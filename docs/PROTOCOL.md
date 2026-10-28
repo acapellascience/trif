@@ -256,17 +256,21 @@ Nothing is hosted; the agent uses the user's own login/subscription.
   - When a run finishes and `changedFiles` is non-empty, show "Reload page to see changes" with a button
     (the agent usually reloads itself; this is the fallback).
   - **States:** helper not connected → short setup instructions (`webmods setup`, link to Setup page);
-    user scripts off → button opening chrome://extensions/?id=…; agent missing or not logged in → the
-    error text from the helper (it includes the fix).
+    user scripts off → button opening chrome://extensions/?id=…; agent missing → the error text from the
+    helper (it includes the fix); agent not logged in (`loggedIn === false` in `agent.list`, or a run
+    failed with the not-logged-in error) → "Claude Code isn't logged in" with a **Log in** button (see
+    "Logging in" below; agents with `canLogin: false` show `loginFix` instead).
   - **Settings:** agent (from `agent.list`; only available ones selectable), optional model name (free
     text, empty = agent default). Stored in `chrome.storage.local` `settings`.
   - Light/dark via `prefers-color-scheme`; compact, clean, system font; fits a narrow panel (320 px+).
 - Panel ⇄ background: `chrome.runtime.connect({name: "panel"})`. Panel → background:
   `{type: "agent.start", site, tabId, url, prompt, sessionId, agent, model}`, `{type: "agent.stop", runId}`,
-  `{type: "agent.list"}`, `{type: "status"}`. Background forwards agent commands to the helper as
-  native `request`s (cmd `agent.start` / `agent.stop` / `agent.list`) and relays every native
-  `{type: "agentEvent", runId, event}` to all panel ports (panels ignore runs they didn't start, by runId).
-  If the helper disconnects mid-run, the background sends the panel `{kind: "error"}` then `{kind: "done", ok: false}`.
+  `{type: "agent.list"}`, `{type: "agent.login", agent}`, `{type: "agent.loginCode", loginId, code}`,
+  `{type: "agent.loginCancel", loginId}`, `{type: "status"}`. Background forwards agent commands to the
+  helper as native `request`s with the same cmd and relays every native `{type: "agentEvent", runId,
+  event}` to all panel ports (panels ignore runs and logins they didn't start, by id).
+  If the helper disconnects mid-run (or mid-login), the background sends the panel `{kind: "error"}` then
+  `{kind: "done", ok: false}` (plus `login: true` for a login).
 
 ### Helper
 
@@ -274,9 +278,17 @@ New native request commands (answered with a normal `response`):
 
 | cmd | args | result |
 |---|---|---|
-| `agent.list` | – | `{agents: [{id, name, path, available, version, note}], default}` |
+| `agent.list` | – | `{agents: [{id, name, path, available, version, note, loggedIn, canLogin, loginFix}], default}` |
 | `agent.start` | `agent, model?, site, url, tabId, prompt, sessionId?` | `{runId}` right away; progress arrives as `agentEvent` messages |
 | `agent.stop` | `runId` | `{stopped: true}` (SIGTERM, SIGKILL after 3 s) |
+| `agent.login` | `agent?` | `{loginId}` right away; progress arrives as `agentEvent` messages with `runId` = the loginId |
+| `agent.loginCode` | `loginId, code` | `{sent: true}` (writes the code and a newline to the login's stdin) |
+| `agent.loginCancel` | `loginId` | `{cancelled: true}` |
+
+`loggedIn` is `true` / `false`, or `null` when unknown or the agent isn't available (from the adapter's
+`loginStatus`, which spends no tokens; cached 30 s per agent, forgotten when a login finishes or a run
+reports "isn't logged in"). `canLogin`: whether `agent.login` works for it; `loginFix`: the terminal
+instructions otherwise.
 
 New helper → extension message: `{type: "agentEvent", runId, event}` where `event` is one of
 (normalized across agents):
@@ -287,6 +299,8 @@ New helper → extension message: `{type: "agentEvent", runId, event}` where `ev
 {kind: "tool", name, summary}                      a tool call, e.g. {name:"Bash", summary:"webmods reload --tab 12"}
 {kind: "error", message}                           something went wrong (agent missing, not logged in, crashed…)
 {kind: "done", ok, result, costUsd, changedFiles, sessionId}   always the last event of a run
+{kind: "login", url}                               (logins) the sign-in page to open
+{kind: "done", ok, login: true, cancelled?}        (logins) always the last event of a login
 ```
 
 - `changedFiles`: paths relative to the workspace under `sites/` whose content changed during the run
@@ -300,6 +314,19 @@ New helper → extension message: `{type: "agentEvent", runId, event}` where `ev
   `PATH = ~/.webmods/bin : <recorded PATH> : <defaults>`, `HOME`, `USER`, `LANG`, `TERM=dumb`, cwd =
   the workspace, and **no** inherited `CLAUDE*`/`ANTHROPIC_*`/`CODEX_*` variables except
   `ANTHROPIC_API_KEY`/`OPENAI_API_KEY` if the user set them in `config.json` → `env`.
+- **Logging in** (`agent.login`): spawns the adapter's login command (claude: `claude auth login`) with
+  the same sanitized env as runs plus `BROWSER=/usr/bin/true` (the panel opens the page itself), cwd =
+  the workspace, stdin piped. The first `https://` URL after `visit:` in its output becomes the `login`
+  event; other output lines become `text` events. The panel opens the URL in a new tab (only https on
+  claude.com, claude.ai, anthropic.com or their subdomains), the user signs in, and pastes the code the
+  page shows into the panel → `agent.loginCode`. When the process exits, `done.ok` = exit code 0 **and**
+  a fresh `loginStatus` says logged in; otherwise an `error` event explains (the CLI's last lines).
+  One login at a time: a new `agent.login` cancels the one in progress. Killed after 10 minutes.
+  The code and the URL's query string are never written to `helper.log` or `runs/` (URLs are logged as
+  scheme + host + path, codes are masked as `[code]`). Codex has no side panel login (`codex login`
+  finishes via a localhost callback or a device code, untested): `agent.login` fails with its `loginFix`.
+  `webmods agent login [--agent claude]` runs the same flow from a terminal (prints the URL, reads the
+  code from stdin).
 - **Context for the agent** (prepended to the first message of a session, or passed as an appended
   system prompt where the agent supports it): "You're running inside the WebMods side panel in the
   user's Chrome. They're looking at <url> (tab <tabId>): pass `--tab <tabId>` to webmods commands. Follow
@@ -311,13 +338,18 @@ New helper → extension message: `{type: "agentEvent", runId, event}` where `ev
 
 Each adapter: `detect(env) → {available, path, version, note}`, `command({prompt, sessionId, model,
 context, workspace}) → {file, args}`, and `parse(line, emit)` turning one stdout line into events.
+Login: `loginStatusArgs` + `parseLoginStatus({status, error, stdout, stderr}) → {loggedIn, detail}`
+(`loginStatus()` runs it synchronously, for `webmods doctor`), `loginFix`, and `login: {args,
+parseLine(line) → {kind:"login", url} | {kind:"text", text} | null}` or `null` when the panel can't log it in.
 
 - **claude** (Claude Code ≥ 2.1, tested): `claude -p <prompt> --output-format stream-json --verbose
-  --permission-mode dontAsk --setting-sources project --strict-mcp-config --append-system-prompt <context>`
-  plus `--resume <sessionId>` and `--model <model>` when given. Permissions come from the workspace's
-  `.claude/settings.json`, written by `webmods setup` (allow: `Read(./**)`, `Edit(./**)`, `Write(./**)`,
-  `Glob`, `Grep`, `Bash(webmods *)`, `Bash(node --test *)`, `Bash(node --check *)`, `Bash(ls *)`;
-  deny: `WebFetch`, `WebSearch`). `--setting-sources project` keeps the user's own broader allow rules out;
+  --permission-mode acceptEdits --setting-sources project --strict-mcp-config --append-system-prompt <context>`
+  plus `--resume <sessionId>` and `--model <model>` when given. `acceptEdits` lets it edit and write files
+  inside the workspace (and denies writes outside it); with `dontAsk`, `Edit`/`Write` allow rules didn't
+  allow writes at all (2.1.149). Everything else comes from the workspace's `.claude/settings.json`,
+  written by `webmods setup` (allow: `Read(./**)`, `Glob`, `Grep`, `Bash(webmods *)`,
+  `Bash(node --test *)`, `Bash(node --check *)`, `Bash(ls *)`, `Bash(cd *)`; deny: `WebFetch`,
+  `WebSearch`); other Bash commands are denied. `--setting-sources project` keeps the user's own broader allow rules out;
   `--strict-mcp-config` keeps their MCP servers out. stream-json lines: `{type:"system", subtype:"init",
   session_id}` → session; `{type:"assistant", message:{content:[{type:"text", text} | {type:"tool_use",
   name, input}]}}` → text / tool (summary: Bash → `input.command`; Edit/Write/Read → `input.file_path`

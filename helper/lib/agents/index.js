@@ -2,8 +2,10 @@
 // Agent registry: finding the user's coding agents, the environment they run in, and the context
 // text the side panel gives them. See docs/PROTOCOL.md "Side panel and agent runs".
 
+const fs = require('fs');
 const os = require('os');
 const path = require('path');
+const { capture } = require('./util');
 
 const ADAPTERS = [require('./claude'), require('./codex')];
 const BY_ID = new Map(ADAPTERS.map((a) => [a.id, a]));
@@ -50,14 +52,53 @@ function agentEnv(ws) {
 
 function detect(adapter, ws, opts = {}) {
   const d = adapter.detect({ dirs: searchDirs(ws), env: agentEnv(ws), version: opts.version !== false });
-  return { id: adapter.id, name: adapter.name, path: d.path, available: !!d.available, version: d.version || null, note: d.note || adapter.note || '' };
+  return {
+    id: adapter.id, name: adapter.name, path: d.path, available: !!d.available, version: d.version || null, note: d.note || adapter.note || '',
+    canLogin: !!adapter.login, loginFix: adapter.loginFix || '',
+  };
 }
 
-/** agent.list result: {agents: [{id, name, path, available, version, note}], default} */
+/** {agents: [{id, name, path, available, version, note, canLogin, loginFix}], default} (no login check) */
 function listAgents(ws, opts = {}) {
   const agents = ADAPTERS.map((a) => detect(a, ws, opts));
   const first = agents.find((a) => a.available);
   return { agents, default: first ? first.id : ADAPTERS[0].id };
+}
+
+// Login status, cached per agent binary: the panel asks for agent.list often and the check spawns the
+// agent. A login (or a run failing with "not logged in") forgets the cache.
+const LOGIN_CACHE_MS = 30000;
+const loginCache = new Map(); // `${id}:${path}` -> {at, value} | {promise}
+
+/** Resolves {loggedIn: true|false|null, detail}. Never rejects. `fresh` skips the cache. */
+function loginStatus(adapter, ws, file, { fresh = false } = {}) {
+  if (!adapter.loginStatusArgs || !file) return Promise.resolve({ loggedIn: null, detail: '' });
+  const key = `${adapter.id}:${file}`;
+  const hit = loginCache.get(key);
+  if (!fresh && hit && (hit.promise || Date.now() - hit.at < LOGIN_CACHE_MS)) return hit.promise || Promise.resolve(hit.value);
+  const cwd = fs.existsSync(ws.home) ? ws.home : undefined;
+  const entry = {};
+  entry.promise = capture(file, adapter.loginStatusArgs, { env: agentEnv(ws), cwd }).then((r) => {
+    let value;
+    try { value = adapter.parseLoginStatus(r); } catch { value = { loggedIn: null, detail: '' }; }
+    if (loginCache.get(key) === entry) loginCache.set(key, { at: Date.now(), value });
+    return value;
+  });
+  loginCache.set(key, entry);
+  return entry.promise;
+}
+
+function forgetLoginStatus(id) {
+  for (const k of [...loginCache.keys()]) if (!id || k.startsWith(`${id}:`)) loginCache.delete(k);
+}
+
+/** agent.list result: listAgents plus `loggedIn` (true / false / null when unknown or not available). */
+async function listAgentsWithLogin(ws, opts = {}) {
+  const r = listAgents(ws, opts);
+  await Promise.all(r.agents.map(async (a) => {
+    a.loggedIn = a.available ? (await loginStatus(getAdapter(a.id), ws, a.path)).loggedIn : null;
+  }));
+  return r;
 }
 
 function hostOf(url) {
@@ -83,13 +124,15 @@ function reminderText({ url, tabId }) {
 // Claude Code permissions for the workspace (written by `webmods setup`).
 const CLAUDE_SETTINGS = {
   permissions: {
-    allow: ['Read(./**)', 'Edit(./**)', 'Write(./**)', 'Glob', 'Grep', 'Bash(webmods *)',
-      'Bash(node --test *)', 'Bash(node --check *)', 'Bash(ls *)'],
+    // (Edits inside the workspace come from --permission-mode acceptEdits: with dontAsk, Edit/Write
+    // allow rules didn't let Claude Code 2.1.149 write at all. Writes outside the workspace are denied.)
+    allow: ['Read(./**)', 'Glob', 'Grep', 'Bash(webmods *)', 'Bash(node --test *)', 'Bash(node --check *)',
+      'Bash(ls *)', 'Bash(cd *)'],
     deny: ['WebFetch', 'WebSearch'],
   },
 };
 
 module.exports = {
   ADAPTERS, getAdapter, defaultDirs, recordedPath, searchDirs, agentEnv, detect, listAgents,
-  contextText, reminderText, hostOf, CLAUDE_SETTINGS, PASSED_KEYS,
+  listAgentsWithLogin, loginStatus, forgetLoginStatus, LOGIN_CACHE_MS, contextText, reminderText, hostOf, CLAUDE_SETTINGS, PASSED_KEYS,
 };

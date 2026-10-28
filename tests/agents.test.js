@@ -12,6 +12,7 @@ const claude = require('../helper/lib/agents/claude');
 const codex = require('../helper/lib/agents/codex');
 const agents = require('../helper/lib/agents');
 const { diffSnapshots } = require('../helper/lib/runs');
+const { redact } = require('../helper/lib/logins');
 
 const cleanups = [];
 test.after(async () => {
@@ -23,13 +24,39 @@ test.after(async () => {
 // A fake Claude Code. Behaviour comes from words in the prompt (its env is sanitized, so env vars
 // can't steer it): NOTLOGGEDIN, CRASH, SLEEP, STUBBORN (ignores SIGTERM), EDIT (changes a mod file).
 // Every call is dumped to <dir>/calls/<time>-<pid>.json with argv, env and cwd.
+// `auth status --json` says logged in once <dir>/logged-in exists; `auth login` prints the sign-in
+// lines, dumps its env to <dir>/login-env.json, reads one line and logs in if it's GOODCODE (anything
+// else: "Invalid code: <code>" on stderr, exit 1).
 const FAKE_CLAUDE = `#!${process.execPath}
 'use strict';
 const fs = require('fs');
 const path = require('path');
 const argv = process.argv.slice(2);
 if (argv[0] === '--version') { console.log('9.9.9 (Claude Code)'); process.exit(0); }
-if (argv[0] === 'auth' && argv[1] === 'status') { console.log(JSON.stringify({ loggedIn: false, authMethod: 'none' }, null, 2)); process.exit(0); }
+const flag = path.join(__dirname, 'logged-in');
+if (argv[0] === 'auth' && argv[1] === 'status') {
+  const yes = fs.existsSync(flag);
+  console.log(JSON.stringify({ loggedIn: yes, authMethod: yes ? 'claude.ai' : 'none' }, null, 2));
+  process.exit(0);
+}
+if (argv[0] === 'auth' && argv[1] === 'login') {
+  fs.writeFileSync(path.join(__dirname, 'login-env.json'), JSON.stringify({ argv, env: process.env, cwd: process.cwd(), pid: process.pid }));
+  process.stdout.write('Opening browser to sign in\u2026\\n');
+  process.stdout.write("If the browser didn't open, visit: https://claude.com/cai/oauth/authorize?code=true&client_id=fake&state=SECRETSTATE&code_challenge=CHALLENGE\\n");
+  process.stdout.write('Paste code here if prompted > ');
+  let buf = '';
+  process.stdin.setEncoding('utf8');
+  process.stdin.on('data', (d) => {
+    buf += d;
+    const nl = buf.indexOf('\\n');
+    if (nl === -1) return;
+    const code = buf.slice(0, nl).trim();
+    if (code === 'GOODCODE') { fs.writeFileSync(flag, 'yes'); process.stdout.write('\\nLogin successful.\\n', () => process.exit(0)); return; }
+    process.stderr.write('Invalid code: ' + code + '\\n', () => process.exit(1));
+  });
+  process.stdin.on('end', () => process.exit(2));
+  return;
+}
 const opt = (name) => { const i = argv.indexOf(name); return i === -1 ? null : argv[i + 1]; };
 const prompt = opt('-p') || '';
 const calls = path.join(__dirname, 'calls');
@@ -134,7 +161,7 @@ const START = { site: 'example.com', url: 'https://example.com/page', tabId: 12 
 test('claude adapter: command flags, resume and model', () => {
   const c = claude.command({ bin: '/x/claude', prompt: 'hi', context: 'CTX' });
   assert.equal(c.file, '/x/claude');
-  assert.deepEqual(c.args, ['-p', 'hi', '--output-format', 'stream-json', '--verbose', '--permission-mode', 'dontAsk',
+  assert.deepEqual(c.args, ['-p', 'hi', '--output-format', 'stream-json', '--verbose', '--permission-mode', 'acceptEdits',
     '--setting-sources', 'project', '--strict-mcp-config', '--append-system-prompt', 'CTX']);
   const r = claude.command({ bin: '/x/claude', prompt: 'hi', context: 'CTX', sessionId: 's1', model: 'opus' });
   assert.deepEqual(r.args.slice(-4), ['--resume', 's1', '--model', 'opus']);
@@ -225,10 +252,15 @@ test('agent.list: finds the fake claude on the recorded PATH, codex missing (exp
   assert.equal(r.ok, true, r.error);
   assert.equal(r.result.default, 'claude');
   const c = r.result.agents.find((a) => a.id === 'claude');
-  assert.deepEqual(c, { id: 'claude', name: 'Claude Code', path: path.join(bin, 'claude'), available: true, version: '9.9.9', note: '' });
+  assert.deepEqual(c, {
+    id: 'claude', name: 'Claude Code', path: path.join(bin, 'claude'), available: true, version: '9.9.9', note: '',
+    canLogin: true, loginFix: claude.loginFix, loggedIn: false,
+  });
   const x = r.result.agents.find((a) => a.id === 'codex');
   assert.equal(x.available, false);
   assert.match(x.note, /experimental/);
+  assert.equal(x.loggedIn, null);
+  assert.equal(x.canLogin, false);
   // Same over the socket.
   await ext.waitForSocket();
   const s = await sockRequest(ext.sock, { id: 'l', cmd: 'agent.list' });
@@ -269,7 +301,7 @@ test('agent.start: runId first, then session/text/tool events, one done with cha
   const a = call.argv;
   assert.equal(a[a.indexOf('-p') + 1], 'EDIT hide the banner');
   for (const f of ['--output-format', 'stream-json', '--verbose', '--strict-mcp-config']) assert.ok(a.includes(f), f);
-  assert.equal(a[a.indexOf('--permission-mode') + 1], 'dontAsk');
+  assert.equal(a[a.indexOf('--permission-mode') + 1], 'acceptEdits');
   assert.equal(a[a.indexOf('--setting-sources') + 1], 'project');
   const ctx = a[a.indexOf('--append-system-prompt') + 1];
   assert.match(ctx, /https:\/\/example\.com\/page \(tab 12\)/);
@@ -435,6 +467,143 @@ test('helper shutdown kills a running agent', async () => {
   await waitFor(() => { try { process.kill(pid, 0); return false; } catch { return true; } }, { message: 'agent killed with the helper' });
 });
 
+// ------------------------------------------------------------------ logging in
+
+const LOGIN_URL = 'https://claude.com/cai/oauth/authorize?code=true&client_id=fake&state=SECRETSTATE&code_challenge=CHALLENGE';
+function loginEnv(bin) { return JSON.parse(fs.readFileSync(path.join(bin, 'login-env.json'), 'utf8')); }
+function helperLog(home) { try { return fs.readFileSync(path.join(home, 'helper.log'), 'utf8'); } catch { return ''; } }
+async function startLogin(ext, args = { agent: 'claude' }) {
+  const r = await extRequest(ext, 'agent.login', args);
+  assert.equal(r.ok, true, r.error);
+  const loginId = r.result.loginId;
+  const ev = await ext.next((m) => m.type === 'agentEvent' && m.runId === loginId && m.event.kind === 'login');
+  return { loginId, url: ev.event.url, response: r };
+}
+
+test('claude login output parsing and redaction (pure)', () => {
+  assert.equal(claude.parseLoginLine('Opening browser to sign in…'), null);
+  assert.deepEqual(claude.parseLoginLine(`If the browser didn't open, visit: ${LOGIN_URL}`), { kind: 'login', url: LOGIN_URL });
+  assert.equal(claude.parseLoginLine('Paste code here if prompted > '), null);
+  assert.deepEqual(claude.parseLoginLine('Paste code here if prompted > Login successful.'), { kind: 'text', text: 'Login successful.' });
+  assert.deepEqual(claude.parseLoginLine('Something else'), { kind: 'text', text: 'Something else' });
+  assert.equal(redact(`visit: ${LOGIN_URL} now`), 'visit: https://claude.com/cai/oauth/authorize?… now');
+  assert.equal(redact('Invalid code: abc#123', ['abc#123']), 'Invalid code: [code]');
+  assert.equal(codex.login, null);
+});
+
+test('agent.login: URL event, code, done ok; agent.list then says loggedIn (cached); nothing secret in helper.log', async () => {
+  const { home, bin } = makeHome();
+  const ext = startHost(home, {
+    CLAUDECODE: '1', ANTHROPIC_BASE_URL: 'https://evil', BROWSER: '/Applications/Evil.app',
+  });
+  let list = await extRequest(ext, 'agent.list');
+  assert.equal(list.result.agents.find((a) => a.id === 'claude').loggedIn, false);
+
+  const { loginId, url, response } = await startLogin(ext);
+  assert.match(loginId, /^l[0-9a-z]+$/);
+  assert.ok(ext.messages.indexOf(response) < ext.messages.findIndex((m) => m.type === 'agentEvent' && m.runId === loginId), 'response first');
+  assert.equal(url, LOGIN_URL);
+  const le = loginEnv(bin);
+  assert.deepEqual(le.argv, ['auth', 'login']);
+  assert.equal(le.cwd, home);
+  assert.equal(le.env.BROWSER, '/usr/bin/true');
+  assert.deepEqual(Object.keys(le.env).filter((k) => /^(CLAUDE|ANTHROPIC_)/.test(k)), []);
+  await ext.waitForSocket();
+  assert.equal((await sockRequest(ext.sock, { id: 'p', cmd: 'ping' })).result.login.loginId, loginId);
+
+  const sent = await extRequest(ext, 'agent.loginCode', { loginId, code: '  GOODCODE \n' });
+  assert.deepEqual(sent.result, { sent: true });
+  const done = await waitDone(ext, loginId);
+  assert.deepEqual(done, { kind: 'done', ok: true, login: true });
+  assert.deepEqual(eventsOf(ext, loginId).map((e) => e.kind), ['login', 'text', 'done']);
+  assert.equal(eventsOf(ext, loginId)[1].text, 'Login successful.');
+
+  list = await extRequest(ext, 'agent.list');
+  assert.equal(list.result.agents.find((a) => a.id === 'claude').loggedIn, true);
+  // Cached for 30 s: logging out behind its back doesn't show yet.
+  fs.unlinkSync(path.join(bin, 'logged-in'));
+  list = await extRequest(ext, 'agent.list');
+  assert.equal(list.result.agents.find((a) => a.id === 'claude').loggedIn, true);
+  // ...but a run that finds it logged out forgets the cache.
+  const run = await extRequest(ext, 'agent.start', { ...START, prompt: 'NOTLOGGEDIN again' });
+  await waitDone(ext, run.result.runId);
+  list = await extRequest(ext, 'agent.list');
+  assert.equal(list.result.agents.find((a) => a.id === 'claude').loggedIn, false);
+
+  const log = helperLog(home);
+  assert.match(log, /sign-in URL https:\/\/claude\.com\/cai\/oauth\/authorize\?…/);
+  assert.match(log, /code sent/);
+  assert.ok(!log.includes('GOODCODE'), 'code not logged');
+  assert.ok(!log.includes('SECRETSTATE') && !log.includes('CHALLENGE'), 'URL query not logged');
+  assert.ok(!fs.existsSync(path.join(home, 'runs')) || !fs.readdirSync(path.join(home, 'runs')).some((f) => fs.readFileSync(path.join(home, 'runs', f), 'utf8').includes('GOODCODE')));
+  assert.equal((await sockRequest(ext.sock, { id: 'p2', cmd: 'ping' })).result.login, null);
+});
+
+test('agent.login: bad code fails (redacted), cancel, one login at a time, bad requests, codex unsupported, time limit', async () => {
+  const { home, bin } = makeHome();
+  const ext = startHost(home);
+
+  // Bad code: done not ok, the error carries the CLI's output with the code masked.
+  let { loginId } = await startLogin(ext);
+  await extRequest(ext, 'agent.loginCode', { loginId, code: 'BADCODE123' });
+  let done = await waitDone(ext, loginId);
+  assert.deepEqual(done, { kind: 'done', ok: false, login: true });
+  const errs = eventsOf(ext, loginId).filter((e) => e.kind === 'error');
+  assert.equal(errs.length, 1);
+  assert.equal(errs[0].message, 'Logging in to Claude Code failed: Invalid code: [code]');
+  assert.ok(!JSON.stringify(eventsOf(ext, loginId)).includes('BADCODE123'));
+  assert.equal((await extRequest(ext, 'agent.list')).result.agents[0].loggedIn, false);
+
+  // Cancel: the process goes, done says cancelled, no error.
+  ({ loginId } = await startLogin(ext));
+  const pid = loginEnv(bin).pid;
+  const c = await extRequest(ext, 'agent.loginCancel', { loginId });
+  assert.deepEqual(c.result, { cancelled: true });
+  done = await waitDone(ext, loginId);
+  assert.deepEqual(done, { kind: 'done', ok: false, login: true, cancelled: true });
+  assert.equal(eventsOf(ext, loginId).filter((e) => e.kind === 'error').length, 0);
+  await waitFor(() => { try { process.kill(pid, 0); return false; } catch { return true; } }, { message: 'login process gone' });
+
+  // A second login replaces the first.
+  const first = await startLogin(ext);
+  const second = await startLogin(ext);
+  assert.notEqual(first.loginId, second.loginId);
+  assert.equal((await waitDone(ext, first.loginId)).cancelled, true);
+  const stale = await extRequest(ext, 'agent.loginCode', { loginId: first.loginId, code: 'GOODCODE' });
+  assert.match(stale.error, /no login in progress/);
+  const empty = await extRequest(ext, 'agent.loginCode', { loginId: second.loginId, code: '  ' });
+  assert.match(empty.error, /missing code/);
+  const multi = await extRequest(ext, 'agent.loginCode', { loginId: second.loginId, code: 'a\nb' });
+  assert.match(multi.error, /doesn't look like a login code/);
+  await extRequest(ext, 'agent.loginCancel', { loginId: second.loginId });
+  await waitDone(ext, second.loginId);
+  assert.match((await extRequest(ext, 'agent.loginCancel', { loginId: second.loginId })).error, /no login in progress/);
+
+  const cx = await extRequest(ext, 'agent.login', { agent: 'codex' });
+  assert.match(cx.error, /^Codex can't log in from the side panel: run `codex login` in a terminal$/);
+  assert.match((await extRequest(ext, 'agent.login', { agent: 'gemini' })).error, /unknown agent/);
+
+  const log = helperLog(home);
+  assert.ok(!log.includes('BADCODE123'), 'bad code not logged');
+  assert.ok(!log.includes('SECRETSTATE'), 'URL query not logged');
+
+  const limited = startHost(home, { WEBMODS_LOGIN_TIMEOUT_MS: '1500' });
+  const r = await extRequest(limited, 'agent.login', {});
+  done = await waitDone(limited, r.result.loginId);
+  assert.equal(done.ok, false);
+  assert.match(eventsOf(limited, r.result.loginId).find((e) => e.kind === 'error').message, /stopped after/);
+});
+
+test('agent.login without the agent installed fails right away', async () => {
+  const { home } = makeHome({ fake: false });
+  const ext = startHost(home);
+  const r = await extRequest(ext, 'agent.login', { agent: 'claude' });
+  assert.equal(r.ok, false);
+  assert.match(r.error, /Claude Code isn't installed/);
+  const list = await extRequest(ext, 'agent.list');
+  assert.equal(list.result.agents[0].loggedIn, null);
+});
+
 // ------------------------------------------------------------------ CLI
 
 test('CLI: agent run streams events and prints a summary; agent list with and without the helper', async () => {
@@ -499,6 +668,39 @@ test('CLI: agent run streams events and prints a summary; agent list with and wi
   assert.match(r.stderr, /missing prompt/);
 });
 
+test('CLI: agent login prints the URL, reads the code from stdin, reports the result', async () => {
+  const { home, bin } = makeHome();
+  let r = await runCli(['agent', 'login'], { home, input: 'GOODCODE\n' });
+  assert.equal(r.code, 2, 'no helper');
+  const ext = startHost(home);
+  ext.hello();
+  await ext.waitForSocket();
+
+  r = await runCli(['agent', 'login'], { home, input: 'NOPE-CODE\n' });
+  assert.equal(r.code, 1, r.stderr);
+  assert.match(r.stdout, /Open this page in your browser and sign in:/);
+  assert.ok(r.stdout.includes(`  ${LOGIN_URL}\n`));
+  assert.match(r.stdout, /Not logged in\.\n$/);
+  assert.match(r.stderr, /error: Logging in to Claude Code failed: Invalid code: \[code\]/);
+
+  r = await runCli(['agent', 'login'], { home });
+  assert.equal(r.code, 1);
+  assert.match(r.stderr, /no code given/);
+  assert.match(r.stdout, /Login cancelled\.\n$/);
+
+  r = await runCli(['agent', 'login', '--agent', 'claude'], { home, input: 'GOODCODE\n' });
+  assert.equal(r.code, 0, r.stderr);
+  assert.match(r.stdout, /Then paste the code it shows here: Checking…\nLogged in\.\n$/);
+  assert.ok(fs.existsSync(path.join(bin, 'logged-in')));
+  r = await runCli(['agent', 'list'], { home });
+  assert.doesNotMatch(r.stdout, /not logged in/);
+
+  r = await runCli(['agent', 'login', '--agent', 'codex'], { home });
+  assert.equal(r.code, 1);
+  assert.match(r.stderr, /can't log in from the side panel/);
+  assert.ok(!helperLog(home).includes('NOPE-CODE') && !helperLog(home).includes('GOODCODE'));
+});
+
 test('CLI: agent run on a busy site fails fast', async () => {
   const { home } = makeHome();
   const ext = startHost(home);
@@ -530,7 +732,7 @@ test('setup records PATH (merging config.json) and writes .claude/settings.json;
   const settings = JSON.parse(fs.readFileSync(path.join(ws, '.claude', 'settings.json'), 'utf8'));
   assert.deepEqual(settings, {
     permissions: {
-      allow: ['Read(./**)', 'Edit(./**)', 'Write(./**)', 'Glob', 'Grep', 'Bash(webmods *)', 'Bash(node --test *)', 'Bash(node --check *)', 'Bash(ls *)'],
+      allow: ['Read(./**)', 'Glob', 'Grep', 'Bash(webmods *)', 'Bash(node --test *)', 'Bash(node --check *)', 'Bash(ls *)', 'Bash(cd *)'],
       deny: ['WebFetch', 'WebSearch'],
     },
   });

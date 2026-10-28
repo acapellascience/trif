@@ -137,8 +137,8 @@ the header plus helpers for injecting CSS and handling elements that appear late
     examples: ['webmods install-example x.com/plain-x'],
   },
   agent: {
-    usage: 'webmods agent list | agent run [opts] "<prompt>"',
-    summary: 'list coding agents the side panel can use, or run one like the side panel does',
+    usage: 'webmods agent list | agent run [opts] "<prompt>" | agent login [--agent claude]',
+    summary: 'list coding agents the side panel can use, run one like the side panel does, or log one in',
     details: `Options for agent run: --agent claude|codex, --tab ID, --url URL, --session ID, --model NAME.
 
 agent list shows which agents the helper can find (Claude Code, Codex) and their versions; it
@@ -147,9 +147,13 @@ like the side panel, and prints what it does as it goes: its replies, one line p
 summary with the session id (pass it to --session to continue the conversation) and the mod files it
 changed. Here --url is the page URL the user is looking at (not a tab selector); without --url the
 helper asks Chrome for the URL of --tab, or of the active tab. Ctrl-C stops the agent.
---json prints one JSON event per line. Exit code 1 if the run failed.`,
+--json prints one JSON event per line. Exit code 1 if the run failed.
+
+agent login logs the agent in through the helper, like the side panel's Log in button (Claude Code
+only; it runs \`claude auth login\`): it prints a sign-in URL, then reads the code that page shows
+from stdin. Exit code 1 if it didn't end up logged in.`,
     examples: ['webmods agent list', 'webmods agent run --url https://x.com/home "hide the trending sidebar"',
-      'webmods agent run --tab 12 --session 1b2c… "also hide Who to follow"'],
+      'webmods agent run --tab 12 --session 1b2c… "also hide Who to follow"', 'webmods agent login'],
   },
   help: {
     usage: 'webmods help [command]',

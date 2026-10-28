@@ -540,6 +540,19 @@ test('siteForUrl and toolLine', () => {
   assert.strictEqual(lib.toolLine('Bash', 'a\n  b'), 'ran a b');
 });
 
+test('isLoginUrl: only https sign-in pages on claude.com, claude.ai, anthropic.com and their subdomains', () => {
+  for (const ok of [
+    'https://claude.com/cai/oauth/authorize?code=true&client_id=x&state=y',
+    'https://claude.ai/oauth/authorize', 'https://console.anthropic.com/login', 'https://platform.claude.com/oauth/code/callback',
+    'https://CLAUDE.AI/x', 'https://a.b.anthropic.com/',
+  ]) assert.ok(lib.isLoginUrl(ok), ok);
+  for (const bad of [
+    'http://claude.com/cai/oauth/authorize', 'https://claude.com.evil.com/', 'https://evilclaude.com/', 'https://notanthropic.com/',
+    'https://evil.com/?r=https://claude.com/', 'https://claude.com@evil.com/', 'https://user:pw@claude.com/', 'https://claude.com:8443/',
+    'javascript:alert(1)', 'chrome://settings', 'file:///etc/passwd', 'claude.com/cai', '', null, undefined, 42,
+  ]) assert.ok(!lib.isLoginUrl(bad), String(bad));
+});
+
 // ---- markdown -----------------------------------------------------------------------------------
 
 test('markdown: escapes everything before formatting', async () => {
@@ -831,6 +844,58 @@ test('background: New chat clears the record and drops later events of the old r
     await settle(20);
     assert.ok(!('chat:x.com' in bg.store));
     assert.strictEqual(panel.sent.filter((m) => m.type === 'agentEvent').length, 2);
+  } finally { bg.restore(); }
+});
+
+test('background: agent.login / loginCode / loginCancel are relayed; login events reach panels but not the chat', async () => {
+  const bg = await loadBackground();
+  try {
+    const panel = bg.connectPanel();
+    const loginP = panel.ask({ type: 'agent.login', agent: 'claude' });
+    const req = await answerNative(bg.native, 'agent.login', { loginId: 'l1' });
+    assert.deepStrictEqual(req.args, { agent: 'claude' });
+    assert.deepStrictEqual((await loginP).result, { loginId: 'l1' });
+
+    const url = 'https://claude.com/cai/oauth/authorize?code=true&state=s';
+    bg.native.emit({ type: 'agentEvent', runId: 'l1', event: { kind: 'login', url } });
+    await settle(10);
+    assert.deepStrictEqual(panel.sent.filter((m) => m.type === 'agentEvent').map((m) => [m.runId, m.event]), [['l1', { kind: 'login', url }]]);
+
+    const codeP = panel.ask({ type: 'agent.loginCode', loginId: 'l1', code: 'abc#def' });
+    const codeReq = await answerNative(bg.native, 'agent.loginCode', { sent: true });
+    assert.deepStrictEqual(codeReq.args, { loginId: 'l1', code: 'abc#def' });
+    assert.deepStrictEqual((await codeP).result, { sent: true });
+    bg.native.emit({ type: 'agentEvent', runId: 'l1', event: { kind: 'done', ok: true, login: true } });
+    await settle(10);
+    assert.deepStrictEqual(panel.sent.filter((m) => m.type === 'agentEvent').at(-1).event, { kind: 'done', ok: true, login: true });
+    assert.deepStrictEqual(Object.keys(bg.store).filter((k) => k.startsWith('chat:')), []);
+
+    // Cancel, and a failure from the helper comes back as a failed reply.
+    const p2 = panel.ask({ type: 'agent.login' });
+    const req2 = await answerNative(bg.native, 'agent.login', { loginId: 'l2' });
+    assert.deepStrictEqual(req2.args, {});
+    await p2;
+    const cancelP = panel.ask({ type: 'agent.loginCancel', loginId: 'l2' });
+    const cancelReq = await answerNative(bg.native, 'agent.loginCancel', { cancelled: true });
+    assert.deepStrictEqual(cancelReq.args, { loginId: 'l2' });
+    assert.deepStrictEqual((await cancelP).result, { cancelled: true });
+    bg.native.emit({ type: 'agentEvent', runId: 'l2', event: { kind: 'done', ok: false, login: true, cancelled: true } });
+    const p3 = panel.ask({ type: 'agent.login', agent: 'codex' });
+    await answerNative(bg.native, 'agent.login', "Codex can't log in from the side panel: run `codex login` in a terminal", false);
+    const r3 = await p3;
+    assert.deepStrictEqual([r3.ok, r3.error], [false, "Codex can't log in from the side panel: run `codex login` in a terminal"]);
+
+    // The helper going away mid-login ends it for the panel.
+    const p4 = panel.ask({ type: 'agent.login', agent: 'claude' });
+    await answerNative(bg.native, 'agent.login', { loginId: 'l4' });
+    await p4;
+    bg.native.onDisconnect.emit();
+    await settle(20);
+    const evs = panel.sent.filter((m) => m.type === 'agentEvent' && m.runId === 'l4').map((m) => m.event);
+    assert.deepStrictEqual(evs.map((e) => e.kind), ['error', 'done']);
+    assert.match(evs[0].message, /disconnected during the login/);
+    assert.deepStrictEqual(evs[1], { kind: 'done', ok: false, login: true });
+    assert.strictEqual(panel.sent.filter((m) => m.type === 'agentEvent' && m.runId === 'l2').length, 1, 'finished logins are not re-ended');
   } finally { bg.restore(); }
 });
 

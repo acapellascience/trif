@@ -1,8 +1,7 @@
 'use strict';
 // Claude Code adapter (tested with Claude Code 2.1.149). See docs/PROTOCOL.md "Agent adapters".
 
-const { spawnSync } = require('child_process');
-const { findExecutable, versionOf, relToWorkspace, oneLine, parseJsonLine } = require('./util');
+const { findExecutable, versionOf, relToWorkspace, oneLine, parseJsonLine, captureSync } = require('./util');
 
 const NOT_LOGGED_IN = "Claude Code isn't logged in: run `claude` in a terminal and log in (type /login)";
 
@@ -22,7 +21,7 @@ const adapter = {
 
   command({ bin, prompt, sessionId, model, context }) {
     const args = ['-p', prompt, '--output-format', 'stream-json', '--verbose',
-      '--permission-mode', 'dontAsk', '--setting-sources', 'project', '--strict-mcp-config'];
+      '--permission-mode', 'acceptEdits', '--setting-sources', 'project', '--strict-mcp-config'];
     if (context) args.push('--append-system-prompt', context);
     if (sessionId) args.push('--resume', sessionId);
     if (model) args.push('--model', model);
@@ -72,17 +71,38 @@ const adapter = {
     return null;
   },
 
-  // Cheap login check without spending tokens: `claude auth status` prints JSON {loggedIn, authMethod}.
-  loginStatus({ path: file, env, cwd }) {
-    try {
-      const r = spawnSync(file, ['auth', 'status', '--json'], { env, cwd, encoding: 'utf8', timeout: 10000, stdio: ['ignore', 'pipe', 'pipe'] });
-      const j = parseJsonLine(String(r.stdout || '').replace(/\n/g, ' '));
-      if (j && typeof j.loggedIn === 'boolean') return { loggedIn: j.loggedIn, detail: j.authMethod || '' };
-    } catch { /* fall through */ }
+  // Cheap login check without spending tokens: `claude auth status --json` prints {loggedIn, authMethod}.
+  loginStatusArgs: ['auth', 'status', '--json'],
+  parseLoginStatus({ stdout }) {
+    const j = parseJsonLine(String(stdout || '').replace(/\n/g, ' '));
+    if (j && typeof j.loggedIn === 'boolean') return { loggedIn: j.loggedIn, detail: j.authMethod || '' };
     return { loggedIn: null, detail: '' };
   },
+  loginStatus({ path: file, env, cwd }) {
+    return adapter.parseLoginStatus(captureSync(file, adapter.loginStatusArgs, { env, cwd }));
+  },
   loginFix: 'run `claude` in a terminal and log in (type /login)',
+
+  // Logging in from the side panel. Without a TTY, `claude auth login` (2.1.149) prints
+  //   Opening browser to sign in…
+  //   If the browser didn't open, visit: https://claude.com/cai/oauth/authorize?code=true&…
+  //   Paste code here if prompted >
+  // and waits for the code (shown by the redirect page) on stdin.
+  login: {
+    args: ['auth', 'login'],
+    parseLine: parseLoginLine,
+  },
 };
+
+// One line of `claude auth login` output -> {kind:"login", url} | {kind:"text", text} | null (skip).
+function parseLoginLine(line) {
+  // (The prompt has no newline, so whatever the CLI prints next can share its line.)
+  const t = String(line).replace(/^\s*paste code here[^>]*>/i, '').trim();
+  if (!t || /^opening browser/i.test(t)) return null;
+  const m = /\bvisit:\s*(https:\/\/\S+)/i.exec(t);
+  if (m) return { kind: 'login', url: m[1] };
+  return { kind: 'text', text: t };
+}
 
 function isLoginMessage(text) {
   return /not logged in|please run \/login/i.test(String(text));
@@ -105,3 +125,4 @@ function toolSummary(name, input, workspace) {
 module.exports = adapter;
 module.exports.toolSummary = toolSummary;
 module.exports.NOT_LOGGED_IN = NOT_LOGGED_IN;
+module.exports.parseLoginLine = parseLoginLine;

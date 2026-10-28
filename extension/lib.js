@@ -280,6 +280,22 @@ export function toolLine(name, summary) {
   return s ? `${n || 'tool'} ${s}` : (n || 'tool');
 }
 
+/** Hosts whose sign-in pages the side panel may open for an agent login (and their subdomains). */
+export const LOGIN_HOSTS = ['claude.com', 'claude.ai', 'anthropic.com'];
+
+/**
+ * Whether the URL from a `login` event may be opened in a tab: https, default port, no credentials,
+ * host one of LOGIN_HOSTS or a subdomain. Anything else is refused (the helper relays what the agent
+ * CLI printed, so don't trust it blindly).
+ */
+export function isLoginUrl(url) {
+  let u;
+  try { u = new URL(String(url ?? '')); } catch { return false; }
+  if (u.protocol !== 'https:' || u.port !== '' || u.username || u.password) return false;
+  const host = u.hostname.toLowerCase();
+  return LOGIN_HOSTS.some((h) => host === h || host.endsWith('.' + h));
+}
+
 // ---- run ----------------------------------------------------------------------------------------
 
 /**

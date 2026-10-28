@@ -136,6 +136,19 @@ svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width:
 .notice .title { font-weight: 600; }
 .notice.bad { border-color: color-mix(in srgb, var(--bad) 35%, var(--line)); }
 .notice .actions { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.notice > * + * { margin-top: 6px; }
+.notice.ok { border-color: color-mix(in srgb, var(--ok) 35%, var(--line)); }
+.notice .md p + p { margin-top: 4px; }
+.login-form { display: flex; gap: 6px; }
+.login-form input {
+  flex: 1;
+  min-width: 0;
+  padding: 4px 8px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: var(--bg);
+  font: 12px/1.4 var(--mono);
+}
 
 .btn {
   padding: 4px 10px;

@@ -6,7 +6,7 @@
 const fs = require('fs');
 const path = require('path');
 const P = require('./lib/paths');
-const { request, streamRun, HelperError } = require('./lib/client');
+const { request, streamRun, streamLogin, HelperError } = require('./lib/client');
 const { scanMods, planModsMessage, isIgnoredName } = require('./lib/mods');
 const { COMMANDS, mainHelp, commandHelp } = require('./lib/help');
 
@@ -427,7 +427,8 @@ const handlers = {
     const sub = pos.shift() || 'list';
     if (sub === 'list') return agentList(ctx);
     if (sub === 'run') return agentRun(ctx, pos);
-    throw new UsageError(`unknown agent command "${sub}" (use: agent list | agent run)`);
+    if (sub === 'login') return agentLogin(ctx);
+    throw new UsageError(`unknown agent command "${sub}" (use: agent list | agent run | agent login)`);
   },
 
   async 'install-example'(ctx, pos) {
@@ -482,7 +483,7 @@ async function agentList(ctx) {
   if (ctx.json) return printJson(r);
   for (const a of r.agents) {
     const what = a.available ? `${a.name}${a.version ? ' ' + a.version : ''}` : `${a.name}: not found`;
-    const extra = [a.path, a.note, a.id === r.default && a.available ? 'default' : ''].filter(Boolean).join('  ');
+    const extra = [a.path, a.note, a.loggedIn === false ? 'not logged in' : '', a.id === r.default && a.available ? 'default' : ''].filter(Boolean).join('  ');
     out(`${pad(a.id, 8)}${pad(what, 26)}${extra}`);
   }
   if (!r.agents.some((a) => a.available)) {
@@ -550,6 +551,90 @@ async function agentRun(ctx, pos) {
     out(files.length ? `changed: ${files.join(', ')}` : 'changed: (no files)');
   }
   if (!done.ok) process.exitCode = 1;
+}
+
+// Log the agent in through the helper, like the side panel's "Log in" button: print the sign-in URL,
+// read the code from stdin, send it, print the result.
+async function agentLogin(ctx) {
+  const args = {};
+  if (ctx.opts['--agent']) args.agent = ctx.opts['--agent'];
+  const lines = stdinLines();
+  let loginId = null;
+  let interrupts = 0;
+  const onSigint = () => {
+    if (++interrupts > 1 || !loginId) process.exit(130);
+    process.stderr.write('\ncancelling the login (Ctrl-C again to quit now)…\n');
+    request(ctx.ws.sock, 'agent.loginCancel', { loginId }, 5000).catch(() => {});
+  };
+  const askCode = async (send) => {
+    const code = await lines.next();
+    if (code === null || !code.trim()) {
+      process.stderr.write('\nno code given: cancelling the login\n');
+      send('agent.loginCancel', { loginId }).catch(() => {});
+      return;
+    }
+    if (!ctx.json) out('Checking…');
+    send('agent.loginCode', { loginId, code: code.trim() }).catch((e) => process.stderr.write(`error: ${e.message}\n`));
+  };
+  process.on('SIGINT', onSigint);
+  let done;
+  try {
+    done = await streamLogin(ctx.ws.sock, args, {
+      onStart: (r) => {
+        loginId = r.loginId;
+        if (ctx.json) out(JSON.stringify({ loginId }));
+      },
+      onEvent: (ev, send) => {
+        if (ctx.json) out(JSON.stringify(ev));
+        if (ev.kind === 'login') {
+          if (!ctx.json) {
+            out('Open this page in your browser and sign in:\n');
+            out(`  ${ev.url}\n`);
+            process.stdout.write('Then paste the code it shows here: ');
+          }
+          askCode(send);
+        } else if (ev.kind === 'error') {
+          process.stderr.write(`error: ${ev.message}\n`);
+        }
+      },
+    });
+  } finally {
+    process.removeListener('SIGINT', onSigint);
+    lines.close();
+  }
+  if (!ctx.json) out(done.ok ? 'Logged in.' : done.cancelled ? 'Login cancelled.' : 'Not logged in.');
+  if (!done.ok) process.exitCode = 1;
+}
+
+// stdin one line at a time: next() resolves a line, or null at the end.
+function stdinLines() {
+  const queue = [];
+  const waiters = [];
+  let buf = '';
+  let ended = false;
+  const push = (line) => { const w = waiters.shift(); if (w) w(line); else queue.push(line); };
+  const end = () => {
+    if (ended) return;
+    if (buf) push(buf);
+    buf = '';
+    ended = true;
+    while (waiters.length) waiters.shift()(null);
+  };
+  process.stdin.setEncoding('utf8');
+  process.stdin.on('data', (c) => {
+    buf += c;
+    let nl;
+    while ((nl = buf.indexOf('\n')) !== -1) {
+      push(buf.slice(0, nl).replace(/\r$/, ''));
+      buf = buf.slice(nl + 1);
+    }
+  });
+  process.stdin.on('end', end);
+  process.stdin.on('error', end);
+  return {
+    next: () => (queue.length ? Promise.resolve(queue.shift()) : ended ? Promise.resolve(null) : new Promise((r) => waiters.push(r))),
+    close: () => { try { process.stdin.destroy(); } catch { /* ignore */ } },
+  };
 }
 
 const NO_HELPER_MESSAGE = `webmods: the helper isn't running, so page commands can't reach Chrome.

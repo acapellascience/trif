@@ -3,7 +3,7 @@
 // chrome.storage.local `chat:<site>`; this page renders that record and reacts to storage changes.
 // See docs/PROTOCOL.md, "Side panel and agent runs".
 
-import { siteForUrl, modAppliesTo } from './lib.js';
+import { siteForUrl, modAppliesTo, isLoginUrl } from './lib.js';
 import { renderMarkdown, MARKDOWN_ELEMENTS, MARKDOWN_ATTRIBUTES } from './markdown.js';
 
 const $ = (sel) => document.querySelector(sel);
@@ -33,6 +33,7 @@ const view = {
   myRuns: new Set(),         // runs this panel started
   dismissedReload: new Set(),
   loadedAt: new Map(),       // tabId → last time a load completed (seen while the panel was open)
+  login: null,               // agent login in progress: {loginId, agent, name, fix, phase, url, error, early}
 };
 
 // ---- background port ----------------------------------------------------------------------------
@@ -68,9 +69,16 @@ function onPortMessage(msg) {
     pending.delete(msg.reqId);
     if (msg.ok) p.resolve(msg.result); else p.reject(new Error(msg.error || 'error'));
   } else if (msg?.type === 'agentEvent') {
+    const L = view.login;
+    if (L && L.loginId && msg.runId === L.loginId) return onLoginEvent(L, msg.event);
+    if (L && !L.loginId && !view.myRuns.has(msg.runId) && L.early.length < 50) L.early.push(msg); // before agent.login's reply
     // The transcript arrives through storage; only our own runs matter here.
     if (!view.myRuns.has(msg.runId)) return;
-    if (msg.event?.kind === 'done') { view.myRuns.delete(msg.runId); refreshStatus(); }
+    if (msg.event?.kind === 'done') {
+      view.myRuns.delete(msg.runId);
+      refreshStatus();
+      if (!msg.event.ok) loadAgents(); // maybe "not logged in": refresh loggedIn
+    }
   } else if (msg?.type === 'statusChanged') {
     refreshStatusSoon();
   }
@@ -228,9 +236,10 @@ function render() {
   let dotLabel = 'Helper not connected';
   if (!status) { dot = ''; dotLabel = 'Checking…'; }
   else if (helperOk) {
-    const agentOk = agentInfo ? agentInfo.available : anyAgent;
+    const agentOk = agentInfo ? agentInfo.available && agentInfo.loggedIn !== false : anyAgent;
     dot = status.userScripts && agentOk ? 'ok' : 'warn';
     dotLabel = !status.userScripts ? 'User scripts are off'
+      : agentInfo?.available && agentInfo.loggedIn === false ? `${agentInfo.name} isn’t logged in`
       : !agentOk ? 'Coding agent not available'
       : `Ready${agentInfo ? ` · ${agentInfo.name}` : ''}`;
   }
@@ -265,6 +274,22 @@ function renderNotice({ helperOk, agentInfo, anyAgent }) {
   const { site, status } = view;
   const parts = [];
   let bad = false;
+  if (helperOk && (view.login || needsLogin(agentInfo))) {
+    // Built once per state, so the status refresh doesn't wipe the code being typed.
+    const L = view.login;
+    const key = JSON.stringify(['login', L?.phase, L?.error, L?.name || agentInfo?.name, agentInfo?.canLogin, agentInfo?.loginFix]);
+    if (n.dataset.key === key && !n.hidden) return;
+    n.dataset.key = key;
+    const { nodes, tone } = loginNotice(agentInfo);
+    n.replaceChildren(...nodes);
+    n.classList.toggle('bad', tone === 'bad');
+    n.classList.toggle('ok', tone === 'ok');
+    n.hidden = false;
+    if (L?.phase === 'code') n.querySelector('input')?.focus();
+    return;
+  }
+  n.dataset.key = '';
+  n.classList.remove('ok');
   if (!site) {
     parts.push(el('p', null, 'Open a website in this window to customize it.'));
   } else if (status && !helperOk) {
@@ -310,6 +335,185 @@ function renderNotice({ helperOk, agentInfo, anyAgent }) {
   n.replaceChildren(...parts);
   n.classList.toggle('bad', bad);
   n.hidden = parts.length === 0;
+}
+
+// ---- logging in --------------------------------------------------------------------------------
+
+/** The chosen agent is available but logged out (agent.list says so, or the last run failed with it). */
+function needsLogin(agentInfo) {
+  if (!agentInfo?.available || agentInfo.loggedIn === true) return false;
+  if (agentInfo.loggedIn === false) return true;
+  const last = view.site ? view.chat.messages.at(-1) : null;
+  return last?.role === 'error' && /isn[’']t logged in/i.test(String(last.text));
+}
+
+function button(label, className, onClick) {
+  const b = el('button', className ? `btn ${className}` : 'btn', label);
+  b.type = 'button';
+  b.addEventListener('click', onClick);
+  return b;
+}
+
+function markdownBlock(className, text) {
+  const d = el('div', `md ${className || ''}`.trim());
+  setMarkdown(d, text);
+  return d;
+}
+
+/** Notice contents for the login flow: {nodes, tone: ''|'bad'|'ok'}. */
+function loginNotice(agentInfo) {
+  const L = view.login;
+  const name = L?.name || agentInfo?.name || 'The agent';
+  const fix = L?.fix || agentInfo?.loginFix || '';
+  const fallback = () => (fix ? markdownBlock('note', `Or ${fix}.`) : null);
+  const cancel = () => button('Cancel', '', cancelLogin);
+  const nodes = [];
+  let tone = '';
+  switch (L?.phase) {
+    case 'starting':
+      nodes.push(el('p', 'title', `Logging in to ${name}…`), el('p', null, 'Opening the sign-in page…'), actions(cancel()));
+      break;
+    case 'code': {
+      nodes.push(el('p', 'title', `Logging in to ${name}`),
+        el('p', null, 'Finish signing in in the tab that opened, then paste the code it shows here:'));
+      const form = el('form', 'login-form');
+      const input = el('input');
+      Object.assign(input, { type: 'text', name: 'code', placeholder: 'Code', autocomplete: 'off', spellcheck: false, required: true });
+      input.setAttribute('aria-label', 'Login code');
+      form.append(input, Object.assign(el('button', 'btn primary', 'Submit'), { type: 'submit' }));
+      form.addEventListener('submit', (e) => { e.preventDefault(); submitLoginCode(input.value); });
+      nodes.push(form);
+      if (L.error) nodes.push(el('p', 'note', L.error));
+      const again = el('a', null, 'Open the sign-in page again');
+      again.href = '#';
+      again.addEventListener('click', (e) => { e.preventDefault(); if (isLoginUrl(L.url)) chrome.tabs.create({ url: L.url, active: true }); });
+      nodes.push(actions(cancel(), again));
+      break;
+    }
+    case 'checking':
+      nodes.push(el('p', 'title', `Logging in to ${name}`), el('p', null, 'Checking the code…'), actions(cancel()));
+      break;
+    case 'success':
+      tone = 'ok';
+      nodes.push(el('p', 'title', 'Logged in'), el('p', null, `${name} is ready.`));
+      break;
+    case 'failed':
+      tone = 'bad';
+      nodes.push(el('p', 'title', `Couldn’t log in to ${name}`));
+      if (L.error) nodes.push(markdownBlock('', L.error));
+      nodes.push(actions(button('Try again', 'primary', () => startLogin(L.agent, name, fix))));
+      nodes.push(fallback());
+      break;
+    default: // not started
+      nodes.push(el('p', 'title', `${name} isn’t logged in`));
+      if (agentInfo?.canLogin) {
+        nodes.push(el('p', null, 'Log in with your account to use it from this panel.'));
+        nodes.push(actions(button('Log in', 'primary', () => startLogin(agentInfo.id, name, fix))));
+        nodes.push(fallback());
+      } else if (fix) {
+        nodes.push(markdownBlock('', `To log in, ${fix}.`));
+      }
+  }
+  return { nodes: nodes.filter(Boolean), tone };
+}
+
+function actions(...children) {
+  const p = el('p', 'actions');
+  p.append(...children.filter(Boolean));
+  return p;
+}
+
+async function startLogin(agent, name, fix) {
+  const L = { loginId: null, agent, name, fix, phase: 'starting', url: null, error: null, early: [] };
+  view.login = L;
+  render();
+  let loginId;
+  try {
+    ({ loginId } = await request({ type: 'agent.login', agent: agent || undefined }));
+  } catch (e) {
+    if (view.login === L) loginFailed(L, String(e?.message ?? e));
+    return;
+  }
+  if (view.login !== L) { // cancelled meanwhile
+    request({ type: 'agent.loginCancel', loginId }).catch(() => {});
+    return;
+  }
+  L.loginId = loginId;
+  const early = L.early.filter((m) => m.runId === loginId);
+  L.early = [];
+  for (const m of early) onLoginEvent(L, m.event);
+}
+
+function onLoginEvent(L, event) {
+  if (view.login !== L || !event) return;
+  switch (event.kind) {
+    case 'login': {
+      if (L.url) return;
+      if (!isLoginUrl(event.url)) {
+        request({ type: 'agent.loginCancel', loginId: L.loginId }).catch(() => {});
+        loginFailed(L, `${L.name} gave a sign-in link that isn’t on claude.com, claude.ai or anthropic.com, so WebMods didn’t open it.`);
+        return;
+      }
+      L.url = event.url;
+      L.phase = 'code';
+      chrome.tabs.create({ url: L.url, active: true }).catch((e) => console.warn('[webmods] could not open the sign-in page', e));
+      break;
+    }
+    case 'text':
+      // A complaint about the code while it's being checked: let the user paste it again.
+      if (L.phase === 'checking' && /invalid|error|fail|expired|try again/i.test(String(event.text))) {
+        L.phase = 'code';
+        L.error = String(event.text);
+      }
+      break;
+    case 'error':
+      L.error = String(event.message || '');
+      break;
+    case 'done':
+      if (event.ok) {
+        L.phase = 'success';
+        L.error = null;
+        loadAgents();
+        setTimeout(() => { if (view.login === L) { view.login = null; render(); } }, 2500);
+      } else if (event.cancelled) {
+        view.login = null;
+      } else {
+        loginFailed(L, L.error || 'The login didn’t finish.');
+        return;
+      }
+      break;
+    default:
+      return;
+  }
+  render();
+}
+
+function loginFailed(L, message) {
+  L.phase = 'failed';
+  L.error = message;
+  render();
+}
+
+async function submitLoginCode(value) {
+  const L = view.login;
+  const code = String(value ?? '').trim();
+  if (!L || L.phase !== 'code' || !code) return;
+  L.phase = 'checking';
+  L.error = null;
+  render();
+  try {
+    await request({ type: 'agent.loginCode', loginId: L.loginId, code });
+  } catch (e) {
+    if (view.login === L && L.phase === 'checking') { L.phase = 'code'; L.error = String(e?.message ?? e); render(); }
+  }
+}
+
+function cancelLogin() {
+  const L = view.login;
+  if (!L) return;
+  view.login = null;
+  if (L.loginId) request({ type: 'agent.loginCancel', loginId: L.loginId }).catch(() => {});
+  render();
 }
 
 function renderMods() {

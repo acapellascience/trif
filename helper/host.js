@@ -8,7 +8,8 @@
 //  - $WEBMODS_HOME/helper.sock: newline-delimited JSON for the `webmods` CLI.
 //  - watches $WEBMODS_HOME/sites and pushes {type:"mods"} to the extension on connect and on change.
 //  - runs the user's coding agent for the side panel (agent.list / agent.start / agent.stop requests
-//    from the extension or the CLI), sending progress as {type:"agentEvent", runId, event}.
+//    from the extension or the CLI), sending progress as {type:"agentEvent", runId, event}; and logs
+//    the agent in (agent.login / agent.loginCode / agent.loginCancel, events under the loginId).
 
 const fs = require('fs');
 const net = require('net');
@@ -18,6 +19,7 @@ const { createLogger } = require('./lib/log');
 const { encode, Decoder, MAX_TO_EXTENSION } = require('./lib/framing');
 const { scanMods, planModsMessage, folderFingerprint, summarize } = require('./lib/mods');
 const { Runs } = require('./lib/runs');
+const { Logins } = require('./lib/logins');
 const agents = require('./lib/agents');
 
 const ws = workspace();
@@ -224,10 +226,13 @@ function poll() {
 
 // config.json can change while Chrome runs (`webmods setup` re-records PATH), so re-read it per run.
 const runs = new Runs({ getWorkspace: () => workspace(ws.home), logger, onEvent: onAgentEvent });
-const runSubscribers = new Map(); // runId -> Set of CLI sockets that started it (see onClientLine)
-const AGENT_COMMANDS = new Set(['agent.list', 'agent.start', 'agent.stop']);
+const logins = new Logins({ getWorkspace: () => workspace(ws.home), logger, onEvent: onAgentEvent });
+const runSubscribers = new Map(); // runId or loginId -> Set of CLI sockets that started it (see onClientLine)
+const AGENT_COMMANDS = new Set(['agent.list', 'agent.start', 'agent.stop', 'agent.login', 'agent.loginCode', 'agent.loginCancel']);
 
 function onAgentEvent(runId, event) {
+  // A run that found the agent logged out: agent.list shouldn't keep saying it's logged in.
+  if (event && event.kind === 'error' && /isn't logged in/.test(String(event.message))) agents.forgetLoginStatus();
   // Every run goes to the extension (panels ignore runs they didn't start).
   if (state.stdoutOpen) {
     try { sendToExtension({ type: 'agentEvent', runId, event }); } catch (e) { logger.warn(`could not send agent event: ${e.message}`); }
@@ -237,11 +242,26 @@ function onAgentEvent(runId, event) {
   if (event.kind === 'done') runSubscribers.delete(runId);
 }
 
-// Helper-local agent commands, answered the same way for the extension and the CLI. Throws on error.
+// Helper-local agent commands, answered the same way for the extension and the CLI. Throws on error;
+// agent.list returns a promise (it checks login status).
 function agentCommand(cmd, args) {
-  if (cmd === 'agent.list') return agents.listAgents(workspace(ws.home));
-  if (cmd === 'agent.start') return runs.start(args);
-  return runs.stop(args.runId);
+  switch (cmd) {
+    case 'agent.list': return agents.listAgentsWithLogin(workspace(ws.home));
+    case 'agent.start': return runs.start(args);
+    case 'agent.stop': return runs.stop(args.runId);
+    case 'agent.login': return logins.start(args);
+    case 'agent.loginCode': return logins.code(args.loginId, args.code);
+    default: return logins.cancel(args.loginId);
+  }
+}
+
+// Run an agent command and call done(error, result): synchronously when the command is synchronous,
+// so agent.start / agent.login are answered before their first event.
+function runAgentCommand(cmd, args, done) {
+  let result;
+  try { result = agentCommand(cmd, args); } catch (e) { return done(e); }
+  if (result && typeof result.then === 'function') result.then((r) => done(null, r), (e) => done(e));
+  else done(null, result);
 }
 
 // The extension asks the helper things too (side panel): {type:"request", id, cmd, args} -> response.
@@ -252,12 +272,13 @@ function onExtensionRequest(msg) {
     try { sendToExtension({ type: 'response', id, ...body }); } catch (e) { logger.warn(`could not answer extension request ${id}: ${e.message}`); }
   };
   if (!AGENT_COMMANDS.has(msg.cmd)) return respond({ ok: false, error: `unknown command "${msg.cmd}"` });
-  let result;
-  try { result = agentCommand(msg.cmd, args); } catch (e) {
-    logger.warn(`${msg.cmd} failed: ${e.message}`);
-    return respond({ ok: false, error: e.message });
-  }
-  respond({ ok: true, result: result === undefined ? null : result });
+  runAgentCommand(msg.cmd, args, (e, result) => {
+    if (e) {
+      logger.warn(`${msg.cmd} failed: ${e.message}`);
+      return respond({ ok: false, error: e.message });
+    }
+    respond({ ok: true, result: result === undefined ? null : result });
+  });
 }
 
 // ---------------------------------------------------------------- unix socket for the CLI
@@ -399,6 +420,7 @@ function helperInfo() {
     modsApplied: state.modsApplied,
     pending: pending.size,
     runs: runs.list(),
+    login: logins.info(),
   };
 }
 
@@ -419,17 +441,20 @@ function onClientLine(sock, line) {
     });
   }
 
-  // Agent commands are helper-local. Streaming: after answering agent.start with {runId}, the same
-  // connection receives {type:"agentEvent", runId, event} lines (no `id`) for that run, ending with
-  // the event whose kind is "done". The client closes the connection when it has seen it.
+  // Agent commands are helper-local. Streaming: after answering agent.start with {runId} (or
+  // agent.login with {loginId}), the same connection receives {type:"agentEvent", runId, event} lines
+  // (no `id`; runId is the loginId for a login), ending with the event whose kind is "done". The client
+  // may send more requests on the connection meanwhile (agent.loginCode) and closes it after "done".
   if (AGENT_COMMANDS.has(cmd)) {
-    let result;
-    try { result = agentCommand(cmd, args); } catch (e) { return reply(sock, { id, ok: false, error: e.message }); }
-    reply(sock, { id, ok: true, result: result === undefined ? null : result });
-    if (cmd === 'agent.start' && result && result.runId) {
-      if (!runSubscribers.has(result.runId)) runSubscribers.set(result.runId, new Set());
-      runSubscribers.get(result.runId).add(sock);
-    }
+    runAgentCommand(cmd, args, (e, result) => {
+      if (e) return reply(sock, { id, ok: false, error: e.message });
+      reply(sock, { id, ok: true, result: result === undefined ? null : result });
+      const streamId = result && ((cmd === 'agent.start' && result.runId) || (cmd === 'agent.login' && result.loginId));
+      if (streamId) {
+        if (!runSubscribers.has(streamId)) runSubscribers.set(streamId, new Set());
+        runSubscribers.get(streamId).add(sock);
+      }
+    });
     return;
   }
 
@@ -474,7 +499,7 @@ function shutdown(reason, code = 0) {
   }
   pending.clear();
   // Agents die with the helper (SIGTERM, SIGKILL after a moment); their final events still go out.
-  const agentsGone = runs.stopAll();
+  const agentsGone = Promise.all([runs.stopAll(), logins.stopAll()]);
   if (server) {
     try { server.close(); } catch { /* ignore */ }
     // Only remove the socket if it's still ours (a newer helper may have replaced it).

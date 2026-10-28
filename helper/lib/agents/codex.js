@@ -12,8 +12,7 @@
 // exit_code, status}, file_change {changes:[{path, kind}]}, mcp_tool_call {server, tool},
 // web_search {query}, todo_list, error {message}.
 
-const { spawnSync } = require('child_process');
-const { findExecutable, versionOf, relToWorkspace, oneLine, parseJsonLine } = require('./util');
+const { findExecutable, versionOf, relToWorkspace, oneLine, parseJsonLine, captureSync } = require('./util');
 
 const NOT_LOGGED_IN = "Codex isn't logged in: run `codex login` in a terminal (or set OPENAI_API_KEY under \"env\" in the workspace's config.json)";
 const AUTH_RE = /not logged in|unauthori[sz]ed|\b401\b|please (run )?`?codex login|missing (api key|credentials)/i;
@@ -95,17 +94,21 @@ const adapter = {
   },
 
   // `codex login status` exits 0 when logged in (no tokens spent).
-  loginStatus({ path: file, env, cwd }) {
-    try {
-      const r = spawnSync(file, ['login', 'status'], { env, cwd, encoding: 'utf8', timeout: 10000, stdio: ['ignore', 'pipe', 'pipe'] });
-      if (r.error) return { loggedIn: null, detail: '' };
-      const text = `${r.stdout || ''}${r.stderr || ''}`.trim();
-      if (r.status === 0 && !/not logged in/i.test(text)) return { loggedIn: true, detail: oneLine(text, 80) };
-      if (/not logged in/i.test(text) || r.status === 1) return { loggedIn: false, detail: oneLine(text, 80) };
-    } catch { /* ignore */ }
+  loginStatusArgs: ['login', 'status'],
+  parseLoginStatus({ status, error, stdout, stderr }) {
+    if (error) return { loggedIn: null, detail: '' };
+    const text = `${stdout || ''}${stderr || ''}`.trim();
+    if (status === 0 && !/not logged in/i.test(text)) return { loggedIn: true, detail: oneLine(text, 80) };
+    if (/not logged in/i.test(text) || status === 1) return { loggedIn: false, detail: oneLine(text, 80) };
     return { loggedIn: null, detail: '' };
   },
+  loginStatus({ path: file, env, cwd }) {
+    return adapter.parseLoginStatus(captureSync(file, adapter.loginStatusArgs, { env, cwd }));
+  },
   loginFix: 'run `codex login` in a terminal',
+  // No side panel login: `codex login` finishes through a localhost callback server (port 1455) or a
+  // device code, not a code pasted back on stdin, and it's untested here. The panel shows loginFix.
+  login: null,
 };
 
 function friendly(message) {

@@ -33,6 +33,7 @@ const state = {
   runs: new Map(),       // runId → {runId, site, agent, tabId, stopping, errored, texts}
   starting: 0,           // agent.start requests awaiting their response
   early: new Map(),      // runId → events that arrived before its agent.start response (defensive)
+  logins: new Set(),     // loginIds of agent logins in progress (see agent.login)
   panels: new Set(),     // connected side panel ports
 };
 
@@ -241,6 +242,10 @@ function helperGone(reason) {
   for (const runId of [...state.runs.keys()]) {
     onAgentEvent(runId, { kind: 'error', message: `The WebMods helper disconnected while the agent was working (${reason}).` });
     onAgentEvent(runId, { kind: 'done', ok: false, result: '', costUsd: null, changedFiles: [], sessionId: null });
+  }
+  for (const loginId of [...state.logins]) {
+    onAgentEvent(loginId, { kind: 'error', message: `The WebMods helper disconnected during the login (${reason}).` });
+    onAgentEvent(loginId, { kind: 'done', ok: false, login: true });
   }
   notifyPanels();
 }
@@ -551,6 +556,9 @@ async function onPanelMessage(msg) {
     case 'agent.list': return helperRequest('agent.list', {}, 20000);
     case 'agent.start': return startAgent(msg);
     case 'agent.stop': return stopAgent(msg.runId);
+    case 'agent.login': return startLogin(msg);
+    case 'agent.loginCode': return helperRequest('agent.loginCode', { loginId: String(msg.loginId ?? ''), code: String(msg.code ?? '') }, 10000);
+    case 'agent.loginCancel': return helperRequest('agent.loginCancel', { loginId: String(msg.loginId ?? '') }, 10000);
     case 'chat.clear': return clearChat(msg.site);
     default: return onPageMessage(msg);
   }
@@ -604,6 +612,15 @@ async function stopAgent(runId) {
   return helperRequest('agent.stop', { runId }, 10000);
 }
 
+/** Log the agent in: the helper runs its login command; events arrive under the loginId (the panel opens the URL). */
+async function startLogin(msg) {
+  const args = msg.agent ? { agent: String(msg.agent) } : {};
+  const r = await helperRequest('agent.login', args);
+  if (!r?.loginId) throw new Error('the helper did not return a login id');
+  state.logins.add(r.loginId);
+  return { loginId: r.loginId };
+}
+
 async function clearChat(site) {
   const s = normalizeSite(site);
   for (const r of state.runs.values()) {
@@ -615,6 +632,8 @@ async function clearChat(site) {
 
 async function onAgentEvent(runId, event, relay = true) {
   if (relay) broadcast({ type: 'agentEvent', runId, event });
+  if (event?.login) { if (event.kind === 'done') state.logins.delete(runId); return; }
+  if (state.logins.has(runId)) return; // login events concern the panel only
   const run = state.runs.get(runId);
   if (!run && state.starting > 0 && state.early.size < 20) {
     // The helper answers agent.start before launching, so this shouldn't happen; keep it anyway.

@@ -1,0 +1,283 @@
+// Logic shared by background.js and the tests. Nothing here touches `chrome` at import time; the
+// functions that need Chrome APIs take them as parameters.
+
+import { safeStringify, formatError } from './runtime.js';
+
+export const EXTENSION_ID = 'iaablflfafmonebdomeikadolkgdbkhe';
+export const SETTINGS_URL = `chrome://extensions/?id=${EXTENSION_ID}`;
+// PROTOCOL.md calls this `__webmods_runtime`, but chrome.userScripts rejects ids starting with "_"
+// (reserved for generated ids), so it is registered under this id.
+export const RUNTIME_ID = 'webmods-runtime';
+export const USER_SCRIPTS_OFF =
+  `User scripts are off for WebMods. Open ${SETTINGS_URL} and turn on "Allow User Scripts", then reload the page.`;
+export const RUN_CAP = 1000000;
+
+// ---- user scripts -------------------------------------------------------------------------------
+
+/** True when chrome.userScripts can be used (the "Allow User Scripts" switch is on). */
+export function userScriptsAvailable(chromeApi) {
+  try {
+    const p = chromeApi.userScripts.getScripts(); // throws when the switch is off
+    if (p && typeof p.catch === 'function') p.catch(() => {});
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+const RUN_AT = {
+  document_start: 'document_start', 'document-start': 'document_start',
+  document_end: 'document_end', 'document-end': 'document_end',
+  document_idle: 'document_idle', 'document-idle': 'document_idle',
+};
+export function normalizeRunAt(runAt) {
+  return RUN_AT[String(runAt || '').trim().toLowerCase()] || 'document_start';
+}
+
+/** Wrap a mod's code exactly as PROTOCOL.md specifies. */
+export function wrapModCode(id, code) {
+  const mod = JSON.stringify(id);
+  return `(() => { const __mod = ${mod}; window.__webmods && (window.__webmods.current = __mod);
+try { ${code}
+} catch (e) { window.__webmods?.errors.push({mod: __mod, message: String(e?.message ?? e), stack: String(e?.stack ?? ""), time: Date.now()}); console.error("[webmods]", __mod, e); }
+})();
+//# sourceURL=webmods://${id}.js`;
+}
+
+export function modToUserScript(mod) {
+  return {
+    id: mod.id,
+    matches: Array.isArray(mod.matches) ? mod.matches : [],
+    excludeMatches: Array.isArray(mod.excludes) ? mod.excludes : [],
+    js: [{ code: wrapModCode(mod.id, String(mod.code ?? '')) }],
+    runAt: normalizeRunAt(mod.runAt),
+    world: 'MAIN',
+    allFrames: false,
+  };
+}
+
+export function runtimeUserScript(code) {
+  return { id: RUNTIME_ID, matches: ['<all_urls>'], excludeMatches: [], js: [{ code }], runAt: 'document_start', world: 'MAIN', allFrames: false };
+}
+
+/** Small non-cryptographic string hash (FNV-1a), used to remember the registered runtime. */
+export function quickHash(s) {
+  let h = 0x811c9dc5;
+  for (let i = 0; i < s.length; i++) { h ^= s.charCodeAt(i); h = Math.imul(h, 0x01000193); }
+  return (h >>> 0).toString(16) + ':' + s.length;
+}
+
+const errMsg = (e) => String(e?.message ?? e);
+
+/**
+ * Make chrome.userScripts (`us`) contain exactly the runtime plus `mods`.
+ * `applied` maps script id → hash of what was last registered (persisted by the caller).
+ * The runtime must run before every mod, so whenever it is missing or its code changed, everything
+ * is unregistered and re-registered with the runtime first (registration order = injection order).
+ * Returns {registered, errors, applied, reset}.
+ */
+export async function syncUserScripts(us, { mods, runtimeCode, applied = {} }) {
+  const errors = [];
+  const desired = [];
+  const seen = new Set();
+  for (const mod of mods || []) {
+    if (!mod || typeof mod.id !== 'string' || !mod.id) { errors.push({ id: String(mod?.id ?? ''), error: 'mod has no id' }); continue; }
+    if (mod.id === RUNTIME_ID || seen.has(mod.id)) { errors.push({ id: mod.id, error: 'duplicate or reserved mod id' }); continue; }
+    seen.add(mod.id);
+    desired.push(mod);
+  }
+
+  const existing = await us.getScripts();
+  const existingIds = new Set(existing.map((s) => s.id));
+  const runtimeHash = quickHash(runtimeCode);
+  const current = existing.find((s) => s.id === RUNTIME_ID);
+  const currentCode = current?.js?.[0]?.code;
+  const runtimeOk = !!current && (currentCode !== undefined ? currentCode === runtimeCode : applied[RUNTIME_ID] === runtimeHash);
+
+  const next = {};
+  const registered = [];
+  const registerMod = async (mod, update) => {
+    try {
+      if (update) await us.update([modToUserScript(mod)]);
+      else await us.register([modToUserScript(mod)]);
+      next[mod.id] = mod.hash ?? null;
+      registered.push(mod.id);
+    } catch (e) {
+      errors.push({ id: mod.id, error: errMsg(e) });
+    }
+  };
+
+  if (!runtimeOk) {
+    if (existing.length) await us.unregister();
+    await us.register([runtimeUserScript(runtimeCode)]);
+    next[RUNTIME_ID] = runtimeHash;
+    for (const mod of desired) await registerMod(mod, false);
+    return { registered, errors, applied: next, reset: true };
+  }
+
+  next[RUNTIME_ID] = runtimeHash;
+  const stale = existing.map((s) => s.id).filter((id) => id !== RUNTIME_ID && !seen.has(id));
+  if (stale.length) await us.unregister({ ids: stale });
+  for (const mod of desired) {
+    if (!existingIds.has(mod.id)) await registerMod(mod, false);
+    else if (mod.hash && applied[mod.id] === mod.hash) { next[mod.id] = mod.hash; registered.push(mod.id); }
+    else await registerMod(mod, true);
+  }
+  return { registered, errors, applied: next, reset: false };
+}
+
+// ---- tabs ---------------------------------------------------------------------------------------
+
+/** Test a tab URL against a selector: "/regex/flags" or a plain substring. */
+export function urlMatcher(selector) {
+  const s = String(selector);
+  const m = /^\/(.+)\/([a-z]*)$/s.exec(s);
+  if (m) {
+    let re;
+    try { re = new RegExp(m[1], m[2]); } catch (e) { throw new Error(`invalid url regex ${s}: ${e.message}`); }
+    return (url) => re.test(url || '');
+  }
+  return (url) => (url || '').includes(s);
+}
+
+/**
+ * Pick the target tab. `tabs` = all tabs in normal windows (in window/index order),
+ * `focusedWindowId` = the last-focused normal window. Throws with a helpful message.
+ */
+export function selectTab(tabs, focusedWindowId, args = {}) {
+  if (args.tab !== undefined && args.tab !== null && args.tab !== '') {
+    const id = Number(args.tab);
+    const t = tabs.find((x) => x.id === id);
+    if (!t) throw new Error(`no tab with id ${args.tab} (run \`webmods tabs\` to list tabs)`);
+    return t;
+  }
+  if (args.url !== undefined && args.url !== null && args.url !== '') {
+    const match = urlMatcher(args.url);
+    const t = tabs.find((x) => x.windowId === focusedWindowId && match(x.url)) || tabs.find((x) => match(x.url));
+    if (!t) throw new Error(`no tab whose URL matches ${args.url} (run \`webmods tabs\` to list tabs)`);
+    return t;
+  }
+  const t = tabs.find((x) => x.active && x.windowId === focusedWindowId) || tabs.find((x) => x.active);
+  if (!t) throw new Error('no active tab (is a Chrome window open?)');
+  return t;
+}
+
+/** Resolve a tab selector using chrome.windows/chrome.tabs. */
+export async function resolveTab(chromeApi, args = {}) {
+  const [tabs, win] = await Promise.all([
+    chromeApi.tabs.query({ windowType: 'normal' }),
+    chromeApi.windows.getLastFocused({ windowTypes: ['normal'] }).catch(() => null),
+  ]);
+  tabs.sort((a, b) => (a.windowId - b.windowId) || (a.index - b.index));
+  return selectTab(tabs, win?.id, args);
+}
+
+export function tabInfo(t) {
+  return { id: t.id, windowId: t.windowId, active: !!t.active, url: t.url ?? t.pendingUrl ?? '', title: t.title ?? '' };
+}
+
+/** Add https:// when the URL has no scheme ("example.com/x" → "https://example.com/x"). */
+export function normalizeUrl(to) {
+  const s = String(to ?? '').trim();
+  if (!s) throw new Error('missing URL');
+  return /^[a-z][a-z0-9+.-]*:/i.test(s) ? s : 'https://' + s;
+}
+
+/** "https://www.x.com/home" → "www.x.com"; "X.com" → "x.com". */
+export function normalizeSite(site) {
+  let s = String(site ?? '').trim().toLowerCase();
+  if (!s) throw new Error('missing site');
+  s = s.replace(/^[a-z][a-z0-9+.-]*:\/\//, '').replace(/[/?#].*$/, '').replace(/:\d+$/, '').replace(/^\*\./, '');
+  if (!s) throw new Error(`invalid site ${site}`);
+  return s;
+}
+
+export function hostMatchesSite(hostname, site) {
+  const h = String(hostname || '').toLowerCase();
+  return h === site || h.endsWith('.' + site);
+}
+
+// ---- run ----------------------------------------------------------------------------------------
+
+/**
+ * Code for chrome.userScripts.execute. It evaluates to a Promise of a JSON envelope string
+ * ({ok, json} or {ok:false, error}); the envelope is also stored in window.__webmods_runs[runId]
+ * for 60 s so the background can poll for it if execute doesn't wait for the promise.
+ */
+export function buildRunCode(code, expression, runId) {
+  const body = expression ? `return (${code}\n);` : `${code}\n`;
+  return `(async () => {
+const __wmStringify = (${safeStringify.toString()});
+const __wmFormatError = (${formatError.toString()});
+let __wmOut;
+try {
+  const __wmValue = await (async () => {
+${body}
+  })();
+  __wmOut = JSON.stringify({ ok: true, json: __wmStringify(__wmValue, ${RUN_CAP}) });
+} catch (__wmErr) {
+  let msg; try { msg = __wmFormatError(__wmErr); } catch (x) { msg = 'error'; }
+  __wmOut = JSON.stringify({ ok: false, error: msg });
+}
+try {
+  const runs = window.__webmods_runs || (window.__webmods_runs = {});
+  runs[${JSON.stringify(runId)}] = __wmOut;
+  setTimeout(() => { try { delete runs[${JSON.stringify(runId)}]; } catch (x) {} }, 60000);
+} catch (x) {}
+return __wmOut;
+})()`;
+}
+
+/** Code that reads (and removes) a stored run envelope; evaluates to the string or null. */
+export function buildPollCode(runId) {
+  const k = JSON.stringify(runId);
+  return `(() => { try { const r = window.__webmods_runs; if (r && typeof r[${k}] === 'string') { const v = r[${k}]; delete r[${k}]; return v; } } catch (e) {} return null; })()`;
+}
+
+/** Turn an envelope string into {value}, or throw the page's error. */
+export function parseRunEnvelope(str) {
+  const env = JSON.parse(str);
+  if (!env.ok) throw new Error(env.error || 'error');
+  return { value: JSON.parse(env.json) };
+}
+
+/** First injection result of chrome.userScripts.execute: envelope string, null (not ready), or throws. */
+export function firstInjectionResult(results) {
+  const r = Array.isArray(results) ? results[0] : undefined;
+  if (!r) throw new Error('the script was not injected (the tab may be closed or showing a page extensions cannot access)');
+  if (r.error) throw new Error(String(r.error));
+  return typeof r.result === 'string' ? r.result : null;
+}
+
+export function withTimeout(promise, ms, message) {
+  let timer;
+  return Promise.race([
+    promise,
+    new Promise((_, reject) => { timer = setTimeout(() => reject(new Error(message)), ms); }),
+  ]).finally(() => clearTimeout(timer));
+}
+
+// ---- recorder results ---------------------------------------------------------------------------
+
+/** Filter/limit recorder entries (already light: no bodies) for the `requests` command. */
+export function filterRequests(entries, { filter, limit } = {}) {
+  let list = Array.isArray(entries) ? entries : [];
+  if (filter !== undefined && filter !== null && filter !== '') {
+    let re;
+    try { re = new RegExp(String(filter)); } catch (e) { throw new Error(`invalid filter regex: ${e.message}`); }
+    list = list.filter((e) => re.test(e.url));
+  }
+  const n = limit === undefined || limit === null || limit === '' ? 50 : Number(limit);
+  if (!Number.isFinite(n) || n < 0) throw new Error(`invalid limit ${limit}`);
+  return n === 0 ? [] : list.slice(-n);
+}
+
+/** Exponential reconnect delay: 1 s, 2 s, 4 s … capped at 30 s. */
+export function nextBackoff(prev) {
+  return prev ? Math.min(prev * 2, 30000) : 1000;
+}
+
+export function chromeVersion(userAgent) {
+  const m = /Chrom(?:e|ium)\/([\d.]+)/.exec(userAgent || '');
+  return m ? m[1] : 'unknown';
+}

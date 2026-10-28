@@ -134,7 +134,7 @@ Without one, the target is the active tab of the last-focused normal window.
 
 ## The page runtime: `window.__webmods`
 
-The extension registers one internal user script, id `__webmods_runtime`, matching `<all_urls>`, MAIN
+The extension registers one internal user script, id `webmods-runtime` (ids starting with `_` are reserved by Chrome), matching `<all_urls>`, MAIN
 world, `document_start`, **registered before any mod** so it runs first. It defines:
 
 ```js
@@ -163,7 +163,7 @@ also listens for `window` `error`/`unhandledrejection` events and attributes tho
 **Recorder:** when the page's hostname is in the recording set, the runtime hooks `fetch` and
 `XMLHttpRequest` (before the site's code runs) and stores each request: method, URL, status, request
 body (strings only; else `"[binary]"`), response text (text-like content types only). The recording set
-reaches the runtime because the extension re-registers `__webmods_runtime` with the set embedded in its
+reaches the runtime because the extension re-registers `webmods-runtime` (ids starting with `_` are reserved by Chrome) with the set embedded in its
 code whenever it changes (`const RECORDING = ["x.com"]`).
 
 ## CLI (`webmods`)
@@ -227,4 +227,4 @@ tests/       node tests (node --test), incl. a fake extension for the helper and
 docs/        PROTOCOL.md (this file)
 ```
 
-Tests run with `node --test tests/` (Node's built-in runner). No dependencies.
+Tests run with `node --test` (Node's built-in runner). No dependencies.

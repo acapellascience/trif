@@ -1,0 +1,9 @@
+{
+  "name": "webmods-helper",
+  "version": "0.1.0",
+  "private": true,
+  "description": "WebMods native messaging host and `webmods` CLI",
+  "type": "commonjs",
+  "bin": { "webmods": "cli.js" },
+  "engines": { "node": ">=18" }
+}

@@ -74,6 +74,8 @@ function checkUserScripts() {
   state.userScripts = now;
   if (before !== null && before !== now) {
     log(now ? 'info' : 'warn', now ? 'user scripts were turned on' : 'user scripts were turned off');
+    // A fresh hello keeps the helper's view of the switch (shown by `webmods doctor`) current.
+    post({ type: 'hello', version: VERSION, userScripts: now, chrome: CHROME });
     if (now) serial(applyMods).then(reportApplied, () => {});
   }
   return now;

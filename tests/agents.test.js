@@ -162,7 +162,9 @@ test('claude adapter: command flags, resume and model', () => {
   const c = claude.command({ bin: '/x/claude', prompt: 'hi', context: 'CTX' });
   assert.equal(c.file, '/x/claude');
   assert.deepEqual(c.args, ['-p', 'hi', '--output-format', 'stream-json', '--verbose', '--permission-mode', 'acceptEdits',
-    '--setting-sources', 'project', '--strict-mcp-config', '--append-system-prompt', 'CTX']);
+    '--setting-sources', 'project', '--strict-mcp-config',
+    '--allowedTools', 'Read(./**)', 'Glob', 'Grep', 'Bash(webmods:*)', 'Bash(cd:*)', 'Bash(ls:*)', 'Bash(node --test:*)', 'Bash(node --check:*)',
+    '--disallowedTools', 'WebFetch', 'WebSearch', '--append-system-prompt', 'CTX']);
   const r = claude.command({ bin: '/x/claude', prompt: 'hi', context: 'CTX', sessionId: 's1', model: 'opus' });
   assert.deepEqual(r.args.slice(-4), ['--resume', 's1', '--model', 'opus']);
 });
@@ -732,7 +734,7 @@ test('setup records PATH (merging config.json) and writes .claude/settings.json;
   const settings = JSON.parse(fs.readFileSync(path.join(ws, '.claude', 'settings.json'), 'utf8'));
   assert.deepEqual(settings, {
     permissions: {
-      allow: ['Read(./**)', 'Glob', 'Grep', 'Bash(webmods *)', 'Bash(node --test *)', 'Bash(node --check *)', 'Bash(ls *)', 'Bash(cd *)'],
+      allow: ['Read(./**)', 'Glob', 'Grep', 'Bash(webmods:*)', 'Bash(cd:*)', 'Bash(ls:*)', 'Bash(node --test:*)', 'Bash(node --check:*)'],
       deny: ['WebFetch', 'WebSearch'],
     },
   });

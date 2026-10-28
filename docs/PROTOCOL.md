@@ -346,10 +346,11 @@ parseLine(line) → {kind:"login", url} | {kind:"text", text} | null}` or `null`
   --permission-mode acceptEdits --setting-sources project --strict-mcp-config --append-system-prompt <context>`
   plus `--resume <sessionId>` and `--model <model>` when given. `acceptEdits` lets it edit and write files
   inside the workspace (and denies writes outside it); with `dontAsk`, `Edit`/`Write` allow rules didn't
-  allow writes at all (2.1.149). Everything else comes from the workspace's `.claude/settings.json`,
-  written by `webmods setup` (allow: `Read(./**)`, `Glob`, `Grep`, `Bash(webmods *)`,
-  `Bash(node --test *)`, `Bash(node --check *)`, `Bash(ls *)`, `Bash(cd *)`; deny: `WebFetch`,
-  `WebSearch`); other Bash commands are denied. `--setting-sources project` keeps the user's own broader allow rules out;
+  allow writes at all (2.1.149). Everything else is passed as `--allowedTools Read(./**) Glob Grep
+  Bash(webmods:*) Bash(cd:*) Bash(ls:*) "Bash(node --test:*)" "Bash(node --check:*)" --disallowedTools
+  WebFetch WebSearch` (2.1.312 ignored `Bash(...)` allow rules from the workspace's settings file in -p
+  runs); `webmods setup` writes the same lists to the workspace's `.claude/settings.json` for interactive
+  sessions there. Other Bash commands are denied. `--setting-sources project` keeps the user's own broader allow rules out;
   `--strict-mcp-config` keeps their MCP servers out. stream-json lines: `{type:"system", subtype:"init",
   session_id}` → session; `{type:"assistant", message:{content:[{type:"text", text} | {type:"tool_use",
   name, input}]}}` → text / tool (summary: Bash → `input.command`; Edit/Write/Read → `input.file_path`

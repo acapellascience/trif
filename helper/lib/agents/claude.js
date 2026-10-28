@@ -3,10 +3,18 @@
 
 const { findExecutable, versionOf, relToWorkspace, oneLine, parseJsonLine, captureSync } = require('./util');
 
+// What side-panel runs may do besides editing the workspace (acceptEdits). Passed on the command line:
+// Claude Code 2.1.312 ignored `Bash(...)` allow rules from the workspace's .claude/settings.json in -p runs.
+const ALLOWED_TOOLS = ['Read(./**)', 'Glob', 'Grep', 'Bash(webmods:*)', 'Bash(cd:*)', 'Bash(ls:*)',
+  'Bash(node --test:*)', 'Bash(node --check:*)'];
+const DENIED_TOOLS = ['WebFetch', 'WebSearch'];
+
 const NOT_LOGGED_IN = "Claude Code isn't logged in: run `claude` in a terminal and log in (type /login)";
 
 const adapter = {
   id: 'claude',
+  allowedTools: ALLOWED_TOOLS,
+  deniedTools: DENIED_TOOLS,
   name: 'Claude Code',
   binary: 'claude',
   systemPrompt: true, // context goes in --append-system-prompt on every run
@@ -21,7 +29,8 @@ const adapter = {
 
   command({ bin, prompt, sessionId, model, context }) {
     const args = ['-p', prompt, '--output-format', 'stream-json', '--verbose',
-      '--permission-mode', 'acceptEdits', '--setting-sources', 'project', '--strict-mcp-config'];
+      '--permission-mode', 'acceptEdits', '--setting-sources', 'project', '--strict-mcp-config',
+      '--allowedTools', ...ALLOWED_TOOLS, '--disallowedTools', ...DENIED_TOOLS];
     if (context) args.push('--append-system-prompt', context);
     if (sessionId) args.push('--resume', sessionId);
     if (model) args.push('--model', model);

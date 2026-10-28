@@ -50,6 +50,9 @@ async function doctor(opts = {}) {
   if (fs.existsSync(ws.home)) {
     if (fs.existsSync(path.join(ws.home, 'AGENTS.md'))) add('ok', 'AGENTS.md present');
     else add('warn', `${path.join(ws.home, 'AGENTS.md')} is missing (agents won't know how to write mods)`, setupFix);
+    // Written by setup since the side panel arrived; without it, side-panel runs of Claude Code can't edit or run anything.
+    if (fs.existsSync(path.join(ws.home, '.claude', 'settings.json'))) add('ok', 'agent permissions present');
+    else add('warn', `${path.join(ws.home, '.claude', 'settings.json')} is missing (side-panel agents can't edit mods or run webmods)`, setupFix);
   }
 
   // Host wrapper

@@ -1,10 +1,11 @@
 // WebMods service worker: talks to the native helper, keeps chrome.userScripts in sync with the mods
-// folder, and executes page commands from the `webmods` CLI. See docs/PROTOCOL.md.
+// folder, executes page commands from the `webmods` CLI, and relays agent runs between the side
+// panel and the helper. See docs/PROTOCOL.md.
 
 import {
   SETTINGS_URL, USER_SCRIPTS_OFF, userScriptsAvailable, syncUserScripts, resolveTab, tabInfo,
   normalizeUrl, normalizeSite, hostMatchesSite, buildRunCode, buildPollCode, parseRunEnvelope,
-  firstInjectionResult, withTimeout, filterRequests, nextBackoff, chromeVersion,
+  firstInjectionResult, withTimeout, filterRequests, nextBackoff, chromeVersion, toolLine,
 } from './lib.js';
 import { runtimeCode } from './runtime.js';
 
@@ -12,6 +13,8 @@ const HOST = 'com.webmods.helper';
 const VERSION = chrome.runtime.getManifest().version;
 const CHROME = chromeVersion(navigator.userAgent);
 const LOAD_TIMEOUT = 30000;
+const CHAT_MAX = 500;          // messages kept per site
+const NOT_CONNECTED = 'The WebMods helper isn\'t connected. Run `webmods setup` in a terminal, then restart Chrome.';
 
 const state = {
   port: null,
@@ -25,6 +28,12 @@ const state = {
   recording: [],         // hostnames being recorded (persisted)
   applied: {},           // script id → hash last registered (persisted)
   lastApply: { registered: [], errors: [] },
+  requestSeq: 0,
+  pending: new Map(),    // our native request id → {resolve, reject, timer}
+  runs: new Map(),       // runId → {runId, site, agent, tabId, stopping, errored, texts}
+  starting: 0,           // agent.start requests awaiting their response
+  early: new Map(),      // runId → events that arrived before its agent.start response (defensive)
+  panels: new Set(),     // connected side panel ports
 };
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -32,24 +41,41 @@ const errMsg = (e) => String(e?.message ?? e);
 
 // ---- startup ------------------------------------------------------------------------------------
 
-const ready = chrome.storage.local.get(['mods', 'recording', 'applied']).then((s) => {
+const ready = chrome.storage.local.get(null).then(async (s) => {
   if (Array.isArray(s.mods)) state.mods = s.mods;
   if (Array.isArray(s.recording)) state.recording = s.recording;
   if (s.applied && typeof s.applied === 'object') state.applied = s.applied;
+  await cleanStaleRuns(s);
 }).catch((e) => console.error('[webmods] failed to read storage', e));
 
 // Listeners must be registered synchronously at the top level of a service worker.
-chrome.runtime.onStartup.addListener(() => { ready.then(() => { checkUserScripts(); connect(); }); });
-chrome.runtime.onInstalled.addListener((details) => {
-  ready.then(() => serial(applyMods)).catch(() => {});
-  if (details.reason === 'install') openOnboarding();
+chrome.runtime.onStartup.addListener(() => {
+  setPanelBehavior();
+  ready.then(() => { checkUserScripts(); connect(); });
 });
-chrome.action.onClicked.addListener(() => openOnboarding());
+chrome.runtime.onInstalled.addListener((details) => {
+  setPanelBehavior();
+  ready.then(() => serial(applyMods)).catch(() => {});
+  if (details.reason === 'install') openOnboarding().catch(() => {});
+});
 chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   if (sender.id !== chrome.runtime.id) return false;
   ready.then(() => onPageMessage(msg)).then(sendResponse, (e) => sendResponse({ error: errMsg(e) }));
   return true;
 });
+chrome.runtime.onConnect.addListener((port) => {
+  if (port.name !== 'panel' || port.sender?.id !== chrome.runtime.id) return;
+  onPanelConnect(port);
+});
+
+/** The toolbar icon opens the side panel (the setting persists, so this only needs to run occasionally). */
+function setPanelBehavior() {
+  try {
+    chrome.sidePanel?.setPanelBehavior({ openPanelOnActionClick: true })?.catch?.((e) => console.warn('[webmods] setPanelBehavior failed', e));
+  } catch (e) {
+    console.warn('[webmods] setPanelBehavior failed', e);
+  }
+}
 
 ready.then(() => {
   checkUserScripts();
@@ -77,6 +103,7 @@ function checkUserScripts() {
     // A fresh hello keeps the helper's view of the switch (shown by `webmods doctor`) current.
     post({ type: 'hello', version: VERSION, userScripts: now, chrome: CHROME });
     if (now) serial(applyMods).then(reportApplied, () => {});
+    notifyPanels();
   }
   return now;
 }
@@ -104,6 +131,7 @@ async function applyMods() {
 
 function reportApplied(res) {
   post({ type: 'modsApplied', registered: res.registered, errors: res.errors });
+  notifyPanels();
 }
 
 function requireUserScripts() {
@@ -126,7 +154,7 @@ function connect() {
   }
   state.port = port;
   port.onMessage.addListener((msg) => {
-    if (!state.connected) { state.connected = true; state.connectedAt = Date.now(); state.helperError = null; }
+    if (!state.connected) { state.connected = true; state.connectedAt = Date.now(); state.helperError = null; notifyPanels(); }
     checkUserScripts();
     onHelperMessage(msg).catch((e) => log('error', `handling ${msg?.type}: ${errMsg(e)}`));
   });
@@ -137,6 +165,7 @@ function connect() {
     state.port = null;
     state.connected = false;
     state.helperError = reason;
+    helperGone(reason);
     scheduleReconnect();
   });
   post({ type: 'hello', version: VERSION, userScripts: checkUserScripts(), chrome: CHROME });
@@ -171,7 +200,49 @@ async function onHelperMessage(msg) {
     } catch (e) {
       post({ type: 'response', id: msg.id, ok: false, error: errMsg(e) });
     }
+  } else if (msg.type === 'response') {
+    const p = state.pending.get(msg.id);
+    if (!p) return;
+    state.pending.delete(msg.id);
+    clearTimeout(p.timer);
+    if (msg.ok) p.resolve(msg.result); else p.reject(new Error(msg.error || 'the helper reported an error'));
+  } else if (msg.type === 'agentEvent') {
+    await onAgentEvent(msg.runId, msg.event);
   }
+}
+
+/** Send a native `request` to the helper (the reverse of CLI page commands) and await its `response`. */
+function helperRequest(cmd, args = {}, timeout = 30000) {
+  if (!state.port) return Promise.reject(new Error(NOT_CONNECTED));
+  const id = `ext-${++state.requestSeq}`;
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => {
+      state.pending.delete(id);
+      reject(new Error(`the helper didn't answer ${cmd} within ${timeout / 1000} s`));
+    }, timeout);
+    state.pending.set(id, { resolve, reject, timer });
+    try {
+      state.port.postMessage({ type: 'request', id, cmd, args });
+    } catch (e) {
+      state.pending.delete(id);
+      clearTimeout(timer);
+      reject(new Error(`${NOT_CONNECTED} (${errMsg(e)})`));
+    }
+  });
+}
+
+/** The helper went away: fail pending requests and finish in-flight runs for the panel. */
+function helperGone(reason) {
+  for (const [id, p] of state.pending) {
+    clearTimeout(p.timer);
+    p.reject(new Error(`the WebMods helper disconnected (${reason})`));
+    state.pending.delete(id);
+  }
+  for (const runId of [...state.runs.keys()]) {
+    onAgentEvent(runId, { kind: 'error', message: `The WebMods helper disconnected while the agent was working (${reason}).` });
+    onAgentEvent(runId, { kind: 'done', ok: false, result: '', costUsd: null, changedFiles: [], sessionId: null });
+  }
+  notifyPanels();
 }
 
 // ---- page commands ------------------------------------------------------------------------------
@@ -415,22 +486,225 @@ async function onPageMessage(msg) {
       state.backoff = 0;
       connect();
       return { ok: true };
-    case 'status': {
-      if (!state.port && !state.retryTimer) connect();
-      const s = await commands.status();
-      const errors = new Map(state.lastApply.errors.map((e) => [e.id, e.error]));
-      return {
-        helper: { connected: state.connected, error: state.connected ? null : state.helperError },
-        userScripts: s.userScripts, settingsUrl: SETTINGS_URL, version: VERSION, chrome: CHROME,
-        recording: s.recording,
-        mods: state.mods.map((m, i) => ({
-          id: m.id, name: m.name || m.id, description: m.description || '', site: m.site,
-          matches: m.matches || [], registered: s.mods[i].registered,
-          error: errors.get(m.id) === USER_SCRIPTS_OFF ? null : errors.get(m.id) || null,
-        })),
-      };
-    }
+    case 'status':
+      return uiStatus();
     default:
       throw new Error(`unknown message ${msg?.type}`);
   }
+}
+
+/** Status for the onboarding page and the side panel. */
+async function uiStatus() {
+  if (!state.port && !state.retryTimer) connect();
+  const s = await commands.status();
+  const errors = new Map(state.lastApply.errors.map((e) => [e.id, e.error]));
+  return {
+    helper: { connected: state.connected, error: state.connected ? null : state.helperError },
+    userScripts: s.userScripts, settingsUrl: SETTINGS_URL, version: VERSION, chrome: CHROME,
+    recording: s.recording,
+    mods: state.mods.map((m, i) => ({
+      id: m.id, name: m.name || m.id, description: m.description || '', site: m.site, file: m.file || '',
+      matches: m.matches || [], excludes: m.excludes || [], registered: s.mods[i].registered,
+      error: errors.get(m.id) === USER_SCRIPTS_OFF ? null : errors.get(m.id) || null,
+    })),
+    runs: [...state.runs.values()].map((r) => ({ runId: r.runId, site: r.site })),
+  };
+}
+
+// ---- side panel ---------------------------------------------------------------------------------
+//
+// Panels talk over a `panel` port. Requests carry a `reqId` and get `{type:"reply", reqId, ok,
+// result|error}`; every native agentEvent is relayed as `{type:"agentEvent", runId, event}`; and
+// `{type:"statusChanged"}` tells panels to ask for status again. The background also writes each
+// run's transcript into `chat:<site>` (so a run survives the panel being closed, and every panel
+// showing the site sees the same chat via storage.onChanged).
+
+function onPanelConnect(port) {
+  state.panels.add(port);
+  port.onDisconnect.addListener(() => state.panels.delete(port));
+  port.onMessage.addListener((msg) => {
+    ready.then(() => onPanelMessage(msg)).then(
+      (result) => reply(port, msg, { ok: true, result: result === undefined ? null : result }),
+      (e) => reply(port, msg, { ok: false, error: errMsg(e) }),
+    );
+  });
+}
+
+function reply(port, msg, r) {
+  if (msg?.reqId === undefined) return;
+  try { port.postMessage({ type: 'reply', reqId: msg.reqId, ...r }); } catch { /* panel closed */ }
+}
+
+function broadcast(msg) {
+  for (const port of state.panels) {
+    try { port.postMessage(msg); } catch { state.panels.delete(port); }
+  }
+}
+
+function notifyPanels() {
+  broadcast({ type: 'statusChanged' });
+}
+
+async function onPanelMessage(msg) {
+  switch (msg?.type) {
+    case 'status': return uiStatus();
+    case 'agent.list': return helperRequest('agent.list', {}, 20000);
+    case 'agent.start': return startAgent(msg);
+    case 'agent.stop': return stopAgent(msg.runId);
+    case 'chat.clear': return clearChat(msg.site);
+    default: return onPageMessage(msg);
+  }
+}
+
+async function startAgent(msg) {
+  const site = normalizeSite(msg.site);
+  const prompt = String(msg.prompt ?? '').trim();
+  if (!prompt) throw new Error('empty message');
+  const agent = msg.agent ? String(msg.agent) : undefined;
+  const tabId = Number.isInteger(msg.tabId) ? msg.tabId : undefined;
+  const startedAt = Date.now();
+  await updateChat(site, (chat) => {
+    if (chat.run) throw new Error(`already working on ${site}`);
+    chat.messages.push({ role: 'user', text: prompt, time: startedAt });
+    chat.run = { runId: null, startedAt };
+    chat.last = null;
+  });
+  const args = { site, url: String(msg.url ?? ''), tabId, prompt, agent };
+  if (msg.sessionId) args.sessionId = String(msg.sessionId);
+  if (msg.model) args.model = String(msg.model);
+  let runId;
+  state.starting++;
+  try {
+    ({ runId } = (await helperRequest('agent.start', args)) || {});
+    if (!runId) throw new Error('the helper did not return a run id');
+  } catch (e) {
+    if (--state.starting === 0) state.early.clear();
+    await updateChat(site, (chat) => {
+      chat.messages.push({ role: 'error', text: errMsg(e), time: Date.now() });
+      chat.run = null;
+    }).catch(() => {});
+    throw e;
+  }
+  // Registered synchronously after the response, before the next native message is handled.
+  state.runs.set(runId, { runId, site, agent, tabId, stopping: false, errored: false, texts: 0 });
+  const early = state.early.get(runId) || [];
+  state.early.delete(runId);
+  if (--state.starting === 0) state.early.clear();
+  await updateChat(site, (chat) => {
+    if (chat.run && chat.run.startedAt === startedAt) chat.run.runId = runId;
+  });
+  for (const event of early) onAgentEvent(runId, event, false);
+  notifyPanels();
+  return { runId };
+}
+
+async function stopAgent(runId) {
+  const run = state.runs.get(runId);
+  if (run) run.stopping = true;
+  return helperRequest('agent.stop', { runId }, 10000);
+}
+
+async function clearChat(site) {
+  const s = normalizeSite(site);
+  for (const r of state.runs.values()) {
+    if (r.site === s) { r.stopping = true; helperRequest('agent.stop', { runId: r.runId }, 10000).catch(() => {}); }
+  }
+  await chatSerial(s, () => chrome.storage.local.remove(chatKey(s)));
+  return { cleared: true };
+}
+
+async function onAgentEvent(runId, event, relay = true) {
+  if (relay) broadcast({ type: 'agentEvent', runId, event });
+  const run = state.runs.get(runId);
+  if (!run && state.starting > 0 && state.early.size < 20) {
+    // The helper answers agent.start before launching, so this shouldn't happen; keep it anyway.
+    const list = state.early.get(runId) || [];
+    if (list.length < 200) list.push(event);
+    state.early.set(runId, list);
+  }
+  if (!run || !event || typeof event !== 'object') return;
+  if (event.kind === 'done') state.runs.delete(runId);
+  if (event.kind === 'error') run.errored = true;
+  if (event.kind === 'text' && String(event.text ?? '').trim()) run.texts++;
+  const time = Date.now();
+  await updateChat(run.site, (chat) => {
+    if (chat.run?.runId !== runId) return false; // the chat was cleared meanwhile
+    const push = (role, text) => chat.messages.push({ role, text: String(text), time });
+    switch (event.kind) {
+      case 'session':
+        if (event.sessionId) { chat.sessionId = String(event.sessionId); chat.agent = run.agent ?? chat.agent ?? null; }
+        break;
+      case 'text':
+        if (String(event.text ?? '').trim()) push('assistant', event.text);
+        break;
+      case 'tool':
+        push('tool', toolLine(event.name, event.summary));
+        break;
+      case 'error':
+        push('error', event.message || 'Something went wrong.');
+        break;
+      case 'done': {
+        if (event.sessionId) { chat.sessionId = String(event.sessionId); chat.agent = run.agent ?? chat.agent ?? null; }
+        if (event.ok && !run.texts && String(event.result ?? '').trim()) push('assistant', event.result);
+        if (!event.ok && !run.errored) {
+          if (run.stopping) push('tool', 'stopped');
+          else push('error', String(event.result ?? '').trim() || 'The agent stopped without finishing.');
+        }
+        chat.last = {
+          runId, ok: !!event.ok, time,
+          changedFiles: Array.isArray(event.changedFiles) ? event.changedFiles : [],
+          costUsd: typeof event.costUsd === 'number' ? event.costUsd : null,
+        };
+        chat.run = null;
+        break;
+      }
+      default:
+        return false;
+    }
+  });
+  if (event.kind === 'done') notifyPanels();
+}
+
+// ---- chat storage -------------------------------------------------------------------------------
+
+const chatKey = (site) => `chat:${site}`;
+const chatQueues = new Map();
+
+function emptyChat() {
+  return { sessionId: null, agent: null, messages: [], run: null, last: null };
+}
+
+/** Run `fn` after earlier chat updates for the same site (read-modify-write must not interleave). */
+function chatSerial(site, fn) {
+  const p = (chatQueues.get(site) || Promise.resolve()).then(fn);
+  const tail = p.catch(() => {});
+  chatQueues.set(site, tail);
+  tail.then(() => { if (chatQueues.get(site) === tail) chatQueues.delete(site); });
+  return p;
+}
+
+/** Read chat:<site>, let `fn` mutate it (return false to skip writing), write it back. */
+function updateChat(site, fn) {
+  return chatSerial(site, async () => {
+    const key = chatKey(site);
+    const stored = (await chrome.storage.local.get(key))[key];
+    const chat = { ...emptyChat(), ...(stored && typeof stored === 'object' ? stored : {}) };
+    if (!Array.isArray(chat.messages)) chat.messages = [];
+    if (fn(chat) === false) return chat;
+    if (chat.messages.length > CHAT_MAX) chat.messages = chat.messages.slice(-CHAT_MAX);
+    await chrome.storage.local.set({ [key]: chat });
+    return chat;
+  });
+}
+
+/** On service worker start no run can be live: mark runs left in storage as interrupted. */
+async function cleanStaleRuns(all) {
+  const fixes = {};
+  for (const [key, chat] of Object.entries(all || {})) {
+    if (!key.startsWith('chat:') || !chat?.run) continue;
+    const messages = Array.isArray(chat.messages) ? chat.messages.slice() : [];
+    messages.push({ role: 'error', text: 'Interrupted: WebMods restarted while the agent was working.', time: Date.now() });
+    fixes[key] = { ...chat, messages, run: null };
+  }
+  if (Object.keys(fixes).length) await chrome.storage.local.set(fixes);
 }

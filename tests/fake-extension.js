@@ -17,12 +17,26 @@ function tempDir(prefix = 'wm-') {
   return fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), prefix)));
 }
 
-// An environment that can never touch the real ~/.webmods or browser folders.
+// PATH without any real coding agent on it (setup records PATH and the helper/doctor look agents up
+// there), plus a folder with `node` so `#!/usr/bin/env node` scripts still work.
+let safePath = null;
+function agentFreePath() {
+  if (safePath !== null) return safePath;
+  const nodeDir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'wm-node-')));
+  fs.symlinkSync(process.execPath, path.join(nodeDir, 'node'));
+  const has = (d, n) => { try { fs.accessSync(path.join(d, n), fs.constants.X_OK); return true; } catch { return false; } };
+  const dirs = String(process.env.PATH || '').split(path.delimiter).filter((d) => d && !has(d, 'claude') && !has(d, 'codex'));
+  safePath = [nodeDir, ...dirs].join(path.delimiter);
+  return safePath;
+}
+
+// An environment that can never touch the real ~/.webmods, browser folders or coding agents.
 function testEnv(home, extra = {}) {
   return {
-    PATH: process.env.PATH,
+    PATH: agentFreePath(),
     HOME: path.join(home, 'fakehome'),
     WEBMODS_HOME: home,
+    WEBMODS_DEFAULT_AGENT_DIRS: '',
     ...extra,
   };
 }

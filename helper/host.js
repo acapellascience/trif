@@ -7,6 +7,8 @@
 //    ever be written to stdout; logs go to $WEBMODS_HOME/helper.log.
 //  - $WEBMODS_HOME/helper.sock: newline-delimited JSON for the `webmods` CLI.
 //  - watches $WEBMODS_HOME/sites and pushes {type:"mods"} to the extension on connect and on change.
+//  - runs the user's coding agent for the side panel (agent.list / agent.start / agent.stop requests
+//    from the extension or the CLI), sending progress as {type:"agentEvent", runId, event}.
 
 const fs = require('fs');
 const net = require('net');
@@ -15,6 +17,8 @@ const { workspace, VERSION } = require('./lib/paths');
 const { createLogger } = require('./lib/log');
 const { encode, Decoder, MAX_TO_EXTENSION } = require('./lib/framing');
 const { scanMods, planModsMessage, folderFingerprint, summarize } = require('./lib/mods');
+const { Runs } = require('./lib/runs');
+const agents = require('./lib/agents');
 
 const ws = workspace();
 try { fs.mkdirSync(ws.home, { recursive: true }); } catch { /* logged below if it matters */ }
@@ -87,6 +91,9 @@ function onExtensionMessage(msg) {
       break;
     case 'response':
       onExtensionResponse(msg);
+      break;
+    case 'request':
+      onExtensionRequest(msg);
       break;
     case 'modsApplied':
       state.modsApplied = {
@@ -213,6 +220,46 @@ function poll() {
   if (fp !== state.lastFingerprint) scheduleSync('poll');
 }
 
+// ---------------------------------------------------------------- agent runs (side panel)
+
+// config.json can change while Chrome runs (`webmods setup` re-records PATH), so re-read it per run.
+const runs = new Runs({ getWorkspace: () => workspace(ws.home), logger, onEvent: onAgentEvent });
+const runSubscribers = new Map(); // runId -> Set of CLI sockets that started it (see onClientLine)
+const AGENT_COMMANDS = new Set(['agent.list', 'agent.start', 'agent.stop']);
+
+function onAgentEvent(runId, event) {
+  // Every run goes to the extension (panels ignore runs they didn't start).
+  if (state.stdoutOpen) {
+    try { sendToExtension({ type: 'agentEvent', runId, event }); } catch (e) { logger.warn(`could not send agent event: ${e.message}`); }
+  }
+  const subs = runSubscribers.get(runId);
+  if (subs) for (const s of subs) reply(s, { type: 'agentEvent', runId, event });
+  if (event.kind === 'done') runSubscribers.delete(runId);
+}
+
+// Helper-local agent commands, answered the same way for the extension and the CLI. Throws on error.
+function agentCommand(cmd, args) {
+  if (cmd === 'agent.list') return agents.listAgents(workspace(ws.home));
+  if (cmd === 'agent.start') return runs.start(args);
+  return runs.stop(args.runId);
+}
+
+// The extension asks the helper things too (side panel): {type:"request", id, cmd, args} -> response.
+function onExtensionRequest(msg) {
+  const id = msg.id;
+  const args = msg.args && typeof msg.args === 'object' ? msg.args : {};
+  const respond = (body) => {
+    try { sendToExtension({ type: 'response', id, ...body }); } catch (e) { logger.warn(`could not answer extension request ${id}: ${e.message}`); }
+  };
+  if (!AGENT_COMMANDS.has(msg.cmd)) return respond({ ok: false, error: `unknown command "${msg.cmd}"` });
+  let result;
+  try { result = agentCommand(msg.cmd, args); } catch (e) {
+    logger.warn(`${msg.cmd} failed: ${e.message}`);
+    return respond({ ok: false, error: e.message });
+  }
+  respond({ ok: true, result: result === undefined ? null : result });
+}
+
 // ---------------------------------------------------------------- unix socket for the CLI
 
 let server = null;
@@ -328,6 +375,10 @@ function onClient(sock) {
     for (const [id, p] of pending) {
       if (p.sock === sock) { clearTimeout(p.timer); pending.delete(id); }
     }
+    for (const [runId, subs] of runSubscribers) {
+      subs.delete(sock);
+      if (!subs.size) runSubscribers.delete(runId);
+    }
   });
 }
 
@@ -347,6 +398,7 @@ function helperInfo() {
     modWarnings: state.modWarnings,
     modsApplied: state.modsApplied,
     pending: pending.size,
+    runs: runs.list(),
   };
 }
 
@@ -365,6 +417,20 @@ function onClientLine(sock, line) {
       id, ok: true,
       result: { modsDir: ws.modsDir, mods: state.mods.map(summarize), errors: state.modErrors, warnings: state.modWarnings },
     });
+  }
+
+  // Agent commands are helper-local. Streaming: after answering agent.start with {runId}, the same
+  // connection receives {type:"agentEvent", runId, event} lines (no `id`) for that run, ending with
+  // the event whose kind is "done". The client closes the connection when it has seen it.
+  if (AGENT_COMMANDS.has(cmd)) {
+    let result;
+    try { result = agentCommand(cmd, args); } catch (e) { return reply(sock, { id, ok: false, error: e.message }); }
+    reply(sock, { id, ok: true, result: result === undefined ? null : result });
+    if (cmd === 'agent.start' && result && result.runId) {
+      if (!runSubscribers.has(result.runId)) runSubscribers.set(result.runId, new Set());
+      runSubscribers.get(result.runId).add(sock);
+    }
+    return;
   }
 
   // Everything else is a page command for the extension.
@@ -407,6 +473,8 @@ function shutdown(reason, code = 0) {
     reply(p.sock, { id: p.clientId, ok: false, error: 'Chrome disconnected from the helper before answering' });
   }
   pending.clear();
+  // Agents die with the helper (SIGTERM, SIGKILL after a moment); their final events still go out.
+  const agentsGone = runs.stopAll();
   if (server) {
     try { server.close(); } catch { /* ignore */ }
     // Only remove the socket if it's still ours (a newer helper may have replaced it).
@@ -414,7 +482,7 @@ function shutdown(reason, code = 0) {
       if (serverIno === null || fs.statSync(ws.sock).ino === serverIno) fs.unlinkSync(ws.sock);
     } catch { /* already gone */ }
   }
-  setTimeout(() => process.exit(code), 50);
+  agentsGone.then(() => setTimeout(() => process.exit(code), 50));
 }
 
 process.on('SIGTERM', () => shutdown('SIGTERM'));

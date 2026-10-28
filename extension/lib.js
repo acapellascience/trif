@@ -197,6 +197,89 @@ export function hostMatchesSite(hostname, site) {
   return h === site || h.endsWith('.' + site);
 }
 
+/** The side panel's "site" for a tab URL: hostname without a leading "www.", or null for pages mods can't run on. */
+export function siteForUrl(url) {
+  let u;
+  try { u = new URL(String(url ?? '')); } catch { return null; }
+  if (u.protocol !== 'http:' && u.protocol !== 'https:') return null;
+  const host = u.hostname.toLowerCase().replace(/\.$/, '');
+  if (!host) return null;
+  return host.startsWith('www.') && host.length > 4 ? host.slice(4) : host;
+}
+
+// ---- match patterns -----------------------------------------------------------------------------
+
+const ALL_URLS_SCHEMES = new Set(['http', 'https', 'file', 'ftp', 'ws', 'wss']);
+const DEFAULT_PORTS = { http: '80', https: '443', ws: '80', wss: '443', ftp: '21' };
+
+/**
+ * Chrome match pattern test (https://developer.chrome.com/docs/extensions/develop/concepts/match-patterns):
+ * `<all_urls>`, or `scheme://host/path` where scheme is `*` (http or https) or a concrete scheme;
+ * host is `*`, `*.example.com` (the domain and its subdomains) or exact, optionally with `:port`
+ * (no port = any port); path is a glob (`*` = any run of characters) matched against path + query.
+ * Invalid patterns and unparsable URLs never match. Pure: used by the side panel and the tests.
+ */
+export function matchesPattern(pattern, url) {
+  let u;
+  try { u = new URL(String(url ?? '')); } catch { return false; }
+  const scheme = u.protocol.slice(0, -1).toLowerCase();
+  const p = String(pattern ?? '').trim();
+  if (p === '<all_urls>') return ALL_URLS_SCHEMES.has(scheme);
+  const m = /^(\*|[a-z][a-z0-9+.-]*):\/\/([^/]*)(\/.*)$/i.exec(p);
+  if (!m) return false;
+  const [, pScheme, pHostPort, pPath] = m;
+  if (pScheme === '*') { if (scheme !== 'http' && scheme !== 'https') return false; }
+  else if (pScheme.toLowerCase() !== scheme) return false;
+
+  if (scheme === 'file') {
+    if (pHostPort !== '' && pHostPort !== '*') return false;
+  } else {
+    const hp = /^(\*|(?:\*\.)?[^*:/[\]]+|\[[0-9a-f:.]+\])(?::(\*|\d+))?$/i.exec(pHostPort);
+    if (!hp) return false;
+    const pHost = hp[1].toLowerCase().replace(/\.$/, '');
+    const host = u.hostname.toLowerCase().replace(/\.$/, '');
+    if (pHost !== '*') {
+      if (pHost.startsWith('*.')) {
+        const base = pHost.slice(2);
+        if (host !== base && !host.endsWith('.' + base)) return false;
+      } else if (host !== pHost) return false;
+    }
+    if (hp[2] !== undefined && hp[2] !== '*' && (u.port || DEFAULT_PORTS[scheme] || '') !== hp[2]) return false;
+  }
+  return globMatch(pPath, u.pathname + u.search);
+}
+
+/** `*` matches any run of characters (including none); everything else is literal. */
+export function globMatch(glob, s) {
+  const parts = String(glob).split('*');
+  if (parts.length === 1) return s === glob;
+  if (!s.startsWith(parts[0])) return false;
+  let pos = parts[0].length;
+  for (let i = 1; i < parts.length - 1; i++) {
+    const at = s.indexOf(parts[i], pos);
+    if (at < 0) return false;
+    pos = at + parts[i].length;
+  }
+  const last = parts[parts.length - 1];
+  return s.length - pos >= last.length && s.endsWith(last);
+}
+
+/** True when a mod ({matches, excludes}) would run on `url`. */
+export function modAppliesTo(mod, url) {
+  const matches = Array.isArray(mod?.matches) ? mod.matches : [];
+  const excludes = Array.isArray(mod?.excludes) ? mod.excludes : [];
+  return matches.some((p) => matchesPattern(p, url)) && !excludes.some((p) => matchesPattern(p, url));
+}
+
+/** One compact line for a tool event: "ran webmods reload --tab 12", "edited sites/x.com/a.js". */
+export function toolLine(name, summary) {
+  const n = String(name ?? '').trim();
+  const s = String(summary ?? '').replace(/\s+/g, ' ').trim();
+  const verb = { Bash: 'ran', Edit: 'edited', MultiEdit: 'edited', Write: 'wrote', Read: 'read', Glob: 'searched', Grep: 'searched' }[n];
+  if (verb) return s ? `${verb} ${s}` : verb;
+  return s ? `${n || 'tool'} ${s}` : (n || 'tool');
+}
+
 // ---- run ----------------------------------------------------------------------------------------
 
 /**

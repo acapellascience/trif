@@ -466,3 +466,381 @@ test('recorder: caps bodies and entries; inactive on other hosts', async () => {
   assert.strictEqual(other.fetch, origFetch);
   assert.strictEqual(XHR.prototype.open, openBefore);
 });
+
+// ---- match patterns -----------------------------------------------------------------------------
+
+test('matchesPattern follows Chrome match-pattern rules', () => {
+  const yes = (p, u) => assert.ok(lib.matchesPattern(p, u), `${p} should match ${u}`);
+  const no = (p, u) => assert.ok(!lib.matchesPattern(p, u), `${p} should not match ${u}`);
+  // scheme: * is http or https only
+  yes('*://x.com/*', 'https://x.com/home');
+  yes('*://x.com/*', 'http://x.com/');
+  no('*://x.com/*', 'ftp://x.com/');
+  no('*://x.com/*', 'file:///x.com/');
+  yes('https://x.com/*', 'https://x.com/a');
+  no('https://x.com/*', 'http://x.com/a');
+  // host: exact, *.domain (domain itself and subdomains), *
+  no('*://x.com/*', 'https://www.x.com/');
+  no('*://x.com/*', 'https://notx.com/');
+  yes('*://*.x.com/*', 'https://x.com/');
+  yes('*://*.x.com/*', 'https://mobile.api.x.com/');
+  no('*://*.x.com/*', 'https://notx.com/');
+  yes('*://*/*', 'https://anything.example/');
+  yes('https://X.COM/*', 'https://x.com/');
+  // path glob, matched against path + query; fragments ignored
+  yes('*://x.com/*/status/*', 'https://x.com/jack/status/20');
+  no('*://x.com/*/status/*', 'https://x.com/jack');
+  yes('*://x.com/settings*', 'https://x.com/settings/account');
+  no('*://x.com/settings*', 'https://x.com/home?next=/settings');
+  yes('*://x.com/search?q=*', 'https://x.com/search?q=cats');
+  yes('*://x.com/', 'https://x.com/#frag');
+  no('*://x.com/', 'https://x.com/home');
+  yes('*://x.com/a*b*b', 'https://x.com/abb');
+  no('*://x.com/a*b*c', 'https://x.com/acb');
+  // ports: none in the pattern = any port
+  yes('http://localhost/*', 'http://localhost:3000/app');
+  yes('http://localhost:3000/*', 'http://localhost:3000/');
+  no('http://localhost:3000/*', 'http://localhost:4000/');
+  yes('https://x.com:443/*', 'https://x.com/');
+  yes('http://localhost:*/*', 'http://localhost:8080/');
+  yes('http://[::1]/*', 'http://[::1]:8000/');
+  // <all_urls>, file
+  yes('<all_urls>', 'https://x.com/');
+  yes('<all_urls>', 'file:///Users/me/a.html');
+  no('<all_urls>', 'chrome://extensions/');
+  no('<all_urls>', 'chrome-extension://abc/page.html');
+  yes('file:///Users/*', 'file:///Users/me/a.html');
+  // invalid patterns and URLs never match
+  no('x.com', 'https://x.com/');
+  no('*://x.com', 'https://x.com/');
+  no('*://x*.com/*', 'https://xy.com/');
+  no('*://x.com/*', 'not a url');
+  no(undefined, 'https://x.com/');
+});
+
+test('modAppliesTo honours matches and excludes', () => {
+  const m = { matches: ['*://x.com/*', '*://twitter.com/*'], excludes: ['*://x.com/settings*'] };
+  assert.ok(lib.modAppliesTo(m, 'https://x.com/home'));
+  assert.ok(lib.modAppliesTo(m, 'https://twitter.com/home'));
+  assert.ok(!lib.modAppliesTo(m, 'https://x.com/settings/privacy'));
+  assert.ok(!lib.modAppliesTo(m, 'https://example.com/'));
+  assert.ok(!lib.modAppliesTo({}, 'https://x.com/'));
+});
+
+test('siteForUrl and toolLine', () => {
+  assert.strictEqual(lib.siteForUrl('https://www.x.com/home'), 'x.com');
+  assert.strictEqual(lib.siteForUrl('https://News.YCombinator.com/'), 'news.ycombinator.com');
+  assert.strictEqual(lib.siteForUrl('http://localhost:3000/'), 'localhost');
+  assert.strictEqual(lib.siteForUrl('chrome://newtab/'), null);
+  assert.strictEqual(lib.siteForUrl('file:///a.html'), null);
+  assert.strictEqual(lib.siteForUrl(''), null);
+  assert.strictEqual(lib.toolLine('Bash', 'webmods reload --tab 12'), 'ran webmods reload --tab 12');
+  assert.strictEqual(lib.toolLine('Edit', 'sites/x.com/hide-reposts.js'), 'edited sites/x.com/hide-reposts.js');
+  assert.strictEqual(lib.toolLine('TodoWrite', ''), 'TodoWrite');
+  assert.strictEqual(lib.toolLine('Bash', 'a\n  b'), 'ran a b');
+});
+
+// ---- markdown -----------------------------------------------------------------------------------
+
+test('markdown: escapes everything before formatting', async () => {
+  const { renderMarkdown, escapeHtml } = await import('../extension/markdown.js');
+  assert.strictEqual(escapeHtml(`<a href="x">'&'</a>`), '&lt;a href=&quot;x&quot;&gt;&#39;&amp;&#39;&lt;/a&gt;');
+  const evil = renderMarkdown('<script>alert(1)</script> <img src=x onerror="alert(1)"> **<b>bold</b>**');
+  assert.ok(!/<script|<img|<b>/i.test(evil), evil);
+  assert.match(evil, /&lt;script&gt;/);
+  assert.match(evil, /<strong>&lt;b&gt;bold&lt;\/b&gt;<\/strong>/);
+  // code spans and blocks stay literal
+  assert.strictEqual(renderMarkdown('use `<div onclick=x>` here'), '<p>use <code>&lt;div onclick=x&gt;</code> here</p>');
+  assert.strictEqual(renderMarkdown('```html\n<p>**not bold**</p>\n```'), '<pre><code>&lt;p&gt;**not bold**&lt;/p&gt;</code></pre>');
+  assert.strictEqual(renderMarkdown('```\nunclosed <x>'), '<pre><code>unclosed &lt;x&gt;</code></pre>');
+  // only http(s)/mailto links; quotes can't break out of href
+  assert.ok(!renderMarkdown('[x](javascript:alert(1))').includes('<a'));
+  assert.ok(!renderMarkdown('[x](data:text/html,hi)').includes('<a'));
+  const q = renderMarkdown('[x](https://e.com/"onmouseover="alert(1))');
+  assert.ok(!/onmouseover="/.test(q) && !/<a [^>]*"alert/.test(q), q);
+  assert.match(q, /<a href="https:\/\/e\.com\/" target="_blank" rel="noopener noreferrer">/);
+  assert.strictEqual(
+    renderMarkdown('see [the docs](https://e.com/a?b=1&c=2).'),
+    '<p>see <a href="https://e.com/a?b=1&amp;c=2" target="_blank" rel="noopener noreferrer">the docs</a>.</p>',
+  );
+  assert.strictEqual(
+    renderMarkdown('go to https://e.com/x.'),
+    '<p>go to <a href="https://e.com/x" target="_blank" rel="noopener noreferrer">https://e.com/x</a>.</p>',
+  );
+  // placeholder characters in the input can't forge saved fragments
+  assert.ok(!renderMarkdown('\u00010\u0002 `a`').startsWith('<p><code>'));
+});
+
+test('markdown: paragraphs, lists, headings, emphasis', async () => {
+  const { renderMarkdown } = await import('../extension/markdown.js');
+  assert.strictEqual(renderMarkdown('one\ntwo\n\nthree'), '<p>one<br>two</p><p>three</p>');
+  assert.strictEqual(renderMarkdown('- a\n- **b**\n  more\n\n1. x\n2. y'),
+    '<ul><li>a</li><li><strong>b</strong><br>more</li></ul><ol><li>x</li><li>y</li></ol>');
+  assert.strictEqual(renderMarkdown('3. c'), '<ol start="3"><li>c</li></ol>');
+  assert.strictEqual(renderMarkdown('## Done'), '<h4>Done</h4>');
+  assert.strictEqual(renderMarkdown('*it* and 2*3*4'), '<p><em>it</em> and 2*3*4</p>');
+  assert.strictEqual(renderMarkdown('> note'), '<blockquote>note</blockquote>');
+  assert.strictEqual(renderMarkdown(''), '');
+});
+
+// ---- background: side panel relay ---------------------------------------------------------------
+
+function chromeEvent() {
+  const fns = [];
+  return {
+    fns,
+    addListener: (f) => fns.push(f),
+    removeListener: (f) => { const i = fns.indexOf(f); if (i >= 0) fns.splice(i, 1); },
+    emit: (...a) => fns.map((f) => f(...a)),
+  };
+}
+
+function mockPort(name) {
+  const port = { name, sent: [], onMessage: chromeEvent(), onDisconnect: chromeEvent() };
+  port.postMessage = (m) => { if (port.closed) throw new Error('Attempting to use a disconnected port object'); port.sent.push(structuredClone(m)); };
+  port.disconnect = () => { port.closed = true; };
+  return port;
+}
+
+let bgCount = 0;
+async function loadBackground({ storage = {} } = {}) {
+  const store = structuredClone(storage);
+  const natives = [];
+  const panelBehavior = [];
+  const created = [];
+  const chromeMock = {
+    runtime: {
+      id: lib.EXTENSION_ID, lastError: undefined,
+      getManifest: () => ({ version: '0.1.0' }),
+      getURL: (p) => `chrome-extension://${lib.EXTENSION_ID}/${p}`,
+      onStartup: chromeEvent(), onInstalled: chromeEvent(), onMessage: chromeEvent(), onConnect: chromeEvent(),
+      connectNative: () => { const p = mockPort('native'); natives.push(p); return p; },
+    },
+    storage: {
+      local: {
+        async get(keys) {
+          if (keys === null || keys === undefined) return structuredClone(store);
+          const out = {};
+          for (const k of [].concat(keys)) if (k in store) out[k] = structuredClone(store[k]);
+          return out;
+        },
+        async set(obj) { Object.assign(store, structuredClone(obj)); },
+        async remove(keys) { for (const k of [].concat(keys)) delete store[k]; },
+      },
+    },
+    userScripts: mockUserScripts(),
+    tabs: {
+      query: async () => [], create: async (o) => { created.push(o); return { id: 99, ...o }; },
+      update: async () => ({}), get: async () => ({}), onUpdated: chromeEvent(),
+    },
+    windows: { update: async () => ({}), getLastFocused: async () => ({ id: 1 }) },
+    sidePanel: { setPanelBehavior: async (o) => { panelBehavior.push(o); } },
+    scripting: {},
+    action: { onClicked: chromeEvent() },
+  };
+  globalThis.chrome = chromeMock;
+  Object.defineProperty(globalThis, 'navigator', { value: { userAgent: 'Chrome/156.0.0.0' }, configurable: true, writable: true });
+  const realConsole = { warn: console.warn, error: console.error, log: console.log };
+  Object.assign(console, quietConsole);
+  await import(`../extension/background.js?instance=${++bgCount}`);
+  await settle(20);
+  const native = natives[0];
+  native.emit = (m) => native.onMessage.emit(m);
+  const connectPanel = () => {
+    const p = mockPort('panel');
+    p.sender = { id: lib.EXTENSION_ID, url: `chrome-extension://${lib.EXTENSION_ID}/sidepanel.html` };
+    chromeMock.runtime.onConnect.emit(p);
+    p.ask = async (msg) => {
+      const reqId = Math.random();
+      p.onMessage.emit({ ...msg, reqId });
+      for (let i = 0; i < 200; i++) {
+        const r = p.sent.find((m) => m.type === 'reply' && m.reqId === reqId);
+        if (r) return r;
+        await tick();
+      }
+      throw new Error(`no reply to ${msg.type}`);
+    };
+    return p;
+  };
+  const restore = () => Object.assign(console, realConsole);
+  return { chrome: chromeMock, store, natives, native, connectPanel, panelBehavior, created, restore };
+}
+
+/** Answer the extension's next native request for `cmd` like the helper would. */
+async function answerNative(native, cmd, result, ok = true) {
+  let req;
+  for (let i = 0; i < 200 && !(req = native.sent.find((m) => m.type === 'request' && m.cmd === cmd && !m.answered)); i++) await tick();
+  assert.ok(req, `expected a native ${cmd} request`);
+  req.answered = true;
+  native.emit(ok ? { type: 'response', id: req.id, ok: true, result } : { type: 'response', id: req.id, ok: false, error: result });
+  return req;
+}
+
+test('background: install opens onboarding and sets the side panel to open on action click', async () => {
+  const bg = await loadBackground();
+  try {
+    bg.chrome.runtime.onInstalled.emit({ reason: 'install' });
+    await settle(10);
+    assert.deepStrictEqual(bg.panelBehavior.at(-1), { openPanelOnActionClick: true });
+    assert.strictEqual(bg.created.at(-1).url, `chrome-extension://${lib.EXTENSION_ID}/onboarding.html`);
+    bg.chrome.runtime.onInstalled.emit({ reason: 'update' });
+    await settle(10);
+    assert.strictEqual(bg.created.length, 1);
+    bg.chrome.runtime.onStartup.emit();
+    assert.strictEqual(bg.panelBehavior.length, 3);
+    assert.strictEqual(bg.chrome.action.onClicked.fns.length, 0);
+  } finally { bg.restore(); }
+});
+
+test('background: panel status includes helper state and mods with match patterns', async () => {
+  const mods = [mod('x.com/plain-x', { name: 'Plain X', matches: ['*://x.com/*'], excludes: ['*://x.com/settings*'] })];
+  const bg = await loadBackground({ storage: { mods } });
+  try {
+    const panel = bg.connectPanel();
+    let r = await panel.ask({ type: 'status' });
+    assert.strictEqual(r.ok, true);
+    assert.strictEqual(r.result.helper.connected, false);
+    bg.native.emit({ type: 'mods', mods });
+    await settle(20);
+    assert.ok(panel.sent.some((m) => m.type === 'statusChanged'));
+    r = await panel.ask({ type: 'status' });
+    assert.strictEqual(r.result.helper.connected, true);
+    assert.strictEqual(r.result.userScripts, true);
+    const [m] = r.result.mods;
+    assert.deepStrictEqual([m.id, m.name, m.file, m.matches, m.excludes, m.registered],
+      ['x.com/plain-x', 'Plain X', '/w/sites/x.com/plain-x.js', ['*://x.com/*'], ['*://x.com/settings*'], true]);
+    assert.deepStrictEqual(r.result.runs, []);
+  } finally { bg.restore(); }
+});
+
+test('background: agent.start becomes a native request; agentEvents reach panels and the chat', async () => {
+  const bg = await loadBackground();
+  try {
+    const panel = bg.connectPanel();
+    const other = bg.connectPanel();
+    const replyP = panel.ask({ type: 'agent.start', site: 'x.com', tabId: 12, url: 'https://x.com/home', prompt: 'hide reposts', agent: 'claude', model: 'opus' });
+    const req = await answerNative(bg.native, 'agent.start', { runId: 'r1' });
+    assert.deepStrictEqual(req.args, { site: 'x.com', url: 'https://x.com/home', tabId: 12, prompt: 'hide reposts', agent: 'claude', model: 'opus' });
+    assert.match(req.id, /^ext-/);
+    const reply = await replyP;
+    assert.deepStrictEqual([reply.ok, reply.result], [true, { runId: 'r1' }]);
+    await settle(10);
+    assert.deepStrictEqual(bg.store['chat:x.com'].run.runId, 'r1');
+    assert.deepStrictEqual(bg.store['chat:x.com'].messages.map((m) => [m.role, m.text]), [['user', 'hide reposts']]);
+
+    const events = [
+      { kind: 'session', sessionId: 's-1' },
+      { kind: 'tool', name: 'Bash', summary: 'webmods reload --tab 12' },
+      { kind: 'tool', name: 'Edit', summary: 'sites/x.com/hide-reposts.js' },
+      { kind: 'text', text: 'Done: reposts are hidden.' },
+      { kind: 'done', ok: true, result: 'Done: reposts are hidden.', costUsd: 0.12, changedFiles: ['sites/x.com/hide-reposts.js'], sessionId: 's-1' },
+    ];
+    for (const event of events) bg.native.emit({ type: 'agentEvent', runId: 'r1', event });
+    await settle(30);
+    for (const p of [panel, other]) {
+      assert.deepStrictEqual(p.sent.filter((m) => m.type === 'agentEvent').map((m) => [m.runId, m.event.kind]),
+        events.map((e) => ['r1', e.kind]));
+    }
+    const chat = bg.store['chat:x.com'];
+    assert.deepStrictEqual(chat.messages.map((m) => [m.role, m.text]), [
+      ['user', 'hide reposts'], ['tool', 'ran webmods reload --tab 12'], ['tool', 'edited sites/x.com/hide-reposts.js'],
+      ['assistant', 'Done: reposts are hidden.'],
+    ]);
+    assert.strictEqual(chat.sessionId, 's-1');
+    assert.strictEqual(chat.agent, 'claude');
+    assert.strictEqual(chat.run, null);
+    assert.deepStrictEqual([chat.last.ok, chat.last.changedFiles, chat.last.costUsd], [true, ['sites/x.com/hide-reposts.js'], 0.12]);
+
+    // the next message resumes the session
+    const second = panel.ask({ type: 'agent.start', site: 'x.com', tabId: 12, url: 'https://x.com/home', prompt: 'also likes', sessionId: 's-1', agent: 'claude' });
+    const req2 = await answerNative(bg.native, 'agent.start', { runId: 'r2' });
+    assert.strictEqual(req2.args.sessionId, 's-1');
+    await second;
+    // stop → native agent.stop; done without error → a muted "stopped" line
+    const stopP = panel.ask({ type: 'agent.stop', runId: 'r2' });
+    const stopReq = await answerNative(bg.native, 'agent.stop', { stopped: true });
+    assert.deepStrictEqual(stopReq.args, { runId: 'r2' });
+    assert.deepStrictEqual((await stopP).result, { stopped: true });
+    bg.native.emit({ type: 'agentEvent', runId: 'r2', event: { kind: 'done', ok: false, result: '', changedFiles: [] } });
+    await settle(20);
+    assert.deepStrictEqual(bg.store['chat:x.com'].messages.slice(-2).map((m) => [m.role, m.text]), [['user', 'also likes'], ['tool', 'stopped']]);
+  } finally { bg.restore(); }
+});
+
+test('background: agent.list is forwarded; failures are replied and recorded', async () => {
+  const bg = await loadBackground();
+  try {
+    const panel = bg.connectPanel();
+    const listP = panel.ask({ type: 'agent.list' });
+    await answerNative(bg.native, 'agent.list', { agents: [{ id: 'claude', name: 'Claude Code', available: true }], default: 'claude' });
+    assert.strictEqual((await listP).result.default, 'claude');
+
+    const startP = panel.ask({ type: 'agent.start', site: 'x.com', tabId: 1, url: 'https://x.com/', prompt: 'hi' });
+    await answerNative(bg.native, 'agent.start', 'already working on x.com', false);
+    const r = await startP;
+    assert.deepStrictEqual([r.ok, r.error], [false, 'already working on x.com']);
+    await settle(10);
+    const chat = bg.store['chat:x.com'];
+    assert.deepStrictEqual(chat.messages.map((m) => [m.role, m.text]), [['user', 'hi'], ['error', 'already working on x.com']]);
+    assert.strictEqual(chat.run, null);
+  } finally { bg.restore(); }
+});
+
+test('background: helper disconnect mid-run synthesizes error then done for the panel', async () => {
+  const bg = await loadBackground();
+  try {
+    const panel = bg.connectPanel();
+    const startP = panel.ask({ type: 'agent.start', site: 'x.com', tabId: 1, url: 'https://x.com/', prompt: 'go' });
+    await answerNative(bg.native, 'agent.start', { runId: 'r9' });
+    await startP;
+    bg.native.emit({ type: 'agentEvent', runId: 'r9', event: { kind: 'text', text: 'Looking…' } });
+    const pendingList = panel.ask({ type: 'agent.list' });
+    await settle(10);
+    bg.native.onDisconnect.emit();
+    const list = await pendingList;
+    assert.strictEqual(list.ok, false);
+    assert.match(list.error, /disconnected/);
+    await settle(20);
+    const evs = panel.sent.filter((m) => m.type === 'agentEvent' && m.runId === 'r9').map((m) => m.event);
+    assert.deepStrictEqual(evs.map((e) => e.kind), ['text', 'error', 'done']);
+    assert.match(evs[1].message, /disconnected/);
+    assert.strictEqual(evs[2].ok, false);
+    const chat = bg.store['chat:x.com'];
+    assert.strictEqual(chat.run, null);
+    assert.deepStrictEqual(chat.messages.map((m) => m.role), ['user', 'assistant', 'error']);
+    // not connected: start fails without reaching a helper
+    const r = await panel.ask({ type: 'agent.start', site: 'x.com', tabId: 1, url: 'https://x.com/', prompt: 'again' });
+    assert.strictEqual(r.ok, false);
+    assert.match(r.error, /webmods setup/);
+  } finally { bg.restore(); }
+});
+
+test('background: New chat clears the record and drops later events of the old run', async () => {
+  const bg = await loadBackground();
+  try {
+    const panel = bg.connectPanel();
+    const startP = panel.ask({ type: 'agent.start', site: 'x.com', tabId: 1, url: 'https://x.com/', prompt: 'go' });
+    await answerNative(bg.native, 'agent.start', { runId: 'r5' });
+    await startP;
+    const clearP = panel.ask({ type: 'chat.clear', site: 'x.com' });
+    await answerNative(bg.native, 'agent.stop', { stopped: true });
+    assert.strictEqual((await clearP).ok, true);
+    assert.ok(!('chat:x.com' in bg.store));
+    bg.native.emit({ type: 'agentEvent', runId: 'r5', event: { kind: 'text', text: 'late' } });
+    bg.native.emit({ type: 'agentEvent', runId: 'r5', event: { kind: 'done', ok: false } });
+    await settle(20);
+    assert.ok(!('chat:x.com' in bg.store));
+    assert.strictEqual(panel.sent.filter((m) => m.type === 'agentEvent').length, 2);
+  } finally { bg.restore(); }
+});
+
+test('background: runs left in storage by a previous service worker are marked interrupted', async () => {
+  const bg = await loadBackground({ storage: { 'chat:x.com': { sessionId: 's', agent: 'claude', messages: [{ role: 'user', text: 'go', time: 1 }], run: { runId: 'old', startedAt: 1 }, last: null } } });
+  try {
+    const chat = bg.store['chat:x.com'];
+    assert.strictEqual(chat.run, null);
+    assert.strictEqual(chat.sessionId, 's');
+    assert.deepStrictEqual(chat.messages.map((m) => m.role), ['user', 'error']);
+    assert.match(chat.messages[1].text, /Interrupted/);
+  } finally { bg.restore(); }
+});

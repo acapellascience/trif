@@ -70,6 +70,22 @@ function rcFileHint() {
   return '~/.profile';
 }
 
+// Merge config.json -> env.PATH = pathValue, keeping every other key. Leaves a broken file alone.
+function recordPath(home, pathValue) {
+  const file = path.join(home, 'config.json');
+  let config = {};
+  let text = null;
+  try { text = fs.readFileSync(file, 'utf8'); } catch { /* new */ }
+  if (text !== null && text.trim()) {
+    try { config = JSON.parse(text); } catch (e) { return { error: `${file} is not valid JSON (${e.message}); left it alone` }; }
+    if (!config || typeof config !== 'object' || Array.isArray(config)) return { error: `${file} is not a JSON object; left it alone` };
+  }
+  const env = config.env && typeof config.env === 'object' && !Array.isArray(config.env) ? config.env : {};
+  config.env = { ...env, PATH: pathValue };
+  const how = writeIfChanged(file, JSON.stringify(config, null, 2) + '\n');
+  return { error: null, how };
+}
+
 /**
  * opts: { home, browser, nativeDir, binDir, noLink }
  * Returns { ok, lines: [string], ws, manifests: [{browser, file}] }
@@ -95,6 +111,16 @@ function setup(opts = {}) {
   const claudeSrc = path.join(P.HELPER_DIR, 'workspace', 'CLAUDE.md');
   const claude = fs.existsSync(claudeSrc) ? fs.readFileSync(claudeSrc, 'utf8') : '@AGENTS.md\n';
   fs.writeFileSync(path.join(home, 'CLAUDE.md'), claude);
+
+  // Side panel agent runs: Claude Code's permissions for the workspace (overwritten every time), and
+  // this terminal's PATH, since Chrome starts the helper with a minimal one and agents live on PATH.
+  const agents = require('./agents');
+  fs.mkdirSync(path.join(home, '.claude'), { recursive: true });
+  fs.writeFileSync(path.join(home, '.claude', 'settings.json'), JSON.stringify(agents.CLAUDE_SETTINGS, null, 2) + '\n');
+  const rec = recordPath(home, process.env.PATH || '');
+  if (rec.error) say(`              couldn't record PATH for agents: ${rec.error}`);
+  const found = agents.listAgents(P.workspace(opts.home), { version: false }).agents;
+  say(`agents        ${found.map((a) => (a.available ? `${a.id} (${a.path})` : `${a.id} not found`)).join(', ')}`);
 
   // 2. Wrappers
   const nodePath = pickNodePath();
@@ -179,4 +205,4 @@ function setup(opts = {}) {
   return { ok, lines, ws, manifests, nodePath };
 }
 
-module.exports = { setup, hostWrapperContent, cliWrapperContent, manifestFor, pickNodePath, shq, isExecutable };
+module.exports = { setup, recordPath, hostWrapperContent, cliWrapperContent, manifestFor, pickNodePath, shq, isExecutable };

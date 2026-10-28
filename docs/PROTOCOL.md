@@ -200,6 +200,7 @@ the raw result as JSON.
 Newline-delimited JSON on `~/.webmods/helper.sock` (mode 0600). Request `{id, cmd, args}` →
 response `{id, ok, result|error}`. Helper-local commands (`mods`, `ping`) are answered by the helper;
 everything else is forwarded to the extension. Requests time out after `args.timeout + 5000` ms (default 35 s).
+Agent commands (`agent.list`/`agent.start`/`agent.stop`) are helper-local too; after answering `agent.start` with `{runId}`, the helper streams `{type:"agentEvent", runId, event}` lines (no `id`) on that same connection until the `done` event.
 If the socket file exists but nothing listens, the next host to start removes it. If a second host starts
 (a second Chrome profile) while one is live, it logs that and serves only mod syncing for its profile.
 

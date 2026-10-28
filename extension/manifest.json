@@ -7,6 +7,7 @@
   "minimum_chrome_version": "135",
   "background": { "service_worker": "background.js", "type": "module" },
   "action": { "default_title": "WebMods" },
-  "permissions": ["userScripts", "storage", "tabs", "nativeMessaging", "scripting"],
+  "side_panel": { "default_path": "sidepanel.html" },
+  "permissions": ["userScripts", "storage", "tabs", "nativeMessaging", "scripting", "sidePanel"],
   "host_permissions": ["<all_urls>"]
 }

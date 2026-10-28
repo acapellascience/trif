@@ -163,11 +163,36 @@ async function doctor(opts = {}) {
     for (const w of warnings) add('warn', `mod ${w.id}: ${w.warning}`, 'fix the header (see AGENTS.md)');
   }
 
+  // Coding agents for the side panel (optional: mods work without them).
+  const agents = require('./agents');
+  const listed = agents.listAgents(ws);
+  const env = agents.agentEnv(ws);
+  const termDirs = String(process.env.PATH || '').split(path.delimiter).filter(Boolean);
+  const { findExecutable } = require('./agents/util');
+  for (const a of listed.agents) {
+    const adapter = agents.getAdapter(a.id);
+    const label = `${a.name}${adapter.note ? ` (${adapter.note})` : ''}`;
+    const another = listed.agents.some((x) => x.available);
+    if (!a.available) {
+      const here = findExecutable(adapter.binary, termDirs);
+      if (here) add('warn', `${label} is at ${here}, but the helper won't find it there`, 'run webmods setup in this terminal (it records your PATH for the helper)');
+      else if (another) add('info', `${label}: not found (optional)`);
+      else add('warn', `${label}: not found (the side panel needs a coding agent)`, adapter.missing);
+      continue;
+    }
+    add('ok', `${label} ${a.version || ''} (${a.path})`.replace(/ {2,}/g, ' '));
+    if (adapter.loginStatus) {
+      const st = adapter.loginStatus({ path: a.path, env, cwd: fs.existsSync(ws.home) ? ws.home : undefined });
+      if (st.loggedIn === true) add('ok', `${a.name} is logged in${st.detail ? ` (${st.detail})` : ''}`);
+      else if (st.loggedIn === false) add('warn', `${a.name} isn't logged in, so the side panel can't use it`, adapter.loginFix);
+    }
+  }
+
   return { ok: !checks.some((c) => c.status === 'fail'), checks };
 }
 
 function formatDoctor({ ok, checks }) {
-  const tag = { ok: 'ok  ', warn: 'warn', fail: 'FAIL' };
+  const tag = { ok: 'ok  ', warn: 'warn', fail: 'FAIL', info: '-   ' };
   const out = [];
   for (const c of checks) {
     out.push(`${tag[c.status]}  ${c.title}`);

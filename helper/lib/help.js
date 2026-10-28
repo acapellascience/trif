@@ -12,6 +12,8 @@ const COMMANDS = {
 touches sites/), writes bin/webmods-host and bin/webmods wrappers with an absolute node path, writes
 the native messaging host manifest for each browser (default: every browser whose profile folder
 exists), and symlinks /usr/local/bin/webmods when that folder is writable. Prints next steps.
+It also records this terminal's PATH in config.json (env.PATH) so the helper can find your coding
+agent for the side panel, and writes .claude/settings.json (what Claude Code may do in the workspace).
 Run it again after moving the repo or upgrading Node.`,
     examples: ['webmods setup', 'webmods setup --browser brave', 'webmods setup --browser all'],
   },
@@ -27,7 +29,8 @@ Run it again after moving the repo or upgrading Node.`,
     summary: 'diagnose setup problems, printing a fix for each',
     details: `Checks Node, the workspace, the host wrapper, each browser's native host manifest, the CLI on
 PATH, whether the helper is reachable, whether the extension said hello, the "Allow User Scripts"
-switch, and every mod file. Exit code 1 if anything failed. Fix problems top-down.`,
+switch, every mod file, and which coding agents the side panel can use (and whether Claude Code is
+logged in). Exit code 1 if anything failed. Fix problems top-down.`,
     examples: ['webmods doctor'],
   },
   tabs: {
@@ -133,6 +136,21 @@ the header plus helpers for injecting CSS and handling elements that appear late
     details: 'Run without an argument to list the available examples. --force overwrites an existing mod.',
     examples: ['webmods install-example x.com/plain-x'],
   },
+  agent: {
+    usage: 'webmods agent list | agent run [opts] "<prompt>"',
+    summary: 'list coding agents the side panel can use, or run one like the side panel does',
+    details: `Options for agent run: --agent claude|codex, --tab ID, --url URL, --session ID, --model NAME.
+
+agent list shows which agents the helper can find (Claude Code, Codex) and their versions; it
+works without Chrome. agent run starts the agent headless in the workspace through the helper, exactly
+like the side panel, and prints what it does as it goes: its replies, one line per tool call, then a
+summary with the session id (pass it to --session to continue the conversation) and the mod files it
+changed. Here --url is the page URL the user is looking at (not a tab selector); without --url the
+helper asks Chrome for the URL of --tab, or of the active tab. Ctrl-C stops the agent.
+--json prints one JSON event per line. Exit code 1 if the run failed.`,
+    examples: ['webmods agent list', 'webmods agent run --url https://x.com/home "hide the trending sidebar"',
+      'webmods agent run --tab 12 --session 1b2c… "also hide Who to follow"'],
+  },
   help: {
     usage: 'webmods help [command]',
     summary: 'this help, or details and examples for one command',
@@ -144,6 +162,7 @@ const GROUPS = [
   ['Setup and diagnosis', ['setup', 'status', 'doctor']],
   ['Mod files (work without Chrome)', ['mods', 'new', 'install-example']],
   ['Pages (need Chrome running with the extension)', ['tabs', 'run', 'reload', 'open', 'navigate', 'text', 'screenshot', 'record', 'requests', 'request', 'errors', 'logs']],
+  ['Agent runs (what the side panel does)', ['agent']],
   ['', ['help']],
 ];
 

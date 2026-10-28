@@ -6,12 +6,12 @@
 const fs = require('fs');
 const path = require('path');
 const P = require('./lib/paths');
-const { request, HelperError } = require('./lib/client');
+const { request, streamRun, HelperError } = require('./lib/client');
 const { scanMods, planModsMessage, isIgnoredName } = require('./lib/mods');
 const { COMMANDS, mainHelp, commandHelp } = require('./lib/help');
 
 const VALUE_FLAGS = new Set(['--tab', '--url', '-o', '--out', '--output', '--filter', '--limit', '-f', '--file',
-  '--browser', '--home', '--native-dir', '--bin-dir', '--timeout']);
+  '--browser', '--home', '--native-dir', '--bin-dir', '--timeout', '--agent', '--session', '--model']);
 const BOOL_FLAGS = new Set(['--json', '--hard', '--help', '-h', '--force', '--no-link']);
 const ALIASES = { '--out': '-o', '--output': '-o', '--file': '-f', '-h': '--help' };
 
@@ -423,6 +423,13 @@ const handlers = {
     out(file);
   },
 
+  async agent(ctx, pos) {
+    const sub = pos.shift() || 'list';
+    if (sub === 'list') return agentList(ctx);
+    if (sub === 'run') return agentRun(ctx, pos);
+    throw new UsageError(`unknown agent command "${sub}" (use: agent list | agent run)`);
+  },
+
   async 'install-example'(ctx, pos) {
     const dir = P.examplesDir();
     const available = () => {
@@ -461,6 +468,89 @@ const handlers = {
     out(dest);
   },
 };
+
+// ---------------------------------------------------------------- agent commands
+
+async function agentList(ctx) {
+  let r;
+  try {
+    r = await ctx.call('agent.list', {}, 20000);
+  } catch (e) {
+    if (!(e instanceof HelperError && e.kind === 'no-helper')) throw e;
+    r = require('./lib/agents').listAgents(ctx.ws); // same lookup the helper does
+  }
+  if (ctx.json) return printJson(r);
+  for (const a of r.agents) {
+    const what = a.available ? `${a.name}${a.version ? ' ' + a.version : ''}` : `${a.name}: not found`;
+    const extra = [a.path, a.note, a.id === r.default && a.available ? 'default' : ''].filter(Boolean).join('  ');
+    out(`${pad(a.id, 8)}${pad(what, 26)}${extra}`);
+  }
+  if (!r.agents.some((a) => a.available)) {
+    out('\nNo agent found. Install Claude Code (or Codex), then run `webmods setup` in that terminal so the helper can find it.');
+  }
+}
+
+async function agentRun(ctx, pos) {
+  let prompt;
+  if (pos.length === 1 && pos[0] === '-') prompt = await readStdin();
+  else prompt = pos.join(' ');
+  if (!prompt.trim()) throw new UsageError('missing prompt: webmods agent run [--tab ID] [--url URL] "<what to change>"');
+  const args = { prompt };
+  if (ctx.opts['--agent']) args.agent = ctx.opts['--agent'];
+  if (ctx.opts['--model']) args.model = ctx.opts['--model'];
+  if (ctx.opts['--session']) args.sessionId = ctx.opts['--session'];
+  if (ctx.opts['--tab'] !== undefined) args.tabId = tabArgs(ctx.opts).tab;
+  if (ctx.opts['--url'] !== undefined) {
+    args.url = normalizeUrl(ctx.opts['--url']);
+  } else {
+    // No URL: ask Chrome which page that is (the given tab, or the active one).
+    let tabs;
+    try { tabs = await ctx.call('tabs', { timeout: 5000 }); } catch (e) {
+      if (e.kind === 'no-helper') throw e;
+      throw new UsageError(`pass --url <page URL> (couldn't ask Chrome for the current tab: ${e.message})`);
+    }
+    const t = (Array.isArray(tabs) ? tabs : []).find((x) => (args.tabId !== undefined ? x.id === args.tabId : x.active));
+    if (!t) throw new UsageError(args.tabId !== undefined ? `no tab ${args.tabId} (see webmods tabs)` : 'no active tab found: pass --url <page URL>');
+    args.url = t.url;
+    args.tabId = t.id;
+  }
+  args.site = require('./lib/agents').hostOf(args.url);
+  if (!args.site) throw new UsageError(`"${args.url}" doesn't look like a page URL`);
+
+  let runId = null;
+  let interrupts = 0;
+  const onSigint = () => {
+    if (++interrupts > 1 || !runId) process.exit(130);
+    process.stderr.write('stopping the agent (Ctrl-C again to quit now)…\n');
+    request(ctx.ws.sock, 'agent.stop', { runId }, 5000).catch(() => {});
+  };
+  process.on('SIGINT', onSigint);
+  let done;
+  try {
+    done = await streamRun(ctx.ws.sock, args, {
+      onStart: (r) => {
+        runId = r.runId;
+        if (ctx.json) out(JSON.stringify({ runId }));
+      },
+      onEvent: (ev) => {
+        if (ctx.json) return out(JSON.stringify(ev));
+        if (ev.kind === 'text') { out(String(ev.text).trim()); out(''); }
+        else if (ev.kind === 'tool') out(`  [${ev.name}]${ev.summary ? ' ' + ev.summary : ''}`);
+        else if (ev.kind === 'error') process.stderr.write(`error: ${ev.message}\n`);
+      },
+    });
+  } finally {
+    process.removeListener('SIGINT', onSigint);
+  }
+  if (!ctx.json) {
+    const status = done.ok ? 'ok' : done.stopped ? 'stopped' : 'failed';
+    out(`done: ${status}${typeof done.costUsd === 'number' ? ` ($${done.costUsd.toFixed(4)})` : ''}`);
+    if (done.sessionId) out(`session: ${done.sessionId}   (continue: webmods agent run --session ${done.sessionId} --url ${args.url} "...")`);
+    const files = Array.isArray(done.changedFiles) ? done.changedFiles : [];
+    out(files.length ? `changed: ${files.join(', ')}` : 'changed: (no files)');
+  }
+  if (!done.ok) process.exitCode = 1;
+}
 
 const NO_HELPER_MESSAGE = `webmods: the helper isn't running, so page commands can't reach Chrome.
 Open Chrome (with the WebMods extension installed). If Chrome is already open, run: webmods doctor`;

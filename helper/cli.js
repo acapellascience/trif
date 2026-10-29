@@ -209,6 +209,7 @@ const handlers = {
     }
     if (stErr) lines.push(`status        the extension didn't answer: ${stErr}`);
     const registered = new Map(((st && st.mods) || []).map((m) => [m.id, !!m.registered]));
+    const off = new Set(((st && st.mods) || []).filter((m) => m.enabled === false).map((m) => m.id));
     const applyErrors = new Map((((info.modsApplied || {}).errors) || []).map((e) => [e.id, e.error]));
     const helperErrors = new Map((info.modErrors || []).map((e) => [e.id, e.error]));
     const ids = [...new Set([...(info.mods || []), ...registered.keys()])].sort();
@@ -216,6 +217,7 @@ const handlers = {
     for (const id of ids) {
       let s;
       if (helperErrors.has(id)) s = `NOT SENT: ${helperErrors.get(id)}`;
+      else if (off.has(id)) s = 'off';
       else if (applyErrors.has(id)) s = `NOT REGISTERED: ${applyErrors.get(id)}`;
       else if (!st) s = '?';
       else if (!registered.has(id)) s = 'not known to the extension yet';
@@ -223,9 +225,13 @@ const handlers = {
       lines.push(`  ${pad(id, 40)} ${s}`);
     }
     for (const [id, err] of helperErrors) if (!ids.includes(id)) lines.push(`  ${pad(id, 40)} NOT SENT: ${err}`);
+    if (off.size) lines.push(`              off = switched off by the user (webmods enable <id> turns one back on)`);
     if (st) lines.push(`recording     ${(st.recording || []).length ? st.recording.join(', ') : '(none)'}`);
     out(lines.join('\n'));
   },
+
+  async enable(ctx, pos) { return switchMod(ctx, pos, true); },
+  async disable(ctx, pos) { return switchMod(ctx, pos, false); },
 
   async tabs(ctx) {
     const tabs = await ctx.call('tabs');
@@ -379,10 +385,11 @@ const handlers = {
     const { mods, problems, warnings } = scanMods(ctx.ws.modsDir);
     const plan = planModsMessage(mods);
     const errors = [...problems, ...plan.errors];
+    const enabled = await knownEnabled(ctx);
     if (ctx.json) {
       return printJson({
         modsDir: ctx.ws.modsDir,
-        mods: mods.map(({ code, ...m }) => m),
+        mods: mods.map(({ code, ...m }) => (enabled.has(m.id) ? { ...m, enabled: enabled.get(m.id) } : m)),
         errors,
         warnings,
       });
@@ -394,7 +401,8 @@ const handlers = {
     }
     const errById = new Map(errors.map((e) => [e.id, e.error]));
     for (const m of mods) {
-      out(m.id + (m.name !== path.basename(m.file, '.js') ? `  (${m.name})` : ''));
+      out(m.id + (m.name !== path.basename(m.file, '.js') ? `  (${m.name})` : '') + (enabled.get(m.id) === false ? '  [off]' : ''));
+      if (enabled.get(m.id) === false) out(`  switched off by the user (not running; webmods enable ${m.id} turns it on)`);
       if (m.description) out(`  ${m.description}`);
       out(`  matches: ${m.matches.join(' ')}`);
       if (m.excludes.length) out(`  excludes: ${m.excludes.join(' ')}`);
@@ -469,6 +477,38 @@ const handlers = {
     out(dest);
   },
 };
+
+// ---------------------------------------------------------------- mod switches
+
+// "x.com/a", "sites/x.com/a.js", "~/.webmods/sites/x.com/a.js" → "x.com/a".
+function modId(arg) {
+  const s = String(arg || '').trim().replace(/\\/g, '/').replace(/\.js$/, '');
+  const m = /(?:^|\/)sites\/([^/]+\/[^/]+)$/.exec(s);
+  const id = m ? m[1] : s;
+  if (!/^[^/\s]+\/[^/\s]+$/.test(id)) throw new UsageError(`"${arg}" isn't a mod id: use <site>/<mod>, e.g. x.com/hide-reposts (see webmods status)`);
+  return id;
+}
+
+async function switchMod(ctx, pos, enabled) {
+  if (!pos[0]) throw new UsageError('missing mod id');
+  const id = modId(pos[0]);
+  const r = await ctx.call('mod.enable', { id, enabled, wait: true, ...tabArgs(ctx.opts) });
+  if (ctx.json) return printJson(r);
+  const site = id.split('/')[0];
+  out(`${id} is ${enabled ? 'on' : 'off'}`);
+  if (r && r.reloaded != null) out(`reloaded tab ${r.reloaded}`);
+  else out(`It applies from the next page load: reload open ${site} tabs to see it (webmods reload --url ${site}).`);
+}
+
+// When the extension can be asked: Map(mod id → enabled). Otherwise (no helper, no answer) empty.
+async function knownEnabled(ctx) {
+  try {
+    const st = await ctx.call('status', { timeout: 2000 }, 3000);
+    return new Map(((st && st.mods) || []).map((m) => [m.id, m.enabled !== false]));
+  } catch {
+    return new Map();
+  }
+}
 
 // ---------------------------------------------------------------- agent commands
 

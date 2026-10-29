@@ -25,6 +25,7 @@ async function getShared() {
   const ext = new FakeExtension({ home, env: { WEBMODS_TIMEOUT_GRACE: '300' } });
   cleanups.push(() => ext.close());
   ext.hello();
+  const off = new Set(); // mods switched off through mod.enable
   ext.handlers = {
     run: (args) => {
       if (args.code.includes('throw')) throw new Error('Error: boom\n    at <anonymous>:1:7');
@@ -37,7 +38,16 @@ async function getShared() {
       { id: 11, windowId: 1, active: true, url: 'https://example.com/', title: 'Example' },
       { id: 12, windowId: 1, active: false, url: 'https://x.com/home', title: 'Home / X' },
     ],
-    status: () => ({ userScripts: true, chrome: '140.0.0.0', version: '0.1.0', mods: [{ id: 'example.com/banner', registered: true }], recording: ['x.com'] }),
+    status: () => ({
+      userScripts: true, chrome: '140.0.0.0', version: '0.1.0',
+      mods: [{ id: 'example.com/banner', registered: !off.has('example.com/banner'), enabled: !off.has('example.com/banner') }],
+      recording: ['x.com'],
+    }),
+    'mod.enable': (args) => {
+      if (args.id !== 'example.com/banner') throw new Error(`no mod ${args.id} (run \`webmods status\` to list mods)`);
+      if (args.enabled) off.delete(args.id); else off.add(args.id);
+      return { id: args.id, enabled: args.enabled, reloaded: args.tab === 11 ? 11 : null };
+    },
     screenshot: () => ({ dataUrl: `data:image/png;base64,${PNG_1PX}` }),
     reload: (args) => ({ url: args.url ? `https://${args.url}/` : 'https://example.com/' }),
     open: (args) => ({ id: 99, url: args.to }),
@@ -129,7 +139,7 @@ test('help: lists every command and gives per-command help', async () => {
   const r = await runCli(['help'], { home });
   assert.equal(r.code, 0);
   for (const c of ['setup', 'status', 'doctor', 'tabs', 'run', 'reload', 'open', 'navigate', 'text', 'screenshot',
-    'record', 'requests', 'request', 'errors', 'logs', 'mods', 'new', 'install-example', 'help']) {
+    'record', 'requests', 'request', 'errors', 'logs', 'mods', 'new', 'install-example', 'enable', 'disable', 'help']) {
     assert.match(r.stdout, new RegExp(`^  ${c}\\b`, 'm'), `help mentions ${c}`);
   }
   assert.match(r.stdout, /--url/);
@@ -252,6 +262,61 @@ test('tabs, status, reload, open, navigate, text, record, errors, logs', async (
   assert.match(r.stdout, /webmods:\/\/example\.com\/banner\.js:3:9/);
   r = await runCli(['logs'], { home });
   assert.match(r.stdout, /example\.com\/banner hello 42/);
+});
+
+test('enable / disable: mod.enable through the helper; status shows off; mods marks [off]', async () => {
+  const { home, ext } = await getShared();
+  let r = await runCli(['disable', 'example.com/banner', '--tab', '11'], { home });
+  assert.equal(r.code, 0, r.stderr);
+  assert.equal(r.stdout, 'example.com/banner is off\nreloaded tab 11\n');
+  assert.deepEqual(lastRequest(ext, 'mod.enable').args, { id: 'example.com/banner', enabled: false, wait: true, tab: 11 });
+
+  r = await runCli(['status'], { home });
+  assert.match(r.stdout, /example\.com\/banner\s+off\n/);
+  assert.match(r.stdout, /off = switched off by the user/);
+  r = await runCli(['mods'], { home });
+  assert.match(r.stdout, /^example\.com\/banner {2}\(Banner\) {2}\[off\]$/m);
+  assert.match(r.stdout, /switched off by the user \(not running; webmods enable example\.com\/banner turns it on\)/);
+  r = await runCli(['mods', '--json'], { home });
+  assert.equal(JSON.parse(r.stdout).mods[0].enabled, false);
+
+  // a file path works as the id; no reload → says how to see it
+  r = await runCli(['enable', path.join(home, 'sites', 'example.com', 'banner.js')], { home });
+  assert.equal(r.code, 0, r.stderr);
+  assert.match(r.stdout, /^example\.com\/banner is on\n/);
+  assert.match(r.stdout, /reload open example\.com tabs to see it \(webmods reload --url example\.com\)/);
+  assert.deepEqual(lastRequest(ext, 'mod.enable').args, { id: 'example.com/banner', enabled: true, wait: true });
+  r = await runCli(['status'], { home });
+  assert.match(r.stdout, /example\.com\/banner\s+registered/);
+  assert.doesNotMatch(r.stdout, /switched off/);
+  r = await runCli(['mods'], { home });
+  assert.doesNotMatch(r.stdout, /\[off\]/);
+  r = await runCli(['enable', 'example.com/banner', '--json'], { home });
+  assert.deepEqual(JSON.parse(r.stdout), { id: 'example.com/banner', enabled: true, reloaded: null });
+
+  r = await runCli(['disable', 'nope.com/x'], { home });
+  assert.equal(r.code, 1);
+  assert.match(r.stderr, /no mod nope\.com\/x/);
+  r = await runCli(['disable', 'banner'], { home });
+  assert.equal(r.code, 1);
+  assert.match(r.stderr, /isn't a mod id/);
+  assert.match(r.stderr, /usage: webmods disable <site>\/<mod> \[TAB\]/);
+  r = await runCli(['enable'], { home });
+  assert.equal(r.code, 1);
+  r = await runCli(['help', 'disable'], { home });
+  assert.match(r.stdout, /without deleting or editing it/);
+  assert.match(r.stdout, /TAB: --tab/);
+});
+
+test('enable / disable: exit 2 without the helper; mods says nothing about switches then', async () => {
+  const home = tempDir();
+  writeMod(home, 'x.com', 'plain.js', '1');
+  let r = await runCli(['disable', 'x.com/plain'], { home });
+  assert.equal(r.code, 2);
+  r = await runCli(['mods'], { home });
+  assert.equal(r.code, 0);
+  assert.doesNotMatch(r.stdout, /off/);
+  assert.equal(JSON.parse((await runCli(['mods', '--json'], { home })).stdout).mods[0].enabled, undefined);
 });
 
 test('requests and request: table, pretty JSON bodies, -o', async () => {

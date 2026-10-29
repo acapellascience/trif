@@ -5,6 +5,7 @@
 
 import { siteForUrl, modAppliesTo, isLoginUrl } from './lib.js';
 import { renderMarkdown, MARKDOWN_ELEMENTS, MARKDOWN_ATTRIBUTES } from './markdown.js';
+import { modSwitch, syncSwitches, shownEnabled, switchError, enabledIn, onSwitchChange } from './modswitch.js';
 
 const $ = (sel) => document.querySelector(sel);
 const chatKey = (site) => `chat:${site}`;
@@ -30,6 +31,8 @@ const view = {
   settings: { agent: '', model: '' },
   rendered: { site: null, count: 0, first: null },
   modsOpenFor: null,         // site whose mods <details> open state was last set automatically
+  modsKey: null,             // which mods the list was last built for (switches update in place)
+  disabled: {},              // chrome.storage.local `disabled`: mods switched off (by anyone: panel, agent, CLI)
   myRuns: new Set(),         // runs this panel started
   dismissedReload: new Set(),
   loadedAt: new Map(),       // tabId → last time a load completed (seen while the panel was open)
@@ -128,8 +131,9 @@ async function init() {
   connectPort();
   const win = await chrome.windows.getCurrent();
   view.windowId = win.id;
-  const stored = await chrome.storage.local.get('settings');
+  const stored = await chrome.storage.local.get(['settings', 'disabled']);
   view.settings = { agent: '', model: '', ...(stored.settings || {}) };
+  view.disabled = stored.disabled || {};
   renderSettings();
 
   chrome.tabs.onActivated.addListener(({ tabId, windowId }) => {
@@ -151,6 +155,10 @@ async function init() {
       view.settings = { agent: '', model: '', ...(changes.settings.newValue || {}) };
       renderSettings();
       render();
+    }
+    if (changes.disabled) { // a switch flipped here, on the setup page, or by an agent / the CLI
+      view.disabled = changes.disabled.newValue || {};
+      renderMods();
     }
   });
 
@@ -516,28 +524,68 @@ function cancelLogin() {
   render();
 }
 
+let modLabelSeq = 0;
+onSwitchChange(() => renderMods());
+
 function renderMods() {
   const { site, status, tab } = view;
   const mods = site && status ? status.mods.filter((m) => modAppliesTo(m, tab.url)) : [];
   ui.mods.hidden = mods.length === 0;
-  if (!mods.length) return;
+  if (!mods.length) { view.modsKey = null; ui.modList.replaceChildren(); return; }
   ui.modsCount.textContent = `(${mods.length})`;
-  const items = mods.map((m) => {
-    const li = el('li');
-    const name = el('div', 'mod-name', m.name);
-    if (!m.registered) name.append(el('span', 'tag', status.userScripts ? 'not active' : 'paused'));
-    li.append(name, el('div', 'mod-file', (m.file || m.id).split('/').pop()));
-    li.title = m.file || m.id;
-    if (m.error) li.append(el('div', 'mod-err', m.error));
-    return li;
-  });
-  ui.modList.replaceChildren(...items);
+  // Rebuilt only when the set of mods changes; everything else updates in place, so a focused switch
+  // keeps focus through status refreshes.
+  const key = JSON.stringify(mods.map((m) => [m.id, m.name, m.file]));
+  if (key !== view.modsKey) {
+    view.modsKey = key;
+    ui.modList.replaceChildren(...mods.map(modItem));
+  }
+  const byId = new Map(mods.map((m) => [m.id, m]));
+  for (const li of ui.modList.children) updateModItem(li, byId.get(li.dataset.mod));
+  syncSwitches(ui.modList, (id) => enabledIn(view.disabled, id));
   // Open by default for an empty chat, collapsed once there's a conversation; then leave it to the user.
   const autoKey = `${site}:${view.chat.messages.length > 0}`;
   if (view.modsOpenFor !== autoKey) {
     ui.mods.open = view.chat.messages.length === 0;
     view.modsOpenFor = autoKey;
   }
+}
+
+function modItem(m) {
+  const li = el('li');
+  li.dataset.mod = m.id;
+  li.title = m.file || m.id;
+  const labelId = `mod-name-${++modLabelSeq}`;
+  const name = el('div', 'mod-name');
+  const label = el('span', null, m.name);
+  label.id = labelId;
+  const tag = el('span', 'tag');
+  tag.hidden = true;
+  name.append(label, tag);
+  const main = el('div', 'mod-main');
+  main.append(name, el('div', 'mod-file', (m.file || m.id).split('/').pop()));
+  const row = el('div', 'mod-row');
+  row.append(main, modSwitch(document, {
+    id: m.id, enabled: enabledIn(view.disabled, m.id), labelId,
+    apply: (id, enabled) => request({ type: 'mod.enable', id, enabled, tab: view.tab?.id }),
+  }));
+  const err = el('div', 'mod-err');
+  err.hidden = true;
+  li.append(row, err);
+  return li;
+}
+
+function updateModItem(li, m) {
+  if (!m) return;
+  const on = shownEnabled(m.id, enabledIn(view.disabled, m.id));
+  li.classList.toggle('off', !on);
+  // "not active"/"paused" only once the status agrees the mod is on (not mid-switch).
+  const tag = li.querySelector('.tag');
+  tag.textContent = on && m.enabled !== false && !m.registered ? (view.status.userScripts ? 'not active' : 'paused') : '';
+  tag.hidden = !tag.textContent;
+  const err = li.querySelector('.mod-err');
+  err.textContent = switchError(m.id) || (on && m.error) || '';
+  err.hidden = !err.textContent;
 }
 
 function renderMessages() {

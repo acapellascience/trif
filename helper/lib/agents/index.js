@@ -111,7 +111,8 @@ function contextText({ url, tabId }) {
     ? `They're looking at ${url}${tabId != null ? ` (tab ${tabId}): pass \`--tab ${tabId}\` to webmods commands` : ''}.`
     : "They didn't say which page they're on: run `webmods tabs` if you need it.";
   return "You're running inside the WebMods side panel in the user's Chrome. " + where +
-    ' Follow AGENTS.md. Reply briefly in plain language; your replies appear in a narrow chat panel.' +
+    ' Follow AGENTS.md. Mods can be switched off and on with `webmods disable/enable <site>/<mod>`; `webmods status` shows which are on.' +
+    ' Reply briefly in plain language; your replies appear in a narrow chat panel.' +
     " You can't ask follow-up questions mid-task: if something's unclear, make a sensible choice or end your turn with a question.";
 }
 

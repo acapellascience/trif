@@ -239,6 +239,8 @@ test('context text names the URL and tab; diffSnapshots catches edits, adds and 
   const t = agents.contextText({ url: 'https://x.com/home', tabId: 7 });
   assert.match(t, /looking at https:\/\/x\.com\/home \(tab 7\): pass `--tab 7`/);
   assert.match(t, /Follow AGENTS\.md/);
+  assert.match(t, /webmods disable\/enable/);
+  assert.match(t, /`webmods status` shows which are on/);
   assert.match(agents.reminderText({ url: 'https://x.com/', tabId: 7 }), /x\.com.*--tab 7/);
   const before = new Map([['sites/a', '1'], ['sites/b', '2'], ['sites/c', '3']]);
   const after = new Map([['sites/a', '1'], ['sites/b', 'X'], ['sites/d', '4']]);

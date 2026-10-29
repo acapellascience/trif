@@ -70,19 +70,34 @@ export function quickHash(s) {
 const errMsg = (e) => String(e?.message ?? e);
 
 /**
- * Make chrome.userScripts (`us`) contain exactly the runtime plus `mods`.
+ * The switched-off set from chrome.storage.local `disabled` ({"<mod id>": true}), cleaned up: only
+ * `true` entries count. Ids of mods that no longer exist may linger; they're harmless and never shown.
+ */
+export function normalizeDisabled(value) {
+  const out = {};
+  if (value && typeof value === 'object' && !Array.isArray(value)) {
+    for (const [id, off] of Object.entries(value)) if (off === true) out[id] = true;
+  }
+  return out;
+}
+
+/**
+ * Make chrome.userScripts (`us`) contain exactly the runtime plus `mods`, minus the ids in
+ * `disabled` (mods the user switched off: they're unregistered if registered, and not reported as
+ * registered or as errors).
  * `applied` maps script id → hash of what was last registered (persisted by the caller).
  * The runtime must run before every mod, so whenever it is missing or its code changed, everything
  * is unregistered and re-registered with the runtime first (registration order = injection order).
  * Returns {registered, errors, applied, reset}.
  */
-export async function syncUserScripts(us, { mods, runtimeCode, applied = {} }) {
+export async function syncUserScripts(us, { mods, runtimeCode, applied = {}, disabled = {} }) {
   const errors = [];
   const desired = [];
   const seen = new Set();
   for (const mod of mods || []) {
     if (!mod || typeof mod.id !== 'string' || !mod.id) { errors.push({ id: String(mod?.id ?? ''), error: 'mod has no id' }); continue; }
     if (mod.id === RUNTIME_ID || seen.has(mod.id)) { errors.push({ id: mod.id, error: 'duplicate or reserved mod id' }); continue; }
+    if (disabled[mod.id] === true) continue; // switched off: not desired, so unregistered below if registered
     seen.add(mod.id);
     desired.push(mod);
   }

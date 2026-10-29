@@ -6,6 +6,7 @@ import {
   SETTINGS_URL, USER_SCRIPTS_OFF, userScriptsAvailable, syncUserScripts, resolveTab, tabInfo,
   normalizeUrl, normalizeSite, hostMatchesSite, buildRunCode, buildPollCode, parseRunEnvelope,
   firstInjectionResult, withTimeout, filterRequests, nextBackoff, chromeVersion, toolLine,
+  normalizeDisabled, modAppliesTo,
 } from './lib.js';
 import { runtimeCode } from './runtime.js';
 
@@ -26,6 +27,7 @@ const state = {
   userScripts: null,     // null until first checked
   mods: [],              // last `mods` message (persisted)
   recording: [],         // hostnames being recorded (persisted)
+  disabled: {},          // mod id → true for mods the user switched off (persisted as `disabled`)
   applied: {},           // script id → hash last registered (persisted)
   lastApply: { registered: [], errors: [] },
   requestSeq: 0,
@@ -45,6 +47,7 @@ const errMsg = (e) => String(e?.message ?? e);
 const ready = chrome.storage.local.get(null).then(async (s) => {
   if (Array.isArray(s.mods)) state.mods = s.mods;
   if (Array.isArray(s.recording)) state.recording = s.recording;
+  state.disabled = normalizeDisabled(s.disabled);
   if (s.applied && typeof s.applied === 'object') state.applied = s.applied;
   await cleanStaleRuns(s);
 }).catch((e) => console.error('[webmods] failed to read storage', e));
@@ -109,14 +112,16 @@ function checkUserScripts() {
   return now;
 }
 
+const isEnabled = (id) => state.disabled[id] !== true;
+
 async function applyMods() {
   if (!checkUserScripts()) {
-    state.lastApply = { registered: [], errors: state.mods.map((m) => ({ id: m.id, error: USER_SCRIPTS_OFF })) };
+    state.lastApply = { registered: [], errors: state.mods.filter((m) => isEnabled(m.id)).map((m) => ({ id: m.id, error: USER_SCRIPTS_OFF })) };
     return state.lastApply;
   }
   try {
     const res = await syncUserScripts(chrome.userScripts, {
-      mods: state.mods, runtimeCode: runtimeCode(state.recording), applied: state.applied,
+      mods: state.mods, runtimeCode: runtimeCode(state.recording), applied: state.applied, disabled: state.disabled,
     });
     state.applied = res.applied;
     state.lastApply = { registered: res.registered, errors: res.errors };
@@ -124,7 +129,7 @@ async function applyMods() {
     for (const e of res.errors) log('error', `mod ${e.id}: ${e.error}`);
   } catch (e) {
     state.applied = {}; // unknown state: force a full re-register next time
-    state.lastApply = { registered: [], errors: state.mods.map((m) => ({ id: m.id, error: errMsg(e) })) };
+    state.lastApply = { registered: [], errors: state.mods.filter((m) => isEnabled(m.id)).map((m) => ({ id: m.id, error: errMsg(e) })) };
     log('error', `applying mods failed: ${errMsg(e)}`);
   }
   return state.lastApply;
@@ -263,7 +268,7 @@ const commands = {
     return {
       userScripts: state.userScripts, chrome: CHROME, version: VERSION,
       mods: state.mods.map((m) => {
-        const o = { id: m.id, registered: ids.has(m.id) };
+        const o = { id: m.id, registered: ids.has(m.id), enabled: isEnabled(m.id) };
         if (errors.has(m.id) && errors.get(m.id) !== USER_SCRIPTS_OFF) o.error = errors.get(m.id);
         return o;
       }),
@@ -398,10 +403,59 @@ const commands = {
     return runtimeList(args, 'errors');
   },
 
+  /**
+   * Switch a mod on or off. The switched-off set lives in chrome.storage.local `disabled`; the mod file
+   * is never touched. Then reload the target tab (selector, else the active tab) if the mod runs on it,
+   * so the change shows (`wait: true` waits for the load, like `reload`). If registering/unregistering
+   * fails, the previous state is restored and the error thrown.
+   */
+  async 'mod.enable'(args) {
+    const id = typeof args.id === 'string' ? args.id.trim() : '';
+    if (!id) throw new Error('missing mod id');
+    if (typeof args.enabled !== 'boolean') throw new Error('enabled must be true or false');
+    const mod = state.mods.find((m) => m.id === id);
+    if (!mod) throw new Error(`no mod ${id} (run \`webmods status\` to list mods)`);
+    const enabled = args.enabled;
+    const res = await serial(async () => {
+      const before = isEnabled(id);
+      await setDisabled(id, !enabled);
+      const r = await applyMods();
+      const failure = r.errors.find((e) => e.id === id && e.error !== USER_SCRIPTS_OFF);
+      if (failure && before !== enabled) {
+        await setDisabled(id, !before);
+        await applyMods();
+      }
+      return { failure };
+    });
+    reportApplied(state.lastApply);
+    if (res.failure) throw new Error(`couldn't turn ${id} ${enabled ? 'on' : 'off'}: ${res.failure.error}`);
+    return { id, enabled, reloaded: await reloadIfApplies(mod, args) };
+  },
+
   async logs(args) {
     return runtimeList(args, 'logs');
   },
 };
+
+async function setDisabled(id, off) {
+  const next = { ...state.disabled };
+  if (off) next[id] = true; else delete next[id];
+  state.disabled = next;
+  await chrome.storage.local.set({ disabled: next });
+}
+
+/** After a switch: reload the selected (or active) tab if `mod` runs on it. Returns the tab id or null; never throws. */
+async function reloadIfApplies(mod, args) {
+  try {
+    const tab = await resolveTab(chrome, args);
+    if (!modAppliesTo(mod, tab.url || tab.pendingUrl || '')) return null;
+    if (args.wait) await loadAndReport(tab.id, () => chrome.tabs.reload(tab.id)).catch(() => {});
+    else await chrome.tabs.reload(tab.id);
+    return tab.id;
+  } catch {
+    return null;
+  }
+}
 
 async function runCommand(cmd, args) {
   await ready;
@@ -493,6 +547,11 @@ async function onPageMessage(msg) {
       return { ok: true };
     case 'status':
       return uiStatus();
+    case 'mod.enable': {
+      const args = { id: msg.id, enabled: msg.enabled };
+      if (msg.tab !== undefined) args.tab = msg.tab;
+      return commands['mod.enable'](args);
+    }
     default:
       throw new Error(`unknown message ${msg?.type}`);
   }
@@ -509,7 +568,7 @@ async function uiStatus() {
     recording: s.recording,
     mods: state.mods.map((m, i) => ({
       id: m.id, name: m.name || m.id, description: m.description || '', site: m.site, file: m.file || '',
-      matches: m.matches || [], excludes: m.excludes || [], registered: s.mods[i].registered,
+      matches: m.matches || [], excludes: m.excludes || [], registered: s.mods[i].registered, enabled: s.mods[i].enabled,
       error: errors.get(m.id) === USER_SCRIPTS_OFF ? null : errors.get(m.id) || null,
     })),
     runs: [...state.runs.values()].map((r) => ({ runId: r.runId, site: r.site })),

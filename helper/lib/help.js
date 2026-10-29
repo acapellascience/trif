@@ -19,9 +19,10 @@ Run it again after moving the repo or upgrading Node.`,
   },
   status: {
     usage: 'webmods status',
-    summary: 'connection, "Allow User Scripts" switch, mods and whether each is registered',
+    summary: 'connection, "Allow User Scripts" switch, mods and whether each is registered or off',
     details: `Asks the helper and the extension how things stand. If a mod you just saved is missing or
-"not registered", check its header and run webmods doctor.`,
+"not registered", check its header and run webmods doctor. "off" means the user switched the mod off
+(side panel switch, or webmods disable): it isn't running, and its file is unchanged.`,
     examples: ['webmods status', 'webmods status --json'],
   },
   doctor: {
@@ -118,9 +119,29 @@ responses you want to grep.`,
     summary: 'what mods logged with webmods.log(...) / .warn / .error in that page',
     examples: ['webmods logs'],
   },
+  enable: {
+    usage: 'webmods enable <site>/<mod> [TAB]',
+    summary: 'switch a mod back on (like its switch in the side panel)',
+    details: `Mods can be switched off and on without touching their files: the side panel shows a switch per
+mod, and these commands flip the same switch. The state lives in the extension, so the user sees it
+change. If the mod runs on the tab (TAB, or the active tab) that tab is reloaded so the change shows;
+otherwise it applies from the next page load. webmods status shows which mods are off.
+Only flip switches the user asked about.`,
+    examples: ['webmods enable x.com/hide-reposts', 'webmods enable x.com/hide-reposts --tab 12'],
+  },
+  disable: {
+    usage: 'webmods disable <site>/<mod> [TAB]',
+    summary: 'switch a mod off without deleting or editing it (like its switch in the side panel)',
+    details: `The mod stops running (it is unregistered) but its file stays as it is; webmods enable turns it
+back on. If the mod runs on the tab (TAB, or the active tab) that tab is reloaded so the change shows;
+otherwise it applies from the next page load. Use this when the user asks to turn a mod off, rather
+than deleting or renaming the file.`,
+    examples: ['webmods disable x.com/hide-reposts', 'webmods disable example.com/dark-mode --url example.com'],
+  },
   mods: {
     usage: 'webmods mods',
     summary: 'list mods in the folder: id, matches, file (works without Chrome)',
+    details: 'When Chrome is reachable, mods the user switched off are marked [off].',
     examples: ['webmods mods', 'webmods mods --json'],
   },
   new: {
@@ -165,6 +186,7 @@ from stdin. Exit code 1 if it didn't end up logged in.`,
 const GROUPS = [
   ['Setup and diagnosis', ['setup', 'status', 'doctor']],
   ['Mod files (work without Chrome)', ['mods', 'new', 'install-example']],
+  ['Switching mods off and on (need Chrome running with the extension)', ['disable', 'enable']],
   ['Pages (need Chrome running with the extension)', ['tabs', 'run', 'reload', 'open', 'navigate', 'text', 'screenshot', 'record', 'requests', 'request', 'errors', 'logs']],
   ['Agent runs (what the side panel does)', ['agent']],
   ['', ['help']],

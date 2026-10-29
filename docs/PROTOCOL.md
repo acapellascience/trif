@@ -105,7 +105,7 @@ Without one, the target is the active tab of the last-focused normal window.
 
 | cmd | args | result |
 |---|---|---|
-| `status` | – | `{userScripts, chrome, version, mods:[{id, registered}], recording:[sites]}` |
+| `status` | – | `{userScripts, chrome, version, mods:[{id, registered, enabled}], recording:[sites]}` (`enabled: false` = switched off, see below) |
 | `tabs` | – | `[{id, windowId, active, url, title}]` (normal windows only) |
 | `run` | `code`, `expression: bool`, `timeout` (ms, default 10000) + tab selector | `{value}`: the code's result, made JSON-safe in the page (see below), or an error `{ok:false, error:"<message + stack>"}` |
 | `reload` | `hard: bool` + tab selector | `{url}` after the tab's `status` is `complete` (timeout 30 s) |
@@ -118,6 +118,21 @@ Without one, the target is the active tab of the last-focused normal window.
 | `request` | `i` + tab selector | `{method, url, status, requestBody, responseText}` (bodies capped at 2 MB each) |
 | `errors` | tab selector | `[{mod, message, stack, time}]`: errors thrown by mods in that page |
 | `logs` | tab selector | `[{mod, level, args:[strings], time}]`: what mods logged with `webmods.log(...)` |
+| `mod.enable` | `id`, `enabled: bool`, `wait: bool` + tab selector | `{id, enabled, reloaded}`: switches a mod on/off (below). `reloaded` = the tab id reloaded, or null |
+
+### Mod switches (`mod.enable`)
+
+Each mod can be switched off without touching its file. The switched-off set lives in the extension's
+`chrome.storage.local` under **`disabled`** = `{"<mod id>": true}`, so it survives service-worker
+restarts and helper reconnects: every sync (including each `mods` message from the helper) skips
+switched-off mods and unregisters them if registered; switching one on registers it again. Ids of
+deleted mods may linger in the set (harmless, never shown); a re-created mod with the same id stays off.
+After a switch, the target tab (selector, else the active tab) is reloaded if the mod's matches cover
+it (`wait: true` waits for the load, like `reload`). If (un)registering fails, the previous state is
+restored and the command fails. `status` (and the panel/setup page status) reports `enabled` per mod.
+The side panel's "Mods on this site" list and the setup page show a switch per mod (`modswitch.js`,
+`switch.css`); they send `{type: "mod.enable", id, enabled, tab}` to the background and follow
+`storage.onChanged` for `disabled`, so a switch flipped by an agent or the CLI shows live.
 
 ### `run` semantics
 
@@ -170,7 +185,7 @@ code whenever it changes (`const RECORDING = ["x.com"]`).
 
 ```
 webmods setup [--browser chrome|chromium|brave|edge|arc|all]   install workspace, native host, CLI link
-webmods status                     connection, user-scripts switch, mods and whether each is registered
+webmods status                     connection, user-scripts switch, mods and whether each is registered (or off)
 webmods doctor                     diagnose setup problems, printing a fix for each
 webmods tabs
 webmods run [TAB] '<code>'         run JS in the page (REPL-style); `-f file.js` to run a file; `-` reads stdin
@@ -184,7 +199,9 @@ webmods requests [TAB] [--filter <regex>] [--limit N]
 webmods request [TAB] <i> [-o file]        prints JSON; response bodies that are JSON are pretty-printed
 webmods errors [TAB]
 webmods logs [TAB]
-webmods mods                        list mods from the folder (id, matches, file)
+webmods mods                        list mods from the folder (id, matches, file); [off] marks switched-off ones when Chrome is reachable
+webmods disable <site>/<mod> [TAB]  switch a mod off (mod.enable; reloads TAB/the active tab if the mod runs there)
+webmods enable <site>/<mod> [TAB]   switch it back on
 webmods new <site> <mod>            create sites/<site>/<mod>.js from a template, print its path
 webmods install-example <site>/<mod>
 webmods help [command]
@@ -244,8 +261,8 @@ Nothing is hosted; the agent uses the user's own login/subscription.
 - `sidepanel.html/.js/.css`: follows the active tab of its window.
   - **Header:** the current site (hostname without `www.`), a status dot (helper connected, user scripts
     on, agent available), a settings button.
-  - **Mods on this site:** the mods whose matches cover the current tab (name, file name), collapsed by
-    default when there's a chat.
+  - **Mods on this site:** the mods whose matches cover the current tab (name, file name, on/off switch;
+    see "Mod switches"), collapsed by default when there's a chat.
   - **Chat:** one conversation per site, persisted in `chrome.storage.local` under `chat:<site>` =
     `{sessionId, agent, messages: [{role: "user"|"assistant"|"tool"|"error", text, time}]}`. A text box
     (Enter sends, Shift+Enter newline), Send / Stop, "New chat" (forgets the sessionId and messages).
@@ -266,7 +283,7 @@ Nothing is hosted; the agent uses the user's own login/subscription.
 - Panel ⇄ background: `chrome.runtime.connect({name: "panel"})`. Panel → background:
   `{type: "agent.start", site, tabId, url, prompt, sessionId, agent, model}`, `{type: "agent.stop", runId}`,
   `{type: "agent.list"}`, `{type: "agent.login", agent}`, `{type: "agent.loginCode", loginId, code}`,
-  `{type: "agent.loginCancel", loginId}`, `{type: "status"}`. Background forwards agent commands to the
+  `{type: "agent.loginCancel", loginId}`, `{type: "status"}`, `{type: "mod.enable", id, enabled, tab}`. Background forwards agent commands to the
   helper as native `request`s with the same cmd and relays every native `{type: "agentEvent", runId,
   event}` to all panel ports (panels ignore runs and logins they didn't start, by id).
   If the helper disconnects mid-run (or mid-login), the background sends the panel `{kind: "error"}` then
@@ -330,7 +347,8 @@ New helper → extension message: `{type: "agentEvent", runId, event}` where `ev
 - **Context for the agent** (prepended to the first message of a session, or passed as an appended
   system prompt where the agent supports it): "You're running inside the WebMods side panel in the
   user's Chrome. They're looking at <url> (tab <tabId>): pass `--tab <tabId>` to webmods commands. Follow
-  AGENTS.md. Reply briefly in plain language; your replies appear in a narrow chat panel. You can't ask
+  AGENTS.md. Mods can be switched off and on with `webmods disable/enable <site>/<mod>`; `webmods status`
+  shows which are on. Reply briefly in plain language; your replies appear in a narrow chat panel. You can't ask
   follow-up questions mid-task: if something's unclear, make a sensible choice or end your turn with a
   question." Later messages in the session get a one-line reminder of the current URL and tab id.
 

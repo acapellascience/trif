@@ -1,7 +1,13 @@
-// Status page: helper connection, the "Allow User Scripts" switch, installed mods.
-// Polls the service worker, which also re-checks the switch on every status request.
+// Status page: helper connection, the "Allow User Scripts" switch, installed mods (each with an on/off
+// switch, shared with the side panel). Polls the service worker, which also re-checks the switch on
+// every status request; switches follow chrome.storage.local `disabled` live.
+
+import { modSwitch, syncSwitches, shownEnabled, switchError, enabledIn, onSwitchChange } from './modswitch.js';
 
 const $ = (sel) => document.querySelector(sel);
+let last = null;        // last status
+let modsKey = null;     // which mods the list was built for (switches update in place)
+let disabled = {};      // chrome.storage.local `disabled`
 
 function setSection(id, ok, title, detail) {
   const el = document.getElementById(id);
@@ -44,25 +50,70 @@ function render(s) {
   }
   $('#settings').hidden = !!s.userScripts;
 
+  last = s;
+  renderMods();
+  const rec = s.recording.length ? ` · recording requests on ${s.recording.join(', ')}` : '';
+  $('#footer').textContent = `WebMods ${s.version} · Chrome ${s.chrome}${rec}`;
+}
+
+let labelSeq = 0;
+onSwitchChange(() => { if (last) renderMods(); });
+
+function renderMods() {
+  const s = last;
   const list = $('#mod-list');
-  list.replaceChildren();
   const modsDetail = $('#mods .detail');
   if (!s.mods.length) {
     modsDetail.replaceChildren('No mods yet. Open your coding agent in ', code('~/.webmods'), ' and ask it to change a website.');
   } else {
     modsDetail.replaceChildren();
-    for (const m of s.mods) {
-      const li = el('li');
-      const name = el('div', 'mod-name', m.name);
-      if (!m.registered) name.append(el('span', 'tag', s.userScripts ? 'not active' : 'paused'));
-      li.append(name, el('div', 'mod-id', m.id));
-      if (m.description) li.append(el('div', 'mod-desc', m.description));
-      if (m.error) li.append(el('div', 'mod-err', m.error));
-      list.append(li);
-    }
   }
-  const rec = s.recording.length ? ` · recording requests on ${s.recording.join(', ')}` : '';
-  $('#footer').textContent = `WebMods ${s.version} · Chrome ${s.chrome}${rec}`;
+  // Rebuilt only when the set of mods changes, so a focused switch keeps focus through the polling.
+  const key = JSON.stringify(s.mods.map((m) => [m.id, m.name, m.description]));
+  if (key !== modsKey) {
+    modsKey = key;
+    list.replaceChildren(...s.mods.map(modItem));
+  }
+  const byId = new Map(s.mods.map((m) => [m.id, m]));
+  for (const li of list.children) {
+    const m = byId.get(li.dataset.mod);
+    const on = shownEnabled(m.id, enabledIn(disabled, m.id));
+    li.classList.toggle('off', !on);
+    const tag = li.querySelector('.tag');
+    tag.textContent = on && m.enabled !== false && !m.registered ? (s.userScripts ? 'not active' : 'paused') : '';
+    tag.hidden = !tag.textContent;
+    const err = li.querySelector('.mod-err');
+    err.textContent = switchError(m.id) || (on && m.error) || '';
+    err.hidden = !err.textContent;
+  }
+  syncSwitches(list, (id) => enabledIn(disabled, id));
+}
+
+function modItem(m) {
+  const li = el('li');
+  li.dataset.mod = m.id;
+  const labelId = `mod-name-${++labelSeq}`;
+  const name = el('div', 'mod-name');
+  const label = el('span', null, m.name);
+  label.id = labelId;
+  const tag = el('span', 'tag');
+  tag.hidden = true;
+  name.append(label, tag);
+  const main = el('div', 'mod-main');
+  main.append(name, el('div', 'mod-id', m.id));
+  if (m.description) main.append(el('div', 'mod-desc', m.description));
+  const err = el('div', 'mod-err');
+  err.hidden = true;
+  main.append(err);
+  li.append(main, modSwitch(document, {
+    id: m.id, enabled: enabledIn(disabled, m.id), labelId,
+    apply: async (id, enabled) => {
+      const r = await chrome.runtime.sendMessage({ type: 'mod.enable', id, enabled });
+      if (!r || r.error) throw new Error(r?.error || 'no answer from the WebMods service worker');
+      return r;
+    },
+  }));
+  return li;
 }
 
 async function refresh() {
@@ -82,6 +133,12 @@ $('#reconnect').addEventListener('click', async () => {
   setTimeout(refresh, 800);
 });
 
-refresh();
+chrome.storage.onChanged.addListener((changes, area) => {
+  if (area !== 'local' || !changes.disabled) return;
+  disabled = changes.disabled.newValue || {};
+  if (last) renderMods();
+});
+
+chrome.storage.local.get('disabled').then((s) => { disabled = s.disabled || {}; }, () => {}).finally(refresh);
 setInterval(refresh, 2000);
 document.addEventListener('visibilitychange', () => { if (!document.hidden) refresh(); });

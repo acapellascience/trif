@@ -172,7 +172,10 @@ svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width:
 .mod-list { list-style: none; margin: 6px 0 0; padding: 0; }
 .mod-list li { padding: 5px 0; border-top: 1px solid var(--line); }
 .mod-list li:first-child { border-top: 0; }
+.mod-row { display: flex; align-items: center; gap: 10px; }
+.mod-main { flex: 1; min-width: 0; }
 .mod-name { font-weight: 500; }
+.mod-list li.off .mod-name { color: var(--muted); }
 .mod-file { color: var(--muted); font: 11px/1.4 var(--mono); overflow-wrap: anywhere; }
 .mod-err { color: var(--bad); font-size: 12px; }
 .tag {

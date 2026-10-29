@@ -142,6 +142,35 @@ test('one bad mod is reported without blocking the others; duplicates are reject
   assert.ok(!('x.com/bad' in r.applied));
 });
 
+test('sync skips switched-off mods, unregisters newly switched-off ones, re-registers them when switched on', async () => {
+  const us = mockUserScripts();
+  const runtimeCode = rt.runtimeCode([]);
+  let r = await lib.syncUserScripts(us, { mods: [mod('x.com/a'), mod('x.com/b')], runtimeCode, disabled: { 'x.com/b': true } });
+  assert.deepStrictEqual(r.registered, ['x.com/a']);
+  assert.deepStrictEqual(r.errors, []);
+  assert.deepStrictEqual(us.scripts.map((s) => s.id), [lib.RUNTIME_ID, 'x.com/a']);
+
+  us.calls.length = 0;
+  r = await lib.syncUserScripts(us, { mods: [mod('x.com/a'), mod('x.com/b')], runtimeCode, applied: r.applied, disabled: { 'x.com/a': true } });
+  assert.deepStrictEqual(us.calls, [['unregister', ['x.com/a']], ['register', ['x.com/b']]]);
+  assert.deepStrictEqual(r.registered, ['x.com/b']);
+  assert.ok(!('x.com/a' in r.applied));
+
+  us.calls.length = 0;
+  r = await lib.syncUserScripts(us, { mods: [mod('x.com/a'), mod('x.com/b')], runtimeCode, applied: r.applied, disabled: {} });
+  assert.deepStrictEqual(us.calls, [['register', ['x.com/a']]]);
+  assert.deepStrictEqual(r.registered, ['x.com/a', 'x.com/b']);
+
+  // a full re-register (runtime change) leaves switched-off mods out too
+  us.calls.length = 0;
+  r = await lib.syncUserScripts(us, { mods: [mod('x.com/a'), mod('x.com/b')], runtimeCode: rt.runtimeCode(['x.com']), applied: r.applied, disabled: { 'x.com/a': true, 'gone.com/stale': true } });
+  assert.deepStrictEqual(us.calls, [['unregister', 'all'], ['register', [lib.RUNTIME_ID]], ['register', ['x.com/b']]]);
+
+  assert.deepStrictEqual(lib.normalizeDisabled({ 'x.com/a': true, 'x.com/b': false, 'x.com/c': 'yes' }), { 'x.com/a': true });
+  assert.deepStrictEqual(lib.normalizeDisabled(null), {});
+  assert.deepStrictEqual(lib.normalizeDisabled(['x.com/a']), {});
+});
+
 test('run-at mapping', () => {
   assert.strictEqual(lib.normalizeRunAt('document_end'), 'document_end');
   assert.strictEqual(lib.normalizeRunAt('document-idle'), 'document_idle');
@@ -616,11 +645,13 @@ function mockPort(name) {
 }
 
 let bgCount = 0;
-async function loadBackground({ storage = {} } = {}) {
+async function loadBackground({ storage = {}, tabs = [] } = {}) {
   const store = structuredClone(storage);
   const natives = [];
   const panelBehavior = [];
   const created = [];
+  const reloaded = [];
+  const onUpdated = chromeEvent();
   const chromeMock = {
     runtime: {
       id: lib.EXTENSION_ID, lastError: undefined,
@@ -643,8 +674,9 @@ async function loadBackground({ storage = {} } = {}) {
     },
     userScripts: mockUserScripts(),
     tabs: {
-      query: async () => [], create: async (o) => { created.push(o); return { id: 99, ...o }; },
-      update: async () => ({}), get: async () => ({}), onUpdated: chromeEvent(),
+      query: async () => structuredClone(tabs), create: async (o) => { created.push(o); return { id: 99, ...o }; },
+      update: async () => ({}), get: async (id) => structuredClone(tabs.find((t) => t.id === id) || {}), onUpdated,
+      reload: async (id) => { reloaded.push(id); setImmediate(() => onUpdated.emit(id, { status: 'complete' })); },
     },
     windows: { update: async () => ({}), getLastFocused: async () => ({ id: 1 }) },
     sidePanel: { setPanelBehavior: async (o) => { panelBehavior.push(o); } },
@@ -676,7 +708,18 @@ async function loadBackground({ storage = {} } = {}) {
     return p;
   };
   const restore = () => Object.assign(console, realConsole);
-  return { chrome: chromeMock, store, natives, native, connectPanel, panelBehavior, created, restore };
+  /** Send a native request like the helper does for a CLI page command; resolves the response. */
+  native.call = async (cmd, args = {}) => {
+    const id = `h-${Math.random()}`;
+    native.emit({ type: 'request', id, cmd, args });
+    for (let i = 0; i < 400; i++) {
+      const r = native.sent.find((m) => m.type === 'response' && m.id === id);
+      if (r) return r;
+      await tick();
+    }
+    throw new Error(`no response to ${cmd}`);
+  };
+  return { chrome: chromeMock, store, natives, native, connectPanel, panelBehavior, created, reloaded, restore };
 }
 
 /** Answer the extension's next native request for `cmd` like the helper would. */
@@ -908,4 +951,181 @@ test('background: runs left in storage by a previous service worker are marked i
     assert.deepStrictEqual(chat.messages.map((m) => m.role), ['user', 'error']);
     assert.match(chat.messages[1].text, /Interrupted/);
   } finally { bg.restore(); }
+});
+
+// ---- mod switches -------------------------------------------------------------------------------
+
+const SWITCH_TABS = [
+  { id: 5, windowId: 1, index: 0, active: true, url: 'https://x.com/home', title: 'X' },
+  { id: 6, windowId: 1, index: 1, active: false, url: 'https://z.com/', title: 'Z' },
+];
+const scriptIds = (bg) => bg.chrome.userScripts.scripts.map((s) => s.id);
+
+test('background: mod.enable switches a mod off and on, persists it, and reloads the tab only when the mod runs there', async () => {
+  const mods = [mod('x.com/a'), mod('y.com/b')];
+  const bg = await loadBackground({ storage: { mods }, tabs: SWITCH_TABS });
+  try {
+    bg.native.emit({ type: 'mods', mods });
+    await settle(20);
+    assert.deepStrictEqual(scriptIds(bg), [lib.RUNTIME_ID, 'x.com/a', 'y.com/b']);
+
+    // CLI path: native request, default target = the active tab (x.com), which x.com/a runs on
+    let r = await bg.native.call('mod.enable', { id: 'x.com/a', enabled: false, wait: true });
+    assert.deepStrictEqual([r.ok, r.result], [true, { id: 'x.com/a', enabled: false, reloaded: 5 }]);
+    assert.deepStrictEqual(bg.store.disabled, { 'x.com/a': true });
+    assert.deepStrictEqual(scriptIds(bg), [lib.RUNTIME_ID, 'y.com/b']);
+    assert.deepStrictEqual(bg.reloaded, [5]);
+    assert.ok(bg.native.sent.some((m) => m.type === 'modsApplied' && !m.registered.includes('x.com/a')));
+    assert.ok(bg.native.sent.every((m) => m.type !== 'modsApplied' || !m.errors.some((e) => e.id === 'x.com/a')));
+
+    // status reports enabled per mod
+    r = await bg.native.call('status');
+    assert.deepStrictEqual(r.result.mods, [
+      { id: 'x.com/a', registered: false, enabled: false },
+      { id: 'y.com/b', registered: true, enabled: true },
+    ]);
+    const panel = bg.connectPanel();
+    const st = (await panel.ask({ type: 'status' })).result;
+    assert.deepStrictEqual(st.mods.map((m) => [m.id, m.enabled, m.registered]), [['x.com/a', false, false], ['y.com/b', true, true]]);
+
+    // the helper resending mods (a reconnect, a file change) keeps it off
+    bg.native.emit({ type: 'mods', mods: [mod('x.com/a', { hash: 'h2', code: 'edited()' }), mod('y.com/b')] });
+    await settle(20);
+    assert.deepStrictEqual(scriptIds(bg), [lib.RUNTIME_ID, 'y.com/b']);
+
+    // a mod that doesn't run on the target tab: no reload
+    r = await bg.native.call('mod.enable', { id: 'y.com/b', enabled: false, tab: 5 });
+    assert.deepStrictEqual(r.result, { id: 'y.com/b', enabled: false, reloaded: null });
+    assert.deepStrictEqual(bg.reloaded, [5]);
+    assert.deepStrictEqual(scriptIds(bg), [lib.RUNTIME_ID]);
+
+    // panel path: switch x.com/a back on for the panel's tab
+    let reply = await panel.ask({ type: 'mod.enable', id: 'x.com/a', enabled: true, tab: 5 });
+    assert.deepStrictEqual([reply.ok, reply.result], [true, { id: 'x.com/a', enabled: true, reloaded: 5 }]);
+    assert.deepStrictEqual(bg.store.disabled, { 'y.com/b': true });
+    assert.deepStrictEqual(scriptIds(bg), [lib.RUNTIME_ID, 'x.com/a']);
+    assert.match(bg.chrome.userScripts.scripts[1].js[0].code, /edited\(\)/);
+    assert.deepStrictEqual(bg.reloaded, [5, 5]);
+    assert.ok(panel.sent.some((m) => m.type === 'statusChanged'));
+    // a tab the mod doesn't run on, and a tab that's gone: applied, nothing reloaded
+    reply = await panel.ask({ type: 'mod.enable', id: 'y.com/b', enabled: true, tab: 6 });
+    assert.deepStrictEqual(reply.result, { id: 'y.com/b', enabled: true, reloaded: null });
+    reply = await panel.ask({ type: 'mod.enable', id: 'x.com/a', enabled: false, tab: 404 });
+    assert.deepStrictEqual(reply.result, { id: 'x.com/a', enabled: false, reloaded: null });
+    assert.deepStrictEqual(bg.reloaded, [5, 5]);
+
+    // bad requests
+    r = await bg.native.call('mod.enable', { id: 'nope.com/x', enabled: false });
+    assert.deepStrictEqual([r.ok, r.error], [false, 'no mod nope.com/x (run `webmods status` to list mods)']);
+    r = await bg.native.call('mod.enable', { id: 'x.com/a', enabled: 'no' });
+    assert.match(r.error, /enabled must be true or false/);
+    r = await bg.native.call('mod.enable', { enabled: true });
+    assert.match(r.error, /missing mod id/);
+  } finally { bg.restore(); }
+});
+
+test('background: switched-off mods stay off after a service worker restart; stale ids are ignored', async () => {
+  const mods = [mod('x.com/a'), mod('y.com/b')];
+  const bg = await loadBackground({ storage: { mods, disabled: { 'x.com/a': true, 'gone.com/old': true } } });
+  try {
+    assert.deepStrictEqual(scriptIds(bg), [lib.RUNTIME_ID, 'y.com/b']);
+    const st = (await bg.native.call('status')).result;
+    assert.deepStrictEqual(st.mods.map((m) => [m.id, m.enabled]), [['x.com/a', false], ['y.com/b', true]]);
+  } finally { bg.restore(); }
+});
+
+test('background: a switch that fails to apply is reverted and reported', async () => {
+  const mods = [mod('x.com/a'), mod('y.com/b')];
+  const bg = await loadBackground({ storage: { mods, disabled: { 'x.com/a': true } }, tabs: SWITCH_TABS });
+  try {
+    const us = bg.chrome.userScripts;
+    const register = us.register;
+    us.register = async (list) => {
+      if (list.some((s) => s.id === 'x.com/a')) throw new Error("Invalid match pattern 'nope'");
+      return register.call(us, list);
+    };
+    const panel = bg.connectPanel();
+    const reply = await panel.ask({ type: 'mod.enable', id: 'x.com/a', enabled: true, tab: 5 });
+    assert.strictEqual(reply.ok, false);
+    assert.strictEqual(reply.error, "couldn't turn x.com/a on: Invalid match pattern 'nope'");
+    assert.deepStrictEqual(bg.store.disabled, { 'x.com/a': true });
+    assert.deepStrictEqual(scriptIds(bg), [lib.RUNTIME_ID, 'y.com/b']);
+    assert.deepStrictEqual(bg.reloaded, []);
+    const st = (await panel.ask({ type: 'status' })).result;
+    assert.deepStrictEqual(st.mods.map((m) => [m.id, m.enabled, m.error]), [['x.com/a', false, null], ['y.com/b', true, null]]);
+  } finally { bg.restore(); }
+});
+
+// A few DOM methods, enough for modswitch.js.
+function fakeDoc() {
+  const make = (tag) => {
+    const attrs = new Map();
+    const listeners = {};
+    const e = {
+      tagName: tag.toUpperCase(), children: [], dataset: {}, className: '', title: '', type: '',
+      setAttribute: (k, v) => attrs.set(k, String(v)),
+      getAttribute: (k) => (attrs.has(k) ? attrs.get(k) : null),
+      removeAttribute: (k) => attrs.delete(k),
+      append: (...c) => e.children.push(...c),
+      addEventListener: (t, f) => (listeners[t] ||= []).push(f),
+      click: () => (listeners.click || []).forEach((f) => f()),
+    };
+    return e;
+  };
+  return { createElement: make };
+}
+
+test('mod switch: accessible, optimistic, one change at a time, reverts with a short error, follows live updates', async () => {
+  const ms = await import('../extension/modswitch.js');
+  let changes = 0;
+  ms.onSwitchChange(() => changes++);
+  const calls = [];
+  let settleApply;
+  const apply = (id, enabled) => { calls.push([id, enabled]); return new Promise((res, rej) => { settleApply = { res, rej }; }); };
+  const b = ms.modSwitch(fakeDoc(), { id: 'x.com/a', enabled: true, labelId: 'mod-name-1', apply });
+  const root = { querySelectorAll: (sel) => { assert.strictEqual(sel, '[role="switch"][data-mod]'); return [b]; } };
+  assert.deepStrictEqual([b.tagName, b.type, b.getAttribute('role'), b.getAttribute('aria-checked'), b.getAttribute('aria-labelledby')],
+    ['BUTTON', 'button', 'switch', 'true', 'mod-name-1']);
+  assert.match(b.title, /^On/);
+  assert.strictEqual(b.children[0].getAttribute('aria-hidden'), 'true');
+
+  // optimistic: the new state shows before the background answers
+  b.click();
+  assert.strictEqual(b.getAttribute('aria-checked'), 'false');
+  assert.strictEqual(b.getAttribute('aria-busy'), 'true');
+  assert.deepStrictEqual(calls, [['x.com/a', false]]);
+  assert.strictEqual(ms.shownEnabled('x.com/a', true), false);
+  ms.syncSwitches(root, () => true); // a status refresh mid-flight doesn't undo it
+  assert.strictEqual(b.getAttribute('aria-checked'), 'false');
+  b.click(); // ignored while in flight
+  assert.strictEqual(calls.length, 1);
+  settleApply.res({ id: 'x.com/a', enabled: false });
+  await settle();
+  assert.strictEqual(b.getAttribute('aria-checked'), 'false');
+  assert.strictEqual(b.getAttribute('aria-busy'), null);
+  assert.strictEqual(ms.shownEnabled('x.com/a', true), true);
+  assert.ok(changes >= 2);
+
+  // live: chrome.storage.local `disabled` changed elsewhere (an agent ran `webmods enable x.com/a`)
+  ms.syncSwitches(root, (id) => ms.enabledIn({}, id));
+  assert.strictEqual(b.getAttribute('aria-checked'), 'true');
+  ms.syncSwitches(root, (id) => ms.enabledIn({ 'x.com/a': true }, id));
+  assert.strictEqual(b.getAttribute('aria-checked'), 'false');
+  ms.syncSwitches(root, (id) => ms.enabledIn(undefined, id));
+  assert.strictEqual(b.getAttribute('aria-checked'), 'true');
+
+  // failure: flips back, short error
+  b.click();
+  assert.strictEqual(b.getAttribute('aria-checked'), 'false');
+  settleApply.rej(new Error("couldn't turn x.com/a off: Invalid match pattern 'nope'"));
+  await settle();
+  assert.strictEqual(b.getAttribute('aria-checked'), 'true');
+  assert.strictEqual(ms.switchError('x.com/a'), "Couldn’t switch it off: Invalid match pattern 'nope'");
+  // trying again clears the error
+  b.click();
+  assert.strictEqual(ms.switchError('x.com/a'), null);
+  settleApply.res({});
+  await settle();
+  assert.strictEqual(b.getAttribute('aria-checked'), 'false');
+  ms.onSwitchChange(null);
 });

@@ -30,7 +30,7 @@ const view = {
   agentsError: null,
   settings: { agent: '', model: '' },
   rendered: { site: null, count: 0, first: null },
-  modsOpenFor: null,         // site whose mods <details> open state was last set automatically
+  modsOpenFor: null,         // set once the mods <details> open state has been restored
   modsKey: null,             // which mods the list was last built for (switches update in place)
   disabled: {},              // chrome.storage.local `disabled`: mods switched off (by anyone: panel, agent, CLI)
   myRuns: new Set(),         // runs this panel started
@@ -543,11 +543,15 @@ function renderMods() {
   const byId = new Map(mods.map((m) => [m.id, m]));
   for (const li of ui.modList.children) updateModItem(li, byId.get(li.dataset.mod));
   syncSwitches(ui.modList, (id) => enabledIn(view.disabled, id));
-  // Open by default for an empty chat, collapsed once there's a conversation; then leave it to the user.
-  const autoKey = `${site}:${view.chat.messages.length > 0}`;
-  if (view.modsOpenFor !== autoKey) {
-    ui.mods.open = view.chat.messages.length === 0;
-    view.modsOpenFor = autoKey;
+  // Open unless the user closed it (remembered across sites and sessions), so each switch is one click away.
+  if (view.modsOpenFor === null) {
+    let open = true;
+    try { open = localStorage.getItem('modsOpen') !== 'false'; } catch {}
+    ui.mods.open = open;
+    ui.mods.addEventListener('toggle', () => {
+      try { localStorage.setItem('modsOpen', String(ui.mods.open)); } catch {}
+    });
+    view.modsOpenFor = site;
   }
 }
 

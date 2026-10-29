@@ -392,7 +392,7 @@ test('install-example finds the repo examples by default', async () => {
 // ------------------------------------------------------------------ setup and doctor
 
 function setupArgs(root) {
-  return ['setup', '--home', path.join(root, 'ws'), '--native-dir', path.join(root, 'native'), '--bin-dir', path.join(root, 'bin')];
+  return ['setup', '--home', path.join(root, 'ws'), '--native-dir', path.join(root, 'native'), '--bin-dir', path.join(root, 'bin'), '--no-examples'];
 }
 
 test('setup: workspace, wrappers, manifest, link; idempotent; leaves sites alone', async () => {

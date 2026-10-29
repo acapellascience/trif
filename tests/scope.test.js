@@ -43,6 +43,18 @@ test('patternInScope / hostInScope', () => {
   assert.deepEqual(outOfScope({ matches: ['https://x.com/*', 'https://twitter.com/*'] }, 'x.com'), ['https://twitter.com/*']);
 });
 
+test('applyStartOff: preinstalled mods are switched off once, then the switch is the user\'s', async () => {
+  const { applyStartOff } = await import('../extension/lib.js');
+  const mods = [{ id: 'x.com/plain-x', startOff: true }, { id: 'a.com/mine' }];
+  let r = applyStartOff(mods, { 'b.com/old': true }, {});
+  assert.deepStrictEqual(r, { disabled: { 'b.com/old': true, 'x.com/plain-x': true }, startedOff: { 'x.com/plain-x': true }, changed: true });
+  // The user switched it on: it stays on.
+  const disabled = {};
+  r = applyStartOff(mods, disabled, r.startedOff);
+  assert.strictEqual(r.changed, false);
+  assert.strictEqual(r.disabled, disabled);
+});
+
 test('the extension agrees with the helper on patterns', async () => {
   const lib = await import('../extension/lib.js');
   for (const [p, scope, want] of PATTERNS) assert.equal(lib.patternInScope(p, scope), want, p);

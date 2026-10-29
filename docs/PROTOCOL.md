@@ -242,6 +242,13 @@ Re-running setup is safe; run it again to update.
   - `link` (default in a git checkout, for developing WebMods): the wrappers run the checkout's files.
   - `--copy` / `--link` force either mode.
   AGENTS.md, CLAUDE.md, the mod template and the examples always come from the files the wrappers run.
+- Preinstalled mods: setup copies the examples listed in `PREINSTALLED` (helper/lib/preinstalled.js:
+  Plain X and the Instagram mods) into `sites/`, **switched off**. `~/.webmods/preinstalled.json` =
+  `{offered, startOff}`: `offered` keeps a later setup from bringing back one the user deleted (an
+  existing file is never overwritten); `startOff` lists the ones setup copied. The helper sends those
+  mods with `startOff: true`; the extension switches each off (`disabled`) the first time it sees it and
+  remembers that in chrome.storage.local `startedOff`, so afterwards the switch is the user's.
+  `--no-examples` skips all this.
 - Wrapper: `~/.webmods/bin/webmods-host` = `#!/bin/sh\nexec "<absolute node path>" "<app>/helper/host.js" "$@"`
   where `<app>` is `~/.webmods/app` (copy) or the checkout (link)
   (Chrome launches hosts with a minimal PATH, so the node path is absolute).

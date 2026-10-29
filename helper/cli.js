@@ -20,7 +20,7 @@ process.stdout.on('error', (e) => { if (e.code === 'EPIPE') process.exit(0); thr
 
 const VALUE_FLAGS = new Set(['--tab', '--url', '-o', '--out', '--output', '--filter', '--limit', '-f', '--file',
   '--browser', '--home', '--native-dir', '--bin-dir', '--timeout', '--agent', '--session', '--model']);
-const BOOL_FLAGS = new Set(['--json', '--hard', '--help', '-h', '--force', '--no-link', '--copy', '--link']);
+const BOOL_FLAGS = new Set(['--json', '--hard', '--help', '-h', '--force', '--no-link', '--no-examples', '--copy', '--link']);
 const ALIASES = { '--out': '-o', '--output': '-o', '--file': '-f', '-h': '--help' };
 
 class UsageError extends Error {}
@@ -181,6 +181,7 @@ const handlers = {
       nativeDir: ctx.opts['--native-dir'],
       binDir: ctx.opts['--bin-dir'],
       noLink: !!ctx.opts['--no-link'],
+      noExamples: !!ctx.opts['--no-examples'],
       mode: ctx.opts['--copy'] ? 'copy' : ctx.opts['--link'] ? 'link' : undefined,
     });
     if (ctx.json) printJson({ ok: r.ok, home: r.ws.home, mode: r.mode, app: r.root, manifests: r.manifests, node: r.nodePath });

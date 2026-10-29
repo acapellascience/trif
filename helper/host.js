@@ -24,6 +24,7 @@ const { Runs } = require('./lib/runs');
 const { Logins } = require('./lib/logins');
 const agents = require('./lib/agents');
 const { updateHeld, approveHeld } = require('./lib/held');
+const { startOffIds } = require('./lib/preinstalled');
 
 const ws = workspace();
 try { fs.mkdirSync(ws.home, { recursive: true }); } catch { /* logged below if it matters */ }
@@ -142,9 +143,14 @@ function syncMods(reason, force) {
   const { mods, problems, warnings } = scanMods(ws.modsDir);
   const plan = planModsMessage(mods);
   try { state.held = updateHeld(ws, mods, runs.scopes()); } catch (e) { logger.error(`held mods: ${e.message}`); }
-  // Held mods still go to the extension (the panel lists them with an Allow button), marked so they aren't registered.
-  const sent = plan.mods.map((m) => (state.held[m.id] ? { ...m, held: { site: state.held[m.id].site, reason: state.held[m.id].reason } } : m));
-  const signature = sent.map((m) => `${m.id}:${m.hash}${m.held ? ':held' : ''}`).join('|');
+  // Held mods still go to the extension (the panel lists them with an Allow button), marked so they aren't
+  // registered. Preinstalled mods are marked startOff: the extension switches them off when it first sees them.
+  const startOff = startOffIds(ws.home);
+  const sent = plan.mods.map((m) => {
+    const out = state.held[m.id] ? { ...m, held: { site: state.held[m.id].site, reason: state.held[m.id].reason } } : m;
+    return startOff.has(m.id) ? { ...out, startOff: true } : out;
+  });
+  const signature = sent.map((m) => `${m.id}:${m.hash}${m.held ? ':held' : ''}${m.startOff ? ':off' : ''}`).join('|');
   const errors = [...problems, ...plan.errors];
   const errorsChanged = JSON.stringify(errors) !== JSON.stringify(state.modErrors);
   state.mods = mods;

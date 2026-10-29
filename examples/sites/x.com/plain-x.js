@@ -17,7 +17,9 @@
  *   together (a back-and-forth, or someone's own thread): a block shows only if Conversations is on, its
  *   top post is by someone you follow (or you), and every post in it passes the other toggles. Filtering
  *   the data rather than hiding posts on screen matters because X's list is virtualised (absolutely
- *   positioned rows), so hidden rows would leave gaps.
+ *   positioned rows), so hidden rows would leave gaps. Non-mutuals covers posts by people who don't
+ *   follow you back (X's `followed_by` on the author; for a repost, the reposter); in a conversation,
+ *   every post's author must follow you.
  * - Filters menu. "Filters ⌄" at the right of the header opens a menu styled like X's own Following
  *   menu, with a checkmark on each kind of post that's shown. Choices are kept in localStorage
  *   (`dmFeedOptions`); when the menu closes after a change, the page reloads so the timeline is fetched
@@ -60,8 +62,8 @@
 
   // ---- Options (true = show).
   const OPTIONS_KEY = 'dmFeedOptions';
-  const OPTION_LABELS = { reposts: 'Reposts', quotes: 'Quotes', replies: 'Replies', conversations: 'Conversations', long: 'Long', links: 'Links', videos: 'Videos', images: 'Images' };
-  const options = { reposts: false, quotes: true, replies: true, conversations: true, long: true, links: true, videos: true, images: true };
+  const OPTION_LABELS = { reposts: 'Reposts', quotes: 'Quotes', replies: 'Replies', conversations: 'Conversations', long: 'Long', links: 'Links', videos: 'Videos', images: 'Images', nonMutuals: 'Non-mutuals' };
+  const options = { reposts: false, quotes: true, replies: true, conversations: true, long: true, links: true, videos: true, images: true, nonMutuals: true };
   try { Object.assign(options, JSON.parse(localStorage.getItem(OPTIONS_KEY) || '{}')); } catch {}
   for (const key of Object.keys(options)) if (!(key in OPTION_LABELS)) delete options[key];   // e.g. the old "threads"
 
@@ -104,16 +106,26 @@
     return !!(user?.relationship_perspectives?.following || user?.legacy?.following)
       || (!!id && id === (String(document.cookie || '').match(/(?:^|;\s*)twid=u%3D(\d+)/) || [])[1]);
   };
+  // The post's author follows you (or it's yours). X sends this per author as `followed_by`; when it's
+  // missing altogether (the data's shape changed), count it as yes rather than empty the feed.
+  const followsYou = (tweet) => {
+    const user = tweet?.core?.user_results?.result;
+    const flag = user?.relationship_perspectives?.followed_by ?? user?.legacy?.followed_by;
+    const id = tweet?.legacy?.user_id_str || user?.rest_id;
+    return flag === undefined || !!flag || (!!id && id === (String(document.cookie || '').match(/(?:^|;\s*)twid=u%3D(\d+)/) || [])[1]);
+  };
   // The reason a post is filtered out (for the debug stats), or '' to keep it. `inConversation`: a post
-  // in a conversation block, which the Conversations toggle covers instead of Replies.
-  const isUnwanted = (content, inConversation = false) => {
+  // in a conversation block, which the Conversations toggle covers instead of Replies. `inRepost`: the
+  // post inside a repost, whose author isn't checked for Non-mutuals (the reposter is).
+  const isUnwanted = (content, inConversation = false, inRepost = false) => {
     const tweet = tweetIn(content);
     if (!tweet) return '';
+    if (!inRepost && !options.nonMutuals && !followsYou(tweet)) return 'non-mutual';
     // A repost, when shown, is judged by the post it reposts (a reposted reply, video, link…).
     const reposted = tweetOf(tweet.legacy?.retweeted_status_result?.result);
     if (tweet.legacy?.retweeted_status_result) {
       if (!options.reposts) return 'repost';
-      const why = reposted ? isUnwanted({ itemContent: { tweet_results: { result: reposted } } }, inConversation) : '';
+      const why = reposted ? isUnwanted({ itemContent: { tweet_results: { result: reposted } } }, inConversation, true) : '';
       return why && `repost:${why}`;
     }
     if (!options.quotes && (tweet.legacy?.is_quote_status || tweet.quoted_status_result)) return 'quote';

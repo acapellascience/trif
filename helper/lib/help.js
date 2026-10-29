@@ -6,11 +6,13 @@ const P = require('./paths');
 
 const COMMANDS = {
   setup: {
-    usage: 'webmods setup [--browser chrome|chromium|brave|edge|arc|all] [--home DIR] [--copy|--link] [--no-link]',
+    usage: 'webmods setup [--browser chrome|chromium|brave|edge|arc|all] [--home DIR] [--copy|--link] [--no-link] [--no-examples]',
     summary: 'install the workspace, native messaging host and CLI link (safe to re-run)',
     details: `First time: npx webmods setup   (needs Node 18 or newer).
 Creates the workspace (sites/, screenshots/, bin/), installs the WebMods files the wrappers run,
-refreshes AGENTS.md and CLAUDE.md there from those files (never touches sites/), writes bin/webmods-host
+refreshes AGENTS.md and CLAUDE.md there from those files, adds the example mods (Plain X, the Instagram ones),
+switched off, the first time (once: never again after you delete one, never over your own file;
+--no-examples skips them), writes bin/webmods-host
 and bin/webmods wrappers with an absolute node path, writes the native messaging host manifest for each
 browser (default: every browser whose profile folder exists) allowing every WebMods extension ID (plus
 any in config.json "extensionIds"), and symlinks /usr/local/bin/webmods when that folder is writable.

@@ -6,7 +6,7 @@ import {
   SETTINGS_URL, USER_SCRIPTS_OFF, userScriptsAvailable, syncUserScripts, resolveTab, tabInfo,
   normalizeUrl, normalizeSite, hostMatchesSite, buildRunCode, buildPollCode, parseRunEnvelope,
   firstInjectionResult, withTimeout, filterRequests, nextBackoff, chromeVersion, toolLine,
-  normalizeDisabled, modAppliesTo, urlInScope, modInScope,
+  normalizeDisabled, modAppliesTo, urlInScope, modInScope, applyStartOff,
 } from './lib.js';
 import { runtimeCode } from './runtime.js';
 
@@ -28,6 +28,7 @@ const state = {
   mods: [],              // last `mods` message (persisted)
   recording: [],         // hostnames being recorded (persisted)
   disabled: {},          // mod id → true for mods the user switched off (persisted as `disabled`)
+  startedOff: {},        // mod id → true for preinstalled mods already switched off once (persisted)
   applied: {},           // script id → hash last registered (persisted)
   lastApply: { registered: [], errors: [] },
   requestSeq: 0,
@@ -48,6 +49,7 @@ const ready = chrome.storage.local.get(null).then(async (s) => {
   if (Array.isArray(s.mods)) state.mods = s.mods;
   if (Array.isArray(s.recording)) state.recording = s.recording;
   state.disabled = normalizeDisabled(s.disabled);
+  state.startedOff = normalizeDisabled(s.startedOff);
   if (s.applied && typeof s.applied === 'object') state.applied = s.applied;
   await cleanStaleRuns(s);
 }).catch((e) => console.error('[webmods] failed to read storage', e));
@@ -197,6 +199,13 @@ async function onHelperMessage(msg) {
   if (!msg || typeof msg !== 'object') return;
   if (msg.type === 'mods') {
     state.mods = Array.isArray(msg.mods) ? msg.mods : [];
+    // Preinstalled mods arrive switched off the first time (before they're ever registered).
+    const off = applyStartOff(state.mods, state.disabled, state.startedOff);
+    if (off.changed) {
+      state.disabled = off.disabled;
+      state.startedOff = off.startedOff;
+      await chrome.storage.local.set({ disabled: state.disabled, startedOff: state.startedOff });
+    }
     await chrome.storage.local.set({ mods: state.mods });
     reportApplied(await serial(applyMods));
   } else if (msg.type === 'request') {

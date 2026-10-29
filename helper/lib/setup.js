@@ -11,6 +11,7 @@ const os = require('os');
 const path = require('path');
 const P = require('./paths');
 const { selectBrowsers } = require('./browsers');
+const { preinstallMods } = require('./preinstalled');
 
 // Quote for a POSIX shell double-quoted string.
 function shq(s) {
@@ -211,7 +212,7 @@ function recordPath(home, pathValue) {
 }
 
 /**
- * opts: { home, browser, nativeDir, binDir, noLink, mode: 'copy'|'link'|undefined (auto) }
+ * opts: { home, browser, nativeDir, binDir, noLink, noExamples, mode: 'copy'|'link'|undefined (auto) }
  * Returns { ok, lines: [string], ws, manifests: [{browser, file}], nodePath, mode, root }
  */
 function setup(opts = {}) {
@@ -262,6 +263,11 @@ function setup(opts = {}) {
     say(`              AGENTS.md refreshed from ${agentsSrc}`);
   } else {
     say(`              AGENTS.md not found at ${agentsSrc}; skipped`);
+  }
+  if (!opts.noExamples) {
+    const examplesDir = process.env.WEBMODS_EXAMPLES_DIR ? path.resolve(process.env.WEBMODS_EXAMPLES_DIR) : path.join(root, 'examples', 'sites');
+    const added = preinstallMods(home, ws.modsDir, examplesDir);
+    if (added.length) say(`mods          preinstalled ${added.join(', ')}: switched off until you turn them on in the side panel`);
   }
   const claudeSrc = path.join(helperDir, 'workspace', 'CLAUDE.md');
   const claude = fs.existsSync(claudeSrc) ? fs.readFileSync(claudeSrc, 'utf8') : '@AGENTS.md\n';

@@ -215,6 +215,20 @@ export function hostMatchesSite(hostname, site) {
   return h === site || h.endsWith('.' + site);
 }
 
+/**
+ * Mods the helper marks `startOff` (preinstalled by setup) are switched off the first time the extension
+ * sees them; `startedOff` remembers that, so after it the switch is the user's. Pure: returns
+ * {disabled, startedOff, changed} with new objects when something changed.
+ */
+export function applyStartOff(mods, disabled = {}, startedOff = {}) {
+  const fresh = (mods || []).filter((m) => m?.startOff && typeof m.id === 'string' && startedOff[m.id] !== true);
+  if (!fresh.length) return { disabled, startedOff, changed: false };
+  const d = { ...disabled };
+  const s = { ...startedOff };
+  for (const m of fresh) { d[m.id] = true; s[m.id] = true; }
+  return { disabled: d, startedOff: s, changed: true };
+}
+
 // ---- run scope ----------------------------------------------------------------------------------
 // Requests from a side-panel agent run carry args.scope, a registrable domain set by the helper
 // (helper/lib/scope.js, which these mirror): they may only touch tabs and URLs on that site.

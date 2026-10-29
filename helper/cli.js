@@ -10,6 +10,9 @@ const { request, streamRun, streamLogin, HelperError } = require('./lib/client')
 const { scanMods, planModsMessage, isIgnoredName } = require('./lib/mods');
 const { COMMANDS, mainHelp, commandHelp } = require('./lib/help');
 
+// Output piped into something that stops reading early (`webmods tabs | head -1`) isn't an error.
+process.stdout.on('error', (e) => { if (e.code === 'EPIPE') process.exit(0); throw e; });
+
 const VALUE_FLAGS = new Set(['--tab', '--url', '-o', '--out', '--output', '--filter', '--limit', '-f', '--file',
   '--browser', '--home', '--native-dir', '--bin-dir', '--timeout', '--agent', '--session', '--model']);
 const BOOL_FLAGS = new Set(['--json', '--hard', '--help', '-h', '--force', '--no-link']);

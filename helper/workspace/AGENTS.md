@@ -14,7 +14,8 @@ install or update it.
 ## The short version
 
 1. Work out what the user wants changed, on which site. Check for existing mods: `webmods mods`.
-2. Look at the live page: `webmods tabs`, `webmods run`, `webmods text`, `webmods screenshot`, and for
+2. Look at the live page: `webmods tabs`, `webmods run`, `webmods text`, `webmods screenshot` (only works
+   while the tab is showing; WebMods never switches tabs on the user, so prefer `run`/`text`), and for
    data, `webmods record <site> on` → `webmods reload` → `webmods requests` → `webmods request <i>`.
 3. `webmods new <site> <mod>` and write the mod (CSS first; data filtering for feeds; DOM tweaks last).
 4. Save, `webmods reload`, then verify: `webmods errors`, `webmods logs`, `webmods run` checks, screenshot.

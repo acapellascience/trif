@@ -65,7 +65,7 @@ The result is printed as pretty JSON, or as-is if it's a string. DOM nodes come 
   },
   open: {
     usage: 'webmods open <url>',
-    summary: 'open a URL in a new active tab and wait for it to load; prints the tab id',
+    summary: 'open a URL in a new background tab and wait for it to load; prints the tab id',
     details: 'https:// is added when the URL has no scheme.',
     examples: ['webmods open example.com'],
   },
@@ -84,8 +84,9 @@ The result is printed as pretty JSON, or as-is if it's a string. DOM nodes come 
   screenshot: {
     usage: 'webmods screenshot [TAB] [-o file.png]',
     summary: 'save a PNG of the visible part of the tab and print its path',
-    details: `Default path: <workspace>/screenshots/<time>.png. The tab's window is focused and the tab
-activated first. Open the printed file to look at it.`,
+    details: `Default path: <workspace>/screenshots/<time>.png. Only works on a tab that's showing in its
+window: WebMods never switches tabs (the user may be browsing, or other agents working). For a
+background tab, use \`webmods text\` or \`webmods run\`. Open the printed file to look at it.`,
     examples: ['webmods screenshot', 'webmods screenshot --url x.com -o /tmp/x.png'],
   },
   record: {

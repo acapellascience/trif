@@ -110,9 +110,9 @@ Without one, the target is the active tab of the last-focused normal window.
 | `run` | `code`, `expression: bool`, `timeout` (ms, default 10000) + tab selector | `{value}`: the code's result, made JSON-safe in the page (see below), or an error `{ok:false, error:"<message + stack>"}` |
 | `reload` | `hard: bool` + tab selector | `{url}` after the tab's `status` is `complete` (timeout 30 s) |
 | `navigate` | `to` (URL) + tab selector | `{url}` after load completes |
-| `open` | `to` (URL) | `{id, url}`: opens a new active tab, waits for load |
+| `open` | `to` (URL) | `{id, url}`: opens a new background tab (never takes focus), waits for load |
 | `text` | tab selector | `{url, title, text}`: `document.body.innerText`, capped at 200 000 chars |
-| `screenshot` | tab selector | `{dataUrl}` PNG of the visible area (the extension focuses the tab's window and activates the tab first). The CLI writes it to a file. |
+| `screenshot` | tab selector | `{dataUrl}` PNG of the visible area. Only for a tab that's showing in its (non-minimized) window; otherwise an error: the extension never switches tabs or focuses windows, since agents may run while the user browses. The CLI writes it to a file. |
 | `record` | `site`, `on: bool` | `{recording:[sites]}`. Turns the network recorder on/off for a hostname (and its subdomains). Takes effect on the next page load. |
 | `requests` | `filter` (regex string, matched against URL), `limit` (default 50) + tab selector | `[{i, method, url, status, type:"fetch"|"xhr", size, time}]`, newest last |
 | `request` | `i` + tab selector | `{method, url, status, requestBody, responseText}` (bodies capped at 2 MB each) |

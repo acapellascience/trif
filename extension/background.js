@@ -326,9 +326,10 @@ const commands = {
       const win = await chrome.windows.getLastFocused({ windowTypes: ['normal'] }).catch(() => null);
       let tab;
       if (win) {
-        tab = await chrome.tabs.create({ url, active: true, windowId: win.id });
+        // In the background: agents work while the user is looking at something else.
+        tab = await chrome.tabs.create({ url, active: false, windowId: win.id });
       } else {
-        tab = (await chrome.windows.create({ url, focused: true })).tabs[0];
+        tab = (await chrome.windows.create({ url, focused: false })).tabs[0];
       }
       await waiter.wait(tab.id);
       const t = await chrome.tabs.get(tab.id);
@@ -348,11 +349,15 @@ const commands = {
     });
   },
 
+  // Only the tab showing in its window can be captured, and WebMods never switches tabs or focuses
+  // windows to get one: several agents can be working at once while the user browses.
   async screenshot(args) {
     const tab = await resolveTab(chrome, args);
-    await chrome.windows.update(tab.windowId, { focused: true });
-    await chrome.tabs.update(tab.id, { active: true });
-    await sleep(250); // let the newly activated tab paint
+    const win = await chrome.windows.get(tab.windowId).catch(() => null);
+    if (!tab.active || !win || win.state === 'minimized') {
+      throw new Error("that tab isn't showing (WebMods doesn't switch tabs while the user is browsing); " +
+        'inspect it with `webmods text` or `webmods run` instead, or try again when it is in front');
+    }
     return { dataUrl: await chrome.tabs.captureVisibleTab(tab.windowId, { format: 'png' }) };
   },
 

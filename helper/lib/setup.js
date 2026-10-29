@@ -1,5 +1,10 @@
 'use strict';
-// `webmods setup`: workspace, wrappers, native host manifests, CLI link. Idempotent.
+// `webmods setup`: workspace, app copy, wrappers, native host manifests, CLI link. Idempotent.
+//
+// Install modes (where the wrappers point):
+//   link  the package itself (a git checkout: the maintainer's way of working)
+//   copy  a self-contained copy in <home>/app (default when not a git checkout, e.g. `npx webmods setup`,
+//         whose package lives in npm's cache, which npm may delete)
 
 const fs = require('fs');
 const os = require('os');
@@ -33,25 +38,135 @@ function pickNodePath() {
   return exec;
 }
 
-function hostWrapperContent(nodePath, home) {
+function hostWrapperContent(nodePath, home, hostJs = P.HOST_JS) {
   const env = home !== P.defaultHome() ? `WEBMODS_HOME=${shq(home)}\nexport WEBMODS_HOME\n` : '';
-  return `#!/bin/sh\n${env}exec ${shq(nodePath)} ${shq(P.HOST_JS)} "$@"\n`;
+  return `#!/bin/sh\n${env}exec ${shq(nodePath)} ${shq(hostJs)} "$@"\n`;
 }
 
-function cliWrapperContent(nodePath, home) {
+function cliWrapperContent(nodePath, home, cliJs = P.CLI_JS) {
   // Respect an explicit WEBMODS_HOME, else default to the home this wrapper was installed for.
   const env = home !== P.defaultHome() ? `: "\${WEBMODS_HOME:=${String(home).replace(/(["\\$`])/g, '\\$1')}}"\nexport WEBMODS_HOME\n` : '';
-  return `#!/bin/sh\n${env}exec ${shq(nodePath)} ${shq(P.CLI_JS)} "$@"\n`;
+  return `#!/bin/sh\n${env}exec ${shq(nodePath)} ${shq(cliJs)} "$@"\n`;
 }
 
-function manifestFor(wrapperPath) {
+function manifestFor(wrapperPath, origins = [P.EXTENSION_ORIGIN]) {
   return {
     name: P.HOST_NAME,
     description: 'WebMods helper: syncs mods and serves the webmods CLI',
     path: wrapperPath,
     type: 'stdio',
-    allowed_origins: [P.EXTENSION_ORIGIN],
+    allowed_origins: [...origins],
   };
+}
+
+// ---------------------------------------------------------------- app copy
+
+// What the copy needs: the helper (host + CLI + AGENTS.md + template), the extension to load unpacked,
+// the examples, and package.json (version, and it keeps helper/ CommonJS).
+const COPY_ITEMS = ['package.json', 'helper', 'extension', 'examples'];
+const REQUIRED_FILES = ['package.json', 'helper/host.js', 'helper/cli.js', 'extension/manifest.json'];
+const SKIP_NAMES = new Set(['.DS_Store', 'node_modules', '.git']);
+
+function chooseMode(mode, root = P.REPO_ROOT) {
+  if (mode === 'copy' || mode === 'link') return mode;
+  return P.isGitCheckout(root) ? 'link' : 'copy';
+}
+
+function realOrResolved(p) {
+  try { return fs.realpathSync(p); } catch { return path.resolve(p); }
+}
+
+function copyTree(src, dest) {
+  const st = fs.lstatSync(src);
+  if (st.isSymbolicLink()) {
+    fs.symlinkSync(fs.readlinkSync(src), dest);
+  } else if (st.isDirectory()) {
+    fs.mkdirSync(dest, { recursive: true });
+    for (const name of fs.readdirSync(src)) {
+      if (!SKIP_NAMES.has(name)) copyTree(path.join(src, name), path.join(dest, name));
+    }
+  } else if (st.isFile()) {
+    fs.copyFileSync(src, dest);
+    fs.chmodSync(dest, st.mode & 0o777);
+  }
+}
+
+// rel path -> 'dir' | 'link:<target>' | 'file:<mode>:<size>' for every entry under root/items.
+function listTree(root, items) {
+  const out = new Map();
+  const walk = (rel) => {
+    const abs = path.join(root, rel);
+    let st;
+    try { st = fs.lstatSync(abs); } catch { return; }
+    if (st.isSymbolicLink()) out.set(rel, `link:${fs.readlinkSync(abs)}`);
+    else if (st.isDirectory()) {
+      out.set(rel, 'dir');
+      for (const name of fs.readdirSync(abs)) if (!SKIP_NAMES.has(name)) walk(path.join(rel, name));
+    } else if (st.isFile()) out.set(rel, `file:${st.mode & 0o777}:${st.size}`);
+  };
+  for (const item of items) walk(item);
+  return out;
+}
+
+// True when dest already holds exactly what a copy from src would produce (so re-running setup doesn't
+// pull files out from under a running helper).
+function sameTree(src, dest, items = COPY_ITEMS) {
+  const a = listTree(src, items);
+  const b = listTree(dest, items);
+  if (a.size !== b.size) return false;
+  for (const [rel, kind] of a) {
+    if (b.get(rel) !== kind) return false;
+    if (kind.startsWith('file:') && !fs.readFileSync(path.join(src, rel)).equals(fs.readFileSync(path.join(dest, rel)))) return false;
+  }
+  return true;
+}
+
+/**
+ * Copy the package at srcRoot into appDir: into a temp sibling first, then swapped in, so a failed copy
+ * leaves a working install alone. Returns { how: 'created'|'updated'|'unchanged'|'in-place' }; throws
+ * (with appDir untouched) on failure.
+ */
+function installApp(srcRoot, appDir) {
+  if (realOrResolved(srcRoot) === realOrResolved(appDir)) return { how: 'in-place' };
+  for (const f of REQUIRED_FILES) {
+    if (!fs.existsSync(path.join(srcRoot, f))) throw new Error(`${path.join(srcRoot, f)} is missing; nothing to copy from`);
+  }
+  if (fs.existsSync(appDir) && sameTree(srcRoot, appDir)) return { how: 'unchanged' };
+
+  const parent = path.dirname(appDir);
+  const base = path.basename(appDir);
+  fs.mkdirSync(parent, { recursive: true });
+  // Leftovers from an interrupted earlier run.
+  for (const name of fs.readdirSync(parent)) {
+    if (name.startsWith(`.${base}.new-`) || name.startsWith(`.${base}.old-`)) fs.rmSync(path.join(parent, name), { recursive: true, force: true });
+  }
+  const tmp = path.join(parent, `.${base}.new-${process.pid}`);
+  try {
+    fs.mkdirSync(tmp);
+    for (const item of COPY_ITEMS) {
+      const s = path.join(srcRoot, item);
+      if (fs.existsSync(s)) copyTree(s, path.join(tmp, item));
+    }
+    for (const f of REQUIRED_FILES) if (!fs.existsSync(path.join(tmp, f))) throw new Error(`the copy is missing ${f}`);
+  } catch (e) {
+    fs.rmSync(tmp, { recursive: true, force: true });
+    throw e;
+  }
+
+  let old = null;
+  if (fs.existsSync(appDir)) {
+    old = path.join(parent, `.${base}.old-${process.pid}`);
+    fs.renameSync(appDir, old);
+  }
+  try {
+    fs.renameSync(tmp, appDir);
+  } catch (e) {
+    if (old) fs.renameSync(old, appDir);
+    fs.rmSync(tmp, { recursive: true, force: true });
+    throw e;
+  }
+  if (old) fs.rmSync(old, { recursive: true, force: true });
+  return { how: old ? 'updated' : 'created' };
 }
 
 function writeIfChanged(file, content, mode) {
@@ -68,6 +183,15 @@ function rcFileHint() {
   if (shell === 'bash') return process.platform === 'darwin' ? '~/.bash_profile' : '~/.bashrc';
   if (shell === 'fish') return null;
   return '~/.profile';
+}
+
+// Drop the folders npm/npx put on PATH for the duration of `npx webmods setup` (npm's cache, which it
+// may delete, and its node-gyp shim): the helper and agents shouldn't keep using them.
+function cleanPath(pathValue) {
+  const sep = path.sep;
+  return String(pathValue || '').split(path.delimiter).filter((d) => d
+    && !d.includes(`${sep}_npx${sep}`)
+    && !d.includes(`${sep}@npmcli${sep}run-script${sep}`)).join(path.delimiter);
 }
 
 // Merge config.json -> env.PATH = pathValue, keeping every other key. Leaves a broken file alone.
@@ -87,8 +211,8 @@ function recordPath(home, pathValue) {
 }
 
 /**
- * opts: { home, browser, nativeDir, binDir, noLink }
- * Returns { ok, lines: [string], ws, manifests: [{browser, file}] }
+ * opts: { home, browser, nativeDir, binDir, noLink, mode: 'copy'|'link'|undefined (auto) }
+ * Returns { ok, lines: [string], ws, manifests: [{browser, file}], nodePath, mode, root }
  */
 function setup(opts = {}) {
   const lines = [];
@@ -101,14 +225,45 @@ function setup(opts = {}) {
   for (const d of [home, ws.modsDir, ws.screenshots, ws.bin]) fs.mkdirSync(d, { recursive: true });
   say(`workspace     ${home}`);
 
-  const agentsSrc = path.join(P.HELPER_DIR, 'workspace', 'AGENTS.md');
+  // 2. App: what the wrappers run and where the extension is loaded from.
+  const mode = chooseMode(opts.mode);
+  let root = P.REPO_ROOT;
+  if (mode === 'copy') {
+    try {
+      const { how } = installApp(P.REPO_ROOT, ws.appDir);
+      say(`app           ${ws.appDir} (v${P.VERSION}, ${how === 'in-place' ? 'running from it' : `${how}, copied from ${P.REPO_ROOT}`})`);
+      root = ws.appDir;
+    } catch (e) {
+      ok = false;
+      if (fs.existsSync(path.join(ws.appDir, 'helper', 'host.js'))) {
+        say(`app           FAILED to update ${ws.appDir}: ${e.message}; kept the existing copy`);
+        root = ws.appDir;
+      } else {
+        say(`app           FAILED to copy WebMods into ${ws.appDir}: ${e.message}`);
+        return { ok, lines, ws, manifests: [], nodePath: null, mode, root: null };
+      }
+    }
+  } else {
+    say(`app           ${root} (linked: the wrappers run this folder)`);
+    if (!P.isGitCheckout(root)) {
+      say(`              warning: ${root} isn't a git checkout. If it goes away (npm deletes its npx cache),`);
+      say('              WebMods stops working. Run setup without --link to install a copy instead.');
+    }
+    if (fs.existsSync(ws.appDir) && realOrResolved(ws.appDir) !== realOrResolved(root)) {
+      say(`              (an earlier copy in ${ws.appDir} is no longer used; you can delete it)`);
+    }
+  }
+  const helperDir = path.join(root, 'helper');
+  const extensionDir = path.join(root, 'extension');
+
+  const agentsSrc = path.join(helperDir, 'workspace', 'AGENTS.md');
   if (fs.existsSync(agentsSrc)) {
     fs.copyFileSync(agentsSrc, path.join(home, 'AGENTS.md'));
     say(`              AGENTS.md refreshed from ${agentsSrc}`);
   } else {
     say(`              AGENTS.md not found at ${agentsSrc}; skipped`);
   }
-  const claudeSrc = path.join(P.HELPER_DIR, 'workspace', 'CLAUDE.md');
+  const claudeSrc = path.join(helperDir, 'workspace', 'CLAUDE.md');
   const claude = fs.existsSync(claudeSrc) ? fs.readFileSync(claudeSrc, 'utf8') : '@AGENTS.md\n';
   fs.writeFileSync(path.join(home, 'CLAUDE.md'), claude);
 
@@ -117,19 +272,24 @@ function setup(opts = {}) {
   const agents = require('./agents');
   fs.mkdirSync(path.join(home, '.claude'), { recursive: true });
   fs.writeFileSync(path.join(home, '.claude', 'settings.json'), JSON.stringify(agents.CLAUDE_SETTINGS, null, 2) + '\n');
-  const rec = recordPath(home, process.env.PATH || '');
+  const rec = recordPath(home, cleanPath(process.env.PATH));
   if (rec.error) say(`              couldn't record PATH for agents: ${rec.error}`);
   const found = agents.listAgents(P.workspace(opts.home), { version: false }).agents;
   say(`agents        ${found.map((a) => (a.available ? `${a.id} (${a.path})` : `${a.id} not found`)).join(', ')}`);
 
-  // 2. Wrappers
+  // 3. Wrappers
   const nodePath = pickNodePath();
-  writeIfChanged(ws.hostWrapper, hostWrapperContent(nodePath, home), 0o755);
-  writeIfChanged(ws.cliWrapper, cliWrapperContent(nodePath, home), 0o755);
-  say(`host wrapper  ${ws.hostWrapper} (node ${nodePath})`);
-  say(`CLI wrapper   ${ws.cliWrapper}`);
+  const hostJs = path.join(helperDir, 'host.js');
+  const cliJs = path.join(helperDir, 'cli.js');
+  writeIfChanged(ws.hostWrapper, hostWrapperContent(nodePath, home, hostJs), 0o755);
+  writeIfChanged(ws.cliWrapper, cliWrapperContent(nodePath, home, cliJs), 0o755);
+  say(`host wrapper  ${ws.hostWrapper} -> ${hostJs} (node ${nodePath})`);
+  say(`CLI wrapper   ${ws.cliWrapper} -> ${cliJs}`);
 
-  // 3. Native host manifests
+  // 4. Native host manifests, accepting every WebMods extension ID.
+  const { ids, invalid } = P.extensionIds(ws.config);
+  say(`extension IDs ${ids.join(', ')}`);
+  if (invalid.length) say(`              ignored config.json extensionIds entries that aren't extension IDs: ${invalid.map((x) => JSON.stringify(x)).join(', ')}`);
   let targets;
   if (opts.nativeDir) {
     targets = [{ key: 'custom', label: 'custom', nativeDir: path.resolve(opts.nativeDir) }];
@@ -140,7 +300,7 @@ function setup(opts = {}) {
       targets = selectBrowsers('chrome');
     }
   }
-  const manifest = JSON.stringify(manifestFor(ws.hostWrapper), null, 2) + '\n';
+  const manifest = JSON.stringify(manifestFor(ws.hostWrapper, P.extensionOrigins(ws.config)), null, 2) + '\n';
   const manifests = [];
   for (const t of targets) {
     const file = path.join(t.nativeDir, `${P.HOST_NAME}.json`);
@@ -155,7 +315,7 @@ function setup(opts = {}) {
     }
   }
 
-  // 4. CLI link
+  // 5. CLI link
   const binDir = opts.binDir ? path.resolve(opts.binDir) : '/usr/local/bin';
   const link = path.join(binDir, 'webmods');
   if (opts.noLink) {
@@ -179,7 +339,7 @@ function setup(opts = {}) {
     }
   }
 
-  // 5. PATH
+  // 6. PATH
   const pathDirs = String(process.env.PATH || '').split(path.delimiter).map((d) => path.resolve(d));
   const linked = (() => { try { return fs.readlinkSync(link) === ws.cliWrapper; } catch { return false; } })();
   const onPath = pathDirs.includes(path.resolve(ws.bin)) || (linked && pathDirs.includes(binDir));
@@ -191,18 +351,23 @@ function setup(opts = {}) {
     else say(`                fish_add_path ${ws.bin}`);
   }
 
-  // 6. Next steps
+  // 7. Next steps
   say('');
   say('Next steps:');
-  say(`  1. Open chrome://extensions, turn on "Developer mode" (top right), click "Load unpacked"`);
-  say(`     and choose ${path.join(P.REPO_ROOT, 'extension')}`);
-  say(`     (its ID must be ${P.EXTENSION_ID}).`);
+  say('  1. Install the extension. Until WebMods is on the Chrome Web Store, load it unpacked:');
+  say('     open chrome://extensions, turn on "Developer mode" (top right), click "Load unpacked"');
+  say(`     and choose ${extensionDir}`);
+  say(`     (its ID must be ${P.EXTENSION_ID}).${mode === 'copy' ? ' Keep that folder: Chrome runs the extension from it,' : ''}`);
+  if (mode === 'copy') say('     and setup updates it in place. (A Web Store listing will replace this step later.)');
   say('  2. Click "Details" on the WebMods extension and turn on "Allow User Scripts".');
   say('  3. If Chrome was already running before this setup, quit it completely and reopen it.');
   say('  4. Check everything with: webmods doctor');
   say(`  Then ask your coding agent to work in ${home} (it reads AGENTS.md there).`);
 
-  return { ok, lines, ws, manifests, nodePath };
+  return { ok, lines, ws, manifests, nodePath, mode, root };
 }
 
-module.exports = { setup, recordPath, hostWrapperContent, cliWrapperContent, manifestFor, pickNodePath, shq, isExecutable };
+module.exports = {
+  setup, recordPath, cleanPath, hostWrapperContent, cliWrapperContent, manifestFor, pickNodePath, shq, isExecutable,
+  chooseMode, installApp, sameTree, COPY_ITEMS,
+};

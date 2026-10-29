@@ -303,7 +303,7 @@ function renderNotice({ helperOk, agentInfo, anyAgent }) {
   } else if (status && !helperOk) {
     bad = true;
     const p = el('p');
-    p.append('Run ', code('webmods setup'), ' in a terminal, then restart Chrome.');
+    p.append('Run ', code('npx webmods setup'), ' in a terminal (needs Node 18+), then restart Chrome.');
     parts.push(el('p', 'title', 'The WebMods helper isn’t connected'), p);
     if (status.helper.error) parts.push(el('p', 'note', `Chrome says: ${status.helper.error}`));
     const actions = el('p', 'actions');
@@ -334,7 +334,7 @@ function renderNotice({ helperOk, agentInfo, anyAgent }) {
       if (agentInfo.note) { const p = el('p'); setMarkdown(p, agentInfo.note); parts.push(p); }
     } else {
       parts.push(el('p', 'title', 'No coding agent found'));
-      parts.push(el('p', null, 'Install Claude Code, then run webmods setup again from the same terminal.'));
+      parts.push(el('p', null, 'Install Claude Code, then run npx webmods setup again from the same terminal.'));
     }
     if (anyAgent) parts.push(el('p', 'note', 'Pick another agent in Settings.'));
   } else if (helperOk && view.agentsError && !view.agents) {
@@ -529,13 +529,14 @@ onSwitchChange(() => renderMods());
 
 function renderMods() {
   const { site, status, tab } = view;
-  const mods = site && status ? status.mods.filter((m) => modAppliesTo(m, tab.url)) : [];
+  // Plus mods on hold from an agent run on this site, wherever they'd run, so they can be allowed here.
+  const mods = site && status ? status.mods.filter((m) => modAppliesTo(m, tab.url) || m.held?.site === site) : [];
   ui.mods.hidden = mods.length === 0;
   if (!mods.length) { view.modsKey = null; ui.modList.replaceChildren(); return; }
   ui.modsCount.textContent = `(${mods.length})`;
   // Rebuilt only when the set of mods changes; everything else updates in place, so a focused switch
   // keeps focus through status refreshes.
-  const key = JSON.stringify(mods.map((m) => [m.id, m.name, m.file]));
+  const key = JSON.stringify(mods.map((m) => [m.id, m.name, m.file, !!m.held]));
   if (key !== view.modsKey) {
     view.modsKey = key;
     ui.modList.replaceChildren(...mods.map(modItem));
@@ -569,10 +570,28 @@ function modItem(m) {
   const main = el('div', 'mod-main');
   main.append(name, el('div', 'mod-file', (m.file || m.id).split('/').pop()));
   const row = el('div', 'mod-row');
-  row.append(main, modSwitch(document, {
-    id: m.id, enabled: enabledIn(view.disabled, m.id), labelId,
-    apply: (id, enabled) => request({ type: 'mod.enable', id, enabled, tab: view.tab?.id }),
-  }));
+  if (m.held) {
+    // Written by an agent run here but reaching other sites: not running until the user allows it.
+    li.classList.add('held');
+    const allow = el('button', 'btn allow', 'Allow');
+    allow.type = 'button';
+    allow.setAttribute('aria-describedby', labelId);
+    allow.addEventListener('click', async () => {
+      allow.disabled = true;
+      try { await request({ type: 'mod.approve', id: m.id, tab: view.tab?.id }); } catch (e) {
+        allow.disabled = false;
+        const err = li.querySelector('.mod-err');
+        err.textContent = String(e?.message ?? e);
+        err.hidden = false;
+      }
+    });
+    row.append(main, allow);
+  } else {
+    row.append(main, modSwitch(document, {
+      id: m.id, enabled: enabledIn(view.disabled, m.id), labelId,
+      apply: (id, enabled) => request({ type: 'mod.enable', id, enabled, tab: view.tab?.id }),
+    }));
+  }
   const err = el('div', 'mod-err');
   err.hidden = true;
   li.append(row, err);
@@ -581,6 +600,17 @@ function modItem(m) {
 
 function updateModItem(li, m) {
   if (!m) return;
+  if (m.held) {
+    const tag = li.querySelector('.tag');
+    tag.textContent = 'on hold';
+    tag.hidden = false;
+    const err = li.querySelector('.mod-err');
+    if (!li.querySelector('.allow')?.disabled) {
+      err.textContent = `An agent wrote this while working here, but ${m.held.reason}. It won't run until you allow it.`;
+      err.hidden = false;
+    }
+    return;
+  }
   const on = shownEnabled(m.id, enabledIn(view.disabled, m.id));
   li.classList.toggle('off', !on);
   // "not active"/"paused" only once the status agrees the mod is on (not mid-switch).

@@ -106,11 +106,14 @@ function hostOf(url) {
 }
 
 // Full context: appended system prompt (claude, every run) or prepended to a session's first message.
-function contextText({ url, tabId }) {
+function contextText({ url, tabId, scope }) {
   const where = url
     ? `They're looking at ${url}${tabId != null ? ` (tab ${tabId}): pass \`--tab ${tabId}\` to webmods commands` : ''}.`
     : "They didn't say which page they're on: run `webmods tabs` if you need it.";
-  return "You're running inside the WebMods side panel in the user's Chrome. " + where +
+  const limit = scope
+    ? ` This run is limited to ${scope}: webmods commands only work on its tabs, and a mod you write that matches other sites is held until the user approves it (see "Side-panel runs" in AGENTS.md).`
+    : '';
+  return "You're running inside the WebMods side panel in the user's Chrome. " + where + limit +
     ' Follow AGENTS.md. Mods can be switched off and on with `webmods disable/enable <site>/<mod>`; `webmods status` shows which are on.' +
     ' Reply briefly in plain language; your replies appear in a narrow chat panel.' +
     " You can't ask follow-up questions mid-task: if something's unclear, make a sensible choice or end your turn with a question.";

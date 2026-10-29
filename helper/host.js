@@ -10,6 +10,8 @@
 //  - runs the user's coding agent for the side panel (agent.list / agent.start / agent.stop requests
 //    from the extension or the CLI), sending progress as {type:"agentEvent", runId, event}; and logs
 //    the agent in (agent.login / agent.loginCode / agent.loginCancel, events under the loginId).
+//  - limits each agent run to its site: `webmods` inside a run sends the run's token, and its page
+//    commands go to the extension with args.scope; mods a run writes for other sites are held (held.js).
 
 const fs = require('fs');
 const net = require('net');
@@ -21,6 +23,7 @@ const { scanMods, planModsMessage, folderFingerprint, summarize } = require('./l
 const { Runs } = require('./lib/runs');
 const { Logins } = require('./lib/logins');
 const agents = require('./lib/agents');
+const { updateHeld, approveHeld } = require('./lib/held');
 
 const ws = workspace();
 try { fs.mkdirSync(ws.home, { recursive: true }); } catch { /* logged below if it matters */ }
@@ -50,6 +53,7 @@ const state = {
   mods: [],
   modErrors: [],
   modWarnings: [],
+  held: {}, // mod id -> held entry (see lib/held.js)
   lastSignature: null,
   lastFingerprint: null,
   stdoutOpen: true,
@@ -137,7 +141,10 @@ function syncMods(reason, force) {
   state.lastFingerprint = folderFingerprint(ws.modsDir);
   const { mods, problems, warnings } = scanMods(ws.modsDir);
   const plan = planModsMessage(mods);
-  const signature = plan.mods.map((m) => `${m.id}:${m.hash}`).join('|');
+  try { state.held = updateHeld(ws, mods, runs.scopes()); } catch (e) { logger.error(`held mods: ${e.message}`); }
+  // Held mods still go to the extension (the panel lists them with an Allow button), marked so they aren't registered.
+  const sent = plan.mods.map((m) => (state.held[m.id] ? { ...m, held: { site: state.held[m.id].site, reason: state.held[m.id].reason } } : m));
+  const signature = sent.map((m) => `${m.id}:${m.hash}${m.held ? ':held' : ''}`).join('|');
   const errors = [...problems, ...plan.errors];
   const errorsChanged = JSON.stringify(errors) !== JSON.stringify(state.modErrors);
   state.mods = mods;
@@ -150,8 +157,9 @@ function syncMods(reason, force) {
   if (!force && signature === state.lastSignature) return;
   state.lastSignature = signature;
   try {
-    sendToExtension({ type: 'mods', mods: plan.mods });
-    logger.info(`sent ${plan.mods.length} mod(s) to the extension (${reason})`);
+    sendToExtension({ type: 'mods', mods: sent });
+    const nHeld = sent.filter((m) => m.held).length;
+    logger.info(`sent ${sent.length} mod(s) to the extension${nHeld ? ` (${nHeld} held)` : ''} (${reason})`);
   } catch (e) {
     logger.error(`could not send mods: ${e.message}`);
   }
@@ -228,9 +236,15 @@ function poll() {
 const runs = new Runs({ getWorkspace: () => workspace(ws.home), logger, onEvent: onAgentEvent });
 const logins = new Logins({ getWorkspace: () => workspace(ws.home), logger, onEvent: onAgentEvent });
 const runSubscribers = new Map(); // runId or loginId -> Set of CLI sockets that started it (see onClientLine)
-const AGENT_COMMANDS = new Set(['agent.list', 'agent.start', 'agent.stop', 'agent.login', 'agent.loginCode', 'agent.loginCancel']);
+const AGENT_COMMANDS = new Set(['agent.list', 'agent.start', 'agent.stop', 'agent.login', 'agent.loginCode', 'agent.loginCancel', 'mod.approve']);
 
 function onAgentEvent(runId, event) {
+  // Before the run's last event goes out: hold what it wrote for other sites, and say so in `done`.
+  if (event && event.kind === 'done' && String(runId).startsWith('r')) {
+    syncMods('agent done', false);
+    const held = Object.entries(state.held).filter(([, h]) => h.runId === runId).map(([id, h]) => ({ id, reason: h.reason }));
+    if (held.length) event.held = held;
+  }
   // A run that found the agent logged out: agent.list shouldn't keep saying it's logged in.
   if (event && event.kind === 'error' && /isn't logged in/.test(String(event.message))) agents.forgetLoginStatus();
   // Every run goes to the extension (panels ignore runs they didn't start).
@@ -251,6 +265,14 @@ function agentCommand(cmd, args) {
     case 'agent.stop': return runs.stop(args.runId);
     case 'agent.login': return logins.start(args);
     case 'agent.loginCode': return logins.code(args.loginId, args.code);
+    case 'mod.approve': {
+      const id = typeof args.id === 'string' ? args.id.trim() : '';
+      if (!id) throw new Error('missing mod id');
+      approveHeld(ws.home, id);
+      logger.info(`approved held mod ${id}`);
+      syncMods('approve', false);
+      return { id, approved: true };
+    }
     default: return logins.cancel(args.loginId);
   }
 }
@@ -420,6 +442,7 @@ function helperInfo() {
     modsApplied: state.modsApplied,
     pending: pending.size,
     runs: runs.list(),
+    held: state.held,
     login: logins.info(),
   };
 }
@@ -433,11 +456,26 @@ function onClientLine(sock, line) {
   const args = req && req.args && typeof req.args === 'object' ? req.args : {};
   if (typeof cmd !== 'string' || !cmd) return reply(sock, { id, ok: false, error: 'missing cmd' });
 
+  // From inside an agent run (`webmods` sends the run's token): only page commands, limited to its site.
+  if (req.token !== undefined) {
+    const run = runs.byToken(req.token);
+    if (!run) return reply(sock, { id, ok: false, error: 'this agent run has ended (or its token is wrong)' });
+    if (AGENT_COMMANDS.has(cmd)) {
+      return reply(sock, { id, ok: false, error: cmd === 'mod.approve'
+        ? 'only the user can approve a held mod (in the side panel, or `webmods approve` in their terminal)'
+        : `"${cmd}" isn't available inside an agent run` });
+    }
+    args.scope = run.scope;
+  }
+
   if (cmd === 'ping') return reply(sock, { id, ok: true, result: helperInfo() });
   if (cmd === 'mods') {
     return reply(sock, {
       id, ok: true,
-      result: { modsDir: ws.modsDir, mods: state.mods.map(summarize), errors: state.modErrors, warnings: state.modWarnings },
+      result: {
+        modsDir: ws.modsDir, errors: state.modErrors, warnings: state.modWarnings,
+        mods: state.mods.map((m) => (state.held[m.id] ? { ...summarize(m), held: state.held[m.id] } : summarize(m))),
+      },
     });
   }
 

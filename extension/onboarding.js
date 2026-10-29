@@ -36,7 +36,8 @@ function render(s) {
     setSection('helper', true, 'Helper connected', 'Your coding agent can use the webmods command.');
   } else {
     setSection('helper', false, 'Helper not connected', [
-      'Run ', code('webmods setup'), ' in a terminal, then quit and restart Chrome.',
+      'Run ', code('npx webmods setup'), ' in a terminal (it needs Node 18 or newer), then quit and restart Chrome.',
+      el('br'), 'Already set up? Run ', code('webmods doctor'), ' to see what\'s wrong.',
       ...(s.helper.error ? [el('br'), `Chrome says: ${s.helper.error}`] : []),
     ]);
   }

@@ -8,12 +8,15 @@ const path = require('path');
 const crypto = require('crypto');
 const { spawn } = require('child_process');
 const agents = require('./agents');
+const { scopeFor } = require('./scope');
 
 const RUN_TIMEOUT_MS = Number(process.env.WEBMODS_AGENT_TIMEOUT_MS) > 0 ? Number(process.env.WEBMODS_AGENT_TIMEOUT_MS) : 15 * 60 * 1000;
 const KILL_GRACE_MS = Number(process.env.WEBMODS_AGENT_KILL_GRACE_MS) > 0 ? Number(process.env.WEBMODS_AGENT_KILL_GRACE_MS) : 3000;
 const KEEP_RUN_LOGS = 50;
 const STDERR_KEEP = 16 * 1024;
 const MAX_SNAPSHOT_FILES = 5000;
+// Finished runs still count for held mods this long (a last write can reach the folder watcher late).
+const RECENT_MS = 10000;
 
 // sha1 of every file under `dir` (relative to `base`), skipping dot-folders. Capped for sanity.
 function snapshot(dir, base) {
@@ -54,7 +57,9 @@ function normalizeSite(site, url) {
  * new Runs({ getWorkspace: () => ws, logger, onEvent: (runId, event) => void })
  *   start(args) -> {runId}     args: {agent, model, site, url, tabId, prompt, sessionId}
  *   stop(runId) -> {stopped: true}
- *   list() -> [{runId, site, agent, startedAt}]
+ *   list() -> [{runId, site, scope, agent, startedAt}]
+ *   byToken(token) -> the live run whose agent was given this WEBMODS_RUN_TOKEN, or null
+ *   scopes() -> [{runId, site, scope, before, startedAt}] for live and just-finished runs (held mods)
  *   stopAll() -> Promise (resolves once every agent process has exited, SIGKILLing stragglers)
  */
 class Runs {
@@ -64,10 +69,24 @@ class Runs {
     this.onEvent = onEvent || (() => {});
     this.runs = new Map(); // runId -> run
     this.bySite = new Map(); // site -> runId
+    this.recent = []; // [{runId, site, scope, before, startedAt, until}]
   }
 
   list() {
-    return [...this.runs.values()].map((r) => ({ runId: r.id, site: r.site, agent: r.agent, startedAt: r.startedAt }));
+    return [...this.runs.values()].map((r) => ({ runId: r.id, site: r.site, scope: r.scope, agent: r.agent, startedAt: r.startedAt }));
+  }
+
+  byToken(token) {
+    if (typeof token !== 'string' || !token) return null;
+    for (const r of this.runs.values()) if (r.token === token && !r.finished) return r;
+    return null;
+  }
+
+  scopes() {
+    const now = Date.now();
+    this.recent = this.recent.filter((r) => r.until > now);
+    const live = [...this.runs.values()].map((r) => ({ runId: r.id, site: r.site, scope: r.scope, before: r.before || null, startedAt: r.startedAt }));
+    return [...live, ...this.recent];
   }
 
   start(args = {}) {
@@ -84,6 +103,9 @@ class Runs {
     const run = {
       id: newRunId(),
       site,
+      scope: scopeFor(site),
+      // Given to the agent as WEBMODS_RUN_TOKEN; `webmods` sends it, and the helper scopes its requests.
+      token: crypto.randomBytes(16).toString('hex'),
       agent: adapter.id,
       adapter,
       ws,
@@ -164,14 +186,14 @@ class Runs {
     this._log(run, { webmods: 'start', runId: run.id, agent: run.agent, site: run.site, url: run.url, tabId: run.tabId, sessionId: run.sessionId, model: run.model, prompt: run.prompt, time: run.startedAt });
 
     if (run.stopped) return this._finish(run, { code: null, signal: null }); // stopped before it started
-    const env = agents.agentEnv(ws);
+    const env = { ...agents.agentEnv(ws), WEBMODS_RUN_TOKEN: run.token };
     const found = adapter.detect({ dirs: agents.searchDirs(ws), env, version: false });
     if (!found.available) {
       this._emit(run, { kind: 'error', message: adapter.missing });
       return this._finish(run, { code: null, signal: null });
     }
 
-    const ctx = { url: run.url, tabId: run.tabId };
+    const ctx = { url: run.url, tabId: run.tabId, scope: run.scope };
     let prompt = run.prompt;
     let context = null;
     if (adapter.systemPrompt) context = agents.contextText(ctx);
@@ -284,6 +306,7 @@ class Runs {
     this._emit(run, done);
     this._log(run, { webmods: 'done', ...done, exitCode: code, signal, stderrTail: run.stderr.slice(-4000), time: Date.now() });
     this.logger.info(`agent run ${run.id} done: ok=${done.ok} code=${code} signal=${signal} changed=${changedFiles.length}`);
+    if (run.before) this.recent.push({ runId: run.id, site: run.site, scope: run.scope, before: run.before, startedAt: run.startedAt, until: Date.now() + RECENT_MS });
     this.runs.delete(run.id);
     if (this.bySite.get(run.site) === run.id) this.bySite.delete(run.site);
   }

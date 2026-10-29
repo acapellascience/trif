@@ -24,6 +24,7 @@ dependencies, no build step.**
      watches the mods folder, pushing mods to the extension.
    - `cli.js`: the `webmods` command agents (and people) run.
    - `webmods setup` installs everything: workspace, native host manifest, wrapper script, CLI link.
+     Strangers run it as `npx webmods setup` (npm package `webmods`, see "Native host installation").
 3. **Workspace** (`~/.webmods/`, overridable with env `WEBMODS_HOME`). The agent's working directory:
    ```
    ~/.webmods/
@@ -41,9 +42,10 @@ dependencies, no build step.**
 ## Extension identity
 
 `extension/manifest.json` carries a fixed `"key"` so the unpacked extension always has the ID
-**`iaablflfafmonebdomeikadolkgdbkhe`**. The native host manifest's `allowed_origins` is
-`chrome-extension://iaablflfafmonebdomeikadolkgdbkhe/`. (The private key lives in `.keys/`, gitignored;
-it's only needed to pack a .crx.)
+**`iaablflfafmonebdomeikadolkgdbkhe`**. The native host manifest's `allowed_origins` lists every WebMods
+extension ID: this dev ID, the Chrome Web Store ID (unknown until the first upload; add it to
+`STORE_EXTENSION_IDS` in `helper/lib/paths.js`), and any extra IDs in the workspace's `config.json`
+`"extensionIds": [...]`. (The private key lives in `.keys/`, gitignored; it's only needed to pack a .crx.)
 
 ```
 "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAvrM00irPxw843QWA7797u9U1QLvK2M9cHdfoblqrEGec2aA++jHrJMdStaXa19U5R+K+aI8atnfwq4FLGDNid11AcgBavxUgtOGU7cXIXDX8MVdbfBVdMl4oMcfOVH1QJW6z0X5CzavJ5+F4HQj2dOQ8gMEBqjrB0k8rGD7G+93Tj7ewODVcYclNqZJUEfnGbz+TIbHh98F6KkwIvbJF3ng3Uh/6Qq7lXgPa6sGvRTIHGTJ0tD7xeJ7sWteE/3f8jzs6pKyYJyBqxoPYciim2LtzgxF+BHFe7c8CBFRflRTG0ofwblJwcRNhqMFYIwsxZes7QVd1c/ul/xdk2uOu9wIDAQAB"
@@ -184,7 +186,7 @@ code whenever it changes (`const RECORDING = ["x.com"]`).
 ## CLI (`webmods`)
 
 ```
-webmods setup [--browser chrome|chromium|brave|edge|arc|all]   install workspace, native host, CLI link
+webmods setup [--browser chrome|chromium|brave|edge|arc|all] [--copy|--link]   install workspace, native host, CLI link
 webmods status                     connection, user-scripts switch, mods and whether each is registered (or off)
 webmods doctor                     diagnose setup problems, printing a fix for each
 webmods tabs
@@ -202,6 +204,8 @@ webmods logs [TAB]
 webmods mods                        list mods from the folder (id, matches, file); [off] marks switched-off ones when Chrome is reachable
 webmods disable <site>/<mod> [TAB]  switch a mod off (mod.enable; reloads TAB/the active tab if the mod runs there)
 webmods enable <site>/<mod> [TAB]   switch it back on
+webmods approve <site>/<mod>        let a held mod run (see "Run scope"); refused inside an agent run
+webmods check <file|site/mod>       compile a mod without running it; prints the syntax error or "ok"
 webmods new <site> <mod>            create sites/<site>/<mod>.js from a template, print its path
 webmods install-example <site>/<mod>
 webmods help [command]
@@ -214,31 +218,56 @@ the raw result as JSON.
 
 ## CLI ⇄ helper (unix socket)
 
-Newline-delimited JSON on `~/.webmods/helper.sock` (mode 0600). Request `{id, cmd, args}` →
+Newline-delimited JSON on `~/.webmods/helper.sock` (mode 0600). Request `{id, cmd, args, token?}` →
 response `{id, ok, result|error}`. Helper-local commands (`mods`, `ping`) are answered by the helper;
 everything else is forwarded to the extension. Requests time out after `args.timeout + 5000` ms (default 35 s).
 Agent commands (`agent.list`/`agent.start`/`agent.stop`) are helper-local too; after answering `agent.start` with `{runId}`, the helper streams `{type:"agentEvent", runId, event}` lines (no `id`) on that same connection until the `done` event.
+`token` is the run token (see "Run scope"): the CLI sends `$WEBMODS_RUN_TOKEN` when it's set.
 If the socket file exists but nothing listens, the next host to start removes it. If a second host starts
 (a second Chrome profile) while one is live, it logs that and serves only mod syncing for its profile.
 
 ## Native host installation (`webmods setup`)
 
-- Wrapper: `~/.webmods/bin/webmods-host` = `#!/bin/sh\nexec "<absolute node path>" "<repo>/helper/host.js" "$@"`
+First install, for anyone with Node ≥ 18: **`npx webmods setup`**. The npm package `webmods` (root
+`package.json`, `bin: webmods → helper/cli.js`) ships `helper/`, `extension/`, `examples/` and this file.
+Re-running setup is safe; run it again to update.
+
+- **Where the wrappers point (install mode).**
+  - `copy` (default when the package isn't a git checkout, i.e. `<package>/.git` doesn't exist, as
+    with npx, whose folder is a cache npm may delete): setup copies `package.json`, `helper/`,
+    `extension/` and `examples/` into `~/.webmods/app/` and the wrappers run that copy. The copy goes to
+    a temp sibling (`.app.new-<pid>`) and is then swapped in, so a failed copy leaves a working install
+    alone; when `app/` already matches byte for byte, nothing is touched (a running helper keeps its files).
+    Running setup from the copy itself (`webmods setup` through the wrapper) leaves it in place.
+  - `link` (default in a git checkout, for developing WebMods): the wrappers run the checkout's files.
+  - `--copy` / `--link` force either mode.
+  AGENTS.md, CLAUDE.md, the mod template and the examples always come from the files the wrappers run.
+- Wrapper: `~/.webmods/bin/webmods-host` = `#!/bin/sh\nexec "<absolute node path>" "<app>/helper/host.js" "$@"`
+  where `<app>` is `~/.webmods/app` (copy) or the checkout (link)
   (Chrome launches hosts with a minimal PATH, so the node path is absolute).
-- Manifest `com.webmods.helper.json` → `{ name, description, path: <wrapper>, type: "stdio", allowed_origins: ["chrome-extension://iaablflfafmonebdomeikadolkgdbkhe/"] }`
-  written to each selected browser's `NativeMessagingHosts` dir (macOS:
+- Manifest `com.webmods.helper.json` → `{ name, description, path: <wrapper>, type: "stdio", allowed_origins: [...] }`
+  where `allowed_origins` is `chrome-extension://<id>/` for every WebMods extension ID (see "Extension
+  identity"), written to each selected browser's `NativeMessagingHosts` dir (macOS:
   `~/Library/Application Support/Google/Chrome/NativeMessagingHosts`, `…/Chromium/…`,
   `…/BraveSoftware/Brave-Browser/…`, `…/Microsoft Edge/…`; Linux: `~/.config/google-chrome/NativeMessagingHosts` etc.).
-  Default: every one of those browsers whose parent folder exists.
+  Default: every one of those browsers whose parent folder exists. `webmods doctor` fails a manifest
+  that is missing any of the IDs.
 - CLI link: `~/.webmods/bin/webmods` (shell wrapper like the host's), and it prints a line to add
   `~/.webmods/bin` to PATH if it isn't there. If `/usr/local/bin` is writable, it also symlinks
   `/usr/local/bin/webmods`.
+- PATH for agents: setup records the terminal's PATH in `config.json` `env.PATH`, minus the folders npx
+  adds for its own run.
+- Extension: until the Chrome Web Store listing exists, users (beta testers) load it unpacked from
+  `<app>/extension` (setup's "Next steps" print the folder). The listing will replace that step.
+- Version: the root `package.json` is the single source; `helper/lib/paths.js` reads it and
+  `extension/manifest.json`'s version must match (a test checks).
 
 ## Repository layout
 
 ```
 extension/   manifest.json, background.js (service worker), runtime.js (page runtime source),
              onboarding.html/.js, icons/
+package.json the npm package `webmods` (version, bin, files allowlist)
 helper/      host.js, cli.js, lib/*.js, workspace/AGENTS.md, workspace/CLAUDE.md, templates/mod.js
 examples/    sites/x.com/plain-x.js (+ tests)
 tests/       node tests (node --test), incl. a fake extension for the helper and a chrome.* mock for the extension
@@ -301,6 +330,7 @@ New native request commands (answered with a normal `response`):
 | `agent.login` | `agent?` | `{loginId}` right away; progress arrives as `agentEvent` messages with `runId` = the loginId |
 | `agent.loginCode` | `loginId, code` | `{sent: true}` (writes the code and a newline to the login's stdin) |
 | `agent.loginCancel` | `loginId` | `{cancelled: true}` |
+| `mod.approve` | `id` | `{id, approved: true}`: releases a held mod (see "Run scope"); also on the socket, not from a run |
 
 `loggedIn` is `true` / `false`, or `null` when unknown or the agent isn't available (from the adapter's
 `loginStatus`, which spends no tokens; cached 30 s per agent, forgotten when a login finishes or a run
@@ -352,6 +382,39 @@ New helper → extension message: `{type: "agentEvent", runId, event}` where `ev
   follow-up questions mid-task: if something's unclear, make a sensible choice or end your turn with a
   question." Later messages in the session get a one-line reminder of the current URL and tab id.
 
+### Run scope
+
+Agent runs read web pages, and a page can carry instructions aimed at the agent. So each run is limited
+to one site, its **scope**: the registrable domain of the run's site (`en.wikipedia.org` →
+`wikipedia.org`; `bbc.co.uk`, `user.github.io` and a few other suffixes are handled; no full Public
+Suffix List). `helper/lib/scope.js` computes it; `extension/lib.js` mirrors the checks.
+
+- **Token.** `agent.start` makes a random token per run and gives the agent `WEBMODS_RUN_TOKEN`; the
+  CLI sends it with every request. The helper answers a request with an unknown token (the run ended)
+  with an error, refuses `agent.*` and `mod.approve` from a run, and sets `args.scope` on everything
+  else it forwards (overriding any `scope` the client sent). Requests without a token (the user's
+  terminal, the user's own agent outside the panel) are not scoped. The CLI itself refuses `setup`,
+  `agent` and `approve` when the variable is set.
+- **Extension.** With `args.scope`, page commands only act on tabs whose URL is http(s) on the scope or
+  a subdomain (`tabs` lists only those; others fail with an error naming the scope); `open`/`navigate`
+  only go to such URLs; `record` only for such sites; `mod.enable` only for mods whose every `@match` is
+  in scope.
+- **Held mods.** The helper snapshots the mods folder when a run starts. On every mods sync while a run
+  is live (and for 10 s after it ends), a mod that the run added or changed and that has an `@match`
+  outside the scope (`<all_urls>`, a `*` host, another domain, `file://`) is **held**: recorded in
+  `~/.webmods/held.json` (`{id: {hash, site, scope, runId, reason, at, approved?}}`) and sent to the
+  extension with `held: {site, reason}`, which the extension doesn't register. The run's `done` event
+  carries `held: [{id, reason}]`; the panel says so in the chat and lists the mod (also when it doesn't
+  apply to the tab) with an Allow button (`mod.approve`). Approving marks the entry approved so that
+  version isn't held again; any change to the file drops the entry (a later run's change is checked
+  afresh). `webmods status`/`mods` show held mods.
+- **Agent permissions.** The scope only holds if the agent can't reach the helper without the token or
+  rewrite the rules: so Claude Code runs get no command that runs arbitrary code (no `node`), can't
+  edit `held.json`, `config.json`, `AGENTS.md`, `CLAUDE.md`, `.claude/`, `bin/` or `app/` (verified
+  with Claude Code 2.1.312), and can't read
+  `config.json` (it may hold API keys). Codex runs use Codex's workspace-write sandbox, which can run
+  any command in the workspace: the scope is advisory for Codex (still experimental).
+
 ### Agent adapters (`helper/lib/agents/<id>.js`)
 
 Each adapter: `detect(env) → {available, path, version, note}`, `command({prompt, sessionId, model,
@@ -365,8 +428,11 @@ parseLine(line) → {kind:"login", url} | {kind:"text", text} | null}` or `null`
   plus `--resume <sessionId>` and `--model <model>` when given. `acceptEdits` lets it edit and write files
   inside the workspace (and denies writes outside it); with `dontAsk`, `Edit`/`Write` allow rules didn't
   allow writes at all (2.1.149). Everything else is passed as `--allowedTools Read(./**) Glob Grep
-  Bash(webmods:*) Bash(cd:*) Bash(ls:*) "Bash(node --test:*)" "Bash(node --check:*)" --disallowedTools
-  WebFetch WebSearch` (2.1.312 ignored `Bash(...)` allow rules from the workspace's settings file in -p
+  Bash(webmods:*) Bash(cd:*) Bash(ls:*) --disallowedTools WebFetch WebSearch "Read(./config.json)"
+  "Edit(./config.json)" "Edit(./held.json)" "Edit(./AGENTS.md)" "Edit(./CLAUDE.md)" "Edit(./.claude/**)"
+  "Edit(./bin/**)" "Edit(./app/**)" "Edit(./runs/**)"`: nothing that runs arbitrary code, and no edits
+  to the files that control WebMods (see "Run scope"; `Edit(./*)` denied every file, sites/ included,
+  in 2.1.312, so the files are listed) (2.1.312 ignored `Bash(...)` allow rules from the workspace's settings file in -p
   runs); `webmods setup` writes the same lists to the workspace's `.claude/settings.json` for interactive
   sessions there. Other Bash commands are denied. `--setting-sources project` keeps the user's own broader allow rules out;
   `--strict-mcp-config` keeps their MCP servers out. stream-json lines: `{type:"system", subtype:"init",

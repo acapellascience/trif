@@ -6,7 +6,7 @@ import {
   SETTINGS_URL, USER_SCRIPTS_OFF, userScriptsAvailable, syncUserScripts, resolveTab, tabInfo,
   normalizeUrl, normalizeSite, hostMatchesSite, buildRunCode, buildPollCode, parseRunEnvelope,
   firstInjectionResult, withTimeout, filterRequests, nextBackoff, chromeVersion, toolLine,
-  normalizeDisabled, modAppliesTo,
+  normalizeDisabled, modAppliesTo, urlInScope, modInScope,
 } from './lib.js';
 import { runtimeCode } from './runtime.js';
 
@@ -15,7 +15,7 @@ const VERSION = chrome.runtime.getManifest().version;
 const CHROME = chromeVersion(navigator.userAgent);
 const LOAD_TIMEOUT = 30000;
 const CHAT_MAX = 500;          // messages kept per site
-const NOT_CONNECTED = 'The WebMods helper isn\'t connected. Run `webmods setup` in a terminal, then restart Chrome.';
+const NOT_CONNECTED = 'The WebMods helper isn\'t connected. Run `npx webmods setup` in a terminal (needs Node 18+), then restart Chrome.';
 
 const state = {
   port: null,
@@ -257,6 +257,25 @@ function helperGone(reason) {
 
 // ---- page commands ------------------------------------------------------------------------------
 
+// A side-panel agent run's requests carry args.scope (the helper sets it from the run's token): they
+// may only touch tabs and URLs on that site. See docs/PROTOCOL.md "Run scope".
+function checkScopeUrl(url, scope, what) {
+  if (scope && !urlInScope(url, scope)) {
+    throw new Error(`${what} is on ${hostOf(url) || url || 'a page'}, and this agent run is limited to ${scope}` +
+      ' (it was started from the side panel on that site; the user can start another chat on the other site)');
+  }
+}
+
+function hostOf(url) {
+  try { return new URL(url).hostname; } catch { return ''; }
+}
+
+async function scopedTab(args) {
+  const tab = await resolveTab(chrome, args);
+  checkScopeUrl(tab.url || tab.pendingUrl || '', args.scope, `tab ${tab.id}`);
+  return tab;
+}
+
 const commands = {
   async status() {
     await serial(() => {}); // let pending mod syncs finish first
@@ -269,6 +288,7 @@ const commands = {
       userScripts: state.userScripts, chrome: CHROME, version: VERSION,
       mods: state.mods.map((m) => {
         const o = { id: m.id, registered: ids.has(m.id), enabled: isEnabled(m.id) };
+        if (m.held) o.held = m.held;
         if (errors.has(m.id) && errors.get(m.id) !== USER_SCRIPTS_OFF) o.error = errors.get(m.id);
         return o;
       }),
@@ -276,16 +296,16 @@ const commands = {
     };
   },
 
-  async tabs() {
+  async tabs(args) {
     const tabs = await chrome.tabs.query({ windowType: 'normal' });
     tabs.sort((a, b) => (a.windowId - b.windowId) || (a.index - b.index));
-    return tabs.map(tabInfo);
+    return tabs.filter((t) => !args.scope || urlInScope(t.url || t.pendingUrl || '', args.scope)).map(tabInfo);
   },
 
   async run(args) {
     requireUserScripts();
     if (typeof args.code !== 'string') throw new Error('missing code');
-    const tab = await resolveTab(chrome, args);
+    const tab = await scopedTab(args);
     const timeout = Number(args.timeout) > 0 ? Number(args.timeout) : 10000;
     const runId = crypto.randomUUID();
     let timedOut = false;
@@ -309,18 +329,20 @@ const commands = {
   },
 
   async reload(args) {
-    const tab = await resolveTab(chrome, args);
+    const tab = await scopedTab(args);
     return loadAndReport(tab.id, () => chrome.tabs.reload(tab.id, { bypassCache: !!args.hard }));
   },
 
   async navigate(args) {
     const url = normalizeUrl(args.to);
-    const tab = await resolveTab(chrome, args);
+    checkScopeUrl(url, args.scope, 'that URL');
+    const tab = await scopedTab(args);
     return loadAndReport(tab.id, () => chrome.tabs.update(tab.id, { url }));
   },
 
   async open(args) {
     const url = normalizeUrl(args.to);
+    checkScopeUrl(url, args.scope, 'that URL');
     const waiter = loadWaiter();
     try {
       const win = await chrome.windows.getLastFocused({ windowTypes: ['normal'] }).catch(() => null);
@@ -340,7 +362,7 @@ const commands = {
   },
 
   async text(args) {
-    const tab = await resolveTab(chrome, args);
+    const tab = await scopedTab(args);
     // Isolated world via chrome.scripting: works even when user scripts are off and can't be
     // fooled by page globals.
     return pageCall(tab.id, 'ISOLATED', () => {
@@ -352,7 +374,7 @@ const commands = {
   // Only the tab showing in its window can be captured, and WebMods never switches tabs or focuses
   // windows to get one: several agents can be working at once while the user browses.
   async screenshot(args) {
-    const tab = await resolveTab(chrome, args);
+    const tab = await scopedTab(args);
     const win = await chrome.windows.get(tab.windowId).catch(() => null);
     if (!tab.active || !win || win.state === 'minimized') {
       throw new Error("that tab isn't showing (WebMods doesn't switch tabs while the user is browsing); " +
@@ -363,6 +385,7 @@ const commands = {
 
   async record(args) {
     const site = normalizeSite(args.site);
+    checkScopeUrl(`https://${site}/`, args.scope, site);
     const set = new Set(state.recording);
     if (args.on === false || args.on === 'off') set.delete(site); else set.add(site);
     state.recording = [...set].sort();
@@ -373,7 +396,7 @@ const commands = {
 
   async requests(args) {
     requireUserScripts();
-    const tab = await resolveTab(chrome, args);
+    const tab = await scopedTab(args);
     const r = await pageCall(tab.id, 'MAIN', () => {
       const w = window.__webmods;
       if (!w || !Array.isArray(w.requests)) return null;
@@ -391,7 +414,7 @@ const commands = {
     requireUserScripts();
     const i = Number(args.i);
     if (!Number.isInteger(i)) throw new Error('missing request number i (see `webmods requests`)');
-    const tab = await resolveTab(chrome, args);
+    const tab = await scopedTab(args);
     const r = await pageCall(tab.id, 'MAIN', (n) => {
       const w = window.__webmods;
       if (!w || !Array.isArray(w.requests)) return { missing: true };
@@ -420,6 +443,7 @@ const commands = {
     if (typeof args.enabled !== 'boolean') throw new Error('enabled must be true or false');
     const mod = state.mods.find((m) => m.id === id);
     if (!mod) throw new Error(`no mod ${id} (run \`webmods status\` to list mods)`);
+    if (args.scope && !modInScope(mod, args.scope)) throw new Error(`${id} runs outside ${args.scope}, and this agent run is limited to ${args.scope}`);
     const enabled = args.enabled;
     const res = await serial(async () => {
       const before = isEnabled(id);
@@ -452,7 +476,7 @@ async function setDisabled(id, off) {
 /** After a switch: reload the selected (or active) tab if `mod` runs on it. Returns the tab id or null; never throws. */
 async function reloadIfApplies(mod, args) {
   try {
-    const tab = await resolveTab(chrome, args);
+    const tab = await scopedTab(args);
     if (!modAppliesTo(mod, tab.url || tab.pendingUrl || '')) return null;
     if (args.wait) await loadAndReport(tab.id, () => chrome.tabs.reload(tab.id)).catch(() => {});
     else await chrome.tabs.reload(tab.id);
@@ -471,7 +495,7 @@ async function runCommand(cmd, args) {
 
 async function runtimeList(args, key) {
   requireUserScripts();
-  const tab = await resolveTab(chrome, args);
+  const tab = await scopedTab(args);
   const list = await pageCall(tab.id, 'MAIN', (k) => {
     const w = window.__webmods;
     return w && Array.isArray(w[k]) ? w[k].slice() : null;
@@ -575,6 +599,7 @@ async function uiStatus() {
       id: m.id, name: m.name || m.id, description: m.description || '', site: m.site, file: m.file || '',
       matches: m.matches || [], excludes: m.excludes || [], registered: s.mods[i].registered, enabled: s.mods[i].enabled,
       error: errors.get(m.id) === USER_SCRIPTS_OFF ? null : errors.get(m.id) || null,
+      held: m.held || null,
     })),
     runs: [...state.runs.values()].map((r) => ({ runId: r.runId, site: r.site })),
   };
@@ -624,6 +649,15 @@ async function onPanelMessage(msg) {
     case 'agent.loginCode': return helperRequest('agent.loginCode', { loginId: String(msg.loginId ?? ''), code: String(msg.code ?? '') }, 10000);
     case 'agent.loginCancel': return helperRequest('agent.loginCancel', { loginId: String(msg.loginId ?? '') }, 10000);
     case 'chat.clear': return clearChat(msg.site);
+    case 'mod.approve': {
+      const r = await helperRequest('mod.approve', { id: String(msg.id ?? '') }, 10000);
+      if (msg.tab !== undefined) {
+        await serial(() => {}); // the helper re-sent the mods before answering: let them register first
+        const mod = state.mods.find((m) => m.id === r.id);
+        if (mod) await reloadIfApplies(mod, { tab: msg.tab });
+      }
+      return r;
+    }
     default: return onPageMessage(msg);
   }
 }
@@ -732,6 +766,9 @@ async function onAgentEvent(runId, event, relay = true) {
         if (!event.ok && !run.errored) {
           if (run.stopping) push('tool', 'stopped');
           else push('error', String(event.result ?? '').trim() || 'The agent stopped without finishing.');
+        }
+        for (const h of Array.isArray(event.held) ? event.held : []) {
+          push('error', `${h.id} is on hold: ${h.reason}. It won't run until you allow it (in Mods above).`);
         }
         chat.last = {
           runId, ok: !!event.ok, time,

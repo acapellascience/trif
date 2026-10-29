@@ -19,6 +19,41 @@ function parseWrapper(text) {
   return { node: un(m[1]), script: un(m[2]) };
 }
 
+function readVersion(root) {
+  try { return JSON.parse(fs.readFileSync(path.join(root, 'package.json'), 'utf8')).version || null; } catch { return null; }
+}
+
+function isInside(child, parent) {
+  const rel = path.relative(parent, child);
+  return rel === '' || (!!rel && !rel.startsWith('..') && !path.isAbsolute(rel));
+}
+
+/**
+ * Is the host wrapper's script a sensible one? Copy installs run <home>/app/helper/host.js (whichever
+ * copy of the CLI is asking, e.g. `npx webmods doctor`); link installs run this checkout's host.js.
+ * Returns null when fine, else { status, title, fix? }.
+ */
+function checkWrapperScript(script, ws) {
+  const s = path.resolve(script);
+  const appHost = path.join(ws.appDir, 'helper', 'host.js');
+  if (s === appHost) {
+    const v = readVersion(ws.appDir);
+    if (v && v !== P.VERSION) {
+      return {
+        status: 'warn',
+        title: `the installed copy in ${ws.appDir} is v${v}, but this webmods is v${P.VERSION}`,
+        fix: `to install v${P.VERSION}, run: node ${P.CLI_JS} setup --copy`,
+      };
+    }
+    return null;
+  }
+  if (s === P.HOST_JS) return null;
+  if (s.includes(`${path.sep}_npx${path.sep}`)) {
+    return { status: 'warn', title: `host wrapper runs ${script}, inside npm's npx cache, which npm may delete` };
+  }
+  return { status: 'warn', title: `host wrapper runs ${script}, not this copy (${P.HOST_JS})` };
+}
+
 function nodeMajor(version) {
   const m = /^v?(\d+)/.exec(String(version).trim());
   return m ? Number(m[1]) : 0;
@@ -36,7 +71,11 @@ async function doctor(opts = {}) {
   const ws = P.workspace(opts.home);
   const checks = [];
   const add = (status, title, fix, detail) => checks.push({ status, title, fix, detail });
-  const setupFix = 'run: webmods setup   (or: node ' + P.CLI_JS + ' setup)';
+  // From a git checkout, point at its CLI; otherwise npx fetches WebMods again if the install is broken.
+  const setupFix = P.isGitCheckout()
+    ? 'run: webmods setup   (or: node ' + P.CLI_JS + ' setup)'
+    : 'run: npx webmods setup   (or: webmods setup)';
+  let installRoot = P.REPO_ROOT; // where the wrapper's files are: its extension/ is what Chrome should load
 
   // Node
   const major = nodeMajor(process.version);
@@ -68,7 +107,7 @@ async function doctor(opts = {}) {
     } else if (!isExecutable(w.node)) {
       add('fail', `host wrapper points at node ${w.node}, which doesn't exist (Node moved or was upgraded?)`, setupFix);
     } else if (!fs.existsSync(w.script)) {
-      add('fail', `host wrapper points at ${w.script}, which doesn't exist (repo moved?)`, setupFix);
+      add('fail', `host wrapper points at ${w.script}, which doesn't exist (moved or deleted?)`, setupFix);
     } else {
       const r = spawnSync(w.node, ['--version'], { encoding: 'utf8', timeout: 5000 });
       const v = (r.stdout || '').trim();
@@ -76,10 +115,11 @@ async function doctor(opts = {}) {
         add('fail', `host wrapper's node ${w.node} is ${v || 'not runnable'}; WebMods needs Node 18+`, 'install a current Node, then ' + setupFix);
       } else {
         wrapperOk = true;
-        add('ok', `host wrapper ${ws.hostWrapper} (node ${v})`);
-        if (path.resolve(w.script) !== P.HOST_JS) {
-          add('warn', `host wrapper runs ${w.script}, not this copy (${P.HOST_JS})`, setupFix);
-        }
+        installRoot = path.resolve(w.script, '..', '..');
+        const copy = isInside(path.resolve(w.script), ws.appDir);
+        add('ok', `host wrapper ${ws.hostWrapper} -> ${w.script} (${copy ? 'installed copy' : 'linked'}, node ${v})`);
+        const problem = checkWrapperScript(w.script, ws);
+        if (problem) add(problem.status, problem.title, problem.fix || setupFix);
       }
     }
   }
@@ -93,6 +133,12 @@ async function doctor(opts = {}) {
   }
   if (!targets.length) {
     add('fail', 'no Chromium browser profile found (looked for Chrome, Chromium, Brave, Edge, Arc)', 'install and open Google Chrome once, then ' + setupFix);
+  }
+  const expectedOrigins = P.extensionOrigins(ws.config);
+  const badIds = P.extensionIds(ws.config).invalid;
+  if (badIds.length) {
+    add('warn', `config.json extensionIds has entries that aren't extension IDs: ${badIds.map((x) => JSON.stringify(x)).join(', ')}`,
+      `fix them (32 letters a-p each) in ${path.join(ws.home, 'config.json')}`);
   }
   let manifestsOk = 0;
   for (const t of targets) {
@@ -108,9 +154,10 @@ async function doctor(opts = {}) {
     if (m.type !== 'stdio') problems.push('type is not "stdio"');
     if (m.path !== ws.hostWrapper) problems.push(`path is ${JSON.stringify(m.path)}, expected ${ws.hostWrapper}`);
     else if (!fs.existsSync(m.path)) problems.push(`path ${m.path} doesn't exist`);
-    if (!Array.isArray(m.allowed_origins) || !m.allowed_origins.includes(P.EXTENSION_ORIGIN)) {
-      problems.push(`allowed_origins doesn't include ${P.EXTENSION_ORIGIN}`);
-    }
+    // Every WebMods extension ID (dev, Web Store, config.json extensionIds) must be allowed.
+    const origins = Array.isArray(m.allowed_origins) ? m.allowed_origins : [];
+    const missing = expectedOrigins.filter((o) => !origins.includes(o));
+    if (missing.length) problems.push(`allowed_origins doesn't include ${missing.join(', ')}`);
     if (problems.length) add('fail', `${t.label}: native host manifest ${file}: ${problems.join('; ')}`, fix);
     else { manifestsOk++; add('ok', `${t.label}: native host manifest`); }
   }
@@ -130,7 +177,7 @@ async function doctor(opts = {}) {
     const fixLines = [
       'open Chrome (the helper only runs while Chrome is running with the WebMods extension).',
       `If Chrome is open: check the extension is installed and enabled at ${EXT_URL}`,
-      `  (Load unpacked from ${path.join(P.REPO_ROOT, 'extension')}; its ID must be ${P.EXTENSION_ID}).`,
+      `  (Load unpacked from ${path.join(installRoot, 'extension')}; its ID must be ${P.EXTENSION_ID}).`,
       'On that page, click "service worker" and look at the console: "Specified native messaging host not found"',
       '  means the manifest is missing or wrong (fix the manifest checks above, then reload the extension);',
       '  "Native host has exited" means the helper crashed: see the log below.',
@@ -212,4 +259,4 @@ function formatDoctor({ ok, checks }) {
   return out.join('\n');
 }
 
-module.exports = { doctor, formatDoctor, parseWrapper };
+module.exports = { doctor, formatDoctor, parseWrapper, checkWrapperScript };

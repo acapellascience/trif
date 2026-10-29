@@ -6,16 +6,27 @@ const P = require('./paths');
 
 const COMMANDS = {
   setup: {
-    usage: 'webmods setup [--browser chrome|chromium|brave|edge|arc|all] [--home DIR]',
+    usage: 'webmods setup [--browser chrome|chromium|brave|edge|arc|all] [--home DIR] [--copy|--link] [--no-link]',
     summary: 'install the workspace, native messaging host and CLI link (safe to re-run)',
-    details: `Creates the workspace (sites/, screenshots/, bin/), refreshes AGENTS.md and CLAUDE.md there (never
-touches sites/), writes bin/webmods-host and bin/webmods wrappers with an absolute node path, writes
-the native messaging host manifest for each browser (default: every browser whose profile folder
-exists), and symlinks /usr/local/bin/webmods when that folder is writable. Prints next steps.
+    details: `First time: npx webmods setup   (needs Node 18 or newer).
+Creates the workspace (sites/, screenshots/, bin/), installs the WebMods files the wrappers run,
+refreshes AGENTS.md and CLAUDE.md there from those files (never touches sites/), writes bin/webmods-host
+and bin/webmods wrappers with an absolute node path, writes the native messaging host manifest for each
+browser (default: every browser whose profile folder exists) allowing every WebMods extension ID (plus
+any in config.json "extensionIds"), and symlinks /usr/local/bin/webmods when that folder is writable.
+Prints next steps, including the extension folder to load in Chrome.
+Where the wrappers point:
+  --copy     copy helper/, extension/ and examples/ into <home>/app and run that copy (the default
+             unless run from a git checkout; npx's own folder is a cache npm may delete). Updates swap
+             in a fresh copy only when the files changed.
+  --link     run the files where they are, without copying (the default in a git checkout, for
+             developing WebMods itself).
 It also records this terminal's PATH in config.json (env.PATH) so the helper can find your coding
 agent for the side panel, and writes .claude/settings.json (what Claude Code may do in the workspace).
-Run it again after moving the repo or upgrading Node.`,
-    examples: ['webmods setup', 'webmods setup --browser brave', 'webmods setup --browser all'],
+Other options: --no-link skips the /usr/local/bin link; --native-dir DIR writes the manifest only to DIR;
+--bin-dir DIR links the CLI there instead of /usr/local/bin.
+Run it again after upgrading WebMods, moving the repo or upgrading Node.`,
+    examples: ['npx webmods setup', 'webmods setup', 'webmods setup --browser brave', 'webmods setup --browser all', 'node helper/cli.js setup --copy'],
   },
   status: {
     usage: 'webmods status',
@@ -120,6 +131,21 @@ responses you want to grep.`,
     summary: 'what mods logged with webmods.log(...) / .warn / .error in that page',
     examples: ['webmods logs'],
   },
+  approve: {
+    usage: 'webmods approve <site>/<mod>',
+    summary: 'let a held mod run (one a side-panel agent wrote that matches other sites)',
+    details: `A side-panel agent run is limited to the site it was started on. If it writes a mod whose @match
+reaches other sites, that mod is held: it isn't registered until the user approves it, here or with the
+Allow button in the side panel. webmods status and webmods mods show held mods and why. Editing the mod
+yourself also releases it. Not available to agents inside a side-panel run.`,
+    examples: ['webmods approve x.com/hide-reposts'],
+  },
+  check: {
+    usage: 'webmods check <file|site/mod>',
+    summary: 'check that a mod file parses (compiles it without running it)',
+    details: 'Prints the syntax error and where it is, or "ok". Use it instead of node --check.',
+    examples: ['webmods check sites/x.com/hide-reposts.js', 'webmods check x.com/hide-reposts'],
+  },
   enable: {
     usage: 'webmods enable <site>/<mod> [TAB]',
     summary: 'switch a mod back on (like its switch in the side panel)',
@@ -186,8 +212,8 @@ from stdin. Exit code 1 if it didn't end up logged in.`,
 
 const GROUPS = [
   ['Setup and diagnosis', ['setup', 'status', 'doctor']],
-  ['Mod files (work without Chrome)', ['mods', 'new', 'install-example']],
-  ['Switching mods off and on (need Chrome running with the extension)', ['disable', 'enable']],
+  ['Mod files (work without Chrome)', ['mods', 'new', 'check', 'install-example']],
+  ['Switching mods off and on (need Chrome running with the extension)', ['disable', 'enable', 'approve']],
   ['Pages (need Chrome running with the extension)', ['tabs', 'run', 'reload', 'open', 'navigate', 'text', 'screenshot', 'record', 'requests', 'request', 'errors', 'logs']],
   ['Agent runs (what the side panel does)', ['agent']],
   ['', ['help']],

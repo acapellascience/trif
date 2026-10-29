@@ -22,7 +22,8 @@ test.after(async () => {
 // ------------------------------------------------------------------ fake agent
 
 // A fake Claude Code. Behaviour comes from words in the prompt (its env is sanitized, so env vars
-// can't steer it): NOTLOGGEDIN, CRASH, SLEEP, STUBBORN (ignores SIGTERM), EDIT (changes a mod file).
+// can't steer it): NOTLOGGEDIN, CRASH, SLEEP, STUBBORN (ignores SIGTERM), EDIT (changes a mod file),
+// EVIL (writes a mod for its site and one for <all_urls>).
 // Every call is dumped to <dir>/calls/<time>-<pid>.json with argv, env and cwd.
 // `auth status --json` says logged in once <dir>/logged-in exists; `auth login` prints the sign-in
 // lines, dumps its env to <dir>/login-env.json, reads one line and logs in if it's GOODCODE (anything
@@ -88,6 +89,13 @@ if (prompt.includes('EDIT')) {
   fs.mkdirSync(path.dirname(file), { recursive: true });
   fs.writeFileSync(file, '// edited ' + Date.now() + Math.random());
   say({ type: 'assistant', message: { content: [{ type: 'tool_use', id: 't2', name: 'Edit', input: { file_path: file, old_string: 'a', new_string: 'b' } }] } });
+}
+if (prompt.includes('EVIL')) {
+  // One mod inside the run's site, one that reaches every site (gets held).
+  const dir = path.join(process.cwd(), 'sites', 'example.com');
+  fs.mkdirSync(dir, { recursive: true });
+  fs.writeFileSync(path.join(dir, 'good.js'), '// fine ' + Date.now());
+  fs.writeFileSync(path.join(dir, 'evil.js'), '// ==WebMod==\\n// @match <all_urls>\\n// ==/WebMod==\\n// ' + Date.now());
 }
 process.stdout.write('not json at all\\n');
 say({ type: 'assistant', message: { content: [{ type: 'text', text: 'Done: the banner is hidden.' }] } });
@@ -163,8 +171,9 @@ test('claude adapter: command flags, resume and model', () => {
   assert.equal(c.file, '/x/claude');
   assert.deepEqual(c.args, ['-p', 'hi', '--output-format', 'stream-json', '--verbose', '--permission-mode', 'acceptEdits',
     '--setting-sources', 'project', '--strict-mcp-config',
-    '--allowedTools', 'Read(./**)', 'Glob', 'Grep', 'Bash(webmods:*)', 'Bash(cd:*)', 'Bash(ls:*)', 'Bash(node --test:*)', 'Bash(node --check:*)',
-    '--disallowedTools', 'WebFetch', 'WebSearch', '--append-system-prompt', 'CTX']);
+    '--allowedTools', 'Read(./**)', 'Glob', 'Grep', 'Bash(webmods:*)', 'Bash(cd:*)', 'Bash(ls:*)',
+    '--disallowedTools', 'WebFetch', 'WebSearch', 'Read(./config.json)', 'Edit(./config.json)', 'Edit(./held.json)',
+    'Edit(./AGENTS.md)', 'Edit(./CLAUDE.md)', 'Edit(./.claude/**)', 'Edit(./bin/**)', 'Edit(./app/**)', 'Edit(./runs/**)', '--append-system-prompt', 'CTX']);
   const r = claude.command({ bin: '/x/claude', prompt: 'hi', context: 'CTX', sessionId: 's1', model: 'opus' });
   assert.deepEqual(r.args.slice(-4), ['--resume', 's1', '--model', 'opus']);
 });
@@ -736,8 +745,9 @@ test('setup records PATH (merging config.json) and writes .claude/settings.json;
   const settings = JSON.parse(fs.readFileSync(path.join(ws, '.claude', 'settings.json'), 'utf8'));
   assert.deepEqual(settings, {
     permissions: {
-      allow: ['Read(./**)', 'Glob', 'Grep', 'Bash(webmods:*)', 'Bash(cd:*)', 'Bash(ls:*)', 'Bash(node --test:*)', 'Bash(node --check:*)'],
-      deny: ['WebFetch', 'WebSearch'],
+      allow: ['Read(./**)', 'Glob', 'Grep', 'Bash(webmods:*)', 'Bash(cd:*)', 'Bash(ls:*)'],
+      deny: ['WebFetch', 'WebSearch', 'Read(./config.json)', 'Edit(./config.json)', 'Edit(./held.json)',
+        'Edit(./AGENTS.md)', 'Edit(./CLAUDE.md)', 'Edit(./.claude/**)', 'Edit(./bin/**)', 'Edit(./app/**)', 'Edit(./runs/**)'],
     },
   });
   assert.match(r.stdout, new RegExp(`agents +claude \\(${fakeBin.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}/claude\\), codex not found`));
@@ -762,4 +772,78 @@ test('setup records PATH (merging config.json) and writes .claude/settings.json;
   r = await runCli(['doctor', '--native-dir', path.join(root, 'native')], { home: ws, env: { PATH: termPath } });
   assert.match(r.stdout, /warn {2}Claude Code is at .*fakebin\/claude, but the helper won't find it there/);
   assert.match(r.stdout, /fix: run webmods setup in this terminal/);
+});
+
+// ------------------------------------------------------------------ run scope and held mods
+
+test('run scope: the run token limits webmods requests to the run\'s site; agent commands refused; ends with the run', async () => {
+  const { home, bin } = makeHome();
+  const ext = startHost(home);
+  ext.handlers.tabs = (args) => ({ scope: args.scope ?? null });
+  await ext.waitForSocket();
+  const r = await extRequest(ext, 'agent.start', { site: 'en.example.co.uk', url: 'https://en.example.co.uk/x', tabId: 3, prompt: 'SLEEP' });
+  const runId = r.result.runId;
+  const call = await waitFor(() => callFor(bin, 'SLEEP'), { message: 'the agent to start' });
+  const token = call.env.WEBMODS_RUN_TOKEN;
+  assert.match(token, /^[0-9a-f]{32}$/);
+  assert.match(call.argv[call.argv.indexOf('--append-system-prompt') + 1], /limited to example\.co\.uk/);
+
+  // The helper overrides whatever scope the client sends; without a token nothing is scoped.
+  let res = await sockRequest(ext.sock, { id: 'a', cmd: 'tabs', args: { scope: 'evil.com' }, token });
+  assert.deepEqual(res.result, { scope: 'example.co.uk' });
+  res = await sockRequest(ext.sock, { id: 'b', cmd: 'tabs', args: {} });
+  assert.deepEqual(res.result, { scope: null });
+  for (const cmd of ['agent.start', 'agent.list', 'agent.login', 'mod.approve']) {
+    res = await sockRequest(ext.sock, { id: cmd, cmd, args: { id: 'example.com/x', prompt: 'hi', site: 'evil.com' }, token });
+    assert.equal(res.ok, false, cmd);
+  }
+  assert.match(res.error, /only the user can approve/);
+  res = await sockRequest(ext.sock, { id: 'c', cmd: 'tabs', args: {}, token: 'not-a-token' });
+  assert.equal(res.ok, false);
+
+  await extRequest(ext, 'agent.stop', { runId });
+  await waitDone(ext, runId);
+  res = await sockRequest(ext.sock, { id: 'd', cmd: 'tabs', args: {}, token });
+  assert.match(res.error, /run has ended/);
+});
+
+test('held mods: a run\'s mod that matches other sites is held (not registered) until approved', async () => {
+  const { home } = makeHome();
+  const ext = startHost(home);
+  await ext.waitForSocket();
+  const r = await extRequest(ext, 'agent.start', { ...START, prompt: 'EVIL' });
+  const done = await waitDone(ext, r.result.runId);
+  assert.deepEqual(done.held, [{ id: 'example.com/evil', reason: 'it matches <all_urls>, outside example.com' }]);
+  const lastMods = () => [...ext.messages].reverse().find((m) => m.type === 'mods').mods;
+  const byId = (id) => lastMods().find((m) => m.id === id);
+  assert.deepEqual(byId('example.com/evil').held, { site: 'example.com', reason: 'it matches <all_urls>, outside example.com' });
+  assert.equal(byId('example.com/good').held, undefined);
+  const stored = JSON.parse(fs.readFileSync(path.join(home, 'held.json'), 'utf8'));
+  assert.deepEqual(Object.keys(stored), ['example.com/evil']);
+
+  // Still held after the run (and a resync); `webmods mods` says so.
+  await sleep(300);
+  let out = await runCli(['mods'], { home });
+  assert.match(out.stdout, /HELD: a side-panel agent wrote it while working on example\.com/);
+
+  const ok = await extRequest(ext, 'mod.approve', { id: 'example.com/evil' });
+  assert.deepEqual(ok.result, { id: 'example.com/evil', approved: true });
+  await waitFor(() => byId('example.com/evil') && !byId('example.com/evil').held, { message: 'mods re-sent without the hold' });
+  assert.equal(JSON.parse(fs.readFileSync(path.join(home, 'held.json'), 'utf8'))['example.com/evil'].approved, true);
+  const again = await extRequest(ext, 'mod.approve', { id: 'example.com/evil' });
+  assert.match(again.error, /isn't held/);
+});
+
+test('held mods: editing a held mod yourself releases it; `webmods approve` refuses inside a run', async () => {
+  const { home } = makeHome();
+  const ext = startHost(home);
+  await ext.waitForSocket();
+  const r = await extRequest(ext, 'agent.start', { ...START, prompt: 'EVIL' });
+  await waitDone(ext, r.result.runId);
+  await sleep(10500); // past the just-finished window: later edits aren't the run's
+  fs.appendFileSync(path.join(home, 'sites', 'example.com', 'evil.js'), '\n// the user edited this\n');
+  await waitFor(() => !fs.existsSync(path.join(home, 'held.json')), { message: 'the hold to be released' });
+  const res = await runCli(['approve', 'example.com/evil'], { home, env: { WEBMODS_RUN_TOKEN: 'x' } });
+  assert.equal(res.code, 1);
+  assert.match(res.stderr, /not available inside a side-panel agent run/);
 });

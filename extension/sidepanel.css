@@ -178,6 +178,8 @@ svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width:
 .mod-list li.off .mod-name { color: var(--muted); }
 .mod-file { color: var(--muted); font: 11px/1.4 var(--mono); overflow-wrap: anywhere; }
 .mod-err { color: var(--bad); font-size: 12px; }
+.mod-list li.held .mod-name { color: var(--muted); }
+.allow { flex: none; }
 .tag {
   margin-left: 6px;
   padding: 0 5px;

@@ -58,7 +58,7 @@ code (`sites/x.com/_plain-x.test.js`). Only create or edit files inside this wor
   `@match`/`@exclude` repeat and take Chrome match patterns. Add `@match` lines when a site has several
   domains (x.com and twitter.com).
 - Wrap the body in an IIFE as above: early `return`s work, nothing leaks into the page's globals, and
-  `node --check` can parse the file.
+  `webmods check` can parse the file.
 - Start new mods with `webmods new <site> <mod>`; it creates the file from a template and prints its path.
 
 ### Where mods run
@@ -95,13 +95,14 @@ the last-focused window, which may not be the site you're working on: pass `--ur
 | `webmods open <url>` / `webmods navigate [TAB] <url>` | Open a new tab / load a URL in a tab. Wait for load. |
 | `webmods run [TAB] '<code>'` | Run JS in the page; prints the result as JSON. `-f file.js` runs a file, `-` reads stdin. |
 | `webmods text [TAB]` | The page's visible text. |
-| `webmods screenshot [TAB] [-o file.png]` | PNG of the visible area. It brings the tab to the front. |
+| `webmods screenshot [TAB] [-o file.png]` | PNG of the visible area. Only while the tab is showing (WebMods never switches tabs); otherwise use `text`/`run`. |
 | `webmods reload [TAB] [--hard]` | Reload and wait for load. |
 | `webmods record <site> on\|off` | Record fetch/XHR traffic for a hostname, from the next load. |
 | `webmods requests [TAB] [--filter <regex>] [--limit N]` | Recorded requests, newest last, with index `i`. |
 | `webmods request [TAB] <i> [-o file]` | One request: method, URL, status, request body, response (JSON pretty-printed). |
 | `webmods errors [TAB]` / `webmods logs [TAB]` | Errors thrown by mods in that page / what mods logged. |
-| `webmods mods` | Mods in the workspace (id, matches, file; `[off]` = switched off). |
+| `webmods mods` | Mods in the workspace (id, matches, file; `[off]` = switched off, `HELD` = waiting for the user's OK). |
+| `webmods check <file\|site/mod>` | Check that a mod parses, without running it (use instead of `node --check`). |
 | `webmods install-example <site>/<mod>` | Copy a ready-made example mod into the workspace. |
 
 Exit code 2 means the helper isn't running: ask the user to open Chrome, and if it's open, run
@@ -133,6 +134,25 @@ on and which are `off`.
 - Only flip the switches the user asked about. Never re-enable a mod the user switched off unless they
   ask, and don't switch mods off as a side effect of other work.
 - If you change a mod that's off, it stays off: say so, and ask whether to switch it on.
+
+## Side-panel runs
+
+When you're started from the WebMods side panel (your instructions say so), you work for one site:
+the one the user opened the panel on, including its subdomains (from en.wikipedia.org: wikipedia.org).
+WebMods enforces this, so that a web page you read can't steer you into other sites the user is
+logged in to:
+
+- `webmods` commands only work on tabs of that site. `webmods tabs` lists only those; `run`, `text`,
+  `reload` etc. on another site's tab, and `open`/`navigate` to another site, fail with a message that
+  says so. Pass `--tab` with the tab id you were given.
+- Keep each mod's `@match` lines on that site. A mod you write or change whose `@match` reaches other
+  sites (`<all_urls>`, `*://*/*`, another domain) is **held**: it doesn't run until the user clicks
+  Allow in the side panel. If the user asked for that (the same change on twitter.com too), write it,
+  then tell them it's waiting for their OK and why. Don't try to get around a hold.
+- Edit only files under `sites/` (WebMods' own files are blocked), and only `webmods`, `cd` and `ls` run in the shell: no
+  `node`, so unit tests can't run in the side panel (write them anyway when they help; the user can run
+  them). `webmods check` checks syntax.
+- `webmods setup`, `webmods agent` and `webmods approve` are the user's; they fail inside a run.
 
 ## Workflow
 
@@ -468,7 +488,8 @@ test('reposts go, cursors stay', () => {
 });
 ```
 
-Run it with `node --test sites/x.com/_hide-reposts.test.js`. Build fixtures from a real recorded
+Run it with `node --test sites/x.com/_hide-reposts.test.js` (not available in side-panel runs; see
+"Side-panel runs"). Build fixtures from a real recorded
 response (trimmed), and add a case for every bug you fix.
 
 ## Safety rules

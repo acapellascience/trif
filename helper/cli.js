@@ -5,17 +5,22 @@
 
 const fs = require('fs');
 const path = require('path');
+const vm = require('vm');
 const P = require('./lib/paths');
 const { request, streamRun, streamLogin, HelperError } = require('./lib/client');
 const { scanMods, planModsMessage, isIgnoredName } = require('./lib/mods');
 const { COMMANDS, mainHelp, commandHelp } = require('./lib/help');
+const { loadHeld } = require('./lib/held');
+
+// Inside a side-panel agent run (the helper set WEBMODS_RUN_TOKEN) these are the user's alone.
+const NOT_IN_RUNS = new Set(['setup', 'agent', 'approve']);
 
 // Output piped into something that stops reading early (`webmods tabs | head -1`) isn't an error.
 process.stdout.on('error', (e) => { if (e.code === 'EPIPE') process.exit(0); throw e; });
 
 const VALUE_FLAGS = new Set(['--tab', '--url', '-o', '--out', '--output', '--filter', '--limit', '-f', '--file',
   '--browser', '--home', '--native-dir', '--bin-dir', '--timeout', '--agent', '--session', '--model']);
-const BOOL_FLAGS = new Set(['--json', '--hard', '--help', '-h', '--force', '--no-link']);
+const BOOL_FLAGS = new Set(['--json', '--hard', '--help', '-h', '--force', '--no-link', '--copy', '--link']);
 const ALIASES = { '--out': '-o', '--output': '-o', '--file': '-f', '-h': '--help' };
 
 class UsageError extends Error {}
@@ -169,14 +174,16 @@ const handlers = {
 
   async setup(ctx) {
     const { setup } = require('./lib/setup');
+    if (ctx.opts['--copy'] && ctx.opts['--link']) throw new UsageError('use --copy or --link, not both');
     const r = setup({
       home: ctx.opts['--home'],
       browser: ctx.opts['--browser'],
       nativeDir: ctx.opts['--native-dir'],
       binDir: ctx.opts['--bin-dir'],
       noLink: !!ctx.opts['--no-link'],
+      mode: ctx.opts['--copy'] ? 'copy' : ctx.opts['--link'] ? 'link' : undefined,
     });
-    if (ctx.json) printJson({ ok: r.ok, home: r.ws.home, manifests: r.manifests, node: r.nodePath });
+    if (ctx.json) printJson({ ok: r.ok, home: r.ws.home, mode: r.mode, app: r.root, manifests: r.manifests, node: r.nodePath });
     else out(r.lines.join('\n'));
     if (!r.ok) process.exitCode = 1;
   },
@@ -215,11 +222,13 @@ const handlers = {
     const off = new Set(((st && st.mods) || []).filter((m) => m.enabled === false).map((m) => m.id));
     const applyErrors = new Map((((info.modsApplied || {}).errors) || []).map((e) => [e.id, e.error]));
     const helperErrors = new Map((info.modErrors || []).map((e) => [e.id, e.error]));
+    const held = info.held || {};
     const ids = [...new Set([...(info.mods || []), ...registered.keys()])].sort();
     lines.push(`mods          ${ids.length} in ${info.modsDir}`);
     for (const id of ids) {
       let s;
       if (helperErrors.has(id)) s = `NOT SENT: ${helperErrors.get(id)}`;
+      else if (held[id]) s = `HELD: ${held[id].reason} (webmods approve ${id})`;
       else if (off.has(id)) s = 'off';
       else if (applyErrors.has(id)) s = `NOT REGISTERED: ${applyErrors.get(id)}`;
       else if (!st) s = '?';
@@ -229,8 +238,31 @@ const handlers = {
     }
     for (const [id, err] of helperErrors) if (!ids.includes(id)) lines.push(`  ${pad(id, 40)} NOT SENT: ${err}`);
     if (off.size) lines.push(`              off = switched off by the user (webmods enable <id> turns one back on)`);
+    if (Object.keys(held).length) lines.push('              HELD = written by a side-panel agent for another site; not running until the user approves it');
     if (st) lines.push(`recording     ${(st.recording || []).length ? st.recording.join(', ') : '(none)'}`);
     out(lines.join('\n'));
+  },
+
+  async approve(ctx, pos) {
+    if (!pos[0]) throw new UsageError('missing mod id');
+    const r = await ctx.call('mod.approve', { id: modId(pos[0]) }, 10000);
+    if (ctx.json) return printJson(r);
+    out(`${r.id} approved: it runs from the next page load`);
+  },
+
+  async check(ctx, pos) {
+    if (!pos[0]) throw new UsageError('missing file');
+    let file = pos[0];
+    if (!fs.existsSync(file) && /^[^/\s]+\/[^/\s]+$/.test(file.replace(/\.js$/, ''))) file = path.join(ctx.ws.modsDir, `${file.replace(/\.js$/, '')}.js`);
+    const code = fs.readFileSync(file, 'utf8');
+    // Compiles without running anything (side-panel agents may not run code; this replaces node --check).
+    try { new vm.Script(code, { filename: path.resolve(file) }); } catch (e) {
+      const where = String(e.stack || '').split('\n').slice(0, 3).join('\n');
+      if (ctx.json) printJson({ ok: false, error: e.message, where }); else out(`${where}`);
+      process.exitCode = 1;
+      return;
+    }
+    if (ctx.json) printJson({ ok: true, file: path.resolve(file) }); else out(`ok: ${path.resolve(file)} parses`);
   },
 
   async enable(ctx, pos) { return switchMod(ctx, pos, true); },
@@ -389,10 +421,14 @@ const handlers = {
     const plan = planModsMessage(mods);
     const errors = [...problems, ...plan.errors];
     const enabled = await knownEnabled(ctx);
+    const held = loadHeld(ctx.ws.home);
+    const isHeld = (m) => held[m.id] && held[m.id].hash === m.hash && !held[m.id].approved;
     if (ctx.json) {
       return printJson({
         modsDir: ctx.ws.modsDir,
-        mods: mods.map(({ code, ...m }) => (enabled.has(m.id) ? { ...m, enabled: enabled.get(m.id) } : m)),
+        mods: mods.map(({ code, ...m }) => ({
+          ...m, ...(enabled.has(m.id) ? { enabled: enabled.get(m.id) } : {}), ...(isHeld(m) ? { held: held[m.id] } : {}),
+        })),
         errors,
         warnings,
       });
@@ -406,6 +442,7 @@ const handlers = {
     for (const m of mods) {
       out(m.id + (m.name !== path.basename(m.file, '.js') ? `  (${m.name})` : '') + (enabled.get(m.id) === false ? '  [off]' : ''));
       if (enabled.get(m.id) === false) out(`  switched off by the user (not running; webmods enable ${m.id} turns it on)`);
+      if (isHeld(m)) out(`  HELD: a side-panel agent wrote it while working on ${held[m.id].site}, but ${held[m.id].reason}. Not running until the user approves it (webmods approve ${m.id}).`);
       if (m.description) out(`  ${m.description}`);
       out(`  matches: ${m.matches.join(' ')}`);
       if (m.excludes.length) out(`  excludes: ${m.excludes.join(' ')}`);
@@ -698,6 +735,10 @@ async function main(argv) {
   const handler = handlers[cmd];
   if (!handler || !COMMANDS[cmd]) {
     process.stderr.write(`webmods: unknown command "${cmd}". Run webmods help for the list.\n`);
+    return 1;
+  }
+  if (process.env.WEBMODS_RUN_TOKEN && NOT_IN_RUNS.has(cmd)) {
+    process.stderr.write(`webmods ${cmd}: not available inside a side-panel agent run (the user can run it in a terminal)\n`);
     return 1;
   }
   const ctx = makeCtx(opts);

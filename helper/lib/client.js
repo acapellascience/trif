@@ -5,6 +5,14 @@ const net = require('net');
 
 const NO_HELPER_CODES = new Set(['ENOENT', 'ECONNREFUSED', 'ENOTSOCK', 'EACCES', 'EPERM', 'ENOTDIR']);
 
+// Inside a side-panel agent run the helper gives the agent WEBMODS_RUN_TOKEN; every request carries it,
+// and the helper limits the run to its site (docs/PROTOCOL.md "Run scope").
+function frame(id, cmd, args) {
+  const msg = { id, cmd, args };
+  if (process.env.WEBMODS_RUN_TOKEN) msg.token = process.env.WEBMODS_RUN_TOKEN;
+  return JSON.stringify(msg) + '\n';
+}
+
 class HelperError extends Error {
   constructor(message, kind) {
     super(message);
@@ -32,7 +40,7 @@ function request(sockPath, cmd, args = {}, timeoutMs = 40000) {
 
     sock.setEncoding('utf8');
     sock.on('connect', () => {
-      sock.write(JSON.stringify({ id, cmd, args }) + '\n');
+      sock.write(frame(id, cmd, args));
     });
     sock.on('data', (chunk) => {
       buf += chunk;
@@ -101,12 +109,12 @@ function streamCommand(sockPath, cmd, args, { onStart = () => {}, onEvent = () =
       const rid = newId();
       return new Promise((res, rej) => {
         asked.set(rid, { resolve: res, reject: rej });
-        sock.write(JSON.stringify({ id: rid, cmd: c, args: a }) + '\n');
+        sock.write(frame(rid, c, a));
       });
     }
 
     sock.setEncoding('utf8');
-    sock.on('connect', () => sock.write(JSON.stringify({ id, cmd, args }) + '\n'));
+    sock.on('connect', () => sock.write(frame(id, cmd, args)));
     sock.on('data', (chunk) => {
       buf += chunk;
       let nl;

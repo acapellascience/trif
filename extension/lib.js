@@ -3,7 +3,9 @@
 
 import { safeStringify, formatError } from './runtime.js';
 
-export const EXTENSION_ID = 'iaablflfafmonebdomeikadolkgdbkhe';
+// The running extension's own id: the Web Store build has a different one from the unpacked dev build
+// (whose manifest key fixes it to this fallback, also used under Node in the tests).
+export const EXTENSION_ID = globalThis.chrome?.runtime?.id || 'iaablflfafmonebdomeikadolkgdbkhe';
 export const SETTINGS_URL = `chrome://extensions/?id=${EXTENSION_ID}`;
 // PROTOCOL.md calls this `__webmods_runtime`, but chrome.userScripts rejects ids starting with "_"
 // (reserved for generated ids), so it is registered under this id.
@@ -98,6 +100,7 @@ export async function syncUserScripts(us, { mods, runtimeCode, applied = {}, dis
     if (!mod || typeof mod.id !== 'string' || !mod.id) { errors.push({ id: String(mod?.id ?? ''), error: 'mod has no id' }); continue; }
     if (mod.id === RUNTIME_ID || seen.has(mod.id)) { errors.push({ id: mod.id, error: 'duplicate or reserved mod id' }); continue; }
     if (disabled[mod.id] === true) continue; // switched off: not desired, so unregistered below if registered
+    if (mod.held) continue; // held for the user's approval (an agent wrote it for another site): same
     seen.add(mod.id);
     desired.push(mod);
   }
@@ -210,6 +213,37 @@ export function normalizeSite(site) {
 export function hostMatchesSite(hostname, site) {
   const h = String(hostname || '').toLowerCase();
   return h === site || h.endsWith('.' + site);
+}
+
+// ---- run scope ----------------------------------------------------------------------------------
+// Requests from a side-panel agent run carry args.scope, a registrable domain set by the helper
+// (helper/lib/scope.js, which these mirror): they may only touch tabs and URLs on that site.
+
+/** "x.com" is in scope "x.com", and so is "api.x.com"; "notx.com" isn't. */
+export function hostInScope(hostname, scope) {
+  const h = String(hostname || '').toLowerCase().replace(/\.$/, '');
+  return !!scope && (h === scope || h.endsWith('.' + scope));
+}
+
+export function urlInScope(url, scope) {
+  let u;
+  try { u = new URL(String(url ?? '')); } catch { return false; }
+  return (u.protocol === 'http:' || u.protocol === 'https:') && hostInScope(u.hostname, scope);
+}
+
+// Whether a match pattern only matches pages in `scope` (not <all_urls>, any-host patterns, file://…).
+export function patternInScope(pattern, scope) {
+  const m = /^(\*|https?):\/\/([^/]*)\//i.exec(String(pattern ?? '').trim());
+  if (!m) return false;
+  let host = m[2].replace(/:(\*|\d+)$/, '').toLowerCase().replace(/\.$/, '');
+  if (host.startsWith('*.')) host = host.slice(2);
+  if (!host || host.includes('*')) return false;
+  return hostInScope(host, scope);
+}
+
+export function modInScope(mod, scope) {
+  const matches = Array.isArray(mod?.matches) ? mod.matches : [];
+  return matches.length > 0 && matches.every((p) => patternInScope(p, scope));
 }
 
 /** The side panel's "site" for a tab URL: hostname without a leading "www.", or null for pages mods can't run on. */

@@ -12,6 +12,7 @@
 <header class="bar">
   <span id="dot" class="dot" role="img" aria-label="Status unknown"></span>
   <h1 id="site" class="site">WebMods</h1>
+  <button id="site-switch" class="switch" type="button" role="switch" aria-checked="false" hidden><span class="knob" aria-hidden="true"></span></button>
   <button id="new-chat" class="icon-btn" type="button" title="New chat" aria-label="New chat" disabled>
     <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 3v10M3 8h10"/></svg>
   </button>
@@ -38,6 +39,12 @@
   </label>
   <p id="instructions-note" class="note">Applies from your next message, here and in Claude Code in ~/.webmods.</p>
   <p class="note"><a href="#" id="setup-link">Setup and status</a></p>
+</section>
+
+<section id="gate" class="gate" hidden>
+  <p class="gate-title">WebMods is disabled</p>
+  <p id="gate-note" class="note"></p>
+  <button id="gate-btn" class="btn go" type="button"></button>
 </section>
 
 <section id="notice" class="notice" hidden></section>

@@ -109,10 +109,13 @@ export function normalizeDisabled(value) {
  * The runtime must run before every mod, so whenever it is missing or its code or matches changed,
  * everything is unregistered and re-registered with the runtime first (registration order = injection
  * order). It only runs where a registered mod does, or on a site in `recording` (runtimeMatches); with
- * neither, nothing is registered at all.
+ * neither, nothing is registered at all. With `sitesOn`, mods are limited to those sites (limitToSites)
+ * and so is `recording`.
  * Returns {registered, errors, applied, reset}.
  */
-export async function syncUserScripts(us, { mods, runtimeCode, applied = {}, disabled = {}, offSites = {}, recording = [] }) {
+export async function syncUserScripts(us, { mods, runtimeCode, applied = {}, disabled = {}, offSites = {}, recording = [], sitesOn = null }) {
+  // sitesOn (null: no limit): mods and recording only on the sites WebMods is on for (limitToSites).
+  if (sitesOn) recording = (recording || []).filter((site) => (sitesOn || []).some((s) => hostInScope(site, s)));
   const errors = [];
   const desired = [];
   const seen = new Set();
@@ -122,7 +125,9 @@ export async function syncUserScripts(us, { mods, runtimeCode, applied = {}, dis
     if (disabled[mod.id] === true) continue; // switched off: not desired, so unregistered below if registered
     if (mod.held) continue; // held for the user's approval (an agent wrote it for another site): same
     seen.add(mod.id);
-    desired.push(withOffSites(mod, offSites[mod.id]));
+    const limited = sitesOn ? limitToSites(mod, sitesOn) : mod;
+    if (!limited) continue; // only on sites WebMods is off for
+    desired.push(withOffSites(limited, offSites[mod.id]));
   }
 
   const existing = await us.getScripts();
@@ -295,6 +300,91 @@ export function patternInScope(pattern, scope) {
 export function modInScope(mod, scope) {
   const matches = Array.isArray(mod?.matches) ? mod.matches : [];
   return matches.length > 0 && matches.every((p) => patternInScope(p, scope));
+}
+
+// ---- sites WebMods is on for -------------------------------------------------------------------
+// WebMods is off on every site until the user turns it on from the side panel there. On a site that's
+// off nothing from WebMods runs (no mods, not even all-sites ones, no runtime) and no page command
+// reaches its tabs, from a side-panel chat or a terminal. chrome.storage.local `sitesOn` is a sorted
+// list of registrable domains ("x.com", "bbc.co.uk"), each covering its subdomains.
+
+// Mirrors helper/lib/scope.js (a test keeps them in step).
+const MULTI_SUFFIXES = new Set([
+  'co.uk', 'org.uk', 'ac.uk', 'gov.uk', 'me.uk', 'com.au', 'net.au', 'org.au', 'edu.au', 'gov.au',
+  'co.nz', 'org.nz', 'co.jp', 'ne.jp', 'or.jp', 'ac.jp', 'com.br', 'com.mx', 'co.in', 'co.za', 'com.cn',
+  'com.tw', 'com.hk', 'co.kr', 'com.sg', 'com.tr', 'com.ar', 'co.il', 'com.my', 'co.id', 'com.ph',
+]);
+const SHARED_SUFFIXES = new Set([
+  'github.io', 'githubusercontent.com', 'vercel.app', 'netlify.app', 'pages.dev', 'workers.dev',
+  'herokuapp.com', 'blogspot.com', 'appspot.com', 'web.app', 'firebaseapp.com', 'glitch.me',
+  'substack.com', 'tumblr.com', 'wordpress.com', 'neocities.org', 'fly.dev', 'onrender.com',
+]);
+
+/** The registrable domain for a host or site name: "www.news.bbc.co.uk" -> "bbc.co.uk", "x.com" -> "x.com". */
+export function scopeFor(host) {
+  const h = String(host || '').trim().toLowerCase().replace(/\.$/, '').replace(/:\d+$/, '').replace(/^www\./, '');
+  if (!h || !h.includes('.') || /^[\d.]+$/.test(h) || h.includes(':') || h.startsWith('[')) return h;
+  const labels = h.split('.');
+  const last2 = labels.slice(-2).join('.');
+  const keep = MULTI_SUFFIXES.has(last2) || SHARED_SUFFIXES.has(last2) ? 3 : 2;
+  return labels.slice(-keep).join('.');
+}
+
+/** chrome.storage.local `sitesOn`, cleaned up: unique registrable domains, sorted. */
+export function normalizeSitesOn(value) {
+  return [...new Set((Array.isArray(value) ? value : []).filter((x) => typeof x === 'string').map(scopeFor).filter(Boolean))].sort();
+}
+
+/** The site in `sitesOn` that covers `url`'s host (http/https only), or null: WebMods is off there. */
+export function siteOnFor(url, sitesOn) {
+  let u;
+  try { u = new URL(String(url ?? '')); } catch { return null; }
+  if (u.protocol !== 'http:' && u.protocol !== 'https:') return null;
+  return (sitesOn || []).find((s) => hostInScope(u.hostname, s)) || null;
+}
+
+/**
+ * Sites to turn on for someone who used WebMods before sites had to be turned on: those of their mods
+ * that are switched on (not all-sites ones, which name no site) and those they've chatted on.
+ * `chats` maps site -> stored chat.
+ */
+export function sitesInUse(mods, disabled, chats) {
+  const sites = [];
+  for (const m of mods || []) {
+    const site = String(m?.id || '').split('/')[0];
+    if (site && site !== 'all-sites' && disabled?.[m.id] !== true && !m.held) sites.push(site);
+  }
+  for (const [site, chat] of Object.entries(chats || {})) if (chat?.messages?.length) sites.push(site);
+  return normalizeSitesOn(sites);
+}
+
+/**
+ * The mod limited to the sites in `sitesOn`: each @match narrowed to those sites (any-host patterns and
+ * <all_urls> become one pair per site; patterns for other sites go), or null when nothing is left. The
+ * sites used go into its hash, so it re-registers when they change. file:// patterns go too.
+ */
+export function limitToSites(mod, sitesOn) {
+  const out = new Set();
+  const used = new Set();
+  for (const raw of Array.isArray(mod?.matches) ? mod.matches : []) {
+    const p = String(raw).trim();
+    const m = p === '<all_urls>' ? ['', '*', '*', '/*'] : /^(\*|https?|wss?|ftp):\/\/([^/]*)(\/.*)$/i.exec(p);
+    if (!m) continue;
+    const [, scheme, hostPart, path] = m;
+    const port = /(:(\*|\d+))$/.exec(hostPart)?.[1] || '';
+    const host = hostPart.slice(0, hostPart.length - port.length).toLowerCase();
+    const add = (s) => { used.add(s); out.add(`${scheme}://${s}${port}${path}`); out.add(`${scheme}://*.${s}${port}${path}`); };
+    if (host === '*') { (sitesOn || []).forEach(add); continue; }
+    const wild = host.startsWith('*.');
+    const base = wild ? host.slice(2) : host;
+    const covering = (sitesOn || []).find((s) => hostInScope(base, s));
+    if (covering) { used.add(covering); out.add(p); continue; }
+    // "*.co.uk" with bbc.co.uk on: just bbc.co.uk. (An exact host never covers another site.)
+    if (wild) for (const s of sitesOn || []) if (hostInScope(s, base)) add(s);
+  }
+  if (!out.size) return null;
+  const tag = [...used].sort().join(',');
+  return { ...mod, matches: [...out].sort(), hash: mod.hash ? `${mod.hash}|sites:${tag}` : mod.hash };
 }
 
 /** The side panel's "site" for a tab URL: hostname without a leading "www.", or null for pages mods can't run on. */

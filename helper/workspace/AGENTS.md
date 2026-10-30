@@ -155,6 +155,20 @@ webmods run --url x.com '[...document.querySelectorAll("[data-testid]")].map(e =
 webmods run --url news.ycombinator.com 'const t = document.querySelector("#hnmain"); return { width: t?.getAttribute("width"), bg: getComputedStyle(document.body).backgroundColor }'
 ```
 
+## Sites WebMods is on for
+
+WebMods is off on every site until the user turns it on there, with the switch in the side panel. On a
+site where it's off, nothing from WebMods runs or reads it: no mods (all-sites mods included), and every
+`webmods` page command (`tabs` doesn't list its tabs; `run`, `text`, `open`, `record` etc. fail with
+"WebMods is off on bank.com"). This holds for you in a terminal too; you can't turn a site on.
+
+- `webmods status` shows the sites it's on for (`sites on`), and a mod whose site is off as `waiting`.
+- If a command fails because WebMods is off on the site, tell the user: "WebMods is off on bank.com; turn
+  it on with the switch in the side panel there, then I'll carry on." Don't look for ways around it.
+- You can still write a mod for a site that's off (`webmods new`, edit the file); it runs once the user
+  turns the site on. Say so when you finish.
+- A mod for all sites runs only on sites WebMods is on for.
+
 ## Switching mods off and on
 
 The user can switch each mod off and on with its switch in the side panel (and on the setup page),

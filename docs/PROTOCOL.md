@@ -129,6 +129,28 @@ Without one, the target is the active tab of the last-focused normal window.
 | `logs` | tab selector | `[{mod, level, args:[strings], time}]`: what mods logged with `webmods.log(...)` |
 | `mod.enable` | `id`, `enabled: bool`, `wait: bool` + tab selector | `{id, enabled, reloaded}`: switches a mod on/off (below). `reloaded` = the tab id reloaded, or null |
 
+### Sites WebMods is on for (`sitesOn`)
+
+WebMods is off on every site until the user turns it on from the side panel there. The extension keeps
+the sites in `chrome.storage.local` **`sitesOn`**: a sorted list of registrable domains (`scopeFor` in
+`extension/lib.js`, mirroring `helper/lib/scope.js`; `x.com` covers `m.x.com`). It's the one place this
+is enforced, for everyone:
+
+- **Mods.** Each sync limits every mod to those sites (`limitToSites`): an `@match` with any host, or
+  `<all_urls>`, becomes `*://<site>/<path>` and `*://*.<site>/<path>` for each site on; one for a host
+  inside a site on is kept; others (and `file://`) go. A mod with nothing left isn't registered, and
+  `status` gives it `sitesOff: true`. The runtime follows the registered mods, and `recording` only
+  counts on sites that are on.
+- **Page commands.** Every tab or URL a page command touches must be on a site that's on (the same check
+  as run scope, for all requests, scoped or not): otherwise `WebMods is off on <site>: …`. `tabs` lists
+  only tabs on sites that are on. `agent.start` is refused for a site that's off.
+- **The switch.** The panel's `{type: "site.set", site, on, tab}` adds or removes the site's registrable
+  domain, re-applies mods, reloads `tab` if an enabled mod applies to it, and (off) stops runs on the
+  site. Mod switches (`disabled`, `offSites`) are untouched, so they're as they were when it's turned back
+  on. `status` and the panel's status carry `sitesOn`.
+- **Updating.** A profile without `sitesOn` (from before) starts with the sites of its switched-on mods
+  (not all-sites ones) and the sites it has chats for (`sitesInUse`).
+
 ### Mod switches (`mod.enable`)
 
 Each mod can be switched off without touching its file. The switched-off set lives in the extension's

@@ -3,7 +3,7 @@
 // chrome.storage.local `chat:<site>`; this page renders that record and reacts to storage changes.
 // See docs/PROTOCOL.md, "Side panel and agent runs".
 
-import { siteForUrl, modAppliesTo, modSites, isMultiSite, offOnSite, normalizeOffSites, isLoginUrl, FIREFOX, BROWSER } from './lib.js';
+import { siteForUrl, modAppliesTo, modSites, isMultiSite, offOnSite, normalizeOffSites, isLoginUrl, scopeFor, FIREFOX, BROWSER } from './lib.js';
 import { renderMarkdown, MARKDOWN_ELEMENTS, MARKDOWN_ATTRIBUTES } from './markdown.js';
 import { modSwitch, syncSwitches, shownEnabled, switchError, enabledIn, onSwitchChange } from './modswitch.js';
 
@@ -12,7 +12,8 @@ const chatKey = (site) => `chat:${site}`;
 const emptyChat = () => ({ sessionId: null, agent: null, messages: [], run: null, last: null });
 
 const ui = {
-  dot: $('#dot'), site: $('#site'), newChat: $('#new-chat'), settingsBtn: $('#settings-btn'),
+  dot: $('#dot'), site: $('#site'), siteSwitch: $('#site-switch'), newChat: $('#new-chat'), settingsBtn: $('#settings-btn'),
+  gate: $('#gate'), gateNote: $('#gate-note'), gateBtn: $('#gate-btn'),
   settings: $('#settings'), agent: $('#agent'), agentNote: $('#agent-note'), model: $('#model'),
   instructions: $('#instructions'), instructionsNote: $('#instructions-note'),
   notice: $('#notice'), mods: $('#mods'), modsCount: $('#mods-count'), modList: $('#mod-list'),
@@ -270,6 +271,7 @@ function render() {
   ui.dot.title = dotLabel;
   ui.dot.setAttribute('aria-label', dotLabel);
 
+  renderGate();
   renderNotice({ helperOk, agentInfo, anyAgent });
   renderMods();
   renderMessages();
@@ -573,6 +575,50 @@ function renderMods() {
   }
 }
 
+// WebMods is off on a site until the user turns it on here (see "sites WebMods is on for" in lib.js):
+// until then the panel is greyed out under a card with the switch, and nothing runs or reads the site.
+// Once on, the header's switch turns it back off. (Unknown until the first status: neither shows.)
+const siteScope = () => (view.site ? scopeFor(view.site) : null);
+const siteIsOn = () => !!siteScope() && (view.status?.sitesOn || []).includes(siteScope());
+let siteSwitching = false;
+
+function renderGate() {
+  const scope = siteScope();
+  const known = !!scope && !!view.status;
+  const gated = known && !siteIsOn();
+  document.body.classList.toggle('site-off', gated);
+  ui.chat.inert = gated;
+  ui.composer.inert = gated;
+  ui.gate.hidden = !gated;
+  ui.siteSwitch.hidden = !known;
+  ui.siteSwitch.setAttribute('aria-checked', String(siteIsOn()));
+  ui.siteSwitch.setAttribute('aria-busy', String(siteSwitching));
+  ui.siteSwitch.title = scope ? `WebMods on ${scope}` : '';
+  ui.siteSwitch.setAttribute('aria-label', ui.siteSwitch.title);
+  if (!gated) return;
+  // Mods that would run here once it's on (all-sites ones included), so turning it on holds no surprises.
+  const waiting = (view.status.mods || []).filter((m) => m.enabled !== false && !m.held && modAppliesTo(m, view.tab?.url || ''));
+  ui.gateNote.textContent = `Nothing from WebMods runs on ${scope} or reads it: no mods, no agents.` +
+    (waiting.length ? ` Turning it on also runs your ${waiting.length === 1 ? 'mod' : 'mods'} ${waiting.map((m) => `“${m.name}”`).join(', ')} here.` : '');
+  ui.gateBtn.textContent = `Enable WebMods on ${scope}`;
+  ui.gateBtn.disabled = siteSwitching;
+}
+
+async function setSiteOn(on) {
+  if (siteSwitching || !view.site) return;
+  siteSwitching = true;
+  render();
+  try {
+    await request({ type: 'site.set', site: view.site, on, tab: view.tab?.id });
+    await refreshStatus();
+  } catch (e) {
+    ui.gateNote.textContent = `Couldn't switch WebMods ${on ? 'on' : 'off'}: ${e?.message ?? e}`;
+  } finally {
+    siteSwitching = false;
+    render();
+  }
+}
+
 // A mod on several sites gets a switch for this site only (the setup page has the whole-mod one);
 // a mod for one site, a switch for the mod.
 const switchSite = (m) => (isMultiSite(m) ? view.site : undefined);
@@ -814,6 +860,8 @@ ui.input.addEventListener('keydown', (e) => {
 });
 ui.stop.addEventListener('click', stop);
 ui.newChat.addEventListener('click', newChat);
+ui.gateBtn.addEventListener('click', () => setSiteOn(true));
+ui.siteSwitch.addEventListener('click', () => setSiteOn(!siteIsOn()));
 for (const chip of document.querySelectorAll('.chip')) {
   chip.addEventListener('click', () => {
     ui.input.value = chip.textContent;

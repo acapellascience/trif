@@ -247,6 +247,7 @@ const handlers = {
     const registered = new Map(((st && st.mods) || []).map((m) => [m.id, !!m.registered]));
     const off = new Set(((st && st.mods) || []).filter((m) => m.enabled === false).map((m) => m.id));
     const offSites = new Map(((st && st.mods) || []).filter((m) => m.offSites).map((m) => [m.id, m.offSites]));
+    const sitesOff = new Set(((st && st.mods) || []).filter((m) => m.sitesOff).map((m) => m.id));
     const applyErrors = new Map((((info.modsApplied || {}).errors) || []).map((e) => [e.id, e.error]));
     const helperErrors = new Map((info.modErrors || []).map((e) => [e.id, e.error]));
     const held = info.held || {};
@@ -257,6 +258,7 @@ const handlers = {
       if (helperErrors.has(id)) s = `NOT SENT: ${helperErrors.get(id)}`;
       else if (held[id]) s = `HELD: ${held[id].reason} (webmods approve ${id})`;
       else if (off.has(id)) s = 'off';
+      else if (sitesOff.has(id)) s = 'waiting: WebMods is off on its site';
       else if (applyErrors.has(id)) s = `NOT REGISTERED: ${applyErrors.get(id)}`;
       else if (!st) s = '?';
       else if (!registered.has(id)) s = 'not known to the extension yet';
@@ -267,6 +269,10 @@ const handlers = {
     for (const [id, err] of helperErrors) if (!ids.includes(id)) lines.push(`  ${pad(id, 40)} NOT SENT: ${err}`);
     if (off.size) lines.push(`              off = switched off by the user (webmods enable <id> turns one back on)`);
     if (Object.keys(held).length) lines.push('              HELD = written by a side-panel agent for another site; not running until the user approves it');
+    if (sitesOff.size) lines.push('              waiting = not running until the user turns WebMods on for the site (side panel)');
+    if (st && Array.isArray(st.sitesOn)) {
+      lines.push(`sites on      ${st.sitesOn.length ? st.sitesOn.join(', ') : '(none)'}; WebMods is off everywhere else: no mods, no page commands`);
+    }
     if (st) lines.push(`recording     ${(st.recording || []).length ? st.recording.join(', ') : '(none)'}`);
     out(lines.join('\n'));
   },

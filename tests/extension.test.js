@@ -668,8 +668,11 @@ function mockPort(name) {
 }
 
 let bgCount = 0;
-async function loadBackground({ storage = {}, tabs = [] } = {}) {
-  const store = structuredClone(storage);
+// WebMods is on for the test sites unless a test says otherwise (storage.sitesOn), or migrate: true
+// leaves sitesOn out, as for someone updating from before sites had to be turned on.
+const TEST_SITES_ON = ['example.com', 'x.com', 'y.com', 'z.com'];
+async function loadBackground({ storage = {}, tabs = [], migrate = false } = {}) {
+  const store = structuredClone(migrate || 'sitesOn' in storage ? storage : { sitesOn: TEST_SITES_ON, ...storage });
   const natives = [];
   const panelBehavior = [];
   const created = [];
@@ -1387,5 +1390,107 @@ test('background: deleting or restoring reloads the tab only when the mod runs t
     assert.deepStrictEqual(bg.reloaded, []);
     await roundTrip('x.com/on');
     assert.deepStrictEqual(bg.reloaded, [5, 5]);
+  } finally { bg.restore(); }
+});
+
+// ------------------------------------------------------------------ sites WebMods is on for
+
+test('scopeFor matches the helper\'s', async () => {
+  const { scopeFor } = require('../helper/lib/scope');
+  for (const h of ['x.com', 'www.x.com', 'm.x.com', 'news.bbc.co.uk', 'user.github.io', 'a.b.user.github.io', 'localhost', '127.0.0.1', 'X.COM.', 'shop.example.com:8080']) {
+    assert.strictEqual(lib.scopeFor(h), scopeFor(h), h);
+  }
+});
+
+test('siteOnFor, sitesInUse and limitToSites', () => {
+  const on = ['bbc.co.uk', 'x.com'];
+  assert.strictEqual(lib.siteOnFor('https://m.x.com/a', on), 'x.com');
+  assert.strictEqual(lib.siteOnFor('https://notx.com/', on), null);
+  assert.strictEqual(lib.siteOnFor('file:///Users/x.com', on), null);
+  assert.deepStrictEqual(lib.sitesInUse(
+    [mod('www.x.com/a'), mod('off.com/b'), mod('all-sites/dark'), mod('held.com/c', { held: { reason: 'r' } })],
+    { 'off.com/b': true },
+    { 'news.bbc.co.uk': { messages: [{ role: 'user' }] }, 'empty.com': { messages: [] } }), ['bbc.co.uk', 'x.com']);
+
+  const wide = { id: 'all-sites/d', hash: 'h', matches: ['*://*/*', '<all_urls>', 'https://x.com/home*', '*://*.co.uk/*', '*://evil.com/*', 'file:///*', '*://localhost:3000/*'] };
+  assert.deepStrictEqual(lib.limitToSites(wide, on), { ...wide, hash: 'h|sites:bbc.co.uk,x.com',
+    matches: ['*://*.bbc.co.uk/*', '*://*.x.com/*', '*://bbc.co.uk/*', '*://x.com/*', 'https://x.com/home*'] });
+  assert.strictEqual(lib.limitToSites(mod('bank.com/a'), on), null);
+  assert.strictEqual(lib.limitToSites(wide, []), null);
+  assert.deepStrictEqual(lib.limitToSites(mod('m.x.com/a', { matches: ['*://m.x.com/*'] }), on).matches, ['*://m.x.com/*']);
+  // An exact host never covers another site, even a subdomain of it.
+  assert.strictEqual(lib.limitToSites({ matches: ['*://co.uk/*'] }, on), null);
+});
+
+test('syncUserScripts with sitesOn: mods and the runtime only on those sites; recording too', async () => {
+  const us = mockUserScripts();
+  const r = await lib.syncUserScripts(us, {
+    mods: [mod('x.com/a'), mod('bank.com/b'), mod('all-sites/dark', { matches: ['*://*/*'] })],
+    runtimeCode: rt.runtimeCode([]), recording: ['news.com', 'x.com'], sitesOn: ['x.com'],
+  });
+  assert.deepStrictEqual(r.registered, ['x.com/a', 'all-sites/dark']);
+  assert.deepStrictEqual(us.scripts.map((s) => [s.id, s.matches]), [
+    [lib.RUNTIME_ID, ['*://*.x.com/*', '*://x.com/*']],
+    ['x.com/a', ['*://x.com/*']],
+    ['all-sites/dark', ['*://*.x.com/*', '*://x.com/*']],
+  ]);
+  const none = mockUserScripts();
+  await lib.syncUserScripts(none, { mods: [mod('x.com/a')], runtimeCode: rt.runtimeCode([]), recording: ['x.com'], sitesOn: [] });
+  assert.deepStrictEqual(none.scripts, []);
+});
+
+const GATE_TABS = [
+  { id: 5, windowId: 1, index: 0, active: true, url: 'https://x.com/home', title: 'X' },
+  { id: 6, windowId: 1, index: 1, active: false, url: 'https://bank.com/', title: 'Bank' },
+];
+
+test('background: page commands and chats only reach sites WebMods is on for', async () => {
+  const bg = await loadBackground({ storage: { sitesOn: ['x.com'] }, tabs: GATE_TABS });
+  try {
+    let r = await bg.native.call('tabs');
+    assert.deepStrictEqual(r.result.map((t) => t.id), [5]);
+    for (const [cmd, args] of [['text', { tab: 6 }], ['reload', { tab: 6 }], ['open', { to: 'https://bank.com/' }], ['navigate', { tab: 5, to: 'bank.com' }], ['record', { site: 'bank.com' }]]) {
+      r = await bg.native.call(cmd, args);
+      assert.strictEqual(r.ok, false, cmd);
+      assert.match(r.error, /WebMods is off on bank\.com/, cmd);
+    }
+    const panel = bg.connectPanel();
+    r = await panel.ask({ type: 'agent.start', site: 'bank.com', tabId: 6, url: 'https://bank.com/', prompt: 'hi' });
+    assert.deepStrictEqual([r.ok, r.error], [false, 'WebMods is off on bank.com: turn it on first']);
+    assert.strictEqual(bg.natives[0].sent.some((m) => m.cmd === 'agent.start'), false);
+  } finally { bg.restore(); }
+});
+
+test('background: the panel\'s site switch turns a site on and off, applying mods and reloading if one runs there', async () => {
+  const mods = [mod('bank.com/a'), mod('all-sites/dark', { matches: ['*://*/*'] })];
+  const bg = await loadBackground({ storage: { mods, sitesOn: [] }, tabs: GATE_TABS });
+  try {
+    bg.native.emit({ type: 'mods', mods });
+    await settle(20);
+    assert.deepStrictEqual(scriptIds(bg), []);
+    const panel = bg.connectPanel();
+    let r = await panel.ask({ type: 'site.set', site: 'www.bank.com', on: true, tab: 6 });
+    assert.deepStrictEqual(r.result, { site: 'bank.com', on: true, sitesOn: ['bank.com'] });
+    assert.deepStrictEqual(bg.store.sitesOn, ['bank.com']);
+    assert.deepStrictEqual(scriptIds(bg), [lib.RUNTIME_ID, 'bank.com/a', 'all-sites/dark']);
+    assert.deepStrictEqual(bg.reloaded, [6]);
+    r = await panel.ask({ type: 'site.set', site: 'bank.com', on: false, tab: 6 });
+    assert.deepStrictEqual(bg.store.sitesOn, []);
+    assert.deepStrictEqual(scriptIds(bg), []);
+    assert.deepStrictEqual(bg.reloaded, [6, 6]);
+    await panel.ask({ type: 'site.set', site: 'x.com', on: true, tab: 5 });
+    assert.deepStrictEqual(bg.reloaded, [6, 6, 5], 'the all-sites mod now runs on x.com');
+  } finally { bg.restore(); }
+});
+
+test('background: updating from before sites had to be turned on keeps WebMods on where it was in use', async () => {
+  const bg = await loadBackground({ migrate: true, storage: {
+    mods: [mod('x.com/a'), mod('off.com/b'), mod('all-sites/dark', { matches: ['*://*/*'] })],
+    disabled: { 'off.com/b': true },
+    'chat:news.bbc.co.uk': { messages: [{ role: 'user', text: 'hi', time: 1 }] },
+  } });
+  try {
+    await settle(10);
+    assert.deepStrictEqual(bg.store.sitesOn, ['bbc.co.uk', 'x.com']);
   } finally { bg.restore(); }
 });

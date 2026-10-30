@@ -548,3 +548,19 @@ test('doctor: after setup, wrong manifest and missing node are caught; live help
   assert.match(r.stdout, /user scripts {2}OFF/);
   await ext.close();
 });
+
+test('status: lists the sites WebMods is on for and marks mods waiting for theirs', async () => {
+  const home = tempDir();
+  writeMod(home, 'bank.com', 'a.js', '// ==WebMod==\n// @name A\n// ==/WebMod==\n');
+  const ext = new FakeExtension({ home });
+  cleanups.push(() => ext.close());
+  ext.hello();
+  ext.handlers.status = () => ({ userScripts: true, chrome: '140', version: '0.1.0', recording: [], sitesOn: ['x.com'],
+    mods: [{ id: 'bank.com/a', registered: false, enabled: true, sitesOff: true }] });
+  await ext.waitForSocket();
+  await ext.nextMods((mods) => mods.length === 1);
+  const r = await runCli(['status'], { home });
+  assert.match(r.stdout, /bank\.com\/a\s+waiting: WebMods is off on its site\n/);
+  assert.match(r.stdout, /waiting = not running until the user turns WebMods on for the site/);
+  assert.match(r.stdout, /^sites on {6}x\.com; WebMods is off everywhere else/m);
+});

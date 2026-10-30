@@ -37,7 +37,9 @@ Run it again after upgrading WebMods, moving the repo or upgrading Node.`,
 its own helper), an "also" line lists the others; --browser <name|pid> picks one for any command.
 If a mod you just saved is missing or
 "not registered", check its header and run webmods doctor. "off" means the user switched the mod off
-(side panel switch, or webmods disable): it isn't running, and its file is unchanged.`,
+(side panel switch, or webmods disable): it isn't running, and its file is unchanged. "sites on" lists
+the sites WebMods is on for; it's off everywhere else until the user turns a site on in the side panel,
+and a mod for a site that's off shows as "waiting".`,
     examples: ['webmods status', 'webmods status --json'],
   },
   doctor: {
@@ -52,7 +54,7 @@ logged in). Exit code 1 if anything failed. Fix problems top-down.`,
   tabs: {
     usage: 'webmods tabs',
     summary: 'list open tabs: id, url, title (* marks active tabs)',
-    details: 'Use the id with --tab, or select tabs with --url <substring>.',
+    details: 'Use the id with --tab, or select tabs with --url <substring>. Only tabs on sites WebMods is on for\nare listed (see webmods status); the user turns a site on in the side panel.',
     examples: ['webmods tabs'],
   },
   run: {

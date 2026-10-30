@@ -107,7 +107,7 @@ svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width:
 
 /* ---- settings, notices, mods ----------------------------------------------------------------- */
 
-.settings, .notice, .mods {
+.settings, .notice, .mods, .gate {
   flex: none;
   margin: 10px 12px 0;
   padding: 10px 12px;
@@ -117,6 +117,16 @@ svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width:
 }
 
 .settings { display: grid; gap: 8px; }
+
+/* A site WebMods is off for: the card says so and offers the switch; the rest is greyed out and inert. */
+.gate { display: grid; gap: 8px; justify-items: start; }
+.gate-title { margin: 0; font-weight: 600; }
+.gate .note { font-size: 13px; }
+.btn.go { padding: 6px 14px; border-color: transparent; background: var(--switch-on); color: #04291c; font-weight: 600; }
+.btn.go:hover { background: color-mix(in srgb, var(--switch-on) 85%, #000); }
+body.site-off .mods { display: none; }
+body.site-off .chat, body.site-off .composer { opacity: 0.4; }
+#site-switch { margin-right: 4px; }
 
 .field { display: grid; grid-template-columns: 52px 1fr; align-items: center; gap: 8px; }
 .field > span { color: var(--muted); }

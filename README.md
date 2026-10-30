@@ -58,6 +58,10 @@ on its own browser. Switching a mod off is per browser.
 
 ## Using it
 
+- WebMods is off on every site until you turn it on there: the side panel shows "WebMods is disabled"
+  and a button to enable it. Until then nothing from WebMods runs on the site or reads it, not even a
+  mod for all sites, and agents (in the panel or a terminal) can't touch its tabs. The switch next to
+  the site name turns it back off.
 - Go to a site, open the side panel, and describe the change you want. The agent looks at the page,
   writes a mod, and reloads the tab so you can see it. Keep chatting to adjust it.
 - Each mod has a switch in the side panel, so you can turn it off without deleting it. Its trash icon

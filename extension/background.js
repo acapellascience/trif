@@ -7,7 +7,7 @@ import {
   normalizeUrl, normalizeSite, hostMatchesSite, buildRunCode, buildPollCode, parseRunEnvelope,
   firstInjectionResult, withTimeout, filterRequests, nextBackoff, chromeVersion, toolLine,
   normalizeDisabled, modAppliesTo, urlInScope, modInScope, applyStartOff,
-  normalizeOffSites, offSiteName, offOnSite, hostInScope, withOffSites, switchSite, fromOtherBrowser, timedUserScripts,
+  normalizeOffSites, offSiteName, offOnSite, hostInScope, withOffSites, scopeFor, normalizeSitesOn, siteOnFor, sitesInUse, limitToSites, switchSite, fromOtherBrowser, timedUserScripts,
 } from './lib.js';
 import { runtimeCode } from './runtime.js';
 
@@ -30,6 +30,7 @@ const state = {
   recording: [],         // hostnames being recorded (persisted)
   disabled: {},          // mod id → true for mods the user switched off (persisted as `disabled`)
   offSites: {},          // mod id → sites it's switched off on, for mods on several sites (persisted)
+  sitesOn: [],           // registrable domains WebMods is on for; off everywhere else (persisted)
   startedOff: {},        // mod id → true for mods already switched off once: preinstalled, or from another browser (persisted)
   installId: null,       // random id of this install (persisted): the helper records it as the origin of mods made here
   applied: {},           // script id → hash last registered (persisted)
@@ -54,6 +55,13 @@ const ready = chrome.storage.local.get(null).then(async (s) => {
   state.disabled = normalizeDisabled(s.disabled);
   state.offSites = normalizeOffSites(s.offSites);
   state.startedOff = normalizeDisabled(s.startedOff);
+  if (Array.isArray(s.sitesOn)) state.sitesOn = normalizeSitesOn(s.sitesOn);
+  else {
+    // First start since WebMods has to be turned on per site: keep it on where it's already in use.
+    const chats = Object.fromEntries(Object.entries(s).filter(([k]) => k.startsWith('chat:')).map(([k, v]) => [k.slice(5), v]));
+    state.sitesOn = sitesInUse(state.mods, state.disabled, chats);
+    await chrome.storage.local.set({ sitesOn: state.sitesOn });
+  }
   state.installId = typeof s.installId === 'string' && s.installId ? s.installId : crypto.randomUUID();
   if (state.installId !== s.installId) await chrome.storage.local.set({ installId: state.installId });
   if (s.applied && typeof s.applied === 'object') state.applied = s.applied;
@@ -148,7 +156,7 @@ async function applyMods() {
   try {
     const res = await syncUserScripts(timedUserScripts(chrome.userScripts), {
       mods: state.mods, runtimeCode: runtimeCode(state.recording), applied: state.applied, disabled: state.disabled,
-      offSites: state.offSites, recording: state.recording,
+      offSites: state.offSites, recording: state.recording, sitesOn: state.sitesOn,
     });
     state.applied = res.applied;
     state.lastApply = { registered: res.registered, errors: res.errors };
@@ -294,11 +302,18 @@ function helperGone(reason) {
 // ---- page commands ------------------------------------------------------------------------------
 
 // A side-panel agent run's requests carry args.scope (the helper sets it from the run's token): they
-// may only touch tabs and URLs on that site. See docs/PROTOCOL.md "Run scope".
+// may only touch tabs and URLs on that site. See docs/PROTOCOL.md "Run scope". And no request, from a
+// run or a terminal, touches a site WebMods is off for (see "sites WebMods is on for" in lib.js).
 function checkScopeUrl(url, scope, what) {
   if (scope && !urlInScope(url, scope)) {
     throw new Error(`${what} is on ${hostOf(url) || url || 'a page'}, and this agent run is limited to ${scope}` +
       ' (it was started from the side panel on that site; the user can start another chat on the other site)');
+  }
+  if (!siteOnFor(url, state.sitesOn)) {
+    const host = hostOf(url);
+    throw new Error(host && /^https?:/.test(url)
+      ? `WebMods is off on ${scopeFor(host)}: nothing from WebMods runs there or reads it until the user turns it on (the side panel on that site has the switch)`
+      : `${what} isn't a web page (${url || 'no URL'}); WebMods only works on http and https pages`);
   }
 }
 
@@ -326,18 +341,22 @@ const commands = {
       mods: state.mods.map((m) => {
         const o = { id: m.id, registered: ids.has(m.id), enabled: isEnabled(m.id) };
         if (state.offSites[m.id]) o.offSites = state.offSites[m.id];
+        if (!limitToSites(m, state.sitesOn)) o.sitesOff = true; // every site it's for is off
         if (m.held) o.held = m.held;
         if (errors.has(m.id) && errors.get(m.id) !== USER_SCRIPTS_OFF) o.error = errors.get(m.id);
         return o;
       }),
-      recording: state.recording,
+      recording: state.recording, sitesOn: state.sitesOn,
     };
   },
 
   async tabs(args) {
     const tabs = await chrome.tabs.query({ windowType: 'normal' });
     tabs.sort((a, b) => (a.windowId - b.windowId) || (a.index - b.index));
-    return tabs.filter((t) => !args.scope || urlInScope(t.url || t.pendingUrl || '', args.scope)).map(tabInfo);
+    return tabs.filter((t) => {
+      const url = t.url || t.pendingUrl || '';
+      return (!args.scope || urlInScope(url, args.scope)) && siteOnFor(url, state.sitesOn);
+    }).map(tabInfo);
   },
 
   async run(args) {
@@ -650,7 +669,7 @@ async function uiStatus() {
   return {
     helper: { connected: state.connected, error: state.connected ? null : state.helperError },
     userScripts: s.userScripts, settingsUrl: SETTINGS_URL, version: VERSION, chrome: CHROME, browser: BROWSER,
-    recording: s.recording,
+    recording: s.recording, sitesOn: state.sitesOn,
     mods: state.mods.map((m, i) => ({
       id: m.id, name: m.name || m.id, description: m.description || '', site: m.site, file: m.file || '',
       matches: m.matches || [], excludes: m.excludes || [], registered: s.mods[i].registered, enabled: s.mods[i].enabled,
@@ -708,6 +727,7 @@ async function onPanelMessage(msg) {
     case 'agent.loginCode': return helperRequest('agent.loginCode', { loginId: String(msg.loginId ?? ''), code: String(msg.code ?? '') }, 10000);
     case 'agent.loginCancel': return helperRequest('agent.loginCancel', { loginId: String(msg.loginId ?? '') }, 10000);
     case 'chat.clear': return clearChat(msg.site);
+    case 'site.set': return setSiteOn(msg);
     case 'chat.note': {
       // A line from the panel itself (a slash command's answer), shown like a tool line.
       const site = normalizeSite(msg.site);
@@ -758,6 +778,7 @@ async function startAgent(msg) {
   const site = normalizeSite(msg.site);
   const prompt = String(msg.prompt ?? '').trim();
   if (!prompt) throw new Error('empty message');
+  if (!siteOnFor(`https://${site}/`, state.sitesOn)) throw new Error(`WebMods is off on ${scopeFor(site)}: turn it on first`);
   const agent = msg.agent ? String(msg.agent) : undefined;
   const tabId = Number.isInteger(msg.tabId) ? msg.tabId : undefined;
   const startedAt = Date.now();
@@ -809,6 +830,31 @@ async function startLogin(msg) {
   if (!r?.loginId) throw new Error('the helper did not return a login id');
   state.logins.add(r.loginId);
   return { loginId: r.loginId };
+}
+
+// The panel's switch for the site it's showing (the registrable domain: x.com covers m.x.com). Off stops
+// everything there: its mods, chats in progress, and page commands. Mod switches are kept for next time.
+async function setSiteOn(msg) {
+  const site = scopeFor(normalizeSite(msg.site));
+  if (!site) throw new Error('missing site');
+  const on = msg.on !== false;
+  const set = new Set(state.sitesOn);
+  if (on) set.add(site); else set.delete(site);
+  state.sitesOn = [...set].sort();
+  await chrome.storage.local.set({ sitesOn: state.sitesOn });
+  if (!on) {
+    for (const r of state.runs.values()) {
+      if (hostInScope(r.site, site)) { r.stopping = true; helperRequest('agent.stop', { runId: r.runId }, 10000).catch(() => {}); }
+    }
+  }
+  // Reload the tab if a mod starts or stops running on it.
+  const tab = msg.tab !== undefined ? await chrome.tabs.get(msg.tab).catch(() => null) : null;
+  const url = tab ? tab.url || tab.pendingUrl || '' : '';
+  const runsThere = url && state.mods.some((m) => isEnabled(m.id) && !m.held && modAppliesTo(withOffSites(m, state.offSites[m.id]), url));
+  if (checkUserScripts()) reportApplied(await serial(applyMods));
+  if (runsThere) await chrome.tabs.reload(tab.id).catch(() => {});
+  notifyPanels();
+  return { site, on, sitesOn: state.sitesOn };
 }
 
 async function clearChat(site) {

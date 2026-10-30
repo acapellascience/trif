@@ -200,6 +200,9 @@ body.site-off :is(.bar, .settings, .notice, .mods, .chat, .composer) { display: 
 .mod-row { display: flex; align-items: center; gap: 10px; }
 .mod-main { flex: 1; min-width: 0; }
 .mod-name { font-weight: 500; }
+.light { display: inline-block; width: 7px; height: 7px; margin-right: 7px; border-radius: 50%; vertical-align: 1px;
+  background: color-mix(in srgb, var(--muted) 45%, transparent); }
+.light.on { background: var(--switch-on); }
 .mod-list li.off .mod-name { color: var(--muted); }
 .mod-file { color: var(--muted); font: 11px/1.4 var(--mono); overflow-wrap: anywhere; }
 .mod-err { color: var(--bad); font-size: 12px; }

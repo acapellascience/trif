@@ -3,7 +3,7 @@
 // chrome.storage.local `chat:<site>`; this page renders that record and reacts to storage changes.
 // See docs/PROTOCOL.md, "Side panel and agent runs".
 
-import { siteForUrl, modAppliesTo, modSites, isMultiSite, offOnSite, normalizeOffSites, isLoginUrl, scopeFor, FIREFOX, BROWSER } from './lib.js';
+import { siteForUrl, modAppliesTo, modSites, isMultiSite, offOnSite, normalizeOffSites, isLoginUrl, scopeFor, limitToSites, withOffSites, FIREFOX, BROWSER } from './lib.js';
 import { renderMarkdown, MARKDOWN_ELEMENTS, MARKDOWN_ATTRIBUTES } from './markdown.js';
 import { modSwitch, syncSwitches, shownEnabled, switchError, enabledIn, onSwitchChange } from './modswitch.js';
 
@@ -548,8 +548,11 @@ onSwitchChange(() => renderMods());
 
 function renderMods() {
   const { site, status, tab } = view;
-  // Plus mods on hold from an agent run on this site, wherever they'd run, so they can be allowed here.
-  const mods = site && status ? status.mods.filter((m) => modAppliesTo(m, tab.url) || m.held?.site === site) : [];
+  // Every mod that runs somewhere on this site's domain (google.com: Search, Maps, mail.google.com…, and
+  // all-sites mods), not just on this page, so the list doesn't change as you move around the site; a
+  // light says which run on this page. Plus mods on hold from an agent run here, so they can be allowed.
+  const scope = site ? scopeFor(site) : null;
+  const mods = site && status ? status.mods.filter((m) => limitToSites(m, [scope]) || m.held?.site === site) : [];
   ui.mods.hidden = mods.length === 0;
   if (!mods.length) { view.modsKey = null; ui.modList.replaceChildren(); return; }
   ui.modsCount.textContent = `(${mods.length})`;
@@ -630,11 +633,12 @@ function modItem(m) {
   li.title = m.file || m.id;
   const labelId = `mod-name-${++modLabelSeq}`;
   const name = el('div', 'mod-name');
+  const light = el('span', 'light');
   const label = el('span', null, m.name);
   label.id = labelId;
   const tag = el('span', 'tag');
   tag.hidden = true;
-  name.append(label, tag);
+  name.append(light, label, tag);
   // Risk tier from the mod's header (AGENTS.md "Account safety"): nothing for 0, a badge for 1 and 2.
   if (m.risk?.tier >= 1) {
     const badge = el('span', `tag risk risk-${m.risk.tier}`, m.risk.tier >= 2 ? 'changes requests' : 'detectable');
@@ -707,9 +711,18 @@ function deleteButton(m, labelId, li) {
   return b;
 }
 
+// Green when the mod runs on the tab's page: switched on (here), matching this URL, not on hold.
+function updateLight(li, m, on) {
+  const light = li.querySelector('.light');
+  const running = on && !m.held && modAppliesTo(withOffSites(m, view.offSites[m.id]), view.tab?.url || '');
+  light.classList.toggle('on', running);
+  light.title = running ? 'Running on this page' : m.held ? 'On hold' : !on ? 'Switched off' : 'Not running on this page';
+}
+
 function updateModItem(li, m) {
   if (!m) return;
   if (m.held) {
+    updateLight(li, m, false);
     const tag = li.querySelector('.tag');
     tag.textContent = 'on hold';
     tag.hidden = false;
@@ -723,6 +736,7 @@ function updateModItem(li, m) {
   const site = switchSite(m);
   const on = shownEnabled(m.id, isOn(m.id, site), site);
   li.classList.toggle('off', !on);
+  updateLight(li, m, on);
   // "not active"/"paused" only once the status agrees the mod is on (not mid-switch).
   const tag = li.querySelector('.tag');
   tag.textContent = on && m.enabled !== false && !m.registered ? (view.status.userScripts ? 'not active' : 'paused')

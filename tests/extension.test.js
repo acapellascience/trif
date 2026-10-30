@@ -1336,3 +1336,32 @@ test('background: a mod made in another browser arrives switched off, once; the 
     assert.deepStrictEqual(st.mods.find((m) => m.id === 'x.com/theirs').enabled, true);
   } finally { bg.restore(); }
 });
+
+test('background: deleting from the panel leaves a chat line with Undo; restoring says how its switch is', async () => {
+  const bg = await loadBackground({ storage: { disabled: { 'x.com/quiet': true }, offSites: { 'all-sites/dark': ['bank.com'] } } });
+  try {
+    const panel = bg.connectPanel();
+    let p = panel.ask({ type: 'mod.delete', id: 'x.com/quiet', site: 'x.com' });
+    await answerNative(bg.native, 'mod.delete', { id: 'x.com/quiet', deleted: true });
+    assert.strictEqual((await p).ok, true);
+    await settle(10);
+    assert.deepStrictEqual(bg.store['chat:x.com'].messages.map((m) => [m.role, m.text, m.undo, m.undone]),
+      [['mod', 'quiet.js was deleted.', 'x.com/quiet', undefined]]);
+
+    p = panel.ask({ type: 'mod.restore', id: 'x.com/quiet', site: 'x.com' });
+    await answerNative(bg.native, 'mod.restore', { id: 'x.com/quiet', restored: true });
+    assert.strictEqual((await p).ok, true);
+    await settle(10);
+    assert.deepStrictEqual(bg.store['chat:x.com'].messages.map((m) => [m.text, m.undone]),
+      [['quiet.js was deleted.', true], ['quiet.js was restored (off, as before).', undefined]]);
+
+    p = panel.ask({ type: 'mod.delete', id: 'all-sites/dark', site: 'x.com' });
+    await answerNative(bg.native, 'mod.delete', { id: 'all-sites/dark', deleted: true });
+    await p;
+    p = panel.ask({ type: 'mod.restore', id: 'all-sites/dark', site: 'x.com' });
+    await answerNative(bg.native, 'mod.restore', { id: 'all-sites/dark', restored: true });
+    await p;
+    await settle(10);
+    assert.strictEqual(bg.store['chat:x.com'].messages.at(-1).text, 'dark.js was restored (on except on bank.com, as before).');
+  } finally { bg.restore(); }
+});

@@ -377,7 +377,7 @@ Nothing is hosted; the agent uses the user's own login/subscription.
   `{type: "agent.start", site, tabId, url, prompt, sessionId, agent, model}`, `{type: "agent.stop", runId}`,
   `{type: "agent.list"}`, `{type: "agent.login", agent}`, `{type: "agent.loginCode", loginId, code}`,
   `{type: "agent.loginCancel", loginId}`, `{type: "status"}`, `{type: "mod.enable", id, enabled, tab}`,
-  `{type: "mod.approve", id, tab}`, `{type: "mod.delete", id, tab}`, `{type: "mod.restore", id, tab}` (the tab is reloaded if the mod runs there), `{type: "instructions.get"}`, `{type: "instructions.set", text}`, `{type: "chat.clear", site}`, `{type: "chat.note", site, text}`. Background forwards agent commands to the
+  `{type: "mod.approve", id, tab}`, `{type: "mod.delete", id, site, tab}`, `{type: "mod.restore", id, site, tab}` (the tab is reloaded if the mod runs there; with `site`, the chat gets a `{role: "mod", text: "x.js was deleted.", undo: id}` line, marked `undone: true` once restored, and a "was restored (off, as before)" line), `{type: "instructions.get"}`, `{type: "instructions.set", text}`, `{type: "chat.clear", site}`, `{type: "chat.note", site, text}`. Background forwards agent commands to the
   helper as native `request`s with the same cmd and relays every native `{type: "agentEvent", runId,
   event}` to all panel ports (panels ignore runs and logins they didn't start, by id).
   If the helper disconnects mid-run (or mid-login), the background sends the panel `{kind: "error"}` then

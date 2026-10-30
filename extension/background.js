@@ -719,20 +719,31 @@ async function onPanelMessage(msg) {
       }
       return r;
     }
+    // From the panel's trash icon and the Undo on the chat line that follows it. The mod stops (or starts)
+    // running once the helper re-sends the mods; the tab is reloaded if it runs there.
     case 'mod.delete': {
-      // The mod stops running once the helper re-sends the mods; reload the tab it was running on.
       const mod = state.mods.find((m) => m.id === msg.id);
       const r = await helperRequest('mod.delete', { id: String(msg.id ?? '') }, 10000);
+      if (msg.site) {
+        await updateChat(normalizeSite(msg.site), (chat) => {
+          chat.messages.push({ role: 'mod', text: `${modFileName(r.id)} was deleted.`, undo: r.id, time: Date.now() });
+        });
+      }
       if (mod && msg.tab !== undefined) { await serial(() => {}); await reloadIfApplies(mod, { tab: msg.tab }); }
       return r;
     }
     case 'mod.restore': {
       const r = await helperRequest('mod.restore', { id: String(msg.id ?? '') }, 10000);
-      if (msg.tab !== undefined) {
-        await serial(() => {});
-        const mod = state.mods.find((m) => m.id === r.id);
-        if (mod) await reloadIfApplies(mod, { tab: msg.tab });
+      if (msg.site) {
+        await updateChat(normalizeSite(msg.site), (chat) => {
+          const line = chat.messages.findLast((m) => m.undo === r.id && !m.undone);
+          if (line) line.undone = true;
+          chat.messages.push({ role: 'mod', text: `${modFileName(r.id)} was restored (${switchState(r.id)}, as before).`, time: Date.now() });
+        });
       }
+      await serial(() => {});
+      const mod = state.mods.find((m) => m.id === r.id);
+      if (mod && msg.tab !== undefined) await reloadIfApplies(mod, { tab: msg.tab });
       return r;
     }
     default: return onPageMessage(msg);
@@ -881,6 +892,15 @@ function chatSerial(site, fn) {
 }
 
 /** Read chat:<site>, let `fn` mutate it (return false to skip writing), write it back. */
+const modFileName = (id) => `${String(id).split('/').pop()}.js`;
+
+// A mod's switches in words: "on", "off", "on except on bank.com".
+function switchState(id) {
+  if (!isEnabled(id)) return 'off';
+  const off = state.offSites[id];
+  return Array.isArray(off) && off.length ? `on except on ${off.join(', ')}` : 'on';
+}
+
 function updateChat(site, fn) {
   return chatSerial(site, async () => {
     const key = chatKey(site);

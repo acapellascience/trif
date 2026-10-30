@@ -198,8 +198,6 @@ svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width:
 .mod-delete { width: 24px; height: 24px; color: var(--faint); }
 .mod-delete svg { width: 14px; height: 14px; }
 .mod-delete:hover:not(:disabled) { color: var(--bad); }
-.undo { display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--muted); }
-.undo span { flex: 1; min-width: 0; }
 .tag.risk-1 { color: var(--muted); }
 .tag.risk-2 { color: var(--bad); border-color: currentColor; }
 .tag {
@@ -279,6 +277,8 @@ svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width:
   text-overflow: ellipsis;
 }
 .msg.tool + .msg.tool { margin-top: -6px; }
+.msg.mod { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 0 2px; color: var(--muted); font-size: 12px; }
+.msg.mod .btn { padding: 2px 10px; }
 
 .msg.error {
   padding: 7px 10px;

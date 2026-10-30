@@ -1365,3 +1365,27 @@ test('background: deleting from the panel leaves a chat line with Undo; restorin
     assert.strictEqual(bg.store['chat:x.com'].messages.at(-1).text, 'dark.js was restored (on except on bank.com, as before).');
   } finally { bg.restore(); }
 });
+
+test('background: deleting or restoring reloads the tab only when the mod runs there (on, not off on the site)', async () => {
+  const mods = [mod('x.com/on'), mod('x.com/off'), mod('x.com/offhere')];
+  const bg = await loadBackground({ storage: { mods, disabled: { 'x.com/off': true }, offSites: { 'x.com/offhere': ['x.com'] } }, tabs: SWITCH_TABS });
+  try {
+    bg.native.emit({ type: 'mods', mods });
+    await settle(20);
+    const panel = bg.connectPanel();
+    const roundTrip = async (id) => {
+      let p = panel.ask({ type: 'mod.delete', id, site: 'x.com', tab: 5 });
+      await answerNative(bg.native, 'mod.delete', { id, deleted: true });
+      await p;
+      p = panel.ask({ type: 'mod.restore', id, site: 'x.com', tab: 5 });
+      await answerNative(bg.native, 'mod.restore', { id, restored: true });
+      await p;
+      await settle(10);
+    };
+    await roundTrip('x.com/off');
+    await roundTrip('x.com/offhere');
+    assert.deepStrictEqual(bg.reloaded, []);
+    await roundTrip('x.com/on');
+    assert.deepStrictEqual(bg.reloaded, [5, 5]);
+  } finally { bg.restore(); }
+});

@@ -7,7 +7,7 @@ import {
   normalizeUrl, normalizeSite, hostMatchesSite, buildRunCode, buildPollCode, parseRunEnvelope,
   firstInjectionResult, withTimeout, filterRequests, nextBackoff, chromeVersion, toolLine,
   normalizeDisabled, modAppliesTo, urlInScope, modInScope, applyStartOff,
-  normalizeOffSites, offSiteName, hostInScope, withOffSites, switchSite, fromOtherBrowser, timedUserScripts,
+  normalizeOffSites, offSiteName, offOnSite, hostInScope, withOffSites, switchSite, fromOtherBrowser, timedUserScripts,
 } from './lib.js';
 import { runtimeCode } from './runtime.js';
 
@@ -522,10 +522,14 @@ async function setSwitchState(id, { disabled, offSites }) {
 }
 
 /** After a switch: reload the selected (or active) tab if `mod` runs on it. Returns the tab id or null; never throws. */
-async function reloadIfApplies(mod, args) {
+// With onlyIfRunning, only when the mod runs on the tab's page: not switched off (everywhere or on that
+// site) and not held. Deleting or restoring a mod that's off changes nothing on the page.
+async function reloadIfApplies(mod, args, { onlyIfRunning = false } = {}) {
   try {
     const tab = await scopedTab(args);
-    if (!modAppliesTo(mod, tab.url || tab.pendingUrl || '')) return null;
+    const url = tab.url || tab.pendingUrl || '';
+    if (!modAppliesTo(mod, url)) return null;
+    if (onlyIfRunning && (!isEnabled(mod.id) || mod.held || offOnSite(state.offSites, mod.id, new URL(url).hostname))) return null;
     if (args.wait) await loadAndReport(tab.id, () => chrome.tabs.reload(tab.id)).catch(() => {});
     else await chrome.tabs.reload(tab.id);
     return tab.id;
@@ -729,7 +733,7 @@ async function onPanelMessage(msg) {
           chat.messages.push({ role: 'mod', text: `${modFileName(r.id)} was deleted.`, undo: r.id, time: Date.now() });
         });
       }
-      if (mod && msg.tab !== undefined) { await serial(() => {}); await reloadIfApplies(mod, { tab: msg.tab }); }
+      if (mod && msg.tab !== undefined) { await serial(() => {}); await reloadIfApplies(mod, { tab: msg.tab }, { onlyIfRunning: true }); }
       return r;
     }
     case 'mod.restore': {
@@ -743,7 +747,7 @@ async function onPanelMessage(msg) {
       }
       await serial(() => {});
       const mod = state.mods.find((m) => m.id === r.id);
-      if (mod && msg.tab !== undefined) await reloadIfApplies(mod, { tab: msg.tab });
+      if (mod && msg.tab !== undefined) await reloadIfApplies(mod, { tab: msg.tab }, { onlyIfRunning: true });
       return r;
     }
     default: return onPageMessage(msg);

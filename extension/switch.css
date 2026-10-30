@@ -1,5 +1,8 @@
-/* The mod on/off switch (modswitch.js), shared by the side panel and the setup page. Uses the page's
-   --accent and --muted colours, so it follows light and dark mode. */
+/* The mod on/off switch (modswitch.js), shared by the side panel and the setup page. On is WebMods'
+   green (the right half of the icon's W); off uses the page's --muted colour, so it follows light and
+   dark mode. */
+
+:root { --switch-on: #34d399; }
 
 button.switch {
   flex: none;
@@ -18,8 +21,8 @@ button.switch {
   transition: background-color 0.15s ease;
 }
 button.switch:hover { background: color-mix(in srgb, var(--muted) 60%, transparent); }
-button.switch[aria-checked="true"] { background: var(--accent); }
-button.switch[aria-checked="true"]:hover { background: color-mix(in srgb, var(--accent) 85%, var(--muted)); }
+button.switch[aria-checked="true"] { background: var(--switch-on); }
+button.switch[aria-checked="true"]:hover { background: color-mix(in srgb, var(--switch-on) 85%, #000); }
 button.switch[aria-busy="true"] { cursor: progress; opacity: 0.75; }
 button.switch:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 

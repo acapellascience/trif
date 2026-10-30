@@ -1,13 +1,13 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="128" height="128" viewBox="0 0 128 128">
-  <!-- PLACEHOLDER icon for WebMods: a browser window with a code mark. Replace before a public launch. -->
+  <!-- WebMods icon: a grey W whose right half is the green of a switch that's on, cut vertically at x=64.
+       scripts/render-icon.js draws the same shapes into extension/icons/icon-*.png. -->
   <defs>
-    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
-      <stop offset="0" stop-color="#4a73e8"/>
-      <stop offset="1" stop-color="#2546b0"/>
-    </linearGradient>
+    <clipPath id="left"><rect width="64" height="128"/></clipPath>
+    <clipPath id="right"><rect x="64" width="64" height="128"/></clipPath>
   </defs>
-  <rect x="8" y="8" width="112" height="112" rx="26" fill="url(#bg)"/>
-  <rect x="26" y="32" width="76" height="64" rx="9" fill="none" stroke="#ffffff" stroke-width="7"/>
-  <line x1="26" y1="48" x2="102" y2="48" stroke="#ffffff" stroke-width="6"/>
-  <path d="M53 59 L42 71 L53 83 M75 59 L86 71 L75 83" fill="none" stroke="#ffffff" stroke-width="7" stroke-linecap="round" stroke-linejoin="round"/>
+  <rect x="8" y="8" width="112" height="112" rx="26" fill="#6b7280"/>
+  <g fill="none" stroke-width="10.5" stroke-linecap="round" stroke-linejoin="round">
+    <path clip-path="url(#left)" d="M33.7 43 L47.7 87.3 L64 52.3 L80.3 87.3 L94.3 43" stroke="#ffffff"/>
+    <path clip-path="url(#right)" d="M33.7 43 L47.7 87.3 L64 52.3 L80.3 87.3 L94.3 43" stroke="#34d399"/>
+  </g>
 </svg>

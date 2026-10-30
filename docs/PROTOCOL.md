@@ -142,6 +142,19 @@ The side panel's "Mods on this site" list and the setup page show a switch per m
 `switch.css`); they send `{type: "mod.enable", id, enabled, tab}` to the background and follow
 `storage.onChanged` for `disabled`, so a switch flipped by an agent or the CLI shows live.
 
+**Per-site switches.** `mod.enable` takes an optional `site` (a hostname; `www.` and ports dropped): the
+mod is switched on or off on that site and its subdomains only. Those sites live in
+`chrome.storage.local` **`offSites`** = `{"<mod id>": ["twitter.com", …]}` and are added to the mod's
+`excludeMatches` when it registers (`withOffSites` in lib.js; its hash changes, so it re-registers).
+`switchSite` in lib.js decides the new state: off on the last site the mod names switches the whole
+mod off (and clears its list); on on a site while the whole mod is off turns it on there only (its other
+named sites go into the list; a mod matching any host comes on everywhere except the listed sites).
+The whole-mod switch (no `site`) leaves the list alone. The reply adds `site`, `offSites` and
+`modEnabled`; `status` reports `offSites` per mod when non-empty. A scoped run may switch any mod with
+`site` inside its scope (`webmods enable|disable <id> --site HOST`). In the side panel, a mod that
+names several sites or any host (`isMultiSite`) gets a switch for the panel's site; the setup page
+shows the whole-mod switch plus one per site (the named sites and any in `offSites`).
+
 ### `run` semantics
 
 - The code runs in the page's MAIN world via `chrome.userScripts.execute` (`world:"MAIN"`,
@@ -324,9 +337,9 @@ Nothing is hosted; the agent uses the user's own login/subscription.
     emits a command's `<local-command-stdout>` as text.
   - **Mod badges.** A mod's `risk` tier 1 shows "detectable", tier 2 "changes requests" (tooltip: what
     that means, plus the header's reason). A mod matching other sites too shows "N sites" or "all
-    sites" (`modSites` in lib.js; tooltip lists them and says the switch is for all of them). The setup
+    sites" (`modSites` in lib.js; tooltip lists them and says the switch is for this site only). The setup
     page groups mods by site: the folder (minus `www.`) if the mod runs there, else its one site, else
-    "Several sites"; mods matching any host go under "Every site". Extra sites show as "also runs on".
+    "Several sites"; mods matching any host go under "Every site".
   - No reload prompt: the agent reloads the tab after each change (AGENTS.md), and switches reload it too.
   - **States:** helper not connected → short setup instructions (`npx webmods setup`, link to Setup page);
     user scripts off → button opening chrome://extensions/?id=…; agent missing → the error text from the

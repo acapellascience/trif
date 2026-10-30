@@ -7,6 +7,7 @@ import {
   normalizeUrl, normalizeSite, hostMatchesSite, buildRunCode, buildPollCode, parseRunEnvelope,
   firstInjectionResult, withTimeout, filterRequests, nextBackoff, chromeVersion, toolLine,
   normalizeDisabled, modAppliesTo, urlInScope, modInScope, applyStartOff,
+  normalizeOffSites, offSiteName, hostInScope, withOffSites, switchSite,
 } from './lib.js';
 import { runtimeCode } from './runtime.js';
 
@@ -28,6 +29,7 @@ const state = {
   mods: [],              // last `mods` message (persisted)
   recording: [],         // hostnames being recorded (persisted)
   disabled: {},          // mod id → true for mods the user switched off (persisted as `disabled`)
+  offSites: {},          // mod id → sites it's switched off on, for mods on several sites (persisted)
   startedOff: {},        // mod id → true for preinstalled mods already switched off once (persisted)
   applied: {},           // script id → hash last registered (persisted)
   lastApply: { registered: [], errors: [] },
@@ -49,6 +51,7 @@ const ready = chrome.storage.local.get(null).then(async (s) => {
   if (Array.isArray(s.mods)) state.mods = s.mods;
   if (Array.isArray(s.recording)) state.recording = s.recording;
   state.disabled = normalizeDisabled(s.disabled);
+  state.offSites = normalizeOffSites(s.offSites);
   state.startedOff = normalizeDisabled(s.startedOff);
   if (s.applied && typeof s.applied === 'object') state.applied = s.applied;
   await cleanStaleRuns(s);
@@ -124,7 +127,7 @@ async function applyMods() {
   try {
     const res = await syncUserScripts(chrome.userScripts, {
       mods: state.mods, runtimeCode: runtimeCode(state.recording), applied: state.applied, disabled: state.disabled,
-      recording: state.recording,
+      offSites: state.offSites, recording: state.recording,
     });
     state.applied = res.applied;
     state.lastApply = { registered: res.registered, errors: res.errors };
@@ -298,6 +301,7 @@ const commands = {
       userScripts: state.userScripts, chrome: CHROME, version: VERSION,
       mods: state.mods.map((m) => {
         const o = { id: m.id, registered: ids.has(m.id), enabled: isEnabled(m.id) };
+        if (state.offSites[m.id]) o.offSites = state.offSites[m.id];
         if (m.held) o.held = m.held;
         if (errors.has(m.id) && errors.get(m.id) !== USER_SCRIPTS_OFF) o.error = errors.get(m.id);
         return o;
@@ -442,10 +446,11 @@ const commands = {
   },
 
   /**
-   * Switch a mod on or off. The switched-off set lives in chrome.storage.local `disabled`; the mod file
-   * is never touched. Then reload the target tab (selector, else the active tab) if the mod runs on it,
-   * so the change shows (`wait: true` waits for the load, like `reload`). If registering/unregistering
-   * fails, the previous state is restored and the error thrown.
+   * Switch a mod on or off: everywhere, or with `site` on that site only (switchSite in lib.js). The
+   * state lives in chrome.storage.local `disabled` and `offSites`; the mod file is never touched. Then
+   * reload the target tab (selector, else the active tab) if the mod runs on it, so the change shows
+   * (`wait: true` waits for the load, like `reload`). If registering/unregistering fails, the previous
+   * state is restored and the error thrown. A scoped run may switch a mod on its own site with `site`.
    */
   async 'mod.enable'(args) {
     const id = typeof args.id === 'string' ? args.id.trim() : '';
@@ -453,22 +458,28 @@ const commands = {
     if (typeof args.enabled !== 'boolean') throw new Error('enabled must be true or false');
     const mod = state.mods.find((m) => m.id === id);
     if (!mod) throw new Error(`no mod ${id} (run \`webmods status\` to list mods)`);
-    if (args.scope && !modInScope(mod, args.scope)) throw new Error(`${id} runs outside ${args.scope}, and this agent run is limited to ${args.scope}`);
+    const site = args.site == null || args.site === '' ? null : offSiteName(args.site);
+    if (args.site != null && args.site !== '' && !site) throw new Error(`"${args.site}" isn't a site (use a hostname like twitter.com)`);
+    if (args.scope && !(site ? hostInScope(site, args.scope) : modInScope(mod, args.scope))) {
+      throw new Error(`${site ? `${site} is` : `${id} runs`} outside ${args.scope}, and this agent run is limited to ${args.scope}`);
+    }
     const enabled = args.enabled;
     const res = await serial(async () => {
-      const before = isEnabled(id);
-      await setDisabled(id, !enabled);
+      const before = { disabled: !isEnabled(id), offSites: state.offSites[id] || [] };
+      const after = site ? switchSite(mod, before, site, enabled) : { disabled: !enabled, offSites: before.offSites };
+      await setSwitchState(id, after);
       const r = await applyMods();
       const failure = r.errors.find((e) => e.id === id && e.error !== USER_SCRIPTS_OFF);
-      if (failure && before !== enabled) {
-        await setDisabled(id, !before);
+      if (failure) {
+        await setSwitchState(id, before);
         await applyMods();
       }
-      return { failure };
+      return { failure, after };
     });
     reportApplied(state.lastApply);
-    if (res.failure) throw new Error(`couldn't turn ${id} ${enabled ? 'on' : 'off'}: ${res.failure.error}`);
-    return { id, enabled, reloaded: await reloadIfApplies(mod, args) };
+    if (res.failure) throw new Error(`couldn't turn ${id} ${enabled ? 'on' : 'off'}${site ? ` on ${site}` : ''}: ${res.failure.error}`);
+    const siteInfo = site ? { site, offSites: res.after.offSites, modEnabled: !res.after.disabled } : {};
+    return { id, enabled, ...siteInfo, reloaded: await reloadIfApplies(mod, args) };
   },
 
   async logs(args) {
@@ -476,11 +487,14 @@ const commands = {
   },
 };
 
-async function setDisabled(id, off) {
+async function setSwitchState(id, { disabled, offSites }) {
   const next = { ...state.disabled };
-  if (off) next[id] = true; else delete next[id];
+  if (disabled) next[id] = true; else delete next[id];
+  const nextOff = { ...state.offSites };
+  if (offSites.length) nextOff[id] = offSites; else delete nextOff[id];
   state.disabled = next;
-  await chrome.storage.local.set({ disabled: next });
+  state.offSites = nextOff;
+  await chrome.storage.local.set({ disabled: next, offSites: nextOff });
 }
 
 /** After a switch: reload the selected (or active) tab if `mod` runs on it. Returns the tab id or null; never throws. */
@@ -513,7 +527,7 @@ async function runtimeList(args, key) {
   if (list) return list;
   // The runtime only runs where a mod that's on does (or on a recorded site): no such mod, nothing to report.
   const url = tab.url || tab.pendingUrl || '';
-  if (!state.mods.some((m) => isEnabled(m.id) && !m.held && modAppliesTo(m, url))) return [];
+  if (!state.mods.some((m) => isEnabled(m.id) && !m.held && modAppliesTo(withOffSites(m, state.offSites[m.id]), url))) return [];
   throw new Error(noRuntime());
 }
 
@@ -592,6 +606,7 @@ async function onPageMessage(msg) {
     case 'mod.enable': {
       const args = { id: msg.id, enabled: msg.enabled };
       if (msg.tab !== undefined) args.tab = msg.tab;
+      if (msg.site) args.site = msg.site;
       return commands['mod.enable'](args);
     }
     default:

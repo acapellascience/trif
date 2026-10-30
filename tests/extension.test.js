@@ -1163,3 +1163,96 @@ test('modSites: hosts a mod names, and whether it runs everywhere', () => {
   assert.equal(lib.modSites({ matches: ['*://*/*', 'https://x.com/*'] }).everywhere, true);
   assert.deepEqual(lib.modSites({ matches: ['file:///*', 'nonsense'] }), { everywhere: false, sites: [] });
 });
+
+test('per-site switches: switchSite, offOnSite, withOffSites, normalizeOffSites, isMultiSite', () => {
+  const px = { matches: ['https://x.com/*', 'https://twitter.com/*'] };
+  const all = { matches: ['*://*/*'] };
+  assert.equal(lib.isMultiSite(px), true);
+  assert.equal(lib.isMultiSite(all), true);
+  assert.equal(lib.isMultiSite({ matches: ['*://x.com/*', '*://*.x.com/*'] }), false);
+
+  // off on one site, then the other: the whole mod goes off and the list clears
+  let st = lib.switchSite(px, { disabled: false, offSites: [] }, 'https://www.Twitter.com/home', false);
+  assert.deepEqual(st, { disabled: false, offSites: ['twitter.com'] });
+  assert.deepEqual(lib.switchSite(px, st, 'twitter.com', false), st, 'already off there');
+  assert.deepEqual(lib.switchSite(px, st, 'x.com', false), { disabled: true, offSites: [] });
+  // on on one site while the whole mod is off: on there only
+  assert.deepEqual(lib.switchSite(px, { disabled: true, offSites: [] }, 'x.com', true), { disabled: false, offSites: ['twitter.com'] });
+  assert.deepEqual(lib.switchSite(px, st, 'twitter.com', true), { disabled: false, offSites: [] });
+  // a mod for every site: never goes off as a whole from site switches; on while off comes on everywhere but the list
+  st = lib.switchSite(all, { disabled: false, offSites: [] }, 'bank.com', false);
+  assert.deepEqual(st, { disabled: false, offSites: ['bank.com'] });
+  assert.deepEqual(lib.switchSite(all, { disabled: true, offSites: ['bank.com'] }, 'news.com', true), { disabled: false, offSites: ['bank.com'] });
+  // a parent domain's entry covers subdomains; switching a subdomain on removes it
+  assert.deepEqual(lib.switchSite(all, { disabled: false, offSites: ['wikipedia.org'] }, 'en.wikipedia.org', false),
+    { disabled: false, offSites: ['wikipedia.org'] });
+  assert.deepEqual(lib.switchSite(all, { disabled: false, offSites: ['wikipedia.org', 'bank.com'] }, 'en.wikipedia.org', true),
+    { disabled: false, offSites: ['bank.com'] });
+  assert.throws(() => lib.switchSite(all, { disabled: false }, 'not a site', false), /isn't a site/);
+
+  assert.equal(lib.offOnSite({ a: ['wikipedia.org'] }, 'a', 'en.wikipedia.org'), true);
+  assert.equal(lib.offOnSite({ a: ['en.wikipedia.org'] }, 'a', 'wikipedia.org'), false);
+  assert.equal(lib.offOnSite({}, 'a', 'x.com'), false);
+
+  assert.deepEqual(lib.withOffSites({ id: 'a', excludes: ['https://x.com/settings*'], hash: 'h' }, ['twitter.com', '10.0.0.1']), {
+    id: 'a', hash: 'h|off:twitter.com,10.0.0.1',
+    excludes: ['https://x.com/settings*', '*://twitter.com/*', '*://*.twitter.com/*', '*://10.0.0.1/*'],
+  });
+  const same = { id: 'a', excludes: [] };
+  assert.equal(lib.withOffSites(same, undefined), same);
+
+  assert.deepEqual(lib.normalizeOffSites({ a: ['www.X.com', 'x.com', 'bad site', 3], b: [], c: 'nope' }), { a: ['x.com'] });
+});
+
+test('background: mod.enable with site switches a multi-site mod on one site, via excludes', async () => {
+  const px = mod('x.com/p', { matches: ['https://x.com/*', 'https://twitter.com/*'] });
+  const bg = await loadBackground({ storage: { mods: [px] }, tabs: SWITCH_TABS });
+  try {
+    bg.native.emit({ type: 'mods', mods: [px] });
+    await settle(20);
+    const script = () => bg.chrome.userScripts.scripts.find((s) => s.id === 'x.com/p');
+
+    let r = await bg.native.call('mod.enable', { id: 'x.com/p', enabled: false, site: 'twitter.com', tab: 6 });
+    assert.deepStrictEqual(r.result, { id: 'x.com/p', enabled: false, site: 'twitter.com', offSites: ['twitter.com'], modEnabled: true, reloaded: null });
+    assert.deepStrictEqual(bg.store.offSites, { 'x.com/p': ['twitter.com'] });
+    assert.deepStrictEqual(script().excludeMatches, ['*://twitter.com/*', '*://*.twitter.com/*']);
+    let st = (await bg.native.call('status')).result;
+    assert.deepStrictEqual(st.mods, [{ id: 'x.com/p', registered: true, enabled: true, offSites: ['twitter.com'] }]);
+
+    // the panel, on x.com: off there too, which was the last site, so the whole mod goes off
+    const panel = bg.connectPanel();
+    let reply = await panel.ask({ type: 'mod.enable', id: 'x.com/p', enabled: false, site: 'x.com', tab: 5 });
+    assert.deepStrictEqual(reply.result, { id: 'x.com/p', enabled: false, site: 'x.com', offSites: [], modEnabled: false, reloaded: 5 });
+    assert.deepStrictEqual([bg.store.disabled, bg.store.offSites], [{ 'x.com/p': true }, {}]);
+    assert.equal(script(), undefined);
+
+    // back on, on x.com only
+    reply = await panel.ask({ type: 'mod.enable', id: 'x.com/p', enabled: true, site: 'x.com', tab: 5 });
+    assert.deepStrictEqual([bg.store.disabled, bg.store.offSites], [{}, { 'x.com/p': ['twitter.com'] }]);
+    assert.deepStrictEqual(script().excludeMatches, ['*://twitter.com/*', '*://*.twitter.com/*']);
+
+    // the whole-mod switch leaves the list alone
+    await bg.native.call('mod.enable', { id: 'x.com/p', enabled: false });
+    await bg.native.call('mod.enable', { id: 'x.com/p', enabled: true });
+    assert.deepStrictEqual(bg.store.offSites, { 'x.com/p': ['twitter.com'] });
+
+    // a run scoped to x.com: its own site with site, not the other one, and not the whole mod
+    r = await bg.native.call('mod.enable', { id: 'x.com/p', enabled: false, site: 'x.com', scope: 'x.com' });
+    assert.equal(r.ok, true);
+    r = await bg.native.call('mod.enable', { id: 'x.com/p', enabled: true, site: 'twitter.com', scope: 'x.com' });
+    assert.match(r.error, /twitter\.com is outside x\.com/);
+    r = await bg.native.call('mod.enable', { id: 'x.com/p', enabled: true, scope: 'x.com' });
+    assert.match(r.error, /x\.com\/p runs outside x\.com/);
+    r = await bg.native.call('mod.enable', { id: 'x.com/p', enabled: true, site: '%%' });
+    assert.match(r.error, /isn't a site/);
+  } finally { bg.restore(); }
+});
+
+test('background: per-site offs survive a service worker restart', async () => {
+  const px = mod('x.com/p', { matches: ['https://x.com/*', 'https://twitter.com/*'] });
+  const bg = await loadBackground({ storage: { mods: [px], offSites: { 'x.com/p': ['twitter.com'] } } });
+  try {
+    const s = bg.chrome.userScripts.scripts.find((x) => x.id === 'x.com/p');
+    assert.deepStrictEqual(s.excludeMatches, ['*://twitter.com/*', '*://*.twitter.com/*']);
+  } finally { bg.restore(); }
+});

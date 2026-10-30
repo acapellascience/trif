@@ -149,23 +149,27 @@ yourself also releases it. Not available to agents inside a side-panel run.`,
     examples: ['webmods check sites/x.com/hide-reposts.js', 'webmods check x.com/hide-reposts'],
   },
   enable: {
-    usage: 'webmods enable <site>/<mod> [TAB]',
+    usage: 'webmods enable <site>/<mod> [--site HOST] [TAB]',
     summary: 'switch a mod back on (like its switch in the side panel)',
     details: `Mods can be switched off and on without touching their files: the side panel shows a switch per
 mod, and these commands flip the same switch. The state lives in the extension, so the user sees it
 change. If the mod runs on the tab (TAB, or the active tab) that tab is reloaded so the change shows;
 otherwise it applies from the next page load. webmods status shows which mods are off.
+--site switches a mod that runs on several sites on (or, with disable, off) on that site only, like
+the side panel's switch on that site; a side-panel run can do this on its own site.
 Only flip switches the user asked about.`,
-    examples: ['webmods enable x.com/hide-reposts', 'webmods enable x.com/hide-reposts --tab 12'],
+    examples: ['webmods enable x.com/hide-reposts', 'webmods enable x.com/hide-reposts --tab 12',
+      'webmods enable all-sites/dark-mode --site wikipedia.org'],
   },
   disable: {
-    usage: 'webmods disable <site>/<mod> [TAB]',
+    usage: 'webmods disable <site>/<mod> [--site HOST] [TAB]',
     summary: 'switch a mod off without deleting or editing it (like its switch in the side panel)',
     details: `The mod stops running (it is unregistered) but its file stays as it is; webmods enable turns it
 back on. If the mod runs on the tab (TAB, or the active tab) that tab is reloaded so the change shows;
 otherwise it applies from the next page load. Use this when the user asks to turn a mod off, rather
-than deleting or renaming the file.`,
-    examples: ['webmods disable x.com/hide-reposts', 'webmods disable example.com/dark-mode --url example.com'],
+than deleting or renaming the file. With --site HOST, only on that site (see enable).`,
+    examples: ['webmods disable x.com/hide-reposts', 'webmods disable example.com/dark-mode --url example.com',
+      'webmods disable all-sites/dark-mode --site bank.com'],
   },
   mods: {
     usage: 'webmods mods',

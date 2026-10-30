@@ -97,7 +97,7 @@ export function normalizeDisabled(value) {
 /**
  * Make chrome.userScripts (`us`) contain exactly the runtime plus `mods`, minus the ids in
  * `disabled` (mods the user switched off: they're unregistered if registered, and not reported as
- * registered or as errors).
+ * registered or as errors). `offSites` (mod id → sites it's switched off on) become extra excludes.
  * `applied` maps script id → hash of what was last registered (persisted by the caller).
  * The runtime must run before every mod, so whenever it is missing or its code or matches changed,
  * everything is unregistered and re-registered with the runtime first (registration order = injection
@@ -105,7 +105,7 @@ export function normalizeDisabled(value) {
  * neither, nothing is registered at all.
  * Returns {registered, errors, applied, reset}.
  */
-export async function syncUserScripts(us, { mods, runtimeCode, applied = {}, disabled = {}, recording = [] }) {
+export async function syncUserScripts(us, { mods, runtimeCode, applied = {}, disabled = {}, offSites = {}, recording = [] }) {
   const errors = [];
   const desired = [];
   const seen = new Set();
@@ -115,7 +115,7 @@ export async function syncUserScripts(us, { mods, runtimeCode, applied = {}, dis
     if (disabled[mod.id] === true) continue; // switched off: not desired, so unregistered below if registered
     if (mod.held) continue; // held for the user's approval (an agent wrote it for another site): same
     seen.add(mod.id);
-    desired.push(mod);
+    desired.push(withOffSites(mod, offSites[mod.id]));
   }
 
   const existing = await us.getScripts();
@@ -487,4 +487,80 @@ export function modSites(mod) {
   }
   const sites = hosts.filter((h) => !hosts.some((o) => o !== h && h.endsWith('.' + o)));
   return { everywhere, sites };
+}
+
+// ---- per-site switches --------------------------------------------------------------------------
+// A mod that runs on several sites can be off on some of them: chrome.storage.local `offSites`
+// ({"<mod id>": ["twitter.com", …]}, sites as siteForUrl gives them). A site covers its subdomains.
+// Registration adds them to the mod's excludes, so Chrome skips those sites.
+
+/** Whether the mod runs on more than one site (the side panel's switch is then per site). */
+export function isMultiSite(mod) {
+  const { everywhere, sites } = modSites(mod);
+  return everywhere || sites.length > 1;
+}
+
+/** A switched-off site as stored: lowercase hostname without a trailing dot, "www." or port; null if it isn't one. */
+export function offSiteName(site) {
+  let h = String(site ?? '').trim().toLowerCase();
+  if (/^[a-z][a-z0-9+.-]*:\/\//.test(h)) { try { h = new URL(h).hostname; } catch { return null; } }
+  h = h.replace(/\/.*$/, '').replace(/:\d+$/, '').replace(/\.$/, '');
+  if (h.startsWith('www.') && h.length > 4) h = h.slice(4);
+  return /^(\[[0-9a-f:.]+\]|[a-z0-9_-]+(\.[a-z0-9_-]+)*)$/.test(h) ? h : null;
+}
+
+/** `offSites` from storage, cleaned up: valid sites only, no duplicates, no empty lists. */
+export function normalizeOffSites(value) {
+  const out = {};
+  if (value && typeof value === 'object' && !Array.isArray(value)) {
+    for (const [id, list] of Object.entries(value)) {
+      if (!Array.isArray(list)) continue;
+      const sites = [...new Set(list.filter((x) => typeof x === 'string').map(offSiteName).filter(Boolean))];
+      if (sites.length) out[id] = sites;
+    }
+  }
+  return out;
+}
+
+/** Whether `site` is switched off for mod `id` (an entry for it or a parent domain). */
+export function offOnSite(offSites, id, site) {
+  const s = offSiteName(site);
+  return !!s && (offSites?.[id] || []).some((o) => hostInScope(s, o));
+}
+
+/** Exclude patterns for a switched-off site and its subdomains (IPs: just the address). */
+export function siteExcludes(site) {
+  return /^(\d{1,3}(\.\d{1,3}){3}|\[.*\])$/.test(site) ? [`*://${site}/*`] : [`*://${site}/*`, `*://*.${site}/*`];
+}
+
+/** The mod as registered: its switched-off sites added to its excludes (and to its hash, so it re-registers). */
+export function withOffSites(mod, sites) {
+  if (!sites || !sites.length) return mod;
+  const excludes = [...(Array.isArray(mod.excludes) ? mod.excludes : []), ...sites.flatMap(siteExcludes)];
+  return { ...mod, excludes, hash: mod.hash ? `${mod.hash}|off:${sites.join(',')}` : mod.hash };
+}
+
+/**
+ * The switch state after switching mod `mod` on or off on `site`: {disabled, offSites} for that mod,
+ * from its current `disabled` (whole mod off) and `offSites` list.
+ * - Off on a site: the site joins the list. Once every site the mod names is off, the whole mod is
+ *   off instead (and the list is cleared), so its main switch shows off.
+ * - On on a site: entries for it, its parent domains and its subdomains go. If the whole mod was off,
+ *   it comes on there only: on its other named sites it's off (a mod for every site comes on
+ *   everywhere but the sites still in its list).
+ */
+export function switchSite(mod, { disabled, offSites = [] }, site, enabled) {
+  const s = offSiteName(site);
+  if (!s) throw new Error(`"${site}" isn't a site (use a hostname like twitter.com)`);
+  const related = (o) => hostInScope(s, o) || hostInScope(o, s);
+  const { everywhere, sites } = modSites(mod);
+  if (enabled) {
+    let list = offSites.filter((o) => !related(o));
+    if (disabled && !everywhere) list = [...new Set([...list, ...sites.filter((o) => !related(o))])];
+    return { disabled: false, offSites: list };
+  }
+  if (disabled) return { disabled: true, offSites };
+  const list = offSites.some((o) => hostInScope(s, o)) ? offSites : [...offSites, s];
+  if (!everywhere && sites.length && sites.every((o) => list.some((x) => hostInScope(o, x)))) return { disabled: true, offSites: [] };
+  return { disabled: false, offSites: list };
 }

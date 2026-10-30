@@ -2,13 +2,14 @@
 // switch, shared with the side panel). Polls the service worker, which also re-checks the switch on
 // every status request; switches follow chrome.storage.local `disabled` live.
 
-import { modSites } from './lib.js';
+import { modSites, offOnSite, normalizeOffSites } from './lib.js';
 import { modSwitch, syncSwitches, shownEnabled, switchError, enabledIn, onSwitchChange } from './modswitch.js';
 
 const $ = (sel) => document.querySelector(sel);
 let last = null;        // last status
 let modsKey = null;     // which mods the list was built for (switches update in place)
 let disabled = {};      // chrome.storage.local `disabled`
+let offSites = {};      // chrome.storage.local `offSites`: mods switched off on some of their sites
 
 function setSection(id, ok, title, detail) {
   const el = document.getElementById(id);
@@ -71,7 +72,7 @@ function renderMods() {
     modsDetail.replaceChildren();
   }
   // Rebuilt only when the set of mods changes, so a focused switch keeps focus through the polling.
-  const key = JSON.stringify(s.mods.map((m) => [m.id, m.name, m.description, m.matches]));
+  const key = JSON.stringify(s.mods.map((m) => [m.id, m.name, m.description, m.matches, offSites[m.id] || []]));
   if (key !== modsKey) {
     modsKey = key;
     const open = new Set([...list.querySelectorAll('details[open]')].map((d) => d.dataset.site));
@@ -95,7 +96,15 @@ function renderMods() {
     err.textContent = switchError(m.id) || (on && m.error) || '';
     err.hidden = !err.textContent;
   }
-  syncSwitches(list, (id) => enabledIn(disabled, id));
+  syncSwitches(list, isOn);
+}
+
+const isOn = (id, site) => enabledIn(disabled, id) && !(site && offOnSite(offSites, id, site));
+
+async function applySwitch(id, enabled, site) {
+  const r = await chrome.runtime.sendMessage({ type: 'mod.enable', id, enabled, ...(site ? { site } : {}) });
+  if (!r || r.error) throw new Error(r?.error || 'no answer from the WebMods service worker');
+  return r;
 }
 
 // Group keys that aren't websites: mods matching every site, and mods for several sites with none of
@@ -104,24 +113,23 @@ const EVERY_SITE = '*';
 const SEVERAL_SITES = '+';
 const GROUP_NAMES = { [EVERY_SITE]: 'Every site', [SEVERAL_SITES]: 'Several sites' };
 
-// A mod's group, and the other sites it runs on (shown under it). The group is its folder without
-// "www." (so www.google.com and google.com mods share one) when the mod runs there, else the one site
-// it runs on; a mod for x.com that also matches twitter.com is in x.com, "also runs on twitter.com".
-function placeMod(m) {
+// A mod's group: its folder without "www." (so www.google.com and google.com mods share one) when the
+// mod runs there, else the one site it runs on; a mod for x.com that also matches twitter.com is in x.com
+// (with a switch per site under it).
+function groupOf(m) {
   const { everywhere, sites } = modSites(m);
-  if (everywhere) return { group: EVERY_SITE, others: [] };
+  if (everywhere) return EVERY_SITE;
   const folder = String(m.site || m.id.split('/')[0]).replace(/^www\./, '');
   const covers = (s) => s === folder || folder.endsWith('.' + s) || s.endsWith('.' + folder);
-  if (!sites.length || sites.some(covers)) return { group: folder, others: sites.filter((s) => !covers(s)) };
-  if (sites.length === 1) return { group: sites[0], others: [] };
-  return { group: SEVERAL_SITES, others: sites };
+  if (!sites.length || sites.some(covers)) return folder;
+  return sites.length === 1 ? sites[0] : SEVERAL_SITES;
 }
 
 // Every site first, then several sites, then websites alphabetically; mods by name.
 function groupBySite(mods) {
   const groups = new Map();
   for (const m of mods) {
-    const { group } = placeMod(m);
+    const group = groupOf(m);
     if (!groups.has(group)) groups.set(group, []);
     groups.get(group).push(m);
   }
@@ -157,21 +165,35 @@ function modItem(m) {
   name.append(label, tag);
   const main = el('div', 'mod-main');
   main.append(name, el('div', 'mod-id', m.id.split('/').slice(1).join('/')));
-  const { group, others } = placeMod(m);
-  if (others.length) main.append(el('div', 'mod-sites', `${group === SEVERAL_SITES ? 'Runs on' : 'Also runs on'} ${others.join(', ')}`));
   if (m.description) main.append(el('div', 'mod-desc', m.description));
+  const siteList = siteSwitches(m);
+  if (siteList) main.append(siteList);
   const err = el('div', 'mod-err');
   err.hidden = true;
   main.append(err);
-  li.append(main, modSwitch(document, {
-    id: m.id, enabled: enabledIn(disabled, m.id), labelId,
-    apply: async (id, enabled) => {
-      const r = await chrome.runtime.sendMessage({ type: 'mod.enable', id, enabled });
-      if (!r || r.error) throw new Error(r?.error || 'no answer from the WebMods service worker');
-      return r;
-    },
-  }));
+  li.append(main, modSwitch(document, { id: m.id, enabled: enabledIn(disabled, m.id), labelId, apply: applySwitch }));
   return li;
+}
+
+// For a mod on several sites, a switch per site: the sites it names, plus any it was switched off on
+// (for a mod on every site, those are all there is). Null when there's nothing to list.
+function siteSwitches(m) {
+  const { everywhere, sites } = modSites(m);
+  if (!everywhere && sites.length < 2) return null;
+  const off = offSites[m.id] || [];
+  const all = [...sites, ...off.filter((o) => !sites.includes(o))];
+  if (!all.length) return el('div', 'mod-sites', 'Switch it off on one site from the side panel there.');
+  const ul = el('ul', 'site-switches');
+  ul.setAttribute('aria-label', `${m.name} by site`);
+  if (everywhere) ul.append(el('li', 'site-switches-note', 'Off on:'));
+  for (const site of all) {
+    const row = el('li');
+    const label = el('span', null, site);
+    label.id = `mod-site-${++labelSeq}`;
+    row.append(label, modSwitch(document, { id: m.id, site, enabled: isOn(m.id, site), labelId: label.id, apply: applySwitch }));
+    ul.append(row);
+  }
+  return ul;
 }
 
 async function refresh() {
@@ -192,11 +214,15 @@ $('#reconnect').addEventListener('click', async () => {
 });
 
 chrome.storage.onChanged.addListener((changes, area) => {
-  if (area !== 'local' || !changes.disabled) return;
-  disabled = changes.disabled.newValue || {};
+  if (area !== 'local' || !(changes.disabled || changes.offSites)) return;
+  if (changes.disabled) disabled = changes.disabled.newValue || {};
+  if (changes.offSites) offSites = normalizeOffSites(changes.offSites.newValue);
   if (last) renderMods();
 });
 
-chrome.storage.local.get('disabled').then((s) => { disabled = s.disabled || {}; }, () => {}).finally(refresh);
+chrome.storage.local.get(['disabled', 'offSites']).then((s) => {
+  disabled = s.disabled || {};
+  offSites = normalizeOffSites(s.offSites);
+}, () => {}).finally(refresh);
 setInterval(refresh, 2000);
 document.addEventListener('visibilitychange', () => { if (!document.hidden) refresh(); });

@@ -19,7 +19,7 @@ const NOT_IN_RUNS = new Set(['setup', 'agent', 'approve']);
 process.stdout.on('error', (e) => { if (e.code === 'EPIPE') process.exit(0); throw e; });
 
 const VALUE_FLAGS = new Set(['--tab', '--url', '-o', '--out', '--output', '--filter', '--limit', '-f', '--file',
-  '--browser', '--home', '--native-dir', '--bin-dir', '--timeout', '--agent', '--session', '--model']);
+  '--browser', '--home', '--native-dir', '--bin-dir', '--timeout', '--agent', '--session', '--model', '--site']);
 const BOOL_FLAGS = new Set(['--json', '--hard', '--help', '-h', '--force', '--no-link', '--no-examples', '--copy', '--link']);
 const ALIASES = { '--out': '-o', '--output': '-o', '--file': '-f', '-h': '--help' };
 
@@ -221,6 +221,7 @@ const handlers = {
     if (stErr) lines.push(`status        the extension didn't answer: ${stErr}`);
     const registered = new Map(((st && st.mods) || []).map((m) => [m.id, !!m.registered]));
     const off = new Set(((st && st.mods) || []).filter((m) => m.enabled === false).map((m) => m.id));
+    const offSites = new Map(((st && st.mods) || []).filter((m) => m.offSites).map((m) => [m.id, m.offSites]));
     const applyErrors = new Map((((info.modsApplied || {}).errors) || []).map((e) => [e.id, e.error]));
     const helperErrors = new Map((info.modErrors || []).map((e) => [e.id, e.error]));
     const held = info.held || {};
@@ -235,6 +236,7 @@ const handlers = {
       else if (!st) s = '?';
       else if (!registered.has(id)) s = 'not known to the extension yet';
       else s = registered.get(id) ? 'registered' : 'NOT REGISTERED';
+      if (offSites.has(id) && !off.has(id)) s += ` (off on ${offSites.get(id).join(', ')})`;
       lines.push(`  ${pad(id, 40)} ${s}`);
     }
     for (const [id, err] of helperErrors) if (!ids.includes(id)) lines.push(`  ${pad(id, 40)} NOT SENT: ${err}`);
@@ -421,14 +423,15 @@ const handlers = {
     const { mods, problems, warnings } = scanMods(ctx.ws.modsDir);
     const plan = planModsMessage(mods);
     const errors = [...problems, ...plan.errors];
-    const enabled = await knownEnabled(ctx);
+    const { enabled, offSites } = await knownSwitches(ctx);
     const held = loadHeld(ctx.ws.home);
     const isHeld = (m) => held[m.id] && held[m.id].hash === m.hash && !held[m.id].approved;
     if (ctx.json) {
       return printJson({
         modsDir: ctx.ws.modsDir,
         mods: mods.map(({ code, ...m }) => ({
-          ...m, ...(enabled.has(m.id) ? { enabled: enabled.get(m.id) } : {}), ...(isHeld(m) ? { held: held[m.id] } : {}),
+          ...m, ...(enabled.has(m.id) ? { enabled: enabled.get(m.id) } : {}), ...(offSites.has(m.id) ? { offSites: offSites.get(m.id) } : {}),
+          ...(isHeld(m) ? { held: held[m.id] } : {}),
         })),
         errors,
         warnings,
@@ -443,6 +446,7 @@ const handlers = {
     for (const m of mods) {
       out(m.id + (m.name !== path.basename(m.file, '.js') ? `  (${m.name})` : '') + (enabled.get(m.id) === false ? '  [off]' : ''));
       if (enabled.get(m.id) === false) out(`  switched off by the user (not running; webmods enable ${m.id} turns it on)`);
+      else if (offSites.has(m.id)) out(`  switched off by the user on ${offSites.get(m.id).join(', ')} (webmods enable ${m.id} --site <site> turns it back on there)`);
       if (isHeld(m)) out(`  HELD: a side-panel agent wrote it while working on ${held[m.id].site}, but ${held[m.id].reason}. Not running until the user approves it (webmods approve ${m.id}).`);
       if (m.description) out(`  ${m.description}`);
       out(`  matches: ${m.matches.join(' ')}`);
@@ -537,21 +541,32 @@ function modId(arg) {
 async function switchMod(ctx, pos, enabled) {
   if (!pos[0]) throw new UsageError('missing mod id');
   const id = modId(pos[0]);
-  const r = await ctx.call('mod.enable', { id, enabled, wait: true, ...tabArgs(ctx.opts) });
+  const only = ctx.opts['--site'];
+  if (only !== undefined && !String(only).trim()) throw new UsageError('--site needs a hostname, e.g. --site twitter.com');
+  const r = await ctx.call('mod.enable', { id, enabled, wait: true, ...(only !== undefined ? { site: String(only).trim() } : {}), ...tabArgs(ctx.opts) });
   if (ctx.json) return printJson(r);
-  const site = id.split('/')[0];
-  out(`${id} is ${enabled ? 'on' : 'off'}`);
+  const site = r && r.site ? r.site : id.split('/')[0];
+  if (r && r.site) {
+    out(`${id} is ${enabled ? 'on' : 'off'} on ${r.site}`);
+    if (r.modEnabled === false) out('That was the last site it was on, so the whole mod is off now.');
+    else if (r.offSites && r.offSites.length) out(`Off on: ${r.offSites.join(', ')}`);
+  } else out(`${id} is ${enabled ? 'on' : 'off'}`);
   if (r && r.reloaded != null) out(`reloaded tab ${r.reloaded}`);
   else out(`It applies from the next page load: reload open ${site} tabs to see it (webmods reload --url ${site}).`);
 }
 
-// When the extension can be asked: Map(mod id → enabled). Otherwise (no helper, no answer) empty.
-async function knownEnabled(ctx) {
+// When the extension can be asked: {enabled: Map(mod id → enabled), offSites: Map(mod id → sites it's
+// off on)}. Otherwise (no helper, no answer) both empty.
+async function knownSwitches(ctx) {
   try {
     const st = await ctx.call('status', { timeout: 2000 }, 3000);
-    return new Map(((st && st.mods) || []).map((m) => [m.id, m.enabled !== false]));
+    const mods = (st && st.mods) || [];
+    return {
+      enabled: new Map(mods.map((m) => [m.id, m.enabled !== false])),
+      offSites: new Map(mods.filter((m) => Array.isArray(m.offSites) && m.offSites.length).map((m) => [m.id, m.offSites])),
+    };
   } catch {
-    return new Map();
+    return { enabled: new Map(), offSites: new Map() };
   }
 }
 

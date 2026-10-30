@@ -71,13 +71,14 @@ A mod runs wherever its `@match` lines say, whatever its folder; the folder is i
 where the user finds it on the WebMods setup page).
 
 - **One site with several domains** (x.com and twitter.com, a site's country domains): the site's
-  folder, with a `@match` per domain. The setup page lists it under that site, "also runs on" the rest.
+  folder, with a `@match` per domain. The setup page lists it under that site, with a switch per domain.
 - **Every site, or several unrelated sites** (dark mode everywhere, hide cookie banners on a few news
   sites): `sites/all-sites/` (`webmods new all-sites <mod>`). Its default `@match` is `*://*/*`;
   narrow it to the sites that need it, and `@exclude` sites it breaks. The setup page groups these
   under "Every site" or "Several sites".
-- The on/off switch is per mod, not per site: switching a mod off on one site switches it off on all
-  of them. When the user may want a change on some sites and not others, write separate mods.
+- The user can switch a mod off on one site and keep it on elsewhere (the side panel's switch on a
+  multi-site mod is for the site it's on; see "Switching mods off and on"), so one mod for several
+  sites is fine. Write separate mods when the change itself differs between sites.
 - A mod that runs everywhere runs on the user's bank, email and work tools too: keep it render-only
   (`@risk 0`) unless they asked for more, cheap on pages it doesn't apply to, and quick to bail out
   (check `location.hostname` or for the elements it needs, and return).
@@ -156,6 +157,11 @@ on and which are `off`.
 - Only flip the switches the user asked about. Never re-enable a mod the user switched off unless they
   ask, and don't switch mods off as a side effect of other work.
 - If you change a mod that's off, it stays off: say so, and ask whether to switch it on.
+- A mod that runs on several sites can also be off on some of them: `webmods disable <id> --site
+  bank.com` (and `enable --site`) flip its switch for that site only, like the side panel does there;
+  `webmods status` shows `(off on bank.com)`. Use `--site` when the user means one site ("turn the
+  dark mode off on Wikipedia"); without it the mod goes off everywhere. Turning a mod off on the last
+  site it names switches the whole mod off.
 
 ## Side-panel runs
 
@@ -166,7 +172,8 @@ logged in to:
 
 - `webmods` commands only work on tabs of that site. `webmods tabs` lists only those; `run`, `text`,
   `reload` etc. on another site's tab, and `open`/`navigate` to another site, fail with a message that
-  says so. Pass `--tab` with the tab id you were given.
+  says so. Pass `--tab` with the tab id you were given. `enable`/`disable` work on mods that only run
+  on that site, and on any mod with `--site` set to it.
 - Keep each mod's `@match` lines on that site. A mod you write or change whose `@match` reaches other
   sites (`<all_urls>`, `*://*/*`, another domain) is **held**: it doesn't run until the user clicks
   Allow in the side panel. If the user asked for that (the same change on twitter.com too), write it,

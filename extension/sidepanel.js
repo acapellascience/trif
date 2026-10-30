@@ -3,7 +3,7 @@
 // chrome.storage.local `chat:<site>`; this page renders that record and reacts to storage changes.
 // See docs/PROTOCOL.md, "Side panel and agent runs".
 
-import { siteForUrl, modAppliesTo, modSites, isLoginUrl } from './lib.js';
+import { siteForUrl, modAppliesTo, modSites, isMultiSite, offOnSite, normalizeOffSites, isLoginUrl } from './lib.js';
 import { renderMarkdown, MARKDOWN_ELEMENTS, MARKDOWN_ATTRIBUTES } from './markdown.js';
 import { modSwitch, syncSwitches, shownEnabled, switchError, enabledIn, onSwitchChange } from './modswitch.js';
 
@@ -33,6 +33,7 @@ const view = {
   modsOpenFor: null,         // set once the mods <details> open state has been restored
   modsKey: null,             // which mods the list was last built for (switches update in place)
   disabled: {},              // chrome.storage.local `disabled`: mods switched off (by anyone: panel, agent, CLI)
+  offSites: {},              // chrome.storage.local `offSites`: mods switched off on some of their sites
   myRuns: new Set(),         // runs this panel started
   login: null,               // agent login in progress: {loginId, agent, name, fix, phase, url, error, early}
 };
@@ -129,9 +130,10 @@ async function init() {
   connectPort();
   const win = await chrome.windows.getCurrent();
   view.windowId = win.id;
-  const stored = await chrome.storage.local.get(['settings', 'disabled']);
+  const stored = await chrome.storage.local.get(['settings', 'disabled', 'offSites']);
   view.settings = { agent: '', model: '', ...(stored.settings || {}) };
   view.disabled = stored.disabled || {};
+  view.offSites = normalizeOffSites(stored.offSites);
   renderSettings();
 
   chrome.tabs.onActivated.addListener(({ tabId, windowId }) => {
@@ -153,8 +155,9 @@ async function init() {
       renderSettings();
       render();
     }
-    if (changes.disabled) { // a switch flipped here, on the setup page, or by an agent / the CLI
-      view.disabled = changes.disabled.newValue || {};
+    if (changes.disabled || changes.offSites) { // a switch flipped here, on the setup page, or by an agent / the CLI
+      if (changes.disabled) view.disabled = changes.disabled.newValue || {};
+      if (changes.offSites) view.offSites = normalizeOffSites(changes.offSites.newValue);
       renderMods();
     }
   });
@@ -529,14 +532,14 @@ function renderMods() {
   ui.modsCount.textContent = `(${mods.length})`;
   // Rebuilt only when the set of mods changes; everything else updates in place, so a focused switch
   // keeps focus through status refreshes.
-  const key = JSON.stringify(mods.map((m) => [m.id, m.name, m.file, !!m.held, m.risk?.tier ?? null, m.risk?.why ?? null, m.matches]));
+  const key = JSON.stringify([site, mods.map((m) => [m.id, m.name, m.file, !!m.held, m.risk?.tier ?? null, m.risk?.why ?? null, m.matches])]);
   if (key !== view.modsKey) {
     view.modsKey = key;
     ui.modList.replaceChildren(...mods.map(modItem));
   }
   const byId = new Map(mods.map((m) => [m.id, m]));
   for (const li of ui.modList.children) updateModItem(li, byId.get(li.dataset.mod));
-  syncSwitches(ui.modList, (id) => enabledIn(view.disabled, id));
+  syncSwitches(ui.modList, isOn);
   // Open unless the user closed it (remembered across sites and sessions), so each switch is one click away.
   if (view.modsOpenFor === null) {
     let open = true;
@@ -548,6 +551,11 @@ function renderMods() {
     view.modsOpenFor = site;
   }
 }
+
+// A mod on several sites gets a switch for this site only (the setup page has the whole-mod one);
+// a mod for one site, a switch for the mod.
+const switchSite = (m) => (isMultiSite(m) ? view.site : undefined);
+const isOn = (id, site) => enabledIn(view.disabled, id) && !(site && offOnSite(view.offSites, id, site));
 
 function modItem(m) {
   const li = el('li');
@@ -569,12 +577,12 @@ function modItem(m) {
       (m.risk.why ? `\n${m.risk.why}` : '');
     name.append(badge);
   }
-  // Mods that also run on other sites say so: the switch turns them off on all of them.
+  // Mods that also run on other sites say so: their switch here is for this site only.
   const { everywhere, sites } = modSites(m);
   if (everywhere || sites.length > 1) {
     const badge = el('span', 'tag', everywhere ? 'all sites' : `${sites.length} sites`);
     badge.title = (everywhere ? 'Runs on every site.' : `Runs on ${sites.join(', ')}.`) +
-      ' Switching it off here switches it off everywhere.';
+      ` This switch is for ${view.site} only; switch it on other sites, or everywhere, from Setup.`;
     name.append(badge);
   }
   const main = el('div', 'mod-main');
@@ -597,9 +605,10 @@ function modItem(m) {
     });
     row.append(main, allow);
   } else {
+    const site = switchSite(m);
     row.append(main, modSwitch(document, {
-      id: m.id, enabled: enabledIn(view.disabled, m.id), labelId,
-      apply: (id, enabled) => request({ type: 'mod.enable', id, enabled, tab: view.tab?.id }),
+      id: m.id, site, enabled: isOn(m.id, site), labelId,
+      apply: (id, enabled, s) => request({ type: 'mod.enable', id, enabled, tab: view.tab?.id, ...(s ? { site: s } : {}) }),
     }));
   }
   const err = el('div', 'mod-err');
@@ -621,14 +630,15 @@ function updateModItem(li, m) {
     }
     return;
   }
-  const on = shownEnabled(m.id, enabledIn(view.disabled, m.id));
+  const site = switchSite(m);
+  const on = shownEnabled(m.id, isOn(m.id, site), site);
   li.classList.toggle('off', !on);
   // "not active"/"paused" only once the status agrees the mod is on (not mid-switch).
   const tag = li.querySelector('.tag');
   tag.textContent = on && m.enabled !== false && !m.registered ? (view.status.userScripts ? 'not active' : 'paused') : '';
   tag.hidden = !tag.textContent;
   const err = li.querySelector('.mod-err');
-  err.textContent = switchError(m.id) || (on && m.error) || '';
+  err.textContent = switchError(m.id, site) || (on && m.error) || '';
   err.hidden = !err.textContent;
 }
 

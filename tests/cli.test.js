@@ -45,6 +45,7 @@ async function getShared() {
     }),
     'mod.enable': (args) => {
       if (args.id !== 'example.com/banner') throw new Error(`no mod ${args.id} (run \`webmods status\` to list mods)`);
+      if (args.site) return { id: args.id, enabled: args.enabled, site: args.site, offSites: args.enabled ? [] : [args.site], modEnabled: true, reloaded: null };
       if (args.enabled) off.delete(args.id); else off.add(args.id);
       return { id: args.id, enabled: args.enabled, reloaded: args.tab === 11 ? 11 : null };
     },
@@ -294,13 +295,22 @@ test('enable / disable: mod.enable through the helper; status shows off; mods ma
   r = await runCli(['enable', 'example.com/banner', '--json'], { home });
   assert.deepEqual(JSON.parse(r.stdout), { id: 'example.com/banner', enabled: true, reloaded: null });
 
+  // --site: one site only
+  r = await runCli(['disable', 'example.com/banner', '--site', 'twitter.com'], { home });
+  assert.equal(r.code, 0, r.stderr);
+  assert.deepEqual(lastRequest(ext, 'mod.enable').args, { id: 'example.com/banner', enabled: false, wait: true, site: 'twitter.com' });
+  assert.match(r.stdout, /^example\.com\/banner is off on twitter\.com\nOff on: twitter\.com\n/);
+  r = await runCli(['enable', 'example.com/banner', '--site', ' '], { home });
+  assert.equal(r.code, 1);
+  assert.match(r.stderr, /--site needs a hostname/);
+
   r = await runCli(['disable', 'nope.com/x'], { home });
   assert.equal(r.code, 1);
   assert.match(r.stderr, /no mod nope\.com\/x/);
   r = await runCli(['disable', 'banner'], { home });
   assert.equal(r.code, 1);
   assert.match(r.stderr, /isn't a mod id/);
-  assert.match(r.stderr, /usage: webmods disable <site>\/<mod> \[TAB\]/);
+  assert.match(r.stderr, /usage: webmods disable <site>\/<mod> \[--site HOST\] \[TAB\]/);
   r = await runCli(['enable'], { home });
   assert.equal(r.code, 1);
   r = await runCli(['help', 'disable'], { home });

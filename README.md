@@ -51,7 +51,8 @@ Nothing goes to a WebMods server: there isn't one.
 - Go to a site, open the side panel, and describe the change you want. The agent looks at the page,
   writes a mod, and reloads the tab so you can see it. Keep chatting to adjust it.
 - Each mod has a switch in the side panel, so you can turn it off without deleting it. A mod can run on
-  several sites (a badge says how many); its switch turns it off on all of them.
+  several sites (a badge says how many): its switch in the side panel is for the site you're on, and
+  the Setup page has a switch for the whole mod and one for each site.
 - To change every site at once (dark mode everywhere, say), just ask. The mod waits for your **Allow**,
   like any side-panel mod that reaches beyond the site you're on.
 - A side-panel agent can only touch the site you opened it on. If it writes a mod that would also run on

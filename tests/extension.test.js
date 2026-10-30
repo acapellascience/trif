@@ -259,6 +259,7 @@ test('url, site and request helpers', () => {
   assert.throws(() => lib.filterRequests(entries, { filter: '(' }), /invalid filter regex/);
   assert.deepStrictEqual([0, 1000, 2000, 16000, 30000].map(lib.nextBackoff), [1000, 2000, 4000, 30000, 30000]);
   assert.strictEqual(lib.chromeVersion('Mozilla/5.0 ... Chrome/156.0.0.0 Safari/537.36'), '156.0.0.0');
+  assert.strictEqual(lib.chromeVersion('Mozilla/5.0 (Macintosh; rv:159.0) Gecko/20100101 Firefox/159.0'), '159.0');
 });
 
 // ---- run ----------------------------------------------------------------------------------------

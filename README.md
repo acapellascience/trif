@@ -46,6 +46,13 @@ Nothing goes to a WebMods server: there isn't one.
 5. **Open the side panel.** Click the WebMods icon in the toolbar (pin it from the puzzle-piece menu). If
    it asks you to log in to Claude, click **Log in** and follow the steps.
 
+### Firefox
+
+WebMods also runs in Firefox 153 or newer. Open Firefox once before running `npx webmods setup`, so setup
+finds it (or run `npx webmods setup --browser firefox`). Then open the signed `webmods-firefox.xpi` you were
+sent in Firefox to install the add-on, click the WebMods toolbar button to open the sidebar, and click
+**Allow user scripts**. Restart Firefox if it was open during setup.
+
 ## Using it
 
 - Go to a site, open the side panel, and describe the change you want. The agent looks at the page,
@@ -110,3 +117,7 @@ terms. See [store/PRIVACY.md](store/PRIVACY.md).
 
 How the pieces fit together, and the full CLI, are in [docs/PROTOCOL.md](docs/PROTOCOL.md). Run the tests
 with `node --test`.
+
+`node scripts/build-extension.js firefox` builds the Firefox add-on into `dist/firefox` (try it with
+`npx web-ext run -s dist/firefox`). Firefox only keeps signed add-ons installed; sign it as unlisted with
+`npx web-ext sign -s dist/firefox --channel unlisted` and your addons.mozilla.org API key.

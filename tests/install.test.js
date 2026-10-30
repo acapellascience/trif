@@ -12,6 +12,7 @@ const P = require('../helper/lib/paths');
 const { installApp, chooseMode, cleanPath } = require('../helper/lib/setup');
 const { preinstallMods, loadPreinstalled } = require('../helper/lib/preinstalled');
 const { checkWrapperScript } = require('../helper/lib/doctor');
+const { browserTable } = require('../helper/lib/browsers');
 
 const DEV_ORIGIN = 'chrome-extension://iaablflfafmonebdomeikadolkgdbkhe/';
 const OTHER_ID = 'abcdefghijklmnopabcdefghijklmnop';
@@ -307,4 +308,54 @@ test('preinstalled mods: Plain X and the Instagram mods once, marked to start of
   r = await runCli(['setup', '--native-dir', path.join(home4, 'native'), '--no-link', '--no-examples'], { home: home4 });
   assert.strictEqual(r.code, 0, r.stderr);
   assert.strictEqual(fs.existsSync(path.join(home4, 'sites', 'x.com')), false);
+});
+
+// ------------------------------------------------------------------ Firefox
+
+test('setup --browser firefox writes a manifest with allowed_extensions; doctor checks it', async () => {
+  const root = tempDir();
+  const ws = path.join(root, 'ws');
+  fs.mkdirSync(ws, { recursive: true });
+  const r = await runCli(['setup', '--browser', 'chrome,firefox', '--no-link'], { home: ws });
+  assert.equal(r.code, 0, r.stderr);
+  const fakehome = path.join(ws, 'fakehome');
+  const fxDir = process.platform === 'darwin'
+    ? path.join(fakehome, 'Library/Application Support/Mozilla/NativeMessagingHosts')
+    : path.join(fakehome, '.mozilla/native-messaging-hosts');
+  const fx = readManifest(fxDir);
+  assert.deepEqual(fx.allowed_extensions, [P.FIREFOX_EXTENSION_ID]);
+  assert.equal(fx.allowed_origins, undefined);
+  assert.equal(fx.path, path.join(ws, 'bin', 'webmods-host'));
+  const chrome = browserTable(fakehome).find((b) => b.key === 'chrome');
+  assert.deepEqual(readManifest(chrome.nativeDir).allowed_origins, [DEV_ORIGIN]);
+  assert.match(r.stdout, /Firefox: open the signed WebMods add-on/);
+
+  let d = await runCli(['doctor'], { home: ws });
+  assert.match(d.stdout, /ok {4}Firefox: native host manifest/);
+  fs.writeFileSync(path.join(fxDir, 'com.webmods.helper.json'), JSON.stringify({ ...fx, allowed_extensions: ['other@example.com'] }));
+  d = await runCli(['doctor'], { home: ws });
+  assert.match(d.stdout, new RegExp(`FAIL {2}Firefox: .*allowed_extensions doesn't include ${esc(P.FIREFOX_EXTENSION_ID)}`));
+});
+
+test('browserTable: Firefox has one native host folder for every profile', () => {
+  const mac = browserTable('/H', 'darwin').find((b) => b.key === 'firefox');
+  assert.equal(mac.nativeDir, '/H/Library/Application Support/Mozilla/NativeMessagingHosts');
+  assert.equal(mac.firefox, true);
+  const linux = browserTable('/H', 'linux').find((b) => b.key === 'firefox');
+  assert.equal(linux.nativeDir, '/H/.mozilla/native-messaging-hosts');
+  assert.equal(browserTable('/H', 'darwin').find((b) => b.key === 'chrome').firefox, false);
+});
+
+test('build-extension firefox: sidebar, background scripts, optional userScripts, gecko id', async () => {
+  const r = await new Promise((resolve) => execFile(process.execPath, [path.join(REPO, 'scripts/build-extension.js'), 'firefox'],
+    { timeout: 20000 }, (err, stdout, stderr) => resolve({ code: err ? 1 : 0, stdout, stderr })));
+  assert.equal(r.code, 0, r.stderr);
+  const m = JSON.parse(fs.readFileSync(path.join(REPO, 'dist/firefox/manifest.json'), 'utf8'));
+  assert.deepEqual(m.background, { scripts: ['background.js'], type: 'module' });
+  assert.equal(m.sidebar_action.default_panel, 'sidepanel.html');
+  assert.equal(m.side_panel, undefined);
+  assert.equal(m.key, undefined);
+  assert.ok(!m.permissions.includes('userScripts') && !m.permissions.includes('sidePanel'));
+  assert.deepEqual(m.optional_permissions, ['userScripts']);
+  assert.equal(m.browser_specific_settings.gecko.id, P.FIREFOX_EXTENSION_ID);
 });

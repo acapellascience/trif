@@ -3,7 +3,7 @@
 // chrome.storage.local `chat:<site>`; this page renders that record and reacts to storage changes.
 // See docs/PROTOCOL.md, "Side panel and agent runs".
 
-import { siteForUrl, modAppliesTo, modSites, isMultiSite, offOnSite, normalizeOffSites, isLoginUrl } from './lib.js';
+import { siteForUrl, modAppliesTo, modSites, isMultiSite, offOnSite, normalizeOffSites, isLoginUrl, FIREFOX, BROWSER } from './lib.js';
 import { renderMarkdown, MARKDOWN_ELEMENTS, MARKDOWN_ATTRIBUTES } from './markdown.js';
 import { modSwitch, syncSwitches, shownEnabled, switchError, enabledIn, onSwitchChange } from './modswitch.js';
 
@@ -300,9 +300,9 @@ function renderNotice({ helperOk, agentInfo, anyAgent }) {
   } else if (status && !helperOk) {
     bad = true;
     const p = el('p');
-    p.append('Run ', code('npx webmods setup'), ' in a terminal (needs Node 18+), then restart Chrome.');
+    p.append('Run ', code('npx webmods setup'), ` in a terminal (needs Node 18+), then restart ${BROWSER}.`);
     parts.push(el('p', 'title', 'The WebMods helper isn’t connected'), p);
-    if (status.helper.error) parts.push(el('p', 'note', `Chrome says: ${status.helper.error}`));
+    if (status.helper.error) parts.push(el('p', 'note', `${BROWSER} says: ${status.helper.error}`));
     const actions = el('p', 'actions');
     const retry = el('button', 'btn', 'Try again');
     retry.type = 'button';
@@ -317,11 +317,17 @@ function renderNotice({ helperOk, agentInfo, anyAgent }) {
     parts.push(actions);
   } else if (status && !status.userScripts) {
     parts.push(el('p', 'title', 'Mods are paused'));
-    parts.push(el('p', null, 'Turn on “Allow User Scripts” for WebMods so mods can run on websites.'));
+    parts.push(el('p', null, FIREFOX
+      ? 'Allow user scripts for WebMods so mods can run on websites.'
+      : 'Turn on “Allow User Scripts” for WebMods so mods can run on websites.'));
     const actions = el('p', 'actions');
-    const open = el('button', 'btn primary', 'Open extension settings');
+    const open = el('button', 'btn primary', FIREFOX ? 'Allow user scripts' : 'Open extension settings');
     open.type = 'button';
-    open.addEventListener('click', () => chrome.tabs.create({ url: status.settingsUrl || `chrome://extensions/?id=${chrome.runtime.id}` }));
+    open.addEventListener('click', () => {
+      // Firefox grants userScripts only through this prompt, which must open from the click itself.
+      if (FIREFOX) chrome.permissions.request({ permissions: ['userScripts'] }).then(() => setTimeout(refreshStatus, 300), () => {});
+      else chrome.tabs.create({ url: status.settingsUrl || `chrome://extensions/?id=${chrome.runtime.id}` });
+    });
     actions.append(open);
     parts.push(actions);
   } else if (helperOk && view.agents && (agentInfo ? !agentInfo.available : !anyAgent)) {

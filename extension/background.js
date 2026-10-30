@@ -3,7 +3,7 @@
 // panel and the helper. See docs/PROTOCOL.md.
 
 import {
-  SETTINGS_URL, USER_SCRIPTS_OFF, userScriptsAvailable, syncUserScripts, resolveTab, tabInfo,
+  SETTINGS_URL, USER_SCRIPTS_OFF, FIREFOX, BROWSER, userScriptsAvailable, syncUserScripts, resolveTab, tabInfo,
   normalizeUrl, normalizeSite, hostMatchesSite, buildRunCode, buildPollCode, parseRunEnvelope,
   firstInjectionResult, withTimeout, filterRequests, nextBackoff, chromeVersion, toolLine,
   normalizeDisabled, modAppliesTo, urlInScope, modInScope, applyStartOff,
@@ -16,7 +16,7 @@ const VERSION = chrome.runtime.getManifest().version;
 const CHROME = chromeVersion(navigator.userAgent);
 const LOAD_TIMEOUT = 30000;
 const CHAT_MAX = 500;          // messages kept per site
-const NOT_CONNECTED = 'The WebMods helper isn\'t connected. Run `npx webmods setup` in a terminal (needs Node 18+), then restart Chrome.';
+const NOT_CONNECTED = `The WebMods helper isn't connected. Run \`npx webmods setup\` in a terminal (needs Node 18+), then restart ${BROWSER}.`;
 
 const state = {
   port: null,
@@ -76,9 +76,18 @@ chrome.runtime.onConnect.addListener((port) => {
   if (port.name !== 'panel' || port.sender?.id !== chrome.runtime.id) return;
   onPanelConnect(port);
 });
+if (FIREFOX) {
+  // Firefox has a sidebar instead of the side panel; the toolbar button toggles it (toggle() must run
+  // synchronously in the click handler).
+  chrome.action.onClicked.addListener(() => { (globalThis.browser ?? chrome).sidebarAction.toggle(); });
+  // Its userScripts permission is optional: the setup page or the panel asks for it.
+  chrome.permissions.onAdded.addListener(() => ready.then(checkUserScripts));
+  chrome.permissions.onRemoved.addListener(() => ready.then(checkUserScripts));
+}
 
 /** The toolbar icon opens the side panel (the setting persists, so this only needs to run occasionally). */
 function setPanelBehavior() {
+  if (FIREFOX) return;
   try {
     chrome.sidePanel?.setPanelBehavior({ openPanelOnActionClick: true })?.catch?.((e) => console.warn('[webmods] setPanelBehavior failed', e));
   } catch (e) {
@@ -110,7 +119,7 @@ function checkUserScripts() {
   if (before !== null && before !== now) {
     log(now ? 'info' : 'warn', now ? 'user scripts were turned on' : 'user scripts were turned off');
     // A fresh hello keeps the helper's view of the switch (shown by `webmods doctor`) current.
-    post({ type: 'hello', version: VERSION, userScripts: now, chrome: CHROME });
+    post({ type: 'hello', version: VERSION, userScripts: now, chrome: CHROME, browser: BROWSER });
     if (now) serial(applyMods).then(reportApplied, () => {});
     notifyPanels();
   }
@@ -180,7 +189,7 @@ function connect() {
     helperGone(reason);
     scheduleReconnect();
   });
-  post({ type: 'hello', version: VERSION, userScripts: checkUserScripts(), chrome: CHROME });
+  post({ type: 'hello', version: VERSION, userScripts: checkUserScripts(), chrome: CHROME, browser: BROWSER });
 }
 
 function scheduleReconnect() {
@@ -298,7 +307,7 @@ const commands = {
     }
     const errors = new Map(state.lastApply.errors.map((e) => [e.id, e.error]));
     return {
-      userScripts: state.userScripts, chrome: CHROME, version: VERSION,
+      userScripts: state.userScripts, chrome: CHROME, browser: BROWSER, version: VERSION,
       mods: state.mods.map((m) => {
         const o = { id: m.id, registered: ids.has(m.id), enabled: isEnabled(m.id) };
         if (state.offSites[m.id]) o.offSites = state.offSites[m.id];
@@ -621,7 +630,7 @@ async function uiStatus() {
   const errors = new Map(state.lastApply.errors.map((e) => [e.id, e.error]));
   return {
     helper: { connected: state.connected, error: state.connected ? null : state.helperError },
-    userScripts: s.userScripts, settingsUrl: SETTINGS_URL, version: VERSION, chrome: CHROME,
+    userScripts: s.userScripts, settingsUrl: SETTINGS_URL, version: VERSION, chrome: CHROME, browser: BROWSER,
     recording: s.recording,
     mods: state.mods.map((m, i) => ({
       id: m.id, name: m.name || m.id, description: m.description || '', site: m.site, file: m.file || '',

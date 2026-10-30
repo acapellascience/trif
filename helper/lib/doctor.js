@@ -132,7 +132,7 @@ async function doctor(opts = {}) {
     targets = browserTable().filter((b) => b.detected || fs.existsSync(path.join(b.nativeDir, `${P.HOST_NAME}.json`)));
   }
   if (!targets.length) {
-    add('fail', 'no Chromium browser profile found (looked for Chrome, Chromium, Brave, Edge, Arc)', 'install and open Google Chrome once, then ' + setupFix);
+    add('fail', 'no browser profile found (looked for Chrome, Chromium, Brave, Edge, Arc, Firefox)', 'install and open Google Chrome or Firefox once, then ' + setupFix);
   }
   const expectedOrigins = P.extensionOrigins(ws.config);
   const badIds = P.extensionIds(ws.config).invalid;
@@ -154,10 +154,15 @@ async function doctor(opts = {}) {
     if (m.type !== 'stdio') problems.push('type is not "stdio"');
     if (m.path !== ws.hostWrapper) problems.push(`path is ${JSON.stringify(m.path)}, expected ${ws.hostWrapper}`);
     else if (!fs.existsSync(m.path)) problems.push(`path ${m.path} doesn't exist`);
-    // Every WebMods extension ID (dev, Web Store, config.json extensionIds) must be allowed.
-    const origins = Array.isArray(m.allowed_origins) ? m.allowed_origins : [];
-    const missing = expectedOrigins.filter((o) => !origins.includes(o));
-    if (missing.length) problems.push(`allowed_origins doesn't include ${missing.join(', ')}`);
+    if (t.firefox) {
+      const ids = Array.isArray(m.allowed_extensions) ? m.allowed_extensions : [];
+      if (!ids.includes(P.FIREFOX_EXTENSION_ID)) problems.push(`allowed_extensions doesn't include ${P.FIREFOX_EXTENSION_ID}`);
+    } else {
+      // Every WebMods extension ID (dev, Web Store, config.json extensionIds) must be allowed.
+      const origins = Array.isArray(m.allowed_origins) ? m.allowed_origins : [];
+      const missing = expectedOrigins.filter((o) => !origins.includes(o));
+      if (missing.length) problems.push(`allowed_origins doesn't include ${missing.join(', ')}`);
+    }
     if (problems.length) add('fail', `${t.label}: native host manifest ${file}: ${problems.join('; ')}`, fix);
     else { manifestsOk++; add('ok', `${t.label}: native host manifest`); }
   }
@@ -194,8 +199,10 @@ async function doctor(opts = {}) {
     if (!info.extension) {
       add('fail', 'the helper is running but the extension never said hello', `reload the extension at ${EXT_URL} (or restart Chrome) and run webmods doctor again; check ${ws.log}`);
     } else {
-      add('ok', `extension v${info.extension.version} on Chrome ${info.extension.chrome}`);
-      if (info.extension.userScripts) add('ok', '"Allow User Scripts" is on');
+      const firefox = info.extension.browser === 'Firefox';
+      add('ok', `extension v${info.extension.version} on ${info.extension.browser || 'Chrome'} ${info.extension.chrome}`);
+      if (info.extension.userScripts) add('ok', firefox ? 'user scripts are allowed' : '"Allow User Scripts" is on');
+      else if (firefox) add('fail', 'user scripts aren\'t allowed, so mods can\'t run', 'click the WebMods toolbar button in Firefox, then "Allow user scripts", then reload your tabs');
       else add('fail', '"Allow User Scripts" is OFF, so mods can\'t run', `open ${EXT_URL}, turn on "Allow User Scripts", then reload your tabs`);
     }
     for (const e of (info.modsApplied && info.modsApplied.errors) || []) {

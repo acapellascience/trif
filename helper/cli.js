@@ -213,10 +213,13 @@ const handlers = {
     if (!ext) {
       lines.push('extension     connected, but it has not said hello yet');
     } else {
-      lines.push(`extension     v${ext.version} on Chrome ${ext.chrome}`);
+      const firefox = ext.browser === 'Firefox';
+      lines.push(`extension     v${ext.version} on ${ext.browser || 'Chrome'} ${ext.chrome}`);
       lines.push(ext.userScripts
         ? 'user scripts  on'
-        : `user scripts  OFF: mods can't run. Fix: open chrome://extensions/?id=${P.EXTENSION_ID} and turn on "Allow User Scripts"`);
+        : firefox
+          ? 'user scripts  OFF: mods can\'t run. Fix: click the WebMods toolbar button in Firefox, then "Allow user scripts"'
+          : `user scripts  OFF: mods can't run. Fix: open chrome://extensions/?id=${P.EXTENSION_ID} and turn on "Allow User Scripts"`);
     }
     if (stErr) lines.push(`status        the extension didn't answer: ${stErr}`);
     const registered = new Map(((st && st.mods) || []).map((m) => [m.id, !!m.registered]));

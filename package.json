@@ -29,5 +29,8 @@
   ],
   "scripts": {
     "test": "node --test --test-timeout=60000"
+  },
+  "devDependencies": {
+    "web-ext": "^10.8.0"
   }
 }

@@ -6,17 +6,24 @@ import { safeStringify, formatError } from './runtime.js';
 // The running extension's own id: the Web Store build has a different one from the unpacked dev build
 // (whose manifest key fixes it to this fallback, also used under Node in the tests).
 export const EXTENSION_ID = globalThis.chrome?.runtime?.id || 'iaablflfafmonebdomeikadolkgdbkhe';
-export const SETTINGS_URL = `chrome://extensions/?id=${EXTENSION_ID}`;
+// The Firefox build (scripts/build-extension.js firefox) runs the same code; these cover the differences.
+export const FIREFOX = !!globalThis.chrome?.runtime?.getURL?.('')?.startsWith('moz-extension:');
+export const BROWSER = FIREFOX ? 'Firefox' : 'Chrome';
+export const SETTINGS_URL = FIREFOX ? 'about:addons' : `chrome://extensions/?id=${EXTENSION_ID}`;
 // PROTOCOL.md calls this `__webmods_runtime`, but chrome.userScripts rejects ids starting with "_"
 // (reserved for generated ids), so it is registered under this id.
 export const RUNTIME_ID = 'webmods-runtime';
-export const USER_SCRIPTS_OFF =
-  `User scripts are off for WebMods. Open ${SETTINGS_URL} and turn on "Allow User Scripts", then reload the page.`;
+export const USER_SCRIPTS_OFF = FIREFOX
+  ? 'User scripts aren\'t allowed for WebMods. Click the WebMods toolbar button, then "Allow user scripts", and reload the page.'
+  : `User scripts are off for WebMods. Open ${SETTINGS_URL} and turn on "Allow User Scripts", then reload the page.`;
 export const RUN_CAP = 1000000;
 
 // ---- user scripts -------------------------------------------------------------------------------
 
-/** True when chrome.userScripts can be used (the "Allow User Scripts" switch is on). */
+/**
+ * True when chrome.userScripts can be used: Chrome's "Allow User Scripts" switch is on, or in Firefox the
+ * optional userScripts permission is granted (without it chrome.userScripts is undefined).
+ */
 export function userScriptsAvailable(chromeApi) {
   try {
     const p = chromeApi.userScripts.getScripts(); // throws when the switch is off
@@ -464,7 +471,7 @@ export function nextBackoff(prev) {
 }
 
 export function chromeVersion(userAgent) {
-  const m = /Chrom(?:e|ium)\/([\d.]+)/.exec(userAgent || '');
+  const m = /(?:Chrom(?:e|ium)|Firefox)\/([\d.]+)/.exec(userAgent || '');
   return m ? m[1] : 'unknown';
 }
 

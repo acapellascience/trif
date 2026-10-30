@@ -2,7 +2,9 @@
 // switch, shared with the side panel). Polls the service worker, which also re-checks the switch on
 // every status request; switches follow chrome.storage.local `disabled` live.
 
-import { modSites, offOnSite, normalizeOffSites } from './lib.js';
+import { modSites, offOnSite, normalizeOffSites, FIREFOX, BROWSER } from './lib.js';
+
+const PANEL = FIREFOX ? 'sidebar' : 'side panel';
 import { modSwitch, syncSwitches, shownEnabled, switchError, enabledIn, onSwitchChange } from './modswitch.js';
 
 const $ = (sel) => document.querySelector(sel);
@@ -38,9 +40,9 @@ function render(s) {
     setSection('helper', true, 'Helper connected', 'Your coding agent can use the webmods command.');
   } else {
     setSection('helper', false, 'Helper not connected', [
-      'Run ', code('npx webmods setup'), ' in a terminal (it needs Node 18 or newer), then quit and restart Chrome.',
+      'Run ', code('npx webmods setup'), ` in a terminal (it needs Node 18 or newer), then quit and restart ${BROWSER}.`,
       el('br'), 'Already set up? Run ', code('webmods doctor'), ' to see what\'s wrong.',
-      ...(s.helper.error ? [el('br'), `Chrome says: ${s.helper.error}`] : []),
+      ...(s.helper.error ? [el('br'), `${BROWSER} says: ${s.helper.error}`] : []),
     ]);
   }
   $('#reconnect').hidden = s.helper.connected;
@@ -48,15 +50,16 @@ function render(s) {
   if (s.userScripts) {
     setSection('userscripts', true, 'User scripts allowed', 'Mods can run on websites.');
   } else {
-    setSection('userscripts', false, 'User scripts are off',
-      'Open the extension settings and turn on "Allow User Scripts".');
+    setSection('userscripts', false, 'User scripts are off', FIREFOX
+      ? `Firefox asks before an add-on can run scripts on websites. Click "Allow user scripts" and confirm.`
+      : 'Open the extension settings and turn on "Allow User Scripts".');
   }
   $('#settings').hidden = !!s.userScripts;
 
   last = s;
   renderMods();
   const rec = s.recording.length ? ` · recording requests on ${s.recording.join(', ')}` : '';
-  $('#footer').textContent = `WebMods ${s.version} · Chrome ${s.chrome}${rec}`;
+  $('#footer').textContent = `WebMods ${s.version} · ${BROWSER} ${s.chrome}${rec}`;
 }
 
 let labelSeq = 0;
@@ -182,7 +185,7 @@ function siteSwitches(m) {
   if (!everywhere && sites.length < 2) return null;
   const off = offSites[m.id] || [];
   const all = [...sites, ...off.filter((o) => !sites.includes(o))];
-  if (!all.length) return el('div', 'mod-sites', 'Switch it off on one site from the side panel there.');
+  if (!all.length) return el('div', 'mod-sites', `Switch it off on one site from the ${PANEL} there.`);
   const ul = el('ul', 'site-switches');
   ul.setAttribute('aria-label', `${m.name} by site`);
   if (everywhere) ul.append(el('li', 'site-switches-note', 'Off on:'));
@@ -205,8 +208,14 @@ async function refresh() {
   }
 }
 
+if (FIREFOX) {
+  $('#settings').textContent = 'Allow user scripts';
+  $('.sub').textContent = $('.sub').textContent.replace('side panel', PANEL);
+}
 $('#settings').addEventListener('click', () => {
-  chrome.tabs.create({ url: `chrome://extensions/?id=${chrome.runtime.id}` });
+  // Firefox grants userScripts only through this prompt, which must open from the click itself.
+  if (FIREFOX) chrome.permissions.request({ permissions: ['userScripts'] }).then(() => setTimeout(refresh, 300), () => {});
+  else chrome.tabs.create({ url: `chrome://extensions/?id=${chrome.runtime.id}` });
 });
 $('#reconnect').addEventListener('click', async () => {
   await chrome.runtime.sendMessage({ type: 'reconnect' }).catch(() => {});

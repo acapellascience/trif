@@ -92,9 +92,9 @@ function onExtensionMessage(msg) {
   if (!msg || typeof msg !== 'object') return logger.warn('ignoring non-object message from extension');
   switch (msg.type) {
     case 'hello':
-      state.hello = { version: msg.version ?? null, userScripts: !!msg.userScripts, chrome: msg.chrome ?? null };
+      state.hello = { version: msg.version ?? null, userScripts: !!msg.userScripts, chrome: msg.chrome ?? null, browser: msg.browser ?? 'Chrome' };
       state.helloAt = Date.now();
-      logger.info(`hello from extension ${msg.version} on Chrome ${msg.chrome}; userScripts=${!!msg.userScripts}`);
+      logger.info(`hello from extension ${msg.version} on ${state.hello.browser} ${msg.chrome}; userScripts=${!!msg.userScripts}`);
       syncMods('hello', true);
       break;
     case 'response':

@@ -1,6 +1,7 @@
 'use strict';
-// Where each Chromium browser looks for native messaging host manifests.
-// Chromium reads <user data dir>/NativeMessagingHosts/<name>.json for per-user hosts.
+// Where each browser looks for native messaging host manifests.
+// Chromium reads <user data dir>/NativeMessagingHosts/<name>.json for per-user hosts; Firefox reads one
+// folder for all profiles, and its manifests list extension IDs (allowed_extensions), not origins.
 
 const fs = require('fs');
 const os = require('os');
@@ -12,6 +13,7 @@ const MAC = {
   brave: { label: 'Brave', userData: 'Library/Application Support/BraveSoftware/Brave-Browser' },
   edge: { label: 'Microsoft Edge', userData: 'Library/Application Support/Microsoft Edge' },
   arc: { label: 'Arc', userData: 'Library/Application Support/Arc/User Data' },
+  firefox: { label: 'Firefox', userData: 'Library/Application Support/Firefox', nativeDir: 'Library/Application Support/Mozilla/NativeMessagingHosts', firefox: true },
 };
 
 const LINUX = {
@@ -19,15 +21,17 @@ const LINUX = {
   chromium: { label: 'Chromium', userData: '.config/chromium' },
   brave: { label: 'Brave', userData: '.config/BraveSoftware/Brave-Browser' },
   edge: { label: 'Microsoft Edge', userData: '.config/microsoft-edge' },
+  firefox: { label: 'Firefox', userData: '.mozilla/firefox', nativeDir: '.mozilla/native-messaging-hosts', firefox: true },
 };
 
-const ALL_KEYS = ['chrome', 'chromium', 'brave', 'edge', 'arc'];
+const ALL_KEYS = ['chrome', 'chromium', 'brave', 'edge', 'arc', 'firefox'];
 
 function browserTable(homedir = os.homedir(), platform = process.platform) {
   const table = platform === 'darwin' ? MAC : LINUX;
   return Object.entries(table).map(([key, b]) => {
     const userData = path.join(homedir, b.userData);
-    return { key, label: b.label, userData, nativeDir: path.join(userData, 'NativeMessagingHosts'), detected: fs.existsSync(userData) };
+    const nativeDir = b.nativeDir ? path.join(homedir, b.nativeDir) : path.join(userData, 'NativeMessagingHosts');
+    return { key, label: b.label, userData, nativeDir, firefox: !!b.firefox, detected: fs.existsSync(userData) };
   });
 }
 

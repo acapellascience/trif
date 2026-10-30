@@ -50,13 +50,13 @@ function cliWrapperContent(nodePath, home, cliJs = P.CLI_JS) {
   return `#!/bin/sh\n${env}exec ${shq(nodePath)} ${shq(cliJs)} "$@"\n`;
 }
 
-function manifestFor(wrapperPath, origins = [P.EXTENSION_ORIGIN]) {
+function manifestFor(wrapperPath, origins = [P.EXTENSION_ORIGIN], { firefox = false } = {}) {
   return {
     name: P.HOST_NAME,
     description: 'WebMods helper: syncs mods and serves the webmods CLI',
     path: wrapperPath,
     type: 'stdio',
-    allowed_origins: [...origins],
+    ...(firefox ? { allowed_extensions: [P.FIREFOX_EXTENSION_ID] } : { allowed_origins: [...origins] }),
   };
 }
 
@@ -302,14 +302,15 @@ function setup(opts = {}) {
   } else {
     targets = selectBrowsers(opts.browser);
     if (!targets.length) {
-      say('browsers      no Chromium browser profile folder found; installing for Google Chrome anyway');
+      say('browsers      no browser profile folder found; installing for Google Chrome anyway');
       targets = selectBrowsers('chrome');
     }
   }
-  const manifest = JSON.stringify(manifestFor(ws.hostWrapper, P.extensionOrigins(ws.config)), null, 2) + '\n';
+  const origins = P.extensionOrigins(ws.config);
   const manifests = [];
   for (const t of targets) {
     const file = path.join(t.nativeDir, `${P.HOST_NAME}.json`);
+    const manifest = JSON.stringify(manifestFor(ws.hostWrapper, origins, { firefox: t.firefox }), null, 2) + '\n';
     try {
       fs.mkdirSync(t.nativeDir, { recursive: true });
       const how = writeIfChanged(file, manifest);
@@ -368,6 +369,10 @@ function setup(opts = {}) {
   say('  2. Click "Details" on the WebMods extension and turn on "Allow User Scripts".');
   say('  3. If Chrome was already running before this setup, quit it completely and reopen it.');
   say('  4. Check everything with: webmods doctor');
+  if (targets.some((t) => t.firefox)) {
+    say('  Firefox: open the signed WebMods add-on (.xpi) in Firefox to install it, then click the WebMods');
+    say('     toolbar button and "Allow user scripts". Restart Firefox if it was running before this setup.');
+  }
   say(`  Then ask your coding agent to work in ${home} (it reads AGENTS.md there).`);
 
   return { ok, lines, ws, manifests, nodePath, mode, root };

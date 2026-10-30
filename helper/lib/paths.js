@@ -14,6 +14,9 @@ const DEV_EXTENSION_ID = 'iaablflfafmonebdomeikadolkgdbkhe';
 // >>> then ship a release so `webmods setup` writes it into every native host manifest.
 const STORE_EXTENSION_IDS = [];
 // Users can add more in config.json: { "extensionIds": ["<32 letters a-p>", ...] } (see extensionIds()).
+// Firefox identifies the add-on by the ID in its manifest (scripts/build-extension.js firefox), and native
+// host manifests for Firefox list it in allowed_extensions.
+const FIREFOX_EXTENSION_ID = 'webmods@webmods.ext';
 const EXTENSION_ID = DEV_EXTENSION_ID; // the one the docs and fix messages point at
 const EXTENSION_ORIGIN = `chrome-extension://${EXTENSION_ID}/`;
 
@@ -111,7 +114,7 @@ function examplesDir() {
 }
 
 module.exports = {
-  HOST_NAME, DEV_EXTENSION_ID, STORE_EXTENSION_IDS, EXTENSION_ID, EXTENSION_ORIGIN, HELPER_DIR, REPO_ROOT,
+  HOST_NAME, DEV_EXTENSION_ID, FIREFOX_EXTENSION_ID, STORE_EXTENSION_IDS, EXTENSION_ID, EXTENSION_ORIGIN, HELPER_DIR, REPO_ROOT,
   HOST_JS, CLI_JS, APP_DIR_NAME, VERSION,
   expandHome, defaultHome, resolveHome, readConfig, workspace, examplesDir, isGitCheckout, extensionIds, extensionOrigins,
 };

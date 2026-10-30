@@ -9,6 +9,10 @@ const MAX_BYTES = 2 * 1024 * 1024;
 
 function createLogger(file, { stderr = false } = {}) {
   let writes = 0;
+  // Once stderr's reader is gone (the browser or test that started us died), writes fail with EPIPE
+  // asynchronously. Unhandled, that was an uncaught exception, which logged to stderr again: a busy
+  // loop that kept the orphaned helper spinning. Stop using stderr instead.
+  if (stderr) process.stderr.on('error', () => { stderr = false; });
   try { fs.mkdirSync(path.dirname(file), { recursive: true }); } catch { /* ignore */ }
 
   function rotateIfNeeded() {

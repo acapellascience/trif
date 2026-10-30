@@ -31,7 +31,8 @@ dependencies, no build step.**
      AGENTS.md           how to build mods (copied from helper/workspace/AGENTS.md on setup; refreshed on every setup)
      CLAUDE.md           "@AGENTS.md" (Claude Code reads CLAUDE.md; the @ import pulls in AGENTS.md)
      sites/<site>/<mod>.js
-     helper.sock         the helper's socket (exists while Chrome is running with the extension)
+     helper.sock         the default helper's socket (exists while a browser is running with the extension)
+     helper-<pid>.sock   each running helper's own socket (one helper per connected browser or Chrome profile)
      config.json         { "modsDir": "...optional override..." }
    ```
    `<site>` is a hostname like `x.com` or `news.ycombinator.com`. `<mod>` is a kebab-case name.
@@ -245,8 +246,20 @@ response `{id, ok, result|error}`. Helper-local commands (`mods`, `ping`) are an
 everything else is forwarded to the extension. Requests time out after `args.timeout + 5000` ms (default 35 s).
 Agent commands (`agent.list`/`agent.start`/`agent.stop`) are helper-local too; after answering `agent.start` with `{runId}`, the helper streams `{type:"agentEvent", runId, event}` lines (no `id`) on that same connection until the `done` event.
 `token` is the run token (see "Run scope"): the CLI sends `$WEBMODS_RUN_TOKEN` when it's set.
-If the socket file exists but nothing listens, the next host to start removes it. If a second host starts
-(a second Chrome profile) while one is live, it logs that and serves only mod syncing for its profile.
+If the socket file exists but nothing listens, the next host to start removes it.
+
+**Several browsers.** Each browser (or Chrome profile) that runs the extension starts its own host. Every
+host serves its own socket, `helper-<pid>.sock`, and removes it on exit (a host starting up removes those
+whose pid is dead). The first host also serves `helper.sock`; later ones log that they're secondary and
+take over `helper.sock` when the first exits. Mod files are shared: every host watches the same folder.
+Which socket the CLI uses:
+- `--browser <name|pid>`: the host whose extension said hello with that browser name (`Chrome`,
+  `Firefox`, case-insensitive) or that pid (`lib/helpers.js` pings each `helper-*.sock`). Two hosts for
+  the same browser (two Chrome profiles) need the pid. Refused inside an agent run.
+- Inside an agent run: `$WEBMODS_SOCK`, which the host that started the run sets to its own socket, so
+  a run started from Firefox's sidebar works on Firefox's tabs even while Chrome's host owns `helper.sock`.
+- Otherwise `helper.sock`.
+`webmods status` and `webmods doctor` list the other connected browsers.
 
 ## Native host installation (`webmods setup`)
 

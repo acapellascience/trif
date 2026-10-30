@@ -359,6 +359,8 @@ test('agent env is sanitized: no inherited CLAUDE*/ANTHROPIC_*/CODEX_*, API key 
   assert.equal(env.LANG, 'en_CA.UTF-8');
   assert.equal(env.HOME, path.join(home, 'fakehome'));
   assert.equal(env.WEBMODS_HOME, home);
+  // The run reaches this host (and so this browser) even when another helper owns helper.sock.
+  assert.equal(env.WEBMODS_SOCK, path.join(home, `helper-${ext.child.pid}.sock`));
   assert.deepEqual(env.PATH.split(':').slice(0, 2), [path.join(home, 'bin'), bin]);
 });
 

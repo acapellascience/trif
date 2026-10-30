@@ -7,6 +7,7 @@ const { spawnSync } = require('child_process');
 const P = require('./paths');
 const { browserTable } = require('./browsers');
 const { request } = require('./client');
+const { listHelpers, describeHelper } = require('./helpers');
 const { scanMods, planModsMessage } = require('./mods');
 const { isExecutable } = require('./setup');
 
@@ -176,7 +177,9 @@ async function doctor(opts = {}) {
   // Helper / extension
   let info = null;
   try {
-    info = await request(ws.sock, 'ping', {}, 3000);
+    // Inside an agent run, the helper that started it (see lib/helpers.js).
+    const sock = process.env.WEBMODS_SOCK && !opts.home ? process.env.WEBMODS_SOCK : ws.sock;
+    info = await request(sock, 'ping', {}, 3000);
   } catch (e) {
     const stale = fs.existsSync(ws.sock);
     const fixLines = [
@@ -208,6 +211,9 @@ async function doctor(opts = {}) {
     for (const e of (info.modsApplied && info.modsApplied.errors) || []) {
       add('fail', `extension couldn't register ${e.id}: ${e.error}`, 'fix the mod\'s @match/@exclude patterns (see AGENTS.md)');
     }
+    // Each connected browser has its own helper; `webmods` uses this one unless told --browser.
+    const others = process.env.WEBMODS_RUN_TOKEN ? [] : (await listHelpers(ws.home)).filter((h) => h.pid !== info.pid);
+    if (others.length) add('ok', `also connected: ${others.map(describeHelper).join(', ')}`, 'webmods commands go to the default browser; add --browser <name|pid> to use another');
   }
 
   // Mods

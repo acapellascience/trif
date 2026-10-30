@@ -351,7 +351,7 @@ test('host: second instance only syncs mods, then takes over when the first exit
   const b = startHost(home);
   const bMods = await b.nextMods();
   assert.deepEqual(bMods.map((m) => m.id), ['a.com/m']);
-  await waitFor(() => fs.readFileSync(path.join(home, 'helper.log'), 'utf8').includes('only syncs mods'), { message: 'secondary log line' });
+  await waitFor(() => fs.readFileSync(path.join(home, 'helper.log'), 'utf8').includes('for its own browser'), { message: 'secondary log line' });
   let ping = await sockRequest(a.sock, { id: 1, cmd: 'ping' });
   assert.equal(ping.result.pid, a.child.pid);
 

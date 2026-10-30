@@ -121,6 +121,9 @@ where the user finds it on the WebMods setup page).
 
 `TAB` below is `--tab <id>` or `--url <substring|/regex/>`. Without one, commands use the active tab of
 the last-focused window, which may not be the site you're working on: pass `--url` habitually.
+If the user has WebMods in more than one browser (say Chrome and Firefox), each is a separate
+connection: `webmods status` lists them, and `--browser firefox` (or a pid from there) sends a command
+to that one. In a side-panel run you're already on the browser the user is chatting from.
 
 | Command | Use |
 |---|---|

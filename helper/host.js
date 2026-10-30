@@ -26,8 +26,12 @@ const agents = require('./lib/agents');
 const { updateHeld, approveHeld } = require('./lib/held');
 const { startOffIds } = require('./lib/preinstalled');
 const { readInstructions, writeInstructions, instructionsFile, MAX_LENGTH } = require('./lib/instructions');
+const { ownSock, removeStaleSockets } = require('./lib/helpers');
 
 const ws = workspace();
+// This helper's own socket (helper-<pid>.sock), served whether or not it also owns helper.sock; agent
+// runs get it as WEBMODS_SOCK so their `webmods` commands reach this browser (lib/helpers.js).
+ws.ownSock = ownSock(ws.home);
 try { fs.mkdirSync(ws.home, { recursive: true }); } catch { /* logged below if it matters */ }
 const logger = createLogger(ws.log, { stderr: true });
 
@@ -240,7 +244,8 @@ function poll() {
 // ---------------------------------------------------------------- agent runs (side panel)
 
 // config.json can change while Chrome runs (`webmods setup` re-records PATH), so re-read it per run.
-const runs = new Runs({ getWorkspace: () => workspace(ws.home), logger, onEvent: onAgentEvent });
+// ownSock rides along so runs can give agents WEBMODS_SOCK (a fresh workspace() doesn't have it).
+const runs = new Runs({ getWorkspace: () => ({ ...workspace(ws.home), ownSock: ws.ownSock }), logger, onEvent: onAgentEvent });
 const logins = new Logins({ getWorkspace: () => workspace(ws.home), logger, onEvent: onAgentEvent });
 const runSubscribers = new Map(); // runId or loginId -> Set of CLI sockets that started it (see onClientLine)
 const AGENT_COMMANDS = new Set(['agent.list', 'agent.start', 'agent.stop', 'agent.login', 'agent.loginCode', 'agent.loginCancel', 'mod.approve',
@@ -321,6 +326,7 @@ function onExtensionRequest(msg) {
 
 let server = null;
 let serverIno = null;
+let ownServer = null;
 let secondaryTimer = null;
 let lastSecondaryProbe = 0;
 const pending = new Map(); // extension request id -> { sock, clientId, timer, cmd }
@@ -336,13 +342,13 @@ function probe(sockPath) {
   });
 }
 
-function listen() {
+function listen(sockPath = ws.sock) {
   return new Promise((resolve, reject) => {
     const srv = net.createServer(onClient);
     srv.once('error', reject);
     const oldMask = process.umask(0o177); // socket created as 0600
     try {
-      srv.listen(ws.sock, () => {
+      srv.listen(sockPath, () => {
         srv.removeListener('error', reject);
         srv.on('error', (e) => logger.error(`socket server error: ${e.message}`));
         resolve(srv);
@@ -389,7 +395,7 @@ function stopSecondaryChecks() {
 function startSecondaryChecks() {
   if (secondaryTimer) return;
   state.role = 'secondary';
-  logger.info(`another helper is already serving ${ws.sock} (another Chrome profile?); this one only syncs mods for its profile`);
+  logger.info(`another helper is already serving ${ws.sock} (another browser or Chrome profile); this one serves ${ws.ownSock} for its own browser's agent runs and \`webmods --browser\``);
   let busy = false;
   secondaryTimer = setInterval(async () => {
     if (busy || state.shuttingDown) return;
@@ -446,6 +452,7 @@ function helperInfo() {
     node: process.version,
     role: state.role,
     home: ws.home,
+    sock: ws.ownSock,
     modsDir: ws.modsDir,
     startedAt: state.startedAt,
     connected: state.stdoutOpen,
@@ -547,7 +554,7 @@ function shutdown(reason, code = 0) {
   closeWatchers();
   for (const [, p] of pending) {
     clearTimeout(p.timer);
-    reply(p.sock, { id: p.clientId, ok: false, error: 'Chrome disconnected from the helper before answering' });
+    reply(p.sock, { id: p.clientId, ok: false, error: 'the browser disconnected from the helper before answering' });
   }
   pending.clear();
   // Agents die with the helper (SIGTERM, SIGKILL after a moment); their final events still go out.
@@ -558,6 +565,10 @@ function shutdown(reason, code = 0) {
     try {
       if (serverIno === null || fs.statSync(ws.sock).ino === serverIno) fs.unlinkSync(ws.sock);
     } catch { /* already gone */ }
+  }
+  if (ownServer) {
+    try { ownServer.close(); } catch { /* ignore */ }
+    try { fs.unlinkSync(ws.ownSock); } catch { /* already gone */ }
   }
   agentsGone.then(() => setTimeout(() => process.exit(code), 50));
 }
@@ -572,6 +583,14 @@ process.on('unhandledRejection', (e) => logger.error('unhandled rejection:', e &
   // Mods go out immediately on connect (and again after the extension's hello).
   syncMods('connect', true);
   pollTimer = setInterval(poll, POLL_MS);
+  for (const s of removeStaleSockets(ws.home)) logger.info(`removed stale socket ${s}`);
+  try {
+    try { fs.unlinkSync(ws.ownSock); } catch { /* none */ }
+    ownServer = await listen(ws.ownSock);
+    fs.chmodSync(ws.ownSock, 0o600);
+  } catch (e) {
+    logger.error(`can't listen on ${ws.ownSock}: ${e.message}`);
+  }
   const role = await becomePrimary();
   if (role === 'busy' && !state.shuttingDown) startSecondaryChecks();
   else if (role === 'error') state.role = 'no-socket';

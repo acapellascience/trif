@@ -11,6 +11,7 @@ const { request, streamRun, streamLogin, HelperError } = require('./lib/client')
 const { ALL_SITES, scanMods, planModsMessage, isIgnoredName } = require('./lib/mods');
 const { COMMANDS, mainHelp, commandHelp } = require('./lib/help');
 const { loadHeld } = require('./lib/held');
+const { pickHelper, listHelpers, describeHelper } = require('./lib/helpers');
 
 // Inside a side-panel agent run (the helper set WEBMODS_RUN_TOKEN) these are the user's alone.
 const NOT_IN_RUNS = new Set(['setup', 'agent', 'approve']);
@@ -150,13 +151,30 @@ function tabArgs(opts) {
   return a;
 }
 
+/**
+ * Which helper to talk to: `--browser <name|pid>` picks one of the connected browsers; inside an agent
+ * run, the helper that started it (WEBMODS_SOCK); otherwise the default helper.sock (lib/helpers.js).
+ */
+async function resolveSock(ws, opts) {
+  if (opts['--browser'] !== undefined) {
+    if (process.env.WEBMODS_RUN_TOKEN) {
+      throw new UsageError('--browser can\'t be used inside a side-panel agent run; it works on the browser it was started from');
+    }
+    return pickHelper(ws.home, opts['--browser']);
+  }
+  if (process.env.WEBMODS_SOCK && opts['--home'] === undefined) return process.env.WEBMODS_SOCK;
+  return ws.sock;
+}
+
 function makeCtx(opts) {
   const ws = P.workspace(opts['--home']);
-  const call = (cmd, args = {}, timeoutMs) => {
+  let sockP = null;
+  const sock = () => sockP || (sockP = resolveSock(ws, opts));
+  const call = async (cmd, args = {}, timeoutMs) => {
     const t = timeoutMs || (typeof args.timeout === 'number' ? args.timeout + 8000 : 40000);
-    return request(ws.sock, cmd, args, t);
+    return request(await sock(), cmd, args, t);
   };
-  return { ws, opts, call, json: !!opts['--json'] };
+  return { ws, opts, call, sock, json: !!opts['--json'] };
 }
 
 function printJson(v) { out(JSON.stringify(v === undefined ? null : v, null, 2)); }
@@ -206,7 +224,9 @@ const handlers = {
       if (e.kind === 'no-helper') throw e;
       stErr = e.message;
     }
-    if (ctx.json) return printJson({ helper: info, extension: st, error: stErr });
+    // Other connected browsers (each has its own helper); a run only sees its own.
+    const others = process.env.WEBMODS_RUN_TOKEN ? [] : (await listHelpers(ctx.ws.home)).filter((h) => h.pid !== info.pid);
+    if (ctx.json) return printJson({ helper: info, extension: st, error: stErr, otherBrowsers: others.map((h) => ({ pid: h.pid, sock: h.sock, extension: h.info.extension })) });
     const lines = [];
     lines.push(`helper        running (pid ${info.pid}, v${info.helper}${info.role && info.role !== 'primary' ? `, ${info.role}` : ''})`);
     const ext = st || info.extension;
@@ -222,6 +242,7 @@ const handlers = {
           : `user scripts  OFF: mods can't run. Fix: open chrome://extensions/?id=${P.EXTENSION_ID} and turn on "Allow User Scripts"`);
     }
     if (stErr) lines.push(`status        the extension didn't answer: ${stErr}`);
+    if (others.length) lines.push(`also          ${others.map(describeHelper).join(', ')}; pick one with --browser <name|pid>`);
     const registered = new Map(((st && st.mods) || []).map((m) => [m.id, !!m.registered]));
     const off = new Set(((st && st.mods) || []).filter((m) => m.enabled === false).map((m) => m.id));
     const offSites = new Map(((st && st.mods) || []).filter((m) => m.offSites).map((m) => [m.id, m.offSites]));
@@ -621,17 +642,18 @@ async function agentRun(ctx, pos) {
   args.site = require('./lib/agents').hostOf(args.url);
   if (!args.site) throw new UsageError(`"${args.url}" doesn't look like a page URL`);
 
+  const sock = await ctx.sock();
   let runId = null;
   let interrupts = 0;
   const onSigint = () => {
     if (++interrupts > 1 || !runId) process.exit(130);
     process.stderr.write('stopping the agent (Ctrl-C again to quit now)…\n');
-    request(ctx.ws.sock, 'agent.stop', { runId }, 5000).catch(() => {});
+    request(sock, 'agent.stop', { runId }, 5000).catch(() => {});
   };
   process.on('SIGINT', onSigint);
   let done;
   try {
-    done = await streamRun(ctx.ws.sock, args, {
+    done = await streamRun(sock, args, {
       onStart: (r) => {
         runId = r.runId;
         if (ctx.json) out(JSON.stringify({ runId }));
@@ -662,12 +684,13 @@ async function agentLogin(ctx) {
   const args = {};
   if (ctx.opts['--agent']) args.agent = ctx.opts['--agent'];
   const lines = stdinLines();
+  const sock = await ctx.sock();
   let loginId = null;
   let interrupts = 0;
   const onSigint = () => {
     if (++interrupts > 1 || !loginId) process.exit(130);
     process.stderr.write('\ncancelling the login (Ctrl-C again to quit now)…\n');
-    request(ctx.ws.sock, 'agent.loginCancel', { loginId }, 5000).catch(() => {});
+    request(sock, 'agent.loginCancel', { loginId }, 5000).catch(() => {});
   };
   const askCode = async (send) => {
     const code = await lines.next();
@@ -682,7 +705,7 @@ async function agentLogin(ctx) {
   process.on('SIGINT', onSigint);
   let done;
   try {
-    done = await streamLogin(ctx.ws.sock, args, {
+    done = await streamLogin(sock, args, {
       onStart: (r) => {
         loginId = r.loginId;
         if (ctx.json) out(JSON.stringify({ loginId }));

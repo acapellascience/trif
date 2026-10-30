@@ -53,6 +53,9 @@ finds it (or run `npx webmods setup --browser firefox`). Then open the signed `w
 sent in Firefox to install the add-on, click the WebMods toolbar button to open the sidebar, and click
 **Allow user scripts**. Restart Firefox if it was open during setup.
 
+Chrome and Firefox can both be open: they share your mods, and each sidebar or side panel chat works
+on its own browser. Switching a mod off is per browser.
+
 ## Using it
 
 - Go to a site, open the side panel, and describe the change you want. The agent looks at the page,

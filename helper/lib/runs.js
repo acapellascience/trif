@@ -187,7 +187,9 @@ class Runs {
     this._log(run, { webmods: 'start', runId: run.id, agent: run.agent, site: run.site, url: run.url, tabId: run.tabId, sessionId: run.sessionId, model: run.model, prompt: run.prompt, time: run.startedAt });
 
     if (run.stopped) return this._finish(run, { code: null, signal: null }); // stopped before it started
-    const env = { ...agents.agentEnv(ws), WEBMODS_RUN_TOKEN: run.token };
+    // WEBMODS_SOCK: this helper's own socket, so the run reaches this browser even when another
+    // browser's helper owns helper.sock (lib/helpers.js).
+    const env = { ...agents.agentEnv(ws), WEBMODS_RUN_TOKEN: run.token, ...(ws.ownSock ? { WEBMODS_SOCK: ws.ownSock } : {}) };
     const found = adapter.detect({ dirs: agents.searchDirs(ws), env, version: false });
     if (!found.available) {
       this._emit(run, { kind: 'error', message: adapter.missing });

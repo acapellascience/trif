@@ -6,7 +6,7 @@ const P = require('./paths');
 
 const COMMANDS = {
   setup: {
-    usage: 'webmods setup [--browser chrome|chromium|brave|edge|arc|all] [--home DIR] [--copy|--link] [--no-link] [--no-examples]',
+    usage: 'webmods setup [--browser chrome|chromium|brave|edge|arc|firefox|all] [--home DIR] [--copy|--link] [--no-link] [--no-examples]',
     summary: 'install the workspace, native messaging host and CLI link (safe to re-run)',
     details: `First time: npx webmods setup   (needs Node 18 or newer).
 Creates the workspace (sites/, screenshots/, bin/), installs the WebMods files the wrappers run,
@@ -33,7 +33,9 @@ Run it again after upgrading WebMods, moving the repo or upgrading Node.`,
   status: {
     usage: 'webmods status',
     summary: 'connection, "Allow User Scripts" switch, mods and whether each is registered or off',
-    details: `Asks the helper and the extension how things stand. If a mod you just saved is missing or
+    details: `Asks the helper and the extension how things stand. When several browsers are connected (each runs
+its own helper), an "also" line lists the others; --browser <name|pid> picks one for any command.
+If a mod you just saved is missing or
 "not registered", check its header and run webmods doctor. "off" means the user switched the mod off
 (side panel switch, or webmods disable): it isn't running, and its file is unchanged.`,
     examples: ['webmods status', 'webmods status --json'],
@@ -248,11 +250,14 @@ Usage: webmods <command> [options]`);
   }
   lines.push(`
 TAB picks the tab: --tab <id> (from webmods tabs) or --url <substring|/regex/>.
-Without one, commands use the active tab of the last-focused Chrome window.
+Without one, commands use the active tab of the last-focused browser window.
+--browser <name|pid> sends the command to another connected browser (e.g. --browser firefox; see
+webmods status). Without it: the browser that connected first, or, inside a side-panel run, the
+browser the run was started from.
 --json prints any command's raw result as JSON.
 
 Exit codes: 0 ok, 1 the command failed, 2 the helper isn't running
-(open Chrome; if Chrome is open, run webmods doctor).
+(open your browser; if it's open, run webmods doctor).
 
 Typical loop:
   webmods new example.com hide-banner        # prints the file path; edit it

@@ -75,10 +75,13 @@ class FakeExtension {
 
   get sock() { return path.join(this.home, 'helper.sock'); }
 
+  // This host's own socket, served whether or not it owns helper.sock (helper/lib/helpers.js).
+  get ownSock() { return path.join(this.home, `helper-${this.child.pid}.sock`); }
+
   send(msg) { this.child.stdin.write(encode(msg)); }
 
-  hello({ userScripts = true, version = '0.1.0', chrome = '140.0.0.0' } = {}) {
-    this.send({ type: 'hello', version, userScripts, chrome });
+  hello({ userScripts = true, version = '0.1.0', chrome = '140.0.0.0', browser } = {}) {
+    this.send({ type: 'hello', version, userScripts, chrome, ...(browser ? { browser } : {}) });
   }
 
   _onMessage(msg) {
@@ -126,10 +129,10 @@ class FakeExtension {
     return null;
   }
 
-  async waitForSocket(timeout = 5000) {
+  async waitForSocket(timeout = 5000, sock = this.sock) {
     const net = require('net');
     await waitFor(() => new Promise((resolve) => {
-      const s = net.connect(this.sock);
+      const s = net.connect(sock);
       s.on('connect', () => { s.destroy(); resolve(true); });
       s.on('error', () => resolve(false));
     }), { timeout, message: 'helper socket' });

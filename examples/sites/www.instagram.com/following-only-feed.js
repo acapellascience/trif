@@ -1,5 +1,5 @@
 // ==WebMod==
-// @name        Following-only feed
+// @name        Following-Only Feed
 // @description Removes suggested posts, suggested accounts and ads from the Instagram home feed, so it only shows people you follow
 // @match       https://www.instagram.com/*
 // @run-at      document-start

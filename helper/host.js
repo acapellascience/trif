@@ -24,7 +24,7 @@ const { Runs } = require('./lib/runs');
 const { Logins } = require('./lib/logins');
 const agents = require('./lib/agents');
 const { updateHeld, approveHeld } = require('./lib/held');
-const { startOffIds } = require('./lib/preinstalled');
+const { startOffIds, startSitesOn } = require('./lib/preinstalled');
 const { readInstructions, writeInstructions, instructionsFile, MAX_LENGTH } = require('./lib/instructions');
 const { ownSock, removeStaleSockets } = require('./lib/helpers');
 const { loadOrigins, recordOrigins, activeRuns } = require('./lib/origins');
@@ -164,7 +164,10 @@ function syncMods(reason, force) {
     const withOrigin = o ? { ...out, origin: { by: o.by, browser: o.browser } } : out;
     return startOff.has(m.id) ? { ...withOrigin, startOff: true } : withOrigin;
   });
-  const signature = sent.map((m) => `${m.id}:${m.hash}${m.held ? ':held' : ''}${m.startOff ? ':off' : ''}${m.origin ? `:${m.origin.by}` : ''}`).join('|');
+  // Sites WebMods starts on for (preinstalled.json): each browser turns each one on the first time it sees it.
+  const sitesOn = startSitesOn(ws.home);
+  const signature = sent.map((m) => `${m.id}:${m.hash}${m.held ? ':held' : ''}${m.startOff ? ':off' : ''}${m.origin ? `:${m.origin.by}` : ''}`).join('|') +
+    `|sites:${sitesOn.join(',')}`;
   const errors = [...problems, ...plan.errors];
   const errorsChanged = JSON.stringify(errors) !== JSON.stringify(state.modErrors);
   state.mods = mods;
@@ -177,7 +180,7 @@ function syncMods(reason, force) {
   if (!force && signature === state.lastSignature) return;
   state.lastSignature = signature;
   try {
-    sendToExtension({ type: 'mods', mods: sent });
+    sendToExtension({ type: 'mods', mods: sent, sitesOn });
     const nHeld = sent.filter((m) => m.held).length;
     logger.info(`sent ${sent.length} mod(s) to the extension${nHeld ? ` (${nHeld} held)` : ''} (${reason})`);
   } catch (e) {

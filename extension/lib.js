@@ -359,6 +359,24 @@ export function sitesInUse(mods, disabled, chats) {
 }
 
 /**
+ * Sites setup said to start on (the helper's mods message `sitesOn`), applied once per browser: each
+ * one not in `offered` is turned on and joins `offered`, so a site the user later turns off stays off.
+ * Returns {sitesOn, offered, changed}.
+ */
+export function applyStartSites(sitesOn, offered, start) {
+  const on = new Set(sitesOn || []);
+  const seen = new Set(offered || []);
+  let changed = false;
+  for (const site of normalizeSitesOn(start)) {
+    if (seen.has(site)) continue;
+    seen.add(site);
+    on.add(site);
+    changed = true;
+  }
+  return { sitesOn: [...on].sort(), offered: [...seen].sort(), changed };
+}
+
+/**
  * The mod limited to the sites in `sitesOn`: each @match narrowed to those sites (any-host patterns and
  * <all_urls> become one pair per site; patterns for other sites go), or null when nothing is left. The
  * sites used go into its hash, so it re-registers when they change. file:// patterns go too.

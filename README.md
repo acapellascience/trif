@@ -82,15 +82,21 @@ on its own browser. Switching a mod off is per browser.
 - Commands: `/model sonnet` (or `opus`, `haiku`, `default`) switches the model, `/clear` starts a new
   chat, `/compact` shrinks a long conversation, `/context` shows how full it is, `/help` lists these.
 
-### Mods that come with it (switched off)
+### Mods that come with it
 
-Turn these on with their switches in the side panel, on the site they're for:
+WebMods starts on for Google, X, Amazon and Instagram, with these mods. Each has a switch in the side
+panel on its site; the ones marked *(off)* wait for you to switch them on.
 
-- **Plain X** (x.com): Home is just the people you follow, newest first, with no ads or suggestions, and
-  a **Filters** menu (reposts, quotes, replies, links, videos, images, non-mutuals…). It also hides the
-  trends column, tidies post pages, and turns Explore into a plain search field.
+- **Google:** Hide AI in Results, Hide AI Mode and Gemini Promo, Results Only (no extra sections), Hide
+  Sponsored Results.
+- **X:** **Plain X**: Home is just the people you follow, newest first, with no ads or suggestions, and a
+  **Filters** menu (reposts, quotes, replies, links, videos, images, non-mutuals…); it also hides the
+  trends column, tidies post pages, and turns Explore into a plain search field. Punk Fonts *(off)* and
+  Rainbow Rave *(off)*, for fun.
+- **Amazon:** Simple Home (just a search box) and Simple Shopping (results show only picture, price and
+  stars; no sponsored items, ads or recommendations).
 - **Instagram:** Following-only feed (no suggested posts or ads), Hide reposts, Hide AI content, and
-  Desaturate (colours down to 35%).
+  Desaturate *(off)*: colours down to 35%.
 
 ## If something's wrong
 

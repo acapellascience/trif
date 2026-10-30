@@ -91,7 +91,7 @@ stay under 1 MB (the helper rejects bigger mods with an error logged to stderr, 
 
 | message | meaning |
 |---|---|
-| `{type:"mods", mods:[Mod…]}` | The full set of mods. Sent on connect and after every change in the mods folder (debounced 150 ms). The extension makes `chrome.userScripts` match it exactly (register new, update changed, unregister missing). |
+| `{type:"mods", mods:[Mod…], sitesOn:[site…]}` | The full set of mods, and the sites setup said to start on (`preinstalled.json`; each browser turns each on once, see "Sites WebMods is on for"). Sent on connect and after every change in the mods folder (debounced 150 ms). The extension makes `chrome.userScripts` match it exactly (register new, update changed, unregister missing). |
 | `{type:"request", id, cmd, args}` | A page command from the CLI (table below). The extension answers with a `response`. |
 
 `Mod = { id, site, file, name, description, matches:[…], excludes:[…], runAt:"document_start"|"document_end"|"document_idle", risk:{tier, why}|null, code, hash, held?, startOff?, origin?:{by, browser} }`
@@ -311,12 +311,14 @@ Re-running setup is safe; run it again to update.
   - `--copy` / `--link` force either mode.
   AGENTS.md, CLAUDE.md, the mod template and the examples always come from the files the wrappers run.
 - Preinstalled mods: setup copies the examples listed in `PREINSTALLED` (helper/lib/preinstalled.js:
-  Plain X and the Instagram mods) into `sites/`, **switched off**. `~/.webmods/preinstalled.json` =
-  `{offered, startOff}`: `offered` keeps a later setup from bringing back one the user deleted (an
-  existing file is never overwritten); `startOff` lists the ones setup copied. The helper sends those
-  mods with `startOff: true`; the extension switches each off (`disabled`) the first time it sees it and
-  remembers that in chrome.storage.local `startedOff`, so afterwards the switch is the user's.
-  `--no-examples` skips all this.
+  Google, X, Amazon and Instagram mods, each marked on or off) into `sites/`, and offers `SITES_ON`
+  (google.com, x.com, amazon.com, instagram.com). `~/.webmods/preinstalled.json` =
+  `{offered, startOff, sitesOn}`: `offered` keeps a later setup from bringing back one the user deleted
+  (an existing file is never overwritten); `startOff` lists the copied ones that start off. The helper
+  sends those mods with `startOff: true`; the extension switches each off (`disabled`) the first time it
+  sees it and remembers that in chrome.storage.local `startedOff`, so afterwards the switch is the user's.
+  `sitesOn` goes with every mods message; the extension turns each site on the first time it sees it
+  and remembers that in `sitesOffered` (`applyStartSites`). `--no-examples` skips all this.
 - Wrapper: `~/.webmods/bin/webmods-host` = `#!/bin/sh\nexec "<absolute node path>" "<app>/helper/host.js" "$@"`
   where `<app>` is `~/.webmods/app` (copy) or the checkout (link)
   (Chrome launches hosts with a minimal PATH, so the node path is absolute).

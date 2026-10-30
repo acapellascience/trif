@@ -455,6 +455,9 @@
       background: var(--dm-bg, #000); display: flex; flex-direction: column; align-items: center; justify-content: center;
       gap: 28px; padding: 0 24px 18vh; box-sizing: border-box; }
     html:not([data-dm-explore]) .dm-search { display: none !important; }
+    /* Under a dialog opened over Explore: below X's app layer (z-index 0, which holds #layers), so the
+       dialog and its mask cover it. X's own Explore page is hidden, so nothing else covers it. */
+    html[data-dm-under-dialog] .dm-search { z-index: -1; }
     .dm-search .logo { font: 400 88px/0.7 -apple-system, system-ui, sans-serif; color: var(--dm-fg); padding-bottom: 12px; }
     .dm-search form { width: 100%; max-width: 584px; position: relative; }
     .dm-search input { width: 100%; box-sizing: border-box; height: 48px; padding: 0 20px 0 48px; border-radius: 24px;
@@ -723,9 +726,15 @@
   const SEARCH_ICON = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M10.25 3.75c-3.59 0-6.5 2.91-6.5 6.5s2.91 6.5 6.5 6.5c1.795 0 3.419-.726 4.596-1.904 1.178-1.177 1.904-2.801 1.904-4.596 0-3.59-2.91-6.5-6.5-6.5zm-8.5 6.5c0-4.694 3.806-8.5 8.5-8.5s8.5 3.806 8.5 8.5c0 1.986-.682 3.815-1.824 5.262l4.781 4.781-1.414 1.414-4.781-4.781c-1.447 1.142-3.276 1.824-5.262 1.824-4.694 0-8.5-3.806-8.5-8.5z"/></svg>';
   const X_LOGO = '<div class="logo" aria-hidden="true">x</div>';   // Plain X's logo
   // A layer of its own over the main area, so it shows at once without waiting for X's page.
+  // Routes X opens as a dialog over the current page (compose, media viewer). X keeps the page behind
+  // in history.state.state.previousPath; while one is over Explore, keep the search page under it.
+  const OVERLAY_ROUTE = /^\/(compose\/|i\/display|i\/keyboard_shortcuts|[^/]+\/status\/\d+\/(photo|video)\/)/;
+  const isExplore = (path) => /^\/explore(\/|$)/.test(path);
   const showSearch = () => {
-    const explore = /^\/explore(\/|$)/.test(location.pathname);
+    const under = OVERLAY_ROUTE.test(location.pathname) && isExplore(String(history.state?.state?.previousPath || ''));
+    const explore = isExplore(location.pathname) || under;
     document.documentElement.toggleAttribute('data-dm-explore', explore);
+    document.documentElement.toggleAttribute('data-dm-under-dialog', under);
     let box = document.querySelector('.dm-search');
     if (!explore) { box?.remove(); return; }
     const nav = document.querySelector('header[role=banner]');

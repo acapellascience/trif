@@ -266,8 +266,11 @@ function setup(opts = {}) {
   }
   if (!opts.noExamples) {
     const examplesDir = process.env.WEBMODS_EXAMPLES_DIR ? path.resolve(process.env.WEBMODS_EXAMPLES_DIR) : path.join(root, 'examples', 'sites');
-    const added = preinstallMods(home, ws.modsDir, examplesDir);
-    if (added.length) say(`mods          preinstalled ${added.join(', ')}: switched off until you turn them on in the side panel`);
+    const { added, on, sites } = preinstallMods(home, ws.modsDir, examplesDir);
+    const off = added.filter((id) => !on.includes(id));
+    if (on.length) say(`mods          preinstalled, on: ${on.join(', ')}`);
+    if (off.length) say(`mods          preinstalled, off until you switch them on in the side panel: ${off.join(', ')}`);
+    if (sites.length) say(`sites         WebMods starts on for ${sites.join(', ')} (off everywhere else until you turn it on there)`);
   }
   const claudeSrc = path.join(helperDir, 'workspace', 'CLAUDE.md');
   const claude = fs.existsSync(claudeSrc) ? fs.readFileSync(claudeSrc, 'utf8') : '@AGENTS.md\n@instructions.md\n';

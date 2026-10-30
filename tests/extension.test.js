@@ -1494,3 +1494,29 @@ test('background: updating from before sites had to be turned on keeps WebMods o
     assert.deepStrictEqual(bg.store.sitesOn, ['bbc.co.uk', 'x.com']);
   } finally { bg.restore(); }
 });
+
+test('applyStartSites turns each offered site on once', () => {
+  let r = lib.applyStartSites(['x.com'], [], ['www.google.com', 'x.com']);
+  assert.deepStrictEqual(r, { sitesOn: ['google.com', 'x.com'], offered: ['google.com', 'x.com'], changed: true });
+  // The user turned google.com off: offered again, it stays off.
+  r = lib.applyStartSites(['x.com'], r.offered, ['google.com', 'x.com']);
+  assert.deepStrictEqual(r, { sitesOn: ['x.com'], offered: ['google.com', 'x.com'], changed: false });
+  assert.strictEqual(lib.applyStartSites([], [], undefined).changed, false);
+});
+
+test('background: the helper\'s start sites are turned on once, and mods for them registered', async () => {
+  const mods = [mod('www.google.com/a', { matches: ['*://www.google.com/*'] })];
+  const bg = await loadBackground({ storage: { sitesOn: [] } });
+  try {
+    bg.native.emit({ type: 'mods', mods, sitesOn: ['google.com', 'x.com'] });
+    await settle(20);
+    assert.deepStrictEqual(bg.store.sitesOn, ['google.com', 'x.com']);
+    assert.deepStrictEqual(bg.store.sitesOffered, ['google.com', 'x.com']);
+    assert.deepStrictEqual(scriptIds(bg), [lib.RUNTIME_ID, 'www.google.com/a']);
+    const panel = bg.connectPanel();
+    await panel.ask({ type: 'site.set', site: 'google.com', on: false });
+    bg.native.emit({ type: 'mods', mods, sitesOn: ['google.com', 'x.com'] });
+    await settle(20);
+    assert.deepStrictEqual(bg.store.sitesOn, ['x.com'], 'turned off by the user: stays off');
+  } finally { bg.restore(); }
+});

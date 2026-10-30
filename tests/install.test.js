@@ -10,7 +10,7 @@ const { execFile } = require('child_process');
 const { runCli, tempDir, testEnv, REPO } = require('./fake-extension');
 const P = require('../helper/lib/paths');
 const { installApp, chooseMode, cleanPath } = require('../helper/lib/setup');
-const { preinstallMods, loadPreinstalled } = require('../helper/lib/preinstalled');
+const { preinstallMods, loadPreinstalled, PREINSTALLED, SITES_ON } = require('../helper/lib/preinstalled');
 const { checkWrapperScript } = require('../helper/lib/doctor');
 const { browserTable } = require('../helper/lib/browsers');
 
@@ -276,37 +276,45 @@ test('doctor: which host.js the wrapper may run', () => {
   assert.match(checkWrapperScript('/somewhere/else/helper/host.js', ws).title, /not this copy/);
 });
 
-test('preinstalled mods: Plain X and the Instagram mods once, marked to start off; never over the user\'s file, never back after deleting it', async () => {
+test('preinstalled mods: each once, switched on or off as listed; the start sites once; never over the user\'s file, never back after deleting it', async () => {
   const home = tempDir();
   const sites = path.join(home, 'sites');
   const examples = path.join(REPO, 'examples', 'sites');
   const plainx = path.join(sites, 'x.com', 'plain-x.js');
-  const ids = ['x.com/plain-x', 'www.instagram.com/following-only-feed', 'www.instagram.com/hide-reposts', 'www.instagram.com/hide-ai-content', 'www.instagram.com/desaturate'];
-  assert.deepStrictEqual(preinstallMods(home, sites, examples), ids);
+  const ids = PREINSTALLED.map((p) => p.id);
+  const off = PREINSTALLED.filter((p) => !p.on).map((p) => p.id);
+  assert.deepStrictEqual(off, ['x.com/punk-fonts', 'x.com/rainbow-rave', 'www.instagram.com/desaturate']);
+  assert.deepStrictEqual(SITES_ON, ['google.com', 'x.com', 'amazon.com', 'instagram.com']);
+  for (const id of ids) assert.ok(fs.existsSync(path.join(examples, `${id}.js`)), `examples has ${id}`);
+  let r = preinstallMods(home, sites, examples);
+  assert.deepStrictEqual(r, { added: ids, on: ids.filter((id) => !off.includes(id)), sites: SITES_ON });
   for (const id of ids) assert.ok(fs.existsSync(path.join(sites, `${id}.js`)), id);
   assert.strictEqual(fs.readFileSync(plainx, 'utf8'), fs.readFileSync(path.join(examples, 'x.com', 'plain-x.js'), 'utf8'));
-  assert.deepStrictEqual(loadPreinstalled(home), { offered: ids, startOff: ids });
+  assert.deepStrictEqual(loadPreinstalled(home), { offered: ids, startOff: off, sitesOn: SITES_ON });
   fs.unlinkSync(plainx);
-  assert.deepStrictEqual(preinstallMods(home, sites, examples), [], 'deleted: not brought back');
+  assert.deepStrictEqual(preinstallMods(home, sites, examples), { added: [], on: [], sites: [] }, 'deleted: not brought back');
   assert.strictEqual(fs.existsSync(plainx), false);
 
   const home2 = tempDir();
-  const own = path.join(home2, 'sites', 'x.com', 'plain-x.js');
+  const own = path.join(home2, 'sites', 'x.com', 'rainbow-rave.js');
   fs.mkdirSync(path.dirname(own), { recursive: true });
   fs.writeFileSync(own, '// mine');
-  assert.deepStrictEqual(preinstallMods(home2, path.join(home2, 'sites'), examples), ids.slice(1));
+  r = preinstallMods(home2, path.join(home2, 'sites'), examples);
+  assert.deepStrictEqual(r.added, ids.filter((id) => id !== 'x.com/rainbow-rave'));
   assert.strictEqual(fs.readFileSync(own, 'utf8'), '// mine');
-  assert.deepStrictEqual(loadPreinstalled(home2), { offered: ids, startOff: ids.slice(1) }, 'the user\'s own file isn\'t switched off');
+  assert.deepStrictEqual(loadPreinstalled(home2).startOff, ['x.com/punk-fonts', 'www.instagram.com/desaturate'], 'the user\'s own file isn\'t switched off');
 
   // Through setup, and --no-examples.
   const home3 = tempDir();
-  let r = await runCli(['setup', '--native-dir', path.join(home3, 'native'), '--no-link'], { home: home3 });
-  assert.strictEqual(r.code, 0, r.stderr);
-  assert.match(r.stdout, /preinstalled x\.com\/plain-x, www\.instagram\.com\/following-only-feed.*switched off/);
+  let res = await runCli(['setup', '--native-dir', path.join(home3, 'native'), '--no-link'], { home: home3 });
+  assert.strictEqual(res.code, 0, res.stderr);
+  assert.match(res.stdout, /preinstalled, on: www\.google\.com\/hide-ai-in-results, /);
+  assert.match(res.stdout, /preinstalled, off until you switch them on in the side panel: x\.com\/punk-fonts, x\.com\/rainbow-rave, www\.instagram\.com\/desaturate/);
+  assert.match(res.stdout, /WebMods starts on for google\.com, x\.com, amazon\.com, instagram\.com/);
   assert.ok(fs.existsSync(path.join(home3, 'sites', 'x.com', 'plain-x.js')));
   const home4 = tempDir();
-  r = await runCli(['setup', '--native-dir', path.join(home4, 'native'), '--no-link', '--no-examples'], { home: home4 });
-  assert.strictEqual(r.code, 0, r.stderr);
+  res = await runCli(['setup', '--native-dir', path.join(home4, 'native'), '--no-link', '--no-examples'], { home: home4 });
+  assert.strictEqual(res.code, 0, res.stderr);
   assert.strictEqual(fs.existsSync(path.join(home4, 'sites', 'x.com')), false);
 });
 

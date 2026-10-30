@@ -383,3 +383,13 @@ test('host: never writes anything but frames to stdout, even with odd input', as
   assert.deepEqual(ext.badFrames, []);
   assert.equal(ext.child.exitCode, null, 'still running');
 });
+
+test('mods messages carry the sites preinstalled.json says to start on', async () => {
+  const home = tempDir();
+  writeMod(home, 'www.google.com', 'a.js', '// ==WebMod==\n// @name A\n// ==/WebMod==\n');
+  fs.writeFileSync(path.join(home, 'preinstalled.json'), JSON.stringify({ offered: [], startOff: [], sitesOn: ['google.com', 'x.com'] }));
+  const ext = new FakeExtension({ home });
+  cleanups.push(() => ext.close());
+  const msg = await ext.next((m) => m.type === 'mods');
+  assert.deepStrictEqual(msg.sitesOn, ['google.com', 'x.com']);
+});

@@ -7,7 +7,7 @@ import {
   normalizeUrl, normalizeSite, hostMatchesSite, buildRunCode, buildPollCode, parseRunEnvelope,
   firstInjectionResult, withTimeout, filterRequests, nextBackoff, chromeVersion, toolLine,
   normalizeDisabled, modAppliesTo, urlInScope, modInScope, applyStartOff,
-  normalizeOffSites, offSiteName, offOnSite, hostInScope, withOffSites, scopeFor, normalizeSitesOn, siteOnFor, sitesInUse, limitToSites, switchSite, fromOtherBrowser, timedUserScripts,
+  normalizeOffSites, offSiteName, offOnSite, hostInScope, withOffSites, scopeFor, normalizeSitesOn, siteOnFor, sitesInUse, limitToSites, applyStartSites, switchSite, fromOtherBrowser, timedUserScripts,
 } from './lib.js';
 import { runtimeCode } from './runtime.js';
 
@@ -31,6 +31,7 @@ const state = {
   disabled: {},          // mod id → true for mods the user switched off (persisted as `disabled`)
   offSites: {},          // mod id → sites it's switched off on, for mods on several sites (persisted)
   sitesOn: [],           // registrable domains WebMods is on for; off everywhere else (persisted)
+  sitesOffered: [],      // sites the helper said to start on that were turned on once already (persisted)
   startedOff: {},        // mod id → true for mods already switched off once: preinstalled, or from another browser (persisted)
   installId: null,       // random id of this install (persisted): the helper records it as the origin of mods made here
   applied: {},           // script id → hash last registered (persisted)
@@ -55,6 +56,7 @@ const ready = chrome.storage.local.get(null).then(async (s) => {
   state.disabled = normalizeDisabled(s.disabled);
   state.offSites = normalizeOffSites(s.offSites);
   state.startedOff = normalizeDisabled(s.startedOff);
+  state.sitesOffered = normalizeSitesOn(s.sitesOffered);
   if (Array.isArray(s.sitesOn)) state.sitesOn = normalizeSitesOn(s.sitesOn);
   else {
     // First start since WebMods has to be turned on per site: keep it on where it's already in use.
@@ -240,6 +242,14 @@ async function onHelperMessage(msg) {
       state.disabled = off.disabled;
       state.startedOff = off.startedOff;
       await chrome.storage.local.set({ disabled: state.disabled, startedOff: state.startedOff });
+    }
+    // Sites setup starts WebMods on for (the preinstalled mods' sites), each turned on once.
+    const sites = applyStartSites(state.sitesOn, state.sitesOffered, msg.sitesOn);
+    if (sites.changed) {
+      state.sitesOn = sites.sitesOn;
+      state.sitesOffered = sites.offered;
+      await chrome.storage.local.set({ sitesOn: state.sitesOn, sitesOffered: state.sitesOffered });
+      notifyPanels();
     }
     await chrome.storage.local.set({ mods: state.mods });
     reportApplied(await serial(applyMods));

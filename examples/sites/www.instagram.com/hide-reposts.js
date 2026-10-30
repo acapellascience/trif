@@ -1,5 +1,5 @@
 // ==WebMod==
-// @name        Hide reposts
+// @name        Hide Reposts
 // @description Removes reposts (posts shown because someone you follow reposted them) from the Instagram home feed
 // @match       https://www.instagram.com/*
 // @run-at      document-start

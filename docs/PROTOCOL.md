@@ -63,6 +63,7 @@ patch `fetch`/`XMLHttpRequest`, read React state, etc.). An optional header sets
 // @match       https://x.com/*
 // @match       https://twitter.com/*
 // @run-at      document-start
+// @risk        1 hides ads and promoted posts
 // ==/WebMod==
 ```
 
@@ -71,6 +72,10 @@ patch `fetch`/`XMLHttpRequest`, read React state, etc.). An optional header sets
 - `@exclude` (repeatable): exclude match patterns. Default none.
 - `@run-at`: `document-start` (default), `document-end` or `document-idle`.
 - `@name`: default is the file name without `.js`. `@description`: default empty.
+- `@risk`: `0`, `1` or `2`, then optionally why: how noticeable the mod is to the site (0 render-only,
+  1 noticeable by the page's scripts, 2 changes what the site receives; defined in AGENTS.md "Account
+  safety"). Parsed into `risk: {tier, why}` (null when absent; a malformed value is a warning). The side
+  panel shows a badge for 1 and 2; a side-panel run's tier-2 mod is held (see "Run scope").
 - Unknown keys are ignored. A file without a header is valid.
 
 **Mod id** = `<site>/<mod>` (e.g. `x.com/plain-x`). The helper parses headers; the extension never parses.
@@ -87,7 +92,7 @@ stay under 1 MB (the helper rejects bigger mods with an error logged to stderr, 
 | `{type:"mods", mods:[Mod…]}` | The full set of mods. Sent on connect and after every change in the mods folder (debounced 150 ms). The extension makes `chrome.userScripts` match it exactly (register new, update changed, unregister missing). |
 | `{type:"request", id, cmd, args}` | A page command from the CLI (table below). The extension answers with a `response`. |
 
-`Mod = { id, site, file, name, description, matches:[…], excludes:[…], runAt:"document_start"|"document_end"|"document_idle", code, hash }`
+`Mod = { id, site, file, name, description, matches:[…], excludes:[…], runAt:"document_start"|"document_end"|"document_idle", risk:{tier, why}|null, code, hash, held?, startOff? }`
 (`file` is the absolute path; `hash` is a sha1 of code+metadata so the extension can skip unchanged mods.)
 
 **extension → helper**
@@ -151,7 +156,10 @@ The side panel's "Mods on this site" list and the setup page show a switch per m
 
 ## The page runtime: `window.__webmods`
 
-The extension registers one internal user script, id `webmods-runtime` (ids starting with `_` are reserved by Chrome), matching `<all_urls>`, MAIN
+The extension registers one internal user script, id `webmods-runtime` (ids starting with `_` are reserved by Chrome), matching
+the union of the registered mods' `@match` patterns plus `*://<site>/*` and `*://*.<site>/*` for each
+recorded site (not every page: its globals would let any site detect WebMods users; with no mods on and
+nothing recorded, nothing is registered; if the union is invalid, `<all_urls>`), MAIN
 world, `document_start`, **registered before any mod** so it runs first. It defines:
 
 ```js
@@ -306,20 +314,30 @@ Nothing is hosted; the agent uses the user's own login/subscription.
     open in a new tab), escaped first: never inject agent or page text as raw HTML. Tool events render
     as one compact line each ("ran webmods reload --tab 12", "edited sites/x.com/hide-reposts.js").
     While running: a working indicator, the Stop button.
+  - **Slash commands.** The panel handles `/model [name|default]` (sets the model setting: each message
+    is a new agent process, so the agent's own `/model` would last one message), `/clear` or `/new`
+    (New chat) and `/help`, answering with a tool-style line (`chat.note`). Any other `/…` goes to the
+    agent as the message; Claude Code runs its own commands in -p mode (`/compact`, `/context`, `/cost`…).
+    The claude adapter turns compaction status lines into tool events ("compacting the conversation",
+    "compacted the conversation"), skips the messages Claude Code replays after `compact_boundary`, and
+    emits a command's `<local-command-stdout>` as text.
+  - **Mod badges.** A mod's `risk` tier 1 shows "detectable", tier 2 "changes requests" (tooltip: what
+    that means, plus the header's reason).
   - When a run finishes and `changedFiles` is non-empty, show "Reload page to see changes" with a button
     (the agent usually reloads itself; this is the fallback).
-  - **States:** helper not connected → short setup instructions (`webmods setup`, link to Setup page);
+  - **States:** helper not connected → short setup instructions (`npx webmods setup`, link to Setup page);
     user scripts off → button opening chrome://extensions/?id=…; agent missing → the error text from the
     helper (it includes the fix); agent not logged in (`loggedIn === false` in `agent.list`, or a run
     failed with the not-logged-in error) → "Claude Code isn't logged in" with a **Log in** button (see
     "Logging in" below; agents with `canLogin: false` show `loginFix` instead).
   - **Settings:** agent (from `agent.list`; only available ones selectable), optional model name (free
-    text, empty = agent default). Stored in `chrome.storage.local` `settings`.
+    text with suggestions opus / sonnet / haiku, empty = agent default). Stored in `chrome.storage.local` `settings`.
   - Light/dark via `prefers-color-scheme`; compact, clean, system font; fits a narrow panel (320 px+).
 - Panel ⇄ background: `chrome.runtime.connect({name: "panel"})`. Panel → background:
   `{type: "agent.start", site, tabId, url, prompt, sessionId, agent, model}`, `{type: "agent.stop", runId}`,
   `{type: "agent.list"}`, `{type: "agent.login", agent}`, `{type: "agent.loginCode", loginId, code}`,
-  `{type: "agent.loginCancel", loginId}`, `{type: "status"}`, `{type: "mod.enable", id, enabled, tab}`. Background forwards agent commands to the
+  `{type: "agent.loginCancel", loginId}`, `{type: "status"}`, `{type: "mod.enable", id, enabled, tab}`,
+  `{type: "mod.approve", id, tab}`, `{type: "chat.clear", site}`, `{type: "chat.note", site, text}`. Background forwards agent commands to the
   helper as native `request`s with the same cmd and relays every native `{type: "agentEvent", runId,
   event}` to all panel ports (panels ignore runs and logins they didn't start, by id).
   If the helper disconnects mid-run (or mid-login), the background sends the panel `{kind: "error"}` then
@@ -408,7 +426,7 @@ Suffix List). `helper/lib/scope.js` computes it; `extension/lib.js` mirrors the 
   in scope.
 - **Held mods.** The helper snapshots the mods folder when a run starts. On every mods sync while a run
   is live (and for 10 s after it ends), a mod that the run added or changed and that has an `@match`
-  outside the scope (`<all_urls>`, a `*` host, another domain, `file://`) is **held**: recorded in
+  outside the scope (`<all_urls>`, a `*` host, another domain, `file://`), or whose `@risk` is 2, is **held**: recorded in
   `~/.webmods/held.json` (`{id: {hash, site, scope, runId, reason, at, approved?}}`) and sent to the
   extension with `held: {site, reason}`, which the extension doesn't register. The run's `done` event
   carries `held: [{id, reason}]`; the panel says so in the chat and lists the mod (also when it doesn't

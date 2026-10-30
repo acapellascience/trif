@@ -43,6 +43,7 @@ code (`sites/x.com/_plain-x.test.js`). Only create or edit files inside this wor
 // @match       https://x.com/*
 // @match       https://twitter.com/*
 // @run-at      document-start
+// @risk        1 hides promoted posts, so their ad impressions never report
 // ==/WebMod==
 
 (() => {
@@ -57,6 +58,8 @@ code (`sites/x.com/_plain-x.test.js`). Only create or edit files inside this wor
   its subdomains); `@exclude` none; `@run-at document-start`; `@name` = file name; `@description` empty.
   `@match`/`@exclude` repeat and take Chrome match patterns. Add `@match` lines when a site has several
   domains (x.com and twitter.com).
+- `@risk <0|1|2> <why>` says how noticeable the mod is to the site (see "Account safety"). Always
+  include it; the side panel shows a badge for 1 and 2.
 - Wrap the body in an IIFE as above: early `return`s work, nothing leaks into the page's globals, and
   `webmods check` can parse the file.
 - Start new mods with `webmods new <site> <mod>`; it creates the file from a template and prints its path.
@@ -65,7 +68,8 @@ code (`sites/x.com/_plain-x.test.js`). Only create or edit files inside this wor
 
 - In the page's **MAIN world**: you share `window` with the site. You can patch `fetch`,
   `XMLHttpRequest`, `history`, prototypes; read the app's globals and React state. The site can also see
-  (and break) anything you put on `window`, so prefix your globals (`window.__hideReposts`).
+  (and break) anything you put on `window`, so keep globals to a minimum (each one also lets the site
+  detect the mod) and prefix any you need (`window.__hideReposts`).
 - At **`document_start`** by default: before the site's own scripts, so your hooks are in place before
   its first request. `document.documentElement` exists; `document.head` and `document.body` usually do
   not yet. Use `document-end` or `document-idle` only for simple DOM tweaks where a flash of the original
@@ -186,7 +190,7 @@ the site (`webmods tabs`; `webmods open <url>` if none) and look:
 ### 3. Write the mod
 
 `webmods new <site> <mod>`, then edit. Pick the least invasive technique that does the job (next
-section). Saving the file updates the registered script automatically; it applies from the next load, so
+section), and the lowest risk tier that gets the user what they want (see "Account safety"); set `@risk`. Saving the file updates the registered script automatically; it applies from the next load, so
 `webmods reload --url <site>`.
 
 ### 4. Verify
@@ -491,6 +495,44 @@ test('reposts go, cursors stay', () => {
 Run it with `node --test sites/x.com/_hide-reposts.test.js` (not available in side-panel runs; see
 "Side-panel runs"). Build fixtures from a real recorded
 response (trimmed), and add a case for every bug you fix.
+
+## Account safety
+
+Users may build whatever they like, but they should know when a mod could get their account noticed.
+What a site can see is **what it receives** (requests) and **what its own scripts can observe in the
+page**, not which technique you used. Patching `fetch`, `XMLHttpRequest` or `JSON.parse` to filter what
+comes back is invisible to the server: the requests are unchanged.
+
+Every mod's header says its tier, `// @risk <tier> <why>`, using the highest tier any part of it reaches:
+
+- **0, render-only.** Changes how what the site already sent looks, or which parts of it show: CSS,
+  colour filters, DOM tweaks, filtering responses before the app reads them. Requests are exactly what
+  the page would send. No warning needed. (`// @risk 0 render-only`)
+- **1, noticeable by the page.** Still no unusual requests, but the site's own scripts could tell:
+  hiding ads or sponsored posts (their impression reports never fire, which looks like an ad blocker;
+  sites usually respond with a "disable your ad blocker" prompt, rarely more), patching built-ins (a site
+  can check `String(fetch)`), globals on `window`, or DOM surgery that breaks the site's own scripts.
+  Mention it once, briefly.
+- **2, changes what the site receives.** Requests the site's own interface would never send: loading
+  more in the background or scrolling programmatically to trigger loads (pre-fetching), calling internal
+  APIs directly, parameters its UI never uses, anything at a pace no person would. The server can see
+  this, and it's how accounts get rate-limited or flagged as automated. Warn clearly, before writing it.
+  Rewriting a request into one the site's own UI sends (Plain X asks for the Recent sort, as X's menu
+  does) is not tier 2. In side-panel runs, a tier-2 mod waits for the user's Allow, like mods for other
+  sites.
+- **Acting on the user's behalf is never done**, whatever the tier: see "Safety rules". A mod runs on
+  every load, unattended, logged in; a bug there posts or follows from the user's account.
+
+How to warn:
+
+- One short paragraph, before writing the code: the specific risk, and a safer way to get close to what
+  they want if there is one ("loading posts in the background could look automated; the safer version
+  only filters what you scroll to, so the feed may feel thinner"). Then do what they chose.
+- Once per tier crossing, not on every edit. If a change moves a mod up a tier, say so then; update
+  `@risk` whenever a change moves it up or down.
+- Don't refuse (tiers 0 to 2), don't moralize, don't repeat yourself.
+- When the user brings in a mod from elsewhere, read what it actually does and correct its `@risk` if
+  it's missing or understated. Don't trust the label.
 
 ## Safety rules
 

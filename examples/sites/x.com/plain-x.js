@@ -4,6 +4,7 @@
 // @match       https://x.com/*
 // @match       https://twitter.com/*
 // @run-at      document-start
+// @risk        1 hides ads and promoted posts (their impressions never report); patches X's fetch/XHR, which its scripts could notice
 // ==/WebMod==
 
 /*

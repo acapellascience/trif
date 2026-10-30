@@ -1,6 +1,6 @@
 'use strict';
 // Held mods: mods a side-panel agent run wrote that match pages outside the run's scope (see
-// scope.js). $WEBMODS_HOME/held.json maps mod id -> {hash, site, scope, runId, reason, at, approved?}. A
+// scope.js), or that say they're risk tier 2 (they change what the site receives). $WEBMODS_HOME/held.json maps mod id -> {hash, site, scope, runId, reason, at, approved?}. A
 // mod stays held while its hash is unchanged and it isn't approved; approving keeps the entry (marked
 // approved) so the same version isn't held again, and any change to the file drops the entry.
 // (Agents can't edit this file: side-panel runs may only write under sites/.)
@@ -9,6 +9,15 @@ const fs = require('fs');
 const path = require('path');
 const { snapshot, diffSnapshots } = require('./runs');
 const { outOfScope } = require('./scope');
+
+// Why a mod a run changed must wait for the user: it reaches other sites, or its header says it changes
+// what the site receives (risk tier 2, see AGENTS.md "Account safety"). '' when it needn't.
+function holdReason(mod, scope) {
+  const outside = outOfScope(mod, scope);
+  if (outside.length) return `it matches ${outside.join(', ')}, outside ${scope}`;
+  if (mod.risk && mod.risk.tier >= 2) return `it changes what the site receives (risk ${mod.risk.tier}${mod.risk.why ? `: ${mod.risk.why}` : ''})`;
+  return '';
+}
 
 function heldFile(home) { return path.join(home, 'held.json'); }
 
@@ -43,12 +52,9 @@ function updateHeld(ws, mods, scopes) {
       const touched = new Set(diffSnapshots(s.before, now));
       for (const m of mods) {
         if (!touched.has(path.relative(ws.home, m.file))) continue;
-        const outside = outOfScope(m, s.scope);
-        if (!outside.length || (held[m.id] && held[m.id].hash === m.hash)) continue;
-        held[m.id] = {
-          hash: m.hash, site: s.site, scope: s.scope, runId: s.runId, at: Date.now(),
-          reason: `it matches ${outside.join(', ')}, outside ${s.scope}`,
-        };
+        const reason = holdReason(m, s.scope);
+        if (!reason || (held[m.id] && held[m.id].hash === m.hash)) continue;
+        held[m.id] = { hash: m.hash, site: s.site, scope: s.scope, runId: s.runId, at: Date.now(), reason };
         changed = true;
       }
     }
@@ -69,4 +75,4 @@ function approveHeld(home, id) {
   saveHeld(home, held);
 }
 
-module.exports = { loadHeld, saveHeld, updateHeld, approveHeld, heldFile };
+module.exports = { loadHeld, saveHeld, updateHeld, approveHeld, heldFile, holdReason };

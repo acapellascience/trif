@@ -124,6 +124,7 @@ async function applyMods() {
   try {
     const res = await syncUserScripts(chrome.userScripts, {
       mods: state.mods, runtimeCode: runtimeCode(state.recording), applied: state.applied, disabled: state.disabled,
+      recording: state.recording,
     });
     state.applied = res.applied;
     state.lastApply = { registered: res.registered, errors: res.errors };
@@ -414,7 +415,7 @@ const commands = {
         entries: w.requests.map((e) => ({ i: e.i, method: e.method, url: e.url, status: e.status, type: e.type, size: e.size, time: e.time })),
       };
     });
-    if (!r) throw new Error(noRuntime());
+    if (!r) throw new Error(state.recording.some((s) => hostMatchesSite(hostOf(tab.url || ''), s)) ? noRuntime() : notRecording(hostOf(tab.url || '')));
     if (!r.recording) throw new Error(notRecording(r.host));
     return filterRequests(r.entries, args);
   },
@@ -509,8 +510,11 @@ async function runtimeList(args, key) {
     const w = window.__webmods;
     return w && Array.isArray(w[k]) ? w[k].slice() : null;
   }, [key]);
-  if (!list) throw new Error(noRuntime());
-  return list;
+  if (list) return list;
+  // The runtime only runs where a mod that's on does (or on a recorded site): no such mod, nothing to report.
+  const url = tab.url || tab.pendingUrl || '';
+  if (!state.mods.some((m) => isEnabled(m.id) && !m.held && modAppliesTo(m, url))) return [];
+  throw new Error(noRuntime());
 }
 
 function noRuntime() {
@@ -608,7 +612,7 @@ async function uiStatus() {
       id: m.id, name: m.name || m.id, description: m.description || '', site: m.site, file: m.file || '',
       matches: m.matches || [], excludes: m.excludes || [], registered: s.mods[i].registered, enabled: s.mods[i].enabled,
       error: errors.get(m.id) === USER_SCRIPTS_OFF ? null : errors.get(m.id) || null,
-      held: m.held || null,
+      held: m.held || null, risk: m.risk || null,
     })),
     runs: [...state.runs.values()].map((r) => ({ runId: r.runId, site: r.site })),
   };
@@ -658,6 +662,12 @@ async function onPanelMessage(msg) {
     case 'agent.loginCode': return helperRequest('agent.loginCode', { loginId: String(msg.loginId ?? ''), code: String(msg.code ?? '') }, 10000);
     case 'agent.loginCancel': return helperRequest('agent.loginCancel', { loginId: String(msg.loginId ?? '') }, 10000);
     case 'chat.clear': return clearChat(msg.site);
+    case 'chat.note': {
+      // A line from the panel itself (a slash command's answer), shown like a tool line.
+      const site = normalizeSite(msg.site);
+      await updateChat(site, (chat) => { chat.messages.push({ role: 'tool', text: String(msg.text ?? ''), time: Date.now() }); });
+      return { ok: true };
+    }
     case 'mod.approve': {
       const r = await helperRequest('mod.approve', { id: String(msg.id ?? '') }, 10000);
       if (msg.tab !== undefined) {

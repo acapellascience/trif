@@ -536,7 +536,7 @@ function renderMods() {
   ui.modsCount.textContent = `(${mods.length})`;
   // Rebuilt only when the set of mods changes; everything else updates in place, so a focused switch
   // keeps focus through status refreshes.
-  const key = JSON.stringify(mods.map((m) => [m.id, m.name, m.file, !!m.held]));
+  const key = JSON.stringify(mods.map((m) => [m.id, m.name, m.file, !!m.held, m.risk?.tier ?? null, m.risk?.why ?? null]));
   if (key !== view.modsKey) {
     view.modsKey = key;
     ui.modList.replaceChildren(...mods.map(modItem));
@@ -567,6 +567,15 @@ function modItem(m) {
   const tag = el('span', 'tag');
   tag.hidden = true;
   name.append(label, tag);
+  // Risk tier from the mod's header (AGENTS.md "Account safety"): nothing for 0, a badge for 1 and 2.
+  if (m.risk?.tier >= 1) {
+    const badge = el('span', `tag risk risk-${m.risk.tier}`, m.risk.tier >= 2 ? 'changes requests' : 'detectable');
+    badge.title = (m.risk.tier >= 2
+      ? 'Risk 2: this mod changes what the site receives, which the site could notice (rate limits or an account flag are possible).'
+      : 'Risk 1: the site\'s own scripts could notice this mod (for example, ads it hides never report being seen).') +
+      (m.risk.why ? `\n${m.risk.why}` : '');
+    name.append(badge);
+  }
   const main = el('div', 'mod-main');
   main.append(name, el('div', 'mod-file', (m.file || m.id).split('/').pop()));
   const row = el('div', 'mod-row');
@@ -666,9 +675,39 @@ async function saveSettings(patch) {
   await chrome.storage.local.set({ settings: view.settings });
 }
 
+// Slash commands the panel handles itself (each message starts a fresh agent process, so e.g. Claude
+// Code's own /model would only last one message). Anything else starting with / goes to the agent, which
+// runs its own commands: /compact, /context… Returns true when handled.
+const PANEL_HELP = 'Panel commands: /model [name|default] picks the model (also in settings), /clear starts a new chat. ' +
+  'Other commands go to the agent: /compact shrinks a long conversation, /context shows what it holds.';
+async function panelCommand(text) {
+  const m = /^\/(\S+)\s*(.*)$/s.exec(text);
+  if (!m) return false;
+  const [, cmd, arg] = m;
+  const note = (t) => request({ type: 'chat.note', site: view.site, text: t });
+  if (cmd === 'model') {
+    if (!arg.trim()) {
+      await note(`Model: ${view.settings.model || 'the agent\'s default'}. Change it with /model opus, sonnet, haiku or default.`);
+    } else {
+      const model = /^default$/i.test(arg.trim()) ? '' : arg.trim();
+      await saveSettings({ model });
+      if (document.activeElement !== ui.model) ui.model.value = model;
+      await note(model ? `Model set to ${model} (from the next message)` : 'Model set to the agent\'s default');
+    }
+    return true;
+  }
+  if (cmd === 'clear' || cmd === 'new') { await newChat(); return true; }
+  if (cmd === 'help') { await note(PANEL_HELP); return true; }
+  return false;
+}
+
 async function send() {
   const text = ui.input.value.trim();
   if (!text || !view.site || view.chat.run || !ui.composer.dataset.canSend) return;
+  if (text.startsWith('/')) {
+    ui.input.value = '';
+    try { if (await panelCommand(text)) return; } catch (e) { console.warn('[webmods] command failed', e); }
+  }
   const { id: agent } = currentAgent();
   const chat = view.chat;
   const sessionId = chat.sessionId && (!chat.agent || !agent || chat.agent === agent) ? chat.sessionId : undefined;

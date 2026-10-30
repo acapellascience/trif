@@ -92,7 +92,8 @@ test('buildMod: defaults from folder and file name', () => {
   assert.equal(mod.runAt, 'document_start');
   assert.equal(mod.code, 'document.title = "x";');
   assert.match(mod.hash, /^[0-9a-f]{40}$/);
-  assert.deepEqual(Object.keys(mod).sort(), ['code', 'description', 'excludes', 'file', 'hash', 'id', 'matches', 'name', 'runAt', 'site']);
+  assert.deepEqual(Object.keys(mod).sort(), ['code', 'description', 'excludes', 'file', 'hash', 'id', 'matches', 'name', 'risk', 'runAt', 'site']);
+  assert.strictEqual(mod.risk, null);
 });
 
 test('buildMod: hash changes with code and with metadata', () => {

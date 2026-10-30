@@ -180,6 +180,8 @@ svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width:
 .mod-err { color: var(--bad); font-size: 12px; }
 .mod-list li.held .mod-name { color: var(--muted); }
 .allow { flex: none; }
+.tag.risk-1 { color: var(--muted); }
+.tag.risk-2 { color: var(--bad); border-color: currentColor; }
 .tag {
   margin-left: 6px;
   padding: 0 5px;

@@ -3,6 +3,7 @@
 // @description Turns Instagram's colour saturation down to 35% across the whole site
 // @match       https://www.instagram.com/*
 // @run-at      document-start
+// @risk        0 render-only
 // ==/WebMod==
 
 (() => {

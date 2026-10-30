@@ -49,6 +49,26 @@ const adapter = {
     if (!msg) return;
     if (msg.type === 'system' && msg.subtype === 'init' && msg.session_id) {
       emit({ kind: 'session', sessionId: msg.session_id });
+    } else if (msg.type === 'system' && msg.subtype === 'status') {
+      // `/compact` (or an automatic compaction): say so, since its result text is empty.
+      if (msg.status === 'compacting') emit({ kind: 'tool', name: 'compacting the conversation', summary: '' });
+      else if (msg.compact_result === 'success') emit({ kind: 'tool', name: 'compacted the conversation', summary: '' });
+      else if (msg.compact_result) emit({ kind: 'error', message: `Couldn't compact the conversation (${msg.compact_result})` });
+    } else if (msg.type === 'system' && msg.subtype === 'compact_boundary') {
+      // After compacting, Claude Code replays the messages it kept (old replies, already in the chat)
+      // until the command's own output; don't show them twice.
+      state.replaying = true;
+    } else if (msg.type === 'user' && msg.message) {
+      // A slash command's output (`/context`, `/cost`…) comes back as <local-command-stdout>.
+      const text = typeof msg.message.content === 'string' ? msg.message.content : '';
+      const out = /<local-command-stdout>([\s\S]*?)<\/local-command-stdout>/.exec(text);
+      if (out) {
+        state.replaying = false;
+        const said = out[1].trim();
+        if (said && !/^Compacted\b/.test(said)) emit({ kind: 'text', text: said });
+      }
+    } else if (state.replaying) {
+      // (replayed messages: see compact_boundary)
     } else if (msg.type === 'assistant' && msg.message && Array.isArray(msg.message.content)) {
       for (const c of msg.message.content) {
         if (!c || typeof c !== 'object') continue;

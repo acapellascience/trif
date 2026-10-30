@@ -52,7 +52,12 @@ Nothing goes to a WebMods server: there isn't one.
   writes a mod, and reloads the tab so you can see it. Keep chatting to adjust it.
 - Each mod has a switch in the side panel, so you can turn it off without deleting it.
 - A side-panel agent can only touch the site you opened it on. If it writes a mod that would also run on
-  other sites, that mod waits for you to click **Allow**.
+  other sites, or one that changes what the site receives, that mod waits for you to click **Allow**.
+- Some mods are easier for a site to notice than others. A badge says so: **detectable** (for example, it
+  hides ads, so they never report being seen) or **changes requests** (the site could see unusual
+  traffic). The agent tells you before it builds anything in the second group.
+- Commands: `/model sonnet` (or `opus`, `haiku`, `default`) switches the model, `/clear` starts a new
+  chat, `/compact` shrinks a long conversation, `/context` shows how full it is, `/help` lists these.
 
 ### Mods that come with it (switched off)
 

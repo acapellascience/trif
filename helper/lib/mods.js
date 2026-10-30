@@ -30,7 +30,7 @@ function isIgnoredName(name) {
 // Parse the `// ==WebMod==` block. Returns raw header values plus warnings; defaults are applied
 // by buildMod because they depend on the folder and file name.
 function parseHeader(code) {
-  const out = { hasHeader: false, name: null, description: null, matches: [], excludes: [], runAt: null, warnings: [] };
+  const out = { hasHeader: false, name: null, description: null, matches: [], excludes: [], runAt: null, risk: null, warnings: [] };
   const lines = String(code).replace(/^﻿/, '').split(/\r?\n/);
   const start = lines.findIndex((l) => HEADER_START.test(l));
   if (start === -1) return out;
@@ -62,6 +62,13 @@ function parseHeader(code) {
       case 'exclude-match':
         if (value) out.excludes.push(value);
         break;
+      case 'risk': {
+        // `@risk <0|1|2> [what makes it that tier]`: see "Account safety" in AGENTS.md.
+        const r = /^([0-2])\b\s*(.*)$/.exec(value);
+        if (r) out.risk = { tier: Number(r[1]), why: r[2].replace(/^[(:\-–—\s]+|[)\s]+$/g, '') };
+        else out.warnings.push(`@risk should start with 0, 1 or 2 (got "${value}")`);
+        break;
+      }
       case 'run-at': {
         const mapped = RUN_AT[value.toLowerCase()];
         if (mapped) out.runAt = mapped;
@@ -99,8 +106,9 @@ function buildMod({ site, file, code }) {
     matches: header.matches.length ? header.matches : defaultMatches(site),
     excludes: header.excludes,
     runAt: header.runAt || 'document_start',
+    risk: header.risk, // {tier, why} or null when the header doesn't say
   };
-  const hash = sha1(JSON.stringify([meta.id, meta.name, meta.description, meta.matches, meta.excludes, meta.runAt]) + '\n' + code);
+  const hash = sha1(JSON.stringify([meta.id, meta.name, meta.description, meta.matches, meta.excludes, meta.runAt, meta.risk]) + '\n' + code);
   return { mod: { ...meta, code, hash }, warnings: header.warnings };
 }
 

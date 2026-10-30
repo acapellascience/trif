@@ -109,3 +109,23 @@ test('updateHeld: holds only changed out-of-scope mods; releases on edit or appr
   write(ws, 'x.com/wide.js', header('<all_urls>') + '// changed again');
   assert.deepEqual(Object.keys(updateHeld(ws, scanMods(ws.modsDir).mods, scopes)), ['x.com/wide']);
 });
+
+test('@risk header: parsed into {tier, why}; a panel run\'s tier-2 mod is held, tier 0 and 1 aren\'t', () => {
+  const ws = makeWs();
+  const before = snapshot(ws.modsDir, ws.home);
+  write(ws, 'x.com/zero.js', '// ==WebMod==\n// @risk 0 render-only\n// ==/WebMod==\n');
+  write(ws, 'x.com/one.js', '// ==WebMod==\n// @risk 1 (hides ads)\n// ==/WebMod==\n');
+  write(ws, 'x.com/two.js', '// ==WebMod==\n// @risk 2: loads more in the background\n// ==/WebMod==\n');
+  write(ws, 'x.com/bad.js', '// ==WebMod==\n// @risk high\n// ==/WebMod==\n');
+  write(ws, 'x.com/none.js', '// no header');
+  const { mods, warnings } = scanMods(ws.modsDir);
+  const risk = Object.fromEntries(mods.map((m) => [m.id, m.risk]));
+  assert.deepStrictEqual(risk, {
+    'x.com/bad': null, 'x.com/none': null, 'x.com/one': { tier: 1, why: 'hides ads' },
+    'x.com/two': { tier: 2, why: 'loads more in the background' }, 'x.com/zero': { tier: 0, why: 'render-only' },
+  });
+  assert.ok(warnings.some((w) => w.id === 'x.com/bad' && /@risk should start with 0, 1 or 2/.test(w.warning)));
+  const held = updateHeld(ws, mods, [{ runId: 'r1', site: 'x.com', scope: 'x.com', before }]);
+  assert.deepStrictEqual(Object.keys(held), ['x.com/two']);
+  assert.strictEqual(held['x.com/two'].reason, 'it changes what the site receives (risk 2: loads more in the background)');
+});

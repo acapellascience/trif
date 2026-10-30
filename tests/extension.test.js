@@ -69,7 +69,7 @@ test('first sync registers the runtime first, then each mod, wrapped and in the 
   assert.deepStrictEqual(res.errors, []);
   assert.deepStrictEqual(us.scripts.map((s) => s.id), [lib.RUNTIME_ID, 'x.com/a', 'y.com/b']);
   const [runtime, a, b] = us.scripts;
-  assert.deepStrictEqual(runtime.matches, ['<all_urls>']);
+  assert.deepStrictEqual(runtime.matches, ['*://x.com/*', '*://y.com/*'], 'the runtime only goes where mods run');
   assert.strictEqual(runtime.runAt, 'document_start');
   assert.strictEqual(runtime.world, 'MAIN');
   assert.strictEqual(a.world, 'MAIN');
@@ -79,6 +79,24 @@ test('first sync registers the runtime first, then each mod, wrapped and in the 
   assert.strictEqual(a.js[0].code, lib.wrapModCode('x.com/a', '/* x.com/a */'));
   assert.ok(!lib.RUNTIME_ID.startsWith('_'));
   assert.strictEqual(res.applied['x.com/a'], 'h1');
+});
+
+test('the runtime follows the mods and recorded sites; with neither, nothing is registered', async () => {
+  const us = mockUserScripts();
+  const runtimeCode = rt.runtimeCode(['news.com']);
+  let r = await lib.syncUserScripts(us, { mods: [], runtimeCode, recording: ['news.com'] });
+  assert.deepStrictEqual(us.scripts.map((s) => [s.id, s.matches]), [[lib.RUNTIME_ID, ['*://*.news.com/*', '*://news.com/*']]]);
+  r = await lib.syncUserScripts(us, { mods: [mod('x.com/a')], runtimeCode, recording: ['news.com'], applied: r.applied });
+  assert.strictEqual(r.reset, true, 'new matches: re-registered, runtime first');
+  assert.deepStrictEqual(us.scripts.map((s) => s.id), [lib.RUNTIME_ID, 'x.com/a']);
+  assert.deepStrictEqual(us.scripts[0].matches, ['*://*.news.com/*', '*://news.com/*', '*://x.com/*']);
+  us.calls.length = 0;
+  r = await lib.syncUserScripts(us, { mods: [mod('x.com/a')], runtimeCode, recording: ['news.com'], applied: r.applied });
+  assert.deepStrictEqual(us.calls, [], 'unchanged: untouched');
+  r = await lib.syncUserScripts(us, { mods: [mod('x.com/a')], runtimeCode, recording: ['news.com'], applied: r.applied, disabled: { 'x.com/a': true } });
+  r = await lib.syncUserScripts(us, { mods: [], runtimeCode: rt.runtimeCode([]), applied: r.applied });
+  assert.deepStrictEqual(us.scripts, []);
+  assert.deepStrictEqual(r.applied, {});
 });
 
 test('unchanged mods are skipped by hash; changed are updated; missing unregistered; new appended', async () => {
@@ -97,7 +115,7 @@ test('unchanged mods are skipped by hash; changed are updated; missing unregiste
   assert.deepStrictEqual(us.calls, [['unregister', ['x.com/b']], ['update', ['x.com/a']], ['register', ['x.com/c']]]);
   assert.deepStrictEqual(us.scripts.map((s) => s.id), [lib.RUNTIME_ID, 'x.com/a', 'x.com/c']);
   assert.match(us.scripts[1].js[0].code, /changed\(\)/);
-  assert.deepStrictEqual(r.applied, { [lib.RUNTIME_ID]: lib.quickHash(runtimeCode), 'x.com/a': 'h2', 'x.com/c': 'h1' });
+  assert.deepStrictEqual(r.applied, { [lib.RUNTIME_ID]: lib.quickHash(runtimeCode + '\n' + JSON.stringify(['*://x.com/*'])), 'x.com/a': 'h2', 'x.com/c': 'h1' });
 });
 
 test('a lost hash map updates existing scripts instead of re-registering', async () => {
@@ -997,7 +1015,7 @@ test('background: mod.enable switches a mod off and on, persists it, and reloads
     r = await bg.native.call('mod.enable', { id: 'y.com/b', enabled: false, tab: 5 });
     assert.deepStrictEqual(r.result, { id: 'y.com/b', enabled: false, reloaded: null });
     assert.deepStrictEqual(bg.reloaded, [5]);
-    assert.deepStrictEqual(scriptIds(bg), [lib.RUNTIME_ID]);
+    assert.deepStrictEqual(scriptIds(bg), [], 'no mods on: no runtime either');
 
     // panel path: switch x.com/a back on for the panel's tab
     let reply = await panel.ask({ type: 'mod.enable', id: 'x.com/a', enabled: true, tab: 5 });

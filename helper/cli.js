@@ -446,6 +446,7 @@ const handlers = {
       if (isHeld(m)) out(`  HELD: a side-panel agent wrote it while working on ${held[m.id].site}, but ${held[m.id].reason}. Not running until the user approves it (webmods approve ${m.id}).`);
       if (m.description) out(`  ${m.description}`);
       out(`  matches: ${m.matches.join(' ')}`);
+      if (m.risk) out(`  risk: ${m.risk.tier}${m.risk.why ? ` (${m.risk.why})` : ''}`);
       if (m.excludes.length) out(`  excludes: ${m.excludes.join(' ')}`);
       if (m.runAt !== 'document_start') out(`  run-at: ${m.runAt.replace('_', '-')}`);
       out(`  file: ${m.file}`);

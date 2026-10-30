@@ -58,8 +58,19 @@ export function modToUserScript(mod) {
   };
 }
 
-export function runtimeUserScript(code) {
-  return { id: RUNTIME_ID, matches: ['<all_urls>'], excludeMatches: [], js: [{ code }], runAt: 'document_start', world: 'MAIN', allFrames: false };
+export function runtimeUserScript(code, matches = ['<all_urls>']) {
+  return { id: RUNTIME_ID, matches, excludeMatches: [], js: [{ code }], runAt: 'document_start', world: 'MAIN', allFrames: false };
+}
+
+/**
+ * Where the runtime goes: the pages the registered mods match, plus the sites being recorded. Not every
+ * page: the runtime's globals (window.webmods, window.__webmods) would let any site detect WebMods users.
+ */
+export function runtimeMatches(mods, recording = []) {
+  const set = new Set();
+  for (const m of mods || []) for (const p of Array.isArray(m.matches) ? m.matches : []) set.add(String(p));
+  for (const site of recording || []) { set.add(`*://${site}/*`); set.add(`*://*.${site}/*`); }
+  return [...set].sort();
 }
 
 /** Small non-cryptographic string hash (FNV-1a), used to remember the registered runtime. */
@@ -88,11 +99,13 @@ export function normalizeDisabled(value) {
  * `disabled` (mods the user switched off: they're unregistered if registered, and not reported as
  * registered or as errors).
  * `applied` maps script id → hash of what was last registered (persisted by the caller).
- * The runtime must run before every mod, so whenever it is missing or its code changed, everything
- * is unregistered and re-registered with the runtime first (registration order = injection order).
+ * The runtime must run before every mod, so whenever it is missing or its code or matches changed,
+ * everything is unregistered and re-registered with the runtime first (registration order = injection
+ * order). It only runs where a registered mod does, or on a site in `recording` (runtimeMatches); with
+ * neither, nothing is registered at all.
  * Returns {registered, errors, applied, reset}.
  */
-export async function syncUserScripts(us, { mods, runtimeCode, applied = {}, disabled = {} }) {
+export async function syncUserScripts(us, { mods, runtimeCode, applied = {}, disabled = {}, recording = [] }) {
   const errors = [];
   const desired = [];
   const seen = new Set();
@@ -107,10 +120,19 @@ export async function syncUserScripts(us, { mods, runtimeCode, applied = {}, dis
 
   const existing = await us.getScripts();
   const existingIds = new Set(existing.map((s) => s.id));
-  const runtimeHash = quickHash(runtimeCode);
+  const matches = runtimeMatches(desired, recording);
+  if (!matches.length) {
+    if (existing.length) await us.unregister();
+    return { registered: [], errors, applied: {}, reset: existing.length > 0 };
+  }
+  const runtimeHash = quickHash(runtimeCode + '\n' + JSON.stringify(matches));
   const current = existing.find((s) => s.id === RUNTIME_ID);
   const currentCode = current?.js?.[0]?.code;
-  const runtimeOk = !!current && (currentCode !== undefined ? currentCode === runtimeCode : applied[RUNTIME_ID] === runtimeHash);
+  const sameMatches = (a) => Array.isArray(a) && JSON.stringify([...a].sort()) === JSON.stringify(matches);
+  // (applied's hash also covers the fallback below, where the registered matches are <all_urls>.)
+  const runtimeOk = !!current && (currentCode !== undefined
+    ? currentCode === runtimeCode && (sameMatches(current.matches) || applied[RUNTIME_ID] === runtimeHash)
+    : applied[RUNTIME_ID] === runtimeHash);
 
   const next = {};
   const registered = [];
@@ -127,7 +149,9 @@ export async function syncUserScripts(us, { mods, runtimeCode, applied = {}, dis
 
   if (!runtimeOk) {
     if (existing.length) await us.unregister();
-    await us.register([runtimeUserScript(runtimeCode)]);
+    // A mod with an invalid pattern makes the union invalid too; then the runtime goes everywhere
+    // (the mod itself fails to register and is reported).
+    try { await us.register([runtimeUserScript(runtimeCode, matches)]); } catch { await us.register([runtimeUserScript(runtimeCode)]); }
     next[RUNTIME_ID] = runtimeHash;
     for (const mod of desired) await registerMod(mod, false);
     return { registered, errors, applied: next, reset: true };

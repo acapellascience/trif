@@ -847,3 +847,25 @@ test('held mods: editing a held mod yourself releases it; `webmods approve` refu
   assert.equal(res.code, 1);
   assert.match(res.stderr, /not available inside a side-panel agent run/);
 });
+
+test('claude adapter: /compact shows progress, not the replayed messages; command output becomes text', () => {
+  const lines = [
+    { type: 'system', subtype: 'status', status: 'compacting', session_id: 's' },
+    { type: 'system', subtype: 'status', status: null, compact_result: 'success', session_id: 's' },
+    { type: 'system', subtype: 'init', session_id: 's' },
+    { type: 'system', subtype: 'compact_boundary', session_id: 's', compact_metadata: { trigger: 'manual' } },
+    { type: 'user', message: { role: 'user', content: 'This session is being continued from a previous conversation…' } },
+    { type: 'assistant', message: { content: [{ type: 'text', text: 'an old reply, replayed' }] } },
+    { type: 'user', message: { role: 'user', content: '<local-command-stdout>Compacted </local-command-stdout>' } },
+    { type: 'result', subtype: 'success', is_error: false, result: '', session_id: 's' },
+  ];
+  const events = [];
+  const state = {};
+  for (const l of lines) claude.parse(JSON.stringify(l), (e) => events.push(e), state);
+  assert.deepStrictEqual(events.map((e) => e.kind + ':' + (e.name || e.text || '')), [
+    'tool:compacting the conversation', 'tool:compacted the conversation', 'session:', 'done:',
+  ]);
+  const out = [];
+  claude.parse(JSON.stringify({ type: 'user', message: { content: '<local-command-stdout>Total cost: $0.01</local-command-stdout>' } }), (e) => out.push(e), {});
+  assert.deepStrictEqual(out, [{ kind: 'text', text: 'Total cost: $0.01' }]);
+});

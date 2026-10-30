@@ -4,6 +4,7 @@
 // @match       *://{{site}}/*
 // @match       *://*.{{site}}/*
 // @run-at      document-start
+// @risk        0 render-only
 // ==/WebMod==
 
 // This file runs in the page itself (same `window` as the site) every time a matching page loads,

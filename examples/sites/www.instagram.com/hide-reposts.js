@@ -3,7 +3,7 @@
 // @description Removes reposts (posts shown because someone you follow reposted them) from the Instagram home feed
 // @match       https://www.instagram.com/*
 // @run-at      document-start
-// @risk        1 patches JSON.parse, which Instagram's scripts could notice
+// @risk        1 patches JSON.parse, which the page's scripts could notice
 // ==/WebMod==
 
 (() => {
@@ -46,5 +46,4 @@
     } catch (e) { window.webmods?.warn('repost filter failed', String(e)); }
     return result;
   };
-  window.__wmIgRepostsRemoved = () => removed;
 })();

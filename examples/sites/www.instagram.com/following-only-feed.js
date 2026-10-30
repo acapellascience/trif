@@ -3,7 +3,7 @@
 // @description Removes suggested posts, suggested accounts and ads from the Instagram home feed, so it only shows people you follow
 // @match       https://www.instagram.com/*
 // @run-at      document-start
-// @risk        1 removes ads from the feed (their impressions never report); patches JSON.parse
+// @risk        1 drops feed ads, so their impressions never report; patches JSON.parse
 // ==/WebMod==
 
 (() => {
@@ -59,5 +59,4 @@
     } catch (e) { window.webmods?.warn('filter failed', String(e)); }
     return result;
   };
-  window.__wmIgCounts = counts;
 })();

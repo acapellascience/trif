@@ -2,9 +2,8 @@
 // @name        Plain X
 // @description Home is just the people you follow, filtered (no ads, reposts or recommendations); a plainer X around it
 // @match       https://x.com/*
-// @match       https://twitter.com/*
 // @run-at      document-start
-// @risk        1 hides ads and promoted posts (their impressions never report); patches X's fetch/XHR, which its scripts could notice
+// @risk        1 drops ads, so their impressions never report; patches fetch and XMLHttpRequest
 // ==/WebMod==
 
 /*

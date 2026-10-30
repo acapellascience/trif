@@ -323,8 +323,7 @@ Nothing is hosted; the agent uses the user's own login/subscription.
     emits a command's `<local-command-stdout>` as text.
   - **Mod badges.** A mod's `risk` tier 1 shows "detectable", tier 2 "changes requests" (tooltip: what
     that means, plus the header's reason).
-  - When a run finishes and `changedFiles` is non-empty, show "Reload page to see changes" with a button
-    (the agent usually reloads itself; this is the fallback).
+  - No reload prompt: the agent reloads the tab after each change (AGENTS.md), and switches reload it too.
   - **States:** helper not connected → short setup instructions (`npx webmods setup`, link to Setup page);
     user scripts off → button opening chrome://extensions/?id=…; agent missing → the error text from the
     helper (it includes the fix); agent not logged in (`loggedIn === false` in `agent.list`, or a run

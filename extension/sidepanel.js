@@ -16,7 +16,7 @@ const ui = {
   settings: $('#settings'), agent: $('#agent'), agentNote: $('#agent-note'), model: $('#model'),
   notice: $('#notice'), mods: $('#mods'), modsCount: $('#mods-count'), modList: $('#mod-list'),
   chat: $('#chat'), empty: $('#empty'), messages: $('#messages'), working: $('#working'),
-  reloadBar: $('#reload-bar'), reloadBtn: $('#reload-btn'),
+
   composer: $('#composer'), input: $('#input'), send: $('#send'), stop: $('#stop'),
 };
 
@@ -34,8 +34,6 @@ const view = {
   modsKey: null,             // which mods the list was last built for (switches update in place)
   disabled: {},              // chrome.storage.local `disabled`: mods switched off (by anyone: panel, agent, CLI)
   myRuns: new Set(),         // runs this panel started
-  dismissedReload: new Set(),
-  loadedAt: new Map(),       // tabId → last time a load completed (seen while the panel was open)
   login: null,               // agent login in progress: {loginId, agent, name, fix, phase, url, error, early}
 };
 
@@ -140,7 +138,6 @@ async function init() {
     if (windowId === view.windowId) chrome.tabs.get(tabId).then(setTab, () => {});
   });
   chrome.tabs.onUpdated.addListener((tabId, info, tab) => {
-    if (info.status === 'complete') view.loadedAt.set(tabId, Date.now());
     if (tabId === view.tab?.id && (info.url !== undefined || info.status !== undefined)) setTab(tab);
   });
   chrome.tabs.onAttached.addListener(() => followActiveTab());
@@ -261,10 +258,6 @@ function render() {
 
   ui.empty.hidden = !site || chat.messages.length > 0;
   ui.working.hidden = !running;
-  const last = chat.last;
-  const showReload = !running && site && last && last.changedFiles?.length > 0
-    && !view.dismissedReload.has(last.runId) && !((view.loadedAt.get(view.tab?.id) || 0) > last.time);
-  ui.reloadBar.hidden = !showReload;
 
   ui.newChat.disabled = !site || (chat.messages.length === 0 && !running);
   const canSend = !!site && helperOk && (agentInfo ? agentInfo.available : (view.agents ? anyAgent : true));
@@ -712,7 +705,6 @@ async function send() {
   const chat = view.chat;
   const sessionId = chat.sessionId && (!chat.agent || !agent || chat.agent === agent) ? chat.sessionId : undefined;
   ui.input.value = '';
-  view.dismissedReload.clear();
   try {
     const { runId } = await request({
       type: 'agent.start', site: view.site, tabId: view.tab.id, url: view.tab.url, prompt: text,
@@ -758,11 +750,6 @@ ui.input.addEventListener('keydown', (e) => {
 });
 ui.stop.addEventListener('click', stop);
 ui.newChat.addEventListener('click', newChat);
-ui.reloadBtn.addEventListener('click', () => {
-  if (view.chat.last) view.dismissedReload.add(view.chat.last.runId);
-  if (view.tab) chrome.tabs.reload(view.tab.id);
-  render();
-});
 for (const chip of document.querySelectorAll('.chip')) {
   chip.addEventListener('click', () => {
     ui.input.value = chip.textContent;

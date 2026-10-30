@@ -132,7 +132,8 @@ make X or YouTube logos the focus of screenshots.
   helper at all.
 - Version: the root `package.json` and `extension/manifest.json` must match (a test checks this).
   Every later upload needs a higher version.
-- The icons are **placeholders**.
+- The icon is the grey W with a green right half (`store/icon.svg`); regenerate the PNGs with
+  `node scripts/render-icon.js` after changing it.
 
 ---
 

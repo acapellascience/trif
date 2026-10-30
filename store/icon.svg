@@ -1,6 +1,7 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="128" height="128" viewBox="0 0 128 128">
   <!-- WebMods icon: a W in switch-on green on the side panel's dark grey.
-       scripts/render-icon.js draws the same shapes into extension/icons/icon-*.png. -->
+       scripts/render-icon.js draws the same shapes into extension/icons/icon-*.png
+       (16-48 px without the margin, so the tile fills the toolbar square). -->
   <rect x="8" y="8" width="112" height="112" rx="26" fill="#18181a"/>
-  <path d="M33.7 43 L47.7 87.3 L64 52.3 L80.3 87.3 L94.3 43" fill="none" stroke="#34d399" stroke-width="10.5" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M30.7 40.8 L46.1 89.5 L64 51 L81.9 89.5 L97.3 40.8" fill="none" stroke="#34d399" stroke-width="11.6" stroke-linecap="round" stroke-linejoin="round"/>
 </svg>

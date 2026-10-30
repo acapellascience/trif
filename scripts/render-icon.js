@@ -13,8 +13,11 @@ const sizes = process.argv.length > 3 ? process.argv.slice(3).map(Number) : [16,
 
 // Geometry in 128-unit icon space (same numbers as store/icon.svg).
 const TILE = { cx: 64, cy: 64, half: 56, r: 26, color: [0x18, 0x18, 0x1a] };
-const STROKE = 10.5 / 2;
-const W = { pts: [[33.7, 43], [47.7, 87.3], [64, 52.3], [80.3, 87.3], [94.3, 43]], color: [0x34, 0xd3, 0x99] };
+const STROKE = 11.6 / 2;
+const W = { pts: [[30.7, 40.8], [46.1, 89.5], [64, 51], [81.9, 89.5], [97.3, 40.8]], color: [0x34, 0xd3, 0x99] };
+// The toolbar sizes drop the 8-unit margin (the tile fills the square, like other toolbar icons); the
+// 128 px icon keeps it for the Web Store and chrome://extensions.
+const FULL_BLEED_MAX = 48;
 
 const roundRect = (x, y, { cx, cy, half, r }) => {
   const qx = Math.abs(x - cx) - half + r;
@@ -36,6 +39,8 @@ function sample(x, y) {
 
 function render(size) {
   const N = 8;
+  const zoom = size <= FULL_BLEED_MAX ? (TILE.half + 8) / TILE.half : 1;
+  const at = (p) => ((p * 128) / size - 64) / zoom + 64; // pixel position -> icon space
   const rows = [];
   for (let py = 0; py < size; py++) {
     const row = Buffer.alloc(1 + size * 4); // filter byte 0, then RGBA
@@ -43,7 +48,7 @@ function render(size) {
       let r = 0, g = 0, b = 0, a = 0;
       for (let sy = 0; sy < N; sy++) {
         for (let sx = 0; sx < N; sx++) {
-          const c = sample(((px + (sx + 0.5) / N) * 128) / size, ((py + (sy + 0.5) / N) * 128) / size);
+          const c = sample(at(px + (sx + 0.5) / N), at(py + (sy + 0.5) / N));
           if (!c) continue;
           r += c[0]; g += c[1]; b += c[2]; a++;
         }

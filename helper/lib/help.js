@@ -173,6 +173,21 @@ than deleting or renaming the file. With --site HOST, only on that site (see ena
     examples: ['webmods disable x.com/hide-reposts', 'webmods disable example.com/dark-mode --url example.com',
       'webmods disable all-sites/dark-mode --site bank.com'],
   },
+  delete: {
+    usage: 'webmods delete <site>/<mod>',
+    summary: 'delete a mod (it goes to the trash; webmods restore brings it back)',
+    details: `Moves the mod's file to ~/.webmods/trash, where it stays for 30 days; the side panel's Delete does
+the same. Works without the browser. Inside a side-panel run, only mods that stay on the run's site.
+Ask the user before deleting a mod, and prefer webmods disable when they only want it off.`,
+    examples: ['webmods delete x.com/hide-reposts'],
+  },
+  restore: {
+    usage: 'webmods restore [<site>/<mod>]',
+    summary: 'bring a deleted mod back from the trash (no id: list the trash)',
+    details: `Puts back the most recently deleted copy of the mod, switched on or off as it was. Fails if a mod
+with that id exists again. With no id, lists what's in the trash, newest first.`,
+    examples: ['webmods restore', 'webmods restore x.com/hide-reposts'],
+  },
   mods: {
     usage: 'webmods mods',
     summary: 'list mods in the folder: id, matches, file (works without Chrome)',
@@ -220,7 +235,7 @@ from stdin. Exit code 1 if it didn't end up logged in.`,
 
 const GROUPS = [
   ['Setup and diagnosis', ['setup', 'status', 'doctor']],
-  ['Mod files (work without Chrome)', ['mods', 'new', 'check', 'install-example']],
+  ['Mod files (work without Chrome)', ['mods', 'new', 'check', 'delete', 'restore', 'install-example']],
   ['Switching mods off and on (need Chrome running with the extension)', ['disable', 'enable', 'approve']],
   ['Pages (need Chrome running with the extension)', ['tabs', 'run', 'reload', 'open', 'navigate', 'text', 'screenshot', 'record', 'requests', 'request', 'errors', 'logs']],
   ['Agent runs (what the side panel does)', ['agent']],

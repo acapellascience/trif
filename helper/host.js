@@ -28,6 +28,7 @@ const { startOffIds } = require('./lib/preinstalled');
 const { readInstructions, writeInstructions, instructionsFile, MAX_LENGTH } = require('./lib/instructions');
 const { ownSock, removeStaleSockets } = require('./lib/helpers');
 const { loadOrigins, recordOrigins, activeRuns } = require('./lib/origins');
+const { deleteMod, restoreMod, emptyTrash } = require('./lib/trash');
 
 const ws = workspace();
 // This helper's own socket (helper-<pid>.sock), served whether or not it also owns helper.sock; agent
@@ -285,6 +286,8 @@ const logins = new Logins({ getWorkspace: () => workspace(ws.home), logger, onEv
 const runSubscribers = new Map(); // runId or loginId -> Set of CLI sockets that started it (see onClientLine)
 const AGENT_COMMANDS = new Set(['agent.list', 'agent.start', 'agent.stop', 'agent.login', 'agent.loginCode', 'agent.loginCancel', 'mod.approve',
   'instructions.get', 'instructions.set']);
+// Helper-local too, but a run may use them (on mods inside its scope; see lib/trash.js).
+const MOD_FILE_COMMANDS = new Set(['mod.delete', 'mod.restore']);
 
 function onAgentEvent(runId, event) {
   // Before the run's last event goes out: hold what it wrote for other sites, and say so in `done`.
@@ -321,6 +324,18 @@ function agentCommand(cmd, args) {
       syncMods('approve', false);
       return { id, approved: true };
     }
+    case 'mod.delete': {
+      const r = deleteMod(ws, args.id, { scope: args.scope });
+      logger.info(`deleted mod ${r.id} (to ${r.trashed})`);
+      syncMods('delete', false);
+      return { id: r.id, deleted: true };
+    }
+    case 'mod.restore': {
+      const r = restoreMod(ws, args.id, { scope: args.scope });
+      logger.info(`restored mod ${r.id}`);
+      syncMods('restore', false);
+      return { id: r.id, restored: true, file: r.file };
+    }
     case 'instructions.get': return { text: readInstructions(ws.home), file: instructionsFile(ws.home), max: MAX_LENGTH };
     case 'instructions.set': {
       const text = writeInstructions(ws.home, args.text);
@@ -347,7 +362,7 @@ function onExtensionRequest(msg) {
   const respond = (body) => {
     try { sendToExtension({ type: 'response', id, ...body }); } catch (e) { logger.warn(`could not answer extension request ${id}: ${e.message}`); }
   };
-  if (!AGENT_COMMANDS.has(msg.cmd)) return respond({ ok: false, error: `unknown command "${msg.cmd}"` });
+  if (!AGENT_COMMANDS.has(msg.cmd) && !MOD_FILE_COMMANDS.has(msg.cmd)) return respond({ ok: false, error: `unknown command "${msg.cmd}"` });
   runAgentCommand(msg.cmd, args, (e, result) => {
     if (e) {
       logger.warn(`${msg.cmd} failed: ${e.message}`);
@@ -539,7 +554,7 @@ function onClientLine(sock, line) {
   // agent.login with {loginId}), the same connection receives {type:"agentEvent", runId, event} lines
   // (no `id`; runId is the loginId for a login), ending with the event whose kind is "done". The client
   // may send more requests on the connection meanwhile (agent.loginCode) and closes it after "done".
-  if (AGENT_COMMANDS.has(cmd)) {
+  if (AGENT_COMMANDS.has(cmd) || MOD_FILE_COMMANDS.has(cmd)) {
     runAgentCommand(cmd, args, (e, result) => {
       if (e) return reply(sock, { id, ok: false, error: e.message });
       reply(sock, { id, ok: true, result: result === undefined ? null : result });
@@ -619,6 +634,7 @@ process.on('unhandledRejection', (e) => logger.error('unhandled rejection:', e &
   syncMods('connect', true);
   pollTimer = setInterval(poll, POLL_MS);
   for (const s of removeStaleSockets(ws.home)) logger.info(`removed stale socket ${s}`);
+  try { const n = emptyTrash(ws); if (n) logger.info(`emptied ${n} mod(s) from the trash (older than 30 days)`); } catch (e) { logger.warn(`could not empty the trash: ${e.message}`); }
   try {
     try { fs.unlinkSync(ws.ownSock); } catch { /* none */ }
     ownServer = await listen(ws.ownSock);

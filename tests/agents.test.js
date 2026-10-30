@@ -7,7 +7,7 @@ const assert = require('node:assert');
 const fs = require('fs');
 const net = require('net');
 const path = require('path');
-const { FakeExtension, runCli, tempDir, waitFor, sleep } = require('./fake-extension');
+const { FakeExtension, runCli, writeMod, tempDir, waitFor, sleep } = require('./fake-extension');
 const claude = require('../helper/lib/agents/claude');
 const codex = require('../helper/lib/agents/codex');
 const agents = require('../helper/lib/agents');
@@ -906,4 +906,41 @@ test('instructionsContext: for agents that don\'t read CLAUDE.md', () => {
   assert.equal(instructionsContext(''), '');
   assert.match(instructionsContext('Talk like a caveman.'), /^\n\nThe user's own instructions for every run \(instructions\.md;.*\):\nTalk like a caveman\.$/s);
   assert.match(fs.readFileSync(path.join(__dirname, '..', 'helper', 'workspace', 'CLAUDE.md'), 'utf8'), /^@instructions\.md$/m);
+});
+
+// ------------------------------------------------------------------ deleting mods
+
+test('mod.delete / mod.restore: from the panel any mod; from a run only mods inside its scope', async () => {
+  const { home, bin } = makeHome();
+  const local = writeMod(home, 'example.com', 'local.js', '// ==WebMod==\n// @name Local\n// ==/WebMod==\n');
+  const wide = writeMod(home, 'example.com', 'wide.js', '// ==WebMod==\n// @name Wide\n// @match *://*/*\n// ==/WebMod==\n');
+  const ext = startHost(home);
+  await ext.waitForSocket();
+  await ext.nextMods((mods) => mods.length === 2);
+
+  // The panel: the mod goes to the trash and the extension is sent the mods without it, then back.
+  let r = await extRequest(ext, 'mod.delete', { id: 'example.com/wide' });
+  assert.deepStrictEqual(r.result, { id: 'example.com/wide', deleted: true });
+  assert.equal(fs.existsSync(wide), false);
+  assert.deepStrictEqual(ext.lastMods().map((m) => m.id), ['example.com/local']);
+  r = await extRequest(ext, 'mod.restore', { id: 'example.com/wide' });
+  assert.equal(r.result.restored, true);
+  assert.deepStrictEqual(ext.lastMods().map((m) => m.id).sort(), ['example.com/local', 'example.com/wide']);
+
+  // A run on example.com: `webmods delete` goes through the helper, which holds it to the scope.
+  r = await extRequest(ext, 'agent.start', { ...START, prompt: 'SLEEP' });
+  const call = await waitFor(() => callFor(bin, 'SLEEP'), { message: 'the agent to start' });
+  const env = { WEBMODS_RUN_TOKEN: call.env.WEBMODS_RUN_TOKEN, WEBMODS_SOCK: call.env.WEBMODS_SOCK };
+  let res = await runCli(['delete', 'example.com/wide'], { home, env });
+  assert.equal(res.code, 1);
+  assert.match(res.stderr, /can only delete mods that stay on example\.com; example\.com\/wide also runs on \*:\/\/\*\/\*/);
+  assert.ok(fs.existsSync(wide));
+  res = await runCli(['delete', 'example.com/local'], { home, env });
+  assert.equal(res.code, 0, res.stderr);
+  assert.equal(fs.existsSync(local), false);
+  res = await runCli(['restore', 'example.com/local'], { home, env });
+  assert.equal(res.code, 0, res.stderr);
+  assert.ok(fs.existsSync(local));
+  await extRequest(ext, 'agent.stop', { runId: r.result.runId });
+  await waitDone(ext, r.result.runId);
 });

@@ -228,6 +228,8 @@ webmods mods                        list mods from the folder (id, matches, file
 webmods disable <site>/<mod> [TAB]  switch a mod off (mod.enable; reloads TAB/the active tab if the mod runs there)
 webmods enable <site>/<mod> [TAB]   switch it back on
 webmods approve <site>/<mod>        let a held mod run (see "Run scope"); refused inside an agent run
+webmods delete <site>/<mod>         move a mod to ~/.webmods/trash (kept 30 days); inside a run, through the helper (mod.delete)
+webmods restore [<site>/<mod>]      put back the newest trashed copy of a mod; no id: list the trash
 webmods check <file|site/mod>       compile a mod without running it; prints the syntax error or "ok"
 webmods new <site> <mod>            create sites/<site>/<mod>.js from a template, print its path
 webmods install-example <site>/<mod>
@@ -375,7 +377,7 @@ Nothing is hosted; the agent uses the user's own login/subscription.
   `{type: "agent.start", site, tabId, url, prompt, sessionId, agent, model}`, `{type: "agent.stop", runId}`,
   `{type: "agent.list"}`, `{type: "agent.login", agent}`, `{type: "agent.loginCode", loginId, code}`,
   `{type: "agent.loginCancel", loginId}`, `{type: "status"}`, `{type: "mod.enable", id, enabled, tab}`,
-  `{type: "mod.approve", id, tab}`, `{type: "instructions.get"}`, `{type: "instructions.set", text}`, `{type: "chat.clear", site}`, `{type: "chat.note", site, text}`. Background forwards agent commands to the
+  `{type: "mod.approve", id, tab}`, `{type: "mod.delete", id, tab}`, `{type: "mod.restore", id, tab}` (the tab is reloaded if the mod runs there), `{type: "instructions.get"}`, `{type: "instructions.set", text}`, `{type: "chat.clear", site}`, `{type: "chat.note", site, text}`. Background forwards agent commands to the
   helper as native `request`s with the same cmd and relays every native `{type: "agentEvent", runId,
   event}` to all panel ports (panels ignore runs and logins they didn't start, by id).
   If the helper disconnects mid-run (or mid-login), the background sends the panel `{kind: "error"}` then
@@ -394,6 +396,8 @@ New native request commands (answered with a normal `response`):
 | `agent.loginCode` | `loginId, code` | `{sent: true}` (writes the code and a newline to the login's stdin) |
 | `agent.loginCancel` | `loginId` | `{cancelled: true}` |
 | `mod.approve` | `id` | `{id, approved: true}`: releases a held mod (see "Run scope"); also on the socket, not from a run |
+| `mod.delete` | `id` | `{id, deleted: true}`: moves `sites/<site>/<mod>.js` to `trash/<site>/<mod>@<UTC stamp>.js` (entries older than 30 days are removed), then re-sends the mods; also on the socket, and from a run for mods inside its scope |
+| `mod.restore` | `id` | `{id, restored: true, file}`: moves the newest trashed copy back (fails if the mod exists again); same rules as `mod.delete`. The extension keeps a deleted mod's switch state, so it comes back as it was |
 | `instructions.get` | | `{text, file, max}`: the user's standing instructions (`~/.webmods/instructions.md`, `''` if none) |
 | `instructions.set` | `text` | same; trimmed, at most 4000 characters, empty removes the file. Not from a run |
 
@@ -458,7 +462,8 @@ Suffix List). `helper/lib/scope.js` computes it; `extension/lib.js` mirrors the 
   CLI sends it with every request. The helper answers a request with an unknown token (the run ended)
   with an error, refuses `agent.*`, `mod.approve` and `instructions.*` from a run, and sets `args.scope` on everything
   else it forwards (overriding any `scope` the client sent). Requests without a token (the user's
-  terminal, the user's own agent outside the panel) are not scoped. The CLI itself refuses `setup`,
+  terminal, the user's own agent outside the panel) are not scoped. The helper answers `mod.delete` and `mod.restore` from a run
+  itself, only for mods whose every `@match` is in scope. The CLI itself refuses `setup`,
   `agent` and `approve` when the variable is set.
 - **Extension.** With `args.scope`, page commands only act on tabs whose URL is http(s) on the scope or
   a subdomain (`tabs` lists only those; others fail with an error naming the scope); `open`/`navigate`

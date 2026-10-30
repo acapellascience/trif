@@ -195,6 +195,11 @@ svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width:
 .mod-err { color: var(--bad); font-size: 12px; }
 .mod-list li.held .mod-name { color: var(--muted); }
 .allow { flex: none; }
+.mod-delete { width: 24px; height: 24px; color: var(--faint); }
+.mod-delete svg { width: 14px; height: 14px; }
+.mod-delete:hover:not(:disabled) { color: var(--bad); }
+.undo { display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--muted); }
+.undo span { flex: 1; min-width: 0; }
 .tag.risk-1 { color: var(--muted); }
 .tag.risk-2 { color: var(--bad); border-color: currentColor; }
 .tag {

@@ -16,6 +16,7 @@ const ui = {
   settings: $('#settings'), agent: $('#agent'), agentNote: $('#agent-note'), model: $('#model'),
   instructions: $('#instructions'), instructionsNote: $('#instructions-note'),
   notice: $('#notice'), mods: $('#mods'), modsCount: $('#mods-count'), modList: $('#mod-list'),
+  undo: $('#undo'), undoText: $('#undo-text'), undoBtn: $('#undo-btn'),
   chat: $('#chat'), empty: $('#empty'), messages: $('#messages'), working: $('#working'),
 
   composer: $('#composer'), input: $('#input'), send: $('#send'), stop: $('#stop'),
@@ -610,18 +611,68 @@ function modItem(m) {
         err.hidden = false;
       }
     });
-    row.append(main, allow);
+    row.append(main, allow, deleteButton(m, labelId, li));
   } else {
     const site = switchSite(m);
     row.append(main, modSwitch(document, {
       id: m.id, site, enabled: isOn(m.id, site), labelId,
       apply: (id, enabled, s) => request({ type: 'mod.enable', id, enabled, tab: view.tab?.id, ...(s ? { site: s } : {}) }),
-    }));
+    }), deleteButton(m, labelId, li));
   }
   const err = el('div', 'mod-err');
   err.hidden = true;
   li.append(row, err);
   return li;
+}
+
+// Deleting moves the mod to the helper's trash (`webmods restore`), so it's one click with an Undo
+// rather than a confirmation.
+function deleteButton(m, labelId, li) {
+  const b = el('button', 'icon-btn mod-delete');
+  b.type = 'button';
+  b.title = 'Delete';
+  b.setAttribute('aria-label', 'Delete');
+  b.setAttribute('aria-describedby', labelId);
+  b.innerHTML = '<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M2.5 4.5h11M6.5 4.5V2.75h3V4.5M4 4.5l.7 8.75h6.6L12 4.5M6.75 7v4M9.25 7v4"/></svg>';
+  b.addEventListener('click', async () => {
+    b.disabled = true;
+    try {
+      await request({ type: 'mod.delete', id: m.id, tab: view.tab?.id });
+      showUndo(m);
+    } catch (e) {
+      b.disabled = false;
+      const err = li.querySelector('.mod-err');
+      err.textContent = String(e?.message ?? e);
+      err.hidden = false;
+    }
+  });
+  return b;
+}
+
+let undoTimer = null;
+function showUndo(m) {
+  clearTimeout(undoTimer);
+  ui.undoText.textContent = `Deleted ${m.name}.`;
+  ui.undoBtn.hidden = false;
+  ui.undoBtn.disabled = false;
+  ui.undoBtn.onclick = async () => {
+    ui.undoBtn.disabled = true;
+    try {
+      await request({ type: 'mod.restore', id: m.id, tab: view.tab?.id });
+      hideUndo();
+    } catch (e) {
+      ui.undoText.textContent = `Couldn't restore ${m.name}: ${e?.message ?? e}`;
+      ui.undoBtn.hidden = true;
+      undoTimer = setTimeout(hideUndo, 10000);
+    }
+  };
+  ui.undo.hidden = false;
+  undoTimer = setTimeout(hideUndo, 10000);
+}
+
+function hideUndo() {
+  clearTimeout(undoTimer);
+  ui.undo.hidden = true;
 }
 
 function updateModItem(li, m) {

@@ -719,6 +719,22 @@ async function onPanelMessage(msg) {
       }
       return r;
     }
+    case 'mod.delete': {
+      // The mod stops running once the helper re-sends the mods; reload the tab it was running on.
+      const mod = state.mods.find((m) => m.id === msg.id);
+      const r = await helperRequest('mod.delete', { id: String(msg.id ?? '') }, 10000);
+      if (mod && msg.tab !== undefined) { await serial(() => {}); await reloadIfApplies(mod, { tab: msg.tab }); }
+      return r;
+    }
+    case 'mod.restore': {
+      const r = await helperRequest('mod.restore', { id: String(msg.id ?? '') }, 10000);
+      if (msg.tab !== undefined) {
+        await serial(() => {});
+        const mod = state.mods.find((m) => m.id === r.id);
+        if (mod) await reloadIfApplies(mod, { tab: msg.tab });
+      }
+      return r;
+    }
     default: return onPageMessage(msg);
   }
 }

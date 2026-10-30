@@ -12,6 +12,7 @@ const { ALL_SITES, scanMods, planModsMessage, isIgnoredName } = require('./lib/m
 const { COMMANDS, mainHelp, commandHelp } = require('./lib/help');
 const { loadHeld } = require('./lib/held');
 const { pickHelper, listHelpers, describeHelper } = require('./lib/helpers');
+const trash = require('./lib/trash');
 
 // Inside a side-panel agent run (the helper set WEBMODS_RUN_TOKEN) these are the user's alone.
 const NOT_IN_RUNS = new Set(['setup', 'agent', 'approve']);
@@ -294,6 +295,30 @@ const handlers = {
 
   async enable(ctx, pos) { return switchMod(ctx, pos, true); },
   async disable(ctx, pos) { return switchMod(ctx, pos, false); },
+
+  // Inside a run the helper does it (it knows the run's scope); otherwise the CLI moves the file itself,
+  // so this works without the browser, and a running helper picks the change up like any other.
+  async delete(ctx, pos) {
+    if (!pos[0]) throw new UsageError('missing mod id');
+    const id = modId(pos[0]);
+    const r = process.env.WEBMODS_RUN_TOKEN ? await ctx.call('mod.delete', { id }, 10000) : trash.deleteMod(ctx.ws, id);
+    if (ctx.json) return printJson({ id: r.id, deleted: true });
+    out(`deleted ${r.id}: it's in the trash for ${trash.TRASH_DAYS} days (webmods restore ${r.id} brings it back)`);
+  },
+
+  async restore(ctx, pos) {
+    if (!pos[0]) {
+      const items = trash.listTrash(ctx.ws);
+      if (ctx.json) return printJson({ trash: items });
+      if (!items.length) return out('the trash is empty');
+      for (const t of items) out(`${t.id}  deleted ${new Date(t.deletedAt).toLocaleString()}`);
+      return;
+    }
+    const id = modId(pos[0]);
+    const r = process.env.WEBMODS_RUN_TOKEN ? await ctx.call('mod.restore', { id }, 10000) : trash.restoreMod(ctx.ws, id);
+    if (ctx.json) return printJson({ id: r.id, restored: true, file: r.file });
+    out(`restored ${r.id} (${r.file}); it's back on or off as it was before`);
+  },
 
   async tabs(ctx) {
     const tabs = await ctx.call('tabs');
@@ -801,7 +826,7 @@ async function main(argv) {
       process.stderr.write(NO_HELPER_MESSAGE + '\n');
       return 2;
     }
-    if (e instanceof HelperError) {
+    if (e instanceof HelperError || e instanceof trash.TrashError) {
       if (ctx.json) printJson({ ok: false, error: e.message });
       process.stderr.write(`webmods ${cmd}: ${e.message}\n`);
       return 1;

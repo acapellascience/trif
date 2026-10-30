@@ -1,13 +1,6 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="128" height="128" viewBox="0 0 128 128">
-  <!-- WebMods icon: a grey W whose right half is the green of a switch that's on, cut vertically at x=64.
+  <!-- WebMods icon: a W in switch-on green on the side panel's dark grey.
        scripts/render-icon.js draws the same shapes into extension/icons/icon-*.png. -->
-  <defs>
-    <clipPath id="left"><rect width="64" height="128"/></clipPath>
-    <clipPath id="right"><rect x="64" width="64" height="128"/></clipPath>
-  </defs>
-  <rect x="8" y="8" width="112" height="112" rx="26" fill="#6b7280"/>
-  <g fill="none" stroke-width="10.5" stroke-linecap="round" stroke-linejoin="round">
-    <path clip-path="url(#left)" d="M33.7 43 L47.7 87.3 L64 52.3 L80.3 87.3 L94.3 43" stroke="#ffffff"/>
-    <path clip-path="url(#right)" d="M33.7 43 L47.7 87.3 L64 52.3 L80.3 87.3 L94.3 43" stroke="#34d399"/>
-  </g>
+  <rect x="8" y="8" width="112" height="112" rx="26" fill="#18181a"/>
+  <path d="M33.7 43 L47.7 87.3 L64 52.3 L80.3 87.3 L94.3 43" fill="none" stroke="#34d399" stroke-width="10.5" stroke-linecap="round" stroke-linejoin="round"/>
 </svg>

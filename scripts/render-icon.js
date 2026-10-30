@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 'use strict';
-// Draws the WebMods icon (store/icon.svg: a grey W whose right half is switch-on green) into
+// Draws the WebMods icon (store/icon.svg: a switch-green W on the side panel's dark grey) into
 // extension/icons/icon-<size>.png, antialiased with 8x8 supersampling. No dependencies: shapes are
 // signed distances, PNGs are written by hand. Usage: node scripts/render-icon.js [outDir] [sizes...]
 
@@ -12,11 +12,9 @@ const outDir = process.argv[2] || path.join(__dirname, '..', 'extension', 'icons
 const sizes = process.argv.length > 3 ? process.argv.slice(3).map(Number) : [16, 32, 48, 128];
 
 // Geometry in 128-unit icon space (same numbers as store/icon.svg).
-const TILE = { cx: 64, cy: 64, half: 56, r: 26, color: [0x6b, 0x72, 0x80] };
+const TILE = { cx: 64, cy: 64, half: 56, r: 26, color: [0x18, 0x18, 0x1a] };
 const STROKE = 10.5 / 2;
-const LEFT = { pts: [[33.7, 43], [47.7, 87.3], [64, 52.3]], color: [0xff, 0xff, 0xff] };
-const RIGHT = { pts: [[64, 52.3], [80.3, 87.3], [94.3, 43]], color: [0x34, 0xd3, 0x99] };
-const SPLIT = 64;
+const W = { pts: [[33.7, 43], [47.7, 87.3], [64, 52.3], [80.3, 87.3], [94.3, 43]], color: [0x34, 0xd3, 0x99] };
 
 const roundRect = (x, y, { cx, cy, half, r }) => {
   const qx = Math.abs(x - cx) - half + r;
@@ -33,8 +31,7 @@ const polyline = (x, y, pts) => Math.min(...pts.slice(1).map((p, i) => segment(x
 /** Colour at one point, or null outside the tile. */
 function sample(x, y) {
   if (roundRect(x, y, TILE) > 0) return null;
-  if (Math.min(polyline(x, y, LEFT.pts), polyline(x, y, RIGHT.pts)) > STROKE) return TILE.color;
-  return x < SPLIT ? LEFT.color : RIGHT.color; // a clean vertical cut through the middle peak
+  return polyline(x, y, W.pts) <= STROKE ? W.color : TILE.color;
 }
 
 function render(size) {

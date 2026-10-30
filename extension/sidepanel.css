@@ -200,7 +200,9 @@ body.site-off :is(.bar, .settings, .notice, .mods, .chat, .composer) { display: 
 .mod-row { display: flex; align-items: center; gap: 10px; }
 .mod-main { flex: 1; min-width: 0; }
 .mod-name { font-weight: 500; }
-.light { display: inline-block; width: 7px; height: 7px; margin-right: 7px; border-radius: 50%; vertical-align: 1px;
+/* The light hangs left of the name and file, so wrapped lines line up with the name. */
+.mod-main { position: relative; padding-left: 14px; }
+.light { position: absolute; left: 0; top: 6px; width: 7px; height: 7px; border-radius: 50%;
   background: color-mix(in srgb, var(--muted) 45%, transparent); }
 .light.on { background: var(--switch-on); }
 .mod-list li.off .mod-name { color: var(--muted); }
@@ -214,7 +216,7 @@ body.site-off :is(.bar, .settings, .notice, .mods, .chat, .composer) { display: 
 .tag.risk-1 { color: var(--muted); }
 .tag.risk-2 { color: var(--bad); border-color: currentColor; }
 .tag {
-  margin-left: 6px;
+  white-space: nowrap;
   padding: 0 5px;
   border: 1px solid var(--line);
   border-radius: 5px;

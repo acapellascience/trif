@@ -638,7 +638,8 @@ function modItem(m) {
   label.id = labelId;
   const tag = el('span', 'tag');
   tag.hidden = true;
-  name.append(light, label, tag);
+  // Spaces between the name and its badges, so a badge can wrap to the next line on its own.
+  name.append(label, ' ', tag);
   // Risk tier from the mod's header (AGENTS.md "Account safety"): nothing for 0, a badge for 1 and 2.
   if (m.risk?.tier >= 1) {
     const badge = el('span', `tag risk risk-${m.risk.tier}`, m.risk.tier >= 2 ? 'changes requests' : 'detectable');
@@ -646,7 +647,7 @@ function modItem(m) {
       ? 'Risk 2: this mod changes what the site receives, which the site could notice (rate limits or an account flag are possible).'
       : 'Risk 1: the site\'s own scripts could notice this mod (for example, ads it hides never report being seen).') +
       (m.risk.why ? `\n${m.risk.why}` : '');
-    name.append(badge);
+    name.append(' ', badge);
   }
   // Mods that also run on other sites say so: their switch here is for this site only.
   const { everywhere, sites } = modSites(m);
@@ -654,10 +655,10 @@ function modItem(m) {
     const badge = el('span', 'tag', everywhere ? 'all sites' : `${sites.length} sites`);
     badge.title = (everywhere ? 'Runs on every site.' : `Runs on ${sites.join(', ')}.`) +
       ` This switch is for ${view.site} only; switch it on other sites, or everywhere, from Setup.`;
-    name.append(badge);
+    name.append(' ', badge);
   }
   const main = el('div', 'mod-main');
-  main.append(name, el('div', 'mod-file', (m.file || m.id).split('/').pop()));
+  main.append(light, name, el('div', 'mod-file', (m.file || m.id).split('/').pop()));
   const row = el('div', 'mod-row');
   if (m.held) {
     // Written by an agent run here but reaching other sites: not running until the user allows it.

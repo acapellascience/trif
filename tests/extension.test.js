@@ -1257,3 +1257,82 @@ test('background: per-site offs survive a service worker restart', async () => {
     assert.deepStrictEqual(s.excludeMatches, ['*://twitter.com/*', '*://*.twitter.com/*']);
   } finally { bg.restore(); }
 });
+
+// ---- mods made in another browser ---------------------------------------------------------------
+
+test('fromOtherBrowser: only a mod whose origin is another install', () => {
+  assert.strictEqual(lib.fromOtherBrowser({ id: 'x.com/a', origin: { by: 'B', browser: 'Firefox' } }, 'A'), true);
+  assert.strictEqual(lib.fromOtherBrowser({ id: 'x.com/a', origin: { by: 'A', browser: 'Chrome' } }, 'A'), false);
+  assert.strictEqual(lib.fromOtherBrowser({ id: 'x.com/a' }, 'A'), false);
+  assert.strictEqual(lib.fromOtherBrowser({ id: 'x.com/a', origin: { by: '' } }, 'A'), false);
+  assert.strictEqual(lib.fromOtherBrowser({ id: 'x.com/a', origin: { by: 42 } }, 'A'), false);
+  assert.strictEqual(lib.fromOtherBrowser({ id: 'x.com/a', origin: { by: 'B' } }, null), false, 'no install id: nothing is foreign');
+  assert.strictEqual(lib.fromOtherBrowser(null, 'A'), false);
+});
+
+test('applyStartOff: a mod made in another browser is switched off once; own and origin-less mods are left alone', () => {
+  const mods = [
+    { id: 'x.com/theirs', origin: { by: 'B', browser: 'Firefox' } },
+    { id: 'x.com/mine', origin: { by: 'A', browser: 'Chrome' } },
+    { id: 'x.com/plain' },
+  ];
+  let r = lib.applyStartOff(mods, { 'old.com/x': true }, {}, 'A');
+  assert.deepStrictEqual(r, { disabled: { 'old.com/x': true, 'x.com/theirs': true }, startedOff: { 'x.com/theirs': true }, changed: true });
+  // The user switched it on here: it stays on.
+  const disabled = {};
+  const again = lib.applyStartOff(mods, disabled, r.startedOff, 'A');
+  assert.strictEqual(again.changed, false);
+  assert.strictEqual(again.disabled, disabled);
+  // Without an install id nothing counts as foreign (preinstalled startOff still applies).
+  r = lib.applyStartOff([...mods, { id: 'x.com/pre', startOff: true }], {}, {}, null);
+  assert.deepStrictEqual(r.disabled, { 'x.com/pre': true });
+  assert.strictEqual(lib.applyStartOff(mods, {}, {}).changed, false, 'old 3-argument call: no foreign switching');
+});
+
+test('background: the hello carries an install id that persists across a service worker restart', async () => {
+  // Every hello on this instance's native ports (an earlier test's background may reconnect onto the
+  // newest chrome mock under load, so natives[0] isn't necessarily ours).
+  const hellos = (bg) => bg.natives.flatMap((p) => p.sent).filter((m) => m.type === 'hello').map((m) => m.installId);
+  const bg = await loadBackground();
+  let id;
+  try {
+    id = bg.store.installId;
+    assert.match(String(id), /^[0-9a-f-]{36}$/);
+    assert.ok(hellos(bg).includes(id), 'the hello carries the stored install id');
+  } finally { bg.restore(); }
+  const bg2 = await loadBackground({ storage: { installId: id } });
+  try {
+    assert.strictEqual(bg2.store.installId, id, 'kept, not regenerated');
+    assert.ok(hellos(bg2).includes(id));
+  } finally { bg2.restore(); }
+});
+
+test('background: a mod made in another browser arrives switched off, once; the panel says where it came from', async () => {
+  const mods = [
+    mod('x.com/theirs', { origin: { by: 'other-install', browser: 'Firefox' } }),
+    mod('x.com/mine', { origin: { by: 'me', browser: 'Chrome' } }),
+    mod('x.com/plain'),
+  ];
+  const bg = await loadBackground({ storage: { installId: 'me' }, tabs: SWITCH_TABS });
+  try {
+    bg.native.emit({ type: 'mods', mods });
+    await settle(30);
+    assert.deepStrictEqual(bg.store.disabled, { 'x.com/theirs': true });
+    assert.deepStrictEqual(bg.store.startedOff, { 'x.com/theirs': true });
+    assert.deepStrictEqual(scriptIds(bg), [lib.RUNTIME_ID, 'x.com/mine', 'x.com/plain']);
+    const panel = bg.connectPanel();
+    let st = (await panel.ask({ type: 'status' })).result;
+    assert.deepStrictEqual(st.mods.map((m) => [m.id, m.enabled, m.from]),
+      [['x.com/theirs', false, 'Firefox'], ['x.com/mine', true, null], ['x.com/plain', true, null]]);
+
+    // The user switches it on here; the next mods message doesn't switch it off again.
+    const r = await bg.native.call('mod.enable', { id: 'x.com/theirs', enabled: true });
+    assert.strictEqual(r.ok, true, r.error);
+    bg.native.emit({ type: 'mods', mods: mods.map((m) => ({ ...m, hash: 'h2' })) });
+    await settle(30);
+    assert.deepStrictEqual(bg.store.disabled, {});
+    assert.ok(scriptIds(bg).includes('x.com/theirs'));
+    st = (await panel.ask({ type: 'status' })).result;
+    assert.deepStrictEqual(st.mods.find((m) => m.id === 'x.com/theirs').enabled, true);
+  } finally { bg.restore(); }
+});

@@ -93,7 +93,9 @@ function renderMods() {
     const on = shownEnabled(m.id, enabledIn(disabled, m.id));
     li.classList.toggle('off', !on);
     const tag = li.querySelector('.tag');
-    tag.textContent = on && m.enabled !== false && !m.registered ? (s.userScripts ? 'not active' : 'paused') : '';
+    tag.textContent = on && m.enabled !== false && !m.registered ? (s.userScripts ? 'not active' : 'paused')
+      : !on && m.from ? `from ${m.from}` : '';
+    tag.title = !on && m.from ? `Made from ${m.from}. Mods made in another browser start off here; switch it on to use it.` : '';
     tag.hidden = !tag.textContent;
     const err = li.querySelector('.mod-err');
     err.textContent = switchError(m.id) || (on && m.error) || '';

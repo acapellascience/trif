@@ -94,7 +94,7 @@ stay under 1 MB (the helper rejects bigger mods with an error logged to stderr, 
 | `{type:"mods", mods:[Mod…]}` | The full set of mods. Sent on connect and after every change in the mods folder (debounced 150 ms). The extension makes `chrome.userScripts` match it exactly (register new, update changed, unregister missing). |
 | `{type:"request", id, cmd, args}` | A page command from the CLI (table below). The extension answers with a `response`. |
 
-`Mod = { id, site, file, name, description, matches:[…], excludes:[…], runAt:"document_start"|"document_end"|"document_idle", risk:{tier, why}|null, code, hash, held?, startOff? }`
+`Mod = { id, site, file, name, description, matches:[…], excludes:[…], runAt:"document_start"|"document_end"|"document_idle", risk:{tier, why}|null, code, hash, held?, startOff?, origin?:{by, browser} }`
 (`file` is the absolute path; `hash` is a sha1 of code+metadata so the extension can skip unchanged mods.)
 
 **extension → helper**
@@ -260,6 +260,15 @@ Which socket the CLI uses:
   a run started from Firefox's sidebar works on Firefox's tabs even while Chrome's host owns `helper.sock`.
 - Otherwise `helper.sock`.
 `webmods status` and `webmods doctor` list the other connected browsers.
+
+**Mods made in another browser start off.** Each extension install has a random `installId` (in its
+storage, sent in `hello`). A run marks itself in `<home>/active-runs/<runId>.json` (`{runId, by, browser,
+site, pid}`; `endedAt` when done, honoured for 15 s). When a helper's scan first sees a new mod id, it
+records in `<home>/origins.json` the run that made it (one on the mod's site first, else its own, else
+any): `{"<id>": {by, browser, at}}`; with no run going (a terminal agent, a hand edit) the id has no
+origin. Mods go to the extension with `origin: {by, browser}`, and an extension switches off a mod whose
+`origin.by` isn't its own `installId` the first time it sees it (`startedOff`, as for preinstalled mods);
+the panel tags it "from <browser>" while it's off.
 
 ## Native host installation (`webmods setup`)
 

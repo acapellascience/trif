@@ -7,7 +7,7 @@ import {
   normalizeUrl, normalizeSite, hostMatchesSite, buildRunCode, buildPollCode, parseRunEnvelope,
   firstInjectionResult, withTimeout, filterRequests, nextBackoff, chromeVersion, toolLine,
   normalizeDisabled, modAppliesTo, urlInScope, modInScope, applyStartOff,
-  normalizeOffSites, offSiteName, hostInScope, withOffSites, switchSite,
+  normalizeOffSites, offSiteName, hostInScope, withOffSites, switchSite, fromOtherBrowser, timedUserScripts,
 } from './lib.js';
 import { runtimeCode } from './runtime.js';
 
@@ -30,7 +30,8 @@ const state = {
   recording: [],         // hostnames being recorded (persisted)
   disabled: {},          // mod id → true for mods the user switched off (persisted as `disabled`)
   offSites: {},          // mod id → sites it's switched off on, for mods on several sites (persisted)
-  startedOff: {},        // mod id → true for preinstalled mods already switched off once (persisted)
+  startedOff: {},        // mod id → true for mods already switched off once: preinstalled, or from another browser (persisted)
+  installId: null,       // random id of this install (persisted): the helper records it as the origin of mods made here
   applied: {},           // script id → hash last registered (persisted)
   lastApply: { registered: [], errors: [] },
   requestSeq: 0,
@@ -53,6 +54,8 @@ const ready = chrome.storage.local.get(null).then(async (s) => {
   state.disabled = normalizeDisabled(s.disabled);
   state.offSites = normalizeOffSites(s.offSites);
   state.startedOff = normalizeDisabled(s.startedOff);
+  state.installId = typeof s.installId === 'string' && s.installId ? s.installId : crypto.randomUUID();
+  if (state.installId !== s.installId) await chrome.storage.local.set({ installId: state.installId });
   if (s.applied && typeof s.applied === 'object') state.applied = s.applied;
   await cleanStaleRuns(s);
 }).catch((e) => console.error('[webmods] failed to read storage', e));
@@ -101,11 +104,20 @@ ready.then(() => {
   connect();
 });
 
-// Mod syncing and recording changes run one at a time.
+// Mod syncing and recording changes run one at a time. If one hasn't finished after QUEUE_STALL_MS (a
+// browser call that never answers), it's logged and the queue moves on instead of freezing every switch.
+const QUEUE_STALL_MS = 30000;
 let queue = Promise.resolve();
 function serial(fn) {
   const p = queue.then(fn);
-  queue = p.catch(() => {});
+  let timer;
+  const stalled = new Promise((resolve) => {
+    timer = setTimeout(() => {
+      log('warn', `a mod sync hasn't finished after ${QUEUE_STALL_MS / 1000}s; not waiting for it`);
+      resolve();
+    }, QUEUE_STALL_MS);
+  });
+  queue = Promise.race([p.catch(() => {}), stalled]).finally(() => clearTimeout(timer));
   return p;
 }
 
@@ -119,7 +131,7 @@ function checkUserScripts() {
   if (before !== null && before !== now) {
     log(now ? 'info' : 'warn', now ? 'user scripts were turned on' : 'user scripts were turned off');
     // A fresh hello keeps the helper's view of the switch (shown by `webmods doctor`) current.
-    post({ type: 'hello', version: VERSION, userScripts: now, chrome: CHROME, browser: BROWSER });
+    post({ type: 'hello', version: VERSION, userScripts: now, chrome: CHROME, browser: BROWSER, installId: state.installId });
     if (now) serial(applyMods).then(reportApplied, () => {});
     notifyPanels();
   }
@@ -134,7 +146,7 @@ async function applyMods() {
     return state.lastApply;
   }
   try {
-    const res = await syncUserScripts(chrome.userScripts, {
+    const res = await syncUserScripts(timedUserScripts(chrome.userScripts), {
       mods: state.mods, runtimeCode: runtimeCode(state.recording), applied: state.applied, disabled: state.disabled,
       offSites: state.offSites, recording: state.recording,
     });
@@ -189,7 +201,8 @@ function connect() {
     helperGone(reason);
     scheduleReconnect();
   });
-  post({ type: 'hello', version: VERSION, userScripts: checkUserScripts(), chrome: CHROME, browser: BROWSER });
+  // After storage is read, so the hello carries the install id.
+  ready.then(() => { if (state.port === port) post({ type: 'hello', version: VERSION, userScripts: checkUserScripts(), chrome: CHROME, browser: BROWSER, installId: state.installId }); });
 }
 
 function scheduleReconnect() {
@@ -212,8 +225,9 @@ async function onHelperMessage(msg) {
   if (!msg || typeof msg !== 'object') return;
   if (msg.type === 'mods') {
     state.mods = Array.isArray(msg.mods) ? msg.mods : [];
-    // Preinstalled mods arrive switched off the first time (before they're ever registered).
-    const off = applyStartOff(state.mods, state.disabled, state.startedOff);
+    // Preinstalled mods, and mods made from another browser, arrive switched off the first time (before
+    // they're ever registered).
+    const off = applyStartOff(state.mods, state.disabled, state.startedOff, state.installId);
     if (off.changed) {
       state.disabled = off.disabled;
       state.startedOff = off.startedOff;
@@ -300,10 +314,11 @@ async function scopedTab(args) {
 
 const commands = {
   async status() {
-    await serial(() => {}); // let pending mod syncs finish first
+    // Let pending mod syncs finish first, but answer within a few seconds even if one is stuck.
+    await Promise.race([serial(() => {}), sleep(3000)]);
     let ids = new Set();
     if (checkUserScripts()) {
-      try { ids = new Set((await chrome.userScripts.getScripts()).map((s) => s.id)); } catch { /* switched off meanwhile */ }
+      try { ids = new Set((await timedUserScripts(chrome.userScripts).getScripts()).map((s) => s.id)); } catch { /* switched off meanwhile, or stuck */ }
     }
     const errors = new Map(state.lastApply.errors.map((e) => [e.id, e.error]));
     return {
@@ -637,6 +652,7 @@ async function uiStatus() {
       matches: m.matches || [], excludes: m.excludes || [], registered: s.mods[i].registered, enabled: s.mods[i].enabled,
       error: errors.get(m.id) === USER_SCRIPTS_OFF ? null : errors.get(m.id) || null,
       held: m.held || null, risk: m.risk || null,
+      from: fromOtherBrowser(m, state.installId) ? (m.origin.browser || 'another browser') : null,
     })),
     runs: [...state.runs.values()].map((r) => ({ runId: r.runId, site: r.site })),
   };

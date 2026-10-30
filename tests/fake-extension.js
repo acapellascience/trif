@@ -80,8 +80,8 @@ class FakeExtension {
 
   send(msg) { this.child.stdin.write(encode(msg)); }
 
-  hello({ userScripts = true, version = '0.1.0', chrome = '140.0.0.0', browser } = {}) {
-    this.send({ type: 'hello', version, userScripts, chrome, ...(browser ? { browser } : {}) });
+  hello({ userScripts = true, version = '0.1.0', chrome = '140.0.0.0', browser, installId } = {}) {
+    this.send({ type: 'hello', version, userScripts, chrome, ...(browser ? { browser } : {}), ...(installId ? { installId } : {}) });
   }
 
   _onMessage(msg) {

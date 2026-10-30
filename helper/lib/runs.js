@@ -10,6 +10,7 @@ const { spawn } = require('child_process');
 const agents = require('./agents');
 const { scopeFor } = require('./scope');
 const { readInstructions, instructionsContext } = require('./instructions');
+const { markRunActive, markRunEnded } = require('./origins');
 
 const RUN_TIMEOUT_MS = Number(process.env.WEBMODS_AGENT_TIMEOUT_MS) > 0 ? Number(process.env.WEBMODS_AGENT_TIMEOUT_MS) : 15 * 60 * 1000;
 const KILL_GRACE_MS = Number(process.env.WEBMODS_AGENT_KILL_GRACE_MS) > 0 ? Number(process.env.WEBMODS_AGENT_KILL_GRACE_MS) : 3000;
@@ -205,6 +206,10 @@ class Runs {
     const { file, args } = adapter.command({ bin: found.path, prompt, sessionId: run.sessionId, model: run.model, context, workspace: ws.home });
 
     run.before = snapshot(ws.modsDir, ws.home);
+    // Tell the other browsers' helpers a run is going, so mods it creates start off there (lib/origins.js).
+    if (ws.installId) {
+      try { markRunActive(ws.home, { runId: run.id, by: ws.installId, browser: ws.browser || '', site: run.site }); run.marked = true; } catch (e) { this.logger.warn(`couldn't mark run ${run.id} active: ${e.message}`); }
+    }
     this.logger.info(`agent run ${run.id}: ${run.agent} for ${run.site}${run.sessionId ? ` (resume ${run.sessionId})` : ''}`);
     let child;
     try {
@@ -310,6 +315,7 @@ class Runs {
     this._emit(run, done);
     this._log(run, { webmods: 'done', ...done, exitCode: code, signal, stderrTail: run.stderr.slice(-4000), time: Date.now() });
     this.logger.info(`agent run ${run.id} done: ok=${done.ok} code=${code} signal=${signal} changed=${changedFiles.length}`);
+    if (run.marked) markRunEnded(run.ws.home, run.id);
     if (run.before) this.recent.push({ runId: run.id, site: run.site, scope: run.scope, before: run.before, startedAt: run.startedAt, until: Date.now() + RECENT_MS });
     this.runs.delete(run.id);
     if (this.bySite.get(run.site) === run.id) this.bySite.delete(run.site);

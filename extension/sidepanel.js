@@ -642,7 +642,9 @@ function updateModItem(li, m) {
   li.classList.toggle('off', !on);
   // "not active"/"paused" only once the status agrees the mod is on (not mid-switch).
   const tag = li.querySelector('.tag');
-  tag.textContent = on && m.enabled !== false && !m.registered ? (view.status.userScripts ? 'not active' : 'paused') : '';
+  tag.textContent = on && m.enabled !== false && !m.registered ? (view.status.userScripts ? 'not active' : 'paused')
+    : !on && m.from ? `from ${m.from}` : '';
+  tag.title = !on && m.from ? `Made from ${m.from}. Mods made in another browser start off here; switch it on to use it.` : '';
   tag.hidden = !tag.textContent;
   const err = li.querySelector('.mod-err');
   err.textContent = switchError(m.id, site) || (on && m.error) || '';

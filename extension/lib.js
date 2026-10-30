@@ -246,13 +246,19 @@ export function hostMatchesSite(hostname, site) {
   return h === site || h.endsWith('.' + site);
 }
 
+/** True when the mod was made from another browser's side panel (its origin isn't this install). */
+export function fromOtherBrowser(mod, installId) {
+  return !!(installId && mod?.origin && typeof mod.origin.by === 'string' && mod.origin.by && mod.origin.by !== installId);
+}
+
 /**
- * Mods the helper marks `startOff` (preinstalled by setup) are switched off the first time the extension
- * sees them; `startedOff` remembers that, so after it the switch is the user's. Pure: returns
- * {disabled, startedOff, changed} with new objects when something changed.
+ * Mods the helper marks `startOff` (preinstalled by setup), and mods made from another browser's side
+ * panel, are switched off the first time the extension sees them; `startedOff` remembers that, so after
+ * it the switch is the user's. Pure: returns {disabled, startedOff, changed} with new objects when
+ * something changed.
  */
-export function applyStartOff(mods, disabled = {}, startedOff = {}) {
-  const fresh = (mods || []).filter((m) => m?.startOff && typeof m.id === 'string' && startedOff[m.id] !== true);
+export function applyStartOff(mods, disabled = {}, startedOff = {}, installId = null) {
+  const fresh = (mods || []).filter((m) => (m?.startOff || fromOtherBrowser(m, installId)) && typeof m.id === 'string' && startedOff[m.id] !== true);
   if (!fresh.length) return { disabled, startedOff, changed: false };
   const d = { ...disabled };
   const s = { ...startedOff };
@@ -440,6 +446,15 @@ export function firstInjectionResult(results) {
   if (!r) throw new Error('the script was not injected (the tab may be closed or showing a page extensions cannot access)');
   if (r.error) throw new Error(String(r.error));
   return typeof r.result === 'string' ? r.result : null;
+}
+
+// One chrome.userScripts call that never settles (seen in Firefox) would hold up every queued mod sync and
+// switch behind it, so each call gets a time limit; the error names the call.
+export const USER_SCRIPTS_TIMEOUT_MS = 10000;
+export function timedUserScripts(api, ms = USER_SCRIPTS_TIMEOUT_MS) {
+  const wrap = (name) => (...args) =>
+    withTimeout(Promise.resolve().then(() => api[name](...args)), ms, `userScripts.${name} didn't answer within ${ms / 1000}s`);
+  return { register: wrap('register'), update: wrap('update'), unregister: wrap('unregister'), getScripts: wrap('getScripts') };
 }
 
 export function withTimeout(promise, ms, message) {

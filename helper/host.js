@@ -27,6 +27,7 @@ const { updateHeld, approveHeld } = require('./lib/held');
 const { startOffIds } = require('./lib/preinstalled');
 const { readInstructions, writeInstructions, instructionsFile, MAX_LENGTH } = require('./lib/instructions');
 const { ownSock, removeStaleSockets } = require('./lib/helpers');
+const { loadOrigins, recordOrigins, activeRuns } = require('./lib/origins');
 
 const ws = workspace();
 // This helper's own socket (helper-<pid>.sock), served whether or not it also owns helper.sock; agent
@@ -54,6 +55,7 @@ const state = {
   startedAt: Date.now(),
   role: 'starting', // 'primary' (serves the socket) | 'secondary' (mod sync only)
   hello: null,
+  knownIds: null, // mod ids the last scan saw (null before the first): new ones get an origin
   helloAt: null,
   modsApplied: null,
   mods: [],
@@ -96,7 +98,10 @@ function onExtensionMessage(msg) {
   if (!msg || typeof msg !== 'object') return logger.warn('ignoring non-object message from extension');
   switch (msg.type) {
     case 'hello':
-      state.hello = { version: msg.version ?? null, userScripts: !!msg.userScripts, chrome: msg.chrome ?? null, browser: msg.browser ?? 'Chrome' };
+      state.hello = {
+        version: msg.version ?? null, userScripts: !!msg.userScripts, chrome: msg.chrome ?? null, browser: msg.browser ?? 'Chrome',
+        installId: typeof msg.installId === 'string' && msg.installId ? msg.installId : null,
+      };
       state.helloAt = Date.now();
       logger.info(`hello from extension ${msg.version} on ${state.hello.browser} ${msg.chrome}; userScripts=${!!msg.userScripts}`);
       syncMods('hello', true);
@@ -148,14 +153,17 @@ function syncMods(reason, force) {
   const { mods, problems, warnings } = scanMods(ws.modsDir);
   const plan = planModsMessage(mods);
   try { state.held = updateHeld(ws, mods, runs.scopes()); } catch (e) { logger.error(`held mods: ${e.message}`); }
+  const origins = trackOrigins(mods);
   // Held mods still go to the extension (the panel lists them with an Allow button), marked so they aren't
   // registered. Preinstalled mods are marked startOff: the extension switches them off when it first sees them.
   const startOff = startOffIds(ws.home);
   const sent = plan.mods.map((m) => {
     const out = state.held[m.id] ? { ...m, held: { site: state.held[m.id].site, reason: state.held[m.id].reason } } : m;
-    return startOff.has(m.id) ? { ...out, startOff: true } : out;
+    const o = origins[m.id];
+    const withOrigin = o ? { ...out, origin: { by: o.by, browser: o.browser } } : out;
+    return startOff.has(m.id) ? { ...withOrigin, startOff: true } : withOrigin;
   });
-  const signature = sent.map((m) => `${m.id}:${m.hash}${m.held ? ':held' : ''}${m.startOff ? ':off' : ''}`).join('|');
+  const signature = sent.map((m) => `${m.id}:${m.hash}${m.held ? ':held' : ''}${m.startOff ? ':off' : ''}${m.origin ? `:${m.origin.by}` : ''}`).join('|');
   const errors = [...problems, ...plan.errors];
   const errorsChanged = JSON.stringify(errors) !== JSON.stringify(state.modErrors);
   state.mods = mods;
@@ -174,6 +182,29 @@ function syncMods(reason, force) {
   } catch (e) {
     logger.error(`could not send mods: ${e.message}`);
   }
+}
+
+/**
+ * Attribute mod ids this scan sees for the first time (not on the first scan: those existed before this
+ * helper started) to the agent run that made them, and return all origins (lib/origins.js).
+ */
+function trackOrigins(mods) {
+  const ids = new Set(mods.map((m) => m.id));
+  if (state.knownIds) {
+    const fresh = [...ids].filter((id) => !state.knownIds.has(id));
+    if (fresh.length) {
+      // Every helper reads the same run markers (this one's runs included), so they all agree.
+      const me = state.hello?.installId || null;
+      let active = [];
+      try { active = activeRuns(ws.home).map((r) => ({ ...r, own: !!me && r.by === me })); } catch (e) { logger.warn(`active runs: ${e.message}`); }
+      active.sort((a, b) => Number(b.own) - Number(a.own));
+      try {
+        if (recordOrigins(ws.home, fresh, active)) logger.info(`recorded where ${fresh.join(', ')} came from`);
+      } catch (e) { logger.error(`origins: ${e.message}`); }
+    }
+  }
+  state.knownIds = ids;
+  return loadOrigins(ws.home);
 }
 
 function closeWatchers() {
@@ -244,8 +275,12 @@ function poll() {
 // ---------------------------------------------------------------- agent runs (side panel)
 
 // config.json can change while Chrome runs (`webmods setup` re-records PATH), so re-read it per run.
-// ownSock rides along so runs can give agents WEBMODS_SOCK (a fresh workspace() doesn't have it).
-const runs = new Runs({ getWorkspace: () => ({ ...workspace(ws.home), ownSock: ws.ownSock }), logger, onEvent: onAgentEvent });
+// ownSock rides along so runs can give agents WEBMODS_SOCK (a fresh workspace() doesn't have it), and the
+// extension's install id so runs mark themselves for the other browsers (lib/origins.js).
+const runs = new Runs({
+  getWorkspace: () => ({ ...workspace(ws.home), ownSock: ws.ownSock, installId: state.hello?.installId || null, browser: state.hello?.browser || '' }),
+  logger, onEvent: onAgentEvent,
+});
 const logins = new Logins({ getWorkspace: () => workspace(ws.home), logger, onEvent: onAgentEvent });
 const runSubscribers = new Map(); // runId or loginId -> Set of CLI sockets that started it (see onClientLine)
 const AGENT_COMMANDS = new Set(['agent.list', 'agent.start', 'agent.stop', 'agent.login', 'agent.loginCode', 'agent.loginCancel', 'mod.approve',

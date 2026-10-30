@@ -73,10 +73,17 @@ function renderMods() {
   const key = JSON.stringify(s.mods.map((m) => [m.id, m.name, m.description]));
   if (key !== modsKey) {
     modsKey = key;
-    list.replaceChildren(...s.mods.map(modItem));
+    const open = new Set([...list.querySelectorAll('details[open]')].map((d) => d.dataset.site));
+    list.replaceChildren(...groupBySite(s.mods).map(([site, mods]) => siteGroup(site, mods, open.has(site))));
   }
   const byId = new Map(s.mods.map((m) => [m.id, m]));
-  for (const li of list.children) {
+  for (const group of list.querySelectorAll('details[data-site]')) {
+    const ids = [...group.querySelectorAll('li[data-mod]')].map((li) => li.dataset.mod);
+    const on = ids.filter((id) => shownEnabled(id, enabledIn(disabled, id))).length;
+    group.querySelector('.site-count').textContent =
+      `${ids.length} mod${ids.length === 1 ? '' : 's'}${on === ids.length ? ', all on' : on ? `, ${on} on` : ', all off'}`;
+  }
+  for (const li of list.querySelectorAll('li[data-mod]')) {
     const m = byId.get(li.dataset.mod);
     const on = shownEnabled(m.id, enabledIn(disabled, m.id));
     li.classList.toggle('off', !on);
@@ -90,6 +97,34 @@ function renderMods() {
   syncSwitches(list, (id) => enabledIn(disabled, id));
 }
 
+// Mods grouped by website: the folder name without "www.", so www.google.com and google.com mods
+// share a group. Sites alphabetically, mods by name.
+function groupBySite(mods) {
+  const groups = new Map();
+  for (const m of mods) {
+    const site = String(m.site || m.id.split('/')[0]).replace(/^www\./, '');
+    if (!groups.has(site)) groups.set(site, []);
+    groups.get(site).push(m);
+  }
+  for (const list of groups.values()) list.sort((a, b) => a.name.localeCompare(b.name));
+  return [...groups].sort(([a], [b]) => a.localeCompare(b));
+}
+
+// A collapsible group: the site and how many of its mods are on, then the mods with their switches.
+function siteGroup(site, mods, open) {
+  const li = el('li', 'site');
+  const details = el('details');
+  details.dataset.site = site;
+  details.open = open;
+  const summary = el('summary');
+  summary.append(el('span', 'site-name', site), el('span', 'site-count'));
+  const ul = el('ul', 'site-mods');
+  ul.append(...mods.map(modItem));
+  details.append(summary, ul);
+  li.append(details);
+  return li;
+}
+
 function modItem(m) {
   const li = el('li');
   li.dataset.mod = m.id;
@@ -101,7 +136,7 @@ function modItem(m) {
   tag.hidden = true;
   name.append(label, tag);
   const main = el('div', 'mod-main');
-  main.append(name, el('div', 'mod-id', m.id));
+  main.append(name, el('div', 'mod-id', m.id.split('/').slice(1).join('/')));
   if (m.description) main.append(el('div', 'mod-desc', m.description));
   const err = el('div', 'mod-err');
   err.hidden = true;

@@ -118,14 +118,14 @@ svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width:
 
 .settings { display: grid; gap: 8px; }
 
-/* A site WebMods is off for: only the site's name, "WebMods is disabled" and the button. */
+/* A site WebMods is off for: only "WebMods is disabled" and the button. */
 .gate { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 14px; padding: 24px 16px 64px; }
 .gate[hidden] { display: none; }
 .gate .mod-err { margin: 0; text-align: center; }
 .gate-title { margin: 0; font-size: 15px; font-weight: 600; }
 .btn.go { padding: 8px 16px; border-color: transparent; background: var(--switch-on); color: #04291c; font-size: 13px; font-weight: 600; }
 .btn.go:hover { background: color-mix(in srgb, var(--switch-on) 85%, #000); }
-body.site-off :is(.settings, .notice, .mods, .chat, .composer, #site-switch, #new-chat, #settings-btn) { display: none; }
+body.site-off :is(.bar, .settings, .notice, .mods, .chat, .composer) { display: none; }
 #site-switch { margin-right: 4px; }
 
 .field { display: grid; grid-template-columns: 52px 1fr; align-items: center; gap: 8px; }

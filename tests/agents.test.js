@@ -173,7 +173,7 @@ test('claude adapter: command flags, resume and model', () => {
     '--setting-sources', 'project', '--strict-mcp-config',
     '--allowedTools', 'Read(./**)', 'Glob', 'Grep', 'Bash(webmods:*)', 'Bash(cd:*)', 'Bash(ls:*)',
     '--disallowedTools', 'WebFetch', 'WebSearch', 'Read(./config.json)', 'Edit(./config.json)', 'Edit(./held.json)',
-    'Edit(./AGENTS.md)', 'Edit(./CLAUDE.md)', 'Edit(./.claude/**)', 'Edit(./bin/**)', 'Edit(./app/**)', 'Edit(./runs/**)', '--append-system-prompt', 'CTX']);
+    'Edit(./AGENTS.md)', 'Edit(./CLAUDE.md)', 'Edit(./instructions.md)', 'Edit(./.claude/**)', 'Edit(./bin/**)', 'Edit(./app/**)', 'Edit(./runs/**)', '--append-system-prompt', 'CTX']);
   const r = claude.command({ bin: '/x/claude', prompt: 'hi', context: 'CTX', sessionId: 's1', model: 'opus' });
   assert.deepEqual(r.args.slice(-4), ['--resume', 's1', '--model', 'opus']);
 });
@@ -747,7 +747,7 @@ test('setup records PATH (merging config.json) and writes .claude/settings.json;
     permissions: {
       allow: ['Read(./**)', 'Glob', 'Grep', 'Bash(webmods:*)', 'Bash(cd:*)', 'Bash(ls:*)'],
       deny: ['WebFetch', 'WebSearch', 'Read(./config.json)', 'Edit(./config.json)', 'Edit(./held.json)',
-        'Edit(./AGENTS.md)', 'Edit(./CLAUDE.md)', 'Edit(./.claude/**)', 'Edit(./bin/**)', 'Edit(./app/**)', 'Edit(./runs/**)'],
+        'Edit(./AGENTS.md)', 'Edit(./CLAUDE.md)', 'Edit(./instructions.md)', 'Edit(./.claude/**)', 'Edit(./bin/**)', 'Edit(./app/**)', 'Edit(./runs/**)'],
     },
   });
   assert.match(r.stdout, new RegExp(`agents +claude \\(${fakeBin.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}/claude\\), codex not found`));
@@ -793,7 +793,7 @@ test('run scope: the run token limits webmods requests to the run\'s site; agent
   assert.deepEqual(res.result, { scope: 'example.co.uk' });
   res = await sockRequest(ext.sock, { id: 'b', cmd: 'tabs', args: {} });
   assert.deepEqual(res.result, { scope: null });
-  for (const cmd of ['agent.start', 'agent.list', 'agent.login', 'mod.approve']) {
+  for (const cmd of ['agent.start', 'agent.list', 'agent.login', 'instructions.set', 'mod.approve']) {
     res = await sockRequest(ext.sock, { id: cmd, cmd, args: { id: 'example.com/x', prompt: 'hi', site: 'evil.com' }, token });
     assert.equal(res.ok, false, cmd);
   }
@@ -868,4 +868,40 @@ test('claude adapter: /compact shows progress, not the replayed messages; comman
   const out = [];
   claude.parse(JSON.stringify({ type: 'user', message: { content: '<local-command-stdout>Total cost: $0.01</local-command-stdout>' } }), (e) => out.push(e), {});
   assert.deepStrictEqual(out, [{ kind: 'text', text: 'Total cost: $0.01' }]);
+});
+
+test('instructions: saved and read through the helper, never from a run; claude gets them via CLAUDE.md, not the context', async () => {
+  const { home, bin } = makeHome();
+  const ext = startHost(home);
+  await ext.waitForSocket();
+  let r = await extRequest(ext, 'instructions.get', {});
+  assert.deepEqual(r.result, { text: '', file: path.join(home, 'instructions.md'), max: 4000 });
+  r = await extRequest(ext, 'instructions.set', { text: '  Talk like a caveman.\r\nNo risk talk.\n\n' });
+  assert.equal(r.result.text, 'Talk like a caveman.\nNo risk talk.');
+  assert.equal(fs.readFileSync(path.join(home, 'instructions.md'), 'utf8'), 'Talk like a caveman.\nNo risk talk.\n');
+  assert.equal((await extRequest(ext, 'instructions.get', {})).result.text, 'Talk like a caveman.\nNo risk talk.');
+  r = await extRequest(ext, 'instructions.set', { text: 'x'.repeat(4001) });
+  assert.match(r.error, /limited to 4000 characters/);
+  r = await extRequest(ext, 'instructions.set', { text: 3 });
+  assert.match(r.error, /must be text/);
+
+  // claude reads instructions.md through the workspace's CLAUDE.md: not repeated in its context
+  r = await extRequest(ext, 'agent.start', { ...START, prompt: 'SLEEP caveman' });
+  const call = await waitFor(() => callFor(bin, 'SLEEP caveman'), { message: 'the agent to start' });
+  assert.doesNotMatch(call.argv[call.argv.indexOf('--append-system-prompt') + 1], /caveman/);
+  const res = await sockRequest(ext.sock, { id: 'i', cmd: 'instructions.set', args: { text: 'evil' }, token: call.env.WEBMODS_RUN_TOKEN });
+  assert.match(res.error, /isn't available inside an agent run/);
+  await extRequest(ext, 'agent.stop', { runId: r.result.runId });
+  await waitDone(ext, r.result.runId);
+
+  r = await extRequest(ext, 'instructions.set', { text: '   ' });
+  assert.equal(r.result.text, '');
+  assert.ok(!fs.existsSync(path.join(home, 'instructions.md')));
+});
+
+test('instructionsContext: for agents that don\'t read CLAUDE.md', () => {
+  const { instructionsContext } = require('../helper/lib/instructions');
+  assert.equal(instructionsContext(''), '');
+  assert.match(instructionsContext('Talk like a caveman.'), /^\n\nThe user's own instructions for every run \(instructions\.md;.*\):\nTalk like a caveman\.$/s);
+  assert.match(fs.readFileSync(path.join(__dirname, '..', 'helper', 'workspace', 'CLAUDE.md'), 'utf8'), /^@instructions\.md$/m);
 });

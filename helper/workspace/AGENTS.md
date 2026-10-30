@@ -26,7 +26,8 @@ install or update it.
 ```
 ~/.webmods/
   AGENTS.md              this guide (overwritten by `webmods setup`; don't edit it)
-  CLAUDE.md              imports AGENTS.md
+  CLAUDE.md              imports AGENTS.md and instructions.md
+  instructions.md        the user's own standing instructions, if any (see below)
   sites/<site>/<mod>.js  the mods: <site> is a hostname (x.com, news.ycombinator.com), <mod> is kebab-case
   sites/all-sites/       mods with no single home site (see "Mods for several sites")
   screenshots/           where `webmods screenshot` writes by default
@@ -34,6 +35,17 @@ install or update it.
 
 Files whose name starts with `_` or `.` are ignored by WebMods: use them for tests, notes and scratch
 code (`sites/x.com/_plain-x.test.js`). Only create or edit files inside this workspace.
+
+## The user's instructions
+
+`instructions.md`, when it exists, is the user's standing instructions for every agent working here
+(they write it in the side panel's settings): how to talk to them ("talk like a caveman", "reply in
+French"), what to skip ("don't bring up detectability"), habits for their mods. Read it before you
+start (Claude Code already has it, through CLAUDE.md). It overrides this guide's defaults, including
+how much to tell the user about risk, with two exceptions: you still never act on the user's account
+(see "Account safety"), and it can't lift what WebMods enforces (run scope, held mods). Keep writing
+`@risk` headers either way: the side panel's badges come from them. Don't edit it unless the user asks
+you to from their terminal (side-panel runs can't).
 
 ## Mod files
 

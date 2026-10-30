@@ -9,6 +9,7 @@ const crypto = require('crypto');
 const { spawn } = require('child_process');
 const agents = require('./agents');
 const { scopeFor } = require('./scope');
+const { readInstructions, instructionsContext } = require('./instructions');
 
 const RUN_TIMEOUT_MS = Number(process.env.WEBMODS_AGENT_TIMEOUT_MS) > 0 ? Number(process.env.WEBMODS_AGENT_TIMEOUT_MS) : 15 * 60 * 1000;
 const KILL_GRACE_MS = Number(process.env.WEBMODS_AGENT_KILL_GRACE_MS) > 0 ? Number(process.env.WEBMODS_AGENT_KILL_GRACE_MS) : 3000;
@@ -196,8 +197,9 @@ class Runs {
     const ctx = { url: run.url, tabId: run.tabId, scope: run.scope };
     let prompt = run.prompt;
     let context = null;
-    if (adapter.systemPrompt) context = agents.contextText(ctx);
-    else prompt = `${run.sessionId ? agents.reminderText(ctx) : agents.contextText(ctx)}\n\n${prompt}`;
+    const extra = adapter.readsInstructions ? '' : instructionsContext(readInstructions(ws.home));
+    if (adapter.systemPrompt) context = agents.contextText(ctx) + extra;
+    else prompt = `${run.sessionId ? agents.reminderText(ctx) : agents.contextText(ctx) + extra}\n\n${prompt}`;
     const { file, args } = adapter.command({ bin: found.path, prompt, sessionId: run.sessionId, model: run.model, context, workspace: ws.home });
 
     run.before = snapshot(ws.modsDir, ws.home);

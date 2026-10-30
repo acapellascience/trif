@@ -270,7 +270,7 @@ function setup(opts = {}) {
     if (added.length) say(`mods          preinstalled ${added.join(', ')}: switched off until you turn them on in the side panel`);
   }
   const claudeSrc = path.join(helperDir, 'workspace', 'CLAUDE.md');
-  const claude = fs.existsSync(claudeSrc) ? fs.readFileSync(claudeSrc, 'utf8') : '@AGENTS.md\n';
+  const claude = fs.existsSync(claudeSrc) ? fs.readFileSync(claudeSrc, 'utf8') : '@AGENTS.md\n@instructions.md\n';
   fs.writeFileSync(path.join(home, 'CLAUDE.md'), claude);
 
   // Side panel agent runs: Claude Code's permissions for the workspace (overwritten every time), and

@@ -31,6 +31,12 @@
     <input id="model" type="text" list="model-options" placeholder="Agent default" autocomplete="off" spellcheck="false">
     <datalist id="model-options"><option value="opus"><option value="sonnet"><option value="haiku"></datalist>
   </label>
+  <label class="field field-stacked">
+    <span>Instructions for your agent</span>
+    <textarea id="instructions" rows="3" maxlength="4000" spellcheck="true" disabled
+      placeholder="Read by every chat. For example: talk like a caveman; don't bring up detectability."></textarea>
+  </label>
+  <p id="instructions-note" class="note">Applies from your next message, here and in Claude Code in ~/.webmods.</p>
   <p class="note"><a href="#" id="setup-link">Setup and status</a></p>
 </section>
 

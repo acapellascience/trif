@@ -353,7 +353,7 @@ Nothing is hosted; the agent uses the user's own login/subscription.
   `{type: "agent.start", site, tabId, url, prompt, sessionId, agent, model}`, `{type: "agent.stop", runId}`,
   `{type: "agent.list"}`, `{type: "agent.login", agent}`, `{type: "agent.loginCode", loginId, code}`,
   `{type: "agent.loginCancel", loginId}`, `{type: "status"}`, `{type: "mod.enable", id, enabled, tab}`,
-  `{type: "mod.approve", id, tab}`, `{type: "chat.clear", site}`, `{type: "chat.note", site, text}`. Background forwards agent commands to the
+  `{type: "mod.approve", id, tab}`, `{type: "instructions.get"}`, `{type: "instructions.set", text}`, `{type: "chat.clear", site}`, `{type: "chat.note", site, text}`. Background forwards agent commands to the
   helper as native `request`s with the same cmd and relays every native `{type: "agentEvent", runId,
   event}` to all panel ports (panels ignore runs and logins they didn't start, by id).
   If the helper disconnects mid-run (or mid-login), the background sends the panel `{kind: "error"}` then
@@ -372,6 +372,8 @@ New native request commands (answered with a normal `response`):
 | `agent.loginCode` | `loginId, code` | `{sent: true}` (writes the code and a newline to the login's stdin) |
 | `agent.loginCancel` | `loginId` | `{cancelled: true}` |
 | `mod.approve` | `id` | `{id, approved: true}`: releases a held mod (see "Run scope"); also on the socket, not from a run |
+| `instructions.get` | | `{text, file, max}`: the user's standing instructions (`~/.webmods/instructions.md`, `''` if none) |
+| `instructions.set` | `text` | same; trimmed, at most 4000 characters, empty removes the file. Not from a run |
 
 `loggedIn` is `true` / `false`, or `null` when unknown or the agent isn't available (from the adapter's
 `loginStatus`, which spends no tokens; cached 30 s per agent, forgotten when a login finishes or a run
@@ -432,7 +434,7 @@ Suffix List). `helper/lib/scope.js` computes it; `extension/lib.js` mirrors the 
 
 - **Token.** `agent.start` makes a random token per run and gives the agent `WEBMODS_RUN_TOKEN`; the
   CLI sends it with every request. The helper answers a request with an unknown token (the run ended)
-  with an error, refuses `agent.*` and `mod.approve` from a run, and sets `args.scope` on everything
+  with an error, refuses `agent.*`, `mod.approve` and `instructions.*` from a run, and sets `args.scope` on everything
   else it forwards (overriding any `scope` the client sent). Requests without a token (the user's
   terminal, the user's own agent outside the panel) are not scoped. The CLI itself refuses `setup`,
   `agent` and `approve` when the variable is set.
@@ -463,6 +465,8 @@ context, workspace}) → {file, args}`, and `parse(line, emit)` turning one stdo
 Login: `loginStatusArgs` + `parseLoginStatus({status, error, stdout, stderr}) → {loggedIn, detail}`
 (`loginStatus()` runs it synchronously, for `webmods doctor`), `loginFix`, and `login: {args,
 parseLine(line) → {kind:"login", url} | {kind:"text", text} | null}` or `null` when the panel can't log it in.
+The user's standing instructions (`instructions.md`) reach claude through the workspace's CLAUDE.md
+(`@instructions.md`; adapter flag `readsInstructions`); other adapters get them appended to the context.
 
 - **claude** (Claude Code ≥ 2.1, tested): `claude -p <prompt> --output-format stream-json --verbose
   --permission-mode acceptEdits --setting-sources project --strict-mcp-config --append-system-prompt <context>`
@@ -470,7 +474,7 @@ parseLine(line) → {kind:"login", url} | {kind:"text", text} | null}` or `null`
   inside the workspace (and denies writes outside it); with `dontAsk`, `Edit`/`Write` allow rules didn't
   allow writes at all (2.1.149). Everything else is passed as `--allowedTools Read(./**) Glob Grep
   Bash(webmods:*) Bash(cd:*) Bash(ls:*) --disallowedTools WebFetch WebSearch "Read(./config.json)"
-  "Edit(./config.json)" "Edit(./held.json)" "Edit(./AGENTS.md)" "Edit(./CLAUDE.md)" "Edit(./.claude/**)"
+  "Edit(./config.json)" "Edit(./held.json)" "Edit(./AGENTS.md)" "Edit(./CLAUDE.md)" "Edit(./instructions.md)" "Edit(./.claude/**)"
   "Edit(./bin/**)" "Edit(./app/**)" "Edit(./runs/**)"`: nothing that runs arbitrary code, and no edits
   to the files that control WebMods (see "Run scope"; `Edit(./*)` denied every file, sites/ included,
   in 2.1.312, so the files are listed) (2.1.312 ignored `Bash(...)` allow rules from the workspace's settings file in -p

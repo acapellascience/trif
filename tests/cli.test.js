@@ -422,7 +422,7 @@ test('setup: workspace, wrappers, manifest, link; idempotent; leaves sites alone
   let r = await runCli(setupArgs(root), { home: path.join(root, 'unused') });
   assert.equal(r.code, 0, r.stderr + r.stdout);
   for (const d of ['sites', 'screenshots', 'bin']) assert.ok(fs.statSync(path.join(ws, d)).isDirectory(), d);
-  assert.equal(fs.readFileSync(path.join(ws, 'CLAUDE.md'), 'utf8').trim(), '@AGENTS.md');
+  assert.equal(fs.readFileSync(path.join(ws, 'CLAUDE.md'), 'utf8').trim(), '@AGENTS.md\n@instructions.md');
   if (fs.existsSync(path.join(REPO, 'helper', 'workspace', 'AGENTS.md'))) assert.ok(fs.existsSync(path.join(ws, 'AGENTS.md')));
 
   const hostWrapper = path.join(ws, 'bin', 'webmods-host');
@@ -462,7 +462,7 @@ test('setup: workspace, wrappers, manifest, link; idempotent; leaves sites alone
   r = await runCli(setupArgs(root), { home: path.join(root, 'unused') });
   assert.equal(r.code, 0);
   assert.equal(fs.readFileSync(path.join(ws, 'sites', 'a.com', 'mine.js'), 'utf8'), 'keep me');
-  assert.equal(fs.readFileSync(path.join(ws, 'CLAUDE.md'), 'utf8').trim(), '@AGENTS.md');
+  assert.equal(fs.readFileSync(path.join(ws, 'CLAUDE.md'), 'utf8').trim(), '@AGENTS.md\n@instructions.md');
   assert.match(r.stdout, /already/);
   assert.equal(fs.readFileSync(hostWrapper, 'utf8'), host);
 });

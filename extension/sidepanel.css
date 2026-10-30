@@ -129,7 +129,22 @@ svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width:
   background: var(--bg);
 }
 
+.field-stacked { grid-template-columns: 1fr; gap: 4px; }
+.field textarea {
+  width: 100%;
+  min-width: 0;
+  box-sizing: border-box;
+  padding: 5px 8px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: var(--bg);
+  resize: vertical;
+  font-size: 13px;
+}
+.field textarea::placeholder { color: var(--faint); }
+
 .note { margin: 0; color: var(--muted); font-size: 12px; }
+.note.error { color: var(--bad); }
 
 .notice p { margin: 0; }
 .notice p + p, .notice p + .actions { margin-top: 6px; }

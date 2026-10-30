@@ -60,6 +60,9 @@ Nothing goes to a WebMods server: there isn't one.
 - Some mods are easier for a site to notice than others. A badge says so: **detectable** (for example, it
   hides ads, so they never report being seen) or **changes requests** (the site could see unusual
   traffic). The agent tells you before it builds anything in the second group.
+- Standing instructions for your agent ("talk like a caveman", "don't bring up detectability") go in
+  the box in the side panel's settings (the gear). Every chat reads them, and so does Claude Code when
+  you run it in `~/.webmods`. They're saved in `~/.webmods/instructions.md`.
 - Commands: `/model sonnet` (or `opus`, `haiku`, `default`) switches the model, `/clear` starts a new
   chat, `/compact` shrinks a long conversation, `/context` shows how full it is, `/help` lists these.
 

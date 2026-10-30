@@ -25,6 +25,7 @@ const { Logins } = require('./lib/logins');
 const agents = require('./lib/agents');
 const { updateHeld, approveHeld } = require('./lib/held');
 const { startOffIds } = require('./lib/preinstalled');
+const { readInstructions, writeInstructions, instructionsFile, MAX_LENGTH } = require('./lib/instructions');
 
 const ws = workspace();
 try { fs.mkdirSync(ws.home, { recursive: true }); } catch { /* logged below if it matters */ }
@@ -242,7 +243,8 @@ function poll() {
 const runs = new Runs({ getWorkspace: () => workspace(ws.home), logger, onEvent: onAgentEvent });
 const logins = new Logins({ getWorkspace: () => workspace(ws.home), logger, onEvent: onAgentEvent });
 const runSubscribers = new Map(); // runId or loginId -> Set of CLI sockets that started it (see onClientLine)
-const AGENT_COMMANDS = new Set(['agent.list', 'agent.start', 'agent.stop', 'agent.login', 'agent.loginCode', 'agent.loginCancel', 'mod.approve']);
+const AGENT_COMMANDS = new Set(['agent.list', 'agent.start', 'agent.stop', 'agent.login', 'agent.loginCode', 'agent.loginCancel', 'mod.approve',
+  'instructions.get', 'instructions.set']);
 
 function onAgentEvent(runId, event) {
   // Before the run's last event goes out: hold what it wrote for other sites, and say so in `done`.
@@ -278,6 +280,12 @@ function agentCommand(cmd, args) {
       logger.info(`approved held mod ${id}`);
       syncMods('approve', false);
       return { id, approved: true };
+    }
+    case 'instructions.get': return { text: readInstructions(ws.home), file: instructionsFile(ws.home), max: MAX_LENGTH };
+    case 'instructions.set': {
+      const text = writeInstructions(ws.home, args.text);
+      logger.info(text ? `instructions saved (${text.length} chars)` : 'instructions cleared');
+      return { text, file: instructionsFile(ws.home), max: MAX_LENGTH };
     }
     default: return logins.cancel(args.loginId);
   }

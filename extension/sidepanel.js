@@ -14,6 +14,7 @@ const emptyChat = () => ({ sessionId: null, agent: null, messages: [], run: null
 const ui = {
   dot: $('#dot'), site: $('#site'), newChat: $('#new-chat'), settingsBtn: $('#settings-btn'),
   settings: $('#settings'), agent: $('#agent'), agentNote: $('#agent-note'), model: $('#model'),
+  instructions: $('#instructions'), instructionsNote: $('#instructions-note'),
   notice: $('#notice'), mods: $('#mods'), modsCount: $('#mods-count'), modList: $('#mod-list'),
   chat: $('#chat'), empty: $('#empty'), messages: $('#messages'), working: $('#working'),
 
@@ -778,8 +779,52 @@ ui.settingsBtn.addEventListener('click', () => {
   const open = ui.settings.hidden;
   ui.settings.hidden = !open;
   ui.settingsBtn.setAttribute('aria-expanded', String(open));
-  if (open && view.status?.helper?.connected) loadAgents();
+  if (open && view.status?.helper?.connected) { loadAgents(); loadInstructions(); }
 });
+
+// The user's standing instructions for every agent run: ~/.webmods/instructions.md, read and written
+// through the helper (helper/lib/instructions.js). Loaded when settings open; saved as they type.
+const INSTRUCTIONS_NOTE = 'Applies from your next message, here and in Claude Code in ~/.webmods.';
+let instructionsTimer = null;
+let instructionsSaved = null; // the text the helper last confirmed
+
+function instructionsNote(text, error) {
+  ui.instructionsNote.textContent = text;
+  ui.instructionsNote.classList.toggle('error', !!error);
+}
+
+async function loadInstructions() {
+  if (document.activeElement === ui.instructions && instructionsSaved !== null) return; // don't clobber typing
+  try {
+    const r = await request({ type: 'instructions.get' });
+    instructionsSaved = r.text;
+    if (document.activeElement !== ui.instructions || !ui.instructions.value) ui.instructions.value = r.text;
+    ui.instructions.disabled = false;
+    instructionsNote(INSTRUCTIONS_NOTE);
+  } catch (e) {
+    ui.instructions.disabled = instructionsSaved === null;
+    instructionsNote(`Couldn't load them: ${String(e?.message ?? e)}`, true);
+  }
+}
+
+async function saveInstructions() {
+  clearTimeout(instructionsTimer);
+  const text = ui.instructions.value;
+  if (instructionsSaved === null || text.trim() === instructionsSaved) return;
+  try {
+    const r = await request({ type: 'instructions.set', text });
+    instructionsSaved = r.text;
+    instructionsNote(r.text ? 'Saved. ' + INSTRUCTIONS_NOTE : 'Cleared.');
+  } catch (e) {
+    instructionsNote(`Couldn't save them: ${String(e?.message ?? e)}`, true);
+  }
+}
+
+ui.instructions.addEventListener('input', () => {
+  clearTimeout(instructionsTimer);
+  instructionsTimer = setTimeout(saveInstructions, 800);
+});
+ui.instructions.addEventListener('blur', saveInstructions);
 ui.agent.addEventListener('change', () => saveSettings({ agent: ui.agent.value }));
 let modelTimer = null;
 ui.model.addEventListener('input', () => {

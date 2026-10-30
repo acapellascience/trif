@@ -10,10 +10,11 @@ const { findExecutable, versionOf, relToWorkspace, oneLine, parseJsonLine, captu
 // replaces `node --check`.
 const ALLOWED_TOOLS = ['Read(./**)', 'Glob', 'Grep', 'Bash(webmods:*)', 'Bash(cd:*)', 'Bash(ls:*)'];
 // Edits are for mods: everything in the workspace outside sites/ is off limits (config.json can hold API
-// keys, held.json is the user's approvals, .claude/ and bin/ would widen what runs may do).
+// keys, held.json is the user's approvals, instructions.md their standing instructions, .claude/ and bin/
+// would widen what runs may do).
 // (Not `Edit(./*)` for the top-level files: Claude Code 2.1.312 applied that to every file, sites/ too.)
 const DENIED_TOOLS = ['WebFetch', 'WebSearch', 'Read(./config.json)', 'Edit(./config.json)', 'Edit(./held.json)',
-  'Edit(./AGENTS.md)', 'Edit(./CLAUDE.md)', 'Edit(./.claude/**)', 'Edit(./bin/**)', 'Edit(./app/**)', 'Edit(./runs/**)'];
+  'Edit(./AGENTS.md)', 'Edit(./CLAUDE.md)', 'Edit(./instructions.md)', 'Edit(./.claude/**)', 'Edit(./bin/**)', 'Edit(./app/**)', 'Edit(./runs/**)'];
 
 const NOT_LOGGED_IN = "Claude Code isn't logged in: run `claude` in a terminal and log in (type /login)";
 
@@ -24,6 +25,7 @@ const adapter = {
   name: 'Claude Code',
   binary: 'claude',
   systemPrompt: true, // context goes in --append-system-prompt on every run
+  readsInstructions: true, // the workspace's CLAUDE.md imports instructions.md
   missing: "Claude Code isn't installed, or the helper can't find it. Install it (https://claude.com/claude-code), " +
     'then run `webmods setup` in the same terminal so the helper finds it.',
 

@@ -671,6 +671,8 @@ async function onPanelMessage(msg) {
   switch (msg?.type) {
     case 'status': return uiStatus();
     case 'agent.list': return helperRequest('agent.list', {}, 20000);
+    case 'instructions.get': return helperRequest('instructions.get', {}, 10000);
+    case 'instructions.set': return helperRequest('instructions.set', { text: String(msg.text ?? '') }, 10000);
     case 'agent.start': return startAgent(msg);
     case 'agent.stop': return stopAgent(msg.runId);
     case 'agent.login': return startLogin(msg);

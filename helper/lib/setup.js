@@ -361,9 +361,18 @@ function setup(opts = {}) {
     else say(`                fish_add_path ${ws.bin}`);
   }
 
-  // 7. Next steps
+  // 7. Next steps (Firefox's alone when it's the only browser set up)
   say('');
   say('Next steps:');
+  if (!targets.some((t) => !t.firefox)) {
+    say('  1. Open the signed WebMods add-on (webmods-firefox.xpi) in Firefox, e.g. drag it onto a Firefox');
+    say('     window, and click Add.');
+    say('  2. Click the WebMods toolbar button to open the sidebar, then "Allow user scripts" and Allow.');
+    say('  3. If Firefox was already running before this setup, quit it completely and reopen it.');
+    say('  4. Check everything with: webmods doctor');
+    say(`  Then ask your coding agent to work in ${home} (it reads AGENTS.md there).`);
+    return { ok, lines, ws, manifests, nodePath, mode, root };
+  }
   say('  1. Install the extension. Until WebMods is on the Chrome Web Store, load it unpacked:');
   say('     open chrome://extensions, turn on "Developer mode" (top right), click "Load unpacked"');
   say(`     and choose ${extensionDir}`);

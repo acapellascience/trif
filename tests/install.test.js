@@ -367,3 +367,13 @@ test('build-extension firefox: sidebar, background scripts, optional userScripts
   assert.deepEqual(m.optional_permissions, ['userScripts']);
   assert.equal(m.browser_specific_settings.gecko.id, P.FIREFOX_EXTENSION_ID);
 });
+
+test('setup for Firefox alone gives only Firefox\'s next steps', async () => {
+  const ws = tempDir();
+  const r = await runCli(['setup', '--browser', 'firefox', '--no-link', '--no-examples'], { home: ws });
+  assert.equal(r.code, 0, r.stderr);
+  const next = r.stdout.slice(r.stdout.indexOf('Next steps:'));
+  assert.match(next, /1\. Open the signed WebMods add-on \(webmods-firefox\.xpi\) in Firefox/);
+  assert.match(next, /"Allow user scripts"/);
+  assert.doesNotMatch(next, /chrome:\/\/extensions|Load unpacked/);
+});

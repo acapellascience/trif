@@ -611,6 +611,10 @@ test('markdown: escapes everything before formatting', async () => {
   assert.match(evil, /<strong>&lt;b&gt;bold&lt;\/b&gt;<\/strong>/);
   // code spans and blocks stay literal
   assert.strictEqual(renderMarkdown('use `<div onclick=x>` here'), '<p>use <code>&lt;div onclick=x&gt;</code> here</p>');
+  assert.strictEqual(renderMarkdown('Usage\n\n| Category | Tokens |\n|----------|--------|\n| **System** | 3.4k |\n| <b>x</b> | 1 |\n\nafter'),
+    '<p>Usage</p><table><thead><tr><th>Category</th><th>Tokens</th></tr></thead><tbody><tr><td><strong>System</strong></td><td>3.4k</td></tr>' +
+    '<tr><td>&lt;b&gt;x&lt;/b&gt;</td><td>1</td></tr></tbody></table><p>after</p>');
+  assert.strictEqual(renderMarkdown('| not a table |'), '<p>| not a table |</p>', 'a row without a separator stays text');
   assert.strictEqual(renderMarkdown('```html\n<p>**not bold**</p>\n```'), '<pre><code>&lt;p&gt;**not bold**&lt;/p&gt;</code></pre>');
   assert.strictEqual(renderMarkdown('```\nunclosed <x>'), '<pre><code>unclosed &lt;x&gt;</code></pre>');
   // only http(s)/mailto links; quotes can't break out of href

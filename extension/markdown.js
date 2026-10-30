@@ -1,6 +1,6 @@
 // A small, safe markdown renderer for agent replies in the side panel. The input is escaped FIRST;
 // only then are a few constructs turned into tags this file writes itself: paragraphs, line breaks,
-// lists, headings (as <h4>), block quotes, `code`, fenced code blocks, **bold**, *italic*, and links
+// lists, headings (as <h4>), block quotes, tables, `code`, fenced code blocks, **bold**, *italic*, and links
 // (http/https/mailto only, opening in a new tab). Nothing from the input ever becomes raw HTML.
 
 const ESC = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' };
@@ -43,6 +43,10 @@ function inline(esc) {
 }
 
 const LIST_ITEM = /^\s{0,6}([-*+]|\d{1,9}[.)])\s+(.*)$/;
+// A table: a `| a | b |` row followed by a `|---|---|` separator row (Claude Code's /context prints these).
+const TABLE_ROW = /^\s*\|.*\|\s*$/;
+const TABLE_SEP = /^\s*\|?\s*:?-{2,}:?\s*(\|\s*:?-{2,}:?\s*)*\|?\s*$/;
+const cells = (line) => line.trim().replace(/^\|/, '').replace(/\|$/, '').split('|').map((c) => inline(escapeHtml(c.trim())));
 
 /** Render markdown text to an HTML string that is safe to insert. */
 export function renderMarkdown(text) {
@@ -85,6 +89,16 @@ export function renderMarkdown(text) {
     const heading = /^\s{0,3}#{1,6}\s+(.*?)\s*#*\s*$/.exec(line);
     if (heading) { flushAll(); out.push(`<h4>${inline(escapeHtml(heading[1]))}</h4>`); continue; }
     if (/^\s{0,3}([-*_])(\s*\1){2,}\s*$/.test(line)) { flushAll(); out.push('<hr>'); continue; }
+    if (TABLE_ROW.test(line) && i + 1 < lines.length && TABLE_SEP.test(lines[i + 1])) {
+      flushAll();
+      const head = cells(line);
+      const rows = [];
+      for (i += 2; i < lines.length && TABLE_ROW.test(lines[i]); i++) rows.push(cells(lines[i]));
+      i--;
+      out.push(`<table><thead><tr>${head.map((c) => `<th>${c}</th>`).join('')}</tr></thead>` +
+        `<tbody>${rows.map((r) => `<tr>${r.map((c) => `<td>${c}</td>`).join('')}</tr>`).join('')}</tbody></table>`);
+      continue;
+    }
     const q = /^\s{0,3}>\s?(.*)$/.exec(line);
     if (q) { flushPara(); flushList(); quote.push(q[1]); continue; }
     const item = LIST_ITEM.exec(line);
@@ -107,5 +121,6 @@ export function renderMarkdown(text) {
 }
 
 /** The tags and attributes renderMarkdown can produce (used as a Sanitizer allowlist in the panel). */
-export const MARKDOWN_ELEMENTS = ['p', 'br', 'ul', 'ol', 'li', 'h4', 'hr', 'blockquote', 'pre', 'code', 'strong', 'em', 'a'];
+export const MARKDOWN_ELEMENTS = ['p', 'br', 'ul', 'ol', 'li', 'h4', 'hr', 'blockquote', 'pre', 'code', 'strong', 'em', 'a',
+  'table', 'thead', 'tbody', 'tr', 'th', 'td'];
 export const MARKDOWN_ATTRIBUTES = ['href', 'target', 'rel', 'start'];

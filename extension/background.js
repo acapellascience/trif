@@ -789,9 +789,11 @@ async function onAgentEvent(runId, event, relay = true) {
         for (const h of Array.isArray(event.held) ? event.held : []) {
           push('error', `${h.id} is on hold: ${h.reason}. It won't run until you allow it (in Mods above).`);
         }
+        // Held mods don't run, so they don't count as changes to reload for.
+        const held = (Array.isArray(event.held) ? event.held : []).map((h) => `${h.id}.js`);
         chat.last = {
           runId, ok: !!event.ok, time,
-          changedFiles: Array.isArray(event.changedFiles) ? event.changedFiles : [],
+          changedFiles: (Array.isArray(event.changedFiles) ? event.changedFiles : []).filter((f) => !held.some((h) => String(f).endsWith(`/${h}`))),
           costUsd: typeof event.costUsd === 'number' ? event.costUsd : null,
         };
         chat.run = null;

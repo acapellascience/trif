@@ -82,7 +82,11 @@ function parseHeader(code) {
   return out;
 }
 
+// The folder for mods with no single home site (every site, or several unrelated ones).
+const ALL_SITES = 'all-sites';
+
 function defaultMatches(site) {
+  if (site === ALL_SITES) return ['*://*/*'];
   const host = String(site).toLowerCase().replace(/:\d+$/, '');
   // `*.<ip>` is not a meaningful (or valid) host pattern, so IPs only get the exact pattern.
   if (/^\d{1,3}(\.\d{1,3}){3}$/.test(host) || host.startsWith('[')) return [`*://${host}/*`];
@@ -201,6 +205,6 @@ function summarize(mod) {
 }
 
 module.exports = {
-  RUN_AT, parseHeader, defaultMatches, buildMod, listModFiles, folderFingerprint, scanMods,
+  RUN_AT, ALL_SITES, parseHeader, defaultMatches, buildMod, listModFiles, folderFingerprint, scanMods,
   planModsMessage, summarize, isIgnoredName, sha1,
 };

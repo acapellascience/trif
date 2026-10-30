@@ -2,6 +2,7 @@
 // switch, shared with the side panel). Polls the service worker, which also re-checks the switch on
 // every status request; switches follow chrome.storage.local `disabled` live.
 
+import { modSites } from './lib.js';
 import { modSwitch, syncSwitches, shownEnabled, switchError, enabledIn, onSwitchChange } from './modswitch.js';
 
 const $ = (sel) => document.querySelector(sel);
@@ -70,7 +71,7 @@ function renderMods() {
     modsDetail.replaceChildren();
   }
   // Rebuilt only when the set of mods changes, so a focused switch keeps focus through the polling.
-  const key = JSON.stringify(s.mods.map((m) => [m.id, m.name, m.description]));
+  const key = JSON.stringify(s.mods.map((m) => [m.id, m.name, m.description, m.matches]));
   if (key !== modsKey) {
     modsKey = key;
     const open = new Set([...list.querySelectorAll('details[open]')].map((d) => d.dataset.site));
@@ -97,17 +98,36 @@ function renderMods() {
   syncSwitches(list, (id) => enabledIn(disabled, id));
 }
 
-// Mods grouped by website: the folder name without "www.", so www.google.com and google.com mods
-// share a group. Sites alphabetically, mods by name.
+// Group keys that aren't websites: mods matching every site, and mods for several sites with none of
+// them their folder (usually ones in sites/all-sites/).
+const EVERY_SITE = '*';
+const SEVERAL_SITES = '+';
+const GROUP_NAMES = { [EVERY_SITE]: 'Every site', [SEVERAL_SITES]: 'Several sites' };
+
+// A mod's group, and the other sites it runs on (shown under it). The group is its folder without
+// "www." (so www.google.com and google.com mods share one) when the mod runs there, else the one site
+// it runs on; a mod for x.com that also matches twitter.com is in x.com, "also runs on twitter.com".
+function placeMod(m) {
+  const { everywhere, sites } = modSites(m);
+  if (everywhere) return { group: EVERY_SITE, others: [] };
+  const folder = String(m.site || m.id.split('/')[0]).replace(/^www\./, '');
+  const covers = (s) => s === folder || folder.endsWith('.' + s) || s.endsWith('.' + folder);
+  if (!sites.length || sites.some(covers)) return { group: folder, others: sites.filter((s) => !covers(s)) };
+  if (sites.length === 1) return { group: sites[0], others: [] };
+  return { group: SEVERAL_SITES, others: sites };
+}
+
+// Every site first, then several sites, then websites alphabetically; mods by name.
 function groupBySite(mods) {
   const groups = new Map();
   for (const m of mods) {
-    const site = String(m.site || m.id.split('/')[0]).replace(/^www\./, '');
-    if (!groups.has(site)) groups.set(site, []);
-    groups.get(site).push(m);
+    const { group } = placeMod(m);
+    if (!groups.has(group)) groups.set(group, []);
+    groups.get(group).push(m);
   }
   for (const list of groups.values()) list.sort((a, b) => a.name.localeCompare(b.name));
-  return [...groups].sort(([a], [b]) => a.localeCompare(b));
+  const rank = (g) => (g === EVERY_SITE ? 0 : g === SEVERAL_SITES ? 1 : 2);
+  return [...groups].sort(([a], [b]) => rank(a) - rank(b) || a.localeCompare(b));
 }
 
 // A collapsible group: the site and how many of its mods are on, then the mods with their switches.
@@ -117,7 +137,7 @@ function siteGroup(site, mods, open) {
   details.dataset.site = site;
   details.open = open;
   const summary = el('summary');
-  summary.append(el('span', 'site-name', site), el('span', 'site-count'));
+  summary.append(el('span', 'site-name', GROUP_NAMES[site] || site), el('span', 'site-count'));
   const ul = el('ul', 'site-mods');
   ul.append(...mods.map(modItem));
   details.append(summary, ul);
@@ -137,6 +157,8 @@ function modItem(m) {
   name.append(label, tag);
   const main = el('div', 'mod-main');
   main.append(name, el('div', 'mod-id', m.id.split('/').slice(1).join('/')));
+  const { group, others } = placeMod(m);
+  if (others.length) main.append(el('div', 'mod-sites', `${group === SEVERAL_SITES ? 'Runs on' : 'Also runs on'} ${others.join(', ')}`));
   if (m.description) main.append(el('div', 'mod-desc', m.description));
   const err = el('div', 'mod-err');
   err.hidden = true;

@@ -8,7 +8,7 @@ const path = require('path');
 const vm = require('vm');
 const P = require('./lib/paths');
 const { request, streamRun, streamLogin, HelperError } = require('./lib/client');
-const { scanMods, planModsMessage, isIgnoredName } = require('./lib/mods');
+const { ALL_SITES, scanMods, planModsMessage, isIgnoredName } = require('./lib/mods');
 const { COMMANDS, mainHelp, commandHelp } = require('./lib/help');
 const { loadHeld } = require('./lib/held');
 
@@ -466,7 +466,10 @@ const handlers = {
     const file = path.join(ctx.ws.modsDir, site, `${mod}.js`);
     if (fs.existsSync(file)) throw new HelperError(`${file} already exists`, 'command');
     const tpl = fs.readFileSync(path.join(P.HELPER_DIR, 'templates', 'mod.js'), 'utf8');
-    const text = tpl.replace(/\{\{site\}\}/g, site).replace(/\{\{mod\}\}/g, mod).replace(/\{\{name\}\}/g, titleCase(mod));
+    let text = tpl;
+    // all-sites mods run everywhere until the agent narrows the @match lines.
+    if (site === ALL_SITES) text = text.replace(/^\/\/ @match .*\n(\/\/ @match .*\n)*/m, '// @match       *://*/*\n');
+    text = text.replace(/\{\{site\}\}/g, site).replace(/\{\{mod\}\}/g, mod).replace(/\{\{name\}\}/g, titleCase(mod));
     fs.mkdirSync(path.dirname(file), { recursive: true });
     fs.writeFileSync(file, text);
     if (ctx.json) return printJson({ id: `${site}/${mod}`, file });

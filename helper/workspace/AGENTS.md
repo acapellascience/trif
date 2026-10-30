@@ -28,6 +28,7 @@ install or update it.
   AGENTS.md              this guide (overwritten by `webmods setup`; don't edit it)
   CLAUDE.md              imports AGENTS.md
   sites/<site>/<mod>.js  the mods: <site> is a hostname (x.com, news.ycombinator.com), <mod> is kebab-case
+  sites/all-sites/       mods with no single home site (see "Mods for several sites")
   screenshots/           where `webmods screenshot` writes by default
 ```
 
@@ -63,6 +64,23 @@ code (`sites/x.com/_plain-x.test.js`). Only create or edit files inside this wor
 - Wrap the body in an IIFE as above: early `return`s work, nothing leaks into the page's globals, and
   `webmods check` can parse the file.
 - Start new mods with `webmods new <site> <mod>`; it creates the file from a template and prints its path.
+
+### Mods for several sites
+
+A mod runs wherever its `@match` lines say, whatever its folder; the folder is its home (its id, and
+where the user finds it on the WebMods setup page).
+
+- **One site with several domains** (x.com and twitter.com, a site's country domains): the site's
+  folder, with a `@match` per domain. The setup page lists it under that site, "also runs on" the rest.
+- **Every site, or several unrelated sites** (dark mode everywhere, hide cookie banners on a few news
+  sites): `sites/all-sites/` (`webmods new all-sites <mod>`). Its default `@match` is `*://*/*`;
+  narrow it to the sites that need it, and `@exclude` sites it breaks. The setup page groups these
+  under "Every site" or "Several sites".
+- The on/off switch is per mod, not per site: switching a mod off on one site switches it off on all
+  of them. When the user may want a change on some sites and not others, write separate mods.
+- A mod that runs everywhere runs on the user's bank, email and work tools too: keep it render-only
+  (`@risk 0`) unless they asked for more, cheap on pages it doesn't apply to, and quick to bail out
+  (check `location.hostname` or for the elements it needs, and return).
 
 ### Where mods run
 

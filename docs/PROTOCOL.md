@@ -68,7 +68,8 @@ patch `fetch`/`XMLHttpRequest`, read React state, etc.). An optional header sets
 ```
 
 - `@match` (repeatable): Chrome match patterns. **Default** when absent: `*://<site>/*` and
-  `*://*.<site>/*`, where `<site>` is the mod's folder name.
+  `*://*.<site>/*`, where `<site>` is the mod's folder name; `*://*/*` in the `all-sites` folder
+  (mods with no single home site; `webmods new all-sites <mod>` writes that `@match`).
 - `@exclude` (repeatable): exclude match patterns. Default none.
 - `@run-at`: `document-start` (default), `document-end` or `document-idle`.
 - `@name`: default is the file name without `.js`. `@description`: default empty.
@@ -322,7 +323,10 @@ Nothing is hosted; the agent uses the user's own login/subscription.
     "compacted the conversation"), skips the messages Claude Code replays after `compact_boundary`, and
     emits a command's `<local-command-stdout>` as text.
   - **Mod badges.** A mod's `risk` tier 1 shows "detectable", tier 2 "changes requests" (tooltip: what
-    that means, plus the header's reason).
+    that means, plus the header's reason). A mod matching other sites too shows "N sites" or "all
+    sites" (`modSites` in lib.js; tooltip lists them and says the switch is for all of them). The setup
+    page groups mods by site: the folder (minus `www.`) if the mod runs there, else its one site, else
+    "Several sites"; mods matching any host go under "Every site". Extra sites show as "also runs on".
   - No reload prompt: the agent reloads the tab after each change (AGENTS.md), and switches reload it too.
   - **States:** helper not connected → short setup instructions (`npx webmods setup`, link to Setup page);
     user scripts off → button opening chrome://extensions/?id=…; agent missing → the error text from the

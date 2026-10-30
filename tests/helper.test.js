@@ -108,6 +108,10 @@ test('defaultMatches: ports stripped, IPs get exact pattern only', () => {
   assert.deepEqual(defaultMatches('127.0.0.1'), ['*://127.0.0.1/*']);
 });
 
+test('defaultMatches: the all-sites folder matches every site', () => {
+  assert.deepEqual(defaultMatches('all-sites'), ['*://*/*']);
+});
+
 test('scanMods: ignores _ and . files, non-js, nested folders, ignored site folders', () => {
   const home = tempDir();
   writeMod(home, 'a.com', 'one.js', '1');

@@ -361,6 +361,16 @@ test('new creates a mod from the template; refuses to overwrite', async () => {
   assert.doesNotThrow(() => new Function(text));
 });
 
+test('new all-sites: one @match for every site', async () => {
+  const home = tempDir();
+  const r = await runCli(['new', 'all-sites', 'dark-everywhere'], { home });
+  assert.equal(r.code, 0, r.stderr);
+  const text = fs.readFileSync(path.join(home, 'sites', 'all-sites', 'dark-everywhere.js'), 'utf8');
+  assert.deepEqual(text.match(/^\/\/ @match .*$/gm), ['// @match       *://*/*']);
+  assert.match(text, /@run-at {6}document-start/);
+  assert.doesNotThrow(() => new Function(text));
+});
+
 test('install-example copies from the examples folder', async () => {
   const home = tempDir();
   const examples = tempDir();

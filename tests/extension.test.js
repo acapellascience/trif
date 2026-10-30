@@ -1151,3 +1151,15 @@ test('mod switch: accessible, optimistic, one change at a time, reverts with a s
   assert.strictEqual(b.getAttribute('aria-checked'), 'false');
   ms.onSwitchChange(null);
 });
+
+test('modSites: hosts a mod names, and whether it runs everywhere', () => {
+  assert.deepEqual(lib.modSites({ matches: ['https://x.com/*', 'https://twitter.com/*'] }),
+    { everywhere: false, sites: ['x.com', 'twitter.com'] });
+  assert.deepEqual(lib.modSites({ matches: ['*://www.instagram.com/*', '*://*.instagram.com/*'] }),
+    { everywhere: false, sites: ['instagram.com'] });
+  assert.deepEqual(lib.modSites({ matches: ['*://x.com/*', '*://mobile.x.com:8080/*'] }),
+    { everywhere: false, sites: ['x.com'] });
+  assert.equal(lib.modSites({ matches: ['<all_urls>'] }).everywhere, true);
+  assert.equal(lib.modSites({ matches: ['*://*/*', 'https://x.com/*'] }).everywhere, true);
+  assert.deepEqual(lib.modSites({ matches: ['file:///*', 'nonsense'] }), { everywhere: false, sites: [] });
+});

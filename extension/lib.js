@@ -467,3 +467,24 @@ export function chromeVersion(userAgent) {
   const m = /Chrom(?:e|ium)\/([\d.]+)/.exec(userAgent || '');
   return m ? m[1] : 'unknown';
 }
+
+// Where a mod runs, for display: `everywhere` when a pattern covers any host (<all_urls>, `*://*/*`),
+// and `sites`, the hosts its other patterns name, without "www." or "*.", subdomains of a listed
+// site folded into it (x.com and mobile.x.com: x.com), in pattern order. Excludes are ignored.
+export function modSites(mod) {
+  const hosts = [];
+  let everywhere = false;
+  for (const p of Array.isArray(mod?.matches) ? mod.matches : []) {
+    const s = String(p).trim();
+    if (s === '<all_urls>') { everywhere = true; continue; }
+    const m = /^(\*|[a-z][a-z0-9+.-]*):\/\/([^/]*)\//i.exec(s);
+    if (!m || m[1].toLowerCase() === 'file') continue;
+    let host = m[2].replace(/:(\*|\d+)$/, '').toLowerCase().replace(/\.$/, '');
+    if (host === '*') { everywhere = true; continue; }
+    if (host.startsWith('*.')) host = host.slice(2);
+    if (host.startsWith('www.') && host.length > 4) host = host.slice(4);
+    if (host && !host.includes('*') && !hosts.includes(host)) hosts.push(host);
+  }
+  const sites = hosts.filter((h) => !hosts.some((o) => o !== h && h.endsWith('.' + o)));
+  return { everywhere, sites };
+}

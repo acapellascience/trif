@@ -3,7 +3,7 @@
 // chrome.storage.local `chat:<site>`; this page renders that record and reacts to storage changes.
 // See docs/PROTOCOL.md, "Side panel and agent runs".
 
-import { siteForUrl, modAppliesTo, isLoginUrl } from './lib.js';
+import { siteForUrl, modAppliesTo, modSites, isLoginUrl } from './lib.js';
 import { renderMarkdown, MARKDOWN_ELEMENTS, MARKDOWN_ATTRIBUTES } from './markdown.js';
 import { modSwitch, syncSwitches, shownEnabled, switchError, enabledIn, onSwitchChange } from './modswitch.js';
 
@@ -529,7 +529,7 @@ function renderMods() {
   ui.modsCount.textContent = `(${mods.length})`;
   // Rebuilt only when the set of mods changes; everything else updates in place, so a focused switch
   // keeps focus through status refreshes.
-  const key = JSON.stringify(mods.map((m) => [m.id, m.name, m.file, !!m.held, m.risk?.tier ?? null, m.risk?.why ?? null]));
+  const key = JSON.stringify(mods.map((m) => [m.id, m.name, m.file, !!m.held, m.risk?.tier ?? null, m.risk?.why ?? null, m.matches]));
   if (key !== view.modsKey) {
     view.modsKey = key;
     ui.modList.replaceChildren(...mods.map(modItem));
@@ -567,6 +567,14 @@ function modItem(m) {
       ? 'Risk 2: this mod changes what the site receives, which the site could notice (rate limits or an account flag are possible).'
       : 'Risk 1: the site\'s own scripts could notice this mod (for example, ads it hides never report being seen).') +
       (m.risk.why ? `\n${m.risk.why}` : '');
+    name.append(badge);
+  }
+  // Mods that also run on other sites say so: the switch turns them off on all of them.
+  const { everywhere, sites } = modSites(m);
+  if (everywhere || sites.length > 1) {
+    const badge = el('span', 'tag', everywhere ? 'all sites' : `${sites.length} sites`);
+    badge.title = (everywhere ? 'Runs on every site.' : `Runs on ${sites.join(', ')}.`) +
+      ' Switching it off here switches it off everywhere.';
     name.append(badge);
   }
   const main = el('div', 'mod-main');

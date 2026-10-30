@@ -26,6 +26,9 @@ global.document = {
   head: node, documentElement: node, addEventListener() {}, querySelector() { return null }, querySelectorAll() { return []; },
   createElement: () => ({ append() {}, set textContent(v) {} }),
 };
+// Everything shown but reposts (out of the box everything is hidden), so each filter can be tested on its own.
+const saved = { reposts: false, quotes: true, replies: true, conversations: true, long: true, links: true, videos: true, images: true, nonMutuals: true };
+global.localStorage = { getItem: (key) => (key === 'dmFeedOptions' ? JSON.stringify(saved) : null), setItem() {} };
 eval(fs.readFileSync(MOD, 'utf8'));
 
 // Posts from people you follow, unless a test says otherwise.

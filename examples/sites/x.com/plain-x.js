@@ -12,7 +12,7 @@
  * - Timeline filter. The home timeline's data (the `HomeLatestTimeline` / `HomeTimeline` GraphQL
  *   responses) is filtered before X sees it. Ads and who-to-follow-style modules always go; reposts,
  *   quote posts, posts with links, long posts (over 280 characters), posts with videos and posts with
- *   images go when their toggle is off (reposts are off by default). Replies covers replies shown on
+ *   images go when their toggle is off (every toggle starts off). Replies covers replies shown on
  *   their own (to someone else or to oneself). Conversations covers blocks of two or more posts shown
  *   together (a back-and-forth, or someone's own thread): a block shows only if Conversations is on, its
  *   top post is by someone you follow (or you), and every post in it passes the other toggles. Filtering
@@ -63,7 +63,7 @@
   // ---- Options (true = show).
   const OPTIONS_KEY = 'dmFeedOptions';
   const OPTION_LABELS = { reposts: 'Reposts', quotes: 'Quotes', replies: 'Replies', conversations: 'Conversations', long: 'Long', links: 'Links', videos: 'Videos', images: 'Images', nonMutuals: 'Non-mutuals' };
-  const options = { reposts: false, quotes: true, replies: true, conversations: true, long: true, links: true, videos: true, images: true, nonMutuals: true };
+  const options = { reposts: false, quotes: false, replies: false, conversations: false, long: false, links: false, videos: false, images: false, nonMutuals: false };
   try { Object.assign(options, JSON.parse(localStorage.getItem(OPTIONS_KEY) || '{}')); } catch {}
   for (const key of Object.keys(options)) if (!(key in OPTION_LABELS)) delete options[key];   // e.g. the old "threads"
 

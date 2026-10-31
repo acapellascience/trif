@@ -47,7 +47,14 @@ function writeJson(file, v) { fs.writeFileSync(file, JSON.stringify(v, null, 2) 
 
 function keychain(service) {
   const r = spawnSync('security', ['find-generic-password', '-s', service, '-w'], { encoding: 'utf8' });
-  return r.status === 0 ? r.stdout.replace(/\n$/, '') : null;
+  if (r.status !== 0) return null;
+  const out = r.stdout.replace(/\n$/, '');
+  // `security -w` prints a value with line breaks in it (the PEM key) as hex.
+  if (/^([0-9a-f]{2})+$/i.test(out)) {
+    const text = Buffer.from(out, 'hex').toString('utf8');
+    if (text.startsWith('-----BEGIN')) return text;
+  }
+  return out;
 }
 
 // ---------------------------------------------------------------- pure parts (tested)

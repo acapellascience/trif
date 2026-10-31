@@ -126,6 +126,11 @@ test('check: fetches and caches the feed, reports what\'s new, records errors', 
     assert.equal(s.available, false);
     assert.match(s.error, /not signed/);
 
+    // No feed at all (nothing released yet, or a private repo): quietly nothing.
+    delete server.files['/latest.json'];
+    s = await U.check(ws, { root, publicKey: k.pub, force: true });
+    assert.deepStrictEqual([s.available, s.latest, s.error], [false, null, null]);
+
     // Turned off: no request unless forced.
     ws.config.checkForUpdates = false;
     const before = server.hits.length;

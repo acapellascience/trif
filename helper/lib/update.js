@@ -196,7 +196,9 @@ async function check(ws, { force = false, now = Date.now(), root = P.REPO_ROOT, 
     s.latest = { version: feed.version, notes: feed.notes, published: feed.published };
     s.error = null;
   } catch (e) {
-    s.error = e.message;
+    // No feed there (nothing released yet, or the repo is still private): nothing to offer, not an error.
+    s.error = /answered HTTP 404/.test(e.message) ? null : e.message;
+    if (!s.error) s.latest = null;
   }
   s.checkedAt = now;
   writeState(ws.home, s);

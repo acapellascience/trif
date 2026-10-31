@@ -1,0 +1,48 @@
+WebMods {{VERSION}} beta (Chrome, Mac)
+================================
+
+WebMods lets your coding agent (Claude Code) customize websites for you. It comes with mods for
+Google, X, Amazon and Instagram, already on; everywhere else it stays off until you turn it on.
+
+You need
+- Google Chrome, up to date (Chrome menu > About Google Chrome).
+- Claude Code installed (https://claude.com/claude-code).
+- Node 18 or newer. Check in Terminal with:  node --version
+  If that says "command not found", install it from https://nodejs.org (the LTS button).
+
+Already have an earlier WebMods beta?
+  Do step 2 again from this folder (your mods and settings are kept). Then in chrome://extensions,
+  click the circular reload arrow on WebMods. From this version on, the WebMods panel tells you when
+  there's an update and installs it with one click.
+
+Install (about 2 minutes)
+1. Open Chrome once if you haven't yet, so it has a profile.
+2. Open Terminal and paste these two lines (change the path if this folder isn't in Downloads):
+
+     cd ~/Downloads/webmods-beta-chrome
+     npx --yes --package ./webmods-{{VERSION}}.tgz webmods setup --browser chrome
+
+   It ends with a list of next steps (the ones below). You can ignore its notes about PATH or sudo.
+
+   Setup also opens a Finder window with a folder called "extension" selected. Leave it open.
+
+3. In Chrome, go to  chrome://extensions  and turn on "Developer mode" (top right).
+4. Drag the "extension" folder from that Finder window onto the chrome://extensions page.
+   WebMods appears in the list, and opens a welcome tab. Leave the folder where it is: Chrome runs
+   WebMods from it.
+   (If dragging doesn't work: click "Load unpacked", press Cmd-Shift-G, press Cmd-V to paste the
+   folder's path, which setup put on your clipboard, then press Return and click Select.)
+5. On the WebMods welcome tab, click "Open extension settings" and turn on "Allow User Scripts".
+6. Click the puzzle-piece button in Chrome's toolbar and pin WebMods.
+
+Try it
+- Visit google.com, x.com, amazon.com or instagram.com: the mods are already working. Click the WebMods
+  button to open its side panel and see them; each has a switch, and a green light when it's running on
+  the page you're on.
+- On any other site, the side panel says "WebMods is disabled". Click "Enable WebMods on <site>", then
+  describe the change you want ("hide the comments", "make it dark") and Claude writes a mod for it.
+  The first time, it may ask you to log in to Claude: click Log in and follow the steps.
+
+If something's wrong, run this in Terminal and send me what it says:
+
+     ~/.webmods/bin/webmods doctor

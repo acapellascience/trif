@@ -20,6 +20,7 @@ const DIST = path.join(ROOT, 'dist');
 const TARGET = process.argv[2] || 'chrome';
 const OUT = path.join(DIST, TARGET === 'firefox' ? 'firefox' : 'extension');
 const { FIREFOX_EXTENSION_ID } = require('../helper/lib/paths');
+const { githubRepo } = require('../helper/lib/update');
 
 // Not needed at runtime. extension/package.json only exists so Node's test runner loads
 // extension/*.js as ES modules (tests/extension.test.js imports them); Chrome never reads it.
@@ -67,7 +68,7 @@ function manifestPaths(m) {
  * userScripts as an optional permission, which is the only way Firefox grants it (the user allows it
  * from the setup page or the panel).
  */
-function firefoxManifest(m) {
+function firefoxManifest(m, repo = githubRepo(readPackage())) {
   const f = { ...m };
   delete f.key;
   delete f.minimum_chrome_version;
@@ -82,7 +83,14 @@ function firefoxManifest(m) {
   f.browser_specific_settings = {
     gecko: { id: FIREFOX_EXTENSION_ID, strict_min_version: '153.0', data_collection_permissions: { required: ['none'] } },
   };
+  // Self-distributed (signed, unlisted) builds update from the repo's feed, which scripts/release.js
+  // writes. Firefox checks it about once a day; each version there must be signed by Mozilla.
+  if (repo) f.browser_specific_settings.gecko.update_url = `https://raw.githubusercontent.com/${repo}/main/updates/firefox.json`;
   return f;
+}
+
+function readPackage() {
+  try { return JSON.parse(fs.readFileSync(path.join(ROOT, 'package.json'), 'utf8')); } catch { return {}; }
 }
 
 function listFiles(dir, base = dir) {

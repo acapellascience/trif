@@ -12,6 +12,8 @@
 //    the agent in (agent.login / agent.loginCode / agent.loginCancel, events under the loginId).
 //  - limits each agent run to its site: `webmods` inside a run sends the run's token, and its page
 //    commands go to the extension with args.scope; mods a run writes for other sites are held (held.js).
+//  - checks for updates (lib/update.js) and tells the extension {type:"update", update}; installs them
+//    when asked (or by itself with "autoUpdate"), then asks it to {type:"reload"} onto the new version.
 
 const fs = require('fs');
 const net = require('net');
@@ -29,6 +31,8 @@ const { readInstructions, writeInstructions, instructionsFile, MAX_LENGTH } = re
 const { ownSock, removeStaleSockets } = require('./lib/helpers');
 const { loadOrigins, recordOrigins, activeRuns } = require('./lib/origins');
 const { deleteMod, restoreMod, emptyTrash } = require('./lib/trash');
+const update = require('./lib/update');
+const { buildReport, reportEmail } = require('./lib/report');
 
 const ws = workspace();
 // This helper's own socket (helper-<pid>.sock), served whether or not it also owns helper.sock; agent
@@ -67,6 +71,7 @@ const state = {
   lastFingerprint: null,
   stdoutOpen: true,
   shuttingDown: false,
+  installing: false, // an update is being installed
 };
 
 logger.info(`host ${VERSION} starting (node ${process.version}, home ${ws.home}, mods ${ws.modsDir}, args ${JSON.stringify(process.argv.slice(2))})`);
@@ -106,6 +111,7 @@ function onExtensionMessage(msg) {
       state.helloAt = Date.now();
       logger.info(`hello from extension ${msg.version} on ${state.hello.browser} ${msg.chrome}; userScripts=${!!msg.userScripts}`);
       syncMods('hello', true);
+      sendUpdate();
       break;
     case 'response':
       onExtensionResponse(msg);
@@ -288,7 +294,7 @@ const runs = new Runs({
 const logins = new Logins({ getWorkspace: () => workspace(ws.home), logger, onEvent: onAgentEvent });
 const runSubscribers = new Map(); // runId or loginId -> Set of CLI sockets that started it (see onClientLine)
 const AGENT_COMMANDS = new Set(['agent.list', 'agent.start', 'agent.stop', 'agent.login', 'agent.loginCode', 'agent.loginCancel', 'mod.approve',
-  'instructions.get', 'instructions.set']);
+  'instructions.get', 'instructions.set', 'update.check', 'update.install', 'update.setAuto', 'report.build']);
 // Helper-local too, but a run may use them (on mods inside its scope; see lib/trash.js).
 const MOD_FILE_COMMANDS = new Set(['mod.delete', 'mod.restore']);
 
@@ -345,8 +351,112 @@ function agentCommand(cmd, args) {
       logger.info(text ? `instructions saved (${text.length} chars)` : 'instructions cleared');
       return { text, file: instructionsFile(ws.home), max: MAX_LENGTH };
     }
+    case 'update.check': return checkForUpdate(args.force !== false);
+    case 'update.install': return installUpdate('asked');
+    case 'update.setAuto': {
+      update.setConfigKey(ws.home, 'autoUpdate', args.on ? true : undefined);
+      logger.info(`automatic updates ${args.on ? 'on' : 'off'}`);
+      const info = updateInfo();
+      sendUpdate(info);
+      if (args.on && info.available) maybeAutoInstall(info);
+      return info;
+    }
+    case 'report.build': return report(args);
     default: return logins.cancel(args.loginId);
   }
+}
+
+// ---------------------------------------------------------------- updates (lib/update.js)
+
+const UPDATE_FIRST_CHECK_MS = Number(process.env.WEBMODS_UPDATE_DELAY) >= 0 && process.env.WEBMODS_UPDATE_DELAY !== undefined
+  ? Number(process.env.WEBMODS_UPDATE_DELAY) : 60000;
+const UPDATE_EVERY_MS = 6 * 60 * 60 * 1000; // the feed itself is fetched at most every 20 hours
+let updateTimers = [];
+
+function updateInfo(summary = update.summary(workspace(ws.home))) {
+  return { ...summary, installing: state.installing };
+}
+
+function sendUpdate(info = updateInfo()) {
+  if (!state.stdoutOpen) return;
+  try { sendToExtension({ type: 'update', update: info }); } catch (e) { logger.warn(`could not send update info: ${e.message}`); }
+}
+
+async function checkForUpdate(force) {
+  const info = updateInfo(await update.check(workspace(ws.home), { force }));
+  if (info.error) logger.warn(`update check: ${info.error}`);
+  else if (info.available) logger.info(`update available: ${info.current} -> ${info.latest}`);
+  sendUpdate(info);
+  maybeAutoInstall(info);
+  return info;
+}
+
+// With "autoUpdate" on, install when nothing is running (else on a later check).
+function maybeAutoInstall(info) {
+  if (!info.auto || !info.available || !info.canInstall || state.installing || runs.list().length) return;
+  installUpdate('automatic').catch((e) => logger.warn(`automatic update failed: ${e.message}`));
+}
+
+async function installUpdate(why) {
+  if (state.installing) throw new Error('an update is already being installed');
+  if (runs.list().length) throw new Error("a chat is still running; update when it's done");
+  state.installing = true;
+  sendUpdate();
+  try {
+    logger.info(`installing update (${why})`);
+    const r = await update.install(workspace(ws.home));
+    logger.info(`updated ${r.from} -> ${r.to}`);
+    // The extension reloads (Chrome's unpacked copy from the new files), which starts the new helper.
+    if (state.stdoutOpen) {
+      try { sendToExtension({ type: 'updated', from: r.from, to: r.to, notes: r.notes }); } catch { /* gone */ }
+      setTimeout(() => reloadExtension(`updated to ${r.to}`), 300);
+    }
+    return { from: r.from, to: r.to, notes: r.notes };
+  } finally {
+    state.installing = false;
+  }
+}
+
+function reloadExtension(reason) {
+  if (!state.stdoutOpen) return;
+  logger.info(`asking the extension to reload: ${reason}`);
+  try { sendToExtension({ type: 'reload', reason }); } catch (e) { logger.warn(`could not ask the extension to reload: ${e.message}`); }
+}
+
+// Another helper (the other browser's) or `npx webmods setup` replaced <home>/app under this one: this
+// process is running old code, so reload onto the new version.
+function checkAppReplaced() {
+  if (state.installing || state.shuttingDown || !update.installable(ws).ok) return;
+  const now = update.installedVersion(ws);
+  if (now && now !== VERSION && !runs.list().length) reloadExtension(`${ws.appDir} is now version ${now}`);
+}
+
+// ---------------------------------------------------------------- problem reports (lib/report.js)
+
+function duration(ms) {
+  const m = Math.round(ms / 60000);
+  return m < 60 ? `${m} min` : `${Math.round(m / 60)} h`;
+}
+
+async function report(args) {
+  const { doctor } = require('./lib/doctor');
+  const w = workspace(ws.home);
+  const [doc, agentList] = await Promise.all([
+    doctor({ home: ws.home }).catch(() => null),
+    agents.listAgentsWithLogin(w, { version: true }).catch(() => null),
+  ]);
+  const mods = Array.isArray(args.mods) ? args.mods.slice(0, 40) : [];
+  const text = buildReport({
+    description: typeof args.description === 'string' ? args.description.slice(0, 4000) : '',
+    site: typeof args.site === 'string' ? args.site : '', siteOn: !!args.siteOn,
+    browser: state.hello ? `${state.hello.browser} ${state.hello.chrome || ''}`.trim() : null,
+    extensionVersion: state.hello?.version || null,
+    helper: { role: state.role, connectedFor: state.helloAt ? duration(Date.now() - state.helloAt) : null },
+    agents: agentList ? agentList.agents : null,
+    update: update.summary(w),
+    mods, doctor: doc, logFile: ws.log,
+  });
+  return { text, email: reportEmail() };
 }
 
 // Run an agent command and call done(error, result): synchronously when the command is synchronous,
@@ -603,6 +713,7 @@ function shutdown(reason, code = 0) {
   logger.info(`shutting down: ${reason}`);
   clearTimeout(debounceTimer);
   clearInterval(pollTimer);
+  for (const t of updateTimers) clearTimeout(t);
   stopSecondaryChecks();
   closeWatchers();
   for (const [, p] of pending) {
@@ -638,6 +749,8 @@ process.on('unhandledRejection', (e) => logger.error('unhandled rejection:', e &
   pollTimer = setInterval(poll, POLL_MS);
   for (const s of removeStaleSockets(ws.home)) logger.info(`removed stale socket ${s}`);
   try { const n = emptyTrash(ws); if (n) logger.info(`emptied ${n} mod(s) from the trash (older than 30 days)`); } catch (e) { logger.warn(`could not empty the trash: ${e.message}`); }
+  const updateCheck = () => checkForUpdate(false).catch((e) => logger.warn(`update check failed: ${e.message}`));
+  updateTimers = [setTimeout(updateCheck, UPDATE_FIRST_CHECK_MS), setInterval(updateCheck, UPDATE_EVERY_MS), setInterval(checkAppReplaced, 30000)];
   try {
     try { fs.unlinkSync(ws.ownSock); } catch { /* none */ }
     ownServer = await listen(ws.ownSock);

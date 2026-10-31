@@ -16,6 +16,9 @@ const ui = {
   gate: $('#gate'), gateBtn: $('#gate-btn'), gateErr: $('#gate-err'),
   settings: $('#settings'), agent: $('#agent'), agentNote: $('#agent-note'), model: $('#model'),
   instructions: $('#instructions'), instructionsNote: $('#instructions-note'),
+  autoUpdate: $('#auto-update'), updateNote: $('#update-note'), update: $('#update'),
+  report: $('#report'), reportText: $('#report-text'), reportPreview: $('#report-preview'), reportNote: $('#report-note'),
+  reportSend: $('#report-send'), reportCopy: $('#report-copy'), reportCancel: $('#report-cancel'),
   notice: $('#notice'), mods: $('#mods'), modsCount: $('#mods-count'), modList: $('#mod-list'),
   chat: $('#chat'), empty: $('#empty'), messages: $('#messages'), working: $('#working'),
 
@@ -38,6 +41,10 @@ const view = {
   offSites: {},              // chrome.storage.local `offSites`: mods switched off on some of their sites
   myRuns: new Set(),         // runs this panel started
   login: null,               // agent login in progress: {loginId, agent, name, fix, phase, url, error, early}
+  updated: null,             // chrome.storage.local `updated`: {from, to, notes, at} after an update's reload
+  updateBusy: null,          // 'checking' | 'installing' while the panel waits on the helper
+  updateError: null,
+  report: null,              // {text, email} once the helper built the report
 };
 
 // ---- background port ----------------------------------------------------------------------------
@@ -132,7 +139,8 @@ async function init() {
   connectPort();
   const win = await chrome.windows.getCurrent();
   view.windowId = win.id;
-  const stored = await chrome.storage.local.get(['settings', 'disabled', 'offSites']);
+  const stored = await chrome.storage.local.get(['settings', 'disabled', 'offSites', 'updated']);
+  view.updated = stored.updated || null;
   view.settings = { agent: '', model: '', ...(stored.settings || {}) };
   view.disabled = stored.disabled || {};
   view.offSites = normalizeOffSites(stored.offSites);
@@ -156,6 +164,10 @@ async function init() {
       view.settings = { agent: '', model: '', ...(changes.settings.newValue || {}) };
       renderSettings();
       render();
+    }
+    if (changes.updated) {
+      view.updated = changes.updated.newValue || null;
+      renderUpdate();
     }
     if (changes.disabled || changes.offSites) { // a switch flipped here, on the setup page, or by an agent / the CLI
       if (changes.disabled) view.disabled = changes.disabled.newValue || {};
@@ -273,6 +285,7 @@ function render() {
 
   renderGate();
   renderNotice({ helperOk, agentInfo, anyAgent });
+  renderUpdate();
   renderMods();
   renderMessages();
 
@@ -941,5 +954,190 @@ ui.model.addEventListener('input', () => {
 });
 ui.model.addEventListener('change', () => { clearTimeout(modelTimer); saveSettings({ model: ui.model.value.trim() }); });
 $('#setup-link').addEventListener('click', (e) => { e.preventDefault(); openSetup(); });
+
+// ---- updates ------------------------------------------------------------------------------------
+// The helper checks for a newer WebMods (helper/lib/update.js) and its summary rides on the status. The
+// panel offers it (Update installs it, then the extension reloads onto it), says so after the reload, and
+// has the "Install updates automatically" setting (off unless the user turns it on).
+
+const UPDATED_SHOWN_MS = 24 * 60 * 60 * 1000;
+
+function renderUpdate() {
+  const n = ui.update;
+  const u = view.status?.helper?.connected ? view.status.update : null;
+  const done = view.updated && Date.now() - view.updated.at < UPDATED_SHOWN_MS && view.updated.to === (u?.current || view.status?.version) ? view.updated : null;
+  const installing = view.updateBusy === 'installing' || u?.installing;
+  const key = JSON.stringify([u?.available, u?.latest, u?.canInstall, installing, view.updateError, done?.to]);
+  renderUpdateSettings(u);
+  if (n.dataset.key === key) return;
+  n.dataset.key = key;
+  const parts = [];
+  n.classList.remove('ok', 'bad');
+  if (installing) {
+    parts.push(el('p', 'title', `Updating WebMods to ${u?.latest || 'the new version'}…`));
+    parts.push(el('p', 'note', 'It reloads by itself when it’s done.'));
+  } else if (u?.available) {
+    parts.push(el('p', 'title', `WebMods ${u.latest} is available`));
+    if (view.updateError) { parts.push(el('p', 'note error', view.updateError)); n.classList.add('bad'); }
+    const actions = el('p', 'actions');
+    if (u.canInstall) actions.append(button('Update', 'primary', installUpdate));
+    if (u.notes) actions.append(notesToggle(n, u.notes));
+    if (actions.childNodes.length) parts.push(actions);
+    if (!u.canInstall && u.why) parts.push(el('p', 'note', u.why));
+  } else if (done) {
+    n.classList.add('ok');
+    parts.push(el('p', 'title', `WebMods updated to ${done.to}`));
+    const actions = el('p', 'actions');
+    if (done.notes) actions.append(notesToggle(n, done.notes));
+    actions.append(button('OK', null, () => request({ type: 'update.dismiss' }).catch(() => {})));
+    parts.push(actions);
+  }
+  n.replaceChildren(...parts);
+  n.hidden = parts.length === 0;
+}
+
+function notesToggle(container, notes) {
+  return button('What’s new', null, (e) => {
+    const shown = container.querySelector('.md');
+    if (shown) { shown.remove(); e.target.textContent = 'What’s new'; return; }
+    const md = el('div', 'md');
+    setMarkdown(md, notes);
+    container.append(md);
+    e.target.textContent = 'Hide';
+  });
+}
+
+function renderUpdateSettings(u) {
+  const connected = !!view.status?.helper?.connected;
+  ui.autoUpdate.checked = !!u?.auto;
+  ui.autoUpdate.disabled = !connected || !u || !u.canInstall || !!view.updateBusy;
+  let text = '';
+  if (!connected || !u) text = connected ? '' : 'Update settings appear once the helper is connected.';
+  else if (view.updateBusy === 'checking') text = `WebMods ${u.current}. Checking for updates…`;
+  else if (!u.canInstall) text = `WebMods ${u.current}. ${u.why || ''}`;
+  else if (u.available) text = `WebMods ${u.current} (${u.latest} is available).`;
+  else if (u.error) text = `WebMods ${u.current}. Couldn’t check for updates: ${u.error}`;
+  else text = `WebMods ${u.current}${u.latest ? ', up to date' : ''}.`;
+  if (ui.updateNote.dataset.text === text) return;
+  ui.updateNote.dataset.text = text;
+  ui.updateNote.replaceChildren(text);
+  if (connected && u && u.source && !view.updateBusy) {
+    const check = el('a', null, 'Check now');
+    check.href = '#';
+    check.addEventListener('click', (e) => { e.preventDefault(); checkForUpdate(); });
+    ui.updateNote.append(' ', check);
+  }
+}
+
+async function checkForUpdate() {
+  view.updateBusy = 'checking';
+  ui.updateNote.dataset.text = '';
+  renderUpdate();
+  try { await request({ type: 'update.check' }); } catch (e) { view.updateError = String(e?.message ?? e); }
+  view.updateBusy = null;
+  await refreshStatus();
+}
+
+async function installUpdate() {
+  view.updateBusy = 'installing';
+  view.updateError = null;
+  renderUpdate();
+  try {
+    await request({ type: 'update.install' });
+    // The extension reloads in a moment, closing this panel's connection; it reopens on the new version.
+  } catch (e) {
+    view.updateError = `Couldn’t update: ${String(e?.message ?? e)}`;
+    view.updateBusy = null;
+    renderUpdate();
+  }
+}
+
+ui.autoUpdate.addEventListener('change', async () => {
+  const on = ui.autoUpdate.checked;
+  try { await request({ type: 'update.setAuto', on }); } catch (e) {
+    ui.autoUpdate.checked = !on;
+    ui.updateNote.dataset.text = '';
+    ui.updateNote.textContent = `Couldn’t change it: ${String(e?.message ?? e)}`;
+  }
+  refreshStatus();
+});
+
+// ---- report a problem ---------------------------------------------------------------------------
+// The helper writes the report (helper/lib/report.js: versions, setup checks, recent errors, scrubbed of
+// names, paths and addresses); the panel adds what the user typed and opens it in their mail app, or
+// copies it. Nothing is sent by WebMods itself.
+
+const MAILTO_MAX = 6000; // longer mailto: links get cut off by some mail apps
+
+function reportBody() {
+  const what = ui.reportText.value.trim();
+  return `${what ? `What happened:\n${what}\n\n` : ''}${view.report?.text || ''}`;
+}
+
+function updateReportLink() {
+  const email = view.report?.email;
+  const subject = encodeURIComponent(`WebMods problem report${view.site ? ` (${view.site})` : ''}`);
+  let href = email ? `mailto:${email}?subject=${subject}&body=${encodeURIComponent(reportBody())}` : '#';
+  ui.reportSend.dataset.long = '';
+  if (email && href.length > MAILTO_MAX) {
+    // Too long for a link: the full report goes on the clipboard when they click, and the mail says so.
+    const short = `${ui.reportText.value.trim()}\n\n(The full report is on the clipboard: paste it here.)`;
+    href = `mailto:${email}?subject=${subject}&body=${encodeURIComponent(short)}`;
+    ui.reportSend.dataset.long = '1';
+  }
+  ui.reportSend.href = href;
+  ui.reportSend.setAttribute('aria-disabled', String(!email || !view.report));
+  ui.reportSend.hidden = !email;
+}
+
+async function openReport() {
+  ui.settings.hidden = true;
+  ui.settingsBtn.setAttribute('aria-expanded', 'false');
+  ui.report.hidden = false;
+  view.report = null;
+  ui.reportPreview.textContent = 'Gathering details…';
+  ui.reportNote.classList.remove('error');
+  updateReportLink();
+  ui.reportText.focus();
+  const scope = view.site ? scopeFor(view.site) : null;
+  const mods = view.site && view.status ? view.status.mods.filter((m) => limitToSites(m, [scope])) : [];
+  try {
+    view.report = await request({ type: 'report.build', site: view.site || '', siteOn: siteIsOn(), mods });
+    ui.reportPreview.textContent = view.report.text;
+    if (!view.report.email) ui.reportNote.textContent = 'Copy the report and send it to whoever gave you WebMods.';
+  } catch (e) {
+    // Without the helper: what the panel knows, so there's still something to send.
+    const s = view.status;
+    view.report = { email: null, text: `WebMods problem report\n\nWebMods     ${s?.version || '?'}\nBrowser     ${s?.browser || ''} ${s?.chrome || ''}\nHelper      not connected (${s?.helper?.error || String(e?.message ?? e)})` };
+    ui.reportPreview.textContent = view.report.text;
+    ui.reportNote.textContent = 'The helper isn’t connected, so this report is short. Copy it and send it to whoever gave you WebMods.';
+  }
+  updateReportLink();
+}
+
+function closeReport() {
+  ui.report.hidden = true;
+  ui.reportText.value = '';
+  view.report = null;
+}
+
+$('#report-link').addEventListener('click', (e) => { e.preventDefault(); openReport(); });
+ui.reportText.addEventListener('input', updateReportLink);
+ui.reportCancel.addEventListener('click', closeReport);
+ui.reportCopy.addEventListener('click', async () => {
+  try {
+    await navigator.clipboard.writeText(reportBody());
+    ui.reportCopy.textContent = 'Copied';
+    setTimeout(() => { ui.reportCopy.textContent = 'Copy report'; }, 1500);
+  } catch (e) {
+    ui.reportNote.textContent = `Couldn’t copy: ${String(e?.message ?? e)}`;
+    ui.reportNote.classList.add('error');
+  }
+});
+ui.reportSend.addEventListener('click', (e) => {
+  if (ui.reportSend.getAttribute('aria-disabled') === 'true') { e.preventDefault(); return; }
+  if (ui.reportSend.dataset.long) navigator.clipboard.writeText(reportBody()).catch(() => {});
+  setTimeout(closeReport, 500);
+});
 
 init().catch((e) => console.error('[webmods] side panel failed to start', e));

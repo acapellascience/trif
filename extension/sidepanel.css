@@ -369,3 +369,18 @@ body.site-off :is(.bar, .settings, .notice, .mods, .chat, .composer) { display: 
 .send svg { width: 14px; height: 14px; stroke-width: 2; }
 .stop { background: var(--text); color: var(--bg); }
 .stop svg { fill: currentColor; stroke: none; }
+
+/* Settings: automatic updates. */
+.check { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--muted); }
+.check input { margin: 0; }
+
+/* Report a problem. */
+.report-title { margin: 0; font-weight: 600; }
+.report .actions { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin: 0; }
+.report a.btn { text-decoration: none; color: inherit; }
+.report a.btn.primary { color: var(--on-accent); }
+.report a.btn[aria-disabled=true] { opacity: .5; pointer-events: none; }
+.report-details summary { cursor: pointer; color: var(--muted); font-size: 12px; }
+.report-preview { margin: 6px 0 0; max-height: 220px; overflow: auto; padding: 8px; border: 1px solid var(--line);
+  border-radius: 6px; font-size: 11px; line-height: 1.4; white-space: pre-wrap; overflow-wrap: anywhere; }
+#update .md { margin-top: 6px; font-size: 12px; color: var(--muted); }

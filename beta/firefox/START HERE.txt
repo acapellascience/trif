@@ -1,0 +1,41 @@
+WebMods {{VERSION}} beta (Firefox, Mac)
+=================================
+
+WebMods lets your coding agent (Claude Code) customize websites for you. It comes with mods for
+Google, X, Amazon and Instagram, already on; everywhere else it stays off until you turn it on.
+
+You need
+- Firefox, up to date (Firefox menu > About Firefox).
+- Claude Code installed (https://claude.com/claude-code).
+- Node 18 or newer. Check in Terminal with:  node --version
+  If that says "command not found", install it from https://nodejs.org (the LTS button).
+
+Already have an earlier WebMods beta?
+  Do step 2 again from this folder (your mods and settings are kept), then step 3 again to install the
+  new add-on over the old one. From this version on, Firefox updates the add-on by itself, and the
+  WebMods panel tells you when there's an update for the rest.
+
+Install (about 2 minutes)
+1. Open Firefox once if you haven't yet, so it has a profile.
+2. Open Terminal and paste these two lines (change the path if this folder isn't in Downloads):
+
+     cd ~/Downloads/webmods-beta-firefox
+     npx --yes --package ./webmods-{{VERSION}}.tgz webmods setup --browser firefox
+
+   It ends with a list of next steps (the ones below). You can ignore its notes about PATH or sudo.
+
+3. Drag webmods-firefox.xpi from this folder onto a Firefox window, and click Add.
+4. Click the WebMods button in the Firefox toolbar (if you don't see it, it's under the puzzle-piece
+   menu; pin it). In the sidebar, click "Allow user scripts", then Allow.
+5. Quit Firefox completely (Cmd-Q) and open it again.
+
+Try it
+- Visit google.com, x.com, amazon.com or instagram.com: the mods are already working. Click the WebMods
+  button to see them; each has a switch, and a green light when it's running on the page you're on.
+- On any other site, the sidebar says "WebMods is disabled". Click "Enable WebMods on <site>", then
+  describe the change you want ("hide the comments", "make it dark") and Claude writes a mod for it.
+  The first time, it may ask you to log in to Claude: click Log in and follow the steps.
+
+If something's wrong, run this in Terminal and send me what it says:
+
+     ~/.webmods/bin/webmods doctor

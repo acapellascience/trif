@@ -37,6 +37,7 @@ function testEnv(home, extra = {}) {
     HOME: path.join(home, 'fakehome'),
     WEBMODS_HOME: home,
     WEBMODS_DEFAULT_AGENT_DIRS: '',
+    WEBMODS_UPDATE_DELAY: '2000000000', // no update check over the network during a test
     ...extra,
   };
 }

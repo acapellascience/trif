@@ -93,6 +93,9 @@ stay under 1 MB (the helper rejects bigger mods with an error logged to stderr, 
 |---|---|
 | `{type:"mods", mods:[Mod…], sitesOn:[site…]}` | The full set of mods, and the sites setup said to start on (`preinstalled.json`; each browser turns each on once, see "Sites WebMods is on for"). Sent on connect and after every change in the mods folder (debounced 150 ms). The extension makes `chrome.userScripts` match it exactly (register new, update changed, unregister missing). |
 | `{type:"request", id, cmd, args}` | A page command from the CLI (table below). The extension answers with a `response`. |
+| `{type:"update", update:Summary}` | What the helper knows about updates (see "Updates"), after the extension's hello, after each check and while installing. The panel shows it. |
+| `{type:"updated", from, to, notes}` | An update was installed. The extension keeps it in storage (`updated`) so the panel can say so after the reload. |
+| `{type:"reload", reason}` | The extension should `chrome.runtime.reload()`: <home>/app now holds a newer version (installed by this helper, another browser's, or `webmods setup`). Chrome reloads the unpacked extension from the new files; either browser starts the new helper on reconnect. |
 
 `Mod = { id, site, file, name, description, matches:[…], excludes:[…], runAt:"document_start"|"document_end"|"document_idle", risk:{tier, why}|null, code, hash, held?, startOff?, origin?:{by, browser} }`
 (`file` is the absolute path; `hash` is a sha1 of code+metadata so the extension can skip unchanged mods.)
@@ -339,6 +342,44 @@ Re-running setup is safe; run it again to update.
 - Version: the root `package.json` is the single source; `helper/lib/paths.js` reads it and
   `extension/manifest.json`'s version must match (a test checks).
 
+## Updates
+
+`helper/lib/update.js`. Releases are made by `scripts/release.js`, which writes two feeds into `updates/`
+on the main branch; both are read from raw.githubusercontent.com for the repo in package.json
+`repository`:
+
+- `updates/latest.json` (+ `latest.json.sig`) for the helper: `{version, published, notes, package:{url,
+  sha256, size}}`, where `package.url` is the release's npm tarball on GitHub. The `.sig` is an Ed25519
+  signature of latest.json's exact bytes by the release key; `helper/lib/release-key.js` holds the public
+  half. A feed with a missing or wrong signature, a non-https package URL, or a download whose size or
+  sha256 doesn't match is refused.
+- `updates/firefox.json` for Firefox: its update manifest (`addons[id].updates[{version, update_link,
+  update_hash}]`). The Firefox build's `browser_specific_settings.gecko.update_url` points at it, so
+  Firefox updates the signed add-on itself.
+
+The helper checks the feed a minute after it starts and every 6 hours, fetching it at most every 20 hours
+(state in `<home>/update.json`), and sends the result as `{type:"update"}`. Installing (`update.install`,
+or by itself when config.json `autoUpdate` is true and no run is going) downloads the tarball, verifies
+it, unpacks it into `<home>/.update-*`, and runs the new version's `helper/cli.js setup --copy --no-link
+--home <home> --browser <the browsers with a manifest now>` with the PATH setup recorded, which swaps it
+into `<home>/app` like a first install. Then `{type:"updated"}` and `{type:"reload"}`. Only installs
+running from `<home>/app` update themselves; a git checkout says to use git. config.json
+`checkForUpdates: false` stops the checks.
+
+`Summary = {current, latest, available, notes, published, checkedAt, error, auto, checks, source,
+canInstall, why, lastInstalled, installing}`.
+
+Helper commands (from the extension, or the CLI over the socket; never from inside an agent run):
+`update.check {force}` → Summary; `update.install` → `{from, to, notes}`; `update.setAuto {on}` → Summary;
+`report.build {site, siteOn, mods:[{id, enabled, registered, error}]}` → `{text, email}`: the problem
+report (`helper/lib/report.js`: versions, doctor warnings, recent log warnings folded together, scrubbed
+of the home folder, user name, email addresses, query strings and token-like strings). `email` is
+package.json `bugs.email`; the panel opens a `mailto:` with the report, or copies it.
+
+CLI: `webmods update [--install] [--auto on|off]` works without the helper (a running helper notices the
+new `<home>/app` within 30 s and asks the extension to reload); `webmods report` asks the helper, or
+builds a shorter report without it.
+
 ## Repository layout
 
 ```
@@ -349,6 +390,10 @@ helper/      host.js, cli.js, lib/*.js, workspace/AGENTS.md, workspace/CLAUDE.md
 examples/    sites/x.com/plain-x.js (+ tests)
 tests/       node tests (node --test), incl. a fake extension for the helper and a chrome.* mock for the extension
 docs/        PROTOCOL.md (this file)
+scripts/     build-extension.js (Chrome/Firefox builds), release.js (releases, see "Updates"), render-icon.js
+beta/        START HERE.txt templates for the beta zips (Firefox, Chrome)
+updates/     the update feeds, written by release.js (latest.json + .sig, firefox.json)
+CHANGELOG.md what's new per version (the panel's "What's new")
 ```
 
 Tests run with `node --test` (Node's built-in runner). No dependencies.

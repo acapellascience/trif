@@ -183,6 +183,25 @@ the same. Works without the browser. Inside a side-panel run, only mods that sta
 Ask the user before deleting a mod, and prefer webmods disable when they only want it off.`,
     examples: ['webmods delete x.com/hide-reposts'],
   },
+  update: {
+    usage: 'webmods update [--install] [--auto on|off]',
+    summary: 'check for a newer WebMods, install it, or turn automatic updates on or off',
+    details: `With no options, checks now and says whether a newer version is out, with what changed.
+--install downloads and installs it (only for a copy setup installed in <home>/app; a git checkout updates
+with git pull). Updates are signed: one that isn't signed by the WebMods release key is refused.
+A running browser switches to the new version within a minute. The side panel shows the same notice,
+with an Update button. --auto on installs updates by themselves when no chat is running (off by
+default). The user's choice: don't change it, or install updates, unless they ask.`,
+    examples: ['webmods update', 'webmods update --install', 'webmods update --auto on'],
+  },
+  report: {
+    usage: 'webmods report',
+    summary: 'print a problem report (versions, setup checks, recent errors) to send to the WebMods developer',
+    details: `The same report as the side panel's "Report a problem": WebMods, browser, system and agent versions,
+the doctor's warnings, and recent warnings and errors from the helper log, with the home folder, user
+name, email addresses, query strings and token-like strings removed. Nothing is sent; it's printed.`,
+    examples: ['webmods report'],
+  },
   restore: {
     usage: 'webmods restore [<site>/<mod>]',
     summary: 'bring a deleted mod back from the trash (no id: list the trash)',
@@ -236,7 +255,7 @@ from stdin. Exit code 1 if it didn't end up logged in.`,
 };
 
 const GROUPS = [
-  ['Setup and diagnosis', ['setup', 'status', 'doctor']],
+  ['Setup and diagnosis', ['setup', 'status', 'doctor', 'update', 'report']],
   ['Mod files (work without Chrome)', ['mods', 'new', 'check', 'delete', 'restore', 'install-example']],
   ['Switching mods off and on (need Chrome running with the extension)', ['disable', 'enable', 'approve']],
   ['Pages (need Chrome running with the extension)', ['tabs', 'run', 'reload', 'open', 'navigate', 'text', 'screenshot', 'record', 'requests', 'request', 'errors', 'logs']],

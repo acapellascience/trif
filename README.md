@@ -98,6 +98,16 @@ panel on its site; the ones marked *(off)* wait for you to switch them on.
 - **Instagram:** Following-only feed (no suggested posts or ads), Hide reposts, Hide AI content, and
   Desaturate *(off)*: colours down to 35%.
 
+## Updates
+
+When a new version is out, the WebMods panel says so: click **Update** to install it, or **What's new**
+to read what changed first. In Settings, **Install updates automatically** lets it update by itself when
+no chat is running (it's off unless you turn it on). Firefox updates the add-on itself, like any other
+add-on. From a terminal: `~/.webmods/bin/webmods update` (or `update --install`).
+
+Updates are signed: WebMods installs only versions signed with its release key, so a copy from anywhere
+else is refused.
+
 ## If something's wrong
 
 ```sh
@@ -110,6 +120,10 @@ checks every piece and says how to fix what's broken. Common fixes:
   `npx webmods setup` again, then restart Chrome.
 - **Mods don't run**: make sure **Allow User Scripts** is on (step 3), then reload the page.
 - **Claude Code isn't found**: install it, then run `npx webmods setup` again in the same terminal.
+
+Still stuck? **Report a problem** in the panel's Settings opens your mail app with a report of your setup
+and recent errors (no names, email addresses or full page addresses), ready to send. `webmods report`
+prints the same report.
 
 To use the `webmods` command directly (as your agent does), add it to your PATH:
 
@@ -136,3 +150,17 @@ with `node --test`.
 `node scripts/build-extension.js firefox` builds the Firefox add-on into `dist/firefox` (try it with
 `npx web-ext run -s dist/firefox`). Firefox only keeps signed add-ons installed; sign it as unlisted with
 `npx web-ext sign -s dist/firefox --channel unlisted` and your addons.mozilla.org API key.
+
+### Releasing
+
+`node scripts/release.js <version>` makes a release, after a `## <version>` section in
+[CHANGELOG.md](CHANGELOG.md) (that text is what the panel shows as "What's new"). It checks everything,
+bumps the version, runs the tests, builds both extensions and the npm package, has Mozilla sign the
+Firefox add-on, makes the beta zips (from `beta/`), and writes the update feeds in `updates/`. Then it asks
+before publishing: a tagged commit, a GitHub release with the files, and the feeds last. `--dry-run`
+builds everything into `dist/release/<version>` and publishes nothing.
+
+It needs, on the releasing Mac: `gh auth login`; the addons.mozilla.org API key and secret in the
+keychain as `webmods-amo-issuer` and `webmods-amo-secret`; and the release signing key, made once with
+`node scripts/release.js keygen` (private half in the keychain as `webmods-release-key`, public half in
+`helper/lib/release-key.js`). Back the private key up: installs only accept updates signed with it.

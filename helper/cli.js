@@ -21,8 +21,8 @@ const NOT_IN_RUNS = new Set(['setup', 'agent', 'approve']);
 process.stdout.on('error', (e) => { if (e.code === 'EPIPE') process.exit(0); throw e; });
 
 const VALUE_FLAGS = new Set(['--tab', '--url', '-o', '--out', '--output', '--filter', '--limit', '-f', '--file',
-  '--browser', '--home', '--native-dir', '--bin-dir', '--timeout', '--agent', '--session', '--model', '--site']);
-const BOOL_FLAGS = new Set(['--json', '--hard', '--help', '-h', '--force', '--no-link', '--no-examples', '--copy', '--link']);
+  '--browser', '--home', '--native-dir', '--bin-dir', '--timeout', '--agent', '--session', '--model', '--site', '--auto']);
+const BOOL_FLAGS = new Set(['--json', '--hard', '--help', '-h', '--force', '--no-link', '--no-examples', '--copy', '--link', '--install']);
 const ALIASES = { '--out': '-o', '--output': '-o', '--file': '-f', '-h': '--help' };
 
 class UsageError extends Error {}
@@ -312,6 +312,59 @@ const handlers = {
     const r = process.env.WEBMODS_RUN_TOKEN ? await ctx.call('mod.delete', { id }, 10000) : trash.deleteMod(ctx.ws, id);
     if (ctx.json) return printJson({ id: r.id, deleted: true });
     out(`deleted ${r.id}: it's in the trash for ${trash.TRASH_DAYS} days (webmods restore ${r.id} brings it back)`);
+  },
+
+  // Updates work without the browser: the CLI checks and installs itself, and a running helper notices
+  // the new version in <home>/app and reloads the extension onto it (host.js checkAppReplaced).
+  async update(ctx) {
+    const update = require('./lib/update');
+    const inRun = !!process.env.WEBMODS_RUN_TOKEN;
+    if (ctx.opts['--auto'] !== undefined) {
+      if (inRun) throw new UsageError("automatic updates can't be changed inside an agent run");
+      const v = String(ctx.opts['--auto']).toLowerCase();
+      if (!['on', 'off'].includes(v)) throw new UsageError('--auto takes on or off');
+      update.setConfigKey(ctx.ws.home, 'autoUpdate', v === 'on' ? true : undefined);
+      if (!ctx.json) out(`automatic updates ${v}`);
+      ctx.ws = P.workspace(ctx.opts['--home']);
+    }
+    if (ctx.opts['--install']) {
+      if (inRun) throw new UsageError("updates can't be installed inside an agent run");
+      const r = await update.install(ctx.ws);
+      if (ctx.json) return printJson({ updated: true, from: r.from, to: r.to, notes: r.notes });
+      out(`updated WebMods ${r.from} -> ${r.to}. A running browser switches to it within a minute.`);
+      if (r.notes) out(`\n${r.notes}`);
+      return;
+    }
+    const s = await update.check(ctx.ws, { force: true });
+    if (ctx.json) return printJson(s);
+    if (s.error) out(`WebMods ${s.current}: couldn't check for updates (${s.error})`);
+    else if (s.available) {
+      out(`WebMods ${s.latest} is available (you have ${s.current}).`);
+      if (s.notes) out(`\n${s.notes}\n`);
+      out(s.canInstall ? 'Install it with: webmods update --install' : s.why);
+    } else out(`WebMods ${s.current} is up to date.`);
+    out(`Automatic updates: ${s.auto ? 'on (webmods update --auto off)' : 'off (webmods update --auto on)'}`);
+  },
+
+  // The same report as the side panel's "Report a problem", printed: with the browser's details when a
+  // helper is connected, else without them.
+  async report(ctx) {
+    let r;
+    try {
+      r = await ctx.call('report.build', {}, 30000);
+    } catch {
+      const { buildReport, reportEmail } = require('./lib/report');
+      const { doctor } = require('./lib/doctor');
+      const update = require('./lib/update');
+      const agents = require('./lib/agents');
+      const doc = await doctor({ home: ctx.opts['--home'] }).catch(() => null);
+      const text = buildReport({ agents: agents.listAgents(ctx.ws).agents, update: update.summary(ctx.ws), doctor: doc, logFile: ctx.ws.log });
+      r = { text: `${text}\n\n(The browser isn't connected, so its details are missing.)`, email: reportEmail() };
+    }
+    if (ctx.json) return printJson(r);
+    out(r.text);
+    out('');
+    out(r.email ? `Send this, with what went wrong, to ${r.email}` : 'Send this, with what went wrong, to whoever gave you WebMods.');
   },
 
   async restore(ctx, pos) {

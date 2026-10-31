@@ -23,6 +23,7 @@ const state = {
   connected: false,      // true once the helper has sent us something on the current port
   connectedAt: 0,
   helperError: null,     // last disconnect reason (shown on the onboarding page)
+  update: null,          // the helper's update summary (helper/lib/update.js), for the panel's notice
   backoff: 0,
   retryTimer: null,
   userScripts: null,     // null until first checked
@@ -268,6 +269,17 @@ async function onHelperMessage(msg) {
     if (msg.ok) p.resolve(msg.result); else p.reject(new Error(msg.error || 'the helper reported an error'));
   } else if (msg.type === 'agentEvent') {
     await onAgentEvent(msg.runId, msg.event);
+  } else if (msg.type === 'update') {
+    state.update = msg.update && typeof msg.update === 'object' ? msg.update : null;
+    notifyPanels();
+  } else if (msg.type === 'updated') {
+    // Shown by the panel after the reload that follows ("WebMods updated to …").
+    await chrome.storage.local.set({ updated: { from: String(msg.from ?? ''), to: String(msg.to ?? ''), notes: String(msg.notes ?? ''), at: Date.now() } });
+  } else if (msg.type === 'reload') {
+    // The helper installed a new version (or found one installed): reload onto it. Chrome reads the
+    // unpacked extension's files again; either browser starts the new helper on reconnect.
+    console.log('[webmods] reloading:', msg.reason);
+    setTimeout(() => chrome.runtime.reload(), 100);
   }
 }
 
@@ -679,7 +691,7 @@ async function uiStatus() {
   return {
     helper: { connected: state.connected, error: state.connected ? null : state.helperError },
     userScripts: s.userScripts, settingsUrl: SETTINGS_URL, version: VERSION, chrome: CHROME, browser: BROWSER,
-    recording: s.recording, sitesOn: state.sitesOn,
+    recording: s.recording, sitesOn: state.sitesOn, update: state.connected ? state.update : null,
     mods: state.mods.map((m, i) => ({
       id: m.id, name: m.name || m.id, description: m.description || '', site: m.site, file: m.file || '',
       matches: m.matches || [], excludes: m.excludes || [], registered: s.mods[i].registered, enabled: s.mods[i].enabled,
@@ -779,6 +791,16 @@ async function onPanelMessage(msg) {
       const mod = state.mods.find((m) => m.id === r.id);
       if (mod && msg.tab !== undefined) await reloadIfApplies(mod, { tab: msg.tab }, { onlyIfRunning: true });
       return r;
+    }
+    case 'update.check': return helperRequest('update.check', { force: true }, 60000);
+    case 'update.install': return helperRequest('update.install', {}, 180000);
+    case 'update.setAuto': return helperRequest('update.setAuto', { on: !!msg.on }, 10000);
+    case 'update.dismiss': return chrome.storage.local.remove('updated');
+    case 'report.build': {
+      const mods = (Array.isArray(msg.mods) ? msg.mods : []).slice(0, 40).map((m) => ({
+        id: String(m?.id ?? ''), enabled: m?.enabled !== false, registered: !!m?.registered, error: m?.error ? String(m.error) : null,
+      }));
+      return helperRequest('report.build', { site: String(msg.site ?? ''), siteOn: !!msg.siteOn, mods }, 60000);
     }
     default: return onPageMessage(msg);
   }

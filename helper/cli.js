@@ -202,6 +202,8 @@ const handlers = {
       noLink: !!ctx.opts['--no-link'],
       noExamples: !!ctx.opts['--no-examples'],
       mode: ctx.opts['--copy'] ? 'copy' : ctx.opts['--link'] ? 'link' : undefined,
+      // Only for a person at a terminal (not scripts, tests or --json).
+      reveal: !!process.stdout.isTTY && !ctx.json,
     });
     if (ctx.json) printJson({ ok: r.ok, home: r.ws.home, mode: r.mode, app: r.root, manifests: r.manifests, node: r.nodePath });
     else out(r.lines.join('\n'));

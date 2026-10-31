@@ -211,8 +211,17 @@ function recordPath(home, pathValue) {
   return { error: null, how };
 }
 
+/** Selects `dir` in a Finder window and copies its path (macOS only). Returns whether Finder showed it. */
+function revealFolder(dir) {
+  if (process.platform !== 'darwin') return false;
+  const { spawnSync } = require('child_process');
+  spawnSync('pbcopy', { input: dir });
+  return spawnSync('open', ['-R', dir]).status === 0;
+}
+
 /**
- * opts: { home, browser, nativeDir, binDir, noLink, noExamples, mode: 'copy'|'link'|undefined (auto) }
+ * opts: { home, browser, nativeDir, binDir, noLink, noExamples, mode: 'copy'|'link'|undefined (auto),
+ *         reveal (show the extension folder in Finder for Chrome's Load unpacked) }
  * Returns { ok, lines: [string], ws, manifests: [{browser, file}], nodePath, mode, root }
  */
 function setup(opts = {}) {
@@ -373,14 +382,23 @@ function setup(opts = {}) {
     say(`  Then ask your coding agent to work in ${home} (it reads AGENTS.md there).`);
     return { ok, lines, ws, manifests, nodePath, mode, root };
   }
+  // The extension folder is hidden (~/.webmods) from Load unpacked's file picker, so on a Mac show it in
+  // Finder, ready to drag onto chrome://extensions, and put its path on the clipboard for Cmd-Shift-G.
+  const revealed = !!opts.reveal && revealFolder(extensionDir);
   say('  1. Install the extension. Until WebMods is on the Chrome Web Store, load it unpacked:');
-  say('     open chrome://extensions, turn on "Developer mode" (top right), click "Load unpacked"');
-  say(`     and choose ${extensionDir}`);
+  if (revealed) {
+    say('     open chrome://extensions and turn on "Developer mode" (top right). Then drag the "extension"');
+    say('     folder from the Finder window that just opened onto that page. (Or click "Load unpacked",');
+    say(`     press Cmd-Shift-G and paste: the folder's path, ${extensionDir}, is on your clipboard.)`);
+  } else {
+    say('     open chrome://extensions, turn on "Developer mode" (top right), click "Load unpacked"');
+    say(`     and choose ${extensionDir}`);
+  }
   say(`     (its ID must be ${P.EXTENSION_ID}).${mode === 'copy' ? ' Keep that folder: Chrome runs the extension from it,' : ''}`);
   if (mode === 'copy') say('     and setup updates it in place. (A Web Store listing will replace this step later.)');
-  say('  2. Click "Details" on the WebMods extension and turn on "Allow User Scripts".');
-  say('  3. If Chrome was already running before this setup, quit it completely and reopen it.');
-  say('  4. Check everything with: webmods doctor');
+  say('  2. Turn on "Allow User Scripts": click "Open extension settings" on the WebMods tab Chrome opens,');
+  say('     or "Details" on WebMods in chrome://extensions.');
+  say('  3. Check everything with: webmods doctor');
   if (targets.some((t) => t.firefox)) {
     say('  Firefox: open the signed WebMods add-on (.xpi) in Firefox to install it, then click the WebMods');
     say('     toolbar button and "Allow user scripts". Restart Firefox if it was running before this setup.');

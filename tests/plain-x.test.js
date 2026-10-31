@@ -433,7 +433,7 @@ assert.deepStrictEqual(JSON.parse(window.__dmFilterTimeline(JSON.stringify(spamP
 test("the page's own UI keeps its styles", () => {
 // The page's own UI keeps its styles (they were once lost in an edit).
 const source = fs.readFileSync(MOD, 'utf8');
-for (const selector of ['#placeholder::after', 'header[role=banner] h1 a[href="/home"]::after', '.dm-search {', 'html[data-dm-explore]', '.dm-unfollowed {', '.dm-unfollowed:not([data-open]) .dm-threads', '.dm-reply img.av', '.dm-filters {', '.dm-menu {', '[data-dm-placeholder] article']) {
+for (const selector of ['#placeholder::after', 'header[role=banner] h1 a[href="/home"] > div::after', '.dm-search {', 'html[data-dm-explore]', '.dm-unfollowed {', '.dm-unfollowed:not([data-open]) .dm-threads', '.dm-reply img.av', '.dm-filters {', '.dm-menu {', '[data-dm-placeholder] article']) {
   assert.ok(source.includes(selector), `stylesheet has ${selector}`);
 }
 });

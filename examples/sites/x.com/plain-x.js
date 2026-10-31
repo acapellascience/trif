@@ -442,8 +442,11 @@
       font: 400 96px/1 -apple-system, system-ui, sans-serif; color: #fff; mix-blend-mode: difference; pointer-events: none; }
     header[role=banner] h1 a[href="/home"] svg { visibility: hidden !important; }
     header[role=banner] h1 a[href="/home"] { position: relative; }
-    header[role=banner] h1 a[href="/home"]::after { content: "x"; position: absolute; left: 50%; top: 50%; transform: translate(-50%, -56%);
-      font: 400 42px/1 -apple-system, system-ui, sans-serif; color: var(--dm-fg, rgb(231, 233, 234)); pointer-events: none; }
+    /* Drawn on the div X wraps its logo in (X sets the theme's text colour on it, inline), and inheriting
+       that colour, so the x always matches the logo it replaces, light or dark, even after a theme switch.
+       Positioned against the link (position: relative above). */
+    header[role=banner] h1 a[href="/home"] > div::after { content: "x"; position: absolute; left: 50%; top: 50%; transform: translate(-50%, -56%);
+      font: 400 42px/1 -apple-system, system-ui, sans-serif; color: inherit; pointer-events: none; }
     /* The timeline fills the window instead of sitting in a 600px column on the left. */
     main[role=main] > div, main[role=main] > div > div, main[role=main] > div > div > div { width: 100% !important; max-width: none !important; }
     [data-testid=primaryColumn] { max-width: none !important; border-right: none !important; border-left: none !important; }
@@ -458,6 +461,11 @@
     /* Under a dialog opened over Explore: below X's app layer (z-index 0, which holds #layers), so the
        dialog and its mask cover it. X's own Explore page is hidden, so nothing else covers it. */
     html[data-dm-under-dialog] .dm-search { z-index: -1; }
+    /* X's pop-ups (hover cards, menus, the account menu) live in #layers (z-index 1), but inside the app's
+       wrappers (z-index 0), which made them stack as one layer below the search page (z-index 2). On
+       Explore those two wrappers stop being layers, so #layers stacks on its own, above the search page. */
+    html[data-dm-explore] :is(div:has(> #layers), div:has(> div > #layers)) { z-index: auto !important; }
+    html[data-dm-explore] #layers { z-index: 3 !important; }
     .dm-search .logo { font: 400 88px/0.7 -apple-system, system-ui, sans-serif; color: var(--dm-fg); padding-bottom: 12px; }
     .dm-search form { width: 100%; max-width: 584px; position: relative; }
     .dm-search input { width: 100%; box-sizing: border-box; height: 48px; padding: 0 20px 0 48px; border-radius: 24px;
@@ -739,7 +747,15 @@
     if (!explore) { box?.remove(); return; }
     const nav = document.querySelector('header[role=banner]');
     document.documentElement.style.setProperty('--dm-nav-width', `${nav ? Math.round(nav.getBoundingClientRect().right) : 0}px`);
-    if (box || !document.body) return;
+    // The x takes the colour X gives its own logo in the side bar (the theme's text colour, current even
+    // after a theme switch); --dm-fg, worked out once when the box is made, is only the fallback.
+    const matchLogo = () => {
+      const fg = nav && getComputedStyle(nav.querySelector('h1 a[href="/home"] > div') || nav).color;
+      const logo = box?.querySelector('.logo');
+      if (logo && fg && logo.style.color !== fg) logo.style.color = fg;
+    };
+    if (box) { matchLogo(); return; }
+    if (!document.body) return;
     applyTheme();
     box = document.createElement('div');
     box.className = 'dm-search';
@@ -752,6 +768,7 @@
       dispatchEvent(new PopStateEvent('popstate', { state: {} }));
     });
     document.body.append(box);
+    matchLogo();
     setTimeout(() => box.querySelector('input')?.focus(), 50);
   };
   // Flip the Explore flag the moment the route changes, not after X has drawn the page.

@@ -17,7 +17,7 @@
        of hidden test elements it puts directly in <body>. Restyling those makes X answer 404. */
     #react-root, #react-root *, .dm-search, .dm-search *, .dm-menu, .dm-menu * { font-family: ${FONT} !important; }
     /* Plain X draws its "x" logo (side bar, loading screen) as ::after, which body * doesn't reach. */
-    header[role=banner] h1 a[href="/home"]::after, #placeholder::after { font-family: ${FONT} !important; }
+    header[role=banner] h1 a[href="/home"] > div::after, #placeholder::after { font-family: ${FONT} !important; }
   `;
   (document.head || document.documentElement).append(style);
 

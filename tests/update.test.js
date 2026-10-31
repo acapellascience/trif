@@ -225,8 +225,10 @@ test('release script: changelog sections and feeds the helper and Firefox accept
     [['0.1.1', 'https://x/1.xpi', 'sha256:c'], ['0.1.2', 'https://x/2b.xpi', 'sha256:e']]);
 });
 
-test('webmods update without a release source says so; --auto writes config.json', async () => {
+test('webmods update reports a failed check; --auto writes config.json', async () => {
   const home = tempDir();
+  // Nothing listens there: the check fails without going to GitHub.
+  fs.writeFileSync(path.join(home, 'config.json'), JSON.stringify({ updateFeed: 'http://127.0.0.1:9/latest.json' }));
   let r = await runCli(['update'], { home });
   assert.equal(r.code, 0, r.stderr);
   assert.match(r.stdout, /couldn't check for updates/);
@@ -234,6 +236,7 @@ test('webmods update without a release source says so; --auto writes config.json
   r = await runCli(['update', '--auto', 'on'], { home });
   assert.match(r.stdout, /automatic updates on/);
   assert.equal(JSON.parse(fs.readFileSync(path.join(home, 'config.json'), 'utf8')).autoUpdate, true);
+  assert.equal(JSON.parse(fs.readFileSync(path.join(home, 'config.json'), 'utf8')).updateFeed, 'http://127.0.0.1:9/latest.json', 'the rest of config.json is kept');
   r = await runCli(['update', '--auto', 'maybe'], { home });
   assert.equal(r.code, 1);
   assert.match(r.stderr, /--auto takes on or off/);

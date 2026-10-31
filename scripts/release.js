@@ -250,7 +250,12 @@ async function release(version, { dryRun, skipTests }) {
   console.log(`\nReady in ${path.relative(ROOT, out)}:`);
   for (const a of assets) console.log(`  ${path.basename(a)}`);
   console.log(`\nWhat's new in ${version}:\n${notes}\n`);
-  if (dryRun) { console.log('Dry run: nothing published.'); return; }
+  if (dryRun) {
+    // The copy it built from holds the tests too; left there, `node --test` would find them.
+    fs.rmSync(src, { recursive: true, force: true });
+    console.log('Dry run: nothing published.');
+    return;
+  }
 
   const answer = await ask(`Publish WebMods ${version} to github.com/${repo}? This is public. Type ${version} to confirm: `);
   if (answer !== version) {

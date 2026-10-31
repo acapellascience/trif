@@ -3,6 +3,14 @@
   "version": "0.1.0",
   "description": "Customize any website with mods written by your coding agent: a Chrome extension, a native messaging helper and the `webmods` CLI.",
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/acapellascience/WebMods.git"
+  },
+  "homepage": "https://github.com/acapellascience/WebMods#readme",
+  "bugs": {
+    "url": "https://github.com/acapellascience/WebMods/issues"
+  },
   "type": "commonjs",
   "bin": {
     "webmods": "helper/cli.js"

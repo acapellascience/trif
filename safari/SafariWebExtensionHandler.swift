@@ -1,0 +1,35 @@
+// The Mac app's side of WebMods for Safari (scripts/build-safari.js puts this file in the generated
+// Xcode project). WebMods' extension asks its app for one thing: the key the helper's Safari bridge
+// expects (~/.webmods/safari-token, written by `webmods setup --browser safari`). Safari only lets an
+// extension message its own app, so another Safari extension can't get the key and reach the helper.
+
+import SafariServices
+import Foundation
+
+// SFExtensionMessageKey's value; the constant itself needs macOS 11, newer than the target's minimum.
+let messageKey = "message"
+
+class SafariWebExtensionHandler: NSObject, NSExtensionRequestHandling {
+
+    func beginRequest(with context: NSExtensionContext) {
+        let request = context.inputItems.first as? NSExtensionItem
+        let message = request?.userInfo?[messageKey] as? [String: Any]
+        var reply: [String: Any] = [:]
+        if message?["type"] as? String == "token" {
+            // In the sandbox, NSHomeDirectory() is this extension's container; the key is in the real home
+            // (the entitlements allow reading just that file).
+            let home = String(cString: getpwuid(getuid()).pointee.pw_dir)
+            let path = home + "/.webmods/safari-token"
+            if let token = try? String(contentsOfFile: path, encoding: .utf8) {
+                reply["token"] = token.trimmingCharacters(in: .whitespacesAndNewlines)
+            } else {
+                reply["error"] = "couldn't read \(path); run: webmods setup --browser safari"
+            }
+        } else {
+            reply["error"] = "unknown request"
+        }
+        let response = NSExtensionItem()
+        response.userInfo = [messageKey: reply]
+        context.completeRequest(returningItems: [response], completionHandler: nil)
+    }
+}

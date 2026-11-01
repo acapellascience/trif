@@ -107,7 +107,8 @@ function safariManifest(m) {
   // start without saying why, and a page can be inspected (Develop → Web Extension Background Content).
   // Still one classic script (bundleClassic).
   f.background = { scripts: ['safari-background.js'], persistent: false };
-  f.permissions = [...m.permissions.filter((p) => !['sidePanel', 'userScripts', 'nativeMessaging'].includes(p)), 'webNavigation'];
+  // nativeMessaging stays: in Safari it reaches the extension's own app, which hands out the bridge's key.
+  f.permissions = [...m.permissions.filter((p) => !['sidePanel', 'userScripts'].includes(p)), 'webNavigation'];
   return f;
 }
 

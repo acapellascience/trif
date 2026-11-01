@@ -6,8 +6,11 @@
 // stdout (docs/PROTOCOL.md). The bridge itself only relays. `webmods setup --browser safari` installs it
 // as a login item (a launchd agent), so it's always running.
 //
-// Only Safari extension pages may connect. A browser always sends the page's origin with a WebSocket
-// handshake and a web page can't change it, so a website can't reach the helper this way.
+// Only WebMods' Safari extension may connect. A browser always sends the page's origin with a WebSocket
+// handshake and a web page can't change it, so only a Safari extension gets past the origin check, and of
+// those only WebMods has the key (?token=, the contents of <home>/safari-token, written by setup): the
+// extension gets it from its own Mac app, which no other extension can message. (A Safari extension's
+// origin is random and changes, so it can't be checked for itself.)
 //
 // Safari unloads an extension's background after half a minute or so with nothing to do, which closes
 // the WebSocket. In Chrome that would mean the host exits (its stdin closes), ending any agent run, so
@@ -32,10 +35,15 @@ const HOST_IDLE_MS = 30 * 60 * 1000;
 const QUEUE_MAX = 2000; // messages kept for a disconnected extension (oldest dropped)
 const PING_MS = 20000;
 
-/** Whether a handshake may become a helper connection. */
-function allowed(req) {
-  return ALLOWED_ORIGIN.test(String(req.headers.origin || '')) && req.headers.upgrade?.toLowerCase() === 'websocket'
-    && typeof req.headers['sec-websocket-key'] === 'string';
+/** Whether a handshake may become a helper connection: from a Safari extension, bringing `key`. */
+function allowed(req, key) {
+  if (!ALLOWED_ORIGIN.test(String(req.headers.origin || '')) || req.headers.upgrade?.toLowerCase() !== 'websocket'
+    || typeof req.headers['sec-websocket-key'] !== 'string' || !key) return false;
+  let given;
+  try { given = new URL(req.url, 'http://127.0.0.1').searchParams.get('token') || ''; } catch { return false; }
+  const a = crypto.createHash('sha256').update(given).digest();
+  const b = crypto.createHash('sha256').update(key).digest();
+  return crypto.timingSafeEqual(a, b);
 }
 
 /** One WebSocket frame from the server (never masked). */
@@ -94,6 +102,7 @@ class WsReader {
  *   log                                     { info, warn, error } (default: discard)
  *   idleMs                                  how long a host may go without a connection (HOST_IDLE_MS)
  *   runActive()                             whether an agent run is going (keeps an idle host)
+ *   token()                                 the key connections must bring (read for each one), or null
  * Returns { server, hosts } (hosts: origin → { child, socket, queue, idleTimer }).
  */
 function createBridge(opts = {}) {
@@ -101,6 +110,7 @@ function createBridge(opts = {}) {
   const log = opts.log || { info() {}, warn() {}, error() {} };
   const idleMs = opts.idleMs ?? HOST_IDLE_MS;
   const runActive = opts.runActive || (() => false);
+  const token = opts.token || (() => null);
   const hosts = new Map();
 
   function hostFor(origin) {
@@ -190,8 +200,9 @@ function createBridge(opts = {}) {
     res.end('WebMods helper for Safari: WebSocket only.\n');
   });
   server.on('upgrade', (req, socket) => {
-    if (!allowed(req)) {
-      log.warn(`safari bridge: refused a connection from ${req.headers.origin || 'no origin'}`);
+    const key = token();
+    if (!allowed(req, key)) {
+      log.warn(`safari bridge: refused a connection from ${req.headers.origin || 'no origin'}${key ? '' : ' (no key yet: run webmods setup --browser safari)'}`);
       socket.end('HTTP/1.1 403 Forbidden\r\nConnection: close\r\n\r\n');
       return;
     }
@@ -217,7 +228,9 @@ function main() {
   }]));
   const at = process.argv.indexOf('--port');
   const port = at > 0 ? Number(process.argv[at + 1]) : PORT;
-  const { server } = createBridge({ log, runActive: () => agentRunActive(ws.home) });
+  const tokenFile = path.join(ws.home, 'safari-token');
+  const token = () => { try { return fs.readFileSync(tokenFile, 'utf8').trim() || null; } catch { return null; } };
+  const { server } = createBridge({ log, runActive: () => agentRunActive(ws.home), token });
   server.on('error', (e) => {
     log.error(`safari bridge: ${e.code === 'EADDRINUSE' ? `port ${port} is in use (is the bridge already running?)` : e.message}`);
     process.exit(1);

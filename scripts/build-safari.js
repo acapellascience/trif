@@ -3,7 +3,9 @@
 // small Mac app Safari requires, as dist/safari-app/WebMods.app and dist/webmods-safari-<version>.zip.
 //
 // The Xcode project is generated each time with Apple's safari-web-extension-converter (so nothing
-// generated is kept in the repo), then given WebMods' bundle IDs. Needs Xcode (not just the command
+// generated is kept in the repo), then given WebMods' bundle IDs and the app's own part from safari/:
+// the extension's message handler (it hands the extension the Safari bridge's key) and its entitlements
+// (sandboxed, reading only that key's file). Needs Xcode (not just the command
 // line tools). Without --team the app is signed ad hoc: it runs on this Mac once Safari's "Allow
 // unsigned extensions" is on. With --team <Apple developer team ID> Xcode signs it with that team.
 //
@@ -21,6 +23,8 @@ const OUT = path.join(DIST, 'safari-app');
 const APP_NAME = 'WebMods';
 const APP_ID = 'dev.webmods.app';
 const EXTENSION_ID = `${APP_ID}.extension`;
+const EXTENSION_TARGET = `${APP_NAME} Extension`;
+const ENTITLEMENTS = `${EXTENSION_TARGET}.entitlements`;
 
 const arg = (name) => { const i = process.argv.indexOf(name); return i > 0 ? process.argv[i + 1] : null; };
 const team = arg('--team');
@@ -39,12 +43,21 @@ function run(file, args, opts = {}) {
   }
 }
 
-/** The converter's project with WebMods' bundle IDs: the app's, and the extension's under it. */
-function fixIdentifiers(projectDir) {
+/**
+ * The converter's project made WebMods': its bundle IDs (the app's, and the extension's under it), and
+ * the extension's handler and entitlements from safari/.
+ */
+function customize(projectDir) {
   const pbx = path.join(projectDir, `${APP_NAME}.xcodeproj`, 'project.pbxproj');
-  const text = fs.readFileSync(pbx, 'utf8').replace(/PRODUCT_BUNDLE_IDENTIFIER = ([^;]+);/g,
-    (_, id) => `PRODUCT_BUNDLE_IDENTIFIER = ${/\.Extension$/.test(id) ? EXTENSION_ID : APP_ID};`);
+  const text = fs.readFileSync(pbx, 'utf8').replace(/^(\s*)PRODUCT_BUNDLE_IDENTIFIER = ([^;]+);/gm,
+    (_, indent, id) => (/\.Extension$/.test(id)
+      ? `${indent}CODE_SIGN_ENTITLEMENTS = "${EXTENSION_TARGET}/${ENTITLEMENTS}";\n${indent}PRODUCT_BUNDLE_IDENTIFIER = ${EXTENSION_ID};`
+      : `${indent}PRODUCT_BUNDLE_IDENTIFIER = ${APP_ID};`));
+  if ((text.match(/CODE_SIGN_ENTITLEMENTS/g) || []).length !== 2) fail("couldn't find the extension's build settings in the generated project");
   fs.writeFileSync(pbx, text);
+  for (const file of ['SafariWebExtensionHandler.swift', ENTITLEMENTS]) {
+    fs.copyFileSync(path.join(ROOT, 'safari', file), path.join(projectDir, EXTENSION_TARGET, file));
+  }
   const vc = path.join(projectDir, APP_NAME, 'ViewController.swift');
   if (fs.existsSync(vc)) {
     fs.writeFileSync(vc, fs.readFileSync(vc, 'utf8').replace(/let extensionBundleIdentifier = "[^"]*"/, `let extensionBundleIdentifier = "${EXTENSION_ID}"`));
@@ -63,7 +76,7 @@ function main() {
     '--no-open', '--no-prompt', '--force']);
   const projectDir = path.join(OUT, APP_NAME);
   if (!fs.existsSync(path.join(projectDir, `${APP_NAME}.xcodeproj`))) fail(`the converter didn't make ${projectDir}/${APP_NAME}.xcodeproj`);
-  fixIdentifiers(projectDir);
+  customize(projectDir);
 
   const signing = team
     ? [`DEVELOPMENT_TEAM=${team}`, 'CODE_SIGN_STYLE=Automatic']
@@ -75,8 +88,13 @@ function main() {
 
   const built = path.join(OUT, 'build', 'Build', 'Products', configuration, `${APP_NAME}.app`);
   if (!fs.existsSync(built)) fail(`xcodebuild didn't make ${built}`);
+  // Moved, not copied, and Xcode's copy forgotten: macOS registers every copy of the app it sees, and with
+  // two Safari lists WebMods twice and its extension can't message its app ("Other version in use").
   const app = path.join(OUT, `${APP_NAME}.app`);
-  run('ditto', [built, app]);
+  fs.renameSync(built, app);
+  try {
+    execFileSync('/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister', ['-u', built], { stdio: 'ignore' });
+  } catch { /* never registered */ }
   const zip = path.join(DIST, `webmods-safari-${version}.zip`);
   fs.rmSync(zip, { force: true });
   run('ditto', ['-c', '-k', '--keepParent', app, zip]);

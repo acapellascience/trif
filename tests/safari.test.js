@@ -21,6 +21,8 @@ const injected = [];
 let failInjection = null;
 const storage = {};
 const sockets = [];
+let nativeReply = async () => ({ token: 'the-key' });
+const nativeCalls = [];
 
 class FakeWebSocket {
   constructor(url) {
@@ -40,6 +42,7 @@ const fakeChrome = {
   runtime: Object.preventExtensions({
     getURL: (p) => `safari-web-extension://ABC/${p}`, id: 'dev.webmods.app.extension (X)',
     getManifest: () => ({ version: '0.0.0' }), lastError: undefined, onMessage: event('runtime.onMessage'),
+    sendNativeMessage: (app, msg) => { nativeCalls.push([app, msg]); return nativeReply(); },
   }),
   storage: {
     local: {
@@ -174,11 +177,14 @@ test('Safari adapter: syncUserScripts works against the stand-in (runtime first,
   await us().unregister();
 });
 
-test('Safari adapter: connectNative is a port over a WebSocket to the bridge', () => {
+test('Safari adapter: connectNative is a port over a WebSocket to the bridge, with the key from the app', async () => {
+  const before = sockets.length;
   const port = safari.bundledChrome.runtime.connectNative('com.webmods.helper');
-  const ws = sockets.at(-1);
-  assert.equal(ws.url, `ws://127.0.0.1:${PORT}/`);
   port.postMessage({ type: 'hello' });
+  await waitFor(() => sockets.length > before, { message: 'the WebSocket' });
+  const ws = sockets.at(-1);
+  assert.equal(ws.url, `ws://127.0.0.1:${PORT}/?token=the-key`);
+  assert.deepEqual(nativeCalls.at(-1), ['dev.webmods.app', { type: 'token' }]);
   assert.deepEqual(ws.sent, [], 'held until the socket opens');
   ws.onopen();
   assert.deepEqual(ws.sent, [{ type: 'hello' }]);
@@ -195,6 +201,28 @@ test('Safari adapter: connectNative is a port over a WebSocket to the bridge', (
   assert.throws(() => port.postMessage({}), /disconnected port/);
 });
 
+test('Safari adapter: without a key from the app, the port disconnects (and asks again next time)', async () => {
+  // The previous test's socket closed after opening, so the key is still remembered; a refused one isn't.
+  const p1 = safari.bundledChrome.runtime.connectNative('com.webmods.helper');
+  await waitFor(() => sockets.at(-1).url.endsWith('the-key'));
+  let gone1 = 0;
+  p1.onDisconnect.addListener(() => gone1++);
+  sockets.at(-1).onclose(); // refused before opening
+  assert.equal(gone1, 1);
+
+  const before = sockets.length;
+  nativeReply = async () => ({ error: "couldn't read /Users/x/.webmods/safari-token" });
+  try {
+    const p2 = safari.bundledChrome.runtime.connectNative('com.webmods.helper');
+    let gone2 = 0;
+    p2.onDisconnect.addListener(() => gone2++);
+    await waitFor(() => gone2 === 1, { message: 'a disconnect' });
+    assert.equal(sockets.length, before, 'no socket without a key');
+  } finally {
+    nativeReply = async () => ({ token: 'the-key' });
+  }
+});
+
 // ---- the Safari build ----------------------------------------------------------------------------
 
 test('Safari build: manifest has the adapter\'s background page and no Chrome-only parts', () => {
@@ -203,7 +231,8 @@ test('Safari build: manifest has the adapter\'s background page and no Chrome-on
   assert.equal(m.side_panel, undefined);
   assert.equal(m.key, undefined);
   assert.ok(m.permissions.includes('webNavigation') && m.permissions.includes('scripting'));
-  for (const p of ['userScripts', 'nativeMessaging', 'sidePanel']) assert.ok(!m.permissions.includes(p), p);
+  assert.ok(m.permissions.includes('nativeMessaging'), "to ask the app for the bridge's key");
+  for (const p of ['userScripts', 'sidePanel']) assert.ok(!m.permissions.includes(p), p);
 });
 
 test('Safari build: the background is one classic script that starts against Safari-like APIs', () => {
@@ -217,6 +246,7 @@ test('Safari build: the background is one classic script that starts against Saf
   const runtime = Object.preventExtensions({
     getURL: (p) => `safari-web-extension://ABC/${p}`, getManifest: () => ({ version: '0.0.0' }), id: 'X',
     onMessage: event('b'), onConnect: event('b'), onInstalled: event('b'), onStartup: event('b'),
+    sendNativeMessage: async () => ({ token: 'k' }),
   });
   const chrome = new Proxy({ runtime }, { get: (t, k) => (k in t ? t[k] : (t[k] = ns())) });
   const errors = [];
@@ -232,7 +262,7 @@ test('Safari build: the background is one classic script that starts against Saf
   ctx.addEventListener = () => {};
   vm.runInNewContext(src, ctx);
   return waitFor(() => seen.length > 0, { message: 'a connection to the bridge' }).then(() => {
-    assert.deepEqual(seen, [`ws://127.0.0.1:${PORT}/`]);
+    assert.deepEqual(seen, [`ws://127.0.0.1:${PORT}/?token=k`]);
     assert.deepEqual(errors.filter((e) => /failed to start/.test(e)), []);
   });
 });
@@ -252,10 +282,10 @@ process.stdin.on('end', () => process.exit(0));
 `;
 
 /** A minimal WebSocket client that can set its Origin (browsers can't, which is the point). */
-function wsConnect(port, origin) {
+function wsConnect(port, origin, key = 'k') {
   return new Promise((resolve, reject) => {
     const req = http.request({
-      host: '127.0.0.1', port, path: '/',
+      host: '127.0.0.1', port, path: key === null ? '/' : `/?token=${encodeURIComponent(key)}`,
       headers: { Connection: 'Upgrade', Upgrade: 'websocket', 'Sec-WebSocket-Version': '13', 'Sec-WebSocket-Key': crypto.randomBytes(16).toString('base64'), ...(origin ? { Origin: origin } : {}) },
     });
     req.on('response', (res) => resolve({ refused: res.statusCode }));
@@ -294,7 +324,7 @@ function wsConnect(port, origin) {
 async function startBridge(opts = {}) {
   const logged = [];
   const log = { info: (m) => logged.push(m), warn: (m) => logged.push(m), error: (m) => logged.push(m) };
-  const { server, hosts } = createBridge({ hostCommand: () => [process.execPath, '-e', FAKE_HOST], log, ...opts });
+  const { server, hosts } = createBridge({ hostCommand: () => [process.execPath, '-e', FAKE_HOST], log, token: () => 'k', ...opts });
   await new Promise((r) => server.listen(0, '127.0.0.1', r));
   const port = server.address().port;
   const stop = async () => {
@@ -315,6 +345,21 @@ test('Safari bridge: refuses connections that aren\'t from a Safari extension', 
     assert.deepEqual(await wsConnect(b.port, 'chrome-extension://abcdefghijklmnopabcdefghijklmnop'), { refused: 403 });
     assert.equal(b.hosts.size, 0, 'no host started');
   } finally { await b.stop(); }
+});
+
+test('Safari bridge: refuses a Safari extension without the key (another extension than WebMods)', async () => {
+  const b = await startBridge();
+  try {
+    assert.deepEqual(await wsConnect(b.port, ORIGIN, null), { refused: 403 });
+    assert.deepEqual(await wsConnect(b.port, ORIGIN, 'kk'), { refused: 403 });
+    assert.deepEqual(await wsConnect(b.port, ORIGIN, ''), { refused: 403 });
+    assert.equal(b.hosts.size, 0);
+  } finally { await b.stop(); }
+  const none = await startBridge({ token: () => null }); // setup hasn't made a key yet
+  try {
+    assert.deepEqual(await wsConnect(none.port, ORIGIN, ''), { refused: 403 });
+    assert.ok(none.logged.some((l) => /no key yet/.test(l)));
+  } finally { await none.stop(); }
 });
 
 test('Safari bridge: relays to a host, and the host outlives a disconnect (Safari napping the background)', async () => {
@@ -392,4 +437,11 @@ test('setup --browser safari installs the bridge\'s login item and gives Safari\
   assert.match(next, /Allow unsigned extensions/);
   assert.doesNotMatch(next, /chrome:\/\/extensions|Load unpacked|\.xpi/);
   assert.doesNotMatch(r.stdout, /native host/, 'no native messaging manifest for Safari');
+  const tokenFile = path.join(home, 'safari-token');
+  const key = fs.readFileSync(tokenFile, 'utf8').trim();
+  assert.match(key, /^[0-9a-f]{64}$/);
+  assert.equal(fs.statSync(tokenFile).mode & 0o777, 0o600, 'only you can read the key');
+  const again = await runCli(['setup', '--browser', 'safari', '--no-link', '--no-examples'], { home });
+  assert.equal(again.code, 0);
+  assert.equal(fs.readFileSync(tokenFile, 'utf8').trim(), key, 'kept on re-running setup');
 });

@@ -8,7 +8,9 @@
 //   script's code runs that code, even on pages whose CSP forbids eval (x.com, instagram.com). That's
 //   how Safari 27 behaves rather than a documented promise; tests/safari.test.js describes what it needs.
 // - chrome.runtime.connectNative: a port over a WebSocket to the helper's Safari bridge
-//   (helper/safari-bridge.js) on 127.0.0.1, which speaks to an ordinary host.js for each connection.
+//   (helper/safari-bridge.js) on 127.0.0.1, which relays to an ordinary host.js. The bridge only takes
+//   connections that bring its key, which the extension gets from its own Mac app (the one native
+//   messaging partner Safari allows: safari/SafariWebExtensionHandler.swift).
 // - The side panel: the toolbar button opens the panel page in a window of its own, following the tabs
 //   of the window it was opened from.
 //
@@ -17,6 +19,7 @@
 import { matchesPattern } from './lib.js';
 
 export const BRIDGE_URL = 'ws://127.0.0.1:47615/';
+const APP_ID = 'dev.webmods.app'; // Safari sends native messages to the extension's own app whatever this says
 const LOG_URL = 'http://127.0.0.1:47615/log';
 const STORE_KEY = 'safariUserScripts';
 
@@ -136,6 +139,16 @@ function event() {
   return { set, api: { addListener: (f) => set.add(f), removeListener: (f) => set.delete(f), hasListener: (f) => set.has(f) } };
 }
 
+let token = null; // the bridge's key, once the app has given it
+
+/** The bridge's key, from the extension's app (which reads ~/.webmods/safari-token). */
+async function bridgeToken() {
+  if (token) return token;
+  const r = await chrome.runtime.sendNativeMessage(APP_ID, { type: 'token' });
+  if (typeof r?.token !== 'string' || !r.token) throw new Error(r?.error || "WebMods' app didn't give the key for the helper");
+  return (token = r.token);
+}
+
 /** A runtime.Port to the helper's Safari bridge. */
 function bridgePort() {
   const message = event();
@@ -143,7 +156,12 @@ function bridgePort() {
   const queue = [];
   let open = false;
   let closed = false;
-  const ws = new WebSocket(BRIDGE_URL);
+  let ws = null;
+  const gone = () => {
+    if (closed) return;
+    closed = true;
+    for (const f of disconnect.set) f(port);
+  };
   const port = {
     name: 'webmods-helper',
     onMessage: message.api,
@@ -153,20 +171,23 @@ function bridgePort() {
       const s = JSON.stringify(msg);
       if (open) ws.send(s); else queue.push(s);
     },
-    disconnect() { closed = true; try { ws.close(); } catch {} },
+    disconnect() { closed = true; try { ws?.close(); } catch {} },
   };
-  ws.onopen = () => { open = true; for (const s of queue.splice(0)) ws.send(s); };
-  ws.onmessage = (e) => {
-    let msg;
-    try { msg = JSON.parse(e.data); } catch { return; }
-    for (const f of message.set) f(msg, port);
-  };
-  ws.onerror = () => {};
-  ws.onclose = () => {
+  bridgeToken().then((key) => {
     if (closed) return;
-    closed = true;
-    for (const f of disconnect.set) f(port);
-  };
+    ws = new WebSocket(`${BRIDGE_URL}?token=${encodeURIComponent(key)}`);
+    ws.onopen = () => { open = true; for (const s of queue.splice(0)) ws.send(s); };
+    ws.onmessage = (e) => {
+      let msg;
+      try { msg = JSON.parse(e.data); } catch { return; }
+      for (const f of message.set) f(msg, port);
+    };
+    ws.onerror = () => {};
+    ws.onclose = () => { if (!open) token = null; gone(); }; // refused: maybe the key changed, so ask again
+  }, (e) => {
+    console.warn('[webmods] no key for the helper:', e?.message ?? e);
+    setTimeout(gone, 0);
+  });
   return port;
 }
 

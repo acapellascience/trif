@@ -357,6 +357,15 @@ function setup(opts = {}) {
   const manifests = [];
   for (const t of targets) {
     if (t.safari) {
+      // The key the bridge asks of connections; WebMods' Safari app reads it from ~/.webmods (its sandbox
+      // allows that one path) and hands it to the extension.
+      const tokenFile = path.join(home, 'safari-token');
+      if (!fs.existsSync(tokenFile)) fs.writeFileSync(tokenFile, require('crypto').randomBytes(32).toString('hex') + '\n', { mode: 0o600 });
+      fs.chmodSync(tokenFile, 0o600);
+      if (path.resolve(home) !== path.resolve(P.defaultHome())) {
+        say(`              warning: Safari's WebMods app only looks for ${path.join(P.defaultHome(), 'safari-token')}, so Safari`);
+        say(`              can't connect to a workspace elsewhere (${home})`);
+      }
       const plist = opts.launchAgentsDir ? path.join(path.resolve(opts.launchAgentsDir), path.basename(safariAgentPlist())) : safariAgentPlist();
       const bridgeJs = path.join(helperDir, 'safari-bridge.js');
       try {

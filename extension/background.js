@@ -480,16 +480,22 @@ const commands = {
     return { dataUrl: await chrome.tabs.captureVisibleTab(tab.windowId, { format: 'png' }) };
   },
 
+  // `changed` and `site` let the helper switch recording off again when the agent run that switched it
+  // on ends (host.js). Switching off is allowed on a site WebMods is off for: it only records less.
   async record(args) {
     const site = normalizeSite(args.site);
-    checkScopeUrl(`https://${site}/`, args.scope, site);
+    const on = !(args.on === false || args.on === 'off');
+    if (on || args.scope) checkScopeUrl(`https://${site}/`, args.scope, site);
     const set = new Set(state.recording);
-    if (args.on === false || args.on === 'off') set.delete(site); else set.add(site);
+    const was = set.has(site);
+    if (on) set.add(site); else set.delete(site);
     const recording = [...set].sort();
-    await save({ recording });
-    state.recording = recording;
-    if (checkUserScripts()) reportApplied(await serial(applyMods));
-    return { recording: state.recording };
+    if (was !== on) {
+      await save({ recording });
+      state.recording = recording;
+      if (checkUserScripts()) reportApplied(await serial(applyMods));
+    }
+    return { recording: state.recording, site, changed: was !== on };
   },
 
   async requests(args) {

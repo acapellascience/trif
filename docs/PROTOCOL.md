@@ -174,7 +174,7 @@ Without one, the target is the active tab of the last-focused normal window.
 | `open` | `to` (URL) | `{id, url}`: opens a new background tab (never takes focus), waits for load |
 | `text` | tab selector | `{url, title, text}`: `document.body.innerText`, capped at 200 000 chars |
 | `screenshot` | tab selector | `{dataUrl}` PNG of the visible area. Only for a tab that's showing in its (non-minimized) window; otherwise an error: the extension never switches tabs or focuses windows, since agents may run while the user browses. The CLI writes it to a file. |
-| `record` | `site`, `on: bool` | `{recording:[sites]}`. Turns the network recorder on/off for a hostname (and its subdomains). Takes effect on the next page load. |
+| `record` | `site`, `on: bool` | `{recording:[sites], site, changed}`. Turns the network recorder on/off for a hostname (and its subdomains). Takes effect on the next page load. `changed`: whether it was the other way before. Switching off is allowed on a site WebMods is off for. Recording a side-panel run switched on (changed, from its token) is switched off by the helper when that run's `done` goes out; recording that was already on, or that a terminal switched on, is left alone. |
 | `requests` | `filter` (regex string, matched against URL), `limit` (default 50) + tab selector | `[{i, method, url, status, type:"fetch"|"xhr", size, time}]`, newest last |
 | `request` | `i` + tab selector | `{method, url, status, requestBody, responseText}` (bodies capped at 2 MB each) |
 | `errors` | tab selector | `[{mod, message, stack, time}]`: errors thrown by mods in that page |
@@ -257,7 +257,7 @@ world, `document_start`, **registered before any mod** so it runs first. It defi
 window.__webmods = {
   errors: [],          // {mod, message, stack, time}  (capped at 200)
   logs: [],            // {mod, level, args, time}      (capped at 500)
-  requests: [],        // recorder entries, only when recording this site (capped at 300; bodies capped at 2 MB)
+  requests: [],        // recorder entries, only when recording this site (capped at 300; bodies at 2 MB each, 32 MB in all)
   recording: bool,
 };
 window.webmods = { log(...args), warn(...args), error(...args) };   // for mods; records with the current mod id
@@ -278,7 +278,10 @@ also listens for `window` `error`/`unhandledrejection` events and attributes tho
 
 **Recorder:** when the page's hostname is in the recording set, the runtime hooks `fetch` and
 `XMLHttpRequest` (before the site's code runs) and stores each request: method, URL, status, request
-body (strings only; else `"[binary]"`), response text (text-like content types only). The recording set
+body (strings only; else `"[binary]"`), response text (text-like content types only). A fetch response
+is read from a clone through its stream, stopping (and cancelling the clone) after 2 MB, so a body that
+streams on doesn't grow without end; `text/event-stream` isn't read at all. Bodies kept add up to at most
+32 million characters across the entries; past that the oldest bodies are replaced by a note. The recording set
 reaches the runtime because the extension re-registers `webmods-runtime` (ids starting with `_` are reserved by Chrome) with the set embedded in its
 code whenever it changes (`const RECORDING = ["x.com"]`).
 

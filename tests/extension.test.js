@@ -509,7 +509,7 @@ test('recorder: XHR behaviour is unchanged and requests are recorded', async () 
   assert.deepStrictEqual([e.type, e.method, e.url, e.status, e.requestBody, e.responseText], ['xhr', 'PUT', 'https://x.com/save', 201, '{"x":1}', '{"saved":true}']);
 });
 
-test('recorder: caps bodies and entries; inactive on other hosts', async () => {
+test('recorder: caps bodies, entries and the total kept; inactive on other hosts', async () => {
   const big = 'z'.repeat(2 * 1024 * 1024 + 1000);
   const page = makePage('x.com', { fetch: async () => fakeResponse(big, { type: 'text/plain' }) });
   const W = loadRuntime(page, ['x.com']);
@@ -517,9 +517,16 @@ test('recorder: caps bodies and entries; inactive on other hosts', async () => {
   await settle();
   assert.strictEqual(W.requests.length, 300);
   assert.strictEqual(W.requests[0].i, 5);
-  assert.ok(W.requests[0].responseText.length < big.length);
-  assert.match(W.requests[0].responseText, /truncated/);
+  const last = W.requests.at(-1);
+  assert.ok(last.responseText.length < big.length);
+  assert.match(last.responseText, /truncated/);
+  assert.strictEqual(last.size, big.length);
+  // 300 bodies of 2 MB is more than the recorder keeps: the oldest are dropped, their entries kept.
+  const kept = W.requests.reduce((n, e) => n + (/^\[dropped/.test(e.responseText) ? 0 : e.responseText.length), 0);
+  assert.ok(kept <= 32 * 1024 * 1024, `kept ${kept}`);
+  assert.match(W.requests[0].responseText, /^\[dropped: the recorder keeps at most/);
   assert.strictEqual(W.requests[0].size, big.length);
+  assert.ok(W.requests.filter((e) => !/^\[dropped/.test(e.responseText)).length >= 14);
 
   const origFetch = async () => fakeResponse('');
   const XHR = makeXHRClass();
@@ -529,6 +536,53 @@ test('recorder: caps bodies and entries; inactive on other hosts', async () => {
   assert.strictEqual(W2.recording, false);
   assert.strictEqual(other.fetch, origFetch);
   assert.strictEqual(XHR.prototype.open, openBefore);
+});
+
+// A Response whose body is a stream of `chunks` (or endless), counting what's read and whether the
+// reader was cancelled.
+function streamResponse({ type, chunk = 'x'.repeat(64 * 1024), chunks = Infinity }) {
+  const stats = { reads: 0, cancelled: false, cloned: 0 };
+  const make = () => ({
+    status: 200,
+    headers: { get: (h) => (h.toLowerCase() === 'content-type' ? type : null) },
+    body: {
+      getReader() {
+        let n = 0;
+        return {
+          async read() { stats.reads++; return n++ < chunks ? { done: false, value: new TextEncoder().encode(chunk) } : { done: true }; },
+          async cancel() { stats.cancelled = true; },
+        };
+      },
+    },
+    async text() { throw new Error('text() would buffer the whole stream'); },
+    clone() { stats.cloned++; return make(); },
+  });
+  return { res: make(), stats };
+}
+
+test('recorder: reads streamed bodies only up to the cap, and leaves event streams alone', async () => {
+  const endless = streamResponse({ type: 'application/x-ndjson' });
+  const sse = streamResponse({ type: 'text/event-stream; charset=utf-8' });
+  const small = streamResponse({ type: 'application/json', chunk: '{"ü":1}', chunks: 2 });
+  const responses = { '/feed': endless.res, '/events': sse.res, '/small': small.res };
+  const page = makePage('x.com', { fetch: async (u) => responses[u], TextDecoder, TextEncoder });
+  const W = loadRuntime(page, ['x.com']);
+  for (const u of Object.keys(responses)) await page.fetch(u);
+  await settle(50);
+
+  const [feed, events, json] = W.requests;
+  assert.strictEqual(endless.stats.cancelled, true, 'stopped reading the endless stream');
+  assert.ok(endless.stats.reads <= 2 * 1024 * 1024 / (64 * 1024) + 1, `${endless.stats.reads} reads`);
+  assert.strictEqual(feed.responseText.indexOf('\n…[truncated'), 2 * 1024 * 1024, 'the first 2 MB kept');
+  assert.match(feed.responseText, /\[truncated: longer than 2097152 bytes\]$/);
+  assert.strictEqual(feed.size, null);
+
+  assert.strictEqual(sse.stats.cloned, 0, 'an event stream is never cloned or read');
+  assert.match(events.responseText, /^\[stream: text\/event-stream/);
+  assert.strictEqual(events.status, 200);
+
+  assert.strictEqual(json.responseText, '{"ü":1}{"ü":1}');
+  assert.strictEqual(small.stats.cancelled, false);
 });
 
 // ---- match patterns -----------------------------------------------------------------------------
@@ -1103,6 +1157,26 @@ test('background: when storage is full, switches fail and change nothing, and mo
     r = await panel.ask({ type: 'mod.enable', id: 'x.com/a', enabled: false, tab: 5 });
     assert.strictEqual(r.ok, true);
     assert.deepStrictEqual(bg.store.disabled, { 'x.com/a': true });
+  } finally { bg.restore(); }
+});
+
+test('background: record says whether it changed anything; switching off works on a site that\'s off', async () => {
+  const bg = await loadBackground({ storage: { sitesOn: ['x.com', 'bank.com'] } });
+  try {
+    let r = await bg.native.call('record', { site: 'bank.com', on: true });
+    assert.deepStrictEqual(r.result, { recording: ['bank.com'], site: 'bank.com', changed: true });
+    r = await bg.native.call('record', { site: 'bank.com', on: true });
+    assert.strictEqual(r.result.changed, false);
+    const panel = bg.connectPanel();
+    await panel.ask({ type: 'site.set', site: 'bank.com', on: false });
+    r = await bg.native.call('record', { site: 'bank.com', on: true });
+    assert.match(r.error, /WebMods is off on bank\.com/);
+    r = await bg.native.call('record', { site: 'bank.com', on: false });
+    assert.deepStrictEqual(r.result, { recording: [], site: 'bank.com', changed: true });
+    assert.deepStrictEqual(bg.store.recording, []);
+    // A run still can't switch off another site's recording.
+    r = await bg.native.call('record', { site: 'bank.com', on: false, scope: 'x.com' });
+    assert.match(r.error, /limited to x\.com/);
   } finally { bg.restore(); }
 });
 

@@ -110,7 +110,9 @@ background tab, use \`webmods text\` or \`webmods run\`. Open the printed file t
     usage: 'webmods record <site> [on|off]',
     summary: "record a site's fetch/XHR traffic (from the next page load) so you can inspect it",
     details: `Turns the network recorder on (default) or off for a hostname and its subdomains. It takes effect
-on the next page load, so reload afterwards. Then use webmods requests / webmods request.`,
+on the next page load, so reload afterwards. Then use webmods requests / webmods request. Bodies are kept
+up to 2 MB each (32 MB in all, oldest dropped first); event streams aren't read. Recording that a side-panel
+chat switched on goes off when that chat's agent finishes.`,
     examples: ['webmods record x.com on && webmods reload --url x.com', 'webmods record x.com off'],
   },
   requests: {

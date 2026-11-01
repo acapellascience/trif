@@ -109,6 +109,7 @@ export function runtimeMain(RECORDING, safeStringify) {
   const W = window.__webmods = { errors: [], logs: [], requests: [], recording: false, current: null };
   const nativeConsole = { log: console.log, warn: console.warn, error: console.error };
   const MAX_ERRORS = 200, MAX_LOGS = 500, MAX_REQUESTS = 300, MAX_BODY = 2 * 1024 * 1024;
+  const MAX_KEPT = 32 * 1024 * 1024; // characters of bodies kept across all recorded requests
 
   const push = (arr, item, max) => { arr.push(item); if (arr.length > max) arr.splice(0, arr.length - max); };
   const modFromStack = (stack) => {
@@ -157,24 +158,84 @@ export function runtimeMain(RECORDING, safeStringify) {
     return ct.startsWith('text/') || /[/+](json|xml|javascript|ecmascript|graphql|x-www-form-urlencoded)$/.test(ct) ||
       ct === 'application/x-javascript' || ct === 'application/x-ndjson';
   };
+  // Server-sent events never end: reading them would hold the stream open and grow forever.
+  const isEventStream = (ct) => /^\s*text\/event-stream/i.test(String(ct || ''));
   const bodyText = (b) => {
     if (b == null) return null;
     if (typeof b === 'string') return cap(b);
     if (typeof URLSearchParams !== 'undefined' && b instanceof URLSearchParams) return cap(b.toString());
     return '[binary]';
   };
+
+  // Bodies kept, in characters, across W.requests, so a page making many big requests can't make the
+  // recorder hold more than MAX_KEPT: the oldest bodies are dropped first (their entries stay).
+  let kept = 0;
+  const sizes = new WeakMap(); // entry -> { requestBody, responseText } lengths counted in `kept`
+  const forget = (entry, note) => {
+    const s = sizes.get(entry);
+    if (!s) return;
+    for (const f of Object.keys(s)) {
+      if (!s[f]) continue;
+      kept -= s[f];
+      s[f] = 0;
+      if (note) entry[f] = '[dropped: the recorder keeps at most ' + MAX_KEPT + ' characters of bodies; this was one of the oldest]';
+    }
+  };
+  const keep = (entry, field, text) => {
+    entry[field] = text;
+    if (typeof text !== 'string' || !W.requests.includes(entry)) return; // already pushed out by newer requests
+    const s = sizes.get(entry) || {};
+    kept += text.length - (s[field] || 0);
+    s[field] = text.length;
+    sizes.set(entry, s);
+    for (let k = 0; kept > MAX_KEPT && k < W.requests.length; k++) if (W.requests[k] !== entry) forget(W.requests[k], true);
+  };
   const start = (type, method, url, requestBody) => {
     const entry = {
       i: counter++, type, method: String(method || 'GET').toUpperCase(), url: absUrl(url), status: null,
-      requestBody, responseText: null, size: null, time: Date.now(), duration: null,
+      requestBody: null, responseText: null, size: null, time: Date.now(), duration: null,
     };
-    push(W.requests, entry, MAX_REQUESTS);
+    W.requests.push(entry);
+    if (W.requests.length > MAX_REQUESTS) for (const old of W.requests.splice(0, W.requests.length - MAX_REQUESTS)) forget(old, false);
+    keep(entry, 'requestBody', requestBody);
     return entry;
   };
-  const finish = (entry, status, text, size) => {
+  // more: the body went on past what was read (readBody stopped at MAX_BODY bytes).
+  const finish = (entry, status, text, size, more) => {
     entry.status = status;
     entry.duration = Date.now() - entry.time;
-    if (text != null) { entry.responseText = cap(text); entry.size = text.length; } else if (size != null) entry.size = size;
+    if (text != null) {
+      keep(entry, 'responseText', more ? text + '\n…[truncated: longer than ' + MAX_BODY + ' bytes]' : cap(text));
+      entry.size = size != null ? size : more ? null : text.length;
+    } else if (size != null) entry.size = size;
+  };
+
+  // A response's text, read from a clone through its stream so that at most MAX_BODY bytes are read: a
+  // body that streams on (NDJSON, a long poll) would otherwise be buffered without end. Past the cap
+  // the clone is cancelled, which leaves the page's own response alone. Resolves { text, more }.
+  const readBody = (res) => {
+    const clone = res.clone();
+    const body = clone.body;
+    if (!body || typeof body.getReader !== 'function' || typeof TextDecoder !== 'function') {
+      return clone.text().then((text) => ({ text, more: false }));
+    }
+    const reader = body.getReader();
+    const decoder = new TextDecoder();
+    let text = '';
+    let bytes = 0;
+    const step = () => reader.read().then((r) => {
+      if (r.done) return { text: text + decoder.decode(), more: false };
+      const chunk = r.value;
+      if (bytes + chunk.byteLength > MAX_BODY) {
+        text += decoder.decode(chunk.subarray(0, MAX_BODY - bytes));
+        try { reader.cancel().catch(() => {}); } catch (e) { /* ignore */ }
+        return { text, more: true };
+      }
+      bytes += chunk.byteLength;
+      text += decoder.decode(chunk, { stream: true });
+      return step();
+    });
+    return step();
   };
 
   if (typeof window.fetch === 'function') {
@@ -189,7 +250,7 @@ export function runtimeMain(RECORDING, safeStringify) {
         entry = start('fetch', method, url, body);
         if (isReq && !(init && 'body' in init) && !/^(GET|HEAD)$/i.test(input.method)) {
           const e = entry;
-          input.clone().text().then((t) => { e.requestBody = cap(t); }, () => {});
+          input.clone().text().then((t) => { keep(e, 'requestBody', cap(t)); }, () => {});
         }
       } catch (e) { entry = null; }
       const p = origFetch.apply(this, arguments);
@@ -199,9 +260,13 @@ export function runtimeMain(RECORDING, safeStringify) {
           try {
             const ct = res.headers.get('content-type');
             const len = Number(res.headers.get('content-length'));
-            if (isTextType(ct)) {
-              finish(e, res.status, null, Number.isFinite(len) && len > 0 ? len : null);
-              res.clone().text().then((t) => finish(e, res.status, t), () => {});
+            const known = Number.isFinite(len) && len > 0 ? len : null;
+            if (isEventStream(ct)) {
+              finish(e, res.status, null, null);
+              e.responseText = '[stream: ' + ct + '; not recorded]';
+            } else if (isTextType(ct)) {
+              finish(e, res.status, null, known);
+              readBody(res).then((r) => finish(e, res.status, r.text, r.more ? known : null, r.more), () => {});
             } else {
               finish(e, res.status, null, Number.isFinite(len) ? len : null);
               e.responseText = '[binary: ' + ct + ']';
@@ -232,7 +297,7 @@ export function runtimeMain(RECORDING, safeStringify) {
             try {
               const ct = xhr.getResponseHeader('content-type');
               let text = null;
-              if (isTextType(ct)) {
+              if (isTextType(ct) && !isEventStream(ct)) {
                 const rt = xhr.responseType;
                 if (rt === '' || rt === 'text') text = xhr.responseText;
                 else if (rt === 'json') text = xhr.response == null ? null : JSON.stringify(xhr.response);

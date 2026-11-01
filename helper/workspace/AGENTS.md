@@ -246,6 +246,7 @@ the site (`webmods tabs`; `webmods open <url>` if none) and look:
   webmods request --url x.com 14 -o ~/.webmods/sites/x.com/_home-timeline.json
   webmods record x.com off          # when you're done
   ```
+  (In a side-panel chat, recording you switched on goes off by itself when you finish.)
   Read the response to find where items live, what distinguishes the ones to remove, and which entries
   are pagination cursors. Note how the request is made (fetch or XHR, GET or POST, URL pattern).
 

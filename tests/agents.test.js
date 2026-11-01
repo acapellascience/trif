@@ -896,6 +896,35 @@ test('run mailbox: whatever a request in it says, it\'s the run\'s; links aren\'
   assert.match(res.stderr, /has the agent run ended/);
 });
 
+test('recording a run switched on goes off when that run ends; the user\'s own recording stays', async () => {
+  const { home, bin } = makeHome();
+  const ext = startHost(home);
+  const recording = new Set(['user.com']); // the user switched this on from a terminal
+  const offs = [];
+  ext.handlers.record = (args) => {
+    const on = args.on !== false;
+    const changed = recording.has(args.site) !== on;
+    if (on) recording.add(args.site); else { recording.delete(args.site); offs.push({ site: args.site, scope: args.scope ?? null }); }
+    return { recording: [...recording].sort(), site: args.site, changed };
+  };
+  await ext.waitForSocket();
+  const r = await extRequest(ext, 'agent.start', { ...START, prompt: 'SLEEP' });
+  const call = await waitFor(() => callFor(bin, 'SLEEP'), { message: 'the agent to start' });
+  const env = { WEBMODS_RUN_TOKEN: call.env.WEBMODS_RUN_TOKEN, WEBMODS_RUN_BOX: call.env.WEBMODS_RUN_BOX };
+  for (const site of ['example.com', 'm.example.com', 'user.com']) {
+    const res = await runCli(['record', site, 'on'], { home, env });
+    assert.equal(res.code, 0, res.stderr);
+  }
+  assert.deepEqual([...recording].sort(), ['example.com', 'm.example.com', 'user.com']);
+
+  await extRequest(ext, 'agent.stop', { runId: r.result.runId });
+  await waitDone(ext, r.result.runId);
+  await waitFor(() => offs.length === 2, { message: 'recording switched off' });
+  assert.deepEqual(offs.sort((a, b) => a.site.localeCompare(b.site)), [{ site: 'example.com', scope: null }, { site: 'm.example.com', scope: null }]);
+  assert.deepEqual([...recording], ['user.com'], 'already on before the run: left on');
+  assert.match(helperLog(home), /recording on example\.com off: run r\w+ that switched it on has ended/);
+});
+
 test('held mods: a mod in a folder a looser snapshot skipped (node_modules) is held too', async () => {
   const { home } = makeHome();
   const ext = startHost(home);

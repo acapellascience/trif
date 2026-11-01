@@ -337,7 +337,44 @@ function onAgentEvent(runId, event) {
   }
   const subs = runSubscribers.get(runId);
   if (subs) for (const s of subs) reply(s, { type: 'agentEvent', runId, event });
-  if (event.kind === 'done') runSubscribers.delete(runId);
+  if (event.kind === 'done') { runSubscribers.delete(runId); stopRunRecording(runId); }
+}
+
+// The network recorder keeps whole request and response bodies (logins, API calls) for as long as it's
+// on, so recording an agent run switches on (`webmods record <site> on` from the run) goes off again
+// when that run ends: runId -> sites it switched on. Recording the user switched on from a terminal is
+// theirs to switch off.
+const recordingByRun = new Map();
+
+function noteRecording(runId, result) {
+  const site = result && typeof result.site === 'string' ? result.site : null;
+  if (!site || !Array.isArray(result.recording)) return;
+  if (!result.recording.includes(site)) {
+    for (const sites of recordingByRun.values()) sites.delete(site); // off, whoever switched it on
+  } else if (runId && result.changed) {
+    if (!recordingByRun.has(runId)) recordingByRun.set(runId, new Set());
+    recordingByRun.get(runId).add(site);
+  }
+}
+
+function stopRunRecording(runId) {
+  const sites = recordingByRun.get(runId);
+  recordingByRun.delete(runId);
+  if (!sites) return;
+  for (const site of sites) {
+    if ([...recordingByRun.values()].some((other) => other.has(site))) continue; // another run still wants it
+    logger.info(`recording on ${site} off: run ${runId} that switched it on has ended`);
+    const extId = `h${++requestCounter}`;
+    try { sendToExtension({ type: 'request', id: extId, cmd: 'record', args: { site, on: false } }); } catch (e) {
+      logger.warn(`couldn't switch recording off on ${site}: ${e.message}`);
+      continue;
+    }
+    const sink = { destroyed: false, writable: true, write(text) {
+      const r = JSON.parse(text);
+      if (!r.ok) logger.warn(`couldn't switch recording off on ${site}: ${r.error}`);
+    } };
+    pending.set(extId, { sock: sink, clientId: null, timer: setTimeout(() => pending.delete(extId), DEFAULT_TIMEOUT_MS), cmd: 'record', runId: null });
+  }
 }
 
 // Helper-local agent commands, answered the same way for the extension and the CLI. Throws on error;
@@ -668,8 +705,9 @@ function onClientLine(sock, line) {
   if (typeof cmd !== 'string' || !cmd) return reply(sock, { id, ok: false, error: 'missing cmd' });
 
   // From inside an agent run (`webmods` sends the run's token): only page commands, limited to its site.
+  let run = null;
   if (req.token !== undefined) {
-    const run = runs.byToken(req.token);
+    run = runs.byToken(req.token);
     if (!run) return reply(sock, { id, ok: false, error: 'this agent run has ended (or its token is wrong)' });
     if (AGENT_COMMANDS.has(cmd)) {
       return reply(sock, { id, ok: false, error: cmd === 'mod.approve'
@@ -720,7 +758,7 @@ function onClientLine(sock, line) {
     logger.warn(`request ${extId} (${cmd}) timed out after ${timeoutMs}ms`);
     reply(sock, { id, ok: false, error: `timed out after ${timeoutMs}ms waiting for the extension to answer "${cmd}"` });
   }, timeoutMs);
-  pending.set(extId, { sock, clientId: id, timer, cmd });
+  pending.set(extId, { sock, clientId: id, timer, cmd, runId: run ? run.id : null });
 }
 
 function onExtensionResponse(msg) {
@@ -728,6 +766,7 @@ function onExtensionResponse(msg) {
   if (!p) return logger.warn(`response for unknown or expired request ${msg.id}`);
   pending.delete(msg.id);
   clearTimeout(p.timer);
+  if (p.cmd === 'record' && msg.ok) noteRecording(p.runId, msg.result);
   if (msg.ok) reply(p.sock, { id: p.clientId, ok: true, result: msg.result === undefined ? null : msg.result });
   else reply(p.sock, { id: p.clientId, ok: false, error: String(msg.error ?? 'unknown error from extension') });
 }

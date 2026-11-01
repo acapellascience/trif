@@ -10,7 +10,7 @@ const path = require('node:path');
 const vm = require('node:vm');
 const { test, before } = require('node:test');
 const { runCli, tempDir, waitFor, sleep, REPO } = require('./fake-extension');
-const { createBridge, PORT } = require('../helper/safari-bridge');
+const { createBridge, WsReader, PORT } = require('../helper/safari-bridge');
 const { safariManifest, bundleClassic } = require('../scripts/build-extension');
 const { safariAgentContent } = require('../helper/lib/setup');
 
@@ -407,6 +407,41 @@ test('Safari bridge: stops a host left unused, unless an agent run is going', as
     running = false;
     await waitFor(() => b.hosts.size === 0, { message: 'the idle host stopped' });
   } finally { await b.stop(); }
+});
+
+test('Safari bridge: WsReader joins a big message once, and refuses fragments adding up past the limit', () => {
+  const masked = (opcode, data, fin = true) => {
+    const mask = crypto.randomBytes(4);
+    const len = data.length;
+    const head = len < 126 ? Buffer.from([(fin ? 0x80 : 0) | opcode, 0x80 | len])
+      : len < 65536 ? Buffer.from([(fin ? 0x80 : 0) | opcode, 0x80 | 126, len >> 8, len & 255])
+        : (() => { const b = Buffer.alloc(10); b[0] = (fin ? 0x80 : 0) | opcode; b[1] = 0x80 | 127; b.writeBigUInt64BE(BigInt(len), 2); return b; })();
+    return Buffer.concat([head, mask, Buffer.from(data.map((x, i) => x ^ mask[i & 3]))]);
+  };
+  const texts = [];
+  let closed = 0;
+  const r = new WsReader({ onText: (t) => texts.push(t), onClose: () => closed++, send() {} });
+  const big = Buffer.from('y'.repeat(4 * 1024 * 1024));
+  const frames = Buffer.concat([masked(0x1, Buffer.from('hel'), false), masked(0x0, Buffer.from('lo')), masked(0x1, big)]);
+  const concat = Buffer.concat;
+  let copied = 0;
+  Buffer.concat = (list, len) => { const b = concat(list, len); copied += b.length; return b; };
+  try {
+    for (let i = 0; i < frames.length; i += 8192) r.push(frames.subarray(i, i + 8192));
+  } finally { Buffer.concat = concat; }
+  assert.deepEqual(texts.map((t) => t.length), [5, big.length]);
+  assert.equal(texts[0], 'hello');
+  assert.ok(copied < 3 * frames.length, `copied ${copied} bytes for ${frames.length}`);
+  assert.equal(closed, 0);
+
+  // Fragments are capped in total, not just one by one.
+  const r2 = new WsReader({ onText: (t) => texts.push(t), onClose: () => closed++, send() {}, max: 100 });
+  r2.push(masked(0x1, Buffer.alloc(60, 0x61), false));
+  assert.equal(closed, 0);
+  r2.push(masked(0x0, Buffer.alloc(60, 0x61)));
+  assert.equal(closed, 1);
+  r2.push(masked(0x1, Buffer.from('ignored')));
+  assert.equal(texts.length, 2, 'nothing read after closing');
 });
 
 test('Safari bridge: logs the extension\'s errors, but only from a Safari extension', async () => {

@@ -25,7 +25,7 @@ const http = require('node:http');
 const crypto = require('node:crypto');
 const path = require('node:path');
 const { spawn } = require('node:child_process');
-const { encode, Decoder } = require('./lib/framing');
+const { encode, Decoder, ByteQueue } = require('./lib/framing');
 
 const PORT = 47615;
 const ALLOWED_ORIGIN = /^safari-web-extension:\/\/[0-9A-Fa-f-]+$/;
@@ -59,40 +59,66 @@ const CLOSE_FRAME = wsFrame(0x8, Buffer.alloc(0));
 
 /**
  * Reads client frames (always masked) from `push`ed chunks. Calls onText(string) for each whole text
- * message, onClose() for a close frame or a protocol error; answers pings itself through `send`.
+ * message, onClose() for a close frame or a protocol error (unmasked, or a message over `max`, counting
+ * all its fragments); answers pings itself through `send`. Bytes are joined once per frame,
+ * when the whole frame has arrived, not on every chunk.
  */
 class WsReader {
-  constructor({ onText, onClose, send }) {
-    Object.assign(this, { onText, onClose, send });
-    this.buf = Buffer.alloc(0);
+  constructor({ onText, onClose, send, max = MAX_MESSAGE }) {
+    Object.assign(this, { onText, onClose, send, max });
+    this.queue = new ByteQueue();
+    this.frame = null; // the current frame's header, once read: { fin, opcode, len, at }
     this.parts = [];
+    this.partsLength = 0;
+    this.closed = false;
   }
 
   push(chunk) {
-    this.buf = this.buf.length ? Buffer.concat([this.buf, chunk]) : chunk;
+    if (this.closed) return;
+    this.queue.push(chunk);
     for (;;) {
-      if (this.buf.length < 2) return;
-      const fin = (this.buf[0] & 0x80) !== 0;
-      const opcode = this.buf[0] & 0x0f;
-      const masked = (this.buf[1] & 0x80) !== 0;
-      let len = this.buf[1] & 0x7f;
-      let at = 2;
-      if (len === 126) { if (this.buf.length < 4) return; len = this.buf.readUInt16BE(2); at = 4; }
-      else if (len === 127) { if (this.buf.length < 10) return; len = Number(this.buf.readBigUInt64BE(2)); at = 10; }
-      if (!masked || len > MAX_MESSAGE) { this.onClose(); return; }
-      if (this.buf.length < at + 4 + len) return;
-      const mask = this.buf.subarray(at, at + 4);
-      const data = Buffer.from(this.buf.subarray(at + 4, at + 4 + len));
+      if (!this.frame) {
+        if (this.queue.length < 2) return;
+        const head = this.queue.peek(Math.min(this.queue.length, 10));
+        const fin = (head[0] & 0x80) !== 0;
+        const opcode = head[0] & 0x0f;
+        const masked = (head[1] & 0x80) !== 0;
+        let len = head[1] & 0x7f;
+        let at = 2;
+        if (len === 126) { if (head.length < 4) return; len = head.readUInt16BE(2); at = 4; }
+        else if (len === 127) { if (head.length < 10) return; len = Number(head.readBigUInt64BE(2)); at = 10; }
+        const data = opcode === 0x0 || opcode === 0x1;
+        if (!masked || len > this.max || (data && this.partsLength + len > this.max)) { this.fail(); return; }
+        this.frame = { fin, opcode, len, at };
+      }
+      const { fin, opcode, len, at } = this.frame;
+      if (this.queue.length < at + 4 + len) return;
+      const bytes = this.queue.take(at + 4 + len);
+      this.frame = null;
+      const mask = bytes.subarray(at, at + 4);
+      const data = Buffer.from(bytes.subarray(at + 4));
       for (let i = 0; i < data.length; i++) data[i] ^= mask[i & 3];
-      this.buf = this.buf.subarray(at + 4 + len);
-      if (opcode === 0x8) { this.onClose(); return; }
+      if (opcode === 0x8) { this.fail(); return; }
       if (opcode === 0x9) { this.send(wsFrame(0xA, data)); continue; }
       if (opcode === 0xA) continue;
       if (opcode === 0x1 || opcode === 0x0) {
         this.parts.push(data);
-        if (fin) { const text = Buffer.concat(this.parts).toString('utf8'); this.parts = []; this.onText(text); }
+        this.partsLength += data.length;
+        if (fin) {
+          const text = Buffer.concat(this.parts, this.partsLength).toString('utf8');
+          this.parts = [];
+          this.partsLength = 0;
+          this.onText(text);
+        }
       }
     }
+  }
+
+  fail() {
+    this.closed = true;
+    this.queue.clear();
+    this.parts = [];
+    this.onClose();
   }
 }
 
@@ -125,7 +151,12 @@ function createBridge(opts = {}) {
       const frame = textFrame(msg);
       if (h.socket && !h.socket.destroyed) h.socket.write(frame);
       else { h.queue.push(frame); if (h.queue.length > QUEUE_MAX) h.queue.shift(); }
-    }, (e) => log.warn(`safari bridge: bad frame from host ${child.pid}: ${e.message}`));
+    }, (e) => {
+      log.warn(`safari bridge: bad frame from host ${child.pid}: ${e.message}`);
+      // Out of step with the host: nothing it says can be read any more, so stop it (the next
+      // connection starts a new one).
+      if (e.fatal) child.kill();
+    });
     child.stdout.on('data', (chunk) => decoder.push(chunk));
     child.stdin.on('error', () => {});
     child.on('error', (e) => log.error(`safari bridge: couldn't start the host: ${e.message}`));

@@ -150,6 +150,42 @@ test('framing: round trip across arbitrary chunk boundaries', () => {
   assert.deepEqual(got, [{ a: 1 }, { b: 'ü'.repeat(1000) }, [1, 2]]);
 });
 
+test('framing: a big frame in small chunks is joined once, not on every chunk', () => {
+  const got = [];
+  const d = new Decoder((m) => got.push(m));
+  const frame = encode({ s: 'x'.repeat(8 * 1024 * 1024) });
+  const concat = Buffer.concat;
+  let copied = 0;
+  Buffer.concat = (list, len) => { const b = concat(list, len); copied += b.length; return b; };
+  try {
+    for (let i = 0; i < frame.length; i += 16 * 1024) d.push(frame.subarray(i, i + 16 * 1024));
+  } finally { Buffer.concat = concat; }
+  assert.equal(got.length, 1);
+  assert.equal(got[0].s.length, 8 * 1024 * 1024);
+  assert.ok(copied < 2 * frame.length, `copied ${copied} bytes for a ${frame.length}-byte frame`);
+});
+
+test('framing: an oversize frame is a fatal error and nothing after it is read', () => {
+  const got = [];
+  const errors = [];
+  const d = new Decoder((m) => got.push(m), (e) => errors.push(e), 1000);
+  const huge = Buffer.alloc(4);
+  huge.writeUInt32LE(5000, 0);
+  d.push(Buffer.concat([encode({ a: 1 }), huge, encode({ b: 2 })]));
+  d.push(encode({ c: 3 }));
+  assert.deepEqual(got, [{ a: 1 }]);
+  assert.equal(errors.length, 1);
+  assert.equal(errors[0].fatal, true);
+  // A bad JSON frame isn't fatal: the frames after it are still read.
+  const d2 = new Decoder((m) => got.push(m), (e) => errors.push(e));
+  const bad = Buffer.from('{nope');
+  const head = Buffer.alloc(4);
+  head.writeUInt32LE(bad.length, 0);
+  d2.push(Buffer.concat([head, bad, encode({ d: 4 })]));
+  assert.deepEqual(got, [{ a: 1 }, { d: 4 }]);
+  assert.equal(errors[1].fatal, undefined);
+});
+
 // ------------------------------------------------------------------ host process
 
 test('host: pushes mods on connect and after hello, socket is 0600, ping works before hello', async () => {
@@ -382,6 +418,16 @@ test('host: never writes anything but frames to stdout, even with odd input', as
   await sleep(200);
   assert.deepEqual(ext.badFrames, []);
   assert.equal(ext.child.exitCode, null, 'still running');
+});
+
+test('host: shuts down after a frame too big to be real, rather than misreading what follows', async () => {
+  const home = tempDir();
+  const ext = startHost(home);
+  await ext.nextMods();
+  ext.child.stdin.write(Buffer.from([0xff, 0xff, 0xff, 0xff, 0x7b])); // a 4 GB "frame": out of step
+  const { code } = await ext.exited;
+  assert.equal(code, 1);
+  assert.match(fs.readFileSync(path.join(home, 'helper.log'), 'utf8'), /unreadable input from the extension/);
 });
 
 test('mods messages carry the sites preinstalled.json says to start on', async () => {

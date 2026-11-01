@@ -94,7 +94,11 @@ process.stdout.on('error', (e) => {
   shutdown('stdout closed');
 });
 
-const decoder = new Decoder(onExtensionMessage, (e) => logger.error('native messaging:', e.message));
+const decoder = new Decoder(onExtensionMessage, (e) => {
+  logger.error('native messaging:', e.message);
+  // After an oversize frame every later frame would be misread, so start over: the extension reconnects.
+  if (e.fatal) shutdown('unreadable input from the extension', 1);
+});
 process.stdin.on('data', (chunk) => decoder.push(chunk));
 process.stdin.on('end', () => shutdown('stdin closed (Chrome disconnected)'));
 process.stdin.on('close', () => shutdown('stdin closed (Chrome disconnected)'));

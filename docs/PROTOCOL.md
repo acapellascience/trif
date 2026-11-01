@@ -86,6 +86,8 @@ patch `fetch`/`XMLHttpRequest`, read React state, etc.). An optional header sets
 
 Chrome native messaging framing: 4-byte little-endian length + UTF-8 JSON. Host→extension messages must
 stay under 1 MB (the helper rejects bigger mods with an error logged to stderr, and the CLI reports it).
+Extension→host frames may be up to 256 MB; a bigger length means the stream is out of step, so the host
+logs it and exits (the extension reconnects to a fresh one) instead of misreading every later frame.
 
 **helper → extension**
 

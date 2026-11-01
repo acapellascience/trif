@@ -101,10 +101,4 @@ function acquireInstallLock(appDir, { env = process.env } = {}) {
   throw busyError(readLock(file));
 }
 
-/** Runs fn (sync or async) holding the install lock; releases it afterwards. */
-async function withInstallLock(appDir, fn, opts) {
-  const lock = acquireInstallLock(appDir, opts);
-  try { return await fn(lock); } finally { lock.release(); }
-}
-
-module.exports = { acquireInstallLock, withInstallLock, lockPath, pidAlive, readLock, LockBusy, LOCK_ENV, LOCK_MAX_AGE_MS };
+module.exports = { acquireInstallLock, lockPath, pidAlive, readLock, LockBusy, LOCK_ENV, LOCK_MAX_AGE_MS };

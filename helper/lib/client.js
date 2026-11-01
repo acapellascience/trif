@@ -36,7 +36,6 @@ function boxRequest(box, cmd, args = {}, timeoutMs = 40000) {
     const reqFile = path.join(box, `${id}.req`);
     const resFile = path.join(box, `${id}.res`);
     let settled = false;
-    let watcher = null;
     let poll = null;
     const timer = setTimeout(() => {
       try { fs.unlinkSync(reqFile); } catch { /* the helper took it */ }
@@ -47,7 +46,6 @@ function boxRequest(box, cmd, args = {}, timeoutMs = 40000) {
       settled = true;
       clearTimeout(timer);
       clearInterval(poll);
-      try { watcher?.close(); } catch { /* ignore */ }
       if (err) reject(err); else resolve(value);
     }
     function check() {
@@ -67,8 +65,9 @@ function boxRequest(box, cmd, args = {}, timeoutMs = 40000) {
       finish(new HelperError(`can't reach the helper through ${box}: ${e.code || e.message} (has the agent run ended?)`, 'no-helper'));
       return;
     }
-    try { watcher = fs.watch(box, () => check()); } catch { /* polling alone */ }
-    poll = setInterval(check, 100);
+    // Polled, not watched: watching a folder goes through a macOS service the run's sandbox blocks (the
+    // watch fails a moment later, as "too many open files"), and reading a file every 50 ms costs nothing.
+    poll = setInterval(check, 50);
     check();
   });
 }

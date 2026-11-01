@@ -608,3 +608,29 @@ test('doctor: an unreadable Safari login item doesn\'t crash it; inside a run it
     fs.chmodSync(plist, 0o600);
   }
 });
+
+test('a mailbox request works where watching a folder fails (as in an agent run\'s sandbox)', async () => {
+  const { EventEmitter } = require('events');
+  const box = fs.mkdtempSync(path.join(tempDir(), 'box-'));
+  const realWatch = fs.watch;
+  // macOS sandboxes block the folder-watching service: the watch fails a moment later, as an 'error' event.
+  fs.watch = () => { const w = new EventEmitter(); w.close = () => {}; setImmediate(() => w.emit('error', Object.assign(new Error('EMFILE: too many open files, watch'), { code: 'EMFILE' }))); return w; };
+  const helper = setInterval(() => { // stands in for the helper's side (runs.js _serveBox)
+    for (const name of fs.readdirSync(box)) {
+      if (!name.endsWith('.req')) continue;
+      const req = JSON.parse(fs.readFileSync(path.join(box, name), 'utf8'));
+      fs.unlinkSync(path.join(box, name));
+      fs.writeFileSync(path.join(box, name.replace(/\.req$/, '.res')), JSON.stringify({ id: req.id, ok: true, result: { pong: req.cmd } }));
+    }
+  }, 10);
+  const saved = process.env.WEBMODS_RUN_BOX;
+  process.env.WEBMODS_RUN_BOX = box;
+  try {
+    const { request } = require('../helper/lib/client');
+    assert.deepEqual(await request('/nonexistent.sock', 'ping', {}, 5000), { pong: 'ping' });
+  } finally {
+    fs.watch = realWatch;
+    clearInterval(helper);
+    if (saved === undefined) delete process.env.WEBMODS_RUN_BOX; else process.env.WEBMODS_RUN_BOX = saved;
+  }
+});

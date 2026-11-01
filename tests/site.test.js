@@ -75,6 +75,22 @@ test('the Worker: pages with strict headers, reports emailed, bad ones refused',
   assert.equal(e.sent.length, 1);
 });
 
+test('the Worker: only takes JSON reports from its own form (no other site can post them)', async () => {
+  const [{ default: worker, limitKey }] = await load();
+  const e = env();
+  assert.equal((await worker.fetch(post({ what: 'from the form' }, { Origin: 'https://webmods.dev' }), e)).status, 200);
+  assert.equal((await worker.fetch(post({ what: 'from a tool' }), e)).status, 200, 'no Origin: a tool, left to the rate limit');
+  assert.equal((await worker.fetch(post({ what: 'from elsewhere' }, { Origin: 'https://evil.example' }), e)).status, 403);
+  assert.equal((await worker.fetch(post({ what: 'as text' }, { 'Content-Type': 'text/plain' }), e)).status, 415);
+  assert.equal((await worker.fetch(post({ what: 'big' }, { 'Content-Length': String(10 * 1024 * 1024) }), e)).status, 413);
+  assert.equal(e.sent.length, 2);
+  assert.equal(limitKey('203.0.113.9'), '203.0.113.9');
+  assert.equal(limitKey('2001:db8:85a3:0042:1000:8a2e:370:7334'), '2001:db8:85a3:42::/64');
+  assert.equal(limitKey('2001:DB8::1'), '2001:db8:0:0::/64');
+  assert.equal(limitKey('2001:db8:85a3:42::abcd'), limitKey('2001:db8:85a3:42:ffff::1'));
+  assert.equal(limitKey(''), 'unknown');
+});
+
 test('the Worker: rate limited per address; says so when email isn\'t set up or fails', async () => {
   const [{ default: worker }] = await load();
   const keys = [];

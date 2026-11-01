@@ -15,10 +15,31 @@ const respond = (body, type, status = 200, extra = {}) =>
 const json = (obj, status = 200) => respond(JSON.stringify(obj), 'application/json; charset=utf-8', status, { 'Cache-Control': 'no-store' });
 const html = (body) => respond(body, 'text/html; charset=utf-8', 200, { 'Cache-Control': 'public, max-age=300' });
 
+/**
+ * The rate limit's key for an address: IPv4 as is, IPv6 by its /64 (one household or server usually
+ * has a whole /64, so each of its addresses mustn't count separately).
+ */
+export function limitKey(ip) {
+  if (!ip || !ip.includes(':')) return ip || 'unknown';
+  const [head, tail = ''] = ip.toLowerCase().split('::');
+  const a = head ? head.split(':') : [];
+  const b = tail ? tail.split(':') : [];
+  const groups = [...a, ...Array(Math.max(0, 8 - a.length - b.length)).fill('0'), ...b];
+  return `${groups.slice(0, 4).map((g) => g.replace(/^0+(?=.)/, '')).join(':')}::/64`;
+}
+
 async function receiveReport(request, env) {
+  // Only the form on this site may send reports. A JSON body makes a browser ask first (CORS preflight,
+  // which this Worker doesn't answer) before another site's page could post one, and the origin check
+  // covers anything that slips past that; tools that send no Origin are left to the rate limit.
+  const type = (request.headers.get('Content-Type') || '').split(';')[0].trim().toLowerCase();
+  if (type !== 'application/json') return json({ ok: false, error: 'expected JSON' }, 415);
+  const origin = request.headers.get('Origin');
+  if (origin && origin !== new URL(request.url).origin) return json({ ok: false, error: 'Reports are sent from the form on this site.' }, 403);
+  if (Number(request.headers.get('Content-Length')) > LIMITS.body) return json({ ok: false, error: 'The report is too large.' }, 413);
   const ip = request.headers.get('CF-Connecting-IP') || 'unknown';
   if (env.REPORT_LIMIT) {
-    const { success } = await env.REPORT_LIMIT.limit({ key: `report:${ip}` });
+    const { success } = await env.REPORT_LIMIT.limit({ key: `report:${limitKey(ip)}` });
     if (!success) return json({ ok: false, error: 'Too many reports from here just now. Please try again in a minute.' }, 429);
   }
   const raw = await request.text();

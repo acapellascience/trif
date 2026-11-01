@@ -107,8 +107,9 @@ panel on its site; the ones marked *(off)* wait for you to switch them on.
 
 - **Google:** Hide AI in Results, Hide AI Mode and Gemini Promo, Results Only (no extra sections), Hide
   Sponsored Results.
-- **X:** **Plain X**: Home is just the people you follow, newest first, with no ads or suggestions, and a
-  **Filters** menu (reposts, quotes, replies, links, videos, images, non-mutuals…); it also hides the
+- **X:** **Plain X**: Home is just the people you follow, newest first, with no ads or suggestions. It
+  starts as plain as it gets (only original text posts from people who follow you back); the **Filters**
+  menu turns each kind back on (reposts, quotes, replies, links, videos, images, non-mutuals…). It also hides the
   trends column, tidies post pages, and turns Explore into a plain search field. Punk Fonts *(off)* and
   Rainbow Rave *(off)*, for fun.
 - **Amazon:** Simple Home (just a search box) and Simple Shopping (results show only picture, price and

@@ -92,7 +92,7 @@ const run = () => JSON.parse(window.__dmFilterTimeline(JSON.stringify(mixed())))
 const opts = window.__dmFeedOptions;
 
 test("toggles: quotes, videos and images can be hidden; reposts shown", () => {
-assert.deepStrictEqual(run(), ['plain', '7', 'photo', 'vid', 'gif', 'q2'], 'defaults: reposts hidden, everything else shown');
+assert.deepStrictEqual(run(), ['plain', '7', 'photo', 'vid', 'gif', 'q2'], 'these tests\' settings: reposts hidden, everything else shown');
 Object.assign(opts, { reposts: true });
 assert.deepStrictEqual(run(), ['plain', 'rp', '7', 'photo', 'vid', 'gif', 'q2'], 'reposts on');
 Object.assign(opts, { reposts: false, quotes: false });
@@ -428,6 +428,15 @@ const moreCursor = { entryId: 'cursor-showmorethreads-9', content: { entryType: 
 const spamPage = { data: { threaded_conversation_with_injections_v2: { instructions: [{ type: 'TimelineAddEntries', entries: [tweet('sp'), spamCursor, promptCursor, moreCursor] }] } } };
 assert.deepStrictEqual(JSON.parse(window.__dmFilterTimeline(JSON.stringify(spamPage), detailURL('sp'))).data.threaded_conversation_with_injections_v2.instructions[0].entries.map((e) => e.entryId),
   ['tweet-sp', 'cursor-showmorethreads-9']);
+});
+
+test('out of the box every kind of post is off (the plainest timeline)', () => {
+const source = fs.readFileSync(MOD, 'utf8');
+const literal = /const options = (\{[^}]*\});/.exec(source);
+assert.ok(literal, 'the defaults are one object literal');
+const defaults = Function(`return ${literal[1]}`)();
+assert.ok(Object.keys(defaults).length >= 9);
+for (const [key, on] of Object.entries(defaults)) assert.equal(on, false, key);
 });
 
 test("the page's own UI keeps its styles", () => {

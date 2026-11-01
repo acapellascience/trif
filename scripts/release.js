@@ -179,10 +179,27 @@ function betaZip(out, kind, version, files) {
   return zip;
 }
 
+/**
+ * Whether a signed .xpi holds exactly the files in `dir` (Mozilla's signature files aside), so an earlier
+ * run's signed add-on can be reused for the same build.
+ */
+function xpiMatches(xpi, dir) {
+  const listDir = (d, base = d) => fs.readdirSync(d, { withFileTypes: true })
+    .flatMap((e) => (e.isDirectory() ? listDir(path.join(d, e.name), base) : [path.relative(base, path.join(d, e.name))]));
+  let names;
+  try { names = execFileSync('unzip', ['-Z1', xpi], { encoding: 'utf8' }).split('\n').filter((n) => n && !n.endsWith('/') && !n.startsWith('META-INF/')); } catch { return false; }
+  const files = listDir(dir);
+  if (names.length !== files.length || !files.every((f) => names.includes(f))) return false;
+  return files.every((f) => execFileSync('unzip', ['-p', xpi, f], { maxBuffer: 64 * 1024 * 1024 }).equals(fs.readFileSync(path.join(dir, f))));
+}
+
 async function release(version, { dryRun, skipTests }) {
   const { repo, notes, priv } = preflight(version, { dryRun });
   const out = path.join(DIST, 'release', version);
-  fs.rmSync(out, { recursive: true, force: true });
+  // A fresh start, except for the Mozilla-signed add-on: Mozilla never signs the same version twice, so
+  // losing it (a declined or failed run, then a re-run) would make this version unshippable for Firefox.
+  const signedName = `webmods-firefox-${version}.xpi`;
+  if (fs.existsSync(out)) for (const f of fs.readdirSync(out)) if (f !== signedName) fs.rmSync(path.join(out, f), { recursive: true, force: true });
   fs.mkdirSync(out, { recursive: true });
 
   // Dry runs build from a copy, so no tracked file changes.
@@ -211,7 +228,14 @@ async function release(version, { dryRun, skipTests }) {
   console.log(`built ${tgzName} and the Chrome and Firefox extensions`);
 
   let xpi = null;
-  if (!dryRun) {
+  const earlier = path.join(out, signedName);
+  if (!dryRun && fs.existsSync(earlier)) {
+    if (!xpiMatches(earlier, path.join(builtDist, 'firefox'))) {
+      fail(`${path.relative(ROOT, earlier)} (signed by Mozilla in an earlier run) doesn't match this build, and Mozilla won't sign ${version} again: release a new version`);
+    }
+    console.log(`reusing the Firefox add-on Mozilla signed in an earlier run (${path.relative(ROOT, earlier)})`);
+    xpi = earlier;
+  } else if (!dryRun) {
     console.log('asking Mozilla to sign the Firefox add-on (takes a few minutes)…');
     const amo = path.join(out, 'amo');
     const webExt = path.join(ROOT, 'node_modules', '.bin', 'web-ext');
@@ -293,4 +317,4 @@ if (require.main === module) {
   else release(cmd, { dryRun: flags.has('--dry-run'), skipTests: flags.has('--skip-tests') }).catch((e) => fail(e.stack || e.message));
 }
 
-module.exports = { changelogSection, latestFeed, signBytes, firefoxFeed, bump };
+module.exports = { changelogSection, latestFeed, signBytes, firefoxFeed, bump, xpiMatches };

@@ -11,7 +11,7 @@ const crypto = require('crypto');
 const { execFileSync } = require('child_process');
 const { tempDir, runCli } = require('./fake-extension');
 const U = require('../helper/lib/update');
-const { changelogSection, latestFeed, signBytes, firefoxFeed } = require('../scripts/release');
+const { changelogSection, latestFeed, signBytes, firefoxFeed, xpiMatches } = require('../scripts/release');
 
 const keys = () => {
   const { publicKey, privateKey } = crypto.generateKeyPairSync('ed25519');
@@ -207,6 +207,29 @@ test('setConfigKey keeps the rest of config.json; autoUpdate starts off', () => 
   assert.deepStrictEqual(JSON.parse(fs.readFileSync(path.join(home, 'config.json'), 'utf8')), { env: { PATH: '/x' }, modsDir: 'm' });
   fs.writeFileSync(path.join(home, 'config.json'), '{oops');
   assert.throws(() => U.setConfigKey(home, 'autoUpdate', true), /isn't valid JSON/);
+});
+
+test('release script: an earlier run\'s signed add-on is reused only if it holds exactly this build', () => {
+  const { execFileSync } = require('child_process');
+  const root = fs.mkdtempSync(path.join(require('os').tmpdir(), 'wm-xpi-'));
+  try {
+    const dir = path.join(root, 'firefox');
+    fs.mkdirSync(path.join(dir, 'icons'), { recursive: true });
+    fs.writeFileSync(path.join(dir, 'manifest.json'), '{"version":"9.9.9"}');
+    fs.writeFileSync(path.join(dir, 'icons', 'a.png'), 'png');
+    fs.mkdirSync(path.join(root, 'META-INF'));
+    fs.writeFileSync(path.join(root, 'META-INF', 'mozilla.rsa'), 'signature');
+    const xpi = path.join(root, 'signed.xpi');
+    execFileSync('zip', ['-q', '-r', xpi, '.'], { cwd: dir });
+    execFileSync('zip', ['-q', '-r', xpi, 'META-INF'], { cwd: root });
+    assert.equal(xpiMatches(xpi, dir), true, "Mozilla's signature files don't count");
+    fs.writeFileSync(path.join(dir, 'icons', 'a.png'), 'changed');
+    assert.equal(xpiMatches(xpi, dir), false);
+    fs.writeFileSync(path.join(dir, 'icons', 'a.png'), 'png');
+    fs.writeFileSync(path.join(dir, 'new.js'), '1');
+    assert.equal(xpiMatches(xpi, dir), false);
+    assert.equal(xpiMatches(path.join(root, 'missing.xpi'), dir), false);
+  } finally { fs.rmSync(root, { recursive: true, force: true }); }
 });
 
 test('release script: changelog sections and feeds the helper and Firefox accept', () => {

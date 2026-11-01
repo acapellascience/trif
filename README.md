@@ -173,6 +173,19 @@ with `node --test`.
 `npx web-ext run -s dist/firefox`). Firefox only keeps signed add-ons installed; sign it as unlisted with
 `npx web-ext sign -s dist/firefox --channel unlisted` and your addons.mozilla.org API key.
 
+### Trying the code in this checkout in each browser
+
+With `webmods setup` run from this checkout (it links the helper here), every browser's helper runs
+this folder's code from its next start. The extension itself loads differently in each browser:
+
+- **Chrome:** chrome://extensions, the reload button on WebMods (it's loaded unpacked from `extension/`).
+- **Firefox:** `node scripts/build-extension.js firefox`, then about:debugging#/runtime/this-firefox →
+  **Load Temporary Add-on…** → `dist/firefox/manifest.json`. It stands in for the installed WebMods
+  (same add-on ID) until Firefox quits; build and load again after changes.
+- **Safari:** `node scripts/build-safari.js`, open `dist/safari-app/WebMods.app` once, then Safari →
+  Settings → Developer → **Allow unsigned extensions** (off again whenever Safari quits), and untick and
+  tick WebMods in Settings → Extensions. `webmods setup --browser safari` once, for its bridge.
+
 ### webmods.dev
 
 `site/` is the report form's website, a Cloudflare Worker: `node site/dev.js` runs it locally (reports

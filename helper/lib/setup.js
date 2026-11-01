@@ -429,8 +429,8 @@ function setup(opts = {}) {
   const safariSteps = (n) => [
     `${n}. Open WebMods.app (from the Safari download) once: it adds the WebMods extension to Safari.`,
     `${n + 1}. Until WebMods is signed by Apple, let Safari run it: Safari → Settings → Advanced, tick "Show`,
-    '     features for web developers"; then Settings → Developer, tick "Allow unsigned extensions" (Safari',
-    '     turns this off whenever it quits, so tick it again after restarting Safari).',
+    '   features for web developers"; then Settings → Developer, tick "Allow unsigned extensions" (Safari',
+    '   turns this off whenever it quits, so tick it again after restarting Safari).',
     `${n + 2}. Safari → Settings → Extensions: tick WebMods, and allow it on every website.`,
     `${n + 3}. Click the WebMods toolbar button to open the panel (in Safari it's a window of its own).`,
   ];

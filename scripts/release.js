@@ -39,7 +39,8 @@ function fail(msg) {
 }
 
 function sh(file, args, opts = {}) {
-  return execFileSync(file, args, { cwd: ROOT, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], ...opts }).trim();
+  // With stdio 'inherit' there's no output to return (execFileSync gives null).
+  return (execFileSync(file, args, { cwd: ROOT, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], ...opts }) ?? '').trim();
 }
 
 function readJson(file) { return JSON.parse(fs.readFileSync(file, 'utf8')); }
@@ -257,7 +258,11 @@ async function release(version, { dryRun, skipTests }) {
     return;
   }
 
-  const answer = await ask(`Publish WebMods ${version} to github.com/${repo}? This is public. Type ${version} to confirm: `);
+  const visibility = spawnSync('gh', ['repo', 'view', repo, '--json', 'visibility', '-q', '.visibility'], { encoding: 'utf8' }).stdout?.trim().toLowerCase();
+  const who = visibility === 'public' ? 'Anyone can see it, and installs will pick it up.'
+    : visibility === 'private' ? 'The repo is private: only you can see it, and installs can\'t fetch updates from it yet.'
+      : '';
+  const answer = await ask(`Publish WebMods ${version} to github.com/${repo}? ${who} Type ${version} to confirm: `);
   if (answer !== version) {
     sh('git', ['checkout', '--', 'package.json', 'extension/manifest.json', 'package-lock.json']);
     spawnSync('git', ['checkout', '--', 'updates'], { cwd: ROOT }); // tracked feeds back as they were

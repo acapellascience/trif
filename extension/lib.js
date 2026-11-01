@@ -595,7 +595,8 @@ export function nextBackoff(prev) {
 }
 
 export function chromeVersion(userAgent) {
-  const m = /(?:Chrom(?:e|ium)|Firefox)\/([\d.]+)/.exec(userAgent || '');
+  const m = /(?:Chrom(?:e|ium)|Firefox)\/([\d.]+)/.exec(userAgent || '')
+    || /Version\/([\d.]+)(?: Mobile\/\S+)? Safari\//.exec(userAgent || ''); // Safari's own version
   return m ? m[1] : 'unknown';
 }
 

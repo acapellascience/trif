@@ -141,7 +141,11 @@ messaging to an arbitrary program (Safari's only reaches the extension's own Mac
   reconnects, which it does with a fresh `hello`. A host with no connection for 30 minutes and no agent
   run in `<home>/active-runs` is stopped. `webmods setup --browser safari` installs the bridge as a
   launchd agent (`~/Library/LaunchAgents/dev.webmods.safari-bridge.plist`, KeepAlive); `webmods doctor`
-  checks that it's listening. The background's warnings, errors and failures to start are POSTed to the
+  checks that it's listening. Setup restarts a loaded agent with `launchctl kickstart -k` (bootout and
+  bootstrap only when the plist is new or changed). Stopping the bridge stops its hosts and their
+  children, so a setup run inside one (an update installed from Safari: the bridge gives its hosts
+  `WEBMODS_SAFARI_BRIDGE`) leaves the launchctl commands to a detached shell that runs them 3 s later,
+  after the update has finished. The background's warnings, errors and failures to start are POSTed to the
   bridge (`/log`, `/startup-error`) and written to `helper.log`, since Safari shows the background's
   console only in its developer tools.
 - **The panel.** The toolbar button opens `sidepanel.html?window=<id>` in a window of its own; the panel
@@ -356,6 +360,11 @@ Re-running setup is safe; run it again to update.
     `extension/` and `examples/` into `~/.webmods/app/` and the wrappers run that copy. The copy goes to
     a temp sibling (`.app.new-<pid>`) and is then swapped in, so a failed copy leaves a working install
     alone; when `app/` already matches byte for byte, nothing is touched (a running helper keeps its files).
+    Every install into `app/` (setup, an update, either browser's helper) holds `<home>/.app.lock`
+    (`helper/lib/lock.js`: made with O_EXCL, holding the owner's pid and a token; taken over when that pid
+    is dead or the lock is older than 15 minutes). A second install while one holds it is refused ("another
+    WebMods install is in progress"). Leftover `.app.new-*`/`.app.old-*` folders are removed only when the
+    pid in their name is dead.
     Running setup from the copy itself (`webmods setup` through the wrapper) leaves it in place.
   - `link` (default in a git checkout, for developing WebMods): the wrappers run the checkout's files.
   - `--copy` / `--link` force either mode.
@@ -409,7 +418,12 @@ The helper checks the feed a minute after it starts and every 6 hours, fetching 
 or by itself when config.json `autoUpdate` is true and no run is going) downloads the tarball, verifies
 it, unpacks it into `<home>/.update-*`, and runs the new version's `helper/cli.js setup --copy --no-link
 --home <home> --browser <the browsers with a manifest now>` with the PATH setup recorded, which swaps it
-into `<home>/app` like a first install. Then `{type:"updated"}` and `{type:"reload"}`. Only installs
+into `<home>/app` like a first install. The whole install holds the install lock (see "Native host
+installation"); the setup it runs gets the lock's token in `WEBMODS_INSTALL_LOCK`, so its copy goes ahead
+under the parent's lock. If `<home>/app` holds the new version afterwards but setup exited non-zero (a
+later step failed: a manifest, the Safari bridge), the update counts as installed: `lastInstalled` gets a
+`warning` with setup's last lines, the helper logs it and `webmods update --install` prints it. Then
+`{type:"updated"}` and `{type:"reload"}`. Only installs
 running from `<home>/app` update themselves; a git checkout says to use git. config.json
 `checkForUpdates: false` stops the checks.
 

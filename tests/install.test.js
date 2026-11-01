@@ -6,10 +6,11 @@ const test = require('node:test');
 const assert = require('node:assert');
 const fs = require('fs');
 const path = require('path');
-const { execFile } = require('child_process');
+const { execFile, spawn, spawnSync } = require('child_process');
 const { runCli, tempDir, testEnv, REPO } = require('./fake-extension');
 const P = require('../helper/lib/paths');
-const { installApp, chooseMode, cleanPath } = require('../helper/lib/setup');
+const { installApp, chooseMode, cleanPath, loadSafariAgent } = require('../helper/lib/setup');
+const L = require('../helper/lib/lock');
 const { preinstallMods, loadPreinstalled, PREINSTALLED, SITES_ON } = require('../helper/lib/preinstalled');
 const { checkWrapperScript } = require('../helper/lib/doctor');
 const { browserTable } = require('../helper/lib/browsers');
@@ -206,6 +207,121 @@ test('installApp: a failed copy leaves a working install alone', () => {
     assert.equal(fs.readFileSync(path.join(app, 'helper', 'host.js'), 'utf8'), hostBefore);
     assert.deepEqual(fs.readdirSync(path.dirname(app)).filter((n) => n !== 'app'), []);
   }
+});
+
+// A pid that was running a moment ago and isn't now.
+function deadPid() {
+  return spawnSync(process.execPath, ['-e', 'process.stdout.write(String(process.pid))'], { encoding: 'utf8' }).stdout.trim() * 1;
+}
+
+// A process that stays alive until killed; another install "running" in it.
+function livePid(cleanup) {
+  const child = spawn(process.execPath, ['-e', 'setInterval(() => {}, 1000)'], { stdio: 'ignore' });
+  cleanup(() => child.kill());
+  return child.pid;
+}
+
+test('install lock: one holder at a time; a dead or old holder is taken over; a child with the token holds it', (t) => {
+  const home = tempDir();
+  const app = path.join(home, 'app');
+  const file = L.lockPath(app);
+  assert.equal(file, path.join(home, '.app.lock'));
+
+  const a = L.acquireInstallLock(app);
+  assert.equal(a.held, false);
+  assert.throws(() => L.acquireInstallLock(app), L.LockBusy, 'held by this very process');
+  // The new version's setup, run with the token, counts as holding it, and doesn't release it.
+  const child = L.acquireInstallLock(app, { env: { [L.LOCK_ENV]: a.token } });
+  assert.equal(child.held, true);
+  child.release();
+  assert.ok(fs.existsSync(file));
+  assert.throws(() => L.acquireInstallLock(app, { env: { [L.LOCK_ENV]: 'not-the-token' } }), L.LockBusy);
+  a.release();
+  assert.equal(fs.existsSync(file), false);
+
+  // Another live process holds it: busy, naming it.
+  const other = livePid((f) => t.after(f));
+  fs.writeFileSync(file, `${other}\nsometoken\n`);
+  assert.throws(() => L.acquireInstallLock(app), new RegExp(`in progress \\(process ${other}\\)`));
+  // A holder whose lock was taken over (it hung past the age limit) doesn't remove the new holder's.
+  const c = L.acquireInstallLock(path.join(home, 'other-app'));
+  fs.writeFileSync(L.lockPath(path.join(home, 'other-app')), `${other}\nsometoken\n`);
+  c.release();
+  assert.ok(fs.existsSync(L.lockPath(path.join(home, 'other-app'))));
+
+  // Its process died: stale, taken over.
+  fs.writeFileSync(file, `${deadPid()}\nsometoken\n`);
+  const b = L.acquireInstallLock(app);
+  assert.equal(L.readLock(file).pid, process.pid);
+  b.release();
+
+  // A live pid, but the lock is older than any install takes (the pid was reused): stale.
+  fs.writeFileSync(file, `${other}\nsometoken\n`);
+  const old = new Date(Date.now() - L.LOCK_MAX_AGE_MS - 60000);
+  fs.utimesSync(file, old, old);
+  L.acquireInstallLock(app).release();
+
+  // An empty lock file just made (its owner hasn't written its pid yet) is not stale.
+  fs.writeFileSync(file, '');
+  assert.throws(() => L.acquireInstallLock(app), L.LockBusy);
+  fs.rmSync(file);
+});
+
+test('installApp: never touches another live install\'s folders or swaps while it holds the lock', async (t) => {
+  const home = tempDir();
+  const app = path.join(home, 'app');
+  const other = livePid((f) => t.after(f));
+  const dead = deadPid();
+  for (const name of [`.app.new-${other}`, `.app.old-${other}`, `.app.new-${dead}`, `.app.old-${dead}`]) {
+    fs.mkdirSync(path.join(home, name, 'helper'), { recursive: true });
+  }
+  assert.equal(installApp(REPO, app).how, 'created');
+  assert.deepEqual(fs.readdirSync(home).filter((n) => n.startsWith('.app.')).sort(), [`.app.new-${other}`, `.app.old-${other}`],
+    'leftovers of a dead process removed, a live one\'s kept');
+  assert.equal(fs.existsSync(L.lockPath(app)), false, 'lock released');
+
+  // Another process is installing: refused, app untouched.
+  fs.writeFileSync(path.join(home, '.app.lock'), `${other}\ntok\n`);
+  fs.writeFileSync(path.join(app, 'package.json'), '{"changed": true}');
+  assert.throws(() => installApp(REPO, app), /another WebMods install is in progress/);
+  assert.equal(fs.readFileSync(path.join(app, 'package.json'), 'utf8'), '{"changed": true}');
+
+  // setup says so and keeps the existing copy.
+  const r = await runCli(['setup', '--copy', '--home', home, '--native-dir', path.join(home, 'native'), '--no-link', '--no-examples'], { home });
+  assert.equal(r.code, 1);
+  assert.match(r.stdout, /FAILED to update .*another WebMods install is in progress.*kept the existing copy/);
+  assert.equal(fs.readFileSync(path.join(app, 'package.json'), 'utf8'), '{"changed": true}');
+});
+
+test('Safari bridge agent: restarted in place when loaded, loaded afresh when changed, later and detached from inside the bridge', () => {
+  const calls = [];
+  const fake = (loaded, fail) => (args) => {
+    calls.push(args);
+    if (args[0] === 'print') return { status: loaded ? 0 : 113 };
+    return fail === args[0] ? { status: 5, stderr: 'Bootstrap failed: 5: Input/output error\n' } : { status: 0 };
+  };
+  const uid = process.getuid();
+  const target = `gui/${uid}/dev.webmods.safari-bridge`;
+
+  assert.deepEqual(loadSafariAgent('/p.plist', { changed: false, env: {}, run: fake(true) }), { error: null, later: false });
+  assert.deepEqual(calls.splice(0), [['print', target], ['kickstart', '-k', target]]);
+
+  loadSafariAgent('/p.plist', { changed: true, env: {}, run: fake(true) });
+  assert.deepEqual(calls.splice(0), [['print', target], ['bootout', target], ['bootstrap', `gui/${uid}`, '/p.plist']]);
+
+  loadSafariAgent('/p.plist', { changed: false, env: {}, run: fake(false) });
+  assert.deepEqual(calls.splice(0), [['print', target], ['bootstrap', `gui/${uid}`, '/p.plist']]);
+
+  assert.match(loadSafariAgent('/p.plist', { env: {}, run: fake(false, 'bootstrap') }).error, /Input\/output error/);
+  calls.splice(0);
+
+  // Inside a host the bridge started (an update installed from Safari): nothing now, a detached script later.
+  const scripts = [];
+  const r = loadSafariAgent('/p p.plist', { changed: true, env: { WEBMODS_SAFARI_BRIDGE: '123' }, run: fake(true), runDetached: (s) => scripts.push(s) });
+  assert.deepEqual(r, { error: null, later: true });
+  assert.deepEqual(calls.splice(0), [['print', target]]);
+  assert.equal(scripts.length, 1);
+  assert.equal(scripts[0], `sleep 3; "launchctl" "bootout" "${target}"; "launchctl" "bootstrap" "gui/${uid}" "/p p.plist"`);
 });
 
 // ------------------------------------------------------------------ extension IDs

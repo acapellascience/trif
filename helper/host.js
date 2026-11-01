@@ -431,6 +431,7 @@ async function installUpdate(why) {
     logger.info(`installing update (${why})`);
     const r = await update.install(workspace(ws.home));
     logger.info(`updated ${r.from} -> ${r.to}`);
+    if (r.warning) logger.warn(`update to ${r.to}: ${r.warning}`);
     // The extension reloads (Chrome's unpacked copy from the new files), which starts the new helper.
     if (state.stdoutOpen) {
       try { sendToExtension({ type: 'updated', from: r.from, to: r.to, notes: r.notes }); } catch { /* gone */ }

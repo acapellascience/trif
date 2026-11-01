@@ -23,6 +23,7 @@ const crypto = require('crypto');
 const { execFile } = require('child_process');
 const P = require('./paths');
 const { browserTable } = require('./browsers');
+const { acquireInstallLock, LockBusy, LOCK_ENV } = require('./lock');
 
 const CHECK_EVERY_MS = 20 * 60 * 60 * 1000; // a cached answer is good for this long
 const FEED_MAX = 256 * 1024;
@@ -220,8 +221,11 @@ function run(file, args, opts) {
 }
 
 /**
- * Download, verify and install the feed's version. Resolves { from, to, notes, output }; throws
- * UpdateError (with <home>/app untouched) on failure, or when there's nothing newer.
+ * Download, verify and install the feed's version. Resolves { from, to, notes, output, warning };
+ * throws UpdateError (with <home>/app untouched) on failure, when there's nothing newer, or when another
+ * process is installing (the install lock, lock.js, is held throughout). `warning` is set when the new
+ * version went into <home>/app but its setup failed at a later step (a browser's manifest, the Safari
+ * bridge): it's installed, and the setup output says what to fix.
  */
 async function install(ws, { root = P.REPO_ROOT, fetch = fetchUrl, browsers = browsersSetUp(), node = process.execPath, ...feedOpts } = {}) {
   const inst = installable(ws, root);
@@ -229,9 +233,23 @@ async function install(ws, { root = P.REPO_ROOT, fetch = fetchUrl, browsers = br
   const url = feedUrl(ws, packageJson(root));
   if (!url) throw new UpdateError("this build doesn't say where its updates come from");
   const feed = await fetchFeed(url, { fetch, ...feedOpts });
-  const from = packageJson(root).version || P.VERSION;
-  if (compareVersions(feed.version, from) <= 0) throw new UpdateError(`WebMods ${from} is up to date`);
 
+  let lock;
+  try { lock = acquireInstallLock(ws.appDir); } catch (e) {
+    if (e instanceof LockBusy) throw new UpdateError(e.message);
+    throw e;
+  }
+  try {
+    // Read after taking the lock: another helper may have just installed this very version.
+    const from = packageJson(root).version || P.VERSION;
+    if (compareVersions(feed.version, from) <= 0) throw new UpdateError(`WebMods ${from} is up to date`);
+    return await installLocked(ws, { feed, from, fetch, browsers, node, lock });
+  } finally {
+    lock.release();
+  }
+}
+
+async function installLocked(ws, { feed, from, fetch, browsers, node, lock }) {
   const tmp = fs.mkdtempSync(path.join(ws.home, '.update-'));
   try {
     const tgz = await fetch(feed.package.url, { maxBytes: PACKAGE_MAX, timeoutMs: 120000 });
@@ -246,19 +264,26 @@ async function install(ws, { root = P.REPO_ROOT, fetch = fetchUrl, browsers = br
 
     // The new version's own setup: copies itself into <home>/app, refreshes AGENTS.md and the wrappers,
     // offers newly bundled mods. With the PATH the first setup recorded (the browser starts the helper
-    // with a bare one), so agents are still found.
+    // with a bare one), so agents are still found, and with our lock's token, so its copy goes ahead
+    // under the lock this process holds.
     const args = [path.join(pkgRoot, 'helper', 'cli.js'), 'setup', '--copy', '--no-link', '--home', ws.home];
     if (browsers.length) args.push('--browser', browsers.join(','));
     const recordedPath = typeof ws.config?.env?.PATH === 'string' && ws.config.env.PATH ? ws.config.env.PATH : process.env.PATH;
-    const r = await run(node, args, { cwd: tmp, env: { ...process.env, PATH: recordedPath, WEBMODS_HOME: ws.home } });
-    if (r.code) throw new UpdateError(`the new version's setup failed: ${r.out.trim().split('\n').slice(-6).join('\n')}`);
+    const env = { ...process.env, PATH: recordedPath, WEBMODS_HOME: ws.home, [LOCK_ENV]: lock.token };
+    const r = await run(node, args, { cwd: tmp, env });
+    const tail = r.out.trim().split('\n').slice(-6).join('\n');
+    // Setup exits 1 for any problem, including ones after the copy; what matters is whether <home>/app
+    // now holds the new version.
+    const swapped = installedVersion(ws) === feed.version;
+    if (!swapped) throw new UpdateError(r.code ? `the new version's setup failed: ${tail}` : `the new version's setup didn't install it: ${tail}`);
+    const warning = r.code ? `installed, but the new version's setup reported a problem: ${tail}` : null;
 
     const s = readState(ws.home);
-    s.lastInstalled = { from, to: feed.version, notes: feed.notes, at: Date.now() };
+    s.lastInstalled = { from, to: feed.version, notes: feed.notes, at: Date.now(), ...(warning ? { warning } : {}) };
     s.latest = { version: feed.version, notes: feed.notes, published: feed.published };
     s.error = null;
     writeState(ws.home, s);
-    return { from, to: feed.version, notes: feed.notes, output: r.out };
+    return { from, to: feed.version, notes: feed.notes, output: r.out, warning };
   } finally {
     fs.rmSync(tmp, { recursive: true, force: true });
   }

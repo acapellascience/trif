@@ -12,6 +12,7 @@ const path = require('path');
 const P = require('./paths');
 const { selectBrowsers, SAFARI_AGENT_LABEL, safariAgentPlist } = require('./browsers');
 const { preinstallMods } = require('./preinstalled');
+const { acquireInstallLock, pidAlive } = require('./lock');
 
 // Quote for a POSIX shell double-quoted string.
 function shq(s) {
@@ -84,13 +85,36 @@ ${env}  <key>RunAtLoad</key><true/>
 `;
 }
 
-/** (Re)start the Safari bridge's agent so it runs the current code. Returns an error message, or null. */
-function loadSafariAgent(plist) {
-  const { spawnSync } = require('child_process');
+/**
+ * (Re)start the Safari bridge's agent so it runs the current code. `changed`: whether the agent's file
+ * was just written (a loaded agent with an unchanged file only needs restarting, `kickstart -k`; a new
+ * or changed file is loaded afresh). Returns { error, later }: error is a message or null.
+ *
+ * Stopping the bridge stops everything launchd started with it, its hosts and their children included.
+ * An update installed from Safari runs this inside such a host (safari-bridge.js gives its hosts
+ * WEBMODS_SAFARI_BRIDGE), so doing it here would kill this setup and the update half way, leaving the
+ * bridge stopped until the next login. There, the launchctl commands run a few seconds later from a
+ * process of their own (detached, so launchd doesn't count it as the bridge's), after the update has
+ * finished; `later` is true.
+ */
+function loadSafariAgent(plist, { changed = true, env = process.env, run, runDetached } = {}) {
+  const { spawnSync, spawn } = require('child_process');
+  run = run || ((args) => spawnSync('launchctl', args, { encoding: 'utf8' }));
+  runDetached = runDetached || ((script) => spawn('/bin/sh', ['-c', script], { detached: true, stdio: 'ignore' }).unref());
   const domain = `gui/${process.getuid()}`;
-  spawnSync('launchctl', ['bootout', `${domain}/${SAFARI_AGENT_LABEL}`]); // not loaded yet is fine
-  const r = spawnSync('launchctl', ['bootstrap', domain, plist], { encoding: 'utf8' });
-  return r.status === 0 ? null : (r.stderr || r.stdout || `launchctl exited ${r.status}`).trim();
+  const target = `${domain}/${SAFARI_AGENT_LABEL}`;
+  const loaded = run(['print', target]).status === 0;
+  const steps = loaded && !changed ? [['kickstart', '-k', target]]
+    : [...(loaded ? [['bootout', target]] : []), ['bootstrap', domain, plist]];
+  if (env.WEBMODS_SAFARI_BRIDGE) {
+    runDetached(`sleep 3; ${steps.map((a) => ['launchctl', ...a].map(shq).join(' ')).join('; ')}`);
+    return { error: null, later: true };
+  }
+  for (const args of steps) {
+    const r = run(args);
+    if (r.status !== 0) return { error: (r.stderr || r.stdout || `launchctl ${args[0]} exited ${r.status}`).trim(), later: false };
+  }
+  return { error: null, later: false };
 }
 
 // ---------------------------------------------------------------- app copy
@@ -155,27 +179,47 @@ function sameTree(src, dest, items = COPY_ITEMS) {
   return true;
 }
 
+// The pid in a leftover's name (.app.new-<pid>, .app.old-<pid>), if that process is still running.
+function leftoverOwnerAlive(name) {
+  const m = /-(\d+)$/.exec(name);
+  return !!m && pidAlive(Number(m[1]));
+}
+
 /**
  * Copy the package at srcRoot into appDir: into a temp sibling first, then swapped in, so a failed copy
- * leaves a working install alone. Returns { how: 'created'|'updated'|'unchanged'|'in-place' }; throws
- * (with appDir untouched) on failure.
+ * leaves a working install alone. Holds the install lock (lock.js) throughout, so two installs never
+ * swap at once. Returns { how: 'created'|'updated'|'unchanged'|'in-place' }; throws (with appDir
+ * untouched) on failure, or LockBusy when another process is installing.
  */
 function installApp(srcRoot, appDir) {
   if (realOrResolved(srcRoot) === realOrResolved(appDir)) return { how: 'in-place' };
   for (const f of REQUIRED_FILES) {
     if (!fs.existsSync(path.join(srcRoot, f))) throw new Error(`${path.join(srcRoot, f)} is missing; nothing to copy from`);
   }
+  const lock = acquireInstallLock(appDir);
+  try {
+    return installAppLocked(srcRoot, appDir);
+  } finally {
+    lock.release();
+  }
+}
+
+function installAppLocked(srcRoot, appDir) {
   if (fs.existsSync(appDir) && sameTree(srcRoot, appDir)) return { how: 'unchanged' };
 
   const parent = path.dirname(appDir);
   const base = path.basename(appDir);
   fs.mkdirSync(parent, { recursive: true });
-  // Leftovers from an interrupted earlier run.
+  // Leftovers from an interrupted earlier run, unless the process that made them is still going (an
+  // older WebMods, from before the lock, may be installing right now).
   for (const name of fs.readdirSync(parent)) {
-    if (name.startsWith(`.${base}.new-`) || name.startsWith(`.${base}.old-`)) fs.rmSync(path.join(parent, name), { recursive: true, force: true });
+    if ((name.startsWith(`.${base}.new-`) || name.startsWith(`.${base}.old-`)) && !leftoverOwnerAlive(name)) {
+      fs.rmSync(path.join(parent, name), { recursive: true, force: true });
+    }
   }
   const tmp = path.join(parent, `.${base}.new-${process.pid}`);
   try {
+    fs.rmSync(tmp, { recursive: true, force: true }); // ours, from an earlier setup in this process
     fs.mkdirSync(tmp);
     for (const item of COPY_ITEMS) {
       const s = path.join(srcRoot, item);
@@ -190,6 +234,7 @@ function installApp(srcRoot, appDir) {
   let old = null;
   if (fs.existsSync(appDir)) {
     old = path.join(parent, `.${base}.old-${process.pid}`);
+    fs.rmSync(old, { recursive: true, force: true });
     fs.renameSync(appDir, old);
   }
   try {
@@ -374,8 +419,10 @@ function setup(opts = {}) {
         manifests.push({ browser: t.key, file: plist });
         say(`Safari bridge ${plist} -> ${bridgeJs} (${how})`);
         if (opts.launchctl !== false && !process.env.WEBMODS_NO_LAUNCHCTL) {
-          const err = loadSafariAgent(plist);
-          if (err) { ok = false; say(`              FAILED to start it: ${err}`); } else say('              running (it starts again whenever you log in)');
+          const { error, later } = loadSafariAgent(plist, { changed: how !== 'unchanged' });
+          if (error) { ok = false; say(`              FAILED to start it: ${error}`); }
+          else if (later) say('              restarting in a few seconds, onto this version');
+          else say('              running (it starts again whenever you log in)');
         }
       } catch (e) {
         ok = false;
@@ -488,5 +535,5 @@ function setup(opts = {}) {
 
 module.exports = {
   setup, recordPath, cleanPath, hostWrapperContent, cliWrapperContent, manifestFor, pickNodePath, shq, isExecutable,
-  chooseMode, installApp, sameTree, COPY_ITEMS, safariAgentContent,
+  chooseMode, installApp, sameTree, COPY_ITEMS, safariAgentContent, loadSafariAgent,
 };

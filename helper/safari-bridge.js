@@ -143,7 +143,9 @@ function createBridge(opts = {}) {
     const existing = hosts.get(origin);
     if (existing) return existing;
     const [file, ...args] = hostCommand(origin);
-    const child = spawn(file, args, { stdio: ['pipe', 'pipe', 'inherit'] });
+    // WEBMODS_SAFARI_BRIDGE tells an update's setup, run inside this host, that restarting the bridge
+    // would kill it (setup.js loadSafariAgent).
+    const child = spawn(file, args, { stdio: ['pipe', 'pipe', 'inherit'], env: { ...process.env, WEBMODS_SAFARI_BRIDGE: String(process.pid) } });
     const h = { child, socket: null, queue: [], idleTimer: null };
     hosts.set(origin, h);
     log.info(`safari bridge: host ${child.pid} started for ${origin}`);

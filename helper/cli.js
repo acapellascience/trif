@@ -348,8 +348,9 @@ const handlers = {
     if (ctx.opts['--install']) {
       if (inRun) throw new UsageError("updates can't be installed inside an agent run");
       const r = await update.install(ctx.ws);
-      if (ctx.json) return printJson({ updated: true, from: r.from, to: r.to, notes: r.notes });
+      if (ctx.json) return printJson({ updated: true, from: r.from, to: r.to, notes: r.notes, warning: r.warning });
       out(`updated WebMods ${r.from} -> ${r.to}. A running browser switches to it within a minute.`);
+      if (r.warning) out(`warning: ${r.warning}\nRun \`webmods setup\` to finish setting up, or \`webmods doctor\` to see what's wrong.`);
       if (r.notes) out(`\n${r.notes}`);
       return;
     }

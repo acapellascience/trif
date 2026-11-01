@@ -45,8 +45,10 @@ function appWorkspace(version, config = {}) {
   return { ws: { home, appDir, config }, root: appDir };
 }
 
-// A package tarball like `npm pack`'s, whose setup records how it was run.
-function fakePackage(version) {
+// A package tarball like `npm pack`'s, whose setup records how it was run (and whether the install lock
+// was held for it). copy: whether its setup puts it into <home>/app; exit: its exit code; wait: ms it
+// takes.
+function fakePackage(version, { copy = true, exit = 0, wait = 0 } = {}) {
   const dir = tempDir();
   const pkg = path.join(dir, 'package');
   fs.mkdirSync(path.join(pkg, 'helper'), { recursive: true });
@@ -54,9 +56,15 @@ function fakePackage(version) {
   fs.writeFileSync(path.join(pkg, 'helper', 'cli.js'), `
     const fs = require('fs'), path = require('path');
     const home = process.argv[process.argv.indexOf('--home') + 1];
-    fs.writeFileSync(path.join(home, 'setup-ran.json'), JSON.stringify({ argv: process.argv.slice(2), PATH: process.env.PATH }));
-    fs.cpSync(path.join(__dirname, '..'), path.join(home, 'app'), { recursive: true });
-    console.log('setup done');`);
+    let lock = null;
+    try { lock = fs.readFileSync(path.join(home, '.app.lock'), 'utf8').split('\\n')[1]; } catch {}
+    fs.writeFileSync(path.join(home, 'setup-ran.json'), JSON.stringify({ argv: process.argv.slice(2), PATH: process.env.PATH,
+      lockHeldForUs: !!lock && lock === process.env.WEBMODS_INSTALL_LOCK }));
+    setTimeout(() => {
+      if (${copy}) fs.cpSync(path.join(__dirname, '..'), path.join(home, 'app'), { recursive: true });
+      console.log(${exit} ? 'Safari bridge FAILED to start it: launchctl said no' : 'setup done');
+      process.exitCode = ${exit};
+    }, ${wait});`);
   execFileSync('tar', ['-czf', 'webmods.tgz', 'package'], { cwd: dir });
   return fs.readFileSync(path.join(dir, 'webmods.tgz'));
 }
@@ -162,6 +170,9 @@ test('install: downloads, checks and runs the new version\'s setup with the reco
     assert.ok(ran.argv.includes('--no-link'));
     assert.deepStrictEqual(ran.argv.slice(ran.argv.indexOf('--browser'), ran.argv.indexOf('--browser') + 2), ['--browser', 'firefox']);
     assert.equal(ran.PATH, '/recorded/bin:/usr/bin:/bin');
+    assert.equal(ran.lockHeldForUs, true, 'setup ran under the install lock, with its token');
+    assert.equal(fs.existsSync(path.join(ws.home, '.app.lock')), false, 'lock released');
+    assert.equal(r.warning, null);
     assert.equal(U.installedVersion(ws), '0.2.0');
     assert.equal(U.readState(ws.home).lastInstalled.to, '0.2.0');
     assert.deepStrictEqual(fs.readdirSync(ws.home).filter((f) => f.startsWith('.update-')), [], 'temp folder removed');
@@ -194,6 +205,48 @@ test('install refuses a download that doesn\'t match the signed feed, and copies
     const repo = path.resolve(__dirname, '..');
     assert.match(U.installable(other.ws, repo).why, /git checkout/);
     await assert.rejects(U.install(other.ws, { root: repo, publicKey: k.pub }), /git pull/);
+  } finally { await server.close(); }
+});
+
+test('install: a setup that fails after swapping the app in counts as installed, with a warning', async () => {
+  const k = keys();
+  const server = await serve({});
+  try {
+    const { ws, root } = appWorkspace('0.1.0');
+    ws.config.updateFeed = `${server.base}/latest.json`;
+    publish(server, k, { version: '0.2.0', tgz: fakePackage('0.2.0', { exit: 1 }) });
+    const r = await U.install(ws, { root, publicKey: k.pub, browsers: [] });
+    assert.equal(r.to, '0.2.0');
+    assert.match(r.warning, /installed, but .*launchctl said no/s);
+    const last = U.readState(ws.home).lastInstalled;
+    assert.equal(last.to, '0.2.0');
+    assert.match(last.warning, /launchctl said no/);
+
+    // One that fails before the swap is a failed update, as before.
+    const other = appWorkspace('0.1.0');
+    other.ws.config.updateFeed = `${server.base}/latest.json`;
+    publish(server, k, { version: '0.2.0', tgz: fakePackage('0.2.0', { exit: 1, copy: false }) });
+    await assert.rejects(U.install(other.ws, { root: other.root, publicKey: k.pub, browsers: [] }), /setup failed/);
+    assert.equal(U.installedVersion(other.ws), '0.1.0');
+    assert.equal(U.readState(other.ws.home).lastInstalled, undefined);
+  } finally { await server.close(); }
+});
+
+test('install: two at once (two browsers\' helpers) install once; the other is told it\'s in progress', async () => {
+  const k = keys();
+  const server = await serve({});
+  try {
+    const { ws, root } = appWorkspace('0.1.0');
+    ws.config.updateFeed = `${server.base}/latest.json`;
+    publish(server, k, { version: '0.2.0', tgz: fakePackage('0.2.0', { wait: 300 }) });
+    const results = await Promise.allSettled([
+      U.install(ws, { root, publicKey: k.pub, browsers: [] }),
+      U.install(ws, { root, publicKey: k.pub, browsers: [] }),
+    ]);
+    assert.deepEqual(results.map((x) => x.status).sort(), ['fulfilled', 'rejected']);
+    assert.match(results.find((x) => x.status === 'rejected').reason.message, /another WebMods install is in progress|is up to date/);
+    assert.equal(U.installedVersion(ws), '0.2.0');
+    assert.equal(fs.existsSync(path.join(ws.home, '.app.lock')), false);
   } finally { await server.close(); }
 });
 

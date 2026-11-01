@@ -850,8 +850,10 @@
       if (!row.querySelector(':scope > .dm-filters')) row.append(filtersButton());
     }
   };
+  // Tidied just before the next frame is drawn (at most once a frame), so what it hides or widens is never
+  // drawn the old way first. (A 100ms timer here showed X's tabs and narrow column for a moment on load.)
   let queued = false;
   new MutationObserver(() => {
-    if (!queued) { queued = true; setTimeout(() => { queued = false; tidy(); }, 100); }
+    if (!queued) { queued = true; requestAnimationFrame(() => { queued = false; tidy(); }); }
   }).observe(document.documentElement, { childList: true, subtree: true });
 })();

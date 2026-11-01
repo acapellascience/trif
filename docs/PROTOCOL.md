@@ -31,14 +31,17 @@ dependencies, no build step.**
      AGENTS.md           how to build mods (copied from helper/workspace/AGENTS.md on setup; refreshed on every setup)
      CLAUDE.md           "@AGENTS.md" (Claude Code reads CLAUDE.md; the @ import pulls in AGENTS.md)
      sites/<site>/<mod>.js
+     preinstalled.json   what setup offered and shipped (see "Updates to shipped mods")
+     .shipped/<site>/    versions of the shipped mods kept for merging (<mod>.js, <mod>.new.js)
      helper.sock         the default helper's socket (exists while a browser is running with the extension)
      helper-<pid>.sock   each running helper's own socket (one helper per connected browser or Chrome profile)
      config.json         { "modsDir": "...optional override..." }
    ```
    `<site>` is a hostname like `x.com` or `news.ycombinator.com`. `<mod>` is a kebab-case name.
    Files whose name starts with `_` or `.` are ignored (scratch files, helpers).
-4. **Examples** (`examples/sites/<site>/<mod>.js`): ready-made mods (Plain X first). Not installed
-   automatically; `webmods install-example <site>/<mod>` copies one into the workspace.
+4. **Examples** (`examples/sites/<site>/<mod>.js`): ready-made mods (Plain X first). Setup copies them
+   into a new workspace (see "Native host installation") and later setups keep them up to date (see
+   "Updates to shipped mods"); `webmods install-example <site>/<mod>` copies one in by hand.
 
 ## Extension identity
 
@@ -65,6 +68,8 @@ patch `fetch`/`XMLHttpRequest`, read React state, etc.). An optional header sets
 // @match       https://twitter.com/*
 // @run-at      document-start
 // @risk        1 hides ads and promoted posts
+// @source      webmods
+// @version     3
 // ==/WebMod==
 ```
 
@@ -78,6 +83,10 @@ patch `fetch`/`XMLHttpRequest`, read React state, etc.). An optional header sets
   1 noticeable by the page's scripts, 2 changes what the site receives; defined in AGENTS.md "Account
   safety"). Parsed into `risk: {tier, why}` (null when absent; a malformed value is a warning). The side
   panel shows a badge for 1 and 2; a side-panel run's tier-2 mod is held (see "Run scope").
+- `@source` and `@version`: `@source webmods` marks a mod WebMods ships (the examples); `@version` is
+  its version (any text; the examples count 1, 2, 3…). Parsed into `source` (lowercased) and `version`
+  (null when absent). The panel shows "from WebMods, version 3"; setup keeps such mods up to date (see
+  "Updates to shipped mods").
 - Unknown keys are ignored. A file without a header is valid.
 
 **Mod id** = `<site>/<mod>` (e.g. `x.com/plain-x`). The helper parses headers; the extension never parses.
@@ -99,8 +108,9 @@ logs it and exits (the extension reconnects to a fresh one) instead of misreadin
 | `{type:"updated", from, to, notes}` | An update was installed. The extension keeps it in storage (`updated`) so the panel can say so after the reload. |
 | `{type:"reload", reason}` | The extension should `chrome.runtime.reload()`: <home>/app now holds a newer version (installed by this helper, another browser's, or `webmods setup`). Chrome reloads the unpacked extension from the new files; either browser starts the new helper on reconnect. |
 
-`Mod = { id, site, file, name, description, matches:[…], excludes:[…], runAt:"document_start"|"document_end"|"document_idle", risk:{tier, why}|null, code, hash, held?, startOff?, origin?:{by, browser} }`
-(`file` is the absolute path; `hash` is a sha1 of code+metadata so the extension can skip unchanged mods.)
+`Mod = { id, site, file, name, description, matches:[…], excludes:[…], runAt:"document_start"|"document_end"|"document_idle", risk:{tier, why}|null, source, version, code, hash, held?, startOff?, origin?:{by, browser}, update?:{version, from, modified} }`
+(`file` is the absolute path; `hash` is a sha1 of code+metadata so the extension can skip unchanged mods;
+`update`: a newer version of this shipped mod is waiting, see "Updates to shipped mods".)
 
 **extension → helper**
 
@@ -312,6 +322,7 @@ webmods restore [<site>/<mod>]      put back the newest trashed copy of a mod; n
 webmods check <file|site/mod>       compile a mod without running it; prints the syntax error or "ok"
 webmods new <site> <mod>            create sites/<site>/<mod>.js from a template, print its path
 webmods install-example <site>/<mod>
+webmods mod-update <site>/<mod> [--use-new|--keep|--merged]   a shipped mod's new version (see "Updates to shipped mods"); refused inside an agent run
 webmods help [command]
 ```
 
@@ -381,6 +392,7 @@ Re-running setup is safe; run it again to update.
   (an existing file is never overwritten); `startOff` lists the copied ones that start off. The helper
   sends those mods with `startOff: true`; the extension switches each off (`disabled`) the first time it
   sees it and remembers that in chrome.storage.local `startedOff`, so afterwards the switch is the user's.
+  Later setups update the copies (see "Updates to shipped mods"); `preinstalled.json` also holds `shipped`.
   `sitesOn` goes with every mods message; the extension turns each site on the first time it sees it
   and remembers that in `sitesOffered` (`applyStartSites`). `--no-examples` skips all this.
 - Wrapper: `~/.webmods/bin/webmods-host` = `#!/bin/sh\nexec "<absolute node path>" "<app>/helper/host.js" "$@"`
@@ -449,6 +461,58 @@ CLI: `webmods update [--install] [--auto on|off]` works without the helper (a ru
 new `<home>/app` within 30 s and asks the extension to reload); `webmods report` asks the helper, or
 builds a shorter report without it; `--open` opens the form with it filled in.
 
+## Updates to shipped mods
+
+`helper/lib/preinstalled.js`. The preinstalled mods get fixes in later WebMods versions (Plain X when X
+changes). Every setup, which is also how an update installs, brings them to the user's copy without ever
+overwriting the user's own changes. Only examples whose header says `@source webmods` and that are in
+`PREINSTALLED` are managed.
+
+- **What was shipped.** `preinstalled.json` `shipped` = `{"<id>": {hash, version, pending?, declined?,
+  replaced?, own?}}`: `hash`/`version` are the sha1 and `@version` of the shipped version the user's copy
+  is based on, and `<home>/.shipped/<site>/<mod>.js` keeps that exact file (the merge base). `hash` is
+  null for a copy edited before the record existed (its starting point is unknown). `own: true`: the
+  user had their own file under that name before it was offered; never touched.
+- **Older workspaces** have no record. There, a copy whose sha1 is in `examples/shipped-history.json`
+  (`{"<id>": [sha1 of every version git has of examples/sites/<id>.js]}`, written by
+  `scripts/shipped-history.js`, which `scripts/release.js` runs for every release and commits with the
+  version bump; it ships in `examples/`) counts as unchanged.
+- **Each setup**, for each managed mod already offered:
+  - the user's file is gone: left gone;
+  - it is the new version already: recorded;
+  - it is based on the new version already (`hash` equals it: merged, then edited): nothing to do;
+  - the user declined this version (`declined`): nothing;
+  - it is unchanged since shipped (its sha1 is `hash`, or with no record, in the history): replaced with
+    the new version (written to a dot-named temp file and renamed), base updated. Switches are keyed by
+    mod id in the extension, so they carry over;
+  - otherwise (edited): untouched; `pending = {hash, version}` and the new version kept in
+    `<home>/.shipped/<site>/<mod>.new.js`.
+  Setup prints "updated to the new version: …" and "new version waiting, not installed because you
+  changed these: …".
+- **Telling the user.** Each mods message gives a mod with an update waiting `update: {version, from,
+  modified}` (`modified`: the copy differs from the base, so using the new version loses changes; a copy
+  that already is the new version has none). The helper's sync fingerprint includes
+  `preinstalled.json`, so a setup elsewhere shows up within the poll interval. `webmods mods`/`status` say
+  "update available (you've changed it): version N". The side panel shows, on that mod, a notice with
+  **Use the new version**, **Keep mine** and (when modified) **Merge with my agent**.
+- **Helper command** `mod.update {id, choice: "new"|"mine"}` (extension or socket; refused inside a run,
+  like `mod.approve`):
+  - `new` → `{id, choice, version, trashed}`: the user's copy goes to the trash (trash.js), the new
+    version takes its place and becomes the base; `replaced` remembers how things were. `mod.restore`
+    (the panel's Undo, `webmods restore`) while the file is still that new version puts the user's copy
+    back and the update is pending again. The panel adds `{role:"mod", text:"x.js is now version 2 from
+    WebMods; yours is in the trash.", undo: id}` to the chat.
+  - `mine` → `{id, choice, version}`: `declined = <its hash>`, so it isn't offered again; a later version is.
+- **Merging** is an ordinary side-panel run: `agent.start` with `merge: "<id>"` (from the mod's own site:
+  the scopes must match). The helper appends to the prompt where the three files are, relative to the
+  workspace: the user's copy (`sites/…`, the only one to edit), the new version (`.shipped/…/<mod>.new.js`)
+  and the base (`.shipped/…/<mod>.js`, or a note that it isn't known), and asks to keep the user's changes,
+  keep `@source webmods` and take the new `@version`. Same sandbox, scope and held-mod rules as any run:
+  `.shipped` is readable (it isn't in `PRIVATE_FILES`) and not writable (outside the mods folder; Claude
+  Code's sandbox also denies it). When that run's `done` has `ok: true`, the pending version becomes the
+  base (if it's still the one waiting), before the mods go out again and `done` is relayed.
+  `webmods mod-update <id> --merged` does the same after a merge in a terminal.
+
 ## Repository layout
 
 ```
@@ -456,11 +520,11 @@ extension/   manifest.json, background.js (service worker), runtime.js (page run
              onboarding.html/.js, icons/, safari.js + safari-background.js (Safari build only)
 package.json the npm package `webmods` (version, bin, files allowlist)
 helper/      host.js, cli.js, safari-bridge.js, lib/*.js, workspace/AGENTS.md, workspace/CLAUDE.md, templates/mod.js
-examples/    sites/x.com/plain-x.js (+ tests)
+examples/    sites/<site>/<mod>.js (the shipped mods), shipped-history.json (scripts/shipped-history.js)
 tests/       node tests (node --test), incl. a fake extension for the helper and a chrome.* mock for the extension
 docs/        PROTOCOL.md (this file)
 scripts/     build-extension.js (Chrome/Firefox/Safari builds), build-safari.js (the Safari Mac app),
-             release.js (releases, see "Updates"), render-icon.js
+             release.js (releases, see "Updates"), shipped-history.js, render-icon.js
 beta/        START HERE.txt templates for the beta zips (Firefox, Chrome)
 updates/     the update feeds, written by release.js (latest.json + .sig, firefox.json)
 CHANGELOG.md what's new per version (the panel's "What's new")
@@ -520,7 +584,7 @@ Nothing is hosted; the agent uses the user's own login/subscription.
   `{type: "agent.start", site, tabId, url, prompt, sessionId, agent, model}`, `{type: "agent.stop", runId}`,
   `{type: "agent.list"}`, `{type: "agent.login", agent}`, `{type: "agent.loginCode", loginId, code}`,
   `{type: "agent.loginCancel", loginId}`, `{type: "status"}`, `{type: "mod.enable", id, enabled, tab}`,
-  `{type: "mod.approve", id, tab}`, `{type: "mod.delete", id, site, tab}`, `{type: "mod.restore", id, site, tab}` (the tab is reloaded if the mod runs there; with `site`, the chat gets a `{role: "mod", text: "x.js was deleted.", undo: id}` line, marked `undone: true` once restored, and a "was restored (off, as before)" line), `{type: "instructions.get"}`, `{type: "instructions.set", text}`, `{type: "chat.clear", site}`, `{type: "chat.note", site, text}`. Background forwards agent commands to the
+  `{type: "mod.approve", id, tab}`, `{type: "mod.update", id, choice, site, tab}`, `{type: "mod.delete", id, site, tab}`, `{type: "mod.restore", id, site, tab}` (the tab is reloaded if the mod runs there; with `site`, the chat gets a `{role: "mod", text: "x.js was deleted.", undo: id}` line, marked `undone: true` once restored, and a "was restored (off, as before)" line), `{type: "instructions.get"}`, `{type: "instructions.set", text}`, `{type: "chat.clear", site}`, `{type: "chat.note", site, text}`. Background forwards agent commands to the
   helper as native `request`s with the same cmd and relays every native `{type: "agentEvent", runId,
   event}` to all panel ports (panels ignore runs and logins they didn't start, by id).
   If the helper disconnects mid-run (or mid-login), the background sends the panel `{kind: "error"}` then
@@ -533,14 +597,15 @@ New native request commands (answered with a normal `response`):
 | cmd | args | result |
 |---|---|---|
 | `agent.list` | – | `{agents: [{id, name, path, available, version, note, loggedIn, canLogin, loginFix}], default}` |
-| `agent.start` | `agent, model?, site, url, tabId, prompt, sessionId?` | `{runId}` right away; progress arrives as `agentEvent` messages |
+| `agent.start` | `agent, model?, site, url, tabId, prompt, sessionId?, merge?` | `{runId}` right away; progress arrives as `agentEvent` messages. `merge`: a shipped mod's id, to merge its new version (see "Updates to shipped mods") |
 | `agent.stop` | `runId` | `{stopped: true}` (SIGTERM, SIGKILL after 3 s) |
 | `agent.login` | `agent?` | `{loginId}` right away; progress arrives as `agentEvent` messages with `runId` = the loginId |
 | `agent.loginCode` | `loginId, code` | `{sent: true}` (writes the code and a newline to the login's stdin) |
 | `agent.loginCancel` | `loginId` | `{cancelled: true}` |
 | `mod.approve` | `id` | `{id, approved: true}`: releases a held mod (see "Run scope"); also on the socket, not from a run |
 | `mod.delete` | `id` | `{id, deleted: true}`: moves `sites/<site>/<mod>.js` to `trash/<site>/<mod>@<UTC stamp>.js` (entries older than 30 days are removed), then re-sends the mods; also on the socket, and from a run for mods inside its scope |
-| `mod.restore` | `id` | `{id, restored: true, file}`: moves the newest trashed copy back (fails if the mod exists again); same rules as `mod.delete`. The extension keeps a deleted mod's switch state, so it comes back as it was |
+| `mod.restore` | `id` | `{id, restored: true, file}`: moves the newest trashed copy back (fails if the mod exists again, except to undo `mod.update` `new`); same rules as `mod.delete`. The extension keeps a deleted mod's switch state, so it comes back as it was |
+| `mod.update` | `id, choice: "new"\|"mine"` | a shipped mod's new version: use it or keep the user's copy (see "Updates to shipped mods"); also on the socket, not from a run |
 | `instructions.get` | | `{text, file, max}`: the user's standing instructions (`~/.webmods/instructions.md`, `''` if none) |
 | `instructions.set` | `text` | same; trimmed, at most 4000 characters, empty removes the file. Not from a run |
 
@@ -612,12 +677,12 @@ Suffix List). `helper/lib/scope.js` computes it; `extension/lib.js` mirrors the 
   the run time limit (left by helpers that died).
 - **Token.** `agent.start` makes a random token per run and gives the agent `WEBMODS_RUN_TOKEN`; the
   CLI sends it with every request. The helper answers a request with an unknown token (the run ended)
-  with an error, refuses `agent.*`, `mod.approve` and `instructions.*` from a run, and sets `args.scope` on everything
+  with an error, refuses `agent.*`, `mod.approve`, `mod.update` and `instructions.*` from a run, and sets `args.scope` on everything
   else it forwards (overriding any `scope` the client sent; `args` must be a plain object). Requests on
   the socket without a token (the user's terminal, the user's own agent outside the panel) are not
   scoped: runs can't reach the socket. The helper answers `mod.delete` and `mod.restore` from a run
-  itself, only for mods whose every `@match` is in scope. The CLI itself refuses `setup`, `agent` and
-  `approve` when the variable is set, and inside a run its own file options stay in the run's folders:
+  itself, only for mods whose every `@match` is in scope. The CLI itself refuses `setup`, `agent`,
+  `approve` and `mod-update` when the variable is set, and inside a run its own file options stay in the run's folders:
   `-f` and `check` read only the mods folder, `-o` writes only there or the run's screenshots folder
   (`$WEBMODS_RUN_SCREENSHOTS`, `screenshots/<scope>/`, also where screenshots go by default).
 - **Extension.** With `args.scope`, page commands only act on tabs whose URL is http(s) on the scope or
@@ -644,7 +709,7 @@ Suffix List). `helper/lib/scope.js` computes it; `extension/lib.js` mirrors the 
     (other runs' logs hold the pages they read) or `screenshots/` (other sites'), except the run's own
     screenshots folder and mailbox.
   - **Writes:** the mods folder, with every existing folder of another site (`all-sites/` included)
-    read-only inside it; the run's screenshots folder; its mailbox. Not `held.json`, `preinstalled.json`,
+    read-only inside it; the run's screenshots folder; its mailbox. Not `held.json`, `preinstalled.json`, `.shipped/`,
     `origins.json`, `active-runs/`, `trash/`, `instructions.md`, `AGENTS.md`, `CLAUDE.md`, `.claude/`,
     `bin/`, `app/` or `runs/`. A run can still create a folder for another site; its mods are held like
     any out-of-scope mod.

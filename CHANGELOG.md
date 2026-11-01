@@ -14,6 +14,11 @@ here for the version it releases.
   (no browser data, keys or documents), can't read your API keys, other chats' logs or other sites'
   screenshots, and has no internet access of its own, so a web page it reads can't talk it into
   sending your data anywhere. Claude Code 2.1.285 or newer is needed.
+- **The mods that come with WebMods get fixes.** Plain X and the Google, Amazon and Instagram mods now
+  update with WebMods. If you never changed one, it just gets the new version. If you (or your agent)
+  changed it, yours is left alone and the side panel offers the new version on that mod: use it (yours
+  goes to the trash, with Undo), keep yours, or have your agent merge the two, keeping your changes.
+  Each says which version it is ("from WebMods, version 1").
 - An agent working on one site can no longer see which other sites you have open, or switch on, from
   its own site, a mod that runs everywhere.
 - Plain X no longer flashes X's own tabs and narrow timeline for a moment when a page loads or you go

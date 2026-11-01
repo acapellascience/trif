@@ -18,6 +18,17 @@ here for the version it releases.
   its own site, a mod that runs everywhere.
 - Plain X no longer flashes X's own tabs and narrow timeline for a moment when a page loads or you go
   back to Home.
+- If X changes how its timeline data looks, Plain X shows the timeline unfiltered rather than an empty
+  one, and some rarer X responses no longer break.
+- Two browsers installing an update at the same moment no longer trip over each other, and installing an
+  update from Safari no longer leaves WebMods stopped in Safari until you log in again.
+- An update that installed but hit a problem afterwards (setting up a browser, say) says so, instead of
+  saying the update failed.
+- WebMods no longer runs out of browser storage when you have long or many chats; if saving does fail, a
+  switch you flip stays as it was rather than looking off while mods keep running.
+- Network recording an agent switches on goes off again when the agent finishes, and keeps less: at most
+  2 MB per response and 32 MB in all, skipping live event streams.
+- Big screenshots and other large messages between the browser and WebMods no longer slow the helper down.
 
 ## 0.1.1
 

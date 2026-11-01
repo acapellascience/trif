@@ -301,9 +301,28 @@
     } catch { return {}; }
   };
 
+  // If X renamed its post type, every post in the feed would look like "not a post" and go, leaving an
+  // empty feed. A feed page whose items include a type this script doesn't know, and no post of the type
+  // it does, is let through as X sent it (noted in the stats) rather than emptied.
+  const KNOWN_ITEM_TYPES = ['TimelineTweet', 'TimelineTimelineCursor', ...JUNK_ITEM_TYPES];
+  const unrecognisedTypes = (instructions) => {
+    const items = instructions.flatMap((i) => (i.entries || []).flatMap((e) => (Array.isArray(e.content?.items)
+      ? e.content.items.map((x) => x.item?.itemContent) : [e.content?.itemContent]))).filter(Boolean);
+    if (items.some((item) => item.itemType === 'TimelineTweet')) return null;
+    const unknown = [...new Set(items.map((item) => item.itemType).filter((type) => !KNOWN_ITEM_TYPES.includes(type)))];
+    return unknown.length ? unknown : null;
+  };
+
   const filterData = (data, url, body) => {
     const variables = requestVariables(url, body);
     const home = data?.data?.home?.home_timeline_urt?.instructions;
+    const unknown = home && unrecognisedTypes(home);
+    if (unknown) {
+      stats.push({ op: String(url || '').split('?')[0].split('/').pop(), passedThrough: `no post of a known type; new types: ${unknown.join(', ')}`,
+        before: home.flatMap((i) => describe(i.entries)) });
+      if (stats.length > 20) stats.shift();
+      return data;
+    }
     // A profile's timelines: only ads and recommendations go (as on post pages). Their layout varies by
     // request, so find the instructions list wherever it is.
     const findInstructions = (node, depth = 0) => {
@@ -352,6 +371,11 @@
   const filterText = (text, url, body) => {
     try { return JSON.stringify(filterData(JSON.parse(text), url, body)); } catch { return text; }
   };
+  // The same for data X already parsed (XHR responseType 'json'). filterData changes what it's given,
+  // so it works on a copy: if it fails half way, X gets its data back as it was.
+  const filterParsed = (data, url, body) => {
+    try { return filterData(JSON.parse(JSON.stringify(data)), url, body); } catch { return data; }
+  };
   window.__dmFilterTimeline = filterText;   // for tests
   window.__dmFeedOptions = options;
   window.__dmUnfollowed = unfollowed;
@@ -381,6 +405,7 @@
   window.__dmRecentOnly = recentOnly;   // for tests
   window.__dmRecentBody = recentBody;
 
+  const NULL_BODY = [101, 103, 204, 205, 304];
   const fetch0 = window.fetch;
   window.fetch = async function (input, init) {
     if (typeof input === 'string' && FOLLOWING.test(input)) {
@@ -389,13 +414,15 @@
     }
     const response = await fetch0.apply(this, arguments);
     const url = typeof input === 'string' ? input : input?.url || String(input);
-    if (!TIMELINE.test(url) || !response.ok) return response;
+    // A response with no body (204, 205, 304…) can't be rebuilt with one, and has nothing to filter.
+    if (!TIMELINE.test(url) || !response.ok || NULL_BODY.includes(response.status)) return response;
     const text = filterText(await response.text(), url, init?.body);
     return new Response(text, { status: response.status, statusText: response.statusText, headers: response.headers });
   };
 
   const open = XMLHttpRequest.prototype.open;
   XMLHttpRequest.prototype.open = function (method, url) {
+    this.__dmFiltered = undefined;   // a reused XHR: forget the last response's filtered copy
     this.__dmTimeline = TIMELINE.test(String(url));
     if (FOLLOWING.test(String(url))) arguments[1] = url = recentOnly(String(url));
     this.__dmUrl = String(url);
@@ -414,7 +441,7 @@
     if (xhr.__dmFiltered === undefined) {
       const raw = responseGetter.call(xhr);
       xhr.__dmFiltered = typeof raw === 'string' ? filterText(raw, xhr.__dmUrl, xhr.__dmBody)
-        : raw && typeof raw === 'object' && !(raw instanceof Blob) && !(raw instanceof ArrayBuffer) ? filterData(raw, xhr.__dmUrl, xhr.__dmBody) : raw;
+        : raw && typeof raw === 'object' && !(raw instanceof Blob) && !(raw instanceof ArrayBuffer) ? filterParsed(raw, xhr.__dmUrl, xhr.__dmBody) : raw;
     }
     return xhr.__dmFiltered;
   };

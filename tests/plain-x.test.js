@@ -19,7 +19,8 @@ global.history = { pushState() {}, replaceState() {} };
 global.addEventListener = () => {};
 global.location = { hostname: 'x.com', pathname: '/home', href: 'https://x.com/home', origin: 'https://x.com' };
 global.XMLHttpRequest = FakeXHR;
-global.fetch = async () => { throw new Error('unused'); };
+let fetchImpl = async () => { throw new Error('unused'); };   // what X's fetch answers, per test
+global.fetch = (...args) => fetchImpl(...args);
 global.MutationObserver = class { observe() {} };
 global.document = {
   cookie: 'twid=u%3D999',
@@ -445,4 +446,52 @@ const source = fs.readFileSync(MOD, 'utf8');
 for (const selector of ['#placeholder::after', 'header[role=banner] h1 a[href="/home"] > div::after', '.dm-search {', 'html[data-dm-explore]', '.dm-unfollowed {', '.dm-unfollowed:not([data-open]) .dm-threads', '.dm-reply img.av', '.dm-filters {', '.dm-menu {', '[data-dm-placeholder] article']) {
   assert.ok(source.includes(selector), `stylesheet has ${selector}`);
 }
+});
+
+test("a feed page with a post type Plain X doesn't know is let through, not emptied", () => {
+const renamed = (id) => ({ entryId: `tweet-${id}`, content: { entryType: 'TimelineTimelineItem', itemContent: { itemType: 'TimelinePost', tweet_results: { result: { rest_id: id } } } } });
+const page = { data: { home: { home_timeline_urt: { instructions: [{ type: 'TimelineAddEntries', entries: [renamed('r1'), renamed('r2'), whoToFollow, cursor] }] } } } };
+const out = window.__dmFilterTimeline(JSON.stringify(page), 'https://x.com/i/api/graphql/abc/HomeLatestTimeline?variables={"cursor":"c9"}');
+assert.strictEqual(out, JSON.stringify(page));
+assert.match(window.__dmFilterStats.at(-1).passedThrough, /no post of a known type; new types: TimelinePost/);
+// A page of known non-posts only (say, just a who-to-follow block) is still cleaned as usual.
+const junkOnly = { data: { home: { home_timeline_urt: { instructions: [{ type: 'TimelineAddEntries', entries: [whoToFollow, cursor] }] } } } };
+const kept = JSON.parse(window.__dmFilterTimeline(JSON.stringify(junkOnly))).data.home.home_timeline_urt.instructions[0].entries.map((e) => e.entryId);
+assert.ok(!kept.includes('who-to-follow-1') && kept.includes('cursor-bottom-1'), kept.join());
+});
+
+test("XHR with parsed JSON: filtered on a copy; if filtering fails, X gets its data as it was", () => {
+const xhr = new XMLHttpRequest();
+xhr.open('GET', 'https://x.com/i/api/graphql/abc/HomeLatestTimeline?variables=1');
+const parsed = JSON.parse(JSON.stringify(data));
+Object.assign(xhr, { readyState: 4, status: 200, _text: parsed });
+assert.deepStrictEqual(xhr.response.data.home.home_timeline_urt.instructions[1].entries.map((e) => e.entryId), ['tweet-1', 'tweet-7', 'cursor-bottom-1']);
+assert.strictEqual(parsed.data.home.home_timeline_urt.instructions[1].entries.length, 10, 'X\'s own object untouched');
+const broken = { data: { home: { home_timeline_urt: { instructions: [{ type: 'TimelineAddEntries', entries: [tweet('b1'), null] }] } } } };
+const bad = new XMLHttpRequest();
+bad.open('GET', 'https://x.com/i/api/graphql/abc/HomeLatestTimeline?variables=1');
+Object.assign(bad, { readyState: 4, status: 200, _text: broken });
+assert.strictEqual(bad.response, broken);
+});
+
+test("a reused XHR filters its new response, not the last one again", () => {
+const xhr = new XMLHttpRequest();
+xhr.open('GET', 'https://x.com/i/api/graphql/abc/HomeLatestTimeline?variables=1');
+Object.assign(xhr, { readyState: 4, status: 200, _text: JSON.stringify(data) });
+assert.deepStrictEqual(ids(xhr.responseText), ['tweet-1', 'tweet-7', 'cursor-bottom-1']);
+xhr.open('GET', 'https://x.com/i/api/graphql/abc/HomeLatestTimeline?variables=2');
+const second = { data: { home: { home_timeline_urt: { instructions: [{ type: 'TimelineClearCache' }, { type: 'TimelineAddEntries', entries: [tweet('n1'), cursor] }] } } } };
+Object.assign(xhr, { _text: JSON.stringify(second) });
+assert.deepStrictEqual(ids(xhr.responseText), ['tweet-n1', 'cursor-bottom-1']);
+});
+
+test("fetch: responses with no body (204, 304…) come back untouched; others filtered", async () => {
+const url = 'https://x.com/i/api/graphql/abc/HomeLatestTimeline?variables=1';
+const empty = new Response(null, { status: 204 });
+fetchImpl = async () => empty;
+assert.strictEqual(await window.fetch(url), empty);
+fetchImpl = async () => new Response(JSON.stringify(data), { status: 200, headers: { 'content-type': 'application/json' } });
+const res = await window.fetch(url);
+assert.deepStrictEqual(ids(await res.text()), ['tweet-1', 'tweet-7', 'cursor-bottom-1']);
+fetchImpl = async () => { throw new Error('unused'); };
 });

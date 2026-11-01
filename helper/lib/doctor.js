@@ -138,59 +138,68 @@ async function doctor(opts = {}) {
     }
   }
 
-  // Native host manifests
-  let targets;
-  if (opts.nativeDir) {
-    targets = [{ key: 'custom', label: opts.nativeDir, nativeDir: path.resolve(opts.nativeDir), detected: true }];
-  } else {
-    targets = browserTable().filter((b) => !b.safari && (b.detected || fs.existsSync(path.join(b.nativeDir, `${P.HOST_NAME}.json`))));
-  }
-  const safari = !opts.nativeDir && browserTable().find((b) => b.safari && b.detected);
-  if (!targets.length && !safari) {
-    add('fail', 'no browser profile found (looked for Chrome, Chromium, Brave, Edge, Arc, Firefox)', 'install and open Google Chrome or Firefox once, then ' + setupFix);
-  }
-  const expectedOrigins = P.extensionOrigins(ws.config);
-  const badIds = P.extensionIds(ws.config).invalid;
-  if (badIds.length) {
-    add('warn', `config.json extensionIds has entries that aren't extension IDs: ${badIds.map((x) => JSON.stringify(x)).join(', ')}`,
-      `fix them (32 letters a-p each) in ${path.join(ws.home, 'config.json')}`);
-  }
+  // The browsers' setup lives outside the workspace (~/Library…), which a side-panel agent run's sandbox
+  // can't read: there, say so instead of failing on it. The user's terminal checks it.
+  const inRun = !!process.env.WEBMODS_RUN_BOX;
   let manifestsOk = 0;
-  for (const t of targets) {
-    const file = path.join(t.nativeDir, `${P.HOST_NAME}.json`);
-    const fix = `${setupFix}${t.key !== 'custom' ? ` --browser ${t.key}` : ''}`;
-    if (!fs.existsSync(file)) { add('fail', `${t.label}: native host manifest missing (${file})`, fix); continue; }
-    let m;
-    try { m = JSON.parse(fs.readFileSync(file, 'utf8')); } catch (e) {
-      add('fail', `${t.label}: native host manifest is not valid JSON (${file})`, fix); continue;
-    }
-    const problems = [];
-    if (m.name !== P.HOST_NAME) problems.push(`name is ${JSON.stringify(m.name)}, expected "${P.HOST_NAME}"`);
-    if (m.type !== 'stdio') problems.push('type is not "stdio"');
-    if (m.path !== ws.hostWrapper) problems.push(`path is ${JSON.stringify(m.path)}, expected ${ws.hostWrapper}`);
-    else if (!fs.existsSync(m.path)) problems.push(`path ${m.path} doesn't exist`);
-    if (t.firefox) {
-      const ids = Array.isArray(m.allowed_extensions) ? m.allowed_extensions : [];
-      if (!ids.includes(P.FIREFOX_EXTENSION_ID)) problems.push(`allowed_extensions doesn't include ${P.FIREFOX_EXTENSION_ID}`);
+  if (inRun) {
+    add('ok', "inside a side-panel agent run: the browsers' setup files aren't checked (the run can't read them; run webmods doctor in a terminal for those)");
+  } else {
+    // Native host manifests
+    let targets;
+    if (opts.nativeDir) {
+      targets = [{ key: 'custom', label: opts.nativeDir, nativeDir: path.resolve(opts.nativeDir), detected: true }];
     } else {
-      // Every WebMods extension ID (dev, Web Store, config.json extensionIds) must be allowed.
-      const origins = Array.isArray(m.allowed_origins) ? m.allowed_origins : [];
-      const missing = expectedOrigins.filter((o) => !origins.includes(o));
-      if (missing.length) problems.push(`allowed_origins doesn't include ${missing.join(', ')}`);
+      targets = browserTable().filter((b) => !b.safari && (b.detected || fs.existsSync(path.join(b.nativeDir, `${P.HOST_NAME}.json`))));
     }
-    if (problems.length) add('fail', `${t.label}: native host manifest ${file}: ${problems.join('; ')}`, fix);
-    else { manifestsOk++; add('ok', `${t.label}: native host manifest`); }
-  }
+    const safari = !opts.nativeDir && browserTable().find((b) => b.safari && b.detected);
+    if (!targets.length && !safari) {
+      add('fail', 'no browser profile found (looked for Chrome, Chromium, Brave, Edge, Arc, Firefox)', 'install and open Google Chrome or Firefox once, then ' + setupFix);
+    }
+    const expectedOrigins = P.extensionOrigins(ws.config);
+    const badIds = P.extensionIds(ws.config).invalid;
+    if (badIds.length) {
+      add('warn', `config.json extensionIds has entries that aren't extension IDs: ${badIds.map((x) => JSON.stringify(x)).join(', ')}`,
+        `fix them (32 letters a-p each) in ${path.join(ws.home, 'config.json')}`);
+    }
+    for (const t of targets) {
+      const file = path.join(t.nativeDir, `${P.HOST_NAME}.json`);
+      const fix = `${setupFix}${t.key !== 'custom' ? ` --browser ${t.key}` : ''}`;
+      if (!fs.existsSync(file)) { add('fail', `${t.label}: native host manifest missing (${file})`, fix); continue; }
+      let m;
+      try { m = JSON.parse(fs.readFileSync(file, 'utf8')); } catch (e) {
+        add('fail', `${t.label}: native host manifest is not valid JSON (${file})`, fix); continue;
+      }
+      const problems = [];
+      if (m.name !== P.HOST_NAME) problems.push(`name is ${JSON.stringify(m.name)}, expected "${P.HOST_NAME}"`);
+      if (m.type !== 'stdio') problems.push('type is not "stdio"');
+      if (m.path !== ws.hostWrapper) problems.push(`path is ${JSON.stringify(m.path)}, expected ${ws.hostWrapper}`);
+      else if (!fs.existsSync(m.path)) problems.push(`path ${m.path} doesn't exist`);
+      if (t.firefox) {
+        const ids = Array.isArray(m.allowed_extensions) ? m.allowed_extensions : [];
+        if (!ids.includes(P.FIREFOX_EXTENSION_ID)) problems.push(`allowed_extensions doesn't include ${P.FIREFOX_EXTENSION_ID}`);
+      } else {
+        // Every WebMods extension ID (dev, Web Store, config.json extensionIds) must be allowed.
+        const origins = Array.isArray(m.allowed_origins) ? m.allowed_origins : [];
+        const missing = expectedOrigins.filter((o) => !origins.includes(o));
+        if (missing.length) problems.push(`allowed_origins doesn't include ${missing.join(', ')}`);
+      }
+      if (problems.length) add('fail', `${t.label}: native host manifest ${file}: ${problems.join('; ')}`, fix);
+      else { manifestsOk++; add('ok', `${t.label}: native host manifest`); }
+    }
 
-  // Safari: its bridge, instead of a native host manifest
-  if (safari) {
-    const plist = safariAgentPlist();
-    const args = [...fs.readFileSync(plist, 'utf8').matchAll(/<string>([^<]*)<\/string>/g)].map((m) => m[1].replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&amp;/g, '&'));
-    const bridgeJs = args.find((a) => a.endsWith('safari-bridge.js'));
-    const fix = `${setupFix} --browser safari`;
-    if (!bridgeJs || !fs.existsSync(bridgeJs)) add('fail', `Safari: the bridge's login item (${plist}) runs ${bridgeJs || 'nothing'}, which doesn't exist`, fix);
-    else if (await portOpen(SAFARI_PORT)) add('ok', `Safari: the bridge is running (127.0.0.1:${SAFARI_PORT})`);
-    else add('fail', `Safari: the bridge isn't running (nothing on 127.0.0.1:${SAFARI_PORT})`, `${fix}   (errors: ${path.join(ws.home, 'safari-bridge.err')})`);
+    // Safari: its bridge, instead of a native host manifest
+    if (safari) {
+      const plist = safariAgentPlist();
+      let text = '';
+    try { text = fs.readFileSync(plist, 'utf8'); } catch { /* unreadable: reported below as nothing to run */ }
+    const args = [...text.matchAll(/<string>([^<]*)<\/string>/g)].map((m) => m[1].replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&amp;/g, '&'));
+      const bridgeJs = args.find((a) => a.endsWith('safari-bridge.js'));
+      const fix = `${setupFix} --browser safari`;
+      if (!bridgeJs || !fs.existsSync(bridgeJs)) add('fail', `Safari: the bridge's login item (${plist}) runs ${bridgeJs || 'nothing'}, which doesn't exist`, fix);
+      else if (await portOpen(SAFARI_PORT)) add('ok', `Safari: the bridge is running (127.0.0.1:${SAFARI_PORT})`);
+      else add('fail', `Safari: the bridge isn't running (nothing on 127.0.0.1:${SAFARI_PORT})`, `${fix}   (errors: ${path.join(ws.home, 'safari-bridge.err')})`);
+    }
   }
 
   // CLI on PATH
@@ -251,7 +260,9 @@ async function doctor(opts = {}) {
     for (const w of warnings) add('warn', `mod ${w.id}: ${w.warning}`, 'fix the header (see AGENTS.md)');
   }
 
-  // Coding agents for the side panel (optional: mods work without them).
+  // Coding agents for the side panel (optional: mods work without them). Inside a run they live outside
+  // what its sandbox can read, and the run itself shows one works.
+  if (inRun) return { ok: !checks.some((c) => c.status === 'fail'), checks };
   const agents = require('./agents');
   const listed = agents.listAgents(ws);
   const env = agents.agentEnv(ws);

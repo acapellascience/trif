@@ -586,3 +586,25 @@ test('inside a side-panel run, the CLI reads -f and check files only from the mo
   r = await runCli(['check', secret], { home });
   assert.match(r.stdout + r.stderr, /anthropicApiKey/);
 });
+
+test('doctor: an unreadable Safari login item doesn\'t crash it; inside a run it skips the browsers\' setup files', async () => {
+  const home = tempDir();
+  const agentsDir = path.join(home, 'fakehome', 'Library', 'LaunchAgents');
+  fs.mkdirSync(agentsDir, { recursive: true });
+  const plist = path.join(agentsDir, 'dev.webmods.safari-bridge.plist');
+  fs.writeFileSync(plist, '<plist/>');
+  fs.chmodSync(plist, 0o000); // as a run's sandbox sees it: there, but not readable
+  try {
+    let r = await runCli(['doctor'], { home });
+    assert.doesNotMatch(r.stderr, /EACCES|EPERM|TypeError/);
+    assert.match(r.stdout, /Safari: the bridge's login item .* runs nothing/);
+    const box = path.join(home, 'boxes', 'r1');
+    fs.mkdirSync(box, { recursive: true });
+    r = await runCli(['doctor'], { home, env: { WEBMODS_RUN_BOX: box, WEBMODS_RUN_TOKEN: 'x' } });
+    assert.doesNotMatch(r.stderr, /EACCES|EPERM|TypeError/);
+    assert.match(r.stdout, /inside a side-panel agent run: the browsers' setup files aren't checked/);
+    assert.doesNotMatch(r.stdout, /Safari:|native host manifest|Claude Code|Codex/);
+  } finally {
+    fs.chmodSync(plist, 0o600);
+  }
+});

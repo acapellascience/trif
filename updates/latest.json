@@ -1,0 +1,10 @@
+{
+  "version": "0.1.1",
+  "published": "2026-11-01",
+  "notes": "- **Updates.** The WebMods panel tells you when a new version is out, and installs it with one click.\n  You can let it install updates by itself (Settings, off unless you turn it on). In Firefox the add-on\n  now updates itself, like any other add-on.\n- **Report a problem** (in Settings) opens a report form at webmods.dev with your setup and recent errors\n  filled in, without your name, email or full page addresses. Nothing is sent until you press Send.\n- **Codex works**, as well as Claude Code. Pick it in Settings. A Codex chat can only change mods for the\n  site it's about: your Mac enforces that, not just the instructions.\n- The model picker shows the models your agent offers: for Codex, the ones your account can use.\n- Chrome setup is easier: setup opens the extension's folder in Finder, ready to drag onto\n  chrome://extensions, and Chrome no longer needs a restart.\n- Plain X starts with every filter off, for the plainest timeline. Its logo follows X's light or dark\n  theme, and menus on the search page no longer hide behind it.\n- New commands for agents and terminals: `webmods update` and `webmods report`.",
+  "package": {
+    "url": "https://github.com/acapellascience/WebMods/releases/download/v0.1.1/webmods-0.1.1.tgz",
+    "sha256": "588ba3c05ea105793671ca88e81c12f3868b5a8b440cc1f31c9ec9a33265caba",
+    "size": 220130
+  }
+}

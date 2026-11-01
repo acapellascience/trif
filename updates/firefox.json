@@ -1,0 +1,13 @@
+{
+  "addons": {
+    "webmods@webmods.ext": {
+      "updates": [
+        {
+          "version": "0.1.1",
+          "update_link": "https://github.com/acapellascience/WebMods/releases/download/v0.1.1/webmods-firefox-0.1.1.xpi",
+          "update_hash": "sha256:f905baf034db8b71d6748ea59392c4509fe1e3221bf87795e437fd39bab17efc"
+        }
+      ]
+    }
+  }
+}

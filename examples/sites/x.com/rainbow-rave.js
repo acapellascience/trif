@@ -4,6 +4,8 @@
 // @match       https://x.com/*
 // @run-at      document-start
 // @risk        1 patches attachShadow (to style chat and calls), which the page's scripts could notice
+// @source      webmods
+// @version     1
 // ==/WebMod==
 
 (() => {

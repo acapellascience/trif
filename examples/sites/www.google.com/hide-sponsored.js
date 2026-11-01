@@ -4,6 +4,8 @@
 // @match       https://www.google.com/search*
 // @run-at      document-start
 // @risk        1 hides ads, so Google's ad impression reports for them never fire
+// @source      webmods
+// @version     1
 // ==/WebMod==
 
 (() => {

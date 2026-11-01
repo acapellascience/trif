@@ -23,3 +23,9 @@ delete `~/.webmods/sites/<site>/<mod>.js`.
 Each example is a single plain JavaScript file with a `// ==WebMod==` header; read it to see how it
 works, or ask your coding agent to change it. Plain X's tests live in `tests/plain-x.test.js`
 (`node --test tests/`).
+
+Their headers say `// @source webmods` and `// @version <n>`: that marks them as shipped by WebMods.
+When a new WebMods version brings a changed example, setup replaces your copy if you never changed it,
+and otherwise leaves it alone and offers the new version in the side panel (use it, keep yours, or have
+your agent merge the two). Changing an example here: raise its `@version`, commit, then run
+`node scripts/shipped-history.js` (releases do this too) so setup can recognise every version it shipped.

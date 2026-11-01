@@ -4,6 +4,8 @@
 // @match       https://www.instagram.com/*
 // @run-at      document-start
 // @risk        1 drops feed ads, so their impressions never report; patches JSON.parse
+// @source      webmods
+// @version     1
 // ==/WebMod==
 
 (() => {

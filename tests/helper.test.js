@@ -7,7 +7,7 @@ const fs = require('fs');
 const net = require('net');
 const path = require('path');
 const { spawn } = require('child_process');
-const { FakeExtension, runCli, writeMod, tempDir, waitFor, sleep } = require('./fake-extension');
+const { FakeExtension, runCli, writeMod, tempDir, waitFor, sleep, REPO } = require('./fake-extension');
 const { parseHeader, buildMod, scanMods, planModsMessage, defaultMatches } = require('../helper/lib/mods');
 const { encode, Decoder } = require('../helper/lib/framing');
 
@@ -57,7 +57,24 @@ console.log(1);`);
   assert.deepEqual(h.matches, ['https://x.com/*', 'https://twitter.com/*']);
   assert.deepEqual(h.excludes, ['https://x.com/settings/*']);
   assert.equal(h.runAt, 'document_end');
+  assert.equal(h.version, '3');
+  assert.equal(h.source, null);
   assert.deepEqual(h.warnings, []);
+});
+
+test('parseHeader: @source and @version mark the mods WebMods ships', () => {
+  const h = parseHeader('// ==WebMod==\n// @name Plain X\n// @source      WebMods\n// @version     3\n// ==/WebMod==\n');
+  assert.equal(h.source, 'webmods');
+  assert.equal(h.version, '3');
+  const { mod } = buildMod({ site: 'x.com', file: '/s/x.com/plain-x.js', code: '// ==WebMod==\n// @source webmods\n// @version 2\n// ==/WebMod==\n' });
+  assert.deepEqual([mod.source, mod.version], ['webmods', '2']);
+  // Every shipped example says so (the updater only manages those).
+  const { PREINSTALLED } = require('../helper/lib/preinstalled');
+  for (const { id } of PREINSTALLED) {
+    const ex = parseHeader(fs.readFileSync(path.join(REPO, 'examples', 'sites', `${id}.js`), 'utf8'));
+    assert.equal(ex.source, 'webmods', id);
+    assert.match(String(ex.version), /^\d+$/, id);
+  }
 });
 
 test('parseHeader: run-at mapping and bad values', () => {
@@ -92,8 +109,9 @@ test('buildMod: defaults from folder and file name', () => {
   assert.equal(mod.runAt, 'document_start');
   assert.equal(mod.code, 'document.title = "x";');
   assert.match(mod.hash, /^[0-9a-f]{40}$/);
-  assert.deepEqual(Object.keys(mod).sort(), ['code', 'description', 'excludes', 'file', 'hash', 'id', 'matches', 'name', 'risk', 'runAt', 'site']);
+  assert.deepEqual(Object.keys(mod).sort(), ['code', 'description', 'excludes', 'file', 'hash', 'id', 'matches', 'name', 'risk', 'runAt', 'site', 'source', 'version']);
   assert.strictEqual(mod.risk, null);
+  assert.deepEqual([mod.source, mod.version], [null, null]);
 });
 
 test('buildMod: hash changes with code and with metadata', () => {

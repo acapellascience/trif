@@ -7,6 +7,8 @@
 // @match       https://www.google.com/search*
 // @run-at      document-start
 // @risk        0 render-only
+// @source      webmods
+// @version     1
 // ==/WebMod==
 
 (() => {

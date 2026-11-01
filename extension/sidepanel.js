@@ -302,6 +302,10 @@ function render() {
   ui.dot.title = dotLabel;
   ui.dot.setAttribute('aria-label', dotLabel);
 
+  // Before the mods: a mod's "Merge with my agent" starts a run too.
+  const canSend = !!site && helperOk && (agentInfo ? agentInfo.available : (view.agents ? anyAgent : true));
+  ui.composer.dataset.canSend = canSend ? '1' : '';
+
   renderGate();
   renderNotice({ helperOk, agentInfo, anyAgent });
   renderUpdate();
@@ -312,14 +316,12 @@ function render() {
   ui.working.hidden = !running;
 
   ui.newChat.disabled = !site || (chat.messages.length === 0 && !running);
-  const canSend = !!site && helperOk && (agentInfo ? agentInfo.available : (view.agents ? anyAgent : true));
   ui.input.disabled = !site;
   ui.input.placeholder = site ? `What would you like to change on ${site}?` : 'Open a website to customize it';
   ui.send.hidden = running;
   ui.stop.hidden = !running;
   ui.stop.disabled = !chat.run?.runId;
   ui.send.disabled = !canSend;
-  ui.composer.dataset.canSend = canSend ? '1' : '';
 }
 
 function renderNotice({ helperOk, agentInfo, anyAgent }) {
@@ -593,7 +595,8 @@ function renderMods() {
   ui.modsCount.textContent = `(${mods.length})`;
   // Rebuilt only when the set of mods changes; everything else updates in place, so a focused switch
   // keeps focus through status refreshes.
-  const key = JSON.stringify([site, mods.map((m) => [m.id, m.name, m.file, !!m.held, m.risk?.tier ?? null, m.risk?.why ?? null, m.matches])]);
+  const key = JSON.stringify([site, mods.map((m) => [m.id, m.name, m.file, !!m.held, m.risk?.tier ?? null, m.risk?.why ?? null, m.matches,
+    m.source ?? null, m.version ?? null, m.update ?? null])]);
   if (key !== view.modsKey) {
     view.modsKey = key;
     ui.modList.replaceChildren(...mods.map(modItem));
@@ -693,7 +696,10 @@ function modItem(m) {
     name.append(' ', badge);
   }
   const main = el('div', 'mod-main');
-  main.append(light, name, el('div', 'mod-file', (m.file || m.id).split('/').pop()));
+  // The mods WebMods ships say so (their header's @source and @version).
+  const file = el('div', 'mod-file', (m.file || m.id).split('/').pop());
+  if (m.source === 'webmods') file.append(' ', el('span', 'mod-source', `from WebMods${m.version ? `, version ${m.version}` : ''}`));
+  main.append(light, name, file);
   const row = el('div', 'mod-row');
   if (m.held) {
     // Written by an agent run here but reaching other sites: not running until the user allows it.
@@ -721,7 +727,42 @@ function modItem(m) {
   const err = el('div', 'mod-err');
   err.hidden = true;
   li.append(row, err);
+  if (m.update && !m.held) li.append(updateNotice(m, err));
   return li;
+}
+
+// A newer version of a mod WebMods ships, which didn't replace this copy because the user changed it
+// (helper/lib/preinstalled.js): use it (theirs goes to the trash, with an Undo in the chat), keep theirs
+// (this version isn't offered again), or have their agent merge the two in a chat run here.
+function updateNotice(m, err) {
+  const box = el('div', 'mod-update');
+  const v = m.update.version ? ` (version ${m.update.version})` : '';
+  box.append(el('p', null, m.update.modified
+    ? `WebMods has a new version of this mod${v}. You've changed yours, so it wasn't replaced.`
+    : `WebMods has a new version of this mod${v}.`));
+  const fail = (b, e) => { b.disabled = false; err.textContent = String(e?.message ?? e); err.hidden = false; };
+  const choose = (choice) => async (e) => {
+    const b = e.currentTarget;
+    b.disabled = true;
+    try { await request({ type: 'mod.update', id: m.id, choice, site: view.site, tab: view.tab?.id }); } catch (x) { fail(b, x); }
+  };
+  const useNew = button('Use the new version', '', choose('new'));
+  useNew.title = m.update.modified ? 'Your copy goes to the trash (Undo in the chat brings it back).' : '';
+  const keep = button('Keep mine', '', choose('mine'));
+  keep.title = 'This version won\'t be offered again; a later one will.';
+  const row = actions(useNew, keep);
+  if (m.update.modified) {
+    const merge = button('Merge with my agent', 'merge', async () => {
+      merge.disabled = true;
+      try {
+        await startRun(`Merge the new version of ${m.name}${v} from WebMods into my copy, keeping my changes.`, { merge: m.id });
+      } catch (x) { fail(merge, x); }
+    });
+    merge.title = 'Your agent combines the new version with your changes, in this chat.';
+    row.append(merge);
+  }
+  box.append(row);
+  return box;
 }
 
 // Deleting moves the mod to the helper's trash (`webmods restore`), so it's one click, with an Undo on
@@ -757,6 +798,9 @@ function updateLight(li, m, on) {
 
 function updateModItem(li, m) {
   if (!m) return;
+  // One chat run at a time per site: merging waits for the one going.
+  const merge = li.querySelector('.mod-update .merge');
+  if (merge) merge.disabled = !!view.chat.run || !ui.composer.dataset.canSend;
   if (m.held) {
     updateLight(li, m, false);
     const tag = li.querySelector('.tag');
@@ -918,22 +962,30 @@ async function send() {
     ui.input.value = '';
     try { if (await panelCommand(text)) return; } catch (e) { console.warn('[webmods] command failed', e); }
   }
-  const { id: agent } = currentAgent();
-  const chat = view.chat;
-  const sessionId = chat.sessionId && (!chat.agent || !agent || chat.agent === agent) ? chat.sessionId : undefined;
   ui.input.value = '';
   try {
-    const { runId } = await request({
-      type: 'agent.start', site: view.site, tabId: view.tab.id, url: view.tab.url, prompt: text,
-      sessionId, agent: agent || undefined, model: chosenModel(agent) || undefined,
-    });
-    view.myRuns.add(runId);
+    await startRun(text);
   } catch (e) {
     // The background records start failures in the chat; anything earlier goes back in the box.
     const inChat = view.chat.messages.some((m) => m.role === 'user' && m.text === text);
     if (!inChat && !ui.input.value) ui.input.value = text;
     console.warn('[webmods] agent.start failed', e);
   }
+}
+
+/** Starts an agent run in this chat with `text` as the user's message; `extra` goes along (e.g. merge). */
+async function startRun(text, extra = {}) {
+  if (view.chat.run) throw new Error(`already working on ${view.site}`);
+  if (!ui.composer.dataset.canSend) throw new Error('No coding agent is available here yet');
+  const { id: agent } = currentAgent();
+  const chat = view.chat;
+  const sessionId = chat.sessionId && (!chat.agent || !agent || chat.agent === agent) ? chat.sessionId : undefined;
+  const { runId } = await request({
+    type: 'agent.start', site: view.site, tabId: view.tab.id, url: view.tab.url, prompt: text,
+    sessionId, agent: agent || undefined, model: chosenModel(agent) || undefined, ...extra,
+  });
+  view.myRuns.add(runId);
+  return runId;
 }
 
 async function stop() {

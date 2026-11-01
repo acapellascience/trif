@@ -728,6 +728,7 @@ async function uiStatus() {
       error: errors.get(m.id) === USER_SCRIPTS_OFF ? null : errors.get(m.id) || null,
       held: m.held || null, risk: m.risk || null,
       from: fromOtherBrowser(m, state.installId) ? (m.origin.browser || 'another browser') : null,
+      source: m.source || null, version: m.version || null, update: m.update || null,
     })),
     runs: [...state.runs.values()].map((r) => ({ runId: r.runId, site: r.site })),
   };
@@ -823,6 +824,26 @@ async function onPanelMessage(msg) {
       if (mod && msg.tab !== undefined) await reloadIfApplies(mod, { tab: msg.tab }, { onlyIfRunning: true });
       return r;
     }
+    // A new version of a shipped mod the user changed: "Use the new version" (theirs goes to the trash, with
+    // an Undo on the chat line, as for a delete) or "Keep mine". "Merge with my agent" is an agent.start.
+    case 'mod.update': {
+      const choice = msg.choice === 'new' ? 'new' : 'mine';
+      const r = await helperRequest('mod.update', { id: String(msg.id ?? ''), choice }, 10000);
+      if (choice === 'new' && msg.site) {
+        await updateChat(normalizeSite(msg.site), (chat) => {
+          chat.messages.push({
+            role: 'mod', time: Date.now(), ...(r.trashed ? { undo: r.id } : {}),
+            text: `${modFileName(r.id)} is now ${r.version ? `version ${r.version}` : 'the new version'} from WebMods${r.trashed ? '; yours is in the trash.' : '.'}`,
+          });
+        });
+      }
+      if (choice === 'new' && msg.tab !== undefined) {
+        await serial(() => {});
+        const mod = state.mods.find((m) => m.id === r.id);
+        if (mod) await reloadIfApplies(mod, { tab: msg.tab }, { onlyIfRunning: true });
+      }
+      return r;
+    }
     case 'update.check': return helperRequest('update.check', { force: true }, 60000);
     case 'update.install': return helperRequest('update.install', {}, 180000);
     case 'update.setAuto': return helperRequest('update.setAuto', { on: !!msg.on }, 10000);
@@ -854,6 +875,7 @@ async function startAgent(msg) {
   const args = { site, url: String(msg.url ?? ''), tabId, prompt, agent };
   if (msg.sessionId) args.sessionId = String(msg.sessionId);
   if (msg.model) args.model = String(msg.model);
+  if (msg.merge) args.merge = String(msg.merge); // merge the new version of this shipped mod (the helper adds how)
   let runId;
   state.starting++;
   try {

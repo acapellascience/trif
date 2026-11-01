@@ -208,6 +208,12 @@ body.site-off :is(.bar, .settings, .notice, .mods, .chat, .composer) { display: 
 .mod-list li.off .mod-name { color: var(--muted); }
 .mod-file { color: var(--muted); font: 11px/1.4 var(--mono); overflow-wrap: anywhere; }
 .mod-err { color: var(--bad); font-size: 12px; }
+.mod-source { font: 11px/1.4 system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; color: var(--faint); }
+.mod-source::before { content: "· "; }
+/* A new version of a shipped mod the user changed, with what they can do about it. */
+.mod-update { margin: 6px 0 2px 14px; padding: 6px 8px; border: 1px solid var(--line); border-radius: 7px; font-size: 12px; }
+.mod-update p { margin: 0; }
+.mod-update .actions { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; }
 .mod-list li.held .mod-name { color: var(--muted); }
 .allow { flex: none; }
 .mod-delete { width: 24px; height: 24px; color: var(--faint); }

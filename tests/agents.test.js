@@ -820,6 +820,89 @@ test('setup records PATH (merging config.json) and writes .claude/settings.json;
   assert.match(r.stdout, /fix: run webmods setup in this terminal/);
 });
 
+// ------------------------------------------------------------------ merging a new version of a shipped mod
+
+// A workspace where WebMods shipped example.com/plain version 1, the user changed it, and version 2 waits.
+function homeWithPendingUpdate() {
+  const { home, bin } = makeHome();
+  const sha1 = (s) => require('crypto').createHash('sha1').update(s).digest('hex');
+  const v = (n, body) => `// ==WebMod==\n// @source webmods\n// @version ${n}\n// ==/WebMod==\n// ${body}\n`;
+  writeMod(home, 'example.com', 'plain.js', v(1, 'mine'));
+  fs.mkdirSync(path.join(home, '.shipped', 'example.com'), { recursive: true });
+  fs.writeFileSync(path.join(home, '.shipped', 'example.com', 'plain.js'), v(1, 'one'));
+  fs.writeFileSync(path.join(home, '.shipped', 'example.com', 'plain.new.js'), v(2, 'two'));
+  fs.writeFileSync(path.join(home, 'preinstalled.json'), JSON.stringify({
+    offered: ['example.com/plain'], startOff: [], sitesOn: [],
+    shipped: { 'example.com/plain': { hash: sha1(v(1, 'one')), version: '1', pending: { hash: sha1(v(2, 'two')), version: '2' } } },
+  }));
+  return { home, bin, newHash: sha1(v(2, 'two')) };
+}
+
+test('merge run: the agent gets the three files; a run that finishes well settles the update', async () => {
+  const { home, bin, newHash } = homeWithPendingUpdate();
+  const ext = startHost(home);
+  const first = await ext.nextMods((ms) => ms.length === 1);
+  assert.deepEqual(first[0].update, { version: '2', from: '1', modified: true });
+
+  // A failed run leaves it waiting.
+  let r = await extRequest(ext, 'agent.start', { ...START, prompt: 'CRASH while merging', merge: 'example.com/plain' });
+  assert.equal(r.ok, true, r.error);
+  assert.equal((await waitDone(ext, r.result.runId)).ok, false);
+  assert.ok(JSON.parse(fs.readFileSync(path.join(home, 'preinstalled.json'), 'utf8')).shipped['example.com/plain'].pending);
+
+  // Only from the mod's own site.
+  r = await extRequest(ext, 'agent.start', { site: 'other.org', url: 'https://other.org/', tabId: 3, prompt: 'merge', merge: 'example.com/plain' });
+  assert.equal(r.ok, false);
+  assert.match(r.error, /isn't a mod for other\.org/);
+
+  const since = ext.messages.length;
+  r = await extRequest(ext, 'agent.start', { ...START, prompt: 'Merge the new version, keeping my changes.', merge: 'example.com/plain' });
+  assert.equal(r.ok, true, r.error);
+  const done = await waitDone(ext, r.result.runId);
+  assert.equal(done.ok, true);
+  const call = callFor(bin, 'keeping my changes');
+  assert.match(call.prompt, /^Merge the new version, keeping my changes\.\n\n/);
+  assert.match(call.prompt, /edit this file, and only this one\): sites\/example\.com\/plain\.js/);
+  assert.match(call.prompt, /\(read only\): \.shipped\/example\.com\/plain\.new\.js/);
+  assert.match(call.prompt, /\(version 1\), which the user's copy started from \(read only\): \.shipped\/example\.com\/plain\.js/);
+  const rec = JSON.parse(fs.readFileSync(path.join(home, 'preinstalled.json'), 'utf8')).shipped['example.com/plain'];
+  assert.deepEqual(rec, { hash: newHash, version: '2' });
+  assert.ok(!fs.existsSync(path.join(home, '.shipped', 'example.com', 'plain.new.js')));
+  // The mods went out again without the update, before the run's done.
+  const doneIdx = ext.messages.findIndex((m) => m.type === 'agentEvent' && m.event.kind === 'done' && m.runId === r.result.runId);
+  const modsIdx = ext.messages.findIndex((m, i) => i >= since && m.type === 'mods' && !m.mods[0].update);
+  assert.ok(modsIdx !== -1 && modsIdx < doneIdx);
+  // Nothing left to merge.
+  r = await extRequest(ext, 'agent.start', { ...START, prompt: 'again', merge: 'example.com/plain' });
+  assert.match(r.error, /no new WebMods version/);
+});
+
+test('merge run: choosing what happens to the update is the user\'s, not the run\'s', async () => {
+  const { home, bin } = homeWithPendingUpdate();
+  const ext = startHost(home);
+  await ext.waitForSocket();
+  await extRequest(ext, 'agent.start', { ...START, prompt: 'SLEEP' });
+  const call = await waitFor(() => callFor(bin, 'SLEEP'), { message: 'the agent to start' });
+  const token = call.env.WEBMODS_RUN_TOKEN;
+  for (const [choice, cmd] of [['new', 'mod.update'], ['mine', 'mod.update']]) {
+    const res = await sockRequest(ext.sock, { id: choice, cmd, args: { id: 'example.com/plain', choice }, token });
+    assert.equal(res.ok, false);
+    assert.match(res.error, /only the user can choose what happens with a new version/);
+  }
+  const res = await sockRequest(ext.sock, { id: 'm', cmd: 'agent.start', args: { ...START, prompt: 'x', merge: 'example.com/plain' }, token });
+  assert.equal(res.ok, false);
+  assert.ok(JSON.parse(fs.readFileSync(path.join(home, 'preinstalled.json'), 'utf8')).shipped['example.com/plain'].pending, 'still waiting');
+  // The user can, from the extension.
+  const r = await extRequest(ext, 'mod.update', { id: 'example.com/plain', choice: 'new' });
+  assert.deepEqual(r.result, { id: 'example.com/plain', choice: 'new', version: '2', trashed: true });
+  assert.match(fs.readFileSync(path.join(home, 'sites', 'example.com', 'plain.js'), 'utf8'), /\/\/ two/);
+  // And Undo (mod.restore) brings theirs back, with the update offered again.
+  const u = await extRequest(ext, 'mod.restore', { id: 'example.com/plain' });
+  assert.equal(u.ok, true, u.error);
+  assert.match(fs.readFileSync(path.join(home, 'sites', 'example.com', 'plain.js'), 'utf8'), /\/\/ mine/);
+  await waitFor(() => (ext.lastMods() || []).some((m) => m.update && m.update.version === '2'), { message: 'the update offered again' });
+});
+
 // ------------------------------------------------------------------ run scope and held mods
 
 test('run scope: the run token limits webmods requests to the run\'s site; agent commands refused; ends with the run', async () => {

@@ -40,7 +40,7 @@ function tooOld(version) {
  * The run's own rules (--settings): the sandbox for its shell commands, and per-run permission rules
  * (other sites' folders and screenshots). `limits` is runs.js runLimits.
  */
-function runSettings({ workspace = '', readOnly = [], denied = [], box, screenshots, otherScreenshots = [] } = {}) {
+function runSettings({ workspace = '', readOnly = [], denied = [], home, readable = [], privateFiles = [], box, screenshots, otherScreenshots = [] } = {}) {
   const rel = (p) => `./${path.relative(workspace, p).split(path.sep).join('/')}`;
   const inWorkspace = (p) => !!workspace && p.startsWith(workspace + path.sep);
   return {
@@ -50,8 +50,11 @@ function runSettings({ workspace = '', readOnly = [], denied = [], box, screensh
       allowUnsandboxedCommands: false, // no retrying a command outside it
       autoAllowBashIfSandboxed: false, // only the commands allowed above, sandbox or not
       filesystem: {
-        denyRead: denied,
-        allowRead: [box, screenshots].filter(Boolean), // inside denied runs/ and screenshots/: the run's own
+        // The whole home folder, then what the run may read inside it (the narrower path wins), rather
+        // than each item in it: Claude Code looks inside every folder on these lists, and listing
+        // Desktop, Documents and the like made macOS ask the user to allow that.
+        denyRead: home ? [home, ...privateFiles] : denied,
+        allowRead: [...(home ? readable : []), box, screenshots].filter(Boolean),
         allowWrite: [box, screenshots].filter(Boolean), // (writing there needs saying too)
         denyWrite: [...(workspace ? STATE_FILES.map((f) => path.join(workspace, f)) : []), ...readOnly],
       },

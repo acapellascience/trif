@@ -173,7 +173,8 @@ const START = { site: 'example.com', url: 'https://example.com/page', tabId: 12 
 // ------------------------------------------------------------------ adapters (pure)
 
 test('claude adapter: command flags, resume and model', () => {
-  const limits = { workspace: '/h', readOnly: ['/h/sites/y.com'], denied: ['/Users/u/.ssh', '/h/config.json', '/h/runs'],
+  const limits = { workspace: '/h', readOnly: ['/h/sites/y.com'], denied: ['/Users/u/.ssh', '/Users/u/Desktop', '/h/config.json', '/h/runs'],
+    home: '/Users/u', readable: ['/h', '/app'], privateFiles: ['/h/config.json', '/h/runs'],
     box: '/c/boxes/r1', screenshots: '/h/screenshots/x.com', otherScreenshots: ['/h/screenshots/y.com'] };
   const c = claude.command({ bin: '/x/claude', prompt: 'hi', context: 'CTX', ...limits });
   assert.equal(c.file, '/x/claude');
@@ -187,8 +188,11 @@ test('claude adapter: command flags, resume and model', () => {
   const sb = settings.sandbox;
   assert.deepEqual([sb.enabled, sb.failIfUnavailable, sb.allowUnsandboxedCommands, sb.autoAllowBashIfSandboxed], [true, true, false, false]);
   assert.deepEqual(sb.network, { allowedDomains: [], strictAllowlist: true });
-  assert.deepEqual(sb.filesystem.denyRead, limits.denied);
-  assert.deepEqual(sb.filesystem.allowRead, ['/c/boxes/r1', '/h/screenshots/x.com']);
+  // The whole home folder, reopened where the run may read: not each item in it (Claude Code looks inside
+  // each listed folder, and macOS asked the user about Desktop, Documents and the like).
+  assert.deepEqual(sb.filesystem.denyRead, ['/Users/u', '/h/config.json', '/h/runs']);
+  assert.deepEqual(sb.filesystem.allowRead, ['/h', '/app', '/c/boxes/r1', '/h/screenshots/x.com']);
+  assert.ok(!JSON.stringify(settings).includes('Desktop'));
   assert.deepEqual(sb.filesystem.allowWrite, ['/c/boxes/r1', '/h/screenshots/x.com']);
   for (const p of ['/h/held.json', '/h/preinstalled.json', '/h/runs', '/h/sites/y.com']) assert.ok(sb.filesystem.denyWrite.includes(p), p);
   assert.deepEqual(settings.permissions.deny, ['Edit(./sites/y.com/**)', 'Read(./screenshots/y.com/**)']);

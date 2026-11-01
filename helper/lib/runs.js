@@ -109,12 +109,13 @@ function runLimits(ws, { scope, box, screenshots }) {
   const onTheWay = (p) => readable.some((r) => r === p || r.startsWith(p + path.sep));
   let inHome = [];
   try { inHome = fs.readdirSync(home).map((n) => path.join(home, n)).filter((p) => !onTheWay(p)); } catch { /* unreadable: nothing to list */ }
-  const denied = [...inHome, ...PRIVATE_FILES.map((f) => real(path.join(ws.home, f)))];
+  const privateFiles = PRIVATE_FILES.map((f) => real(path.join(ws.home, f)));
+  const denied = [...inHome, ...privateFiles];
   // Other sites' screenshot folders, for agents whose file tools take per-folder rules (Claude Code).
   let shots = [];
   try { shots = fs.readdirSync(ws.screenshots, { withFileTypes: true }).filter((d) => d.isDirectory()).map((d) => real(path.join(ws.screenshots, d.name))); } catch { /* none */ }
   const otherScreenshots = shots.filter((p) => p !== real(screenshots));
-  return { readable, writable, readOnly, denied, workspace: real(ws.home), box: real(box), screenshots: real(screenshots), otherScreenshots };
+  return { readable, writable, readOnly, denied, home, privateFiles, workspace: real(ws.home), box: real(box), screenshots: real(screenshots), otherScreenshots };
 }
 
 function normalizeSite(site, url) {

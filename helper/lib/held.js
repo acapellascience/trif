@@ -7,7 +7,7 @@
 
 const fs = require('fs');
 const path = require('path');
-const { snapshot, diffSnapshots } = require('./runs');
+const { modSnapshot, diffSnapshots } = require('./runs');
 const { outOfScope } = require('./scope');
 
 // Why a mod a run changed must wait for the user: it reaches other sites, or its header says it changes
@@ -38,7 +38,7 @@ function saveHeld(home, held) {
 
 /**
  * Update the held set for the current mods. `scopes` are the runs to check ({runId, site, scope,
- * before}: `before` is the runs.js snapshot taken when the run started). Mods those runs changed that
+ * before}: `before` is the runs.js modSnapshot taken when the run started). Mods those runs changed that
  * reach outside their scope get held; entries whose mod changed or vanished are dropped.
  * Returns the mods held now (mod id -> entry, approved ones left out).
  */
@@ -47,7 +47,7 @@ function updateHeld(ws, mods, scopes) {
   let changed = false;
   const live = scopes.filter((s) => s.before);
   if (live.length) {
-    const now = snapshot(ws.modsDir, ws.home);
+    const now = modSnapshot(ws.modsDir, ws.home);
     for (const s of live) {
       const touched = new Set(diffSnapshots(s.before, now));
       for (const m of mods) {

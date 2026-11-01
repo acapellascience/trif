@@ -326,8 +326,10 @@ Which socket the CLI uses:
 - `--browser <name|pid>`: the host whose extension said hello with that browser name (`Chrome`,
   `Firefox`, case-insensitive) or that pid (`lib/helpers.js` pings each `helper-*.sock`). Two hosts for
   the same browser (two Chrome profiles) need the pid. Refused inside an agent run.
-- Inside an agent run: `$WEBMODS_SOCK`, which the host that started the run sets to its own socket, so
-  a run started from Firefox's sidebar works on Firefox's tabs even while Chrome's host owns `helper.sock`.
+- Inside a side-panel agent run: no socket. The CLI writes to the run's mailbox (`$WEBMODS_RUN_BOX`, see
+  "Run scope"), which the host that started the run serves, so a run started from Firefox's sidebar works
+  on Firefox's tabs even while Chrome's host owns `helper.sock`.
+- `$WEBMODS_SOCK`, when set: that socket.
 - Otherwise `helper.sock`.
 `webmods status` and `webmods doctor` list the other connected browsers.
 
@@ -575,19 +577,33 @@ to one site, its **scope**: the registrable domain of the run's site (`en.wikipe
 `wikipedia.org`; `bbc.co.uk`, `user.github.io` and a few other suffixes are handled; no full Public
 Suffix List). `helper/lib/scope.js` computes it; `extension/lib.js` mirrors the checks.
 
+- **Mailbox.** A run reaches the helper only through its mailbox: a folder made for it alone,
+  `~/Library/Caches/WebMods/boxes/<runId>/` (`~/.cache/webmods/boxes/` on Linux; `runs.js` boxRoot),
+  given to the agent as `WEBMODS_RUN_BOX`. Its sandbox (below) has no network and no sockets, so this is
+  the only way. The CLI writes a request (one JSON line, as on the socket) to `<id>.tmp` and renames it to
+  `<id>.req`; the helper watches the folder, takes the file (opened without following symlinks, regular
+  files of at most 8 MB), and writes the answer as `<id>.res` (created fresh, then renamed into place).
+  Whatever a request in the mailbox says, the helper handles it as the run's: it puts the run's token in.
+  The mailbox is removed when the run ends; a helper starting a run removes mailboxes older than twice
+  the run time limit (left by helpers that died).
 - **Token.** `agent.start` makes a random token per run and gives the agent `WEBMODS_RUN_TOKEN`; the
   CLI sends it with every request. The helper answers a request with an unknown token (the run ended)
   with an error, refuses `agent.*`, `mod.approve` and `instructions.*` from a run, and sets `args.scope` on everything
-  else it forwards (overriding any `scope` the client sent). Requests without a token (the user's
-  terminal, the user's own agent outside the panel) are not scoped. The helper answers `mod.delete` and `mod.restore` from a run
-  itself, only for mods whose every `@match` is in scope. The CLI itself refuses `setup`,
-  `agent` and `approve` when the variable is set.
+  else it forwards (overriding any `scope` the client sent; `args` must be a plain object). Requests on
+  the socket without a token (the user's terminal, the user's own agent outside the panel) are not
+  scoped: runs can't reach the socket. The helper answers `mod.delete` and `mod.restore` from a run
+  itself, only for mods whose every `@match` is in scope. The CLI itself refuses `setup`, `agent` and
+  `approve` when the variable is set, and inside a run its own file options stay in the run's folders:
+  `-f` and `check` read only the mods folder, `-o` writes only there or the run's screenshots folder
+  (`$WEBMODS_RUN_SCREENSHOTS`, `screenshots/<scope>/`, also where screenshots go by default).
 - **Extension.** With `args.scope`, page commands only act on tabs whose URL is http(s) on the scope or
   a subdomain (`tabs` lists only those; others fail with an error naming the scope); `open`/`navigate`
   only go to such URLs; `record` only for such sites; `mod.enable` only for mods whose every `@match` is
   in scope.
-- **Held mods.** The helper snapshots the mods folder when a run starts. On every mods sync while a run
-  is live (and for 10 s after it ends), a mod that the run added or changed and that has an `@match`
+- **Held mods.** The helper snapshots the mod files when a run starts (the same files the scanner loads:
+  `mods.js` listModFiles, symlinks followed, no cap). On every mods sync while a run is live (and for 10 s
+  after it ends; a finished run's leftover processes get SIGTERM, then SIGKILL after 3 s, so nothing
+  writes later), a mod that the run added or changed and that has an `@match`
   outside the scope (`<all_urls>`, a `*` host, another domain, `file://`), or whose `@risk` is 2, is **held**: recorded in
   `~/.webmods/held.json` (`{id: {hash, site, scope, runId, reason, at, approved?}}`) and sent to the
   extension with `held: {site, reason}`, which the extension doesn't register. The run's `done` event
@@ -595,18 +611,33 @@ Suffix List). `helper/lib/scope.js` computes it; `extension/lib.js` mirrors the 
   apply to the tab) with an Allow button (`mod.approve`). Approving marks the entry approved so that
   version isn't held again; any change to the file drops the entry (a later run's change is checked
   afresh). `webmods status`/`mods` show held mods.
-- **Agent permissions.** The scope only holds if the agent can't reach the helper without the token or
-  rewrite the rules: so Claude Code runs get no command that runs arbitrary code (no `node`), can't
-  edit `held.json`, `config.json`, `AGENTS.md`, `CLAUDE.md`, `.claude/`, `bin/` or `app/` (verified
-  with Claude Code 2.1.312), and can't read
-  `config.json` (it may hold API keys). Codex runs can run any command, so the limits are enforced by
-  the operating system instead: a Codex permission profile (`runs.js` writeLimits, `codex.js`
-  permissionsToml) makes the workspace read-only except the mods folder and `screenshots/`, makes
-  every existing mod folder of another site read-only inside it, and denies reading `config.json`; the
-  user's own Codex config and rules files aren't loaded for runs (a `sandbox_mode` there would replace
-  the profile). Verified with Codex 0.166 on macOS: edits, deletes and renames of other sites' mods, and
-  writes to `held.json`/`config.json`, fail with "Operation not permitted". A run can still create a
-  folder for another site; its mods are held like any out-of-scope mod.
+- **Agent sandboxes.** The scope only holds if the agent can't reach the helper some other way or
+  rewrite the rules, so both agents run under limits the operating system enforces (macOS Seatbelt;
+  `runs.js` runLimits computes them, each adapter passes them on):
+  - **Reads:** the workspace, the WebMods code `webmods` runs, and node; nothing else in the home folder
+    (every item in it is denied, rather than the folder itself, which node and `mkdir -p` must be able to
+    look at). In the workspace, not `config.json` (API keys), `safari-token`, `helper.log`, `runs/`
+    (other runs' logs hold the pages they read) or `screenshots/` (other sites'), except the run's own
+    screenshots folder and mailbox.
+  - **Writes:** the mods folder, with every existing folder of another site (`all-sites/` included)
+    read-only inside it; the run's screenshots folder; its mailbox. Not `held.json`, `preinstalled.json`,
+    `origins.json`, `active-runs/`, `trash/`, `instructions.md`, `AGENTS.md`, `CLAUDE.md`, `.claude/`,
+    `bin/`, `app/` or `runs/`. A run can still create a folder for another site; its mods are held like
+    any out-of-scope mod.
+  - **Network:** none, and no unix sockets: not the helper's, not the Safari bridge's.
+
+  Codex runs any command, all inside its permission profile (`codex.js` permissionsToml: `network =
+  { enabled = false }`; the user's own Codex config and rules files aren't loaded, since a
+  `sandbox_mode` there would replace the profile). Claude Code runs only `webmods`, `cd` and `ls`, in its
+  sandbox (`claude.js` runSettings, passed with `--settings`: `enabled`, `failIfUnavailable`,
+  `allowUnsandboxedCommands: false`, the filesystem lists, `network: {allowedDomains: [],
+  strictAllowlist: true}`); its own file tools follow permission rules: edits only under `sites/` minus
+  other sites' existing folders, no reads of the secrets, logs or other sites' screenshots. Claude Code
+  applies a `Read`/`Edit` deny rule to its sandbox too, where nothing can reopen it, so those rules don't
+  cover `runs/` (the sandbox does). Verified on macOS with Codex 0.166 (`codex sandbox`) and Claude Code
+  2.1.312 (a real `-p` run): each read and write above, another run's mailbox, the internet and the
+  helper's socket are refused ("Operation not permitted"); the run's own mods, screenshots and
+  mailbox, and `webmods`, work.
 
 ### Models (`agent.models`)
 
@@ -630,18 +661,17 @@ parseLine(line) → {kind:"login", url} | {kind:"text", text} | null}` or `null`
 The user's standing instructions (`instructions.md`) reach claude through the workspace's CLAUDE.md
 (`@instructions.md`; adapter flag `readsInstructions`); other adapters get them appended to the context.
 
-- **claude** (Claude Code ≥ 2.1, tested): `claude -p <prompt> --output-format stream-json --verbose
-  --permission-mode acceptEdits --setting-sources project --strict-mcp-config --append-system-prompt <context>`
-  plus `--resume <sessionId>` and `--model <model>` when given. `acceptEdits` lets it edit and write files
-  inside the workspace (and denies writes outside it); with `dontAsk`, `Edit`/`Write` allow rules didn't
-  allow writes at all (2.1.149). Everything else is passed as `--allowedTools Read(./**) Glob Grep
+- **claude** (Claude Code 2.1.285+, tested with 2.1.312; older versions show as unavailable): `claude -p
+  --output-format stream-json --verbose --permission-mode default --setting-sources project
+  --strict-mcp-config --settings <run settings> --allowedTools Read(./**) Glob Grep "Edit(./sites/**)"
   Bash(webmods:*) Bash(cd:*) Bash(ls:*) --disallowedTools WebFetch WebSearch "Read(./config.json)"
-  "Edit(./config.json)" "Edit(./held.json)" "Edit(./AGENTS.md)" "Edit(./CLAUDE.md)" "Edit(./instructions.md)" "Edit(./.claude/**)"
-  "Edit(./bin/**)" "Edit(./app/**)" "Edit(./runs/**)"`: nothing that runs arbitrary code, and no edits
-  to the files that control WebMods (see "Run scope"; `Edit(./*)` denied every file, sites/ included,
-  in 2.1.312, so the files are listed) (2.1.312 ignored `Bash(...)` allow rules from the workspace's settings file in -p
-  runs); `webmods setup` writes the same lists to the workspace's `.claude/settings.json` for interactive
-  sessions there. Other Bash commands are denied. `--setting-sources project` keeps the user's own broader allow rules out;
+  "Read(./safari-token)" "Read(./helper.log*)" "Read(./runs/*.jsonl)" "Read(./screenshots/*.png)"
+  --append-system-prompt <context> [--resume <sessionId>] [--model <model>] -- <prompt>`, the message
+  last, after `--`. In -p anything that would need approval is denied, so edits happen only under
+  `sites/`; the run settings add its sandbox and the per-run denies (see "Run scope"). (2.1.312 ignored
+  `Bash(...)` allow rules from the workspace's settings file in -p runs; `webmods setup` writes the same
+  lists to the workspace's `.claude/settings.json` for interactive sessions there, and the deny rules
+  there apply to runs too.) Other Bash commands are denied. `--setting-sources project` keeps the user's own broader allow rules out;
   `--strict-mcp-config` keeps their MCP servers out. stream-json lines: `{type:"system", subtype:"init",
   session_id}` → session; `{type:"assistant", message:{content:[{type:"text", text} | {type:"tool_use",
   name, input}]}}` → text / tool (summary: Bash → `input.command`; Edit/Write/Read → `input.file_path`
@@ -650,7 +680,7 @@ The user's standing instructions (`instructions.md`) reach claude through the wo
   (type /login)".
 - **codex** (OpenAI Codex CLI 0.138+; tested with 0.166): `codex exec --json --skip-git-repo-check
   --ignore-user-config --ignore-rules -c approval_policy="never" -c default_permissions="webmods-run"
-  -c permissions={…} [-m MODEL] [resume THREAD_ID] PROMPT`, the exec options before `resume`. JSONL
+  -c permissions={…} [-m MODEL] [resume THREAD_ID] -- PROMPT`, the exec options before `resume`. JSONL
   events: thread.started (the session id), item.* (agent_message, command_execution, file_change…),
   turn.completed / turn.failed. Older versions show as unavailable, with an update hint. No side panel
   login (`codex login` in a terminal). Codex's Homebrew build ships a ripgrep (`rg`) that isn't

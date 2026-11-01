@@ -30,7 +30,7 @@ install or update it.
   instructions.md        the user's own standing instructions, if any (see below)
   sites/<site>/<mod>.js  the mods: <site> is a hostname (x.com, news.ycombinator.com), <mod> is kebab-case
   sites/all-sites/       mods with no single home site (see "Mods for several sites")
-  screenshots/           where `webmods screenshot` writes by default
+  screenshots/           where `webmods screenshot` writes by default (in a side-panel run, screenshots/<site>/)
 ```
 
 Files whose name starts with `_` or `.` are ignored by WebMods: use them for tests, notes and scratch
@@ -212,9 +212,12 @@ logged in to:
   sites (`<all_urls>`, `*://*/*`, another domain) is **held**: it doesn't run until the user clicks
   Allow in the side panel. If the user asked for that (the same change on twitter.com too), write it,
   then tell them it's waiting for their OK and why. Don't try to get around a hold.
-- Edit only files under `sites/` (WebMods' own files are blocked), and only `webmods`, `cd` and `ls` run in the shell: no
-  `node`, so unit tests can't run in the side panel (write them anyway when they help; the user can run
-  them). `webmods check` checks syntax.
+- Edit only files under `sites/`, and not another site's existing folder (WebMods' own files are
+  blocked). Shell commands run in a sandbox with no network and nothing outside the workspace; with
+  Claude Code only `webmods`, `cd` and `ls` run: no `node`, so unit tests can't run in the side panel
+  (write them anyway when they help; the user can run them). `webmods check` checks syntax.
+- `webmods run -f` and `webmods check` read files from `sites/` only, and `-o` writes there or to your
+  screenshots folder. Other runs' logs, other sites' screenshots and config.json aren't readable.
 - `webmods setup`, `webmods agent` and `webmods approve` are the user's; they fail inside a run.
 
 ## Workflow

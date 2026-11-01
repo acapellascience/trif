@@ -25,7 +25,7 @@ const { scanMods, planModsMessage, folderFingerprint, summarize } = require('./l
 const { Runs } = require('./lib/runs');
 const { Logins } = require('./lib/logins');
 const agents = require('./lib/agents');
-const { updateHeld, approveHeld } = require('./lib/held');
+const { updateHeld, approveHeld, heldFile } = require('./lib/held');
 const { startOffIds, startSitesOn } = require('./lib/preinstalled');
 const { readInstructions, writeInstructions, instructionsFile, MAX_LENGTH } = require('./lib/instructions');
 const { ownSock, removeStaleSockets } = require('./lib/helpers');
@@ -156,7 +156,7 @@ function syncMods(reason, force) {
   if (state.shuttingDown) return;
   clearTimeout(debounceTimer);
   ensureWatchers();
-  state.lastFingerprint = folderFingerprint(ws.modsDir);
+  state.lastFingerprint = fingerprint();
   const { mods, problems, warnings } = scanMods(ws.modsDir);
   const plan = planModsMessage(mods);
   try { state.held = updateHeld(ws, mods, runs.scopes()); } catch (e) { logger.error(`held mods: ${e.message}`); }
@@ -275,22 +275,42 @@ function ensureWatchers() {
 }
 
 // Safety net for missed events (editors doing atomic renames, folders deleted out from under us).
+// What a sync depends on: the mods folder, and held.json (another browser's helper may hold or approve a
+// mod; this one must send the change on too).
+function fingerprint() {
+  let held = '';
+  try { const st = fs.statSync(heldFile(ws.home)); held = `${st.mtimeMs}:${st.size}`; } catch { /* none */ }
+  return `${folderFingerprint(ws.modsDir)}\nheld ${held}`;
+}
+
 function poll() {
   if (state.shuttingDown) return;
   ensureWatchers();
-  const fp = folderFingerprint(ws.modsDir);
+  const fp = fingerprint();
   if (fp !== state.lastFingerprint) scheduleSync('poll');
 }
 
 // ---------------------------------------------------------------- agent runs (side panel)
 
 // config.json can change while Chrome runs (`webmods setup` re-records PATH), so re-read it per run.
-// ownSock rides along so runs can give agents WEBMODS_SOCK (a fresh workspace() doesn't have it), and the
-// extension's install id so runs mark themselves for the other browsers (lib/origins.js).
+// The extension's install id rides along so runs mark themselves for the other browsers (lib/origins.js).
 const runs = new Runs({
-  getWorkspace: () => ({ ...workspace(ws.home), ownSock: ws.ownSock, installId: state.hello?.installId || null, browser: state.hello?.browser || '' }),
-  logger, onEvent: onAgentEvent,
+  getWorkspace: () => ({ ...workspace(ws.home), installId: state.hello?.installId || null, browser: state.hello?.browser || '' }),
+  logger, onEvent: onAgentEvent, onRequest: onRunRequest,
 });
+
+/**
+ * A request from a run's mailbox (runs.js _serveBox). It's the run's, whatever it says: the run's token
+ * goes in, so it's limited to the run's site like any request carrying it. Answered once, through
+ * `respond`, by a stand-in for the socket the rest of this file replies on.
+ */
+function onRunRequest(run, line, respond) {
+  let req;
+  try { req = JSON.parse(line); } catch { return respond(JSON.stringify({ id: null, ok: false, error: 'bad request JSON' })); }
+  if (!req || typeof req !== 'object' || Array.isArray(req)) return respond(JSON.stringify({ id: null, ok: false, error: 'bad request' }));
+  const answer = { destroyed: false, writable: true, write(text) { if (this.destroyed) return; this.destroyed = true; this.writable = false; respond(text); } };
+  onClientLine(answer, JSON.stringify({ ...req, token: run.token }));
+}
 const logins = new Logins({ getWorkspace: () => workspace(ws.home), logger, onEvent: onAgentEvent });
 const runSubscribers = new Map(); // runId or loginId -> Set of CLI sockets that started it (see onClientLine)
 const AGENT_COMMANDS = new Set(['agent.list', 'agent.start', 'agent.stop', 'agent.login', 'agent.loginCode', 'agent.loginCancel', 'mod.approve',
@@ -638,7 +658,8 @@ function onClientLine(sock, line) {
     return reply(sock, { id: null, ok: false, error: `bad request JSON: ${e.message}` });
   }
   const { id, cmd } = req || {};
-  const args = req && req.args && typeof req.args === 'object' ? req.args : {};
+  // A plain object: an array's `scope` (set below for runs) wouldn't survive being sent on.
+  const args = req && req.args && typeof req.args === 'object' && !Array.isArray(req.args) ? req.args : {};
   if (typeof cmd !== 'string' || !cmd) return reply(sock, { id, ok: false, error: 'missing cmd' });
 
   // From inside an agent run (`webmods` sends the run's token): only page commands, limited to its site.

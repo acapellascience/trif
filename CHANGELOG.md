@@ -9,6 +9,13 @@ here for the version it releases.
 - **Safari, for trying out.** WebMods runs in Safari 27.2 or newer on a Mac: mods, the panel (a window of
   its own, since Safari has no side panel) and agent chats. Until it's signed by Apple it only runs on
   the Mac it was built on; see the README.
+- **Side-panel agents are walled in by your Mac, not just told the rules.** A chat's agent (Claude Code
+  or Codex) can only change mods for the site you're on, can't read anything outside the WebMods folder
+  (no browser data, keys or documents), can't read your API keys, other chats' logs or other sites'
+  screenshots, and has no internet access of its own, so a web page it reads can't talk it into
+  sending your data anywhere. Claude Code 2.1.285 or newer is needed.
+- An agent working on one site can no longer see which other sites you have open, or switch on, from
+  its own site, a mod that runs everywhere.
 - Plain X no longer flashes X's own tabs and narrow timeline for a moment when a page loads or you go
   back to Home.
 

@@ -1,7 +1,9 @@
 'use strict';
 // CLI side of the unix socket: newline-delimited JSON {id, cmd, args} -> {id, ok, result|error}.
 
+const fs = require('fs');
 const net = require('net');
+const path = require('path');
 
 const NO_HELPER_CODES = new Set(['ENOENT', 'ECONNREFUSED', 'ENOTSOCK', 'EACCES', 'EPERM', 'ENOTDIR']);
 
@@ -20,9 +22,61 @@ class HelperError extends Error {
   }
 }
 
-function request(sockPath, cmd, args = {}, timeoutMs = 40000) {
+const newId = () => `c${process.pid}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+
+/**
+ * A request through a side-panel run's mailbox (WEBMODS_RUN_BOX): the folder only that run may write,
+ * and its only way to the helper. The run's sandbox has no network, so no socket either; the helper
+ * watches the folder and treats whatever arrives there as the run's (docs/PROTOCOL.md "Run scope").
+ * `<id>.req` (written whole, then renamed into place) gets an answer in `<id>.res`.
+ */
+function boxRequest(box, cmd, args = {}, timeoutMs = 40000) {
   return new Promise((resolve, reject) => {
-    const id = `c${process.pid}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+    const id = newId();
+    const reqFile = path.join(box, `${id}.req`);
+    const resFile = path.join(box, `${id}.res`);
+    let settled = false;
+    let watcher = null;
+    let poll = null;
+    const timer = setTimeout(() => {
+      try { fs.unlinkSync(reqFile); } catch { /* the helper took it */ }
+      finish(new HelperError(`timed out after ${timeoutMs}ms waiting for the helper`, 'timeout'));
+    }, timeoutMs);
+    function finish(err, value) {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      clearInterval(poll);
+      try { watcher?.close(); } catch { /* ignore */ }
+      if (err) reject(err); else resolve(value);
+    }
+    function check() {
+      let text;
+      try { text = fs.readFileSync(resFile, 'utf8'); } catch { return; }
+      try { fs.unlinkSync(resFile); } catch { /* ignore */ }
+      let msg;
+      try { msg = JSON.parse(text); } catch (e) { finish(new HelperError(`bad response from helper: ${e.message}`, 'protocol')); return; }
+      if (msg.ok) finish(null, msg.result);
+      else finish(new HelperError(String(msg.error ?? 'unknown error'), 'command'));
+    }
+    try {
+      const tmp = path.join(box, `${id}.tmp`);
+      fs.writeFileSync(tmp, frame(id, cmd, args));
+      fs.renameSync(tmp, reqFile);
+    } catch (e) {
+      finish(new HelperError(`can't reach the helper through ${box}: ${e.code || e.message} (has the agent run ended?)`, 'no-helper'));
+      return;
+    }
+    try { watcher = fs.watch(box, () => check()); } catch { /* polling alone */ }
+    poll = setInterval(check, 100);
+    check();
+  });
+}
+
+function request(sockPath, cmd, args = {}, timeoutMs = 40000) {
+  if (process.env.WEBMODS_RUN_BOX) return boxRequest(process.env.WEBMODS_RUN_BOX, cmd, args, timeoutMs);
+  return new Promise((resolve, reject) => {
+    const id = newId();
     let settled = false;
     let buf = '';
     const sock = net.connect(sockPath);

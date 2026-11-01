@@ -90,6 +90,12 @@ if (prompt.includes('EDIT')) {
   fs.writeFileSync(file, '// edited ' + Date.now() + Math.random());
   say({ type: 'assistant', message: { content: [{ type: 'tool_use', id: 't2', name: 'Edit', input: { file_path: file, old_string: 'a', new_string: 'b' } }] } });
 }
+if (prompt.includes('HIDDEN')) {
+  // A mod for every site, where a looser snapshot once didn't look (node_modules).
+  const dir = path.join(process.cwd(), 'sites', 'node_modules');
+  fs.mkdirSync(dir, { recursive: true });
+  fs.writeFileSync(path.join(dir, 'hidden.js'), '// ==WebMod==\\n// @match *://*/*\\n// ==/WebMod==\\n// ' + Date.now());
+}
 if (prompt.includes('EVIL')) {
   // One mod inside the run's site, one that reaches every site (gets held).
   const dir = path.join(process.cwd(), 'sites', 'example.com');
@@ -167,13 +173,27 @@ const START = { site: 'example.com', url: 'https://example.com/page', tabId: 12 
 // ------------------------------------------------------------------ adapters (pure)
 
 test('claude adapter: command flags, resume and model', () => {
-  const c = claude.command({ bin: '/x/claude', prompt: 'hi', context: 'CTX' });
+  const limits = { workspace: '/h', readOnly: ['/h/sites/y.com'], denied: ['/Users/u/.ssh', '/h/config.json', '/h/runs'],
+    box: '/c/boxes/r1', screenshots: '/h/screenshots/x.com', otherScreenshots: ['/h/screenshots/y.com'] };
+  const c = claude.command({ bin: '/x/claude', prompt: 'hi', context: 'CTX', ...limits });
   assert.equal(c.file, '/x/claude');
-  assert.deepEqual(c.args, ['-p', '--output-format', 'stream-json', '--verbose', '--permission-mode', 'acceptEdits',
-    '--setting-sources', 'project', '--strict-mcp-config',
-    '--allowedTools', 'Read(./**)', 'Glob', 'Grep', 'Bash(webmods:*)', 'Bash(cd:*)', 'Bash(ls:*)',
-    '--disallowedTools', 'WebFetch', 'WebSearch', 'Read(./config.json)', 'Edit(./config.json)', 'Edit(./held.json)',
-    'Edit(./AGENTS.md)', 'Edit(./CLAUDE.md)', 'Edit(./instructions.md)', 'Edit(./.claude/**)', 'Edit(./bin/**)', 'Edit(./app/**)', 'Edit(./runs/**)', '--append-system-prompt', 'CTX', '--', 'hi']);
+  const settings = JSON.parse(c.args[c.args.indexOf('--settings') + 1]);
+  assert.deepEqual(c.args.filter((a, i) => c.args[i - 1] !== '--settings'), ['-p', '--output-format', 'stream-json', '--verbose', '--permission-mode', 'default',
+    '--setting-sources', 'project', '--strict-mcp-config', '--settings',
+    '--allowedTools', 'Read(./**)', 'Glob', 'Grep', 'Edit(./sites/**)', 'Bash(webmods:*)', 'Bash(cd:*)', 'Bash(ls:*)',
+    '--disallowedTools', 'WebFetch', 'WebSearch', 'Read(./config.json)', 'Read(./safari-token)', 'Read(./helper.log*)', 'Read(./runs/*.jsonl)',
+    'Read(./screenshots/*.png)', '--append-system-prompt', 'CTX', '--', 'hi']);
+  // The run's sandbox: fails closed, no way out of it, no network, the run's reads and writes.
+  const sb = settings.sandbox;
+  assert.deepEqual([sb.enabled, sb.failIfUnavailable, sb.allowUnsandboxedCommands, sb.autoAllowBashIfSandboxed], [true, true, false, false]);
+  assert.deepEqual(sb.network, { allowedDomains: [], strictAllowlist: true });
+  assert.deepEqual(sb.filesystem.denyRead, limits.denied);
+  assert.deepEqual(sb.filesystem.allowRead, ['/c/boxes/r1', '/h/screenshots/x.com']);
+  assert.deepEqual(sb.filesystem.allowWrite, ['/c/boxes/r1', '/h/screenshots/x.com']);
+  for (const p of ['/h/held.json', '/h/preinstalled.json', '/h/runs', '/h/sites/y.com']) assert.ok(sb.filesystem.denyWrite.includes(p), p);
+  assert.deepEqual(settings.permissions.deny, ['Edit(./sites/y.com/**)', 'Read(./screenshots/y.com/**)']);
+  assert.equal(claude.tooOld('2.1.284 (Claude Code)'), true);
+  assert.equal(claude.tooOld('2.1.312 (Claude Code)'), false);
   const r = claude.command({ bin: '/x/claude', prompt: 'hi', context: 'CTX', sessionId: 's1', model: 'opus' });
   assert.deepEqual(r.args.slice(-6), ['--resume', 's1', '--model', 'opus', '--', 'hi']);
   // A message that looks like an option is still the message.
@@ -215,7 +235,7 @@ test('claude adapter: parses init, text, tools, result; maps "Not logged in"', (
 });
 
 test('codex adapter: command, resume, JSONL events', () => {
-  const c = codex.command({ bin: '/x/codex', prompt: 'P', model: 'gpt-5', writable: ['/h/sites', '/h/screenshots'], readOnly: ['/h/sites/x.com'], denied: ['/h/config.json'] });
+  const c = codex.command({ bin: '/x/codex', prompt: 'P', model: 'gpt-5', readable: ['/h', '/app'], writable: ['/h/sites', '/h/screenshots/x.com', '/h/runs/r1.box'], readOnly: ['/h/sites/y.com'], denied: ['/Users/u/.ssh', '/h/config.json', '/h/runs'] });
   assert.equal(c.args[0], 'exec');
   assert.ok(c.args.includes('--json') && c.args.includes('--skip-git-repo-check'));
   assert.deepEqual(c.args.slice(-4), ['-m', 'gpt-5', '--', 'P']);
@@ -224,8 +244,9 @@ test('codex adapter: command, resume, JSONL events', () => {
   assert.ok(c.args.includes('--ignore-user-config') && c.args.includes('--ignore-rules'));
   assert.ok(c.args.includes('approval_policy="never"'));
   assert.ok(c.args.includes('default_permissions="webmods-run"'));
+  // No network: `webmods` reaches the helper through the run's mailbox.
   assert.equal(c.args.find((a) => a.startsWith('permissions=')),
-    'permissions={ webmods-run = { extends = ":workspace", filesystem = { ":workspace_roots" = { "." = "read" }, "/h/sites" = "write", "/h/screenshots" = "write", "/h/sites/x.com" = "read", "/h/config.json" = "deny" }, network = { enabled = true } } }');
+    'permissions={ webmods-run = { extends = ":workspace", filesystem = { ":workspace_roots" = { "." = "read" }, "/Users/u/.ssh" = "deny", "/h/config.json" = "deny", "/h/runs" = "deny", "/h" = "read", "/app" = "read", "/h/sites" = "write", "/h/screenshots/x.com" = "write", "/h/runs/r1.box" = "write", "/h/sites/y.com" = "read" }, network = { enabled = false } } }');
   assert.equal(codex.tooOld('codex-cli 0.137.9'), true);
   assert.equal(codex.tooOld('0.166.0'), false);
   assert.equal(codex.tooOld(null), false);
@@ -328,7 +349,8 @@ test('agent.start: runId first, then session/text/tool events, one done with cha
   const a = call.argv;
   assert.equal(a[a.indexOf('--') + 1], 'EDIT hide the banner');
   for (const f of ['--output-format', 'stream-json', '--verbose', '--strict-mcp-config']) assert.ok(a.includes(f), f);
-  assert.equal(a[a.indexOf('--permission-mode') + 1], 'acceptEdits');
+  assert.equal(a[a.indexOf('--permission-mode') + 1], 'default');
+  assert.equal(JSON.parse(a[a.indexOf('--settings') + 1]).sandbox.enabled, true);
   assert.equal(a[a.indexOf('--setting-sources') + 1], 'project');
   const ctx = a[a.indexOf('--append-system-prompt') + 1];
   assert.match(ctx, /https:\/\/example\.com\/page \(tab 12\)/);
@@ -373,8 +395,12 @@ test('agent env is sanitized: no inherited CLAUDE*/ANTHROPIC_*/CODEX_*, API key 
   assert.equal(env.LANG, 'en_CA.UTF-8');
   assert.equal(env.HOME, path.join(home, 'fakehome'));
   assert.equal(env.WEBMODS_HOME, home);
-  // The run reaches this host (and so this browser) even when another helper owns helper.sock.
-  assert.equal(env.WEBMODS_SOCK, path.join(home, `helper-${ext.child.pid}.sock`));
+  // The run reaches this host (and so this browser) through its own mailbox, not a socket; no socket path.
+  assert.equal(path.dirname(env.WEBMODS_RUN_BOX), path.join(home, 'boxes'));
+  assert.match(path.basename(env.WEBMODS_RUN_BOX), /^r[a-z0-9]+$/);
+  assert.equal(env.WEBMODS_RUN_SCREENSHOTS, path.join(home, 'screenshots', 'example.com'));
+  assert.ok(/^[0-9a-f]{32}$/.test(env.WEBMODS_RUN_TOKEN));
+  assert.equal(env.WEBMODS_SOCK, undefined);
   assert.deepEqual(env.PATH.split(':').slice(0, 2), [path.join(home, 'bin'), bin]);
 });
 
@@ -564,7 +590,7 @@ test('agent.login: URL event, code, done ok; agent.list then says loggedIn (cach
   assert.match(log, /code sent/);
   assert.ok(!log.includes('GOODCODE'), 'code not logged');
   assert.ok(!log.includes('SECRETSTATE') && !log.includes('CHALLENGE'), 'URL query not logged');
-  assert.ok(!fs.existsSync(path.join(home, 'runs')) || !fs.readdirSync(path.join(home, 'runs')).some((f) => fs.readFileSync(path.join(home, 'runs', f), 'utf8').includes('GOODCODE')));
+  assert.ok(!fs.existsSync(path.join(home, 'runs')) || !fs.readdirSync(path.join(home, 'runs')).filter((f) => f.endsWith('.jsonl')).some((f) => fs.readFileSync(path.join(home, 'runs', f), 'utf8').includes('GOODCODE')));
   assert.equal((await sockRequest(ext.sock, { id: 'p2', cmd: 'ping' })).result.login, null);
 });
 
@@ -761,9 +787,9 @@ test('setup records PATH (merging config.json) and writes .claude/settings.json;
   const settings = JSON.parse(fs.readFileSync(path.join(ws, '.claude', 'settings.json'), 'utf8'));
   assert.deepEqual(settings, {
     permissions: {
-      allow: ['Read(./**)', 'Glob', 'Grep', 'Bash(webmods:*)', 'Bash(cd:*)', 'Bash(ls:*)'],
-      deny: ['WebFetch', 'WebSearch', 'Read(./config.json)', 'Edit(./config.json)', 'Edit(./held.json)',
-        'Edit(./AGENTS.md)', 'Edit(./CLAUDE.md)', 'Edit(./instructions.md)', 'Edit(./.claude/**)', 'Edit(./bin/**)', 'Edit(./app/**)', 'Edit(./runs/**)'],
+      allow: ['Read(./**)', 'Glob', 'Grep', 'Edit(./sites/**)', 'Bash(webmods:*)', 'Bash(cd:*)', 'Bash(ls:*)'],
+      deny: ['WebFetch', 'WebSearch', 'Read(./config.json)', 'Read(./safari-token)', 'Read(./helper.log*)', 'Read(./runs/*.jsonl)',
+        'Read(./screenshots/*.png)'],
     },
   });
   assert.match(r.stdout, new RegExp(`agents +claude \\(${fakeBin.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}/claude\\), codex not found`));
@@ -821,6 +847,58 @@ test('run scope: the run token limits webmods requests to the run\'s site; agent
   await waitDone(ext, runId);
   res = await sockRequest(ext.sock, { id: 'd', cmd: 'tabs', args: {}, token });
   assert.match(res.error, /run has ended/);
+});
+
+test('run mailbox: whatever a request in it says, it\'s the run\'s; links aren\'t followed; agent commands refused', async () => {
+  const { home, bin } = makeHome();
+  const ext = startHost(home);
+  ext.handlers.tabs = (args) => ({ scope: args.scope ?? null });
+  await ext.waitForSocket();
+  const r = await extRequest(ext, 'agent.start', { ...START, prompt: 'SLEEP' });
+  const call = await waitFor(() => callFor(bin, 'SLEEP'), { message: 'the agent to start' });
+  const box = call.env.WEBMODS_RUN_BOX;
+  assert.equal(fs.statSync(box).mode & 0o777, 0o700);
+
+  // The CLI, with only the mailbox (no token): still the run's, limited to its site.
+  let res = await runCli(['tabs', '--json'], { home, env: { WEBMODS_RUN_BOX: box } });
+  assert.equal(res.code, 0, res.stderr);
+  assert.deepEqual(JSON.parse(res.stdout), { scope: 'example.com' });
+
+  // A hand-written request with someone else's token and a scope of its own: the run's anyway.
+  const raw = (name, msg) => {
+    fs.writeFileSync(path.join(box, `${name}.tmp`), JSON.stringify(msg) + '\n');
+    fs.renameSync(path.join(box, `${name}.tmp`), path.join(box, `${name}.req`));
+  };
+  const answer = (name) => waitFor(() => { try { return JSON.parse(fs.readFileSync(path.join(box, `${name}.res`), 'utf8')); } catch { return null; } }, { message: `the answer to ${name}` });
+  raw('forged', { id: 'f', cmd: 'tabs', args: { scope: 'evil.com' }, token: 'not-a-token' });
+  assert.deepEqual((await answer('forged')).result, { scope: 'example.com' });
+  raw('agent', { id: 'g', cmd: 'agent.start', args: { site: 'evil.com', url: 'https://evil.com/', prompt: 'hi' } });
+  assert.match((await answer('agent')).error, /isn't available inside an agent run/);
+  raw('arr', { id: 'h', cmd: 'tabs', args: ['x'] });
+  assert.deepEqual((await answer('arr')).result, { scope: 'example.com' });
+
+  // A request that's a link to another file isn't read (the agent could point it anywhere).
+  const outside = path.join(home, 'outside.json');
+  fs.writeFileSync(outside, JSON.stringify({ id: 's', cmd: 'tabs', args: {} }));
+  fs.symlinkSync(outside, path.join(box, 'link.req'));
+  assert.deepEqual(await answer('link'), { id: null, ok: false, error: 'unreadable request' });
+  assert.ok(fs.existsSync(outside));
+
+  await extRequest(ext, 'agent.stop', { runId: r.result.runId });
+  await waitDone(ext, r.result.runId);
+  await waitFor(() => !fs.existsSync(box), { timeout: 5000, message: 'the mailbox removed' });
+  res = await runCli(['tabs'], { home, env: { WEBMODS_RUN_BOX: box } });
+  assert.notEqual(res.code, 0);
+  assert.match(res.stderr, /has the agent run ended/);
+});
+
+test('held mods: a mod in a folder a looser snapshot skipped (node_modules) is held too', async () => {
+  const { home } = makeHome();
+  const ext = startHost(home);
+  await ext.waitForSocket();
+  const r = await extRequest(ext, 'agent.start', { ...START, prompt: 'HIDDEN' });
+  const done = await waitDone(ext, r.result.runId);
+  assert.deepEqual(done.held, [{ id: 'node_modules/hidden', reason: 'it matches *://*/*, outside example.com' }]);
 });
 
 test('held mods: a run\'s mod that matches other sites is held (not registered) until approved', async () => {
@@ -944,7 +1022,8 @@ test('mod.delete / mod.restore: from the panel any mod; from a run only mods ins
   // A run on example.com: `webmods delete` goes through the helper, which holds it to the scope.
   r = await extRequest(ext, 'agent.start', { ...START, prompt: 'SLEEP' });
   const call = await waitFor(() => callFor(bin, 'SLEEP'), { message: 'the agent to start' });
-  const env = { WEBMODS_RUN_TOKEN: call.env.WEBMODS_RUN_TOKEN, WEBMODS_SOCK: call.env.WEBMODS_SOCK };
+  // As the agent would: through the run's mailbox (its sandbox has no socket).
+  const env = { WEBMODS_RUN_TOKEN: call.env.WEBMODS_RUN_TOKEN, WEBMODS_RUN_BOX: call.env.WEBMODS_RUN_BOX };
   let res = await runCli(['delete', 'example.com/wide'], { home, env });
   assert.equal(res.code, 1);
   assert.match(res.stderr, /can only delete mods that stay on example\.com; example\.com\/wide also runs on \*:\/\/\*\/\*/);

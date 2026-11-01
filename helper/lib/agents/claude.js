@@ -1,20 +1,68 @@
 'use strict';
 // Claude Code adapter (tested with Claude Code 2.1.149). See docs/PROTOCOL.md "Agent adapters".
 
+const path = require('path');
 const { findExecutable, versionOf, relToWorkspace, oneLine, parseJsonLine, captureSync } = require('./util');
 
-// What side-panel runs may do besides editing the workspace (acceptEdits). Passed on the command line:
-// Claude Code 2.1.312 ignored `Bash(...)` allow rules from the workspace's .claude/settings.json in -p runs.
-// No command that runs arbitrary code (not even `node --test`): a run must not be able to reach the
-// helper without its WEBMODS_RUN_TOKEN, which limits it to one site (see scope.js). `webmods check`
-// replaces `node --check`.
-const ALLOWED_TOOLS = ['Read(./**)', 'Glob', 'Grep', 'Bash(webmods:*)', 'Bash(cd:*)', 'Bash(ls:*)'];
-// Edits are for mods: everything in the workspace outside sites/ is off limits (config.json can hold API
-// keys, held.json is the user's approvals, instructions.md their standing instructions, .claude/ and bin/
-// would widen what runs may do).
-// (Not `Edit(./*)` for the top-level files: Claude Code 2.1.312 applied that to every file, sites/ too.)
-const DENIED_TOOLS = ['WebFetch', 'WebSearch', 'Read(./config.json)', 'Edit(./config.json)', 'Edit(./held.json)',
-  'Edit(./AGENTS.md)', 'Edit(./CLAUDE.md)', 'Edit(./instructions.md)', 'Edit(./.claude/**)', 'Edit(./bin/**)', 'Edit(./app/**)', 'Edit(./runs/**)'];
+// What a side-panel run may do (runs.js runLimits gives the paths). Two layers:
+//   - Claude Code's own tools, by permission rules passed on the command line (Claude Code 2.1.312
+//     ignored `Bash(...)` allow rules from the workspace's .claude/settings.json in -p runs). Edits are
+//     allowed under sites/ only (no --permission-mode acceptEdits, which allowed the whole workspace: its
+//     state files steer WebMods), minus every existing folder of another site; reads, the whole
+//     workspace but its secrets and other runs' traces. In -p, anything else that would need approval is
+//     denied.
+//   - Shell commands, only `webmods`, `cd` and `ls`, run in Claude Code's sandbox (macOS Seatbelt), which
+//     the system enforces whatever the command line says: no network and no sockets (so `webmods`
+//     reaches the helper only through the run's mailbox, which limits it to the run's site), the same
+//     reads as Codex runs (nothing else in the home folder), and no writes to WebMods' state files or
+//     other sites' folders. failIfUnavailable: no sandbox, no commands.
+// No command that runs arbitrary code (not even `node --test`); `webmods check` replaces `node --check`.
+const ALLOWED_TOOLS = ['Read(./**)', 'Glob', 'Grep', 'Edit(./sites/**)', 'Bash(webmods:*)', 'Bash(cd:*)', 'Bash(ls:*)'];
+// (Not Read(./runs/**): Claude Code also applies Read denies to the sandbox, where nothing can reopen
+// them, so the run's own mailbox under runs/ would be lost. The sandbox keeps runs/ but the mailbox
+// unreadable to commands; these cover Claude Code's own file tools.)
+const DENIED_TOOLS = ['WebFetch', 'WebSearch', 'Read(./config.json)', 'Read(./safari-token)', 'Read(./helper.log*)', 'Read(./runs/*.jsonl)',
+  'Read(./screenshots/*.png)'];
+// The workspace's files that steer WebMods (or the agents): never written by a run's commands.
+const STATE_FILES = ['held.json', 'preinstalled.json', 'origins.json', 'active-runs', 'trash', 'config.json', 'instructions.md',
+  'AGENTS.md', 'CLAUDE.md', 'bin', 'app', 'safari-token', 'helper.log', 'helper.log.1', 'runs'];
+const MIN_VERSION = [2, 1, 285]; // the sandbox settings used here, and --settings taking precedence over the workspace's
+
+function tooOld(version) {
+  const m = /(\d+)\.(\d+)\.(\d+)/.exec(String(version || ''));
+  if (!m) return false; // unknown: let it try
+  const v = [Number(m[1]), Number(m[2]), Number(m[3])];
+  for (let i = 0; i < 3; i++) if (v[i] !== MIN_VERSION[i]) return v[i] < MIN_VERSION[i];
+  return false;
+}
+
+/**
+ * The run's own rules (--settings): the sandbox for its shell commands, and per-run permission rules
+ * (other sites' folders and screenshots). `limits` is runs.js runLimits.
+ */
+function runSettings({ workspace = '', readOnly = [], denied = [], box, screenshots, otherScreenshots = [] } = {}) {
+  const rel = (p) => `./${path.relative(workspace, p).split(path.sep).join('/')}`;
+  const inWorkspace = (p) => !!workspace && p.startsWith(workspace + path.sep);
+  return {
+    sandbox: {
+      enabled: true,
+      failIfUnavailable: true,
+      allowUnsandboxedCommands: false, // no retrying a command outside it
+      autoAllowBashIfSandboxed: false, // only the commands allowed above, sandbox or not
+      filesystem: {
+        denyRead: denied,
+        allowRead: [box, screenshots].filter(Boolean), // inside denied runs/ and screenshots/: the run's own
+        allowWrite: [box, screenshots].filter(Boolean), // (writing there needs saying too)
+        denyWrite: [...(workspace ? STATE_FILES.map((f) => path.join(workspace, f)) : []), ...readOnly],
+      },
+      network: { allowedDomains: [], strictAllowlist: true }, // and no unix sockets (none allowed)
+    },
+    permissions: {
+      deny: [...readOnly.filter(inWorkspace).map((p) => `Edit(${rel(p)}/**)`),
+        ...otherScreenshots.filter(inWorkspace).map((p) => `Read(${rel(p)}/**)`)],
+    },
+  };
+}
 
 const NOT_LOGGED_IN = "Claude Code isn't logged in: run `claude` in a terminal and log in (type /login)";
 
@@ -32,7 +80,9 @@ const adapter = {
   detect({ dirs, env, version = true }) {
     const file = findExecutable(adapter.binary, dirs);
     if (!file) return { available: false, path: null, version: null, note: 'not found' };
-    return { available: true, path: file, version: version ? versionOf(file, env) : null, note: '' };
+    const v = version ? versionOf(file, env) : null;
+    if (tooOld(v)) return { available: false, path: file, version: v, note: `Claude Code ${v} is too old for WebMods (it needs ${MIN_VERSION.join('.')} or newer to keep side-panel runs to their site): update it (claude update)` };
+    return { available: true, path: file, version: v, note: '' };
   },
 
   // Claude Code has no command that lists the models an account can use, so: its aliases, each the
@@ -44,11 +94,12 @@ const adapter = {
       note: "Claude Code can't say which models your account has. Each name is the newest of its family; use Other for an exact model name." };
   },
 
-  command({ bin, prompt, sessionId, model, context }) {
+  command({ bin, prompt, sessionId, model, context, ...limits }) {
     // The message goes last, after `--`: before it, one starting with "-" would be read as an option
     // (even --dangerously-skip-permissions).
     const args = ['-p', '--output-format', 'stream-json', '--verbose',
-      '--permission-mode', 'acceptEdits', '--setting-sources', 'project', '--strict-mcp-config',
+      '--permission-mode', 'default', '--setting-sources', 'project', '--strict-mcp-config',
+      '--settings', JSON.stringify(runSettings(limits)),
       '--allowedTools', ...ALLOWED_TOOLS, '--disallowedTools', ...DENIED_TOOLS];
     if (context) args.push('--append-system-prompt', context);
     if (sessionId) args.push('--resume', sessionId);
@@ -175,3 +226,5 @@ module.exports = adapter;
 module.exports.toolSummary = toolSummary;
 module.exports.NOT_LOGGED_IN = NOT_LOGGED_IN;
 module.exports.parseLoginLine = parseLoginLine;
+module.exports.runSettings = runSettings;
+module.exports.tooOld = tooOld;

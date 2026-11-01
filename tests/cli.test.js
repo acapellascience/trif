@@ -564,3 +564,25 @@ test('status: lists the sites WebMods is on for and marks mods waiting for their
   assert.match(r.stdout, /waiting = not running until the user turns WebMods on for the site/);
   assert.match(r.stdout, /^sites on {6}x\.com; WebMods is off everywhere else/m);
 });
+
+test('inside a side-panel run, the CLI reads -f and check files only from the mods folder', async () => {
+  const home = tempDir();
+  const box = path.join(home, 'boxes', 'r1');
+  fs.mkdirSync(box, { recursive: true });
+  writeMod(home, 'example.com', 'ok.js', '1 + 1');
+  const secret = path.join(home, 'config.json');
+  fs.writeFileSync(secret, '{\n  "anthropicApiKey": "sk-secret"\n}\n');
+  const env = { WEBMODS_RUN_BOX: box, WEBMODS_RUN_TOKEN: 'x' };
+  let r = await runCli(['run', '-f', secret], { home, env });
+  assert.equal(r.code, 1);
+  assert.match(r.stderr, /inside a side-panel agent run, files are read only in /);
+  assert.doesNotMatch(r.stdout + r.stderr, /sk-secret/);
+  r = await runCli(['check', secret], { home, env });
+  assert.equal(r.code, 1);
+  assert.doesNotMatch(r.stdout + r.stderr, /sk-secret/);
+  r = await runCli(['check', 'example.com/ok'], { home, env });
+  assert.equal(r.code, 0, r.stderr);
+  // The user's own terminal: no limit.
+  r = await runCli(['check', secret], { home });
+  assert.match(r.stdout + r.stderr, /anthropicApiKey/);
+});

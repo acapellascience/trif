@@ -4,6 +4,7 @@
 // See docs/PROTOCOL.md "Side panel and agent runs".
 
 const fs = require('fs');
+const os = require('os');
 const path = require('path');
 const crypto = require('crypto');
 const { spawn } = require('child_process');
@@ -11,6 +12,7 @@ const agents = require('./agents');
 const { scopeFor } = require('./scope');
 const { readInstructions, instructionsContext } = require('./instructions');
 const { markRunActive, markRunEnded } = require('./origins');
+const { listModFiles } = require('./mods');
 
 const RUN_TIMEOUT_MS = Number(process.env.WEBMODS_AGENT_TIMEOUT_MS) > 0 ? Number(process.env.WEBMODS_AGENT_TIMEOUT_MS) : 15 * 60 * 1000;
 const KILL_GRACE_MS = Number(process.env.WEBMODS_AGENT_KILL_GRACE_MS) > 0 ? Number(process.env.WEBMODS_AGENT_KILL_GRACE_MS) : 3000;
@@ -20,7 +22,33 @@ const MAX_SNAPSHOT_FILES = 5000;
 // Finished runs still count for held mods this long (a last write can reach the folder watcher late).
 const RECENT_MS = 10000;
 
-// sha1 of every file under `dir` (relative to `base`), skipping dot-folders. Capped for sanity.
+const MAX_BOX_REQUEST = 8 * 1024 * 1024;
+
+/**
+ * Where runs' mailboxes go: outside the workspace and the temp folder, which agents' sandboxes may write
+ * by default, so a run can only write its own mailbox (opened for it alone), never another run's (whose
+ * requests would carry that run's site). Inside the home folder's Library (or ~/.cache), which runs can't
+ * read at all.
+ */
+function boxRoot() {
+  if (process.env.WEBMODS_BOX_ROOT) return path.resolve(process.env.WEBMODS_BOX_ROOT);
+  return process.platform === 'darwin'
+    ? path.join(os.homedir(), 'Library', 'Caches', 'WebMods', 'boxes')
+    : path.join(process.env.XDG_CACHE_HOME || path.join(os.homedir(), '.cache'), 'webmods', 'boxes');
+}
+
+// sha1 of every mod file the scanner loads (mods.js listModFiles: same folders, same symlink handling,
+// no cap), relative to `base`. What held mods are decided on: a run can't put a mod where this doesn't look.
+function modSnapshot(modsDir, base) {
+  const out = new Map();
+  for (const { file } of listModFiles(modsDir)) {
+    try { out.set(path.relative(base, file), crypto.createHash('sha1').update(fs.readFileSync(file)).digest('hex')); } catch { /* vanished */ }
+  }
+  return out;
+}
+
+// sha1 of every file under `dir` (relative to `base`), skipping dot-folders, for the `changedFiles` a run
+// reports. Capped for sanity; held mods use modSnapshot.
 function snapshot(dir, base) {
   const out = new Map();
   const walk = (d) => {
@@ -53,17 +81,40 @@ function realOrResolved(p) {
   try { return fs.realpathSync(p); } catch { return path.resolve(p); }
 }
 
+// The workspace's files a run may not read: secrets (config.json can hold API keys; safari-token is
+// the Safari bridge's key), and other runs' traces (their logs hold the pages they read; screenshots
+// of other sites; helper.log).
+const PRIVATE_FILES = ['config.json', 'safari-token', 'helper.log', 'helper.log.1', 'runs', 'screenshots'];
+
 /**
- * What a run may write, for agents whose sandbox can enforce it (Codex): the mods folder and screenshots/
- * writable, every existing mod folder of another site (all-sites/ included) read-only inside it, and
- * config.json (it may hold API keys) unreadable.
+ * What a run may touch, for the agents' sandboxes, which macOS enforces (docs/PROTOCOL.md "Run scope"):
+ *   readable  the workspace, the WebMods code `webmods` runs, and node
+ *   writable  the mods folder, this run's screenshots folder, and its mailbox (`box`)
+ *   readOnly  every existing mod folder of another site (all-sites/ included), inside the mods folder
+ *   denied    everything else in the home folder, and the workspace's PRIVATE_FILES (the more
+ *             specific path wins, so the run's own screenshots folder and mailbox stay writable). Each
+ *             item in the home folder rather than the folder itself: node, and `mkdir -p`, look at
+ *             every folder on a path, the home folder included.
+ * No network at all: `webmods` reaches the helper through the mailbox. Real paths, as sandboxes compare.
  */
-function writeLimits(ws, scope) {
-  const writable = [ws.modsDir, ws.screenshots].map(realOrResolved);
+function runLimits(ws, { scope, box, screenshots }) {
+  const real = realOrResolved;
+  const node = real(process.execPath);
+  const readable = [...new Set([real(ws.home), real(path.join(__dirname, '..', '..')), path.dirname(path.dirname(node))])];
+  const writable = [real(ws.modsDir), real(screenshots), real(box)];
   let names = [];
-  try { names = fs.readdirSync(ws.modsDir, { withFileTypes: true }).filter((d) => d.isDirectory()).map((d) => d.name); } catch { /* none yet */ }
-  const readOnly = names.filter((n) => scopeFor(n) !== scope).map((n) => realOrResolved(path.join(ws.modsDir, n)));
-  return { writable, readOnly, denied: [realOrResolved(path.join(ws.home, 'config.json'))] };
+  try { names = fs.readdirSync(ws.modsDir, { withFileTypes: true }).filter((d) => d.isDirectory() || d.isSymbolicLink()).map((d) => d.name); } catch { /* none yet */ }
+  const readOnly = names.filter((n) => scopeFor(n) !== scope).map((n) => real(path.join(ws.modsDir, n)));
+  const home = real(os.homedir());
+  const onTheWay = (p) => readable.some((r) => r === p || r.startsWith(p + path.sep));
+  let inHome = [];
+  try { inHome = fs.readdirSync(home).map((n) => path.join(home, n)).filter((p) => !onTheWay(p)); } catch { /* unreadable: nothing to list */ }
+  const denied = [...inHome, ...PRIVATE_FILES.map((f) => real(path.join(ws.home, f)))];
+  // Other sites' screenshot folders, for agents whose file tools take per-folder rules (Claude Code).
+  let shots = [];
+  try { shots = fs.readdirSync(ws.screenshots, { withFileTypes: true }).filter((d) => d.isDirectory()).map((d) => real(path.join(ws.screenshots, d.name))); } catch { /* none */ }
+  const otherScreenshots = shots.filter((p) => p !== real(screenshots));
+  return { readable, writable, readOnly, denied, workspace: real(ws.home), box: real(box), screenshots: real(screenshots), otherScreenshots };
 }
 
 function normalizeSite(site, url) {
@@ -82,10 +133,15 @@ function normalizeSite(site, url) {
  *   stopAll() -> Promise (resolves once every agent process has exited, SIGKILLing stragglers)
  */
 class Runs {
-  constructor({ getWorkspace, logger, onEvent }) {
+  /**
+   * onRequest(run, line, respond): a request from the run's mailbox (one JSON line, as on the socket);
+   * respond(text) answers it. The host handles it as the run's, whatever the line says.
+   */
+  constructor({ getWorkspace, logger, onEvent, onRequest }) {
     this.getWorkspace = getWorkspace;
     this.logger = logger || { info() {}, warn() {}, error() {}, debug() {} };
     this.onEvent = onEvent || (() => {});
+    this.onRequest = onRequest || ((run, line, respond) => respond(JSON.stringify({ id: null, ok: false, error: 'no helper commands here' })));
     this.runs = new Map(); // runId -> run
     this.bySite = new Map(); // site -> runId
     this.recent = []; // [{runId, site, scope, before, startedAt, until}]
@@ -190,6 +246,13 @@ class Runs {
   _prepareLogDir(ws) {
     const dir = path.join(ws.home, 'runs');
     try { fs.mkdirSync(dir, { recursive: true }); } catch { /* ignore */ }
+    // Mailboxes left by helpers that died mid-run (a live run's is younger than its time limit).
+    try {
+      for (const f of fs.readdirSync(boxRoot())) {
+        const p = path.join(boxRoot(), f);
+        try { if (Date.now() - fs.statSync(p).mtimeMs > 2 * RUN_TIMEOUT_MS) fs.rmSync(p, { recursive: true, force: true }); } catch { /* ignore */ }
+      }
+    } catch { /* ignore */ }
     // Keep the last KEEP_RUN_LOGS - 1 (this run makes KEEP_RUN_LOGS).
     try {
       const files = fs.readdirSync(dir).filter((f) => f.endsWith('.jsonl'))
@@ -205,9 +268,20 @@ class Runs {
     this._log(run, { webmods: 'start', runId: run.id, agent: run.agent, site: run.site, url: run.url, tabId: run.tabId, sessionId: run.sessionId, model: run.model, prompt: run.prompt, time: run.startedAt });
 
     if (run.stopped) return this._finish(run, { code: null, signal: null }); // stopped before it started
-    // WEBMODS_SOCK: this helper's own socket, so the run reaches this browser even when another
-    // browser's helper owns helper.sock (lib/helpers.js).
-    const env = { ...agents.agentEnv(ws), WEBMODS_RUN_TOKEN: run.token, ...(ws.ownSock ? { WEBMODS_SOCK: ws.ownSock } : {}) };
+    // The run's mailbox, its only way to the helper (its sandbox has no network), and its screenshots
+    // folder (it may not see other sites' screenshots).
+    run.box = path.join(boxRoot(), run.id);
+    run.screenshots = path.join(ws.screenshots, run.scope.replace(/[^a-z0-9.-]/gi, '_') || 'site');
+    try {
+      fs.mkdirSync(boxRoot(), { recursive: true, mode: 0o700 });
+      fs.mkdirSync(run.box, { mode: 0o700 });
+      fs.mkdirSync(run.screenshots, { recursive: true });
+    } catch (e) {
+      this._emit(run, { kind: 'error', message: `couldn't prepare the run's folders: ${e.message}` });
+      return this._finish(run, { code: null, signal: null });
+    }
+    this._serveBox(run);
+    const env = { ...agents.agentEnv(ws), WEBMODS_RUN_TOKEN: run.token, WEBMODS_RUN_BOX: run.box, WEBMODS_RUN_SCREENSHOTS: run.screenshots };
     const found = adapter.detect({ dirs: agents.searchDirs(ws), env, version: false });
     if (!found.available) {
       this._emit(run, { kind: 'error', message: adapter.missing });
@@ -220,10 +294,12 @@ class Runs {
     const extra = adapter.readsInstructions ? '' : instructionsContext(readInstructions(ws.home));
     if (adapter.systemPrompt) context = agents.contextText(ctx) + extra;
     else prompt = `${run.sessionId ? agents.reminderText(ctx) : agents.contextText(ctx) + extra}\n\n${prompt}`;
-    for (const d of [ws.modsDir, ws.screenshots]) { try { fs.mkdirSync(d, { recursive: true }); } catch { /* reported by the agent */ } }
-    const { file, args } = adapter.command({ bin: found.path, prompt, sessionId: run.sessionId, model: run.model, context, workspace: ws.home, ...writeLimits(ws, run.scope) });
+    try { fs.mkdirSync(ws.modsDir, { recursive: true }); } catch { /* reported by the agent */ }
+    const limits = runLimits(ws, run);
+    const { file, args } = adapter.command({ bin: found.path, prompt, sessionId: run.sessionId, model: run.model, context, workspace: ws.home, ...limits });
 
-    run.before = snapshot(ws.modsDir, ws.home);
+    run.before = modSnapshot(ws.modsDir, ws.home);
+    run.beforeFiles = snapshot(ws.modsDir, ws.home);
     // Tell the other browsers' helpers a run is going, so mods it creates start off there (lib/origins.js).
     if (ws.installId) {
       try { markRunActive(ws.home, { runId: run.id, by: ws.installId, browser: ws.browser || '', site: run.site }); run.marked = true; } catch (e) { this.logger.warn(`couldn't mark run ${run.id} active: ${e.message}`); }
@@ -272,6 +348,43 @@ class Runs {
     }, RUN_TIMEOUT_MS));
   }
 
+  // Answer requests from the run's mailbox (client.js boxRequest). The agent can write there, so files are
+  // opened without following symlinks and answers are created fresh: a planted link can't make the helper
+  // read or overwrite anything else.
+  _serveBox(run) {
+    const take = () => {
+      if (run.finished) return;
+      let names;
+      try { names = fs.readdirSync(run.box); } catch { return; }
+      for (const name of names) {
+        if (!/^[\w.-]+\.req$/.test(name)) continue;
+        const id = name.slice(0, -4);
+        const file = path.join(run.box, name);
+        let line;
+        try {
+          const fd = fs.openSync(file, fs.constants.O_RDONLY | fs.constants.O_NOFOLLOW);
+          try {
+            const st = fs.fstatSync(fd);
+            if (!st.isFile() || st.size > MAX_BOX_REQUEST) throw new Error('not a request');
+            line = fs.readFileSync(fd, 'utf8').trim();
+          } finally { fs.closeSync(fd); }
+        } catch { line = null; }
+        try { fs.unlinkSync(file); } catch { continue; } // another pass took it
+        const respond = (text) => {
+          const tmp = path.join(run.box, `${id}.${crypto.randomBytes(4).toString('hex')}.part`);
+          try {
+            fs.writeFileSync(tmp, text, { flag: 'wx', mode: 0o600 });
+            fs.renameSync(tmp, path.join(run.box, `${id}.res`));
+          } catch (e) { this.logger.warn(`agent run ${run.id}: couldn't answer a request: ${e.message}`); }
+        };
+        if (line === null) { respond(JSON.stringify({ id: null, ok: false, error: 'unreadable request' })); continue; }
+        try { this.onRequest(run, line, respond); } catch (e) { respond(JSON.stringify({ id: null, ok: false, error: e.message })); }
+      }
+    };
+    try { run.boxWatcher = fs.watch(run.box, take); run.boxWatcher.on('error', () => {}); } catch { /* polling alone */ }
+    run.timers.push(setInterval(take, 200));
+  }
+
   _onLine(run, line) {
     if (!line.trim() || run.doneSent) return;
     this._log(run, line);
@@ -308,12 +421,19 @@ class Runs {
     run.finished = true;
     for (const t of run.timers) clearTimeout(t);
     if (run.stdoutBuf.trim()) { const l = run.stdoutBuf; run.stdoutBuf = ''; this._onLine(run, l); }
-    // Leftover processes of a finished run (backgrounded by a tool) go too.
-    if (run.child && run.child.pid && !run.stopped) { try { process.kill(-run.child.pid, 'SIGTERM'); } catch { /* none */ } }
+    try { run.boxWatcher?.close(); } catch { /* ignore */ }
+    if (run.box) setTimeout(() => { try { fs.rmSync(run.box, { recursive: true, force: true }); } catch { /* ignore */ } }, 2000).unref();
+    // Leftover processes of a finished run (backgrounded by a tool) go too, by force after a moment: a
+    // write landing after the held-mod window (RECENT_MS) would never be held.
+    if (run.child && run.child.pid && !run.stopped) {
+      const pid = run.child.pid;
+      try { process.kill(-pid, 'SIGTERM'); } catch { /* none */ }
+      setTimeout(() => { try { process.kill(-pid, 'SIGKILL'); } catch { /* gone */ } }, KILL_GRACE_MS).unref();
+    }
 
     let changedFiles = [];
-    if (run.before) {
-      try { changedFiles = diffSnapshots(run.before, snapshot(run.ws.modsDir, run.ws.home)); } catch { /* ignore */ }
+    if (run.beforeFiles) {
+      try { changedFiles = diffSnapshots(run.beforeFiles, snapshot(run.ws.modsDir, run.ws.home)); } catch { /* ignore */ }
     }
     const d = run.agentDone;
     let done;
@@ -341,4 +461,4 @@ class Runs {
 }
 
 module.exports = {
-  writeLimits, Runs, snapshot, diffSnapshots, normalizeSite, RUN_TIMEOUT_MS };
+  runLimits, Runs, snapshot, modSnapshot, diffSnapshots, normalizeSite, boxRoot, RUN_TIMEOUT_MS, PRIVATE_FILES };

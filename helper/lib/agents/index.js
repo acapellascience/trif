@@ -148,10 +148,9 @@ function reminderText({ url, tabId }) {
 // Claude Code permissions for the workspace (written by `webmods setup`).
 const CLAUDE_SETTINGS = {
   permissions: {
-    // (Edits inside the workspace come from --permission-mode acceptEdits: with dontAsk, Edit/Write
-    // allow rules didn't let Claude Code 2.1.149 write at all. Writes outside the workspace are denied.)
     // (The claude adapter also passes these as --allowedTools/--disallowedTools, which is what actually
-    // takes effect in -p runs; this file keeps interactive `claude` sessions in the workspace consistent.)
+    // takes effect in -p runs, plus its per-run sandbox; this file keeps interactive `claude` sessions in
+    // the workspace consistent.)
     allow: getAdapter('claude').allowedTools,
     deny: getAdapter('claude').deniedTools,
   },

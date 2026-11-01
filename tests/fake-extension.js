@@ -39,6 +39,7 @@ function testEnv(home, extra = {}) {
     WEBMODS_DEFAULT_AGENT_DIRS: '',
     WEBMODS_UPDATE_DELAY: '2000000000', // no update check over the network during a test
     WEBMODS_NO_LAUNCHCTL: '1', // setup --browser safari writes the bridge's agent but doesn't start it
+    WEBMODS_BOX_ROOT: path.join(home, 'boxes'), // agent runs' mailboxes (runs.js boxRoot)
     ...extra,
   };
 }

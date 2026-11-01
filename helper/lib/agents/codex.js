@@ -5,15 +5,20 @@
 //              -c approval_policy="never" -c default_permissions="webmods-run" -c permissions={…}
 //              [-m MODEL] [resume THREAD_ID] PROMPT
 //
-// The run's site is enforced by the operating system, not just asked for: a permission profile makes the
-// workspace read-only except the mods folder and screenshots/, and makes every existing mod folder of
-// another site read-only inside it, so a run can't change or delete other sites' mods (or WebMods' own
-// files: held.json, config.json) whatever it's told; config.json, which may hold API keys, isn't even
-// readable (as for Claude Code). A new folder for another site can still be created;
-// mods in it are held until the user approves them, like any out-of-scope mod (macOS Seatbelt, Linux bubblewrap;
-// Codex refuses to run a command it can't sandbox). The user's own Codex config and rules files are
-// ignored for these runs, since a sandbox_mode there would replace the profile and an "allow" rule could
-// run commands outside it. Network stays on: `webmods` reaches the helper over a unix socket.
+// The run's limits (runs.js runLimits) are enforced by the operating system, not just asked for: a
+// permission profile (macOS Seatbelt, Linux bubblewrap; Codex refuses to run a command it can't sandbox)
+// lets the commands it runs
+//   - read the workspace, the WebMods code and node, and nothing else in the home folder (no ~/.ssh, no
+//     Codex's own login), nor the workspace's secrets and other runs' traces (config.json, safari-token,
+//     runs/, screenshots/, helper.log);
+//   - write only the mods folder (every existing mod folder of another site read-only inside it), the
+//     run's screenshots folder and its mailbox, so a run can't change other sites' mods or WebMods' own
+//     files. A new folder for another site can still be created; mods in it are held until the user
+//     approves them, like any out-of-scope mod;
+//   - reach no network at all: `webmods` talks to the helper through the run's mailbox (client.js), so
+//     a run can't send what it read anywhere, nor reach the helper's sockets without its site limit.
+// The user's own Codex config and rules files are ignored for these runs, since a sandbox_mode there would
+// replace the profile and an "allow" rule could run commands outside it.
 //
 // JSONL events: {type:"thread.started", thread_id} | {type:"turn.started"} |
 // {type:"item.started"|"item.updated"|"item.completed", item:{id, type, ...}} |
@@ -33,13 +38,16 @@ const MIN_VERSION = [0, 138, 0]; // permission profiles
 const tomlKey = (s) => JSON.stringify(String(s)); // a JSON string is a valid TOML basic string here
 
 /**
- * The inline TOML table for -c permissions=…: the workspace read-only, `writable` folders writable,
- * `readOnly` folders inside them read-only again (the more specific path wins), `denied` unreadable.
+ * The inline TOML table for -c permissions=…: `denied` unreadable, `readable` read-only, `writable`
+ * writable, `readOnly` read-only again inside those; the more specific path wins (so a readable workspace
+ * inside a denied home folder is readable, and a writable mailbox inside a denied runs/ is writable).
+ * No network.
  */
-function permissionsToml(writable = [], readOnly = [], denied = []) {
+function permissionsToml({ readable = [], writable = [], readOnly = [], denied = [] } = {}) {
   const fsRules = [`${tomlKey(':workspace_roots')} = { "." = "read" }`,
-    ...writable.map((p) => `${tomlKey(p)} = "write"`), ...readOnly.map((p) => `${tomlKey(p)} = "read"`), ...denied.map((p) => `${tomlKey(p)} = "deny"`)];
-  return `{ ${PROFILE} = { extends = ":workspace", filesystem = { ${fsRules.join(', ')} }, network = { enabled = true } } }`;
+    ...denied.map((p) => `${tomlKey(p)} = "deny"`), ...readable.map((p) => `${tomlKey(p)} = "read"`),
+    ...writable.map((p) => `${tomlKey(p)} = "write"`), ...readOnly.map((p) => `${tomlKey(p)} = "read"`)];
+  return `{ ${PROFILE} = { extends = ":workspace", filesystem = { ${fsRules.join(', ')} }, network = { enabled = false } } }`;
 }
 
 function tooOld(version) {
@@ -83,10 +91,10 @@ const adapter = {
   },
 
   // writable / readOnly / denied: absolute (real) paths; see permissionsToml.
-  command({ bin, prompt, sessionId, model, writable = [], readOnly = [], denied = [] }) {
+  command({ bin, prompt, sessionId, model, readable = [], writable = [], readOnly = [], denied = [] }) {
     // Exec options go before the `resume` subcommand (verified with Codex 0.166).
     const args = ['exec', '--json', '--skip-git-repo-check', '--ignore-user-config', '--ignore-rules',
-      '-c', 'approval_policy="never"', '-c', `default_permissions="${PROFILE}"`, '-c', `permissions=${permissionsToml(writable, readOnly, denied)}`];
+      '-c', 'approval_policy="never"', '-c', `default_permissions="${PROFILE}"`, '-c', `permissions=${permissionsToml({ readable, writable, readOnly, denied })}`];
     if (model) args.push('-m', model);
     if (sessionId) args.push('resume', sessionId);
     args.push('--', prompt); // `--`: a message starting with "-" isn't an option

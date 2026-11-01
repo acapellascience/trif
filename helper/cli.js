@@ -167,6 +167,23 @@ async function resolveSock(ws, opts) {
   return ws.sock;
 }
 
+/**
+ * A file the CLI reads (`write` false) or writes for its options (-f, -o, check). Inside a side-panel
+ * agent run (WEBMODS_RUN_BOX) only the mods folder, and for writing the run's screenshots folder: the
+ * run's sandbox enforces that too, and this says so plainly instead of "Operation not permitted".
+ */
+function optionPath(ctx, file, { write = false } = {}) {
+  const resolved = path.resolve(String(file));
+  if (!process.env.WEBMODS_RUN_BOX) return resolved;
+  const real = (p) => { try { return fs.realpathSync(p); } catch { return path.resolve(p); } };
+  const target = write ? path.join(real(path.dirname(resolved)), path.basename(resolved)) : real(resolved);
+  const roots = [ctx.ws.modsDir, ...(write && process.env.WEBMODS_RUN_SCREENSHOTS ? [process.env.WEBMODS_RUN_SCREENSHOTS] : [])].map(real);
+  if (!roots.some((r) => target.startsWith(r + path.sep))) {
+    throw new UsageError(`inside a side-panel agent run, ${write ? 'files are written' : 'files are read'} only in ${roots.join(' or ')}`);
+  }
+  return target;
+}
+
 function makeCtx(opts) {
   const ws = P.workspace(opts['--home']);
   let sockP = null;
@@ -290,6 +307,7 @@ const handlers = {
     if (!pos[0]) throw new UsageError('missing file');
     let file = pos[0];
     if (!fs.existsSync(file) && /^[^/\s]+\/[^/\s]+$/.test(file.replace(/\.js$/, ''))) file = path.join(ctx.ws.modsDir, `${file.replace(/\.js$/, '')}.js`);
+    file = optionPath(ctx, file);
     const code = fs.readFileSync(file, 'utf8');
     // Compiles without running anything (side-panel agents may not run code; this replaces node --check).
     try { new vm.Script(code, { filename: path.resolve(file) }); } catch (e) {
@@ -401,7 +419,8 @@ const handlers = {
   async run(ctx, pos) {
     let code;
     if (ctx.opts['-f']) {
-      try { code = fs.readFileSync(ctx.opts['-f'], 'utf8'); } catch (e) { throw new UsageError(`can't read ${ctx.opts['-f']}: ${e.message}`); }
+      const file = optionPath(ctx, ctx.opts['-f']);
+      try { code = fs.readFileSync(file, 'utf8'); } catch (e) { throw new UsageError(`can't read ${ctx.opts['-f']}: ${e.message}`); }
     } else if (pos.length === 1 && pos[0] === '-') {
       code = await readStdin();
     } else if (pos.length) {
@@ -452,11 +471,13 @@ const handlers = {
     if (!m) throw new HelperError('the extension returned no image data', 'command');
     let file = ctx.opts['-o'];
     if (!file) {
+      // In a run, its own screenshots folder (it may not see other sites').
+      const dir = process.env.WEBMODS_RUN_SCREENSHOTS || ctx.ws.screenshots;
       const stamp = new Date().toISOString().replace(/[:]/g, '-').replace(/\..+$/, '');
-      file = path.join(ctx.ws.screenshots, `${stamp}.png`);
-      for (let n = 2; fs.existsSync(file); n++) file = path.join(ctx.ws.screenshots, `${stamp}-${n}.png`);
+      file = path.join(dir, `${stamp}.png`);
+      for (let n = 2; fs.existsSync(file); n++) file = path.join(dir, `${stamp}-${n}.png`);
     }
-    file = path.resolve(file);
+    file = optionPath(ctx, file, { write: true });
     fs.mkdirSync(path.dirname(file), { recursive: true });
     fs.writeFileSync(file, Buffer.from(m[2], 'base64'));
     if (ctx.json) return printJson({ file });
@@ -503,7 +524,7 @@ const handlers = {
     if (ctx.opts['-o']) {
       const body = prettyBody(r.responseText);
       const text = typeof body === 'string' ? body : JSON.stringify(body, null, 2) + '\n';
-      const file = path.resolve(ctx.opts['-o']);
+      const file = optionPath(ctx, ctx.opts['-o'], { write: true });
       fs.mkdirSync(path.dirname(file), { recursive: true });
       fs.writeFileSync(file, text == null ? '' : text);
       delete view.responseText;
@@ -892,7 +913,8 @@ async function main(argv) {
       return 1;
     }
     if (e instanceof HelperError && e.kind === 'no-helper') {
-      process.stderr.write(NO_HELPER_MESSAGE + '\n');
+      // Inside a side-panel run the helper is reached through the run's mailbox: gone means the run ended.
+      process.stderr.write((process.env.WEBMODS_RUN_BOX ? `webmods: ${e.message}` : NO_HELPER_MESSAGE) + '\n');
       return 2;
     }
     if (e instanceof HelperError || e instanceof trash.TrashError) {

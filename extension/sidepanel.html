@@ -29,9 +29,13 @@
   <p id="agent-note" class="note" hidden></p>
   <label class="field">
     <span>Model</span>
-    <input id="model" type="text" list="model-options" placeholder="Agent default" autocomplete="off" spellcheck="false">
-    <datalist id="model-options"><option value="opus"><option value="sonnet"><option value="haiku"></datalist>
+    <select id="model"><option value="">Default</option></select>
   </label>
+  <label id="model-custom-row" class="field" hidden>
+    <span></span>
+    <input id="model-custom" type="text" placeholder="Exact model name" autocomplete="off" spellcheck="false" aria-label="Exact model name">
+  </label>
+  <p id="model-note" class="note" hidden></p>
   <label class="field field-stacked">
     <span>Instructions for your agent</span>
     <textarea id="instructions" rows="3" maxlength="4000" spellcheck="true" disabled

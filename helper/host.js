@@ -294,7 +294,7 @@ const runs = new Runs({
 const logins = new Logins({ getWorkspace: () => workspace(ws.home), logger, onEvent: onAgentEvent });
 const runSubscribers = new Map(); // runId or loginId -> Set of CLI sockets that started it (see onClientLine)
 const AGENT_COMMANDS = new Set(['agent.list', 'agent.start', 'agent.stop', 'agent.login', 'agent.loginCode', 'agent.loginCancel', 'mod.approve',
-  'instructions.get', 'instructions.set', 'update.check', 'update.install', 'update.setAuto', 'report.build']);
+  'instructions.get', 'instructions.set', 'agent.models', 'update.check', 'update.install', 'update.setAuto', 'report.build']);
 // Helper-local too, but a run may use them (on mods inside its scope; see lib/trash.js).
 const MOD_FILE_COMMANDS = new Set(['mod.delete', 'mod.restore']);
 
@@ -321,6 +321,7 @@ function onAgentEvent(runId, event) {
 function agentCommand(cmd, args) {
   switch (cmd) {
     case 'agent.list': return agents.listAgentsWithLogin(workspace(ws.home));
+    case 'agent.models': return agents.agentModels(workspace(ws.home), String(args.agent || ''), { fresh: !!args.fresh });
     case 'agent.start': return runs.start(args);
     case 'agent.stop': return runs.stop(args.runId);
     case 'agent.login': return logins.start(args);

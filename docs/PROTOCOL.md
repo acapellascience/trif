@@ -560,6 +560,18 @@ Suffix List). `helper/lib/scope.js` computes it; `extension/lib.js` mirrors the 
   writes to `held.json`/`config.json`, fail with "Operation not permitted". A run can still create a
   folder for another site; its mods are held like any out-of-scope mod.
 
+### Models (`agent.models`)
+
+`agent.models {agent, fresh}` → `{agent, models:[{id, name, description}], default, custom, error, note}`:
+what the side panel's model picker offers for that agent (cached per agent binary for 30 minutes;
+`fresh` skips the cache). Codex: its own catalog for the signed-in account (`codex debug models`),
+the models it lists in its picker, ordered by priority; `default` is the first; `custom: false` (only
+those). Claude Code has no command that lists an account's models, so: its aliases `fable`, `opus`,
+`sonnet`, `haiku` (each the newest of its family), `custom: true` (the panel's "Other…" takes an exact
+name), with a `note` saying so. The panel keeps the chosen model per agent (chrome.storage `settings.models`,
+`{agentId: model}`; an older single `settings.model` becomes Claude Code's) and passes it as `agent.start`'s
+`model`.
+
 ### Agent adapters (`helper/lib/agents/<id>.js`)
 
 Each adapter: `detect(env) → {available, path, version, note}`, `command({prompt, sessionId, model,

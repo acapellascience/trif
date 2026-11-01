@@ -954,3 +954,36 @@ test('mod.delete / mod.restore: from the panel any mod; from a run only mods ins
   await extRequest(ext, 'agent.stop', { runId: r.result.runId });
   await waitDone(ext, r.result.runId);
 });
+
+test('agent.models: Codex lists the account\'s catalog (picker models, best first); Claude Code offers its aliases', async () => {
+  const { home, bin } = makeHome();
+  // A fake codex whose `debug models` prints a catalog like the real one (padded past 64 KB, as the real
+  // one is with each model's instructions).
+  const catalog = { models: [
+    { slug: 'hidden-review', display_name: 'Review', visibility: 'hide', priority: 1 },
+    { slug: 'gpt-older', display_name: 'GPT-Older', description: 'Older.', visibility: 'list', priority: 9, base_instructions: 'x'.repeat(70000) },
+    { slug: 'gpt-best', display_name: 'GPT-Best', description: 'Best.', visibility: 'list', priority: 2 },
+  ] };
+  fs.writeFileSync(path.join(bin, 'catalog.json'), JSON.stringify(catalog));
+  fs.writeFileSync(path.join(bin, 'codex'), `#!/bin/sh\nif [ "$1" = "--version" ]; then echo "codex-cli 0.166.0"; exit 0; fi\nif [ "$1 $2" = "debug models" ]; then /bin/cat "${bin}/catalog.json"; exit 0; fi\nexit 1\n`);
+  fs.chmodSync(path.join(bin, 'codex'), 0o755);
+  const ext = startHost(home);
+  await ext.waitForSocket();
+  let r = await extRequest(ext, 'agent.models', { agent: 'codex' });
+  assert.equal(r.ok, true, r.error);
+  assert.deepStrictEqual(r.result.models.map((m) => [m.id, m.name, m.description]), [['gpt-best', 'GPT-Best', 'Best.'], ['gpt-older', 'GPT-Older', 'Older.']]);
+  assert.equal(r.result.default, 'gpt-best');
+  assert.equal(r.result.custom, false);
+  r = await extRequest(ext, 'agent.models', { agent: 'claude' });
+  assert.deepStrictEqual(r.result.models.map((m) => m.id), ['fable', 'opus', 'sonnet', 'haiku']);
+  assert.equal(r.result.custom, true);
+  assert.match(r.result.note, /can't say which models/);
+  r = await extRequest(ext, 'agent.models', { agent: 'nope' });
+  assert.match(r.error, /unknown agent/);
+  // Too old for permission profiles: not offered at all.
+  fs.writeFileSync(path.join(bin, 'codex'), '#!/bin/sh\necho "codex-cli 0.120.0"\n');
+  r = await extRequest(ext, 'agent.list', {});
+  const cx = r.result.agents.find((a) => a.id === 'codex');
+  assert.equal(cx.available, false);
+  assert.match(cx.note, /too old for WebMods \(it needs 0\.138\.0 or newer\)/);
+});

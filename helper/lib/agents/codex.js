@@ -22,7 +22,7 @@
 // exit_code, status}, file_change {changes:[{path, kind}]}, mcp_tool_call {server, tool},
 // web_search {query}, todo_list, error {message}.
 
-const { findExecutable, versionOf, relToWorkspace, oneLine, parseJsonLine, captureSync } = require('./util');
+const { findExecutable, versionOf, relToWorkspace, oneLine, parseJsonLine, captureSync, capture } = require('./util');
 
 const NOT_LOGGED_IN = "Codex isn't logged in: run `codex login` in a terminal (or set OPENAI_API_KEY under \"env\" in the workspace's config.json)";
 const AUTH_RE = /not logged in|unauthori[sz]ed|\b401\b|please (run )?`?codex login|missing (api key|credentials)/i;
@@ -65,6 +65,21 @@ const adapter = {
     const v = version ? versionOf(file, env) : null;
     if (tooOld(v)) return { available: false, path: file, version: v, note: `Codex ${v} is too old for WebMods (it needs ${MIN_VERSION.join('.')} or newer): update it (brew upgrade codex, or npm install -g @openai/codex)` };
     return { available: true, path: file, version: v, note: '' };
+  },
+
+  // The models this account can use: Codex's own catalog (`codex debug models`, fetched for the signed-in
+  // account), the ones it lists in its picker, best first. Its first one is what it uses by default.
+  async listModels({ path: file, env, cwd }) {
+    // (The catalog includes each model's full instructions: tens of KB.)
+    const r = await capture(file, ['debug', 'models'], { env, cwd, timeout: 20000, maxBytes: 8 * 1024 * 1024 });
+    let catalog = null;
+    try { catalog = JSON.parse(r.stdout); } catch { /* below */ }
+    const list = Array.isArray(catalog?.models) ? catalog.models : null;
+    if (!list) return { models: [], default: null, custom: true, error: `couldn't read Codex's model list${r.stderr ? `: ${oneLine(r.stderr).slice(0, 200)}` : ''}` };
+    const models = list.filter((m) => m && typeof m.slug === 'string' && m.visibility === 'list')
+      .sort((a, b) => (a.priority ?? 99) - (b.priority ?? 99))
+      .map((m) => ({ id: m.slug, name: typeof m.display_name === 'string' && m.display_name ? m.display_name : m.slug, description: typeof m.description === 'string' ? m.description : '' }));
+    return { models, default: models[0]?.id || null, custom: false, error: null };
   },
 
   // writable / readOnly / denied: absolute (real) paths; see permissionsToml.

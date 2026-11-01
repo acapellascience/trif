@@ -69,7 +69,7 @@ function captureSync(file, args, { env, cwd, timeout = 10000 } = {}) {
 }
 
 // The same without blocking the helper (agent.list asks for login status often). Never rejects.
-function capture(file, args, { env, cwd, timeout = 10000 } = {}) {
+function capture(file, args, { env, cwd, timeout = 10000, maxBytes = 65536 } = {}) {
   return new Promise((resolve) => {
     let stdout = '';
     let stderr = '';
@@ -92,7 +92,7 @@ function capture(file, args, { env, cwd, timeout = 10000 } = {}) {
     timer = setTimeout(() => { error = new Error(`timed out after ${timeout}ms`); try { child.kill('SIGKILL'); } catch { /* gone */ } }, timeout);
     child.stdout.setEncoding('utf8');
     child.stderr.setEncoding('utf8');
-    child.stdout.on('data', (d) => { if (stdout.length < 65536) stdout += d; });
+    child.stdout.on('data', (d) => { if (stdout.length < maxBytes) stdout += d; });
     child.stderr.on('data', (d) => { if (stderr.length < 65536) stderr += d; });
     child.on('error', (e) => { error = error || e; if (child.pid === undefined) finish(null); }); // couldn't start
     child.on('close', (code) => finish(code));

@@ -35,6 +35,15 @@ const adapter = {
     return { available: true, path: file, version: version ? versionOf(file, env) : null, note: '' };
   },
 
+  // Claude Code has no command that lists the models an account can use, so: its aliases, each the
+  // newest model of its family (what `claude --model` documents), and any exact name typed in.
+  async listModels() {
+    const models = [['fable', 'Fable'], ['opus', 'Opus'], ['sonnet', 'Sonnet'], ['haiku', 'Haiku']]
+      .map(([id, name]) => ({ id, name: `${name} (newest)`, description: '' }));
+    return { models, default: null, custom: true, error: null,
+      note: "Claude Code can't say which models your account has. Each name is the newest of its family; use Other for an exact model name." };
+  },
+
   command({ bin, prompt, sessionId, model, context }) {
     const args = ['-p', prompt, '--output-format', 'stream-json', '--verbose',
       '--permission-mode', 'acceptEdits', '--setting-sources', 'project', '--strict-mcp-config',

@@ -15,6 +15,7 @@ const ui = {
   dot: $('#dot'), site: $('#site'), siteSwitch: $('#site-switch'), newChat: $('#new-chat'), settingsBtn: $('#settings-btn'),
   gate: $('#gate'), gateBtn: $('#gate-btn'), gateErr: $('#gate-err'),
   settings: $('#settings'), agent: $('#agent'), agentNote: $('#agent-note'), model: $('#model'),
+  modelCustomRow: $('#model-custom-row'), modelCustom: $('#model-custom'), modelNote: $('#model-note'),
   instructions: $('#instructions'), instructionsNote: $('#instructions-note'),
   autoUpdate: $('#auto-update'), updateNote: $('#update-note'), update: $('#update'),
   report: $('#report'), reportText: $('#report-text'), reportPreview: $('#report-preview'), reportNote: $('#report-note'),
@@ -33,7 +34,9 @@ const view = {
   status: null,              // background status (helper, userScripts, mods…)
   agents: null,              // agent.list result, or null when unknown
   agentsError: null,
-  settings: { agent: '', model: '' },
+  settings: { agent: '', models: {} }, // models: agent id -> chosen model ('' = the agent's default)
+  modelLists: {},            // agent id -> agent.models result (what that agent offers)
+  modelOther: {},            // agent id -> true while "Other…" is picked but nothing typed yet
   rendered: { site: null, count: 0, first: null },
   modsOpenFor: null,         // set once the mods <details> open state has been restored
   modsKey: null,             // which mods the list was last built for (switches update in place)
@@ -141,7 +144,7 @@ async function init() {
   view.windowId = win.id;
   const stored = await chrome.storage.local.get(['settings', 'disabled', 'offSites', 'updated']);
   view.updated = stored.updated || null;
-  view.settings = { agent: '', model: '', ...(stored.settings || {}) };
+  view.settings = normalizeSettings(stored.settings);
   view.disabled = stored.disabled || {};
   view.offSites = normalizeOffSites(stored.offSites);
   renderSettings();
@@ -161,7 +164,7 @@ async function init() {
       render();
     }
     if (changes.settings) {
-      view.settings = { agent: '', model: '', ...(changes.settings.newValue || {}) };
+      view.settings = normalizeSettings(changes.settings.newValue);
       renderSettings();
       render();
     }
@@ -202,6 +205,18 @@ async function setTab(tab) {
   }
   render();
 }
+
+// Settings: the model is chosen per agent (an Opus choice means nothing to Codex). Before that there
+// was one `model`, only ever meaningful for Claude Code.
+function normalizeSettings(s) {
+  const out = { agent: '', models: {}, ...(s && typeof s === 'object' ? s : {}) };
+  if (!out.models || typeof out.models !== 'object') out.models = {};
+  if (typeof out.model === 'string' && out.model && !Object.keys(out.models).length) out.models = { claude: out.model };
+  delete out.model;
+  return out;
+}
+
+const chosenModel = (agentId) => (agentId && view.settings.models[agentId]) || '';
 
 function normalizeChat(c) {
   const chat = { ...emptyChat(), ...(c && typeof c === 'object' ? c : {}) };
@@ -796,7 +811,61 @@ function renderSettings() {
   const note = chosen?.note || (view.agentsError && !view.agents ? 'Agents are listed once the helper is connected.' : '');
   ui.agentNote.textContent = note;
   ui.agentNote.hidden = !note;
-  if (document.activeElement !== ui.model) ui.model.value = view.settings.model || '';
+  renderModels();
+}
+
+// ---- model picker -------------------------------------------------------------------------------
+// What the chosen agent offers (helper agent.models): Codex lists the models the signed-in account can
+// use; Claude Code can't, so it offers its family aliases plus "Other…" for an exact name.
+
+const OTHER = '__other__';
+
+async function loadModels(agentId, fresh = false) {
+  if (!agentId || !view.status?.helper?.connected) return;
+  try { view.modelLists[agentId] = await request({ type: 'agent.models', agent: agentId, fresh }); } catch (e) {
+    view.modelLists[agentId] = { models: [], default: null, custom: true, error: String(e?.message ?? e) };
+  }
+  renderModels();
+}
+
+function renderModels() {
+  const { id, info } = currentAgent();
+  const list = view.modelLists[id] || null;
+  const chosen = chosenModel(id);
+  const models = list?.models || [];
+  const allowsOther = !list || list.custom !== false;
+  const known = !chosen || models.some((m) => m.id === chosen);
+  const def = list?.default ? models.find((m) => m.id === list.default) : null;
+  const opts = [new Option(def ? `Default (${def.name})` : 'Default', '')];
+  for (const m of models) {
+    const o = new Option(m.name, m.id);
+    if (m.description) o.title = m.description;
+    opts.push(o);
+  }
+  if (!known && !allowsOther) opts.push(new Option(`${chosen} (not available)`, chosen));
+  if (allowsOther) opts.push(new Option('Other…', OTHER));
+  const value = (!known && allowsOther) || view.modelOther[id] ? OTHER : chosen;
+  if (document.activeElement !== ui.model) {
+    ui.model.replaceChildren(...opts);
+    ui.model.value = value;
+  }
+  ui.model.disabled = !id;
+  ui.modelCustomRow.hidden = value !== OTHER;
+  if (value === OTHER && document.activeElement !== ui.modelCustom) ui.modelCustom.value = known ? '' : chosen;
+
+  const selected = models.find((m) => m.id === (value === OTHER ? '' : value || list?.default));
+  const name = info?.name || 'this agent';
+  const note = list?.error ? `Couldn’t list ${name}’s models: ${list.error}`
+    : !known && !allowsOther ? `${chosen} isn’t one of the models your account can use; pick another.`
+      : value === OTHER || !selected?.description ? list?.note || '' : selected.description;
+  ui.modelNote.textContent = note;
+  ui.modelNote.hidden = !note;
+  ui.modelNote.classList.toggle('error', !!list?.error || (!known && !allowsOther));
+}
+
+async function saveModel(agentId, model) {
+  if (!agentId) return;
+  await saveSettings({ models: { ...view.settings.models, [agentId]: model } });
 }
 
 // ---- actions ------------------------------------------------------------------------------------
@@ -817,13 +886,16 @@ async function panelCommand(text) {
   const [, cmd, arg] = m;
   const note = (t) => request({ type: 'chat.note', site: view.site, text: t });
   if (cmd === 'model') {
+    const { id, info } = currentAgent();
+    const names = (view.modelLists[id]?.models || []).map((x) => x.id).join(', ');
     if (!arg.trim()) {
-      await note(`Model: ${view.settings.model || 'the agent\'s default'}. Change it with /model opus, sonnet, haiku or default.`);
+      await note(`Model: ${chosenModel(id) || `${info?.name || 'the agent'}’s default`}.${names ? ` Change it with /model followed by one of: ${names}, or default.` : ''}`);
     } else {
       const model = /^default$/i.test(arg.trim()) ? '' : arg.trim();
-      await saveSettings({ model });
-      if (document.activeElement !== ui.model) ui.model.value = model;
-      await note(model ? `Model set to ${model} (from the next message)` : 'Model set to the agent\'s default');
+      view.modelOther[id] = false;
+      await saveModel(id, model);
+      renderModels();
+      await note(model ? `Model set to ${model} (from the next message)` : `Model set to ${info?.name || 'the agent'}’s default`);
     }
     return true;
   }
@@ -846,7 +918,7 @@ async function send() {
   try {
     const { runId } = await request({
       type: 'agent.start', site: view.site, tabId: view.tab.id, url: view.tab.url, prompt: text,
-      sessionId, agent: agent || undefined, model: view.settings.model.trim() || undefined,
+      sessionId, agent: agent || undefined, model: chosenModel(agent) || undefined,
     });
     view.myRuns.add(runId);
   } catch (e) {
@@ -900,7 +972,7 @@ ui.settingsBtn.addEventListener('click', () => {
   const open = ui.settings.hidden;
   ui.settings.hidden = !open;
   ui.settingsBtn.setAttribute('aria-expanded', String(open));
-  if (open && view.status?.helper?.connected) { loadAgents(); loadInstructions(); }
+  if (open && view.status?.helper?.connected) { loadAgents().then(() => loadModels(currentAgent().id)); loadInstructions(); }
 });
 
 // The user's standing instructions for every agent run: ~/.webmods/instructions.md, read and written
@@ -946,13 +1018,28 @@ ui.instructions.addEventListener('input', () => {
   instructionsTimer = setTimeout(saveInstructions, 800);
 });
 ui.instructions.addEventListener('blur', saveInstructions);
-ui.agent.addEventListener('change', () => saveSettings({ agent: ui.agent.value }));
-let modelTimer = null;
-ui.model.addEventListener('input', () => {
-  clearTimeout(modelTimer);
-  modelTimer = setTimeout(() => saveSettings({ model: ui.model.value.trim() }), 400);
+ui.agent.addEventListener('change', async () => {
+  await saveSettings({ agent: ui.agent.value });
+  renderModels();
+  loadModels(currentAgent().id);
 });
-ui.model.addEventListener('change', () => { clearTimeout(modelTimer); saveSettings({ model: ui.model.value.trim() }); });
+ui.model.addEventListener('change', () => {
+  const { id } = currentAgent();
+  if (ui.model.value === OTHER) {
+    view.modelOther[id] = true;
+    renderModels();
+    ui.modelCustom.focus();
+    return;
+  }
+  view.modelOther[id] = false;
+  saveModel(id, ui.model.value).then(renderModels);
+});
+let modelTimer = null;
+ui.modelCustom.addEventListener('input', () => {
+  clearTimeout(modelTimer);
+  modelTimer = setTimeout(() => saveModel(currentAgent().id, ui.modelCustom.value.trim()), 400);
+});
+ui.modelCustom.addEventListener('change', () => { clearTimeout(modelTimer); saveModel(currentAgent().id, ui.modelCustom.value.trim()); });
 $('#setup-link').addEventListener('click', (e) => { e.preventDefault(); openSetup(); });
 
 // ---- updates ------------------------------------------------------------------------------------

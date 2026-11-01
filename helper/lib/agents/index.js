@@ -101,6 +101,26 @@ async function listAgentsWithLogin(ws, opts = {}) {
   return r;
 }
 
+// The models an agent offers ({models: [{id, name, description}], default, custom, error, note}),
+// cached per binary for half an hour: Codex fetches its catalog over the network.
+const MODELS_CACHE_MS = 30 * 60 * 1000;
+const modelsCache = new Map(); // `${id}:${path}` -> {at, value}
+
+async function agentModels(ws, id, { fresh = false } = {}) {
+  const adapter = getAdapter(id);
+  if (!adapter) throw new Error(`unknown agent "${id}"`);
+  const d = detect(adapter, ws, { version: false });
+  if (!d.available) return { agent: id, models: [], default: null, custom: true, error: `${adapter.name} isn't available`, note: '' };
+  const key = `${id}:${d.path}`;
+  const hit = modelsCache.get(key);
+  if (!fresh && hit && Date.now() - hit.at < MODELS_CACHE_MS) return hit.value;
+  let r;
+  try { r = await adapter.listModels({ path: d.path, env: agentEnv(ws), cwd: ws.home }); } catch (e) { r = { models: [], default: null, custom: true, error: e.message }; }
+  const value = { agent: id, note: '', ...r };
+  if (!value.error) modelsCache.set(key, { at: Date.now(), value });
+  return value;
+}
+
 function hostOf(url) {
   try { return new URL(url).hostname.replace(/^www\./, ''); } catch { return ''; }
 }
@@ -139,5 +159,5 @@ const CLAUDE_SETTINGS = {
 
 module.exports = {
   ADAPTERS, getAdapter, defaultDirs, recordedPath, searchDirs, agentEnv, detect, listAgents,
-  listAgentsWithLogin, loginStatus, forgetLoginStatus, LOGIN_CACHE_MS, contextText, reminderText, hostOf, CLAUDE_SETTINGS, PASSED_KEYS,
+  listAgentsWithLogin, loginStatus, forgetLoginStatus, LOGIN_CACHE_MS, agentModels, contextText, reminderText, hostOf, CLAUDE_SETTINGS, PASSED_KEYS,
 };

@@ -551,8 +551,14 @@ Suffix List). `helper/lib/scope.js` computes it; `extension/lib.js` mirrors the 
   rewrite the rules: so Claude Code runs get no command that runs arbitrary code (no `node`), can't
   edit `held.json`, `config.json`, `AGENTS.md`, `CLAUDE.md`, `.claude/`, `bin/` or `app/` (verified
   with Claude Code 2.1.312), and can't read
-  `config.json` (it may hold API keys). Codex runs use Codex's workspace-write sandbox, which can run
-  any command in the workspace: the scope is advisory for Codex (still experimental).
+  `config.json` (it may hold API keys). Codex runs can run any command, so the limits are enforced by
+  the operating system instead: a Codex permission profile (`runs.js` writeLimits, `codex.js`
+  permissionsToml) makes the workspace read-only except the mods folder and `screenshots/`, makes
+  every existing mod folder of another site read-only inside it, and denies reading `config.json`; the
+  user's own Codex config and rules files aren't loaded for runs (a `sandbox_mode` there would replace
+  the profile). Verified with Codex 0.166 on macOS: edits, deletes and renames of other sites' mods, and
+  writes to `held.json`/`config.json`, fail with "Operation not permitted". A run can still create a
+  folder for another site; its mods are held like any out-of-scope mod.
 
 ### Agent adapters (`helper/lib/agents/<id>.js`)
 
@@ -582,9 +588,14 @@ The user's standing instructions (`instructions.md`) reach claude through the wo
   relative to the workspace); `{type:"result", is_error, result, total_cost_usd, session_id}` → done.
   "Not logged in" in the result → error "Claude Code isn't logged in: run `claude` in a terminal and log in
   (type /login)".
-- **codex** (OpenAI Codex CLI, experimental, not installed here): `codex exec --json …` with resume by
-  thread id; research the current CLI flags and JSONL event shapes from its docs; mark `note:
-  "experimental"`.
+- **codex** (OpenAI Codex CLI 0.138+; tested with 0.166): `codex exec --json --skip-git-repo-check
+  --ignore-user-config --ignore-rules -c approval_policy="never" -c default_permissions="webmods-run"
+  -c permissions={…} [-m MODEL] [resume THREAD_ID] PROMPT`, the exec options before `resume`. JSONL
+  events: thread.started (the session id), item.* (agent_message, command_execution, file_change…),
+  turn.completed / turn.failed. Older versions show as unavailable, with an update hint. No side panel
+  login (`codex login` in a terminal). Codex's Homebrew build ships a ripgrep (`rg`) that isn't
+  notarized, so macOS may show an "rg Not Opened" dialog during runs: harmless (click Done), or clear it
+  with `xattr -d com.apple.quarantine <codex dir>/codex-path/rg`.
 
 Security notes: page content reaches the agent, so prompt injection is possible. The agent is limited
 to editing the workspace and running `webmods` (which can still run JavaScript in the user's tabs);

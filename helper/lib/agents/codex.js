@@ -1,9 +1,19 @@
 'use strict';
-// OpenAI Codex CLI adapter. EXPERIMENTAL: written from the Codex docs (non-interactive mode) and
-// codex-rs/exec/src/{cli.rs,exec_events.rs}, not tested against a real install.
+// OpenAI Codex CLI adapter (tested with Codex 0.166; needs 0.138+ for permission profiles).
 //
-//   codex exec --json --skip-git-repo-check --sandbox workspace-write
-//              -c sandbox_workspace_write.network_access=true [-m MODEL] [resume THREAD_ID] PROMPT
+//   codex exec --json --skip-git-repo-check --ignore-user-config --ignore-rules
+//              -c approval_policy="never" -c default_permissions="webmods-run" -c permissions={…}
+//              [-m MODEL] [resume THREAD_ID] PROMPT
+//
+// The run's site is enforced by the operating system, not just asked for: a permission profile makes the
+// workspace read-only except the mods folder and screenshots/, and makes every existing mod folder of
+// another site read-only inside it, so a run can't change or delete other sites' mods (or WebMods' own
+// files: held.json, config.json) whatever it's told; config.json, which may hold API keys, isn't even
+// readable (as for Claude Code). A new folder for another site can still be created;
+// mods in it are held until the user approves them, like any out-of-scope mod (macOS Seatbelt, Linux bubblewrap;
+// Codex refuses to run a command it can't sandbox). The user's own Codex config and rules files are
+// ignored for these runs, since a sandbox_mode there would replace the profile and an "allow" rule could
+// run commands outside it. Network stays on: `webmods` reaches the helper over a unix socket.
 //
 // JSONL events: {type:"thread.started", thread_id} | {type:"turn.started"} |
 // {type:"item.started"|"item.updated"|"item.completed", item:{id, type, ...}} |
@@ -17,26 +27,51 @@ const { findExecutable, versionOf, relToWorkspace, oneLine, parseJsonLine, captu
 const NOT_LOGGED_IN = "Codex isn't logged in: run `codex login` in a terminal (or set OPENAI_API_KEY under \"env\" in the workspace's config.json)";
 const AUTH_RE = /not logged in|unauthori[sz]ed|\b401\b|please (run )?`?codex login|missing (api key|credentials)/i;
 
+const PROFILE = 'webmods-run';
+const MIN_VERSION = [0, 138, 0]; // permission profiles
+
+const tomlKey = (s) => JSON.stringify(String(s)); // a JSON string is a valid TOML basic string here
+
+/**
+ * The inline TOML table for -c permissions=…: the workspace read-only, `writable` folders writable,
+ * `readOnly` folders inside them read-only again (the more specific path wins), `denied` unreadable.
+ */
+function permissionsToml(writable = [], readOnly = [], denied = []) {
+  const fsRules = [`${tomlKey(':workspace_roots')} = { "." = "read" }`,
+    ...writable.map((p) => `${tomlKey(p)} = "write"`), ...readOnly.map((p) => `${tomlKey(p)} = "read"`), ...denied.map((p) => `${tomlKey(p)} = "deny"`)];
+  return `{ ${PROFILE} = { extends = ":workspace", filesystem = { ${fsRules.join(', ')} }, network = { enabled = true } } }`;
+}
+
+function tooOld(version) {
+  const m = /(\d+)\.(\d+)(?:\.(\d+))?/.exec(String(version || ''));
+  if (!m) return false; // unknown: let it try
+  const v = [Number(m[1]), Number(m[2]), Number(m[3] || 0)];
+  for (let i = 0; i < 3; i++) if (v[i] !== MIN_VERSION[i]) return v[i] < MIN_VERSION[i];
+  return false;
+}
+
 const adapter = {
   id: 'codex',
   name: 'Codex',
   binary: 'codex',
   systemPrompt: false, // context is prepended to the prompt
-  note: 'experimental',
+  note: '',
   missing: "Codex isn't installed, or the helper can't find it. Install it (npm install -g @openai/codex), " +
     'then run `webmods setup` in the same terminal so the helper finds it.',
 
   detect({ dirs, env, version = true }) {
     const file = findExecutable(adapter.binary, dirs);
-    if (!file) return { available: false, path: null, version: null, note: 'experimental; not found' };
-    return { available: true, path: file, version: version ? versionOf(file, env) : null, note: 'experimental' };
+    if (!file) return { available: false, path: null, version: null, note: 'not found' };
+    const v = version ? versionOf(file, env) : null;
+    if (tooOld(v)) return { available: false, path: file, version: v, note: `Codex ${v} is too old for WebMods (it needs ${MIN_VERSION.join('.')} or newer): update it (brew upgrade codex, or npm install -g @openai/codex)` };
+    return { available: true, path: file, version: v, note: '' };
   },
 
-  command({ bin, prompt, sessionId, model }) {
-    // Exec options go before the `resume` subcommand (valid whether or not clap marks them global).
-    const args = ['exec', '--json', '--skip-git-repo-check', '--sandbox', 'workspace-write',
-      // `webmods` talks to the helper over a unix socket; the sandbox blocks that without network access.
-      '-c', 'sandbox_workspace_write.network_access=true'];
+  // writable / readOnly / denied: absolute (real) paths; see permissionsToml.
+  command({ bin, prompt, sessionId, model, writable = [], readOnly = [], denied = [] }) {
+    // Exec options go before the `resume` subcommand (verified with Codex 0.166).
+    const args = ['exec', '--json', '--skip-git-repo-check', '--ignore-user-config', '--ignore-rules',
+      '-c', 'approval_policy="never"', '-c', `default_permissions="${PROFILE}"`, '-c', `permissions=${permissionsToml(writable, readOnly, denied)}`];
     if (model) args.push('-m', model);
     if (sessionId) args.push('resume', sessionId);
     args.push(prompt);
@@ -129,4 +164,6 @@ function toolEvent(item, workspace) {
 }
 
 module.exports = adapter;
+adapter.permissionsToml = permissionsToml;
+adapter.tooOld = tooOld;
 module.exports.NOT_LOGGED_IN = NOT_LOGGED_IN;

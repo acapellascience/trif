@@ -5,7 +5,7 @@ want ("hide the trending sidebar", "only show people I follow"), and your agent 
 runs every time that site loads. Mods are plain JavaScript files on your computer; switch each one off
 and on from the side panel.
 
-WebMods uses the agent you already have (Claude Code today; Codex is experimental), on your own account.
+WebMods uses the coding agent you already have (Claude Code or Codex), on your own account.
 Nothing goes to a WebMods server: there isn't one.
 
 **Beta.** Expect rough edges, and please send feedback.
@@ -15,7 +15,9 @@ Nothing goes to a WebMods server: there isn't one.
 - A Mac (or Linux). Windows isn't supported yet.
 - Google Chrome 138 or newer.
 - Node 18 or newer: check with `node --version`, or install it from [nodejs.org](https://nodejs.org).
-- [Claude Code](https://claude.com/claude-code), installed. You can log in from the side panel.
+- A coding agent: [Claude Code](https://claude.com/claude-code) (you can log in from the side panel), or
+  [Codex](https://github.com/openai/codex) 0.138 or newer (`brew install codex`, then `codex login` in a terminal).
+  Pick one in the side panel's settings when you have both.
 
 ## Install
 
@@ -120,6 +122,8 @@ checks every piece and says how to fix what's broken. Common fixes:
   `npx webmods setup` again, then restart Chrome.
 - **Mods don't run**: make sure **Allow User Scripts** is on (step 3), then reload the page.
 - **Claude Code isn't found**: install it, then run `npx webmods setup` again in the same terminal.
+- **"rg" Not Opened** while Codex works: a search tool that ships with Codex hasn't been checked by
+  Apple. It's harmless: click Done (Codex works without it).
 
 Still stuck? **Report a problem** in the panel's Settings opens your mail app with a report of your setup
 and recent errors (no names, email addresses or full page addresses), ready to send. `webmods report`
@@ -139,7 +143,7 @@ a copy of `~/.webmods/sites` if you want them later.
 ## Privacy
 
 Your mods and chats stay on your computer. When you ask for a change, your coding agent reads the page
-you're on, and sends what it reads to its provider (Anthropic for Claude Code) under that provider's
+you're on, and sends what it reads to its provider (Anthropic for Claude Code, OpenAI for Codex) under that provider's
 terms. See [store/PRIVACY.md](store/PRIVACY.md).
 
 ## For developers

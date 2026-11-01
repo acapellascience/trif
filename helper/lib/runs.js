@@ -49,6 +49,23 @@ function newRunId() {
   return 'r' + Date.now().toString(36) + crypto.randomBytes(3).toString('hex');
 }
 
+function realOrResolved(p) {
+  try { return fs.realpathSync(p); } catch { return path.resolve(p); }
+}
+
+/**
+ * What a run may write, for agents whose sandbox can enforce it (Codex): the mods folder and screenshots/
+ * writable, every existing mod folder of another site (all-sites/ included) read-only inside it, and
+ * config.json (it may hold API keys) unreadable.
+ */
+function writeLimits(ws, scope) {
+  const writable = [ws.modsDir, ws.screenshots].map(realOrResolved);
+  let names = [];
+  try { names = fs.readdirSync(ws.modsDir, { withFileTypes: true }).filter((d) => d.isDirectory()).map((d) => d.name); } catch { /* none yet */ }
+  const readOnly = names.filter((n) => scopeFor(n) !== scope).map((n) => realOrResolved(path.join(ws.modsDir, n)));
+  return { writable, readOnly, denied: [realOrResolved(path.join(ws.home, 'config.json'))] };
+}
+
 function normalizeSite(site, url) {
   let s = typeof site === 'string' && site.trim() ? site.trim() : agents.hostOf(url);
   s = s.toLowerCase().replace(/^www\./, '');
@@ -203,7 +220,8 @@ class Runs {
     const extra = adapter.readsInstructions ? '' : instructionsContext(readInstructions(ws.home));
     if (adapter.systemPrompt) context = agents.contextText(ctx) + extra;
     else prompt = `${run.sessionId ? agents.reminderText(ctx) : agents.contextText(ctx) + extra}\n\n${prompt}`;
-    const { file, args } = adapter.command({ bin: found.path, prompt, sessionId: run.sessionId, model: run.model, context, workspace: ws.home });
+    for (const d of [ws.modsDir, ws.screenshots]) { try { fs.mkdirSync(d, { recursive: true }); } catch { /* reported by the agent */ } }
+    const { file, args } = adapter.command({ bin: found.path, prompt, sessionId: run.sessionId, model: run.model, context, workspace: ws.home, ...writeLimits(ws, run.scope) });
 
     run.before = snapshot(ws.modsDir, ws.home);
     // Tell the other browsers' helpers a run is going, so mods it creates start off there (lib/origins.js).
@@ -322,4 +340,5 @@ class Runs {
   }
 }
 
-module.exports = { Runs, snapshot, diffSnapshots, normalizeSite, RUN_TIMEOUT_MS };
+module.exports = {
+  writeLimits, Runs, snapshot, diffSnapshots, normalizeSite, RUN_TIMEOUT_MS };

@@ -210,11 +210,21 @@ test('claude adapter: parses init, text, tools, result; maps "Not logged in"', (
   assert.match(ev[0].message, /error_max_turns/);
 });
 
-test('codex adapter (experimental): command, resume, JSONL events', () => {
-  const c = codex.command({ bin: '/x/codex', prompt: 'P', model: 'gpt-5' });
+test('codex adapter: command, resume, JSONL events', () => {
+  const c = codex.command({ bin: '/x/codex', prompt: 'P', model: 'gpt-5', writable: ['/h/sites', '/h/screenshots'], readOnly: ['/h/sites/x.com'], denied: ['/h/config.json'] });
   assert.equal(c.args[0], 'exec');
   assert.ok(c.args.includes('--json') && c.args.includes('--skip-git-repo-check'));
   assert.deepEqual(c.args.slice(-3), ['-m', 'gpt-5', 'P']);
+  // The site limit is a permission profile the OS enforces; nothing that would replace it is loaded.
+  assert.ok(!c.args.includes('--sandbox'), 'the legacy --sandbox would override the profile');
+  assert.ok(c.args.includes('--ignore-user-config') && c.args.includes('--ignore-rules'));
+  assert.ok(c.args.includes('approval_policy="never"'));
+  assert.ok(c.args.includes('default_permissions="webmods-run"'));
+  assert.equal(c.args.find((a) => a.startsWith('permissions=')),
+    'permissions={ webmods-run = { extends = ":workspace", filesystem = { ":workspace_roots" = { "." = "read" }, "/h/sites" = "write", "/h/screenshots" = "write", "/h/sites/x.com" = "read", "/h/config.json" = "deny" }, network = { enabled = true } } }');
+  assert.equal(codex.tooOld('codex-cli 0.137.9'), true);
+  assert.equal(codex.tooOld('0.166.0'), false);
+  assert.equal(codex.tooOld(null), false);
   const r = codex.command({ bin: '/x/codex', prompt: 'P', sessionId: 'th1' });
   assert.deepEqual(r.args.slice(-3), ['resume', 'th1', 'P']);
 
@@ -258,7 +268,7 @@ test('context text names the URL and tab; diffSnapshots catches edits, adds and 
 
 // ------------------------------------------------------------------ host: agent.* commands
 
-test('agent.list: finds the fake claude on the recorded PATH, codex missing (experimental)', async () => {
+test('agent.list: finds the fake claude on the recorded PATH, codex missing', async () => {
   const { home, bin } = makeHome();
   const ext = startHost(home);
   const r = await extRequest(ext, 'agent.list');
@@ -271,7 +281,7 @@ test('agent.list: finds the fake claude on the recorded PATH, codex missing (exp
   });
   const x = r.result.agents.find((a) => a.id === 'codex');
   assert.equal(x.available, false);
-  assert.match(x.note, /experimental/);
+  assert.equal(x.note, 'not found');
   assert.equal(x.loggedIn, null);
   assert.equal(x.canLogin, false);
   // Same over the socket.
@@ -626,7 +636,7 @@ test('CLI: agent run streams events and prints a summary; agent list with and wi
   let r = await runCli(['agent', 'list'], { home });
   assert.equal(r.code, 0, r.stderr);
   assert.match(r.stdout, new RegExp(`^claude +Claude Code 9\\.9\\.9 +${bin.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}/claude +default$`, 'm'));
-  assert.match(r.stdout, /^codex +Codex: not found +experimental; not found$/m);
+  assert.match(r.stdout, /^codex +Codex: not found +not found$/m);
 
   r = await runCli(['agent', 'run', '--url', 'https://example.com/', '--tab', '12', 'x'], { home });
   assert.equal(r.code, 2, 'no helper');
@@ -767,7 +777,7 @@ test('setup records PATH (merging config.json) and writes .claude/settings.json;
   assert.match(r.stdout, /^ok {4}Claude Code 9\.9\.9 \(.*fakebin\/claude\)$/m);
   assert.match(r.stdout, /^warn {2}Claude Code isn't logged in, so the side panel can't use it$/m);
   assert.match(r.stdout, /fix: run `claude` in a terminal and log in/);
-  assert.match(r.stdout, /^- {5}Codex \(experimental\): not found/m);
+  assert.match(r.stdout, /^- {5}Codex: not found \(optional\)$/m);
 
   // Agent on the terminal's PATH but not the recorded one.
   fs.writeFileSync(path.join(ws, 'config.json'), JSON.stringify({ env: { PATH: '/usr/bin' } }));

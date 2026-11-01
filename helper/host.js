@@ -28,7 +28,7 @@ const agents = require('./lib/agents');
 const { updateHeld, approveHeld, heldFile } = require('./lib/held');
 const { startOffIds, startSitesOn } = require('./lib/preinstalled');
 const { readInstructions, writeInstructions, instructionsFile, MAX_LENGTH } = require('./lib/instructions');
-const { ownSock, removeStaleSockets } = require('./lib/helpers');
+const { ownSock, removeStaleSockets, codeStamp } = require('./lib/helpers');
 const { loadOrigins, recordOrigins, activeRuns } = require('./lib/origins');
 const { deleteMod, restoreMod, emptyTrash } = require('./lib/trash');
 const update = require('./lib/update');
@@ -489,9 +489,20 @@ function reloadExtension(reason) {
 // Another helper (the other browser's) or `npx webmods setup` replaced <home>/app under this one: this
 // process is running old code, so reload onto the new version.
 function checkAppReplaced() {
+  checkCodeChanged();
   if (state.installing || state.shuttingDown || !update.installable(ws).ok) return;
   const now = update.installedVersion(ws);
   if (now && now !== VERSION && !runs.list().length) reloadExtension(`${ws.appDir} is now version ${now}`);
+}
+
+// This helper's code as it was when it started. When it changes on disk (a checkout being edited, or setup
+// copying in a new version) and nothing is going on, exit, so the next helper runs the new code: Chrome
+// and Firefox start one when the extension reconnects, and the Safari bridge on the next connection (it
+// keeps a helper across Safari unloading the extension, so reloading the extension wouldn't do it).
+const startedCode = codeStamp(__dirname);
+function checkCodeChanged() {
+  if (state.installing || state.shuttingDown || runs.list().length || logins.info() || pending.size) return;
+  if (codeStamp(__dirname) > startedCode) shutdown("its code changed on disk; the next helper runs the new code");
 }
 
 // ---------------------------------------------------------------- problem reports (lib/report.js)

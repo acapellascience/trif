@@ -74,4 +74,24 @@ async function pickHelper(home, choice) {
   throw new HelperError(`more than one ${browserName(matches[0].info)} is connected (separate profiles); pick one with --browser <pid>. ${connected}`, 'command');
 }
 
-module.exports = { ownSock, helperSockets, removeStaleSockets, listHelpers, pickHelper, describeHelper, browserName, pidAlive };
+/**
+ * The newest modification time of the helper's code under `dir` (.js files, recursively), for a helper to
+ * notice that its own code changed on disk since it started (see host.js checkCodeChanged).
+ */
+function codeStamp(dir) {
+  let newest = 0;
+  const walk = (d) => {
+    let entries;
+    try { entries = fs.readdirSync(d, { withFileTypes: true }); } catch { return; }
+    for (const e of entries) {
+      if (e.name.startsWith('.') || e.name === 'node_modules') continue;
+      const p = path.join(d, e.name);
+      if (e.isDirectory()) walk(p);
+      else if (e.name.endsWith('.js')) { try { newest = Math.max(newest, fs.statSync(p).mtimeMs); } catch { /* vanished */ } }
+    }
+  };
+  walk(dir);
+  return newest;
+}
+
+module.exports = { ownSock, helperSockets, removeStaleSockets, listHelpers, pickHelper, describeHelper, browserName, pidAlive, codeStamp };

@@ -233,3 +233,21 @@ process.stdout.write('ready\\n');`;
   assert.ok(lines.length < 20, `log has ${lines.length} lines`);
   assert.ok(lines.some((l) => l.includes('line 4')));
 });
+
+test('codeStamp: the newest .js change under a folder, so a helper notices its code changed', () => {
+  const { codeStamp } = require('../helper/lib/helpers');
+  const dir = fs.mkdtempSync(path.join(require('os').tmpdir(), 'wm-code-'));
+  try {
+    fs.mkdirSync(path.join(dir, 'lib'));
+    fs.writeFileSync(path.join(dir, 'host.js'), '1');
+    fs.writeFileSync(path.join(dir, 'lib', 'a.js'), '1');
+    const old = new Date(Date.now() - 60000);
+    fs.utimesSync(path.join(dir, 'host.js'), old, old);
+    fs.utimesSync(path.join(dir, 'lib', 'a.js'), old, old);
+    const before = codeStamp(dir);
+    fs.writeFileSync(path.join(dir, 'notes.md'), 'x'); // not code
+    assert.equal(codeStamp(dir), before);
+    fs.writeFileSync(path.join(dir, 'lib', 'a.js'), '2');
+    assert.ok(codeStamp(dir) > before);
+  } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+});

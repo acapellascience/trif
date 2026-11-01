@@ -6,7 +6,7 @@ const P = require('./paths');
 
 const COMMANDS = {
   setup: {
-    usage: 'webmods setup [--browser chrome|chromium|brave|edge|arc|firefox|all] [--home DIR] [--copy|--link] [--no-link] [--no-examples]',
+    usage: 'webmods setup [--browser chrome|chromium|brave|edge|arc|firefox|safari|all] [--home DIR] [--copy|--link] [--no-link] [--no-examples]',
     summary: 'install the workspace, native messaging host and CLI link (safe to re-run)',
     details: `First time: npx webmods setup   (needs Node 18 or newer).
 Creates the workspace (sites/, screenshots/, bin/), installs the WebMods files the wrappers run,

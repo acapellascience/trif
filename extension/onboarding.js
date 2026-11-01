@@ -4,7 +4,7 @@
 
 import { modSites, offOnSite, normalizeOffSites, FIREFOX, BROWSER } from './lib.js';
 
-const PANEL = FIREFOX ? 'sidebar' : 'side panel';
+const PANEL = FIREFOX ? 'sidebar' : BROWSER === 'Safari' ? 'panel' : 'side panel';
 import { modSwitch, syncSwitches, shownEnabled, switchError, enabledIn, onSwitchChange } from './modswitch.js';
 
 const $ = (sel) => document.querySelector(sel);

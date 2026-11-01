@@ -5,7 +5,7 @@ const fs = require('fs');
 const path = require('path');
 const { spawnSync } = require('child_process');
 const P = require('./paths');
-const { browserTable } = require('./browsers');
+const { browserTable, safariAgentPlist } = require('./browsers');
 const { request } = require('./client');
 const { listHelpers, describeHelper } = require('./helpers');
 const { scanMods, planModsMessage } = require('./mods');
@@ -53,6 +53,19 @@ function checkWrapperScript(script, ws) {
     return { status: 'warn', title: `host wrapper runs ${script}, inside npm's npx cache, which npm may delete` };
   }
   return { status: 'warn', title: `host wrapper runs ${script}, not this copy (${P.HOST_JS})` };
+}
+
+const SAFARI_PORT = require('../safari-bridge').PORT;
+
+/** Whether something accepts connections on 127.0.0.1:port. */
+function portOpen(port, timeoutMs = 1000) {
+  return new Promise((resolve) => {
+    const sock = require('net').connect({ host: '127.0.0.1', port });
+    const done = (v) => { sock.destroy(); resolve(v); };
+    sock.setTimeout(timeoutMs, () => done(false));
+    sock.on('connect', () => done(true));
+    sock.on('error', () => done(false));
+  });
 }
 
 function nodeMajor(version) {
@@ -130,9 +143,10 @@ async function doctor(opts = {}) {
   if (opts.nativeDir) {
     targets = [{ key: 'custom', label: opts.nativeDir, nativeDir: path.resolve(opts.nativeDir), detected: true }];
   } else {
-    targets = browserTable().filter((b) => b.detected || fs.existsSync(path.join(b.nativeDir, `${P.HOST_NAME}.json`)));
+    targets = browserTable().filter((b) => !b.safari && (b.detected || fs.existsSync(path.join(b.nativeDir, `${P.HOST_NAME}.json`))));
   }
-  if (!targets.length) {
+  const safari = !opts.nativeDir && browserTable().find((b) => b.safari && b.detected);
+  if (!targets.length && !safari) {
     add('fail', 'no browser profile found (looked for Chrome, Chromium, Brave, Edge, Arc, Firefox)', 'install and open Google Chrome or Firefox once, then ' + setupFix);
   }
   const expectedOrigins = P.extensionOrigins(ws.config);
@@ -166,6 +180,17 @@ async function doctor(opts = {}) {
     }
     if (problems.length) add('fail', `${t.label}: native host manifest ${file}: ${problems.join('; ')}`, fix);
     else { manifestsOk++; add('ok', `${t.label}: native host manifest`); }
+  }
+
+  // Safari: its bridge, instead of a native host manifest
+  if (safari) {
+    const plist = safariAgentPlist();
+    const args = [...fs.readFileSync(plist, 'utf8').matchAll(/<string>([^<]*)<\/string>/g)].map((m) => m[1].replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&amp;/g, '&'));
+    const bridgeJs = args.find((a) => a.endsWith('safari-bridge.js'));
+    const fix = `${setupFix} --browser safari`;
+    if (!bridgeJs || !fs.existsSync(bridgeJs)) add('fail', `Safari: the bridge's login item (${plist}) runs ${bridgeJs || 'nothing'}, which doesn't exist`, fix);
+    else if (await portOpen(SAFARI_PORT)) add('ok', `Safari: the bridge is running (127.0.0.1:${SAFARI_PORT})`);
+    else add('fail', `Safari: the bridge isn't running (nothing on 127.0.0.1:${SAFARI_PORT})`, `${fix}   (errors: ${path.join(ws.home, 'safari-bridge.err')})`);
   }
 
   // CLI on PATH

@@ -109,6 +109,44 @@ stay under 1 MB (the helper rejects bigger mods with an error logged to stderr, 
 | `{type:"modsApplied", registered:[ids], errors:[{id, error}]}` | After applying a `mods` message. |
 | `{type:"log", level, message}` | Extension-side diagnostics; the helper writes them to `~/.webmods/helper.log`. |
 
+## Safari
+
+Safari 27.2 has none of the three things the Chrome build relies on: `chrome.userScripts`, native
+messaging to an arbitrary program (Safari's only reaches the extension's own Mac app), and the side panel.
+`extension/safari.js` stands in for them, and the Safari build hands background.js its stand-ins as
+`chrome` (Safari's own object can't be changed):
+
+- **chrome.userScripts.** Registered scripts are kept in memory and in `chrome.storage.local`
+  (`safariUserScripts`). On `webNavigation.onCommitted` (top frame only) the scripts whose `matches` /
+  `excludeMatches` fit the URL and whose `runAt` is `document_start` are injected with
+  `chrome.scripting.executeScript({world:"MAIN", injectImmediately:true})`, in registration order (so
+  the runtime first), each in its own `try`, behind a per-document marker. `document_end` and
+  `document_idle` scripts go in on `onDOMContentLoaded` and `onCompleted`. Safari serializes an injected
+  function with `toString()`, so the injected function is one whose `toString` returns the code: that runs
+  even on pages whose CSP forbids eval (checked on x.com and instagram.com in Safari 27.2). If the combined
+  code fails to inject (a mod that doesn't parse), each script is injected on its own. `execute` (for
+  `webmods run`) injects `return (<code>);` the same way.
+- **Native messaging.** `connectNative` returns a port over a WebSocket to `ws://127.0.0.1:47615/`, the
+  Safari bridge (`helper/safari-bridge.js`), which relays JSON messages to a host.js in the usual frames.
+  The bridge accepts only handshakes whose `Origin` is `safari-web-extension://…` (web pages can't set it).
+  Safari unloads the background page after about 30 s with nothing to do, closing the socket, so the host
+  outlives the connection: its messages are queued (up to 2000) and delivered when the background
+  reconnects, which it does with a fresh `hello`. A host with no connection for 30 minutes and no agent
+  run in `<home>/active-runs` is stopped. `webmods setup --browser safari` installs the bridge as a
+  launchd agent (`~/Library/LaunchAgents/dev.webmods.safari-bridge.plist`, KeepAlive); `webmods doctor`
+  checks that it's listening. The background's warnings, errors and failures to start are POSTed to the
+  bridge (`/log`, `/startup-error`) and written to `helper.log`, since Safari shows the background's
+  console only in its developer tools.
+- **The panel.** The toolbar button opens `sidepanel.html?window=<id>` in a window of its own; the panel
+  follows the active tab of window `<id>` (and re-reads it when a page commits, since Safari can give a
+  tab a new id when it goes to another site).
+
+The build (`scripts/build-extension.js safari`) bundles the background into one classic script (Safari
+doesn't run module workers) and makes it a non-persistent background page rather than a service worker.
+`scripts/build-safari.js` wraps that in the Mac app Safari requires (Xcode project generated each time
+with `safari-web-extension-converter`; app `dev.webmods.app`, extension `dev.webmods.app.extension`),
+signed ad hoc unless given `--team`.
+
 ## Page commands (CLI → helper → extension)
 
 Each request's `args` may contain a **tab selector**: `tab` (numeric tab id) or `url` (substring or
@@ -387,13 +425,14 @@ builds a shorter report without it; `--open` opens the form with it filled in.
 
 ```
 extension/   manifest.json, background.js (service worker), runtime.js (page runtime source),
-             onboarding.html/.js, icons/
+             onboarding.html/.js, icons/, safari.js + safari-background.js (Safari build only)
 package.json the npm package `webmods` (version, bin, files allowlist)
-helper/      host.js, cli.js, lib/*.js, workspace/AGENTS.md, workspace/CLAUDE.md, templates/mod.js
+helper/      host.js, cli.js, safari-bridge.js, lib/*.js, workspace/AGENTS.md, workspace/CLAUDE.md, templates/mod.js
 examples/    sites/x.com/plain-x.js (+ tests)
 tests/       node tests (node --test), incl. a fake extension for the helper and a chrome.* mock for the extension
 docs/        PROTOCOL.md (this file)
-scripts/     build-extension.js (Chrome/Firefox builds), release.js (releases, see "Updates"), render-icon.js
+scripts/     build-extension.js (Chrome/Firefox/Safari builds), build-safari.js (the Safari Mac app),
+             release.js (releases, see "Updates"), render-icon.js
 beta/        START HERE.txt templates for the beta zips (Firefox, Chrome)
 updates/     the update feeds, written by release.js (latest.json + .sig, firefox.json)
 CHANGELOG.md what's new per version (the panel's "What's new")

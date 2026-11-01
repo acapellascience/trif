@@ -205,9 +205,10 @@ async function check(ws, { force = false, now = Date.now(), root = P.REPO_ROOT, 
   return summary(ws, s, root);
 }
 
-// Native host manifests setup wrote before, so the update keeps the same browsers set up.
+// Native host manifests (and the Safari bridge's agent) setup wrote before, so the update keeps the same
+// browsers set up.
 function browsersSetUp() {
-  return browserTable().filter((b) => fs.existsSync(path.join(b.nativeDir, `${P.HOST_NAME}.json`))).map((b) => b.key);
+  return browserTable().filter((b) => (b.safari ? b.detected : fs.existsSync(path.join(b.nativeDir, `${P.HOST_NAME}.json`)))).map((b) => b.key);
 }
 
 function run(file, args, opts) {

@@ -4,6 +4,14 @@ What's new in each WebMods release. The text under a version is what the side pa
 "What's new", so it's written for people using WebMods. `node scripts/release.js <version>` needs a section
 here for the version it releases.
 
+## Unreleased
+
+- **Safari, for trying out.** WebMods runs in Safari 27.2 or newer on a Mac: mods, the panel (a window of
+  its own, since Safari has no side panel) and agent chats. Until it's signed by Apple it only runs on
+  the Mac it was built on; see the README.
+- Plain X no longer flashes X's own tabs and narrow timeline for a moment when a page loads or you go
+  back to Home.
+
 ## 0.1.1
 
 - **Updates.** The WebMods panel tells you when a new version is out, and installs it with one click.

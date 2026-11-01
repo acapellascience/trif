@@ -10,7 +10,7 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 const P = require('./paths');
-const { selectBrowsers } = require('./browsers');
+const { selectBrowsers, SAFARI_AGENT_LABEL, safariAgentPlist } = require('./browsers');
 const { preinstallMods } = require('./preinstalled');
 
 // Quote for a POSIX shell double-quoted string.
@@ -58,6 +58,39 @@ function manifestFor(wrapperPath, origins = [P.EXTENSION_ORIGIN], { firefox = fa
     type: 'stdio',
     ...(firefox ? { allowed_extensions: [P.FIREFOX_EXTENSION_ID] } : { allowed_origins: [...origins] }),
   };
+}
+
+// ---------------------------------------------------------------- Safari bridge
+
+const xmlEscape = (s) => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+
+/** The launchd agent that keeps the Safari bridge (helper/safari-bridge.js) running while you're logged in. */
+function safariAgentContent(nodePath, bridgeJs, home) {
+  const env = home !== P.defaultHome()
+    ? `  <key>EnvironmentVariables</key>\n  <dict><key>WEBMODS_HOME</key><string>${xmlEscape(home)}</string></dict>\n` : '';
+  return `<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key><string>${SAFARI_AGENT_LABEL}</string>
+  <key>ProgramArguments</key>
+  <array><string>${xmlEscape(nodePath)}</string><string>${xmlEscape(bridgeJs)}</string></array>
+${env}  <key>RunAtLoad</key><true/>
+  <key>KeepAlive</key><true/>
+  <key>ThrottleInterval</key><integer>10</integer>
+  <key>StandardErrorPath</key><string>${xmlEscape(path.join(home, 'safari-bridge.err'))}</string>
+</dict>
+</plist>
+`;
+}
+
+/** (Re)start the Safari bridge's agent so it runs the current code. Returns an error message, or null. */
+function loadSafariAgent(plist) {
+  const { spawnSync } = require('child_process');
+  const domain = `gui/${process.getuid()}`;
+  spawnSync('launchctl', ['bootout', `${domain}/${SAFARI_AGENT_LABEL}`]); // not loaded yet is fine
+  const r = spawnSync('launchctl', ['bootstrap', domain, plist], { encoding: 'utf8' });
+  return r.status === 0 ? null : (r.stderr || r.stdout || `launchctl exited ${r.status}`).trim();
 }
 
 // ---------------------------------------------------------------- app copy
@@ -221,7 +254,9 @@ function revealFolder(dir) {
 
 /**
  * opts: { home, browser, nativeDir, binDir, noLink, noExamples, mode: 'copy'|'link'|undefined (auto),
- *         reveal (show the extension folder in Finder for Chrome's Load unpacked) }
+ *         reveal (show the extension folder in Finder for Chrome's Load unpacked),
+ *         launchAgentsDir (where the Safari bridge's agent goes; default ~/Library/LaunchAgents),
+ *         launchctl (false: write the agent but don't start it; also WEBMODS_NO_LAUNCHCTL=1) }
  * Returns { ok, lines: [string], ws, manifests: [{browser, file}], nodePath, mode, root }
  */
 function setup(opts = {}) {
@@ -321,6 +356,24 @@ function setup(opts = {}) {
   const origins = P.extensionOrigins(ws.config);
   const manifests = [];
   for (const t of targets) {
+    if (t.safari) {
+      const plist = opts.launchAgentsDir ? path.join(path.resolve(opts.launchAgentsDir), path.basename(safariAgentPlist())) : safariAgentPlist();
+      const bridgeJs = path.join(helperDir, 'safari-bridge.js');
+      try {
+        fs.mkdirSync(path.dirname(plist), { recursive: true });
+        const how = writeIfChanged(plist, safariAgentContent(nodePath, bridgeJs, home));
+        manifests.push({ browser: t.key, file: plist });
+        say(`Safari bridge ${plist} -> ${bridgeJs} (${how})`);
+        if (opts.launchctl !== false && !process.env.WEBMODS_NO_LAUNCHCTL) {
+          const err = loadSafariAgent(plist);
+          if (err) { ok = false; say(`              FAILED to start it: ${err}`); } else say('              running (it starts again whenever you log in)');
+        }
+      } catch (e) {
+        ok = false;
+        say(`Safari bridge FAILED to write ${plist}: ${e.message}`);
+      }
+      continue;
+    }
     const file = path.join(t.nativeDir, `${P.HOST_NAME}.json`);
     const manifest = JSON.stringify(manifestFor(ws.hostWrapper, origins, { firefox: t.firefox }), null, 2) + '\n';
     try {
@@ -370,15 +423,30 @@ function setup(opts = {}) {
     else say(`                fish_add_path ${ws.bin}`);
   }
 
-  // 7. Next steps (Firefox's alone when it's the only browser set up)
+  // 7. Next steps (Firefox's or Safari's alone when it's the only browser set up)
   say('');
   say('Next steps:');
-  if (!targets.some((t) => !t.firefox)) {
+  const safariSteps = (n) => [
+    `${n}. Open WebMods.app (from the Safari download) once: it adds the WebMods extension to Safari.`,
+    `${n + 1}. Until WebMods is signed by Apple, let Safari run it: Safari → Settings → Advanced, tick "Show`,
+    '     features for web developers"; then Settings → Developer, tick "Allow unsigned extensions" (Safari',
+    '     turns this off whenever it quits, so tick it again after restarting Safari).',
+    `${n + 2}. Safari → Settings → Extensions: tick WebMods, and allow it on every website.`,
+    `${n + 3}. Click the WebMods toolbar button to open the panel (in Safari it's a window of its own).`,
+  ];
+  if (targets.every((t) => t.safari)) {
+    for (const l of safariSteps(1)) say(`  ${l}`);
+    say('  5. Check everything with: webmods doctor');
+    say(`  Then ask your coding agent to work in ${home} (it reads AGENTS.md there).`);
+    return { ok, lines, ws, manifests, nodePath, mode, root };
+  }
+  if (!targets.some((t) => !t.firefox && !t.safari)) {
     say('  1. Open the signed WebMods add-on (webmods-firefox.xpi) in Firefox, e.g. drag it onto a Firefox');
     say('     window, and click Add.');
     say('  2. Click the WebMods toolbar button to open the sidebar, then "Allow user scripts" and Allow.');
     say('  3. If Firefox was already running before this setup, quit it completely and reopen it.');
     say('  4. Check everything with: webmods doctor');
+    if (targets.some((t) => t.safari)) { say('  Safari:'); for (const l of safariSteps(1)) say(`    ${l}`); }
     say(`  Then ask your coding agent to work in ${home} (it reads AGENTS.md there).`);
     return { ok, lines, ws, manifests, nodePath, mode, root };
   }
@@ -403,6 +471,7 @@ function setup(opts = {}) {
     say('  Firefox: open the signed WebMods add-on (.xpi) in Firefox to install it, then click the WebMods');
     say('     toolbar button and "Allow user scripts". Restart Firefox if it was running before this setup.');
   }
+  if (targets.some((t) => t.safari)) { say('  Safari:'); for (const l of safariSteps(1)) say(`    ${l}`); }
   say(`  Then ask your coding agent to work in ${home} (it reads AGENTS.md there).`);
 
   return { ok, lines, ws, manifests, nodePath, mode, root };
@@ -410,5 +479,5 @@ function setup(opts = {}) {
 
 module.exports = {
   setup, recordPath, cleanPath, hostWrapperContent, cliWrapperContent, manifestFor, pickNodePath, shq, isExecutable,
-  chooseMode, installApp, sameTree, COPY_ITEMS,
+  chooseMode, installApp, sameTree, COPY_ITEMS, safariAgentContent,
 };

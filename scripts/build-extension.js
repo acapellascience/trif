@@ -217,4 +217,5 @@ function main() {
   else console.log('Safari manifest (Safari 27.2+).');
 }
 
-main();
+if (require.main === module) main();
+module.exports = { bundleClassic, safariManifest, firefoxManifest };

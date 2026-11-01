@@ -58,6 +58,22 @@ sent in Firefox to install the add-on, click the WebMods toolbar button to open 
 Chrome and Firefox can both be open: they share your mods, and each sidebar or side panel chat works
 on its own browser. Switching a mod off is per browser.
 
+### Safari (Mac, test builds)
+
+WebMods runs in Safari 27.2 or newer on a Mac. Until it's signed by Apple it only runs on the Mac it was
+built on, so for now this is for trying it out:
+
+1. `node scripts/build-safari.js` (needs Xcode) makes `dist/safari-app/WebMods.app`. Open it once: it adds
+   the WebMods extension to Safari.
+2. `webmods setup --browser safari` starts the Safari bridge, a small background program Safari's
+   extension talks to (Safari can't start the helper itself the way Chrome does). It starts again whenever
+   you log in.
+3. In Safari: Settings → Advanced, tick "Show features for web developers"; Settings → Developer, tick
+   "Allow unsigned extensions" (Safari turns this off whenever it quits); Settings → Extensions, tick
+   WebMods and allow it on every website.
+4. Click the WebMods toolbar button. Safari has no side panel, so the panel opens in a window of its own,
+   following the tabs of the window you opened it from.
+
 ## Using it
 
 - WebMods is off on every site until you turn it on there: the side panel shows "WebMods is disabled"

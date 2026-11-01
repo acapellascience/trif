@@ -23,9 +23,10 @@ const ALLOWED_TOOLS = ['Read(./**)', 'Glob', 'Grep', 'Edit(./sites/**)', 'Bash(w
 // unreadable to commands; these cover Claude Code's own file tools.)
 const DENIED_TOOLS = ['WebFetch', 'WebSearch', 'Read(./config.json)', 'Read(./safari-token)', 'Read(./helper.log*)', 'Read(./runs/*.jsonl)',
   'Read(./screenshots/*.png)'];
-// The workspace's files that steer WebMods (or the agents): never written by a run's commands.
+// The workspace's files that steer WebMods (or the agents): never written by a run's commands. (.shipped
+// holds the versions of shipped mods a merge run reads: readable, never written.)
 const STATE_FILES = ['held.json', 'preinstalled.json', 'origins.json', 'active-runs', 'trash', 'config.json', 'instructions.md',
-  'AGENTS.md', 'CLAUDE.md', 'bin', 'app', 'safari-token', 'helper.log', 'helper.log.1', 'runs'];
+  'AGENTS.md', 'CLAUDE.md', 'bin', 'app', 'safari-token', 'helper.log', 'helper.log.1', 'runs', '.shipped'];
 const MIN_VERSION = [2, 1, 285]; // the sandbox settings used here, and --settings taking precedence over the workspace's
 
 function tooOld(version) {

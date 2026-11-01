@@ -8,8 +8,9 @@ import { safeStringify, formatError } from './runtime.js';
 export const EXTENSION_ID = globalThis.chrome?.runtime?.id || 'iaablflfafmonebdomeikadolkgdbkhe';
 // The Firefox build (scripts/build-extension.js firefox) runs the same code; these cover the differences.
 export const FIREFOX = !!globalThis.chrome?.runtime?.getURL?.('')?.startsWith('moz-extension:');
-export const BROWSER = FIREFOX ? 'Firefox' : 'Chrome';
-export const SETTINGS_URL = FIREFOX ? 'about:addons' : `chrome://extensions/?id=${EXTENSION_ID}`;
+export const SAFARI = !!globalThis.chrome?.runtime?.getURL?.('')?.startsWith('safari-web-extension:');
+export const BROWSER = FIREFOX ? 'Firefox' : SAFARI ? 'Safari' : 'Chrome';
+export const SETTINGS_URL = FIREFOX ? 'about:addons' : SAFARI ? 'Safari Settings → Extensions' : `chrome://extensions/?id=${EXTENSION_ID}`;
 // PROTOCOL.md calls this `__webmods_runtime`, but chrome.userScripts rejects ids starting with "_"
 // (reserved for generated ids), so it is registered under this id.
 export const RUNTIME_ID = 'webmods-runtime';

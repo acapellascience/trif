@@ -4,8 +4,10 @@
 //     with the manifest "key" stripped (the store assigns its own ID).
 //   firefox: dist/firefox/ and dist/webmods-firefox-<version>.zip, with the manifest rewritten for
 //     Firefox (see firefoxManifest). Run it with `web-ext run -s dist/firefox`, or sign the zip on AMO.
+//   safari: dist/safari/ and dist/webmods-safari-<version>.zip, with the manifest rewritten for Safari
+//     (see safariManifest). scripts/build-safari.js wraps it in the Mac app Safari needs.
 //
-// Usage: node scripts/build-extension.js [chrome|firefox]
+// Usage: node scripts/build-extension.js [chrome|firefox|safari]
 // No dependencies. The unpacked dev build (Load unpacked from extension/) is unaffected.
 
 'use strict';
@@ -18,7 +20,9 @@ const ROOT = path.resolve(__dirname, '..');
 const SRC = path.join(ROOT, 'extension');
 const DIST = path.join(ROOT, 'dist');
 const TARGET = process.argv[2] || 'chrome';
-const OUT = path.join(DIST, TARGET === 'firefox' ? 'firefox' : 'extension');
+const OUT = path.join(DIST, TARGET === 'chrome' ? 'extension' : TARGET);
+// The Safari adapter (extension/safari.js) only goes in the Safari build.
+const SAFARI_ONLY = ['safari.js', 'safari-background.js'];
 const { FIREFOX_EXTENSION_ID } = require('../helper/lib/paths');
 const { githubRepo } = require('../helper/lib/update');
 
@@ -89,6 +93,70 @@ function firefoxManifest(m, repo = githubRepo(readPackage())) {
   return f;
 }
 
+/**
+ * The Chrome manifest rewritten for Safari: the Safari adapter loads before the background (it stands in
+ * for chrome.userScripts and native messaging), mods go in with chrome.scripting as pages commit
+ * (webNavigation), and there's no side panel (the toolbar button opens the panel in a window).
+ */
+function safariManifest(m) {
+  const f = { ...m };
+  delete f.key;
+  delete f.minimum_chrome_version;
+  delete f.side_panel;
+  // A non-persistent background page rather than a service worker: Safari reports a worker that fails to
+  // start without saying why, and a page can be inspected (Develop → Web Extension Background Content).
+  // Still one classic script (bundleClassic).
+  f.background = { scripts: ['safari-background.js'], persistent: false };
+  f.permissions = [...m.permissions.filter((p) => !['sidePanel', 'userScripts', 'nativeMessaging'].includes(p)), 'webNavigation'];
+  return f;
+}
+
+/**
+ * `entry` and the modules it imports, as one classic (non-module) script: Safari doesn't run module
+ * service workers. Each module becomes a function run once, in import order, whose exported names are
+ * what its importers destructure. Handles the forms this extension uses: `import { a, b as c } from
+ * './x.js'`, `import './x.js'`, and `export` before function/class/const/let declarations.
+ */
+function bundleClassic(dir, entry) {
+  const order = [];
+  const sources = new Map();
+  const IMPORT = /^import\s+(?:\{([^}]*)\}\s+from\s+)?'\.\/([\w.-]+\.js)';[^\n]*$/gm;
+  const visit = (file) => {
+    if (sources.has(file)) return;
+    const code = fs.readFileSync(path.join(dir, file), 'utf8');
+    sources.set(file, code);
+    for (const m of code.matchAll(IMPORT)) visit(m[2]);
+    order.push(file);
+  };
+  visit(entry);
+  const v = (file) => `__module_${file.replace(/\W/g, '_')}`;
+  const parts = order.map((file) => {
+    const names = [];
+    const body = sources.get(file)
+      .replace(IMPORT, (_, list, from) => (list
+        ? `const { ${list.split(',').map((x) => x.trim()).filter(Boolean).map((x) => x.replace(/\s+as\s+/, ': ')).join(', ')} } = ${v(from)};`
+        : ''))
+      .replace(/^export\s+((?:async\s+)?function\*?|class|const|let)\s+([\w$]+)/gm, (_, kind, name) => { names.push(name); return `${kind} ${name}`; });
+    if (/^export\b/m.test(body)) fail(`${file}: an export form the Safari bundle doesn't handle`);
+    // A module that exports `bundledChrome` (extension/safari.js) changes what later modules see as `chrome`.
+    return `// ---- ${file}\nconst ${v(file)} = ((chrome) => {\n${body}\nreturn { ${names.join(', ')} };\n})(__chrome);\n`
+      + `if (${v(file)}.bundledChrome) __chrome = ${v(file)}.bundledChrome;`;
+  });
+  // A worker that fails to start leaves no console to read, and Safari stops it before anything it sent
+  // gets out, so the error is caught (the worker stays up, doing nothing else) and sent to the helper's
+  // Safari bridge, which logs it (helper/safari-bridge.js).
+  return `// Built by scripts/build-extension.js from ${order.join(', ')}. Edit those, not this.
+'use strict';
+let __chrome = globalThis.chrome;
+try {
+${parts.join('\n\n')}
+} catch (e) {
+  console.error('[webmods] the background failed to start:', e);
+  fetch('http://127.0.0.1:47615/startup-error', { method: 'POST', body: String((e && e.stack) || e) }).catch(() => {});
+}
+`;
+}
+
 function readPackage() {
   try { return JSON.parse(fs.readFileSync(path.join(ROOT, 'package.json'), 'utf8')); } catch { return {}; }
 }
@@ -120,15 +188,18 @@ function main() {
   copyDir(SRC, OUT, skipped);
 
   if (TARGET === 'firefox') manifest = firefoxManifest(manifest);
+  else if (TARGET === 'safari') manifest = safariManifest(manifest);
   else if (TARGET === 'chrome') delete manifest.key; // the store rejects or ignores "key" and assigns its own ID
-  else fail(`unknown target "${TARGET}" (use chrome or firefox)`);
+  else fail(`unknown target "${TARGET}" (use chrome, firefox or safari)`);
+  if (TARGET !== 'safari') for (const f of SAFARI_ONLY) fs.rmSync(path.join(OUT, f), { force: true });
+  if (TARGET === 'safari') fs.writeFileSync(path.join(OUT, 'safari-background.js'), bundleClassic(OUT, 'safari-background.js'));
   fs.writeFileSync(path.join(OUT, 'manifest.json'), JSON.stringify(manifest, null, 2) + '\n');
 
   const missing = manifestPaths(manifest).filter((p) => !fs.existsSync(path.join(OUT, p)));
   if (missing.length) fail(`manifest points at missing files: ${missing.join(', ')}`);
   if (!manifest.icons || !manifest.icons['128']) fail('manifest has no 128px icon (the store requires one)');
 
-  const zipPath = path.join(DIST, `webmods-${TARGET === 'firefox' ? 'firefox' : 'extension'}-${version}.zip`);
+  const zipPath = path.join(DIST, `webmods-${TARGET === 'chrome' ? 'extension' : TARGET}-${version}.zip`);
   fs.rmSync(zipPath, { force: true });
   try {
     // -X: no extra file attributes (uid/gid, macOS metadata); -r recursive; -q quiet.
@@ -142,7 +213,8 @@ function main() {
   for (const f of files) console.log(`  ${f}`);
   if (skipped.length) console.log(`Left out: ${skipped.join(', ')}`);
   if (TARGET === 'chrome') console.log('Removed manifest "key" (the Chrome Web Store assigns the ID).');
-  else console.log(`Firefox manifest, add-on ID ${FIREFOX_EXTENSION_ID}.`);
+  else if (TARGET === 'firefox') console.log(`Firefox manifest, add-on ID ${FIREFOX_EXTENSION_ID}.`);
+  else console.log('Safari manifest (Safari 27.2+).');
 }
 
 main();

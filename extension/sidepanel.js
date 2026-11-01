@@ -137,8 +137,9 @@ function currentAgent() {
 
 async function init() {
   connectPort();
-  const win = await chrome.windows.getCurrent();
-  view.windowId = win.id;
+  // In Safari the panel is a window of its own, opened with ?window=<the window whose tabs it follows>.
+  const opener = Number(new URLSearchParams(location.search).get('window'));
+  view.windowId = opener || (await chrome.windows.getCurrent()).id;
   const stored = await chrome.storage.local.get(['settings', 'disabled', 'offSites', 'updated']);
   view.updated = stored.updated || null;
   view.settings = normalizeSettings(stored.settings);
@@ -150,8 +151,14 @@ async function init() {
     if (windowId === view.windowId) chrome.tabs.get(tabId).then(setTab, () => {});
   });
   chrome.tabs.onUpdated.addListener((tabId, info, tab) => {
-    if (tabId === view.tab?.id && (info.url !== undefined || info.status !== undefined)) setTab(tab);
+    if (info.url === undefined && info.status === undefined) return;
+    // The active tab of this window, even under another id: Safari can give a tab a new id when it goes
+    // to another site.
+    if (tabId === view.tab?.id || (tab.active && tab.windowId === view.windowId)) setTab(tab);
   });
+  // Safari doesn't always report a tab's new address in onUpdated; a page committing in it is certain.
+  // (Only the Safari build has the webNavigation permission.)
+  chrome.webNavigation?.onCommitted.addListener(({ frameId }) => { if (frameId === 0) followActiveTab(); });
   chrome.tabs.onAttached.addListener(() => followActiveTab());
   chrome.tabs.onDetached.addListener(() => followActiveTab());
   chrome.storage.onChanged.addListener((changes, area) => {

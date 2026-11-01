@@ -689,6 +689,7 @@ let bgCount = 0;
 const TEST_SITES_ON = ['example.com', 'x.com', 'y.com', 'z.com'];
 async function loadBackground({ storage = {}, tabs = [], migrate = false } = {}) {
   const store = structuredClone(migrate || 'sitesOn' in storage ? storage : { sitesOn: TEST_SITES_ON, ...storage });
+  const ctl = { full: false }; // full: every storage write fails, like a full quota
   const natives = [];
   const panelBehavior = [];
   const created = [];
@@ -710,7 +711,10 @@ async function loadBackground({ storage = {}, tabs = [], migrate = false } = {})
           for (const k of [].concat(keys)) if (k in store) out[k] = structuredClone(store[k]);
           return out;
         },
-        async set(obj) { Object.assign(store, structuredClone(obj)); },
+        async set(obj) {
+          if (ctl.full) throw new Error('QUOTA_BYTES quota exceeded');
+          Object.assign(store, structuredClone(obj));
+        },
         async remove(keys) { for (const k of [].concat(keys)) delete store[k]; },
       },
     },
@@ -761,7 +765,7 @@ async function loadBackground({ storage = {}, tabs = [], migrate = false } = {})
     }
     throw new Error(`no response to ${cmd}`);
   };
-  return { chrome: chromeMock, store, natives, native, connectPanel, panelBehavior, created, reloaded, restore };
+  return { chrome: chromeMock, store, ctl, natives, native, connectPanel, panelBehavior, created, reloaded, restore };
 }
 
 /** Answer the extension's next native request for `cmd` like the helper would. */
@@ -1064,6 +1068,57 @@ test('background: mod.enable switches a mod off and on, persists it, and reloads
     r = await bg.native.call('mod.enable', { enabled: true });
     assert.match(r.error, /missing mod id/);
   } finally { bg.restore(); }
+});
+
+test('background: when storage is full, switches fail and change nothing, and mods are still applied', async () => {
+  const mods = [mod('x.com/a'), mod('y.com/b')];
+  const bg = await loadBackground({ storage: { mods }, tabs: SWITCH_TABS });
+  try {
+    bg.native.emit({ type: 'mods', mods });
+    await settle(20);
+    bg.ctl.full = true;
+    const panel = bg.connectPanel();
+    let r = await panel.ask({ type: 'mod.enable', id: 'x.com/a', enabled: false, tab: 5 });
+    assert.strictEqual(r.ok, false);
+    assert.match(r.error, /couldn't save to Chrome's extension storage \(QUOTA_BYTES quota exceeded\); nothing was changed/);
+    assert.deepStrictEqual(scriptIds(bg), [lib.RUNTIME_ID, 'x.com/a', 'y.com/b'], 'still running, as the panel still says');
+    assert.strictEqual((await bg.native.call('status')).result.mods[0].enabled, true);
+    assert.deepStrictEqual(bg.reloaded, []);
+
+    r = await panel.ask({ type: 'site.set', site: 'x.com', on: false, tab: 5 });
+    assert.strictEqual(r.ok, false);
+    assert.ok((await panel.ask({ type: 'status' })).result.sitesOn.includes('x.com'));
+    assert.deepStrictEqual(scriptIds(bg), [lib.RUNTIME_ID, 'x.com/a', 'y.com/b']);
+
+    r = await bg.native.call('record', { site: 'x.com', on: true });
+    assert.strictEqual(r.ok, false);
+    assert.deepStrictEqual((await bg.native.call('status')).result.recording, []);
+
+    // A changed mod from the helper is applied even though it can't be cached.
+    bg.native.emit({ type: 'mods', mods: [mod('x.com/a', { hash: 'h2', code: 'edited()' }), mod('y.com/b')] });
+    await settle(20);
+    assert.match(bg.chrome.userScripts.scripts.find((x) => x.id === 'x.com/a').js[0].code, /edited\(\)/);
+
+    bg.ctl.full = false;
+    r = await panel.ask({ type: 'mod.enable', id: 'x.com/a', enabled: false, tab: 5 });
+    assert.strictEqual(r.ok, true);
+    assert.deepStrictEqual(bg.store.disabled, { 'x.com/a': true });
+  } finally { bg.restore(); }
+});
+
+test('capChat: each message\'s text and each chat\'s size are capped, oldest messages going first', () => {
+  const long = 'z'.repeat(lib.CHAT_TEXT_MAX + 500);
+  let chat = lib.capChat({ messages: [{ role: 'assistant', text: long, time: 1 }, { role: 'tool', text: 'ok', time: 2 }] });
+  assert.strictEqual(chat.messages[0].text.slice(0, lib.CHAT_TEXT_MAX), long.slice(0, lib.CHAT_TEXT_MAX));
+  assert.match(chat.messages[0].text, /shortened: 500 more characters not kept\]$/);
+  assert.deepStrictEqual(chat.messages[1], { role: 'tool', text: 'ok', time: 2 });
+
+  const many = Array.from({ length: 200 }, (_, i) => ({ role: 'assistant', text: `${i} ${'y'.repeat(lib.CHAT_TEXT_MAX - 10)}`, time: i }));
+  chat = lib.capChat({ messages: many });
+  assert.ok(JSON.stringify(chat.messages).length <= lib.CHAT_BYTES_MAX);
+  assert.ok(chat.messages.length > 10);
+  assert.strictEqual(chat.messages.at(-1).time, 199, 'the newest kept');
+  assert.strictEqual(lib.capChat({ messages: Array.from({ length: 600 }, (_, i) => ({ role: 'user', text: 'a', time: i })) }).messages.length, lib.CHAT_MAX);
 });
 
 test('background: switched-off mods stay off after a service worker restart; stale ids are ignored', async () => {

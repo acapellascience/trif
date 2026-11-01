@@ -208,7 +208,9 @@ is enforced, for everyone:
 Each mod can be switched off without touching its file. The switched-off set lives in the extension's
 `chrome.storage.local` under **`disabled`** = `{"<mod id>": true}`, so it survives service-worker
 restarts and helper reconnects: every sync (including each `mods` message from the helper) skips
-switched-off mods and unregisters them if registered; switching one on registers it again. Ids of
+switched-off mods and unregisters them if registered; switching one on registers it again. Switch state
+(`disabled`, `offSites`, `sitesOn`, `recording`) is written to storage before it changes in memory: if the
+write fails (a full quota), the switch fails with an error and nothing changes. Ids of
 deleted mods may linger in the set (harmless, never shown); a re-created mod with the same id stays off.
 After a switch, the target tab (selector, else the active tab) is reloaded if the mod's matches cover
 it (`wait: true` waits for the load, like `reload`). If (un)registering fails, the previous state is
@@ -481,7 +483,10 @@ Nothing is hosted; the agent uses the user's own login/subscription.
   - **Mods on this site:** the mods whose matches cover the current tab (name, file name, on/off switch;
     see "Mod switches"), collapsed by default when there's a chat.
   - **Chat:** one conversation per site, persisted in `chrome.storage.local` under `chat:<site>` =
-    `{sessionId, agent, messages: [{role: "user"|"assistant"|"tool"|"error", text, time}]}`. A text box
+    `{sessionId, agent, messages: [{role: "user"|"assistant"|"tool"|"error", text, time}]}`, at most 500
+    messages, each message's text cut at 20 000 characters and the chat at about 1 MB (oldest messages
+    dropped first; `capChat` in lib.js). The manifest asks for `unlimitedStorage`, so Chrome's 10 MB quota
+    doesn't apply. A text box
     (Enter sends, Shift+Enter newline), Send / Stop, "New chat" (forgets the sessionId and messages).
     Assistant text renders as simple markdown (paragraphs, lists, `code`, code blocks, bold, links that
     open in a new tab), escaped first: never inject agent or page text as raw HTML. Tool events render

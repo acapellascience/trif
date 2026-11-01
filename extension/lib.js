@@ -495,6 +495,29 @@ export function toolLine(name, summary) {
   return s ? `${n || 'tool'} ${s}` : (n || 'tool');
 }
 
+// A chat lives in chrome.storage.local (chat:<site>). Agents can reply at length, or an error can carry
+// a whole page, so each message's text and each chat's total size are capped.
+export const CHAT_MAX = 500;               // messages kept per site
+export const CHAT_TEXT_MAX = 20000;        // characters kept of one message
+export const CHAT_BYTES_MAX = 1024 * 1024; // about how much one chat may take (oldest messages go first)
+
+/** Caps a chat's messages in place (see above); returns the chat. */
+export function capChat(chat) {
+  let messages = Array.isArray(chat.messages) ? chat.messages : [];
+  if (messages.length > CHAT_MAX) messages = messages.slice(-CHAT_MAX);
+  messages = messages.map((m) => {
+    if (typeof m?.text !== 'string' || m.text.length <= CHAT_TEXT_MAX) return m;
+    return { ...m, text: `${m.text.slice(0, CHAT_TEXT_MAX)}\n\n[… shortened: ${m.text.length - CHAT_TEXT_MAX} more characters not kept]` };
+  });
+  // Sizes as stored, roughly (JSON text; non-ASCII may take more bytes, which the slack covers).
+  const sizes = messages.map((m) => JSON.stringify(m).length + 1);
+  let total = sizes.reduce((a, b) => a + b, 0);
+  let drop = 0;
+  while (total > CHAT_BYTES_MAX && drop < messages.length - 1) total -= sizes[drop++];
+  chat.messages = drop ? messages.slice(drop) : messages;
+  return chat;
+}
+
 /** Hosts whose sign-in pages the side panel may open for an agent login (and their subdomains). */
 export const LOGIN_HOSTS = ['claude.com', 'claude.ai', 'anthropic.com'];
 

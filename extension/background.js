@@ -7,7 +7,7 @@ import {
   normalizeUrl, normalizeSite, hostMatchesSite, buildRunCode, buildPollCode, parseRunEnvelope,
   firstInjectionResult, withTimeout, filterRequests, nextBackoff, chromeVersion, toolLine,
   normalizeDisabled, modAppliesTo, urlInScope, modInScope, applyStartOff, modSites,
-  normalizeOffSites, offSiteName, offOnSite, hostInScope, withOffSites, scopeFor, normalizeSitesOn, siteOnFor, sitesInUse, limitToSites, applyStartSites, switchSite, fromOtherBrowser, timedUserScripts,
+  normalizeOffSites, offSiteName, offOnSite, hostInScope, withOffSites, scopeFor, normalizeSitesOn, siteOnFor, sitesInUse, limitToSites, applyStartSites, switchSite, fromOtherBrowser, timedUserScripts, capChat,
 } from './lib.js';
 import { runtimeCode } from './runtime.js';
 
@@ -15,7 +15,6 @@ const HOST = 'com.webmods.helper';
 const VERSION = chrome.runtime.getManifest().version;
 const CHROME = chromeVersion(navigator.userAgent);
 const LOAD_TIMEOUT = 30000;
-const CHAT_MAX = 500;          // messages kept per site
 const NOT_CONNECTED = `The WebMods helper isn't connected. Run \`npx webmods setup\` in a terminal (needs Node 18+), then restart ${BROWSER}.`;
 
 const state = {
@@ -49,6 +48,20 @@ const state = {
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const errMsg = (e) => String(e?.message ?? e);
 
+/**
+ * Writes to chrome.storage.local, saying what failed if it can't (a full quota rejects every write).
+ * Switch state (sitesOn, disabled, offSites, recording) is saved with this *before* it changes in
+ * memory: if the write fails, nothing changes, rather than mods running while the panel (which reads
+ * storage) says they're off, until the next service worker start puts back what was stored.
+ */
+async function save(items) {
+  try {
+    await chrome.storage.local.set(items);
+  } catch (e) {
+    throw new Error(`couldn't save to ${BROWSER}'s extension storage (${errMsg(e)}); nothing was changed`);
+  }
+}
+
 // ---- startup ------------------------------------------------------------------------------------
 
 const ready = chrome.storage.local.get(null).then(async (s) => {
@@ -63,10 +76,10 @@ const ready = chrome.storage.local.get(null).then(async (s) => {
     // First start since WebMods has to be turned on per site: keep it on where it's already in use.
     const chats = Object.fromEntries(Object.entries(s).filter(([k]) => k.startsWith('chat:')).map(([k, v]) => [k.slice(5), v]));
     state.sitesOn = sitesInUse(state.mods, state.disabled, chats);
-    await chrome.storage.local.set({ sitesOn: state.sitesOn });
+    await save({ sitesOn: state.sitesOn }).catch((e) => console.warn('[webmods]', errMsg(e)));
   }
   state.installId = typeof s.installId === 'string' && s.installId ? s.installId : crypto.randomUUID();
-  if (state.installId !== s.installId) await chrome.storage.local.set({ installId: state.installId });
+  if (state.installId !== s.installId) await save({ installId: state.installId }).catch((e) => console.warn('[webmods]', errMsg(e)));
   if (s.applied && typeof s.applied === 'object') state.applied = s.applied;
   await cleanStaleRuns(s);
 }).catch((e) => console.error('[webmods] failed to read storage', e));
@@ -163,7 +176,9 @@ async function applyMods() {
     });
     state.applied = res.applied;
     state.lastApply = { registered: res.registered, errors: res.errors };
-    await chrome.storage.local.set({ applied: state.applied });
+    // Only a shortcut for the next sync (unsaved, the next worker re-registers everything), so a full
+    // storage mustn't turn a sync that worked into a failure.
+    await save({ applied: state.applied }).catch((e) => log('warn', errMsg(e)));
     for (const e of res.errors) log('error', `mod ${e.id}: ${e.error}`);
   } catch (e) {
     state.applied = {}; // unknown state: force a full re-register next time
@@ -238,21 +253,24 @@ async function onHelperMessage(msg) {
     state.mods = Array.isArray(msg.mods) ? msg.mods : [];
     // Preinstalled mods, and mods made from another browser, arrive switched off the first time (before
     // they're ever registered).
+    // These two take effect even if they can't be saved: then they're applied again, the same way, on
+    // the next start (startedOff and sitesOffered weren't saved either), so memory and storage agree in
+    // effect. And a failed write mustn't stop the mods from being applied.
     const off = applyStartOff(state.mods, state.disabled, state.startedOff, state.installId);
     if (off.changed) {
       state.disabled = off.disabled;
       state.startedOff = off.startedOff;
-      await chrome.storage.local.set({ disabled: state.disabled, startedOff: state.startedOff });
+      await save({ disabled: state.disabled, startedOff: state.startedOff }).catch((e) => log('warn', errMsg(e)));
     }
     // Sites setup starts WebMods on for (the preinstalled mods' sites), each turned on once.
     const sites = applyStartSites(state.sitesOn, state.sitesOffered, msg.sitesOn);
     if (sites.changed) {
       state.sitesOn = sites.sitesOn;
       state.sitesOffered = sites.offered;
-      await chrome.storage.local.set({ sitesOn: state.sitesOn, sitesOffered: state.sitesOffered });
+      await save({ sitesOn: state.sitesOn, sitesOffered: state.sitesOffered }).catch((e) => log('warn', errMsg(e)));
       notifyPanels();
     }
-    await chrome.storage.local.set({ mods: state.mods });
+    await save({ mods: state.mods }).catch((e) => log('warn', errMsg(e)));
     reportApplied(await serial(applyMods));
   } else if (msg.type === 'request') {
     try {
@@ -467,8 +485,9 @@ const commands = {
     checkScopeUrl(`https://${site}/`, args.scope, site);
     const set = new Set(state.recording);
     if (args.on === false || args.on === 'off') set.delete(site); else set.add(site);
-    state.recording = [...set].sort();
-    await chrome.storage.local.set({ recording: state.recording });
+    const recording = [...set].sort();
+    await save({ recording });
+    state.recording = recording;
     if (checkUserScripts()) reportApplied(await serial(applyMods));
     return { recording: state.recording };
   },
@@ -562,9 +581,9 @@ async function setSwitchState(id, { disabled, offSites }) {
   if (disabled) next[id] = true; else delete next[id];
   const nextOff = { ...state.offSites };
   if (offSites.length) nextOff[id] = offSites; else delete nextOff[id];
+  await save({ disabled: next, offSites: nextOff });
   state.disabled = next;
   state.offSites = nextOff;
-  await chrome.storage.local.set({ disabled: next, offSites: nextOff });
 }
 
 /** After a switch: reload the selected (or active) tab if `mod` runs on it. Returns the tab id or null; never throws. */
@@ -878,8 +897,9 @@ async function setSiteOn(msg) {
   const on = msg.on !== false;
   const set = new Set(state.sitesOn);
   if (on) set.add(site); else set.delete(site);
-  state.sitesOn = [...set].sort();
-  await chrome.storage.local.set({ sitesOn: state.sitesOn });
+  const sitesOn = [...set].sort();
+  await save({ sitesOn });
+  state.sitesOn = sitesOn;
   if (!on) {
     for (const r of state.runs.values()) {
       if (hostInScope(r.site, site)) { r.stopping = true; helperRequest('agent.stop', { runId: r.runId }, 10000).catch(() => {}); }
@@ -996,8 +1016,8 @@ function updateChat(site, fn) {
     const chat = { ...emptyChat(), ...(stored && typeof stored === 'object' ? stored : {}) };
     if (!Array.isArray(chat.messages)) chat.messages = [];
     if (fn(chat) === false) return chat;
-    if (chat.messages.length > CHAT_MAX) chat.messages = chat.messages.slice(-CHAT_MAX);
-    await chrome.storage.local.set({ [key]: chat });
+    capChat(chat);
+    await save({ [key]: chat });
     return chat;
   });
 }

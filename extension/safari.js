@@ -98,14 +98,20 @@ const appliesTo = (s, url) => (s.matches || []).some((p) => matchesPattern(p, ur
 
 /**
  * The code for one page and one run-at time: every matching script, in order, each in its own try so one
- * mod's error doesn't stop the rest (mods are already wrapped that way; the runtime isn't). The marker on
- * `document` keeps a page restored from the back/forward cache from getting a second copy.
+ * mod's error doesn't stop the rest (mods are already wrapped that way; the runtime isn't).
+ * - It only runs on the origin it was matched for: the tab may have moved on to another site by the
+ *   time the injection lands (executeScript targets the tab, not the document).
+ * - The marker on `document` keeps a page restored from the back/forward cache from getting a second
+ *   copy. `markFor` names it: the scripts injected one at a time (inject's fallback) each need their own.
  */
-export function pageCode(list, url, runAt) {
+export function pageCode(list, url, runAt, markFor = runAt) {
   const parts = list.filter((s) => (s.runAt || 'document_idle') === runAt && appliesTo(s, url)).map(codeOf);
   if (!parts.length) return '';
-  const mark = JSON.stringify(`__webmods_${runAt}`);
-  return `if (document[${mark}]) return; document[${mark}] = true;\n${parts.map((c) => `try {\n${c}\n} catch (e) { console.error('[webmods]', e); }`).join('\n')}`;
+  let origin = 'null';
+  try { origin = new URL(url).origin; } catch {}
+  const mark = JSON.stringify(`__webmods_${markFor}`);
+  return `if (location.origin !== ${JSON.stringify(origin)} || document[${mark}]) return; document[${mark}] = true;\n`
+    + parts.map((c) => `try {\n${c}\n} catch (e) { console.error('[webmods]', e); }`).join('\n');
 }
 
 async function inject(runAt, { tabId, frameId, url }) {
@@ -122,7 +128,7 @@ async function inject(runAt, { tabId, frameId, url }) {
     // One script that doesn't parse would stop them all, so try them one at a time.
     console.warn('[webmods] injecting into', url, 'failed, retrying one script at a time:', e?.message ?? e);
     for (const s of scripts) {
-      const one = pageCode([s], url, runAt);
+      const one = pageCode([s], url, runAt, `${runAt}_${s.id}`);
       if (one) await run(one).catch((err) => console.error('[webmods] script', s.id, 'failed on', url, err?.message ?? err));
     }
   }

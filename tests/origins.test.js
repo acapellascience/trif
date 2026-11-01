@@ -117,7 +117,7 @@ const fs = require('fs');
 const path = require('path');
 const argv = process.argv.slice(2);
 if (argv[0] === '--version') { console.log('9.9.9 (Claude Code)'); process.exit(0); }
-const i = argv.indexOf('-p');
+const i = argv.indexOf('--');
 const prompt = i === -1 ? '' : argv[i + 1];
 const say = (o) => process.stdout.write(JSON.stringify(o) + '\\n');
 say({ type: 'system', subtype: 'init', session_id: 'sess-o', cwd: process.cwd(), tools: [] });

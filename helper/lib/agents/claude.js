@@ -45,12 +45,15 @@ const adapter = {
   },
 
   command({ bin, prompt, sessionId, model, context }) {
-    const args = ['-p', prompt, '--output-format', 'stream-json', '--verbose',
+    // The message goes last, after `--`: before it, one starting with "-" would be read as an option
+    // (even --dangerously-skip-permissions).
+    const args = ['-p', '--output-format', 'stream-json', '--verbose',
       '--permission-mode', 'acceptEdits', '--setting-sources', 'project', '--strict-mcp-config',
       '--allowedTools', ...ALLOWED_TOOLS, '--disallowedTools', ...DENIED_TOOLS];
     if (context) args.push('--append-system-prompt', context);
     if (sessionId) args.push('--resume', sessionId);
     if (model) args.push('--model', model);
+    args.push('--', prompt);
     return { file: bin || adapter.binary, args };
   },
 

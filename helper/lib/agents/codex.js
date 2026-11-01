@@ -89,7 +89,7 @@ const adapter = {
       '-c', 'approval_policy="never"', '-c', `default_permissions="${PROFILE}"`, '-c', `permissions=${permissionsToml(writable, readOnly, denied)}`];
     if (model) args.push('-m', model);
     if (sessionId) args.push('resume', sessionId);
-    args.push(prompt);
+    args.push('--', prompt); // `--`: a message starting with "-" isn't an option
     return { file: bin || adapter.binary, args };
   },
 

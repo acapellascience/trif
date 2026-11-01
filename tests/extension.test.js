@@ -230,6 +230,21 @@ test('tab selection: id, url substring, /regex/, default active tab', () => {
   assert.throws(() => lib.selectTab([], 10, {}), /no active tab/);
 });
 
+test('tab selection for a scoped run: only its site\'s tabs, and errors name no other tab', () => {
+  const scope = 'x.com';
+  // the focused window's active tab is example.com: the run gets its own site's tab instead
+  assert.strictEqual(lib.selectTab(TABS, 20, { scope }).id, 1);
+  assert.strictEqual(lib.selectTab(TABS, 20, { scope, tab: 3 }).id, 3);
+  for (const args of [{ tab: 2 }, { tab: 4 }, { url: 'ycombinator' }, { url: '/^https:\\/\\/news/' }]) {
+    let err;
+    try { lib.selectTab(TABS, 20, { scope, ...args }); } catch (e) { err = e; }
+    assert.ok(err, JSON.stringify(args));
+    assert.match(err.message, /on x\.com/);
+    assert.doesNotMatch(err.message, /example\.com|news\.ycombinator\.com|is on /, 'nothing about other tabs');
+  }
+  assert.throws(() => lib.selectTab(TABS.filter((t) => !t.url.includes('x.com')), 20, { scope }), /no tab is open on x\.com/);
+});
+
 test('resolveTab queries normal windows and the last-focused window', async () => {
   const queries = [];
   const chromeMock = {
@@ -1250,6 +1265,23 @@ test('background: mod.enable with site switches a multi-site mod on one site, vi
     assert.match(r.error, /x\.com\/p runs outside x\.com/);
     r = await bg.native.call('mod.enable', { id: 'x.com/p', enabled: true, site: '%%' });
     assert.match(r.error, /isn't a site/);
+  } finally { bg.restore(); }
+});
+
+test('background: a scoped run can\'t switch on an all-sites mod that\'s off (that would turn it on everywhere)', async () => {
+  const all = mod('all/e', { matches: ['<all_urls>'] });
+  const bg = await loadBackground({ storage: { mods: [all], disabled: { 'all/e': true } }, tabs: SWITCH_TABS });
+  try {
+    bg.native.emit({ type: 'mods', mods: [all] });
+    await settle(20);
+    let r = await bg.native.call('mod.enable', { id: 'all/e', enabled: true, site: 'x.com', scope: 'x.com' });
+    assert.match(r.error, /runs on every site, and it's switched off; only the user can switch it on/);
+    assert.deepStrictEqual(bg.store.disabled, { 'all/e': true });
+    // switching it off on its own site is fine, and so is the user turning it on
+    r = await bg.native.call('mod.enable', { id: 'all/e', enabled: false, site: 'x.com', scope: 'x.com' });
+    assert.equal(r.ok, true);
+    r = await bg.native.call('mod.enable', { id: 'all/e', enabled: true, site: 'x.com' });
+    assert.equal(r.ok, true, r.error);
   } finally { bg.restore(); }
 });
 

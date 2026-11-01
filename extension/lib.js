@@ -198,22 +198,28 @@ export function urlMatcher(selector) {
 /**
  * Pick the target tab. `tabs` = all tabs in normal windows (in window/index order),
  * `focusedWindowId` = the last-focused normal window. Throws with a helpful message.
+ * With `args.scope` (an agent run's site) only tabs on that site count, and errors never mention other
+ * tabs: a run must not learn which other sites are open, or their addresses by guessing at --url.
  */
 export function selectTab(tabs, focusedWindowId, args = {}) {
+  const scope = args.scope || null;
+  if (scope) tabs = tabs.filter((x) => urlInScope(x.url || x.pendingUrl || '', scope));
+  const on = scope ? ` on ${scope}` : '';
   if (args.tab !== undefined && args.tab !== null && args.tab !== '') {
     const id = Number(args.tab);
     const t = tabs.find((x) => x.id === id);
-    if (!t) throw new Error(`no tab with id ${args.tab} (run \`webmods tabs\` to list tabs)`);
+    if (!t) throw new Error(`no tab${on} with id ${args.tab} (run \`webmods tabs\` to list tabs)`);
     return t;
   }
   if (args.url !== undefined && args.url !== null && args.url !== '') {
     const match = urlMatcher(args.url);
     const t = tabs.find((x) => x.windowId === focusedWindowId && match(x.url)) || tabs.find((x) => match(x.url));
-    if (!t) throw new Error(`no tab whose URL matches ${args.url} (run \`webmods tabs\` to list tabs)`);
+    if (!t) throw new Error(`no tab${on} whose URL matches ${args.url} (run \`webmods tabs\` to list tabs)`);
     return t;
   }
-  const t = tabs.find((x) => x.active && x.windowId === focusedWindowId) || tabs.find((x) => x.active);
-  if (!t) throw new Error('no active tab (is a Chrome window open?)');
+  // A run works on its site's tab even when the user has moved to another one.
+  const t = tabs.find((x) => x.active && x.windowId === focusedWindowId) || tabs.find((x) => x.active) || (scope ? tabs[0] : null);
+  if (!t) throw new Error(scope ? `no tab is open on ${scope} (open one with \`webmods open\`)` : 'no active tab (is a Chrome window open?)');
   return t;
 }
 

@@ -118,7 +118,7 @@ test('Safari adapter: page code is the runtime then the matching mods, each in i
   ];
   const code = safari.pageCode(list, 'https://x.com/home', 'document_start');
   const run = (src) => {
-    const ctx = { log: [], document: {}, console: { error() {} } };
+    const ctx = { log: [], document: {}, location: { origin: 'https://x.com' }, console: { error() {} } };
     vm.runInNewContext(`(function () {\n${src}\n})(); (function () {\n${src}\n})();`, ctx);
     return ctx.log;
   };
@@ -126,6 +126,10 @@ test('Safari adapter: page code is the runtime then the matching mods, each in i
   assert.deepEqual(run(safari.pageCode(list, 'https://x.com/settings/account', 'document_start')), ['runtime', 'one']);
   assert.deepEqual(run(safari.pageCode(list, 'https://x.com/home', 'document_idle')), ['idle']);
   assert.equal(safari.pageCode(list, 'https://example.com/', 'document_idle'), '');
+  // the tab moved on to another site before the code landed: nothing runs
+  const ctx = { log: [], document: {}, location: { origin: 'https://accounts.google.com' }, console: { error() {} } };
+  vm.runInNewContext(`(function () {\n${code}\n})();`, ctx);
+  assert.deepEqual(ctx.log, []);
 });
 
 test('Safari adapter: mods go into each page as it commits, in the top frame, in the page\'s world', async () => {
@@ -143,17 +147,21 @@ test('Safari adapter: mods go into each page as it commits, in the top frame, in
   await us().unregister();
 });
 
-test('Safari adapter: when the page code doesn\'t parse, each script is tried on its own', async () => {
+test('Safari adapter: when the page code doesn\'t parse, every other script still runs, one at a time', async () => {
   await us().unregister();
-  await us().register([mod('good', 'GOOD()'), mod('bad', 'BAD(')]);
+  await us().register([mod('webmods-runtime', 'log.push("runtime")', { matches: ['<all_urls>'] }), mod('one', 'log.push("one")'),
+    mod('bad', 'BAD('), mod('two', 'log.push("two")')]);
   injected.length = 0;
   failInjection = ({ func }) => String(func).includes('BAD(');
   try {
     for (const f of listeners.onCommitted) f({ tabId: 4, frameId: 0, url: 'https://x.com/' });
-    await waitFor(() => injected.length === 1);
+    await waitFor(() => injected.length === 3);
     await sleep(50);
-    assert.equal(injected.length, 1);
-    assert.match(injected[0].source, /GOOD\(\)/);
+    // run what was injected, in order, in one page
+    const page = { log: [], document: {}, location: { origin: 'https://x.com' }, console: { error() {} } };
+    vm.createContext(page);
+    for (const { source } of injected) vm.runInContext(`(${source})()`, page);
+    assert.deepEqual(page.log, ['runtime', 'one', 'two']);
   } finally {
     failInjection = null;
     await us().unregister();

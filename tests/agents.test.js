@@ -59,7 +59,7 @@ if (argv[0] === 'auth' && argv[1] === 'login') {
   return;
 }
 const opt = (name) => { const i = argv.indexOf(name); return i === -1 ? null : argv[i + 1]; };
-const prompt = opt('-p') || '';
+const prompt = argv.includes('--') ? argv[argv.indexOf('--') + 1] : '';
 const calls = path.join(__dirname, 'calls');
 fs.mkdirSync(calls, { recursive: true });
 fs.writeFileSync(path.join(calls, Date.now() + '-' + process.pid + '.json'), JSON.stringify({ argv, env: process.env, cwd: process.cwd(), pid: process.pid, prompt }));
@@ -169,13 +169,17 @@ const START = { site: 'example.com', url: 'https://example.com/page', tabId: 12 
 test('claude adapter: command flags, resume and model', () => {
   const c = claude.command({ bin: '/x/claude', prompt: 'hi', context: 'CTX' });
   assert.equal(c.file, '/x/claude');
-  assert.deepEqual(c.args, ['-p', 'hi', '--output-format', 'stream-json', '--verbose', '--permission-mode', 'acceptEdits',
+  assert.deepEqual(c.args, ['-p', '--output-format', 'stream-json', '--verbose', '--permission-mode', 'acceptEdits',
     '--setting-sources', 'project', '--strict-mcp-config',
     '--allowedTools', 'Read(./**)', 'Glob', 'Grep', 'Bash(webmods:*)', 'Bash(cd:*)', 'Bash(ls:*)',
     '--disallowedTools', 'WebFetch', 'WebSearch', 'Read(./config.json)', 'Edit(./config.json)', 'Edit(./held.json)',
-    'Edit(./AGENTS.md)', 'Edit(./CLAUDE.md)', 'Edit(./instructions.md)', 'Edit(./.claude/**)', 'Edit(./bin/**)', 'Edit(./app/**)', 'Edit(./runs/**)', '--append-system-prompt', 'CTX']);
+    'Edit(./AGENTS.md)', 'Edit(./CLAUDE.md)', 'Edit(./instructions.md)', 'Edit(./.claude/**)', 'Edit(./bin/**)', 'Edit(./app/**)', 'Edit(./runs/**)', '--append-system-prompt', 'CTX', '--', 'hi']);
   const r = claude.command({ bin: '/x/claude', prompt: 'hi', context: 'CTX', sessionId: 's1', model: 'opus' });
-  assert.deepEqual(r.args.slice(-4), ['--resume', 's1', '--model', 'opus']);
+  assert.deepEqual(r.args.slice(-6), ['--resume', 's1', '--model', 'opus', '--', 'hi']);
+  // A message that looks like an option is still the message.
+  const f = claude.command({ bin: '/x/claude', prompt: '--dangerously-skip-permissions hide ads' });
+  assert.deepEqual(f.args.slice(-2), ['--', '--dangerously-skip-permissions hide ads']);
+  assert.ok(!f.args.slice(0, -1).includes('--dangerously-skip-permissions hide ads'));
 });
 
 test('claude adapter: parses init, text, tools, result; maps "Not logged in"', () => {
@@ -214,7 +218,7 @@ test('codex adapter: command, resume, JSONL events', () => {
   const c = codex.command({ bin: '/x/codex', prompt: 'P', model: 'gpt-5', writable: ['/h/sites', '/h/screenshots'], readOnly: ['/h/sites/x.com'], denied: ['/h/config.json'] });
   assert.equal(c.args[0], 'exec');
   assert.ok(c.args.includes('--json') && c.args.includes('--skip-git-repo-check'));
-  assert.deepEqual(c.args.slice(-3), ['-m', 'gpt-5', 'P']);
+  assert.deepEqual(c.args.slice(-4), ['-m', 'gpt-5', '--', 'P']);
   // The site limit is a permission profile the OS enforces; nothing that would replace it is loaded.
   assert.ok(!c.args.includes('--sandbox'), 'the legacy --sandbox would override the profile');
   assert.ok(c.args.includes('--ignore-user-config') && c.args.includes('--ignore-rules'));
@@ -226,7 +230,7 @@ test('codex adapter: command, resume, JSONL events', () => {
   assert.equal(codex.tooOld('0.166.0'), false);
   assert.equal(codex.tooOld(null), false);
   const r = codex.command({ bin: '/x/codex', prompt: 'P', sessionId: 'th1' });
-  assert.deepEqual(r.args.slice(-3), ['resume', 'th1', 'P']);
+  assert.deepEqual(r.args.slice(-4), ['resume', 'th1', '--', 'P']);
 
   const ev = [];
   const emit = (e) => ev.push(e);
@@ -322,7 +326,7 @@ test('agent.start: runId first, then session/text/tool events, one done with cha
   const call = callFor(bin, 'EDIT');
   assert.equal(call.cwd, home);
   const a = call.argv;
-  assert.equal(a[a.indexOf('-p') + 1], 'EDIT hide the banner');
+  assert.equal(a[a.indexOf('--') + 1], 'EDIT hide the banner');
   for (const f of ['--output-format', 'stream-json', '--verbose', '--strict-mcp-config']) assert.ok(a.includes(f), f);
   assert.equal(a[a.indexOf('--permission-mode') + 1], 'acceptEdits');
   assert.equal(a[a.indexOf('--setting-sources') + 1], 'project');
@@ -662,7 +666,7 @@ test('CLI: agent run streams events and prints a summary; agent list with and wi
     '',
   ].join('\n'));
   const a = calls(bin).pop().argv;
-  assert.equal(a[a.indexOf('-p') + 1], 'EDIT the banner');
+  assert.equal(a[a.indexOf('--') + 1], 'EDIT the banner');
   assert.match(a[a.indexOf('--append-system-prompt') + 1], /https:\/\/example\.com\/page \(tab 12\)/);
   // The extension saw the same run.
   assert.ok(ext.messages.some((m) => m.type === 'agentEvent' && m.event.kind === 'done'));

@@ -6,7 +6,7 @@ import {
   SETTINGS_URL, USER_SCRIPTS_OFF, FIREFOX, BROWSER, userScriptsAvailable, syncUserScripts, resolveTab, tabInfo,
   normalizeUrl, normalizeSite, hostMatchesSite, buildRunCode, buildPollCode, parseRunEnvelope,
   firstInjectionResult, withTimeout, filterRequests, nextBackoff, chromeVersion, toolLine,
-  normalizeDisabled, modAppliesTo, urlInScope, modInScope, applyStartOff,
+  normalizeDisabled, modAppliesTo, urlInScope, modInScope, applyStartOff, modSites,
   normalizeOffSites, offSiteName, offOnSite, hostInScope, withOffSites, scopeFor, normalizeSitesOn, siteOnFor, sitesInUse, limitToSites, applyStartSites, switchSite, fromOtherBrowser, timedUserScripts,
 } from './lib.js';
 import { runtimeCode } from './runtime.js';
@@ -527,6 +527,11 @@ const commands = {
     if (args.site != null && args.site !== '' && !site) throw new Error(`"${args.site}" isn't a site (use a hostname like twitter.com)`);
     if (args.scope && !(site ? hostInScope(site, args.scope) : modInScope(mod, args.scope))) {
       throw new Error(`${site ? `${site} is` : `${id} runs`} outside ${args.scope}, and this agent run is limited to ${args.scope}`);
+    }
+    // Switching a mod that's off on "for this site" turns an all-sites mod on everywhere (switchSite):
+    // from a run limited to one site, that's the user's call.
+    if (args.scope && args.enabled && !isEnabled(id) && !modInScope(mod, args.scope) && modSites(mod).everywhere) {
+      throw new Error(`${id} runs on every site, and it's switched off; only the user can switch it on (in the side panel), because this agent run is limited to ${args.scope}`);
     }
     const enabled = args.enabled;
     const res = await serial(async () => {

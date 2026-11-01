@@ -128,7 +128,12 @@ messaging to an arbitrary program (Safari's only reaches the extension's own Mac
   `webmods run`) injects `return (<code>);` the same way.
 - **Native messaging.** `connectNative` returns a port over a WebSocket to `ws://127.0.0.1:47615/`, the
   Safari bridge (`helper/safari-bridge.js`), which relays JSON messages to a host.js in the usual frames.
-  The bridge accepts only handshakes whose `Origin` is `safari-web-extension://…` (web pages can't set it).
+  The bridge accepts only handshakes whose `Origin` is `safari-web-extension://…` (web pages can't set it)
+  and that bring its key as `?token=`: the contents of `<home>/safari-token` (64 hex characters, mode 600,
+  made by `webmods setup --browser safari`). A Safari extension's origin is random and changes, so the key
+  is what tells WebMods from other extensions: the extension gets it with
+  `runtime.sendNativeMessage(…, {type:"token"})` from its own Mac app (`safari/SafariWebExtensionHandler.swift`,
+  whose sandbox may read just `~/.webmods/safari-token`), which no other extension can message.
   Safari unloads the background page after about 30 s with nothing to do, closing the socket, so the host
   outlives the connection: its messages are queued (up to 2000) and delivered when the background
   reconnects, which it does with a fresh `hello`. A host with no connection for 30 minutes and no agent

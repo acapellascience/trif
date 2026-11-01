@@ -6,7 +6,7 @@ runs every time that site loads. Mods are plain JavaScript files on your compute
 and on from the side panel.
 
 WebMods uses the coding agent you already have (Claude Code or Codex), on your own account.
-Nothing goes to a WebMods server: there isn't one.
+WebMods collects nothing: the only thing that ever reaches its developer is a problem report you choose to send.
 
 **Beta.** Expect rough edges, and please send feedback.
 
@@ -125,9 +125,10 @@ checks every piece and says how to fix what's broken. Common fixes:
 - **"rg" Not Opened** while Codex works: a search tool that ships with Codex hasn't been checked by
   Apple. It's harmless: click Done (Codex works without it).
 
-Still stuck? **Report a problem** in the panel's Settings opens your mail app with a report of your setup
-and recent errors (no names, email addresses or full page addresses), ready to send. `webmods report`
-prints the same report.
+Still stuck? **Report a problem** (in the panel's Settings, or on the "helper isn't connected" notice)
+opens the report form at [webmods.dev/report](https://webmods.dev/report) with your setup and recent
+errors filled in (no names, email addresses or full page addresses). Nothing is sent until you press
+Send. `webmods report --open` does the same from a terminal; the form also works on its own.
 
 To use the `webmods` command directly (as your agent does), add it to your PATH:
 
@@ -154,6 +155,11 @@ with `node --test`.
 `node scripts/build-extension.js firefox` builds the Firefox add-on into `dist/firefox` (try it with
 `npx web-ext run -s dist/firefox`). Firefox only keeps signed add-ons installed; sign it as unlisted with
 `npx web-ext sign -s dist/firefox --channel unlisted` and your addons.mozilla.org API key.
+
+### webmods.dev
+
+`site/` is the report form's website, a Cloudflare Worker: `node site/dev.js` runs it locally (reports
+are printed instead of emailed); see [site/README.md](site/README.md) to deploy it.
 
 ### Releasing
 

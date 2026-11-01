@@ -36,6 +36,9 @@ Try it
   describe the change you want ("hide the comments", "make it dark") and Claude writes a mod for it.
   The first time, it may ask you to log in to Claude: click Log in and follow the steps.
 
-If something's wrong, run this in Terminal and send me what it says:
+If something's wrong, click the gear in the WebMods panel, then "Report a problem". Or, if the panel
+doesn't work at all, run this in Terminal: it opens the same form with your setup details filled in.
 
-     ~/.webmods/bin/webmods doctor
+     ~/.webmods/bin/webmods report --open
+
+Or go to https://webmods.dev/report and describe it there.

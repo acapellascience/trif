@@ -195,12 +195,13 @@ default). The user's choice: don't change it, or install updates, unless they as
     examples: ['webmods update', 'webmods update --install', 'webmods update --auto on'],
   },
   report: {
-    usage: 'webmods report',
+    usage: 'webmods report [--open]',
     summary: 'print a problem report (versions, setup checks, recent errors) to send to the WebMods developer',
     details: `The same report as the side panel's "Report a problem": WebMods, browser, system and agent versions,
 the doctor's warnings, and recent warnings and errors from the helper log, with the home folder, user
-name, email addresses, query strings and token-like strings removed. Nothing is sent; it's printed.`,
-    examples: ['webmods report'],
+name, email addresses, query strings and token-like strings removed. Nothing is sent; it's printed.
+--open opens the report form (webmods.dev/report) in the browser with it filled in, for the user to send.`,
+    examples: ['webmods report', 'webmods report --open'],
   },
   restore: {
     usage: 'webmods restore [<site>/<mod>]',

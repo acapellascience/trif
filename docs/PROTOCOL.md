@@ -373,12 +373,15 @@ Helper commands (from the extension, or the CLI over the socket; never from insi
 `update.check {force}` → Summary; `update.install` → `{from, to, notes}`; `update.setAuto {on}` → Summary;
 `report.build {site, siteOn, mods:[{id, enabled, registered, error}]}` → `{text, email}`: the problem
 report (`helper/lib/report.js`: versions, doctor warnings, recent log warnings folded together, scrubbed
-of the home folder, user name, email addresses, query strings and token-like strings). `email` is
-package.json `bugs.email`; the panel opens a `mailto:` with the report, or copies it.
+of the home folder, user name, email addresses, query strings and token-like strings) → `{text, email,
+url}`: `url` is package.json `bugs.url` (the report form, https://webmods.dev/report), `email` its
+`bugs.email`. The panel opens `url#r=<text>&s=<site>` in a tab: the form reads the report from after the
+`#`, which browsers never send to a server, so nothing is sent until the person presses Send there
+(`site/`, a Cloudflare Worker that emails it to the maintainer).
 
 CLI: `webmods update [--install] [--auto on|off]` works without the helper (a running helper notices the
 new `<home>/app` within 30 s and asks the extension to reload); `webmods report` asks the helper, or
-builds a shorter report without it.
+builds a shorter report without it; `--open` opens the form with it filled in.
 
 ## Repository layout
 
@@ -394,6 +397,7 @@ scripts/     build-extension.js (Chrome/Firefox builds), release.js (releases, s
 beta/        START HERE.txt templates for the beta zips (Firefox, Chrome)
 updates/     the update feeds, written by release.js (latest.json + .sig, firefox.json)
 CHANGELOG.md what's new per version (the panel's "What's new")
+site/        webmods.dev, the report form (a Cloudflare Worker; site/README.md)
 ```
 
 Tests run with `node --test` (Node's built-in runner). No dependencies.

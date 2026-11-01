@@ -44,7 +44,7 @@ FEATURES
 • Mods apply automatically every time you visit the site
 • Switch any mod off and on from the side panel, without deleting it
 • Mods are ordinary files in a folder on your computer (~/.webmods/sites/), so you can read, edit, back up or delete them yourself
-• Works with the coding agent you already use and pay for. There's no WebMods account and no WebMods server
+• Works with the coding agent you already use and pay for (Claude Code or Codex). There's no WebMods account
 
 REQUIREMENTS (PRIVATE BETA)
 • Chrome 135 or later on macOS or Linux
@@ -60,7 +60,7 @@ HOW TO USE
 5. Don't like it? Ask for a tweak, switch the mod off, or start a new chat.
 
 PRIVACY
-WebMods has no server and collects nothing. The extension talks only to the helper on your own computer. When you ask your coding agent for a change, the agent can read the page you're on (its text, the address, and screenshots) so it can write the mod. It sends that to its own AI provider (for example Anthropic or OpenAI) under that provider's terms, the same as any other time you use the agent. Chats and settings are stored only in your browser. Full policy: <PRIVACY POLICY URL>
+WebMods collects nothing. The extension talks only to the helper on your own computer. The only thing that reaches the developer is a problem report, when you fill in the report form and press Send. When you ask your coding agent for a change, the agent can read the page you're on (its text, the address, and screenshots) so it can write the mod. It sends that to its own AI provider (for example Anthropic or OpenAI) under that provider's terms, the same as any other time you use the agent. Chats and settings are stored only in your browser. Full policy: <PRIVACY POLICY URL>
 
 PERMISSIONS
 • "Read and change all your data on all websites": mods can be written for any site you choose, and your agent needs to read the page you're asking about. Nothing runs on a site unless you or your agent created a mod for it.
@@ -99,7 +99,7 @@ WebMods is a user script manager. Its mods are user scripts that the user's own 
 
 **nativeMessaging**
 ```
-The extension's only connection is to the WebMods helper, a local program the user installs on their own computer (native host "com.webmods.helper"). The helper sends the extension the mods from the user's mods folder, starts the user's coding agent when the user sends a message in the side panel, and relays the agent's page commands (read page text, reload, run a script) to the extension. No data goes to any WebMods server; none exists.
+The extension's only connection is to the WebMods helper, a local program the user installs on their own computer (native host "com.webmods.helper"). The helper sends the extension the mods from the user's mods folder, starts the user's coding agent when the user sends a message in the side panel, and relays the agent's page commands (read page text, reload, run a script) to the extension. No browsing data goes to the developer. (Separately, the helper checks GitHub for WebMods updates, and "Report a problem" opens a web form the user can choose to submit.)
 ```
 
 **tabs** (see REVIEW_RISKS.md §4: possibly redundant with `<all_urls>`; drop this block if `tabs` is removed)
@@ -136,7 +136,7 @@ Justification, in case the dashboard asks or review questions it:
 ```
 All of the extension's own JavaScript is in the package. It loads no scripts from a server, uses no eval of fetched content, and the extension makes no network requests at all.
 
-The scripts it runs on web pages are user scripts, and it runs them only through Chrome's userScripts API, which exists for this purpose and which the user must turn on with Chrome's "Allow User Scripts" switch. These scripts are written by the user's own coding agent, running on the user's own computer under the user's own account, at the user's explicit request in the side panel. They are saved as files in a folder the user owns (~/.webmods/sites/), and the extension receives them from a helper program on the same machine. The developer has no way to send code to users: there is no WebMods server, update channel or script catalogue. It is the same model as Tampermonkey: the user supplies the scripts, here written with their own AI coding tool.
+The scripts it runs on web pages are user scripts, and it runs them only through Chrome's userScripts API, which exists for this purpose and which the user must turn on with Chrome's "Allow User Scripts" switch. These scripts are written by the user's own coding agent, running on the user's own computer under the user's own account, at the user's explicit request in the side panel. They are saved as files in a folder the user owns (~/.webmods/sites/), and the extension receives them from a helper program on the same machine. The developer has no way to send mods to users: there is no script catalogue, and no server the extension contacts. (Updates to WebMods itself come through the Chrome Web Store like any extension's.) It is the same model as Tampermonkey: the user supplies the scripts, here written with their own AI coding tool.
 ```
 
 ### Data usage

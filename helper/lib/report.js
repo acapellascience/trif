@@ -1,7 +1,7 @@
 'use strict';
 // "Report a problem": a plain-text report of what's installed and what's going wrong, for the user to
-// read and send (the side panel opens it in their mail app; `webmods report` prints it). Nothing is sent
-// from here. Personal details are scrubbed: the home folder and user name, email addresses, query
+// read and send. The side panel opens the report form (package.json bugs.url, webmods.dev/report) with it
+// filled in; `webmods report` prints it (--open: the form). Nothing is sent from here. Personal details are scrubbed: the home folder and user name, email addresses, query
 // strings, and anything that looks like a token.
 
 const fs = require('fs');
@@ -20,6 +20,22 @@ function reportEmail(root = P.REPO_ROOT) {
     const email = bugs && typeof bugs === 'object' ? bugs.email : null;
     return typeof email === 'string' && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) ? email : null;
   } catch { return null; }
+}
+
+/** The problem report form: package.json's bugs.url when it's an https page, else null. */
+function reportUrl(root = P.REPO_ROOT) {
+  try {
+    const bugs = JSON.parse(fs.readFileSync(path.join(root, 'package.json'), 'utf8')).bugs;
+    const url = bugs && typeof bugs === 'object' ? bugs.url : null;
+    return typeof url === 'string' && /^https:\/\/[^\s#]+$/.test(url) ? url : null;
+  } catch { return null; }
+}
+
+/** The form's address with a report filled in: after the #, which browsers never send to a server. */
+function reportLink(url, text, site) {
+  const params = new URLSearchParams({ r: text });
+  if (site) params.set('s', site);
+  return `${url}#${params.toString()}`;
 }
 
 function escapeRe(s) { return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'); }
@@ -136,4 +152,4 @@ function buildReport(info = {}, scrubOpts) {
   return scrub(lines.join('\n'), scrubOpts);
 }
 
-module.exports = { reportEmail, scrub, logProblems, buildReport };
+module.exports = { reportEmail, reportUrl, reportLink, scrub, logProblems, buildReport };

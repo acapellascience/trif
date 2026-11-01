@@ -9,8 +9,11 @@ here for the version it releases.
 - **Updates.** The WebMods panel tells you when a new version is out, and installs it with one click.
   You can let it install updates by itself (Settings, off unless you turn it on). In Firefox the add-on
   now updates itself, like any other add-on.
-- **Report a problem** (in Settings) opens your mail app with a report of your setup and recent errors,
-  without your name, email or full page addresses. Nothing is sent until you press Send.
+- **Report a problem** (in Settings) opens a report form at webmods.dev with your setup and recent errors
+  filled in, without your name, email or full page addresses. Nothing is sent until you press Send.
+- **Codex works**, as well as Claude Code. Pick it in Settings. A Codex chat can only change mods for the
+  site it's about: your Mac enforces that, not just the instructions.
+- The model picker shows the models your agent offers: for Codex, the ones your account can use.
 - Chrome setup is easier: setup opens the extension's folder in Finder, ready to drag onto
   chrome://extensions, and Chrome no longer needs a restart.
 - Plain X starts with every filter off, for the plainest timeline. Its logo follows X's light or dark

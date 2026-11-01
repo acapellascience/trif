@@ -18,8 +18,6 @@ const ui = {
   modelCustomRow: $('#model-custom-row'), modelCustom: $('#model-custom'), modelNote: $('#model-note'),
   instructions: $('#instructions'), instructionsNote: $('#instructions-note'),
   autoUpdate: $('#auto-update'), updateNote: $('#update-note'), update: $('#update'),
-  report: $('#report'), reportText: $('#report-text'), reportPreview: $('#report-preview'), reportNote: $('#report-note'),
-  reportSend: $('#report-send'), reportCopy: $('#report-copy'), reportCancel: $('#report-cancel'),
   notice: $('#notice'), mods: $('#mods'), modsCount: $('#mods-count'), modList: $('#mod-list'),
   chat: $('#chat'), empty: $('#empty'), messages: $('#messages'), working: $('#working'),
 
@@ -47,7 +45,6 @@ const view = {
   updated: null,             // chrome.storage.local `updated`: {from, to, notes, at} after an update's reload
   updateBusy: null,          // 'checking' | 'installing' while the panel waits on the helper
   updateError: null,
-  report: null,              // {text, email} once the helper built the report
 };
 
 // ---- background port ----------------------------------------------------------------------------
@@ -357,7 +354,10 @@ function renderNotice({ helperOk, agentInfo, anyAgent }) {
     const setup = el('a', null, 'Setup page');
     setup.href = '#';
     setup.addEventListener('click', (e) => { e.preventDefault(); openSetup(); });
-    actions.append(retry, setup);
+    const report = el('a', null, 'Report a problem');
+    report.href = '#';
+    report.addEventListener('click', (e) => { e.preventDefault(); openReport(); });
+    actions.append(retry, setup, report);
     parts.push(actions);
   } else if (status && !status.userScripts) {
     parts.push(el('p', 'title', 'Mods are paused'));
@@ -1150,81 +1150,36 @@ ui.autoUpdate.addEventListener('change', async () => {
 });
 
 // ---- report a problem ---------------------------------------------------------------------------
-// The helper writes the report (helper/lib/report.js: versions, setup checks, recent errors, scrubbed of
-// names, paths and addresses); the panel adds what the user typed and opens it in their mail app, or
-// copies it. Nothing is sent by WebMods itself.
+// The helper writes the report (helper/lib/report.js: versions, setup checks, this site's mods and recent
+// errors, scrubbed of names, paths and addresses); the panel opens the report form (webmods.dev/report)
+// with it after the #, which the browser never sends to the server: nothing leaves until the person
+// presses Send there.
 
-const MAILTO_MAX = 6000; // longer mailto: links get cut off by some mail apps
+const REPORT_URL = 'https://webmods.dev/report'; // when the helper can't say (it isn't connected)
 
-function reportBody() {
-  const what = ui.reportText.value.trim();
-  return `${what ? `What happened:\n${what}\n\n` : ''}${view.report?.text || ''}`;
-}
-
-function updateReportLink() {
-  const email = view.report?.email;
-  const subject = encodeURIComponent(`WebMods problem report${view.site ? ` (${view.site})` : ''}`);
-  let href = email ? `mailto:${email}?subject=${subject}&body=${encodeURIComponent(reportBody())}` : '#';
-  ui.reportSend.dataset.long = '';
-  if (email && href.length > MAILTO_MAX) {
-    // Too long for a link: the full report goes on the clipboard when they click, and the mail says so.
-    const short = `${ui.reportText.value.trim()}\n\n(The full report is on the clipboard: paste it here.)`;
-    href = `mailto:${email}?subject=${subject}&body=${encodeURIComponent(short)}`;
-    ui.reportSend.dataset.long = '1';
-  }
-  ui.reportSend.href = href;
-  ui.reportSend.setAttribute('aria-disabled', String(!email || !view.report));
-  ui.reportSend.hidden = !email;
+function reportLink(url, text, site) {
+  const params = new URLSearchParams({ r: text });
+  if (site) params.set('s', site);
+  return `${url}#${params.toString()}`;
 }
 
 async function openReport() {
-  ui.settings.hidden = true;
-  ui.settingsBtn.setAttribute('aria-expanded', 'false');
-  ui.report.hidden = false;
-  view.report = null;
-  ui.reportPreview.textContent = 'Gathering details…';
-  ui.reportNote.classList.remove('error');
-  updateReportLink();
-  ui.reportText.focus();
   const scope = view.site ? scopeFor(view.site) : null;
   const mods = view.site && view.status ? view.status.mods.filter((m) => limitToSites(m, [scope])) : [];
+  let url = REPORT_URL;
+  let text;
   try {
-    view.report = await request({ type: 'report.build', site: view.site || '', siteOn: siteIsOn(), mods });
-    ui.reportPreview.textContent = view.report.text;
-    if (!view.report.email) ui.reportNote.textContent = 'Copy the report and send it to whoever gave you WebMods.';
+    const r = await request({ type: 'report.build', site: view.site || '', siteOn: siteIsOn(), mods });
+    text = r.text;
+    url = r.url || url;
   } catch (e) {
-    // Without the helper: what the panel knows, so there's still something to send.
+    // Without the helper: what the panel knows, which is when a report matters most.
     const s = view.status;
-    view.report = { email: null, text: `WebMods problem report\n\nWebMods     ${s?.version || '?'}\nBrowser     ${s?.browser || ''} ${s?.chrome || ''}\nHelper      not connected (${s?.helper?.error || String(e?.message ?? e)})` };
-    ui.reportPreview.textContent = view.report.text;
-    ui.reportNote.textContent = 'The helper isn’t connected, so this report is short. Copy it and send it to whoever gave you WebMods.';
+    text = `WebMods problem report\n\nWebMods     ${s?.version || '?'}\nBrowser     ${s?.browser || BROWSER} ${s?.chrome || ''}\nHelper      not connected (${s?.helper?.error || String(e?.message ?? e)})`;
   }
-  updateReportLink();
-}
-
-function closeReport() {
-  ui.report.hidden = true;
-  ui.reportText.value = '';
-  view.report = null;
+  chrome.tabs.create({ url: reportLink(url, text, view.site || '') });
 }
 
 $('#report-link').addEventListener('click', (e) => { e.preventDefault(); openReport(); });
-ui.reportText.addEventListener('input', updateReportLink);
-ui.reportCancel.addEventListener('click', closeReport);
-ui.reportCopy.addEventListener('click', async () => {
-  try {
-    await navigator.clipboard.writeText(reportBody());
-    ui.reportCopy.textContent = 'Copied';
-    setTimeout(() => { ui.reportCopy.textContent = 'Copy report'; }, 1500);
-  } catch (e) {
-    ui.reportNote.textContent = `Couldn’t copy: ${String(e?.message ?? e)}`;
-    ui.reportNote.classList.add('error');
-  }
-});
-ui.reportSend.addEventListener('click', (e) => {
-  if (ui.reportSend.getAttribute('aria-disabled') === 'true') { e.preventDefault(); return; }
-  if (ui.reportSend.dataset.long) navigator.clipboard.writeText(reportBody()).catch(() => {});
-  setTimeout(closeReport, 500);
-});
 
 init().catch((e) => console.error('[webmods] side panel failed to start', e));

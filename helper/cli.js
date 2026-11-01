@@ -22,7 +22,7 @@ process.stdout.on('error', (e) => { if (e.code === 'EPIPE') process.exit(0); thr
 
 const VALUE_FLAGS = new Set(['--tab', '--url', '-o', '--out', '--output', '--filter', '--limit', '-f', '--file',
   '--browser', '--home', '--native-dir', '--bin-dir', '--timeout', '--agent', '--session', '--model', '--site', '--auto']);
-const BOOL_FLAGS = new Set(['--json', '--hard', '--help', '-h', '--force', '--no-link', '--no-examples', '--copy', '--link', '--install']);
+const BOOL_FLAGS = new Set(['--json', '--hard', '--help', '-h', '--force', '--no-link', '--no-examples', '--copy', '--link', '--install', '--open']);
 const ALIASES = { '--out': '-o', '--output': '-o', '--file': '-f', '-h': '--help' };
 
 class UsageError extends Error {}
@@ -346,25 +346,33 @@ const handlers = {
     out(`Automatic updates: ${s.auto ? 'on (webmods update --auto off)' : 'off (webmods update --auto on)'}`);
   },
 
-  // The same report as the side panel's "Report a problem", printed: with the browser's details when a
-  // helper is connected, else without them.
+  // The same report as the side panel's "Report a problem", printed (--open: the report form, filled in):
+  // with the browser's details when a helper is connected, else without them.
   async report(ctx) {
     let r;
     try {
       r = await ctx.call('report.build', {}, 30000);
     } catch {
-      const { buildReport, reportEmail } = require('./lib/report');
+      const { buildReport, reportEmail, reportUrl } = require('./lib/report');
       const { doctor } = require('./lib/doctor');
       const update = require('./lib/update');
       const agents = require('./lib/agents');
       const doc = await doctor({ home: ctx.opts['--home'] }).catch(() => null);
       const text = buildReport({ agents: agents.listAgents(ctx.ws).agents, update: update.summary(ctx.ws), doctor: doc, logFile: ctx.ws.log });
-      r = { text: `${text}\n\n(The browser isn't connected, so its details are missing.)`, email: reportEmail() };
+      r = { text: `${text}\n\n(The browser isn't connected, so its details are missing.)`, email: reportEmail(), url: reportUrl() };
+    }
+    if (ctx.opts['--open'] && r.url) {
+      const { reportLink } = require('./lib/report');
+      const link = reportLink(r.url, r.text);
+      const { spawnSync } = require('child_process');
+      const opened = spawnSync(process.platform === 'darwin' ? 'open' : 'xdg-open', [link], { stdio: 'ignore' }).status === 0;
+      if (opened) return out(`Opened the report form (${r.url}) with these details filled in. Say what went wrong there and press Send.`);
     }
     if (ctx.json) return printJson(r);
     out(r.text);
     out('');
-    out(r.email ? `Send this, with what went wrong, to ${r.email}` : 'Send this, with what went wrong, to whoever gave you WebMods.');
+    if (r.url) out(`Send this, with what went wrong, with the form at ${r.url} (webmods report --open fills it in)${r.email ? `, or email it to ${r.email}` : ''}.`);
+    else out(`Send this, with what went wrong, to ${r.email || 'whoever gave you WebMods'}.`);
   },
 
   async restore(ctx, pos) {

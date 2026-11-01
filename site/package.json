@@ -1,0 +1,6 @@
+{
+  "name": "webmods-site",
+  "private": true,
+  "description": "webmods.dev: the bug report form (a Cloudflare Worker). Deploy with npx wrangler deploy.",
+  "type": "module"
+}

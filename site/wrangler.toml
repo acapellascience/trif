@@ -1,0 +1,22 @@
+# webmods.dev: the problem report form and the page that receives it (a Cloudflare Worker).
+# Deploy from this folder: npx wrangler deploy. See README.md here.
+name = "webmods-site"
+main = "src/index.js"
+compatibility_date = "2026-10-01"
+routes = [{ pattern = "webmods.dev", custom_domain = true }]
+
+# Reports are emailed to the address in the REPORT_TO secret (npx wrangler secret put REPORT_TO), which
+# must be a verified destination address in Email Routing. It's a secret so it isn't in the public repo.
+[[send_email]]
+name = "EMAIL"
+
+[vars]
+REPORT_FROM = "reports@webmods.dev"
+
+# At most 5 reports a minute from one address (approximate, per Cloudflare location).
+[[ratelimits]]
+name = "REPORT_LIMIT"
+namespace_id = "1001"
+  [ratelimits.simple]
+  limit = 5
+  period = 60

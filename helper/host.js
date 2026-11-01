@@ -32,7 +32,7 @@ const { ownSock, removeStaleSockets } = require('./lib/helpers');
 const { loadOrigins, recordOrigins, activeRuns } = require('./lib/origins');
 const { deleteMod, restoreMod, emptyTrash } = require('./lib/trash');
 const update = require('./lib/update');
-const { buildReport, reportEmail } = require('./lib/report');
+const { buildReport, reportEmail, reportUrl } = require('./lib/report');
 
 const ws = workspace();
 // This helper's own socket (helper-<pid>.sock), served whether or not it also owns helper.sock; agent
@@ -457,7 +457,7 @@ async function report(args) {
     update: update.summary(w),
     mods, doctor: doc, logFile: ws.log,
   });
-  return { text, email: reportEmail() };
+  return { text, email: reportEmail(), url: reportUrl() };
 }
 
 // Run an agent command and call done(error, result): synchronously when the command is synchronous,

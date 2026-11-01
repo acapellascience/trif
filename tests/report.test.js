@@ -63,6 +63,20 @@ test('buildReport lists what helps and nothing personal', () => {
   assert.doesNotMatch(text, /zed/);
 });
 
+test('reportUrl and reportLink: the form from package.json bugs.url, the report after the #', () => {
+  const { reportUrl, reportLink } = require('../helper/lib/report');
+  const root = tempDir();
+  assert.equal(reportUrl(root), null);
+  fs.writeFileSync(path.join(root, 'package.json'), JSON.stringify({ bugs: { url: 'https://webmods.dev/report' } }));
+  assert.equal(reportUrl(root), 'https://webmods.dev/report');
+  fs.writeFileSync(path.join(root, 'package.json'), JSON.stringify({ bugs: { url: 'http://insecure.example/report' } }));
+  assert.equal(reportUrl(root), null);
+  const link = reportLink('https://webmods.dev/report', 'WebMods 0.1.1\nx & y', 'x.com');
+  assert.equal(link.split('#')[0], 'https://webmods.dev/report');
+  const params = new URLSearchParams(link.split('#')[1]);
+  assert.deepStrictEqual([params.get('r'), params.get('s')], ['WebMods 0.1.1\nx & y', 'x.com']);
+});
+
 test('reportEmail comes from package.json bugs.email', () => {
   const root = tempDir();
   assert.equal(reportEmail(root), null);
@@ -107,6 +121,8 @@ test('the helper answers report.build and update.*, and tells the extension abou
   assert.match(r.result.text, /^WebMods problem report/);
   assert.match(r.result.text, /Browser {5}Firefox 153 \(extension 0\.1\.1\)/);
   assert.match(r.result.text, /x\.com\/plain-x: on, running/);
+  assert.equal(r.result.url, 'https://webmods.dev/report');
+  assert.equal(r.result.email, 'reports@webmods.dev');
 
   r = await extRequest(ext, 'update.setAuto', { on: true });
   assert.equal(r.result.auto, true);
@@ -130,5 +146,5 @@ test('webmods report prints a report without a browser', async () => {
   assert.equal(r.code, 0, r.stderr);
   assert.match(r.stdout, /^WebMods problem report/);
   assert.match(r.stdout, /The browser isn't connected/);
-  assert.match(r.stdout, /Send this, with what went wrong, to/);
+  assert.match(r.stdout, /Send this, with what went wrong, with the form at https:\/\/webmods\.dev\/report .*, or email it to reports@webmods\.dev\./);
 });

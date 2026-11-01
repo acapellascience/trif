@@ -1,11 +1,11 @@
 # WebMods privacy policy
 
-Last updated: October 29, 2026
+Last updated: November 1, 2026
 
 WebMods is a Chrome extension that runs website customizations ("mods") written by **your own coding
 agent** (for example Claude Code or OpenAI Codex) on your own computer. This policy explains what the
-extension does with your data. In short, **WebMods has no server, collects nothing, and sends nothing
-to its developer.**
+extension does with your data. In short, **WebMods collects nothing.** The only thing that ever reaches
+its developer is a problem report, and only when you fill in the report form and press Send.
 
 ## Who handles your data
 
@@ -19,9 +19,24 @@ There are three parties:
    its AI provider (for example Anthropic or OpenAI). The helper starts it when you send a message in
    the WebMods side panel.
 
-The WebMods developer is none of these at run time. There is no WebMods account, server, analytics,
-telemetry, crash reporting, advertising or tracking of any kind. The extension contains no code that
+The WebMods developer is none of these at run time. There is no WebMods account, analytics, telemetry,
+automatic crash reporting, advertising or tracking of any kind. The extension contains no code that
 makes network requests to anyone.
+
+Two things go over the network, neither carrying anything about you:
+
+- **Updates.** The helper checks for a newer WebMods about once a day by downloading a small public file
+  from GitHub (`raw.githubusercontent.com`), and downloads the new version from GitHub when you choose
+  to install it. GitHub sees an ordinary download request (your IP address and "webmods/<version>");
+  nothing about your mods, pages or chats is sent. You can turn the checks off with `"checkForUpdates":
+  false` in `~/.webmods/config.json`.
+- **Problem reports, only when you send one.** "Report a problem" opens the report form at
+  webmods.dev/report with details from WebMods filled in: version numbers, setup checks, the mods for
+  the site you're on, and recent errors, with your name, email addresses and full page addresses removed.
+  You see exactly what's included and can leave it out. Nothing is sent until you press Send. Then the
+  report, what you typed, the email address you give (if any) and your browser's name go to the
+  developer by email. They're used only to fix problems and to reply to you, and deleted when no longer
+  needed; ask at reports@webmods.dev to have a report deleted.
 
 ## What the extension handles, and why
 
@@ -57,9 +72,10 @@ commands can run scripts in your open tabs, so review what the agent does on sen
 
 ## Sharing and sale
 
-The WebMods developer doesn't receive your data, so it can't share or sell it. Data reaches a third
-party (your AI provider) only when you send a request through your own agent, and only for the purpose
-you asked for. It isn't used for advertising, profiling, or creditworthiness or lending.
+The WebMods developer receives nothing except the problem reports you choose to send, and doesn't share
+or sell them. Data reaches a third party (your AI provider) only when you send a request through your
+own agent, and only for the purpose you asked for. Reports pass through Cloudflare, which hosts the
+report form and delivers its email. It isn't used for advertising, profiling, or creditworthiness or lending.
 
 ## Keeping and deleting your data
 

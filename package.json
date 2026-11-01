@@ -9,7 +9,7 @@
   },
   "homepage": "https://github.com/acapellascience/WebMods#readme",
   "bugs": {
-    "url": "https://github.com/acapellascience/WebMods/issues",
+    "url": "https://webmods.dev/report",
     "email": "reports@webmods.dev"
   },
   "type": "commonjs",

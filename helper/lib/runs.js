@@ -289,7 +289,7 @@ class Runs {
       return this._finish(run, { code: null, signal: null });
     }
 
-    const ctx = { url: run.url, tabId: run.tabId, scope: run.scope };
+    const ctx = { url: run.url, tabId: run.tabId, scope: run.scope, browser: ws.browser || '' };
     let prompt = run.prompt;
     let context = null;
     const extra = adapter.readsInstructions ? '' : instructionsContext(readInstructions(ws.home));

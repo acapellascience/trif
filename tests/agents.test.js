@@ -1103,3 +1103,10 @@ test('agent.models: Codex lists the account\'s catalog (picker models, best firs
   assert.equal(cx.available, false);
   assert.match(cx.note, /too old for WebMods \(it needs 0\.138\.0 or newer\)/);
 });
+
+test('a run is told which browser it was started from', () => {
+  const agents = require('../helper/lib/agents');
+  assert.match(agents.contextText({ url: 'https://x.com/', tabId: 3, scope: 'x.com', browser: 'Safari' }), /in the user's Safari\./);
+  assert.match(agents.contextText({ url: 'https://x.com/', browser: 'Firefox' }), /in the user's Firefox\./);
+  assert.match(agents.contextText({ url: 'https://x.com/' }), /in the user's browser\./);
+});

@@ -4,7 +4,7 @@
 // See docs/PROTOCOL.md, "Side panel and agent runs".
 
 import { siteForUrl, modAppliesTo, modSites, isMultiSite, offOnSite, normalizeOffSites, isLoginUrl, scopeFor, limitToSites, withOffSites, FIREFOX, BROWSER,
-  normalizeSettings, normalizePicks, siteSettings } from './lib.js';
+  normalizeSettings, normalizePicks, siteSettings, withoutModel } from './lib.js';
 import { renderMarkdown, MARKDOWN_ELEMENTS, MARKDOWN_ATTRIBUTES } from './markdown.js';
 import { modSwitch, syncSwitches, shownEnabled, switchError, enabledIn, onSwitchChange } from './modswitch.js';
 import { mountOpenModel, renderOpenModel } from './openmodel.js';
@@ -971,6 +971,15 @@ async function saveSettings(patch) {
   await chrome.storage.local.set({ settings: view.settings, sitePicks: view.picks });
 }
 
+/** Drop every stored model pick for `agentId` (each site's and the default): the open model's provider changed. */
+async function forgetModelPicks(agentId) {
+  const r = withoutModel({ settings: view.settings, picks: view.picks, snapshots: view.snapshots }, agentId);
+  view.settings = r.settings;
+  view.picks = r.picks;
+  await chrome.storage.local.set({ settings: view.settings, sitePicks: view.picks }).catch(() => {});
+  renderModels();
+}
+
 /** A run is starting here: the site keeps the settings it runs with, whatever is picked elsewhere later. */
 async function keepSettings() {
   if (!view.site || view.picks[view.site]) return;
@@ -1153,7 +1162,7 @@ ui.modelCustom.addEventListener('input', () => {
 });
 ui.modelCustom.addEventListener('change', () => { clearTimeout(modelTimer); saveModel(currentAgent().id, ui.modelCustom.value.trim()); });
 $('#setup-link').addEventListener('click', (e) => { e.preventDefault(); openSetup(); });
-mountOpenModel({ request, onChange: () => loadModels('codex-oss', true) });
+mountOpenModel({ request, onChange: async () => { await forgetModelPicks('codex-oss'); loadModels('codex-oss', true); } });
 
 // ---- updates ------------------------------------------------------------------------------------
 // The helper checks for a newer TRIF (helper/lib/update.js) and its summary rides on the status. The

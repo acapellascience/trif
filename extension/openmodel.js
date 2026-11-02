@@ -1,9 +1,11 @@
 // Side panel settings for "Open model (via Codex)" (experimental; helper/lib/agents/codex-oss.js): where
 // the model comes from (Ollama, LM Studio, OpenRouter, a custom URL), the server address for a custom one,
 // and the NAME of the environment variable holding the API key (never the key). They're stored by the
-// helper in ~/.trif/config.json `openModel` (agent.openModel / agent.openModel.set), as defaults the
-// terminal's `trif agent run` shares; the model itself is picked in the panel's ordinary model picker.
-// A run can also carry its own choice (agent.start `openModel`, same shape), for per-chat choices.
+// helper in ~/.trif/config.json `openModel` (agent.openModel / agent.openModel.set), global (every site's
+// chat, and the terminal's `trif agent run`); the model itself is picked per site chat in the panel's
+// ordinary model picker. Model picks belong to a provider, so when the provider changes (here, or from
+// the terminal: `ossProvider` in storage remembers the one they were made for) every stored codex-oss
+// model pick is dropped (onProviderChange) and each chat falls back to the new provider's default.
 
 const AGENT = 'codex-oss';
 const $ = (sel) => document.querySelector(sel);
@@ -31,13 +33,25 @@ async function load() {
   try { data = await request({ type: 'agent.openModel', check: true }); data.error = null; } catch (e) { data = { error: String(e?.message ?? e) }; }
   loading = false;
   paint();
+  if (data?.openModel) await syncProvider(data.openModel.provider);
+}
+
+// The provider the stored model picks were made for. Another one now (changed here or in the terminal):
+// the picks are dropped (they name the old provider's models).
+// (Changed here: dropped whatever was remembered. Not remembered yet: nothing to compare with.)
+async function syncProvider(provider, changedHere = false) {
+  let was;
+  try { was = (await chrome.storage.local.get('ossProvider')).ossProvider; } catch { return; }
+  if (was === provider && !changedHere) return;
+  await chrome.storage.local.set({ ossProvider: provider }).catch(() => {});
+  if (changedHere || was !== undefined) await onProviderChange();
 }
 
 async function save(patch, providerChanged = false) {
   try {
     data = { ...(await request({ type: 'agent.openModel.set', ...patch })), error: null };
     paint();
-    if (providerChanged) onProviderChange();
+    if (providerChanged) await syncProvider(data.openModel.provider, true);
     load(); // whether the key variable is found
   } catch (e) {
     ui.note.textContent = String(e?.message ?? e);
@@ -69,18 +83,21 @@ function paint() {
     ui.provider.value = om.provider;
   }
   const p = providers.find((x) => x.id === om.provider) || {};
+  // (`effective.local`: a local provider at a loopback address. Pointed at another computer, it isn't.)
+  const local = !!data.effective?.local;
   ui.urlRow.hidden = om.provider !== 'custom';
   if (document.activeElement !== ui.url) ui.url.value = om.baseUrl || '';
-  ui.keyRow.hidden = !!p.local;
+  ui.keyRow.hidden = local;
   ui.key.placeholder = p.keyEnv || 'none';
   if (document.activeElement !== ui.key) ui.key.value = om.keyEnv || '';
   const k = data.key;
-  let note = p.local
+  const problem = data.effective?.error || '';
+  let note = problem ? problem : local
     ? `Runs on this computer: nothing leaves it. Small models are weaker at this than Claude Code or Codex.`
-    : k ? (k.found ? `${k.name} found (${k.source === 'helper' ? 'in the helper’s environment' : 'in your shell profile'}). Your agent’s commands can’t see it.`
+    : k ? (k.found ? `${k.name} found (${k.source === 'helper' ? 'in the helper’s environment' : 'in your shell profile'}). TRIF adds it to the model requests itself: neither Codex nor your agent’s commands are given it.`
       : `${k.name} isn’t set: add export ${k.name}=… to ~/.zshrc. Only its name is stored here.`)
       : 'No key variable: fine if the server needs none.';
   ui.note.textContent = `Experimental. ${note}`;
-  ui.note.classList.toggle('error', !!(k && !k.found));
+  ui.note.classList.toggle('error', !!problem || !!(k && !k.found));
   ui.note.hidden = false;
 }

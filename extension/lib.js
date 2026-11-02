@@ -765,6 +765,23 @@ export function normalizePicks(value) {
 }
 
 /**
+ * {settings, picks} without any model pick for `agentId` (the default's and every site's); `snapshots`
+ * (siteSettings) lose it too, in place. Used when the open model's provider changes: its model picks name
+ * the old provider's models.
+ */
+export function withoutModel({ settings, picks, snapshots }, agentId) {
+  const strip = (s) => {
+    const n = normalizeSettings(s);
+    const { [agentId]: _gone, ...models } = n.models;
+    return { ...n, models };
+  };
+  const outPicks = {};
+  for (const [site, s] of Object.entries(picks || {})) outPicks[site] = strip(s);
+  if (snapshots) for (const [site, s] of snapshots) snapshots.set(site, strip(s));
+  return { settings: strip(settings), picks: outPicks };
+}
+
+/**
  * The agent settings for `site`'s chat: its pick, else the default this panel first saw for it (kept in
  * `snapshots`, a Map the panel owns), else `global` (no site: the global settings themselves).
  */

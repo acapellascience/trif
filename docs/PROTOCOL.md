@@ -1,18 +1,19 @@
-# WebMods: architecture and protocol
+# TRIF: architecture and protocol
 
-WebMods lets anyone customize websites with their own coding agent (Claude Code, Codex, Gemini CLI,
+TRIF lets anyone customize websites with their own coding agent (Claude Code, Codex, Gemini CLI,
 Cursor…). The agent writes **mods**: plain JavaScript files, one per customization, that run on a site
 every time it loads. Mods keep working with no agent around.
 
-Working name: WebMods. Everything is plain Node (≥ 18) and plain browser JavaScript: **no npm
+Its name: Tim's Robot Internet Fixer, TRIF for short. It was called WebMods until 0.2.0 (see "Renamed
+from WebMods" for what kept the old name, and why). Everything is plain Node (≥ 18) and plain browser JavaScript: **no npm
 dependencies, no build step.**
 
 ## Pieces
 
 ```
- coding agent ──runs──▶ `webmods` CLI ──unix socket──▶ helper (native host) ──native messaging──▶ extension ──▶ tabs
-                         (helper/cli.js)   ~/.webmods/helper.sock   (helper/host.js)                 (extension/)
- coding agent ──edits──▶ ~/.webmods/sites/<site>/<mod>.js ◀──watches── helper ──pushes mods──▶ extension (chrome.userScripts)
+ coding agent ──runs──▶ `trif` CLI ──unix socket──▶ helper (native host) ──native messaging──▶ extension ──▶ tabs
+                         (helper/cli.js)   ~/.trif/helper.sock   (helper/host.js)                 (extension/)
+ coding agent ──edits──▶ ~/.trif/sites/<site>/<mod>.js ◀──watches── helper ──pushes mods──▶ extension (chrome.userScripts)
 ```
 
 1. **Extension** (`extension/`, Manifest V3, Chrome ≥ 135). Runs mods with `chrome.userScripts` in the
@@ -22,12 +23,12 @@ dependencies, no build step.**
    - `host.js`: the native messaging host Chrome launches when the extension calls
      `chrome.runtime.connectNative('com.webmods.helper')`. It serves the CLI over a unix socket and
      watches the mods folder, pushing mods to the extension.
-   - `cli.js`: the `webmods` command agents (and people) run.
-   - `webmods setup` installs everything: workspace, native host manifest, wrapper script, CLI link.
-     Strangers run it as `npx webmods setup` (npm package `webmods`, see "Native host installation").
-3. **Workspace** (`~/.webmods/`, overridable with env `WEBMODS_HOME`). The agent's working directory:
+   - `cli.js`: the `trif` command agents (and people) run.
+   - `trif setup` installs everything: workspace, native host manifest, wrapper script, CLI link.
+     Strangers run it as `npx trif setup` (npm package `trif`, see "Native host installation").
+3. **Workspace** (`~/.trif/`, overridable with env `TRIF_HOME`, or `WEBMODS_HOME` as it was called before 0.2.0). The agent's working directory:
    ```
-   ~/.webmods/
+   ~/.trif/
      AGENTS.md           how to build mods (copied from helper/workspace/AGENTS.md on setup; refreshed on every setup)
      CLAUDE.md           "@AGENTS.md" (Claude Code reads CLAUDE.md; the @ import pulls in AGENTS.md)
      sites/<site>/<mod>.js
@@ -41,12 +42,12 @@ dependencies, no build step.**
    Files whose name starts with `_` or `.` are ignored (scratch files, helpers).
 4. **Examples** (`examples/sites/<site>/<mod>.js`): ready-made mods (Plain X first). Setup copies them
    into a new workspace (see "Native host installation") and later setups keep them up to date (see
-   "Updates to shipped mods"); `webmods install-example <site>/<mod>` copies one in by hand.
+   "Updates to shipped mods"); `trif install-example <site>/<mod>` copies one in by hand.
 
 ## Extension identity
 
 `extension/manifest.json` carries a fixed `"key"` so the unpacked extension always has the ID
-**`iaablflfafmonebdomeikadolkgdbkhe`**. The native host manifest's `allowed_origins` lists every WebMods
+**`iaablflfafmonebdomeikadolkgdbkhe`**. The native host manifest's `allowed_origins` lists every TRIF
 extension ID: this dev ID, the Chrome Web Store ID (unknown until the first upload; add it to
 `STORE_EXTENSION_IDS` in `helper/lib/paths.js`), and any extra IDs in the workspace's `config.json`
 `"extensionIds": [...]`. (The private key lives in `.keys/`, gitignored; it's only needed to pack a .crx.)
@@ -75,7 +76,7 @@ patch `fetch`/`XMLHttpRequest`, read React state, etc.). An optional header sets
 
 - `@match` (repeatable): Chrome match patterns. **Default** when absent: `*://<site>/*` and
   `*://*.<site>/*`, where `<site>` is the mod's folder name; `*://*/*` in the `all-sites` folder
-  (mods with no single home site; `webmods new all-sites <mod>` writes that `@match`).
+  (mods with no single home site; `trif new all-sites <mod>` writes that `@match`).
 - `@exclude` (repeatable): exclude match patterns. Default none.
 - `@run-at`: `document-start` (default), `document-end` or `document-idle`.
 - `@name`: default is the file name without `.js`. `@description`: default empty.
@@ -83,9 +84,9 @@ patch `fetch`/`XMLHttpRequest`, read React state, etc.). An optional header sets
   1 noticeable by the page's scripts, 2 changes what the site receives; defined in AGENTS.md "Account
   safety"). Parsed into `risk: {tier, why}` (null when absent; a malformed value is a warning). The side
   panel shows a badge for 1 and 2; a side-panel run's tier-2 mod is held (see "Run scope").
-- `@source` and `@version`: `@source webmods` marks a mod WebMods ships (the examples); `@version` is
+- `@source` and `@version`: `@source webmods` marks a mod TRIF ships (the examples); `@version` is
   its version (any text; the examples count 1, 2, 3…). Parsed into `source` (lowercased) and `version`
-  (null when absent). The panel shows "from WebMods, version 3"; setup keeps such mods up to date (see
+  (null when absent). The panel shows "from TRIF, version 3"; setup keeps such mods up to date (see
   "Updates to shipped mods").
 - Unknown keys are ignored. A file without a header is valid.
 
@@ -102,11 +103,11 @@ logs it and exits (the extension reconnects to a fresh one) instead of misreadin
 
 | message | meaning |
 |---|---|
-| `{type:"mods", mods:[Mod…], sitesOn:[site…]}` | The full set of mods, and the sites setup said to start on (`preinstalled.json`; each browser turns each on once, see "Sites WebMods is on for"). Sent on connect and after every change in the mods folder (debounced 150 ms). The extension makes `chrome.userScripts` match it exactly (register new, update changed, unregister missing). |
+| `{type:"mods", mods:[Mod…], sitesOn:[site…]}` | The full set of mods, and the sites setup said to start on (`preinstalled.json`; each browser turns each on once, see "Sites TRIF is on for"). Sent on connect and after every change in the mods folder (debounced 150 ms). The extension makes `chrome.userScripts` match it exactly (register new, update changed, unregister missing). |
 | `{type:"request", id, cmd, args}` | A page command from the CLI (table below). The extension answers with a `response`. |
 | `{type:"update", update:Summary}` | What the helper knows about updates (see "Updates"), after the extension's hello, after each check and while installing. The panel shows it. |
 | `{type:"updated", from, to, notes}` | An update was installed. The extension keeps it in storage (`updated`) so the panel can say so after the reload. |
-| `{type:"reload", reason}` | The extension should `chrome.runtime.reload()`: <home>/app now holds a newer version (installed by this helper, another browser's, or `webmods setup`). Chrome reloads the unpacked extension from the new files; either browser starts the new helper on reconnect. |
+| `{type:"reload", reason}` | The extension should `chrome.runtime.reload()`: <home>/app now holds a newer version (installed by this helper, another browser's, or `trif setup`). Chrome reloads the unpacked extension from the new files; either browser starts the new helper on reconnect. |
 
 `Mod = { id, site, file, name, description, matches:[…], excludes:[…], runAt:"document_start"|"document_end"|"document_idle", risk:{tier, why}|null, source, version, code, hash, held?, startOff?, origin?:{by, browser}, update?:{version, from, modified} }`
 (`file` is the absolute path; `hash` is a sha1 of code+metadata so the extension can skip unchanged mods;
@@ -119,7 +120,7 @@ logs it and exits (the extension reconnects to a fresh one) instead of misreadin
 | `{type:"hello", version, userScripts: bool, chrome: "<version>"}` | Sent on connect. `userScripts` is false when the "Allow User Scripts" switch is off. |
 | `{type:"response", id, ok:true, result}` / `{type:"response", id, ok:false, error:"message"}` | Answer to a request. |
 | `{type:"modsApplied", registered:[ids], errors:[{id, error}]}` | After applying a `mods` message. |
-| `{type:"log", level, message}` | Extension-side diagnostics; the helper writes them to `~/.webmods/helper.log`. |
+| `{type:"log", level, message}` | Extension-side diagnostics; the helper writes them to `~/.trif/helper.log`. |
 
 ## Safari
 
@@ -137,24 +138,24 @@ messaging to an arbitrary program (Safari's only reaches the extension's own Mac
   function with `toString()`, so the injected function is one whose `toString` returns the code: that runs
   even on pages whose CSP forbids eval (checked on x.com and instagram.com in Safari 27.2). If the combined
   code fails to inject (a mod that doesn't parse), each script is injected on its own. `execute` (for
-  `webmods run`) injects `return (<code>);` the same way.
+  `trif run`) injects `return (<code>);` the same way.
 - **Native messaging.** `connectNative` returns a port over a WebSocket to `ws://127.0.0.1:47615/`, the
   Safari bridge (`helper/safari-bridge.js`), which relays JSON messages to a host.js in the usual frames.
   The bridge accepts only handshakes whose `Origin` is `safari-web-extension://…` (web pages can't set it)
   and that bring its key as `?token=`: the contents of `<home>/safari-token` (64 hex characters, mode 600,
-  made by `webmods setup --browser safari`). A Safari extension's origin is random and changes, so the key
-  is what tells WebMods from other extensions: the extension gets it with
+  made by `trif setup --browser safari`). A Safari extension's origin is random and changes, so the key
+  is what tells TRIF from other extensions: the extension gets it with
   `runtime.sendNativeMessage(…, {type:"token"})` from its own Mac app (`safari/SafariWebExtensionHandler.swift`,
-  whose sandbox may read just `~/.webmods/safari-token`), which no other extension can message.
+  whose sandbox may read just `~/.trif/safari-token`), which no other extension can message.
   Safari unloads the background page after about 30 s with nothing to do, closing the socket, so the host
   outlives the connection: its messages are queued (up to 2000) and delivered when the background
   reconnects, which it does with a fresh `hello`. A host with no connection for 30 minutes and no agent
-  run in `<home>/active-runs` is stopped. `webmods setup --browser safari` installs the bridge as a
-  launchd agent (`~/Library/LaunchAgents/dev.webmods.safari-bridge.plist`, KeepAlive); `webmods doctor`
+  run in `<home>/active-runs` is stopped. `trif setup --browser safari` installs the bridge as a
+  launchd agent (`~/Library/LaunchAgents/com.timsrobot.trif.safari-bridge.plist`, KeepAlive); `trif doctor`
   checks that it's listening. Setup restarts a loaded agent with `launchctl kickstart -k` (bootout and
   bootstrap only when the plist is new or changed). Stopping the bridge stops its hosts and their
   children, so a setup run inside one (an update installed from Safari: the bridge gives its hosts
-  `WEBMODS_SAFARI_BRIDGE`) leaves the launchctl commands to a detached shell that runs them 3 s later,
+  `TRIF_SAFARI_BRIDGE`) leaves the launchctl commands to a detached shell that runs them 3 s later,
   after the update has finished. The background's warnings, errors and failures to start are POSTed to the
   bridge (`/log`, `/startup-error`) and written to `helper.log`, since Safari shows the background's
   console only in its developer tools.
@@ -165,7 +166,7 @@ messaging to an arbitrary program (Safari's only reaches the extension's own Mac
 The build (`scripts/build-extension.js safari`) bundles the background into one classic script (Safari
 doesn't run module workers) and makes it a non-persistent background page rather than a service worker.
 `scripts/build-safari.js` wraps that in the Mac app Safari requires (Xcode project generated each time
-with `safari-web-extension-converter`; app `dev.webmods.app`, extension `dev.webmods.app.extension`),
+with `safari-web-extension-converter`; app `com.timsrobot.trif`, extension `com.timsrobot.trif.extension`),
 signed ad hoc unless given `--team`.
 
 ## Page commands (CLI → helper → extension)
@@ -184,16 +185,16 @@ Without one, the target is the active tab of the last-focused normal window.
 | `open` | `to` (URL) | `{id, url}`: opens a new background tab (never takes focus), waits for load |
 | `text` | tab selector | `{url, title, text}`: `document.body.innerText`, capped at 200 000 chars |
 | `screenshot` | tab selector | `{dataUrl}` PNG of the visible area. Only for a tab that's showing in its (non-minimized) window; otherwise an error: the extension never switches tabs or focuses windows, since agents may run while the user browses. The CLI writes it to a file. |
-| `record` | `site`, `on: bool` | `{recording:[sites], site, changed}`. Turns the network recorder on/off for a hostname (and its subdomains). Takes effect on the next page load. `changed`: whether it was the other way before. Switching off is allowed on a site WebMods is off for. Recording a side-panel run switched on (changed, from its token) is switched off by the helper when that run's `done` goes out; recording that was already on, or that a terminal switched on, is left alone. |
+| `record` | `site`, `on: bool` | `{recording:[sites], site, changed}`. Turns the network recorder on/off for a hostname (and its subdomains). Takes effect on the next page load. `changed`: whether it was the other way before. Switching off is allowed on a site TRIF is off for. Recording a side-panel run switched on (changed, from its token) is switched off by the helper when that run's `done` goes out; recording that was already on, or that a terminal switched on, is left alone. |
 | `requests` | `filter` (regex string, matched against URL), `limit` (default 50) + tab selector | `[{i, method, url, status, type:"fetch"|"xhr", size, time}]`, newest last |
 | `request` | `i` + tab selector | `{method, url, status, requestBody, responseText}` (bodies capped at 2 MB each) |
 | `errors` | tab selector | `[{mod, message, stack, time}]`: errors thrown by mods in that page |
-| `logs` | tab selector | `[{mod, level, args:[strings], time}]`: what mods logged with `webmods.log(...)` |
+| `logs` | tab selector | `[{mod, level, args:[strings], time}]`: what mods logged with `trif.log(...)` |
 | `mod.enable` | `id`, `enabled: bool`, `wait: bool` + tab selector | `{id, enabled, reloaded}`: switches a mod on/off (below). `reloaded` = the tab id reloaded, or null |
 
-### Sites WebMods is on for (`sitesOn`)
+### Sites TRIF is on for (`sitesOn`)
 
-WebMods is off on every site until the user turns it on from the side panel there. The extension keeps
+TRIF is off on every site until the user turns it on from the side panel there. The extension keeps
 the sites in `chrome.storage.local` **`sitesOn`**: a sorted list of registrable domains (`scopeFor` in
 `extension/lib.js`, mirroring `helper/lib/scope.js`; `x.com` covers `m.x.com`). It's the one place this
 is enforced, for everyone:
@@ -204,7 +205,7 @@ is enforced, for everyone:
   `status` gives it `sitesOff: true`. The runtime follows the registered mods, and `recording` only
   counts on sites that are on.
 - **Page commands.** Every tab or URL a page command touches must be on a site that's on (the same check
-  as run scope, for all requests, scoped or not): otherwise `WebMods is off on <site>: …`. `tabs` lists
+  as run scope, for all requests, scoped or not): otherwise `TRIF is off on <site>: …`. `tabs` lists
   only tabs on sites that are on. `agent.start` is refused for a site that's off.
 - **The switch.** The panel's `{type: "site.set", site, on, tab}` adds or removes the site's registrable
   domain, re-applies mods, reloads `tab` if an enabled mod applies to it, and (off) stops runs on the
@@ -238,7 +239,7 @@ mod off (and clears its list); on on a site while the whole mod is off turns it 
 named sites go into the list; a mod matching any host comes on everywhere except the listed sites).
 The whole-mod switch (no `site`) leaves the list alone. The reply adds `site`, `offSites` and
 `modEnabled`; `status` reports `offSites` per mod when non-empty. A scoped run may switch any mod with
-`site` inside its scope (`webmods enable|disable <id> --site HOST`). In the side panel, a mod that
+`site` inside its scope (`trif enable|disable <id> --site HOST`). In the side panel, a mod that
 names several sites or any host (`isMultiSite`) gets a switch for the panel's site; the setup page
 shows the whole-mod switch plus one per site (the named sites and any in `offSites`).
 
@@ -259,7 +260,7 @@ shows the whole-mod switch plus one per site (the named sites and any in `offSit
 
 The extension registers one internal user script, id `webmods-runtime` (ids starting with `_` are reserved by Chrome), matching
 the union of the registered mods' `@match` patterns plus `*://<site>/*` and `*://*.<site>/*` for each
-recorded site (not every page: its globals would let any site detect WebMods users; with no mods on and
+recorded site (not every page: its globals would let any site detect TRIF users; with no mods on and
 nothing recorded, nothing is registered; if the union is invalid, `<all_urls>`), MAIN
 world, `document_start`, **registered before any mod** so it runs first. It defines:
 
@@ -270,21 +271,24 @@ window.__webmods = {
   requests: [],        // recorder entries, only when recording this site (capped at 300; bodies at 2 MB each, 32 MB in all)
   recording: bool,
 };
-window.webmods = { log(...args), warn(...args), error(...args) };   // for mods; records with the current mod id
+window.trif = { log(...args), warn(...args), error(...args) };   // for mods; records with the current mod id
+window.webmods = window.trif;   // its name before 0.2.0 (when TRIF was called WebMods): users' mods use it, so it stays
+// (__webmods, __webmods_runs and the user script id webmods-runtime also keep their names from then: mods
+// and older code may read them.)
 ```
 
 Every mod is wrapped by the extension before registering:
 
 ```js
 (() => { const __mod = "x.com/plain-x"; window.__webmods && (window.__webmods.current = __mod);
-try { /* mod code */ } catch (e) { window.__webmods?.errors.push({mod: __mod, message: String(e?.message ?? e), stack: String(e?.stack ?? ""), time: Date.now()}); console.error("[webmods]", __mod, e); }
+try { /* mod code */ } catch (e) { window.__webmods?.errors.push({mod: __mod, message: String(e?.message ?? e), stack: String(e?.stack ?? ""), time: Date.now()}); console.error("[TRIF]", __mod, e); }
 })();
-//# sourceURL=webmods://x.com/plain-x.js
+//# sourceURL=trif://x.com/plain-x.js
 ```
 
 (Errors thrown later from a mod's event handlers or timers aren't caught by this wrapper; the runtime
 also listens for `window` `error`/`unhandledrejection` events and attributes those whose stack mentions
-`webmods://<site>/<mod>.js`.)
+`trif://<site>/<mod>.js` (or `webmods://`, the name before 0.2.0).)
 
 **Recorder:** when the page's hostname is in the recording set, the runtime hooks `fetch` and
 `XMLHttpRequest` (before the site's code runs) and stores each request: method, URL, status, request
@@ -295,49 +299,49 @@ streams on doesn't grow without end; `text/event-stream` isn't read at all. Bodi
 reaches the runtime because the extension re-registers `webmods-runtime` (ids starting with `_` are reserved by Chrome) with the set embedded in its
 code whenever it changes (`const RECORDING = ["x.com"]`).
 
-## CLI (`webmods`)
+## CLI (`trif`)
 
 ```
-webmods setup [--browser chrome|chromium|brave|edge|arc|all] [--copy|--link]   install workspace, native host, CLI link
-webmods status                     connection, user-scripts switch, mods and whether each is registered (or off)
-webmods doctor                     diagnose setup problems, printing a fix for each
-webmods tabs
-webmods run [TAB] '<code>'         run JS in the page (REPL-style); `-f file.js` to run a file; `-` reads stdin
-webmods reload [TAB] [--hard]
-webmods open <url>
-webmods navigate [TAB] <url>
-webmods text [TAB]
-webmods screenshot [TAB] [-o file.png]     default: ~/.webmods/screenshots/<time>.png; prints the path
-webmods record <site> [on|off]
-webmods requests [TAB] [--filter <regex>] [--limit N]
-webmods request [TAB] <i> [-o file]        prints JSON; response bodies that are JSON are pretty-printed
-webmods errors [TAB]
-webmods logs [TAB]
-webmods mods                        list mods from the folder (id, matches, file); [off] marks switched-off ones when Chrome is reachable
-webmods disable <site>/<mod> [TAB]  switch a mod off (mod.enable; reloads TAB/the active tab if the mod runs there)
-webmods enable <site>/<mod> [TAB]   switch it back on
-webmods approve <site>/<mod>        let a held mod run (see "Run scope"); refused inside an agent run
-webmods delete <site>/<mod>         move a mod to ~/.webmods/trash (kept 30 days); inside a run, through the helper (mod.delete)
-webmods restore [<site>/<mod>]      put back the newest trashed copy of a mod; no id: list the trash
-webmods check <file|site/mod>       compile a mod without running it; prints the syntax error or "ok"
-webmods new <site> <mod>            create sites/<site>/<mod>.js from a template, print its path
-webmods install-example <site>/<mod>
-webmods mod-update <site>/<mod> [--use-new|--keep|--merged]   a shipped mod's new version (see "Updates to shipped mods"); refused inside an agent run
-webmods help [command]
+trif setup [--browser chrome|chromium|brave|edge|arc|all] [--copy|--link]   install workspace, native host, CLI link
+trif status                     connection, user-scripts switch, mods and whether each is registered (or off)
+trif doctor                     diagnose setup problems, printing a fix for each
+trif tabs
+trif run [TAB] '<code>'         run JS in the page (REPL-style); `-f file.js` to run a file; `-` reads stdin
+trif reload [TAB] [--hard]
+trif open <url>
+trif navigate [TAB] <url>
+trif text [TAB]
+trif screenshot [TAB] [-o file.png]     default: ~/.trif/screenshots/<time>.png; prints the path
+trif record <site> [on|off]
+trif requests [TAB] [--filter <regex>] [--limit N]
+trif request [TAB] <i> [-o file]        prints JSON; response bodies that are JSON are pretty-printed
+trif errors [TAB]
+trif logs [TAB]
+trif mods                        list mods from the folder (id, matches, file); [off] marks switched-off ones when Chrome is reachable
+trif disable <site>/<mod> [TAB]  switch a mod off (mod.enable; reloads TAB/the active tab if the mod runs there)
+trif enable <site>/<mod> [TAB]   switch it back on
+trif approve <site>/<mod>        let a held mod run (see "Run scope"); refused inside an agent run
+trif delete <site>/<mod>         move a mod to ~/.trif/trash (kept 30 days); inside a run, through the helper (mod.delete)
+trif restore [<site>/<mod>]      put back the newest trashed copy of a mod; no id: list the trash
+trif check <file|site/mod>       compile a mod without running it; prints the syntax error or "ok"
+trif new <site> <mod>            create sites/<site>/<mod>.js from a template, print its path
+trif install-example <site>/<mod>
+trif mod-update <site>/<mod> [--use-new|--keep|--merged]   a shipped mod's new version (see "Updates to shipped mods"); refused inside an agent run
+trif help [command]
 ```
 
 `TAB` is `--tab <id>` or `--url <substring|/regex/>`. Exit code 0 on success, 1 on a command error,
-2 when the helper isn't running (message: open Chrome; if Chrome is open, run `webmods doctor`). Output
+2 when the helper isn't running (message: open Chrome; if Chrome is open, run `trif doctor`). Output
 is plain text for humans and agents: no colours when stdout isn't a TTY. `--json` makes any command print
 the raw result as JSON.
 
 ## CLI ⇄ helper (unix socket)
 
-Newline-delimited JSON on `~/.webmods/helper.sock` (mode 0600). Request `{id, cmd, args, token?}` →
+Newline-delimited JSON on `~/.trif/helper.sock` (mode 0600). Request `{id, cmd, args, token?}` →
 response `{id, ok, result|error}`. Helper-local commands (`mods`, `ping`) are answered by the helper;
 everything else is forwarded to the extension. Requests time out after `args.timeout + 5000` ms (default 35 s).
 Agent commands (`agent.list`/`agent.start`/`agent.stop`) are helper-local too; after answering `agent.start` with `{runId}`, the helper streams `{type:"agentEvent", runId, event}` lines (no `id`) on that same connection until the `done` event.
-`token` is the run token (see "Run scope"): the CLI sends `$WEBMODS_RUN_TOKEN` when it's set.
+`token` is the run token (see "Run scope"): the CLI sends `$TRIF_RUN_TOKEN` when it's set.
 If the socket file exists but nothing listens, the next host to start removes it.
 
 **Several browsers.** Each browser (or Chrome profile) that runs the extension starts its own host. Every
@@ -348,12 +352,12 @@ Which socket the CLI uses:
 - `--browser <name|pid>`: the host whose extension said hello with that browser name (`Chrome`,
   `Firefox`, case-insensitive) or that pid (`lib/helpers.js` pings each `helper-*.sock`). Two hosts for
   the same browser (two Chrome profiles) need the pid. Refused inside an agent run.
-- Inside a side-panel agent run: no socket. The CLI writes to the run's mailbox (`$WEBMODS_RUN_BOX`, see
+- Inside a side-panel agent run: no socket. The CLI writes to the run's mailbox (`$TRIF_RUN_BOX`, see
   "Run scope"), which the host that started the run serves, so a run started from Firefox's sidebar works
   on Firefox's tabs even while Chrome's host owns `helper.sock`.
-- `$WEBMODS_SOCK`, when set: that socket.
+- `$TRIF_SOCK`, when set: that socket.
 - Otherwise `helper.sock`.
-`webmods status` and `webmods doctor` list the other connected browsers.
+`trif status` and `trif doctor` list the other connected browsers.
 
 **Mods made in another browser start off.** Each extension install has a random `installId` (in its
 storage, sent in `hello`). A run marks itself in `<home>/active-runs/<runId>.json` (`{runId, by, browser,
@@ -364,30 +368,30 @@ origin. Mods go to the extension with `origin: {by, browser}`, and an extension 
 `origin.by` isn't its own `installId` the first time it sees it (`startedOff`, as for preinstalled mods);
 the panel tags it "from <browser>" while it's off.
 
-## Native host installation (`webmods setup`)
+## Native host installation (`trif setup`)
 
-First install, for anyone with Node ≥ 18: **`npx webmods setup`**. The npm package `webmods` (root
-`package.json`, `bin: webmods → helper/cli.js`) ships `helper/`, `extension/`, `examples/` and this file.
+First install, for anyone with Node ≥ 18: **`npx trif setup`**. The npm package `trif` (root
+`package.json`, `bin: trif → helper/cli.js`) ships `helper/`, `extension/`, `examples/` and this file.
 Re-running setup is safe; run it again to update.
 
 - **Where the wrappers point (install mode).**
   - `copy` (default when the package isn't a git checkout, i.e. `<package>/.git` doesn't exist, as
     with npx, whose folder is a cache npm may delete): setup copies `package.json`, `helper/`,
-    `extension/` and `examples/` into `~/.webmods/app/` and the wrappers run that copy. The copy goes to
+    `extension/` and `examples/` into `~/.trif/app/` and the wrappers run that copy. The copy goes to
     a temp sibling (`.app.new-<pid>`) and is then swapped in, so a failed copy leaves a working install
     alone; when `app/` already matches byte for byte, nothing is touched (a running helper keeps its files).
     Every install into `app/` (setup, an update, either browser's helper) holds `<home>/.app.lock`
     (`helper/lib/lock.js`: made with O_EXCL, holding the owner's pid and a token; taken over when that pid
     is dead or the lock is older than 15 minutes). A second install while one holds it is refused ("another
-    WebMods install is in progress"). Leftover `.app.new-*`/`.app.old-*` folders are removed only when the
+    TRIF install is in progress"). Leftover `.app.new-*`/`.app.old-*` folders are removed only when the
     pid in their name is dead.
-    Running setup from the copy itself (`webmods setup` through the wrapper) leaves it in place.
-  - `link` (default in a git checkout, for developing WebMods): the wrappers run the checkout's files.
+    Running setup from the copy itself (`trif setup` through the wrapper) leaves it in place.
+  - `link` (default in a git checkout, for developing TRIF): the wrappers run the checkout's files.
   - `--copy` / `--link` force either mode.
   AGENTS.md, CLAUDE.md, the mod template and the examples always come from the files the wrappers run.
 - Preinstalled mods: setup copies the examples listed in `PREINSTALLED` (helper/lib/preinstalled.js:
   Google, X, Amazon and Instagram mods, each marked on or off) into `sites/`, and offers `SITES_ON`
-  (google.com, x.com, amazon.com, instagram.com). `~/.webmods/preinstalled.json` =
+  (google.com, x.com, amazon.com, instagram.com). `~/.trif/preinstalled.json` =
   `{offered, startOff, sitesOn}`: `offered` keeps a later setup from bringing back one the user deleted
   (an existing file is never overwritten); `startOff` lists the copied ones that start off. The helper
   sends those mods with `startOff: true`; the extension switches each off (`disabled`) the first time it
@@ -395,25 +399,68 @@ Re-running setup is safe; run it again to update.
   Later setups update the copies (see "Updates to shipped mods"); `preinstalled.json` also holds `shipped`.
   `sitesOn` goes with every mods message; the extension turns each site on the first time it sees it
   and remembers that in `sitesOffered` (`applyStartSites`). `--no-examples` skips all this.
-- Wrapper: `~/.webmods/bin/webmods-host` = `#!/bin/sh\nexec "<absolute node path>" "<app>/helper/host.js" "$@"`
-  where `<app>` is `~/.webmods/app` (copy) or the checkout (link)
+- Wrapper: `~/.trif/bin/trif-host` (and the same as `bin/webmods-host`, its name before 0.2.0, which
+  manifests written then may name; likewise `bin/webmods` beside `bin/trif`) = `#!/bin/sh\nexec "<absolute node path>" "<app>/helper/host.js" "$@"`
+  where `<app>` is `~/.trif/app` (copy) or the checkout (link)
   (Chrome launches hosts with a minimal PATH, so the node path is absolute).
 - Manifest `com.webmods.helper.json` → `{ name, description, path: <wrapper>, type: "stdio", allowed_origins: [...] }`
-  where `allowed_origins` is `chrome-extension://<id>/` for every WebMods extension ID (see "Extension
+  where `allowed_origins` is `chrome-extension://<id>/` for every TRIF extension ID (see "Extension
   identity"), written to each selected browser's `NativeMessagingHosts` dir (macOS:
   `~/Library/Application Support/Google/Chrome/NativeMessagingHosts`, `…/Chromium/…`,
   `…/BraveSoftware/Brave-Browser/…`, `…/Microsoft Edge/…`; Linux: `~/.config/google-chrome/NativeMessagingHosts` etc.).
-  Default: every one of those browsers whose parent folder exists. `webmods doctor` fails a manifest
+  Default: every one of those browsers whose parent folder exists. `trif doctor` fails a manifest
   that is missing any of the IDs.
-- CLI link: `~/.webmods/bin/webmods` (shell wrapper like the host's), and it prints a line to add
-  `~/.webmods/bin` to PATH if it isn't there. If `/usr/local/bin` is writable, it also symlinks
-  `/usr/local/bin/webmods`.
+- CLI link: `~/.trif/bin/trif` (shell wrapper like the host's), and it prints a line to add
+  `~/.trif/bin` to PATH if it isn't there. If `/usr/local/bin` is writable, it also symlinks
+  `/usr/local/bin/trif`.
 - PATH for agents: setup records the terminal's PATH in `config.json` `env.PATH`, minus the folders npx
   adds for its own run.
 - Extension: until the Chrome Web Store listing exists, users (beta testers) load it unpacked from
   `<app>/extension` (setup's "Next steps" print the folder). The listing will replace that step.
 - Version: the root `package.json` is the single source; `helper/lib/paths.js` reads it and
   `extension/manifest.json`'s version must match (a test checks).
+
+## Renamed from WebMods (0.2.0)
+
+TRIF was WebMods until 0.2.0. What changed name: everything a person sees (the extension's name TRIF, its
+description, the panel, setup and doctor output, docs), the command (`trif`; `webmods` is kept as an alias:
+both wrappers are written, the npm package has both bins, and Claude runs may use either), the workspace
+(`~/.trif`), the npm package (`trif`), environment variables (`TRIF_*`; `WEBMODS_*` still read, see
+`helper/lib/env.js`), the website (timsrobot.com; the Worker redirects webmods.dev there), release asset
+names (`trif-<version>.tgz` …), the in-page API (`window.trif`, with `window.webmods` the same object), the
+Safari app (`TRIF.app`, bundle IDs `com.timsrobot.trif[.extension]`, a new extension to Safari), the Safari
+bridge's launchd label (`com.timsrobot.trif.safari-bridge`; setup stops and removes
+`dev.webmods.safari-bridge`), run mailboxes (`~/Library/Caches/TRIF/boxes`) and keychain names in
+`scripts/release.js` (old names still found).
+
+What kept its old name, because changing it would break existing installs or updates: the Chrome
+extension key/ID and the Firefox add-on ID `webmods@webmods.ext` (browsers would see a new extension and
+drop its settings and updates); the native host name `com.webmods.helper` (Firefox updates the add-on on
+its own schedule, so add-on and helper versions mix for a while, and both must find each other by name;
+nobody sees it); extension storage keys; the in-page globals `__webmods`, `__webmods_runs` and the user
+script id `webmods-runtime`; the `// ==WebMod==` header; and `@source webmods` in the shipped mods (changing
+their text would make every edited copy offer a "new version"; `@source trif` counts too).
+
+**Moving the workspace** (`helper/lib/migrate.js`). Whenever setup sets up the default workspace (no
+`--home`/`TRIF_HOME`, or one naming `~/.webmods` or `~/.trif`), it first moves `~/.webmods` to `~/.trif` with
+one rename and makes `~/.webmods` a relative link to `.trif`. That covers the way 0.1.x installs get 0.2.0:
+their updater runs the new version's `setup --copy --no-link --home ~/.webmods` from inside
+`~/.webmods/.update-*`, holding `~/.webmods/.app.lock`. Through the link, the updater's tmp folder, the new
+version's own files, the lock (it moved with the folder, and its token comes down as
+`WEBMODS_INSTALL_LOCK`), `~/.webmods/app/package.json` (which the updater reads to see the new version
+installed) and its state writes all still resolve. Chrome keeps loading an unpacked extension from
+`~/.webmods/app/extension`, so the link has to stay (doctor warns when it's gone). Cases: a link to `~/.trif`
+already: nothing; a link elsewhere (the user keeps the workspace somewhere else): `~/.trif` becomes a link
+to the same place; both folders real: merged into `~/.trif`, which wins conflicts, `~/.webmods`' conflicting
+copies kept in `~/.trif/old-webmods-<date>/`; another live process installing in `~/.webmods` (its lock):
+skipped, try again. A workspace elsewhere (`TRIF_HOME`) isn't moved. Until setup has run, the default
+workspace is `~/.webmods` if only that exists (a git checkout's helper restarting onto new code first).
+
+Running helpers keep working through the link (their sockets moved with the folder). A 0.2.0 helper that
+started on a folder that has since become a link exits when idle (host.js `homeMoved`), and an older one
+sees its code change on disk (its `app/` now resolves to the new copy), so each browser starts a fresh
+helper on `~/.trif`. Run sandboxes get real paths (`runLimits`), and the `~/.webmods` link is left out of
+the denied home-folder entries, since a sandbox that resolves it would deny the workspace itself.
 
 ## Updates
 
@@ -436,10 +483,10 @@ or by itself when config.json `autoUpdate` is true and no run is going) download
 it, unpacks it into `<home>/.update-*`, and runs the new version's `helper/cli.js setup --copy --no-link
 --home <home> --browser <the browsers with a manifest now>` with the PATH setup recorded, which swaps it
 into `<home>/app` like a first install. The whole install holds the install lock (see "Native host
-installation"); the setup it runs gets the lock's token in `WEBMODS_INSTALL_LOCK`, so its copy goes ahead
+installation"); the setup it runs gets the lock's token in `TRIF_INSTALL_LOCK`, so its copy goes ahead
 under the parent's lock. If `<home>/app` holds the new version afterwards but setup exited non-zero (a
 later step failed: a manifest, the Safari bridge), the update counts as installed: `lastInstalled` gets a
-`warning` with setup's last lines, the helper logs it and `webmods update --install` prints it. Then
+`warning` with setup's last lines, the helper logs it and `trif update --install` prints it. Then
 `{type:"updated"}` and `{type:"reload"}`. Only installs
 running from `<home>/app` update themselves; a git checkout says to use git. config.json
 `checkForUpdates: false` stops the checks.
@@ -452,18 +499,18 @@ Helper commands (from the extension, or the CLI over the socket; never from insi
 `report.build {site, siteOn, mods:[{id, enabled, registered, error}]}` → `{text, email}`: the problem
 report (`helper/lib/report.js`: versions, doctor warnings, recent log warnings folded together, scrubbed
 of the home folder, user name, email addresses, query strings and token-like strings) → `{text, email,
-url}`: `url` is package.json `bugs.url` (the report form, https://webmods.dev/report), `email` its
+url}`: `url` is package.json `bugs.url` (the report form, https://timsrobot.com/report), `email` its
 `bugs.email`. The panel opens `url#r=<text>&s=<site>` in a tab: the form reads the report from after the
 `#`, which browsers never send to a server, so nothing is sent until the person presses Send there
 (`site/`, a Cloudflare Worker that emails it to the maintainer).
 
-CLI: `webmods update [--install] [--auto on|off]` works without the helper (a running helper notices the
-new `<home>/app` within 30 s and asks the extension to reload); `webmods report` asks the helper, or
+CLI: `trif update [--install] [--auto on|off]` works without the helper (a running helper notices the
+new `<home>/app` within 30 s and asks the extension to reload); `trif report` asks the helper, or
 builds a shorter report without it; `--open` opens the form with it filled in.
 
 ## Updates to shipped mods
 
-`helper/lib/preinstalled.js`. The preinstalled mods get fixes in later WebMods versions (Plain X when X
+`helper/lib/preinstalled.js`. The preinstalled mods get fixes in later TRIF versions (Plain X when X
 changes). Every setup, which is also how an update installs, brings them to the user's copy without ever
 overwriting the user's own changes. Only examples whose header says `@source webmods` and that are in
 `PREINSTALLED` are managed.
@@ -492,16 +539,16 @@ overwriting the user's own changes. Only examples whose header says `@source web
 - **Telling the user.** Each mods message gives a mod with an update waiting `update: {version, from,
   modified}` (`modified`: the copy differs from the base, so using the new version loses changes; a copy
   that already is the new version has none). The helper's sync fingerprint includes
-  `preinstalled.json`, so a setup elsewhere shows up within the poll interval. `webmods mods`/`status` say
+  `preinstalled.json`, so a setup elsewhere shows up within the poll interval. `trif mods`/`status` say
   "update available (you've changed it): version N". The side panel shows, on that mod, a notice with
   **Use the new version**, **Keep mine** and (when modified) **Merge with my agent**.
 - **Helper command** `mod.update {id, choice: "new"|"mine"}` (extension or socket; refused inside a run,
   like `mod.approve`):
   - `new` → `{id, choice, version, trashed}`: the user's copy goes to the trash (trash.js), the new
     version takes its place and becomes the base; `replaced` remembers how things were. `mod.restore`
-    (the panel's Undo, `webmods restore`) while the file is still that new version puts the user's copy
+    (the panel's Undo, `trif restore`) while the file is still that new version puts the user's copy
     back and the update is pending again. The panel adds `{role:"mod", text:"x.js is now version 2 from
-    WebMods; yours is in the trash.", undo: id}` to the chat.
+    TRIF; yours is in the trash.", undo: id}` to the chat.
   - `mine` → `{id, choice, version}`: `declined = <its hash>`, so it isn't offered again; a later version is.
 - **Merging** is an ordinary side-panel run: `agent.start` with `merge: "<id>"` (from the mod's own site:
   the scopes must match). The helper appends to the prompt where the three files are, relative to the
@@ -511,14 +558,14 @@ overwriting the user's own changes. Only examples whose header says `@source web
   `.shipped` is readable (it isn't in `PRIVATE_FILES`) and not writable (outside the mods folder; Claude
   Code's sandbox also denies it). When that run's `done` has `ok: true`, the pending version becomes the
   base (if it's still the one waiting), before the mods go out again and `done` is relayed.
-  `webmods mod-update <id> --merged` does the same after a merge in a terminal.
+  `trif mod-update <id> --merged` does the same after a merge in a terminal.
 
 ## Repository layout
 
 ```
 extension/   manifest.json, background.js (service worker), runtime.js (page runtime source),
              onboarding.html/.js, icons/, safari.js + safari-background.js (Safari build only)
-package.json the npm package `webmods` (version, bin, files allowlist)
+package.json the npm package `trif` (version, bin, files allowlist)
 helper/      host.js, cli.js, safari-bridge.js, lib/*.js, workspace/AGENTS.md, workspace/CLAUDE.md, templates/mod.js
 examples/    sites/<site>/<mod>.js (the shipped mods), shipped-history.json (scripts/shipped-history.js)
 tests/       node tests (node --test), incl. a fake extension for the helper and a chrome.* mock for the extension
@@ -528,7 +575,7 @@ scripts/     build-extension.js (Chrome/Firefox/Safari builds), build-safari.js 
 beta/        START HERE.txt templates for the beta zips (Firefox, Chrome)
 updates/     the update feeds, written by release.js (latest.json + .sig, firefox.json)
 CHANGELOG.md what's new per version (the panel's "What's new")
-site/        webmods.dev, the report form (a Cloudflare Worker; site/README.md)
+site/        timsrobot.com, the report form (a Cloudflare Worker; site/README.md)
 ```
 
 Tests run with `node --test` (Node's built-in runner). No dependencies.
@@ -557,7 +604,7 @@ Nothing is hosted; the agent uses the user's own login/subscription.
     (Enter sends, Shift+Enter newline), Send / Stop, "New chat" (forgets the sessionId and messages).
     Assistant text renders as simple markdown (paragraphs, lists, `code`, code blocks, bold, links that
     open in a new tab), escaped first: never inject agent or page text as raw HTML. Tool events render
-    as one compact line each ("ran webmods reload --tab 12", "edited sites/x.com/hide-reposts.js").
+    as one compact line each ("ran trif reload --tab 12", "edited sites/x.com/hide-reposts.js").
     While running: a working indicator, the Stop button.
   - **Slash commands.** The panel handles `/model [name|default]` (sets the model setting: each message
     is a new agent process, so the agent's own `/model` would last one message), `/clear` or `/new`
@@ -572,7 +619,7 @@ Nothing is hosted; the agent uses the user's own login/subscription.
     page groups mods by site: the folder (minus `www.`) if the mod runs there, else its one site, else
     "Several sites"; mods matching any host go under "Every site".
   - No reload prompt: the agent reloads the tab after each change (AGENTS.md), and switches reload it too.
-  - **States:** helper not connected → short setup instructions (`npx webmods setup`, link to Setup page);
+  - **States:** helper not connected → short setup instructions (`npx trif setup`, link to Setup page);
     user scripts off → button opening chrome://extensions/?id=…; agent missing → the error text from the
     helper (it includes the fix); agent not logged in (`loggedIn === false` in `agent.list`, or a run
     failed with the not-logged-in error) → "Claude Code isn't logged in" with a **Log in** button (see
@@ -606,7 +653,7 @@ New native request commands (answered with a normal `response`):
 | `mod.delete` | `id` | `{id, deleted: true}`: moves `sites/<site>/<mod>.js` to `trash/<site>/<mod>@<UTC stamp>.js` (entries older than 30 days are removed), then re-sends the mods; also on the socket, and from a run for mods inside its scope |
 | `mod.restore` | `id` | `{id, restored: true, file}`: moves the newest trashed copy back (fails if the mod exists again, except to undo `mod.update` `new`); same rules as `mod.delete`. The extension keeps a deleted mod's switch state, so it comes back as it was |
 | `mod.update` | `id, choice: "new"\|"mine"` | a shipped mod's new version: use it or keep the user's copy (see "Updates to shipped mods"); also on the socket, not from a run |
-| `instructions.get` | | `{text, file, max}`: the user's standing instructions (`~/.webmods/instructions.md`, `''` if none) |
+| `instructions.get` | | `{text, file, max}`: the user's standing instructions (`~/.trif/instructions.md`, `''` if none) |
 | `instructions.set` | `text` | same; trimmed, at most 4000 characters, empty removes the file. Not from a run |
 
 `loggedIn` is `true` / `false`, or `null` when unknown or the agent isn't available (from the adapter's
@@ -620,7 +667,7 @@ New helper → extension message: `{type: "agentEvent", runId, event}` where `ev
 ```
 {kind: "session", sessionId}                       the agent's conversation id (for resuming)
 {kind: "text", text}                               a block of assistant text
-{kind: "tool", name, summary}                      a tool call, e.g. {name:"Bash", summary:"webmods reload --tab 12"}
+{kind: "tool", name, summary}                      a tool call, e.g. {name:"Bash", summary:"trif reload --tab 12"}
 {kind: "error", message}                           something went wrong (agent missing, not logged in, crashed…)
 {kind: "done", ok, result, costUsd, changedFiles, sessionId}   always the last event of a run
 {kind: "login", url}                               (logins) the sign-in page to open
@@ -630,12 +677,12 @@ New helper → extension message: `{type: "agentEvent", runId, event}` where `ev
 - `changedFiles`: paths relative to the workspace under `sites/` whose content changed during the run
   (snapshot hashes before and after).
 - One run at a time per site; a second `agent.start` for a busy site fails with "already working on <site>".
-  Runs are killed after 15 minutes. Raw agent output is kept in `~/.webmods/runs/<runId>.jsonl`
+  Runs are killed after 15 minutes. Raw agent output is kept in `~/.trif/runs/<runId>.jsonl`
   (last 50 runs).
-- **Finding agents.** Chrome starts the helper with a minimal PATH, so `webmods setup` records the PATH
+- **Finding agents.** Chrome starts the helper with a minimal PATH, so `trif setup` records the PATH
   of the terminal it ran in as `config.json` → `env.PATH`. The helper looks agents up in that PATH plus
   `~/.local/bin`, `/usr/local/bin`, `/opt/homebrew/bin`, `~/.npm-global/bin`. Spawned agents get
-  `PATH = ~/.webmods/bin : <recorded PATH> : <defaults>`, `HOME`, `USER`, `LANG`, `TERM=dumb`, cwd =
+  `PATH = ~/.trif/bin : <recorded PATH> : <defaults>`, `HOME`, `USER`, `LANG`, `TERM=dumb`, cwd =
   the workspace, and **no** inherited `CLAUDE*`/`ANTHROPIC_*`/`CODEX_*` variables except
   `ANTHROPIC_API_KEY`/`OPENAI_API_KEY` if the user set them in `config.json` → `env`.
 - **Logging in** (`agent.login`): spawns the adapter's login command (claude: `claude auth login`) with
@@ -649,12 +696,12 @@ New helper → extension message: `{type: "agentEvent", runId, event}` where `ev
   The code and the URL's query string are never written to `helper.log` or `runs/` (URLs are logged as
   scheme + host + path, codes are masked as `[code]`). Codex has no side panel login (`codex login`
   finishes via a localhost callback or a device code, untested): `agent.login` fails with its `loginFix`.
-  `webmods agent login [--agent claude]` runs the same flow from a terminal (prints the URL, reads the
+  `trif agent login [--agent claude]` runs the same flow from a terminal (prints the URL, reads the
   code from stdin).
 - **Context for the agent** (prepended to the first message of a session, or passed as an appended
-  system prompt where the agent supports it): "You're running inside the WebMods side panel in the
-  user's Chrome. They're looking at <url> (tab <tabId>): pass `--tab <tabId>` to webmods commands. Follow
-  AGENTS.md. Mods can be switched off and on with `webmods disable/enable <site>/<mod>`; `webmods status`
+  system prompt where the agent supports it): "You're running inside the TRIF side panel in the
+  user's Chrome. They're looking at <url> (tab <tabId>): pass `--tab <tabId>` to trif commands. Follow
+  AGENTS.md. Mods can be switched off and on with `trif disable/enable <site>/<mod>`; `trif status`
   shows which are on. Reply briefly in plain language; your replies appear in a narrow chat panel. You can't ask
   follow-up questions mid-task: if something's unclear, make a sensible choice or end your turn with a
   question." Later messages in the session get a one-line reminder of the current URL and tab id.
@@ -667,15 +714,15 @@ to one site, its **scope**: the registrable domain of the run's site (`en.wikipe
 Suffix List). `helper/lib/scope.js` computes it; `extension/lib.js` mirrors the checks.
 
 - **Mailbox.** A run reaches the helper only through its mailbox: a folder made for it alone,
-  `~/Library/Caches/WebMods/boxes/<runId>/` (`~/.cache/webmods/boxes/` on Linux; `runs.js` boxRoot),
-  given to the agent as `WEBMODS_RUN_BOX`. Its sandbox (below) has no network and no sockets, so this is
+  `~/Library/Caches/TRIF/boxes/<runId>/` (`~/.cache/trif/boxes/` on Linux; `runs.js` boxRoot),
+  given to the agent as `TRIF_RUN_BOX`. Its sandbox (below) has no network and no sockets, so this is
   the only way. The CLI writes a request (one JSON line, as on the socket) to `<id>.tmp` and renames it to
   `<id>.req`; the helper watches the folder, takes the file (opened without following symlinks, regular
   files of at most 8 MB), and writes the answer as `<id>.res` (created fresh, then renamed into place).
   Whatever a request in the mailbox says, the helper handles it as the run's: it puts the run's token in.
   The mailbox is removed when the run ends; a helper starting a run removes mailboxes older than twice
   the run time limit (left by helpers that died).
-- **Token.** `agent.start` makes a random token per run and gives the agent `WEBMODS_RUN_TOKEN`; the
+- **Token.** `agent.start` makes a random token per run and gives the agent `TRIF_RUN_TOKEN`; the
   CLI sends it with every request. The helper answers a request with an unknown token (the run ended)
   with an error, refuses `agent.*`, `mod.approve`, `mod.update` and `instructions.*` from a run, and sets `args.scope` on everything
   else it forwards (overriding any `scope` the client sent; `args` must be a plain object). Requests on
@@ -684,7 +731,7 @@ Suffix List). `helper/lib/scope.js` computes it; `extension/lib.js` mirrors the 
   itself, only for mods whose every `@match` is in scope. The CLI itself refuses `setup`, `agent`,
   `approve` and `mod-update` when the variable is set, and inside a run its own file options stay in the run's folders:
   `-f` and `check` read only the mods folder, `-o` writes only there or the run's screenshots folder
-  (`$WEBMODS_RUN_SCREENSHOTS`, `screenshots/<scope>/`, also where screenshots go by default).
+  (`$TRIF_RUN_SCREENSHOTS`, `screenshots/<scope>/`, also where screenshots go by default).
 - **Extension.** With `args.scope`, page commands only act on tabs whose URL is http(s) on the scope or
   a subdomain (`tabs` lists only those; others fail with an error naming the scope); `open`/`navigate`
   only go to such URLs; `record` only for such sites; `mod.enable` only for mods whose every `@match` is
@@ -694,16 +741,16 @@ Suffix List). `helper/lib/scope.js` computes it; `extension/lib.js` mirrors the 
   after it ends; a finished run's leftover processes get SIGTERM, then SIGKILL after 3 s, so nothing
   writes later), a mod that the run added or changed and that has an `@match`
   outside the scope (`<all_urls>`, a `*` host, another domain, `file://`), or whose `@risk` is 2, is **held**: recorded in
-  `~/.webmods/held.json` (`{id: {hash, site, scope, runId, reason, at, approved?}}`) and sent to the
+  `~/.trif/held.json` (`{id: {hash, site, scope, runId, reason, at, approved?}}`) and sent to the
   extension with `held: {site, reason}`, which the extension doesn't register. The run's `done` event
   carries `held: [{id, reason}]`; the panel says so in the chat and lists the mod (also when it doesn't
   apply to the tab) with an Allow button (`mod.approve`). Approving marks the entry approved so that
   version isn't held again; any change to the file drops the entry (a later run's change is checked
-  afresh). `webmods status`/`mods` show held mods.
+  afresh). `trif status`/`mods` show held mods.
 - **Agent sandboxes.** The scope only holds if the agent can't reach the helper some other way or
   rewrite the rules, so both agents run under limits the operating system enforces (macOS Seatbelt;
   `runs.js` runLimits computes them, each adapter passes them on):
-  - **Reads:** the workspace, the WebMods code `webmods` runs, and node; nothing else in the home folder
+  - **Reads:** the workspace, the TRIF code `trif` runs, and node; nothing else in the home folder
     (every item in it is denied, rather than the folder itself, which node and `mkdir -p` must be able to
     look at). In the workspace, not `config.json` (API keys), `safari-token`, `helper.log`, `runs/`
     (other runs' logs hold the pages they read) or `screenshots/` (other sites'), except the run's own
@@ -717,7 +764,7 @@ Suffix List). `helper/lib/scope.js` computes it; `extension/lib.js` mirrors the 
 
   Codex runs any command, all inside its permission profile (`codex.js` permissionsToml: `network =
   { enabled = false }`; the user's own Codex config and rules files aren't loaded, since a
-  `sandbox_mode` there would replace the profile). Claude Code runs only `webmods`, `cd` and `ls`, in its
+  `sandbox_mode` there would replace the profile). Claude Code runs only `trif`, `cd` and `ls`, in its
   sandbox (`claude.js` runSettings, passed with `--settings`: `enabled`, `failIfUnavailable`,
   `allowUnsandboxedCommands: false`, the filesystem lists, `network: {allowedDomains: [],
   strictAllowlist: true}`); its own file tools follow permission rules: edits only under `sites/` minus
@@ -726,7 +773,7 @@ Suffix List). `helper/lib/scope.js` computes it; `extension/lib.js` mirrors the 
   cover `runs/` (the sandbox does). Verified on macOS with Codex 0.166 (`codex sandbox`) and Claude Code
   2.1.312 (a real `-p` run): each read and write above, another run's mailbox, the internet and the
   helper's socket are refused ("Operation not permitted"); the run's own mods, screenshots and
-  mailbox, and `webmods`, work.
+  mailbox, and `trif`, work.
 
 ### Models (`agent.models`)
 
@@ -745,7 +792,7 @@ name), with a `note` saying so. The panel keeps the chosen model per agent (chro
 Each adapter: `detect(env) → {available, path, version, note}`, `command({prompt, sessionId, model,
 context, workspace}) → {file, args}`, and `parse(line, emit)` turning one stdout line into events.
 Login: `loginStatusArgs` + `parseLoginStatus({status, error, stdout, stderr}) → {loggedIn, detail}`
-(`loginStatus()` runs it synchronously, for `webmods doctor`), `loginFix`, and `login: {args,
+(`loginStatus()` runs it synchronously, for `trif doctor`), `loginFix`, and `login: {args,
 parseLine(line) → {kind:"login", url} | {kind:"text", text} | null}` or `null` when the panel can't log it in.
 The user's standing instructions (`instructions.md`) reach claude through the workspace's CLAUDE.md
 (`@instructions.md`; adapter flag `readsInstructions`); other adapters get them appended to the context.
@@ -758,7 +805,7 @@ The user's standing instructions (`instructions.md`) reach claude through the wo
   --append-system-prompt <context> [--resume <sessionId>] [--model <model>] -- <prompt>`, the message
   last, after `--`. In -p anything that would need approval is denied, so edits happen only under
   `sites/`; the run settings add its sandbox and the per-run denies (see "Run scope"). (2.1.312 ignored
-  `Bash(...)` allow rules from the workspace's settings file in -p runs; `webmods setup` writes the same
+  `Bash(...)` allow rules from the workspace's settings file in -p runs; `trif setup` writes the same
   lists to the workspace's `.claude/settings.json` for interactive sessions there, and the deny rules
   there apply to runs too.) Other Bash commands are denied. `--setting-sources project` keeps the user's own broader allow rules out;
   `--strict-mcp-config` keeps their MCP servers out. stream-json lines: `{type:"system", subtype:"init",
@@ -768,7 +815,7 @@ The user's standing instructions (`instructions.md`) reach claude through the wo
   "Not logged in" in the result → error "Claude Code isn't logged in: run `claude` in a terminal and log in
   (type /login)".
 - **codex** (OpenAI Codex CLI 0.138+; tested with 0.166): `codex exec --json --skip-git-repo-check
-  --ignore-user-config --ignore-rules -c approval_policy="never" -c default_permissions="webmods-run"
+  --ignore-user-config --ignore-rules -c approval_policy="never" -c default_permissions="trif-run"
   -c permissions={…} [-m MODEL] [resume THREAD_ID] -- PROMPT`, the exec options before `resume`. JSONL
   events: thread.started (the session id), item.* (agent_message, command_execution, file_change…),
   turn.completed / turn.failed. Older versions show as unavailable, with an update hint. No side panel
@@ -777,5 +824,5 @@ The user's standing instructions (`instructions.md`) reach claude through the wo
   with `xattr -d com.apple.quarantine <codex dir>/codex-path/rg`.
 
 Security notes: page content reaches the agent, so prompt injection is possible. The agent is limited
-to editing the workspace and running `webmods` (which can still run JavaScript in the user's tabs);
+to editing the workspace and running `trif` (which can still run JavaScript in the user's tabs);
 AGENTS.md's safety rules forbid acting on page instructions and account-changing clicks.

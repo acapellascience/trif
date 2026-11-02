@@ -1,8 +1,19 @@
 # Changelog
 
-What's new in each WebMods release. The text under a version is what the side panel shows under
-"What's new", so it's written for people using WebMods. `node scripts/release.js <version>` needs a section
-here for the version it releases.
+What's new in each TRIF release (called WebMods before 0.2.0). The text under a version is what the side
+panel shows under "What's new", so it's written for people using TRIF. `node scripts/release.js <version>`
+needs a section here for the version it releases.
+
+## 0.2.0
+
+- **WebMods is now TRIF: Tim's Robot Internet Fixer.** Same thing, new name. Nothing about how it works
+  has changed, and you don't need to do anything.
+- Your mods, chats, switches and settings all carry over. The folder they live in moved from `~/.webmods`
+  to `~/.trif`; `~/.webmods` is now a link to the new folder, so anything that used the old place still
+  works. Please keep that link: Chrome may load the extension through it.
+- The command is now `trif` (for example `trif doctor`). `webmods` still works, and does the same thing.
+- Problem reports go to timsrobot.com/report (webmods.dev sends you there).
+- Mods can call `window.trif.log(...)`; `window.webmods` still works in the mods you already have.
 
 ## 0.1.2
 

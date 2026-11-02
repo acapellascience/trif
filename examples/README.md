@@ -1,8 +1,8 @@
 # Examples
 
-Ready-made mods. `webmods setup` adds all of them to a new workspace once, **switched off**: turn one on
+Ready-made mods. `trif setup` adds all of them to a new workspace once, **switched off**: turn one on
 with its switch in the side panel (`--no-examples` skips them). Or copy one in yourself with
-`webmods install-example <site>/<mod>`, then reload the site.
+`trif install-example <site>/<mod>`, then reload the site.
 
 | Mod | What it does |
 |---|---|
@@ -13,19 +13,19 @@ with its switch in the side panel (`--no-examples` skips them). Or copy one in y
 | `www.instagram.com/desaturate` | Turns Instagram's colour down to 35% saturation. |
 
 ```sh
-webmods install-example x.com/plain-x
-webmods reload --url x.com
+trif install-example x.com/plain-x
+trif reload --url x.com
 ```
 
-To turn one off, use its switch in the side panel (or `webmods disable x.com/plain-x`); to remove it,
-delete `~/.webmods/sites/<site>/<mod>.js`.
+To turn one off, use its switch in the side panel (or `trif disable x.com/plain-x`); to remove it,
+delete `~/.trif/sites/<site>/<mod>.js`.
 
 Each example is a single plain JavaScript file with a `// ==WebMod==` header; read it to see how it
 works, or ask your coding agent to change it. Plain X's tests live in `tests/plain-x.test.js`
 (`node --test tests/`).
 
-Their headers say `// @source webmods` and `// @version <n>`: that marks them as shipped by WebMods.
-When a new WebMods version brings a changed example, setup replaces your copy if you never changed it,
+Their headers say `// @source webmods` and `// @version <n>`: that marks them as shipped by TRIF.
+When a new TRIF version brings a changed example, setup replaces your copy if you never changed it,
 and otherwise leaves it alone and offers the new version in the side panel (use it, keep yours, or have
 your agent merge the two). Changing an example here: raise its `@version`, commit, then run
 `node scripts/shipped-history.js` (releases do this too) so setup can recognise every version it shipped.

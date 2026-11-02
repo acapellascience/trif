@@ -1,4 +1,4 @@
-# Chrome Web Store review risks: WebMods 0.1.0
+# Chrome Web Store review risks: TRIF 0.1.0
 
 What is likely to slow down or fail review, roughly most to least likely, with mitigations. An
 unlisted item gets **the same review** as a public one. Unlisted only hides it from search.
@@ -22,8 +22,8 @@ under the **minimum functionality** policy, or "couldn't verify functionality".
 
 Mitigations:
 - **Make the helper installable by a stranger before submitting.** Today the repo has no git remote
-  and the npm package `webmods` isn't published (the name is free on npm as of 2026-10-29). The
-  setup page and listing say `npx webmods setup`, so that command must work for the reviewer.
+  and the npm package `trif` isn't published (the name was free on npm on 2026-11-01). The
+  setup page and listing say `npx trif setup`, so that command must work for the reviewer.
   Either publish the npm package, or host a tarball or public repo and change the instructions.
 - Say clearly in the **listing description** (already done in `listing.md`) that a separately
   installed helper and a coding agent are required.
@@ -52,7 +52,7 @@ Mitigations:
   `chrome.scripting.registerContentScripts({ world: "MAIN", runAt: "document_start" })`. The
   recording set embedded in its code would then have to come from somewhere else, for example a
   second tiny registered script.
-- `chrome.userScripts.execute` runs code the user's agent sends via the `webmods run` command. Same
+- `chrome.userScripts.execute` runs code the user's agent sends via the `trif run` command. Same
   argument: it's user-provided and local. The helper's socket is mode 0600, so only the user's own
   account can reach it.
 
@@ -82,7 +82,7 @@ Mitigations:
 - **`tabs` may be redundant.** With the `<all_urls>` host permission, Chrome already exposes
   `tab.url` and `tab.title` for web pages. Granting `tabs` adds the separate "Read your browsing
   history" install warning, and reviewers do reject unneeded permissions. Before submitting, try
-  removing `tabs` and check: the side panel following the site, `webmods tabs`, tab selection by URL,
+  removing `tabs` and check: the side panel following the site, `trif tabs`, tab selection by URL,
   finding the setup tab (`chrome.tabs.query({url: <extension page>})`), and screenshots. If
   everything works, drop it and its justification. If something needs it, note what in the
   justification.
@@ -112,7 +112,7 @@ automation.
 
 An agent that reads arbitrary pages and can run scripts in the user's tabs is a prompt-injection
 surface, and reviewers increasingly ask about it. Mitigations already in the helper: the agent can
-only edit the workspace and run `webmods`; WebFetch and WebSearch are disallowed; AGENTS.md forbids
+only edit the workspace and run `trif`; WebFetch and WebSearch are disallowed; AGENTS.md forbids
 acting on page instructions and account-changing clicks. Mention this briefly if asked. The privacy
 policy also warns users.
 
@@ -127,7 +127,7 @@ make X or YouTube logos the focus of screenshots.
 - The `key` field is removed by `scripts/build-extension.js`. The store assigns a **new extension ID**,
   shown in the dashboard as soon as the draft item is created, before review.
 - The helper must accept that ID: add it to `STORE_EXTENSION_IDS` in `helper/lib/paths.js` (the slot
-  is already there) and release the helper, so `webmods setup` writes it into the native host
+  is already there) and release the helper, so `trif setup` writes it into the native host
   manifest's `allowed_origins`. If you don't, the store-installed extension can't connect to the
   helper at all.
 - Version: the root `package.json` and `extension/manifest.json` must match (a test checks this).
@@ -143,24 +143,24 @@ Replace `<…>` first. Keep it under the field's character limit. If it's too lo
 holding these steps.
 
 ```
-WebMods runs site customizations ("mods") written by the user's own coding agent. It needs a small helper program on the computer (macOS or Linux, Node.js 18+). Without the helper, the extension only shows its setup page. The steps below take about 3 minutes, and the main path needs no AI account.
+TRIF runs site customizations ("mods") written by the user's own coding agent. It needs a small helper program on the computer (macOS or Linux, Node.js 18+). Without the helper, the extension only shows its setup page. The steps below take about 3 minutes, and the main path needs no AI account.
 
 1. Install the extension, then install the helper in a terminal:
-     npx webmods setup
+     npx trif setup
    (or: <alternative install instructions / tarball URL>)
    Quit and reopen Chrome.
-2. A "WebMods" setup page opens (or click the toolbar icon, then "Setup"). Turn on "Allow User Scripts": click "Open extension settings" and switch it on (Chrome 138+). On Chrome 135–137, turn on Developer mode at chrome://extensions instead. The setup page should show Helper: connected and Allow User Scripts: on.
+2. A "TRIF" setup page opens (or click the toolbar icon, then "Setup"). Turn on "Allow User Scripts": click "Open extension settings" and switch it on (Chrome 138+). On Chrome 135–137, turn on Developer mode at chrome://extensions instead. The setup page should show Helper: connected and Allow User Scripts: on.
 3. Create a mod without any AI account. In a terminal:
-     mkdir -p ~/.webmods/sites/example.com
-     printf '%s\n' "document.addEventListener('DOMContentLoaded', () => { document.querySelector('h1').textContent = 'Hello from WebMods'; });" > ~/.webmods/sites/example.com/hello.js
-4. Open https://example.com. The heading reads "Hello from WebMods". Click the WebMods toolbar icon: the side panel lists the "hello" mod for this site. Switch it off and the page reloads with the original heading.
+     mkdir -p ~/.trif/sites/example.com
+     printf '%s\n' "document.addEventListener('DOMContentLoaded', () => { document.querySelector('h1').textContent = 'Hello from TRIF'; });" > ~/.trif/sites/example.com/hello.js
+4. Open https://example.com. The heading reads "Hello from TRIF". Click the TRIF toolbar icon: the side panel lists the "hello" mod for this site. Switch it off and the page reloads with the original heading.
 5. Optional, needs a Claude Code login: install Claude Code (https://claude.com/claude-code), then in the side panel on example.com type "make the background light yellow". The agent writes a mod and reloads the page. If Claude Code isn't logged in, the panel shows a "Log in" button.
 
 Demo video: <unlisted YouTube URL>
-WebMods has no server and sends nothing to the developer. Privacy policy: <PRIVACY POLICY URL>
+TRIF has no server and sends nothing to the developer. Privacy policy: <PRIVACY POLICY URL>
 ```
 
 Before submitting, check steps 1–4 yourself on a clean Chrome profile with the **store build**. Load
 `dist/extension/` unpacked: it has no `key`, so it gets a different ID, like the store version. The
 helper won't connect until that ID is in `allowed_origins`. For local testing, add it to
-`~/.webmods/config.json` as `{"extensionIds": ["<id>"]}` and rerun `webmods setup`.
+`~/.trif/config.json` as `{"extensionIds": ["<id>"]}` and rerun `trif setup`.

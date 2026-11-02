@@ -609,6 +609,37 @@ test('doctor: an unreadable Safari login item doesn\'t crash it; inside a run it
   }
 });
 
+test('doctor: the ~/.webmods link is checked in a terminal, not inside a run (its sandbox hides ~)', async () => {
+  const root = tempDir();
+  const fakehome = path.join(root, 'fakehome');
+  const trif = path.join(fakehome, '.trif');
+  fs.mkdirSync(path.join(trif, 'sites'), { recursive: true });
+  fs.writeFileSync(path.join(trif, require('../helper/lib/migrate').MARKER), `${path.join(fakehome, '.webmods')}\n`);
+  // No ~/.webmods: in a terminal that's a warning (a browser may still load TRIF from there).
+  const env = { HOME: fakehome, TRIF_HOME: trif };
+  let r = await runCli(['doctor'], { home: root, env });
+  assert.match(r.stdout, /\.webmods is gone, but this workspace was moved from there/);
+  assert.match(r.stdout, /ln -s \.trif/);
+  // Inside a run the link can't be seen (the sandbox denies the home folder): not checked, no warning.
+  const box = path.join(root, 'boxes', 'r1');
+  fs.mkdirSync(box, { recursive: true });
+  r = await runCli(['doctor'], { home: root, env: { ...env, TRIF_RUN_BOX: box, TRIF_RUN_TOKEN: 'x' } });
+  assert.doesNotMatch(r.stdout, /is gone|ln -s/);
+  assert.match(r.stdout, /inside a side-panel agent run: the link .*\.webmods -> .*\.trif isn't checked/);
+});
+
+test('doctor: the last line says so when there were warnings', () => {
+  const { formatDoctor } = require('../helper/lib/doctor');
+  const ok = { status: 'ok', title: 'fine' };
+  const warn = { status: 'warn', title: 'hmm', fix: 'do this' };
+  const fail = { status: 'fail', title: 'broken', fix: 'do that' };
+  assert.match(formatDoctor({ ok: true, checks: [ok] }), /\nAll good\.$/);
+  assert.match(formatDoctor({ ok: true, checks: [ok, warn] }), /\nNo problems, but 1 warning above\.$/);
+  assert.doesNotMatch(formatDoctor({ ok: true, checks: [ok, warn, warn] }), /All good/);
+  assert.match(formatDoctor({ ok: true, checks: [ok, warn, warn] }), /2 warnings above\.$/);
+  assert.match(formatDoctor({ ok: false, checks: [warn, fail] }), /1 problem\(s\) found/);
+});
+
 test('a mailbox request works where watching a folder fails (as in an agent run\'s sandbox)', async () => {
   const { EventEmitter } = require('events');
   const box = fs.mkdtempSync(path.join(tempDir(), 'box-'));

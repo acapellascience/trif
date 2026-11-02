@@ -104,13 +104,19 @@ async function doctor(opts = {}) {
   // A workspace moved from ~/.webmods (before 0.2.0, when TRIF was called WebMods): Chrome may load the
   // extension from ~/.webmods/app/extension, and PATHs may name ~/.webmods/bin, so the link must stay.
   const legacy = P.legacyHome();
-  if (path.resolve(ws.home) === path.resolve(P.defaultHome()) && !opts.home) {
+  // A side-panel run's sandbox hides the home folder, ~/.webmods included, so the run can't see the link:
+  // say it wasn't checked rather than warn that it's gone.
+  const inRun = !!envVar('RUN_BOX');
+  const moved = fs.existsSync(path.join(ws.home, require('./migrate').MARKER));
+  if (inRun && moved) {
+    add('info', `inside a side-panel agent run: the link ${legacy} -> ${ws.home} isn't checked (the run can't see it; run trif doctor in a terminal for that)`);
+  } else if (!inRun && path.resolve(ws.home) === path.resolve(P.defaultHome()) && !opts.home) {
     let link = null;
     try { link = fs.lstatSync(legacy); } catch { /* none */ }
     const real = (p) => { try { return fs.realpathSync(p); } catch { return null; } };
     if (link && link.isSymbolicLink() && real(legacy) === real(ws.home)) add('ok', `${legacy} links to ${ws.home} (from before 0.2.0; keep it)`);
     else if (link && link.isDirectory()) add('warn', `${legacy} is still a folder of its own (TRIF uses ${ws.home} since 0.2.0)`, `${setupFix} (it moves what's in ${legacy} into ${ws.home})`);
-    else if (!link && fs.existsSync(path.join(ws.home, require('./migrate').MARKER))) {
+    else if (!link && moved) {
       add('warn', `${legacy} is gone, but this workspace was moved from there: a browser may still load TRIF from ${path.join(legacy, 'app', 'extension')}`,
         `put the link back: ln -s .trif ${legacy}`);
     }
@@ -155,7 +161,6 @@ async function doctor(opts = {}) {
 
   // The browsers' setup lives outside the workspace (~/Library…), which a side-panel agent run's sandbox
   // can't read: there, say so instead of failing on it. The user's terminal checks it.
-  const inRun = !!envVar('RUN_BOX');
   let manifestsOk = 0;
   if (inRun) {
     add('ok', "inside a side-panel agent run: the browsers' setup files aren't checked (the run can't read them; run trif doctor in a terminal for those)");
@@ -319,7 +324,9 @@ function formatDoctor({ ok, checks }) {
   }
   out.push('');
   const fails = checks.filter((c) => c.status === 'fail').length;
-  out.push(ok ? 'All good.' : `${fails} problem(s) found. Fix them in order (top first) and run trif doctor again.`);
+  const warns = checks.filter((c) => c.status === 'warn').length;
+  out.push(!ok ? `${fails} problem(s) found. Fix them in order (top first) and run trif doctor again.`
+    : warns ? `No problems, but ${warns} warning${warns === 1 ? '' : 's'} above.` : 'All good.');
   return out.join('\n');
 }
 

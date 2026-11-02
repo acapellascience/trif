@@ -16,6 +16,7 @@
 const fs = require('node:fs');
 const path = require('node:path');
 const { execFileSync } = require('node:child_process');
+const { render: renderIcon, MAC_ZOOM } = require('./render-icon');
 
 const ROOT = path.resolve(__dirname, '..');
 const DIST = path.join(ROOT, 'dist');
@@ -59,6 +60,14 @@ function customize(projectDir) {
   fs.writeFileSync(pbx, text);
   for (const file of ['SafariWebExtensionHandler.swift', ENTITLEMENTS]) {
     fs.copyFileSync(path.join(ROOT, 'safari', file), path.join(projectDir, EXTENSION_TARGET, file));
+  }
+  // The app's own icon: the robot's head as the whole icon (the converter puts the extension's icon on a
+  // white tile).
+  const icons = path.join(projectDir, APP_NAME, 'Assets.xcassets', 'AppIcon.appiconset');
+  const sets = JSON.parse(fs.readFileSync(path.join(icons, 'Contents.json'), 'utf8')).images.filter((i) => i.filename);
+  for (const i of sets) {
+    const px = parseInt(i.size, 10) * parseInt(i.scale, 10);
+    fs.writeFileSync(path.join(icons, i.filename), renderIcon(px, MAC_ZOOM));
   }
   const vc = path.join(projectDir, APP_NAME, 'ViewController.swift');
   if (fs.existsSync(vc)) {

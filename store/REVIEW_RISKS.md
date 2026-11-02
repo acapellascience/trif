@@ -132,8 +132,8 @@ make X or YouTube logos the focus of screenshots.
   helper at all.
 - Version: the root `package.json` and `extension/manifest.json` must match (a test checks this).
   Every later upload needs a higher version.
-- The icon is a green W on dark grey (`store/icon.svg`); regenerate the PNGs with
-  `node scripts/render-icon.js` after changing it.
+- The icon is a robot head: a dark squircle in a green rim with two mint eyes. Its shapes are numbers in
+  `scripts/render-icon.js`, which draws the PNGs and `store/icon.svg`; run it after changing them.
 
 ---
 

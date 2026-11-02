@@ -11,6 +11,7 @@ needs a section here for the version it releases.
 - Your mods, chats, switches and settings all carry over. The folder they live in moved from `~/.webmods`
   to `~/.trif`; `~/.webmods` is now a link to the new folder, so anything that used the old place still
   works. Please keep that link: Chrome may load the extension through it.
+- A new icon: the robot himself, a little dark head with green eyes.
 - The command is now `trif` (for example `trif doctor`). `webmods` still works, and does the same thing.
 - Problem reports go to timsrobot.com/report (webmods.dev sends you there).
 - Mods can call `window.trif.log(...)`; `window.webmods` still works in the mods you already have.

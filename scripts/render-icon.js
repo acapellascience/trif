@@ -1,45 +1,63 @@
 #!/usr/bin/env node
 'use strict';
-// Draws the WebMods icon (store/icon.svg: a switch-green W on the side panel's dark grey) into
-// extension/icons/icon-<size>.png, antialiased with 8x8 supersampling. No dependencies: shapes are
-// signed distances, PNGs are written by hand. Usage: node scripts/render-icon.js [outDir] [sizes...]
+// Draws the TRIF icon (the robot's head: a dark squircle in a switch-green rim, with two mint eyes) into
+// extension/icons/icon-<size>.png, antialiased with 8x8 supersampling, and writes the same shapes to
+// store/icon.svg. No dependencies: shapes are superellipses, PNGs are written by hand.
+// Usage: node scripts/render-icon.js [outDir] [sizes...]
 
 const fs = require('fs');
 const path = require('path');
 const zlib = require('zlib');
 
-const outDir = process.argv[2] || path.join(__dirname, '..', 'extension', 'icons');
-const sizes = process.argv.length > 3 ? process.argv.slice(3).map(Number) : [16, 32, 48, 128];
+const outDir = require.main === module && process.argv[2] || path.join(__dirname, '..', 'extension', 'icons');
+const sizes = require.main === module && process.argv.length > 3 ? process.argv.slice(3).map(Number) : [16, 32, 48, 128];
+const SVG_FILE = path.join(__dirname, '..', 'store', 'icon.svg');
 
-// Geometry in 128-unit icon space (same numbers as store/icon.svg).
-const TILE = { cx: 64, cy: 64, half: 56, r: 26, color: [0x18, 0x18, 0x1a] };
-const STROKE = 11.6 / 2;
-const W = { pts: [[30.7, 40.8], [46.1, 89.5], [64, 51], [81.9, 89.5], [97.3, 40.8]], color: [0x34, 0xd3, 0x99] };
-// The toolbar sizes drop the 8-unit margin (the tile fills the square, like other toolbar icons); the
+// Geometry in 128-unit icon space. A superellipse |x/a|^n + |y/b|^n = 1: the head is n 3 (a squircle), the
+// eyes n 2.3 (rounder, a touch taller than wide).
+const HEAD = { cx: 64, cy: 64, outer: 56, inner: 46, n: 3, rim: [0x34, 0xd3, 0x99], face: [0x18, 0x18, 0x1a] };
+const EYES = { cy: 63, xs: [45, 83], a: 12.35, b: 13.3, n: 2.3, color: [0x59, 0xdb, 0xab] };
+// The toolbar sizes drop the 8-unit margin (the head fills the square, like other toolbar icons); the
 // 128 px icon keeps it for the Web Store and chrome://extensions.
 const FULL_BLEED_MAX = 48;
 
-const roundRect = (x, y, { cx, cy, half, r }) => {
-  const qx = Math.abs(x - cx) - half + r;
-  const qy = Math.abs(y - cy) - half + r;
-  return Math.hypot(Math.max(qx, 0), Math.max(qy, 0)) + Math.min(Math.max(qx, qy), 0) - r;
-};
-const segment = (x, y, [ax, ay], [bx, by]) => {
-  const dx = bx - ax, dy = by - ay;
-  const t = Math.max(0, Math.min(1, ((x - ax) * dx + (y - ay) * dy) / (dx * dx + dy * dy)));
-  return Math.hypot(x - ax - t * dx, y - ay - t * dy);
-};
-const polyline = (x, y, pts) => Math.min(...pts.slice(1).map((p, i) => segment(x, y, pts[i], p)));
+const inside = (x, y, cx, cy, a, b, n) => (Math.abs(x - cx) / a) ** n + (Math.abs(y - cy) / b) ** n <= 1;
 
-/** Colour at one point, or null outside the tile. */
+/** Colour at one point, or null outside the head. */
 function sample(x, y) {
-  if (roundRect(x, y, TILE) > 0) return null;
-  return polyline(x, y, W.pts) <= STROKE ? W.color : TILE.color;
+  const { cx, cy, outer, inner, n } = HEAD;
+  if (!inside(x, y, cx, cy, outer, outer, n)) return null;
+  if (!inside(x, y, cx, cy, inner, inner, n)) return HEAD.rim;
+  return EYES.xs.some((ex) => inside(x, y, ex, EYES.cy, EYES.a, EYES.b, EYES.n)) ? EYES.color : HEAD.face;
 }
 
-function render(size) {
+/** The same shapes as SVG polygons. */
+function svg() {
+  const hex = (c) => '#' + c.map((v) => v.toString(16).padStart(2, '0')).join('');
+  const shape = (cx, cy, a, b, n, fill) => {
+    const pts = [];
+    for (let i = 0; i < 180; i++) {
+      const t = (i / 180) * 2 * Math.PI, c = Math.cos(t), s = Math.sin(t);
+      pts.push(`${+(cx + a * Math.sign(c) * Math.abs(c) ** (2 / n)).toFixed(2)},${+(cy + b * Math.sign(s) * Math.abs(s) ** (2 / n)).toFixed(2)}`);
+    }
+    return `  <polygon fill="${hex(fill)}" points="${pts.join(' ')}"/>`;
+  };
+  const { cx, cy, outer, inner, n } = HEAD;
+  return [
+    '<svg xmlns="http://www.w3.org/2000/svg" width="128" height="128" viewBox="0 0 128 128">',
+    '  <!-- TRIF icon, written by scripts/render-icon.js (edit the numbers there, not this file). Alternates with',
+    '       more depth, for when he needs it: store/icon-alt-borderless.svg, store/icon-alt-shaded.svg. -->',
+    shape(cx, cy, outer, outer, n, HEAD.rim),
+    shape(cx, cy, inner, inner, n, HEAD.face),
+    ...EYES.xs.map((ex) => shape(ex, EYES.cy, EYES.a, EYES.b, EYES.n, EYES.color)),
+    '</svg>',
+    '',
+  ].join('\n');
+}
+
+/** One size as PNG bytes. `zoom` scales the head about the centre (default: fill the square up to 48 px). */
+function render(size, zoom = size <= FULL_BLEED_MAX ? (HEAD.outer + 8) / HEAD.outer : 1) {
   const N = 8;
-  const zoom = size <= FULL_BLEED_MAX ? (TILE.half + 8) / TILE.half : 1;
   const at = (p) => ((p * 128) / size - 64) / zoom + 64; // pixel position -> icon space
   const rows = [];
   for (let py = 0; py < size; py++) {
@@ -82,9 +100,18 @@ function png(size, raw) {
     chunk('IDAT', zlib.deflateSync(raw)), chunk('IEND', Buffer.alloc(0))]);
 }
 
-fs.mkdirSync(outDir, { recursive: true });
-for (const size of sizes) {
-  const file = path.join(outDir, `icon-${size}.png`);
-  fs.writeFileSync(file, render(size));
-  console.log(file);
+// A macOS app icon's shape fills about 824 of its 1024 points (Apple's icon grid), so the Safari app's icons
+// draw the head at that size.
+const MAC_ZOOM = (824 / 1024 * 64) / HEAD.outer;
+
+if (require.main === module) {
+  fs.mkdirSync(outDir, { recursive: true });
+  for (const size of sizes) {
+    const file = path.join(outDir, `icon-${size}.png`);
+    fs.writeFileSync(file, render(size));
+    console.log(file);
+  }
+  if (!process.argv[2]) { fs.writeFileSync(SVG_FILE, svg()); console.log(SVG_FILE); }
 }
+
+module.exports = { render, MAC_ZOOM };

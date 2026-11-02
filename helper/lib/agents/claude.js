@@ -27,6 +27,12 @@ const DENIED_TOOLS = ['WebFetch', 'WebSearch', 'Read(./config.json)', 'Read(./sa
 // holds the versions of shipped mods a merge run reads: readable, never written.)
 const STATE_FILES = ['held.json', 'preinstalled.json', 'origins.json', 'active-runs', 'trash', 'config.json', 'instructions.md',
   'AGENTS.md', 'CLAUDE.md', 'bin', 'app', 'safari-token', 'helper.log', 'helper.log.1', 'runs', '.shipped'];
+/** Rules like Read(./config.json) made absolute to the workspace (see runSettings `rel`). */
+function absoluteRules(rules, workspace) {
+  if (!workspace) return rules;
+  return rules.map((r) => r.replace(/^(\w+)\(\.\/(.*)\)$/, (_, tool, p) => `${tool}(/${path.join(workspace, p)})`));
+}
+
 const MIN_VERSION = [2, 1, 285]; // the sandbox settings used here, and --settings taking precedence over the workspace's
 
 function tooOld(version) {
@@ -41,8 +47,10 @@ function tooOld(version) {
  * The run's own rules (--settings): the sandbox for its shell commands, and per-run permission rules
  * (other sites' folders and screenshots). `limits` is runs.js runLimits.
  */
-function runSettings({ workspace = '', readOnly = [], denied = [], home, readable = [], privateFiles = [], box, screenshots, otherScreenshots = [] } = {}) {
-  const rel = (p) => `./${path.relative(workspace, p).split(path.sep).join('/')}`;
+function runSettings({ workspace = '', readOnly = [], denied = [], home, readable = [], privateFiles = [], box, screenshots, otherScreenshots = [], skills = [] } = {}) {
+  // Absolute ("//" + path): a "./" rule follows the agent's current folder, so after `cd sites/x.com` it
+  // would point somewhere else.
+  const rel = (p) => `/${p}`;
   const inWorkspace = (p) => !!workspace && p.startsWith(workspace + path.sep);
   return {
     sandbox: {
@@ -62,6 +70,10 @@ function runSettings({ workspace = '', readOnly = [], denied = [], home, readabl
       network: { allowedDomains: [], strictAllowlist: true }, // and no unix sockets (none allowed)
     },
     permissions: {
+      // The user's skill folders (runs.js skillDirs), read only. ("//" starts an absolute path in a rule.)
+      // Claude Code doesn't load user skills in these runs (--setting-sources project), so this only
+      // matters when the agent is pointed at one.
+      allow: skills.map((p) => `Read(/${p}/**)`),
       deny: [...readOnly.filter(inWorkspace).map((p) => `Edit(${rel(p)}/**)`),
         ...otherScreenshots.filter(inWorkspace).map((p) => `Read(${rel(p)}/**)`)],
     },
@@ -104,7 +116,8 @@ const adapter = {
     const args = ['-p', '--output-format', 'stream-json', '--verbose',
       '--permission-mode', 'default', '--setting-sources', 'project', '--strict-mcp-config',
       '--settings', JSON.stringify(runSettings(limits)),
-      '--allowedTools', ...ALLOWED_TOOLS, '--disallowedTools', ...DENIED_TOOLS];
+      '--allowedTools', ...absoluteRules(ALLOWED_TOOLS, limits.workspace),
+      '--disallowedTools', ...absoluteRules(DENIED_TOOLS, limits.workspace)];
     if (context) args.push('--append-system-prompt', context);
     if (sessionId) args.push('--resume', sessionId);
     if (model) args.push('--model', model);

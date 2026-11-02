@@ -3,7 +3,8 @@
 // chrome.storage.local `chat:<site>`; this page renders that record and reacts to storage changes.
 // See docs/PROTOCOL.md, "Side panel and agent runs".
 
-import { siteForUrl, modAppliesTo, modSites, isMultiSite, offOnSite, normalizeOffSites, isLoginUrl, scopeFor, limitToSites, withOffSites, FIREFOX, BROWSER } from './lib.js';
+import { siteForUrl, modAppliesTo, modSites, isMultiSite, offOnSite, normalizeOffSites, isLoginUrl, scopeFor, limitToSites, withOffSites, FIREFOX, BROWSER,
+  normalizeSettings, normalizePicks, siteSettings } from './lib.js';
 import { renderMarkdown, MARKDOWN_ELEMENTS, MARKDOWN_ATTRIBUTES } from './markdown.js';
 import { modSwitch, syncSwitches, shownEnabled, switchError, enabledIn, onSwitchChange } from './modswitch.js';
 import { mountOpenModel, renderOpenModel } from './openmodel.js';
@@ -33,12 +34,16 @@ const view = {
   status: null,              // background status (helper, userScripts, mods…)
   agents: null,              // agent.list result, or null when unknown
   agentsError: null,
-  settings: { agent: '', models: {} }, // models: agent id -> chosen model ('' = the agent's default)
+  settings: { agent: '', models: {} }, // the default agent settings (models: agent id -> model, '' = its default)
+  picks: {},                 // chrome.storage.local `sitePicks`: each site chat's own agent and model (lib.js)
+  snapshots: new Map(),      // site -> the default this panel first saw for it, until the site has a pick
   modelLists: {},            // agent id -> agent.models result (what that agent offers)
   modelOther: {},            // agent id -> true while "Other…" is picked but nothing typed yet
   rendered: { site: null, count: 0, first: null },
   modsOpenFor: null,         // set once the mods <details> open state has been restored
-  modsKey: null,             // which mods the list was last built for (switches update in place)
+  modRows: new Map(),        // mod id -> {key, li}: each row is rebuilt only when its own mod changes
+  modErrors: new Map(),      // mod id -> {message, timer}: why a row's button (merge, delete…) failed, shown a while
+  merging: new Set(),        // mod ids whose "Merge with my agent" is starting a run
   disabled: {},              // chrome.storage.local `disabled`: mods switched off (by anyone: panel, agent, CLI)
   offSites: {},              // chrome.storage.local `offSites`: mods switched off on some of their sites
   myRuns: new Set(),         // runs this panel started
@@ -127,10 +132,13 @@ async function loadAgents() {
   render();
 }
 
-/** The agent a new run would use: the chosen one, else the helper's default. */
+/** This site chat's agent settings ({agent, models}): see "agent and model per site chat" in lib.js. */
+const chatSettings = () => siteSettings({ picks: view.picks, snapshots: view.snapshots, global: view.settings, site: view.site });
+
+/** The agent a new run here would use: this chat's choice, else the helper's default. */
 function currentAgent() {
   const list = view.agents?.agents || [];
-  const id = view.settings.agent || view.agents?.default || '';
+  const id = chatSettings().agent || view.agents?.default || '';
   return { id, info: list.find((a) => a.id === id) || null, list };
 }
 
@@ -141,9 +149,10 @@ async function init() {
   // In Safari the panel is a window of its own, opened with ?window=<the window whose tabs it follows>.
   const opener = Number(new URLSearchParams(location.search).get('window'));
   view.windowId = opener || (await chrome.windows.getCurrent()).id;
-  const stored = await chrome.storage.local.get(['settings', 'disabled', 'offSites', 'updated']);
+  const stored = await chrome.storage.local.get(['settings', 'sitePicks', 'disabled', 'offSites', 'updated']);
   view.updated = stored.updated || null;
   view.settings = normalizeSettings(stored.settings);
+  view.picks = normalizePicks(stored.sitePicks);
   view.disabled = stored.disabled || {};
   view.offSites = normalizeOffSites(stored.offSites);
   renderSettings();
@@ -168,9 +177,11 @@ async function init() {
       view.chat = normalizeChat(changes[chatKey(view.site)].newValue);
       render();
     }
-    if (changes.settings) {
-      view.settings = normalizeSettings(changes.settings.newValue);
+    if (changes.settings || changes.sitePicks) { // another panel's pick, or this one's
+      if (changes.settings) view.settings = normalizeSettings(changes.settings.newValue);
+      if (changes.sitePicks) view.picks = normalizePicks(changes.sitePicks.newValue);
       renderSettings();
+      renderModels();
       render();
     }
     if (changes.updated) {
@@ -207,21 +218,15 @@ async function setTab(tab) {
       view.chat = normalizeChat((await chrome.storage.local.get(key))[key]);
       if (view.site !== site) return; // switched again meanwhile
     }
+    // Each site chat has its own agent and model.
+    renderSettings();
+    if (!ui.settings.hidden && view.status?.helper?.connected) loadModels(currentAgent().id);
   }
   render();
 }
 
-// Settings: the model is chosen per agent (an Opus choice means nothing to Codex). Before that there
-// was one `model`, only ever meaningful for Claude Code.
-function normalizeSettings(s) {
-  const out = { agent: '', models: {}, ...(s && typeof s === 'object' ? s : {}) };
-  if (!out.models || typeof out.models !== 'object') out.models = {};
-  if (typeof out.model === 'string' && out.model && !Object.keys(out.models).length) out.models = { claude: out.model };
-  delete out.model;
-  return out;
-}
-
-const chosenModel = (agentId) => (agentId && view.settings.models[agentId]) || '';
+// The model is chosen per agent (an Opus choice means nothing to Codex), per site chat (lib.js).
+const chosenModel = (agentId) => (agentId && chatSettings().models[agentId]) || '';
 
 function normalizeChat(c) {
   const chat = { ...emptyChat(), ...(c && typeof c === 'object' ? c : {}) };
@@ -283,9 +288,9 @@ function render() {
   const { info: agentInfo, list: agentList } = currentAgent();
   const anyAgent = agentList.some((a) => a.available);
 
-  ui.site.textContent = site || 'TRIF';
+  ui.site.textContent = site || 'Tim\'s Robot Internet Fixer';
   ui.site.title = view.tab?.url || '';
-  document.title = site ? `TRIF · ${site}` : 'TRIF';
+  document.title = site ? `TRIF · ${site}` : 'Tim\'s Robot Internet Fixer';
 
   // Status dot
   let dot = 'bad';
@@ -592,16 +597,22 @@ function renderMods() {
   const scope = site ? scopeFor(site) : null;
   const mods = site && status ? status.mods.filter((m) => limitToSites(m, [scope]) || m.held?.site === site) : [];
   ui.mods.hidden = mods.length === 0;
-  if (!mods.length) { view.modsKey = null; ui.modList.replaceChildren(); return; }
+  if (!mods.length) { view.modRows.clear(); ui.modList.replaceChildren(); return; }
   ui.modsCount.textContent = `(${mods.length})`;
-  // Rebuilt only when the set of mods changes; everything else updates in place, so a focused switch
-  // keeps focus through status refreshes.
-  const key = JSON.stringify([site, mods.map((m) => [m.id, m.name, m.file, !!m.held, m.risk?.tier ?? null, m.risk?.why ?? null, m.matches,
-    m.source ?? null, m.version ?? null, m.update ?? null])]);
-  if (key !== view.modsKey) {
-    view.modsKey = key;
-    ui.modList.replaceChildren(...mods.map(modItem));
+  // Each row is built once and rebuilt only when its own mod changes; rows that stay are left where they
+  // are (not even moved), so a button being clicked or a focused switch is never swapped out from under
+  // the pointer by a status refresh or by another mod changing. Everything else updates in place.
+  const rows = new Map();
+  for (const m of mods) {
+    const key = JSON.stringify([site, m.name, m.file, !!m.held, m.risk?.tier ?? null, m.risk?.why ?? null, m.matches,
+      m.source ?? null, m.version ?? null, m.update ?? null]);
+    const old = view.modRows.get(m.id);
+    rows.set(m.id, old && old.key === key ? old : { key, li: modItem(m) });
   }
+  view.modRows = rows;
+  const want = [...rows.values()].map((r) => r.li);
+  want.forEach((li, i) => { if (ui.modList.children[i] !== li) ui.modList.insertBefore(li, ui.modList.children[i] || null); });
+  while (ui.modList.children.length > want.length) ui.modList.lastElementChild.remove();
   const byId = new Map(mods.map((m) => [m.id, m]));
   for (const li of ui.modList.children) updateModItem(li, byId.get(li.dataset.mod));
   syncSwitches(ui.modList, isOn);
@@ -699,7 +710,7 @@ function modItem(m) {
   const main = el('div', 'mod-main');
   // The mods TRIF ships say so (their header's @source and @version).
   const file = el('div', 'mod-file', (m.file || m.id).split('/').pop());
-  if (m.source === 'webmods' || m.source === 'trif') file.append(' ', el('span', 'mod-source', `from TRIF${m.version ? `, version ${m.version}` : ''}`));
+  if (m.source === 'webmods' || m.source === 'trif') file.append(' ', el('span', 'mod-source', `Tim's mod${m.version ? `, v${m.version}` : ''}`));
   main.append(light, name, file);
   const row = el('div', 'mod-row');
   if (m.held) {
@@ -710,11 +721,10 @@ function modItem(m) {
     allow.setAttribute('aria-describedby', labelId);
     allow.addEventListener('click', async () => {
       allow.disabled = true;
+      clearRowError(m.id);
       try { await request({ type: 'mod.approve', id: m.id, tab: view.tab?.id }); } catch (e) {
         allow.disabled = false;
-        const err = li.querySelector('.mod-err');
-        err.textContent = String(e?.message ?? e);
-        err.hidden = false;
+        rowError(m.id, String(e?.message ?? e));
       }
     });
     row.append(main, allow, deleteButton(m, labelId, li));
@@ -741,10 +751,11 @@ function updateNotice(m, err) {
   box.append(el('p', null, m.update.modified
     ? `TRIF has a new version of this mod${v}. You've changed yours, so it wasn't replaced.`
     : `TRIF has a new version of this mod${v}.`));
-  const fail = (b, e) => { b.disabled = false; err.textContent = String(e?.message ?? e); err.hidden = false; };
+  const fail = (b, e) => { b.disabled = false; rowError(m.id, String(e?.message ?? e)); };
   const choose = (choice) => async (e) => {
     const b = e.currentTarget;
     b.disabled = true;
+    clearRowError(m.id);
     try { await request({ type: 'mod.update', id: m.id, choice, site: view.site, tab: view.tab?.id }); } catch (x) { fail(b, x); }
   };
   const useNew = button('Use the new version', '', choose('new'));
@@ -753,17 +764,36 @@ function updateNotice(m, err) {
   keep.title = 'This version won\'t be offered again; a later one will.';
   const row = actions(useNew, keep);
   if (m.update.modified) {
+    // A first run only proposes the merge; the agent edits once the user says so in the chat (see the
+    // helper's mergeRequest and host.js).
     const merge = button('Merge with my agent', 'merge', async () => {
+      if (view.merging.has(m.id)) return;
+      view.merging.add(m.id); // not re-enabled by a render while the run is starting
       merge.disabled = true;
+      clearRowError(m.id);
       try {
-        await startRun(`Merge the new version of ${m.name}${v} from TRIF into my copy, keeping my changes.`, { merge: m.id });
-      } catch (x) { fail(merge, x); }
+        await startRun(`Compare the new version of ${m.name}${v} from TRIF with my copy and suggest how to merge them, keeping my changes.`, { merge: m.id });
+      } catch (x) { fail(merge, x); } finally { view.merging.delete(m.id); renderMods(); }
     });
-    merge.title = 'Your agent combines the new version with your changes, in this chat.';
+    merge.title = 'Your agent looks at both versions and suggests how to merge them; nothing changes until you say so.';
     row.append(merge);
   }
   box.append(row);
   return box;
+}
+
+// A row's button failed: say why under it for a while. Kept here, not just written into the row, because
+// every render rewrites the row's error line (the next status refresh would wipe it at once).
+const ROW_ERROR_MS = 10000;
+function rowError(id, message) {
+  const old = view.modErrors.get(id);
+  if (old) clearTimeout(old.timer);
+  view.modErrors.set(id, { message, timer: setTimeout(() => { view.modErrors.delete(id); renderMods(); }, ROW_ERROR_MS) });
+  renderMods();
+}
+function clearRowError(id) {
+  const old = view.modErrors.get(id);
+  if (old) { clearTimeout(old.timer); view.modErrors.delete(id); }
 }
 
 // Deleting moves the mod to the helper's trash (`trif restore`), so it's one click, with an Undo on
@@ -777,13 +807,12 @@ function deleteButton(m, labelId, li) {
   b.innerHTML = '<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M2.5 4.5h11M6.5 4.5V2.75h3V4.5M4 4.5l.7 8.75h6.6L12 4.5M6.75 7v4M9.25 7v4"/></svg>';
   b.addEventListener('click', async () => {
     b.disabled = true;
+    clearRowError(m.id);
     try {
       await request({ type: 'mod.delete', id: m.id, site: view.site, tab: view.tab?.id });
     } catch (e) {
       b.disabled = false;
-      const err = li.querySelector('.mod-err');
-      err.textContent = String(e?.message ?? e);
-      err.hidden = false;
+      rowError(m.id, String(e?.message ?? e));
     }
   });
   return b;
@@ -801,14 +830,20 @@ function updateModItem(li, m) {
   if (!m) return;
   // One chat run at a time per site: merging waits for the one going.
   const merge = li.querySelector('.mod-update .merge');
-  if (merge) merge.disabled = !!view.chat.run || !ui.composer.dataset.canSend;
+  if (merge) {
+    merge.disabled = view.merging.has(m.id) || !!view.chat.run || !ui.composer.dataset.canSend;
+    merge.title = view.chat.run ? 'Your agent is busy in this chat; this waits until it\'s done.'
+      : !ui.composer.dataset.canSend ? 'No coding agent is available here yet.'
+        : 'Your agent looks at both versions and suggests how to merge them; nothing changes until you say so.';
+  }
+  const rowErr = view.modErrors.get(m.id)?.message;
   if (m.held) {
     updateLight(li, m, false);
     const tag = li.querySelector('.tag');
     tag.textContent = 'on hold';
     tag.hidden = false;
     const err = li.querySelector('.mod-err');
-    if (!li.querySelector('.allow')?.disabled) {
+    if (rowErr) { err.textContent = rowErr; err.hidden = false; } else if (!li.querySelector('.allow')?.disabled) {
       err.textContent = `An agent wrote this while working here, but ${m.held.reason}. It won't run until you allow it.`;
       err.hidden = false;
     }
@@ -825,7 +860,7 @@ function updateModItem(li, m) {
   tag.title = !on && m.from ? `Made from ${m.from}. Mods made in another browser start off here; switch it on to use it.` : '';
   tag.hidden = !tag.textContent;
   const err = li.querySelector('.mod-err');
-  err.textContent = switchError(m.id, site) || (on && m.error) || '';
+  err.textContent = rowErr || switchError(m.id, site) || (on && m.error) || '';
   err.hidden = !err.textContent;
 }
 
@@ -854,12 +889,13 @@ function renderSettings() {
     o.disabled = !a.available;
     opts.push(o);
   }
-  if (view.settings.agent && !list.some((a) => a.id === view.settings.agent)) {
-    opts.push(new Option(view.settings.agent, view.settings.agent));
+  const mine = chatSettings();
+  if (mine.agent && !list.some((a) => a.id === mine.agent)) {
+    opts.push(new Option(mine.agent, mine.agent));
   }
   ui.agent.replaceChildren(...opts);
-  ui.agent.value = view.settings.agent || '';
-  const chosen = list.find((a) => a.id === (view.settings.agent || view.agents?.default));
+  ui.agent.value = mine.agent || '';
+  const chosen = list.find((a) => a.id === (mine.agent || view.agents?.default));
   const note = chosen?.note || (view.agentsError && !view.agents ? 'Agents are listed once the helper is connected.' : '');
   ui.agentNote.textContent = note;
   ui.agentNote.hidden = !note;
@@ -918,14 +954,28 @@ function renderModels() {
 
 async function saveModel(agentId, model) {
   if (!agentId) return;
-  await saveSettings({ models: { ...view.settings.models, [agentId]: model } });
+  await saveSettings({ models: { ...chatSettings().models, [agentId]: model } });
 }
 
 // ---- actions ------------------------------------------------------------------------------------
 
+/**
+ * Changes this site chat's agent settings (its pick), and makes them the default for sites without one.
+ * (No site: just the default.)
+ */
 async function saveSettings(patch) {
-  view.settings = { ...view.settings, ...patch };
-  await chrome.storage.local.set({ settings: view.settings });
+  const next = { ...chatSettings(), ...patch };
+  view.settings = normalizeSettings(next);
+  if (!view.site) return chrome.storage.local.set({ settings: view.settings });
+  view.picks = { ...view.picks, [view.site]: normalizeSettings(next) };
+  await chrome.storage.local.set({ settings: view.settings, sitePicks: view.picks });
+}
+
+/** A run is starting here: the site keeps the settings it runs with, whatever is picked elsewhere later. */
+async function keepSettings() {
+  if (!view.site || view.picks[view.site]) return;
+  view.picks = { ...view.picks, [view.site]: normalizeSettings(chatSettings()) };
+  await chrome.storage.local.set({ sitePicks: view.picks }).catch(() => {});
 }
 
 // Slash commands the panel handles itself (each message starts a fresh agent process, so e.g. Claude
@@ -980,6 +1030,7 @@ async function startRun(text, extra = {}) {
   if (view.chat.run) throw new Error(`already working on ${view.site}`);
   if (!ui.composer.dataset.canSend) throw new Error('No coding agent is available here yet');
   const { id: agent } = currentAgent();
+  await keepSettings();
   const chat = view.chat;
   const sessionId = chat.sessionId && (!chat.agent || !agent || chat.agent === agent) ? chat.sessionId : undefined;
   const { runId } = await request({

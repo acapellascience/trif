@@ -132,7 +132,8 @@ svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width:
 .btn.go { padding: 8px 16px; border-color: transparent; background: var(--switch-on); color: #04291c; font-size: 13px; font-weight: 600; }
 .btn.go:hover { background: color-mix(in srgb, var(--switch-on) 85%, #000); }
 body.site-off :is(.bar, .settings, .notice, .mods, .chat, .composer) { display: none; }
-#site-switch { margin-left: auto; }
+/* The power, + and settings buttons: close together, at the right edge (the power button can be hidden). */
+.bar-actions { flex: none; display: flex; align-items: center; gap: 2px; margin-left: auto; }
 /* The robot in the middle of the bar (the toolbar icon); the bar only shows on sites TRIF is on for. */
 .bar-robot { position: absolute; left: 50%; top: 50%; width: 20px; height: 20px; transform: translate(-50%, -50%); stroke: none; pointer-events: none; }
 .bar-robot .rim { fill: var(--switch-on); }
@@ -210,7 +211,15 @@ body.site-off :is(.bar, .settings, .notice, .mods, .chat, .composer) { display: 
 }
 .mods summary::marker { color: var(--faint); }
 .count { color: var(--faint); }
-.mod-list { list-style: none; margin: 6px 0 0; padding: 0; }
+/* A section of its own above the chat: at most about 40% of the panel, scrolling inside, so the chat
+   below shrinks instead of being pushed out of sight. */
+.mod-list {
+  list-style: none; margin: 4px -3px 0; padding: 2px 3px; /* room for focus rings inside the scroller */
+  max-height: calc(40vh - 40px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-width: thin;
+}
 .mod-list li { padding: 5px 0; border-top: 1px solid var(--line); }
 .mod-list li:first-child { border-top: 0; }
 .mod-row { display: flex; align-items: center; gap: 10px; }
@@ -230,6 +239,9 @@ body.site-off :is(.bar, .settings, .notice, .mods, .chat, .composer) { display: 
 .mod-update { margin: 6px 0 2px 14px; padding: 6px 8px; border: 1px solid var(--line); border-radius: 7px; font-size: 12px; }
 .mod-update p { margin: 0; }
 .mod-update .actions { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; }
+/* A waiting button looks it (its tooltip says why), instead of silently ignoring clicks. */
+.mod-update .btn:disabled { opacity: 0.5; }
+.mod-update .btn:disabled:hover { border-color: var(--line); }
 .mod-list li.held .mod-name { color: var(--muted); }
 .allow { flex: none; }
 .mod-delete { width: 24px; height: 24px; color: var(--faint); }

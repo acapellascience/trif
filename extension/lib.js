@@ -735,3 +735,42 @@ export function switchSite(mod, { disabled, offSites = [] }, site, enabled) {
   if (!everywhere && sites.length && sites.every((o) => list.some((x) => hostInScope(o, x)))) return { disabled: true, offSites: [] };
   return { disabled: false, offSites: list };
 }
+
+// ---- agent and model per site chat -----------------------------------------------------------------
+// Each site's chat (the panel showing that site) has its own agent and model: Claude Code with Opus on
+// one site, Codex on another, at the same time. chrome.storage.local `sitePicks` = {<site>: {agent,
+// models: {<agent id>: model}}} (the same shape as `settings`); `settings` is the default for sites
+// without a pick, and is set to the last pick made anywhere, so a new site starts with what the user last
+// chose. A panel showing a site without a pick holds on to the default it first saw for that site (its
+// `snapshots`), so a pick made in another panel doesn't change it; the site's pick is written when the user
+// changes it there, or when a run starts there.
+
+/** Agent settings from storage: {agent, models}. Before per-agent models there was one `model` (Claude Code's). */
+export function normalizeSettings(s) {
+  const out = { agent: '', models: {}, ...(s && typeof s === 'object' && !Array.isArray(s) ? s : {}) };
+  if (typeof out.agent !== 'string') out.agent = '';
+  if (!out.models || typeof out.models !== 'object' || Array.isArray(out.models)) out.models = {};
+  if (typeof out.model === 'string' && out.model && !Object.keys(out.models).length) out.models = { claude: out.model };
+  delete out.model;
+  return out;
+}
+
+/** `sitePicks` from storage, cleaned up. */
+export function normalizePicks(value) {
+  const out = {};
+  if (value && typeof value === 'object' && !Array.isArray(value)) {
+    for (const [site, s] of Object.entries(value)) if (site && s && typeof s === 'object') out[site] = normalizeSettings(s);
+  }
+  return out;
+}
+
+/**
+ * The agent settings for `site`'s chat: its pick, else the default this panel first saw for it (kept in
+ * `snapshots`, a Map the panel owns), else `global` (no site: the global settings themselves).
+ */
+export function siteSettings({ picks, snapshots, global, site }) {
+  if (!site) return normalizeSettings(global);
+  if (picks[site]) return picks[site];
+  if (!snapshots.has(site)) snapshots.set(site, normalizeSettings(JSON.parse(JSON.stringify(global || {}))));
+  return snapshots.get(site);
+}

@@ -90,6 +90,13 @@ if (prompt.includes('EDIT')) {
   fs.writeFileSync(file, '// edited ' + Date.now() + Math.random());
   say({ type: 'assistant', message: { content: [{ type: 'tool_use', id: 't2', name: 'Edit', input: { file_path: file, old_string: 'a', new_string: 'b' } }] } });
 }
+if (prompt.includes('GOAHEAD') || prompt.includes('TWEAK')) {
+  // The user's go-ahead after a merge proposal: the merged copy, with the new @version. TWEAK: an edit
+  // that isn't the merge (the old @version kept).
+  const file = path.join(process.cwd(), 'sites', 'example.com', 'plain.js');
+  const v = prompt.includes('GOAHEAD') ? 2 : 1;
+  fs.writeFileSync(file, '// ==WebMod==\\n// @source webmods\\n// @version ' + v + '\\n// ==/WebMod==\\n// mine and two ' + Date.now() + '\\n');
+}
 if (prompt.includes('HIDDEN')) {
   // A mod for every site, where a looser snapshot once didn't look (node_modules).
   const dir = path.join(process.cwd(), 'sites', 'node_modules');
@@ -181,9 +188,10 @@ test('claude adapter: command flags, resume and model', () => {
   const settings = JSON.parse(c.args[c.args.indexOf('--settings') + 1]);
   assert.deepEqual(c.args.filter((a, i) => c.args[i - 1] !== '--settings'), ['-p', '--output-format', 'stream-json', '--verbose', '--permission-mode', 'default',
     '--setting-sources', 'project', '--strict-mcp-config', '--settings',
-    '--allowedTools', 'Read(./**)', 'Glob', 'Grep', 'Edit(./sites/**)', 'Bash(trif:*)', 'Bash(webmods:*)', 'Bash(cd:*)', 'Bash(ls:*)',
-    '--disallowedTools', 'WebFetch', 'WebSearch', 'Read(./config.json)', 'Read(./safari-token)', 'Read(./helper.log*)', 'Read(./runs/*.jsonl)',
-    'Read(./screenshots/*.png)', '--append-system-prompt', 'CTX', '--', 'hi']);
+    // Absolute rules ("//" + path): a "./" rule would follow the agent after a `cd`.
+    '--allowedTools', 'Read(//h/**)', 'Glob', 'Grep', 'Edit(//h/sites/**)', 'Bash(trif:*)', 'Bash(webmods:*)', 'Bash(cd:*)', 'Bash(ls:*)',
+    '--disallowedTools', 'WebFetch', 'WebSearch', 'Read(//h/config.json)', 'Read(//h/safari-token)', 'Read(//h/helper.log*)', 'Read(//h/runs/*.jsonl)',
+    'Read(//h/screenshots/*.png)', '--append-system-prompt', 'CTX', '--', 'hi']);
   // The run's sandbox: fails closed, no way out of it, no network, the run's reads and writes.
   const sb = settings.sandbox;
   assert.deepEqual([sb.enabled, sb.failIfUnavailable, sb.allowUnsandboxedCommands, sb.autoAllowBashIfSandboxed], [true, true, false, false]);
@@ -195,7 +203,13 @@ test('claude adapter: command flags, resume and model', () => {
   assert.ok(!JSON.stringify(settings).includes('Desktop'));
   assert.deepEqual(sb.filesystem.allowWrite, ['/c/boxes/r1', '/h/screenshots/x.com']);
   for (const p of ['/h/held.json', '/h/preinstalled.json', '/h/runs', '/h/sites/y.com']) assert.ok(sb.filesystem.denyWrite.includes(p), p);
-  assert.deepEqual(settings.permissions.deny, ['Edit(./sites/y.com/**)', 'Read(./screenshots/y.com/**)']);
+  assert.deepEqual(settings.permissions.deny, ['Edit(//h/sites/y.com/**)', 'Read(//h/screenshots/y.com/**)']);
+  assert.deepEqual(settings.permissions.allow, []);
+  // The user's skill folders: readable by its file tools (absolute-path rules), never writable.
+  const sk = JSON.parse((c2 => c2.args[c2.args.indexOf('--settings') + 1])(claude.command({ bin: '/x/claude', prompt: 'hi', ...limits, readable: [...limits.readable, '/Users/u/.agents/skills/web'], skills: ['/Users/u/.agents/skills/web'] })));
+  assert.deepEqual(sk.permissions.allow, ['Read(//Users/u/.agents/skills/web/**)']);
+  assert.ok(sk.sandbox.filesystem.allowRead.includes('/Users/u/.agents/skills/web'));
+  assert.ok(!sk.sandbox.filesystem.allowWrite.some((p) => p.includes('skills')));
   assert.equal(claude.tooOld('2.1.284 (Claude Code)'), true);
   assert.equal(claude.tooOld('2.1.312 (Claude Code)'), false);
   const r = claude.command({ bin: '/x/claude', prompt: 'hi', context: 'CTX', sessionId: 's1', model: 'opus' });
@@ -236,6 +250,42 @@ test('claude adapter: parses init, text, tools, result; maps "Not logged in"', (
   ev.length = 0;
   claude.parse(JSON.stringify({ type: 'result', is_error: true, subtype: 'error_max_turns', session_id: 's' }), emit, st);
   assert.match(ev[0].message, /error_max_turns/);
+});
+
+test('run limits: the user\'s skill folders are readable (real paths, links followed), nothing else of theirs', () => {
+  const { skillDirs, deniedInHome } = require('../helper/lib/runs');
+  const h = fs.realpathSync(tempDir());
+  const mk = (...p) => { fs.mkdirSync(path.join(h, ...p), { recursive: true }); return path.join(h, ...p); };
+  const web = mk('.agents', 'skills', 'modern-web-guidance');
+  fs.writeFileSync(path.join(web, 'SKILL.md'), '---\nname: modern-web-guidance\n---\n');
+  fs.writeFileSync(path.join(h, '.agents', '.skill-lock.json'), '{}');
+  mk('.claude', 'skills', 'synced');
+  fs.symlinkSync('../../.agents/skills/modern-web-guidance', path.join(h, '.claude', 'skills', 'modern-web-guidance'));
+  fs.writeFileSync(path.join(h, '.claude', 'history.jsonl'), 'private');
+  mk('.codex', 'skills', '.system');
+  fs.writeFileSync(path.join(h, '.codex', 'auth.json'), '{"secret":1}');
+  const elsewhere = fs.realpathSync(tempDir());
+  fs.symlinkSync(elsewhere, path.join(h, '.claude', 'skills', 'outside'));
+  fs.symlinkSync(h, path.join(h, '.claude', 'skills', 'everything')); // a link to the home folder: never
+  mk('Documents', 'my-skill');
+  fs.symlinkSync(path.join(h, 'Documents', 'my-skill'), path.join(h, '.agents', 'skills', 'in-documents')); // can't deny around it quietly
+  const dirs = skillDirs(h);
+  assert.deepEqual(dirs.sort(), [path.join(h, '.agents', 'skills'), path.join(h, '.claude', 'skills'), path.join(h, '.codex', 'skills'), elsewhere].sort());
+  // Denied around them: the rest of ~/.agents, ~/.claude and ~/.codex (Codex's login among them), and
+  // everything else in the home folder.
+  const denied = deniedInHome(h, [...dirs, mk('.trif')]);
+  for (const p of [path.join(h, '.agents', '.skill-lock.json'), path.join(h, '.claude', 'history.jsonl'), path.join(h, '.codex', 'auth.json'), path.join(h, 'Documents')]) {
+    assert.ok(denied.includes(p), p);
+  }
+  for (const p of [path.join(h, '.agents'), path.join(h, '.claude'), path.join(h, '.codex'), path.join(h, '.trif'), path.join(h, '.agents', 'skills')]) {
+    assert.ok(!denied.includes(p), p);
+  }
+  // The Codex permission profile: skills read only, no write.
+  const c = codex.command({ bin: '/x/codex', prompt: 'P', readable: dirs, writable: ['/w'], denied });
+  const perm = c.args.find((a) => a.startsWith('permissions='));
+  assert.ok(perm.includes(`${JSON.stringify(path.join(h, '.agents', 'skills'))} = "read"`));
+  assert.ok(perm.includes(`${JSON.stringify(path.join(h, '.codex', 'auth.json'))} = "deny"`));
+  assert.ok(!/skills" = "write"/.test(perm));
 });
 
 test('codex adapter: command, resume, JSONL events', () => {
@@ -281,6 +331,24 @@ test('codex adapter: command, resume, JSONL events', () => {
   line({ type: 'turn.failed', error: { message: 'unexpected status 401 Unauthorized' } });
   assert.match(ev[0].message, /Codex isn't logged in/);
   assert.equal(ev[1].ok, false);
+});
+
+test('codex adapter: WebSocket reconnects and the HTTPS fallback are one quiet line; real errors still show', () => {
+  const ev = [];
+  const st = { workspace: '/ws' };
+  const line = (o) => codex.parse(JSON.stringify(o), (e) => ev.push(e), st);
+  line({ type: 'thread.started', thread_id: 'th1' });
+  for (let i = 1; i <= 5; i++) line({ type: 'error', message: `Reconnecting... ${i}/5 (stream disconnected before completion: websocket closed by server before response.completed)` });
+  line({ type: 'error', message: 'Falling back from WebSockets to HTTPS transport. stream disconnected before completion' });
+  line({ type: 'item.completed', item: { id: 'e1', type: 'error', message: 'Reconnecting... 1/5 (again)' } });
+  line({ type: 'item.completed', item: { id: 'a', type: 'agent_message', text: 'Done.' } });
+  line({ type: 'error', message: 'stream disconnected before completion: quota exceeded' });
+  assert.deepEqual(ev, [
+    { kind: 'session', sessionId: 'th1' },
+    { kind: 'tool', name: 'reconnecting to OpenAI…', summary: '' },
+    { kind: 'text', text: 'Done.' },
+    { kind: 'error', message: 'stream disconnected before completion: quota exceeded' },
+  ]);
 });
 
 test('context text names the URL and tab; diffSnapshots catches edits, adds and deletes', () => {
@@ -838,43 +906,69 @@ function homeWithPendingUpdate() {
   return { home, bin, newHash: sha1(v(2, 'two')) };
 }
 
-test('merge run: the agent gets the three files; a run that finishes well settles the update', async () => {
+test('merge: the first run only proposes; the update settles after the run that merged the user\'s copy', async () => {
   const { home, bin, newHash } = homeWithPendingUpdate();
   const ext = startHost(home);
   const first = await ext.nextMods((ms) => ms.length === 1);
   assert.deepEqual(first[0].update, { version: '2', from: '1', modified: true });
+  const pending = () => JSON.parse(fs.readFileSync(path.join(home, 'preinstalled.json'), 'utf8')).shipped['example.com/plain'];
 
   // A failed run leaves it waiting.
   let r = await extRequest(ext, 'agent.start', { ...START, prompt: 'CRASH while merging', merge: 'example.com/plain' });
   assert.equal(r.ok, true, r.error);
   assert.equal((await waitDone(ext, r.result.runId)).ok, false);
-  assert.ok(JSON.parse(fs.readFileSync(path.join(home, 'preinstalled.json'), 'utf8')).shipped['example.com/plain'].pending);
+  assert.ok(pending().pending);
 
   // Only from the mod's own site.
   r = await extRequest(ext, 'agent.start', { site: 'other.org', url: 'https://other.org/', tabId: 3, prompt: 'merge', merge: 'example.com/plain' });
   assert.equal(r.ok, false);
   assert.match(r.error, /isn't a mod for other\.org/);
 
-  const since = ext.messages.length;
-  r = await extRequest(ext, 'agent.start', { ...START, prompt: 'Merge the new version, keeping my changes.', merge: 'example.com/plain' });
+  // The proposal: told where the three files are, to explain and ask, and not to edit yet.
+  r = await extRequest(ext, 'agent.start', { ...START, prompt: 'Suggest how to merge them, keeping my changes.', merge: 'example.com/plain' });
   assert.equal(r.ok, true, r.error);
-  const done = await waitDone(ext, r.result.runId);
-  assert.equal(done.ok, true);
+  assert.equal((await waitDone(ext, r.result.runId)).ok, true);
   const call = callFor(bin, 'keeping my changes');
-  assert.match(call.prompt, /^Merge the new version, keeping my changes\.\n\n/);
-  assert.match(call.prompt, /edit this file, and only this one\): sites\/example\.com\/plain\.js/);
+  assert.match(call.prompt, /^Suggest how to merge them, keeping my changes\.\n\n/);
+  assert.match(call.prompt, /user's copy \(the only file to edit, later\): sites\/example\.com\/plain\.js/);
   assert.match(call.prompt, /\(read only\): \.shipped\/example\.com\/plain\.new\.js/);
   assert.match(call.prompt, /\(version 1\), which the user's copy started from \(read only\): \.shipped\/example\.com\/plain\.js/);
-  const rec = JSON.parse(fs.readFileSync(path.join(home, 'preinstalled.json'), 'utf8')).shipped['example.com/plain'];
-  assert.deepEqual(rec, { hash: newHash, version: '2' });
+  assert.match(call.prompt, /Don't change any file in this reply/);
+  assert.match(call.prompt, /asking whether to go ahead, and stop/);
+  assert.match(call.prompt, /set `\/\/ @version` to `2`/);
+  assert.ok(pending().pending, 'a proposal settles nothing');
+
+  // An unrelated edit in that chat (the old @version kept) isn't the merge.
+  r = await extRequest(ext, 'agent.start', { ...START, prompt: 'TWEAK the colors' });
+  await waitDone(ext, r.result.runId);
+  assert.ok(pending().pending);
+
+  // The go-ahead: the run that writes the merged copy (new @version) settles it, and the mods go out
+  // again without the update before that run's done.
+  const since = ext.messages.length;
+  r = await extRequest(ext, 'agent.start', { ...START, prompt: 'GOAHEAD, merge it' });
+  assert.equal((await waitDone(ext, r.result.runId)).ok, true);
+  assert.deepEqual(pending(), { hash: newHash, version: '2' });
   assert.ok(!fs.existsSync(path.join(home, '.shipped', 'example.com', 'plain.new.js')));
-  // The mods went out again without the update, before the run's done.
   const doneIdx = ext.messages.findIndex((m) => m.type === 'agentEvent' && m.event.kind === 'done' && m.runId === r.result.runId);
   const modsIdx = ext.messages.findIndex((m, i) => i >= since && m.type === 'mods' && !m.mods[0].update);
   assert.ok(modsIdx !== -1 && modsIdx < doneIdx);
   // Nothing left to merge.
   r = await extRequest(ext, 'agent.start', { ...START, prompt: 'again', merge: 'example.com/plain' });
   assert.match(r.error, /no new TRIF version/);
+});
+
+test('merge: a run on another site never settles it', async () => {
+  const { home } = homeWithPendingUpdate();
+  const ext = startHost(home);
+  await ext.nextMods((ms) => ms.length === 1);
+  let r = await extRequest(ext, 'agent.start', { ...START, prompt: 'propose', merge: 'example.com/plain' });
+  await waitDone(ext, r.result.runId);
+  // The user's copy merged by hand meanwhile, then a run elsewhere: not this chat's doing, nothing settled.
+  fs.writeFileSync(path.join(home, 'sites', 'example.com', 'plain.js'), '// ==WebMod==\n// @source webmods\n// @version 2\n// ==/WebMod==\n// by hand\n');
+  r = await extRequest(ext, 'agent.start', { site: 'other.org', url: 'https://other.org/', tabId: 3, prompt: 'hello' });
+  await waitDone(ext, r.result.runId);
+  assert.ok(JSON.parse(fs.readFileSync(path.join(home, 'preinstalled.json'), 'utf8')).shipped['example.com/plain'].pending);
 });
 
 test('merge run: choosing what happens to the update is the user\'s, not the run\'s', async () => {
@@ -1044,6 +1138,28 @@ test('held mods: a run\'s mod that matches other sites is held (not registered) 
   assert.match(again.error, /isn't held/);
 });
 
+test('held mods: a change in another site\'s folder during a run isn\'t held on that run\'s account', async () => {
+  // The run on example.com can't write sites/x.com/ (read-only to it), so a broad mod changed there
+  // meanwhile (by a run on x.com, the user, another browser) isn't its doing.
+  const { home, bin } = makeHome();
+  writeMod(home, 'x.com', 'wide.js', '// ==WebMod==\n// @match https://x.com/*\n// ==/WebMod==\n// one\n');
+  const ext = startHost(home);
+  await ext.waitForSocket();
+  const r = await extRequest(ext, 'agent.start', { ...START, prompt: 'SLEEP' });
+  await waitFor(() => callFor(bin, 'SLEEP'), { message: 'the agent to start' });
+  writeMod(home, 'x.com', 'wide.js', '// ==WebMod==\n// @match https://x.com/*\n// @match https://twitter.com/*\n// ==/WebMod==\n// edited elsewhere\n');
+  const lastMods = () => [...ext.messages].reverse().find((m) => m.type === 'mods')?.mods || [];
+  await waitFor(() => lastMods().some((m) => m.id === 'x.com/wide' && m.matches.includes('https://twitter.com/*')), { message: 'the edit to reach the extension' });
+  assert.equal(lastMods().find((m) => m.id === 'x.com/wide').held, undefined);
+  // The run's own broad mod in its own folder is still held.
+  writeMod(home, 'example.com', 'evil.js', '// ==WebMod==\n// @match <all_urls>\n// ==/WebMod==\n// by the run\n');
+  await waitFor(() => lastMods().find((m) => m.id === 'example.com/evil')?.held, { message: 'the in-scope broad mod to be held' });
+  await extRequest(ext, 'agent.stop', { runId: r.result.runId });
+  const done = await waitDone(ext, r.result.runId);
+  assert.deepEqual((done.held || []).map((h) => h.id), ['example.com/evil']);
+  assert.deepEqual(Object.keys(JSON.parse(fs.readFileSync(path.join(home, 'held.json'), 'utf8'))), ['example.com/evil']);
+});
+
 test('held mods: editing a held mod yourself releases it; `trif approve` refuses inside a run', async () => {
   const { home } = makeHome();
   const ext = startHost(home);
@@ -1173,6 +1289,12 @@ test('agent.models: Codex lists the account\'s catalog (picker models, best firs
   assert.deepStrictEqual(r.result.models.map((m) => [m.id, m.name, m.description]), [['gpt-best', 'GPT-Best', 'Best.'], ['gpt-older', 'GPT-Older', 'Older.']]);
   assert.equal(r.result.default, 'gpt-best');
   assert.equal(r.result.custom, false);
+  // A new plan brings a new model: cached only briefly (the panel asks again whenever Settings opens).
+  assert.ok(agents.MODELS_CACHE_MS <= 60 * 1000);
+  catalog.models.push({ slug: 'sol', display_name: 'Sol', visibility: 'list', priority: 1 });
+  fs.writeFileSync(path.join(bin, 'catalog.json'), JSON.stringify(catalog));
+  r = await extRequest(ext, 'agent.models', { agent: 'codex', fresh: true });
+  assert.deepStrictEqual(r.result.models.map((m) => m.id), ['sol', 'gpt-best', 'gpt-older']);
   r = await extRequest(ext, 'agent.models', { agent: 'claude' });
   assert.deepStrictEqual(r.result.models.map((m) => m.id), ['fable', 'opus', 'sonnet', 'haiku']);
   assert.equal(r.result.custom, true);

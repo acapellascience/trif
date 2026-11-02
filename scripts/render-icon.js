@@ -56,7 +56,7 @@ function svg() {
 }
 
 /** One size as PNG bytes. `zoom` scales the head about the centre (default: fill the square up to 48 px). */
-function render(size, zoom = size <= FULL_BLEED_MAX ? (HEAD.outer + 8) / HEAD.outer : 1) {
+function render(size, zoom = size <= FULL_BLEED_MAX ? (HEAD.outer + 8) / HEAD.outer : 1, at0 = sample) {
   const N = 8;
   const at = (p) => ((p * 128) / size - 64) / zoom + 64; // pixel position -> icon space
   const rows = [];
@@ -66,7 +66,7 @@ function render(size, zoom = size <= FULL_BLEED_MAX ? (HEAD.outer + 8) / HEAD.ou
       let r = 0, g = 0, b = 0, a = 0;
       for (let sy = 0; sy < N; sy++) {
         for (let sx = 0; sx < N; sx++) {
-          const c = sample(at(px + (sx + 0.5) / N), at(py + (sy + 0.5) / N));
+          const c = at0(at(px + (sx + 0.5) / N), at(py + (sy + 0.5) / N));
           if (!c) continue;
           r += c[0]; g += c[1]; b += c[2]; a++;
         }
@@ -100,9 +100,13 @@ function png(size, raw) {
     chunk('IDAT', zlib.deflateSync(raw)), chunk('IEND', Buffer.alloc(0))]);
 }
 
-// A macOS app icon's shape fills about 824 of its 1024 points (Apple's icon grid), so the Safari app's icons
-// draw the head at that size.
+// The Safari app's icon (macOS): the head itself, at the size Apple's icon grid gives an icon's shape (about
+// 824 of 1024 points), with transparent margins. macOS 15 shows app icons unmasked, so a full-bleed square
+// would show as a green square in the Dock and Finder.
 const MAC_ZOOM = (824 / 1024 * 64) / HEAD.outer;
+
+/** The Mac app icon at `size` px, as PNG bytes. */
+function renderMac(size) { return render(size, MAC_ZOOM); }
 
 if (require.main === module) {
   fs.mkdirSync(outDir, { recursive: true });
@@ -114,4 +118,4 @@ if (require.main === module) {
   if (!process.argv[2]) { fs.writeFileSync(SVG_FILE, svg()); console.log(SVG_FILE); }
 }
 
-module.exports = { render, MAC_ZOOM };
+module.exports = { render, renderMac };

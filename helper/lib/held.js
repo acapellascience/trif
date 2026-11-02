@@ -38,8 +38,12 @@ function saveHeld(home, held) {
 
 /**
  * Update the held set for the current mods. `scopes` are the runs to check ({runId, site, scope,
- * before}: `before` is the runs.js modSnapshot taken when the run started). Mods those runs changed that
- * reach outside their scope get held; entries whose mod changed or vanished are dropped.
+ * before, locked}: `before` is the runs.js modSnapshot taken when the run started, `locked` the mods
+ * folders it couldn't write). Mods those runs changed that reach outside their scope get held; entries
+ * whose mod changed or vanished are dropped. A change in a folder the run couldn't write (another site's,
+ * which its sandbox makes read-only) isn't the run's: another run, the user or another browser made it
+ * meanwhile, so it isn't held on this run's account. A run's own change in a folder it could write (its
+ * site's, or a new one) with a broad @match still is.
  * Returns the mods held now (mod id -> entry, approved ones left out).
  */
 function updateHeld(ws, mods, scopes) {
@@ -50,8 +54,11 @@ function updateHeld(ws, mods, scopes) {
     const now = modSnapshot(ws.modsDir, ws.home);
     for (const s of live) {
       const touched = new Set(diffSnapshots(s.before, now));
+      const locked = s.locked || [];
       for (const m of mods) {
-        if (!touched.has(path.relative(ws.home, m.file))) continue;
+        const rel = path.relative(ws.home, m.file);
+        if (!touched.has(rel)) continue;
+        if (locked.some((d) => rel === d || rel.startsWith(d + path.sep))) continue;
         const reason = holdReason(m, s.scope);
         if (!reason || (held[m.id] && held[m.id].hash === m.hash)) continue;
         held[m.id] = { hash: m.hash, site: s.site, scope: s.scope, runId: s.runId, at: Date.now(), reason };

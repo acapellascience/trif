@@ -88,9 +88,70 @@ function realOrResolved(p) {
 // of other sites; helper.log).
 const PRIVATE_FILES = ['config.json', 'safari-token', 'helper.log', 'helper.log.1', 'runs', 'screenshots'];
 
+// Where the user's agent skills live: Codex reads ~/.agents/skills (and ~/.codex/skills), Claude Code
+// ~/.claude/skills. Each is often a link to a folder elsewhere (~/.claude/skills/x -> ~/.agents/skills/x).
+const SKILL_FOLDERS = [['.agents', 'skills'], ['.codex', 'skills'], ['.claude', 'skills']];
+
+/**
+ * The user's skill folders, as real paths, for runs to read (never write): each skills folder, and where
+ * each skill in it really is. Left out: a link that leads to the home folder itself, above it, or to the
+ * root (it would open everything), and one into a visible folder of the home folder (~/Documents…), whose
+ * other contents would have to be listed to deny them, which can make macOS ask the user.
+ */
+function skillDirs(homedir = os.homedir()) {
+  const home = realOrResolved(homedir);
+  const hiddenOrOutside = (p) => !p.startsWith(home + path.sep) || p.slice(home.length + 1).startsWith('.');
+  const ok = (p) => p !== '/' && p !== home && !home.startsWith(p + path.sep) && hiddenOrOutside(p);
+  const isDir = (p) => { try { return fs.statSync(p).isDirectory(); } catch { return false; } };
+  const out = new Set();
+  for (const parts of SKILL_FOLDERS) {
+    const base = path.join(homedir, ...parts);
+    if (!isDir(base)) continue;
+    const realBase = realOrResolved(base);
+    if (ok(realBase)) out.add(realBase);
+    let names = [];
+    try { names = fs.readdirSync(base); } catch { continue; }
+    for (const n of names) {
+      const p = path.join(base, n);
+      if (!isDir(p)) continue;
+      const r = realOrResolved(p);
+      if (ok(r) && !r.startsWith(realBase + path.sep)) out.add(r);
+    }
+  }
+  const all = [...out];
+  return all.filter((p) => !all.some((q) => p.startsWith(q + path.sep))); // inside another one: covered
+}
+
+/**
+ * What in the home folder to deny so that only `readable` (and the way to it) can be read: each item in
+ * the home folder, except those `readable` paths are in or lead through; inside hidden folders that lead
+ * through (~/.claude for ~/.claude/skills), every other item, and so on down. (A visible folder on the way
+ * isn't looked into, as before skills: listing ~/Documents and the like can make macOS ask the user.) By
+ * where each item leads, too.
+ */
+function deniedInHome(home, readable) {
+  const real = realOrResolved;
+  const covered = (p) => readable.some((r) => p === r || p.startsWith(r + path.sep));
+  const onTheWay = (p) => readable.some((r) => r.startsWith(p + path.sep));
+  const out = [];
+  const walk = (dir) => {
+    let names;
+    try { names = fs.readdirSync(dir); } catch { return; } // unreadable: nothing to list
+    for (const n of names) {
+      const p = path.join(dir, n);
+      const rp = real(p);
+      if (covered(p) || covered(rp)) continue;
+      if (onTheWay(p) || onTheWay(rp)) { if (n.startsWith('.')) walk(p); continue; }
+      out.push(p);
+    }
+  };
+  walk(home);
+  return out;
+}
+
 /**
  * What a run may touch, for the agents' sandboxes, which macOS enforces (docs/PROTOCOL.md "Run scope"):
- *   readable  the workspace, the TRIF code `trif` runs, and node
+ *   readable  the workspace, the TRIF code `trif` runs, node, and the user's skill folders (skillDirs)
  *   writable  the mods folder, this run's screenshots folder, and its mailbox (`box`)
  *   readOnly  every existing mod folder of another site (all-sites/ included), inside the mods folder
  *   denied    everything else in the home folder, and the workspace's PRIVATE_FILES (the more
@@ -102,24 +163,27 @@ const PRIVATE_FILES = ['config.json', 'safari-token', 'helper.log', 'helper.log.
 function runLimits(ws, { scope, box, screenshots }) {
   const real = realOrResolved;
   const node = real(process.execPath);
-  const readable = [...new Set([real(ws.home), real(path.join(__dirname, '..', '..')), path.dirname(path.dirname(node))])];
+  const home = real(os.homedir());
+  const skills = skillDirs(os.homedir());
+  const readable = [...new Set([real(ws.home), real(path.join(__dirname, '..', '..')), path.dirname(path.dirname(node)), ...skills])];
   const writable = [real(ws.modsDir), real(screenshots), real(box)];
   let names = [];
   try { names = fs.readdirSync(ws.modsDir, { withFileTypes: true }).filter((d) => d.isDirectory() || d.isSymbolicLink()).map((d) => d.name); } catch { /* none yet */ }
-  const readOnly = names.filter((n) => scopeFor(n) !== scope).map((n) => real(path.join(ws.modsDir, n)));
-  const home = real(os.homedir());
-  const onTheWay = (p) => readable.some((r) => r === p || r.startsWith(p + path.sep));
-  let inHome = [];
+  const otherSites = names.filter((n) => scopeFor(n) !== scope);
+  const readOnly = otherSites.map((n) => real(path.join(ws.modsDir, n)));
   // (By where each leads, too: ~/.webmods is a link to the workspace, ~/.trif, since 0.2.0, and a rule
   // denying it would deny the workspace itself to a sandbox that follows links.)
-  try { inHome = fs.readdirSync(home).map((n) => path.join(home, n)).filter((p) => !onTheWay(p) && !onTheWay(real(p))); } catch { /* unreadable: nothing to list */ }
+  const inHome = deniedInHome(home, readable);
   const privateFiles = PRIVATE_FILES.map((f) => real(path.join(ws.home, f)));
   const denied = [...inHome, ...privateFiles];
   // Other sites' screenshot folders, for agents whose file tools take per-folder rules (Claude Code).
   let shots = [];
   try { shots = fs.readdirSync(ws.screenshots, { withFileTypes: true }).filter((d) => d.isDirectory()).map((d) => real(path.join(ws.screenshots, d.name))); } catch { /* none */ }
   const otherScreenshots = shots.filter((p) => p !== real(screenshots));
-  return { readable, writable, readOnly, denied, home, privateFiles, workspace: real(ws.home), box: real(box), screenshots: real(screenshots), otherScreenshots };
+  // The same read-only folders relative to the workspace, as modSnapshot names files: a change under them
+  // can't be the run's doing (held.js).
+  const locked = otherSites.map((n) => path.relative(ws.home, path.join(ws.modsDir, n)));
+  return { readable, writable, readOnly, locked, denied, home, skills, privateFiles, workspace: real(ws.home), box: real(box), screenshots: real(screenshots), otherScreenshots };
 }
 
 function normalizeSite(site, url) {
@@ -134,7 +198,8 @@ function normalizeSite(site, url) {
  *   stop(runId) -> {stopped: true}
  *   list() -> [{runId, site, scope, agent, startedAt}]
  *   byToken(token) -> the live run whose agent was given this TRIF_RUN_TOKEN, or null
- *   scopes() -> [{runId, site, scope, before, startedAt}] for live and just-finished runs (held mods)
+ *   scopes() -> [{runId, site, scope, before, locked, startedAt}] for live and just-finished runs (held
+ *     mods; `locked`: the mods folders the run couldn't write, relative to the workspace)
  *   stopAll() -> Promise (resolves once every agent process has exited, SIGKILLing stragglers)
  */
 class Runs {
@@ -149,7 +214,7 @@ class Runs {
     this.onRequest = onRequest || ((run, line, respond) => respond(JSON.stringify({ id: null, ok: false, error: 'no helper commands here' })));
     this.runs = new Map(); // runId -> run
     this.bySite = new Map(); // site -> runId
-    this.recent = []; // [{runId, site, scope, before, startedAt, until}]
+    this.recent = []; // [{runId, site, scope, before, locked, startedAt, until}]
   }
 
   list() {
@@ -165,7 +230,7 @@ class Runs {
   scopes() {
     const now = Date.now();
     this.recent = this.recent.filter((r) => r.until > now);
-    const live = [...this.runs.values()].map((r) => ({ runId: r.id, site: r.site, scope: r.scope, before: r.before || null, startedAt: r.startedAt }));
+    const live = [...this.runs.values()].map((r) => ({ runId: r.id, site: r.site, scope: r.scope, before: r.before || null, locked: r.locked || [], startedAt: r.startedAt }));
     return [...live, ...this.recent];
   }
 
@@ -329,6 +394,7 @@ class Runs {
     const { file, args } = adapter.command({ bin: found.path, prompt, sessionId: run.sessionId, model: run.model, context, workspace: ws.home, ...limits, ...options });
 
     run.before = modSnapshot(ws.modsDir, ws.home);
+    run.locked = limits.locked;
     run.beforeFiles = snapshot(ws.modsDir, ws.home);
     // Tell the other browsers' helpers a run is going, so mods it creates start off there (lib/origins.js).
     if (ws.installId) {
@@ -484,11 +550,11 @@ class Runs {
     this._log(run, { webmods: 'done', ...done, exitCode: code, signal, stderrTail: run.stderr.slice(-4000), time: Date.now() });
     this.logger.info(`agent run ${run.id} done: ok=${done.ok} code=${code} signal=${signal} changed=${changedFiles.length}`);
     if (run.marked) markRunEnded(run.ws.home, run.id);
-    if (run.before) this.recent.push({ runId: run.id, site: run.site, scope: run.scope, before: run.before, startedAt: run.startedAt, until: Date.now() + RECENT_MS });
+    if (run.before) this.recent.push({ runId: run.id, site: run.site, scope: run.scope, before: run.before, locked: run.locked || [], startedAt: run.startedAt, until: Date.now() + RECENT_MS });
     this.runs.delete(run.id);
     if (this.bySite.get(run.site) === run.id) this.bySite.delete(run.site);
   }
 }
 
 module.exports = {
-  runLimits, Runs, snapshot, modSnapshot, diffSnapshots, normalizeSite, boxRoot, RUN_TIMEOUT_MS, PRIVATE_FILES };
+  runLimits, Runs, snapshot, modSnapshot, diffSnapshots, normalizeSite, boxRoot, RUN_TIMEOUT_MS, PRIVATE_FILES, skillDirs, deniedInHome };

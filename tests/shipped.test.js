@@ -217,7 +217,7 @@ test('merge: the prompt points at the three files; resolving makes the new versi
   w.setup();
   const m = S.mergeRequest(w.ws, 'x.com/plain-x');
   assert.strictEqual(m.hash, sha1(mod(2)));
-  assert.match(m.prompt, /user's copy \(edit this file, and only this one\): sites\/x\.com\/plain-x\.js/);
+  assert.match(m.prompt, /user's copy \(the only file to edit, later\): sites\/x\.com\/plain-x\.js/);
   assert.match(m.prompt, /new version from TRIF \(read only\): \.shipped\/x\.com\/plain-x\.new\.js/);
   assert.match(m.prompt, /shipped before \(version 1\).*: \.shipped\/x\.com\/plain-x\.js/);
   assert.strictEqual(S.resolveMerge(w.home, 'x.com/plain-x', 'some other version'), false);
@@ -229,6 +229,31 @@ test('merge: the prompt points at the three files; resolving makes the new versi
   assert.deepStrictEqual(w.setup(), { updated: [], waiting: [] });
   w.ship('x.com/plain-x', mod(3));
   assert.deepStrictEqual(w.setup().waiting, [{ id: 'x.com/plain-x', version: '3' }]);
+});
+
+test('mergeSettled: waiting until the user\'s copy changed and has the new @version; then merged', () => {
+  const w = world();
+  w.ship('x.com/plain-x', mod(1));
+  w.setup();
+  w.edit('x.com/plain-x', mod(1, 'mine'));
+  w.ship('x.com/plain-x', mod(2));
+  w.setup();
+  const m = S.mergeRequest(w.ws, 'x.com/plain-x');
+  assert.deepStrictEqual([m.version, m.before], ['2', sha1(mod(1, 'mine'))]);
+  assert.strictEqual(S.mergeSettled(w.ws, 'x.com/plain-x', m), 'waiting', 'the proposal changed nothing');
+  w.edit('x.com/plain-x', mod(1, 'mine, tweaked'));
+  assert.strictEqual(S.mergeSettled(w.ws, 'x.com/plain-x', m), 'waiting', 'changed, but not to the new version');
+  w.edit('x.com/plain-x', mod(2, 'mine and two'));
+  assert.strictEqual(S.mergeSettled(w.ws, 'x.com/plain-x', m), 'merged');
+  assert.deepStrictEqual(w.rec('x.com/plain-x'), { hash: sha1(mod(2)), version: '2' });
+  assert.strictEqual(S.mergeSettled(w.ws, 'x.com/plain-x', m), 'gone', 'nothing left to settle');
+  // Kept theirs meanwhile: gone too.
+  w.ship('x.com/plain-x', mod(3));
+  w.setup();
+  const m3 = S.mergeRequest(w.ws, 'x.com/plain-x');
+  S.keepMine(w.ws, 'x.com/plain-x');
+  w.edit('x.com/plain-x', mod(3, 'x'));
+  assert.strictEqual(S.mergeSettled(w.ws, 'x.com/plain-x', m3), 'gone');
 });
 
 test('runs can read .shipped (to merge) but not write it', () => {

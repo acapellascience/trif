@@ -18,7 +18,8 @@
 //    exact version is kept in <home>/.shipped/<site>/<mod>.js, the base for merging;
 //  - pending {hash, version}: a newer version the user's edited copy didn't get, kept in
 //    <home>/.shipped/<site>/<mod>.new.js until the user picks what to do in the side panel (or with
-//    `trif mod-update`): use it, keep theirs, or have their agent merge the two;
+//    `trif mod-update`): use it, keep theirs, or have their agent merge the two (it proposes first, and
+//    edits once the user agrees);
 //  - declined: the hash of a version the user chose not to use ("Keep mine"); a later one is offered again;
 //  - replaced {hash, version, pending, trashed}: how things were before "Use the new version", so
 //    `trif restore` (the panel's Undo) can put the user's copy back and offer the update again;
@@ -50,6 +51,9 @@ const PREINSTALLED = [
   { id: 'www.instagram.com/following-only-feed', on: true },
   { id: 'www.instagram.com/hide-ai-content', on: true },
   { id: 'www.instagram.com/hide-reposts', on: true },
+  // Added in 0.2.0: existing workspaces get it (off) with the setup that installs the update, since it
+  // isn't in their `offered` list yet.
+  { id: 'www.google.com/dvd-logo', on: false },
 ];
 
 // TRIF is off on every site until the user turns it on there; it starts on for these, the sites the
@@ -279,9 +283,12 @@ function keepMine(ws, id) {
 }
 
 /**
- * What a side-panel run needs to merge the new version into the user's copy: {hash, prompt}. `hash` is
- * the new version's, for resolveMerge when the run succeeds. Paths in the prompt are relative to the
- * workspace (the agent's working folder).
+ * What a side-panel run needs to merge the new version into the user's copy: {hash, version, before,
+ * prompt}. The merge takes two runs in one chat: the first (this prompt) only explains both sides'
+ * changes and proposes how to merge them, then waits; the user's next message ("go ahead") is the run
+ * that edits the file. So the update can't be settled when this run ends: `before` (the sha1 of the
+ * user's copy now), `hash` and `version` are for mergeSettled, which the helper checks after each run
+ * in that chat. Paths in the prompt are relative to the workspace (the agent's working folder).
  */
 function mergeRequest(ws, id) {
   const { site, mod } = trash.parseId(id);
@@ -294,26 +301,46 @@ function mergeRequest(ws, id) {
   const rel = (f) => path.relative(ws.home, f).split(path.sep).join('/');
   const base = rec.hash && fs.existsSync(baseFile(ws.home, id)) ? rel(baseFile(ws.home, id)) : null;
   const v = (x) => (x ? `version ${x}` : 'an earlier version');
+  const newVersion = rec.pending.version || null;
   const lines = [
-    `TRIF has a new version (${v(rec.pending.version)}) of the mod ${id}, which it ships. The user changed their copy, so it wasn't replaced. Merge the two into the user's copy: keep every change the user made, and bring in what's new in TRIF's version.`,
+    `TRIF has a new version (${v(newVersion)}) of the mod ${id}, which it ships. The user changed their copy, so it wasn't replaced. The user wants to merge the two, but first wants to know what that would do.`,
     '',
-    `- The user's copy (edit this file, and only this one): ${rel(mine)}`,
+    `- The user's copy (the only file to edit, later): ${rel(mine)}`,
     `- The new version from TRIF (read only): ${rel(newFile(ws.home, id))}`,
     base
       ? `- What TRIF shipped before (${v(rec.version)}), which the user's copy started from (read only): ${base}`
       : '- What TRIF shipped before, which the user started from, isn\'t available: tell the user\'s changes apart from TRIF\'s by what they do.',
     '',
-    base
-      ? 'Compare the old version with the user\'s copy to see what the user changed, and with the new version to see what TRIF changed.'
-      : 'Compare the user\'s copy with the new version.',
-    'Where both changed the same thing, keep the user\'s behaviour and say what you couldn\'t bring over. Keep `// @source webmods` in the header and set `// @version` to the new version\'s. Check the file parses (`trif check`), reload the tab, then tell the user in a few words what changed. TRIF marks the update merged when this run finishes: don\'t run `trif mod-update`, or ask the user to.',
+    '**Don\'t change any file in this reply.** Read the files and ' + (base
+      ? 'compare the old version with the user\'s copy to see what the user changed, and with the new version to see what TRIF changed.'
+      : 'compare the user\'s copy with the new version.'),
+    'Then tell the user, in plain words and briefly: what TRIF changed in the new version; what the user changed in theirs; and how you would merge them: what you\'d bring in, what you\'d keep, and any conflicts (where both changed the same thing) and which side you\'d keep there (by default the user\'s behaviour). End by asking whether to go ahead, and stop.',
+    `Only when the user says to go ahead (in their next message), edit the user's copy as proposed (or as they ask instead): keep the \`// @source\` line, set \`// @version\` to ${newVersion ? `\`${newVersion}\`, the new version's` : 'the new version\'s'}, check the file parses (\`trif check\`), reload the tab, and tell the user in a few words what changed. TRIF marks the update merged once the user's copy has changed${newVersion ? ` and says \`@version ${newVersion}\`` : ''}: don't run \`trif mod-update\`, or ask the user to.`,
   ];
-  return { hash: rec.pending.hash, prompt: lines.join('\n') };
+  return { hash: rec.pending.hash, version: newVersion, before: sha1(fs.readFileSync(mine)), prompt: lines.join('\n') };
 }
 
 /**
- * After a successful merge run: the new version becomes the base, so it isn't offered again. Only if it's
- * still the version waiting (`hash`). Returns whether it was resolved.
+ * After a run in a chat where a merge was proposed (`m`: mergeRequest's {hash, version, before}):
+ * 'merged' when the user's copy has changed since the proposal and (when the new version has one) says
+ * the new @version, which settles the update (resolveMerge); 'gone' when there's nothing to settle any
+ * more (the update was used, kept or merged another way, or the file is gone); else 'waiting' (the
+ * proposal run itself, or an unrelated change).
+ */
+function mergeSettled(ws, id, m) {
+  const rec = load(ws.home).shipped[id];
+  if (!rec || !rec.pending || rec.pending.hash !== m.hash) return 'gone';
+  const now = readOrNull(modFile(ws.modsDir, id));
+  if (!now) return 'gone';
+  if (sha1(now) === m.before) return 'waiting';
+  if (m.version && String(parseHeader(now.toString('utf8')).version || '') !== String(m.version)) return 'waiting';
+  return resolveMerge(ws.home, id, m.hash) ? 'merged' : 'gone';
+}
+
+/**
+ * The merge is settled (mergeSettled, or `trif mod-update --merged` after a merge in a terminal): the new
+ * version becomes the base, so it isn't offered again. Only if it's still the version waiting (`hash`).
+ * Returns whether it was resolved.
  */
 function resolveMerge(home, id, hash) {
   const state = load(home);
@@ -364,5 +391,5 @@ function startSitesOn(home) { return load(home).sitesOn; }
 
 module.exports = {
   PREINSTALLED, SITES_ON, SHIPPED_DIR, preinstallMods, updateShippedMods, startOffIds, startSitesOn, loadPreinstalled: load,
-  pendingUpdates, useNewVersion, keepMine, mergeRequest, resolveMerge, restoreMod, baseFile, newFile, loadHistory,
+  pendingUpdates, useNewVersion, keepMine, mergeRequest, mergeSettled, resolveMerge, restoreMod, baseFile, newFile, loadHistory,
 };

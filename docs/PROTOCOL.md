@@ -86,7 +86,7 @@ patch `fetch`/`XMLHttpRequest`, read React state, etc.). An optional header sets
   panel shows a badge for 1 and 2; a side-panel run's tier-2 mod is held (see "Run scope").
 - `@source` and `@version`: `@source webmods` marks a mod TRIF ships (the examples); `@version` is
   its version (any text; the examples count 1, 2, 3…). Parsed into `source` (lowercased) and `version`
-  (null when absent). The panel shows "from TRIF, version 3"; setup keeps such mods up to date (see
+  (null when absent). The panel shows "Tim's mod, v3"; setup keeps such mods up to date (see
   "Updates to shipped mods").
 - Unknown keys are ignored. A file without a header is valid.
 
@@ -550,15 +550,24 @@ overwriting the user's own changes. Only examples whose header says `@source web
     back and the update is pending again. The panel adds `{role:"mod", text:"x.js is now version 2 from
     TRIF; yours is in the trash.", undo: id}` to the chat.
   - `mine` → `{id, choice, version}`: `declined = <its hash>`, so it isn't offered again; a later version is.
-- **Merging** is an ordinary side-panel run: `agent.start` with `merge: "<id>"` (from the mod's own site:
-  the scopes must match). The helper appends to the prompt where the three files are, relative to the
-  workspace: the user's copy (`sites/…`, the only one to edit), the new version (`.shipped/…/<mod>.new.js`)
-  and the base (`.shipped/…/<mod>.js`, or a note that it isn't known), and asks to keep the user's changes,
-  keep `@source webmods` and take the new `@version`. Same sandbox, scope and held-mod rules as any run:
-  `.shipped` is readable (it isn't in `PRIVATE_FILES`) and not writable (outside the mods folder; Claude
-  Code's sandbox also denies it). When that run's `done` has `ok: true`, the pending version becomes the
-  base (if it's still the one waiting), before the mods go out again and `done` is relayed.
-  `trif mod-update <id> --merged` does the same after a merge in a terminal.
+- **Merging** takes two ordinary side-panel runs in one chat. The first is `agent.start` with `merge:
+  "<id>"` (from the mod's own site: the scopes must match). The helper appends to the prompt where the
+  three files are, relative to the workspace: the user's copy (`sites/…`, the only one to edit), the new
+  version (`.shipped/…/<mod>.new.js`) and the base (`.shipped/…/<mod>.js`, or a note that it isn't known),
+  and asks the agent not to change anything yet: explain in plain words what TRIF changed, what the user
+  changed, and how it would merge them (what it brings in and keeps, conflicts and which side wins), then
+  ask whether to go ahead and stop. The user's reply ("go ahead") is the next run in the chat, which
+  edits the user's copy: keep the `@source` line, set the new `@version`. Same sandbox, scope and
+  held-mod rules as any run: `.shipped` is readable (it isn't in `PRIVATE_FILES`) and not writable
+  (outside the mods folder; Claude Code's sandbox also denies it).
+  **Settling.** The helper remembers the proposal (in memory: mod id → its scope, the new version's hash
+  and `@version`, and the sha1 of the user's copy then). After every run on that site that ends, it
+  checks the user's copy: changed since the proposal *and* saying the new `@version` (when it has one)
+  means merged, and the pending version becomes the base (if it's still the one waiting), before the
+  mods go out again and `done` is relayed. The proposal run itself (nothing changed) and unrelated edits
+  (old `@version`) leave it waiting; runs on other sites never settle it. If the update was used, kept
+  or settled otherwise meanwhile, the proposal is dropped. After a helper restart, Merge proposes again.
+  `trif mod-update <id> --merged` settles it after a merge in a terminal.
 
 ## Repository layout
 
@@ -626,7 +635,8 @@ Nothing is hosted; the agent uses the user's own login/subscription.
     failed with the not-logged-in error) → "Claude Code isn't logged in" with a **Log in** button (see
     "Logging in" below; agents with `canLogin: false` show `loginFix` instead).
   - **Settings:** agent (from `agent.list`; only available ones selectable), optional model name (free
-    text with suggestions opus / sonnet / haiku, empty = agent default). Stored in `chrome.storage.local` `settings`.
+    text with suggestions opus / sonnet / haiku, empty = agent default), for this site's chat: each site
+    chat has its own (see "Agent and model per site chat" below).
   - Light/dark via `prefers-color-scheme`; compact, clean, system font; fits a narrow panel (320 px+).
 - Panel ⇄ background: `chrome.runtime.connect({name: "panel"})`. Panel → background:
   `{type: "agent.start", site, tabId, url, prompt, sessionId, agent, model, openModel?}`, `{type: "agent.stop", runId}`,
@@ -755,9 +765,15 @@ Suffix List). `helper/lib/scope.js` computes it; `extension/lib.js` mirrors the 
 - **Agent sandboxes.** The scope only holds if the agent can't reach the helper some other way or
   rewrite the rules, so both agents run under limits the operating system enforces (macOS Seatbelt;
   `runs.js` runLimits computes them, each adapter passes them on):
-  - **Reads:** the workspace, the TRIF code `trif` runs, and node; nothing else in the home folder
-    (every item in it is denied, rather than the folder itself, which node and `mkdir -p` must be able to
-    look at). In the workspace, not `config.json` (API keys), `safari-token`, `helper.log`, `runs/`
+  - **Reads:** the workspace, the TRIF code `trif` runs, node, and the user's skill folders, read only
+    (`skillDirs`: `~/.agents/skills`, `~/.codex/skills`, `~/.claude/skills` and where each skill in them
+    really is, links followed; not a link to the home folder or above, nor into a visible folder such as
+    `~/Documents`); nothing else in the home folder (every item in it is denied, rather than the folder
+    itself, which node and `mkdir -p` must be able to look at; inside hidden folders on the way to a skill
+    folder, such as `~/.codex`, every other item: Codex's login stays unreadable). Codex offers the
+    skills it finds and its commands can now read them; Claude Code doesn't load user skills in these runs
+    (`--setting-sources project`), so its file tools may read them (absolute `Read(//…)` rules) but it
+    isn't told they exist. A skill that needs the network (`npx …@latest`) still can't run its tool. In the workspace, not `config.json` (API keys), `safari-token`, `helper.log`, `runs/`
     (other runs' logs hold the pages they read) or `screenshots/` (other sites'), except the run's own
     screenshots folder and mailbox.
   - **Writes:** the mods folder, with every existing folder of another site (`all-sites/` included)
@@ -783,14 +799,24 @@ Suffix List). `helper/lib/scope.js` computes it; `extension/lib.js` mirrors the 
 ### Models (`agent.models`)
 
 `agent.models {agent, fresh}` → `{agent, models:[{id, name, description}], default, custom, error, note}`:
-what the side panel's model picker offers for that agent (cached per agent binary for 30 minutes;
+what the side panel's model picker offers for that agent (cached per agent binary for a minute;
 `fresh` skips the cache). Codex: its own catalog for the signed-in account (`codex debug models`),
 the models it lists in its picker, ordered by priority; `default` is the first; `custom: false` (only
 those). Claude Code has no command that lists an account's models, so: its aliases `fable`, `opus`,
 `sonnet`, `haiku` (each the newest of its family), `custom: true` (the panel's "Other…" takes an exact
-name), with a `note` saying so. The panel keeps the chosen model per agent (chrome.storage `settings.models`,
-`{agentId: model}`; an older single `settings.model` becomes Claude Code's) and passes it as `agent.start`'s
-`model`.
+name), with a `note` saying so. The panel keeps the chosen model per agent (`models`, `{agentId: model}`;
+an older single `settings.model` becomes Claude Code's) and passes it as `agent.start`'s `model`.
+
+**Agent and model per site chat** (`extension/lib.js`). Each site's chat has its own agent and model, so
+one panel can run Claude Code with Opus on one site while another runs Codex on another.
+`chrome.storage.local` `sitePicks` = `{"<site>": {agent, models}}`, the same shape as `settings`, which is
+the default for sites without a pick. Changing the agent or model in Settings (or `/model`) writes this
+site's pick and also makes it the default, so a site seen for the first time starts with the last pick
+made anywhere. A panel showing a site without a pick keeps the default it first saw for that site (in
+memory), so a pick made in another panel doesn't change it; the site's pick is written when a run starts
+there. New chat (+) keeps the site's pick. The setting from before 0.2.0 (one global `settings`) is the
+default, so every site starts with it. `trif agent run` doesn't read any of this: it takes `--agent` and
+`--model`, or uses the helper's default agent.
 
 ### Agent adapters (`helper/lib/agents/<id>.js`)
 

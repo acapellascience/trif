@@ -56,7 +56,7 @@ function svg() {
 }
 
 /** One size as PNG bytes. `zoom` scales the head about the centre (default: fill the square up to 48 px). */
-function render(size, zoom = size <= FULL_BLEED_MAX ? (HEAD.outer + 8) / HEAD.outer : 1) {
+function render(size, zoom = size <= FULL_BLEED_MAX ? (HEAD.outer + 8) / HEAD.outer : 1, at0 = sample) {
   const N = 8;
   const at = (p) => ((p * 128) / size - 64) / zoom + 64; // pixel position -> icon space
   const rows = [];
@@ -66,7 +66,7 @@ function render(size, zoom = size <= FULL_BLEED_MAX ? (HEAD.outer + 8) / HEAD.ou
       let r = 0, g = 0, b = 0, a = 0;
       for (let sy = 0; sy < N; sy++) {
         for (let sx = 0; sx < N; sx++) {
-          const c = sample(at(px + (sx + 0.5) / N), at(py + (sy + 0.5) / N));
+          const c = at0(at(px + (sx + 0.5) / N), at(py + (sy + 0.5) / N));
           if (!c) continue;
           r += c[0]; g += c[1]; b += c[2]; a++;
         }
@@ -100,9 +100,27 @@ function png(size, raw) {
     chunk('IDAT', zlib.deflateSync(raw)), chunk('IEND', Buffer.alloc(0))]);
 }
 
-// A macOS app icon's shape fills about 824 of its 1024 points (Apple's icon grid), so the Safari app's icons
-// draw the head at that size.
-const MAC_ZOOM = (824 / 1024 * 64) / HEAD.outer;
+// The Safari app's icon (macOS) is full bleed: the whole square is rim green, and the system's own rounded
+// mask becomes the head's outline. Safari (Settings → Extensions) and macOS 26 put an icon with transparent
+// margins on a white tile instead. The face is the mask inset by the rim (a rounded square: Apple's mask has
+// corners of about 22.4% of the side), so the rim left after masking is as thick all round as the toolbar
+// icon's; the eyes are the toolbar icon's, scaled with the face. Without a mask (Finder and the Dock before
+// macOS 26) it shows as a green square.
+const MAC = { r: 0.224 * 128, rim: (HEAD.outer - HEAD.inner) * (64 / HEAD.outer) };
+function sampleMac(x, y) {
+  const half = 64 - MAC.rim;
+  const r = MAC.r - MAC.rim;
+  const dx = Math.max(0, Math.abs(x - 64) - (half - r));
+  const dy = Math.max(0, Math.abs(y - 64) - (half - r));
+  if (Math.abs(x - 64) > half || Math.abs(y - 64) > half || dx * dx + dy * dy > r * r) return HEAD.rim;
+  // Eyes: the toolbar icon's, zoomed with the head (64 / outer) about the centre.
+  const k = HEAD.outer / 64;
+  const ex = (x - 64) * k + 64, ey = (y - 64) * k + 64;
+  return EYES.xs.some((cx) => inside(ex, ey, cx, EYES.cy, EYES.a, EYES.b, EYES.n)) ? EYES.color : HEAD.face;
+}
+
+/** The Mac app icon at `size` px, as PNG bytes (opaque, full bleed). */
+function renderMac(size) { return render(size, 1, sampleMac); }
 
 if (require.main === module) {
   fs.mkdirSync(outDir, { recursive: true });
@@ -114,4 +132,4 @@ if (require.main === module) {
   if (!process.argv[2]) { fs.writeFileSync(SVG_FILE, svg()); console.log(SVG_FILE); }
 }
 
-module.exports = { render, MAC_ZOOM };
+module.exports = { render, renderMac };

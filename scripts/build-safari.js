@@ -16,12 +16,13 @@
 const fs = require('node:fs');
 const path = require('node:path');
 const { execFileSync } = require('node:child_process');
-const { render: renderIcon, MAC_ZOOM } = require('./render-icon');
+const { renderMac } = require('./render-icon');
 
 const ROOT = path.resolve(__dirname, '..');
 const DIST = path.join(ROOT, 'dist');
 const OUT = path.join(DIST, 'safari-app');
 const APP_NAME = 'TRIF';
+const FULL_NAME = 'Tim’s Robot Internet Fixer';
 // (dev.webmods.app before 0.2.0: Safari sees this as another extension. A WebMods.app from before can be
 // deleted.)
 const APP_ID = 'com.timsrobot.trif';
@@ -61,13 +62,23 @@ function customize(projectDir) {
   for (const file of ['SafariWebExtensionHandler.swift', ENTITLEMENTS]) {
     fs.copyFileSync(path.join(ROOT, 'safari', file), path.join(projectDir, EXTENSION_TARGET, file));
   }
-  // The app's own icon: the robot's head as the whole icon (the converter puts the extension's icon on a
-  // white tile).
+  // The app's own icon: full bleed, so the system's mask makes the head's outline (render-icon.js; the
+  // converter puts the extension's icon on a white tile).
   const icons = path.join(projectDir, APP_NAME, 'Assets.xcassets', 'AppIcon.appiconset');
   const sets = JSON.parse(fs.readFileSync(path.join(icons, 'Contents.json'), 'utf8')).images.filter((i) => i.filename);
   for (const i of sets) {
     const px = parseInt(i.size, 10) * parseInt(i.scale, 10);
-    fs.writeFileSync(path.join(icons, i.filename), renderIcon(px, MAC_ZOOM));
+    fs.writeFileSync(path.join(icons, i.filename), renderMac(px));
+  }
+  // The app's window: the converter writes "TRIF’s extension is currently off…" (from --app-name) into its
+  // page and script; there it says the full name. The app itself stays TRIF.app, and its Finder/Dock name
+  // (CFBundleDisplayName) stays TRIF.
+  for (const file of [path.join('Resources', 'Base.lproj', 'Main.html'), path.join('Resources', 'Script.js')]) {
+    const f = path.join(projectDir, APP_NAME, file);
+    const before = fs.readFileSync(f, 'utf8');
+    const after = before.replaceAll(`${APP_NAME}’s extension`, `${FULL_NAME} extension`);
+    if (after === before) fail(`couldn't find "${APP_NAME}’s extension" in the converter's ${file}`);
+    fs.writeFileSync(f, after);
   }
   const vc = path.join(projectDir, APP_NAME, 'ViewController.swift');
   if (fs.existsSync(vc)) {

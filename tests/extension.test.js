@@ -257,6 +257,19 @@ test('resolveTab queries normal windows and the last-focused window', async () =
   assert.strictEqual((await lib.resolveTab(chromeMock, {})).id, 1);
 });
 
+test('lastFocusedNormalWindow: no deprecated windowTypes in Firefox, and only normal windows', async () => {
+  const queries = [];
+  let win = { id: 7, type: 'normal' };
+  const chromeMock = { windows: { getLastFocused: async (q) => { queries.push(q); return win; } } };
+  assert.strictEqual((await lib.lastFocusedNormalWindow(chromeMock, true)).id, 7);
+  assert.strictEqual((await lib.lastFocusedNormalWindow(chromeMock, false)).id, 7);
+  assert.deepStrictEqual(queries, [{}, { windowTypes: ['normal'] }]);
+  win = { id: 8, type: 'popup' };
+  assert.strictEqual(await lib.lastFocusedNormalWindow(chromeMock, true), null);
+  chromeMock.windows.getLastFocused = async () => { throw new Error('No last-focused window'); };
+  assert.strictEqual(await lib.lastFocusedNormalWindow(chromeMock, true), null);
+});
+
 test('url, site and request helpers', () => {
   assert.strictEqual(lib.normalizeUrl('example.com/x'), 'https://example.com/x');
   assert.strictEqual(lib.normalizeUrl('http://a.b'), 'http://a.b');

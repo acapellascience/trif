@@ -223,11 +223,21 @@ export function selectTab(tabs, focusedWindowId, args = {}) {
   return t;
 }
 
+/**
+ * The last-focused normal window, or null. Firefox deprecates getLastFocused's `windowTypes` (it logs a
+ * warning on every call, and the panel asks for status every few seconds), so there the window's type
+ * is checked instead.
+ */
+export async function lastFocusedNormalWindow(chromeApi, firefox = FIREFOX) {
+  const win = await chromeApi.windows.getLastFocused(firefox ? {} : { windowTypes: ['normal'] }).catch(() => null);
+  return win && (!win.type || win.type === 'normal') ? win : null;
+}
+
 /** Resolve a tab selector using chrome.windows/chrome.tabs. */
 export async function resolveTab(chromeApi, args = {}) {
   const [tabs, win] = await Promise.all([
     chromeApi.tabs.query({ windowType: 'normal' }),
-    chromeApi.windows.getLastFocused({ windowTypes: ['normal'] }).catch(() => null),
+    lastFocusedNormalWindow(chromeApi),
   ]);
   tabs.sort((a, b) => (a.windowId - b.windowId) || (a.index - b.index));
   return selectTab(tabs, win?.id, args);

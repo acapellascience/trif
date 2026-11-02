@@ -3,7 +3,7 @@
 // panel and the helper. See docs/PROTOCOL.md.
 
 import {
-  SETTINGS_URL, USER_SCRIPTS_OFF, FIREFOX, BROWSER, userScriptsAvailable, syncUserScripts, resolveTab, tabInfo,
+  SETTINGS_URL, USER_SCRIPTS_OFF, FIREFOX, BROWSER, userScriptsAvailable, syncUserScripts, resolveTab, lastFocusedNormalWindow, tabInfo,
   normalizeUrl, normalizeSite, hostMatchesSite, buildRunCode, buildPollCode, parseRunEnvelope,
   firstInjectionResult, withTimeout, filterRequests, nextBackoff, chromeVersion, toolLine,
   normalizeDisabled, modAppliesTo, urlInScope, modInScope, applyStartOff, modSites,
@@ -442,7 +442,7 @@ const commands = {
     checkScopeUrl(url, args.scope, 'that URL');
     const waiter = loadWaiter();
     try {
-      const win = await chrome.windows.getLastFocused({ windowTypes: ['normal'] }).catch(() => null);
+      const win = await lastFocusedNormalWindow(chrome);
       let tab;
       if (win) {
         // In the background: agents work while the user is looking at something else.

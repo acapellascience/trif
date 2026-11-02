@@ -125,6 +125,29 @@ test('updateHeld: a change in a folder the run couldn\'t write (`locked`) isn\'t
   assert.deepEqual(runLimits(ws, { scope: 'chatgpt.com', box, screenshots: box }).locked, [path.join('sites', 'x.com')]);
 });
 
+test('locked folders: a linked site folder gets Edit deny rules by its workspace path and its real path; only protected folders are exempt', () => {
+  const { runLimits } = require('../helper/lib/runs');
+  const claude = require('../helper/lib/agents/claude');
+  const codex = require('../helper/lib/agents/codex');
+  const ws = makeWs();
+  const elsewhere = tempDir();
+  fs.mkdirSync(path.join(ws.modsDir, 'chatgpt.com'));
+  fs.symlinkSync(elsewhere, path.join(ws.modsDir, 'other.com'));
+  const box = tempDir();
+  const lim = runLimits(ws, { scope: 'x.com', box, screenshots: box });
+  const realMods = fs.realpathSync(ws.modsDir);
+  assert.deepEqual(lim.locked.sort(), [path.join('sites', 'chatgpt.com'), path.join('sites', 'other.com')]);
+  const c = claude.command({ bin: '/x/claude', prompt: 'P', ...lim });
+  const deny = JSON.parse(c.args[c.args.indexOf('--settings') + 1]).permissions.deny;
+  for (const p of [path.join(realMods, 'other.com'), fs.realpathSync(elsewhere), path.join(realMods, 'chatgpt.com')]) {
+    assert.ok(deny.includes(`Edit(/${p}/**)`), p);
+  }
+  assert.deepEqual(c.locked.sort(), lim.locked.sort());
+  assert.deepEqual(codex.command({ bin: '/x/codex', prompt: 'P', ...lim }).locked.sort(), lim.locked.sort());
+  // An adapter that says nothing about it protects nothing: no folder is exempt from holding.
+  assert.deepEqual(codex.command({ bin: '/x/codex', prompt: 'P', ...lim, readOnly: [] }).locked, []);
+});
+
 test('@risk header: parsed into {tier, why}; a panel run\'s tier-2 mod is held, tier 0 and 1 aren\'t', () => {
   const ws = makeWs();
   const before = snapshot(ws.modsDir, ws.home);

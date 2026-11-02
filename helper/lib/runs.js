@@ -121,6 +121,47 @@ function skillDirs(homedir = os.homedir()) {
   return all.filter((p) => !all.some((q) => p.startsWith(q + path.sep))); // inside another one: covered
 }
 
+// Inside skill folders: what looks like a secret (a skill folder can hold a token or an .env file next to
+// its scripts). Dotfiles and dot-folders, except Codex's built-in skills folder `.system`, and these names.
+const SKILL_SECRET = /^\.env|\.pem$|\.key$|^credentials|^secrets|^token/i;
+const SKILL_WALK_DEPTH = 4;
+const SKILL_WALK_MAX = 5000;
+
+/**
+ * What a run mustn't read inside the readable skill folders (`skills`, real paths, from skillDirs):
+ *   secrets  [{path, dir}]: dotfiles and dot-folders (but `.system`) and SKILL_SECRET names, a few levels
+ *            down (SKILL_WALK_DEPTH; at most SKILL_WALK_MAX entries looked at): real paths, for the
+ *            sandboxes and for Claude Code's Read rules
+ *   links    links inside them that lead somewhere the run may not read (`deniedTarget(realPath)`), or
+ *            nowhere: sandboxes follow links to the real path and deny it there, but Claude Code's own Read
+ *            tool runs outside the sandbox and matches its rules against the path it's given, which a
+ *            Read(//<skills>/**) allow covers. Links aren't followed by the walk.
+ */
+function skillSecrets(skills, deniedTarget = () => false) {
+  const secrets = [];
+  const links = [];
+  let seen = 0;
+  const walk = (dir, depth) => {
+    let entries;
+    try { entries = fs.readdirSync(dir, { withFileTypes: true }); } catch { return; }
+    for (const e of entries) {
+      if (++seen > SKILL_WALK_MAX) return;
+      const p = path.join(dir, e.name);
+      if (e.isSymbolicLink()) {
+        let target = null;
+        try { target = fs.realpathSync(p); } catch { /* dangling */ }
+        if (!target || deniedTarget(target)) links.push(p);
+        continue;
+      }
+      const isDir = e.isDirectory();
+      if ((e.name.startsWith('.') && !(isDir && e.name === '.system')) || SKILL_SECRET.test(e.name)) { secrets.push({ path: p, dir: isDir }); continue; }
+      if (isDir && depth < SKILL_WALK_DEPTH) walk(p, depth + 1);
+    }
+  };
+  for (const s of skills) walk(s, 1);
+  return { secrets, links };
+}
+
 /**
  * What in the home folder to deny so that only `readable` (and the way to it) can be read: each item in
  * the home folder, except those `readable` paths are in or lead through; inside hidden folders that lead
@@ -157,7 +198,8 @@ function deniedInHome(home, readable) {
  *   readable  the workspace, the TRIF code `trif` runs, node, and the user's skill folders (skillDirs)
  *   writable  the mods folder, this run's screenshots folder, and its mailbox (`box`)
  *   readOnly  every existing mod folder of another site (all-sites/ included), inside the mods folder
- *   denied    everything else in the home folder, and the workspace's PRIVATE_FILES (the more
+ *   denied    everything else in the home folder, what looks like a secret inside the skill folders
+ *             (skillSecrets), and the workspace's PRIVATE_FILES (the more
  *             specific path wins, so the run's own screenshots folder and mailbox stay writable). Each
  *             item in the home folder rather than the folder itself: node, and `mkdir -p`, look at
  *             every folder on a path, the home folder included.
@@ -173,20 +215,30 @@ function runLimits(ws, { scope, box, screenshots }) {
   let names = [];
   try { names = fs.readdirSync(ws.modsDir, { withFileTypes: true }).filter((d) => d.isDirectory() || d.isSymbolicLink()).map((d) => d.name); } catch { /* none yet */ }
   const otherSites = names.filter((n) => scopeFor(n) !== scope);
-  const readOnly = otherSites.map((n) => real(path.join(ws.modsDir, n)));
+  // Each such folder by its path in the workspace (`literal`, what Claude Code's file tools match rules
+  // against: a site folder can be a link) and its real path (`real`, what sandboxes compare); `rel` names
+  // it as modSnapshot names files.
+  const lockedDirs = otherSites.map((n) => ({ rel: path.relative(ws.home, path.join(ws.modsDir, n)), literal: path.join(real(ws.modsDir), n), real: real(path.join(ws.modsDir, n)) }));
+  const readOnly = lockedDirs.map((d) => d.real);
   // (By where each leads, too: ~/.webmods is a link to the workspace, ~/.trif, since 0.2.0, and a rule
   // denying it would deny the workspace itself to a sandbox that follows links.)
   const inHome = deniedInHome(home, readable);
   const privateFiles = PRIVATE_FILES.map((f) => real(path.join(ws.home, f)));
-  const denied = [...inHome, ...privateFiles];
+  // Inside the skill folders: secrets, and links to what the run may not read (skillSecrets).
+  const under = (p, list) => list.some((r) => p === r || p.startsWith(r + path.sep));
+  const deniedTarget = (t) => under(t, privateFiles) || (t.startsWith(home + path.sep) && (!under(t, readable) || under(t, inHome)));
+  const { secrets, links } = skillSecrets(skills, deniedTarget);
+  const skillDenied = secrets.map((x) => x.path);
+  const denied = [...inHome, ...privateFiles, ...skillDenied];
   // Other sites' screenshot folders, for agents whose file tools take per-folder rules (Claude Code).
   let shots = [];
   try { shots = fs.readdirSync(ws.screenshots, { withFileTypes: true }).filter((d) => d.isDirectory()).map((d) => real(path.join(ws.screenshots, d.name))); } catch { /* none */ }
   const otherScreenshots = shots.filter((p) => p !== real(screenshots));
   // The same read-only folders relative to the workspace, as modSnapshot names files: a change under them
-  // can't be the run's doing (held.js).
-  const locked = otherSites.map((n) => path.relative(ws.home, path.join(ws.modsDir, n)));
-  return { readable, writable, readOnly, locked, denied, home, skills, privateFiles, workspace: real(ws.home), box: real(box), screenshots: real(screenshots), otherScreenshots };
+  // can't be the run's doing (held.js). Only once the agent's adapter has protected each one: its
+  // command() returns `locked`, the ones it did (runs.js uses that, not this).
+  const locked = lockedDirs.map((d) => d.rel);
+  return { readable, writable, readOnly, locked, lockedDirs, denied, home, skills, skillSecrets: secrets, skillLinks: links, privateFiles, workspace: real(ws.home), box: real(box), screenshots: real(screenshots), otherScreenshots };
 }
 
 function normalizeSite(site, url) {
@@ -369,10 +421,12 @@ class Runs {
     else prompt = `${run.sessionId ? agents.reminderText(ctx) : agents.contextText(ctx) + extra}\n\n${prompt}`;
     try { fs.mkdirSync(ws.modsDir, { recursive: true }); } catch { /* reported by the agent */ }
     const limits = runLimits(ws, run);
-    const { file, args } = adapter.command({ bin: found.path, prompt, sessionId: run.sessionId, model: run.model, context, workspace: ws.home, ...limits });
+    const { file, args, locked } = adapter.command({ bin: found.path, prompt, sessionId: run.sessionId, model: run.model, context, workspace: ws.home, ...limits });
 
     run.before = modSnapshot(ws.modsDir, ws.home);
-    run.locked = limits.locked;
+    // Changes in these folders aren't held on this run's account (held.js): only the ones the adapter
+    // says it kept the run out of; an adapter that doesn't say exempts none.
+    run.locked = Array.isArray(locked) ? locked.filter((d) => limits.locked.includes(d)) : [];
     run.beforeFiles = snapshot(ws.modsDir, ws.home);
     // Tell the other browsers' helpers a run is going, so mods it creates start off there (lib/origins.js).
     if (ws.installId) {
@@ -535,4 +589,4 @@ class Runs {
 }
 
 module.exports = {
-  runLimits, Runs, snapshot, modSnapshot, diffSnapshots, normalizeSite, boxRoot, RUN_TIMEOUT_MS, PRIVATE_FILES, skillDirs, deniedInHome };
+  runLimits, Runs, snapshot, modSnapshot, diffSnapshots, normalizeSite, boxRoot, RUN_TIMEOUT_MS, PRIVATE_FILES, skillDirs, skillSecrets, deniedInHome };

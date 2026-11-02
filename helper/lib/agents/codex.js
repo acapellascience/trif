@@ -105,14 +105,16 @@ const adapter = {
   },
 
   // writable / readOnly / denied: absolute (real) paths; see permissionsToml.
-  command({ bin, prompt, sessionId, model, readable = [], writable = [], readOnly = [], denied = [] }) {
+  command({ bin, prompt, sessionId, model, readable = [], writable = [], readOnly = [], denied = [], lockedDirs = [] }) {
     // Exec options go before the `resume` subcommand (verified with Codex 0.166).
     const args = ['exec', '--json', '--skip-git-repo-check', '--ignore-user-config', '--ignore-rules',
       '-c', 'approval_policy="never"', '-c', `default_permissions="${PROFILE}"`, '-c', `permissions=${permissionsToml({ readable, writable, readOnly, denied })}`];
     if (model) args.push('-m', model);
     if (sessionId) args.push('resume', sessionId);
     args.push('--', prompt); // `--`: a message starting with "-" isn't an option
-    return { file: bin || adapter.binary, args };
+    // Other sites' folders the profile makes read-only (by real path: the sandbox follows links, its
+    // patches included).
+    return { file: bin || adapter.binary, args, locked: lockedDirs.filter((d) => readOnly.includes(d.real)).map((d) => d.rel) };
   },
 
   parse(line, emit, state = {}) {

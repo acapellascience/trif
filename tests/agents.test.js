@@ -295,6 +295,66 @@ test('run limits: the user\'s skill folders are readable (real paths, links foll
   assert.ok(!/skills" = "write"/.test(perm));
 });
 
+test('run limits: inside skill folders, secrets and links out of what a run may read are denied', () => {
+  const { runLimits } = require('../helper/lib/runs');
+  const P = require('../helper/lib/paths');
+  const h = fs.realpathSync(tempDir());
+  const mk = (...p) => { fs.mkdirSync(path.join(h, ...p), { recursive: true }); return path.join(h, ...p); };
+  const put = (f, t = 'x') => { fs.mkdirSync(path.dirname(f), { recursive: true }); fs.writeFileSync(f, t); return f; };
+  const skill = mk('.agents', 'skills', 'deploy');
+  put(path.join(skill, 'SKILL.md'), '---\nname: deploy\n---\n');
+  put(path.join(skill, 'scripts', 'run.sh'));
+  const secretFiles = [put(path.join(skill, '.env')), put(path.join(skill, '.env.local')), put(path.join(skill, 'scripts', 'server.PEM')),
+    put(path.join(skill, 'api.key')), put(path.join(skill, 'Credentials.json')), put(path.join(skill, 'secrets.yaml')),
+    put(path.join(skill, 'scripts', 'TOKEN')), put(path.join(skill, '.DS_Store'))];
+  const secretDirs = [mk('.agents', 'skills', 'deploy', '.git'), mk('.agents', 'skills', 'deploy', 'tokens')];
+  put(path.join(skill, '.git', 'config'));
+  const system = mk('.codex', 'skills', '.system', 'imagegen');
+  put(path.join(system, 'SKILL.md'));
+  const sysSecret = put(path.join(system, '.env'));
+  mk('.ssh');
+  put(path.join(h, '.ssh', 'id_rsa'), 'PRIVATE');
+  const trif = mk('.trif');
+  put(path.join(trif, 'config.json'), '{}');
+  mk('.trif', 'sites');
+  const elsewhere = fs.realpathSync(tempDir());
+  fs.symlinkSync(path.join(h, '.ssh'), path.join(skill, 'keys')); // into the home folder: denied
+  fs.symlinkSync(path.join(trif, 'config.json'), path.join(skill, 'conf.json')); // a workspace secret: denied
+  fs.symlinkSync(path.join(h, 'gone'), path.join(skill, 'dangling')); // nowhere (yet): denied
+  fs.symlinkSync(path.join(skill, 'SKILL.md'), path.join(skill, 'README.md')); // within the skill: fine
+  fs.symlinkSync(elsewhere, path.join(skill, 'lib')); // outside the home folder: readable anyway
+  const old = process.env.HOME;
+  process.env.HOME = h;
+  try {
+    const ws = P.workspace(trif);
+    const box = mk('Library', 'Caches', 'TRIF', 'boxes', 'r1');
+    const lim = runLimits(ws, { scope: 'x.com', box, screenshots: path.join(trif, 'screenshots', 'x.com') });
+    assert.ok(lim.readable.includes(path.join(h, '.agents', 'skills')));
+    for (const f of [...secretFiles, ...secretDirs, sysSecret]) assert.ok(lim.denied.includes(f), f);
+    for (const f of [path.join(skill, 'SKILL.md'), path.join(skill, 'scripts'), path.join(skill, 'scripts', 'run.sh'), path.join(h, '.codex', 'skills', '.system'), system]) {
+      assert.ok(!lim.denied.includes(f), f);
+    }
+    assert.ok(!lim.denied.some((p) => p.startsWith(path.join(skill, '.git') + path.sep)), 'a denied folder covers what is in it');
+    assert.deepEqual(lim.skillLinks.sort(), [path.join(skill, 'conf.json'), path.join(skill, 'dangling'), path.join(skill, 'keys')].sort());
+    // Codex: the secrets are denied in its profile.
+    const perm = codex.command({ bin: '/x/codex', prompt: 'P', ...lim }).args.find((a) => a.startsWith('permissions='));
+    assert.ok(perm.includes(`${JSON.stringify(path.join(skill, '.env'))} = "deny"`));
+    assert.ok(perm.includes(`${JSON.stringify(path.join(skill, '.git'))} = "deny"`));
+    // Claude Code: its sandbox, and its unsandboxed Read tool (rules), also for the links.
+    const settings = JSON.parse(claude.command({ bin: '/x/claude', prompt: 'P', ...lim }).args.find((a, i, all) => all[i - 1] === '--settings'));
+    const deny = settings.permissions.deny;
+    assert.ok(settings.sandbox.filesystem.denyRead.includes(path.join(skill, 'api.key')));
+    assert.ok(deny.includes(`Read(/${path.join(skill, 'api.key')})`));
+    assert.ok(deny.includes(`Read(/${path.join(skill, '.git')}/**)`));
+    assert.ok(deny.includes(`Read(/${path.join(skill, 'keys')}/**)`) && deny.includes(`Read(/${path.join(skill, 'keys')})`));
+    assert.ok(deny.includes(`Read(/${path.join(skill, 'conf.json')})`));
+    assert.ok(!deny.some((r) => r.includes('SKILL.md') || r.includes('/lib') || r.includes('README')));
+    assert.ok(settings.permissions.allow.includes(`Read(/${path.join(h, '.agents', 'skills')}/**)`));
+  } finally {
+    process.env.HOME = old;
+  }
+});
+
 test('codex adapter: command, resume, JSONL events', () => {
   const c = codex.command({ bin: '/x/codex', prompt: 'P', model: 'gpt-5', readable: ['/h', '/app'], writable: ['/h/sites', '/h/screenshots/x.com', '/h/runs/r1.box'], readOnly: ['/h/sites/y.com'], denied: ['/Users/u/.ssh', '/h/config.json', '/h/runs'] });
   assert.equal(c.args[0], 'exec');

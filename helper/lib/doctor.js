@@ -311,6 +311,10 @@ async function doctor(opts = {}) {
   const oss = listed.agents.find((a) => a.id === 'codex-oss');
   if (oss && !oss.available && ws.config.openModel) add('warn', 'Open model: set up, but it runs through Codex, which isn\'t available', agents.getAdapter('codex-oss').missing);
   else if (oss && oss.available) for (const c of await agents.getAdapter('codex-oss').doctorChecks(ws, { codexVersion: oss.version })) add(c.status, c.title, c.fix);
+  // API keys exported in the shell profile: readable by every same-user process (sysctl KERN_PROCARGS2),
+  // an agent's sandboxed commands included. Only their presence is checked.
+  const keyVars = agents.getAdapter('codex-oss').keyVarsCheck(process.env);
+  if (keyVars) add(keyVars.status, keyVars.title, keyVars.fix);
 
   return { ok: !checks.some((c) => c.status === 'fail'), checks };
 }

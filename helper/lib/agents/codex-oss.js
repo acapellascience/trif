@@ -6,7 +6,7 @@
 //   codex exec <codex.js flags, the same permission profile>
 //              -c model_providers.trif-open={ name = "…", base_url = "…", wire_api = "responses" … }
 //              -c model_provider="trif-open" -c web_search="disabled"
-//              [-c shell_environment_policy.exclude=["NAME"]] -m MODEL [resume THREAD_ID] -- PROMPT
+//              -c shell_environment_policy.exclude=[<API key patterns>] -m MODEL [resume THREAD_ID] -- PROMPT
 //
 // (base_url: the provider's, or for a provider with a key, the run's key proxy: see "The API key".)
 //
@@ -19,22 +19,24 @@
 // Codex's own requests to the model server aren't sandboxed (verified with Codex 0.166 against a stand-in
 // server on 127.0.0.1: the model requests arrive, the agent's own curl to the same server is refused).
 //
-// The API key (hosted): config.json holds only the NAME of the variable (`keyEnv`). Before each run the
-// helper reads it from its own environment or the user's login shell (shellenv.js) and keeps it in its own
-// memory: Codex never gets it. Instead the helper starts a proxy for the run (keyproxy.js) on 127.0.0.1,
-// at a random path, which adds the key and forwards to the provider; Codex's base_url is that proxy. (Codex
-// used to get the key in its environment, excluded from its commands' environment; but a command can read
-// any same-user process's environment and arguments with sysctl KERN_PROCARGS2, sandbox or not.) The
-// sandbox keeps the commands away from the shell profile files (in the home folder), from config.json and
-// from the network (the proxy included); shell_environment_policy.exclude keeps the variable out of the
-// environment Codex gives them (it snapshots the user's login shell, profile and all, outside the
-// sandbox). runs.js redacts the value from run logs.
+// The API key (hosted: OpenRouter, a custom server): only in the system keyring (keyring.js: the macOS
+// Keychain, item "TRIF open model key" / account `openrouter` or `custom:<host>`), set from the panel
+// (agent.openModel.setKey) or `trif agent open-model --set-key`; never in config.json, an environment
+// variable or the extension. Before each run the helper reads it into its own memory: Codex never gets it.
+// Instead the helper starts a proxy for the run (keyproxy.js) on 127.0.0.1, at a random path, which adds
+// the key and forwards to the provider; Codex's base_url is that proxy. (Anything in a process's
+// environment or arguments is readable by any same-user process, sysctl KERN_PROCARGS2, sandbox or not:
+// that's why the key is in neither Codex's nor, any more, the user's shell's.) The sandbox keeps the
+// commands away from the Keychain (in the home folder, denied), config.json and the network (the proxy
+// included). shell_environment_policy.exclude keeps API-key-looking variables a shell profile still
+// exports out of the environment Codex gives them (it snapshots the user's login shell outside the
+// sandbox). runs.js redacts the key from run logs.
 //
-// Settings: config.json `openModel` = {provider, model, baseUrl, keyEnv}, the defaults; agent.start's
-// `openModel` (same shape) overrides them for one run, and agent.start's `model` beats both.
+// Settings: config.json `openModel` = {provider, model, baseUrl}, the defaults; agent.start's `openModel`
+// (same shape) overrides them for one run, and agent.start's `model` beats both.
 
 const codex = require('./codex');
-const { lookupEnvVar, keyNameProblem, forget: forgetEnvVar } = require('../shellenv');
+const keyring = require('../keyring');
 const { startKeyProxy } = require('../keyproxy');
 const { oneLine } = require('./util');
 
@@ -44,10 +46,10 @@ const PASSED_KEYS = ['ANTHROPIC_API_KEY', 'OPENAI_API_KEY'];
 const PROVIDER_ID = 'trif-open';
 
 const PROVIDERS = {
-  ollama: { name: 'Ollama', label: 'Ollama (on this computer)', local: true, baseUrl: 'http://127.0.0.1:11434/v1', keyEnv: '', defaultModel: 'gpt-oss:20b' },
-  lmstudio: { name: 'LM Studio', label: 'LM Studio (on this computer)', local: true, baseUrl: 'http://127.0.0.1:1234/v1', keyEnv: '', defaultModel: 'openai/gpt-oss-20b' },
-  openrouter: { name: 'OpenRouter', label: 'OpenRouter', local: false, baseUrl: 'https://openrouter.ai/api/v1', keyEnv: 'OPENROUTER_API_KEY', defaultModel: 'openai/gpt-oss-120b' },
-  custom: { name: 'the model server', label: 'Custom URL (OpenAI-compatible)', local: false, baseUrl: '', keyEnv: '', defaultModel: '' },
+  ollama: { name: 'Ollama', label: 'Ollama (on this computer)', local: true, baseUrl: 'http://127.0.0.1:11434/v1', defaultModel: 'gpt-oss:20b' },
+  lmstudio: { name: 'LM Studio', label: 'LM Studio (on this computer)', local: true, baseUrl: 'http://127.0.0.1:1234/v1', defaultModel: 'openai/gpt-oss-20b' },
+  openrouter: { name: 'OpenRouter', label: 'OpenRouter', local: false, keyRequired: true, baseUrl: 'https://openrouter.ai/api/v1', defaultModel: 'openai/gpt-oss-120b' },
+  custom: { name: 'the model server', label: 'Custom URL (OpenAI-compatible)', local: false, keyRequired: false, baseUrl: '', defaultModel: '' },
 };
 
 // Local models worth trying first, if installed (matched loosely: "devstral" matches devstral:24b, and
@@ -70,7 +72,7 @@ function cleanUrl(u) {
   try {
     const url = new URL(u.trim());
     if (url.protocol !== 'http:' && url.protocol !== 'https:') return '';
-    if (url.username || url.password) return ''; // keys go in an environment variable, not the URL
+    if (url.username || url.password) return ''; // keys go in the keyring, not the URL
     return url.href.replace(/\/+$/, '');
   } catch { return ''; }
 }
@@ -88,22 +90,33 @@ function isLoopback(u) {
   return host === 'localhost' || host === '[::1]' || /^127(\.\d{1,3}){3}$/.test(host);
 }
 
-/** config.json's openModel, checked: {provider, model, baseUrl, keyEnv} ('' where unset). */
+/** config.json's openModel, checked: {provider, model, baseUrl} ('' where unset). (An old `keyEnv` is ignored.) */
 function normalize(cfg) {
   const c = cfg && typeof cfg === 'object' && !Array.isArray(cfg) ? cfg : {};
   const provider = Object.prototype.hasOwnProperty.call(PROVIDERS, c.provider) ? c.provider : 'ollama';
-  return { provider, model: cleanModel(c.model), baseUrl: cleanUrl(c.baseUrl), keyEnv: c.keyEnv && !keyNameProblem(c.keyEnv) ? c.keyEnv : '' };
+  return { provider, model: cleanModel(c.model), baseUrl: cleanUrl(c.baseUrl) };
+}
+
+/**
+ * The keyring account holding a provider's key ('' when it takes none): `openrouter`, or `custom:<host>`
+ * for a custom server (its host and port, so each server has its own key). Local servers: none.
+ */
+function keyAccount({ provider, baseUrl }) {
+  if (provider === 'openrouter') return 'openrouter';
+  if (provider !== 'custom' || !baseUrl) return '';
+  try { return `custom:${new URL(baseUrl).host.toLowerCase()}`; } catch { return ''; }
 }
 
 /**
  * What a run uses: the stored defaults, then a run's own choice (same shape; a different provider starts
  * from that provider's defaults), then agent.start's `model`. Provider defaults fill the gaps.
- * {provider, name, local, server, model, modelChosen, baseUrl, keyEnv}; `error` when it can't run (a custom
- * provider with no URL, or a key that would go over plain http to another computer).
+ * {provider, name, local, server, model, modelChosen, baseUrl, keyAccount, keyRequired}; `error` when it
+ * can't run (a custom provider with no URL, no model).
  *   local        the model runs on this computer: a local provider at a loopback address (an Ollama
  *                pointed elsewhere isn't local; the panel only says "nothing leaves it" when it is)
  *   server       an Ollama or LM Studio server (wherever it is): its installed models can be listed
  *   modelChosen  the model was picked (stored, the run's, or agent.start's), not the provider's default
+ *   keyAccount   the keyring account its key would be under ('' for local servers); keyRequired: OpenRouter
  */
 function resolve(stored, override, model) {
   const s = normalize(stored);
@@ -120,19 +133,19 @@ function resolve(stored, override, model) {
     provider: r.provider, name: p.name, local: p.local && isLoopback(baseUrl), server: p.local,
     model: chosen || p.defaultModel, modelChosen: !!chosen,
     baseUrl,
-    keyEnv: r.keyEnv || p.keyEnv,
+    keyAccount: keyAccount({ provider: r.provider, baseUrl }),
+    keyRequired: !!p.keyRequired,
     error: null,
   };
   if (!out.baseUrl) out.error = 'no server address set for the open model: set one in the side panel’s Settings (or `trif agent open-model --base-url <url>`)';
-  else if (insecureKey(out)) out.error = insecureKey(out);
   else if (!out.model) out.error = 'no model chosen for the open model: pick one in the side panel’s Settings (or `trif agent open-model --model <name>`)';
   return out;
 }
 
 /** Why a key can't be sent to this server ('' when it can): plain http to another computer would show it to the network. */
-function insecureKey({ baseUrl, keyEnv }) {
-  if (!keyEnv || !baseUrl || isLoopback(baseUrl) || !/^http:/i.test(baseUrl)) return '';
-  return `the server address must start with https:// when an API key is sent (${keyEnv}): over http:// to another computer the key would cross the network readable`;
+function insecureKey({ baseUrl }) {
+  if (!baseUrl || isLoopback(baseUrl) || !/^http:/i.test(baseUrl)) return '';
+  return 'the server address must start with https:// when an API key is sent: over http:// to another computer the key would cross the network readable';
 }
 
 /**
@@ -159,25 +172,28 @@ function providerArgs(om) {
   const args = ['-c', `model_providers.${PROVIDER_ID}={ ${fields.join(', ')} }`, '-c', `model_provider="${PROVIDER_ID}"`,
     // OpenAI's hosted web search tool: no other provider has it.
     '-c', 'web_search="disabled"'];
-  // Still needed with the key proxy: Codex builds its commands' environment from a snapshot of the user's
-  // login shell, taken by Codex itself (outside the sandbox), so a key exported in ~/.zshrc would reach
-  // them that way (seen with Codex 0.166 and a stand-in profile). This keeps that variable out.
-  if (om.keyEnv) args.push('-c', `shell_environment_policy.exclude=[${tomlStr(om.keyEnv)}]`);
+  // Codex builds its commands' environment from a snapshot of the user's login shell, taken by Codex
+  // itself (outside the sandbox), so a key still exported in ~/.zshrc would reach them that way (seen with
+  // Codex 0.166 and a stand-in profile). TRIF's own key is never there (keyring); this keeps out the
+  // usual API key variables a profile may still export. (Not *TOKEN*: TRIF_RUN_TOKEN must get through.)
+  args.push('-c', `shell_environment_policy.exclude=[${EXCLUDED_VARS.map(tomlStr).join(', ')}]`);
   return args;
 }
+const EXCLUDED_VARS = ['*_API_KEY', '*_API_TOKEN', '*_ACCESS_TOKEN', '*_AUTH_TOKEN', '*_SECRET_KEY'];
 
 function keyHelp(om) {
-  return `add \`export ${om.keyEnv}=<your key>\` to your shell profile (~/.zshrc), then try again`;
+  return `paste your ${om.name} API key in the side panel’s Settings (it’s kept in ${keyringName()}), or run \`trif agent open-model --set-key\` in a terminal`;
 }
+function keyringName() { const b = keyring.backend(); return b ? b.name : 'the system keyring'; }
 
 /** Errors in the user's terms (codex.js parse calls it through state.friendly). */
 function friendlyFor(om) {
   return (message) => {
     const m = String(message);
     if (/Model metadata for .* not found/i.test(m)) return null; // Codex's warning for every non-OpenAI model
-    if (/missing environment variable|env(ironment)? var.*not (set|found)/i.test(m) && om.keyEnv) return `${om.keyEnv} isn't set: ${keyHelp(om)}`;
     if (/\b401\b|unauthori[sz]ed|invalid api key|no auth/i.test(m)) {
-      return om.keyEnv ? `${om.name} refused the key in ${om.keyEnv} (401): check it, or make a new one` : `${om.name} wants an API key (401): set the name of the variable holding it in Settings`;
+      if (om.keyed) return `${om.name} refused the API key (401): check it, or make a new one and save it in Settings (or \`trif agent open-model --set-key\`)`;
+      return om.keyAccount ? `${om.name} wants an API key (401): ${keyHelp(om)}` : `${om.name} wants an API key (401)`;
     }
     if (/\b402\b|insufficient (credits|balance|funds)|payment required/i.test(m)) return `${om.name} says the account is out of credit (402)`;
     if (/not found, try pulling|model .*not found|\b404\b.*model|no such model/i.test(m)) {
@@ -248,7 +264,7 @@ const adapter = {
   note: '',
   missing: 'Open models run through Codex, which isn\'t installed or can\'t be found. Install it (brew install codex), ' +
     'then run `trif setup` in the same terminal so the helper finds it. (No OpenAI account needed for open models.)',
-  PROVIDERS, RECOMMENDED_LOCAL, OPENROUTER_MODELS, normalize, resolve, providerArgs, parseModelList, orderLocal, friendlyFor, installedModels, isLoopback, localModel,
+  PROVIDERS, RECOMMENDED_LOCAL, OPENROUTER_MODELS, EXCLUDED_VARS, normalize, resolve, keyAccount, insecureKey, providerArgs, parseModelList, orderLocal, friendlyFor, installedModels, isLoopback, localModel,
 
   detect(opts) {
     const d = codex.detect(opts);
@@ -276,23 +292,29 @@ const adapter = {
   modelsCacheMs: 5000, // a model pulled a minute ago should show up
 
   /**
-   * Before the run (runs.js, async): settle the provider and model, find the key, and check a local
-   * server is up and has the model (fast, clear errors instead of Codex's retries). Throws a user-facing
-   * Error. Returns {env, unsetEnv, secrets, state, options, cleanup}: the key goes into no environment;
-   * with a key, a proxy that adds it is started (keyproxy.js) and `cleanup` closes it (runs.js calls it
-   * when the run ends); secrets are redacted from logs. API keys the user put in config.json for Claude
-   * Code and Codex (`unsetEnv`) aren't passed to this agent: it doesn't need them.
+   * Before the run (runs.js, async): settle the provider and model, read the key from the keyring, and
+   * check a local server is up and has the model (fast, clear errors instead of Codex's retries). Throws a
+   * user-facing Error. Returns {env, unsetEnv, secrets, state, options, cleanup}: the key goes into no
+   * environment; with a key, a proxy that adds it is started (keyproxy.js) and `cleanup` closes it
+   * (runs.js calls it when the run ends); secrets are redacted from logs. The key is read afresh for every
+   * run (a Keychain read takes milliseconds), so a key just replaced or removed counts at once. API keys
+   * the user put in config.json for Claude Code and Codex (`unsetEnv`) aren't passed to this agent.
    */
-  async prepare({ ws, model, openModel, env = process.env, lookup = lookupEnvVar, forget = forgetEnvVar, fetchImpl, logger }) {
+  async prepare({ ws, model, openModel, env = process.env, fetchImpl, logger }) {
     const om = resolve(ws && ws.config && ws.config.openModel, openModel, model);
     if (om.error) throw new Error(om.error);
     const secrets = [];
     let key = null;
-    if (om.keyEnv) {
-      const k = await lookup(om.keyEnv, { env });
-      if (!k.value) throw new Error(`${om.keyEnv} isn't set (${k.error || 'not found'}): ${keyHelp(om)}`);
-      key = k.value;
-      secrets.push(k.value);
+    if (om.keyAccount) {
+      const k = await keyring.getKey(om.keyAccount, { env });
+      if (k.error) throw new Error(`${k.error}${om.keyRequired ? '' : ` (for ${om.baseUrl})`}`);
+      if (!k.value && om.keyRequired) throw new Error(`no ${om.name} API key yet: ${keyHelp(om)}`);
+      if (k.value) {
+        if (insecureKey(om)) throw new Error(insecureKey(om));
+        key = k.value;
+        secrets.push(key);
+        om.keyed = true;
+      }
     }
     if (om.server) {
       const r = await installedModels(om, { fetchImpl });
@@ -304,13 +326,13 @@ const adapter = {
     }
     let proxy = null;
     if (key) {
-      // A refused key (401) isn't kept: the next run looks it up again (the user may have just fixed it).
-      const onStatus = (status) => { if (status === 401) forget(om.keyEnv); };
+      let said = false;
+      const onStatus = (status) => { if (status === 401 && !said && logger) { said = true; logger.warn(`open model: ${om.name} refused the API key (401)`); } };
       try { proxy = await startKeyProxy({ target: om.baseUrl, key, logger, onStatus }); } catch (e) { throw new Error(`couldn't start the key proxy for ${om.name}: ${e.message}`); }
     }
     const forCodex = proxy ? { ...om, proxyUrl: proxy.url } : om;
     return {
-      env: {}, unsetEnv: [...PASSED_KEYS, ...(om.keyEnv ? [om.keyEnv] : [])], secrets,
+      env: {}, unsetEnv: [...PASSED_KEYS], secrets,
       state: { friendly: friendlyFor(om), openModel: om, providerName: om.name },
       options: { openModel: forCodex },
       cleanup: proxy ? () => proxy.close() : null,
@@ -344,8 +366,37 @@ const adapter = {
   login: null,
 };
 
+// API key variables a shell profile commonly exports (doctor warns when one is in the environment).
+const KEY_VARS = ['OPENROUTER_API_KEY', 'OPENAI_API_KEY', 'ANTHROPIC_API_KEY', 'GROQ_API_KEY', 'TOGETHER_API_KEY', 'DEEPSEEK_API_KEY',
+  'MISTRAL_API_KEY', 'GEMINI_API_KEY', 'GOOGLE_API_KEY', 'XAI_API_KEY', 'FIREWORKS_API_KEY', 'HF_TOKEN'];
+/** Names of likely API key variables set in `env` (their values aren't looked at beyond being non-empty). */
+function keyVarsIn(env) {
+  return Object.keys(env || {}).filter((k) => (KEY_VARS.includes(k) || /_API_KEY$/i.test(k)) && typeof env[k] === 'string' && env[k] !== '').sort();
+}
+adapter.keyVarsIn = keyVarsIn;
+
+/** Doctor's warning about API keys in the environment (null when there are none). Never reads more than presence. */
+adapter.keyVarsCheck = function keyVarsCheck(env = process.env) {
+  const vars = keyVarsIn(env);
+  if (!vars.length) return null;
+  const one = vars.length === 1;
+  return {
+    status: 'warn',
+    title: `API key variable${one ? '' : 's'} set in this environment: ${vars.join(', ')}. Every program started from this terminal gets ${one ? 'it' : 'them'}, and other programs (an agent's sandboxed commands among them) can read ${one ? 'it' : 'them'}`,
+    fix: `remove the export line${one ? '' : 's'} from your shell profile (~/.zshrc, ~/.zprofile, ~/.bash_profile…) and open a new terminal. Open models don't need ${one ? 'it' : 'them'}: paste the key in the side panel's Settings, or run trif agent open-model --set-key (kept in ${keyringName()})`,
+  };
+};
+
+/** Whether the key for `om` is in the keyring: {account, stored, keyring, error}; null when it takes none. */
+async function keyStatus(om, env) {
+  if (!om.keyAccount) return null;
+  const b = keyring.backend({ env });
+  const h = await keyring.hasKey(om.keyAccount, { env });
+  return { account: om.keyAccount, stored: h.stored, keyring: b ? b.name : null, error: h.error };
+}
+
 /** Doctor checks for the open model (async; never prints the key). [{status, title, fix?}] */
-adapter.doctorChecks = async function doctorChecks(ws, { codexVersion, env = process.env, lookup = lookupEnvVar, fetchImpl } = {}) {
+adapter.doctorChecks = async function doctorChecks(ws, { codexVersion, env = process.env, fetchImpl } = {}) {
   const out = [];
   const add = (status, title, fix) => out.push(fix ? { status, title, fix } : { status, title });
   const stored = ws.config && ws.config.openModel;
@@ -354,12 +405,14 @@ adapter.doctorChecks = async function doctorChecks(ws, { codexVersion, env = pro
   const label = `Open model: ${PROVIDERS[om.provider].label}${om.model ? `, ${om.model}` : ''}`;
   if (om.error) { add('warn', `${label}: ${om.error}`); return out; }
   if (codexVersion && codex.tooOld(codexVersion)) add('warn', `${label}: Codex ${codexVersion} is too old`, 'brew upgrade codex');
-  if (om.keyEnv) {
-    const k = await lookup(om.keyEnv, { env, fresh: true }); // (a check looks again, past the cache)
-    if (k.value) add('ok', `${label}: ${om.keyEnv} is set (${k.source === 'helper' ? 'in this environment' : 'in your shell profile'}; not shown)`);
-    else add('warn', `${label}: ${om.keyEnv} isn't set, so runs can't reach ${om.name}`, keyHelp(om));
-  } else if (!om.server) {
-    add('info', `${label}: no API key variable set (fine if ${om.baseUrl} needs none)`);
+  const k = await keyStatus(om, env);
+  if (k) {
+    const what = om.provider === 'openrouter' ? 'OpenRouter key' : `API key for ${new URL(om.baseUrl).host}`;
+    if (k.error) add('warn', `${what}: ${k.error}`);
+    else if (k.stored && insecureKey(om)) add('warn', `${what}: saved, but ${insecureKey(om)}`);
+    else if (k.stored) add('ok', `${what}: saved in ${k.keyring} (not shown)`);
+    else if (om.keyRequired) add('warn', `${what}: missing, so runs can't reach ${om.name}`, 'set it in the side panel\'s Settings, or with trif agent open-model --set-key');
+    else add('info', `${what}: none saved (fine if ${om.baseUrl} needs none; set one in the side panel's Settings or with trif agent open-model --set-key)`);
   }
   if (om.server) {
     const r = await installedModels(om, { fetchImpl });
@@ -372,26 +425,33 @@ adapter.doctorChecks = async function doctorChecks(ws, { codexVersion, env = pro
   return out;
 };
 
-/** agent.openModel: the stored defaults, the providers, and (with `check`) whether the key is found. */
-adapter.settings = async function settings(ws, { check = false, env = process.env, lookup = lookupEnvVar } = {}) {
+/**
+ * agent.openModel: the stored defaults, the providers, and whether the provider's key is in the keyring
+ * (`hasKey`, `key`: {account, stored, keyring, error}; never the key). `check` is accepted for older
+ * callers: the keyring is always checked (it's cheap, and doesn't decrypt the key).
+ */
+adapter.settings = async function settings(ws, { env = process.env } = {}) {
   const stored = ws.config && ws.config.openModel;
   const openModel = normalize(stored);
   const effective = resolve(stored);
   const out = {
     openModel, configured: !!stored,
-    effective: { provider: effective.provider, model: effective.model, baseUrl: effective.baseUrl, keyEnv: effective.keyEnv, local: effective.local, error: effective.error },
-    providers: Object.entries(PROVIDERS).map(([id, p]) => ({ id, label: p.label, local: p.local, baseUrl: p.baseUrl, keyEnv: p.keyEnv, defaultModel: p.defaultModel })),
+    effective: { provider: effective.provider, model: effective.model, baseUrl: effective.baseUrl, local: effective.local, keyAccount: effective.keyAccount, keyRequired: effective.keyRequired, error: effective.error },
+    providers: Object.entries(PROVIDERS).map(([id, p]) => ({ id, label: p.label, local: p.local, baseUrl: p.baseUrl, keyRequired: !!p.keyRequired, defaultModel: p.defaultModel })),
+    hasKey: false,
   };
-  if (check && effective.keyEnv) {
-    const k = await lookup(effective.keyEnv, { env, fresh: true }); // (a check looks again, past the cache)
-    out.key = { name: effective.keyEnv, found: !!k.value, source: k.source, error: k.value ? null : k.error };
+  const k = effective.keyAccount ? await keyStatus(effective, env) : null;
+  if (k) {
+    out.key = k;
+    out.hasKey = k.stored;
+    if (k.stored && insecureKey(effective)) out.key.error = insecureKey(effective);
   }
   return out;
 };
 
 /**
  * agent.openModel.set / `trif agent open-model`: store the defaults in config.json `openModel` (merged with
- * what's there; '' clears a field). Throws on anything invalid. Never a key: only a variable's name.
+ * what's there; '' clears a field). Throws on anything invalid. Never a key (see setKey).
  */
 adapter.saveSettings = function saveSettings(home, input, { setConfigKey = require('../update').setConfigKey, readConfig = require('../paths').readConfig } = {}) {
   const i = input && typeof input === 'object' ? input : {};
@@ -399,7 +459,7 @@ adapter.saveSettings = function saveSettings(home, input, { setConfigKey = requi
   const next = { ...cur };
   if (i.provider !== undefined) {
     if (!Object.prototype.hasOwnProperty.call(PROVIDERS, i.provider)) throw new Error(`unknown provider "${String(i.provider).slice(0, 40)}" (use: ${Object.keys(PROVIDERS).join(', ')})`);
-    if (i.provider !== cur.provider) { next.model = ''; next.baseUrl = ''; next.keyEnv = ''; } // another provider's choices don't carry over
+    if (i.provider !== cur.provider) { next.model = ''; next.baseUrl = ''; } // another provider's choices don't carry over
     next.provider = i.provider;
   }
   if (i.model !== undefined) {
@@ -410,16 +470,37 @@ adapter.saveSettings = function saveSettings(home, input, { setConfigKey = requi
     if (i.baseUrl !== '' && !cleanUrl(i.baseUrl)) throw new Error('the server address must be an http(s) URL without a user name or password, like https://example.com/v1');
     next.baseUrl = cleanUrl(i.baseUrl);
   }
-  if (i.keyEnv !== undefined) {
-    if (i.keyEnv !== '' && keyNameProblem(i.keyEnv)) throw new Error(keyNameProblem(i.keyEnv));
-    next.keyEnv = i.keyEnv;
-  }
-  const insecure = insecureKey(resolve(next));
-  if (insecure) throw new Error(insecure);
   const stored = { provider: next.provider };
-  for (const k of ['model', 'baseUrl', 'keyEnv']) if (next[k]) stored[k] = next[k];
+  for (const k of ['model', 'baseUrl']) if (next[k]) stored[k] = next[k];
   setConfigKey(home, 'openModel', stored);
   return normalize(stored);
+};
+
+/**
+ * agent.openModel.setKey / `trif agent open-model --set-key`: save the API key for the stored provider
+ * (and, for a custom one, its server) in the keyring. The key is never echoed back, logged or written
+ * anywhere else; errors don't contain it. Resolves {account, keyring}.
+ */
+adapter.setKey = async function setKey(ws, key, { env = process.env } = {}) {
+  const om = resolve(ws.config && ws.config.openModel);
+  if (!om.keyAccount) {
+    throw new Error(om.server ? `${om.name} runs without an API key: there's nothing to save`
+      : 'set the custom server\'s address first: its key is saved for that server');
+  }
+  if (insecureKey(om)) throw new Error(insecureKey(om));
+  const problem = keyring.keyProblem(key);
+  if (problem) throw new Error(problem);
+  await keyring.setKey(om.keyAccount, key, { env });
+  const b = keyring.backend({ env });
+  return { account: om.keyAccount, keyring: b ? b.name : null };
+};
+
+/** agent.openModel.removeKey / `--remove-key`: forget the stored provider's key. Resolves {account, removed}. */
+adapter.removeKey = async function removeKey(ws, { env = process.env } = {}) {
+  const om = resolve(ws.config && ws.config.openModel);
+  if (!om.keyAccount) throw new Error(`${om.name} has no API key to remove`);
+  const r = await keyring.removeKey(om.keyAccount, { env });
+  return { account: om.keyAccount, removed: r.removed };
 };
 
 module.exports = adapter;

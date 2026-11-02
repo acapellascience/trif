@@ -40,6 +40,8 @@ function testEnv(home, extra = {}) {
     TRIF_UPDATE_DELAY: '2000000000', // no update check over the network during a test
     TRIF_NO_LAUNCHCTL: '1', // setup --browser safari writes the bridge's agent but doesn't start it
     TRIF_BOX_ROOT: path.join(home, 'boxes'), // agent runs' mailboxes (runs.js boxRoot)
+    // Never the real Keychain (lib/keyring.js): a tool that isn't there, unless a test brings a fake one.
+    TRIF_KEYCHAIN_BIN: path.join(home, 'no-keychain', 'security'),
     ...extra,
   };
 }

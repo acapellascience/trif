@@ -1284,6 +1284,11 @@ test('instructions: saved and read through the helper, never from a run; claude 
   assert.doesNotMatch(call.argv[call.argv.indexOf('--append-system-prompt') + 1], /caveman/);
   const res = await sockRequest(ext.sock, { id: 'i', cmd: 'instructions.set', args: { text: 'evil' }, token: call.env.TRIF_RUN_TOKEN });
   assert.match(res.error, /isn't available inside an agent run/);
+  // Nor the open model's API key (it goes to the keyring).
+  for (const cmd of ['agent.openModel', 'agent.openModel.set', 'agent.openModel.setKey', 'agent.openModel.removeKey']) {
+    const k = await sockRequest(ext.sock, { id: 'k', cmd, args: { key: 'evil-key-0123456789', provider: 'custom' }, token: call.env.TRIF_RUN_TOKEN });
+    assert.match(k.error, /isn't available inside an agent run/, cmd);
+  }
   await extRequest(ext, 'agent.stop', { runId: r.result.runId });
   await waitDone(ext, r.result.runId);
 

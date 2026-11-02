@@ -26,7 +26,7 @@ const VALUE_FLAGS = new Set(['--tab', '--url', '-o', '--out', '--output', '--fil
   '--browser', '--home', '--native-dir', '--bin-dir', '--timeout', '--agent', '--session', '--model', '--site', '--auto',
   '--provider', '--base-url', '--key-env']);
 const BOOL_FLAGS = new Set(['--json', '--hard', '--help', '-h', '--force', '--no-link', '--no-examples', '--copy', '--link', '--install', '--open',
-  '--use-new', '--keep', '--merged']);
+  '--use-new', '--keep', '--merged', '--set-key', '--remove-key']);
 const ALIASES = { '--out': '-o', '--output': '-o', '--file': '-f', '-h': '--help' };
 
 class UsageError extends Error {}
@@ -678,7 +678,7 @@ const handlers = {
     if (sub === 'list') return agentList(ctx);
     if (sub === 'run') return agentRun(ctx, pos);
     if (sub === 'login') return agentLogin(ctx);
-    if (sub === 'open-model') return agentOpenModel(ctx);
+    if (sub === 'open-model') return agentOpenModel(ctx, pos);
     throw new UsageError(`unknown agent command "${sub}" (use: agent list | agent run | agent login | agent open-model)`);
   },
 
@@ -791,27 +791,81 @@ async function agentList(ctx) {
 }
 
 // Open models through Codex (experimental; lib/agents/codex-oss.js): show or change the defaults in
-// config.json `openModel`. Written here directly (the helper reads config.json per run); never a key.
-async function agentOpenModel(ctx) {
+// config.json `openModel` (written here directly: the helper reads config.json per run), and save or
+// remove the provider's API key in the system keyring (lib/keyring.js). The key is read from stdin or a
+// no-echo prompt, never from the command line (any same-user process can list arguments).
+async function agentOpenModel(ctx, pos = []) {
   const oss = require('./lib/agents/codex-oss');
+  if (ctx.opts['--key-env'] !== undefined) {
+    throw new UsageError('--key-env is gone: TRIF no longer reads API keys from environment variables. Save the key in the keyring instead: trif agent open-model --set-key (it asks for it), then remove the export line from your shell profile');
+  }
+  if (pos.length) {
+    // (Not echoed: it may be a key typed after --set-key.)
+    throw new UsageError(`unexpected argument${pos.length === 1 ? '' : 's'} to agent open-model${ctx.opts['--set-key'] ? ': --set-key reads the key from stdin or asks for it; never put a key on the command line (if you just did, consider it seen by other programs and make a new one)' : ''}`);
+  }
+  if (ctx.opts['--set-key'] && ctx.opts['--remove-key']) throw new UsageError('--set-key or --remove-key, not both');
   const patch = {};
   if (ctx.opts['--provider'] !== undefined) patch.provider = String(ctx.opts['--provider']);
   if (ctx.opts['--model'] !== undefined) patch.model = String(ctx.opts['--model']);
   if (ctx.opts['--base-url'] !== undefined) patch.baseUrl = String(ctx.opts['--base-url']);
-  if (ctx.opts['--key-env'] !== undefined) patch.keyEnv = String(ctx.opts['--key-env']);
   if (Object.keys(patch).length) {
     try { oss.saveSettings(ctx.ws.home, patch); } catch (e) { throw new UsageError(e.message); }
   }
-  const s = await oss.settings(P.workspace(ctx.ws.home), { check: true });
+  if (ctx.opts['--set-key']) {
+    const ws = P.workspace(ctx.ws.home);
+    const om = oss.resolve(ws.config.openModel);
+    if (!om.keyAccount) throw new UsageError(om.server ? `${om.name} runs without an API key: nothing to save` : 'set the custom server\'s address first (--base-url): its key is saved for that server');
+    const key = process.stdin.isTTY ? await promptHidden(`${om.name} API key (not shown): `) : await readStdin();
+    try { await oss.setKey(ws, key.trim()); } catch (e) { throw new UsageError(e.message); }
+    if (!ctx.json) out(`Saved the ${om.name} API key in ${require('./lib/keyring').backend().name}.`);
+  } else if (ctx.opts['--remove-key']) {
+    try {
+      const r = await oss.removeKey(P.workspace(ctx.ws.home));
+      if (!ctx.json) out(r.removed ? 'Removed the API key.' : 'There was no API key saved.');
+    } catch (e) { throw new UsageError(e.message); }
+  }
+  const s = await oss.settings(P.workspace(ctx.ws.home));
   if (ctx.json) return printJson(s);
   const e = s.effective;
   const p = s.providers.find((x) => x.id === e.provider);
   out(`provider  ${e.provider} (${p.label})${s.configured ? '' : '   (not set up yet: the defaults)'}`);
   out(`model     ${e.model || '(none: pick one with --model)'}`);
   out(`server    ${e.baseUrl || '(none: set one with --base-url)'}`);
-  if (e.keyEnv) out(`key in    ${e.keyEnv}: ${s.key && s.key.found ? `set (${s.key.source === 'helper' ? 'in this environment' : 'in your shell profile'}; not shown)` : `not set (add export ${e.keyEnv}=… to ~/.zshrc)`}`);
+  if (s.key) {
+    const k = s.key;
+    out(`API key   ${k.error ? `${k.stored ? 'saved, but ' : ''}${k.error}` : k.stored ? `saved in ${k.keyring} (not shown)`
+      : e.keyRequired ? 'none yet: trif agent open-model --set-key' : 'none (fine if the server needs none; --set-key to save one)'}`);
+  }
   out('\nUse it: pick "Open model (via Codex)" in the side panel\'s Settings, or trif agent run --agent codex-oss "…".');
-  out('Change it: trif agent open-model --provider ollama|lmstudio|openrouter|custom [--model NAME] [--base-url URL] [--key-env VAR_NAME]');
+  out('Change it: trif agent open-model --provider ollama|lmstudio|openrouter|custom [--model NAME] [--base-url URL] [--set-key | --remove-key]');
+}
+
+// A line typed at the terminal without echoing it (the API key). Ctrl-C or Ctrl-D cancels.
+function promptHidden(question) {
+  return new Promise((resolve, reject) => {
+    const stdin = process.stdin;
+    process.stderr.write(question);
+    let buf = '';
+    const done = (err) => {
+      stdin.setRawMode(false);
+      stdin.pause();
+      stdin.removeListener('data', onData);
+      process.stderr.write('\n');
+      if (err) reject(err); else resolve(buf);
+    };
+    const onData = (chunk) => {
+      for (const ch of String(chunk)) {
+        if (ch === '\r' || ch === '\n') return done();
+        if (ch === '\u0003' || ch === '\u0004') return done(new UsageError('cancelled'));
+        if (ch === '\u007f' || ch === '\b') buf = buf.slice(0, -1);
+        else if (ch >= ' ') buf += ch;
+      }
+    };
+    stdin.setEncoding('utf8');
+    stdin.setRawMode(true);
+    stdin.resume();
+    stdin.on('data', onData);
+  });
 }
 
 async function agentRun(ctx, pos) {

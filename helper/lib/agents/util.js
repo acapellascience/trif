@@ -99,4 +99,11 @@ function capture(file, args, { env, cwd, timeout = 10000, maxBytes = 65536 } = {
   });
 }
 
-module.exports = { isExecutableFile, findExecutable, versionOf, relToWorkspace, oneLine, parseJsonLine, captureSync, capture };
+/** `text` with every occurrence of each secret (8+ characters) replaced by [redacted]. */
+function redactSecrets(text, secrets) {
+  let s = String(text ?? '');
+  for (const v of secrets || []) if (typeof v === 'string' && v.length >= 8) s = s.split(v).join('[redacted]');
+  return s;
+}
+
+module.exports = { isExecutableFile, findExecutable, versionOf, relToWorkspace, oneLine, parseJsonLine, captureSync, capture, redactSecrets };

@@ -780,8 +780,11 @@ async function onPanelMessage(msg) {
     case 'status': return uiStatus();
     case 'agent.list': return helperRequest('agent.list', {}, 20000);
     case 'agent.models': return helperRequest('agent.models', { agent: String(msg.agent ?? ''), fresh: !!msg.fresh }, 30000);
-    case 'agent.openModel': return helperRequest('agent.openModel', { check: !!msg.check }, 20000);
-    case 'agent.openModel.set': return helperRequest('agent.openModel.set', pick(msg, ['provider', 'model', 'baseUrl', 'keyEnv']), 10000);
+    case 'agent.openModel': return helperRequest('agent.openModel', {}, 20000);
+    case 'agent.openModel.set': return helperRequest('agent.openModel.set', pick(msg, ['provider', 'model', 'baseUrl']), 10000);
+    // The API key goes straight to the helper (which keeps it in the system keyring): never stored or logged here.
+    case 'agent.openModel.setKey': return helperRequest('agent.openModel.setKey', pick(msg, ['key']), 60000);
+    case 'agent.openModel.removeKey': return helperRequest('agent.openModel.removeKey', {}, 60000);
     case 'instructions.get': return helperRequest('instructions.get', {}, 10000);
     case 'instructions.set': return helperRequest('instructions.set', { text: String(msg.text ?? '') }, 10000);
     case 'agent.start': return startAgent(msg);
@@ -884,7 +887,7 @@ async function startAgent(msg) {
   const args = { site, url: String(msg.url ?? ''), tabId, prompt, agent };
   if (msg.sessionId) args.sessionId = String(msg.sessionId);
   if (msg.model) args.model = String(msg.model);
-  if (msg.openModel && typeof msg.openModel === 'object') args.openModel = pick(msg.openModel, ['provider', 'model', 'baseUrl', 'keyEnv']); // a chat's own open-model choice
+  if (msg.openModel && typeof msg.openModel === 'object') args.openModel = pick(msg.openModel, ['provider', 'model', 'baseUrl']); // a chat's own open-model choice
   if (msg.merge) args.merge = String(msg.merge); // merge the new version of this shipped mod (the helper adds how)
   let runId;
   state.starting++;

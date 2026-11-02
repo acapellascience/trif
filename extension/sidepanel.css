@@ -157,6 +157,10 @@ body.site-off :is(.bar, .settings, .notice, .mods, .chat, .composer) { display: 
 }
 
 .field-stacked { grid-template-columns: 1fr; gap: 4px; }
+/* The open model's API key: a password field with Save / Remove beside it. */
+.om-key { display: flex; gap: 6px; min-width: 0; margin: 0; }
+.om-key input { flex: 1; }
+.om-key .btn { padding: 4px 10px; }
 .field textarea {
   width: 100%;
   min-width: 0;

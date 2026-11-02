@@ -14,7 +14,7 @@ const { scopeFor } = require('./scope');
 const { readInstructions, instructionsContext } = require('./instructions');
 const { markRunActive, markRunEnded } = require('./origins');
 const { listModFiles } = require('./mods');
-const { redactSecrets } = require('./shellenv');
+const { redactSecrets } = require('./agents/util');
 
 const RUN_TIMEOUT_MS = Number(envVar('AGENT_TIMEOUT_MS')) > 0 ? Number(envVar('AGENT_TIMEOUT_MS')) : 15 * 60 * 1000;
 const KILL_GRACE_MS = Number(envVar('AGENT_KILL_GRACE_MS')) > 0 ? Number(envVar('AGENT_KILL_GRACE_MS')) : 3000;
@@ -427,7 +427,7 @@ class Runs {
         run.secrets = (prep && prep.secrets) || [];
         Object.assign(run.state, (prep && prep.state) || {});
         const om = run.state.openModel;
-        if (om) this._log(run, { webmods: 'openModel', provider: om.provider, model: om.model, baseUrl: om.baseUrl, keyEnv: om.keyEnv || null, keyProxy: !!run.cleanup });
+        if (om) this._log(run, { webmods: 'openModel', provider: om.provider, model: om.model, baseUrl: om.baseUrl, key: om.keyed ? 'keyring' : null, keyProxy: !!run.cleanup });
         const runEnv = { ...env, ...((prep && prep.env) || {}) };
         for (const k of (prep && prep.unsetEnv) || []) delete runEnv[k];
         this._spawn(run, found, runEnv, (prep && prep.options) || {});

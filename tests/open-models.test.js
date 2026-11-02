@@ -1,6 +1,8 @@
 'use strict';
-// Open models through Codex (experimental): helper/lib/agents/codex-oss.js, helper/lib/shellenv.js and
-// their plumbing (agent.openModel, agent.start's prepare step, redaction, doctor, `trif agent open-model`).
+// Open models through Codex (experimental): helper/lib/agents/codex-oss.js, helper/lib/keyring.js (the API
+// key in the system keyring: a stand-in `security`/`secret-tool` here, tests/fake-keychain.js, never the
+// real Keychain) and their plumbing (agent.openModel[.setKey], agent.start's prepare step, the key proxy,
+// redaction, doctor, `trif agent open-model`).
 // A fake `codex` for the helper tests; the last test runs the REAL Codex (when installed) against a
 // stand-in model server (tests/fake-model-server.js), with TRIF's real permission profile and a scratch
 // HOME (so no OpenAI login, nothing of the user's). It applies macOS's sandbox, which may fail inside
@@ -13,14 +15,21 @@ const path = require('path');
 const { FakeExtension, runCli, tempDir, waitFor, CLI_JS } = require('./fake-extension');
 const { startFakeModelServer } = require('./fake-model-server');
 const oss = require('../helper/lib/agents/codex-oss');
-const shellenv = require('../helper/lib/shellenv');
-const { findExecutable, versionOf } = require('../helper/lib/agents/util');
+const keyring = require('../helper/lib/keyring');
+const { makeFakeKeychain } = require('./fake-keychain');
+const { findExecutable, versionOf, redactSecrets } = require('../helper/lib/agents/util');
+
+// In this process too (oss.settings, prepare, doctorChecks called directly): a stand-in keychain.
+const KC = makeFakeKeychain(path.join(tempDir(), 'kc'));
+process.env.TRIF_KEYCHAIN_BIN = KC.bin;
+const kcEnv = KC.env;
 
 const cleanups = [];
 test.after(async () => { for (const fn of cleanups.reverse()) { try { await fn(); } catch { /* ignore */ } } });
 
 const LIMITS = { readable: ['/h'], writable: ['/h/sites'], readOnly: [], denied: ['/h/config.json'] };
 const FAKE_KEY = 'fake-test-key-0123456789abcdef'; // a made-up value, for checking where it does and doesn't go
+const EXCLUDE = 'shell_environment_policy.exclude=["*_API_KEY", "*_API_TOKEN", "*_ACCESS_TOKEN", "*_AUTH_TOKEN", "*_SECRET_KEY"]';
 
 function argAfter(args, flag, pred) {
   for (let i = 0; i < args.length - 1; i++) if (args[i] === flag && pred(args[i + 1])) return args[i + 1];
@@ -30,7 +39,7 @@ const providerToml = (args) => argAfter(args, '-c', (v) => v.startsWith('model_p
 
 // ------------------------------------------------------------------ command lines (pure)
 
-test('command: local Ollama, LM Studio, OpenRouter (key by name), custom URL with resume', () => {
+test('command: local Ollama, LM Studio, OpenRouter (through the key proxy), custom URL with resume', () => {
   // Ollama: a custom provider at 127.0.0.1:11434/v1, no key, no --oss (it would pull missing models).
   let om = oss.resolve({ provider: 'ollama' });
   let c = oss.command({ bin: '/x/codex', prompt: 'P', openModel: om, ...LIMITS });
@@ -40,7 +49,8 @@ test('command: local Ollama, LM Studio, OpenRouter (key by name), custom URL wit
   assert.match(c.args.find((a) => a.startsWith('permissions=')), /network = \{ enabled = false \}/);
   assert.equal(providerToml(c.args), 'model_providers.trif-open={ name = "Ollama (TRIF)", base_url = "http://127.0.0.1:11434/v1", wire_api = "responses", supports_websockets = false, stream_idle_timeout_ms = 900000, request_max_retries = 1, stream_max_retries = 1 }');
   assert.ok(c.args.includes('model_provider="trif-open"') && c.args.includes('web_search="disabled"'));
-  assert.ok(!c.args.some((a) => a.startsWith('shell_environment_policy')));
+  // (API key variables a shell profile may still export: kept from the commands, whatever the provider.)
+  assert.ok(c.args.includes(EXCLUDE));
   assert.deepEqual(c.args.slice(-4), ['-m', 'gpt-oss:20b', '--', 'P']);
 
   om = oss.resolve({ provider: 'lmstudio', model: 'qwen/qwen3-coder-30b' });
@@ -53,12 +63,11 @@ test('command: local Ollama, LM Studio, OpenRouter (key by name), custom URL wit
   c = oss.command({ bin: 'codex', prompt: 'P', openModel: om, ...LIMITS });
   assert.equal(providerToml(c.args), 'model_providers.trif-open={ name = "OpenRouter (TRIF)", base_url = "http://127.0.0.1:5555/0123abcd/v1", wire_api = "responses", supports_websockets = false }');
   assert.ok(!c.args.some((a) => /env_key/.test(a)));
-  // (Codex snapshots the user's login shell for its commands' environment: the variable stays out of it.)
-  assert.ok(c.args.includes('shell_environment_policy.exclude=["OPENROUTER_API_KEY"]'));
+  assert.ok(c.args.includes(EXCLUDE));
   assert.deepEqual(c.args.slice(-4), ['-m', 'qwen/qwen3-coder', '--', 'P']);
 
-  // Custom URL, its own key variable, resuming: exec options before `resume`.
-  om = oss.resolve({ provider: 'custom', baseUrl: 'https://llm.example.com/v1/', keyEnv: 'MY_LLM_KEY', model: 'big-model' });
+  // Custom URL, resuming: exec options before `resume`.
+  om = oss.resolve({ provider: 'custom', baseUrl: 'https://llm.example.com/v1/', model: 'big-model' });
   c = oss.command({ bin: 'codex', prompt: '-P', sessionId: 'th1', openModel: om, ...LIMITS });
   assert.match(providerToml(c.args), /base_url = "https:\/\/llm\.example\.com\/v1", wire_api = "responses", supports_websockets/);
   assert.deepEqual(c.args.slice(-6), ['-m', 'big-model', 'resume', 'th1', '--', '-P']);
@@ -68,23 +77,29 @@ test('command: local Ollama, LM Studio, OpenRouter (key by name), custom URL wit
   assert.ok(!plain.args.some((a) => /trif-open|web_search/.test(a)));
 });
 
-test('settings: resolve (defaults, a run\'s own choice, model), validation; never a key', () => {
-  assert.deepEqual(oss.normalize(undefined), { provider: 'ollama', model: '', baseUrl: '', keyEnv: '' });
-  assert.deepEqual(oss.normalize({ provider: 'nope', model: 'two words', baseUrl: 'ftp://x', keyEnv: 'sk-or-v1-abc' }), { provider: 'ollama', model: '', baseUrl: '', keyEnv: '' });
+test('settings: resolve (defaults, a run\'s own choice, model), keyring accounts, validation; never a key', () => {
+  assert.deepEqual(oss.normalize(undefined), { provider: 'ollama', model: '', baseUrl: '' });
+  assert.deepEqual(oss.normalize({ provider: 'nope', model: 'two words', baseUrl: 'ftp://x', keyEnv: 'OPENROUTER_API_KEY' }), { provider: 'ollama', model: '', baseUrl: '' });
   assert.equal(oss.normalize({ baseUrl: 'https://user:pw@x.com/v1' }).baseUrl, '');
   const stored = { provider: 'openrouter', model: 'z-ai/glm-5.3' };
   assert.equal(oss.resolve(stored).model, 'z-ai/glm-5.3');
   assert.equal(oss.resolve(stored, null, 'qwen/qwen3-coder').model, 'qwen/qwen3-coder');
   // A chat's own choice (agent.start openModel): another provider starts from that provider's defaults.
   const r = oss.resolve(stored, { provider: 'ollama' });
-  assert.deepEqual([r.provider, r.model, r.baseUrl, r.keyEnv, r.local], ['ollama', 'gpt-oss:20b', 'http://127.0.0.1:11434/v1', '', true]);
-  assert.equal(oss.resolve(stored, { keyEnv: 'OTHER_KEY' }).model, 'z-ai/glm-5.3');
+  assert.deepEqual([r.provider, r.model, r.baseUrl, r.keyAccount, r.local], ['ollama', 'gpt-oss:20b', 'http://127.0.0.1:11434/v1', '', true]);
+  assert.equal(oss.resolve(stored, { provider: 'openrouter' }).model, 'z-ai/glm-5.3'); // the same provider: the stored model stays
   assert.match(oss.resolve({ provider: 'custom' }).error, /no server address/);
+  // The keyring account: one per hosted provider, per server for custom ones; none for local servers.
+  assert.deepEqual([oss.resolve(stored).keyAccount, oss.resolve(stored).keyRequired], ['openrouter', true]);
+  assert.deepEqual([oss.resolve({ provider: 'custom', baseUrl: 'https://LLM.example.com:8443/v1' }).keyAccount, oss.resolve({ provider: 'custom', baseUrl: 'https://x.com/v1' }).keyRequired], ['custom:llm.example.com:8443', false]);
+  assert.equal(oss.resolve({ provider: 'custom' }).keyAccount, '');
+  assert.equal(oss.resolve({ provider: 'ollama', baseUrl: 'http://gpu-box.lan:11434/v1' }).keyAccount, '');
 
   const home = tempDir();
-  oss.saveSettings(home, { provider: 'openrouter', model: 'qwen/qwen3-coder', keyEnv: 'OPENROUTER_API_KEY' });
-  assert.deepEqual(JSON.parse(fs.readFileSync(path.join(home, 'config.json'), 'utf8')).openModel, { provider: 'openrouter', model: 'qwen/qwen3-coder', keyEnv: 'OPENROUTER_API_KEY' });
-  assert.throws(() => oss.saveSettings(home, { keyEnv: 'sk-or-v1-0123456789abcdef' }), /NAME of the environment variable/);
+  // An old config's keyEnv: ignored, and gone after the next save.
+  fs.writeFileSync(path.join(home, 'config.json'), JSON.stringify({ openModel: { provider: 'openrouter', keyEnv: 'OPENROUTER_API_KEY' } }));
+  oss.saveSettings(home, { provider: 'openrouter', model: 'qwen/qwen3-coder', keyEnv: 'OTHER' });
+  assert.deepEqual(JSON.parse(fs.readFileSync(path.join(home, 'config.json'), 'utf8')).openModel, { provider: 'openrouter', model: 'qwen/qwen3-coder' });
   assert.throws(() => oss.saveSettings(home, { provider: 'evil' }), /unknown provider/);
   assert.throws(() => oss.saveSettings(home, { baseUrl: 'file:///etc/passwd' }), /http\(s\) URL/);
   // Switching provider drops the old one's model and key name.
@@ -131,8 +146,9 @@ test('model lists: Ollama /api/tags and LM Studio /v1/models parsed, recommended
 test('errors in the user\'s terms; Codex\'s metadata warning is dropped', () => {
   const or = oss.friendlyFor(oss.resolve({ provider: 'openrouter' }));
   assert.equal(or('Model metadata for `x` not found. Defaulting to fallback metadata'), null);
-  assert.match(or('unexpected status 401 Unauthorized: No auth credentials found'), /OpenRouter refused the key in OPENROUTER_API_KEY/);
-  assert.match(or('Missing environment variable: `OPENROUTER_API_KEY`.'), /OPENROUTER_API_KEY isn't set: add `export OPENROUTER_API_KEY=<your key>`/);
+  assert.match(or('unexpected status 401 Unauthorized: No auth credentials found'), /OpenRouter wants an API key \(401\): paste your OpenRouter API key in the side panel’s Settings .*trif agent open-model --set-key/);
+  const orKeyed = oss.friendlyFor({ ...oss.resolve({ provider: 'openrouter' }), keyed: true });
+  assert.match(orKeyed('unexpected status 401 Unauthorized'), /OpenRouter refused the API key \(401\): check it, or make a new one/);
   assert.match(or('unexpected status 402 Payment Required: Insufficient credits'), /out of credit/);
   const ol = oss.friendlyFor(oss.resolve({ provider: 'ollama', model: 'qwen3-coder:30b' }));
   assert.match(ol('unexpected status 404 Not Found: model "qwen3-coder:30b" not found, try pulling it first'), /run `ollama pull qwen3-coder:30b`/);
@@ -144,35 +160,76 @@ test('errors in the user\'s terms; Codex\'s metadata warning is dropped', () => 
   oss.parse(JSON.stringify({ type: 'item.completed', item: { id: 'i0', type: 'error', message: 'Model metadata for `m` not found.' } }), (e) => ev.push(e), st);
   oss.parse(JSON.stringify({ type: 'turn.failed', error: { message: 'unexpected status 401 Unauthorized' } }), (e) => ev.push(e), st);
   assert.equal(ev.length, 2);
-  assert.match(ev[0].message, /refused the key/);
+  assert.match(ev[0].message, /wants an API key/);
   assert.equal(ev[1].kind, 'done');
 });
 
-// ------------------------------------------------------------------ the key: from the shell, never written
+// ------------------------------------------------------------------ the key: in the keyring, nowhere else
 
-test('shellenv: the helper\'s env first, else the login shell (past its noise); bad names refused; redaction', async () => {
+test('keyring: macOS `security` (written through -i on stdin, as hex: never in argv), Linux secret-tool, none; keys checked', async () => {
   const dir = tempDir();
-  const shell = path.join(dir, 'fakeshell');
-  // Called as <shell> -l -i -c <script>: prints a banner like a chatty profile, exports the key, runs the script.
-  fs.writeFileSync(shell, `#!/bin/sh\necho "Welcome back! fortune: ${'x'.repeat(10)}"\nTTEST_SHELL_KEY='${FAKE_KEY}'; export TTEST_SHELL_KEY\n[ "$1 $2 $3" = "-l -i -c" ] || exit 9\n/bin/sh -c "$4"\necho trailing noise\n`);
-  fs.chmodSync(shell, 0o755);
-  shellenv.forget();
-  let r = await shellenv.lookupEnvVar('TTEST_SHELL_KEY', { env: {}, shell });
-  assert.deepEqual(r, { value: FAKE_KEY, source: 'shell', error: null });
-  r = await shellenv.lookupEnvVar('TTEST_SHELL_KEY', { env: { TTEST_SHELL_KEY: 'from-env-value' }, shell });
-  assert.deepEqual(r, { value: 'from-env-value', source: 'helper', error: null });
-  r = await shellenv.lookupEnvVar('TTEST_UNSET_VAR', { env: {}, shell });
-  assert.equal(r.value, null);
-  assert.match(r.error, /isn't set in your shell/);
-  r = await shellenv.lookupEnvVar('X; rm -rf ~', { env: {}, shell });
-  assert.match(r.error, /isn't a valid environment variable name/);
-  const slow = path.join(dir, 'slowshell');
-  fs.writeFileSync(slow, '#!/bin/sh\nsleep 5\n');
-  fs.chmodSync(slow, 0o755);
-  r = await shellenv.lookupEnvVar('TTEST_SLOW', { env: {}, shell: slow, timeout: 300 });
-  assert.match(r.error, /took more than/);
-  assert.equal(shellenv.redactSecrets(`a ${FAKE_KEY} b ${FAKE_KEY}`, [FAKE_KEY]), 'a [redacted] b [redacted]');
-  assert.equal(shellenv.redactSecrets('short ab', ['ab']), 'short ab'); // too short to be a key
+  const mac = makeFakeKeychain(path.join(dir, 'mac'));
+  const o = { env: mac.env };
+  assert.deepEqual(keyring.backend(o), { kind: 'security', bin: mac.bin, name: 'your Mac’s Keychain' });
+  assert.deepEqual(keyring.backend({ env: {}, platform: 'darwin' }).bin, '/usr/bin/security');
+  assert.deepEqual(await keyring.hasKey('openrouter', o), { stored: false, error: null });
+  assert.deepEqual(await keyring.getKey('openrouter', o), { value: null, error: null });
+  await keyring.setKey('openrouter', `  ${FAKE_KEY}\n`, o); // (pasted with blanks around it)
+  assert.deepEqual(mac.items(), { 'TRIF open model key\u0000openrouter': FAKE_KEY });
+  assert.deepEqual(await keyring.getKey('openrouter', o), { value: FAKE_KEY, error: null });
+  assert.deepEqual(await keyring.hasKey('openrouter', o), { stored: true, error: null });
+  await keyring.setKey('openrouter', 'second-key-0123456789', o); // replaced (-U)
+  assert.equal((await keyring.getKey('openrouter', o)).value, 'second-key-0123456789');
+  // What each call's command line was: the write is `security -i` (the command on its stdin).
+  const calls = mac.argv();
+  assert.ok(calls.some((a) => a.length === 1 && a[0] === '-i'));
+  assert.ok(calls.some((a) => a.join(' ') === 'find-generic-password -s TRIF open model key -a openrouter -w'));
+  assert.ok(calls.some((a) => a.join(' ') === 'find-generic-password -s TRIF open model key -a openrouter'), 'the check: no -w, nothing decrypted');
+  for (const k of [FAKE_KEY, 'second-key-0123456789', Buffer.from(FAKE_KEY).toString('hex')]) assert.ok(!mac.argvText().includes(k), 'never in an argv');
+  assert.deepEqual(await keyring.removeKey('openrouter', o), { removed: true });
+  assert.deepEqual(await keyring.removeKey('openrouter', o), { removed: false });
+  assert.deepEqual(mac.items(), {});
+  const before = mac.argv().length;
+  // Keys and accounts: checked, and the key is never quoted back.
+  for (const bad of ['', 'short', 'has space in it 0123', 'quote"in-it-0123456', 'back\\slash-0123456', 'two\nlines-0123456789', 'é-unicode-0123456789']) {
+    await assert.rejects(keyring.setKey('openrouter', bad, o), (e) => {
+      assert.match(e.message, /no key given|doesn't look like an API key/);
+      if (bad.length >= 8) assert.ok(!e.message.includes(bad.trim()), e.message);
+      return true;
+    });
+  }
+  assert.equal(keyring.keyProblem('sk-or-v1-0123456789abcdefABCDEF_xyz'), '');
+  await assert.rejects(keyring.setKey('evil"account', FAKE_KEY, o), /bad keyring account/);
+  assert.equal(mac.argv().length, before, 'refused before the keyring is asked');
+  // Linux: secret-tool, the key on its stdin.
+  const lin = makeFakeKeychain(path.join(dir, 'lin'), { kind: 'secret-tool' });
+  const l = { env: lin.env };
+  assert.equal(keyring.backend(l).kind, 'secret-tool');
+  assert.deepEqual(await keyring.hasKey('custom:llm.example.com', l), { stored: false, error: null });
+  await keyring.setKey('custom:llm.example.com', FAKE_KEY, l);
+  assert.deepEqual(await keyring.getKey('custom:llm.example.com', l), { value: FAKE_KEY, error: null });
+  assert.ok(lin.argv().some((a) => a[0] === 'store' && a.includes('--label=TRIF open model key (custom:llm.example.com)')));
+  assert.ok(!lin.argvText().includes(FAKE_KEY));
+  assert.deepEqual(await keyring.removeKey('custom:llm.example.com', l), { removed: true });
+  // No keyring (Linux without secret-tool): no fallback, a clear message.
+  assert.equal(keyring.backend({ env: {}, platform: 'win32' }), null);
+  const none = await keyring.getKey('openrouter', { env: {}, platform: 'win32' });
+  assert.equal(none.value, null);
+  assert.match(none.error, /need a system keyring/);
+  assert.match(keyring.noKeyring({ platform: 'linux' }), /secret-tool .*libsecret-tools/);
+  await assert.rejects(keyring.setKey('openrouter', FAKE_KEY, { env: {}, platform: 'win32' }), /need a system keyring/);
+  // A keyring tool that fails: its complaint, never the key.
+  const broken = path.join(dir, 'broken-security');
+  fs.writeFileSync(broken, `#!/bin/sh\necho "security: something went wrong: $(cat)" >&2\nexit 3\n`);
+  fs.chmodSync(broken, 0o755);
+  await assert.rejects(keyring.setKey('openrouter', FAKE_KEY, { env: { TRIF_KEYCHAIN_BIN: broken } }), (e) => {
+    assert.match(e.message, /couldn't save the key in your Mac’s Keychain: security: something went wrong/);
+    assert.ok(!e.message.includes(FAKE_KEY) && !e.message.includes(Buffer.from(FAKE_KEY).toString('hex')), e.message);
+    return true;
+  });
+  // Redaction (runs.js).
+  assert.equal(redactSecrets(`a ${FAKE_KEY} b ${FAKE_KEY}`, [FAKE_KEY]), 'a [redacted] b [redacted]');
+  assert.equal(redactSecrets('short ab', ['ab']), 'short ab'); // too short to be a key
 });
 
 // A fake codex: `--version`; `exec` dumps argv and env to <dir>/calls, asks its base_url for /models (the
@@ -232,41 +289,78 @@ function startHost(home, env = {}) {
 }
 const START = { site: 'example.com', url: 'https://example.com/page', tabId: 12 };
 
-test('helper: codex-oss listed (experimental, never the default); settings through agent.openModel; refused from a run', async () => {
+test('helper: codex-oss listed (experimental, never the default); settings and the API key through agent.openModel*; refused from a run', async () => {
   const { home } = makeHome();
-  const ext = startHost(home);
+  const kc = makeFakeKeychain(path.join(home, 'kc'));
+  const ext = startHost(home, kc.env);
   let r = await extRequest(ext, 'agent.list');
   const a = r.result.agents.find((x) => x.id === 'codex-oss');
   assert.equal(a.name, 'Open model (via Codex)');
   assert.equal(a.available, true);
   assert.equal(a.experimental, true);
   assert.equal(r.result.default, 'codex');
-  r = await extRequest(ext, 'agent.openModel.set', { provider: 'openrouter', keyEnv: 'TTEST_KEY' });
+  r = await extRequest(ext, 'agent.openModel.set', { provider: 'openrouter' });
   assert.equal(r.ok, true, r.error);
-  assert.deepEqual(r.result.openModel, { provider: 'openrouter', model: '', baseUrl: '', keyEnv: 'TTEST_KEY' });
+  assert.deepEqual(r.result.openModel, { provider: 'openrouter', model: '', baseUrl: '' });
   assert.equal(r.result.effective.model, 'openai/gpt-oss-120b');
-  r = await extRequest(ext, 'agent.openModel.set', { keyEnv: FAKE_KEY.replace(/-/g, '-') });
+  assert.equal(r.result.hasKey, false);
+  assert.deepEqual(r.result.key, { account: 'openrouter', stored: false, keyring: 'your Mac’s Keychain', error: null });
+  // The key: into the keyring, never echoed back.
+  r = await extRequest(ext, 'agent.openModel.setKey', { key: FAKE_KEY });
+  assert.equal(r.ok, true, r.error);
+  assert.equal(r.result.hasKey, true);
+  assert.ok(!JSON.stringify(r).includes(FAKE_KEY), 'not in the answer');
+  assert.deepEqual(kc.items(), { 'TRIF open model key\u0000openrouter': FAKE_KEY });
+  assert.equal((await extRequest(ext, 'agent.openModel')).result.hasKey, true);
+  // A bad one: refused, and the error doesn't quote it.
+  r = await extRequest(ext, 'agent.openModel.setKey', { key: 'not a key 0123456789' });
   assert.equal(r.ok, false);
-  assert.match(r.error, /NAME of the environment variable/);
+  assert.match(r.error, /doesn't look like an API key/);
+  assert.ok(!r.error.includes('not a key'));
+  // Never in config.json, an argv or the helper's log.
   assert.ok(!fs.readFileSync(path.join(home, 'config.json'), 'utf8').includes(FAKE_KEY));
+  assert.ok(!kc.argvText().includes(FAKE_KEY));
+  assert.ok(!fs.readFileSync(path.join(home, 'helper.log'), 'utf8').includes(FAKE_KEY));
+  assert.match(fs.readFileSync(path.join(home, 'helper.log'), 'utf8'), /API key saved in the keyring \(openrouter\)/);
+  r = await extRequest(ext, 'agent.openModel.removeKey');
+  assert.equal(r.result.hasKey, false);
+  assert.deepEqual(kc.items(), {});
+  // Local servers take no key; a custom server's key is per server, and not for http:// to another computer.
+  await extRequest(ext, 'agent.openModel.set', { provider: 'ollama' });
+  r = await extRequest(ext, 'agent.openModel.setKey', { key: FAKE_KEY });
+  assert.match(r.error, /runs without an API key/);
+  r = await extRequest(ext, 'agent.openModel.set', { provider: 'custom', baseUrl: 'http://llm.example.com/v1' });
+  assert.equal(r.result.effective.keyAccount, 'custom:llm.example.com');
+  r = await extRequest(ext, 'agent.openModel.setKey', { key: FAKE_KEY });
+  assert.match(r.error, /must start with https:\/\//);
+  await extRequest(ext, 'agent.openModel.set', { baseUrl: 'https://llm.example.com/v1' });
+  r = await extRequest(ext, 'agent.openModel.setKey', { key: FAKE_KEY });
+  assert.equal(r.result.hasKey, true);
+  assert.deepEqual(Object.keys(kc.items()), ['TRIF open model key\u0000custom:llm.example.com']);
+  await extRequest(ext, 'agent.openModel.set', { provider: 'openrouter' });
   r = await extRequest(ext, 'agent.models', { agent: 'codex-oss' });
   assert.equal(r.result.models[0].id, 'openai/gpt-oss-120b');
   // The panel's per-chat choice: agent.models for another provider than the stored one.
   r = await extRequest(ext, 'agent.models', { agent: 'codex-oss', openModel: { provider: 'custom', baseUrl: 'https://llm.example.com/v1' } });
   assert.deepEqual(r.result.models, []);
   assert.match(r.result.note, /llm\.example\.com/);
-  // A run can't read or change them (config.json is private from runs too).
+  // A run can't read or change them (config.json is private from runs too; host.js refuses agent.* with a run token).
   await ext.waitForSocket();
-  const res = await runCli(['agent', 'open-model', '--provider', 'ollama'], { home, env: { TRIF_RUN_TOKEN: 'x', TRIF_RUN_BOX: path.join(home, 'nobox') } });
+  let res = await runCli(['agent', 'open-model', '--provider', 'ollama'], { home, env: { TRIF_RUN_TOKEN: 'x', TRIF_RUN_BOX: path.join(home, 'nobox') } });
+  assert.notEqual(res.code, 0);
+  res = await runCli(['agent', 'open-model', '--set-key'], { home, env: { ...kc.env, TRIF_RUN_TOKEN: 'x', TRIF_RUN_BOX: path.join(home, 'nobox') }, input: 'evil-key-0123456789\n' });
   assert.notEqual(res.code, 0);
   assert.equal(JSON.parse(fs.readFileSync(path.join(home, 'config.json'), 'utf8')).openModel.provider, 'openrouter');
+  assert.ok(!JSON.stringify(kc.items()).includes('evil-key'));
 });
 
-test('helper: the key never reaches Codex (no env, no argv): the run\'s key proxy adds it, closes after; never in logs or events', async () => {
+test('helper: the key never reaches Codex (no env, no argv): read from the keyring, the run\'s key proxy adds it, closes after; never in logs or events', async () => {
   const srv = await startFakeModelServer({ echoAuth: true });
   cleanups.push(() => srv.close());
-  const { home, bin } = makeHome({ openModel: { provider: 'custom', baseUrl: `${srv.url}/v1`, keyEnv: 'TTEST_KEY' }, env: { OPENAI_API_KEY: 'sk-config-openai-0123456789' } });
-  const ext = startHost(home, { TTEST_KEY: FAKE_KEY }); // as if Chrome had been started from the terminal
+  const { home, bin } = makeHome({ openModel: { provider: 'custom', baseUrl: `${srv.url}/v1` }, env: { OPENAI_API_KEY: 'sk-config-openai-0123456789' } });
+  const kc = makeFakeKeychain(path.join(home, 'kc'));
+  await keyring.setKey(`custom:${new URL(srv.url).host}`, FAKE_KEY, { env: kc.env });
+  const ext = startHost(home, kc.env);
   const r = await extRequest(ext, 'agent.start', { ...START, agent: 'codex-oss', model: 'qwen/qwen3-coder', prompt: 'hide the banner' });
   assert.equal(r.ok, true, r.error);
   const done = await waitDone(ext, r.result.runId);
@@ -274,10 +368,10 @@ test('helper: the key never reaches Codex (no env, no argv): the run\'s key prox
   assert.equal(done.sessionId, 'th-oss-1');
   const call = lastCall(bin);
   assert.ok(!JSON.stringify(call).includes(FAKE_KEY), 'not in Codex\'s env or argv');
-  assert.equal(call.env.TTEST_KEY, undefined);
   assert.equal(call.env.OPENAI_API_KEY, undefined, 'config.json\'s keys for the other agents aren\'t passed to this one');
+  assert.equal(call.env.TRIF_KEYCHAIN_BIN, undefined);
   assert.ok(!call.argv.some((a) => /env_key/.test(a)));
-  assert.ok(call.argv.includes('shell_environment_policy.exclude=["TTEST_KEY"]'));
+  assert.ok(call.argv.includes(EXCLUDE));
   const base = /base_url = "([^"]+)"/.exec(providerToml(call.argv))[1];
   assert.match(base, /^http:\/\/127\.0\.0\.1:\d+\/[0-9a-f]{32}\/v1$/);
   assert.deepEqual(call.argv.slice(call.argv.indexOf('-m'), call.argv.indexOf('-m') + 2), ['-m', 'qwen/qwen3-coder']);
@@ -291,72 +385,131 @@ test('helper: the key never reaches Codex (no env, no argv): the run\'s key prox
   assert.ok(!evs.some((e) => e.kind === 'error'), 'the metadata warning is dropped');
   const log = fs.readFileSync(path.join(home, 'runs', `${r.result.runId}.jsonl`), 'utf8');
   assert.ok(!log.includes(FAKE_KEY));
-  assert.match(log, /"webmods":"openModel","provider":"custom","model":"qwen\/qwen3-coder".*"keyProxy":true/);
+  assert.match(log, /"webmods":"openModel","provider":"custom","model":"qwen\/qwen3-coder".*"key":"keyring","keyProxy":true/);
   assert.match(log, /Bearer \[redacted\]/);
   assert.ok(!fs.readFileSync(path.join(home, 'helper.log'), 'utf8').includes(FAKE_KEY));
+  assert.ok(!kc.argvText().includes(FAKE_KEY), 'nor in the keyring tool\'s argv');
   // Closed once the run ended.
   await waitFor(async () => { try { await fetch(`${base}/models`); return false; } catch { return true; } });
 
-  // A failing run: the stderr tail in the error is redacted too. A per-run provider override is honoured.
-  const r2 = await extRequest(ext, 'agent.start', { ...START, agent: 'codex-oss', prompt: '-P-FAIL', openModel: { provider: 'custom', baseUrl: 'http://127.0.0.1:9/v1', keyEnv: 'TTEST_KEY' }, model: 'm1' });
+  // A failing run: the stderr tail in the error is redacted too. A per-run provider override is honoured
+  // (a server without a saved key: no proxy, the address as is).
+  const r2 = await extRequest(ext, 'agent.start', { ...START, agent: 'codex-oss', prompt: '-P-FAIL', openModel: { provider: 'custom', baseUrl: 'http://127.0.0.1:9/v1' }, model: 'm1' });
   const d2 = await waitDone(ext, r2.result.runId);
   assert.equal(d2.ok, false);
-  assert.match(fs.readFileSync(path.join(home, 'runs', `${r2.result.runId}.jsonl`), 'utf8'), /"webmods":"openModel","provider":"custom","model":"m1","baseUrl":"http:\/\/127\.0\.0\.1:9\/v1"/);
-  assert.match(providerToml(lastCall(bin).argv), /base_url = "http:\/\/127\.0\.0\.1:\d+\/[0-9a-f]{32}\/v1"/); // (through its own proxy)
-  assert.ok(!JSON.stringify(eventsOf(ext, r2.result.runId)).includes(FAKE_KEY));
-  assert.ok(!fs.readFileSync(path.join(home, 'runs', `${r2.result.runId}.jsonl`), 'utf8').includes(FAKE_KEY));
+  assert.match(fs.readFileSync(path.join(home, 'runs', `${r2.result.runId}.jsonl`), 'utf8'), /"webmods":"openModel","provider":"custom","model":"m1","baseUrl":"http:\/\/127\.0\.0\.1:9\/v1","key":null,"keyProxy":false/);
+  assert.match(providerToml(lastCall(bin).argv), /base_url = "http:\/\/127\.0\.0\.1:9\/v1"/);
+  // The same server with a key: through its own proxy, and the key still redacted from what failed.
+  await keyring.setKey('custom:127.0.0.1:9', FAKE_KEY, { env: kc.env });
+  const r3 = await extRequest(ext, 'agent.start', { ...START, agent: 'codex-oss', prompt: '-P-FAIL', openModel: { provider: 'custom', baseUrl: 'http://127.0.0.1:9/v1' }, model: 'm1' });
+  const d3 = await waitDone(ext, r3.result.runId);
+  assert.equal(d3.ok, false);
+  assert.match(providerToml(lastCall(bin).argv), /base_url = "http:\/\/127\.0\.0\.1:\d+\/[0-9a-f]{32}\/v1"/);
+  assert.ok(!JSON.stringify(eventsOf(ext, r3.result.runId)).includes(FAKE_KEY));
+  assert.ok(!fs.readFileSync(path.join(home, 'runs', `${r3.result.runId}.jsonl`), 'utf8').includes(FAKE_KEY));
 });
 
 test('helper: no key, Ollama down or the model missing: the run fails fast with the fix, Codex never starts', async () => {
   const srv = await startFakeModelServer({ models: ['llama3:8b'] });
   cleanups.push(() => srv.close());
-  const { home, bin } = makeHome({ openModel: { provider: 'openrouter', keyEnv: 'TTEST_NEVER_SET_KEY' } });
-  const ext = startHost(home);
+  const { home, bin } = makeHome({ openModel: { provider: 'openrouter' } });
+  const kc = makeFakeKeychain(path.join(home, 'kc'));
+  const ext = startHost(home, { ...kc.env, OPENROUTER_API_KEY: 'from-env-never-used-0123' }); // (the environment is never read for keys)
   let r = await extRequest(ext, 'agent.start', { ...START, agent: 'codex-oss', prompt: 'x' });
   let d = await waitDone(ext, r.result.runId);
   assert.equal(d.ok, false);
-  assert.match(eventsOf(ext, r.result.runId).find((e) => e.kind === 'error').message, /TTEST_NEVER_SET_KEY isn't set .*export TTEST_NEVER_SET_KEY=/);
+  assert.match(eventsOf(ext, r.result.runId).find((e) => e.kind === 'error').message, /no OpenRouter API key yet: paste your OpenRouter API key in the side panel’s Settings .*trif agent open-model --set-key/);
+  // No keyring at all (here: the tool is missing): said so, no fallback.
+  const ext2 = startHost(makeHome({ openModel: { provider: 'openrouter' } }).home);
+  r = await extRequest(ext2, 'agent.start', { ...START, agent: 'codex-oss', prompt: 'x' });
+  d = await waitDone(ext2, r.result.runId);
+  assert.match(eventsOf(ext2, r.result.runId).find((e) => e.kind === 'error').message, /couldn't read the key from your Mac’s Keychain/);
   r = await extRequest(ext, 'agent.start', { ...START, agent: 'codex-oss', prompt: 'x', openModel: { provider: 'ollama', baseUrl: 'http://127.0.0.1:9/v1' } });
   d = await waitDone(ext, r.result.runId);
   assert.match(eventsOf(ext, r.result.runId).find((e) => e.kind === 'error').message, /Ollama isn't running \(nothing answers at http:\/\/127\.0\.0\.1:9\/v1\)/);
   r = await extRequest(ext, 'agent.start', { ...START, agent: 'codex-oss', prompt: 'x', model: 'gpt-oss:20b', openModel: { provider: 'ollama', baseUrl: `${srv.url}/v1` } });
   d = await waitDone(ext, r.result.runId);
   assert.match(eventsOf(ext, r.result.runId).find((e) => e.kind === 'error').message, /gpt-oss:20b isn't installed in Ollama: run `ollama pull gpt-oss:20b`/);
+  // A saved key for a custom server at http:// on another computer: never sent.
+  await keyring.setKey('custom:llm.example.com', FAKE_KEY, { env: kc.env });
+  r = await extRequest(ext, 'agent.start', { ...START, agent: 'codex-oss', prompt: 'x', model: 'm', openModel: { provider: 'custom', baseUrl: 'http://llm.example.com/v1' } });
+  d = await waitDone(ext, r.result.runId);
+  assert.match(eventsOf(ext, r.result.runId).find((e) => e.kind === 'error').message, /must start with https:\/\//);
   assert.ok(!fs.existsSync(path.join(bin, 'calls')), 'codex never ran');
   // The model picker lists what that server has.
   const m = await extRequest(ext, 'agent.models', { agent: 'codex-oss', openModel: { provider: 'ollama', baseUrl: `${srv.url}/v1` } });
   assert.deepEqual(m.result.models.map((x) => x.id), ['llama3:8b']);
 });
 
-test('doctor and `trif agent open-model`: provider, key found or not (never shown), Ollama reachable, model installed', async () => {
+test('`trif agent open-model`: --set-key from stdin (never argv), --remove-key; --key-env gone; doctor: key saved or missing (never shown), key variables in the environment', async () => {
   const srv = await startFakeModelServer({ models: ['gpt-oss:20b'] });
   cleanups.push(() => srv.close());
   const { home } = makeHome();
-  let res = await runCli(['agent', 'open-model'], { home });
+  const kc = makeFakeKeychain(path.join(home, 'kc'));
+  const env = kc.env;
+  let res = await runCli(['agent', 'open-model'], { home, env });
   assert.equal(res.code, 0, res.stderr);
   assert.match(res.stdout, /provider {2}ollama .*not set up yet/);
-  res = await runCli(['agent', 'open-model', '--provider', 'openrouter', '--key-env', 'TTEST_KEY', '--model', 'z-ai/glm-5.3'], { home, env: { TTEST_KEY: FAKE_KEY } });
+  assert.doesNotMatch(res.stdout, /API key/);
+  res = await runCli(['agent', 'open-model', '--provider', 'openrouter', '--model', 'z-ai/glm-5.3'], { home, env });
   assert.equal(res.code, 0, res.stderr);
-  assert.match(res.stdout, /key in {4}TTEST_KEY: set \(in this environment; not shown\)/);
+  assert.match(res.stdout, /API key {3}none yet: trif agent open-model --set-key/);
+  res = await runCli(['agent', 'open-model', '--set-key'], { home, env, input: `${FAKE_KEY}\n` });
+  assert.equal(res.code, 0, res.stderr);
+  assert.match(res.stdout, /Saved the OpenRouter API key in your Mac’s Keychain/);
+  assert.match(res.stdout, /API key {3}saved in your Mac’s Keychain \(not shown\)/);
+  assert.ok(!res.stdout.includes(FAKE_KEY) && !res.stderr.includes(FAKE_KEY));
+  assert.deepEqual(kc.items(), { 'TRIF open model key\u0000openrouter': FAKE_KEY });
+  assert.ok(!kc.argvText().includes(FAKE_KEY), 'never in the keyring tool\'s argv');
+  res = await runCli(['agent', 'open-model', '--json'], { home, env });
+  const j = JSON.parse(res.stdout);
+  assert.equal(j.hasKey, true);
   assert.ok(!res.stdout.includes(FAKE_KEY));
-  res = await runCli(['agent', 'open-model', '--key-env', 'sk-or-v1-abcdef0123'], { home });
+  // A key on the command line: refused, not echoed (and not saved).
+  res = await runCli(['agent', 'open-model', '--set-key', 'sk-or-v1-onthecommandline0123'], { home, env });
   assert.notEqual(res.code, 0);
-  assert.match(res.stderr, /NAME of the environment variable/);
+  assert.match(res.stderr, /never put a key on the command line/);
+  assert.ok(!res.stderr.includes('onthecommandline') && !res.stdout.includes('onthecommandline'));
+  assert.equal(kc.items()['TRIF open model key\u0000openrouter'], FAKE_KEY);
+  res = await runCli(['agent', 'open-model', '--set-key'], { home, env, input: 'bad key with spaces\n' });
+  assert.notEqual(res.code, 0);
+  assert.match(res.stderr, /doesn't look like an API key/);
+  res = await runCli(['agent', 'open-model', '--key-env', 'OPENROUTER_API_KEY'], { home, env });
+  assert.notEqual(res.code, 0);
+  assert.match(res.stderr, /--key-env is gone/);
 
+  // Doctor's checks (in this process, the stand-in keychain).
   const ws = (openModel) => ({ config: { openModel } });
-  const lookup = async (name, { env }) => (env[name] ? { value: env[name], source: 'helper' } : { value: null, error: 'not set' });
-  let c = await oss.doctorChecks(ws({ provider: 'openrouter', keyEnv: 'TTEST_KEY' }), { env: { TTEST_KEY: FAKE_KEY }, lookup });
-  assert.deepEqual(c.map((x) => x.status), ['ok']);
-  assert.match(c[0].title, /TTEST_KEY is set/);
-  assert.ok(!JSON.stringify(c).includes(FAKE_KEY));
-  c = await oss.doctorChecks(ws({ provider: 'openrouter' }), { env: {}, lookup });
+  let c = await oss.doctorChecks(ws({ provider: 'openrouter' }), { env });
+  assert.deepEqual(c.map((x) => [x.status, x.title]), [['ok', 'OpenRouter key: saved in your Mac’s Keychain (not shown)']]);
+  // ... and through `trif doctor`.
+  res = await runCli(['doctor'], { home, env });
+  assert.match(res.stdout, /OpenRouter key: saved in your Mac’s Keychain \(not shown\)/);
+  assert.ok(!res.stdout.includes(FAKE_KEY));
+  res = await runCli(['agent', 'open-model', '--remove-key'], { home, env });
+  assert.equal(res.code, 0, res.stderr);
+  assert.match(res.stdout, /Removed the API key/);
+  assert.deepEqual(kc.items(), {});
+  c = await oss.doctorChecks(ws({ provider: 'openrouter' }), { env });
   assert.equal(c[0].status, 'warn');
-  assert.match(c[0].fix, /export OPENROUTER_API_KEY=/);
-  c = await oss.doctorChecks(ws({ provider: 'ollama', baseUrl: `${srv.url}/v1` }), { env: {}, lookup });
+  assert.equal(c[0].title, 'OpenRouter key: missing, so runs can\'t reach OpenRouter');
+  assert.equal(c[0].fix, 'set it in the side panel\'s Settings, or with trif agent open-model --set-key');
+  // Key variables in the doctor's environment: named (presence only), with the fix.
+  res = await runCli(['doctor'], { home, env: { ...env, OPENROUTER_API_KEY: 'sk-or-v1-exported0123456789', MY_SERVICE_API_KEY: 'x0123456789' } });
+  assert.match(res.stdout, /API key variables set in this environment: MY_SERVICE_API_KEY, OPENROUTER_API_KEY/);
+  assert.match(res.stdout, /remove the export lines from your shell profile/);
+  assert.ok(!res.stdout.includes('exported0123456789'));
+  assert.equal(oss.keyVarsCheck({ PATH: '/bin', HOME: '/h' }), null);
+  assert.equal(oss.keyVarsCheck({ OPENAI_API_KEY: '' }), null);
+  assert.match(oss.keyVarsCheck({ HF_TOKEN: 'x' }).title, /variable set in this environment: HF_TOKEN\. Every program/);
+  // A custom server: "none saved" is fine.
+  c = await oss.doctorChecks(ws({ provider: 'custom', baseUrl: 'https://llm.example.com/v1', model: 'm' }), { env });
+  assert.deepEqual([c[0].status, c[0].title], ['info', 'API key for llm.example.com: none saved (fine if https://llm.example.com/v1 needs none; set one in the side panel\'s Settings or with trif agent open-model --set-key)']);
+  c = await oss.doctorChecks(ws({ provider: 'ollama', baseUrl: `${srv.url}/v1` }), { env });
   assert.deepEqual(c.map((x) => [x.status, x.title.replace(/.*: /, '')]), [['ok', 'Ollama is running (1 model installed)']]);
-  c = await oss.doctorChecks(ws({ provider: 'ollama', baseUrl: `${srv.url}/v1`, model: 'qwen3-coder:30b' }), { env: {}, lookup });
+  c = await oss.doctorChecks(ws({ provider: 'ollama', baseUrl: `${srv.url}/v1`, model: 'qwen3-coder:30b' }), { env });
   assert.deepEqual([c[0].status, c[0].fix], ['warn', 'ollama pull qwen3-coder:30b']);
-  c = await oss.doctorChecks(ws({ provider: 'ollama', baseUrl: 'http://127.0.0.1:9/v1' }), { env: {}, lookup });
+  c = await oss.doctorChecks(ws({ provider: 'ollama', baseUrl: 'http://127.0.0.1:9/v1' }), { env });
   assert.match(c[0].title, /Ollama isn't reachable/);
   assert.match(c[0].fix, /ollama serve/);
   c = await oss.doctorChecks(ws(undefined), {});
@@ -447,14 +600,17 @@ test('key proxy: adds the key, streams, passes status and headers; refuses other
   await assert.rejects(fetch(`${proxy.url}/models`));
 });
 
-test('codex-oss prepare: a proxy only with a key; a 401 forgets the cached key; the run closes it; checks look again', async () => {
+test('codex-oss prepare: a proxy only with a saved key, read afresh each run; the run closes it; settings say whether one is saved', async () => {
   const srv = await startFakeModelServer({ models: ['llama3:8b'] });
   cleanups.push(() => srv.close());
-  const forgot = [];
-  const lookup = async (name, { env }) => (env[name] ? { value: env[name], source: 'helper' } : { value: null, error: 'not set' });
-  const prep = await oss.prepare({ ws: { config: { openModel: { provider: 'custom', baseUrl: `${srv.url}/v1`, keyEnv: 'TTEST_KEY', model: 'm' } } }, env: { TTEST_KEY: FAKE_KEY }, lookup, forget: (n) => forgot.push(n) });
+  const kc = makeFakeKeychain(path.join(tempDir(), 'kc'));
+  const env = kc.env;
+  const account = `custom:${new URL(srv.url).host}`;
+  await keyring.setKey(account, FAKE_KEY, { env });
+  const wsFor = (openModel) => ({ config: { openModel } });
+  const prep = await oss.prepare({ ws: wsFor({ provider: 'custom', baseUrl: `${srv.url}/v1`, model: 'm' }), env });
   assert.deepEqual(prep.env, {});
-  assert.ok(prep.unsetEnv.includes('TTEST_KEY') && prep.unsetEnv.includes('OPENAI_API_KEY') && prep.unsetEnv.includes('ANTHROPIC_API_KEY'));
+  assert.ok(prep.unsetEnv.includes('OPENAI_API_KEY') && prep.unsetEnv.includes('ANTHROPIC_API_KEY'));
   assert.deepEqual(prep.secrets, [FAKE_KEY]);
   assert.equal(prep.state.openModel.baseUrl, `${srv.url}/v1`); // (messages name the real server)
   const proxied = prep.options.openModel.proxyUrl;
@@ -463,34 +619,47 @@ test('codex-oss prepare: a proxy only with a key; a 401 forgets the cached key; 
   assert.ok(!JSON.stringify(oss.command({ bin: 'codex', prompt: 'P', ...LIMITS, ...prep.options }).args).includes(FAKE_KEY));
   const ok = await fetch(`${proxied}/models`);
   assert.equal(ok.status, 200);
-  assert.deepEqual(forgot, []);
   await prep.cleanup();
   await assert.rejects(fetch(`${proxied}/models`));
-  // A 401 from the provider: the key is looked up afresh next time.
+  // Read afresh: a key replaced, then removed, counts for the next run at once.
+  await keyring.setKey(account, 'replaced-key-0123456789', { env });
+  const p2 = await oss.prepare({ ws: wsFor({ provider: 'custom', baseUrl: `${srv.url}/v1`, model: 'm' }), env });
+  assert.deepEqual(p2.secrets, ['replaced-key-0123456789']);
+  await p2.cleanup();
+  await keyring.removeKey(account, { env });
+  const p3 = await oss.prepare({ ws: wsFor({ provider: 'custom', baseUrl: `${srv.url}/v1`, model: 'm' }), env });
+  assert.deepEqual([p3.secrets, p3.cleanup, p3.options.openModel.proxyUrl], [[], null, undefined]); // a custom server may need none
+  // A 401 through the proxy is logged (without the key).
   const http = require('http');
   const refusing = http.createServer((req, res) => { req.resume(); res.writeHead(401, { 'content-type': 'application/json' }); res.end('{"error":{"message":"No auth credentials found"}}'); });
   await new Promise((r) => refusing.listen(0, '127.0.0.1', r));
   cleanups.push(() => new Promise((r) => refusing.close(() => r())));
-  const p2 = await oss.prepare({ ws: { config: { openModel: { provider: 'custom', baseUrl: `http://127.0.0.1:${refusing.address().port}/v1`, keyEnv: 'TTEST_KEY', model: 'm' } } }, env: { TTEST_KEY: FAKE_KEY }, lookup, forget: (n) => forgot.push(n) });
-  assert.equal((await fetch(`${p2.options.openModel.proxyUrl}/responses`, { method: 'POST', body: '{}' })).status, 401);
-  assert.deepEqual(forgot, ['TTEST_KEY']);
-  await p2.cleanup();
-  // No key (a local server): no proxy, nothing to clean up.
-  const p3 = await oss.prepare({ ws: { config: { openModel: { provider: 'ollama', baseUrl: `${srv.url}/v1` } } }, env: {}, lookup });
-  assert.equal(p3.cleanup, null);
-  assert.equal(p3.options.openModel.proxyUrl, undefined);
-  // Checks (doctor, the panel's key check) look past the 10-minute cache.
-  const fresh = [];
-  const spy = async (name, opts) => { fresh.push(!!opts.fresh); return { value: 'v', source: 'shell' }; };
-  await oss.settings({ config: { openModel: { provider: 'openrouter' } } }, { check: true, lookup: spy });
-  await oss.doctorChecks({ config: { openModel: { provider: 'openrouter' } } }, { lookup: spy });
-  assert.deepEqual(fresh, [true, true]);
+  await keyring.setKey(`custom:127.0.0.1:${refusing.address().port}`, FAKE_KEY, { env });
+  const warned = [];
+  const p4 = await oss.prepare({ ws: wsFor({ provider: 'custom', baseUrl: `http://127.0.0.1:${refusing.address().port}/v1`, model: 'm' }), env, logger: { warn: (m) => warned.push(m), info() {} } });
+  assert.equal((await fetch(`${p4.options.openModel.proxyUrl}/responses`, { method: 'POST', body: '{}' })).status, 401);
+  assert.deepEqual(warned, ['open model: the model server refused the API key (401)']);
+  await p4.cleanup();
+  // No key (a local server): no proxy, the keyring isn't asked.
+  const calls = kc.argv().length;
+  const p5 = await oss.prepare({ ws: wsFor({ provider: 'ollama', baseUrl: `${srv.url}/v1` }), env });
+  assert.equal(p5.cleanup, null);
+  assert.equal(p5.options.openModel.proxyUrl, undefined);
+  assert.equal(kc.argv().length, calls);
+  // settings: hasKey, never the key.
+  let st = await oss.settings(wsFor({ provider: 'openrouter' }), { env });
+  assert.deepEqual([st.hasKey, st.key], [false, { account: 'openrouter', stored: false, keyring: 'your Mac’s Keychain', error: null }]);
+  await keyring.setKey('openrouter', FAKE_KEY, { env });
+  st = await oss.settings(wsFor({ provider: 'openrouter' }), { env });
+  assert.equal(st.hasKey, true);
+  assert.ok(!JSON.stringify(st).includes(FAKE_KEY));
+  assert.equal((await oss.settings(wsFor({ provider: 'ollama' }), { env })).key, undefined);
   // The panel's "nothing leaves it" goes by effective.local: an Ollama on another computer isn't local.
-  assert.equal((await oss.settings({ config: { openModel: { provider: 'ollama', baseUrl: 'http://gpu-box.lan:11434/v1' } } })).effective.local, false);
-  assert.equal((await oss.settings({ config: { openModel: { provider: 'ollama' } } })).effective.local, true);
+  assert.equal((await oss.settings(wsFor({ provider: 'ollama', baseUrl: 'http://gpu-box.lan:11434/v1' }))).effective.local, false);
+  assert.equal((await oss.settings(wsFor({ provider: 'ollama' }))).effective.local, true);
 });
 
-test('local means loopback; no key over plain http to another computer; well-known variables refused as the key name', () => {
+test('local means loopback; no key over plain http to another computer', () => {
   assert.equal(oss.resolve({ provider: 'ollama' }).local, true);
   assert.equal(oss.resolve({ provider: 'ollama', baseUrl: 'http://localhost:11434/v1' }).local, true);
   assert.equal(oss.resolve({ provider: 'lmstudio', baseUrl: 'http://[::1]:1234/v1' }).local, true);
@@ -499,23 +668,10 @@ test('local means loopback; no key over plain http to another computer; well-kno
   assert.equal(oss.resolve({ provider: 'ollama', baseUrl: 'http://127.0.0.1.evil.com/v1' }).local, false);
   assert.equal(oss.resolve({ provider: 'custom', baseUrl: 'https://x.com/v1' }).local, false);
   // A key over http to another computer: refused; https, or http on this computer: fine.
-  assert.match(oss.resolve({ provider: 'custom', baseUrl: 'http://llm.example.com/v1', keyEnv: 'MY_KEY', model: 'm' }).error, /must start with https:\/\//);
-  assert.equal(oss.resolve({ provider: 'custom', baseUrl: 'https://llm.example.com/v1', keyEnv: 'MY_KEY', model: 'm' }).error, null);
-  assert.equal(oss.resolve({ provider: 'custom', baseUrl: 'http://127.0.0.1:8080/v1', keyEnv: 'MY_KEY', model: 'm' }).error, null);
+  assert.match(oss.insecureKey({ baseUrl: 'http://llm.example.com/v1' }), /must start with https:\/\//);
+  assert.equal(oss.insecureKey({ baseUrl: 'https://llm.example.com/v1' }), '');
+  assert.equal(oss.insecureKey({ baseUrl: 'http://127.0.0.1:8080/v1' }), '');
   assert.equal(oss.resolve({ provider: 'custom', baseUrl: 'http://llm.example.com/v1', model: 'm' }).error, null); // no key: the user's call
-  const home = tempDir();
-  oss.saveSettings(home, { provider: 'custom', baseUrl: 'http://llm.example.com/v1', model: 'm' });
-  assert.throws(() => oss.saveSettings(home, { keyEnv: 'MY_KEY' }), /https:\/\//);
-  oss.saveSettings(home, { baseUrl: 'https://llm.example.com/v1', keyEnv: 'MY_KEY' });
-  assert.throws(() => oss.saveSettings(home, { baseUrl: 'http://llm.example.com/v1' }), /https:\/\//);
-  // Key names: not the system's, the shell's, the loader's or TRIF's own.
-  for (const n of ['PATH', 'HOME', 'USER', 'SHELL', 'TMPDIR', 'PWD', 'LANG', 'LC_ALL', 'DYLD_INSERT_LIBRARIES', 'LD_PRELOAD', 'NODE_OPTIONS', 'TRIF_RUN_TOKEN', 'WEBMODS_HOME', 'CODEX_HOME', 'SSH_AUTH_SOCK', 'path']) {
-    assert.match(shellenv.keyNameProblem(n), /not an API key's/, n);
-    assert.throws(() => oss.saveSettings(home, { keyEnv: n }), /not an API key's/, n);
-    assert.equal(oss.normalize({ provider: 'custom', keyEnv: n }).keyEnv, '', n);
-  }
-  for (const n of ['OPENROUTER_API_KEY', 'MY_LLM_KEY', 'OPENAI_API_KEY', 'GROQ_API_KEY', 'PATHWAY_KEY']) assert.equal(shellenv.keyNameProblem(n), '', n);
-  assert.equal(oss.resolve({ provider: 'openrouter', keyEnv: 'HOME' }).keyEnv, 'OPENROUTER_API_KEY'); // a stored bad name: the provider's
 });
 
 test('the default model: what a run with none picked uses, listed and run alike (local: an installed one)', async () => {
@@ -548,24 +704,6 @@ test('the default model: what a run with none picked uses, listed and run alike 
   assert.equal(r.default, null);
 });
 
-test('shellenv: done once the end marker is out, though a background job holds the output; its process group is killed', async () => {
-  const dir = tempDir();
-  const shell = path.join(dir, 'bgshell');
-  const pidFile = path.join(dir, 'bg.pid');
-  // A profile that starts a job in the background holding stdout (like a slow `nvm` or an update check).
-  fs.writeFileSync(shell, `#!/bin/sh\nsleep 20 &\necho $! > '${pidFile}'\nTTEST_BG_KEY='${FAKE_KEY}'; export TTEST_BG_KEY\n/bin/sh -c "$4"\n`);
-  fs.chmodSync(shell, 0o755);
-  shellenv.forget();
-  const t0 = Date.now();
-  const r = await shellenv.lookupEnvVar('TTEST_BG_KEY', { env: {}, shell, timeout: 10000 });
-  assert.deepEqual(r, { value: FAKE_KEY, source: 'shell', error: null });
-  assert.ok(Date.now() - t0 < 3000, `took ${Date.now() - t0} ms`);
-  const pid = Number(fs.readFileSync(pidFile, 'utf8'));
-  await waitFor(() => { try { process.kill(pid, 0); return false; } catch { return true; } }, { timeout: 3000, message: 'the background job to be killed' });
-  // A refused name never reaches the shell.
-  assert.match((await shellenv.lookupEnvVar('NODE_OPTIONS', { env: {}, shell })).error, /not an API key's/);
-});
-
 test('panel: when the open model\'s provider changes, every stored codex-oss model pick goes', async () => {
   const lib = await import('../extension/lib.js');
   const snapshots = new Map([['c.com', { agent: '', models: { 'codex-oss': 'gpt-oss:20b', codex: 'gpt-5' } }]]);
@@ -589,7 +727,7 @@ function realCodex() {
   return require('../helper/lib/agents/codex').tooOld(v) ? null : { file, version: v };
 }
 
-test('real Codex + stand-in model: model requests get through (the key proxy adds the key), the agent\'s commands get no network, no config.json, no key anywhere (procargs); trif works', { skip: !realCodex() && 'needs Codex 0.138+ (and a shell without another sandbox)' }, async () => {
+test('real Codex + stand-in model: model requests get through (the key proxy adds the keyring\'s key), the agent\'s commands get no network, no config.json, no key anywhere (procargs), no profile key variables; trif works', { skip: !realCodex() && 'needs Codex 0.138+ (and a shell without another sandbox)' }, async () => {
   const cx = realCodex();
   // Its own made-up key: earlier tests' helpers (still running) hold FAKE_KEY in their environment.
   const KEY = `fake-real-key-${require('crypto').randomBytes(12).toString('hex')}`;
@@ -599,17 +737,15 @@ test('real Codex + stand-in model: model requests get through (the key proxy add
   fs.symlinkSync(cx.file, path.join(bin, 'codex'));
   fs.mkdirSync(path.join(home, 'sites', 'example.com'), { recursive: true });
   fs.mkdirSync(path.join(home, 'sites', 'other.org'), { recursive: true });
-  // The key in the (fake) home's shell profiles too: the sandbox keeps the agent's login shell out of them,
-  // and shell_environment_policy.exclude keeps it out of the environment Codex builds from its own
-  // (unsandboxed) snapshot of that shell: without it, the commands get the key (seen with Codex 0.166).
+  // The key is in the keyring (a stand-in for /usr/bin/security), as after the user saved it in the panel.
+  const kc = makeFakeKeychain(path.join(tempDir(), 'kc')); // (outside the workspace, like the real one)
+  // A key variable some (fake) shell profile still exports: the sandbox keeps the agent's login shell out
+  // of the profiles, and the exclude globs keep it out of the environment Codex builds from its own
+  // (unsandboxed) snapshot of that shell: without them, the commands get it (seen with Codex 0.166).
+  const LEFTOVER = `leftover-${require('crypto').randomBytes(12).toString('hex')}`;
   const fakehome = path.join(home, 'fakehome');
   fs.mkdirSync(fakehome);
-  for (const f of ['.zshenv', '.zprofile', '.zshrc']) fs.writeFileSync(path.join(fakehome, f), `export TTEST_KEY='${KEY}'\n`);
-  // The helper finds the key the way it does when Chrome starts it: through the login shell (a stand-in
-  // here), not in its own environment, which (like any same-user process's) the agent's commands could read.
-  const keyShell = path.join(home, 'keyshell');
-  fs.writeFileSync(keyShell, `#!/bin/sh\nTTEST_KEY='${KEY}'; export TTEST_KEY\n/bin/sh -c "$4"\n`);
-  fs.chmodSync(keyShell, 0o755);
+  for (const f of ['.zshenv', '.zprofile', '.zshrc']) fs.writeFileSync(path.join(fakehome, f), `export TTEST_OR_API_KEY='${LEFTOVER}'\n`);
   // A value the helper's own environment does hold: the procargs probe must find it, to show it works.
   const canary = `canary-${require('crypto').randomBytes(12).toString('hex')}`;
   const sha = (t) => require('crypto').createHash('sha256').update(t).digest('hex');
@@ -624,7 +760,7 @@ test('real Codex + stand-in model: model requests get through (the key proxy add
     { run: `cat ${q(path.join(home, 'config.json'))}; echo " cat=$?"` },
     { run: `echo '// mine' > ${q(path.join(home, 'sites', 'example.com', 'oss-probe.js'))} && echo WROTE-OWN` },
     { run: `echo x > ${q(path.join(home, 'sites', 'other.org', 'oss-probe.js'))}; echo " other=$?"` },
-    { run: 'echo "key=[$TTEST_KEY]"; env | grep -c TTEST_KEY' },
+    { run: 'echo "key=[$TTEST_OR_API_KEY]"; env | grep -c TTEST_OR_API_KEY' },
     // Every same-user process's argv and environment (KERN_PROCARGS2, which the sandbox allows): no key.
     { run: `python3 -I ${q(probe)} ${sha(KEY)} ${KEY.length} ${sha(canary)} ${canary.length}` },
     { say: 'Done: probed.' },
@@ -632,9 +768,9 @@ test('real Codex + stand-in model: model requests get through (the key proxy add
   const srv = await startFakeModelServer({ script });
   cleanups.push(() => srv.close());
   script[2] = { run: `curl -sS -m 5 ${srv.url}/api/version; echo " local=$?"` };
-  fs.writeFileSync(path.join(home, 'config.json'), JSON.stringify({ env: { PATH: `${bin}:/usr/bin:/bin` }, openModel: { provider: 'custom', baseUrl: `${srv.url}/v1`, keyEnv: 'TTEST_KEY', model: 'stand-in' }, secret: 'CONFIG-SECRET' }));
-  shellenv.forget();
-  const ext = startHost(home, { TRIF_KEY_SHELL: keyShell, TTEST_CANARY: canary, TRIF_AGENT_TIMEOUT_MS: '100000' });
+  fs.writeFileSync(path.join(home, 'config.json'), JSON.stringify({ env: { PATH: `${bin}:/usr/bin:/bin` }, openModel: { provider: 'custom', baseUrl: `${srv.url}/v1`, model: 'stand-in' }, secret: 'CONFIG-SECRET' }));
+  await keyring.setKey(`custom:${new URL(srv.url).host}`, KEY, { env: kc.env });
+  const ext = startHost(home, { ...kc.env, TTEST_CANARY: canary, TRIF_AGENT_TIMEOUT_MS: '100000' });
   ext.handlers.tabs = () => [{ id: 12, url: 'https://example.com/page', title: 'Example', active: true }];
   ext.hello();
   const r = await extRequest(ext, 'agent.start', { ...START, agent: 'codex-oss', prompt: 'probe' });
@@ -668,7 +804,8 @@ test('real Codex + stand-in model: model requests get through (the key proxy add
   assert.ok(Number(scan[1]) > 10, info); // it could read other processes
   assert.ok(Number(scan[3]) >= 1, `the probe should find the canary in the helper's environment: ${info}`);
   assert.equal(scan[2], '0', `the key is in some process's argv or environment: ${info}`);
-  assert.ok(!out.includes(KEY));
+  assert.ok(!out.includes(KEY) && !out.includes(LEFTOVER));
+  assert.ok(!kc.argvText().includes(KEY));
   assert.deepEqual(done.changedFiles, ['sites/example.com/oss-probe.js']);
   assert.ok(evs.some((e) => e.kind === 'text' && e.text === 'Done: probed.'));
   assert.ok(!fs.readFileSync(path.join(home, 'runs', `${r.result.runId}.jsonl`), 'utf8').includes(KEY));

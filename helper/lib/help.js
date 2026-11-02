@@ -273,11 +273,13 @@ from stdin. Exit code 1 if it didn't end up logged in.
 
 agent open-model (experimental) shows or sets where the open-model agent (codex-oss: an open model run
 through Codex) gets its model: --provider ollama|lmstudio|openrouter|custom, --model NAME, --base-url URL
-(custom servers), --key-env VAR_NAME (the NAME of the environment variable holding the API key, e.g.
-OPENROUTER_API_KEY; the key itself is never stored). Saved in config.json "openModel".`,
+(custom servers). Saved in config.json "openModel". --set-key saves the provider's API key in the system
+keyring (the macOS Keychain; secret-tool on Linux), read from stdin or asked for without echo, never from
+the command line; --remove-key removes it. Don't export API keys in your shell profile: every program
+started from a terminal gets them, and other programs can read them.`,
     examples: ['trif agent list', 'trif agent run --url https://x.com/home "hide the trending sidebar"',
       'trif agent run --tab 12 --session 1b2c… "also hide Who to follow"', 'trif agent login',
-      'trif agent open-model --provider openrouter --model qwen/qwen3-coder'],
+      'trif agent open-model --provider openrouter --model qwen/qwen3-coder', 'trif agent open-model --provider openrouter --set-key'],
   },
   help: {
     usage: 'trif help [command]',

@@ -326,7 +326,7 @@ function onRunRequest(run, line, respond) {
 const logins = new Logins({ getWorkspace: () => workspace(ws.home), logger, onEvent: onAgentEvent });
 const runSubscribers = new Map(); // runId or loginId -> Set of CLI sockets that started it (see onClientLine)
 const AGENT_COMMANDS = new Set(['agent.list', 'agent.start', 'agent.stop', 'agent.login', 'agent.loginCode', 'agent.loginCancel', 'mod.approve',
-  'mod.update', 'instructions.get', 'instructions.set', 'agent.models', 'agent.openModel', 'agent.openModel.set', 'update.check', 'update.install', 'update.setAuto', 'report.build']);
+  'mod.update', 'instructions.get', 'instructions.set', 'agent.models', 'agent.openModel', 'agent.openModel.set', 'agent.openModel.setKey', 'agent.openModel.removeKey', 'update.check', 'update.install', 'update.setAuto', 'report.build']);
 // Helper-local too, but a run may use them (on mods inside its scope; see lib/trash.js).
 const MOD_FILE_COMMANDS = new Set(['mod.delete', 'mod.restore']);
 
@@ -416,11 +416,26 @@ function agentCommand(cmd, args) {
     case 'agent.list': return agents.listAgentsWithLogin(workspace(ws.home));
     case 'agent.models': return agents.agentModels(workspace(ws.home), String(args.agent || ''), { fresh: !!args.fresh, openModel: args.openModel || null });
     // Open models (agents/codex-oss.js): the defaults in config.json, which runs can't read or change.
-    case 'agent.openModel': return agents.getAdapter('codex-oss').settings(workspace(ws.home), { check: !!args.check });
+    case 'agent.openModel': return agents.getAdapter('codex-oss').settings(workspace(ws.home));
     case 'agent.openModel.set': {
       const r = agents.getAdapter('codex-oss').saveSettings(ws.home, args);
-      logger.info(`open model settings: ${r.provider}${r.model ? ` ${r.model}` : ''}${r.keyEnv ? ` (key in ${r.keyEnv})` : ''}`);
+      logger.info(`open model settings: ${r.provider}${r.model ? ` ${r.model}` : ''}`);
       return agents.getAdapter('codex-oss').settings(workspace(ws.home));
+    }
+    // The API key, into the keyring (keyring.js) and nowhere else: not logged, never sent back.
+    case 'agent.openModel.setKey': {
+      const oss = agents.getAdapter('codex-oss');
+      return oss.setKey(workspace(ws.home), typeof args.key === 'string' ? args.key : '').then((r) => {
+        logger.info(`open model: API key saved in the keyring (${r.account})`);
+        return oss.settings(workspace(ws.home));
+      });
+    }
+    case 'agent.openModel.removeKey': {
+      const oss = agents.getAdapter('codex-oss');
+      return oss.removeKey(workspace(ws.home)).then((r) => {
+        logger.info(`open model: API key ${r.removed ? 'removed from' : 'wasn\'t in'} the keyring (${r.account})`);
+        return oss.settings(workspace(ws.home));
+      });
     }
     case 'agent.start': return startRun(args);
     case 'agent.stop': return runs.stop(args.runId);

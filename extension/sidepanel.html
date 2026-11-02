@@ -43,10 +43,15 @@
       <span>Server</span>
       <input id="om-url" type="url" placeholder="https://…/v1" autocomplete="off" spellcheck="false" aria-label="Server address">
     </label>
-    <label id="om-key-row" class="field" hidden>
-      <span>Key in</span>
-      <input id="om-key" type="text" autocomplete="off" spellcheck="false" aria-label="Name of the environment variable holding the API key">
-    </label>
+    <div id="om-key-row" class="field" hidden>
+      <span>API key</span>
+      <div class="om-key">
+        <input id="om-key" type="password" autocomplete="off" spellcheck="false" placeholder="Paste your key" aria-label="API key">
+        <button id="om-key-save" class="btn" type="button">Save</button>
+        <button id="om-key-remove" class="btn" type="button" hidden>Remove</button>
+      </div>
+    </div>
+    <p id="om-key-status" class="note" hidden></p>
     <p id="om-note" class="note" hidden></p>
   </div>
   <label class="field">

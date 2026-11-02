@@ -47,7 +47,7 @@
   <p class="note"><a href="#" id="report-link">Report a problem</a> · <a href="#" id="setup-link">Setup and status</a></p>
 </section>
 <section id="gate" class="gate" hidden>
-  <p class="gate-title">TRIF is disabled</p>
+  <p id="gate-title" class="gate-title">TRIF is off here</p>
   <button id="gate-btn" class="btn go" type="button"></button>
   <p id="gate-err" class="mod-err" hidden></p>
 </section>
@@ -62,7 +62,7 @@
 
 <main id="chat" class="chat">
   <div id="empty" class="empty" hidden>
-    <p class="empty-lead">Describe a change and your coding agent will write a mod that runs every time this site loads.</p>
+    <p class="empty-lead">Tell me what to fix, and your coding agent will write a mod that runs every time this site loads.</p>
     <div class="chips">
       <button type="button" class="chip">Hide distractions</button>
       <button type="button" class="chip">Make it dark</button>
@@ -75,7 +75,7 @@
 
 <form id="composer" class="composer">
   <label for="input" class="visually-hidden">Message</label>
-  <textarea id="input" rows="1" placeholder="What would you like to change?"></textarea>
+  <textarea id="input" rows="1" placeholder="What should I fix?"></textarea>
   <button id="send" class="send" type="submit" title="Send" aria-label="Send">
     <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 13V3M3.5 7.5L8 3l4.5 4.5"/></svg>
   </button>

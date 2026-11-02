@@ -81,11 +81,11 @@ built on, so for now this is for trying it out:
 
 ## Using it
 
-- TRIF is off on every site until you turn it on there: the side panel shows "TRIF is disabled"
-  and a button to enable it. Until then nothing from TRIF runs on the site or reads it, not even a
-  mod for all sites, and agents (in the panel or a terminal) can't touch its tabs. The switch next to
-  the site name turns it back off.
-- Go to a site, open the side panel, and describe the change you want. The agent looks at the page,
+- TRIF is off on every site until you turn it on there: the side panel shows "TRIF is off on <site>"
+  and a "Fix this site" button that turns it on. Until then nothing from TRIF runs on the site or reads
+  it, not even a mod for all sites, and agents (in the panel or a terminal) can't touch its tabs. The
+  switch next to the site name turns it back off.
+- Go to a site, open the side panel, and tell it what to fix. The agent looks at the page,
   writes a mod, and reloads the tab so you can see it. Keep chatting to adjust it.
 - Each mod has a switch in the side panel, so you can turn it off without deleting it. Its trash icon
   deletes it, leaving a line in the chat with an Undo; deleted mods stay in `~/.trif/trash` for 30 days (`trif restore`

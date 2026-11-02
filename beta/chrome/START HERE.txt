@@ -40,7 +40,7 @@ Try it
 - Visit google.com, x.com, amazon.com or instagram.com: the mods are already working. Click the TRIF
   button to open its side panel and see them; each has a switch, and a green light when it's running on
   the page you're on.
-- On any other site, the side panel says "TRIF is disabled". Click "Enable TRIF on <site>", then
+- On any other site, the side panel says "TRIF is off on <site>". Click "Fix this site", then
   describe the change you want ("hide the comments", "make it dark") and Claude writes a mod for it.
   The first time, it may ask you to log in to Claude: click Log in and follow the steps.
 

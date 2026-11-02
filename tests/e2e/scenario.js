@@ -472,12 +472,41 @@ class Scenario {
       await this.shot(this.panelCtx, 'panel-x');
       return p.mods.map((m) => `${m.id.split('/')[1]} ${m.on ? 'on' : 'off'}`).join(', ');
     });
+    await this.narrowShots();
     if (this.o.kind === 'upgrade') await this.mergeChecks();
     await this.ext(`async (id) => { await chrome.tabs.remove(id); }`, [this.xTab]).catch(() => {});
     await this.ext(`async (id) => { await chrome.tabs.update(id, { active: true }); }`, [win.tabId]).catch(() => {});
 
     if (this.o.agent) await this.agentChecks('claude');
     if (this.o.codex) await this.agentChecks('codex');
+  }
+
+  // ---- screenshots of the panel as narrow as a side panel (for people to look at; no checks)
+
+  async narrowShots() {
+    try {
+      const panelWin = await this.panel(`async () => (await chrome.windows.getCurrent()).id`);
+      await this.ext(`async (id) => { await chrome.windows.update(id, { width: 380, height: 640 }); }`, [panelWin]);
+      // (Headless Chrome keeps its pages 1280 wide whatever the window: emulate the size there.)
+      const metrics = async (on) => {
+        if (!this.d.cdp) return;
+        const sid = await this.d._attach(this.panelCtx);
+        if (on) await this.d.cdp.send('Emulation.setDeviceMetricsOverride', { width: 380, height: 640, deviceScaleFactor: 2, mobile: false }, sid);
+        else await this.d.cdp.send('Emulation.clearDeviceMetricsOverride', {}, sid);
+      };
+      await metrics(true);
+      await sleep(800);
+      await this.shot(this.panelCtx, 'panel-narrow-x');
+      // A page without a site (the top bar without the power button: + and settings stay at the right).
+      await this.ext(`async (id) => { await chrome.tabs.update(id, { url: 'about:blank' }); }`, [this.xTab]);
+      await this.waitPanel('the panel on a page without a site', (x) => !x.site || !/x\.com/.test(x.site), 10000).catch(() => {});
+      await sleep(500);
+      await this.shot(this.panelCtx, 'panel-narrow-no-site');
+      await this.ext(`async (id, url) => { await chrome.tabs.update(id, { url }); }`, [this.xTab, `https://x.com:${this.o.servers.tlsPort}/home`]);
+      await this.waitPanel('the panel back on x.com', (x) => x.site === 'x.com' && x.mods.length >= 3, 15000);
+      await metrics(false);
+      await this.ext(`async (id) => { await chrome.windows.update(id, { width: 420, height: 900 }); }`, [panelWin]);
+    } catch (e) { this.r.note(`narrow panel screenshots: ${e.message}`); }
   }
 
   // ---- "Merge with my agent" on the edited shipped mod (upgrade scenarios, panel on x.com)
@@ -506,7 +535,12 @@ class Scenario {
       await this.shot(this.panelCtx, 'panel-merge-started');
       return `chat: "${c.messages.find((m) => m.role === 'user').text}"`;
     });
-    if (!this.o.agent) return;
+    if (!this.o.agent) {
+      // Without your login the run ends at once (not logged in); let it, so nothing writes to the browser
+      // as it closes.
+      await waitFor('the merge run to end', async () => { const x = await chat(); return x && !x.run ? x : null; }, { timeoutMs: 60000, intervalMs: 500 }).catch(() => {});
+      return;
+    }
     const done = (n0) => waitFor('the run to finish', async () => {
       const x = await chat();
       return x && !x.run && x.messages.length > n0 ? x : null;

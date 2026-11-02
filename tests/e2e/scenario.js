@@ -99,7 +99,7 @@ class Scenario {
       off: document.documentElement.dataset.trifE2eOff || null,
       user: document.documentElement.dataset.trifE2eUser || null,
       target: document.getElementById('target')?.textContent || null,
-      text: document.body ? document.body.innerText.slice(0, 2000) : '',
+      text: document.documentElement.innerText.slice(0, 2000), // all of it: a mod may add to <html> itself
     })`);
   }
 

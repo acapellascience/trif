@@ -6,6 +6,7 @@ const crypto = require('crypto');
 const fs = require('fs');
 const path = require('path');
 const { MAX_TO_EXTENSION } = require('./framing');
+const { within, ignoresCase } = require('./pathcheck');
 
 const RUN_AT = {
   'document-start': 'document_start',
@@ -136,8 +137,9 @@ function statSafe(p) {
   try { return fs.statSync(p); } catch { return null; }
 }
 
+// The system's real path (links resolved, and on macOS each component in its on-disk case), or null.
 function realOrNull(p) {
-  try { return fs.realpathSync(p); } catch { return null; }
+  try { return fs.realpathSync.native(p); } catch { return null; }
 }
 
 // A run may write its site's folder, so it can plant a link there (sites/x.com/a.js -> ~/.ssh/id_rsa, or
@@ -152,7 +154,8 @@ function listModFiles(modsDir, skipped = null) {
   const files = [];
   const root = realOrNull(modsDir);
   if (!root) return files;
-  const inside = (p) => !!p && p.startsWith(root + path.sep);
+  const ci = ignoresCase(root);
+  const inside = (p) => !!p && within(p, root, { ci });
   const skip = (id, file) => { if (skipped) skipped.push({ id, file, warning: LINK_OUTSIDE }); };
   let sites;
   try { sites = fs.readdirSync(modsDir); } catch { return files; }
@@ -188,7 +191,7 @@ function readModFile(modsDir, file) {
     const st = fs.fstatSync(fd);
     const real = realOrNull(file);
     const rst = real ? statSafe(real) : null;
-    if (!root || !real || !real.startsWith(root + path.sep) || !rst || rst.ino !== st.ino || rst.dev !== st.dev) {
+    if (!root || !real || !within(real, root, { ci: ignoresCase(root) }) || !rst || rst.ino !== st.ino || rst.dev !== st.dev) {
       throw new Error(LINK_OUTSIDE);
     }
     if (!st.isFile()) throw new Error('not a file');

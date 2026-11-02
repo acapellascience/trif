@@ -9,6 +9,7 @@ const fs = require('fs');
 const path = require('path');
 const { modSnapshot, diffSnapshots } = require('./runs');
 const { outOfScope } = require('./scope');
+const { within, ignoresCase } = require('./pathcheck');
 
 // Why a mod a run changed must wait for the user: it reaches other sites, or its header says it changes
 // what the site receives (risk tier 2, see AGENTS.md "Account safety"). '' when it needn't.
@@ -52,13 +53,14 @@ function updateHeld(ws, mods, scopes) {
   const live = scopes.filter((s) => s.before);
   if (live.length) {
     const now = modSnapshot(ws.modsDir, ws.home);
+    const ci = ignoresCase(ws.home); // (APFS: sites/X.com is sites/x.com)
     for (const s of live) {
       const touched = new Set(diffSnapshots(s.before, now));
       const locked = s.locked || [];
       for (const m of mods) {
         const rel = path.relative(ws.home, m.file);
         if (!touched.has(rel)) continue;
-        if (locked.some((d) => rel === d || rel.startsWith(d + path.sep))) continue;
+        if (locked.some((d) => within(rel, d, { ci, orEqual: true }))) continue;
         const reason = holdReason(m, s.scope);
         if (!reason || (held[m.id] && held[m.id].hash === m.hash)) continue;
         held[m.id] = { hash: m.hash, site: s.site, scope: s.scope, runId: s.runId, at: Date.now(), reason };

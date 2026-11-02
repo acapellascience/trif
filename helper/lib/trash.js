@@ -10,6 +10,7 @@ const fs = require('fs');
 const path = require('path');
 const { buildMod, isIgnoredName, readModFile } = require('./mods');
 const { outOfScope } = require('./scope');
+const { badName } = require('./pathcheck');
 
 const TRASH = 'trash';
 const TRASH_DAYS = 30;
@@ -22,7 +23,7 @@ function trashDir(ws) { return path.join(ws.home, TRASH); }
 /** Splits a mod id into {site, mod}, refusing anything that isn't a plain <site>/<mod>. */
 function parseId(id) {
   const m = /^([^/\\\s]+)\/([^/\\\s]+?)(?:\.js)?$/.exec(String(id || '').trim());
-  if (!m || [m[1], m[2]].some((p) => p === '..' || isIgnoredName(p))) {
+  if (!m || [m[1], m[2]].some((p) => p === '..' || isIgnoredName(p) || badName(p))) {
     throw new TrashError(`"${id}" isn't a mod id: use <site>/<mod>, e.g. x.com/hide-reposts`);
   }
   return { site: m[1], mod: m[2] };

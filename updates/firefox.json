@@ -6,6 +6,11 @@
           "version": "0.1.1",
           "update_link": "https://github.com/acapellascience/WebMods/releases/download/v0.1.1/webmods-firefox-0.1.1.xpi",
           "update_hash": "sha256:f905baf034db8b71d6748ea59392c4509fe1e3221bf87795e437fd39bab17efc"
+        },
+        {
+          "version": "0.1.2",
+          "update_link": "https://github.com/acapellascience/WebMods/releases/download/v0.1.2/webmods-firefox-0.1.2.xpi",
+          "update_hash": "sha256:fbc4470fa0a0dc8e120598d09b4cad69a3115c680a14775197e0c3531d1d9828"
         }
       ]
     }

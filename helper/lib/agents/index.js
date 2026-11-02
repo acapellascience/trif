@@ -132,7 +132,7 @@ function contextText({ url, tabId, scope, browser }) {
     ? `They're looking at ${url}${tabId != null ? ` (tab ${tabId}): pass \`--tab ${tabId}\` to trif commands` : ''}.`
     : "They didn't say which page they're on: run `trif tabs` if you need it.";
   const limit = scope
-    ? ` This run is limited to ${scope}: trif commands only work on its tabs, and a mod you write that matches other sites is held until the user approves it (see "Side-panel runs" in AGENTS.md).`
+    ? ` This run is limited to ${scope}: trif commands only work on its tabs, and a mod you write that matches other sites is held until the user approves it (see "Side-panel runs" in AGENTS.md). You can only change files in ${scope}'s folders under sites/ (start a mod with \`trif new ${scope} <name>\`); writes anywhere else are refused, so if one is, check the folder rather than giving up.`
     : '';
   // The browser whose panel started the run (its hello names it); "browser" when unknown, e.g. from a terminal.
   return `You're running inside the TRIF side panel in the user's ${browser || 'browser'}. ` + where + limit +

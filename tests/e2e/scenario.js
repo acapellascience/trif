@@ -621,7 +621,7 @@ class Scenario {
     const lines = fs.readFileSync(file, 'utf8').split('\n');
     fs.copyFileSync(file, this.r.file(`${this.label}-helper.log`));
     // Before the harness allows user scripts, every sync logs that each mod couldn't register: expected.
-    const expected = (l) => /User scripts aren't allowed for TRIF/.test(l);
+    const expected = (l) => /User scripts aren't allowed for TRIF|User scripts are off for TRIF/.test(l); // Firefox's wording, Chrome's
     const skipped = lines.filter(expected).length;
     const bad = lines.filter((l) => !expected(l) && /\b(WARN|ERROR|warn|error)\b/.test(l.slice(0, 60)));
     const errors = bad.filter((l) => /\bERROR\b|\berror\b/.test(l.slice(0, 60)));

@@ -153,6 +153,17 @@ class FirefoxDriver {
       const el = document.querySelector(sel);
       if (!el) throw new Error('no element ' + sel);
       el.scrollIntoView({ block: 'center' });
+      // Wait for the layout to settle (a notice appearing above can move the element mid-click), and for
+      // nothing to cover the element's centre.
+      const rect = () => JSON.stringify(el.getBoundingClientRect());
+      for (let i = 0, last = rect(); i < 20; i++) {
+        await new Promise((r) => setTimeout(r, 150));
+        const now = rect();
+        const c = el.getBoundingClientRect();
+        const hit = document.elementFromPoint(c.x + c.width / 2, c.y + c.height / 2);
+        if (now === last && hit && (hit === el || el.contains(hit))) break;
+        last = now;
+      }
       const b = el.getBoundingClientRect();
       return [Math.round(b.x + b.width / 2), Math.round(b.y + b.height / 2)];
     }`, [selector]);

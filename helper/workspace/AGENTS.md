@@ -31,6 +31,7 @@ install or update it.
   sites/<site>/<mod>.js  the mods: <site> is a hostname (x.com, news.ycombinator.com), <mod> is kebab-case
   sites/all-sites/       mods with no single home site (see "Mods for several sites")
   screenshots/           where `webmods screenshot` writes by default (in a side-panel run, screenshots/<site>/)
+  .shipped/              versions of the mods WebMods ships, kept for merging (read them; never edit them)
 ```
 
 Files whose name starts with `_` or `.` are ignored by WebMods: use them for tests, notes and scratch
@@ -76,6 +77,24 @@ you to from their terminal (side-panel runs can't).
 - Wrap the body in an IIFE as above: early `return`s work, nothing leaks into the page's globals, and
   `webmods check` can parse the file.
 - Start new mods with `webmods new <site> <mod>`; it creates the file from a template and prints its path.
+
+### Mods WebMods ships
+
+The mods setup put in the workspace (Plain X, the Google, Amazon and Instagram ones) say
+`// @source webmods` and `// @version <n>` in their header. You may change them like any other mod when
+the user asks. While a copy is exactly as shipped, WebMods replaces it with each new version silently;
+once it's changed, it never does: when a new version comes, the user gets an offer in the side panel to
+use it (their copy goes to the trash), keep theirs, or merge the two with their agent. `webmods mods`
+shows "update available (you've changed it)" on such a mod. Keep the `@source` and `@version` lines when
+you edit one.
+
+Merging (a side-panel run started from that offer says so, with the three files): `.shipped/<site>/<mod>.js`
+is what was shipped before, the version the user's copy started from; `.shipped/<site>/<mod>.new.js` is the
+new version; edit only the user's copy in `sites/`. Keep every change the user made, bring in WebMods'
+changes, set `@version` to the new version's, check it parses, reload, and tell the user briefly what
+changed and anything you couldn't bring over. In a terminal, after merging, run
+`webmods mod-update <site>/<mod> --merged` so the update isn't offered again; choosing to use the new
+version or keep theirs (`--use-new`, `--keep`) is the user's call, so ask first.
 
 ### Mods for several sites
 
@@ -218,7 +237,8 @@ logged in to:
   (write them anyway when they help; the user can run them). `webmods check` checks syntax.
 - `webmods run -f` and `webmods check` read files from `sites/` only, and `-o` writes there or to your
   screenshots folder. Other runs' logs, other sites' screenshots and config.json aren't readable.
-- `webmods setup`, `webmods agent` and `webmods approve` are the user's; they fail inside a run.
+- `webmods setup`, `webmods agent`, `webmods approve` and `webmods mod-update` are the user's; they
+  fail inside a run. (A merge run is settled by the helper when it finishes well.)
 
 ## Workflow
 

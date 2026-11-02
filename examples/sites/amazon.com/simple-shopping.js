@@ -4,6 +4,8 @@
 // @match       https://www.amazon.com/*
 // @run-at      document-start
 // @risk        1 hides sponsored results and ad slots, so their ad impressions never report (looks like an ad blocker)
+// @source      webmods
+// @version     1
 // ==/WebMod==
 
 (() => {

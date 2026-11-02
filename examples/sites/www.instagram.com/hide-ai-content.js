@@ -4,6 +4,8 @@
 // @match       https://www.instagram.com/*
 // @run-at      document-start
 // @risk        1 patches JSON.parse, which the page's scripts could notice
+// @source      webmods
+// @version     1
 // ==/WebMod==
 
 (() => {

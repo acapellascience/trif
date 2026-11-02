@@ -11,7 +11,7 @@ const os = require('os');
 const path = require('path');
 const P = require('./paths');
 const { selectBrowsers, SAFARI_AGENT_LABEL, safariAgentPlist } = require('./browsers');
-const { preinstallMods } = require('./preinstalled');
+const { preinstallMods, updateShippedMods } = require('./preinstalled');
 const { acquireInstallLock, pidAlive } = require('./lock');
 
 // Quote for a POSIX shell double-quoted string.
@@ -360,6 +360,18 @@ function setup(opts = {}) {
     if (on.length) say(`mods          preinstalled, on: ${on.join(', ')}`);
     if (off.length) say(`mods          preinstalled, off until you switch them on in the side panel: ${off.join(', ')}`);
     if (sites.length) say(`sites         WebMods starts on for ${sites.join(', ')} (off everywhere else until you turn it on there)`);
+    // Later versions of the shipped mods: unchanged copies are replaced, edited ones offered the new version.
+    const vers = (m) => `${m.id}${m.version ? ` (version ${m.version})` : ''}`;
+    try {
+      const { updated, waiting } = updateShippedMods(home, ws.modsDir, examplesDir);
+      if (updated.length) say(`mods          updated to the new version: ${updated.map(vers).join(', ')}`);
+      if (waiting.length) {
+        say(`mods          new version waiting, not installed because you changed these: ${waiting.map(vers).join(', ')}`);
+        say('              (the side panel offers it on each: use it, keep yours, or merge them with your agent)');
+      }
+    } catch (e) {
+      say(`mods          couldn't update the mods WebMods ships: ${e.message}`);
+    }
   }
   const claudeSrc = path.join(helperDir, 'workspace', 'CLAUDE.md');
   const claude = fs.existsSync(claudeSrc) ? fs.readFileSync(claudeSrc, 'utf8') : '@AGENTS.md\n@instructions.md\n';

@@ -4,6 +4,8 @@
 // @match       https://www.amazon.com/*
 // @run-at      document-start
 // @risk        1 covers the whole home page, ads included, so their impressions never report
+// @source      webmods
+// @version     1
 // ==/WebMod==
 
 (() => {

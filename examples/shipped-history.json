@@ -1,0 +1,73 @@
+{
+  "amazon.com/simple-home": [
+    "f8f6cf6969b6e9e3aa20ca55f4963be54d69774d",
+    "6c536dfec92e237be07676a898ec164587e25711"
+  ],
+  "amazon.com/simple-shopping": [
+    "abe0bc7f4451b53f2a078d2a2e3c0276ee290aaf",
+    "a8dbfd6a318fee21d82647387d10c4e6878a327e"
+  ],
+  "www.google.com/hide-ai-in-results": [
+    "ca98e4800a4e65b7334a879f55e77e263d76ad52",
+    "c43e175d8266433152936758498577cf549f9ec4"
+  ],
+  "www.google.com/hide-ai-mode": [
+    "eec9b362dce4588e0fe0d0930c012b32f66127fc",
+    "ac128852fa4540a8525a970a88d09a9921968dca"
+  ],
+  "www.google.com/hide-extra-sections": [
+    "85720e4467151e6b13f61efd9a008090e59da5ad",
+    "f77918919903cce37d27f82ebb0fe2c9a46cfe8f"
+  ],
+  "www.google.com/hide-sponsored": [
+    "810cf044eb22b832e7c7d610b0c5cd52cbd608a7",
+    "fabc539970300a43dcc09b59e37e11a66f211e34"
+  ],
+  "www.instagram.com/desaturate": [
+    "c94ae1c6f6cb40c20f2ea1a70c1d1e6d8e8aa582",
+    "14231260104b552fd6799a71bd5612824a612242",
+    "cea7ccddf950d7698a72e24916ea872896b062e7"
+  ],
+  "www.instagram.com/following-only-feed": [
+    "8b9ec1256e7d85fb2ff9fb0b401a0266106f52fc",
+    "6cafc09aeca6dd6f2d07742b85d2cb8d885c9a7e",
+    "dbb1d93be16c5fbd803440e7b1e8c4e24653bc5d",
+    "0d1d5b2fac23bdb5a1aa3a0155853cbe48d789e1",
+    "3464d2ca09d7a94efdee9293185693d6522bac80"
+  ],
+  "www.instagram.com/hide-ai-content": [
+    "8c5d41e49e791a1b0286c7db15273cf1e904a3d0",
+    "c3ccd848275eaf244f4eb3bf60838409962a0919",
+    "d404e21b9f4ab6940ba7277bc37a205002170d58",
+    "288948a2f1eb9068346c4c0f0d4a8d2a18c05f90",
+    "b097bf2f71274382a4a18f950a2cb4d176602828"
+  ],
+  "www.instagram.com/hide-reposts": [
+    "6d47d9e1b7acceda13d117bf546dfbf51c03b902",
+    "584643560683d3d88c000db2c18f707a3d8b46e7",
+    "3831b13f98ecf128dec0bf56f7e59fd83edd0249",
+    "ccc5ec4fe6907c76b76412450d0ae6c237c1cf65",
+    "f183ef9bcfb260ba853c14720fe1aaeb64466b23"
+  ],
+  "x.com/plain-x": [
+    "b1acf27f42fd30d34c2102e1c9657a878b1f26cb",
+    "5829ae2650992705d5b383133e8693fce1d5357a",
+    "6fafa5ded0beeb325c4b92bba1ece18159cbedc9",
+    "a4f0adbd3877819a0cc80e379796df9e45fdb78c",
+    "a42f805793191588d91de620e4906a0fb0695fee",
+    "0e4c1bd954f4d8e83b78543e0522ca576d4d242f",
+    "b161394a66da188cb5c5402fff5e43feef588dda",
+    "3e0cb01ed3eb8d43e701f29602087ce32b499581",
+    "f04d073d3dc889bd80260db211c08bfe162713b3",
+    "f3243188e23a5b8b455d20f3a41b300790088c5f"
+  ],
+  "x.com/punk-fonts": [
+    "6b07d068f0f3632933133a3b8fb8d6657778160b",
+    "edf90fb6a8c9fac514577be140aadee029201609",
+    "67ae93db12ad71b1ee693ee3df86ca73d7823677"
+  ],
+  "x.com/rainbow-rave": [
+    "94c30538c799f42ac4a4da2f698718e4b13ea2dd",
+    "87160c99ace91a8cd278d3dadda9e0cba552b8e6"
+  ]
+}

@@ -102,4 +102,4 @@ function restoreMod(ws, id, { scope } = {}) {
   return { id: `${site}/${mod}`, file };
 }
 
-module.exports = { deleteMod, restoreMod, listTrash, emptyTrash, TrashError, TRASH_DAYS };
+module.exports = { deleteMod, restoreMod, listTrash, emptyTrash, parseId, TrashError, TRASH_DAYS };

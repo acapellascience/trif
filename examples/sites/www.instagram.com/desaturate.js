@@ -4,6 +4,8 @@
 // @match       https://www.instagram.com/*
 // @run-at      document-start
 // @risk        0 render-only
+// @source      webmods
+// @version     1
 // ==/WebMod==
 
 (() => {

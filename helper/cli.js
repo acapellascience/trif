@@ -13,16 +13,18 @@ const { COMMANDS, mainHelp, commandHelp } = require('./lib/help');
 const { loadHeld } = require('./lib/held');
 const { pickHelper, listHelpers, describeHelper } = require('./lib/helpers');
 const trash = require('./lib/trash');
+const shipped = require('./lib/preinstalled');
 
 // Inside a side-panel agent run (the helper set WEBMODS_RUN_TOKEN) these are the user's alone.
-const NOT_IN_RUNS = new Set(['setup', 'agent', 'approve']);
+const NOT_IN_RUNS = new Set(['setup', 'agent', 'approve', 'mod-update']);
 
 // Output piped into something that stops reading early (`webmods tabs | head -1`) isn't an error.
 process.stdout.on('error', (e) => { if (e.code === 'EPIPE') process.exit(0); throw e; });
 
 const VALUE_FLAGS = new Set(['--tab', '--url', '-o', '--out', '--output', '--filter', '--limit', '-f', '--file',
   '--browser', '--home', '--native-dir', '--bin-dir', '--timeout', '--agent', '--session', '--model', '--site', '--auto']);
-const BOOL_FLAGS = new Set(['--json', '--hard', '--help', '-h', '--force', '--no-link', '--no-examples', '--copy', '--link', '--install', '--open']);
+const BOOL_FLAGS = new Set(['--json', '--hard', '--help', '-h', '--force', '--no-link', '--no-examples', '--copy', '--link', '--install', '--open',
+  '--use-new', '--keep', '--merged']);
 const ALIASES = { '--out': '-o', '--output': '-o', '--file': '-f', '-h': '--help' };
 
 class UsageError extends Error {}
@@ -270,6 +272,7 @@ const handlers = {
     const applyErrors = new Map((((info.modsApplied || {}).errors) || []).map((e) => [e.id, e.error]));
     const helperErrors = new Map((info.modErrors || []).map((e) => [e.id, e.error]));
     const held = info.held || {};
+    const updates = info.updates || {};
     const ids = [...new Set([...(info.mods || []), ...registered.keys()])].sort();
     lines.push(`mods          ${ids.length} in ${info.modsDir}`);
     for (const id of ids) {
@@ -283,11 +286,13 @@ const handlers = {
       else if (!registered.has(id)) s = 'not known to the extension yet';
       else s = registered.get(id) ? 'registered' : 'NOT REGISTERED';
       if (offSites.has(id) && !off.has(id)) s += ` (off on ${offSites.get(id).join(', ')})`;
+      if (updates[id]) s += `; ${updateText(updates[id])}`;
       lines.push(`  ${pad(id, 40)} ${s}`);
     }
     for (const [id, err] of helperErrors) if (!ids.includes(id)) lines.push(`  ${pad(id, 40)} NOT SENT: ${err}`);
     if (off.size) lines.push(`              off = switched off by the user (webmods enable <id> turns one back on)`);
     if (Object.keys(held).length) lines.push('              HELD = written by a side-panel agent for another site; not running until the user approves it');
+    if (Object.keys(updates).length) lines.push('              update available = WebMods has a new version of a mod it ships; see webmods mod-update <id>');
     if (sitesOff.size) lines.push('              waiting = not running until the user turns WebMods on for the site (side panel)');
     if (st && Array.isArray(st.sitesOn)) {
       lines.push(`sites on      ${st.sitesOn.length ? st.sitesOn.join(', ') : '(none)'}; WebMods is off everywhere else: no mods, no page commands`);
@@ -394,6 +399,49 @@ const handlers = {
     else out(`Send this, with what went wrong, to ${r.email || 'whoever gave you WebMods'}.`);
   },
 
+  // A new version of a shipped mod the user changed (lib/preinstalled.js). Works without the browser;
+  // a running helper sends the change on. The user's choice, so not inside a side-panel run.
+  async 'mod-update'(ctx, pos) {
+    if (!pos[0]) throw new UsageError('missing mod id');
+    const id = modId(pos[0]);
+    const choices = ['--use-new', '--keep', '--merged'].filter((f) => ctx.opts[f]);
+    if (choices.length > 1) throw new UsageError('pick one of --use-new, --keep and --merged');
+    const { mods } = scanMods(ctx.ws.modsDir);
+    const mod = mods.find((m) => m.id === id);
+    const u = mod ? shipped.pendingUpdates(ctx.ws.home, [mod])[id] : null;
+    if (!choices.length) {
+      const rec = shipped.loadPreinstalled(ctx.ws.home).shipped[id];
+      const files = rec && rec.pending ? {
+        mine: mod ? mod.file : null, new: shipped.newFile(ctx.ws.home, id),
+        base: rec.hash && fs.existsSync(shipped.baseFile(ctx.ws.home, id)) ? shipped.baseFile(ctx.ws.home, id) : null,
+      } : null;
+      if (ctx.json) return printJson({ id, update: u || null, files });
+      if (!u) return out(`${id}: no new WebMods version waiting`);
+      out(`${id}: ${updateText(u)}`);
+      out(`  yours:            ${files.mine}`);
+      out(`  the new version:  ${files.new}`);
+      out(`  shipped before:   ${files.base || "(not kept: your copy is older than WebMods' record of it)"}`);
+      out(`Use it (yours goes to the trash): webmods mod-update ${id} --use-new`);
+      out(`Keep yours (this version isn't offered again): webmods mod-update ${id} --keep`);
+      out(`Or merge the new version into yours (your agent can, from the files above), then: webmods mod-update ${id} --merged`);
+      return;
+    }
+    if (ctx.opts['--use-new']) {
+      const r = shipped.useNewVersion(ctx.ws, id);
+      if (ctx.json) return printJson({ id: r.id, choice: 'new', version: r.version, file: r.file, trashed: r.trashed });
+      out(`${r.id} is now ${r.version ? `version ${r.version}` : 'the new version'}${r.trashed ? `; your copy is in the trash (webmods restore ${r.id} brings it back)` : ''}`);
+    } else if (ctx.opts['--keep']) {
+      const r = shipped.keepMine(ctx.ws, id);
+      if (ctx.json) return printJson({ id: r.id, choice: 'mine', version: r.version });
+      out(`kept your ${r.id}; ${r.version ? `version ${r.version}` : 'this version'} won't be offered again (a later one will)`);
+    } else {
+      const rec = shipped.loadPreinstalled(ctx.ws.home).shipped[id];
+      if (!rec || !rec.pending || !shipped.resolveMerge(ctx.ws.home, id, rec.pending.hash)) throw new trash.TrashError(`there's no new WebMods version of ${id} waiting`);
+      if (ctx.json) return printJson({ id, choice: 'merged', version: rec.pending.version || null });
+      out(`${id}: marked as merged with ${rec.pending.version ? `version ${rec.pending.version}` : 'the new version'}`);
+    }
+  },
+
   async restore(ctx, pos) {
     if (!pos[0]) {
       const items = trash.listTrash(ctx.ws);
@@ -403,7 +451,7 @@ const handlers = {
       return;
     }
     const id = modId(pos[0]);
-    const r = process.env.WEBMODS_RUN_TOKEN ? await ctx.call('mod.restore', { id }, 10000) : trash.restoreMod(ctx.ws, id);
+    const r = process.env.WEBMODS_RUN_TOKEN ? await ctx.call('mod.restore', { id }, 10000) : shipped.restoreMod(ctx.ws, id);
     if (ctx.json) return printJson({ id: r.id, restored: true, file: r.file });
     out(`restored ${r.id} (${r.file}); it's back on or off as it was before`);
   },
@@ -566,12 +614,13 @@ const handlers = {
     const { enabled, offSites } = await knownSwitches(ctx);
     const held = loadHeld(ctx.ws.home);
     const isHeld = (m) => held[m.id] && held[m.id].hash === m.hash && !held[m.id].approved;
+    const updates = shipped.pendingUpdates(ctx.ws.home, mods);
     if (ctx.json) {
       return printJson({
         modsDir: ctx.ws.modsDir,
         mods: mods.map(({ code, ...m }) => ({
           ...m, ...(enabled.has(m.id) ? { enabled: enabled.get(m.id) } : {}), ...(offSites.has(m.id) ? { offSites: offSites.get(m.id) } : {}),
-          ...(isHeld(m) ? { held: held[m.id] } : {}),
+          ...(isHeld(m) ? { held: held[m.id] } : {}), ...(updates[m.id] ? { update: updates[m.id] } : {}),
         })),
         errors,
         warnings,
@@ -588,7 +637,9 @@ const handlers = {
       if (enabled.get(m.id) === false) out(`  switched off by the user (not running; webmods enable ${m.id} turns it on)`);
       else if (offSites.has(m.id)) out(`  switched off by the user on ${offSites.get(m.id).join(', ')} (webmods enable ${m.id} --site <site> turns it back on there)`);
       if (isHeld(m)) out(`  HELD: a side-panel agent wrote it while working on ${held[m.id].site}, but ${held[m.id].reason}. Not running until the user approves it (webmods approve ${m.id}).`);
+      if (updates[m.id]) out(`  ${updateText(updates[m.id])}: webmods mod-update ${m.id}`);
       if (m.description) out(`  ${m.description}`);
+      if (m.source === 'webmods') out(`  from WebMods${m.version ? `, version ${m.version}` : ''}`);
       out(`  matches: ${m.matches.join(' ')}`);
       if (m.risk) out(`  risk: ${m.risk.tier}${m.risk.why ? ` (${m.risk.why})` : ''}`);
       if (m.excludes.length) out(`  excludes: ${m.excludes.join(' ')}`);
@@ -668,6 +719,11 @@ const handlers = {
 };
 
 // ---------------------------------------------------------------- mod switches
+
+// "update available (you've changed it): version 3" for a pendingUpdates entry.
+function updateText(u) {
+  return `update available${u.modified ? " (you've changed it)" : ''}${u.version ? `: version ${u.version}` : ''}`;
+}
 
 // "x.com/a", "sites/x.com/a.js", "~/.webmods/sites/x.com/a.js" → "x.com/a".
 function modId(arg) {

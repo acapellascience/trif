@@ -30,7 +30,7 @@ function isIgnoredName(name) {
 // Parse the `// ==WebMod==` block. Returns raw header values plus warnings; defaults are applied
 // by buildMod because they depend on the folder and file name.
 function parseHeader(code) {
-  const out = { hasHeader: false, name: null, description: null, matches: [], excludes: [], runAt: null, risk: null, warnings: [] };
+  const out = { hasHeader: false, name: null, description: null, matches: [], excludes: [], runAt: null, risk: null, source: null, version: null, warnings: [] };
   const lines = String(code).replace(/^﻿/, '').split(/\r?\n/);
   const start = lines.findIndex((l) => HEADER_START.test(l));
   if (start === -1) return out;
@@ -69,6 +69,15 @@ function parseHeader(code) {
         else out.warnings.push(`@risk should start with 0, 1 or 2 (got "${value}")`);
         break;
       }
+      // `@source webmods` and `@version <n>` mark a mod WebMods ships (examples/), which setup keeps up
+      // to date while the user's copy is unchanged (preinstalled.js). Anyone may write them; the updater
+      // also checks the mod is one it shipped.
+      case 'source':
+        if (value) out.source = value.toLowerCase();
+        break;
+      case 'version':
+        if (value) out.version = value;
+        break;
       case 'run-at': {
         const mapped = RUN_AT[value.toLowerCase()];
         if (mapped) out.runAt = mapped;
@@ -111,6 +120,8 @@ function buildMod({ site, file, code }) {
     excludes: header.excludes,
     runAt: header.runAt || 'document_start',
     risk: header.risk, // {tier, why} or null when the header doesn't say
+    source: header.source, // 'webmods' for the mods WebMods ships, else what the header says, or null
+    version: header.version, // the header's @version, or null
   };
   const hash = sha1(JSON.stringify([meta.id, meta.name, meta.description, meta.matches, meta.excludes, meta.runAt, meta.risk]) + '\n' + code);
   return { mod: { ...meta, code, hash }, warnings: header.warnings };

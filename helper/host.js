@@ -26,11 +26,12 @@ const { Runs } = require('./lib/runs');
 const { Logins } = require('./lib/logins');
 const agents = require('./lib/agents');
 const { updateHeld, approveHeld, heldFile } = require('./lib/held');
-const { startOffIds, startSitesOn } = require('./lib/preinstalled');
+const { startOffIds, startSitesOn, pendingUpdates, useNewVersion, keepMine, mergeRequest, resolveMerge, restoreMod } = require('./lib/preinstalled');
 const { readInstructions, writeInstructions, instructionsFile, MAX_LENGTH } = require('./lib/instructions');
 const { ownSock, removeStaleSockets, codeStamp } = require('./lib/helpers');
 const { loadOrigins, recordOrigins, activeRuns } = require('./lib/origins');
-const { deleteMod, restoreMod, emptyTrash } = require('./lib/trash');
+const { deleteMod, emptyTrash } = require('./lib/trash');
+const { scopeFor } = require('./lib/scope');
 const update = require('./lib/update');
 const { buildReport, reportEmail, reportUrl } = require('./lib/report');
 
@@ -67,6 +68,7 @@ const state = {
   modErrors: [],
   modWarnings: [],
   held: {}, // mod id -> held entry (see lib/held.js)
+  updates: {}, // mod id -> new shipped version waiting (see lib/preinstalled.js pendingUpdates)
   lastSignature: null,
   lastFingerprint: null,
   stdoutOpen: true,
@@ -168,15 +170,20 @@ function syncMods(reason, force) {
   // Held mods still go to the extension (the panel lists them with an Allow button), marked so they aren't
   // registered. Preinstalled mods are marked startOff: the extension switches them off when it first sees them.
   const startOff = startOffIds(ws.home);
+  // A newer version of a shipped mod the user changed (preinstalled.js): the panel offers it on the mod.
+  let updates = {};
+  try { updates = pendingUpdates(ws.home, mods); } catch (e) { logger.warn(`shipped mod updates: ${e.message}`); }
+  state.updates = updates;
   const sent = plan.mods.map((m) => {
     const out = state.held[m.id] ? { ...m, held: { site: state.held[m.id].site, reason: state.held[m.id].reason } } : m;
     const o = origins[m.id];
     const withOrigin = o ? { ...out, origin: { by: o.by, browser: o.browser } } : out;
-    return startOff.has(m.id) ? { ...withOrigin, startOff: true } : withOrigin;
+    const withUpdate = updates[m.id] ? { ...withOrigin, update: updates[m.id] } : withOrigin;
+    return startOff.has(m.id) ? { ...withUpdate, startOff: true } : withUpdate;
   });
   // Sites WebMods starts on for (preinstalled.json): each browser turns each one on the first time it sees it.
   const sitesOn = startSitesOn(ws.home);
-  const signature = sent.map((m) => `${m.id}:${m.hash}${m.held ? ':held' : ''}${m.startOff ? ':off' : ''}${m.origin ? `:${m.origin.by}` : ''}`).join('|') +
+  const signature = sent.map((m) => `${m.id}:${m.hash}${m.held ? ':held' : ''}${m.startOff ? ':off' : ''}${m.origin ? `:${m.origin.by}` : ''}${m.update ? `:update ${JSON.stringify(m.update)}` : ''}`).join('|') +
     `|sites:${sitesOn.join(',')}`;
   const errors = [...problems, ...plan.errors];
   const errorsChanged = JSON.stringify(errors) !== JSON.stringify(state.modErrors);
@@ -279,12 +286,12 @@ function ensureWatchers() {
 }
 
 // Safety net for missed events (editors doing atomic renames, folders deleted out from under us).
-// What a sync depends on: the mods folder, and held.json (another browser's helper may hold or approve a
-// mod; this one must send the change on too).
+// What a sync depends on: the mods folder, held.json (another browser's helper may hold or approve a
+// mod; this one must send the change on too), and preinstalled.json (setup, or the user's choice in
+// another browser, changes which shipped mods have a new version waiting).
 function fingerprint() {
-  let held = '';
-  try { const st = fs.statSync(heldFile(ws.home)); held = `${st.mtimeMs}:${st.size}`; } catch { /* none */ }
-  return `${folderFingerprint(ws.modsDir)}\nheld ${held}`;
+  const stamp = (f) => { try { const st = fs.statSync(f); return `${st.mtimeMs}:${st.size}`; } catch { return ''; } };
+  return `${folderFingerprint(ws.modsDir)}\nheld ${stamp(heldFile(ws.home))}\npreinstalled ${stamp(path.join(ws.home, 'preinstalled.json'))}`;
 }
 
 function poll() {
@@ -318,11 +325,22 @@ function onRunRequest(run, line, respond) {
 const logins = new Logins({ getWorkspace: () => workspace(ws.home), logger, onEvent: onAgentEvent });
 const runSubscribers = new Map(); // runId or loginId -> Set of CLI sockets that started it (see onClientLine)
 const AGENT_COMMANDS = new Set(['agent.list', 'agent.start', 'agent.stop', 'agent.login', 'agent.loginCode', 'agent.loginCancel', 'mod.approve',
-  'instructions.get', 'instructions.set', 'agent.models', 'update.check', 'update.install', 'update.setAuto', 'report.build']);
+  'mod.update', 'instructions.get', 'instructions.set', 'agent.models', 'update.check', 'update.install', 'update.setAuto', 'report.build']);
 // Helper-local too, but a run may use them (on mods inside its scope; see lib/trash.js).
 const MOD_FILE_COMMANDS = new Set(['mod.delete', 'mod.restore']);
 
+// Runs started to merge a new version of a shipped mod into the user's copy: runId -> {id, hash}.
+const mergeRuns = new Map();
+
 function onAgentEvent(runId, event) {
+  // A merge run that finished well settles the update it was for (before the mods go out again below).
+  const merge = event && event.kind === 'done' ? mergeRuns.get(runId) : null;
+  if (merge) {
+    mergeRuns.delete(runId);
+    if (event.ok) {
+      try { if (resolveMerge(ws.home, merge.id, merge.hash)) logger.info(`merged the new version of ${merge.id} (run ${runId})`); } catch (e) { logger.warn(`couldn't record the merge of ${merge.id}: ${e.message}`); }
+    }
+  }
   // Before the run's last event goes out: hold what it wrote for other sites, and say so in `done`.
   if (event && event.kind === 'done' && String(runId).startsWith('r')) {
     syncMods('agent done', false);
@@ -383,7 +401,7 @@ function agentCommand(cmd, args) {
   switch (cmd) {
     case 'agent.list': return agents.listAgentsWithLogin(workspace(ws.home));
     case 'agent.models': return agents.agentModels(workspace(ws.home), String(args.agent || ''), { fresh: !!args.fresh });
-    case 'agent.start': return runs.start(args);
+    case 'agent.start': return startRun(args);
     case 'agent.stop': return runs.stop(args.runId);
     case 'agent.login': return logins.start(args);
     case 'agent.loginCode': return logins.code(args.loginId, args.code);
@@ -400,6 +418,17 @@ function agentCommand(cmd, args) {
       logger.info(`deleted mod ${r.id} (to ${r.trashed})`);
       syncMods('delete', false);
       return { id: r.id, deleted: true };
+    }
+    case 'mod.update': {
+      // The user's choice for a new version of a shipped mod they changed: 'new' (theirs goes to the
+      // trash) or 'mine' (this version isn't offered again). Merging is a run: agent.start with `merge`.
+      const id = typeof args.id === 'string' ? args.id.trim() : '';
+      if (!id) throw new Error('missing mod id');
+      if (args.choice !== 'new' && args.choice !== 'mine') throw new Error('choice must be "new" or "mine"');
+      const r = args.choice === 'new' ? useNewVersion(ws, id) : keepMine(ws, id);
+      logger.info(args.choice === 'new' ? `${r.id}: now the new version${r.trashed ? ` (the user's copy is in ${r.trashed})` : ''}` : `${r.id}: kept the user's copy over version ${r.version}`);
+      syncMods('mod update', false);
+      return args.choice === 'new' ? { id: r.id, choice: 'new', version: r.version, trashed: !!r.trashed } : { id: r.id, choice: 'mine', version: r.version };
     }
     case 'mod.restore': {
       const r = restoreMod(ws, args.id, { scope: args.scope });
@@ -426,6 +455,24 @@ function agentCommand(cmd, args) {
     case 'report.build': return report(args);
     default: return logins.cancel(args.loginId);
   }
+}
+
+/**
+ * agent.start. With `merge: "<mod id>"`, the run merges the new version of that shipped mod into the
+ * user's copy: the helper adds where the three versions are to the prompt, and a run that finishes
+ * well settles the update (onAgentEvent). An ordinary run otherwise, with the same scope and rules.
+ */
+function startRun(args) {
+  if (args.merge === undefined || args.merge === null || args.merge === '') return runs.start(args);
+  const id = String(args.merge).trim();
+  const site = typeof args.site === 'string' && args.site.trim() ? args.site.trim() : agents.hostOf(args.url);
+  if (scopeFor(id.split('/')[0]) !== scopeFor(site)) throw new Error(`${id} isn't a mod for ${scopeFor(site) || 'this site'}: merge it from its own site`);
+  const m = mergeRequest(workspace(ws.home), id);
+  const prompt = typeof args.prompt === 'string' && args.prompt.trim() ? `${args.prompt.trim()}\n\n${m.prompt}` : m.prompt;
+  const r = runs.start({ ...args, prompt });
+  mergeRuns.set(r.runId, { id, hash: m.hash });
+  logger.info(`run ${r.runId} merges the new version of ${id}`);
+  return r;
 }
 
 // ---------------------------------------------------------------- updates (lib/update.js)
@@ -701,6 +748,7 @@ function helperInfo() {
     pending: pending.size,
     runs: runs.list(),
     held: state.held,
+    updates: state.updates,
     login: logins.info(),
   };
 }
@@ -723,7 +771,9 @@ function onClientLine(sock, line) {
     if (AGENT_COMMANDS.has(cmd)) {
       return reply(sock, { id, ok: false, error: cmd === 'mod.approve'
         ? 'only the user can approve a held mod (in the side panel, or `webmods approve` in their terminal)'
-        : `"${cmd}" isn't available inside an agent run` });
+        : cmd === 'mod.update'
+          ? 'only the user can choose what happens with a new version of a WebMods mod (in the side panel, or `webmods mod-update` in their terminal)'
+          : `"${cmd}" isn't available inside an agent run` });
     }
     args.scope = run.scope;
   }
@@ -734,7 +784,9 @@ function onClientLine(sock, line) {
       id, ok: true,
       result: {
         modsDir: ws.modsDir, errors: state.modErrors, warnings: state.modWarnings,
-        mods: state.mods.map((m) => (state.held[m.id] ? { ...summarize(m), held: state.held[m.id] } : summarize(m))),
+        mods: state.mods.map((m) => ({
+          ...summarize(m), ...(state.held[m.id] ? { held: state.held[m.id] } : {}), ...(state.updates[m.id] ? { update: state.updates[m.id] } : {}),
+        })),
       },
     });
   }

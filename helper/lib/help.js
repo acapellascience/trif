@@ -209,13 +209,33 @@ name, email addresses, query strings and token-like strings removed. Nothing is 
     usage: 'webmods restore [<site>/<mod>]',
     summary: 'bring a deleted mod back from the trash (no id: list the trash)',
     details: `Puts back the most recently deleted copy of the mod, switched on or off as it was. Fails if a mod
-with that id exists again. With no id, lists what's in the trash, newest first.`,
+with that id exists again, except right after webmods mod-update --use-new (or the side panel's "Use the
+new version"): then the user's copy comes back in place of the new version, which is offered again.
+With no id, lists what's in the trash, newest first.`,
     examples: ['webmods restore', 'webmods restore x.com/hide-reposts'],
+  },
+  'mod-update': {
+    usage: 'webmods mod-update <site>/<mod> [--use-new | --keep | --merged]',
+    summary: 'a new version of a shipped mod you changed: use it, keep yours, or mark it merged',
+    details: `The mods WebMods ships (their header says @source webmods) get fixes with WebMods updates: setup
+replaces a copy nobody changed. A copy that was changed is left alone, and the new version waits;
+webmods mods and webmods status say "update available (you've changed it)", and the side panel offers
+it on the mod. With no option, prints the three files: the user's copy, the new version, and what was
+shipped before (what the user's copy started from), for merging.
+  --use-new  the new version replaces the user's copy, which goes to the trash (webmods restore brings it
+             back, and offers the new version again)
+  --keep     keep the user's copy; this version isn't offered again (a later one is)
+  --merged   the new version has been merged into the user's copy (by hand or by an agent in the
+             terminal): it isn't offered again, and becomes what later versions are merged against
+The user's choice: not available inside a side-panel run (the panel's "Merge with my agent" starts one
+that merges, and settles the update when it finishes).`,
+    examples: ['webmods mod-update x.com/plain-x', 'webmods mod-update x.com/plain-x --use-new', 'webmods mod-update x.com/plain-x --keep'],
   },
   mods: {
     usage: 'webmods mods',
     summary: 'list mods in the folder: id, matches, file (works without Chrome)',
-    details: 'When Chrome is reachable, mods the user switched off are marked [off].',
+    details: `When Chrome is reachable, mods the user switched off are marked [off]. Mods WebMods ships say "from
+WebMods, version N", and "update available" when a newer version is waiting (webmods mod-update).`,
     examples: ['webmods mods', 'webmods mods --json'],
   },
   new: {
@@ -259,7 +279,7 @@ from stdin. Exit code 1 if it didn't end up logged in.`,
 
 const GROUPS = [
   ['Setup and diagnosis', ['setup', 'status', 'doctor', 'update', 'report']],
-  ['Mod files (work without Chrome)', ['mods', 'new', 'check', 'delete', 'restore', 'install-example']],
+  ['Mod files (work without Chrome)', ['mods', 'new', 'check', 'delete', 'restore', 'install-example', 'mod-update']],
   ['Switching mods off and on (need Chrome running with the extension)', ['disable', 'enable', 'approve']],
   ['Pages (need Chrome running with the extension)', ['tabs', 'run', 'reload', 'open', 'navigate', 'text', 'screenshot', 'record', 'requests', 'request', 'errors', 'logs']],
   ['Agent runs (what the side panel does)', ['agent']],

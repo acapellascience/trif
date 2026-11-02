@@ -8,11 +8,12 @@
 //   node scripts/release.js 0.1.2 [--dry-run] [--skip-tests]
 //
 // A release: checks everything first (clean main branch, a CHANGELOG.md section for the version, keys,
-// GitHub login), bumps the version, runs the tests, builds the Chrome and Firefox extensions and the npm
-// package, has Mozilla sign the Firefox add-on (unlisted), makes the two beta zips, and writes the update
-// feeds: updates/latest.json (+ .sig, signed with the release key) for the helper, updates/firefox.json for
-// Firefox. Then it asks before publishing anything: a commit and tag, a GitHub release with the files,
-// and the feeds (pushed last, once the files they point at exist).
+// GitHub login), bumps the version, refreshes examples/shipped-history.json, runs the tests, builds the
+// Chrome and Firefox extensions and the npm package, has Mozilla sign the Firefox add-on (unlisted),
+// makes the two beta zips, and writes the update feeds: updates/latest.json (+ .sig, signed with the
+// release key) for the helper, updates/firefox.json for Firefox. Then it asks before publishing
+// anything: a commit and tag, a GitHub release with the files, and the feeds (pushed last, once the files
+// they point at exist).
 //
 // --dry-run does everything up to publishing, into dist/release/<version>, and changes no tracked file
 // (no Mozilla signing, so no .xpi; feeds are signed only if the release key is there).
@@ -27,6 +28,7 @@ const crypto = require('crypto');
 const readline = require('readline');
 const { execFileSync, spawnSync } = require('child_process');
 const { githubRepo, compareVersions } = require('../helper/lib/update');
+const { writeShippedHistory, OUT: SHIPPED_HISTORY } = require('./shipped-history');
 
 const ROOT = path.resolve(__dirname, '..');
 const DIST = path.join(ROOT, 'dist');
@@ -214,6 +216,9 @@ async function release(version, { dryRun, skipTests }) {
   }
   bump(version, src);
   console.log(`version ${version}`);
+  // Every version of the example mods this repo has held, so setup recognises users' unchanged copies of
+  // any of them (see scripts/shipped-history.js). From the repo's git history, into what gets packed.
+  if (writeShippedHistory(ROOT, src).changed) console.log(`${SHIPPED_HISTORY} brought up to date`);
 
   if (!skipTests) {
     console.log('running tests…');
@@ -288,12 +293,12 @@ async function release(version, { dryRun, skipTests }) {
       : '';
   const answer = await ask(`Publish WebMods ${version} to github.com/${repo}? ${who} Type ${version} to confirm: `);
   if (answer !== version) {
-    sh('git', ['checkout', '--', 'package.json', 'extension/manifest.json', 'package-lock.json']);
+    sh('git', ['checkout', '--', 'package.json', 'extension/manifest.json', 'package-lock.json', SHIPPED_HISTORY]);
     spawnSync('git', ['checkout', '--', 'updates'], { cwd: ROOT }); // tracked feeds back as they were
     spawnSync('git', ['clean', '-fq', '--', 'updates'], { cwd: ROOT }); // a first release's new ones gone
     fail('not published; the version bump and feeds were rolled back (the built files are still in dist/release)');
   }
-  sh('git', ['add', 'package.json', 'extension/manifest.json', 'package-lock.json']);
+  sh('git', ['add', 'package.json', 'extension/manifest.json', 'package-lock.json', SHIPPED_HISTORY]);
   sh('git', ['commit', '-m', `Release ${version}`]);
   sh('git', ['tag', '-a', `v${version}`, '-m', `WebMods ${version}`]);
   sh('git', ['push', 'origin', 'main', `v${version}`], { stdio: 'inherit' });

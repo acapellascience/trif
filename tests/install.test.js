@@ -92,7 +92,7 @@ test('setup --copy: copies helper/extension/examples into <home>/app and points 
   assert.equal(r.code, 0, r.stderr + r.stdout);
   const app = path.join(ws, 'app');
   for (const f of ['package.json', 'helper/host.js', 'helper/cli.js', 'helper/workspace/AGENTS.md', 'helper/templates/mod.js',
-    'extension/manifest.json', 'examples/sites']) {
+    'extension/manifest.json', 'examples/sites', 'examples/shipped-history.json']) {
     assert.ok(fs.existsSync(path.join(app, f)), f);
   }
   for (const f of ['tests', '.keys', '.git', 'docs']) assert.ok(!fs.existsSync(path.join(app, f)), `${f} not copied`);
@@ -406,7 +406,9 @@ test('preinstalled mods: each once, switched on or off as listed; the start site
   assert.deepStrictEqual(r, { added: ids, on: ids.filter((id) => !off.includes(id)), sites: SITES_ON });
   for (const id of ids) assert.ok(fs.existsSync(path.join(sites, `${id}.js`)), id);
   assert.strictEqual(fs.readFileSync(plainx, 'utf8'), fs.readFileSync(path.join(examples, 'x.com', 'plain-x.js'), 'utf8'));
-  assert.deepStrictEqual(loadPreinstalled(home), { offered: ids, startOff: off, sitesOn: SITES_ON });
+  const { shipped, ...rest } = loadPreinstalled(home);
+  assert.deepStrictEqual(rest, { offered: ids, startOff: off, sitesOn: SITES_ON });
+  assert.deepStrictEqual(shipped, {}, 'recorded by updateShippedMods, not here');
   fs.unlinkSync(plainx);
   assert.deepStrictEqual(preinstallMods(home, sites, examples), { added: [], on: [], sites: [] }, 'deleted: not brought back');
   assert.strictEqual(fs.existsSync(plainx), false);
@@ -419,6 +421,7 @@ test('preinstalled mods: each once, switched on or off as listed; the start site
   assert.deepStrictEqual(r.added, ids.filter((id) => id !== 'x.com/rainbow-rave'));
   assert.strictEqual(fs.readFileSync(own, 'utf8'), '// mine');
   assert.deepStrictEqual(loadPreinstalled(home2).startOff, ['x.com/punk-fonts', 'www.instagram.com/desaturate'], 'the user\'s own file isn\'t switched off');
+  assert.deepStrictEqual(loadPreinstalled(home2).shipped, { 'x.com/rainbow-rave': { own: true } }, 'nor ever updated');
 
   // Through setup, and --no-examples.
   const home3 = tempDir();

@@ -1531,6 +1531,39 @@ test('background: deleting from the panel leaves a chat line with Undo; restorin
   } finally { bg.restore(); }
 });
 
+test('background: a shipped mod\'s new version: status carries it; use it (chat line with Undo), keep mine, merge as a run', async () => {
+  const mods = [mod('x.com/plain-x', { source: 'webmods', version: '1', update: { version: '2', from: '1', modified: true } })];
+  const bg = await loadBackground({ storage: { mods } });
+  try {
+    bg.native.emit({ type: 'mods', mods });
+    await settle(20);
+    const panel = bg.connectPanel();
+    const st = (await panel.ask({ type: 'status' })).result;
+    const m = st.mods.find((x) => x.id === 'x.com/plain-x');
+    assert.deepStrictEqual([m.source, m.version, m.update], ['webmods', '1', { version: '2', from: '1', modified: true }]);
+
+    let p = panel.ask({ type: 'mod.update', id: 'x.com/plain-x', choice: 'new', site: 'x.com' });
+    let req = await answerNative(bg.native, 'mod.update', { id: 'x.com/plain-x', choice: 'new', version: '2', trashed: true });
+    assert.deepStrictEqual(req.args, { id: 'x.com/plain-x', choice: 'new' });
+    assert.strictEqual((await p).ok, true);
+    await settle(10);
+    assert.deepStrictEqual(bg.store['chat:x.com'].messages.map((x) => [x.role, x.text, x.undo]),
+      [['mod', 'plain-x.js is now version 2 from WebMods; yours is in the trash.', 'x.com/plain-x']]);
+
+    p = panel.ask({ type: 'mod.update', id: 'x.com/plain-x', choice: 'mine', site: 'x.com' });
+    req = await answerNative(bg.native, 'mod.update', { id: 'x.com/plain-x', choice: 'mine', version: '2' });
+    assert.deepStrictEqual(req.args, { id: 'x.com/plain-x', choice: 'mine' });
+    await p;
+    await settle(10);
+    assert.strictEqual(bg.store['chat:x.com'].messages.length, 1, 'keeping mine adds no line');
+
+    p = panel.ask({ type: 'agent.start', site: 'x.com', tabId: 12, url: 'https://x.com/home', prompt: 'Merge the new version', merge: 'x.com/plain-x' });
+    req = await answerNative(bg.native, 'agent.start', { runId: 'r9' });
+    assert.strictEqual(req.args.merge, 'x.com/plain-x');
+    await p;
+  } finally { bg.restore(); }
+});
+
 test('background: deleting or restoring reloads the tab only when the mod runs there (on, not off on the site)', async () => {
   const mods = [mod('x.com/on'), mod('x.com/off'), mod('x.com/offhere')];
   const bg = await loadBackground({ storage: { mods, disabled: { 'x.com/off': true }, offSites: { 'x.com/offhere': ['x.com'] } }, tabs: SWITCH_TABS });

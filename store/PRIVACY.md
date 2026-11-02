@@ -29,7 +29,7 @@ Two things go over the network, neither carrying anything about you:
   from GitHub (`raw.githubusercontent.com`), and downloads the new version from GitHub when you choose
   to install it. GitHub sees an ordinary download request (your IP address and "trif/<version>");
   nothing about your mods, pages or chats is sent. You can turn the checks off with `"checkForUpdates":
-  false` in `~/.trif/config.json`.
+  false` in TRIF's `config.json` (`~/Library/Application Support/TRIF/config.json` on a Mac).
 - **Problem reports, only when you send one.** "Report a problem" opens the report form at
   timsrobot.com/report with details from TRIF filled in: version numbers, setup checks, the mods for
   the site you're on, and recent errors, with your name, email addresses and full page addresses removed.
@@ -85,8 +85,9 @@ Everything stays on your computer until you delete it:
 - **Mods:** switch them off in the side panel, or delete the files in `~/.trif/sites/`.
 - **Everything the extension stored:** remove the extension from Chrome. That deletes its local
   storage and all registered mods.
-- **Helper files** (`~/.trif/`, including logs and the agent run records in `~/.trif/runs/`):
-  delete that folder.
+- **Helper files** (`~/.trif/`, your mods; and `~/Library/Application Support/TRIF/` on a Mac, or
+  `~/.local/state/trif/` on Linux: settings, logs and the agent run records in `runs/`): delete those
+  folders.
 - **What your agent sent to its provider:** see that provider's controls (linked above).
 
 ## Children

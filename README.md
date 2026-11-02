@@ -22,7 +22,10 @@ as they were.
 - Node 18 or newer: check with `node --version`, or install it from [nodejs.org](https://nodejs.org).
 - A coding agent: [Claude Code](https://claude.com/claude-code) (you can log in from the side panel), or
   [Codex](https://github.com/openai/codex) 0.138 or newer (`brew install codex`, then `codex login` in a terminal).
-  Pick one in the side panel's settings when you have both.
+  Pick one in the side panel's settings when you have both. If you use an Anthropic or OpenAI API key
+  instead of logging in, save it with `trif agent key --agent claude --set-key` (or `--agent codex`):
+  it's kept in your Mac's Keychain, and TRIF adds it to the agent's requests itself, so neither the agent
+  nor its commands ever get it. (A key you put in TRIF's `config.json` before moves there by itself.)
 
 ## Install
 
@@ -213,11 +216,15 @@ echo 'export PATH="$HOME/.trif/bin:$PATH"' >> ~/.zshrc
 
 Remove TRIF from `chrome://extensions`, then delete `~/.trif` (and `~/.webmods`, the link to it, if you
 used TRIF when it was called WebMods). That folder holds your mods, so keep a copy of `~/.trif/sites` if
-you want them later.
+you want them later. TRIF's settings, logs and screenshots are in `~/Library/Application Support/TRIF`
+(on Linux, `~/.local/state/trif`): delete that too. API keys you saved are in the Keychain, under "TRIF
+API key" and "TRIF open model key" (`trif agent key --remove-key`, `trif agent open-model --remove-key`).
 
 ## Privacy
 
-Your mods and chats stay on your computer. When you ask for a change, your coding agent reads the page
+Your mods and chats stay on your computer. A chat's agent can read your mods folder, `~/.trif`, but not
+TRIF's settings, logs or other sites' screenshots, which are kept apart, in `~/Library/Application
+Support/TRIF`. When you ask for a change, your coding agent reads the page
 you're on, and sends what it reads to its provider (Anthropic for Claude Code, OpenAI for Codex, the provider
 you picked for an open model; nobody for a model on your own computer) under that provider's
 terms. See [store/PRIVACY.md](store/PRIVACY.md).

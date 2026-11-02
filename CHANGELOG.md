@@ -6,6 +6,16 @@ needs a section here for the version it releases.
 
 ## Unreleased
 
+- **TRIF's own files moved out of the folder your agent works in.** Settings, logs, chat logs and
+  screenshots now live in `~/Library/Application Support/TRIF` (moved there by themselves), where a chat's
+  agent can't read them at all; your mods stay in `~/.trif`. Using Safari: install TRIF.app from this
+  version (older ones look for TRIF's key in the old place).
+- **API keys for Claude Code and Codex go in the Keychain.** If you use an API key instead of logging
+  in, save it with `trif agent key --set-key`; a key you'd put in TRIF's settings moves there by itself.
+  TRIF adds it to the agent's requests, so the agent and its commands never get it.
+- **What you type in a chat isn't on the agent's command line any more**, where other programs on your
+  Mac could read it.
+
 - **Open models (experimental).** A third choice in Settings, "Open model (via Codex)": your agent runs
   on a model on your own computer (Ollama or LM Studio, nothing leaves it) or from a provider like
   OpenRouter with your own key, through Codex (no OpenAI account needed). Same walls as any chat. Paste

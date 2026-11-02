@@ -25,9 +25,9 @@ function readVersion(root) {
   try { return JSON.parse(fs.readFileSync(path.join(root, 'package.json'), 'utf8')).version || null; } catch { return null; }
 }
 
+// (The folder itself counts; real paths, case as the volume does: pathcheck.js.)
 function isInside(child, parent) {
-  const rel = path.relative(parent, child);
-  return rel === '' || (!!rel && !rel.startsWith('..') && !path.isAbsolute(rel));
+  return require('./pathcheck').isInside(child, parent, { orEqual: true });
 }
 
 /**

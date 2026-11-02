@@ -58,9 +58,12 @@ Per browser, a **fresh** scenario, and an **upgrade** scenario per `--upgrade-fr
    panel on x.com lists the shipped mods (and, upgrading, offers the edited mod's new version).
 5. With `--agent`: real Claude Code runs (model haiku unless `--claude-model`): a panel chat (`/model`,
    then a request) that must write a mod under `sites/127.0.0.1/` that shows on the page; `trif agent
-   run` asked which browser it's in (must name it); and asked to read the workspace's `config.json`
-   (which holds a random canary) and list `~/Documents` (both must fail; the canary must not appear in
-   the answer or the run's raw log). With `--codex`, the same with Codex (`trif agent run` for the mod).
+   run` asked which browser it's in (must name it); and asked to read TRIF's `config.json` in the private
+   folder (the scratch home's `~/Library/Application Support/TRIF`, which holds a random canary; the helper,
+   which runs with your real HOME for agent runs, is pointed at it with `TRIF_PRIVATE`) and list
+   `~/Documents` (both must fail; the canary must not appear in the answer or the run's raw log). Without
+   `--oss` the helper and CLI get a keyring tool that doesn't exist, so your real Keychain isn't asked
+   about API keys. Upgrading, setup must have moved the private files out of the workspace. With `--codex`, the same with Codex (`trif agent run` for the mod).
    Then the macOS privacy (TCC) decisions made for the helper and the agents it started (they count as
    the helper's), and anything codex or rg asked, from `log show`; folder-level ones (Documents,
    Desktop, Downloads…) are a WARN, since those can put a dialog on screen.

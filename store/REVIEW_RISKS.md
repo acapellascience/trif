@@ -163,4 +163,4 @@ TRIF has no server and sends nothing to the developer. Privacy policy: <PRIVACY 
 Before submitting, check steps 1–4 yourself on a clean Chrome profile with the **store build**. Load
 `dist/extension/` unpacked: it has no `key`, so it gets a different ID, like the store version. The
 helper won't connect until that ID is in `allowed_origins`. For local testing, add it to
-`~/.trif/config.json` as `{"extensionIds": ["<id>"]}` and rerun `trif setup`.
+`~/Library/Application Support/TRIF/config.json` as `{"extensionIds": ["<id>"]}` and rerun `trif setup`.

@@ -36,10 +36,36 @@ dependencies, no build step.**
      .shipped/<site>/    versions of the shipped mods kept for merging (<mod>.js, <mod>.new.js)
      helper.sock         the default helper's socket (exists while a browser is running with the extension)
      helper-<pid>.sock   each running helper's own socket (one helper per connected browser or Chrome profile)
-     config.json         { "modsDir": "...optional override..." }
    ```
-   `<site>` is a hostname like `x.com` or `news.ycombinator.com`. `<mod>` is a kebab-case name.
-   Files whose name starts with `_` or `.` are ignored (scratch files, helpers).
+   `<site>` is a hostname like `x.com` or `news.ycombinator.com`. `<mod>` is a kebab-case name (no
+   `:`, no trailing dot or space, not a reserved device name such as `con`: `helper/lib/pathcheck.js`
+   badName). Files whose name starts with `_` or `.` are ignored (scratch files, helpers).
+   Side-panel runs may read the whole workspace, so nothing private is kept in it: see "The private folder".
+3b. **The private folder** (`helper/lib/paths.js` privateDir): what the helper keeps that agent runs must
+   never read, outside the workspace. `~/Library/Application Support/TRIF/` on macOS,
+   `$XDG_STATE_HOME/trif` (or `~/.local/state/trif`) on Linux, `<workspace>-private` beside a workspace
+   set with `TRIF_HOME`/`--home`; `TRIF_PRIVATE` overrides it (ignored, with a warning, if it's inside the
+   workspace or holds it). Made with mode 700.
+   ```
+   <private>/
+     config.json         { "modsDir": "...", "env": {"PATH": ...}, "extensionIds": [...], "openModel": {...}, "autoUpdate": … }
+     safari-token        the Safari bridge's key (see "Safari")
+     helper.log(.1)      the helpers' log; safari-bridge.err, the bridge's stderr
+     runs/<runId>.jsonl  run logs (the pages runs read)
+     screenshots/        `trif screenshot`'s default folder; a side-panel run gets screenshots/<scope>/ alone
+   ```
+   Until 0.2.1 these were in the workspace, kept from runs by deny rules inside the folders runs may read.
+   `migrate.js` migratePrivate moves them, once: setup runs it, every helper does when it starts, the Safari
+   bridge too, and a run does when one reappears (an older helper still running writes its log where it
+   used to), refusing to start if it can't. Only in the workspace: moved (copied and removed across
+   volumes). In both: folders merged (what the private one lacks moves in), identical files dropped,
+   logs and the key dropped from the workspace (the private copies win), a differing `config.json` (or
+   anything else) kept in `<private>/from-workspace-<stamp>/`. An `old-webmods-<date>/` folder in the
+   workspace (migrateHome's leftovers) can hold an old `config.json`, `runs/`…: those move to
+   `<private>/old-webmods-<date>/`. What runs may read but never write stays in the workspace (`held.json`,
+   `preinstalled.json`, `origins.json`, `active-runs/`, `update.json`, `trash/`, `.shipped/`,
+   `instructions.md`): run sandboxes keep them read-only. `readConfig` still reads a workspace
+   `config.json` until it's moved. `trif doctor` warns about anything private left in the workspace.
 4. **Examples** (`examples/sites/<site>/<mod>.js`): ready-made mods (Plain X first). Setup copies them
    into a new workspace (see "Native host installation") and later setups keep them up to date (see
    "Updates to shipped mods"); `trif install-example <site>/<mod>` copies one in by hand.
@@ -49,7 +75,7 @@ dependencies, no build step.**
 `extension/manifest.json` carries a fixed `"key"` so the unpacked extension always has the ID
 **`iaablflfafmonebdomeikadolkgdbkhe`**. The native host manifest's `allowed_origins` lists every TRIF
 extension ID: this dev ID, the Chrome Web Store ID (unknown until the first upload; add it to
-`STORE_EXTENSION_IDS` in `helper/lib/paths.js`), and any extra IDs in the workspace's `config.json`
+`STORE_EXTENSION_IDS` in `helper/lib/paths.js`), and any extra IDs in `config.json` (private folder)
 `"extensionIds": [...]`. (The private key lives in `.keys/`, gitignored; it's only needed to pack a .crx.)
 
 ```
@@ -127,7 +153,7 @@ logs it and exits (the extension reconnects to a fresh one) instead of misreadin
 | `{type:"hello", version, userScripts: bool, chrome: "<version>"}` | Sent on connect. `userScripts` is false when the "Allow User Scripts" switch is off. |
 | `{type:"response", id, ok:true, result}` / `{type:"response", id, ok:false, error:"message"}` | Answer to a request. |
 | `{type:"modsApplied", registered:[ids], errors:[{id, error}]}` | After applying a `mods` message. |
-| `{type:"log", level, message}` | Extension-side diagnostics; the helper writes them to `~/.trif/helper.log`. |
+| `{type:"log", level, message}` | Extension-side diagnostics; the helper writes them to `helper.log` (private folder). |
 
 ## Safari
 
@@ -149,11 +175,14 @@ messaging to an arbitrary program (Safari's only reaches the extension's own Mac
 - **Native messaging.** `connectNative` returns a port over a WebSocket to `ws://127.0.0.1:47615/`, the
   Safari bridge (`helper/safari-bridge.js`), which relays JSON messages to a host.js in the usual frames.
   The bridge accepts only handshakes whose `Origin` is `safari-web-extension://…` (web pages can't set it)
-  and that bring its key as `?token=`: the contents of `<home>/safari-token` (64 hex characters, mode 600,
+  and that bring its key as `?token=`: the contents of `safari-token` in the private folder (64 hex characters, mode 600,
   made by `trif setup --browser safari`). A Safari extension's origin is random and changes, so the key
   is what tells TRIF from other extensions: the extension gets it with
   `runtime.sendNativeMessage(…, {type:"token"})` from its own Mac app (`safari/SafariWebExtensionHandler.swift`,
-  whose sandbox may read just `~/.trif/safari-token`), which no other extension can message.
+  whose sandbox may read just `~/Library/Application Support/TRIF/safari-token`, and for one more version
+  the old `~/.trif/safari-token` and `~/.webmods/safari-token`, read in that order; entitlement in
+  `safari/TRIF Extension.entitlements`), which no other extension can message. A TRIF.app from before
+  0.2.1 only looks in `~/.trif`: after setup moves the key, install the app from the same version.
   Safari unloads the background page after about 30 s with nothing to do, closing the socket, so the host
   outlives the connection: its messages are queued (up to 2000) and delivered when the background
   reconnects, which it does with a fresh `hello`. A host with no connection for 30 minutes and no agent
@@ -318,7 +347,7 @@ trif reload [TAB] [--hard]
 trif open <url>
 trif navigate [TAB] <url>
 trif text [TAB]
-trif screenshot [TAB] [-o file.png]     default: ~/.trif/screenshots/<time>.png; prints the path
+trif screenshot [TAB] [-o file.png]     default: <private>/screenshots/<time>.png; prints the path
 trif record <site> [on|off]
 trif requests [TAB] [--filter <regex>] [--limit N]
 trif request [TAB] <i> [-o file]        prints JSON; response bodies that are JSON are pretty-printed
@@ -420,7 +449,7 @@ Re-running setup is safe; run it again to update.
 - CLI link: `~/.trif/bin/trif` (shell wrapper like the host's), and it prints a line to add
   `~/.trif/bin` to PATH if it isn't there. If `/usr/local/bin` is writable, it also symlinks
   `/usr/local/bin/trif`.
-- PATH for agents: setup records the terminal's PATH in `config.json` `env.PATH`, minus the folders npx
+- PATH for agents: setup records the terminal's PATH in `config.json` (private folder) `env.PATH`, minus the folders npx
   adds for its own run.
 - Extension: until the Chrome Web Store listing exists, users (beta testers) load it unpacked from
   `<app>/extension` (setup's "Next steps" print the folder). The listing will replace that step.
@@ -702,16 +731,23 @@ New helper → extension message: `{type: "agentEvent", runId, event}` where `ev
 - `changedFiles`: paths relative to the workspace under `sites/` whose content changed during the run
   (snapshot hashes before and after).
 - One run at a time per site; a second `agent.start` for a busy site fails with "already working on <site>".
-  Runs are killed after 15 minutes. Raw agent output is kept in `~/.trif/runs/<runId>.jsonl`
+  Runs are killed after 15 minutes. Raw agent output is kept in `runs/<runId>.jsonl` in the private folder
   (last 50 runs).
 - **Finding agents.** Chrome starts the helper with a minimal PATH, so `trif setup` records the PATH
   of the terminal it ran in as `config.json` → `env.PATH`. The helper looks agents up in that PATH plus
   `~/.local/bin`, `/usr/local/bin`, `/opt/homebrew/bin`, `~/.npm-global/bin`. Spawned agents get
   `PATH = ~/.trif/bin : <recorded PATH> : <defaults>`, `HOME`, `USER`, `LANG`, `TERM=dumb`, cwd =
-  the workspace, and **no** inherited `CLAUDE*`/`ANTHROPIC_*`/`CODEX_*` variables except
-  `ANTHROPIC_API_KEY`/`OPENAI_API_KEY` if the user set them in `config.json` → `env`. An open-model run
-  (codex-oss) gets neither, and no provider key either: the helper's key proxy adds it (see "Open
-  models").
+  the workspace, and **no** inherited `CLAUDE*`/`ANTHROPIC_*`/`CODEX_*` variables and never an API key:
+  a key the user saved reaches the provider through the run's key proxy (see "API keys for Claude Code
+  and Codex" and "Open models").
+- **Nothing private on the command line.** Any same-user process can read another's argv (`ps`, sysctl
+  KERN_PROCARGS2), an agent's sandboxed commands included. So the user's message goes to the agent on
+  **stdin** (`claude -p` with no prompt argument; `codex exec … -`, `codex exec … resume <id> -`), and
+  Claude Code's run settings and context go in files (`--settings <file>`, `--append-system-prompt-file
+  <file>`) in `<box root>/<runId>.agent/` (mode 700, files 600), beside the run's mailbox rather than in
+  it (the run's commands can write there), removed when the run ends. What's left in argv: flags, rules,
+  paths, the model name and session id, which must be one word (`[A-Za-z0-9][\w.:/@+[\]-]*`, so neither
+  can read as an option).
 - **Logging in** (`agent.login`): spawns the adapter's login command (claude: `claude auth login`) with
   the same sanitized env as runs plus `BROWSER=/usr/bin/true` (the panel opens the page itself), cwd =
   the workspace, stdin piped. The first `https://` URL after `visit:` in its output becomes the `login`
@@ -758,7 +794,12 @@ Suffix List). `helper/lib/scope.js` computes it; `extension/lib.js` mirrors the 
   itself, only for mods whose every `@match` is in scope. The CLI itself refuses `setup`, `agent`,
   `approve` and `mod-update` when the variable is set, and inside a run its own file options stay in the run's folders:
   `-f` and `check` read only the mods folder, `-o` writes only there or the run's screenshots folder
-  (`$TRIF_RUN_SCREENSHOTS`, `screenshots/<scope>/`, also where screenshots go by default).
+  (`$TRIF_RUN_SCREENSHOTS`, `<private>/screenshots/<scope>/`, also where screenshots go by default),
+  never through a link left in its place (O_NOFOLLOW). Paths are compared as the file system does
+  (`helper/lib/pathcheck.js` isInside, also used for the mods folder and held mods): real paths from the
+  system's realpath (links and `..` resolved; on macOS each component in its on-disk case), the nearest
+  existing parent for a new file, a separator boundary, and case and Unicode normalization ignored on
+  volumes that ignore them (APFS by default: `/Users/x/.TRIF/SITES/` is the workspace's `sites/`).
 - **Extension.** With `args.scope`, page commands only act on tabs whose URL is http(s) on the scope or
   a subdomain (`tabs` lists only those; others fail with an error naming the scope); `open`/`navigate`
   only go to such URLs; `record` only for such sites; `mod.enable` only for mods whose every `@match` is
@@ -779,12 +820,20 @@ Suffix List). `helper/lib/scope.js` computes it; `extension/lib.js` mirrors the 
 - **Agent sandboxes.** The scope only holds if the agent can't reach the helper some other way or
   rewrite the rules, so both agents run under limits the operating system enforces (macOS Seatbelt;
   `runs.js` runLimits computes them, each adapter passes them on):
-  - **Reads:** the workspace, the TRIF code `trif` runs, node, and the user's skill folders, read only
+  - **Reads, allow-only:** the workspace as a whole (nothing private is in it: see "The private folder"),
+    the TRIF code `trif` runs (`trifCode`: the package's `helper/`, `package.json` and `examples/`, not
+    the whole package folder, which in a git checkout holds `.git`, keys and build output), node, and the
+    user's skill folders, read only
     (`skillDirs`: `~/.agents/skills`, `~/.codex/skills`, `~/.claude/skills` and where each skill in them
     really is, links followed; not a link to the home folder or above, nor into a visible folder such as
     `~/Documents`); nothing else in the home folder (every item in it is denied, rather than the folder
-    itself, which node and `mkdir -p` must be able to look at; inside hidden folders on the way to a skill
-    folder, such as `~/.codex`, every other item: Codex's login stays unreadable). Codex offers the
+    itself, which node and `mkdir -p` must be able to look at; inside folders on the way to something
+    readable, such as `~/.codex` for its skills or `~/src` for a checkout's `~/src/trif/helper`, every
+    other item: Codex's login stays unreadable; but not inside `~/Documents`, `~/Desktop`,
+    `~/Downloads`, `~/Library` and the other folders macOS asks the user about before they're listed);
+    and never the private folder, denied by name wherever it is, with the run's own screenshots folder
+    (`<private>/screenshots/<scope>/`) reopened inside it, as its mailbox is inside the denied
+    `~/Library`. Real paths compared as the volume does (case on APFS). Codex offers the
     skills it finds and its commands can now read them; Claude Code doesn't load user skills in these runs
     (`--setting-sources project`), so its file tools may read them (absolute `Read(//…)` rules) but it
     isn't told they exist. A skill that needs the network (`npx …@latest`) still can't run its tool. Inside the skill folders (a
@@ -798,14 +847,12 @@ Suffix List). `helper/lib/scope.js` computes it; `extension/lib.js` mirrors the 
     given, which the skill folder's allow rule covers. The trade-off: a skill's own script that reads a
     `.env` beside it can't, in a run; a secret under some other name, deeper than four levels or past
     the first 5000 entries is still readable (skill folders are the user's own, but keep secrets out
-    of them). In the workspace, not `config.json` (API keys), `safari-token`, `helper.log`, `runs/`
-    (other runs' logs hold the pages they read) or `screenshots/` (other sites'), except the run's own
-    screenshots folder and mailbox.
+    of them). These skill-folder denies are the only ones inside a readable folder.
   - **Writes:** the mods folder, with every existing folder of another site (`all-sites/` included)
     read-only inside it; the run's screenshots folder; its mailbox. Not `held.json`, `preinstalled.json`, `.shipped/`,
-    `origins.json`, `active-runs/`, `trash/`, `instructions.md`, `AGENTS.md`, `CLAUDE.md`, `.claude/`,
-    `bin/`, `app/` or `runs/`. A run can still create a folder for another site; its mods are held like
-    any out-of-scope mod.
+    `origins.json`, `active-runs/`, `update.json`, `trash/`, `instructions.md`, `AGENTS.md`, `CLAUDE.md`,
+    `.claude/`, `bin/` or `app/`. A run's commands can still create a folder for another site; its mods are
+    held like any out-of-scope mod.
   - **Network:** none, and no unix sockets: not the helper's, not the Safari bridge's.
 
   Codex runs any command, all inside its permission profile (`codex.js` permissionsToml: `network =
@@ -813,14 +860,20 @@ Suffix List). `helper/lib/scope.js` computes it; `extension/lib.js` mirrors the 
   `sandbox_mode` there would replace the profile). Claude Code runs only `trif`, `cd` and `ls`, in its
   sandbox (`claude.js` runSettings, passed with `--settings`: `enabled`, `failIfUnavailable`,
   `allowUnsandboxedCommands: false`, the filesystem lists, `network: {allowedDomains: [],
-  strictAllowlist: true}`); its own file tools follow permission rules: edits only under `sites/` minus
-  other sites' existing folders (deny rules by each folder's path in the workspace and by its real path,
-  so a site folder that is a link is covered too), no reads of the secrets, logs or other sites' screenshots. Claude Code
-  applies a `Read`/`Edit` deny rule to its sandbox too, where nothing can reopen it, so those rules don't
-  cover `runs/` (the sandbox does). Verified on macOS with Codex 0.166 (`codex sandbox`) and Claude Code
-  2.1.312 (a real `-p` run): each read and write above, another run's mailbox, the internet and the
-  helper's socket are refused ("Operation not permitted"); the run's own mods, screenshots and
-  mailbox, and `trif`, work.
+  strictAllowlist: true}`; `denyRead` the home folder and the private folder, `allowRead` the readable
+  folders, the mailbox and the run's screenshots folder); its own file tools follow permission rules:
+  reads in the workspace (anything outside it needs approval, which `-p` denies), the run's screenshots
+  folder and the skill folders (`Read(//…)` allows); edits only under `sites/` minus other sites' existing
+  folders (deny rules by each folder's path in the workspace and by its real path, so a site folder that
+  is a link is covered too; a path in another case, `/Users/x/.TRIF/sites/X.com/a.js`, is refused as
+  well, checked with Claude Code 2.1.316). No `Read` deny rules for TRIF's files any more: they're
+  outside the workspace. Verified on macOS with Codex 0.166 (`codex sandbox`) and Claude Code 2.1.312 /
+  2.1.316 (real `-p` runs): each read and write above, another run's mailbox, the internet and the
+  helper's socket are refused ("Operation not permitted", or Claude Code's own "blocked"/"haven't
+  granted" for its tools); the run's own mods, screenshots and mailbox, and `trif`, work.
+  `tests/agent-keys.test.js` (real Claude Code, a stand-in API, no tokens) and `tests/open-models.test.js`
+  (real Codex, a stand-in model) check the private folder can't be read, and scan every process's
+  argv and environment (KERN_PROCARGS2) during the run for the message and the key.
 
 ### Models (`agent.models`)
 
@@ -856,11 +909,10 @@ The user's standing instructions (`instructions.md`) reach claude through the wo
 
 - **claude** (Claude Code 2.1.285+, tested with 2.1.312; older versions show as unavailable): `claude -p
   --output-format stream-json --verbose --permission-mode default --setting-sources project
-  --strict-mcp-config --settings <run settings> --allowedTools Read(./**) Glob Grep "Edit(./sites/**)"
-  Bash(webmods:*) Bash(cd:*) Bash(ls:*) --disallowedTools WebFetch WebSearch "Read(./config.json)"
-  "Read(./safari-token)" "Read(./helper.log*)" "Read(./runs/*.jsonl)" "Read(./screenshots/*.png)"
-  --append-system-prompt <context> [--resume <sessionId>] [--model <model>] -- <prompt>`, the message
-  last, after `--`. In -p anything that would need approval is denied, so edits happen only under
+  --strict-mcp-config --settings <run settings file> --allowedTools Read(./**) Glob Grep "Edit(./sites/**)"
+  Bash(trif:*) Bash(webmods:*) Bash(cd:*) Bash(ls:*) --disallowedTools WebFetch WebSearch
+  --append-system-prompt-file <context file> [--resume <sessionId>] [--model <model>]`, with the message
+  on stdin (the rules are made absolute to the workspace, `//<path>`). In -p anything that would need approval is denied, so edits happen only under
   `sites/`; the run settings add its sandbox and the per-run denies (see "Run scope"). (2.1.312 ignored
   `Bash(...)` allow rules from the workspace's settings file in -p runs; `trif setup` writes the same
   lists to the workspace's `.claude/settings.json` for interactive sessions there, and the deny rules
@@ -873,7 +925,8 @@ The user's standing instructions (`instructions.md`) reach claude through the wo
   (type /login)".
 - **codex** (OpenAI Codex CLI 0.138+; tested with 0.166): `codex exec --json --skip-git-repo-check
   --ignore-user-config --ignore-rules -c approval_policy="never" -c default_permissions="trif-run"
-  -c permissions={…} [-m MODEL] [resume THREAD_ID] -- PROMPT`, the exec options before `resume`. JSONL
+  -c permissions={…} -c shell_environment_policy.exclude=[…] [-m MODEL] [resume THREAD_ID] -`, the message
+  on stdin, the exec options before `resume`. JSONL
   events: thread.started (the session id), item.* (agent_message, command_execution, file_change…),
   turn.completed / turn.failed. Older versions show as unavailable, with an update hint. No side panel
   login (`codex login` in a terminal). Codex's Homebrew build ships a ripgrep (`rg`) that isn't
@@ -897,7 +950,7 @@ codex exec <the codex flags and permission profile>
        wire_api = "responses", supports_websockets = false }
   -c model_provider="trif-open" -c web_search="disabled"
   -c shell_environment_policy.exclude=["*_API_KEY", "*_API_TOKEN", "*_ACCESS_TOKEN", "*_AUTH_TOKEN", "*_SECRET_KEY"]
-  -m openai/gpt-oss-120b [resume THREAD_ID] -- PROMPT
+  -m openai/gpt-oss-120b [resume THREAD_ID] -      (the message on stdin)
 ```
 
 No `env_key`: with a key, `base_url` is the run's key proxy (see "The key"); without one, the provider's
@@ -983,10 +1036,8 @@ mid-chat). `web_search` is OpenAI's hosted tool; other providers don't have it.
   developer account. Requiring Touch ID for each read was considered and rejected (a prompt per run).
   Weighed against the rest: software already running as the user can usually do worse (keystrokes,
   browser cookies, the workspace), so this is defence in depth, not the main line.
-- **Plain Codex and Claude Code: keys in config.json.** `env.OPENAI_API_KEY` / `env.ANTHROPIC_API_KEY`
-  in config.json go into the agent's environment (that's how those CLIs take them), so a run's commands
-  can read them through KERN_PROCARGS2 as above. Not changed yet; a login (`codex login`, `/login`)
-  keeps the agent's credentials in files the sandbox denies instead.
+- **Plain Codex and Claude Code** use the same keyring and the same kind of proxy for an API key: see
+  "API keys for Claude Code and Codex" below.
 - **Network.** The permission profile's `network = { enabled = false }` covers the commands Codex runs,
   not Codex's own model requests. Verified with Codex 0.166 (real `codex exec`, TRIF's profile, a
   stand-in Responses server on 127.0.0.1; `tests/open-models.test.js` last test, and a real OpenRouter
@@ -1016,6 +1067,39 @@ mid-chat). `web_search` is OpenAI's hosted tool; other providers don't have it.
   value: macOS checks without decrypting it), the local server reachable, the Ollama model installed,
   Codex new enough; without it, an info line. Always: a warning naming any likely API key variable set
   in its own environment (presence only), with the fix (remove the export from the shell profile).
+
+### API keys for Claude Code and Codex
+
+Most people log the agent in (`claude` then `/login`, `codex login`), which keeps its credentials in
+its own files, which run sandboxes deny. For those who use an API key instead (`helper/lib/agentkeys.js`):
+
+- **Kept in the keyring**, like open-model keys (`keyring.js`): service `TRIF API key`, account
+  `anthropic` (Claude Code) or `openai` (Codex). `trif agent key [--agent claude|codex] [--set-key |
+  --remove-key]` (stdin or a no-echo prompt, never argv; not from a run). No panel setting.
+- **Never in the agent's environment or argv.** Until 0.2.1, config.json `env.ANTHROPIC_API_KEY` /
+  `env.OPENAI_API_KEY` went into the agent's environment, readable by its commands (KERN_PROCARGS2).
+  Now, before each run (the adapter's `prepare`), the helper reads the key and starts a key proxy for the
+  run (`keyproxy.js`):
+  - Claude Code: `ANTHROPIC_BASE_URL=http://127.0.0.1:<port>/<32 hex>` (style `anthropic`: the proxy
+    adds `x-api-key`; paths `/v1/messages…`, `/v1/models…`) and `ANTHROPIC_API_KEY=<a placeholder>`, so
+    Claude Code makes API requests, which the proxy fixes. As with a key before, an API key takes
+    precedence over a claude.ai login (Claude Code says its claude.ai connectors are off).
+  - Codex: a custom provider (`-c model_providers.trif-openai={ name = "OpenAI (TRIF)", base_url =
+    "http://127.0.0.1:<port>/<32 hex>/v1", wire_api = "responses", supports_websockets = false }
+    -c model_provider="trif-openai"`; bearer). (`OPENAI_BASE_URL` alone wouldn't do: Codex would still
+    want the key.)
+  The proxy, its refusals (browsers, other hosts, other paths) and its lifetime are as for open models;
+  the key is redacted from run logs, events and stderr. `agent.list` and doctor count a saved key as
+  logged in. Verified with a real Claude Code 2.1.316 against a stand-in API (`tests/agent-keys.test.js`).
+- **Moving keys out of config.json** (`migrateKeys`, by setup and every helper when it starts): each
+  key found there is saved in the keyring (unless one is already there: that one, set later, wins) and
+  removed from config.json. Without any keyring (Linux without `secret-tool`) a key stays in config.json
+  and is still sent through the proxy: config.json is in the private folder, unreadable to runs. Doctor:
+  where each key is (never the key), and key-like entries in config.json `env` that nothing uses.
+- **Limits.** The proxy's address (with its random path) is in Claude Code's environment and Codex's
+  argv, so for the run's duration another same-user program could use it, but not the run's own
+  commands (no network in their sandbox). Codex's `codex debug models` (the panel's model list) runs
+  without the key (nothing gives it one), so with only an API key it may not list the account's models.
 
 Security notes: page content reaches the agent, so prompt injection is possible. The agent is limited
 to editing the workspace and running `trif` (which can still run JavaScript in the user's tabs);

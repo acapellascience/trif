@@ -160,8 +160,9 @@ function setConfigKey(home, key, value) {
 function autoUpdateOn(ws) { return ws.config?.autoUpdate === true; }
 function checksOn(ws) { return ws.config?.checkForUpdates !== false; }
 
+// (The system's realpath: on macOS also each component's on-disk case, so two spellings compare equal.)
 function realOrResolved(p) {
-  try { return fs.realpathSync(p); } catch { return path.resolve(p); }
+  try { return fs.realpathSync.native(p); } catch { return path.resolve(p); }
 }
 
 /** Whether this copy of TRIF can update itself, and if not, why. */

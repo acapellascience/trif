@@ -138,8 +138,9 @@ function chooseMode(mode, root = P.REPO_ROOT) {
   return P.isGitCheckout(root) ? 'link' : 'copy';
 }
 
+// (The system's realpath: on macOS also each component's on-disk case, so two spellings compare equal.)
 function realOrResolved(p) {
-  try { return fs.realpathSync(p); } catch { return path.resolve(p); }
+  try { return fs.realpathSync.native(p); } catch { return path.resolve(p); }
 }
 
 function copyTree(src, dest) {

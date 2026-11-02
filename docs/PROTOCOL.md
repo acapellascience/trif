@@ -568,8 +568,9 @@ extension/   manifest.json, background.js (service worker), runtime.js (page run
 package.json the npm package `trif` (version, bin, files allowlist)
 helper/      host.js, cli.js, safari-bridge.js, lib/*.js, workspace/AGENTS.md, workspace/CLAUDE.md, templates/mod.js
 examples/    sites/<site>/<mod>.js (the shipped mods), shipped-history.json (scripts/shipped-history.js)
-tests/       node tests (node --test), incl. a fake extension for the helper and a chrome.* mock for the extension
-docs/        PROTOCOL.md (this file)
+tests/       node tests (node --test), incl. a fake extension for the helper and a chrome.* mock for the extension;
+             tests/e2e/ the opt-in browser suite (docs/TESTING.md)
+docs/        PROTOCOL.md (this file), TESTING.md
 scripts/     build-extension.js (Chrome/Firefox/Safari builds), build-safari.js (the Safari Mac app),
              release.js (releases, see "Updates"), shipped-history.js, render-icon.js
 beta/        START HERE.txt templates for the beta zips (Firefox, Chrome)

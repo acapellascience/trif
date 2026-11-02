@@ -175,6 +175,13 @@ terms. See [store/PRIVACY.md](store/PRIVACY.md).
 How the pieces fit together, and the full CLI, are in [docs/PROTOCOL.md](docs/PROTOCOL.md). Run the tests
 with `node --test --test-concurrency=2 --test-timeout=120000`.
 
+Before a release, also run the end-to-end browser suite, which installs the npm package into a scratch
+home and drives a throwaway Firefox (and Chrome for Testing) profile through setup, the panel, switches,
+Plain X and real agent runs, saving screenshots:
+`node tests/e2e/run.js firefox --agent --codex --upgrade-from <previous release .tgz>`. It never touches
+your real browsers, profiles or `~/.trif`. What it covers and what stays manual (Safari, a real X
+timeline, look and feel): [docs/TESTING.md](docs/TESTING.md).
+
 `node scripts/build-extension.js firefox` builds the Firefox add-on into `dist/firefox` (try it with
 `npx web-ext run -s dist/firefox`). Firefox only keeps signed add-ons installed; sign it as unlisted with
 `npx web-ext sign -s dist/firefox --channel unlisted` and your addons.mozilla.org API key.

@@ -150,11 +150,10 @@ class Scenario {
     try {
       const installed = await r.check('install from the npm package into a scratch home', () => this.install());
       if (!installed) return;
-      await r.check('browser starts with the extension, isolated to the scratch helper', () => this.startBrowser());
-      if (!this.d) return;
-      await this.browserChecks();
+      const started = await r.check('browser starts with the extension, isolated to the scratch helper', () => this.startBrowser());
+      if (started) await this.browserChecks();
     } finally {
-      if (this.d) {
+      if (this.d && this.d.proc) {
         await r.check('console: no warnings or errors from the extension or pages', () => this.consoleCheck());
         await this.d.stop().catch((e) => r.note(`stopping the browser: ${e.message}`));
       }
@@ -280,7 +279,7 @@ class Scenario {
     const origin = d.origin;
 
     // The setup page: our handle on the extension's chrome.* APIs, and the user scripts permission.
-    await r.check('user scripts allowed', async () => {
+    const allowed = await r.check('user scripts allowed', async () => {
       this.control = await d.openTab(`${origin}/onboarding.html`);
       await sleep(1000);
       const how = await d.grantUserScripts(this.control);
@@ -290,7 +289,7 @@ class Scenario {
     await sleep(500);
     await this.shot(this.control, 'setup-page');
 
-    await r.check('helper connected (trif status, extension hello)', async () => {
+    const connected = await r.check('helper connected (trif status, extension hello)', async () => {
       const s = (await this.cli(['status'], { json: true })).json;
       const e = s.extension;
       if (!e) throw new Error('no extension status');
@@ -298,6 +297,7 @@ class Scenario {
       return `helper v${s.helper.helper}, extension v${e.version} on ${e.browser} ${e.chrome}, user scripts ${e.userScripts ? 'on' : 'off'}`;
     });
 
+    if (!connected) return;
     await r.check('trif doctor', async () => {
       const doc = await this.cli(['doctor'], { json: true, timeoutMs: 60000 });
       if (!doc.json) throw new Error(`no JSON: ${doc.stdout} ${doc.stderr}`);
@@ -337,6 +337,8 @@ class Scenario {
       }
       return `${shipped.length} shipped (${shipped.filter((m) => byId.get(m.id)?.enabled !== false).length} on), sites on: ${st.sitesOn.join(', ')}`;
     });
+
+    if (!allowed) { r.note('user scripts are off, so the page checks were skipped'); return; }
 
     // ---- the test window and the panel following it
     const base = `http://127.0.0.1:${port}`;

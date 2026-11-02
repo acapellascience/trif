@@ -50,6 +50,9 @@ const PREINSTALLED = [
   { id: 'www.instagram.com/following-only-feed', on: true },
   { id: 'www.instagram.com/hide-ai-content', on: true },
   { id: 'www.instagram.com/hide-reposts', on: true },
+  // Added in 0.2.0: existing workspaces get it (off) with the setup that installs the update, since it
+  // isn't in their `offered` list yet.
+  { id: 'www.google.com/dvd-logo', on: false },
 ];
 
 // TRIF is off on every site until the user turns it on there; it starts on for these, the sites the

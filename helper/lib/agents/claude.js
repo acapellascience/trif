@@ -41,7 +41,7 @@ function tooOld(version) {
  * The run's own rules (--settings): the sandbox for its shell commands, and per-run permission rules
  * (other sites' folders and screenshots). `limits` is runs.js runLimits.
  */
-function runSettings({ workspace = '', readOnly = [], denied = [], home, readable = [], privateFiles = [], box, screenshots, otherScreenshots = [] } = {}) {
+function runSettings({ workspace = '', readOnly = [], denied = [], home, readable = [], privateFiles = [], box, screenshots, otherScreenshots = [], skills = [] } = {}) {
   const rel = (p) => `./${path.relative(workspace, p).split(path.sep).join('/')}`;
   const inWorkspace = (p) => !!workspace && p.startsWith(workspace + path.sep);
   return {
@@ -62,6 +62,10 @@ function runSettings({ workspace = '', readOnly = [], denied = [], home, readabl
       network: { allowedDomains: [], strictAllowlist: true }, // and no unix sockets (none allowed)
     },
     permissions: {
+      // The user's skill folders (runs.js skillDirs), read only. ("//" starts an absolute path in a rule.)
+      // Claude Code doesn't load user skills in these runs (--setting-sources project), so this only
+      // matters when the agent is pointed at one.
+      allow: skills.map((p) => `Read(/${p}/**)`),
       deny: [...readOnly.filter(inWorkspace).map((p) => `Edit(${rel(p)}/**)`),
         ...otherScreenshots.filter(inWorkspace).map((p) => `Read(${rel(p)}/**)`)],
     },

@@ -237,7 +237,8 @@ logged in to:
   Allow in the side panel. If the user asked for that (the same change on twitter.com too), write it,
   then tell them it's waiting for their OK and why. Don't try to get around a hold.
 - Edit only files under `sites/`, and not another site's existing folder (TRIF's own files are
-  blocked). Shell commands run in a sandbox with no network and nothing outside the workspace; with
+  blocked). Shell commands run in a sandbox with no network and nothing outside the workspace
+  but the user's skill folders (read only; a skill's tool that needs the network won't work); with
   Claude Code only `trif`, `cd` and `ls` run: no `node`, so unit tests can't run in the side panel
   (write them anyway when they help; the user can run them). `trif check` checks syntax.
 - `trif run -f` and `trif check` read files from `sites/` only, and `-o` writes there or to your

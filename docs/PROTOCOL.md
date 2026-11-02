@@ -761,9 +761,15 @@ Suffix List). `helper/lib/scope.js` computes it; `extension/lib.js` mirrors the 
 - **Agent sandboxes.** The scope only holds if the agent can't reach the helper some other way or
   rewrite the rules, so both agents run under limits the operating system enforces (macOS Seatbelt;
   `runs.js` runLimits computes them, each adapter passes them on):
-  - **Reads:** the workspace, the TRIF code `trif` runs, and node; nothing else in the home folder
-    (every item in it is denied, rather than the folder itself, which node and `mkdir -p` must be able to
-    look at). In the workspace, not `config.json` (API keys), `safari-token`, `helper.log`, `runs/`
+  - **Reads:** the workspace, the TRIF code `trif` runs, node, and the user's skill folders, read only
+    (`skillDirs`: `~/.agents/skills`, `~/.codex/skills`, `~/.claude/skills` and where each skill in them
+    really is, links followed; not a link to the home folder or above, nor into a visible folder such as
+    `~/Documents`); nothing else in the home folder (every item in it is denied, rather than the folder
+    itself, which node and `mkdir -p` must be able to look at; inside hidden folders on the way to a skill
+    folder, such as `~/.codex`, every other item: Codex's login stays unreadable). Codex offers the
+    skills it finds and its commands can now read them; Claude Code doesn't load user skills in these runs
+    (`--setting-sources project`), so its file tools may read them (absolute `Read(//…)` rules) but it
+    isn't told they exist. A skill that needs the network (`npx …@latest`) still can't run its tool. In the workspace, not `config.json` (API keys), `safari-token`, `helper.log`, `runs/`
     (other runs' logs hold the pages they read) or `screenshots/` (other sites'), except the run's own
     screenshots folder and mailbox.
   - **Writes:** the mods folder, with every existing folder of another site (`all-sites/` included)

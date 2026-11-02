@@ -203,6 +203,12 @@ test('claude adapter: command flags, resume and model', () => {
   assert.deepEqual(sb.filesystem.allowWrite, ['/c/boxes/r1', '/h/screenshots/x.com']);
   for (const p of ['/h/held.json', '/h/preinstalled.json', '/h/runs', '/h/sites/y.com']) assert.ok(sb.filesystem.denyWrite.includes(p), p);
   assert.deepEqual(settings.permissions.deny, ['Edit(./sites/y.com/**)', 'Read(./screenshots/y.com/**)']);
+  assert.deepEqual(settings.permissions.allow, []);
+  // The user's skill folders: readable by its file tools (absolute-path rules), never writable.
+  const sk = JSON.parse((c2 => c2.args[c2.args.indexOf('--settings') + 1])(claude.command({ bin: '/x/claude', prompt: 'hi', ...limits, readable: [...limits.readable, '/Users/u/.agents/skills/web'], skills: ['/Users/u/.agents/skills/web'] })));
+  assert.deepEqual(sk.permissions.allow, ['Read(//Users/u/.agents/skills/web/**)']);
+  assert.ok(sk.sandbox.filesystem.allowRead.includes('/Users/u/.agents/skills/web'));
+  assert.ok(!sk.sandbox.filesystem.allowWrite.some((p) => p.includes('skills')));
   assert.equal(claude.tooOld('2.1.284 (Claude Code)'), true);
   assert.equal(claude.tooOld('2.1.312 (Claude Code)'), false);
   const r = claude.command({ bin: '/x/claude', prompt: 'hi', context: 'CTX', sessionId: 's1', model: 'opus' });
@@ -243,6 +249,42 @@ test('claude adapter: parses init, text, tools, result; maps "Not logged in"', (
   ev.length = 0;
   claude.parse(JSON.stringify({ type: 'result', is_error: true, subtype: 'error_max_turns', session_id: 's' }), emit, st);
   assert.match(ev[0].message, /error_max_turns/);
+});
+
+test('run limits: the user\'s skill folders are readable (real paths, links followed), nothing else of theirs', () => {
+  const { skillDirs, deniedInHome } = require('../helper/lib/runs');
+  const h = fs.realpathSync(tempDir());
+  const mk = (...p) => { fs.mkdirSync(path.join(h, ...p), { recursive: true }); return path.join(h, ...p); };
+  const web = mk('.agents', 'skills', 'modern-web-guidance');
+  fs.writeFileSync(path.join(web, 'SKILL.md'), '---\nname: modern-web-guidance\n---\n');
+  fs.writeFileSync(path.join(h, '.agents', '.skill-lock.json'), '{}');
+  mk('.claude', 'skills', 'synced');
+  fs.symlinkSync('../../.agents/skills/modern-web-guidance', path.join(h, '.claude', 'skills', 'modern-web-guidance'));
+  fs.writeFileSync(path.join(h, '.claude', 'history.jsonl'), 'private');
+  mk('.codex', 'skills', '.system');
+  fs.writeFileSync(path.join(h, '.codex', 'auth.json'), '{"secret":1}');
+  const elsewhere = fs.realpathSync(tempDir());
+  fs.symlinkSync(elsewhere, path.join(h, '.claude', 'skills', 'outside'));
+  fs.symlinkSync(h, path.join(h, '.claude', 'skills', 'everything')); // a link to the home folder: never
+  mk('Documents', 'my-skill');
+  fs.symlinkSync(path.join(h, 'Documents', 'my-skill'), path.join(h, '.agents', 'skills', 'in-documents')); // can't deny around it quietly
+  const dirs = skillDirs(h);
+  assert.deepEqual(dirs.sort(), [path.join(h, '.agents', 'skills'), path.join(h, '.claude', 'skills'), path.join(h, '.codex', 'skills'), elsewhere].sort());
+  // Denied around them: the rest of ~/.agents, ~/.claude and ~/.codex (Codex's login among them), and
+  // everything else in the home folder.
+  const denied = deniedInHome(h, [...dirs, mk('.trif')]);
+  for (const p of [path.join(h, '.agents', '.skill-lock.json'), path.join(h, '.claude', 'history.jsonl'), path.join(h, '.codex', 'auth.json'), path.join(h, 'Documents')]) {
+    assert.ok(denied.includes(p), p);
+  }
+  for (const p of [path.join(h, '.agents'), path.join(h, '.claude'), path.join(h, '.codex'), path.join(h, '.trif'), path.join(h, '.agents', 'skills')]) {
+    assert.ok(!denied.includes(p), p);
+  }
+  // The Codex permission profile: skills read only, no write.
+  const c = codex.command({ bin: '/x/codex', prompt: 'P', readable: dirs, writable: ['/w'], denied });
+  const perm = c.args.find((a) => a.startsWith('permissions='));
+  assert.ok(perm.includes(`${JSON.stringify(path.join(h, '.agents', 'skills'))} = "read"`));
+  assert.ok(perm.includes(`${JSON.stringify(path.join(h, '.codex', 'auth.json'))} = "deny"`));
+  assert.ok(!/skills" = "write"/.test(perm));
 });
 
 test('codex adapter: command, resume, JSONL events', () => {

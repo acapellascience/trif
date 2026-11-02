@@ -100,13 +100,27 @@ function png(size, raw) {
     chunk('IDAT', zlib.deflateSync(raw)), chunk('IEND', Buffer.alloc(0))]);
 }
 
-// The Safari app's icon (macOS): the head itself, at the size Apple's icon grid gives an icon's shape (about
-// 824 of 1024 points), with transparent margins. macOS 15 shows app icons unmasked, so a full-bleed square
-// would show as a green square in the Dock and Finder.
-const MAC_ZOOM = (824 / 1024 * 64) / HEAD.outer;
+// The Safari app's icon (macOS) is full bleed: the whole square is rim green, and the system's own rounded
+// mask becomes the head's outline. Safari (Settings → Extensions) and macOS 26 put an icon with transparent
+// margins on a white tile instead. The face is the mask inset by the rim (a rounded square: Apple's mask has
+// corners of about 22.4% of the side), so the rim left after masking is as thick all round as the toolbar
+// icon's; the eyes are the toolbar icon's, scaled with the face. Without a mask (Finder and the Dock before
+// macOS 26) it shows as a green square; acceptable, since TRIF.app is only a container people open once.
+const MAC = { r: 0.224 * 128, rim: (HEAD.outer - HEAD.inner) * (64 / HEAD.outer) };
+function sampleMac(x, y) {
+  const half = 64 - MAC.rim;
+  const r = MAC.r - MAC.rim;
+  const dx = Math.max(0, Math.abs(x - 64) - (half - r));
+  const dy = Math.max(0, Math.abs(y - 64) - (half - r));
+  if (Math.abs(x - 64) > half || Math.abs(y - 64) > half || dx * dx + dy * dy > r * r) return HEAD.rim;
+  // Eyes: the toolbar icon's, zoomed with the head (64 / outer) about the centre.
+  const k = HEAD.outer / 64;
+  const ex = (x - 64) * k + 64, ey = (y - 64) * k + 64;
+  return EYES.xs.some((cx) => inside(ex, ey, cx, EYES.cy, EYES.a, EYES.b, EYES.n)) ? EYES.color : HEAD.face;
+}
 
-/** The Mac app icon at `size` px, as PNG bytes. */
-function renderMac(size) { return render(size, MAC_ZOOM); }
+/** The Mac app icon at `size` px, as PNG bytes (opaque, full bleed). */
+function renderMac(size) { return render(size, 1, sampleMac); }
 
 if (require.main === module) {
   fs.mkdirSync(outDir, { recursive: true });

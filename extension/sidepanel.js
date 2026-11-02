@@ -282,9 +282,9 @@ function render() {
   const { info: agentInfo, list: agentList } = currentAgent();
   const anyAgent = agentList.some((a) => a.available);
 
-  ui.site.textContent = site || 'TRIF';
+  ui.site.textContent = site || 'Tim\'s Robot Internet Fixer';
   ui.site.title = view.tab?.url || '';
-  document.title = site ? `TRIF · ${site}` : 'TRIF';
+  document.title = site ? `TRIF · ${site}` : 'Tim\'s Robot Internet Fixer';
 
   // Status dot
   let dot = 'bad';
@@ -698,7 +698,7 @@ function modItem(m) {
   const main = el('div', 'mod-main');
   // The mods TRIF ships say so (their header's @source and @version).
   const file = el('div', 'mod-file', (m.file || m.id).split('/').pop());
-  if (m.source === 'webmods' || m.source === 'trif') file.append(' ', el('span', 'mod-source', `from TRIF${m.version ? `, version ${m.version}` : ''}`));
+  if (m.source === 'webmods' || m.source === 'trif') file.append(' ', el('span', 'mod-source', `Tim's mod${m.version ? `, v${m.version}` : ''}`));
   main.append(light, name, file);
   const row = el('div', 'mod-row');
   if (m.held) {

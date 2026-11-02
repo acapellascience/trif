@@ -3,14 +3,14 @@
 //
 //   codex exec --json --skip-git-repo-check --ignore-user-config --ignore-rules
 //              -c approval_policy="never" -c default_permissions="trif-run" -c permissions={…}
-//              [-m MODEL] [resume THREAD_ID] PROMPT
+//              [-m MODEL] [resume THREAD_ID] -        (the message on stdin)
 //
 // The run's limits (runs.js runLimits) are enforced by the operating system, not just asked for: a
 // permission profile (macOS Seatbelt, Linux bubblewrap; Codex refuses to run a command it can't sandbox)
 // lets the commands it runs
-//   - read the workspace, the TRIF code and node, and nothing else in the home folder (no ~/.ssh, no
-//     Codex's own login), nor the workspace's secrets and other runs' traces (config.json, safari-token,
-//     runs/, screenshots/, helper.log);
+//   - read the workspace (all of it: nothing private is kept there), the TRIF code and node, and nothing
+//     else in the home folder (no ~/.ssh, no Codex's own login), nor TRIF's private folder (settings,
+//     logs, other runs' logs, other sites' screenshots: paths.js privateDir), wherever it is;
 //   - write only the mods folder (every existing mod folder of another site read-only inside it), the
 //     run's screenshots folder and its mailbox, so a run can't change other sites' mods or TRIF's own
 //     files. A new folder for another site can still be created; mods in it are held until the user
@@ -29,10 +29,16 @@
 
 const { findExecutable, versionOf, relToWorkspace, oneLine, parseJsonLine, captureSync, capture } = require('./util');
 
-const NOT_LOGGED_IN = "Codex isn't logged in: run `codex login` in a terminal (or set OPENAI_API_KEY under \"env\" in the workspace's config.json)";
+const NOT_LOGGED_IN = "Codex isn't logged in: run `codex login` in a terminal (or save an OpenAI API key: trif agent key --agent codex --set-key)";
 const AUTH_RE = /not logged in|unauthori[sz]ed|\b401\b|please (run )?`?codex login|missing (api key|credentials)/i;
 
 const PROFILE = 'trif-run';
+// Codex builds its commands' environment from a snapshot of the user's login shell, taken by Codex itself
+// (outside the sandbox), so a key still exported in ~/.zshrc would reach them that way (seen with Codex
+// 0.166 and a stand-in profile). TRIF's own keys are never there (keyring); these case-insensitive globs
+// keep out the usual API key variables a profile may still export. (Not *TOKEN*: TRIF_RUN_TOKEN must get
+// through.)
+const EXCLUDED_VARS = ['*_API_KEY', '*_API_TOKEN', '*_ACCESS_TOKEN', '*_AUTH_TOKEN', '*_SECRET_KEY'];
 const MIN_VERSION = [0, 138, 0]; // permission profiles
 
 const tomlKey = (s) => JSON.stringify(String(s)); // a JSON string is a valid TOML basic string here
@@ -40,8 +46,8 @@ const tomlKey = (s) => JSON.stringify(String(s)); // a JSON string is a valid TO
 /**
  * The inline TOML table for -c permissions=…: `denied` unreadable, `readable` read-only, `writable`
  * writable, `readOnly` read-only again inside those; the more specific path wins (so a readable workspace
- * inside a denied home folder is readable, and a writable mailbox inside a denied runs/ is writable).
- * No network.
+ * inside a denied home folder is readable, and the run's own screenshots folder inside the denied private
+ * folder is writable). No network.
  */
 function permissionsToml({ readable = [], writable = [], readOnly = [], denied = [] } = {}) {
   const fsRules = [`${tomlKey(':workspace_roots')} = { "." = "read" }`,
@@ -104,17 +110,21 @@ const adapter = {
     return { models, default: models[0]?.id || null, custom: false, error: null };
   },
 
-  // writable / readOnly / denied: absolute (real) paths; see permissionsToml.
-  command({ bin, prompt, sessionId, model, readable = [], writable = [], readOnly = [], denied = [], lockedDirs = [] }) {
+  // writable / readOnly / denied: absolute (real) paths; see permissionsToml. `config`: more -c pairs
+  // (codex-oss: its provider; a plain run with an API key: the key proxy's provider, see keyProvider).
+  command({ bin, prompt, sessionId, model, readable = [], writable = [], readOnly = [], denied = [], lockedDirs = [], config = [] }) {
     // Exec options go before the `resume` subcommand (verified with Codex 0.166).
     const args = ['exec', '--json', '--skip-git-repo-check', '--ignore-user-config', '--ignore-rules',
-      '-c', 'approval_policy="never"', '-c', `default_permissions="${PROFILE}"`, '-c', `permissions=${permissionsToml({ readable, writable, readOnly, denied })}`];
+      '-c', 'approval_policy="never"', '-c', `default_permissions="${PROFILE}"`, '-c', `permissions=${permissionsToml({ readable, writable, readOnly, denied })}`, ...config,
+      '-c', `shell_environment_policy.exclude=[${EXCLUDED_VARS.map(tomlKey).join(', ')}]`];
     if (model) args.push('-m', model);
     if (sessionId) args.push('resume', sessionId);
-    args.push('--', prompt); // `--`: a message starting with "-" isn't an option
+    // The message on stdin (`-`), not in argv, which any same-user process can read (`ps`, sysctl
+    // KERN_PROCARGS2; the agent's sandboxed commands included).
+    args.push('-');
     // Other sites' folders the profile makes read-only (by real path: the sandbox follows links, its
     // patches included).
-    return { file: bin || adapter.binary, args, locked: lockedDirs.filter((d) => readOnly.includes(d.real)).map((d) => d.rel) };
+    return { file: bin || adapter.binary, args, stdin: prompt, locked: lockedDirs.filter((d) => readOnly.includes(d.real)).map((d) => d.rel) };
   },
 
   parse(line, emit, state = {}) {
@@ -203,7 +213,14 @@ function toolEvent(item, workspace) {
   }
 }
 
+// With an OpenAI API key saved (agentkeys.js): the run's key proxy, as a provider of its own; the key
+// never reaches Codex. Without one: Codex's own login.
+adapter.prepare = async function prepare({ ws, logger }) {
+  return (await require('../agentkeys').prepareAgentKey('codex', { ws, logger })) || {};
+};
+
 module.exports = adapter;
 adapter.permissionsToml = permissionsToml;
+adapter.EXCLUDED_VARS = EXCLUDED_VARS;
 adapter.tooOld = tooOld;
 module.exports.NOT_LOGGED_IN = NOT_LOGGED_IN;

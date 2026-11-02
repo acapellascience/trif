@@ -9,7 +9,7 @@ const crypto = require('node:crypto');
 const path = require('node:path');
 const vm = require('node:vm');
 const { test, before } = require('node:test');
-const { runCli, tempDir, waitFor, sleep, REPO } = require('./fake-extension');
+const { runCli, tempDir, waitFor, sleep, REPO, privDir } = require('./fake-extension');
 const { createBridge, WsReader, PORT } = require('../helper/safari-bridge');
 const { safariManifest, bundleClassic } = require('../scripts/build-extension');
 const { safariAgentContent } = require('../helper/lib/setup');
@@ -480,13 +480,24 @@ test('setup --browser safari installs the bridge\'s login item and gives Safari\
   assert.match(next, /Allow unsigned extensions/);
   assert.doesNotMatch(next, /chrome:\/\/extensions|Load unpacked|\.xpi/);
   assert.doesNotMatch(r.stdout, /native host/, 'no native messaging manifest for Safari');
-  const tokenFile = path.join(home, 'safari-token');
+  // The key and the bridge's error log: in the private folder, which runs can't read.
+  const tokenFile = path.join(privDir(home), 'safari-token');
+  assert.ok(!fs.existsSync(path.join(home, 'safari-token')));
+  assert.ok(xml.includes(`<string>${path.join(privDir(home), 'safari-bridge.err')}</string>`));
   const key = fs.readFileSync(tokenFile, 'utf8').trim();
   assert.match(key, /^[0-9a-f]{64}$/);
   assert.equal(fs.statSync(tokenFile).mode & 0o777, 0o600, 'only you can read the key');
   const again = await runCli(['setup', '--browser', 'safari', '--no-link', '--no-examples'], { home });
   assert.equal(again.code, 0);
   assert.equal(fs.readFileSync(tokenFile, 'utf8').trim(), key, 'kept on re-running setup');
+  // A key from before 0.2.0, in the workspace: moved, the same key (the Safari app reads it there).
+  const old = tempDir();
+  fs.writeFileSync(path.join(old, 'safari-token'), `${'ab'.repeat(32)}\n`, { mode: 0o600 });
+  const moved = await runCli(['setup', '--browser', 'safari', '--no-link', '--no-examples'], { home: old });
+  assert.equal(moved.code, 0, moved.stderr + moved.stdout);
+  assert.ok(!fs.existsSync(path.join(old, 'safari-token')));
+  assert.equal(fs.readFileSync(path.join(privDir(old), 'safari-token'), 'utf8').trim(), 'ab'.repeat(32));
+  assert.match(moved.stdout, /moved TRIF's private files \(safari-token\)/);
   // The bridge's agent from before 0.2.0 (dev.webmods.safari-bridge) is replaced: its file goes.
   const oldPlist = path.join(home, 'fakehome', 'Library', 'LaunchAgents', 'dev.webmods.safari-bridge.plist');
   fs.writeFileSync(oldPlist, '<plist/>');

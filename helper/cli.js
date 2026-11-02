@@ -10,6 +10,7 @@ const { envVar } = require('./lib/env');
 const P = require('./lib/paths');
 const { request, streamRun, streamLogin, HelperError } = require('./lib/client');
 const { ALL_SITES, scanMods, planModsMessage, isIgnoredName, isShippedSource } = require('./lib/mods');
+const { realish, isInside, badName } = require('./lib/pathcheck');
 const { COMMANDS, mainHelp, commandHelp } = require('./lib/help');
 const { loadHeld } = require('./lib/held');
 const { pickHelper, listHelpers, describeHelper } = require('./lib/helpers');
@@ -130,7 +131,7 @@ function normalizeSite(s) {
     try { site = new URL(site).host; } catch { /* keep */ }
   }
   site = site.replace(/\/.*$/, '').toLowerCase();
-  if (!site || /[\s\\]/.test(site) || isIgnoredName(site)) throw new UsageError(`"${s}" doesn't look like a hostname`);
+  if (!site || /[\s\\]/.test(site) || isIgnoredName(site) || badName(site)) throw new UsageError(`"${s}" doesn't look like a hostname`);
   return site;
 }
 function prettyBody(text) {
@@ -179,13 +180,22 @@ async function resolveSock(ws, opts) {
 function optionPath(ctx, file, { write = false } = {}) {
   const resolved = path.resolve(String(file));
   if (!envVar('RUN_BOX')) return resolved;
-  const real = (p) => { try { return fs.realpathSync(p); } catch { return path.resolve(p); } };
-  const target = write ? path.join(real(path.dirname(resolved)), path.basename(resolved)) : real(resolved);
-  const roots = [ctx.ws.modsDir, ...(write && envVar('RUN_SCREENSHOTS') ? [envVar('RUN_SCREENSHOTS')] : [])].map(real);
-  if (!roots.some((r) => target.startsWith(r + path.sep))) {
+  // Real paths, compared as the file system does (pathcheck.js: links, `..`, and case on macOS). For a
+  // write, the folder is checked and the file itself must not be a link (written with O_NOFOLLOW below).
+  const target = write ? path.join(realish(path.dirname(resolved)), path.basename(resolved)) : realish(resolved);
+  const roots = [ctx.ws.modsDir, ...(write && envVar('RUN_SCREENSHOTS') ? [envVar('RUN_SCREENSHOTS')] : [])].map((r) => realish(r));
+  if (!roots.some((r) => isInside(target, r))) {
     throw new UsageError(`inside a side-panel agent run, ${write ? 'files are written' : 'files are read'} only in ${roots.join(' or ')}`);
   }
   return target;
+}
+
+/** Write a file the CLI was told to (-o, screenshots): in a run, never through a link left in its place. */
+function writeOptionFile(file, data) {
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  if (!envVar('RUN_BOX')) { fs.writeFileSync(file, data); return; }
+  const fd = fs.openSync(file, fs.constants.O_WRONLY | fs.constants.O_CREAT | fs.constants.O_TRUNC | fs.constants.O_NOFOLLOW, 0o644);
+  try { fs.writeFileSync(fd, data); } finally { fs.closeSync(fd); }
 }
 
 function makeCtx(opts) {
@@ -226,6 +236,14 @@ const handlers = {
       // Only for a person at a terminal (not scripts, tests or --json).
       reveal: !!process.stdout.isTTY && !ctx.json,
     });
+    // API keys left in config.json (before 0.2.0) move to the keyring (agentkeys.js; async, so here).
+    if (r.ws && r.ws.home) {
+      try {
+        const k = await require('./lib/agentkeys').migrateKeys(r.ws.home);
+        const at = r.lines.findIndex((l) => l.startsWith('agents '));
+        if (k.notes.length) r.lines.splice(at === -1 ? r.lines.length : at + 1, 0, ...k.notes.map((n) => `              ${n}`));
+      } catch (e) { r.lines.push(`API keys      couldn't move them out of config.json: ${e.message}`); }
+    }
     if (ctx.json) printJson({ ok: r.ok, home: r.ws.home, mode: r.mode, app: r.root, manifests: r.manifests, node: r.nodePath });
     else out(r.lines.join('\n'));
     if (!r.ok) process.exitCode = 1;
@@ -529,8 +547,7 @@ const handlers = {
       for (let n = 2; fs.existsSync(file); n++) file = path.join(dir, `${stamp}-${n}.png`);
     }
     file = optionPath(ctx, file, { write: true });
-    fs.mkdirSync(path.dirname(file), { recursive: true });
-    fs.writeFileSync(file, Buffer.from(m[2], 'base64'));
+    writeOptionFile(file, Buffer.from(m[2], 'base64'));
     if (ctx.json) return printJson({ file });
     out(file);
   },
@@ -576,8 +593,7 @@ const handlers = {
       const body = prettyBody(r.responseText);
       const text = typeof body === 'string' ? body : JSON.stringify(body, null, 2) + '\n';
       const file = optionPath(ctx, ctx.opts['-o'], { write: true });
-      fs.mkdirSync(path.dirname(file), { recursive: true });
-      fs.writeFileSync(file, text == null ? '' : text);
+      writeOptionFile(file, text == null ? '' : text);
       delete view.responseText;
       view.responseFile = file;
       view.responseLength = typeof r.responseText === 'string' ? r.responseText.length : 0;
@@ -657,7 +673,7 @@ const handlers = {
     if (pos.length < 2) throw new UsageError('usage: trif new <site> <mod>');
     const site = normalizeSite(pos[0]);
     const mod = String(pos[1]).replace(/\.js$/, '');
-    if (!/^[a-z0-9][a-z0-9._-]*$/i.test(mod)) {
+    if (!/^[a-z0-9][a-z0-9._-]*$/i.test(mod) || badName(mod)) {
       throw new UsageError(`"${pos[1]}" isn't a good mod name: use kebab-case letters, digits and dashes (e.g. hide-sidebar)`);
     }
     const file = path.join(ctx.ws.modsDir, site, `${mod}.js`);
@@ -679,7 +695,8 @@ const handlers = {
     if (sub === 'run') return agentRun(ctx, pos);
     if (sub === 'login') return agentLogin(ctx);
     if (sub === 'open-model') return agentOpenModel(ctx, pos);
-    throw new UsageError(`unknown agent command "${sub}" (use: agent list | agent run | agent login | agent open-model)`);
+    if (sub === 'key') return agentKeyCommand(ctx, pos);
+    throw new UsageError(`unknown agent command "${sub}" (use: agent list | agent run | agent login | agent open-model | agent key)`);
   },
 
   async 'install-example'(ctx, pos) {
@@ -703,7 +720,7 @@ const handlers = {
       return;
     }
     const m = /^([^/]+)\/([^/]+?)(\.js)?$/.exec(pos[0]);
-    if (!m) throw new UsageError('usage: trif install-example <site>/<mod>   (e.g. x.com/plain-x)');
+    if (!m || badName(m[1]) || badName(m[2]) || isIgnoredName(m[1]) || isIgnoredName(m[2])) throw new UsageError('usage: trif install-example <site>/<mod>   (e.g. x.com/plain-x)');
     const [, site, mod] = m;
     const src = path.join(dir, site, `${mod}.js`);
     if (!fs.existsSync(src)) {
@@ -838,6 +855,36 @@ async function agentOpenModel(ctx, pos = []) {
   }
   out('\nUse it: pick "Open model (via Codex)" in the side panel\'s Settings, or trif agent run --agent codex-oss "…".');
   out('Change it: trif agent open-model --provider ollama|lmstudio|openrouter|custom [--model NAME] [--base-url URL] [--set-key | --remove-key]');
+}
+
+// An API key for plain Claude Code or Codex runs (lib/agentkeys.js), for people who use one instead of
+// logging the agent in: saved in the keyring, sent by the run's key proxy, never in the agent's
+// environment. Like open-model keys: from stdin or a no-echo prompt, never the command line.
+async function agentKeyCommand(ctx, pos = []) {
+  const keys = require('./lib/agentkeys');
+  if (pos.length) throw new UsageError(`unexpected argument${pos.length === 1 ? '' : 's'} to agent key${ctx.opts['--set-key'] ? ': --set-key reads the key from stdin or asks for it; never put a key on the command line (if you just did, consider it seen by other programs and make a new one)' : ''}`);
+  if (ctx.opts['--set-key'] && ctx.opts['--remove-key']) throw new UsageError('--set-key or --remove-key, not both');
+  const id = ctx.opts['--agent'] ? String(ctx.opts['--agent']) : 'claude';
+  if (!keys.AGENT_KEYS[id]) throw new UsageError(`--agent takes ${Object.keys(keys.AGENT_KEYS).join(' or ')} (open models: trif agent open-model --set-key)`);
+  const s = keys.AGENT_KEYS[id];
+  if (ctx.opts['--set-key']) {
+    const key = process.stdin.isTTY ? await promptHidden(`${s.name} API key (not shown): `) : await readStdin();
+    try { await keys.setAgentKey(id, key); } catch (e) { throw new UsageError(e.message); }
+    if (!ctx.json) out(`Saved the ${s.name} API key in ${require('./lib/keyring').backend().name}.`);
+  } else if (ctx.opts['--remove-key']) {
+    try {
+      const r = await keys.removeAgentKey(id);
+      if (!ctx.json) out(r.removed ? `Removed the ${s.name} API key.` : `There was no ${s.name} API key saved.`);
+    } catch (e) { throw new UsageError(e.message); }
+  }
+  const ws = P.workspace(ctx.ws.home);
+  const h = await keys.hasAgentKey(id, { config: ws.config });
+  if (ctx.json) return printJson({ agent: id, account: s.account, stored: h.stored, source: h.source, error: h.error });
+  const kr = require('./lib/keyring').backend();
+  out(`${id === 'claude' ? 'Claude Code' : 'Codex'}: ${h.source === 'keyring' ? `an ${s.name} API key is saved in ${kr.name} (not shown); side-panel runs send it through a key proxy`
+    : h.source === 'config' ? `an ${s.name} API key is in config.json (${s.envVar}); run trif setup to move it to ${kr ? kr.name : 'a keyring'}`
+      : `no ${s.name} API key saved: runs use ${id === 'claude' ? 'Claude Code' : 'Codex'}'s own login${h.error ? ` (${h.error})` : ''}`}`);
+  if (h.source !== 'keyring') out(`Save one (most people log in instead): trif agent key --agent ${id} --set-key`);
 }
 
 // A line typed at the terminal without echoing it (the API key). Ctrl-C or Ctrl-D cancels.
@@ -1065,7 +1112,7 @@ async function main(argv) {
   }
 }
 
-module.exports = { parseArgs, detectExpression, formatValue, normalizeSite, normalizeUrl, main };
+module.exports = { parseArgs, detectExpression, formatValue, normalizeSite, normalizeUrl, main, optionPath };
 
 if (require.main === module) {
   main(process.argv.slice(2)).then((code) => { process.exitCode = code; });

@@ -7,7 +7,7 @@ const assert = require('node:assert');
 const fs = require('fs');
 const net = require('net');
 const path = require('path');
-const { FakeExtension, runCli, writeMod, tempDir, waitFor, sleep } = require('./fake-extension');
+const { FakeExtension, runCli, writeMod, tempDir, waitFor, sleep, privDir } = require('./fake-extension');
 const claude = require('../helper/lib/agents/claude');
 const codex = require('../helper/lib/agents/codex');
 const agents = require('../helper/lib/agents');
@@ -59,10 +59,14 @@ if (argv[0] === 'auth' && argv[1] === 'login') {
   return;
 }
 const opt = (name) => { const i = argv.indexOf(name); return i === -1 ? null : argv[i + 1]; };
-const prompt = argv.includes('--') ? argv[argv.indexOf('--') + 1] : '';
+// The message comes on stdin (never in argv); the run settings and the context in files the helper
+// removes after the run, so they're kept with the call.
+const prompt = argv.includes('--') ? argv[argv.indexOf('--') + 1] : (() => { try { return fs.readFileSync(0, 'utf8'); } catch { return ''; } })();
+const readOpt = (name) => { const f = opt(name); try { return f ? fs.readFileSync(f, 'utf8') : null; } catch (e) { return 'UNREADABLE ' + e.code; } };
 const calls = path.join(__dirname, 'calls');
 fs.mkdirSync(calls, { recursive: true });
-fs.writeFileSync(path.join(calls, Date.now() + '-' + process.pid + '.json'), JSON.stringify({ argv, env: process.env, cwd: process.cwd(), pid: process.pid, prompt }));
+fs.writeFileSync(path.join(calls, Date.now() + '-' + process.pid + '.json'), JSON.stringify({ argv, env: process.env, cwd: process.cwd(), pid: process.pid, prompt,
+  context: readOpt('--append-system-prompt-file'), settings: readOpt('--settings'), settingsFile: opt('--settings') }));
 const session = opt('--resume') || 'sess-new-1';
 const say = (o) => process.stdout.write(JSON.stringify(o) + '\\n');
 say({ type: 'system', subtype: 'init', session_id: session, cwd: process.cwd(), tools: [] });
@@ -126,7 +130,8 @@ function makeHome({ fake = true, config = {} } = {}) {
     fs.chmodSync(path.join(bin, 'claude'), 0o755);
   }
   const cfg = { ...config, env: { PATH: bin, ...(config.env || {}) } };
-  fs.writeFileSync(path.join(home, 'config.json'), JSON.stringify(cfg));
+  fs.mkdirSync(privDir(home), { recursive: true });
+  fs.writeFileSync(path.join(privDir(home), 'config.json'), JSON.stringify(cfg));
   return { home, bin };
 }
 
@@ -179,45 +184,53 @@ const START = { site: 'example.com', url: 'https://example.com/page', tabId: 12 
 
 // ------------------------------------------------------------------ adapters (pure)
 
-test('claude adapter: command flags, resume and model', () => {
-  const limits = { workspace: '/h', readOnly: ['/h/sites/y.com'], denied: ['/Users/u/.ssh', '/Users/u/Desktop', '/h/config.json', '/h/runs'],
-    home: '/Users/u', readable: ['/h', '/app'], privateFiles: ['/h/config.json', '/h/runs'],
-    box: '/c/boxes/r1', screenshots: '/h/screenshots/x.com', otherScreenshots: ['/h/screenshots/y.com'] };
-  const c = claude.command({ bin: '/x/claude', prompt: 'hi', context: 'CTX', ...limits });
+test('claude adapter: command flags, resume and model; nothing private in argv', () => {
+  const limits = { workspace: '/h', readOnly: ['/h/sites/y.com'], denied: ['/Users/u/.ssh', '/Users/u/Desktop', '/p'],
+    home: '/Users/u', readable: ['/h', '/app'], privateDir: '/p',
+    box: '/c/boxes/r1', screenshots: '/p/screenshots/x.com' };
+  const c = claude.command({ bin: '/x/claude', prompt: 'hi there, my secret plan', context: 'CTX on https://example.com/private', agentDir: '/c/boxes/r1.agent', ...limits });
   assert.equal(c.file, '/x/claude');
-  const settings = JSON.parse(c.args[c.args.indexOf('--settings') + 1]);
-  assert.deepEqual(c.args.filter((a, i) => c.args[i - 1] !== '--settings'), ['-p', '--output-format', 'stream-json', '--verbose', '--permission-mode', 'default',
-    '--setting-sources', 'project', '--strict-mcp-config', '--settings',
+  assert.deepEqual(c.args, ['-p', '--output-format', 'stream-json', '--verbose', '--permission-mode', 'default',
+    '--setting-sources', 'project', '--strict-mcp-config', '--settings', '/c/boxes/r1.agent/settings.json',
     // Absolute rules ("//" + path): a "./" rule would follow the agent after a `cd`.
     '--allowedTools', 'Read(//h/**)', 'Glob', 'Grep', 'Edit(//h/sites/**)', 'Bash(trif:*)', 'Bash(webmods:*)', 'Bash(cd:*)', 'Bash(ls:*)',
-    '--disallowedTools', 'WebFetch', 'WebSearch', 'Read(//h/config.json)', 'Read(//h/safari-token)', 'Read(//h/helper.log*)', 'Read(//h/runs/*.jsonl)',
-    'Read(//h/screenshots/*.png)', '--append-system-prompt', 'CTX', '--', 'hi']);
+    '--disallowedTools', 'WebFetch', 'WebSearch', '--append-system-prompt-file', '/c/boxes/r1.agent/context.md']);
+  // The message on stdin, the settings and the context in the run's own files: none of it in argv,
+  // which any same-user process can read.
+  assert.equal(c.stdin, 'hi there, my secret plan');
+  assert.ok(!c.args.some((a) => /secret plan|example\.com|sandbox/.test(a)));
+  assert.deepEqual(c.files.map((f) => f.path), ['/c/boxes/r1.agent/settings.json', '/c/boxes/r1.agent/context.md']);
+  assert.equal(c.files[1].content, 'CTX on https://example.com/private');
+  const settings = JSON.parse(c.files[0].content);
   // The run's sandbox: fails closed, no way out of it, no network, the run's reads and writes.
   const sb = settings.sandbox;
   assert.deepEqual([sb.enabled, sb.failIfUnavailable, sb.allowUnsandboxedCommands, sb.autoAllowBashIfSandboxed], [true, true, false, false]);
   assert.deepEqual(sb.network, { allowedDomains: [], strictAllowlist: true });
   // The whole home folder, reopened where the run may read: not each item in it (Claude Code looks inside
-  // each listed folder, and macOS asked the user about Desktop, Documents and the like).
-  assert.deepEqual(sb.filesystem.denyRead, ['/Users/u', '/h/config.json', '/h/runs']);
-  assert.deepEqual(sb.filesystem.allowRead, ['/h', '/app', '/c/boxes/r1', '/h/screenshots/x.com']);
+  // each listed folder, and macOS asked the user about Desktop, Documents and the like). The private folder
+  // by name, its run's own screenshots folder reopened; nothing denied inside the workspace.
+  assert.deepEqual(sb.filesystem.denyRead, ['/Users/u', '/p']);
+  assert.deepEqual(sb.filesystem.allowRead, ['/h', '/app', '/c/boxes/r1', '/p/screenshots/x.com']);
   assert.ok(!JSON.stringify(settings).includes('Desktop'));
-  assert.deepEqual(sb.filesystem.allowWrite, ['/c/boxes/r1', '/h/screenshots/x.com']);
-  for (const p of ['/h/held.json', '/h/preinstalled.json', '/h/runs', '/h/sites/y.com']) assert.ok(sb.filesystem.denyWrite.includes(p), p);
-  assert.deepEqual(settings.permissions.deny, ['Edit(//h/sites/y.com/**)', 'Read(//h/screenshots/y.com/**)']);
-  assert.deepEqual(settings.permissions.allow, []);
+  assert.deepEqual(sb.filesystem.allowWrite, ['/c/boxes/r1', '/p/screenshots/x.com']);
+  for (const p of ['/h/held.json', '/h/preinstalled.json', '/h/instructions.md', '/h/sites/y.com']) assert.ok(sb.filesystem.denyWrite.includes(p), p);
+  assert.ok(!sb.filesystem.denyWrite.some((p) => /config\.json|helper\.log|safari-token|\/runs$/.test(p)), 'not in the workspace any more');
+  assert.deepEqual(settings.permissions.deny, ['Edit(//h/sites/y.com/**)']);
+  assert.deepEqual(settings.permissions.allow, ['Read(//p/screenshots/x.com/**)']);
   // The user's skill folders: readable by its file tools (absolute-path rules), never writable.
-  const sk = JSON.parse((c2 => c2.args[c2.args.indexOf('--settings') + 1])(claude.command({ bin: '/x/claude', prompt: 'hi', ...limits, readable: [...limits.readable, '/Users/u/.agents/skills/web'], skills: ['/Users/u/.agents/skills/web'] })));
-  assert.deepEqual(sk.permissions.allow, ['Read(//Users/u/.agents/skills/web/**)']);
+  const sk = JSON.parse(claude.command({ bin: '/x/claude', prompt: 'hi', ...limits, readable: [...limits.readable, '/Users/u/.agents/skills/web'], skills: ['/Users/u/.agents/skills/web'] }).files[0].content);
+  assert.deepEqual(sk.permissions.allow, ['Read(//Users/u/.agents/skills/web/**)', 'Read(//p/screenshots/x.com/**)']);
   assert.ok(sk.sandbox.filesystem.allowRead.includes('/Users/u/.agents/skills/web'));
   assert.ok(!sk.sandbox.filesystem.allowWrite.some((p) => p.includes('skills')));
   assert.equal(claude.tooOld('2.1.284 (Claude Code)'), true);
   assert.equal(claude.tooOld('2.1.312 (Claude Code)'), false);
-  const r = claude.command({ bin: '/x/claude', prompt: 'hi', context: 'CTX', sessionId: 's1', model: 'opus' });
-  assert.deepEqual(r.args.slice(-6), ['--resume', 's1', '--model', 'opus', '--', 'hi']);
-  // A message that looks like an option is still the message.
+  const r = claude.command({ bin: '/x/claude', prompt: 'hi', context: 'CTX', sessionId: 's1', model: 'opus', agentDir: '/a' });
+  assert.deepEqual(r.args.slice(-5), ['/a/context.md', '--resume', 's1', '--model', 'opus']);
+  assert.equal(r.stdin, 'hi');
+  // A message that looks like an option is still the message: it isn't in argv at all.
   const f = claude.command({ bin: '/x/claude', prompt: '--dangerously-skip-permissions hide ads' });
-  assert.deepEqual(f.args.slice(-2), ['--', '--dangerously-skip-permissions hide ads']);
-  assert.ok(!f.args.slice(0, -1).includes('--dangerously-skip-permissions hide ads'));
+  assert.ok(!f.args.some((a) => a.includes('dangerously')));
+  assert.equal(f.stdin, '--dangerously-skip-permissions hide ads');
 });
 
 test('claude adapter: parses init, text, tools, result; maps "Not logged in"', () => {
@@ -315,11 +328,12 @@ test('run limits: inside skill folders, secrets and links out of what a run may 
   mk('.ssh');
   put(path.join(h, '.ssh', 'id_rsa'), 'PRIVATE');
   const trif = mk('.trif');
-  put(path.join(trif, 'config.json'), '{}');
+  const priv = mk('Library', 'Application Support', 'TRIF'); // the private folder of ~/.trif (paths.js)
+  put(path.join(priv, 'config.json'), '{}');
   mk('.trif', 'sites');
   const elsewhere = fs.realpathSync(tempDir());
   fs.symlinkSync(path.join(h, '.ssh'), path.join(skill, 'keys')); // into the home folder: denied
-  fs.symlinkSync(path.join(trif, 'config.json'), path.join(skill, 'conf.json')); // a workspace secret: denied
+  fs.symlinkSync(path.join(priv, 'config.json'), path.join(skill, 'conf.json')); // TRIF's settings: denied
   fs.symlinkSync(path.join(h, 'gone'), path.join(skill, 'dangling')); // nowhere (yet): denied
   fs.symlinkSync(path.join(skill, 'SKILL.md'), path.join(skill, 'README.md')); // within the skill: fine
   fs.symlinkSync(elsewhere, path.join(skill, 'lib')); // outside the home folder: readable anyway
@@ -328,8 +342,10 @@ test('run limits: inside skill folders, secrets and links out of what a run may 
   try {
     const ws = P.workspace(trif);
     const box = mk('Library', 'Caches', 'TRIF', 'boxes', 'r1');
-    const lim = runLimits(ws, { scope: 'x.com', box, screenshots: path.join(trif, 'screenshots', 'x.com') });
+    assert.equal(ws.private, priv);
+    const lim = runLimits(ws, { scope: 'x.com', box, screenshots: path.join(priv, 'screenshots', 'x.com') });
     assert.ok(lim.readable.includes(path.join(h, '.agents', 'skills')));
+    assert.ok(lim.denied.includes(priv));
     for (const f of [...secretFiles, ...secretDirs, sysSecret]) assert.ok(lim.denied.includes(f), f);
     for (const f of [path.join(skill, 'SKILL.md'), path.join(skill, 'scripts'), path.join(skill, 'scripts', 'run.sh'), path.join(h, '.codex', 'skills', '.system'), system]) {
       assert.ok(!lim.denied.includes(f), f);
@@ -341,7 +357,7 @@ test('run limits: inside skill folders, secrets and links out of what a run may 
     assert.ok(perm.includes(`${JSON.stringify(path.join(skill, '.env'))} = "deny"`));
     assert.ok(perm.includes(`${JSON.stringify(path.join(skill, '.git'))} = "deny"`));
     // Claude Code: its sandbox, and its unsandboxed Read tool (rules), also for the links.
-    const settings = JSON.parse(claude.command({ bin: '/x/claude', prompt: 'P', ...lim }).args.find((a, i, all) => all[i - 1] === '--settings'));
+    const settings = JSON.parse(claude.command({ bin: '/x/claude', prompt: 'P', ...lim }).files[0].content);
     const deny = settings.permissions.deny;
     assert.ok(settings.sandbox.filesystem.denyRead.includes(path.join(skill, 'api.key')));
     assert.ok(deny.includes(`Read(/${path.join(skill, 'api.key')})`));
@@ -356,10 +372,13 @@ test('run limits: inside skill folders, secrets and links out of what a run may 
 });
 
 test('codex adapter: command, resume, JSONL events', () => {
-  const c = codex.command({ bin: '/x/codex', prompt: 'P', model: 'gpt-5', readable: ['/h', '/app'], writable: ['/h/sites', '/h/screenshots/x.com', '/h/runs/r1.box'], readOnly: ['/h/sites/y.com'], denied: ['/Users/u/.ssh', '/h/config.json', '/h/runs'] });
+  const c = codex.command({ bin: '/x/codex', prompt: 'P the secret', model: 'gpt-5', readable: ['/h', '/app'], writable: ['/h/sites', '/p/screenshots/x.com', '/c/r1'], readOnly: ['/h/sites/y.com'], denied: ['/Users/u/.ssh', '/p'] });
   assert.equal(c.args[0], 'exec');
   assert.ok(c.args.includes('--json') && c.args.includes('--skip-git-repo-check'));
-  assert.deepEqual(c.args.slice(-4), ['-m', 'gpt-5', '--', 'P']);
+  // The message on stdin (`-`), not in argv.
+  assert.deepEqual(c.args.slice(-3), ['-m', 'gpt-5', '-']);
+  assert.equal(c.stdin, 'P the secret');
+  assert.ok(!c.args.some((a) => a.includes('secret')));
   // The site limit is a permission profile the OS enforces; nothing that would replace it is loaded.
   assert.ok(!c.args.includes('--sandbox'), 'the legacy --sandbox would override the profile');
   assert.ok(c.args.includes('--ignore-user-config') && c.args.includes('--ignore-rules'));
@@ -367,12 +386,13 @@ test('codex adapter: command, resume, JSONL events', () => {
   assert.ok(c.args.includes('default_permissions="trif-run"'));
   // No network: `trif` reaches the helper through the run's mailbox.
   assert.equal(c.args.find((a) => a.startsWith('permissions=')),
-    'permissions={ trif-run = { extends = ":workspace", filesystem = { ":workspace_roots" = { "." = "read" }, "/Users/u/.ssh" = "deny", "/h/config.json" = "deny", "/h/runs" = "deny", "/h" = "read", "/app" = "read", "/h/sites" = "write", "/h/screenshots/x.com" = "write", "/h/runs/r1.box" = "write", "/h/sites/y.com" = "read" }, network = { enabled = false } } }');
+    'permissions={ trif-run = { extends = ":workspace", filesystem = { ":workspace_roots" = { "." = "read" }, "/Users/u/.ssh" = "deny", "/p" = "deny", "/h" = "read", "/app" = "read", "/h/sites" = "write", "/p/screenshots/x.com" = "write", "/c/r1" = "write", "/h/sites/y.com" = "read" }, network = { enabled = false } } }');
   assert.equal(codex.tooOld('codex-cli 0.137.9'), true);
   assert.equal(codex.tooOld('0.166.0'), false);
   assert.equal(codex.tooOld(null), false);
   const r = codex.command({ bin: '/x/codex', prompt: 'P', sessionId: 'th1' });
-  assert.deepEqual(r.args.slice(-4), ['resume', 'th1', '--', 'P']);
+  assert.deepEqual(r.args.slice(-3), ['resume', 'th1', '-']);
+  assert.equal(r.stdin, 'P');
 
   const ev = [];
   const emit = (e) => ev.push(e);
@@ -486,17 +506,21 @@ test('agent.start: runId first, then session/text/tool events, one done with cha
   const call = callFor(bin, 'EDIT');
   assert.equal(call.cwd, home);
   const a = call.argv;
-  assert.equal(a[a.indexOf('--') + 1], 'EDIT hide the banner');
+  // The message came on stdin; neither it nor the page's URL is in argv (other processes can read those).
+  assert.equal(call.prompt, 'EDIT hide the banner');
+  assert.ok(!a.includes('--'));
+  assert.ok(!a.some((x) => /hide the banner|example\.com/.test(x)), JSON.stringify(a));
   for (const f of ['--output-format', 'stream-json', '--verbose', '--strict-mcp-config']) assert.ok(a.includes(f), f);
   assert.equal(a[a.indexOf('--permission-mode') + 1], 'default');
-  assert.equal(JSON.parse(a[a.indexOf('--settings') + 1]).sandbox.enabled, true);
+  assert.equal(JSON.parse(call.settings).sandbox.enabled, true);
+  assert.equal(path.dirname(call.settingsFile), path.join(home, 'boxes', `${runId}.agent`), 'beside the mailbox, not in it');
+  assert.ok(!fs.existsSync(call.settingsFile), 'removed after the run');
   assert.equal(a[a.indexOf('--setting-sources') + 1], 'project');
-  const ctx = a[a.indexOf('--append-system-prompt') + 1];
-  assert.match(ctx, /https:\/\/example\.com\/page \(tab 12\)/);
+  assert.match(call.context, /https:\/\/example\.com\/page \(tab 12\)/);
   assert.ok(!a.includes('--resume'));
 
-  // Raw output kept.
-  const raw = fs.readFileSync(path.join(home, 'runs', `${runId}.jsonl`), 'utf8');
+  // Raw output kept, in the private folder.
+  const raw = fs.readFileSync(path.join(privDir(home), 'runs', `${runId}.jsonl`), 'utf8');
   assert.match(raw, /"subtype":"init"/);
   assert.match(raw, /not json at all/);
   assert.match(raw, /"webmods":"done"/);
@@ -515,7 +539,7 @@ test('agent.start with sessionId passes --resume; unchanged files give empty cha
   assert.equal(a[a.indexOf('--model') + 1], 'sonnet');
 });
 
-test('agent env is sanitized: no inherited CLAUDE*/ANTHROPIC_*/CODEX_*, API key only from config', async () => {
+test('agent env is sanitized: no inherited CLAUDE*/ANTHROPIC_*/CODEX_*, never an API key (a key proxy instead)', async () => {
   const { home, bin } = makeHome({ config: { env: { ANTHROPIC_API_KEY: 'from-config', SOMETHING_ELSE: 'no' } } });
   const ext = startHost(home, {
     CLAUDECODE: '1', CLAUDE_CODE_ENTRYPOINT: 'cli', ANTHROPIC_BASE_URL: 'https://evil', ANTHROPIC_API_KEY: 'inherited',
@@ -524,9 +548,13 @@ test('agent env is sanitized: no inherited CLAUDE*/ANTHROPIC_*/CODEX_*, API key 
   const r = await extRequest(ext, 'agent.start', { ...START, prompt: 'ENVDUMP' });
   await waitDone(ext, r.result.runId);
   const env = callFor(bin, 'ENVDUMP').env;
-  const leaked = Object.keys(env).filter((k) => /^(CLAUDE|ANTHROPIC_|CODEX_)/.test(k) && k !== 'ANTHROPIC_API_KEY');
+  const leaked = Object.keys(env).filter((k) => /^(CLAUDE|ANTHROPIC_|CODEX_)/.test(k) && !['ANTHROPIC_API_KEY', 'ANTHROPIC_BASE_URL'].includes(k));
   assert.deepEqual(leaked, []);
-  assert.equal(env.ANTHROPIC_API_KEY, 'from-config');
+  // config.json's key (no keyring here to move it to): sent by the run's key proxy; the agent gets a
+  // placeholder and the proxy's address, never the key or an inherited base URL.
+  assert.ok(!JSON.stringify(callFor(bin, 'ENVDUMP')).includes('from-config'));
+  assert.equal(env.ANTHROPIC_API_KEY, require('../helper/lib/agentkeys').PLACEHOLDER);
+  assert.match(env.ANTHROPIC_BASE_URL, /^http:\/\/127\.0\.0\.1:\d+\/[0-9a-f]{32}$/);
   assert.equal(env.OPENAI_API_KEY, undefined);
   assert.equal(env.SECRET_TOKEN, undefined);
   assert.equal(env.SOMETHING_ELSE, undefined);
@@ -537,7 +565,7 @@ test('agent env is sanitized: no inherited CLAUDE*/ANTHROPIC_*/CODEX_*, API key 
   // The run reaches this host (and so this browser) through its own mailbox, not a socket; no socket path.
   assert.equal(path.dirname(env.TRIF_RUN_BOX), path.join(home, 'boxes'));
   assert.match(path.basename(env.TRIF_RUN_BOX), /^r[a-z0-9]+$/);
-  assert.equal(env.TRIF_RUN_SCREENSHOTS, path.join(home, 'screenshots', 'example.com'));
+  assert.equal(env.TRIF_RUN_SCREENSHOTS, path.join(privDir(home), 'screenshots', 'example.com'));
   assert.ok(/^[0-9a-f]{32}$/.test(env.TRIF_RUN_TOKEN));
   assert.equal(env.TRIF_SOCK, undefined);
   assert.deepEqual(env.PATH.split(':').slice(0, 2), [path.join(home, 'bin'), bin]);
@@ -632,9 +660,47 @@ test('errors: not logged in, crash with stderr tail, agent missing, 15-minute li
   assert.deepEqual(done, { kind: 'done', ok: false, result: null, costUsd: null, changedFiles: [], sessionId: null });
 });
 
+test('a run never starts with private files in the workspace: they\'re moved first, or the run is refused', async () => {
+  const { home, bin } = makeHome();
+  const ext = startHost(home);
+  await ext.waitForSocket();
+  // An older helper still running writes its log where it used to.
+  fs.writeFileSync(path.join(home, 'helper.log'), 'from an older helper\n');
+  let r = await extRequest(ext, 'agent.start', { ...START, prompt: 'MOVEDFIRST' });
+  assert.equal(r.ok, true, r.error);
+  await waitDone(ext, r.result.runId);
+  assert.ok(!fs.existsSync(path.join(home, 'helper.log')));
+  assert.ok(callFor(bin, 'MOVEDFIRST'));
+  // Can't be moved (the private folder isn't writable): refused, the agent never starts.
+  fs.writeFileSync(path.join(home, 'config.json'), '{"handmade":true}');
+  fs.chmodSync(privDir(home), 0o500);
+  try {
+    r = await extRequest(ext, 'agent.start', { ...START, prompt: 'NEVERSTARTS' });
+    assert.equal(r.ok, false);
+    assert.match(r.error, /private files are in the workspace.*config\.json.*trif setup/);
+    assert.ok(!callFor(bin, 'NEVERSTARTS'));
+  } finally {
+    fs.chmodSync(privDir(home), 0o700);
+  }
+});
+
+test('session ids and model names are one word: nothing that reads as an option', async () => {
+  const { home, bin } = makeHome();
+  const ext = startHost(home);
+  for (const args of [{ sessionId: '--dangerously-skip-permissions' }, { model: '-x' }, { model: 'opus --settings /tmp/x' }, { sessionId: 'a b' }]) {
+    const r = await extRequest(ext, 'agent.start', { ...START, prompt: 'BADWORD', ...args });
+    assert.equal(r.ok, false, JSON.stringify(args));
+    assert.match(r.error, /bad (session id|model name)/);
+  }
+  assert.ok(!callFor(bin, 'BADWORD'));
+  const ok = await extRequest(ext, 'agent.start', { ...START, prompt: 'GOODWORD', model: 'claude-opus-4-1[1m]', sessionId: '0f3e9a2c-1111-4a2b-9c3d-abcdefabcdef' });
+  assert.equal(ok.ok, true, ok.error);
+  await waitDone(ext, ok.result.runId);
+});
+
 test('run logs are pruned to the last 50', async () => {
   const { home } = makeHome();
-  const runs = path.join(home, 'runs');
+  const runs = path.join(privDir(home), 'runs');
   fs.mkdirSync(runs);
   const old = Date.now() / 1000 - 3600;
   for (let i = 0; i < 60; i++) {
@@ -665,7 +731,7 @@ test('helper shutdown kills a running agent', async () => {
 
 const LOGIN_URL = 'https://claude.com/cai/oauth/authorize?code=true&client_id=fake&state=SECRETSTATE&code_challenge=CHALLENGE';
 function loginEnv(bin) { return JSON.parse(fs.readFileSync(path.join(bin, 'login-env.json'), 'utf8')); }
-function helperLog(home) { try { return fs.readFileSync(path.join(home, 'helper.log'), 'utf8'); } catch { return ''; } }
+function helperLog(home) { try { return fs.readFileSync(path.join(privDir(home), 'helper.log'), 'utf8'); } catch { return ''; } }
 async function startLogin(ext, args = { agent: 'claude' }) {
   const r = await extRequest(ext, 'agent.login', args);
   assert.equal(r.ok, true, r.error);
@@ -729,7 +795,7 @@ test('agent.login: URL event, code, done ok; agent.list then says loggedIn (cach
   assert.match(log, /code sent/);
   assert.ok(!log.includes('GOODCODE'), 'code not logged');
   assert.ok(!log.includes('SECRETSTATE') && !log.includes('CHALLENGE'), 'URL query not logged');
-  assert.ok(!fs.existsSync(path.join(home, 'runs')) || !fs.readdirSync(path.join(home, 'runs')).filter((f) => f.endsWith('.jsonl')).some((f) => fs.readFileSync(path.join(home, 'runs', f), 'utf8').includes('GOODCODE')));
+  assert.ok(!fs.existsSync(path.join(privDir(home), 'runs')) || !fs.readdirSync(path.join(privDir(home), 'runs')).filter((f) => f.endsWith('.jsonl')).some((f) => fs.readFileSync(path.join(privDir(home), 'runs', f), 'utf8').includes('GOODCODE')));
   assert.equal((await sockRequest(ext.sock, { id: 'p2', cmd: 'ping' })).result.login, null);
 });
 
@@ -830,9 +896,9 @@ test('CLI: agent run streams events and prints a summary; agent list with and wi
     'changed: sites/example.com/fake.js',
     '',
   ].join('\n'));
-  const a = calls(bin).pop().argv;
-  assert.equal(a[a.indexOf('--') + 1], 'EDIT the banner');
-  assert.match(a[a.indexOf('--append-system-prompt') + 1], /https:\/\/example\.com\/page \(tab 12\)/);
+  const call = calls(bin).pop();
+  assert.equal(call.prompt, 'EDIT the banner');
+  assert.match(call.context, /https:\/\/example\.com\/page \(tab 12\)/);
   // The extension saw the same run.
   assert.ok(ext.messages.some((m) => m.type === 'agentEvent' && m.event.kind === 'done'));
 
@@ -848,9 +914,9 @@ test('CLI: agent run streams events and prints a summary; agent list with and wi
   ext.handlers.tabs = () => [{ id: 5, active: true, url: 'https://news.example.org/x', title: 't' }, { id: 6, active: false, url: 'https://b.com/', title: 'b' }];
   r = await runCli(['agent', 'run', 'TABLESS'], { home });
   assert.equal(r.code, 0, r.stderr);
-  assert.match(callFor(bin, 'TABLESS').argv.join(' '), /news\.example\.org\/x \(tab 5\)/);
+  assert.match(callFor(bin, 'TABLESS').context, /news\.example\.org\/x \(tab 5\)/);
   r = await runCli(['agent', 'run', '--tab', '6', 'TAB6'], { home });
-  assert.match(callFor(bin, 'TAB6').argv.join(' '), /https:\/\/b\.com\/ \(tab 6\)/);
+  assert.match(callFor(bin, 'TAB6').context, /https:\/\/b\.com\/ \(tab 6\)/);
 
   // Failures exit 1 with the error on stderr.
   r = await runCli(['agent', 'run', '--url', 'https://example.com/', 'NOTLOGGEDIN'], { home });
@@ -921,26 +987,27 @@ test('setup records PATH (merging config.json) and writes .claude/settings.json;
   const termPath = `${fakeBin}:/usr/bin:/bin`;
   let r = await runCli(['setup', '--native-dir', path.join(root, 'native'), '--no-link'], { home: ws, env: { PATH: termPath } });
   assert.equal(r.code, 0, r.stderr);
-  const cfg = JSON.parse(fs.readFileSync(path.join(ws, 'config.json'), 'utf8'));
+  // (Moved out of the workspace into the private folder, where runs can't read it.)
+  assert.ok(!fs.existsSync(path.join(ws, 'config.json')));
+  const cfg = JSON.parse(fs.readFileSync(path.join(privDir(ws), 'config.json'), 'utf8'));
   assert.deepEqual(cfg, { modsDir: 'sites', env: { ANTHROPIC_API_KEY: 'k', PATH: termPath } });
   const settings = JSON.parse(fs.readFileSync(path.join(ws, '.claude', 'settings.json'), 'utf8'));
   assert.deepEqual(settings, {
     permissions: {
       allow: ['Read(./**)', 'Glob', 'Grep', 'Edit(./sites/**)', 'Bash(trif:*)', 'Bash(webmods:*)', 'Bash(cd:*)', 'Bash(ls:*)'],
-      deny: ['WebFetch', 'WebSearch', 'Read(./config.json)', 'Read(./safari-token)', 'Read(./helper.log*)', 'Read(./runs/*.jsonl)',
-        'Read(./screenshots/*.png)'],
+      deny: ['WebFetch', 'WebSearch'],
     },
   });
   assert.match(r.stdout, new RegExp(`agents +claude \\(${fakeBin.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}/claude\\), codex not found`));
 
   // Overwritten on every setup; a broken config.json is left alone.
   fs.writeFileSync(path.join(ws, '.claude', 'settings.json'), '{"permissions":{"allow":["Bash"]}}');
-  fs.writeFileSync(path.join(ws, 'config.json'), '{ broken');
+  fs.writeFileSync(path.join(privDir(ws), 'config.json'), '{ broken');
   r = await runCli(['setup', '--native-dir', path.join(root, 'native'), '--no-link'], { home: ws, env: { PATH: termPath } });
   assert.match(r.stdout, /couldn't record PATH for agents: .*not valid JSON/);
-  assert.equal(fs.readFileSync(path.join(ws, 'config.json'), 'utf8'), '{ broken');
+  assert.equal(fs.readFileSync(path.join(privDir(ws), 'config.json'), 'utf8'), '{ broken');
   assert.deepEqual(JSON.parse(fs.readFileSync(path.join(ws, '.claude', 'settings.json'), 'utf8')), settings);
-  fs.writeFileSync(path.join(ws, 'config.json'), JSON.stringify({ env: { PATH: termPath } }));
+  fs.writeFileSync(path.join(privDir(ws), 'config.json'), JSON.stringify({ env: { PATH: termPath } }));
 
   r = await runCli(['doctor', '--native-dir', path.join(root, 'native')], { home: ws });
   assert.match(r.stdout, /^ok {4}Claude Code 9\.9\.9 \(.*fakebin\/claude\)$/m);
@@ -949,7 +1016,7 @@ test('setup records PATH (merging config.json) and writes .claude/settings.json;
   assert.match(r.stdout, /^- {5}Codex: not found \(optional\)$/m);
 
   // Agent on the terminal's PATH but not the recorded one.
-  fs.writeFileSync(path.join(ws, 'config.json'), JSON.stringify({ env: { PATH: '/usr/bin' } }));
+  fs.writeFileSync(path.join(privDir(ws), 'config.json'), JSON.stringify({ env: { PATH: '/usr/bin' } }));
   r = await runCli(['doctor', '--native-dir', path.join(root, 'native')], { home: ws, env: { PATH: termPath } });
   assert.match(r.stdout, /warn {2}Claude Code is at .*fakebin\/claude, but the helper won't find it there/);
   assert.match(r.stdout, /fix: run trif setup in this terminal/);
@@ -1076,7 +1143,7 @@ test('run scope: the run token limits trif requests to the run\'s site; agent co
   const call = await waitFor(() => callFor(bin, 'SLEEP'), { message: 'the agent to start' });
   const token = call.env.TRIF_RUN_TOKEN;
   assert.match(token, /^[0-9a-f]{32}$/);
-  assert.match(call.argv[call.argv.indexOf('--append-system-prompt') + 1], /limited to example\.co\.uk/);
+  assert.match(call.context, /limited to example\.co\.uk/);
 
   // The helper overrides whatever scope the client sends; without a token nothing is scoped.
   let res = await sockRequest(ext.sock, { id: 'a', cmd: 'tabs', args: { scope: 'evil.com' }, token });
@@ -1281,7 +1348,7 @@ test('instructions: saved and read through the helper, never from a run; claude 
   // claude reads instructions.md through the workspace's CLAUDE.md: not repeated in its context
   r = await extRequest(ext, 'agent.start', { ...START, prompt: 'SLEEP caveman' });
   const call = await waitFor(() => callFor(bin, 'SLEEP caveman'), { message: 'the agent to start' });
-  assert.doesNotMatch(call.argv[call.argv.indexOf('--append-system-prompt') + 1], /caveman/);
+  assert.doesNotMatch(call.context, /caveman/);
   const res = await sockRequest(ext.sock, { id: 'i', cmd: 'instructions.set', args: { text: 'evil' }, token: call.env.TRIF_RUN_TOKEN });
   assert.match(res.error, /isn't available inside an agent run/);
   // Nor the open model's API key (it goes to the keyring).

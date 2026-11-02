@@ -6,7 +6,7 @@
 //   codex exec <codex.js flags, the same permission profile>
 //              -c model_providers.trif-open={ name = "…", base_url = "…", wire_api = "responses" … }
 //              -c model_provider="trif-open" -c web_search="disabled"
-//              -c shell_environment_policy.exclude=[<API key patterns>] -m MODEL [resume THREAD_ID] -- PROMPT
+//              -c shell_environment_policy.exclude=[<API key patterns>] -m MODEL [resume THREAD_ID] -   (message on stdin)
 //
 // (base_url: the provider's, or for a provider with a key, the run's key proxy: see "The API key".)
 //
@@ -40,7 +40,7 @@ const keyring = require('../keyring');
 const { startKeyProxy } = require('../keyproxy');
 const { oneLine } = require('./util');
 
-// API keys config.json may pass to the other agents (index.js PASSED_KEYS; not required here, to avoid a cycle).
+// API key variables never given to this agent (index.js agentEnv gives none since 0.2.0; kept as a guard).
 const PASSED_KEYS = ['ANTHROPIC_API_KEY', 'OPENAI_API_KEY'];
 
 const PROVIDER_ID = 'trif-open';
@@ -172,14 +172,11 @@ function providerArgs(om) {
   const args = ['-c', `model_providers.${PROVIDER_ID}={ ${fields.join(', ')} }`, '-c', `model_provider="${PROVIDER_ID}"`,
     // OpenAI's hosted web search tool: no other provider has it.
     '-c', 'web_search="disabled"'];
-  // Codex builds its commands' environment from a snapshot of the user's login shell, taken by Codex
-  // itself (outside the sandbox), so a key still exported in ~/.zshrc would reach them that way (seen with
-  // Codex 0.166 and a stand-in profile). TRIF's own key is never there (keyring); this keeps out the
-  // usual API key variables a profile may still export. (Not *TOKEN*: TRIF_RUN_TOKEN must get through.)
-  args.push('-c', `shell_environment_policy.exclude=[${EXCLUDED_VARS.map(tomlStr).join(', ')}]`);
+  // (shell_environment_policy.exclude, keeping API key variables a shell profile still exports from the
+  // commands: codex.js adds it to every Codex run.)
   return args;
 }
-const EXCLUDED_VARS = ['*_API_KEY', '*_API_TOKEN', '*_ACCESS_TOKEN', '*_AUTH_TOKEN', '*_SECRET_KEY'];
+const { EXCLUDED_VARS } = codex;
 
 function keyHelp(om) {
   return `paste your ${om.name} API key in the side panel’s Settings (it’s kept in ${keyringName()}), or run \`trif agent open-model --set-key\` in a terminal`;
@@ -342,11 +339,7 @@ const adapter = {
   // writable / readOnly / denied: as codex.js. openModel: from prepare (resolve()).
   command(opts) {
     const om = opts.openModel || resolve(null, null, opts.model);
-    const base = codex.command({ ...opts, model: om.model });
-    const args = base.args;
-    const at = args.length - (opts.sessionId ? 4 : 2) - (om.model ? 2 : 0); // before -m [resume id] -- prompt
-    args.splice(at, 0, ...providerArgs(om));
-    return { file: base.file, args, locked: base.locked };
+    return codex.command({ ...opts, model: om.model, config: providerArgs(om) });
   },
 
   parse(line, emit, state = {}) {

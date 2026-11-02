@@ -15,6 +15,8 @@ const { readInstructions, instructionsContext } = require('./instructions');
 const { markRunActive, markRunEnded } = require('./origins');
 const { listModFiles } = require('./mods');
 const { redactSecrets } = require('./agents/util');
+const { within, ignoresCase } = require('./pathcheck');
+const { migratePrivate, privateLeftovers } = require('./migrate');
 
 const RUN_TIMEOUT_MS = Number(envVar('AGENT_TIMEOUT_MS')) > 0 ? Number(envVar('AGENT_TIMEOUT_MS')) : 15 * 60 * 1000;
 const KILL_GRACE_MS = Number(envVar('AGENT_KILL_GRACE_MS')) > 0 ? Number(envVar('AGENT_KILL_GRACE_MS')) : 3000;
@@ -75,18 +77,35 @@ function diffSnapshots(before, after) {
   return [...changed].sort();
 }
 
+// A session id or model name goes on the agent's command line as an option's value: one word, never
+// something the CLI could read as an option of its own.
+const WORD = /^[A-Za-z0-9][\w.:/@+[\]-]{0,199}$/;
+function checkWord(v, what) {
+  if (!WORD.test(v)) throw new Error(`bad ${what}: one word of letters, digits and . _ - : / @ + [ ], not starting with a symbol`);
+  return v;
+}
+
 function newRunId() {
   return 'r' + Date.now().toString(36) + crypto.randomBytes(3).toString('hex');
 }
 
+// The system's real path (links resolved; on macOS each component in its on-disk case, which sandboxes
+// and the comparisons below need), else the path as given, resolved.
 function realOrResolved(p) {
-  try { return fs.realpathSync(p); } catch { return path.resolve(p); }
+  try { return fs.realpathSync.native(p); } catch { return path.resolve(p); }
 }
 
-// The workspace's files a run may not read: secrets (config.json can hold API keys; safari-token is
-// the Safari bridge's key), and other runs' traces (their logs hold the pages they read; screenshots
-// of other sites; helper.log).
-const PRIVATE_FILES = ['config.json', 'safari-token', 'helper.log', 'helper.log.1', 'runs', 'screenshots'];
+// What the helper keeps that runs may not read (settings, the Safari bridge's key, logs, other runs' logs,
+// screenshots) is in the private folder (paths.js privateDir), outside the workspace, since 0.2.0.
+const { PRIVATE_FILES } = require('./paths');
+
+// The TRIF code a run's `trif` needs (helper/, and package.json for the version) and the examples
+// (`trif install-example`): not the whole package folder, which in a git checkout holds .git, keys
+// and build output.
+const CODE_ITEMS = ['helper', 'package.json', 'examples'];
+function trifCode(root = path.join(__dirname, '..', '..')) {
+  return CODE_ITEMS.map((n) => path.join(root, n)).filter((p) => fs.existsSync(p)).map(realOrResolved);
+}
 
 // Where the user's agent skills live: Codex reads ~/.agents/skills (and ~/.codex/skills), Claude Code
 // ~/.claude/skills. Each is often a link to a folder elsewhere (~/.claude/skills/x -> ~/.agents/skills/x).
@@ -100,8 +119,11 @@ const SKILL_FOLDERS = [['.agents', 'skills'], ['.codex', 'skills'], ['.claude', 
  */
 function skillDirs(homedir = os.homedir()) {
   const home = realOrResolved(homedir);
-  const hiddenOrOutside = (p) => !p.startsWith(home + path.sep) || p.slice(home.length + 1).startsWith('.');
-  const ok = (p) => p !== '/' && p !== home && !home.startsWith(p + path.sep) && hiddenOrOutside(p);
+  const ci = ignoresCase(home);
+  const inside = (p, q) => within(p, q, { ci });
+  const same = (p, q) => within(p, q, { ci, orEqual: true }) && within(q, p, { ci, orEqual: true });
+  const hiddenOrOutside = (p) => !inside(p, home) || p.slice(home.length + 1).startsWith('.');
+  const ok = (p) => p !== '/' && !same(p, home) && !inside(home, p) && hiddenOrOutside(p);
   const isDir = (p) => { try { return fs.statSync(p).isDirectory(); } catch { return false; } };
   const out = new Set();
   for (const parts of SKILL_FOLDERS) {
@@ -115,11 +137,11 @@ function skillDirs(homedir = os.homedir()) {
       const p = path.join(base, n);
       if (!isDir(p)) continue;
       const r = realOrResolved(p);
-      if (ok(r) && !r.startsWith(realBase + path.sep)) out.add(r);
+      if (ok(r) && !inside(r, realBase)) out.add(r);
     }
   }
   const all = [...out];
-  return all.filter((p) => !all.some((q) => p.startsWith(q + path.sep))); // inside another one: covered
+  return all.filter((p) => !all.some((q) => inside(p, q))); // inside another one: covered
 }
 
 // Inside skill folders: what looks like a secret (a skill folder can hold a token or an .env file next to
@@ -150,7 +172,7 @@ function skillSecrets(skills, deniedTarget = () => false) {
       const p = path.join(dir, e.name);
       if (e.isSymbolicLink()) {
         let target = null;
-        try { target = fs.realpathSync(p); } catch { /* dangling */ }
+        try { target = fs.realpathSync.native(p); } catch { /* dangling */ }
         if (!target || deniedTarget(target)) links.push(p);
         continue;
       }
@@ -163,55 +185,65 @@ function skillSecrets(skills, deniedTarget = () => false) {
   return { secrets, links };
 }
 
+// Folders of the home folder that macOS asks the user about before a program may list them (privacy
+// protections): never looked into here.
+const PROTECTED = new Set(['desktop', 'documents', 'downloads', 'library', 'movies', 'music', 'pictures', 'public']);
+
 /**
  * What in the home folder to deny so that only `readable` (and the way to it) can be read: each item in
- * the home folder, except those `readable` paths are in or lead through; inside hidden folders that lead
- * through (~/.claude for ~/.claude/skills), every other item, and so on down. (A visible folder on the way
- * isn't looked into, as before skills: listing ~/Documents and the like can make macOS ask the user.) By
- * where each item leads, too.
+ * the home folder, except those `readable` paths are in or lead through; inside folders that lead through
+ * (~/.claude for ~/.claude/skills, ~/src for a TRIF checkout's ~/src/trif/helper), every other item, and so
+ * on down. (Not inside ~/Documents and the other PROTECTED folders: listing them can make macOS ask the
+ * user.) By where each item leads, too. Compared as the volume does (case, on macOS).
  */
 function deniedInHome(home, readable) {
   const real = realOrResolved;
+  const ci = ignoresCase(home);
   // A readable folder that is the home folder or holds it (node in ~/bin makes node's folder the home
   // folder) mustn't excuse anything: every item would count as readable and nothing would be denied.
   // The sandbox still denies the items listed here inside it (the more specific path wins).
-  const inner = readable.filter((r) => r !== home && !home.startsWith(r + path.sep));
-  const covered = (p) => inner.some((r) => p === r || p.startsWith(r + path.sep));
-  const onTheWay = (p) => inner.some((r) => r.startsWith(p + path.sep));
+  const inner = readable.filter((r) => !within(home, r, { ci, orEqual: true }));
+  const covered = (p) => inner.some((r) => within(p, r, { ci, orEqual: true }));
+  const onTheWay = (p) => inner.some((r) => within(r, p, { ci }));
   const out = [];
-  const walk = (dir) => {
+  const walk = (dir, depth) => {
     let names;
     try { names = fs.readdirSync(dir); } catch { return; } // unreadable: nothing to list
     for (const n of names) {
       const p = path.join(dir, n);
       const rp = real(p);
       if (covered(p) || covered(rp)) continue;
-      if (onTheWay(p) || onTheWay(rp)) { if (n.startsWith('.')) walk(p); continue; }
+      if (onTheWay(p) || onTheWay(rp)) { if (!(depth === 0 && PROTECTED.has(n.toLowerCase()))) walk(p, depth + 1); continue; }
       out.push(p);
     }
   };
-  walk(home);
+  walk(home, 0);
   return out;
 }
 
 /**
  * What a run may touch, for the agents' sandboxes, which macOS enforces (docs/PROTOCOL.md "Run scope"):
- *   readable  the workspace, the TRIF code `trif` runs, node, and the user's skill folders (skillDirs)
+ *   readable  the workspace, all of it (nothing private is kept there), the TRIF code `trif` runs
+ *             (trifCode), node, and the user's skill folders (skillDirs)
  *   writable  the mods folder, this run's screenshots folder, and its mailbox (`box`)
  *   readOnly  every existing mod folder of another site (all-sites/ included), inside the mods folder
- *   denied    everything else in the home folder, what looks like a secret inside the skill folders
- *             (skillSecrets), and the workspace's PRIVATE_FILES (the more
- *             specific path wins, so the run's own screenshots folder and mailbox stay writable). Each
- *             item in the home folder rather than the folder itself: node, and `mkdir -p`, look at
- *             every folder on a path, the home folder included.
- * No network at all: `trif` reaches the helper through the mailbox. Real paths, as sandboxes compare.
+ *   denied    everything else in the home folder, the private folder (paths.js privateDir: settings,
+ *             logs, other runs' logs, screenshots; denied by name too, wherever it is), and what looks
+ *             like a secret inside the skill folders (skillSecrets). The run's own screenshots folder
+ *             (in the private folder) and mailbox (in ~/Library/Caches) are allowed inside what's denied:
+ *             the more specific path wins. Each item in the home folder rather than the folder itself:
+ *             node, and `mkdir -p`, look at every folder on a path, the home folder included.
+ * The only denies inside readable folders are the skill folders' secrets. No network at all: `trif`
+ * reaches the helper through the mailbox. Real paths, as sandboxes compare.
  */
 function runLimits(ws, { scope, box, screenshots }) {
   const real = realOrResolved;
   const node = real(process.execPath);
   const home = real(os.homedir());
+  const ci = ignoresCase(home);
   const skills = skillDirs(os.homedir());
-  const readable = [...new Set([real(ws.home), real(path.join(__dirname, '..', '..')), path.dirname(path.dirname(node)), ...skills])];
+  const privateDir = real(ws.private || require('./paths').privateDir(ws.home));
+  const readable = [...new Set([real(ws.home), ...trifCode(), path.dirname(path.dirname(node)), ...skills])];
   const writable = [real(ws.modsDir), real(screenshots), real(box)];
   let names = [];
   try { names = fs.readdirSync(ws.modsDir, { withFileTypes: true }).filter((d) => d.isDirectory() || d.isSymbolicLink()).map((d) => d.name); } catch { /* none yet */ }
@@ -224,22 +256,24 @@ function runLimits(ws, { scope, box, screenshots }) {
   // (By where each leads, too: ~/.webmods is a link to the workspace, ~/.trif, since 0.2.0, and a rule
   // denying it would deny the workspace itself to a sandbox that follows links.)
   const inHome = deniedInHome(home, readable);
-  const privateFiles = PRIVATE_FILES.map((f) => real(path.join(ws.home, f)));
   // Inside the skill folders: secrets, and links to what the run may not read (skillSecrets).
-  const under = (p, list) => list.some((r) => p === r || p.startsWith(r + path.sep));
-  const deniedTarget = (t) => under(t, privateFiles) || (t.startsWith(home + path.sep) && (!under(t, readable) || under(t, inHome)));
+  const under = (p, list) => list.some((r) => within(p, r, { ci, orEqual: true }));
+  const deniedTarget = (t) => under(t, [privateDir]) || (within(t, home, { ci }) && (!under(t, readable) || under(t, inHome)));
   const { secrets, links } = skillSecrets(skills, deniedTarget);
   const skillDenied = secrets.map((x) => x.path);
-  const denied = [...inHome, ...privateFiles, ...skillDenied];
-  // Other sites' screenshot folders, for agents whose file tools take per-folder rules (Claude Code).
-  let shots = [];
-  try { shots = fs.readdirSync(ws.screenshots, { withFileTypes: true }).filter((d) => d.isDirectory()).map((d) => real(path.join(ws.screenshots, d.name))); } catch { /* none */ }
-  const otherScreenshots = shots.filter((p) => p !== real(screenshots));
+  const denied = [...inHome, privateDir, ...skillDenied];
   // The same read-only folders relative to the workspace, as modSnapshot names files: a change under them
   // can't be the run's doing (held.js). Only once the agent's adapter has protected each one: its
   // command() returns `locked`, the ones it did (runs.js uses that, not this).
   const locked = lockedDirs.map((d) => d.rel);
-  return { readable, writable, readOnly, locked, lockedDirs, denied, home, skills, skillSecrets: secrets, skillLinks: links, privateFiles, workspace: real(ws.home), box: real(box), screenshots: real(screenshots), otherScreenshots };
+  return { readable, writable, readOnly, locked, lockedDirs, denied, home, skills, skillSecrets: secrets, skillLinks: links, privateDir, workspace: real(ws.home), box: real(box), screenshots: real(screenshots) };
+}
+
+/** ws with its private folder's paths (paths.js workspace has them; a hand-made ws may not). */
+function withPrivatePaths(ws) {
+  if (ws.private && ws.runs && ws.screenshots) return ws;
+  const priv = ws.private || require('./paths').privateDir(ws.home);
+  return { ...ws, private: priv, runs: ws.runs || path.join(priv, 'runs'), screenshots: ws.screenshots || path.join(priv, 'screenshots') };
 }
 
 function normalizeSite(site, url) {
@@ -296,7 +330,15 @@ class Runs {
     const site = normalizeSite(args.site, args.url);
     if (!site) throw new Error('missing site (pass the page URL)');
     if (this.bySite.has(site)) throw new Error(`already working on ${site}`);
-    const ws = this.getWorkspace();
+    const ws = withPrivatePaths(this.getWorkspace());
+    // Runs may read the whole workspace, so nothing private may be in it: an older helper still running
+    // can write its log there again. Move it out (migrate.js), or refuse.
+    if (privateLeftovers(ws.home).length) {
+      const m = migratePrivate(ws.home, { privateDir: ws.private });
+      for (const n of m.notes) this.logger.info(n);
+      const left = privateLeftovers(ws.home);
+      if (left.length) throw new Error(`TRIF's private files are in the workspace, where agent runs could read them (${left.map((f) => path.relative(ws.home, f)).join(', ')}), and couldn't be moved${m.errors.length ? ` (${m.errors.join('; ')})` : ''}: run \`trif setup\` in a terminal`);
+    }
     const agentId = typeof args.agent === 'string' && args.agent ? args.agent : agents.listAgents(ws, { version: false }).default;
     const adapter = agents.getAdapter(agentId);
     if (!adapter) throw new Error(`unknown agent "${agentId}" (known: ${agents.ADAPTERS.map((a) => a.id).join(', ')})`);
@@ -312,8 +354,8 @@ class Runs {
       ws,
       url: typeof args.url === 'string' ? args.url : '',
       tabId: args.tabId === undefined || args.tabId === null || args.tabId === '' ? null : args.tabId,
-      sessionId: typeof args.sessionId === 'string' && args.sessionId ? args.sessionId : null,
-      model: typeof args.model === 'string' && args.model.trim() ? args.model.trim() : null,
+      sessionId: typeof args.sessionId === 'string' && args.sessionId ? checkWord(args.sessionId, 'session id') : null,
+      model: typeof args.model === 'string' && args.model.trim() ? checkWord(args.model.trim(), 'model name') : null,
       // codex-oss: this run's provider choice over config.json's (agents/codex-oss.js resolve).
       openModel: args.openModel && typeof args.openModel === 'object' && !Array.isArray(args.openModel) ? { ...args.openModel } : null,
       secrets: [], // values (API keys) kept out of the run's log and events
@@ -331,7 +373,7 @@ class Runs {
       doneSent: false, // the final `done` went out; nothing follows it
       timers: [],
     };
-    run.logFile = path.join(ws.home, 'runs', `${run.id}.jsonl`);
+    run.logFile = path.join(ws.runs, `${run.id}.jsonl`);
     run.lastSessionId = run.sessionId;
     this.runs.set(run.id, run);
     this.bySite.set(site, run.id);
@@ -374,9 +416,9 @@ class Runs {
     try { fs.appendFileSync(run.logFile, text + '\n'); } catch { /* ignore */ }
   }
 
-  _prepareLogDir(ws) {
-    const dir = path.join(ws.home, 'runs');
-    try { fs.mkdirSync(dir, { recursive: true }); } catch { /* ignore */ }
+  _prepareLogDir(run) {
+    const dir = path.dirname(run.logFile);
+    try { fs.mkdirSync(dir, { recursive: true, mode: 0o700 }); } catch { /* ignore */ }
     // Mailboxes left by helpers that died mid-run (a live run's is younger than its time limit).
     try {
       for (const f of fs.readdirSync(boxRoot())) {
@@ -395,7 +437,7 @@ class Runs {
 
   _launch(run) {
     const { ws, adapter } = run;
-    this._prepareLogDir(ws);
+    this._prepareLogDir(run);
     this._log(run, { webmods: 'start', runId: run.id, agent: run.agent, site: run.site, url: run.url, tabId: run.tabId, sessionId: run.sessionId, model: run.model, prompt: run.prompt, time: run.startedAt });
 
     if (run.stopped) return this._finish(run, { code: null, signal: null }); // stopped before it started
@@ -418,7 +460,8 @@ class Runs {
       this._emit(run, { kind: 'error', message: adapter.missing });
       return this._finish(run, { code: null, signal: null });
     }
-    // Adapters with something to settle first (codex-oss: the provider, its key, a local server).
+    // Adapters with something to settle first (codex-oss: the provider, its key, a local server; claude
+    // and codex: a saved API key's proxy, agentkeys.js).
     if (adapter.prepare) {
       adapter.prepare({ ws, model: run.model, openModel: run.openModel, logger: this.logger }).then((prep) => {
         // (cleanup: what prepare started for the run, the key proxy; _finish calls it.)
@@ -428,6 +471,8 @@ class Runs {
         Object.assign(run.state, (prep && prep.state) || {});
         const om = run.state.openModel;
         if (om) this._log(run, { webmods: 'openModel', provider: om.provider, model: om.model, baseUrl: om.baseUrl, key: om.keyed ? 'keyring' : null, keyProxy: !!run.cleanup });
+        const ak = run.state.apiKey;
+        if (ak) this._log(run, { webmods: 'apiKey', account: ak.account, source: ak.source, keyProxy: !!run.cleanup });
         const runEnv = { ...env, ...((prep && prep.env) || {}) };
         for (const k of (prep && prep.unsetEnv) || []) delete runEnv[k];
         this._spawn(run, found, runEnv, (prep && prep.options) || {});
@@ -451,7 +496,20 @@ class Runs {
     else prompt = `${run.sessionId ? agents.reminderText(ctx) : agents.contextText(ctx) + extra}\n\n${prompt}`;
     try { fs.mkdirSync(ws.modsDir, { recursive: true }); } catch { /* reported by the agent */ }
     const limits = runLimits(ws, run);
-    const { file, args, locked } = adapter.command({ bin: found.path, prompt, sessionId: run.sessionId, model: run.model, context, workspace: ws.home, ...limits, ...options });
+    // The agent's own files (claude: its run settings and context), in a folder of the run's that only
+    // the helper and the agent itself read: beside its mailbox, not in it (the run's commands may write
+    // there), and not in the workspace. Removed when the run ends.
+    run.agentDir = path.join(boxRoot(), `${run.id}.agent`);
+    let cmd;
+    try {
+      fs.mkdirSync(run.agentDir, { mode: 0o700 });
+      cmd = adapter.command({ bin: found.path, prompt, sessionId: run.sessionId, model: run.model, context, workspace: ws.home, agentDir: run.agentDir, ...limits, ...options });
+      for (const f of cmd.files || []) fs.writeFileSync(f.path, f.content, { mode: 0o600, flag: 'wx' });
+    } catch (e) {
+      this._emit(run, { kind: 'error', message: `couldn't prepare ${adapter.name}'s run: ${e.message}` });
+      return this._finish(run, { code: null, signal: null });
+    }
+    const { file, args, locked } = cmd;
 
     run.before = modSnapshot(ws.modsDir, ws.home);
     // Changes in these folders aren't held on this run's account (held.js): only the ones the adapter
@@ -465,7 +523,9 @@ class Runs {
     this.logger.info(`agent run ${run.id}: ${run.agent} for ${run.site}${run.sessionId ? ` (resume ${run.sessionId})` : ''}`);
     let child;
     try {
-      child = spawn(file, args, { cwd: ws.home, env, stdio: ['ignore', 'pipe', 'pipe'], detached: true });
+      // The message on stdin (cmd.stdin), never in argv: other processes can read those.
+      child = spawn(file, args, { cwd: ws.home, env, stdio: [typeof cmd.stdin === 'string' ? 'pipe' : 'ignore', 'pipe', 'pipe'], detached: true });
+      if (typeof cmd.stdin === 'string') { child.stdin.on('error', () => { /* it may exit first */ }); child.stdin.end(cmd.stdin); }
     } catch (e) {
       this._emit(run, { kind: 'error', message: `couldn't start ${adapter.name}: ${e.message}` });
       return this._finish(run, { code: null, signal: null });
@@ -586,6 +646,7 @@ class Runs {
     if (run.stdoutBuf.trim()) { const l = run.stdoutBuf; run.stdoutBuf = ''; this._onLine(run, l); }
     try { run.boxWatcher?.close(); } catch { /* ignore */ }
     if (run.box) setTimeout(() => { try { fs.rmSync(run.box, { recursive: true, force: true }); } catch { /* ignore */ } }, 2000).unref();
+    if (run.agentDir) { try { fs.rmSync(run.agentDir, { recursive: true, force: true }); } catch { /* ignore */ } }
     // Leftover processes of a finished run (backgrounded by a tool) go too, by force after a moment: a
     // write landing after the held-mod window (RECENT_MS) would never be held.
     if (run.child && run.child.pid && !run.stopped) {
@@ -624,4 +685,4 @@ class Runs {
 }
 
 module.exports = {
-  runLimits, Runs, snapshot, modSnapshot, diffSnapshots, normalizeSite, boxRoot, RUN_TIMEOUT_MS, PRIVATE_FILES, skillDirs, skillSecrets, deniedInHome };
+  runLimits, Runs, snapshot, modSnapshot, diffSnapshots, normalizeSite, boxRoot, RUN_TIMEOUT_MS, PRIVATE_FILES, skillDirs, skillSecrets, deniedInHome, trifCode, withPrivatePaths };

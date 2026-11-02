@@ -8,7 +8,7 @@ const assert = require('node:assert');
 const fs = require('fs');
 const path = require('path');
 const { spawn } = require('child_process');
-const { FakeExtension, writeMod, tempDir, waitFor, sleep } = require('./fake-extension');
+const { FakeExtension, writeMod, tempDir, waitFor, sleep, privDir } = require('./fake-extension');
 const { loadOrigins, recordOrigins, markRunActive, markRunEnded, activeRuns, ENDED_GRACE_MS } = require('../helper/lib/origins');
 
 const cleanups = [];
@@ -117,8 +117,7 @@ const fs = require('fs');
 const path = require('path');
 const argv = process.argv.slice(2);
 if (argv[0] === '--version') { console.log('9.9.9 (Claude Code)'); process.exit(0); }
-const i = argv.indexOf('--');
-const prompt = i === -1 ? '' : argv[i + 1];
+const prompt = (() => { try { return fs.readFileSync(0, 'utf8'); } catch { return ''; } })(); // (on stdin)
 const say = (o) => process.stdout.write(JSON.stringify(o) + '\\n');
 say({ type: 'system', subtype: 'init', session_id: 'sess-o', cwd: process.cwd(), tools: [] });
 const m = /NEWMOD (\\S+)\\/(\\S+)/.exec(prompt);
@@ -141,7 +140,7 @@ function makeHome() {
   fs.mkdirSync(path.join(home, 'sites'));
   fs.writeFileSync(path.join(bin, 'claude'), FAKE_CLAUDE);
   fs.chmodSync(path.join(bin, 'claude'), 0o755);
-  fs.writeFileSync(path.join(home, 'config.json'), JSON.stringify({ env: { PATH: bin } }));
+  fs.writeFileSync(path.join(privDir(home), 'config.json'), JSON.stringify({ env: { PATH: bin } }));
   return { home, bin };
 }
 

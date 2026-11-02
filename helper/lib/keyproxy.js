@@ -1,5 +1,7 @@
 'use strict';
-// A per-run reverse proxy that adds the API key, so the key never reaches Codex (agents/codex-oss.js).
+// A per-run reverse proxy that adds the API key, so the key never reaches the agent: Codex for open
+// models (agents/codex-oss.js), and plain Claude Code and Codex runs with an API key saved in the keyring
+// (agentkeys.js).
 //
 // Why: anything in Codex's environment or argv can be read by the commands it runs. Its sandbox keeps them
 // out of files and the network, but not out of other processes' arguments and environment: on macOS,
@@ -12,8 +14,9 @@
 // 127.0.0.1 included. Not web pages: every request must start with the random path prefix (128 bits, never
 // in a page's reach), and requests that carry `Origin`, `Sec-Fetch-Site` or `Sec-Fetch-Dest` (which
 // browsers add to fetches, form posts and image loads alike) are refused, as is any Host but the proxy's own (DNS rebinding); no
-// CORS headers either, so a page couldn't read an answer. Only the paths Codex uses go through
-// (`/responses…`, `/models…`), GET and POST. It closes when the run ends.
+// CORS headers either, so a page couldn't read an answer. Only the paths the agent uses go through
+// (OpenAI-style: `/responses…`, `/models…`; Anthropic: `/v1/messages…`, `/v1/models…`), GET and POST. It
+// closes when the run ends.
 
 const http = require('http');
 const https = require('https');
@@ -24,6 +27,12 @@ const DROP_REQUEST = new Set(['host', 'connection', 'keep-alive', 'proxy-connect
   'transfer-encoding', 'authorization', 'cookie', 'origin', 'referer', 'x-api-key', 'api-key']);
 const DROP_RESPONSE = new Set(['connection', 'keep-alive', 'proxy-connection', 'te', 'trailer', 'upgrade', 'transfer-encoding', 'set-cookie']);
 const ALLOWED_PATH = /^\/(responses|models)(?:[/?]|$)/;
+// The two ways of passing it: OpenAI's (and OpenRouter's, and most servers') bearer token, Anthropic's
+// x-api-key (the base URL Claude Code gets is the proxy's root: it adds /v1/messages itself).
+const STYLES = {
+  bearer: { mount: '/v1', paths: ALLOWED_PATH, headers: (key) => ({ authorization: `Bearer ${key}` }) },
+  anthropic: { mount: '', paths: /^\/v1\/(messages|models)(?:[/?]|$)/, headers: (key) => ({ 'x-api-key': key }) },
+};
 
 function refuse(res, status, message) {
   if (res.headersSent) { res.destroy(); return; }
@@ -39,28 +48,38 @@ function sameText(a, b) {
 }
 
 /**
- * startKeyProxy({target, key, headers?, logger?, onStatus?}) -> Promise<{url, port, close(), stats}>
+ * startKeyProxy({target, key, style?, headers?, logger?, onStatus?}) -> Promise<{url, port, close(), stats}>
  *   target   the provider's base URL (https, or http on loopback), e.g. https://openrouter.ai/api/v1
- *   key      sent as `Authorization: Bearer <key>` on every forwarded request
+ *   key      added to every forwarded request, as `style` says:
+ *   style    'bearer' (default): `Authorization: Bearer <key>`, url ends in /v1, paths /responses, /models;
+ *            'anthropic': `x-api-key: <key>`, url is the root, paths /v1/messages, /v1/models
  *   headers  extra headers for the provider (none by default)
- *   onStatus called with each answer's HTTP status (codex-oss: a 401 means the key was refused)
- *   url      what Codex gets as base_url: http://127.0.0.1:<port>/<32 hex>/v1
+ *   onStatus called with each answer's HTTP status (a 401 means the key was refused)
+ *   url      what the agent gets as its base URL: http://127.0.0.1:<port>/<32 hex>[/v1]
  *   stats    {forwarded, refused} counts (for tests and the log)
  */
-function startKeyProxy({ target, key, headers = {}, logger = null, onStatus = null }) {
+function startKeyProxy({ target, key, style = 'bearer', headers = {}, logger = null, onStatus = null }) {
+  const how = STYLES[style];
+  if (!how) return Promise.reject(new Error(`unknown key style ${style}`));
   const base = new URL(target);
   if (base.protocol !== 'https:' && base.protocol !== 'http:') return Promise.reject(new Error(`unsupported provider URL ${base.protocol}`));
   const basePath = base.pathname.replace(/\/+$/, '');
   const client = base.protocol === 'https:' ? https : http;
   const secret = crypto.randomBytes(16).toString('hex');
-  const mount = `/${secret}/v1`;
+  const mount = `/${secret}${how.mount}`;
   const upstreams = new Set();
   const stats = { forwarded: 0, refused: 0 };
   let port = 0;
   let closed = false;
 
   const server = http.createServer((req, res) => {
-    const deny = (status, message) => { stats.refused++; req.resume(); refuse(res, status, message); };
+    const deny = (status, message) => {
+      stats.refused++;
+      req.resume();
+      // (What was refused, never the secret prefix or a query string.)
+      if (logger && logger.debug) logger.debug(`key proxy: refused ${req.method} ${String(req.url || '').replace(mount, '<proxy>').replace(/\?.*$/, '')}: ${message}`);
+      refuse(res, status, message);
+    };
     if (closed) return deny(503, 'the run has ended');
     const h = req.headers;
     // Browsers: a page's fetch, form post or <img> carries Origin and/or Sec-Fetch-Site and -Dest; Codex
@@ -71,11 +90,11 @@ function startKeyProxy({ target, key, headers = {}, logger = null, onStatus = nu
     const head = url.slice(0, mount.length);
     if (!sameText(head, mount) || (url.length > mount.length && url[mount.length] !== '/')) return deny(404, 'not found');
     const rest = url.slice(mount.length) || '/';
-    if (!ALLOWED_PATH.test(rest) || (req.method !== 'POST' && req.method !== 'GET')) return deny(404, 'not found');
+    if (!how.paths.test(rest) || (req.method !== 'POST' && req.method !== 'GET')) return deny(404, 'not found');
 
     const out = {};
     for (const [k, v] of Object.entries(h)) if (!DROP_REQUEST.has(k)) out[k] = v;
-    Object.assign(out, headers, { host: base.host, authorization: `Bearer ${key}` });
+    Object.assign(out, headers, { host: base.host }, how.headers(key));
     const up = client.request({
       protocol: base.protocol, hostname: base.hostname, port: base.port || undefined, method: req.method,
       path: basePath + rest, headers: out,
@@ -124,4 +143,4 @@ function startKeyProxy({ target, key, headers = {}, logger = null, onStatus = nu
   });
 }
 
-module.exports = { startKeyProxy };
+module.exports = { startKeyProxy, STYLES };

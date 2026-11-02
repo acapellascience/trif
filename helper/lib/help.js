@@ -10,8 +10,9 @@ const COMMANDS = {
     summary: 'install the workspace, native messaging host and CLI link (safe to re-run)',
     details: `First time: npx trif setup   (needs Node 18 or newer).
 Creates the workspace (~/.trif, unless --home or TRIF_HOME says otherwise; a ~/.webmods from before 0.2.0,
-when TRIF was called WebMods, is moved there first and left as a link to it) with sites/, screenshots/
-and bin/, installs the TRIF files the wrappers run,
+when TRIF was called WebMods, is moved there first and left as a link to it) with sites/ and bin/, and the
+private folder (settings, logs, screenshots; ~/Library/Application Support/TRIF on a Mac, moved out of the
+workspace if an older TRIF kept them there), installs the TRIF files the wrappers run,
 refreshes AGENTS.md and CLAUDE.md there from those files, adds the example mods (Plain X, the Instagram ones),
 switched off, the first time (once: never again after you delete one, never over your own file;
 --no-examples skips them), writes bin/trif-host
@@ -104,7 +105,8 @@ The result is printed as pretty JSON, or as-is if it's a string. DOM nodes come 
   screenshot: {
     usage: 'trif screenshot [TAB] [-o file.png]',
     summary: 'save a PNG of the visible part of the tab and print its path',
-    details: `Default path: <workspace>/screenshots/<time>.png. Only works on a tab that's showing in its
+    details: `Default path: screenshots/<time>.png in TRIF's private folder (on a Mac, ~/Library/Application
+Support/TRIF; in a side-panel run, its site's folder there). Only works on a tab that's showing in its
 window: TRIF never switches tabs (the user may be browsing, or other agents working). For a
 background tab, use \`trif text\` or \`trif run\`. Open the printed file to look at it.`,
     examples: ['trif screenshot', 'trif screenshot --url x.com -o /tmp/x.png'],
@@ -255,7 +257,7 @@ the header plus helpers for injecting CSS and handling elements that appear late
     examples: ['trif install-example x.com/plain-x'],
   },
   agent: {
-    usage: 'trif agent list | agent run [opts] "<prompt>" | agent login [--agent claude] | agent open-model [opts]',
+    usage: 'trif agent list | agent run [opts] "<prompt>" | agent login [--agent claude] | agent open-model [opts] | agent key [opts]',
     summary: 'list coding agents the side panel can use, run one like the side panel does, or log one in',
     details: `Options for agent run: --agent claude|codex|codex-oss, --tab ID, --url URL, --session ID, --model NAME.
 
@@ -276,10 +278,16 @@ through Codex) gets its model: --provider ollama|lmstudio|openrouter|custom, --m
 (custom servers). Saved in config.json "openModel". --set-key saves the provider's API key in the system
 keyring (the macOS Keychain; secret-tool on Linux), read from stdin or asked for without echo, never from
 the command line; --remove-key removes it. Don't export API keys in your shell profile: every program
-started from a terminal gets them, and other programs can read them.`,
+started from a terminal gets them, and other programs can read them.
+
+agent key [--agent claude|codex] [--set-key | --remove-key] shows, saves or removes an API key for plain
+Claude Code (Anthropic) or Codex (OpenAI) runs, for those who use one instead of logging the agent in.
+Kept in the system keyring like open-model keys (stdin or a no-echo prompt, never the command line), and
+sent by a proxy the helper runs for each chat: the agent never has it.`,
     examples: ['trif agent list', 'trif agent run --url https://x.com/home "hide the trending sidebar"',
       'trif agent run --tab 12 --session 1b2c… "also hide Who to follow"', 'trif agent login',
-      'trif agent open-model --provider openrouter --model qwen/qwen3-coder', 'trif agent open-model --provider openrouter --set-key'],
+      'trif agent open-model --provider openrouter --model qwen/qwen3-coder', 'trif agent open-model --provider openrouter --set-key',
+      'trif agent key --agent codex --set-key'],
   },
   help: {
     usage: 'trif help [command]',

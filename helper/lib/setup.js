@@ -13,7 +13,7 @@ const path = require('path');
 const { envVar } = require('./env');
 const P = require('./paths');
 const { selectBrowsers, SAFARI_AGENT_LABEL, LEGACY_SAFARI_AGENT_LABEL, safariAgentPlist, legacySafariAgentPlist } = require('./browsers');
-const { migrateHome, describeMigration } = require('./migrate');
+const { migrateHome, describeMigration, migratePrivate } = require('./migrate');
 const { preinstallMods, updateShippedMods } = require('./preinstalled');
 const { acquireInstallLock, pidAlive } = require('./lock');
 
@@ -69,7 +69,7 @@ function manifestFor(wrapperPath, origins = [P.EXTENSION_ORIGIN], { firefox = fa
 const xmlEscape = (s) => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 
 /** The launchd agent that keeps the Safari bridge (helper/safari-bridge.js) running while you're logged in. */
-function safariAgentContent(nodePath, bridgeJs, home) {
+function safariAgentContent(nodePath, bridgeJs, home, errFile = path.join(P.privateDir(home), 'safari-bridge.err')) {
   const env = !P.isDefaultHome(home)
     ? `  <key>EnvironmentVariables</key>\n  <dict><key>TRIF_HOME</key><string>${xmlEscape(home)}</string></dict>\n` : '';
   return `<?xml version="1.0" encoding="UTF-8"?>
@@ -82,7 +82,7 @@ function safariAgentContent(nodePath, bridgeJs, home) {
 ${env}  <key>RunAtLoad</key><true/>
   <key>KeepAlive</key><true/>
   <key>ThrottleInterval</key><integer>10</integer>
-  <key>StandardErrorPath</key><string>${xmlEscape(path.join(home, 'safari-bridge.err'))}</string>
+  <key>StandardErrorPath</key><string>${xmlEscape(errFile)}</string>
 </dict>
 </plist>
 `;
@@ -138,8 +138,9 @@ function chooseMode(mode, root = P.REPO_ROOT) {
   return P.isGitCheckout(root) ? 'link' : 'copy';
 }
 
+// (The system's realpath: on macOS also each component's on-disk case, so two spellings compare equal.)
 function realOrResolved(p) {
-  try { return fs.realpathSync(p); } catch { return path.resolve(p); }
+  try { return fs.realpathSync.native(p); } catch { return path.resolve(p); }
 }
 
 function copyTree(src, dest) {
@@ -283,7 +284,8 @@ function cleanPath(pathValue) {
 
 // Merge config.json -> env.PATH = pathValue, keeping every other key. Leaves a broken file alone.
 function recordPath(home, pathValue) {
-  const file = path.join(home, 'config.json');
+  const file = P.configFile(home);
+  fs.mkdirSync(path.dirname(file), { recursive: true, mode: 0o700 });
   let config = {};
   let text = null;
   try { text = fs.readFileSync(file, 'utf8'); } catch { /* new */ }
@@ -324,13 +326,24 @@ function setup(opts = {}) {
     try { migration = migrateHome(); } catch (e) { migration = { how: 'skipped', notes: [], error: `couldn't move ${P.legacyHome()} to ${P.defaultHome()}: ${e.message}; still using ${P.legacyHome()}` }; }
     for (const l of describeMigration(migration)) say(l);
   }
-  const ws = P.workspace(opts.home);
+  let ws = P.workspace(opts.home);
   const home = ws.home;
   let ok = true;
 
+  // 0b. The helper's private files leave the workspace (0.2.0; migrate.js migratePrivate): runs may read
+  // all of the workspace, never the private folder.
+  const priv = migratePrivate(home, { privateDir: ws.private });
+  for (const n of priv.notes) say(`private       ${n}`);
+  for (const e of priv.errors) { ok = false; say(`private       FAILED: ${e}`); }
+  if (priv.moved.length || priv.removed.length) ws = P.workspace(opts.home); // (config.json moved)
+  if (ws.privateError) say(`private       warning: ${ws.privateError}`);
+
   // 1. Workspace
-  for (const d of [home, ws.modsDir, ws.screenshots, ws.bin]) fs.mkdirSync(d, { recursive: true });
+  for (const d of [home, ws.modsDir, ws.bin]) fs.mkdirSync(d, { recursive: true });
+  fs.mkdirSync(ws.private, { recursive: true, mode: 0o700 });
+  fs.mkdirSync(ws.screenshots, { recursive: true });
   say(`workspace     ${home}`);
+  say(`private       ${ws.private} (settings, logs, screenshots: never readable by side-panel runs)`);
 
   // 2. App: what the wrappers run and where the extension is loaded from.
   const mode = chooseMode(opts.mode);
@@ -435,20 +448,23 @@ function setup(opts = {}) {
   const manifests = [];
   for (const t of targets) {
     if (t.safari) {
-      // The key the bridge asks of connections; TRIF's Safari app reads it from ~/.trif (its sandbox
-      // allows that path, and ~/.webmods/safari-token from before 0.2.0) and hands it to the extension.
-      const tokenFile = path.join(home, 'safari-token');
+      // The key the bridge asks of connections; TRIF's Safari app reads it from the private folder (its
+      // sandbox allows that path, and until 0.2.0's app the old ones in ~/.trif and ~/.webmods) and hands
+      // it to the extension.
+      const tokenFile = ws.safariToken;
       if (!fs.existsSync(tokenFile)) fs.writeFileSync(tokenFile, require('crypto').randomBytes(32).toString('hex') + '\n', { mode: 0o600 });
       fs.chmodSync(tokenFile, 0o600);
-      if (!P.isDefaultHome(home)) {
-        say(`              warning: Safari's TRIF app only looks for ${path.join(P.defaultHome(), 'safari-token')}, so Safari`);
+      if (!P.isDefaultHome(home) || ws.private !== P.defaultPrivateDir()) {
+        say(`              warning: Safari's TRIF app only looks for ${path.join(P.defaultPrivateDir(), 'safari-token')}, so Safari`);
         say(`              can't connect to a workspace elsewhere (${home})`);
+      } else if (priv.moved.includes('safari-token')) {
+        say('              the key moved: install TRIF.app from this version (older ones look for it in ~/.trif)');
       }
       const plist = opts.launchAgentsDir ? path.join(path.resolve(opts.launchAgentsDir), path.basename(safariAgentPlist())) : safariAgentPlist();
       const bridgeJs = path.join(helperDir, 'safari-bridge.js');
       try {
         fs.mkdirSync(path.dirname(plist), { recursive: true });
-        const how = writeIfChanged(plist, safariAgentContent(nodePath, bridgeJs, home));
+        const how = writeIfChanged(plist, safariAgentContent(nodePath, bridgeJs, home, ws.safariBridgeErr));
         manifests.push({ browser: t.key, file: plist });
         say(`Safari bridge ${plist} -> ${bridgeJs} (${how})`);
         // The agent from before 0.2.0: loadSafariAgent stops it; its file goes now.

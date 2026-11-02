@@ -9,7 +9,7 @@ const fs = require('fs');
 const net = require('net');
 const path = require('path');
 const { spawn } = require('child_process');
-const { FakeExtension, runCli, writeMod, tempDir, waitFor, REPO } = require('./fake-extension');
+const { FakeExtension, runCli, writeMod, tempDir, waitFor, REPO, privDir } = require('./fake-extension');
 const { removeStaleSockets, helperSockets } = require('../helper/lib/helpers');
 
 const cleanups = [];
@@ -140,7 +140,7 @@ test('host: removes a helper-<pid>.sock left by a helper that died', async () =>
   const ext = startHost(home);
   await ext.waitForSocket(5000, ext.ownSock);
   await waitFor(() => !fs.existsSync(stale), { message: 'stale socket removed' });
-  assert.match(fs.readFileSync(path.join(home, 'helper.log'), 'utf8'), /removed stale socket .*helper-\d+\.sock/);
+  assert.match(fs.readFileSync(path.join(privDir(home), 'helper.log'), 'utf8'), /removed stale socket .*helper-\d+\.sock/);
 });
 
 // ------------------------------------------------------------------ CLI routing

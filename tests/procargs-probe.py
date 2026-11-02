@@ -3,10 +3,11 @@
 # KERN_PROCARGS2, which macOS's sandbox doesn't stop, and looks for a secret without being given it:
 # argv holds only sha256 hex digests and lengths, so the secret is in no command line.
 #
-#   python3 -I procargs-probe.py <sha256 of the key> <key length> [<sha256 of a canary> <canary length>]
+#   python3 -I procargs-probe.py <sha256 of the key> <key length> [<sha256 of a canary> <canary length>
+#                                [<sha256 of the user's message> <its length>]]
 #
-# Prints "procargs scanned=<processes read> key=<processes holding it> canary=<processes holding it>", and
-# when the key is found, "key in: <pid>:<executable>…".
+# Prints "procargs scanned=<processes read> key=<processes holding it> canary=<processes holding it>
+# [prompt=<processes holding it>]", and when the key is found, "key in: <pid>:<executable>…".
 # The canary is a value known to be in some process's environment (the helper's): finding it shows the
 # scan works.
 import ctypes
@@ -26,7 +27,7 @@ buf = ctypes.create_string_buffer(argmax.value or 1 << 20)
 
 wanted = []  # (name, digest, length)
 args = sys.argv[1:]
-for name, i in (('key', 0), ('canary', 2)):
+for name, i in (('key', 0), ('canary', 2), ('prompt', 4)):
     if len(args) > i + 1:
         wanted.append((name, args[i], int(args[i + 1])))
 

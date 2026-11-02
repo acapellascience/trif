@@ -32,12 +32,12 @@ install or update it. (TRIF, "Tim's Robot Internet Fixer", was called WebMods be
   instructions.md        the user's own standing instructions, if any (see below)
   sites/<site>/<mod>.js  the mods: <site> is a hostname (x.com, news.ycombinator.com), <mod> is kebab-case
   sites/all-sites/       mods with no single home site (see "Mods for several sites")
-  screenshots/           where `trif screenshot` writes by default (in a side-panel run, screenshots/<site>/)
   .shipped/              versions of the mods TRIF ships, kept for merging (read them; never edit them)
 ```
 
 Files whose name starts with `_` or `.` are ignored by TRIF: use them for tests, notes and scratch
 code (`sites/x.com/_plain-x.test.js`). Only create or edit files inside this workspace.
+`trif screenshot` saves outside it, in TRIF's own folder, and prints the file's path: open that.
 
 ## The user's instructions
 
@@ -242,7 +242,8 @@ logged in to:
   Claude Code only `trif`, `cd` and `ls` run: no `node`, so unit tests can't run in the side panel
   (write them anyway when they help; the user can run them). `trif check` checks syntax.
 - `trif run -f` and `trif check` read files from `sites/` only, and `-o` writes there or to your
-  screenshots folder. Other runs' logs, other sites' screenshots and config.json aren't readable.
+  screenshots folder (`$TRIF_RUN_SCREENSHOTS`, where `trif screenshot` saves). TRIF's settings, logs
+  and other sites' screenshots aren't in the workspace and aren't readable.
 - `trif setup`, `trif agent`, `trif approve` and `trif mod-update` are the user's; they
   fail inside a run. (A merge is settled by the helper once a run in that chat leaves the user's copy
   changed with the new `@version`.)

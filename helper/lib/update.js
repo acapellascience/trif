@@ -139,22 +139,30 @@ function writeState(home, s) {
 
 /** Set (or remove, with undefined) a top-level key in config.json, keeping everything else. */
 function setConfigKey(home, key, value) {
-  const file = path.join(home, 'config.json');
+  // (In the private folder since 0.2.0: paths.js configFile. readConfig still finds one left in the
+  // workspace until it's moved, and this write would leave both: move it first.)
+  const P = require('./paths');
+  const legacy = path.join(home, 'config.json');
+  if (fs.existsSync(legacy)) require('./migrate').migratePrivate(home);
+  const file = P.configFile(home);
   let config = {};
   if (fs.existsSync(file)) {
     try { config = JSON.parse(fs.readFileSync(file, 'utf8')); } catch (e) { throw new UpdateError(`${file} isn't valid JSON (${e.message}); fix it first`); }
     if (!config || typeof config !== 'object' || Array.isArray(config)) throw new UpdateError(`${file} isn't a JSON object; fix it first`);
   }
   if (value === undefined) delete config[key]; else config[key] = value;
-  fs.mkdirSync(home, { recursive: true });
-  fs.writeFileSync(file, JSON.stringify(config, null, 2) + '\n');
+  fs.mkdirSync(path.dirname(file), { recursive: true, mode: 0o700 });
+  const tmp = `${file}.${process.pid}.tmp`;
+  fs.writeFileSync(tmp, JSON.stringify(config, null, 2) + '\n', { mode: 0o600 });
+  fs.renameSync(tmp, file);
 }
 
 function autoUpdateOn(ws) { return ws.config?.autoUpdate === true; }
 function checksOn(ws) { return ws.config?.checkForUpdates !== false; }
 
+// (The system's realpath: on macOS also each component's on-disk case, so two spellings compare equal.)
 function realOrResolved(p) {
-  try { return fs.realpathSync(p); } catch { return path.resolve(p); }
+  try { return fs.realpathSync.native(p); } catch { return path.resolve(p); }
 }
 
 /** Whether this copy of TRIF can update itself, and if not, why. */

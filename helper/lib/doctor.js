@@ -25,9 +25,9 @@ function readVersion(root) {
   try { return JSON.parse(fs.readFileSync(path.join(root, 'package.json'), 'utf8')).version || null; } catch { return null; }
 }
 
+// (The folder itself counts; real paths, case as the volume does: pathcheck.js.)
 function isInside(child, parent) {
-  const rel = path.relative(parent, child);
-  return rel === '' || (!!rel && !rel.startsWith('..') && !path.isAbsolute(rel));
+  return require('./pathcheck').isInside(child, parent, { orEqual: true });
 }
 
 /**
@@ -100,7 +100,15 @@ async function doctor(opts = {}) {
   // Workspace
   if (fs.existsSync(ws.home) && fs.existsSync(ws.modsDir)) add('ok', `workspace ${ws.home}`);
   else add('fail', `workspace ${ws.home} is missing${fs.existsSync(ws.home) ? ` its mods folder ${ws.modsDir}` : ''}`, setupFix);
-  if (ws.configError) add('fail', ws.configError, `fix or delete ${path.join(ws.home, 'config.json')}`);
+  if (ws.configError) add('fail', ws.configError, `fix or delete ${ws.configFile}`);
+  // The private folder (settings, logs, screenshots): never readable by side-panel runs, so nothing of it
+  // may be left in the workspace, which runs may read (see "Run scope" in docs/PROTOCOL.md).
+  if (ws.privateError) add('warn', ws.privateError);
+  if (!envVar('RUN_BOX')) {
+    const left = require('./migrate').privateLeftovers(ws.home);
+    if (left.length) add('warn', `TRIF's private files are still in the workspace, where side-panel runs can read them: ${left.map((f) => path.relative(ws.home, f)).join(', ')}`, `${setupFix} (it moves them to ${ws.private})`);
+    else if (fs.existsSync(ws.private)) add('ok', `private folder ${ws.private} (settings, logs, screenshots; side-panel runs can't read it)`);
+  }
   // A workspace moved from ~/.webmods (before 0.2.0, when TRIF was called WebMods): Chrome may load the
   // extension from ~/.webmods/app/extension, and PATHs may name ~/.webmods/bin, so the link must stay.
   const legacy = P.legacyHome();
@@ -113,7 +121,7 @@ async function doctor(opts = {}) {
   } else if (!inRun && path.resolve(ws.home) === path.resolve(P.defaultHome()) && !opts.home) {
     let link = null;
     try { link = fs.lstatSync(legacy); } catch { /* none */ }
-    const real = (p) => { try { return fs.realpathSync(p); } catch { return null; } };
+    const real = (p) => { try { return fs.realpathSync.native(p); } catch { return null; } };
     if (link && link.isSymbolicLink() && real(legacy) === real(ws.home)) add('ok', `${legacy} links to ${ws.home} (from before 0.2.0; keep it)`);
     else if (link && link.isDirectory()) add('warn', `${legacy} is still a folder of its own (TRIF uses ${ws.home} since 0.2.0)`, `${setupFix} (it moves what's in ${legacy} into ${ws.home})`);
     else if (!link && moved) {
@@ -218,7 +226,8 @@ async function doctor(opts = {}) {
       const fix = `${setupFix} --browser safari`;
       if (!bridgeJs || !fs.existsSync(bridgeJs)) add('fail', `Safari: the bridge's login item (${plist}) runs ${bridgeJs || 'nothing'}, which doesn't exist`, fix);
       else if (await portOpen(SAFARI_PORT)) add('ok', `Safari: the bridge is running (127.0.0.1:${SAFARI_PORT})`);
-      else add('fail', `Safari: the bridge isn't running (nothing on 127.0.0.1:${SAFARI_PORT})`, `${fix}   (errors: ${path.join(ws.home, 'safari-bridge.err')})`);
+      else add('fail', `Safari: the bridge isn't running (nothing on 127.0.0.1:${SAFARI_PORT})`, `${fix}   (errors: ${ws.safariBridgeErr})`);
+      if (!fs.existsSync(ws.safariToken)) add('fail', `Safari: the bridge's key ${ws.safariToken} is missing, so Safari can't connect`, fix);
     }
   }
 
@@ -301,7 +310,9 @@ async function doctor(opts = {}) {
       continue;
     }
     add('ok', `${label} ${a.version || ''} (${a.path})`.replace(/ {2,}/g, ' '));
-    if (adapter.loginStatus) {
+    // (A saved API key counts as logged in: runs use it through a key proxy; listed below.)
+    const keyed = require('./agentkeys').AGENT_KEYS[a.id] ? (await require('./agentkeys').hasAgentKey(a.id, { config: ws.config })).stored : false;
+    if (adapter.loginStatus && !keyed) {
       const st = adapter.loginStatus({ path: a.path, env, cwd: fs.existsSync(ws.home) ? ws.home : undefined });
       if (st.loggedIn === true) add('ok', `${a.name} is logged in${st.detail ? ` (${st.detail})` : ''}`);
       else if (st.loggedIn === false) add('warn', `${a.name} isn't logged in, so the side panel can't use it`, adapter.loginFix);
@@ -311,6 +322,8 @@ async function doctor(opts = {}) {
   const oss = listed.agents.find((a) => a.id === 'codex-oss');
   if (oss && !oss.available && ws.config.openModel) add('warn', 'Open model: set up, but it runs through Codex, which isn\'t available', agents.getAdapter('codex-oss').missing);
   else if (oss && oss.available) for (const c of await agents.getAdapter('codex-oss').doctorChecks(ws, { codexVersion: oss.version })) add(c.status, c.title, c.fix);
+  // API keys for plain Claude Code / Codex runs: in the keyring, or still in config.json (agentkeys.js).
+  for (const c of await require('./agentkeys').doctorChecks(ws)) add(c.status, c.title, c.fix);
   // API keys exported in the shell profile: readable by every same-user process (sysctl KERN_PROCARGS2),
   // an agent's sandboxed commands included. Only their presence is checked.
   const keyVars = agents.getAdapter('codex-oss').keyVarsCheck(process.env);

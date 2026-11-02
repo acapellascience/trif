@@ -35,7 +35,13 @@ const { deleteMod, emptyTrash } = require('./lib/trash');
 const { scopeFor } = require('./lib/scope');
 const update = require('./lib/update');
 const { buildReport, reportEmail, reportUrl } = require('./lib/report');
+const { migratePrivate } = require('./lib/migrate');
 
+// The helper's private files (settings, logs, run logs, screenshots) leave the workspace for the private
+// folder, once (lib/migrate.js migratePrivate): side-panel runs may read the workspace, never that.
+const privateMigration = (() => {
+  try { const w = workspace(); return migratePrivate(w.home, { privateDir: w.private }); } catch (e) { return { moved: [], removed: [], kept: [], notes: [], errors: [e.message] }; }
+})();
 const ws = workspace();
 // This helper's own socket (helper-<pid>.sock), served whether or not it also owns helper.sock; agent
 // runs get it as TRIF_SOCK so their `trif` commands reach this browser (lib/helpers.js).
@@ -78,6 +84,14 @@ const state = {
 };
 
 logger.info(`host ${VERSION} starting (node ${process.version}, home ${ws.home}, mods ${ws.modsDir}, args ${JSON.stringify(process.argv.slice(2))})`);
+for (const n of privateMigration.notes) logger.info(n);
+// API keys left in config.json (before 0.2.0) move to the keyring (lib/agentkeys.js), in the background.
+require('./lib/agentkeys').migrateKeys(ws.home).then((k) => {
+  for (const n of k.notes) logger.info(n);
+  if (k.moved.length || k.left.length) { ws.config = workspace(ws.home).config; agents.forgetLoginStatus(); }
+}, (e) => logger.warn(`couldn't move API keys out of config.json: ${e.message}`));
+for (const e of privateMigration.errors) logger.warn(`couldn't move the private files out of the workspace: ${e}`);
+if (ws.privateError) logger.warn(ws.privateError);
 if (ws.configError) logger.warn(ws.configError);
 
 // ---------------------------------------------------------------- native messaging

@@ -1,5 +1,6 @@
 'use strict';
-// API keys for hosted open models (agents/codex-oss.js), kept in the system keyring and nowhere else:
+// API keys for hosted open models (agents/codex-oss.js), and for plain Claude Code and Codex runs
+// (agentkeys.js: service "TRIF API key"), kept in the system keyring and nowhere else:
 // not in config.json, not in an environment variable (a key exported in ~/.zshrc sits in the environment
 // of every program started from a terminal, which any same-user process can read: macOS sysctl
 // KERN_PROCARGS2, sandbox or not), not in the extension's storage.
@@ -55,10 +56,10 @@ function backend({ env = process.env, platform = process.platform } = {}) {
 }
 
 /** Why there's no keyring, in the user's terms. */
-function noKeyring({ platform = process.platform } = {}) {
+function noKeyring({ platform = process.platform, what = 'hosted open models need' } = {}) {
   return platform === 'linux'
-    ? 'hosted open models need a keyring to keep the API key in: install libsecret\'s secret-tool (e.g. `sudo apt install libsecret-tools`) and a Secret Service such as GNOME Keyring or KeePassXC'
-    : 'hosted open models need a system keyring to keep the API key in (the macOS Keychain, or a Secret Service on Linux)';
+    ? `${what} a keyring to keep the API key in: install libsecret's secret-tool (e.g. \`sudo apt install libsecret-tools\`) and a Secret Service such as GNOME Keyring or KeePassXC`
+    : `${what} a system keyring to keep the API key in (the macOS Keychain, or a Secret Service on Linux)`;
 }
 
 /** Why `key` can't be stored ('' when it can). Never quotes the key. */

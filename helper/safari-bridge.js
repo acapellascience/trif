@@ -8,7 +8,7 @@
 //
 // Only TRIF's Safari extension may connect. A browser always sends the page's origin with a WebSocket
 // handshake and a web page can't change it, so only a Safari extension gets past the origin check, and of
-// those only TRIF has the key (?token=, the contents of <home>/safari-token, written by setup): the
+// those only TRIF has the key (?token=, the contents of safari-token in the private folder, written by setup): the
 // extension gets it from its own Mac app, which no other extension can message. (A Safari extension's
 // origin is random and changes, so it can't be checked for itself.)
 //
@@ -18,7 +18,7 @@
 // and reconnects (it sends a fresh hello) it gets the same host and the queue. A host with no connection
 // for an idle period, and no agent run going, is stopped.
 //
-// Usage: node helper/safari-bridge.js [--port N]   (logs to <home>/helper.log, and to the terminal if any)
+// Usage: node helper/safari-bridge.js [--port N]   (logs to helper.log in the private folder, and to the terminal if any)
 
 const fs = require('node:fs');
 const http = require('node:http');
@@ -252,6 +252,8 @@ function agentRunActive(home) {
 function main() {
   const P = require('./lib/paths');
   const { createLogger } = require('./lib/log');
+  // (The key and the log are in the private folder since 0.2.0: move them there if no helper has yet.)
+  try { const w = P.workspace(); require('./lib/migrate').migratePrivate(w.home, { privateDir: w.private }); } catch { /* the helper will */ }
   const ws = P.workspace();
   const file = createLogger(ws.log);
   const tty = process.stdout.isTTY;
@@ -261,8 +263,7 @@ function main() {
   }]));
   const at = process.argv.indexOf('--port');
   const port = at > 0 ? Number(process.argv[at + 1]) : PORT;
-  const tokenFile = path.join(ws.home, 'safari-token');
-  const token = () => { try { return fs.readFileSync(tokenFile, 'utf8').trim() || null; } catch { return null; } };
+  const token = () => { try { return fs.readFileSync(ws.safariToken, 'utf8').trim() || null; } catch { return null; } };
   const { server } = createBridge({ log, runActive: () => agentRunActive(ws.home), token });
   server.on('error', (e) => {
     log.error(`safari bridge: ${e.code === 'EADDRINUSE' ? `port ${port} is in use (is the bridge already running?)` : e.message}`);

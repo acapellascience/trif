@@ -7,7 +7,7 @@ const assert = require('node:assert');
 const fs = require('fs');
 const net = require('net');
 const path = require('path');
-const { FakeExtension, tempDir, runCli } = require('./fake-extension');
+const { FakeExtension, tempDir, runCli, privDir } = require('./fake-extension');
 const { scrub, logProblems, buildReport, reportEmail } = require('../helper/lib/report');
 
 test('scrub removes the home folder, user name, emails, query strings and tokens, but keeps extension IDs', () => {
@@ -27,7 +27,7 @@ test('scrub removes the home folder, user name, emails, query strings and tokens
 
 test('logProblems keeps recent warnings and errors and folds repeats', () => {
   const home = tempDir();
-  const log = path.join(home, 'helper.log');
+  const log = path.join(privDir(home), 'helper.log');
   const now = Date.parse('2026-11-01T12:00:00Z');
   fs.writeFileSync(log, [
     '2026-10-20T10:00:00.000Z [1] ERROR too old',
@@ -126,10 +126,10 @@ test('the helper answers report.build and update.*, and tells the extension abou
 
   r = await extRequest(ext, 'update.setAuto', { on: true });
   assert.equal(r.result.auto, true);
-  assert.equal(JSON.parse(fs.readFileSync(path.join(home, 'config.json'), 'utf8')).autoUpdate, true);
+  assert.equal(JSON.parse(fs.readFileSync(path.join(privDir(home), 'config.json'), 'utf8')).autoUpdate, true);
   r = await extRequest(ext, 'update.setAuto', { on: false });
   assert.equal(r.result.auto, false);
-  assert.equal(JSON.parse(fs.readFileSync(path.join(home, 'config.json'), 'utf8')).autoUpdate, undefined);
+  assert.equal(JSON.parse(fs.readFileSync(path.join(privDir(home), 'config.json'), 'utf8')).autoUpdate, undefined);
 
   r = await extRequest(ext, 'update.install', {});
   assert.equal(r.ok, false);

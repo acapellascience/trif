@@ -213,7 +213,7 @@ Without one, the target is the active tab of the last-focused normal window.
 
 | cmd | args | result |
 |---|---|---|
-| `status` | – | `{userScripts, chrome, version, mods:[{id, registered, enabled}], recording:[sites]}` (`enabled: false` = switched off, see below) |
+| `status` | optional tab selector | `{userScripts, chrome, version, mods:[{id, registered, enabled}], recording:[sites]}` (`enabled: false` = switched off, see below); with a tab selector also `page: {tab, url, mods:[{id, name, runAt}]}`, the mods that run on that tab's page |
 | `tabs` | – | `[{id, windowId, active, url, title}]` (normal windows only) |
 | `run` | `code`, `expression: bool`, `timeout` (ms, default 10000) + tab selector | `{value}`: the code's result, made JSON-safe in the page (see below), or an error `{ok:false, error:"<message + stack>"}` |
 | `reload` | `hard: bool` + tab selector | `{url}` after the tab's `status` is `complete` (timeout 30 s) |
@@ -340,7 +340,7 @@ code whenever it changes (`const RECORDING = ["x.com"]`).
 
 ```
 trif setup [--browser chrome|chromium|brave|edge|arc|all] [--copy|--link]   install workspace, native host, CLI link
-trif status                     connection, user-scripts switch, mods and whether each is registered (or off)
+trif status [TAB]               connection, user-scripts switch, mods and whether each is registered (or off); with TAB, the mods running on that page
 trif doctor                     diagnose setup problems, printing a fix for each
 trif tabs
 trif run [TAB] '<code>'         run JS in the page (REPL-style); `-f file.js` to run a file; `-` reads stdin

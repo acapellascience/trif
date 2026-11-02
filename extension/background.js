@@ -371,7 +371,7 @@ async function scopedTab(args) {
 }
 
 const commands = {
-  async status() {
+  async status(args) {
     // Let pending mod syncs finish first, but answer within a few seconds even if one is stuck.
     await Promise.race([serial(() => {}), sleep(3000)]);
     let ids = new Set();
@@ -390,6 +390,7 @@ const commands = {
         return o;
       }),
       recording: state.recording, sitesOn: state.sitesOn,
+      ...(args && (args.tab !== undefined || args.url !== undefined) ? { page: await modsOnPage(args) } : {}),
     };
   },
 
@@ -598,6 +599,15 @@ const commands = {
     return runtimeList(args, 'logs');
   },
 };
+
+// `status --url`: the mods that run on a tab's page (on, not held, not off on its site, its site on),
+// so an agent can see what its change will meet.
+async function modsOnPage(args) {
+  const tab = await scopedTab(args);
+  const url = tab.url || tab.pendingUrl || '';
+  const mods = state.mods.filter((m) => isEnabled(m.id) && !m.held && limitToSites(m, state.sitesOn) && modAppliesTo(withOffSites(m, state.offSites[m.id]), url));
+  return { tab: tab.id, url, mods: mods.map((m) => ({ id: m.id, name: m.name || m.id, runAt: m.runAt || 'document_start' })) };
+}
 
 // Windows a screenshot opened for a copy of a page (extension/screenshot.js), kept in session storage so
 // that one left open by a worker that stopped mid-capture is closed on the next start.

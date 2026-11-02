@@ -261,7 +261,7 @@ const handlers = {
     let st = null;
     let stErr = null;
     try {
-      st = await ctx.call('status', { timeout: 5000 });
+      st = await ctx.call('status', { timeout: 5000, ...tabArgs(ctx.opts) });
     } catch (e) {
       if (e.kind === 'no-helper') throw e;
       stErr = e.message;
@@ -318,6 +318,12 @@ const handlers = {
       lines.push(`sites on      ${st.sitesOn.length ? st.sitesOn.join(', ') : '(none)'}; TRIF is off everywhere else: no mods, no page commands`);
     }
     if (st) lines.push(`recording     ${(st.recording || []).length ? st.recording.join(', ') : '(none)'}`);
+    if (st && st.page) {
+      lines.push(`this page     ${st.page.url} (tab ${st.page.tab})`);
+      lines.push(st.page.mods.length ? `  ${st.page.mods.length} running here: ${st.page.mods.map((m) => m.id).join(', ')}` : '  no mods run here');
+    } else if (st && (ctx.opts['--url'] !== undefined || ctx.opts['--tab'] !== undefined)) {
+      lines.push('this page     (this version of the extension doesn\'t say which mods run on a page)');
+    }
     out(lines.join('\n'));
   },
 

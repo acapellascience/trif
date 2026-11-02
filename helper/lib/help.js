@@ -35,7 +35,7 @@ Run it again after upgrading TRIF, moving the repo or upgrading Node.`,
     examples: ['npx trif setup', 'trif setup', 'trif setup --browser brave', 'trif setup --browser all', 'node helper/cli.js setup --copy'],
   },
   status: {
-    usage: 'trif status',
+    usage: 'trif status [TAB]',
     summary: 'connection, "Allow User Scripts" switch, mods and whether each is registered or off',
     details: `Asks the helper and the extension how things stand. When several browsers are connected (each runs
 its own helper), an "also" line lists the others; --browser <name|pid> picks one for any command.
@@ -43,8 +43,9 @@ If a mod you just saved is missing or
 "not registered", check its header and run trif doctor. "off" means the user switched the mod off
 (side panel switch, or trif disable): it isn't running, and its file is unchanged. "sites on" lists
 the sites TRIF is on for; it's off everywhere else until the user turns a site on in the side panel,
-and a mod for a site that's off shows as "waiting".`,
-    examples: ['trif status', 'trif status --json'],
+and a mod for a site that's off shows as "waiting".
+With --url or --tab, also the mods that run on that tab's page: what a change there will meet.`,
+    examples: ['trif status', 'trif status --url x.com', 'trif status --json'],
   },
   doctor: {
     usage: 'trif doctor',

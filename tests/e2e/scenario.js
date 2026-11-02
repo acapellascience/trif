@@ -536,6 +536,12 @@ class Scenario {
       if (!c.rules.list.some((x) => x.selector === '.promo')) throw new Error(`the shadow root's .promo rule is missing: ${JSON.stringify(c.rules.list)}`);
       return `text ${t.total}; colour ${c.total} (${got.join('; ')}); ${c.rules.total} rules, ${c.rules.variables.length} variable`;
     });
+    await r.check('trif status --tab lists the mods running on that page', async () => {
+      const x = await this.cli(['status', '--tab', String(sweepTab)], { json: true });
+      const page = x.json && x.json.extension && x.json.extension.page;
+      if (!page || !page.mods.some((m) => m.id === '127.0.0.1/e2e-banner')) throw new Error(`page: ${JSON.stringify(page)} ${x.stderr}`);
+      return page.mods.map((m) => m.id).join(', ');
+    });
     // The user's view, which no screenshot may change.
     const view = () => this.ext(`async () => {
       const wins = await chrome.windows.getAll({ populate: true });

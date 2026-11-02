@@ -280,6 +280,13 @@ test('run limits: the user\'s skill folders are readable (real paths, links foll
   for (const p of [path.join(h, '.agents'), path.join(h, '.claude'), path.join(h, '.codex'), path.join(h, '.trif'), path.join(h, '.agents', 'skills')]) {
     assert.ok(!denied.includes(p), p);
   }
+  // A readable folder that is the home folder, or holds it (node installed in ~/bin makes node's folder the
+  // home folder; a workspace above it), excuses nothing: the shell profiles and the rest stay denied.
+  fs.writeFileSync(path.join(h, '.zshrc'), 'export KEY=secret');
+  for (const wide of [h, path.dirname(h)]) {
+    const d = deniedInHome(h, [...dirs, mk('.trif'), wide]);
+    for (const p of [path.join(h, '.zshrc'), path.join(h, 'Documents'), path.join(h, '.codex', 'auth.json')]) assert.ok(d.includes(p), `${p} with ${wide} readable`);
+  }
   // The Codex permission profile: skills read only, no write.
   const c = codex.command({ bin: '/x/codex', prompt: 'P', readable: dirs, writable: ['/w'], denied });
   const perm = c.args.find((a) => a.startsWith('permissions='));

@@ -252,7 +252,7 @@ function agentRunActive(home) {
 function main() {
   const P = require('./lib/paths');
   const { createLogger } = require('./lib/log');
-  // (The key and the log are in the private folder since 0.2.1: move them there if no helper has yet.)
+  // (The key and the log are in the private folder since 0.2.0: move them there if no helper has yet.)
   try { const w = P.workspace(); require('./lib/migrate').migratePrivate(w.home, { privateDir: w.private }); } catch { /* the helper will */ }
   const ws = P.workspace();
   const file = createLogger(ws.log);

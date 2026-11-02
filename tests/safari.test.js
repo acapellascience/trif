@@ -490,7 +490,7 @@ test('setup --browser safari installs the bridge\'s login item and gives Safari\
   const again = await runCli(['setup', '--browser', 'safari', '--no-link', '--no-examples'], { home });
   assert.equal(again.code, 0);
   assert.equal(fs.readFileSync(tokenFile, 'utf8').trim(), key, 'kept on re-running setup');
-  // A key from before 0.2.1, in the workspace: moved, the same key (the Safari app reads it there).
+  // A key from before 0.2.0, in the workspace: moved, the same key (the Safari app reads it there).
   const old = tempDir();
   fs.writeFileSync(path.join(old, 'safari-token'), `${'ab'.repeat(32)}\n`, { mode: 0o600 });
   const moved = await runCli(['setup', '--browser', 'safari', '--no-link', '--no-examples'], { home: old });

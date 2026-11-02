@@ -2,7 +2,7 @@
 // API keys for plain Claude Code and Codex runs (most people log in instead: `claude` then /login, or
 // `codex login`, which keep the agent's credentials in its own files, which run sandboxes deny).
 //
-// Until 0.2.1 a key in config.json `env.ANTHROPIC_API_KEY` / `env.OPENAI_API_KEY` went into the agent's
+// Until 0.2.0 a key in config.json `env.ANTHROPIC_API_KEY` / `env.OPENAI_API_KEY` went into the agent's
 // environment, where any same-user process can read it (sysctl KERN_PROCARGS2), the agent's own sandboxed
 // commands included. Now the key lives in the system keyring (keyring.js; service "TRIF API key",
 // account `anthropic` or `openai`), set with `trif agent key --set-key`, and never enters the agent's

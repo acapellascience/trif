@@ -35,8 +35,8 @@ function searchDirs(ws) { return uniq([...recordedPath(ws), ...defaultDirs()]); 
 
 // The environment spawned agents get: nothing inherited from the helper except the basics, so no
 // CLAUDE*/ANTHROPIC_*/CODEX_* leak in from wherever Chrome was started. Never an API key: one the user
-// saved (agentkeys.js; config.json env before 0.2.1) reaches the provider through the run's key proxy.
-const PASSED_KEYS = []; // (before 0.2.1: ANTHROPIC_API_KEY, OPENAI_API_KEY from config.json env)
+// saved (agentkeys.js; config.json env before 0.2.0) reaches the provider through the run's key proxy.
+const PASSED_KEYS = []; // (before 0.2.0: ANTHROPIC_API_KEY, OPENAI_API_KEY from config.json env)
 function agentEnv(ws) {
   const env = {
     PATH: uniq([ws.bin, ...recordedPath(ws), ...defaultDirs()]).join(path.delimiter),

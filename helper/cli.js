@@ -236,7 +236,7 @@ const handlers = {
       // Only for a person at a terminal (not scripts, tests or --json).
       reveal: !!process.stdout.isTTY && !ctx.json,
     });
-    // API keys left in config.json (before 0.2.1) move to the keyring (agentkeys.js; async, so here).
+    // API keys left in config.json (before 0.2.0) move to the keyring (agentkeys.js; async, so here).
     if (r.ws && r.ws.home) {
       try {
         const k = await require('./lib/agentkeys').migrateKeys(r.ws.home);

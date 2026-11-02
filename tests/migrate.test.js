@@ -249,7 +249,7 @@ test('run limits: the ~/.webmods link to the workspace is not denied, the real p
   }
 });
 
-// ------------------------------------------------------------------ the private folder (0.2.1)
+// ------------------------------------------------------------------ the private folder (0.2.0)
 
 const { migratePrivate, privateLeftovers } = require('../helper/lib/migrate');
 

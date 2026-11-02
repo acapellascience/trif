@@ -139,7 +139,7 @@ function writeState(home, s) {
 
 /** Set (or remove, with undefined) a top-level key in config.json, keeping everything else. */
 function setConfigKey(home, key, value) {
-  // (In the private folder since 0.2.1: paths.js configFile. readConfig still finds one left in the
+  // (In the private folder since 0.2.0: paths.js configFile. readConfig still finds one left in the
   // workspace until it's moved, and this write would leave both: move it first.)
   const P = require('./paths');
   const legacy = path.join(home, 'config.json');

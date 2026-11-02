@@ -233,9 +233,9 @@ function describeMigration(m) {
   return lines;
 }
 
-// ---------------------------------------------------------------- the private folder (0.2.1)
+// ---------------------------------------------------------------- the private folder (0.2.0)
 //
-// Until 0.2.1 the helper's private files were in the workspace, kept from runs by deny rules inside the
+// Until 0.2.0 the helper's private files were in the workspace, kept from runs by deny rules inside the
 // folders runs may read (where bugs came from). Now they live in the private folder (paths.js privateDir)
 // and the workspace holds nothing a run mustn't read. migratePrivate moves them there, once: setup runs it,
 // every helper does when it starts, the Safari bridge too, and runs.js before a run if any reappeared (an

@@ -40,7 +40,7 @@ const keyring = require('../keyring');
 const { startKeyProxy } = require('../keyproxy');
 const { oneLine } = require('./util');
 
-// API key variables never given to this agent (index.js agentEnv gives none since 0.2.1; kept as a guard).
+// API key variables never given to this agent (index.js agentEnv gives none since 0.2.0; kept as a guard).
 const PASSED_KEYS = ['ANTHROPIC_API_KEY', 'OPENAI_API_KEY'];
 
 const PROVIDER_ID = 'trif-open';

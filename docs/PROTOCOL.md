@@ -54,7 +54,7 @@ dependencies, no build step.**
      runs/<runId>.jsonl  run logs (the pages runs read)
      screenshots/        `trif screenshot`'s default folder; a side-panel run gets screenshots/<scope>/ alone
    ```
-   Until 0.2.1 these were in the workspace, kept from runs by deny rules inside the folders runs may read.
+   Until 0.2.0 these were in the workspace, kept from runs by deny rules inside the folders runs may read.
    `migrate.js` migratePrivate moves them, once: setup runs it, every helper does when it starts, the Safari
    bridge too, and a run does when one reappears (an older helper still running writes its log where it
    used to), refusing to start if it can't. Only in the workspace: moved (copied and removed across
@@ -182,7 +182,7 @@ messaging to an arbitrary program (Safari's only reaches the extension's own Mac
   whose sandbox may read just `~/Library/Application Support/TRIF/safari-token`, and for one more version
   the old `~/.trif/safari-token` and `~/.webmods/safari-token`, read in that order; entitlement in
   `safari/TRIF Extension.entitlements`), which no other extension can message. A TRIF.app from before
-  0.2.1 only looks in `~/.trif`: after setup moves the key, install the app from the same version.
+  0.2.0 only looks in `~/.trif`: after setup moves the key, install the app from the same version.
   Safari unloads the background page after about 30 s with nothing to do, closing the socket, so the host
   outlives the connection: its messages are queued (up to 2000) and delivered when the background
   reconnects, which it does with a fresh `hello`. A host with no connection for 30 minutes and no agent
@@ -1076,7 +1076,7 @@ its own files, which run sandboxes deny. For those who use an API key instead (`
 - **Kept in the keyring**, like open-model keys (`keyring.js`): service `TRIF API key`, account
   `anthropic` (Claude Code) or `openai` (Codex). `trif agent key [--agent claude|codex] [--set-key |
   --remove-key]` (stdin or a no-echo prompt, never argv; not from a run). No panel setting.
-- **Never in the agent's environment or argv.** Until 0.2.1, config.json `env.ANTHROPIC_API_KEY` /
+- **Never in the agent's environment or argv.** Until 0.2.0, config.json `env.ANTHROPIC_API_KEY` /
   `env.OPENAI_API_KEY` went into the agent's environment, readable by its commands (KERN_PROCARGS2).
   Now, before each run (the adapter's `prepare`), the helper reads the key and starts a key proxy for the
   run (`keyproxy.js`):

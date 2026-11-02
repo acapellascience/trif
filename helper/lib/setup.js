@@ -330,7 +330,7 @@ function setup(opts = {}) {
   const home = ws.home;
   let ok = true;
 
-  // 0b. The helper's private files leave the workspace (0.2.1; migrate.js migratePrivate): runs may read
+  // 0b. The helper's private files leave the workspace (0.2.0; migrate.js migratePrivate): runs may read
   // all of the workspace, never the private folder.
   const priv = migratePrivate(home, { privateDir: ws.private });
   for (const n of priv.notes) say(`private       ${n}`);
@@ -449,7 +449,7 @@ function setup(opts = {}) {
   for (const t of targets) {
     if (t.safari) {
       // The key the bridge asks of connections; TRIF's Safari app reads it from the private folder (its
-      // sandbox allows that path, and until 0.2.1's app the old ones in ~/.trif and ~/.webmods) and hands
+      // sandbox allows that path, and until 0.2.0's app the old ones in ~/.trif and ~/.webmods) and hands
       // it to the extension.
       const tokenFile = ws.safariToken;
       if (!fs.existsSync(tokenFile)) fs.writeFileSync(tokenFile, require('crypto').randomBytes(32).toString('hex') + '\n', { mode: 0o600 });

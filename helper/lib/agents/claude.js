@@ -19,7 +19,7 @@ const { within, ignoresCase } = require('../pathcheck');
 //     other sites' folders. failIfUnavailable: no sandbox, no commands.
 // No command that runs arbitrary code (not even `node --test`); `trif check` replaces `node --check`.
 const ALLOWED_TOOLS = ['Read(./**)', 'Glob', 'Grep', 'Edit(./sites/**)', 'Bash(trif:*)', 'Bash(webmods:*)', 'Bash(cd:*)', 'Bash(ls:*)'];
-// (No Read denies for TRIF's secrets and logs: since 0.2.1 they're in the private folder, outside the
+// (No Read denies for TRIF's secrets and logs: since 0.2.0 they're in the private folder, outside the
 // workspace, which a run's file tools can't read without approval and its sandbox denies.)
 const DENIED_TOOLS = ['WebFetch', 'WebSearch'];
 // The workspace's files that steer TRIF (or the agents): never written by a run's commands. (.shipped

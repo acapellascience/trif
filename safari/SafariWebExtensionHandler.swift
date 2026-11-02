@@ -1,7 +1,7 @@
 // The Mac app's side of TRIF for Safari (scripts/build-safari.js puts this file in the generated
 // Xcode project). TRIF's extension asks its app for one thing: the key the helper's Safari bridge
 // expects (~/Library/Application Support/TRIF/safari-token, TRIF's private folder, written by
-// `trif setup --browser safari`). Until 0.2.1 it was ~/.trif/safari-token (~/.webmods/safari-token before
+// `trif setup --browser safari`). Until 0.2.0 it was ~/.trif/safari-token (~/.webmods/safari-token before
 // 0.2.0, when TRIF was called WebMods): still read when the new one isn't there, for one version. Safari
 // only lets an extension message its own app, so another Safari extension can't get the key and reach
 // the helper.

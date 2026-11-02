@@ -130,7 +130,7 @@ test('migrateKeys: config.json\'s API keys move to the keyring, then leave confi
 test('Claude Code with a saved key: the run\'s key proxy adds it; Claude Code gets a placeholder and the proxy\'s address, never the key', async () => {
   const api = await startFakeAnthropic();
   cleanups.push(() => api.close());
-  const { home, bin } = makeHome({ env: { ANTHROPIC_API_KEY: ANT_KEY } }); // as before 0.2.1
+  const { home, bin } = makeHome({ env: { ANTHROPIC_API_KEY: ANT_KEY } }); // as before 0.2.0
   const kc = makeFakeKeychain(path.join(home, 'kc'));
   const ext = startHost(home, { ...kc.env, TRIF_ANTHROPIC_URL: api.url });
   // The helper moved the key to the keyring when it started.

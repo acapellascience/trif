@@ -96,7 +96,7 @@ function realOrResolved(p) {
 }
 
 // What the helper keeps that runs may not read (settings, the Safari bridge's key, logs, other runs' logs,
-// screenshots) is in the private folder (paths.js privateDir), outside the workspace, since 0.2.1.
+// screenshots) is in the private folder (paths.js privateDir), outside the workspace, since 0.2.0.
 const { PRIVATE_FILES } = require('./paths');
 
 // The TRIF code a run's `trif` needs (helper/, and package.json for the version) and the examples

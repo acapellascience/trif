@@ -20,7 +20,7 @@ const REAL_FILES = [
   path.join(REAL_HOME, 'Library/Application Support/Google/Chrome/NativeMessagingHosts/com.webmods.helper.json'),
   path.join(REAL_HOME, '.trif/config.json'),
   path.join(REAL_HOME, '.webmods/config.json'),
-  path.join(REAL_HOME, 'Library/Application Support/TRIF/config.json'), // the real private folder (0.2.1)
+  path.join(REAL_HOME, 'Library/Application Support/TRIF/config.json'), // the real private folder (0.2.0)
   path.join(REAL_HOME, 'Library/Application Support/TRIF/helper.log'),
 ];
 function fingerprint(files) {

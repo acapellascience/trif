@@ -126,11 +126,11 @@ function isDefaultHome(home) {
 
 // ---------------------------------------------------------------- the private folder
 //
-// What the helper keeps that agent runs must never read: config.json (settings, and before 0.2.1 API
+// What the helper keeps that agent runs must never read: config.json (settings, and before 0.2.0 API
 // keys), safari-token (the Safari bridge's key), helper.log, runs/ (run logs: the pages runs read) and
 // screenshots/ (one folder per site; a run is given its own site's alone). Outside the workspace, which
 // runs may read in full (docs/PROTOCOL.md "Run scope"), so no rule inside the workspace has to keep runs
-// out of them. Until 0.2.1 they were in the workspace; migrate.js migratePrivate moves them.
+// out of them. Until 0.2.0 they were in the workspace; migrate.js migratePrivate moves them.
 //   macOS    ~/Library/Application Support/TRIF
 //   Linux    $XDG_STATE_HOME/trif, or ~/.local/state/trif
 //   a workspace elsewhere ($TRIF_HOME, --home): <workspace>-private beside it
@@ -163,7 +163,7 @@ function configFile(home) { return path.join(privateDir(home), 'config.json'); }
 
 function readConfig(home) {
   let file = configFile(home);
-  // (Before migratePrivate has run, e.g. a helper restarting onto new code: where it was until 0.2.1.)
+  // (Before migratePrivate has run, e.g. a helper restarting onto new code: where it was until 0.2.0.)
   if (!fs.existsSync(file) && fs.existsSync(path.join(home, 'config.json'))) file = path.join(home, 'config.json');
   let text;
   try { text = fs.readFileSync(file, 'utf8'); } catch { return { config: {}, error: null }; }

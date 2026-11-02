@@ -11,6 +11,7 @@ import {
 } from './lib.js';
 import { runtimeCode } from './runtime.js';
 import { sweepPage } from './sweep.js';
+import { captureScreenshot, stitchShots } from './screenshot.js';
 
 const HOST = 'com.webmods.helper';
 const VERSION = chrome.runtime.getManifest().version;
@@ -127,6 +128,7 @@ ready.then(() => {
   checkUserScripts();
   serial(applyMods).catch(() => {}); // re-apply persisted mods without waiting for the helper
   connect();
+  closeLeftoverProbes();
 });
 
 // Mod syncing and recording changes run one at a time. If one hasn't finished after QUEUE_STALL_MS (a
@@ -481,16 +483,18 @@ const commands = {
     return r;
   },
 
-  // Only the tab showing in its window can be captured, and TRIF never switches tabs or focuses
-  // windows to get one: several agents can be working at once while the user browses.
+  // TRIF never switches tabs or focuses windows to capture one: several agents can be working at once
+  // while the user browses. A tab that isn't showing is captured by Firefox as it is; Chrome captures a
+  // fresh copy in a window of its own (extension/screenshot.js), and says so in `note`.
   async screenshot(args) {
     const tab = await scopedTab(args);
-    const win = await chrome.windows.get(tab.windowId).catch(() => null);
-    if (!tab.active || !win || win.state === 'minimized') {
-      throw new Error("that tab isn't showing (TRIF doesn't switch tabs while the user is browsing); " +
-        'inspect it with `trif text` or `trif run` instead, or try again when it is in front');
-    }
-    return { dataUrl: await chrome.tabs.captureVisibleTab(tab.windowId, { format: 'png' }) };
+    const timeout = Number(args.timeout) > 4000 ? Number(args.timeout) - 3000 : 45000;
+    return captureScreenshot(chrome, tab, { full: !!args.full, timeout }, {
+      browser: BROWSER,
+      pageCall: (tabId, func, a = []) => pageCall(tabId, 'ISOLATED', func, a),
+      stitch: stitchShots,
+      onProbe: rememberProbe,
+    });
   },
 
   // `changed` and `site` let the helper switch recording off again when the agent run that switched it
@@ -594,6 +598,24 @@ const commands = {
     return runtimeList(args, 'logs');
   },
 };
+
+// Windows a screenshot opened for a copy of a page (extension/screenshot.js), kept in session storage so
+// that one left open by a worker that stopped mid-capture is closed on the next start.
+async function rememberProbe(windowId, open) {
+  try {
+    const { probes = [] } = await chrome.storage.session.get('probes');
+    const next = open ? [...new Set([...probes, windowId])] : probes.filter((id) => id !== windowId);
+    await chrome.storage.session.set({ probes: next });
+  } catch { /* no session storage */ }
+}
+
+async function closeLeftoverProbes() {
+  try {
+    const { probes = [] } = await chrome.storage.session.get('probes');
+    for (const id of probes) await chrome.windows.remove(id).catch(() => {});
+    if (probes.length) await chrome.storage.session.set({ probes: [] });
+  } catch { /* no session storage */ }
+}
 
 async function setSwitchState(id, { disabled, offSites }) {
   const next = { ...state.disabled };

@@ -26,6 +26,32 @@ function testPage(host, pathName) {
 <p><a href="/two.html">Page two</a></p>`);
 }
 
+// A page with one kind of thing repeated across regions, a shadow root and a same-origin frame, for
+// `trif sweep` (the counts are in SWEEP_EXPECT), and tall enough for full-page screenshots.
+const BLUE = '#1d9bf0';
+const SWEEP_PAGE = () => PAGE('TRIF e2e sweep', `
+<style>:root { --brand: ${BLUE}; } .badge::before { content: 'AD '; color: var(--brand); } .tall { height: 2400px; }</style>
+<header id="bar" style="position: sticky; top: 0; background: ${BLUE}; color: #fff; padding: 8px">Bar <span class="promo">Sponsored: top deal</span></header>
+<main>
+  <div class="promo" style="border: 2px solid ${BLUE}">Sponsored one</div>
+  <p style="color: ${BLUE}">Blue words</p>
+  <div class="promo">Sponsored two</div>
+  <div class="promo badge">Sponsored three</div>
+  <div class="promo" style="display: none">Sponsored hidden</div>
+  <div id="host"></div>
+  <iframe src="/sweep-frame.html" style="height: 60px"></iframe>
+  <div class="tall">Tall filler</div>
+</main>
+<aside><div class="promo">Sponsored side</div></aside>
+<script>
+document.getElementById('host').attachShadow({ mode: 'open' }).innerHTML =
+  '<style>.promo { background: ${BLUE}; }</style><div class="promo">Sponsored shadow one</div><div class="promo">Sponsored shadow two</div>';
+</script>`);
+const SWEEP_FRAME = () => PAGE('TRIF e2e sweep frame', '<div class="promo">Sponsored in frame</div>');
+// .promo: header 1, main 4 (one hidden), aside 1, shadow 2, frame 1. Text "Sponsored": the same 9.
+// The blue: header background, the bordered promo, the blue words, 2 shadow promos, the badge's ::before.
+const SWEEP_EXPECT = { promo: 9, hidden: 1, shadow: 2, frames: 1, sponsored: 9, blue: 6, sticky: 1 };
+
 // ---- the X stand-in
 
 // The authenticated user (document.cookie twid) and authors.
@@ -122,6 +148,8 @@ async function startServers(dir) {
       return send(404, 'text/plain', 'not found');
     }
     if (u.pathname === '/favicon.ico') return send(204, 'image/x-icon', '');
+    if (u.pathname === '/sweep.html') return send(200, 'text/html; charset=utf-8', SWEEP_PAGE());
+    if (u.pathname === '/sweep-frame.html') return send(200, 'text/html; charset=utf-8', SWEEP_FRAME());
     return send(200, 'text/html; charset=utf-8', testPage(host, u.pathname));
   };
   const plain = http.createServer(handler);
@@ -137,4 +165,4 @@ async function startServers(dir) {
   };
 }
 
-module.exports = { startServers, timeline };
+module.exports = { startServers, timeline, SWEEP_EXPECT };

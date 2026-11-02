@@ -10,6 +10,7 @@ const { sleep, waitFor, run, runAsync, pidsMatching, killMatching } = require('.
 const I = require('./lib/install');
 const { FirefoxDriver } = require('./lib/firefox');
 const { ChromeDriver } = require('./lib/chrome');
+const { SWEEP_EXPECT } = require('./lib/server');
 
 const REAL_HOME = os.userInfo().homedir;
 const SHIPPED_IDS = require('../../helper/lib/preinstalled').PREINSTALLED.map((p) => p.id || p);
@@ -489,6 +490,7 @@ class Scenario {
       return p.mods.map((m) => `${m.id.split('/')[1]} ${m.on ? 'on' : 'off'}`).join(', ');
     });
     await this.narrowShots();
+    await this.sweepAndScreenshotChecks(base, win);
     if (this.o.kind === 'upgrade') await this.mergeChecks();
     await this.ext(`async (id) => { await chrome.tabs.remove(id); }`, [this.xTab]).catch(() => {});
     await this.ext(`async (id) => { await chrome.tabs.update(id, { active: true }); }`, [win.tabId]).catch(() => {});
@@ -496,6 +498,71 @@ class Scenario {
     if (this.o.agent) await this.agentChecks('claude');
     if (this.o.codex) await this.agentChecks('codex');
     if (this.o.oss) await this.agentChecks('oss');
+  }
+
+  // ---- trif sweep on a page of repeated things, and screenshots of a tab that isn't showing
+
+  async sweepAndScreenshotChecks(base, win) {
+    const r = this.r;
+    const E = SWEEP_EXPECT;
+    const url = `${base}/sweep.html`;
+    // In the background of the test window, as `trif open` does: the test tab stays in front.
+    const opened = await this.cli(['open', url], { json: true });
+    const sweepTab = opened.json && opened.json.id;
+    if (!sweepTab) { r.note(`trif open ${url} failed: ${opened.stderr || opened.stdout}`); return; }
+    await sleep(500);
+    const sweep = async (...args) => {
+      const x = await this.cli(['sweep', '--tab', String(sweepTab), ...args], { json: true });
+      if (x.status !== 0 || !x.json) throw new Error(`trif sweep ${args.join(' ')}: ${x.stderr || x.stdout}`);
+      return x.json;
+    };
+    await r.check('trif sweep --selector finds every instance: regions, shadow root, frame, hidden', async () => {
+      const j = await sweep('--selector', '.promo');
+      const s = j.summary;
+      if (j.total !== E.promo) throw new Error(`${j.total} matches, want ${E.promo}: ${JSON.stringify(j.matches.map((m) => m.text))}`);
+      if (s.inShadowRoots !== E.shadow || s.inFrames !== E.frames || s.hidden !== E.hidden || s.sticky !== E.sticky) throw new Error(`summary ${JSON.stringify(s)}`);
+      if (!s.regions.main || !s.regions.aside || !Object.keys(s.regions).some((k) => k.startsWith('header'))) throw new Error(`regions ${JSON.stringify(s.regions)}`);
+      const text = await this.cli(['sweep', '--tab', String(sweepTab), '--selector', '.promo']);
+      r.log(text.stdout);
+      return `${j.total} matches; ${Object.entries(s.regions).map(([k, v]) => `${k} ${v}`).join(', ')}; ${j.scanned.ms} ms`;
+    });
+    await r.check('trif sweep --text and --color: the same promos by their words; the blue, its rules and variable', async () => {
+      const t = await sweep('--text', 'sponsored');
+      if (t.total !== E.sponsored) throw new Error(`--text: ${t.total} matches, want ${E.sponsored}`);
+      const c = await sweep('--color', '#1d9bf0');
+      const got = c.matches.map((m) => `${m.element} ${m.props.map((p) => `${p.pseudo || ''}${p.prop}`).join(',')}`);
+      if (c.total !== E.blue) throw new Error(`--color: ${c.total} matches, want ${E.blue}: ${JSON.stringify(got)}`);
+      if (!c.rules || !c.rules.variables.some((v) => v.name === '--brand' && v.uses >= 1)) throw new Error(`no --brand variable in ${JSON.stringify(c.rules)}`);
+      if (!c.rules.list.some((x) => x.selector === '.promo')) throw new Error(`the shadow root's .promo rule is missing: ${JSON.stringify(c.rules.list)}`);
+      return `text ${t.total}; colour ${c.total} (${got.join('; ')}); ${c.rules.total} rules, ${c.rules.variables.length} variable`;
+    });
+    // The user's view, which no screenshot may change.
+    const view = () => this.ext(`async () => {
+      const wins = await chrome.windows.getAll({ populate: true });
+      const focused = await chrome.windows.getLastFocused().catch(() => null);
+      return { focused: focused && focused.id, windows: wins.length, active: wins.map((w) => [w.id, (w.tabs.find((t) => t.active) || {}).id]).sort((a, b) => a[0] - b[0]) };
+    }`);
+    const pngSize = (file) => { const b = fs.readFileSync(file); return b.subarray(1, 4).toString() === 'PNG' ? { w: b.readUInt32BE(16), h: b.readUInt32BE(20), bytes: b.length } : null; };
+    for (const full of [false, true]) {
+      await r.check(`trif screenshot${full ? ' --full' : ''} of a tab that isn't showing: works, and the user's tabs and focus stay as they were`, async () => {
+        const before = await view();
+        const isActive = (await this.ext(`async (id) => (await chrome.tabs.get(id)).active`, [sweepTab]));
+        if (isActive) throw new Error('the sweep tab is in front; the check needs it in the background');
+        const file = this.r.file(`${this.label}-${String(++this.shots).padStart(2, '0')}-trif-screenshot-background${full ? '-full' : ''}.png`);
+        const x = await this.cli(['screenshot', '--tab', String(sweepTab), ...(full ? ['--full'] : []), '-o', file], { json: true, timeoutMs: 90000 });
+        if (x.status !== 0 || !x.json) throw new Error(`trif screenshot: ${x.stderr || x.stdout}`);
+        const after = await view();
+        if (JSON.stringify(after) !== JSON.stringify(before)) throw new Error(`the user's view changed: ${JSON.stringify(before)} -> ${JSON.stringify(after)}`);
+        const want = this.o.browser === 'firefox' ? 'tab' : 'copy';
+        if (x.json.how !== want) throw new Error(`captured by ${x.json.how}, want ${want}`);
+        if (x.json.stale) throw new Error(`the copy wasn't being drawn (its window was covered): ${x.json.note}`);
+        const size = pngSize(file);
+        if (!size || size.w < 200 || size.h < 200 || size.bytes < 3000) throw new Error(`not much of a PNG: ${JSON.stringify(size)}`);
+        if (full && size.h < size.w) throw new Error(`a full page of a 2400px-tall page should be tall: ${JSON.stringify(size)}`);
+        return `${x.json.how}, ${size.w}x${size.h}, ${size.bytes} bytes${x.json.slices ? `, slices at ${x.json.slices.join('/')} of ${x.json.viewport}px` : ''}; note: ${x.json.note || '(none)'}`;
+      });
+    }
+    await this.ext(`async (id) => { await chrome.tabs.remove(id); }`, [sweepTab]).catch(() => {});
   }
 
   // ---- screenshots of the panel as narrow as a side panel (for people to look at; no checks)

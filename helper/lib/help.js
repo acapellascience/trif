@@ -132,13 +132,23 @@ element, text and the properties that matched. Bounded: --timeout (default 4000 
     ],
   },
   screenshot: {
-    usage: 'trif screenshot [TAB] [-o file.png]',
-    summary: 'save a PNG of the visible part of the tab and print its path',
+    usage: 'trif screenshot [TAB] [--full] [-o file.png]',
+    summary: 'save a PNG of the tab and print its path (works on tabs that aren\'t showing)',
     details: `Default path: screenshots/<time>.png in TRIF's private folder (on a Mac, ~/Library/Application
-Support/TRIF; in a side-panel run, its site's folder there). Only works on a tab that's showing in its
-window: TRIF never switches tabs (the user may be browsing, or other agents working). For a
-background tab, use \`trif text\` or \`trif run\`. Open the printed file to look at it.`,
-    examples: ['trif screenshot', 'trif screenshot --url x.com -o /tmp/x.png'],
+Support/TRIF; in a side-panel run, its site's folder there). Open the printed file to look at it.
+TRIF never switches tabs or focuses windows (the user may be browsing, or other agents working), so:
+  - a tab that's showing: captured as it is;
+  - Firefox, a tab that isn't showing: captured as it is, in the background;
+  - Chrome, a tab that isn't showing: TRIF loads a fresh copy of the page, with the mods, in a window of
+    its own that isn't focused (the size of the user's, at the tab's scroll position; it shows at the
+    right edge of the screen for a second or so, since Chrome doesn't draw covered windows), captures it
+    and closes it. That's the page as it loads now, not the tab's exact state (open menus, typed text,
+    content loaded since): a note on stderr says so. Check state-dependent things with trif sweep/run.
+  - Safari: only a tab that's showing.
+--full captures the whole page (up to 12000 px): Firefox from the tab itself; Chrome from a copy, as
+above, stitched from several captures (fixed and sticky elements only at the top). --json prints
+{file, how: visible|tab|copy, full, note}.`,
+    examples: ['trif screenshot --url x.com', 'trif screenshot --url x.com --full -o /tmp/x-full.png'],
   },
   record: {
     usage: 'trif record <site> [on|off]',
@@ -371,6 +381,7 @@ Typical loop:
   trif reload --url example.com           # mods apply on page load
   trif errors --url example.com           # did the mod throw?
   trif screenshot --url example.com       # look at the result (prints a PNG path)
+  trif sweep --url example.com --selector '#banner'   # how many are left, and where
   trif run --url example.com 'document.querySelector("#banner")?.offsetHeight'
 
 Exploring a site:

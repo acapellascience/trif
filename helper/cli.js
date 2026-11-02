@@ -544,7 +544,8 @@ const handlers = {
   },
 
   async screenshot(ctx) {
-    const r = await ctx.call('screenshot', tabArgs(ctx.opts));
+    // A copy loaded in a window of its own (a tab that isn't showing, in Chrome) takes a page load or more.
+    const r = await ctx.call('screenshot', { full: !!ctx.opts['--full'], timeout: 60000, ...tabArgs(ctx.opts) });
     const m = /^data:image\/(\w+);base64,(.*)$/s.exec((r && r.dataUrl) || '');
     if (!m) throw new HelperError('the extension returned no image data', 'command');
     let file = ctx.opts['-o'];
@@ -557,8 +558,10 @@ const handlers = {
     }
     file = optionPath(ctx, file, { write: true });
     writeOptionFile(file, Buffer.from(m[2], 'base64'));
-    if (ctx.json) return printJson({ file });
+    if (ctx.json) return printJson({ file, how: r.how || 'visible', full: !!r.full, note: r.note || null, ...(r.cut ? { cut: true } : {}), ...(r.stale ? { stale: true } : {}), ...(r.slices ? { slices: r.slices, viewport: r.viewport } : {}) });
     out(file);
+    // On stderr, so $(trif screenshot) is still just the path; agents see it either way.
+    if (r.note) process.stderr.write(`note: ${r.note}\n`);
   },
 
   async record(ctx, pos) {

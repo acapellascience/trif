@@ -116,7 +116,9 @@ class ChromeDriver {
       '--window-size=1280,900',
       'about:blank',
     ];
-    if (headless) args.unshift('--headless=new');
+    // A screen bigger than the windows (headless defaults to 800x600, smaller than the 1280x900 windows), so
+    // windows are placed as on a real display: `trif screenshot`'s copy window goes against its right edge.
+    if (headless) args.unshift('--headless=new', '--screen-info={0,0 2560x1440}');
     const env = { ...process.env, HOME: home };
     for (const k of Object.keys(env)) if (/^(TRIF|WEBMODS)_/.test(k)) delete env[k];
     Object.assign(env, this.opts.env || {});

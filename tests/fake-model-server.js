@@ -4,11 +4,12 @@
 // /api/version) and LM Studio / OpenAI-compatible servers (/v1/models) serve. Each POST to /responses
 // takes the next step of a script: {run: "<shell command>"} answers with a call to whichever shell tool
 // Codex offered (exec_command, shell_command or shell), {say: "<text>"} with a message (ending the turn).
-// Every request is kept in `requests` ({method, url, headers, body}).
+// Every request is kept in `requests` ({method, url, headers, body}). `echoAuth`: /models answers say the
+// Authorization header they came with (as `auth`), to check where a key goes.
 
 const http = require('http');
 
-function startFakeModelServer({ script = [{ say: 'ok' }], models = ['gpt-oss:20b'] } = {}) {
+function startFakeModelServer({ script = [{ say: 'ok' }], models = ['gpt-oss:20b'], echoAuth = false } = {}) {
   const requests = [];
   let step = 0;
   const server = http.createServer((req, res) => {
@@ -22,7 +23,7 @@ function startFakeModelServer({ script = [{ say: 'ok' }], models = ['gpt-oss:20b
       const send = (status, obj) => { res.writeHead(status, { 'content-type': 'application/json' }); res.end(JSON.stringify(obj)); };
       if (req.url.endsWith('/api/version')) return send(200, { version: '0.13.6' });
       if (req.url.endsWith('/api/tags')) return send(200, { models: models.map((m) => ({ name: m, model: m })) });
-      if (req.method === 'GET' && req.url.endsWith('/models')) return send(200, { object: 'list', data: models.map((m) => ({ id: m, object: 'model' })) });
+      if (req.method === 'GET' && req.url.endsWith('/models')) return send(200, { object: 'list', data: models.map((m) => ({ id: m, object: 'model' })), ...(echoAuth ? { auth: req.headers.authorization || '' } : {}) });
       if (req.method !== 'POST' || !req.url.endsWith('/responses')) return send(404, { error: { message: 'not found' } });
       const s = script[Math.min(step++, script.length - 1)];
       const tools = (json && Array.isArray(json.tools) ? json.tools : []).map((t) => t && (t.name || t.type));

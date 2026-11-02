@@ -462,7 +462,7 @@ class Scenario {
       const p = await this.waitPanel('the panel on x.com', (x) => x.site === 'x.com' && x.mods.length >= 3);
       const px = p.mods.find((m) => m.id === 'x.com/plain-x');
       if (!px || !px.on || !px.running) throw new Error(`plain-x: ${JSON.stringify(px)}`);
-      if (!px.source || !/from TRIF/.test(px.source)) throw new Error(`plain-x isn't marked as from TRIF: ${px.source}`);
+      if (!px.source || !/^Tim's mod, v\d+$/.test(px.source)) throw new Error(`plain-x isn't marked as Tim's mod: ${px.source}`);
       if (this.o.kind === 'upgrade') {
         const pf = p.mods.find((m) => m.id === 'x.com/punk-fonts');
         if (!pf || !pf.update) throw new Error(`no update notice on punk-fonts: ${JSON.stringify(pf)}`);
@@ -472,11 +472,69 @@ class Scenario {
       await this.shot(this.panelCtx, 'panel-x');
       return p.mods.map((m) => `${m.id.split('/')[1]} ${m.on ? 'on' : 'off'}`).join(', ');
     });
+    if (this.o.kind === 'upgrade') await this.mergeChecks();
     await this.ext(`async (id) => { await chrome.tabs.remove(id); }`, [this.xTab]).catch(() => {});
     await this.ext(`async (id) => { await chrome.tabs.update(id, { active: true }); }`, [win.tabId]).catch(() => {});
 
     if (this.o.agent) await this.agentChecks('claude');
     if (this.o.codex) await this.agentChecks('codex');
+  }
+
+  // ---- "Merge with my agent" on the edited shipped mod (upgrade scenarios, panel on x.com)
+
+  async mergeChecks() {
+    const r = this.r;
+    const d = this.d;
+    const chatKey = 'chat:x.com';
+    const chat = () => this.ext(`async (k) => (await chrome.storage.local.get(k))[k] || null`, [chatKey]);
+    const file = path.join(this.trif, 'sites', 'x.com', 'punk-fonts.js');
+    const pending = () => (JSON.parse(fs.readFileSync(path.join(this.trif, 'preinstalled.json'), 'utf8')).shipped || {})['x.com/punk-fonts'] || {};
+    const before = fs.readFileSync(file, 'utf8');
+    const model = this.o.claudeModel || 'haiku';
+    if (this.o.agent) {
+      await this.ext(`async (model) => { const { settings = {} } = await chrome.storage.local.get('settings'); settings.agent = 'claude'; settings.models = { ...(settings.models || {}), claude: model }; await chrome.storage.local.set({ settings }); }`, [model]);
+    }
+    await r.check('Merge with my agent: one click starts it, while the panel keeps refreshing', async () => {
+      // Busy the panel the way real use does (status refreshes, storage changes) right before the click.
+      await this.panel(`async () => { for (let i = 0; i < 5; i++) { await chrome.storage.local.set({ e2eTick: i }); document.dispatchEvent(new Event('visibilitychange')); } }`);
+      await d.click(this.panelCtx, 'li[data-mod="x.com/punk-fonts"] .mod-update .merge');
+      const c = await waitFor('the merge request in the chat', async () => {
+        const x = await chat();
+        return x && x.messages.some((m) => m.role === 'user' && /suggest how to merge/.test(m.text)) ? x : null;
+      }, { timeoutMs: 5000, intervalMs: 200 });
+      await this.shot(this.panelCtx, 'panel-merge-started');
+      return `chat: "${c.messages.find((m) => m.role === 'user').text}"`;
+    });
+    if (!this.o.agent) return;
+    const done = (n0) => waitFor('the run to finish', async () => {
+      const x = await chat();
+      return x && !x.run && x.messages.length > n0 ? x : null;
+    }, { timeoutMs: 6 * 60000, intervalMs: 2000 });
+    await r.check(`Merge (Claude Code, ${model}): the agent proposes and waits; nothing changes yet`, async () => {
+      const c = await done(1);
+      await this.shot(this.panelCtx, 'panel-merge-proposal');
+      r.log(`merge proposal chat: ${JSON.stringify(c.messages, null, 2)}`);
+      const said = c.messages.filter((m) => m.role === 'assistant').map((m) => m.text).join('\n');
+      if (fs.readFileSync(file, 'utf8') !== before) throw new Error(`punk-fonts.js changed before the user said go ahead:\n${said.slice(-600)}`);
+      if (!pending().pending) throw new Error('the update was settled by the proposal');
+      if (!said.trim()) throw new Error(`no proposal in the chat: ${JSON.stringify(c.messages.slice(-3))}`);
+      return said.replace(/\s+/g, ' ').slice(0, 300);
+    });
+    await r.check(`Merge (Claude Code, ${model}): "go ahead" merges it and settles the update`, async () => {
+      const n0 = ((await chat()) || { messages: [] }).messages.length;
+      await this.panel(`async (text) => { const i = document.getElementById('input'); i.value = text; i.dispatchEvent(new Event('input', { bubbles: true })); }`, ['Go ahead.']);
+      await d.click(this.panelCtx, '#send');
+      const c = await done(n0 + 1);
+      await this.shot(this.panelCtx, 'panel-merge-done');
+      r.log(`merge go-ahead chat: ${JSON.stringify(c.messages.slice(n0), null, 2)}`);
+      const now = fs.readFileSync(file, 'utf8');
+      if (now === before) throw new Error('punk-fonts.js is unchanged');
+      const v = /@version\s+(\S+)/.exec(now);
+      const rec = await waitFor('the update to settle', async () => (pending().pending ? null : pending()), { timeoutMs: 10000 }).catch(() => null);
+      if (!rec) throw new Error(`the update is still waiting (the copy says @version ${v && v[1]})`);
+      const p = await this.waitPanel('the offer to go', (x) => x.mods.some((m) => m.id === 'x.com/punk-fonts' && !m.update), 15000);
+      return `@version ${v && v[1]}; ${p ? 'the panel no longer offers it' : ''}`;
+    });
   }
 
   // ---- agent runs (real ones: they use your Claude Code / Codex login and cost a little)

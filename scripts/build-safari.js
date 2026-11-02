@@ -62,8 +62,8 @@ function customize(projectDir) {
   for (const file of ['SafariWebExtensionHandler.swift', ENTITLEMENTS]) {
     fs.copyFileSync(path.join(ROOT, 'safari', file), path.join(projectDir, EXTENSION_TARGET, file));
   }
-  // The app's own icon: full bleed, so the system's mask makes the head's outline (render-icon.js; the
-  // converter puts the extension's icon on a white tile).
+  // The app's own icon: the robot's head as the whole icon (render-icon.js renderMac; the converter puts
+  // the extension's icon on a white tile).
   const icons = path.join(projectDir, APP_NAME, 'Assets.xcassets', 'AppIcon.appiconset');
   const sets = JSON.parse(fs.readFileSync(path.join(icons, 'Contents.json'), 'utf8')).images.filter((i) => i.filename);
   for (const i of sets) {

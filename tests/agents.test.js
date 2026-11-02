@@ -188,9 +188,10 @@ test('claude adapter: command flags, resume and model', () => {
   const settings = JSON.parse(c.args[c.args.indexOf('--settings') + 1]);
   assert.deepEqual(c.args.filter((a, i) => c.args[i - 1] !== '--settings'), ['-p', '--output-format', 'stream-json', '--verbose', '--permission-mode', 'default',
     '--setting-sources', 'project', '--strict-mcp-config', '--settings',
-    '--allowedTools', 'Read(./**)', 'Glob', 'Grep', 'Edit(./sites/**)', 'Bash(trif:*)', 'Bash(webmods:*)', 'Bash(cd:*)', 'Bash(ls:*)',
-    '--disallowedTools', 'WebFetch', 'WebSearch', 'Read(./config.json)', 'Read(./safari-token)', 'Read(./helper.log*)', 'Read(./runs/*.jsonl)',
-    'Read(./screenshots/*.png)', '--append-system-prompt', 'CTX', '--', 'hi']);
+    // Absolute rules ("//" + path): a "./" rule would follow the agent after a `cd`.
+    '--allowedTools', 'Read(//h/**)', 'Glob', 'Grep', 'Edit(//h/sites/**)', 'Bash(trif:*)', 'Bash(webmods:*)', 'Bash(cd:*)', 'Bash(ls:*)',
+    '--disallowedTools', 'WebFetch', 'WebSearch', 'Read(//h/config.json)', 'Read(//h/safari-token)', 'Read(//h/helper.log*)', 'Read(//h/runs/*.jsonl)',
+    'Read(//h/screenshots/*.png)', '--append-system-prompt', 'CTX', '--', 'hi']);
   // The run's sandbox: fails closed, no way out of it, no network, the run's reads and writes.
   const sb = settings.sandbox;
   assert.deepEqual([sb.enabled, sb.failIfUnavailable, sb.allowUnsandboxedCommands, sb.autoAllowBashIfSandboxed], [true, true, false, false]);
@@ -202,7 +203,7 @@ test('claude adapter: command flags, resume and model', () => {
   assert.ok(!JSON.stringify(settings).includes('Desktop'));
   assert.deepEqual(sb.filesystem.allowWrite, ['/c/boxes/r1', '/h/screenshots/x.com']);
   for (const p of ['/h/held.json', '/h/preinstalled.json', '/h/runs', '/h/sites/y.com']) assert.ok(sb.filesystem.denyWrite.includes(p), p);
-  assert.deepEqual(settings.permissions.deny, ['Edit(./sites/y.com/**)', 'Read(./screenshots/y.com/**)']);
+  assert.deepEqual(settings.permissions.deny, ['Edit(//h/sites/y.com/**)', 'Read(//h/screenshots/y.com/**)']);
   assert.deepEqual(settings.permissions.allow, []);
   // The user's skill folders: readable by its file tools (absolute-path rules), never writable.
   const sk = JSON.parse((c2 => c2.args[c2.args.indexOf('--settings') + 1])(claude.command({ bin: '/x/claude', prompt: 'hi', ...limits, readable: [...limits.readable, '/Users/u/.agents/skills/web'], skills: ['/Users/u/.agents/skills/web'] })));

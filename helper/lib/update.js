@@ -161,7 +161,7 @@ function realOrResolved(p) {
 function installable(ws, root = P.REPO_ROOT) {
   if (realOrResolved(root) !== realOrResolved(ws.appDir)) {
     return { ok: false, why: P.isGitCheckout(root)
-      ? `TRIF runs from a git checkout (${root}); update it with git pull`
+      ? `${P.FULL_NAME} is running from a git checkout (${root}), so it updates with git pull, not from here.`
       : `TRIF runs from ${root}, not ${ws.appDir}; run \`npx trif setup\` to install a copy that can update` };
   }
   return { ok: true, why: null };

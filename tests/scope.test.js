@@ -110,6 +110,21 @@ test('updateHeld: holds only changed out-of-scope mods; releases on edit or appr
   assert.deepEqual(Object.keys(updateHeld(ws, scanMods(ws.modsDir).mods, scopes)), ['x.com/wide']);
 });
 
+test('updateHeld: a change in a folder the run couldn\'t write (`locked`) isn\'t the run\'s', () => {
+  const ws = makeWs();
+  fs.mkdirSync(path.join(ws.modsDir, 'chatgpt.com'));
+  write(ws, 'x.com/rainbow.js', header('https://x.com/*'));
+  const before = snapshot(ws.modsDir, ws.home);
+  write(ws, 'x.com/rainbow.js', header('https://x.com/*', 'https://twitter.com/*') + '// edited by a run on x.com');
+  write(ws, 'chatgpt.com/wide.js', header('<all_urls>'));
+  const held = updateHeld(ws, scanMods(ws.modsDir).mods, [{ runId: 'r1', site: 'chatgpt.com', scope: 'chatgpt.com', before, locked: [path.join('sites', 'x.com')] }]);
+  assert.deepEqual(Object.keys(held), ['chatgpt.com/wide']);
+  // runLimits says which folders those are, relative to the workspace.
+  const { runLimits } = require('../helper/lib/runs');
+  const box = tempDir();
+  assert.deepEqual(runLimits(ws, { scope: 'chatgpt.com', box, screenshots: box }).locked, [path.join('sites', 'x.com')]);
+});
+
 test('@risk header: parsed into {tier, why}; a panel run\'s tier-2 mod is held, tier 0 and 1 aren\'t', () => {
   const ws = makeWs();
   const before = snapshot(ws.modsDir, ws.home);

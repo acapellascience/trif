@@ -1077,6 +1077,28 @@ test('held mods: a run\'s mod that matches other sites is held (not registered) 
   assert.match(again.error, /isn't held/);
 });
 
+test('held mods: a change in another site\'s folder during a run isn\'t held on that run\'s account', async () => {
+  // The run on example.com can't write sites/x.com/ (read-only to it), so a broad mod changed there
+  // meanwhile (by a run on x.com, the user, another browser) isn't its doing.
+  const { home, bin } = makeHome();
+  writeMod(home, 'x.com', 'wide.js', '// ==WebMod==\n// @match https://x.com/*\n// ==/WebMod==\n// one\n');
+  const ext = startHost(home);
+  await ext.waitForSocket();
+  const r = await extRequest(ext, 'agent.start', { ...START, prompt: 'SLEEP' });
+  await waitFor(() => callFor(bin, 'SLEEP'), { message: 'the agent to start' });
+  writeMod(home, 'x.com', 'wide.js', '// ==WebMod==\n// @match https://x.com/*\n// @match https://twitter.com/*\n// ==/WebMod==\n// edited elsewhere\n');
+  const lastMods = () => [...ext.messages].reverse().find((m) => m.type === 'mods')?.mods || [];
+  await waitFor(() => lastMods().some((m) => m.id === 'x.com/wide' && m.matches.includes('https://twitter.com/*')), { message: 'the edit to reach the extension' });
+  assert.equal(lastMods().find((m) => m.id === 'x.com/wide').held, undefined);
+  // The run's own broad mod in its own folder is still held.
+  writeMod(home, 'example.com', 'evil.js', '// ==WebMod==\n// @match <all_urls>\n// ==/WebMod==\n// by the run\n');
+  await waitFor(() => lastMods().find((m) => m.id === 'example.com/evil')?.held, { message: 'the in-scope broad mod to be held' });
+  await extRequest(ext, 'agent.stop', { runId: r.result.runId });
+  const done = await waitDone(ext, r.result.runId);
+  assert.deepEqual((done.held || []).map((h) => h.id), ['example.com/evil']);
+  assert.deepEqual(Object.keys(JSON.parse(fs.readFileSync(path.join(home, 'held.json'), 'utf8'))), ['example.com/evil']);
+});
+
 test('held mods: editing a held mod yourself releases it; `trif approve` refuses inside a run', async () => {
   const { home } = makeHome();
   const ext = startHost(home);

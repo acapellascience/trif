@@ -105,7 +105,8 @@ function runLimits(ws, { scope, box, screenshots }) {
   const writable = [real(ws.modsDir), real(screenshots), real(box)];
   let names = [];
   try { names = fs.readdirSync(ws.modsDir, { withFileTypes: true }).filter((d) => d.isDirectory() || d.isSymbolicLink()).map((d) => d.name); } catch { /* none yet */ }
-  const readOnly = names.filter((n) => scopeFor(n) !== scope).map((n) => real(path.join(ws.modsDir, n)));
+  const otherSites = names.filter((n) => scopeFor(n) !== scope);
+  const readOnly = otherSites.map((n) => real(path.join(ws.modsDir, n)));
   const home = real(os.homedir());
   const onTheWay = (p) => readable.some((r) => r === p || r.startsWith(p + path.sep));
   let inHome = [];
@@ -118,7 +119,10 @@ function runLimits(ws, { scope, box, screenshots }) {
   let shots = [];
   try { shots = fs.readdirSync(ws.screenshots, { withFileTypes: true }).filter((d) => d.isDirectory()).map((d) => real(path.join(ws.screenshots, d.name))); } catch { /* none */ }
   const otherScreenshots = shots.filter((p) => p !== real(screenshots));
-  return { readable, writable, readOnly, denied, home, privateFiles, workspace: real(ws.home), box: real(box), screenshots: real(screenshots), otherScreenshots };
+  // The same read-only folders relative to the workspace, as modSnapshot names files: a change under them
+  // can't be the run's doing (held.js).
+  const locked = otherSites.map((n) => path.relative(ws.home, path.join(ws.modsDir, n)));
+  return { readable, writable, readOnly, locked, denied, home, privateFiles, workspace: real(ws.home), box: real(box), screenshots: real(screenshots), otherScreenshots };
 }
 
 function normalizeSite(site, url) {
@@ -133,7 +137,8 @@ function normalizeSite(site, url) {
  *   stop(runId) -> {stopped: true}
  *   list() -> [{runId, site, scope, agent, startedAt}]
  *   byToken(token) -> the live run whose agent was given this TRIF_RUN_TOKEN, or null
- *   scopes() -> [{runId, site, scope, before, startedAt}] for live and just-finished runs (held mods)
+ *   scopes() -> [{runId, site, scope, before, locked, startedAt}] for live and just-finished runs (held
+ *     mods; `locked`: the mods folders the run couldn't write, relative to the workspace)
  *   stopAll() -> Promise (resolves once every agent process has exited, SIGKILLing stragglers)
  */
 class Runs {
@@ -148,7 +153,7 @@ class Runs {
     this.onRequest = onRequest || ((run, line, respond) => respond(JSON.stringify({ id: null, ok: false, error: 'no helper commands here' })));
     this.runs = new Map(); // runId -> run
     this.bySite = new Map(); // site -> runId
-    this.recent = []; // [{runId, site, scope, before, startedAt, until}]
+    this.recent = []; // [{runId, site, scope, before, locked, startedAt, until}]
   }
 
   list() {
@@ -164,7 +169,7 @@ class Runs {
   scopes() {
     const now = Date.now();
     this.recent = this.recent.filter((r) => r.until > now);
-    const live = [...this.runs.values()].map((r) => ({ runId: r.id, site: r.site, scope: r.scope, before: r.before || null, startedAt: r.startedAt }));
+    const live = [...this.runs.values()].map((r) => ({ runId: r.id, site: r.site, scope: r.scope, before: r.before || null, locked: r.locked || [], startedAt: r.startedAt }));
     return [...live, ...this.recent];
   }
 
@@ -303,6 +308,7 @@ class Runs {
     const { file, args } = adapter.command({ bin: found.path, prompt, sessionId: run.sessionId, model: run.model, context, workspace: ws.home, ...limits });
 
     run.before = modSnapshot(ws.modsDir, ws.home);
+    run.locked = limits.locked;
     run.beforeFiles = snapshot(ws.modsDir, ws.home);
     // Tell the other browsers' helpers a run is going, so mods it creates start off there (lib/origins.js).
     if (ws.installId) {
@@ -458,7 +464,7 @@ class Runs {
     this._log(run, { webmods: 'done', ...done, exitCode: code, signal, stderrTail: run.stderr.slice(-4000), time: Date.now() });
     this.logger.info(`agent run ${run.id} done: ok=${done.ok} code=${code} signal=${signal} changed=${changedFiles.length}`);
     if (run.marked) markRunEnded(run.ws.home, run.id);
-    if (run.before) this.recent.push({ runId: run.id, site: run.site, scope: run.scope, before: run.before, startedAt: run.startedAt, until: Date.now() + RECENT_MS });
+    if (run.before) this.recent.push({ runId: run.id, site: run.site, scope: run.scope, before: run.before, locked: run.locked || [], startedAt: run.startedAt, until: Date.now() + RECENT_MS });
     this.runs.delete(run.id);
     if (this.bySite.get(run.site) === run.id) this.bySite.delete(run.site);
   }

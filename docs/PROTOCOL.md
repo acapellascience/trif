@@ -86,7 +86,7 @@ patch `fetch`/`XMLHttpRequest`, read React state, etc.). An optional header sets
   panel shows a badge for 1 and 2; a side-panel run's tier-2 mod is held (see "Run scope").
 - `@source` and `@version`: `@source webmods` marks a mod TRIF ships (the examples); `@version` is
   its version (any text; the examples count 1, 2, 3…). Parsed into `source` (lowercased) and `version`
-  (null when absent). The panel shows "from TRIF, version 3"; setup keeps such mods up to date (see
+  (null when absent). The panel shows "Tim's mod, v3"; setup keeps such mods up to date (see
   "Updates to shipped mods").
 - Unknown keys are ignored. A file without a header is valid.
 
@@ -550,15 +550,24 @@ overwriting the user's own changes. Only examples whose header says `@source web
     back and the update is pending again. The panel adds `{role:"mod", text:"x.js is now version 2 from
     TRIF; yours is in the trash.", undo: id}` to the chat.
   - `mine` → `{id, choice, version}`: `declined = <its hash>`, so it isn't offered again; a later version is.
-- **Merging** is an ordinary side-panel run: `agent.start` with `merge: "<id>"` (from the mod's own site:
-  the scopes must match). The helper appends to the prompt where the three files are, relative to the
-  workspace: the user's copy (`sites/…`, the only one to edit), the new version (`.shipped/…/<mod>.new.js`)
-  and the base (`.shipped/…/<mod>.js`, or a note that it isn't known), and asks to keep the user's changes,
-  keep `@source webmods` and take the new `@version`. Same sandbox, scope and held-mod rules as any run:
-  `.shipped` is readable (it isn't in `PRIVATE_FILES`) and not writable (outside the mods folder; Claude
-  Code's sandbox also denies it). When that run's `done` has `ok: true`, the pending version becomes the
-  base (if it's still the one waiting), before the mods go out again and `done` is relayed.
-  `trif mod-update <id> --merged` does the same after a merge in a terminal.
+- **Merging** takes two ordinary side-panel runs in one chat. The first is `agent.start` with `merge:
+  "<id>"` (from the mod's own site: the scopes must match). The helper appends to the prompt where the
+  three files are, relative to the workspace: the user's copy (`sites/…`, the only one to edit), the new
+  version (`.shipped/…/<mod>.new.js`) and the base (`.shipped/…/<mod>.js`, or a note that it isn't known),
+  and asks the agent not to change anything yet: explain in plain words what TRIF changed, what the user
+  changed, and how it would merge them (what it brings in and keeps, conflicts and which side wins), then
+  ask whether to go ahead and stop. The user's reply ("go ahead") is the next run in the chat, which
+  edits the user's copy: keep the `@source` line, set the new `@version`. Same sandbox, scope and
+  held-mod rules as any run: `.shipped` is readable (it isn't in `PRIVATE_FILES`) and not writable
+  (outside the mods folder; Claude Code's sandbox also denies it).
+  **Settling.** The helper remembers the proposal (in memory: mod id → its scope, the new version's hash
+  and `@version`, and the sha1 of the user's copy then). After every run on that site that ends, it
+  checks the user's copy: changed since the proposal *and* saying the new `@version` (when it has one)
+  means merged, and the pending version becomes the base (if it's still the one waiting), before the
+  mods go out again and `done` is relayed. The proposal run itself (nothing changed) and unrelated edits
+  (old `@version`) leave it waiting; runs on other sites never settle it. If the update was used, kept
+  or settled otherwise meanwhile, the proposal is dropped. After a helper restart, Merge proposes again.
+  `trif mod-update <id> --merged` settles it after a merge in a terminal.
 
 ## Repository layout
 

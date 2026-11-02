@@ -238,6 +238,9 @@ body.site-off :is(.bar, .settings, .notice, .mods, .chat, .composer) { display: 
 .mod-update { margin: 6px 0 2px 14px; padding: 6px 8px; border: 1px solid var(--line); border-radius: 7px; font-size: 12px; }
 .mod-update p { margin: 0; }
 .mod-update .actions { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; }
+/* A waiting button looks it (its tooltip says why), instead of silently ignoring clicks. */
+.mod-update .btn:disabled { opacity: 0.5; }
+.mod-update .btn:disabled:hover { border-color: var(--line); }
 .mod-list li.held .mod-name { color: var(--muted); }
 .allow { flex: none; }
 .mod-delete { width: 24px; height: 24px; color: var(--faint); }

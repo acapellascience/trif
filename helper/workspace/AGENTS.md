@@ -92,9 +92,11 @@ you edit one.
 
 Merging (a side-panel run started from that offer says so, with the three files): `.shipped/<site>/<mod>.js`
 is what was shipped before, the version the user's copy started from; `.shipped/<site>/<mod>.new.js` is the
-new version; edit only the user's copy in `sites/`. Keep every change the user made, bring in TRIF's
-changes, set `@version` to the new version's, check it parses, reload, and tell the user briefly what
-changed and anything you couldn't bring over. In a terminal, after merging, run
+new version; edit only the user's copy in `sites/`. First, without changing anything, tell the user in
+plain words what TRIF changed, what they changed, and how you'd merge the two (what you'd bring in and
+keep, any conflicts and which side you'd keep), then ask whether to go ahead and stop. Only when they say
+so: keep every change the user made (or as they asked), bring in TRIF's changes, set `@version` to the new
+version's, check it parses, reload, and tell them briefly what changed. In a terminal, after merging, run
 `trif mod-update <site>/<mod> --merged` so the update isn't offered again; choosing to use the new
 version or keep theirs (`--use-new`, `--keep`) is the user's call, so ask first.
 
@@ -241,7 +243,8 @@ logged in to:
 - `trif run -f` and `trif check` read files from `sites/` only, and `-o` writes there or to your
   screenshots folder. Other runs' logs, other sites' screenshots and config.json aren't readable.
 - `trif setup`, `trif agent`, `trif approve` and `trif mod-update` are the user's; they
-  fail inside a run. (A merge run is settled by the helper when it finishes well.)
+  fail inside a run. (A merge is settled by the helper once a run in that chat leaves the user's copy
+  changed with the new `@version`.)
 
 ## Workflow
 

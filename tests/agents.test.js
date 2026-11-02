@@ -90,6 +90,13 @@ if (prompt.includes('EDIT')) {
   fs.writeFileSync(file, '// edited ' + Date.now() + Math.random());
   say({ type: 'assistant', message: { content: [{ type: 'tool_use', id: 't2', name: 'Edit', input: { file_path: file, old_string: 'a', new_string: 'b' } }] } });
 }
+if (prompt.includes('GOAHEAD') || prompt.includes('TWEAK')) {
+  // The user's go-ahead after a merge proposal: the merged copy, with the new @version. TWEAK: an edit
+  // that isn't the merge (the old @version kept).
+  const file = path.join(process.cwd(), 'sites', 'example.com', 'plain.js');
+  const v = prompt.includes('GOAHEAD') ? 2 : 1;
+  fs.writeFileSync(file, '// ==WebMod==\\n// @source webmods\\n// @version ' + v + '\\n// ==/WebMod==\\n// mine and two ' + Date.now() + '\\n');
+}
 if (prompt.includes('HIDDEN')) {
   // A mod for every site, where a looser snapshot once didn't look (node_modules).
   const dir = path.join(process.cwd(), 'sites', 'node_modules');
@@ -838,43 +845,69 @@ function homeWithPendingUpdate() {
   return { home, bin, newHash: sha1(v(2, 'two')) };
 }
 
-test('merge run: the agent gets the three files; a run that finishes well settles the update', async () => {
+test('merge: the first run only proposes; the update settles after the run that merged the user\'s copy', async () => {
   const { home, bin, newHash } = homeWithPendingUpdate();
   const ext = startHost(home);
   const first = await ext.nextMods((ms) => ms.length === 1);
   assert.deepEqual(first[0].update, { version: '2', from: '1', modified: true });
+  const pending = () => JSON.parse(fs.readFileSync(path.join(home, 'preinstalled.json'), 'utf8')).shipped['example.com/plain'];
 
   // A failed run leaves it waiting.
   let r = await extRequest(ext, 'agent.start', { ...START, prompt: 'CRASH while merging', merge: 'example.com/plain' });
   assert.equal(r.ok, true, r.error);
   assert.equal((await waitDone(ext, r.result.runId)).ok, false);
-  assert.ok(JSON.parse(fs.readFileSync(path.join(home, 'preinstalled.json'), 'utf8')).shipped['example.com/plain'].pending);
+  assert.ok(pending().pending);
 
   // Only from the mod's own site.
   r = await extRequest(ext, 'agent.start', { site: 'other.org', url: 'https://other.org/', tabId: 3, prompt: 'merge', merge: 'example.com/plain' });
   assert.equal(r.ok, false);
   assert.match(r.error, /isn't a mod for other\.org/);
 
-  const since = ext.messages.length;
-  r = await extRequest(ext, 'agent.start', { ...START, prompt: 'Merge the new version, keeping my changes.', merge: 'example.com/plain' });
+  // The proposal: told where the three files are, to explain and ask, and not to edit yet.
+  r = await extRequest(ext, 'agent.start', { ...START, prompt: 'Suggest how to merge them, keeping my changes.', merge: 'example.com/plain' });
   assert.equal(r.ok, true, r.error);
-  const done = await waitDone(ext, r.result.runId);
-  assert.equal(done.ok, true);
+  assert.equal((await waitDone(ext, r.result.runId)).ok, true);
   const call = callFor(bin, 'keeping my changes');
-  assert.match(call.prompt, /^Merge the new version, keeping my changes\.\n\n/);
-  assert.match(call.prompt, /edit this file, and only this one\): sites\/example\.com\/plain\.js/);
+  assert.match(call.prompt, /^Suggest how to merge them, keeping my changes\.\n\n/);
+  assert.match(call.prompt, /user's copy \(the only file to edit, later\): sites\/example\.com\/plain\.js/);
   assert.match(call.prompt, /\(read only\): \.shipped\/example\.com\/plain\.new\.js/);
   assert.match(call.prompt, /\(version 1\), which the user's copy started from \(read only\): \.shipped\/example\.com\/plain\.js/);
-  const rec = JSON.parse(fs.readFileSync(path.join(home, 'preinstalled.json'), 'utf8')).shipped['example.com/plain'];
-  assert.deepEqual(rec, { hash: newHash, version: '2' });
+  assert.match(call.prompt, /Don't change any file in this reply/);
+  assert.match(call.prompt, /asking whether to go ahead, and stop/);
+  assert.match(call.prompt, /set `\/\/ @version` to `2`/);
+  assert.ok(pending().pending, 'a proposal settles nothing');
+
+  // An unrelated edit in that chat (the old @version kept) isn't the merge.
+  r = await extRequest(ext, 'agent.start', { ...START, prompt: 'TWEAK the colors' });
+  await waitDone(ext, r.result.runId);
+  assert.ok(pending().pending);
+
+  // The go-ahead: the run that writes the merged copy (new @version) settles it, and the mods go out
+  // again without the update before that run's done.
+  const since = ext.messages.length;
+  r = await extRequest(ext, 'agent.start', { ...START, prompt: 'GOAHEAD, merge it' });
+  assert.equal((await waitDone(ext, r.result.runId)).ok, true);
+  assert.deepEqual(pending(), { hash: newHash, version: '2' });
   assert.ok(!fs.existsSync(path.join(home, '.shipped', 'example.com', 'plain.new.js')));
-  // The mods went out again without the update, before the run's done.
   const doneIdx = ext.messages.findIndex((m) => m.type === 'agentEvent' && m.event.kind === 'done' && m.runId === r.result.runId);
   const modsIdx = ext.messages.findIndex((m, i) => i >= since && m.type === 'mods' && !m.mods[0].update);
   assert.ok(modsIdx !== -1 && modsIdx < doneIdx);
   // Nothing left to merge.
   r = await extRequest(ext, 'agent.start', { ...START, prompt: 'again', merge: 'example.com/plain' });
   assert.match(r.error, /no new TRIF version/);
+});
+
+test('merge: a run on another site never settles it', async () => {
+  const { home } = homeWithPendingUpdate();
+  const ext = startHost(home);
+  await ext.nextMods((ms) => ms.length === 1);
+  let r = await extRequest(ext, 'agent.start', { ...START, prompt: 'propose', merge: 'example.com/plain' });
+  await waitDone(ext, r.result.runId);
+  // The user's copy merged by hand meanwhile, then a run elsewhere: not this chat's doing, nothing settled.
+  fs.writeFileSync(path.join(home, 'sites', 'example.com', 'plain.js'), '// ==WebMod==\n// @source webmods\n// @version 2\n// ==/WebMod==\n// by hand\n');
+  r = await extRequest(ext, 'agent.start', { site: 'other.org', url: 'https://other.org/', tabId: 3, prompt: 'hello' });
+  await waitDone(ext, r.result.runId);
+  assert.ok(JSON.parse(fs.readFileSync(path.join(home, 'preinstalled.json'), 'utf8')).shipped['example.com/plain'].pending);
 });
 
 test('merge run: choosing what happens to the update is the user\'s, not the run\'s', async () => {

@@ -27,7 +27,7 @@ const { Runs } = require('./lib/runs');
 const { Logins } = require('./lib/logins');
 const agents = require('./lib/agents');
 const { updateHeld, approveHeld, heldFile } = require('./lib/held');
-const { startOffIds, startSitesOn, pendingUpdates, useNewVersion, keepMine, mergeRequest, resolveMerge, restoreMod } = require('./lib/preinstalled');
+const { startOffIds, startSitesOn, pendingUpdates, useNewVersion, keepMine, mergeRequest, mergeSettled, restoreMod } = require('./lib/preinstalled');
 const { readInstructions, writeInstructions, instructionsFile, MAX_LENGTH } = require('./lib/instructions');
 const { ownSock, removeStaleSockets, codeStamp } = require('./lib/helpers');
 const { loadOrigins, recordOrigins, activeRuns } = require('./lib/origins');
@@ -330,18 +330,31 @@ const AGENT_COMMANDS = new Set(['agent.list', 'agent.start', 'agent.stop', 'agen
 // Helper-local too, but a run may use them (on mods inside its scope; see lib/trash.js).
 const MOD_FILE_COMMANDS = new Set(['mod.delete', 'mod.restore']);
 
-// Runs started to merge a new version of a shipped mod into the user's copy: runId -> {id, hash}.
-const mergeRuns = new Map();
+// Merges proposed in a side-panel chat (agent.start with `merge`): mod id -> {scope, hash, version,
+// before} (preinstalled.js mergeRequest). The proposing run only explains and asks; the user's go-ahead
+// is a later run in the same chat, which edits the file. So after every run on that site (runsOnScope),
+// mergeSettled checks whether the user's copy now has the merge (changed since the proposal, with the
+// new @version) and, if so, settles the update. In memory: after a helper restart, Merge proposes again.
+const pendingMerges = new Map();
+const mergeRunIds = new Map(); // runId -> the ids of pendingMerges that run may settle
+
+function settleMerges(runId) {
+  const ids = mergeRunIds.get(runId);
+  mergeRunIds.delete(runId);
+  for (const id of ids || []) {
+    const m = pendingMerges.get(id);
+    if (!m) continue;
+    let r;
+    try { r = mergeSettled(workspace(ws.home), id, m); } catch (e) { logger.warn(`couldn't check the merge of ${id}: ${e.message}`); continue; }
+    if (r === 'merged') logger.info(`merged the new version of ${id} (run ${runId})`);
+    if (r !== 'waiting') pendingMerges.delete(id);
+  }
+}
 
 function onAgentEvent(runId, event) {
-  // A merge run that finished well settles the update it was for (before the mods go out again below).
-  const merge = event && event.kind === 'done' ? mergeRuns.get(runId) : null;
-  if (merge) {
-    mergeRuns.delete(runId);
-    if (event.ok) {
-      try { if (resolveMerge(ws.home, merge.id, merge.hash)) logger.info(`merged the new version of ${merge.id} (run ${runId})`); } catch (e) { logger.warn(`couldn't record the merge of ${merge.id}: ${e.message}`); }
-    }
-  }
+  // A run in a chat with a merge proposed may have done it: settle the update (before the mods go out
+  // again below, so the panel's offer goes away with this run's done).
+  if (event && event.kind === 'done' && mergeRunIds.has(runId)) settleMerges(runId);
   // Before the run's last event goes out: hold what it wrote for other sites, and say so in `done`.
   if (event && event.kind === 'done' && String(runId).startsWith('r')) {
     syncMods('agent done', false);
@@ -464,15 +477,22 @@ function agentCommand(cmd, args) {
  * well settles the update (onAgentEvent). An ordinary run otherwise, with the same scope and rules.
  */
 function startRun(args) {
-  if (args.merge === undefined || args.merge === null || args.merge === '') return runs.start(args);
-  const id = String(args.merge).trim();
   const site = typeof args.site === 'string' && args.site.trim() ? args.site.trim() : agents.hostOf(args.url);
-  if (scopeFor(id.split('/')[0]) !== scopeFor(site)) throw new Error(`${id} isn't a mod for ${scopeFor(site) || 'this site'}: merge it from its own site`);
+  const scope = scopeFor(site);
+  if (args.merge === undefined || args.merge === null || args.merge === '') {
+    const r = runs.start(args);
+    const ids = [...pendingMerges].filter(([, m]) => m.scope === scope).map(([id]) => id);
+    if (ids.length) mergeRunIds.set(r.runId, ids);
+    return r;
+  }
+  const id = String(args.merge).trim();
+  if (scopeFor(id.split('/')[0]) !== scope) throw new Error(`${id} isn't a mod for ${scope || 'this site'}: merge it from its own site`);
   const m = mergeRequest(workspace(ws.home), id);
   const prompt = typeof args.prompt === 'string' && args.prompt.trim() ? `${args.prompt.trim()}\n\n${m.prompt}` : m.prompt;
   const r = runs.start({ ...args, prompt });
-  mergeRuns.set(r.runId, { id, hash: m.hash });
-  logger.info(`run ${r.runId} merges the new version of ${id}`);
+  pendingMerges.set(id, { scope, hash: m.hash, version: m.version, before: m.before });
+  mergeRunIds.set(r.runId, [...pendingMerges].filter(([, x]) => x.scope === scope).map(([x]) => x));
+  logger.info(`run ${r.runId} proposes a merge of the new version of ${id}`);
   return r;
 }
 

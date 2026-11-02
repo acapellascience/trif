@@ -632,7 +632,7 @@ function renderGate() {
   ui.siteSwitch.hidden = !known;
   ui.siteSwitch.setAttribute('aria-checked', String(siteIsOn()));
   ui.siteSwitch.setAttribute('aria-busy', String(siteSwitching));
-  ui.siteSwitch.title = ui.siteSwitch.dataset.error || (scope ? `TRIF on ${scope}` : '');
+  ui.siteSwitch.title = ui.siteSwitch.dataset.error || (scope ? `Turn the robot ${siteIsOn() ? 'off' : 'on'} on ${scope}` : '');
   ui.siteSwitch.setAttribute('aria-label', ui.siteSwitch.title);
   if (!gated) return;
   ui.gateBtn.textContent = `Fix ${scope}`;

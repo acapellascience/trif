@@ -58,6 +58,7 @@ code {
 /* ---- header ---------------------------------------------------------------------------------- */
 
 .bar {
+  position: relative;
   flex: none;
   display: flex;
   align-items: center;
@@ -69,6 +70,7 @@ code {
 .site {
   flex: 1;
   min-width: 0;
+  max-width: calc(50% - 44px); /* clear of the robot in the middle */
   margin: 0;
   font-size: 14px;
   font-weight: 600;
@@ -129,7 +131,17 @@ svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width:
 .btn.go { padding: 8px 16px; border-color: transparent; background: var(--switch-on); color: #04291c; font-size: 13px; font-weight: 600; }
 .btn.go:hover { background: color-mix(in srgb, var(--switch-on) 85%, #000); }
 body.site-off :is(.bar, .settings, .notice, .mods, .chat, .composer) { display: none; }
-#site-switch { margin-right: 4px; }
+#site-switch { margin-left: auto; }
+/* The robot in the middle of the bar (the toolbar icon); the bar only shows on sites TRIF is on for. */
+.bar-robot { position: absolute; left: 50%; top: 50%; width: 20px; height: 20px; transform: translate(-50%, -50%); stroke: none; pointer-events: none; }
+.bar-robot .rim { fill: var(--switch-on); }
+.bar-robot .face { fill: #18181a; }
+.bar-robot .eye { fill: #59dbab; }
+/* The power button that turns TRIF off (and on) for the site. */
+.power { color: var(--muted); }
+.power svg { stroke-width: 1.8; }
+.power[aria-checked="true"], .power[aria-checked="true"]:hover:not(:disabled) { color: var(--switch-on); }
+.power[aria-busy="true"] { cursor: progress; opacity: 0.6; }
 
 .field { display: grid; grid-template-columns: 52px 1fr; align-items: center; gap: 8px; }
 .field > span { color: var(--muted); }

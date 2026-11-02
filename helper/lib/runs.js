@@ -131,8 +131,12 @@ function skillDirs(homedir = os.homedir()) {
  */
 function deniedInHome(home, readable) {
   const real = realOrResolved;
-  const covered = (p) => readable.some((r) => p === r || p.startsWith(r + path.sep));
-  const onTheWay = (p) => readable.some((r) => r.startsWith(p + path.sep));
+  // A readable folder that is the home folder or holds it (node in ~/bin makes node's folder the home
+  // folder) mustn't excuse anything: every item would count as readable and nothing would be denied.
+  // The sandbox still denies the items listed here inside it (the more specific path wins).
+  const inner = readable.filter((r) => r !== home && !home.startsWith(r + path.sep));
+  const covered = (p) => inner.some((r) => p === r || p.startsWith(r + path.sep));
+  const onTheWay = (p) => inner.some((r) => r.startsWith(p + path.sep));
   const out = [];
   const walk = (dir) => {
     let names;

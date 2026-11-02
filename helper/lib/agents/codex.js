@@ -60,7 +60,7 @@ function permissionsToml({ readable = [], writable = [], readOnly = [], denied =
 const TRANSPORT_NOISE = /^\s*(Reconnecting\.\.\.|Falling back from WebSockets to HTTPS transport)/i;
 function transportNoise(message, emit, state) {
   if (!TRANSPORT_NOISE.test(String(message || ''))) return false;
-  if (!state.reconnecting) { state.reconnecting = true; emit({ kind: 'tool', name: 'reconnecting to OpenAI…', summary: '' }); }
+  if (!state.reconnecting) { state.reconnecting = true; emit({ kind: 'tool', name: `reconnecting to ${state.providerName || 'OpenAI'}…`, summary: '' }); }
   return true;
 }
 

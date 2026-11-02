@@ -2,8 +2,10 @@
 'use strict';
 // TRIF's end-to-end browser suite (opt-in; not part of `npm test`). See docs/TESTING.md.
 //
-//   node tests/e2e/run.js [firefox|chrome|all] [--agent] [--codex] [--upgrade-from <tgz>] [--skip-fresh]
+//   node tests/e2e/run.js [firefox|chrome|all] [--agent] [--codex] [--oss] [--upgrade-from <tgz>] [--skip-fresh]
 //                         [--work <dir>] [--out <dir>] [--headful] [--claude-model haiku] [--codex-model M]
+//                         [--oss-model qwen/qwen3-coder] [--oss-key-env OPENROUTER_API_KEY]
+// --oss: open-model (codex-oss) runs through OpenRouter; the key is read from your shell, never shown.
 //
 // Each scenario packs this checkout (npm pack), installs it into a scratch home, starts a throwaway
 // browser profile connected to that home's helper, and checks the chain end to end. Nothing in your
@@ -27,6 +29,9 @@ function parseArgs(argv) {
     else if (a === 'all') o.browsers.push('firefox', 'chrome');
     else if (a === '--agent') o.agent = true;
     else if (a === '--codex') o.codex = true;
+    else if (a === '--oss') o.oss = true;
+    else if (a === '--oss-model') o.ossModel = val();
+    else if (a === '--oss-key-env') o.ossKeyEnv = val();
     else if (a === '--upgrade-from') o.upgradeFrom.push(path.resolve(val()));
     else if (a === '--skip-fresh') o.skipFresh = true;
     else if (a === '--work') o.work = path.resolve(val());
@@ -56,7 +61,7 @@ async function main() {
   const out = o.out ? path.join(o.out, stamp) : path.join(work, 'results', stamp);
   fs.mkdirSync(work, { recursive: true });
   const results = new Results(out);
-  console.log(`TRIF e2e: ${o.browsers.join(', ')}${o.agent ? ' + Claude Code agent runs' : ''}${o.codex ? ' + Codex agent runs' : ''}`);
+  console.log(`TRIF e2e: ${o.browsers.join(', ')}${o.agent ? ' + Claude Code agent runs' : ''}${o.codex ? ' + Codex agent runs' : ''}${o.oss ? ' + open-model runs (OpenRouter)' : ''}`);
   console.log(`work ${work}\nresults ${out}`);
 
   const t0 = Date.now();
@@ -89,7 +94,8 @@ async function main() {
         const sc = new Scenario({
           browser, kind: k.kind, oldTgz: k.oldTgz, newTgz: tgz, results, servers,
           work: path.join(work, `${browser === 'firefox' ? 'ff' : 'cr'}-${name}`.slice(0, 24)),
-          agent: o.agent && !agentDone, codex: o.codex && !agentDone, claudeModel: o.claudeModel, codexModel: o.codexModel,
+          agent: o.agent && !agentDone, codex: o.codex && !agentDone, oss: o.oss && !agentDone, claudeModel: o.claudeModel, codexModel: o.codexModel,
+          ossModel: o.ossModel, ossKeyEnv: o.ossKeyEnv,
           headless: o.headless, extensionDirFirefox: fxDir,
         });
         agentDone = true; // agent runs once per browser, in its first scenario

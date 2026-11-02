@@ -38,7 +38,7 @@ test('command: local Ollama, LM Studio, OpenRouter (key by name), custom URL wit
   assert.ok(!c.args.includes('--oss') && !c.args.includes('--local-provider'));
   assert.ok(c.args.includes('--ignore-user-config') && c.args.includes('--ignore-rules') && c.args.includes('default_permissions="trif-run"'));
   assert.match(c.args.find((a) => a.startsWith('permissions=')), /network = \{ enabled = false \}/);
-  assert.equal(providerToml(c.args), 'model_providers.trif-open={ name = "Ollama (TRIF)", base_url = "http://127.0.0.1:11434/v1", wire_api = "responses", stream_idle_timeout_ms = 900000, request_max_retries = 1, stream_max_retries = 1 }');
+  assert.equal(providerToml(c.args), 'model_providers.trif-open={ name = "Ollama (TRIF)", base_url = "http://127.0.0.1:11434/v1", wire_api = "responses", supports_websockets = false, stream_idle_timeout_ms = 900000, request_max_retries = 1, stream_max_retries = 1 }');
   assert.ok(c.args.includes('model_provider="trif-open"') && c.args.includes('web_search="disabled"'));
   assert.ok(!c.args.some((a) => a.startsWith('shell_environment_policy')));
   assert.deepEqual(c.args.slice(-4), ['-m', 'gpt-oss:20b', '--', 'P']);
@@ -51,7 +51,7 @@ test('command: local Ollama, LM Studio, OpenRouter (key by name), custom URL wit
   // OpenRouter: the key's variable NAME only; Codex is told not to pass it on to commands.
   om = oss.resolve({ provider: 'openrouter' }, null, 'qwen/qwen3-coder');
   c = oss.command({ bin: 'codex', prompt: 'P', openModel: om, ...LIMITS });
-  assert.equal(providerToml(c.args), 'model_providers.trif-open={ name = "OpenRouter (TRIF)", base_url = "https://openrouter.ai/api/v1", wire_api = "responses", env_key = "OPENROUTER_API_KEY" }');
+  assert.equal(providerToml(c.args), 'model_providers.trif-open={ name = "OpenRouter (TRIF)", base_url = "https://openrouter.ai/api/v1", wire_api = "responses", env_key = "OPENROUTER_API_KEY", supports_websockets = false }');
   assert.ok(c.args.includes('shell_environment_policy.exclude=["OPENROUTER_API_KEY"]'));
   assert.deepEqual(c.args.slice(-4), ['-m', 'qwen/qwen3-coder', '--', 'P']);
 

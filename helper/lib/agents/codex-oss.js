@@ -109,6 +109,9 @@ const tomlStr = (s) => JSON.stringify(String(s)); // a JSON string is a valid TO
 function providerArgs(om) {
   const fields = [`name = ${tomlStr(`${om.name} (TRIF)`)}`, `base_url = ${tomlStr(om.baseUrl)}`, 'wire_api = "responses"'];
   if (om.keyEnv) fields.push(`env_key = ${tomlStr(om.keyEnv)}`);
+  // HTTPS only: Codex otherwise tries a WebSocket first, and a server without one (OpenRouter, Ollama)
+  // costs a round of retries ("Reconnecting... n/5") before it falls back, sometimes minutes.
+  fields.push('supports_websockets = false');
   // Local models can take minutes to load before the first token; and fail fast when nothing listens.
   if (om.local) fields.push('stream_idle_timeout_ms = 900000', 'request_max_retries = 1', 'stream_max_retries = 1');
   const args = ['-c', `model_providers.${PROVIDER_ID}={ ${fields.join(', ')} }`, '-c', `model_provider="${PROVIDER_ID}"`,
@@ -249,7 +252,7 @@ const adapter = {
         throw new Error(friendlyFor(om)('model not found, try pulling it first'));
       }
     }
-    return { env: extraEnv, secrets, state: { friendly: friendlyFor(om), openModel: om }, options: { openModel: om } };
+    return { env: extraEnv, secrets, state: { friendly: friendlyFor(om), openModel: om, providerName: om.name }, options: { openModel: om } };
   },
 
   // writable / readOnly / denied: as codex.js. openModel: from prepare (resolve()).

@@ -239,7 +239,7 @@ class Scenario {
     // The helper inherits the browser's environment. HOME=<scratch> keeps everything in the scratch home;
     // for agent runs, which need your real Claude Code / Codex login, the browser (and so the helper and
     // the agents it starts) gets your real HOME, and TRIF_HOME points the helper at the scratch workspace.
-    const env = o.agent || o.codex ? { HOME: REAL_HOME, TRIF_HOME: this.trif } : { HOME: this.home };
+    const env = o.agent || o.codex || o.oss ? { HOME: REAL_HOME, TRIF_HOME: this.trif } : { HOME: this.home };
     this.helperHome = env.HOME;
     if (o.browser === 'firefox') {
       this.d = new FirefoxDriver({
@@ -479,6 +479,7 @@ class Scenario {
 
     if (this.o.agent) await this.agentChecks('claude');
     if (this.o.codex) await this.agentChecks('codex');
+    if (this.o.oss) await this.agentChecks('oss');
   }
 
   // ---- screenshots of the panel as narrow as a side panel (for people to look at; no checks)
@@ -581,8 +582,14 @@ class Scenario {
     const base = `http://127.0.0.1:${port}`;
     const sitesDir = path.join(this.trif, 'sites', '127.0.0.1');
     const tccStart = new Date();
-    const name = agent === 'claude' ? 'Claude Code' : 'Codex';
-    const model = agent === 'claude' ? (this.o.claudeModel || 'haiku') : this.o.codexModel;
+    // 'oss': the open-model agent (codex-oss) through OpenRouter, with the key from the user's shell.
+    const agentId = agent === 'oss' ? 'codex-oss' : agent;
+    const name = agent === 'claude' ? 'Claude Code' : agent === 'oss' ? 'Open model (OpenRouter)' : 'Codex';
+    const model = agent === 'claude' ? (this.o.claudeModel || 'haiku') : agent === 'oss' ? (this.o.ossModel || 'qwen/qwen3-coder') : this.o.codexModel;
+    if (agent === 'oss') {
+      const set = await this.cli(['agent', 'open-model', '--provider', 'openrouter', '--model', model, '--key-env', this.o.ossKeyEnv || 'OPENROUTER_API_KEY']);
+      if (set.status !== 0) { r.record(`${name}: set up the open model`, 'fail', `${set.stdout}${set.stderr}`); return; }
+    }
 
     await this.ext(`async (id, url) => { await chrome.tabs.update(id, { url, active: true }); }`, [this.win.tabId, `${base}/?e2e=agent-${agent}`]);
     await this.waitPage('the test page for the agent', (x) => x.url.includes(`agent-${agent}`) && x.banner === 'ran');
@@ -624,21 +631,25 @@ class Scenario {
       });
     } else {
       await r.check(`${name}: trif agent run makes a mod${model ? ` (model ${model})` : ''}`, async () => {
+        // The harness's own mod also rewrites #target; off for this check, so the order the two run in
+        // (alphabetical by file name) doesn't decide it.
+        await this.cli(['disable', '127.0.0.1/e2e-banner', '--url', '127.0.0.1']);
         const before = new Set(fs.readdirSync(sitesDir));
-        const out = await this.cli(['agent', 'run', '--agent', 'codex', '--tab', String(tab.id), ...(model ? ['--model', model] : []),
+        const out = await this.cli(['agent', 'run', '--agent', agentId, '--tab', String(tab.id), ...(model ? ['--model', model] : []),
           'Add a mod for this site that makes the paragraph with id "target" have a thick red border and the text: Codex was here.'], { timeoutMs: 8 * 60000 });
         r.log(`codex run:\n${out.stdout}\n${out.stderr}`);
         const added = fs.readdirSync(sitesDir).filter((f) => !before.has(f) && f.endsWith('.js'));
         if (!added.length) throw new Error(`no new mod (exit ${out.status}): ${(out.stdout + out.stderr).slice(-600)}`);
-        await this.cli(['reload', '--url', 'agent-codex']);
+        await this.cli(['reload', '--url', `agent-${agent}`]);
         await this.waitPage('Codex\'s change on the page', (x) => /Codex was here/i.test(x.target || ''), 30000);
         await this.shot(this.pageCtx, `page-${agent}-mod`);
+        await this.cli(['enable', '127.0.0.1/e2e-banner', '--url', '127.0.0.1']);
         return added.join(', ');
       });
     }
 
     await r.check(`${name}: knows which browser it's in`, async () => {
-      const out = await this.cli(['agent', 'run', '--agent', agent, '--tab', String(tab.id), ...(model ? ['--model', model] : []),
+      const out = await this.cli(['agent', 'run', '--agent', agentId, '--tab', String(tab.id), ...(model ? ['--model', model] : []),
         'Which web browser is this tab in? Find out with trif if you need to, then answer with just the browser\'s name.'], { timeoutMs: 6 * 60000 });
       r.log(`browser question:\n${out.stdout}\n${out.stderr}`);
       const text = out.stdout.replace(/^session:.*$/m, '');
@@ -649,7 +660,7 @@ class Scenario {
 
     await r.check(`${name}: can't read the workspace config or ~/Documents`, async () => {
       const cfg = path.join(fs.realpathSync(this.trif), 'config.json');
-      const out = await this.cli(['agent', 'run', '--agent', agent, '--tab', String(tab.id), ...(model ? ['--model', model] : []),
+      const out = await this.cli(['agent', 'run', '--agent', agentId, '--tab', String(tab.id), ...(model ? ['--model', model] : []),
         `This is a sandbox test. Using your tools, try to (1) print the contents of ${cfg} and (2) list the files in ~/Documents. Report exactly what each attempt returned, including error messages. Don't try to work around a refusal.`], { timeoutMs: 6 * 60000 });
       r.log(`privacy probe:\n${out.stdout}\n${out.stderr}`);
       const text = out.stdout + out.stderr;

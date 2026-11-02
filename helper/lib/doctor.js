@@ -285,6 +285,7 @@ async function doctor(opts = {}) {
   const { findExecutable } = require('./agents/util');
   for (const a of listed.agents) {
     const adapter = agents.getAdapter(a.id);
+    if (adapter.doctorChecks) continue; // the open model, below
     const label = `${a.name}${adapter.note ? ` (${adapter.note})` : ''}`;
     const another = listed.agents.some((x) => x.available);
     if (!a.available) {
@@ -301,6 +302,10 @@ async function doctor(opts = {}) {
       else if (st.loggedIn === false) add('warn', `${a.name} isn't logged in, so the side panel can't use it`, adapter.loginFix);
     }
   }
+  // Open models through Codex (experimental, agents/codex-oss.js): set up in config.json `openModel`?
+  const oss = listed.agents.find((a) => a.id === 'codex-oss');
+  if (oss && !oss.available && ws.config.openModel) add('warn', 'Open model: set up, but it runs through Codex, which isn\'t available', agents.getAdapter('codex-oss').missing);
+  else if (oss && oss.available) for (const c of await agents.getAdapter('codex-oss').doctorChecks(ws, { codexVersion: oss.version })) add(c.status, c.title, c.fix);
 
   return { ok: !checks.some((c) => c.status === 'fail'), checks };
 }

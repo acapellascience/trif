@@ -255,9 +255,9 @@ the header plus helpers for injecting CSS and handling elements that appear late
     examples: ['trif install-example x.com/plain-x'],
   },
   agent: {
-    usage: 'trif agent list | agent run [opts] "<prompt>" | agent login [--agent claude]',
+    usage: 'trif agent list | agent run [opts] "<prompt>" | agent login [--agent claude] | agent open-model [opts]',
     summary: 'list coding agents the side panel can use, run one like the side panel does, or log one in',
-    details: `Options for agent run: --agent claude|codex, --tab ID, --url URL, --session ID, --model NAME.
+    details: `Options for agent run: --agent claude|codex|codex-oss, --tab ID, --url URL, --session ID, --model NAME.
 
 agent list shows which agents the helper can find (Claude Code, Codex) and their versions; it
 works without Chrome. agent run starts the agent headless in the workspace through the helper, exactly
@@ -269,9 +269,15 @@ helper asks Chrome for the URL of --tab, or of the active tab. Ctrl-C stops the 
 
 agent login logs the agent in through the helper, like the side panel's Log in button (Claude Code
 only; it runs \`claude auth login\`): it prints a sign-in URL, then reads the code that page shows
-from stdin. Exit code 1 if it didn't end up logged in.`,
+from stdin. Exit code 1 if it didn't end up logged in.
+
+agent open-model (experimental) shows or sets where the open-model agent (codex-oss: an open model run
+through Codex) gets its model: --provider ollama|lmstudio|openrouter|custom, --model NAME, --base-url URL
+(custom servers), --key-env VAR_NAME (the NAME of the environment variable holding the API key, e.g.
+OPENROUTER_API_KEY; the key itself is never stored). Saved in config.json "openModel".`,
     examples: ['trif agent list', 'trif agent run --url https://x.com/home "hide the trending sidebar"',
-      'trif agent run --tab 12 --session 1b2c… "also hide Who to follow"', 'trif agent login'],
+      'trif agent run --tab 12 --session 1b2c… "also hide Who to follow"', 'trif agent login',
+      'trif agent open-model --provider openrouter --model qwen/qwen3-coder'],
   },
   help: {
     usage: 'trif help [command]',

@@ -23,7 +23,8 @@ const NOT_IN_RUNS = new Set(['setup', 'agent', 'approve', 'mod-update']);
 process.stdout.on('error', (e) => { if (e.code === 'EPIPE') process.exit(0); throw e; });
 
 const VALUE_FLAGS = new Set(['--tab', '--url', '-o', '--out', '--output', '--filter', '--limit', '-f', '--file',
-  '--browser', '--home', '--native-dir', '--bin-dir', '--timeout', '--agent', '--session', '--model', '--site', '--auto']);
+  '--browser', '--home', '--native-dir', '--bin-dir', '--timeout', '--agent', '--session', '--model', '--site', '--auto',
+  '--provider', '--base-url', '--key-env']);
 const BOOL_FLAGS = new Set(['--json', '--hard', '--help', '-h', '--force', '--no-link', '--no-examples', '--copy', '--link', '--install', '--open',
   '--use-new', '--keep', '--merged']);
 const ALIASES = { '--out': '-o', '--output': '-o', '--file': '-f', '-h': '--help' };
@@ -677,7 +678,8 @@ const handlers = {
     if (sub === 'list') return agentList(ctx);
     if (sub === 'run') return agentRun(ctx, pos);
     if (sub === 'login') return agentLogin(ctx);
-    throw new UsageError(`unknown agent command "${sub}" (use: agent list | agent run | agent login)`);
+    if (sub === 'open-model') return agentOpenModel(ctx);
+    throw new UsageError(`unknown agent command "${sub}" (use: agent list | agent run | agent login | agent open-model)`);
   },
 
   async 'install-example'(ctx, pos) {
@@ -781,11 +783,35 @@ async function agentList(ctx) {
   for (const a of r.agents) {
     const what = a.available ? `${a.name}${a.version ? ' ' + a.version : ''}` : `${a.name}: not found`;
     const extra = [a.path, a.note, a.loggedIn === false ? 'not logged in' : '', a.id === r.default && a.available ? 'default' : ''].filter(Boolean).join('  ');
-    out(`${pad(a.id, 8)}${pad(what, 26)}${extra}`);
+    out(`${pad(a.id, 11)}${pad(what, 30)}${extra}`);
   }
   if (!r.agents.some((a) => a.available)) {
     out('\nNo agent found. Install Claude Code (or Codex), then run `trif setup` in that terminal so the helper can find it.');
   }
+}
+
+// Open models through Codex (experimental; lib/agents/codex-oss.js): show or change the defaults in
+// config.json `openModel`. Written here directly (the helper reads config.json per run); never a key.
+async function agentOpenModel(ctx) {
+  const oss = require('./lib/agents/codex-oss');
+  const patch = {};
+  if (ctx.opts['--provider'] !== undefined) patch.provider = String(ctx.opts['--provider']);
+  if (ctx.opts['--model'] !== undefined) patch.model = String(ctx.opts['--model']);
+  if (ctx.opts['--base-url'] !== undefined) patch.baseUrl = String(ctx.opts['--base-url']);
+  if (ctx.opts['--key-env'] !== undefined) patch.keyEnv = String(ctx.opts['--key-env']);
+  if (Object.keys(patch).length) {
+    try { oss.saveSettings(ctx.ws.home, patch); } catch (e) { throw new UsageError(e.message); }
+  }
+  const s = await oss.settings(P.workspace(ctx.ws.home), { check: true });
+  if (ctx.json) return printJson(s);
+  const e = s.effective;
+  const p = s.providers.find((x) => x.id === e.provider);
+  out(`provider  ${e.provider} (${p.label})${s.configured ? '' : '   (not set up yet: the defaults)'}`);
+  out(`model     ${e.model || '(none: pick one with --model)'}`);
+  out(`server    ${e.baseUrl || '(none: set one with --base-url)'}`);
+  if (e.keyEnv) out(`key in    ${e.keyEnv}: ${s.key && s.key.found ? `set (${s.key.source === 'helper' ? 'in this environment' : 'in your shell profile'}; not shown)` : `not set (add export ${e.keyEnv}=… to ~/.zshrc)`}`);
+  out('\nUse it: pick "Open model (via Codex)" in the side panel\'s Settings, or trif agent run --agent codex-oss "…".');
+  out('Change it: trif agent open-model --provider ollama|lmstudio|openrouter|custom [--model NAME] [--base-url URL] [--key-env VAR_NAME]');
 }
 
 async function agentRun(ctx, pos) {

@@ -119,6 +119,7 @@ svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width:
 }
 
 .settings { display: grid; gap: 8px; }
+.open-model { display: grid; gap: 8px; } /* openmodel.js */
 
 /* A site TRIF is off for: only "The robot is off." and the button. */
 .gate { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 14px; padding: 24px 16px 64px; }

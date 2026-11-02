@@ -14,6 +14,7 @@ const { scopeFor } = require('./scope');
 const { readInstructions, instructionsContext } = require('./instructions');
 const { markRunActive, markRunEnded } = require('./origins');
 const { listModFiles } = require('./mods');
+const { redactSecrets } = require('./shellenv');
 
 const RUN_TIMEOUT_MS = Number(envVar('AGENT_TIMEOUT_MS')) > 0 ? Number(envVar('AGENT_TIMEOUT_MS')) : 15 * 60 * 1000;
 const KILL_GRACE_MS = Number(envVar('AGENT_KILL_GRACE_MS')) > 0 ? Number(envVar('AGENT_KILL_GRACE_MS')) : 3000;
@@ -192,6 +193,9 @@ class Runs {
       tabId: args.tabId === undefined || args.tabId === null || args.tabId === '' ? null : args.tabId,
       sessionId: typeof args.sessionId === 'string' && args.sessionId ? args.sessionId : null,
       model: typeof args.model === 'string' && args.model.trim() ? args.model.trim() : null,
+      // codex-oss: this run's provider choice over config.json's (agents/codex-oss.js resolve).
+      openModel: args.openModel && typeof args.openModel === 'object' && !Array.isArray(args.openModel) ? { ...args.openModel } : null,
+      secrets: [], // values (API keys) kept out of the run's log and events
       prompt,
       startedAt: Date.now(),
       state: { workspace: ws.home },
@@ -239,12 +243,14 @@ class Runs {
 
   _emit(run, event) {
     if (run.doneSent) return;
+    if (run.secrets.length) { const t = JSON.stringify(event); const r = redactSecrets(t, run.secrets); if (r !== t) event = JSON.parse(r); }
     if (event.kind === 'done') run.doneSent = true;
     try { this.onEvent(run.id, event); } catch (e) { this.logger.error(`agent event handler: ${e.message}`); }
   }
 
   _log(run, obj) {
-    try { fs.appendFileSync(run.logFile, (typeof obj === 'string' ? obj : JSON.stringify(obj)) + '\n'); } catch { /* ignore */ }
+    const text = redactSecrets(typeof obj === 'string' ? obj : JSON.stringify(obj), run.secrets);
+    try { fs.appendFileSync(run.logFile, text + '\n'); } catch { /* ignore */ }
   }
 
   _prepareLogDir(ws) {
@@ -291,6 +297,26 @@ class Runs {
       this._emit(run, { kind: 'error', message: adapter.missing });
       return this._finish(run, { code: null, signal: null });
     }
+    // Adapters with something to settle first (codex-oss: the provider, its key, a local server).
+    if (adapter.prepare) {
+      adapter.prepare({ ws, model: run.model, openModel: run.openModel }).then((prep) => {
+        if (run.stopped || run.finished) return this._finish(run, { code: null, signal: null });
+        run.secrets = (prep && prep.secrets) || [];
+        Object.assign(run.state, (prep && prep.state) || {});
+        const om = run.state.openModel;
+        if (om) this._log(run, { webmods: 'openModel', provider: om.provider, model: om.model, baseUrl: om.baseUrl, keyEnv: om.keyEnv || null });
+        this._spawn(run, found, { ...env, ...((prep && prep.env) || {}) }, (prep && prep.options) || {});
+      }, (e) => {
+        this._emit(run, { kind: 'error', message: e.message });
+        this._finish(run, { code: null, signal: null });
+      });
+      return;
+    }
+    this._spawn(run, found, env, {});
+  }
+
+  _spawn(run, found, env, options) {
+    const { ws, adapter } = run;
 
     const ctx = { url: run.url, tabId: run.tabId, scope: run.scope, browser: ws.browser || '' };
     let prompt = run.prompt;
@@ -300,7 +326,7 @@ class Runs {
     else prompt = `${run.sessionId ? agents.reminderText(ctx) : agents.contextText(ctx) + extra}\n\n${prompt}`;
     try { fs.mkdirSync(ws.modsDir, { recursive: true }); } catch { /* reported by the agent */ }
     const limits = runLimits(ws, run);
-    const { file, args } = adapter.command({ bin: found.path, prompt, sessionId: run.sessionId, model: run.model, context, workspace: ws.home, ...limits });
+    const { file, args } = adapter.command({ bin: found.path, prompt, sessionId: run.sessionId, model: run.model, context, workspace: ws.home, ...limits, ...options });
 
     run.before = modSnapshot(ws.modsDir, ws.home);
     run.beforeFiles = snapshot(ws.modsDir, ws.home);
@@ -334,7 +360,7 @@ class Runs {
     });
     child.stderr.setEncoding('utf8');
     child.stderr.on('data', (chunk) => {
-      run.stderr = (run.stderr + chunk).slice(-STDERR_KEEP);
+      run.stderr = redactSecrets(run.stderr + chunk, run.secrets).slice(-STDERR_KEEP);
     });
 
     let exitInfo = null;
@@ -446,7 +472,7 @@ class Runs {
     } else {
       if (!run.stopped && !run.timedOut && run.child) {
         const tail = run.stderr.trim().split('\n').slice(-12).join('\n').slice(-2000);
-        const friendly = run.adapter.explainExit ? run.adapter.explainExit({ code, signal, stderr: run.stderr }) : null;
+        const friendly = run.adapter.explainExit ? run.adapter.explainExit({ code, signal, stderr: run.stderr, state: run.state }) : null;
         const how = signal ? `was killed (${signal})` : `exited with code ${code}`;
         this._emit(run, { kind: 'error', message: friendly || `${run.adapter.name} ${how} without finishing${tail ? `:\n${tail}` : ''}` });
       }

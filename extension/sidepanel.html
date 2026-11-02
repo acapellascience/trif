@@ -30,6 +30,21 @@
     <select id="agent"><option value="">Default</option></select>
   </label>
   <p id="agent-note" class="note" hidden></p>
+  <div id="open-model" class="open-model" hidden>
+    <label class="field">
+      <span>From</span>
+      <select id="om-provider"></select>
+    </label>
+    <label id="om-url-row" class="field" hidden>
+      <span>Server</span>
+      <input id="om-url" type="url" placeholder="https://…/v1" autocomplete="off" spellcheck="false" aria-label="Server address">
+    </label>
+    <label id="om-key-row" class="field" hidden>
+      <span>Key in</span>
+      <input id="om-key" type="text" autocomplete="off" spellcheck="false" aria-label="Name of the environment variable holding the API key">
+    </label>
+    <p id="om-note" class="note" hidden></p>
+  </div>
   <label class="field">
     <span>Model</span>
     <select id="model"><option value="">Default</option></select>

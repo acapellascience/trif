@@ -8,7 +8,7 @@ const path = require('path');
 const { envVar, envName } = require('../env');
 const { capture } = require('./util');
 
-const ADAPTERS = [require('./claude'), require('./codex')];
+const ADAPTERS = [require('./claude'), require('./codex'), require('./codex-oss')];
 const BY_ID = new Map(ADAPTERS.map((a) => [a.id, a]));
 
 function getAdapter(id) { return BY_ID.get(id) || null; }
@@ -56,13 +56,14 @@ function detect(adapter, ws, opts = {}) {
   return {
     id: adapter.id, name: adapter.name, path: d.path, available: !!d.available, version: d.version || null, note: d.note || adapter.note || '',
     canLogin: !!adapter.login, loginFix: adapter.loginFix || '',
+    ...(adapter.experimental ? { experimental: true } : {}),
   };
 }
 
 /** {agents: [{id, name, path, available, version, note, canLogin, loginFix}], default} (no login check) */
 function listAgents(ws, opts = {}) {
   const agents = ADAPTERS.map((a) => detect(a, ws, opts));
-  const first = agents.find((a) => a.available);
+  const first = agents.find((a) => a.available && !a.experimental);
   return { agents, default: first ? first.id : ADAPTERS[0].id };
 }
 
@@ -107,16 +108,17 @@ async function listAgentsWithLogin(ws, opts = {}) {
 const MODELS_CACHE_MS = 30 * 60 * 1000;
 const modelsCache = new Map(); // `${id}:${path}` -> {at, value}
 
-async function agentModels(ws, id, { fresh = false } = {}) {
+async function agentModels(ws, id, { fresh = false, openModel = null } = {}) {
   const adapter = getAdapter(id);
   if (!adapter) throw new Error(`unknown agent "${id}"`);
   const d = detect(adapter, ws, { version: false });
   if (!d.available) return { agent: id, models: [], default: null, custom: true, error: `${adapter.name} isn't available`, note: '' };
-  const key = `${id}:${d.path}`;
+  // (codex-oss: what's offered depends on the provider chosen, and changes as models are pulled.)
+  const key = `${id}:${d.path}${adapter.modelsCacheKey ? `:${adapter.modelsCacheKey({ config: ws.config, openModel })}` : ''}`;
   const hit = modelsCache.get(key);
-  if (!fresh && hit && Date.now() - hit.at < MODELS_CACHE_MS) return hit.value;
+  if (!fresh && hit && Date.now() - hit.at < (adapter.modelsCacheMs ?? MODELS_CACHE_MS)) return hit.value;
   let r;
-  try { r = await adapter.listModels({ path: d.path, env: agentEnv(ws), cwd: ws.home }); } catch (e) { r = { models: [], default: null, custom: true, error: e.message }; }
+  try { r = await adapter.listModels({ path: d.path, env: agentEnv(ws), cwd: ws.home, config: ws.config, openModel }); } catch (e) { r = { models: [], default: null, custom: true, error: e.message }; }
   const value = { agent: id, note: '', ...r };
   if (!value.error) modelsCache.set(key, { at: Date.now(), value });
   return value;

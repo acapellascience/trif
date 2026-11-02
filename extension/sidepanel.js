@@ -6,6 +6,7 @@
 import { siteForUrl, modAppliesTo, modSites, isMultiSite, offOnSite, normalizeOffSites, isLoginUrl, scopeFor, limitToSites, withOffSites, FIREFOX, BROWSER } from './lib.js';
 import { renderMarkdown, MARKDOWN_ELEMENTS, MARKDOWN_ATTRIBUTES } from './markdown.js';
 import { modSwitch, syncSwitches, shownEnabled, switchError, enabledIn, onSwitchChange } from './modswitch.js';
+import { mountOpenModel, renderOpenModel } from './openmodel.js';
 
 const $ = (sel) => document.querySelector(sel);
 const chatKey = (site) => `chat:${site}`;
@@ -862,6 +863,7 @@ function renderSettings() {
   const note = chosen?.note || (view.agentsError && !view.agents ? 'Agents are listed once the helper is connected.' : '');
   ui.agentNote.textContent = note;
   ui.agentNote.hidden = !note;
+  renderOpenModel(chosen?.id, !!view.status?.helper?.connected); // open model: where it comes from (openmodel.js)
   renderModels();
 }
 
@@ -1100,6 +1102,7 @@ ui.modelCustom.addEventListener('input', () => {
 });
 ui.modelCustom.addEventListener('change', () => { clearTimeout(modelTimer); saveModel(currentAgent().id, ui.modelCustom.value.trim()); });
 $('#setup-link').addEventListener('click', (e) => { e.preventDefault(); openSetup(); });
+mountOpenModel({ request, onChange: () => loadModels('codex-oss', true) });
 
 // ---- updates ------------------------------------------------------------------------------------
 // The helper checks for a newer TRIF (helper/lib/update.js) and its summary rides on the status. The

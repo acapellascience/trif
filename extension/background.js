@@ -768,11 +768,20 @@ function notifyPanels() {
   broadcast({ type: 'statusChanged' });
 }
 
+// The listed string fields of a panel message (open model settings), nothing else.
+function pick(obj, keys) {
+  const out = {};
+  for (const k of keys) if (typeof obj[k] === 'string') out[k] = obj[k];
+  return out;
+}
+
 async function onPanelMessage(msg) {
   switch (msg?.type) {
     case 'status': return uiStatus();
     case 'agent.list': return helperRequest('agent.list', {}, 20000);
     case 'agent.models': return helperRequest('agent.models', { agent: String(msg.agent ?? ''), fresh: !!msg.fresh }, 30000);
+    case 'agent.openModel': return helperRequest('agent.openModel', { check: !!msg.check }, 20000);
+    case 'agent.openModel.set': return helperRequest('agent.openModel.set', pick(msg, ['provider', 'model', 'baseUrl', 'keyEnv']), 10000);
     case 'instructions.get': return helperRequest('instructions.get', {}, 10000);
     case 'instructions.set': return helperRequest('instructions.set', { text: String(msg.text ?? '') }, 10000);
     case 'agent.start': return startAgent(msg);
@@ -875,6 +884,7 @@ async function startAgent(msg) {
   const args = { site, url: String(msg.url ?? ''), tabId, prompt, agent };
   if (msg.sessionId) args.sessionId = String(msg.sessionId);
   if (msg.model) args.model = String(msg.model);
+  if (msg.openModel && typeof msg.openModel === 'object') args.openModel = pick(msg.openModel, ['provider', 'model', 'baseUrl', 'keyEnv']); // a chat's own open-model choice
   if (msg.merge) args.merge = String(msg.merge); // merge the new version of this shipped mod (the helper adds how)
   let runId;
   state.starting++;

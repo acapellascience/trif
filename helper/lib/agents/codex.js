@@ -105,6 +105,7 @@ const adapter = {
     const msg = parseJsonLine(line);
     if (!msg) return;
     state.seen = state.seen || new Set();
+    const friendly = state.friendly || friendlyDefault; // codex-oss.js words errors for its providers
     switch (msg.type) {
       case 'thread.started':
         if (msg.thread_id) { state.sessionId = msg.thread_id; emit({ kind: 'session', sessionId: msg.thread_id }); }
@@ -148,7 +149,7 @@ const adapter = {
   },
 
   explainExit({ stderr }) {
-    return AUTH_RE.test(String(stderr || '')) ? NOT_LOGGED_IN : null;
+    return AUTH_RE.test(String(stderr || '')) ? NOT_LOGGED_IN : null; // (codex-oss.js has its own)
   },
 
   // `codex login status` exits 0 when logged in (no tokens spent).
@@ -169,7 +170,7 @@ const adapter = {
   login: null,
 };
 
-function friendly(message) {
+function friendlyDefault(message) {
   return AUTH_RE.test(String(message)) ? NOT_LOGGED_IN : String(message);
 }
 

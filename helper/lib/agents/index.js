@@ -103,8 +103,10 @@ async function listAgentsWithLogin(ws, opts = {}) {
 }
 
 // The models an agent offers ({models: [{id, name, description}], default, custom, error, note}),
-// cached per binary for half an hour: Codex fetches its catalog over the network.
-const MODELS_CACHE_MS = 30 * 60 * 1000;
+// cached per binary for a minute (Codex fetches its catalog over the network, and keeps its own cache).
+// Short, because what an account offers changes (a new plan brings new models), and the panel asks
+// again each time Settings opens or the agent changes.
+const MODELS_CACHE_MS = 60 * 1000;
 const modelsCache = new Map(); // `${id}:${path}` -> {at, value}
 
 async function agentModels(ws, id, { fresh = false } = {}) {
@@ -160,5 +162,5 @@ const CLAUDE_SETTINGS = {
 
 module.exports = {
   ADAPTERS, getAdapter, defaultDirs, recordedPath, searchDirs, agentEnv, detect, listAgents,
-  listAgentsWithLogin, loginStatus, forgetLoginStatus, LOGIN_CACHE_MS, agentModels, contextText, reminderText, hostOf, CLAUDE_SETTINGS, PASSED_KEYS,
+  listAgentsWithLogin, loginStatus, forgetLoginStatus, LOGIN_CACHE_MS, agentModels, MODELS_CACHE_MS, contextText, reminderText, hostOf, CLAUDE_SETTINGS, PASSED_KEYS,
 };

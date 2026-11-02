@@ -1246,6 +1246,12 @@ test('agent.models: Codex lists the account\'s catalog (picker models, best firs
   assert.deepStrictEqual(r.result.models.map((m) => [m.id, m.name, m.description]), [['gpt-best', 'GPT-Best', 'Best.'], ['gpt-older', 'GPT-Older', 'Older.']]);
   assert.equal(r.result.default, 'gpt-best');
   assert.equal(r.result.custom, false);
+  // A new plan brings a new model: cached only briefly (the panel asks again whenever Settings opens).
+  assert.ok(agents.MODELS_CACHE_MS <= 60 * 1000);
+  catalog.models.push({ slug: 'sol', display_name: 'Sol', visibility: 'list', priority: 1 });
+  fs.writeFileSync(path.join(bin, 'catalog.json'), JSON.stringify(catalog));
+  r = await extRequest(ext, 'agent.models', { agent: 'codex', fresh: true });
+  assert.deepStrictEqual(r.result.models.map((m) => m.id), ['sol', 'gpt-best', 'gpt-older']);
   r = await extRequest(ext, 'agent.models', { agent: 'claude' });
   assert.deepStrictEqual(r.result.models.map((m) => m.id), ['fable', 'opus', 'sonnet', 'haiku']);
   assert.equal(r.result.custom, true);

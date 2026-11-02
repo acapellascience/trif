@@ -147,26 +147,31 @@ do better.
 **On your computer, with LM Studio.** Download a model in [LM Studio](https://lmstudio.ai) (gpt-oss 20B
 is a good start), start its server (Developer tab, or `lms server start`), then pick LM Studio in Settings.
 
-**OpenRouter** (or another provider). Make a key at [openrouter.ai](https://openrouter.ai), and put it in
-your shell profile, not in TRIF:
+**OpenRouter** (or another provider). Make a key at [openrouter.ai](https://openrouter.ai). In
+Settings pick From: OpenRouter, paste the key in the **API key** field and click **Save**, then pick a
+model (the cheapest, gpt-oss-120b, cost under half a cent per message in testing; Qwen3-Coder 480B about
+5 cents). From a terminal: `trif agent open-model --provider openrouter --set-key` (it asks for the key
+without showing it, or reads it from stdin; `--remove-key` removes it).
 
-```sh
-echo 'export OPENROUTER_API_KEY=sk-or-…' >> ~/.zshrc
-```
+The key is kept in your Mac's **Keychain** (on Linux, your keyring, through `secret-tool`), and nowhere
+else: not in TRIF's files, not in the extension. Before each chat the helper reads it and adds it to
+Codex's requests itself, through a small proxy on your Mac that only lives for the chat, so neither Codex
+nor your agent's commands ever get it, and it's kept out of TRIF's logs. The panel only ever shows
+whether a key is saved.
 
-Then in Settings pick From: OpenRouter, and a model (the cheapest, gpt-oss-120b, cost under half a cent
-per message in testing; Qwen3-Coder 480B about 5 cents). TRIF stores only the variable's name
-(`OPENROUTER_API_KEY`, or another name in "Key in"). Chrome doesn't see your shell profile, so before each
-chat the helper asks your login shell for that one variable (`zsh -l -i -c`, as when you open a terminal)
-and keeps it in memory: it adds the key to Codex's requests itself (through a small proxy on your Mac
-that only lives for the chat), so neither Codex nor your agent's commands ever get it, and it's kept out
-of TRIF's logs. (One limit: on a Mac any program can read the environment other programs of yours
-started with, so programs you start from a terminal, where the key is exported, carry it where a chat's
-agent could read it. Start Chrome from the Dock, and keep a spending limit on the key.) A **Custom URL** works the same way for any server that speaks OpenAI's
-Responses API; with a key, its address must be `https://` unless it's on this computer.
+**Don't export API keys in your shell profile** (`export OPENROUTER_API_KEY=…` in `~/.zshrc`). Every
+program you start from a terminal then carries the key in its environment, and on a Mac any program of
+yours can read other programs' environments, a chat agent's sandboxed commands included. If you had
+one there for TRIF, save the key as above, delete the `export` line, and open new terminals (and restart
+anything started from the old ones, Chrome included if you launched it from a terminal). `trif doctor`
+warns when it sees such a variable. Keep a spending limit on the key anyway.
 
-`trif doctor` checks the setup: Ollama or LM Studio running, the model installed, the key variable set
-(without showing it).
+A **Custom URL** works for any server that speaks OpenAI's Responses API; once its address is set you
+can save a key for it the same way (each server has its own), and with a key its address must be
+`https://` unless it's on this computer.
+
+`trif doctor` checks the setup: Ollama or LM Studio running, the model installed, the key saved in the
+Keychain (without showing it).
 
 ## Updates
 

@@ -8,9 +8,11 @@ needs a section here for the version it releases.
 
 - **Open models (experimental).** A third choice in Settings, "Open model (via Codex)": your agent runs
   on a model on your own computer (Ollama or LM Studio, nothing leaves it) or from a provider like
-  OpenRouter with your own key, through Codex (no OpenAI account needed). Same walls as any chat. Your
-  key stays in your shell profile: TRIF stores only its name, and your agent's commands can't see it.
-  Small local models are much weaker at this than Claude Code or Codex. See the README.
+  OpenRouter with your own key, through Codex (no OpenAI account needed). Same walls as any chat. Paste
+  your key in Settings (or `trif agent open-model --set-key`): it's kept in your Mac's Keychain, never
+  in TRIF's files, and neither Codex nor your agent's commands ever get it. Don't keep API keys in your
+  shell profile: other programs can read them there (`trif doctor` warns). Small local models are much
+  weaker at this than Claude Code or Codex. See the README.
 
 ## 0.2.0
 

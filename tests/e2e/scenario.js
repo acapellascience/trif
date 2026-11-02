@@ -71,8 +71,8 @@ class Scenario {
   env(extra) { return I.scratchEnv(this.home, extra); }
 
   /** Runs the installed `trif` (the scratch home's wrapper). */
-  async cli(args, { json = false, timeoutMs = 60000 } = {}) {
-    const r = await runAsync(path.join(this.trif, 'bin', 'trif'), [...args, ...(json ? ['--json'] : [])], { env: this.env(), cwd: this.home, timeoutMs });
+  async cli(args, { json = false, timeoutMs = 60000, env = undefined } = {}) {
+    const r = await runAsync(path.join(this.trif, 'bin', 'trif'), [...args, ...(json ? ['--json'] : [])], { env: this.env(env), cwd: this.home, timeoutMs });
     if (json) {
       try { return { ...r, json: JSON.parse(r.stdout) }; } catch { return { ...r, json: null }; }
     }
@@ -582,13 +582,21 @@ class Scenario {
     const base = `http://127.0.0.1:${port}`;
     const sitesDir = path.join(this.trif, 'sites', '127.0.0.1');
     const tccStart = new Date();
-    // 'oss': the open-model agent (codex-oss) through OpenRouter, with the key from the user's shell.
+    // 'oss': the open-model agent (codex-oss) through OpenRouter, with the key the user saved in the Keychain.
     const agentId = agent === 'oss' ? 'codex-oss' : agent;
     const name = agent === 'claude' ? 'Claude Code' : agent === 'oss' ? 'Open model (OpenRouter)' : 'Codex';
     const model = agent === 'claude' ? (this.o.claudeModel || 'haiku') : agent === 'oss' ? (this.o.ossModel || 'qwen/qwen3-coder') : this.o.codexModel;
     if (agent === 'oss') {
-      const set = await this.cli(['agent', 'open-model', '--provider', 'openrouter', '--model', model, '--key-env', this.o.ossKeyEnv || 'OPENROUTER_API_KEY']);
+      const set = await this.cli(['agent', 'open-model', '--provider', 'openrouter', '--model', model]);
       if (set.status !== 0) { r.record(`${name}: set up the open model`, 'fail', `${set.stdout}${set.stderr}`); return; }
+      // The key: the Keychain item the user saved (the helper runs with the real HOME for agent runs, so it
+      // finds the login Keychain; asked here the same way). Only whether there is one: never the key.
+      const st = await this.cli(['agent', 'open-model'], { json: true, env: { HOME: REAL_HOME, TRIF_HOME: this.trif } });
+      if (!st.json || !st.json.hasKey) {
+        r.record(`${name}: an OpenRouter key in the Keychain`, 'skip', (st.json && st.json.key && st.json.key.error)
+          || 'no OpenRouter key saved: save one in the side panel\'s settings, or run `trif agent open-model --provider openrouter --set-key`, then run --oss again');
+        return;
+      }
     }
 
     await this.ext(`async (id, url) => { await chrome.tabs.update(id, { url, active: true }); }`, [this.win.tabId, `${base}/?e2e=agent-${agent}`]);

@@ -15,6 +15,9 @@ const REPO = path.resolve(__dirname, '..', '..', '..');
 function scratchEnv(home, extra = {}) {
   const env = { ...process.env, HOME: home, TRIF_NO_LAUNCHCTL: '1', ...extra };
   for (const k of Object.keys(env)) if (/^(TRIF|WEBMODS)_(HOME|SOCK|RUN_|INSTALL_LOCK|SAFARI_BRIDGE)/.test(k)) delete env[k];
+  // No API keys from the terminal (TRIF reads open-model keys from the keyring only; agents get theirs
+  // from config.json), so none sit in the scratch browser's and helper's environment.
+  for (const k of Object.keys(env)) if (/_API_KEY$/i.test(k)) delete env[k];
   Object.assign(env, extra);
   return env;
 }

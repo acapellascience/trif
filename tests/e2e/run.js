@@ -4,8 +4,10 @@
 //
 //   node tests/e2e/run.js [firefox|chrome|all] [--agent] [--codex] [--oss] [--upgrade-from <tgz>] [--skip-fresh]
 //                         [--work <dir>] [--out <dir>] [--headful] [--claude-model haiku] [--codex-model M]
-//                         [--oss-model qwen/qwen3-coder] [--oss-key-env OPENROUTER_API_KEY]
-// --oss: open-model (codex-oss) runs through OpenRouter; the key is read from your shell, never shown.
+//                         [--oss-model qwen/qwen3-coder]
+// --oss: open-model (codex-oss) runs through OpenRouter, with the key already saved in your Keychain (the
+// panel's API key field, or `trif agent open-model --provider openrouter --set-key`); skipped without one.
+// The key is never read from the environment, shown or logged.
 //
 // Each scenario packs this checkout (npm pack), installs it into a scratch home, starts a throwaway
 // browser profile connected to that home's helper, and checks the chain end to end. Nothing in your
@@ -31,7 +33,6 @@ function parseArgs(argv) {
     else if (a === '--codex') o.codex = true;
     else if (a === '--oss') o.oss = true;
     else if (a === '--oss-model') o.ossModel = val();
-    else if (a === '--oss-key-env') o.ossKeyEnv = val();
     else if (a === '--upgrade-from') o.upgradeFrom.push(path.resolve(val()));
     else if (a === '--skip-fresh') o.skipFresh = true;
     else if (a === '--work') o.work = path.resolve(val());
@@ -95,7 +96,7 @@ async function main() {
           browser, kind: k.kind, oldTgz: k.oldTgz, newTgz: tgz, results, servers,
           work: path.join(work, `${browser === 'firefox' ? 'ff' : 'cr'}-${name}`.slice(0, 24)),
           agent: o.agent && !agentDone, codex: o.codex && !agentDone, oss: o.oss && !agentDone, claudeModel: o.claudeModel, codexModel: o.codexModel,
-          ossModel: o.ossModel, ossKeyEnv: o.ossKeyEnv,
+          ossModel: o.ossModel,
           headless: o.headless, extensionDirFirefox: fxDir,
         });
         agentDone = true; // agent runs once per browser, in its first scenario

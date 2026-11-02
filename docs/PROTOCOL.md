@@ -646,7 +646,8 @@ Nothing is hosted; the agent uses the user's own login/subscription.
     chat has its own (see "Agent and model per site chat" below).
   - Light/dark via `prefers-color-scheme`; compact, clean, system font; fits a narrow panel (320 px+).
 - Panel ⇄ background: `chrome.runtime.connect({name: "panel"})`. Panel → background:
-  `{type: "agent.start", site, tabId, url, prompt, sessionId, agent, model, openModel?}`, `{type: "agent.stop", runId}`,
+  `{type: "agent.start", site, tabId, url, prompt, sessionId, agent, model}` (the panel sends no
+  `openModel`; background.js would pass one on), `{type: "agent.stop", runId}`,
   `{type: "agent.openModel", check}`, `{type: "agent.openModel.set", provider, model, baseUrl, keyEnv}`,
   `{type: "agent.list"}`, `{type: "agent.login", agent}`, `{type: "agent.loginCode", loginId, code}`,
   `{type: "agent.loginCancel", loginId}`, `{type: "status"}`, `{type: "mod.enable", id, enabled, tab}`,
@@ -888,14 +889,17 @@ OpenRouter serve `/v1/responses`. Every source is one custom provider passed inl
 
 ```
 codex exec <the codex flags and permission profile>
-  -c model_providers.trif-open={ name = "OpenRouter (TRIF)", base_url = "https://openrouter.ai/api/v1",
-       wire_api = "responses", env_key = "OPENROUTER_API_KEY" }
+  -c model_providers.trif-open={ name = "OpenRouter (TRIF)", base_url = "http://127.0.0.1:<port>/<32 hex>/v1",
+       wire_api = "responses", supports_websockets = false }
   -c model_provider="trif-open" -c web_search="disabled"
   -c shell_environment_policy.exclude=["OPENROUTER_API_KEY"]
   -m openai/gpt-oss-120b [resume THREAD_ID] -- PROMPT
 ```
 
-Local providers have no `env_key`, and add `stream_idle_timeout_ms = 900000` (a model can take minutes
+No `env_key`: with a key, `base_url` is the run's key proxy (see "The key"); without one, the provider's
+own address. `shell_environment_policy.exclude` is still needed: Codex builds its commands' environment
+from a snapshot of the user's login shell that it takes itself, outside the sandbox, so a key exported
+in `~/.zshrc` would otherwise reach them (seen with Codex 0.166 and a stand-in profile). Ollama and LM Studio servers add `stream_idle_timeout_ms = 900000` (a model can take minutes
 to load), `request_max_retries = 1`, `stream_max_retries = 1`. Not `--oss --local-provider`: in Codex
 0.166 `exec --oss` fails ("This chat uses ollama, but your current provider is openai") unless
 `model_provider` is set as well, and it **pulls** a model that isn't installed (`POST /api/pull`, many GB,
@@ -910,37 +914,80 @@ mid-chat). `web_search` is OpenAI's hosted tool; other providers don't have it.
   `agent.*` is refused from runs. `keyEnv` is a variable NAME (`^[A-Za-z_][A-Za-z0-9_]*$`), never a key;
   `baseUrl` is http(s) without credentials. What a run uses (`resolve`): the defaults, then agent.start's
   `openModel` (same shape; another provider starts from that provider's defaults), then agent.start's
-  `model`, then the provider's defaults. The panel's model picker keeps the model like any agent's
-  (`settings.models["codex-oss"]`); the provider block (`extension/openmodel.js`) shows under the agent
-  picker when codex-oss is chosen. For per-chat agent choices, a chat's selection is `{agent: "codex-oss",
-  model, openModel: {provider, baseUrl, keyEnv}}`, passed as agent.start's `agent`, `model` and
-  `openModel` (and `agent.models {agent, openModel}` lists that provider's models).
+  `model`, then the provider's defaults. In the panel, the provider, its server address and key
+  variable are global (config.json, the block `extension/openmodel.js` shows under the agent picker when
+  codex-oss is chosen); only the model is per site chat, kept like any agent's
+  (`sitePicks[site].models["codex-oss"]`, and `settings.models["codex-oss"]` as the default) and sent as
+  agent.start's `model`. The panel sends no `openModel` (agent.start's and `agent.models`' `openModel`
+  are for helper clients; background.js passes agent.start's on and drops `agent.models`'). Model picks
+  name a provider's models, so when the provider changes they're all dropped and every chat falls back
+  to the new provider's default: on a change in the panel, and when the panel next loads the settings
+  after a change elsewhere (`trif agent open-model`; storage `ossProvider` is the provider they were made
+  for).
+- **Local, and keys over http.** `local` (Ollama, LM Studio) only counts at a loopback address
+  (`localhost`, `127.*`, `[::1]`): an Ollama pointed at another computer still lists its models, but the
+  panel doesn't say "nothing leaves it". A key is never sent over `http://` to another computer:
+  `resolve` and `agent.openModel.set` refuse that (https required).
+- **Key variable names.** Besides the name pattern, well-known variables are refused as `keyEnv`
+  (`shellenv.js` NOT_A_KEY, ignoring case): `PATH`, `HOME`, `USER`, `SHELL`, `TMPDIR`, `PWD`, `LANG`,
+  `TERM`, `LC_*`, `DYLD_*`, `LD_*`, `NODE_*`, `NPM_*`, `SSH_*`, `XPC_*`, `XDG_*`, `TRIF_*` (the run token
+  among them), `WEBMODS_*`, `CODEX_*`, `CLAUDE_*` and the like, so a setting can't send one of them to a
+  server as a key.
 - **The key.** Chrome starts the helper without the user's shell profile, so before each run
   (`prepare`, awaited by runs.js before spawning) the helper looks the variable up (`shellenv.js`): its
   own environment first, then the user's login shell, interactive so `~/.zshrc` is read:
   `<shell from the user database> -l -i -c "printf <begin>; /usr/bin/printenv NAME; printf <end>"`, with
-  HOME/USER/PATH only, stdin closed, a 10 s limit, random markers to skip what the profile prints. Found
-  values stay in the helper's memory for 10 minutes; nothing is written anywhere. The value goes into
-  Codex's environment only (Codex sends it as `Authorization: Bearer`), `shell_environment_policy.exclude`
-  keeps it out of the commands Codex runs, and runs.js redacts it (`[redacted]`) from the run log, its
-  events and the stderr tail. The commands can't get it another way: the shell profiles are in the home
-  folder (denied), `ps -E` is refused by the sandbox, config.json holds only the name. (On Linux the
-  bubblewrap sandbox would need checking for `/proc/<codex pid>/environ`.)
+  HOME/USER/PATH only, stdin closed, a 10 s limit, random markers to skip what the profile prints; done
+  as soon as the end marker is out, then the shell's process group is killed (a background job the
+  profile starts can't hold it up). Found values stay in the helper's memory for 10 minutes; nothing is
+  written anywhere. A check (`agent.openModel {check}`, `trif doctor`) looks again past that cache, and a
+  401 from the provider drops the cached value. **The key never reaches Codex.** A sandboxed command can
+  read every same-user process's arguments and initial environment (macOS `sysctl` KERN_PROCARGS2; the
+  sandbox doesn't stop it), so anything in Codex's environment or argv is the agent's. Instead, `prepare`
+  starts a proxy for the run (`helper/lib/keyproxy.js`): an HTTP server on 127.0.0.1, a random port, a
+  random 128-bit path prefix, given to Codex as `base_url`; it adds `Authorization: Bearer <key>` and
+  forwards to the provider, streaming answers (server-sent events) through as they come, with their
+  status and headers (no CORS headers). It refuses anything outside the prefix, paths other than
+  `/responses…` and `/models…`, methods other than GET and POST, a Host other than its own, and any
+  request carrying `Origin`, `Sec-Fetch-Site` or `Sec-Fetch-Dest` (what browsers add to a page's
+  fetches, form posts and image loads), so a web page can't spend the user's credit through it. It closes when the run ends. The key
+  lives only in the helper's memory: never in an argv, a child's environment, a file or a log (runs.js
+  still redacts it, `[redacted]`, from the run log, events and stderr tail). The commands can't use the
+  proxy (no network in their sandbox, 127.0.0.1 included), and can't read the key elsewhere: the shell
+  profiles are in the home folder (denied), config.json holds only the name, and
+  `shell_environment_policy.exclude` keeps the variable out of the environment Codex builds for them
+  from its own snapshot of the login shell. The API keys config.json
+  passes to Claude Code and Codex (`env`) aren't passed to this agent. Left open: a key exported in
+  `~/.zshrc` is in the initial environment of every program started from a terminal (Claude Code, its
+  MCP servers, a Chrome started from a terminal and so the helper…), and KERN_PROCARGS2 shows those to
+  the agent's commands too (macOS hides it only for Apple's own programs). Seen in a real run: no TRIF or
+  Codex process held the key, but a Claude Code session started from a terminal and three of its node
+  children did. Keeping the key out of the shell's environment (a Keychain item TRIF reads, say) would
+  close that; not done yet. (On Linux the bubblewrap sandbox would need checking for
+  `/proc/<pid>/environ`.)
+- **Plain Codex and Claude Code: keys in config.json.** `env.OPENAI_API_KEY` / `env.ANTHROPIC_API_KEY`
+  in config.json go into the agent's environment (that's how those CLIs take them), so a run's commands
+  can read them through KERN_PROCARGS2 as above. Not changed yet; a login (`codex login`, `/login`)
+  keeps the agent's credentials in files the sandbox denies instead.
 - **Network.** The permission profile's `network = { enabled = false }` covers the commands Codex runs,
   not Codex's own model requests. Verified with Codex 0.166 (real `codex exec`, TRIF's profile, a
   stand-in Responses server on 127.0.0.1; `tests/open-models.test.js` last test, and a real OpenRouter
-  run): the model requests arrive with the key; the agent's `curl https://example.com` fails to resolve,
+  run): the model requests arrive with the key (added by the proxy); the agent's `curl https://example.com` fails to resolve,
   its `curl` to the stand-in server's own port is refused, `cat config.json` and `~/.zshrc` are
   "Operation not permitted", writes to another site's folder are refused, its own site's folder and
-  `trif` (through the mailbox) work, and `$OPENROUTER_API_KEY` is empty.
-- **Before a run** (`prepare`): no key found → error naming the variable and the fix; a local server
+  `trif` (through the mailbox) work, `$OPENROUTER_API_KEY` is empty, and a scan of every same-user
+  process's arguments and environment (python3 ctypes, KERN_PROCARGS2) doesn't find the key.
+- **Before a run** (`prepare`): no key found → error naming the variable and the fix; an Ollama or LM
+  Studio server with no model picked → the provider's default if installed, else the first installed
+  recommended model, else the first installed (what `agent.models` reports as `default`); a local server
   that doesn't answer (`/api/tags` for Ollama, `/v1/models` otherwise, 3 s) → "Ollama isn't running";
   an Ollama model that isn't installed → "run `ollama pull <model>`". Codex isn't started in those cases.
 - **Models** (`agent.models`, cached 5 s, keyed by provider): local → the server's installed models,
   recommended ones first (`gpt-oss:20b`, `gpt-oss:120b`, `qwen3-coder:30b`, `qwen3.6:27b`, `devstral`,
   `gemma4`, matched loosely so LM Studio's names count); OpenRouter → a short fixed list
   (`openai/gpt-oss-120b`, `qwen/qwen3-coder`, `deepseek/deepseek-v4.1-flash`, `z-ai/glm-5.3`,
-  `moonshotai/kimi-k2.7-code`), no network; custom → none. Always `custom: true` ("Other…").
+  `moonshotai/kimi-k2.7-code`), no network; custom → none. Always `custom: true` ("Other…"). `default` is
+  the model a run with none picked would use (for a local server, as in `prepare` below).
 - **Errors** are reworded for the provider (codex.js `parse` takes `state.friendly`): 401 → the key in
   `<VAR>` was refused; 402 → out of credit; Ollama's "not found, try pulling it" → `ollama pull`;
   connection refused → not running. Codex's "Model metadata for `<model>` not found" warning (every

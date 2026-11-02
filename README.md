@@ -158,8 +158,12 @@ Then in Settings pick From: OpenRouter, and a model (the cheapest, gpt-oss-120b,
 per message in testing; Qwen3-Coder 480B about 5 cents). TRIF stores only the variable's name
 (`OPENROUTER_API_KEY`, or another name in "Key in"). Chrome doesn't see your shell profile, so before each
 chat the helper asks your login shell for that one variable (`zsh -l -i -c`, as when you open a terminal)
-and hands it to Codex alone: your agent's commands can't see it, and it's kept out of TRIF's logs. A
-**Custom URL** works the same way for any server that speaks OpenAI's Responses API.
+and keeps it in memory: it adds the key to Codex's requests itself (through a small proxy on your Mac
+that only lives for the chat), so neither Codex nor your agent's commands ever get it, and it's kept out
+of TRIF's logs. (One limit: on a Mac any program can read the environment other programs of yours
+started with, so programs you start from a terminal, where the key is exported, carry it where a chat's
+agent could read it. Start Chrome from the Dock, and keep a spending limit on the key.) A **Custom URL** works the same way for any server that speaks OpenAI's
+Responses API; with a key, its address must be `https://` unless it's on this computer.
 
 `trif doctor` checks the setup: Ollama or LM Studio running, the model installed, the key variable set
 (without showing it).

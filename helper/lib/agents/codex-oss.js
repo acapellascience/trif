@@ -4,9 +4,11 @@
 // provider (OpenRouter, or any base URL) instead of OpenAI.
 //
 //   codex exec <codex.js flags, the same permission profile>
-//              -c model_providers.trif-open={ name = "…", base_url = "…", wire_api = "responses"[, env_key = "NAME"] … }
+//              -c model_providers.trif-open={ name = "…", base_url = "…", wire_api = "responses" … }
 //              -c model_provider="trif-open" -c web_search="disabled"
 //              [-c shell_environment_policy.exclude=["NAME"]] -m MODEL [resume THREAD_ID] -- PROMPT
+//
+// (base_url: the provider's, or for a provider with a key, the run's key proxy: see "The API key".)
 //
 // One custom provider for every source, not `--oss --local-provider`: Codex 0.166's `exec --oss` fails
 // ("This chat uses ollama, but your current provider is openai") unless model_provider is set too, and it
@@ -18,17 +20,26 @@
 // server on 127.0.0.1: the model requests arrive, the agent's own curl to the same server is refused).
 //
 // The API key (hosted): config.json holds only the NAME of the variable (`keyEnv`). Before each run the
-// helper reads it from its own environment or the user's login shell (shellenv.js), gives it to Codex in
-// Codex's environment only, and tells Codex not to pass it to the commands it runs
-// (shell_environment_policy.exclude). The sandbox keeps those commands away from the shell profile files
-// (they're in the home folder), from `ps -E` and from config.json. runs.js redacts the value from run logs.
+// helper reads it from its own environment or the user's login shell (shellenv.js) and keeps it in its own
+// memory: Codex never gets it. Instead the helper starts a proxy for the run (keyproxy.js) on 127.0.0.1,
+// at a random path, which adds the key and forwards to the provider; Codex's base_url is that proxy. (Codex
+// used to get the key in its environment, excluded from its commands' environment; but a command can read
+// any same-user process's environment and arguments with sysctl KERN_PROCARGS2, sandbox or not.) The
+// sandbox keeps the commands away from the shell profile files (in the home folder), from config.json and
+// from the network (the proxy included); shell_environment_policy.exclude keeps the variable out of the
+// environment Codex gives them (it snapshots the user's login shell, profile and all, outside the
+// sandbox). runs.js redacts the value from run logs.
 //
 // Settings: config.json `openModel` = {provider, model, baseUrl, keyEnv}, the defaults; agent.start's
 // `openModel` (same shape) overrides them for one run, and agent.start's `model` beats both.
 
 const codex = require('./codex');
-const { lookupEnvVar, validName } = require('../shellenv');
+const { lookupEnvVar, keyNameProblem, forget: forgetEnvVar } = require('../shellenv');
+const { startKeyProxy } = require('../keyproxy');
 const { oneLine } = require('./util');
+
+// API keys config.json may pass to the other agents (index.js PASSED_KEYS; not required here, to avoid a cycle).
+const PASSED_KEYS = ['ANTHROPIC_API_KEY', 'OPENAI_API_KEY'];
 
 const PROVIDER_ID = 'trif-open';
 
@@ -70,17 +81,29 @@ function cleanModel(m) {
   return t && t.length <= MAX_MODEL && !/[\s\0-\x1f]/.test(t) ? t : '';
 }
 
+/** Whether a server address is on this computer (the loopback interface). */
+function isLoopback(u) {
+  let host;
+  try { host = new URL(u).hostname.toLowerCase(); } catch { return false; }
+  return host === 'localhost' || host === '[::1]' || /^127(\.\d{1,3}){3}$/.test(host);
+}
+
 /** config.json's openModel, checked: {provider, model, baseUrl, keyEnv} ('' where unset). */
 function normalize(cfg) {
   const c = cfg && typeof cfg === 'object' && !Array.isArray(cfg) ? cfg : {};
   const provider = Object.prototype.hasOwnProperty.call(PROVIDERS, c.provider) ? c.provider : 'ollama';
-  return { provider, model: cleanModel(c.model), baseUrl: cleanUrl(c.baseUrl), keyEnv: validName(c.keyEnv) ? c.keyEnv : '' };
+  return { provider, model: cleanModel(c.model), baseUrl: cleanUrl(c.baseUrl), keyEnv: c.keyEnv && !keyNameProblem(c.keyEnv) ? c.keyEnv : '' };
 }
 
 /**
  * What a run uses: the stored defaults, then a run's own choice (same shape; a different provider starts
  * from that provider's defaults), then agent.start's `model`. Provider defaults fill the gaps.
- * {provider, name, local, model, baseUrl, keyEnv}; `error` when it can't run (a custom provider with no URL).
+ * {provider, name, local, server, model, modelChosen, baseUrl, keyEnv}; `error` when it can't run (a custom
+ * provider with no URL, or a key that would go over plain http to another computer).
+ *   local        the model runs on this computer: a local provider at a loopback address (an Ollama
+ *                pointed elsewhere isn't local; the panel only says "nothing leaves it" when it is)
+ *   server       an Ollama or LM Studio server (wherever it is): its installed models can be listed
+ *   modelChosen  the model was picked (stored, the run's, or agent.start's), not the provider's default
  */
 function resolve(stored, override, model) {
   const s = normalize(stored);
@@ -91,32 +114,54 @@ function resolve(stored, override, model) {
     r = n;
   }
   const p = PROVIDERS[r.provider];
+  const chosen = cleanModel(model) || r.model;
+  const baseUrl = r.baseUrl || p.baseUrl;
   const out = {
-    provider: r.provider, name: p.name, local: p.local,
-    model: cleanModel(model) || r.model || p.defaultModel,
-    baseUrl: r.baseUrl || p.baseUrl,
+    provider: r.provider, name: p.name, local: p.local && isLoopback(baseUrl), server: p.local,
+    model: chosen || p.defaultModel, modelChosen: !!chosen,
+    baseUrl,
     keyEnv: r.keyEnv || p.keyEnv,
     error: null,
   };
   if (!out.baseUrl) out.error = 'no server address set for the open model: set one in the side panel’s Settings (or `trif agent open-model --base-url <url>`)';
+  else if (insecureKey(out)) out.error = insecureKey(out);
   else if (!out.model) out.error = 'no model chosen for the open model: pick one in the side panel’s Settings (or `trif agent open-model --model <name>`)';
   return out;
+}
+
+/** Why a key can't be sent to this server ('' when it can): plain http to another computer would show it to the network. */
+function insecureKey({ baseUrl, keyEnv }) {
+  if (!keyEnv || !baseUrl || isLoopback(baseUrl) || !/^http:/i.test(baseUrl)) return '';
+  return `the server address must start with https:// when an API key is sent (${keyEnv}): over http:// to another computer the key would cross the network readable`;
+}
+
+/**
+ * The model a local server run uses when none was picked: the provider's default if installed, else the
+ * first installed recommended model, else the first installed (orderLocal's first), else the default.
+ */
+function isInstalled(model, names) { return names.some((n) => n === model || n === `${model}:latest`); }
+function localModel(om, names) {
+  if (om.modelChosen || !Array.isArray(names) || !names.length || isInstalled(om.model, names)) return om.model;
+  return orderLocal(names)[0].id;
 }
 
 const tomlStr = (s) => JSON.stringify(String(s)); // a JSON string is a valid TOML basic string here
 
 /** The -c values that point Codex at the provider. */
 function providerArgs(om) {
-  const fields = [`name = ${tomlStr(`${om.name} (TRIF)`)}`, `base_url = ${tomlStr(om.baseUrl)}`, 'wire_api = "responses"'];
-  if (om.keyEnv) fields.push(`env_key = ${tomlStr(om.keyEnv)}`);
+  // No env_key: Codex never has the key (the run's key proxy adds it; see "The API key" above).
+  const fields = [`name = ${tomlStr(`${om.name} (TRIF)`)}`, `base_url = ${tomlStr(om.proxyUrl || om.baseUrl)}`, 'wire_api = "responses"'];
   // HTTPS only: Codex otherwise tries a WebSocket first, and a server without one (OpenRouter, Ollama)
   // costs a round of retries ("Reconnecting... n/5") before it falls back, sometimes minutes.
   fields.push('supports_websockets = false');
   // Local models can take minutes to load before the first token; and fail fast when nothing listens.
-  if (om.local) fields.push('stream_idle_timeout_ms = 900000', 'request_max_retries = 1', 'stream_max_retries = 1');
+  if (om.server) fields.push('stream_idle_timeout_ms = 900000', 'request_max_retries = 1', 'stream_max_retries = 1');
   const args = ['-c', `model_providers.${PROVIDER_ID}={ ${fields.join(', ')} }`, '-c', `model_provider="${PROVIDER_ID}"`,
     // OpenAI's hosted web search tool: no other provider has it.
     '-c', 'web_search="disabled"'];
+  // Still needed with the key proxy: Codex builds its commands' environment from a snapshot of the user's
+  // login shell, taken by Codex itself (outside the sandbox), so a key exported in ~/.zshrc would reach
+  // them that way (seen with Codex 0.166 and a stand-in profile). This keeps that variable out.
   if (om.keyEnv) args.push('-c', `shell_environment_policy.exclude=[${tomlStr(om.keyEnv)}]`);
   return args;
 }
@@ -139,7 +184,7 @@ function friendlyFor(om) {
       return om.provider === 'ollama' ? `${om.model} isn't installed in Ollama: run \`ollama pull ${om.model}\` in a terminal` : `${om.name} doesn't have the model ${om.model}: pick another in Settings (${oneLine(m, 160)})`;
     }
     if (/connection refused|error sending request|tcp connect|failed to connect|dns error|connect error/i.test(m)) {
-      return om.local ? `${om.name} isn't running (nothing answers at ${om.baseUrl}): open the ${om.name} app${om.provider === 'ollama' ? ' (or run `ollama serve`)' : ' and start its server'}, then try again`
+      return om.server ? `${om.name} isn't running (nothing answers at ${om.baseUrl}): open the ${om.name} app${om.provider === 'ollama' ? ' (or run `ollama serve`)' : ' and start its server'}, then try again`
         : `couldn't reach ${om.baseUrl}: ${oneLine(m, 200)}`;
     }
     return m;
@@ -203,7 +248,7 @@ const adapter = {
   note: '',
   missing: 'Open models run through Codex, which isn\'t installed or can\'t be found. Install it (brew install codex), ' +
     'then run `trif setup` in the same terminal so the helper finds it. (No OpenAI account needed for open models.)',
-  PROVIDERS, RECOMMENDED_LOCAL, OPENROUTER_MODELS, normalize, resolve, providerArgs, parseModelList, orderLocal, friendlyFor, installedModels,
+  PROVIDERS, RECOMMENDED_LOCAL, OPENROUTER_MODELS, normalize, resolve, providerArgs, parseModelList, orderLocal, friendlyFor, installedModels, isLoopback, localModel,
 
   detect(opts) {
     const d = codex.detect(opts);
@@ -213,16 +258,17 @@ const adapter = {
   // The model picker: what's installed locally (recommended first), or a short list for OpenRouter. Never
   // the network for hosted providers. `custom: true` always: "Other…" takes any name.
   async listModels({ config, openModel, fetchImpl }) {
+    // `default`: what a run with no model picked uses (resolve, and for a local server localModel).
     const om = resolve(config && config.openModel, openModel);
     const p = PROVIDERS[om.provider];
-    if (om.provider === 'openrouter') return { models: OPENROUTER_MODELS, default: om.model || p.defaultModel, custom: true, error: null, note: '' };
-    if (!p.local) return { models: [], default: om.model || null, custom: true, error: null, note: `Type the model name ${om.baseUrl || 'your server'} expects.` };
+    if (om.provider === 'openrouter') return { models: OPENROUTER_MODELS, default: om.model || null, custom: true, error: null, note: '' };
+    if (!om.server) return { models: [], default: om.model || null, custom: true, error: null, note: `Type the model name ${om.baseUrl || 'your server'} expects.` };
     const r = await installedModels(om, { fetchImpl });
     if (r.error) return { models: [], default: null, custom: true, error: `${p.name} isn't running at ${om.baseUrl} (${r.error}): open the ${p.name} app${om.provider === 'ollama' ? ', or run `ollama serve`' : ' and start its server'}`, note: '' };
     const models = orderLocal(r.names);
     const pull = om.provider === 'ollama' ? 'run `ollama pull gpt-oss:20b` (about 14 GB; needs 16 GB of memory free)' : 'download one in LM Studio (gpt-oss 20B is a good start)';
     return {
-      models, default: models[0] ? models[0].id : null, custom: true, error: null,
+      models, default: models.length ? localModel(om, r.names) : null, custom: true, error: null,
       note: models.length ? (models[0].description ? '' : `None of the recommended models is installed (${RECOMMENDED_LOCAL.join(', ')}).`) : `No models installed in ${p.name} yet: ${pull}.`,
     };
   },
@@ -232,27 +278,43 @@ const adapter = {
   /**
    * Before the run (runs.js, async): settle the provider and model, find the key, and check a local
    * server is up and has the model (fast, clear errors instead of Codex's retries). Throws a user-facing
-   * Error. Returns {env, secrets, state, options}: env goes to Codex only; secrets are redacted from logs.
+   * Error. Returns {env, unsetEnv, secrets, state, options, cleanup}: the key goes into no environment;
+   * with a key, a proxy that adds it is started (keyproxy.js) and `cleanup` closes it (runs.js calls it
+   * when the run ends); secrets are redacted from logs. API keys the user put in config.json for Claude
+   * Code and Codex (`unsetEnv`) aren't passed to this agent: it doesn't need them.
    */
-  async prepare({ ws, model, openModel, env = process.env, lookup = lookupEnvVar, fetchImpl }) {
+  async prepare({ ws, model, openModel, env = process.env, lookup = lookupEnvVar, forget = forgetEnvVar, fetchImpl, logger }) {
     const om = resolve(ws && ws.config && ws.config.openModel, openModel, model);
     if (om.error) throw new Error(om.error);
-    const extraEnv = {};
     const secrets = [];
+    let key = null;
     if (om.keyEnv) {
       const k = await lookup(om.keyEnv, { env });
       if (!k.value) throw new Error(`${om.keyEnv} isn't set (${k.error || 'not found'}): ${keyHelp(om)}`);
-      extraEnv[om.keyEnv] = k.value;
+      key = k.value;
       secrets.push(k.value);
     }
-    if (om.local) {
+    if (om.server) {
       const r = await installedModels(om, { fetchImpl });
       if (r.error) throw new Error(friendlyFor(om)(`connection refused (${r.error})`));
-      if (om.provider === 'ollama' && r.names.length && !r.names.some((n) => n === om.model || n === `${om.model}:latest`)) {
+      om.model = localModel(om, r.names); // (no model picked: one that's installed, as listModels offers)
+      if (om.provider === 'ollama' && r.names.length && !isInstalled(om.model, r.names)) {
         throw new Error(friendlyFor(om)('model not found, try pulling it first'));
       }
     }
-    return { env: extraEnv, secrets, state: { friendly: friendlyFor(om), openModel: om, providerName: om.name }, options: { openModel: om } };
+    let proxy = null;
+    if (key) {
+      // A refused key (401) isn't kept: the next run looks it up again (the user may have just fixed it).
+      const onStatus = (status) => { if (status === 401) forget(om.keyEnv); };
+      try { proxy = await startKeyProxy({ target: om.baseUrl, key, logger, onStatus }); } catch (e) { throw new Error(`couldn't start the key proxy for ${om.name}: ${e.message}`); }
+    }
+    const forCodex = proxy ? { ...om, proxyUrl: proxy.url } : om;
+    return {
+      env: {}, unsetEnv: [...PASSED_KEYS, ...(om.keyEnv ? [om.keyEnv] : [])], secrets,
+      state: { friendly: friendlyFor(om), openModel: om, providerName: om.name },
+      options: { openModel: forCodex },
+      cleanup: proxy ? () => proxy.close() : null,
+    };
   },
 
   // writable / readOnly / denied: as codex.js. openModel: from prepare (resolve()).
@@ -293,17 +355,18 @@ adapter.doctorChecks = async function doctorChecks(ws, { codexVersion, env = pro
   if (om.error) { add('warn', `${label}: ${om.error}`); return out; }
   if (codexVersion && codex.tooOld(codexVersion)) add('warn', `${label}: Codex ${codexVersion} is too old`, 'brew upgrade codex');
   if (om.keyEnv) {
-    const k = await lookup(om.keyEnv, { env });
+    const k = await lookup(om.keyEnv, { env, fresh: true }); // (a check looks again, past the cache)
     if (k.value) add('ok', `${label}: ${om.keyEnv} is set (${k.source === 'helper' ? 'in this environment' : 'in your shell profile'}; not shown)`);
     else add('warn', `${label}: ${om.keyEnv} isn't set, so runs can't reach ${om.name}`, keyHelp(om));
-  } else if (!om.local) {
+  } else if (!om.server) {
     add('info', `${label}: no API key variable set (fine if ${om.baseUrl} needs none)`);
   }
-  if (om.local) {
+  if (om.server) {
     const r = await installedModels(om, { fetchImpl });
     const app = PROVIDERS[om.provider].name;
+    if (!r.error) om.model = localModel(om, r.names);
     if (r.error) add('warn', `${label}: ${app} isn't reachable at ${om.baseUrl} (${r.error})`, om.provider === 'ollama' ? 'open the Ollama app, or run `ollama serve` (install: brew install ollama)' : 'open LM Studio and start its server (Developer tab, or `lms server start`)');
-    else if (om.provider === 'ollama' && !r.names.some((n) => n === om.model || n === `${om.model}:latest`)) add('warn', `${label}: ${om.model} isn't installed in Ollama`, `ollama pull ${om.model}`);
+    else if (om.provider === 'ollama' && !isInstalled(om.model, r.names)) add('warn', `${label}: ${om.model} isn't installed in Ollama`, `ollama pull ${om.model}`);
     else add('ok', `${label}: ${app} is running${r.names.length ? ` (${r.names.length} model${r.names.length === 1 ? '' : 's'} installed)` : ''}`);
   }
   return out;
@@ -316,11 +379,11 @@ adapter.settings = async function settings(ws, { check = false, env = process.en
   const effective = resolve(stored);
   const out = {
     openModel, configured: !!stored,
-    effective: { provider: effective.provider, model: effective.model, baseUrl: effective.baseUrl, keyEnv: effective.keyEnv },
+    effective: { provider: effective.provider, model: effective.model, baseUrl: effective.baseUrl, keyEnv: effective.keyEnv, local: effective.local, error: effective.error },
     providers: Object.entries(PROVIDERS).map(([id, p]) => ({ id, label: p.label, local: p.local, baseUrl: p.baseUrl, keyEnv: p.keyEnv, defaultModel: p.defaultModel })),
   };
   if (check && effective.keyEnv) {
-    const k = await lookup(effective.keyEnv, { env });
+    const k = await lookup(effective.keyEnv, { env, fresh: true }); // (a check looks again, past the cache)
     out.key = { name: effective.keyEnv, found: !!k.value, source: k.source, error: k.value ? null : k.error };
   }
   return out;
@@ -348,9 +411,11 @@ adapter.saveSettings = function saveSettings(home, input, { setConfigKey = requi
     next.baseUrl = cleanUrl(i.baseUrl);
   }
   if (i.keyEnv !== undefined) {
-    if (i.keyEnv !== '' && !validName(i.keyEnv)) throw new Error('give the NAME of the environment variable holding the key (like OPENROUTER_API_KEY), not the key');
+    if (i.keyEnv !== '' && keyNameProblem(i.keyEnv)) throw new Error(keyNameProblem(i.keyEnv));
     next.keyEnv = i.keyEnv;
   }
+  const insecure = insecureKey(resolve(next));
+  if (insecure) throw new Error(insecure);
   const stored = { provider: next.provider };
   for (const k of ['model', 'baseUrl', 'keyEnv']) if (next[k]) stored[k] = next[k];
   setConfigKey(home, 'openModel', stored);

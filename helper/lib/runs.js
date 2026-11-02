@@ -420,13 +420,17 @@ class Runs {
     }
     // Adapters with something to settle first (codex-oss: the provider, its key, a local server).
     if (adapter.prepare) {
-      adapter.prepare({ ws, model: run.model, openModel: run.openModel }).then((prep) => {
+      adapter.prepare({ ws, model: run.model, openModel: run.openModel, logger: this.logger }).then((prep) => {
+        // (cleanup: what prepare started for the run, the key proxy; _finish calls it.)
+        if (prep && typeof prep.cleanup === 'function') run.cleanup = prep.cleanup;
         if (run.stopped || run.finished) return this._finish(run, { code: null, signal: null });
         run.secrets = (prep && prep.secrets) || [];
         Object.assign(run.state, (prep && prep.state) || {});
         const om = run.state.openModel;
-        if (om) this._log(run, { webmods: 'openModel', provider: om.provider, model: om.model, baseUrl: om.baseUrl, keyEnv: om.keyEnv || null });
-        this._spawn(run, found, { ...env, ...((prep && prep.env) || {}) }, (prep && prep.options) || {});
+        if (om) this._log(run, { webmods: 'openModel', provider: om.provider, model: om.model, baseUrl: om.baseUrl, keyEnv: om.keyEnv || null, keyProxy: !!run.cleanup });
+        const runEnv = { ...env, ...((prep && prep.env) || {}) };
+        for (const k of (prep && prep.unsetEnv) || []) delete runEnv[k];
+        this._spawn(run, found, runEnv, (prep && prep.options) || {});
       }, (e) => {
         this._emit(run, { kind: 'error', message: e.message });
         this._finish(run, { code: null, signal: null });
@@ -571,9 +575,14 @@ class Runs {
   }
 
   _finish(run, { code, signal }) {
-    if (run.finished) return;
+    if (run.finished) {
+      // (prepare may settle after a stop already finished the run: close what it started.)
+      if (run.cleanup) { const c = run.cleanup; run.cleanup = null; Promise.resolve().then(c).catch(() => {}); }
+      return;
+    }
     run.finished = true;
     for (const t of run.timers) clearTimeout(t);
+    if (run.cleanup) { const c = run.cleanup; run.cleanup = null; Promise.resolve().then(c).catch((e) => this.logger.warn(`agent run ${run.id}: cleanup: ${e.message}`)); }
     if (run.stdoutBuf.trim()) { const l = run.stdoutBuf; run.stdoutBuf = ''; this._onLine(run, l); }
     try { run.boxWatcher?.close(); } catch { /* ignore */ }
     if (run.box) setTimeout(() => { try { fs.rmSync(run.box, { recursive: true, force: true }); } catch { /* ignore */ } }, 2000).unref();

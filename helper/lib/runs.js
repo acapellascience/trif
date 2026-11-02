@@ -460,7 +460,8 @@ class Runs {
       this._emit(run, { kind: 'error', message: adapter.missing });
       return this._finish(run, { code: null, signal: null });
     }
-    // Adapters with something to settle first (codex-oss: the provider, its key, a local server).
+    // Adapters with something to settle first (codex-oss: the provider, its key, a local server; claude
+    // and codex: a saved API key's proxy, agentkeys.js).
     if (adapter.prepare) {
       adapter.prepare({ ws, model: run.model, openModel: run.openModel, logger: this.logger }).then((prep) => {
         // (cleanup: what prepare started for the run, the key proxy; _finish calls it.)
@@ -470,6 +471,8 @@ class Runs {
         Object.assign(run.state, (prep && prep.state) || {});
         const om = run.state.openModel;
         if (om) this._log(run, { webmods: 'openModel', provider: om.provider, model: om.model, baseUrl: om.baseUrl, key: om.keyed ? 'keyring' : null, keyProxy: !!run.cleanup });
+        const ak = run.state.apiKey;
+        if (ak) this._log(run, { webmods: 'apiKey', account: ak.account, source: ak.source, keyProxy: !!run.cleanup });
         const runEnv = { ...env, ...((prep && prep.env) || {}) };
         for (const k of (prep && prep.unsetEnv) || []) delete runEnv[k];
         this._spawn(run, found, runEnv, (prep && prep.options) || {});

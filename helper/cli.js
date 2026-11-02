@@ -236,6 +236,14 @@ const handlers = {
       // Only for a person at a terminal (not scripts, tests or --json).
       reveal: !!process.stdout.isTTY && !ctx.json,
     });
+    // API keys left in config.json (before 0.2.1) move to the keyring (agentkeys.js; async, so here).
+    if (r.ws && r.ws.home) {
+      try {
+        const k = await require('./lib/agentkeys').migrateKeys(r.ws.home);
+        const at = r.lines.findIndex((l) => l.startsWith('agents '));
+        if (k.notes.length) r.lines.splice(at === -1 ? r.lines.length : at + 1, 0, ...k.notes.map((n) => `              ${n}`));
+      } catch (e) { r.lines.push(`API keys      couldn't move them out of config.json: ${e.message}`); }
+    }
     if (ctx.json) printJson({ ok: r.ok, home: r.ws.home, mode: r.mode, app: r.root, manifests: r.manifests, node: r.nodePath });
     else out(r.lines.join('\n'));
     if (!r.ok) process.exitCode = 1;
@@ -687,7 +695,8 @@ const handlers = {
     if (sub === 'run') return agentRun(ctx, pos);
     if (sub === 'login') return agentLogin(ctx);
     if (sub === 'open-model') return agentOpenModel(ctx, pos);
-    throw new UsageError(`unknown agent command "${sub}" (use: agent list | agent run | agent login | agent open-model)`);
+    if (sub === 'key') return agentKeyCommand(ctx, pos);
+    throw new UsageError(`unknown agent command "${sub}" (use: agent list | agent run | agent login | agent open-model | agent key)`);
   },
 
   async 'install-example'(ctx, pos) {
@@ -846,6 +855,36 @@ async function agentOpenModel(ctx, pos = []) {
   }
   out('\nUse it: pick "Open model (via Codex)" in the side panel\'s Settings, or trif agent run --agent codex-oss "…".');
   out('Change it: trif agent open-model --provider ollama|lmstudio|openrouter|custom [--model NAME] [--base-url URL] [--set-key | --remove-key]');
+}
+
+// An API key for plain Claude Code or Codex runs (lib/agentkeys.js), for people who use one instead of
+// logging the agent in: saved in the keyring, sent by the run's key proxy, never in the agent's
+// environment. Like open-model keys: from stdin or a no-echo prompt, never the command line.
+async function agentKeyCommand(ctx, pos = []) {
+  const keys = require('./lib/agentkeys');
+  if (pos.length) throw new UsageError(`unexpected argument${pos.length === 1 ? '' : 's'} to agent key${ctx.opts['--set-key'] ? ': --set-key reads the key from stdin or asks for it; never put a key on the command line (if you just did, consider it seen by other programs and make a new one)' : ''}`);
+  if (ctx.opts['--set-key'] && ctx.opts['--remove-key']) throw new UsageError('--set-key or --remove-key, not both');
+  const id = ctx.opts['--agent'] ? String(ctx.opts['--agent']) : 'claude';
+  if (!keys.AGENT_KEYS[id]) throw new UsageError(`--agent takes ${Object.keys(keys.AGENT_KEYS).join(' or ')} (open models: trif agent open-model --set-key)`);
+  const s = keys.AGENT_KEYS[id];
+  if (ctx.opts['--set-key']) {
+    const key = process.stdin.isTTY ? await promptHidden(`${s.name} API key (not shown): `) : await readStdin();
+    try { await keys.setAgentKey(id, key); } catch (e) { throw new UsageError(e.message); }
+    if (!ctx.json) out(`Saved the ${s.name} API key in ${require('./lib/keyring').backend().name}.`);
+  } else if (ctx.opts['--remove-key']) {
+    try {
+      const r = await keys.removeAgentKey(id);
+      if (!ctx.json) out(r.removed ? `Removed the ${s.name} API key.` : `There was no ${s.name} API key saved.`);
+    } catch (e) { throw new UsageError(e.message); }
+  }
+  const ws = P.workspace(ctx.ws.home);
+  const h = await keys.hasAgentKey(id, { config: ws.config });
+  if (ctx.json) return printJson({ agent: id, account: s.account, stored: h.stored, source: h.source, error: h.error });
+  const kr = require('./lib/keyring').backend();
+  out(`${id === 'claude' ? 'Claude Code' : 'Codex'}: ${h.source === 'keyring' ? `an ${s.name} API key is saved in ${kr.name} (not shown); side-panel runs send it through a key proxy`
+    : h.source === 'config' ? `an ${s.name} API key is in config.json (${s.envVar}); run trif setup to move it to ${kr ? kr.name : 'a keyring'}`
+      : `no ${s.name} API key saved: runs use ${id === 'claude' ? 'Claude Code' : 'Codex'}'s own login${h.error ? ` (${h.error})` : ''}`}`);
+  if (h.source !== 'keyring') out(`Save one (most people log in instead): trif agent key --agent ${id} --set-key`);
 }
 
 // A line typed at the terminal without echoing it (the API key). Ctrl-C or Ctrl-D cancels.

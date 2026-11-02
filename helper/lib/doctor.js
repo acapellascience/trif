@@ -310,7 +310,9 @@ async function doctor(opts = {}) {
       continue;
     }
     add('ok', `${label} ${a.version || ''} (${a.path})`.replace(/ {2,}/g, ' '));
-    if (adapter.loginStatus) {
+    // (A saved API key counts as logged in: runs use it through a key proxy; listed below.)
+    const keyed = require('./agentkeys').AGENT_KEYS[a.id] ? (await require('./agentkeys').hasAgentKey(a.id, { config: ws.config })).stored : false;
+    if (adapter.loginStatus && !keyed) {
       const st = adapter.loginStatus({ path: a.path, env, cwd: fs.existsSync(ws.home) ? ws.home : undefined });
       if (st.loggedIn === true) add('ok', `${a.name} is logged in${st.detail ? ` (${st.detail})` : ''}`);
       else if (st.loggedIn === false) add('warn', `${a.name} isn't logged in, so the side panel can't use it`, adapter.loginFix);
@@ -320,6 +322,8 @@ async function doctor(opts = {}) {
   const oss = listed.agents.find((a) => a.id === 'codex-oss');
   if (oss && !oss.available && ws.config.openModel) add('warn', 'Open model: set up, but it runs through Codex, which isn\'t available', agents.getAdapter('codex-oss').missing);
   else if (oss && oss.available) for (const c of await agents.getAdapter('codex-oss').doctorChecks(ws, { codexVersion: oss.version })) add(c.status, c.title, c.fix);
+  // API keys for plain Claude Code / Codex runs: in the keyring, or still in config.json (agentkeys.js).
+  for (const c of await require('./agentkeys').doctorChecks(ws)) add(c.status, c.title, c.fix);
   // API keys exported in the shell profile: readable by every same-user process (sysctl KERN_PROCARGS2),
   // an agent's sandboxed commands included. Only their presence is checked.
   const keyVars = agents.getAdapter('codex-oss').keyVarsCheck(process.env);

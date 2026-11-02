@@ -91,6 +91,12 @@ function runSettings({ workspace = '', readOnly = [], lockedDirs = [], denied = 
 
 const NOT_LOGGED_IN = "Claude Code isn't logged in: run `claude` in a terminal and log in (type /login)";
 
+// With an Anthropic API key saved (agentkeys.js): the run's key proxy as ANTHROPIC_BASE_URL and a
+// placeholder key; the real key never reaches Claude Code. Without one: Claude Code's own login.
+async function prepare({ ws, logger }) {
+  return (await require('../agentkeys').prepareAgentKey('claude', { ws, logger })) || {};
+}
+
 const adapter = {
   id: 'claude',
   allowedTools: ALLOWED_TOOLS,
@@ -99,6 +105,7 @@ const adapter = {
   binary: 'claude',
   systemPrompt: true, // context goes in --append-system-prompt on every run
   readsInstructions: true, // the workspace's CLAUDE.md imports instructions.md
+  prepare,
   missing: "Claude Code isn't installed, or the helper can't find it. Install it (https://claude.com/claude-code), " +
     'then run `trif setup` in the same terminal so the helper finds it.',
 

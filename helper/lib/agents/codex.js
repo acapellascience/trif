@@ -29,10 +29,16 @@
 
 const { findExecutable, versionOf, relToWorkspace, oneLine, parseJsonLine, captureSync, capture } = require('./util');
 
-const NOT_LOGGED_IN = "Codex isn't logged in: run `codex login` in a terminal (or set OPENAI_API_KEY under \"env\" in the workspace's config.json)";
+const NOT_LOGGED_IN = "Codex isn't logged in: run `codex login` in a terminal (or save an OpenAI API key: trif agent key --agent codex --set-key)";
 const AUTH_RE = /not logged in|unauthori[sz]ed|\b401\b|please (run )?`?codex login|missing (api key|credentials)/i;
 
 const PROFILE = 'trif-run';
+// Codex builds its commands' environment from a snapshot of the user's login shell, taken by Codex itself
+// (outside the sandbox), so a key still exported in ~/.zshrc would reach them that way (seen with Codex
+// 0.166 and a stand-in profile). TRIF's own keys are never there (keyring); these case-insensitive globs
+// keep out the usual API key variables a profile may still export. (Not *TOKEN*: TRIF_RUN_TOKEN must get
+// through.)
+const EXCLUDED_VARS = ['*_API_KEY', '*_API_TOKEN', '*_ACCESS_TOKEN', '*_AUTH_TOKEN', '*_SECRET_KEY'];
 const MIN_VERSION = [0, 138, 0]; // permission profiles
 
 const tomlKey = (s) => JSON.stringify(String(s)); // a JSON string is a valid TOML basic string here
@@ -109,7 +115,8 @@ const adapter = {
   command({ bin, prompt, sessionId, model, readable = [], writable = [], readOnly = [], denied = [], lockedDirs = [], config = [] }) {
     // Exec options go before the `resume` subcommand (verified with Codex 0.166).
     const args = ['exec', '--json', '--skip-git-repo-check', '--ignore-user-config', '--ignore-rules',
-      '-c', 'approval_policy="never"', '-c', `default_permissions="${PROFILE}"`, '-c', `permissions=${permissionsToml({ readable, writable, readOnly, denied })}`, ...config];
+      '-c', 'approval_policy="never"', '-c', `default_permissions="${PROFILE}"`, '-c', `permissions=${permissionsToml({ readable, writable, readOnly, denied })}`, ...config,
+      '-c', `shell_environment_policy.exclude=[${EXCLUDED_VARS.map(tomlKey).join(', ')}]`];
     if (model) args.push('-m', model);
     if (sessionId) args.push('resume', sessionId);
     // The message on stdin (`-`), not in argv, which any same-user process can read (`ps`, sysctl
@@ -206,7 +213,14 @@ function toolEvent(item, workspace) {
   }
 }
 
+// With an OpenAI API key saved (agentkeys.js): the run's key proxy, as a provider of its own; the key
+// never reaches Codex. Without one: Codex's own login.
+adapter.prepare = async function prepare({ ws, logger }) {
+  return (await require('../agentkeys').prepareAgentKey('codex', { ws, logger })) || {};
+};
+
 module.exports = adapter;
 adapter.permissionsToml = permissionsToml;
+adapter.EXCLUDED_VARS = EXCLUDED_VARS;
 adapter.tooOld = tooOld;
 module.exports.NOT_LOGGED_IN = NOT_LOGGED_IN;

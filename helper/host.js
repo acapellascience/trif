@@ -85,6 +85,11 @@ const state = {
 
 logger.info(`host ${VERSION} starting (node ${process.version}, home ${ws.home}, mods ${ws.modsDir}, args ${JSON.stringify(process.argv.slice(2))})`);
 for (const n of privateMigration.notes) logger.info(n);
+// API keys left in config.json (before 0.2.1) move to the keyring (lib/agentkeys.js), in the background.
+require('./lib/agentkeys').migrateKeys(ws.home).then((k) => {
+  for (const n of k.notes) logger.info(n);
+  if (k.moved.length || k.left.length) { ws.config = workspace(ws.home).config; agents.forgetLoginStatus(); }
+}, (e) => logger.warn(`couldn't move API keys out of config.json: ${e.message}`));
 for (const e of privateMigration.errors) logger.warn(`couldn't move the private files out of the workspace: ${e}`);
 if (ws.privateError) logger.warn(ws.privateError);
 if (ws.configError) logger.warn(ws.configError);

@@ -257,7 +257,7 @@ the header plus helpers for injecting CSS and handling elements that appear late
     examples: ['trif install-example x.com/plain-x'],
   },
   agent: {
-    usage: 'trif agent list | agent run [opts] "<prompt>" | agent login [--agent claude] | agent open-model [opts]',
+    usage: 'trif agent list | agent run [opts] "<prompt>" | agent login [--agent claude] | agent open-model [opts] | agent key [opts]',
     summary: 'list coding agents the side panel can use, run one like the side panel does, or log one in',
     details: `Options for agent run: --agent claude|codex|codex-oss, --tab ID, --url URL, --session ID, --model NAME.
 
@@ -278,10 +278,16 @@ through Codex) gets its model: --provider ollama|lmstudio|openrouter|custom, --m
 (custom servers). Saved in config.json "openModel". --set-key saves the provider's API key in the system
 keyring (the macOS Keychain; secret-tool on Linux), read from stdin or asked for without echo, never from
 the command line; --remove-key removes it. Don't export API keys in your shell profile: every program
-started from a terminal gets them, and other programs can read them.`,
+started from a terminal gets them, and other programs can read them.
+
+agent key [--agent claude|codex] [--set-key | --remove-key] shows, saves or removes an API key for plain
+Claude Code (Anthropic) or Codex (OpenAI) runs, for those who use one instead of logging the agent in.
+Kept in the system keyring like open-model keys (stdin or a no-echo prompt, never the command line), and
+sent by a proxy the helper runs for each chat: the agent never has it.`,
     examples: ['trif agent list', 'trif agent run --url https://x.com/home "hide the trending sidebar"',
       'trif agent run --tab 12 --session 1b2c… "also hide Who to follow"', 'trif agent login',
-      'trif agent open-model --provider openrouter --model qwen/qwen3-coder', 'trif agent open-model --provider openrouter --set-key'],
+      'trif agent open-model --provider openrouter --model qwen/qwen3-coder', 'trif agent open-model --provider openrouter --set-key',
+      'trif agent key --agent codex --set-key'],
   },
   help: {
     usage: 'trif help [command]',

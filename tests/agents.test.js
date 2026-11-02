@@ -539,7 +539,7 @@ test('agent.start with sessionId passes --resume; unchanged files give empty cha
   assert.equal(a[a.indexOf('--model') + 1], 'sonnet');
 });
 
-test('agent env is sanitized: no inherited CLAUDE*/ANTHROPIC_*/CODEX_*, API key only from config', async () => {
+test('agent env is sanitized: no inherited CLAUDE*/ANTHROPIC_*/CODEX_*, never an API key (a key proxy instead)', async () => {
   const { home, bin } = makeHome({ config: { env: { ANTHROPIC_API_KEY: 'from-config', SOMETHING_ELSE: 'no' } } });
   const ext = startHost(home, {
     CLAUDECODE: '1', CLAUDE_CODE_ENTRYPOINT: 'cli', ANTHROPIC_BASE_URL: 'https://evil', ANTHROPIC_API_KEY: 'inherited',
@@ -548,9 +548,13 @@ test('agent env is sanitized: no inherited CLAUDE*/ANTHROPIC_*/CODEX_*, API key 
   const r = await extRequest(ext, 'agent.start', { ...START, prompt: 'ENVDUMP' });
   await waitDone(ext, r.result.runId);
   const env = callFor(bin, 'ENVDUMP').env;
-  const leaked = Object.keys(env).filter((k) => /^(CLAUDE|ANTHROPIC_|CODEX_)/.test(k) && k !== 'ANTHROPIC_API_KEY');
+  const leaked = Object.keys(env).filter((k) => /^(CLAUDE|ANTHROPIC_|CODEX_)/.test(k) && !['ANTHROPIC_API_KEY', 'ANTHROPIC_BASE_URL'].includes(k));
   assert.deepEqual(leaked, []);
-  assert.equal(env.ANTHROPIC_API_KEY, 'from-config');
+  // config.json's key (no keyring here to move it to): sent by the run's key proxy; the agent gets a
+  // placeholder and the proxy's address, never the key or an inherited base URL.
+  assert.ok(!JSON.stringify(callFor(bin, 'ENVDUMP')).includes('from-config'));
+  assert.equal(env.ANTHROPIC_API_KEY, require('../helper/lib/agentkeys').PLACEHOLDER);
+  assert.match(env.ANTHROPIC_BASE_URL, /^http:\/\/127\.0\.0\.1:\d+\/[0-9a-f]{32}$/);
   assert.equal(env.OPENAI_API_KEY, undefined);
   assert.equal(env.SECRET_TOKEN, undefined);
   assert.equal(env.SOMETHING_ELSE, undefined);

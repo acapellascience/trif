@@ -40,7 +40,7 @@ const keyring = require('../keyring');
 const { startKeyProxy } = require('../keyproxy');
 const { oneLine } = require('./util');
 
-// API keys config.json may pass to the other agents (index.js PASSED_KEYS; not required here, to avoid a cycle).
+// API key variables never given to this agent (index.js agentEnv gives none since 0.2.1; kept as a guard).
 const PASSED_KEYS = ['ANTHROPIC_API_KEY', 'OPENAI_API_KEY'];
 
 const PROVIDER_ID = 'trif-open';
@@ -172,14 +172,11 @@ function providerArgs(om) {
   const args = ['-c', `model_providers.${PROVIDER_ID}={ ${fields.join(', ')} }`, '-c', `model_provider="${PROVIDER_ID}"`,
     // OpenAI's hosted web search tool: no other provider has it.
     '-c', 'web_search="disabled"'];
-  // Codex builds its commands' environment from a snapshot of the user's login shell, taken by Codex
-  // itself (outside the sandbox), so a key still exported in ~/.zshrc would reach them that way (seen with
-  // Codex 0.166 and a stand-in profile). TRIF's own key is never there (keyring); this keeps out the
-  // usual API key variables a profile may still export. (Not *TOKEN*: TRIF_RUN_TOKEN must get through.)
-  args.push('-c', `shell_environment_policy.exclude=[${EXCLUDED_VARS.map(tomlStr).join(', ')}]`);
+  // (shell_environment_policy.exclude, keeping API key variables a shell profile still exports from the
+  // commands: codex.js adds it to every Codex run.)
   return args;
 }
-const EXCLUDED_VARS = ['*_API_KEY', '*_API_TOKEN', '*_ACCESS_TOKEN', '*_AUTH_TOKEN', '*_SECRET_KEY'];
+const { EXCLUDED_VARS } = codex;
 
 function keyHelp(om) {
   return `paste your ${om.name} API key in the side panel’s Settings (it’s kept in ${keyringName()}), or run \`trif agent open-model --set-key\` in a terminal`;

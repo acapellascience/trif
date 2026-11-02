@@ -34,9 +34,9 @@ function uniq(list) { return [...new Set(list.filter((d) => d && path.isAbsolute
 function searchDirs(ws) { return uniq([...recordedPath(ws), ...defaultDirs()]); }
 
 // The environment spawned agents get: nothing inherited from the helper except the basics, so no
-// CLAUDE*/ANTHROPIC_*/CODEX_* leak in from wherever Chrome was started. API keys only when the user
-// put them in config.json -> env.
-const PASSED_KEYS = ['ANTHROPIC_API_KEY', 'OPENAI_API_KEY'];
+// CLAUDE*/ANTHROPIC_*/CODEX_* leak in from wherever Chrome was started. Never an API key: one the user
+// saved (agentkeys.js; config.json env before 0.2.1) reaches the provider through the run's key proxy.
+const PASSED_KEYS = []; // (before 0.2.1: ANTHROPIC_API_KEY, OPENAI_API_KEY from config.json env)
 function agentEnv(ws) {
   const env = {
     PATH: uniq([ws.bin, ...recordedPath(ws), ...defaultDirs()]).join(path.delimiter),
@@ -46,8 +46,6 @@ function agentEnv(ws) {
   };
   for (const k of ['USER', 'LANG']) if (process.env[k]) env[k] = process.env[k];
   if (!env.USER) { try { env.USER = os.userInfo().username; } catch { /* ignore */ } }
-  const cfg = ws.config && ws.config.env && typeof ws.config.env === 'object' ? ws.config.env : {};
-  for (const k of PASSED_KEYS) if (typeof cfg[k] === 'string' && cfg[k]) env[k] = cfg[k];
   return env;
 }
 
@@ -72,20 +70,33 @@ function listAgents(ws, opts = {}) {
 const LOGIN_CACHE_MS = 30000;
 const loginCache = new Map(); // `${id}:${path}` -> {at, value} | {promise}
 
-/** Resolves {loggedIn: true|false|null, detail}. Never rejects. `fresh` skips the cache. */
+/**
+ * Resolves {loggedIn: true|false|null, detail}. Never rejects. `fresh` skips the cache. A saved API key
+ * (agentkeys.js) counts: runs use it whatever the agent's own login says.
+ */
 function loginStatus(adapter, ws, file, { fresh = false } = {}) {
   if (!adapter.loginStatusArgs || !file) return Promise.resolve({ loggedIn: null, detail: '' });
   const key = `${adapter.id}:${file}`;
   const hit = loginCache.get(key);
   if (!fresh && hit && (hit.promise || Date.now() - hit.at < LOGIN_CACHE_MS)) return hit.promise || Promise.resolve(hit.value);
   const cwd = fs.existsSync(ws.home) ? ws.home : undefined;
+  const keys = require('../agentkeys');
   const entry = {};
-  entry.promise = capture(file, adapter.loginStatusArgs, { env: agentEnv(ws), cwd }).then((r) => {
-    let value;
-    try { value = adapter.parseLoginStatus(r); } catch { value = { loggedIn: null, detail: '' }; }
+  entry.promise = (async () => {
+    let value = null;
+    if (keys.AGENT_KEYS[adapter.id]) {
+      try {
+        const h = await keys.hasAgentKey(adapter.id, { config: ws.config });
+        if (h.stored) value = { loggedIn: true, detail: h.source === 'keyring' ? 'API key in the keyring' : 'API key in config.json' };
+      } catch { /* the agent's own login, below */ }
+    }
+    if (!value) {
+      const r = await capture(file, adapter.loginStatusArgs, { env: agentEnv(ws), cwd });
+      try { value = adapter.parseLoginStatus(r); } catch { value = { loggedIn: null, detail: '' }; }
+    }
     if (loginCache.get(key) === entry) loginCache.set(key, { at: Date.now(), value });
     return value;
-  });
+  })();
   loginCache.set(key, entry);
   return entry.promise;
 }

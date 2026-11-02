@@ -492,7 +492,8 @@ class Scenario {
     const before = fs.readFileSync(file, 'utf8');
     const model = this.o.claudeModel || 'haiku';
     if (this.o.agent) {
-      await this.ext(`async (model) => { const { settings = {} } = await chrome.storage.local.get('settings'); settings.agent = 'claude'; settings.models = { ...(settings.models || {}), claude: model }; await chrome.storage.local.set({ settings }); }`, [model]);
+      // This site chat's own agent and model (the panel's Settings write the same).
+      await this.ext(`async (model) => { const { sitePicks = {} } = await chrome.storage.local.get('sitePicks'); sitePicks['x.com'] = { agent: 'claude', models: { claude: model } }; await chrome.storage.local.set({ sitePicks }); }`, [model]);
     }
     await r.check('Merge with my agent: one click starts it, while the panel keeps refreshing', async () => {
       // Busy the panel the way real use does (status refreshes, storage changes) right before the click.
@@ -565,7 +566,7 @@ class Scenario {
 
     if (agent === 'claude') {
       await r.check(`${name}: panel chat run makes a mod (model ${model})`, async () => {
-        await this.ext(`async (agent) => { const { settings = {} } = await chrome.storage.local.get('settings'); settings.agent = agent; await chrome.storage.local.set({ settings }); }`, [agent]);
+        await this.ext(`async (agent) => { const { sitePicks = {} } = await chrome.storage.local.get('sitePicks'); sitePicks['127.0.0.1'] = { agent, models: {} }; await chrome.storage.local.set({ sitePicks }); }`, [agent]);
         await send(`/model ${model}`);
         await sleep(1000);
         const before = new Set(fs.readdirSync(sitesDir));

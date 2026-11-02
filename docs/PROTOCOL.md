@@ -635,7 +635,8 @@ Nothing is hosted; the agent uses the user's own login/subscription.
     failed with the not-logged-in error) → "Claude Code isn't logged in" with a **Log in** button (see
     "Logging in" below; agents with `canLogin: false` show `loginFix` instead).
   - **Settings:** agent (from `agent.list`; only available ones selectable), optional model name (free
-    text with suggestions opus / sonnet / haiku, empty = agent default). Stored in `chrome.storage.local` `settings`.
+    text with suggestions opus / sonnet / haiku, empty = agent default), for this site's chat: each site
+    chat has its own (see "Agent and model per site chat" below).
   - Light/dark via `prefers-color-scheme`; compact, clean, system font; fits a narrow panel (320 px+).
 - Panel ⇄ background: `chrome.runtime.connect({name: "panel"})`. Panel → background:
   `{type: "agent.start", site, tabId, url, prompt, sessionId, agent, model}`, `{type: "agent.stop", runId}`,
@@ -788,14 +789,24 @@ Suffix List). `helper/lib/scope.js` computes it; `extension/lib.js` mirrors the 
 ### Models (`agent.models`)
 
 `agent.models {agent, fresh}` → `{agent, models:[{id, name, description}], default, custom, error, note}`:
-what the side panel's model picker offers for that agent (cached per agent binary for 30 minutes;
+what the side panel's model picker offers for that agent (cached per agent binary for a minute;
 `fresh` skips the cache). Codex: its own catalog for the signed-in account (`codex debug models`),
 the models it lists in its picker, ordered by priority; `default` is the first; `custom: false` (only
 those). Claude Code has no command that lists an account's models, so: its aliases `fable`, `opus`,
 `sonnet`, `haiku` (each the newest of its family), `custom: true` (the panel's "Other…" takes an exact
-name), with a `note` saying so. The panel keeps the chosen model per agent (chrome.storage `settings.models`,
-`{agentId: model}`; an older single `settings.model` becomes Claude Code's) and passes it as `agent.start`'s
-`model`.
+name), with a `note` saying so. The panel keeps the chosen model per agent (`models`, `{agentId: model}`;
+an older single `settings.model` becomes Claude Code's) and passes it as `agent.start`'s `model`.
+
+**Agent and model per site chat** (`extension/lib.js`). Each site's chat has its own agent and model, so
+one panel can run Claude Code with Opus on one site while another runs Codex on another.
+`chrome.storage.local` `sitePicks` = `{"<site>": {agent, models}}`, the same shape as `settings`, which is
+the default for sites without a pick. Changing the agent or model in Settings (or `/model`) writes this
+site's pick and also makes it the default, so a site seen for the first time starts with the last pick
+made anywhere. A panel showing a site without a pick keeps the default it first saw for that site (in
+memory), so a pick made in another panel doesn't change it; the site's pick is written when a run starts
+there. New chat (+) keeps the site's pick. The setting from before 0.2.0 (one global `settings`) is the
+default, so every site starts with it. `trif agent run` doesn't read any of this: it takes `--agent` and
+`--model`, or uses the helper's default agent.
 
 ### Agent adapters (`helper/lib/agents/<id>.js`)
 

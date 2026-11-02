@@ -1733,3 +1733,26 @@ test('background: the helper\'s start sites are turned on once, and mods for the
     assert.deepStrictEqual(bg.store.sitesOn, ['x.com'], 'turned off by the user: stays off');
   } finally { bg.restore(); }
 });
+
+test('agent and model per site chat: each site its own pick; the default is the last pick; a panel holds what it first saw', () => {
+  // The old single setting carries over as the default (and the even older `model` as Claude Code's).
+  assert.deepEqual(lib.normalizeSettings({ agent: 'codex', model: 'opus' }), { agent: 'codex', models: { claude: 'opus' } });
+  assert.deepEqual(lib.normalizeSettings(null), { agent: '', models: {} });
+  assert.deepEqual(lib.normalizePicks({ 'x.com': { agent: 'codex', models: { codex: 'sol' } }, bad: 3, '': {} }), { 'x.com': { agent: 'codex', models: { codex: 'sol' } } });
+  const global = { agent: 'claude', models: { claude: 'opus' } };
+  const picks = { 'chatgpt.com': { agent: 'codex', models: { codex: 'astra' } }, 'x.com': { agent: 'codex', models: { codex: 'sol' } } };
+  const panelA = new Map();
+  const panelB = new Map();
+  assert.deepEqual(lib.siteSettings({ picks, snapshots: panelA, global, site: 'x.com' }), { agent: 'codex', models: { codex: 'sol' } });
+  assert.deepEqual(lib.siteSettings({ picks, snapshots: panelA, global, site: 'chatgpt.com' }), { agent: 'codex', models: { codex: 'astra' } });
+  // A site without a pick: the default, as this panel first saw it...
+  assert.deepEqual(lib.siteSettings({ picks, snapshots: panelA, global, site: 'github.com' }), global);
+  // ...so a pick in another panel (which also becomes the default) doesn't change what this one shows.
+  const global2 = { agent: 'codex', models: { codex: 'sol', claude: 'opus' } };
+  assert.deepEqual(lib.siteSettings({ picks, snapshots: panelA, global: global2, site: 'github.com' }), global);
+  assert.deepEqual(lib.siteSettings({ picks, snapshots: panelB, global: global2, site: 'github.com' }), lib.normalizeSettings(global2), 'a panel opening now starts from the new default');
+  global.models.claude = 'haiku';
+  assert.equal(lib.siteSettings({ picks, snapshots: panelA, global, site: 'github.com' }).models.claude, 'opus', 'a copy, not the default itself');
+  // No site (chrome://extensions): the default itself.
+  assert.deepEqual(lib.siteSettings({ picks, snapshots: panelA, global: global2, site: null }), lib.normalizeSettings(global2));
+});

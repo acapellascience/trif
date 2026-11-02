@@ -3,7 +3,8 @@
 // chrome.storage.local `chat:<site>`; this page renders that record and reacts to storage changes.
 // See docs/PROTOCOL.md, "Side panel and agent runs".
 
-import { siteForUrl, modAppliesTo, modSites, isMultiSite, offOnSite, normalizeOffSites, isLoginUrl, scopeFor, limitToSites, withOffSites, FIREFOX, BROWSER } from './lib.js';
+import { siteForUrl, modAppliesTo, modSites, isMultiSite, offOnSite, normalizeOffSites, isLoginUrl, scopeFor, limitToSites, withOffSites, FIREFOX, BROWSER,
+  normalizeSettings, normalizePicks, siteSettings } from './lib.js';
 import { renderMarkdown, MARKDOWN_ELEMENTS, MARKDOWN_ATTRIBUTES } from './markdown.js';
 import { modSwitch, syncSwitches, shownEnabled, switchError, enabledIn, onSwitchChange } from './modswitch.js';
 
@@ -32,7 +33,9 @@ const view = {
   status: null,              // background status (helper, userScripts, mods…)
   agents: null,              // agent.list result, or null when unknown
   agentsError: null,
-  settings: { agent: '', models: {} }, // models: agent id -> chosen model ('' = the agent's default)
+  settings: { agent: '', models: {} }, // the default agent settings (models: agent id -> model, '' = its default)
+  picks: {},                 // chrome.storage.local `sitePicks`: each site chat's own agent and model (lib.js)
+  snapshots: new Map(),      // site -> the default this panel first saw for it, until the site has a pick
   modelLists: {},            // agent id -> agent.models result (what that agent offers)
   modelOther: {},            // agent id -> true while "Other…" is picked but nothing typed yet
   rendered: { site: null, count: 0, first: null },
@@ -128,10 +131,13 @@ async function loadAgents() {
   render();
 }
 
-/** The agent a new run would use: the chosen one, else the helper's default. */
+/** This site chat's agent settings ({agent, models}): see "agent and model per site chat" in lib.js. */
+const chatSettings = () => siteSettings({ picks: view.picks, snapshots: view.snapshots, global: view.settings, site: view.site });
+
+/** The agent a new run here would use: this chat's choice, else the helper's default. */
 function currentAgent() {
   const list = view.agents?.agents || [];
-  const id = view.settings.agent || view.agents?.default || '';
+  const id = chatSettings().agent || view.agents?.default || '';
   return { id, info: list.find((a) => a.id === id) || null, list };
 }
 
@@ -142,9 +148,10 @@ async function init() {
   // In Safari the panel is a window of its own, opened with ?window=<the window whose tabs it follows>.
   const opener = Number(new URLSearchParams(location.search).get('window'));
   view.windowId = opener || (await chrome.windows.getCurrent()).id;
-  const stored = await chrome.storage.local.get(['settings', 'disabled', 'offSites', 'updated']);
+  const stored = await chrome.storage.local.get(['settings', 'sitePicks', 'disabled', 'offSites', 'updated']);
   view.updated = stored.updated || null;
   view.settings = normalizeSettings(stored.settings);
+  view.picks = normalizePicks(stored.sitePicks);
   view.disabled = stored.disabled || {};
   view.offSites = normalizeOffSites(stored.offSites);
   renderSettings();
@@ -169,9 +176,11 @@ async function init() {
       view.chat = normalizeChat(changes[chatKey(view.site)].newValue);
       render();
     }
-    if (changes.settings) {
-      view.settings = normalizeSettings(changes.settings.newValue);
+    if (changes.settings || changes.sitePicks) { // another panel's pick, or this one's
+      if (changes.settings) view.settings = normalizeSettings(changes.settings.newValue);
+      if (changes.sitePicks) view.picks = normalizePicks(changes.sitePicks.newValue);
       renderSettings();
+      renderModels();
       render();
     }
     if (changes.updated) {
@@ -208,21 +217,15 @@ async function setTab(tab) {
       view.chat = normalizeChat((await chrome.storage.local.get(key))[key]);
       if (view.site !== site) return; // switched again meanwhile
     }
+    // Each site chat has its own agent and model.
+    renderSettings();
+    if (!ui.settings.hidden && view.status?.helper?.connected) loadModels(currentAgent().id);
   }
   render();
 }
 
-// Settings: the model is chosen per agent (an Opus choice means nothing to Codex). Before that there
-// was one `model`, only ever meaningful for Claude Code.
-function normalizeSettings(s) {
-  const out = { agent: '', models: {}, ...(s && typeof s === 'object' ? s : {}) };
-  if (!out.models || typeof out.models !== 'object') out.models = {};
-  if (typeof out.model === 'string' && out.model && !Object.keys(out.models).length) out.models = { claude: out.model };
-  delete out.model;
-  return out;
-}
-
-const chosenModel = (agentId) => (agentId && view.settings.models[agentId]) || '';
+// The model is chosen per agent (an Opus choice means nothing to Codex), per site chat (lib.js).
+const chosenModel = (agentId) => (agentId && chatSettings().models[agentId]) || '';
 
 function normalizeChat(c) {
   const chat = { ...emptyChat(), ...(c && typeof c === 'object' ? c : {}) };
@@ -885,12 +888,13 @@ function renderSettings() {
     o.disabled = !a.available;
     opts.push(o);
   }
-  if (view.settings.agent && !list.some((a) => a.id === view.settings.agent)) {
-    opts.push(new Option(view.settings.agent, view.settings.agent));
+  const mine = chatSettings();
+  if (mine.agent && !list.some((a) => a.id === mine.agent)) {
+    opts.push(new Option(mine.agent, mine.agent));
   }
   ui.agent.replaceChildren(...opts);
-  ui.agent.value = view.settings.agent || '';
-  const chosen = list.find((a) => a.id === (view.settings.agent || view.agents?.default));
+  ui.agent.value = mine.agent || '';
+  const chosen = list.find((a) => a.id === (mine.agent || view.agents?.default));
   const note = chosen?.note || (view.agentsError && !view.agents ? 'Agents are listed once the helper is connected.' : '');
   ui.agentNote.textContent = note;
   ui.agentNote.hidden = !note;
@@ -948,14 +952,28 @@ function renderModels() {
 
 async function saveModel(agentId, model) {
   if (!agentId) return;
-  await saveSettings({ models: { ...view.settings.models, [agentId]: model } });
+  await saveSettings({ models: { ...chatSettings().models, [agentId]: model } });
 }
 
 // ---- actions ------------------------------------------------------------------------------------
 
+/**
+ * Changes this site chat's agent settings (its pick), and makes them the default for sites without one.
+ * (No site: just the default.)
+ */
 async function saveSettings(patch) {
-  view.settings = { ...view.settings, ...patch };
-  await chrome.storage.local.set({ settings: view.settings });
+  const next = { ...chatSettings(), ...patch };
+  view.settings = normalizeSettings(next);
+  if (!view.site) return chrome.storage.local.set({ settings: view.settings });
+  view.picks = { ...view.picks, [view.site]: normalizeSettings(next) };
+  await chrome.storage.local.set({ settings: view.settings, sitePicks: view.picks });
+}
+
+/** A run is starting here: the site keeps the settings it runs with, whatever is picked elsewhere later. */
+async function keepSettings() {
+  if (!view.site || view.picks[view.site]) return;
+  view.picks = { ...view.picks, [view.site]: normalizeSettings(chatSettings()) };
+  await chrome.storage.local.set({ sitePicks: view.picks }).catch(() => {});
 }
 
 // Slash commands the panel handles itself (each message starts a fresh agent process, so e.g. Claude
@@ -1010,6 +1028,7 @@ async function startRun(text, extra = {}) {
   if (view.chat.run) throw new Error(`already working on ${view.site}`);
   if (!ui.composer.dataset.canSend) throw new Error('No coding agent is available here yet');
   const { id: agent } = currentAgent();
+  await keepSettings();
   const chat = view.chat;
   const sessionId = chat.sessionId && (!chat.agent || !agent || chat.agent === agent) ? chat.sessionId : undefined;
   const { runId } = await request({

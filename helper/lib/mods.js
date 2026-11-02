@@ -136,9 +136,24 @@ function statSafe(p) {
   try { return fs.statSync(p); } catch { return null; }
 }
 
-// List candidate mod files: <modsDir>/<site>/<mod>.js, skipping names starting with _ or .
-function listModFiles(modsDir) {
+function realOrNull(p) {
+  try { return fs.realpathSync(p); } catch { return null; }
+}
+
+// A run may write its site's folder, so it can plant a link there (sites/x.com/a.js -> ~/.ssh/id_rsa, or
+// sites/evil -> ~/.ssh). The helper reads mods outside any sandbox, so an entry whose real path is outside
+// the real mods folder is never a mod: it's skipped, with a warning (`skipped`). Links within the mods
+// folder are fine.
+const LINK_OUTSIDE = 'is a link to somewhere outside the mods folder; ignored';
+
+// List candidate mod files: <modsDir>/<site>/<mod>.js, skipping names starting with _ or ., and entries
+// whose real path isn't inside the real mods folder. `skipped` (an array) collects those: {id, file, warning}.
+function listModFiles(modsDir, skipped = null) {
   const files = [];
+  const root = realOrNull(modsDir);
+  if (!root) return files;
+  const inside = (p) => !!p && p.startsWith(root + path.sep);
+  const skip = (id, file) => { if (skipped) skipped.push({ id, file, warning: LINK_OUTSIDE }); };
   let sites;
   try { sites = fs.readdirSync(modsDir); } catch { return files; }
   for (const site of sites.sort()) {
@@ -146,6 +161,7 @@ function listModFiles(modsDir) {
     const siteDir = path.join(modsDir, site);
     const st = statSafe(siteDir);
     if (!st || !st.isDirectory()) continue;
+    if (!inside(realOrNull(siteDir))) { skip(`${site}/`, siteDir); continue; }
     let names;
     try { names = fs.readdirSync(siteDir); } catch { continue; }
     for (const name of names.sort()) {
@@ -153,10 +169,31 @@ function listModFiles(modsDir) {
       const file = path.join(siteDir, name);
       const fst = statSafe(file);
       if (!fst || !fst.isFile()) continue;
+      if (!inside(realOrNull(file))) { skip(`${site}/${name.slice(0, -3)}`, file); continue; }
       files.push({ site, file, mtimeMs: fst.mtimeMs, size: fst.size });
     }
   }
   return files;
+}
+
+/**
+ * Read a mod file only if it really is inside the mods folder: the file opened is the one whose real path
+ * was checked (same device and inode after opening), so swapping in a link between the check and the read
+ * doesn't work either. Throws otherwise.
+ */
+function readModFile(modsDir, file) {
+  const root = realOrNull(modsDir);
+  const fd = fs.openSync(file, 'r');
+  try {
+    const st = fs.fstatSync(fd);
+    const real = realOrNull(file);
+    const rst = real ? statSafe(real) : null;
+    if (!root || !real || !real.startsWith(root + path.sep) || !rst || rst.ino !== st.ino || rst.dev !== st.dev) {
+      throw new Error(LINK_OUTSIDE);
+    }
+    if (!st.isFile()) throw new Error('not a file');
+    return fs.readFileSync(fd, 'utf8');
+  } finally { fs.closeSync(fd); }
 }
 
 // Cheap fingerprint of the folder (names + mtimes + sizes) for change polling.
@@ -164,18 +201,20 @@ function folderFingerprint(modsDir) {
   return listModFiles(modsDir).map((f) => `${f.file}:${f.mtimeMs}:${f.size}`).join('\n');
 }
 
-// Read and parse every mod. Returns { mods, problems: [{id, file, error}], warnings: [{id, file, warning}] }.
+// Read and parse every mod. Returns { mods, problems: [{id, file, error}], warnings: [{id, file, warning}] }
+// (links outside the mods folder are among the warnings).
 function scanMods(modsDir) {
   const mods = [];
   const problems = [];
   const warnings = [];
-  for (const { site, file } of listModFiles(modsDir)) {
+  for (const { site, file } of listModFiles(modsDir, warnings)) {
     const id = `${site}/${path.basename(file, '.js')}`;
     let code;
     try {
-      code = fs.readFileSync(file, 'utf8');
+      code = readModFile(modsDir, file);
     } catch (e) {
-      problems.push({ id, file, error: `can't read file: ${e.message}` });
+      if (e.message === LINK_OUTSIDE) warnings.push({ id, file, warning: LINK_OUTSIDE });
+      else problems.push({ id, file, error: `can't read file: ${e.message}` });
       continue;
     }
     const { mod, warnings: w } = buildMod({ site, file, code });
@@ -222,6 +261,6 @@ function summarize(mod) {
 
 module.exports = {
   SHIPPED_SOURCES, isShippedSource,
-  RUN_AT, ALL_SITES, parseHeader, defaultMatches, buildMod, listModFiles, folderFingerprint, scanMods,
+  RUN_AT, ALL_SITES, parseHeader, defaultMatches, buildMod, listModFiles, readModFile, folderFingerprint, scanMods, LINK_OUTSIDE,
   planModsMessage, summarize, isIgnoredName, sha1,
 };

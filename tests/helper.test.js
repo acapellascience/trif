@@ -149,6 +149,33 @@ test('scanMods: ignores _ and . files, non-js, nested folders, ignored site fold
   assert.deepEqual(scanMods(path.join(home, 'missing')).mods, []);
 });
 
+test('scanMods: ignores links out of the mods folder (a run could plant one), keeps links within it', () => {
+  const { readModFile, listModFiles, LINK_OUTSIDE } = require('../helper/lib/mods');
+  const home = tempDir();
+  const outside = tempDir();
+  fs.writeFileSync(path.join(outside, 'id_rsa'), 'SECRET KEY');
+  fs.writeFileSync(path.join(outside, 'x.js'), 'SECRET JS');
+  writeMod(home, 'a.com', 'one.js', '// ==WebMod==\n// @name One\n// ==/WebMod==\n1');
+  const sites = path.join(home, 'sites');
+  fs.symlinkSync(path.join(outside, 'id_rsa'), path.join(sites, 'a.com', 'key.js')); // a file link out
+  fs.symlinkSync(path.join(sites, 'a.com', 'one.js'), path.join(sites, 'a.com', 'same.js')); // within: fine
+  fs.symlinkSync(outside, path.join(sites, 'evil.com')); // a folder link out
+  fs.symlinkSync(path.join(sites, 'a.com'), path.join(sites, 'b.com')); // within: fine
+  const { mods, problems, warnings } = scanMods(sites);
+  assert.deepEqual(mods.map((m) => m.id), ['a.com/one', 'a.com/same', 'b.com/one', 'b.com/same']);
+  assert.deepEqual(problems, []);
+  assert.deepEqual(warnings.map((w) => [w.id, w.warning]), [['a.com/key', LINK_OUTSIDE], ['b.com/key', LINK_OUTSIDE], ['evil.com/', LINK_OUTSIDE]]);
+  assert.ok(!JSON.stringify({ mods, problems, warnings }).includes('SECRET'));
+  assert.ok(!listModFiles(sites).some((f) => f.file.includes('key.js') || f.site === 'evil.com'));
+  // Reading checks the file opened, too (a link swapped in after the listing).
+  assert.throws(() => readModFile(sites, path.join(sites, 'a.com', 'key.js')), new RegExp(LINK_OUTSIDE));
+  assert.equal(readModFile(sites, path.join(sites, 'a.com', 'same.js')).trim().slice(-1), '1');
+  // A mods folder that is itself a link (~/.webmods -> ~/.trif) is fine.
+  const alias = path.join(tempDir(), 'alias');
+  fs.symlinkSync(sites, alias);
+  assert.deepEqual(scanMods(alias).mods.map((m) => m.id), ['a.com/one', 'a.com/same', 'b.com/one', 'b.com/same']);
+});
+
 test('planModsMessage: rejects a mod over 1 MB and keeps the total under the limit', () => {
   const small = buildMod({ site: 'a.com', file: '/s/a.com/s.js', code: 'x' }).mod;
   const huge = buildMod({ site: 'a.com', file: '/s/a.com/h.js', code: 'x'.repeat(1100 * 1024) }).mod;

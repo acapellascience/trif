@@ -187,7 +187,7 @@ function syncMods(reason, force) {
   const signature = sent.map((m) => `${m.id}:${m.hash}${m.held ? ':held' : ''}${m.startOff ? ':off' : ''}${m.origin ? `:${m.origin.by}` : ''}${m.update ? `:update ${JSON.stringify(m.update)}` : ''}`).join('|') +
     `|sites:${sitesOn.join(',')}`;
   const errors = [...problems, ...plan.errors];
-  const errorsChanged = JSON.stringify(errors) !== JSON.stringify(state.modErrors);
+  const errorsChanged = JSON.stringify(errors) !== JSON.stringify(state.modErrors) || JSON.stringify(warnings) !== JSON.stringify(state.modWarnings);
   state.mods = mods;
   state.modErrors = errors;
   state.modWarnings = warnings;

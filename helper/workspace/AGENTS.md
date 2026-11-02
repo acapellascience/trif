@@ -328,7 +328,8 @@ missed these" costs the user a round trip; finding them is your job.
    trif sweep --url amazon.com --text '^Sponsored$' --scroll
    ```
    The report says where the matches are (landmarks, menus, dialogs, fixed/sticky, shadow roots,
-   frames). Repointing a variable, or re-declaring each rule that uses a value, beats patching elements,
+   frames). Your own `querySelectorAll` and `getComputedStyle` loops miss shadow roots, `::before` and
+   stylesheet rules; `trif sweep` doesn't. Repointing a variable, or re-declaring each rule that uses a value, beats patching elements,
    and catches what's added later.
 3. List where else it lives, and check each: the site's other page types (home, search, item, settings;
    single-page apps change pages without a load); states (hover, focus, selected, open menus, dialogs

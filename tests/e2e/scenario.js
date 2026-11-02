@@ -253,7 +253,7 @@ class Scenario {
     // The helper inherits the browser's environment. HOME=<scratch> keeps everything in the scratch home;
     // for agent runs, which need your real Claude Code / Codex login, the browser (and so the helper and
     // the agents it starts) gets your real HOME, and TRIF_HOME points the helper at the scratch workspace.
-    const env = o.agent || o.codex || o.oss ? { HOME: REAL_HOME, TRIF_HOME: this.trif, TRIF_PRIVATE: this.priv } : { HOME: this.home };
+    const env = o.agent || o.codex || o.oss || o.guidance ? { HOME: REAL_HOME, TRIF_HOME: this.trif, TRIF_PRIVATE: this.priv } : { HOME: this.home };
     // The real Keychain only for --oss (the OpenRouter key the user saved); otherwise a keyring tool that
     // isn't there, so the helper doesn't even look up API keys for Claude Code or Codex in the real one.
     if (!o.oss) env.TRIF_KEYCHAIN_BIN = path.join(this.work, 'no-keychain', 'security');
@@ -498,6 +498,85 @@ class Scenario {
     if (this.o.agent) await this.agentChecks('claude');
     if (this.o.codex) await this.agentChecks('codex');
     if (this.o.oss) await this.agentChecks('oss');
+    if (this.o.guidance) await this.guidanceComparison(base);
+  }
+
+  // ---- --guidance: the same requests with the AGENTS.md from main and the one in this checkout, with
+  // a real Claude Code run each (no pass/fail: what each run found, checked and said, in the log)
+
+  async guidanceComparison(base) {
+    const r = this.r;
+    const model = this.o.claudeModel || 'haiku';
+    const repeats = this.o.guidanceRepeats || 1;
+    const sitesDir = path.join(this.trif, 'sites', '127.0.0.1');
+    const agentsFile = path.join(this.trif, 'AGENTS.md');
+    const guides = {
+      old: run('git', ['show', 'main:helper/workspace/AGENTS.md'], { cwd: I.REPO }).stdout,
+      new: fs.readFileSync(path.join(I.REPO, 'helper', 'workspace', 'AGENTS.md'), 'utf8'),
+    };
+    if (!guides.old) { r.note('--guidance: no AGENTS.md on main'); return; }
+    // Only the agent's own mods on the page (the harness's banner off).
+    await this.cli(['disable', '127.0.0.1/e2e-banner', '--url', '127.0.0.1']);
+    await this.ext(`async (id, url) => { await chrome.tabs.update(id, { url, active: true }); }`, [this.win.tabId, `${base}/promos.html`]);
+    await sleep(1500);
+    const sweep = async (...args) => (await this.cli(['sweep', '--url', 'promos.html', '--scroll', ...args], { json: true })).json;
+    // Ground truth after a run: visible "Promoted" labels (lazy ones loaded by scrolling), visible posts,
+    // visible elements still using the blue.
+    const measure = async () => {
+      await this.cli(['reload', '--url', 'promos.html']);
+      await sleep(800);
+      const promos = await sweep('--text', '^Promoted');
+      const posts = await sweep('--text', '^Post \\d');
+      const blue = await sweep('--color', '#0a66c2');
+      const left = (j) => (j ? j.matches.filter((x) => x.visible).map((x) => `${x.element}${x.root !== 'document' ? ' (shadow)' : ''}${x.props ? ` ${x.props.map((p) => (p.pseudo || '') + p.prop).join(',')}` : ` "${x.text}"`}`) : null);
+      return {
+        promos: promos ? promos.summary.visible : null, posts: posts ? posts.summary.visible : null, blue: blue ? blue.summary.visible : null,
+        promosLeft: left(promos), blueLeft: left(blue),
+      };
+    };
+    const base0 = await measure();
+    r.log(`--guidance baseline: ${JSON.stringify(base0)}`);
+    const tasks = [
+      { key: 'promos', prompt: 'hide the promos, like the "Promoted · Deal 1" one' },
+      { key: 'pink', prompt: 'make the blue stuff pink' },
+    ];
+    const rows = [];
+    for (let rep = 0; rep < repeats; rep++) {
+      for (const task of tasks) {
+        for (const which of ['old', 'new']) {
+          fs.writeFileSync(agentsFile, guides[which]);
+          const gone = [];
+          for (const f of fs.readdirSync(sitesDir)) if (f.endsWith('.js') && f !== 'e2e-banner.js') { fs.renameSync(path.join(sitesDir, f), path.join(this.work, `done-${which}-${task.key}-${rep}-${f}`)); gone.push(`127.0.0.1/${f.slice(0, -3)}`); }
+          // The last run's mods must be unregistered before this run looks at the page.
+          await waitFor('the last run\'s mods to go', async () => {
+            const st = (await this.cli(['status', '--url', 'promos.html'], { json: true })).json;
+            const on = (st && st.extension && st.extension.page && st.extension.page.mods || []).map((x) => x.id);
+            return gone.some((id) => on.includes(id)) ? null : true;
+          }, { timeoutMs: 20000 });
+          await this.cli(['reload', '--url', 'promos.html']);
+          await sleep(800);
+          const t0 = Date.now();
+          const tab = ((await this.cli(['tabs'], { json: true })).json || []).find((t) => t.url.includes('promos.html'));
+          const out = await this.cli(['agent', 'run', '--agent', 'claude', '--model', model, '--tab', String(tab && tab.id), task.prompt], { timeoutMs: 10 * 60000 });
+          const secs = Math.round((Date.now() - t0) / 1000);
+          const m = await measure();
+          const transcript = `${out.stdout}\n${out.stderr}`;
+          const file = this.r.file(`guidance-${task.key}-${which}-${rep}.txt`);
+          fs.writeFileSync(file, transcript);
+          const mods = fs.readdirSync(sitesDir).filter((f) => f.endsWith('.js') && f !== 'e2e-banner.js');
+          const row = {
+            task: task.key, guide: which, rep, secs, cost: (/\$([\d.]+)/.exec(transcript.split('\ndone:').pop() || '') || [])[1] || null,
+            ...m, sweeps: (transcript.match(/\[\w+\][^\n]*trif sweep/g) || []).length, mods,
+          };
+          rows.push(row);
+          r.record(`--guidance ${task.key} with the ${which} AGENTS.md (${model})`, 'pass', JSON.stringify(row));
+        }
+      }
+    }
+    r.log(`--guidance rows:\n${rows.map((x) => JSON.stringify(x)).join('\n')}`);
+    fs.writeFileSync(this.r.file('guidance.json'), JSON.stringify({ baseline: base0, rows }, null, 2));
+    fs.writeFileSync(agentsFile, guides.new);
+    await this.cli(['enable', '127.0.0.1/e2e-banner', '--url', '127.0.0.1']);
   }
 
   // ---- trif sweep on a page of repeated things, and screenshots of a tab that isn't showing

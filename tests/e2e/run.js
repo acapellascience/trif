@@ -5,6 +5,8 @@
 //   node tests/e2e/run.js [firefox|chrome|all] [--agent] [--codex] [--oss] [--upgrade-from <tgz>] [--skip-fresh]
 //                         [--work <dir>] [--out <dir>] [--headful] [--claude-model haiku] [--codex-model M]
 //                         [--oss-model qwen/qwen3-coder]
+// --guidance: the same two requests with main's AGENTS.md and this checkout's, a real Claude Code run each
+// (--guidance-repeats N); results in guidance.json. See docs/TESTING.md.
 // --oss: open-model (codex-oss) runs through OpenRouter, with the key already saved in your Keychain (the
 // panel's API key field, or `trif agent open-model --provider openrouter --set-key`); skipped without one.
 // The key is never read from the environment, shown or logged.
@@ -32,6 +34,8 @@ function parseArgs(argv) {
     else if (a === '--agent') o.agent = true;
     else if (a === '--codex') o.codex = true;
     else if (a === '--oss') o.oss = true;
+    else if (a === '--guidance') o.guidance = true;
+    else if (a === '--guidance-repeats') o.guidanceRepeats = Number(val());
     else if (a === '--oss-model') o.ossModel = val();
     else if (a === '--upgrade-from') o.upgradeFrom.push(path.resolve(val()));
     else if (a === '--skip-fresh') o.skipFresh = true;
@@ -96,7 +100,7 @@ async function main() {
           browser, kind: k.kind, oldTgz: k.oldTgz, newTgz: tgz, results, servers,
           work: path.join(work, `${browser === 'firefox' ? 'ff' : 'cr'}-${name}`.slice(0, 24)),
           agent: o.agent && !agentDone, codex: o.codex && !agentDone, oss: o.oss && !agentDone, claudeModel: o.claudeModel, codexModel: o.codexModel,
-          ossModel: o.ossModel,
+          ossModel: o.ossModel, guidance: o.guidance && !agentDone, guidanceRepeats: o.guidanceRepeats,
           headless: o.headless, extensionDirFirefox: fxDir,
         });
         agentDone = true; // agent runs once per browser, in its first scenario

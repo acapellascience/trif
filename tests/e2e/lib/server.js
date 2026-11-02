@@ -52,6 +52,73 @@ const SWEEP_FRAME = () => PAGE('TRIF e2e sweep frame', '<div class="promo">Spons
 // The blue: header background, the bordered promo, the blue words, 2 shadow promos, the badge's ::before.
 const SWEEP_EXPECT = { promo: 9, hidden: 1, shadow: 2, frames: 1, sponsored: 9, blue: 6, sticky: 1 };
 
+// A page like the ones users ask about (for `--guidance`, comparing versions of AGENTS.md with a real
+// agent): 12 promos of several markups across the header, the feed, a list, the sidebar, the footer, a
+// shadow root, and 3 more that load when the page is scrolled to the bottom; and a brand blue used by a
+// sticky header, links, buttons, a border, a ::before, an SVG icon and the shadow root, mostly through a
+// CSS variable. The promos all carry a "Promoted" label, which is how they're counted.
+const BRAND = '#0a66c2';
+const PROMOS_PAGE = () => PAGE('Daily Feed', `
+<style>
+  :root { --brand: ${BRAND}; }
+  body { max-width: 980px; }
+  .top { position: sticky; top: 0; background: var(--brand); color: #fff; padding: 10px 16px; display: flex; gap: 16px; align-items: center; z-index: 5; }
+  .top .strip { margin-left: auto; font-size: 13px; background: #fff3; padding: 2px 8px; border-radius: 4px; }
+  .layout { display: grid; grid-template-columns: 1fr 260px; gap: 24px; margin-top: 16px; }
+  a { color: var(--brand); }
+  .post, .promoted, .sponsor-card, .rec-item, .footer-deal { border: 1px solid #ddd; border-radius: 8px; padding: 12px; margin: 10px 0; list-style: none; }
+  .label { font-size: 12px; color: #666; display: block; }
+  .shop { background: var(--brand); color: #fff; border: 0; border-radius: 4px; padding: 4px 10px; }
+  blockquote { border-left: 4px solid var(--brand); margin: 8px 0; padding-left: 10px; }
+  .tips li::before { content: '> '; color: var(--brand); }
+  svg.icon { width: 16px; height: 16px; fill: ${BRAND}; vertical-align: middle; }
+</style>
+<header class="top"><b>Daily Feed</b><a href="#" style="color:#fff">Home</a><span class="strip"><span class="label" style="display:inline;color:#fff">Promoted</span> Get Premium · Deal 0</span></header>
+<div class="layout">
+<main id="feed">
+  <article class="post"><h3>Post 1</h3><p>A normal post. <a href="#">Read more</a></p></article>
+  <article class="post promoted"><span class="label">Promoted · Deal 1</span><h3>Big sale on lamps</h3><button class="shop">Shop now</button></article>
+  <article class="post"><h3>Post 2</h3><blockquote>A quoted line.</blockquote></article>
+  <div class="sponsor-card"><span class="label">Promoted</span><b>Deal 2: cheap flights</b> <button class="shop">Book</button></div>
+  <article class="post"><h3>Post 3</h3><p><svg class="icon" viewBox="0 0 16 16"><circle cx="8" cy="8" r="8"/></svg> With an icon. <a href="#">Link</a></p></article>
+  <section><h4>Recommended for you</h4><ul class="recs">
+    <li class="rec-item" data-ad="1"><span class="label">Promoted</span> Deal 3: a course <button class="shop">Enroll</button></li>
+    <li class="post">Post 4 (recommended, not a promo)</li></ul></section>
+  <article class="post promoted"><span class="label">Promoted · Deal 4</span><h3>Phones</h3><button class="shop">Shop now</button></article>
+  <article class="post"><h3>Post 5</h3><ul class="tips"><li>Tip one</li><li>Tip two</li></ul></article>
+  <deal-widget></deal-widget>
+  <article class="post"><h3>Post 6</h3><p>The last post for now. <a href="#">More</a></p></article>
+  <div id="more" style="height: 900px"></div>
+</main>
+<aside>
+  <h4>Around the web</h4>
+  <div class="sponsor-card"><span class="label">Promoted</span> Deal 5: shoes <button class="shop">See</button></div>
+  <div class="sponsor-card"><span class="label">Promoted</span> Deal 6: coffee <button class="shop">See</button></div>
+  <p><a href="#">About</a></p>
+</aside>
+</div>
+<footer><section class="footer-deal"><span class="label">Promoted</span> Deal 7: a credit card <button class="shop">Apply</button></section><p>© Daily Feed</p></footer>
+<script>
+customElements.define('deal-widget', class extends HTMLElement {
+  connectedCallback() {
+    this.attachShadow({ mode: 'open' }).innerHTML = '<style>.card{border:1px solid #ddd;border-radius:8px;padding:12px;margin:10px 0}.label{font-size:12px;color:#666;display:block}button{background:${BRAND};color:#fff;border:0;border-radius:4px;padding:4px 10px}</style>' +
+      '<div class="card"><span class="label">Promoted</span> Deal 8: a widget deal <button>Get it</button></div>';
+  }
+});
+let loaded = false;
+addEventListener('scroll', () => {
+  if (loaded || scrollY + innerHeight < document.documentElement.scrollHeight - 300) return;
+  loaded = true;
+  const feed = document.getElementById('feed');
+  for (const n of [9, 10, 11]) {
+    const a = document.createElement('article');
+    a.className = 'post promoted';
+    a.innerHTML = '<span class="label">Promoted · Deal ' + n + '</span><h3>Late deal ' + n + '</h3><button class="shop">Shop now</button>';
+    feed.insertBefore(a, document.getElementById('more'));
+  }
+});
+</script>`);
+
 // ---- the X stand-in
 
 // The authenticated user (document.cookie twid) and authors.
@@ -148,6 +215,7 @@ async function startServers(dir) {
       return send(404, 'text/plain', 'not found');
     }
     if (u.pathname === '/favicon.ico') return send(204, 'image/x-icon', '');
+    if (u.pathname === '/promos.html') return send(200, 'text/html; charset=utf-8', PROMOS_PAGE());
     if (u.pathname === '/sweep.html') return send(200, 'text/html; charset=utf-8', SWEEP_PAGE());
     if (u.pathname === '/sweep-frame.html') return send(200, 'text/html; charset=utf-8', SWEEP_FRAME());
     return send(200, 'text/html; charset=utf-8', testPage(host, u.pathname));

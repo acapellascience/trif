@@ -4,6 +4,14 @@ What's new in each TRIF release (called WebMods before 0.2.0). The text under a 
 panel shows under "What's new", so it's written for people using TRIF. `node scripts/release.js <version>`
 needs a section here for the version it releases.
 
+## Unreleased
+
+- **Open models (experimental).** A third choice in Settings, "Open model (via Codex)": your agent runs
+  on a model on your own computer (Ollama or LM Studio, nothing leaves it) or from a provider like
+  OpenRouter with your own key, through Codex (no OpenAI account needed). Same walls as any chat. Your
+  key stays in your shell profile: TRIF stores only its name, and your agent's commands can't see it.
+  Small local models are much weaker at this than Claude Code or Codex. See the README.
+
 ## 0.2.0
 
 - **WebMods is now TRIF: Tim's Robot Internet Fixer.** Same thing, new name. Nothing about how it works

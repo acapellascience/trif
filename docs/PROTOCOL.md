@@ -629,7 +629,8 @@ Nothing is hosted; the agent uses the user's own login/subscription.
     text with suggestions opus / sonnet / haiku, empty = agent default). Stored in `chrome.storage.local` `settings`.
   - Light/dark via `prefers-color-scheme`; compact, clean, system font; fits a narrow panel (320 px+).
 - Panel ⇄ background: `chrome.runtime.connect({name: "panel"})`. Panel → background:
-  `{type: "agent.start", site, tabId, url, prompt, sessionId, agent, model}`, `{type: "agent.stop", runId}`,
+  `{type: "agent.start", site, tabId, url, prompt, sessionId, agent, model, openModel?}`, `{type: "agent.stop", runId}`,
+  `{type: "agent.openModel", check}`, `{type: "agent.openModel.set", provider, model, baseUrl, keyEnv}`,
   `{type: "agent.list"}`, `{type: "agent.login", agent}`, `{type: "agent.loginCode", loginId, code}`,
   `{type: "agent.loginCancel", loginId}`, `{type: "status"}`, `{type: "mod.enable", id, enabled, tab}`,
   `{type: "mod.approve", id, tab}`, `{type: "mod.update", id, choice, site, tab}`, `{type: "mod.delete", id, site, tab}`, `{type: "mod.restore", id, site, tab}` (the tab is reloaded if the mod runs there; with `site`, the chat gets a `{role: "mod", text: "x.js was deleted.", undo: id}` line, marked `undone: true` once restored, and a "was restored (off, as before)" line), `{type: "instructions.get"}`, `{type: "instructions.set", text}`, `{type: "chat.clear", site}`, `{type: "chat.note", site, text}`. Background forwards agent commands to the
@@ -645,7 +646,7 @@ New native request commands (answered with a normal `response`):
 | cmd | args | result |
 |---|---|---|
 | `agent.list` | – | `{agents: [{id, name, path, available, version, note, loggedIn, canLogin, loginFix}], default}` |
-| `agent.start` | `agent, model?, site, url, tabId, prompt, sessionId?, merge?` | `{runId}` right away; progress arrives as `agentEvent` messages. `merge`: a shipped mod's id, to merge its new version (see "Updates to shipped mods") |
+| `agent.start` | `agent, model?, site, url, tabId, prompt, sessionId?, merge?, openModel?` | `{runId}` right away; progress arrives as `agentEvent` messages. `merge`: a shipped mod's id, to merge its new version (see "Updates to shipped mods"). `openModel`: codex-oss only, this run's `{provider, model, baseUrl, keyEnv}` over the stored defaults (see "Open models") |
 | `agent.stop` | `runId` | `{stopped: true}` (SIGTERM, SIGKILL after 3 s) |
 | `agent.login` | `agent?` | `{loginId}` right away; progress arrives as `agentEvent` messages with `runId` = the loginId |
 | `agent.loginCode` | `loginId, code` | `{sent: true}` (writes the code and a newline to the login's stdin) |
@@ -656,6 +657,8 @@ New native request commands (answered with a normal `response`):
 | `mod.update` | `id, choice: "new"\|"mine"` | a shipped mod's new version: use it or keep the user's copy (see "Updates to shipped mods"); also on the socket, not from a run |
 | `instructions.get` | | `{text, file, max}`: the user's standing instructions (`~/.trif/instructions.md`, `''` if none) |
 | `instructions.set` | `text` | same; trimmed, at most 4000 characters, empty removes the file. Not from a run |
+| `agent.openModel` | `check?` | `{openModel, configured, effective, providers, key?}`: the open model's stored defaults (see "Open models"); with `check`, `key: {name, found, source, error}` (never the value). Not from a run |
+| `agent.openModel.set` | `provider?, model?, baseUrl?, keyEnv?` | stores them in config.json `openModel` (merged; `''` clears a field; a new provider drops the old one's model, URL and key name); same result. Not from a run |
 
 `loggedIn` is `true` / `false`, or `null` when unknown or the agent isn't available (from the adapter's
 `loginStatus`, which spends no tokens; cached 30 s per agent, forgotten when a login finishes or a run
@@ -685,7 +688,8 @@ New helper → extension message: `{type: "agentEvent", runId, event}` where `ev
   `~/.local/bin`, `/usr/local/bin`, `/opt/homebrew/bin`, `~/.npm-global/bin`. Spawned agents get
   `PATH = ~/.trif/bin : <recorded PATH> : <defaults>`, `HOME`, `USER`, `LANG`, `TERM=dumb`, cwd =
   the workspace, and **no** inherited `CLAUDE*`/`ANTHROPIC_*`/`CODEX_*` variables except
-  `ANTHROPIC_API_KEY`/`OPENAI_API_KEY` if the user set them in `config.json` → `env`.
+  `ANTHROPIC_API_KEY`/`OPENAI_API_KEY` if the user set them in `config.json` → `env`. An open-model run
+  (codex-oss) also gets its provider's key variable, read at run time (see "Open models").
 - **Logging in** (`agent.login`): spawns the adapter's login command (claude: `claude auth login`) with
   the same sanitized env as runs plus `BROWSER=/usr/bin/true` (the panel opens the page itself), cwd =
   the workspace, stdin piped. The first `https://` URL after `visit:` in its output becomes the `login`
@@ -823,6 +827,79 @@ The user's standing instructions (`instructions.md`) reach claude through the wo
   login (`codex login` in a terminal). Codex's Homebrew build ships a ripgrep (`rg`) that isn't
   notarized, so macOS may show an "rg Not Opened" dialog during runs: harmless (click Done), or clear it
   with `xattr -d com.apple.quarantine <codex dir>/codex-path/rg`.
+
+- **codex-oss**, "Open model (via Codex)", experimental: the codex adapter (same binary, flags,
+  permission profile and event parsing) with the model from somewhere else. See "Open models" below.
+  Never the default agent (`agent.list` marks it `experimental: true`).
+
+### Open models (`codex-oss`, experimental)
+
+`helper/lib/agents/codex-oss.js`. Codex 0.166 talks to any server speaking OpenAI's **Responses API**
+(`wire_api = "responses"`; the chat-completions wire API is gone from Codex). Ollama, LM Studio and
+OpenRouter serve `/v1/responses`. Every source is one custom provider passed inline (runs use
+`--ignore-user-config`):
+
+```
+codex exec <the codex flags and permission profile>
+  -c model_providers.trif-open={ name = "OpenRouter (TRIF)", base_url = "https://openrouter.ai/api/v1",
+       wire_api = "responses", env_key = "OPENROUTER_API_KEY" }
+  -c model_provider="trif-open" -c web_search="disabled"
+  -c shell_environment_policy.exclude=["OPENROUTER_API_KEY"]
+  -m openai/gpt-oss-120b [resume THREAD_ID] -- PROMPT
+```
+
+Local providers have no `env_key`, and add `stream_idle_timeout_ms = 900000` (a model can take minutes
+to load), `request_max_retries = 1`, `stream_max_retries = 1`. Not `--oss --local-provider`: in Codex
+0.166 `exec --oss` fails ("This chat uses ollama, but your current provider is openai") unless
+`model_provider` is set as well, and it **pulls** a model that isn't installed (`POST /api/pull`, many GB,
+mid-chat). `web_search` is OpenAI's hosted tool; other providers don't have it.
+
+- **Providers** (`PROVIDERS`): `ollama` (`http://127.0.0.1:11434/v1`, default model `gpt-oss:20b`),
+  `lmstudio` (`http://127.0.0.1:1234/v1`, `openai/gpt-oss-20b`), `openrouter`
+  (`https://openrouter.ai/api/v1`, key in `OPENROUTER_API_KEY`, `openai/gpt-oss-120b`), `custom` (a base
+  URL, optional key variable, no default model).
+- **Settings.** config.json `openModel` = `{provider, model?, baseUrl?, keyEnv?}`: the defaults, shared
+  by the panel (`agent.openModel.set`) and `trif agent open-model`. config.json is unreadable to runs, and
+  `agent.*` is refused from runs. `keyEnv` is a variable NAME (`^[A-Za-z_][A-Za-z0-9_]*$`), never a key;
+  `baseUrl` is http(s) without credentials. What a run uses (`resolve`): the defaults, then agent.start's
+  `openModel` (same shape; another provider starts from that provider's defaults), then agent.start's
+  `model`, then the provider's defaults. The panel's model picker keeps the model like any agent's
+  (`settings.models["codex-oss"]`); the provider block (`extension/openmodel.js`) shows under the agent
+  picker when codex-oss is chosen. For per-chat agent choices, a chat's selection is `{agent: "codex-oss",
+  model, openModel: {provider, baseUrl, keyEnv}}`, passed as agent.start's `agent`, `model` and
+  `openModel` (and `agent.models {agent, openModel}` lists that provider's models).
+- **The key.** Chrome starts the helper without the user's shell profile, so before each run
+  (`prepare`, awaited by runs.js before spawning) the helper looks the variable up (`shellenv.js`): its
+  own environment first, then the user's login shell, interactive so `~/.zshrc` is read:
+  `<shell from the user database> -l -i -c "printf <begin>; /usr/bin/printenv NAME; printf <end>"`, with
+  HOME/USER/PATH only, stdin closed, a 10 s limit, random markers to skip what the profile prints. Found
+  values stay in the helper's memory for 10 minutes; nothing is written anywhere. The value goes into
+  Codex's environment only (Codex sends it as `Authorization: Bearer`), `shell_environment_policy.exclude`
+  keeps it out of the commands Codex runs, and runs.js redacts it (`[redacted]`) from the run log, its
+  events and the stderr tail. The commands can't get it another way: the shell profiles are in the home
+  folder (denied), `ps -E` is refused by the sandbox, config.json holds only the name. (On Linux the
+  bubblewrap sandbox would need checking for `/proc/<codex pid>/environ`.)
+- **Network.** The permission profile's `network = { enabled = false }` covers the commands Codex runs,
+  not Codex's own model requests. Verified with Codex 0.166 (real `codex exec`, TRIF's profile, a
+  stand-in Responses server on 127.0.0.1; `tests/open-models.test.js` last test, and a real OpenRouter
+  run): the model requests arrive with the key; the agent's `curl https://example.com` fails to resolve,
+  its `curl` to the stand-in server's own port is refused, `cat config.json` and `~/.zshrc` are
+  "Operation not permitted", writes to another site's folder are refused, its own site's folder and
+  `trif` (through the mailbox) work, and `$OPENROUTER_API_KEY` is empty.
+- **Before a run** (`prepare`): no key found → error naming the variable and the fix; a local server
+  that doesn't answer (`/api/tags` for Ollama, `/v1/models` otherwise, 3 s) → "Ollama isn't running";
+  an Ollama model that isn't installed → "run `ollama pull <model>`". Codex isn't started in those cases.
+- **Models** (`agent.models`, cached 5 s, keyed by provider): local → the server's installed models,
+  recommended ones first (`gpt-oss:20b`, `gpt-oss:120b`, `qwen3-coder:30b`, `qwen3.6:27b`, `devstral`,
+  `gemma4`, matched loosely so LM Studio's names count); OpenRouter → a short fixed list
+  (`openai/gpt-oss-120b`, `qwen/qwen3-coder`, `deepseek/deepseek-v4.1-flash`, `z-ai/glm-5.3`,
+  `moonshotai/kimi-k2.7-code`), no network; custom → none. Always `custom: true` ("Other…").
+- **Errors** are reworded for the provider (codex.js `parse` takes `state.friendly`): 401 → the key in
+  `<VAR>` was refused; 402 → out of credit; Ollama's "not found, try pulling it" → `ollama pull`;
+  connection refused → not running. Codex's "Model metadata for `<model>` not found" warning (every
+  non-OpenAI model) is dropped.
+- **Doctor**: with `openModel` set, the key variable found (where, never the value), the local server
+  reachable, the Ollama model installed, Codex new enough; without it, an info line.
 
 Security notes: page content reaches the agent, so prompt injection is possible. The agent is limited
 to editing the workspace and running `trif` (which can still run JavaScript in the user's tabs);

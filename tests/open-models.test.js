@@ -2,8 +2,9 @@
 // Open models through Codex (experimental): helper/lib/agents/codex-oss.js, helper/lib/shellenv.js and
 // their plumbing (agent.openModel, agent.start's prepare step, redaction, doctor, `trif agent open-model`).
 // A fake `codex` for the helper tests; the last test runs the REAL Codex (when installed) against a
-// stand-in model server (tests/fake-model-server.js), with TRIF's real permission profile. It needs to
-// apply macOS's sandbox, so it fails inside another sandbox; TRIF_TEST_NO_REAL_CODEX=1 skips it.
+// stand-in model server (tests/fake-model-server.js), with TRIF's real permission profile and a scratch
+// HOME (so no OpenAI login, nothing of the user's). It applies macOS's sandbox, which may fail inside
+// another sandbox; TRIF_TEST_NO_REAL_CODEX=1 skips it.
 
 const test = require('node:test');
 const assert = require('node:assert');
@@ -403,11 +404,13 @@ test('real Codex + stand-in model: model requests get through, the agent\'s comm
   assert.match(out, /example\.com\/page/, info); // trif tabs, through the mailbox
   assert.match(out, /curl: \(6\)[^\n]*\n000 curl=6/, info); // no DNS, no internet
   assert.match(out, /curl: \(7\)[^\n]*\n local=7/, info); // not even the model server on 127.0.0.1
-  assert.match(out, /Operation not permitted\n cat=1/, info);
+  assert.match(out, /config\.json: Operation not permitted/, info);
+  assert.match(out, /^ cat=1$/m, info);
   assert.ok(!out.includes('CONFIG-SECRET'));
   assert.match(out, /WROTE-OWN/, info);
   assert.equal(fs.readFileSync(path.join(home, 'sites', 'example.com', 'oss-probe.js'), 'utf8'), '// mine\n');
-  assert.match(out, /operation not permitted[^\n]*\n other=1/i, info);
+  assert.match(out, /operation not permitted[^\n]*other\.org/i, info); // (stderr and stdout can come in either order)
+  assert.match(out, /^ other=1$/m, info);
   assert.ok(!fs.existsSync(path.join(home, 'sites', 'other.org', 'oss-probe.js')));
   assert.match(out, /key=\[\]\n0/, info);
   assert.ok(!out.includes(FAKE_KEY));

@@ -122,6 +122,48 @@ panel on its site; the ones marked *(off)* wait for you to switch them on.
 - **Instagram:** Following-only feed (no suggested posts or ads), Hide reposts, Hide AI content, and
   Desaturate *(off)*: colours down to 35%.
 
+## Open models (experimental)
+
+Instead of Claude Code or Codex's own models, a chat can run on an **open model**: one on your own
+computer, or one from a provider like OpenRouter, with your own key. It runs through Codex, so you need
+Codex installed (`brew install codex`), but not an OpenAI account. In the side panel's Settings, pick
+**Open model (via Codex)** as the agent, then where the model comes from, then the model. (From a
+terminal: `trif agent open-model --provider ollama|lmstudio|openrouter|custom --model <name>`, and
+`trif agent run --agent codex-oss "…"`.) It works within the same walls as any chat: only the site
+you're on, no internet for its commands.
+
+Be warned: small local models are much weaker at this kind of work than Claude Code or Codex. They
+misread pages, skip checks and give up early. The bigger hosted ones (Qwen3-Coder, GLM, DeepSeek, Kimi)
+do better.
+
+**On your computer, with Ollama.** Nothing leaves your computer.
+
+1. Install Ollama: `brew install ollama` (then `ollama serve`), or the app from [ollama.com](https://ollama.com).
+2. Get a model: `ollama pull gpt-oss:20b` (about 14 GB; it wants about 16 GB of free memory, so a Mac
+   with 32 GB). Others worth trying, if you have room: `qwen3-coder:30b`, `gpt-oss:120b` (big),
+   `devstral`, `gemma4`. The panel lists what you've installed, these first.
+3. In Settings: Open model (via Codex) → From: Ollama → Model.
+
+**On your computer, with LM Studio.** Download a model in [LM Studio](https://lmstudio.ai) (gpt-oss 20B
+is a good start), start its server (Developer tab, or `lms server start`), then pick LM Studio in Settings.
+
+**OpenRouter** (or another provider). Make a key at [openrouter.ai](https://openrouter.ai), and put it in
+your shell profile, not in TRIF:
+
+```sh
+echo 'export OPENROUTER_API_KEY=sk-or-…' >> ~/.zshrc
+```
+
+Then in Settings pick From: OpenRouter, and a model (the cheapest, gpt-oss-120b, cost us under a cent
+per message in testing; Qwen3-Coder 480B about 2 to 3 cents). TRIF stores only the variable's name
+(`OPENROUTER_API_KEY`, or another name in "Key in"). Chrome doesn't see your shell profile, so before each
+chat the helper asks your login shell for that one variable (`zsh -l -i -c`, as when you open a terminal)
+and hands it to Codex alone: your agent's commands can't see it, and it's kept out of TRIF's logs. A
+**Custom URL** works the same way for any server that speaks OpenAI's Responses API.
+
+`trif doctor` checks the setup: Ollama or LM Studio running, the model installed, the key variable set
+(without showing it).
+
 ## Updates
 
 When a new version is out, the TRIF panel says so: click **Update** to install it, or **What's new**
@@ -167,7 +209,8 @@ you want them later.
 ## Privacy
 
 Your mods and chats stay on your computer. When you ask for a change, your coding agent reads the page
-you're on, and sends what it reads to its provider (Anthropic for Claude Code, OpenAI for Codex) under that provider's
+you're on, and sends what it reads to its provider (Anthropic for Claude Code, OpenAI for Codex, the provider
+you picked for an open model; nobody for a model on your own computer) under that provider's
 terms. See [store/PRIVACY.md](store/PRIVACY.md).
 
 ## For developers

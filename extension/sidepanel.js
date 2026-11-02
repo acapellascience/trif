@@ -863,7 +863,6 @@ function renderSettings() {
   const note = chosen?.note || (view.agentsError && !view.agents ? 'Agents are listed once the helper is connected.' : '');
   ui.agentNote.textContent = note;
   ui.agentNote.hidden = !note;
-  renderOpenModel(chosen?.id, !!view.status?.helper?.connected); // open model: where it comes from (openmodel.js)
   renderModels();
 }
 
@@ -883,6 +882,7 @@ async function loadModels(agentId, fresh = false) {
 
 function renderModels() {
   const { id, info } = currentAgent();
+  renderOpenModel(id, !!view.status?.helper?.connected); // open model: where it comes from (openmodel.js)
   const list = view.modelLists[id] || null;
   const chosen = chosenModel(id);
   const models = list?.models || [];

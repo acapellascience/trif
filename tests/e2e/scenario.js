@@ -303,7 +303,10 @@ class Scenario {
       if (!doc.json) throw new Error(`no JSON: ${doc.stdout} ${doc.stderr}`);
       r.log(JSON.stringify(doc.json, null, 2));
       const fails = doc.json.checks.filter((c) => c.status === 'fail');
-      const warns = doc.json.checks.filter((c) => c.status === 'warn');
+      // Expected in the scratch home: the CLI isn't on PATH (setup ran with --no-link), and the agents
+      // aren't logged in there (doctor runs with HOME=<scratch>; their logins are in your real home).
+      const expected = (c) => /not on your PATH|isn't logged in/.test(c.title);
+      const warns = doc.json.checks.filter((c) => c.status === 'warn' && !expected(c));
       const connected = doc.json.checks.find((c) => /helper|extension/i.test(c.title) && c.status === 'ok');
       if (fails.length) throw new Error(fails.map((c) => c.title).join('; '));
       if (!connected) throw new Error('doctor has no passing helper/extension check');
@@ -569,23 +572,34 @@ class Scenario {
       const tcc = this.tccLog(tccStart);
       fs.writeFileSync(this.r.file(`${this.label}-tcc-${agent}.txt`), tcc.raw);
       if (tcc.error) return { status: 'warn', detail: `couldn't read the TCC log: ${tcc.error}` };
-      if (!tcc.requests.length) return 'none from node, claude or codex';
-      return { status: 'warn', detail: `${tcc.requests.length} request(s):\n${tcc.requests.slice(0, 20).join('\n')}` };
+      if (!tcc.requests.length) return 'none from the helper, its agents, codex or rg';
+      // Folder-level privacy services (Documents, Desktop, Downloads…) are what can put a dialog on screen;
+      // DeveloperTool and sandboxd's silent Full Disk Access check (Denied (Service Policy)) can't.
+      const asked = tcc.requests.filter((q) => /Folder|Volumes|Downloads|Desktop|User Consent/.test(q));
+      const detail = `${tcc.requests.length} decision(s):\n${tcc.requests.join('\n')}`;
+      return asked.length ? { status: 'warn', detail } : { status: 'pass', detail };
     });
   }
 
-  /** TCC (privacy) activity since `start` that mentions node, claude, codex or rg. */
+  /**
+   * TCC (macOS privacy) decisions since `start` for the helper and what it started (the agents count
+   * as the helper's: it's their "responsible" process), and anything codex or rg asked for. Returns
+   * {requests: ["<service>: <result> (<subject>)"], raw}. sandboxd's silent checks show up here too.
+   */
   tccLog(start) {
     const fmt = (t) => {
       const p = (n) => String(n).padStart(2, '0');
       return `${t.getFullYear()}-${p(t.getMonth() + 1)}-${p(t.getDate())} ${p(t.getHours())}:${p(t.getMinutes())}:${p(t.getSeconds())}`;
     };
-    const r = run('/usr/bin/log', ['show', '--style', 'compact', '--predicate', 'subsystem == "com.apple.TCC"', '--start', fmt(start)], { timeoutMs: 120000 });
+    const r = run('/usr/bin/log', ['show', '--info', '--predicate', 'subsystem == "com.apple.TCC"', '--start', fmt(start)], { timeoutMs: 180000 });
     if (r.status !== 0) return { error: (r.stderr || '').trim() || `exit ${r.status}`, raw: r.stdout + r.stderr, requests: [] };
-    const lines = r.stdout.split('\n');
-    const requests = lines.filter((l) => /\b(node|claude|codex|rg)\b/i.test(l) && /kTCCService|AUTHREQ|request|prompt/i.test(l))
-      .map((l) => l.replace(/\s+/g, ' ').slice(0, 300));
-    return { raw: r.stdout, requests };
+    const lines = r.stdout.split('\n').filter((l) => l.includes('Handling access request to '));
+    const ours = lines.filter((l) => l.includes(`pid=${this.helperPid},`) || /\b(codex|codex-path\/rg)\b/.test(l));
+    const requests = [...new Set(ours.map((l) => {
+      const m = /Handling access request to (\w+), from Sub:\{([^}]*)\}.*?Auth Right: ([^,]*?)\s*,/.exec(l);
+      return m ? `${m[1]}: ${m[3]} (from ${m[2]})` : l.slice(l.indexOf('Handling')).slice(0, 300);
+    }))];
+    return { raw: ours.join('\n') + '\n', requests };
   }
 
   async consoleCheck() {

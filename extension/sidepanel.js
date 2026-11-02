@@ -13,7 +13,7 @@ const emptyChat = () => ({ sessionId: null, agent: null, messages: [], run: null
 
 const ui = {
   dot: $('#dot'), site: $('#site'), siteSwitch: $('#site-switch'), newChat: $('#new-chat'), settingsBtn: $('#settings-btn'),
-  gate: $('#gate'), gateTitle: $('#gate-title'), gateBtn: $('#gate-btn'), gateErr: $('#gate-err'),
+  gate: $('#gate'), gateBtn: $('#gate-btn'), gateErr: $('#gate-err'),
   settings: $('#settings'), agent: $('#agent'), agentNote: $('#agent-note'), model: $('#model'),
   modelCustomRow: $('#model-custom-row'), modelCustom: $('#model-custom'), modelNote: $('#model-note'),
   instructions: $('#instructions'), instructionsNote: $('#instructions-note'),
@@ -617,7 +617,7 @@ function renderMods() {
 }
 
 // TRIF is off on a site until the user turns it on here (see "sites TRIF is on for" in lib.js):
-// until then the panel shows only "TRIF is off on <site>" and the button, and nothing runs or reads the
+// until then the panel shows only "The robot is off." and the button, and nothing runs or reads the
 // site. Once on, the header's switch turns it back off. (Unknown until the first status: neither shows.)
 const siteScope = () => (view.site ? scopeFor(view.site) : null);
 const siteIsOn = () => !!siteScope() && (view.status?.sitesOn || []).includes(siteScope());
@@ -635,8 +635,7 @@ function renderGate() {
   ui.siteSwitch.title = ui.siteSwitch.dataset.error || (scope ? `TRIF on ${scope}` : '');
   ui.siteSwitch.setAttribute('aria-label', ui.siteSwitch.title);
   if (!gated) return;
-  ui.gateTitle.textContent = `TRIF is off on ${scope}`;
-  ui.gateBtn.textContent = 'Fix this site';
+  ui.gateBtn.textContent = `Fix ${scope}`;
   ui.gateBtn.disabled = siteSwitching;
 }
 

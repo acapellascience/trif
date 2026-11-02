@@ -118,11 +118,14 @@ svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width:
 
 .settings { display: grid; gap: 8px; }
 
-/* A site TRIF is off for: only "TRIF is off on <site>" and the button. */
+/* A site TRIF is off for: only "The robot is off." and the button. */
 .gate { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 14px; padding: 24px 16px 64px; }
 .gate[hidden] { display: none; }
 .gate .mod-err { margin: 0; text-align: center; }
 .gate-title { margin: 0; font-size: 15px; font-weight: 600; }
+.gate-icon { stroke: none; }
+.gate-icon .rim { fill: var(--switch-on); }
+.gate-icon .face { fill: #18181a; }
 .btn.go { padding: 8px 16px; border-color: transparent; background: var(--switch-on); color: #04291c; font-size: 13px; font-weight: 600; }
 .btn.go:hover { background: color-mix(in srgb, var(--switch-on) 85%, #000); }
 body.site-off :is(.bar, .settings, .notice, .mods, .chat, .composer) { display: none; }

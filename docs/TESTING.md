@@ -45,7 +45,7 @@ Per browser, a **fresh** scenario, and an **upgrade** scenario per `--upgrade-fr
    `trif doctor`, the shipped mods (`trif mods`, which start on and off, the sites TRIF starts on for).
 3. Against a local test site (`http://127.0.0.1:<port>`, `http://localhost:<port>`) with a mod the
    harness writes, and the panel opened as a window following the test window (`sidepanel.html?window=<id>`):
-   - the site starts off: the mod doesn't run, the panel shows "TRIF is off on 127.0.0.1" and "Fix this site"; clicking it
+   - the site starts off: the mod doesn't run, the panel shows "The robot is off." and "Fix 127.0.0.1"; clicking it
      runs the mod;
    - the mod's switch in the panel off and on (page reloads, `trif status` agrees), `trif disable` /
      `trif enable` from the CLI (page and panel follow), the site switch off (nothing runs, page

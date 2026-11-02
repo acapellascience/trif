@@ -47,7 +47,7 @@ function tooOld(version) {
  * The run's own rules (--settings): the sandbox for its shell commands, and per-run permission rules
  * (other sites' folders and screenshots). `limits` is runs.js runLimits.
  */
-function runSettings({ workspace = '', readOnly = [], denied = [], home, readable = [], privateFiles = [], box, screenshots, otherScreenshots = [], skills = [] } = {}) {
+function runSettings({ workspace = '', readOnly = [], lockedDirs = [], denied = [], home, readable = [], privateFiles = [], box, screenshots, otherScreenshots = [], skills = [], skillSecrets = [], skillLinks = [] } = {}) {
   // Absolute ("//" + path): a "./" rule follows the agent's current folder, so after `cd sites/x.com` it
   // would point somewhere else.
   const rel = (p) => `/${p}`;
@@ -62,7 +62,7 @@ function runSettings({ workspace = '', readOnly = [], denied = [], home, readabl
         // The whole home folder, then what the run may read inside it (the narrower path wins), rather
         // than each item in it: Claude Code looks inside every folder on these lists, and listing
         // Desktop, Documents and the like made macOS ask the user to allow that.
-        denyRead: home ? [home, ...privateFiles] : denied,
+        denyRead: home ? [home, ...privateFiles, ...skillSecrets.map((x) => x.path)] : denied,
         allowRead: [...(home ? readable : []), box, screenshots].filter(Boolean),
         allowWrite: [box, screenshots].filter(Boolean), // (writing there needs saying too)
         denyWrite: [...(workspace ? STATE_FILES.map((f) => path.join(workspace, f)) : []), ...readOnly],
@@ -74,8 +74,15 @@ function runSettings({ workspace = '', readOnly = [], denied = [], home, readabl
       // Claude Code doesn't load user skills in these runs (--setting-sources project), so this only
       // matters when the agent is pointed at one.
       allow: skills.map((p) => `Read(/${p}/**)`),
-      deny: [...readOnly.filter(inWorkspace).map((p) => `Edit(${rel(p)}/**)`),
-        ...otherScreenshots.filter(inWorkspace).map((p) => `Read(${rel(p)}/**)`)],
+      // Denied: other sites' folders, by their path in the workspace and by their real path (a site folder
+      // that is a link matches the Edit(//<workspace>/sites/**) allow by the first, whatever the second
+      // is); other sites' screenshots; inside the skill folders, what looks like a secret (runs.js
+      // skillSecrets) and links that lead where the run may not read (Claude Code's Read tool isn't
+      // sandboxed and matches rules against the path it's given).
+      deny: [...new Set([...readOnly.filter(inWorkspace), ...lockedDirs.flatMap((d) => [d.literal, d.real])])].map((p) => `Edit(${rel(p)}/**)`).concat(
+        ...otherScreenshots.filter(inWorkspace).map((p) => `Read(${rel(p)}/**)`),
+        ...skillSecrets.flatMap((x) => (x.dir ? [`Read(/${x.path})`, `Read(/${x.path}/**)`] : [`Read(/${x.path})`])),
+        ...skillLinks.flatMap((p) => [`Read(/${p})`, `Read(/${p}/**)`])),
     },
   };
 }
@@ -122,7 +129,8 @@ const adapter = {
     if (sessionId) args.push('--resume', sessionId);
     if (model) args.push('--model', model);
     args.push('--', prompt);
-    return { file: bin || adapter.binary, args };
+    // Every other site's folder got its Edit deny rules (runSettings) and its sandbox denyWrite.
+    return { file: bin || adapter.binary, args, locked: (limits.lockedDirs || []).map((d) => d.rel) };
   },
 
   // One stdout line -> zero or more normalized events. `state` is per run ({workspace}).

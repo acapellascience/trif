@@ -8,7 +8,7 @@
 
 const fs = require('fs');
 const path = require('path');
-const { buildMod, isIgnoredName } = require('./mods');
+const { buildMod, isIgnoredName, readModFile } = require('./mods');
 const { outOfScope } = require('./scope');
 
 const TRASH = 'trash';
@@ -37,7 +37,10 @@ const timeOf = (stamp) => {
 
 function checkScope(site, file, scope, verb) {
   if (!scope) return;
-  const mod = buildMod({ site, file, code: fs.readFileSync(file, 'utf8') }).mod;
+  // (A link out of the mods folder, or the trash, isn't read: readModFile.)
+  let code;
+  try { code = readModFile(path.dirname(path.dirname(file)), file); } catch (e) { throw new TrashError(`${site}/${path.basename(file, '.js')}: ${e.message}`); }
+  const mod = buildMod({ site, file, code }).mod;
   const outside = outOfScope(mod, scope);
   if (outside.length) {
     throw new TrashError(`this chat can only ${verb} mods that stay on ${scope}; ${mod.id} also runs on ${outside.join(', ')}. ` +

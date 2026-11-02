@@ -92,6 +92,13 @@ patch `fetch`/`XMLHttpRequest`, read React state, etc.). An optional header sets
 
 **Mod id** = `<site>/<mod>` (e.g. `x.com/plain-x`). The helper parses headers; the extension never parses.
 
+**Links.** A mod file or site folder may be a symlink only to somewhere inside the mods folder (real
+paths compared, `mods.js` listModFiles/readModFile). One whose real path is outside it is ignored with a
+warning (`helper.log`, `trif mods`, `trif doctor`): a side-panel run can write its site's folder, so it
+could otherwise plant `sites/x.com/a.js -> ~/.ssh/id_rsa` and have the helper, which runs unsandboxed,
+read the target and send it to the extension. The file read is the one whose real path was checked (same
+device and inode after opening), so swapping a link in between doesn't work either.
+
 ## Messages: helper ⇄ extension (native messaging)
 
 Chrome native messaging framing: 4-byte little-endian length + UTF-8 JSON. Host→extension messages must
@@ -752,7 +759,7 @@ Suffix List). `helper/lib/scope.js` computes it; `extension/lib.js` mirrors the 
   only go to such URLs; `record` only for such sites; `mod.enable` only for mods whose every `@match` is
   in scope.
 - **Held mods.** The helper snapshots the mod files when a run starts (the same files the scanner loads:
-  `mods.js` listModFiles, symlinks followed, no cap). On every mods sync while a run is live (and for 10 s
+  `mods.js` listModFiles: links within the mods folder followed, links out of it ignored, no cap). On every mods sync while a run is live (and for 10 s
   after it ends; a finished run's leftover processes get SIGTERM, then SIGKILL after 3 s, so nothing
   writes later), a mod that the run added or changed and that has an `@match`
   outside the scope (`<all_urls>`, a `*` host, another domain, `file://`), or whose `@risk` is 2, is **held**: recorded in
@@ -761,7 +768,9 @@ Suffix List). `helper/lib/scope.js` computes it; `extension/lib.js` mirrors the 
   carries `held: [{id, reason}]`; the panel says so in the chat and lists the mod (also when it doesn't
   apply to the tab) with an Allow button (`mod.approve`). Approving marks the entry approved so that
   version isn't held again; any change to the file drops the entry (a later run's change is checked
-  afresh). `trif status`/`mods` show held mods.
+  afresh). `trif status`/`mods` show held mods. A change in another site's existing folder, which the
+  run's limits make read-only, isn't held on the run's account (someone else made it), but only for the
+  folders the agent's adapter says it protected (`command()` returns `locked`; none if it doesn't say).
 - **Agent sandboxes.** The scope only holds if the agent can't reach the helper some other way or
   rewrite the rules, so both agents run under limits the operating system enforces (macOS Seatbelt;
   `runs.js` runLimits computes them, each adapter passes them on):
@@ -773,7 +782,18 @@ Suffix List). `helper/lib/scope.js` computes it; `extension/lib.js` mirrors the 
     folder, such as `~/.codex`, every other item: Codex's login stays unreadable). Codex offers the
     skills it finds and its commands can now read them; Claude Code doesn't load user skills in these runs
     (`--setting-sources project`), so its file tools may read them (absolute `Read(//…)` rules) but it
-    isn't told they exist. A skill that needs the network (`npx …@latest`) still can't run its tool. In the workspace, not `config.json` (API keys), `safari-token`, `helper.log`, `runs/`
+    isn't told they exist. A skill that needs the network (`npx …@latest`) still can't run its tool. Inside the skill folders (a
+    skill can keep a token or an `.env` file next to its scripts), `skillSecrets` denies, four levels
+    down: dotfiles and dot-folders (`.git`, `.env`…), except Codex's built-in `.system`, and anything
+    named `.env*`, `*.pem`, `*.key`, `credentials*`, `secrets*` or `token*` (any case): in Codex's
+    profile, in Claude Code's sandbox (`denyRead`) and as `Read` deny rules for its file tools. A link
+    inside a skill folder that leads where the run may not read (elsewhere in the home folder, the
+    workspace's secrets, or nowhere) gets `Read` deny rules too: sandboxes follow links and deny the real
+    path, but Claude Code's Read tool runs outside the sandbox and matches rules against the path it's
+    given, which the skill folder's allow rule covers. The trade-off: a skill's own script that reads a
+    `.env` beside it can't, in a run; a secret under some other name, deeper than four levels or past
+    the first 5000 entries is still readable (skill folders are the user's own, but keep secrets out
+    of them). In the workspace, not `config.json` (API keys), `safari-token`, `helper.log`, `runs/`
     (other runs' logs hold the pages they read) or `screenshots/` (other sites'), except the run's own
     screenshots folder and mailbox.
   - **Writes:** the mods folder, with every existing folder of another site (`all-sites/` included)
@@ -789,7 +809,8 @@ Suffix List). `helper/lib/scope.js` computes it; `extension/lib.js` mirrors the 
   sandbox (`claude.js` runSettings, passed with `--settings`: `enabled`, `failIfUnavailable`,
   `allowUnsandboxedCommands: false`, the filesystem lists, `network: {allowedDomains: [],
   strictAllowlist: true}`); its own file tools follow permission rules: edits only under `sites/` minus
-  other sites' existing folders, no reads of the secrets, logs or other sites' screenshots. Claude Code
+  other sites' existing folders (deny rules by each folder's path in the workspace and by its real path,
+  so a site folder that is a link is covered too), no reads of the secrets, logs or other sites' screenshots. Claude Code
   applies a `Read`/`Edit` deny rule to its sandbox too, where nothing can reopen it, so those rules don't
   cover `runs/` (the sandbox does). Verified on macOS with Codex 0.166 (`codex sandbox`) and Claude Code
   2.1.312 (a real `-p` run): each read and write above, another run's mailbox, the internet and the

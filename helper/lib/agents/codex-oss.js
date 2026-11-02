@@ -262,7 +262,7 @@ const adapter = {
     const args = base.args;
     const at = args.length - (opts.sessionId ? 4 : 2) - (om.model ? 2 : 0); // before -m [resume id] -- prompt
     args.splice(at, 0, ...providerArgs(om));
-    return { file: base.file, args };
+    return { file: base.file, args, locked: base.locked };
   },
 
   parse(line, emit, state = {}) {

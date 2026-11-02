@@ -154,8 +154,8 @@ your shell profile, not in TRIF:
 echo 'export OPENROUTER_API_KEY=sk-or-…' >> ~/.zshrc
 ```
 
-Then in Settings pick From: OpenRouter, and a model (the cheapest, gpt-oss-120b, cost us under a cent
-per message in testing; Qwen3-Coder 480B about 2 to 3 cents). TRIF stores only the variable's name
+Then in Settings pick From: OpenRouter, and a model (the cheapest, gpt-oss-120b, cost under half a cent
+per message in testing; Qwen3-Coder 480B about 5 cents). TRIF stores only the variable's name
 (`OPENROUTER_API_KEY`, or another name in "Key in"). Chrome doesn't see your shell profile, so before each
 chat the helper asks your login shell for that one variable (`zsh -l -i -c`, as when you open a terminal)
 and hands it to Codex alone: your agent's commands can't see it, and it's kept out of TRIF's logs. A

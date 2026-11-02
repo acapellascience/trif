@@ -124,8 +124,47 @@ function isDefaultHome(home) {
   return resolved === defaultHome() || resolved === legacyHome();
 }
 
+// ---------------------------------------------------------------- the private folder
+//
+// What the helper keeps that agent runs must never read: config.json (settings, and before 0.2.1 API
+// keys), safari-token (the Safari bridge's key), helper.log, runs/ (run logs: the pages runs read) and
+// screenshots/ (one folder per site; a run is given its own site's alone). Outside the workspace, which
+// runs may read in full (docs/PROTOCOL.md "Run scope"), so no rule inside the workspace has to keep runs
+// out of them. Until 0.2.1 they were in the workspace; migrate.js migratePrivate moves them.
+//   macOS    ~/Library/Application Support/TRIF
+//   Linux    $XDG_STATE_HOME/trif, or ~/.local/state/trif
+//   a workspace elsewhere ($TRIF_HOME, --home): <workspace>-private beside it
+//   $TRIF_PRIVATE overrides all of these (not inside the workspace, nor holding it).
+const PRIVATE_FILES = ['config.json', 'safari-token', 'helper.log', 'helper.log.1', 'safari-bridge.err', 'runs', 'screenshots'];
+
+function defaultPrivateDir({ env = process.env, platform = process.platform, homedir = os.homedir() } = {}) {
+  if (platform === 'darwin') return path.join(homedir, 'Library', 'Application Support', NAME);
+  const state = env.XDG_STATE_HOME && path.isAbsolute(env.XDG_STATE_HOME) ? env.XDG_STATE_HOME : path.join(homedir, '.local', 'state');
+  return path.join(state, CLI_NAME);
+}
+
+/** {dir, error}: the private folder for workspace `home` (error: why $TRIF_PRIVATE was ignored). */
+function privateDirInfo(home, { env = process.env, platform = process.platform, homedir = os.homedir() } = {}) {
+  const resolved = path.resolve(expandHome(String(home)));
+  const fallback = isDefaultHome(resolved) ? defaultPrivateDir({ env, platform, homedir }) : `${resolved}-private`;
+  const forced = envVar('PRIVATE', env);
+  if (!forced) return { dir: fallback, error: null };
+  const dir = path.resolve(expandHome(String(forced)));
+  const { isInside } = require('./pathcheck');
+  if (isInside(dir, resolved, { orEqual: true }) || isInside(resolved, dir, { orEqual: true })) {
+    return { dir: fallback, error: `TRIF_PRIVATE (${dir}) is inside the workspace or holds it, so it was ignored: runs may read the workspace. Using ${fallback}` };
+  }
+  return { dir, error: null };
+}
+
+function privateDir(home, opts) { return privateDirInfo(home, opts).dir; }
+
+function configFile(home) { return path.join(privateDir(home), 'config.json'); }
+
 function readConfig(home) {
-  const file = path.join(home, 'config.json');
+  let file = configFile(home);
+  // (Before migratePrivate has run, e.g. a helper restarting onto new code: where it was until 0.2.1.)
+  if (!fs.existsSync(file) && fs.existsSync(path.join(home, 'config.json'))) file = path.join(home, 'config.json');
   let text;
   try { text = fs.readFileSync(file, 'utf8'); } catch { return { config: {}, error: null }; }
   try {
@@ -139,6 +178,7 @@ function readConfig(home) {
 function workspace(homeOverride) {
   const home = resolveHome(homeOverride);
   const { config, error } = readConfig(home);
+  const priv = privateDirInfo(home);
   let modsDir = path.join(home, 'sites');
   if (typeof config.modsDir === 'string' && config.modsDir.trim()) {
     modsDir = path.resolve(home, expandHome(config.modsDir.trim()));
@@ -147,8 +187,15 @@ function workspace(homeOverride) {
     home,
     modsDir,
     sock: path.join(home, 'helper.sock'),
-    log: path.join(home, 'helper.log'),
-    screenshots: path.join(home, 'screenshots'),
+    // The private folder (see above) and what's in it.
+    private: priv.dir,
+    privateError: priv.error,
+    configFile: path.join(priv.dir, 'config.json'),
+    log: path.join(priv.dir, 'helper.log'),
+    runs: path.join(priv.dir, 'runs'),
+    screenshots: path.join(priv.dir, 'screenshots'),
+    safariToken: path.join(priv.dir, 'safari-token'),
+    safariBridgeErr: path.join(priv.dir, 'safari-bridge.err'),
     bin: path.join(home, 'bin'),
     hostWrapper: path.join(home, 'bin', `${CLI_NAME}-host`),
     cliWrapper: path.join(home, 'bin', CLI_NAME),
@@ -173,4 +220,5 @@ module.exports = {
   HOST_NAME, DEV_EXTENSION_ID, FIREFOX_EXTENSION_ID, STORE_EXTENSION_IDS, EXTENSION_ID, EXTENSION_ORIGIN, HELPER_DIR, REPO_ROOT,
   HOST_JS, CLI_JS, APP_DIR_NAME, VERSION,
   expandHome, defaultHome, resolveHome, readConfig, workspace, examplesDir, isGitCheckout, extensionIds, extensionOrigins,
+  PRIVATE_FILES, defaultPrivateDir, privateDir, privateDirInfo, configFile,
 };

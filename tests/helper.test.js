@@ -7,7 +7,7 @@ const fs = require('fs');
 const net = require('net');
 const path = require('path');
 const { spawn } = require('child_process');
-const { FakeExtension, runCli, writeMod, tempDir, waitFor, sleep, REPO } = require('./fake-extension');
+const { FakeExtension, runCli, writeMod, tempDir, waitFor, sleep, REPO, privDir } = require('./fake-extension');
 const { parseHeader, buildMod, scanMods, planModsMessage, defaultMatches } = require('../helper/lib/mods');
 const { encode, Decoder } = require('../helper/lib/framing');
 
@@ -275,8 +275,25 @@ document.querySelector('#banner')?.remove();`);
   ext.send({ type: 'modsApplied', registered: [], errors: [{ id: 'example.com/banner', error: 'Invalid match pattern' }] });
   ext.send({ type: 'log', level: 'warn', message: 'hello from the fake extension' });
   await waitFor(async () => (await sockRequest(ext.sock, { id: 'p3', cmd: 'ping' })).result.modsApplied, { message: 'modsApplied' });
-  await waitFor(() => fs.readFileSync(path.join(home, 'helper.log'), 'utf8').includes('hello from the fake extension'), { message: 'log line' });
+  await waitFor(() => fs.readFileSync(path.join(privDir(home), 'helper.log'), 'utf8').includes('hello from the fake extension'), { message: 'log line' });
   assert.deepEqual(ext.badFrames, []);
+});
+
+test('host: on start, moves the private files an older version left in the workspace (settings, logs, run logs)', async () => {
+  const home = tempDir();
+  fs.mkdirSync(path.join(home, 'sites', 'example.com'), { recursive: true });
+  fs.writeFileSync(path.join(home, 'config.json'), JSON.stringify({ checkForUpdates: false }));
+  fs.writeFileSync(path.join(home, 'helper.log'), 'a line from 0.2.0\n');
+  fs.mkdirSync(path.join(home, 'runs'));
+  fs.writeFileSync(path.join(home, 'runs', 'r0.jsonl'), '{}\n');
+  const ext = startHost(home);
+  await ext.waitForSocket();
+  for (const f of ['config.json', 'helper.log', 'runs']) assert.ok(!fs.existsSync(path.join(home, f)), f);
+  assert.equal(JSON.parse(fs.readFileSync(path.join(privDir(home), 'config.json'), 'utf8')).checkForUpdates, false);
+  assert.ok(fs.existsSync(path.join(privDir(home), 'runs', 'r0.jsonl')));
+  const log = fs.readFileSync(path.join(privDir(home), 'helper.log'), 'utf8');
+  assert.match(log, /^a line from 0\.2\.0$/m);
+  assert.match(log, /moved TRIF's private files \(.*config\.json.*\) out of/);
 });
 
 test('host: syncs on file add, change, delete, ignored files, and site folders coming and going', async () => {
@@ -436,7 +453,7 @@ test('host: second instance only syncs mods, then takes over when the first exit
   const b = startHost(home);
   const bMods = await b.nextMods();
   assert.deepEqual(bMods.map((m) => m.id), ['a.com/m']);
-  await waitFor(() => fs.readFileSync(path.join(home, 'helper.log'), 'utf8').includes('for its own browser'), { message: 'secondary log line' });
+  await waitFor(() => fs.readFileSync(path.join(privDir(home), 'helper.log'), 'utf8').includes('for its own browser'), { message: 'secondary log line' });
   let ping = await sockRequest(a.sock, { id: 1, cmd: 'ping' });
   assert.equal(ping.result.pid, a.child.pid);
 
@@ -476,7 +493,7 @@ test('host: shuts down after a frame too big to be real, rather than misreading 
   ext.child.stdin.write(Buffer.from([0xff, 0xff, 0xff, 0xff, 0x7b])); // a 4 GB "frame": out of step
   const { code } = await ext.exited;
   assert.equal(code, 1);
-  assert.match(fs.readFileSync(path.join(home, 'helper.log'), 'utf8'), /unreadable input from the extension/);
+  assert.match(fs.readFileSync(path.join(privDir(home), 'helper.log'), 'utf8'), /unreadable input from the extension/);
 });
 
 test('mods messages carry the sites preinstalled.json says to start on', async () => {

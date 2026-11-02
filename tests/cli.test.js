@@ -5,7 +5,7 @@ const test = require('node:test');
 const assert = require('node:assert');
 const fs = require('fs');
 const path = require('path');
-const { FakeExtension, runCli, writeMod, tempDir, REPO } = require('./fake-extension');
+const { FakeExtension, runCli, writeMod, tempDir, REPO, privDir } = require('./fake-extension');
 const { detectExpression, formatValue, parseArgs } = require('../helper/cli');
 
 const PNG_1PX = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==';
@@ -219,7 +219,7 @@ test('screenshot writes a PNG to -o and to the default folder', async () => {
   r = await runCli(['screenshot'], { home });
   assert.equal(r.code, 0, r.stderr);
   const p = r.stdout.trim();
-  assert.equal(path.dirname(p), path.join(home, 'screenshots'));
+  assert.equal(path.dirname(p), path.join(privDir(home), 'screenshots'), 'in the private folder, not the workspace');
   assert.match(path.basename(p), /^\d{4}-\d\d-\d\dT\d\d-\d\d-\d\d(-\d+)?\.png$/);
   assert.equal(fs.readFileSync(p).subarray(1, 4).toString(), 'PNG');
 });
@@ -421,7 +421,10 @@ test('setup: workspace, wrappers, manifest, link; idempotent; leaves sites alone
   const ws = path.join(root, 'ws');
   let r = await runCli(setupArgs(root), { home: path.join(root, 'unused') });
   assert.equal(r.code, 0, r.stderr + r.stdout);
-  for (const d of ['sites', 'screenshots', 'bin']) assert.ok(fs.statSync(path.join(ws, d)).isDirectory(), d);
+  for (const d of ['sites', 'bin']) assert.ok(fs.statSync(path.join(ws, d)).isDirectory(), d);
+  assert.ok(!fs.existsSync(path.join(ws, 'screenshots')), 'screenshots are kept in the private folder');
+  assert.ok(fs.statSync(path.join(privDir(ws), 'screenshots')).isDirectory());
+  assert.equal(fs.statSync(privDir(ws)).mode & 0o777, 0o700);
   assert.equal(fs.readFileSync(path.join(ws, 'CLAUDE.md'), 'utf8').trim(), '@AGENTS.md\n@instructions.md');
   if (fs.existsSync(path.join(REPO, 'helper', 'workspace', 'AGENTS.md'))) assert.ok(fs.existsSync(path.join(ws, 'AGENTS.md')));
 
@@ -563,6 +566,66 @@ test('status: lists the sites TRIF is on for and marks mods waiting for theirs',
   assert.match(r.stdout, /bank\.com\/a\s+waiting: TRIF is off on its site\n/);
   assert.match(r.stdout, /waiting = not running until the user turns TRIF on for the site/);
   assert.match(r.stdout, /^sites on {6}x\.com; TRIF is off everywhere else/m);
+});
+
+test('inside a side-panel run, -f/-o/check paths are compared as the file system does: case, links, ..', async () => {
+  const home = tempDir();
+  const box = path.join(home, 'boxes', 'r1');
+  const shots = path.join(privDir(home), 'screenshots', 'example.com');
+  fs.mkdirSync(box, { recursive: true });
+  fs.mkdirSync(shots, { recursive: true });
+  writeMod(home, 'example.com', 'ok.js', '1 + 1');
+  fs.writeFileSync(path.join(home, 'notes.js'), '"outside the mods folder"');
+  fs.symlinkSync(path.join(home, 'notes.js'), path.join(home, 'sites', 'example.com', 'link.js'));
+  const env = { TRIF_RUN_BOX: box, TRIF_RUN_TOKEN: 'x', TRIF_RUN_SCREENSHOTS: shots };
+  const refused = /inside a side-panel agent run, files are (read|written) only in /;
+  const upper = (p) => p.replace(/\/sites\//, '/SITES/');
+  const caseInsensitive = fs.existsSync(upper(path.join(home, 'sites', 'example.com', 'ok.js')));
+  // Outside the mods folder, however it's spelled: refused.
+  for (const f of [path.join(home, 'notes.js'), path.join(home, 'NOTES.js'), path.join(home, 'sites', 'example.com', 'link.js'),
+    `${path.join(home, 'sites', 'example.com')}/../../notes.js`, path.join(home.toUpperCase(), 'NOTES.JS'), path.join(home, 'sites-other', 'x.js')]) {
+    const r = await runCli(['check', f], { home, env });
+    assert.equal(r.code, 1, f);
+    assert.match(r.stderr, refused, f);
+  }
+  // Inside it in another case (macOS): the same folder, so allowed.
+  if (caseInsensitive) {
+    const r = await runCli(['check', upper(path.join(home, 'sites', 'example.com', 'ok.js'))], { home, env });
+    assert.equal(r.code, 0, r.stderr);
+  }
+  // Writes (-o; checked before the file is written): a mixed-case path outside, a path climbing out, a
+  // link to a folder outside: refused. The run's screenshots folder in another case: fine.
+  fs.mkdirSync(path.join(home, 'elsewhere'));
+  fs.symlinkSync(path.join(home, 'elsewhere'), path.join(home, 'sites', 'example.com', 'out'));
+  const { optionPath } = require('../helper/cli');
+  const P = require('../helper/lib/paths');
+  const saved = { ...process.env };
+  Object.assign(process.env, env, { TRIF_HOME: home });
+  try {
+    const ctx = { ws: P.workspace(home) };
+    for (const o of [path.join(home.toUpperCase(), 'OUT.png'), `${path.join(home, 'sites', 'example.com')}/../../out.png`, path.join(home, 'sites', 'example.com', 'out', 'x.png')]) {
+      assert.throws(() => optionPath(ctx, o, { write: true }), refused, o);
+    }
+    assert.equal(optionPath(ctx, path.join(home, 'sites', 'example.com', 'new.txt'), { write: true }), path.join(home, 'sites', 'example.com', 'new.txt'));
+    if (caseInsensitive) assert.equal(optionPath(ctx, path.join(shots.toUpperCase(), 'a.png'), { write: true }), path.join(shots, 'a.png'));
+  } finally {
+    for (const k of Object.keys(process.env)) if (!(k in saved)) delete process.env[k];
+    Object.assign(process.env, saved);
+  }
+});
+
+test('site and mod names: no colon, trailing dot or space, reserved name', async () => {
+  const home = tempDir();
+  for (const [site, mod] of [['x.com:evil', 'a'], ['x.com.', 'a'], ['x.com', 'a.'], ['con', 'a'], ['x.com', 'nul'], ['x.com', 'a:b']]) {
+    const r = await runCli(['new', site, mod], { home });
+    assert.equal(r.code, 1, `${site} ${mod}: ${r.stdout}`);
+  }
+  const ok = await runCli(['new', 'X.COM', 'hide-it'], { home });
+  assert.equal(ok.code, 0, ok.stderr);
+  assert.ok(fs.existsSync(path.join(home, 'sites', 'x.com', 'hide-it.js')), 'site names are lowercased');
+  const pc = require('../helper/lib/pathcheck');
+  for (const n of ['a:b', 'a.', 'a ', ' a', 'CON', 'lpt1.txt', '..', '.', 'a/b', 'a\\b', '']) assert.ok(pc.badName(n), JSON.stringify(n));
+  for (const n of ['x.com', 'all-sites', 'hide-sidebar', 'a.b-c_d']) assert.equal(pc.badName(n), '', n);
 });
 
 test('inside a side-panel run, the CLI reads -f and check files only from the mods folder', async () => {

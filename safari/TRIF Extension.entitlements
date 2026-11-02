@@ -7,9 +7,11 @@
 	<key>com.apple.security.files.user-selected.read-only</key>
 	<true/>
 	<!-- The Safari bridge's key, and nothing else outside the sandbox (SafariWebExtensionHandler.swift):
-	     ~/.trif/safari-token, or where it was before 0.2.0, when TRIF was called WebMods. -->
+	     TRIF's private folder; until 0.2.1 ~/.trif/safari-token, and before 0.2.0, when TRIF was called
+	     WebMods, ~/.webmods/safari-token (the old two for one more version). -->
 	<key>com.apple.security.temporary-exception.files.home-relative-path.read-only</key>
 	<array>
+		<string>/Library/Application Support/TRIF/safari-token</string>
 		<string>/.trif/safari-token</string>
 		<string>/.webmods/safari-token</string>
 	</array>

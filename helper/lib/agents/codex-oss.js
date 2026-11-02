@@ -6,7 +6,7 @@
 //   codex exec <codex.js flags, the same permission profile>
 //              -c model_providers.trif-open={ name = "…", base_url = "…", wire_api = "responses" … }
 //              -c model_provider="trif-open" -c web_search="disabled"
-//              -c shell_environment_policy.exclude=[<API key patterns>] -m MODEL [resume THREAD_ID] -- PROMPT
+//              -c shell_environment_policy.exclude=[<API key patterns>] -m MODEL [resume THREAD_ID] -   (message on stdin)
 //
 // (base_url: the provider's, or for a provider with a key, the run's key proxy: see "The API key".)
 //
@@ -342,11 +342,7 @@ const adapter = {
   // writable / readOnly / denied: as codex.js. openModel: from prepare (resolve()).
   command(opts) {
     const om = opts.openModel || resolve(null, null, opts.model);
-    const base = codex.command({ ...opts, model: om.model });
-    const args = base.args;
-    const at = args.length - (opts.sessionId ? 4 : 2) - (om.model ? 2 : 0); // before -m [resume id] -- prompt
-    args.splice(at, 0, ...providerArgs(om));
-    return { file: base.file, args, locked: base.locked };
+    return codex.command({ ...opts, model: om.model, config: providerArgs(om) });
   },
 
   parse(line, emit, state = {}) {

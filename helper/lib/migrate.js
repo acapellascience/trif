@@ -48,7 +48,7 @@ function lstat(p) {
 }
 
 function realOrNull(p) {
-  try { return fs.realpathSync(p); } catch { return null; }
+  try { return fs.realpathSync.native(p); } catch { return null; }
 }
 
 function stamp(now = new Date()) {
@@ -233,4 +233,128 @@ function describeMigration(m) {
   return lines;
 }
 
-module.exports = { migrateHome, describeMigration, mergeInto, MARKER, SETUP_OWNED };
+// ---------------------------------------------------------------- the private folder (0.2.1)
+//
+// Until 0.2.1 the helper's private files were in the workspace, kept from runs by deny rules inside the
+// folders runs may read (where bugs came from). Now they live in the private folder (paths.js privateDir)
+// and the workspace holds nothing a run mustn't read. migratePrivate moves them there, once: setup runs it,
+// every helper does when it starts, the Safari bridge too, and runs.js before a run if any reappeared (an
+// older helper still running writes its log where it used to). Idempotent; never loses settings:
+//   only in the workspace        moved (renamed; copied and removed across volumes)
+//   in both, folders             merged: what the private one lacks moves in; what's in both stays the
+//                                private one's, the workspace's copy kept in <private>/from-workspace-<stamp>/
+//   in both, identical files     the workspace's copy removed
+//   in both, config.json         the private one wins; the workspace's kept in from-workspace-<stamp>/
+//   in both, logs, safari-token  the private one wins; the workspace's removed (a log, a random key)
+// Also: an old-webmods-<date>/ folder (migrateHome's leftovers) can hold an old config.json, runs/…:
+// those move to <private>/old-webmods-<date>/.
+
+const DISPOSABLE = new Set(['helper.log', 'helper.log.1', 'safari-bridge.err', 'safari-token']);
+
+// Copy a tree (files keep their mode; links stay links; sockets and the like are skipped).
+function copyTree(src, dest) {
+  const st = fs.lstatSync(src);
+  if (st.isSymbolicLink()) fs.symlinkSync(fs.readlinkSync(src), dest);
+  else if (st.isDirectory()) {
+    fs.mkdirSync(dest, { recursive: true, mode: st.mode & 0o777 });
+    for (const name of fs.readdirSync(src)) copyTree(path.join(src, name), path.join(dest, name));
+  } else if (st.isFile()) {
+    fs.copyFileSync(src, dest, fs.constants.COPYFILE_EXCL);
+    fs.chmodSync(dest, st.mode & 0o777);
+  }
+}
+
+/** Rename `from` to `to` (which mustn't exist); across volumes, copy then remove. */
+function moveItem(from, to) {
+  fs.mkdirSync(path.dirname(to), { recursive: true, mode: 0o700 });
+  try {
+    fs.renameSync(from, to);
+  } catch (e) {
+    if (e.code !== 'EXDEV') throw e;
+    try { copyTree(from, to); } catch (err) { fs.rmSync(to, { recursive: true, force: true }); throw err; }
+    fs.rmSync(from, { recursive: true, force: true });
+  }
+}
+
+// mergeInto, but across volumes too, and without its workspace-specific rules (setup-owned names).
+function mergeTree(from, to, kept, rel) {
+  let names;
+  try { names = fs.readdirSync(from); } catch { return; }
+  for (const name of names) {
+    const src = path.join(from, name);
+    const dest = path.join(to, name);
+    const s = lstat(src);
+    const d = lstat(dest);
+    if (!s) continue;
+    if (!d) moveItem(src, dest);
+    else if (s.isDirectory() && d.isDirectory()) { mergeTree(src, dest, kept, path.join(rel, name)); try { fs.rmdirSync(src); } catch { /* conflicts left */ } }
+    else if (s.isFile() && d.isFile() && sameFile(src, dest)) fs.rmSync(src, { force: true });
+    else kept.push({ src, rel: path.join(rel, name) });
+  }
+}
+
+/** What of PRIVATE_FILES is in the workspace (or an old-webmods-* folder in it): paths. */
+function privateLeftovers(home) {
+  const out = [];
+  for (const name of P.PRIVATE_FILES) if (lstat(path.join(home, name))) out.push(path.join(home, name));
+  let names = [];
+  try { names = fs.readdirSync(home).filter((n) => /^old-webmods-/.test(n)); } catch { /* none */ }
+  for (const n of names) for (const name of P.PRIVATE_FILES) if (lstat(path.join(home, n, name))) out.push(path.join(home, n, name));
+  return out;
+}
+
+/**
+ * Move the private files out of workspace `home` into `privateDir` (see above). Returns
+ * { moved: [names], kept: [paths in the private folder], removed: [names], notes: [string], errors: [string] }.
+ */
+function migratePrivate(home, { privateDir = P.privateDir(home), now = new Date() } = {}) {
+  const r = { moved: [], kept: [], removed: [], notes: [], errors: [] };
+  const homeSt = (() => { try { return fs.statSync(home); } catch { return null; } })();
+  if (!homeSt || !homeSt.isDirectory() || !privateLeftovers(home).length) return r;
+  const { isInside } = require('./pathcheck');
+  if (isInside(privateDir, home, { orEqual: true })) { r.errors.push(`the private folder ${privateDir} is inside the workspace ${home}; nothing moved`); return r; }
+  try { fs.mkdirSync(privateDir, { recursive: true, mode: 0o700 }); } catch (e) { r.errors.push(`couldn't make ${privateDir}: ${e.message}`); return r; }
+  const keepDir = path.join(privateDir, `from-workspace-${stamp(now)}`);
+  const keep = (src, rel) => {
+    let dest = path.join(keepDir, rel);
+    for (let n = 2; lstat(dest); n++) dest = path.join(keepDir, `${rel}-${n}`);
+    moveItem(src, dest);
+    r.kept.push(dest);
+  };
+  const one = (from, to, name, keepRel) => {
+    const s = lstat(from);
+    if (!s) return;
+    const d = lstat(to);
+    if (!d) { moveItem(from, to); r.moved.push(path.relative(home, from)); return; }
+    if (s.isDirectory() && d.isDirectory()) {
+      const kept = [];
+      mergeTree(from, to, kept, '');
+      for (const k of kept) keep(k.src, path.join(keepRel, k.rel));
+      fs.rmSync(from, { recursive: true, force: true }); // (empty folders left by the merge)
+      r.moved.push(path.relative(home, from));
+    } else if (s.isFile() && d.isFile() && sameFile(from, to)) {
+      fs.rmSync(from, { force: true });
+      r.removed.push(path.relative(home, from));
+    } else if (DISPOSABLE.has(name)) {
+      fs.rmSync(from, { recursive: true, force: true });
+      r.removed.push(path.relative(home, from));
+    } else {
+      keep(from, keepRel);
+    }
+  };
+  for (const name of P.PRIVATE_FILES) {
+    try { one(path.join(home, name), path.join(privateDir, name), name, name); } catch (e) { if (e.code !== 'ENOENT') r.errors.push(`${name}: ${e.message}`); }
+  }
+  let old = [];
+  try { old = fs.readdirSync(home).filter((n) => /^old-webmods-/.test(n)); } catch { /* none */ }
+  for (const n of old) {
+    for (const name of P.PRIVATE_FILES) {
+      try { one(path.join(home, n, name), path.join(privateDir, n, name), name, path.join(n, name)); } catch (e) { if (e.code !== 'ENOENT') r.errors.push(`${n}/${name}: ${e.message}`); }
+    }
+  }
+  if (r.moved.length || r.removed.length) r.notes.push(`moved TRIF's private files (${[...r.moved, ...r.removed].join(', ')}) out of ${home} into ${privateDir}, where agent runs can't read them`);
+  if (r.kept.length) r.notes.push(`both places had ${r.kept.length === 1 ? 'a copy' : 'copies'}: kept the private folder's; the workspace's ${r.kept.length === 1 ? 'is' : 'are'} in ${keepDir}`);
+  return r;
+}
+
+module.exports = { migrateHome, describeMigration, mergeInto, MARKER, SETUP_OWNED, migratePrivate, privateLeftovers, moveItem };

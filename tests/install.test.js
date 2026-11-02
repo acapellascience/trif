@@ -7,7 +7,7 @@ const assert = require('node:assert');
 const fs = require('fs');
 const path = require('path');
 const { execFile, spawn, spawnSync } = require('child_process');
-const { runCli, tempDir, testEnv, REPO } = require('./fake-extension');
+const { runCli, tempDir, testEnv, REPO, privDir } = require('./fake-extension');
 const P = require('../helper/lib/paths');
 const { installApp, chooseMode, cleanPath, loadSafariAgent } = require('../helper/lib/setup');
 const L = require('../helper/lib/lock');
@@ -354,7 +354,7 @@ test('setup writes every extension ID into allowed_origins; doctor flags a manif
   const ws = path.join(root, 'ws');
   const native = path.join(root, 'native');
   fs.mkdirSync(ws, { recursive: true });
-  fs.writeFileSync(path.join(ws, 'config.json'), JSON.stringify({ extensionIds: [OTHER_ID, 'not-an-id'] }));
+  fs.writeFileSync(path.join(privDir(ws), 'config.json'), JSON.stringify({ extensionIds: [OTHER_ID, 'not-an-id'] }));
   let r = await runCli(['setup', '--native-dir', native, '--no-link'], { home: ws });
   assert.equal(r.code, 0, r.stderr);
   const all = P.extensionOrigins({ extensionIds: [OTHER_ID] });
@@ -362,7 +362,7 @@ test('setup writes every extension ID into allowed_origins; doctor flags a manif
   assert.deepEqual(readManifest(native).allowed_origins, all);
   assert.match(r.stdout, /ignored config\.json extensionIds entries .*"not-an-id"/);
   // setup keeps extensionIds when it records PATH.
-  assert.deepEqual(JSON.parse(fs.readFileSync(path.join(ws, 'config.json'), 'utf8')).extensionIds, [OTHER_ID, 'not-an-id']);
+  assert.deepEqual(JSON.parse(fs.readFileSync(path.join(privDir(ws), 'config.json'), 'utf8')).extensionIds, [OTHER_ID, 'not-an-id']);
 
   r = await runCli(['doctor', '--native-dir', native], { home: ws });
   assert.match(r.stdout, /ok {4}.*native host manifest/);

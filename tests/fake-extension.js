@@ -17,6 +17,14 @@ function tempDir(prefix = 'wm-') {
   return fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), prefix)));
 }
 
+// The private folder of a test workspace (paths.js privateDir: <workspace>-private for a TRIF_HOME),
+// made if it isn't there yet (so a test can put a config.json in it).
+function privDir(home) {
+  const dir = `${home}-private`;
+  fs.mkdirSync(dir, { recursive: true });
+  return dir;
+}
+
 // PATH without any real coding agent on it (setup records PATH and the helper/doctor look agents up
 // there), plus a folder with `node` so `#!/usr/bin/env node` scripts still work.
 let safePath = null;
@@ -178,4 +186,4 @@ function writeMod(home, site, name, code) {
   return file;
 }
 
-module.exports = { FakeExtension, runCli, writeMod, tempDir, testEnv, waitFor, sleep, REPO, HOST_JS, CLI_JS };
+module.exports = { FakeExtension, runCli, writeMod, tempDir, privDir, testEnv, waitFor, sleep, REPO, HOST_JS, CLI_JS };

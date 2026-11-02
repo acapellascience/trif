@@ -147,7 +147,7 @@ function event() {
 
 let token = null; // the bridge's key, once the app has given it
 
-/** The bridge's key, from the extension's app (which reads ~/.trif/safari-token). */
+/** The bridge's key, from the extension's app (which reads safari-token in TRIF's private folder). */
 async function bridgeToken() {
   if (token) return token;
   const r = await chrome.runtime.sendNativeMessage(APP_ID, { type: 'token' });

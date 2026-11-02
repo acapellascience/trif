@@ -12,7 +12,7 @@ const test = require('node:test');
 const assert = require('node:assert');
 const fs = require('fs');
 const path = require('path');
-const { FakeExtension, runCli, tempDir, waitFor, CLI_JS } = require('./fake-extension');
+const { FakeExtension, runCli, tempDir, waitFor, CLI_JS, privDir } = require('./fake-extension');
 const { startFakeModelServer } = require('./fake-model-server');
 const oss = require('../helper/lib/agents/codex-oss');
 const keyring = require('../helper/lib/keyring');
@@ -51,12 +51,12 @@ test('command: local Ollama, LM Studio, OpenRouter (through the key proxy), cust
   assert.ok(c.args.includes('model_provider="trif-open"') && c.args.includes('web_search="disabled"'));
   // (API key variables a shell profile may still export: kept from the commands, whatever the provider.)
   assert.ok(c.args.includes(EXCLUDE));
-  assert.deepEqual(c.args.slice(-4), ['-m', 'gpt-oss:20b', '--', 'P']);
+  assert.deepEqual(c.args.slice(-3), ['-m', 'gpt-oss:20b', '-']);
 
   om = oss.resolve({ provider: 'lmstudio', model: 'qwen/qwen3-coder-30b' });
   c = oss.command({ bin: 'codex', prompt: 'P', openModel: om, ...LIMITS });
   assert.match(providerToml(c.args), /name = "LM Studio \(TRIF\)", base_url = "http:\/\/127\.0\.0\.1:1234\/v1"/);
-  assert.deepEqual(c.args.slice(-4), ['-m', 'qwen/qwen3-coder-30b', '--', 'P']);
+  assert.deepEqual(c.args.slice(-3), ['-m', 'qwen/qwen3-coder-30b', '-']);
 
   // OpenRouter: Codex gets no key and no key variable: its base_url is the run's key proxy (prepare).
   om = { ...oss.resolve({ provider: 'openrouter' }, null, 'qwen/qwen3-coder'), proxyUrl: 'http://127.0.0.1:5555/0123abcd/v1' };
@@ -64,13 +64,14 @@ test('command: local Ollama, LM Studio, OpenRouter (through the key proxy), cust
   assert.equal(providerToml(c.args), 'model_providers.trif-open={ name = "OpenRouter (TRIF)", base_url = "http://127.0.0.1:5555/0123abcd/v1", wire_api = "responses", supports_websockets = false }');
   assert.ok(!c.args.some((a) => /env_key/.test(a)));
   assert.ok(c.args.includes(EXCLUDE));
-  assert.deepEqual(c.args.slice(-4), ['-m', 'qwen/qwen3-coder', '--', 'P']);
+  assert.deepEqual(c.args.slice(-3), ['-m', 'qwen/qwen3-coder', '-']);
 
   // Custom URL, resuming: exec options before `resume`.
   om = oss.resolve({ provider: 'custom', baseUrl: 'https://llm.example.com/v1/', model: 'big-model' });
   c = oss.command({ bin: 'codex', prompt: '-P', sessionId: 'th1', openModel: om, ...LIMITS });
   assert.match(providerToml(c.args), /base_url = "https:\/\/llm\.example\.com\/v1", wire_api = "responses", supports_websockets/);
-  assert.deepEqual(c.args.slice(-6), ['-m', 'big-model', 'resume', 'th1', '--', '-P']);
+  assert.deepEqual(c.args.slice(-5), ['-m', 'big-model', 'resume', 'th1', '-']);
+  assert.equal(c.stdin, '-P', 'the message on stdin, never in argv');
   assert.ok(c.args.indexOf('model_provider="trif-open"') < c.args.indexOf('resume'));
   // The plain Codex option is untouched by all this.
   const plain = require('../helper/lib/agents/codex').command({ bin: 'codex', prompt: 'P', ...LIMITS });
@@ -97,14 +98,14 @@ test('settings: resolve (defaults, a run\'s own choice, model), keyring accounts
 
   const home = tempDir();
   // An old config's keyEnv: ignored, and gone after the next save.
-  fs.writeFileSync(path.join(home, 'config.json'), JSON.stringify({ openModel: { provider: 'openrouter', keyEnv: 'OPENROUTER_API_KEY' } }));
+  fs.writeFileSync(path.join(privDir(home), 'config.json'), JSON.stringify({ openModel: { provider: 'openrouter', keyEnv: 'OPENROUTER_API_KEY' } }));
   oss.saveSettings(home, { provider: 'openrouter', model: 'qwen/qwen3-coder', keyEnv: 'OTHER' });
-  assert.deepEqual(JSON.parse(fs.readFileSync(path.join(home, 'config.json'), 'utf8')).openModel, { provider: 'openrouter', model: 'qwen/qwen3-coder' });
+  assert.deepEqual(JSON.parse(fs.readFileSync(path.join(privDir(home), 'config.json'), 'utf8')).openModel, { provider: 'openrouter', model: 'qwen/qwen3-coder' });
   assert.throws(() => oss.saveSettings(home, { provider: 'evil' }), /unknown provider/);
   assert.throws(() => oss.saveSettings(home, { baseUrl: 'file:///etc/passwd' }), /http\(s\) URL/);
   // Switching provider drops the old one's model and key name.
   oss.saveSettings(home, { provider: 'ollama' });
-  assert.deepEqual(JSON.parse(fs.readFileSync(path.join(home, 'config.json'), 'utf8')).openModel, { provider: 'ollama' });
+  assert.deepEqual(JSON.parse(fs.readFileSync(path.join(privDir(home), 'config.json'), 'utf8')).openModel, { provider: 'ollama' });
 });
 
 // ------------------------------------------------------------------ model lists (no network)
@@ -243,7 +244,8 @@ const argv = process.argv.slice(2);
 if (argv[0] === '--version') { console.log('codex-cli 0.166.0'); process.exit(0); }
 const calls = path.join(__dirname, 'calls');
 fs.mkdirSync(calls, { recursive: true });
-fs.writeFileSync(path.join(calls, Date.now() + '-' + process.pid + '.json'), JSON.stringify({ argv, env: process.env }));
+const prompt = argv[argv.length - 1] === '-' ? fs.readFileSync(0, 'utf8') : ''; // (the message comes on stdin)
+fs.writeFileSync(path.join(calls, Date.now() + '-' + process.pid + '.json'), JSON.stringify({ argv, env: process.env, prompt }));
 const prov = argv.find((a) => a.startsWith('model_providers.trif-open=')) || '';
 const base = (/base_url = "([^"]+)"/.exec(prov) || [])[1] || '';
 const say = (o) => process.stdout.write(JSON.stringify(o) + '\\n');
@@ -254,7 +256,7 @@ const say = (o) => process.stdout.write(JSON.stringify(o) + '\\n');
   say({ type: 'item.completed', item: { id: 'i0', type: 'error', message: 'Model metadata for \`x\` not found. Defaulting to fallback metadata' } });
   say({ type: 'item.completed', item: { id: 'i1', type: 'agent_message', text: 'leaking ' + got } });
   process.stderr.write('debug: auth header ' + got + '\\n');
-  if (argv.some((a) => a.includes('-P-FAIL'))) process.exit(1);
+  if (prompt.includes('-P-FAIL')) process.exit(1);
   say({ type: 'turn.completed', usage: {} });
 })();
 `;
@@ -266,7 +268,7 @@ function makeHome(config = {}) {
   fs.mkdirSync(path.join(home, 'sites'));
   fs.writeFileSync(path.join(bin, 'codex'), FAKE_CODEX);
   fs.chmodSync(path.join(bin, 'codex'), 0o755);
-  fs.writeFileSync(path.join(home, 'config.json'), JSON.stringify({ ...config, env: { ...(config.env || {}), PATH: bin } }));
+  fs.writeFileSync(path.join(privDir(home), 'config.json'), JSON.stringify({ ...config, env: { ...(config.env || {}), PATH: bin } }));
   return { home, bin };
 }
 function lastCall(bin) {
@@ -318,10 +320,10 @@ test('helper: codex-oss listed (experimental, never the default); settings and t
   assert.match(r.error, /doesn't look like an API key/);
   assert.ok(!r.error.includes('not a key'));
   // Never in config.json, an argv or the helper's log.
-  assert.ok(!fs.readFileSync(path.join(home, 'config.json'), 'utf8').includes(FAKE_KEY));
+  assert.ok(!fs.readFileSync(path.join(privDir(home), 'config.json'), 'utf8').includes(FAKE_KEY));
   assert.ok(!kc.argvText().includes(FAKE_KEY));
-  assert.ok(!fs.readFileSync(path.join(home, 'helper.log'), 'utf8').includes(FAKE_KEY));
-  assert.match(fs.readFileSync(path.join(home, 'helper.log'), 'utf8'), /API key saved in the keyring \(openrouter\)/);
+  assert.ok(!fs.readFileSync(path.join(privDir(home), 'helper.log'), 'utf8').includes(FAKE_KEY));
+  assert.match(fs.readFileSync(path.join(privDir(home), 'helper.log'), 'utf8'), /API key saved in the keyring \(openrouter\)/);
   r = await extRequest(ext, 'agent.openModel.removeKey');
   assert.equal(r.result.hasKey, false);
   assert.deepEqual(kc.items(), {});
@@ -350,7 +352,7 @@ test('helper: codex-oss listed (experimental, never the default); settings and t
   assert.notEqual(res.code, 0);
   res = await runCli(['agent', 'open-model', '--set-key'], { home, env: { ...kc.env, TRIF_RUN_TOKEN: 'x', TRIF_RUN_BOX: path.join(home, 'nobox') }, input: 'evil-key-0123456789\n' });
   assert.notEqual(res.code, 0);
-  assert.equal(JSON.parse(fs.readFileSync(path.join(home, 'config.json'), 'utf8')).openModel.provider, 'openrouter');
+  assert.equal(JSON.parse(fs.readFileSync(path.join(privDir(home), 'config.json'), 'utf8')).openModel.provider, 'openrouter');
   assert.ok(!JSON.stringify(kc.items()).includes('evil-key'));
 });
 
@@ -368,6 +370,8 @@ test('helper: the key never reaches Codex (no env, no argv): read from the keyri
   assert.equal(done.sessionId, 'th-oss-1');
   const call = lastCall(bin);
   assert.ok(!JSON.stringify(call).includes(FAKE_KEY), 'not in Codex\'s env or argv');
+  assert.match(call.prompt, /hide the banner$/, 'the message on stdin');
+  assert.ok(!call.argv.some((a) => a.includes('hide the banner')), 'not in argv');
   assert.equal(call.env.OPENAI_API_KEY, undefined, 'config.json\'s keys for the other agents aren\'t passed to this one');
   assert.equal(call.env.TRIF_KEYCHAIN_BIN, undefined);
   assert.ok(!call.argv.some((a) => /env_key/.test(a)));
@@ -383,11 +387,11 @@ test('helper: the key never reaches Codex (no env, no argv): read from the keyri
   assert.ok(!JSON.stringify(evs).includes(FAKE_KEY));
   assert.ok(evs.some((e) => e.kind === 'text' && e.text === 'leaking Bearer [redacted]'), JSON.stringify(evs));
   assert.ok(!evs.some((e) => e.kind === 'error'), 'the metadata warning is dropped');
-  const log = fs.readFileSync(path.join(home, 'runs', `${r.result.runId}.jsonl`), 'utf8');
+  const log = fs.readFileSync(path.join(privDir(home), 'runs', `${r.result.runId}.jsonl`), 'utf8');
   assert.ok(!log.includes(FAKE_KEY));
   assert.match(log, /"webmods":"openModel","provider":"custom","model":"qwen\/qwen3-coder".*"key":"keyring","keyProxy":true/);
   assert.match(log, /Bearer \[redacted\]/);
-  assert.ok(!fs.readFileSync(path.join(home, 'helper.log'), 'utf8').includes(FAKE_KEY));
+  assert.ok(!fs.readFileSync(path.join(privDir(home), 'helper.log'), 'utf8').includes(FAKE_KEY));
   assert.ok(!kc.argvText().includes(FAKE_KEY), 'nor in the keyring tool\'s argv');
   // Closed once the run ended.
   await waitFor(async () => { try { await fetch(`${base}/models`); return false; } catch { return true; } });
@@ -397,7 +401,7 @@ test('helper: the key never reaches Codex (no env, no argv): read from the keyri
   const r2 = await extRequest(ext, 'agent.start', { ...START, agent: 'codex-oss', prompt: '-P-FAIL', openModel: { provider: 'custom', baseUrl: 'http://127.0.0.1:9/v1' }, model: 'm1' });
   const d2 = await waitDone(ext, r2.result.runId);
   assert.equal(d2.ok, false);
-  assert.match(fs.readFileSync(path.join(home, 'runs', `${r2.result.runId}.jsonl`), 'utf8'), /"webmods":"openModel","provider":"custom","model":"m1","baseUrl":"http:\/\/127\.0\.0\.1:9\/v1","key":null,"keyProxy":false/);
+  assert.match(fs.readFileSync(path.join(privDir(home), 'runs', `${r2.result.runId}.jsonl`), 'utf8'), /"webmods":"openModel","provider":"custom","model":"m1","baseUrl":"http:\/\/127\.0\.0\.1:9\/v1","key":null,"keyProxy":false/);
   assert.match(providerToml(lastCall(bin).argv), /base_url = "http:\/\/127\.0\.0\.1:9\/v1"/);
   // The same server with a key: through its own proxy, and the key still redacted from what failed.
   await keyring.setKey('custom:127.0.0.1:9', FAKE_KEY, { env: kc.env });
@@ -406,7 +410,7 @@ test('helper: the key never reaches Codex (no env, no argv): read from the keyri
   assert.equal(d3.ok, false);
   assert.match(providerToml(lastCall(bin).argv), /base_url = "http:\/\/127\.0\.0\.1:\d+\/[0-9a-f]{32}\/v1"/);
   assert.ok(!JSON.stringify(eventsOf(ext, r3.result.runId)).includes(FAKE_KEY));
-  assert.ok(!fs.readFileSync(path.join(home, 'runs', `${r3.result.runId}.jsonl`), 'utf8').includes(FAKE_KEY));
+  assert.ok(!fs.readFileSync(path.join(privDir(home), 'runs', `${r3.result.runId}.jsonl`), 'utf8').includes(FAKE_KEY));
 });
 
 test('helper: no key, Ollama down or the model missing: the run fails fast with the fix, Codex never starts', async () => {
@@ -691,7 +695,7 @@ test('the default model: what a run with none picked uses, listed and run alike 
   const ws = { config: { openModel: { provider: 'ollama' } } };
   let p = await oss.prepare({ ws, fetchImpl: tags(['llama3:8b', 'qwen3-coder:30b']) });
   assert.equal(p.options.openModel.model, 'qwen3-coder:30b');
-  assert.equal(oss.command({ bin: 'codex', prompt: 'P', ...LIMITS, ...p.options }).args.slice(-4)[1], 'qwen3-coder:30b');
+  assert.equal(oss.command({ bin: 'codex', prompt: 'P', ...LIMITS, ...p.options }).args.slice(-2)[0], 'qwen3-coder:30b');
   p = await oss.prepare({ ws, model: 'llama3:8b', fetchImpl: tags(['llama3:8b', 'gpt-oss:20b']) });
   assert.equal(p.options.openModel.model, 'llama3:8b');
   await assert.rejects(oss.prepare({ ws, model: 'gemma4:9b', fetchImpl: tags(['llama3:8b']) }), /ollama pull gemma4:9b/);
@@ -748,6 +752,8 @@ test('real Codex + stand-in model: model requests get through (the key proxy add
   for (const f of ['.zshenv', '.zprofile', '.zshrc']) fs.writeFileSync(path.join(fakehome, f), `export TTEST_OR_API_KEY='${LEFTOVER}'\n`);
   // A value the helper's own environment does hold: the procargs probe must find it, to show it works.
   const canary = `canary-${require('crypto').randomBytes(12).toString('hex')}`;
+  // The user's message: on Codex's stdin, never in its argv (other processes could read it).
+  const MESSAGE = `probe-${require('crypto').randomBytes(12).toString('hex')}`;
   const sha = (t) => require('crypto').createHash('sha256').update(t).digest('hex');
   const probe = path.join(home, 'procargs-probe.py');
   fs.copyFileSync(path.join(__dirname, 'procargs-probe.py'), probe);
@@ -757,23 +763,23 @@ test('real Codex + stand-in model: model requests get through (the key proxy add
     { run: `${q(node)} ${q(CLI_JS)} tabs` },
     { run: 'curl -sS -m 5 -o /dev/null -w "%{http_code}" https://example.com; echo " curl=$?"' },
     { run: 'LOCAL' }, // filled in below: curl to the model server itself
-    { run: `cat ${q(path.join(home, 'config.json'))}; echo " cat=$?"` },
+    { run: `cat ${q(path.join(privDir(home), 'config.json'))}; echo " cat=$?"` },
     { run: `echo '// mine' > ${q(path.join(home, 'sites', 'example.com', 'oss-probe.js'))} && echo WROTE-OWN` },
     { run: `echo x > ${q(path.join(home, 'sites', 'other.org', 'oss-probe.js'))}; echo " other=$?"` },
     { run: 'echo "key=[$TTEST_OR_API_KEY]"; env | grep -c TTEST_OR_API_KEY' },
     // Every same-user process's argv and environment (KERN_PROCARGS2, which the sandbox allows): no key.
-    { run: `python3 -I ${q(probe)} ${sha(KEY)} ${KEY.length} ${sha(canary)} ${canary.length}` },
+    { run: `python3 -I ${q(probe)} ${sha(KEY)} ${KEY.length} ${sha(canary)} ${canary.length} ${sha(MESSAGE)} ${MESSAGE.length}` },
     { say: 'Done: probed.' },
   ];
   const srv = await startFakeModelServer({ script });
   cleanups.push(() => srv.close());
   script[2] = { run: `curl -sS -m 5 ${srv.url}/api/version; echo " local=$?"` };
-  fs.writeFileSync(path.join(home, 'config.json'), JSON.stringify({ env: { PATH: `${bin}:/usr/bin:/bin` }, openModel: { provider: 'custom', baseUrl: `${srv.url}/v1`, model: 'stand-in' }, secret: 'CONFIG-SECRET' }));
+  fs.writeFileSync(path.join(privDir(home), 'config.json'), JSON.stringify({ env: { PATH: `${bin}:/usr/bin:/bin` }, openModel: { provider: 'custom', baseUrl: `${srv.url}/v1`, model: 'stand-in' }, secret: 'CONFIG-SECRET' }));
   await keyring.setKey(`custom:${new URL(srv.url).host}`, KEY, { env: kc.env });
   const ext = startHost(home, { ...kc.env, TTEST_CANARY: canary, TRIF_AGENT_TIMEOUT_MS: '100000' });
   ext.handlers.tabs = () => [{ id: 12, url: 'https://example.com/page', title: 'Example', active: true }];
   ext.hello();
-  const r = await extRequest(ext, 'agent.start', { ...START, agent: 'codex-oss', prompt: 'probe' });
+  const r = await extRequest(ext, 'agent.start', { ...START, agent: 'codex-oss', prompt: MESSAGE });
   assert.equal(r.ok, true, r.error);
   const done = await waitDone(ext, r.result.runId, 100000);
   const evs = eventsOf(ext, r.result.runId);
@@ -799,17 +805,19 @@ test('real Codex + stand-in model: model requests get through (the key proxy add
   assert.match(out, /^ other=1$/m, info);
   assert.ok(!fs.existsSync(path.join(home, 'sites', 'other.org', 'oss-probe.js')));
   assert.match(out, /key=\[\]\n0/, info);
-  const scan = /procargs scanned=(\d+) key=(\d+) canary=(\d+)/.exec(out);
+  const scan = /procargs scanned=(\d+) key=(\d+) canary=(\d+) prompt=(\d+)/.exec(out);
   assert.ok(scan, info);
   assert.ok(Number(scan[1]) > 10, info); // it could read other processes
   assert.ok(Number(scan[3]) >= 1, `the probe should find the canary in the helper's environment: ${info}`);
   assert.equal(scan[2], '0', `the key is in some process's argv or environment: ${info}`);
+  assert.equal(scan[4], '0', `the user's message is in some process's argv: ${info}`);
+  assert.ok(posts[0].body.input.some((i) => JSON.stringify(i).includes(MESSAGE)), 'the message did reach the model');
   assert.ok(!out.includes(KEY) && !out.includes(LEFTOVER));
   assert.ok(!kc.argvText().includes(KEY));
   assert.deepEqual(done.changedFiles, ['sites/example.com/oss-probe.js']);
   assert.ok(evs.some((e) => e.kind === 'text' && e.text === 'Done: probed.'));
-  assert.ok(!fs.readFileSync(path.join(home, 'runs', `${r.result.runId}.jsonl`), 'utf8').includes(KEY));
-  assert.ok(!fs.readFileSync(path.join(home, 'helper.log'), 'utf8').includes(KEY));
+  assert.ok(!fs.readFileSync(path.join(privDir(home), 'runs', `${r.result.runId}.jsonl`), 'utf8').includes(KEY));
+  assert.ok(!fs.readFileSync(path.join(privDir(home), 'helper.log'), 'utf8').includes(KEY));
 
   // Resuming the conversation works with the same provider.
   const before = srv.requests.length;

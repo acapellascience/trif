@@ -9,7 +9,7 @@ const path = require('path');
 const http = require('http');
 const crypto = require('crypto');
 const { execFileSync } = require('child_process');
-const { tempDir, runCli } = require('./fake-extension');
+const { tempDir, runCli, privDir } = require('./fake-extension');
 const U = require('../helper/lib/update');
 const { changelogSection, latestFeed, signBytes, firefoxFeed, xpiMatches } = require('../scripts/release');
 
@@ -41,7 +41,7 @@ function appWorkspace(version, config = {}) {
   const appDir = path.join(home, 'app');
   fs.mkdirSync(appDir, { recursive: true });
   fs.writeFileSync(path.join(appDir, 'package.json'), JSON.stringify({ name: 'trif', version }));
-  fs.writeFileSync(path.join(home, 'config.json'), JSON.stringify(config));
+  fs.writeFileSync(path.join(privDir(home), 'config.json'), JSON.stringify(config));
   return { ws: { home, appDir, config }, root: appDir };
 }
 
@@ -252,13 +252,13 @@ test('install: two at once (two browsers\' helpers) install once; the other is t
 
 test('setConfigKey keeps the rest of config.json; autoUpdate starts off', () => {
   const home = tempDir();
-  fs.writeFileSync(path.join(home, 'config.json'), JSON.stringify({ env: { PATH: '/x' }, modsDir: 'm' }));
+  fs.writeFileSync(path.join(privDir(home), 'config.json'), JSON.stringify({ env: { PATH: '/x' }, modsDir: 'm' }));
   assert.equal(U.autoUpdateOn({ config: {} }), false);
   U.setConfigKey(home, 'autoUpdate', true);
-  assert.deepStrictEqual(JSON.parse(fs.readFileSync(path.join(home, 'config.json'), 'utf8')), { env: { PATH: '/x' }, modsDir: 'm', autoUpdate: true });
+  assert.deepStrictEqual(JSON.parse(fs.readFileSync(path.join(privDir(home), 'config.json'), 'utf8')), { env: { PATH: '/x' }, modsDir: 'm', autoUpdate: true });
   U.setConfigKey(home, 'autoUpdate', undefined);
-  assert.deepStrictEqual(JSON.parse(fs.readFileSync(path.join(home, 'config.json'), 'utf8')), { env: { PATH: '/x' }, modsDir: 'm' });
-  fs.writeFileSync(path.join(home, 'config.json'), '{oops');
+  assert.deepStrictEqual(JSON.parse(fs.readFileSync(path.join(privDir(home), 'config.json'), 'utf8')), { env: { PATH: '/x' }, modsDir: 'm' });
+  fs.writeFileSync(path.join(privDir(home), 'config.json'), '{oops');
   assert.throws(() => U.setConfigKey(home, 'autoUpdate', true), /isn't valid JSON/);
 });
 
@@ -309,15 +309,15 @@ test('release script: changelog sections and feeds the helper and Firefox accept
 test('trif update reports a failed check; --auto writes config.json', async () => {
   const home = tempDir();
   // Nothing listens there: the check fails without going to GitHub.
-  fs.writeFileSync(path.join(home, 'config.json'), JSON.stringify({ updateFeed: 'http://127.0.0.1:9/latest.json' }));
+  fs.writeFileSync(path.join(privDir(home), 'config.json'), JSON.stringify({ updateFeed: 'http://127.0.0.1:9/latest.json' }));
   let r = await runCli(['update'], { home });
   assert.equal(r.code, 0, r.stderr);
   assert.match(r.stdout, /couldn't check for updates/);
   assert.match(r.stdout, /Automatic updates: off/);
   r = await runCli(['update', '--auto', 'on'], { home });
   assert.match(r.stdout, /automatic updates on/);
-  assert.equal(JSON.parse(fs.readFileSync(path.join(home, 'config.json'), 'utf8')).autoUpdate, true);
-  assert.equal(JSON.parse(fs.readFileSync(path.join(home, 'config.json'), 'utf8')).updateFeed, 'http://127.0.0.1:9/latest.json', 'the rest of config.json is kept');
+  assert.equal(JSON.parse(fs.readFileSync(path.join(privDir(home), 'config.json'), 'utf8')).autoUpdate, true);
+  assert.equal(JSON.parse(fs.readFileSync(path.join(privDir(home), 'config.json'), 'utf8')).updateFeed, 'http://127.0.0.1:9/latest.json', 'the rest of config.json is kept');
   r = await runCli(['update', '--auto', 'maybe'], { home });
   assert.equal(r.code, 1);
   assert.match(r.stderr, /--auto takes on or off/);

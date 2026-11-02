@@ -4,6 +4,7 @@
 const test = require('node:test');
 const assert = require('node:assert');
 const fs = require('fs');
+const os = require('os');
 const path = require('path');
 const { scopeFor, hostInScope, patternInScope, outOfScope } = require('../helper/lib/scope');
 const { updateHeld, approveHeld, loadHeld } = require('../helper/lib/held');
@@ -138,7 +139,7 @@ test('locked folders: a linked site folder gets Edit deny rules by its workspace
   const realMods = fs.realpathSync(ws.modsDir);
   assert.deepEqual(lim.locked.sort(), [path.join('sites', 'chatgpt.com'), path.join('sites', 'other.com')]);
   const c = claude.command({ bin: '/x/claude', prompt: 'P', ...lim });
-  const deny = JSON.parse(c.args[c.args.indexOf('--settings') + 1]).permissions.deny;
+  const deny = JSON.parse(c.files[0].content).permissions.deny;
   for (const p of [path.join(realMods, 'other.com'), fs.realpathSync(elsewhere), path.join(realMods, 'chatgpt.com')]) {
     assert.ok(deny.includes(`Edit(/${p}/**)`), p);
   }
@@ -146,6 +147,19 @@ test('locked folders: a linked site folder gets Edit deny rules by its workspace
   assert.deepEqual(codex.command({ bin: '/x/codex', prompt: 'P', ...lim }).locked.sort(), lim.locked.sort());
   // An adapter that says nothing about it protects nothing: no folder is exempt from holding.
   assert.deepEqual(codex.command({ bin: '/x/codex', prompt: 'P', ...lim, readOnly: [] }).locked, []);
+});
+
+test('held mods: a locked folder named in another case is the same folder (APFS)', { skip: !fs.existsSync(os.tmpdir().toUpperCase()) }, () => {
+  const ws = makeWs();
+  fs.mkdirSync(path.join(ws.modsDir, 'other.com'));
+  write(ws, 'other.com/a.js', '// ==WebMod==\n// @match *://other.com/*\n// ==/WebMod==\n1');
+  const before = snapshot(ws.modsDir, ws.home);
+  write(ws, 'other.com/a.js', '// ==WebMod==\n// @match *://other.com/*\n// ==/WebMod==\n2');
+  const { mods } = scanMods(ws.modsDir);
+  // Locked as sites/OTHER.COM (another spelling of the same folder): not the run's change, not held.
+  assert.deepStrictEqual(Object.keys(updateHeld(ws, mods, [{ runId: 'r1', site: 'x.com', scope: 'x.com', before, locked: [path.join('sites', 'OTHER.COM')] }])), []);
+  // Not locked: the run changed a mod for another site: held.
+  assert.deepStrictEqual(Object.keys(updateHeld(ws, mods, [{ runId: 'r2', site: 'x.com', scope: 'x.com', before, locked: [] }])), ['other.com/a']);
 });
 
 test('@risk header: parsed into {tier, why}; a panel run\'s tier-2 mod is held, tier 0 and 1 aren\'t', () => {

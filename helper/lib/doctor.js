@@ -100,7 +100,15 @@ async function doctor(opts = {}) {
   // Workspace
   if (fs.existsSync(ws.home) && fs.existsSync(ws.modsDir)) add('ok', `workspace ${ws.home}`);
   else add('fail', `workspace ${ws.home} is missing${fs.existsSync(ws.home) ? ` its mods folder ${ws.modsDir}` : ''}`, setupFix);
-  if (ws.configError) add('fail', ws.configError, `fix or delete ${path.join(ws.home, 'config.json')}`);
+  if (ws.configError) add('fail', ws.configError, `fix or delete ${ws.configFile}`);
+  // The private folder (settings, logs, screenshots): never readable by side-panel runs, so nothing of it
+  // may be left in the workspace, which runs may read (see "Run scope" in docs/PROTOCOL.md).
+  if (ws.privateError) add('warn', ws.privateError);
+  if (!envVar('RUN_BOX')) {
+    const left = require('./migrate').privateLeftovers(ws.home);
+    if (left.length) add('warn', `TRIF's private files are still in the workspace, where side-panel runs can read them: ${left.map((f) => path.relative(ws.home, f)).join(', ')}`, `${setupFix} (it moves them to ${ws.private})`);
+    else if (fs.existsSync(ws.private)) add('ok', `private folder ${ws.private} (settings, logs, screenshots; side-panel runs can't read it)`);
+  }
   // A workspace moved from ~/.webmods (before 0.2.0, when TRIF was called WebMods): Chrome may load the
   // extension from ~/.webmods/app/extension, and PATHs may name ~/.webmods/bin, so the link must stay.
   const legacy = P.legacyHome();
@@ -113,7 +121,7 @@ async function doctor(opts = {}) {
   } else if (!inRun && path.resolve(ws.home) === path.resolve(P.defaultHome()) && !opts.home) {
     let link = null;
     try { link = fs.lstatSync(legacy); } catch { /* none */ }
-    const real = (p) => { try { return fs.realpathSync(p); } catch { return null; } };
+    const real = (p) => { try { return fs.realpathSync.native(p); } catch { return null; } };
     if (link && link.isSymbolicLink() && real(legacy) === real(ws.home)) add('ok', `${legacy} links to ${ws.home} (from before 0.2.0; keep it)`);
     else if (link && link.isDirectory()) add('warn', `${legacy} is still a folder of its own (TRIF uses ${ws.home} since 0.2.0)`, `${setupFix} (it moves what's in ${legacy} into ${ws.home})`);
     else if (!link && moved) {
@@ -218,7 +226,8 @@ async function doctor(opts = {}) {
       const fix = `${setupFix} --browser safari`;
       if (!bridgeJs || !fs.existsSync(bridgeJs)) add('fail', `Safari: the bridge's login item (${plist}) runs ${bridgeJs || 'nothing'}, which doesn't exist`, fix);
       else if (await portOpen(SAFARI_PORT)) add('ok', `Safari: the bridge is running (127.0.0.1:${SAFARI_PORT})`);
-      else add('fail', `Safari: the bridge isn't running (nothing on 127.0.0.1:${SAFARI_PORT})`, `${fix}   (errors: ${path.join(ws.home, 'safari-bridge.err')})`);
+      else add('fail', `Safari: the bridge isn't running (nothing on 127.0.0.1:${SAFARI_PORT})`, `${fix}   (errors: ${ws.safariBridgeErr})`);
+      if (!fs.existsSync(ws.safariToken)) add('fail', `Safari: the bridge's key ${ws.safariToken} is missing, so Safari can't connect`, fix);
     }
   }
 

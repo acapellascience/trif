@@ -974,6 +974,15 @@ mid-chat). `web_search` is OpenAI's hosted tool; other providers don't have it.
   protects the key from sandboxed agent commands and from environment snooping, not from other software
   of the user's. (On Linux the bubblewrap sandbox would need checking for `/proc/<pid>/environ` and the
   Secret Service's D-Bus socket.)
+  Planned hardening, once TRIF has an Apple Developer ID (stable code signing): a small signed key
+  program (Swift) owns the item, stored so that only that program can read it (a Keychain ACL for its
+  signature, or better, a data-protection keychain access group for the TRIF team, which other software
+  can't read at all), and it makes the provider requests itself, so the key never leaves it, not even to
+  the helper; other software could at most ask it to make requests. Without stable signing every rebuild
+  is a new program and would prompt for Keychain access after each update, so this waits for the
+  developer account. Requiring Touch ID for each read was considered and rejected (a prompt per run).
+  Weighed against the rest: software already running as the user can usually do worse (keystrokes,
+  browser cookies, the workspace), so this is defence in depth, not the main line.
 - **Plain Codex and Claude Code: keys in config.json.** `env.OPENAI_API_KEY` / `env.ANTHROPIC_API_KEY`
   in config.json go into the agent's environment (that's how those CLIs take them), so a run's commands
   can read them through KERN_PROCARGS2 as above. Not changed yet; a login (`codex login`, `/login`)

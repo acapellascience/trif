@@ -1,5 +1,5 @@
 'use strict';
-// Tests for updates to the mods WebMods ships (helper/lib/preinstalled.js): unchanged copies replaced,
+// Tests for updates to the mods TRIF ships (helper/lib/preinstalled.js): unchanged copies replaced,
 // edited ones offered the new version, the user's choices, the history of shipped versions, and how it
 // reaches the helper's mods messages and the CLI. Everything in temp folders.
 
@@ -172,11 +172,11 @@ test('use the new version: the user\'s copy goes to the trash; restore brings it
   assert.strictEqual(w.rec('x.com/plain-x').hash, sha1(mod(2)));
   assert.strictEqual(fs.readFileSync(S.baseFile(w.home, 'x.com/plain-x'), 'utf8'), mod(2));
   assert.ok(!fs.existsSync(S.newFile(w.home, 'x.com/plain-x')));
-  assert.throws(() => S.useNewVersion(w.ws, 'x.com/plain-x'), /no new WebMods version/);
+  assert.throws(() => S.useNewVersion(w.ws, 'x.com/plain-x'), /no new TRIF version/);
   // A setup in between doesn't spoil the undo.
   w.setup();
 
-  // Undo (the panel's, or `webmods restore`).
+  // Undo (the panel's, or `trif restore`).
   S.restoreMod(w.ws, 'x.com/plain-x');
   assert.strictEqual(w.mine('x.com/plain-x'), mod(1, 'mine'));
   assert.deepStrictEqual(w.rec('x.com/plain-x'), { hash: sha1(mod(1)), version: '1', pending: { hash: sha1(mod(2)), version: '2' } });
@@ -218,7 +218,7 @@ test('merge: the prompt points at the three files; resolving makes the new versi
   const m = S.mergeRequest(w.ws, 'x.com/plain-x');
   assert.strictEqual(m.hash, sha1(mod(2)));
   assert.match(m.prompt, /user's copy \(edit this file, and only this one\): sites\/x\.com\/plain-x\.js/);
-  assert.match(m.prompt, /new version from WebMods \(read only\): \.shipped\/x\.com\/plain-x\.new\.js/);
+  assert.match(m.prompt, /new version from TRIF \(read only\): \.shipped\/x\.com\/plain-x\.new\.js/);
   assert.match(m.prompt, /shipped before \(version 1\).*: \.shipped\/x\.com\/plain-x\.js/);
   assert.strictEqual(S.resolveMerge(w.home, 'x.com/plain-x', 'some other version'), false);
   w.edit('x.com/plain-x', mod(2, 'merged'));
@@ -264,7 +264,7 @@ test('setup says what it updated and what waits; the helper and the CLI show the
   const w = world();
   w.ship('x.com/plain-x', mod(1));
   w.ship('x.com/punk-fonts', mod(1, 'punk'));
-  const env = { WEBMODS_EXAMPLES_DIR: w.examples };
+  const env = { TRIF_EXAMPLES_DIR: w.examples };
   const args = ['setup', '--home', w.home, '--native-dir', path.join(w.root, 'native'), '--no-link', '--link'];
   let r = await runCli(args, { home: w.home, env });
   assert.strictEqual(r.code, 0, r.stderr + r.stdout);
@@ -276,10 +276,10 @@ test('setup says what it updated and what waits; the helper and the CLI show the
   assert.match(r.stdout, /updated to the new version: x\.com\/plain-x \(version 2\)/);
   assert.match(r.stdout, /new version waiting, not installed because you changed these: x\.com\/punk-fonts \(version 2\)/);
 
-  // webmods mods / mod-update, without the browser.
+  // trif mods / mod-update, without the browser.
   r = await runCli(['mods'], { home: w.home });
-  assert.match(r.stdout, /x\.com\/punk-fonts[\s\S]*update available \(you've changed it\): version 2: webmods mod-update x\.com\/punk-fonts/);
-  assert.match(r.stdout, /from WebMods, version 2/);
+  assert.match(r.stdout, /x\.com\/punk-fonts[\s\S]*update available \(you've changed it\): version 2: trif mod-update x\.com\/punk-fonts/);
+  assert.match(r.stdout, /from TRIF, version 2/);
   r = await runCli(['mods', '--json'], { home: w.home });
   const listed = JSON.parse(r.stdout).mods;
   assert.deepStrictEqual(listed.find((m) => m.id === 'x.com/punk-fonts').update, { version: '2', from: '1', modified: true });
@@ -300,7 +300,7 @@ test('setup says what it updated and what waits; the helper and the CLI show the
   assert.match(r.stdout, /x\.com\/punk-fonts .*update available \(you've changed it\): version 2/);
 
   // Inside a side-panel run the choice isn't the agent's.
-  r = await runCli(['mod-update', 'x.com/punk-fonts', '--keep'], { home: w.home, env: { WEBMODS_RUN_TOKEN: 'x' } });
+  r = await runCli(['mod-update', 'x.com/punk-fonts', '--keep'], { home: w.home, env: { TRIF_RUN_TOKEN: 'x' } });
   assert.strictEqual(r.code, 1);
   assert.match(r.stderr, /not available inside a side-panel agent run/);
 
@@ -341,7 +341,7 @@ test('the repo\'s own examples: a legacy workspace with unchanged copies gets th
   fs.writeFileSync(path.join(root, 'examples', 'shipped-history.json'), JSON.stringify(history));
   fs.mkdirSync(path.join(home, 'sites', 'x.com'), { recursive: true });
   fs.writeFileSync(path.join(home, 'sites', 'x.com', 'plain-x.js'), legacy);
-  const r = await runCli(['setup', '--native-dir', path.join(root, 'native'), '--no-link', '--link'], { home, env: { WEBMODS_EXAMPLES_DIR: path.join(root, 'examples', 'sites') } });
+  const r = await runCli(['setup', '--native-dir', path.join(root, 'native'), '--no-link', '--link'], { home, env: { TRIF_EXAMPLES_DIR: path.join(root, 'examples', 'sites') } });
   assert.strictEqual(r.code, 0, r.stderr + r.stdout);
   assert.match(r.stdout, /updated to the new version: x\.com\/plain-x \(version \d+\)/);
   assert.strictEqual(fs.readFileSync(path.join(home, 'sites', 'x.com', 'plain-x.js'), 'utf8'), fs.readFileSync(path.join(REPO, 'examples', 'sites', 'x.com', 'plain-x.js'), 'utf8'));

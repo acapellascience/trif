@@ -1,6 +1,6 @@
 'use strict';
 // Tests for deleting mods (helper/lib/trash.js): the trash, restore, emptying old entries, and
-// `webmods delete` / `webmods restore` without a helper. The helper's mod.delete / mod.restore (panel and
+// `trif delete` / `trif restore` without a helper. The helper's mod.delete / mod.restore (panel and
 // agent runs, run scope) are in agents.test.js.
 
 const test = require('node:test');
@@ -81,14 +81,14 @@ test('emptyTrash removes entries older than 30 days; deleting empties it too', (
   assert.deepStrictEqual(listTrash(ws).map((t) => t.id), ['a.com/other']);
 });
 
-test('webmods delete / restore work without a helper', async () => {
+test('trif delete / restore work without a helper', async () => {
   const home = tempDir();
   const file = writeMod(home, 'x.com', 'quiet.js', MOD());
   let r = await runCli(['restore'], { home });
   assert.equal(r.stdout, 'the trash is empty\n');
   r = await runCli(['delete', 'x.com/quiet'], { home });
   assert.equal(r.code, 0, r.stderr);
-  assert.match(r.stdout, /^deleted x\.com\/quiet: it's in the trash for 30 days \(webmods restore x\.com\/quiet brings it back\)/);
+  assert.match(r.stdout, /^deleted x\.com\/quiet: it's in the trash for 30 days \(trif restore x\.com\/quiet brings it back\)/);
   assert.equal(fs.existsSync(file), false);
   r = await runCli(['restore', '--json'], { home });
   assert.deepStrictEqual(JSON.parse(r.stdout).trash.map((t) => t.id), ['x.com/quiet']);
@@ -97,5 +97,5 @@ test('webmods delete / restore work without a helper', async () => {
   assert.ok(fs.existsSync(file));
   r = await runCli(['delete', 'x.com/missing'], { home });
   assert.equal(r.code, 1);
-  assert.match(r.stderr, /^webmods delete: there's no mod x\.com\/missing/);
+  assert.match(r.stderr, /^trif delete: there's no mod x\.com\/missing/);
 });

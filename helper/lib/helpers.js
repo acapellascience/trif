@@ -1,7 +1,7 @@
 'use strict';
 // Every running helper: one per connected browser (or Chrome profile). Each listens on its own socket,
 // <home>/helper-<pid>.sock, and the first one also serves <home>/helper.sock, the CLI's default. Agent
-// runs get their helper's own socket as WEBMODS_SOCK, so a run started from Firefox's sidebar works on
+// runs get their helper's own socket as TRIF_SOCK, so a run started from Firefox's sidebar works on
 // Firefox's tabs even while Chrome's helper owns helper.sock. `--browser` picks one from a terminal.
 
 const fs = require('fs');

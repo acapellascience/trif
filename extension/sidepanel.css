@@ -118,7 +118,7 @@ svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width:
 
 .settings { display: grid; gap: 8px; }
 
-/* A site WebMods is off for: only "WebMods is disabled" and the button. */
+/* A site TRIF is off for: only "TRIF is disabled" and the button. */
 .gate { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 14px; padding: 24px 16px 64px; }
 .gate[hidden] { display: none; }
 .gate .mod-err { margin: 0; text-align: center; }

@@ -1,6 +1,6 @@
 'use strict';
-// Deleting mods: `webmods delete`, the side panel's Delete, and agents (which have `webmods` but no rm).
-// A deleted mod isn't erased but moved to <home>/trash/<site>/<mod>@<stamp>.js, so `webmods restore`
+// Deleting mods: `trif delete`, the side panel's Delete, and agents (which have `trif` but no rm).
+// A deleted mod isn't erased but moved to <home>/trash/<site>/<mod>@<stamp>.js, so `trif restore`
 // (or the panel's Undo) can bring it back; entries older than TRASH_DAYS are removed. Only mod files are
 // ever touched. A run may delete or restore only mods that stay inside its scope, as with switches.
 //
@@ -93,7 +93,7 @@ function deleteMod(ws, id, { scope, now = Date.now() } = {}) {
 function restoreMod(ws, id, { scope } = {}) {
   const { site, mod } = parseId(id);
   const entry = listTrash(ws).find((t) => t.id === `${site}/${mod}`);
-  if (!entry) throw new TrashError(`${site}/${mod} isn't in the trash (webmods restore lists what is)`);
+  if (!entry) throw new TrashError(`${site}/${mod} isn't in the trash (trif restore lists what is)`);
   const file = path.join(ws.modsDir, site, `${mod}.js`);
   if (fs.existsSync(file)) throw new TrashError(`${site}/${mod} exists again (${file}): rename or delete it first`);
   checkScope(site, entry.file, scope, 'restore');

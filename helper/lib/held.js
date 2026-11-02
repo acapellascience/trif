@@ -1,6 +1,6 @@
 'use strict';
 // Held mods: mods a side-panel agent run wrote that match pages outside the run's scope (see
-// scope.js), or that say they're risk tier 2 (they change what the site receives). $WEBMODS_HOME/held.json maps mod id -> {hash, site, scope, runId, reason, at, approved?}. A
+// scope.js), or that say they're risk tier 2 (they change what the site receives). $TRIF_HOME/held.json maps mod id -> {hash, site, scope, runId, reason, at, approved?}. A
 // mod stays held while its hash is unchanged and it isn't approved; approving keeps the entry (marked
 // approved) so the same version isn't held again, and any change to the file drops the entry.
 // (Agents can't edit this file: side-panel runs may only write under sites/.)

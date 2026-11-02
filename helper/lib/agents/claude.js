@@ -8,22 +8,22 @@ const { findExecutable, versionOf, relToWorkspace, oneLine, parseJsonLine, captu
 //   - Claude Code's own tools, by permission rules passed on the command line (Claude Code 2.1.312
 //     ignored `Bash(...)` allow rules from the workspace's .claude/settings.json in -p runs). Edits are
 //     allowed under sites/ only (no --permission-mode acceptEdits, which allowed the whole workspace: its
-//     state files steer WebMods), minus every existing folder of another site; reads, the whole
+//     state files steer TRIF), minus every existing folder of another site; reads, the whole
 //     workspace but its secrets and other runs' traces. In -p, anything else that would need approval is
 //     denied.
-//   - Shell commands, only `webmods`, `cd` and `ls`, run in Claude Code's sandbox (macOS Seatbelt), which
-//     the system enforces whatever the command line says: no network and no sockets (so `webmods`
+//   - Shell commands, only `trif`, `cd` and `ls`, run in Claude Code's sandbox (macOS Seatbelt), which
+//     the system enforces whatever the command line says: no network and no sockets (so `trif`
 //     reaches the helper only through the run's mailbox, which limits it to the run's site), the same
-//     reads as Codex runs (nothing else in the home folder), and no writes to WebMods' state files or
+//     reads as Codex runs (nothing else in the home folder), and no writes to TRIF's state files or
 //     other sites' folders. failIfUnavailable: no sandbox, no commands.
-// No command that runs arbitrary code (not even `node --test`); `webmods check` replaces `node --check`.
-const ALLOWED_TOOLS = ['Read(./**)', 'Glob', 'Grep', 'Edit(./sites/**)', 'Bash(webmods:*)', 'Bash(cd:*)', 'Bash(ls:*)'];
+// No command that runs arbitrary code (not even `node --test`); `trif check` replaces `node --check`.
+const ALLOWED_TOOLS = ['Read(./**)', 'Glob', 'Grep', 'Edit(./sites/**)', 'Bash(trif:*)', 'Bash(webmods:*)', 'Bash(cd:*)', 'Bash(ls:*)'];
 // (Not Read(./runs/**): Claude Code also applies Read denies to the sandbox, where nothing can reopen
 // them, so the run's own mailbox under runs/ would be lost. The sandbox keeps runs/ but the mailbox
 // unreadable to commands; these cover Claude Code's own file tools.)
 const DENIED_TOOLS = ['WebFetch', 'WebSearch', 'Read(./config.json)', 'Read(./safari-token)', 'Read(./helper.log*)', 'Read(./runs/*.jsonl)',
   'Read(./screenshots/*.png)'];
-// The workspace's files that steer WebMods (or the agents): never written by a run's commands. (.shipped
+// The workspace's files that steer TRIF (or the agents): never written by a run's commands. (.shipped
 // holds the versions of shipped mods a merge run reads: readable, never written.)
 const STATE_FILES = ['held.json', 'preinstalled.json', 'origins.json', 'active-runs', 'trash', 'config.json', 'instructions.md',
   'AGENTS.md', 'CLAUDE.md', 'bin', 'app', 'safari-token', 'helper.log', 'helper.log.1', 'runs', '.shipped'];
@@ -79,13 +79,13 @@ const adapter = {
   systemPrompt: true, // context goes in --append-system-prompt on every run
   readsInstructions: true, // the workspace's CLAUDE.md imports instructions.md
   missing: "Claude Code isn't installed, or the helper can't find it. Install it (https://claude.com/claude-code), " +
-    'then run `webmods setup` in the same terminal so the helper finds it.',
+    'then run `trif setup` in the same terminal so the helper finds it.',
 
   detect({ dirs, env, version = true }) {
     const file = findExecutable(adapter.binary, dirs);
     if (!file) return { available: false, path: null, version: null, note: 'not found' };
     const v = version ? versionOf(file, env) : null;
-    if (tooOld(v)) return { available: false, path: file, version: v, note: `Claude Code ${v} is too old for WebMods (it needs ${MIN_VERSION.join('.')} or newer to keep side-panel runs to their site): update it (claude update)` };
+    if (tooOld(v)) return { available: false, path: file, version: v, note: `Claude Code ${v} is too old for TRIF (it needs ${MIN_VERSION.join('.')} or newer to keep side-panel runs to their site): update it (claude update)` };
     return { available: true, path: file, version: v, note: '' };
   },
 

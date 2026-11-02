@@ -1,5 +1,9 @@
-// webmods.dev (a Cloudflare Worker): the home page, the problem report form, and POST /report, which
+// timsrobot.com (a Cloudflare Worker): the home page, the problem report form, and POST /report, which
 // emails the report to the maintainer (the EMAIL send_email binding, to the REPORT_TO secret).
+//
+// It also answers for webmods.dev, TRIF's address before 0.2.0 (when it was called WebMods), sending
+// everything there to the same path on timsrobot.com: older installs open webmods.dev/report#r=… (a
+// browser keeps the # part across the redirect).
 
 import { HOME, REPORT, REPORT_JS } from './pages.js';
 import { LIMITS, ReportError, parseReport, reportEmail } from './report.js';
@@ -59,7 +63,7 @@ async function receiveReport(request, env) {
   try {
     await env.EMAIL.send({
       to: env.REPORT_TO,
-      from: { email: env.REPORT_FROM || 'reports@webmods.dev', name: 'WebMods reports' },
+      from: { email: env.REPORT_FROM || 'reports@timsrobot.com', name: 'TRIF reports' },
       subject: mail.subject,
       text: mail.text,
       ...(mail.replyTo ? { replyTo: mail.replyTo } : {}),
@@ -71,8 +75,21 @@ async function receiveReport(request, env) {
   return json({ ok: true });
 }
 
+export const HOME_HOST = 'timsrobot.com';
+const OLD_HOSTS = new Set(['webmods.dev', 'www.webmods.dev']);
+
+/** The redirect for a request to an old address (OLD_HOSTS), or null. */
+export function redirectFor(url) {
+  const u = new URL(url);
+  if (!OLD_HOSTS.has(u.hostname)) return null;
+  // 308 keeps the method and body (an older form's POST /report still arrives).
+  return new Response(null, { status: 308, headers: { Location: `https://${HOME_HOST}${u.pathname}${u.search}`, 'Cache-Control': 'public, max-age=3600' } });
+}
+
 export default {
   async fetch(request, env) {
+    const moved = redirectFor(request.url);
+    if (moved) return moved;
     const { pathname } = new URL(request.url);
     if (pathname === '/report' && request.method === 'POST') return receiveReport(request, env);
     if (request.method !== 'GET' && request.method !== 'HEAD') return respond('Method not allowed', 'text/plain', 405);

@@ -9,8 +9,8 @@
 
 // This file runs in the page itself (same `window` as the site) every time a matching page loads,
 // at document-start: before the site's own scripts, and before <head> and <body> exist.
-// Save the file, then `webmods reload` to see the change; `webmods errors` shows anything it threw.
-// webmods.log(...) records messages you can read back with `webmods logs`.
+// Save the file, then `trif reload` to see the change; `trif errors` shows anything it threw.
+// window.trif?.log(...) records messages you can read back with `trif logs`.
 
 // --- 1. CSS: the simplest and sturdiest way to hide or restyle things. ----------------------------
 // Prefer stable hooks (data-testid, aria-label, role, href) over generated class names.
@@ -21,7 +21,7 @@ const CSS = `
 
 function addStyle(css) {
   const style = document.createElement('style');
-  style.dataset.webmod = '{{site}}/{{mod}}';
+  style.dataset.trif = '{{site}}/{{mod}}';
   style.textContent = css;
   const insert = () => (document.head || document.documentElement).append(style);
   if (document.head) return insert();
@@ -45,7 +45,7 @@ function onElements(selector, fn) {
     for (const el of document.querySelectorAll(selector)) {
       if (seen.has(el)) continue;
       seen.add(el);
-      try { fn(el); } catch (e) { webmods.error(e); }
+      try { fn(el); } catch (e) { window.trif?.error(e); }
     }
   };
   const schedule = () => { if (!queued) { queued = true; queueMicrotask(scan); } };
@@ -63,4 +63,4 @@ function onElements(selector, fn) {
 //   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', fn, { once: true });
 //   else fn();
 // }
-// ready(() => webmods.log('{{mod}} loaded on', location.href));
+// ready(() => trif.log('{{mod}} loaded on', location.href));

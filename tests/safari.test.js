@@ -40,7 +40,7 @@ function event(name) {
 
 const fakeChrome = {
   runtime: Object.preventExtensions({
-    getURL: (p) => `safari-web-extension://ABC/${p}`, id: 'dev.webmods.app.extension (X)',
+    getURL: (p) => `safari-web-extension://ABC/${p}`, id: 'com.timsrobot.trif.extension (X)',
     getManifest: () => ({ version: '0.0.0' }), lastError: undefined, onMessage: event('runtime.onMessage'),
     sendNativeMessage: (app, msg) => { nativeCalls.push([app, msg]); return nativeReply(); },
   }),
@@ -192,7 +192,7 @@ test('Safari adapter: connectNative is a port over a WebSocket to the bridge, wi
   await waitFor(() => sockets.length > before, { message: 'the WebSocket' });
   const ws = sockets.at(-1);
   assert.equal(ws.url, `ws://127.0.0.1:${PORT}/?token=the-key`);
-  assert.deepEqual(nativeCalls.at(-1), ['dev.webmods.app', { type: 'token' }]);
+  assert.deepEqual(nativeCalls.at(-1), ['com.timsrobot.trif', { type: 'token' }]);
   assert.deepEqual(ws.sent, [], 'held until the socket opens');
   ws.onopen();
   assert.deepEqual(ws.sent, [{ type: 'hello' }]);
@@ -219,7 +219,7 @@ test('Safari adapter: without a key from the app, the port disconnects (and asks
   assert.equal(gone1, 1);
 
   const before = sockets.length;
-  nativeReply = async () => ({ error: "couldn't read /Users/x/.webmods/safari-token" });
+  nativeReply = async () => ({ error: "couldn't read /Users/x/.trif/safari-token" });
   try {
     const p2 = safari.bundledChrome.runtime.connectNative('com.webmods.helper');
     let gone2 = 0;
@@ -355,7 +355,7 @@ test('Safari bridge: refuses connections that aren\'t from a Safari extension', 
   } finally { await b.stop(); }
 });
 
-test('Safari bridge: refuses a Safari extension without the key (another extension than WebMods)', async () => {
+test('Safari bridge: refuses a Safari extension without the key (another extension than TRIF)', async () => {
   const b = await startBridge();
   try {
     assert.deepEqual(await wsConnect(b.port, ORIGIN, null), { refused: 403 });
@@ -462,9 +462,9 @@ test('Safari bridge: logs the extension\'s errors, but only from a Safari extens
 
 test('Safari setup: the bridge\'s login item runs the bridge with this node, for this workspace', () => {
   const xml = safariAgentContent('/opt/node & co/bin/node', '/W/app/helper/safari-bridge.js', '/custom <home>');
-  assert.match(xml, /<key>Label<\/key><string>dev\.webmods\.safari-bridge<\/string>/);
+  assert.match(xml, /<key>Label<\/key><string>com\.timsrobot\.trif\.safari-bridge<\/string>/);
   assert.match(xml, /<string>\/opt\/node &amp; co\/bin\/node<\/string><string>\/W\/app\/helper\/safari-bridge\.js<\/string>/);
-  assert.match(xml, /<key>WEBMODS_HOME<\/key><string>\/custom &lt;home&gt;<\/string>/);
+  assert.match(xml, /<key>TRIF_HOME<\/key><string>\/custom &lt;home&gt;<\/string>/);
   assert.match(xml, /<key>KeepAlive<\/key><true\/>/);
 });
 
@@ -472,11 +472,11 @@ test('setup --browser safari installs the bridge\'s login item and gives Safari\
   const home = tempDir();
   const r = await runCli(['setup', '--browser', 'safari', '--no-link', '--no-examples'], { home });
   assert.equal(r.code, 0, r.stderr + r.stdout);
-  const plist = path.join(home, 'fakehome', 'Library', 'LaunchAgents', 'dev.webmods.safari-bridge.plist');
+  const plist = path.join(home, 'fakehome', 'Library', 'LaunchAgents', 'com.timsrobot.trif.safari-bridge.plist');
   const xml = fs.readFileSync(plist, 'utf8');
   assert.match(xml, /helper\/safari-bridge\.js<\/string>/);
   const next = r.stdout.slice(r.stdout.indexOf('Next steps:'));
-  assert.match(next, /Open WebMods\.app/);
+  assert.match(next, /Open TRIF\.app/);
   assert.match(next, /Allow unsigned extensions/);
   assert.doesNotMatch(next, /chrome:\/\/extensions|Load unpacked|\.xpi/);
   assert.doesNotMatch(r.stdout, /native host/, 'no native messaging manifest for Safari');
@@ -487,4 +487,11 @@ test('setup --browser safari installs the bridge\'s login item and gives Safari\
   const again = await runCli(['setup', '--browser', 'safari', '--no-link', '--no-examples'], { home });
   assert.equal(again.code, 0);
   assert.equal(fs.readFileSync(tokenFile, 'utf8').trim(), key, 'kept on re-running setup');
+  // The bridge's agent from before 0.2.0 (dev.webmods.safari-bridge) is replaced: its file goes.
+  const oldPlist = path.join(home, 'fakehome', 'Library', 'LaunchAgents', 'dev.webmods.safari-bridge.plist');
+  fs.writeFileSync(oldPlist, '<plist/>');
+  const upgrade = await runCli(['setup', '--browser', 'safari', '--no-link', '--no-examples'], { home });
+  assert.equal(upgrade.code, 0, upgrade.stderr + upgrade.stdout);
+  assert.ok(!fs.existsSync(oldPlist));
+  assert.ok(fs.existsSync(plist));
 });

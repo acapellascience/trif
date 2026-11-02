@@ -1,9 +1,9 @@
 #!/usr/bin/env node
-// Builds WebMods for Safari: the Safari extension (scripts/build-extension.js safari) wrapped in the
-// small Mac app Safari requires, as dist/safari-app/WebMods.app and dist/webmods-safari-<version>.zip.
+// Builds TRIF for Safari: the Safari extension (scripts/build-extension.js safari) wrapped in the
+// small Mac app Safari requires, as dist/safari-app/TRIF.app and dist/trif-safari-<version>.zip.
 //
 // The Xcode project is generated each time with Apple's safari-web-extension-converter (so nothing
-// generated is kept in the repo), then given WebMods' bundle IDs and the app's own part from safari/:
+// generated is kept in the repo), then given TRIF's bundle IDs and the app's own part from safari/:
 // the extension's message handler (it hands the extension the Safari bridge's key) and its entitlements
 // (sandboxed, reading only that key's file). Needs Xcode (not just the command
 // line tools). Without --team the app is signed ad hoc: it runs on this Mac once Safari's "Allow
@@ -20,8 +20,10 @@ const { execFileSync } = require('node:child_process');
 const ROOT = path.resolve(__dirname, '..');
 const DIST = path.join(ROOT, 'dist');
 const OUT = path.join(DIST, 'safari-app');
-const APP_NAME = 'WebMods';
-const APP_ID = 'dev.webmods.app';
+const APP_NAME = 'TRIF';
+// (dev.webmods.app before 0.2.0: Safari sees this as another extension. A WebMods.app from before can be
+// deleted.)
+const APP_ID = 'com.timsrobot.trif';
 const EXTENSION_ID = `${APP_ID}.extension`;
 const EXTENSION_TARGET = `${APP_NAME} Extension`;
 const ENTITLEMENTS = `${EXTENSION_TARGET}.entitlements`;
@@ -44,7 +46,7 @@ function run(file, args, opts = {}) {
 }
 
 /**
- * The converter's project made WebMods': its bundle IDs (the app's, and the extension's under it), and
+ * The converter's project made TRIF's: its bundle IDs (the app's, and the extension's under it), and
  * the extension's handler and entitlements from safari/.
  */
 function customize(projectDir) {
@@ -89,13 +91,13 @@ function main() {
   const built = path.join(OUT, 'build', 'Build', 'Products', configuration, `${APP_NAME}.app`);
   if (!fs.existsSync(built)) fail(`xcodebuild didn't make ${built}`);
   // Moved, not copied, and Xcode's copy forgotten: macOS registers every copy of the app it sees, and with
-  // two Safari lists WebMods twice and its extension can't message its app ("Other version in use").
+  // two Safari lists TRIF twice and its extension can't message its app ("Other version in use").
   const app = path.join(OUT, `${APP_NAME}.app`);
   fs.renameSync(built, app);
   try {
     execFileSync('/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister', ['-u', built], { stdio: 'ignore' });
   } catch { /* never registered */ }
-  const zip = path.join(DIST, `webmods-safari-${version}.zip`);
+  const zip = path.join(DIST, `trif-safari-${version}.zip`);
   fs.rmSync(zip, { force: true });
   run('ditto', ['-c', '-k', '--keepParent', app, zip]);
 

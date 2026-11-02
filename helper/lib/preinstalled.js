@@ -1,6 +1,6 @@
 'use strict';
-// Mods a new workspace starts with, copied from the examples by `webmods setup`, each switched on or off
-// as listed, and the sites WebMods starts on for; and keeping those mods up to date. $WEBMODS_HOME/
+// Mods a new workspace starts with, copied from the examples by `trif setup`, each switched on or off
+// as listed, and the sites TRIF starts on for; and keeping those mods up to date. $TRIF_HOME/
 // preinstalled.json = {offered: [ids], startOff: [ids], sitesOn: [sites], shipped: {id: record}}:
 //  - offered: ids already offered, so one the user deleted doesn't come back with the next setup (and an
 //    existing file, the user's own version, is never overwritten);
@@ -8,23 +8,23 @@
 //    the extension switches each one off the first time it sees it (after that, its switch is the user's);
 //  - sitesOn: sites setup offered. The helper sends them with every mods message, and each browser turns
 //    each one on the first time it sees it (after that, the site's switch is the user's);
-//  - shipped: what WebMods shipped of each mod the user has, so later versions can reach them (below).
+//  - shipped: what TRIF shipped of each mod the user has, so later versions can reach them (below).
 //
-// Updates. A shipped mod (an example whose header says `@source webmods`) gets fixes in later WebMods
+// Updates. A shipped mod (an example whose header says `@source webmods`) gets fixes in later TRIF
 // versions, and every setup (which is also how updates install) brings them to the user's copy, but
 // never over the user's own changes. shipped[id] = {hash, version, pending?, declined?, replaced?, own?}:
 //  - hash, version: the sha1 and @version of the shipped version the user's copy is based on (hash null
-//    for a copy edited before WebMods kept this record: which version it started from isn't known). That
+//    for a copy edited before TRIF kept this record: which version it started from isn't known). That
 //    exact version is kept in <home>/.shipped/<site>/<mod>.js, the base for merging;
 //  - pending {hash, version}: a newer version the user's edited copy didn't get, kept in
 //    <home>/.shipped/<site>/<mod>.new.js until the user picks what to do in the side panel (or with
-//    `webmods mod-update`): use it, keep theirs, or have their agent merge the two;
+//    `trif mod-update`): use it, keep theirs, or have their agent merge the two;
 //  - declined: the hash of a version the user chose not to use ("Keep mine"); a later one is offered again;
 //  - replaced {hash, version, pending, trashed}: how things were before "Use the new version", so
-//    `webmods restore` (the panel's Undo) can put the user's copy back and offer the update again;
-//  - own: the user had their own file under that name before WebMods offered the mod: never touched.
+//    `trif restore` (the panel's Undo) can put the user's copy back and offer the update again;
+//  - own: the user had their own file under that name before TRIF offered the mod: never touched.
 // A copy that is still exactly what was shipped is replaced with the new version silently. Workspaces set
-// up before the record existed have none: there, a copy matching any version WebMods ever shipped
+// up before the record existed have none: there, a copy matching any version TRIF ever shipped
 // (examples/shipped-history.json, from git) counts as unchanged.
 //
 // <home>/.shipped starts with a dot, so the mod scanner never loads it; side-panel runs can read it (the
@@ -32,7 +32,7 @@
 
 const fs = require('fs');
 const path = require('path');
-const { parseHeader, sha1 } = require('./mods');
+const { parseHeader, sha1, isShippedSource } = require('./mods');
 const trash = require('./trash');
 
 // on: switched on from the start; the rest wait for the user to switch them on.
@@ -52,7 +52,7 @@ const PREINSTALLED = [
   { id: 'www.instagram.com/hide-reposts', on: true },
 ];
 
-// WebMods is off on every site until the user turns it on there; it starts on for these, the sites the
+// TRIF is off on every site until the user turns it on there; it starts on for these, the sites the
 // mods above are for.
 const SITES_ON = ['google.com', 'x.com', 'amazon.com', 'instagram.com'];
 
@@ -115,7 +115,7 @@ function readShipped(examplesDir, id) {
   const code = readOrNull(modFile(examplesDir, id));
   if (!code) return null;
   const header = parseHeader(code.toString('utf8'));
-  if (header.source !== 'webmods') return null;
+  if (!isShippedSource(header.source)) return null;
   return { code, hash: sha1(code), version: header.version };
 }
 
@@ -238,12 +238,12 @@ function pendingUpdates(home, mods) {
 
 function pendingRecord(state, id) {
   const rec = state.shipped[id];
-  if (!rec || rec.own || !rec.pending) throw new trash.TrashError(`there's no new WebMods version of ${id} waiting`);
+  if (!rec || rec.own || !rec.pending) throw new trash.TrashError(`there's no new TRIF version of ${id} waiting`);
   return rec;
 }
 
 /**
- * "Use the new version": the user's copy goes to the trash (`webmods restore` brings it back, and offers
+ * "Use the new version": the user's copy goes to the trash (`trif restore` brings it back, and offers
  * the update again), the new version takes its place. Returns {id, file, trashed, version}.
  */
 function useNewVersion(ws, id) {
@@ -252,7 +252,7 @@ function useNewVersion(ws, id) {
   const state = load(ws.home);
   const rec = pendingRecord(state, id);
   const code = readOrNull(newFile(ws.home, id));
-  if (!code) throw new trash.TrashError(`the new version of ${id} is missing (${newFile(ws.home, id)}); run webmods setup to bring it back`);
+  if (!code) throw new trash.TrashError(`the new version of ${id} is missing (${newFile(ws.home, id)}); run trif setup to bring it back`);
   const dest = modFile(ws.modsDir, id);
   const trashed = fs.existsSync(dest) ? trash.deleteMod(ws, id).trashed : null;
   writeAtomic(dest, code);
@@ -290,23 +290,23 @@ function mergeRequest(ws, id) {
   const rec = pendingRecord(state, id);
   const mine = modFile(ws.modsDir, id);
   if (!fs.existsSync(mine)) throw new trash.TrashError(`there's no mod ${id} to merge into (no file ${mine})`);
-  if (!fs.existsSync(newFile(ws.home, id))) throw new trash.TrashError(`the new version of ${id} is missing; run webmods setup to bring it back`);
+  if (!fs.existsSync(newFile(ws.home, id))) throw new trash.TrashError(`the new version of ${id} is missing; run trif setup to bring it back`);
   const rel = (f) => path.relative(ws.home, f).split(path.sep).join('/');
   const base = rec.hash && fs.existsSync(baseFile(ws.home, id)) ? rel(baseFile(ws.home, id)) : null;
   const v = (x) => (x ? `version ${x}` : 'an earlier version');
   const lines = [
-    `WebMods has a new version (${v(rec.pending.version)}) of the mod ${id}, which it ships. The user changed their copy, so it wasn't replaced. Merge the two into the user's copy: keep every change the user made, and bring in what's new in WebMods' version.`,
+    `TRIF has a new version (${v(rec.pending.version)}) of the mod ${id}, which it ships. The user changed their copy, so it wasn't replaced. Merge the two into the user's copy: keep every change the user made, and bring in what's new in TRIF's version.`,
     '',
     `- The user's copy (edit this file, and only this one): ${rel(mine)}`,
-    `- The new version from WebMods (read only): ${rel(newFile(ws.home, id))}`,
+    `- The new version from TRIF (read only): ${rel(newFile(ws.home, id))}`,
     base
-      ? `- What WebMods shipped before (${v(rec.version)}), which the user's copy started from (read only): ${base}`
-      : '- What WebMods shipped before, which the user started from, isn\'t available: tell the user\'s changes apart from WebMods\' by what they do.',
+      ? `- What TRIF shipped before (${v(rec.version)}), which the user's copy started from (read only): ${base}`
+      : '- What TRIF shipped before, which the user started from, isn\'t available: tell the user\'s changes apart from TRIF\'s by what they do.',
     '',
     base
-      ? 'Compare the old version with the user\'s copy to see what the user changed, and with the new version to see what WebMods changed.'
+      ? 'Compare the old version with the user\'s copy to see what the user changed, and with the new version to see what TRIF changed.'
       : 'Compare the user\'s copy with the new version.',
-    'Where both changed the same thing, keep the user\'s behaviour and say what you couldn\'t bring over. Keep `// @source webmods` in the header and set `// @version` to the new version\'s. Check the file parses (`webmods check`), reload the tab, then tell the user in a few words what changed. WebMods marks the update merged when this run finishes: don\'t run `webmods mod-update`, or ask the user to.',
+    'Where both changed the same thing, keep the user\'s behaviour and say what you couldn\'t bring over. Keep `// @source webmods` in the header and set `// @version` to the new version\'s. Check the file parses (`trif check`), reload the tab, then tell the user in a few words what changed. TRIF marks the update merged when this run finishes: don\'t run `trif mod-update`, or ask the user to.',
   ];
   return { hash: rec.pending.hash, prompt: lines.join('\n') };
 }
@@ -359,7 +359,7 @@ function restoreMod(ws, id, opts = {}) {
 /** The ids the extension should switch off when it first sees them. */
 function startOffIds(home) { return new Set(load(home).startOff); }
 
-/** The sites each browser should turn WebMods on for when it first sees them. */
+/** The sites each browser should turn TRIF on for when it first sees them. */
 function startSitesOn(home) { return load(home).sitesOn; }
 
 module.exports = {

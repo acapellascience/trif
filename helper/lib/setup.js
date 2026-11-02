@@ -1,16 +1,19 @@
 'use strict';
-// `webmods setup`: workspace, app copy, wrappers, native host manifests, CLI link. Idempotent.
+// `trif setup`: workspace (moving one from before 0.2.0 from ~/.webmods first: migrate.js), app copy,
+// wrappers, native host manifests, CLI link. Idempotent.
 //
 // Install modes (where the wrappers point):
 //   link  the package itself (a git checkout: the maintainer's way of working)
-//   copy  a self-contained copy in <home>/app (default when not a git checkout, e.g. `npx webmods setup`,
+//   copy  a self-contained copy in <home>/app (default when not a git checkout, e.g. `npx trif setup`,
 //         whose package lives in npm's cache, which npm may delete)
 
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
+const { envVar } = require('./env');
 const P = require('./paths');
-const { selectBrowsers, SAFARI_AGENT_LABEL, safariAgentPlist } = require('./browsers');
+const { selectBrowsers, SAFARI_AGENT_LABEL, LEGACY_SAFARI_AGENT_LABEL, safariAgentPlist, legacySafariAgentPlist } = require('./browsers');
+const { migrateHome, describeMigration } = require('./migrate');
 const { preinstallMods, updateShippedMods } = require('./preinstalled');
 const { acquireInstallLock, pidAlive } = require('./lock');
 
@@ -41,20 +44,20 @@ function pickNodePath() {
 }
 
 function hostWrapperContent(nodePath, home, hostJs = P.HOST_JS) {
-  const env = home !== P.defaultHome() ? `WEBMODS_HOME=${shq(home)}\nexport WEBMODS_HOME\n` : '';
+  const env = !P.isDefaultHome(home) ? `TRIF_HOME=${shq(home)}\nexport TRIF_HOME\n` : '';
   return `#!/bin/sh\n${env}exec ${shq(nodePath)} ${shq(hostJs)} "$@"\n`;
 }
 
 function cliWrapperContent(nodePath, home, cliJs = P.CLI_JS) {
-  // Respect an explicit WEBMODS_HOME, else default to the home this wrapper was installed for.
-  const env = home !== P.defaultHome() ? `: "\${WEBMODS_HOME:=${String(home).replace(/(["\\$`])/g, '\\$1')}}"\nexport WEBMODS_HOME\n` : '';
+  // Respect an explicit TRIF_HOME, else default to the home this wrapper was installed for.
+  const env = !P.isDefaultHome(home) ? `: "\${TRIF_HOME:=${String(home).replace(/(["\\$`])/g, '\\$1')}}"\nexport TRIF_HOME\n` : '';
   return `#!/bin/sh\n${env}exec ${shq(nodePath)} ${shq(cliJs)} "$@"\n`;
 }
 
 function manifestFor(wrapperPath, origins = [P.EXTENSION_ORIGIN], { firefox = false } = {}) {
   return {
     name: P.HOST_NAME,
-    description: 'WebMods helper: syncs mods and serves the webmods CLI',
+    description: `${P.NAME} helper: syncs mods and serves the ${P.CLI_NAME} CLI`,
     path: wrapperPath,
     type: 'stdio',
     ...(firefox ? { allowed_extensions: [P.FIREFOX_EXTENSION_ID] } : { allowed_origins: [...origins] }),
@@ -67,8 +70,8 @@ const xmlEscape = (s) => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').
 
 /** The launchd agent that keeps the Safari bridge (helper/safari-bridge.js) running while you're logged in. */
 function safariAgentContent(nodePath, bridgeJs, home) {
-  const env = home !== P.defaultHome()
-    ? `  <key>EnvironmentVariables</key>\n  <dict><key>WEBMODS_HOME</key><string>${xmlEscape(home)}</string></dict>\n` : '';
+  const env = !P.isDefaultHome(home)
+    ? `  <key>EnvironmentVariables</key>\n  <dict><key>TRIF_HOME</key><string>${xmlEscape(home)}</string></dict>\n` : '';
   return `<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
@@ -92,10 +95,13 @@ ${env}  <key>RunAtLoad</key><true/>
  *
  * Stopping the bridge stops everything launchd started with it, its hosts and their children included.
  * An update installed from Safari runs this inside such a host (safari-bridge.js gives its hosts
- * WEBMODS_SAFARI_BRIDGE), so doing it here would kill this setup and the update half way, leaving the
+ * TRIF_SAFARI_BRIDGE, or WEBMODS_SAFARI_BRIDGE before 0.2.0), so doing it here would kill this setup and the update half way, leaving the
  * bridge stopped until the next login. There, the launchctl commands run a few seconds later from a
  * process of their own (detached, so launchd doesn't count it as the bridge's), after the update has
  * finished; `later` is true.
+ *
+ * The agent from before 0.2.0 (LEGACY_SAFARI_AGENT_LABEL) is stopped first if it's loaded: both bridges
+ * want the same port.
  */
 function loadSafariAgent(plist, { changed = true, env = process.env, run, runDetached } = {}) {
   const { spawnSync, spawn } = require('child_process');
@@ -104,15 +110,17 @@ function loadSafariAgent(plist, { changed = true, env = process.env, run, runDet
   const domain = `gui/${process.getuid()}`;
   const target = `${domain}/${SAFARI_AGENT_LABEL}`;
   const loaded = run(['print', target]).status === 0;
-  const steps = loaded && !changed ? [['kickstart', '-k', target]]
-    : [...(loaded ? [['bootout', target]] : []), ['bootstrap', domain, plist]];
-  if (env.WEBMODS_SAFARI_BRIDGE) {
+  const legacyTarget = `${domain}/${LEGACY_SAFARI_AGENT_LABEL}`;
+  const legacy = run(['print', legacyTarget]).status === 0 ? [['bootout', legacyTarget]] : [];
+  const steps = [...legacy, ...(loaded && !changed ? [['kickstart', '-k', target]]
+    : [...(loaded ? [['bootout', target]] : []), ['bootstrap', domain, plist]])];
+  if (envVar('SAFARI_BRIDGE', env)) {
     runDetached(`sleep 3; ${steps.map((a) => ['launchctl', ...a].map(shq).join(' ')).join('; ')}`);
     return { error: null, later: true };
   }
   for (const args of steps) {
     const r = run(args);
-    if (r.status !== 0) return { error: (r.stderr || r.stdout || `launchctl ${args[0]} exited ${r.status}`).trim(), later: false };
+    if (r.status !== 0 && args[1] !== legacyTarget) return { error: (r.stderr || r.stdout || `launchctl ${args[0]} exited ${r.status}`).trim(), later: false };
   }
   return { error: null, later: false };
 }
@@ -211,7 +219,7 @@ function installAppLocked(srcRoot, appDir) {
   const base = path.basename(appDir);
   fs.mkdirSync(parent, { recursive: true });
   // Leftovers from an interrupted earlier run, unless the process that made them is still going (an
-  // older WebMods, from before the lock, may be installing right now).
+  // older TRIF, from before the lock, may be installing right now).
   for (const name of fs.readdirSync(parent)) {
     if ((name.startsWith(`.${base}.new-`) || name.startsWith(`.${base}.old-`)) && !leftoverOwnerAlive(name)) {
       fs.rmSync(path.join(parent, name), { recursive: true, force: true });
@@ -264,7 +272,7 @@ function rcFileHint() {
   return '~/.profile';
 }
 
-// Drop the folders npm/npx put on PATH for the duration of `npx webmods setup` (npm's cache, which it
+// Drop the folders npm/npx put on PATH for the duration of `npx trif setup` (npm's cache, which it
 // may delete, and its node-gyp shim): the helper and agents shouldn't keep using them.
 function cleanPath(pathValue) {
   const sep = path.sep;
@@ -301,12 +309,21 @@ function revealFolder(dir) {
  * opts: { home, browser, nativeDir, binDir, noLink, noExamples, mode: 'copy'|'link'|undefined (auto),
  *         reveal (show the extension folder in Finder for Chrome's Load unpacked),
  *         launchAgentsDir (where the Safari bridge's agent goes; default ~/Library/LaunchAgents),
- *         launchctl (false: write the agent but don't start it; also WEBMODS_NO_LAUNCHCTL=1) }
- * Returns { ok, lines: [string], ws, manifests: [{browser, file}], nodePath, mode, root }
+ *         launchctl (false: write the agent but don't start it; also TRIF_NO_LAUNCHCTL=1) }
+ * Returns { ok, lines: [string], ws, manifests: [{browser, file}], nodePath, mode, root, migration }
  */
 function setup(opts = {}) {
   const lines = [];
   const say = (s = '') => lines.push(s);
+  // 0. A workspace from before 0.2.0 moves from ~/.webmods to ~/.trif (migrate.js), when setting up the
+  // default one: no --home or TRIF_HOME, or one naming either of those (an older updater passes
+  // --home ~/.webmods). A workspace somewhere else stays where it is.
+  const asked = opts.home || envVar('HOME');
+  let migration = null;
+  if (!asked || P.isDefaultHome(asked)) {
+    try { migration = migrateHome(); } catch (e) { migration = { how: 'skipped', notes: [], error: `couldn't move ${P.legacyHome()} to ${P.defaultHome()}: ${e.message}; still using ${P.legacyHome()}` }; }
+    for (const l of describeMigration(migration)) say(l);
+  }
   const ws = P.workspace(opts.home);
   const home = ws.home;
   let ok = true;
@@ -329,15 +346,15 @@ function setup(opts = {}) {
         say(`app           FAILED to update ${ws.appDir}: ${e.message}; kept the existing copy`);
         root = ws.appDir;
       } else {
-        say(`app           FAILED to copy WebMods into ${ws.appDir}: ${e.message}`);
-        return { ok, lines, ws, manifests: [], nodePath: null, mode, root: null };
+        say(`app           FAILED to copy TRIF into ${ws.appDir}: ${e.message}`);
+        return { ok, lines, ws, manifests: [], nodePath: null, mode, root: null, migration };
       }
     }
   } else {
     say(`app           ${root} (linked: the wrappers run this folder)`);
     if (!P.isGitCheckout(root)) {
       say(`              warning: ${root} isn't a git checkout. If it goes away (npm deletes its npx cache),`);
-      say('              WebMods stops working. Run setup without --link to install a copy instead.');
+      say('              TRIF stops working. Run setup without --link to install a copy instead.');
     }
     if (fs.existsSync(ws.appDir) && realOrResolved(ws.appDir) !== realOrResolved(root)) {
       say(`              (an earlier copy in ${ws.appDir} is no longer used; you can delete it)`);
@@ -354,12 +371,12 @@ function setup(opts = {}) {
     say(`              AGENTS.md not found at ${agentsSrc}; skipped`);
   }
   if (!opts.noExamples) {
-    const examplesDir = process.env.WEBMODS_EXAMPLES_DIR ? path.resolve(process.env.WEBMODS_EXAMPLES_DIR) : path.join(root, 'examples', 'sites');
+    const examplesDir = envVar('EXAMPLES_DIR') ? path.resolve(envVar('EXAMPLES_DIR')) : path.join(root, 'examples', 'sites');
     const { added, on, sites } = preinstallMods(home, ws.modsDir, examplesDir);
     const off = added.filter((id) => !on.includes(id));
     if (on.length) say(`mods          preinstalled, on: ${on.join(', ')}`);
     if (off.length) say(`mods          preinstalled, off until you switch them on in the side panel: ${off.join(', ')}`);
-    if (sites.length) say(`sites         WebMods starts on for ${sites.join(', ')} (off everywhere else until you turn it on there)`);
+    if (sites.length) say(`sites         TRIF starts on for ${sites.join(', ')} (off everywhere else until you turn it on there)`);
     // Later versions of the shipped mods: unchanged copies are replaced, edited ones offered the new version.
     const vers = (m) => `${m.id}${m.version ? ` (version ${m.version})` : ''}`;
     try {
@@ -370,7 +387,7 @@ function setup(opts = {}) {
         say('              (the side panel offers it on each: use it, keep yours, or merge them with your agent)');
       }
     } catch (e) {
-      say(`mods          couldn't update the mods WebMods ships: ${e.message}`);
+      say(`mods          couldn't update the mods TRIF ships: ${e.message}`);
     }
   }
   const claudeSrc = path.join(helperDir, 'workspace', 'CLAUDE.md');
@@ -393,10 +410,14 @@ function setup(opts = {}) {
   const cliJs = path.join(helperDir, 'cli.js');
   writeIfChanged(ws.hostWrapper, hostWrapperContent(nodePath, home, hostJs), 0o755);
   writeIfChanged(ws.cliWrapper, cliWrapperContent(nodePath, home, cliJs), 0o755);
+  // The same under the names from before 0.2.0: `webmods` stays an alias of `trif`, and a native host
+  // manifest this setup doesn't rewrite (a browser it didn't select) may still name webmods-host.
+  writeIfChanged(ws.legacyHostWrapper, hostWrapperContent(nodePath, home, hostJs), 0o755);
+  writeIfChanged(ws.legacyCliWrapper, cliWrapperContent(nodePath, home, cliJs), 0o755);
   say(`host wrapper  ${ws.hostWrapper} -> ${hostJs} (node ${nodePath})`);
-  say(`CLI wrapper   ${ws.cliWrapper} -> ${cliJs}`);
+  say(`CLI wrapper   ${ws.cliWrapper} -> ${cliJs} (also as ${path.basename(ws.legacyCliWrapper)}, its old name)`);
 
-  // 4. Native host manifests, accepting every WebMods extension ID.
+  // 4. Native host manifests, accepting every TRIF extension ID.
   const { ids, invalid } = P.extensionIds(ws.config);
   say(`extension IDs ${ids.join(', ')}`);
   if (invalid.length) say(`              ignored config.json extensionIds entries that aren't extension IDs: ${invalid.map((x) => JSON.stringify(x)).join(', ')}`);
@@ -414,13 +435,13 @@ function setup(opts = {}) {
   const manifests = [];
   for (const t of targets) {
     if (t.safari) {
-      // The key the bridge asks of connections; WebMods' Safari app reads it from ~/.webmods (its sandbox
-      // allows that one path) and hands it to the extension.
+      // The key the bridge asks of connections; TRIF's Safari app reads it from ~/.trif (its sandbox
+      // allows that path, and ~/.webmods/safari-token from before 0.2.0) and hands it to the extension.
       const tokenFile = path.join(home, 'safari-token');
       if (!fs.existsSync(tokenFile)) fs.writeFileSync(tokenFile, require('crypto').randomBytes(32).toString('hex') + '\n', { mode: 0o600 });
       fs.chmodSync(tokenFile, 0o600);
-      if (path.resolve(home) !== path.resolve(P.defaultHome())) {
-        say(`              warning: Safari's WebMods app only looks for ${path.join(P.defaultHome(), 'safari-token')}, so Safari`);
+      if (!P.isDefaultHome(home)) {
+        say(`              warning: Safari's TRIF app only looks for ${path.join(P.defaultHome(), 'safari-token')}, so Safari`);
         say(`              can't connect to a workspace elsewhere (${home})`);
       }
       const plist = opts.launchAgentsDir ? path.join(path.resolve(opts.launchAgentsDir), path.basename(safariAgentPlist())) : safariAgentPlist();
@@ -430,7 +451,10 @@ function setup(opts = {}) {
         const how = writeIfChanged(plist, safariAgentContent(nodePath, bridgeJs, home));
         manifests.push({ browser: t.key, file: plist });
         say(`Safari bridge ${plist} -> ${bridgeJs} (${how})`);
-        if (opts.launchctl !== false && !process.env.WEBMODS_NO_LAUNCHCTL) {
+        // The agent from before 0.2.0: loadSafariAgent stops it; its file goes now.
+        const oldPlist = opts.launchAgentsDir ? path.join(path.resolve(opts.launchAgentsDir), path.basename(legacySafariAgentPlist())) : legacySafariAgentPlist();
+        if (fs.existsSync(oldPlist)) { fs.rmSync(oldPlist, { force: true }); say(`              removed ${oldPlist} (its name before 0.2.0)`); }
+        if (opts.launchctl !== false && !envVar('NO_LAUNCHCTL')) {
           const { error, later } = loadSafariAgent(plist, { changed: how !== 'unchanged' });
           if (error) { ok = false; say(`              FAILED to start it: ${error}`); }
           else if (later) say('              restarting in a few seconds, onto this version');
@@ -457,7 +481,7 @@ function setup(opts = {}) {
 
   // 5. CLI link
   const binDir = opts.binDir ? path.resolve(opts.binDir) : '/usr/local/bin';
-  const link = path.join(binDir, 'webmods');
+  const link = path.join(binDir, P.CLI_NAME);
   if (opts.noLink) {
     say('CLI link      skipped (--no-link)');
   } else {
@@ -495,33 +519,33 @@ function setup(opts = {}) {
   say('');
   say('Next steps:');
   const safariSteps = (n) => [
-    `${n}. Open WebMods.app (from the Safari download) once: it adds the WebMods extension to Safari.`,
-    `${n + 1}. Until WebMods is signed by Apple, let Safari run it: Safari → Settings → Advanced, tick "Show`,
+    `${n}. Open TRIF.app (from the Safari download) once: it adds the TRIF extension to Safari.`,
+    `${n + 1}. Until TRIF is signed by Apple, let Safari run it: Safari → Settings → Advanced, tick "Show`,
     '   features for web developers"; then Settings → Developer, tick "Allow unsigned extensions" (Safari',
     '   turns this off whenever it quits, so tick it again after restarting Safari).',
-    `${n + 2}. Safari → Settings → Extensions: tick WebMods, and allow it on every website.`,
-    `${n + 3}. Click the WebMods toolbar button to open the panel (in Safari it's a window of its own).`,
+    `${n + 2}. Safari → Settings → Extensions: tick TRIF, and allow it on every website.`,
+    `${n + 3}. Click the TRIF toolbar button to open the panel (in Safari it's a window of its own).`,
   ];
   if (targets.every((t) => t.safari)) {
     for (const l of safariSteps(1)) say(`  ${l}`);
-    say('  5. Check everything with: webmods doctor');
+    say('  5. Check everything with: trif doctor');
     say(`  Then ask your coding agent to work in ${home} (it reads AGENTS.md there).`);
-    return { ok, lines, ws, manifests, nodePath, mode, root };
+    return { ok, lines, ws, manifests, nodePath, mode, root, migration };
   }
   if (!targets.some((t) => !t.firefox && !t.safari)) {
-    say('  1. Open the signed WebMods add-on (webmods-firefox.xpi) in Firefox, e.g. drag it onto a Firefox');
+    say('  1. Open the signed TRIF add-on (trif-firefox.xpi) in Firefox, e.g. drag it onto a Firefox');
     say('     window, and click Add.');
-    say('  2. Click the WebMods toolbar button to open the sidebar, then "Allow user scripts" and Allow.');
+    say('  2. Click the TRIF toolbar button to open the sidebar, then "Allow user scripts" and Allow.');
     say('  3. If Firefox was already running before this setup, quit it completely and reopen it.');
-    say('  4. Check everything with: webmods doctor');
+    say('  4. Check everything with: trif doctor');
     if (targets.some((t) => t.safari)) { say('  Safari:'); for (const l of safariSteps(1)) say(`    ${l}`); }
     say(`  Then ask your coding agent to work in ${home} (it reads AGENTS.md there).`);
-    return { ok, lines, ws, manifests, nodePath, mode, root };
+    return { ok, lines, ws, manifests, nodePath, mode, root, migration };
   }
-  // The extension folder is hidden (~/.webmods) from Load unpacked's file picker, so on a Mac show it in
+  // The extension folder is hidden (~/.trif) from Load unpacked's file picker, so on a Mac show it in
   // Finder, ready to drag onto chrome://extensions, and put its path on the clipboard for Cmd-Shift-G.
   const revealed = !!opts.reveal && revealFolder(extensionDir);
-  say('  1. Install the extension. Until WebMods is on the Chrome Web Store, load it unpacked:');
+  say('  1. Install the extension. Until TRIF is on the Chrome Web Store, load it unpacked:');
   if (revealed) {
     say('     open chrome://extensions and turn on "Developer mode" (top right). Then drag the "extension"');
     say('     folder from the Finder window that just opened onto that page. (Or click "Load unpacked",');
@@ -532,17 +556,17 @@ function setup(opts = {}) {
   }
   say(`     (its ID must be ${P.EXTENSION_ID}).${mode === 'copy' ? ' Keep that folder: Chrome runs the extension from it,' : ''}`);
   if (mode === 'copy') say('     and setup updates it in place. (A Web Store listing will replace this step later.)');
-  say('  2. Turn on "Allow User Scripts": click "Open extension settings" on the WebMods tab Chrome opens,');
-  say('     or "Details" on WebMods in chrome://extensions.');
-  say('  3. Check everything with: webmods doctor');
+  say('  2. Turn on "Allow User Scripts": click "Open extension settings" on the TRIF tab Chrome opens,');
+  say('     or "Details" on TRIF in chrome://extensions.');
+  say('  3. Check everything with: trif doctor');
   if (targets.some((t) => t.firefox)) {
-    say('  Firefox: open the signed WebMods add-on (.xpi) in Firefox to install it, then click the WebMods');
+    say('  Firefox: open the signed TRIF add-on (.xpi) in Firefox to install it, then click the TRIF');
     say('     toolbar button and "Allow user scripts". Restart Firefox if it was running before this setup.');
   }
   if (targets.some((t) => t.safari)) { say('  Safari:'); for (const l of safariSteps(1)) say(`    ${l}`); }
   say(`  Then ask your coding agent to work in ${home} (it reads AGENTS.md there).`);
 
-  return { ok, lines, ws, manifests, nodePath, mode, root };
+  return { ok, lines, ws, manifests, nodePath, mode, root, migration };
 }
 
 module.exports = {

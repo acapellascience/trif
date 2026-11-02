@@ -1,5 +1,5 @@
 'use strict';
-// Tests for installing WebMods: the npm package, copy vs link installs, allowed_origins for every
+// Tests for installing TRIF: the npm package, copy vs link installs, allowed_origins for every
 // extension ID, and the matching doctor checks. Everything runs in temp dirs (--home, --native-dir).
 
 const test = require('node:test');
@@ -39,9 +39,9 @@ function runOtherCli(cliJs, args, home, env = {}) {
   });
 }
 
-// A package folder like npm's (no .git): what `npx webmods` runs from.
+// A package folder like npm's (no .git): what `npx trif` runs from.
 function fakePackage(root) {
-  const pkg = path.join(root, 'pkg', 'node_modules', 'webmods');
+  const pkg = path.join(root, 'pkg', 'node_modules', 'trif');
   const r = installApp(REPO, pkg);
   assert.equal(r.how, 'created');
   assert.ok(!fs.existsSync(path.join(pkg, '.git')));
@@ -52,8 +52,8 @@ function fakePackage(root) {
 
 test('package: npm metadata, files allowlist and one version everywhere', () => {
   const pkg = JSON.parse(fs.readFileSync(path.join(REPO, 'package.json'), 'utf8'));
-  assert.equal(pkg.name, 'webmods');
-  assert.deepEqual(pkg.bin, { webmods: 'helper/cli.js' });
+  assert.equal(pkg.name, 'trif');
+  assert.deepEqual(pkg.bin, { trif: 'helper/cli.js', webmods: 'helper/cli.js' }, '`webmods` stays an alias');
   assert.equal(pkg.license, 'MIT');
   assert.equal(pkg.engines.node, '>=18');
   for (const f of ['helper/', 'extension/', 'examples/', 'docs/PROTOCOL.md']) assert.ok(pkg.files.includes(f), f);
@@ -96,8 +96,8 @@ test('setup --copy: copies helper/extension/examples into <home>/app and points 
     assert.ok(fs.existsSync(path.join(app, f)), f);
   }
   for (const f of ['tests', '.keys', '.git', 'docs']) assert.ok(!fs.existsSync(path.join(app, f)), `${f} not copied`);
-  assert.equal(wrapperScript(path.join(ws, 'bin', 'webmods-host')), path.join(app, 'helper', 'host.js'));
-  assert.equal(wrapperScript(path.join(ws, 'bin', 'webmods')), path.join(app, 'helper', 'cli.js'));
+  assert.equal(wrapperScript(path.join(ws, 'bin', 'trif-host')), path.join(app, 'helper', 'host.js'));
+  assert.equal(wrapperScript(path.join(ws, 'bin', 'trif')), path.join(app, 'helper', 'cli.js'));
   assert.equal(fs.statSync(path.join(app, 'helper', 'cli.js')).mode & 0o777, fs.statSync(path.join(REPO, 'helper', 'cli.js')).mode & 0o777);
   assert.equal(fs.readFileSync(path.join(ws, 'AGENTS.md'), 'utf8'), fs.readFileSync(path.join(app, 'helper', 'workspace', 'AGENTS.md'), 'utf8'));
   assert.match(r.stdout, new RegExp(`app {11}${esc(app)} \\(v${esc(P.VERSION)}, created, copied from`));
@@ -107,7 +107,7 @@ test('setup --copy: copies helper/extension/examples into <home>/app and points 
 
   // The CLI wrapper runs the copy (its examples, its template).
   const viaWrapper = await new Promise((resolve) => {
-    execFile(path.join(ws, 'bin', 'webmods'), ['new', 'example.com', 'hello'], { env: { PATH: process.env.PATH, HOME: root } }, (e, so, se) => resolve({ e, so, se }));
+    execFile(path.join(ws, 'bin', 'trif'), ['new', 'example.com', 'hello'], { env: { PATH: process.env.PATH, HOME: root } }, (e, so, se) => resolve({ e, so, se }));
   });
   assert.equal(viaWrapper.e, null, viaWrapper.se);
   assert.ok(fs.existsSync(path.join(ws, 'sites', 'example.com', 'hello.js')));
@@ -146,7 +146,7 @@ test('setup from a package that is not a git checkout copies by default; re-runn
   const out = JSON.parse(r.stdout);
   assert.equal(out.mode, 'copy');
   assert.equal(out.app, path.join(ws, 'app'));
-  assert.equal(wrapperScript(path.join(ws, 'bin', 'webmods-host')), path.join(ws, 'app', 'helper', 'host.js'));
+  assert.equal(wrapperScript(path.join(ws, 'bin', 'trif-host')), path.join(ws, 'app', 'helper', 'host.js'));
 
   // The package folder can go away (npm cleans its npx cache): the install keeps working.
   fs.rmSync(path.join(root, 'pkg'), { recursive: true, force: true });
@@ -163,14 +163,14 @@ test('setup --link: wrappers run the package where it is; warns when that is not
   const ws = path.join(root, 'ws');
   let r = await runCli(['setup', '--link', '--home', ws, '--native-dir', path.join(root, 'native'), '--no-link'], { home: ws });
   assert.equal(r.code, 0, r.stderr);
-  assert.equal(wrapperScript(path.join(ws, 'bin', 'webmods-host')), path.join(REPO, 'helper', 'host.js'));
+  assert.equal(wrapperScript(path.join(ws, 'bin', 'trif-host')), path.join(REPO, 'helper', 'host.js'));
   assert.ok(!fs.existsSync(path.join(ws, 'app')));
   assert.match(r.stdout, /linked: the wrappers run this folder/);
 
   const pkg = fakePackage(root);
   r = await runOtherCli(path.join(pkg, 'helper', 'cli.js'), ['setup', '--link', '--home', ws, '--native-dir', path.join(root, 'native'), '--no-link'], ws);
   assert.equal(r.code, 0, r.stderr);
-  assert.equal(wrapperScript(path.join(ws, 'bin', 'webmods-host')), path.join(pkg, 'helper', 'host.js'));
+  assert.equal(wrapperScript(path.join(ws, 'bin', 'trif-host')), path.join(pkg, 'helper', 'host.js'));
   assert.match(r.stdout, /isn't a git checkout/);
 
   const both = await runCli(['setup', '--copy', '--link', '--home', ws, '--no-link'], { home: ws });
@@ -283,45 +283,58 @@ test('installApp: never touches another live install\'s folders or swaps while i
   // Another process is installing: refused, app untouched.
   fs.writeFileSync(path.join(home, '.app.lock'), `${other}\ntok\n`);
   fs.writeFileSync(path.join(app, 'package.json'), '{"changed": true}');
-  assert.throws(() => installApp(REPO, app), /another WebMods install is in progress/);
+  assert.throws(() => installApp(REPO, app), /another TRIF install is in progress/);
   assert.equal(fs.readFileSync(path.join(app, 'package.json'), 'utf8'), '{"changed": true}');
 
   // setup says so and keeps the existing copy.
   const r = await runCli(['setup', '--copy', '--home', home, '--native-dir', path.join(home, 'native'), '--no-link', '--no-examples'], { home });
   assert.equal(r.code, 1);
-  assert.match(r.stdout, /FAILED to update .*another WebMods install is in progress.*kept the existing copy/);
+  assert.match(r.stdout, /FAILED to update .*another TRIF install is in progress.*kept the existing copy/);
   assert.equal(fs.readFileSync(path.join(app, 'package.json'), 'utf8'), '{"changed": true}');
 });
 
 test('Safari bridge agent: restarted in place when loaded, loaded afresh when changed, later and detached from inside the bridge', () => {
   const calls = [];
-  const fake = (loaded, fail) => (args) => {
+  const uid = process.getuid();
+  const target = `gui/${uid}/com.timsrobot.trif.safari-bridge`;
+  const legacyTarget = `gui/${uid}/dev.webmods.safari-bridge`;
+  // loaded: whether the agent is loaded; legacy: whether the one from before 0.2.0 is.
+  const fake = (loaded, fail, legacy = false) => (args) => {
     calls.push(args);
-    if (args[0] === 'print') return { status: loaded ? 0 : 113 };
+    if (args[0] === 'print') return { status: (args[1] === legacyTarget ? legacy : loaded) ? 0 : 113 };
     return fail === args[0] ? { status: 5, stderr: 'Bootstrap failed: 5: Input/output error\n' } : { status: 0 };
   };
-  const uid = process.getuid();
-  const target = `gui/${uid}/dev.webmods.safari-bridge`;
+  const prints = [['print', target], ['print', legacyTarget]];
 
   assert.deepEqual(loadSafariAgent('/p.plist', { changed: false, env: {}, run: fake(true) }), { error: null, later: false });
-  assert.deepEqual(calls.splice(0), [['print', target], ['kickstart', '-k', target]]);
+  assert.deepEqual(calls.splice(0), [...prints, ['kickstart', '-k', target]]);
 
   loadSafariAgent('/p.plist', { changed: true, env: {}, run: fake(true) });
-  assert.deepEqual(calls.splice(0), [['print', target], ['bootout', target], ['bootstrap', `gui/${uid}`, '/p.plist']]);
+  assert.deepEqual(calls.splice(0), [...prints, ['bootout', target], ['bootstrap', `gui/${uid}`, '/p.plist']]);
 
   loadSafariAgent('/p.plist', { changed: false, env: {}, run: fake(false) });
-  assert.deepEqual(calls.splice(0), [['print', target], ['bootstrap', `gui/${uid}`, '/p.plist']]);
+  assert.deepEqual(calls.splice(0), [...prints, ['bootstrap', `gui/${uid}`, '/p.plist']]);
 
   assert.match(loadSafariAgent('/p.plist', { env: {}, run: fake(false, 'bootstrap') }).error, /Input\/output error/);
   calls.splice(0);
 
+  // An upgrade from 0.1.x: the old agent is stopped first (it holds the port), and its failing doesn't matter.
+  const r0 = loadSafariAgent('/p.plist', { changed: true, env: {}, run: fake(false, 'bootout', true) });
+  assert.deepEqual(r0, { error: null, later: false });
+  assert.deepEqual(calls.splice(0), [...prints, ['bootout', legacyTarget], ['bootstrap', `gui/${uid}`, '/p.plist']]);
+
   // Inside a host the bridge started (an update installed from Safari): nothing now, a detached script later.
   const scripts = [];
-  const r = loadSafariAgent('/p p.plist', { changed: true, env: { WEBMODS_SAFARI_BRIDGE: '123' }, run: fake(true), runDetached: (s) => scripts.push(s) });
+  const r = loadSafariAgent('/p p.plist', { changed: true, env: { TRIF_SAFARI_BRIDGE: '123' }, run: fake(true), runDetached: (s) => scripts.push(s) });
   assert.deepEqual(r, { error: null, later: true });
-  assert.deepEqual(calls.splice(0), [['print', target]]);
+  assert.deepEqual(calls.splice(0), prints);
   assert.equal(scripts.length, 1);
   assert.equal(scripts[0], `sleep 3; "launchctl" "bootout" "${target}"; "launchctl" "bootstrap" "gui/${uid}" "/p p.plist"`);
+  // An older bridge (0.1.x, updating to this version) says so as WEBMODS_SAFARI_BRIDGE.
+  const r2 = loadSafariAgent('/p.plist', { changed: true, env: { WEBMODS_SAFARI_BRIDGE: '9' }, run: fake(false, null, true), runDetached: (s) => scripts.push(s) });
+  assert.deepEqual(r2, { error: null, later: true });
+  assert.equal(scripts[1], `sleep 3; "launchctl" "bootout" "${legacyTarget}"; "launchctl" "bootstrap" "gui/${uid}" "/p.plist"`);
+  calls.splice(0);
 });
 
 // ------------------------------------------------------------------ extension IDs
@@ -386,9 +399,9 @@ test('doctor: which host.js the wrapper may run', () => {
   fs.writeFileSync(path.join(ws.appDir, 'package.json'), JSON.stringify({ version: '0.0.1-old' }));
   const old = checkWrapperScript(appHost, ws);
   assert.equal(old.status, 'warn');
-  assert.match(old.title, /is v0\.0\.1-old, but this webmods is v/);
+  assert.match(old.title, /is v0\.0\.1-old, but this trif is v/);
   assert.match(old.fix, /setup --copy/);
-  assert.match(checkWrapperScript('/Users/a/.npm/_npx/123/node_modules/webmods/helper/host.js', ws).title, /npx cache/);
+  assert.match(checkWrapperScript('/Users/a/.npm/_npx/123/node_modules/trif/helper/host.js', ws).title, /npx cache/);
   assert.match(checkWrapperScript('/somewhere/else/helper/host.js', ws).title, /not this copy/);
 });
 
@@ -429,7 +442,7 @@ test('preinstalled mods: each once, switched on or off as listed; the start site
   assert.strictEqual(res.code, 0, res.stderr);
   assert.match(res.stdout, /preinstalled, on: www\.google\.com\/hide-ai-in-results, /);
   assert.match(res.stdout, /preinstalled, off until you switch them on in the side panel: x\.com\/punk-fonts, x\.com\/rainbow-rave, www\.instagram\.com\/desaturate/);
-  assert.match(res.stdout, /WebMods starts on for google\.com, x\.com, amazon\.com, instagram\.com/);
+  assert.match(res.stdout, /TRIF starts on for google\.com, x\.com, amazon\.com, instagram\.com/);
   assert.ok(fs.existsSync(path.join(home3, 'sites', 'x.com', 'plain-x.js')));
   const home4 = tempDir();
   res = await runCli(['setup', '--native-dir', path.join(home4, 'native'), '--no-link', '--no-examples'], { home: home4 });
@@ -452,10 +465,10 @@ test('setup --browser firefox writes a manifest with allowed_extensions; doctor 
   const fx = readManifest(fxDir);
   assert.deepEqual(fx.allowed_extensions, [P.FIREFOX_EXTENSION_ID]);
   assert.equal(fx.allowed_origins, undefined);
-  assert.equal(fx.path, path.join(ws, 'bin', 'webmods-host'));
+  assert.equal(fx.path, path.join(ws, 'bin', 'trif-host'));
   const chrome = browserTable(fakehome).find((b) => b.key === 'chrome');
   assert.deepEqual(readManifest(chrome.nativeDir).allowed_origins, [DEV_ORIGIN]);
-  assert.match(r.stdout, /Firefox: open the signed WebMods add-on/);
+  assert.match(r.stdout, /Firefox: open the signed TRIF add-on/);
 
   let d = await runCli(['doctor'], { home: ws });
   assert.match(d.stdout, /ok {4}Firefox: native host manifest/);
@@ -492,7 +505,7 @@ test('setup for Firefox alone gives only Firefox\'s next steps', async () => {
   const r = await runCli(['setup', '--browser', 'firefox', '--no-link', '--no-examples'], { home: ws });
   assert.equal(r.code, 0, r.stderr);
   const next = r.stdout.slice(r.stdout.indexOf('Next steps:'));
-  assert.match(next, /1\. Open the signed WebMods add-on \(webmods-firefox\.xpi\) in Firefox/);
+  assert.match(next, /1\. Open the signed TRIF add-on \(trif-firefox\.xpi\) in Firefox/);
   assert.match(next, /"Allow user scripts"/);
   assert.doesNotMatch(next, /chrome:\/\/extensions|Load unpacked/);
 });

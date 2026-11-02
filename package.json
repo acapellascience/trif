@@ -1,19 +1,20 @@
 {
-  "name": "webmods",
+  "name": "trif",
   "version": "0.1.2",
-  "description": "Customize any website with mods written by your coding agent: a Chrome extension, a native messaging helper and the `webmods` CLI.",
+  "description": "Tim's Robot Internet Fixer (TRIF): customize any website with mods written by your coding agent. A browser extension, a native messaging helper and the `trif` CLI.",
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/acapellascience/WebMods.git"
+    "url": "git+https://github.com/acapellascience/trif.git"
   },
-  "homepage": "https://github.com/acapellascience/WebMods#readme",
+  "homepage": "https://github.com/acapellascience/trif#readme",
   "bugs": {
-    "url": "https://webmods.dev/report",
-    "email": "reports@webmods.dev"
+    "url": "https://timsrobot.com/report",
+    "email": "reports@timsrobot.com"
   },
   "type": "commonjs",
   "bin": {
+    "trif": "helper/cli.js",
     "webmods": "helper/cli.js"
   },
   "files": [

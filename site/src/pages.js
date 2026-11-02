@@ -1,4 +1,4 @@
-// The pages webmods.dev serves. Plain HTML and one small script; nothing loaded from anywhere else.
+// The pages timsrobot.com serves. Plain HTML and one small script; nothing loaded from anywhere else.
 
 const STYLE = `
 :root { color-scheme: light dark; --bg: #f6f6f4; --card: #fff; --fg: #1b1b1a; --muted: #6a6a66; --line: #ddddd8;
@@ -50,16 +50,16 @@ ${body}
 `;
 }
 
-export const HOME = page('WebMods', `
-<h1>WebMods</h1>
-<p class="lead">Customize any website with mods written by your own coding agent. In beta.</p>
+export const HOME = page("Tim's Robot Internet Fixer", `
+<h1>Tim's Robot Internet Fixer</h1>
+<p class="lead">TRIF customizes any website with mods written by your own coding agent. In beta.</p>
 <div class="card">
   <p style="margin:0">Something wrong? <a href="/report">Report a problem</a>.</p>
 </div>`);
 
-export const REPORT = page('Report a problem · WebMods', `
+export const REPORT = page('Report a problem · TRIF', `
 <h1>Report a problem</h1>
-<p class="lead">Tell the WebMods developer what went wrong.</p>
+<p class="lead">Tell the TRIF developer what went wrong.</p>
 <form id="form" class="card" novalidate>
   <div class="field">
     <label for="what">What went wrong?</label>
@@ -75,28 +75,28 @@ export const REPORT = page('Report a problem · WebMods', `
     <input id="email" type="email" maxlength="200" autocomplete="email">
   </div>
   <div class="field" id="details-field" hidden>
-    <label class="check"><input id="include" type="checkbox" checked> Include details from WebMods</label>
+    <label class="check"><input id="include" type="checkbox" checked> Include details from TRIF</label>
     <details>
       <summary>What's included</summary>
       <pre id="details"></pre>
     </details>
   </div>
   <div class="field" id="paste-field">
-    <label for="pasted">Details from WebMods <span class="hint">(optional)</span></label>
+    <label for="pasted">Details from TRIF <span class="hint">(optional)</span></label>
     <textarea id="pasted" rows="4" maxlength="30000"
-      placeholder="If you can, paste what this Terminal command prints: ~/.webmods/bin/webmods report"></textarea>
+      placeholder="If you can, paste what this Terminal command prints: ~/.trif/bin/trif report"></textarea>
   </div>
   <div class="trap" aria-hidden="true"><label for="website">Website</label><input id="website" type="text" tabindex="-1" autocomplete="off"></div>
   <button id="send" type="submit">Send report</button>
-  <p id="status" class="note" role="status">The report goes to the WebMods developer and nowhere else. The details list
+  <p id="status" class="note" role="status">The report goes to the TRIF developer and nowhere else. The details list
     versions, setup checks, the site's mods and recent errors, without your name or full page addresses.</p>
 </form>
 <div id="done" class="card done" hidden>
   <h2>Thanks, it's sent.</h2>
-  <p style="margin:0">Thanks for helping make WebMods better. If you left your email, you may hear back.</p>
+  <p style="margin:0">Thanks for helping make TRIF better. If you left your email, you may hear back.</p>
 </div>`, { script: true });
 
-// The form's script. Details from WebMods arrive after the # (r=<report>&s=<site>): browsers never send
+// The form's script. Details from TRIF arrive after the # (r=<report>&s=<site>): browsers never send
 // that part to a server, so nothing leaves the computer until the person presses Send.
 export const REPORT_JS = `(() => {
   const $ = (id) => document.getElementById(id);
@@ -129,7 +129,7 @@ export const REPORT_JS = `(() => {
       $('done').hidden = false;
     } catch (err) {
       $('send').disabled = false;
-      status(err.message + ' You can also email it to reports@webmods.dev.', true);
+      status(err.message + ' You can also email it to reports@timsrobot.com.', true);
     }
   });
 })();

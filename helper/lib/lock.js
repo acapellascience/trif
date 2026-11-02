@@ -1,21 +1,22 @@
 'use strict';
 // The lock on installing into <home>/app. Several processes may install at once: each browser's helper
-// (automatic updates), `webmods update --install` and `webmods setup`. Without a lock between them one
+// (automatic updates), `trif update --install` and `trif setup`. Without a lock between them one
 // could clear away another's half-made copy, or swap folders under it, and leave <home>/app half gone.
 //
 // The lock is <home>/.app.lock, created with O_EXCL so only one process can make it, holding the owner's
 // pid and a random token. A lock whose pid has died (a crash, a killed helper) is stale and taken over;
 // so is one older than LOCK_MAX_AGE_MS, in case the pid has since been reused. An update runs the new
 // version's setup as a child process, which installs while its parent holds the lock: the parent passes
-// its token down in WEBMODS_INSTALL_LOCK, and a process with the holder's token counts as holding it.
+// its token down in TRIF_INSTALL_LOCK, and a process with the holder's token counts as holding it.
 
 const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
+const { envVar } = require('./env');
 
 const LOCK_MAX_AGE_MS = 15 * 60 * 1000; // an install takes a couple of minutes at most
 const LOCK_FRESH_MS = 10 * 1000; // a lock file still being written (no pid yet) is not stale
-const LOCK_ENV = 'WEBMODS_INSTALL_LOCK';
+const LOCK_ENV = 'TRIF_INSTALL_LOCK'; // (an updater from before 0.2.0 sets WEBMODS_INSTALL_LOCK: env.js)
 
 class LockBusy extends Error {}
 
@@ -59,7 +60,7 @@ function breakStale(file, seen) {
 }
 
 function busyError(l) {
-  const e = new LockBusy(`another WebMods install is in progress${l && pidAlive(l.pid) ? ` (process ${l.pid})` : ''}; try again in a minute`);
+  const e = new LockBusy(`another TRIF install is in progress${l && pidAlive(l.pid) ? ` (process ${l.pid})` : ''}; try again in a minute`);
   e.pid = l ? l.pid : null;
   return e;
 }
@@ -70,7 +71,7 @@ function busyError(l) {
  */
 function acquireInstallLock(appDir, { env = process.env } = {}) {
   const file = lockPath(appDir);
-  const inherited = env[LOCK_ENV];
+  const inherited = envVar('INSTALL_LOCK', env);
   if (inherited) {
     const l = readLock(file);
     if (l && l.token === inherited && pidAlive(l.pid)) return { token: inherited, held: true, release() {} };

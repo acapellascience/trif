@@ -19,7 +19,7 @@
 import { matchesPattern } from './lib.js';
 
 export const BRIDGE_URL = 'ws://127.0.0.1:47615/';
-const APP_ID = 'dev.webmods.app'; // Safari sends native messages to the extension's own app whatever this says
+const APP_ID = 'com.timsrobot.trif'; // Safari sends native messages to the extension's own app whatever this says
 const LOG_URL = 'http://127.0.0.1:47615/log';
 const STORE_KEY = 'safariUserScripts';
 
@@ -111,7 +111,7 @@ export function pageCode(list, url, runAt, markFor = runAt) {
   try { origin = new URL(url).origin; } catch {}
   const mark = JSON.stringify(`__webmods_${markFor}`);
   return `if (location.origin !== ${JSON.stringify(origin)} || document[${mark}]) return; document[${mark}] = true;\n`
-    + parts.map((c) => `try {\n${c}\n} catch (e) { console.error('[webmods]', e); }`).join('\n');
+    + parts.map((c) => `try {\n${c}\n} catch (e) { console.error('[TRIF]', e); }`).join('\n');
 }
 
 async function inject(runAt, { tabId, frameId, url }) {
@@ -126,10 +126,10 @@ async function inject(runAt, { tabId, frameId, url }) {
     await run(code);
   } catch (e) {
     // One script that doesn't parse would stop them all, so try them one at a time.
-    console.warn('[webmods] injecting into', url, 'failed, retrying one script at a time:', e?.message ?? e);
+    console.warn('[TRIF] injecting into', url, 'failed, retrying one script at a time:', e?.message ?? e);
     for (const s of scripts) {
       const one = pageCode([s], url, runAt, `${runAt}_${s.id}`);
-      if (one) await run(one).catch((err) => console.error('[webmods] script', s.id, 'failed on', url, err?.message ?? err));
+      if (one) await run(one).catch((err) => console.error('[TRIF] script', s.id, 'failed on', url, err?.message ?? err));
     }
   }
 }
@@ -147,11 +147,11 @@ function event() {
 
 let token = null; // the bridge's key, once the app has given it
 
-/** The bridge's key, from the extension's app (which reads ~/.webmods/safari-token). */
+/** The bridge's key, from the extension's app (which reads ~/.trif/safari-token). */
 async function bridgeToken() {
   if (token) return token;
   const r = await chrome.runtime.sendNativeMessage(APP_ID, { type: 'token' });
-  if (typeof r?.token !== 'string' || !r.token) throw new Error(r?.error || "WebMods' app didn't give the key for the helper");
+  if (typeof r?.token !== 'string' || !r.token) throw new Error(r?.error || "TRIF's app didn't give the key for the helper");
   return (token = r.token);
 }
 
@@ -191,7 +191,7 @@ function bridgePort() {
     ws.onerror = () => {};
     ws.onclose = () => { if (!open) token = null; gone(); }; // refused: maybe the key changed, so ask again
   }, (e) => {
-    console.warn('[webmods] no key for the helper:', e?.message ?? e);
+    console.warn('[TRIF] no key for the helper:', e?.message ?? e);
     setTimeout(gone, 0);
   });
   return port;

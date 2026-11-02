@@ -1,9 +1,15 @@
-# webmods.dev: the problem report form and the page that receives it (a Cloudflare Worker).
+# timsrobot.com: the problem report form and the page that receives it (a Cloudflare Worker).
 # Deploy from this folder: npx wrangler deploy. See README.md here.
-name = "webmods-site"
+name = "timsrobot-site"
 main = "src/index.js"
 compatibility_date = "2026-10-01"
-routes = [{ pattern = "webmods.dev", custom_domain = true }]
+# webmods.dev (and www.) is the address from before 0.2.0, when TRIF was called WebMods: the Worker
+# redirects it to timsrobot.com (src/index.js redirectFor).
+routes = [
+  { pattern = "timsrobot.com", custom_domain = true },
+  { pattern = "webmods.dev", custom_domain = true },
+  { pattern = "www.webmods.dev", custom_domain = true },
+]
 
 # Reports are emailed to the address in the REPORT_TO secret (npx wrangler secret put REPORT_TO), which
 # must be a verified destination address in Email Routing. It's a secret so it isn't in the public repo.
@@ -11,7 +17,7 @@ routes = [{ pattern = "webmods.dev", custom_domain = true }]
 name = "EMAIL"
 
 [vars]
-REPORT_FROM = "reports@webmods.dev"
+REPORT_FROM = "reports@timsrobot.com"
 
 # At most 5 reports a minute from one address (approximate, per Cloudflare location).
 [[ratelimits]]

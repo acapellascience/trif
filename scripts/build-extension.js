@@ -1,10 +1,10 @@
 #!/usr/bin/env node
 // Builds the extension packages from extension/ (runtime files only):
-//   chrome (default): dist/extension/ and dist/webmods-extension-<version>.zip for the Chrome Web Store,
+//   chrome (default): dist/extension/ and dist/trif-extension-<version>.zip for the Chrome Web Store,
 //     with the manifest "key" stripped (the store assigns its own ID).
-//   firefox: dist/firefox/ and dist/webmods-firefox-<version>.zip, with the manifest rewritten for
+//   firefox: dist/firefox/ and dist/trif-firefox-<version>.zip, with the manifest rewritten for
 //     Firefox (see firefoxManifest). Run it with `web-ext run -s dist/firefox`, or sign the zip on AMO.
-//   safari: dist/safari/ and dist/webmods-safari-<version>.zip, with the manifest rewritten for Safari
+//   safari: dist/safari/ and dist/trif-safari-<version>.zip, with the manifest rewritten for Safari
 //     (see safariManifest). scripts/build-safari.js wraps it in the Mac app Safari needs.
 //
 // Usage: node scripts/build-extension.js [chrome|firefox|safari]
@@ -152,7 +152,7 @@ let __chrome = globalThis.chrome;
 try {
 ${parts.join('\n\n')}
 } catch (e) {
-  console.error('[webmods] the background failed to start:', e);
+  console.error('[TRIF] the background failed to start:', e);
   fetch('http://127.0.0.1:47615/startup-error', { method: 'POST', body: String((e && e.stack) || e) }).catch(() => {});
 }
 `;
@@ -200,7 +200,7 @@ function main() {
   if (missing.length) fail(`manifest points at missing files: ${missing.join(', ')}`);
   if (!manifest.icons || !manifest.icons['128']) fail('manifest has no 128px icon (the store requires one)');
 
-  const zipPath = path.join(DIST, `webmods-${TARGET === 'chrome' ? 'extension' : TARGET}-${version}.zip`);
+  const zipPath = path.join(DIST, `trif-${TARGET === 'chrome' ? 'extension' : TARGET}-${version}.zip`);
   fs.rmSync(zipPath, { force: true });
   try {
     // -X: no extra file attributes (uid/gid, macOS metadata); -r recursive; -q quiet.

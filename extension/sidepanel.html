@@ -4,14 +4,14 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="color-scheme" content="light dark">
-<title>WebMods</title>
+<title>TRIF</title>
 <link rel="stylesheet" href="sidepanel.css">
 <link rel="stylesheet" href="switch.css">
 </head>
 <body>
 <header class="bar">
   <span id="dot" class="dot" role="img" aria-label="Status unknown"></span>
-  <h1 id="site" class="site">WebMods</h1>
+  <h1 id="site" class="site">TRIF</h1>
   <button id="site-switch" class="switch" type="button" role="switch" aria-checked="false" hidden><span class="knob" aria-hidden="true"></span></button>
   <button id="new-chat" class="icon-btn" type="button" title="New chat" aria-label="New chat" disabled>
     <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 3v10M3 8h10"/></svg>
@@ -41,13 +41,13 @@
     <textarea id="instructions" rows="3" maxlength="4000" spellcheck="true" disabled
       placeholder="Read by every chat. For example: talk like a caveman; don't bring up detectability."></textarea>
   </label>
-  <p id="instructions-note" class="note">Applies from your next message, here and in Claude Code in ~/.webmods.</p>
+  <p id="instructions-note" class="note">Applies from your next message, here and in Claude Code in ~/.trif.</p>
   <label class="check"><input id="auto-update" type="checkbox"> Install updates automatically</label>
   <p id="update-note" class="note"></p>
   <p class="note"><a href="#" id="report-link">Report a problem</a> · <a href="#" id="setup-link">Setup and status</a></p>
 </section>
 <section id="gate" class="gate" hidden>
-  <p class="gate-title">WebMods is disabled</p>
+  <p class="gate-title">TRIF is disabled</p>
   <button id="gate-btn" class="btn go" type="button"></button>
   <p id="gate-err" class="mod-err" hidden></p>
 </section>

@@ -1,16 +1,17 @@
 'use strict';
-// Logging in to a coding agent from the side panel (and `webmods agent login`): run the agent's own
+// Logging in to a coding agent from the side panel (and `trif agent login`): run the agent's own
 // login command (claude: `claude auth login`) with stdin piped, report the sign-in URL it prints, pass
 // on the code the user pastes back, and always finish with exactly one `done`. One login at a time.
 // The code and the URL's query string (OAuth state, PKCE challenge) never reach helper.log.
 // See docs/PROTOCOL.md "Side panel and agent runs".
 
 const crypto = require('crypto');
+const { envVar } = require('./env');
 const { spawn } = require('child_process');
 const agents = require('./agents');
 
-const LOGIN_TIMEOUT_MS = Number(process.env.WEBMODS_LOGIN_TIMEOUT_MS) > 0 ? Number(process.env.WEBMODS_LOGIN_TIMEOUT_MS) : 10 * 60 * 1000;
-const KILL_GRACE_MS = Number(process.env.WEBMODS_AGENT_KILL_GRACE_MS) > 0 ? Number(process.env.WEBMODS_AGENT_KILL_GRACE_MS) : 3000;
+const LOGIN_TIMEOUT_MS = Number(envVar('LOGIN_TIMEOUT_MS')) > 0 ? Number(envVar('LOGIN_TIMEOUT_MS')) : 10 * 60 * 1000;
+const KILL_GRACE_MS = Number(envVar('AGENT_KILL_GRACE_MS')) > 0 ? Number(envVar('AGENT_KILL_GRACE_MS')) : 3000;
 const MAX_CODE = 4096;
 const NOTES_KEEP = 20;
 

@@ -1,5 +1,5 @@
 'use strict';
-// webmods.dev (site/): the report form's checks, the email it makes, and the Worker's routes, run in Node
+// timsrobot.com (site/): the report form's checks, the email it makes, and the Worker's routes, run in Node
 // with a stand-in for Cloudflare's email and rate-limit bindings.
 
 const test = require('node:test');
@@ -11,13 +11,13 @@ function env(overrides = {}) {
   const sent = [];
   return {
     sent,
-    REPORT_TO: 'maintainer@example.com', REPORT_FROM: 'reports@webmods.dev',
+    REPORT_TO: 'maintainer@example.com', REPORT_FROM: 'reports@timsrobot.com',
     EMAIL: { async send(m) { sent.push(m); return { messageId: 'm1' }; } },
     ...overrides,
   };
 }
 
-const post = (body, headers = {}) => new Request('https://webmods.dev/report', {
+const post = (body, headers = {}) => new Request('https://timsrobot.com/report', {
   method: 'POST', headers: { 'Content-Type': 'application/json', 'CF-Connecting-IP': '203.0.113.9', ...headers },
   body: typeof body === 'string' ? body : JSON.stringify(body),
 });
@@ -35,11 +35,11 @@ test('parseReport: needs a description, checks lengths and the email, ignores bo
 
 test('reportEmail: a readable subject and body, replies go to the reporter', async () => {
   const [, { reportEmail }] = await load();
-  const m = reportEmail({ what: 'Plain X shows\nnothing at all since this morning, and more words to make it long', site: 'x.com', email: 'a@b.co', details: 'WebMods 0.1.1' },
+  const m = reportEmail({ what: 'Plain X shows\nnothing at all since this morning, and more words to make it long', site: 'x.com', email: 'a@b.co', details: 'TRIF 0.1.1' },
     { country: 'CA', userAgent: 'Firefox/159', at: '2026-11-01T00:00:00Z' });
-  assert.equal(m.subject, 'WebMods report (x.com): Plain X shows nothing at all since this morning, and more w…');
+  assert.equal(m.subject, 'TRIF report (x.com): Plain X shows nothing at all since this morning, and more w…');
   assert.equal(m.replyTo, 'a@b.co');
-  for (const want of ['What went wrong\nPlain X shows\nnothing', 'Site: x.com', 'Reply to: a@b.co', 'Sent: 2026-11-01T00:00:00Z from CA', 'Browser: Firefox/159', 'Details from WebMods\nWebMods 0.1.1']) {
+  for (const want of ['What went wrong\nPlain X shows\nnothing', 'Site: x.com', 'Reply to: a@b.co', 'Sent: 2026-11-01T00:00:00Z from CA', 'Browser: Firefox/159', 'Details from TRIF\nTRIF 0.1.1']) {
     assert.ok(m.text.includes(want), want);
   }
   assert.equal(reportEmail({ what: 'x y z', site: '', email: '', details: '' }).replyTo, null);
@@ -49,20 +49,20 @@ test('the Worker: pages with strict headers, reports emailed, bad ones refused',
   const [{ default: worker }] = await load();
   const e = env();
   for (const [path, type] of [['/', 'text/html'], ['/report', 'text/html'], ['/report.js', 'text/javascript']]) {
-    const res = await worker.fetch(new Request(`https://webmods.dev${path}`), e);
+    const res = await worker.fetch(new Request(`https://timsrobot.com${path}`), e);
     assert.equal(res.status, 200, path);
     assert.match(res.headers.get('Content-Type'), new RegExp(type));
     assert.match(res.headers.get('Content-Security-Policy'), /default-src 'none'; script-src 'self'/);
     assert.equal(res.headers.get('Referrer-Policy'), 'no-referrer');
   }
-  assert.match(await (await worker.fetch(new Request('https://webmods.dev/report'), e)).text(), /<script src="\/report.js">/);
-  assert.equal((await worker.fetch(new Request('https://webmods.dev/nope'), e)).status, 404);
+  assert.match(await (await worker.fetch(new Request('https://timsrobot.com/report'), e)).text(), /<script src="\/report.js">/);
+  assert.equal((await worker.fetch(new Request('https://timsrobot.com/nope'), e)).status, 404);
 
-  let res = await worker.fetch(post({ what: 'It broke', site: 'x.com', email: 'a@b.co', details: 'WebMods 0.1.1' }, { 'User-Agent': 'Firefox/159' }), e);
+  let res = await worker.fetch(post({ what: 'It broke', site: 'x.com', email: 'a@b.co', details: 'TRIF 0.1.1' }, { 'User-Agent': 'Firefox/159' }), e);
   assert.deepStrictEqual([res.status, await res.json()], [200, { ok: true }]);
   assert.equal(e.sent.length, 1);
-  assert.deepStrictEqual([e.sent[0].to, e.sent[0].from, e.sent[0].replyTo], ['maintainer@example.com', { email: 'reports@webmods.dev', name: 'WebMods reports' }, 'a@b.co']);
-  assert.match(e.sent[0].subject, /^WebMods report \(x\.com\): It broke$/);
+  assert.deepStrictEqual([e.sent[0].to, e.sent[0].from, e.sent[0].replyTo], ['maintainer@example.com', { email: 'reports@timsrobot.com', name: 'TRIF reports' }, 'a@b.co']);
+  assert.match(e.sent[0].subject, /^TRIF report \(x\.com\): It broke$/);
 
   res = await worker.fetch(post({ what: 'x' }), e);
   assert.equal(res.status, 400);
@@ -78,7 +78,7 @@ test('the Worker: pages with strict headers, reports emailed, bad ones refused',
 test('the Worker: only takes JSON reports from its own form (no other site can post them)', async () => {
   const [{ default: worker, limitKey }] = await load();
   const e = env();
-  assert.equal((await worker.fetch(post({ what: 'from the form' }, { Origin: 'https://webmods.dev' }), e)).status, 200);
+  assert.equal((await worker.fetch(post({ what: 'from the form' }, { Origin: 'https://timsrobot.com' }), e)).status, 200);
   assert.equal((await worker.fetch(post({ what: 'from a tool' }), e)).status, 200, 'no Origin: a tool, left to the rate limit');
   assert.equal((await worker.fetch(post({ what: 'from elsewhere' }, { Origin: 'https://evil.example' }), e)).status, 403);
   assert.equal((await worker.fetch(post({ what: 'as text' }, { 'Content-Type': 'text/plain' }), e)).status, 415);
@@ -112,4 +112,17 @@ test('the Worker: rate limited per address; says so when email isn\'t set up or 
     assert.equal(r.status, 502);
     assert.match((await r.json()).error, /couldn’t be sent/);
   } finally { console.error = origError; }
+});
+
+test('webmods.dev (the address before 0.2.0) redirects to the same place on timsrobot.com', async () => {
+  const [{ default: worker }] = await load();
+  const e = env();
+  const res = await worker.fetch(new Request('https://webmods.dev/report?x=1'), e);
+  assert.equal(res.status, 308);
+  assert.equal(res.headers.get('Location'), 'https://timsrobot.com/report?x=1');
+  assert.equal((await worker.fetch(new Request('https://www.webmods.dev/'), e)).headers.get('Location'), 'https://timsrobot.com/');
+  const post = await worker.fetch(new Request('https://webmods.dev/report', { method: 'POST', body: '{}', headers: { 'Content-Type': 'application/json' } }), e);
+  assert.equal(post.status, 308);
+  assert.equal(e.sent.length, 0, 'nothing is sent from the old address');
+  assert.equal((await worker.fetch(new Request('https://timsrobot.com/'), e)).status, 200);
 });

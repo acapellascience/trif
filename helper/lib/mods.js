@@ -1,6 +1,6 @@
 'use strict';
 // Mod discovery and header parsing. Shared by host.js (pushes mods to the extension) and
-// cli.js (`webmods mods`, `status`, `doctor`), so both always agree on what a mod is.
+// cli.js (`trif mods`, `status`, `doctor`), so both always agree on what a mod is.
 
 const crypto = require('crypto');
 const fs = require('fs');
@@ -18,6 +18,10 @@ const RUN_AT = {
   'document_idle': 'document_idle',
   'idle': 'document_idle',
 };
+
+// What a shipped mod's `@source` says: `webmods` (all of them so far: TRIF was called WebMods) or `trif`.
+const SHIPPED_SOURCES = new Set(['webmods', 'trif']);
+function isShippedSource(source) { return SHIPPED_SOURCES.has(String(source || '').toLowerCase()); }
 
 const HEADER_START = /^\s*\/\/\s*==WebMod==\s*$/i;
 const HEADER_END = /^\s*\/\/\s*==\/WebMod==\s*$/i;
@@ -69,7 +73,8 @@ function parseHeader(code) {
         else out.warnings.push(`@risk should start with 0, 1 or 2 (got "${value}")`);
         break;
       }
-      // `@source webmods` and `@version <n>` mark a mod WebMods ships (examples/), which setup keeps up
+      // `@source webmods` (or `@source trif`: SHIPPED_SOURCES) and `@version <n>` mark a mod TRIF ships
+      // (examples/; they say webmods, from before the rename, so users' copies still match), which setup keeps up
       // to date while the user's copy is unchanged (preinstalled.js). Anyone may write them; the updater
       // also checks the mod is one it shipped.
       case 'source':
@@ -120,7 +125,7 @@ function buildMod({ site, file, code }) {
     excludes: header.excludes,
     runAt: header.runAt || 'document_start',
     risk: header.risk, // {tier, why} or null when the header doesn't say
-    source: header.source, // 'webmods' for the mods WebMods ships, else what the header says, or null
+    source: header.source, // 'webmods' (or 'trif') for the mods TRIF ships, else what the header says, or null
     version: header.version, // the header's @version, or null
   };
   const hash = sha1(JSON.stringify([meta.id, meta.name, meta.description, meta.matches, meta.excludes, meta.runAt, meta.risk]) + '\n' + code);
@@ -216,6 +221,7 @@ function summarize(mod) {
 }
 
 module.exports = {
+  SHIPPED_SOURCES, isShippedSource,
   RUN_AT, ALL_SITES, parseHeader, defaultMatches, buildMod, listModFiles, folderFingerprint, scanMods,
   planModsMessage, summarize, isIgnoredName, sha1,
 };

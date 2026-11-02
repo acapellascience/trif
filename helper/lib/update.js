@@ -1,5 +1,5 @@
 'use strict';
-// Updates: checking the release feed and installing a newer WebMods into <home>/app.
+// Updates: checking the release feed and installing a newer TRIF into <home>/app.
 //
 // The feed is updates/latest.json in the GitHub repo named by package.json's "repository" (read from
 // raw.githubusercontent.com), next to latest.json.sig: an Ed25519 signature of latest.json's exact bytes
@@ -7,10 +7,10 @@
 // refused, so taking over the repo or the GitHub account isn't enough to ship code to users.
 //
 //   { "version": "0.1.2", "published": "2026-11-02", "notes": "…",
-//     "package": { "url": "https://github.com/…/releases/download/v0.1.2/webmods-0.1.2.tgz", "sha256": "…", "size": 123 } }
+//     "package": { "url": "https://github.com/…/releases/download/v0.1.2/trif-0.1.2.tgz", "sha256": "…", "size": 123 } }
 //
 // Installing downloads the package (checking its size and sha256 against the signed feed), unpacks it
-// and runs its own `webmods setup --copy`, which swaps it into <home>/app the same way a first install
+// and runs its own `trif setup --copy`, which swaps it into <home>/app the same way a first install
 // does. Only installs that run from <home>/app are updated: a git checkout updates with git.
 //
 // config.json: "autoUpdate": true installs updates without asking (off by default); "checkForUpdates":
@@ -74,7 +74,7 @@ function fetchUrl(url, { maxBytes = FEED_MAX, timeoutMs = 20000, redirects = 5 }
   return new Promise((resolve, reject) => {
     if (!allowedUrl(url)) return reject(new UpdateError(`refusing to download ${url} (https only)`));
     const lib = url.startsWith('https:') ? require('https') : require('http');
-    const req = lib.get(url, { headers: { 'User-Agent': `webmods/${P.VERSION}` }, timeout: timeoutMs }, (res) => {
+    const req = lib.get(url, { headers: { 'User-Agent': `trif/${P.VERSION}` }, timeout: timeoutMs }, (res) => {
       if ([301, 302, 303, 307, 308].includes(res.statusCode) && res.headers.location) {
         res.resume();
         if (redirects <= 0) return reject(new UpdateError(`too many redirects fetching ${url}`));
@@ -104,7 +104,7 @@ function verifyFeed(bytes, sig, publicKey) {
   if (!publicKey) throw new UpdateError("this build has no release key, so it can't verify updates");
   let ok = false;
   try { ok = crypto.verify(null, bytes, publicKey, Buffer.from(String(sig).trim(), 'base64')); } catch { ok = false; }
-  if (!ok) throw new UpdateError('the update feed is not signed by the WebMods release key; ignoring it');
+  if (!ok) throw new UpdateError('the update feed is not signed by the TRIF release key; ignoring it');
   let feed;
   try { feed = JSON.parse(bytes.toString('utf8')); } catch (e) { throw new UpdateError(`the update feed isn't valid JSON: ${e.message}`); }
   const pkg = feed && feed.package;
@@ -157,12 +157,12 @@ function realOrResolved(p) {
   try { return fs.realpathSync(p); } catch { return path.resolve(p); }
 }
 
-/** Whether this copy of WebMods can update itself, and if not, why. */
+/** Whether this copy of TRIF can update itself, and if not, why. */
 function installable(ws, root = P.REPO_ROOT) {
   if (realOrResolved(root) !== realOrResolved(ws.appDir)) {
     return { ok: false, why: P.isGitCheckout(root)
-      ? `WebMods runs from a git checkout (${root}); update it with git pull`
-      : `WebMods runs from ${root}, not ${ws.appDir}; run \`npx webmods setup\` to install a copy that can update` };
+      ? `TRIF runs from a git checkout (${root}); update it with git pull`
+      : `TRIF runs from ${root}, not ${ws.appDir}; run \`npx trif setup\` to install a copy that can update` };
   }
   return { ok: true, why: null };
 }
@@ -242,7 +242,7 @@ async function install(ws, { root = P.REPO_ROOT, fetch = fetchUrl, browsers = br
   try {
     // Read after taking the lock: another helper may have just installed this very version.
     const from = packageJson(root).version || P.VERSION;
-    if (compareVersions(feed.version, from) <= 0) throw new UpdateError(`WebMods ${from} is up to date`);
+    if (compareVersions(feed.version, from) <= 0) throw new UpdateError(`TRIF ${from} is up to date`);
     return await installLocked(ws, { feed, from, fetch, browsers, node, lock });
   } finally {
     lock.release();
@@ -256,8 +256,8 @@ async function installLocked(ws, { feed, from, fetch, browsers, node, lock }) {
     if (tgz.length !== feed.package.size) throw new UpdateError(`the download is ${tgz.length} bytes, not the ${feed.package.size} the feed says`);
     const sha = crypto.createHash('sha256').update(tgz).digest('hex');
     if (sha !== feed.package.sha256) throw new UpdateError("the download's checksum doesn't match the signed feed; not installing it");
-    fs.writeFileSync(path.join(tmp, 'webmods.tgz'), tgz);
-    const untar = await run('tar', ['-xzf', 'webmods.tgz'], { cwd: tmp });
+    fs.writeFileSync(path.join(tmp, 'trif.tgz'), tgz);
+    const untar = await run('tar', ['-xzf', 'trif.tgz'], { cwd: tmp });
     if (untar.code) throw new UpdateError(`couldn't unpack the update: ${untar.out.trim().slice(-400)}`);
     const pkgRoot = path.join(tmp, 'package');
     if (packageJson(pkgRoot).version !== feed.version) throw new UpdateError(`the package isn't version ${feed.version}`);
@@ -269,7 +269,7 @@ async function installLocked(ws, { feed, from, fetch, browsers, node, lock }) {
     const args = [path.join(pkgRoot, 'helper', 'cli.js'), 'setup', '--copy', '--no-link', '--home', ws.home];
     if (browsers.length) args.push('--browser', browsers.join(','));
     const recordedPath = typeof ws.config?.env?.PATH === 'string' && ws.config.env.PATH ? ws.config.env.PATH : process.env.PATH;
-    const env = { ...process.env, PATH: recordedPath, WEBMODS_HOME: ws.home, [LOCK_ENV]: lock.token };
+    const env = { ...process.env, PATH: recordedPath, TRIF_HOME: ws.home, [LOCK_ENV]: lock.token };
     const r = await run(node, args, { cwd: tmp, env });
     const tail = r.out.trim().split('\n').slice(-6).join('\n');
     // Setup exits 1 for any problem, including ones after the copy; what matters is whether <home>/app
@@ -289,7 +289,7 @@ async function installLocked(ws, { feed, from, fetch, browsers, node, lock }) {
   }
 }
 
-/** The version now installed in <home>/app (another helper, or `npx webmods setup`, may have updated it). */
+/** The version now installed in <home>/app (another helper, or `npx trif setup`, may have updated it). */
 function installedVersion(ws) {
   return packageJson(ws.appDir).version || null;
 }

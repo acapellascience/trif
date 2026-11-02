@@ -62,9 +62,13 @@ console.log(1);`);
   assert.deepEqual(h.warnings, []);
 });
 
-test('parseHeader: @source and @version mark the mods WebMods ships', () => {
-  const h = parseHeader('// ==WebMod==\n// @name Plain X\n// @source      WebMods\n// @version     3\n// ==/WebMod==\n');
-  assert.equal(h.source, 'webmods');
+test('parseHeader: @source and @version mark the mods TRIF ships', () => {
+  const h = parseHeader('// ==WebMod==\n// @name Plain X\n// @source      TRIF\n// @version     3\n// ==/WebMod==\n');
+  assert.equal(h.source, 'trif');
+  // Shipped mods say webmods (TRIF's name before 0.2.0) or trif; both count.
+  const { isShippedSource } = require('../helper/lib/mods');
+  assert.ok(isShippedSource('webmods') && isShippedSource('trif') && isShippedSource('WebMods'));
+  assert.ok(!isShippedSource('me') && !isShippedSource(null));
   assert.equal(h.version, '3');
   const { mod } = buildMod({ site: 'x.com', file: '/s/x.com/plain-x.js', code: '// ==WebMod==\n// @source webmods\n// @version 2\n// ==/WebMod==\n' });
   assert.deepEqual([mod.source, mod.version], ['webmods', '2']);
@@ -352,7 +356,7 @@ test('host: routes responses by id, handles concurrent requests answered out of 
 
 test('host: request timeout is args.timeout + grace', async () => {
   const home = tempDir();
-  const ext = startHost(home, { env: { WEBMODS_TIMEOUT_GRACE: '200' } });
+  const ext = startHost(home, { env: { TRIF_TIMEOUT_GRACE: '200' } });
   ext.hello();
   await ext.waitForSocket();
   const t0 = Date.now();

@@ -4,14 +4,15 @@
 const fs = require('fs');
 const net = require('net');
 const path = require('path');
+const { envVar } = require('./env');
 
 const NO_HELPER_CODES = new Set(['ENOENT', 'ECONNREFUSED', 'ENOTSOCK', 'EACCES', 'EPERM', 'ENOTDIR']);
 
-// Inside a side-panel agent run the helper gives the agent WEBMODS_RUN_TOKEN; every request carries it,
+// Inside a side-panel agent run the helper gives the agent TRIF_RUN_TOKEN; every request carries it,
 // and the helper limits the run to its site (docs/PROTOCOL.md "Run scope").
 function frame(id, cmd, args) {
   const msg = { id, cmd, args };
-  if (process.env.WEBMODS_RUN_TOKEN) msg.token = process.env.WEBMODS_RUN_TOKEN;
+  if (envVar('RUN_TOKEN')) msg.token = envVar('RUN_TOKEN');
   return JSON.stringify(msg) + '\n';
 }
 
@@ -25,7 +26,7 @@ class HelperError extends Error {
 const newId = () => `c${process.pid}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
 
 /**
- * A request through a side-panel run's mailbox (WEBMODS_RUN_BOX): the folder only that run may write,
+ * A request through a side-panel run's mailbox (TRIF_RUN_BOX): the folder only that run may write,
  * and its only way to the helper. The run's sandbox has no network, so no socket either; the helper
  * watches the folder and treats whatever arrives there as the run's (docs/PROTOCOL.md "Run scope").
  * `<id>.req` (written whole, then renamed into place) gets an answer in `<id>.res`.
@@ -73,7 +74,7 @@ function boxRequest(box, cmd, args = {}, timeoutMs = 40000) {
 }
 
 function request(sockPath, cmd, args = {}, timeoutMs = 40000) {
-  if (process.env.WEBMODS_RUN_BOX) return boxRequest(process.env.WEBMODS_RUN_BOX, cmd, args, timeoutMs);
+  if (envVar('RUN_BOX')) return boxRequest(envVar('RUN_BOX'), cmd, args, timeoutMs);
   return new Promise((resolve, reject) => {
     const id = newId();
     let settled = false;

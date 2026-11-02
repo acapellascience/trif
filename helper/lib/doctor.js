@@ -1,8 +1,9 @@
 'use strict';
-// `webmods doctor`: check every link in the chain and print a concrete fix for each failure.
+// `trif doctor`: check every link in the chain and print a concrete fix for each failure.
 
 const fs = require('fs');
 const path = require('path');
+const { envVar } = require('./env');
 const { spawnSync } = require('child_process');
 const P = require('./paths');
 const { browserTable, safariAgentPlist } = require('./browsers');
@@ -31,7 +32,7 @@ function isInside(child, parent) {
 
 /**
  * Is the host wrapper's script a sensible one? Copy installs run <home>/app/helper/host.js (whichever
- * copy of the CLI is asking, e.g. `npx webmods doctor`); link installs run this checkout's host.js.
+ * copy of the CLI is asking, e.g. `npx trif doctor`); link installs run this checkout's host.js.
  * Returns null when fine, else { status, title, fix? }.
  */
 function checkWrapperScript(script, ws) {
@@ -42,7 +43,7 @@ function checkWrapperScript(script, ws) {
     if (v && v !== P.VERSION) {
       return {
         status: 'warn',
-        title: `the installed copy in ${ws.appDir} is v${v}, but this webmods is v${P.VERSION}`,
+        title: `the installed copy in ${ws.appDir} is v${v}, but this trif is v${P.VERSION}`,
         fix: `to install v${P.VERSION}, run: node ${P.CLI_JS} setup --copy`,
       };
     }
@@ -85,27 +86,41 @@ async function doctor(opts = {}) {
   const ws = P.workspace(opts.home);
   const checks = [];
   const add = (status, title, fix, detail) => checks.push({ status, title, fix, detail });
-  // From a git checkout, point at its CLI; otherwise npx fetches WebMods again if the install is broken.
+  // From a git checkout, point at its CLI; otherwise npx fetches TRIF again if the install is broken.
   const setupFix = P.isGitCheckout()
-    ? 'run: webmods setup   (or: node ' + P.CLI_JS + ' setup)'
-    : 'run: npx webmods setup   (or: webmods setup)';
+    ? 'run: trif setup   (or: node ' + P.CLI_JS + ' setup)'
+    : 'run: npx trif setup   (or: trif setup)';
   let installRoot = P.REPO_ROOT; // where the wrapper's files are: its extension/ is what Chrome should load
 
   // Node
   const major = nodeMajor(process.version);
   if (major >= 18) add('ok', `Node ${process.version}`);
-  else add('fail', `Node ${process.version} is too old (WebMods needs Node 18 or newer)`, 'install a current Node from https://nodejs.org or with your package manager, then run webmods setup again');
+  else add('fail', `Node ${process.version} is too old (TRIF needs Node 18 or newer)`, 'install a current Node from https://nodejs.org or with your package manager, then run trif setup again');
 
   // Workspace
   if (fs.existsSync(ws.home) && fs.existsSync(ws.modsDir)) add('ok', `workspace ${ws.home}`);
   else add('fail', `workspace ${ws.home} is missing${fs.existsSync(ws.home) ? ` its mods folder ${ws.modsDir}` : ''}`, setupFix);
   if (ws.configError) add('fail', ws.configError, `fix or delete ${path.join(ws.home, 'config.json')}`);
+  // A workspace moved from ~/.webmods (before 0.2.0, when TRIF was called WebMods): Chrome may load the
+  // extension from ~/.webmods/app/extension, and PATHs may name ~/.webmods/bin, so the link must stay.
+  const legacy = P.legacyHome();
+  if (path.resolve(ws.home) === path.resolve(P.defaultHome()) && !opts.home) {
+    let link = null;
+    try { link = fs.lstatSync(legacy); } catch { /* none */ }
+    const real = (p) => { try { return fs.realpathSync(p); } catch { return null; } };
+    if (link && link.isSymbolicLink() && real(legacy) === real(ws.home)) add('ok', `${legacy} links to ${ws.home} (from before 0.2.0; keep it)`);
+    else if (link && link.isDirectory()) add('warn', `${legacy} is still a folder of its own (TRIF uses ${ws.home} since 0.2.0)`, `${setupFix} (it moves what's in ${legacy} into ${ws.home})`);
+    else if (!link && fs.existsSync(path.join(ws.home, require('./migrate').MARKER))) {
+      add('warn', `${legacy} is gone, but this workspace was moved from there: a browser may still load TRIF from ${path.join(legacy, 'app', 'extension')}`,
+        `put the link back: ln -s .trif ${legacy}`);
+    }
+  }
   if (fs.existsSync(ws.home)) {
     if (fs.existsSync(path.join(ws.home, 'AGENTS.md'))) add('ok', 'AGENTS.md present');
     else add('warn', `${path.join(ws.home, 'AGENTS.md')} is missing (agents won't know how to write mods)`, setupFix);
     // Written by setup since the side panel arrived; without it, side-panel runs of Claude Code can't edit or run anything.
     if (fs.existsSync(path.join(ws.home, '.claude', 'settings.json'))) add('ok', 'agent permissions present');
-    else add('warn', `${path.join(ws.home, '.claude', 'settings.json')} is missing (side-panel agents can't edit mods or run webmods)`, setupFix);
+    else add('warn', `${path.join(ws.home, '.claude', 'settings.json')} is missing (side-panel agents can't edit mods or run trif)`, setupFix);
   }
 
   // Host wrapper
@@ -117,7 +132,7 @@ async function doctor(opts = {}) {
   } else {
     const w = parseWrapper(fs.readFileSync(ws.hostWrapper, 'utf8'));
     if (!w) {
-      add('fail', `host wrapper ${ws.hostWrapper} doesn't look like a WebMods wrapper`, setupFix);
+      add('fail', `host wrapper ${ws.hostWrapper} doesn't look like a TRIF wrapper`, setupFix);
     } else if (!isExecutable(w.node)) {
       add('fail', `host wrapper points at node ${w.node}, which doesn't exist (Node moved or was upgraded?)`, setupFix);
     } else if (!fs.existsSync(w.script)) {
@@ -126,7 +141,7 @@ async function doctor(opts = {}) {
       const r = spawnSync(w.node, ['--version'], { encoding: 'utf8', timeout: 5000 });
       const v = (r.stdout || '').trim();
       if (nodeMajor(v) < 18) {
-        add('fail', `host wrapper's node ${w.node} is ${v || 'not runnable'}; WebMods needs Node 18+`, 'install a current Node, then ' + setupFix);
+        add('fail', `host wrapper's node ${w.node} is ${v || 'not runnable'}; TRIF needs Node 18+`, 'install a current Node, then ' + setupFix);
       } else {
         wrapperOk = true;
         installRoot = path.resolve(w.script, '..', '..');
@@ -140,10 +155,10 @@ async function doctor(opts = {}) {
 
   // The browsers' setup lives outside the workspace (~/Library…), which a side-panel agent run's sandbox
   // can't read: there, say so instead of failing on it. The user's terminal checks it.
-  const inRun = !!process.env.WEBMODS_RUN_BOX;
+  const inRun = !!envVar('RUN_BOX');
   let manifestsOk = 0;
   if (inRun) {
-    add('ok', "inside a side-panel agent run: the browsers' setup files aren't checked (the run can't read them; run webmods doctor in a terminal for those)");
+    add('ok', "inside a side-panel agent run: the browsers' setup files aren't checked (the run can't read them; run trif doctor in a terminal for those)");
   } else {
     // Native host manifests
     let targets;
@@ -179,7 +194,7 @@ async function doctor(opts = {}) {
         const ids = Array.isArray(m.allowed_extensions) ? m.allowed_extensions : [];
         if (!ids.includes(P.FIREFOX_EXTENSION_ID)) problems.push(`allowed_extensions doesn't include ${P.FIREFOX_EXTENSION_ID}`);
       } else {
-        // Every WebMods extension ID (dev, Web Store, config.json extensionIds) must be allowed.
+        // Every TRIF extension ID (dev, Web Store, config.json extensionIds) must be allowed.
         const origins = Array.isArray(m.allowed_origins) ? m.allowed_origins : [];
         const missing = expectedOrigins.filter((o) => !origins.includes(o));
         if (missing.length) problems.push(`allowed_origins doesn't include ${missing.join(', ')}`);
@@ -204,20 +219,20 @@ async function doctor(opts = {}) {
 
   // CLI on PATH
   const pathDirs = String(process.env.PATH || '').split(path.delimiter).filter(Boolean);
-  const onPath = pathDirs.some((d) => isExecutable(path.join(d, 'webmods')));
-  if (onPath) add('ok', '`webmods` is on PATH');
-  else add('warn', '`webmods` is not on your PATH', `add ${ws.bin} to PATH: echo 'export PATH="${ws.bin}:$PATH"' >> ~/.zshrc  (then open a new terminal)`);
+  const onPath = pathDirs.some((d) => isExecutable(path.join(d, 'trif')));
+  if (onPath) add('ok', '`trif` is on PATH');
+  else add('warn', '`trif` is not on your PATH', `add ${ws.bin} to PATH: echo 'export PATH="${ws.bin}:$PATH"' >> ~/.zshrc  (then open a new terminal)`);
 
   // Helper / extension
   let info = null;
   try {
     // Inside an agent run, the helper that started it (see lib/helpers.js).
-    const sock = process.env.WEBMODS_SOCK && !opts.home ? process.env.WEBMODS_SOCK : ws.sock;
+    const sock = envVar('SOCK') && !opts.home ? envVar('SOCK') : ws.sock;
     info = await request(sock, 'ping', {}, 3000);
   } catch (e) {
     const stale = fs.existsSync(ws.sock);
     const fixLines = [
-      'open Chrome (the helper only runs while Chrome is running with the WebMods extension).',
+      'open Chrome (the helper only runs while Chrome is running with the TRIF extension).',
       `If Chrome is open: check the extension is installed and enabled at ${EXT_URL}`,
       `  (Load unpacked from ${path.join(installRoot, 'extension')}; its ID must be ${P.EXTENSION_ID}).`,
       'On that page, click "service worker" and look at the console: "Specified native messaging host not found"',
@@ -234,20 +249,20 @@ async function doctor(opts = {}) {
   if (info) {
     add('ok', `helper running (pid ${info.pid}, v${info.helper})`);
     if (!info.extension) {
-      add('fail', 'the helper is running but the extension never said hello', `reload the extension at ${EXT_URL} (or restart Chrome) and run webmods doctor again; check ${ws.log}`);
+      add('fail', 'the helper is running but the extension never said hello', `reload the extension at ${EXT_URL} (or restart Chrome) and run trif doctor again; check ${ws.log}`);
     } else {
       const firefox = info.extension.browser === 'Firefox';
       add('ok', `extension v${info.extension.version} on ${info.extension.browser || 'Chrome'} ${info.extension.chrome}`);
       if (info.extension.userScripts) add('ok', firefox ? 'user scripts are allowed' : '"Allow User Scripts" is on');
-      else if (firefox) add('fail', 'user scripts aren\'t allowed, so mods can\'t run', 'click the WebMods toolbar button in Firefox, then "Allow user scripts", then reload your tabs');
+      else if (firefox) add('fail', 'user scripts aren\'t allowed, so mods can\'t run', 'click the TRIF toolbar button in Firefox, then "Allow user scripts", then reload your tabs');
       else add('fail', '"Allow User Scripts" is OFF, so mods can\'t run', `open ${EXT_URL}, turn on "Allow User Scripts", then reload your tabs`);
     }
     for (const e of (info.modsApplied && info.modsApplied.errors) || []) {
       add('fail', `extension couldn't register ${e.id}: ${e.error}`, 'fix the mod\'s @match/@exclude patterns (see AGENTS.md)');
     }
-    // Each connected browser has its own helper; `webmods` uses this one unless told --browser.
-    const others = process.env.WEBMODS_RUN_TOKEN ? [] : (await listHelpers(ws.home)).filter((h) => h.pid !== info.pid);
-    if (others.length) add('ok', `also connected: ${others.map(describeHelper).join(', ')}`, 'webmods commands go to the default browser; add --browser <name|pid> to use another');
+    // Each connected browser has its own helper; `trif` uses this one unless told --browser.
+    const others = envVar('RUN_TOKEN') ? [] : (await listHelpers(ws.home)).filter((h) => h.pid !== info.pid);
+    if (others.length) add('ok', `also connected: ${others.map(describeHelper).join(', ')}`, 'trif commands go to the default browser; add --browser <name|pid> to use another');
   }
 
   // Mods
@@ -274,7 +289,7 @@ async function doctor(opts = {}) {
     const another = listed.agents.some((x) => x.available);
     if (!a.available) {
       const here = findExecutable(adapter.binary, termDirs);
-      if (here) add('warn', `${label} is at ${here}, but the helper won't find it there`, 'run webmods setup in this terminal (it records your PATH for the helper)');
+      if (here) add('warn', `${label} is at ${here}, but the helper won't find it there`, 'run trif setup in this terminal (it records your PATH for the helper)');
       else if (another) add('info', `${label}: not found (optional)`);
       else add('warn', `${label}: not found (the side panel needs a coding agent)`, adapter.missing);
       continue;
@@ -304,7 +319,7 @@ function formatDoctor({ ok, checks }) {
   }
   out.push('');
   const fails = checks.filter((c) => c.status === 'fail').length;
-  out.push(ok ? 'All good.' : `${fails} problem(s) found. Fix them in order (top first) and run webmods doctor again.`);
+  out.push(ok ? 'All good.' : `${fails} problem(s) found. Fix them in order (top first) and run trif doctor again.`);
   return out.join('\n');
 }
 

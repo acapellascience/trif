@@ -1,16 +1,16 @@
 #!/usr/bin/env node
 'use strict';
-// WebMods native messaging host. Chrome launches this when the extension calls
+// TRIF native messaging host. Chrome launches this when the extension calls
 // chrome.runtime.connectNative('com.webmods.helper').
 //
 //  - stdin/stdout: native messaging with the extension (4-byte LE length + JSON). NOTHING else may
-//    ever be written to stdout; logs go to $WEBMODS_HOME/helper.log.
-//  - $WEBMODS_HOME/helper.sock: newline-delimited JSON for the `webmods` CLI.
-//  - watches $WEBMODS_HOME/sites and pushes {type:"mods"} to the extension on connect and on change.
+//    ever be written to stdout; logs go to $TRIF_HOME/helper.log.
+//  - $TRIF_HOME/helper.sock: newline-delimited JSON for the `trif` CLI.
+//  - watches $TRIF_HOME/sites and pushes {type:"mods"} to the extension on connect and on change.
 //  - runs the user's coding agent for the side panel (agent.list / agent.start / agent.stop requests
 //    from the extension or the CLI), sending progress as {type:"agentEvent", runId, event}; and logs
 //    the agent in (agent.login / agent.loginCode / agent.loginCancel, events under the loginId).
-//  - limits each agent run to its site: `webmods` inside a run sends the run's token, and its page
+//  - limits each agent run to its site: `trif` inside a run sends the run's token, and its page
 //    commands go to the extension with args.scope; mods a run writes for other sites are held (held.js).
 //  - checks for updates (lib/update.js) and tells the extension {type:"update", update}; installs them
 //    when asked (or by itself with "autoUpdate"), then asks it to {type:"reload"} onto the new version.
@@ -18,6 +18,7 @@
 const fs = require('fs');
 const net = require('net');
 const path = require('path');
+const { envVar } = require('./lib/env');
 const { workspace, VERSION } = require('./lib/paths');
 const { createLogger } = require('./lib/log');
 const { encode, Decoder, MAX_TO_EXTENSION } = require('./lib/framing');
@@ -37,7 +38,7 @@ const { buildReport, reportEmail, reportUrl } = require('./lib/report');
 
 const ws = workspace();
 // This helper's own socket (helper-<pid>.sock), served whether or not it also owns helper.sock; agent
-// runs get it as WEBMODS_SOCK so their `webmods` commands reach this browser (lib/helpers.js).
+// runs get it as TRIF_SOCK so their `trif` commands reach this browser (lib/helpers.js).
 ws.ownSock = ownSock(ws.home);
 try { fs.mkdirSync(ws.home, { recursive: true }); } catch { /* logged below if it matters */ }
 const logger = createLogger(ws.log, { stderr: true });
@@ -50,8 +51,8 @@ console.warn = (...a) => logger.warn(...a);
 console.error = (...a) => logger.error(...a);
 console.trace = (...a) => logger.debug(...a);
 
-const GRACE_MS = Number(process.env.WEBMODS_TIMEOUT_GRACE) >= 0 && process.env.WEBMODS_TIMEOUT_GRACE !== undefined
-  ? Number(process.env.WEBMODS_TIMEOUT_GRACE) : 5000;
+const GRACE_MS = Number(envVar('TIMEOUT_GRACE')) >= 0 && envVar('TIMEOUT_GRACE') !== undefined
+  ? Number(envVar('TIMEOUT_GRACE')) : 5000;
 const DEFAULT_TIMEOUT_MS = 30000 + GRACE_MS; // 35 s with the default grace
 const DEBOUNCE_MS = 150;
 const POLL_MS = 2000;
@@ -181,7 +182,7 @@ function syncMods(reason, force) {
     const withUpdate = updates[m.id] ? { ...withOrigin, update: updates[m.id] } : withOrigin;
     return startOff.has(m.id) ? { ...withUpdate, startOff: true } : withUpdate;
   });
-  // Sites WebMods starts on for (preinstalled.json): each browser turns each one on the first time it sees it.
+  // Sites TRIF starts on for (preinstalled.json): each browser turns each one on the first time it sees it.
   const sitesOn = startSitesOn(ws.home);
   const signature = sent.map((m) => `${m.id}:${m.hash}${m.held ? ':held' : ''}${m.startOff ? ':off' : ''}${m.origin ? `:${m.origin.by}` : ''}${m.update ? `:update ${JSON.stringify(m.update)}` : ''}`).join('|') +
     `|sites:${sitesOn.join(',')}`;
@@ -303,7 +304,7 @@ function poll() {
 
 // ---------------------------------------------------------------- agent runs (side panel)
 
-// config.json can change while Chrome runs (`webmods setup` re-records PATH), so re-read it per run.
+// config.json can change while Chrome runs (`trif setup` re-records PATH), so re-read it per run.
 // The extension's install id rides along so runs mark themselves for the other browsers (lib/origins.js).
 const runs = new Runs({
   getWorkspace: () => ({ ...workspace(ws.home), installId: state.hello?.installId || null, browser: state.hello?.browser || '' }),
@@ -359,7 +360,7 @@ function onAgentEvent(runId, event) {
 }
 
 // The network recorder keeps whole request and response bodies (logins, API calls) for as long as it's
-// on, so recording an agent run switches on (`webmods record <site> on` from the run) goes off again
+// on, so recording an agent run switches on (`trif record <site> on` from the run) goes off again
 // when that run ends: runId -> sites it switched on. Recording the user switched on from a terminal is
 // theirs to switch off.
 const recordingByRun = new Map();
@@ -477,8 +478,8 @@ function startRun(args) {
 
 // ---------------------------------------------------------------- updates (lib/update.js)
 
-const UPDATE_FIRST_CHECK_MS = Number(process.env.WEBMODS_UPDATE_DELAY) >= 0 && process.env.WEBMODS_UPDATE_DELAY !== undefined
-  ? Number(process.env.WEBMODS_UPDATE_DELAY) : 60000;
+const UPDATE_FIRST_CHECK_MS = Number(envVar('UPDATE_DELAY')) >= 0 && envVar('UPDATE_DELAY') !== undefined
+  ? Number(envVar('UPDATE_DELAY')) : 60000;
 const UPDATE_EVERY_MS = 6 * 60 * 60 * 1000; // the feed itself is fetched at most every 20 hours
 let updateTimers = [];
 
@@ -533,7 +534,7 @@ function reloadExtension(reason) {
   try { sendToExtension({ type: 'reload', reason }); } catch (e) { logger.warn(`could not ask the extension to reload: ${e.message}`); }
 }
 
-// Another helper (the other browser's) or `npx webmods setup` replaced <home>/app under this one: this
+// Another helper (the other browser's) or `npx trif setup` replaced <home>/app under this one: this
 // process is running old code, so reload onto the new version.
 function checkAppReplaced() {
   checkCodeChanged();
@@ -547,9 +548,18 @@ function checkAppReplaced() {
 // and Firefox start one when the extension reconnects, and the Safari bridge on the next connection (it
 // keeps a helper across Safari unloading the extension, so reloading the extension wouldn't do it).
 const startedCode = codeStamp(__dirname);
+// Likewise when the workspace this helper started on, a folder then, has become a link: setup moved it
+// (~/.webmods to ~/.trif, lib/migrate.js). Everything still works through the link, but watching the mods
+// folder by its old path may not, so the next helper starts on the new one.
+const startedOnFolder = (() => { try { return !fs.lstatSync(ws.home).isSymbolicLink(); } catch { return false; } })();
+function homeMoved() {
+  if (!startedOnFolder) return false;
+  try { return fs.lstatSync(ws.home).isSymbolicLink(); } catch { return false; }
+}
 function checkCodeChanged() {
   if (state.installing || state.shuttingDown || runs.list().length || logins.info() || pending.size) return;
   if (codeStamp(__dirname) > startedCode) shutdown("its code changed on disk; the next helper runs the new code");
+  else if (homeMoved()) shutdown(`its workspace ${ws.home} moved (it's now a link); the next helper uses the new place`);
 }
 
 // ---------------------------------------------------------------- problem reports (lib/report.js)
@@ -658,7 +668,7 @@ async function becomePrimary() {
     } catch (e) {
       if (e.code !== 'EADDRINUSE') {
         logger.error(`can't listen on ${ws.sock}: ${e.message}` +
-          (Buffer.byteLength(ws.sock) > 100 ? ' (the path is too long for a unix socket; use a shorter WEBMODS_HOME)' : ''));
+          (Buffer.byteLength(ws.sock) > 100 ? ' (the path is too long for a unix socket; use a shorter TRIF_HOME)' : ''));
         return 'error';
       }
       if (await probe(ws.sock)) return 'busy'; // someone live owns it
@@ -679,7 +689,7 @@ function stopSecondaryChecks() {
 function startSecondaryChecks() {
   if (secondaryTimer) return;
   state.role = 'secondary';
-  logger.info(`another helper is already serving ${ws.sock} (another browser or Chrome profile); this one serves ${ws.ownSock} for its own browser's agent runs and \`webmods --browser\``);
+  logger.info(`another helper is already serving ${ws.sock} (another browser or Chrome profile); this one serves ${ws.ownSock} for its own browser's agent runs and \`trif --browser\``);
   let busy = false;
   secondaryTimer = setInterval(async () => {
     if (busy || state.shuttingDown) return;
@@ -763,16 +773,16 @@ function onClientLine(sock, line) {
   const args = req && req.args && typeof req.args === 'object' && !Array.isArray(req.args) ? req.args : {};
   if (typeof cmd !== 'string' || !cmd) return reply(sock, { id, ok: false, error: 'missing cmd' });
 
-  // From inside an agent run (`webmods` sends the run's token): only page commands, limited to its site.
+  // From inside an agent run (`trif` sends the run's token): only page commands, limited to its site.
   let run = null;
   if (req.token !== undefined) {
     run = runs.byToken(req.token);
     if (!run) return reply(sock, { id, ok: false, error: 'this agent run has ended (or its token is wrong)' });
     if (AGENT_COMMANDS.has(cmd)) {
       return reply(sock, { id, ok: false, error: cmd === 'mod.approve'
-        ? 'only the user can approve a held mod (in the side panel, or `webmods approve` in their terminal)'
+        ? 'only the user can approve a held mod (in the side panel, or `trif approve` in their terminal)'
         : cmd === 'mod.update'
-          ? 'only the user can choose what happens with a new version of a WebMods mod (in the side panel, or `webmods mod-update` in their terminal)'
+          ? 'only the user can choose what happens with a new version of a TRIF mod (in the side panel, or `trif mod-update` in their terminal)'
           : `"${cmd}" isn't available inside an agent run` });
     }
     args.scope = run.scope;

@@ -1,6 +1,6 @@
 'use strict';
 // The user's standing instructions for their agents ("talk like a caveman", "don't mention risk"):
-// ~/.webmods/instructions.md, edited from the side panel's settings (or by hand). CLAUDE.md imports it,
+// ~/.trif/instructions.md, edited from the side panel's settings (or by hand). CLAUDE.md imports it,
 // so every Claude Code session in the workspace reads it; adapters that don't read CLAUDE.md get it in
 // their run context. Side-panel runs can't edit it (claude adapter's denied tools), so a page can't
 // talk an agent into rewriting it.

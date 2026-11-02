@@ -5,6 +5,7 @@
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
+const { envVar, envName } = require('../env');
 const { capture } = require('./util');
 
 const ADAPTERS = [require('./claude'), require('./codex')];
@@ -12,11 +13,11 @@ const BY_ID = new Map(ADAPTERS.map((a) => [a.id, a]));
 
 function getAdapter(id) { return BY_ID.get(id) || null; }
 
-// Chrome starts the helper with a minimal PATH, so agents are looked up in the PATH `webmods setup`
-// recorded (config.json -> env.PATH) plus these. WEBMODS_DEFAULT_AGENT_DIRS overrides them (tests).
+// Chrome starts the helper with a minimal PATH, so agents are looked up in the PATH `trif setup`
+// recorded (config.json -> env.PATH) plus these. TRIF_DEFAULT_AGENT_DIRS overrides them (tests).
 function defaultDirs() {
-  if (process.env.WEBMODS_DEFAULT_AGENT_DIRS !== undefined) {
-    return process.env.WEBMODS_DEFAULT_AGENT_DIRS.split(path.delimiter).filter(Boolean);
+  if (envVar('DEFAULT_AGENT_DIRS') !== undefined) {
+    return envVar('DEFAULT_AGENT_DIRS').split(path.delimiter).filter(Boolean);
   }
   const home = os.homedir();
   return [path.join(home, '.local', 'bin'), '/usr/local/bin', '/opt/homebrew/bin', path.join(home, '.npm-global', 'bin')];
@@ -29,7 +30,7 @@ function recordedPath(ws) {
 
 function uniq(list) { return [...new Set(list.filter((d) => d && path.isAbsolute(d)))]; }
 
-// Where agents are searched for (without ~/.webmods/bin: that only holds webmods itself).
+// Where agents are searched for (without ~/.trif/bin: that only holds trif itself).
 function searchDirs(ws) { return uniq([...recordedPath(ws), ...defaultDirs()]); }
 
 // The environment spawned agents get: nothing inherited from the helper except the basics, so no
@@ -41,7 +42,7 @@ function agentEnv(ws) {
     PATH: uniq([ws.bin, ...recordedPath(ws), ...defaultDirs()]).join(path.delimiter),
     HOME: os.homedir(),
     TERM: 'dumb',
-    WEBMODS_HOME: ws.home, // so `webmods` inside the agent talks to this workspace
+    [envName('HOME')]: ws.home, // so `trif` inside the agent talks to this workspace
   };
   for (const k of ['USER', 'LANG']) if (process.env[k]) env[k] = process.env[k];
   if (!env.USER) { try { env.USER = os.userInfo().username; } catch { /* ignore */ } }
@@ -128,25 +129,25 @@ function hostOf(url) {
 // Full context: appended system prompt (claude, every run) or prepended to a session's first message.
 function contextText({ url, tabId, scope, browser }) {
   const where = url
-    ? `They're looking at ${url}${tabId != null ? ` (tab ${tabId}): pass \`--tab ${tabId}\` to webmods commands` : ''}.`
-    : "They didn't say which page they're on: run `webmods tabs` if you need it.";
+    ? `They're looking at ${url}${tabId != null ? ` (tab ${tabId}): pass \`--tab ${tabId}\` to trif commands` : ''}.`
+    : "They didn't say which page they're on: run `trif tabs` if you need it.";
   const limit = scope
-    ? ` This run is limited to ${scope}: webmods commands only work on its tabs, and a mod you write that matches other sites is held until the user approves it (see "Side-panel runs" in AGENTS.md).`
+    ? ` This run is limited to ${scope}: trif commands only work on its tabs, and a mod you write that matches other sites is held until the user approves it (see "Side-panel runs" in AGENTS.md).`
     : '';
   // The browser whose panel started the run (its hello names it); "browser" when unknown, e.g. from a terminal.
-  return `You're running inside the WebMods side panel in the user's ${browser || 'browser'}. ` + where + limit +
-    ' Follow AGENTS.md. Mods can be switched off and on with `webmods disable/enable <site>/<mod>`; `webmods status` shows which are on.' +
+  return `You're running inside the TRIF side panel in the user's ${browser || 'browser'}. ` + where + limit +
+    ' Follow AGENTS.md. Mods can be switched off and on with `trif disable/enable <site>/<mod>`; `trif status` shows which are on.' +
     ' Reply briefly in plain language; your replies appear in a narrow chat panel.' +
     " You can't ask follow-up questions mid-task: if something's unclear, make a sensible choice or end your turn with a question.";
 }
 
 // One-line reminder for later messages of a session (agents without a system prompt flag).
 function reminderText({ url, tabId }) {
-  if (!url) return '(WebMods side panel.)';
-  return `(WebMods side panel: the user is now on ${url}${tabId != null ? `, tab ${tabId}: use --tab ${tabId}` : ''}.)`;
+  if (!url) return '(TRIF side panel.)';
+  return `(TRIF side panel: the user is now on ${url}${tabId != null ? `, tab ${tabId}: use --tab ${tabId}` : ''}.)`;
 }
 
-// Claude Code permissions for the workspace (written by `webmods setup`).
+// Claude Code permissions for the workspace (written by `trif setup`).
 const CLAUDE_SETTINGS = {
   permissions: {
     // (The claude adapter also passes these as --allowedTools/--disallowedTools, which is what actually

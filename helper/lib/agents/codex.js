@@ -2,20 +2,20 @@
 // OpenAI Codex CLI adapter (tested with Codex 0.166; needs 0.138+ for permission profiles).
 //
 //   codex exec --json --skip-git-repo-check --ignore-user-config --ignore-rules
-//              -c approval_policy="never" -c default_permissions="webmods-run" -c permissions={…}
+//              -c approval_policy="never" -c default_permissions="trif-run" -c permissions={…}
 //              [-m MODEL] [resume THREAD_ID] PROMPT
 //
 // The run's limits (runs.js runLimits) are enforced by the operating system, not just asked for: a
 // permission profile (macOS Seatbelt, Linux bubblewrap; Codex refuses to run a command it can't sandbox)
 // lets the commands it runs
-//   - read the workspace, the WebMods code and node, and nothing else in the home folder (no ~/.ssh, no
+//   - read the workspace, the TRIF code and node, and nothing else in the home folder (no ~/.ssh, no
 //     Codex's own login), nor the workspace's secrets and other runs' traces (config.json, safari-token,
 //     runs/, screenshots/, helper.log);
 //   - write only the mods folder (every existing mod folder of another site read-only inside it), the
-//     run's screenshots folder and its mailbox, so a run can't change other sites' mods or WebMods' own
+//     run's screenshots folder and its mailbox, so a run can't change other sites' mods or TRIF's own
 //     files. A new folder for another site can still be created; mods in it are held until the user
 //     approves them, like any out-of-scope mod;
-//   - reach no network at all: `webmods` talks to the helper through the run's mailbox (client.js), so
+//   - reach no network at all: `trif` talks to the helper through the run's mailbox (client.js), so
 //     a run can't send what it read anywhere, nor reach the helper's sockets without its site limit.
 // The user's own Codex config and rules files are ignored for these runs, since a sandbox_mode there would
 // replace the profile and an "allow" rule could run commands outside it.
@@ -32,7 +32,7 @@ const { findExecutable, versionOf, relToWorkspace, oneLine, parseJsonLine, captu
 const NOT_LOGGED_IN = "Codex isn't logged in: run `codex login` in a terminal (or set OPENAI_API_KEY under \"env\" in the workspace's config.json)";
 const AUTH_RE = /not logged in|unauthori[sz]ed|\b401\b|please (run )?`?codex login|missing (api key|credentials)/i;
 
-const PROFILE = 'webmods-run';
+const PROFILE = 'trif-run';
 const MIN_VERSION = [0, 138, 0]; // permission profiles
 
 const tomlKey = (s) => JSON.stringify(String(s)); // a JSON string is a valid TOML basic string here
@@ -65,13 +65,13 @@ const adapter = {
   systemPrompt: false, // context is prepended to the prompt
   note: '',
   missing: "Codex isn't installed, or the helper can't find it. Install it (npm install -g @openai/codex), " +
-    'then run `webmods setup` in the same terminal so the helper finds it.',
+    'then run `trif setup` in the same terminal so the helper finds it.',
 
   detect({ dirs, env, version = true }) {
     const file = findExecutable(adapter.binary, dirs);
     if (!file) return { available: false, path: null, version: null, note: 'not found' };
     const v = version ? versionOf(file, env) : null;
-    if (tooOld(v)) return { available: false, path: file, version: v, note: `Codex ${v} is too old for WebMods (it needs ${MIN_VERSION.join('.')} or newer): update it (brew upgrade codex, or npm install -g @openai/codex)` };
+    if (tooOld(v)) return { available: false, path: file, version: v, note: `Codex ${v} is too old for TRIF (it needs ${MIN_VERSION.join('.')} or newer): update it (brew upgrade codex, or npm install -g @openai/codex)` };
     return { available: true, path: file, version: v, note: '' };
   },
 

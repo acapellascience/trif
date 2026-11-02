@@ -146,7 +146,7 @@ function makeHome() {
 }
 
 function startHost(home) {
-  const ext = new FakeExtension({ home, env: { WEBMODS_AGENT_KILL_GRACE_MS: '400' } });
+  const ext = new FakeExtension({ home, env: { TRIF_AGENT_KILL_GRACE_MS: '400' } });
   cleanups.push(() => ext.close());
   return ext;
 }

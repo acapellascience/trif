@@ -1,24 +1,25 @@
 #!/usr/bin/env node
 'use strict';
-// The `webmods` command. Talks to the helper (host.js) over $WEBMODS_HOME/helper.sock.
+// The `trif` command. Talks to the helper (host.js) over $TRIF_HOME/helper.sock.
 // Exit codes: 0 ok, 1 command error, 2 helper not running.
 
 const fs = require('fs');
 const path = require('path');
 const vm = require('vm');
+const { envVar } = require('./lib/env');
 const P = require('./lib/paths');
 const { request, streamRun, streamLogin, HelperError } = require('./lib/client');
-const { ALL_SITES, scanMods, planModsMessage, isIgnoredName } = require('./lib/mods');
+const { ALL_SITES, scanMods, planModsMessage, isIgnoredName, isShippedSource } = require('./lib/mods');
 const { COMMANDS, mainHelp, commandHelp } = require('./lib/help');
 const { loadHeld } = require('./lib/held');
 const { pickHelper, listHelpers, describeHelper } = require('./lib/helpers');
 const trash = require('./lib/trash');
 const shipped = require('./lib/preinstalled');
 
-// Inside a side-panel agent run (the helper set WEBMODS_RUN_TOKEN) these are the user's alone.
+// Inside a side-panel agent run (the helper set TRIF_RUN_TOKEN) these are the user's alone.
 const NOT_IN_RUNS = new Set(['setup', 'agent', 'approve', 'mod-update']);
 
-// Output piped into something that stops reading early (`webmods tabs | head -1`) isn't an error.
+// Output piped into something that stops reading early (`trif tabs | head -1`) isn't an error.
 process.stdout.on('error', (e) => { if (e.code === 'EPIPE') process.exit(0); throw e; });
 
 const VALUE_FLAGS = new Set(['--tab', '--url', '-o', '--out', '--output', '--filter', '--limit', '-f', '--file',
@@ -51,7 +52,7 @@ function parseArgs(argv) {
     } else if (BOOL_FLAGS.has(name)) {
       opts[name] = true;
     } else {
-      throw new UsageError(`unknown option ${a} (see webmods help)`);
+      throw new UsageError(`unknown option ${a} (see trif help)`);
     }
   }
   return { opts, pos };
@@ -147,7 +148,7 @@ function tabArgs(opts) {
   const a = {};
   if (opts['--tab'] !== undefined) {
     const n = Number(opts['--tab']);
-    if (!Number.isInteger(n)) throw new UsageError('--tab needs a numeric tab id (see webmods tabs)');
+    if (!Number.isInteger(n)) throw new UsageError('--tab needs a numeric tab id (see trif tabs)');
     a.tab = n;
   }
   if (opts['--url'] !== undefined) a.url = opts['--url'];
@@ -156,30 +157,30 @@ function tabArgs(opts) {
 
 /**
  * Which helper to talk to: `--browser <name|pid>` picks one of the connected browsers; inside an agent
- * run, the helper that started it (WEBMODS_SOCK); otherwise the default helper.sock (lib/helpers.js).
+ * run, the helper that started it (TRIF_SOCK); otherwise the default helper.sock (lib/helpers.js).
  */
 async function resolveSock(ws, opts) {
   if (opts['--browser'] !== undefined) {
-    if (process.env.WEBMODS_RUN_TOKEN) {
+    if (envVar('RUN_TOKEN')) {
       throw new UsageError('--browser can\'t be used inside a side-panel agent run; it works on the browser it was started from');
     }
     return pickHelper(ws.home, opts['--browser']);
   }
-  if (process.env.WEBMODS_SOCK && opts['--home'] === undefined) return process.env.WEBMODS_SOCK;
+  if (envVar('SOCK') && opts['--home'] === undefined) return envVar('SOCK');
   return ws.sock;
 }
 
 /**
  * A file the CLI reads (`write` false) or writes for its options (-f, -o, check). Inside a side-panel
- * agent run (WEBMODS_RUN_BOX) only the mods folder, and for writing the run's screenshots folder: the
+ * agent run (TRIF_RUN_BOX) only the mods folder, and for writing the run's screenshots folder: the
  * run's sandbox enforces that too, and this says so plainly instead of "Operation not permitted".
  */
 function optionPath(ctx, file, { write = false } = {}) {
   const resolved = path.resolve(String(file));
-  if (!process.env.WEBMODS_RUN_BOX) return resolved;
+  if (!envVar('RUN_BOX')) return resolved;
   const real = (p) => { try { return fs.realpathSync(p); } catch { return path.resolve(p); } };
   const target = write ? path.join(real(path.dirname(resolved)), path.basename(resolved)) : real(resolved);
-  const roots = [ctx.ws.modsDir, ...(write && process.env.WEBMODS_RUN_SCREENSHOTS ? [process.env.WEBMODS_RUN_SCREENSHOTS] : [])].map(real);
+  const roots = [ctx.ws.modsDir, ...(write && envVar('RUN_SCREENSHOTS') ? [envVar('RUN_SCREENSHOTS')] : [])].map(real);
   if (!roots.some((r) => target.startsWith(r + path.sep))) {
     throw new UsageError(`inside a side-panel agent run, ${write ? 'files are written' : 'files are read'} only in ${roots.join(' or ')}`);
   }
@@ -247,7 +248,7 @@ const handlers = {
       stErr = e.message;
     }
     // Other connected browsers (each has its own helper); a run only sees its own.
-    const others = process.env.WEBMODS_RUN_TOKEN ? [] : (await listHelpers(ctx.ws.home)).filter((h) => h.pid !== info.pid);
+    const others = envVar('RUN_TOKEN') ? [] : (await listHelpers(ctx.ws.home)).filter((h) => h.pid !== info.pid);
     if (ctx.json) return printJson({ helper: info, extension: st, error: stErr, otherBrowsers: others.map((h) => ({ pid: h.pid, sock: h.sock, extension: h.info.extension })) });
     const lines = [];
     lines.push(`helper        running (pid ${info.pid}, v${info.helper}${info.role && info.role !== 'primary' ? `, ${info.role}` : ''})`);
@@ -260,7 +261,7 @@ const handlers = {
       lines.push(ext.userScripts
         ? 'user scripts  on'
         : firefox
-          ? 'user scripts  OFF: mods can\'t run. Fix: click the WebMods toolbar button in Firefox, then "Allow user scripts"'
+          ? 'user scripts  OFF: mods can\'t run. Fix: click the TRIF toolbar button in Firefox, then "Allow user scripts"'
           : `user scripts  OFF: mods can't run. Fix: open chrome://extensions/?id=${P.EXTENSION_ID} and turn on "Allow User Scripts"`);
     }
     if (stErr) lines.push(`status        the extension didn't answer: ${stErr}`);
@@ -278,9 +279,9 @@ const handlers = {
     for (const id of ids) {
       let s;
       if (helperErrors.has(id)) s = `NOT SENT: ${helperErrors.get(id)}`;
-      else if (held[id]) s = `HELD: ${held[id].reason} (webmods approve ${id})`;
+      else if (held[id]) s = `HELD: ${held[id].reason} (trif approve ${id})`;
       else if (off.has(id)) s = 'off';
-      else if (sitesOff.has(id)) s = 'waiting: WebMods is off on its site';
+      else if (sitesOff.has(id)) s = 'waiting: TRIF is off on its site';
       else if (applyErrors.has(id)) s = `NOT REGISTERED: ${applyErrors.get(id)}`;
       else if (!st) s = '?';
       else if (!registered.has(id)) s = 'not known to the extension yet';
@@ -290,12 +291,12 @@ const handlers = {
       lines.push(`  ${pad(id, 40)} ${s}`);
     }
     for (const [id, err] of helperErrors) if (!ids.includes(id)) lines.push(`  ${pad(id, 40)} NOT SENT: ${err}`);
-    if (off.size) lines.push(`              off = switched off by the user (webmods enable <id> turns one back on)`);
+    if (off.size) lines.push(`              off = switched off by the user (trif enable <id> turns one back on)`);
     if (Object.keys(held).length) lines.push('              HELD = written by a side-panel agent for another site; not running until the user approves it');
-    if (Object.keys(updates).length) lines.push('              update available = WebMods has a new version of a mod it ships; see webmods mod-update <id>');
-    if (sitesOff.size) lines.push('              waiting = not running until the user turns WebMods on for the site (side panel)');
+    if (Object.keys(updates).length) lines.push('              update available = TRIF has a new version of a mod it ships; see trif mod-update <id>');
+    if (sitesOff.size) lines.push('              waiting = not running until the user turns TRIF on for the site (side panel)');
     if (st && Array.isArray(st.sitesOn)) {
-      lines.push(`sites on      ${st.sitesOn.length ? st.sitesOn.join(', ') : '(none)'}; WebMods is off everywhere else: no mods, no page commands`);
+      lines.push(`sites on      ${st.sitesOn.length ? st.sitesOn.join(', ') : '(none)'}; TRIF is off everywhere else: no mods, no page commands`);
     }
     if (st) lines.push(`recording     ${(st.recording || []).length ? st.recording.join(', ') : '(none)'}`);
     out(lines.join('\n'));
@@ -332,16 +333,16 @@ const handlers = {
   async delete(ctx, pos) {
     if (!pos[0]) throw new UsageError('missing mod id');
     const id = modId(pos[0]);
-    const r = process.env.WEBMODS_RUN_TOKEN ? await ctx.call('mod.delete', { id }, 10000) : trash.deleteMod(ctx.ws, id);
+    const r = envVar('RUN_TOKEN') ? await ctx.call('mod.delete', { id }, 10000) : trash.deleteMod(ctx.ws, id);
     if (ctx.json) return printJson({ id: r.id, deleted: true });
-    out(`deleted ${r.id}: it's in the trash for ${trash.TRASH_DAYS} days (webmods restore ${r.id} brings it back)`);
+    out(`deleted ${r.id}: it's in the trash for ${trash.TRASH_DAYS} days (trif restore ${r.id} brings it back)`);
   },
 
   // Updates work without the browser: the CLI checks and installs itself, and a running helper notices
   // the new version in <home>/app and reloads the extension onto it (host.js checkAppReplaced).
   async update(ctx) {
     const update = require('./lib/update');
-    const inRun = !!process.env.WEBMODS_RUN_TOKEN;
+    const inRun = !!envVar('RUN_TOKEN');
     if (ctx.opts['--auto'] !== undefined) {
       if (inRun) throw new UsageError("automatic updates can't be changed inside an agent run");
       const v = String(ctx.opts['--auto']).toLowerCase();
@@ -354,20 +355,20 @@ const handlers = {
       if (inRun) throw new UsageError("updates can't be installed inside an agent run");
       const r = await update.install(ctx.ws);
       if (ctx.json) return printJson({ updated: true, from: r.from, to: r.to, notes: r.notes, warning: r.warning });
-      out(`updated WebMods ${r.from} -> ${r.to}. A running browser switches to it within a minute.`);
-      if (r.warning) out(`warning: ${r.warning}\nRun \`webmods setup\` to finish setting up, or \`webmods doctor\` to see what's wrong.`);
+      out(`updated TRIF ${r.from} -> ${r.to}. A running browser switches to it within a minute.`);
+      if (r.warning) out(`warning: ${r.warning}\nRun \`trif setup\` to finish setting up, or \`trif doctor\` to see what's wrong.`);
       if (r.notes) out(`\n${r.notes}`);
       return;
     }
     const s = await update.check(ctx.ws, { force: true });
     if (ctx.json) return printJson(s);
-    if (s.error) out(`WebMods ${s.current}: couldn't check for updates (${s.error})`);
+    if (s.error) out(`TRIF ${s.current}: couldn't check for updates (${s.error})`);
     else if (s.available) {
-      out(`WebMods ${s.latest} is available (you have ${s.current}).`);
+      out(`TRIF ${s.latest} is available (you have ${s.current}).`);
       if (s.notes) out(`\n${s.notes}\n`);
-      out(s.canInstall ? 'Install it with: webmods update --install' : s.why);
-    } else out(`WebMods ${s.current} is up to date.`);
-    out(`Automatic updates: ${s.auto ? 'on (webmods update --auto off)' : 'off (webmods update --auto on)'}`);
+      out(s.canInstall ? 'Install it with: trif update --install' : s.why);
+    } else out(`TRIF ${s.current} is up to date.`);
+    out(`Automatic updates: ${s.auto ? 'on (trif update --auto off)' : 'off (trif update --auto on)'}`);
   },
 
   // The same report as the side panel's "Report a problem", printed (--open: the report form, filled in):
@@ -395,8 +396,8 @@ const handlers = {
     if (ctx.json) return printJson(r);
     out(r.text);
     out('');
-    if (r.url) out(`Send this, with what went wrong, with the form at ${r.url} (webmods report --open fills it in)${r.email ? `, or email it to ${r.email}` : ''}.`);
-    else out(`Send this, with what went wrong, to ${r.email || 'whoever gave you WebMods'}.`);
+    if (r.url) out(`Send this, with what went wrong, with the form at ${r.url} (trif report --open fills it in)${r.email ? `, or email it to ${r.email}` : ''}.`);
+    else out(`Send this, with what went wrong, to ${r.email || 'whoever gave you TRIF'}.`);
   },
 
   // A new version of a shipped mod the user changed (lib/preinstalled.js). Works without the browser;
@@ -416,27 +417,27 @@ const handlers = {
         base: rec.hash && fs.existsSync(shipped.baseFile(ctx.ws.home, id)) ? shipped.baseFile(ctx.ws.home, id) : null,
       } : null;
       if (ctx.json) return printJson({ id, update: u || null, files });
-      if (!u) return out(`${id}: no new WebMods version waiting`);
+      if (!u) return out(`${id}: no new TRIF version waiting`);
       out(`${id}: ${updateText(u)}`);
       out(`  yours:            ${files.mine}`);
       out(`  the new version:  ${files.new}`);
-      out(`  shipped before:   ${files.base || "(not kept: installed by a WebMods older than 0.1.2)"}`);
-      out(`Use it (yours goes to the trash): webmods mod-update ${id} --use-new`);
-      out(`Keep yours (this version isn't offered again): webmods mod-update ${id} --keep`);
-      out(`Or merge the new version into yours (your agent can, from the files above), then: webmods mod-update ${id} --merged`);
+      out(`  shipped before:   ${files.base || "(not kept: installed by a TRIF older than 0.1.2)"}`);
+      out(`Use it (yours goes to the trash): trif mod-update ${id} --use-new`);
+      out(`Keep yours (this version isn't offered again): trif mod-update ${id} --keep`);
+      out(`Or merge the new version into yours (your agent can, from the files above), then: trif mod-update ${id} --merged`);
       return;
     }
     if (ctx.opts['--use-new']) {
       const r = shipped.useNewVersion(ctx.ws, id);
       if (ctx.json) return printJson({ id: r.id, choice: 'new', version: r.version, file: r.file, trashed: r.trashed });
-      out(`${r.id} is now ${r.version ? `version ${r.version}` : 'the new version'}${r.trashed ? `; your copy is in the trash (webmods restore ${r.id} brings it back)` : ''}`);
+      out(`${r.id} is now ${r.version ? `version ${r.version}` : 'the new version'}${r.trashed ? `; your copy is in the trash (trif restore ${r.id} brings it back)` : ''}`);
     } else if (ctx.opts['--keep']) {
       const r = shipped.keepMine(ctx.ws, id);
       if (ctx.json) return printJson({ id: r.id, choice: 'mine', version: r.version });
       out(`kept your ${r.id}; ${r.version ? `version ${r.version}` : 'this version'} won't be offered again (a later one will)`);
     } else {
       const rec = shipped.loadPreinstalled(ctx.ws.home).shipped[id];
-      if (!rec || !rec.pending || !shipped.resolveMerge(ctx.ws.home, id, rec.pending.hash)) throw new trash.TrashError(`there's no new WebMods version of ${id} waiting`);
+      if (!rec || !rec.pending || !shipped.resolveMerge(ctx.ws.home, id, rec.pending.hash)) throw new trash.TrashError(`there's no new TRIF version of ${id} waiting`);
       if (ctx.json) return printJson({ id, choice: 'merged', version: rec.pending.version || null });
       out(`${id}: marked as merged with ${rec.pending.version ? `version ${rec.pending.version}` : 'the new version'}`);
     }
@@ -451,7 +452,7 @@ const handlers = {
       return;
     }
     const id = modId(pos[0]);
-    const r = process.env.WEBMODS_RUN_TOKEN ? await ctx.call('mod.restore', { id }, 10000) : shipped.restoreMod(ctx.ws, id);
+    const r = envVar('RUN_TOKEN') ? await ctx.call('mod.restore', { id }, 10000) : shipped.restoreMod(ctx.ws, id);
     if (ctx.json) return printJson({ id: r.id, restored: true, file: r.file });
     out(`restored ${r.id} (${r.file}); it's back on or off as it was before`);
   },
@@ -475,7 +476,7 @@ const handlers = {
     } else if (pos.length) {
       code = pos.join(' ');
     } else {
-      throw new UsageError("nothing to run: webmods run '<code>' | -f file.js | -");
+      throw new UsageError("nothing to run: trif run '<code>' | -f file.js | -");
     }
     const det = detectExpression(code);
     const args = { code: det.code, expression: det.expression, ...tabArgs(ctx.opts) };
@@ -521,7 +522,7 @@ const handlers = {
     let file = ctx.opts['-o'];
     if (!file) {
       // In a run, its own screenshots folder (it may not see other sites').
-      const dir = process.env.WEBMODS_RUN_SCREENSHOTS || ctx.ws.screenshots;
+      const dir = envVar('RUN_SCREENSHOTS') || ctx.ws.screenshots;
       const stamp = new Date().toISOString().replace(/[:]/g, '-').replace(/\..+$/, '');
       file = path.join(dir, `${stamp}.png`);
       for (let n = 2; fs.existsSync(file); n++) file = path.join(dir, `${stamp}-${n}.png`);
@@ -536,12 +537,12 @@ const handlers = {
   async record(ctx, pos) {
     const site = normalizeSite(pos[0]);
     const mode = (pos[1] || 'on').toLowerCase();
-    if (!['on', 'off'].includes(mode)) throw new UsageError('usage: webmods record <site> [on|off]');
+    if (!['on', 'off'].includes(mode)) throw new UsageError('usage: trif record <site> [on|off]');
     const r = await ctx.call('record', { site, on: mode === 'on' });
     if (ctx.json) return printJson(r);
     const list = (r && r.recording) || [];
     out(`recording: ${list.length ? list.join(', ') : '(none)'}`);
-    if (mode === 'on') out(`Takes effect on the next page load: webmods reload --url ${site}`);
+    if (mode === 'on') out(`Takes effect on the next page load: trif reload --url ${site}`);
   },
 
   async requests(ctx) {
@@ -555,7 +556,7 @@ const handlers = {
     const r = await ctx.call('requests', args);
     if (ctx.json) return printJson(r);
     if (!Array.isArray(r) || !r.length) {
-      return out('(no recorded requests; is recording on for this site? webmods record <site> on, then reload)');
+      return out('(no recorded requests; is recording on for this site? trif record <site> on, then reload)');
     }
     for (const q of r) {
       out(`${padL(q.i, 4)}  ${pad(q.method || '', 6)} ${padL(q.status ?? '', 3)}  ${pad(q.type || '', 5)} ${padL(humanSize(q.size), 7)}  ${q.url}`);
@@ -563,9 +564,9 @@ const handlers = {
   },
 
   async request(ctx, pos) {
-    if (pos[0] === undefined) throw new UsageError('usage: webmods request [TAB] <i> [-o file]');
+    if (pos[0] === undefined) throw new UsageError('usage: trif request [TAB] <i> [-o file]');
     const i = Number(pos[0]);
-    if (!Number.isInteger(i)) throw new UsageError('<i> must be the number shown by webmods requests');
+    if (!Number.isInteger(i)) throw new UsageError('<i> must be the number shown by trif requests');
     const r = await ctx.call('request', { i, ...tabArgs(ctx.opts) });
     if (ctx.json && !ctx.opts['-o']) return printJson(r);
     const view = { ...r };
@@ -628,18 +629,18 @@ const handlers = {
     }
     if (!mods.length && !errors.length) {
       out(`(no mods in ${ctx.ws.modsDir})`);
-      out('Create one with: webmods new <site> <mod>');
+      out('Create one with: trif new <site> <mod>');
       return;
     }
     const errById = new Map(errors.map((e) => [e.id, e.error]));
     for (const m of mods) {
       out(m.id + (m.name !== path.basename(m.file, '.js') ? `  (${m.name})` : '') + (enabled.get(m.id) === false ? '  [off]' : ''));
-      if (enabled.get(m.id) === false) out(`  switched off by the user (not running; webmods enable ${m.id} turns it on)`);
-      else if (offSites.has(m.id)) out(`  switched off by the user on ${offSites.get(m.id).join(', ')} (webmods enable ${m.id} --site <site> turns it back on there)`);
-      if (isHeld(m)) out(`  HELD: a side-panel agent wrote it while working on ${held[m.id].site}, but ${held[m.id].reason}. Not running until the user approves it (webmods approve ${m.id}).`);
-      if (updates[m.id]) out(`  ${updateText(updates[m.id])}: webmods mod-update ${m.id}`);
+      if (enabled.get(m.id) === false) out(`  switched off by the user (not running; trif enable ${m.id} turns it on)`);
+      else if (offSites.has(m.id)) out(`  switched off by the user on ${offSites.get(m.id).join(', ')} (trif enable ${m.id} --site <site> turns it back on there)`);
+      if (isHeld(m)) out(`  HELD: a side-panel agent wrote it while working on ${held[m.id].site}, but ${held[m.id].reason}. Not running until the user approves it (trif approve ${m.id}).`);
+      if (updates[m.id]) out(`  ${updateText(updates[m.id])}: trif mod-update ${m.id}`);
       if (m.description) out(`  ${m.description}`);
-      if (m.source === 'webmods') out(`  from WebMods${m.version ? `, version ${m.version}` : ''}`);
+      if (isShippedSource(m.source)) out(`  from TRIF${m.version ? `, version ${m.version}` : ''}`);
       out(`  matches: ${m.matches.join(' ')}`);
       if (m.risk) out(`  risk: ${m.risk.tier}${m.risk.why ? ` (${m.risk.why})` : ''}`);
       if (m.excludes.length) out(`  excludes: ${m.excludes.join(' ')}`);
@@ -652,7 +653,7 @@ const handlers = {
   },
 
   async new(ctx, pos) {
-    if (pos.length < 2) throw new UsageError('usage: webmods new <site> <mod>');
+    if (pos.length < 2) throw new UsageError('usage: trif new <site> <mod>');
     const site = normalizeSite(pos[0]);
     const mod = String(pos[1]).replace(/\.js$/, '');
     if (!/^[a-z0-9][a-z0-9._-]*$/i.test(mod)) {
@@ -696,11 +697,11 @@ const handlers = {
     if (!pos[0]) {
       const list = available();
       if (ctx.json) return printJson(list);
-      out(list.length ? `Available examples:\n${list.map((l) => '  ' + l).join('\n')}\n\nInstall one with: webmods install-example <site>/<mod>` : `(no examples found in ${dir})`);
+      out(list.length ? `Available examples:\n${list.map((l) => '  ' + l).join('\n')}\n\nInstall one with: trif install-example <site>/<mod>` : `(no examples found in ${dir})`);
       return;
     }
     const m = /^([^/]+)\/([^/]+?)(\.js)?$/.exec(pos[0]);
-    if (!m) throw new UsageError('usage: webmods install-example <site>/<mod>   (e.g. x.com/plain-x)');
+    if (!m) throw new UsageError('usage: trif install-example <site>/<mod>   (e.g. x.com/plain-x)');
     const [, site, mod] = m;
     const src = path.join(dir, site, `${mod}.js`);
     if (!fs.existsSync(src)) {
@@ -725,12 +726,12 @@ function updateText(u) {
   return `update available${u.modified ? " (you've changed it)" : ''}${u.version ? `: version ${u.version}` : ''}`;
 }
 
-// "x.com/a", "sites/x.com/a.js", "~/.webmods/sites/x.com/a.js" → "x.com/a".
+// "x.com/a", "sites/x.com/a.js", "~/.trif/sites/x.com/a.js" → "x.com/a".
 function modId(arg) {
   const s = String(arg || '').trim().replace(/\\/g, '/').replace(/\.js$/, '');
   const m = /(?:^|\/)sites\/([^/]+\/[^/]+)$/.exec(s);
   const id = m ? m[1] : s;
-  if (!/^[^/\s]+\/[^/\s]+$/.test(id)) throw new UsageError(`"${arg}" isn't a mod id: use <site>/<mod>, e.g. x.com/hide-reposts (see webmods status)`);
+  if (!/^[^/\s]+\/[^/\s]+$/.test(id)) throw new UsageError(`"${arg}" isn't a mod id: use <site>/<mod>, e.g. x.com/hide-reposts (see trif status)`);
   return id;
 }
 
@@ -748,7 +749,7 @@ async function switchMod(ctx, pos, enabled) {
     else if (r.offSites && r.offSites.length) out(`Off on: ${r.offSites.join(', ')}`);
   } else out(`${id} is ${enabled ? 'on' : 'off'}`);
   if (r && r.reloaded != null) out(`reloaded tab ${r.reloaded}`);
-  else out(`It applies from the next page load: reload open ${site} tabs to see it (webmods reload --url ${site}).`);
+  else out(`It applies from the next page load: reload open ${site} tabs to see it (trif reload --url ${site}).`);
 }
 
 // When the extension can be asked: {enabled: Map(mod id → enabled), offSites: Map(mod id → sites it's
@@ -783,7 +784,7 @@ async function agentList(ctx) {
     out(`${pad(a.id, 8)}${pad(what, 26)}${extra}`);
   }
   if (!r.agents.some((a) => a.available)) {
-    out('\nNo agent found. Install Claude Code (or Codex), then run `webmods setup` in that terminal so the helper can find it.');
+    out('\nNo agent found. Install Claude Code (or Codex), then run `trif setup` in that terminal so the helper can find it.');
   }
 }
 
@@ -791,7 +792,7 @@ async function agentRun(ctx, pos) {
   let prompt;
   if (pos.length === 1 && pos[0] === '-') prompt = await readStdin();
   else prompt = pos.join(' ');
-  if (!prompt.trim()) throw new UsageError('missing prompt: webmods agent run [--tab ID] [--url URL] "<what to change>"');
+  if (!prompt.trim()) throw new UsageError('missing prompt: trif agent run [--tab ID] [--url URL] "<what to change>"');
   const args = { prompt };
   if (ctx.opts['--agent']) args.agent = ctx.opts['--agent'];
   if (ctx.opts['--model']) args.model = ctx.opts['--model'];
@@ -807,7 +808,7 @@ async function agentRun(ctx, pos) {
       throw new UsageError(`pass --url <page URL> (couldn't ask Chrome for the current tab: ${e.message})`);
     }
     const t = (Array.isArray(tabs) ? tabs : []).find((x) => (args.tabId !== undefined ? x.id === args.tabId : x.active));
-    if (!t) throw new UsageError(args.tabId !== undefined ? `no tab ${args.tabId} (see webmods tabs)` : 'no active tab found: pass --url <page URL>');
+    if (!t) throw new UsageError(args.tabId !== undefined ? `no tab ${args.tabId} (see trif tabs)` : 'no active tab found: pass --url <page URL>');
     args.url = t.url;
     args.tabId = t.id;
   }
@@ -843,7 +844,7 @@ async function agentRun(ctx, pos) {
   if (!ctx.json) {
     const status = done.ok ? 'ok' : done.stopped ? 'stopped' : 'failed';
     out(`done: ${status}${typeof done.costUsd === 'number' ? ` ($${done.costUsd.toFixed(4)})` : ''}`);
-    if (done.sessionId) out(`session: ${done.sessionId}   (continue: webmods agent run --session ${done.sessionId} --url ${args.url} "...")`);
+    if (done.sessionId) out(`session: ${done.sessionId}   (continue: trif agent run --session ${done.sessionId} --url ${args.url} "...")`);
     const files = Array.isArray(done.changedFiles) ? done.changedFiles : [];
     out(files.length ? `changed: ${files.join(', ')}` : 'changed: (no files)');
   }
@@ -935,15 +936,15 @@ function stdinLines() {
   };
 }
 
-const NO_HELPER_MESSAGE = `webmods: the helper isn't running, so page commands can't reach Chrome.
-Open Chrome (with the WebMods extension installed). If Chrome is already open, run: webmods doctor`;
+const NO_HELPER_MESSAGE = `trif: the helper isn't running, so page commands can't reach Chrome.
+Open Chrome (with the TRIF extension installed). If Chrome is already open, run: trif doctor`;
 
 async function main(argv) {
   let parsed;
   try {
     parsed = parseArgs(argv);
   } catch (e) {
-    process.stderr.write(`webmods: ${e.message}\n`);
+    process.stderr.write(`trif: ${e.message}\n`);
     return 1;
   }
   const { opts, pos } = parsed;
@@ -952,11 +953,11 @@ async function main(argv) {
   if (opts['--help'] && cmd !== 'help') { pos.unshift(cmd); cmd = 'help'; }
   const handler = handlers[cmd];
   if (!handler || !COMMANDS[cmd]) {
-    process.stderr.write(`webmods: unknown command "${cmd}". Run webmods help for the list.\n`);
+    process.stderr.write(`trif: unknown command "${cmd}". Run trif help for the list.\n`);
     return 1;
   }
-  if (process.env.WEBMODS_RUN_TOKEN && NOT_IN_RUNS.has(cmd)) {
-    process.stderr.write(`webmods ${cmd}: not available inside a side-panel agent run (the user can run it in a terminal)\n`);
+  if (envVar('RUN_TOKEN') && NOT_IN_RUNS.has(cmd)) {
+    process.stderr.write(`trif ${cmd}: not available inside a side-panel agent run (the user can run it in a terminal)\n`);
     return 1;
   }
   const ctx = makeCtx(opts);
@@ -965,21 +966,21 @@ async function main(argv) {
     return process.exitCode || 0;
   } catch (e) {
     if (e instanceof UsageError) {
-      process.stderr.write(`webmods ${cmd}: ${e.message}\n`);
+      process.stderr.write(`trif ${cmd}: ${e.message}\n`);
       if (COMMANDS[cmd]) process.stderr.write(`usage: ${COMMANDS[cmd].usage}\n`);
       return 1;
     }
     if (e instanceof HelperError && e.kind === 'no-helper') {
       // Inside a side-panel run the helper is reached through the run's mailbox: gone means the run ended.
-      process.stderr.write((process.env.WEBMODS_RUN_BOX ? `webmods: ${e.message}` : NO_HELPER_MESSAGE) + '\n');
+      process.stderr.write((envVar('RUN_BOX') ? `trif: ${e.message}` : NO_HELPER_MESSAGE) + '\n');
       return 2;
     }
     if (e instanceof HelperError || e instanceof trash.TrashError) {
       if (ctx.json) printJson({ ok: false, error: e.message });
-      process.stderr.write(`webmods ${cmd}: ${e.message}\n`);
+      process.stderr.write(`trif ${cmd}: ${e.message}\n`);
       return 1;
     }
-    process.stderr.write(`webmods ${cmd}: ${e && e.stack ? e.stack : e}\n`);
+    process.stderr.write(`trif ${cmd}: ${e && e.stack ? e.stack : e}\n`);
     return 1;
   }
 }

@@ -58,7 +58,7 @@ function connectPort() {
   port.onMessage.addListener(onPortMessage);
   port.onDisconnect.addListener(() => {
     port = null;
-    for (const p of pending.values()) p.reject(new Error('lost connection to the WebMods service worker'));
+    for (const p of pending.values()) p.reject(new Error('lost connection to the TRIF service worker'));
     pending.clear();
     setTimeout(() => { if (!port) connectPort(); refreshStatus(); }, 500); // the service worker restarted
   });
@@ -109,7 +109,7 @@ async function refreshStatus() {
     view.status = await request({ type: 'status' });
     if (view.status.helper.connected && (!wasConnected || !view.agents)) loadAgents();
   } catch (e) {
-    console.warn('[webmods] status failed', e);
+    console.warn('[TRIF] status failed', e);
   }
   render();
 }
@@ -282,9 +282,9 @@ function render() {
   const { info: agentInfo, list: agentList } = currentAgent();
   const anyAgent = agentList.some((a) => a.available);
 
-  ui.site.textContent = site || 'WebMods';
+  ui.site.textContent = site || 'TRIF';
   ui.site.title = view.tab?.url || '';
-  document.title = site ? `WebMods · ${site}` : 'WebMods';
+  document.title = site ? `TRIF · ${site}` : 'TRIF';
 
   // Status dot
   let dot = 'bad';
@@ -350,8 +350,8 @@ function renderNotice({ helperOk, agentInfo, anyAgent }) {
   } else if (status && !helperOk) {
     bad = true;
     const p = el('p');
-    p.append('Run ', code('npx webmods setup'), ` in a terminal (needs Node 18+), then restart ${BROWSER}.`);
-    parts.push(el('p', 'title', 'The WebMods helper isn’t connected'), p);
+    p.append('Run ', code('npx trif setup'), ` in a terminal (needs Node 18+), then restart ${BROWSER}.`);
+    parts.push(el('p', 'title', 'The TRIF helper isn’t connected'), p);
     if (status.helper.error) parts.push(el('p', 'note', `${BROWSER} says: ${status.helper.error}`));
     const actions = el('p', 'actions');
     const retry = el('button', 'btn', 'Try again');
@@ -371,8 +371,8 @@ function renderNotice({ helperOk, agentInfo, anyAgent }) {
   } else if (status && !status.userScripts) {
     parts.push(el('p', 'title', 'Mods are paused'));
     parts.push(el('p', null, FIREFOX
-      ? 'Allow user scripts for WebMods so mods can run on websites.'
-      : 'Turn on “Allow User Scripts” for WebMods so mods can run on websites.'));
+      ? 'Allow user scripts for TRIF so mods can run on websites.'
+      : 'Turn on “Allow User Scripts” for TRIF so mods can run on websites.'));
     const actions = el('p', 'actions');
     const open = el('button', 'btn primary', FIREFOX ? 'Allow user scripts' : 'Open extension settings');
     open.type = 'button';
@@ -390,7 +390,7 @@ function renderNotice({ helperOk, agentInfo, anyAgent }) {
       if (agentInfo.note) { const p = el('p'); setMarkdown(p, agentInfo.note); parts.push(p); }
     } else {
       parts.push(el('p', 'title', 'No coding agent found'));
-      parts.push(el('p', null, 'Install Claude Code, then run npx webmods setup again from the same terminal.'));
+      parts.push(el('p', null, 'Install Claude Code, then run npx trif setup again from the same terminal.'));
     }
     if (anyAgent) parts.push(el('p', 'note', 'Pick another agent in Settings.'));
   } else if (helperOk && view.agentsError && !view.agents) {
@@ -515,12 +515,12 @@ function onLoginEvent(L, event) {
       if (L.url) return;
       if (!isLoginUrl(event.url)) {
         request({ type: 'agent.loginCancel', loginId: L.loginId }).catch(() => {});
-        loginFailed(L, `${L.name} gave a sign-in link that isn’t on claude.com, claude.ai or anthropic.com, so WebMods didn’t open it.`);
+        loginFailed(L, `${L.name} gave a sign-in link that isn’t on claude.com, claude.ai or anthropic.com, so TRIF didn’t open it.`);
         return;
       }
       L.url = event.url;
       L.phase = 'code';
-      chrome.tabs.create({ url: L.url, active: true }).catch((e) => console.warn('[webmods] could not open the sign-in page', e));
+      chrome.tabs.create({ url: L.url, active: true }).catch((e) => console.warn('[TRIF] could not open the sign-in page', e));
       break;
     }
     case 'text':
@@ -616,8 +616,8 @@ function renderMods() {
   }
 }
 
-// WebMods is off on a site until the user turns it on here (see "sites WebMods is on for" in lib.js):
-// until then the panel shows only "WebMods is disabled" and the button, and nothing runs or reads the
+// TRIF is off on a site until the user turns it on here (see "sites TRIF is on for" in lib.js):
+// until then the panel shows only "TRIF is disabled" and the button, and nothing runs or reads the
 // site. Once on, the header's switch turns it back off. (Unknown until the first status: neither shows.)
 const siteScope = () => (view.site ? scopeFor(view.site) : null);
 const siteIsOn = () => !!siteScope() && (view.status?.sitesOn || []).includes(siteScope());
@@ -632,10 +632,10 @@ function renderGate() {
   ui.siteSwitch.hidden = !known;
   ui.siteSwitch.setAttribute('aria-checked', String(siteIsOn()));
   ui.siteSwitch.setAttribute('aria-busy', String(siteSwitching));
-  ui.siteSwitch.title = ui.siteSwitch.dataset.error || (scope ? `WebMods on ${scope}` : '');
+  ui.siteSwitch.title = ui.siteSwitch.dataset.error || (scope ? `TRIF on ${scope}` : '');
   ui.siteSwitch.setAttribute('aria-label', ui.siteSwitch.title);
   if (!gated) return;
-  ui.gateBtn.textContent = `Enable WebMods on ${scope}`;
+  ui.gateBtn.textContent = `Enable TRIF on ${scope}`;
   ui.gateBtn.disabled = siteSwitching;
 }
 
@@ -650,7 +650,7 @@ async function setSiteOn(on) {
     await refreshStatus();
   } catch (e) {
     // Under the button when turning on; on the header switch's tooltip when turning off.
-    const text = `Couldn't switch WebMods ${on ? 'on' : 'off'}: ${e?.message ?? e}`;
+    const text = `Couldn't switch TRIF ${on ? 'on' : 'off'}: ${e?.message ?? e}`;
     ui.gateErr.textContent = text;
     ui.gateErr.hidden = false;
     if (!on) ui.siteSwitch.dataset.error = text;
@@ -696,9 +696,9 @@ function modItem(m) {
     name.append(' ', badge);
   }
   const main = el('div', 'mod-main');
-  // The mods WebMods ships say so (their header's @source and @version).
+  // The mods TRIF ships say so (their header's @source and @version).
   const file = el('div', 'mod-file', (m.file || m.id).split('/').pop());
-  if (m.source === 'webmods') file.append(' ', el('span', 'mod-source', `from WebMods${m.version ? `, version ${m.version}` : ''}`));
+  if (m.source === 'webmods' || m.source === 'trif') file.append(' ', el('span', 'mod-source', `from TRIF${m.version ? `, version ${m.version}` : ''}`));
   main.append(light, name, file);
   const row = el('div', 'mod-row');
   if (m.held) {
@@ -731,15 +731,15 @@ function modItem(m) {
   return li;
 }
 
-// A newer version of a mod WebMods ships, which didn't replace this copy because the user changed it
+// A newer version of a mod TRIF ships, which didn't replace this copy because the user changed it
 // (helper/lib/preinstalled.js): use it (theirs goes to the trash, with an Undo in the chat), keep theirs
 // (this version isn't offered again), or have their agent merge the two in a chat run here.
 function updateNotice(m, err) {
   const box = el('div', 'mod-update');
   const v = m.update.version ? ` (version ${m.update.version})` : '';
   box.append(el('p', null, m.update.modified
-    ? `WebMods has a new version of this mod${v}. You've changed yours, so it wasn't replaced.`
-    : `WebMods has a new version of this mod${v}.`));
+    ? `TRIF has a new version of this mod${v}. You've changed yours, so it wasn't replaced.`
+    : `TRIF has a new version of this mod${v}.`));
   const fail = (b, e) => { b.disabled = false; err.textContent = String(e?.message ?? e); err.hidden = false; };
   const choose = (choice) => async (e) => {
     const b = e.currentTarget;
@@ -755,7 +755,7 @@ function updateNotice(m, err) {
     const merge = button('Merge with my agent', 'merge', async () => {
       merge.disabled = true;
       try {
-        await startRun(`Merge the new version of ${m.name}${v} from WebMods into my copy, keeping my changes.`, { merge: m.id });
+        await startRun(`Merge the new version of ${m.name}${v} from TRIF into my copy, keeping my changes.`, { merge: m.id });
       } catch (x) { fail(merge, x); }
     });
     merge.title = 'Your agent combines the new version with your changes, in this chat.';
@@ -765,7 +765,7 @@ function updateNotice(m, err) {
   return box;
 }
 
-// Deleting moves the mod to the helper's trash (`webmods restore`), so it's one click, with an Undo on
+// Deleting moves the mod to the helper's trash (`trif restore`), so it's one click, with an Undo on
 // the chat line it leaves, rather than a confirmation.
 function deleteButton(m, labelId, li) {
   const b = el('button', 'icon-btn mod-delete');
@@ -960,7 +960,7 @@ async function send() {
   if (!text || !view.site || view.chat.run || !ui.composer.dataset.canSend) return;
   if (text.startsWith('/')) {
     ui.input.value = '';
-    try { if (await panelCommand(text)) return; } catch (e) { console.warn('[webmods] command failed', e); }
+    try { if (await panelCommand(text)) return; } catch (e) { console.warn('[TRIF] command failed', e); }
   }
   ui.input.value = '';
   try {
@@ -969,7 +969,7 @@ async function send() {
     // The background records start failures in the chat; anything earlier goes back in the box.
     const inChat = view.chat.messages.some((m) => m.role === 'user' && m.text === text);
     if (!inChat && !ui.input.value) ui.input.value = text;
-    console.warn('[webmods] agent.start failed', e);
+    console.warn('[TRIF] agent.start failed', e);
   }
 }
 
@@ -992,12 +992,12 @@ async function stop() {
   const runId = view.chat.run?.runId;
   if (!runId) return;
   ui.stop.disabled = true;
-  try { await request({ type: 'agent.stop', runId }); } catch (e) { console.warn('[webmods] stop failed', e); }
+  try { await request({ type: 'agent.stop', runId }); } catch (e) { console.warn('[TRIF] stop failed', e); }
 }
 
 async function newChat() {
   if (!view.site) return;
-  await request({ type: 'chat.clear', site: view.site }).catch((e) => console.warn('[webmods] clear failed', e));
+  await request({ type: 'chat.clear', site: view.site }).catch((e) => console.warn('[TRIF] clear failed', e));
   ui.input.focus();
 }
 
@@ -1034,9 +1034,9 @@ ui.settingsBtn.addEventListener('click', () => {
   if (open && view.status?.helper?.connected) { loadAgents().then(() => loadModels(currentAgent().id)); loadInstructions(); }
 });
 
-// The user's standing instructions for every agent run: ~/.webmods/instructions.md, read and written
+// The user's standing instructions for every agent run: ~/.trif/instructions.md, read and written
 // through the helper (helper/lib/instructions.js). Loaded when settings open; saved as they type.
-const INSTRUCTIONS_NOTE = 'Applies from your next message, here and in Claude Code in ~/.webmods.';
+const INSTRUCTIONS_NOTE = 'Applies from your next message, here and in Claude Code in ~/.trif.';
 let instructionsTimer = null;
 let instructionsSaved = null; // the text the helper last confirmed
 
@@ -1102,7 +1102,7 @@ ui.modelCustom.addEventListener('change', () => { clearTimeout(modelTimer); save
 $('#setup-link').addEventListener('click', (e) => { e.preventDefault(); openSetup(); });
 
 // ---- updates ------------------------------------------------------------------------------------
-// The helper checks for a newer WebMods (helper/lib/update.js) and its summary rides on the status. The
+// The helper checks for a newer TRIF (helper/lib/update.js) and its summary rides on the status. The
 // panel offers it (Update installs it, then the extension reloads onto it), says so after the reload, and
 // has the "Install updates automatically" setting (off unless the user turns it on).
 
@@ -1120,10 +1120,10 @@ function renderUpdate() {
   const parts = [];
   n.classList.remove('ok', 'bad');
   if (installing) {
-    parts.push(el('p', 'title', `Updating WebMods to ${u?.latest || 'the new version'}…`));
+    parts.push(el('p', 'title', `Updating TRIF to ${u?.latest || 'the new version'}…`));
     parts.push(el('p', 'note', 'It reloads by itself when it’s done.'));
   } else if (u?.available) {
-    parts.push(el('p', 'title', `WebMods ${u.latest} is available`));
+    parts.push(el('p', 'title', `TRIF ${u.latest} is available`));
     if (view.updateError) { parts.push(el('p', 'note error', view.updateError)); n.classList.add('bad'); }
     const actions = el('p', 'actions');
     if (u.canInstall) actions.append(button('Update', 'primary', installUpdate));
@@ -1132,7 +1132,7 @@ function renderUpdate() {
     if (!u.canInstall && u.why) parts.push(el('p', 'note', u.why));
   } else if (done) {
     n.classList.add('ok');
-    parts.push(el('p', 'title', `WebMods updated to ${done.to}`));
+    parts.push(el('p', 'title', `TRIF updated to ${done.to}`));
     const actions = el('p', 'actions');
     if (done.notes) actions.append(notesToggle(n, done.notes));
     actions.append(button('OK', null, () => request({ type: 'update.dismiss' }).catch(() => {})));
@@ -1159,11 +1159,11 @@ function renderUpdateSettings(u) {
   ui.autoUpdate.disabled = !connected || !u || !u.canInstall || !!view.updateBusy;
   let text = '';
   if (!connected || !u) text = connected ? '' : 'Update settings appear once the helper is connected.';
-  else if (view.updateBusy === 'checking') text = `WebMods ${u.current}. Checking for updates…`;
-  else if (!u.canInstall) text = `WebMods ${u.current}. ${u.why || ''}`;
-  else if (u.available) text = `WebMods ${u.current} (${u.latest} is available).`;
-  else if (u.error) text = `WebMods ${u.current}. Couldn’t check for updates: ${u.error}`;
-  else text = `WebMods ${u.current}${u.latest ? ', up to date' : ''}.`;
+  else if (view.updateBusy === 'checking') text = `TRIF ${u.current}. Checking for updates…`;
+  else if (!u.canInstall) text = `TRIF ${u.current}. ${u.why || ''}`;
+  else if (u.available) text = `TRIF ${u.current} (${u.latest} is available).`;
+  else if (u.error) text = `TRIF ${u.current}. Couldn’t check for updates: ${u.error}`;
+  else text = `TRIF ${u.current}${u.latest ? ', up to date' : ''}.`;
   if (ui.updateNote.dataset.text === text) return;
   ui.updateNote.dataset.text = text;
   ui.updateNote.replaceChildren(text);
@@ -1210,11 +1210,11 @@ ui.autoUpdate.addEventListener('change', async () => {
 
 // ---- report a problem ---------------------------------------------------------------------------
 // The helper writes the report (helper/lib/report.js: versions, setup checks, this site's mods and recent
-// errors, scrubbed of names, paths and addresses); the panel opens the report form (webmods.dev/report)
+// errors, scrubbed of names, paths and addresses); the panel opens the report form (timsrobot.com/report)
 // with it after the #, which the browser never sends to the server: nothing leaves until the person
 // presses Send there.
 
-const REPORT_URL = 'https://webmods.dev/report'; // when the helper can't say (it isn't connected)
+const REPORT_URL = 'https://timsrobot.com/report'; // when the helper can't say (it isn't connected)
 
 function reportLink(url, text, site) {
   const params = new URLSearchParams({ r: text });
@@ -1234,11 +1234,11 @@ async function openReport() {
   } catch (e) {
     // Without the helper: what the panel knows, which is when a report matters most.
     const s = view.status;
-    text = `WebMods problem report\n\nWebMods     ${s?.version || '?'}\nBrowser     ${s?.browser || BROWSER} ${s?.chrome || ''}\nHelper      not connected (${s?.helper?.error || String(e?.message ?? e)})`;
+    text = `TRIF problem report\n\nTRIF        ${s?.version || '?'}\nBrowser     ${s?.browser || BROWSER} ${s?.chrome || ''}\nHelper      not connected (${s?.helper?.error || String(e?.message ?? e)})`;
   }
   chrome.tabs.create({ url: reportLink(url, text, view.site || '') });
 }
 
 $('#report-link').addEventListener('click', (e) => { e.preventDefault(); openReport(); });
 
-init().catch((e) => console.error('[webmods] side panel failed to start', e));
+init().catch((e) => console.error('[TRIF] side panel failed to start', e));

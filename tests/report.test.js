@@ -1,6 +1,6 @@
 'use strict';
 // Problem reports (helper/lib/report.js), the helper's report.build / update.* commands, and
-// `webmods report`.
+// `trif report`.
 
 const test = require('node:test');
 const assert = require('node:assert');
@@ -12,13 +12,13 @@ const { scrub, logProblems, buildReport, reportEmail } = require('../helper/lib/
 
 test('scrub removes the home folder, user name, emails, query strings and tokens, but keeps extension IDs', () => {
   const t = scrub([
-    'log at /Users/alice/.webmods/helper.log and /home/bob/x',
+    'log at /Users/alice/.trif/helper.log and /home/bob/x',
     'Alice wrote alice@example.com',
     'opened https://x.com/i/flow?token=abc&next=1',
     'session 7f51ddf4b1dd486e85ab7caf3965fd41aa and id iaablflfafmonebdomeikadolkgdbkhe',
   ].join('\n'), { home: '/Users/alice', user: 'alice' });
   assert.equal(t, [
-    'log at ~/.webmods/helper.log and /home/<user>/x',
+    'log at ~/.trif/helper.log and /home/<user>/x',
     '<user> wrote <email>',
     'opened https://x.com/i/flow?…',
     'session <redacted> and id iaablflfafmonebdomeikadolkgdbkhe',
@@ -53,11 +53,11 @@ test('buildReport lists what helps and nothing personal', () => {
     agents: [{ id: 'claude', available: true, version: '2.1.312', loggedIn: true }, { id: 'codex', available: false }],
     update: { available: true, latest: '0.1.2' },
     mods: [{ id: 'x.com/plain-x', enabled: true, registered: true }, { id: 'x.com/punk', enabled: false }, { id: 'x.com/new', enabled: true, registered: false, error: 'SyntaxError' }],
-    doctor: { checks: [{ status: 'ok', title: 'node' }, { status: 'warn', title: 'CLI not on PATH (/Users/zed/.webmods/bin)' }] },
+    doctor: { checks: [{ status: 'ok', title: 'node' }, { status: 'warn', title: 'CLI not on PATH (/Users/zed/.trif/bin)' }] },
   }, { home: '/Users/zed', user: 'zed' });
   for (const want of ['What happened\nPlain X shows nothing', 'Browser     Firefox 153 (extension 0.1.1)', 'claude 2.1.312 (logged in), codex not found',
-    'Updates     0.1.2 available', 'Site        x.com, WebMods on', 'x.com/plain-x: on, running', 'x.com/punk: off', 'x.com/new: on, not running (error: SyntaxError)',
-    'Doctor      1 ok, 1 warning(s), 0 problem(s)', 'warn  CLI not on PATH (~/.webmods/bin)']) {
+    'Updates     0.1.2 available', 'Site        x.com, TRIF on', 'x.com/plain-x: on, running', 'x.com/punk: off', 'x.com/new: on, not running (error: SyntaxError)',
+    'Doctor      1 ok, 1 warning(s), 0 problem(s)', 'warn  CLI not on PATH (~/.trif/bin)']) {
     assert.ok(text.includes(want), `report has ${JSON.stringify(want)}:\n${text}`);
   }
   assert.doesNotMatch(text, /zed/);
@@ -67,14 +67,14 @@ test('reportUrl and reportLink: the form from package.json bugs.url, the report 
   const { reportUrl, reportLink } = require('../helper/lib/report');
   const root = tempDir();
   assert.equal(reportUrl(root), null);
-  fs.writeFileSync(path.join(root, 'package.json'), JSON.stringify({ bugs: { url: 'https://webmods.dev/report' } }));
-  assert.equal(reportUrl(root), 'https://webmods.dev/report');
+  fs.writeFileSync(path.join(root, 'package.json'), JSON.stringify({ bugs: { url: 'https://timsrobot.com/report' } }));
+  assert.equal(reportUrl(root), 'https://timsrobot.com/report');
   fs.writeFileSync(path.join(root, 'package.json'), JSON.stringify({ bugs: { url: 'http://insecure.example/report' } }));
   assert.equal(reportUrl(root), null);
-  const link = reportLink('https://webmods.dev/report', 'WebMods 0.1.1\nx & y', 'x.com');
-  assert.equal(link.split('#')[0], 'https://webmods.dev/report');
+  const link = reportLink('https://timsrobot.com/report', 'TRIF 0.1.1\nx & y', 'x.com');
+  assert.equal(link.split('#')[0], 'https://timsrobot.com/report');
   const params = new URLSearchParams(link.split('#')[1]);
-  assert.deepStrictEqual([params.get('r'), params.get('s')], ['WebMods 0.1.1\nx & y', 'x.com']);
+  assert.deepStrictEqual([params.get('r'), params.get('s')], ['TRIF 0.1.1\nx & y', 'x.com']);
 });
 
 test('reportEmail comes from package.json bugs.email', () => {
@@ -118,11 +118,11 @@ test('the helper answers report.build and update.*, and tells the extension abou
 
   let r = await extRequest(ext, 'report.build', { site: 'x.com', siteOn: true, mods: [{ id: 'x.com/plain-x', enabled: true, registered: true }] });
   assert.equal(r.ok, true, r.error);
-  assert.match(r.result.text, /^WebMods problem report/);
+  assert.match(r.result.text, /^TRIF problem report/);
   assert.match(r.result.text, /Browser {5}Firefox 153 \(extension 0\.1\.1\)/);
   assert.match(r.result.text, /x\.com\/plain-x: on, running/);
-  assert.equal(r.result.url, 'https://webmods.dev/report');
-  assert.equal(r.result.email, 'reports@webmods.dev');
+  assert.equal(r.result.url, 'https://timsrobot.com/report');
+  assert.equal(r.result.email, 'reports@timsrobot.com');
 
   r = await extRequest(ext, 'update.setAuto', { on: true });
   assert.equal(r.result.auto, true);
@@ -140,11 +140,11 @@ test('the helper answers report.build and update.*, and tells the extension abou
   assert.equal(res.ok, false);
 });
 
-test('webmods report prints a report without a browser', async () => {
+test('trif report prints a report without a browser', async () => {
   const home = tempDir();
   const r = await runCli(['report'], { home });
   assert.equal(r.code, 0, r.stderr);
-  assert.match(r.stdout, /^WebMods problem report/);
+  assert.match(r.stdout, /^TRIF problem report/);
   assert.match(r.stdout, /The browser isn't connected/);
-  assert.match(r.stdout, /Send this, with what went wrong, with the form at https:\/\/webmods\.dev\/report .*, or email it to reports@webmods\.dev\./);
+  assert.match(r.stdout, /Send this, with what went wrong, with the form at https:\/\/timsrobot\.com\/report .*, or email it to reports@timsrobot\.com\./);
 });

@@ -1,14 +1,14 @@
 #!/usr/bin/env node
 'use strict';
-// The WebMods helper's bridge for Safari. Safari's native messaging only reaches an extension's own Mac
+// The TRIF helper's bridge for Safari. Safari's native messaging only reaches an extension's own Mac
 // app, so the Safari extension (extension/safari.js) connects here instead, with a WebSocket to
 // 127.0.0.1:47615, and gets a host.js, spoken to in the usual native-messaging frames on its stdin and
-// stdout (docs/PROTOCOL.md). The bridge itself only relays. `webmods setup --browser safari` installs it
+// stdout (docs/PROTOCOL.md). The bridge itself only relays. `trif setup --browser safari` installs it
 // as a login item (a launchd agent), so it's always running.
 //
-// Only WebMods' Safari extension may connect. A browser always sends the page's origin with a WebSocket
+// Only TRIF's Safari extension may connect. A browser always sends the page's origin with a WebSocket
 // handshake and a web page can't change it, so only a Safari extension gets past the origin check, and of
-// those only WebMods has the key (?token=, the contents of <home>/safari-token, written by setup): the
+// those only TRIF has the key (?token=, the contents of <home>/safari-token, written by setup): the
 // extension gets it from its own Mac app, which no other extension can message. (A Safari extension's
 // origin is random and changes, so it can't be checked for itself.)
 //
@@ -143,9 +143,9 @@ function createBridge(opts = {}) {
     const existing = hosts.get(origin);
     if (existing) return existing;
     const [file, ...args] = hostCommand(origin);
-    // WEBMODS_SAFARI_BRIDGE tells an update's setup, run inside this host, that restarting the bridge
+    // TRIF_SAFARI_BRIDGE tells an update's setup, run inside this host, that restarting the bridge
     // would kill it (setup.js loadSafariAgent).
-    const child = spawn(file, args, { stdio: ['pipe', 'pipe', 'inherit'], env: { ...process.env, WEBMODS_SAFARI_BRIDGE: String(process.pid) } });
+    const child = spawn(file, args, { stdio: ['pipe', 'pipe', 'inherit'], env: { ...process.env, TRIF_SAFARI_BRIDGE: String(process.pid) } });
     const h = { child, socket: null, queue: [], idleTimer: null };
     hosts.set(origin, h);
     log.info(`safari bridge: host ${child.pid} started for ${origin}`);
@@ -230,12 +230,12 @@ function createBridge(opts = {}) {
       return;
     }
     res.writeHead(426, { 'Content-Type': 'text/plain' });
-    res.end('WebMods helper for Safari: WebSocket only.\n');
+    res.end('TRIF helper for Safari: WebSocket only.\n');
   });
   server.on('upgrade', (req, socket) => {
     const key = token();
     if (!allowed(req, key)) {
-      log.warn(`safari bridge: refused a connection from ${req.headers.origin || 'no origin'}${key ? '' : ' (no key yet: run webmods setup --browser safari)'}`);
+      log.warn(`safari bridge: refused a connection from ${req.headers.origin || 'no origin'}${key ? '' : ' (no key yet: run trif setup --browser safari)'}`);
       socket.end('HTTP/1.1 403 Forbidden\r\nConnection: close\r\n\r\n');
       return;
     }

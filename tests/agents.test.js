@@ -1,6 +1,6 @@
 'use strict';
 // Tests for agent runs: helper/lib/agents/*, helper/lib/runs.js, the agent.* commands in host.js,
-// `webmods agent`, and the agent bits of setup/doctor. Uses a fake `claude` executable; never the real one.
+// `trif agent`, and the agent bits of setup/doctor. Uses a fake `claude` executable; never the real one.
 
 const test = require('node:test');
 const assert = require('node:assert');
@@ -82,7 +82,7 @@ if (prompt.includes('SLEEP') || prompt.includes('STUBBORN')) {
   return;
 }
 say({ type: 'assistant', message: { content: [{ type: 'text', text: 'Hiding the banner now.' }] } });
-say({ type: 'assistant', message: { content: [{ type: 'tool_use', id: 't1', name: 'Bash', input: { command: 'webmods reload --tab 12' } }] } });
+say({ type: 'assistant', message: { content: [{ type: 'tool_use', id: 't1', name: 'Bash', input: { command: 'trif reload --tab 12' } }] } });
 say({ type: 'user', message: { content: [{ type: 'tool_result', tool_use_id: 't1', content: 'reloaded' }] } });
 if (prompt.includes('EDIT')) {
   const file = path.join(process.cwd(), 'sites', 'example.com', 'fake.js');
@@ -132,7 +132,7 @@ function calls(bin) {
 function callFor(bin, word) { return calls(bin).find((c) => c.prompt.includes(word)); }
 
 function startHost(home, env = {}) {
-  const ext = new FakeExtension({ home, env: { WEBMODS_AGENT_KILL_GRACE_MS: '400', ...env } });
+  const ext = new FakeExtension({ home, env: { TRIF_AGENT_KILL_GRACE_MS: '400', ...env } });
   cleanups.push(() => ext.close());
   return ext;
 }
@@ -181,7 +181,7 @@ test('claude adapter: command flags, resume and model', () => {
   const settings = JSON.parse(c.args[c.args.indexOf('--settings') + 1]);
   assert.deepEqual(c.args.filter((a, i) => c.args[i - 1] !== '--settings'), ['-p', '--output-format', 'stream-json', '--verbose', '--permission-mode', 'default',
     '--setting-sources', 'project', '--strict-mcp-config', '--settings',
-    '--allowedTools', 'Read(./**)', 'Glob', 'Grep', 'Edit(./sites/**)', 'Bash(webmods:*)', 'Bash(cd:*)', 'Bash(ls:*)',
+    '--allowedTools', 'Read(./**)', 'Glob', 'Grep', 'Edit(./sites/**)', 'Bash(trif:*)', 'Bash(webmods:*)', 'Bash(cd:*)', 'Bash(ls:*)',
     '--disallowedTools', 'WebFetch', 'WebSearch', 'Read(./config.json)', 'Read(./safari-token)', 'Read(./helper.log*)', 'Read(./runs/*.jsonl)',
     'Read(./screenshots/*.png)', '--append-system-prompt', 'CTX', '--', 'hi']);
   // The run's sandbox: fails closed, no way out of it, no network, the run's reads and writes.
@@ -213,7 +213,7 @@ test('claude adapter: parses init, text, tools, result; maps "Not logged in"', (
   claude.parse(JSON.stringify({ type: 'system', subtype: 'init', session_id: 'abc' }), emit, st);
   claude.parse(JSON.stringify({ type: 'assistant', message: { content: [
     { type: 'text', text: 'Hello' }, { type: 'text', text: '  ' },
-    { type: 'tool_use', name: 'Bash', input: { command: 'webmods reload\n --tab 3' } },
+    { type: 'tool_use', name: 'Bash', input: { command: 'trif reload\n --tab 3' } },
     { type: 'tool_use', name: 'Write', input: { file_path: '/ws/sites/a.com/m.js' } },
     { type: 'tool_use', name: 'Read', input: { file_path: '/elsewhere/x' } },
   ] } }), emit, st);
@@ -222,7 +222,7 @@ test('claude adapter: parses init, text, tools, result; maps "Not logged in"', (
   assert.deepEqual(ev, [
     { kind: 'session', sessionId: 'abc' },
     { kind: 'text', text: 'Hello' },
-    { kind: 'tool', name: 'Bash', summary: 'webmods reload --tab 3' },
+    { kind: 'tool', name: 'Bash', summary: 'trif reload --tab 3' },
     { kind: 'tool', name: 'Write', summary: 'sites/a.com/m.js' },
     { kind: 'tool', name: 'Read', summary: '/elsewhere/x' },
     { kind: 'done', ok: true, result: 'ok!', costUsd: 0.5, sessionId: 'abc' },
@@ -247,10 +247,10 @@ test('codex adapter: command, resume, JSONL events', () => {
   assert.ok(!c.args.includes('--sandbox'), 'the legacy --sandbox would override the profile');
   assert.ok(c.args.includes('--ignore-user-config') && c.args.includes('--ignore-rules'));
   assert.ok(c.args.includes('approval_policy="never"'));
-  assert.ok(c.args.includes('default_permissions="webmods-run"'));
-  // No network: `webmods` reaches the helper through the run's mailbox.
+  assert.ok(c.args.includes('default_permissions="trif-run"'));
+  // No network: `trif` reaches the helper through the run's mailbox.
   assert.equal(c.args.find((a) => a.startsWith('permissions=')),
-    'permissions={ webmods-run = { extends = ":workspace", filesystem = { ":workspace_roots" = { "." = "read" }, "/Users/u/.ssh" = "deny", "/h/config.json" = "deny", "/h/runs" = "deny", "/h" = "read", "/app" = "read", "/h/sites" = "write", "/h/screenshots/x.com" = "write", "/h/runs/r1.box" = "write", "/h/sites/y.com" = "read" }, network = { enabled = false } } }');
+    'permissions={ trif-run = { extends = ":workspace", filesystem = { ":workspace_roots" = { "." = "read" }, "/Users/u/.ssh" = "deny", "/h/config.json" = "deny", "/h/runs" = "deny", "/h" = "read", "/app" = "read", "/h/sites" = "write", "/h/screenshots/x.com" = "write", "/h/runs/r1.box" = "write", "/h/sites/y.com" = "read" }, network = { enabled = false } } }');
   assert.equal(codex.tooOld('codex-cli 0.137.9'), true);
   assert.equal(codex.tooOld('0.166.0'), false);
   assert.equal(codex.tooOld(null), false);
@@ -263,8 +263,8 @@ test('codex adapter: command, resume, JSONL events', () => {
   const line = (o) => codex.parse(JSON.stringify(o), emit, st);
   line({ type: 'thread.started', thread_id: 'th1' });
   line({ type: 'turn.started' });
-  line({ type: 'item.started', item: { id: 'i1', type: 'command_execution', command: 'webmods tabs', status: 'in_progress' } });
-  line({ type: 'item.completed', item: { id: 'i1', type: 'command_execution', command: 'webmods tabs', exit_code: 0, status: 'completed' } });
+  line({ type: 'item.started', item: { id: 'i1', type: 'command_execution', command: 'trif tabs', status: 'in_progress' } });
+  line({ type: 'item.completed', item: { id: 'i1', type: 'command_execution', command: 'trif tabs', exit_code: 0, status: 'completed' } });
   line({ type: 'item.started', item: { id: 'i2', type: 'file_change', changes: [] } });
   line({ type: 'item.completed', item: { id: 'i2', type: 'file_change', changes: [{ path: '/ws/sites/a.com/m.js', kind: 'add' }] } });
   line({ type: 'item.completed', item: { id: 'i3', type: 'reasoning', text: 'hmm' } });
@@ -272,7 +272,7 @@ test('codex adapter: command, resume, JSONL events', () => {
   line({ type: 'turn.completed', usage: { input_tokens: 1, output_tokens: 2 } });
   assert.deepEqual(ev, [
     { kind: 'session', sessionId: 'th1' },
-    { kind: 'tool', name: 'Bash', summary: 'webmods tabs' },
+    { kind: 'tool', name: 'Bash', summary: 'trif tabs' },
     { kind: 'tool', name: 'Edit', summary: 'sites/a.com/m.js' },
     { kind: 'text', text: 'All done.' },
     { kind: 'done', ok: true, result: 'All done.', costUsd: null, sessionId: 'th1' },
@@ -287,8 +287,8 @@ test('context text names the URL and tab; diffSnapshots catches edits, adds and 
   const t = agents.contextText({ url: 'https://x.com/home', tabId: 7 });
   assert.match(t, /looking at https:\/\/x\.com\/home \(tab 7\): pass `--tab 7`/);
   assert.match(t, /Follow AGENTS\.md/);
-  assert.match(t, /webmods disable\/enable/);
-  assert.match(t, /`webmods status` shows which are on/);
+  assert.match(t, /trif disable\/enable/);
+  assert.match(t, /`trif status` shows which are on/);
   assert.match(agents.reminderText({ url: 'https://x.com/', tabId: 7 }), /x\.com.*--tab 7/);
   const before = new Map([['sites/a', '1'], ['sites/b', '2'], ['sites/c', '3']]);
   const after = new Map([['sites/a', '1'], ['sites/b', 'X'], ['sites/d', '4']]);
@@ -340,7 +340,7 @@ test('agent.start: runId first, then session/text/tool events, one done with cha
   assert.deepEqual(evs.slice(0, -1), [
     { kind: 'session', sessionId: 'sess-new-1' },
     { kind: 'text', text: 'Hiding the banner now.' },
-    { kind: 'tool', name: 'Bash', summary: 'webmods reload --tab 12' },
+    { kind: 'tool', name: 'Bash', summary: 'trif reload --tab 12' },
     { kind: 'tool', name: 'Edit', summary: 'sites/example.com/fake.js' },
     { kind: 'text', text: 'Done: the banner is hidden.' },
   ]);
@@ -398,13 +398,13 @@ test('agent env is sanitized: no inherited CLAUDE*/ANTHROPIC_*/CODEX_*, API key 
   assert.equal(env.TERM, 'dumb');
   assert.equal(env.LANG, 'en_CA.UTF-8');
   assert.equal(env.HOME, path.join(home, 'fakehome'));
-  assert.equal(env.WEBMODS_HOME, home);
+  assert.equal(env.TRIF_HOME, home);
   // The run reaches this host (and so this browser) through its own mailbox, not a socket; no socket path.
-  assert.equal(path.dirname(env.WEBMODS_RUN_BOX), path.join(home, 'boxes'));
-  assert.match(path.basename(env.WEBMODS_RUN_BOX), /^r[a-z0-9]+$/);
-  assert.equal(env.WEBMODS_RUN_SCREENSHOTS, path.join(home, 'screenshots', 'example.com'));
-  assert.ok(/^[0-9a-f]{32}$/.test(env.WEBMODS_RUN_TOKEN));
-  assert.equal(env.WEBMODS_SOCK, undefined);
+  assert.equal(path.dirname(env.TRIF_RUN_BOX), path.join(home, 'boxes'));
+  assert.match(path.basename(env.TRIF_RUN_BOX), /^r[a-z0-9]+$/);
+  assert.equal(env.TRIF_RUN_SCREENSHOTS, path.join(home, 'screenshots', 'example.com'));
+  assert.ok(/^[0-9a-f]{32}$/.test(env.TRIF_RUN_TOKEN));
+  assert.equal(env.TRIF_SOCK, undefined);
   assert.deepEqual(env.PATH.split(':').slice(0, 2), [path.join(home, 'bin'), bin]);
 });
 
@@ -483,7 +483,7 @@ test('errors: not logged in, crash with stderr tail, agent missing, 15-minute li
   assert.equal(done.ok, false);
   assert.equal(done.sessionId, 'sess-new-1');
 
-  const limited = startHost(home, { WEBMODS_AGENT_TIMEOUT_MS: '1500' });
+  const limited = startHost(home, { TRIF_AGENT_TIMEOUT_MS: '1500' });
   r = await extRequest(limited, 'agent.start', { ...START, prompt: 'SLEEP until the limit' });
   done = await waitDone(limited, r.result.runId);
   errs = eventsOf(limited, r.result.runId).filter((e) => e.kind === 'error');
@@ -646,7 +646,7 @@ test('agent.login: bad code fails (redacted), cancel, one login at a time, bad r
   assert.ok(!log.includes('BADCODE123'), 'bad code not logged');
   assert.ok(!log.includes('SECRETSTATE'), 'URL query not logged');
 
-  const limited = startHost(home, { WEBMODS_LOGIN_TIMEOUT_MS: '1500' });
+  const limited = startHost(home, { TRIF_LOGIN_TIMEOUT_MS: '1500' });
   const r = await extRequest(limited, 'agent.login', {});
   done = await waitDone(limited, r.result.loginId);
   assert.equal(done.ok, false);
@@ -686,12 +686,12 @@ test('CLI: agent run streams events and prints a summary; agent list with and wi
   assert.equal(r.stdout, [
     'Hiding the banner now.',
     '',
-    '  [Bash] webmods reload --tab 12',
+    '  [Bash] trif reload --tab 12',
     '  [Edit] sites/example.com/fake.js',
     'Done: the banner is hidden.',
     '',
     'done: ok ($0.0123)',
-    'session: sess-new-1   (continue: webmods agent run --session sess-new-1 --url https://example.com/page "...")',
+    'session: sess-new-1   (continue: trif agent run --session sess-new-1 --url https://example.com/page "...")',
     'changed: sites/example.com/fake.js',
     '',
   ].join('\n'));
@@ -791,7 +791,7 @@ test('setup records PATH (merging config.json) and writes .claude/settings.json;
   const settings = JSON.parse(fs.readFileSync(path.join(ws, '.claude', 'settings.json'), 'utf8'));
   assert.deepEqual(settings, {
     permissions: {
-      allow: ['Read(./**)', 'Glob', 'Grep', 'Edit(./sites/**)', 'Bash(webmods:*)', 'Bash(cd:*)', 'Bash(ls:*)'],
+      allow: ['Read(./**)', 'Glob', 'Grep', 'Edit(./sites/**)', 'Bash(trif:*)', 'Bash(webmods:*)', 'Bash(cd:*)', 'Bash(ls:*)'],
       deny: ['WebFetch', 'WebSearch', 'Read(./config.json)', 'Read(./safari-token)', 'Read(./helper.log*)', 'Read(./runs/*.jsonl)',
         'Read(./screenshots/*.png)'],
     },
@@ -817,12 +817,12 @@ test('setup records PATH (merging config.json) and writes .claude/settings.json;
   fs.writeFileSync(path.join(ws, 'config.json'), JSON.stringify({ env: { PATH: '/usr/bin' } }));
   r = await runCli(['doctor', '--native-dir', path.join(root, 'native')], { home: ws, env: { PATH: termPath } });
   assert.match(r.stdout, /warn {2}Claude Code is at .*fakebin\/claude, but the helper won't find it there/);
-  assert.match(r.stdout, /fix: run webmods setup in this terminal/);
+  assert.match(r.stdout, /fix: run trif setup in this terminal/);
 });
 
 // ------------------------------------------------------------------ merging a new version of a shipped mod
 
-// A workspace where WebMods shipped example.com/plain version 1, the user changed it, and version 2 waits.
+// A workspace where TRIF shipped example.com/plain version 1, the user changed it, and version 2 waits.
 function homeWithPendingUpdate() {
   const { home, bin } = makeHome();
   const sha1 = (s) => require('crypto').createHash('sha1').update(s).digest('hex');
@@ -874,7 +874,7 @@ test('merge run: the agent gets the three files; a run that finishes well settle
   assert.ok(modsIdx !== -1 && modsIdx < doneIdx);
   // Nothing left to merge.
   r = await extRequest(ext, 'agent.start', { ...START, prompt: 'again', merge: 'example.com/plain' });
-  assert.match(r.error, /no new WebMods version/);
+  assert.match(r.error, /no new TRIF version/);
 });
 
 test('merge run: choosing what happens to the update is the user\'s, not the run\'s', async () => {
@@ -883,7 +883,7 @@ test('merge run: choosing what happens to the update is the user\'s, not the run
   await ext.waitForSocket();
   await extRequest(ext, 'agent.start', { ...START, prompt: 'SLEEP' });
   const call = await waitFor(() => callFor(bin, 'SLEEP'), { message: 'the agent to start' });
-  const token = call.env.WEBMODS_RUN_TOKEN;
+  const token = call.env.TRIF_RUN_TOKEN;
   for (const [choice, cmd] of [['new', 'mod.update'], ['mine', 'mod.update']]) {
     const res = await sockRequest(ext.sock, { id: choice, cmd, args: { id: 'example.com/plain', choice }, token });
     assert.equal(res.ok, false);
@@ -905,7 +905,7 @@ test('merge run: choosing what happens to the update is the user\'s, not the run
 
 // ------------------------------------------------------------------ run scope and held mods
 
-test('run scope: the run token limits webmods requests to the run\'s site; agent commands refused; ends with the run', async () => {
+test('run scope: the run token limits trif requests to the run\'s site; agent commands refused; ends with the run', async () => {
   const { home, bin } = makeHome();
   const ext = startHost(home);
   ext.handlers.tabs = (args) => ({ scope: args.scope ?? null });
@@ -913,7 +913,7 @@ test('run scope: the run token limits webmods requests to the run\'s site; agent
   const r = await extRequest(ext, 'agent.start', { site: 'en.example.co.uk', url: 'https://en.example.co.uk/x', tabId: 3, prompt: 'SLEEP' });
   const runId = r.result.runId;
   const call = await waitFor(() => callFor(bin, 'SLEEP'), { message: 'the agent to start' });
-  const token = call.env.WEBMODS_RUN_TOKEN;
+  const token = call.env.TRIF_RUN_TOKEN;
   assert.match(token, /^[0-9a-f]{32}$/);
   assert.match(call.argv[call.argv.indexOf('--append-system-prompt') + 1], /limited to example\.co\.uk/);
 
@@ -943,11 +943,11 @@ test('run mailbox: whatever a request in it says, it\'s the run\'s; links aren\'
   await ext.waitForSocket();
   const r = await extRequest(ext, 'agent.start', { ...START, prompt: 'SLEEP' });
   const call = await waitFor(() => callFor(bin, 'SLEEP'), { message: 'the agent to start' });
-  const box = call.env.WEBMODS_RUN_BOX;
+  const box = call.env.TRIF_RUN_BOX;
   assert.equal(fs.statSync(box).mode & 0o777, 0o700);
 
   // The CLI, with only the mailbox (no token): still the run's, limited to its site.
-  let res = await runCli(['tabs', '--json'], { home, env: { WEBMODS_RUN_BOX: box } });
+  let res = await runCli(['tabs', '--json'], { home, env: { TRIF_RUN_BOX: box } });
   assert.equal(res.code, 0, res.stderr);
   assert.deepEqual(JSON.parse(res.stdout), { scope: 'example.com' });
 
@@ -974,7 +974,7 @@ test('run mailbox: whatever a request in it says, it\'s the run\'s; links aren\'
   await extRequest(ext, 'agent.stop', { runId: r.result.runId });
   await waitDone(ext, r.result.runId);
   await waitFor(() => !fs.existsSync(box), { timeout: 5000, message: 'the mailbox removed' });
-  res = await runCli(['tabs'], { home, env: { WEBMODS_RUN_BOX: box } });
+  res = await runCli(['tabs'], { home, env: { TRIF_RUN_BOX: box } });
   assert.notEqual(res.code, 0);
   assert.match(res.stderr, /has the agent run ended/);
 });
@@ -993,7 +993,7 @@ test('recording a run switched on goes off when that run ends; the user\'s own r
   await ext.waitForSocket();
   const r = await extRequest(ext, 'agent.start', { ...START, prompt: 'SLEEP' });
   const call = await waitFor(() => callFor(bin, 'SLEEP'), { message: 'the agent to start' });
-  const env = { WEBMODS_RUN_TOKEN: call.env.WEBMODS_RUN_TOKEN, WEBMODS_RUN_BOX: call.env.WEBMODS_RUN_BOX };
+  const env = { TRIF_RUN_TOKEN: call.env.TRIF_RUN_TOKEN, TRIF_RUN_BOX: call.env.TRIF_RUN_BOX };
   for (const site of ['example.com', 'm.example.com', 'user.com']) {
     const res = await runCli(['record', site, 'on'], { home, env });
     assert.equal(res.code, 0, res.stderr);
@@ -1031,7 +1031,7 @@ test('held mods: a run\'s mod that matches other sites is held (not registered) 
   const stored = JSON.parse(fs.readFileSync(path.join(home, 'held.json'), 'utf8'));
   assert.deepEqual(Object.keys(stored), ['example.com/evil']);
 
-  // Still held after the run (and a resync); `webmods mods` says so.
+  // Still held after the run (and a resync); `trif mods` says so.
   await sleep(300);
   let out = await runCli(['mods'], { home });
   assert.match(out.stdout, /HELD: a side-panel agent wrote it while working on example\.com/);
@@ -1044,7 +1044,7 @@ test('held mods: a run\'s mod that matches other sites is held (not registered) 
   assert.match(again.error, /isn't held/);
 });
 
-test('held mods: editing a held mod yourself releases it; `webmods approve` refuses inside a run', async () => {
+test('held mods: editing a held mod yourself releases it; `trif approve` refuses inside a run', async () => {
   const { home } = makeHome();
   const ext = startHost(home);
   await ext.waitForSocket();
@@ -1053,7 +1053,7 @@ test('held mods: editing a held mod yourself releases it; `webmods approve` refu
   await sleep(10500); // past the just-finished window: later edits aren't the run's
   fs.appendFileSync(path.join(home, 'sites', 'example.com', 'evil.js'), '\n// the user edited this\n');
   await waitFor(() => !fs.existsSync(path.join(home, 'held.json')), { message: 'the hold to be released' });
-  const res = await runCli(['approve', 'example.com/evil'], { home, env: { WEBMODS_RUN_TOKEN: 'x' } });
+  const res = await runCli(['approve', 'example.com/evil'], { home, env: { TRIF_RUN_TOKEN: 'x' } });
   assert.equal(res.code, 1);
   assert.match(res.stderr, /not available inside a side-panel agent run/);
 });
@@ -1099,7 +1099,7 @@ test('instructions: saved and read through the helper, never from a run; claude 
   r = await extRequest(ext, 'agent.start', { ...START, prompt: 'SLEEP caveman' });
   const call = await waitFor(() => callFor(bin, 'SLEEP caveman'), { message: 'the agent to start' });
   assert.doesNotMatch(call.argv[call.argv.indexOf('--append-system-prompt') + 1], /caveman/);
-  const res = await sockRequest(ext.sock, { id: 'i', cmd: 'instructions.set', args: { text: 'evil' }, token: call.env.WEBMODS_RUN_TOKEN });
+  const res = await sockRequest(ext.sock, { id: 'i', cmd: 'instructions.set', args: { text: 'evil' }, token: call.env.TRIF_RUN_TOKEN });
   assert.match(res.error, /isn't available inside an agent run/);
   await extRequest(ext, 'agent.stop', { runId: r.result.runId });
   await waitDone(ext, r.result.runId);
@@ -1135,11 +1135,11 @@ test('mod.delete / mod.restore: from the panel any mod; from a run only mods ins
   assert.equal(r.result.restored, true);
   assert.deepStrictEqual(ext.lastMods().map((m) => m.id).sort(), ['example.com/local', 'example.com/wide']);
 
-  // A run on example.com: `webmods delete` goes through the helper, which holds it to the scope.
+  // A run on example.com: `trif delete` goes through the helper, which holds it to the scope.
   r = await extRequest(ext, 'agent.start', { ...START, prompt: 'SLEEP' });
   const call = await waitFor(() => callFor(bin, 'SLEEP'), { message: 'the agent to start' });
   // As the agent would: through the run's mailbox (its sandbox has no socket).
-  const env = { WEBMODS_RUN_TOKEN: call.env.WEBMODS_RUN_TOKEN, WEBMODS_RUN_BOX: call.env.WEBMODS_RUN_BOX };
+  const env = { TRIF_RUN_TOKEN: call.env.TRIF_RUN_TOKEN, TRIF_RUN_BOX: call.env.TRIF_RUN_BOX };
   let res = await runCli(['delete', 'example.com/wide'], { home, env });
   assert.equal(res.code, 1);
   assert.match(res.stderr, /can only delete mods that stay on example\.com; example\.com\/wide also runs on \*:\/\/\*\/\*/);
@@ -1184,7 +1184,7 @@ test('agent.models: Codex lists the account\'s catalog (picker models, best firs
   r = await extRequest(ext, 'agent.list', {});
   const cx = r.result.agents.find((a) => a.id === 'codex');
   assert.equal(cx.available, false);
-  assert.match(cx.note, /too old for WebMods \(it needs 0\.138\.0 or newer\)/);
+  assert.match(cx.note, /too old for TRIF \(it needs 0\.138\.0 or newer\)/);
 });
 
 test('a run is told which browser it was started from', () => {

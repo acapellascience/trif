@@ -35,12 +35,12 @@ function serve(files) {
   }));
 }
 
-// A workspace whose WebMods "runs from" <home>/app (so it can update), at version `version`.
+// A workspace whose TRIF "runs from" <home>/app (so it can update), at version `version`.
 function appWorkspace(version, config = {}) {
   const home = tempDir();
   const appDir = path.join(home, 'app');
   fs.mkdirSync(appDir, { recursive: true });
-  fs.writeFileSync(path.join(appDir, 'package.json'), JSON.stringify({ name: 'webmods', version }));
+  fs.writeFileSync(path.join(appDir, 'package.json'), JSON.stringify({ name: 'trif', version }));
   fs.writeFileSync(path.join(home, 'config.json'), JSON.stringify(config));
   return { ws: { home, appDir, config }, root: appDir };
 }
@@ -52,21 +52,21 @@ function fakePackage(version, { copy = true, exit = 0, wait = 0 } = {}) {
   const dir = tempDir();
   const pkg = path.join(dir, 'package');
   fs.mkdirSync(path.join(pkg, 'helper'), { recursive: true });
-  fs.writeFileSync(path.join(pkg, 'package.json'), JSON.stringify({ name: 'webmods', version }));
+  fs.writeFileSync(path.join(pkg, 'package.json'), JSON.stringify({ name: 'trif', version }));
   fs.writeFileSync(path.join(pkg, 'helper', 'cli.js'), `
     const fs = require('fs'), path = require('path');
     const home = process.argv[process.argv.indexOf('--home') + 1];
     let lock = null;
     try { lock = fs.readFileSync(path.join(home, '.app.lock'), 'utf8').split('\\n')[1]; } catch {}
     fs.writeFileSync(path.join(home, 'setup-ran.json'), JSON.stringify({ argv: process.argv.slice(2), PATH: process.env.PATH,
-      lockHeldForUs: !!lock && lock === process.env.WEBMODS_INSTALL_LOCK }));
+      lockHeldForUs: !!lock && lock === process.env.TRIF_INSTALL_LOCK }));
     setTimeout(() => {
       if (${copy}) fs.cpSync(path.join(__dirname, '..'), path.join(home, 'app'), { recursive: true });
       console.log(${exit} ? 'Safari bridge FAILED to start it: launchctl said no' : 'setup done');
       process.exitCode = ${exit};
     }, ${wait});`);
-  execFileSync('tar', ['-czf', 'webmods.tgz', 'package'], { cwd: dir });
-  return fs.readFileSync(path.join(dir, 'webmods.tgz'));
+  execFileSync('tar', ['-czf', 'trif.tgz', 'package'], { cwd: dir });
+  return fs.readFileSync(path.join(dir, 'trif.tgz'));
 }
 
 function publish(server, k, { version, tgz, notes = 'Shiny.', tamper } = {}) {
@@ -78,12 +78,12 @@ function publish(server, k, { version, tgz, notes = 'Shiny.', tamper } = {}) {
 }
 
 test('githubRepo reads package.json "repository" in its usual spellings', () => {
-  for (const r of ['https://github.com/tim/webmods', 'git+https://github.com/tim/webmods.git', 'github:tim/webmods', 'git@github.com:tim/webmods.git', { type: 'git', url: 'https://github.com/tim/webmods.git' }]) {
-    assert.equal(U.githubRepo({ repository: r }), 'tim/webmods', JSON.stringify(r));
+  for (const r of ['https://github.com/tim/trif', 'git+https://github.com/tim/trif.git', 'github:tim/trif', 'git@github.com:tim/trif.git', { type: 'git', url: 'https://github.com/tim/trif.git' }]) {
+    assert.equal(U.githubRepo({ repository: r }), 'tim/trif', JSON.stringify(r));
   }
   assert.equal(U.githubRepo({}), null);
-  assert.equal(U.githubRepo({ repository: 'https://gitlab.com/tim/webmods' }), null);
-  assert.equal(U.feedUrl({ config: {} }, { repository: 'github:tim/webmods' }), 'https://raw.githubusercontent.com/tim/webmods/main/updates/latest.json');
+  assert.equal(U.githubRepo({ repository: 'https://gitlab.com/tim/trif' }), null);
+  assert.equal(U.feedUrl({ config: {} }, { repository: 'github:tim/trif' }), 'https://raw.githubusercontent.com/tim/trif/main/updates/latest.json');
   assert.equal(U.feedUrl({ config: { updateFeed: 'https://example.com/f.json' } }, {}), 'https://example.com/f.json');
 });
 
@@ -103,7 +103,7 @@ test('verifyFeed accepts only the release key\'s signature and a complete feed',
   const other = keys();
   const feed = latestFeed({ version: '0.2.0', published: '2026-11-01', notes: 'n', url: 'https://github.com/a/b/x.tgz', sha256: 'a'.repeat(64), size: 10 });
   assert.equal(U.verifyFeed(feed, signBytes(feed, k.priv), k.pub).version, '0.2.0');
-  assert.throws(() => U.verifyFeed(feed, signBytes(feed, other.priv), k.pub), /not signed by the WebMods release key/);
+  assert.throws(() => U.verifyFeed(feed, signBytes(feed, other.priv), k.pub), /not signed by the TRIF release key/);
   const changed = Buffer.from(feed.toString().replace('0.2.0', '9.9.9'));
   assert.throws(() => U.verifyFeed(changed, signBytes(feed, k.priv), k.pub), /not signed/);
   assert.throws(() => U.verifyFeed(feed, 'garbage', k.pub), /not signed/);
@@ -244,7 +244,7 @@ test('install: two at once (two browsers\' helpers) install once; the other is t
       U.install(ws, { root, publicKey: k.pub, browsers: [] }),
     ]);
     assert.deepEqual(results.map((x) => x.status).sort(), ['fulfilled', 'rejected']);
-    assert.match(results.find((x) => x.status === 'rejected').reason.message, /another WebMods install is in progress|is up to date/);
+    assert.match(results.find((x) => x.status === 'rejected').reason.message, /another TRIF install is in progress|is up to date/);
     assert.equal(U.installedVersion(ws), '0.2.0');
     assert.equal(fs.existsSync(path.join(ws.home, '.app.lock')), false);
   } finally { await server.close(); }
@@ -296,7 +296,7 @@ test('release script: changelog sections and feeds the helper and Firefox accept
   assert.ok(changelogSection(real, version), `CHANGELOG.md has a section for the current version ${version}`);
 
   const k = keys();
-  const feed = latestFeed({ version: '0.1.2', published: '2026-11-01', notes: '- one', url: 'https://github.com/a/b/releases/download/v0.1.2/webmods-0.1.2.tgz', sha256: 'b'.repeat(64), size: 5 });
+  const feed = latestFeed({ version: '0.1.2', published: '2026-11-01', notes: '- one', url: 'https://github.com/a/b/releases/download/v0.1.2/trif-0.1.2.tgz', sha256: 'b'.repeat(64), size: 5 });
   assert.equal(U.verifyFeed(feed, signBytes(feed, k.priv), k.pub).notes, '- one');
 
   let ff = firefoxFeed(null, { id: 'webmods@webmods.ext', version: '0.1.1', url: 'https://x/1.xpi', sha256: 'c'.repeat(64) });
@@ -306,7 +306,7 @@ test('release script: changelog sections and feeds the helper and Firefox accept
     [['0.1.1', 'https://x/1.xpi', 'sha256:c'], ['0.1.2', 'https://x/2b.xpi', 'sha256:e']]);
 });
 
-test('webmods update reports a failed check; --auto writes config.json', async () => {
+test('trif update reports a failed check; --auto writes config.json', async () => {
   const home = tempDir();
   // Nothing listens there: the check fails without going to GitHub.
   fs.writeFileSync(path.join(home, 'config.json'), JSON.stringify({ updateFeed: 'http://127.0.0.1:9/latest.json' }));
@@ -321,6 +321,6 @@ test('webmods update reports a failed check; --auto writes config.json', async (
   r = await runCli(['update', '--auto', 'maybe'], { home });
   assert.equal(r.code, 1);
   assert.match(r.stderr, /--auto takes on or off/);
-  r = await runCli(['update', '--install'], { home, env: { WEBMODS_RUN_TOKEN: 'x' } });
+  r = await runCli(['update', '--install'], { home, env: { TRIF_RUN_TOKEN: 'x' } });
   assert.match(r.stderr, /can't be installed inside an agent run/);
 });

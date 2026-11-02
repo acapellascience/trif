@@ -15,8 +15,8 @@ export const SETTINGS_URL = FIREFOX ? 'about:addons' : SAFARI ? 'Safari Settings
 // (reserved for generated ids), so it is registered under this id.
 export const RUNTIME_ID = 'webmods-runtime';
 export const USER_SCRIPTS_OFF = FIREFOX
-  ? 'User scripts aren\'t allowed for WebMods. Click the WebMods toolbar button, then "Allow user scripts", and reload the page.'
-  : `User scripts are off for WebMods. Open ${SETTINGS_URL} and turn on "Allow User Scripts", then reload the page.`;
+  ? 'User scripts aren\'t allowed for TRIF. Click the TRIF toolbar button, then "Allow user scripts", and reload the page.'
+  : `User scripts are off for TRIF. Open ${SETTINGS_URL} and turn on "Allow User Scripts", then reload the page.`;
 export const RUN_CAP = 1000000;
 
 // ---- user scripts -------------------------------------------------------------------------------
@@ -49,9 +49,9 @@ export function wrapModCode(id, code) {
   const mod = JSON.stringify(id);
   return `(() => { const __mod = ${mod}; window.__webmods && (window.__webmods.current = __mod);
 try { ${code}
-} catch (e) { window.__webmods?.errors.push({mod: __mod, message: String(e?.message ?? e), stack: String(e?.stack ?? ""), time: Date.now()}); console.error("[webmods]", __mod, e); }
+} catch (e) { window.__webmods?.errors.push({mod: __mod, message: String(e?.message ?? e), stack: String(e?.stack ?? ""), time: Date.now()}); console.error("[TRIF]", __mod, e); }
 })();
-//# sourceURL=webmods://${id}.js`;
+//# sourceURL=trif://${id}.js`;
 }
 
 export function modToUserScript(mod) {
@@ -72,7 +72,7 @@ export function runtimeUserScript(code, matches = ['<all_urls>']) {
 
 /**
  * Where the runtime goes: the pages the registered mods match, plus the sites being recorded. Not every
- * page: the runtime's globals (window.webmods, window.__webmods) would let any site detect WebMods users.
+ * page: the runtime's globals (window.trif, window.webmods, window.__webmods) would let any site detect TRIF users.
  */
 export function runtimeMatches(mods, recording = []) {
   const set = new Set();
@@ -115,7 +115,7 @@ export function normalizeDisabled(value) {
  * Returns {registered, errors, applied, reset}.
  */
 export async function syncUserScripts(us, { mods, runtimeCode, applied = {}, disabled = {}, offSites = {}, recording = [], sitesOn = null }) {
-  // sitesOn (null: no limit): mods and recording only on the sites WebMods is on for (limitToSites).
+  // sitesOn (null: no limit): mods and recording only on the sites TRIF is on for (limitToSites).
   if (sitesOn) recording = (recording || []).filter((site) => (sitesOn || []).some((s) => hostInScope(site, s)));
   const errors = [];
   const desired = [];
@@ -127,7 +127,7 @@ export async function syncUserScripts(us, { mods, runtimeCode, applied = {}, dis
     if (mod.held) continue; // held for the user's approval (an agent wrote it for another site): same
     seen.add(mod.id);
     const limited = sitesOn ? limitToSites(mod, sitesOn) : mod;
-    if (!limited) continue; // only on sites WebMods is off for
+    if (!limited) continue; // only on sites TRIF is off for
     desired.push(withOffSites(limited, offSites[mod.id]));
   }
 
@@ -208,18 +208,18 @@ export function selectTab(tabs, focusedWindowId, args = {}) {
   if (args.tab !== undefined && args.tab !== null && args.tab !== '') {
     const id = Number(args.tab);
     const t = tabs.find((x) => x.id === id);
-    if (!t) throw new Error(`no tab${on} with id ${args.tab} (run \`webmods tabs\` to list tabs)`);
+    if (!t) throw new Error(`no tab${on} with id ${args.tab} (run \`trif tabs\` to list tabs)`);
     return t;
   }
   if (args.url !== undefined && args.url !== null && args.url !== '') {
     const match = urlMatcher(args.url);
     const t = tabs.find((x) => x.windowId === focusedWindowId && match(x.url)) || tabs.find((x) => match(x.url));
-    if (!t) throw new Error(`no tab${on} whose URL matches ${args.url} (run \`webmods tabs\` to list tabs)`);
+    if (!t) throw new Error(`no tab${on} whose URL matches ${args.url} (run \`trif tabs\` to list tabs)`);
     return t;
   }
   // A run works on its site's tab even when the user has moved to another one.
   const t = tabs.find((x) => x.active && x.windowId === focusedWindowId) || tabs.find((x) => x.active) || (scope ? tabs[0] : null);
-  if (!t) throw new Error(scope ? `no tab is open on ${scope} (open one with \`webmods open\`)` : 'no active tab (is a Chrome window open?)');
+  if (!t) throw new Error(scope ? `no tab is open on ${scope} (open one with \`trif open\`)` : 'no active tab (is a Chrome window open?)');
   return t;
 }
 
@@ -309,9 +309,9 @@ export function modInScope(mod, scope) {
   return matches.length > 0 && matches.every((p) => patternInScope(p, scope));
 }
 
-// ---- sites WebMods is on for -------------------------------------------------------------------
-// WebMods is off on every site until the user turns it on from the side panel there. On a site that's
-// off nothing from WebMods runs (no mods, not even all-sites ones, no runtime) and no page command
+// ---- sites TRIF is on for -------------------------------------------------------------------
+// TRIF is off on every site until the user turns it on from the side panel there. On a site that's
+// off nothing from TRIF runs (no mods, not even all-sites ones, no runtime) and no page command
 // reaches its tabs, from a side-panel chat or a terminal. chrome.storage.local `sitesOn` is a sorted
 // list of registrable domains ("x.com", "bbc.co.uk"), each covering its subdomains.
 
@@ -342,7 +342,7 @@ export function normalizeSitesOn(value) {
   return [...new Set((Array.isArray(value) ? value : []).filter((x) => typeof x === 'string').map(scopeFor).filter(Boolean))].sort();
 }
 
-/** The site in `sitesOn` that covers `url`'s host (http/https only), or null: WebMods is off there. */
+/** The site in `sitesOn` that covers `url`'s host (http/https only), or null: TRIF is off there. */
 export function siteOnFor(url, sitesOn) {
   let u;
   try { u = new URL(String(url ?? '')); } catch { return null; }
@@ -351,7 +351,7 @@ export function siteOnFor(url, sitesOn) {
 }
 
 /**
- * Sites to turn on for someone who used WebMods before sites had to be turned on: those of their mods
+ * Sites to turn on for someone who used TRIF before sites had to be turned on: those of their mods
  * that are switched on (not all-sites ones, which name no site) and those they've chatted on.
  * `chats` maps site -> stored chat.
  */
@@ -486,7 +486,7 @@ export function modAppliesTo(mod, url) {
   return matches.some((p) => matchesPattern(p, url)) && !excludes.some((p) => matchesPattern(p, url));
 }
 
-/** One compact line for a tool event: "ran webmods reload --tab 12", "edited sites/x.com/a.js". */
+/** One compact line for a tool event: "ran trif reload --tab 12", "edited sites/x.com/a.js". */
 export function toolLine(name, summary) {
   const n = String(name ?? '').trim();
   const s = String(summary ?? '').replace(/\s+/g, ' ').trim();

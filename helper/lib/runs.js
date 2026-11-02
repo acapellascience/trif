@@ -1,11 +1,12 @@
 'use strict';
-// Agent runs for the side panel (and `webmods agent run`): spawn the user's coding agent headless in
+// Agent runs for the side panel (and `trif agent run`): spawn the user's coding agent headless in
 // the workspace, turn its stdout into normalized events, and always finish with exactly one `done`.
 // See docs/PROTOCOL.md "Side panel and agent runs".
 
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
+const { envVar } = require('./env');
 const crypto = require('crypto');
 const { spawn } = require('child_process');
 const agents = require('./agents');
@@ -14,8 +15,8 @@ const { readInstructions, instructionsContext } = require('./instructions');
 const { markRunActive, markRunEnded } = require('./origins');
 const { listModFiles } = require('./mods');
 
-const RUN_TIMEOUT_MS = Number(process.env.WEBMODS_AGENT_TIMEOUT_MS) > 0 ? Number(process.env.WEBMODS_AGENT_TIMEOUT_MS) : 15 * 60 * 1000;
-const KILL_GRACE_MS = Number(process.env.WEBMODS_AGENT_KILL_GRACE_MS) > 0 ? Number(process.env.WEBMODS_AGENT_KILL_GRACE_MS) : 3000;
+const RUN_TIMEOUT_MS = Number(envVar('AGENT_TIMEOUT_MS')) > 0 ? Number(envVar('AGENT_TIMEOUT_MS')) : 15 * 60 * 1000;
+const KILL_GRACE_MS = Number(envVar('AGENT_KILL_GRACE_MS')) > 0 ? Number(envVar('AGENT_KILL_GRACE_MS')) : 3000;
 const KEEP_RUN_LOGS = 50;
 const STDERR_KEEP = 16 * 1024;
 const MAX_SNAPSHOT_FILES = 5000;
@@ -31,10 +32,10 @@ const MAX_BOX_REQUEST = 8 * 1024 * 1024;
  * read at all.
  */
 function boxRoot() {
-  if (process.env.WEBMODS_BOX_ROOT) return path.resolve(process.env.WEBMODS_BOX_ROOT);
+  if (envVar('BOX_ROOT')) return path.resolve(envVar('BOX_ROOT'));
   return process.platform === 'darwin'
-    ? path.join(os.homedir(), 'Library', 'Caches', 'WebMods', 'boxes')
-    : path.join(process.env.XDG_CACHE_HOME || path.join(os.homedir(), '.cache'), 'webmods', 'boxes');
+    ? path.join(os.homedir(), 'Library', 'Caches', 'TRIF', 'boxes')
+    : path.join(process.env.XDG_CACHE_HOME || path.join(os.homedir(), '.cache'), 'trif', 'boxes');
 }
 
 // sha1 of every mod file the scanner loads (mods.js listModFiles: same folders, same symlink handling,
@@ -88,14 +89,14 @@ const PRIVATE_FILES = ['config.json', 'safari-token', 'helper.log', 'helper.log.
 
 /**
  * What a run may touch, for the agents' sandboxes, which macOS enforces (docs/PROTOCOL.md "Run scope"):
- *   readable  the workspace, the WebMods code `webmods` runs, and node
+ *   readable  the workspace, the TRIF code `trif` runs, and node
  *   writable  the mods folder, this run's screenshots folder, and its mailbox (`box`)
  *   readOnly  every existing mod folder of another site (all-sites/ included), inside the mods folder
  *   denied    everything else in the home folder, and the workspace's PRIVATE_FILES (the more
  *             specific path wins, so the run's own screenshots folder and mailbox stay writable). Each
  *             item in the home folder rather than the folder itself: node, and `mkdir -p`, look at
  *             every folder on a path, the home folder included.
- * No network at all: `webmods` reaches the helper through the mailbox. Real paths, as sandboxes compare.
+ * No network at all: `trif` reaches the helper through the mailbox. Real paths, as sandboxes compare.
  */
 function runLimits(ws, { scope, box, screenshots }) {
   const real = realOrResolved;
@@ -108,7 +109,9 @@ function runLimits(ws, { scope, box, screenshots }) {
   const home = real(os.homedir());
   const onTheWay = (p) => readable.some((r) => r === p || r.startsWith(p + path.sep));
   let inHome = [];
-  try { inHome = fs.readdirSync(home).map((n) => path.join(home, n)).filter((p) => !onTheWay(p)); } catch { /* unreadable: nothing to list */ }
+  // (By where each leads, too: ~/.webmods is a link to the workspace, ~/.trif, since 0.2.0, and a rule
+  // denying it would deny the workspace itself to a sandbox that follows links.)
+  try { inHome = fs.readdirSync(home).map((n) => path.join(home, n)).filter((p) => !onTheWay(p) && !onTheWay(real(p))); } catch { /* unreadable: nothing to list */ }
   const privateFiles = PRIVATE_FILES.map((f) => real(path.join(ws.home, f)));
   const denied = [...inHome, ...privateFiles];
   // Other sites' screenshot folders, for agents whose file tools take per-folder rules (Claude Code).
@@ -129,7 +132,7 @@ function normalizeSite(site, url) {
  *   start(args) -> {runId}     args: {agent, model, site, url, tabId, prompt, sessionId}
  *   stop(runId) -> {stopped: true}
  *   list() -> [{runId, site, scope, agent, startedAt}]
- *   byToken(token) -> the live run whose agent was given this WEBMODS_RUN_TOKEN, or null
+ *   byToken(token) -> the live run whose agent was given this TRIF_RUN_TOKEN, or null
  *   scopes() -> [{runId, site, scope, before, startedAt}] for live and just-finished runs (held mods)
  *   stopAll() -> Promise (resolves once every agent process has exited, SIGKILLing stragglers)
  */
@@ -180,7 +183,7 @@ class Runs {
       id: newRunId(),
       site,
       scope: scopeFor(site),
-      // Given to the agent as WEBMODS_RUN_TOKEN; `webmods` sends it, and the helper scopes its requests.
+      // Given to the agent as TRIF_RUN_TOKEN; `trif` sends it, and the helper scopes its requests.
       token: crypto.randomBytes(16).toString('hex'),
       agent: adapter.id,
       adapter,
@@ -282,7 +285,7 @@ class Runs {
       return this._finish(run, { code: null, signal: null });
     }
     this._serveBox(run);
-    const env = { ...agents.agentEnv(ws), WEBMODS_RUN_TOKEN: run.token, WEBMODS_RUN_BOX: run.box, WEBMODS_RUN_SCREENSHOTS: run.screenshots };
+    const env = { ...agents.agentEnv(ws), TRIF_RUN_TOKEN: run.token, TRIF_RUN_BOX: run.box, TRIF_RUN_SCREENSHOTS: run.screenshots };
     const found = adapter.detect({ dirs: agents.searchDirs(ws), env, version: false });
     if (!found.available) {
       this._emit(run, { kind: 'error', message: adapter.missing });

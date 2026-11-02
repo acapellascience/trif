@@ -1,5 +1,5 @@
 'use strict';
-// A fake WebMods extension for helper tests: spawns helper/host.js like Chrome would and speaks
+// A fake TRIF extension for helper tests: spawns helper/host.js like Chrome would and speaks
 // native messaging over its stdio. Also small utilities shared by the helper and CLI tests.
 
 const { spawn, execFile } = require('child_process');
@@ -30,16 +30,16 @@ function agentFreePath() {
   return safePath;
 }
 
-// An environment that can never touch the real ~/.webmods, browser folders or coding agents.
+// An environment that can never touch the real ~/.trif, browser folders or coding agents.
 function testEnv(home, extra = {}) {
   return {
     PATH: agentFreePath(),
     HOME: path.join(home, 'fakehome'),
-    WEBMODS_HOME: home,
-    WEBMODS_DEFAULT_AGENT_DIRS: '',
-    WEBMODS_UPDATE_DELAY: '2000000000', // no update check over the network during a test
-    WEBMODS_NO_LAUNCHCTL: '1', // setup --browser safari writes the bridge's agent but doesn't start it
-    WEBMODS_BOX_ROOT: path.join(home, 'boxes'), // agent runs' mailboxes (runs.js boxRoot)
+    TRIF_HOME: home,
+    TRIF_DEFAULT_AGENT_DIRS: '',
+    TRIF_UPDATE_DELAY: '2000000000', // no update check over the network during a test
+    TRIF_NO_LAUNCHCTL: '1', // setup --browser safari writes the bridge's agent but doesn't start it
+    TRIF_BOX_ROOT: path.join(home, 'boxes'), // agent runs' mailboxes (runs.js boxRoot)
     ...extra,
   };
 }

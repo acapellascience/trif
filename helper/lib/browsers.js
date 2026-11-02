@@ -4,7 +4,7 @@
 // folder for all profiles, and its manifests list extension IDs (allowed_extensions), not origins.
 // Safari has no such manifests: its extension reaches the helper through the Safari bridge, which setup
 // installs as a launchd agent (SAFARI_AGENT_LABEL). Every Mac has Safari, so it only counts as detected
-// once that agent is installed (`webmods setup --browser safari` installs it).
+// once that agent is installed (`trif setup --browser safari` installs it).
 
 const fs = require('fs');
 const os = require('os');
@@ -30,10 +30,15 @@ const LINUX = {
 
 const ALL_KEYS = ['chrome', 'chromium', 'brave', 'edge', 'arc', 'firefox', 'safari'];
 
-const SAFARI_AGENT_LABEL = 'dev.webmods.safari-bridge';
+const SAFARI_AGENT_LABEL = 'com.timsrobot.trif.safari-bridge';
+// Its label before 0.2.0: setup stops that agent and removes its file.
+const LEGACY_SAFARI_AGENT_LABEL = 'dev.webmods.safari-bridge';
 /** The Safari bridge's launchd agent file. */
-function safariAgentPlist(homedir = os.homedir()) {
-  return path.join(homedir, 'Library', 'LaunchAgents', `${SAFARI_AGENT_LABEL}.plist`);
+function safariAgentPlist(homedir = os.homedir(), label = SAFARI_AGENT_LABEL) {
+  return path.join(homedir, 'Library', 'LaunchAgents', `${label}.plist`);
+}
+function legacySafariAgentPlist(homedir = os.homedir()) {
+  return safariAgentPlist(homedir, LEGACY_SAFARI_AGENT_LABEL);
 }
 
 function browserTable(homedir = os.homedir(), platform = process.platform) {
@@ -41,7 +46,7 @@ function browserTable(homedir = os.homedir(), platform = process.platform) {
   return Object.entries(table).map(([key, b]) => {
     const userData = path.join(homedir, b.userData);
     const nativeDir = b.nativeDir ? path.join(homedir, b.nativeDir) : path.join(userData, 'NativeMessagingHosts');
-    if (b.safari) return { key, label: b.label, userData, nativeDir: null, safari: true, detected: fs.existsSync(safariAgentPlist(homedir)) };
+    if (b.safari) return { key, label: b.label, userData, nativeDir: null, safari: true, detected: fs.existsSync(safariAgentPlist(homedir)) || fs.existsSync(legacySafariAgentPlist(homedir)) };
     return { key, label: b.label, userData, nativeDir, firefox: !!b.firefox, detected: fs.existsSync(userData) };
   });
 }
@@ -64,4 +69,4 @@ function selectBrowsers(choice, homedir, platform) {
   return out;
 }
 
-module.exports = { browserTable, selectBrowsers, ALL_KEYS, SAFARI_AGENT_LABEL, safariAgentPlist };
+module.exports = { browserTable, selectBrowsers, ALL_KEYS, SAFARI_AGENT_LABEL, LEGACY_SAFARI_AGENT_LABEL, safariAgentPlist, legacySafariAgentPlist };

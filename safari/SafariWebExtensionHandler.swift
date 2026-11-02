@@ -1,7 +1,8 @@
-// The Mac app's side of WebMods for Safari (scripts/build-safari.js puts this file in the generated
-// Xcode project). WebMods' extension asks its app for one thing: the key the helper's Safari bridge
-// expects (~/.webmods/safari-token, written by `webmods setup --browser safari`). Safari only lets an
-// extension message its own app, so another Safari extension can't get the key and reach the helper.
+// The Mac app's side of TRIF for Safari (scripts/build-safari.js puts this file in the generated
+// Xcode project). TRIF's extension asks its app for one thing: the key the helper's Safari bridge
+// expects (~/.trif/safari-token, written by `trif setup --browser safari`; ~/.webmods/safari-token before
+// 0.2.0, when TRIF was called WebMods). Safari only lets an extension message its own app, so another
+// Safari extension can't get the key and reach the helper.
 
 import SafariServices
 import Foundation
@@ -19,11 +20,12 @@ class SafariWebExtensionHandler: NSObject, NSExtensionRequestHandling {
             // In the sandbox, NSHomeDirectory() is this extension's container; the key is in the real home
             // (the entitlements allow reading just that file).
             let home = String(cString: getpwuid(getuid()).pointee.pw_dir)
-            let path = home + "/.webmods/safari-token"
-            if let token = try? String(contentsOfFile: path, encoding: .utf8) {
+            let path = home + "/.trif/safari-token"
+            let paths = [path, home + "/.webmods/safari-token"]
+            if let token = paths.lazy.compactMap({ try? String(contentsOfFile: $0, encoding: .utf8) }).first {
                 reply["token"] = token.trimmingCharacters(in: .whitespacesAndNewlines)
             } else {
-                reply["error"] = "couldn't read \(path); run: webmods setup --browser safari"
+                reply["error"] = "couldn't read \(path); run: trif setup --browser safari"
             }
         } else {
             reply["error"] = "unknown request"

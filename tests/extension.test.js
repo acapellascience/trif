@@ -402,11 +402,11 @@ test('runtime: mod wrapper records top-level errors with the mod id', () => {
   assert.strictEqual(page.__webmods, W);
 });
 
-test('runtime: webmods.log attributes sync logs and async logs (via the stack)', async () => {
+test('runtime: trif.log attributes sync logs and async logs (via the stack)', async () => {
   const page = makePage();
   const W = loadRuntime(page);
-  runMod(page, 'x.com/a', 'webmods.log("hello", {n: 1}); setTimeout(() => webmods.warn("later"), 0);');
-  runMod(page, 'x.com/b', 'webmods.error("from b")');
+  runMod(page, 'x.com/a', 'trif.log("hello", {n: 1}); setTimeout(() => trif.warn("later"), 0);');
+  runMod(page, 'x.com/b', 'trif.error("from b")');
   await new Promise((r) => setTimeout(r, 10));
   assert.deepStrictEqual(plain(W.logs.map((l) => [l.mod, l.level, l.args])), [
     ['x.com/a', 'log', ['hello', '{"n":1}']],
@@ -414,8 +414,12 @@ test('runtime: webmods.log attributes sync logs and async logs (via the stack)',
     ['x.com/a', 'warn', ['later']],
   ]);
   // with no mod frame on the stack, falls back to the current mod
-  page.webmods.log('outside');
+  page.trif.log('outside');
   assert.strictEqual(W.logs.at(-1).mod, 'x.com/b');
+  // Mods from before 0.2.0 call it window.webmods: the same object, still there.
+  assert.strictEqual(page.webmods, page.trif);
+  runMod(page, 'x.com/old', 'webmods.warn("old name")');
+  assert.deepStrictEqual([W.logs.at(-1).mod, W.logs.at(-1).level], ['x.com/old', 'warn']);
 });
 
 test('runtime: window error / unhandledrejection events are attributed by stack', () => {
@@ -426,8 +430,9 @@ test('runtime: window error / unhandledrejection events are attributed by stack'
   page.__listeners.unhandledrejection[0]({ reason: page.makeErr() });
   page.__listeners.error[0]({ error: new Error('site error'), filename: 'https://site/app.js' });
   page.__listeners.error[0]({ error: null, message: 'Script error.', filename: 'webmods://x.com/z.js' });
+  page.__listeners.error[0]({ error: null, message: 'Script error.', filename: 'trif://x.com/t.js' });
   assert.deepStrictEqual(plain(W.errors.map((e) => [e.mod, e.message])), [
-    ['news.ycombinator.com/late', 'late'], ['news.ycombinator.com/late', 'late'], ['x.com/z', 'Script error.'],
+    ['news.ycombinator.com/late', 'late'], ['news.ycombinator.com/late', 'late'], ['x.com/z', 'Script error.'], ['x.com/t', 'Script error.'],
   ]);
 });
 
@@ -652,7 +657,7 @@ test('siteForUrl and toolLine', () => {
   assert.strictEqual(lib.siteForUrl('chrome://newtab/'), null);
   assert.strictEqual(lib.siteForUrl('file:///a.html'), null);
   assert.strictEqual(lib.siteForUrl(''), null);
-  assert.strictEqual(lib.toolLine('Bash', 'webmods reload --tab 12'), 'ran webmods reload --tab 12');
+  assert.strictEqual(lib.toolLine('Bash', 'trif reload --tab 12'), 'ran trif reload --tab 12');
   assert.strictEqual(lib.toolLine('Edit', 'sites/x.com/hide-reposts.js'), 'edited sites/x.com/hide-reposts.js');
   assert.strictEqual(lib.toolLine('TodoWrite', ''), 'TodoWrite');
   assert.strictEqual(lib.toolLine('Bash', 'a\n  b'), 'ran a b');
@@ -738,7 +743,7 @@ function mockPort(name) {
 }
 
 let bgCount = 0;
-// WebMods is on for the test sites unless a test says otherwise (storage.sitesOn), or migrate: true
+// TRIF is on for the test sites unless a test says otherwise (storage.sitesOn), or migrate: true
 // leaves sitesOn out, as for someone updating from before sites had to be turned on.
 const TEST_SITES_ON = ['example.com', 'x.com', 'y.com', 'z.com'];
 async function loadBackground({ storage = {}, tabs = [], migrate = false } = {}) {
@@ -886,7 +891,7 @@ test('background: agent.start becomes a native request; agentEvents reach panels
 
     const events = [
       { kind: 'session', sessionId: 's-1' },
-      { kind: 'tool', name: 'Bash', summary: 'webmods reload --tab 12' },
+      { kind: 'tool', name: 'Bash', summary: 'trif reload --tab 12' },
       { kind: 'tool', name: 'Edit', summary: 'sites/x.com/hide-reposts.js' },
       { kind: 'text', text: 'Done: reposts are hidden.' },
       { kind: 'done', ok: true, result: 'Done: reposts are hidden.', costUsd: 0.12, changedFiles: ['sites/x.com/hide-reposts.js'], sessionId: 's-1' },
@@ -899,7 +904,7 @@ test('background: agent.start becomes a native request; agentEvents reach panels
     }
     const chat = bg.store['chat:x.com'];
     assert.deepStrictEqual(chat.messages.map((m) => [m.role, m.text]), [
-      ['user', 'hide reposts'], ['tool', 'ran webmods reload --tab 12'], ['tool', 'edited sites/x.com/hide-reposts.js'],
+      ['user', 'hide reposts'], ['tool', 'ran trif reload --tab 12'], ['tool', 'edited sites/x.com/hide-reposts.js'],
       ['assistant', 'Done: reposts are hidden.'],
     ]);
     assert.strictEqual(chat.sessionId, 's-1');
@@ -967,7 +972,7 @@ test('background: helper disconnect mid-run synthesizes error then done for the 
     // not connected: start fails without reaching a helper
     const r = await panel.ask({ type: 'agent.start', site: 'x.com', tabId: 1, url: 'https://x.com/', prompt: 'again' });
     assert.strictEqual(r.ok, false);
-    assert.match(r.error, /webmods setup/);
+    assert.match(r.error, /trif setup/);
   } finally { bg.restore(); }
 });
 
@@ -1116,7 +1121,7 @@ test('background: mod.enable switches a mod off and on, persists it, and reloads
 
     // bad requests
     r = await bg.native.call('mod.enable', { id: 'nope.com/x', enabled: false });
-    assert.deepStrictEqual([r.ok, r.error], [false, 'no mod nope.com/x (run `webmods status` to list mods)']);
+    assert.deepStrictEqual([r.ok, r.error], [false, 'no mod nope.com/x (run `trif status` to list mods)']);
     r = await bg.native.call('mod.enable', { id: 'x.com/a', enabled: 'no' });
     assert.match(r.error, /enabled must be true or false/);
     r = await bg.native.call('mod.enable', { enabled: true });
@@ -1170,7 +1175,7 @@ test('background: record says whether it changed anything; switching off works o
     const panel = bg.connectPanel();
     await panel.ask({ type: 'site.set', site: 'bank.com', on: false });
     r = await bg.native.call('record', { site: 'bank.com', on: true });
-    assert.match(r.error, /WebMods is off on bank\.com/);
+    assert.match(r.error, /TRIF is off on bank\.com/);
     r = await bg.native.call('record', { site: 'bank.com', on: false });
     assert.deepStrictEqual(r.result, { recording: [], site: 'bank.com', changed: true });
     assert.deepStrictEqual(bg.store.recording, []);
@@ -1277,7 +1282,7 @@ test('mod switch: accessible, optimistic, one change at a time, reverts with a s
   assert.strictEqual(ms.shownEnabled('x.com/a', true), true);
   assert.ok(changes >= 2);
 
-  // live: chrome.storage.local `disabled` changed elsewhere (an agent ran `webmods enable x.com/a`)
+  // live: chrome.storage.local `disabled` changed elsewhere (an agent ran `trif enable x.com/a`)
   ms.syncSwitches(root, (id) => ms.enabledIn({}, id));
   assert.strictEqual(b.getAttribute('aria-checked'), 'true');
   ms.syncSwitches(root, (id) => ms.enabledIn({ 'x.com/a': true }, id));
@@ -1532,7 +1537,7 @@ test('background: deleting from the panel leaves a chat line with Undo; restorin
 });
 
 test('background: a shipped mod\'s new version: status carries it; use it (chat line with Undo), keep mine, merge as a run', async () => {
-  const mods = [mod('x.com/plain-x', { source: 'webmods', version: '1', update: { version: '2', from: '1', modified: true } })];
+  const mods = [mod('x.com/plain-x', { source: 'trif', version: '1', update: { version: '2', from: '1', modified: true } })];
   const bg = await loadBackground({ storage: { mods } });
   try {
     bg.native.emit({ type: 'mods', mods });
@@ -1540,7 +1545,7 @@ test('background: a shipped mod\'s new version: status carries it; use it (chat 
     const panel = bg.connectPanel();
     const st = (await panel.ask({ type: 'status' })).result;
     const m = st.mods.find((x) => x.id === 'x.com/plain-x');
-    assert.deepStrictEqual([m.source, m.version, m.update], ['webmods', '1', { version: '2', from: '1', modified: true }]);
+    assert.deepStrictEqual([m.source, m.version, m.update], ['trif', '1', { version: '2', from: '1', modified: true }]);
 
     let p = panel.ask({ type: 'mod.update', id: 'x.com/plain-x', choice: 'new', site: 'x.com' });
     let req = await answerNative(bg.native, 'mod.update', { id: 'x.com/plain-x', choice: 'new', version: '2', trashed: true });
@@ -1548,7 +1553,7 @@ test('background: a shipped mod\'s new version: status carries it; use it (chat 
     assert.strictEqual((await p).ok, true);
     await settle(10);
     assert.deepStrictEqual(bg.store['chat:x.com'].messages.map((x) => [x.role, x.text, x.undo]),
-      [['mod', 'plain-x.js is now version 2 from WebMods; yours is in the trash.', 'x.com/plain-x']]);
+      [['mod', 'plain-x.js is now version 2 from TRIF; yours is in the trash.', 'x.com/plain-x']]);
 
     p = panel.ask({ type: 'mod.update', id: 'x.com/plain-x', choice: 'mine', site: 'x.com' });
     req = await answerNative(bg.native, 'mod.update', { id: 'x.com/plain-x', choice: 'mine', version: '2' });
@@ -1588,7 +1593,7 @@ test('background: deleting or restoring reloads the tab only when the mod runs t
   } finally { bg.restore(); }
 });
 
-// ------------------------------------------------------------------ sites WebMods is on for
+// ------------------------------------------------------------------ sites TRIF is on for
 
 test('scopeFor matches the helper\'s', async () => {
   const { scopeFor } = require('../helper/lib/scope');
@@ -1639,7 +1644,7 @@ const GATE_TABS = [
   { id: 6, windowId: 1, index: 1, active: false, url: 'https://bank.com/', title: 'Bank' },
 ];
 
-test('background: page commands and chats only reach sites WebMods is on for', async () => {
+test('background: page commands and chats only reach sites TRIF is on for', async () => {
   const bg = await loadBackground({ storage: { sitesOn: ['x.com'] }, tabs: GATE_TABS });
   try {
     let r = await bg.native.call('tabs');
@@ -1647,11 +1652,11 @@ test('background: page commands and chats only reach sites WebMods is on for', a
     for (const [cmd, args] of [['text', { tab: 6 }], ['reload', { tab: 6 }], ['open', { to: 'https://bank.com/' }], ['navigate', { tab: 5, to: 'bank.com' }], ['record', { site: 'bank.com' }]]) {
       r = await bg.native.call(cmd, args);
       assert.strictEqual(r.ok, false, cmd);
-      assert.match(r.error, /WebMods is off on bank\.com/, cmd);
+      assert.match(r.error, /TRIF is off on bank\.com/, cmd);
     }
     const panel = bg.connectPanel();
     r = await panel.ask({ type: 'agent.start', site: 'bank.com', tabId: 6, url: 'https://bank.com/', prompt: 'hi' });
-    assert.deepStrictEqual([r.ok, r.error], [false, 'WebMods is off on bank.com: turn it on first']);
+    assert.deepStrictEqual([r.ok, r.error], [false, 'TRIF is off on bank.com: turn it on first']);
     assert.strictEqual(bg.natives[0].sent.some((m) => m.cmd === 'agent.start'), false);
   } finally { bg.restore(); }
 });
@@ -1678,7 +1683,7 @@ test('background: the panel\'s site switch turns a site on and off, applying mod
   } finally { bg.restore(); }
 });
 
-test('background: updating from before sites had to be turned on keeps WebMods on where it was in use', async () => {
+test('background: updating from before sites had to be turned on keeps TRIF on where it was in use', async () => {
   const bg = await loadBackground({ migrate: true, storage: {
     mods: [mod('x.com/a'), mod('off.com/b'), mod('all-sites/dark', { matches: ['*://*/*'] })],
     disabled: { 'off.com/b': true },

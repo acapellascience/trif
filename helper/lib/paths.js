@@ -4,18 +4,31 @@
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
+const { envVar } = require('./env');
 
+// The product: "Tim's Robot Internet Fixer", TRIF for short (called WebMods before 0.2.0).
+const NAME = 'TRIF';
+const FULL_NAME = "Tim's Robot Internet Fixer";
+const CLI_NAME = 'trif';
+// The command's name before 0.2.0, kept working as an alias (agents, people's habits, PATHs with the old
+// wrapper in them).
+const LEGACY_CLI_NAME = 'webmods';
+
+// The native messaging host's name. Kept from before the rename: the extension connects to it by name,
+// and Firefox updates the add-on on its own schedule, so an older add-on must still find the helper (and
+// a newer one an older helper) by this name. Nobody sees it.
 const HOST_NAME = 'com.webmods.helper';
 
-// Every WebMods extension ID the native host must accept (its manifest's allowed_origins).
+// Every TRIF extension ID the native host must accept (its manifest's allowed_origins).
 // The unpacked/dev build: fixed by the "key" in extension/manifest.json.
 const DEV_EXTENSION_ID = 'iaablflfafmonebdomeikadolkgdbkhe';
 // >>> Chrome Web Store ID(s): unknown until the first upload. Add the listing's ID here once it exists,
-// >>> then ship a release so `webmods setup` writes it into every native host manifest.
+// >>> then ship a release so `trif setup` writes it into every native host manifest.
 const STORE_EXTENSION_IDS = [];
 // Users can add more in config.json: { "extensionIds": ["<32 letters a-p>", ...] } (see extensionIds()).
 // Firefox identifies the add-on by the ID in its manifest (scripts/build-extension.js firefox), and native
-// host manifests for Firefox list it in allowed_extensions.
+// host manifests for Firefox list it in allowed_extensions. (Both IDs date from before the rename and must
+// never change: browsers would treat it as a different extension, losing its settings and updates.)
 const FIREFOX_EXTENSION_ID = 'webmods@webmods.ext';
 const EXTENSION_ID = DEV_EXTENSION_ID; // the one the docs and fix messages point at
 const EXTENSION_ORIGIN = `chrome-extension://${EXTENSION_ID}/`;
@@ -63,14 +76,52 @@ function expandHome(p) {
   return p;
 }
 
-function defaultHome() {
-  return path.join(os.homedir(), '.webmods');
+const HOME_DIR_NAME = '.trif';
+const LEGACY_HOME_DIR_NAME = '.webmods'; // before 0.2.0; setup moves it to ~/.trif and leaves a link (migrate.js)
+
+/** ~/.trif: where the workspace lives unless told otherwise. */
+function defaultHome(homedir = os.homedir()) {
+  return path.join(homedir, HOME_DIR_NAME);
 }
 
-// Precedence: explicit override (--home) > $WEBMODS_HOME > ~/.webmods
+/** ~/.webmods: the workspace's place before 0.2.0. */
+function legacyHome(homedir = os.homedir()) {
+  return path.join(homedir, LEGACY_HOME_DIR_NAME);
+}
+
+function existsNoFollow(p) {
+  try { fs.lstatSync(p); return true; } catch { return false; }
+}
+
+function isDirFollow(p) {
+  try { return fs.statSync(p).isDirectory(); } catch { return false; }
+}
+
+/**
+ * The default workspace as things are on disk: ~/.trif, unless only a ~/.webmods (a folder, or a link to
+ * one) exists, i.e. a workspace from before 0.2.0 that setup hasn't moved yet (say, a git checkout whose
+ * helper restarted onto new code before anyone ran setup): that one, so nothing goes missing.
+ */
+function currentDefaultHome(homedir = os.homedir()) {
+  const home = defaultHome(homedir);
+  if (existsNoFollow(home)) return home;
+  const legacy = legacyHome(homedir);
+  return isDirFollow(legacy) ? legacy : home;
+}
+
+// Precedence: explicit override (--home) > $TRIF_HOME (or $WEBMODS_HOME) > ~/.trif. An override naming
+// ~/.webmods, the old default (an updater from before 0.2.0 passes it), means the default.
 function resolveHome(override) {
-  const h = override || process.env.WEBMODS_HOME || defaultHome();
-  return path.resolve(expandHome(String(h)));
+  const h = override || envVar('HOME');
+  if (!h) return currentDefaultHome();
+  const resolved = path.resolve(expandHome(String(h)));
+  return resolved === legacyHome() || resolved === defaultHome() ? currentDefaultHome() : resolved;
+}
+
+/** Whether `home` (resolved) is the default workspace, under either name. */
+function isDefaultHome(home) {
+  const resolved = path.resolve(expandHome(String(home)));
+  return resolved === defaultHome() || resolved === legacyHome();
 }
 
 function readConfig(home) {
@@ -99,8 +150,12 @@ function workspace(homeOverride) {
     log: path.join(home, 'helper.log'),
     screenshots: path.join(home, 'screenshots'),
     bin: path.join(home, 'bin'),
-    hostWrapper: path.join(home, 'bin', 'webmods-host'),
-    cliWrapper: path.join(home, 'bin', 'webmods'),
+    hostWrapper: path.join(home, 'bin', `${CLI_NAME}-host`),
+    cliWrapper: path.join(home, 'bin', CLI_NAME),
+    // The same wrappers under their names from before 0.2.0: native host manifests and PATHs may still
+    // point at them.
+    legacyHostWrapper: path.join(home, 'bin', `${LEGACY_CLI_NAME}-host`),
+    legacyCliWrapper: path.join(home, 'bin', LEGACY_CLI_NAME),
     appDir: path.join(home, APP_DIR_NAME),
     config,
     configError: error,
@@ -108,12 +163,13 @@ function workspace(homeOverride) {
 }
 
 function examplesDir() {
-  return process.env.WEBMODS_EXAMPLES_DIR
-    ? path.resolve(process.env.WEBMODS_EXAMPLES_DIR)
+  return envVar('EXAMPLES_DIR')
+    ? path.resolve(envVar('EXAMPLES_DIR'))
     : path.join(REPO_ROOT, 'examples', 'sites');
 }
 
 module.exports = {
+  NAME, FULL_NAME, CLI_NAME, LEGACY_CLI_NAME, HOME_DIR_NAME, LEGACY_HOME_DIR_NAME, legacyHome, currentDefaultHome, isDefaultHome,
   HOST_NAME, DEV_EXTENSION_ID, FIREFOX_EXTENSION_ID, STORE_EXTENSION_IDS, EXTENSION_ID, EXTENSION_ORIGIN, HELPER_DIR, REPO_ROOT,
   HOST_JS, CLI_JS, APP_DIR_NAME, VERSION,
   expandHome, defaultHome, resolveHome, readConfig, workspace, examplesDir, isGitCheckout, extensionIds, extensionOrigins,

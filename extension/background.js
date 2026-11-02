@@ -1,5 +1,5 @@
-// WebMods service worker: talks to the native helper, keeps chrome.userScripts in sync with the mods
-// folder, executes page commands from the `webmods` CLI, and relays agent runs between the side
+// TRIF service worker: talks to the native helper, keeps chrome.userScripts in sync with the mods
+// folder, executes page commands from the `trif` CLI, and relays agent runs between the side
 // panel and the helper. See docs/PROTOCOL.md.
 
 import {
@@ -15,7 +15,7 @@ const HOST = 'com.webmods.helper';
 const VERSION = chrome.runtime.getManifest().version;
 const CHROME = chromeVersion(navigator.userAgent);
 const LOAD_TIMEOUT = 30000;
-const NOT_CONNECTED = `The WebMods helper isn't connected. Run \`npx webmods setup\` in a terminal (needs Node 18+), then restart ${BROWSER}.`;
+const NOT_CONNECTED = `The TRIF helper isn't connected. Run \`npx trif setup\` in a terminal (needs Node 18+), then restart ${BROWSER}.`;
 
 const state = {
   port: null,
@@ -30,7 +30,7 @@ const state = {
   recording: [],         // hostnames being recorded (persisted)
   disabled: {},          // mod id → true for mods the user switched off (persisted as `disabled`)
   offSites: {},          // mod id → sites it's switched off on, for mods on several sites (persisted)
-  sitesOn: [],           // registrable domains WebMods is on for; off everywhere else (persisted)
+  sitesOn: [],           // registrable domains TRIF is on for; off everywhere else (persisted)
   sitesOffered: [],      // sites the helper said to start on that were turned on once already (persisted)
   startedOff: {},        // mod id → true for mods already switched off once: preinstalled, or from another browser (persisted)
   installId: null,       // random id of this install (persisted): the helper records it as the origin of mods made here
@@ -73,16 +73,16 @@ const ready = chrome.storage.local.get(null).then(async (s) => {
   state.sitesOffered = normalizeSitesOn(s.sitesOffered);
   if (Array.isArray(s.sitesOn)) state.sitesOn = normalizeSitesOn(s.sitesOn);
   else {
-    // First start since WebMods has to be turned on per site: keep it on where it's already in use.
+    // First start since TRIF has to be turned on per site: keep it on where it's already in use.
     const chats = Object.fromEntries(Object.entries(s).filter(([k]) => k.startsWith('chat:')).map(([k, v]) => [k.slice(5), v]));
     state.sitesOn = sitesInUse(state.mods, state.disabled, chats);
-    await save({ sitesOn: state.sitesOn }).catch((e) => console.warn('[webmods]', errMsg(e)));
+    await save({ sitesOn: state.sitesOn }).catch((e) => console.warn('[TRIF]', errMsg(e)));
   }
   state.installId = typeof s.installId === 'string' && s.installId ? s.installId : crypto.randomUUID();
-  if (state.installId !== s.installId) await save({ installId: state.installId }).catch((e) => console.warn('[webmods]', errMsg(e)));
+  if (state.installId !== s.installId) await save({ installId: state.installId }).catch((e) => console.warn('[TRIF]', errMsg(e)));
   if (s.applied && typeof s.applied === 'object') state.applied = s.applied;
   await cleanStaleRuns(s);
-}).catch((e) => console.error('[webmods] failed to read storage', e));
+}).catch((e) => console.error('[TRIF] failed to read storage', e));
 
 // Listeners must be registered synchronously at the top level of a service worker.
 chrome.runtime.onStartup.addListener(() => {
@@ -116,9 +116,9 @@ if (FIREFOX) {
 function setPanelBehavior() {
   if (FIREFOX) return;
   try {
-    chrome.sidePanel?.setPanelBehavior({ openPanelOnActionClick: true })?.catch?.((e) => console.warn('[webmods] setPanelBehavior failed', e));
+    chrome.sidePanel?.setPanelBehavior({ openPanelOnActionClick: true })?.catch?.((e) => console.warn('[TRIF] setPanelBehavior failed', e));
   } catch (e) {
-    console.warn('[webmods] setPanelBehavior failed', e);
+    console.warn('[TRIF] setPanelBehavior failed', e);
   }
 }
 
@@ -154,7 +154,7 @@ function checkUserScripts() {
   state.userScripts = now;
   if (before !== null && before !== now) {
     log(now ? 'info' : 'warn', now ? 'user scripts were turned on' : 'user scripts were turned off');
-    // A fresh hello keeps the helper's view of the switch (shown by `webmods doctor`) current.
+    // A fresh hello keeps the helper's view of the switch (shown by `trif doctor`) current.
     post({ type: 'hello', version: VERSION, userScripts: now, chrome: CHROME, browser: BROWSER, installId: state.installId });
     if (now) serial(applyMods).then(reportApplied, () => {});
     notifyPanels();
@@ -219,7 +219,7 @@ function connect() {
   });
   port.onDisconnect.addListener(() => {
     const reason = chrome.runtime.lastError?.message || 'the helper exited';
-    console.warn('[webmods] helper disconnected:', reason);
+    console.warn('[TRIF] helper disconnected:', reason);
     if (state.connected && Date.now() - state.connectedAt > 10000) state.backoff = 0;
     state.port = null;
     state.connected = false;
@@ -239,11 +239,11 @@ function scheduleReconnect() {
 
 function post(msg) {
   if (!state.port) return;
-  try { state.port.postMessage(msg); } catch (e) { console.warn('[webmods] postMessage failed', e); }
+  try { state.port.postMessage(msg); } catch (e) { console.warn('[TRIF] postMessage failed', e); }
 }
 
 function log(level, message) {
-  (level === 'error' ? console.error : level === 'warn' ? console.warn : console.log)('[webmods]', message);
+  (level === 'error' ? console.error : level === 'warn' ? console.warn : console.log)('[TRIF]', message);
   post({ type: 'log', level, message });
 }
 
@@ -262,7 +262,7 @@ async function onHelperMessage(msg) {
       state.startedOff = off.startedOff;
       await save({ disabled: state.disabled, startedOff: state.startedOff }).catch((e) => log('warn', errMsg(e)));
     }
-    // Sites setup starts WebMods on for (the preinstalled mods' sites), each turned on once.
+    // Sites setup starts TRIF on for (the preinstalled mods' sites), each turned on once.
     const sites = applyStartSites(state.sitesOn, state.sitesOffered, msg.sitesOn);
     if (sites.changed) {
       state.sitesOn = sites.sitesOn;
@@ -291,12 +291,12 @@ async function onHelperMessage(msg) {
     state.update = msg.update && typeof msg.update === 'object' ? msg.update : null;
     notifyPanels();
   } else if (msg.type === 'updated') {
-    // Shown by the panel after the reload that follows ("WebMods updated to …").
+    // Shown by the panel after the reload that follows ("TRIF updated to …").
     await chrome.storage.local.set({ updated: { from: String(msg.from ?? ''), to: String(msg.to ?? ''), notes: String(msg.notes ?? ''), at: Date.now() } });
   } else if (msg.type === 'reload') {
     // The helper installed a new version (or found one installed): reload onto it. Chrome reads the
     // unpacked extension's files again; either browser starts the new helper on reconnect.
-    console.log('[webmods] reloading:', msg.reason);
+    console.log('[TRIF] reloading:', msg.reason);
     setTimeout(() => chrome.runtime.reload(), 100);
   }
 }
@@ -325,15 +325,15 @@ function helperRequest(cmd, args = {}, timeout = 30000) {
 function helperGone(reason) {
   for (const [id, p] of state.pending) {
     clearTimeout(p.timer);
-    p.reject(new Error(`the WebMods helper disconnected (${reason})`));
+    p.reject(new Error(`the TRIF helper disconnected (${reason})`));
     state.pending.delete(id);
   }
   for (const runId of [...state.runs.keys()]) {
-    onAgentEvent(runId, { kind: 'error', message: `The WebMods helper disconnected while the agent was working (${reason}).` });
+    onAgentEvent(runId, { kind: 'error', message: `The TRIF helper disconnected while the agent was working (${reason}).` });
     onAgentEvent(runId, { kind: 'done', ok: false, result: '', costUsd: null, changedFiles: [], sessionId: null });
   }
   for (const loginId of [...state.logins]) {
-    onAgentEvent(loginId, { kind: 'error', message: `The WebMods helper disconnected during the login (${reason}).` });
+    onAgentEvent(loginId, { kind: 'error', message: `The TRIF helper disconnected during the login (${reason}).` });
     onAgentEvent(loginId, { kind: 'done', ok: false, login: true });
   }
   notifyPanels();
@@ -343,7 +343,7 @@ function helperGone(reason) {
 
 // A side-panel agent run's requests carry args.scope (the helper sets it from the run's token): they
 // may only touch tabs and URLs on that site. See docs/PROTOCOL.md "Run scope". And no request, from a
-// run or a terminal, touches a site WebMods is off for (see "sites WebMods is on for" in lib.js).
+// run or a terminal, touches a site TRIF is off for (see "sites TRIF is on for" in lib.js).
 function checkScopeUrl(url, scope, what) {
   if (scope && !urlInScope(url, scope)) {
     throw new Error(`${what} is on ${hostOf(url) || url || 'a page'}, and this agent run is limited to ${scope}` +
@@ -352,8 +352,8 @@ function checkScopeUrl(url, scope, what) {
   if (!siteOnFor(url, state.sitesOn)) {
     const host = hostOf(url);
     throw new Error(host && /^https?:/.test(url)
-      ? `WebMods is off on ${scopeFor(host)}: nothing from WebMods runs there or reads it until the user turns it on (the side panel on that site has the switch)`
-      : `${what} isn't a web page (${url || 'no URL'}); WebMods only works on http and https pages`);
+      ? `TRIF is off on ${scopeFor(host)}: nothing from TRIF runs there or reads it until the user turns it on (the side panel on that site has the switch)`
+      : `${what} isn't a web page (${url || 'no URL'}); TRIF only works on http and https pages`);
   }
 }
 
@@ -468,20 +468,20 @@ const commands = {
     });
   },
 
-  // Only the tab showing in its window can be captured, and WebMods never switches tabs or focuses
+  // Only the tab showing in its window can be captured, and TRIF never switches tabs or focuses
   // windows to get one: several agents can be working at once while the user browses.
   async screenshot(args) {
     const tab = await scopedTab(args);
     const win = await chrome.windows.get(tab.windowId).catch(() => null);
     if (!tab.active || !win || win.state === 'minimized') {
-      throw new Error("that tab isn't showing (WebMods doesn't switch tabs while the user is browsing); " +
-        'inspect it with `webmods text` or `webmods run` instead, or try again when it is in front');
+      throw new Error("that tab isn't showing (TRIF doesn't switch tabs while the user is browsing); " +
+        'inspect it with `trif text` or `trif run` instead, or try again when it is in front');
     }
     return { dataUrl: await chrome.tabs.captureVisibleTab(tab.windowId, { format: 'png' }) };
   },
 
   // `changed` and `site` let the helper switch recording off again when the agent run that switched it
-  // on ends (host.js). Switching off is allowed on a site WebMods is off for: it only records less.
+  // on ends (host.js). Switching off is allowed on a site TRIF is off for: it only records less.
   async record(args) {
     const site = normalizeSite(args.site);
     const on = !(args.on === false || args.on === 'off');
@@ -517,7 +517,7 @@ const commands = {
   async request(args) {
     requireUserScripts();
     const i = Number(args.i);
-    if (!Number.isInteger(i)) throw new Error('missing request number i (see `webmods requests`)');
+    if (!Number.isInteger(i)) throw new Error('missing request number i (see `trif requests`)');
     const tab = await scopedTab(args);
     const r = await pageCall(tab.id, 'MAIN', (n) => {
       const w = window.__webmods;
@@ -527,7 +527,7 @@ const commands = {
     }, [i]);
     if (r.missing) throw new Error(noRuntime());
     if (!r.recording) throw new Error(notRecording(r.host));
-    if (!r.entry) throw new Error(`no request ${i} in this page (recorded requests reset on every page load; see \`webmods requests\`)`);
+    if (!r.entry) throw new Error(`no request ${i} in this page (recorded requests reset on every page load; see \`trif requests\`)`);
     return r.entry;
   },
 
@@ -547,7 +547,7 @@ const commands = {
     if (!id) throw new Error('missing mod id');
     if (typeof args.enabled !== 'boolean') throw new Error('enabled must be true or false');
     const mod = state.mods.find((m) => m.id === id);
-    if (!mod) throw new Error(`no mod ${id} (run \`webmods status\` to list mods)`);
+    if (!mod) throw new Error(`no mod ${id} (run \`trif status\` to list mods)`);
     const site = args.site == null || args.site === '' ? null : offSiteName(args.site);
     if (args.site != null && args.site !== '' && !site) throw new Error(`"${args.site}" isn't a site (use a hostname like twitter.com)`);
     if (args.scope && !(site ? hostInScope(site, args.scope) : modInScope(mod, args.scope))) {
@@ -631,14 +631,14 @@ async function runtimeList(args, key) {
 }
 
 function noRuntime() {
-  return 'the WebMods runtime is not running in this tab (the page was loaded before WebMods was ready, or it is a page extensions cannot access). Reload the tab and try again.';
+  return 'the TRIF runtime is not running in this tab (the page was loaded before TRIF was ready, or it is a page extensions cannot access). Reload the tab and try again.';
 }
 
 function notRecording(host) {
   const site = state.recording.find((s) => hostMatchesSite(host, s));
   return site
-    ? `recording of ${site} was turned on after this page loaded: reload the tab (\`webmods reload\`) and try again.`
-    : `not recording ${host}. Run \`webmods record ${host} on\`, then reload the tab.`;
+    ? `recording of ${site} was turned on after this page loaded: reload the tab (\`trif reload\`) and try again.`
+    : `not recording ${host}. Run \`trif record ${host} on\`, then reload the tab.`;
 }
 
 /** Run `func` in the tab's top frame with chrome.scripting and return its (JSON-able) result. */
@@ -833,7 +833,7 @@ async function onPanelMessage(msg) {
         await updateChat(normalizeSite(msg.site), (chat) => {
           chat.messages.push({
             role: 'mod', time: Date.now(), ...(r.trashed ? { undo: r.id } : {}),
-            text: `${modFileName(r.id)} is now ${r.version ? `version ${r.version}` : 'the new version'} from WebMods${r.trashed ? '; yours is in the trash.' : '.'}`,
+            text: `${modFileName(r.id)} is now ${r.version ? `version ${r.version}` : 'the new version'} from TRIF${r.trashed ? '; yours is in the trash.' : '.'}`,
           });
         });
       }
@@ -862,7 +862,7 @@ async function startAgent(msg) {
   const site = normalizeSite(msg.site);
   const prompt = String(msg.prompt ?? '').trim();
   if (!prompt) throw new Error('empty message');
-  if (!siteOnFor(`https://${site}/`, state.sitesOn)) throw new Error(`WebMods is off on ${scopeFor(site)}: turn it on first`);
+  if (!siteOnFor(`https://${site}/`, state.sitesOn)) throw new Error(`TRIF is off on ${scopeFor(site)}: turn it on first`);
   const agent = msg.agent ? String(msg.agent) : undefined;
   const tabId = Number.isInteger(msg.tabId) ? msg.tabId : undefined;
   const startedAt = Date.now();
@@ -1056,7 +1056,7 @@ async function cleanStaleRuns(all) {
   for (const [key, chat] of Object.entries(all || {})) {
     if (!key.startsWith('chat:') || !chat?.run) continue;
     const messages = Array.isArray(chat.messages) ? chat.messages.slice() : [];
-    messages.push({ role: 'error', text: 'Interrupted: WebMods restarted while the agent was working.', time: Date.now() });
+    messages.push({ role: 'error', text: 'Interrupted: TRIF restarted while the agent was working.', time: Date.now() });
     fixes[key] = { ...chat, messages, run: null };
   }
   if (Object.keys(fixes).length) await chrome.storage.local.set(fixes);

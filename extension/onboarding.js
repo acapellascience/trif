@@ -37,11 +37,11 @@ function el(tag, className, text) {
 
 function render(s) {
   if (s.helper.connected) {
-    setSection('helper', true, 'Helper connected', 'Your coding agent can use the webmods command.');
+    setSection('helper', true, 'Helper connected', 'Your coding agent can use the trif command.');
   } else {
     setSection('helper', false, 'Helper not connected', [
-      'Run ', code('npx webmods setup'), ` in a terminal (it needs Node 18 or newer), then quit and restart ${BROWSER}.`,
-      el('br'), 'Already set up? Run ', code('webmods doctor'), ' to see what\'s wrong.',
+      'Run ', code('npx trif setup'), ` in a terminal (it needs Node 18 or newer), then quit and restart ${BROWSER}.`,
+      el('br'), 'Already set up? Run ', code('trif doctor'), ' to see what\'s wrong.',
       ...(s.helper.error ? [el('br'), `${BROWSER} says: ${s.helper.error}`] : []),
     ]);
   }
@@ -59,7 +59,7 @@ function render(s) {
   last = s;
   renderMods();
   const rec = s.recording.length ? ` · recording requests on ${s.recording.join(', ')}` : '';
-  $('#footer').textContent = `WebMods ${s.version} · ${BROWSER} ${s.chrome}${rec}`;
+  $('#footer').textContent = `TRIF ${s.version} · ${BROWSER} ${s.chrome}${rec}`;
 }
 
 let labelSeq = 0;
@@ -70,7 +70,7 @@ function renderMods() {
   const list = $('#mod-list');
   const modsDetail = $('#mods .detail');
   if (!s.mods.length) {
-    modsDetail.replaceChildren('No mods yet. Open your coding agent in ', code('~/.webmods'), ' and ask it to change a website.');
+    modsDetail.replaceChildren('No mods yet. Open your coding agent in ', code('~/.trif'), ' and ask it to change a website.');
   } else {
     modsDetail.replaceChildren();
   }
@@ -108,7 +108,7 @@ const isOn = (id, site) => enabledIn(disabled, id) && !(site && offOnSite(offSit
 
 async function applySwitch(id, enabled, site) {
   const r = await chrome.runtime.sendMessage({ type: 'mod.enable', id, enabled, ...(site ? { site } : {}) });
-  if (!r || r.error) throw new Error(r?.error || 'no answer from the WebMods service worker');
+  if (!r || r.error) throw new Error(r?.error || 'no answer from the TRIF service worker');
   return r;
 }
 

@@ -1,5 +1,5 @@
 'use strict';
-// Tests for helper/cli.js (the `webmods` command), run against host.js + a fake extension.
+// Tests for helper/cli.js (the `trif` command), run against host.js + a fake extension.
 
 const test = require('node:test');
 const assert = require('node:assert');
@@ -22,7 +22,7 @@ async function getShared() {
   if (shared) return shared;
   const home = tempDir();
   writeMod(home, 'example.com', 'banner.js', '// ==WebMod==\n// @name Banner\n// ==/WebMod==\n1');
-  const ext = new FakeExtension({ home, env: { WEBMODS_TIMEOUT_GRACE: '300' } });
+  const ext = new FakeExtension({ home, env: { TRIF_TIMEOUT_GRACE: '300' } });
   cleanups.push(() => ext.close());
   ext.hello();
   const off = new Set(); // mods switched off through mod.enable
@@ -44,7 +44,7 @@ async function getShared() {
       recording: ['x.com'],
     }),
     'mod.enable': (args) => {
-      if (args.id !== 'example.com/banner') throw new Error(`no mod ${args.id} (run \`webmods status\` to list mods)`);
+      if (args.id !== 'example.com/banner') throw new Error(`no mod ${args.id} (run \`trif status\` to list mods)`);
       if (args.site) return { id: args.id, enabled: args.enabled, site: args.site, offSites: args.enabled ? [] : [args.site], modEnabled: true, reloaded: null };
       if (args.enabled) off.delete(args.id); else off.add(args.id);
       return { id: args.id, enabled: args.enabled, reloaded: args.tab === 11 ? 11 : null };
@@ -113,7 +113,7 @@ test('exit code 2 with a clear message when the helper is not running', async ()
     assert.equal(r.code, 2, `${args} exit code`);
     assert.match(r.stderr, /helper isn't running/);
     assert.match(r.stderr, /Open Chrome/);
-    assert.match(r.stderr, /webmods doctor/);
+    assert.match(r.stderr, /trif doctor/);
     assert.equal(r.stdout, '');
   }
 });
@@ -277,7 +277,7 @@ test('enable / disable: mod.enable through the helper; status shows off; mods ma
   assert.match(r.stdout, /off = switched off by the user/);
   r = await runCli(['mods'], { home });
   assert.match(r.stdout, /^example\.com\/banner {2}\(Banner\) {2}\[off\]$/m);
-  assert.match(r.stdout, /switched off by the user \(not running; webmods enable example\.com\/banner turns it on\)/);
+  assert.match(r.stdout, /switched off by the user \(not running; trif enable example\.com\/banner turns it on\)/);
   r = await runCli(['mods', '--json'], { home });
   assert.equal(JSON.parse(r.stdout).mods[0].enabled, false);
 
@@ -285,7 +285,7 @@ test('enable / disable: mod.enable through the helper; status shows off; mods ma
   r = await runCli(['enable', path.join(home, 'sites', 'example.com', 'banner.js')], { home });
   assert.equal(r.code, 0, r.stderr);
   assert.match(r.stdout, /^example\.com\/banner is on\n/);
-  assert.match(r.stdout, /reload open example\.com tabs to see it \(webmods reload --url example\.com\)/);
+  assert.match(r.stdout, /reload open example\.com tabs to see it \(trif reload --url example\.com\)/);
   assert.deepEqual(lastRequest(ext, 'mod.enable').args, { id: 'example.com/banner', enabled: true, wait: true });
   r = await runCli(['status'], { home });
   assert.match(r.stdout, /example\.com\/banner\s+registered/);
@@ -310,7 +310,7 @@ test('enable / disable: mod.enable through the helper; status shows off; mods ma
   r = await runCli(['disable', 'banner'], { home });
   assert.equal(r.code, 1);
   assert.match(r.stderr, /isn't a mod id/);
-  assert.match(r.stderr, /usage: webmods disable <site>\/<mod> \[--site HOST\] \[TAB\]/);
+  assert.match(r.stderr, /usage: trif disable <site>\/<mod> \[--site HOST\] \[TAB\]/);
   r = await runCli(['enable'], { home });
   assert.equal(r.code, 1);
   r = await runCli(['help', 'disable'], { home });
@@ -386,7 +386,7 @@ test('install-example copies from the examples folder', async () => {
   const examples = tempDir();
   fs.mkdirSync(path.join(examples, 'x.com'));
   fs.writeFileSync(path.join(examples, 'x.com', 'plain-x.js'), '// example\n');
-  const env = { WEBMODS_EXAMPLES_DIR: examples };
+  const env = { TRIF_EXAMPLES_DIR: examples };
   let r = await runCli(['install-example'], { home, env });
   assert.match(r.stdout, /x\.com\/plain-x/);
   r = await runCli(['install-example', 'x.com/plain-x'], { home, env });
@@ -425,16 +425,16 @@ test('setup: workspace, wrappers, manifest, link; idempotent; leaves sites alone
   assert.equal(fs.readFileSync(path.join(ws, 'CLAUDE.md'), 'utf8').trim(), '@AGENTS.md\n@instructions.md');
   if (fs.existsSync(path.join(REPO, 'helper', 'workspace', 'AGENTS.md'))) assert.ok(fs.existsSync(path.join(ws, 'AGENTS.md')));
 
-  const hostWrapper = path.join(ws, 'bin', 'webmods-host');
+  const hostWrapper = path.join(ws, 'bin', 'trif-host');
   const host = fs.readFileSync(hostWrapper, 'utf8');
   assert.match(host, /^#!\/bin\/sh\n/);
   const m = host.match(/exec "([^"]+)" "([^"]+)" "\$@"\n$/);
   assert.ok(m, host);
   assert.ok(path.isAbsolute(m[1]) && fs.existsSync(m[1]), 'absolute node path');
   assert.equal(m[2], path.join(REPO, 'helper', 'host.js'));
-  assert.match(host, new RegExp(`WEBMODS_HOME="${ws.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}"`));
+  assert.match(host, new RegExp(`TRIF_HOME="${ws.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}"`));
   assert.equal(fs.statSync(hostWrapper).mode & 0o111, 0o111);
-  const cli = fs.readFileSync(path.join(ws, 'bin', 'webmods'), 'utf8');
+  const cli = fs.readFileSync(path.join(ws, 'bin', 'trif'), 'utf8');
   assert.match(cli, /helper\/cli\.js" "\$@"\n$/);
 
   const manifest = JSON.parse(fs.readFileSync(path.join(root, 'native', 'com.webmods.helper.json'), 'utf8'));
@@ -445,14 +445,14 @@ test('setup: workspace, wrappers, manifest, link; idempotent; leaves sites alone
     type: 'stdio',
     allowed_origins: [ORIGIN],
   });
-  assert.equal(fs.readlinkSync(path.join(root, 'bin', 'webmods')), path.join(ws, 'bin', 'webmods'));
+  assert.equal(fs.readlinkSync(path.join(root, 'bin', 'trif')), path.join(ws, 'bin', 'trif'));
   assert.match(r.stdout, /Load unpacked/);
   assert.match(r.stdout, /Allow User Scripts/);
   assert.match(r.stdout, new RegExp(path.join(REPO, 'extension').replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
 
   // The CLI wrapper works and points at the right home.
   const viaWrapper = await new Promise((resolve) => {
-    require('child_process').execFile(path.join(ws, 'bin', 'webmods'), ['mods'], { env: { PATH: process.env.PATH, HOME: root } }, (e, so) => resolve(so));
+    require('child_process').execFile(path.join(ws, 'bin', 'trif'), ['mods'], { env: { PATH: process.env.PATH, HOME: root } }, (e, so) => resolve(so));
   });
   assert.match(viaWrapper, new RegExp(`no mods in ${ws.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}`));
 
@@ -467,18 +467,18 @@ test('setup: workspace, wrappers, manifest, link; idempotent; leaves sites alone
   assert.equal(fs.readFileSync(hostWrapper, 'utf8'), host);
 });
 
-test('setup: does not overwrite a non-symlink webmods in the bin dir; honours WEBMODS_HOME', async () => {
+test('setup: does not overwrite a non-symlink trif in the bin dir; honours TRIF_HOME', async () => {
   const root = tempDir();
   fs.mkdirSync(path.join(root, 'bin'));
-  fs.writeFileSync(path.join(root, 'bin', 'webmods'), 'someone else');
+  fs.writeFileSync(path.join(root, 'bin', 'trif'), 'someone else');
   const ws = path.join(root, 'envhome');
   const r = await runCli(['setup', '--native-dir', path.join(root, 'native'), '--bin-dir', path.join(root, 'bin')], { home: ws });
   assert.equal(r.code, 0, r.stderr);
-  assert.equal(fs.readFileSync(path.join(root, 'bin', 'webmods'), 'utf8'), 'someone else');
+  assert.equal(fs.readFileSync(path.join(root, 'bin', 'trif'), 'utf8'), 'someone else');
   assert.match(r.stdout, /not a symlink/);
-  assert.ok(fs.existsSync(path.join(ws, 'bin', 'webmods-host')));
+  assert.ok(fs.existsSync(path.join(ws, 'bin', 'trif-host')));
   const manifest = JSON.parse(fs.readFileSync(path.join(root, 'native', 'com.webmods.helper.json'), 'utf8'));
-  assert.equal(manifest.path, path.join(ws, 'bin', 'webmods-host'));
+  assert.equal(manifest.path, path.join(ws, 'bin', 'trif-host'));
 });
 
 test('setup: --browser picks folders under HOME; unknown browser fails', async () => {
@@ -504,7 +504,7 @@ test('doctor: broken setup lists failures with fixes and exits 1', async () => {
   assert.match(r.stdout, /FAIL {2}host wrapper .* is missing/);
   assert.match(r.stdout, /FAIL {2}.*native host manifest missing/);
   assert.match(r.stdout, /FAIL {2}helper isn't running/);
-  assert.match(r.stdout, /fix: run: webmods setup/);
+  assert.match(r.stdout, /fix: run: trif setup/);
   assert.match(r.stdout, /fix: first fix the failures above/);
   assert.match(r.stdout, /problem\(s\) found/);
 });
@@ -525,7 +525,7 @@ test('doctor: after setup, wrong manifest and missing node are caught; live help
   const m = JSON.parse(fs.readFileSync(mf, 'utf8'));
   m.allowed_origins = ['chrome-extension://someotherid/'];
   fs.writeFileSync(mf, JSON.stringify(m));
-  const wrapper = path.join(ws, 'bin', 'webmods-host');
+  const wrapper = path.join(ws, 'bin', 'trif-host');
   const orig = fs.readFileSync(wrapper, 'utf8');
   fs.writeFileSync(wrapper, orig.replace(/exec "[^"]+"/, 'exec "/nonexistent/node"'));
   r = await runCli(['doctor', '--native-dir', native], { home: ws });
@@ -549,7 +549,7 @@ test('doctor: after setup, wrong manifest and missing node are caught; live help
   await ext.close();
 });
 
-test('status: lists the sites WebMods is on for and marks mods waiting for theirs', async () => {
+test('status: lists the sites TRIF is on for and marks mods waiting for theirs', async () => {
   const home = tempDir();
   writeMod(home, 'bank.com', 'a.js', '// ==WebMod==\n// @name A\n// ==/WebMod==\n');
   const ext = new FakeExtension({ home });
@@ -560,9 +560,9 @@ test('status: lists the sites WebMods is on for and marks mods waiting for their
   await ext.waitForSocket();
   await ext.nextMods((mods) => mods.length === 1);
   const r = await runCli(['status'], { home });
-  assert.match(r.stdout, /bank\.com\/a\s+waiting: WebMods is off on its site\n/);
-  assert.match(r.stdout, /waiting = not running until the user turns WebMods on for the site/);
-  assert.match(r.stdout, /^sites on {6}x\.com; WebMods is off everywhere else/m);
+  assert.match(r.stdout, /bank\.com\/a\s+waiting: TRIF is off on its site\n/);
+  assert.match(r.stdout, /waiting = not running until the user turns TRIF on for the site/);
+  assert.match(r.stdout, /^sites on {6}x\.com; TRIF is off everywhere else/m);
 });
 
 test('inside a side-panel run, the CLI reads -f and check files only from the mods folder', async () => {
@@ -572,7 +572,7 @@ test('inside a side-panel run, the CLI reads -f and check files only from the mo
   writeMod(home, 'example.com', 'ok.js', '1 + 1');
   const secret = path.join(home, 'config.json');
   fs.writeFileSync(secret, '{\n  "anthropicApiKey": "sk-secret"\n}\n');
-  const env = { WEBMODS_RUN_BOX: box, WEBMODS_RUN_TOKEN: 'x' };
+  const env = { TRIF_RUN_BOX: box, TRIF_RUN_TOKEN: 'x' };
   let r = await runCli(['run', '-f', secret], { home, env });
   assert.equal(r.code, 1);
   assert.match(r.stderr, /inside a side-panel agent run, files are read only in /);
@@ -600,7 +600,7 @@ test('doctor: an unreadable Safari login item doesn\'t crash it; inside a run it
     assert.match(r.stdout, /Safari: the bridge's login item .* runs nothing/);
     const box = path.join(home, 'boxes', 'r1');
     fs.mkdirSync(box, { recursive: true });
-    r = await runCli(['doctor'], { home, env: { WEBMODS_RUN_BOX: box, WEBMODS_RUN_TOKEN: 'x' } });
+    r = await runCli(['doctor'], { home, env: { TRIF_RUN_BOX: box, TRIF_RUN_TOKEN: 'x' } });
     assert.doesNotMatch(r.stderr, /EACCES|EPERM|TypeError/);
     assert.match(r.stdout, /inside a side-panel agent run: the browsers' setup files aren't checked/);
     assert.doesNotMatch(r.stdout, /Safari:|native host manifest|Claude Code|Codex/);
@@ -623,14 +623,14 @@ test('a mailbox request works where watching a folder fails (as in an agent run\
       fs.writeFileSync(path.join(box, name.replace(/\.req$/, '.res')), JSON.stringify({ id: req.id, ok: true, result: { pong: req.cmd } }));
     }
   }, 10);
-  const saved = process.env.WEBMODS_RUN_BOX;
-  process.env.WEBMODS_RUN_BOX = box;
+  const saved = process.env.TRIF_RUN_BOX;
+  process.env.TRIF_RUN_BOX = box;
   try {
     const { request } = require('../helper/lib/client');
     assert.deepEqual(await request('/nonexistent.sock', 'ping', {}, 5000), { pong: 'ping' });
   } finally {
     fs.watch = realWatch;
     clearInterval(helper);
-    if (saved === undefined) delete process.env.WEBMODS_RUN_BOX; else process.env.WEBMODS_RUN_BOX = saved;
+    if (saved === undefined) delete process.env.TRIF_RUN_BOX; else process.env.TRIF_RUN_BOX = saved;
   }
 });

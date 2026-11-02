@@ -38,12 +38,12 @@ const oneLine = (s, n) => {
 
 /** The email for a report: { subject, text, replyTo }. meta: { country, userAgent, at }. */
 export function reportEmail(r, meta = {}) {
-  const subject = `WebMods report${r.site ? ` (${oneLine(r.site, 40)})` : ''}: ${oneLine(r.what, 60)}`;
+  const subject = `TRIF report${r.site ? ` (${oneLine(r.site, 40)})` : ''}: ${oneLine(r.what, 60)}`;
   const lines = ['What went wrong', r.what, ''];
   if (r.site) lines.push(`Site: ${r.site}`);
   lines.push(`Reply to: ${r.email || '(no address given)'}`);
   lines.push(`Sent: ${meta.at || new Date().toISOString()}${meta.country ? ` from ${meta.country}` : ''}`);
   if (meta.userAgent) lines.push(`Browser: ${oneLine(meta.userAgent, 200)}`);
-  lines.push('', r.details ? `Details from WebMods\n${r.details}` : 'No details from WebMods were included.');
+  lines.push('', r.details ? `Details from TRIF\n${r.details}` : 'No details from TRIF were included.');
   return { subject, text: lines.join('\n') + '\n', replyTo: r.email || null };
 }

@@ -113,21 +113,22 @@ export function runtimeMain(RECORDING, safeStringify) {
 
   const push = (arr, item, max) => { arr.push(item); if (arr.length > max) arr.splice(0, arr.length - max); };
   const modFromStack = (stack) => {
-    const m = /webmods:\/\/([^\s/]+\/[^\s/:)]+?)\.js/.exec(String(stack || ''));
+    const m = /(?:trif|webmods):\/\/([^\s/]+\/[^\s/:)]+?)\.js/.exec(String(stack || ''));
     return m ? m[1] : null;
   };
 
-  // window.webmods.log/warn/error: attribute to the mod in the call stack (works from async
-  // callbacks), else to the mod whose top-level code ran last.
+  // window.trif.log/warn/error: attribute to the mod in the call stack (works from async callbacks), else
+  // to the mod whose top-level code ran last. window.webmods is the same object: its name before 0.2.0,
+  // which users' mods call, so it stays.
   const logger = (level) => function (...args) {
     try {
       const mod = modFromStack(new Error().stack) || W.current || null;
       const strs = args.map((a) => (typeof a === 'string' ? a : safeStringify(a, 10000)));
       push(W.logs, { mod, level, args: strs, time: Date.now() }, MAX_LOGS);
-      nativeConsole[level].call(console, '[webmods]', mod || '', ...args);
+      nativeConsole[level].call(console, '[TRIF]', mod || '', ...args);
     } catch (e) { /* never throw into a mod */ }
   };
-  window.webmods = { log: logger('log'), warn: logger('warn'), error: logger('error') };
+  window.webmods = window.trif = { log: logger('log'), warn: logger('warn'), error: logger('error') };
 
   // Errors from mods' event handlers and timers (the per-mod wrapper only catches top-level throws).
   const recordError = (err, filename) => {
@@ -319,7 +320,7 @@ export function runtimeCode(recordingSites) {
   return `(() => {
 const RECORDING = ${JSON.stringify((recordingSites || []).map((s) => String(s).toLowerCase()))};
 try { (${runtimeMain.toString()})(RECORDING, ${safeStringify.toString()}); }
-catch (e) { console.error('[webmods] runtime failed', e); }
+catch (e) { console.error('[TRIF] runtime failed', e); }
 })();
-//# sourceURL=webmods-runtime.js`;
+//# sourceURL=trif-runtime.js`;
 }

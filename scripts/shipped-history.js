@@ -2,7 +2,7 @@
 'use strict';
 // Writes examples/shipped-history.json: for every example mod, the sha1 of each version of its file the
 // repository has ever held ({"x.com/plain-x": ["<sha1>", …]}, oldest first). Setup uses it to tell an
-// unchanged copy of a shipped mod from one the user edited in workspaces that were set up before WebMods
+// unchanged copy of a shipped mod from one the user edited in workspaces that were set up before TRIF
 // kept a record of what it shipped (helper/lib/preinstalled.js). scripts/release.js runs it for every
 // release, so the list ships current; run it by hand after committing a change to an example:
 //

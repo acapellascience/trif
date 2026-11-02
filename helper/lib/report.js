@@ -1,7 +1,7 @@
 'use strict';
 // "Report a problem": a plain-text report of what's installed and what's going wrong, for the user to
-// read and send. The side panel opens the report form (package.json bugs.url, webmods.dev/report) with it
-// filled in; `webmods report` prints it (--open: the form). Nothing is sent from here. Personal details are scrubbed: the home folder and user name, email addresses, query
+// read and send. The side panel opens the report form (package.json bugs.url, timsrobot.com/report) with it
+// filled in; `trif report` prints it (--open: the form). Nothing is sent from here. Personal details are scrubbed: the home folder and user name, email addresses, query
 // strings, and anything that looks like a token.
 
 const fs = require('fs');
@@ -107,14 +107,14 @@ function systemLine() {
 function buildReport(info = {}, scrubOpts) {
   const lines = [];
   const row = (k, v) => lines.push(`${k.padEnd(12)}${v}`);
-  lines.push('WebMods problem report');
+  lines.push('TRIF problem report');
   lines.push('');
   if (info.description && info.description.trim()) {
     lines.push('What happened');
     lines.push(info.description.trim());
     lines.push('');
   }
-  row('WebMods', `${P.VERSION} (${P.isGitCheckout() ? 'git checkout' : 'installed copy'})`);
+  row('TRIF', `${P.VERSION} (${P.isGitCheckout() ? 'git checkout' : 'installed copy'})`);
   if (info.browser) row('Browser', `${info.browser}${info.extensionVersion ? ` (extension ${info.extensionVersion})` : ''}`);
   row('System', systemLine());
   if (info.agents) {
@@ -127,7 +127,7 @@ function buildReport(info = {}, scrubOpts) {
     const u = info.update;
     row('Updates', u.available ? `${u.latest} available` : u.error ? `couldn't check (${u.error})` : u.latest ? 'up to date' : 'not checked yet');
   }
-  if (info.site) row('Site', `${info.site}, WebMods ${info.siteOn ? 'on' : 'off'}`);
+  if (info.site) row('Site', `${info.site}, TRIF ${info.siteOn ? 'on' : 'off'}`);
   if (Array.isArray(info.mods) && info.mods.length) {
     lines.push('');
     lines.push(`Mods for ${info.site || 'this site'}`);

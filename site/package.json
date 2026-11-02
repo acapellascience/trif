@@ -1,6 +1,6 @@
 {
-  "name": "webmods-site",
+  "name": "timsrobot-site",
   "private": true,
-  "description": "webmods.dev: the bug report form (a Cloudflare Worker). Deploy with npx wrangler deploy.",
+  "description": "timsrobot.com: the bug report form (a Cloudflare Worker). Deploy with npx wrangler deploy.",
   "type": "module"
 }

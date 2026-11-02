@@ -1,6 +1,6 @@
 'use strict';
 // Tests for several helpers on one workspace (helper/lib/helpers.js): each host's own socket
-// (helper-<pid>.sock), stale-socket cleanup, `webmods --browser` and WEBMODS_SOCK routing, plus the
+// (helper-<pid>.sock), stale-socket cleanup, `trif --browser` and TRIF_SOCK routing, plus the
 // logger's EPIPE handling that kept orphaned helpers spinning.
 
 const test = require('node:test');
@@ -145,7 +145,7 @@ test('host: removes a helper-<pid>.sock left by a helper that died', async () =>
 
 // ------------------------------------------------------------------ CLI routing
 
-test('webmods --browser <name|pid> reaches that browser; plain commands go to the default', async () => {
+test('trif --browser <name|pid> reaches that browser; plain commands go to the default', async () => {
   const { home, a, b } = await twoBrowsers();
   let r = await runCli(['tabs', '--json'], { home });
   assert.equal(r.code, 0, r.stderr);
@@ -170,7 +170,7 @@ test('webmods --browser <name|pid> reaches that browser; plain commands go to th
   assert.deepEqual(JSON.parse(r.stdout).otherBrowsers.map((o) => o.pid), [b.child.pid]);
 });
 
-test('webmods --browser: an unknown name errors, listing the connected browsers', async () => {
+test('trif --browser: an unknown name errors, listing the connected browsers', async () => {
   const { home, a, b } = await twoBrowsers();
   const r = await runCli(['tabs', '--browser', 'safari'], { home });
   assert.notEqual(r.code, 0);
@@ -179,7 +179,7 @@ test('webmods --browser: an unknown name errors, listing the connected browsers'
   assert.match(r.stderr, new RegExp(`Firefox 159\\.0 \\(pid ${b.child.pid}\\)`));
 });
 
-test('webmods --browser: two of the same browser asks for a pid', async () => {
+test('trif --browser: two of the same browser asks for a pid', async () => {
   const { home, a, b } = await twoBrowsers('Chrome', 'Chrome');
   const r = await runCli(['tabs', '--browser', 'chrome'], { home });
   assert.notEqual(r.code, 0);
@@ -190,14 +190,14 @@ test('webmods --browser: two of the same browser asks for a pid', async () => {
   assert.equal(JSON.parse(byPid.stdout)[0].url, 'https://a.example/');
 });
 
-test('WEBMODS_SOCK routes plain commands to that helper; --browser is refused inside an agent run', async () => {
+test('TRIF_SOCK routes plain commands to that helper; --browser is refused inside an agent run', async () => {
   const { home, b } = await twoBrowsers();
-  let r = await runCli(['tabs', '--json'], { home, env: { WEBMODS_SOCK: b.ownSock } });
+  let r = await runCli(['tabs', '--json'], { home, env: { TRIF_SOCK: b.ownSock } });
   assert.equal(r.code, 0, r.stderr);
   assert.equal(JSON.parse(r.stdout)[0].url, 'https://b.example/');
   assert.equal(requestsOf(b, 'tabs').length, 1);
 
-  r = await runCli(['tabs', '--browser', 'chrome'], { home, env: { WEBMODS_RUN_TOKEN: 'tok', WEBMODS_SOCK: b.ownSock } });
+  r = await runCli(['tabs', '--browser', 'chrome'], { home, env: { TRIF_RUN_TOKEN: 'tok', TRIF_SOCK: b.ownSock } });
   assert.notEqual(r.code, 0);
   assert.match(r.stderr, /--browser can't be used inside a side-panel agent run/);
   assert.equal(requestsOf(b, 'tabs').length, 1, 'nothing sent');

@@ -290,6 +290,24 @@ test('codex adapter: command, resume, JSONL events', () => {
   assert.equal(ev[1].ok, false);
 });
 
+test('codex adapter: WebSocket reconnects and the HTTPS fallback are one quiet line; real errors still show', () => {
+  const ev = [];
+  const st = { workspace: '/ws' };
+  const line = (o) => codex.parse(JSON.stringify(o), (e) => ev.push(e), st);
+  line({ type: 'thread.started', thread_id: 'th1' });
+  for (let i = 1; i <= 5; i++) line({ type: 'error', message: `Reconnecting... ${i}/5 (stream disconnected before completion: websocket closed by server before response.completed)` });
+  line({ type: 'error', message: 'Falling back from WebSockets to HTTPS transport. stream disconnected before completion' });
+  line({ type: 'item.completed', item: { id: 'e1', type: 'error', message: 'Reconnecting... 1/5 (again)' } });
+  line({ type: 'item.completed', item: { id: 'a', type: 'agent_message', text: 'Done.' } });
+  line({ type: 'error', message: 'stream disconnected before completion: quota exceeded' });
+  assert.deepEqual(ev, [
+    { kind: 'session', sessionId: 'th1' },
+    { kind: 'tool', name: 'reconnecting to OpenAI…', summary: '' },
+    { kind: 'text', text: 'Done.' },
+    { kind: 'error', message: 'stream disconnected before completion: quota exceeded' },
+  ]);
+});
+
 test('context text names the URL and tab; diffSnapshots catches edits, adds and deletes', () => {
   const t = agents.contextText({ url: 'https://x.com/home', tabId: 7 });
   assert.match(t, /looking at https:\/\/x\.com\/home \(tab 7\): pass `--tab 7`/);

@@ -50,6 +50,20 @@ function permissionsToml({ readable = [], writable = [], readOnly = [], denied =
   return `{ ${PROFILE} = { extends = ":workspace", filesystem = { ${fsRules.join(', ')} }, network = { enabled = false } } }`;
 }
 
+// Codex streams from OpenAI over a WebSocket and, when that drops, retries and then switches to HTTPS,
+// saying each step as an error event: "Reconnecting... 2/5 (stream disconnected before completion: …)",
+// up to 5/5, then "Falling back from WebSockets to HTTPS transport." after which the turn goes on fine.
+// (The transport can't be chosen for a run: the WebSocket feature flags are gone in 0.166, it's a setting
+// of the model provider, and the built-in openai provider can't be overridden.) Those become one quiet
+// line per run. A real failure still shows: a retry that gives up ends in a different error, or
+// turn.failed.
+const TRANSPORT_NOISE = /^\s*(Reconnecting\.\.\.|Falling back from WebSockets to HTTPS transport)/i;
+function transportNoise(message, emit, state) {
+  if (!TRANSPORT_NOISE.test(String(message || ''))) return false;
+  if (!state.reconnecting) { state.reconnecting = true; emit({ kind: 'tool', name: 'reconnecting to OpenAI…', summary: '' }); }
+  return true;
+}
+
 function tooOld(version) {
   const m = /(\d+)\.(\d+)(?:\.(\d+))?/.exec(String(version || ''));
   if (!m) return false; // unknown: let it try
@@ -117,7 +131,7 @@ const adapter = {
         if (item.type === 'agent_message') {
           if (done && typeof item.text === 'string' && item.text.trim()) { state.lastText = item.text; emit({ kind: 'text', text: item.text }); }
         } else if (item.type === 'error') {
-          if (done && item.message) emit({ kind: 'error', message: friendly(item.message) });
+          if (done && item.message && !transportNoise(item.message, emit, state)) emit({ kind: 'error', message: friendly(item.message) });
         } else {
           const tool = toolEvent(item, state.workspace);
           // Show tools as soon as they start; don't repeat them on completion.
@@ -140,7 +154,7 @@ const adapter = {
         break;
       }
       case 'error':
-        if (msg.message) emit({ kind: 'error', message: friendly(msg.message) });
+        if (msg.message && !transportNoise(msg.message, emit, state)) emit({ kind: 'error', message: friendly(msg.message) });
         break;
       default:
         break;

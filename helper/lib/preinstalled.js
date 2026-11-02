@@ -306,7 +306,7 @@ function mergeRequest(ws, id) {
     base
       ? 'Compare the old version with the user\'s copy to see what the user changed, and with the new version to see what WebMods changed.'
       : 'Compare the user\'s copy with the new version.',
-    'Where both changed the same thing, keep the user\'s behaviour and say what you couldn\'t bring over. Keep `// @source webmods` in the header and set `// @version` to the new version\'s. Check the file parses (`webmods check`), reload the tab, then tell the user in a few words what changed.',
+    'Where both changed the same thing, keep the user\'s behaviour and say what you couldn\'t bring over. Keep `// @source webmods` in the header and set `// @version` to the new version\'s. Check the file parses (`webmods check`), reload the tab, then tell the user in a few words what changed. WebMods marks the update merged when this run finishes: don\'t run `webmods mod-update`, or ask the user to.',
   ];
   return { hash: rec.pending.hash, prompt: lines.join('\n') };
 }

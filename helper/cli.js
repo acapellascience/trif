@@ -420,7 +420,7 @@ const handlers = {
       out(`${id}: ${updateText(u)}`);
       out(`  yours:            ${files.mine}`);
       out(`  the new version:  ${files.new}`);
-      out(`  shipped before:   ${files.base || "(not kept: your copy is older than WebMods' record of it)"}`);
+      out(`  shipped before:   ${files.base || "(not kept: installed by a WebMods older than 0.1.2)"}`);
       out(`Use it (yours goes to the trash): webmods mod-update ${id} --use-new`);
       out(`Keep yours (this version isn't offered again): webmods mod-update ${id} --keep`);
       out(`Or merge the new version into yours (your agent can, from the files above), then: webmods mod-update ${id} --merged`);

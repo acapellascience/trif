@@ -62,7 +62,7 @@ class Scenario {
     this.work = opts.work;
     this.home = path.join(this.work, 'h'); // the scratch HOME
     this.trif = path.join(this.home, '.trif');
-    this.label = `${opts.browser}-${opts.kind}`;
+    this.label = `${opts.browser}-${opts.kind}${opts.oldTgz ? `-${path.basename(opts.oldTgz).replace(/\.tgz$/, '').replace(/^\D+-/, '')}` : ''}`;
     this.shots = 0;
   }
 

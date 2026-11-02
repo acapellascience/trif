@@ -10,6 +10,7 @@ import {
   normalizeOffSites, offSiteName, offOnSite, hostInScope, withOffSites, scopeFor, normalizeSitesOn, siteOnFor, sitesInUse, limitToSites, applyStartSites, switchSite, fromOtherBrowser, timedUserScripts, capChat,
 } from './lib.js';
 import { runtimeCode } from './runtime.js';
+import { sweepPage } from './sweep.js';
 
 const HOST = 'com.webmods.helper';
 const VERSION = chrome.runtime.getManifest().version;
@@ -466,6 +467,18 @@ const commands = {
       const root = document.body || document.documentElement;
       return { url: location.href, title: document.title, text: String((root && root.innerText) || '').slice(0, 200000) };
     });
+  },
+
+  // Every instance of a kind of thing (extension/sweep.js), in the isolated world like `text`: works with
+  // user scripts off, and page globals can't fool it.
+  async sweep(args) {
+    const tab = await scopedTab(args);
+    const opts = {};
+    for (const k of ['selector', 'text', 'color', 'tolerance', 'limit', 'budget', 'scroll']) if (args[k] !== undefined) opts[k] = args[k];
+    const r = await pageCall(tab.id, 'ISOLATED', sweepPage, [opts]);
+    if (!r || typeof r !== 'object') throw new Error('the sweep returned nothing (the page may have navigated meanwhile)');
+    if (r.error) throw new Error(r.error);
+    return r;
   },
 
   // Only the tab showing in its window can be captured, and TRIF never switches tabs or focuses

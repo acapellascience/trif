@@ -25,9 +25,9 @@ process.stdout.on('error', (e) => { if (e.code === 'EPIPE') process.exit(0); thr
 
 const VALUE_FLAGS = new Set(['--tab', '--url', '-o', '--out', '--output', '--filter', '--limit', '-f', '--file',
   '--browser', '--home', '--native-dir', '--bin-dir', '--timeout', '--agent', '--session', '--model', '--site', '--auto',
-  '--provider', '--base-url', '--key-env']);
+  '--provider', '--base-url', '--key-env', '--selector', '--color', '--text', '--tolerance']);
 const BOOL_FLAGS = new Set(['--json', '--hard', '--help', '-h', '--force', '--no-link', '--no-examples', '--copy', '--link', '--install', '--open',
-  '--use-new', '--keep', '--merged', '--set-key', '--remove-key']);
+  '--use-new', '--keep', '--merged', '--set-key', '--remove-key', '--scroll', '--full']);
 const ALIASES = { '--out': '-o', '--output': '-o', '--file': '-f', '-h': '--help' };
 
 class UsageError extends Error {}
@@ -532,6 +532,15 @@ const handlers = {
     const r = (await ctx.call('text', tabArgs(ctx.opts))) || {};
     if (ctx.json) return printJson(r);
     out(`# ${r.title || ''}\n# ${r.url || ''}\n\n${r.text || ''}`);
+  },
+
+  async sweep(ctx) {
+    const { sweepArgs, formatSweep, SweepUsageError } = require('./lib/sweep');
+    let args;
+    try { args = sweepArgs(ctx.opts); } catch (e) { throw e instanceof SweepUsageError ? new UsageError(e.message) : e; }
+    const r = await ctx.call('sweep', { ...args, ...tabArgs(ctx.opts) });
+    if (ctx.json) return printJson(r);
+    out(formatSweep(r));
   },
 
   async screenshot(ctx) {

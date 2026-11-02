@@ -220,6 +220,7 @@ Without one, the target is the active tab of the last-focused normal window.
 | `navigate` | `to` (URL) + tab selector | `{url}` after load completes |
 | `open` | `to` (URL) | `{id, url}`: opens a new background tab (never takes focus), waits for load |
 | `text` | tab selector | `{url, title, text}`: `document.body.innerText`, capped at 200 000 chars |
+| `sweep` | `selector`, `text` (regex; `/re/flags`, else case-insensitive), `color` (any CSS colour), `tolerance` (0-255 per channel, default 2), `limit` (matches returned, default 200), `budget` (ms, default 4000), `scroll` (bool) + tab selector | Every instance of a kind of thing on the page, from `extension/sweep.js` run in the isolated world: `{url, query, target, scanned:{elements, roots, shadowRoots, closedShadowRoots, frames, ms}, partial, skipped:{crossOriginFrames, unreadableSheets}, total, summary:{visible, hidden, inViewport, fixed, sticky, inShadowRoots, inFrames, regions, props}, groups:[{signature, count, visible, regions, example}], matches:[{element, text, region, position, visible, inViewport, root, props?}], rules}`. Searches the document, shadow roots (closed ones through `chrome.dom.openOrClosedShadowRoot` / Firefox's `openOrClosedShadowRoot`) and same-origin frames. With `color`, `rules` lists the stylesheet rules and custom properties using it, and the rules using those (`var()`). `partial` says why it stopped early (time budget, 100 000 elements). |
 | `screenshot` | tab selector | `{dataUrl}` PNG of the visible area. Only for a tab that's showing in its (non-minimized) window; otherwise an error: the extension never switches tabs or focuses windows, since agents may run while the user browses. The CLI writes it to a file. |
 | `record` | `site`, `on: bool` | `{recording:[sites], site, changed}`. Turns the network recorder on/off for a hostname (and its subdomains). Takes effect on the next page load. `changed`: whether it was the other way before. Switching off is allowed on a site TRIF is off for. Recording a side-panel run switched on (changed, from its token) is switched off by the helper when that run's `done` goes out; recording that was already on, or that a terminal switched on, is left alone. |
 | `requests` | `filter` (regex string, matched against URL), `limit` (default 50) + tab selector | `[{i, method, url, status, type:"fetch"|"xhr", size, time}]`, newest last |
@@ -347,6 +348,8 @@ trif reload [TAB] [--hard]
 trif open <url>
 trif navigate [TAB] <url>
 trif text [TAB]
+trif sweep [TAB] --selector <css> | --color <colour> | --text <regex> [--scroll] [--tolerance N] [--limit N] [--timeout MS]
+                                        every instance of a kind of thing: count, regions, kinds; --json for each match
 trif screenshot [TAB] [-o file.png]     default: <private>/screenshots/<time>.png; prints the path
 trif record <site> [on|off]
 trif requests [TAB] [--filter <regex>] [--limit N]

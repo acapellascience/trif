@@ -102,6 +102,35 @@ The result is printed as pretty JSON, or as-is if it's a string. DOM nodes come 
     details: 'Cheaper than a screenshot when you only need to know what the page says.',
     examples: ['trif text --url news.ycombinator.com | head -50'],
   },
+  sweep: {
+    usage: "trif sweep [TAB] (--selector <css> | --color <css colour> | --text <regex>) [--tolerance N] [--scroll] [--limit N] [--timeout MS]",
+    summary: 'find every instance of a kind of thing on the page: count, where, what kinds',
+    details: `For changing a class of things rather than the instances you noticed, and for checking that none
+are left afterwards (run it before and after; compare the counts). It searches the whole page as it is now:
+the document, shadow roots (closed ones too in Chrome and Firefox) and same-origin frames; cross-origin
+frames are listed, not searched.
+  --selector <css>   elements matching it
+  --text <regex>     elements whose own text, aria-label, title, alt or placeholder matches (case-insensitive;
+                     /re/flags for others). With --selector: matching elements whose text matches.
+  --color <colour>   elements whose computed color, background (and gradients), border, outline, box-shadow,
+                     text-shadow, text-decoration, SVG fill or stroke uses it, ::before/::after included
+                     (inherited colours count where they're set); plus the stylesheet rules and CSS
+                     variables that use it, and the rules using those variables. Any CSS colour: #1d9bf0,
+                     rgb(29 155 240), blue. --tolerance N lets each of red, green and blue be off by N
+                     (default 2). With --selector: only inside matching elements.
+  --scroll           scroll to the bottom first (loading lazy content), then back where it was. Sites that
+                     load on scroll may not load in a tab that isn't showing.
+Each match gets a region (the closest landmark or widget: main, nav, header, [role=dialog], [role=menu]…),
+fixed or sticky, visible or hidden, in view or not. The report groups matches by kind (tag, role, test id,
+readable classes) with an example each; --json has every match (up to --limit, default 200), with its
+element, text and the properties that matched. Bounded: --timeout (default 4000 ms) stops early and says so.`,
+    examples: [
+      "trif sweep --url example.com --selector '[data-testid=promo], .promo'",
+      "trif sweep --url x.com --color '#1d9bf0'",
+      "trif sweep --url x.com --text '^(Promoted|Ad)$' --scroll",
+      "trif sweep --url amazon.com --selector '[data-component-type=s-search-result]' --text Sponsored",
+    ],
+  },
   screenshot: {
     usage: 'trif screenshot [TAB] [-o file.png]',
     summary: 'save a PNG of the visible part of the tab and print its path',
@@ -300,7 +329,7 @@ const GROUPS = [
   ['Setup and diagnosis', ['setup', 'status', 'doctor', 'update', 'report']],
   ['Mod files (work without Chrome)', ['mods', 'new', 'check', 'delete', 'restore', 'install-example', 'mod-update']],
   ['Switching mods off and on (need Chrome running with the extension)', ['disable', 'enable', 'approve']],
-  ['Pages (need Chrome running with the extension)', ['tabs', 'run', 'reload', 'open', 'navigate', 'text', 'screenshot', 'record', 'requests', 'request', 'errors', 'logs']],
+  ['Pages (need Chrome running with the extension)', ['tabs', 'run', 'reload', 'open', 'navigate', 'text', 'sweep', 'screenshot', 'record', 'requests', 'request', 'errors', 'logs']],
   ['Agent runs (what the side panel does)', ['agent']],
   ['', ['help']],
 ];

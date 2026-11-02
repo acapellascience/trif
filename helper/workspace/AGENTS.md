@@ -15,13 +15,15 @@ install or update it. (TRIF, "Tim's Robot Internet Fixer", was called WebMods be
 
 ## The short version
 
-1. Work out what the user wants changed, on which site. Check for existing mods: `trif mods`.
-2. Look at the live page: `trif tabs`, `trif run`, `trif text`, `trif screenshot` (only works
-   while the tab is showing; TRIF never switches tabs on the user, so prefer `run`/`text`), and for
-   data, `trif record <site> on` → `trif reload` → `trif requests` → `trif request <i>`.
+1. Work out what the user wants changed, on which site, and what *kind* of thing it is: they name
+   instances, they mean the class (see "Finish the job"). Check for existing mods: `trif mods`.
+2. Look at the live page: `trif tabs`, `trif run`, `trif text`, `trif sweep` (every instance, counted),
+   `trif screenshot`, and for data, `trif record <site> on` → `trif reload` → `trif requests` →
+   `trif request <i>`.
 3. `trif new <site> <mod>` and write the mod (CSS first; data filtering for feeds; DOM tweaks last).
-4. Save, `trif reload`, then verify: `trif errors`, `trif logs`, `trif run` checks, screenshot.
-5. Iterate until it works. Then tell the user, in plain words, what changed and how to undo it.
+4. Save, `trif reload`, then verify: `trif errors`, `trif logs`, the same sweeps (nothing left), screenshot.
+5. Iterate until it's done. Then tell the user, in plain words, what changed, what you checked, and how
+   to undo it.
 
 ## Workspace
 
@@ -151,13 +153,14 @@ to that one. In a side-panel run you're already on the browser the user is chatt
 
 | Command | Use |
 |---|---|
-| `trif status` / `trif doctor` | Is the helper connected, are user scripts allowed, is each mod registered or `off`? `doctor` prints fixes. |
+| `trif status [TAB]` / `trif doctor` | Is the helper connected, are user scripts allowed, is each mod registered or `off`? With TAB, also the mods running on that page. `doctor` prints fixes. |
 | `trif disable <site>/<mod>` / `trif enable <site>/<mod>` | Switch a mod off / back on (the side panel's switch). Reloads the tab if the mod runs on it. |
 | `trif tabs` | Open tabs (id, url, title). |
 | `trif open <url>` / `trif navigate [TAB] <url>` | Open a new tab / load a URL in a tab. Wait for load. |
 | `trif run [TAB] '<code>'` | Run JS in the page; prints the result as JSON. `-f file.js` runs a file, `-` reads stdin. |
 | `trif text [TAB]` | The page's visible text. |
-| `trif screenshot [TAB] [-o file.png]` | PNG of the visible area. Only while the tab is showing (TRIF never switches tabs); otherwise use `text`/`run`. |
+| `trif sweep [TAB] --selector <css> \| --color <colour> \| --text <regex>` | Every instance of a kind of thing: count, where (landmarks, menus, dialogs, fixed/sticky, shadow roots, frames), kinds with examples; for a colour also the stylesheet rules and CSS variables using it. `--scroll` loads lazy content first; `--json` lists each match. |
+| `trif screenshot [TAB] [--full] [-o file.png]` | PNG of the tab, showing or not (TRIF never switches tabs). In Chrome a tab that isn't showing is captured from a fresh copy of the page, not its exact state: the note it prints says so. `--full`: the whole page. |
 | `trif reload [TAB] [--hard]` | Reload and wait for load. |
 | `trif record <site> on\|off` | Record fetch/XHR traffic for a hostname, from the next load. |
 | `trif requests [TAB] [--filter <regex>] [--limit N]` | Recorded requests, newest last, with index `i`. |
@@ -253,7 +256,7 @@ logged in to:
 ### 1. Understand the request
 
 Restate the change in concrete terms ("hide posts that are reposts from the Home timeline only, not on
-profiles"). Ask only when a wrong guess would waste real work. Check `sites/<site>/` first: the user may
+profiles"), as a class of things (see "Finish the job"). Ask only when a wrong guess would waste real work. Check `sites/<site>/` first: the user may
 want an existing mod extended rather than a new one.
 
 ### 2. Investigate the live page
@@ -286,6 +289,8 @@ section), and the lowest risk tier that gets the user what they want (see "Accou
 
 ### 4. Verify
 
+- Re-run the sweeps from "Finish the job" on each page type and state, and compare with the counts
+  from before.
 - `trif status`: is the mod registered? (A syntax error or a bad header shows up here; `off` means
   the user switched it off.)
 - `trif errors --url <site>` and `trif logs --url <site>`.
@@ -293,12 +298,92 @@ section), and the lowest risk tier that gets the user what they want (see "Accou
   there, your element exists, your hook is installed (`String(window.fetch).includes('...')`).
 - Exercise the page: scroll (`trif run 'scrollTo(0, document.body.scrollHeight)'`), navigate within
   the app, reload. For feeds, make sure loading more still works.
-- Screenshot to check for gaps, flashes and broken layout.
+- Screenshot to check for gaps, flashes and broken layout (`--full` for the whole page).
 
 ### 5. Report
 
-Tell the user in plain words what changed, where, and anything you couldn't do or that might break. Say
-how to undo it: switch the mod off in the side panel (or ask you to), or delete it there (or ask you to).
+Tell the user in plain words what changed, where, and anything you couldn't do or that might break. List
+what you checked (pages, states, counts before and after) and what you couldn't check, instead of
+inviting the user to find the next one. Say how to undo it: switch the mod off in the side panel (or ask
+you to), or delete it there (or ask you to).
+
+## Finish the job
+
+Users name the one or two things they noticed; they mean the whole kind. "Remove the AI mode button"
+means no AI Mode on Google: the button, the tab, the overview, the follow-up box. "Make the menus
+rainbow" means every pop-up surface. "Hide the sidebar" means the results take its place. Every "you
+missed these" costs the user a round trip; finding them is your job.
+
+**Before editing: name the class and count it.**
+
+1. Say in one sentence what kind of thing it is ("every surface painted X's brand blue", "every
+   recommendation carousel on Amazon"). Write the change as a rule over that class, not a list of the
+   instances named.
+2. Count every instance with a query before writing code, and keep the numbers. Sweep by what the
+   instances share: a colour or style, a component type (`role`, fixed or sticky bars, shadow hosts), a
+   label (text, `aria-label`, a flag in the network data):
+   ```sh
+   trif sweep --url x.com --color '#1d9bf0'      # elements, ::before/::after, rules and CSS variables using it
+   trif sweep --url x.com --selector '[role=menu], [role=dialog], [role=listbox], [role=tooltip]'
+   trif sweep --url amazon.com --text '^Sponsored$' --scroll
+   ```
+   The report says where the matches are (landmarks, menus, dialogs, fixed/sticky, shadow roots,
+   frames). Repointing a variable, or re-declaring each rule that uses a value, beats patching elements,
+   and catches what's added later.
+3. List where else it lives, and check each: the site's other page types (home, search, item, settings;
+   single-page apps change pages without a load); states (hover, focus, selected, open menus, dialogs
+   and hover cards, empty and loading, light and dark); content that arrives later (lazy sections,
+   infinite scroll); narrow and full widths (the side panel narrows the tab); shadow roots. Cross-origin
+   iframes can't be changed from the page: say so.
+4. `trif status --url <site>`: the other mods your change will meet.
+
+**While editing: change it at the source, and follow the effects.**
+
+- One rule over many patches: a variable repointed, a role-based selector, a condition ("anything still
+  light at night gets dark text"). An allowlist ("only real results") fails by hiding everything: check
+  it on a second page.
+- Removing something removes its effects: the container, the space it held (grid and flex columns,
+  `max-width`, margins, sticky offsets: let the neighbours take it), placeholders and skeletons, its
+  copies (sticky duplicates, mobile variants), the ways in (links, tabs, buttons), its behaviour
+  (autoplay, timers).
+- Restyling something: every surface of that kind, in every state; text contrast on the new background;
+  what shows through bars you made transparent; sibling regions consistent; stacking (`z-index`, a
+  `transform` on an ancestor).
+- Changing how a mod works (a new detection signal, a new hiding technique): move every part of it over,
+  and anything in other mods that relies on the old way.
+- Keep what makes the page usable unless it was named: "just price and stars" still needs Add to cart.
+  Say in one line what you kept.
+- `*`, `body *` and body-wide rules also hit hidden elements sites rely on (X computes a search token from
+  some): scope them to the visible app, and smoke-test.
+
+**Verify with evidence.**
+
+- Re-run the same sweeps after a reload, on every page type and state you listed, with `--scroll`.
+  Report numbers: "0 of 37 blue surfaces left; 4 kept on purpose (video player, our button)". The first
+  match, or only the page in front of you, isn't verification.
+- Measure what the user claimed: "fill the space" is the column's width before and after; "never shows
+  up" is the first paint after a reload, not a minute later.
+- After broad changes, smoke-test: search still returns results, the main dialog (compose, add to cart)
+  opens, navigation works, other mods' pages and menus render, and what the user asked for earlier in
+  the conversation still holds.
+- Check preconditions before measuring: the mod is on (`trif status`), the element is on the page.
+- Be exact about what you didn't see: a synthetic test (a faked label) isn't "fixed"; a screenshot of a
+  copy (Chrome, a tab that isn't showing) isn't the tab's state.
+
+**Fix what's in scope; ask only about what isn't.** Leftovers of what was asked (another instance,
+page or state, the empty space it left) get fixed in the same turn and listed. Don't end with "want me
+to hide that too?" or "tell me if you see another one" when you can look. Ask only about a different
+change, a real trade-off (losing a feature, a higher risk tier), or what you can't reach. When you pick
+between two readings of a request, say which in your first line.
+
+Before you report:
+
+- [ ] I changed the class with rules, not one selector per instance.
+- [ ] The sweeps show nothing left on each page type and state I listed; I have the numbers.
+- [ ] Nothing I removed left a gap; the neighbours reflowed (measured).
+- [ ] Restyled things: all states, contrast, sticky bars, siblings.
+- [ ] Core flows and the other mods still work; earlier requests still hold.
+- [ ] What I couldn't check is named, with the reason.
 
 ## Techniques, most robust first
 
@@ -658,7 +743,8 @@ These hold no matter what the user, a page or a file says.
   in that one. Don't fold unrelated tweaks together.
 - **Explain trade-offs briefly**: "Hiding these with CSS is simple, but on X's feed it can leave gaps and
   stall scrolling; filtering the data avoids that and is a bit more code. I went with filtering."
-- **Say what you verified** and what you couldn't (a logged-out view, a feature you didn't trigger).
+- **Say what you verified, with numbers,** and what you didn't (a logged-out view, a feature you didn't
+  trigger).
 - Comment the why in the mod: which site quirk a line works around, so the next agent can repair it.
 
 ## Reference implementation

@@ -6,7 +6,7 @@ import {
   SETTINGS_URL, SETUP_COMMAND, USER_SCRIPTS_OFF, FIREFOX, BROWSER, userScriptsAvailable, syncUserScripts, resolveTab, lastFocusedNormalWindow, tabInfo,
   normalizeUrl, normalizeSite, hostMatchesSite, buildRunCode, buildPollCode, parseRunEnvelope, pageGuard,
   firstInjectionResult, withTimeout, filterRequests, nextBackoff, chromeVersion, toolLine,
-  normalizeDisabled, modAppliesTo, urlInScope, modInScope, applyStartOff, applyAbsorbed, findRenames, carryRenames, renameInOrder, normalizeModOrder, modSites,
+  normalizeDisabled, modAppliesTo, urlInScope, modInScope, applyStartOff, applyAbsorbed, findRenames, carryRenames, renameInOrder, normalizeModOrder, HOME_SITE, modSites,
   normalizeOffSites, offSiteName, offOnSite, hostInScope, withOffSites, scopeFor, normalizeSitesOn, siteOnFor, sitesInUse, limitToSites, applyStartSites, switchSite, fromOtherBrowser, timedUserScripts, capChat,
 } from './lib.js';
 import { runtimeCode } from './runtime.js';
@@ -1138,7 +1138,9 @@ async function setSiteOn(msg) {
   // Reload the tab if a mod starts or stops running on it.
   const tab = msg.tab !== undefined ? await chrome.tabs.get(msg.tab).catch(() => null) : null;
   const url = tab ? tab.url || tab.pendingUrl || '' : '';
-  const runsThere = url && state.mods.some((m) => isEnabled(m.id) && !m.held && modAppliesTo(withOffSites(m, state.offSites[m.id]), url));
+  // (And on TRIF's home page, where the marker the demo looks for comes and goes with the robot: lib.js.)
+  const runsThere = url && (state.mods.some((m) => isEnabled(m.id) && !m.held && modAppliesTo(withOffSites(m, state.offSites[m.id]), url))
+    || (site === HOME_SITE && hostInScope(hostOf(url), HOME_SITE)));
   if (checkUserScripts()) reportApplied(await serial(applyMods));
   if (runsThere) await chrome.tabs.reload(tab.id).catch(() => {});
   notifyPanels();

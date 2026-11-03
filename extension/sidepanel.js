@@ -4,6 +4,7 @@
 // See docs/PROTOCOL.md, "Side panel and agent runs".
 
 import { siteForUrl, modAppliesTo, modSites, isMultiSite, offOnSite, normalizeOffSites, scopeFor, limitToSites, withOffSites, FIREFOX, BROWSER, SETUP_COMMAND,
+  normalizeModOrder, orderMods, moveId, setModOrder,
   normalizeSettings, normalizePicks, siteSettings, withoutModel } from './lib.js';
 import { setMarkdown } from './markdown.js';
 import { createLogin } from './login.js';
@@ -22,7 +23,7 @@ const ui = {
   modelCustomRow: $('#model-custom-row'), modelCustom: $('#model-custom'), modelNote: $('#model-note'),
   instructions: $('#instructions'), instructionsNote: $('#instructions-note'),
   autoUpdate: $('#auto-update'), updateNote: $('#update-note'), update: $('#update'),
-  notice: $('#notice'), paused: $('#paused'), mods: $('#mods'), modsCount: $('#mods-count'), modList: $('#mod-list'),
+  notice: $('#notice'), paused: $('#paused'), mods: $('#mods'), modsCount: $('#mods-count'), modList: $('#mod-list'), modsLive: $('#mods-live'),
   chat: $('#chat'), empty: $('#empty'), messages: $('#messages'), working: $('#working'),
 
   composer: $('#composer'), input: $('#input'), send: $('#send'), stop: $('#stop'),
@@ -48,11 +49,18 @@ const view = {
   merging: new Set(),        // mod ids whose "Merge with my agent" is starting a run
   disabled: {},              // chrome.storage.local `disabled`: mods switched off (by anyone: panel, agent, CLI)
   offSites: {},              // chrome.storage.local `offSites`: mods switched off on some of their sites
+  modOrder: {},              // chrome.storage.local `modOrder`: the order the user dragged each site's mods into (lib.js)
+  modNatural: [],            // the ids of the mods listed, in the order they came (what an unsaved order is)
   myRuns: new Set(),         // runs this panel started
   updated: null,             // chrome.storage.local `updated`: {from, to, notes, at} after an update's reload
   updateBusy: null,          // 'checking' | 'installing' while the panel waits on the helper
   updateError: null,
 };
+
+// A mod row being dragged into another place (see "reordering"): {li, pointerId, startY, y, started, ids, grabDy, frame, dirty}.
+let modDrag = null;
+const DRAG_PX = 4;  // how far a press moves before it picks the row up
+const EDGE_PX = 28; // how near the list's top or bottom edge it scrolls
 
 // ---- background port ----------------------------------------------------------------------------
 
@@ -154,12 +162,13 @@ async function init() {
   // In Safari the panel is a window of its own, opened with ?window=<the window whose tabs it follows>.
   const opener = Number(new URLSearchParams(location.search).get('window'));
   view.windowId = opener || (await chrome.windows.getCurrent()).id;
-  const stored = await chrome.storage.local.get(['settings', 'sitePicks', 'disabled', 'offSites', 'updated']);
+  const stored = await chrome.storage.local.get(['settings', 'sitePicks', 'disabled', 'offSites', 'updated', 'modOrder']);
   view.updated = stored.updated || null;
   view.settings = normalizeSettings(stored.settings);
   view.picks = normalizePicks(stored.sitePicks);
   view.disabled = stored.disabled || {};
   view.offSites = normalizeOffSites(stored.offSites);
+  view.modOrder = normalizeModOrder(stored.modOrder);
   renderSettings();
 
   chrome.tabs.onActivated.addListener(({ tabId, windowId }) => {
@@ -193,9 +202,10 @@ async function init() {
       view.updated = changes.updated.newValue || null;
       renderUpdate();
     }
-    if (changes.disabled || changes.offSites) { // a switch flipped here, on the setup page, or by an agent / the CLI
+    if (changes.disabled || changes.offSites || changes.modOrder) { // a switch flipped here, on the setup page, or by an agent / the CLI; mods reordered in another panel, or renamed
       if (changes.disabled) view.disabled = changes.disabled.newValue || {};
       if (changes.offSites) view.offSites = normalizeOffSites(changes.offSites.newValue);
+      if (changes.modOrder) view.modOrder = normalizeModOrder(changes.modOrder.newValue);
       renderMods();
     }
   });
@@ -540,12 +550,17 @@ let modLabelSeq = 0;
 onSwitchChange(() => renderMods());
 
 function renderMods() {
+  // A row being dragged stays where the pointer has it: the list catches up when it's dropped.
+  if (modDrag) { modDrag.dirty = true; return; }
   const { site, status, tab } = view;
   // Every mod that runs somewhere on this site's domain (google.com: Search, Maps, mail.google.com…, and
   // all-sites mods), not just on this page, so the list doesn't change as you move around the site; a
   // light says which run on this page. Plus mods on hold from an agent run here, so they can be allowed.
+  // In the order the user dragged them into on this site, if they did (display only: lib.js orderMods).
   const scope = site ? scopeFor(site) : null;
-  const mods = site && status ? status.mods.filter((m) => limitToSites(m, [scope]) || m.held?.site === site) : [];
+  const listed = site && status ? status.mods.filter((m) => limitToSites(m, [scope]) || m.held?.site === site) : [];
+  view.modNatural = listed.map((m) => m.id);
+  const mods = orderMods(listed, view.modOrder[scope]);
   ui.mods.hidden = mods.length === 0;
   if (!mods.length) { view.modRows.clear(); ui.modList.replaceChildren(); return; }
   ui.modsCount.textContent = `(${mods.length})`;
@@ -702,10 +717,10 @@ function modItem(m) {
         rowError(m.id, String(e?.message ?? e));
       }
     });
-    row.append(main, allow, deleteButton(m, labelId, li));
+    row.append(gripButton(labelId), main, allow, deleteButton(m, labelId, li));
   } else {
     const site = switchSite(m);
-    row.append(main, modSwitch(document, {
+    row.append(gripButton(labelId), main, modSwitch(document, {
       id: m.id, site, enabled: isOn(m.id, site), labelId,
       apply: (id, enabled, s) => request({ type: 'mod.enable', id, enabled, tab: view.tab?.id, ...(s ? { site: s } : {}) }),
     }), deleteButton(m, labelId, li));
@@ -791,6 +806,166 @@ function deleteButton(m, labelId, li) {
     }
   });
   return b;
+}
+
+// ---- reordering ---------------------------------------------------------------------------------
+// The mods can be put in any order, per site: dragged by the grip (or anywhere on the row that isn't a
+// button), or with Alt+↑/↓ (and ↑/↓, Home and End on the grip). Display only: chrome.storage.local
+// `modOrder` (lib.js), never the order mods run in.
+
+function gripButton(labelId) {
+  const b = el('button', 'icon-btn mod-grip');
+  b.type = 'button';
+  b.title = 'Drag to move (or Alt+↑ / Alt+↓)';
+  b.setAttribute('aria-label', 'Move');
+  b.setAttribute('aria-describedby', labelId);
+  b.setAttribute('aria-keyshortcuts', 'Alt+ArrowUp Alt+ArrowDown');
+  b.innerHTML = '<svg viewBox="0 0 16 16" aria-hidden="true">' +
+    [5, 11].flatMap((x) => [3.5, 8, 12.5].map((y) => `<circle cx="${x}" cy="${y}" r="1.25"/>`)).join('') + '</svg>';
+  return b;
+}
+
+const rowIds = () => [...ui.modList.children].map((li) => li.dataset.mod);
+const rowName = (li) => li.querySelector('.mod-name > span:not(.light)')?.textContent || li.dataset.mod;
+
+/** Keep the list's current order as this site's (the rows are already where they belong). */
+function saveModOrder(li) {
+  const scope = siteScope();
+  if (!scope) return;
+  const ids = rowIds();
+  view.modOrder = setModOrder(view.modOrder, scope, ids, view.modNatural);
+  chrome.storage.local.set({ modOrder: view.modOrder }).catch((e) => console.warn('[TRIF] couldn\'t save the mod order', e));
+  ui.modsLive.textContent = `${rowName(li)} moved to position ${ids.indexOf(li.dataset.mod) + 1} of ${ids.length}.`;
+}
+
+/** Put row `li` at position `to` by moving the rows around it (so a pointer captured by `li` stays on it). */
+function placeRow(li, to) {
+  const list = ui.modList;
+  const at = () => [...list.children].indexOf(li);
+  while (at() < to && li.nextElementSibling) li.before(li.nextElementSibling);
+  while (at() > to && li.previousElementSibling) li.after(li.previousElementSibling);
+}
+
+// The keyboard: Alt+↑/↓ anywhere in a row; on the grip, ↑/↓, Home and End too.
+ui.modList.addEventListener('keydown', (e) => {
+  if (modDrag && e.key === 'Escape') { e.preventDefault(); endModDrag(false); return; }
+  const li = e.target.closest?.('#mod-list > li');
+  if (!li || e.ctrlKey || e.metaKey || e.shiftKey) return;
+  const onGrip = !!e.target.closest('.mod-grip');
+  const ids = rowIds();
+  const from = ids.indexOf(li.dataset.mod);
+  let to = null;
+  if (e.key === 'ArrowUp' && (e.altKey || onGrip)) to = from - 1;
+  else if (e.key === 'ArrowDown' && (e.altKey || onGrip)) to = from + 1;
+  else if (e.key === 'Home' && onGrip && !e.altKey) to = 0;
+  else if (e.key === 'End' && onGrip && !e.altKey) to = ids.length - 1;
+  if (to === null) return;
+  e.preventDefault();
+  if (moveId(ids, li.dataset.mod, to) === ids) return;
+  const focused = document.activeElement;
+  placeRow(li, Math.max(0, Math.min(ids.length - 1, to)));
+  if (focused && li.contains(focused) && document.activeElement !== focused) focused.focus();
+  li.scrollIntoView({ block: 'nearest' });
+  saveModOrder(li);
+});
+
+// The pointer: a press that moves a few pixels picks the row up; it follows the pointer, the other rows
+// make way, and letting go puts it there (Escape, or the browser taking the pointer, puts it back).
+
+ui.modList.addEventListener('pointerdown', (e) => {
+  if (modDrag || e.button !== 0 || !e.isPrimary) return;
+  const li = e.target.closest('#mod-list > li');
+  if (!li || ui.modList.children.length < 2) return;
+  const onGrip = !!e.target.closest('.mod-grip');
+  // Buttons (the switch, delete, Allow…), the update offer and error text keep their clicks and text
+  // selection; on a touch screen only the grip drags (elsewhere a finger scrolls the list).
+  if (!onGrip && (e.pointerType === 'touch' || e.target.closest('button, a, input, select, textarea, .mod-update, .mod-err'))) return;
+  if (onGrip) e.preventDefault(); // (no text selection starting from the grip)
+  modDrag = { li, pointerId: e.pointerId, startY: e.clientY, y: e.clientY, started: false, dirty: false };
+  document.addEventListener('pointermove', onModDragMove);
+  document.addEventListener('pointerup', onModDragUp);
+  document.addEventListener('pointercancel', onModDragCancel);
+});
+
+function onModDragMove(e) {
+  const d = modDrag;
+  if (!d || e.pointerId !== d.pointerId) return;
+  d.y = e.clientY;
+  if (!d.started) {
+    if (Math.abs(e.clientY - d.startY) < DRAG_PX) return;
+    d.started = true;
+    d.ids = rowIds();
+    d.grabDy = d.startY - d.li.getBoundingClientRect().top;
+    try { d.li.setPointerCapture(d.pointerId); } catch { /* the pointer's gone already */ }
+    window.getSelection()?.removeAllRanges();
+    ui.modList.classList.add('dragging');
+    d.li.classList.add('drag');
+    const step = () => { if (modDrag !== d) return; autoScroll(d); followPointer(d); d.frame = requestAnimationFrame(step); };
+    d.frame = requestAnimationFrame(step);
+  }
+  e.preventDefault();
+  followPointer(d);
+}
+
+// Near the list's top or bottom edge, the list scrolls (faster the closer the pointer).
+function autoScroll(d) {
+  const r = ui.modList.getBoundingClientRect();
+  const over = d.y < r.top + EDGE_PX ? d.y - (r.top + EDGE_PX) : d.y > r.bottom - EDGE_PX ? d.y - (r.bottom - EDGE_PX) : 0;
+  if (over) ui.modList.scrollTop += Math.max(-12, Math.min(12, over / 2));
+}
+
+function followPointer(d) {
+  const list = ui.modList;
+  const { li } = d;
+  const r = list.getBoundingClientRect();
+  const h = li.offsetHeight;
+  const top = Math.max(0, Math.min(list.scrollHeight - h, d.y - r.top - list.clientTop + list.scrollTop - d.grabDy));
+  const mid = top + h / 2;
+  const others = [...list.children].filter((x) => x !== li);
+  let to = others.findIndex((x) => x.offsetTop + x.offsetHeight / 2 > mid);
+  if (to === -1) to = others.length;
+  if (to !== [...list.children].indexOf(li)) {
+    // The rows that make way slide there (unless reduced motion turns that off, in CSS).
+    const before = new Map(others.map((x) => [x, x.offsetTop]));
+    placeRow(li, to);
+    for (const x of others) {
+      const dy = before.get(x) - x.offsetTop;
+      if (!dy) continue;
+      x.style.transition = 'none';
+      x.style.transform = `translateY(${dy}px)`;
+      x.getBoundingClientRect(); // (start from there)
+      x.style.transition = '';
+      x.style.transform = '';
+    }
+  }
+  li.style.transform = `translateY(${top - li.offsetTop}px)`;
+}
+
+function onModDragUp(e) { if (modDrag && e.pointerId === modDrag.pointerId) endModDrag(true); }
+function onModDragCancel(e) { if (modDrag && e.pointerId === modDrag.pointerId) endModDrag(false); }
+
+function endModDrag(keep) {
+  const d = modDrag;
+  if (!d) return;
+  modDrag = null;
+  document.removeEventListener('pointermove', onModDragMove);
+  document.removeEventListener('pointerup', onModDragUp);
+  document.removeEventListener('pointercancel', onModDragCancel);
+  if (d.started) {
+    cancelAnimationFrame(d.frame);
+    try { d.li.releasePointerCapture(d.pointerId); } catch { /* released already */ }
+    d.li.style.transform = '';
+    d.li.classList.remove('drag');
+    ui.modList.classList.remove('dragging');
+    if (!keep) {
+      for (const id of d.ids) { const x = [...ui.modList.children].find((c) => c.dataset.mod === id); if (x) ui.modList.append(x); }
+    } else if (rowIds().join('\n') !== d.ids.join('\n')) saveModOrder(d.li);
+    // The click that ends a drag isn't one.
+    const swallow = (c) => { c.stopPropagation(); c.preventDefault(); };
+    window.addEventListener('click', swallow, { capture: true, once: true });
+    setTimeout(() => window.removeEventListener('click', swallow, { capture: true }), 0);
+  }
+  if (d.dirty) renderMods();
 }
 
 // Green when the mod runs on the tab's page: switched on (here), matching this URL, not on hold.

@@ -279,6 +279,22 @@ body[data-problem="helper"] .mod-list, body.needs-login .mod-list { --switch-on:
 .mod-list li { padding: 5px 0; border-top: 1px solid var(--line); }
 .mod-list li:first-child { border-top: 0; }
 .mod-row { display: flex; align-items: center; gap: 10px; }
+/* Reordering (sidepanel.js): the grip at the start of each row, the row being dragged, the rows making way. */
+.mod-list { position: relative; } /* (the rows' offsetTop is within the list) */
+.mod-grip { flex: none; width: 16px; height: 24px; margin-right: -6px; color: var(--faint); cursor: grab; touch-action: none; opacity: 0.6; }
+.mod-grip svg { width: 14px; height: 14px; fill: currentColor; stroke: none; }
+.mod-list li:hover .mod-grip, .mod-grip:focus-visible { opacity: 1; }
+.mod-grip:hover:not(:disabled) { background: transparent; color: var(--text); }
+.mod-list.dragging, .mod-list.dragging * { cursor: grabbing; user-select: none; -webkit-user-select: none; }
+.mod-list.dragging > li:not(.drag) { transition: transform 0.15s ease; }
+.mod-list li.drag {
+  position: relative; z-index: 1;
+  background: var(--surface);
+  border-radius: 4px;
+  box-shadow: 0 0 0 4px var(--surface), 0 0 0 5px var(--line), 0 8px 20px 4px light-dark(rgb(0 0 0 / 0.12), rgb(0 0 0 / 0.5));
+}
+.mod-list li.drag, .mod-list li.drag + li { border-top-color: transparent; }
+@media (prefers-reduced-motion: reduce) { .mod-list.dragging > li:not(.drag) { transition: none; } }
 .mod-main { flex: 1; min-width: 0; }
 .mod-name { font-weight: 500; }
 /* The light hangs left of the name and file, so wrapped lines line up with the name. */
@@ -293,7 +309,7 @@ body[data-problem="helper"] .mod-list, body.needs-login .mod-list { --switch-on:
 .mod-source { font: 11px/1.4 system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; color: var(--faint); }
 .mod-source::before { content: "· "; }
 /* A new version of a shipped mod the user changed, with what they can do about it. */
-.mod-update { margin: 6px 0 2px 14px; padding: 6px 8px; border: 1px solid var(--line); border-radius: 7px; font-size: 12px; }
+.mod-update { margin: 6px 0 2px 34px; padding: 6px 8px; border: 1px solid var(--line); border-radius: 7px; font-size: 12px; }
 .mod-update p { margin: 0; }
 .mod-update .actions { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; }
 /* A waiting button looks it (its tooltip says why), instead of silently ignoring clicks. */

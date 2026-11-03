@@ -248,7 +248,7 @@ async function main() {
       await sleep(2500);
       // The demo's space shooter on (the page reloads with it, the panel back).
       await demoPanel(`(doc) => doc.querySelector('li[data-mod="timsrobot.com/shooter"] button.switch').click()`);
-      await waitFor('the demo\'s reload', async () => (await state()).url.includes('mods=space-shooter'), { timeoutMs: 10000 });
+      await waitFor('the demo\'s reload', async () => (await state()).url.includes('mods=shooter'), { timeoutMs: 10000 });
       await sleep(2500);
       let s = await state();
       if (s.mods['shooter'] !== 1 || !s.panel || s.flag !== '1') throw new Error(JSON.stringify(s));

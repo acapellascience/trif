@@ -235,7 +235,7 @@ test('setup moves config.json\'s API keys to the keyring and says so', async () 
   fs.mkdirSync(ws);
   fs.writeFileSync(path.join(ws, 'config.json'), JSON.stringify({ env: { ANTHROPIC_API_KEY: ANT_KEY, PATH: '/usr/bin' } })); // 0.2.0: in the workspace
   const kc = makeFakeKeychain(path.join(root, 'kc'));
-  const r = await runCli(['setup', '--native-dir', path.join(root, 'native'), '--no-link', '--no-examples'], { home: ws, env: kc.env });
+  const r = await runCli(['setup', '--verbose', '--native-dir', path.join(root, 'native'), '--no-link', '--no-examples'], { home: ws, env: kc.env });
   assert.equal(r.code, 0, r.stderr + r.stdout);
   assert.match(r.stdout, /moved ANTHROPIC_API_KEY from config\.json into .*key proxy/);
   assert.ok(!r.stdout.includes(ANT_KEY));

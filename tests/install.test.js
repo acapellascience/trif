@@ -87,7 +87,7 @@ test('setup --copy: copies helper/extension/examples into <home>/app and points 
   const root = tempDir();
   const ws = path.join(root, 'ws');
   const native = path.join(root, 'native');
-  const args = ['setup', '--copy', '--home', ws, '--native-dir', native, '--no-link'];
+  const args = ['setup', '--verbose', '--copy', '--home', ws, '--native-dir', native, '--no-link'];
   let r = await runCli(args, { home: path.join(root, 'unused') });
   assert.equal(r.code, 0, r.stderr + r.stdout);
   const app = path.join(ws, 'app');
@@ -150,7 +150,7 @@ test('setup from a package that is not a git checkout copies by default; re-runn
 
   // The package folder can go away (npm cleans its npx cache): the install keeps working.
   fs.rmSync(path.join(root, 'pkg'), { recursive: true, force: true });
-  r = await runOtherCli(path.join(ws, 'app', 'helper', 'cli.js'), ['setup', '--home', ws, '--native-dir', native, '--no-link'], ws);
+  r = await runOtherCli(path.join(ws, 'app', 'helper', 'cli.js'), ['setup', '--verbose', '--home', ws, '--native-dir', native, '--no-link'], ws);
   assert.equal(r.code, 0, r.stderr + r.stdout);
   assert.match(r.stdout, /app {11}.* \(v[^,]+, running from it\)/);
   r = await runOtherCli(path.join(ws, 'app', 'helper', 'cli.js'), ['doctor', '--native-dir', native], ws);
@@ -161,19 +161,19 @@ test('setup from a package that is not a git checkout copies by default; re-runn
 test('setup --link: wrappers run the package where it is; warns when that is not a git checkout', async () => {
   const root = tempDir();
   const ws = path.join(root, 'ws');
-  let r = await runCli(['setup', '--link', '--home', ws, '--native-dir', path.join(root, 'native'), '--no-link'], { home: ws });
+  let r = await runCli(['setup', '--verbose', '--link', '--home', ws, '--native-dir', path.join(root, 'native'), '--no-link'], { home: ws });
   assert.equal(r.code, 0, r.stderr);
   assert.equal(wrapperScript(path.join(ws, 'bin', 'trif-host')), path.join(REPO, 'helper', 'host.js'));
   assert.ok(!fs.existsSync(path.join(ws, 'app')));
   assert.match(r.stdout, /linked: the wrappers run this folder/);
 
   const pkg = fakePackage(root);
-  r = await runOtherCli(path.join(pkg, 'helper', 'cli.js'), ['setup', '--link', '--home', ws, '--native-dir', path.join(root, 'native'), '--no-link'], ws);
+  r = await runOtherCli(path.join(pkg, 'helper', 'cli.js'), ['setup', '--verbose', '--link', '--home', ws, '--native-dir', path.join(root, 'native'), '--no-link'], ws);
   assert.equal(r.code, 0, r.stderr);
   assert.equal(wrapperScript(path.join(ws, 'bin', 'trif-host')), path.join(pkg, 'helper', 'host.js'));
   assert.match(r.stdout, /isn't a git checkout/);
 
-  const both = await runCli(['setup', '--copy', '--link', '--home', ws, '--no-link'], { home: ws });
+  const both = await runCli(['setup', '--verbose', '--copy', '--link', '--home', ws, '--no-link'], { home: ws });
   assert.equal(both.code, 1);
   assert.match(both.stderr, /--copy or --link, not both/);
 });
@@ -287,7 +287,7 @@ test('installApp: never touches another live install\'s folders or swaps while i
   assert.equal(fs.readFileSync(path.join(app, 'package.json'), 'utf8'), '{"changed": true}');
 
   // setup says so and keeps the existing copy.
-  const r = await runCli(['setup', '--copy', '--home', home, '--native-dir', path.join(home, 'native'), '--no-link', '--no-examples'], { home });
+  const r = await runCli(['setup', '--verbose', '--copy', '--home', home, '--native-dir', path.join(home, 'native'), '--no-link', '--no-examples'], { home });
   assert.equal(r.code, 1);
   assert.match(r.stdout, /FAILED to update .*another TRIF install is in progress.*kept the existing copy/);
   assert.equal(fs.readFileSync(path.join(app, 'package.json'), 'utf8'), '{"changed": true}');
@@ -355,7 +355,7 @@ test('setup writes every extension ID into allowed_origins; doctor flags a manif
   const native = path.join(root, 'native');
   fs.mkdirSync(ws, { recursive: true });
   fs.writeFileSync(path.join(privDir(ws), 'config.json'), JSON.stringify({ extensionIds: [OTHER_ID, 'not-an-id'] }));
-  let r = await runCli(['setup', '--native-dir', native, '--no-link'], { home: ws });
+  let r = await runCli(['setup', '--verbose', '--native-dir', native, '--no-link'], { home: ws });
   assert.equal(r.code, 0, r.stderr);
   const all = P.extensionOrigins({ extensionIds: [OTHER_ID] });
   assert.ok(all.includes(DEV_ORIGIN) && all.includes(`chrome-extension://${OTHER_ID}/`));
@@ -438,14 +438,14 @@ test('preinstalled mods: each once, switched on or off as listed; the start site
 
   // Through setup, and --no-examples.
   const home3 = tempDir();
-  let res = await runCli(['setup', '--native-dir', path.join(home3, 'native'), '--no-link'], { home: home3 });
+  let res = await runCli(['setup', '--verbose', '--native-dir', path.join(home3, 'native'), '--no-link'], { home: home3 });
   assert.strictEqual(res.code, 0, res.stderr);
   assert.match(res.stdout, /preinstalled, on: www\.google\.com\/hide-ai-in-results, /);
   assert.match(res.stdout, /preinstalled, off until you switch them on in the side panel: x\.com\/punk-fonts, x\.com\/rainbow-rave, www\.instagram\.com\/desaturate, www\.google\.com\/dvd-logo/);
   assert.match(res.stdout, /TRIF starts on for google\.com, x\.com, amazon\.com, instagram\.com/);
   assert.ok(fs.existsSync(path.join(home3, 'sites', 'x.com', 'plain-x.js')));
   const home4 = tempDir();
-  res = await runCli(['setup', '--native-dir', path.join(home4, 'native'), '--no-link', '--no-examples'], { home: home4 });
+  res = await runCli(['setup', '--verbose', '--native-dir', path.join(home4, 'native'), '--no-link', '--no-examples'], { home: home4 });
   assert.strictEqual(res.code, 0, res.stderr);
   assert.strictEqual(fs.existsSync(path.join(home4, 'sites', 'x.com')), false);
 });
@@ -456,7 +456,7 @@ test('setup --browser firefox writes a manifest with allowed_extensions; doctor 
   const root = tempDir();
   const ws = path.join(root, 'ws');
   fs.mkdirSync(ws, { recursive: true });
-  const r = await runCli(['setup', '--browser', 'chrome,firefox', '--no-link'], { home: ws });
+  const r = await runCli(['setup', '--verbose', '--browser', 'chrome,firefox', '--no-link'], { home: ws });
   assert.equal(r.code, 0, r.stderr);
   const fakehome = path.join(ws, 'fakehome');
   const fxDir = process.platform === 'darwin'
@@ -514,9 +514,30 @@ test('setup\'s next steps give the trif command that works from this terminal: ~
   assert.match(on.stdout.slice(on.stdout.indexOf('Next steps:')), /Check everything with: trif doctor\n/);
 });
 
+test('setup prints a short summary by default, every detail with --verbose (-v); problems either way', async () => {
+  const root = tempDir();
+  const ws = path.join(root, 'ws');
+  const args = ['setup', '--browser', 'chrome,firefox', '--no-link'];
+  const r = await runCli(args, { home: ws });
+  assert.equal(r.code, 0, r.stderr);
+  const top = r.stdout.slice(0, r.stdout.indexOf('Next steps:'));
+  assert.match(top, new RegExp(`^✓ TRIF ${esc(P.VERSION)} (installed|linked to .*) in .*\n`, 'm'));
+  assert.match(top, /^✓ Added the mods TRIF comes with \(it starts on for google\.com, x\.com, amazon\.com, instagram\.com\)$/m);
+  assert.match(top, /^✓ Set up for Google Chrome and Firefox$/m);
+  // No agent on this test's PATH: a problem, so it shows.
+  assert.match(top, /No coding agent found: install Claude Code/);
+  assert.doesNotMatch(r.stdout, /host wrapper|CLI wrapper|native host|com\.webmods\.helper|AGENTS\.md refreshed|preinstalled, on:|extension IDs|private {7}/);
+  const v = await runCli([...args, '-v'], { home: ws });
+  assert.match(v.stdout, /host wrapper {2}/);
+  assert.match(v.stdout, /native host {3}Firefox: .*com\.webmods\.helper\.json/);
+  assert.doesNotMatch(v.stdout, /^✓ /m);
+  assert.match(v.stdout, /No coding agent found/);
+  assert.match(v.stdout, /Next steps:/);
+});
+
 test('setup for Firefox alone gives only Firefox\'s next steps', async () => {
   const ws = tempDir();
-  const r = await runCli(['setup', '--browser', 'firefox', '--no-link', '--no-examples'], { home: ws });
+  const r = await runCli(['setup', '--verbose', '--browser', 'firefox', '--no-link', '--no-examples'], { home: ws });
   assert.equal(r.code, 0, r.stderr);
   const next = r.stdout.slice(r.stdout.indexOf('Next steps:'));
   assert.match(next, /1\. Open this link in Firefox to install the TRIF add-on, and click Add:/);

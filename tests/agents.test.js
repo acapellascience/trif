@@ -997,7 +997,7 @@ test('setup records PATH (merging config.json) and writes .claude/settings.json;
   fs.writeFileSync(path.join(fakeBin, 'claude'), FAKE_CLAUDE);
   fs.chmodSync(path.join(fakeBin, 'claude'), 0o755);
   const termPath = `${fakeBin}:/usr/bin:/bin`;
-  let r = await runCli(['setup', '--native-dir', path.join(root, 'native'), '--no-link'], { home: ws, env: { PATH: termPath } });
+  let r = await runCli(['setup', '--verbose', '--native-dir', path.join(root, 'native'), '--no-link'], { home: ws, env: { PATH: termPath } });
   assert.equal(r.code, 0, r.stderr);
   // (Moved out of the workspace into the private folder, where runs can't read it.)
   assert.ok(!fs.existsSync(path.join(ws, 'config.json')));
@@ -1017,7 +1017,7 @@ test('setup records PATH (merging config.json) and writes .claude/settings.json;
   // Overwritten on every setup; a broken config.json is left alone.
   fs.writeFileSync(path.join(ws, '.claude', 'settings.json'), '{"permissions":{"allow":["Bash"]}}');
   fs.writeFileSync(path.join(privDir(ws), 'config.json'), '{ broken');
-  r = await runCli(['setup', '--native-dir', path.join(root, 'native'), '--no-link'], { home: ws, env: { PATH: termPath } });
+  r = await runCli(['setup', '--verbose', '--native-dir', path.join(root, 'native'), '--no-link'], { home: ws, env: { PATH: termPath } });
   assert.match(r.stdout, /couldn't record PATH for agents: .*not valid JSON/);
   assert.equal(fs.readFileSync(path.join(privDir(ws), 'config.json'), 'utf8'), '{ broken');
   assert.deepEqual(JSON.parse(fs.readFileSync(path.join(ws, '.claude', 'settings.json'), 'utf8')), settings);

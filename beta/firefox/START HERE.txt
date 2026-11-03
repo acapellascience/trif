@@ -23,7 +23,8 @@ Install (about 2 minutes)
      cd ~/Downloads/trif-beta-firefox
      npx --yes --package ./trif-{{VERSION}}.tgz trif setup --browser firefox
 
-   It ends with a list of next steps (the ones below). You can ignore its notes about PATH or sudo.
+   It prints a few lines saying what it set up, then a list of next steps (the ones below). You can
+   ignore its note about PATH.
 
 3. Drag trif-firefox.xpi from this folder onto a Firefox window, and click Add.
 4. On the TRIF setup tab that opened in Firefox, click "Allow user scripts", then Allow.

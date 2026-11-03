@@ -290,7 +290,7 @@ test('setup says what it updated and what waits; the helper and the CLI show the
   w.ship('x.com/plain-x', mod(1));
   w.ship('x.com/punk-fonts', mod(1, 'punk'));
   const env = { TRIF_EXAMPLES_DIR: w.examples };
-  const args = ['setup', '--home', w.home, '--native-dir', path.join(w.root, 'native'), '--no-link', '--link'];
+  const args = ['setup', '--verbose', '--home', w.home, '--native-dir', path.join(w.root, 'native'), '--no-link', '--link'];
   let r = await runCli(args, { home: w.home, env });
   assert.strictEqual(r.code, 0, r.stderr + r.stdout);
   w.ship('x.com/plain-x', mod(2));
@@ -366,7 +366,7 @@ test('the repo\'s own examples: a legacy workspace with unchanged copies gets th
   fs.writeFileSync(path.join(root, 'examples', 'shipped-history.json'), JSON.stringify(history));
   fs.mkdirSync(path.join(home, 'sites', 'x.com'), { recursive: true });
   fs.writeFileSync(path.join(home, 'sites', 'x.com', 'plain-x.js'), legacy);
-  const r = await runCli(['setup', '--native-dir', path.join(root, 'native'), '--no-link', '--link'], { home, env: { TRIF_EXAMPLES_DIR: path.join(root, 'examples', 'sites') } });
+  const r = await runCli(['setup', '--verbose', '--native-dir', path.join(root, 'native'), '--no-link', '--link'], { home, env: { TRIF_EXAMPLES_DIR: path.join(root, 'examples', 'sites') } });
   assert.strictEqual(r.code, 0, r.stderr + r.stdout);
   assert.match(r.stdout, /updated to the new version: x\.com\/plain-x \(version \d+\)/);
   assert.strictEqual(fs.readFileSync(path.join(home, 'sites', 'x.com', 'plain-x.js'), 'utf8'), fs.readFileSync(path.join(REPO, 'examples', 'sites', 'x.com', 'plain-x.js'), 'utf8'));

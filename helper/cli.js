@@ -27,8 +27,8 @@ const VALUE_FLAGS = new Set(['--tab', '--url', '-o', '--out', '--output', '--fil
   '--browser', '--home', '--native-dir', '--bin-dir', '--timeout', '--agent', '--session', '--model', '--site', '--auto',
   '--provider', '--base-url', '--key-env', '--selector', '--color', '--text', '--tolerance']);
 const BOOL_FLAGS = new Set(['--json', '--hard', '--help', '-h', '--force', '--no-link', '--no-examples', '--copy', '--link', '--install', '--open',
-  '--use-new', '--keep', '--merged', '--set-key', '--remove-key', '--scroll', '--full']);
-const ALIASES = { '--out': '-o', '--output': '-o', '--file': '-f', '-h': '--help' };
+  '--use-new', '--keep', '--merged', '--set-key', '--remove-key', '--scroll', '--full', '--verbose', '-v']);
+const ALIASES = { '--out': '-o', '--output': '-o', '--file': '-f', '-h': '--help', '-v': '--verbose' };
 
 class UsageError extends Error {}
 
@@ -232,6 +232,7 @@ const handlers = {
       binDir: ctx.opts['--bin-dir'],
       noLink: !!ctx.opts['--no-link'],
       noExamples: !!ctx.opts['--no-examples'],
+      verbose: !!ctx.opts['--verbose'],
       mode: ctx.opts['--copy'] ? 'copy' : ctx.opts['--link'] ? 'link' : undefined,
       // Only for a person at a terminal (not scripts, tests or --json).
       reveal: !!process.stdout.isTTY && !ctx.json,
@@ -240,8 +241,10 @@ const handlers = {
     if (r.ws && r.ws.home) {
       try {
         const k = await require('./lib/agentkeys').migrateKeys(r.ws.home);
-        const at = r.lines.findIndex((l) => l.startsWith('agents '));
-        if (k.notes.length) r.lines.splice(at === -1 ? r.lines.length : at + 1, 0, ...k.notes.map((n) => `              ${n}`));
+        // (After the agents line, or else before the next steps.)
+        const at = r.lines.findIndex((l) => l.startsWith('agents ') || l.startsWith('✓ Found '));
+        const next = r.lines.indexOf('Next steps:');
+        if (k.notes.length) r.lines.splice(at !== -1 ? at + 1 : next > 0 ? next - 1 : r.lines.length, 0, ...k.notes.map((n) => `API keys      ${n}`));
       } catch (e) { r.lines.push(`API keys      couldn't move them out of config.json: ${e.message}`); }
     }
     if (ctx.json) printJson({ ok: r.ok, home: r.ws.home, mode: r.mode, app: r.root, manifests: r.manifests, node: r.nodePath });

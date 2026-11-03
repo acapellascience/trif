@@ -504,7 +504,7 @@ test('Safari setup: the bridge\'s login item runs the bridge with this node, for
 
 test('setup --browser safari installs the bridge\'s login item and gives Safari\'s next steps', { skip: process.platform !== 'darwin' }, async () => {
   const home = tempDir();
-  const r = await runCli(['setup', '--browser', 'safari', '--no-link', '--no-examples'], { home });
+  const r = await runCli(['setup', '--verbose', '--browser', 'safari', '--no-link', '--no-examples'], { home });
   assert.equal(r.code, 0, r.stderr + r.stdout);
   const plist = path.join(home, 'fakehome', 'Library', 'LaunchAgents', 'com.timsrobot.trif.safari-bridge.plist');
   const xml = fs.readFileSync(plist, 'utf8');
@@ -521,13 +521,13 @@ test('setup --browser safari installs the bridge\'s login item and gives Safari\
   const key = fs.readFileSync(tokenFile, 'utf8').trim();
   assert.match(key, /^[0-9a-f]{64}$/);
   assert.equal(fs.statSync(tokenFile).mode & 0o777, 0o600, 'only you can read the key');
-  const again = await runCli(['setup', '--browser', 'safari', '--no-link', '--no-examples'], { home });
+  const again = await runCli(['setup', '--verbose', '--browser', 'safari', '--no-link', '--no-examples'], { home });
   assert.equal(again.code, 0);
   assert.equal(fs.readFileSync(tokenFile, 'utf8').trim(), key, 'kept on re-running setup');
   // A key from before 0.2.0, in the workspace: moved, the same key (the Safari app reads it there).
   const old = tempDir();
   fs.writeFileSync(path.join(old, 'safari-token'), `${'ab'.repeat(32)}\n`, { mode: 0o600 });
-  const moved = await runCli(['setup', '--browser', 'safari', '--no-link', '--no-examples'], { home: old });
+  const moved = await runCli(['setup', '--verbose', '--browser', 'safari', '--no-link', '--no-examples'], { home: old });
   assert.equal(moved.code, 0, moved.stderr + moved.stdout);
   assert.ok(!fs.existsSync(path.join(old, 'safari-token')));
   assert.equal(fs.readFileSync(path.join(privDir(old), 'safari-token'), 'utf8').trim(), 'ab'.repeat(32));
@@ -535,7 +535,7 @@ test('setup --browser safari installs the bridge\'s login item and gives Safari\
   // The bridge's agent from before 0.2.0 (dev.webmods.safari-bridge) is replaced: its file goes.
   const oldPlist = path.join(home, 'fakehome', 'Library', 'LaunchAgents', 'dev.webmods.safari-bridge.plist');
   fs.writeFileSync(oldPlist, '<plist/>');
-  const upgrade = await runCli(['setup', '--browser', 'safari', '--no-link', '--no-examples'], { home });
+  const upgrade = await runCli(['setup', '--verbose', '--browser', 'safari', '--no-link', '--no-examples'], { home });
   assert.equal(upgrade.code, 0, upgrade.stderr + upgrade.stdout);
   assert.ok(!fs.existsSync(oldPlist));
   assert.ok(fs.existsSync(plist));
@@ -543,7 +543,7 @@ test('setup --browser safari installs the bridge\'s login item and gives Safari\
   // isn't left running, nor Safari without one.
   fs.rmSync(plist);
   fs.writeFileSync(oldPlist, '<plist/>');
-  const fromChrome = await runCli(['setup', '--browser', 'chrome', '--no-link', '--no-examples'], { home });
+  const fromChrome = await runCli(['setup', '--verbose', '--browser', 'chrome', '--no-link', '--no-examples'], { home });
   assert.equal(fromChrome.code, 0, fromChrome.stderr + fromChrome.stdout);
   assert.match(fromChrome.stdout, /also Safari: its bridge from before 0\.2\.0 was installed/);
   assert.ok(!fs.existsSync(oldPlist));

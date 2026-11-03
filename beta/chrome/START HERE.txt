@@ -23,7 +23,8 @@ Install (about 2 minutes)
      cd ~/Downloads/trif-beta-chrome
      npx --yes --package ./trif-{{VERSION}}.tgz trif setup --browser chrome
 
-   It ends with a list of next steps (the ones below). You can ignore its notes about PATH or sudo.
+   It prints a few lines saying what it set up, then a list of next steps (the ones below). You can
+   ignore its note about PATH.
 
    Setup also opens a Finder window with a folder called "extension" selected. Leave it open.
 

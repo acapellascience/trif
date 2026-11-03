@@ -61,12 +61,44 @@ const errMsg = (e) => String(e?.message ?? e);
  * memory: if the write fails, nothing changes, rather than mods running while the panel (which reads
  * storage) says they're off, until the next service worker start puts back what was stored.
  */
-async function save(items) {
+//
+// Storage that keeps failing for another reason than being full (Safari's "Disk I/O error", seen in pairs
+// after many writes) is `broken` after STORAGE_BROKEN_AFTER failures in a row: the panel shows one banner,
+// the warning is logged once, and switch changes (`switches: true`) apply in memory for the session
+// instead of failing. A write that works again clears it.
+const STORAGE_BROKEN_AFTER = 3;
+const storageHealth = { failures: 0, broken: false, warned: false };
+async function save(items, { switches = false } = {}) {
   try {
     await chrome.storage.local.set(items);
+    storageHealth.failures = 0;
+    if (storageHealth.broken) { storageHealth.broken = false; notifyPanels(); }
   } catch (e) {
+    if (!/quota/i.test(errMsg(e))) {
+      storageHealth.failures++;
+      if (storageHealth.failures >= STORAGE_BROKEN_AFTER && !storageHealth.broken) {
+        storageHealth.broken = true;
+        if (!storageHealth.warned) {
+          storageHealth.warned = true;
+          log('warn', `${BROWSER}'s extension storage keeps failing (${errMsg(e)}): switch changes last until ${BROWSER} quits`);
+        }
+        notifyPanels();
+      }
+      if (storageHealth.broken && switches) return; // kept in memory (the caller changes state after this)
+    }
     throw new Error(`couldn't save to ${BROWSER}'s extension storage (${errMsg(e)}); nothing was changed`);
   }
+}
+
+// What last went into storage as `mods`, so the same list isn't written again on every sync.
+let savedModsJson = null;
+
+// `applied` (script id → hash last registered: a shortcut for the next sync) lives in session storage,
+// which outlasts a restarted worker but not the browser, and isn't worth a write to local storage on
+// every sync. Without session storage, in memory: the next worker re-registers everything.
+const sessionStore = chrome.storage?.session;
+function saveApplied(applied) {
+  sessionStore?.set({ applied }).catch?.(() => {});
 }
 
 // ---- startup ------------------------------------------------------------------------------------
@@ -87,7 +119,13 @@ const ready = chrome.storage.local.get(null).then(async (s) => {
   }
   state.installId = typeof s.installId === 'string' && s.installId ? s.installId : crypto.randomUUID();
   if (state.installId !== s.installId) await save({ installId: state.installId }).catch((e) => console.warn('[TRIF]', errMsg(e)));
-  if (s.applied && typeof s.applied === 'object') state.applied = s.applied;
+  savedModsJson = Array.isArray(s.mods) ? JSON.stringify(s.mods) : null;
+  try {
+    const sess = sessionStore ? await sessionStore.get('applied') : {};
+    if (sess && sess.applied && typeof sess.applied === 'object') state.applied = sess.applied;
+  } catch { /* no session storage: re-register everything */ }
+  // (Kept in local storage before 0.2.0.)
+  if ('applied' in s) chrome.storage.local.remove('applied').catch(() => {});
   await cleanStaleRuns(s);
 }).catch((e) => console.error('[TRIF] failed to read storage', e));
 
@@ -173,6 +211,10 @@ function checkUserScripts() {
 const isEnabled = (id) => state.disabled[id] !== true;
 
 async function applyMods() {
+  try { return await applyModsNow(); } finally { chrome.userScripts?.markSynced?.(); } // (Safari's stand-in: safari.js)
+}
+
+async function applyModsNow() {
   if (!checkUserScripts()) {
     state.lastApply = { registered: [], errors: state.mods.filter((m) => isEnabled(m.id)).map((m) => ({ id: m.id, error: USER_SCRIPTS_OFF })) };
     return state.lastApply;
@@ -184,9 +226,8 @@ async function applyMods() {
     });
     state.applied = res.applied;
     state.lastApply = { registered: res.registered, errors: res.errors };
-    // Only a shortcut for the next sync (unsaved, the next worker re-registers everything), so a full
-    // storage mustn't turn a sync that worked into a failure.
-    await save({ applied: state.applied }).catch((e) => log('warn', errMsg(e)));
+    // Only a shortcut for the next sync (unsaved, the next worker re-registers everything).
+    saveApplied(state.applied);
     for (const e of res.errors) log('error', `mod ${e.id}: ${e.error}`);
   } catch (e) {
     state.applied = {}; // unknown state: force a full re-register next time
@@ -278,7 +319,10 @@ async function onHelperMessage(msg) {
       await save({ sitesOn: state.sitesOn, sitesOffered: state.sitesOffered }).catch((e) => log('warn', errMsg(e)));
       notifyPanels();
     }
-    await save({ mods: state.mods }).catch((e) => log('warn', errMsg(e)));
+    const modsJson = JSON.stringify(state.mods);
+    if (modsJson !== savedModsJson) {
+      await save({ mods: state.mods }).then(() => { savedModsJson = modsJson; }, (e) => log('warn', errMsg(e)));
+    }
     reportApplied(await serial(applyMods));
   } else if (msg.type === 'request') {
     try {
@@ -524,7 +568,7 @@ const commands = {
     if (on) set.add(site); else set.delete(site);
     const recording = [...set].sort();
     if (was !== on) {
-      await save({ recording });
+      await save({ recording }, { switches: true });
       state.recording = recording;
       if (checkUserScripts()) reportApplied(await serial(applyMods));
     }
@@ -663,7 +707,7 @@ async function setSwitchState(id, { disabled, offSites }) {
   if (disabled) next[id] = true; else delete next[id];
   const nextOff = { ...state.offSites };
   if (offSites.length) nextOff[id] = offSites; else delete nextOff[id];
-  await save({ disabled: next, offSites: nextOff });
+  await save({ disabled: next, offSites: nextOff }, { switches: true });
   state.disabled = next;
   state.offSites = nextOff;
 }
@@ -821,6 +865,8 @@ async function uiStatus() {
       source: m.source || null, version: m.version || null, update: m.update || null,
     })),
     runs: [...state.runs.values()].map((r) => ({ runId: r.runId, site: r.site })),
+    // Storage stopped working: the panel can't read switches from it, so they come from here.
+    ...(storageHealth.broken ? { storageBroken: true, disabled: state.disabled, offSites: state.offSites } : {}),
   };
 }
 
@@ -1029,7 +1075,7 @@ async function setSiteOn(msg) {
   const set = new Set(state.sitesOn);
   if (on) set.add(site); else set.delete(site);
   const sitesOn = [...set].sort();
-  await save({ sitesOn });
+  await save({ sitesOn }, { switches: true });
   state.sitesOn = sitesOn;
   if (!on) {
     for (const r of state.runs.values()) {
@@ -1051,7 +1097,11 @@ async function clearChat(site) {
   for (const r of state.runs.values()) {
     if (r.site === s) { r.stopping = true; helperRequest('agent.stop', { runId: r.runId }, 10000).catch(() => {}); }
   }
-  await chatSerial(s, () => chrome.storage.local.remove(chatKey(s)));
+  await chatSerial(s, () => {
+    const p = pendingChats.get(s);
+    if (p) { clearTimeout(p.timer); pendingChats.delete(s); }
+    return chrome.storage.local.remove(chatKey(s));
+  });
   return { cleared: true };
 }
 
@@ -1108,7 +1158,7 @@ async function onAgentEvent(runId, event, relay = true) {
       default:
         return false;
     }
-  });
+  }, { batch: event.kind !== 'done' });
   if (event.kind === 'done') notifyPanels();
 }
 
@@ -1140,14 +1190,38 @@ function switchState(id) {
   return Array.isArray(off) && off.length ? `on except on ${off.join(', ')}` : 'on';
 }
 
-function updateChat(site, fn) {
+// While a run is going, its events change the chat many times a second; each change written at once
+// rewrote the whole chat record every time (and Safari's storage gave out under that). So `batch` changes
+// are kept in memory (pendingChats) and written CHAT_BATCH_MS later, together; any other change, a run's
+// `done` included, writes at once, with whatever was waiting.
+const CHAT_BATCH_MS = 500;
+const pendingChats = new Map(); // site -> {chat, timer}
+
+function flushChat(site) {
+  return chatSerial(site, async () => {
+    const p = pendingChats.get(site);
+    if (!p) return;
+    pendingChats.delete(site);
+    clearTimeout(p.timer);
+    await save({ [chatKey(site)]: p.chat }).catch((e) => log('warn', errMsg(e)));
+  });
+}
+
+function updateChat(site, fn, { batch = false } = {}) {
   return chatSerial(site, async () => {
     const key = chatKey(site);
-    const stored = (await chrome.storage.local.get(key))[key];
+    const waiting = pendingChats.get(site);
+    const stored = waiting ? waiting.chat : (await chrome.storage.local.get(key))[key];
     const chat = { ...emptyChat(), ...(stored && typeof stored === 'object' ? stored : {}) };
     if (!Array.isArray(chat.messages)) chat.messages = [];
     if (fn(chat) === false) return chat;
     capChat(chat);
+    if (batch) {
+      if (waiting) waiting.chat = chat;
+      else pendingChats.set(site, { chat, timer: setTimeout(() => flushChat(site), CHAT_BATCH_MS) });
+      return chat;
+    }
+    if (waiting) { clearTimeout(waiting.timer); pendingChats.delete(site); }
     await save({ [key]: chat });
     return chat;
   });

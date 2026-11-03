@@ -114,6 +114,11 @@ async function refreshStatus() {
     const wasConnected = !!view.status?.helper?.connected;
     view.status = await request({ type: 'status' });
     if (view.status.helper.connected && (!wasConnected || !view.agents)) loadAgents();
+    // Storage stopped working: switches can't be read from it, so they come with the status.
+    if (view.status.storageBroken) {
+      view.disabled = view.status.disabled || {};
+      view.offSites = normalizeOffSites(view.status.offSites);
+    }
   } catch (e) {
     console.warn('[TRIF] status failed', e);
   }
@@ -401,6 +406,11 @@ function renderNotice({ helperOk, agentInfo, anyAgent }) {
     if (anyAgent) parts.push(el('p', 'note', 'Pick another agent in Settings.'));
   } else if (helperOk && view.agentsError && !view.agents) {
     parts.push(el('p', 'note', `Couldn’t list coding agents: ${view.agentsError}`));
+  }
+  if (status?.storageBroken) {
+    bad = true;
+    parts.unshift(el('p', 'title', `${BROWSER}’s storage for TRIF stopped working`),
+      el('p', null, `Switches you change now last until ${BROWSER} quits. Quit and reopen ${BROWSER} to fix it.`));
   }
   n.replaceChildren(...parts);
   n.classList.toggle('bad', bad);

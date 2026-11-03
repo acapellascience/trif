@@ -48,6 +48,7 @@ const fakeChrome = {
     local: {
       get: async (key) => (key === null ? { ...storage } : { [key]: storage[key] }),
       set: async (obj) => { Object.assign(storage, JSON.parse(JSON.stringify(obj))); },
+      remove: async (key) => { delete storage[key]; },
     },
   },
   scripting: {
@@ -93,7 +94,7 @@ test('Safari adapter: chrome.userScripts stand-in registers, updates, lists and 
   await us().update([{ id: 'b', js: [{ code: '22' }] }]);
   assert.deepEqual((await us().getScripts()).map((s) => [s.id, s.js[0].code, s.runAt]), [['a', '1', 'document_start'], ['b', '22', 'document_start']]);
   assert.deepEqual((await us().getScripts({ ids: ['b'] })).map((s) => s.id), ['b']);
-  assert.deepEqual(storage.safariUserScripts.map((s) => s.id), ['a', 'b'], 'kept in storage for when Safari restarts the background');
+  assert.equal(storage.safariUserScripts, undefined, 'kept in memory only: the mods\' code is in storage already, as `mods`');
   await us().unregister({ ids: ['a'] });
   assert.deepEqual((await us().getScripts()).map((s) => s.id), ['b']);
   await us().unregister();
@@ -130,6 +131,20 @@ test('Safari adapter: page code is the runtime then the matching mods, each in i
   const ctx = { log: [], document: {}, location: { origin: 'https://accounts.google.com' }, console: { error() {} } };
   vm.runInNewContext(`(function () {\n${code}\n})();`, ctx);
   assert.deepEqual(ctx.log, []);
+});
+
+test('Safari adapter: a page committing before the background\'s first sync waits for it (the scripts are in memory only)', async () => {
+  // (Runs first among the injection tests: the adapter was just loaded, nothing synced yet.)
+  await us().unregister();
+  injected.length = 0;
+  for (const f of listeners.onCommitted) f({ tabId: 4, frameId: 0, url: 'https://x.com/early' });
+  await new Promise((r) => setTimeout(r, 50));
+  assert.equal(injected.length, 0, 'waits for the sync');
+  await us().register([mod('webmods-runtime', 'RUNTIME()', { matches: ['<all_urls>'] }), mod('m', 'MOD()')]);
+  us().markSynced();
+  await new Promise((r) => setTimeout(r, 50));
+  assert.equal(injected.length, 1);
+  assert.match(injected[0].source, /RUNTIME\(\)[\s\S]*MOD\(\)/);
 });
 
 test('Safari adapter: mods go into each page as it commits, in the top frame, in the page\'s world', async () => {

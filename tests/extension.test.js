@@ -782,7 +782,7 @@ let bgCount = 0;
 const TEST_SITES_ON = ['example.com', 'x.com', 'y.com', 'z.com'];
 async function loadBackground({ storage = {}, tabs = [], migrate = false, safari = false, windows = {}, scripting = {} } = {}) {
   const store = structuredClone(migrate || 'sitesOn' in storage ? storage : { sitesOn: TEST_SITES_ON, ...storage });
-  const ctl = { full: false }; // full: every storage write fails, like a full quota
+  const ctl = { full: false, io: false, writes: [] }; // full: every storage write fails, like a full quota; io: like Safari's "Disk I/O error"; writes: the keys of each write
   const natives = [];
   const panelBehavior = [];
   const created = [];
@@ -806,6 +806,8 @@ async function loadBackground({ storage = {}, tabs = [], migrate = false, safari
         },
         async set(obj) {
           if (ctl.full) throw new Error('QUOTA_BYTES quota exceeded');
+          if (ctl.io) throw new Error('Disk I/O error');
+          ctl.writes.push(Object.keys(obj));
           Object.assign(store, structuredClone(obj));
         },
         async remove(keys) { for (const k of [].concat(keys)) delete store[k]; },
@@ -1315,6 +1317,86 @@ test('background: when storage is full, switches fail and change nothing, and mo
     r = await panel.ask({ type: 'mod.enable', id: 'x.com/a', enabled: false, tab: 5 });
     assert.strictEqual(r.ok, true);
     assert.deepStrictEqual(bg.store.disabled, { 'x.com/a': true });
+  } finally { bg.restore(); }
+});
+
+test('background: storage that keeps failing (Safari\'s I/O error): one banner, one warning, switches kept in memory', async () => {
+  const mods = [mod('x.com/a'), mod('y.com/b')];
+  const bg = await loadBackground({ storage: { mods }, tabs: SWITCH_TABS });
+  try {
+    bg.native.emit({ type: 'mods', mods });
+    await settle(20);
+    bg.ctl.io = true;
+    const panel = bg.connectPanel();
+    // The first failures still change nothing, as before.
+    let r = await panel.ask({ type: 'mod.enable', id: 'x.com/a', enabled: false, tab: 5 });
+    assert.strictEqual(r.ok, false);
+    r = await panel.ask({ type: 'mod.enable', id: 'x.com/a', enabled: false, tab: 5 });
+    assert.strictEqual(r.ok, false);
+    assert.notStrictEqual((await panel.ask({ type: 'status' })).result.storageBroken, true);
+    // Then storage counts as broken: switches work for the session, and the panel is told.
+    r = await panel.ask({ type: 'mod.enable', id: 'x.com/a', enabled: false, tab: 5 });
+    assert.strictEqual(r.ok, true, r.error);
+    assert.deepStrictEqual(scriptIds(bg), [lib.RUNTIME_ID, 'y.com/b']);
+    const st = (await panel.ask({ type: 'status' })).result;
+    assert.strictEqual(st.storageBroken, true);
+    assert.deepStrictEqual(st.disabled, { 'x.com/a': true });
+    r = await panel.ask({ type: 'site.set', site: 'y.com', on: false, tab: 5 });
+    assert.strictEqual(r.ok, true, r.error);
+    assert.ok(!(await panel.ask({ type: 'status' })).result.sitesOn.includes('y.com'));
+    const warnings = bg.native.sent.filter((m) => m.type === 'log' && /storage keeps failing/.test(m.message));
+    assert.strictEqual(warnings.length, 1, 'logged once');
+    // Working again: the banner goes.
+    bg.ctl.io = false;
+    r = await panel.ask({ type: 'mod.enable', id: 'x.com/a', enabled: true, tab: 5 });
+    assert.strictEqual(r.ok, true);
+    assert.strictEqual((await panel.ask({ type: 'status' })).result.storageBroken, undefined);
+  } finally { bg.restore(); }
+});
+
+test('background: a run\'s events are written to its chat in batches, not one write each; done writes at once', async () => {
+  const bg = await loadBackground();
+  try {
+    const panel = bg.connectPanel();
+    const startP = panel.ask({ type: 'agent.start', site: 'x.com', tabId: 1, url: 'https://x.com/', prompt: 'go' });
+    await answerNative(bg.native, 'agent.start', { runId: 'rb' });
+    await startP;
+    await settle(10);
+    const before = bg.ctl.writes.filter((k) => k.includes('chat:x.com')).length;
+    for (let i = 0; i < 30; i++) bg.native.emit({ type: 'agentEvent', runId: 'rb', event: { kind: 'tool', name: 'Bash', summary: `trif text ${i}` } });
+    await settle(40);
+    assert.strictEqual(bg.ctl.writes.filter((k) => k.includes('chat:x.com')).length, before, 'nothing written yet: batched');
+    bg.native.emit({ type: 'agentEvent', runId: 'rb', event: { kind: 'done', ok: true, result: 'ok', changedFiles: [] } });
+    await settle(40);
+    const chatWrites = bg.ctl.writes.filter((k) => k.includes('chat:x.com')).length - before;
+    assert.ok(chatWrites <= 2, `${chatWrites} writes`);
+    const chat = bg.store['chat:x.com'];
+    assert.strictEqual(chat.messages.filter((m) => m.role === 'tool').length, 30);
+    assert.strictEqual(chat.run, null);
+    // And without a done, the batch is written after a moment.
+    const p2 = panel.ask({ type: 'agent.start', site: 'x.com', tabId: 1, url: 'https://x.com/', prompt: 'again' });
+    await answerNative(bg.native, 'agent.start', { runId: 'rc' });
+    await p2;
+    bg.native.emit({ type: 'agentEvent', runId: 'rc', event: { kind: 'text', text: 'Looking…' } });
+    await waitFor(() => bg.store['chat:x.com'].messages.some((m) => m.text === 'Looking…'), { timeout: 3000 });
+  } finally { bg.restore(); }
+});
+
+test('background: `applied` stays out of local storage (session storage), and an unchanged mods list isn\'t written again', async () => {
+  const mods = [mod('x.com/a')];
+  const bg = await loadBackground({ storage: { mods, applied: { old: 'x' } } });
+  try {
+    await settle(10);
+    assert.ok(!('applied' in bg.store), 'the old local copy is removed');
+    bg.native.emit({ type: 'mods', mods });
+    await settle(20);
+    bg.native.emit({ type: 'mods', mods });
+    await settle(20);
+    assert.ok(!bg.ctl.writes.some((k) => k.includes('applied')));
+    assert.strictEqual(bg.ctl.writes.filter((k) => k.includes('mods')).length, 0, 'same list as stored: not written');
+    bg.native.emit({ type: 'mods', mods: [mod('x.com/a', { hash: 'h9' })] });
+    await settle(20);
+    assert.strictEqual(bg.ctl.writes.filter((k) => k.includes('mods')).length, 1);
   } finally { bg.restore(); }
 });
 

@@ -2,8 +2,10 @@
 // scripts/build-extension.js). Safari has no chrome.userScripts, its native messaging only reaches the
 // extension's own Mac app, and it has no side panel, so this stands in for all three:
 //
-// - chrome.userScripts: scripts are kept here (and in storage, for when Safari restarts the worker) and
-//   put into each page as it commits, with chrome.scripting, in the page's own world. Safari turns an
+// - chrome.userScripts: scripts are kept here, in memory only (the mods' code is already in storage, as
+//   `mods`, and Safari's storage gives out under heavy writing: a background Safari restarted gets them
+//   again from its first sync, which a page committing meanwhile waits for), and put into each page as
+//   it commits, with chrome.scripting, in the page's own world. Safari turns an
 //   injected function into code by its source text (toString), so a function whose toString returns a
 //   script's code runs that code, even on pages whose CSP forbids eval (x.com, instagram.com). That's
 //   how Safari 27 behaves rather than a documented promise; tests/safari.test.js describes what it needs.
@@ -39,9 +41,16 @@ self.addEventListener('unhandledrejection', (e) => toBridge('unhandled rejection
 // ---- chrome.userScripts --------------------------------------------------------------------------
 
 let scripts = []; // registered, in registration order (the runtime first, as registered by syncUserScripts)
-const loaded = chrome.storage.local.get(STORE_KEY)
-  .then((r) => { if (Array.isArray(r[STORE_KEY])) scripts = r[STORE_KEY]; }, () => {});
-const save = () => chrome.storage.local.set({ [STORE_KEY]: scripts });
+// The background's first sync after a start (background.js applyMods calls userScripts.markSynced): until
+// then `scripts` is empty, so a page committing meanwhile waits for it (at most SYNC_WAIT_MS).
+const SYNC_WAIT_MS = 5000;
+let markSynced = () => {};
+const synced = new Promise((r) => { markSynced = r; });
+const firstSync = Promise.race([synced, new Promise((r) => { const t = setTimeout(r, SYNC_WAIT_MS); t?.unref?.(); })]);
+// (Until 0.2.0 the scripts, code and all, were kept in storage too: that copy goes.)
+try { chrome.storage.local.remove?.(STORE_KEY)?.catch?.(() => {}); } catch { /* storage unavailable */ }
+const loaded = Promise.resolve();
+const save = async () => {};
 const copy = (v) => JSON.parse(JSON.stringify(v));
 const codeOf = (s) => (s.js || []).map((j) => String(j.code ?? '')).join('\n;\n');
 
@@ -91,6 +100,8 @@ const userScripts = {
     });
   },
   async configureWorld() {},
+  /** Not in Chrome's API: the background has registered what should be (see `synced`). */
+  markSynced() { markSynced(); },
 };
 
 const appliesTo = (s, url) => (s.matches || []).some((p) => matchesPattern(p, url))
@@ -116,7 +127,7 @@ export function pageCode(list, url, runAt, markFor = runAt) {
 
 async function inject(runAt, { tabId, frameId, url }) {
   if (frameId !== 0) return;
-  await loaded;
+  await firstSync;
   const code = pageCode(scripts, url, runAt);
   if (!code) return;
   const run = (source) => chrome.scripting.executeScript({

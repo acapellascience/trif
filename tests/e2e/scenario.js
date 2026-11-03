@@ -940,6 +940,7 @@ class Scenario {
         green: colour('var(--trif-green)'), bad: colour('var(--bad)'), warn: colour('var(--warn)'),
         rim: style('#bar-robot .rim', 'fill'), gateRim: style('.gate-icon .rim', 'fill'), power: style('#site-switch', 'color'),
         modSwitch: style('#mod-list button.switch[aria-checked="true"]', 'backgroundColor'), light: style('#mod-list .light.on', 'backgroundColor'),
+        send: { disabled: q('#send').disabled, title: q('#send').title },
         fix: shown('#gate-btn'), gateNote: shown('#gate-note') ? q('#gate-note').innerText.trim() : '',
         landingNote: shown('#landing-note') ? q('#landing-note').innerText.trim() : '',
         landingIcon: shown('#landing-icon') ? img.getAttribute('src') : null, landingIconLoaded: !!img && img.naturalWidth > 0,
@@ -990,6 +991,8 @@ class Scenario {
           for (const [k, v] of Object.entries(want)) if (!Scenario.same(x[k], v)) throw new Error(`${k} is ${x[k]}, not ${v}: ${JSON.stringify(x)}`);
           if (x.light && !Scenario.same(x.light, x.warn)) throw new Error(`the running light is ${x.light}`);
           if (!x.notices.some((t) => /isn’t logged in/.test(t))) throw new Error(`no login notice: ${x.notices}`);
+          // F14: no sending into a run that can only fail with that; the button says why.
+          if (!x.send.disabled || !/^Log in to .+ first$/.test(x.send.title)) throw new Error(`Send: ${JSON.stringify(x.send)}`);
           await this.shot(this.panelCtx, 'panel-yellow-site');
           return `"${x.dotLabel}"; ${x.warn}`;
         });

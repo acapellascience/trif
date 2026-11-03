@@ -314,8 +314,14 @@ function render() {
   ui.dot.setAttribute('aria-label', dotLabel);
 
   // Before the mods: a mod's "Merge with my agent" starts a run too.
-  const canSend = !!site && helperOk && (agentInfo ? agentInfo.available : (view.agents ? anyAgent : true));
+  // Not while the agent is known to be logged out (or the open model has no key): the run would only fail
+  // with that, under the notice that says it. Send's tooltip says what to do.
+  const waitsForLogin = (problem === 'login' && agentInfo?.loggedIn === false) || problem === 'key';
+  const canSend = !!site && helperOk && !waitsForLogin && (agentInfo ? agentInfo.available : (view.agents ? anyAgent : true));
   ui.composer.dataset.canSend = canSend ? '1' : '';
+  ui.send.title = !waitsForLogin ? 'Send'
+    : problem === 'key' ? `Add your ${openModelKeyMissing()} API key in Settings first`
+      : `Log in to ${agentInfo?.name || 'your agent'} first`;
 
   renderGate(problem, agentInfo);
   renderNotice({ helperOk, agentInfo, anyAgent });
@@ -514,7 +520,15 @@ function markdownBlock(className, text) {
 }
 
 // Logging in (login.js): the notice shows its steps.
-const login = createLogin({ request, changed: () => render(), succeeded: () => loadAgents() });
+const login = createLogin({ request, changed: () => render(), succeeded: () => { loadAgents(); answerLoginError(); } });
+
+// Logged in: a chat whose last message is a run's "isn't logged in" error gets a line saying it's sorted,
+// so the error doesn't sit there as if it still applied (and the login notice doesn't come back for it).
+function answerLoginError() {
+  const last = view.site ? view.chat.messages.at(-1) : null;
+  if (last?.role !== 'error' || !/isn[’']t logged in/i.test(String(last.text))) return;
+  request({ type: 'chat.note', site: view.site, text: `${login.current?.name || 'Your agent'} is logged in now: send your message again.` }).catch(() => {});
+}
 
 function actions(...children) {
   const p = el('p', 'actions');
@@ -791,7 +805,7 @@ function updateModItem(li, m) {
   if (merge) {
     merge.disabled = view.merging.has(m.id) || !!view.chat.run || !ui.composer.dataset.canSend;
     merge.title = view.chat.run ? 'Your agent is busy in this chat; this waits until it\'s done.'
-      : !ui.composer.dataset.canSend ? 'No coding agent is available here yet.'
+      : !ui.composer.dataset.canSend ? (ui.send.title !== 'Send' ? `${ui.send.title}.` : 'No coding agent is available here yet.')
         : 'Your agent looks at both versions and suggests how to merge them; nothing changes until you say so.';
   }
   const rowErr = view.modErrors.get(m.id)?.message;

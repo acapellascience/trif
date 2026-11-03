@@ -20,6 +20,8 @@ const net = require('net');
 const path = require('path');
 const { envVar } = require('./lib/env');
 const { workspace, VERSION } = require('./lib/paths');
+const pipes = require('./lib/win/pipes');
+const { panelRunsOff } = require('./lib/platform');
 const { createLogger } = require('./lib/log');
 const { encode, Decoder, MAX_TO_EXTENSION } = require('./lib/framing');
 const { scanMods, planModsMessage, folderFingerprint, summarize } = require('./lib/mods');
@@ -45,7 +47,10 @@ const privateMigration = (() => {
 const ws = workspace();
 // This helper's own socket (helper-<pid>.sock), served whether or not it also owns helper.sock; agent
 // runs get it as TRIF_SOCK so their `trif` commands reach this browser (lib/helpers.js).
-ws.ownSock = ownSock(ws.home);
+// On Windows a named pipe with a random name instead, found through <home>\helper-<pid>.pipe; the default
+// helper is the one <home>\helper.pipe names, and serves the CLI on that same pipe (lib/win/pipes.js).
+const PIPES = pipes.usesPipes();
+ws.ownSock = PIPES ? pipes.newPipeName() : ownSock(ws.home);
 try { fs.mkdirSync(ws.home, { recursive: true }); } catch { /* logged below if it matters */ }
 const logger = createLogger(ws.log, { stderr: true });
 
@@ -430,7 +435,13 @@ function stopRunRecording(runId) {
 // agent.list returns a promise (it checks login status).
 function agentCommand(cmd, args) {
   switch (cmd) {
-    case 'agent.list': return agents.listAgentsWithLogin(workspace(ws.home));
+    case 'agent.list': {
+      // Windows: no chats from the panel yet (lib/platform.js panelRunsOff). The panel says so and why,
+      // and the agents aren't asked whether they're logged in (that runs them).
+      const off = panelRunsOff(process.platform, ws.home);
+      if (off) return { ...agents.listAgents(workspace(ws.home), { version: false }), runsOff: { title: off.title, text: off.text } };
+      return agents.listAgentsWithLogin(workspace(ws.home));
+    }
     case 'agent.models': return agents.agentModels(workspace(ws.home), String(args.agent || ''), { fresh: !!args.fresh, openModel: args.openModel || null });
     // Open models (agents/codex-oss.js): the defaults in config.json, which runs can't read or change.
     case 'agent.openModel': return agents.getAdapter('codex-oss').settings(workspace(ws.home));
@@ -731,6 +742,7 @@ function listen(sockPath = ws.sock) {
 
 // Returns 'primary', 'busy' (another live helper owns the socket) or 'error'.
 async function becomePrimary() {
+  if (PIPES) return becomePrimaryPipe();
   for (let attempt = 0; attempt < 3; attempt++) {
     if (state.shuttingDown) return 'error';
     try {
@@ -757,6 +769,18 @@ async function becomePrimary() {
   return 'error';
 }
 
+// Windows: become the helper <home>\helper.pipe names, serving the CLI on this helper's own pipe.
+async function becomePrimaryPipe() {
+  if (state.shuttingDown || !ownServer) return 'error';
+  const r = await pipes.claimPrimary(ws.home, ws.ownSock);
+  if (r === 'busy') return 'busy';
+  if (r !== 'primary') { logger.error(r.error); return 'error'; }
+  state.role = 'primary';
+  stopSecondaryChecks();
+  logger.info(`serving CLI on ${ws.ownSock} (named in ${pipes.primaryMarker(ws.home)})`);
+  return 'primary';
+}
+
 function stopSecondaryChecks() {
   clearInterval(secondaryTimer);
   secondaryTimer = null;
@@ -771,12 +795,14 @@ function startSecondaryChecks() {
     if (busy || state.shuttingDown) return;
     busy = true;
     try {
-      const exists = fs.existsSync(ws.sock);
+      // (Windows: whether a helper is named in helper.pipe; that pipe is probed below.)
+      const primary = PIPES ? pipes.primaryPipe(ws.home) : ws.sock;
+      const exists = PIPES ? !!primary : fs.existsSync(ws.sock);
       const now = Date.now();
       // Take over when the other helper goes away (socket removed, or left stale by a crash).
       if (!exists || now - lastSecondaryProbe > 5000) {
         lastSecondaryProbe = now;
-        if (!exists || !(await probe(ws.sock))) {
+        if (!exists || !(await probe(primary))) {
           if ((await becomePrimary()) === 'primary') logger.info('took over the CLI socket');
         }
       }
@@ -955,11 +981,14 @@ function shutdown(reason, code = 0) {
   }
   if (ownServer) {
     try { ownServer.close(); } catch { /* ignore */ }
-    try { fs.unlinkSync(ws.ownSock); } catch { /* already gone */ }
+    if (PIPES) pipes.release(ws.home, ws.ownSock); // its markers (the pipe goes with this process)
+    if (!PIPES || pipes.pipeDir()) { try { fs.unlinkSync(ws.ownSock); } catch { /* already gone */ } }
   }
   agentsGone.then(() => setTimeout(() => process.exit(code), 50));
 }
 
+// (Windows has no such signals, beyond SIGHUP when a console closes: there the helper ends when the
+// browser closes its stdin, above, and the browser ends it outright if it must.)
 process.on('SIGTERM', () => shutdown('SIGTERM'));
 process.on('SIGINT', () => shutdown('SIGINT'));
 process.on('SIGHUP', () => shutdown('SIGHUP'));
@@ -975,9 +1004,14 @@ process.on('unhandledRejection', (e) => logger.error('unhandled rejection:', e &
   const updateCheck = () => checkForUpdate(false).catch((e) => logger.warn(`update check failed: ${e.message}`));
   updateTimers = [setTimeout(updateCheck, UPDATE_FIRST_CHECK_MS), setInterval(updateCheck, UPDATE_EVERY_MS), setInterval(checkAppReplaced, 30000)];
   try {
-    try { fs.unlinkSync(ws.ownSock); } catch { /* none */ }
-    ownServer = await listen(ws.ownSock);
-    fs.chmodSync(ws.ownSock, 0o600);
+    if (PIPES) {
+      ownServer = await listen(ws.ownSock);
+      pipes.writeMarker(pipes.ownMarker(ws.home), ws.ownSock);
+    } else {
+      try { fs.unlinkSync(ws.ownSock); } catch { /* none */ }
+      ownServer = await listen(ws.ownSock);
+      fs.chmodSync(ws.ownSock, 0o600);
+    }
   } catch (e) {
     logger.error(`can't listen on ${ws.ownSock}: ${e.message}`);
   }

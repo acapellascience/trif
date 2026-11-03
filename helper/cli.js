@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 'use strict';
-// The `trif` command. Talks to the helper (host.js) over $TRIF_HOME/helper.sock.
+// The `trif` command. Talks to the helper (host.js) over $TRIF_HOME/helper.sock (Windows: the named pipe
+// $TRIF_HOME\helper.pipe names, lib/win/pipes.js).
 // Exit codes: 0 ok, 1 command error, 2 helper not running.
 
 const fs = require('fs');
@@ -414,8 +415,7 @@ const handlers = {
     if (ctx.opts['--open'] && r.url) {
       const { reportLink } = require('./lib/report');
       const link = reportLink(r.url, r.text);
-      const { spawnSync } = require('child_process');
-      const opened = spawnSync(process.platform === 'darwin' ? 'open' : 'xdg-open', [link], { stdio: 'ignore' }).status === 0;
+      const opened = require('./lib/platform').openUrl(link); // (open, xdg-open, or Windows' url handler)
       if (opened) return out(`Opened the report form (${r.url}) with these details filled in. Say what went wrong there and press Send.`);
     }
     if (ctx.json) return printJson(r);

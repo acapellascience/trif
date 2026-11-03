@@ -17,6 +17,7 @@ const { listModFiles } = require('./mods');
 const { redactSecrets } = require('./agents/util');
 const { within, ignoresCase } = require('./pathcheck');
 const { migratePrivate, privateLeftovers } = require('./migrate');
+const { panelRunsOff, killTree } = require('./platform');
 
 const RUN_TIMEOUT_MS = Number(envVar('AGENT_TIMEOUT_MS')) > 0 ? Number(envVar('AGENT_TIMEOUT_MS')) : 15 * 60 * 1000;
 const KILL_GRACE_MS = Number(envVar('AGENT_KILL_GRACE_MS')) > 0 ? Number(envVar('AGENT_KILL_GRACE_MS')) : 3000;
@@ -448,8 +449,9 @@ class Runs {
    * onRequest(run, line, respond): a request from the run's mailbox (one JSON line, as on the socket);
    * respond(text) answers it. The host handles it as the run's, whatever the line says.
    */
-  constructor({ getWorkspace, logger, onEvent, onRequest }) {
+  constructor({ getWorkspace, logger, onEvent, onRequest, platform = process.platform }) {
     this.getWorkspace = getWorkspace;
+    this.platform = platform;
     this.logger = logger || { info() {}, warn() {}, error() {}, debug() {} };
     this.onEvent = onEvent || (() => {});
     this.onRequest = onRequest || ((run, line, respond) => respond(JSON.stringify({ id: null, ok: false, error: 'no helper commands here' })));
@@ -476,6 +478,9 @@ class Runs {
   }
 
   start(args = {}) {
+    // Not where the operating system can't confine the agent (Windows, for now: platform.js).
+    const off = panelRunsOff(this.platform, this.getWorkspace().home);
+    if (off) throw new Error(off.error);
     const prompt = typeof args.prompt === 'string' ? args.prompt : '';
     if (!prompt.trim()) throw new Error('missing prompt');
     const site = normalizeSite(args.site, args.url);
@@ -788,12 +793,11 @@ class Runs {
   }
 
   // Kill the agent's whole process group (it spawns shells for its tools): SIGTERM, then SIGKILL.
+  // (platform.js killTree: Windows has neither, and ends the tree with taskkill.)
   _kill(run, graceMs = KILL_GRACE_MS) {
     const child = run.child;
     if (!child || run.finished || child.exitCode !== null || child.signalCode !== null) return;
-    const sig = (s) => {
-      try { process.kill(-child.pid, s); } catch { try { child.kill(s); } catch { /* gone */ } }
-    };
+    const sig = (s) => killTree(child, s, { platform: this.platform });
     sig('SIGTERM');
     setTimeout(() => sig('SIGKILL'), graceMs).unref(); // the group may outlive its leader
   }
@@ -814,9 +818,9 @@ class Runs {
     // Leftover processes of a finished run (backgrounded by a tool) go too, by force after a moment: a
     // write landing after the held-mod window (RECENT_MS) would never be held.
     if (run.child && run.child.pid && !run.stopped) {
-      const pid = run.child.pid;
-      try { process.kill(-pid, 'SIGTERM'); } catch { /* none */ }
-      setTimeout(() => { try { process.kill(-pid, 'SIGKILL'); } catch { /* gone */ } }, KILL_GRACE_MS).unref();
+      const group = { pid: run.child.pid, kill() { /* the leader is gone: only its group is left */ } };
+      killTree(group, 'SIGTERM', { platform: this.platform });
+      setTimeout(() => killTree(group, 'SIGKILL', { platform: this.platform }), KILL_GRACE_MS).unref();
     }
 
     let changedFiles = [];

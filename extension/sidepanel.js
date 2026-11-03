@@ -292,6 +292,8 @@ function render() {
   const helperOk = !!status?.helper?.connected;
   const { info: agentInfo, list: agentList } = currentAgent();
   const anyAgent = agentList.some((a) => a.available);
+  // The helper says chats from the panel aren't available on this system (Windows, for now).
+  const runsOff = view.agents?.runsOff || null;
 
   ui.site.textContent = site || 'Tim\'s Robot Internet Fixer';
   ui.site.title = view.tab?.url || '';
@@ -303,8 +305,9 @@ function render() {
   if (!status) { dot = ''; dotLabel = 'Checking…'; }
   else if (helperOk) {
     const agentOk = agentInfo ? agentInfo.available && agentInfo.loggedIn !== false : anyAgent;
-    dot = status.userScripts && agentOk ? 'ok' : 'warn';
+    dot = status.userScripts && agentOk && !runsOff ? 'ok' : 'warn';
     dotLabel = !status.userScripts ? 'User scripts are off'
+      : runsOff ? runsOff.title
       : agentInfo?.available && agentInfo.loggedIn === false ? `${agentInfo.name} isn’t logged in`
       : !agentOk ? 'Coding agent not available'
       : `Ready${agentInfo ? ` · ${agentInfo.name}` : ''}`;
@@ -314,7 +317,7 @@ function render() {
   ui.dot.setAttribute('aria-label', dotLabel);
 
   // Before the mods: a mod's "Merge with my agent" starts a run too.
-  const canSend = !!site && helperOk && (agentInfo ? agentInfo.available : (view.agents ? anyAgent : true));
+  const canSend = !runsOff && !!site && helperOk && (agentInfo ? agentInfo.available : (view.agents ? anyAgent : true));
   ui.composer.dataset.canSend = canSend ? '1' : '';
 
   renderGate();
@@ -394,6 +397,8 @@ function renderNotice({ helperOk, agentInfo, anyAgent }) {
     });
     actions.append(open);
     parts.push(actions);
+  } else if (helperOk && view.agents?.runsOff) {
+    parts.push(el('p', 'title', view.agents.runsOff.title), el('p', null, view.agents.runsOff.text));
   } else if (helperOk && view.agents && (agentInfo ? !agentInfo.available : !anyAgent)) {
     bad = true;
     if (agentInfo) {

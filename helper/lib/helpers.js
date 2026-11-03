@@ -3,10 +3,13 @@
 // <home>/helper-<pid>.sock, and the first one also serves <home>/helper.sock, the CLI's default. Agent
 // runs get their helper's own socket as TRIF_SOCK, so a run started from Firefox's sidebar works on
 // Firefox's tabs even while Chrome's helper owns helper.sock. `--browser` picks one from a terminal.
+// On Windows the sockets are named pipes, found through marker files <home>\helper-<pid>.pipe and
+// <home>\helper.pipe (lib/win/pipes.js); the functions below work on those there.
 
 const fs = require('fs');
 const path = require('path');
 const { request, HelperError } = require('./client');
+const pipes = require('./win/pipes');
 
 const SOCK_RE = /^helper-(\d+)\.sock$/;
 
@@ -14,8 +17,9 @@ function ownSock(home, pid = process.pid) {
   return path.join(home, `helper-${pid}.sock`);
 }
 
-/** [{sock, pid}] for every helper-<pid>.sock in home (live or not). */
+/** [{sock, pid}] for every helper-<pid>.sock in home (live or not); Windows: {sock: pipe, pid, marker}. */
 function helperSockets(home) {
+  if (pipes.usesPipes()) return pipes.listMarkers(home);
   let names = [];
   try { names = fs.readdirSync(home); } catch { return []; }
   return names.map((n) => [n, SOCK_RE.exec(n)]).filter(([, m]) => m)
@@ -32,7 +36,8 @@ function removeStaleSockets(home, alive = pidAlive) {
   const removed = [];
   for (const h of helperSockets(home)) {
     if (h.pid === process.pid || alive(h.pid)) continue;
-    try { fs.unlinkSync(h.sock); removed.push(h.sock); } catch { /* already gone */ }
+    const file = h.marker || h.sock; // (a pipe goes with its process: only its marker is left)
+    try { fs.unlinkSync(file); removed.push(file); } catch { /* already gone */ }
   }
   return removed;
 }

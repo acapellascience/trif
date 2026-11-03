@@ -9,6 +9,7 @@ const crypto = require('crypto');
 const { envVar } = require('./env');
 const { spawn } = require('child_process');
 const agents = require('./agents');
+const { killTree, panelRunsOff } = require('./platform');
 
 const LOGIN_TIMEOUT_MS = Number(envVar('LOGIN_TIMEOUT_MS')) > 0 ? Number(envVar('LOGIN_TIMEOUT_MS')) : 10 * 60 * 1000;
 const KILL_GRACE_MS = Number(envVar('AGENT_KILL_GRACE_MS')) > 0 ? Number(envVar('AGENT_KILL_GRACE_MS')) : 3000;
@@ -39,8 +40,9 @@ function redact(text, secrets = []) {
  * Events: {kind:"login", url} | {kind:"text", text} | {kind:"error", message} | {kind:"done", ok, login:true[, cancelled]}
  */
 class Logins {
-  constructor({ getWorkspace, logger, onEvent }) {
+  constructor({ getWorkspace, logger, onEvent, platform = process.platform }) {
     this.getWorkspace = getWorkspace;
+    this.platform = platform;
     this.logger = logger || { info() {}, warn() {}, error() {}, debug() {} };
     this.onEvent = onEvent || (() => {});
     this.current = null;
@@ -52,6 +54,9 @@ class Logins {
 
   start(args = {}) {
     const ws = this.getWorkspace();
+    // Logging in is for the panel's chats, which Windows doesn't have yet (platform.js panelRunsOff).
+    const off = panelRunsOff(this.platform, ws.home);
+    if (off) throw new Error(`${off.error} (log in there too)`);
     const agentId = typeof args.agent === 'string' && args.agent ? args.agent : agents.listAgents(ws, { version: false }).default;
     const adapter = agents.getAdapter(agentId);
     if (!adapter) throw new Error(`unknown agent "${agentId}" (known: ${agents.ADAPTERS.map((a) => a.id).join(', ')})`);
@@ -207,9 +212,7 @@ class Logins {
   _kill(login, graceMs = KILL_GRACE_MS) {
     const child = login.child;
     if (!child || login.finished || child.exitCode !== null || child.signalCode !== null) return;
-    const sig = (s) => {
-      try { process.kill(-child.pid, s); } catch { try { child.kill(s); } catch { /* gone */ } }
-    };
+    const sig = (s) => killTree(child, s, { platform: this.platform }); // (platform.js: Windows has no groups)
     sig('SIGTERM');
     setTimeout(() => sig('SIGKILL'), graceMs).unref();
   }
@@ -221,7 +224,7 @@ class Logins {
     for (const name of ['stdout', 'stderr']) {
       if (login.bufs[name].trim()) { const l = login.bufs[name]; login.bufs[name] = ''; this._onLine(login, l); }
     }
-    if (login.child && login.child.pid && !login.cancelled) { try { process.kill(-login.child.pid, 'SIGTERM'); } catch { /* none */ } }
+    if (login.child && login.child.pid && !login.cancelled) killTree({ pid: login.child.pid, kill() { /* gone */ } }, 'SIGTERM', { platform: this.platform });
     if (this.current === login) this.current = null;
     const { adapter } = login;
     agents.forgetLoginStatus(adapter.id);

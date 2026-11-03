@@ -81,7 +81,7 @@ class Cdp {
 }
 
 class ChromeDriver {
-  /** opts: { userDataDir, home (scratch HOME for Chrome and so the helper), extensionDir, headless, env } */
+  /** opts: { userDataDir, home (scratch HOME for Chrome and so the helper), extensionDir, headless, env, hosts (more to resolve to 127.0.0.1) } */
   constructor(opts) {
     this.opts = opts;
     this.name = 'Chrome';
@@ -111,7 +111,7 @@ class ChromeDriver {
       '--disable-features=DisableLoadExtensionCommandLineSwitch',
       '--no-first-run', '--no-default-browser-check', '--disable-sync', '--disable-component-update',
       '--disable-background-networking', '--password-store=basic', '--use-mock-keychain',
-      '--host-resolver-rules=MAP x.com 127.0.0.1, MAP *.x.com 127.0.0.1, MAP www.google.com 127.0.0.1',
+      `--host-resolver-rules=MAP x.com 127.0.0.1, MAP *.x.com 127.0.0.1, MAP www.google.com 127.0.0.1${(this.opts.hosts || []).map((h) => `, MAP ${h} 127.0.0.1`).join('')}`,
       '--ignore-certificate-errors',
       '--window-size=1280,900',
       'about:blank',

@@ -142,6 +142,30 @@ native host manifests in `~/Library/Application Support/{Google/Chrome,Mozilla}/
 Paths stay short (`--work` defaults to `/tmp/trif-e2e-<uid>`): the helper's unix sockets live in the
 scratch home, and macOS allows about 104 bytes for a socket path.
 
+### TRIF's own home page with the real extension
+
+`node tests/e2e/homepage.js --work /tmp/trif-home` (a short `--work`: the helper's sockets live in it; add
+`--out <dir>` for the screenshots, `--headful` to watch). It serves the home page, demo and all, from this
+checkout over HTTPS as `timsrobot.com` (the site's Worker, as `site/dev.js` runs it; Chrome resolves the name
+to 127.0.0.1 and takes the self-signed certificate), installs TRIF from this checkout into a scratch home
+(`setup --copy`, so the 13 home page mods are there, off) and drives headless Chrome for Testing with the
+same isolation as the suite. It checks that the demo and the real TRIF stay out of each other's way:
+
+- TRIF off for timsrobot.com: no `data-trif` marker; the demo's tab sits outside `<body>` in the top layer;
+  the demo panel lists the 13 mods in the shipped order, off, with descriptions; each demo mod runs once
+  alone, and all 13 together; gravity, the shooter, tilting and the rave leave the tab where it was, as it
+  was; Escape on the page is Gravity's (it doesn't close the panel), Escape on the panel's close button
+  closes it.
+- A visitor's way in: the demo open with its space shooter on, then TRIF turned on in the real side panel
+  (Fix) and the real space shooter switched on (the tab reloads): the marker is there, the tab is gone,
+  the demo panel doesn't come back (its flag is cleared), and there's one ship, not two, though the address
+  still asks for the demo's.
+- Every real mod on (and the address asking for every demo mod): each effect once; gravity and Escape work;
+  other sites (127.0.0.1, localhost) are never marked. The robot off again: no marker, the tab is back.
+
+Each mod's effect is found by something it leaves in the page (`PROBES` in the script); when a mod changes
+what it leaves, update its probe.
+
 ### What stays manual
 
 - **Safari.** safaridriver can't run extensions, and "Allow unsigned extensions" resets whenever Safari

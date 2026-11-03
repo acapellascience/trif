@@ -4,12 +4,11 @@
 // (which also re-checks the user scripts switch); the agent list and the login go over a `panel` port,
 // as in the side panel (login.js). Switches follow chrome.storage.local `disabled` live.
 
-import { modSites, offOnSite, normalizeOffSites, normalizeSettings, scopeFor, FIREFOX, SAFARI, BROWSER, SETUP_COMMAND } from './lib.js';
+import { modSites, offOnSite, normalizeOffSites, normalizeSettings, scopeFor, FIREFOX, SAFARI, BROWSER, PANEL, SETUP_COMMAND } from './lib.js';
 import { modSwitch, syncSwitches, shownEnabled, switchError, enabledIn, onSwitchChange } from './modswitch.js';
 import { createLogin } from './login.js';
 import { setMarkdown } from './markdown.js';
 
-const PANEL = FIREFOX ? 'sidebar' : SAFARI ? 'panel' : 'side panel';
 const OPEN_MODEL = 'codex-oss';
 
 const $ = (sel) => document.querySelector(sel);

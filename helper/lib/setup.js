@@ -442,12 +442,19 @@ function setup(opts = {}) {
   } else {
     note(`              AGENTS.md not found at ${agentsSrc}; skipped`);
   }
+  // What the browsers being set up call TRIF's panel (Chrome's side panel, Firefox's sidebar, Safari's).
+  const panelWord = (() => {
+    let chosen = [];
+    try { chosen = opts.nativeDir ? [] : selectBrowsers(opts.browser); } catch { /* a bad --browser: reported below */ }
+    const words = [...new Set(chosen.map((t) => (t.firefox ? 'sidebar' : t.safari ? 'panel' : 'side panel')))];
+    return words.length ? words.join(' or ') : 'side panel';
+  })();
   if (!opts.noExamples) {
     const examplesDir = envVar('EXAMPLES_DIR') ? path.resolve(envVar('EXAMPLES_DIR')) : path.join(root, 'examples', 'sites');
     const { added, on, sites } = preinstallMods(home, ws.modsDir, examplesDir);
     const off = added.filter((id) => !on.includes(id));
     if (on.length) say(`mods          preinstalled, on: ${on.join(', ')}`);
-    if (off.length) say(`mods          preinstalled, off until you switch them on in the side panel: ${off.join(', ')}`);
+    if (off.length) say(`mods          preinstalled, off until you switch them on in the ${panelWord}: ${off.join(', ')}`);
     if (sites.length) say(`sites         TRIF starts on for ${sites.join(', ')} (off everywhere else until you turn it on there)`);
     if (added.length) tell(`✓ Added the mods TRIF comes with${sites.length ? ` (it starts on for ${sites.join(', ')})` : ''}`);
     // Later versions of the shipped mods: unchanged copies are replaced, edited ones offered the new version.
@@ -457,7 +464,7 @@ function setup(opts = {}) {
       if (updated.length) say(`mods          updated to the new version: ${updated.map(vers).join(', ')}`);
       if (waiting.length) {
         note(`mods          new version waiting, not installed because you changed these: ${waiting.map(vers).join(', ')}`);
-        note('              (the side panel offers it on each: use it, keep yours, or merge them with your agent)');
+        note(`              (the ${panelWord} offers it on each: use it, keep yours, or merge them with your agent)`);
       }
     } catch (e) {
       note(`mods          couldn't update the mods TRIF ships: ${e.message}`);

@@ -10,6 +10,8 @@ export const EXTENSION_ID = globalThis.chrome?.runtime?.id || 'iaablflfafmonebdo
 export const FIREFOX = !!globalThis.chrome?.runtime?.getURL?.('')?.startsWith('moz-extension:');
 export const SAFARI = !!globalThis.chrome?.runtime?.getURL?.('')?.startsWith('safari-web-extension:');
 export const BROWSER = FIREFOX ? 'Firefox' : SAFARI ? 'Safari' : 'Chrome';
+// What the browser calls TRIF's panel: Chrome's side panel, Firefox's sidebar, Safari's window.
+export const PANEL = FIREFOX ? 'sidebar' : SAFARI ? 'panel' : 'side panel';
 // What sets the helper up for this browser: plain setup doesn't install Safari's bridge.
 export const SETUP_COMMAND = SAFARI ? 'npx trif setup --browser safari' : 'npx trif setup';
 export const SETTINGS_URL = FIREFOX ? 'about:addons' : SAFARI ? 'Safari Settings → Extensions' : `chrome://extensions/?id=${EXTENSION_ID}`;

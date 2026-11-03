@@ -8,7 +8,7 @@
 // every change (the page re-renders); succeeded() once the agent is logged in (the page reloads the
 // agent list). The page passes each agentEvent to onAgentEvent and shows nodes() while `current` is set.
 
-import { isLoginUrl } from './lib.js';
+import { isLoginUrl, PANEL } from './lib.js';
 import { setMarkdown } from './markdown.js';
 
 function el(tag, className, text) {
@@ -147,7 +147,7 @@ export function createLogin({ request, changed = () => {}, succeeded = () => {} 
    * The login's contents: {nodes, tone: ''|'bad'|'ok'}. Not started: "<name> isn't logged in", with Log
    * in (`intro` the line above it) or the agent's own way to log in.
    */
-  function nodes(agentInfo, { intro = 'Log in with your account to use it from this panel.' } = {}) {
+  function nodes(agentInfo, { intro = `Log in with your account to use it from this ${PANEL}.` } = {}) {
     const name = L?.name || agentInfo?.name || 'The agent';
     const fix = L?.fix || agentInfo?.loginFix || '';
     const fallback = () => (fix ? markdownBlock('note', `Or ${fix}.`) : null);

@@ -535,6 +535,13 @@ test('setup prints a short summary by default, every detail with --verbose (-v);
   assert.match(v.stdout, /Next steps:/);
 });
 
+test('setup calls the panel what the browser does: the sidebar in Firefox', async () => {
+  const r = await runCli(['setup', '--verbose', '--browser', 'firefox', '--no-link'], { home: tempDir() });
+  assert.equal(r.code, 0, r.stderr);
+  assert.match(r.stdout, /off until you switch them on in the sidebar: /);
+  assert.doesNotMatch(r.stdout, /side panel/);
+});
+
 test('setup for Firefox alone gives only Firefox\'s next steps', async () => {
   const ws = tempDir();
   const r = await runCli(['setup', '--verbose', '--browser', 'firefox', '--no-link', '--no-examples'], { home: ws });

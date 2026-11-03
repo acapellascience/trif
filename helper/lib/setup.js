@@ -309,6 +309,20 @@ function recordPath(home, pathValue, modsDir = null) {
 }
 
 /** Selects `dir` in a Finder window and copies its path (macOS only). Returns whether Finder showed it. */
+/**
+ * Opens chrome://extensions in Google Chrome (macOS, when Chrome is installed), next to the Finder window
+ * revealFolder opens, so both halves of "drag the folder onto chrome://extensions" are on screen. Quiet
+ * when it can't: the printed steps say how to get there. Returns {command, opened}.
+ * (run, exists, platform, home: for tests, which must never open the real Chrome.)
+ */
+function openChromeExtensions({ run = require('child_process').spawnSync, exists = fs.existsSync, platform = process.platform, home = os.homedir() } = {}) {
+  const command = ['open', ['-a', 'Google Chrome', 'chrome://extensions']];
+  if (platform !== 'darwin') return { command, opened: false };
+  const installed = ['/Applications/Google Chrome.app', path.join(home, 'Applications', 'Google Chrome.app')].some((a) => exists(a));
+  if (!installed) return { command, opened: false };
+  try { return { command, opened: run(command[0], command[1], { stdio: 'ignore', timeout: 10000 }).status === 0 }; } catch { return { command, opened: false }; }
+}
+
 function revealFolder(dir) {
   if (process.platform !== 'darwin') return false;
   const { spawnSync } = require('child_process');
@@ -636,8 +650,13 @@ function setup(opts = {}) {
   // The extension folder is hidden (~/.trif) from Load unpacked's file picker, so on a Mac show it in
   // Finder, ready to drag onto chrome://extensions, and put its path on the clipboard for Cmd-Shift-G.
   const revealed = !!opts.reveal && revealFolder(extensionDir);
+  const openedChrome = revealed && targets.some((t) => t.key === 'chrome') && openChromeExtensions().opened;
   note('  1. Install the extension. Until TRIF is on the Chrome Web Store, load it unpacked:');
-  if (revealed) {
+  if (revealed && openedChrome) {
+    note('     on the chrome://extensions tab that just opened in Chrome, turn on "Developer mode" (top right).');
+    note('     Then drag the "extension" folder from the Finder window that just opened onto that page. (Or click');
+    note(`     "Load unpacked", press Cmd-Shift-G and paste: the folder's path, ${extensionDir}, is on your clipboard.)`);
+  } else if (revealed) {
     note('     open chrome://extensions and turn on "Developer mode" (top right). Then drag the "extension"');
     note('     folder from the Finder window that just opened onto that page. (Or click "Load unpacked",');
     note(`     press Cmd-Shift-G and paste: the folder's path, ${extensionDir}, is on your clipboard.)`);
@@ -669,5 +688,5 @@ function setup(opts = {}) {
 
 module.exports = {
   setup, recordPath, cleanPath, hostWrapperContent, cliWrapperContent, manifestFor, pickNodePath, shq, isExecutable,
-  chooseMode, installApp, sameTree, COPY_ITEMS, safariAgentContent, loadSafariAgent,
+  chooseMode, installApp, sameTree, COPY_ITEMS, safariAgentContent, loadSafariAgent, openChromeExtensions,
 };

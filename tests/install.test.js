@@ -605,3 +605,49 @@ test('setup doesn\'t wait when it isn\'t at a terminal', async () => {
   assert.equal(r.code, 0, r.stderr);
   assert.doesNotMatch(r.stdout, /Waiting for/);
 });
+
+test('setup opens chrome://extensions in Chrome (macOS, Chrome installed), quietly not otherwise', () => {
+  const { openChromeExtensions } = require('../helper/lib/setup');
+  const calls = [];
+  const run = (cmd, args) => { calls.push([cmd, ...args]); return { status: 0 }; };
+  const chromeAt = (p) => p === '/Applications/Google Chrome.app';
+  assert.deepEqual(openChromeExtensions({ run, exists: chromeAt, platform: 'darwin', home: '/H' }), { command: ['open', ['-a', 'Google Chrome', 'chrome://extensions']], opened: true });
+  assert.deepEqual(calls, [['open', '-a', 'Google Chrome', 'chrome://extensions']]);
+  // In ~/Applications too.
+  assert.equal(openChromeExtensions({ run, exists: (p) => p === '/H/Applications/Google Chrome.app', platform: 'darwin', home: '/H' }).opened, true);
+  // No Chrome, not a Mac, or `open` failing: nothing (the printed steps say how to get there).
+  calls.length = 0;
+  assert.equal(openChromeExtensions({ run, exists: () => false, platform: 'darwin', home: '/H' }).opened, false);
+  assert.equal(openChromeExtensions({ run, exists: chromeAt, platform: 'linux', home: '/H' }).opened, false);
+  assert.deepEqual(calls, []);
+  assert.equal(openChromeExtensions({ run: () => ({ status: 1 }), exists: chromeAt, platform: 'darwin', home: '/H' }).opened, false);
+  assert.equal(openChromeExtensions({ run: () => { throw new Error('ENOENT'); }, exists: chromeAt, platform: 'darwin', home: '/H' }).opened, false);
+});
+
+test('setup at a terminal shows the extension folder and opens chrome://extensions (through `open`, stubbed here)', async () => {
+  const root = tempDir();
+  const ws = path.join(root, 'ws');
+  const stubs = path.join(root, 'stubs');
+  fs.mkdirSync(stubs);
+  const log = path.join(root, 'open.log');
+  for (const name of ['open', 'pbcopy']) {
+    fs.writeFileSync(path.join(stubs, name), `#!/bin/sh\necho "${name} $*" >> ${JSON.stringify(log)}\ncat > /dev/null\n`, { mode: 0o755 });
+  }
+  // A terminal, as far as setup can tell.
+  const tty = path.join(root, 'tty.js');
+  fs.writeFileSync(tty, 'process.stdout.isTTY = true;\n');
+  const r = await new Promise((resolve) => execFile(process.execPath, ['-r', tty, path.join(REPO, 'helper', 'cli.js'), 'setup', '--browser', 'chrome', '--no-link', '--no-examples', '--no-wait'],
+    { env: testEnv(ws, { PATH: `${stubs}${path.delimiter}${testEnv(ws).PATH}` }), timeout: 20000 }, (err, stdout, stderr) => resolve({ code: err ? 1 : 0, stdout, stderr })));
+  assert.equal(r.code, 0, r.stderr);
+  if (process.platform !== 'darwin') return;
+  const calls = fs.readFileSync(log, 'utf8');
+  assert.match(calls, /^open -R .*\/extension$/m);
+  const chrome = fs.existsSync('/Applications/Google Chrome.app') || fs.existsSync(path.join(ws, 'fakehome', 'Applications', 'Google Chrome.app'));
+  if (chrome) {
+    assert.match(calls, /^open -a Google Chrome chrome:\/\/extensions$/m);
+    assert.match(r.stdout, /on the chrome:\/\/extensions tab that just opened in Chrome/);
+  } else {
+    assert.doesNotMatch(calls, /chrome:\/\/extensions/);
+  }
+  assert.doesNotMatch(r.stdout, /Waiting for/);
+});

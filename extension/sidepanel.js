@@ -14,7 +14,7 @@ const chatKey = (site) => `chat:${site}`;
 const emptyChat = () => ({ sessionId: null, agent: null, messages: [], run: null, last: null });
 
 const ui = {
-  dot: $('#dot'), site: $('#site'), siteSwitch: $('#site-switch'), newChat: $('#new-chat'), settingsBtn: $('#settings-btn'),
+  dot: $('#dot'), site: $('#site'), barRobot: $('#bar-robot'), siteSwitch: $('#site-switch'), newChat: $('#new-chat'), settingsBtn: $('#settings-btn'),
   gate: $('#gate'), gateBtn: $('#gate-btn'), gateErr: $('#gate-err'), landing: $('#landing'),
   settings: $('#settings'), agent: $('#agent'), agentNote: $('#agent-note'), model: $('#model'),
   modelCustomRow: $('#model-custom-row'), modelCustom: $('#model-custom'), modelNote: $('#model-note'),
@@ -639,14 +639,16 @@ function renderMods() {
 }
 
 // TRIF is off on a site until the user turns it on here (see "sites TRIF is on for" in lib.js):
-// until then the panel shows only "The robot is off." and the button, and nothing runs or reads the
-// site. Once on, the header's switch turns it back off. (Unknown until the first status: neither shows.)
+// until then the panel shows only "The robot is off." and the button (and, in the top bar, the robot,
+// grey and dim, and settings), and nothing runs or reads the site. Once on, the header's switch turns it
+// back off. The robot in the bar does what the switch does: wakes the panel, or puts it to sleep.
+// (Unknown until the first status: neither shows.)
 const siteScope = () => (view.site ? scopeFor(view.site) : null);
 const siteIsOn = () => !!siteScope() && (view.status?.sitesOn || []).includes(siteScope());
 let siteSwitching = false;
 
 function renderGate() {
-  // No website in this tab: the landing page, only the robot (body.no-site hides the rest).
+  // No website in this tab: the landing page, only the robot and settings (body.no-site hides the rest).
   const noSite = !!view.tab && !view.site;
   document.body.classList.toggle('no-site', noSite);
   ui.landing.hidden = !noSite;
@@ -660,6 +662,11 @@ function renderGate() {
   ui.siteSwitch.setAttribute('aria-busy', String(siteSwitching));
   ui.siteSwitch.title = ui.siteSwitch.dataset.error || (scope ? `Turn the robot ${siteIsOn() ? 'off' : 'on'} on ${scope}` : '');
   ui.siteSwitch.setAttribute('aria-label', ui.siteSwitch.title);
+  // The robot in the bar: the same switch, so the same words and the same busy look.
+  ui.barRobot.hidden = !known;
+  ui.barRobot.setAttribute('aria-busy', String(siteSwitching));
+  ui.barRobot.title = ui.siteSwitch.title;
+  ui.barRobot.setAttribute('aria-label', ui.siteSwitch.title);
   if (!gated) return;
   ui.gateBtn.textContent = `Fix ${scope}`;
   ui.gateBtn.disabled = siteSwitching;
@@ -1097,6 +1104,7 @@ ui.stop.addEventListener('click', stop);
 ui.newChat.addEventListener('click', newChat);
 ui.gateBtn.addEventListener('click', () => setSiteOn(true));
 ui.siteSwitch.addEventListener('click', () => setSiteOn(!siteIsOn()));
+ui.barRobot.addEventListener('click', () => setSiteOn(!siteIsOn())); // off: the Fix button; on: the power button
 for (const chip of document.querySelectorAll('.chip')) {
   chip.addEventListener('click', () => {
     ui.input.value = chip.textContent;

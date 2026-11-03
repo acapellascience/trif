@@ -131,18 +131,29 @@ svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width:
 .gate-icon .face { fill: #18181a; }
 .btn.go { padding: 8px 16px; border-color: transparent; background: var(--switch-on); color: #04291c; font-size: 13px; font-weight: 600; }
 .btn.go:hover { background: color-mix(in srgb, var(--switch-on) 85%, #000); }
-body:is(.site-off, .no-site) :is(.bar, .settings, .notice, .mods, .chat, .composer) { display: none; }
+/* There the top bar keeps only the robot (grey and dim, below) and settings; with no website, only settings.
+   Settings are for every site, so they open from both. */
+body:is(.site-off, .no-site) :is(.dot, .site, #site-switch, #new-chat, .notice, .mods, .chat, .composer) { display: none; }
+body.no-site .bar-robot { display: none; }
 /* No website in this tab (a new tab, the browser's own pages): only the shaded robot, where the gate's sits. */
 .landing { flex: 1; display: flex; align-items: center; justify-content: center; padding: 24px 16px 64px; }
 .landing[hidden] { display: none; }
 .landing-icon { width: 160px; height: 160px; }
+/* Settings open above either one: in a short panel it scrolls instead of running off the bottom. */
+.gate, .landing { min-height: 0; overflow-y: auto; justify-content: safe center; }
 /* The power, + and settings buttons: close together, at the right edge (the power button can be hidden). */
 .bar-actions { flex: none; display: flex; align-items: center; gap: 2px; margin-left: auto; }
-/* The robot in the middle of the bar (the toolbar icon); the bar only shows on sites TRIF is on for. */
-.bar-robot { position: absolute; left: 50%; top: 50%; width: 20px; height: 20px; transform: translate(-50%, -50%); stroke: none; pointer-events: none; }
+/* The robot in the middle of the bar (the toolbar icon), a button like the power button beside settings:
+   clicking him puts the panel to sleep, or on "The robot is off." wakes it. */
+.bar-robot { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); }
+.bar-robot svg { width: 20px; height: 20px; stroke: none; transition: filter 0.15s ease, opacity 0.15s ease; }
 .bar-robot .rim { fill: var(--switch-on); }
 .bar-robot .face { fill: #18181a; }
 .bar-robot .eye { fill: #59dbab; }
+.bar-robot[aria-busy="true"] { cursor: progress; opacity: 0.6; }
+/* Asleep: still him, eyes and all, but grey and dim; pointing at him brightens him a little toward awake. */
+body.site-off .bar-robot svg { filter: grayscale(1); opacity: 0.45; }
+body.site-off .bar-robot:hover:not([aria-busy="true"]) svg { filter: grayscale(0.6); opacity: 0.7; }
 /* The power button that turns TRIF off (and on) for the site. */
 .power { color: var(--muted); }
 .power svg { stroke-width: 1.8; }

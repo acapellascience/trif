@@ -104,7 +104,7 @@ The result is printed as pretty JSON, or as-is if it's a string. DOM nodes come 
     examples: ['trif text --url news.ycombinator.com | head -50'],
   },
   sweep: {
-    usage: "trif sweep [TAB] (--selector <css> | --color <css colour> | --text <regex>) [--tolerance N] [--scroll] [--limit N] [--timeout MS]",
+    usage: "trif sweep [TAB] (--selector <css> | --color <css colour> | --text <regex>) [--tolerance N] [--scroll [--force]] [--limit N] [--timeout MS]",
     summary: 'find every instance of a kind of thing on the page: count, where, what kinds',
     details: `For changing a class of things rather than the instances you noticed, and for checking that none
 are left afterwards (run it before and after; compare the counts). It searches the whole page as it is now:
@@ -119,8 +119,9 @@ frames are listed, not searched.
                      variables that use it, and the rules using those variables. Any CSS colour: #1d9bf0,
                      rgb(29 155 240), blue. --tolerance N lets each of red, green and blue be off by N
                      (default 2). With --selector: only inside matching elements.
-  --scroll           scroll to the bottom first (loading lazy content), then back where it was. Sites that
-                     load on scroll may not load in a tab that isn't showing.
+  --scroll           scroll to the bottom first (loading lazy content), then back where it was. It scrolls
+                     the user's own tab, so it's refused on the tab they're looking at (add --force if
+                     that's fine). Sites that load on scroll may not load in a tab that isn't showing.
 Each match gets a region (the closest landmark or widget: main, nav, header, [role=dialog], [role=menu]…),
 fixed or sticky, visible or hidden, in view or not. The report groups matches by kind (tag, role, test id,
 readable classes) with an example each; --json has every match (up to --limit, default 200), with its
@@ -133,7 +134,7 @@ element, text and the properties that matched. Bounded: --timeout (default 4000 
     ],
   },
   screenshot: {
-    usage: 'trif screenshot [TAB] [--full] [--copy] [-o file.png]',
+    usage: 'trif screenshot [TAB] [--full] [--copy [--force]] [-o file.png]',
     summary: 'save a PNG of the tab and print its path',
     details: `Default path: screenshots/<time>.png in TRIF's private folder (on a Mac, ~/Library/Application
 Support/TRIF; in a side-panel run, its site's folder there, $TRIF_RUN_SCREENSHOTS). Open the printed file
@@ -148,7 +149,10 @@ TRIF never switches tabs or focuses windows (the user may be browsing, or other 
     edge of the screen for a second or so (Chrome doesn't draw covered windows), and it's the page as it
     loads now, not the tab's exact state (open menus, typed text, content loaded since): a note on
     stderr says so. Check with trif sweep, text or run first; use --copy only when a visual check is
-    truly needed.
+    truly needed. The copy loads the page again with the user's cookies (signed in as them), so an
+    address that looks like a one-time link (a token, a sign-in callback, confirm, reset or unsubscribe)
+    is refused unless you add --force; and if the copy ends up on a site the run may not touch, or one
+    TRIF is off for, it's closed without a capture.
   - Safari: only a tab that's showing.
 --full captures the whole page (up to 12000 px): Firefox from the tab itself; Chrome only with --copy,
 stitched from several captures of the copy (fixed and sticky elements only at the top). --json prints

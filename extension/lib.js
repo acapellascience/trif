@@ -551,10 +551,34 @@ export function isLoginUrl(url) {
  * ({ok, json} or {ok:false, error}); the envelope is also stored in window.__webmods_runs[runId]
  * for 60 s so the background can poll for it if execute doesn't wait for the promise.
  */
-export function buildRunCode(code, expression, runId) {
+/**
+ * Why a page command may not act on this document (null when it may): not http(s), outside the run's
+ * `scope`, or on a site TRIF is off for (`sitesOn`). Injected into the page and run there (so it checks the
+ * document the command really meets: the tab may have gone elsewhere between the extension's check and the
+ * injection), hence self-contained. With a `token` (isolated world), marks the document when it may, so the
+ * extension can tell afterwards that the command ran in this same document (background.js pageCall).
+ */
+export function pageGuard(scope, sitesOn, token) {
+  let u;
+  try { u = new URL(String(location.href)); } catch (e) { return 'the tab is not on a web page any more'; }
+  const host = u.hostname.toLowerCase().replace(/\.$/, '');
+  const inside = (x) => !!x && (host === x || host.endsWith('.' + x));
+  let why = null;
+  if (u.protocol !== 'http:' && u.protocol !== 'https:') why = 'the tab went to a page that isn\'t http or https before TRIF reached it';
+  else if (scope && !inside(scope)) why = `the tab went to ${host} before TRIF reached it, and this agent run is limited to ${scope}`;
+  else if (!(sitesOn || []).some(inside)) why = `the tab went to ${host} before TRIF reached it, and TRIF is off there`;
+  if (!why && token) window.__trifPageGuard = token;
+  return why;
+}
+
+export function buildRunCode(code, expression, runId, guard = null) {
   const body = expression ? `return (${code}\n);` : `${code}\n`;
+  // guard {scope, sitesOn}: checked against the document the code meets, before it runs.
+  const check = guard
+    ? `{ const __wmWhy = (${pageGuard.toString()})(${JSON.stringify(guard.scope || null)}, ${JSON.stringify(guard.sitesOn || [])}, null); if (__wmWhy) return JSON.stringify({ ok: false, error: __wmWhy }); }\n`
+    : '';
   return `(async () => {
-const __wmStringify = (${safeStringify.toString()});
+${check}const __wmStringify = (${safeStringify.toString()});
 const __wmFormatError = (${formatError.toString()});
 let __wmOut;
 try {

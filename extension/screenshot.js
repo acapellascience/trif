@@ -8,7 +8,9 @@
 //   window of its own that isn't focused, the size of the user's, captures that and closes it. That
 //   window shows at the edge of the screen for a second or so, so it's never the default. The copy runs
 //   the same mods, but it is not the tab's exact state, and the answer says so. Without `copy`, a clear
-//   error that says how. Safari: only a tab that's showing.
+//   error that says how. Safari: only a tab that's showing. The copy loads the page again with the
+//   user's cookies, so an address that looks like a one-time link is refused (unless `force`), and where
+//   the copy ended up is checked like any URL a command touches (`checkUrl`) before every capture.
 // Every function takes the browser API and helpers as parameters, so the tests can drive them.
 
 export const FULL_MAX_HEIGHT = 12000;   // CSS px of a full-page capture; longer pages are cut
@@ -83,13 +85,50 @@ export function captureNote({ how, full, showing, url, height, cut, slices, stal
   return null;
 }
 
+// Addresses that may act when loaded again (a copy loads the page again, with the user's cookies): one-time
+// sign-in and OAuth links, password resets, confirm and unsubscribe links. Query parameter names, and
+// path segments.
+const ONE_TIME_PARAM = /token|^(code|otp|nonce|ticket|sig|signature|hmac|magic|magic_?link|auth|login_?key|reset|confirm|confirmation|verify|verification|unsubscribe|invite|invitation)$/i;
+const ONE_TIME_PATH = /^(unsubscribe|optout|opt-out|confirm|confirmation|verify|verification|activate|activation|magic[-_]?link|reset[-_]?password|password[-_]?reset|oauth2?|callback|sso|authorize|invite|accept[-_]?invite)$/i;
+
+/**
+ * Why loading `url` again might do something (a one-time link: sign-in, OAuth, reset, confirm,
+ * unsubscribe), or null.
+ */
+export function oneTimeUrl(url) {
+  let u;
+  try { u = new URL(String(url ?? '')); } catch { return null; }
+  for (const name of u.searchParams.keys()) if (ONE_TIME_PARAM.test(name)) return `its query has "${name}="`;
+  if (u.searchParams.has('state') && u.searchParams.has('code')) return 'it looks like a sign-in callback';
+  if (/(^|[#&])(access_token|id_token|token|code)=/i.test(u.hash.slice(1))) return 'its fragment carries a token';
+  const seg = u.pathname.split('/').find((s) => ONE_TIME_PATH.test(s.replace(/\.\w+$/, '')));
+  if (seg) return `its path has "/${seg}"`;
+  return null;
+}
+
+/**
+ * A window a copy was made in, as remembered (background.js): {id, urls, bounds: {left, top, width,
+ * height}}. Whether `win` (from windows.getAll with tabs) is still that window: one tab, at one of those
+ * URLs, at those bounds. (Window ids change when the browser restarts and restores its windows, so the id
+ * alone could name a window of the user's.)
+ */
+export function isCopyWindow(win, rec) {
+  if (!win || !rec || !Array.isArray(win.tabs) || win.tabs.length !== 1) return false;
+  const url = win.tabs[0].url || win.tabs[0].pendingUrl || '';
+  if (!(rec.urls || []).includes(url)) return false;
+  const b = rec.bounds || {};
+  return ['left', 'top', 'width', 'height'].every((k) => Number.isFinite(b[k]) && Math.abs((win[k] ?? NaN) - b[k]) <= 2);
+}
+
 const sleepDefault = (ms) => new Promise((r) => setTimeout(r, ms));
 
 /**
  * Capture `tab`. deps: {pageCall(tabId, func, args) → result (isolated world), stitch(shots, size) → dataUrl,
- * sleep?, now?, browser, firefox?}. Returns {dataUrl, how, note, full, width?, height?, cut?}.
+ * sleep?, now?, browser, firefox?, checkUrl?(url) (throws when the copy may not show that URL: the run's
+ * scope, TRIF off there), onProbe?(windowId, open, info)}. `force`: make a copy of a one-time link anyway.
+ * Returns {dataUrl, how, note, full, width?, height?, cut?}.
  */
-export async function captureScreenshot(api, tab, { full = false, copy = false, timeout = 45000 } = {}, deps) {
+export async function captureScreenshot(api, tab, { full = false, copy = false, force = false, timeout = 45000 } = {}, deps) {
   const sleep = deps.sleep || sleepDefault;
   const win = await api.windows.get(tab.windowId).catch(() => null);
   const showing = !!(tab.active && win && win.state !== 'minimized');
@@ -107,6 +146,13 @@ export async function captureScreenshot(api, tab, { full = false, copy = false, 
     const height = Math.min(d.h, FULL_MAX_HEIGHT);
     const dataUrl = await api.tabs.captureTab(tab.id, { format: 'png', rect: { x: 0, y: 0, width: d.w, height }, ...(height > 4000 ? { scale: 1 } : {}) });
     return { dataUrl, how: 'tab', full: true, width: d.w, height, cut: d.h > height, note: captureNote({ how: 'tab', full: true, showing, height: d.h, cut: d.h > height }) };
+  }
+  const url = tab.url || tab.pendingUrl || '';
+  const why = force ? null : oneTimeUrl(url);
+  if (why) {
+    throw new Error(`that page's address looks like a one-time link (${why}: sign-in, confirmation, reset or unsubscribe), and --copy ` +
+      "loads it again with the user's cookies, which could act on it. Check it with `trif sweep`, `trif text` or `trif run` instead; " +
+      'if loading it again is harmless, add --force');
   }
   return captureCopy(api, tab, win, { full, showing, timeout }, { ...deps, sleep });
 }
@@ -129,8 +175,21 @@ async function captureCopy(api, tab, win, { full, showing, timeout }, deps) {
     if (!/bounds/i.test(String(e?.message ?? e))) throw e;
     created = await create(copyBounds(win, null));
   }
-  deps.onProbe?.(created.id, true);
+  const bounds = { left: created.left, top: created.top, width: created.width, height: created.height };
+  const urls = [url];
+  deps.onProbe?.(created.id, true, { urls, bounds });
   const probe = created.tabs && created.tabs[0];
+  // Where the copy ended up (redirects, a script navigating) must be allowed too: the run's site, a site
+  // TRIF is on for. Checked once it has loaded and before every capture.
+  const checkCopy = async () => {
+    if (!deps.checkUrl) return;
+    const t = await api.tabs.get(probe.id);
+    const at = t.url || t.pendingUrl || '';
+    if (!urls.includes(at)) { urls.push(at); deps.onProbe?.(created.id, true, { urls, bounds }); }
+    try { deps.checkUrl(at); } catch (e) {
+      throw new Error(`the copy of ${url} went to ${at || 'another page'}, so TRIF closed it: ${e?.message ?? e}`);
+    }
+  };
   try {
     if (!probe) throw new Error('the window TRIF opened for the copy has no tab');
     await api.tabs.update(probe.id, { muted: true }).catch(() => {});
@@ -142,6 +201,7 @@ async function captureCopy(api, tab, win, { full, showing, timeout }, deps) {
       if (now() > deadline) throw new Error(`the copy of ${url} didn't finish loading`);
       await sleep(100);
     }
+    await checkCopy();
     // Same viewport size as the user's tab (window chrome differs between windows).
     if (view) {
       const got = await pageCall(probe.id, () => ({ w: innerWidth, h: innerHeight })).catch(() => null);
@@ -161,12 +221,14 @@ async function captureCopy(api, tab, win, { full, showing, timeout }, deps) {
     const capture = async () => {
       const wait = last + CAPTURE_INTERVAL_MS - now();
       if (wait > 0) await sleep(wait);
+      await checkCopy();
       last = now();
       try {
         return await api.tabs.captureVisibleTab(created.id, { format: 'png' });
       } catch (e) {
         if (!/quota|MAX_CAPTURE/i.test(String(e?.message ?? e))) throw e;
         await sleep(1000);
+        await checkCopy();
         last = now();
         return api.tabs.captureVisibleTab(created.id, { format: 'png' });
       }

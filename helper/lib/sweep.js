@@ -33,6 +33,7 @@ function sweepArgs(opts) {
     a.budget = Math.min(t, 30000);
   }
   if (opts['--scroll']) a.scroll = true;
+  if (opts['--force'] && a.scroll) a.force = true;
   // How long the helper and CLI wait: the sweep, scrolling first, and the stylesheets after.
   const budget = a.budget || DEFAULT_BUDGET;
   a.timeout = budget + (a.scroll ? Math.min(15000, budget * 2) + 1000 : 0) + 5000;

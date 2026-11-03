@@ -4,14 +4,14 @@
 
 import {
   SETTINGS_URL, USER_SCRIPTS_OFF, FIREFOX, BROWSER, userScriptsAvailable, syncUserScripts, resolveTab, lastFocusedNormalWindow, tabInfo,
-  normalizeUrl, normalizeSite, hostMatchesSite, buildRunCode, buildPollCode, parseRunEnvelope,
+  normalizeUrl, normalizeSite, hostMatchesSite, buildRunCode, buildPollCode, parseRunEnvelope, pageGuard,
   firstInjectionResult, withTimeout, filterRequests, nextBackoff, chromeVersion, toolLine,
   normalizeDisabled, modAppliesTo, urlInScope, modInScope, applyStartOff, modSites,
   normalizeOffSites, offSiteName, offOnSite, hostInScope, withOffSites, scopeFor, normalizeSitesOn, siteOnFor, sitesInUse, limitToSites, applyStartSites, switchSite, fromOtherBrowser, timedUserScripts, capChat,
 } from './lib.js';
 import { runtimeCode } from './runtime.js';
 import { sweepPage } from './sweep.js';
-import { captureScreenshot, stitchShots } from './screenshot.js';
+import { captureScreenshot, stitchShots, isCopyWindow } from './screenshot.js';
 
 const HOST = 'com.webmods.helper';
 const VERSION = chrome.runtime.getManifest().version;
@@ -420,7 +420,7 @@ const commands = {
       target: { tabId: tab.id }, world: 'MAIN', injectImmediately: true, js: [{ code }],
     }));
     const work = (async () => {
-      let out = await execute(buildRunCode(args.code, !!args.expression, runId));
+      let out = await execute(buildRunCode(args.code, !!args.expression, runId, { scope: args.scope || null, sitesOn: state.sitesOn }));
       // Fallback in case execute didn't wait for the promise: poll the stored envelope.
       while (out === null && !timedOut) {
         await sleep(100);
@@ -475,16 +475,24 @@ const commands = {
     return pageCall(tab.id, 'ISOLATED', () => {
       const root = document.body || document.documentElement;
       return { url: location.href, title: document.title, text: String((root && root.innerText) || '').slice(0, 200000) };
-    });
+    }, [], args);
   },
 
   // Every instance of a kind of thing (extension/sweep.js), in the isolated world like `text`: works with
   // user scripts off, and page globals can't fool it.
   async sweep(args) {
     const tab = await scopedTab(args);
+    // --scroll scrolls the tab itself: not the one the user is looking at, unless forced.
+    if (args.scroll && !args.force && tab.active) {
+      const win = await chrome.windows.get(tab.windowId).catch(() => null);
+      if (win && win.focused && win.state !== 'minimized') {
+        throw new Error("--scroll scrolls the tab itself (to the bottom and back), and that's the tab the user is looking at. " +
+          'Sweep without --scroll (what has loaded so far), or add --force if scrolling it is fine');
+      }
+    }
     const opts = {};
     for (const k of ['selector', 'text', 'color', 'tolerance', 'limit', 'budget', 'scroll']) if (args[k] !== undefined) opts[k] = args[k];
-    const r = await pageCall(tab.id, 'ISOLATED', sweepPage, [opts]);
+    const r = await pageCall(tab.id, 'ISOLATED', sweepPage, [opts], args);
     if (!r || typeof r !== 'object') throw new Error('the sweep returned nothing (the page may have navigated meanwhile)');
     if (r.error) throw new Error(r.error);
     return r;
@@ -496,11 +504,12 @@ const commands = {
   async screenshot(args) {
     const tab = await scopedTab(args);
     const timeout = Number(args.timeout) > 4000 ? Number(args.timeout) - 3000 : 45000;
-    return captureScreenshot(chrome, tab, { full: !!args.full, copy: !!args.copy, timeout }, {
+    return captureScreenshot(chrome, tab, { full: !!args.full, copy: !!args.copy, force: !!args.force, timeout }, {
       browser: BROWSER,
       pageCall: (tabId, func, a = []) => pageCall(tabId, 'ISOLATED', func, a),
       stitch: stitchShots,
       onProbe: rememberProbe,
+      checkUrl: (url) => checkScopeUrl(url, args.scope, 'the copy'),
     });
   },
 
@@ -532,7 +541,7 @@ const commands = {
         recording: !!w.recording, host: location.hostname,
         entries: w.requests.map((e) => ({ i: e.i, method: e.method, url: e.url, status: e.status, type: e.type, size: e.size, time: e.time })),
       };
-    });
+    }, [], args);
     if (!r) throw new Error(state.recording.some((s) => hostMatchesSite(hostOf(tab.url || ''), s)) ? noRuntime() : notRecording(hostOf(tab.url || '')));
     if (!r.recording) throw new Error(notRecording(r.host));
     return filterRequests(r.entries, args);
@@ -548,7 +557,7 @@ const commands = {
       if (!w || !Array.isArray(w.requests)) return { missing: true };
       const e = w.requests.find((x) => x.i === n);
       return { recording: !!w.recording, host: location.hostname, entry: e ? { method: e.method, url: e.url, status: e.status, requestBody: e.requestBody, responseText: e.responseText } : null };
-    }, [i]);
+    }, [i], args);
     if (r.missing) throw new Error(noRuntime());
     if (!r.recording) throw new Error(notRecording(r.host));
     if (!r.entry) throw new Error(`no request ${i} in this page (recorded requests reset on every page load; see \`trif requests\`)`);
@@ -615,22 +624,38 @@ async function modsOnPage(args) {
   return { tab: tab.id, url, mods: mods.map((m) => ({ id: m.id, name: m.name || m.id, runAt: m.runAt || 'document_start' })) };
 }
 
-// Windows a screenshot opened for a copy of a page (extension/screenshot.js), kept in session storage so
-// that one left open by a worker that stopped mid-capture is closed on the next start.
-async function rememberProbe(windowId, open) {
-  try {
-    const { probes = [] } = await chrome.storage.session.get('probes');
-    const next = open ? [...new Set([...probes, windowId])] : probes.filter((id) => id !== windowId);
-    await chrome.storage.session.set({ probes: next });
-  } catch { /* no session storage */ }
+// Windows a screenshot opened for a copy of a page (extension/screenshot.js), kept in local storage (it
+// survives the browser quitting or crashing mid-capture, when a restored copy window would stay open) as
+// {id, urls, bounds, at}, and closed on the next start: by id, or after a restart (new ids) the window with
+// one tab at one of those URLs at those bounds (isCopyWindow). Forgotten after a day.
+const COPY_WINDOWS_KEY = 'copyWindows';
+const COPY_WINDOW_KEEP_MS = 24 * 60 * 60 * 1000;
+let copyWindowsChain = Promise.resolve();
+function rememberProbe(windowId, open, info = {}) {
+  copyWindowsChain = copyWindowsChain.then(async () => {
+    const list = (await chrome.storage.local.get(COPY_WINDOWS_KEY))[COPY_WINDOWS_KEY] || [];
+    const rest = list.filter((r) => r && r.id !== windowId);
+    const next = open ? [...rest, { id: windowId, urls: info.urls || [], bounds: info.bounds || {}, at: Date.now() }] : rest;
+    if (next.length) await chrome.storage.local.set({ [COPY_WINDOWS_KEY]: next });
+    else await chrome.storage.local.remove(COPY_WINDOWS_KEY);
+  }).catch(() => { /* storage unavailable: nothing to close next time */ });
+  return copyWindowsChain;
 }
 
 async function closeLeftoverProbes() {
   try {
-    const { probes = [] } = await chrome.storage.session.get('probes');
-    for (const id of probes) await chrome.windows.remove(id).catch(() => {});
-    if (probes.length) await chrome.storage.session.set({ probes: [] });
-  } catch { /* no session storage */ }
+    const list = ((await chrome.storage.local.get(COPY_WINDOWS_KEY))[COPY_WINDOWS_KEY] || []).filter((r) => r && Date.now() - (r.at || 0) < COPY_WINDOW_KEEP_MS);
+    if (!list.length) { await chrome.storage.local.remove(COPY_WINDOWS_KEY); return; }
+    const wins = await chrome.windows.getAll({ populate: true });
+    const left = [];
+    for (const rec of list) {
+      const win = wins.find((w) => w.id === rec.id && isCopyWindow(w, rec)) || wins.find((w) => isCopyWindow(w, rec));
+      if (win) await chrome.windows.remove(win.id).catch(() => {});
+      else if (Date.now() - (rec.at || 0) < 60 * 1000) left.push(rec); // (still being restored, perhaps)
+    }
+    if (left.length) await chrome.storage.local.set({ [COPY_WINDOWS_KEY]: left });
+    else await chrome.storage.local.remove(COPY_WINDOWS_KEY);
+  } catch { /* nothing to close */ }
 }
 
 async function setSwitchState(id, { disabled, offSites }) {
@@ -673,7 +698,7 @@ async function runtimeList(args, key) {
   const list = await pageCall(tab.id, 'MAIN', (k) => {
     const w = window.__webmods;
     return w && Array.isArray(w[k]) ? w[k].slice() : null;
-  }, [key]);
+  }, [key], args);
   if (list) return list;
   // The runtime only runs where a mod that's on does (or on a recorded site): no such mod, nothing to report.
   const url = tab.url || tab.pendingUrl || '';
@@ -693,7 +718,21 @@ function notRecording(host) {
 }
 
 /** Run `func` in the tab's top frame with chrome.scripting and return its (JSON-able) result. */
-async function pageCall(tabId, world, func, args = []) {
+async function pageCall(tabId, world, func, args = [], guard = null) {
+  if (!guard) return rawPageCall(tabId, world, func, args);
+  // guard {scope}: the tab was checked (scopedTab), but it may have gone elsewhere since. So the document
+  // is checked again from inside (pageGuard: the run's scope, TRIF on there) and marked, the command runs,
+  // and its result counts only if the mark is still there (the same document).
+  const token = crypto.randomUUID();
+  const why = await rawPageCall(tabId, 'ISOLATED', pageGuard, [guard.scope || null, state.sitesOn, token]);
+  if (why) throw new Error(why);
+  const result = await rawPageCall(tabId, world, func, args);
+  const same = await rawPageCall(tabId, 'ISOLATED', (t) => window.__trifPageGuard === t, [token]).catch(() => false);
+  if (!same) throw new Error('the tab went to another page while TRIF was working in it; try again');
+  return result;
+}
+
+async function rawPageCall(tabId, world, func, args = []) {
   const results = await chrome.scripting.executeScript({ target: { tabId }, world, func, args });
   const r = results?.[0];
   if (!r) throw new Error('could not access the page (it may be a page extensions cannot access, like chrome:// or the Web Store)');

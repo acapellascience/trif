@@ -326,6 +326,26 @@ test('run: expressions, function bodies, await, errors', async () => {
   assert.throws(() => vm.runInContext(lib.buildRunCode('(((', true, 'r'), page), (e) => e.name === 'SyntaxError');
 });
 
+test('run and page commands check the document they meet: a tab that went elsewhere since the check is refused', async () => {
+  // buildRunCode's guard, run in the page: the page the code meets, not the one checked before.
+  const page = makePage('evil.example.net');
+  let out = await vm.runInContext(lib.buildRunCode('window.ran = 1', false, 'g1', { scope: 'example.com', sitesOn: ['example.com', 'evil.example.net'] }), page);
+  assert.throws(() => lib.parseRunEnvelope(out), /went to evil\.example\.net before TRIF reached it, and this agent run is limited to example\.com/);
+  assert.strictEqual(page.ran, undefined, 'the code never ran');
+  out = await vm.runInContext(lib.buildRunCode('2', true, 'g2', { scope: null, sitesOn: ['example.com'] }), page);
+  assert.throws(() => lib.parseRunEnvelope(out), /TRIF is off there/);
+  const ok = makePage('www.example.com');
+  out = await vm.runInContext(lib.buildRunCode('3', true, 'g3', { scope: 'example.com', sitesOn: ['example.com'] }), ok);
+  assert.deepStrictEqual(lib.parseRunEnvelope(out), { value: 3 });
+  // pageGuard (injected before the other page commands): marks the document only when it may act.
+  const g = makePage('www.example.com');
+  assert.strictEqual(vm.runInContext(`(${lib.pageGuard})('example.com', ['example.com'], 'tok')`, g), null);
+  assert.strictEqual(g.__trifPageGuard, 'tok');
+  const bad = makePage('evil.example.net');
+  assert.match(vm.runInContext(`(${lib.pageGuard})('example.com', ['example.com'], 'tok')`, bad), /limited to example\.com/);
+  assert.strictEqual(bad.__trifPageGuard, undefined);
+});
+
 test('run: the envelope is stored for polling and the poll code consumes it', async () => {
   const page = makePage();
   await vm.runInContext(lib.buildRunCode('7', true, 'abc'), page);
@@ -760,7 +780,7 @@ let bgCount = 0;
 // TRIF is on for the test sites unless a test says otherwise (storage.sitesOn), or migrate: true
 // leaves sitesOn out, as for someone updating from before sites had to be turned on.
 const TEST_SITES_ON = ['example.com', 'x.com', 'y.com', 'z.com'];
-async function loadBackground({ storage = {}, tabs = [], migrate = false, safari = false } = {}) {
+async function loadBackground({ storage = {}, tabs = [], migrate = false, safari = false, windows = {}, scripting = {} } = {}) {
   const store = structuredClone(migrate || 'sitesOn' in storage ? storage : { sitesOn: TEST_SITES_ON, ...storage });
   const ctl = { full: false }; // full: every storage write fails, like a full quota
   const natives = [];
@@ -797,9 +817,9 @@ async function loadBackground({ storage = {}, tabs = [], migrate = false, safari
       update: async () => ({}), get: async (id) => structuredClone(tabs.find((t) => t.id === id) || {}), onUpdated,
       reload: async (id) => { reloaded.push(id); setImmediate(() => onUpdated.emit(id, { status: 'complete' })); },
     },
-    windows: { update: async () => ({}), getLastFocused: async () => ({ id: 1 }) },
+    windows: { update: async () => ({}), getLastFocused: async () => ({ id: 1 }), ...windows },
     sidePanel: { setPanelBehavior: async (o) => { panelBehavior.push(o); } },
-    scripting: {},
+    scripting,
     action: { onClicked: chromeEvent() },
   };
   globalThis.chrome = chromeMock;
@@ -850,6 +870,63 @@ async function answerNative(native, cmd, result, ok = true) {
   native.emit(ok ? { type: 'response', id: req.id, ok: true, result } : { type: 'response', id: req.id, ok: false, error: result });
   return req;
 }
+
+test('background: copy windows a screenshot left open (crash, restart) are closed on start, found by id or by URL and bounds', async () => {
+  const removed = [];
+  const bounds = { left: 780, top: 25, width: 1200, height: 860 };
+  const wins = [
+    { id: 3, ...bounds, tabs: [{ url: 'https://example.com/page' }] }, // restored after a restart: a new id
+    { id: 7, left: 0, top: 0, width: 800, height: 600, tabs: [{ url: 'https://mail.example.com/' }] }, // the user's, with the old id
+  ];
+  const bg = await loadBackground({
+    storage: { copyWindows: [{ id: 7, urls: ['https://example.com/page'], bounds, at: Date.now() - 5000 }, { id: 9, urls: ['https://old/'], bounds, at: Date.now() - 2 * 86400000 }] },
+    windows: { getAll: async () => structuredClone(wins), remove: async (id) => { removed.push(id); } },
+  });
+  try {
+    await waitFor(() => removed.length === 1 && !('copyWindows' in bg.store));
+    assert.deepStrictEqual(removed, [3], 'the copy window, not the user\'s window that now has its old id');
+  } finally { bg.restore(); }
+});
+
+test('background: a page command whose tab went to another page between the check and the reading gets no result', async () => {
+  const tabs = [{ id: 5, windowId: 1, active: true, url: 'https://example.com/a' }];
+  let navigated = false;
+  let navigate = true;
+  const calls = [];
+  const executeScript = async ({ func }) => {
+    calls.push(func.name || 'anonymous');
+    if (func.name === 'pageGuard') return [{ result: null }];
+    if (/__trifPageGuard === t/.test(String(func))) return [{ result: !navigated }];
+    navigated = navigate; // the page navigates while the command reads it
+    return [{ result: { url: 'https://example.com/a', text: 'page text' } }];
+  };
+  const bg = await loadBackground({ tabs, scripting: { executeScript } });
+  try {
+    const r = await bg.native.call('text', { tab: 5, scope: 'example.com' });
+    assert.strictEqual(r.ok, false);
+    assert.match(r.error, /went to another page while TRIF was working in it/);
+    assert.strictEqual(calls[0], 'pageGuard');
+    navigated = false;
+    navigate = false;
+    const again = await bg.native.call('text', { tab: 5, scope: 'example.com' });
+    assert.strictEqual(again.ok, true, again.error);
+    assert.strictEqual(again.result.text, 'page text');
+  } finally { bg.restore(); }
+});
+
+test('background: sweep --scroll is refused on the tab the user is looking at, unless forced', async () => {
+  const tabs = [{ id: 5, windowId: 1, active: true, url: 'https://example.com/a' }, { id: 6, windowId: 1, active: false, url: 'https://example.com/b' }];
+  const bg = await loadBackground({ tabs, windows: { get: async () => ({ id: 1, focused: true, state: 'normal' }) } });
+  try {
+    let r = await bg.native.call('sweep', { tab: 5, selector: 'a', scroll: true });
+    assert.strictEqual(r.ok, false);
+    assert.match(r.error, /--scroll scrolls the tab itself.*the tab the user is looking at.*--force/);
+    for (const args of [{ tab: 5, selector: 'a', scroll: true, force: true }, { tab: 6, selector: 'a', scroll: true }, { tab: 5, selector: 'a' }]) {
+      r = await bg.native.call('sweep', args);
+      assert.doesNotMatch(String(r.error || ''), /--scroll/, JSON.stringify(args));
+    }
+  } finally { bg.restore(); }
+});
 
 test('background: install opens onboarding and sets the side panel to open on action click', async () => {
   const bg = await loadBackground();

@@ -127,6 +127,56 @@ test('Chrome, a background tab: a copy in an unfocused window the size of the us
   noFocus(api.calls);
 });
 
+test('--copy: where the copy ended up is checked (run scope, TRIF on) after loading and before each capture; refused, the window closes', async () => {
+  // Loads, then (a script, a redirect) ends up on another site.
+  const api = mockApi({ active: false });
+  const get = api.tabs.get;
+  let n = 0;
+  api.tabs.get = async (id) => { const t = await get(id); return ++n >= 4 ? { ...t, url: 'https://evil.example.net/x' } : t; };
+  const checked = [];
+  const checkUrl = (u) => { checked.push(u); if (!u.startsWith('https://example.com/')) throw new Error(`that URL is on ${new URL(u).hostname}, and this agent run is limited to example.com`); };
+  const probes = [];
+  await assert.rejects(
+    S.captureScreenshot(api, { id: 5, windowId: 1, active: false, url: 'https://example.com/page' }, { copy: true },
+      { ...pages(), ...fakeClock(), browser: 'Chrome', checkUrl, onProbe: (id, open, info) => probes.push([id, open, info && info.urls.slice()]) }),
+    /copy of https:\/\/example\.com\/page went to https:\/\/evil\.example\.net\/x, so TRIF closed it: .*limited to example\.com/);
+  assert.ok(checked.includes('https://example.com/page') && checked.includes('https://evil.example.net/x'));
+  assert.ok(!api.calls.some((c) => c[0] === 'captureVisibleTab'), 'nothing captured');
+  assert.deepStrictEqual(api.calls[api.calls.length - 1], ['windows.remove', 7]);
+  // Remembered with the URLs it showed and its bounds (to find it after a restart), then forgotten.
+  assert.deepStrictEqual(probes.map((p) => p[1]), [true, true, false]);
+  assert.deepStrictEqual(probes[1][2], ['https://example.com/page', 'https://evil.example.net/x']);
+});
+
+test('--copy refuses addresses that look like one-time links, unless --force', async () => {
+  for (const url of ['https://example.com/login?token=abc', 'https://example.com/cb?code=x&state=y', 'https://example.com/email/unsubscribe?u=1',
+    'https://example.com/account/confirm/123', 'https://example.com/#access_token=t', 'https://example.com/a?magic_link=1', 'https://example.com/reset-password?id=1']) {
+    assert.ok(S.oneTimeUrl(url), url);
+    const api = mockApi({ active: false });
+    await assert.rejects(S.captureScreenshot(api, { id: 5, windowId: 1, active: false, url }, { copy: true }, { ...pages(), ...fakeClock(), browser: 'Chrome' }),
+      /looks like a one-time link.*user's cookies.*--force/, url);
+    assert.ok(!api.calls.some((c) => c[0] === 'windows.create'), `${url}: nothing opened`);
+  }
+  for (const url of ['https://example.com/page', 'https://www.google.com/search?q=code', 'https://x.com/home', 'https://example.com/?state=CA', 'https://example.com/codes']) {
+    assert.equal(S.oneTimeUrl(url), null, url);
+  }
+  const api = mockApi({ active: false });
+  const r = await S.captureScreenshot(api, { id: 5, windowId: 1, active: false, url: 'https://example.com/login?token=abc' }, { copy: true, force: true }, { ...pages(), ...fakeClock(), browser: 'Chrome' });
+  assert.strictEqual(r.how, 'copy');
+  // Not for a tab that's showing (nothing is loaded again).
+  assert.strictEqual((await S.captureScreenshot(mockApi(), { id: 5, windowId: 1, active: true, url: 'https://example.com/login?token=abc' }, { copy: true }, { ...pages(), browser: 'Chrome' })).how, 'visible');
+});
+
+test('isCopyWindow: a remembered copy window is found again by its one tab\'s URL and its bounds, not by id alone', () => {
+  const rec = { id: 7, urls: ['https://example.com/page'], bounds: { left: 780, top: 25, width: 1200, height: 860 } };
+  const win = { id: 99, left: 781, top: 25, width: 1200, height: 860, tabs: [{ url: 'https://example.com/page' }] };
+  assert.ok(S.isCopyWindow(win, rec));
+  assert.ok(!S.isCopyWindow({ ...win, tabs: [...win.tabs, { url: 'https://other/' }] }, rec), 'more than one tab: the user\'s');
+  assert.ok(!S.isCopyWindow({ ...win, left: 10 }, rec), 'elsewhere: the user\'s');
+  assert.ok(!S.isCopyWindow({ ...win, tabs: [{ url: 'https://example.com/other' }] }, rec));
+  assert.ok(!S.isCopyWindow(win, { ...rec, bounds: {} }));
+});
+
 test('copyBounds: at the right edge, more than half on screen; without screen info, the user\'s window', () => {
   assert.deepStrictEqual(S.copyBounds({ width: 1000, height: 700, top: 100, state: 'normal', left: 50 }, { x: 0, y: 25, w: 1440, h: 875 }), { left: 890, top: 100, width: 1000, height: 700 });
   assert.deepStrictEqual(S.copyBounds({ width: 1000, height: 900, top: 100 }, { x: 1440, y: 0, w: 1920, h: 1055 }), { left: 1440 + 1920 - 550, top: 100, width: 1000, height: 900 });

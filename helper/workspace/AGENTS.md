@@ -159,8 +159,8 @@ to that one. In a side-panel run you're already on the browser the user is chatt
 | `trif open <url>` / `trif navigate [TAB] <url>` | Open a new tab / load a URL in a tab. Wait for load. |
 | `trif run [TAB] '<code>'` | Run JS in the page; prints the result as JSON. `-f file.js` runs a file, `-` reads stdin. |
 | `trif text [TAB]` | The page's visible text. |
-| `trif sweep [TAB] --selector <css> \| --color <colour> \| --text <regex>` | Every instance of a kind of thing: count, where (landmarks, menus, dialogs, fixed/sticky, shadow roots, frames), kinds with examples; for a colour also the stylesheet rules and CSS variables using it. `--scroll` loads lazy content first; `--json` lists each match. |
-| `trif screenshot [TAB] [--full] [--copy] [-o file.png]` | PNG of the tab. Firefox captures any tab, showing or not. Chrome only the tab that's showing (TRIF never switches tabs); `--copy` captures a fresh copy of the page in a window that appears briefly at the edge of the screen: not the tab's exact state, and the user sees it. `--full`: the whole page (in Chrome, with `--copy`). |
+| `trif sweep [TAB] --selector <css> \| --color <colour> \| --text <regex>` | Every instance of a kind of thing: count, where (landmarks, menus, dialogs, fixed/sticky, shadow roots, frames), kinds with examples; for a colour also the stylesheet rules and CSS variables using it. `--scroll` loads lazy content first by scrolling the tab itself, which the user sees (refused on the tab they're looking at unless `--force`); `--json` lists each match. |
+| `trif screenshot [TAB] [--full] [--copy] [-o file.png]` | PNG of the tab, saved in your screenshots folder (`-o page.png` names it there); prints the path. Firefox captures any tab, showing or not. Chrome only the tab that's showing (TRIF never switches tabs); `--copy` loads the page again, with the user's cookies (signed in as them), in a window that appears briefly at the edge of the screen: not the tab's exact state, the user sees it, and loading the address again can act on it, so never on a sign-in, confirm or unsubscribe link (TRIF refuses addresses that look like one unless `--force`). `--full`: the whole page (in Chrome, with `--copy`). |
 | `trif reload [TAB] [--hard]` | Reload and wait for load. |
 | `trif record <site> on\|off` | Record fetch/XHR traffic for a hostname, from the next load. |
 | `trif requests [TAB] [--filter <regex>] [--limit N]` | Recorded requests, newest last, with index `i`. |
@@ -245,7 +245,8 @@ logged in to:
   Claude Code only `trif`, `cd` and `ls` run: no `node`, so unit tests can't run in the side panel
   (write them anyway when they help; the user can run them). `trif check` checks syntax.
 - `trif run -f` and `trif check` read files from `sites/` only, and `-o` writes there or to your
-  screenshots folder (`$TRIF_RUN_SCREENSHOTS`, where `trif screenshot` saves). TRIF's settings, logs
+  screenshots folder (`$TRIF_RUN_SCREENSHOTS`, where `trif screenshot` saves; `trif screenshot -o
+  page.png` names the file there). TRIF's settings, logs
   and other sites' screenshots aren't in the workspace and aren't readable.
 - `trif setup`, `trif agent`, `trif approve` and `trif mod-update` are the user's; they
   fail inside a run. (A merge is settled by the helper once a run in that chat leaves the user's copy

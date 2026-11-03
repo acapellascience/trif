@@ -75,7 +75,7 @@ built on, so for now this is for trying it out:
 
 1. From a checkout of this repo, `node scripts/build-safari.js` (needs Xcode) makes
    `dist/safari-app/TRIF.app`. Open it once: it adds the TRIF extension to Safari.
-2. `~/.trif/bin/trif setup --browser safari` starts the Safari bridge, a small background program
+2. `npx trif setup --browser safari` starts the Safari bridge, a small background program
    Safari's extension talks to (Safari can't start the helper itself the way Chrome does). It starts again
    whenever you log in.
 3. In Safari: Settings → Advanced, tick "Show features for web developers"; Settings → Developer, tick

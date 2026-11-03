@@ -1,6 +1,6 @@
 // ==WebMod==
 // @name        Tilt Card
-// @description The whole page tilts in 3D toward the mouse like a card floating in space, with a glare that follows the pointer; each section floats at its own depth
+// @description The page tilts in 3D with your mouse
 // @match       https://timsrobot.com/*
 // @match       https://*.timsrobot.com/*
 // @run-at      document-start

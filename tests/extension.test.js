@@ -1844,15 +1844,15 @@ test('orderMods / moveId / setModOrder: the panel\'s own order, per site, new mo
 
 test('orderMods: a site\'s shipped default order first (the rest after, as they come), and the user\'s own order over it', () => {
   const ids = (list) => list.map((x) => x.id);
-  const mods = ['fireworks', 'gravity-mode', 'jelly-buttons', 'mine', 'typing-tagline'].map((x) => mod(`timsrobot.com/${x}`));
-  const shipped = ['timsrobot.com/typing-tagline', 'timsrobot.com/jelly-buttons', 'timsrobot.com/gravity-mode', 'timsrobot.com/fireworks', 'timsrobot.com/neon-title'];
+  const mods = ['fireworks', 'gravity', 'jelly', 'mine', 'tagline'].map((x) => mod(`timsrobot.com/${x}`));
+  const shipped = ['timsrobot.com/tagline', 'timsrobot.com/jelly', 'timsrobot.com/gravity', 'timsrobot.com/fireworks', 'timsrobot.com/neon'];
   // (As the panel does it: the default order, then the user's over that.)
   const natural = lib.orderMods(mods, shipped);
   assert.deepStrictEqual(ids(natural), [...shipped.slice(0, 4), 'timsrobot.com/mine'], 'shipped order, the user\'s own mod after, one they deleted skipped');
   assert.deepStrictEqual(ids(lib.orderMods(natural, undefined)), ids(natural), 'until the user drags');
   const theirs = ['timsrobot.com/mine', 'timsrobot.com/fireworks'];
   assert.deepStrictEqual(ids(lib.orderMods(natural, theirs)),
-    ['timsrobot.com/mine', 'timsrobot.com/fireworks', 'timsrobot.com/typing-tagline', 'timsrobot.com/jelly-buttons', 'timsrobot.com/gravity-mode']);
+    ['timsrobot.com/mine', 'timsrobot.com/fireworks', 'timsrobot.com/tagline', 'timsrobot.com/jelly', 'timsrobot.com/gravity']);
   // Dragged back into the default order: the user's entry goes, and the default applies again.
   assert.deepStrictEqual(lib.setModOrder({ 'timsrobot.com': theirs }, 'timsrobot.com', ids(natural), ids(natural)), {});
 });

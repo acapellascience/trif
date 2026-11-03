@@ -1,6 +1,6 @@
 // ==WebMod==
 // @name        Terminal Box
-// @description Turns the "Yours, on your computer" box into a little terminal window that types `ls ~/.trif/sites/timsrobot.com`, lists our mods, then prints the paragraph
+// @description Turns a box into a terminal
 // @match       https://timsrobot.com/*
 // @match       https://*.timsrobot.com/*
 // @run-at      document-idle
@@ -11,8 +11,8 @@
 
 (() => {
   // Mods can't read the disk, so the listing is written here. Add new mods to it as they're made.
-  const MODS = ['jelly-buttons.js', 'living-robot.js', 'need-checklist.js', 'neon-title.js', 'rainbow-rave.js',
-    'sticker-badges.js', 'terminal-box.js', 'typing-tagline.js'];
+  const MODS = ['checklist.js', 'jelly.js', 'neon.js', 'rave.js', 'robot.js',
+    'stickers.js', 'tagline.js', 'terminal.js'];
   const COMMAND = 'ls ~/.trif/sites/timsrobot.com';
 
   const h2 = [...document.querySelectorAll('h2')].find((h) => /yours, on your computer/i.test(h.textContent));
@@ -101,7 +101,7 @@
         const spans = [...ls.querySelectorAll('span')];
         spans.forEach((s, k) => setTimeout(() => s.classList.add('tb-on'), 250 + k * 70));
         setTimeout(finish, 250 + spans.length * 70 + 350);
-      } catch (e) { window.trif?.warn('terminal-box', String(e)); finish(); }
+      } catch (e) { window.trif?.warn('terminal', String(e)); finish(); }
     };
     setTimeout(type, 400);
   };

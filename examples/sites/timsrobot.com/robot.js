@@ -1,6 +1,6 @@
 // ==WebMod==
 // @name        Living Robot
-// @description The hero robot has little legs and wanders the page in loops, zigzags, dashes and dances (and chases the Space shooter ship while you're flying it); its eyes follow the mouse, it blinks, and hops when clicked
+// @description The robot comes alive and hunts you
 // @match       *://timsrobot.com/*
 // @match       *://*.timsrobot.com/*
 // @run-at      document-idle

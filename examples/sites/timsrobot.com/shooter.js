@@ -1,6 +1,6 @@
 // ==WebMod==
 // @name        Space Shooter
-// @description A little ship flies along the bottom of the page: arrow keys move it around, space fires lasers (drops bombs in Gravity mode), and any word you hit explodes into its letters. R brings the words back
+// @description Fly a ship, blast the words
 // @match       *://timsrobot.com/*
 // @match       *://*.timsrobot.com/*
 // @run-at      document-idle
@@ -113,7 +113,7 @@
   const ctx = canvas.getContext('2d');
   const hud = document.createElement('div');
   hud.id = 'tss-hud';
-  // On <html>, not <body>: tilt-card puts a transform on <body>, which would make these "fixed"
+  // On <html>, not <body>: tilt puts a transform on <body>, which would make these "fixed"
   // elements tilt and shrink with it (the ship then couldn't reach the bottom of the window).
   document.documentElement.append(canvas, hud);
   let W = 0, H = 0;
@@ -125,7 +125,7 @@
   };
   resize();
   addEventListener('resize', resize);
-  // tilt-card sets `perspective` on <html> (and the shake sets `translate`), which makes <html> the
+  // tilt sets `perspective` on <html> (and the shake sets `translate`), which makes <html> the
   // containing block for "fixed" elements: they then scroll with the page. Nudge them back so the
   // canvas always covers the window exactly.
   let pinX = 0, pinY = 0;
@@ -173,7 +173,7 @@
   };
 
   // Screen shake: nudges <html> with the `translate` property, which no other mod here sets on <html>
-  // and which stacks with any `transform` (tilt-card) instead of replacing it.
+  // and which stacks with any `transform` (tilt) instead of replacing it.
   let shake = 0;
   const applyShake = (dt) => {
     const html = document.documentElement;
@@ -631,18 +631,18 @@
   // page; if one's switched off (or its mark changes), the game just resets as usual.
   const MOD_MARKS = {
     'fireworks': 'canvas[data-fw-canvas]',
-    'gravity-mode': 'html[data-gm-ready]',
-    'jelly-buttons': () => [...document.querySelectorAll('style')].some((s) => s.textContent.includes('jb-jelly')),
-    'led-footer': '.led-sign',
-    'living-robot': 'svg.robot[data-lr]',
-    'need-checklist': '[data-nc]',
-    'neon-title': '.nt-word',
-    'rainbow-rave': '#trif-rave-robot',
-    'space-shooter': '#tss-canvas',
-    'sticker-badges': '.sb-badge',
-    'terminal-box': '[data-tb]',
-    'tilt-card': 'style[data-tc]',
-    'typing-tagline': 'html[data-tt-ready], [data-tt-done]',
+    'gravity': 'html[data-gm-ready]',
+    'jelly': () => [...document.querySelectorAll('style')].some((s) => s.textContent.includes('jb-jelly')),
+    'led': '.led-sign',
+    'robot': 'svg.robot[data-lr]',
+    'checklist': '[data-nc]',
+    'neon': '.nt-word',
+    'rave': '#trif-rave-robot',
+    'shooter': '#tss-canvas',
+    'stickers': '.sb-badge',
+    'terminal': '[data-tb]',
+    'tilt': 'style[data-tc]',
+    'tagline': 'html[data-tt-ready], [data-tt-done]',
   };
   const modsOff = () => Object.entries(MOD_MARKS).filter(([, m]) => !(typeof m === 'function' ? m() : document.querySelector(m))).map(([n]) => n);
   const allModsOn = () => {

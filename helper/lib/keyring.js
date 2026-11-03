@@ -15,11 +15,15 @@
 //           key is in no process's argv (any same-user process can list those); hex, so no quoting.
 //   delete  security delete-generic-password -s … -a …
 // An item /usr/bin/security creates lists /usr/bin/security as allowed to read it, so reads don't ask.
+// Windows: Credential Manager, through the Win32 credential API called from Windows PowerShell, with the
+// key on its stdin and stdout only (win/credman.js: Windows has no command-line tool that reads a
+// credential back, and cmdkey takes the secret in its argv).
 // Linux: the Secret Service (GNOME Keyring, KWallet, KeePassXC…) through libsecret's `secret-tool`
 // (`store` reads the key from stdin). No secret-tool: hosted open models can't be used (no file or
 // environment fallback).
 //
-// TRIF_KEYCHAIN_BIN (tests): a stand-in for /usr/bin/security, or for secret-tool when its name says so.
+// TRIF_KEYCHAIN_BIN (tests): a stand-in for /usr/bin/security, or for secret-tool or PowerShell (Windows)
+// when its name says so (a PowerShell stand-in ending in .js runs with this Node).
 // Nothing here logs, returns in an error, or puts in an argv the key itself.
 
 const fs = require('fs');
@@ -37,15 +41,19 @@ const NOT_FOUND = 44; // security's exit status for "The specified item could no
 
 const MAC_NAME = 'your Mac’s Keychain';
 const LINUX_NAME = 'your keyring (Secret Service)';
+const credman = require('./win/credman');
 
-/** Where keys go: {kind: 'security'|'secret-tool', bin, name} or null (no keyring). */
+/** Where keys go: {kind: 'security'|'secret-tool'|'credman', bin, name} or null (no keyring). */
 function backend({ env = process.env, platform = process.platform } = {}) {
   const forced = envVar('KEYCHAIN_BIN', env);
   if (forced) {
     if (!path.isAbsolute(forced)) return null;
+    if (/powershell|credman/i.test(path.basename(forced))) return { kind: 'credman', bin: forced, name: credman.NAME };
     return /secret-tool/.test(path.basename(forced)) ? { kind: 'secret-tool', bin: forced, name: LINUX_NAME } : { kind: 'security', bin: forced, name: MAC_NAME };
   }
   if (platform === 'darwin') return { kind: 'security', bin: '/usr/bin/security', name: MAC_NAME };
+  // (bin null: win/powershell.js uses %SystemRoot%'s Windows PowerShell.)
+  if (platform === 'win32') return { kind: 'credman', bin: null, name: credman.NAME };
   if (platform === 'linux') {
     for (const d of ['/usr/bin', '/usr/local/bin', '/bin']) {
       const f = path.join(d, 'secret-tool');
@@ -59,7 +67,7 @@ function backend({ env = process.env, platform = process.platform } = {}) {
 function noKeyring({ platform = process.platform, what = 'hosted open models need' } = {}) {
   return platform === 'linux'
     ? `${what} a keyring to keep the API key in: install libsecret's secret-tool (e.g. \`sudo apt install libsecret-tools\`) and a Secret Service such as GNOME Keyring or KeePassXC`
-    : `${what} a system keyring to keep the API key in (the macOS Keychain, or a Secret Service on Linux)`;
+    : `${what} a system keyring to keep the API key in (the macOS Keychain, Windows Credential Manager, or a Secret Service on Linux)`;
 }
 
 /** Why `key` can't be stored ('' when it can). Never quotes the key. */
@@ -78,7 +86,7 @@ function run(bin, args, { input = null, timeout = 30000 } = {}) {
   return new Promise((resolve) => {
     let child;
     try {
-      child = spawn(bin, args, { stdio: ['pipe', 'pipe', 'pipe'] });
+      child = spawn(bin, args, { stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true });
     } catch (e) {
       resolve({ code: null, stdout: '', stderr: e.message });
       return;
@@ -116,6 +124,7 @@ async function getKey(account, { service = SERVICE, ...opts } = {}) {
   checkAccount(account);
   const b = backend(opts);
   if (!b) return { value: null, error: noKeyring(opts) };
+  if (b.kind === 'credman') return credman.getKey(service, account, { bin: b.bin, env: opts.env });
   const args = LOOKUP(b.kind, account, service);
   if (b.kind === 'security') args.push('-w');
   const r = await run(b.bin, args, opts);
@@ -130,6 +139,7 @@ async function hasKey(account, { service = SERVICE, ...opts } = {}) {
   checkAccount(account);
   const b = backend(opts);
   if (!b) return { stored: false, error: noKeyring(opts) };
+  if (b.kind === 'credman') return credman.hasKey(service, account, { bin: b.bin, env: opts.env });
   if (b.kind === 'secret-tool') { const k = await getKey(account, { service, ...opts }); return { stored: !!k.value, error: k.error }; }
   const r = await run(b.bin, LOOKUP(b.kind, account, service), opts);
   if (r.code === 0) return { stored: true, error: null };
@@ -148,7 +158,10 @@ async function setKey(account, key, { service = SERVICE, ...opts } = {}) {
   const label = `${service} (${account})`;
   let r;
   const hex = Buffer.from(k, 'utf8').toString('hex');
-  if (b.kind === 'security') {
+  if (b.kind === 'credman') {
+    await credman.setKey(service, account, k, { bin: b.bin, env: opts.env });
+    r = { code: 0 };
+  } else if (b.kind === 'security') {
     // On stdin, never in argv. Every value is ours: the service and label have no quotes or backslashes,
     // the account matches ACCOUNT_RE, the key is hex.
     r = await run(b.bin, ['-i'], { ...opts, input: `add-generic-password -U -s "${service}" -a "${account}" -l "${label}" -X ${hex}\n` });
@@ -165,6 +178,7 @@ async function removeKey(account, { service = SERVICE, ...opts } = {}) {
   checkAccount(account);
   const b = backend(opts);
   if (!b) throw new Error(noKeyring(opts));
+  if (b.kind === 'credman') return credman.removeKey(service, account, { bin: b.bin, env: opts.env });
   if (b.kind === 'secret-tool') {
     const had = await hasKey(account, { service, ...opts });
     const r = await run(b.bin, ['clear', 'service', service, 'account', account], opts);

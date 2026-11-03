@@ -6,7 +6,7 @@ import {
   SETTINGS_URL, SETUP_COMMAND, USER_SCRIPTS_OFF, FIREFOX, BROWSER, userScriptsAvailable, syncUserScripts, resolveTab, lastFocusedNormalWindow, tabInfo,
   normalizeUrl, normalizeSite, hostMatchesSite, buildRunCode, buildPollCode, parseRunEnvelope, pageGuard,
   firstInjectionResult, withTimeout, filterRequests, nextBackoff, chromeVersion, toolLine,
-  normalizeDisabled, modAppliesTo, urlInScope, modInScope, applyStartOff, applyAbsorbed, findRenames, carryRenames, renameInOrder, modSites,
+  normalizeDisabled, modAppliesTo, urlInScope, modInScope, applyStartOff, applyAbsorbed, findRenames, carryRenames, renameInOrder, normalizeModOrder, modSites,
   normalizeOffSites, offSiteName, offOnSite, hostInScope, withOffSites, scopeFor, normalizeSitesOn, siteOnFor, sitesInUse, limitToSites, applyStartSites, switchSite, fromOtherBrowser, timedUserScripts, capChat,
 } from './lib.js';
 import { runtimeCode } from './runtime.js';
@@ -41,6 +41,7 @@ const state = {
   sitesOffered: [],      // sites the helper said to start on that were turned on once already (persisted)
   startedOff: {},        // mod id → true for mods already switched off once: preinstalled, or from another browser (persisted)
   absorbed: {},          // mod id → true for retired shipped mods whose switch was carried over (persisted)
+  defaultOrder: {},      // site → mod ids: the panel's order for its shipped mods until the user drags them (from the helper; persisted)
   installId: null,       // random id of this install (persisted): the helper records it as the origin of mods made here
   applied: {},           // script id → hash last registered (persisted)
   lastApply: { registered: [], errors: [] },
@@ -111,6 +112,7 @@ const ready = chrome.storage.local.get(null).then(async (s) => {
   state.offSites = normalizeOffSites(s.offSites);
   state.startedOff = normalizeDisabled(s.startedOff);
   state.absorbed = normalizeDisabled(s.absorbed);
+  state.defaultOrder = normalizeModOrder(s.defaultOrder);
   state.sitesOffered = normalizeSitesOn(s.sitesOffered);
   if (Array.isArray(s.sitesOn)) state.sitesOn = normalizeSitesOn(s.sitesOn);
   else {
@@ -358,6 +360,12 @@ async function onModsMessage(msg) {
     state.sitesOffered = sites.offered;
     await save({ sitesOn: state.sitesOn, sitesOffered: state.sitesOffered }).catch((e) => log('warn', errMsg(e)));
     notifyPanels();
+  }
+  // The order the side panel starts a site's shipped mods in (the panel reads it from storage).
+  const defaultOrder = normalizeModOrder(msg.defaultOrder);
+  if (JSON.stringify(defaultOrder) !== JSON.stringify(state.defaultOrder)) {
+    state.defaultOrder = defaultOrder;
+    await save({ defaultOrder }).catch((e) => log('warn', errMsg(e)));
   }
   // A shipped mod folded into another one hands that one its switch, once (on if either was on).
   const ab = applyAbsorbed(state.mods, state.disabled, state.offSites, state.absorbed);

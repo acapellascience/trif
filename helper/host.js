@@ -27,7 +27,7 @@ const { Runs } = require('./lib/runs');
 const { Logins } = require('./lib/logins');
 const agents = require('./lib/agents');
 const { updateHeld, approveHeld, heldFile } = require('./lib/held');
-const { startOffIds, startSitesOn, pendingUpdates, useNewVersion, keepMine, mergeRequest, mergeSettled, restoreMod, absorbedIds } = require('./lib/preinstalled');
+const { DEFAULT_ORDER, startOffIds, startSitesOn, pendingUpdates, useNewVersion, keepMine, mergeRequest, mergeSettled, restoreMod, absorbedIds } = require('./lib/preinstalled');
 const { readInstructions, writeInstructions, instructionsFile, MAX_LENGTH } = require('./lib/instructions');
 const { ownSock, removeStaleSockets, codeStamp } = require('./lib/helpers');
 const { loadOrigins, recordOrigins, renameOrigins, activeRuns } = require('./lib/origins');
@@ -221,7 +221,8 @@ function syncMods(reason, force) {
   if (!force && signature === state.lastSignature) return;
   state.lastSignature = signature;
   try {
-    sendToExtension({ type: 'mods', mods: sent, sitesOn });
+    // (defaultOrder: the side panel's order for a site's shipped mods until the user drags them; preinstalled.js.)
+    sendToExtension({ type: 'mods', mods: sent, sitesOn, defaultOrder: DEFAULT_ORDER });
     const nHeld = sent.filter((m) => m.held).length;
     logger.info(`sent ${sent.length} mod(s) to the extension${nHeld ? ` (${nHeld} held)` : ''} (${reason})`);
   } catch (e) {

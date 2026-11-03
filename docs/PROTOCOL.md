@@ -292,7 +292,11 @@ site: `chrome.storage.local` **`modOrder`** = `{"<site as scopeFor gives it>": [
 by the panel. Display only: mods register and run in the order they always do. Mods not in the list
 come after the listed ones in the order the helper sends them; listed ids that aren't mods any more are
 skipped (one restored from the trash takes its old place) and dropped the next time the order is saved;
-an order that's just the helper's is removed (`orderMods`, `setModOrder` in lib.js).
+an order that's just the helper's is removed (`orderMods`, `setModOrder` in lib.js). Until the user drags,
+a site's shipped mods come in the order TRIF ships them in: every `mods` message carries
+`defaultOrder` (same shape; helper/lib/preinstalled.js `DEFAULT_ORDER`, so far timsrobot.com's), which
+the extension keeps in `chrome.storage.local` **`defaultOrder`**; the panel orders by it first, then by
+the user's `modOrder`.
 
 ### `run` semantics
 

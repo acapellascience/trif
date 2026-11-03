@@ -1811,6 +1811,36 @@ test('orderMods / moveId / setModOrder: the panel\'s own order, per site, new mo
   assert.deepStrictEqual(lib.normalizeModOrder(['x']), {});
 });
 
+test('orderMods: a site\'s shipped default order first (the rest after, as they come), and the user\'s own order over it', () => {
+  const ids = (list) => list.map((x) => x.id);
+  const mods = ['fireworks', 'gravity-mode', 'jelly-buttons', 'mine', 'typing-tagline'].map((x) => mod(`timsrobot.com/${x}`));
+  const shipped = ['timsrobot.com/typing-tagline', 'timsrobot.com/jelly-buttons', 'timsrobot.com/gravity-mode', 'timsrobot.com/fireworks', 'timsrobot.com/neon-title'];
+  // (As the panel does it: the default order, then the user's over that.)
+  const natural = lib.orderMods(mods, shipped);
+  assert.deepStrictEqual(ids(natural), [...shipped.slice(0, 4), 'timsrobot.com/mine'], 'shipped order, the user\'s own mod after, one they deleted skipped');
+  assert.deepStrictEqual(ids(lib.orderMods(natural, undefined)), ids(natural), 'until the user drags');
+  const theirs = ['timsrobot.com/mine', 'timsrobot.com/fireworks'];
+  assert.deepStrictEqual(ids(lib.orderMods(natural, theirs)),
+    ['timsrobot.com/mine', 'timsrobot.com/fireworks', 'timsrobot.com/typing-tagline', 'timsrobot.com/jelly-buttons', 'timsrobot.com/gravity-mode']);
+  // Dragged back into the default order: the user's entry goes, and the default applies again.
+  assert.deepStrictEqual(lib.setModOrder({ 'timsrobot.com': theirs }, 'timsrobot.com', ids(natural), ids(natural)), {});
+});
+
+test('background: the helper\'s default order for shipped mods is kept in storage for the panel, and replaced when it changes', async () => {
+  const order = { 'timsrobot.com': ['timsrobot.com/b', 'timsrobot.com/a'] };
+  const bg = await loadBackground();
+  try {
+    bg.native.emit({ type: 'mods', mods: [mod('timsrobot.com/a'), mod('timsrobot.com/b')], defaultOrder: { ...order, junk: 'no' } });
+    await settle(30);
+    assert.deepStrictEqual(bg.store.defaultOrder, order);
+    assert.ok(!('modOrder' in bg.store), 'the user\'s own order isn\'t written');
+    // A helper from before (no defaultOrder): none.
+    bg.native.emit({ type: 'mods', mods: [mod('timsrobot.com/a')] });
+    await settle(30);
+    assert.deepStrictEqual(bg.store.defaultOrder, {});
+  } finally { bg.restore(); }
+});
+
 test('renameInOrder: a renamed mod keeps its place in every site\'s order', () => {
   const order = { 'x.com': ['x.com/c', 'x.com/wobble', 'all-sites/glow'], 'y.com': ['all-sites/glow', 'y.com/a'] };
   const r = lib.renameInOrder(order, [{ from: 'x.com/wobble', to: 'x.com/jelly' }, { from: 'all-sites/glow', to: 'all-sites/shine' }]);

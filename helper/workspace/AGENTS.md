@@ -87,13 +87,13 @@ you to from their terminal (side-panel runs can't).
 
 ### Mods TRIF ships
 
-The mods setup put in the workspace (Timeline Detox, the Google, Amazon and Instagram ones) say
-`// @source webmods` and `// @version <n>` in their header. You may change them like any other mod when
-the user asks. While a copy is exactly as shipped, TRIF replaces it with each new version silently;
-once it's changed, it never does: when a new version comes, the user gets an offer in the side panel to
-use it (their copy goes to the trash), keep theirs, or merge the two with their agent. `trif mods`
-shows "update available (you've changed it)" on such a mod. Keep the `@source` and `@version` lines when
-you edit one.
+The mods setup put in the workspace (Timeline Detox, the Google, Amazon, Instagram and timsrobot.com
+ones) say `// @source webmods` (or `trif`) and `// @version <n>` in their header. You may change them
+like any other mod when the user asks. While a copy is exactly as shipped, TRIF replaces it with each new
+version silently; once it's changed, it never does: when a new version comes, the user gets an offer in
+the side panel to use it (their copy goes to the trash), keep theirs, or merge the two with their agent.
+`trif mods` shows "update available (you've changed it)" on such a mod. Keep the `@source` and
+`@version` lines when you edit one.
 
 Merging (a side-panel run started from that offer says so, with the three files): `.shipped/<site>/<mod>.js`
 is what was shipped before, the version the user's copy started from; `.shipped/<site>/<mod>.new.js` is the

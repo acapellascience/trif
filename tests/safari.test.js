@@ -80,6 +80,11 @@ const mod = (id, code, extra = {}) => ({ id, matches: ['https://x.com/*'], js: [
 
 // ---- the adapter ---------------------------------------------------------------------------------
 
+test('Safari build: the helper-not-connected advice runs setup for Safari (plain setup has no bridge)', () => {
+  assert.equal(lib.BROWSER, 'Safari');
+  assert.equal(lib.SETUP_COMMAND, 'npx trif setup --browser safari');
+});
+
 test('Safari adapter: a function that Safari would inject as the given source', () => {
   const f = safari.asInjectable('return 1 + 1;');
   assert.equal(f.toString(), 'function () {\nreturn 1 + 1;\n}');

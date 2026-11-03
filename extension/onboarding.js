@@ -2,7 +2,7 @@
 // switch, shared with the side panel). Polls the service worker, which also re-checks the switch on
 // every status request; switches follow chrome.storage.local `disabled` live.
 
-import { modSites, offOnSite, normalizeOffSites, FIREFOX, BROWSER } from './lib.js';
+import { modSites, offOnSite, normalizeOffSites, FIREFOX, BROWSER, SETUP_COMMAND } from './lib.js';
 
 const PANEL = FIREFOX ? 'sidebar' : BROWSER === 'Safari' ? 'panel' : 'side panel';
 import { modSwitch, syncSwitches, shownEnabled, switchError, enabledIn, onSwitchChange } from './modswitch.js';
@@ -40,7 +40,7 @@ function render(s) {
     setSection('helper', true, 'Helper connected', 'Your coding agent can use the trif command.');
   } else {
     setSection('helper', false, 'Helper not connected', [
-      'Run ', code('npx trif setup'), ` in a terminal (it needs Node 18 or newer), then quit and restart ${BROWSER}.`,
+      'Run ', code(SETUP_COMMAND), ` in a terminal (it needs Node 18 or newer), then quit and restart ${BROWSER}.`,
       // (The full path: `trif` alone works only once ~/.trif/bin is on PATH, and with no helper there's
       // nothing to ask whether it is.)
       el('br'), 'Already set up? Run ', code('~/.trif/bin/trif doctor'), ' to see what\'s wrong.',

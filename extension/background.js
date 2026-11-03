@@ -3,7 +3,7 @@
 // panel and the helper. See docs/PROTOCOL.md.
 
 import {
-  SETTINGS_URL, USER_SCRIPTS_OFF, FIREFOX, BROWSER, userScriptsAvailable, syncUserScripts, resolveTab, lastFocusedNormalWindow, tabInfo,
+  SETTINGS_URL, SETUP_COMMAND, USER_SCRIPTS_OFF, FIREFOX, BROWSER, userScriptsAvailable, syncUserScripts, resolveTab, lastFocusedNormalWindow, tabInfo,
   normalizeUrl, normalizeSite, hostMatchesSite, buildRunCode, buildPollCode, parseRunEnvelope, pageGuard,
   firstInjectionResult, withTimeout, filterRequests, nextBackoff, chromeVersion, toolLine,
   normalizeDisabled, modAppliesTo, urlInScope, modInScope, applyStartOff, modSites,
@@ -22,7 +22,7 @@ const CHROME = chromeVersion(navigator.userAgent);
 // which runs are still going (agent.running) and the others are finished.
 const PERSISTENT_HOST = !!chrome.runtime.getURL?.('')?.startsWith('safari-web-extension:');
 const LOAD_TIMEOUT = 30000;
-const NOT_CONNECTED = `The TRIF helper isn't connected. Run \`npx trif setup\` in a terminal (needs Node 18+), then restart ${BROWSER}.`;
+const NOT_CONNECTED = `The TRIF helper isn't connected. Run \`${SETUP_COMMAND}\` in a terminal (needs Node 18+), then restart ${BROWSER}.`;
 
 const state = {
   port: null,

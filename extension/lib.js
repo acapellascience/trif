@@ -10,6 +10,8 @@ export const EXTENSION_ID = globalThis.chrome?.runtime?.id || 'iaablflfafmonebdo
 export const FIREFOX = !!globalThis.chrome?.runtime?.getURL?.('')?.startsWith('moz-extension:');
 export const SAFARI = !!globalThis.chrome?.runtime?.getURL?.('')?.startsWith('safari-web-extension:');
 export const BROWSER = FIREFOX ? 'Firefox' : SAFARI ? 'Safari' : 'Chrome';
+// What sets the helper up for this browser: plain setup doesn't install Safari's bridge.
+export const SETUP_COMMAND = SAFARI ? 'npx trif setup --browser safari' : 'npx trif setup';
 export const SETTINGS_URL = FIREFOX ? 'about:addons' : SAFARI ? 'Safari Settings → Extensions' : `chrome://extensions/?id=${EXTENSION_ID}`;
 // PROTOCOL.md calls this `__webmods_runtime`, but chrome.userScripts rejects ids starting with "_"
 // (reserved for generated ids), so it is registered under this id.

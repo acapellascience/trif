@@ -3,7 +3,7 @@
 // chrome.storage.local `chat:<site>`; this page renders that record and reacts to storage changes.
 // See docs/PROTOCOL.md, "Side panel and agent runs".
 
-import { siteForUrl, modAppliesTo, modSites, isMultiSite, offOnSite, normalizeOffSites, isLoginUrl, scopeFor, limitToSites, withOffSites, FIREFOX, BROWSER,
+import { siteForUrl, modAppliesTo, modSites, isMultiSite, offOnSite, normalizeOffSites, isLoginUrl, scopeFor, limitToSites, withOffSites, FIREFOX, BROWSER, SETUP_COMMAND,
   normalizeSettings, normalizePicks, siteSettings, withoutModel } from './lib.js';
 import { renderMarkdown, MARKDOWN_ELEMENTS, MARKDOWN_ATTRIBUTES } from './markdown.js';
 import { modSwitch, syncSwitches, shownEnabled, switchError, enabledIn, onSwitchChange } from './modswitch.js';
@@ -377,7 +377,7 @@ function problemLine(problem, agentInfo) {
   const p = el('p');
   switch (problem) {
     case 'helper':
-      p.append('The TRIF helper isn’t connected. Run ', code('npx trif setup'), ` in a terminal, then restart ${BROWSER}. `, link('Setup page', openSetup));
+      p.append('The TRIF helper isn’t connected. Run ', code(SETUP_COMMAND), ` in a terminal, then restart ${BROWSER}. `, link('Setup page', openSetup));
       break;
     case 'scripts':
       if (FIREFOX) p.append('Mods are paused. ', link('Allow user scripts', allowUserScripts));
@@ -460,7 +460,7 @@ function renderNotice({ helperOk, agentInfo, anyAgent }) {
   } else if (status && !helperOk) {
     bad = true;
     const p = el('p');
-    p.append('Run ', code('npx trif setup'), ` in a terminal (needs Node 18+), then restart ${BROWSER}.`);
+    p.append('Run ', code(SETUP_COMMAND), ` in a terminal (needs Node 18+), then restart ${BROWSER}.`);
     parts.push(el('p', 'title', 'The TRIF helper isn’t connected'), p);
     if (status.helper.error) parts.push(el('p', 'note', `${BROWSER} says: ${status.helper.error}`));
     const actions = el('p', 'actions');
@@ -487,7 +487,7 @@ function renderNotice({ helperOk, agentInfo, anyAgent }) {
       if (agentInfo.note) { const p = el('p'); setMarkdown(p, agentInfo.note); parts.push(p); }
     } else {
       parts.push(el('p', 'title', 'No coding agent found'));
-      parts.push(el('p', null, 'Install Claude Code, then run npx trif setup again from the same terminal.'));
+      parts.push(el('p', null, `Install Claude Code, then run ${SETUP_COMMAND} again from the same terminal.`));
     }
     if (anyAgent) parts.push(el('p', 'note', 'Pick another agent in Settings.'));
   } else if (helperOk && view.agentsError && !view.agents) {

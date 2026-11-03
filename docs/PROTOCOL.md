@@ -280,6 +280,20 @@ The whole-mod switch (no `site`) leaves the list alone. The reply adds `site`, `
 names several sites or any host (`isMultiSite`) gets a switch for the panel's site; the setup page
 shows the whole-mod switch plus one per site (the named sites and any in `offSites`).
 
+**Renamed mod files.** A mod's id is its site folder and file name, so a file renamed on disk arrives as a
+new id with the old one gone. When the new mod has the same code as a vanished one in the same site folder
+(`findRenames`, against the mods the extension last had, which outlast restarts in storage), the extension
+moves the old id's `disabled` and `offSites` entries and its place in `modOrder` to the new id and marks it
+`startedOff` (`carryRenames`, `renameInOrder`), so it isn't switched off again as a new mod. The helper
+does the same in `origins.json`. A file renamed and edited in one go is a new mod.
+
+**Order in the side panel.** The panel's mods can be dragged (or moved with Alt+↑/↓) into any order, per
+site: `chrome.storage.local` **`modOrder`** = `{"<site as scopeFor gives it>": ["<mod id>", …]}`, written
+by the panel. Display only: mods register and run in the order they always do. Mods not in the list
+come after the listed ones in the order the helper sends them; listed ids that aren't mods any more are
+skipped (one restored from the trash takes its old place) and dropped the next time the order is saved;
+an order that's just the helper's is removed (`orderMods`, `setModOrder` in lib.js).
+
 ### `run` semantics
 
 - The code runs in the page's MAIN world via `chrome.userScripts.execute` (`world:"MAIN"`,

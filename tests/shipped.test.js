@@ -564,11 +564,11 @@ test('retired: taking the new version (use it, or a merge) retires the old copy 
   w.edit(INTO, gmod('Hide AI in Results', 1, 'mine'));
   w.release();
   w.setup();
-  // Use the new version: through the real examples folder's path only in setup, so point it here.
+  // Use the new version. It retires with the real RETIRED list (which has this pair) and the examples
+  // TRIF_EXAMPLES_DIR names, as setup's tests do.
+  assert.ok(S.RETIRED.some((x) => x.id === OLD && x.into === INTO), 'the test mirrors the real RETIRED entry');
   process.env.TRIF_EXAMPLES_DIR = w.examples;
   try {
-    const realRetired = S.RETIRED;
-    assert.ok(realRetired.some((x) => x.id === OLD && x.into === INTO), 'the test mirrors the real RETIRED entry');
     S.useNewVersion(w.ws, INTO);
   } finally { delete process.env.TRIF_EXAMPLES_DIR; }
   assert.strictEqual(w.mine(INTO), BANISH2);

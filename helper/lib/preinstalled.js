@@ -43,6 +43,7 @@ const fs = require('fs');
 const path = require('path');
 const { parseHeader, sha1, isShippedSource } = require('./mods');
 const trash = require('./trash');
+const { envVar } = require('./env');
 
 // on: switched on from the start; the rest wait for the user to switch them on.
 const PREINSTALLED = [
@@ -246,7 +247,6 @@ function versionAtLeast(v, min) {
 
 /** The examples TRIF ships (setup and tests point TRIF_EXAMPLES_DIR elsewhere). */
 function examplesDir() {
-  const { envVar } = require('./env');
   return envVar('EXAMPLES_DIR') ? path.resolve(envVar('EXAMPLES_DIR')) : path.join(__dirname, '..', '..', 'examples', 'sites');
 }
 

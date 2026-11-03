@@ -44,7 +44,8 @@ Per browser, a **fresh** scenario, and an **upgrade** scenario per `--upgrade-fr
    waiting. If the old and new packages ship the same `punk-fonts`, the harness gives the new package's
    copy the next `@version` (as the next release would) and says so in a note.
 2. Start a throwaway browser profile with the extension, connected to the scratch helper only (see
-   "Isolation"), allow user scripts, and check: `trif status` (the extension's hello, its browser),
+   "Isolation"), check the setup page's checklist (the helper and the browser ticked, user scripts
+   next), allow user scripts (it ticks that step itself; the agent's login is next), and check: `trif status` (the extension's hello, its browser),
    `trif doctor`, the shipped mods (`trif mods`, which start on and off, the sites TRIF starts on for).
 3. Against a local test site (`http://127.0.0.1:<port>`, `http://localhost:<port>`) with a mod the
    harness writes, and the panel opened as a window following the test window (`sidepanel.html?window=<id>`):
@@ -72,6 +73,8 @@ Per browser, a **fresh** scenario, and an **upgrade** scenario per `--upgrade-fr
    in (yellow; not on the landing page), user scripts off (all red, "Mods are paused" above the login
    notice), and the helper not connected (its wrapper moved aside and the scratch helper stopped: red,
    but the mods' switches green, since mods still run; then put back and reconnected with Try again). Then
+   the setup page all ticked ("TRIF is ready", Try it with the sites where a shipped mod is on) once the
+   agent can run: an API key for Claude Code in the scratch keychain counts as logged in. Then
    screenshots of the panel as narrow as a side panel: on x.com, on a gate (localhost) and on the landing
    page (no website: the big robot, only settings in the bar), each of the last two with settings open
    (they must open, list the agents and load the instructions).

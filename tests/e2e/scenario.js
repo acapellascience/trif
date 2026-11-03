@@ -102,6 +102,52 @@ class Scenario {
     return file;
   }
 
+  /** The setup page's checklist: each step done / now / later / hidden, and what the open one says. */
+  async setupState() {
+    return this.ext(`async () => {
+      const q = (s) => document.querySelector(s);
+      const step = (id) => { const e = q('#step-' + id); return e.hidden ? 'hidden' : ['done', 'now', 'later'].find((c) => e.classList.contains(c)) || '?'; };
+      return { docTitle: document.title, title: q('#title').textContent, sub: q('#sub').textContent,
+        steps: ['helper', 'browser', 'scripts', 'login', 'try'].map(step),
+        states: [...document.querySelectorAll('.step.done .state')].map((e) => e.textContent),
+        now: q('.step.now')?.innerText.trim() || '',
+        buttons: [...document.querySelectorAll('.step.now .body button')].map((b) => b.textContent) };
+    }`);
+  }
+
+  async waitSetup(what, pred, timeoutMs = 20000) {
+    let last = null;
+    try {
+      return await waitFor(`the setup page: ${what}`, async () => { last = await this.setupState(); return pred(last) ? last : null; }, { timeoutMs });
+    } catch (e) { throw new Error(`${e.message}: ${JSON.stringify(last)}`); }
+  }
+
+  /**
+   * The setup page all ticked: the agent can run (here: an API key for Claude Code in the scratch keychain,
+   * which counts as logged in; taken out again after). Then "TRIF is ready" and Try it, with the sites
+   * where a mod TRIF comes with is on.
+   */
+  async setupDoneCheck() {
+    const st = await this.setupState();
+    let keyed = false;
+    if (st.steps[3] !== 'done') {
+      const set = run(path.join(this.trif, 'bin', 'trif'), ['agent', 'key', '--agent', 'claude', '--set-key'], { env: this.env(), cwd: this.home, input: 'sk-ant-e2e-not-a-real-key-0000\n' });
+      if (set.status !== 0) throw new Error(`trif agent key --set-key: ${set.stderr || set.stdout}`);
+      keyed = true;
+    }
+    try {
+      // (The helper keeps an agent's login state for 30 s; the page asks every 5.)
+      const x = await this.waitSetup('all ticked', (s) => s.steps.join() === 'done,done,done,done,now' && s.title === 'TRIF is ready', 60000);
+      // Try it: a button for each site where a shipped mod is on and TRIF is on for the site (x.com's Plain X).
+      if (x.sub !== 'Open any website, click the TRIF icon, and ask for a change.' || !x.buttons.includes('Open x.com')
+        || !x.buttons.every((b) => /^Open [\w-]+(\.[\w-]+)+$/.test(b))) throw new Error(JSON.stringify(x));
+      await this.shot(this.control, 'setup-page-done');
+      return `"${x.title}"; ${x.buttons.join(', ')}`;
+    } finally {
+      if (keyed) run(path.join(this.trif, 'bin', 'trif'), ['agent', 'key', '--agent', 'claude', '--remove-key'], { env: this.env(), cwd: this.home });
+    }
+  }
+
   /** Runs `fn` in the extension's own setup page, which has the chrome.* APIs. */
   ext(fn, args = []) { return this.d.eval(this.control, fn, args); }
 
@@ -408,15 +454,29 @@ class Scenario {
     const origin = d.origin;
 
     // The setup page: our handle on the extension's chrome.* APIs, and the user scripts permission.
+    this.control = await d.openTab(`${origin}/onboarding.html`);
+    await r.check('setup page: a checklist, the helper and the browser ticked, user scripts next', async () => {
+      const x = await this.waitSetup('step 3 open', (st) => st.steps.join() === 'done,done,now,later,later');
+      if (x.docTitle !== 'TRIF setup' || x.title !== 'Set up TRIF' || x.states.join() !== 'connected,done') throw new Error(JSON.stringify(x));
+      const want = d.name === 'Firefox' ? /Firefox asks before an add-on runs them\.[\s\S]*Allow user scripts/ : /One switch:[\s\S]*flip this[\s\S]*Open TRIF’s Chrome settings/;
+      if (!want.test(x.now)) throw new Error(`step 3 says: ${x.now}`);
+      await this.shot(this.control, 'setup-page-scripts-off');
+      return x.now.split('\n').slice(0, 2).join(' / ');
+    });
     const allowed = await r.check('user scripts allowed', async () => {
-      this.control = await d.openTab(`${origin}/onboarding.html`);
-      await sleep(1000);
       const how = await d.grantUserScripts(this.control);
       await waitFor('status.userScripts', async () => (await this.cli(['status'], { json: true })).json?.extension?.userScripts, { timeoutMs: 20000 });
       return how;
     });
-    await sleep(500);
-    await this.shot(this.control, 'setup-page');
+    if (allowed) {
+      await r.check('setup page: user scripts ticked by themselves; the agent\'s login next', async () => {
+        const x = await this.waitSetup('step 4 open', (st) => (st.steps.join() === 'done,done,done,now,later' && /\n\n/.test(st.now) && !/Checking your coding agent/.test(st.now))
+          || st.steps.join() === 'done,done,done,done,now');
+        if (x.steps[3] === 'now' && !/isn’t logged in on this computer yet|needs a coding agent|isn’t available/.test(x.now)) throw new Error(`step 4 says: ${x.now}`);
+        await this.shot(this.control, 'setup-page-login');
+        return x.steps[3] === 'now' ? x.now.split('\n').slice(0, 2).join(' / ') : 'the agent is logged in already';
+      });
+    }
 
     const connected = await r.check('helper connected (trif status, extension hello)', async () => {
       const s = (await this.cli(['status'], { json: true })).json;
@@ -632,6 +692,8 @@ class Scenario {
     if (this.o.kind === 'upgrade') await this.mergeChecks();
     await this.ext(`async (id) => { await chrome.tabs.remove(id); }`, [this.xTab]).catch(() => {});
     await this.ext(`async (id) => { await chrome.tabs.update(id, { active: true }); }`, [win.tabId]).catch(() => {});
+
+    await r.check('setup page: all ticked once the agent can run, then "TRIF is ready" and Try it', () => this.setupDoneCheck());
 
     if (this.o.agent) await this.agentChecks('claude');
     if (this.o.codex) await this.agentChecks('codex');

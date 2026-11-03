@@ -1,26 +1,26 @@
-// Status page: helper connection, the "Allow User Scripts" switch, installed mods (each with an on/off
-// switch, shared with the side panel). Polls the service worker, which also re-checks the switch on
-// every status request; switches follow chrome.storage.local `disabled` live.
+// The setup page: a checklist that ticks itself off (the helper, TRIF in this browser, user scripts, the
+// coding agent's login, then trying it), and the user's mods below (each with an on/off switch, shared
+// with the side panel). Opens by itself when TRIF is installed. Polls the service worker for status
+// (which also re-checks the user scripts switch); the agent list and the login go over a `panel` port,
+// as in the side panel (login.js). Switches follow chrome.storage.local `disabled` live.
 
-import { modSites, offOnSite, normalizeOffSites, FIREFOX, BROWSER, SETUP_COMMAND } from './lib.js';
-
-const PANEL = FIREFOX ? 'sidebar' : BROWSER === 'Safari' ? 'panel' : 'side panel';
+import { modSites, offOnSite, normalizeOffSites, normalizeSettings, scopeFor, FIREFOX, SAFARI, BROWSER, SETUP_COMMAND } from './lib.js';
 import { modSwitch, syncSwitches, shownEnabled, switchError, enabledIn, onSwitchChange } from './modswitch.js';
+import { createLogin } from './login.js';
+import { setMarkdown } from './markdown.js';
+
+const PANEL = FIREFOX ? 'sidebar' : SAFARI ? 'panel' : 'side panel';
+const OPEN_MODEL = 'codex-oss';
 
 const $ = (sel) => document.querySelector(sel);
 let last = null;        // last status
 let modsKey = null;     // which mods the list was built for (switches update in place)
 let disabled = {};      // chrome.storage.local `disabled`
 let offSites = {};      // chrome.storage.local `offSites`: mods switched off on some of their sites
-
-function setSection(id, ok, title, detail) {
-  const el = document.getElementById(id);
-  el.classList.toggle('ok', ok === true);
-  el.classList.toggle('bad', ok === false);
-  el.querySelector('.title').textContent = title;
-  const d = el.querySelector('.detail');
-  d.replaceChildren(...(Array.isArray(detail) ? detail : [detail ?? '']));
-}
+let settings = normalizeSettings(); // chrome.storage.local `settings`: the default agent (as the panel's Settings)
+let agents = null;      // agent.list: {agents, default}, once the helper answers
+let openModel = null;   // agent.openModel, while the open model is the agent
+let choosing = false;   // "Use another agent" open
 
 function code(text) {
   const c = document.createElement('code');
@@ -35,30 +35,233 @@ function el(tag, className, text) {
   return e;
 }
 
-function render(s) {
-  if (s.helper.connected) {
-    setSection('helper', true, 'Helper connected', 'Your coding agent can use the trif command.');
-  } else {
-    setSection('helper', false, 'Helper not connected', [
-      'Run ', code(SETUP_COMMAND), ` in a terminal (it needs Node 18 or newer), then quit and restart ${BROWSER}.`,
+function button(label, className, onClick) {
+  const b = el('button', className ? `btn ${className}` : 'btn', label);
+  b.type = 'button';
+  b.addEventListener('click', onClick);
+  return b;
+}
+
+function link(text, href) {
+  const a = el('a', null, text);
+  a.href = href;
+  a.target = '_blank';
+  a.rel = 'noopener';
+  return a;
+}
+
+// ---- the port to the service worker (agent list, login), as the side panel's
+
+let port = null;
+let reqSeq = 0;
+const pending = new Map();
+
+function connectPort() {
+  port = chrome.runtime.connect({ name: 'panel' });
+  port.onMessage.addListener((msg) => {
+    if (msg?.type === 'reply') {
+      const p = pending.get(msg.reqId);
+      if (!p) return;
+      pending.delete(msg.reqId);
+      if (msg.ok) p.resolve(msg.result); else p.reject(new Error(msg.error || 'error'));
+    } else if (msg?.type === 'agentEvent') {
+      login.onAgentEvent(msg);
+    } else if (msg?.type === 'statusChanged') {
+      refresh();
+    }
+  });
+  port.onDisconnect.addListener(() => {
+    port = null;
+    for (const p of pending.values()) p.reject(new Error('lost connection to the TRIF service worker'));
+    pending.clear();
+  });
+}
+
+function request(msg) {
+  if (!port) connectPort();
+  const reqId = ++reqSeq;
+  return new Promise((resolve, reject) => {
+    pending.set(reqId, { resolve, reject });
+    try { port.postMessage({ ...msg, reqId }); } catch (e) { pending.delete(reqId); reject(e); }
+  });
+}
+
+const login = createLogin({ request, changed: () => renderSteps(), succeeded: () => loadAgents() });
+
+let loadingAgents = false;
+async function loadAgents() {
+  if (loadingAgents || !last?.helper.connected) return;
+  loadingAgents = true;
+  try {
+    agents = await request({ type: 'agent.list' });
+    openModel = currentAgent()?.id === OPEN_MODEL ? await request({ type: 'agent.openModel' }).catch(() => null) : null;
+  } catch { /* the helper went away: the status says so */ }
+  loadingAgents = false;
+  renderSteps();
+}
+
+/** The agent the panel runs by default (its Settings' choice, else the helper's default), from agent.list. */
+function currentAgent() {
+  const list = agents?.agents || [];
+  const id = settings.agent || agents?.default || '';
+  return list.find((a) => a.id === id) || null;
+}
+
+/** The open model's provider name when it needs an API key and none is saved, else null. */
+function keyMissing() {
+  if (!openModel?.effective?.keyRequired || openModel.hasKey) return null;
+  return (openModel.providers || []).find((p) => p.id === openModel.effective.provider)?.label || 'the provider';
+}
+
+async function useAgent(id) {
+  choosing = false;
+  settings = normalizeSettings({ ...settings, agent: id });
+  await chrome.storage.local.set({ settings }).catch(() => {});
+  openModel = null;
+  loadAgents();
+}
+
+// ---- the steps
+
+/** Fill a step's body, rebuilt only when `key` changes (so the login code being typed survives the polling). */
+function setBody(step, key, build) {
+  const body = step.querySelector('.body');
+  if (body.dataset.key === key) return;
+  body.dataset.key = key;
+  body.replaceChildren(...build().filter(Boolean));
+}
+
+function renderSteps() {
+  const s = last;
+  if (!s) return;
+  const connected = !!s.helper.connected;
+  const steps = [];
+
+  // 1. The helper.
+  const helper = $('#step-helper');
+  steps.push({ el: helper, done: connected, state: 'connected' });
+  if (!connected) {
+    const d = helper.querySelector('.detail');
+    d.replaceChildren('Run ', code(SETUP_COMMAND), ` in a terminal (it needs Node 18 or newer), then quit and restart ${BROWSER}.`,
       // (The full path: `trif` alone works only once ~/.trif/bin is on PATH, and with no helper there's
       // nothing to ask whether it is.)
       el('br'), 'Already set up? Run ', code('~/.trif/bin/trif doctor'), ' to see what\'s wrong.',
-      ...(s.helper.error ? [el('br'), `${BROWSER} says: ${s.helper.error}`] : []),
-    ]);
+      ...(s.helper.error ? [el('br'), `${BROWSER} says: ${s.helper.error}`] : []));
   }
-  $('#reconnect').hidden = s.helper.connected;
 
-  if (s.userScripts) {
-    setSection('userscripts', true, 'User scripts allowed', 'Mods can run on websites.');
-  } else {
-    setSection('userscripts', false, 'User scripts are off', FIREFOX
-      ? `Firefox asks before an add-on can run scripts on websites. Click "Allow user scripts" and confirm.`
-      : 'Open the extension settings and turn on "Allow User Scripts".');
+  // 2. TRIF in this browser: this page is it.
+  const browser = $('#step-browser');
+  browser.querySelector('.name').textContent = `Add TRIF to ${BROWSER}`;
+  steps.push({ el: browser, done: true, state: 'done' });
+
+  // 3. User scripts (Safari runs mods without a switch for them).
+  const scripts = $('#step-scripts');
+  scripts.hidden = SAFARI;
+  if (!SAFARI) steps.push({ el: scripts, done: !!s.userScripts, state: 'on' });
+
+  // 4. The coding agent, logged in.
+  steps.push(loginStep(connected));
+
+  // 5. Try it: never ticked; once the rest are, it's what's left.
+  steps.push(tryStep(s));
+
+  const now = steps.findIndex((x) => !x.done);
+  steps.forEach((x, i) => {
+    x.el.classList.toggle('done', !!x.done);
+    x.el.classList.toggle('now', i === now);
+    x.el.classList.toggle('later', i > now && !x.done);
+    x.el.querySelector('.mark').textContent = x.done ? '✓' : String(i + 1);
+    x.el.querySelector('.state').textContent = x.done ? x.state : '';
+  });
+  const ready = now === steps.length - 1;
+  $('#title').textContent = ready ? 'TRIF is ready' : 'Set up TRIF';
+  $('#sub').textContent = ready ? 'Open any website, click the TRIF icon, and ask for a change.' : 'A few steps. Each one ticks itself off.';
+}
+
+function loginStep(connected) {
+  const step = $('#step-login');
+  const name = step.querySelector('.name');
+  const info = currentAgent();
+  const list = agents?.agents || [];
+  const others = list.filter((a) => a.available && a.id !== info?.id);
+  const missing = info?.id === OPEN_MODEL ? keyMissing() : null;
+  name.textContent = !info ? 'Log in to your coding agent' : info.id === OPEN_MODEL ? 'Set up the open model' : `Log in to ${info.name}`;
+  if (!connected) return { el: step, done: false };
+  if (!agents) {
+    setBody(step, 'checking', () => [el('p', null, 'Checking your coding agent…')]);
+    return { el: step, done: false };
   }
-  $('#settings').hidden = !!s.userScripts;
+  const done = !!info?.available && !login.current && (info.loggedIn === true || (info.loggedIn !== false && !missing));
+  if (done) return { el: step, done: true, state: info.loggedIn ? 'logged in' : 'ready' };
 
+  const chooser = () => (choosing && others.length
+    ? (() => { const r = el('div', 'row'); r.append(...others.map((a) => button(`Use ${a.name}`, '', () => useAgent(a.id)))); return r; })()
+    : null);
+  const another = () => (others.length && !choosing ? button('Use another agent', '', () => { choosing = true; renderSteps(); }) : null);
+  const key = JSON.stringify([info?.id, info?.available, info?.loggedIn, missing, choosing, others.map((a) => a.id),
+    login.current && [login.current.phase, login.current.error]]);
+  setBody(step, key, () => {
+    if (login.current) return login.nodes(info).nodes;
+    if (!list.some((a) => a.available)) {
+      const p = el('p');
+      p.append('TRIF needs a coding agent on this computer: ', link('Claude Code', 'https://claude.com/claude-code'), ' or ',
+        link('Codex', 'https://github.com/openai/codex'), '. Install one, then run ', code(SETUP_COMMAND), ' again from the same terminal.');
+      return [p];
+    }
+    if (!info?.available) {
+      const p = el('p', null, `${info?.name || 'Your chosen agent'} isn’t available on this computer.`);
+      const note = info?.note ? el('div', 'md') : null;
+      if (note) setMarkdown(note, info.note);
+      return [p, note, (() => { const r = el('div', 'row'); r.append(...others.map((a) => button(`Use ${a.name}`, '', () => useAgent(a.id)))); return r; })()];
+    }
+    if (missing) {
+      return [el('p', null, `The open model needs your ${missing} API key: paste it in Settings, in the TRIF ${PANEL}.`),
+        another() && (() => { const r = el('div', 'row'); r.append(another()); return r; })(), chooser(),
+        el('p', 'wait', 'This ticks itself off once it’s saved.')];
+    }
+    const fix = info.loginFix || '';
+    const row = el('div', 'row');
+    if (info.canLogin) row.append(button('Log in', 'primary', () => login.start(info.id, info.name, fix)));
+    if (another()) row.append(another());
+    const wait = el('div', 'wait');
+    setMarkdown(wait, info.canLogin ? `${fix ? `Or ${fix}. ` : ''}This ticks itself off either way.` : `To log in, ${fix || 'log in to it in a terminal'}. This ticks itself off once you have.`);
+    return [el('p', null, `TRIF runs ${info.name}, your coding agent, on your account. It isn’t logged in on this computer yet.`),
+      row.childElementCount ? row : null, chooser(), wait];
+  });
+  return { el: step, done: false };
+}
+
+// The sites to try it on: where a mod TRIF comes with is switched on, and TRIF is on for the site.
+function trySites(s) {
+  const on = new Set(s.sitesOn || []);
+  const sites = [];
+  for (const m of s.mods) {
+    if (!['trif', 'webmods'].includes(m.source) || !isOn(m.id)) continue;
+    const site = String(m.site || '').replace(/^www\./, '');
+    if (!site.includes('.') || !on.has(scopeFor(site)) || sites.includes(site)) continue;
+    sites.push(site);
+  }
+  return sites.sort().slice(0, 4);
+}
+
+function tryStep(s) {
+  const step = $('#step-try');
+  const sites = trySites(s);
+  setBody(step, JSON.stringify(sites), () => {
+    if (!sites.length) return [el('p', null, 'Open any website, click the TRIF icon, and ask for a change.')];
+    const row = el('div', 'row');
+    row.append(...sites.map((site, i) => button(`Open ${site}`, i ? '' : 'primary', () => chrome.tabs.create({ url: `https://${site}/` }))));
+    return [el('p', null, 'TRIF comes with a few mods already, switched on for these sites: see the difference, then ask for a change of your own.'), row];
+  });
+  return { el: step, done: false };
+}
+
+function render(s) {
+  const wasConnected = !!last?.helper.connected;
   last = s;
+  if (s.helper.connected && (!wasConnected || !agents)) loadAgents();
+  if (!s.helper.connected) agents = null;
+  renderSteps();
   renderMods();
   const rec = s.recording.length ? ` · recording requests on ${s.recording.join(', ')}` : '';
   $('#footer').textContent = `TRIF ${s.version} · ${BROWSER} ${s.chrome}${rec}`;
@@ -76,6 +279,8 @@ function renderMods() {
   } else {
     modsDetail.replaceChildren();
   }
+  const groups = groupBySite(s.mods).map(([site]) => GROUP_NAMES[site] || site);
+  $('#mods-sites').textContent = groups.length ? ` · ${groups.join(', ')}` : '';
   // Rebuilt only when the set of mods changes, so a focused switch keeps focus through the polling.
   const key = JSON.stringify(s.mods.map((m) => [m.id, m.name, m.description, m.matches, offSites[m.id] || []]));
   if (key !== modsKey) {
@@ -212,14 +417,17 @@ async function refresh() {
   }
 }
 
-if (FIREFOX) {
-  $('#settings').textContent = 'Allow user scripts';
-  $('.sub').textContent = $('.sub').textContent.replace('side panel', PANEL);
-}
+// Step 3's words: Chrome has a switch per extension (pictured); Firefox asks in a prompt.
+$('#step-scripts .why').textContent = FIREFOX
+  ? 'Mods are scripts that run on websites, and Firefox asks before an add-on runs them.'
+  : 'Mods are scripts that run on websites, and Chrome asks you to allow that for each extension that runs them. One switch:';
+$('#step-scripts .chrome-row').hidden = FIREFOX;
+$('#settings').textContent = FIREFOX ? 'Allow user scripts' : 'Open TRIF’s Chrome settings';
+$('#step-scripts .wait').textContent = FIREFOX ? 'Waiting for your OK: click Allow when Firefox asks.' : 'Waiting for the switch. Come back to this tab when it’s on.';
 $('#settings').addEventListener('click', () => {
   // Firefox grants userScripts only through this prompt, which must open from the click itself.
   if (FIREFOX) chrome.permissions.request({ permissions: ['userScripts'] }).then(() => setTimeout(refresh, 300), () => {});
-  else chrome.tabs.create({ url: `chrome://extensions/?id=${chrome.runtime.id}` });
+  else chrome.tabs.create({ url: last?.settingsUrl || `chrome://extensions/?id=${chrome.runtime.id}` });
 });
 $('#reconnect').addEventListener('click', async () => {
   await chrome.runtime.sendMessage({ type: 'reconnect' }).catch(() => {});
@@ -227,15 +435,24 @@ $('#reconnect').addEventListener('click', async () => {
 });
 
 chrome.storage.onChanged.addListener((changes, area) => {
-  if (area !== 'local' || !(changes.disabled || changes.offSites)) return;
+  if (area !== 'local') return;
+  if (changes.settings) { // the agent picked here, or in a panel's Settings
+    settings = normalizeSettings(changes.settings.newValue);
+    openModel = null;
+    loadAgents();
+  }
+  if (!(changes.disabled || changes.offSites)) return;
   if (changes.disabled) disabled = changes.disabled.newValue || {};
   if (changes.offSites) offSites = normalizeOffSites(changes.offSites.newValue);
   if (last) renderMods();
 });
 
-chrome.storage.local.get(['disabled', 'offSites']).then((s) => {
+chrome.storage.local.get(['disabled', 'offSites', 'settings']).then((s) => {
   disabled = s.disabled || {};
   offSites = normalizeOffSites(s.offSites);
+  settings = normalizeSettings(s.settings);
 }, () => {}).finally(refresh);
 setInterval(refresh, 2000);
+// The agent's login can change outside (`claude` in a terminal): ask again while that step is open.
+setInterval(() => { if (!document.hidden && $('#step-login').classList.contains('now') && !login.current) loadAgents(); }, 5000);
 document.addEventListener('visibilitychange', () => { if (!document.hidden) refresh(); });

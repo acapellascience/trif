@@ -3,19 +3,25 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>TRIF</title>
+<title>TRIF setup</title>
 <link rel="icon" href="icons/robot-32.png">
 <link rel="stylesheet" href="switch.css">
 <style>
   :root {
     color-scheme: light dark;
-    --bg: #f7f7f5; --card: #ffffff; --text: #1d1d1f; --muted: #6e6e73; --line: #e3e3e0;
+    --bg: #f7f7f5; --card: #ffffff; --text: #1d1d1f; --muted: #6e6e73; --faint: #9a9a9f; --line: #e3e3e0;
     --ok: #1f8a4c; --bad: #c4372d; --accent: #2f5bd3; --code: #f0f0ed;
+    /* TRIF's green (switch.css), and a darker one for words on the light background. */
+    --green: var(--trif-green); --green-text: #1f8a4c;
+    /* The picture of Chrome's own "Allow User Scripts" row, in Chrome's colours. */
+    --c-bg: #ffffff; --c-line: #dadce0; --c-text: #202124; --c-sub: #5f6368; --c-track: #bdc1c6; --c-knob: #ffffff;
   }
   @media (prefers-color-scheme: dark) {
     :root {
-      --bg: #161617; --card: #1f1f21; --text: #ececee; --muted: #9a9aa0; --line: #333336;
+      --bg: #161617; --card: #1f1f21; --text: #ececee; --muted: #9a9aa0; --faint: #6f6f75; --line: #333336;
       --ok: #4cc27f; --bad: #ff6b5e; --accent: #7d9cff; --code: #2a2a2d;
+      --green-text: var(--trif-green);
+      --c-bg: #202124; --c-line: #3c4043; --c-text: #e8eaed; --c-sub: #9aa0a6; --c-track: #5f6368; --c-knob: #dadce0;
     }
   }
   * { box-sizing: border-box; }
@@ -23,29 +29,75 @@
     margin: 0; background: var(--bg); color: var(--text);
     font: 15px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
   }
-  main { max-width: 640px; margin: 48px auto; padding: 0 16px; }
-  h1 { font-size: 26px; margin: 0 0 4px; letter-spacing: -0.01em; }
-  .sub { color: var(--muted); margin: 0 0 28px; }
-  section { background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 18px 20px; margin-bottom: 14px; }
-  h2 { font-size: 16px; margin: 0; display: flex; align-items: center; gap: 10px; }
-  .dot { width: 10px; height: 10px; border-radius: 50%; background: var(--muted); flex: none; }
-  .ok .dot { background: var(--ok); }
-  .bad .dot { background: var(--bad); }
-  .detail { margin: 8px 0 0 20px; color: var(--muted); }
-  .detail:empty { display: none; }
+  main { max-width: 640px; margin: 44px auto; padding: 0 16px; }
+  a { color: var(--accent); }
   code { background: var(--code); padding: 1px 6px; border-radius: 5px; font: 13px ui-monospace, SFMono-Regular, Menlo, monospace; }
-  button {
-    margin: 12px 0 0 20px; font: inherit; font-size: 14px; color: #fff; background: var(--accent);
-    border: 0; border-radius: 8px; padding: 7px 14px; cursor: pointer;
-  }
-  button[hidden] { display: none; }
+  [hidden] { display: none !important; }
+
+  /* The robot, and what's left to do (or that it's ready). */
+  .head { display: flex; align-items: center; gap: 16px; margin-bottom: 26px; }
+  .head img { width: 56px; height: 56px; flex: none; }
+  h1 { font-size: 26px; margin: 0; letter-spacing: -0.01em; }
+  .sub { color: var(--muted); margin: 2px 0 0; }
+
+  /* The steps: done ones one line with a tick and their state; the current one open, in green; later ones dim. */
+  ol.steps { list-style: none; margin: 0; padding: 0; display: grid; gap: 10px; }
+  .step { background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 14px 18px; }
+  .step h2 { font-size: 16px; margin: 0; display: flex; align-items: center; gap: 12px; }
+  .mark { width: 24px; height: 24px; border-radius: 50%; flex: none; display: grid; place-items: center; font-size: 13px; font-weight: 700;
+    border: 1.5px solid var(--faint); color: var(--muted); }
+  .step .state { color: var(--muted); font-weight: 400; font-size: 14px; margin-left: auto; }
+  .step.done .mark { background: var(--green); border-color: var(--green); color: #04291c; }
+  .step.done h2 { font-weight: 500; }
+  .step.now { border-color: var(--green); padding: 18px 20px 20px; }
+  .step.now .mark { border-color: var(--green); color: var(--green-text); }
+  .step.later { opacity: 0.55; }
+  .step:not(.now) .body { display: none; }
+  .body { margin: 10px 0 0 36px; display: grid; gap: 12px; }
+  .body p { margin: 0; color: var(--muted); }
+  .body .title { color: var(--text); font-weight: 600; }
+  .body .md p + p { margin-top: 4px; }
+  .row, .actions { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+  .btn { justify-self: start; font: inherit; font-size: 14px; font-weight: 500; color: var(--text); background: var(--code);
+    border: 1px solid var(--line); border-radius: 8px; padding: 7px 14px; cursor: pointer; }
+  .btn.primary { font-weight: 600; color: #04291c; background: var(--green); border-color: transparent; }
+  .btn:hover { filter: brightness(0.96); }
+  .wait { font-size: 13px; color: var(--faint) !important; display: flex; align-items: center; gap: 8px; }
+  .wait::before { content: ""; width: 8px; height: 8px; border-radius: 50%; background: var(--green); opacity: 0.8; flex: none; }
+  .login-form { display: flex; gap: 6px; }
+  .login-form input { flex: 1; min-width: 0; padding: 6px 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--bg); color: var(--text);
+    font: 13px ui-monospace, SFMono-Regular, Menlo, monospace; }
+  .note { font-size: 13px; }
+  .problem { color: var(--bad) !important; }
+
+  /* A picture of Chrome's own switch row on TRIF's Details page, to know it when it's there. */
+  .chrome-row { border: 1px solid var(--c-line); border-radius: 10px; background: var(--c-bg); padding: 12px 14px; display: flex; align-items: center; gap: 14px;
+    font: 13px Roboto, system-ui, sans-serif; color: var(--c-text); }
+  .chrome-row .t { flex: 1; }
+  .chrome-row .t b { display: block; font-weight: 500; font-size: 13px; }
+  .chrome-row .t span { color: var(--c-sub); font-size: 12px; }
+  .chrome-toggle { width: 34px; height: 14px; border-radius: 7px; background: var(--c-track); position: relative; flex: none; margin-right: 6px; }
+  .chrome-toggle::after { content: ""; position: absolute; left: -2px; top: -3px; width: 20px; height: 20px; border-radius: 50%; background: var(--c-knob);
+    box-shadow: 0 1px 3px rgb(0 0 0 / 0.4); }
+  .flip { color: var(--green-text); font-weight: 700; font-size: 13px; white-space: nowrap; }
+
+  /* Your mods: one line, opening to the list by site with a switch per mod. */
+  details.mods { margin-top: 22px; background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 14px 18px; }
+  details.mods > summary { cursor: pointer; list-style: none; color: var(--muted); display: flex; gap: 8px; align-items: baseline; }
+  details.mods > summary::-webkit-details-marker { display: none; }
+  details.mods > summary b { color: var(--text); white-space: nowrap; }
+  #mods-sites { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  details.mods > summary::after { content: '▸'; color: var(--muted); transition: transform 0.15s; }
+  details.mods[open] > summary::after { transform: rotate(90deg); }
+  .mods .detail { margin: 10px 0 0; color: var(--muted); }
+  .mods .detail:empty { display: none; }
   ul { list-style: none; margin: 10px 0 0; padding: 0; }
   li.site { border-top: 1px solid var(--line); }
   li.site:first-child { border-top: 0; }
-  summary { display: flex; align-items: baseline; gap: 10px; padding: 10px 0; cursor: pointer; list-style: none; }
-  summary::-webkit-details-marker { display: none; }
-  summary::before { content: '▸'; color: var(--muted); font-size: 15px; width: 12px; transition: transform 0.15s; }
-  details[open] > summary::before { transform: rotate(90deg); }
+  .site summary { display: flex; align-items: baseline; gap: 10px; padding: 10px 0; cursor: pointer; list-style: none; }
+  .site summary::-webkit-details-marker { display: none; }
+  .site summary::before { content: '▸'; color: var(--muted); font-size: 15px; width: 12px; transition: transform 0.15s; }
+  .site details[open] > summary::before { transform: rotate(90deg); }
   .site-name { font-weight: 600; }
   .site-count { color: var(--muted); font-size: 13px; }
   ul.site-mods { margin: 0 0 8px 20px; }
@@ -60,31 +112,59 @@
   .site-switches li { display: flex; align-items: center; gap: 8px; padding: 0; border: 0; color: var(--muted); font-size: 13px; }
   .mod-err { color: var(--bad); font-size: 13px; }
   .tag { font-size: 12px; color: var(--muted); border: 1px solid var(--line); border-radius: 6px; padding: 0 6px; margin-left: 6px; }
-  footer { color: var(--muted); font-size: 12px; margin-top: 20px; }
+  footer { color: var(--muted); font-size: 12px; margin-top: 18px; }
 </style>
 </head>
 <body>
 <main>
-  <h1>TRIF</h1>
-  <p class="sub">Customize websites with mods written by your coding agent. Click the TRIF toolbar icon to open the side panel and ask for a change on any site.</p>
+  <div class="head">
+    <img src="icons/robot-shaded.svg" alt="">
+    <div>
+      <h1 id="title">Set up TRIF</h1>
+      <p id="sub" class="sub">A few steps. Each one ticks itself off.</p>
+    </div>
+  </div>
 
-  <section id="helper">
-    <h2><span class="dot"></span><span class="title">Helper</span></h2>
-    <p class="detail"></p>
-    <button id="reconnect" hidden>Try again</button>
-  </section>
+  <!-- A real sequence (onboarding.js): each step ticks itself off when its condition holds; the first one
+       left is open. Steps 1 and 2 are done by the time this page shows, and shown ticked all the same. -->
+  <ol class="steps">
+    <li id="step-helper" class="step">
+      <h2><span class="mark"></span><span class="name">Install the helper</span><span class="state"></span></h2>
+      <div class="body">
+        <p class="detail"></p>
+        <div class="row"><button id="reconnect" class="btn primary" type="button">Try again</button></div>
+      </div>
+    </li>
+    <li id="step-browser" class="step">
+      <h2><span class="mark"></span><span class="name">Add TRIF to your browser</span><span class="state"></span></h2>
+    </li>
+    <li id="step-scripts" class="step">
+      <h2><span class="mark"></span><span class="name">Allow user scripts</span><span class="state"></span></h2>
+      <div class="body">
+        <p class="why"></p>
+        <div class="chrome-row" aria-hidden="true" hidden>
+          <div class="t"><b>Allow User Scripts</b><span>This extension can run user scripts on websites</span></div>
+          <span class="chrome-toggle"></span><span class="flip">◀ flip this</span>
+        </div>
+        <div class="row"><button id="settings" class="btn primary" type="button"></button></div>
+        <p class="wait"></p>
+      </div>
+    </li>
+    <li id="step-login" class="step">
+      <h2><span class="mark"></span><span class="name">Log in to your coding agent</span><span class="state"></span></h2>
+      <div class="body"></div>
+    </li>
+    <li id="step-try" class="step">
+      <h2><span class="mark"></span><span class="name">Try it</span><span class="state"></span></h2>
+      <div class="body"></div>
+    </li>
+  </ol>
 
-  <section id="userscripts">
-    <h2><span class="dot"></span><span class="title">Allow User Scripts</span></h2>
-    <p class="detail"></p>
-    <button id="settings" hidden>Open extension settings</button>
-  </section>
-
-  <section id="mods">
-    <h2><span class="title">Mods</span></h2>
+  <details id="mods" class="mods">
+    <summary><b>Your mods</b><span id="mods-sites"></span></summary>
     <p class="detail"></p>
     <ul id="mod-list"></ul>
-  </section>
+  </details>
 
   <footer id="footer"></footer>
 </main>

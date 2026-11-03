@@ -593,7 +593,7 @@ function setup(opts = {}) {
       say('  1. Open the signed TRIF add-on (trif-firefox.xpi) in Firefox, e.g. drag it onto a Firefox');
       say('     window, and click Add.');
     }
-    say('  2. Click the TRIF toolbar button to open the sidebar, then "Allow user scripts" and Allow.');
+    say('  2. On the TRIF tab Firefox opens, click "Allow user scripts", then Allow.');
     say('  3. If Firefox was already running before this setup, quit it completely and reopen it.');
     say('  4. Check everything with: trif doctor');
     if (targets.some((t) => t.safari)) { say('  Safari:'); for (const l of safariSteps(1)) say(`    ${l}`); }
@@ -621,11 +621,11 @@ function setup(opts = {}) {
     if (xpiUrl) {
       say('  Firefox: open this link in Firefox to install the TRIF add-on:');
       say(`       ${xpiUrl}`);
-      say('     Then click the TRIF toolbar button and "Allow user scripts". Restart Firefox if it was');
+      say('     Then click "Allow user scripts" on the TRIF tab Firefox opens. Restart Firefox if it was');
       say('     running before this setup.');
     } else {
-      say('  Firefox: open the signed TRIF add-on (.xpi) in Firefox to install it, then click the TRIF');
-      say('     toolbar button and "Allow user scripts". Restart Firefox if it was running before this setup.');
+      say('  Firefox: open the signed TRIF add-on (.xpi) in Firefox to install it, then click "Allow user');
+      say('     scripts" on the TRIF tab it opens. Restart Firefox if it was running before this setup.');
     }
   }
   if (targets.some((t) => t.safari)) { say('  Safari:'); for (const l of safariSteps(1)) say(`    ${l}`); }

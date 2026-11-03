@@ -61,7 +61,8 @@ TRIF also runs in Firefox 153 or newer. Open Firefox once before running `npx tr
 finds it (or run `npx trif setup --browser firefox`). Then open
 [trif-firefox.xpi](https://github.com/acapellascience/trif/releases/latest/download/trif-firefox.xpi)
 in Firefox and click **Add** to install the add-on (if Firefox downloads it instead, drag the file onto
-a Firefox window). Click the TRIF toolbar button to open the sidebar, and click **Allow user scripts**.
+a Firefox window). On the TRIF tab Firefox opens, click **Allow user scripts** (the TRIF sidebar, from
+its toolbar button, offers it too).
 Restart Firefox if it was open during setup.
 
 Chrome and Firefox can both be open: they share your mods, and each sidebar or side panel chat works

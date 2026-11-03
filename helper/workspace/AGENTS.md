@@ -160,7 +160,7 @@ to that one. In a side-panel run you're already on the browser the user is chatt
 | `trif run [TAB] '<code>'` | Run JS in the page; prints the result as JSON. `-f file.js` runs a file, `-` reads stdin. |
 | `trif text [TAB]` | The page's visible text. |
 | `trif sweep [TAB] --selector <css> \| --color <colour> \| --text <regex>` | Every instance of a kind of thing: count, where (landmarks, menus, dialogs, fixed/sticky, shadow roots, frames), kinds with examples; for a colour also the stylesheet rules and CSS variables using it. `--scroll` loads lazy content first; `--json` lists each match. |
-| `trif screenshot [TAB] [--full] [-o file.png]` | PNG of the tab, showing or not (TRIF never switches tabs). In Chrome a tab that isn't showing is captured from a fresh copy of the page, not its exact state: the note it prints says so. `--full`: the whole page. |
+| `trif screenshot [TAB] [--full] [--copy] [-o file.png]` | PNG of the tab. Firefox captures any tab, showing or not. Chrome only the tab that's showing (TRIF never switches tabs); `--copy` captures a fresh copy of the page in a window that appears briefly at the edge of the screen: not the tab's exact state, and the user sees it. `--full`: the whole page (in Chrome, with `--copy`). |
 | `trif reload [TAB] [--hard]` | Reload and wait for load. |
 | `trif record <site> on\|off` | Record fetch/XHR traffic for a hostname, from the next load. |
 | `trif requests [TAB] [--filter <regex>] [--limit N]` | Recorded requests, newest last, with index `i`. |
@@ -298,7 +298,10 @@ section), and the lowest risk tier that gets the user what they want (see "Accou
   there, your element exists, your hook is installed (`String(window.fetch).includes('...')`).
 - Exercise the page: scroll (`trif run 'scrollTo(0, document.body.scrollHeight)'`), navigate within
   the app, reload. For feeds, make sure loading more still works.
-- Screenshot to check for gaps, flashes and broken layout (`--full` for the whole page).
+- Screenshot to check for gaps, flashes and broken layout (`--full` for the whole page). Check with
+  sweeps, `text` and `run` first: they work on any tab. In Chrome, use `--copy` for a tab that isn't
+  showing only when a visual check is truly needed (it flashes a window at the user), and say so in your
+  report.
 
 ### 5. Report
 
@@ -368,8 +371,9 @@ missed these" costs the user a round trip; finding them is your job.
   opens, navigation works, other mods' pages and menus render, and what the user asked for earlier in
   the conversation still holds.
 - Check preconditions before measuring: the mod is on (`trif status`), the element is on the page.
-- Be exact about what you didn't see: a synthetic test (a faked label) isn't "fixed"; a screenshot of a
-  copy (Chrome, a tab that isn't showing) isn't the tab's state.
+- Be exact about what you didn't see: a synthetic test (a faked label) isn't "fixed"; a screenshot you
+  couldn't take is no grounds for describing how the page looks; a `--copy` screenshot isn't the tab's
+  state.
 
 **Fix what's in scope; ask only about what isn't.** Leftovers of what was asked (another instance,
 page or state, the empty space it left) get fixed in the same turn and listed. Don't end with "want me

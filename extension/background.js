@@ -485,12 +485,12 @@ const commands = {
   },
 
   // TRIF never switches tabs or focuses windows to capture one: several agents can be working at once
-  // while the user browses. A tab that isn't showing is captured by Firefox as it is; Chrome captures a
-  // fresh copy in a window of its own (extension/screenshot.js), and says so in `note`.
+  // while the user browses. A tab that isn't showing is captured by Firefox as it is; Chrome, only with
+  // `copy`, captures a fresh copy in a window of its own (extension/screenshot.js), and says so in `note`.
   async screenshot(args) {
     const tab = await scopedTab(args);
     const timeout = Number(args.timeout) > 4000 ? Number(args.timeout) - 3000 : 45000;
-    return captureScreenshot(chrome, tab, { full: !!args.full, timeout }, {
+    return captureScreenshot(chrome, tab, { full: !!args.full, copy: !!args.copy, timeout }, {
       browser: BROWSER,
       pageCall: (tabId, func, a = []) => pageCall(tabId, 'ISOLATED', func, a),
       stitch: stitchShots,

@@ -4,9 +4,11 @@
 //   page (its `rect` is in page coordinates).
 // - Chrome (and Safari): captureVisibleTab only captures the tab showing in a window. For a tab that's
 //   showing, that's used. For one that isn't (or for a full page, which would mean scrolling the user's
-//   tab), Chrome loads a fresh copy of the page in a window of its own that isn't focused, the size of the
-//   user's, captures that and closes it. The copy runs the same mods, but it is not the tab's exact
-//   state, and the answer says so. Safari: only a tab that's showing; otherwise a clear error.
+//   tab), only when asked (`copy`, `trif screenshot --copy`): Chrome loads a fresh copy of the page in a
+//   window of its own that isn't focused, the size of the user's, captures that and closes it. That
+//   window shows at the edge of the screen for a second or so, so it's never the default. The copy runs
+//   the same mods, but it is not the tab's exact state, and the answer says so. Without `copy`, a clear
+//   error that says how. Safari: only a tab that's showing.
 // Every function takes the browser API and helpers as parameters, so the tests can drive them.
 
 export const FULL_MAX_HEIGHT = 12000;   // CSS px of a full-page capture; longer pages are cut
@@ -39,7 +41,7 @@ export function copyBounds(win, screen) {
  * How to capture: 'visible' (captureVisibleTab), 'tab' (Firefox's captureTab), 'copy' (a fresh copy in
  * an unfocused window), or {error}.
  */
-export function screenshotPlan({ showing, full = false, captureTab = false, browser = 'Chrome' }) {
+export function screenshotPlan({ showing, full = false, captureTab = false, browser = 'Chrome', copy = false }) {
   if (captureTab) return 'tab';
   if (showing && !full) return 'visible';
   if (browser === 'Safari') {
@@ -47,6 +49,13 @@ export function screenshotPlan({ showing, full = false, captureTab = false, brow
       ? "Safari can only capture the visible part of a tab (no --full)"
       : "that tab isn't showing, and Safari can only capture the tab in front (TRIF doesn't switch tabs while the user is browsing); " +
         'inspect it with `trif sweep`, `trif text` or `trif run` instead, or try again when it is in front' };
+  }
+  if (!copy) {
+    return { error: (full
+      ? `a full page in ${browser} would mean scrolling the user's tab, and TRIF doesn't; `
+      : `that tab isn't showing, and TRIF doesn't switch tabs while the user is browsing; `) +
+      '`trif screenshot --copy` captures a fresh copy of the page in a window that appears briefly at the edge of the screen. ' +
+      'For checks, prefer `trif sweep`, `trif text` or `trif run`, which work on tabs that aren\'t showing' };
   }
   return 'copy';
 }
@@ -80,11 +89,11 @@ const sleepDefault = (ms) => new Promise((r) => setTimeout(r, ms));
  * Capture `tab`. deps: {pageCall(tabId, func, args) → result (isolated world), stitch(shots, size) → dataUrl,
  * sleep?, now?, browser, firefox?}. Returns {dataUrl, how, note, full, width?, height?, cut?}.
  */
-export async function captureScreenshot(api, tab, { full = false, timeout = 45000 } = {}, deps) {
+export async function captureScreenshot(api, tab, { full = false, copy = false, timeout = 45000 } = {}, deps) {
   const sleep = deps.sleep || sleepDefault;
   const win = await api.windows.get(tab.windowId).catch(() => null);
   const showing = !!(tab.active && win && win.state !== 'minimized');
-  const plan = screenshotPlan({ showing, full, captureTab: typeof api.tabs.captureTab === 'function', browser: deps.browser });
+  const plan = screenshotPlan({ showing, full, captureTab: typeof api.tabs.captureTab === 'function', browser: deps.browser, copy });
   if (plan.error) throw new Error(plan.error);
   if (plan === 'visible') {
     return { dataUrl: await api.tabs.captureVisibleTab(tab.windowId, { format: 'png' }), how: 'visible', note: null, full: false };

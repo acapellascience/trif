@@ -67,14 +67,19 @@ const noFocus = (calls) => {
   }
 };
 
-test('screenshotPlan: the visible tab, Firefox\'s captureTab, a copy in Chrome, an error in Safari', () => {
+test('screenshotPlan: the visible tab, Firefox\'s captureTab, a copy in Chrome only when asked, an error in Safari', () => {
   assert.strictEqual(S.screenshotPlan({ showing: true }), 'visible');
-  assert.strictEqual(S.screenshotPlan({ showing: false }), 'copy');
-  assert.strictEqual(S.screenshotPlan({ showing: true, full: true }), 'copy', 'a full page in Chrome would scroll the user\'s tab');
-  assert.strictEqual(S.screenshotPlan({ showing: false, captureTab: true, browser: 'Firefox' }), 'tab');
+  assert.strictEqual(S.screenshotPlan({ showing: true, copy: true }), 'visible', 'a tab that\'s showing needs no copy');
+  const hint = S.screenshotPlan({ showing: false }).error;
+  assert.match(hint, /that tab isn't showing.*`trif screenshot --copy` captures a fresh copy of the page in a window that appears briefly at the edge of the screen.*prefer `trif sweep`, `trif text` or `trif run`/);
+  assert.match(S.screenshotPlan({ showing: true, full: true }).error, /full page in Chrome would mean scrolling the user's tab.*--copy/);
+  assert.strictEqual(S.screenshotPlan({ showing: false, copy: true }), 'copy');
+  assert.strictEqual(S.screenshotPlan({ showing: true, full: true, copy: true }), 'copy', 'a full page in Chrome would scroll the user\'s tab');
+  assert.strictEqual(S.screenshotPlan({ showing: false, captureTab: true, browser: 'Firefox' }), 'tab', 'Firefox: no copy, no window');
   assert.strictEqual(S.screenshotPlan({ showing: true, full: true, captureTab: true }), 'tab');
   assert.strictEqual(S.screenshotPlan({ showing: true, browser: 'Safari' }), 'visible');
   assert.match(S.screenshotPlan({ showing: false, browser: 'Safari' }).error, /isn't showing.*Safari/);
+  assert.match(S.screenshotPlan({ showing: false, browser: 'Safari', copy: true }).error, /Safari/, 'no copies in Safari');
   assert.match(S.screenshotPlan({ showing: true, full: true, browser: 'Safari' }).error, /no --full/);
 });
 
@@ -92,11 +97,18 @@ test('a tab that is showing: captureVisibleTab of its window, nothing opened, no
   assert.ok(!api.calls.some((c) => c[0] === 'windows.create'));
 });
 
+test('Chrome, a background tab without --copy: refused with the hint, nothing opened or captured', async () => {
+  const api = mockApi({ active: false });
+  await assert.rejects(S.captureScreenshot(api, { id: 5, windowId: 1, active: false, url: 'https://example.com/page' }, {}, { ...pages(), browser: 'Chrome' }), /--copy/);
+  await assert.rejects(S.captureScreenshot(api, { id: 5, windowId: 1, active: true, url: 'https://example.com/page' }, { full: true }, { ...pages(), browser: 'Chrome' }), /--copy/);
+  assert.ok(!api.calls.some((c) => c[0] === 'windows.create' || c[0] === 'captureVisibleTab'));
+});
+
 test('Chrome, a background tab: a copy in an unfocused window the size of the user\'s, at its scroll position, closed after', async () => {
   const api = mockApi({ active: false });
   const p = pages();
   const probes = [];
-  const r = await S.captureScreenshot(api, { id: 5, windowId: 1, active: false, url: 'https://example.com/page' }, {},
+  const r = await S.captureScreenshot(api, { id: 5, windowId: 1, active: false, url: 'https://example.com/page' }, { copy: true },
     { ...p, ...fakeClock(), browser: 'Chrome', onProbe: (id, open) => probes.push([id, open]) });
   assert.strictEqual(r.how, 'copy');
   assert.strictEqual(r.dataUrl, PNG(1));
@@ -128,14 +140,14 @@ test('bounds Chrome refuses: retried at the user\'s window position', async () =
   const create = api.windows.create;
   let first = true;
   api.windows.create = async (o) => { if (first) { first = false; api.calls.push(['refused', o]); throw new Error('Invalid value for bounds. Bounds must be at least 50% within visible screen space.'); } return create(o); };
-  const r = await S.captureScreenshot(api, { id: 5, windowId: 1, active: false, url: 'https://example.com/page' }, {}, { ...pages(), ...fakeClock(), browser: 'Chrome' });
+  const r = await S.captureScreenshot(api, { id: 5, windowId: 1, active: false, url: 'https://example.com/page' }, { copy: true }, { ...pages(), ...fakeClock(), browser: 'Chrome' });
   assert.strictEqual(r.how, 'copy');
   assert.deepStrictEqual(api.calls.find((c) => c[0] === 'windows.create')[1], { url: 'about:blank', focused: false, type: 'normal', width: 1200, height: 800, left: 10, top: 20 });
 });
 
 test('a copy Chrome stopped drawing (covered window) is reported as possibly stale', async () => {
   const api = mockApi({ active: false });
-  const r = await S.captureScreenshot(api, { id: 5, windowId: 1, active: false, url: 'https://example.com/page' }, { full: true },
+  const r = await S.captureScreenshot(api, { id: 5, windowId: 1, active: false, url: 'https://example.com/page' }, { full: true, copy: true },
     { ...pages({ hidden: true }), ...fakeClock(), browser: 'Chrome', stitch: async () => PNG('all') });
   assert.strictEqual(r.stale, true);
   assert.match(r.note, /stopped drawing the copy.*out of date or blank/);
@@ -144,7 +156,7 @@ test('a copy Chrome stopped drawing (covered window) is reported as possibly sta
 test('the copy window is closed when loading fails, and the error says what happened', async () => {
   const api = mockApi({ active: false, failLoad: true });
   await assert.rejects(
-    S.captureScreenshot(api, { id: 5, windowId: 1, active: false, url: 'https://example.com/page' }, { timeout: 2000 }, { ...pages(), ...fakeClock(), browser: 'Chrome' }),
+    S.captureScreenshot(api, { id: 5, windowId: 1, active: false, url: 'https://example.com/page' }, { timeout: 2000, copy: true }, { ...pages(), ...fakeClock(), browser: 'Chrome' }),
     /copy of https:\/\/example\.com\/page didn't finish loading/);
   assert.deepStrictEqual(api.calls[api.calls.length - 1], ['windows.remove', 7]);
   noFocus(api.calls);
@@ -152,7 +164,7 @@ test('the copy window is closed when loading fails, and the error says what happ
 
 test('a minimized window counts as not showing; incognito copies stay incognito; the capture quota is retried', async () => {
   const api = mockApi({ state: 'minimized', quotaOnce: true });
-  const r = await S.captureScreenshot(api, { id: 5, windowId: 1, active: true, incognito: true, url: 'https://example.com/page' }, {}, { ...pages(), ...fakeClock(), browser: 'Chrome' });
+  const r = await S.captureScreenshot(api, { id: 5, windowId: 1, active: true, incognito: true, url: 'https://example.com/page' }, { copy: true }, { ...pages(), ...fakeClock(), browser: 'Chrome' });
   assert.strictEqual(r.how, 'copy');
   const create = api.calls.find((c) => c[0] === 'windows.create')[1];
   assert.strictEqual(create.incognito, true);
@@ -164,7 +176,7 @@ test('Chrome --full: slices of the copy, stitched, fixed elements hidden after t
   const api = mockApi({ active: true });
   const p = pages({ docHeight: 2000 });
   let stitched = null;
-  const r = await S.captureScreenshot(api, { id: 5, windowId: 1, active: true, url: 'https://example.com/page' }, { full: true },
+  const r = await S.captureScreenshot(api, { id: 5, windowId: 1, active: true, url: 'https://example.com/page' }, { full: true, copy: true },
     { ...p, ...fakeClock(), browser: 'Chrome', stitch: async (shots, size) => { stitched = { shots, size }; return PNG('all'); } });
   assert.strictEqual(r.how, 'copy');
   assert.strictEqual(r.full, true);
@@ -203,7 +215,7 @@ let ext;
 let home;
 after(() => ext && ext.close());
 
-test('trif screenshot: the path on stdout, the note on stderr, --full sent, --json has both', async () => {
+test('trif screenshot: the path on stdout, the note on stderr, --full and --copy sent, --json has both', async () => {
   home = tempDir();
   ext = new FakeExtension({ home, env: { TRIF_TIMEOUT_GRACE: '300' } });
   ext.hello();
@@ -214,15 +226,17 @@ test('trif screenshot: the path on stdout, the note on stderr, --full sent, --js
   };
   await ext.waitForSocket();
   const out = path.join(home, 'a.png');
-  let r = await runCli(['screenshot', '--url', 'example', '--full', '-o', out], { home });
+  let r = await runCli(['screenshot', '--url', 'example', '--full', '--copy', '-o', out], { home });
   assert.strictEqual(r.code, 0, r.stderr);
   assert.strictEqual(r.stdout.trim(), out);
   assert.match(r.stderr, /^note: this is a fresh copy of the page$/m);
   assert.strictEqual(last.full, true);
+  assert.strictEqual(last.copy, true);
   assert.strictEqual(last.url, 'example');
   assert.ok(last.timeout >= 45000, 'the helper waits long enough for a page load');
   assert.ok(fs.existsSync(out));
   r = await runCli(['screenshot', '--json', '-o', out], { home });
+  assert.strictEqual(last.copy, false, 'no copy unless asked');
   const j = JSON.parse(r.stdout);
   assert.deepStrictEqual(j, { file: out, how: 'copy', full: false, note: 'this is a fresh copy of the page' });
 });

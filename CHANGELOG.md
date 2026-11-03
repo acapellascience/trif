@@ -6,6 +6,15 @@ needs a section here for the version it releases.
 
 ## Unreleased
 
+- **Your agent finishes the job more often.** Its guide now tells it to change the whole kind of thing
+  you mean, not only the one you pointed at ("hide the promos" means every promo, on every page), to
+  count what's left before saying it's done, and to tell you what it checked and what it couldn't. A new
+  `trif sweep` command lets it find every instance on a page, in one go: by colour, by element or by
+  words, inside widgets and frames too.
+- **Screenshots of tabs you're not looking at.** In Firefox your agent can now see any tab without TRIF
+  switching to it. In Chrome it still can't by default; if it really needs to look, it can open a copy of
+  the page in a window that shows for a moment at the edge of your screen, and it says so.
+
 - **TRIF's own files moved out of the folder your agent works in.** Settings, logs, chat logs and
   screenshots now live in `~/Library/Application Support/TRIF` (moved there by themselves), where a chat's
   agent can't read them at all; your mods stay in `~/.trif`. Using Safari: install TRIF.app from this

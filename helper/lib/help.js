@@ -133,23 +133,25 @@ element, text and the properties that matched. Bounded: --timeout (default 4000 
     ],
   },
   screenshot: {
-    usage: 'trif screenshot [TAB] [--full] [-o file.png]',
-    summary: 'save a PNG of the tab and print its path (works on tabs that aren\'t showing)',
+    usage: 'trif screenshot [TAB] [--full] [--copy] [-o file.png]',
+    summary: 'save a PNG of the tab and print its path',
     details: `Default path: screenshots/<time>.png in TRIF's private folder (on a Mac, ~/Library/Application
 Support/TRIF; in a side-panel run, its site's folder there). Open the printed file to look at it.
 TRIF never switches tabs or focuses windows (the user may be browsing, or other agents working), so:
   - a tab that's showing: captured as it is;
   - Firefox, a tab that isn't showing: captured as it is, in the background;
-  - Chrome, a tab that isn't showing: TRIF loads a fresh copy of the page, with the mods, in a window of
-    its own that isn't focused (the size of the user's, at the tab's scroll position; it shows at the
-    right edge of the screen for a second or so, since Chrome doesn't draw covered windows), captures it
-    and closes it. That's the page as it loads now, not the tab's exact state (open menus, typed text,
-    content loaded since): a note on stderr says so. Check state-dependent things with trif sweep/run.
+  - Chrome, a tab that isn't showing: an error, unless you pass --copy. With --copy, TRIF loads a fresh
+    copy of the page, with the mods, in a window of its own that isn't focused (the size of the user's,
+    at the tab's scroll position), captures it and closes it. The user sees that window at the right
+    edge of the screen for a second or so (Chrome doesn't draw covered windows), and it's the page as it
+    loads now, not the tab's exact state (open menus, typed text, content loaded since): a note on
+    stderr says so. Check with trif sweep, text or run first; use --copy only when a visual check is
+    truly needed.
   - Safari: only a tab that's showing.
---full captures the whole page (up to 12000 px): Firefox from the tab itself; Chrome from a copy, as
-above, stitched from several captures (fixed and sticky elements only at the top). --json prints
+--full captures the whole page (up to 12000 px): Firefox from the tab itself; Chrome only with --copy,
+stitched from several captures of the copy (fixed and sticky elements only at the top). --json prints
 {file, how: visible|tab|copy, full, note}.`,
-    examples: ['trif screenshot --url x.com', 'trif screenshot --url x.com --full -o /tmp/x-full.png'],
+    examples: ['trif screenshot --url x.com', 'trif screenshot --url x.com --full -o /tmp/x-full.png   # Firefox; Chrome needs --copy'],
   },
   record: {
     usage: 'trif record <site> [on|off]',

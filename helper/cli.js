@@ -27,7 +27,7 @@ const VALUE_FLAGS = new Set(['--tab', '--url', '-o', '--out', '--output', '--fil
   '--browser', '--home', '--native-dir', '--bin-dir', '--timeout', '--agent', '--session', '--model', '--site', '--auto',
   '--provider', '--base-url', '--key-env', '--selector', '--color', '--text', '--tolerance']);
 const BOOL_FLAGS = new Set(['--json', '--hard', '--help', '-h', '--force', '--no-link', '--no-examples', '--copy', '--link', '--install', '--open',
-  '--use-new', '--keep', '--merged', '--set-key', '--remove-key', '--scroll', '--full']);
+  '--use-new', '--keep', '--merged', '--set-key', '--remove-key', '--scroll', '--full', '--copy']);
 const ALIASES = { '--out': '-o', '--output': '-o', '--file': '-f', '-h': '--help' };
 
 class UsageError extends Error {}
@@ -550,8 +550,8 @@ const handlers = {
   },
 
   async screenshot(ctx) {
-    // A copy loaded in a window of its own (a tab that isn't showing, in Chrome) takes a page load or more.
-    const r = await ctx.call('screenshot', { full: !!ctx.opts['--full'], timeout: 60000, ...tabArgs(ctx.opts) });
+    // --copy: a copy loaded in a window of its own (a tab that isn't showing, in Chrome) takes a page load or more.
+    const r = await ctx.call('screenshot', { full: !!ctx.opts['--full'], copy: !!ctx.opts['--copy'], timeout: 60000, ...tabArgs(ctx.opts) });
     const m = /^data:image\/(\w+);base64,(.*)$/s.exec((r && r.dataUrl) || '');
     if (!m) throw new HelperError('the extension returned no image data', 'command');
     let file = ctx.opts['-o'];

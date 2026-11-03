@@ -628,13 +628,29 @@ class Scenario {
       return { focused: focused && focused.id, windows: wins.length, active: wins.map((w) => [w.id, (w.tabs.find((t) => t.active) || {}).id]).sort((a, b) => a[0] - b[0]) };
     }`);
     const pngSize = (file) => { const b = fs.readFileSync(file); return b.subarray(1, 4).toString() === 'PNG' ? { w: b.readUInt32BE(16), h: b.readUInt32BE(20), bytes: b.length } : null; };
+    const chrome = this.o.browser !== 'firefox';
+    if (chrome) {
+      await r.check('trif screenshot of a tab that isn\'t showing, without --copy (Chrome): refused with the hint, nothing opened', async () => {
+        const before = await view();
+        const results = [];
+        for (const extra of [[], ['--full']]) {
+          const x = await this.cli(['screenshot', '--tab', String(sweepTab), ...extra, '-o', path.join(this.work, 'refused.png')]);
+          if (x.status === 0) throw new Error(`trif screenshot ${extra.join(' ')} worked without --copy`);
+          if (!/--copy/.test(x.stderr) || !/trif sweep/.test(x.stderr)) throw new Error(`no hint: ${x.stderr}`);
+          results.push(x.stderr.trim().split('\n')[0]);
+        }
+        const after = await view();
+        if (JSON.stringify(after) !== JSON.stringify(before)) throw new Error(`the user's view changed: ${JSON.stringify(before)} -> ${JSON.stringify(after)}`);
+        return results[0];
+      });
+    }
     for (const full of [false, true]) {
-      await r.check(`trif screenshot${full ? ' --full' : ''} of a tab that isn't showing: works, and the user's tabs and focus stay as they were`, async () => {
+      await r.check(`trif screenshot${chrome ? ' --copy' : ''}${full ? ' --full' : ''} of a tab that isn't showing: works, and the user's tabs and focus stay as they were`, async () => {
         const before = await view();
         const isActive = (await this.ext(`async (id) => (await chrome.tabs.get(id)).active`, [sweepTab]));
         if (isActive) throw new Error('the sweep tab is in front; the check needs it in the background');
         const file = this.r.file(`${this.label}-${String(++this.shots).padStart(2, '0')}-trif-screenshot-background${full ? '-full' : ''}.png`);
-        const x = await this.cli(['screenshot', '--tab', String(sweepTab), ...(full ? ['--full'] : []), '-o', file], { json: true, timeoutMs: 90000 });
+        const x = await this.cli(['screenshot', '--tab', String(sweepTab), ...(chrome ? ['--copy'] : []), ...(full ? ['--full'] : []), '-o', file], { json: true, timeoutMs: 90000 });
         if (x.status !== 0 || !x.json) throw new Error(`trif screenshot: ${x.stderr || x.stdout}`);
         const after = await view();
         if (JSON.stringify(after) !== JSON.stringify(before)) throw new Error(`the user's view changed: ${JSON.stringify(before)} -> ${JSON.stringify(after)}`);

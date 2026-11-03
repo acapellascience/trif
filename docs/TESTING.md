@@ -54,8 +54,9 @@ Per browser, a **fresh** scenario, and an **upgrade** scenario per `--upgrade-fr
    - `trif sweep --selector/--text/--color` on a page of repeated things (`/sweep.html`: regions, a sticky
      header, a shadow root, a same-origin frame, a CSS variable) finds the expected counts; `trif status
      --tab` lists the mods on that page; `trif screenshot` and `--full` of that tab while it's in the
-     background work (Firefox: the tab itself; Chrome: a copy in a window of its own) and leave every
-     window's active tab, the focused window and the window count as they were. Headless Chrome gets
+     background work (Firefox: the tab itself; Chrome: refused with a hint about `--copy`, then with
+     `--copy`, a copy in a window of its own) and leave every window's active tab, the focused window
+     and the window count as they were. Headless Chrome gets
      `--screen-info={0,0 2560x1440}`: its default 800x600 screen is smaller than the windows, which puts
      the copy window under the user's, where Chrome stops drawing it.
 4. **Plain X**: the real `examples/sites/x.com/plain-x.js` on `https://x.com:<port>/home`, served

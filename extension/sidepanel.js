@@ -50,7 +50,8 @@ const view = {
   disabled: {},              // chrome.storage.local `disabled`: mods switched off (by anyone: panel, agent, CLI)
   offSites: {},              // chrome.storage.local `offSites`: mods switched off on some of their sites
   modOrder: {},              // chrome.storage.local `modOrder`: the order the user dragged each site's mods into (lib.js)
-  modNatural: [],            // the ids of the mods listed, in the order they came (what an unsaved order is)
+  defaultOrder: {},          // chrome.storage.local `defaultOrder`: each site's order for its shipped mods until then (from the helper)
+  modNatural: [],            // the ids of the mods listed, in the order they come before the user's (what an unsaved order is)
   myRuns: new Set(),         // runs this panel started
   updated: null,             // chrome.storage.local `updated`: {from, to, notes, at} after an update's reload
   updateBusy: null,          // 'checking' | 'installing' while the panel waits on the helper
@@ -162,13 +163,14 @@ async function init() {
   // In Safari the panel is a window of its own, opened with ?window=<the window whose tabs it follows>.
   const opener = Number(new URLSearchParams(location.search).get('window'));
   view.windowId = opener || (await chrome.windows.getCurrent()).id;
-  const stored = await chrome.storage.local.get(['settings', 'sitePicks', 'disabled', 'offSites', 'updated', 'modOrder']);
+  const stored = await chrome.storage.local.get(['settings', 'sitePicks', 'disabled', 'offSites', 'updated', 'modOrder', 'defaultOrder']);
   view.updated = stored.updated || null;
   view.settings = normalizeSettings(stored.settings);
   view.picks = normalizePicks(stored.sitePicks);
   view.disabled = stored.disabled || {};
   view.offSites = normalizeOffSites(stored.offSites);
   view.modOrder = normalizeModOrder(stored.modOrder);
+  view.defaultOrder = normalizeModOrder(stored.defaultOrder);
   renderSettings();
 
   chrome.tabs.onActivated.addListener(({ tabId, windowId }) => {
@@ -202,10 +204,11 @@ async function init() {
       view.updated = changes.updated.newValue || null;
       renderUpdate();
     }
-    if (changes.disabled || changes.offSites || changes.modOrder) { // a switch flipped here, on the setup page, or by an agent / the CLI; mods reordered in another panel, or renamed
+    if (changes.disabled || changes.offSites || changes.modOrder || changes.defaultOrder) { // a switch flipped here, on the setup page, or by an agent / the CLI; mods reordered in another panel, or renamed
       if (changes.disabled) view.disabled = changes.disabled.newValue || {};
       if (changes.offSites) view.offSites = normalizeOffSites(changes.offSites.newValue);
       if (changes.modOrder) view.modOrder = normalizeModOrder(changes.modOrder.newValue);
+      if (changes.defaultOrder) view.defaultOrder = normalizeModOrder(changes.defaultOrder.newValue);
       renderMods();
     }
   });
@@ -556,9 +559,10 @@ function renderMods() {
   // Every mod that runs somewhere on this site's domain (google.com: Search, Maps, mail.google.com…, and
   // all-sites mods), not just on this page, so the list doesn't change as you move around the site; a
   // light says which run on this page. Plus mods on hold from an agent run here, so they can be allowed.
-  // In the order the user dragged them into on this site, if they did (display only: lib.js orderMods).
+  // In the order the user dragged them into on this site, if they did, else the site's shipped mods in
+  // the order TRIF ships them in (display only: lib.js orderMods).
   const scope = site ? scopeFor(site) : null;
-  const listed = site && status ? status.mods.filter((m) => limitToSites(m, [scope]) || m.held?.site === site) : [];
+  const listed = orderMods(site && status ? status.mods.filter((m) => limitToSites(m, [scope]) || m.held?.site === site) : [], view.defaultOrder[scope]);
   view.modNatural = listed.map((m) => m.id);
   const mods = orderMods(listed, view.modOrder[scope]);
   ui.mods.hidden = mods.length === 0;
@@ -675,8 +679,11 @@ function modItem(m) {
   label.id = labelId;
   const tag = el('span', 'tag');
   tag.hidden = true;
-  // Spaces between the name and its badges, so a badge can wrap to the next line on its own.
-  name.append(label, ' ', tag);
+  // The file name right after the name, and the mods TRIF ships say so (their header's @source and @version).
+  const file = el('span', 'mod-file', (m.file || m.id).split('/').pop());
+  const source = m.source === 'webmods' || m.source === 'trif' ? el('span', 'mod-source', `Tim's mod${m.version ? `, v${m.version}` : ''}`) : null;
+  // Spaces between the name and the rest, so each can wrap to the next line on its own.
+  name.append(label, ' ', file, ...(source ? [' ', source] : []), ' ', tag);
   // Risk tier from the mod's header (AGENTS.md "Account safety"): nothing for 0, a badge for 1 and 2.
   if (m.risk?.tier >= 1) {
     const badge = el('span', `tag risk risk-${m.risk.tier}`, m.risk.tier >= 2 ? 'changes requests' : 'detectable');
@@ -695,13 +702,9 @@ function modItem(m) {
     name.append(' ', badge);
   }
   const main = el('div', 'mod-main');
-  // What the mod does, from its header's @description: one line, the whole of it in the tooltip.
+  // What the mod does, from its header's @description, under the name.
   const desc = m.description ? el('div', 'mod-desc', m.description) : null;
-  if (desc) desc.title = m.description;
-  // The mods TRIF ships say so (their header's @source and @version).
-  const file = el('div', 'mod-file', (m.file || m.id).split('/').pop());
-  if (m.source === 'webmods' || m.source === 'trif') file.append(' ', el('span', 'mod-source', `Tim's mod${m.version ? `, v${m.version}` : ''}`));
-  main.append(light, name, ...(desc ? [desc] : []), file);
+  main.append(light, name, ...(desc ? [desc] : []));
   const row = el('div', 'mod-row');
   if (m.held) {
     // Written by an agent run here but reaching other sites: not running until the user allows it.

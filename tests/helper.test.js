@@ -76,7 +76,7 @@ test('parseHeader: @source and @version mark the mods TRIF ships', () => {
   const { PREINSTALLED } = require('../helper/lib/preinstalled');
   for (const { id } of PREINSTALLED) {
     const ex = parseHeader(fs.readFileSync(path.join(REPO, 'examples', 'sites', `${id}.js`), 'utf8'));
-    assert.equal(ex.source, 'webmods', id);
+    assert.ok(isShippedSource(ex.source), `${id}: @source ${ex.source}`);
     assert.match(String(ex.version), /^\d+$/, id);
   }
 });
@@ -380,6 +380,16 @@ test('host: a renamed mod file goes out under its new name (mv, case-only, an ed
     fs.unlinkSync(path.join(dir, 'Jelly.js'));
     fs.renameSync(path.join(dir, '.wiggle.js.tmp'), path.join(dir, 'wiggle.js'));
   });
+});
+
+test('host: every mods message carries the side panel\'s default order for the shipped mods', async () => {
+  const home = tempDir();
+  writeMod(home, 'timsrobot.com', 'fireworks.js', '// mine');
+  const ext = startHost(home);
+  ext.hello();
+  const msg = await ext.next((m) => m.type === 'mods' && m.mods.length === 1);
+  assert.deepStrictEqual(msg.defaultOrder, require('../helper/lib/preinstalled').DEFAULT_ORDER);
+  assert.strictEqual(msg.defaultOrder['timsrobot.com'][0], 'timsrobot.com/typing-tagline');
 });
 
 test('host: rapid edits are debounced into few pushes', async () => {

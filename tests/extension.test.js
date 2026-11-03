@@ -60,6 +60,37 @@ const mod = (id, extra = {}) => ({
   matches: [`*://${id.split('/')[0]}/*`], excludes: [], runAt: 'document_start', code: `/* ${id} */`, hash: 'h1', ...extra,
 });
 
+test('the home page marker: only on timsrobot.com, only while TRIF is on there, never a mod', async () => {
+  const us = mockUserScripts();
+  const markerOn = () => us.scripts.filter((s) => s.id === lib.HOME_MARKER_ID);
+  // TRIF on for other sites (with mods there): no marker anywhere.
+  let r = await lib.syncUserScripts(us, { mods: [mod('x.com/a')], runtimeCode: 'RT', sitesOn: ['x.com', 'google.com'] });
+  assert.deepStrictEqual(markerOn(), []);
+  assert.ok(!us.scripts.some((s) => s.js.some((j) => j.code.includes('data-trif'))), 'nothing else marks pages');
+  // On for timsrobot.com: the marker, matching timsrobot.com and its subdomains only, at document_start.
+  r = await lib.syncUserScripts(us, { mods: [mod('x.com/a')], runtimeCode: 'RT', applied: r.applied, sitesOn: ['x.com', 'timsrobot.com'] });
+  assert.strictEqual(markerOn().length, 1);
+  assert.deepStrictEqual(markerOn()[0].matches, ['*://timsrobot.com/*', '*://*.timsrobot.com/*']);
+  assert.strictEqual(markerOn()[0].runAt, 'document_start');
+  assert.match(markerOn()[0].js[0].code, /setAttribute\("data-trif", "on"\)/);
+  assert.deepStrictEqual(r.registered, ['x.com/a'], 'not reported as a mod');
+  for (const host of ['https://timsrobot.com/', 'https://www.timsrobot.com/x']) assert.ok(markerOn()[0].matches.some((p) => lib.matchesPattern(p, host)), host);
+  for (const host of ['https://x.com/', 'https://nottimsrobot.com/', 'https://timsrobot.com.evil.net/']) assert.ok(!markerOn()[0].matches.some((p) => lib.matchesPattern(p, host)), host);
+  // Even with no mods at all (they're off), and through a full re-register (the runtime changed): still once.
+  r = await lib.syncUserScripts(us, { mods: [], runtimeCode: 'RT', applied: r.applied, sitesOn: ['timsrobot.com'] });
+  assert.deepStrictEqual(us.scripts.map((s) => s.id), [lib.HOME_MARKER_ID]);
+  r = await lib.syncUserScripts(us, { mods: [mod('timsrobot.com/fireworks')], runtimeCode: 'RT2', applied: r.applied, sitesOn: ['timsrobot.com'] });
+  assert.strictEqual(markerOn().length, 1);
+  assert.deepStrictEqual(us.scripts.filter((s) => s.id !== lib.HOME_MARKER_ID).map((s) => s.id), ['webmods-runtime', 'timsrobot.com/fireworks']);
+  // The robot off there: gone.
+  await lib.syncUserScripts(us, { mods: [mod('timsrobot.com/fireworks')], runtimeCode: 'RT2', applied: r.applied, sitesOn: ['x.com'] });
+  assert.deepStrictEqual(markerOn(), []);
+  // No sitesOn (no limit, as before sites had to be turned on): no marker either.
+  await lib.syncUserScripts(us, { mods: [mod('x.com/a')], runtimeCode: 'RT', sitesOn: null });
+  assert.deepStrictEqual(markerOn(), []);
+  assert.strictEqual(lib.wantsHomeMarker(['www.timsrobot.com']), false, 'sitesOn holds scopes (timsrobot.com), not hosts');
+});
+
 test('first sync registers the runtime first, then each mod, wrapped and in the MAIN world', async () => {
   const us = mockUserScripts();
   const res = await lib.syncUserScripts(us, {
@@ -1809,6 +1840,53 @@ test('orderMods / moveId / setModOrder: the panel\'s own order, per site, new mo
   assert.deepStrictEqual(lib.normalizeModOrder({ a: ['x', 'x', 3, ''], b: [], c: 'no', d: ['y'] }), { a: ['x'], d: ['y'] });
   assert.deepStrictEqual(lib.normalizeModOrder(null), {});
   assert.deepStrictEqual(lib.normalizeModOrder(['x']), {});
+});
+
+test('orderMods: a site\'s shipped default order first (the rest after, as they come), and the user\'s own order over it', () => {
+  const ids = (list) => list.map((x) => x.id);
+  const mods = ['fireworks', 'gravity-mode', 'jelly-buttons', 'mine', 'typing-tagline'].map((x) => mod(`timsrobot.com/${x}`));
+  const shipped = ['timsrobot.com/typing-tagline', 'timsrobot.com/jelly-buttons', 'timsrobot.com/gravity-mode', 'timsrobot.com/fireworks', 'timsrobot.com/neon-title'];
+  // (As the panel does it: the default order, then the user's over that.)
+  const natural = lib.orderMods(mods, shipped);
+  assert.deepStrictEqual(ids(natural), [...shipped.slice(0, 4), 'timsrobot.com/mine'], 'shipped order, the user\'s own mod after, one they deleted skipped');
+  assert.deepStrictEqual(ids(lib.orderMods(natural, undefined)), ids(natural), 'until the user drags');
+  const theirs = ['timsrobot.com/mine', 'timsrobot.com/fireworks'];
+  assert.deepStrictEqual(ids(lib.orderMods(natural, theirs)),
+    ['timsrobot.com/mine', 'timsrobot.com/fireworks', 'timsrobot.com/typing-tagline', 'timsrobot.com/jelly-buttons', 'timsrobot.com/gravity-mode']);
+  // Dragged back into the default order: the user's entry goes, and the default applies again.
+  assert.deepStrictEqual(lib.setModOrder({ 'timsrobot.com': theirs }, 'timsrobot.com', ids(natural), ids(natural)), {});
+});
+
+test('background: the home page marker follows the robot on timsrobot.com', async () => {
+  const bg = await loadBackground({ storage: { sitesOn: ['x.com'], mods: [mod('x.com/a'), mod('timsrobot.com/fireworks', { matches: ['https://timsrobot.com/*'] })] } });
+  try {
+    await settle(30);
+    assert.ok(!scriptIds(bg).includes(lib.HOME_MARKER_ID));
+    const panel = bg.connectPanel();
+    const on = await panel.ask({ type: 'site.set', site: 'timsrobot.com', on: true });
+    assert.strictEqual(on.ok, true, on.error);
+    await settle(30);
+    assert.ok(scriptIds(bg).includes(lib.HOME_MARKER_ID));
+    const off = await panel.ask({ type: 'site.set', site: 'timsrobot.com', on: false });
+    assert.strictEqual(off.ok, true, off.error);
+    await settle(30);
+    assert.ok(!scriptIds(bg).includes(lib.HOME_MARKER_ID));
+  } finally { bg.restore(); }
+});
+
+test('background: the helper\'s default order for shipped mods is kept in storage for the panel, and replaced when it changes', async () => {
+  const order = { 'timsrobot.com': ['timsrobot.com/b', 'timsrobot.com/a'] };
+  const bg = await loadBackground();
+  try {
+    bg.native.emit({ type: 'mods', mods: [mod('timsrobot.com/a'), mod('timsrobot.com/b')], defaultOrder: { ...order, junk: 'no' } });
+    await settle(30);
+    assert.deepStrictEqual(bg.store.defaultOrder, order);
+    assert.ok(!('modOrder' in bg.store), 'the user\'s own order isn\'t written');
+    // A helper from before (no defaultOrder): none.
+    bg.native.emit({ type: 'mods', mods: [mod('timsrobot.com/a')] });
+    await settle(30);
+    assert.deepStrictEqual(bg.store.defaultOrder, {});
+  } finally { bg.restore(); }
 });
 
 test('renameInOrder: a renamed mod keeps its place in every site\'s order', () => {

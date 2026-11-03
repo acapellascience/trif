@@ -20,7 +20,7 @@ const RUN_AT = {
   'idle': 'document_idle',
 };
 
-// What a shipped mod's `@source` says: `webmods` (all of them so far: TRIF was called WebMods) or `trif`.
+// What a shipped mod's `@source` says: `webmods` (the ones shipped while TRIF was called WebMods) or `trif`.
 const SHIPPED_SOURCES = new Set(['webmods', 'trif']);
 function isShippedSource(source) { return SHIPPED_SOURCES.has(String(source || '').toLowerCase()); }
 

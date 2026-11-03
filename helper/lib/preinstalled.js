@@ -61,7 +61,29 @@ const PREINSTALLED = [
   // Added in 0.2.0: existing workspaces get it (off) with the setup that installs the update, since it
   // isn't in their `offered` list yet.
   { id: 'www.google.com/dvd-logo', on: false },
+  // Added in 0.2.0, the same way: the mods on TRIF's own home page, all off (and TRIF stays off on
+  // timsrobot.com, not in SITES_ON, until the user turns it on there).
+  { id: 'timsrobot.com/typing-tagline', on: false },
+  { id: 'timsrobot.com/jelly-buttons', on: false },
+  { id: 'timsrobot.com/gravity-mode', on: false },
+  { id: 'timsrobot.com/fireworks', on: false },
+  { id: 'timsrobot.com/neon-title', on: false },
+  { id: 'timsrobot.com/space-shooter', on: false },
+  { id: 'timsrobot.com/sticker-badges', on: false },
+  { id: 'timsrobot.com/need-checklist', on: false },
+  { id: 'timsrobot.com/terminal-box', on: false },
+  { id: 'timsrobot.com/rainbow-rave', on: false },
+  { id: 'timsrobot.com/led-footer', on: false },
+  { id: 'timsrobot.com/living-robot', on: false },
+  { id: 'timsrobot.com/tilt-card', on: false },
 ];
+
+// The order the side panel lists a site's shipped mods in until the user drags them into their own (display
+// only: mods run in their usual order). By site, as the extension's scopeFor gives it; the helper sends it
+// with every mods message (`defaultOrder`), and extension/lib.js orderMods puts mods it doesn't list after.
+const DEFAULT_ORDER = {
+  'timsrobot.com': PREINSTALLED.filter((p) => p.id.startsWith('timsrobot.com/')).map((p) => p.id),
+};
 
 // Shipped mods folded into another one (`into`, from its @version `since`), so no longer shipped
 // (0.2.0: AI Banisher and Just Results). retireShippedMods, below, handles the copies users have.
@@ -506,6 +528,6 @@ function startOffIds(home) { return new Set(load(home).startOff); }
 function startSitesOn(home) { return load(home).sitesOn; }
 
 module.exports = {
-  PREINSTALLED, RETIRED, SITES_ON, SHIPPED_DIR, preinstallMods, updateShippedMods, retireShippedMods, absorbedIds,
+  PREINSTALLED, RETIRED, SITES_ON, DEFAULT_ORDER, SHIPPED_DIR, preinstallMods, updateShippedMods, retireShippedMods, absorbedIds,
   startOffIds, startSitesOn, loadPreinstalled: load, pendingUpdates, useNewVersion, keepMine, mergeRequest, mergeSettled, resolveMerge, restoreMod, baseFile, newFile, loadHistory,
 };

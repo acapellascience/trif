@@ -1,0 +1,1083 @@
+// ==WebMod==
+// @name        Space Shooter
+// @description A little ship flies along the bottom of the page: arrow keys move it around, space fires lasers (drops bombs in Gravity mode), and any word you hit explodes into its letters. R brings the words back
+// @match       *://timsrobot.com/*
+// @match       *://*.timsrobot.com/*
+// @run-at      document-idle
+// @risk        0 render-only
+// @source      trif
+// @version     1
+// ==/WebMod==
+
+(() => {
+  if (window.top !== window) return;
+
+  const css = document.createElement('style');
+  css.textContent = `
+    [data-tss-dead] { visibility: hidden !important; } /* blasted words, bombed pieces, the destroyed robot */
+    /* robot hit flash, on its parts: the <svg>'s own animation slot is Living robot's waddle and hop */
+    svg.robot.tss-hurt > * { animation: tss-hurt 110ms ease-out; }
+    @keyframes tss-hurt { from { filter: brightness(2.6) saturate(0.4); } to { filter: none; } }
+    /* Living robot's legs follow the damage colour */
+    svg.robot[data-tss-hp] .lr-legs line { stroke: var(--tss-robot-leg) !important; }
+    svg.robot[data-tss-hp] .lr-legs ellipse { fill: var(--tss-robot-leg) !important; }
+    #tss-canvas { position: fixed; inset: 0; width: 100vw; height: 100vh; pointer-events: none; z-index: 2147483646; }
+    #tss-hud { position: fixed; left: 12px; top: 8px; /* top, not bottom: see pin() */ z-index: 2147483647; pointer-events: none;
+      font: 600 12px/1.4 ui-monospace, Menlo, monospace; color: #7ff; text-shadow: 0 0 6px #0ff; opacity: .85; }
+    /* "ROBOT DESTROYED": outside <body>, so Gravity mode leaves it hanging; its words are targets */
+    #tss-banner { position: fixed; left: 50vw; top: 50vh; transform: translate(-50%, -50%); z-index: 2147483645;
+      pointer-events: none; white-space: nowrap; }
+    #tss-banner .tss-bn { display: inline-block; font: 900 clamp(40px, 9vw, 120px)/1 ui-monospace, Menlo, monospace;
+      letter-spacing: .06em; color: #7ff; text-shadow: 0 0 12px #0ff, 0 0 42px #08f;
+      animation: tss-bn-in 900ms ease-out both, tss-bn-flicker 1.7s 900ms infinite; }
+    #tss-banner .tss-gap { display: inline-block; width: .6em; }
+
+    /* You Win, in the hero around its buttons (see showWin) */
+    .tss-win-faded { opacity: 0 !important; transition: opacity 0.9s ease !important; pointer-events: none !important; }
+    /* everything arrives top to bottom: title 0.4 s, line under it 1.0 s, buttons (if they need putting
+       back) 1.6 s, "play again?" 2.2 s, each drifting down a touch as it fades in */
+    .tss-win-fadein { animation: tss-win-fadein 1.1s ease 1.6s both !important; }
+    @keyframes tss-win-fadein { from { opacity: 0; translate: 0 -8px; } to { opacity: 1; translate: 0 0; } }
+    /* zero-height holders, out of the flow so nothing on the page moves; full width (the hero centres its
+       children, which would shrink them to nothing and wrap the text a word per line) */
+    .tss-win-above, .tss-win-below { position: relative; height: 0; width: 100%; align-self: stretch; }
+    .tss-win-head { position: absolute; left: 0; right: 0; bottom: 6px; text-align: center; white-space: nowrap; }
+    .tss-win-again { white-space: nowrap; }
+    .tss-win-head h1.tss-win-title { margin: 0 0 6px;
+      /* a smooth fade in, no neon flicker (Rainbow Rave's glow follows the h1's opacity) */
+      animation: tss-win-fadein 1.2s ease 0.4s both !important; } /* (!important: Rainbow Rave turns off h1 animations) */
+    .tss-win-head .tss-win-sub { margin: 0; animation: tss-win-fadein 1.1s ease 1s both; }
+    .tss-win-below { text-align: center; }
+    /* (centred with margins, not transform: Jelly buttons' hover wobble animates transform, which would
+       knock it sideways) */
+    .tss-win-again { position: absolute; left: 0; right: 0; width: max-content; margin: 0 auto; top: 6px; background: none; border: 0;
+      padding: 2px 6px; cursor: pointer; font: 500 12px system-ui, -apple-system, sans-serif; color: rgba(255, 255, 255, 0.65);
+      text-decoration: none; text-shadow: 0 1px 2px rgba(0, 0, 0, 0.6); }
+    /* its fade-in is a class, dropped when done: Jelly buttons' hover wobble replaces the animation, and
+       when the hover ended the fade (with its delay) would start over, so it vanished and came back */
+    .tss-win-again.tss-win-again-in { animation: tss-win-fadein 1s ease 2.2s both !important; } /* (no wobble until it's in) */
+    .tss-win-again:hover { color: #fff; }
+    /* eased "play again?" (see playAgainEased) */
+    /* a plain white card over everything */
+    /* (oversized, and pinned to the window by pinCurtain: a "fixed" box on <html> can be placed against the
+       page instead of the window, when another mod sets perspective or translate on <html>) */
+    .tss-curtain { position: fixed; left: -40px; top: -40px; width: calc(100vw + 80px); height: calc(100vh + 80px); z-index: 2147483647; opacity: 0; background: #fff; pointer-events: none;
+      transition: opacity .8s ease; }
+    .tss-curtain.tss-curtain-on { opacity: 1; pointer-events: auto; }
+    .tss-curtain:not(.tss-curtain-on) { transition-duration: 1s; }
+    @keyframes tss-bn-in { 0% { opacity: 0; transform: scale(2.4); filter: blur(10px); } 30% { opacity: 1; }
+      55% { transform: scale(.92); filter: none; } 75% { transform: scale(1.04); } 100% { transform: scale(1); } }
+    @keyframes tss-bn-flicker { 0%, 46%, 56%, 100% { opacity: 1; } 50% { opacity: .55; } 53% { opacity: .2; } }
+  `;
+  document.head.append(css);
+
+  // --- Turn every word on the page into a target: wrap it in <span class="tss-w">.
+  const SKIP = new Set(['SCRIPT', 'STYLE', 'NOSCRIPT', 'TEXTAREA', 'INPUT', 'SELECT', 'OPTION', 'SVG', 'CANVAS', 'IFRAME', 'CODE', 'PRE']);
+  const wrapWords = () => {
+    const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT, {
+      acceptNode(n) {
+        if (!/\S/.test(n.data)) return NodeFilter.FILTER_REJECT;
+        for (let el = n.parentElement; el && el !== document.body; el = el.parentElement) {
+          if (SKIP.has(el.tagName.toUpperCase()) || el.classList.contains('tss-w') || el.id === 'tss-hud' || el.isContentEditable) return NodeFilter.FILTER_REJECT;
+        }
+        return NodeFilter.FILTER_ACCEPT;
+      },
+    });
+    const nodes = [];
+    while (walker.nextNode()) nodes.push(walker.currentNode);
+    for (const node of nodes) {
+      const frag = document.createDocumentFragment();
+      for (const part of node.data.split(/(\s+)/)) {
+        if (!part) continue;
+        if (/^\s+$/.test(part)) { frag.append(part); continue; }
+        const span = document.createElement('span');
+        span.className = 'tss-w';
+        span.textContent = part;
+        frag.append(span);
+      }
+      node.replaceWith(frag);
+    }
+  };
+  try { wrapWords(); } catch (e) { window.trif?.warn('wrap failed', String(e)); }
+  // Other mods (and the site) may add text later: wrap it too, debounced.
+  let queued = false;
+  new MutationObserver(() => {
+    if (queued) return;
+    queued = true;
+    setTimeout(() => { queued = false; try { wrapWords(); } catch {} }, 300);
+  }).observe(document.body, { childList: true, subtree: true, characterData: true });
+
+  // --- Canvas and HUD
+  const canvas = document.createElement('canvas');
+  canvas.id = 'tss-canvas';
+  const ctx = canvas.getContext('2d');
+  const hud = document.createElement('div');
+  hud.id = 'tss-hud';
+  // On <html>, not <body>: tilt-card puts a transform on <body>, which would make these "fixed"
+  // elements tilt and shrink with it (the ship then couldn't reach the bottom of the window).
+  document.documentElement.append(canvas, hud);
+  let W = 0, H = 0;
+  const resize = () => {
+    const dpr = devicePixelRatio || 1;
+    W = innerWidth; H = innerHeight;
+    canvas.width = W * dpr; canvas.height = H * dpr;
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  };
+  resize();
+  addEventListener('resize', resize);
+  // tilt-card sets `perspective` on <html> (and the shake sets `translate`), which makes <html> the
+  // containing block for "fixed" elements: they then scroll with the page. Nudge them back so the
+  // canvas always covers the window exactly.
+  let pinX = 0, pinY = 0;
+  const pin = () => {
+    const r = canvas.getBoundingClientRect();
+    if (Math.abs(r.left) < 0.5 && Math.abs(r.top) < 0.5) return;
+    pinX -= r.left; pinY -= r.top;
+    canvas.style.translate = hud.style.translate = `${pinX}px ${pinY}px`;
+    if (banner) banner.style.translate = canvas.style.translate;
+  };
+
+  // --- Game state
+  const ship = { x: innerWidth / 2, y: innerHeight - 14, w: 102, h: 78 }; // y = bottom of the ship
+  const keys = {};
+  const lasers = [];
+  const bits = []; // letters and sparks
+  let lastShot = 0, score = 0, lastInput = -1e9;
+
+  const editable = (el) => el && (el.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(el.tagName));
+  addEventListener('keydown', (e) => {
+    if (editable(e.target) || e.metaKey || e.ctrlKey || e.altKey) return;
+    if (['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown', ' '].includes(e.key)) {
+      e.preventDefault(); // no page scrolling, no pressing the focused button
+      keys[e.key] = true;
+      lastInput = performance.now();
+    } else if (e.key === 'r' || e.key === 'R') {
+      if (winEl) playAgainEased(); else if (!againBusy) restoreAll();
+    }
+  }, true);
+  const restoreAll = () => {
+    removeBanner();
+    // words and bombed pieces come back; the robot is rebuilt separately
+    document.querySelectorAll('[data-tss-dead]:not(svg.robot)').forEach((w) => w.removeAttribute('data-tss-dead'));
+    // Living robot listens: a rebuilt robot goes back home
+    dispatchEvent(new CustomEvent('tss-restore', { detail: { robotRebuilt: rebuildRobot() } }));
+  };
+  addEventListener('keyup', (e) => { keys[e.key] = false; }, true);
+  addEventListener('blur', () => { for (const k in keys) keys[k] = false; });
+
+  const fire = (now) => {
+    lastShot = now;
+    muzzle = 0.07;
+    const y = ship.y - ship.h * 0.6;
+    lasers.push({ x: ship.x - 27, y }, { x: ship.x + 27, y });
+  };
+
+  // Screen shake: nudges <html> with the `translate` property, which no other mod here sets on <html>
+  // and which stacks with any `transform` (tilt-card) instead of replacing it.
+  let shake = 0;
+  const applyShake = (dt) => {
+    const html = document.documentElement;
+    if (shake > 0.3) {
+      html.style.translate = `${((Math.random() - 0.5) * 2 * shake).toFixed(1)}px ${((Math.random() - 0.5) * 2 * shake).toFixed(1)}px`;
+      shake *= Math.pow(0.0015, dt); // dies out in about a third of a second
+    } else if (shake) {
+      shake = 0;
+      html.style.translate = '';
+    }
+  };
+  const rings = []; // shockwaves
+
+  // Burst a word: each letter flies off with the word's own font and colour.
+  const explode = (word) => {
+    const cs = getComputedStyle(word);
+    let color = cs.color;
+    if (/rgba\(.*,\s*0\)$/.test(color) || color === 'transparent') color = '#fff'; // gradient/clip text
+    const font = `${cs.fontStyle} ${cs.fontWeight} ${cs.fontSize} ${cs.fontFamily}`;
+    const text = word.firstChild;
+    const range = document.createRange();
+    const r0 = word.getBoundingClientRect();
+    const cx = r0.left + r0.width / 2, cy = r0.top + r0.height / 2;
+    if (text && text.nodeType === 3) {
+      for (let i = 0; i < text.data.length; i++) {
+        range.setStart(text, i); range.setEnd(text, i + 1);
+        const r = range.getBoundingClientRect();
+        const x = r.left + r.width / 2, y = r.top + r.height / 2;
+        const a = Math.atan2(y - cy - 6, x - cx) + (Math.random() - 0.5) * 1.2;
+        const sp = 300 + Math.random() * 500;
+        bits.push({ ch: text.data[i], x, y, vx: Math.cos(a) * sp, vy: Math.sin(a) * sp - 320,
+          rot: 0, vr: (Math.random() - 0.5) * 22, life: 2.4 + Math.random(), font, color,
+          scale: 1, grow: 1.6 + Math.random() * 1.6 }); // letters balloon up as they fly
+      }
+    }
+    const SPARK = ['#fff6c2', '#ffd36b', '#ff9a3c', '#ff4f6d', '#ff6bf0'];
+    for (let i = 0; i < 70; i++) {
+      const a = Math.random() * Math.PI * 2, sp = 150 + Math.random() * 650;
+      bits.push({ x: cx, y: cy, vx: Math.cos(a) * sp, vy: Math.sin(a) * sp, life: 0.4 + Math.random() * 0.7,
+        spark: true, size: 2 + Math.random() * 5, color: SPARK[i % SPARK.length] });
+    }
+    const R = 90 + r0.width * 0.8;
+    rings.push({ x: cx, y: cy, t: 0, R });
+    shake = Math.min(shake + 9, 20);
+    word.setAttribute('data-tss-dead', '');
+    score++;
+  };
+
+  // --- Crashing into the robot (the site's <svg class="robot">) blows the ship up; it respawns
+  // at the bottom after a moment, blinking and untouchable for a bit.
+  let deadUntil = 0, safeUntil = 0, deaths = 0;
+  const robotEl = () => document.querySelector('svg.robot');
+  const robotRect = () => { // null when he's missing or destroyed
+    const robot = robotEl();
+    if (!robot || robot.hasAttribute('data-tss-dead')) return null;
+    const r = robot.getBoundingClientRect();
+    return r.width && r.height ? r : null;
+  };
+  const touchesRobot = () => {
+    const r = robotRect();
+    if (!r) return false;
+    // a slightly smaller box than the ship's drawing, so grazing a wingtip doesn't count
+    const l = ship.x - ship.w * 0.35, rt = ship.x + ship.w * 0.35, t = ship.y - ship.h * 0.9, b = ship.y - ship.h * 0.1;
+    return rt > r.left && l < r.right && b > r.top && t < r.bottom;
+  };
+  const blowUpShip = (now) => {
+    const cx = ship.x, cy = ship.y - ship.h * 0.45;
+    const COLORS = ['#ffffff', '#e8f6ff', '#7ff', '#0cf', '#ffd36b', '#ff9a3c', '#ff4f6d'];
+    for (let i = 0; i < 160; i++) {
+      const a = Math.random() * Math.PI * 2, sp = 100 + Math.random() * 900;
+      bits.push({ x: cx, y: cy, vx: Math.cos(a) * sp, vy: Math.sin(a) * sp - 200, life: 0.6 + Math.random() * 1.4,
+        spark: true, size: 2 + Math.random() * (i < 25 ? 14 : 6), color: COLORS[i % COLORS.length] });
+    }
+    rings.push({ x: cx, y: cy, t: 0, R: 260 }, { x: cx, y: cy, t: 0.1, R: 140 });
+    shake = 24;
+    lasers.length = 0;
+    deadUntil = now + 1800;
+    deaths++;
+    // in Gravity mode the blast throws the pieces around it
+    dispatchEvent(new CustomEvent('tss-blast', { detail: { x: cx, y: cy, radius: 220, power: 1700 } }));
+  };
+
+  // --- Shooting the robot. His health lives here (so it works with or without Living robot): each hit
+  // flashes him and slides his colour green → yellow → red; at 0 he blows up and hides until R.
+  // `data-tss-hp` / `data-tss-dead` on the svg and the `tss-robot-hit` / `tss-restore` events let Living
+  // robot react (speed up, get knocked back, freeze, go home).
+  const ROBOT_HP = 100, DAMAGE = 2; // per laser hit: 50 hits destroy him
+  let robotHp = ROBOT_HP;
+  const hex = (h) => [1, 3, 5].map((i) => parseInt(h.slice(i, i + 2), 16));
+  // [outline light, outline dark, eye light, eye dark (= Living robot's legs)], in the order of the svg's <stop>s
+  const PALETTES = [
+    ['#44e0a8', '#1e9a6c', '#a7f3d0', '#2fc58d'], // green: the site's own colours
+    ['#ffe14a', '#c9a400', '#fff3a8', '#f2c500'], // yellow
+    ['#ff4f4f', '#b31212', '#ffb0b0', '#e02626'], // red
+  ].map((p) => p.map(hex));
+  const paintRobot = (robot) => {
+    const t = 1 - robotHp / ROBOT_HP;
+    const [a, z, f] = t < 0.5 ? [PALETTES[0], PALETTES[1], t * 2] : [PALETTES[1], PALETTES[2], (t - 0.5) * 2];
+    const cols = a.map((c, i) => `rgb(${c.map((v, j) => Math.round(v + (z[i][j] - v) * f)).join(',')})`);
+    const hurt = robotHp < ROBOT_HP;
+    [...robot.querySelectorAll('defs stop')].slice(0, 4).forEach((s, i) => { s.style.stopColor = hurt ? cols[i] : ''; });
+    robot.style.setProperty('--tss-robot-leg', cols[3]);
+    if (hurt) robot.setAttribute('data-tss-hp', String(robotHp));
+    else robot.removeAttribute('data-tss-hp');
+  };
+  // Test mode (address ends in #tss-test): any hit destroys him, to get to the end screens quickly.
+  const testMode = () => location.hash.includes('tss-test');
+  const hitRobot = (x, y, damage = DAMAGE) => {
+    const robot = robotEl();
+    if (robot && robotHp > 0) {
+      robotHp = Math.max(0, robotHp - (testMode() ? ROBOT_HP : damage));
+      paintRobot(robot);
+      robot.classList.remove('tss-hurt');
+      void robot.getBoundingClientRect(); // restart the flash
+      robot.classList.add('tss-hurt');
+      dispatchEvent(new CustomEvent('tss-robot-hit'));
+      if (!robotHp) {
+        const r = robot.getBoundingClientRect();
+        robot.setAttribute('data-tss-dead', '');
+        robot.classList.remove('tss-hurt');
+        explodeRobot(r.left + r.width / 2, r.top + r.height / 2, r.width);
+        setTimeout(() => { if (!robotHp) showBanner(); }, 900); // unless R already rebuilt him
+        window.trif?.log('robot destroyed');
+      }
+    }
+    const COLORS = ['#fff', '#7ff', '#ffd36b'];
+    for (let i = 0; i < 12; i++) {
+      const a = -Math.PI / 2 + (Math.random() - 0.5) * 2.6, sp = 120 + Math.random() * 380;
+      bits.push({ x, y, vx: Math.cos(a) * sp, vy: Math.sin(a) * sp, life: 0.2 + Math.random() * 0.35,
+        spark: true, size: 2 + Math.random() * 3, color: COLORS[i % COLORS.length] });
+    }
+    shake = Math.min(shake + 1.5, 20);
+  };
+  // Test hook: in test mode, a `tss-test-kill` event destroys him outright (for scripted tests; bombing
+  // him from below in Gravity mode can take a while)
+  addEventListener('tss-test-kill', () => {
+    if (!testMode()) return;
+    const r = robotEl()?.getBoundingClientRect();
+    if (r) hitRobot(r.left + r.width / 2, r.top + r.height / 2);
+  });
+  const rebuildRobot = () => { // → was there anything to rebuild?
+    const robot = robotEl();
+    if (!robot || robotHp === ROBOT_HP) return false;
+    robotHp = ROBOT_HP;
+    robot.removeAttribute('data-tss-dead');
+    paintRobot(robot);
+    return true;
+  };
+  function explodeRobot(x, y, size) { // the big one
+    try {
+      const COLORS = ['#ffffff', '#fff6c2', '#ffd36b', '#ff9a3c', '#ff4f4f', '#e02626', '#ff6bf0'];
+      for (let i = 0; i < 320; i++) {
+        const a = Math.random() * Math.PI * 2, sp = 100 + Math.random() * 1200;
+        bits.push({ x: x + (Math.random() - 0.5) * size * 0.6, y: y + (Math.random() - 0.5) * size * 0.6,
+          vx: Math.cos(a) * sp, vy: Math.sin(a) * sp - 250, life: 0.8 + Math.random() * 1.8,
+          spark: true, size: 2 + Math.random() * (i < 40 ? 16 : 7), color: COLORS[i % COLORS.length] });
+      }
+      // Rainbow Rave mod on (its gradient is in the robot svg): the parts cycle through the rainbow
+      // and the blast is a huge rainbow nova with rainbow shockwaves
+      const rave = !!document.getElementById('trif-rave-robot');
+      [...'⚙⚙⚙✦✦⚡⚡◆◆●', ...(rave ? '⚙⚙⚙⚙✦✦✦' : '')].forEach((ch, i) => { // flying robot parts
+        const a = -Math.PI / 2 + (Math.random() - 0.5) * 2.4, sp = 400 + Math.random() * 500;
+        bits.push({ ch, x, y, vx: Math.cos(a) * sp, vy: Math.sin(a) * sp, rot: 0, vr: (Math.random() - 0.5) * 18,
+          life: 2.5 + Math.random(), font: 'bold 26px sans-serif', color: '#e02626', scale: 1, grow: 1.5 + Math.random(),
+          hue: rave ? i * 37 : undefined });
+      });
+      if (rave) {
+        for (const b of bits.slice(-320 - 17, -17)) b.hue = Math.random() * 360; // the sparks too
+        rings.push({ x, y, t: 0, R: Math.max(W, H) * 0.9, nova: true, dur: 1.1 });
+        for (let i = 0; i < 7; i++) rings.push({ x, y, t: i * 0.05, R: 260 + i * 70, hue: i * 51, dur: 0.8 });
+      } else {
+        rings.push({ x, y, t: 0, R: 520 }, { x, y, t: 0.1, R: 340 }, { x, y, t: 0.2, R: 200 });
+      }
+      shake = 34;
+      dispatchEvent(new CustomEvent('tss-blast', { detail: { x, y, radius: 320, power: 2300 } })); // Gravity mode: the big one
+    } catch (err) { window.trif?.warn(String(err)); }
+  }
+
+  // --- Boxes (buttons, badges, the terminal window, the footer: anything with a visible background,
+  // border or shadow that holds words). Their words shield them; once every word in a box is blasted
+  // (and any box inside it is gone), lasers can blast the box itself, which counts as a word.
+  // Outside Gravity mode only (there, bombs remove whole pieces). R brings them back like words.
+  const hasVisibleBox = (el) => {
+    const cs = getComputedStyle(el);
+    const bg = cs.backgroundColor.match(/[\d.]+/g);
+    if (cs.backgroundImage !== 'none' || (bg && (bg.length < 4 || +bg[3] > 0))) return true;
+    if (cs.boxShadow !== 'none') return true;
+    return ['Top', 'Right', 'Bottom', 'Left'].some((s) => parseFloat(cs[`border${s}Width`]) > 0 && !/rgba\(.*,\s*0\)$|transparent/.test(cs[`border${s}Color`]));
+  };
+  let boxList = [], boxListAt = -1e9;
+  const allBoxes = (now) => { // re-scanned at most once a second, and only while lasers are flying
+    if (now - boxListAt > 1000) {
+      boxListAt = now;
+      boxList = [...document.body.querySelectorAll('*')].filter((el) => !/^(MAIN|SECTION|ARTICLE|HEADER|NAV)$/.test(el.tagName)
+        && !el.matches('.tss-w, #tss-hud, #tss-canvas') && el.querySelector('.tss-w') && hasVisibleBox(el));
+    }
+    return boxList;
+  };
+  const hitBox = (x, y, now) => {
+    const list = allBoxes(now);
+    let best = null, bestArea = Infinity;
+    for (const el of list) {
+      if (el.closest('[data-tss-dead]') || !el.isConnected) continue;
+      if (el.querySelector('.tss-w:not([data-tss-dead])')) continue; // still shielded by words
+      if (list.some((b) => b !== el && el.contains(b) && !b.closest('[data-tss-dead]'))) continue; // a box inside is still there
+      const r = el.getBoundingClientRect();
+      if (x < r.left || x > r.right || y < r.top || y > r.bottom) continue;
+      if (r.width * r.height < bestArea) { best = el; bestArea = r.width * r.height; }
+    }
+    return best;
+  };
+  const explodeBox = (el) => {
+    const r = el.getBoundingClientRect(), cs = getComputedStyle(el);
+    const cx = r.left + r.width / 2, cy = r.top + r.height / 2;
+    let color = cs.backgroundColor;
+    if (/rgba\(.*,\s*0\)$|transparent/.test(color)) color = cs.borderTopColor; // a bordered box
+    const COLORS = [color, color, color, '#ffffff', '#ffd36b'];
+    const n = Math.min(120, 30 + Math.round(r.width * r.height / 400));
+    for (let i = 0; i < n; i++) { // shards from all over the box
+      const x = r.left + Math.random() * r.width, y = r.top + Math.random() * r.height;
+      const a = Math.atan2(y - cy, x - cx) + (Math.random() - 0.5) * 0.8, sp = 200 + Math.random() * 600;
+      bits.push({ x, y, vx: Math.cos(a) * sp, vy: Math.sin(a) * sp - 250, life: 0.6 + Math.random() * 1.2,
+        spark: true, size: 3 + Math.random() * 9, color: COLORS[i % COLORS.length] });
+    }
+    rings.push({ x: cx, y: cy, t: 0, R: 90 + Math.max(r.width, r.height) * 0.6 });
+    shake = Math.min(shake + 12, 22);
+    el.setAttribute('data-tss-dead', '');
+    score++;
+  };
+
+  // The "ROBOT DESTROYED" banner can't be hit until its letters have finished coming in (see showBanner).
+  const shielded = (w) => !!w.closest('#tss-banner:not([data-tss-ready])');
+  const hitWord = (x, y) => {
+    for (const el of document.elementsFromPoint(x, y)) {
+      if (el.classList?.contains('tss-w') && !el.hasAttribute('data-tss-dead') && !shielded(el)) return el;
+    }
+    // elementsFromPoint skips pointer-events:none text: fall back to rects
+    for (const w of document.querySelectorAll('.tss-w:not([data-tss-dead])')) {
+      if (shielded(w)) continue;
+      const r = w.getBoundingClientRect();
+      if (x >= r.left && x <= r.right && y >= r.top && y <= r.bottom) return w;
+    }
+    return null;
+  };
+
+  // --- Bombs, only while Gravity mode is on (html[data-gm-on]). space (held: one per cooldown) drops one from the ship's belly instead of firing; it
+  // falls, and blows up on the first piece it touches (or the floor). The piece it hits is removed
+  // (its words burst into letters; the piece itself is hidden with data-tss-dead, which Gravity mode
+  // treats as gone, and R brings back). A direct hit on the robot does BOMB_DAMAGE instead. The blast
+  // goes to Gravity mode as a `tss-blast` { x, y, radius, power } event, which flings the pieces
+  // around it (Gravity mode owns their physics).
+  const BOMB_DAMAGE = 5, BOMB_GRAVITY = 1800, BOMB_COOLDOWN = 350, BLAST_RADIUS = 170, BLAST_POWER = 1500;
+  const bombs = [];
+  let lastBomb = 0;
+  const gravityOn = () => document.documentElement.hasAttribute('data-gm-on');
+  const dropBomb = (now) => {
+    if (now - lastBomb < BOMB_COOLDOWN || now < deadUntil) return;
+    lastBomb = now;
+    const vx = ((keys.ArrowRight ? 1 : 0) - (keys.ArrowLeft ? 1 : 0)) * 520 * 0.6; // carries some of the ship's motion
+    const vy = 80 + ((keys.ArrowDown ? 1 : 0) - (keys.ArrowUp ? 1 : 0)) * 420 * 0.5;
+    bombs.push({ x: ship.x, y: ship.y - 18, vx, vy, born: now });
+  };
+  const pieceAt = (x, y) => { // a live Gravity mode piece under this point (not the robot)
+    for (const el of document.querySelectorAll('[data-gm-body]:not([data-gm-ghost])')) {
+      if (el.matches('svg.robot') || el.closest('[data-tss-dead]')) continue;
+      const r = el.getBoundingClientRect();
+      if (x >= r.left && x <= r.right && y >= r.top && y <= r.bottom) return el;
+    }
+    return null;
+  };
+  // Words that aren't Gravity mode pieces (the tagline, which hangs in place) can be bombed one by one.
+  const looseWordAt = (x, y) => {
+    for (const w of document.querySelectorAll('.tss-w:not([data-tss-dead])')) {
+      if (w.closest('[data-gm-body]') || shielded(w)) continue;
+      const r = w.getBoundingClientRect();
+      if (r.width && x >= r.left && x <= r.right && y >= r.top && y <= r.bottom) return w;
+    }
+    return null;
+  };
+  const detonate = (x, y, piece, robotHit, word) => {
+    if (word) explode(word);
+    if (piece) {
+      const words = piece.matches('.tss-w') ? [piece] : [...piece.querySelectorAll('.tss-w:not([data-tss-dead])')];
+      words.forEach((w, i) => {
+        if (i < 6) explode(w); // letters fly (a few words' worth: a whole paragraph would be a blizzard)
+        else { w.setAttribute('data-tss-dead', ''); score++; }
+      });
+      piece.setAttribute('data-tss-dead', '');
+    }
+    if (robotHit) hitRobot(x, y, BOMB_DAMAGE);
+    dispatchEvent(new CustomEvent('tss-blast', { detail: { x, y, radius: BLAST_RADIUS, power: BLAST_POWER } }));
+    const COLORS = ['#ffffff', '#fff6c2', '#ffd36b', '#ff9a3c', '#ff4f4f', '#ff6bf0'];
+    for (let i = 0; i < 140; i++) {
+      const a = Math.random() * Math.PI * 2, sp = 150 + Math.random() * 900;
+      bits.push({ x, y, vx: Math.cos(a) * sp, vy: Math.sin(a) * sp - 200, life: 0.4 + Math.random() * 0.9,
+        spark: true, size: 2 + Math.random() * (i < 20 ? 12 : 6), color: COLORS[i % COLORS.length] });
+    }
+    rings.push({ x, y, t: 0, R: BLAST_RADIUS * 1.3 }, { x, y, t: 0.1, R: BLAST_RADIUS * 0.7 });
+    shake = Math.min(shake + 16, 26);
+  };
+  const drawBomb = (b, now) => {
+    ctx.save();
+    ctx.translate(b.x, b.y);
+    ctx.rotate(Math.atan2(-b.vx, b.vy)); // nose (local +y) along its motion
+    // bright silver, like the ship's fuselage, with the same cyan glow
+    ctx.shadowColor = '#0ff'; ctx.shadowBlur = 10;
+    const fg = ctx.createLinearGradient(-8, 0, 8, 0);
+    fg.addColorStop(0, '#8fa3c7'); fg.addColorStop(0.5, '#e3eefc'); fg.addColorStop(1, '#8fa3c7');
+    ctx.fillStyle = fg; // tail fins
+    ctx.beginPath(); ctx.moveTo(-8, -15); ctx.lineTo(8, -15); ctx.lineTo(4, -6); ctx.lineTo(-4, -6); ctx.closePath(); ctx.fill();
+    const g = ctx.createRadialGradient(-2.5, -3, 1, 0, 0, 11);
+    g.addColorStop(0, '#ffffff'); g.addColorStop(0.45, '#e3eefc'); g.addColorStop(1, '#8fa3c7');
+    ctx.fillStyle = g;
+    ctx.beginPath(); ctx.ellipse(0, 0, 6.5, 10, 0, 0, Math.PI * 2); ctx.fill();
+    ctx.shadowBlur = 0;
+    ctx.fillStyle = '#ff6bf0'; ctx.fillRect(-6.5, -3, 13, 2); // band
+    if (Math.floor((now - b.born) / 120) % 2) { // blinking light
+      ctx.fillStyle = '#ff3b5c'; ctx.shadowColor = '#ff3b5c'; ctx.shadowBlur = 12;
+      ctx.beginPath(); ctx.arc(0, 6, 2.2, 0, Math.PI * 2); ctx.fill();
+    }
+    ctx.restore();
+  };
+  const updateBombs = (now, dt) => {
+    if (!bombs.length) return;
+    if (!gravityOn()) { bombs.length = 0; return; } // gravity switched off: they fizzle
+    const rr = robotRect();
+    for (let i = bombs.length - 1; i >= 0; i--) {
+      const b = bombs[i];
+      b.vy += BOMB_GRAVITY * dt;
+      b.x += b.vx * dt; b.y += b.vy * dt;
+      const sp = Math.hypot(b.vx, b.vy) || 1, tx = b.x + b.vx / sp * 10, ty = b.y + b.vy / sp * 10; // the nose
+      const robotHit = !!rr && tx > rr.left + rr.width * 0.1 && tx < rr.right - rr.width * 0.1 && ty > rr.top && ty < rr.bottom;
+      const piece = robotHit ? null : pieceAt(tx, ty);
+      const word = robotHit || piece ? null : looseWordAt(tx, ty);
+      if (robotHit || piece || word || ty >= H - 2) {
+        bombs.splice(i, 1);
+        detonate(tx, Math.min(ty, H - 2), piece, robotHit, word);
+      } else if (b.x < -60 || b.x > W + 60) bombs.splice(i, 1);
+      else drawBomb(b, now);
+    }
+  };
+
+  // --- Victory. When the robot is destroyed, "ROBOT DESTROYED" flashes up in the middle of the screen.
+  // Each of its letters is a target like any word (lasers and bombs can blast them; it lives outside <body> so Gravity
+  // mode leaves it hanging). Once they're all gone, the ship takes over: it fires its thrusters, flies off
+  // the top of the screen, and the game resets itself (like R, plus the counters go back to zero), with
+  // the ship flying back in from the bottom.
+  let banner = null, leaving = 0, leaveV = 0, resetAt = 0;
+  const showBanner = () => {
+    if (banner) return;
+    banner = document.createElement('div');
+    banner.id = 'tss-banner';
+    const text = document.createElement('span');
+    text.className = 'tss-bn';
+    // every letter is its own target: you have to hit each one
+    let n = 0;
+    ['ROBOT', 'DESTROYED'].forEach((w, i) => {
+      if (i) text.append(Object.assign(document.createElement('span'), { className: 'tss-gap' }));
+      for (const ch of w) {
+        const s = document.createElement('span');
+        s.className = 'tss-w';
+        s.textContent = ch;
+        s.style.setProperty('--tss-i', String(n++)); // letter index, for themes (Rainbow Rave colours each one)
+        text.append(s);
+      }
+    });
+    banner.append(text);
+    banner.style.translate = canvas.style.translate; // see pin()
+    document.documentElement.append(banner);
+    // Shots pass through it until every letter's entrance animation (ours, or a theme's like Rainbow
+    // Rave's staggered spin-in) has finished; then it's fair game. Capped at 4 s in case one never ends.
+    const b = banner;
+    const ready = () => { if (banner === b) b.setAttribute('data-tss-ready', ''); };
+    setTimeout(ready, 4000);
+    requestAnimationFrame(() => { // after the styles (and so the animations) apply
+      try {
+        const intros = b.getAnimations({ subtree: true }).filter((a) => Number.isFinite(a.effect?.getComputedTiming?.().endTime));
+        Promise.all(intros.map((a) => a.finished.catch(() => {}))).then(ready);
+      } catch { ready(); }
+    });
+  };
+  const removeBanner = () => { banner?.remove(); banner = null; };
+  const victory = (now, dt) => { // → true while the ship is out of your hands
+    if (!leaving && banner && !banner.querySelector('.tss-w:not([data-tss-dead])')) {
+      leaving = now + 700; leaveV = 0; // a beat for the letters to fly, then go
+      lasers.length = 0;
+    }
+    if (!leaving) return false;
+    if (now > leaving) { // full thrust, straight up, with a little wobble
+      leaveV = Math.min(1600, leaveV + 1400 * dt);
+      ship.y -= leaveV * dt;
+      ship.x += Math.sin(now / 70) * 40 * dt;
+    }
+    if (ship.y < -ship.h - 60 && !resetAt) resetAt = now + 1600; // an empty screen for a moment, then reset
+    if (resetAt && now > resetAt) {
+      if (winEl) return true; // the You Win screen is up: wait for "play again?"
+      if (allModsOn()) { showWin(); return true; }
+      playAgain();
+    }
+    return true;
+  };
+  // "play again?" from the You Win screen, eased: the win fades out and the music fades (Rainbow Rave
+  // hears `tss-again-out`), the window dims to black, everything resets behind the curtain, then the page
+  // fades back in with the music starting from the top (`tss-again-in`) and the ship flying in.
+  const AGAIN_OUT = 1400; // ms: music fade
+  let againBusy = false;
+  const playAgainEased = () => {
+    if (againBusy) return;
+    againBusy = true;
+    const done = () => { againBusy = false; };
+    try {
+      dispatchEvent(new CustomEvent('tss-again-out', { detail: { ms: AGAIN_OUT } }));
+      const curtain = document.createElement('div');
+      curtain.className = 'tss-curtain';
+      let cx = 0, cy = 0;
+      const pinCurtain = () => { // keep its top-left 40px above and left of the window's, every frame
+        if (!curtain.isConnected) return;
+        const r = curtain.getBoundingClientRect();
+        if (Math.abs(r.left + 40) > 0.5 || Math.abs(r.top + 40) > 0.5) {
+          cx -= r.left + 40; cy -= r.top + 40;
+          curtain.style.translate = `${cx}px ${cy}px`;
+        }
+        requestAnimationFrame(pinCurtain);
+      };
+      setTimeout(() => {
+        document.documentElement.append(curtain);
+        pinCurtain();
+        curtain.getBoundingClientRect(); // (so the fade runs from 0)
+        curtain.classList.add('tss-curtain-on');
+      }, 300);
+      setTimeout(() => {
+        try { playAgain(); } catch (e) { window.trif?.warn('play again failed', String(e)); }
+        safeUntil = performance.now() + 2600;
+        setTimeout(() => {
+          dispatchEvent(new CustomEvent('tss-again-in'));
+          curtain.classList.remove('tss-curtain-on');
+          setTimeout(() => { curtain.remove(); done(); }, 1100);
+        }, 300); // a breath in the dark
+      }, AGAIN_OUT + 100);
+    } catch (e) { window.trif?.warn('play again failed', String(e)); done(); playAgain(); }
+  };
+  const playAgain = () => {
+    // a fresh game starts from the normal layout: Gravity mode off (the page flies home)
+    if (gravityOn()) dispatchEvent(new KeyboardEvent('keydown', { key: 'g' }));
+    removeWin();
+    restoreAll();
+    score = 0; deaths = 0; bombs.length = 0;
+    leaving = 0; resetAt = 0;
+    ship.x = W / 2; ship.y = H + ship.h; // flies back in from below
+    deadUntil = 0; safeUntil = performance.now() + 1800;
+    returning = true;
+  };
+
+  // --- You Win: only for beating the robot with every timsrobot.com mod on. Each leaves a mark on the
+  // page; if one's switched off (or its mark changes), the game just resets as usual.
+  const MOD_MARKS = {
+    'fireworks': 'canvas[data-fw-canvas]',
+    'gravity-mode': 'html[data-gm-ready]',
+    'jelly-buttons': () => [...document.querySelectorAll('style')].some((s) => s.textContent.includes('jb-jelly')),
+    'led-footer': '.led-sign',
+    'living-robot': 'svg.robot[data-lr]',
+    'need-checklist': '[data-nc]',
+    'neon-title': '.nt-word',
+    'rainbow-rave': '#trif-rave-robot',
+    'space-shooter': '#tss-canvas',
+    'sticker-badges': '.sb-badge',
+    'terminal-box': '[data-tb]',
+    'tilt-card': 'style[data-tc]',
+    'typing-tagline': 'html[data-tt-ready], [data-tt-done]',
+  };
+  const modsOff = () => Object.entries(MOD_MARKS).filter(([, m]) => !(typeof m === 'function' ? m() : document.querySelector(m))).map(([n]) => n);
+  const allModsOn = () => {
+    const off = modsOff();
+    if (off.length) window.trif?.log('no You Win screen: not on', off.join(', '));
+    return !off.length;
+  };
+  // Understated, in the page itself, around the hero's own Get it / GitHub buttons (p.links): what's
+  // left above them (title, tagline, badges) fades out to make room; "You Win!" lights up there in the
+  // neon title's style (it's an <h1> in <main>, so Neon title's warm-up flicker and Rainbow Rave's
+  // per-letter colours and glow apply to it), "Now go fix the internet." in the tagline's style, and a
+  // small "play again?" under the buttons. Buttons that survived stay as they are; blasted ones fade
+  // back in where they belong. Gravity mode is switched off first, so everything's back in place.
+  let winEl = null; // { nodes: [...], faded: [...], revived: [...] } while the win is showing
+  const HERO = 'main > section.hero';
+  const showWin = () => {
+    if (winEl) return;
+    winEl = { nodes: [], faded: [], revived: [], pending: true };
+    if (gravityOn()) { // gravity off first: the page flies home, then the win comes in
+      dispatchEvent(new KeyboardEvent('keydown', { key: 'g' }));
+      setTimeout(showWinNow, 900);
+    } else showWinNow();
+  };
+  const showWinNow = () => {
+    try {
+      if (!winEl) return; // "play again" already
+      winEl.pending = false;
+      const hero = document.querySelector(HERO), links = hero?.querySelector(':scope > .links');
+      if (!links) { window.trif?.warn('you win: no hero buttons found'); return; }
+      const el = (tag, cls, text) => { const n = document.createElement(tag); if (cls) n.className = cls; if (text) n.textContent = text; return n; };
+      // make room: fade out what's above the buttons
+      for (const n of hero.querySelectorAll(':scope > h1, :scope > .tagline, :scope > .small')) {
+        n.classList.add('tss-win-faded'); winEl.faded.push(n);
+      }
+      // the buttons: only one that's completely intact is left alone; anything blasted (the button, or
+      // even one of its words) comes back, fading in
+      const hurt = (a) => a.closest('[data-tss-dead]') || a.querySelector('[data-tss-dead]');
+      links.removeAttribute('data-tss-dead');
+      for (const a of links.querySelectorAll('a')) {
+        if (!hurt(a)) continue;
+        a.removeAttribute('data-tss-dead');
+        a.querySelectorAll('[data-tss-dead]').forEach((n) => n.removeAttribute('data-tss-dead'));
+        a.classList.add('tss-win-fadein'); winEl.revived.push(a);
+        // then drop the class, so other animations (Jelly buttons' wobble on hover) work again
+        a.addEventListener('animationend', function done(e) {
+          if (e.animationName === 'tss-win-fadein') { a.classList.remove('tss-win-fadein'); a.removeEventListener('animationend', done); }
+        });
+      }
+      // "You Win!" and the line under it, sitting just above the buttons (out of the flow, so nothing moves)
+      const above = el('div', 'tss-win-above'), head = el('div', 'tss-win-head');
+      const h1 = el('h1', 'tss-win-title nt-lit'); // lit from the start: Neon title's steady style, no warm-up
+      let i = 0;
+      const TEXT = 'You Win!', n = TEXT.replace(/\s/g, '').length;
+      TEXT.split(' ').forEach((w, wi) => {
+        if (wi) h1.append(' ');
+        const word = el('span', 'nt-word');
+        for (const ch of w) {
+          const s = el('span', 'nt-ch', ch);
+          s.style.setProperty('--nt-hue', String(Math.round(i * 300 / (n - 1)))); // red → magenta across the whole thing (Rainbow Rave)
+          s.style.setProperty('--nt-i', String(i++)); // (the wave's timing)
+          word.append(s);
+        }
+        h1.append(word);
+      });
+      const orig = hero.querySelector(':scope > h1');
+      if (orig) h1.style.fontSize = `${parseFloat(getComputedStyle(orig).fontSize) * 1.3}px`;
+      const sub = el('p', 'tss-win-sub', 'Now go fix the internet.');
+      const tag = hero.querySelector(':scope > .tagline');
+      if (tag) { const cs = getComputedStyle(tag); sub.style.font = cs.font; sub.style.color = cs.color; sub.style.textShadow = cs.textShadow; }
+      head.append(h1, sub);
+      above.append(head);
+      links.before(above);
+      // "play again?", just under the buttons
+      const below = el('div', 'tss-win-below');
+      const again = el('button', 'tss-win-again', 'play again?');
+      again.type = 'button';
+      again.classList.add('tss-win-again-in');
+      again.addEventListener('animationend', function done(e) {
+        if (e.animationName === 'tss-win-fadein') { again.classList.remove('tss-win-again-in'); again.removeEventListener('animationend', done); }
+      });
+      again.addEventListener('click', (e) => { e.stopPropagation(); playAgainEased(); });
+      below.append(again);
+      links.after(below);
+      again.style.top = `${2 - (parseFloat(getComputedStyle(links).marginBottom) || 0)}px`; // tucked just under the buttons
+      winEl.nodes.push(above, below);
+      window.trif?.log('you win!');
+    } catch (e) { window.trif?.warn('you win failed', String(e)); }
+  };
+  const removeWin = () => {
+    if (!winEl) return;
+    for (const n of winEl.nodes) n.remove();
+    for (const n of winEl.faded) n.classList.remove('tss-win-faded');
+    for (const n of winEl.revived) n.classList.remove('tss-win-fadein');
+    winEl = null;
+  };
+  let returning = false; // after the reset: the ship rises back into view on its own
+  const flyBackIn = (dt) => {
+    if (!returning) return false;
+    ship.y -= 380 * dt;
+    if (ship.y <= H - 14) { ship.y = H - 14; returning = false; }
+    return true;
+  };
+
+  // --- The ship. Drawn in ship-local pixels: origin at the bottom centre (ship.x, ship.y), nose at
+  // y = -78, wings out to ±51. The gun pods sit at x = ±27 with their muzzles at y = -47, where fire()
+  // spawns lasers. It banks when flying sideways and its engines flare when climbing.
+  const trail = []; // per engine: recent nozzle positions, for the exhaust
+  // Rainbow Rave rings: one per kick drum while its music plays (it sends `rave-kick`)
+  const pulses = [];
+  addEventListener('rave-kick', () => { // each ring stays where the ship was when it started
+    if (pulses.length < 6) pulses.push({ t: 0, hue: (performance.now() / 4) % 360, x: ship.x, y: ship.y - ship.h * 0.45 });
+  });
+  let bank = 0, thrust = 0.5, muzzle = 0;
+  const ENGINES = [-20, 20];
+  const drawShip = (now, dt, visible) => {
+    const wantBank = leaving || returning ? 0 : (keys.ArrowRight ? 1 : 0) - (keys.ArrowLeft ? 1 : 0);
+    const wantThrust = leaving && now > leaving ? 2.2 : returning ? 1 : keys.ArrowUp ? 1 : keys.ArrowDown ? 0.15 : 0.5; // 2.2: afterburners
+    bank += (wantBank - bank) * Math.min(1, dt * 9);
+    thrust += (wantThrust - thrust) * Math.min(1, dt * 7);
+    muzzle = Math.max(0, muzzle - dt);
+
+    // Rainbow Rave mod on (its gradient is in the robot svg): rainbow flames and exhaust, and with its
+    // music playing, a glowing rainbow ring pulses out from where the ship is on every kick drum
+    const rave = !!document.getElementById('trif-rave-robot');
+    const hueAt = (k) => ((now / 4 + k) % 360 + 360) % 360;
+    if (!rave || !visible) pulses.length = 0;
+    ctx.save();
+    ctx.globalCompositeOperation = 'lighter';
+    for (let i = pulses.length - 1; i >= 0; i--) {
+      const p = pulses[i], cx = p.x, cy = p.y;
+      p.t += dt / 0.6;
+      if (p.t >= 1) { pulses.splice(i, 1); continue; }
+      // races out wide and fades fast: most of its light is gone by halfway
+      const e = 1 - Math.pow(1 - p.t, 3), r = 30 + e * 230, fade = Math.pow(1 - p.t, 2.2);
+      for (let k = 0; k < 3; k++) { // three bands of the rainbow, each a soft halo plus a bright core
+        const h = (p.hue + k * 50) % 360, rr = r + k * 5;
+        ctx.shadowColor = `hsl(${h}, 100%, 60%)`;
+        ctx.shadowBlur = 22;
+        ctx.strokeStyle = `hsla(${h}, 100%, 60%, ${(fade * 0.35).toFixed(3)})`;
+        ctx.lineWidth = 12 * fade + 3;
+        ctx.beginPath(); ctx.arc(cx, cy, rr, 0, Math.PI * 2); ctx.stroke();
+        ctx.shadowBlur = 8;
+        ctx.strokeStyle = `hsla(${h}, 100%, 78%, ${(fade * 0.9).toFixed(3)})`;
+        ctx.lineWidth = 2.5 * fade + 1;
+        ctx.beginPath(); ctx.arc(cx, cy, rr, 0, Math.PI * 2); ctx.stroke();
+      }
+    }
+    ctx.restore();
+
+    // exhaust: a short, wide ribbon per engine through the nozzle's recent positions in screen space
+    // (so it swings out behind when the ship moves), blown downwards and tapering as it ages
+    // (Rainbow Rave: about 2.5× as long, with a wide soft halo under the glow and core)
+    const life = (0.08 + thrust * 0.1) * (rave ? 2.5 : 1);
+    const PASSES = rave
+      ? [[46, 58, 0.13], [24, 62, 0.32], [9, 82, 0.8]] // [width, lightness %, alpha]: halo, glow, core
+      : [[20, '60,140,255', 0.4], [8, '200,245,255', 0.75]]; // [width, rgb, alpha]: glow, core
+    ENGINES.forEach((ex, e) => {
+      const pts = trail[e] || (trail[e] = []);
+      for (const p of pts) { p.age += dt; p.y += (120 + thrust * 160) * dt; }
+      while (pts.length && pts[0].age > life) pts.shift();
+      if (visible) pts.push({ x: ship.x + ex * (1 - Math.abs(bank) * 0.18), y: ship.y - 2, age: 0 });
+      else pts.length = 0;
+      if (pts.length < 2) return;
+      ctx.save();
+      ctx.globalCompositeOperation = 'lighter';
+      ctx.lineCap = 'butt'; // round caps overlap at each joint and, drawn additively, look beaded
+      for (const [w, c, a] of PASSES) {
+        for (let i = 1; i < pts.length; i++) {
+          const f = 1 - pts[i].age / life;
+          ctx.strokeStyle = rave // the whole rainbow down the ribbon, rolling
+            ? `hsla(${hueAt((pts[i].age / life) * 330 + e * 60)}, 100%, ${c}%, ${(a * f).toFixed(3)})`
+            : `rgba(${c},${(a * f).toFixed(3)})`;
+          ctx.lineWidth = w * (0.4 + 0.6 * f) * (0.7 + thrust * 0.5);
+          ctx.beginPath(); ctx.moveTo(pts[i - 1].x, pts[i - 1].y); ctx.lineTo(pts[i].x, pts[i].y); ctx.stroke();
+        }
+      }
+      ctx.restore();
+    });
+    if (!visible) return;
+
+    ctx.save();
+    ctx.translate(ship.x, ship.y);
+    ctx.rotate(bank * 0.1);
+    ctx.scale(1 - Math.abs(bank) * 0.18, 1); // banking: the wings foreshorten
+
+    // engine flames
+    ctx.save();
+    ctx.globalCompositeOperation = 'lighter';
+    for (const ex of ENGINES) {
+      const len = (16 + thrust * 34) * (0.85 + Math.random() * 0.3);
+      const g = ctx.createLinearGradient(0, -6, 0, -6 + len);
+      if (rave) { // white-hot at the nozzle, then a run through the rainbow
+        g.addColorStop(0, 'rgba(255,255,255,0.95)');
+        for (let k = 1; k <= 4; k++) g.addColorStop(k * 0.22, `hsla(${hueAt(k * 70 + ex * 3)}, 100%, 62%, ${0.9 - k * 0.15})`);
+        g.addColorStop(1, `hsla(${hueAt(330)}, 100%, 60%, 0)`);
+      } else { g.addColorStop(0, 'rgba(255,255,255,0.95)'); g.addColorStop(0.3, 'rgba(120,230,255,0.85)'); g.addColorStop(1, 'rgba(40,80,255,0)'); }
+      ctx.fillStyle = g;
+      ctx.beginPath();
+      ctx.moveTo(ex - 6, -6);
+      ctx.quadraticCurveTo(ex - 5, -6 + len * 0.5, ex, -6 + len);
+      ctx.quadraticCurveTo(ex + 5, -6 + len * 0.5, ex + 6, -6);
+      ctx.fill();
+    }
+    ctx.restore();
+
+    // wings (the raised one catches the light)
+    for (const s of [-1, 1]) {
+      const lit = 0.5 - s * bank * 0.35;
+      const g = ctx.createLinearGradient(0, -40, s * 51, -8);
+      g.addColorStop(0, `hsl(222, 30%, ${22 + lit * 20}%)`); g.addColorStop(1, `hsl(222, 35%, ${32 + lit * 30}%)`);
+      ctx.fillStyle = g;
+      ctx.beginPath();
+      ctx.moveTo(s * 9, -44); ctx.lineTo(s * 51, -14); ctx.lineTo(s * 49, -5); ctx.lineTo(s * 30, -10); ctx.lineTo(s * 12, -10);
+      ctx.closePath(); ctx.fill();
+      ctx.save();
+      ctx.strokeStyle = '#3ff'; ctx.lineWidth = 1.6; ctx.shadowColor = '#0ff'; ctx.shadowBlur = 10;
+      ctx.beginPath(); ctx.moveTo(s * 9, -44); ctx.lineTo(s * 51, -14); ctx.lineTo(s * 49, -5); ctx.stroke(); // leading edge
+      ctx.restore();
+      // gun pod and barrel
+      ctx.fillStyle = '#7d8cad';
+      ctx.beginPath(); ctx.roundRect(s * 27 - 3.5, -36, 7, 24, 3); ctx.fill();
+      ctx.fillStyle = '#c9d6ee';
+      ctx.fillRect(s * 27 - 1.5, -47, 3, 12);
+      // wingtip light: red port, green starboard, blinking
+      if (Math.floor(now / 500) % 2 === (s < 0 ? 0 : 1)) {
+        ctx.save();
+        ctx.fillStyle = s < 0 ? '#ff3b5c' : '#3bff8a'; ctx.shadowColor = ctx.fillStyle; ctx.shadowBlur = 14;
+        ctx.beginPath(); ctx.arc(s * 50, -12, 2.6, 0, Math.PI * 2); ctx.fill();
+        ctx.restore();
+      }
+    }
+
+    // engine nacelles
+    for (const ex of ENGINES) {
+      const g = ctx.createLinearGradient(ex - 6, 0, ex + 6, 0);
+      g.addColorStop(0, '#5d6c8e'); g.addColorStop(0.5, '#c4d2ec'); g.addColorStop(1, '#4a5878');
+      ctx.fillStyle = g;
+      ctx.beginPath(); ctx.roundRect(ex - 6, -38, 12, 33, [6, 6, 2, 2]); ctx.fill();
+      ctx.fillStyle = '#ff6bf0';
+      ctx.fillRect(ex - 6, -24, 12, 2.5); // accent band
+      ctx.fillStyle = '#20263a';
+      ctx.fillRect(ex - 5, -7, 10, 3); // nozzle
+    }
+
+    // fuselage: light on the side facing away from the bank
+    const fg = ctx.createLinearGradient(-14, 0, 14, 0);
+    fg.addColorStop(0, bank > 0 ? '#f4fbff' : '#8fa3c7'); fg.addColorStop(0.5, '#e3eefc'); fg.addColorStop(1, bank > 0 ? '#8fa3c7' : '#f4fbff');
+    ctx.save();
+    ctx.fillStyle = fg; ctx.shadowColor = '#0ff'; ctx.shadowBlur = 10;
+    ctx.beginPath();
+    ctx.moveTo(0, -78);
+    ctx.bezierCurveTo(8, -70, 13, -55, 13, -38);
+    ctx.lineTo(11, -8); ctx.lineTo(6, -2); ctx.lineTo(-6, -2); ctx.lineTo(-11, -8); ctx.lineTo(-13, -38);
+    ctx.bezierCurveTo(-13, -55, -8, -70, 0, -78);
+    ctx.fill();
+    ctx.restore();
+    ctx.strokeStyle = '#ff6bf0'; ctx.lineWidth = 2; // racing stripe
+    ctx.beginPath(); ctx.moveTo(0, -36); ctx.lineTo(0, -8); ctx.stroke();
+
+    // cockpit canopy
+    const cg = ctx.createLinearGradient(0, -64, 0, -40);
+    cg.addColorStop(0, '#9ff'); cg.addColorStop(1, '#0870b8');
+    ctx.fillStyle = cg;
+    ctx.beginPath(); ctx.ellipse(0, -51, 6, 13, 0, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = 'rgba(255,255,255,0.75)';
+    ctx.beginPath(); ctx.ellipse(-2.2 - bank * 1.5, -56, 1.6, 5, -0.15, 0, Math.PI * 2); ctx.fill();
+
+    // muzzle flashes
+    if (muzzle > 0) {
+      ctx.save();
+      ctx.globalCompositeOperation = 'lighter';
+      for (const s of [-1, 1]) {
+        const r = 10 * (muzzle / 0.07);
+        const g = ctx.createRadialGradient(s * 27, -49, 0, s * 27, -49, r);
+        g.addColorStop(0, 'rgba(255,255,255,1)'); g.addColorStop(0.4, 'rgba(255,107,240,0.8)'); g.addColorStop(1, 'rgba(255,107,240,0)');
+        ctx.fillStyle = g;
+        ctx.beginPath(); ctx.arc(s * 27, -49, r, 0, Math.PI * 2); ctx.fill();
+      }
+      ctx.restore();
+    }
+    ctx.restore();
+
+    // shield bubble while it can't be hurt after respawning
+    if (now < safeUntil) {
+      ctx.save();
+      ctx.strokeStyle = `rgba(120,255,255,${0.35 + 0.25 * Math.sin(now / 60)})`; ctx.lineWidth = 2.5;
+      ctx.shadowColor = '#0ff'; ctx.shadowBlur = 16;
+      ctx.beginPath(); ctx.ellipse(ship.x, ship.y - 38, 62, 50, 0, 0, Math.PI * 2); ctx.stroke();
+      ctx.restore();
+    }
+  };
+
+  let prev = performance.now();
+  const frame = (now) => {
+    const dt = Math.min(0.05, (now - prev) / 1000);
+    prev = now;
+    try {
+      if (keys.ArrowLeft) ship.x -= 520 * dt;
+      if (keys.ArrowRight) ship.x += 520 * dt;
+      const dead = now < deadUntil;
+      if (deadUntil && !dead) { // respawn
+        deadUntil = 0;
+        ship.x = W / 2; ship.y = H - 14;
+        safeUntil = now + 1500;
+      }
+      const autopilot = victory(now, dt) || flyBackIn(dt);
+      if (!dead && !autopilot) {
+        if (keys.ArrowLeft) ship.x -= 520 * dt;
+        if (keys.ArrowRight) ship.x += 520 * dt;
+        if (keys.ArrowUp) ship.y -= 420 * dt;
+        if (keys.ArrowDown) ship.y += 420 * dt;
+        ship.x = Math.max(ship.w / 2, Math.min(W - ship.w / 2, ship.x));
+        ship.y = Math.max(ship.h + 4, Math.min(H - 14, ship.y));
+        // space: lasers normally; in Gravity mode (where lasers can't do much) it drops bombs instead,
+        // one per BOMB_COOLDOWN while held
+        if (keys[' ']) {
+          if (gravityOn()) dropBomb(now);
+          else if (now - lastShot > 150) fire(now);
+        }
+        if (now > safeUntil && touchesRobot()) blowUpShip(now);
+      }
+      // Tell the Living robot mod where the ship is (it chases an active ship). "Active" = flown
+      // or fired in the last 5 s and not exploded.
+      if (keys.ArrowLeft || keys.ArrowRight || keys.ArrowUp || keys.ArrowDown || keys[' ']) lastInput = now;
+      // (plus the bombs in the air, so the robot can see them coming and dodge)
+      dispatchEvent(new CustomEvent('tss-ship', { detail: {
+        x: ship.x, y: ship.y - ship.h * 0.45, active: !dead && !autopilot && now - lastInput < 5000,
+        bombs: bombs.map((b) => ({ x: b.x, y: b.y, vx: b.vx, vy: b.vy })), bombGravity: BOMB_GRAVITY } }));
+
+      ctx.clearRect(0, 0, W, H);
+
+      applyShake(dt);
+      pin();
+
+      ctx.save();
+      ctx.shadowColor = '#f0f'; ctx.shadowBlur = 18;
+      const rr = lasers.length ? robotRect() : null;
+      for (let i = lasers.length - 1; i >= 0; i--) {
+        const l = lasers[i];
+        l.y -= 950 * dt;
+        // the robot shields the words behind him (inset a little: his svg box has empty corners)
+        if (rr && l.x + 5 > rr.left + rr.width * 0.12 && l.x - 5 < rr.right - rr.width * 0.12
+            && l.y < rr.bottom - rr.height * 0.1 && l.y + 34 > rr.top + rr.height * 0.1) {
+          hitRobot(l.x, l.y);
+          lasers.splice(i, 1);
+          continue;
+        }
+        // fat bolt: hit anything under its centre or either edge
+        const w = l.y > 0 && (hitWord(l.x, l.y) || hitWord(l.x - 5, l.y) || hitWord(l.x + 5, l.y));
+        if (w) explode(w);
+        const box = !w && l.y > 0 && !gravityOn() ? hitBox(l.x, l.y, now) : null;
+        if (box) explodeBox(box);
+        if (w || box || l.y < -40) { lasers.splice(i, 1); continue; }
+        ctx.fillStyle = '#ff6bf0';
+        ctx.beginPath(); ctx.roundRect(l.x - 5, l.y, 10, 34, 5); ctx.fill();
+        ctx.fillStyle = '#fff';
+        ctx.beginPath(); ctx.roundRect(l.x - 2, l.y + 3, 4, 28, 2); ctx.fill();
+      }
+      ctx.restore();
+
+      for (let i = rings.length - 1; i >= 0; i--) {
+        const g = rings[i];
+        g.t += dt / (g.dur || 0.45);
+        if (g.t >= 1) { rings.splice(i, 1); continue; }
+        const e = 1 - Math.pow(1 - g.t, 3);
+        ctx.save();
+        if (g.nova) { // a rainbow disc that swells and fades: the Rainbow Rave robot blast
+          const r = Math.max(1, g.R * e), spin = (now / 4) % 360;
+          const grad = ctx.createRadialGradient(g.x, g.y, 0, g.x, g.y, r);
+          grad.addColorStop(0, 'rgba(255,255,255,0.95)');
+          for (let k = 0; k <= 6; k++) grad.addColorStop(0.15 + k * 0.13, `hsla(${(spin + k * 55) % 360}, 100%, 62%, ${0.75 - k * 0.07})`);
+          grad.addColorStop(1, 'hsla(0, 100%, 60%, 0)');
+          ctx.globalAlpha = (1 - g.t) * 0.85;
+          ctx.globalCompositeOperation = 'lighter';
+          ctx.fillStyle = grad;
+          ctx.beginPath(); ctx.arc(g.x, g.y, r, 0, Math.PI * 2); ctx.fill();
+          ctx.restore();
+          continue;
+        }
+        if (g.hue != null) { // a rainbow shockwave
+          const c = `hsl(${(g.hue + now / 3) % 360}, 100%, 62%)`;
+          ctx.globalAlpha = 1 - g.t;
+          ctx.strokeStyle = c; ctx.lineWidth = 16 * (1 - g.t) + 2;
+          ctx.shadowColor = c; ctx.shadowBlur = 24;
+          ctx.beginPath(); ctx.arc(g.x, g.y, g.R * e, 0, Math.PI * 2); ctx.stroke();
+          ctx.restore();
+          continue;
+        }
+        if (g.t < 0.25) { // white-hot flash at the centre
+          ctx.globalAlpha = 1 - g.t / 0.25;
+          ctx.fillStyle = '#fff8e0';
+          ctx.beginPath(); ctx.arc(g.x, g.y, g.R * 0.45 * (0.5 + g.t * 2), 0, Math.PI * 2); ctx.fill();
+        }
+        ctx.globalAlpha = 1 - g.t;
+        ctx.strokeStyle = '#ffb347'; ctx.lineWidth = 10 * (1 - g.t) + 1;
+        ctx.shadowColor = '#ff6b3c'; ctx.shadowBlur = 20;
+        ctx.beginPath(); ctx.arc(g.x, g.y, g.R * e, 0, Math.PI * 2); ctx.stroke();
+        ctx.restore();
+      }
+
+      for (let i = bits.length - 1; i >= 0; i--) {
+        const b = bits[i];
+        b.life -= dt;
+        if (b.life <= 0) { bits.splice(i, 1); continue; }
+        b.vy += 520 * dt;
+        b.x += b.vx * dt; b.y += b.vy * dt;
+        if (b.y > H - 4 && b.vy > 0) { b.y = H - 4; b.vy *= -0.45; b.vx *= 0.7; }
+        ctx.globalAlpha = Math.min(1, b.life);
+        if (b.hue != null) b.color = `hsl(${(b.hue + now * 0.45) % 360}, 100%, 62%)`; // rainbow bits cycle
+        if (b.spark) {
+          ctx.fillStyle = b.color;
+          ctx.fillRect(b.x - b.size / 2, b.y - b.size / 2, b.size, b.size);
+        } else {
+          b.rot += b.vr * dt;
+          b.scale = Math.min(b.grow, b.scale + dt * 4);
+          ctx.save();
+          ctx.translate(b.x, b.y); ctx.rotate(b.rot); ctx.scale(b.scale, b.scale);
+          ctx.font = b.font; ctx.fillStyle = b.color;
+          ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+          ctx.fillText(b.ch, 0, 0);
+          ctx.restore();
+        }
+      }
+      ctx.globalAlpha = 1;
+      // hidden while dead; blinks while safe after respawning
+      updateBombs(now, dt);
+      drawShip(now, dt, now >= deadUntil && (now > safeUntil || Math.floor(now / 100) % 2));
+      hud.textContent = `← → ↑ ↓ fly · space ${gravityOn() ? 'bomb' : 'fire'}`
+        + (document.documentElement.hasAttribute('data-gm-ready') ? ' · G gravity' : '') // the Gravity mode mod is on
+        + ` · R restore · ${score} words blasted`
+        + (deaths ? ` · ${deaths} death${deaths > 1 ? 's' : ''}` : '')
+        + (robotHp && robotHp < ROBOT_HP ? ` · robot ${robotHp}/${ROBOT_HP}` : ''); // (destroyed: the big banner says so)
+    } catch (e) { window.trif?.warn('frame failed', String(e)); }
+    requestAnimationFrame(frame);
+  };
+  requestAnimationFrame(frame);
+  window.trif?.log('space shooter ready', document.querySelectorAll('.tss-w').length, 'words');
+})();

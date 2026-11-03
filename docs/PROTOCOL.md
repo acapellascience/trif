@@ -287,12 +287,23 @@ moves the old id's `disabled` and `offSites` entries and its place in `modOrder`
 `startedOff` (`carryRenames`, `renameInOrder`), so it isn't switched off again as a new mod. The helper
 does the same in `origins.json`. A file renamed and edited in one go is a new mod.
 
+**TRIF's home page.** timsrobot.com has a demo of TRIF (the real side panel on a stand-in, running the
+home page mods), which would double every mod for someone running the real TRIF there. So while TRIF is on
+for timsrobot.com, and only for it, the extension registers one more user script, `trif-home` (lib.js
+`homeMarkerScript`): at document_start it sets `<html data-trif="on">` on timsrobot.com and its
+subdomains, and the demo stands aside. No other site is ever marked: a marker would let sites tell who
+runs TRIF (the runtime likewise only goes where mods run).
+
 **Order in the side panel.** The panel's mods can be dragged (or moved with Alt+↑/↓) into any order, per
 site: `chrome.storage.local` **`modOrder`** = `{"<site as scopeFor gives it>": ["<mod id>", …]}`, written
 by the panel. Display only: mods register and run in the order they always do. Mods not in the list
 come after the listed ones in the order the helper sends them; listed ids that aren't mods any more are
 skipped (one restored from the trash takes its old place) and dropped the next time the order is saved;
-an order that's just the helper's is removed (`orderMods`, `setModOrder` in lib.js).
+an order that's just the helper's is removed (`orderMods`, `setModOrder` in lib.js). Until the user drags,
+a site's shipped mods come in the order TRIF ships them in: every `mods` message carries
+`defaultOrder` (same shape; helper/lib/preinstalled.js `DEFAULT_ORDER`, so far timsrobot.com's), which
+the extension keeps in `chrome.storage.local` **`defaultOrder`**; the panel orders by it first, then by
+the user's `modOrder`.
 
 ### `run` semantics
 

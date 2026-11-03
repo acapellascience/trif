@@ -405,6 +405,60 @@ test('doctor: which host.js the wrapper may run', () => {
   assert.match(checkWrapperScript('/somewhere/else/helper/host.js', ws).title, /not this copy/);
 });
 
+// The mods on TRIF's own home page (0.2.0), in the order the side panel starts them in.
+const HOMEPAGE = ['typing-tagline', 'jelly-buttons', 'gravity-mode', 'fireworks', 'neon-title', 'space-shooter', 'sticker-badges',
+  'need-checklist', 'terminal-box', 'rainbow-rave', 'led-footer', 'living-robot', 'tilt-card'].map((m) => `timsrobot.com/${m}`);
+
+test('the home page mods: shipped, all off, TRIF not turned on for timsrobot.com, listed in Tim\'s order', () => {
+  const { DEFAULT_ORDER } = require('../helper/lib/preinstalled');
+  const { parseHeader } = require('../helper/lib/mods');
+  const shipped = PREINSTALLED.filter((p) => p.id.startsWith('timsrobot.com/'));
+  assert.deepStrictEqual(shipped.map((p) => p.id), HOMEPAGE);
+  assert.ok(shipped.every((p) => p.on === false), 'all start off');
+  assert.ok(!SITES_ON.some((s) => /timsrobot/.test(s)), 'TRIF stays off there until the user turns it on');
+  assert.deepStrictEqual(DEFAULT_ORDER, { 'timsrobot.com': HOMEPAGE });
+  const dir = path.join(REPO, 'examples', 'sites', 'timsrobot.com');
+  assert.deepStrictEqual(fs.readdirSync(dir).sort(), HOMEPAGE.map((id) => `${id.split('/')[1]}.js`).sort(), 'nothing else in the folder');
+  for (const id of HOMEPAGE) {
+    const h = parseHeader(fs.readFileSync(path.join(REPO, 'examples', 'sites', `${id}.js`), 'utf8'));
+    assert.deepStrictEqual([h.source, h.version, h.warnings], ['trif', '1', []], id);
+    assert.ok(h.name && h.description, `${id} has a name and a description`);
+  }
+});
+
+test('the home page mods reach a workspace from before 0.2.0 off, and never replace the user\'s own same-named files', () => {
+  const examples = path.join(REPO, 'examples', 'sites');
+  const home = tempDir();
+  const sites = path.join(home, 'sites');
+  // Set up before 0.2.0: everything else offered already. And the user's own home page mods under the
+  // same names (as Tim has, from making them), one of them byte for byte what's shipped.
+  const before = PREINSTALLED.map((p) => p.id).filter((id) => !id.startsWith('timsrobot.com/') && id !== 'www.google.com/dvd-logo');
+  fs.writeFileSync(path.join(home, 'preinstalled.json'), JSON.stringify({ offered: before, startOff: [], sitesOn: SITES_ON }));
+  const dir = path.join(sites, 'timsrobot.com');
+  fs.mkdirSync(dir, { recursive: true });
+  const mine = { 'fireworks.js': '// my fireworks, still being worked on\n', 'space-shooter.js': '// my shooter\n' };
+  for (const [f, code] of Object.entries(mine)) fs.writeFileSync(path.join(dir, f), code);
+  fs.copyFileSync(path.join(examples, 'timsrobot.com', 'tilt-card.js'), path.join(dir, 'tilt-card.js'));
+  const r = preinstallMods(home, sites, examples);
+  const theirs = ['timsrobot.com/fireworks', 'timsrobot.com/space-shooter', 'timsrobot.com/tilt-card'];
+  assert.deepStrictEqual(r.added, ['www.google.com/dvd-logo', ...HOMEPAGE.filter((id) => !theirs.includes(id))]);
+  assert.deepStrictEqual(r.on, [], 'all off');
+  assert.deepStrictEqual(r.sites, [], 'no new site turned on');
+  for (const [f, code] of Object.entries(mine)) assert.strictEqual(fs.readFileSync(path.join(dir, f), 'utf8'), code, `${f} untouched`);
+  const st = loadPreinstalled(home);
+  assert.deepStrictEqual(st.startOff, r.added, 'the user\'s own files keep their switches');
+  assert.deepStrictEqual(st.shipped, { 'timsrobot.com/fireworks': { own: true }, 'timsrobot.com/space-shooter': { own: true } },
+    'their own versions are never updated; an exact copy counts as the shipped one');
+  assert.ok(theirs.every((id) => st.offered.includes(id)));
+  // Updates leave them alone too.
+  const { updateShippedMods } = require('../helper/lib/preinstalled');
+  updateShippedMods(home, sites, examples);
+  for (const [f, code] of Object.entries(mine)) assert.strictEqual(fs.readFileSync(path.join(dir, f), 'utf8'), code, `${f} untouched by updates`);
+  assert.deepStrictEqual(loadPreinstalled(home).shipped['timsrobot.com/fireworks'], { own: true });
+  // And the next setup offers nothing again.
+  assert.deepStrictEqual(preinstallMods(home, sites, examples), { added: [], on: [], sites: [] });
+});
+
 test('preinstalled mods: each once, switched on or off as listed; the start sites once; never over the user\'s file, never back after deleting it', async () => {
   const home = tempDir();
   const sites = path.join(home, 'sites');
@@ -412,7 +466,7 @@ test('preinstalled mods: each once, switched on or off as listed; the start site
   const plainx = path.join(sites, 'x.com', 'plain-x.js');
   const ids = PREINSTALLED.map((p) => p.id);
   const off = PREINSTALLED.filter((p) => !p.on).map((p) => p.id);
-  assert.deepStrictEqual(off, ['x.com/punk-fonts', 'x.com/rainbow-rave', 'www.instagram.com/desaturate', 'www.google.com/dvd-logo']);
+  assert.deepStrictEqual(off, ['x.com/punk-fonts', 'x.com/rainbow-rave', 'www.instagram.com/desaturate', 'www.google.com/dvd-logo', ...HOMEPAGE]);
   assert.deepStrictEqual(SITES_ON, ['google.com', 'x.com', 'amazon.com', 'instagram.com']);
   for (const id of ids) assert.ok(fs.existsSync(path.join(examples, `${id}.js`)), `examples has ${id}`);
   let r = preinstallMods(home, sites, examples);
@@ -433,7 +487,7 @@ test('preinstalled mods: each once, switched on or off as listed; the start site
   r = preinstallMods(home2, path.join(home2, 'sites'), examples);
   assert.deepStrictEqual(r.added, ids.filter((id) => id !== 'x.com/rainbow-rave'));
   assert.strictEqual(fs.readFileSync(own, 'utf8'), '// mine');
-  assert.deepStrictEqual(loadPreinstalled(home2).startOff, ['x.com/punk-fonts', 'www.instagram.com/desaturate', 'www.google.com/dvd-logo'], 'the user\'s own file isn\'t switched off');
+  assert.deepStrictEqual(loadPreinstalled(home2).startOff, ['x.com/punk-fonts', 'www.instagram.com/desaturate', 'www.google.com/dvd-logo', ...HOMEPAGE], 'the user\'s own file isn\'t switched off');
   assert.deepStrictEqual(loadPreinstalled(home2).shipped, { 'x.com/rainbow-rave': { own: true } }, 'nor ever updated');
 
   // Through setup, and --no-examples.

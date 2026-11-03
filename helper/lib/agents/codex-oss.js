@@ -90,6 +90,14 @@ function isLoopback(u) {
   return host === 'localhost' || host === '[::1]' || /^127(\.\d{1,3}){3}$/.test(host);
 }
 
+/** For the agent: the model it is and who serves it (Codex's built-in instructions are written for OpenAI's). */
+function modelNote(om) {
+  let where = `served by ${om.name}`;
+  if (om.local) where = `running on this computer in ${om.name}`;
+  else if (om.provider === 'custom') { try { where = `served by ${new URL(om.baseUrl).host}`; } catch { /* as is */ } }
+  return `(This chat's model is ${om.model}, ${where}. Codex CLI is only the program running it: its built-in instructions are written for OpenAI's models. Asked which model you are, that's the answer: ${om.model}.)`;
+}
+
 /** config.json's openModel, checked: {provider, model, baseUrl} ('' where unset). (An old `keyEnv` is ignored.) */
 function normalize(cfg) {
   const c = cfg && typeof cfg === 'object' && !Array.isArray(cfg) ? cfg : {};
@@ -261,7 +269,7 @@ const adapter = {
   note: '',
   missing: 'Open models run through Codex, which isn\'t installed or can\'t be found. Install it (brew install codex), ' +
     'then run `trif setup` in the same terminal so the helper finds it. (No OpenAI account needed for open models.)',
-  PROVIDERS, RECOMMENDED_LOCAL, OPENROUTER_MODELS, EXCLUDED_VARS, normalize, resolve, keyAccount, insecureKey, providerArgs, parseModelList, orderLocal, friendlyFor, installedModels, isLoopback, localModel,
+  PROVIDERS, RECOMMENDED_LOCAL, OPENROUTER_MODELS, EXCLUDED_VARS, normalize, resolve, keyAccount, modelNote, insecureKey, providerArgs, parseModelList, orderLocal, friendlyFor, installedModels, isLoopback, localModel,
 
   detect(opts) {
     const d = codex.detect(opts);
@@ -337,9 +345,11 @@ const adapter = {
   },
 
   // writable / readOnly / denied: as codex.js. openModel: from prepare (resolve()).
+  // Each message starts with which model this is (modelNote): asked, open models said they were OpenAI's
+  // ("I'm an OpenAI coding agent running inside Codex CLI"), from Codex's own instructions.
   command(opts) {
     const om = opts.openModel || resolve(null, null, opts.model);
-    return codex.command({ ...opts, model: om.model, config: providerArgs(om) });
+    return codex.command({ ...opts, prompt: `${modelNote(om)}\n\n${opts.prompt}`, model: om.model, config: providerArgs(om) });
   },
 
   parse(line, emit, state = {}) {

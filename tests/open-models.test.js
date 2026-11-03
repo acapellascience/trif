@@ -71,8 +71,12 @@ test('command: local Ollama, LM Studio, OpenRouter (through the key proxy), cust
   c = oss.command({ bin: 'codex', prompt: '-P', sessionId: 'th1', openModel: om, ...LIMITS });
   assert.match(providerToml(c.args), /base_url = "https:\/\/llm\.example\.com\/v1", wire_api = "responses", supports_websockets/);
   assert.deepEqual(c.args.slice(-5), ['-m', 'big-model', 'resume', 'th1', '-']);
-  assert.equal(c.stdin, '-P', 'the message on stdin, never in argv');
+  assert.equal(c.stdin, `${oss.modelNote(om)}\n\n-P`, 'the message on stdin (after which model this is), never in argv');
   assert.ok(c.args.indexOf('model_provider="trif-open"') < c.args.indexOf('resume'));
+  // Every message says which model this is, and who serves it.
+  assert.equal(oss.modelNote(om), "(This chat's model is big-model, served by llm.example.com. Codex CLI is only the program running it: its built-in instructions are written for OpenAI's models. Asked which model you are, that's the answer: big-model.)");
+  assert.match(oss.modelNote(oss.resolve({ provider: 'openrouter' }, null, 'moonshotai/kimi-k2')), /^\(This chat's model is moonshotai\/kimi-k2, served by OpenRouter\. /);
+  assert.match(oss.modelNote(oss.resolve({ provider: 'ollama' })), /model is gpt-oss:20b, running on this computer in Ollama\./);
   // The plain Codex option is untouched by all this.
   const plain = require('../helper/lib/agents/codex').command({ bin: 'codex', prompt: 'P', ...LIMITS });
   assert.ok(!plain.args.some((a) => /trif-open|web_search/.test(a)));

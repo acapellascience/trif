@@ -632,7 +632,7 @@ function setup(opts = {}) {
   }
   say(`     (its ID must be ${P.EXTENSION_ID}).${mode === 'copy' ? ' Keep that folder: Chrome runs the extension from it,' : ''}`);
   if (mode === 'copy') say('     and setup updates it in place. (A Web Store listing will replace this step later.)');
-  say('  2. Turn on "Allow User Scripts": click "Open extension settings" on the TRIF tab Chrome opens,');
+  say('  2. Turn on "Allow User Scripts": click "Open TRIF’s Chrome settings" on the TRIF tab Chrome opens,');
   say('     or "Details" on TRIF in chrome://extensions.');
   say(`  3. Check everything with: ${trif} doctor`);
   if (targets.some((t) => t.firefox)) {

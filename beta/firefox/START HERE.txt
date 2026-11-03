@@ -26,7 +26,7 @@ Install (about 2 minutes)
    It ends with a list of next steps (the ones below). You can ignore its notes about PATH or sudo.
 
 3. Drag trif-firefox.xpi from this folder onto a Firefox window, and click Add.
-4. On the TRIF tab that opened in Firefox, click "Allow user scripts", then Allow.
+4. On the TRIF setup tab that opened in Firefox, click "Allow user scripts", then Allow.
    (The TRIF button in the Firefox toolbar opens the sidebar, which offers it too. Don't see the
    button? It's under the puzzle-piece menu: pin it.)
 5. Quit Firefox completely (Cmd-Q) and open it again.

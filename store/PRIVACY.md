@@ -1,8 +1,9 @@
 # TRIF privacy policy
 
-Last updated: November 1, 2026
+Last updated: November 2, 2026
 
-Tim's Robot Internet Fixer (TRIF, called WebMods before version 0.2.0) is a Chrome extension that runs website customizations ("mods") written by **your own coding
+Tim's Robot Internet Fixer (TRIF, called WebMods before version 0.2.0) is a browser extension (for
+Chrome, Firefox and Safari) that runs website customizations ("mods") written by **your own coding
 agent** (for example Claude Code or OpenAI Codex) on your own computer. This policy explains what the
 extension does with your data. In short, **TRIF collects nothing.** The only thing that ever reaches
 its developer is a problem report, and only when you fill in the report form and press Send.
@@ -11,19 +12,20 @@ its developer is a problem report, and only when you fill in the report form and
 
 There are three parties:
 
-1. **The TRIF extension**, running in your Chrome.
+1. **The TRIF extension**, running in your browser.
 2. **The TRIF helper**, a small program you install on your computer. The extension talks only
-   to the helper, through Chrome's "native messaging" channel. That channel connects programs on the
-   same machine and doesn't go over the network.
+   to the helper, through the browser's "native messaging" channel (in Safari, a connection to the
+   helper on your own computer, 127.0.0.1). Neither goes over the network.
 3. **Your coding agent** (Claude Code, Codex…). It runs on your computer under your own account with
-   its AI provider (for example Anthropic or OpenAI). The helper starts it when you send a message in
-   the TRIF side panel.
+   its AI provider (for example Anthropic or OpenAI), or with a model you chose (see "Open models"
+   below). The helper starts it when you send a message in the TRIF side panel.
 
 The TRIF developer is none of these at run time. There is no TRIF account, analytics, telemetry,
 automatic crash reporting, advertising or tracking of any kind. The extension contains no code that
 makes network requests to anyone.
 
-Two things go over the network, neither carrying anything about you:
+Apart from your agent's own traffic (below), two things go over the network, neither carrying anything
+about you:
 
 - **Updates.** The helper checks for a newer TRIF about once a day by downloading a small public file
   from GitHub (`raw.githubusercontent.com`), and downloads the new version from GitHub when you choose
@@ -42,14 +44,18 @@ Two things go over the network, neither carrying anything about you:
 
 | Data | When | Where it goes |
 |---|---|---|
-| **Your mods** (JavaScript files, with the sites each one runs on) | Always | Read from a folder on your computer (`~/.trif/sites/`) by the helper. The extension keeps a copy in Chrome's local extension storage so mods work before the helper connects. |
+| **Your mods** (JavaScript files, with the sites each one runs on) | Always | Read from a folder on your computer (`~/.trif/sites/`) by the helper. The extension keeps a copy in the browser's local extension storage so mods work before the helper connects. |
 | **Tab addresses and titles** | When the side panel is open, and when your agent asks | The side panel uses them to show the mods and chat for the current site. Your agent gets them when it lists tabs or targets one. |
-| **Page content**: visible text, screenshots of the visible tab, the result of scripts the agent runs on the page, and errors or log messages from mods | Only when your agent asks, while working on a request from you | Passed through the helper to your agent. |
+| **Page content**: visible text, screenshots, the result of scripts the agent runs on the page, and errors or log messages from mods | Only when your agent asks, while working on a request from you, and only on sites you turned TRIF on for | Passed through the helper to your agent. Screenshots are saved in TRIF's private folder (below), one folder per site, and deleted after 30 days. In Firefox a screenshot can be of a tab you're not looking at. In Chrome, for a tab you're not looking at, your agent can ask for a copy of the page: TRIF loads the page again, with your cookies (so signed in as you), in a window of its own that shows for a moment at the edge of your screen, captures it and closes it; it refuses addresses that look like one-time links (sign-in, confirm, unsubscribe). |
 | **Recorded network requests** (address, method, status, request body and response text) | Only on sites where you or your agent turn recording on. It's off by default. | Kept in the page's memory and cleared on every reload. Passed to your agent when it asks. These can include sensitive data such as login tokens, so turn recording on only where you need it. |
-| **Your chat messages** in the side panel, and your agent's replies | When you use the side panel | Your messages go through the helper to your agent. The chat history for each site is saved in Chrome's local extension storage. |
-| **Settings**: chosen agent, model name, which mods you switched off, which sites are being recorded | When you change them | Chrome's local extension storage only. |
+| **Your chat messages** in the side panel, and your agent's replies | When you use the side panel | Your messages go through the helper to your agent. The chat history for each site is saved in the browser's local extension storage. The helper keeps a record of each of the last 50 agent runs (what the agent saw and said) in its private folder. |
+| **Settings**: chosen agent and model (for each site's chat), which mods you switched off, which sites TRIF is on for and which are being recorded | When you change them | The browser's local extension storage. The helper's own settings, including open-model choices (provider, model, server address; never the key), are in `config.json` in its private folder. |
 
-TRIF doesn't use Chrome sync storage, cookies, or any remote storage.
+TRIF doesn't use browser sync storage, cookies, or any remote storage.
+
+**The private folder.** The helper keeps its settings, logs, agent run records and screenshots in
+`~/Library/Application Support/TRIF` on a Mac (`~/.local/state/trif` on Linux), outside the folder your
+agent works in. Side-panel agents can't read it.
 
 ## Your coding agent and its AI provider
 
@@ -61,14 +67,26 @@ and privacy policy**, not by TRIF:
 - Claude Code (Anthropic): https://www.anthropic.com/legal/privacy
 - Codex (OpenAI): https://openai.com/policies/privacy-policy
 
-The agent uses your own login or API key. TRIF never sees your credentials and receives no copy
-of what is sent. Avoid asking the agent to work on pages that show information you don't want to send
+The agent uses your own login, or an API key you saved. A saved key is kept in your Mac's Keychain (on
+Linux, your keyring) and nowhere else: before each chat the helper reads it and adds it to the agent's
+requests itself, through a small proxy on your computer that lasts only for that chat, so the agent and
+its commands never get it, and it's kept out of TRIF's files and logs. Those requests, with whatever
+page content your agent sends, then go from the helper to the provider: Anthropic or OpenAI. TRIF never
+sees your login, and the TRIF developer receives no copy of anything.
+
+**Open models (experimental).** If you pick "Open model (via Codex)", your agent's requests go to the
+model you chose: to **Ollama or LM Studio on your own computer**, in which case nothing leaves your
+computer; or to **OpenRouter** or **another server you name** (a custom URL), with the key you saved
+(kept and sent as above), under that provider's terms. Avoid asking the agent to work on pages that show information you don't want to send
 to your AI provider, such as banking or medical records. The agent only reads pages while it is
 working on something you asked for.
 
 Web pages can contain text written to mislead AI agents ("prompt injection"). TRIF limits what
-the agent can do: it can edit files in the TRIF folder and run TRIF commands. But those
-commands can run scripts in your open tabs, so review what the agent does on sensitive sites.
+the agent can do, with walls your operating system enforces: it can change mods only for the site
+you're on, run TRIF commands only on that site's tabs, read the TRIF folder and your agents' skill
+folders (read only) but not TRIF's private folder or the rest of your home folder, and its commands get
+no network access. But TRIF commands can run scripts in that site's tabs, so review what the agent does
+on sensitive sites.
 
 ## Sharing and sale
 
@@ -83,11 +101,13 @@ Everything stays on your computer until you delete it:
 
 - **Chat history:** use "New chat" in the side panel to clear a site's conversation.
 - **Mods:** switch them off in the side panel, or delete the files in `~/.trif/sites/`.
-- **Everything the extension stored:** remove the extension from Chrome. That deletes its local
+- **Everything the extension stored:** remove the extension from your browser. That deletes its local
   storage and all registered mods.
-- **Helper files** (`~/.trif/`, your mods; and `~/Library/Application Support/TRIF/` on a Mac, or
-  `~/.local/state/trif/` on Linux: settings, logs and the agent run records in `runs/`): delete those
-  folders.
+- **Helper files** (`~/.trif/`, your mods; and the private folder, `~/Library/Application Support/TRIF/`
+  on a Mac or `~/.local/state/trif/` on Linux: settings, logs, screenshots and the agent run records in
+  `runs/`): delete those folders. Screenshots go by themselves after 30 days, run records after 50 runs.
+- **API keys you saved:** `trif agent key --remove-key` (and `--agent codex`), `trif agent open-model
+  --remove-key`, or delete "TRIF API key" and "TRIF open model key" in Keychain Access.
 - **What your agent sent to its provider:** see that provider's controls (linked above).
 
 ## Children

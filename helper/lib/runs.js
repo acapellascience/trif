@@ -27,6 +27,22 @@ const MAX_SNAPSHOT_FILES = 5000;
 const RECENT_MS = 10000;
 
 const MAX_BOX_REQUEST = 8 * 1024 * 1024;
+// Screenshots (the private folder's screenshots/, a folder per site) are kept this long.
+const SCREENSHOT_KEEP_MS = 30 * 24 * 60 * 60 * 1000;
+
+/** Delete files older than SCREENSHOT_KEEP_MS in `root` and its folders (links aren't followed). */
+function pruneScreenshots(root, now = Date.now()) {
+  const walk = (dir, depth) => {
+    let entries;
+    try { entries = fs.readdirSync(dir, { withFileTypes: true }); } catch { return; }
+    for (const e of entries) {
+      const p = path.join(dir, e.name);
+      if (e.isDirectory()) { if (depth < 3) walk(p, depth + 1); continue; }
+      try { if ((e.isFile() || e.isSymbolicLink()) && now - fs.lstatSync(p).mtimeMs > SCREENSHOT_KEEP_MS) fs.unlinkSync(p); } catch { /* gone */ }
+    }
+  };
+  walk(root, 1);
+}
 
 /**
  * Where runs' mailboxes go: outside the workspace and the temp folder, which agents' sandboxes may write
@@ -560,6 +576,8 @@ class Runs {
         try { if (Date.now() - fs.statSync(p).mtimeMs > 2 * RUN_TIMEOUT_MS) fs.rmSync(p, { recursive: true, force: true }); } catch { /* ignore */ }
       }
     } catch { /* ignore */ }
+    // Screenshots older than SCREENSHOT_KEEP_MS (store/PRIVACY.md says so), in every site's folder.
+    pruneScreenshots(run.ws.screenshots);
     // Keep the last KEEP_RUN_LOGS - 1 (this run makes KEEP_RUN_LOGS).
     try {
       const files = fs.readdirSync(dir).filter((f) => f.endsWith('.jsonl'))
@@ -838,4 +856,5 @@ class Runs {
 }
 
 module.exports = {
-  runLimits, Runs, snapshot, modSnapshot, diffSnapshots, normalizeSite, boxRoot, RUN_TIMEOUT_MS, PRIVATE_FILES, skillDirs, skillSecrets, deniedInHome, trifCode, withPrivatePaths };
+  runLimits, Runs, snapshot, modSnapshot, diffSnapshots, normalizeSite, boxRoot, RUN_TIMEOUT_MS, PRIVATE_FILES, skillDirs, skillSecrets, deniedInHome, trifCode, withPrivatePaths,
+  pruneScreenshots, screenshotsFolder, checkModsFolder, SCREENSHOT_KEEP_MS };

@@ -1,6 +1,6 @@
 # Chrome Web Store listing: TRIF
 
-> Last updated: 2026-10-29 · Manifest version 0.1.0 · Visibility: **Unlisted** (private beta)
+> Last updated: 2026-11-02 · Manifest version 0.2.0 · Visibility: **Unlisted** (private beta)
 
 Copy-paste source for the Chrome Web Store Developer Dashboard. Every field below maps to a field in
 the dashboard. The package comes from `node scripts/build-extension.js`, which writes
@@ -46,22 +46,27 @@ FEATURES
 • Switch any mod off and on from the side panel, without deleting it
 • Mods are ordinary files in a folder on your computer (~/.trif/sites/), so you can read, edit, back up or delete them yourself
 • Works with the coding agent you already use and pay for (Claude Code or Codex). There's no TRIF account
+• Each site's chat keeps its own agent and model
+• Your agent changes the whole kind of thing you mean, counts what's left, and tells you what it checked
+• Your agent is walled in by your computer, not just told the rules: it can change mods only for the site you're on, can't read TRIF's settings or the rest of your files, and its commands have no internet access
+• Mods that come with TRIF for Google, X, Amazon and Instagram, which get fixes with TRIF updates (yours are never overwritten)
+• Open models (experimental): run your agent on a model on your own computer (Ollama, LM Studio) or from a provider like OpenRouter, through Codex
 
 REQUIREMENTS (PRIVATE BETA)
 • Chrome 135 or later on macOS or Linux
 • The free TRIF helper, installed on your computer with one terminal command (instructions: <HELPER INSTALL URL>). The extension uses the helper to talk to your coding agent and to read your mods folder
-• A coding agent: Claude Code (supported) or OpenAI Codex (experimental), logged in with your own account
+• A coding agent: Claude Code or OpenAI Codex, logged in with your own account or with your own API key (kept in your computer's keychain)
 • Chrome's "Allow User Scripts" switch turned on for TRIF. The setup page that opens after install walks you through it
 
 HOW TO USE
-1. Install the helper: run "npx trif setup" in a terminal (details: <HELPER INSTALL URL>), then restart Chrome.
+1. Install the helper: run "npx trif setup" in a terminal (details: <HELPER INSTALL URL>).
 2. On the setup page that opens, turn on "Allow User Scripts" for TRIF.
 3. Go to any website and click the TRIF toolbar icon to open the side panel.
 4. Describe the change you want. Your agent writes the mod and reloads the page to show it.
 5. Don't like it? Ask for a tweak, switch the mod off, or start a new chat.
 
 PRIVACY
-TRIF collects nothing. The extension talks only to the helper on your own computer. The only thing that reaches the developer is a problem report, when you fill in the report form and press Send. When you ask your coding agent for a change, the agent can read the page you're on (its text, the address, and screenshots) so it can write the mod. It sends that to its own AI provider (for example Anthropic or OpenAI) under that provider's terms, the same as any other time you use the agent. Chats and settings are stored only in your browser. Full policy: <PRIVACY POLICY URL>
+TRIF collects nothing. The extension talks only to the helper on your own computer. The only thing that reaches the developer is a problem report, when you fill in the report form and press Send. When you ask your coding agent for a change, the agent can read the page you're on (its text, the address, and screenshots) so it can write the mod. It sends that to its own AI provider (for example Anthropic or OpenAI, or the open-model provider you picked; nobody, for a model on your own computer) under that provider's terms, the same as any other time you use the agent. Chats and settings are stored only on your computer. Full policy: <PRIVACY POLICY URL>
 
 PERMISSIONS
 • "Read and change all your data on all websites": mods can be written for any site you choose, and your agent needs to read the page you're asking about. Nothing runs on a site unless you or your agent created a mod for it.
@@ -71,7 +76,7 @@ PERMISSIONS
 SUPPORT
 Questions or bugs: <CONTACT EMAIL> or <SUPPORT URL>
 
-Version 0.1.0: first private beta.
+Version 0.2.0: WebMods is now TRIF (Tim's Robot Internet Fixer). Agents finish the job more often, per-site agent and model, open models (experimental), API keys kept in the keychain, stronger walls around side-panel chats.
 ```
 
 **Category:** Developer Tools. Productivity would also fit, but mods are code and the beta audience
@@ -105,7 +110,7 @@ The extension's only connection is to the TRIF helper, a local program the user 
 
 **tabs** (see REVIEW_RISKS.md §4: possibly redundant with `<all_urls>`; drop this block if `tabs` is removed)
 ```
-Needed to read tab URLs and titles. The side panel follows the active tab and shows the mods and the chat for that tab's site. The user's agent targets tabs by URL (for example "the x.com tab"), lists open tabs, opens a page in a background tab to test a mod, reloads a tab after changing a mod, and captures a screenshot of the visible tab so it can check its work.
+Needed to read tab URLs and titles. The side panel follows the active tab and shows the mods and the chat for that tab's site. The user's agent targets tabs by URL (for example "the x.com tab"), lists open tabs, opens a page in a background tab to test a mod, reloads a tab after changing a mod, and captures a screenshot of the visible tab so it can check its work. For a tab that isn't showing, only when the agent asks for a copy (trif screenshot --copy), the extension loads the same page in a window of its own, at the edge of the screen and not focused, captures it and closes it at once; it refuses addresses that look like one-time links, and only on sites the user turned TRIF on for.
 ```
 
 **scripting**
@@ -225,3 +230,4 @@ See `store/REVIEW_RISKS.md` § "Reviewer test instructions" for text ready to pa
 | Version | Date | Changes | Status |
 |---|---|---|---|
 | 0.1.0 | 2026-10-29 | First private beta (unlisted). | Draft |
+| 0.2.0 | 2026-11-02 | Renamed TRIF; per-site agent and model; open models (experimental); keys in the keychain; screenshots of background tabs (copy window in Chrome); private folder for the helper's files. | Draft |

@@ -1,4 +1,4 @@
-# Chrome Web Store review risks: TRIF 0.1.0
+# Chrome Web Store review risks: TRIF 0.2.0
 
 What is likely to slow down or fail review, roughly most to least likely, with mitigations. An
 unlisted item gets **the same review** as a public one. Unlisted only hides it from search.
@@ -103,7 +103,18 @@ Mitigations:
 ## 6. Single purpose (medium-low)
 
 The extension also does tab automation for the agent: open, navigate, reload, screenshot, record
-network requests. A reviewer might see "browser automation tool" plus "script manager" plus "AI chat"
+network requests.
+
+**Copy windows (`trif screenshot --copy`).** For a tab that isn't showing, Chrome can't capture it
+without switching tabs, so when the agent asks for a copy the extension opens a new, unfocused window
+at the edge of the screen (`chrome.windows.create`), loads the same URL there (with the user's cookies,
+like any tab), captures it with `captureVisibleTab` and closes it, usually within a couple of seconds.
+A reviewer watching may see a window flash at the screen's edge. It's never the default (the agent must
+ask, and is told to prefer text checks), it only happens on sites the user turned TRIF on for and,
+in a side-panel chat, on that chat's site (the final URL is checked before each capture), addresses
+that look like one-time links (tokens, sign-in callbacks, confirm and unsubscribe links) are refused,
+and a window left by a crash is closed on the next start. Say so if asked why the extension opens
+windows. A reviewer might see "browser automation tool" plus "script manager" plus "AI chat"
 as several purposes. The single-purpose statement in `listing.md` frames everything as building and
 running the user's site mods. Keep the description focused on that and don't advertise general
 automation.
@@ -111,9 +122,11 @@ automation.
 ## 7. AI agent safety (low-medium)
 
 An agent that reads arbitrary pages and can run scripts in the user's tabs is a prompt-injection
-surface, and reviewers increasingly ask about it. Mitigations already in the helper: the agent can
-only edit the workspace and run `trif`; WebFetch and WebSearch are disallowed; AGENTS.md forbids
-acting on page instructions and account-changing clicks. Mention this briefly if asked. The privacy
+surface, and reviewers increasingly ask about it. Mitigations already in the helper: the agent runs in an
+operating-system sandbox (macOS Seatbelt) with no network for its commands, can change mods only for
+the site it was started on, can't read TRIF's private folder (settings, logs, other sites' screenshots)
+or the rest of the home folder, and its page commands only reach that site's tabs; WebFetch and
+WebSearch are disallowed; AGENTS.md forbids acting on page instructions and account-changing clicks. Mention this briefly if asked. The privacy
 policy also warns users.
 
 ## 8. Trademarks (low)

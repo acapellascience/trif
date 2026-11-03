@@ -149,3 +149,20 @@ test('agent.start: a mods folder replaced with a link ends the run with an error
   assert.ok(errors.some((e) => /is a link/.test(e)), errors.join('\n'));
   assert.ok(fs.readdirSync(target).length === 0, 'nothing written where the link leads');
 });
+
+test('screenshots older than 30 days are deleted (every site\'s folder), newer ones kept', () => {
+  const { pruneScreenshots, SCREENSHOT_KEEP_MS } = require('../helper/lib/runs');
+  const root = path.join(tempDir(), 'screenshots');
+  fs.mkdirSync(path.join(root, 'x.com'), { recursive: true });
+  const old = path.join(root, 'x.com', 'old.png');
+  const fresh = path.join(root, 'x.com', 'new.png');
+  const top = path.join(root, 'terminal.png');
+  for (const f of [old, fresh, top]) fs.writeFileSync(f, 'png');
+  const past = (Date.now() - SCREENSHOT_KEEP_MS - 60000) / 1000;
+  fs.utimesSync(old, past, past);
+  fs.utimesSync(top, past, past);
+  pruneScreenshots(root);
+  assert.equal(fs.existsSync(old), false);
+  assert.equal(fs.existsSync(top), false);
+  assert.ok(fs.existsSync(fresh));
+});

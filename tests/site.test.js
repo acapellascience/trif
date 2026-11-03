@@ -57,6 +57,12 @@ test('the Worker: pages with strict headers, reports emailed, bad ones refused',
   }
   assert.match(await (await worker.fetch(new Request('https://timsrobot.com/report'), e)).text(), /<script src="\/report.js">/);
   assert.equal((await worker.fetch(new Request('https://timsrobot.com/nope'), e)).status, 404);
+  // The home page: what TRIF is, where to get it, how to report a problem.
+  const home = await (await worker.fetch(new Request('https://timsrobot.com/'), e)).text();
+  assert.match(home, /Fix any website with your own coding agent\./);
+  assert.match(home, /href="https:\/\/github\.com\/acapellascience\/trif#install">Get it</);
+  assert.match(home, /href="\/report">Report a problem</);
+  assert.ok(!/<script/.test(home), 'the home page runs no script');
 
   let res = await worker.fetch(post({ what: 'It broke', site: 'x.com', email: 'a@b.co', details: 'TRIF 0.1.1' }, { 'User-Agent': 'Firefox/159' }), e);
   assert.deepStrictEqual([res.status, await res.json()], [200, { ok: true }]);
@@ -125,4 +131,13 @@ test('webmods.dev (the address before 0.2.0) redirects to the same place on tims
   assert.equal(post.status, 308);
   assert.equal(e.sent.length, 0, 'nothing is sent from the old address');
   assert.equal((await worker.fetch(new Request('https://timsrobot.com/'), e)).status, 200);
+});
+
+test('the home page\'s robot is the extension\'s shaded robot', async () => {
+  const fs = require('fs');
+  const path = require('path');
+  const { ROBOT_SVG } = await import('../site/src/pages.js');
+  const file = fs.readFileSync(path.join(__dirname, '..', 'extension', 'icons', 'robot-shaded.svg'), 'utf8');
+  const shapes = (svg) => svg.replace(/<!--[\s\S]*?-->/g, '').replace(/<svg[^>]*>/, '').replace(/\s+/g, ' ').trim();
+  assert.equal(shapes(ROBOT_SVG), shapes(file), 'run node scripts/render-icon.js, then copy the new robot into site/src/pages.js');
 });

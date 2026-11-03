@@ -89,17 +89,23 @@
   <p class="gate-title">The robot is off.</p>
   <button id="gate-btn" class="btn go" type="button"></button>
   <p id="gate-err" class="mod-err" hidden></p>
+  <!-- What's in the way, in one line (sidepanel.js problemLine): red, or yellow for a login. -->
+  <div id="gate-note" class="problem-line" hidden></div>
 </section>
 
 <!-- No website in this tab: the robot, the version (filled in from the manifest) and where to start. -->
 <section id="landing" class="landing" hidden>
-  <img class="landing-icon" src="icons/robot-shaded.svg" alt="">
+  <img id="landing-icon" class="landing-icon" src="icons/robot-shaded.svg" alt="">
   <div class="landing-words">
     <p id="landing-version" class="landing-version">TRIF</p>
     <p class="landing-lead">Open any website to start fixing it.</p>
   </div>
+  <!-- Only the red problems here (no website, so no login is needed yet). -->
+  <div id="landing-note" class="problem-line" hidden></div>
 </section>
 
+<!-- User scripts off: a notice of its own, above any other (a login one too). -->
+<section id="paused" class="notice" hidden></section>
 <section id="notice" class="notice" hidden></section>
 <section id="update" class="notice" hidden></section>
 

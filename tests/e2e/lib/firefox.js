@@ -119,6 +119,13 @@ class FirefoxDriver {
     return 'granted through ExtensionPermissions (permissions.request said no)';
   }
 
+  /** Takes the userScripts permission away again, from an extension page `ctx` (the add-on giving it up). */
+  async revokeUserScripts(ctx) {
+    const removed = await this.bidi.call(ctx, `async () => chrome.permissions.remove({ permissions: ['userScripts'] })`);
+    if (!removed) throw new Error('permissions.remove said no');
+    return 'removed with permissions.remove';
+  }
+
   // ---- pages
 
   async contexts() {

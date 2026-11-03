@@ -49,7 +49,7 @@ Per browser, a **fresh** scenario, and an **upgrade** scenario per `--upgrade-fr
 3. Against a local test site (`http://127.0.0.1:<port>`, `http://localhost:<port>`) with a mod the
    harness writes, and the panel opened as a window following the test window (`sidepanel.html?window=<id>`):
    - the site starts off: the mod doesn't run, the panel shows "The robot is off." and "Fix 127.0.0.1"
-     (the top bar only the robot, grey and dim, and settings); clicking it runs the mod;
+     (the top bar only the status dot, the robot, grey and dim, and settings); clicking it runs the mod;
    - the mod's switch in the panel off and on (page reloads, `trif status` agrees), `trif disable` /
      `trif enable` from the CLI (page and panel follow), the site switch off (nothing runs, page
      commands refused) and on again; the same with the robot in the top bar (off like the power button,
@@ -68,6 +68,10 @@ Per browser, a **fresh** scenario, and an **upgrade** scenario per `--upgrade-fr
    fetches and XHRs a saved `HomeLatestTimeline` response, as X does. Checks Plain X keeps only the
    mutuals' plain posts and the cursor, rewrites the requests to Recent, and logs no mod errors. Then the
    panel on x.com lists the shipped mods (and, upgrading, offers the edited mod's new version). Then
+   what's in the way, in colour, on the site's page, the gate and the landing page: the agent not logged
+   in (yellow; not on the landing page), user scripts off (all red, "Mods are paused" above the login
+   notice), and the helper not connected (its wrapper moved aside and the scratch helper stopped: red,
+   but the mods' switches green, since mods still run; then put back and reconnected with Try again). Then
    screenshots of the panel as narrow as a side panel: on x.com, on a gate (localhost) and on the landing
    page (no website: the big robot, only settings in the bar), each of the last two with settings open
    (they must open, list the agents and load the instructions).

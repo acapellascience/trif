@@ -184,14 +184,19 @@ class ChromeDriver {
   }
 
   /** Turns on "Allow User Scripts" for TRIF, as the switch on chrome://extensions does. */
-  async grantUserScripts() {
+  async grantUserScripts() { return this.setUserScripts(true); }
+
+  /** Turns user scripts off for TRIF again, as the switch on chrome://extensions does. */
+  async revokeUserScripts() { return this.setUserScripts(false); }
+
+  async setUserScripts(on) {
     const { targetId } = await this.cdp.send('Target.createTarget', { url: `chrome://extensions/?id=${EXTENSION_ID}` });
     const sid = await this._attach(targetId);
     await sleep(1000);
     const r = await this.cdp.send('Runtime.evaluate', {
       expression: `new Promise((resolve, reject) => {
         if (!chrome.developerPrivate) return reject(new Error('no chrome.developerPrivate'));
-        chrome.developerPrivate.updateExtensionConfiguration({ extensionId: ${JSON.stringify(EXTENSION_ID)}, userScriptsAccess: true }, () => {
+        chrome.developerPrivate.updateExtensionConfiguration({ extensionId: ${JSON.stringify(EXTENSION_ID)}, userScriptsAccess: ${on} }, () => {
           const err = chrome.runtime.lastError; if (err) return reject(new Error(err.message));
           chrome.developerPrivate.getExtensionInfo(${JSON.stringify(EXTENSION_ID)}, (info) => resolve(JSON.stringify({ userScriptsAccess: info.userScriptAccess || info.userScriptsAccess || null, keys: Object.keys(info).filter((k) => /user/i.test(k)) })));
         });
@@ -200,7 +205,7 @@ class ChromeDriver {
     }, sid);
     await this.cdp.send('Target.closeTarget', { targetId }).catch(() => {});
     this.sessions.delete(targetId);
-    if (r.exceptionDetails) throw new Error(`couldn't switch on user scripts: ${r.exceptionDetails.exception?.description || r.exceptionDetails.text}`);
+    if (r.exceptionDetails) throw new Error(`couldn't switch ${on ? 'on' : 'off'} user scripts: ${r.exceptionDetails.exception?.description || r.exceptionDetails.text}`);
     return `developerPrivate: ${r.result.value}`;
   }
 

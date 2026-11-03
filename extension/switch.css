@@ -2,7 +2,7 @@
    green (the icon's W); off uses the page's --muted colour, so it follows light and
    dark mode. */
 
-:root { --switch-on: #34d399; }
+:root { --trif-green: #34d399; --switch-on: var(--trif-green); }
 
 button.switch {
   flex: none;

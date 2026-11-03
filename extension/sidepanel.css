@@ -131,10 +131,12 @@ svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width:
 .gate-icon .face { fill: #18181a; }
 .btn.go { padding: 8px 16px; border-color: transparent; background: var(--switch-on); color: #04291c; font-size: 13px; font-weight: 600; }
 .btn.go:hover { background: color-mix(in srgb, var(--switch-on) 85%, #000); }
-/* There the top bar keeps only the robot (grey and dim, below) and settings; with no website, only settings.
-   Settings are for every site, so they open from both. */
-body:is(.site-off, .no-site) :is(.dot, .site, #site-switch, #new-chat, .notice, .mods, .chat, .composer) { display: none; }
-body.no-site .bar-robot { display: none; }
+/* There the top bar keeps only the dot, the robot (grey and dim, below) and settings; with no website, only
+   settings, and the dot when something red is wrong. Settings are for every site, so they open from both.
+   (A notice moved into the gate, the login in progress, shows: only the body's own notices hide.) */
+body:is(.site-off, .no-site) :is(.site, #site-switch, #new-chat, .mods, .chat, .composer),
+body:is(.site-off, .no-site) > .notice { display: none; }
+body.no-site .bar-robot, body.no-site:not(.blocked) .dot { display: none; }
 /* No website in this tab (a new tab, the browser's own pages): only the shaded robot, where the gate's sits. */
 /* The robot, then the version in bold and the line under it, centred as a group; the extra 33px of top
    padding moves the group 16.5px down, where the robot sat before it had words under it. */
@@ -144,6 +146,15 @@ body.no-site .bar-robot { display: none; }
 .landing-words { margin-top: 48px; display: flex; flex-direction: column; align-items: center; gap: 6px; }
 .landing-version { margin: 0; font-size: 15px; font-weight: 600; }
 .landing-lead { margin: 0; color: var(--muted); }
+/* What's in the way, under the gate's or the landing page's own words: one line in the colour it's in. */
+.problem-line { max-width: 300px; margin: 0; text-align: center; color: var(--bad); }
+body.needs-login .problem-line { color: var(--warn); }
+.problem-line p { margin: 0; }
+.problem-line a { color: inherit; }
+.problem-line code { white-space: nowrap; }
+.landing .problem-line { margin-top: 18px; }
+/* The login started from the gate's line: its notice, in the gate in place of the line. */
+.gate .notice { width: min(100%, 320px); margin: 0; }
 /* Settings open above either one: in a short panel it scrolls instead of running off the bottom. */
 .gate, .landing { min-height: 0; overflow-y: auto; justify-content: safe center; }
 /* The power, + and settings buttons: close together, at the right edge (the power button can be hidden). */
@@ -169,6 +180,19 @@ body.site-off .bar-robot:hover:not([aria-busy="true"]) svg { filter: grayscale(0
 .power svg { stroke-width: 1.8; }
 .power[aria-checked="true"], .power[aria-checked="true"]:hover:not(:disabled) { color: var(--switch-on); }
 .power[aria-busy="true"] { cursor: progress; opacity: 0.6; }
+
+/* Something in the way, the same conditions as the dot (sidepanel.js render): every green turns red when
+   TRIF is missing a part (the helper isn't connected, or user scripts are off), or yellow when the agent
+   needs a login (or the open model a key) first. Nearly all of it is --switch-on (switch.css): the robots,
+   the power button, the Fix button, the mod switches and their lights. */
+body.blocked { --switch-on: var(--bad); }
+body.needs-login { --switch-on: var(--warn); }
+body.blocked .bar-robot .eye { fill: #ffc2bc; }
+body.needs-login .bar-robot .eye { fill: #fbe3a6; }
+body.needs-login .btn.go { color: #2e1f02; }
+/* Except the mods while only the helper is away: they still run (the extension keeps its copy), so their
+   switches and lights stay green. */
+body[data-problem="helper"] .mod-list { --switch-on: var(--trif-green); }
 
 .field { display: grid; grid-template-columns: 52px 1fr; align-items: center; gap: 8px; }
 .field > span { color: var(--muted); }

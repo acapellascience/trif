@@ -7,7 +7,7 @@ import { siteForUrl, modAppliesTo, modSites, isMultiSite, offOnSite, normalizeOf
   normalizeSettings, normalizePicks, siteSettings, withoutModel } from './lib.js';
 import { renderMarkdown, MARKDOWN_ELEMENTS, MARKDOWN_ATTRIBUTES } from './markdown.js';
 import { modSwitch, syncSwitches, shownEnabled, switchError, enabledIn, onSwitchChange } from './modswitch.js';
-import { mountOpenModel, renderOpenModel } from './openmodel.js';
+import { mountOpenModel, renderOpenModel, openModelKeyMissing, watchOpenModel } from './openmodel.js';
 
 const $ = (sel) => document.querySelector(sel);
 const chatKey = (site) => `chat:${site}`;
@@ -15,12 +15,13 @@ const emptyChat = () => ({ sessionId: null, agent: null, messages: [], run: null
 
 const ui = {
   dot: $('#dot'), site: $('#site'), barRobot: $('#bar-robot'), siteSwitch: $('#site-switch'), newChat: $('#new-chat'), settingsBtn: $('#settings-btn'),
-  gate: $('#gate'), gateBtn: $('#gate-btn'), gateErr: $('#gate-err'), landing: $('#landing'), landingVersion: $('#landing-version'),
+  gate: $('#gate'), gateBtn: $('#gate-btn'), gateErr: $('#gate-err'), gateNote: $('#gate-note'),
+  landing: $('#landing'), landingIcon: $('#landing-icon'), landingVersion: $('#landing-version'), landingNote: $('#landing-note'),
   settings: $('#settings'), agent: $('#agent'), agentNote: $('#agent-note'), model: $('#model'),
   modelCustomRow: $('#model-custom-row'), modelCustom: $('#model-custom'), modelNote: $('#model-note'),
   instructions: $('#instructions'), instructionsNote: $('#instructions-note'),
   autoUpdate: $('#auto-update'), updateNote: $('#update-note'), update: $('#update'),
-  notice: $('#notice'), mods: $('#mods'), modsCount: $('#mods-count'), modList: $('#mod-list'),
+  notice: $('#notice'), paused: $('#paused'), mods: $('#mods'), modsCount: $('#mods-count'), modList: $('#mod-list'),
   chat: $('#chat'), empty: $('#empty'), messages: $('#messages'), working: $('#working'),
 
   composer: $('#composer'), input: $('#input'), send: $('#send'), stop: $('#stop'),
@@ -129,6 +130,7 @@ async function loadAgents() {
   try {
     view.agents = await request({ type: 'agent.list' });
     view.agentsError = null;
+    watchOpenModel(currentAgent().id, true, true); // its key may have been saved from a terminal meanwhile
   } catch (e) {
     view.agents = null;
     view.agentsError = String(e?.message ?? e);
@@ -297,15 +299,26 @@ function render() {
   ui.site.title = view.tab?.url || '';
   document.title = site ? `TRIF · ${site}` : 'Tim\'s Robot Internet Fixer';
 
+  // What's in the way (problemNow): the dot, the colours (body.blocked: red; body.needs-login: yellow,
+  // not on the landing page, where no agent is needed yet) and the gate's and landing page's one line all
+  // follow it, so they can't disagree.
+  watchOpenModel(agentInfo?.id, helperOk);
+  const problem = problemNow({ helperOk, agentInfo });
+  const red = RED.has(problem);
+  document.body.classList.toggle('blocked', red);
+  document.body.classList.toggle('needs-login', !!problem && !red && !!site);
+  document.body.dataset.problem = problem || '';
+
   // Status dot
   let dot = 'bad';
   let dotLabel = 'Helper not connected';
   if (!status) { dot = ''; dotLabel = 'Checking…'; }
   else if (helperOk) {
-    const agentOk = agentInfo ? agentInfo.available && agentInfo.loggedIn !== false : anyAgent;
-    dot = status.userScripts && agentOk ? 'ok' : 'warn';
-    dotLabel = !status.userScripts ? 'User scripts are off'
-      : agentInfo?.available && agentInfo.loggedIn === false ? `${agentInfo.name} isn’t logged in`
+    const agentOk = !problem && (agentInfo ? agentInfo.available : anyAgent);
+    dot = red ? 'bad' : agentOk ? 'ok' : 'warn';
+    dotLabel = problem === 'scripts' ? 'User scripts are off'
+      : problem === 'login' ? `${agentInfo?.name || 'The agent'} isn’t logged in`
+      : problem === 'key' ? `No ${openModelKeyMissing()} API key yet`
       : !agentOk ? 'Coding agent not available'
       : `Ready${agentInfo ? ` · ${agentInfo.name}` : ''}`;
   }
@@ -317,7 +330,7 @@ function render() {
   const canSend = !!site && helperOk && (agentInfo ? agentInfo.available : (view.agents ? anyAgent : true));
   ui.composer.dataset.canSend = canSend ? '1' : '';
 
-  renderGate();
+  renderGate(problem, agentInfo);
   renderNotice({ helperOk, agentInfo, anyAgent });
   renderUpdate();
   renderMods();
@@ -335,11 +348,97 @@ function render() {
   ui.send.disabled = !canSend;
 }
 
+// Red (mods can't run): the helper isn't connected, or user scripts are off. Yellow, the rest: the agent
+// can't run until the user logs in (or saves the open model's key).
+const RED = new Set(['helper', 'scripts']);
+
+/** What's in the way: 'helper', 'scripts', 'login', 'key' (in that order: red first), or null. */
+function problemNow({ helperOk, agentInfo }) {
+  const { status } = view;
+  if (!status) return null;
+  if (!helperOk) return 'helper';
+  if (!status.userScripts) return 'scripts';
+  if (needsLogin(agentInfo)) return 'login';
+  if (agentInfo?.id === 'codex-oss' && agentInfo.available && openModelKeyMissing()) return 'key';
+  return null;
+}
+
+/**
+ * The problem in one line, for the gate and the landing page (the site's own page has the notices):
+ * the notice's words, shortened, with its action as a link.
+ */
+function problemLine(problem, agentInfo) {
+  const link = (text, onClick) => {
+    const a = el('a', null, text);
+    a.href = '#';
+    a.addEventListener('click', (e) => { e.preventDefault(); onClick(); });
+    return a;
+  };
+  const p = el('p');
+  switch (problem) {
+    case 'helper':
+      p.append('The TRIF helper isn’t connected. Run ', code('npx trif setup'), ` in a terminal, then restart ${BROWSER}. `, link('Setup page', openSetup));
+      break;
+    case 'scripts':
+      if (FIREFOX) p.append('Mods are paused. ', link('Allow user scripts', allowUserScripts));
+      else p.append('Mods are paused: turn on “Allow User Scripts” for TRIF. ', link('Open extension settings', allowUserScripts));
+      break;
+    case 'login': {
+      const name = agentInfo?.name || 'The agent';
+      const fix = agentInfo?.loginFix || '';
+      if (agentInfo?.canLogin) p.append(`${name} isn’t logged in. `, link('Log in', () => startLogin(agentInfo.id, name, fix)));
+      else return markdownBlock('', `${name} isn’t logged in.${fix ? ` To log in, ${fix}.` : ''}`);
+      break;
+    }
+    case 'key':
+      p.append(`No ${openModelKeyMissing()} API key yet: add it in `, link('Settings', openSettings), '.');
+      break;
+    default:
+      return null;
+  }
+  return p;
+}
+
+/** Fill a one-line problem spot (rebuilt only when what it says changes, so a link isn't swapped mid-click). */
+function renderProblemLine(node, problem, agentInfo) {
+  const key = problem ? JSON.stringify([problem, BROWSER, agentInfo?.name, agentInfo?.canLogin, agentInfo?.loginFix, problem === 'key' && openModelKeyMissing()]) : '';
+  if (node.dataset.key === key) return;
+  node.dataset.key = key;
+  const line = problem ? problemLine(problem, agentInfo) : null;
+  node.replaceChildren(...(line ? [line] : []));
+  node.hidden = !line;
+}
+
+// Turning user scripts on: in Firefox a permission prompt, which must open from the click itself; in
+// Chrome, the extension's settings page, where the switch is.
+function allowUserScripts() {
+  if (FIREFOX) chrome.permissions.request({ permissions: ['userScripts'] }).then(() => setTimeout(refreshStatus, 300), () => {});
+  else chrome.tabs.create({ url: view.status?.settingsUrl || `chrome://extensions/?id=${chrome.runtime.id}` });
+}
+
+/** User scripts off: "Mods are paused", in a notice of its own above the rest (a login notice too). */
+function renderPaused(helperOk) {
+  const n = ui.paused;
+  const off = !!view.site && helperOk && !view.status.userScripts;
+  n.hidden = !off;
+  if (!off || n.childElementCount) return;
+  const actions = el('p', 'actions');
+  actions.append(button(FIREFOX ? 'Allow user scripts' : 'Open extension settings', 'primary', allowUserScripts));
+  n.replaceChildren(el('p', 'title', 'Mods are paused'), el('p', null, FIREFOX
+    ? 'Allow user scripts for TRIF so mods can run on websites.'
+    : 'Turn on “Allow User Scripts” for TRIF so mods can run on websites.'), actions);
+}
+
 function renderNotice({ helperOk, agentInfo, anyAgent }) {
   const n = ui.notice;
   const { site, status } = view;
   const parts = [];
   let bad = false;
+  renderPaused(helperOk);
+  // A login started from the gate's line goes on in the gate (renderGate leaves the line out meanwhile).
+  const inGate = !ui.gate.hidden && !!view.login && !document.body.classList.contains('blocked');
+  if (inGate && n.parentElement !== ui.gate) ui.gate.append(n);
+  else if (!inGate && n.nextElementSibling !== ui.update) ui.update.before(n);
   if (helperOk && (view.login || needsLogin(agentInfo))) {
     // Built once per state, so the status refresh doesn't wipe the code being typed.
     const L = view.login;
@@ -380,20 +479,7 @@ function renderNotice({ helperOk, agentInfo, anyAgent }) {
     actions.append(retry, setup, report);
     parts.push(actions);
   } else if (status && !status.userScripts) {
-    parts.push(el('p', 'title', 'Mods are paused'));
-    parts.push(el('p', null, FIREFOX
-      ? 'Allow user scripts for TRIF so mods can run on websites.'
-      : 'Turn on “Allow User Scripts” for TRIF so mods can run on websites.'));
-    const actions = el('p', 'actions');
-    const open = el('button', 'btn primary', FIREFOX ? 'Allow user scripts' : 'Open extension settings');
-    open.type = 'button';
-    open.addEventListener('click', () => {
-      // Firefox grants userScripts only through this prompt, which must open from the click itself.
-      if (FIREFOX) chrome.permissions.request({ permissions: ['userScripts'] }).then(() => setTimeout(refreshStatus, 300), () => {});
-      else chrome.tabs.create({ url: status.settingsUrl || `chrome://extensions/?id=${chrome.runtime.id}` });
-    });
-    actions.append(open);
-    parts.push(actions);
+    // "Mods are paused" (renderPaused).
   } else if (helperOk && view.agents && (agentInfo ? !agentInfo.available : !anyAgent)) {
     bad = true;
     if (agentInfo) {
@@ -647,11 +733,16 @@ const siteScope = () => (view.site ? scopeFor(view.site) : null);
 const siteIsOn = () => !!siteScope() && (view.status?.sitesOn || []).includes(siteScope());
 let siteSwitching = false;
 
-function renderGate() {
-  // No website in this tab: the landing page, only the robot and settings (body.no-site hides the rest).
+function renderGate(problem, agentInfo) {
+  const red = RED.has(problem);
+  // No website in this tab: the landing page, only the robot and settings (body.no-site hides the rest),
+  // and when something red is in the way, the robot in red and a line saying what.
   const noSite = !!view.tab && !view.site;
   document.body.classList.toggle('no-site', noSite);
   ui.landing.hidden = !noSite;
+  renderProblemLine(ui.landingNote, noSite && red ? problem : null, agentInfo);
+  const icon = `icons/robot-shaded${noSite && red ? '-red' : ''}.svg`;
+  if (ui.landingIcon.getAttribute('src') !== icon) ui.landingIcon.setAttribute('src', icon);
   // This extension's own version (the helper's is in settings: they can differ while one updates).
   if (noSite) ui.landingVersion.textContent = `TRIF ${chrome.runtime.getManifest().version}`;
   const scope = siteScope();
@@ -669,7 +760,11 @@ function renderGate() {
   ui.barRobot.setAttribute('aria-busy', String(siteSwitching));
   ui.barRobot.title = ui.siteSwitch.title;
   ui.barRobot.setAttribute('aria-label', ui.siteSwitch.title);
+  // The problem in one line under "The robot is off." (but not during a login started from it: its
+  // notice shows there instead, renderNotice). Red: no Fix button, which couldn't work.
+  renderProblemLine(ui.gateNote, gated && !(view.login && !red) ? problem : null, agentInfo);
   if (!gated) return;
+  ui.gateBtn.hidden = red;
   ui.gateBtn.textContent = `Fix ${scope}`;
   ui.gateBtn.disabled = siteSwitching;
 }
@@ -1113,12 +1208,14 @@ for (const chip of document.querySelectorAll('.chip')) {
     ui.input.focus();
   });
 }
-ui.settingsBtn.addEventListener('click', () => {
-  const open = ui.settings.hidden;
+ui.settingsBtn.addEventListener('click', () => toggleSettings());
+/** Open or close Settings (open: true just opens them). */
+function toggleSettings(open = ui.settings.hidden) {
   ui.settings.hidden = !open;
   ui.settingsBtn.setAttribute('aria-expanded', String(open));
   if (open && view.status?.helper?.connected) { loadAgents().then(() => loadModels(currentAgent().id)); loadInstructions(); }
-});
+}
+const openSettings = () => { if (ui.settings.hidden) toggleSettings(true); };
 
 // The user's standing instructions for every agent run: ~/.trif/instructions.md, read and written
 // through the helper (helper/lib/instructions.js). Loaded when settings open; saved as they type.
@@ -1186,7 +1283,7 @@ ui.modelCustom.addEventListener('input', () => {
 });
 ui.modelCustom.addEventListener('change', () => { clearTimeout(modelTimer); saveModel(currentAgent().id, ui.modelCustom.value.trim()); });
 $('#setup-link').addEventListener('click', (e) => { e.preventDefault(); openSetup(); });
-mountOpenModel({ request, onChange: async () => { await forgetModelPicks('codex-oss'); loadModels('codex-oss', true); } });
+mountOpenModel({ request, onChange: async () => { await forgetModelPicks('codex-oss'); loadModels('codex-oss', true); }, changed: () => render() });
 
 // ---- updates ------------------------------------------------------------------------------------
 // The helper checks for a newer TRIF (helper/lib/update.js) and its summary rides on the status. The

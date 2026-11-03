@@ -607,7 +607,7 @@ function renderGate(problem, agentInfo) {
   ui.siteSwitch.hidden = !known;
   ui.siteSwitch.setAttribute('aria-checked', String(siteIsOn()));
   ui.siteSwitch.setAttribute('aria-busy', String(siteSwitching));
-  ui.siteSwitch.title = ui.siteSwitch.dataset.error || (scope ? `Turn the robot ${siteIsOn() ? 'off' : 'on'} on ${scope}` : '');
+  ui.siteSwitch.title = ui.siteSwitch.dataset.error || (scope ? `Turn the robot ${siteIsOn() ? 'off' : 'on'} for ${scope}` : '');
   ui.siteSwitch.setAttribute('aria-label', ui.siteSwitch.title);
   // The robot in the bar: the same switch, so the same words and the same busy look.
   ui.barRobot.hidden = !known;

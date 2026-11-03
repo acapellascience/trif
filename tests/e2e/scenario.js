@@ -547,7 +547,7 @@ class Scenario {
     await r.check('gate: the top bar keeps only the dot, the robot, grey and dim, and settings', async () => {
       const b = await this.waitBar('the gate\'s bar', GATE_BAR, Scenario.dim);
       if (!b.robotButton) throw new Error('the robot isn\'t a focusable button');
-      if (b.robotLabel !== 'Turn the robot on on 127.0.0.1' || b.robotLabel !== b.switchLabel) throw new Error(`labelled "${b.robotLabel}" (the power button: "${b.switchLabel}")`);
+      if (b.robotLabel !== 'Turn the robot on for 127.0.0.1' || b.robotLabel !== b.switchLabel) throw new Error(`labelled "${b.robotLabel}" (the power button: "${b.switchLabel}")`);
       return `"${b.robotLabel}"; ${b.filter}, opacity ${b.opacity}`;
     });
     await this.shot(this.panelCtx, 'panel-gate');
@@ -609,7 +609,7 @@ class Scenario {
     await r.check('the robot in the top bar: on a site TRIF is on for, it puts it to sleep like the power button; on the gate, it wakes it like Fix', async () => {
       const all = ['#dot', '#site', '#bar-robot', '#site-switch', '#new-chat', '#settings-btn'];
       const on = await this.waitBar('the bar on a site TRIF is on for', all, Scenario.awake);
-      if (on.robotLabel !== 'Turn the robot off on 127.0.0.1' || on.robotLabel !== on.switchLabel) throw new Error(`labelled "${on.robotLabel}" (the power button: "${on.switchLabel}")`);
+      if (on.robotLabel !== 'Turn the robot off for 127.0.0.1' || on.robotLabel !== on.switchLabel) throw new Error(`labelled "${on.robotLabel}" (the power button: "${on.switchLabel}")`);
       await d.click(this.panelCtx, '#bar-robot');
       await this.waitPanel('the gate', (x) => x.gate && !x.siteOn);
       await this.waitPage('the page without the mod', (x) => !x.banner);

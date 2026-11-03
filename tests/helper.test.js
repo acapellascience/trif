@@ -416,6 +416,25 @@ test('host: request timeout is args.timeout + grace', async () => {
   assert.equal(ping.ok, true);
 });
 
+test('host: a reload right after a mod file is written sends the mod first, not 150 ms later', async () => {
+  const home = tempDir();
+  const ext = startHost(home);
+  ext.hello();
+  await ext.waitForSocket();
+  await ext.nextMods(() => true);
+  ext.handlers.reload = () => ({ url: 'https://example.com/' });
+  // An agent writes a mod and reloads at once, inside the debounce (and likely before the watcher fires).
+  writeMod(home, 'example.com', 'fresh.js', '// ==WebMod==\n// @name Fresh\n// ==/WebMod==\ndocument.title = "fresh";\n');
+  const since = ext.messages.length;
+  const r = await sockRequest(ext.sock, { id: 'r', cmd: 'reload', args: {} });
+  assert.equal(r.ok, true, r.error);
+  const after = ext.messages.slice(since);
+  const modsAt = after.findIndex((m) => m.type === 'mods' && m.mods.some((x) => x.id === 'example.com/fresh'));
+  const reloadAt = after.findIndex((m) => m.type === 'request' && m.cmd === 'reload');
+  assert.ok(modsAt !== -1 && modsAt < reloadAt, `the mod (${modsAt}) before the reload (${reloadAt}): ${after.map((m) => m.type + (m.cmd ? ` ${m.cmd}` : '')).join(', ')}`);
+  await ext.close();
+});
+
 test('host: exits cleanly and removes the socket when stdin closes; pending requests fail', async () => {
   const home = tempDir();
   const ext = startHost(home);

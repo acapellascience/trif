@@ -848,7 +848,7 @@ function placeRow(li, to) {
 
 // The keyboard: Alt+↑/↓ anywhere in a row; on the grip, ↑/↓, Home and End too.
 ui.modList.addEventListener('keydown', (e) => {
-  if (modDrag && e.key === 'Escape') { e.preventDefault(); endModDrag(false); return; }
+  if (modDrag) return;
   const li = e.target.closest?.('#mod-list > li');
   if (!li || e.ctrlKey || e.metaKey || e.shiftKey) return;
   const onGrip = !!e.target.closest('.mod-grip');
@@ -885,7 +885,15 @@ ui.modList.addEventListener('pointerdown', (e) => {
   document.addEventListener('pointermove', onModDragMove);
   document.addEventListener('pointerup', onModDragUp);
   document.addEventListener('pointercancel', onModDragCancel);
+  document.addEventListener('keydown', onModDragKey, true);
 });
+
+function onModDragKey(e) {
+  if (e.key !== 'Escape' || !modDrag?.started) return;
+  e.preventDefault();
+  e.stopPropagation();
+  endModDrag(false);
+}
 
 function onModDragMove(e) {
   const d = modDrag;
@@ -951,6 +959,7 @@ function endModDrag(keep) {
   document.removeEventListener('pointermove', onModDragMove);
   document.removeEventListener('pointerup', onModDragUp);
   document.removeEventListener('pointercancel', onModDragCancel);
+  document.removeEventListener('keydown', onModDragKey, true);
   if (d.started) {
     cancelAnimationFrame(d.frame);
     try { d.li.releasePointerCapture(d.pointerId); } catch { /* released already */ }

@@ -62,7 +62,8 @@ test('the Worker: pages with strict headers, reports emailed, bad ones refused',
   assert.match(home, /Fix any website with your own coding agent\./);
   assert.match(home, /href="https:\/\/github\.com\/acapellascience\/trif#install">Get it</);
   assert.match(home, /href="\/report">Report a problem</);
-  assert.ok(!/<script/.test(home), 'the home page runs no script');
+  // Its only script is the demo tab's (deferred, so the page is all there before it runs).
+  assert.deepStrictEqual(home.match(/<script[^>]*>/g), ['<script src="/demo.js" defer>']);
 
   let res = await worker.fetch(post({ what: 'It broke', site: 'x.com', email: 'a@b.co', details: 'TRIF 0.1.1' }, { 'User-Agent': 'Firefox/159' }), e);
   assert.deepStrictEqual([res.status, await res.json()], [200, { ok: true }]);
@@ -140,4 +141,141 @@ test('the home page\'s robot is the extension\'s shaded robot', async () => {
   const file = fs.readFileSync(path.join(__dirname, '..', 'extension', 'icons', 'robot-shaded.svg'), 'utf8');
   const shapes = (svg) => svg.replace(/<!--[\s\S]*?-->/g, '').replace(/<svg[^>]*>/, '').replace(/\s+/g, ' ').trim();
   assert.equal(shapes(ROBOT_SVG), shapes(file), 'run node scripts/render-icon.js, then copy the new robot into site/src/pages.js');
+});
+
+// ---- the home page's demo (site/src/demo.js, site/demo/) ----------------------------------------------
+
+const fs = require('fs');
+const path = require('path');
+const REPO_DIR = path.join(__dirname, '..');
+
+async function demoEnv() {
+  const { localAssets } = await import('../site/local-assets.js');
+  return env({ EXTENSION: localAssets(path.join(REPO_DIR, 'extension')) });
+}
+const get = async (worker, e, p) => worker.fetch(new Request(`https://timsrobot.com${p}`), e);
+const directives = (res) => Object.fromEntries(res.headers.get('Content-Security-Policy').split(/;\s*/).map((d) => { const [k, ...v] = d.split(' '); return [k, v.join(' ')]; }));
+
+test('the demo: its routes, and the side panel from the extension\'s own files', async () => {
+  const [{ default: worker }] = await load();
+  const e = await demoEnv();
+  for (const [p, type] of [['/demo', 'text/html'], ['/demo/', 'text/html'], ['/demo/home', 'text/html'], ['/demo.js', 'text/javascript'],
+    ['/demo/frame.js', 'text/javascript'], ['/demo/shim.js', 'text/javascript'], ['/demo/panel.css', 'text/css'], ['/demo/mods/fireworks.js', 'text/javascript'],
+    ['/demo/ext/sidepanel.html', 'text/html'], ['/demo/ext/sidepanel.js', 'text/javascript'], ['/demo/ext/sidepanel.css', 'text/css'],
+    ['/demo/ext/manifest.json', 'application/json'], ['/demo/ext/icons/robot-shaded.svg', 'image/svg+xml']]) {
+    const res = await get(worker, e, p);
+    assert.equal(res.status, 200, p);
+    assert.ok(res.headers.get('Content-Type').startsWith(type), p);
+    assert.equal(res.headers.get('X-Content-Type-Options'), 'nosniff', p);
+  }
+  // The extension's files, byte for byte (sidepanel.html: plus the demo's two lines).
+  const ext = (f) => fs.readFileSync(path.join(REPO_DIR, 'extension', f), 'utf8');
+  assert.equal(await (await get(worker, e, '/demo/ext/sidepanel.js')).text(), ext('sidepanel.js'));
+  const panel = await (await get(worker, e, '/demo/ext/sidepanel.html')).text();
+  assert.equal(panel, ext('sidepanel.html').replace('</head>', '<link rel="stylesheet" href="/demo/panel.css">\n<script src="/demo/shim.js"></script>\n</head>'));
+  assert.ok(panel.indexOf('/demo/shim.js') < panel.indexOf('sidepanel.js'), 'the shim loads before the panel');
+  // Nothing else of the extension, and nothing outside it.
+  for (const p of ['/demo/ext/background.js', '/demo/ext/onboarding.html', '/demo/ext/%2e%2e/package.json', '/demo/ext/', '/demo/mods/nope.js',
+    '/demo/mods/../src/index.js', '/demo/mods/Fireworks.js', '/demo/x']) {
+    assert.equal((await get(worker, e, p)).status, 404, p);
+  }
+  // Without the assets binding the panel isn't there, and nothing breaks.
+  assert.equal((await get(worker, env(), '/demo/ext/sidepanel.js')).status, 404);
+  const demo = await (await get(worker, e, '/demo')).text();
+  assert.match(demo, /<iframe id="page" src="\/demo\/home"/);
+  assert.match(demo, /<iframe id="panel" src="\/demo\/ext\/sidepanel.html"/);
+  assert.match(demo, /recordings of real Claude Code chats, sped up/);
+});
+
+test('the demo: the CSP lets this site frame the demo pages and stays strict everywhere else', async () => {
+  const [{ default: worker }] = await load();
+  const e = await demoEnv();
+  const all = ['/', '/report', '/report.js', '/nope', '/demo', '/demo/home?mods=fireworks', '/demo.js', '/demo/shim.js', '/demo/mods/fireworks.js',
+    '/demo/ext/sidepanel.html', '/demo/ext/sidepanel.js'];
+  const framed = new Set(['/demo', '/demo/home?mods=fireworks', '/demo/ext/sidepanel.html']);
+  const frames = new Set(['/', '/demo']);
+  for (const p of all) {
+    const d = directives(await get(worker, e, p));
+    assert.equal(d['default-src'], "'none'", p);
+    assert.equal(d['script-src'], "'self'", p);
+    assert.equal(d['base-uri'], "'none'", p);
+    assert.equal(d['connect-src'], "'self'", p);
+    assert.equal(d['frame-ancestors'], framed.has(p) ? "'self'" : "'none'", p);
+    assert.equal(d['frame-src'], frames.has(p) ? "'self'" : undefined, p);
+    assert.equal(d['style-src'], p === '/demo/ext/sidepanel.html' ? "'self' 'unsafe-inline'" : "'unsafe-inline'", p);
+    assert.ok(!/unsafe-eval|\*|https?:|data:/.test(Object.values(d).join(' ')), `${p}: nothing beyond this site`);
+  }
+});
+
+test('the demo: /demo/home runs only the bundled mods it names, unknown names are ignored', async () => {
+  const [{ default: worker }] = await load();
+  const e = await demoEnv();
+  const page = async (q) => (await get(worker, e, `/demo/home${q}`)).text();
+  const scripts = (html) => html.match(/<script[^>]*>/g) || [];
+  assert.deepStrictEqual(scripts(await page('')), [], 'no mods: no script at all (and no demo tab)');
+  const html = await page(`?mods=${encodeURIComponent('fireworks,nope,../src/index,<img src=x onerror=alert(1)>,neon-title,fireworks')}`);
+  assert.deepStrictEqual(scripts(html), ['<script src="/demo/mods/neon-title.js">', '<script src="/demo/mods/fireworks.js" defer>'],
+    'document-start mods before the page, the rest deferred; each once');
+  assert.ok(!/nope|onerror|index/.test(html), 'nothing from the address is written into the page');
+  assert.ok(!/demo-tab|\/demo\.js/.test(html), 'no demo tab inside the demo');
+  assert.match(html, /<base target="_blank">/);
+  assert.match(html, /Fix any website with your own coding agent\./);
+  const { modsFrom } = await import('../site/src/demo.js');
+  assert.deepStrictEqual(modsFrom('x,,y').map((m) => m.slug), []);
+  assert.deepStrictEqual(modsFrom(null).map((m) => m.slug), []);
+});
+
+test('the home page works without script: everything is in the HTML, the tab is a link to /demo', async () => {
+  const [{ default: worker }] = await load();
+  const home = await (await get(worker, await demoEnv(), '/')).text();
+  for (const want of ["<h1>Tim's Robot Internet Fixer</h1>", 'Fix any website with your own coding agent.', 'What you need', 'Yours, on your computer',
+    '<a class="demo-tab" href="/demo">Try the demo</a>', '<footer>']) assert.ok(home.includes(want), want);
+  assert.ok(!/\shidden[\s>]/.test(home), 'nothing waits for a script to be shown');
+  assert.ok(!/<iframe/.test(home), 'the demo loads only when asked for');
+});
+
+test('the demo serves every extension file the side panel loads', async () => {
+  const { EXTENSION_FILES } = await import('../site/src/demo.js');
+  const dir = path.join(REPO_DIR, 'extension');
+  const need = new Set();
+  const html = fs.readFileSync(path.join(dir, 'sidepanel.html'), 'utf8');
+  for (const [, ref] of html.matchAll(/(?:src|href)="([^"#:]+)"/g)) need.add(ref);
+  // Icons the panel sets itself (renderGate).
+  const panelJs = fs.readFileSync(path.join(dir, 'sidepanel.js'), 'utf8');
+  for (const [, icon] of panelJs.matchAll(/`(icons\/robot-shaded)\$\{[^}]*'(-red)'[^}]*\}\.svg`/g)) { need.add(`${icon}.svg`); need.add(`${icon}-red.svg`); }
+  const visit = (f) => {
+    if (!f.endsWith('.js') || need.has(`seen:${f}`)) return;
+    need.add(`seen:${f}`);
+    for (const [, imp] of fs.readFileSync(path.join(dir, f), 'utf8').matchAll(/^import[^'"]*['"]\.\/([^'"]+)['"]/gm)) { need.add(imp); visit(imp); }
+  };
+  [...need].forEach(visit);
+  const files = [...need].filter((f) => !f.startsWith('seen:'));
+  assert.ok(files.includes('lib.js') && files.includes('runtime.js') && files.includes('icons/robot-shaded-red.svg'), files.join(' '));
+  for (const f of files) assert.ok(EXTENSION_FILES.has(f), `site/src/demo.js EXTENSION_FILES is missing ${f}`);
+  for (const f of EXTENSION_FILES) assert.ok(fs.existsSync(path.join(dir, f)), `${f} isn't in extension/`);
+});
+
+test('the demo\'s bundle is up to date with site/demo/, its chats are clean and render safely', async () => {
+  const { demoModule, OUT } = await import('../site/build-demo.js');
+  assert.equal(fs.readFileSync(OUT, 'utf8'), demoModule(), 'run node site/build-demo.js');
+  const { MODS, CHATS, FILES } = await import('../site/src/demo-files.js');
+  assert.equal(MODS.length, 13);
+  const slugs = new Set(MODS.map((m) => m.slug));
+  for (const c of CHATS) {
+    assert.equal(c.messages[0].role, 'user', c.id);
+    assert.equal(c.messages[0].text, c.prompt, c.id);
+    for (const s of c.mods) assert.ok(slugs.has(s), `${c.id}: ${s}`);
+    for (const a of c.after) assert.ok(CHATS.some((x) => x.id === a), `${c.id} follows ${a}`);
+  }
+  const text = JSON.stringify(CHATS);
+  assert.ok(!/\/private\/|\/tmp\/|\/Users\/|claude-501|--tab \d|e2e/.test(text), 'no machine-specific paths or tab ids in the recordings');
+  // The panel renders assistant (and error) lines as markdown: only its own few tags come out.
+  const { renderMarkdown, MARKDOWN_ELEMENTS } = await import('../extension/markdown.js');
+  for (const c of CHATS) {
+    for (const m of c.messages) {
+      const tags = [...renderMarkdown(m.text).matchAll(/<\/?([a-z0-9]+)/g)].map((x) => x[1]);
+      for (const t of tags) assert.ok(MARKDOWN_ELEMENTS.includes(t), `${c.id}: <${t}>`);
+    }
+  }
+  for (const [name, code] of Object.entries(FILES)) assert.ok(!/\beval\(|new Function|innerHTML|document\.write/.test(code), `${name}: no eval or raw HTML`);
 });

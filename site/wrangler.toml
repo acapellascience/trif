@@ -26,3 +26,13 @@ namespace_id = "1001"
   [ratelimits.simple]
   limit = 5
   period = 60
+
+# The home page's demo shows the real side panel: the Worker serves the files it needs (src/demo.js
+# EXTENSION_FILES, nothing else) from the extension's own folder through this binding. run_worker_first:
+# every request goes to the Worker, so no other file there is served; html_handling none: sidepanel.html
+# is fetched by that name (no redirect to /sidepanel).
+[assets]
+directory = "../extension"
+binding = "EXTENSION"
+run_worker_first = true
+html_handling = "none"

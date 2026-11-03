@@ -1,6 +1,6 @@
 # timsrobot.com
 
-The report form's website: a Cloudflare Worker that serves `timsrobot.com` (a home page) and
+The report form's website: a Cloudflare Worker that serves `timsrobot.com` (a home page, with a demo) and
 `timsrobot.com/report` (the form), and emails each report to the maintainer from `reports@timsrobot.com`.
 It also answers for `webmods.dev`, the address from before 0.2.0 (when TRIF was called WebMods), redirecting
 every request there to the same path on `timsrobot.com`, so older installs' "Report a problem" still works.
@@ -9,6 +9,30 @@ every request there to the same path on `timsrobot.com`, so older installs' "Rep
   `site`, `email`, `details`, plus `website`, a hidden field only bots fill in).
 - `src/pages.js`: the pages and the form's script. Nothing is loaded from anywhere else.
 - `src/report.js`: checking a report and writing its email (tested in `tests/site.test.js`).
+- `src/demo.js`: the home page's demo (below).
+
+## The demo
+
+The home page has a "Try the demo" tab on its right edge (a link to `/demo`; `demo.js` opens it over the
+page instead, with Pop out and Close). `/demo` is a browser window: the home page in it (`/demo/home`) and
+the real TRIF side panel beside it.
+
+- The side panel is the extension's own files, served from `extension/` through the `EXTENSION` assets
+  binding (`wrangler.toml [assets]`) at `/demo/ext/…`; only the files the panel loads are served
+  (`EXTENSION_FILES` in `src/demo.js`, which a test checks against what the panel loads). The Worker adds two
+  lines to `sidepanel.html`: `demo/panel.css` and `demo/shim.js`.
+- `demo/shim.js` stands in for the extension's background: it provides the `chrome.*` calls the panel makes
+  and answers its messages from made-up state (helper connected, Claude Code logged in, timsrobot.com, the
+  robot on). Nothing leaves the page.
+- The mod switches are real: a switch reloads the page in the window as `/demo/home?mods=a,b`, and the
+  Worker adds only mods from its bundled list (`demo/mods/`, the promo video's mods); other names are
+  ignored.
+- Chats are recordings (`demo/chats/`, from the promo video's sessions, paths and tab ids taken out):
+  "Recorded chats" above the message box replays one, sped up, then switches its mod on. Anything typed
+  gets a note saying so.
+
+`site/demo/` is bundled into `src/demo-files.js` by `node site/build-demo.js` (`dev.js` does it on start;
+a test checks it's up to date).
 
 The side panel's "Report a problem" (and `trif report --open`) opens `/report#r=<report>&s=<site>`.
 Browsers never send what's after the `#` to the server, so nothing leaves the computer until Send.
@@ -21,7 +45,8 @@ Reports are limited to 5 a minute per address, 64 KB each.
 node site/dev.js
 ```
 
-Then open http://127.0.0.1:8787/report. Reports are printed in the terminal instead of emailed.
+Then open http://127.0.0.1:8787/report. Reports are printed in the terminal instead of emailed. The demo is
+at http://127.0.0.1:8787/ (the tab) or http://127.0.0.1:8787/demo.
 
 ## Deploy
 

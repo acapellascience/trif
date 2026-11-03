@@ -1,11 +1,15 @@
-// The pages timsrobot.com serves. Plain HTML and one small script; nothing loaded from anywhere else.
+// The pages timsrobot.com serves. Plain HTML and two small scripts (the report form's, and the home page's
+// demo tab: demo.js); nothing loaded from anywhere else.
 
-const STYLE = `
+// The colours, light and dark (the demo's window uses them too: demo.js).
+export const TOKENS = `
 :root { color-scheme: light dark; --bg: #f6f6f4; --card: #fff; --fg: #1b1b1a; --muted: #6a6a66; --line: #ddddd8;
   --accent: #1f9d6b; --on-accent: #fff; --bad: #b3261e; }
 @media (prefers-color-scheme: dark) { :root { --bg: #18181a; --card: #222225; --fg: #ececea; --muted: #a2a29d;
   --line: #3a3a3e; --accent: #43c98d; --on-accent: #04291c; --bad: #ff8a80; } }
-* { box-sizing: border-box; }
+* { box-sizing: border-box; }`;
+
+const STYLE = `${TOKENS}
 body { margin: 0; background: var(--bg); color: var(--fg); font: 15px/1.5 -apple-system, system-ui, "Segoe UI", sans-serif; }
 main { max-width: 640px; margin: 0 auto; padding: 48px 16px 64px; }
 h1 { font-size: 28px; margin: 0 0 4px; letter-spacing: -0.01em; }
@@ -32,14 +36,14 @@ a { color: var(--accent); }
 code { font: 13px ui-monospace, Menlo, monospace; }
 `;
 
-function page(title, body, { script = false, style = '', after = '' } = {}) {
+function page(title, body, { script = false, style = '', after = '', head = '' } = {}) {
   return `<!doctype html>
 <html lang="en">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>${title}</title>
-<style>${STYLE}${style}</style>
+<style>${STYLE}${style}</style>${head}
 </head>
 <body>
 <main>
@@ -86,7 +90,30 @@ footer a { color: var(--muted); }
 @media (max-width: 720px) { .two { grid-template-columns: 1fr; } }
 `;
 
-export const HOME = page("Tim's Robot Internet Fixer", `
+// The demo: a tab on the right edge (a link to /demo), which demo.js (site/demo/tab.js) turns into a
+// window over the page, at the right, with Pop out (.big) and Close. At phone width it fills the screen.
+const DEMO_TAB_STYLE = `
+.demo-tab { position: fixed; z-index: 10; right: 0; top: 50%; transform: translateY(-50%); writing-mode: vertical-rl;
+  padding: 14px 7px; background: var(--card); color: var(--fg); border: 1px solid var(--line); border-right: 0;
+  border-radius: 8px 0 0 8px; font-size: 13px; font-weight: 600; text-decoration: none; }
+.demo-tab:hover { color: var(--accent); }
+.demo-win { position: fixed; z-index: 20; right: 44px; top: 50%; transform: translateY(-50%);
+  width: min(1080px, calc(100vw - 64px)); height: min(720px, calc(100vh - 40px)); background: var(--card);
+  border: 1px solid var(--line); border-radius: 12px; box-shadow: 0 8px 32px rgb(0 0 0 / 0.18); overflow: hidden; }
+.demo-win.big { inset: 16px; width: auto; height: auto; transform: none; }
+.demo-win[hidden], .demo-back[hidden] { display: none; }
+.demo-win iframe { display: block; width: 100%; height: 100%; border: 0; }
+.demo-back { position: fixed; z-index: 19; inset: 0; background: rgb(0 0 0 / 0.35); }
+html.demo-lock { overflow: hidden; }
+@media (max-width: 700px) { .demo-win, .demo-win.big { inset: 0; width: auto; height: auto; transform: none; border: 0; border-radius: 0; } }
+`;
+
+/**
+ * The home page. `demo`: with the demo's tab and script (the real home page); without, it's the page shown
+ * inside the demo's window, with `head` and `tail` (the mods that are on: demo.js).
+ */
+export function homePage({ demo = true, head = '', tail = '' } = {}) {
+  return page("Tim's Robot Internet Fixer", `
 <section class="hero">
   ${ROBOT_SVG}
   <h1>Tim's Robot Internet Fixer</h1>
@@ -109,9 +136,14 @@ export const HOME = page("Tim's Robot Internet Fixer", `
     <p>Mods are plain JavaScript files in <code>~/.trif</code>: read them, change them, switch them off. TRIF collects nothing. The only thing that ever reaches Tim is a problem report you choose to send.</p>
   </div>
 </section>`, {
-  style: HOME_STYLE,
-  after: `\n<footer><a href="${REPO}">GitHub</a><a href="/report">Report a problem</a><a href="${REPO}/blob/main/PRIVACY.md">Privacy</a></footer>`,
-}).replace('<main>', '<main class="home">');
+    style: HOME_STYLE + (demo ? DEMO_TAB_STYLE : ''),
+    head,
+    after: `\n<footer><a href="${REPO}">GitHub</a><a href="/report">Report a problem</a><a href="${REPO}/blob/main/PRIVACY.md">Privacy</a></footer>` +
+      (demo ? '\n<a class="demo-tab" href="/demo">Try the demo</a>\n<script src="/demo.js" defer></script>' : '') + tail,
+  }).replace('<main>', '<main class="home">');
+}
+
+export const HOME = homePage();
 
 export const REPORT = page('Report a problem · TRIF', `
 <h1>Report a problem</h1>

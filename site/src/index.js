@@ -1,23 +1,52 @@
 // timsrobot.com (a Cloudflare Worker): the home page, the problem report form, and POST /report, which
 // emails the report to the maintainer (the EMAIL send_email binding, to the REPORT_TO secret).
 //
+// And the home page's demo (demo.js): /demo, the page inside it (/demo/home), the extension's side panel
+// files (/demo/ext/…, from the EXTENSION assets binding: wrangler.toml), the demo's scripts and its mods.
+// Those pages may be framed by this site only; everything else by nothing.
+//
 // It also answers for webmods.dev, TRIF's address before 0.2.0 (when it was called WebMods), sending
 // everything there to the same path on timsrobot.com: older installs open webmods.dev/report#r=… (a
 // browser keeps the # part across the redirect).
 
 import { HOME, REPORT, REPORT_JS } from './pages.js';
 import { LIMITS, ReportError, parseReport, reportEmail } from './report.js';
+import { DEMO_PAGE, DEMO_FILES, EXTENSION_FILES, innerHome, modScript, panelHtml, typeFor } from './demo.js';
+
+const CSP = {
+  'default-src': "'none'", 'script-src': "'self'", 'style-src': "'unsafe-inline'", 'connect-src': "'self'", 'img-src': "'self'",
+  'form-action': "'self'", 'base-uri': "'none'", 'frame-ancestors': "'none'",
+};
+/** The Content-Security-Policy: CSP with `changes` (a page that frames the demo, or is framed by it). */
+export const csp = (changes = {}) => Object.entries({ ...CSP, ...changes }).map(([k, v]) => `${k} ${v}`).join('; ');
 
 const SECURITY_HEADERS = {
-  'Content-Security-Policy': "default-src 'none'; script-src 'self'; style-src 'unsafe-inline'; connect-src 'self'; img-src 'self'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'",
+  'Content-Security-Policy': csp(),
   'Referrer-Policy': 'no-referrer',
   'X-Content-Type-Options': 'nosniff',
 };
 
+// The demo's pages: the home page frames /demo, which frames /demo/home and the side panel.
+const FRAMES_DEMO = { 'Content-Security-Policy': csp({ 'frame-src': "'self'" }) };
+const DEMO_WINDOW = { 'Content-Security-Policy': csp({ 'frame-src': "'self'", 'frame-ancestors': "'self'" }) };
+const IN_DEMO = { 'Content-Security-Policy': csp({ 'frame-ancestors': "'self'" }) };
+const PANEL = { 'Content-Security-Policy': csp({ 'style-src': "'self' 'unsafe-inline'", 'frame-ancestors': "'self'" }) };
+const CACHE = { 'Cache-Control': 'public, max-age=300' };
+
 const respond = (body, type, status = 200, extra = {}) =>
   new Response(body, { status, headers: { 'Content-Type': type, ...SECURITY_HEADERS, ...extra } });
 const json = (obj, status = 200) => respond(JSON.stringify(obj), 'application/json; charset=utf-8', status, { 'Cache-Control': 'no-store' });
-const html = (body) => respond(body, 'text/html; charset=utf-8', 200, { 'Cache-Control': 'public, max-age=300' });
+const html = (body, extra = {}) => respond(body, 'text/html; charset=utf-8', 200, { ...CACHE, ...extra });
+const notFound = () => respond('Not found', 'text/plain', 404);
+
+/** A side panel file from the extension's folder (the EXTENSION assets binding), if the panel uses it. */
+async function extensionFile(request, env, file) {
+  if (!EXTENSION_FILES.has(file) || !env.EXTENSION) return notFound();
+  const res = await env.EXTENSION.fetch(new Request(new URL(`/${file}`, request.url)));
+  if (!res.ok) return notFound();
+  if (file === 'sidepanel.html') return html(panelHtml(await res.text()), PANEL);
+  return respond(res.body, typeFor(file), 200, CACHE);
+}
 
 /**
  * The rate limit's key for an address: IPv4 as is, IPv6 by its /64 (one household or server usually
@@ -90,12 +119,20 @@ export default {
   async fetch(request, env) {
     const moved = redirectFor(request.url);
     if (moved) return moved;
-    const { pathname } = new URL(request.url);
+    const { pathname, searchParams } = new URL(request.url);
     if (pathname === '/report' && request.method === 'POST') return receiveReport(request, env);
     if (request.method !== 'GET' && request.method !== 'HEAD') return respond('Method not allowed', 'text/plain', 405);
-    if (pathname === '/') return html(HOME);
+    if (pathname === '/') return html(HOME, FRAMES_DEMO);
     if (pathname === '/report' || pathname === '/report/') return html(REPORT);
     if (pathname === '/report.js') return respond(REPORT_JS, 'text/javascript; charset=utf-8', 200, { 'Cache-Control': 'public, max-age=300' });
-    return respond('Not found', 'text/plain', 404);
+    if (pathname === '/demo' || pathname === '/demo/') return html(DEMO_PAGE, DEMO_WINDOW);
+    if (pathname === '/demo/home') return html(innerHome(searchParams.get('mods')), IN_DEMO);
+    if (Object.hasOwn(DEMO_FILES, pathname)) return respond(DEMO_FILES[pathname].body, DEMO_FILES[pathname].type, 200, CACHE);
+    if (pathname.startsWith('/demo/mods/')) {
+      const code = modScript(pathname.slice('/demo/mods/'.length));
+      return code ? respond(code, 'text/javascript; charset=utf-8', 200, CACHE) : notFound();
+    }
+    if (pathname.startsWith('/demo/ext/')) return extensionFile(request, env, pathname.slice('/demo/ext/'.length));
+    return notFound();
   },
 };

@@ -407,7 +407,7 @@ test('doctor: which host.js the wrapper may run', () => {
 
 // The mods on TRIF's own home page (0.2.0), in the order the side panel starts them in.
 const HOMEPAGE = ['tagline', 'jelly', 'gravity', 'fireworks', 'neon', 'shooter', 'stickers',
-  'checklist', 'terminal', 'rainbow-rave', 'led', 'robot', 'tilt'].map((m) => `timsrobot.com/${m}`);
+  'checklist', 'terminal', 'rave', 'led', 'robot', 'tilt'].map((m) => `timsrobot.com/${m}`);
 
 test('the home page mods: shipped, all off, TRIF not turned on for timsrobot.com, listed in Tim\'s order', () => {
   const { DEFAULT_ORDER } = require('../helper/lib/preinstalled');

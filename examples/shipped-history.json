@@ -7,17 +7,30 @@
     "abe0bc7f4451b53f2a078d2a2e3c0276ee290aaf",
     "a8dbfd6a318fee21d82647387d10c4e6878a327e"
   ],
+  "timsrobot.com/checklist": [
+    "a7ab64ff35dd90203af61e4270ccc154b4de8132"
+  ],
   "timsrobot.com/fireworks": [
-    "edd9f969bd91bc9c6ad8e7910d475b06f2e5ba2c"
+    "edd9f969bd91bc9c6ad8e7910d475b06f2e5ba2c",
+    "b8223926a2fd4c05e871adb9bba6789f6fbc7d92"
   ],
   "timsrobot.com/gravity-mode": [
     "963edd7fb4f416567586c28df850989d65a0d241"
   ],
+  "timsrobot.com/gravity": [
+    "620680d11197ae7fd88e861dd60fd865b10c89aa"
+  ],
   "timsrobot.com/jelly-buttons": [
     "72e10b6586ac0cf27973a2b9d7313d6f533c1711"
   ],
+  "timsrobot.com/jelly": [
+    "b56f99ff1ea744862d01d9366acd3cfe2e45c3b5"
+  ],
   "timsrobot.com/led-footer": [
     "debb1ba9fb11976d2f6e66f611f302cd15266f66"
+  ],
+  "timsrobot.com/led": [
+    "f44e904baf5f63bfe73b0693d4fe405024253124"
   ],
   "timsrobot.com/living-robot": [
     "f330b416b9de7fa65cfb91a9e02f8cc916abc7a5"
@@ -28,8 +41,20 @@
   "timsrobot.com/neon-title": [
     "3f58976a8441017bba45c6142a2660657b6c633a"
   ],
+  "timsrobot.com/neon": [
+    "0d6cca3fd651f329b258f6d2bd9b9db2e81be2ad"
+  ],
   "timsrobot.com/rainbow-rave": [
     "3e661f13b2113e7acaf870ff6ca90c2a95982ee6"
+  ],
+  "timsrobot.com/rave": [
+    "f50b02d8a1ebeb52fb929ccb9a08a9c13579868f"
+  ],
+  "timsrobot.com/robot": [
+    "b675716e42205c4eef642a9b881798c013877078"
+  ],
+  "timsrobot.com/shooter": [
+    "781148177a8fd07ccf84aa63f474246fedd36c0b"
   ],
   "timsrobot.com/space-shooter": [
     "0294ddce661b7e50fd1f84b9deed05552e080809"
@@ -37,11 +62,23 @@
   "timsrobot.com/sticker-badges": [
     "d05316cad47bf9b0761be6cbeabc8270080deb24"
   ],
+  "timsrobot.com/stickers": [
+    "b8aacadfdd80402acd83964d4a5ea1f6bc4aeaab"
+  ],
+  "timsrobot.com/tagline": [
+    "651044796dc520ddcf4431bf2746eeb65330dbe2"
+  ],
   "timsrobot.com/terminal-box": [
     "236604f89807ffdbad138c3f6a77434a02635635"
   ],
+  "timsrobot.com/terminal": [
+    "1219af63567f126cc2ebd9f4a4963e1eb96231f7"
+  ],
   "timsrobot.com/tilt-card": [
     "d667f8572c92ab03f030acc7bef2414af2d67471"
+  ],
+  "timsrobot.com/tilt": [
+    "b8fb46fdcffc95bb50449c059f68bf5cd65958cb"
   ],
   "timsrobot.com/typing-tagline": [
     "d22b4f9de2a2eea19ea632b5c9938bb671cbdc9f"

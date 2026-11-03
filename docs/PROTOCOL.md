@@ -459,6 +459,73 @@ Re-running setup is safe; run it again to update.
 - Version: the root `package.json` is the single source; `helper/lib/paths.js` reads it and
   `extension/manifest.json`'s version must match (a test checks).
 
+## Windows (Phase 1)
+
+What runs on Windows: the extension (Chrome, Edge, Brave, Chromium, Firefox), the helper, `trif setup`,
+`trif doctor`, the `trif` CLI, updates and the keyring. What doesn't yet: **side-panel chats** (and
+`trif agent run`, and logging in from the panel). The panel shows "Chats from the panel aren’t available
+on Windows yet" with "Use your coding agent in a terminal instead: open one in <workspace> and ask it
+there." Neither Claude Code nor Codex gives TRIF a sandbox it can rely on there yet (Claude Code runs its
+commands unsandboxed on Windows; Codex's needs a recent Windows 11), and TRIF never runs an agent
+unconfined from the panel (`helper/lib/platform.js` `panelRunsOff`; `Runs.start` and `Logins.start`
+refuse, `agent.list` returns `runsOff: {title, text}` and no login status). An agent in a terminal in
+the workspace is the user's own session, as on a Mac.
+
+Windows specifics live in `helper/lib/win/` and `helper/lib/platform.js`; macOS and Linux code paths are
+unchanged.
+
+- **Workspace** `%USERPROFILE%\.trif` (`~/.trif`, as elsewhere). **Private folder**
+  `%LOCALAPPDATA%\TRIF` (paths.js `defaultPrivateDir`).
+- **Wrappers** (`win/launchers.js`) in `~\.trif\bin`: `trif-host.bat` (what the manifests name: a
+  manifest's `path` takes no arguments, and browsers run a .bat through `cmd.exe /d /c`; `@echo off` first,
+  paths quoted, `%` doubled, CRLF), `trif.cmd` (Command Prompt, PowerShell; no `.ps1`, which the default
+  execution policy refuses and PowerShell would prefer) and `trif` (a `#!/bin/sh` script for Git Bash,
+  Claude Code's shell there, which ignores PATHEXT). No `webmods` names: Windows never had them.
+- **Native messaging** (`win/registry.js`, `browsers.js` `WINDOWS`): manifests are written to
+  `%LOCALAPPDATA%\TRIF\NativeMessagingHosts\<browser>\com.webmods.helper.json` and each browser's key
+  `HKCU\Software\<vendor key>\NativeMessagingHosts\com.webmods.helper` gets the manifest's path as its
+  default value (`reg.exe add … /ve /d <path> /f`, `%SystemRoot%\System32\reg.exe`): Chrome
+  `Google\Chrome`, Chromium `Chromium`, Edge `Microsoft\Edge`, Firefox `Mozilla`, Brave
+  `BraveSoftware\Brave-Browser` plus Chrome's key when that doesn't already name a TRIF manifest (Brave is
+  reported to read Chrome's; unverified). A browser is detected by its user data folder
+  (`%LOCALAPPDATA%\Google\Chrome\User Data`, …; Firefox `%APPDATA%\Mozilla\Firefox`). Doctor checks
+  the keys with `reg.exe query`.
+- **PATH**: setup adds `~\.trif\bin` to the user's Path (`HKCU\Environment`, kept REG_EXPAND_SZ and
+  unexpanded, then WM_SETTINGCHANGE) through Windows PowerShell (`win/userpath.js`); `--no-link` (updates)
+  leaves it. There's no `/usr/local/bin` link.
+- **CLI ⇄ helper: named pipes** (`win/pipes.js`). Each helper listens on one pipe with a random name,
+  `\\.\pipe\trif-<32 hex>` (the pipe namespace is shared by every user, so a fixed name could be taken
+  first by someone else), and writes its name into `<home>\helper-<pid>.pipe`. The default helper is the
+  one `<home>\helper.pipe` names: created with O_EXCL by the first helper; a marker whose pipe doesn't
+  answer is stale and replaced (moved aside first, as with the install lock). The default helper serves
+  the CLI on its own pipe. On exit a helper removes its markers. Node creates pipes as their first
+  instance, with Windows' default security: only the user (and SYSTEM, administrators) may write to them.
+  Markers must name a pipe of that form, nothing else is used. (`TRIF_PIPE_DIR`, tests on macOS/Linux
+  only: the "pipes" are Unix sockets in that folder.)
+- **Keyring** (`win/credman.js`): Windows Credential Manager, one generic credential per key, target
+  `<service>/<account>` (e.g. `TRIF open model key/openrouter`), CRED_PERSIST_LOCAL_MACHINE. No Windows
+  tool reads one back (and `cmdkey` takes the secret in argv), so the helper calls CredReadW/CredWriteW/
+  CredDeleteW through a constant C# snippet in Windows PowerShell 5.1 (`%SystemRoot%\System32\
+  WindowsPowerShell\v1.0\powershell.exe -NoProfile -NonInteractive -EncodedCommand …`): the request,
+  key included as hex, goes on its stdin as one JSON line, the key comes back as hex on stdout; never in
+  argv or the environment. At most 2560 bytes (a generic credential's limit).
+- **Processes**: no process groups or signals. `platform.js` `killTree` uses `taskkill /PID <pid> /T /F`;
+  every spawn the helper makes passes `windowsHide`; the helper ends when the browser closes its stdin.
+  URLs open through `rundll32 url.dll,FileProtocolHandler`; updates unpack with System32's `tar.exe`;
+  swapping `~\.trif\app` retries a rename for a moment when a file in it is open (antivirus, indexer).
+- **Paths** (`pathcheck.js`): case and drive letters ignored on NTFS; `\\?\` long paths compared
+  without the prefix; a path with a component ending in a dot or space, holding a `:` (a stream) or naming
+  a device (CON, NUL, COM1…) isn't inside anything.
+- **Agents** are found by extension (`claude.exe` before `claude.cmd`) in the recorded PATH plus
+  `%USERPROFILE%\.local\bin`, `%APPDATA%\npm`, winget's, Scoop's, pnpm's and Volta's folders (for
+  doctor and the agent list; nothing runs them from the panel).
+- `.gitattributes` keeps every text file LF on checkout (the shipped mods' sha1s, byte-for-byte tests).
+
+Testing: `tests/windows.test.js` runs these code paths on any system (fakes for reg.exe and PowerShell,
+Unix sockets standing in for pipes) and with real named pipes on Windows; `tests/windows-smoke.js` does a
+real setup, registry, pipe and Credential Manager round trip on a Windows runner
+(`.github/workflows/windows.yml`). See docs/TESTING.md.
+
 ## Renamed from WebMods (0.2.0)
 
 TRIF was WebMods until 0.2.0. What changed name: everything a person sees (the extension's name TRIF, its

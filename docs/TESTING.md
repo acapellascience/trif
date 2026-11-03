@@ -9,6 +9,9 @@ Two suites:
   without the tag.
 - **End-to-end browser suite** (opt-in, real browsers): `node tests/e2e/run.js`. Run it before each
   release. It isn't part of `node --test`.
+- **Windows** (see "Windows" below): `tests/windows.test.js` is part of the unit tests on every system;
+  `.github/workflows/windows.yml` runs the unit tests and `tests/windows-smoke.js` on GitHub's Windows
+  runners.
 
 ## The e2e suite
 
@@ -145,3 +148,32 @@ scratch home, and macOS allows about 104 bytes for a socket path.
 - **Look and feel**: layout, dark mode, narrow panels. The screenshots help; a person decides.
 - The Chrome Web Store / signed Firefox add-on install and update paths, and `trif update` from a
   real published feed.
+
+## Windows
+
+There's no Windows computer in the loop day to day, so Windows is tested in three layers:
+
+1. **`tests/windows.test.js`, on any system** (part of `npm test`). The Windows code paths run with
+   `platform: 'win32'` passed in, and stand-ins for what only Windows has: reg.exe (`makeFakeReg` in
+   `tests/fake-powershell.js`, a `run` function), Windows PowerShell (`makeFakePowerShell`: a .js file
+   that powershell.js runs with Node; it decodes the script and keeps credentials and the user Path in
+   files beside itself, logging argv so tests check a key is never in it) and named pipes (Unix sockets
+   in a folder, `TRIF_PIPE_DIR`). It covers wrappers, registry keys, the browser table, the PATH step,
+   Credential Manager through keyring.js, setup and doctor end to end, pipe naming and the choice of the
+   default helper (with two real helpers and the CLI), Windows path checks, taskkill/rundll32/rename
+   retries, agent lookup by extension, and that panel runs and logins are refused.
+2. **The same tests on Windows.** On Windows they use real named pipes; reg.exe and PowerShell stay
+   stand-ins, so `npm test` never touches the computer's registry, Path or Credential Manager. Test files
+   that need macOS or Linux (Unix sockets, `#!/bin/sh` fake agents, file modes, symlinks, signals) use
+   `tests/posix-only.js` and report each test skipped with the reason; making them Windows-proof is later
+   work. Node 18 has no `--test-timeout`, so there it's plain `node --test`.
+3. **`tests/windows-smoke.js`, real Windows, CI only.** Sets TRIF up as a user would, in a scratch user
+   profile, with the real reg.exe, PowerShell and Credential Manager (so it refuses to run outside GitHub
+   Actions unless given `--yes-this-computer`): checks the wrappers, manifests, HKCU keys and user Path,
+   starts `trif-host.bat` through `cmd.exe /d /c` as Chrome does, says hello over native messaging, runs
+   `trif.cmd status` and `trif doctor` over the pipe, saves/reads/removes a key in Credential Manager, and
+   closes the helper's stdin (it must exit and remove `helper.pipe`).
+
+The workflow runs on pushes to the `windows` branch and by hand (workflow_dispatch), Node 18 and 22.
+Not covered anywhere yet: a real browser on Windows (Chrome or Firefox loading the extension and
+starting the helper itself), Edge and Brave's registry keys, and Windows on ARM.

@@ -18,7 +18,7 @@ switches stay as they were; in Safari, install the new TRIF.app (see Safari belo
 
 ## What you need
 
-- A Mac (or Linux). Windows isn't supported yet.
+- A Mac (or Linux, or Windows 10/11 without chats from the side panel yet: see [Windows](#windows)).
 - Google Chrome 135 or newer (or Firefox 153, or Safari 27.2: see below).
 - Node 18 or newer: check with `node --version`, or install it from [nodejs.org](https://nodejs.org).
 - A coding agent: [Claude Code](https://claude.com/claude-code) (you can log in from the side panel), or
@@ -85,6 +85,18 @@ built on, so for now this is for trying it out:
 TRIF's key in the old place, so it can't connect any more). Safari sees TRIF as a new extension, so its
 chats, switches and sites start over (your mods are still in `~/.trif/sites`). Then untick WebMods in
 Settings → Extensions and delete the old WebMods app.
+
+### Windows
+
+TRIF's extension, helper and `trif` command work on Windows 10 and 11, in Chrome and Firefox: run `npx trif setup` in a terminal (PowerShell or Command Prompt), then follow its next steps
+(the extension folder is `%USERPROFILE%\.trif\app\extension`). Setup adds `~\.trif\bin` to your PATH:
+open a new terminal afterwards to use `trif`.
+
+What's missing for now: **chats from the side panel**. TRIF only runs your coding agent from the panel
+where the agent's commands can be kept to the site you're fixing, and on Windows neither Claude Code
+nor Codex can do that for TRIF yet. Use your agent in a terminal instead: open one in `~\.trif`, start
+Claude Code or Codex there, and ask it to fix a site; it reads `AGENTS.md`, and the mods it writes show
+up in the panel as usual. API keys you save with `trif agent key` go to Windows Credential Manager.
 
 ## Using it
 
@@ -229,7 +241,8 @@ keys you saved from the Keychain first, while the command is still there: `~/.tr
 - `~/.trif`, your mods and TRIF's files (keep a copy of `~/.trif/sites` if you want your mods later),
   and `~/.webmods`, the link to it, if you used TRIF when it was called WebMods;
 - TRIF's private folder, with its settings, logs and screenshots: `~/Library/Application Support/TRIF`
-  (on Linux, `~/.local/state/trif`);
+  (on Linux, `~/.local/state/trif`; on Windows, `%LOCALAPPDATA%\TRIF`, and the registry keys named
+  `com.webmods.helper` under `HKEY_CURRENT_USER\Software\…\NativeMessagingHosts`);
 - `~/Library/Caches/TRIF` (chats' mailboxes; on Linux `~/.cache/trif`);
 - if you used Safari, its bridge: `launchctl bootout gui/$(id -u)/com.timsrobot.trif.safari-bridge`, then
   delete `~/Library/LaunchAgents/com.timsrobot.trif.safari-bridge.plist`.

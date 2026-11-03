@@ -5,14 +5,33 @@
 // The mods run on this page: when the panel switches one (or the robot), it asks for the page again with the
 // mods that are on (/?mods=a,b; the Worker adds only mods it has), and the panel opens again by itself after
 // the reload (sessionStorage), where shim.js picks up its state. Without this script there's no tab.
+//
+// The tab and the panel live outside <body>, in the top layer where the browser has it (popover): mods that
+// take the page apart (gravity, the shooter, tilting) walk or transform the body, and mustn't take the demo
+// with it. Someone running the real TRIF, on for this site, has the real mods: the extension marks the page
+// (<html data-trif="on">, before the page's scripts run; extension/lib.js homeMarkerScript), and then
+// there's no tab, the panel doesn't come back after a reload, and the demo's mods do nothing (src/demo.js).
 (() => {
   const tab = document.querySelector('.demo-tab');
   if (!tab) return;
   const root = document.documentElement;
   const OPEN = 'trif-demo-open';
   const remember = (on) => { try { sessionStorage.setItem(OPEN, on ? '1' : ''); } catch {} };
+  const realTrif = () => root.getAttribute('data-trif') === 'on';
+  const topLayer = typeof tab.showPopover === 'function';
   let box = null;
   let frame = null;
+
+  // The real TRIF is on here: no demo at all (and it doesn't reopen after the next reload either).
+  function standAside() {
+    remember(false);
+    if (box) { if (box.popover && box.matches(':popover-open')) box.hidePopover(); box.remove(); box = null; frame = null; }
+    root.classList.remove('demo-open');
+    if (tab.popover && tab.matches(':popover-open')) tab.hidePopover();
+    tab.remove();
+  }
+  if (realTrif()) { standAside(); return; }
+  new MutationObserver(() => { if (realTrif()) standAside(); }).observe(root, { attributes: true, attributeFilter: ['data-trif'] });
 
   function build() {
     box = document.createElement('aside');
@@ -46,11 +65,19 @@
 
   const isOpen = () => !!box && root.classList.contains('demo-open');
 
+  function showTab(on) {
+    tab.hidden = !on;
+    if (!tab.popover) return;
+    if (on && !tab.matches(':popover-open')) tab.showPopover();
+    else if (!on && tab.matches(':popover-open')) tab.hidePopover();
+  }
+
   function show() {
+    if (realTrif()) return standAside();
     if (!box) build();
     if (box.popover) { if (!box.matches(':popover-open')) box.showPopover(); } else box.hidden = false;
     root.classList.add('demo-open');
-    tab.hidden = true;
+    showTab(false);
     remember(true);
   }
 
@@ -58,7 +85,7 @@
     if (!isOpen()) return;
     if (box.popover) box.hidePopover(); else box.hidden = true;
     root.classList.remove('demo-open');
-    tab.hidden = false;
+    showTab(true);
     tab.focus();
     remember(false);
   }
@@ -73,9 +100,14 @@
     location.replace(names.length ? `/?mods=${names.join(',')}` : '/');
   });
 
-  tab.hidden = false;
+  // Out of <body>, like the panel; in the top layer where there is one.
+  root.append(tab);
+  if (topLayer) tab.popover = 'manual';
+  showTab(true);
   tab.addEventListener('click', show);
-  addEventListener('keydown', (e) => { if (e.key === 'Escape') hide(); });
+  // Escape closes the panel only from the demo's own controls: on the page, mods use it (Gravity puts the
+  // page back with it).
+  addEventListener('keydown', (e) => { if (e.key === 'Escape' && box && box.contains(document.activeElement) && !e.defaultPrevented) hide(); });
   let reopen = false;
   try { reopen = sessionStorage.getItem(OPEN) === '1'; } catch {}
   if (reopen) show();

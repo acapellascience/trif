@@ -3,17 +3,21 @@
 // tests/site.test.js checks the module is up to date).
 //
 // site/demo/ holds the demo's own scripts (tab.js on the home page, which docks the side panel to it;
-// shim.js, which stands in for the extension's background under the real side panel; and panel.css), the
-// mods it can switch on (mods/*.js, the ones made in the promo video, as they are) and the recorded chats
-// (chats/*.json, from the same sessions). The side panel itself isn't here: the Worker serves the
-// extension's own files (wrangler.toml [assets]).
+// shim.js, which stands in for the extension's background under the real side panel; and panel.css) and
+// the recorded chats (chats/*.json, from the promo video's sessions). The mods it can switch on are the
+// home page mods TRIF ships, examples/sites/timsrobot.com (one copy: what the demo runs is what users get),
+// listed in the order TRIF ships them in (helper/lib/preinstalled.js DEFAULT_ORDER). The side panel itself
+// isn't here: the Worker serves the extension's own files (wrangler.toml [assets]).
 
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
+import { createRequire } from 'node:module';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const DEMO = path.join(HERE, 'demo');
+export const MODS_DIR = path.join(HERE, '..', 'examples', 'sites', 'timsrobot.com');
+const { DEFAULT_ORDER } = createRequire(import.meta.url)('../helper/lib/preinstalled.js');
 export const OUT = path.join(HERE, 'src', 'demo-files.js');
 
 // The order the recorded chats are offered in. Follow-ups (a chat's `after`) are offered once the chats
@@ -37,10 +41,10 @@ function header(code) {
 }
 
 export function demoModule() {
-  const mods = fs.readdirSync(path.join(DEMO, 'mods')).filter((f) => f.endsWith('.js')).sort().map((f) => {
+  const mods = fs.readdirSync(MODS_DIR).filter((f) => f.endsWith('.js')).sort().map((f) => {
     const slug = f.replace(/\.js$/, '');
     if (!/^[a-z0-9-]+$/.test(slug)) throw new Error(`mod file name ${f}: use a-z, 0-9 and -`);
-    const code = read('mods', f);
+    const code = fs.readFileSync(path.join(MODS_DIR, f), 'utf8');
     const h = header(code);
     const risk = /^(\d)\s*(.*)$/.exec(h.risk || '');
     return {
@@ -50,6 +54,8 @@ export function demoModule() {
     };
   });
   const slugs = new Set(mods.map((m) => m.slug));
+  const order = DEFAULT_ORDER['timsrobot.com'] || [];
+  for (const id of order) if (!slugs.has(id.split('/')[1])) throw new Error(`DEFAULT_ORDER has ${id}, which isn't shipped`);
   const chats = fs.readdirSync(path.join(DEMO, 'chats')).filter((f) => f.endsWith('.json')).map((f) => JSON.parse(read('chats', f)));
   for (const c of chats) {
     if (!CHAT_ORDER.includes(c.id)) throw new Error(`chat ${c.id} isn't in CHAT_ORDER`);
@@ -61,6 +67,7 @@ export function demoModule() {
 export const FILES = ${JSON.stringify(files, null, 1)};
 export const MODS = ${JSON.stringify(mods, null, 1)};
 export const CHATS = ${JSON.stringify(chats, null, 1)};
+export const ORDER = ${JSON.stringify(order)};
 `;
 }
 

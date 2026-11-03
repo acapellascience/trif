@@ -2,7 +2,7 @@
 // Worker adds it to the extension's own sidepanel.html; see site/src/demo.js). It provides the chrome.*
 // calls the panel makes and answers the panel's port messages the way extension/background.js does, from
 // made-up state: the helper is connected, Claude Code is logged in, the tab shows timsrobot.com, the robot
-// is on there, and the mods from the promo video are listed (all off at first).
+// is on there, and the home page mods TRIF ships are listed, in its order (all off at first).
 //
 // What really happens:
 // - A mod switch (or the robot) reloads the home page the panel is docked to with the mods that are on
@@ -130,6 +130,9 @@
     try { running = new Set(new URLSearchParams(window.parent.location.search).get('mods')?.split(',') || []); } catch {}
     store.set('disabled', Object.fromEntries(state.mods.filter((m) => !running.has(m.slug)).map((m) => [m.id, true])));
   }
+  // The panel lists the mods in the order TRIF ships them in until the visitor drags them (as the helper's
+  // defaultOrder does for the real extension); the visitor's own order (modOrder) lives in `store`.
+  store.set('defaultOrder', { [SITE]: (DEMO.order || []).slice() });
   restoring = false;
   persist();
 

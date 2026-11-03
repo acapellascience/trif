@@ -94,9 +94,11 @@ footer a { color: var(--muted); }
 // to the right of the page (in the top layer, above mods' full-window layers); the page moves over to make
 // room. At phone width the panel is a sheet over the bottom of the page.
 const DEMO_STYLE = `
-.demo-tab { position: fixed; z-index: 10; right: 0; top: 50%; transform: translateY(-50%); writing-mode: vertical-rl;
+/* (The tab and the panel are moved out of <body> by demo.js, into the top layer where there is one: mods
+   that take the page apart leave them alone. Their own styles say everything, so page-wide ones don't.) */
+.demo-tab { position: fixed; z-index: 2147483646; inset: 50% 0 auto auto; margin: 0; transform: translateY(-50%); writing-mode: vertical-rl;
   padding: 14px 7px; background: var(--card); color: var(--fg); border: 1px solid var(--line); border-right: 0;
-  border-radius: 8px 0 0 8px; font-size: 13px; font-weight: 600; line-height: 1; }
+  border-radius: 8px 0 0 8px; font: 600 13px/1 -apple-system, system-ui, "Segoe UI", sans-serif; cursor: pointer; overflow: visible; }
 .demo-tab:hover { color: var(--accent); }
 .demo-tab[hidden] { display: none; }
 .demo-panel { position: fixed; z-index: 2147483647; inset: 0 0 0 auto; width: 360px; height: auto; max-width: 100%; max-height: none;

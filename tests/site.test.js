@@ -276,3 +276,33 @@ test('the demo\'s bundle is up to date with site/demo/, its chats are clean and 
   }
   for (const [name, code] of Object.entries(FILES)) assert.ok(!/\beval\(|new Function|innerHTML|document\.write/.test(code), `${name}: no eval or raw HTML`);
 });
+
+test('the demo runs the home page mods TRIF ships (one copy), lists them in its order, and stands aside for the real TRIF', async () => {
+  const { MODS, ORDER } = await import('../site/src/demo-files.js');
+  const { modScript } = await import('../site/src/demo.js');
+  const { DEFAULT_ORDER, PREINSTALLED } = require('../helper/lib/preinstalled');
+  const dir = path.join(REPO_DIR, 'examples', 'sites', 'timsrobot.com');
+  const shipped = PREINSTALLED.filter((p) => p.id.startsWith('timsrobot.com/')).map((p) => p.id.split('/')[1]);
+  assert.deepStrictEqual(MODS.map((m) => m.slug), [...shipped].sort(), 'every shipped home page mod, nothing else');
+  for (const m of MODS) assert.strictEqual(m.code, fs.readFileSync(path.join(dir, `${m.slug}.js`), 'utf8'), `${m.slug}: the shipped copy`);
+  assert.deepStrictEqual(ORDER, DEFAULT_ORDER['timsrobot.com']);
+  assert.strictEqual(ORDER[0], 'timsrobot.com/typing-tagline');
+  // Each mod's script does nothing on a page the real TRIF marked (and runs as before otherwise).
+  const code = modScript('neon-title.js'); // (document-start: as it is; a document-idle one waits for DOMContentLoaded, as with TRIF)
+  assert.ok(code.startsWith('(() => { if (document.documentElement.getAttribute("data-trif") === "on") return;\n'), code.slice(0, 120));
+  assert.ok(code.includes(MODS.find((m) => m.slug === 'neon-title').code));
+  const idle = modScript('fireworks.js');
+  assert.ok(idle.includes(MODS.find((m) => m.slug === 'fireworks').code) && idle.includes("addEventListener('DOMContentLoaded', run, { once: true })"));
+  assert.ok(idle.includes('if (document.documentElement.getAttribute("data-trif") === "on") return;'));
+  const vm = require('node:vm');
+  const run = (marked) => {
+    const ran = [];
+    const ctx = { ran, document: { documentElement: { getAttribute: (a) => (a === 'data-trif' && marked ? 'on' : null) } } };
+    vm.runInNewContext(`${code.slice(0, code.indexOf('\n') + 1)}ran.push(1)\n})();`, ctx); // (the wrapper as served, around a stand-in)
+    return ran.length;
+  };
+  assert.deepStrictEqual([run(false), run(true)], [1, 0]);
+  // The recorded chats switch on mods the bundle has.
+  const { CHATS } = await import('../site/src/demo-files.js');
+  for (const c of CHATS) for (const s of c.mods) assert.ok(MODS.some((m) => m.slug === s), `${c.id}: ${s}`);
+});

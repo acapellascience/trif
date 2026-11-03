@@ -16,6 +16,11 @@ import { captureScreenshot, stitchShots } from './screenshot.js';
 const HOST = 'com.webmods.helper';
 const VERSION = chrome.runtime.getManifest().version;
 const CHROME = chromeVersion(navigator.userAgent);
+// Safari's helper outlives the connection to it (the Safari bridge keeps the host and queues its messages,
+// helper/safari-bridge.js): Safari unloads the background when it's idle, and a run goes on meanwhile. So
+// there a lost connection or a restarted background doesn't end a run; after reconnecting, the helper says
+// which runs are still going (agent.running) and the others are finished.
+const PERSISTENT_HOST = !!chrome.runtime.getURL?.('')?.startsWith('safari-web-extension:');
 const LOAD_TIMEOUT = 30000;
 const NOT_CONNECTED = `The TRIF helper isn't connected. Run \`npx trif setup\` in a terminal (needs Node 18+), then restart ${BROWSER}.`;
 
@@ -216,7 +221,7 @@ function connect() {
   }
   state.port = port;
   port.onMessage.addListener((msg) => {
-    if (!state.connected) { state.connected = true; state.connectedAt = Date.now(); state.helperError = null; notifyPanels(); }
+    if (!state.connected) { state.connected = true; state.connectedAt = Date.now(); state.helperError = null; notifyPanels(); settleOrphans(); }
     checkUserScripts();
     onHelperMessage(msg).catch((e) => log('error', `handling ${msg?.type}: ${errMsg(e)}`));
   });
@@ -332,6 +337,7 @@ function helperGone(reason) {
     state.pending.delete(id);
   }
   for (const runId of [...state.runs.keys()]) {
+    if (PERSISTENT_HOST) { state.runs.get(runId).orphan = true; continue; } // settled on reconnecting (settleOrphans)
     onAgentEvent(runId, { kind: 'error', message: `The TRIF helper disconnected while the agent was working (${reason}).` });
     onAgentEvent(runId, { kind: 'done', ok: false, result: '', costUsd: null, changedFiles: [], sessionId: null });
   }
@@ -1108,11 +1114,36 @@ function updateChat(site, fn) {
   });
 }
 
-/** On service worker start no run can be live: mark runs left in storage as interrupted. */
+/**
+ * Runs that were going when the connection was lost (or the background restarted), on a helper that
+ * outlives it: ask which are still going, finish the rest. A helper without agent.running finishes them all.
+ */
+async function settleOrphans() {
+  const orphans = [...state.runs.values()].filter((r) => r.orphan);
+  if (!orphans.length) return;
+  let live;
+  try { live = new Set((await helperRequest('agent.running', {}, 10000))?.runIds || []); } catch { live = new Set(); }
+  for (const r of orphans) {
+    if (state.runs.get(r.runId) !== r) continue; // its done arrived meanwhile (queued by the bridge)
+    if (live.has(r.runId)) { r.orphan = false; continue; }
+    onAgentEvent(r.runId, { kind: 'error', message: 'The agent stopped while TRIF was away (the helper restarted, or the run ended and its last messages were lost).' });
+    onAgentEvent(r.runId, { kind: 'done', ok: false, result: '', costUsd: null, changedFiles: [], sessionId: null });
+  }
+}
+
+/**
+ * On service worker start no run can be live here: mark runs left in storage as interrupted. Except with a
+ * helper that outlives the background (PERSISTENT_HOST, Safari): there a started run is taken up again,
+ * and settled once the helper answers (settleOrphans).
+ */
 async function cleanStaleRuns(all) {
   const fixes = {};
   for (const [key, chat] of Object.entries(all || {})) {
     if (!key.startsWith('chat:') || !chat?.run) continue;
+    if (PERSISTENT_HOST && chat.run.runId) {
+      state.runs.set(chat.run.runId, { runId: chat.run.runId, site: key.slice(5), agent: chat.agent ?? undefined, tabId: undefined, stopping: false, errored: false, texts: 0, orphan: true });
+      continue;
+    }
     const messages = Array.isArray(chat.messages) ? chat.messages.slice() : [];
     messages.push({ role: 'error', text: 'Interrupted: TRIF restarted while the agent was working.', time: Date.now() });
     fixes[key] = { ...chat, messages, run: null };

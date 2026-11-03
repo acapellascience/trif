@@ -595,6 +595,18 @@ test('agent.stop kills the run (SIGTERM, then SIGKILL for a stubborn agent); don
   assert.equal(unknown.ok, false);
 });
 
+test('agent.running lists the runs still going (for an extension that was away)', async () => {
+  const { home } = makeHome();
+  const ext = startHost(home);
+  assert.deepEqual((await extRequest(ext, 'agent.running', {})).result, { runIds: [] });
+  const { runId } = (await extRequest(ext, 'agent.start', { ...START, prompt: 'SLEEP forever' })).result;
+  await ext.next((m) => m.type === 'agentEvent' && m.runId === runId && m.event.kind === 'text');
+  assert.deepEqual((await extRequest(ext, 'agent.running', {})).result, { runIds: [runId] });
+  await extRequest(ext, 'agent.stop', { runId });
+  await waitDone(ext, runId);
+  assert.deepEqual((await extRequest(ext, 'agent.running', {})).result, { runIds: [] });
+});
+
 test('one run per site: a second start for a busy site fails; another site is fine', async () => {
   const { home } = makeHome();
   const ext = startHost(home);

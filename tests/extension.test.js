@@ -4,6 +4,7 @@
 const assert = require('node:assert');
 const vm = require('node:vm');
 const { test, before } = require('node:test');
+const { waitFor } = require('./fake-extension');
 
 let lib, rt;
 before(async () => {
@@ -759,7 +760,7 @@ let bgCount = 0;
 // TRIF is on for the test sites unless a test says otherwise (storage.sitesOn), or migrate: true
 // leaves sitesOn out, as for someone updating from before sites had to be turned on.
 const TEST_SITES_ON = ['example.com', 'x.com', 'y.com', 'z.com'];
-async function loadBackground({ storage = {}, tabs = [], migrate = false } = {}) {
+async function loadBackground({ storage = {}, tabs = [], migrate = false, safari = false } = {}) {
   const store = structuredClone(migrate || 'sitesOn' in storage ? storage : { sitesOn: TEST_SITES_ON, ...storage });
   const ctl = { full: false }; // full: every storage write fails, like a full quota
   const natives = [];
@@ -771,7 +772,7 @@ async function loadBackground({ storage = {}, tabs = [], migrate = false } = {})
     runtime: {
       id: lib.EXTENSION_ID, lastError: undefined,
       getManifest: () => ({ version: '0.1.0' }),
-      getURL: (p) => `chrome-extension://${lib.EXTENSION_ID}/${p}`,
+      getURL: (p) => (safari ? `safari-web-extension://ABC-123/${p}` : `chrome-extension://${lib.EXTENSION_ID}/${p}`),
       onStartup: chromeEvent(), onInstalled: chromeEvent(), onMessage: chromeEvent(), onConnect: chromeEvent(),
       connectNative: () => { const p = mockPort('native'); natives.push(p); return p; },
     },
@@ -1068,6 +1069,68 @@ test('background: runs left in storage by a previous service worker are marked i
     assert.strictEqual(chat.sessionId, 's');
     assert.deepStrictEqual(chat.messages.map((m) => m.role), ['user', 'error']);
     assert.match(chat.messages[1].text, /Interrupted/);
+  } finally { bg.restore(); }
+});
+
+test('background (Safari): a run left in storage is taken up again, and settled by agent.running', async () => {
+  const stale = (runId) => ({ sessionId: 's', agent: 'claude', messages: [{ role: 'user', text: 'go', time: 1 }], run: { runId, startedAt: 1 }, last: null });
+  const bg = await loadBackground({ safari: true, storage: { 'chat:x.com': stale('going'), 'chat:y.com': stale('gone') } });
+  try {
+    // Safari unloaded the background mid-run; the helper (the bridge's host) kept going.
+    assert.strictEqual(bg.store['chat:x.com'].run.runId, 'going');
+    assert.strictEqual(bg.store['chat:y.com'].run.runId, 'gone');
+    // The first message from the helper: the background asks which runs are still going.
+    bg.native.emit({ type: 'agentEvent', runId: 'going', event: { kind: 'text', text: 'Still here.' } });
+    const req = await answerNative(bg.native, 'agent.running', { runIds: ['going'] });
+    assert.deepStrictEqual(req.args, {});
+    await settle(20);
+    const gone = bg.store['chat:y.com'];
+    assert.strictEqual(gone.run, null);
+    assert.match(gone.messages.at(-1).text, /stopped while TRIF was away/);
+    // The live one carries on, and finishes normally.
+    assert.strictEqual(bg.store['chat:x.com'].run.runId, 'going');
+    bg.native.emit({ type: 'agentEvent', runId: 'going', event: { kind: 'done', ok: true, result: 'Done.', changedFiles: [] } });
+    await settle(20);
+    const chat = bg.store['chat:x.com'];
+    assert.strictEqual(chat.run, null);
+    assert.deepStrictEqual(chat.messages.map((m) => [m.role, m.text]), [['user', 'go'], ['assistant', 'Still here.']]);
+  } finally { bg.restore(); }
+});
+
+test('background (Safari): a lost connection mid-run keeps the run; reconnecting settles it', async () => {
+  const bg = await loadBackground({ safari: true });
+  try {
+    const panel = bg.connectPanel();
+    const startP = panel.ask({ type: 'agent.start', site: 'x.com', tabId: 1, url: 'https://x.com/', prompt: 'go' });
+    await answerNative(bg.native, 'agent.start', { runId: 'r9' });
+    await startP;
+    bg.native.emit({ type: 'agentEvent', runId: 'r9', event: { kind: 'text', text: 'Looking…' } });
+    await settle(10);
+    bg.native.onDisconnect.emit();
+    await settle(20);
+    // Not ended: no error or done for the panel, and the chat still shows it running.
+    assert.deepStrictEqual(panel.sent.filter((m) => m.type === 'agentEvent' && m.runId === 'r9').map((m) => m.event.kind), ['text']);
+    assert.strictEqual(bg.store['chat:x.com'].run.runId, 'r9');
+    // The background reconnects (after its backoff); the helper says the run is still going, then it ends.
+    // (Earlier tests' backgrounds reconnect through the same mock too: the new connection is the one that
+    // asks agent.running once the helper speaks.)
+    let native = null;
+    await waitFor(async () => {
+      for (const p of bg.natives.slice(1)) {
+        if (!p.greeted) { p.greeted = true; p.onMessage.emit({ type: 'mods', mods: [] }); }
+      }
+      await settle(5);
+      native = bg.natives.slice(1).find((p) => p.sent.some((m) => m.type === 'request' && m.cmd === 'agent.running'));
+      return !!native;
+    }, { timeout: 5000, message: 'a new connection asking agent.running' });
+    native.emit = (m) => native.onMessage.emit(m);
+    await answerNative(native, 'agent.running', { runIds: ['r9'] });
+    await settle(10);
+    assert.strictEqual(bg.store['chat:x.com'].run.runId, 'r9');
+    native.emit({ type: 'agentEvent', runId: 'r9', event: { kind: 'done', ok: true, result: 'Done.', changedFiles: [] } });
+    await settle(20);
+    assert.strictEqual(bg.store['chat:x.com'].run, null);
+    assert.deepStrictEqual(bg.store['chat:x.com'].messages.map((m) => m.role), ['user', 'assistant']);
   } finally { bg.restore(); }
 });
 

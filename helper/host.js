@@ -339,7 +339,7 @@ function onRunRequest(run, line, respond) {
 }
 const logins = new Logins({ getWorkspace: () => workspace(ws.home), logger, onEvent: onAgentEvent });
 const runSubscribers = new Map(); // runId or loginId -> Set of CLI sockets that started it (see onClientLine)
-const AGENT_COMMANDS = new Set(['agent.list', 'agent.start', 'agent.stop', 'agent.login', 'agent.loginCode', 'agent.loginCancel', 'mod.approve',
+const AGENT_COMMANDS = new Set(['agent.list', 'agent.start', 'agent.stop', 'agent.running', 'agent.login', 'agent.loginCode', 'agent.loginCancel', 'mod.approve',
   'mod.update', 'instructions.get', 'instructions.set', 'agent.models', 'agent.openModel', 'agent.openModel.set', 'agent.openModel.setKey', 'agent.openModel.removeKey', 'update.check', 'update.install', 'update.setAuto', 'report.build']);
 // Helper-local too, but a run may use them (on mods inside its scope; see lib/trash.js).
 const MOD_FILE_COMMANDS = new Set(['mod.delete', 'mod.restore']);
@@ -453,6 +453,9 @@ function agentCommand(cmd, args) {
     }
     case 'agent.start': return startRun(args);
     case 'agent.stop': return runs.stop(args.runId);
+    // Which runs are still going: an extension that was away (Safari unloads its background) finishes the
+    // ones that ended meanwhile.
+    case 'agent.running': return { runIds: runs.list().map((r) => r.runId) };
     case 'agent.login': return logins.start(args);
     case 'agent.loginCode': return logins.code(args.loginId, args.code);
     case 'mod.approve': {

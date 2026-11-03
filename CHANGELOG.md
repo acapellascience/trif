@@ -8,6 +8,9 @@ needs a section here for the version it releases.
 
 - **Safari: no more garbled characters in the panel.** Messages from TRIF's background (like "isn’t") showed
   as "isnâ€™t" in Safari, which read that script as Latin-1.
+- **Safari: a chat keeps going when Safari pauses TRIF.** Safari unloads TRIF's background when it's idle;
+  a chat that was working then showed "Interrupted" although your agent carried on. Now its messages arrive
+  when TRIF wakes, and only a chat that really ended is closed.
 - **Your agent finishes the job more often.** Its guide now tells it to change the whole kind of thing
   you mean, not only the one you pointed at ("hide the promos" means every promo, on every page), to
   count what's left before saying it's done, and to tell you what it checked and what it couldn't. A new

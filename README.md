@@ -20,7 +20,7 @@ switches stay as they were; in Safari, install the new TRIF.app (see Safari belo
 ## What you need
 
 - A Mac (or Linux). Windows isn't supported yet.
-- Google Chrome 135 or newer (or Firefox 153, or Safari 27.2: see below).
+- Google Chrome 138 or newer (or Firefox 153, or Safari 27.2: see below).
 - Node 18 or newer: check with `node --version`, or install it from [nodejs.org](https://nodejs.org).
 - A coding agent: [Claude Code](https://claude.com/claude-code) (you can log in from the side panel), or
   [Codex](https://github.com/openai/codex) 0.138 or newer (`brew install codex`, then `codex login` in a terminal).

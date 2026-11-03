@@ -58,12 +58,12 @@ Mitigations:
 
 ## 3. The "Allow User Scripts" switch (medium-high)
 
-Since Chrome 138, `userScripts` only works after the user turns on **Allow User Scripts** on the
-extension's details page. In Chrome 135–137, the minimum the manifest allows, Developer mode must be
-on instead. A reviewer who skips the switch sees "user scripts are off" errors and can't see mods run.
+Since Chrome 138 (the minimum the manifest allows), `userScripts` only works after the user turns on
+**Allow User Scripts** on the extension's details page. A reviewer who skips the switch sees "user
+scripts are off" errors and can't see mods run.
 
 Mitigations:
-- The setup page that opens on install already detects this and has an "Open extension settings"
+- The setup page that opens on install already detects this and has an "Open TRIF’s Chrome settings"
   button. Put the switch as step 2 of the test instructions.
 - **Bug to fix before submitting:** `extension/lib.js` builds `SETTINGS_URL` from the hard-coded dev
   ID `iaablflfafmonebdomeikadolkgdbkhe`. The store build gets a different ID, so the side panel's
@@ -162,7 +162,7 @@ TRIF runs site customizations ("mods") written by the user's own coding agent. I
      npx trif setup
    (or: <alternative install instructions / tarball URL>)
    Quit and reopen Chrome.
-2. A "TRIF" setup page opens (or click the toolbar icon, then "Setup"). Turn on "Allow User Scripts": click "Open extension settings" and switch it on (Chrome 138+). On Chrome 135–137, turn on Developer mode at chrome://extensions instead. The setup page should show Helper: connected and Allow User Scripts: on.
+2. A "TRIF setup" page opens (or click the toolbar icon, then "Setup"). Turn on "Allow User Scripts": click "Open TRIF’s Chrome settings" and switch it on. The setup page ticks off "Install the helper" and "Allow user scripts".
 3. Create a mod without any AI account. In a terminal:
      mkdir -p ~/.trif/sites/example.com
      printf '%s\n' "document.addEventListener('DOMContentLoaded', () => { document.querySelector('h1').textContent = 'Hello from TRIF'; });" > ~/.trif/sites/example.com/hello.js

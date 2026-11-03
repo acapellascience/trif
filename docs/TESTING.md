@@ -3,7 +3,10 @@
 Two suites:
 
 - **Unit tests** (fast, no browser): `node --test --test-concurrency=2 --test-timeout=120000`. That's
-  what `npm test` runs, and what `scripts/release.js` runs.
+  what `npm test` runs, and what `scripts/release.js` runs. `tests/upgrade.test.js` among them is a real
+  upgrade without a browser: the v0.1.2 updater (from `git archive v0.1.2`, set up by its own setup in a
+  scratch home) installs this checkout packed at the next version, with a test signing key; skipped
+  without the tag.
 - **End-to-end browser suite** (opt-in, real browsers): `node tests/e2e/run.js`. Run it before each
   release. It isn't part of `node --test`.
 

@@ -4,51 +4,44 @@ What's new in each TRIF release (called WebMods before 0.2.0). The text under a 
 panel shows under "What's new", so it's written for people using TRIF. `node scripts/release.js <version>`
 needs a section here for the version it releases.
 
-## Unreleased
-
-- **Safari: no more garbled characters in the panel.** Messages from TRIF's background (like "isn’t") showed
-  as "isnâ€™t" in Safari, which read that script as Latin-1.
-- **Safari: a chat keeps going when Safari pauses TRIF.** Safari unloads TRIF's background when it's idle;
-  a chat that was working then showed "Interrupted" although your agent carried on. Now its messages arrive
-  when TRIF wakes, and only a chat that really ended is closed.
-- **Your agent finishes the job more often.** Its guide now tells it to change the whole kind of thing
-  you mean, not only the one you pointed at ("hide the promos" means every promo, on every page), to
-  count what's left before saying it's done, and to tell you what it checked and what it couldn't. A new
-  `trif sweep` command lets it find every instance on a page, in one go: by colour, by element or by
-  words, inside widgets and frames too.
-- **Screenshots of tabs you're not looking at.** In Firefox your agent can now see any tab without TRIF
-  switching to it. In Chrome it still can't by default; if it really needs to look, it can open a copy of
-  the page in a window that shows for a moment at the edge of your screen, and it says so.
-
-- **TRIF's own files moved out of the folder your agent works in.** Settings, logs, chat logs and
-  screenshots now live in `~/Library/Application Support/TRIF` (moved there by themselves), where a chat's
-  agent can't read them at all; your mods stay in `~/.trif`. Using Safari: install TRIF.app from this
-  version (older ones look for TRIF's key in the old place).
-- **API keys for Claude Code and Codex go in the Keychain.** If you use an API key instead of logging
-  in, save it with `trif agent key --set-key`; a key you'd put in TRIF's settings moves there by itself.
-  TRIF adds it to the agent's requests, so the agent and its commands never get it.
-- **What you type in a chat isn't on the agent's command line any more**, where other programs on your
-  Mac could read it.
-
-- **Open models (experimental).** A third choice in Settings, "Open model (via Codex)": your agent runs
-  on a model on your own computer (Ollama or LM Studio, nothing leaves it) or from a provider like
-  OpenRouter with your own key, through Codex (no OpenAI account needed). Same walls as any chat. Paste
-  your key in Settings (or `trif agent open-model --set-key`): it's kept in your Mac's Keychain, never
-  in TRIF's files, and neither Codex nor your agent's commands ever get it. Don't keep API keys in your
-  shell profile: other programs can read them there (`trif doctor` warns). Small local models are much
-  weaker at this than Claude Code or Codex. See the README.
-
 ## 0.2.0
 
-- **WebMods is now TRIF: Tim's Robot Internet Fixer.** Same thing, new name. Nothing about how it works
-  has changed, and you don't need to do anything.
-- Your mods, chats, switches and settings all carry over. The folder they live in moved from `~/.webmods`
-  to `~/.trif`; `~/.webmods` is now a link to the new folder, so anything that used the old place still
-  works. Please keep that link: Chrome may load the extension through it.
-- A new icon: the robot himself, a little dark head with green eyes.
-- The command is now `trif` (for example `trif doctor`). `webmods` still works, and does the same thing.
-- Problem reports go to timsrobot.com/report (webmods.dev sends you there).
-- Mods can call `window.trif.log(...)`; `window.webmods` still works in the mods you already have.
+- **WebMods is now TRIF: Tim's Robot Internet Fixer**, with a new icon: the robot himself. Your mods,
+  chats, switches and settings carry over. Their folder moved from `~/.webmods` to `~/.trif`
+  (`~/.webmods` is now a link to it: please keep it). TRIF's own settings, logs and screenshots moved to
+  `~/Library/Application Support/TRIF`, out of your agent's reach. The command is now `trif` (`webmods`
+  still works), and mods can call `window.trif.log(...)` (`window.webmods` still works).
+- **Using Safari?** Build and open the new TRIF.app (see the README), tick TRIF in Safari → Settings →
+  Extensions and allow it on every website. Safari sees it as a new extension, so its chats, switches
+  and sites start over. Then delete the old WebMods app.
+- **Your agent finishes the job more often.** It changes the whole kind of thing you mean ("hide the
+  promos" means every promo, on every page), counts what's left before saying it's done, and tells you
+  what it checked. A new `trif sweep` finds every instance on a page in one go: by colour, element or
+  words, inside widgets and frames too.
+- **Screenshots of tabs you're not looking at.** In Firefox your agent can see any tab without TRIF
+  switching to it. In Chrome it can open a copy of the page in a window that shows for a moment at the
+  edge of your screen, and it says so.
+- **Each site's chat keeps its own agent and model.**
+- **Merge with my agent** (for a new version of a shipped mod you changed): your agent proposes the
+  merge first, and makes it when you say go ahead.
+- **Open models (experimental).** A third choice in Settings, "Open model (via Codex)": a model on your
+  own computer (Ollama or LM Studio: nothing leaves it) or from a provider like OpenRouter with your own
+  key, through Codex (no OpenAI account needed). The key is kept in your Mac's Keychain only. Small
+  local models are much weaker at this than Claude Code or Codex. See the README.
+- **API keys go in the Keychain.** If you use an API key instead of logging in, save it with
+  `trif agent key --set-key` (`--agent codex` for an OpenAI key); one in TRIF's settings moves there by
+  itself. TRIF adds it to your agent's requests, so neither the agent nor its commands get it. Don't keep
+  API keys in your shell profile: other programs can read them there (`trif doctor` warns).
+- **Stronger walls around side-panel chats.** What you type isn't on the agent's command line any more,
+  where other programs could read it. Your agent can read your skill folders (read only), but never
+  TRIF's settings, logs or other sites' screenshots, and one chat can't widen the next one's limits.
+  `trif screenshot --copy` won't reload one-time links, and checks where the copy ends up.
+- New shipped mod: **DVD Logo** for Google (off until you switch it on).
+- The panel: "What should I fix on x.com?", a power button for the site, the robot with its eyes off
+  where TRIF is off, and a mods list that scrolls on its own.
+- **Safari:** no more garbled characters in the panel; a chat keeps going when Safari pauses TRIF; if
+  Safari's storage stops working, TRIF says so and keeps going.
+- **Firefox:** the panel says when the add-on is older than the rest of TRIF, and how to update it.
 
 ## 0.1.2
 

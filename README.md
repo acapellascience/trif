@@ -1,8 +1,8 @@
 # Tim's Robot Internet Fixer (TRIF)
 
-Customize any website by asking your coding agent. Open the TRIF side panel in Chrome, say what you
-want ("hide the trending sidebar", "only show people I follow"), and your agent writes a small mod that
-runs every time that site loads. Mods are plain JavaScript files on your computer; switch each one off
+Customize any website by asking your coding agent. Open the TRIF side panel in Chrome (or Firefox, or
+Safari), say what you want ("hide the trending sidebar", "only show people I follow"), and your agent
+writes a small mod that runs every time that site loads. Mods are plain JavaScript files on your computer; switch each one off
 and on from the side panel.
 
 TRIF uses the coding agent you already have (Claude Code or Codex), on your own account.
@@ -10,20 +10,21 @@ TRIF collects nothing: the only thing that ever reaches its developer is a probl
 
 **Beta.** Expect rough edges, and please send feedback.
 
-**It used to be called WebMods.** Version 0.2.0 renamed it; nothing else changed. Updating moves your mods
-and settings from `~/.webmods` to `~/.trif` (and leaves `~/.webmods` as a link to it, so keep that link),
-the command is now `trif` (`webmods` still works), and the extension, its settings and your switches stay
-as they were.
+**It used to be called WebMods.** Version 0.2.0 renamed it and moved some things. Updating moves your
+mods to `~/.trif` (and leaves `~/.webmods` as a link to it, so keep that link), and TRIF's own settings,
+logs and screenshots to `~/Library/Application Support/TRIF`, where your agent can't read them. The
+command is now `trif` (`webmods` still works). In Chrome and Firefox the extension, its settings and your
+switches stay as they were; in Safari, install the new TRIF.app (see Safari below).
 
 ## What you need
 
 - A Mac (or Linux). Windows isn't supported yet.
-- Google Chrome 138 or newer.
+- Google Chrome 135 or newer (or Firefox 153, or Safari 27.2: see below).
 - Node 18 or newer: check with `node --version`, or install it from [nodejs.org](https://nodejs.org).
 - A coding agent: [Claude Code](https://claude.com/claude-code) (you can log in from the side panel), or
   [Codex](https://github.com/openai/codex) 0.138 or newer (`brew install codex`, then `codex login` in a terminal).
-  Pick one in the side panel's settings when you have both. If you use an Anthropic or OpenAI API key
-  instead of logging in, save it with `trif agent key --agent claude --set-key` (or `--agent codex`):
+  Pick one in the side panel's settings when you have both (each site's chat keeps its own choice of
+  agent and model). If you use an Anthropic or OpenAI API key instead of logging in, save it with `trif agent key --agent claude --set-key` (or `--agent codex`):
   it's kept in your Mac's Keychain, and TRIF adds it to the agent's requests itself, so neither the agent
   nor its commands ever get it. (A key you put in TRIF's `config.json` before moves there by itself.)
 
@@ -51,9 +52,7 @@ as they were.
 3. **Allow it to run mods.** On `chrome://extensions`, click **Details** under TRIF and turn on
    **Allow User Scripts**.
 
-4. **Restart Chrome.** Quit it completely (⌘Q) and open it again.
-
-5. **Open the side panel.** Click the TRIF icon in the toolbar (pin it from the puzzle-piece menu). If
+4. **Open the side panel.** Click the TRIF icon in the toolbar (pin it from the puzzle-piece menu). If
    it asks you to log in to Claude, click **Log in** and follow the steps.
 
 ### Firefox
@@ -71,16 +70,21 @@ on its own browser. Switching a mod off is per browser.
 TRIF runs in Safari 27.2 or newer on a Mac. Until it's signed by Apple it only runs on the Mac it was
 built on, so for now this is for trying it out:
 
-1. `node scripts/build-safari.js` (needs Xcode) makes `dist/safari-app/TRIF.app`. Open it once: it adds
-   the TRIF extension to Safari.
-2. `trif setup --browser safari` starts the Safari bridge, a small background program Safari's
-   extension talks to (Safari can't start the helper itself the way Chrome does). It starts again whenever
-   you log in.
+1. From a checkout of this repo, `node scripts/build-safari.js` (needs Xcode) makes
+   `dist/safari-app/TRIF.app`. Open it once: it adds the TRIF extension to Safari.
+2. `~/.trif/bin/trif setup --browser safari` starts the Safari bridge, a small background program
+   Safari's extension talks to (Safari can't start the helper itself the way Chrome does). It starts again
+   whenever you log in.
 3. In Safari: Settings → Advanced, tick "Show features for web developers"; Settings → Developer, tick
    "Allow unsigned extensions" (Safari turns this off whenever it quits); Settings → Extensions, tick
    TRIF and allow it on every website.
 4. Click the TRIF toolbar button. Safari has no side panel, so the panel opens in a window of its own,
    following the tabs of the window you opened it from.
+
+**Upgrading from WebMods in Safari:** do steps 1 to 3 with the new TRIF.app (the old WebMods app looks for
+TRIF's key in the old place, so it can't connect any more). Safari sees TRIF as a new extension, so its
+chats, switches and sites start over (your mods are still in `~/.trif/sites`). Then untick WebMods in
+Settings → Extensions and delete the old WebMods app.
 
 ## Using it
 
@@ -114,7 +118,8 @@ TRIF starts on for Google, X, Amazon and Instagram, with these mods. Each has a 
 panel on its site; the ones marked *(off)* wait for you to switch them on.
 
 - **Google:** Hide AI in Results, Hide AI Mode and Gemini Promo, Results Only (no extra sections), Hide
-  Sponsored Results.
+  Sponsored Results, and DVD Logo *(off)*: the logo on the home page bounces around like an old DVD
+  screensaver.
 - **X:** **Plain X**: Home is just the people you follow, newest first, with no ads or suggestions. It
   starts as plain as it gets (only original text posts from people who follow you back); the **Filters**
   menu turns each kind back on (reposts, quotes, replies, links, videos, images, non-mutuals…). It also hides the
@@ -181,7 +186,9 @@ Keychain (without showing it).
 When a new version is out, the TRIF panel says so: click **Update** to install it, or **What's new**
 to read what changed first. In Settings, **Install updates automatically** lets it update by itself when
 no chat is running (it's off unless you turn it on). Firefox updates the add-on itself, like any other
-add-on. From a terminal: `~/.trif/bin/trif update` (or `update --install`).
+add-on, about once a day; if the panel says the add-on is older than the rest of TRIF, open about:addons,
+click the gear, then **Check for Updates**. From a terminal: `~/.trif/bin/trif update` (or
+`update --install`).
 
 Updates are signed: TRIF installs only versions signed with its release key, so a copy from anywhere
 else is refused.
@@ -194,8 +201,8 @@ else is refused.
 
 checks every piece and says how to fix what's broken. Common fixes:
 
-- **"Helper isn't connected"**: quit Chrome completely and reopen it. If that doesn't help, run
-  `npx trif setup` again, then restart Chrome.
+- **"Helper isn't connected"**: quit the browser completely and reopen it. If that doesn't help, run
+  `npx trif setup` again, then restart the browser.
 - **Mods don't run**: make sure **Allow User Scripts** is on (step 3), then reload the page.
 - **Claude Code isn't found**: install it, then run `npx trif setup` again in the same terminal.
 - **"rg" Not Opened** while Codex works: a search tool that ships with Codex hasn't been checked by
@@ -214,17 +221,24 @@ echo 'export PATH="$HOME/.trif/bin:$PATH"' >> ~/.zshrc
 
 ## Uninstall
 
-Remove TRIF from `chrome://extensions`, then delete `~/.trif` (and `~/.webmods`, the link to it, if you
-used TRIF when it was called WebMods). That folder holds your mods, so keep a copy of `~/.trif/sites` if
-you want them later. TRIF's settings, logs and screenshots are in `~/Library/Application Support/TRIF`
-(on Linux, `~/.local/state/trif`): delete that too. API keys you saved are in the Keychain, under "TRIF
-API key" and "TRIF open model key" (`trif agent key --remove-key`, `trif agent open-model --remove-key`).
+Remove TRIF from `chrome://extensions` (Firefox: about:addons; Safari: delete TRIF.app). Remove the API
+keys you saved from the Keychain first, while the command is still there: `~/.trif/bin/trif agent key
+--remove-key` (and again with `--agent codex`), and `~/.trif/bin/trif agent open-model --remove-key`
+(they're listed in Keychain Access as "TRIF API key" and "TRIF open model key"). Then delete:
+
+- `~/.trif`, your mods and TRIF's files (keep a copy of `~/.trif/sites` if you want your mods later),
+  and `~/.webmods`, the link to it, if you used TRIF when it was called WebMods;
+- TRIF's private folder, with its settings, logs and screenshots: `~/Library/Application Support/TRIF`
+  (on Linux, `~/.local/state/trif`);
+- `~/Library/Caches/TRIF` (chats' mailboxes; on Linux `~/.cache/trif`);
+- if you used Safari, its bridge: `launchctl bootout gui/$(id -u)/com.timsrobot.trif.safari-bridge`, then
+  delete `~/Library/LaunchAgents/com.timsrobot.trif.safari-bridge.plist`.
 
 ## Privacy
 
-Your mods and chats stay on your computer. A chat's agent can read your mods folder, `~/.trif`, but not
-TRIF's settings, logs or other sites' screenshots, which are kept apart, in `~/Library/Application
-Support/TRIF`. When you ask for a change, your coding agent reads the page
+Your mods and chats stay on your computer. A chat's agent can read your mods folder, `~/.trif`, and your
+agents' skill folders (read only), but not TRIF's settings, logs or other sites' screenshots, which are
+kept apart, in `~/Library/Application Support/TRIF`. When you ask for a change, your coding agent reads the page
 you're on, and sends what it reads to its provider (Anthropic for Claude Code, OpenAI for Codex, the provider
 you picked for an open model; nobody for a model on your own computer) under that provider's
 terms. See [store/PRIVACY.md](store/PRIVACY.md).
@@ -271,6 +285,14 @@ bumps the version, runs the tests, builds both extensions and the npm package, h
 Firefox add-on, makes the beta zips (from `beta/`), and writes the update feeds in `updates/`. Then it asks
 before publishing: a tagged commit, a GitHub release with the files, and the feeds last. `--dry-run`
 builds everything into `dist/release/<version>` and publishes nothing.
+
+Two things it doesn't do, both yours: **rename the GitHub repo** from `acapellascience/WebMods` to
+`acapellascience/trif` before releasing 0.2.0 (package.json points installs at the new name; the script
+stops while the git remote and package.json disagree), then check that the old
+`raw.githubusercontent.com/acapellascience/WebMods/main/updates/…` URLs redirect, since installs from
+before the rename fetch updates there; and **publish `trif` on npm** (`npm publish` the release's .tgz),
+which `npx trif setup` above needs. The script also stops while CHANGELOG.md has a non-empty
+"## Unreleased" section.
 
 It needs, on the releasing Mac: `gh auth login`; the addons.mozilla.org API key and secret in the
 keychain as `trif-amo-issuer` and `trif-amo-secret`; and the release signing key, made once with

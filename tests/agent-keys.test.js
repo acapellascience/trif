@@ -4,7 +4,7 @@
 // the agent never has them. Fake agents, a stand-in Anthropic API (tests/fake-anthropic-server.js) and,
 // when Claude Code is installed, a real Claude Code run against the stand-in (no tokens spent).
 
-const test = require('node:test');
+const test = require('./posix-only')('fake agents are #!/bin/sh scripts, helpers on Unix sockets');
 const assert = require('node:assert');
 const fs = require('fs');
 const path = require('path');

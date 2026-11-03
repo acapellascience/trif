@@ -4,7 +4,7 @@
 // checkModsFolder, workspaceLinks). Links a run leaves in the mods folder mustn't widen the next run's
 // limits either.
 
-const test = require('node:test');
+const test = require('./posix-only')('side-panel runs (not on Windows yet), symlinks');
 const assert = require('node:assert');
 const fs = require('fs');
 const path = require('path');

@@ -1,0 +1,50 @@
+# TRIF on Windows (Phase 1: helper, setup, doctor, CLI, keyring; no side-panel runs). Runs on GitHub's
+# windows-latest runners: the unit tests (tests/windows.test.js runs Windows' own code paths for real
+# there, with real named pipes; test files that need macOS or Linux report themselves skipped), then
+# tests/windows-smoke.js, which sets TRIF up the way a user does (registry keys under HKCU, the user's
+# Path, Credential Manager) on the runner, starts the helper as Chrome does and talks to it over its pipe.
+# Nothing is published, uploaded or signed, and no secrets are used.
+name: windows
+
+on:
+  push:
+    branches: [windows]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# A newer push makes the run still going for an older one pointless.
+concurrency:
+  group: windows-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    runs-on: windows-latest
+    timeout-minutes: 25
+    strategy:
+      fail-fast: false
+      matrix:
+        node: [18, 22]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+      - name: Line endings are LF (.gitattributes)
+        shell: bash
+        run: |
+          if grep -rlI $'\r' helper extension examples tests --include='*.js' --include='*.json' --include='*.md'; then
+            echo "files checked out with CRLF"; exit 1
+          fi
+      # Node 18's test runner has neither --test-timeout nor --test-concurrency (what `npm test` passes).
+      - name: Unit tests (Node 18)
+        if: matrix.node == 18
+        run: node --test
+      - name: Unit tests
+        if: matrix.node != 18
+        run: npm test
+      - name: Smoke test (setup, registry, named pipes, Credential Manager)
+        if: always()
+        run: node tests/windows-smoke.js

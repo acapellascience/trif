@@ -1,7 +1,7 @@
 'use strict';
 // Tests for helper/cli.js (the `trif` command), run against host.js + a fake extension.
 
-const test = require('node:test');
+const test = require('./posix-only')('the CLI against helpers on Unix sockets (<home>/helper.sock), #!/bin/sh wrappers');
 const assert = require('node:assert');
 const fs = require('fs');
 const path = require('path');

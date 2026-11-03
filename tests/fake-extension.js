@@ -28,8 +28,16 @@ function privDir(home) {
 // PATH without any real coding agent on it (setup records PATH and the helper/doctor look agents up
 // there), plus a folder with `node` so `#!/usr/bin/env node` scripts still work.
 let safePath = null;
+// (Windows: no link, which needs Developer Mode there, and no #!/usr/bin/env either; agents are found by
+// extension, lib/agents/util.js.)
 function agentFreePath() {
   if (safePath !== null) return safePath;
+  if (process.platform === 'win32') {
+    const exts = ['', '.exe', '.cmd', '.bat'];
+    const hasAgent = (d) => ['claude', 'codex'].some((n) => exts.some((e) => fs.existsSync(path.join(d, n + e))));
+    safePath = String(process.env.PATH || '').split(path.delimiter).filter((d) => d && !hasAgent(d)).join(path.delimiter);
+    return safePath;
+  }
   const nodeDir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'wm-node-')));
   fs.symlinkSync(process.execPath, path.join(nodeDir, 'node'));
   const has = (d, n) => { try { fs.accessSync(path.join(d, n), fs.constants.X_OK); return true; } catch { return false; } };
@@ -50,8 +58,21 @@ function testEnv(home, extra = {}) {
     TRIF_BOX_ROOT: path.join(home, 'boxes'), // agent runs' mailboxes (runs.js boxRoot)
     // Never the real Keychain (lib/keyring.js): a tool that isn't there, unless a test brings a fake one.
     TRIF_KEYCHAIN_BIN: path.join(home, 'no-keychain', 'security'),
+    ...windowsEnv(path.join(home, 'fakehome')),
     ...extra,
   };
+}
+
+// Windows: what programs there need in their environment (SystemRoot above all: without it Node's
+// networking and crypto fail), and the fake home as the user profile, since Node's os.homedir() reads
+// USERPROFILE there, not HOME. Nothing elsewhere.
+function windowsEnv(fakeHome) {
+  if (process.platform !== 'win32') return {};
+  const keep = {};
+  for (const k of ['SystemRoot', 'SystemDrive', 'windir', 'ComSpec', 'PATHEXT', 'TEMP', 'TMP', 'NUMBER_OF_PROCESSORS', 'PROCESSOR_ARCHITECTURE']) {
+    if (process.env[k] !== undefined) keep[k] = process.env[k];
+  }
+  return { ...keep, USERPROFILE: fakeHome, LOCALAPPDATA: path.join(fakeHome, 'AppData', 'Local'), APPDATA: path.join(fakeHome, 'AppData', 'Roaming') };
 }
 
 function sleep(ms) { return new Promise((r) => setTimeout(r, ms)); }
@@ -186,4 +207,5 @@ function writeMod(home, site, name, code) {
   return file;
 }
 
-module.exports = { FakeExtension, runCli, writeMod, tempDir, privDir, testEnv, waitFor, sleep, REPO, HOST_JS, CLI_JS };
+module.exports = {
+  windowsEnv, FakeExtension, runCli, writeMod, tempDir, privDir, testEnv, waitFor, sleep, REPO, HOST_JS, CLI_JS };

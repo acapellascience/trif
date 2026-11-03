@@ -8,7 +8,7 @@
 // HOME (so no OpenAI login, nothing of the user's). It applies macOS's sandbox, which may fail inside
 // another sandbox; TRIF_TEST_NO_REAL_CODEX=1 skips it.
 
-const test = require('node:test');
+const test = require('./posix-only')('fake agents are #!/bin/sh scripts, the macOS/Linux keyring tools');
 const assert = require('node:assert');
 const fs = require('fs');
 const path = require('path');
@@ -216,13 +216,14 @@ test('keyring: macOS `security` (written through -i on stdin, as hex: never in a
   assert.ok(lin.argv().some((a) => a[0] === 'store' && a.includes('--label=TRIF open model key (custom:llm.example.com)')));
   assert.ok(!lin.argvText().includes(FAKE_KEY));
   assert.deepEqual(await keyring.removeKey('custom:llm.example.com', l), { removed: true });
-  // No keyring (Linux without secret-tool): no fallback, a clear message.
-  assert.equal(keyring.backend({ env: {}, platform: 'win32' }), null);
-  const none = await keyring.getKey('openrouter', { env: {}, platform: 'win32' });
+  // No keyring (a system with none TRIF knows; Windows has Credential Manager, tests/windows.test.js): no
+  // fallback, a clear message.
+  assert.equal(keyring.backend({ env: {}, platform: 'freebsd' }), null);
+  const none = await keyring.getKey('openrouter', { env: {}, platform: 'freebsd' });
   assert.equal(none.value, null);
   assert.match(none.error, /need a system keyring/);
   assert.match(keyring.noKeyring({ platform: 'linux' }), /secret-tool .*libsecret-tools/);
-  await assert.rejects(keyring.setKey('openrouter', FAKE_KEY, { env: {}, platform: 'win32' }), /need a system keyring/);
+  await assert.rejects(keyring.setKey('openrouter', FAKE_KEY, { env: {}, platform: 'freebsd' }), /need a system keyring/);
   // A keyring tool that fails: its complaint, never the key.
   const broken = path.join(dir, 'broken-security');
   fs.writeFileSync(broken, `#!/bin/sh\necho "security: something went wrong: $(cat)" >&2\nexit 3\n`);

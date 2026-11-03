@@ -2,7 +2,7 @@
 // Problem reports (helper/lib/report.js), the helper's report.build / update.* commands, and
 // `trif report`.
 
-const test = require('node:test');
+const test = require('./posix-only')('helpers on Unix sockets, macOS paths');
 const assert = require('node:assert');
 const fs = require('fs');
 const net = require('net');

@@ -1,7 +1,7 @@
 'use strict';
 // Run scope (helper/lib/scope.js, mirrored in extension/lib.js) and held mods (helper/lib/held.js).
 
-const test = require('node:test');
+const test = require('./posix-only')('symlinked site folders');
 const assert = require('node:assert');
 const fs = require('fs');
 const os = require('os');

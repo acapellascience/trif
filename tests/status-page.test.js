@@ -1,6 +1,7 @@
 // `trif status --url`: the mods running on a tab's page, from the extension's status answer.
 const assert = require('node:assert');
-const { test, after } = require('node:test');
+const test = require('./posix-only')('helpers on Unix sockets');
+const { after } = test;
 const { FakeExtension, runCli, tempDir } = require('./fake-extension');
 
 let ext;

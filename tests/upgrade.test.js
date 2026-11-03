@@ -5,7 +5,7 @@
 // link left behind, TRIF's private files out of the workspace, the user's mod kept, the new wrappers.
 // Skipped when the tag isn't there (a shallow clone).
 
-const test = require('node:test');
+const test = require('./posix-only')('the v0.1.2 updater, which never ran on Windows');
 const assert = require('node:assert');
 const fs = require('fs');
 const os = require('os');

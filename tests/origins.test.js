@@ -3,7 +3,7 @@
 // rules, run markers in <home>/active-runs, and two hosts on one workspace agreeing on a new mod's origin.
 // The extension side (applyStartOff, install id) is in extension.test.js.
 
-const test = require('node:test');
+const test = require('./posix-only')('helpers on Unix sockets');
 const assert = require('node:assert');
 const fs = require('fs');
 const path = require('path');

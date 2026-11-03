@@ -1,7 +1,7 @@
 'use strict';
 // Tests for helper/host.js (native messaging host) and helper/lib/mods.js (header parsing).
 
-const test = require('node:test');
+const test = require('./posix-only')('helpers on Unix sockets, file modes and symlinks');
 const assert = require('node:assert');
 const fs = require('fs');
 const net = require('net');

@@ -2,7 +2,7 @@
 // Updates (helper/lib/update.js): the signed feed, checking, installing into <home>/app; and the release
 // script's feed writing (scripts/release.js), which has to produce what the helper accepts.
 
-const test = require('node:test');
+const test = require('./posix-only')('helpers on Unix sockets, #!/bin/sh wrappers');
 const assert = require('node:assert');
 const fs = require('fs');
 const path = require('path');

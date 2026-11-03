@@ -3,7 +3,7 @@
 // `trif delete` / `trif restore` without a helper. The helper's mod.delete / mod.restore (panel and
 // agent runs, run scope) are in agents.test.js.
 
-const test = require('node:test');
+const test = require('./posix-only')('helpers on Unix sockets');
 const assert = require('node:assert');
 const fs = require('fs');
 const path = require('path');

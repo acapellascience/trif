@@ -2,7 +2,7 @@
 // Tests for installing TRIF: the npm package, copy vs link installs, allowed_origins for every
 // extension ID, and the matching doctor checks. Everything runs in temp dirs (--home, --native-dir).
 
-const test = require('node:test');
+const test = require('./posix-only')('#!/bin/sh wrappers, file modes, symlinked installs');
 const assert = require('node:assert');
 const fs = require('fs');
 const path = require('path');

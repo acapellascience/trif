@@ -3,7 +3,8 @@
 const assert = require('node:assert');
 const fs = require('node:fs');
 const path = require('node:path');
-const { test, before, after } = require('node:test');
+const test = require('./posix-only')('helpers on Unix sockets');
+const { before, after } = test;
 const { FakeExtension, runCli, tempDir } = require('./fake-extension');
 
 let S;

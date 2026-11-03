@@ -3,7 +3,7 @@
 // (helper-<pid>.sock), stale-socket cleanup, `trif --browser` and TRIF_SOCK routing, plus the
 // logger's EPIPE handling that kept orphaned helpers spinning.
 
-const test = require('node:test');
+const test = require('./posix-only')('helpers on Unix sockets (<home>/helper-<pid>.sock)');
 const assert = require('node:assert');
 const fs = require('fs');
 const net = require('net');

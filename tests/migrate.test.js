@@ -3,7 +3,7 @@
 // `trif setup` doing it. Everything in temp home folders (HOME=<temp>/fakehome for the CLI; homedir for
 // migrateHome itself), never the real one.
 
-const test = require('node:test');
+const test = require('./posix-only')('the ~/.webmods move (never on Windows), symlinks');
 const assert = require('node:assert');
 const fs = require('fs');
 const path = require('path');

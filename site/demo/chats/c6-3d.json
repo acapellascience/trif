@@ -3,7 +3,7 @@
  "prompt": "make the whole page tilt in 3D as I move the mouse, like a card floating in space, with each section at a different depth",
  "secs": 112,
  "mods": [
-  "tilt-card"
+  "tilt"
  ],
  "after": [],
  "messages": [

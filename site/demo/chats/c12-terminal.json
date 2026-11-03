@@ -3,7 +3,7 @@
  "prompt": "make the \"Yours, on your computer\" box look like a little terminal window: it types out ls ~/.trif/sites/timsrobot.com, lists the mods we have made so far, then shows the paragraph",
  "secs": 80,
  "mods": [
-  "terminal-box"
+  "terminal"
  ],
  "after": [],
  "messages": [

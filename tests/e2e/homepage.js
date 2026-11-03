@@ -31,19 +31,19 @@ const ORDER = require('../../helper/lib/preinstalled').DEFAULT_ORDER[SITE].map((
 
 // What each home page mod leaves in the page (a count: 1 when it runs once).
 const PROBES = {
-  'typing-tagline': '.hero .tagline[data-tt-done]',
-  'jelly-buttons': 'style:@keyframes jb-jelly',
-  'gravity-mode': 'style:html[data-gm-on] { overflow: hidden !important; }',
+  'tagline': '.hero .tagline[data-tt-done]',
+  'jelly': 'style:@keyframes jb-jelly',
+  'gravity': 'style:html[data-gm-on] { overflow: hidden !important; }',
   fireworks: 'canvas[data-fw-canvas]',
-  'neon-title': 'main h1:is(.nt-lit, :has(.nt-word, .nt-ch))',
-  'space-shooter': '#tss-canvas',
-  'sticker-badges': '.sb-row',
-  'need-checklist': 'ul:has(> li .nc-box)',
-  'terminal-box': '[data-tb]',
-  'rainbow-rave': '#rave-glow',
-  'led-footer': '.led-sign',
-  'living-robot': 'svg.robot[data-lr]',
-  'tilt-card': 'style[data-tc]',
+  'neon': 'main h1:is(.nt-lit, :has(.nt-word, .nt-ch))',
+  'shooter': '#tss-canvas',
+  'stickers': '.sb-row',
+  'checklist': 'ul:has(> li .nc-box)',
+  'terminal': '[data-tb]',
+  'rave': '#rave-glow',
+  'led': '.led-sign',
+  'robot': 'svg.robot[data-lr]',
+  'tilt': 'style[data-tc]',
 };
 
 function parseArgs(argv) {
@@ -247,11 +247,11 @@ async function main() {
       await page(`async () => { document.querySelector('.demo-tab').click(); }`);
       await sleep(2500);
       // The demo's space shooter on (the page reloads with it, the panel back).
-      await demoPanel(`(doc) => doc.querySelector('li[data-mod="timsrobot.com/space-shooter"] button.switch').click()`);
+      await demoPanel(`(doc) => doc.querySelector('li[data-mod="timsrobot.com/shooter"] button.switch').click()`);
       await waitFor('the demo\'s reload', async () => (await state()).url.includes('mods=space-shooter'), { timeoutMs: 10000 });
       await sleep(2500);
       let s = await state();
-      if (s.mods['space-shooter'] !== 1 || !s.panel || s.flag !== '1') throw new Error(JSON.stringify(s));
+      if (s.mods['shooter'] !== 1 || !s.panel || s.flag !== '1') throw new Error(JSON.stringify(s));
       // The real side panel: Fix (TRIF on for timsrobot.com): no reload for that alone.
       await ext(`async (url) => { await chrome.windows.create({ url, width: 400, height: 860 }); }`, [`${d.origin}/sidepanel.html?window=${win.windowId}`]);
       panelCtx = await d.findPage('sidepanel.html');
@@ -261,20 +261,20 @@ async function main() {
       const realOrder = await d.eval(panelCtx, `async () => [...document.querySelectorAll('#mod-list > li')].map((li) => li.dataset.mod.split('/')[1])`);
       if (JSON.stringify(realOrder) !== JSON.stringify(ORDER)) throw new Error(`the real panel's order: ${realOrder}`);
       // A real mod on: the tab reloads.
-      await d.click(panelCtx, 'li[data-mod="timsrobot.com/space-shooter"] button.switch');
+      await d.click(panelCtx, 'li[data-mod="timsrobot.com/shooter"] button.switch');
       await waitFor('the marker after the reload', async () => { try { return (await state()).marker === 'on'; } catch { return false; } }, { timeoutMs: 15000 });
       await sleep(2500);
       s = await state();
       if (s.tab || s.panel) throw new Error(`demo still there: ${JSON.stringify({ tab: s.tab, panel: s.panel })}`);
       if (s.flag) throw new Error(`the open flag is still set: ${s.flag}`);
-      if (s.mods['space-shooter'] !== 1) throw new Error(`ships: ${s.mods['space-shooter']} (url ${s.url})`);
+      if (s.mods['shooter'] !== 1) throw new Error(`ships: ${s.mods['shooter']} (url ${s.url})`);
       await shot('real-one-ship');
       return `url ${s.url}: marker on, no tab, no panel, 1 ship`;
     });
 
     await check('the real TRIF with every home page mod on: each once, no demo; other sites unmarked', async () => {
       for (const slug of ORDER) {
-        if (slug === 'space-shooter') continue;
+        if (slug === 'shooter') continue;
         await d.click(panelCtx, `li[data-mod="timsrobot.com/${slug}"] button.switch`);
         await sleep(400);
       }

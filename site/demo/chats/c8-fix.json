@@ -3,8 +3,8 @@
  "prompt": "one bug: with the space shooter on, pressing G makes everything fly UP off the top of the screen instead of falling. can you make gravity mode and the shooter work together?",
  "secs": 53,
  "mods": [
-  "gravity-mode",
-  "space-shooter"
+  "gravity",
+  "shooter"
  ],
  "after": [
   "c4-gravity",

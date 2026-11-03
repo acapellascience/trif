@@ -3,7 +3,7 @@
  "prompt": "make the title glow like a neon sign, and have it flicker on when the page loads like an old tube warming up",
  "secs": 65,
  "mods": [
-  "neon-title"
+  "neon"
  ],
  "after": [],
  "messages": [

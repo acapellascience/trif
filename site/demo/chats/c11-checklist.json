@@ -3,7 +3,7 @@
  "prompt": "turn the What you need list into a checklist: each item gets a checkbox that ticks itself one by one, with a little icon for each (Mac, browser, Node, robot)",
  "secs": 219,
  "mods": [
-  "need-checklist"
+  "checklist"
  ],
  "after": [],
  "messages": [

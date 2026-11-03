@@ -3,7 +3,7 @@
  "prompt": "last one down here: turn the footer into a scrolling LED sign with the links in it (GitHub, Report a problem, Privacy), still clickable",
  "secs": 72,
  "mods": [
-  "led-footer"
+  "led"
  ],
  "after": [],
  "messages": [

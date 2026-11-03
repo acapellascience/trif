@@ -3,7 +3,7 @@
  "prompt": "turn the page into a space shooter. arrow keys fly a little ship along the bottom, space fires lasers, and any word I hit explodes into letters",
  "secs": 100,
  "mods": [
-  "space-shooter"
+  "shooter"
  ],
  "after": [],
  "messages": [

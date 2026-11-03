@@ -3,7 +3,7 @@
  "prompt": "gravity mode: when I press G, everything on the page falls down, bounces and piles up at the bottom. and let me grab things and throw them",
  "secs": 248,
  "mods": [
-  "gravity-mode"
+  "gravity"
  ],
  "after": [],
  "messages": [

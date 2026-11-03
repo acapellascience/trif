@@ -3,7 +3,7 @@
  "prompt": "now the line under the title, \"Fix any website with your own coding agent.\" make it type itself out letter by letter like a terminal, with a blinking cursor, and when it finishes make \"your own coding agent\" glow green",
  "secs": 136,
  "mods": [
-  "typing-tagline"
+  "tagline"
  ],
  "after": [],
  "messages": [

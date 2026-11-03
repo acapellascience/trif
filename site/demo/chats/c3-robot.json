@@ -3,7 +3,7 @@
  "prompt": "bring the robot to life! its eyes should follow my mouse, it should blink every few seconds, and when I click it it should hop",
  "secs": 79,
  "mods": [
-  "living-robot"
+  "robot"
  ],
  "after": [],
  "messages": [

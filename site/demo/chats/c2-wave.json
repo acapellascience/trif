@@ -3,8 +3,8 @@
  "prompt": "now make the letters of the title bob up and down in a wave, one after another. and make the buttons wobble like jelly when I hover them",
  "secs": 68,
  "mods": [
-  "neon-title",
-  "jelly-buttons"
+  "neon",
+  "jelly"
  ],
  "after": [],
  "messages": [

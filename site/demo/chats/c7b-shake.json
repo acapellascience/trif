@@ -3,7 +3,7 @@
  "prompt": "awesome. make the ship 3x bigger, the lasers fatter, and every hit should blow up big with a little screen shake",
  "secs": 77,
  "mods": [
-  "space-shooter"
+  "shooter"
  ],
  "after": [
   "c7-shooter"

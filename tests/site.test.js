@@ -212,8 +212,8 @@ test('the demo: /?mods= runs only the bundled mods it names on the home page, un
   assert.deepStrictEqual(scripts(await page('?mods=')), tabOnly);
   assert.deepStrictEqual(scripts(await page('?mods=nope,x')), tabOnly);
   assert.equal(await page('?mods=nope'), await page(''), 'unknown names: the plain home page');
-  const html = await page(`?mods=${encodeURIComponent('fireworks,nope,../src/index,<img src=x onerror=alert(1)>,neon-title,fireworks')}`);
-  assert.deepStrictEqual(scripts(html), ['<script src="/demo/mods/neon-title.js">', '<script src="/demo.js" defer>', '<script src="/demo/mods/fireworks.js" defer>'],
+  const html = await page(`?mods=${encodeURIComponent('fireworks,nope,../src/index,<img src=x onerror=alert(1)>,neon,fireworks')}`);
+  assert.deepStrictEqual(scripts(html), ['<script src="/demo/mods/neon.js">', '<script src="/demo.js" defer>', '<script src="/demo/mods/fireworks.js" defer>'],
     'document-start mods before the page, the rest deferred; each once');
   assert.ok(!/nope|onerror|src\/index/.test(html), 'nothing from the address is written into the page');
   assert.match(html, /Fix any website with your own coding agent\./);
@@ -286,11 +286,11 @@ test('the demo runs the home page mods TRIF ships (one copy), lists them in its 
   assert.deepStrictEqual(MODS.map((m) => m.slug), [...shipped].sort(), 'every shipped home page mod, nothing else');
   for (const m of MODS) assert.strictEqual(m.code, fs.readFileSync(path.join(dir, `${m.slug}.js`), 'utf8'), `${m.slug}: the shipped copy`);
   assert.deepStrictEqual(ORDER, DEFAULT_ORDER['timsrobot.com']);
-  assert.strictEqual(ORDER[0], 'timsrobot.com/typing-tagline');
+  assert.strictEqual(ORDER[0], 'timsrobot.com/tagline');
   // Each mod's script does nothing on a page the real TRIF marked (and runs as before otherwise).
-  const code = modScript('neon-title.js'); // (document-start: as it is; a document-idle one waits for DOMContentLoaded, as with TRIF)
+  const code = modScript('neon.js'); // (document-start: as it is; a document-idle one waits for DOMContentLoaded, as with TRIF)
   assert.ok(code.startsWith('(() => { if (document.documentElement.getAttribute("data-trif") === "on") return;\n'), code.slice(0, 120));
-  assert.ok(code.includes(MODS.find((m) => m.slug === 'neon-title').code));
+  assert.ok(code.includes(MODS.find((m) => m.slug === 'neon').code));
   const idle = modScript('fireworks.js');
   assert.ok(idle.includes(MODS.find((m) => m.slug === 'fireworks').code) && idle.includes("addEventListener('DOMContentLoaded', run, { once: true })"));
   assert.ok(idle.includes('if (document.documentElement.getAttribute("data-trif") === "on") return;'));

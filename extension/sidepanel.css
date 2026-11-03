@@ -236,6 +236,8 @@ body[data-problem="helper"] .mod-list { --switch-on: var(--trif-green); }
 .notice.ok { border-color: color-mix(in srgb, var(--ok) 35%, var(--line)); }
 .notice .md p + p { margin-top: 4px; }
 .login-form { display: flex; gap: 6px; }
+/* What follows the code field (the note, or Cancel and "Open the sign-in page again"), a little apart. */
+.notice .login-form + p { margin-top: 8px; }
 .login-form input {
   flex: 1;
   min-width: 0;

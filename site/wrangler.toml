@@ -19,7 +19,8 @@ name = "EMAIL"
 [vars]
 REPORT_FROM = "reports@timsrobot.com"
 
-# At most 5 reports a minute from one address (approximate, per Cloudflare location).
+# At most 5 reports a minute from one address (approximate, per Cloudflare location), and, counted
+# separately, 5 Windows waitlist signups.
 [[ratelimits]]
 name = "REPORT_LIMIT"
 namespace_id = "1001"

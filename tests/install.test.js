@@ -405,6 +405,9 @@ test('doctor: which host.js the wrapper may run', () => {
   assert.match(checkWrapperScript('/somewhere/else/helper/host.js', ws).title, /not this copy/);
 });
 
+// Rainbow Rave for the other sites TRIF ships mods for (0.2.0; X's came earlier), all off.
+const RAVES = ['www.google.com', 'amazon.com', 'www.instagram.com'].map((s) => `${s}/rainbow-rave`);
+
 // The mods on TRIF's own home page (0.2.0), in the order the side panel starts them in.
 const HOMEPAGE = ['tagline', 'jelly', 'gravity', 'fireworks', 'neon', 'shooter', 'stickers',
   'checklist', 'terminal', 'rave', 'led', 'robot', 'tilt'].map((m) => `timsrobot.com/${m}`);
@@ -432,7 +435,7 @@ test('the home page mods reach a workspace from before 0.2.0 off, and never repl
   const sites = path.join(home, 'sites');
   // Set up before 0.2.0: everything else offered already. And the user's own home page mods under the
   // same names (as Tim has, from making them), one of them byte for byte what's shipped.
-  const before = PREINSTALLED.map((p) => p.id).filter((id) => !id.startsWith('timsrobot.com/') && id !== 'www.google.com/dvd-logo');
+  const before = PREINSTALLED.map((p) => p.id).filter((id) => !id.startsWith('timsrobot.com/') && id !== 'www.google.com/dvd-logo' && !RAVES.includes(id));
   fs.writeFileSync(path.join(home, 'preinstalled.json'), JSON.stringify({ offered: before, startOff: [], sitesOn: SITES_ON }));
   const dir = path.join(sites, 'timsrobot.com');
   fs.mkdirSync(dir, { recursive: true });
@@ -441,7 +444,7 @@ test('the home page mods reach a workspace from before 0.2.0 off, and never repl
   fs.copyFileSync(path.join(examples, 'timsrobot.com', 'tilt.js'), path.join(dir, 'tilt.js'));
   const r = preinstallMods(home, sites, examples);
   const theirs = ['timsrobot.com/fireworks', 'timsrobot.com/shooter', 'timsrobot.com/tilt'];
-  assert.deepStrictEqual(r.added, ['www.google.com/dvd-logo', ...HOMEPAGE.filter((id) => !theirs.includes(id))]);
+  assert.deepStrictEqual(r.added, ['www.google.com/dvd-logo', ...RAVES, ...HOMEPAGE.filter((id) => !theirs.includes(id))]);
   assert.deepStrictEqual(r.on, [], 'all off');
   assert.deepStrictEqual(r.sites, [], 'no new site turned on');
   for (const [f, code] of Object.entries(mine)) assert.strictEqual(fs.readFileSync(path.join(dir, f), 'utf8'), code, `${f} untouched`);
@@ -466,7 +469,7 @@ test('preinstalled mods: each once, switched on or off as listed; the start site
   const plainx = path.join(sites, 'x.com', 'plain-x.js');
   const ids = PREINSTALLED.map((p) => p.id);
   const off = PREINSTALLED.filter((p) => !p.on).map((p) => p.id);
-  assert.deepStrictEqual(off, ['x.com/punk-fonts', 'x.com/rainbow-rave', 'www.instagram.com/desaturate', 'www.google.com/dvd-logo', ...HOMEPAGE]);
+  assert.deepStrictEqual(off, ['x.com/punk-fonts', 'x.com/rainbow-rave', 'www.instagram.com/desaturate', 'www.google.com/dvd-logo', ...RAVES, ...HOMEPAGE]);
   assert.deepStrictEqual(SITES_ON, ['google.com', 'x.com', 'amazon.com', 'instagram.com']);
   for (const id of ids) assert.ok(fs.existsSync(path.join(examples, `${id}.js`)), `examples has ${id}`);
   let r = preinstallMods(home, sites, examples);
@@ -487,7 +490,7 @@ test('preinstalled mods: each once, switched on or off as listed; the start site
   r = preinstallMods(home2, path.join(home2, 'sites'), examples);
   assert.deepStrictEqual(r.added, ids.filter((id) => id !== 'x.com/rainbow-rave'));
   assert.strictEqual(fs.readFileSync(own, 'utf8'), '// mine');
-  assert.deepStrictEqual(loadPreinstalled(home2).startOff, ['x.com/punk-fonts', 'www.instagram.com/desaturate', 'www.google.com/dvd-logo', ...HOMEPAGE], 'the user\'s own file isn\'t switched off');
+  assert.deepStrictEqual(loadPreinstalled(home2).startOff, ['x.com/punk-fonts', 'www.instagram.com/desaturate', 'www.google.com/dvd-logo', ...RAVES, ...HOMEPAGE], 'the user\'s own file isn\'t switched off');
   assert.deepStrictEqual(loadPreinstalled(home2).shipped, { 'x.com/rainbow-rave': { own: true } }, 'nor ever updated');
 
   // Through setup, and --no-examples.
@@ -495,11 +498,11 @@ test('preinstalled mods: each once, switched on or off as listed; the start site
   let res = await runCli(['setup', '--verbose', '--native-dir', path.join(home3, 'native'), '--no-link'], { home: home3 });
   assert.strictEqual(res.code, 0, res.stderr);
   assert.match(res.stdout, /preinstalled, on: www\.google\.com\/hide-ai-in-results, /);
-  assert.match(res.stdout, /preinstalled, off until you switch them on in the side panel: x\.com\/punk-fonts, x\.com\/rainbow-rave, www\.instagram\.com\/desaturate, www\.google\.com\/dvd-logo/);
+  assert.match(res.stdout, /preinstalled, off until you switch them on in the side panel: x\.com\/punk-fonts, x\.com\/rainbow-rave, www\.instagram\.com\/desaturate, www\.google\.com\/dvd-logo, www\.google\.com\/rainbow-rave, amazon\.com\/rainbow-rave, www\.instagram\.com\/rainbow-rave/);
   assert.match(res.stdout, /TRIF starts on for google\.com, x\.com, amazon\.com, instagram\.com/);
   assert.ok(fs.existsSync(path.join(home3, 'sites', 'x.com', 'plain-x.js')));
   // A new workspace gets the merged Google mods, never the ones folded into them (preinstalled.js RETIRED).
-  assert.deepStrictEqual(fs.readdirSync(path.join(home3, 'sites', 'www.google.com')).sort(), ['dvd-logo.js', 'hide-ai-in-results.js', 'hide-extra-sections.js']);
+  assert.deepStrictEqual(fs.readdirSync(path.join(home3, 'sites', 'www.google.com')).sort(), ['dvd-logo.js', 'hide-ai-in-results.js', 'hide-extra-sections.js', 'rainbow-rave.js']);
   assert.ok(!loadPreinstalled(home3).offered.some((id) => /hide-ai-mode|hide-sponsored/.test(id)));
   assert.doesNotMatch(res.stdout, /is now part of/);
   const home4 = tempDir();

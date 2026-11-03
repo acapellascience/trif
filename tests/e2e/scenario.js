@@ -1186,6 +1186,19 @@ class Scenario {
       // This site chat's own agent and model (the panel's Settings write the same).
       await this.ext(`async (model) => { const { sitePicks = {} } = await chrome.storage.local.get('sitePicks'); sitePicks['x.com'] = { agent: 'claude', models: { claude: model } }; await chrome.storage.local.set({ sitePicks }); }`, [model]);
     }
+    if (!this.o.agent) {
+      // Without your login the agent can't run, so the button waits for one (F14) and says why.
+      await r.check('Merge with my agent: waits for a login, and says so', async () => {
+        const b = await waitFor('the merge button', () => this.panel(`async () => {
+          const m = document.querySelector('li[data-mod="x.com/punk-fonts"] .mod-update .merge');
+          return m ? { disabled: m.disabled, title: m.title } : null;
+        }`), { timeoutMs: 10000 });
+        if (!b.disabled || !/^Log in to .+ first/.test(b.title)) throw new Error(JSON.stringify(b));
+        await this.shot(this.panelCtx, 'panel-merge-needs-login');
+        return `disabled: "${b.title}"`;
+      });
+      return;
+    }
     await r.check('Merge with my agent: one click starts it, while the panel keeps refreshing', async () => {
       // Busy the panel the way real use does (status refreshes, storage changes) right before the click.
       await this.panel(`async () => { for (let i = 0; i < 5; i++) { await chrome.storage.local.set({ e2eTick: i }); document.dispatchEvent(new Event('visibilitychange')); } }`);
@@ -1197,12 +1210,6 @@ class Scenario {
       await this.shot(this.panelCtx, 'panel-merge-started');
       return `chat: "${c.messages.find((m) => m.role === 'user').text}"`;
     });
-    if (!this.o.agent) {
-      // Without your login the run ends at once (not logged in); let it, so nothing writes to the browser
-      // as it closes.
-      await waitFor('the merge run to end', async () => { const x = await chat(); return x && !x.run ? x : null; }, { timeoutMs: 60000, intervalMs: 500 }).catch(() => {});
-      return;
-    }
     const done = (n0) => waitFor('the run to finish', async () => {
       const x = await chat();
       return x && !x.run && x.messages.length > n0 ? x : null;

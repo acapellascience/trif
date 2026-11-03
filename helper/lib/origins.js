@@ -103,4 +103,22 @@ function recordOrigins(home, newIds, runs, now = Date.now()) {
   return changed;
 }
 
-module.exports = { loadOrigins, recordOrigins, markRunActive, markRunEnded, activeRuns, ENDED_GRACE_MS };
+/**
+ * Mods renamed on disk (mods.js findRenames: [{from, to}]) are the same mods: each new id takes the old
+ * one's origin (or none), so a mod made here doesn't become another browser's by being renamed during
+ * its run. Returns true if origins.json changed.
+ */
+function renameOrigins(home, renames) {
+  if (!renames.length) return false;
+  const origins = loadOrigins(home);
+  let changed = false;
+  const was = renames.map(({ from }) => origins[from]);
+  for (const { from } of renames) if (origins[from]) { delete origins[from]; changed = true; }
+  renames.forEach(({ to }, i) => {
+    if (was[i]) { origins[to] = was[i]; changed = true; } else if (origins[to]) { delete origins[to]; changed = true; }
+  });
+  if (changed) writeJson(path.join(home, ORIGINS), origins);
+  return changed;
+}
+
+module.exports = { loadOrigins, recordOrigins, renameOrigins, markRunActive, markRunEnded, activeRuns, ENDED_GRACE_MS };

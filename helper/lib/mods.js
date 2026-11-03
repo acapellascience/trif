@@ -256,6 +256,28 @@ function planModsMessage(mods, limit = MAX_TO_EXTENSION - 4096) {
   return { mods: kept.map((s) => s.m), errors };
 }
 
+/**
+ * Mods renamed on disk between two scans: a mod's id is its site folder and file name, so a renamed file
+ * is a new id while the old one is gone; the same code in the same site folder is the same mod. Returns
+ * [{from, to}], each old id paired once. (extension/lib.js findRenames does the same with the mods the
+ * extension last got.)
+ */
+function findRenames(prev, next) {
+  const before = new Set(prev.map((m) => m.id));
+  const now = new Set(next.map((m) => m.id));
+  const gone = prev.filter((m) => !now.has(m.id));
+  const out = [];
+  for (const m of next) {
+    if (!gone.length) break;
+    if (before.has(m.id)) continue;
+    const i = gone.findIndex((g) => g.site === m.site && g.code === m.code);
+    if (i === -1) continue;
+    out.push({ from: gone[i].id, to: m.id });
+    gone.splice(i, 1);
+  }
+  return out;
+}
+
 // The metadata of a mod, without its code (for listings).
 function summarize(mod) {
   const { code, ...rest } = mod;
@@ -265,5 +287,5 @@ function summarize(mod) {
 module.exports = {
   SHIPPED_SOURCES, isShippedSource,
   RUN_AT, ALL_SITES, parseHeader, defaultMatches, buildMod, listModFiles, readModFile, folderFingerprint, scanMods, LINK_OUTSIDE,
-  planModsMessage, summarize, isIgnoredName, sha1,
+  planModsMessage, summarize, isIgnoredName, sha1, findRenames,
 };

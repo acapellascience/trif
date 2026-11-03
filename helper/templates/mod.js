@@ -1,6 +1,6 @@
 // ==WebMod==
 // @name        {{name}}
-// @description TODO: one line saying what this mod does
+// @description TODO: one line, in plain words, saying what the user will see
 // @match       *://{{site}}/*
 // @match       *://*.{{site}}/*
 // @run-at      document-start

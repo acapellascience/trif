@@ -76,6 +76,9 @@ you to from their terminal (side-panel runs can't).
   its subdomains); `@exclude` none; `@run-at document-start`; `@name` = file name; `@description` empty.
   `@match`/`@exclude` repeat and take Chrome match patterns. Add `@match` lines when a site has several
   domains (x.com and twitter.com).
+- `@description` is one line, in plain words, saying what the user will see ("Buttons wobble like jelly
+  when you hover them"), not how the code does it; the side panel shows it under the mod's name. Always
+  include it, in every mod you write or edit, and update it when you change what the mod does.
 - `@risk <0|1|2> <why>` says how noticeable the mod is to the site (see "Account safety"). Always
   include it; the side panel shows a badge for 1 and 2.
 - Wrap the body in an IIFE as above: early `return`s work, nothing leaks into the page's globals, and

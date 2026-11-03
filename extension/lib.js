@@ -325,6 +325,115 @@ export function applyAbsorbed(mods, disabled = {}, offSites = {}, absorbed = {})
   return { disabled: d, offSites: o, absorbed: a, changed };
 }
 
+/**
+ * Mods renamed on disk since the last `mods` message. A mod's id is its site folder and file name, so a
+ * renamed file arrives as a new id while the old one is gone; when the code is the same, in the same site
+ * folder, it's the same mod. Returns [{from, to}] (each old id paired once, in order).
+ */
+export function findRenames(prev, next) {
+  const before = new Set((prev || []).map((m) => m?.id));
+  const now = new Set((next || []).map((m) => m?.id));
+  const gone = (prev || []).filter((m) => typeof m?.id === 'string' && typeof m.code === 'string' && !now.has(m.id));
+  const out = [];
+  for (const m of next || []) {
+    if (!gone.length) break;
+    if (typeof m?.id !== 'string' || typeof m.code !== 'string' || before.has(m.id)) continue;
+    const i = gone.findIndex((g) => g.site === m.site && g.code === m.code);
+    if (i === -1) continue;
+    out.push({ from: gone[i].id, to: m.id });
+    gone.splice(i, 1);
+  }
+  return out;
+}
+
+/**
+ * A renamed mod keeps its switches: its `disabled` and `offSites` entries move to the new id, and the new
+ * id counts as already seen (`startedOff`), so it isn't switched off again as if it were new. Pure: returns
+ * {disabled, offSites, startedOff, changed} with new objects when something changed.
+ */
+export function carryRenames(renames, { disabled = {}, offSites = {}, startedOff = {} } = {}) {
+  if (!renames?.length) return { disabled, offSites, startedOff, changed: false };
+  const d = { ...disabled };
+  const o = { ...offSites };
+  const s = { ...startedOff };
+  const was = renames.map(({ from }) => ({ disabled: d[from] === true, offSites: o[from] }));
+  for (const { from } of renames) { delete d[from]; delete o[from]; }
+  renames.forEach(({ to }, i) => {
+    if (was[i].disabled) d[to] = true; else delete d[to];
+    if (was[i].offSites?.length) o[to] = was[i].offSites; else delete o[to];
+    s[to] = true;
+  });
+  return { disabled: d, offSites: o, startedOff: s, changed: true };
+}
+
+// ---- mod order in the side panel --------------------------------------------------------------------
+// The user can drag the panel's mods into the order they like, per site: chrome.storage.local `modOrder` =
+// {"<site>": ["<mod id>", …]} (the site as scopeFor gives it). Display only: mods run in the order they
+// always do. Mods not in a site's list (new ones) come after the listed ones, in the order they came in;
+// ids in the list that aren't mods any more are skipped (one brought back from the trash takes its old
+// place), and dropped the next time the order is saved.
+
+/** `modOrder` from storage, cleaned up: lists of ids, no duplicates, no empty lists. */
+export function normalizeModOrder(value) {
+  const out = {};
+  if (value && typeof value === 'object' && !Array.isArray(value)) {
+    for (const [site, list] of Object.entries(value)) {
+      if (!Array.isArray(list)) continue;
+      const ids = [...new Set(list.filter((x) => typeof x === 'string' && x))];
+      if (ids.length) out[site] = ids;
+    }
+  }
+  return out;
+}
+
+/** `mods` in the saved order `ids` (mod ids, or nothing): the listed ones first, then the rest as they came. */
+export function orderMods(mods, ids) {
+  const list = Array.isArray(mods) ? mods : [];
+  if (!Array.isArray(ids) || !ids.length) return list.slice();
+  const rank = new Map(ids.map((id, i) => [id, i]));
+  return list
+    .map((m, i) => ({ m, i, r: rank.has(m?.id) ? rank.get(m.id) : Infinity }))
+    .sort((a, b) => (a.r - b.r) || (a.i - b.i))
+    .map((x) => x.m);
+}
+
+/** `ids` with `id` moved to position `to` (clamped to the list); the same array when it isn't there or doesn't move. */
+export function moveId(ids, id, to) {
+  const from = ids.indexOf(id);
+  if (from === -1) return ids;
+  const at = Math.max(0, Math.min(ids.length - 1, Math.trunc(Number(to) || 0)));
+  if (at === from) return ids;
+  const out = ids.slice();
+  out.splice(from, 1);
+  out.splice(at, 0, id);
+  return out;
+}
+
+/**
+ * `modOrder` with `site`'s order set to `ids`. When that's the order the mods come in anyway (`natural`),
+ * the site's entry goes instead, so new mods keep coming in where they would. Returns a new object.
+ */
+export function setModOrder(modOrder, site, ids, natural = []) {
+  const out = normalizeModOrder(modOrder);
+  const same = ids.length === natural.length && ids.every((id, i) => id === natural[i]);
+  if (same || !ids.length) delete out[site];
+  else out[site] = [...new Set(ids)];
+  return out;
+}
+
+/** `modOrder` with renamed mods (findRenames) in their old places. Returns {modOrder, changed}. */
+export function renameInOrder(modOrder, renames) {
+  const order = normalizeModOrder(modOrder);
+  const to = new Map((renames || []).map((r) => [r.from, r.to]));
+  let changed = false;
+  for (const [site, ids] of Object.entries(order)) {
+    if (!ids.some((id) => to.has(id))) continue;
+    order[site] = [...new Set(ids.map((id) => to.get(id) || id))];
+    changed = true;
+  }
+  return { modOrder: order, changed };
+}
+
 // ---- run scope ----------------------------------------------------------------------------------
 // Requests from a side-panel agent run carry args.scope, a registrable domain set by the helper
 // (helper/lib/scope.js, which these mirror): they may only touch tabs and URLs on that site.

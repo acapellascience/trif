@@ -27,7 +27,7 @@ const VALUE_FLAGS = new Set(['--tab', '--url', '-o', '--out', '--output', '--fil
   '--browser', '--home', '--native-dir', '--bin-dir', '--timeout', '--agent', '--session', '--model', '--site', '--auto',
   '--provider', '--base-url', '--key-env', '--selector', '--color', '--text', '--tolerance']);
 const BOOL_FLAGS = new Set(['--json', '--hard', '--help', '-h', '--force', '--no-link', '--no-examples', '--copy', '--link', '--install', '--open',
-  '--use-new', '--keep', '--merged', '--set-key', '--remove-key', '--scroll', '--full', '--verbose', '-v']);
+  '--use-new', '--keep', '--merged', '--set-key', '--remove-key', '--scroll', '--full', '--verbose', '-v', '--no-wait']);
 const ALIASES = { '--out': '-o', '--output': '-o', '--file': '-f', '-h': '--help', '-v': '--verbose' };
 
 class UsageError extends Error {}
@@ -250,6 +250,19 @@ const handlers = {
     if (ctx.json) printJson({ ok: r.ok, home: r.ws.home, mode: r.mode, app: r.root, manifests: r.manifests, node: r.nodePath });
     else out(r.lines.join('\n'));
     if (!r.ok) process.exitCode = 1;
+    // At a terminal, wait for the browser and say as each step gets done (lib/setupwait.js).
+    if (r.ok && r.targets && process.stdout.isTTY && !ctx.json && !ctx.opts['--no-wait']) {
+      const { waitForBrowser, probe } = require('./lib/setupwait');
+      let stop = () => {};
+      const onInt = () => stop();
+      process.on('SIGINT', onInt);
+      try {
+        const res = await waitForBrowser({ targets: r.targets, print: out, probe: () => probe(r.ws.home), trif: r.trif, onStop: (fn) => { stop = fn; } });
+        if (res === 'skipped') out('\nSkipped the wait: the steps above still work.');
+      } finally {
+        process.removeListener('SIGINT', onInt);
+      }
+    }
   },
 
   async doctor(ctx) {

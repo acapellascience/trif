@@ -321,7 +321,8 @@ function revealFolder(dir) {
  *         reveal (show the extension folder in Finder for Chrome's Load unpacked),
  *         launchAgentsDir (where the Safari bridge's agent goes; default ~/Library/LaunchAgents),
  *         launchctl (false: write the agent but don't start it; also TRIF_NO_LAUNCHCTL=1) }
- * Returns { ok, lines: [string], ws, manifests: [{browser, file}], nodePath, mode, root, migration }
+ * Returns { ok, lines: [string], ws, manifests: [{browser, file}], nodePath, mode, root, migration, targets (the
+ *   browsers set up), trif (the CLI as typed in this terminal) }
  */
 /** A path as typed in a shell: ~/… under the home folder, quoted if it needs to be. */
 function homeRelative(p) {
@@ -611,7 +612,7 @@ function setup(opts = {}) {
     for (const l of safariSteps(1)) note(`  ${l}`);
     note(`  5. Check everything with: ${trif} doctor`);
     sayThen();
-    return { ok, lines: shown(), ws, manifests, nodePath, mode, root, migration };
+    return { ok, lines: shown(), ws, manifests, nodePath, mode, root, migration, targets, trif };
   }
   // setup installs no add-on: Firefox only keeps signed ones, and Mozilla signs each release's. The
   // newest is on the latest GitHub release (scripts/release.js), from package.json's repository.
@@ -630,7 +631,7 @@ function setup(opts = {}) {
     note(`  4. Check everything with: ${trif} doctor`);
     if (targets.some((t) => t.safari)) { note('  Safari:'); for (const l of safariSteps(1)) note(`    ${l}`); }
     sayThen();
-    return { ok, lines: shown(), ws, manifests, nodePath, mode, root, migration };
+    return { ok, lines: shown(), ws, manifests, nodePath, mode, root, migration, targets, trif };
   }
   // The extension folder is hidden (~/.trif) from Load unpacked's file picker, so on a Mac show it in
   // Finder, ready to drag onto chrome://extensions, and put its path on the clipboard for Cmd-Shift-G.
@@ -663,7 +664,7 @@ function setup(opts = {}) {
   if (targets.some((t) => t.safari)) { note('  Safari:'); for (const l of safariSteps(1)) note(`    ${l}`); }
   sayThen();
 
-  return { ok, lines: shown(), ws, manifests, nodePath, mode, root, migration };
+  return { ok, lines: shown(), ws, manifests, nodePath, mode, root, migration, targets, trif };
 }
 
 module.exports = {

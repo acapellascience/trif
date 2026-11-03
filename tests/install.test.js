@@ -545,3 +545,63 @@ test('setup for Firefox alone gives only Firefox\'s next steps', async () => {
   assert.match(next, /"Allow user scripts"/);
   assert.doesNotMatch(next, /chrome:\/\/extensions|Load unpacked/);
 });
+
+// ---- after setup, at a terminal: waiting for the browser (lib/setupwait.js)
+
+test('setup\'s wait: what it waits for, per browser set up (none for Safari)', () => {
+  const { waitingFor } = require('../helper/lib/setupwait');
+  const t = (key) => browserTable('/H', 'darwin').find((b) => b.key === key);
+  assert.deepEqual(waitingFor([t('chrome')]), { name: 'Chrome', how: 'drag the folder onto chrome://extensions' });
+  assert.deepEqual(waitingFor([t('firefox')]), { name: 'Firefox', how: 'open the add-on link' });
+  assert.equal(waitingFor([t('chrome'), t('firefox')]).name, 'Chrome or Firefox');
+  assert.equal(waitingFor([t('brave')]).name, 'Brave');
+  assert.equal(waitingFor([t('safari')]), null);
+  assert.equal(waitingFor([{ key: 'custom', label: 'custom' }]), null);
+});
+
+test('setup\'s wait: "Waiting…", then "✓ Connected" and the next step, then user scripts; Ctrl-C and the timeout stop it', async () => {
+  const { waitForBrowser } = require('../helper/lib/setupwait');
+  const chrome = browserTable('/H', 'darwin').find((b) => b.key === 'chrome');
+  const firefox = browserTable('/H', 'darwin').find((b) => b.key === 'firefox');
+  const run = async (states, extra = {}) => {
+    const lines = [];
+    let i = 0;
+    let clock = 0;
+    const res = await waitForBrowser({ targets: [chrome], print: (l) => lines.push(l), probe: async () => states[Math.min(i++, states.length - 1)],
+      sleep: async (ms) => { clock += ms; }, now: () => clock, trif: '~/.trif/bin/trif', ...extra });
+    return { res, lines: lines.filter(Boolean) };
+  };
+  const off = { connected: false, userScripts: false, browser: null };
+  const noScripts = { connected: true, userScripts: false, browser: 'Chrome' };
+  const on = { connected: true, userScripts: true, browser: 'Chrome' };
+  let r = await run([off, off, noScripts, noScripts, on]);
+  assert.equal(r.res, 'done');
+  assert.deepEqual(r.lines, [
+    'Waiting for Chrome: drag the folder onto chrome://extensions… (Ctrl-C to skip)',
+    '✓ Connected (Chrome)',
+    'Now flip “Allow User Scripts” on the TRIF setup tab that just opened.',
+    '✓ User scripts on. Open any website, click the TRIF icon, and ask for a change.',
+  ]);
+  // Connected with user scripts on already (setup run again): nothing to wait for.
+  r = await run([on]);
+  assert.deepEqual([r.res, r.lines], ['connected', []]);
+  // Firefox's words for the next step.
+  r = await run([off, { connected: true, userScripts: false, browser: 'Firefox' }, { connected: true, userScripts: true, browser: 'Firefox' }], { targets: [firefox] });
+  assert.equal(r.lines[0], 'Waiting for Firefox: open the add-on link… (Ctrl-C to skip)');
+  assert.equal(r.lines[2], 'Now click “Allow user scripts” on the TRIF setup tab that just opened, then Allow.');
+  // Never connects: stops with a way to find out why.
+  r = await run([off], { timeoutMs: 5000 });
+  assert.equal(r.res, 'timeout');
+  assert.equal(r.lines.at(-1), 'Stopped waiting for Chrome. The steps above still work; if it doesn\'t connect, run: ~/.trif/bin/trif doctor');
+  // Ctrl-C.
+  let stop = null;
+  let n = 0;
+  r = await run([off], { onStop: (fn) => { stop = fn; }, probe: async () => { if (++n === 3) stop(); return off; } });
+  assert.equal(r.res, 'skipped');
+});
+
+test('setup doesn\'t wait when it isn\'t at a terminal', async () => {
+  const r = await runCli(['setup', '--browser', 'chrome', '--no-link', '--no-examples'], { home: tempDir() });
+  assert.equal(r.code, 0, r.stderr);
+  assert.doesNotMatch(r.stdout, /Waiting for/);
+});

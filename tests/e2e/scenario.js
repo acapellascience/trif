@@ -1041,11 +1041,12 @@ class Scenario {
       const first = await this.waitLooks('the panel\'s status', (x) => !!x.dot && !/Checking/.test(x.dotLabel));
       const loggedOut = /isn’t logged in/.test(first.dotLabel);
       if (loggedOut) {
-        await r.check('agent not logged in, on the site\'s page: the greens turn yellow, the login notice shows', async () => {
+        await r.check('agent not logged in, on the site\'s page: the robot and power button turn yellow (mods stay green), the login notice shows', async () => {
           const x = await this.waitLooks('yellow', (l) => l.classes.join() === 'needs-login' && l.dot === 'dot warn');
-          const want = { rim: x.warn, power: x.warn, modSwitch: x.warn };
+          // Mods still run without a login, so their switches and lights stay green.
+          const want = { rim: x.warn, power: x.warn, modSwitch: x.green };
           for (const [k, v] of Object.entries(want)) if (!Scenario.same(x[k], v)) throw new Error(`${k} is ${x[k]}, not ${v}: ${JSON.stringify(x)}`);
-          if (x.light && !Scenario.same(x.light, x.warn)) throw new Error(`the running light is ${x.light}`);
+          if (x.light && !Scenario.same(x.light, x.green)) throw new Error(`the running light is ${x.light}`);
           if (!x.notices.some((t) => /isn’t logged in/.test(t))) throw new Error(`no login notice: ${x.notices}`);
           // F14: no sending into a run that can only fail with that; the button says why.
           if (!x.send.disabled || !/^Log in to .+ first$/.test(x.send.title)) throw new Error(`Send: ${JSON.stringify(x.send)}`);

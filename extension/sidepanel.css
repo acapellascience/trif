@@ -184,15 +184,15 @@ body.site-off .bar-robot:hover:not([aria-busy="true"]) svg { filter: grayscale(0
 /* Something in the way, the same conditions as the dot (sidepanel.js render): every green turns red when
    TRIF is missing a part (the helper isn't connected, or user scripts are off), or yellow when the agent
    needs a login (or the open model a key) first. Nearly all of it is --switch-on (switch.css): the robots,
-   the power button, the Fix button, the mod switches and their lights. */
+   the power button, the Fix button, and (when user scripts are off) the mod switches and their lights. */
 body.blocked { --switch-on: var(--bad); }
 body.needs-login { --switch-on: var(--warn); }
 body.blocked .bar-robot .eye { fill: #ffc2bc; }
 body.needs-login .bar-robot .eye { fill: #fbe3a6; }
 body.needs-login .btn.go { color: #2e1f02; }
-/* Except the mods while only the helper is away: they still run (the extension keeps its copy), so their
-   switches and lights stay green. */
-body[data-problem="helper"] .mod-list { --switch-on: var(--trif-green); }
+/* Except the mods while only the helper is away, or only a login is missing: they still run (the extension
+   keeps its copy), so their switches and lights stay green. */
+body[data-problem="helper"] .mod-list, body.needs-login .mod-list { --switch-on: var(--trif-green); }
 
 .field { display: grid; grid-template-columns: 52px 1fr; align-items: center; gap: 8px; }
 .field > span { color: var(--muted); }

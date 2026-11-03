@@ -10,7 +10,8 @@
 // The API key: typed (pasted) into a password field and sent once to the helper
 // (agent.openModel.setKey), which keeps it in the system keyring (the macOS Keychain) and never sends it
 // back. It's in no storage here, no log and no message but that one; the field is emptied once it's sent,
-// whatever the answer. The panel only learns whether a key is saved (`hasKey`).
+// whatever the answer. The panel only learns whether a key is saved (`hasKey`). Saved, the row says so,
+// with Replace (which brings the field back, with Cancel) and Remove; not saved, it's the field.
 
 const AGENT = 'codex-oss';
 const $ = (sel) => document.querySelector(sel);
@@ -20,6 +21,7 @@ let onProviderChange = () => {};
 let data = null; // agent.openModel result
 let loading = false;
 let busy = false; // saving or removing the key
+let replacing = false; // a key is saved and Replace was clicked: the field shows until saved or cancelled
 let ui = null;
 
 /** Wire the controls once. request: the panel's request(); onChange: after the provider changes. */
@@ -29,13 +31,19 @@ export function mountOpenModel({ request: req, onChange }) {
   ui = {
     box: $('#open-model'), provider: $('#om-provider'), urlRow: $('#om-url-row'), url: $('#om-url'),
     keyRow: $('#om-key-row'), key: $('#om-key'), keySave: $('#om-key-save'), keyRemove: $('#om-key-remove'), keyStatus: $('#om-key-status'),
+    keySaved: $('#om-key-saved'), keyEdit: $('#om-key-edit'), keyReplace: $('#om-key-replace'), keyCancel: $('#om-key-cancel'),
     note: $('#om-note'),
   };
   if (!ui.box) return;
-  ui.provider.addEventListener('change', () => save({ provider: ui.provider.value }, true));
+  ui.provider.addEventListener('change', () => { replacing = false; save({ provider: ui.provider.value }, true); });
   ui.url.addEventListener('change', () => save({ baseUrl: ui.url.value.trim() }));
   ui.keySave.addEventListener('click', () => saveKey());
-  ui.key.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); saveKey(); } });
+  ui.key.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') { e.preventDefault(); saveKey(); }
+    if (e.key === 'Escape' && replacing) { e.preventDefault(); cancelReplace(); }
+  });
+  ui.keyReplace.addEventListener('click', () => { replacing = true; paintKey(); ui.key.focus(); });
+  ui.keyCancel.addEventListener('click', () => cancelReplace());
   ui.key.addEventListener('input', () => paintKey());
   ui.keyRemove.addEventListener('click', () => removeKey());
 }
@@ -86,12 +94,19 @@ async function saveKey() {
   try {
     data = { ...(await request({ type: 'agent.openModel.setKey', key })), error: null };
     busy = false;
+    replacing = false;
     paint();
   } catch (e) {
     busy = false;
     paint();
     paintKey(`Couldn’t save the key: ${String(e?.message ?? e)}`, true);
   }
+}
+
+function cancelReplace() {
+  replacing = false;
+  ui.key.value = '';
+  paintKey();
 }
 
 async function removeKey() {
@@ -124,15 +139,19 @@ function paintKey(message, isError = false) {
   if (ui.keyRow.hidden) { ui.keyStatus.hidden = true; return; }
   const k = data?.key;
   const stored = !!data?.hasKey;
+  if (!stored) replacing = false;
+  ui.keySaved.hidden = !stored || replacing;
+  ui.keyEdit.hidden = stored && !replacing;
+  ui.keyCancel.hidden = !replacing;
   ui.keySave.disabled = busy || !ui.key.value.trim();
   ui.keyRemove.disabled = busy;
-  ui.keyRemove.hidden = !stored;
-  ui.key.placeholder = stored ? 'Paste a new key to replace it' : 'Paste your key';
+  ui.keyReplace.disabled = busy;
+  ui.key.placeholder = replacing ? 'Paste the new key' : 'Paste your key';
   let text = message;
   let error = isError;
   if (!text) {
     if (k?.error) { text = k.error; error = true; }
-    else if (stored) text = `Key saved in ${k?.keyring || 'the system keyring'}. TRIF adds it to the model requests itself: neither Codex nor your agent’s commands are given it.`;
+    else if (stored) text = `Kept in ${k?.keyring || 'the system keyring'}. TRIF adds it to the model requests itself: neither Codex nor your agent’s commands are given it.`;
     else if (data?.effective?.keyRequired) { text = `No key yet: paste your OpenRouter API key, then Save. It’s kept in ${k?.keyring || 'the system keyring'}, not in TRIF’s files.`; error = true; }
     else text = 'No key yet: fine if the server needs none.';
   }

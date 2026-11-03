@@ -186,6 +186,7 @@ body.site-off .bar-robot:hover:not([aria-busy="true"]) svg { filter: grayscale(0
 .om-key { display: flex; gap: 6px; min-width: 0; margin: 0; }
 .om-key input { flex: 1; }
 .om-key .btn { padding: 4px 10px; }
+.om-key-ok { flex: 1; align-self: center; color: var(--ok); font-weight: 600; }
 .field textarea {
   width: 100%;
   min-width: 0;

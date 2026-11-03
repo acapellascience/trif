@@ -49,10 +49,16 @@
     </label>
     <div id="om-key-row" class="field" hidden>
       <span>API key</span>
-      <div class="om-key">
+      <!-- A key is saved: say so, with Replace and Remove. Otherwise (or while replacing it): the field. -->
+      <div id="om-key-saved" class="om-key" hidden>
+        <span class="om-key-ok">✓ Saved</span>
+        <button id="om-key-replace" class="btn" type="button">Replace</button>
+        <button id="om-key-remove" class="btn" type="button">Remove</button>
+      </div>
+      <div id="om-key-edit" class="om-key">
         <input id="om-key" type="password" autocomplete="off" spellcheck="false" placeholder="Paste your key" aria-label="API key">
         <button id="om-key-save" class="btn" type="button">Save</button>
-        <button id="om-key-remove" class="btn" type="button" hidden>Remove</button>
+        <button id="om-key-cancel" class="btn" type="button" hidden>Cancel</button>
       </div>
     </div>
     <p id="om-key-status" class="note" hidden></p>

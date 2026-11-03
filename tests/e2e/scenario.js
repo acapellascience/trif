@@ -11,6 +11,7 @@ const I = require('./lib/install');
 const { FirefoxDriver } = require('./lib/firefox');
 const { ChromeDriver } = require('./lib/chrome');
 const { SWEEP_EXPECT } = require('./lib/server');
+const { makeFakeKeychain } = require('../fake-keychain');
 
 const REAL_HOME = os.userInfo().homedir;
 const SHIPPED_IDS = require('../../helper/lib/preinstalled').PREINSTALLED.map((p) => p.id || p);
@@ -74,8 +75,14 @@ class Scenario {
 
   // ---- helpers
 
-  // (Without --oss, no keyring at all: the real Keychain is never asked about API keys.)
-  env(extra) { return I.scratchEnv(this.home, { ...(this.o.oss ? {} : { TRIF_KEYCHAIN_BIN: path.join(this.work, 'no-keychain', 'security') }), ...extra }); }
+  // (Without --oss, the fake keychain from the unit tests, in the work folder: the real Keychain is never
+  // asked about API keys, and the panel's key row can be tried for real.)
+  keychain() {
+    if (!this._keychain) this._keychain = makeFakeKeychain(path.join(this.work, 'keychain'));
+    return this._keychain;
+  }
+
+  env(extra) { return I.scratchEnv(this.home, { ...(this.o.oss ? {} : { TRIF_KEYCHAIN_BIN: this.keychain().bin }), ...extra }); }
 
   /** Runs the installed `trif` (the scratch home's wrapper). */
   async cli(args, { json = false, timeoutMs = 60000, env = undefined } = {}) {
@@ -200,6 +207,52 @@ class Scenario {
     return `${s.agents - 1} agents listed, instructions loaded; "${s.update}"`;
   }
 
+  /**
+   * Settings → Open model → OpenRouter: a key saved (in the fake keychain) shows as "✓ Saved" with Replace
+   * and Remove instead of the field; Replace brings the field back with Cancel; Remove empties the
+   * keychain. The agent and provider are put back afterwards.
+   */
+  async openModelKey() {
+    const kc = this.keychain();
+    const KEY = 'sk-or-v1-e2e-not-a-real-key-0000';
+    await this.d.click(this.panelCtx, '#settings-btn');
+    await waitFor('settings to open', async () => this.panel(`async () => !document.querySelector('#settings').hidden && document.querySelectorAll('#agent option').length > 1`), { timeoutMs: 10000 });
+    const before = await this.panel(`async () => ({ agent: document.querySelector('#agent').value, oss: !!document.querySelector('#agent option[value="codex-oss"]') })`);
+    if (!before.oss) { await this.d.click(this.panelCtx, '#settings-btn'); return 'skipped: no open model agent listed (Codex not installed?)'; }
+    const pick = (sel, value) => this.panel(`async (sel, value) => { const e = document.querySelector(sel); e.value = value; e.dispatchEvent(new Event('change', { bubbles: true })); return e.value; }`, [sel, value]);
+    const row = () => this.panel(`async () => {
+      const shown = (sel) => { const e = document.querySelector(sel); return !!e && e.getClientRects().length > 0; };
+      return { row: shown('#om-key-row'), saved: shown('#om-key-saved'), edit: shown('#om-key-edit'), cancel: shown('#om-key-cancel'),
+        field: document.querySelector('#om-key').value, focused: document.activeElement?.id || '', status: document.querySelector('#om-key-status').textContent,
+        provider: document.querySelector('#om-provider').value };
+    }`);
+    let last = null;
+    const until = (what, ok) => waitFor(what, async () => { last = await row(); return ok(last) ? last : null; }, { timeoutMs: 10000 })
+      .catch((e) => { throw new Error(`${e.message}: ${JSON.stringify(last)}`); });
+    await pick('#agent', 'codex-oss');
+    await until('the open model settings', (x) => !!x.provider);
+    const provider = last.provider;
+    await pick('#om-provider', 'openrouter');
+    await until('the key field (no key yet)', (x) => x.provider === 'openrouter' && x.row && x.edit && !x.saved && !x.cancel);
+    await this.panel(`async (k) => { const e = document.querySelector('#om-key'); e.value = k; e.dispatchEvent(new Event('input', { bubbles: true })); }`, [KEY]);
+    await this.d.click(this.panelCtx, '#om-key-save');
+    const saved = await until('"✓ Saved" with Replace and Remove', (x) => x.saved && !x.edit && x.field === '');
+    if (!Object.values(kc.items()).includes(KEY)) throw new Error(`the key isn't in the keychain: ${JSON.stringify(Object.keys(kc.items()))}`);
+    await this.d.click(this.panelCtx, '#om-key-replace');
+    await until('the field again, with Cancel, focused', (x) => x.edit && x.cancel && !x.saved && x.focused === 'om-key');
+    await this.shot(this.panelCtx, 'panel-open-model-key-replace');
+    await this.d.click(this.panelCtx, '#om-key-cancel');
+    await until('back to "✓ Saved"', (x) => x.saved && !x.edit);
+    await this.shot(this.panelCtx, 'panel-open-model-key-saved');
+    await this.d.click(this.panelCtx, '#om-key-remove');
+    await until('the field (key removed)', (x) => x.edit && !x.saved && !x.cancel);
+    if (Object.values(kc.items()).includes(KEY)) throw new Error('Remove left the key in the keychain');
+    await pick('#om-provider', provider);
+    await pick('#agent', before.agent);
+    await this.d.click(this.panelCtx, '#settings-btn');
+    return `saved ("${saved.status.slice(0, 60)}…"), replace and cancel, removed; agent and provider (${provider}) put back`;
+  }
+
   // ---- the scenario
 
   async run() {
@@ -207,6 +260,7 @@ class Scenario {
     const r = this.r;
     r.setGroup(`${this.o.browser} ${this.o.kind}${this.o.kind === 'upgrade' ? ` from ${path.basename(this.o.oldTgz)}` : ''}`);
     fs.rmSync(this.work, { recursive: true, force: true });
+    this._keychain = null;
     fs.mkdirSync(this.home, { recursive: true });
     const before = fingerprint(REAL_FILES);
     try {
@@ -309,9 +363,9 @@ class Scenario {
     // for agent runs, which need your real Claude Code / Codex login, the browser (and so the helper and
     // the agents it starts) gets your real HOME, and TRIF_HOME points the helper at the scratch workspace.
     const env = o.agent || o.codex || o.oss || o.guidance ? { HOME: REAL_HOME, TRIF_HOME: this.trif, TRIF_PRIVATE: this.priv } : { HOME: this.home };
-    // The real Keychain only for --oss (the OpenRouter key the user saved); otherwise a keyring tool that
-    // isn't there, so the helper doesn't even look up API keys for Claude Code or Codex in the real one.
-    if (!o.oss) env.TRIF_KEYCHAIN_BIN = path.join(this.work, 'no-keychain', 'security');
+    // The real Keychain only for --oss (the OpenRouter key the user saved); otherwise the fake one, so the
+    // helper never looks up API keys for Claude Code or Codex in the real one.
+    if (!o.oss) env.TRIF_KEYCHAIN_BIN = this.keychain().bin;
     this.helperHome = env.HOME;
     if (o.browser === 'firefox') {
       this.d = new FirefoxDriver({
@@ -569,6 +623,7 @@ class Scenario {
       return p.mods.map((m) => `${m.id.split('/')[1]} ${m.on ? 'on' : 'off'}`).join(', ');
     });
     await this.narrowShots();
+    if (!this.o.oss) await r.check('open model key: saved, then Replace (and Cancel) and Remove', () => this.openModelKey());
     await this.sweepAndScreenshotChecks(base, win);
     if (this.o.kind === 'upgrade') await this.mergeChecks();
     await this.ext(`async (id) => { await chrome.tabs.remove(id); }`, [this.xTab]).catch(() => {});

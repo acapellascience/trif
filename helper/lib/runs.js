@@ -99,6 +99,131 @@ function realOrResolved(p) {
 // screenshots) is in the private folder (paths.js privateDir), outside the workspace, since 0.2.0.
 const { PRIVATE_FILES } = require('./paths');
 
+// ---------------------------------------------------------------- folders a run may write
+//
+// A folder a run may write can be deleted by that run and replaced with a link (macOS's sandbox allows it:
+// the writable path itself is inside what's allowed). If the next run's limits came from the real path of
+// that folder, they would follow the link: `rm -rf "$TRIF_RUN_SCREENSHOTS"; ln -s ~/.trif/bin "$_"` in one
+// run, and the next run on the site could rewrite trif-host, which the browser starts outside any sandbox.
+// So a writable folder's place is never taken from a realpath of something a run could have replaced:
+//   - the run's screenshots folder (screenshotsFolder): a link or file in its place (or in its parent's,
+//     `<private>/screenshots`) is removed, never followed, and the folder made again; its real path must
+//     then be its parent's real path plus its name, or the run is refused; links inside it are removed.
+//   - the mods folder (checkModsFolder): a run is refused when it's a link or not a folder, or when its real
+//     path isn't the one `trif setup` recorded (config.json modsDirReal, in the private folder).
+//   - the mailbox: made fresh for each run, without `recursive`, so it can't already be anything.
+// Links a run leaves inside the mods folder (or the trash, where deleted mods go) don't widen the next
+// run's limits either: sandboxes resolve them and check the real path, and Claude Code's own file tools,
+// which run outside the sandbox, get deny rules for them (workspaceLinks).
+
+const LINK_WALK_DEPTH = 4;
+const LINK_WALK_MAX = 5000;
+
+function lstatOrNull(p) {
+  try { return fs.lstatSync(p); } catch { return null; }
+}
+
+// `p` as a plain folder: a link (or file) in its place is removed without following it, and a missing
+// folder made (not recursively: its parent must already be a folder).
+function plainFolder(p) {
+  let st = lstatOrNull(p);
+  if (st && !st.isDirectory()) { fs.unlinkSync(p); st = null; }
+  if (!st) fs.mkdirSync(p, { mode: 0o700 });
+}
+
+// Every link under `dir` (links aren't followed), a few levels down, at most LINK_WALK_MAX entries.
+function linksUnder(dir, depth = LINK_WALK_DEPTH) {
+  const out = [];
+  let seen = 0;
+  const walk = (d, level) => {
+    let entries;
+    try { entries = fs.readdirSync(d, { withFileTypes: true }); } catch { return; }
+    for (const e of entries) {
+      if (++seen > LINK_WALK_MAX) return;
+      const p = path.join(d, e.name);
+      if (e.isSymbolicLink()) out.push(p);
+      else if (e.isDirectory() && level < depth) walk(p, level + 1);
+    }
+  };
+  walk(dir, 1);
+  return out;
+}
+
+function screenshotsName(scope) {
+  const name = String(scope || '').replace(/[^a-z0-9.-]/gi, '_');
+  return !name || /^\.+$/.test(name) ? 'site' : name;
+}
+
+/**
+ * The run's screenshots folder, `<private>/screenshots/<scope>`, made safe to hand to the run as writable
+ * (see above). Returns {dir, real}: its path and its real path. Throws when it can't be.
+ */
+function screenshotsFolder(ws, scope) {
+  fs.mkdirSync(ws.private, { recursive: true, mode: 0o700 });
+  plainFolder(ws.screenshots);
+  const name = screenshotsName(scope);
+  const dir = path.join(ws.screenshots, name);
+  plainFolder(dir);
+  const root = fs.realpathSync.native(ws.screenshots);
+  const real = fs.realpathSync.native(dir);
+  if (!within(real, path.join(root, name), { ci: ignoresCase(root), orEqual: true })) {
+    throw new Error(`the run's screenshots folder ${dir} leads to ${real}, not into ${root}`);
+  }
+  // Links in it (left by an earlier run) would lead Claude Code's Read tool, allowed in this folder,
+  // elsewhere. Only screenshots belong here.
+  for (const l of linksUnder(real)) { try { fs.unlinkSync(l); } catch { /* gone */ } }
+  return { dir, real };
+}
+
+/**
+ * Throws unless the mods folder is a plain folder (made if missing) whose real path is the one `trif setup`
+ * recorded for it, if it recorded one (config.json modsDirReal: {path, real}). Returns its real path.
+ */
+function checkModsFolder(ws) {
+  const dir = ws.modsDir;
+  let st = lstatOrNull(dir);
+  if (!st) { fs.mkdirSync(dir, { recursive: true }); st = lstatOrNull(dir); }
+  const fix = 'If you made it so, set "modsDir" in TRIF\'s config.json to the folder itself; otherwise remove it and run `trif setup` in a terminal.';
+  if (st && st.isSymbolicLink()) {
+    let to = '';
+    try { to = ` (to ${fs.readlinkSync(dir)})`; } catch { /* ignore */ }
+    throw new Error(`The mods folder ${dir} is a link${to}. Agent runs may write the mods folder, so TRIF won't start one through a link. ${fix}`);
+  }
+  if (!st || !st.isDirectory()) throw new Error(`The mods folder ${dir} isn't a folder. ${fix}`);
+  const real = fs.realpathSync.native(dir);
+  const rec = ws.config && ws.config.modsDirReal;
+  if (rec && typeof rec === 'object' && rec.path === dir && typeof rec.real === 'string' && rec.real) {
+    if (!within(real, rec.real, { ci: ignoresCase(real), orEqual: true }) || !within(rec.real, real, { ci: ignoresCase(real), orEqual: true })) {
+      throw new Error(`The mods folder ${dir} now leads to ${real}, not ${rec.real} as when TRIF was set up. If you moved it, run \`trif setup\` in a terminal.`);
+    }
+  }
+  return real;
+}
+
+/**
+ * Links in the mods folder and the trash (deleted mods), which runs may read in full, and what each may
+ * be used for by Claude Code's own file tools (outside the sandbox; they match rules against the path
+ * they're given): [{path, read, edit}]. `edit` false when it leads out of the mods folder (or nowhere),
+ * `read` false when it leads where the run may not read (`deniedTarget(realPath)`) or nowhere.
+ */
+function workspaceLinks(ws, realMods, deniedTarget) {
+  const ci = ignoresCase(realMods);
+  const out = [];
+  const realHome = realOrResolved(ws.home);
+  for (const [dir, literal] of [[realMods, realMods], [path.join(ws.home, 'trash'), path.join(realHome, 'trash')]]) {
+    if (!lstatOrNull(dir)) continue;
+    for (const l of linksUnder(dir)) {
+      let target = null;
+      try { target = fs.realpathSync.native(l); } catch { /* dangling */ }
+      const p = path.join(literal, path.relative(dir, l));
+      const edit = !!target && within(target, realMods, { ci });
+      const read = !!target && !deniedTarget(target);
+      if (!edit || !read) out.push({ path: p, read, edit });
+    }
+  }
+  return out;
+}
+
 // The TRIF code a run's `trif` needs (helper/, and package.json for the version) and the examples
 // (`trif install-example`): not the whole package folder, which in a git checkout holds .git, keys
 // and build output.
@@ -236,7 +361,7 @@ function deniedInHome(home, readable) {
  * The only denies inside readable folders are the skill folders' secrets. No network at all: `trif`
  * reaches the helper through the mailbox. Real paths, as sandboxes compare.
  */
-function runLimits(ws, { scope, box, screenshots }) {
+function runLimits(ws, { scope, box, screenshots, screenshotsReal, modsReal }) {
   const real = realOrResolved;
   const node = real(process.execPath);
   const home = real(os.homedir());
@@ -244,15 +369,22 @@ function runLimits(ws, { scope, box, screenshots }) {
   const skills = skillDirs(os.homedir());
   const privateDir = real(ws.private || require('./paths').privateDir(ws.home));
   const readable = [...new Set([real(ws.home), ...trifCode(), path.dirname(path.dirname(node)), ...skills])];
-  const writable = [real(ws.modsDir), real(screenshots), real(box)];
+  // The writable folders as checked when the run's folders were made (screenshotsFolder, checkModsFolder,
+  // the fresh mailbox): never a realpath of something a run could have replaced since.
+  const mods = modsReal || checkModsFolder(ws);
+  const shots = screenshotsReal || screenshotsFolder(ws, scope).real;
+  const writable = [mods, shots, real(box)];
   let names = [];
-  try { names = fs.readdirSync(ws.modsDir, { withFileTypes: true }).filter((d) => d.isDirectory() || d.isSymbolicLink()).map((d) => d.name); } catch { /* none yet */ }
+  try { names = fs.readdirSync(mods, { withFileTypes: true }).filter((d) => d.isDirectory() || d.isSymbolicLink()).map((d) => d.name); } catch { /* none yet */ }
   const otherSites = names.filter((n) => scopeFor(n) !== scope);
   // Each such folder by its path in the workspace (`literal`, what Claude Code's file tools match rules
   // against: a site folder can be a link) and its real path (`real`, what sandboxes compare); `rel` names
   // it as modSnapshot names files.
-  const lockedDirs = otherSites.map((n) => ({ rel: path.relative(ws.home, path.join(ws.modsDir, n)), literal: path.join(real(ws.modsDir), n), real: real(path.join(ws.modsDir, n)) }));
-  const readOnly = lockedDirs.map((d) => d.real);
+  const lockedDirs = otherSites.map((n) => ({ rel: path.relative(ws.home, path.join(ws.modsDir, n)), literal: path.join(mods, n), real: real(path.join(mods, n)) }));
+  // Read-only for the sandboxes: only those inside the mods folder. A site folder that is a link out of it
+  // isn't a mod folder (mods.js ignores it), and making where it leads "read" would open it to the run
+  // (in Codex's profile, a more specific path wins over the home folder's denies).
+  const readOnly = lockedDirs.map((d) => d.real).filter((r) => within(r, mods, { ci: ignoresCase(mods) }));
   // (By where each leads, too: ~/.webmods is a link to the workspace, ~/.trif, since 0.2.0, and a rule
   // denying it would deny the workspace itself to a sandbox that follows links.)
   const inHome = deniedInHome(home, readable);
@@ -266,7 +398,9 @@ function runLimits(ws, { scope, box, screenshots }) {
   // can't be the run's doing (held.js). Only once the agent's adapter has protected each one: its
   // command() returns `locked`, the ones it did (runs.js uses that, not this).
   const locked = lockedDirs.map((d) => d.rel);
-  return { readable, writable, readOnly, locked, lockedDirs, denied, home, skills, skillSecrets: secrets, skillLinks: links, privateDir, workspace: real(ws.home), box: real(box), screenshots: real(screenshots) };
+  // Links in the mods folder and the trash that lead out of it (or where the run may not read).
+  const wsLinks = workspaceLinks(ws, mods, (t) => !within(t, shots, { ci, orEqual: true }) && deniedTarget(t));
+  return { readable, writable, readOnly, locked, lockedDirs, denied, home, skills, skillSecrets: secrets, skillLinks: links, workspaceLinks: wsLinks, privateDir, workspace: real(ws.home), box: real(box), screenshots: shots, modsDir: mods };
 }
 
 /** ws with its private folder's paths (paths.js workspace has them; a hand-made ws may not). */
@@ -444,11 +578,19 @@ class Runs {
     // The run's mailbox, its only way to the helper (its sandbox has no network), and its screenshots
     // folder (it may not see other sites' screenshots).
     run.box = path.join(boxRoot(), run.id);
-    run.screenshots = path.join(ws.screenshots, run.scope.replace(/[^a-z0-9.-]/gi, '_') || 'site');
+    try {
+      // The mods folder first: a link there is a refusal the user should read as is.
+      run.modsReal = checkModsFolder(ws);
+    } catch (e) {
+      this._emit(run, { kind: 'error', message: e.message });
+      return this._finish(run, { code: null, signal: null });
+    }
     try {
       fs.mkdirSync(boxRoot(), { recursive: true, mode: 0o700 });
-      fs.mkdirSync(run.box, { mode: 0o700 });
-      fs.mkdirSync(run.screenshots, { recursive: true });
+      fs.mkdirSync(run.box, { mode: 0o700 }); // (fresh: not recursive, so it can't already be a link)
+      const shots = screenshotsFolder(ws, run.scope);
+      run.screenshots = shots.dir;
+      run.screenshotsReal = shots.real;
     } catch (e) {
       this._emit(run, { kind: 'error', message: `couldn't prepare the run's folders: ${e.message}` });
       return this._finish(run, { code: null, signal: null });
@@ -494,8 +636,11 @@ class Runs {
     const extra = adapter.readsInstructions ? '' : instructionsContext(readInstructions(ws.home));
     if (adapter.systemPrompt) context = agents.contextText(ctx) + extra;
     else prompt = `${run.sessionId ? agents.reminderText(ctx) : agents.contextText(ctx) + extra}\n\n${prompt}`;
-    try { fs.mkdirSync(ws.modsDir, { recursive: true }); } catch { /* reported by the agent */ }
-    const limits = runLimits(ws, run);
+    let limits;
+    try { limits = runLimits(ws, run); } catch (e) {
+      this._emit(run, { kind: 'error', message: e.message });
+      return this._finish(run, { code: null, signal: null });
+    }
     // The agent's own files (claude: its run settings and context), in a folder of the run's that only
     // the helper and the agent itself read: beside its mailbox, not in it (the run's commands may write
     // there), and not in the workspace. Removed when the run ends.

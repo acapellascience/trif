@@ -46,7 +46,7 @@ function tooOld(version) {
  * The run's own rules (--settings): the sandbox for its shell commands, and per-run permission rules
  * (other sites' folders and screenshots). `limits` is runs.js runLimits.
  */
-function runSettings({ workspace = '', readOnly = [], lockedDirs = [], denied = [], home, readable = [], privateDir, box, screenshots, skills = [], skillSecrets = [], skillLinks = [] } = {}) {
+function runSettings({ workspace = '', readOnly = [], lockedDirs = [], denied = [], home, readable = [], privateDir, box, screenshots, skills = [], skillSecrets = [], skillLinks = [], workspaceLinks = [] } = {}) {
   // Absolute ("//" + path): a "./" rule follows the agent's current folder, so after `cd sites/x.com` it
   // would point somewhere else.
   const rel = (p) => `/${p}`;
@@ -84,7 +84,11 @@ function runSettings({ workspace = '', readOnly = [], lockedDirs = [], denied = 
       // the path it's given).
       deny: [...new Set([...readOnly.filter(inWorkspace), ...lockedDirs.flatMap((d) => [d.literal, d.real])])].map((p) => `Edit(${rel(p)}/**)`).concat(
         ...skillSecrets.flatMap((x) => (x.dir ? [`Read(/${x.path})`, `Read(/${x.path}/**)`] : [`Read(/${x.path})`])),
-        ...skillLinks.flatMap((p) => [`Read(/${p})`, `Read(/${p}/**)`])),
+        ...skillLinks.flatMap((p) => [`Read(/${p})`, `Read(/${p}/**)`]),
+        // Links in the mods folder and the trash (left by an earlier run's commands: Codex can make them)
+        // that lead out of the mods folder, or where the run may not read (runs.js workspaceLinks): the
+        // Edit and Read allows above cover them by the path they're given.
+        ...workspaceLinks.flatMap((l) => [...(l.edit ? [] : [`Edit(/${l.path})`, `Edit(/${l.path}/**)`]), ...(l.read ? [] : [`Read(/${l.path})`, `Read(/${l.path}/**)`])])),
     },
   };
 }

@@ -857,6 +857,18 @@ Suffix List). `helper/lib/scope.js` computes it; `extension/lib.js` mirrors the 
     `origins.json`, `active-runs/`, `update.json`, `trash/`, `instructions.md`, `AGENTS.md`, `CLAUDE.md`,
     `.claude/`, `bin/` or `app/`. A run's commands can still create a folder for another site; its mods are
     held like any out-of-scope mod.
+  - **Writable folders a run replaced.** The sandbox lets a run delete a folder it may write and put a
+    link in its place, so the next run's limits never come from the realpath of such a folder
+    (`runs.js` screenshotsFolder, checkModsFolder): a link or file where the run's screenshots folder (or
+    `<private>/screenshots`) should be is removed without following it and the folder made again, its
+    real path must then be its parent's plus its name (or the run is refused), and links inside it are
+    removed; a run is refused when the mods folder is a link or not a folder, or when its real path isn't
+    the one `trif setup` recorded (`config.json` `modsDirReal: {path, real}`, for that `modsDir`); the
+    mailbox is made fresh, not recursively. Another site's folder that is a link out of the mods folder
+    is never made read-only (that would open where it leads, in Codex's profile), only denied to Claude
+    Code's Edit tool; and links in the mods folder or the trash that lead out of the mods folder (or
+    where the run may not read) get `Edit` (and `Read`) deny rules for Claude Code's file tools, which run
+    outside the sandbox and match rules against the path they're given (`workspaceLinks`).
   - **Network:** none, and no unix sockets: not the helper's, not the Safari bridge's.
 
   Codex runs any command, all inside its permission profile (`codex.js` permissionsToml: `network =

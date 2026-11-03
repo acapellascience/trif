@@ -1002,7 +1002,9 @@ test('setup records PATH (merging config.json) and writes .claude/settings.json;
   // (Moved out of the workspace into the private folder, where runs can't read it.)
   assert.ok(!fs.existsSync(path.join(ws, 'config.json')));
   const cfg = JSON.parse(fs.readFileSync(path.join(privDir(ws), 'config.json'), 'utf8'));
-  assert.deepEqual(cfg, { modsDir: 'sites', env: { ANTHROPIC_API_KEY: 'k', PATH: termPath } });
+  // (modsDirReal: the mods folder's real path, which runs check: runs.js checkModsFolder.)
+  const sites = path.join(ws, 'sites');
+  assert.deepEqual(cfg, { modsDir: 'sites', env: { ANTHROPIC_API_KEY: 'k', PATH: termPath }, modsDirReal: { path: sites, real: fs.realpathSync(sites) } });
   const settings = JSON.parse(fs.readFileSync(path.join(ws, '.claude', 'settings.json'), 'utf8'));
   assert.deepEqual(settings, {
     permissions: {

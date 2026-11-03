@@ -282,8 +282,10 @@ function cleanPath(pathValue) {
     && !d.includes(`${sep}@npmcli${sep}run-script${sep}`)).join(path.delimiter);
 }
 
-// Merge config.json -> env.PATH = pathValue, keeping every other key. Leaves a broken file alone.
-function recordPath(home, pathValue) {
+// Merge config.json -> env.PATH = pathValue, and modsDirReal = {path, real} for the mods folder `modsDir`
+// (runs.js checkModsFolder: a run is refused if the mods folder later leads somewhere else; not recorded,
+// and any old record dropped, when it's a link), keeping every other key. Leaves a broken file alone.
+function recordPath(home, pathValue, modsDir = null) {
   const file = P.configFile(home);
   fs.mkdirSync(path.dirname(file), { recursive: true, mode: 0o700 });
   let config = {};
@@ -295,6 +297,12 @@ function recordPath(home, pathValue) {
   }
   const env = config.env && typeof config.env === 'object' && !Array.isArray(config.env) ? config.env : {};
   config.env = { ...env, PATH: pathValue };
+  if (modsDir) {
+    let st = null;
+    try { st = fs.lstatSync(modsDir); } catch { /* none */ }
+    if (st && st.isDirectory()) config.modsDirReal = { path: modsDir, real: fs.realpathSync.native(modsDir) };
+    else delete config.modsDirReal;
+  }
   const how = writeIfChanged(file, JSON.stringify(config, null, 2) + '\n');
   return { error: null, how };
 }
@@ -340,6 +348,12 @@ function setup(opts = {}) {
 
   // 1. Workspace
   for (const d of [home, ws.modsDir, ws.bin]) fs.mkdirSync(d, { recursive: true });
+  try {
+    if (fs.lstatSync(ws.modsDir).isSymbolicLink()) {
+      say(`mods          warning: the mods folder ${ws.modsDir} is a link; side-panel agent runs won't start until it's a`);
+      say('              folder (or "modsDir" in config.json names the folder itself)');
+    }
+  } catch { /* made above */ }
   fs.mkdirSync(ws.private, { recursive: true, mode: 0o700 });
   fs.mkdirSync(ws.screenshots, { recursive: true });
   say(`workspace     ${home}`);
@@ -412,7 +426,7 @@ function setup(opts = {}) {
   const agents = require('./agents');
   fs.mkdirSync(path.join(home, '.claude'), { recursive: true });
   fs.writeFileSync(path.join(home, '.claude', 'settings.json'), JSON.stringify(agents.CLAUDE_SETTINGS, null, 2) + '\n');
-  const rec = recordPath(home, cleanPath(process.env.PATH));
+  const rec = recordPath(home, cleanPath(process.env.PATH), ws.modsDir);
   if (rec.error) say(`              couldn't record PATH for agents: ${rec.error}`);
   const found = agents.listAgents(P.workspace(opts.home), { version: false }).agents;
   say(`agents        ${found.map((a) => (a.available ? `${a.id} (${a.path})` : `${a.id} not found`)).join(', ')}`);

@@ -11,7 +11,7 @@ const crypto = require('crypto');
 const { execFileSync } = require('child_process');
 const { tempDir, runCli, privDir } = require('./fake-extension');
 const U = require('../helper/lib/update');
-const { changelogSection, latestFeed, signBytes, firefoxFeed, xpiMatches } = require('../scripts/release');
+const { changelogSection, unreleasedSection, repoMismatch, remoteRepo, latestFeed, signBytes, firefoxFeed, xpiMatches } = require('../scripts/release');
 
 const keys = () => {
   const { publicKey, privateKey } = crypto.generateKeyPairSync('ed25519');
@@ -294,6 +294,17 @@ test('release script: changelog sections and feeds the helper and Firefox accept
   const real = fs.readFileSync(path.join(__dirname, '..', 'CHANGELOG.md'), 'utf8');
   const version = JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'package.json'), 'utf8')).version;
   assert.ok(changelogSection(real, version), `CHANGELOG.md has a section for the current version ${version}`);
+  // No "## Unreleased" left behind (release.js stops on it), and every section short enough for a 0.1.x
+  // updater, which cuts the notes at 4000 characters.
+  assert.equal(unreleasedSection('# C\n\n## Unreleased\n\n- new\n\n## 0.1.2\n\n- x\n'), '- new');
+  assert.equal(unreleasedSection('# C\n\n## Unreleased\n\n## 0.1.2\n\n- x\n'), null, 'an empty one is fine');
+  assert.equal(unreleasedSection(real), null, 'CHANGELOG.md has a non-empty "## Unreleased" section');
+  for (const v of [...real.matchAll(/^## (\d+\.\d+\.\d+)/gm)].map((m) => m[1])) assert.ok(changelogSection(real, v).length < 3900, `${v}'s notes are too long`);
+  // package.json's repository against the git remote.
+  assert.equal(remoteRepo('https://github.com/acapellascience/WebMods.git'), 'acapellascience/WebMods');
+  assert.equal(remoteRepo('git@github.com:acapellascience/trif.git'), 'acapellascience/trif');
+  assert.match(repoMismatch('acapellascience/trif', 'https://github.com/acapellascience/WebMods.git'), /Rename the GitHub repo first \(acapellascience\/WebMods → acapellascience\/trif/);
+  assert.equal(repoMismatch('acapellascience/trif', 'git@github.com:acapellascience/Trif.git'), null);
 
   const k = keys();
   const feed = latestFeed({ version: '0.1.2', published: '2026-11-01', notes: '- one', url: 'https://github.com/a/b/releases/download/v0.1.2/trif-0.1.2.tgz', sha256: 'b'.repeat(64), size: 5 });

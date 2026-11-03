@@ -7,8 +7,8 @@
 //                                             helper/lib/release-key.js (commit it).
 //   node scripts/release.js 0.1.2 [--dry-run] [--skip-tests]
 //
-// A release: checks everything first (clean main branch, a CHANGELOG.md section for the version, keys,
-// GitHub login), bumps the version, refreshes examples/shipped-history.json, runs the tests, builds the
+// A release: checks everything first (clean main branch, a CHANGELOG.md section for the version and no
+// "## Unreleased" one, keys, GitHub login, package.json's repository matching the git remote), bumps the version, refreshes examples/shipped-history.json, runs the tests, builds the
 // Chrome and Firefox extensions and the npm package, has Mozilla sign the Firefox add-on (unlisted),
 // makes the two beta zips, and writes the update feeds: updates/latest.json (+ .sig, signed with the
 // release key) for the helper, updates/firefox.json for Firefox. Then it asks before publishing
@@ -85,6 +85,33 @@ function changelogSection(text, version) {
   return body || null;
 }
 
+/**
+ * The text under "## Unreleased" in CHANGELOG.md, or null. A release stops while there is any: it belongs
+ * in the version's section (the panel shows that one), not left behind.
+ */
+function unreleasedSection(text) {
+  return changelogSection(text, 'Unreleased');
+}
+
+/** "owner/name" of a GitHub remote URL (https or ssh), or null. */
+function remoteRepo(url) {
+  const m = /^(?:(?:git\+)?https:\/\/github\.com\/|git@github\.com:|ssh:\/\/git@github\.com\/)([\w.-]+)\/([\w.-]+?)(?:\.git)?\/?$/.exec(String(url || '').trim());
+  return m ? `${m[1]}/${m[2]}` : null;
+}
+
+/**
+ * Why package.json's repository and the git remote disagree (case aside: GitHub ignores it), or null.
+ * Installs fetch updates from package.json's repository, and the release is pushed to the remote.
+ */
+function repoMismatch(pkgRepo, remoteUrl) {
+  const remote = remoteRepo(remoteUrl);
+  if (!pkgRepo || !remote || pkgRepo.toLowerCase() === remote.toLowerCase()) return null;
+  return `package.json's repository is github.com/${pkgRepo}, but the git remote "origin" is github.com/${remote}. ` +
+    `Installs fetch updates from package.json's. Rename the GitHub repo first (${remote} → ${pkgRepo}, in its Settings), ` +
+    `check that the old raw.githubusercontent.com/${remote}/main/updates/… URLs redirect (installs from before the rename use them), ` +
+    `then: git remote set-url origin https://github.com/${pkgRepo}.git`;
+}
+
 /** latest.json's exact bytes for a release. */
 function latestFeed({ version, published, notes, url, sha256, size }) {
   return Buffer.from(JSON.stringify({ version, published, notes, package: { url, sha256, size } }, null, 2) + '\n');
@@ -136,12 +163,20 @@ function preflight(version, { dryRun }) {
   const repo = githubRepo(pkg);
   if (!/^\d+\.\d+\.\d+$/.test(version)) fail(`"${version}" isn't a version like 0.1.2`);
   if (compareVersions(version, pkg.version) <= 0) fail(`${version} isn't newer than the current ${pkg.version}`);
-  const notes = changelogSection(fs.readFileSync(path.join(ROOT, 'CHANGELOG.md'), 'utf8'), version);
+  const changelog = fs.readFileSync(path.join(ROOT, 'CHANGELOG.md'), 'utf8');
+  const notes = changelogSection(changelog, version);
   if (!notes) fail(`CHANGELOG.md has no "## ${version}" section`);
 
   // What a real release needs; a dry run only warns about them.
   const problems = [];
+  if (unreleasedSection(changelog)) problems.push(`CHANGELOG.md still has a "## Unreleased" section: move what's in it into "## ${version}" (the panel shows that one) and delete it`);
+  if (Buffer.byteLength(notes) > 3900) problems.push(`the "## ${version}" notes are ${Buffer.byteLength(notes)} bytes: keep them under 3900 (updaters before 0.2.0 cut them at 4000)`);
   if (!repo) problems.push('package.json has no GitHub "repository"');
+  else {
+    const remote = spawnSync('git', ['remote', 'get-url', 'origin'], { cwd: ROOT, encoding: 'utf8' });
+    const why = remote.status === 0 ? repoMismatch(repo, remote.stdout) : null;
+    if (why) problems.push(why);
+  }
   const pub = require(KEY_FILE);
   const priv = keychain(KEY_SERVICE);
   let keyOk = false;
@@ -158,6 +193,9 @@ function preflight(version, { dryRun }) {
   for (const s of [AMO_ISSUER, AMO_SECRET]) if (!keychain(s)) problems.push(`the keychain has no ${s} (or ${LEGACY_SERVICES[s]})`);
   if (problems.length && !dryRun) fail(`not ready:\n  - ${problems.join('\n  - ')}`);
   for (const p of problems) console.warn(`release (dry run, would stop a real release): ${p}`);
+  // Not checked here (it would need the network): README and listing say `npx trif setup`, which only
+  // works once `trif` is published on npm, by you. This script doesn't publish to npm.
+  console.warn(`release: reminder: this doesn't publish to npm. \`npx ${pkg.name} setup\` needs "${pkg.name}" published there by you (npm view ${pkg.name}; npm publish ${'<'}the .tgz${'>'} after the release).`);
   return { pkg, repo, notes, priv: keyOk ? priv : null };
 }
 
@@ -221,7 +259,9 @@ async function release(version, { dryRun, skipTests }) {
   if (dryRun) {
     src = path.join(out, 'src');
     fs.mkdirSync(src);
-    for (const item of ['package.json', 'package-lock.json', 'helper', 'extension', 'examples', 'docs', 'scripts', 'tests', 'README.md', 'LICENSE']) {
+    // Everything git tracks (the tests read CHANGELOG.md, site/, store/…), not build output or .git.
+    const tracked = new Set(sh('git', ['ls-files']).split('\n').filter(Boolean).map((f) => f.split('/')[0]));
+    for (const item of tracked) {
       if (fs.existsSync(path.join(ROOT, item))) fs.cpSync(path.join(ROOT, item), path.join(src, item), { recursive: true });
     }
     fs.symlinkSync(path.join(ROOT, 'node_modules'), path.join(src, 'node_modules'));
@@ -334,4 +374,4 @@ if (require.main === module) {
   else release(cmd, { dryRun: flags.has('--dry-run'), skipTests: flags.has('--skip-tests') }).catch((e) => fail(e.stack || e.message));
 }
 
-module.exports = { changelogSection, latestFeed, signBytes, firefoxFeed, bump, xpiMatches };
+module.exports = { changelogSection, unreleasedSection, remoteRepo, repoMismatch, latestFeed, signBytes, firefoxFeed, bump, xpiMatches };

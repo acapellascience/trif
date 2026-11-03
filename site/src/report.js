@@ -62,11 +62,11 @@ export function parseSignup(body) {
   return { email };
 }
 
-/** The email for a waitlist signup: { subject, text, replyTo }. meta: { country, at }. */
+/** The email for a waitlist signup: { subject, text, replyTo }. meta: { at }. Just the address and the time. */
 export function signupEmail(s, meta = {}) {
   return {
     subject: `TRIF Windows waitlist: ${s.email}`,
-    text: `${s.email} joined the Windows waitlist.\n\nSigned up: ${meta.at || new Date().toISOString()}${meta.country ? ` from ${meta.country}` : ''}\n`,
+    text: `${s.email} joined the Windows waitlist.\n\nSigned up: ${meta.at || new Date().toISOString()}\n`,
     replyTo: s.email,
   };
 }

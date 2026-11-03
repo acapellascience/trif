@@ -131,7 +131,7 @@ async function receiveSignup(request, env) {
   }
   if (signup.spam) return reply(200); // say nothing to bots
   if (!env.REPORT_TO || !env.EMAIL) return reply(503, 'The waitlist isn’t set up on this server yet.');
-  const mail = signupEmail(signup, { country: request.cf?.country, at: new Date().toISOString() });
+  const mail = signupEmail(signup, { at: new Date().toISOString() });
   try {
     await env.EMAIL.send({
       to: env.REPORT_TO,

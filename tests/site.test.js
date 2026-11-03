@@ -159,10 +159,10 @@ test('parseSignup / signupEmail: one checked address, emailed with a findable su
   assert.throws(() => parseSignup({ email: `${'x'.repeat(LIMITS.email)}@b.co` }), /too long/);
   assert.throws(() => parseSignup([]), ReportError);
   assert.deepStrictEqual(parseSignup({ email: 'a@b.co', website: 'http://spam' }), { spam: true });
-  const m = signupEmail({ email: 'a@b.co' }, { country: 'CA', at: '2026-11-03T00:00:00Z' });
+  const m = signupEmail({ email: 'a@b.co' }, { at: '2026-11-03T00:00:00Z' });
   assert.equal(m.subject, 'TRIF Windows waitlist: a@b.co');
   assert.equal(m.replyTo, 'a@b.co');
-  assert.ok(m.text.includes('a@b.co') && m.text.includes('Signed up: 2026-11-03T00:00:00Z from CA'), m.text);
+  assert.equal(m.text, 'a@b.co joined the Windows waitlist.\n\nSigned up: 2026-11-03T00:00:00Z\n', 'just the address and the time');
 });
 
 test('/windows: the waitlist page, with strict headers and its own script', async () => {

@@ -807,7 +807,16 @@ Suffix List). `helper/lib/scope.js` computes it; `extension/lib.js` mirrors the 
 - **Extension.** With `args.scope`, page commands only act on tabs whose URL is http(s) on the scope or
   a subdomain (`tabs` lists only those; others fail with an error naming the scope); `open`/`navigate`
   only go to such URLs; `record` only for such sites; `mod.enable` only for mods whose every `@match` is
-  in scope.
+  in scope. The tab can navigate between that check and the injection, so the document is checked again
+  from inside (`lib.js` pageGuard: the scope, and TRIF on there): `run`'s code starts with the check,
+  and the other page commands (`text`, `sweep`, `requests`, `request`, `errors`, `logs`) inject it first,
+  in the isolated world, where it marks the document, and only count their result if the mark is still
+  there afterwards (the same document). `screenshot --copy` checks the copy's URL after it loads and
+  before every capture (redirects, scripts), and refuses addresses that look like one-time links
+  (`screenshot.js` oneTimeUrl: token-like query parameters, sign-in callbacks, confirm, reset and
+  unsubscribe paths) unless `force`, since the copy loads the page again with the user's cookies.
+  `sweep --scroll` scrolls the tab itself, so it's refused on the tab the user is looking at (active in
+  the focused window) unless `force`.
 - **Held mods.** The helper snapshots the mod files when a run starts (the same files the scanner loads:
   `mods.js` listModFiles: links within the mods folder followed, links out of it ignored, no cap). On every mods sync while a run is live (and for 10 s
   after it ends; a finished run's leftover processes get SIGTERM, then SIGKILL after 3 s, so nothing
@@ -852,6 +861,9 @@ Suffix List). `helper/lib/scope.js` computes it; `extension/lib.js` mirrors the 
     `.env` beside it can't, in a run; a secret under some other name, deeper than four levels or past
     the first 5000 entries is still readable (skill folders are the user's own, but keep secrets out
     of them). These skill-folder denies are the only ones inside a readable folder.
+    "Allow-only" is about the home folder: outside it, reads are as the system allows, so a run can still
+    read `/Volumes` (other disks), `/Users/Shared`, `/tmp` and `$TMPDIR` (seen with Codex's profile), and
+    the system's own folders. Keep secrets out of those; TRIF doesn't put anything there.
   - **Writes:** the mods folder, with every existing folder of another site (`all-sites/` included)
     read-only inside it; the run's screenshots folder; its mailbox. Not `held.json`, `preinstalled.json`, `.shipped/`,
     `origins.json`, `active-runs/`, `update.json`, `trash/`, `instructions.md`, `AGENTS.md`, `CLAUDE.md`,

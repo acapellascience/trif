@@ -13,9 +13,10 @@ Creates the workspace (~/.trif, unless --home or TRIF_HOME says otherwise; a ~/.
 when TRIF was called WebMods, is moved there first and left as a link to it) with sites/ and bin/, and the
 private folder (settings, logs, screenshots; ~/Library/Application Support/TRIF on a Mac, moved out of the
 workspace if an older TRIF kept them there), installs the TRIF files the wrappers run,
-refreshes AGENTS.md and CLAUDE.md there from those files, adds the example mods (Plain X, the Instagram ones),
-switched off, the first time (once: never again after you delete one, never over your own file;
---no-examples skips them), writes bin/trif-host
+refreshes AGENTS.md and CLAUDE.md there from those files, adds the mods TRIF ships (Google, X, Amazon,
+Instagram; some on, some off) the first time, and each new one a later version brings, switched off
+(each once: never again after you delete one, never over your own file; --no-examples skips them),
+updates the ones you haven't changed (a changed one is offered the new version), writes bin/trif-host
 and bin/trif wrappers with an absolute node path (and the same as bin/webmods-host and bin/webmods, their
 names before 0.2.0), writes the native messaging host manifest for each
 browser (default: every browser whose profile folder exists) allowing every TRIF extension ID (plus
@@ -53,7 +54,12 @@ With --url or --tab, also the mods that run on that tab's page: what a change th
     details: `Checks Node, the workspace, the host wrapper, each browser's native host manifest, the CLI on
 PATH, whether the helper is reachable, whether the extension said hello, the "Allow User Scripts"
 switch, every mod file, and which coding agents the side panel can use (and whether Claude Code is
-logged in). Exit code 1 if anything failed. Fix problems top-down.`,
+logged in, or an API key is saved in the Keychain). It warns about API key variables set in this
+terminal's environment (other programs, an agent's commands among them, can read them there: save the
+key with trif agent key or trif agent open-model --set-key instead), TRIF's private files left in the
+workspace, and the Safari bridge from before 0.2.0. For an open model (Settings, "Open model (via
+Codex)"): Ollama or LM Studio running, the model installed, the key saved in the Keychain (never shown).
+Exit code 1 if anything failed. Fix problems top-down.`,
     examples: ['trif doctor'],
   },
   tabs: {
@@ -280,8 +286,9 @@ shipped before (what the user's copy started from), for merging.
   --keep     keep the user's copy; this version isn't offered again (a later one is)
   --merged   the new version has been merged into the user's copy (by hand or by an agent in the
              terminal): it isn't offered again, and becomes what later versions are merged against
-The user's choice: not available inside a side-panel run (the panel's "Merge with my agent" starts one
-that merges, and settles the update when it finishes).`,
+The user's choice: not available inside a side-panel run (the panel's "Merge with my agent" starts a
+chat in which the agent proposes the merge first and makes it once the user agrees; the update is settled
+when the user's copy has the new @version).`,
     examples: ['trif mod-update x.com/plain-x', 'trif mod-update x.com/plain-x --use-new', 'trif mod-update x.com/plain-x --keep'],
   },
   mods: {

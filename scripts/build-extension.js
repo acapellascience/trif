@@ -80,7 +80,7 @@ function firefoxManifest(m, repo = githubRepo(readPackage())) {
   f.background = { scripts: [m.background.service_worker], type: 'module' };
   f.permissions = m.permissions.filter((p) => p !== 'sidePanel' && p !== 'userScripts');
   f.optional_permissions = ['userScripts'];
-  // Firefox shows this title above the sidebar, and the version nowhere else people look: both, then.
+  // Firefox shows this title above the sidebar.
   f.sidebar_action = {
     default_panel: m.side_panel.default_path, default_title: m.name, default_icon: m.action.default_icon,
     open_at_install: false,

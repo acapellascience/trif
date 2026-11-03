@@ -9,7 +9,8 @@ needs a section here for the version it releases.
 - **WebMods is now TRIF: Tim's Robot Internet Fixer**, with a new icon: the robot himself. Your mods,
   chats, switches and settings carry over. Their folder moved from `~/.webmods` to `~/.trif`
   (`~/.webmods` is now a link to it: please keep it). TRIF's own settings, logs and screenshots moved to
-  `~/Library/Application Support/TRIF`, out of your agent's reach. The command is now `trif` (`webmods`
+  `~/Library/Application Support/TRIF`, out of your agent's reach (screenshots now go after 30 days).
+  The command is now `trif` (`webmods`
   still works), and mods can call `window.trif.log(...)` (`window.webmods` still works).
 - **Using Safari?** Build and open the new TRIF.app (see the README), tick TRIF in Safari → Settings →
   Extensions and allow it on every website. Safari sees it as a new extension, so its chats, switches

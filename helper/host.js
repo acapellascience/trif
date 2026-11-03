@@ -107,6 +107,9 @@ function sendToExtension(msg) {
 
 process.stdout.on('error', (e) => {
   state.stdoutOpen = false;
+  // (Already shutting down because the browser closed our stdin: a last event written after that meets
+  // a closed pipe too. Expected, not a warning.)
+  if (state.shuttingDown) { logger.info(`stdout closed too (${e.code || e.message})`); return; }
   logger.warn(`stdout error (${e.code || e.message}); Chrome went away`);
   shutdown('stdout closed');
 });

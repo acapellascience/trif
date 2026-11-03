@@ -1,70 +1,82 @@
-// The home page's "Try the demo" tab: opens the demo (/demo, a browser window with the real TRIF side
-// panel) over the page, at the right; Pop out makes it nearly as big as the window, Close puts it away.
-// Without this script the tab is a plain link to /demo.
+// The home page's "Try the demo" tab: opens the real TRIF side panel (/demo/ext/sidepanel.html, with
+// shim.js standing in for the extension) docked to the right of this page, like the browser's side panel:
+// the page moves over to make room. At phone width it's a sheet over the bottom of the page.
+//
+// The mods run on this page: when the panel switches one (or the robot), it asks for the page again with the
+// mods that are on (/?mods=a,b; the Worker adds only mods it has), and the panel opens again by itself after
+// the reload (sessionStorage), where shim.js picks up its state. Without this script there's no tab.
 (() => {
   const tab = document.querySelector('.demo-tab');
   if (!tab) return;
   const root = document.documentElement;
-  const phone = matchMedia('(max-width: 700px)');
-  let win = null;
-  let back = null;
+  const OPEN = 'trif-demo-open';
+  const remember = (on) => { try { sessionStorage.setItem(OPEN, on ? '1' : ''); } catch {} };
+  let box = null;
   let frame = null;
-  let big = false;
 
-  const isOpen = () => !!win && !win.hidden;
-
-  function sync() {
-    if (!win) return;
-    win.classList.toggle('big', big);
-    back.hidden = !isOpen() || !big || phone.matches;
-    root.classList.toggle('demo-lock', isOpen() && (big || phone.matches));
-    frame.contentWindow?.postMessage({ type: 'trif-demo:state', big }, location.origin);
+  function build() {
+    box = document.createElement('aside');
+    box.className = 'demo-panel';
+    box.setAttribute('aria-label', 'TRIF side panel (demo)');
+    const top = document.createElement('div');
+    top.className = 'demo-panel-top';
+    const name = document.createElement('span');
+    name.textContent = 'TRIF demo';
+    const close = document.createElement('button');
+    close.type = 'button';
+    close.className = 'demo-close';
+    close.title = 'Close the demo';
+    close.setAttribute('aria-label', 'Close the demo');
+    close.textContent = '×';
+    close.addEventListener('click', () => hide());
+    top.append(name, close);
+    frame = document.createElement('iframe');
+    frame.src = '/demo/ext/sidepanel.html';
+    frame.title = 'The TRIF side panel';
+    const note = document.createElement('p');
+    note.className = 'demo-panel-note';
+    note.textContent = 'Demo: the real TRIF side panel, with recordings of real Claude Code chats, sped up. The switches really run the mods on this page.';
+    box.append(top, frame, note);
+    // Outside <body> (mods that take the page apart walk the body), and in the top layer where the browser
+    // has it (popover), above mods' full-window layers.
+    if (typeof box.showPopover === 'function') box.popover = 'manual';
+    else box.hidden = true;
+    root.append(box);
   }
 
-  function open() {
-    if (!win) {
-      back = document.createElement('div');
-      back.className = 'demo-back';
-      back.hidden = true;
-      back.addEventListener('click', () => { big = false; sync(); });
-      win = document.createElement('div');
-      win.className = 'demo-win';
-      win.setAttribute('role', 'dialog');
-      win.setAttribute('aria-label', 'TRIF demo');
-      frame = document.createElement('iframe');
-      frame.src = '/demo';
-      frame.title = 'TRIF demo: timsrobot.com with the TRIF side panel';
-      win.append(frame);
-      document.body.append(back, win);
-    }
-    win.hidden = false;
-    tab.setAttribute('aria-expanded', 'true');
-    sync();
-    frame.focus();
+  const isOpen = () => !!box && root.classList.contains('demo-open');
+
+  function show() {
+    if (!box) build();
+    if (box.popover) { if (!box.matches(':popover-open')) box.showPopover(); } else box.hidden = false;
+    root.classList.add('demo-open');
+    tab.hidden = true;
+    remember(true);
   }
 
-  function close() {
+  function hide() {
     if (!isOpen()) return;
-    win.hidden = true;
-    big = false;
-    sync();
-    tab.setAttribute('aria-expanded', 'false');
+    if (box.popover) box.hidePopover(); else box.hidden = true;
+    root.classList.remove('demo-open');
+    tab.hidden = false;
     tab.focus();
+    remember(false);
   }
 
-  // Escape: back to the small window first, then closed.
-  function escape() { if (big && !phone.matches) { big = false; sync(); } else close(); }
-
-  tab.setAttribute('aria-expanded', 'false');
-  tab.addEventListener('click', (e) => { e.preventDefault(); if (isOpen()) close(); else open(); });
-  addEventListener('keydown', (e) => { if (e.key === 'Escape' && isOpen()) escape(); });
-  phone.addEventListener('change', sync);
+  // The panel (shim.js) asks for the page with other mods: only names, and the Worker checks them too.
   addEventListener('message', (e) => {
     if (!frame || e.origin !== location.origin || e.source !== frame.contentWindow) return;
-    const type = e.data?.type;
-    if (type === 'trif-demo:close') close();
-    else if (type === 'trif-demo:big') { big = !big; sync(); }
-    else if (type === 'trif-demo:escape') escape();
-    else if (type === 'trif-demo:ready') sync();
+    const d = e.data || {};
+    if (d.type !== 'trif-demo:load') return;
+    const names = (Array.isArray(d.mods) ? d.mods : []).filter((n) => typeof n === 'string' && /^[a-z0-9-]{1,40}$/.test(n));
+    remember(true);
+    location.replace(names.length ? `/?mods=${names.join(',')}` : '/');
   });
+
+  tab.hidden = false;
+  tab.addEventListener('click', show);
+  addEventListener('keydown', (e) => { if (e.key === 'Escape') hide(); });
+  let reopen = false;
+  try { reopen = sessionStorage.getItem(OPEN) === '1'; } catch {}
+  if (reopen) show();
 })();

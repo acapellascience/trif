@@ -8,8 +8,7 @@
 // ==/WebMod==
 
 (() => {
-  // (The original stops here in frames: `if (window.top !== window) return;`. The homepage demo runs the
-  // page in a frame, so its copy doesn't.)
+  if (window.top !== window) return;
 
   const css = document.createElement('style');
   css.textContent = `

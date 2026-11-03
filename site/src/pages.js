@@ -90,29 +90,35 @@ footer a { color: var(--muted); }
 @media (max-width: 720px) { .two { grid-template-columns: 1fr; } }
 `;
 
-// The demo: a tab on the right edge (a link to /demo), which demo.js (site/demo/tab.js) turns into a
-// window over the page, at the right, with Pop out (.big) and Close. At phone width it fills the screen.
-const DEMO_TAB_STYLE = `
+// The demo: a tab on the right edge, shown by demo.js (site/demo/tab.js), opens the real side panel docked
+// to the right of the page (in the top layer, above mods' full-window layers); the page moves over to make
+// room. At phone width the panel is a sheet over the bottom of the page.
+const DEMO_STYLE = `
 .demo-tab { position: fixed; z-index: 10; right: 0; top: 50%; transform: translateY(-50%); writing-mode: vertical-rl;
   padding: 14px 7px; background: var(--card); color: var(--fg); border: 1px solid var(--line); border-right: 0;
-  border-radius: 8px 0 0 8px; font-size: 13px; font-weight: 600; text-decoration: none; }
+  border-radius: 8px 0 0 8px; font-size: 13px; font-weight: 600; line-height: 1; }
 .demo-tab:hover { color: var(--accent); }
-.demo-win { position: fixed; z-index: 20; right: 44px; top: 50%; transform: translateY(-50%);
-  width: min(1080px, calc(100vw - 64px)); height: min(720px, calc(100vh - 40px)); background: var(--card);
-  border: 1px solid var(--line); border-radius: 12px; box-shadow: 0 8px 32px rgb(0 0 0 / 0.18); overflow: hidden; }
-.demo-win.big { inset: 16px; width: auto; height: auto; transform: none; }
-.demo-win[hidden], .demo-back[hidden] { display: none; }
-.demo-win iframe { display: block; width: 100%; height: 100%; border: 0; }
-.demo-back { position: fixed; z-index: 19; inset: 0; background: rgb(0 0 0 / 0.35); }
-html.demo-lock { overflow: hidden; }
-@media (max-width: 700px) { .demo-win, .demo-win.big { inset: 0; width: auto; height: auto; transform: none; border: 0; border-radius: 0; } }
+.demo-tab[hidden] { display: none; }
+.demo-panel { position: fixed; z-index: 2147483647; inset: 0 0 0 auto; width: 360px; height: auto; max-width: 100%; max-height: none;
+  margin: 0; padding: 0; border: 0; border-left: 1px solid var(--line); background: var(--card); color: var(--fg);
+  font: 13px/1.4 -apple-system, system-ui, "Segoe UI", sans-serif; display: none; flex-direction: column; overflow: hidden; }
+.demo-panel:popover-open { display: flex; }
+.demo-panel:not([popover]):not([hidden]) { display: flex; }
+.demo-panel-top { display: flex; align-items: center; justify-content: space-between; padding: 3px 6px 3px 12px;
+  border-bottom: 1px solid var(--line); color: var(--muted); font-size: 12px; }
+.demo-close { padding: 2px 8px; background: none; color: var(--muted); font-size: 18px; font-weight: 400; line-height: 1.2; border-radius: 6px; }
+.demo-close:hover { background: var(--bg); color: var(--fg); }
+.demo-panel iframe { flex: 1; min-height: 0; width: 100%; border: 0; display: block; }
+.demo-panel-note { margin: 0; padding: 6px 12px; border-top: 1px solid var(--line); color: var(--muted); font-size: 11px; line-height: 1.4; }
+@media (min-width: 701px) { html.demo-open body { margin-right: 360px; } }
+@media (max-width: 700px) {
+  .demo-panel { inset: auto 0 0 0; width: auto; height: 72vh; height: 72dvh; border-left: 0; border-top: 1px solid var(--line);
+    border-radius: 12px 12px 0 0; box-shadow: 0 -6px 24px rgb(0 0 0 / 0.15); }
+}
 `;
 
-/**
- * The home page. `demo`: with the demo's tab and script (the real home page); without, it's the page shown
- * inside the demo's window, with `head` and `tail` (the mods that are on: demo.js).
- */
-export function homePage({ demo = true, head = '', tail = '' } = {}) {
+/** The home page, with the demo's tab, and `head` and `tail` (the mods the demo switched on: demo.js). */
+export function homePage({ head = '', tail = '' } = {}) {
   return page("Tim's Robot Internet Fixer", `
 <section class="hero">
   ${ROBOT_SVG}
@@ -136,10 +142,10 @@ export function homePage({ demo = true, head = '', tail = '' } = {}) {
     <p>Mods are plain JavaScript files in <code>~/.trif</code>: read them, change them, switch them off. TRIF collects nothing. The only thing that ever reaches Tim is a problem report you choose to send.</p>
   </div>
 </section>`, {
-    style: HOME_STYLE + (demo ? DEMO_TAB_STYLE : ''),
+    style: HOME_STYLE + DEMO_STYLE,
     head,
     after: `\n<footer><a href="${REPO}">GitHub</a><a href="/report">Report a problem</a><a href="${REPO}/blob/main/PRIVACY.md">Privacy</a></footer>` +
-      (demo ? '\n<a class="demo-tab" href="/demo">Try the demo</a>\n<script src="/demo.js" defer></script>' : '') + tail,
+      '\n<button type="button" class="demo-tab" hidden>Try the demo</button>\n<script src="/demo.js" defer></script>' + tail,
   }).replace('<main>', '<main class="home">');
 }
 

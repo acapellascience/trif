@@ -5,11 +5,14 @@
 // is on there, and the mods from the promo video are listed (all off at first).
 //
 // What really happens:
-// - A mod switch (or the robot) reloads the page beside the panel with the mods that are on: the frame
-//   (frame.js) loads /demo/home?mods=…, and the Worker adds only mods from its bundled list.
+// - A mod switch (or the robot) reloads the home page the panel is docked to with the mods that are on
+//   (tab.js loads /?mods=…, and the Worker adds only mods from its bundled list). The panel opens again
+//   after the reload, and this picks up where it was from sessionStorage (the chat, the switches, settings,
+//   a replay in progress).
 // - Chats are recordings: a recorded prompt (offered under "Recorded chats") replays that session, sped
 //   up, then switches its mod on. Anything else gets a note saying this demo only replays recordings.
-// Nothing leaves the page: no messages to a helper, no keys kept, no storage beyond this page's memory.
+// Nothing leaves the page: no messages to a helper, no keys kept, nothing stored but this tab's
+// sessionStorage.
 //
 // The Worker serves this as (function (DEMO) {…})(<the mod list, recorded chats and words>).
 
@@ -50,6 +53,7 @@
       changes[k] = { oldValue: clone(store.get(k)), newValue: clone(v) };
       store.set(k, clone(v));
     }
+    persist();
     later(() => onChanged.emit(changes, 'local'));
   }
   const local = {
@@ -70,6 +74,7 @@
         changes[k] = { oldValue: clone(store.get(k)) };
         store.delete(k);
       }
+      persist();
       later(() => onChanged.emit(changes, 'local'));
     },
     async clear() { await local.remove([...store.keys()]); },
@@ -86,18 +91,57 @@
     openModel: { provider: 'ollama', model: '', baseUrl: '' },
     runs: new Map(),
     replayed: new Set(), // recorded chats played to the end
+    active: null,        // the run going: {runId, chat (recording id, or null for the demo's note), step}
+    chipsOpen: true,
   };
-  // Every mod starts off: the page beside the panel is the plain home page until a switch says otherwise.
-  setNow({ disabled: Object.fromEntries(state.mods.map((m) => [m.id, true])) });
+
+  // ---- across the page's reloads: this tab's sessionStorage ---------------------------------------
+
+  const SAVED = 'trif-demo-state';
+  let restoring = true;
+  function persist() {
+    if (restoring) return;
+    const out = {
+      v: 1, store: Object.fromEntries(store), sitesOn: state.sitesOn, mods: state.mods.map((m) => m.slug), trash: [...state.trash.values()].map((m) => m.slug),
+      instructions: state.instructions, autoUpdate: state.autoUpdate, openModel: state.openModel, replayed: [...state.replayed],
+      active: state.active, chipsOpen: state.chipsOpen, runSeq,
+    };
+    try { sessionStorage.setItem(SAVED, JSON.stringify(out)); } catch { /* private window: lasts until the reload */ }
+  }
+  let saved = null;
+  try { saved = JSON.parse(sessionStorage.getItem(SAVED) || 'null'); } catch {}
+  const bySlug = new Map(DEMO.mods.map((m) => [m.slug, m]));
+  let runSeq = 0;
+  if (saved?.v === 1) {
+    for (const [k, v] of Object.entries(saved.store || {})) store.set(k, v);
+    state.sitesOn = Array.isArray(saved.sitesOn) ? saved.sitesOn.filter((x) => x === SITE) : [SITE];
+    state.mods = (saved.mods || []).filter((x) => bySlug.has(x)).map((x) => ({ ...bySlug.get(x) }));
+    state.trash = new Map((saved.trash || []).filter((x) => bySlug.has(x)).map((x) => [bySlug.get(x).id, { ...bySlug.get(x) }]));
+    state.instructions = String(saved.instructions || '');
+    state.autoUpdate = !!saved.autoUpdate;
+    if (saved.openModel?.provider) state.openModel = saved.openModel;
+    state.replayed = new Set(saved.replayed || []);
+    state.active = saved.active || null;
+    state.chipsOpen = saved.chipsOpen !== false;
+    runSeq = Number(saved.runSeq) || 0;
+  } else {
+    // First time: the mods running on the page (its ?mods=) are on, the rest off.
+    let running = new Set();
+    try { running = new Set(new URLSearchParams(window.parent.location.search).get('mods')?.split(',') || []); } catch {}
+    store.set('disabled', Object.fromEntries(state.mods.filter((m) => !running.has(m.slug)).map((m) => [m.id, true])));
+  }
+  restoring = false;
+  persist();
 
   const disabled = () => store.get('disabled') || {};
   const siteOn = () => state.sitesOn.includes(SITE);
   const findMod = (id) => state.mods.find((m) => m.id === id);
   const fileOf = (m) => `~/.trif/sites/${SITE}/${m.slug}.js`;
 
-  /** Load the page beside the panel again, with the mods that run there now (frame.js does it). */
+  /** Load the page again with the mods that run there now (tab.js does it; this panel comes back after). */
   function loadPage() {
     const mods = siteOn() ? state.mods.filter((m) => !disabled()[m.id]).map((m) => m.slug) : [];
+    persist();
     if (window.parent !== window) window.parent.postMessage({ type: 'trif-demo:load', mods }, location.origin);
   }
 
@@ -176,7 +220,6 @@
     setNow({ [chatKey]: chat });
   }
 
-  let runSeq = 0;
   async function startAgent(msg) {
     const prompt = String(msg.prompt ?? '').trim();
     if (!prompt) throw new Error('empty message');
@@ -188,7 +231,8 @@
     const recording = DEMO.chats.find((c) => c.prompt === prompt);
     const run = { runId, recording, timers: [] };
     state.runs.set(runId, run);
-    if (recording) replay(run); else notLive(run);
+    state.active = { runId, chat: recording ? recording.id : null, step: 0 };
+    if (recording) replay(run, 0); else notLive(run);
     broadcast({ type: 'statusChanged' });
     return { runId };
   }
@@ -208,19 +252,25 @@
     });
   }
 
-  function replay(run) {
+  // From step `from` on (a replay picked up after the page reloaded starts where it was).
+  function replay(run, from) {
     const steps = run.recording.messages.slice(1);
     const at = schedule(steps);
     const total = at[at.length - 1] + 600;
+    const zero = from ? at[from - 1] : 0;
     run.speedup = Math.max(2, Math.round((run.recording.secs * 1000) / total));
     ui.replaying(run);
-    steps.forEach((m, i) => run.timers.push(later(() => {
-      updateChat((c) => {
-        if (c.run?.runId !== run.runId) return false;
-        c.messages.push({ role: m.role, text: m.text, time: Date.now() });
-      });
-    }, at[i])));
-    run.timers.push(later(() => finish(run, true), total));
+    steps.forEach((m, i) => {
+      if (i < from) return;
+      run.timers.push(later(() => {
+        if (state.active?.runId === run.runId) state.active.step = i + 1;
+        updateChat((c) => {
+          if (c.run?.runId !== run.runId) return false;
+          c.messages.push({ role: m.role, text: m.text, time: Date.now() });
+        });
+      }, at[i] - zero));
+    });
+    run.timers.push(later(() => finish(run, true), total - zero));
   }
 
   function notLive(run) {
@@ -236,15 +286,8 @@
   function finish(run, ok) {
     if (state.runs.get(run.runId) !== run) return;
     state.runs.delete(run.runId);
+    state.active = null;
     run.timers.forEach(clearTimeout);
-    // The mod the recorded session made: on, as it was at the end of the session.
-    if (ok && run.recording) {
-      const off = { ...disabled() };
-      for (const slug of run.recording.mods) delete off[`${SITE}/${slug}`];
-      setNow({ disabled: off });
-      state.replayed.add(run.recording.id);
-      loadPage();
-    }
     updateChat((c) => {
       if (c.run?.runId !== run.runId) return false;
       if (!ok) c.messages.push({ role: 'tool', text: 'stopped', time: Date.now() });
@@ -254,6 +297,30 @@
     broadcast({ type: 'agentEvent', runId: run.runId, event: { kind: 'done', ok, result: '', changedFiles: [], costUsd: null, sessionId: null } });
     broadcast({ type: 'statusChanged' });
     ui.finished(run);
+    // The mod the recorded session made: on, as it was at the end of the session, and the page reloaded
+    // with it (after a moment, so the reply has been seen arriving).
+    if (ok && run.recording) {
+      const off = { ...disabled() };
+      for (const slug of run.recording.mods) delete off[`${SITE}/${slug}`];
+      setNow({ disabled: off });
+      state.replayed.add(run.recording.id);
+      later(loadPage, 1200);
+    }
+  }
+
+  // A run that was going when the page reloaded (a switch flipped mid-replay): carry on from where it was.
+  function resume() {
+    const a = state.active;
+    const chat = store.get(chatKey);
+    if (!a || chat?.run?.runId !== a.runId) {
+      state.active = null;
+      if (chat?.run) updateChat((c) => { c.run = null; }); // nothing to carry on with
+      return;
+    }
+    const recording = a.chat ? DEMO.chats.find((c) => c.id === a.chat) : null;
+    const run = { runId: a.runId, recording, timers: [] };
+    state.runs.set(a.runId, run);
+    if (recording) replay(run, Math.min(a.step || 0, recording.messages.length - 1)); else notLive(run);
   }
 
   function stopRuns() {
@@ -276,12 +343,13 @@
         }
         if (typeof msg.baseUrl === 'string') state.openModel.baseUrl = msg.baseUrl;
         if (typeof msg.model === 'string') state.openModel.model = msg.model;
+        persist();
         return openModel();
       }
       case 'agent.openModel.setKey': throw new Error(DEMO.words.noKeys); // and the key is dropped here, unread
       case 'agent.openModel.removeKey': return openModel();
       case 'instructions.get': return { text: state.instructions, file: '~/.trif/instructions.md', max: 4000 };
-      case 'instructions.set': state.instructions = String(msg.text ?? '').trim().slice(0, 4000); return { text: state.instructions };
+      case 'instructions.set': state.instructions = String(msg.text ?? '').trim().slice(0, 4000); persist(); return { text: state.instructions };
       case 'agent.start': return startAgent(msg);
       case 'agent.stop': { const run = state.runs.get(msg.runId); if (run) finish(run, false); return { ok: true }; }
       case 'agent.login': throw new Error(DEMO.words.noLogin);
@@ -293,7 +361,7 @@
         await sleep(250);
         state.sitesOn = on ? [SITE] : [];
         if (!on) stopRuns();
-        loadPage();
+        later(loadPage, 150);
         broadcast({ type: 'statusChanged' });
         return { site: SITE, on, sitesOn: state.sitesOn.slice() };
       }
@@ -304,7 +372,7 @@
         const off = { ...disabled() };
         if (msg.enabled) delete off[m.id]; else off[m.id] = true;
         setNow({ disabled: off });
-        loadPage();
+        later(loadPage, 150); // once the switch shows its new state
         broadcast({ type: 'statusChanged' });
         return { id: m.id, enabled: !!msg.enabled };
       }
@@ -336,7 +404,7 @@
       case 'mod.approve': case 'mod.update': throw new Error(DEMO.words.notHere);
       case 'update.check': await sleep(600); return { ok: true };
       case 'update.install': throw new Error(DEMO.words.notHere);
-      case 'update.setAuto': state.autoUpdate = !!msg.on; return { auto: state.autoUpdate };
+      case 'update.setAuto': state.autoUpdate = !!msg.on; persist(); return { auto: state.autoUpdate };
       case 'update.dismiss': await local.remove('updated'); return null;
       case 'report.build': return { text: '', url: `https://${SITE}/report` };
       default: throw new Error(`unknown message ${msg?.type}`);
@@ -430,6 +498,8 @@
       const form = document.getElementById('composer');
       if (busy || !input || input.disabled) return;
       box.open = false;
+      state.chipsOpen = false;
+      persist();
       input.focus();
       const step = Math.max(1, Math.ceil(c.prompt.length / 45));
       for (let i = 0; i <= c.prompt.length; i += step) {
@@ -445,12 +515,14 @@
       const form = document.getElementById('composer');
       if (!form || box) return;
       box = el('details', 'demo-replays');
-      box.open = true;
+      box.open = state.chipsOpen;
+      box.addEventListener('toggle', () => { state.chipsOpen = box.open; persist(); });
       summary = el('summary');
       list = el('div', 'chips demo-chips');
       box.append(summary, list);
       form.before(box);
       paint();
+      later(resume);
     }
     if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', mount, { once: true }); else mount();
 

@@ -13,9 +13,9 @@ every request there to the same path on `timsrobot.com`, so older installs' "Rep
 
 ## The demo
 
-The home page has a "Try the demo" tab on its right edge (a link to `/demo`; `demo.js` opens it over the
-page instead, with Pop out and Close). `/demo` is a browser window: the home page in it (`/demo/home`) and
-the real TRIF side panel beside it.
+The home page has a "Try the demo" tab on its right edge (shown by `demo.js`; without script there's no
+tab). It opens the real TRIF side panel docked to the right of the page itself, like the browser's side
+panel (the page moves over; at phone width it's a sheet over the bottom of the page).
 
 - The side panel is the extension's own files, served from `extension/` through the `EXTENSION` assets
   binding (`wrangler.toml [assets]`) at `/demo/ext/…`; only the files the panel loads are served
@@ -23,13 +23,13 @@ the real TRIF side panel beside it.
   lines to `sidepanel.html`: `demo/panel.css` and `demo/shim.js`.
 - `demo/shim.js` stands in for the extension's background: it provides the `chrome.*` calls the panel makes
   and answers its messages from made-up state (helper connected, Claude Code logged in, timsrobot.com, the
-  robot on). Nothing leaves the page.
-- The mod switches are real: a switch reloads the page in the window as `/demo/home?mods=a,b`, and the
-  Worker adds only mods from its bundled list (`demo/mods/`, the promo video's mods); other names are
-  ignored.
+  robot on). Nothing leaves the page; its state lasts across reloads in the tab's sessionStorage.
+- The mod switches are real: a switch reloads the home page as `/?mods=a,b`, and the Worker adds only mods
+  from its bundled list (`demo/mods/`, the promo video's mods); other names are ignored. The panel opens
+  again after the reload where it was.
 - Chats are recordings (`demo/chats/`, from the promo video's sessions, paths and tab ids taken out):
-  "Recorded chats" above the message box replays one, sped up, then switches its mod on. Anything typed
-  gets a note saying so.
+  "Recorded chats" above the message box replays one, sped up, then switches its mod on (the page reloads
+  with it). Anything typed gets a note saying so.
 
 `site/demo/` is bundled into `src/demo-files.js` by `node site/build-demo.js` (`dev.js` does it on start;
 a test checks it's up to date).
@@ -46,7 +46,7 @@ node site/dev.js
 ```
 
 Then open http://127.0.0.1:8787/report. Reports are printed in the terminal instead of emailed. The demo is
-at http://127.0.0.1:8787/ (the tab) or http://127.0.0.1:8787/demo.
+the tab on http://127.0.0.1:8787/.
 
 ## Deploy
 

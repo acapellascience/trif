@@ -159,10 +159,9 @@ const directives = (res) => Object.fromEntries(res.headers.get('Content-Security
 test('the demo: its routes, and the side panel from the extension\'s own files', async () => {
   const [{ default: worker }] = await load();
   const e = await demoEnv();
-  for (const [p, type] of [['/demo', 'text/html'], ['/demo/', 'text/html'], ['/demo/home', 'text/html'], ['/demo.js', 'text/javascript'],
-    ['/demo/frame.js', 'text/javascript'], ['/demo/shim.js', 'text/javascript'], ['/demo/panel.css', 'text/css'], ['/demo/mods/fireworks.js', 'text/javascript'],
-    ['/demo/ext/sidepanel.html', 'text/html'], ['/demo/ext/sidepanel.js', 'text/javascript'], ['/demo/ext/sidepanel.css', 'text/css'],
-    ['/demo/ext/manifest.json', 'application/json'], ['/demo/ext/icons/robot-shaded.svg', 'image/svg+xml']]) {
+  for (const [p, type] of [['/demo.js', 'text/javascript'], ['/demo/shim.js', 'text/javascript'], ['/demo/panel.css', 'text/css'],
+    ['/demo/mods/fireworks.js', 'text/javascript'], ['/demo/ext/sidepanel.html', 'text/html'], ['/demo/ext/sidepanel.js', 'text/javascript'],
+    ['/demo/ext/sidepanel.css', 'text/css'], ['/demo/ext/manifest.json', 'application/json'], ['/demo/ext/icons/robot-shaded.svg', 'image/svg+xml']]) {
     const res = await get(worker, e, p);
     assert.equal(res.status, 200, p);
     assert.ok(res.headers.get('Content-Type').startsWith(type), p);
@@ -174,64 +173,61 @@ test('the demo: its routes, and the side panel from the extension\'s own files',
   const panel = await (await get(worker, e, '/demo/ext/sidepanel.html')).text();
   assert.equal(panel, ext('sidepanel.html').replace('</head>', '<link rel="stylesheet" href="/demo/panel.css">\n<script src="/demo/shim.js"></script>\n</head>'));
   assert.ok(panel.indexOf('/demo/shim.js') < panel.indexOf('sidepanel.js'), 'the shim loads before the panel');
-  // Nothing else of the extension, and nothing outside it.
+  // Nothing else of the extension, nothing outside it, and no more demo window.
   for (const p of ['/demo/ext/background.js', '/demo/ext/onboarding.html', '/demo/ext/%2e%2e/package.json', '/demo/ext/', '/demo/mods/nope.js',
-    '/demo/mods/../src/index.js', '/demo/mods/Fireworks.js', '/demo/x']) {
+    '/demo/mods/../src/index.js', '/demo/mods/Fireworks.js', '/demo/x', '/demo', '/demo/home', '/demo/frame.js']) {
     assert.equal((await get(worker, e, p)).status, 404, p);
   }
   // Without the assets binding the panel isn't there, and nothing breaks.
   assert.equal((await get(worker, env(), '/demo/ext/sidepanel.js')).status, 404);
-  const demo = await (await get(worker, e, '/demo')).text();
-  assert.match(demo, /<iframe id="page" src="\/demo\/home"/);
-  assert.match(demo, /<iframe id="panel" src="\/demo\/ext\/sidepanel.html"/);
-  assert.match(demo, /recordings of real Claude Code chats, sped up/);
 });
 
-test('the demo: the CSP lets this site frame the demo pages and stays strict everywhere else', async () => {
+test('the demo: the CSP lets the home page frame the side panel and stays strict everywhere else', async () => {
   const [{ default: worker }] = await load();
   const e = await demoEnv();
-  const all = ['/', '/report', '/report.js', '/nope', '/demo', '/demo/home?mods=fireworks', '/demo.js', '/demo/shim.js', '/demo/mods/fireworks.js',
+  const all = ['/', '/?mods=fireworks', '/report', '/report.js', '/nope', '/demo.js', '/demo/shim.js', '/demo/mods/fireworks.js',
     '/demo/ext/sidepanel.html', '/demo/ext/sidepanel.js'];
-  const framed = new Set(['/demo', '/demo/home?mods=fireworks', '/demo/ext/sidepanel.html']);
-  const frames = new Set(['/', '/demo']);
   for (const p of all) {
     const d = directives(await get(worker, e, p));
+    const home = p.startsWith('/?') || p === '/';
     assert.equal(d['default-src'], "'none'", p);
     assert.equal(d['script-src'], "'self'", p);
     assert.equal(d['base-uri'], "'none'", p);
     assert.equal(d['connect-src'], "'self'", p);
-    assert.equal(d['frame-ancestors'], framed.has(p) ? "'self'" : "'none'", p);
-    assert.equal(d['frame-src'], frames.has(p) ? "'self'" : undefined, p);
+    assert.equal(d['frame-ancestors'], p === '/demo/ext/sidepanel.html' ? "'self'" : "'none'", p);
+    assert.equal(d['frame-src'], home ? "'self'" : undefined, p);
     assert.equal(d['style-src'], p === '/demo/ext/sidepanel.html' ? "'self' 'unsafe-inline'" : "'unsafe-inline'", p);
     assert.ok(!/unsafe-eval|\*|https?:|data:/.test(Object.values(d).join(' ')), `${p}: nothing beyond this site`);
   }
 });
 
-test('the demo: /demo/home runs only the bundled mods it names, unknown names are ignored', async () => {
+test('the demo: /?mods= runs only the bundled mods it names on the home page, unknown names are ignored', async () => {
   const [{ default: worker }] = await load();
   const e = await demoEnv();
-  const page = async (q) => (await get(worker, e, `/demo/home${q}`)).text();
+  const page = async (q) => (await get(worker, e, `/${q}`)).text();
   const scripts = (html) => html.match(/<script[^>]*>/g) || [];
-  assert.deepStrictEqual(scripts(await page('')), [], 'no mods: no script at all (and no demo tab)');
+  const tabOnly = ['<script src="/demo.js" defer>'];
+  assert.deepStrictEqual(scripts(await page('')), tabOnly);
+  assert.deepStrictEqual(scripts(await page('?mods=')), tabOnly);
+  assert.deepStrictEqual(scripts(await page('?mods=nope,x')), tabOnly);
+  assert.equal(await page('?mods=nope'), await page(''), 'unknown names: the plain home page');
   const html = await page(`?mods=${encodeURIComponent('fireworks,nope,../src/index,<img src=x onerror=alert(1)>,neon-title,fireworks')}`);
-  assert.deepStrictEqual(scripts(html), ['<script src="/demo/mods/neon-title.js">', '<script src="/demo/mods/fireworks.js" defer>'],
+  assert.deepStrictEqual(scripts(html), ['<script src="/demo/mods/neon-title.js">', '<script src="/demo.js" defer>', '<script src="/demo/mods/fireworks.js" defer>'],
     'document-start mods before the page, the rest deferred; each once');
-  assert.ok(!/nope|onerror|index/.test(html), 'nothing from the address is written into the page');
-  assert.ok(!/demo-tab|\/demo\.js/.test(html), 'no demo tab inside the demo');
-  assert.match(html, /<base target="_blank">/);
+  assert.ok(!/nope|onerror|src\/index/.test(html), 'nothing from the address is written into the page');
   assert.match(html, /Fix any website with your own coding agent\./);
   const { modsFrom } = await import('../site/src/demo.js');
   assert.deepStrictEqual(modsFrom('x,,y').map((m) => m.slug), []);
   assert.deepStrictEqual(modsFrom(null).map((m) => m.slug), []);
 });
 
-test('the home page works without script: everything is in the HTML, the tab is a link to /demo', async () => {
+test('the home page works without script: everything is in the HTML; the demo tab only shows with it', async () => {
   const [{ default: worker }] = await load();
   const home = await (await get(worker, await demoEnv(), '/')).text();
   for (const want of ["<h1>Tim's Robot Internet Fixer</h1>", 'Fix any website with your own coding agent.', 'What you need', 'Yours, on your computer',
-    '<a class="demo-tab" href="/demo">Try the demo</a>', '<footer>']) assert.ok(home.includes(want), want);
-  assert.ok(!/\shidden[\s>]/.test(home), 'nothing waits for a script to be shown');
-  assert.ok(!/<iframe/.test(home), 'the demo loads only when asked for');
+    '<footer>', '<button type="button" class="demo-tab" hidden>Try the demo</button>']) assert.ok(home.includes(want), want);
+  assert.deepStrictEqual(home.match(/<[^>]*\shidden[\s>]/g), ['<button type="button" class="demo-tab" hidden>'], 'only the tab waits for the script');
+  assert.ok(!/<iframe/.test(home), 'the panel loads only when asked for');
 });
 
 test('the demo serves every extension file the side panel loads', async () => {

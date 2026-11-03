@@ -1,17 +1,17 @@
 // timsrobot.com (a Cloudflare Worker): the home page, the problem report form, and POST /report, which
 // emails the report to the maintainer (the EMAIL send_email binding, to the REPORT_TO secret).
 //
-// And the home page's demo (demo.js): /demo, the page inside it (/demo/home), the extension's side panel
-// files (/demo/ext/…, from the EXTENSION assets binding: wrangler.toml), the demo's scripts and its mods.
-// Those pages may be framed by this site only; everything else by nothing.
+// And the home page's demo (demo.js): the home page with the mods it switched on (/?mods=a,b), the
+// extension's side panel files (/demo/ext/…, from the EXTENSION assets binding: wrangler.toml), the demo's
+// scripts and its mods. The side panel may be framed by this site only; everything else by nothing.
 //
 // It also answers for webmods.dev, TRIF's address before 0.2.0 (when it was called WebMods), sending
 // everything there to the same path on timsrobot.com: older installs open webmods.dev/report#r=… (a
 // browser keeps the # part across the redirect).
 
-import { HOME, REPORT, REPORT_JS } from './pages.js';
+import { REPORT, REPORT_JS } from './pages.js';
 import { LIMITS, ReportError, parseReport, reportEmail } from './report.js';
-import { DEMO_PAGE, DEMO_FILES, EXTENSION_FILES, innerHome, modScript, panelHtml, typeFor } from './demo.js';
+import { DEMO_FILES, EXTENSION_FILES, homeWith, modScript, panelHtml, typeFor } from './demo.js';
 
 const CSP = {
   'default-src': "'none'", 'script-src': "'self'", 'style-src': "'unsafe-inline'", 'connect-src': "'self'", 'img-src': "'self'",
@@ -26,10 +26,8 @@ const SECURITY_HEADERS = {
   'X-Content-Type-Options': 'nosniff',
 };
 
-// The demo's pages: the home page frames /demo, which frames /demo/home and the side panel.
+// The demo: the home page frames the side panel.
 const FRAMES_DEMO = { 'Content-Security-Policy': csp({ 'frame-src': "'self'" }) };
-const DEMO_WINDOW = { 'Content-Security-Policy': csp({ 'frame-src': "'self'", 'frame-ancestors': "'self'" }) };
-const IN_DEMO = { 'Content-Security-Policy': csp({ 'frame-ancestors': "'self'" }) };
 const PANEL = { 'Content-Security-Policy': csp({ 'style-src': "'self' 'unsafe-inline'", 'frame-ancestors': "'self'" }) };
 const CACHE = { 'Cache-Control': 'public, max-age=300' };
 
@@ -122,11 +120,9 @@ export default {
     const { pathname, searchParams } = new URL(request.url);
     if (pathname === '/report' && request.method === 'POST') return receiveReport(request, env);
     if (request.method !== 'GET' && request.method !== 'HEAD') return respond('Method not allowed', 'text/plain', 405);
-    if (pathname === '/') return html(HOME, FRAMES_DEMO);
+    if (pathname === '/') return html(homeWith(searchParams.get('mods')), FRAMES_DEMO);
     if (pathname === '/report' || pathname === '/report/') return html(REPORT);
     if (pathname === '/report.js') return respond(REPORT_JS, 'text/javascript; charset=utf-8', 200, { 'Cache-Control': 'public, max-age=300' });
-    if (pathname === '/demo' || pathname === '/demo/') return html(DEMO_PAGE, DEMO_WINDOW);
-    if (pathname === '/demo/home') return html(innerHome(searchParams.get('mods')), IN_DEMO);
     if (Object.hasOwn(DEMO_FILES, pathname)) return respond(DEMO_FILES[pathname].body, DEMO_FILES[pathname].type, 200, CACHE);
     if (pathname.startsWith('/demo/mods/')) {
       const code = modScript(pathname.slice('/demo/mods/'.length));

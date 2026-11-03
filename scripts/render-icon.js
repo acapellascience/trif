@@ -1,8 +1,11 @@
 #!/usr/bin/env node
 'use strict';
 // Draws the TRIF icon (the robot's head: a dark squircle in a switch-green rim, with two mint eyes) into
-// extension/icons/icon-<size>.png, antialiased with 8x8 supersampling, and writes the same shapes to
+// extension/icons/robot-<size>.png, antialiased with 8x8 supersampling, and writes the same shapes to
 // store/icon.svg. No dependencies: shapes are superellipses, PNGs are written by hand.
+// A new design gets new file names (manifest.json, sidepanel.html, onboarding.html): Firefox keeps an
+// icon it has drawn in its image cache, keyed by URL, until it quits, so new pixels at an old path keep
+// showing the old icon after an update or reload (the W outlived the switch to the robot that way).
 // Usage: node scripts/render-icon.js [outDir] [sizes...]
 
 const fs = require('fs');
@@ -125,7 +128,7 @@ function renderMac(size) { return render(size, 1, sampleMac); }
 if (require.main === module) {
   fs.mkdirSync(outDir, { recursive: true });
   for (const size of sizes) {
-    const file = path.join(outDir, `icon-${size}.png`);
+    const file = path.join(outDir, `robot-${size}.png`);
     fs.writeFileSync(file, render(size));
     console.log(file);
   }

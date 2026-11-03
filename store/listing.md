@@ -188,7 +188,7 @@ on GitHub Pages or a public gist. The link must work when you submit.
 
 | Asset | Size | Required? | Status |
 |---|---|---|---|
-| Store icon | 128×128 PNG | Required | `extension/icons/icon-128.png` (a robot head: dark squircle, green rim, two mint eyes), drawn by `node scripts/render-icon.js`, which also writes `store/icon.svg`. Google suggests 96×96 artwork with 16 px of transparent padding; this uses 112×112 with 8 px. |
+| Store icon | 128×128 PNG | Required | `extension/icons/robot-128.png` (a robot head: dark squircle, green rim, two mint eyes), drawn by `node scripts/render-icon.js`, which also writes `store/icon.svg`. Google suggests 96×96 artwork with 16 px of transparent padding; this uses 112×112 with 8 px. |
 | Screenshot 1 | 1280×800 (or 640×400) PNG/JPEG | Required (at least 1, up to 5) | To do |
 | Screenshots 2–5 | 1280×800 | Recommended | To do |
 | Small promo tile | 440×280 PNG/JPEG | Recommended (shown in some store surfaces) | To do |

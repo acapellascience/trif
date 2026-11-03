@@ -145,6 +145,61 @@ class Scenario {
     return waitFor(what, async () => { const s = await this.panelState(); return pred(s) ? s : null; }, { timeoutMs });
   }
 
+  /** The panel's top bar: what shows in it, and how the robot in the middle looks and is labelled. */
+  async barState() {
+    return this.panel(`async () => {
+      const shown = (sel) => { const e = document.querySelector(sel); return !!e && e.getClientRects().length > 0; };
+      const robot = document.querySelector('#bar-robot');
+      const look = robot ? getComputedStyle(robot.querySelector('svg')) : null;
+      return {
+        bar: shown('.bar'),
+        shown: ['#dot', '#site', '#bar-robot', '#site-switch', '#new-chat', '#settings-btn'].filter(shown),
+        robotButton: robot?.tagName === 'BUTTON' && robot.tabIndex >= 0,
+        robotLabel: robot?.getAttribute('aria-label') || '',
+        switchLabel: document.querySelector('#site-switch')?.getAttribute('aria-label') || '',
+        filter: look?.filter || '', opacity: look ? Number(look.opacity) : null, hovered: !!robot?.matches(':hover'),
+      };
+    }`);
+  }
+
+  /** Waits until the top bar shows exactly `want` (selectors, in bar order) and `pred(bar)` holds. */
+  async waitBar(what, want, pred = () => true) {
+    let last = null;
+    try {
+      return await waitFor(what, async () => {
+        last = await this.barState();
+        return last.bar && last.shown.join(' ') === want.join(' ') && pred(last) ? last : null;
+      }, { timeoutMs: 10000 });
+    } catch (e) { throw new Error(`${e.message}: ${JSON.stringify(last)}`); }
+  }
+
+  // The robot asleep in the bar: grey and dim (the eyes still there); with the mouse on him, a little
+  // brighter, still asleep; awake: in colour.
+  static grey(b) { return Number((/grayscale\(([\d.]+)\)/.exec(b.filter) || [])[1] || 0); }
+  static dim(b) { return !b.hovered && Scenario.grey(b) === 1 && b.opacity < 0.6; }
+  static stirring(b) { return b.hovered && Scenario.grey(b) > 0 && Scenario.grey(b) < 1 && b.opacity > 0.5 && b.opacity < 1; }
+  static awake(b) { return b.filter === 'none' && b.opacity === 1; }
+
+  /** Settings open from the bar (wherever it is: the gate, the landing page), work, and close again. */
+  async settingsOpen(name) {
+    await this.d.click(this.panelCtx, '#settings-btn');
+    let last = null;
+    const s = await waitFor('settings to open, with the agents and instructions from the helper', async () => {
+      last = await this.panel(`async () => {
+        const e = document.querySelector('#settings');
+        return { open: !!e && e.getClientRects().length > 0, expanded: document.querySelector('#settings-btn').getAttribute('aria-expanded'),
+          agents: document.querySelectorAll('#agent option').length, instructions: !document.querySelector('#instructions').disabled,
+          update: document.querySelector('#update-note').textContent };
+      }`);
+      return last.open && last.expanded === 'true' && last.agents > 1 && last.instructions ? last : null;
+    }, { timeoutMs: 10000 }).catch((e) => { throw new Error(`${e.message}: ${JSON.stringify(last)}`); });
+    await sleep(300);
+    await this.shot(this.panelCtx, name);
+    await this.d.click(this.panelCtx, '#settings-btn');
+    await waitFor('settings to close', async () => this.panel(`async () => document.querySelector('#settings').hidden`), { timeoutMs: 5000 });
+    return `${s.agents - 1} agents listed, instructions loaded; "${s.update}"`;
+  }
+
   // ---- the scenario
 
   async run() {
@@ -372,6 +427,12 @@ class Scenario {
       const p = await this.waitPanel('the panel to show the gate', (x) => x.site === '127.0.0.1' && x.gate);
       return `panel: "${p.gateText}"`;
     });
+    await r.check('gate: the top bar keeps only the robot, grey and dim, and settings', async () => {
+      const b = await this.waitBar('the gate\'s bar', ['#bar-robot', '#settings-btn'], Scenario.dim);
+      if (!b.robotButton) throw new Error('the robot isn\'t a focusable button');
+      if (b.robotLabel !== 'Turn the robot on on 127.0.0.1' || b.robotLabel !== b.switchLabel) throw new Error(`labelled "${b.robotLabel}" (the power button: "${b.switchLabel}")`);
+      return `"${b.robotLabel}"; ${b.filter}, opacity ${b.opacity}`;
+    });
     await this.shot(this.panelCtx, 'panel-gate');
 
     await r.check('enable TRIF on the site from the panel: the mod runs', async () => {
@@ -426,6 +487,24 @@ class Scenario {
       await d.click(this.panelCtx, '#gate-btn');
       await this.waitPage('the mod again', (x) => x.banner === 'ran');
       return `page commands refused while off: ${(blocked.stderr || blocked.stdout).trim().split('\n')[0]}`;
+    });
+
+    await r.check('the robot in the top bar: on a site TRIF is on for, it puts it to sleep like the power button; on the gate, it wakes it like Fix', async () => {
+      const all = ['#dot', '#site', '#bar-robot', '#site-switch', '#new-chat', '#settings-btn'];
+      const on = await this.waitBar('the bar on a site TRIF is on for', all, Scenario.awake);
+      if (on.robotLabel !== 'Turn the robot off on 127.0.0.1' || on.robotLabel !== on.switchLabel) throw new Error(`labelled "${on.robotLabel}" (the power button: "${on.switchLabel}")`);
+      await d.click(this.panelCtx, '#bar-robot');
+      await this.waitPanel('the gate', (x) => x.gate && !x.siteOn);
+      await this.waitPage('the page without the mod', (x) => !x.banner);
+      // The mouse is still on him: grey, but brighter than at rest; moved away, dim.
+      const lit = await this.waitBar('the gate\'s bar, the robot under the mouse', ['#bar-robot', '#settings-btn'], Scenario.stirring);
+      await d.pointerAway(this.panelCtx);
+      const rest = await this.waitBar('the gate\'s bar, the mouse elsewhere', ['#bar-robot', '#settings-btn'], Scenario.dim);
+      await d.click(this.panelCtx, '#bar-robot');
+      await this.waitPage('the mod again', (x) => x.banner === 'ran');
+      await this.waitPanel('the panel awake, the mod on and running', (x) => !x.gate && x.siteOn && x.mods.some((m) => m.id === '127.0.0.1/e2e-banner' && m.on && m.running));
+      await this.waitBar('the whole bar again', all, Scenario.awake);
+      return `off and on again from the robot; the mod stopped and ran again; asleep ${rest.filter} ${rest.opacity}, under the mouse ${lit.filter} ${lit.opacity}`;
     });
 
     await r.check('panel follows tab switches and navigation', async () => {
@@ -682,22 +761,32 @@ class Scenario {
       await metrics(true);
       await sleep(800);
       await this.shot(this.panelCtx, 'panel-narrow-x');
-      // A page without a site (the top bar without the power button: + and settings stay at the right).
+      // A site TRIF is off for (localhost): "The robot is off.", and in the bar the dim robot and settings.
+      await this.ext(`async (id, url) => { await chrome.tabs.update(id, { url }); }`, [this.xTab, `http://localhost:${this.o.servers.port}/?e2e=narrow`]);
+      await this.waitPanel('the panel on localhost\'s gate', (x) => x.site === 'localhost' && x.gate, 10000);
+      await this.d.pointerAway(this.panelCtx); // the robot at rest, not under the last click
+      await this.waitBar('the gate\'s bar', ['#bar-robot', '#settings-btn'], Scenario.dim);
+      await sleep(300);
+      await this.shot(this.panelCtx, 'panel-narrow-gate');
+      await this.r.check('settings open from the gate', () => this.settingsOpen('panel-narrow-gate-settings'));
+      // A page without a site: the landing page.
       await this.ext(`async (id) => { await chrome.tabs.update(id, { url: 'about:blank' }); }`, [this.xTab]);
-      await this.waitPanel('the panel on a page without a site', (x) => !x.site || !/x\.com/.test(x.site), 10000).catch(() => {});
+      await this.waitPanel('the panel on a page without a site', (x) => !x.site, 10000).catch(() => {});
       await sleep(500);
       await this.shot(this.panelCtx, 'panel-narrow-no-site');
-      await this.r.check('landing page: only the robot when the tab has no website', async () => {
+      await this.r.check('landing page: only the robot, and settings in the bar, when the tab has no website', async () => {
         const x = await this.panel(`async () => {
           const shown = (sel) => { const e = document.querySelector(sel); return !!e && e.getClientRects().length > 0; };
           const img = document.querySelector('#landing .landing-icon');
           if (img && !img.complete) await new Promise((ok) => { img.onload = img.onerror = ok; });
-          return { landing: shown('#landing'), bar: shown('.bar'), composer: shown('.composer'), notice: shown('#notice'),
+          return { landing: shown('#landing'), composer: shown('.composer'), notice: shown('#notice'),
             loaded: !!img && img.naturalWidth > 0, width: img ? Math.round(img.getBoundingClientRect().width) : 0 };
         }`);
-        if (!x.landing || x.bar || x.composer || x.notice || !x.loaded || x.width !== 160) throw new Error(JSON.stringify(x));
-        return 'the 160px shaded robot, no bar, notice or composer';
+        if (!x.landing || x.composer || x.notice || !x.loaded || x.width !== 160) throw new Error(JSON.stringify(x));
+        await this.waitBar('the landing page\'s bar', ['#settings-btn']);
+        return 'the 160px shaded robot; in the bar only settings; no notice or composer';
       });
+      await this.r.check('settings open from the landing page', () => this.settingsOpen('panel-narrow-no-site-settings'));
       await this.ext(`async (id, url) => { await chrome.tabs.update(id, { url }); }`, [this.xTab, `https://x.com:${this.o.servers.tlsPort}/home`]);
       await this.waitPanel('the panel back on x.com', (x) => x.site === 'x.com' && x.mods.length >= 3, 15000);
       await metrics(false);

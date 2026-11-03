@@ -265,6 +265,13 @@ class ChromeDriver {
     }
   }
 
+  /** Moves the mouse off whatever it last clicked (to the bottom left corner), so nothing shows hovered. */
+  async pointerAway(ctx) {
+    const sid = await this._attach(ctx);
+    const h = await this.eval(ctx, 'async () => innerHeight');
+    await this.cdp.send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: 1, y: h - 1 }, sid);
+  }
+
   async screenshot(ctx, file) {
     const sid = await this._attach(ctx);
     const { data } = await this.cdp.send('Page.captureScreenshot', { format: 'png' }, sid);

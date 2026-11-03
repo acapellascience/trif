@@ -176,6 +176,16 @@ class FirefoxDriver {
     await this.bidi.send('input.releaseActions', { context: ctx }).catch(() => {});
   }
 
+  /** Moves the mouse off whatever it last clicked (to the bottom left corner), so nothing shows hovered. */
+  async pointerAway(ctx) {
+    const h = await this.bidi.call(ctx, 'async () => innerHeight');
+    await this.bidi.send('input.performActions', {
+      context: ctx,
+      actions: [{ type: 'pointer', id: 'mouse', parameters: { pointerType: 'mouse' }, actions: [{ type: 'pointerMove', x: 1, y: h - 1 }] }],
+    });
+    await this.bidi.send('input.releaseActions', { context: ctx }).catch(() => {});
+  }
+
   async screenshot(ctx, file) {
     const { data } = await this.bidi.send('browsingContext.captureScreenshot', { context: ctx });
     fs.writeFileSync(file, Buffer.from(data, 'base64'));

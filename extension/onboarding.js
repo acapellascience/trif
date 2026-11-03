@@ -41,7 +41,9 @@ function render(s) {
   } else {
     setSection('helper', false, 'Helper not connected', [
       'Run ', code('npx trif setup'), ` in a terminal (it needs Node 18 or newer), then quit and restart ${BROWSER}.`,
-      el('br'), 'Already set up? Run ', code('trif doctor'), ' to see what\'s wrong.',
+      // (The full path: `trif` alone works only once ~/.trif/bin is on PATH, and with no helper there's
+      // nothing to ask whether it is.)
+      el('br'), 'Already set up? Run ', code('~/.trif/bin/trif doctor'), ' to see what\'s wrong.',
       ...(s.helper.error ? [el('br'), `${BROWSER} says: ${s.helper.error}`] : []),
     ]);
   }

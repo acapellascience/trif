@@ -500,6 +500,20 @@ test('build-extension firefox: sidebar, background scripts, optional userScripts
   assert.equal(m.browser_specific_settings.gecko.id, P.FIREFOX_EXTENSION_ID);
 });
 
+test('setup\'s next steps give the trif command that works from this terminal: ~/.trif/bin/trif until it\'s on PATH', async () => {
+  const root = tempDir();
+  const ws = path.join(root, '.trif');
+  const args = ['setup', '--browser', 'chrome', '--no-link', '--no-examples'];
+  const off = await runCli(args, { home: ws, env: { HOME: root } });
+  assert.equal(off.code, 0, off.stderr);
+  assert.match(off.stdout, /is not on your PATH/);
+  assert.match(off.stdout.slice(off.stdout.indexOf('Next steps:')), /Check everything with: ~\/\.trif\/bin\/trif doctor\n/);
+  const on = await runCli(args, { home: ws, env: { HOME: root, PATH: `${path.join(ws, 'bin')}${path.delimiter}${testEnv(ws).PATH}` } });
+  assert.equal(on.code, 0, on.stderr);
+  assert.doesNotMatch(on.stdout, /is not on your PATH/);
+  assert.match(on.stdout.slice(on.stdout.indexOf('Next steps:')), /Check everything with: trif doctor\n/);
+});
+
 test('setup for Firefox alone gives only Firefox\'s next steps', async () => {
   const ws = tempDir();
   const r = await runCli(['setup', '--browser', 'firefox', '--no-link', '--no-examples'], { home: ws });

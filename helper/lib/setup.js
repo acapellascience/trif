@@ -323,6 +323,14 @@ function revealFolder(dir) {
  *         launchctl (false: write the agent but don't start it; also TRIF_NO_LAUNCHCTL=1) }
  * Returns { ok, lines: [string], ws, manifests: [{browser, file}], nodePath, mode, root, migration }
  */
+/** A path as typed in a shell: ~/… under the home folder, quoted if it needs to be. */
+function homeRelative(p) {
+  const h = os.homedir();
+  const rel = p.startsWith(h + path.sep) ? p.slice(h.length + 1) : null;
+  if (rel !== null && /^[\w./-]+$/.test(rel)) return `~/${rel}`;
+  return /^[\w./-]+$/.test(p) ? p : shq(p);
+}
+
 function setup(opts = {}) {
   const lines = [];
   const say = (s = '') => lines.push(s);
@@ -564,7 +572,9 @@ function setup(opts = {}) {
     else say(`                fish_add_path ${ws.bin}`);
   }
 
-  // 7. Next steps (Firefox's or Safari's alone when it's the only browser set up)
+  // 7. Next steps (Firefox's or Safari's alone when it's the only browser set up). The `trif` commands in
+  // them as they work from this terminal: plain `trif` only when it's on PATH (just said if it isn't).
+  const trif = onPath ? P.CLI_NAME : homeRelative(ws.cliWrapper);
   say('');
   say('Next steps:');
   const safariSteps = (n) => [
@@ -577,7 +587,7 @@ function setup(opts = {}) {
   ];
   if (targets.every((t) => t.safari)) {
     for (const l of safariSteps(1)) say(`  ${l}`);
-    say('  5. Check everything with: trif doctor');
+    say(`  5. Check everything with: ${trif} doctor`);
     say(`  Then ask your coding agent to work in ${home} (it reads AGENTS.md there).`);
     return { ok, lines, ws, manifests, nodePath, mode, root, migration };
   }
@@ -595,7 +605,7 @@ function setup(opts = {}) {
     }
     say('  2. On the TRIF tab Firefox opens, click "Allow user scripts", then Allow.');
     say('  3. If Firefox was already running before this setup, quit it completely and reopen it.');
-    say('  4. Check everything with: trif doctor');
+    say(`  4. Check everything with: ${trif} doctor`);
     if (targets.some((t) => t.safari)) { say('  Safari:'); for (const l of safariSteps(1)) say(`    ${l}`); }
     say(`  Then ask your coding agent to work in ${home} (it reads AGENTS.md there).`);
     return { ok, lines, ws, manifests, nodePath, mode, root, migration };
@@ -616,7 +626,7 @@ function setup(opts = {}) {
   if (mode === 'copy') say('     and setup updates it in place. (A Web Store listing will replace this step later.)');
   say('  2. Turn on "Allow User Scripts": click "Open extension settings" on the TRIF tab Chrome opens,');
   say('     or "Details" on TRIF in chrome://extensions.');
-  say('  3. Check everything with: trif doctor');
+  say(`  3. Check everything with: ${trif} doctor`);
   if (targets.some((t) => t.firefox)) {
     if (xpiUrl) {
       say('  Firefox: open this link in Firefox to install the TRIF add-on:');

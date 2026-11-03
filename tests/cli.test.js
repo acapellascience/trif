@@ -512,6 +512,35 @@ test('doctor: broken setup lists failures with fixes and exits 1', async () => {
   assert.match(r.stdout, /problem\(s\) found/);
 });
 
+test('doctor: the helper isn\'t running: advice for the browsers set up, a line each when there are several', async () => {
+  const { helperDownFix } = require('../helper/lib/doctor');
+  const ext = '/x/extension';
+  const chrome = helperDownFix({ chromium: ['Google Chrome'], extensionDir: ext }).join('\n');
+  assert.match(chrome, /^install the TRIF extension and turn it on at chrome:\/\/extensions/);
+  assert.match(chrome, /Load unpacked from \/x\/extension/);
+  assert.match(chrome, /service worker/);
+  const fx = helperDownFix({ firefox: true, extensionDir: ext }).join('\n');
+  assert.match(fx, /^install the TRIF add-on: open https:\/\/github\.com\/[\w.-]+\/[\w.-]+\/releases\/latest\/download\/trif-firefox\.xpi in Firefox/);
+  assert.doesNotMatch(fx, /chrome:\/\/|Load unpacked|service worker/);
+  const safari = helperDownFix({ safari: true, extensionDir: ext }).join('\n');
+  assert.match(safari, /^open TRIF\.app once/);
+  assert.doesNotMatch(safari, /chrome:\/\/|Firefox/);
+  const all = helperDownFix({ chromium: ['Google Chrome', 'Brave'], firefox: true, safari: true, extensionDir: ext });
+  assert.deepEqual(all.map((l) => l.split(':')[0]), ['Google Chrome / Brave', 'Firefox', 'Safari', 'The helper runs while one of them is open with TRIF turned on.']);
+  // Nothing known (inside an agent run): Chrome's, the usual case.
+  assert.match(helperDownFix({ extensionDir: ext })[0], /^install the TRIF extension/);
+});
+
+test('doctor: setup for Firefox alone: no Chrome advice when the helper isn\'t running', async () => {
+  const root = tempDir();
+  const ws = path.join(root, 'ws');
+  await runCli(['setup', '--browser', 'firefox', '--no-link', '--no-examples'], { home: ws });
+  const r = await runCli(['doctor'], { home: ws });
+  assert.match(r.stdout, /FAIL {2}helper isn't running/);
+  assert.match(r.stdout, /install the TRIF add-on/);
+  assert.doesNotMatch(r.stdout, /Load unpacked|service worker/);
+});
+
 test('doctor: after setup, wrong manifest and missing node are caught; live helper and user-scripts switch reported', async () => {
   const root = tempDir();
   const ws = path.join(root, 'ws');

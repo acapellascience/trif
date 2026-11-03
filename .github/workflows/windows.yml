@@ -38,9 +38,14 @@ jobs:
           if grep -rlI $'\r' helper extension examples tests --include='*.js' --include='*.json' --include='*.md'; then
             echo "files checked out with CRLF"; exit 1
           fi
-      # Node 18's test runner has neither --test-timeout nor --test-concurrency (what `npm test` passes).
+      # Node 18's test runner has neither --test-timeout nor --test-concurrency (what `npm test` passes),
+      # and Node 18 has no global `crypto` (the extension's code, run by tests/extension.test.js, uses
+      # crypto.randomUUID as browsers provide it) without this flag (in NODE_OPTIONS, so each test file's
+      # process gets it).
       - name: Unit tests (Node 18)
         if: matrix.node == 18
+        env:
+          NODE_OPTIONS: --experimental-global-webcrypto
         run: node --test
       - name: Unit tests
         if: matrix.node != 18

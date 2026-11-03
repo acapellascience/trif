@@ -53,8 +53,17 @@ function regDefault(key) {
 
 // Runs a .cmd/.bat the way Command Prompt would: cmd.exe /d /s /c ""file" args".
 function cmdLine(file, args) { return ['/d', '/s', '/c', `""${file}" ${args.join(' ')}"`]; }
+// (Asynchronous: this script answers the helper's requests to "the extension" meanwhile.)
 function runCmd(file, args, env) {
-  return spawnSync(process.env.ComSpec || 'cmd.exe', cmdLine(file, args), { env, encoding: 'utf8', windowsVerbatimArguments: true, timeout: 60000 });
+  return new Promise((resolve) => {
+    const c = spawn(process.env.ComSpec || 'cmd.exe', cmdLine(file, args), { env, windowsVerbatimArguments: true });
+    let stdout = '';
+    let stderr = '';
+    c.stdout.setEncoding('utf8').on('data', (d) => { stdout += d; });
+    c.stderr.setEncoding('utf8').on('data', (d) => { stderr += d; });
+    const t = setTimeout(() => c.kill(), 60000);
+    c.on('close', (status) => { clearTimeout(t); resolve({ status, stdout, stderr }); });
+  });
 }
 
 (async () => {
@@ -118,11 +127,14 @@ function runCmd(file, args, env) {
   const pipe = await waitFor(() => { try { return fs.readFileSync(markerFile, 'utf8').trim(); } catch { return null; } });
   check(pipe && /^\\\\\.\\pipe\\trif-[0-9a-f]{32}$/.test(pipe), 'the helper names its pipe in helper.pipe', `${pipe}\n${stderr}`);
   check(bad === 0, 'nothing but native messaging on the helper\'s stdout');
-  const st = runCmd(cmd, ['status', '--json'], env);
+  const t0 = Date.now();
+  const st = await runCmd(cmd, ['status', '--json'], env);
   let status = null;
   try { status = JSON.parse(st.stdout); } catch { /* below */ }
   check(st.status === 0 && status && status.helper && status.helper.extension && status.helper.extension.browser === 'Chrome', 'trif.cmd status reaches the helper over the pipe', `${st.status}\n${st.stdout}\n${st.stderr}`);
-  const doc = runCmd(cmd, ['doctor'], env);
+  check(status && status.extension && !status.error, 'and a page command goes through to the extension and back', st.stdout);
+  check(Date.now() - t0 < 8000, `trif.cmd status took ${Date.now() - t0} ms`);
+  const doc = await runCmd(cmd, ['doctor'], env);
   console.log(doc.stdout);
   for (const want of [/^ok {4}host wrapper .*trif-host\.bat/m, /^ok {4}Google Chrome: native host manifest$/m, /^ok {4}Firefox: native host manifest$/m, /^ok {4}helper running/m, /^- {5}Chats from the panel aren’t available on Windows yet/m]) {
     check(want.test(doc.stdout), `trif doctor: ${want}`);

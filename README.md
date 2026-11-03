@@ -45,15 +45,17 @@ switches stay as they were; in Safari, install the new TRIF.app (see Safari belo
    npx --yes --package ./trif-0.2.0.tgz trif setup
    ```
 
-   This creates `~/.trif` (your mods live in `~/.trif/sites`) and connects it to Chrome. It's safe to
-   run again.
+   npx asks once whether to install the `trif` package: type `y`. This creates `~/.trif` (your mods
+   live in `~/.trif/sites`) and connects it to Chrome. It's safe to run again. On a Mac it then shows the
+   extension folder in Finder and opens `chrome://extensions` in Chrome, and waits, saying as each of
+   the next steps gets done (Ctrl-C skips that).
 
-2. **Add the extension to Chrome.** Open `chrome://extensions`, turn on **Developer mode** (top right),
-   click **Load unpacked**, and choose `~/.trif/app/extension`. (On a Mac, press ⌘⇧. in the file picker
-   to show hidden folders like `.trif`.)
+2. **Add the extension to Chrome.** On `chrome://extensions`, turn on **Developer mode** (top right),
+   then drag the `extension` folder from the Finder window onto the page. (Or click **Load unpacked**,
+   press ⌘⇧G and paste: setup put the folder's path, `~/.trif/app/extension`, on your clipboard.)
 
-3. **Allow it to run mods.** On `chrome://extensions`, click **Details** under TRIF and turn on
-   **Allow User Scripts**.
+3. **Allow it to run mods.** On the **TRIF setup** tab that opens, click **Open TRIF’s Chrome
+   settings** and turn on **Allow User Scripts**.
 
 4. **Open the side panel.** Click the TRIF icon in the toolbar (pin it from the puzzle-piece menu). If
    it asks you to log in to Claude, click **Log in** and follow the steps.

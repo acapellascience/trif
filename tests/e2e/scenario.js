@@ -176,7 +176,7 @@ class Scenario {
   // The robot asleep in the bar: grey and dim (the eyes still there); with the mouse on him, a little
   // brighter, still asleep; awake: in colour.
   static grey(b) { return Number((/grayscale\(([\d.]+)\)/.exec(b.filter) || [])[1] || 0); }
-  static dim(b) { return !b.hovered && Scenario.grey(b) === 1 && b.opacity < 0.6; }
+  static dim(b) { return !b.hovered && Scenario.grey(b) === 1 && b.opacity <= 0.6; } // 0.45 dark, 0.6 light
   static stirring(b) { return b.hovered && Scenario.grey(b) > 0 && Scenario.grey(b) < 1 && b.opacity > 0.5 && b.opacity < 1; }
   static awake(b) { return b.filter === 'none' && b.opacity === 1; }
 
@@ -780,11 +780,14 @@ class Scenario {
           const img = document.querySelector('#landing .landing-icon');
           if (img && !img.complete) await new Promise((ok) => { img.onload = img.onerror = ok; });
           return { landing: shown('#landing'), composer: shown('.composer'), notice: shown('#notice'),
-            loaded: !!img && img.naturalWidth > 0, width: img ? Math.round(img.getBoundingClientRect().width) : 0 };
+            loaded: !!img && img.naturalWidth > 0, width: img ? Math.round(img.getBoundingClientRect().width) : 0,
+            words: Array.from(document.querySelectorAll('#landing .landing-words p'), (p) => p.textContent.trim()),
+            version: chrome.runtime.getManifest().version };
         }`);
-        if (!x.landing || x.composer || x.notice || !x.loaded || x.width !== 160) throw new Error(JSON.stringify(x));
+        const words = JSON.stringify([`TRIF ${x.version}`, 'Open any website to start fixing it.']);
+        if (!x.landing || x.composer || x.notice || !x.loaded || x.width !== 145 || JSON.stringify(x.words) !== words) throw new Error(JSON.stringify(x));
         await this.waitBar('the landing page\'s bar', ['#settings-btn']);
-        return 'the 160px shaded robot; in the bar only settings; no notice or composer';
+        return `the 145px shaded robot, "${x.words.join('" / "')}"; in the bar only settings; no notice or composer`;
       });
       await this.r.check('settings open from the landing page', () => this.settingsOpen('panel-narrow-no-site-settings'));
       await this.ext(`async (id, url) => { await chrome.tabs.update(id, { url }); }`, [this.xTab, `https://x.com:${this.o.servers.tlsPort}/home`]);

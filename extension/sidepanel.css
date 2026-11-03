@@ -136,9 +136,14 @@ svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width:
 body:is(.site-off, .no-site) :is(.dot, .site, #site-switch, #new-chat, .notice, .mods, .chat, .composer) { display: none; }
 body.no-site .bar-robot { display: none; }
 /* No website in this tab (a new tab, the browser's own pages): only the shaded robot, where the gate's sits. */
-.landing { flex: 1; display: flex; align-items: center; justify-content: center; padding: 24px 16px 64px; }
+/* The robot, then the version in bold and the line under it, centred as a group; the extra 33px of top
+   padding moves the group 16.5px down, where the robot sat before it had words under it. */
+.landing { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 57px 16px 64px; text-align: center; }
 .landing[hidden] { display: none; }
-.landing-icon { width: 160px; height: 160px; }
+.landing-icon { flex: none; width: 145px; height: 145px; }
+.landing-words { margin-top: 48px; display: flex; flex-direction: column; align-items: center; gap: 6px; }
+.landing-version { margin: 0; font-size: 15px; font-weight: 600; }
+.landing-lead { margin: 0; color: var(--muted); }
 /* Settings open above either one: in a short panel it scrolls instead of running off the bottom. */
 .gate, .landing { min-height: 0; overflow-y: auto; justify-content: safe center; }
 /* The power, + and settings buttons: close together, at the right edge (the power button can be hidden). */
@@ -154,6 +159,11 @@ body.no-site .bar-robot { display: none; }
 /* Asleep: still him, eyes and all, but grey and dim; pointing at him brightens him a little toward awake. */
 body.site-off .bar-robot svg { filter: grayscale(1); opacity: 0.45; }
 body.site-off .bar-robot:hover:not([aria-busy="true"]) svg { filter: grayscale(0.6); opacity: 0.7; }
+/* On the light background the same opacity washes him out to a pale chip: less faded there. */
+@media (prefers-color-scheme: light) {
+  body.site-off .bar-robot svg { opacity: 0.6; }
+  body.site-off .bar-robot:hover:not([aria-busy="true"]) svg { opacity: 0.85; }
+}
 /* The power button that turns TRIF off (and on) for the site. */
 .power { color: var(--muted); }
 .power svg { stroke-width: 1.8; }

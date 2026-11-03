@@ -15,7 +15,7 @@ const emptyChat = () => ({ sessionId: null, agent: null, messages: [], run: null
 
 const ui = {
   dot: $('#dot'), site: $('#site'), barRobot: $('#bar-robot'), siteSwitch: $('#site-switch'), newChat: $('#new-chat'), settingsBtn: $('#settings-btn'),
-  gate: $('#gate'), gateBtn: $('#gate-btn'), gateErr: $('#gate-err'), landing: $('#landing'),
+  gate: $('#gate'), gateBtn: $('#gate-btn'), gateErr: $('#gate-err'), landing: $('#landing'), landingVersion: $('#landing-version'),
   settings: $('#settings'), agent: $('#agent'), agentNote: $('#agent-note'), model: $('#model'),
   modelCustomRow: $('#model-custom-row'), modelCustom: $('#model-custom'), modelNote: $('#model-note'),
   instructions: $('#instructions'), instructionsNote: $('#instructions-note'),
@@ -652,6 +652,8 @@ function renderGate() {
   const noSite = !!view.tab && !view.site;
   document.body.classList.toggle('no-site', noSite);
   ui.landing.hidden = !noSite;
+  // This extension's own version (the helper's is in settings: they can differ while one updates).
+  if (noSite) ui.landingVersion.textContent = `TRIF ${chrome.runtime.getManifest().version}`;
   const scope = siteScope();
   const known = !!scope && !!view.status;
   const gated = known && !siteIsOn();

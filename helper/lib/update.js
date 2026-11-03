@@ -21,6 +21,7 @@ const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
 const { execFile } = require('child_process');
+const { isWindows, systemExe } = require('./platform');
 const P = require('./paths');
 const { browserTable } = require('./browsers');
 const { acquireInstallLock, LockBusy, LOCK_ENV } = require('./lock');
@@ -222,7 +223,7 @@ function browsersSetUp() {
 
 function run(file, args, opts) {
   return new Promise((resolve) => {
-    execFile(file, args, { maxBuffer: 4 * 1024 * 1024, timeout: 120000, ...opts }, (error, stdout, stderr) => {
+    execFile(file, args, { maxBuffer: 4 * 1024 * 1024, timeout: 120000, windowsHide: true, ...opts }, (error, stdout, stderr) => {
       resolve({ code: error ? (typeof error.code === 'number' ? error.code : 1) : 0, out: `${stdout || ''}${stderr || ''}`, error });
     });
   });
@@ -265,7 +266,9 @@ async function installLocked(ws, { feed, from, fetch, browsers, node, lock }) {
     const sha = crypto.createHash('sha256').update(tgz).digest('hex');
     if (sha !== feed.package.sha256) throw new UpdateError("the download's checksum doesn't match the signed feed; not installing it");
     fs.writeFileSync(path.join(tmp, 'trif.tgz'), tgz);
-    const untar = await run('tar', ['-xzf', 'trif.tgz'], { cwd: tmp });
+    // (Windows: its own tar.exe in System32, there since Windows 10 1803 and reading .tgz, rather than
+    // whichever tar comes first on the PATH the browser gave the helper.)
+    const untar = await run(isWindows() ? systemExe('tar.exe') : 'tar', ['-xzf', 'trif.tgz'], { cwd: tmp });
     if (untar.code) throw new UpdateError(`couldn't unpack the update: ${untar.out.trim().slice(-400)}`);
     const pkgRoot = path.join(tmp, 'package');
     if (packageJson(pkgRoot).version !== feed.version) throw new UpdateError(`the package isn't version ${feed.version}`);

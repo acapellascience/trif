@@ -16,6 +16,7 @@ const { selectBrowsers, SAFARI_AGENT_LABEL, LEGACY_SAFARI_AGENT_LABEL, safariAge
 const { migrateHome, describeMigration, migratePrivate } = require('./migrate');
 const { preinstallMods, updateShippedMods } = require('./preinstalled');
 const { acquireInstallLock, pidAlive } = require('./lock');
+const { isWindows, renameRetry, nodeExeName } = require('./platform');
 
 // Quote for a POSIX shell double-quoted string.
 function shq(s) {
@@ -28,13 +29,14 @@ function isExecutable(p) {
 
 // Prefer a stable node path (e.g. /usr/local/bin/node or /opt/homebrew/bin/node) over a versioned
 // Cellar path, as long as it is the same binary that is running now.
+// (Windows: node.exe on PATH, e.g. C:\Program Files\nodejs\node.exe.)
 function pickNodePath() {
   const exec = process.execPath;
   let real;
   try { real = fs.realpathSync(exec); } catch { return exec; }
   const candidates = [
-    ...String(process.env.PATH || '').split(path.delimiter).filter(Boolean).map((d) => path.join(d, 'node')),
-    '/usr/local/bin/node', '/opt/homebrew/bin/node',
+    ...String(process.env.PATH || '').split(path.delimiter).filter(Boolean).map((d) => path.join(d, nodeExeName())),
+    ...(isWindows() ? [] : ['/usr/local/bin/node', '/opt/homebrew/bin/node']),
   ];
   for (const c of candidates) {
     if (!path.isAbsolute(c) || !isExecutable(c)) continue;
@@ -244,12 +246,13 @@ function installAppLocked(srcRoot, appDir) {
   if (fs.existsSync(appDir)) {
     old = path.join(parent, `.${base}.old-${process.pid}`);
     fs.rmSync(old, { recursive: true, force: true });
-    fs.renameSync(appDir, old);
+    // (Windows: a file open inside it, say in an antivirus scan, makes the rename fail for a moment.)
+    renameRetry(appDir, old);
   }
   try {
-    fs.renameSync(tmp, appDir);
+    renameRetry(tmp, appDir);
   } catch (e) {
-    if (old) fs.renameSync(old, appDir);
+    if (old) renameRetry(old, appDir);
     fs.rmSync(tmp, { recursive: true, force: true });
     throw e;
   }
@@ -307,8 +310,9 @@ function recordPath(home, pathValue, modsDir = null) {
   return { error: null, how };
 }
 
-/** Selects `dir` in a Finder window and copies its path (macOS only). Returns whether Finder showed it. */
+/** Selects `dir` in a Finder window and copies its path (macOS; Windows: Explorer). Returns whether it showed it. */
 function revealFolder(dir) {
+  if (isWindows()) return require('./win/setup').revealFolder(dir);
   if (process.platform !== 'darwin') return false;
   const { spawnSync } = require('child_process');
   spawnSync('pbcopy', { input: dir });
@@ -319,7 +323,9 @@ function revealFolder(dir) {
  * opts: { home, browser, nativeDir, binDir, noLink, noExamples, mode: 'copy'|'link'|undefined (auto),
  *         reveal (show the extension folder in Finder for Chrome's Load unpacked),
  *         launchAgentsDir (where the Safari bridge's agent goes; default ~/Library/LaunchAgents),
- *         launchctl (false: write the agent but don't start it; also TRIF_NO_LAUNCHCTL=1) }
+ *         launchctl (false: write the agent but don't start it; also TRIF_NO_LAUNCHCTL=1),
+ *         platform, homedir, env (tests: Windows' steps anywhere), regOpts ({env, run} for win/registry.js),
+ *         addToUserPath (Windows' PATH step, win/userpath.js) }
  * Returns { ok, lines: [string], ws, manifests: [{browser, file}], nodePath, mode, root, migration }
  */
 function setup(opts = {}) {
@@ -334,7 +340,9 @@ function setup(opts = {}) {
     try { migration = migrateHome(); } catch (e) { migration = { how: 'skipped', notes: [], error: `couldn't move ${P.legacyHome()} to ${P.defaultHome()}: ${e.message}; still using ${P.legacyHome()}` }; }
     for (const l of describeMigration(migration)) say(l);
   }
-  let ws = P.workspace(opts.home);
+  const platform = opts.platform || process.platform;
+  const win = isWindows(platform);
+  let ws = P.workspace(opts.home, { platform });
   const home = ws.home;
   let ok = true;
 
@@ -358,7 +366,7 @@ function setup(opts = {}) {
   const priv = migratePrivate(home, { privateDir: ws.private });
   for (const n of priv.notes) say(`private       ${n}`);
   for (const e of priv.errors) { ok = false; say(`private       FAILED: ${e}`); }
-  if (priv.moved.length || priv.removed.length) ws = P.workspace(opts.home); // (config.json moved)
+  if (priv.moved.length || priv.removed.length) ws = P.workspace(opts.home, { platform }); // (config.json moved)
   if (ws.privateError) say(`private       warning: ${ws.privateError}`);
 
   // 1. Workspace
@@ -450,14 +458,21 @@ function setup(opts = {}) {
   const nodePath = pickNodePath();
   const hostJs = path.join(helperDir, 'host.js');
   const cliJs = path.join(helperDir, 'cli.js');
-  writeIfChanged(ws.hostWrapper, hostWrapperContent(nodePath, home, hostJs), 0o755);
-  writeIfChanged(ws.cliWrapper, cliWrapperContent(nodePath, home, cliJs), 0o755);
-  // The same under the names from before 0.2.0: `webmods` stays an alias of `trif`, and a native host
-  // manifest this setup doesn't rewrite (a browser it didn't select) may still name webmods-host.
-  writeIfChanged(ws.legacyHostWrapper, hostWrapperContent(nodePath, home, hostJs), 0o755);
-  writeIfChanged(ws.legacyCliWrapper, cliWrapperContent(nodePath, home, cliJs), 0o755);
-  say(`host wrapper  ${ws.hostWrapper} -> ${hostJs} (node ${nodePath})`);
-  say(`CLI wrapper   ${ws.cliWrapper} -> ${cliJs} (also as ${path.basename(ws.legacyCliWrapper)}, its old name)`);
+  if (win) {
+    // trif-host.bat, trif.cmd and trif for Git Bash (win/launchers.js); no names from before 0.2.0.
+    require('./win/setup').writeWrappers(ws, { nodePath, hostJs, cliJs, home: P.isDefaultHome(home) ? null : home, write: writeIfChanged });
+    say(`host wrapper  ${ws.hostWrapper} -> ${hostJs} (node ${nodePath})`);
+    say(`CLI wrapper   ${ws.cliWrapper} -> ${cliJs} (and ${path.basename(ws.cliShWrapper)} for Git Bash)`);
+  } else {
+    writeIfChanged(ws.hostWrapper, hostWrapperContent(nodePath, home, hostJs), 0o755);
+    writeIfChanged(ws.cliWrapper, cliWrapperContent(nodePath, home, cliJs), 0o755);
+    // The same under the names from before 0.2.0: `webmods` stays an alias of `trif`, and a native host
+    // manifest this setup doesn't rewrite (a browser it didn't select) may still name webmods-host.
+    writeIfChanged(ws.legacyHostWrapper, hostWrapperContent(nodePath, home, hostJs), 0o755);
+    writeIfChanged(ws.legacyCliWrapper, cliWrapperContent(nodePath, home, cliJs), 0o755);
+    say(`host wrapper  ${ws.hostWrapper} -> ${hostJs} (node ${nodePath})`);
+    say(`CLI wrapper   ${ws.cliWrapper} -> ${cliJs} (also as ${path.basename(ws.legacyCliWrapper)}, its old name)`);
+  }
 
   // 4. Native host manifests, accepting every TRIF extension ID.
   const { ids, invalid } = P.extensionIds(ws.config);
@@ -467,10 +482,10 @@ function setup(opts = {}) {
   if (opts.nativeDir) {
     targets = [{ key: 'custom', label: 'custom', nativeDir: path.resolve(opts.nativeDir) }];
   } else {
-    targets = selectBrowsers(opts.browser);
+    targets = selectBrowsers(opts.browser, opts.homedir, platform, opts.env);
     if (!targets.length) {
       say('browsers      no browser profile folder found; installing for Google Chrome anyway');
-      targets = selectBrowsers('chrome');
+      targets = selectBrowsers('chrome', opts.homedir, platform, opts.env);
     }
     if (legacySafari && !targets.some((t) => t.safari)) {
       say('browsers      also Safari: its bridge from before 0.2.0 was installed, and is replaced by the new one');
@@ -521,16 +536,24 @@ function setup(opts = {}) {
       const how = writeIfChanged(file, manifest);
       manifests.push({ browser: t.key, file });
       say(`native host   ${t.label}: ${file} (${how})`);
+      // Windows: the browser finds the manifest through its registry key (win/registry.js).
+      if (win && t.regKeys) {
+        const r = require('./win/setup').registerNativeHost(t, file, opts.regOpts);
+        if (r.error) { ok = false; say(`              FAILED: ${r.error}`); }
+        else say(`              registered: ${r.keys.join(', ')}`);
+      }
     } catch (e) {
       ok = false;
       say(`native host   ${t.label}: FAILED to write ${file}: ${e.message}`);
     }
   }
 
-  // 5. CLI link
+  // 5. CLI link (Windows: <home>\bin goes on the user's PATH instead, win/setup.js userPathStep)
   const binDir = opts.binDir ? path.resolve(opts.binDir) : '/usr/local/bin';
   const link = path.join(binDir, P.CLI_NAME);
-  if (opts.noLink) {
+  if (win) {
+    for (const l of require('./win/setup').userPathStep(ws, { noLink: !!opts.noLink, ...(opts.addToUserPath ? { add: opts.addToUserPath } : {}) })) say(l);
+  } else if (opts.noLink) {
     say('CLI link      skipped (--no-link)');
   } else {
     let lst = null;
@@ -555,7 +578,7 @@ function setup(opts = {}) {
   const pathDirs = String(process.env.PATH || '').split(path.delimiter).map((d) => path.resolve(d));
   const linked = (() => { try { return fs.readlinkSync(link) === ws.cliWrapper; } catch { return false; } })();
   const onPath = pathDirs.includes(path.resolve(ws.bin)) || (linked && pathDirs.includes(binDir));
-  if (!onPath) {
+  if (!onPath && !win) {
     const rc = rcFileHint();
     say('');
     say(`PATH          ${ws.bin} is not on your PATH. Add it with:`);
@@ -592,9 +615,14 @@ function setup(opts = {}) {
   }
   // The extension folder is hidden (~/.trif) from Load unpacked's file picker, so on a Mac show it in
   // Finder, ready to drag onto chrome://extensions, and put its path on the clipboard for Cmd-Shift-G.
+  // (Windows: in Explorer, the path ready to paste into the picker's address bar.)
   const revealed = !!opts.reveal && revealFolder(extensionDir);
   say('  1. Install the extension. Until TRIF is on the Chrome Web Store, load it unpacked:');
-  if (revealed) {
+  if (revealed && win) {
+    say('     open chrome://extensions and turn on "Developer mode" (top right). Then drag the "extension"');
+    say('     folder from the Explorer window that just opened onto that page. (Or click "Load unpacked",');
+    say(`     click the address bar and paste: the folder's path, ${extensionDir}, is on your clipboard.)`);
+  } else if (revealed) {
     say('     open chrome://extensions and turn on "Developer mode" (top right). Then drag the "extension"');
     say('     folder from the Finder window that just opened onto that page. (Or click "Load unpacked",');
     say(`     press Cmd-Shift-G and paste: the folder's path, ${extensionDir}, is on your clipboard.)`);

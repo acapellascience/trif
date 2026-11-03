@@ -11,6 +11,7 @@ const { request } = require('./client');
 const { listHelpers, describeHelper } = require('./helpers');
 const { scanMods, planModsMessage } = require('./mods');
 const { isExecutable } = require('./setup');
+const { isWindows, panelRunsOff } = require('./platform');
 
 const EXT_URL = `chrome://extensions/?id=${P.EXTENSION_ID}`;
 
@@ -81,9 +82,13 @@ function tail(file, n) {
   } catch { return []; }
 }
 
-/** opts: { home, nativeDir } -> Promise<{ ok, checks: [{status, title, detail?, fix?}] }> */
+/** opts: { home, nativeDir, platform, homedir, env, regOpts } -> Promise<{ ok, checks: [{status, title, detail?, fix?}] }> */
 async function doctor(opts = {}) {
-  const ws = P.workspace(opts.home);
+  const platform = opts.platform || process.platform;
+  const win = isWindows(platform);
+  const ws = P.workspace(opts.home, { platform });
+  // (Windows has no executable bit: a .bat or .cmd that's there can run.)
+  const runnable = (p) => (win ? (() => { try { return fs.statSync(p).isFile(); } catch { return false; } })() : isExecutable(p));
   const checks = [];
   const add = (status, title, fix, detail) => checks.push({ status, title, fix, detail });
   // From a git checkout, point at its CLI; otherwise npx fetches TRIF again if the install is broken.
@@ -141,10 +146,11 @@ async function doctor(opts = {}) {
   let wrapperOk = false;
   if (!fs.existsSync(ws.hostWrapper)) {
     add('fail', `host wrapper ${ws.hostWrapper} is missing`, setupFix);
-  } else if (!isExecutable(ws.hostWrapper)) {
+  } else if (!runnable(ws.hostWrapper)) {
     add('fail', `host wrapper ${ws.hostWrapper} is not executable`, `chmod +x ${ws.hostWrapper}   (or ${setupFix})`);
   } else {
-    const w = parseWrapper(fs.readFileSync(ws.hostWrapper, 'utf8'));
+    // (Windows: trif-host.bat, win/launchers.js.)
+    const w = (win ? require('./win/launchers').parseLauncher : parseWrapper)(fs.readFileSync(ws.hostWrapper, 'utf8'));
     if (!w) {
       add('fail', `host wrapper ${ws.hostWrapper} doesn't look like a TRIF wrapper`, setupFix);
     } else if (!isExecutable(w.node)) {
@@ -152,7 +158,7 @@ async function doctor(opts = {}) {
     } else if (!fs.existsSync(w.script)) {
       add('fail', `host wrapper points at ${w.script}, which doesn't exist (moved or deleted?)`, setupFix);
     } else {
-      const r = spawnSync(w.node, ['--version'], { encoding: 'utf8', timeout: 5000 });
+      const r = spawnSync(w.node, ['--version'], { encoding: 'utf8', timeout: 5000, windowsHide: true });
       const v = (r.stdout || '').trim();
       if (nodeMajor(v) < 18) {
         add('fail', `host wrapper's node ${w.node} is ${v || 'not runnable'}; TRIF needs Node 18+`, 'install a current Node, then ' + setupFix);
@@ -178,9 +184,9 @@ async function doctor(opts = {}) {
     if (opts.nativeDir) {
       targets = [{ key: 'custom', label: opts.nativeDir, nativeDir: path.resolve(opts.nativeDir), detected: true }];
     } else {
-      targets = browserTable().filter((b) => !b.safari && (b.detected || fs.existsSync(path.join(b.nativeDir, `${P.HOST_NAME}.json`))));
+      targets = browserTable(opts.homedir, platform, opts.env).filter((b) => !b.safari && (b.detected || fs.existsSync(path.join(b.nativeDir, `${P.HOST_NAME}.json`))));
     }
-    const safari = !opts.nativeDir && browserTable().find((b) => b.safari && b.detected);
+    const safari = !opts.nativeDir && browserTable(opts.homedir, platform, opts.env).find((b) => b.safari && b.detected);
     if (!targets.length && !safari) {
       add('fail', 'no browser profile found (looked for Chrome, Chromium, Brave, Edge, Arc, Firefox)', 'install and open Google Chrome or Firefox once, then ' + setupFix);
     }
@@ -212,6 +218,11 @@ async function doctor(opts = {}) {
         const missing = expectedOrigins.filter((o) => !origins.includes(o));
         if (missing.length) problems.push(`allowed_origins doesn't include ${missing.join(', ')}`);
       }
+      // Windows: the browser finds the manifest through its registry key (win/registry.js).
+      if (win && t.regKeys) {
+        const reg = require('./win/setup').checkNativeHost(t, file, opts.regOpts);
+        if (reg) problems.push(reg);
+      }
       if (problems.length) add('fail', `${t.label}: native host manifest ${file}: ${problems.join('; ')}`, fix);
       else { manifestsOk++; add('ok', `${t.label}: native host manifest`); }
     }
@@ -241,8 +252,9 @@ async function doctor(opts = {}) {
 
   // CLI on PATH
   const pathDirs = String(process.env.PATH || '').split(path.delimiter).filter(Boolean);
-  const onPath = pathDirs.some((d) => isExecutable(path.join(d, 'trif')));
+  const onPath = pathDirs.some((d) => runnable(path.join(d, win ? 'trif.cmd' : 'trif')));
   if (onPath) add('ok', '`trif` is on PATH');
+  else if (win) add('warn', '`trif` is not on your PATH', `${setupFix} (it adds ${ws.bin} to your PATH), then open a new terminal`);
   else add('warn', '`trif` is not on your PATH', `add ${ws.bin} to PATH: echo 'export PATH="${ws.bin}:$PATH"' >> ~/.zshrc  (then open a new terminal)`);
 
   // Helper / extension
@@ -252,7 +264,10 @@ async function doctor(opts = {}) {
     const sock = envVar('SOCK') && !opts.home ? envVar('SOCK') : ws.sock;
     info = await request(sock, 'ping', {}, 3000);
   } catch (e) {
-    const stale = fs.existsSync(ws.sock);
+    // (Windows: the helper is found through <home>\helper.pipe, win/pipes.js; a pipe isn't a file.)
+    const pipes = require('./win/pipes');
+    const marker = pipes.primaryMarker(ws.home);
+    const stale = pipes.usesPipes({ platform }) ? fs.existsSync(marker) : fs.existsSync(ws.sock);
     const fixLines = [
       'open Chrome (the helper only runs while Chrome is running with the TRIF extension).',
       `If Chrome is open: check the extension is installed and enabled at ${EXT_URL}`,
@@ -263,7 +278,9 @@ async function doctor(opts = {}) {
     ];
     if (!wrapperOk || !manifestsOk) fixLines.unshift('first fix the failures above, then:');
     add('fail',
-      stale ? `helper isn't running (socket ${ws.sock} exists but nothing is listening)` : `helper isn't running (no socket at ${ws.sock})`,
+      pipes.usesPipes({ platform })
+        ? (stale ? `helper isn't running (${marker} names a pipe nothing is listening on)` : `helper isn't running (no ${marker})`)
+        : stale ? `helper isn't running (socket ${ws.sock} exists but nothing is listening)` : `helper isn't running (no socket at ${ws.sock})`,
       fixLines.join('\n'));
     const lines = tail(ws.log, 8);
     if (lines.length) checks[checks.length - 1].detail = `last lines of ${ws.log}:\n` + lines.join('\n');
@@ -300,6 +317,12 @@ async function doctor(opts = {}) {
   // Coding agents for the side panel (optional: mods work without them). Inside a run they live outside
   // what its sandbox can read, and the run itself shows one works.
   if (inRun) return { ok: !checks.some((c) => c.status === 'fail'), checks };
+  // Windows: no side-panel runs yet (platform.js panelRunsOff), so no agent or login checks for them.
+  const off = panelRunsOff(platform, ws.home);
+  if (off) {
+    add('info', `${off.title}: use your coding agent in a terminal, in ${ws.home}`);
+    return { ok: !checks.some((c) => c.status === 'fail'), checks };
+  }
   const agents = require('./agents');
   const listed = agents.listAgents(ws);
   const env = agents.agentEnv(ws);

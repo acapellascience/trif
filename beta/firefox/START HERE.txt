@@ -13,7 +13,7 @@ You need
 
 Already have an earlier beta? (It was called WebMods before version 0.2.0.)
   Do step 2 again from this folder (your mods and settings are kept; WebMods' folder ~/.webmods moves
-  to ~/.trif, leaving a link behind: don't delete ~/.webmods), then step 3 again to install the
+  to ~/.trif, leaving a link behind: don't delete ~/.webmods), then step 4 again to install the
   new add-on over the old one. From this version on, Firefox updates the add-on by itself, and the
   TRIF panel tells you when there's an update for the rest.
 
@@ -27,11 +27,11 @@ Install (about 2 minutes)
    It prints a few lines saying what it set up, then a list of next steps (the ones below). You can
    ignore its note about PATH.
 
-3. Drag trif-firefox.xpi from this folder onto a Firefox window, and click Add.
-4. On the TRIF setup tab that opened in Firefox, click "Allow user scripts", then Allow.
+3. If Firefox was already running before this setup, quit it completely (Cmd-Q) and reopen it.
+4. Drag trif-firefox.xpi from this folder onto a Firefox window, and click Add.
+5. On the TRIF setup tab that opened in Firefox, click "Allow user scripts", then Allow.
    (The TRIF button in the Firefox toolbar opens the sidebar, which offers it too. Don't see the
    button? It's under the puzzle-piece menu: pin it.)
-5. Quit Firefox completely (Cmd-Q) and open it again.
 
 Try it
 - Visit google.com, x.com, amazon.com or instagram.com: the mods are already working. Click the TRIF

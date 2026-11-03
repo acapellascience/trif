@@ -798,8 +798,11 @@ Suffix List). `helper/lib/scope.js` computes it; `extension/lib.js` mirrors the 
   itself, only for mods whose every `@match` is in scope. The CLI itself refuses `setup`, `agent`,
   `approve` and `mod-update` when the variable is set, and inside a run its own file options stay in the run's folders:
   `-f` and `check` read only the mods folder, `-o` writes only there or the run's screenshots folder
-  (`$TRIF_RUN_SCREENSHOTS`, `<private>/screenshots/<scope>/`, also where screenshots go by default),
-  never through a link left in its place (O_NOFOLLOW). Paths are compared as the file system does
+  (`$TRIF_RUN_SCREENSHOTS`, `<private>/screenshots/<scope>/`, also where screenshots go by default;
+  `trif screenshot -o name.png` with a relative name saves there), never through a link left in its
+  place (O_NOFOLLOW). The run can't read `config.json`, so the helper passes the mods folder as
+  `TRIF_RUN_MODS_DIR` (a custom `modsDir` holds for the run's `trif` too). Screenshots older than 30
+  days are deleted when a run starts. Paths are compared as the file system does
   (`helper/lib/pathcheck.js` isInside, also used for the mods folder and held mods): real paths from the
   system's realpath (links and `..` resolved; on macOS each component in its on-disk case), the nearest
   existing parent for a new file, a separator boundary, and case and Unicode normalization ignored on

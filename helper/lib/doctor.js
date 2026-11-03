@@ -12,6 +12,7 @@ const { listHelpers, describeHelper } = require('./helpers');
 const { scanMods, planModsMessage } = require('./mods');
 const { isExecutable } = require('./setup');
 const { isWindows, panelRunsOff } = require('./platform');
+const { firefoxAddonUrl } = require('./update');
 
 const EXT_URL = `chrome://extensions/?id=${P.EXTENSION_ID}`;
 
@@ -58,6 +59,53 @@ function checkWrapperScript(script, ws) {
 }
 
 const SAFARI_PORT = require('../safari-bridge').PORT;
+
+/** "1 mod", "14 mods". */
+const plural = (n, word) => `${n} ${word}${n === 1 ? '' : 's'}`;
+
+/**
+ * What to do when the helper isn't running, for the browsers set up (their native host manifests, or
+ * Safari's bridge): the browser starts the helper, so each needs TRIF installed and turned on. One
+ * browser: its steps in full. Several: a short line each. None known (an agent run can't see them):
+ * Chrome's, the usual case.
+ * browsers: { chromium: [labels], firefox, safari, extensionDir } -> lines
+ */
+function helperDownFix({ chromium = [], firefox = false, safari = false, extensionDir }) {
+  const loadUnpacked = `Load unpacked from ${extensionDir}; its ID must be ${P.EXTENSION_ID}`;
+  const several = (chromium.length ? 1 : 0) + (firefox ? 1 : 0) + (safari ? 1 : 0) > 1;
+  if (several) {
+    return [
+      ...(chromium.length ? [`${chromium.join(' / ')}: check the TRIF extension is installed and turned on at ${EXT_URL} (${loadUnpacked}).`] : []),
+      ...(firefox ? [`Firefox: install the TRIF add-on (open ${firefoxAddonUrl() || 'the signed trif-firefox.xpi'} in Firefox) and check it's on in about:addons; restart Firefox if it was open during setup.`] : []),
+      ...(safari ? ['Safari: open TRIF.app once, turn TRIF on in Safari → Settings → Extensions, and check the Safari bridge above is running.'] : []),
+      'The helper runs while one of them is open with TRIF turned on.',
+    ];
+  }
+  if (firefox) {
+    return [
+      `install the TRIF add-on: open ${firefoxAddonUrl() || 'the signed trif-firefox.xpi'} in Firefox and click Add.`,
+      'Installed already? Check it\'s turned on in about:addons, and restart Firefox if it was open during setup',
+      '  (the helper only runs while Firefox is running with the add-on).',
+      'Still not running? about:debugging#/runtime/this-firefox → TRIF → Inspect shows its console: "No such',
+      '  native application" means the manifest is missing or wrong (fix the manifest checks above).',
+    ];
+  }
+  if (safari) {
+    return [
+      'open TRIF.app once (it adds the TRIF extension to Safari), then turn TRIF on in Safari → Settings →',
+      '  Extensions and allow it on every website.',
+      'The helper runs through the Safari bridge: check the Safari bridge check above.',
+    ];
+  }
+  const name = chromium.length === 1 ? chromium[0] : 'Chrome';
+  return [
+    `install the TRIF extension and turn it on at ${EXT_URL}`,
+    `  (${loadUnpacked}), with ${name} open: the helper only runs while ${name} is running with TRIF.`,
+    'Still not running? On that page, click "service worker" and look at the console: "Specified native messaging host not found"',
+    '  means the manifest is missing or wrong (fix the manifest checks above, then reload the extension);',
+    '  "Native host has exited" means the helper crashed: see the log below.',
+  ];
+}
 
 /** Whether something accepts connections on 127.0.0.1:port. */
 function portOpen(port, timeoutMs = 1000) {
@@ -176,6 +224,7 @@ async function doctor(opts = {}) {
   // The browsers' setup lives outside the workspace (~/Library…), which a side-panel agent run's sandbox
   // can't read: there, say so instead of failing on it. The user's terminal checks it.
   let manifestsOk = 0;
+  const setUp = { chromium: [], firefox: false, safari: false }; // the browsers set up, for helperDownFix
   if (inRun) {
     add('ok', "inside a side-panel agent run: the browsers' setup files aren't checked (the run can't read them; run trif doctor in a terminal for those)");
   } else {
@@ -187,6 +236,13 @@ async function doctor(opts = {}) {
       targets = browserTable(opts.homedir, platform, opts.env).filter((b) => !b.safari && (b.detected || fs.existsSync(path.join(b.nativeDir, `${P.HOST_NAME}.json`))));
     }
     const safari = !opts.nativeDir && browserTable(opts.homedir, platform, opts.env).find((b) => b.safari && b.detected);
+    // Set up: a manifest there (else, detected: setup would set it up, and its failure is above).
+    const withManifest = targets.filter((t) => fs.existsSync(path.join(t.nativeDir, `${P.HOST_NAME}.json`)));
+    for (const t of withManifest.length ? withManifest : targets) {
+      if (t.firefox) setUp.firefox = true;
+      else if (t.key !== 'custom' && !setUp.chromium.includes(t.label)) setUp.chromium.push(t.label);
+    }
+    setUp.safari = !!safari;
     if (!targets.length && !safari) {
       add('fail', 'no browser profile found (looked for Chrome, Chromium, Brave, Edge, Arc, Firefox)', 'install and open Google Chrome or Firefox once, then ' + setupFix);
     }
@@ -268,14 +324,7 @@ async function doctor(opts = {}) {
     const pipes = require('./win/pipes');
     const marker = pipes.primaryMarker(ws.home);
     const stale = pipes.usesPipes({ platform }) ? fs.existsSync(marker) : fs.existsSync(ws.sock);
-    const fixLines = [
-      'open Chrome (the helper only runs while Chrome is running with the TRIF extension).',
-      `If Chrome is open: check the extension is installed and enabled at ${EXT_URL}`,
-      `  (Load unpacked from ${path.join(installRoot, 'extension')}; its ID must be ${P.EXTENSION_ID}).`,
-      'On that page, click "service worker" and look at the console: "Specified native messaging host not found"',
-      '  means the manifest is missing or wrong (fix the manifest checks above, then reload the extension);',
-      '  "Native host has exited" means the helper crashed: see the log below.',
-    ];
+    const fixLines = helperDownFix({ ...setUp, extensionDir: path.join(installRoot, 'extension') });
     if (!wrapperOk || !manifestsOk) fixLines.unshift('first fix the failures above, then:');
     add('fail',
       pipes.usesPipes({ platform })
@@ -309,7 +358,7 @@ async function doctor(opts = {}) {
   const plan = planModsMessage(mods);
   const modProblems = [...problems, ...plan.errors];
   if (fs.existsSync(ws.modsDir)) {
-    if (!modProblems.length) add('ok', `${mods.length} mod(s) in ${ws.modsDir}`);
+    if (!modProblems.length) add('ok', `${plural(mods.length, 'mod')} in ${ws.modsDir}`);
     for (const p of modProblems) add('fail', `mod ${p.id}: ${p.error}`, p.error.includes('1 MB') ? 'make the mod smaller (move data out, or split it)' : 'check the file');
     for (const w of warnings) add('warn', `mod ${w.id}: ${w.warning}`, 'fix the header (see AGENTS.md)');
   }
@@ -328,6 +377,19 @@ async function doctor(opts = {}) {
   const env = agents.agentEnv(ws);
   const termDirs = String(process.env.PATH || '').split(path.delimiter).filter(Boolean);
   const { findExecutable } = require('./agents/util');
+  // Each available agent's login (a saved API key counts: runs use it through a key proxy), first: an
+  // agent that isn't logged in is only a warning when it's the default one, or the default can't run
+  // either; otherwise it's only needed if picked in the side panel.
+  const keys = require('./agentkeys');
+  const logins = new Map();
+  for (const a of listed.agents) {
+    const adapter = agents.getAdapter(a.id);
+    if (!a.available || adapter.doctorChecks || !adapter.loginStatus) continue;
+    if (keys.AGENT_KEYS[a.id] && (await keys.hasAgentKey(a.id, { config: ws.config })).stored) continue;
+    logins.set(a.id, adapter.loginStatus({ path: a.path, env, cwd: fs.existsSync(ws.home) ? ws.home : undefined }));
+  }
+  const def = listed.agents.find((a) => a.id === listed.default);
+  const defaultReady = !!def?.available && logins.get(def.id)?.loggedIn !== false;
   for (const a of listed.agents) {
     const adapter = agents.getAdapter(a.id);
     if (adapter.doctorChecks) continue; // the open model, below
@@ -341,13 +403,10 @@ async function doctor(opts = {}) {
       continue;
     }
     add('ok', `${label} ${a.version || ''} (${a.path})`.replace(/ {2,}/g, ' '));
-    // (A saved API key counts as logged in: runs use it through a key proxy; listed below.)
-    const keyed = require('./agentkeys').AGENT_KEYS[a.id] ? (await require('./agentkeys').hasAgentKey(a.id, { config: ws.config })).stored : false;
-    if (adapter.loginStatus && !keyed) {
-      const st = adapter.loginStatus({ path: a.path, env, cwd: fs.existsSync(ws.home) ? ws.home : undefined });
-      if (st.loggedIn === true) add('ok', `${a.name} is logged in${st.detail ? ` (${st.detail})` : ''}`);
-      else if (st.loggedIn === false) add('warn', `${a.name} isn't logged in, so the side panel can't use it`, adapter.loginFix);
-    }
+    const st = logins.get(a.id);
+    if (st?.loggedIn === true) add('ok', `${a.name} is logged in${st.detail ? ` (${st.detail})` : ''}`);
+    else if (st?.loggedIn === false && a.id !== listed.default && defaultReady) add('info', `${a.name} isn't logged in (only needed if you pick it in the side panel)`, adapter.loginFix);
+    else if (st?.loggedIn === false) add('warn', `${a.name} isn't logged in, so the side panel can't use it`, adapter.loginFix);
   }
   // Open models through Codex (experimental, agents/codex-oss.js): set up in config.json `openModel`?
   const oss = listed.agents.find((a) => a.id === 'codex-oss');
@@ -378,9 +437,9 @@ function formatDoctor({ ok, checks }) {
   out.push('');
   const fails = checks.filter((c) => c.status === 'fail').length;
   const warns = checks.filter((c) => c.status === 'warn').length;
-  out.push(!ok ? `${fails} problem(s) found. Fix them in order (top first) and run trif doctor again.`
+  out.push(!ok ? `${plural(fails, 'problem')} found. Fix them in order (top first) and run trif doctor again.`
     : warns ? `No problems, but ${warns} warning${warns === 1 ? '' : 's'} above.` : 'All good.');
   return out.join('\n');
 }
 
-module.exports = { doctor, formatDoctor, parseWrapper, checkWrapperScript };
+module.exports = { doctor, formatDoctor, parseWrapper, checkWrapperScript, helperDownFix };

@@ -217,15 +217,17 @@ test('windows PATH: <home>\\bin added to the user\'s PATH once; --no-link leaves
   const add = (dir, o = {}) => userpath.addToUserPath(dir, { ...o, bin: fake.bin });
   assert.deepEqual(add(ws.bin, { check: true }), { how: 'missing', error: null });
   let lines = winSetup.userPathStep(ws, { pathEnv: 'C:\\Windows', add });
-  assert.deepEqual(lines, ['PATH          added C:\\Users\\Tim\\.trif\\bin to your PATH (open a new terminal to use trif)']);
+  assert.deepEqual(lines, { onPath: true, lines: ['PATH          added C:\\Users\\Tim\\.trif\\bin to your PATH (open a new terminal to use trif)'] });
   assert.equal(fake.userPath(), 'C:\\Windows\\stuff;%USERPROFILE%\\tools;C:\\Users\\Tim\\.trif\\bin', 'kept as written, the folder at the end');
   lines = winSetup.userPathStep(ws, { pathEnv: 'C:\\Windows', add });
-  assert.deepEqual(lines, ['PATH          C:\\Users\\Tim\\.trif\\bin is on your PATH (open a new terminal to use trif)']);
-  assert.deepEqual(winSetup.userPathStep(ws, { pathEnv: 'C:\\Windows;c:\\users\\tim\\.TRIF\\bin\\', add }), [], 'already in this terminal\'s PATH: nothing to say');
+  assert.deepEqual(lines, { onPath: true, lines: ['PATH          C:\\Users\\Tim\\.trif\\bin is on your PATH (open a new terminal to use trif)'] });
+  assert.deepEqual(winSetup.userPathStep(ws, { pathEnv: 'C:\\Windows;c:\\users\\tim\\.TRIF\\bin\\', add }), { onPath: true, lines: [] }, 'already in this terminal\'s PATH: nothing to say');
   assert.equal(fake.userPath().split(';').length, 3, 'added once');
-  assert.match(winSetup.userPathStep(ws, { noLink: true, pathEnv: 'C:\\Windows', add }).join('\n'), /left alone: --no-link/);
+  const kept = winSetup.userPathStep(ws, { noLink: true, pathEnv: 'C:\\Windows', add });
+  assert.equal(kept.onPath, false);
+  assert.match(kept.lines.join('\n'), /left alone: --no-link/);
   fake.fail('Requested registry access is not allowed.');
-  assert.match(winSetup.userPathStep(ws, { pathEnv: 'C:\\Windows', add }).join('\n'), /couldn't add .* to your PATH: Requested registry access is not allowed\.\n.*Environment Variables/);
+  assert.match(winSetup.userPathStep(ws, { pathEnv: 'C:\\Windows', add }).lines.join('\n'), /couldn't add .* to your PATH: Requested registry access is not allowed\.\n.*Environment Variables/);
 });
 
 // ------------------------------------------------------------------ setup and doctor, Windows' way
@@ -241,7 +243,7 @@ test('windows setup: wrappers, manifests + registry keys, PATH, no /usr/local/bi
   const added = [];
   const { setup } = require('../helper/lib/setup');
   const r = setup({
-    home, platform: 'win32', homedir, env, regOpts, mode: 'link', noExamples: true, browser: 'chrome,firefox',
+    home, platform: 'win32', homedir, env, regOpts, mode: 'link', noExamples: true, browser: 'chrome,firefox', verbose: true,
     addToUserPath: (dir) => { added.push(dir); return { how: 'added', error: null }; },
   });
   const text = r.lines.join('\n');
@@ -267,6 +269,7 @@ test('windows setup: wrappers, manifests + registry keys, PATH, no /usr/local/bi
   assert.match(text, /registered: HKCU\\Software\\Google\\Chrome\\NativeMessagingHosts\\com\.webmods\.helper/);
   assert.deepEqual(added, [ws.bin]);
   assert.match(text, /PATH {10}added .* to your PATH/);
+  assert.match(text, /Check everything with: trif doctor/, 'trif: on the user\'s PATH now, in a new terminal');
   assert.ok(!/CLI link|sudo ln|zshrc|Finder|Cmd-Shift-G/.test(text), text);
   assert.ok(!fs.existsSync(path.join(homedir, 'Library')), 'nothing of macOS\'s');
 

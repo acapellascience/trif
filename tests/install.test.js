@@ -87,7 +87,7 @@ test('setup --copy: copies helper/extension/examples into <home>/app and points 
   const root = tempDir();
   const ws = path.join(root, 'ws');
   const native = path.join(root, 'native');
-  const args = ['setup', '--copy', '--home', ws, '--native-dir', native, '--no-link'];
+  const args = ['setup', '--verbose', '--copy', '--home', ws, '--native-dir', native, '--no-link'];
   let r = await runCli(args, { home: path.join(root, 'unused') });
   assert.equal(r.code, 0, r.stderr + r.stdout);
   const app = path.join(ws, 'app');
@@ -150,7 +150,7 @@ test('setup from a package that is not a git checkout copies by default; re-runn
 
   // The package folder can go away (npm cleans its npx cache): the install keeps working.
   fs.rmSync(path.join(root, 'pkg'), { recursive: true, force: true });
-  r = await runOtherCli(path.join(ws, 'app', 'helper', 'cli.js'), ['setup', '--home', ws, '--native-dir', native, '--no-link'], ws);
+  r = await runOtherCli(path.join(ws, 'app', 'helper', 'cli.js'), ['setup', '--verbose', '--home', ws, '--native-dir', native, '--no-link'], ws);
   assert.equal(r.code, 0, r.stderr + r.stdout);
   assert.match(r.stdout, /app {11}.* \(v[^,]+, running from it\)/);
   r = await runOtherCli(path.join(ws, 'app', 'helper', 'cli.js'), ['doctor', '--native-dir', native], ws);
@@ -161,19 +161,19 @@ test('setup from a package that is not a git checkout copies by default; re-runn
 test('setup --link: wrappers run the package where it is; warns when that is not a git checkout', async () => {
   const root = tempDir();
   const ws = path.join(root, 'ws');
-  let r = await runCli(['setup', '--link', '--home', ws, '--native-dir', path.join(root, 'native'), '--no-link'], { home: ws });
+  let r = await runCli(['setup', '--verbose', '--link', '--home', ws, '--native-dir', path.join(root, 'native'), '--no-link'], { home: ws });
   assert.equal(r.code, 0, r.stderr);
   assert.equal(wrapperScript(path.join(ws, 'bin', 'trif-host')), path.join(REPO, 'helper', 'host.js'));
   assert.ok(!fs.existsSync(path.join(ws, 'app')));
   assert.match(r.stdout, /linked: the wrappers run this folder/);
 
   const pkg = fakePackage(root);
-  r = await runOtherCli(path.join(pkg, 'helper', 'cli.js'), ['setup', '--link', '--home', ws, '--native-dir', path.join(root, 'native'), '--no-link'], ws);
+  r = await runOtherCli(path.join(pkg, 'helper', 'cli.js'), ['setup', '--verbose', '--link', '--home', ws, '--native-dir', path.join(root, 'native'), '--no-link'], ws);
   assert.equal(r.code, 0, r.stderr);
   assert.equal(wrapperScript(path.join(ws, 'bin', 'trif-host')), path.join(pkg, 'helper', 'host.js'));
   assert.match(r.stdout, /isn't a git checkout/);
 
-  const both = await runCli(['setup', '--copy', '--link', '--home', ws, '--no-link'], { home: ws });
+  const both = await runCli(['setup', '--verbose', '--copy', '--link', '--home', ws, '--no-link'], { home: ws });
   assert.equal(both.code, 1);
   assert.match(both.stderr, /--copy or --link, not both/);
 });
@@ -287,7 +287,7 @@ test('installApp: never touches another live install\'s folders or swaps while i
   assert.equal(fs.readFileSync(path.join(app, 'package.json'), 'utf8'), '{"changed": true}');
 
   // setup says so and keeps the existing copy.
-  const r = await runCli(['setup', '--copy', '--home', home, '--native-dir', path.join(home, 'native'), '--no-link', '--no-examples'], { home });
+  const r = await runCli(['setup', '--verbose', '--copy', '--home', home, '--native-dir', path.join(home, 'native'), '--no-link', '--no-examples'], { home });
   assert.equal(r.code, 1);
   assert.match(r.stdout, /FAILED to update .*another TRIF install is in progress.*kept the existing copy/);
   assert.equal(fs.readFileSync(path.join(app, 'package.json'), 'utf8'), '{"changed": true}');
@@ -355,7 +355,7 @@ test('setup writes every extension ID into allowed_origins; doctor flags a manif
   const native = path.join(root, 'native');
   fs.mkdirSync(ws, { recursive: true });
   fs.writeFileSync(path.join(privDir(ws), 'config.json'), JSON.stringify({ extensionIds: [OTHER_ID, 'not-an-id'] }));
-  let r = await runCli(['setup', '--native-dir', native, '--no-link'], { home: ws });
+  let r = await runCli(['setup', '--verbose', '--native-dir', native, '--no-link'], { home: ws });
   assert.equal(r.code, 0, r.stderr);
   const all = P.extensionOrigins({ extensionIds: [OTHER_ID] });
   assert.ok(all.includes(DEV_ORIGIN) && all.includes(`chrome-extension://${OTHER_ID}/`));
@@ -438,14 +438,14 @@ test('preinstalled mods: each once, switched on or off as listed; the start site
 
   // Through setup, and --no-examples.
   const home3 = tempDir();
-  let res = await runCli(['setup', '--native-dir', path.join(home3, 'native'), '--no-link'], { home: home3 });
+  let res = await runCli(['setup', '--verbose', '--native-dir', path.join(home3, 'native'), '--no-link'], { home: home3 });
   assert.strictEqual(res.code, 0, res.stderr);
   assert.match(res.stdout, /preinstalled, on: www\.google\.com\/hide-ai-in-results, /);
   assert.match(res.stdout, /preinstalled, off until you switch them on in the side panel: x\.com\/punk-fonts, x\.com\/rainbow-rave, www\.instagram\.com\/desaturate, www\.google\.com\/dvd-logo/);
   assert.match(res.stdout, /TRIF starts on for google\.com, x\.com, amazon\.com, instagram\.com/);
   assert.ok(fs.existsSync(path.join(home3, 'sites', 'x.com', 'plain-x.js')));
   const home4 = tempDir();
-  res = await runCli(['setup', '--native-dir', path.join(home4, 'native'), '--no-link', '--no-examples'], { home: home4 });
+  res = await runCli(['setup', '--verbose', '--native-dir', path.join(home4, 'native'), '--no-link', '--no-examples'], { home: home4 });
   assert.strictEqual(res.code, 0, res.stderr);
   assert.strictEqual(fs.existsSync(path.join(home4, 'sites', 'x.com')), false);
 });
@@ -456,7 +456,7 @@ test('setup --browser firefox writes a manifest with allowed_extensions; doctor 
   const root = tempDir();
   const ws = path.join(root, 'ws');
   fs.mkdirSync(ws, { recursive: true });
-  const r = await runCli(['setup', '--browser', 'chrome,firefox', '--no-link'], { home: ws });
+  const r = await runCli(['setup', '--verbose', '--browser', 'chrome,firefox', '--no-link'], { home: ws });
   assert.equal(r.code, 0, r.stderr);
   const fakehome = path.join(ws, 'fakehome');
   const fxDir = process.platform === 'darwin'
@@ -468,7 +468,7 @@ test('setup --browser firefox writes a manifest with allowed_extensions; doctor 
   assert.equal(fx.path, path.join(ws, 'bin', 'trif-host'));
   const chrome = browserTable(fakehome).find((b) => b.key === 'chrome');
   assert.deepEqual(readManifest(chrome.nativeDir).allowed_origins, [DEV_ORIGIN]);
-  assert.match(r.stdout, /Firefox: open the signed TRIF add-on/);
+  assert.match(r.stdout, /Firefox: open this link in Firefox to install the TRIF add-on:\n {7}https:\/\/github\.com\/[\w.-]+\/[\w.-]+\/releases\/latest\/download\/trif-firefox\.xpi\n/);
 
   let d = await runCli(['doctor'], { home: ws });
   assert.match(d.stdout, /ok {4}Firefox: native host manifest/);
@@ -500,12 +500,161 @@ test('build-extension firefox: sidebar, background scripts, optional userScripts
   assert.equal(m.browser_specific_settings.gecko.id, P.FIREFOX_EXTENSION_ID);
 });
 
+test('setup\'s next steps give the trif command that works from this terminal: ~/.trif/bin/trif until it\'s on PATH', async () => {
+  const root = tempDir();
+  const ws = path.join(root, '.trif');
+  const args = ['setup', '--browser', 'chrome', '--no-link', '--no-examples'];
+  const off = await runCli(args, { home: ws, env: { HOME: root } });
+  assert.equal(off.code, 0, off.stderr);
+  assert.match(off.stdout, /is not on your PATH/);
+  assert.match(off.stdout.slice(off.stdout.indexOf('Next steps:')), /Check everything with: ~\/\.trif\/bin\/trif doctor\n/);
+  const on = await runCli(args, { home: ws, env: { HOME: root, PATH: `${path.join(ws, 'bin')}${path.delimiter}${testEnv(ws).PATH}` } });
+  assert.equal(on.code, 0, on.stderr);
+  assert.doesNotMatch(on.stdout, /is not on your PATH/);
+  assert.match(on.stdout.slice(on.stdout.indexOf('Next steps:')), /Check everything with: trif doctor\n/);
+});
+
+test('setup prints a short summary by default, every detail with --verbose (-v); problems either way', async () => {
+  const root = tempDir();
+  const ws = path.join(root, 'ws');
+  const args = ['setup', '--browser', 'chrome,firefox', '--no-link'];
+  const r = await runCli(args, { home: ws });
+  assert.equal(r.code, 0, r.stderr);
+  const top = r.stdout.slice(0, r.stdout.indexOf('Next steps:'));
+  assert.match(top, new RegExp(`^✓ TRIF ${esc(P.VERSION)} (installed|linked to .*) in .*\n`, 'm'));
+  assert.match(top, /^✓ Added the mods TRIF comes with \(it starts on for google\.com, x\.com, amazon\.com, instagram\.com\)$/m);
+  assert.match(top, /^✓ Set up for Google Chrome and Firefox$/m);
+  // No agent on this test's PATH: a problem, so it shows.
+  assert.match(top, /No coding agent found: install Claude Code/);
+  assert.doesNotMatch(r.stdout, /host wrapper|CLI wrapper|native host|com\.webmods\.helper|AGENTS\.md refreshed|preinstalled, on:|extension IDs|private {7}/);
+  const v = await runCli([...args, '-v'], { home: ws });
+  assert.match(v.stdout, /host wrapper {2}/);
+  assert.match(v.stdout, /native host {3}Firefox: .*com\.webmods\.helper\.json/);
+  assert.doesNotMatch(v.stdout, /^✓ /m);
+  assert.match(v.stdout, /No coding agent found/);
+  assert.match(v.stdout, /Next steps:/);
+});
+
+test('setup calls the panel what the browser does: the sidebar in Firefox', async () => {
+  const r = await runCli(['setup', '--verbose', '--browser', 'firefox', '--no-link'], { home: tempDir() });
+  assert.equal(r.code, 0, r.stderr);
+  assert.match(r.stdout, /off until you switch them on in the sidebar: /);
+  assert.doesNotMatch(r.stdout, /side panel/);
+});
+
 test('setup for Firefox alone gives only Firefox\'s next steps', async () => {
   const ws = tempDir();
-  const r = await runCli(['setup', '--browser', 'firefox', '--no-link', '--no-examples'], { home: ws });
+  const r = await runCli(['setup', '--verbose', '--browser', 'firefox', '--no-link', '--no-examples'], { home: ws });
   assert.equal(r.code, 0, r.stderr);
   const next = r.stdout.slice(r.stdout.indexOf('Next steps:'));
-  assert.match(next, /1\. Open the signed TRIF add-on \(trif-firefox\.xpi\) in Firefox/);
+  assert.match(next, /1\. Open this link in Firefox to install the TRIF add-on, and click Add:/);
+  assert.ok(next.includes(`       ${require('../helper/lib/update').firefoxAddonUrl()}\n`), 'the latest release\'s add-on');
   assert.match(next, /"Allow user scripts"/);
   assert.doesNotMatch(next, /chrome:\/\/extensions|Load unpacked/);
+});
+
+// ---- after setup, at a terminal: waiting for the browser (lib/setupwait.js)
+
+test('setup\'s wait: what it waits for, per browser set up (none for Safari)', () => {
+  const { waitingFor } = require('../helper/lib/setupwait');
+  const t = (key) => browserTable('/H', 'darwin').find((b) => b.key === key);
+  assert.deepEqual(waitingFor([t('chrome')]), { name: 'Chrome', how: 'drag the folder onto chrome://extensions' });
+  assert.deepEqual(waitingFor([t('firefox')]), { name: 'Firefox', how: 'open the add-on link' });
+  assert.equal(waitingFor([t('chrome'), t('firefox')]).name, 'Chrome or Firefox');
+  assert.equal(waitingFor([t('brave')]).name, 'Brave');
+  assert.equal(waitingFor([t('safari')]), null);
+  assert.equal(waitingFor([{ key: 'custom', label: 'custom' }]), null);
+});
+
+test('setup\'s wait: "Waiting…", then "✓ Connected" and the next step, then user scripts; Ctrl-C and the timeout stop it', async () => {
+  const { waitForBrowser } = require('../helper/lib/setupwait');
+  const chrome = browserTable('/H', 'darwin').find((b) => b.key === 'chrome');
+  const firefox = browserTable('/H', 'darwin').find((b) => b.key === 'firefox');
+  const run = async (states, extra = {}) => {
+    const lines = [];
+    let i = 0;
+    let clock = 0;
+    const res = await waitForBrowser({ targets: [chrome], print: (l) => lines.push(l), probe: async () => states[Math.min(i++, states.length - 1)],
+      sleep: async (ms) => { clock += ms; }, now: () => clock, trif: '~/.trif/bin/trif', ...extra });
+    return { res, lines: lines.filter(Boolean) };
+  };
+  const off = { connected: false, userScripts: false, browser: null };
+  const noScripts = { connected: true, userScripts: false, browser: 'Chrome' };
+  const on = { connected: true, userScripts: true, browser: 'Chrome' };
+  let r = await run([off, off, noScripts, noScripts, on]);
+  assert.equal(r.res, 'done');
+  assert.deepEqual(r.lines, [
+    'Waiting for Chrome: drag the folder onto chrome://extensions… (Ctrl-C to skip)',
+    '✓ Connected (Chrome)',
+    'Now flip “Allow User Scripts” on the TRIF setup tab that just opened.',
+    '✓ User scripts on. Open any website, click the TRIF icon, and ask for a change.',
+  ]);
+  // Connected with user scripts on already (setup run again): nothing to wait for.
+  r = await run([on]);
+  assert.deepEqual([r.res, r.lines], ['connected', []]);
+  // Firefox's words for the next step.
+  r = await run([off, { connected: true, userScripts: false, browser: 'Firefox' }, { connected: true, userScripts: true, browser: 'Firefox' }], { targets: [firefox] });
+  assert.equal(r.lines[0], 'Waiting for Firefox: open the add-on link… (Ctrl-C to skip)');
+  assert.equal(r.lines[2], 'Now click “Allow user scripts” on the TRIF setup tab that just opened, then Allow.');
+  // Never connects: stops with a way to find out why.
+  r = await run([off], { timeoutMs: 5000 });
+  assert.equal(r.res, 'timeout');
+  assert.equal(r.lines.at(-1), 'Stopped waiting for Chrome. The steps above still work; if it doesn\'t connect, run: ~/.trif/bin/trif doctor');
+  // Ctrl-C.
+  let stop = null;
+  let n = 0;
+  r = await run([off], { onStop: (fn) => { stop = fn; }, probe: async () => { if (++n === 3) stop(); return off; } });
+  assert.equal(r.res, 'skipped');
+});
+
+test('setup doesn\'t wait when it isn\'t at a terminal', async () => {
+  const r = await runCli(['setup', '--browser', 'chrome', '--no-link', '--no-examples'], { home: tempDir() });
+  assert.equal(r.code, 0, r.stderr);
+  assert.doesNotMatch(r.stdout, /Waiting for/);
+});
+
+test('setup opens chrome://extensions in Chrome (macOS, Chrome installed), quietly not otherwise', () => {
+  const { openChromeExtensions } = require('../helper/lib/setup');
+  const calls = [];
+  const run = (cmd, args) => { calls.push([cmd, ...args]); return { status: 0 }; };
+  const chromeAt = (p) => p === '/Applications/Google Chrome.app';
+  assert.deepEqual(openChromeExtensions({ run, exists: chromeAt, platform: 'darwin', home: '/H' }), { command: ['open', ['-a', 'Google Chrome', 'chrome://extensions']], opened: true });
+  assert.deepEqual(calls, [['open', '-a', 'Google Chrome', 'chrome://extensions']]);
+  // In ~/Applications too.
+  assert.equal(openChromeExtensions({ run, exists: (p) => p === '/H/Applications/Google Chrome.app', platform: 'darwin', home: '/H' }).opened, true);
+  // No Chrome, not a Mac, or `open` failing: nothing (the printed steps say how to get there).
+  calls.length = 0;
+  assert.equal(openChromeExtensions({ run, exists: () => false, platform: 'darwin', home: '/H' }).opened, false);
+  assert.equal(openChromeExtensions({ run, exists: chromeAt, platform: 'linux', home: '/H' }).opened, false);
+  assert.deepEqual(calls, []);
+  assert.equal(openChromeExtensions({ run: () => ({ status: 1 }), exists: chromeAt, platform: 'darwin', home: '/H' }).opened, false);
+  assert.equal(openChromeExtensions({ run: () => { throw new Error('ENOENT'); }, exists: chromeAt, platform: 'darwin', home: '/H' }).opened, false);
+});
+
+test('setup at a terminal shows the extension folder and opens chrome://extensions (through `open`, stubbed here)', async () => {
+  const root = tempDir();
+  const ws = path.join(root, 'ws');
+  const stubs = path.join(root, 'stubs');
+  fs.mkdirSync(stubs);
+  const log = path.join(root, 'open.log');
+  for (const name of ['open', 'pbcopy']) {
+    fs.writeFileSync(path.join(stubs, name), `#!/bin/sh\necho "${name} $*" >> ${JSON.stringify(log)}\ncat > /dev/null\n`, { mode: 0o755 });
+  }
+  // A terminal, as far as setup can tell.
+  const tty = path.join(root, 'tty.js');
+  fs.writeFileSync(tty, 'process.stdout.isTTY = true;\n');
+  const r = await new Promise((resolve) => execFile(process.execPath, ['-r', tty, path.join(REPO, 'helper', 'cli.js'), 'setup', '--browser', 'chrome', '--no-link', '--no-examples', '--no-wait'],
+    { env: testEnv(ws, { PATH: `${stubs}${path.delimiter}${testEnv(ws).PATH}` }), timeout: 20000 }, (err, stdout, stderr) => resolve({ code: err ? 1 : 0, stdout, stderr })));
+  assert.equal(r.code, 0, r.stderr);
+  if (process.platform !== 'darwin') return;
+  const calls = fs.readFileSync(log, 'utf8');
+  assert.match(calls, /^open -R .*\/extension$/m);
+  const chrome = fs.existsSync('/Applications/Google Chrome.app') || fs.existsSync(path.join(ws, 'fakehome', 'Applications', 'Google Chrome.app'));
+  if (chrome) {
+    assert.match(calls, /^open -a Google Chrome chrome:\/\/extensions$/m);
+    assert.match(r.stdout, /on the chrome:\/\/extensions tab that just opened in Chrome/);
+  } else {
+    assert.doesNotMatch(calls, /chrome:\/\/extensions/);
+  }
+  assert.doesNotMatch(r.stdout, /Waiting for/);
 });

@@ -412,7 +412,7 @@ test('install-example finds the repo examples by default', async () => {
 // ------------------------------------------------------------------ setup and doctor
 
 function setupArgs(root) {
-  return ['setup', '--home', path.join(root, 'ws'), '--native-dir', path.join(root, 'native'), '--bin-dir', path.join(root, 'bin'), '--no-examples'];
+  return ['setup', '--verbose', '--home', path.join(root, 'ws'), '--native-dir', path.join(root, 'native'), '--bin-dir', path.join(root, 'bin'), '--no-examples'];
 }
 
 test('setup: workspace, wrappers, manifest, link; idempotent; leaves sites alone', async () => {
@@ -475,7 +475,7 @@ test('setup: does not overwrite a non-symlink trif in the bin dir; honours TRIF_
   fs.mkdirSync(path.join(root, 'bin'));
   fs.writeFileSync(path.join(root, 'bin', 'trif'), 'someone else');
   const ws = path.join(root, 'envhome');
-  const r = await runCli(['setup', '--native-dir', path.join(root, 'native'), '--bin-dir', path.join(root, 'bin')], { home: ws });
+  const r = await runCli(['setup', '--verbose', '--native-dir', path.join(root, 'native'), '--bin-dir', path.join(root, 'bin')], { home: ws });
   assert.equal(r.code, 0, r.stderr);
   assert.equal(fs.readFileSync(path.join(root, 'bin', 'trif'), 'utf8'), 'someone else');
   assert.match(r.stdout, /not a symlink/);
@@ -487,13 +487,13 @@ test('setup: does not overwrite a non-symlink trif in the bin dir; honours TRIF_
 test('setup: --browser picks folders under HOME; unknown browser fails', async () => {
   const root = tempDir();
   const fakeHome = path.join(root, 'fakehome');
-  const r = await runCli(['setup', '--home', path.join(root, 'ws'), '--browser', 'brave', '--no-link'], { home: root, env: { HOME: fakeHome } });
+  const r = await runCli(['setup', '--verbose', '--home', path.join(root, 'ws'), '--browser', 'brave', '--no-link'], { home: root, env: { HOME: fakeHome } });
   assert.equal(r.code, 0, r.stderr);
   const dir = process.platform === 'darwin'
     ? path.join(fakeHome, 'Library/Application Support/BraveSoftware/Brave-Browser/NativeMessagingHosts')
     : path.join(fakeHome, '.config/BraveSoftware/Brave-Browser/NativeMessagingHosts');
   assert.ok(fs.existsSync(path.join(dir, 'com.webmods.helper.json')));
-  const bad = await runCli(['setup', '--home', path.join(root, 'ws'), '--browser', 'netscape', '--no-link'], { home: root, env: { HOME: fakeHome } });
+  const bad = await runCli(['setup', '--verbose', '--home', path.join(root, 'ws'), '--browser', 'netscape', '--no-link'], { home: root, env: { HOME: fakeHome } });
   assert.equal(bad.code, 1);
   assert.match(bad.stderr, /unknown browser/);
 });
@@ -509,14 +509,43 @@ test('doctor: broken setup lists failures with fixes and exits 1', async () => {
   assert.match(r.stdout, /FAIL {2}helper isn't running/);
   assert.match(r.stdout, /fix: run: trif setup/);
   assert.match(r.stdout, /fix: first fix the failures above/);
-  assert.match(r.stdout, /problem\(s\) found/);
+  assert.match(r.stdout, /\d+ problems? found/);
+});
+
+test('doctor: the helper isn\'t running: advice for the browsers set up, a line each when there are several', async () => {
+  const { helperDownFix } = require('../helper/lib/doctor');
+  const ext = '/x/extension';
+  const chrome = helperDownFix({ chromium: ['Google Chrome'], extensionDir: ext }).join('\n');
+  assert.match(chrome, /^install the TRIF extension and turn it on at chrome:\/\/extensions/);
+  assert.match(chrome, /Load unpacked from \/x\/extension/);
+  assert.match(chrome, /service worker/);
+  const fx = helperDownFix({ firefox: true, extensionDir: ext }).join('\n');
+  assert.match(fx, /^install the TRIF add-on: open https:\/\/github\.com\/[\w.-]+\/[\w.-]+\/releases\/latest\/download\/trif-firefox\.xpi in Firefox/);
+  assert.doesNotMatch(fx, /chrome:\/\/|Load unpacked|service worker/);
+  const safari = helperDownFix({ safari: true, extensionDir: ext }).join('\n');
+  assert.match(safari, /^open TRIF\.app once/);
+  assert.doesNotMatch(safari, /chrome:\/\/|Firefox/);
+  const all = helperDownFix({ chromium: ['Google Chrome', 'Brave'], firefox: true, safari: true, extensionDir: ext });
+  assert.deepEqual(all.map((l) => l.split(':')[0]), ['Google Chrome / Brave', 'Firefox', 'Safari', 'The helper runs while one of them is open with TRIF turned on.']);
+  // Nothing known (inside an agent run): Chrome's, the usual case.
+  assert.match(helperDownFix({ extensionDir: ext })[0], /^install the TRIF extension/);
+});
+
+test('doctor: setup for Firefox alone: no Chrome advice when the helper isn\'t running', async () => {
+  const root = tempDir();
+  const ws = path.join(root, 'ws');
+  await runCli(['setup', '--verbose', '--browser', 'firefox', '--no-link', '--no-examples'], { home: ws });
+  const r = await runCli(['doctor'], { home: ws });
+  assert.match(r.stdout, /FAIL {2}helper isn't running/);
+  assert.match(r.stdout, /install the TRIF add-on/);
+  assert.doesNotMatch(r.stdout, /Load unpacked|service worker/);
 });
 
 test('doctor: after setup, wrong manifest and missing node are caught; live helper and user-scripts switch reported', async () => {
   const root = tempDir();
   const ws = path.join(root, 'ws');
   const native = path.join(root, 'native');
-  await runCli(['setup', '--native-dir', native, '--no-link'], { home: ws });
+  await runCli(['setup', '--verbose', '--native-dir', native, '--no-link'], { home: ws });
   let r = await runCli(['doctor', '--native-dir', native], { home: ws });
   assert.match(r.stdout, /ok {4}workspace/);
   assert.match(r.stdout, /ok {4}host wrapper/);
@@ -535,7 +564,7 @@ test('doctor: after setup, wrong manifest and missing node are caught; live help
   assert.match(r.stdout, /FAIL {2}.*allowed_origins doesn't include chrome-extension:\/\/iaablflfafmonebdomeikadolkgdbkhe\//);
   assert.match(r.stdout, /FAIL {2}host wrapper points at node \/nonexistent\/node/);
   fs.writeFileSync(wrapper, orig);
-  await runCli(['setup', '--native-dir', native, '--no-link'], { home: ws });
+  await runCli(['setup', '--verbose', '--native-dir', native, '--no-link'], { home: ws });
 
   // With a live helper whose extension has user scripts off.
   const ext = new FakeExtension({ home: ws });
@@ -700,7 +729,7 @@ test('doctor: the last line says so when there were warnings', () => {
   assert.match(formatDoctor({ ok: true, checks: [ok, warn] }), /\nNo problems, but 1 warning above\.$/);
   assert.doesNotMatch(formatDoctor({ ok: true, checks: [ok, warn, warn] }), /All good/);
   assert.match(formatDoctor({ ok: true, checks: [ok, warn, warn] }), /2 warnings above\.$/);
-  assert.match(formatDoctor({ ok: false, checks: [warn, fail] }), /1 problem\(s\) found/);
+  assert.match(formatDoctor({ ok: false, checks: [warn, fail] }), /1 problem found/);
 });
 
 test('a mailbox request works where watching a folder fails (as in an agent run\'s sandbox)', async () => {

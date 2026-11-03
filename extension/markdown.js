@@ -124,3 +124,15 @@ export function renderMarkdown(text) {
 export const MARKDOWN_ELEMENTS = ['p', 'br', 'ul', 'ol', 'li', 'h4', 'hr', 'blockquote', 'pre', 'code', 'strong', 'em', 'a',
   'table', 'thead', 'tbody', 'tr', 'th', 'td'];
 export const MARKDOWN_ATTRIBUTES = ['href', 'target', 'rel', 'start'];
+
+/** Put renderMarkdown output (already safe by construction) into `node`, through the Sanitizer as a second fence. */
+export function setMarkdown(node, text) {
+  const html = renderMarkdown(text);
+  if (typeof node.setHTML === 'function') {
+    try {
+      node.setHTML(html, { sanitizer: { elements: MARKDOWN_ELEMENTS, attributes: MARKDOWN_ATTRIBUTES } });
+      return;
+    } catch { /* older Sanitizer API shape: fall through */ }
+  }
+  node.innerHTML = html;
+}

@@ -17,6 +17,7 @@ const { migrateHome, describeMigration, migratePrivate } = require('./migrate');
 const { preinstallMods, updateShippedMods } = require('./preinstalled');
 const { acquireInstallLock, pidAlive } = require('./lock');
 const { isWindows, renameRetry, nodeExeName } = require('./platform');
+const { firefoxAddonUrl } = require('./update');
 
 // Quote for a POSIX shell double-quoted string.
 function shq(s) {
@@ -311,6 +312,20 @@ function recordPath(home, pathValue, modsDir = null) {
 }
 
 /** Selects `dir` in a Finder window and copies its path (macOS; Windows: Explorer). Returns whether it showed it. */
+/**
+ * Opens chrome://extensions in Google Chrome (macOS, when Chrome is installed), next to the Finder window
+ * revealFolder opens, so both halves of "drag the folder onto chrome://extensions" are on screen. Quiet
+ * when it can't: the printed steps say how to get there. Returns {command, opened}.
+ * (run, exists, platform, home: for tests, which must never open the real Chrome.)
+ */
+function openChromeExtensions({ run = require('child_process').spawnSync, exists = fs.existsSync, platform = process.platform, home = os.homedir() } = {}) {
+  const command = ['open', ['-a', 'Google Chrome', 'chrome://extensions']];
+  if (platform !== 'darwin') return { command, opened: false };
+  const installed = ['/Applications/Google Chrome.app', path.join(home, 'Applications', 'Google Chrome.app')].some((a) => exists(a));
+  if (!installed) return { command, opened: false };
+  try { return { command, opened: run(command[0], command[1], { stdio: 'ignore', timeout: 10000 }).status === 0 }; } catch { return { command, opened: false }; }
+}
+
 function revealFolder(dir) {
   if (isWindows()) return require('./win/setup').revealFolder(dir);
   if (process.platform !== 'darwin') return false;
@@ -326,11 +341,25 @@ function revealFolder(dir) {
  *         launchctl (false: write the agent but don't start it; also TRIF_NO_LAUNCHCTL=1),
  *         platform, homedir, env (tests: Windows' steps anywhere), regOpts ({env, run} for win/registry.js),
  *         addToUserPath (Windows' PATH step, win/userpath.js) }
- * Returns { ok, lines: [string], ws, manifests: [{browser, file}], nodePath, mode, root, migration }
+ * Returns { ok, lines: [string], ws, manifests: [{browser, file}], nodePath, mode, root, migration, targets (the
+ *   browsers set up), trif (the CLI as typed in this terminal) }
  */
+/** A path as typed in a shell: ~/… under the home folder, quoted if it needs to be. */
+function homeRelative(p) {
+  const h = os.homedir();
+  const rel = p.startsWith(h + path.sep) ? p.slice(h.length + 1) : null;
+  if (rel !== null && /^[\w./-]+$/.test(rel)) return `~/${rel}`;
+  return /^[\w./-]+$/.test(p) ? p : shq(p);
+}
+
 function setup(opts = {}) {
-  const lines = [];
-  const say = (s = '') => lines.push(s);
+  // What setup prints: by default a short summary (tell), then problems, warnings and the next steps
+  // (note); with --verbose (opts.verbose) every detail (say) instead of the summary.
+  const entries = [];
+  const say = (s = '') => entries.push({ s, when: 'verbose' });
+  const tell = (s = '') => entries.push({ s, when: 'brief' });
+  const note = (s = '') => entries.push({ s, when: 'always' });
+  const shown = () => entries.filter((e) => e.when === 'always' || e.when === (opts.verbose ? 'verbose' : 'brief')).map((e) => e.s);
   // 0. A workspace from before 0.2.0 moves from ~/.webmods to ~/.trif (migrate.js), when setting up the
   // default one: no --home or TRIF_HOME, or one naming either of those (an older updater passes
   // --home ~/.webmods). A workspace somewhere else stays where it is.
@@ -338,7 +367,7 @@ function setup(opts = {}) {
   let migration = null;
   if (!asked || P.isDefaultHome(asked)) {
     try { migration = migrateHome(); } catch (e) { migration = { how: 'skipped', notes: [], error: `couldn't move ${P.legacyHome()} to ${P.defaultHome()}: ${e.message}; still using ${P.legacyHome()}` }; }
-    for (const l of describeMigration(migration)) say(l);
+    for (const l of describeMigration(migration)) note(l);
   }
   const platform = opts.platform || process.platform;
   const win = isWindows(platform);
@@ -358,23 +387,23 @@ function setup(opts = {}) {
   if (legacyLoaded && !envVar('SAFARI_BRIDGE')) {
     const { spawnSync } = require('child_process');
     const r = spawnSync('launchctl', ['bootout', `gui/${process.getuid()}/${LEGACY_SAFARI_AGENT_LABEL}`], { encoding: 'utf8' });
-    say(r.status === 0 ? `Safari bridge stopped the one from before 0.2.0 (${LEGACY_SAFARI_AGENT_LABEL})` : `Safari bridge couldn't stop the one from before 0.2.0 (${LEGACY_SAFARI_AGENT_LABEL}): ${(r.stderr || '').trim()}`);
+    note(r.status === 0 ? `Safari bridge stopped the one from before 0.2.0 (${LEGACY_SAFARI_AGENT_LABEL})` : `Safari bridge couldn't stop the one from before 0.2.0 (${LEGACY_SAFARI_AGENT_LABEL}): ${(r.stderr || '').trim()}`);
   }
 
   // 0b. The helper's private files leave the workspace (0.2.0; migrate.js migratePrivate): runs may read
   // all of the workspace, never the private folder.
   const priv = migratePrivate(home, { privateDir: ws.private });
-  for (const n of priv.notes) say(`private       ${n}`);
-  for (const e of priv.errors) { ok = false; say(`private       FAILED: ${e}`); }
+  for (const n of priv.notes) note(`private       ${n}`);
+  for (const e of priv.errors) { ok = false; note(`private       FAILED: ${e}`); }
   if (priv.moved.length || priv.removed.length) ws = P.workspace(opts.home, { platform }); // (config.json moved)
-  if (ws.privateError) say(`private       warning: ${ws.privateError}`);
+  if (ws.privateError) note(`private       warning: ${ws.privateError}`);
 
   // 1. Workspace
   for (const d of [home, ws.modsDir, ws.bin]) fs.mkdirSync(d, { recursive: true });
   try {
     if (fs.lstatSync(ws.modsDir).isSymbolicLink()) {
-      say(`mods          warning: the mods folder ${ws.modsDir} is a link; side-panel agent runs won't start until it's a`);
-      say('              folder (or "modsDir" in config.json names the folder itself)');
+      note(`mods          warning: the mods folder ${ws.modsDir} is a link; side-panel agent runs won't start until it's a`);
+      note('              folder (or "modsDir" in config.json names the folder itself)');
     }
   } catch { /* made above */ }
   fs.mkdirSync(ws.private, { recursive: true, mode: 0o700 });
@@ -393,18 +422,18 @@ function setup(opts = {}) {
     } catch (e) {
       ok = false;
       if (fs.existsSync(path.join(ws.appDir, 'helper', 'host.js'))) {
-        say(`app           FAILED to update ${ws.appDir}: ${e.message}; kept the existing copy`);
+        note(`app           FAILED to update ${ws.appDir}: ${e.message}; kept the existing copy`);
         root = ws.appDir;
       } else {
-        say(`app           FAILED to copy TRIF into ${ws.appDir}: ${e.message}`);
-        return { ok, lines, ws, manifests: [], nodePath: null, mode, root: null, migration };
+        note(`app           FAILED to copy TRIF into ${ws.appDir}: ${e.message}`);
+        return { ok, lines: shown(), ws, manifests: [], nodePath: null, mode, root: null, migration };
       }
     }
   } else {
     say(`app           ${root} (linked: the wrappers run this folder)`);
     if (!P.isGitCheckout(root)) {
-      say(`              warning: ${root} isn't a git checkout. If it goes away (npm deletes its npx cache),`);
-      say('              TRIF stops working. Run setup without --link to install a copy instead.');
+      note(`              warning: ${root} isn't a git checkout. If it goes away (npm deletes its npx cache),`);
+      note('              TRIF stops working. Run setup without --link to install a copy instead.');
     }
     if (fs.existsSync(ws.appDir) && realOrResolved(ws.appDir) !== realOrResolved(root)) {
       say(`              (an earlier copy in ${ws.appDir} is no longer used; you can delete it)`);
@@ -412,32 +441,41 @@ function setup(opts = {}) {
   }
   const helperDir = path.join(root, 'helper');
   const extensionDir = path.join(root, 'extension');
+  tell(`✓ TRIF ${P.VERSION} ${mode === 'copy' ? 'installed' : `linked to ${root}`} in ${homeRelative(home)}`);
 
   const agentsSrc = path.join(helperDir, 'workspace', 'AGENTS.md');
   if (fs.existsSync(agentsSrc)) {
     fs.copyFileSync(agentsSrc, path.join(home, 'AGENTS.md'));
     say(`              AGENTS.md refreshed from ${agentsSrc}`);
   } else {
-    say(`              AGENTS.md not found at ${agentsSrc}; skipped`);
+    note(`              AGENTS.md not found at ${agentsSrc}; skipped`);
   }
+  // What the browsers being set up call TRIF's panel (Chrome's side panel, Firefox's sidebar, Safari's).
+  const panelWord = (() => {
+    let chosen = [];
+    try { chosen = opts.nativeDir ? [] : selectBrowsers(opts.browser); } catch { /* a bad --browser: reported below */ }
+    const words = [...new Set(chosen.map((t) => (t.firefox ? 'sidebar' : t.safari ? 'panel' : 'side panel')))];
+    return words.length ? words.join(' or ') : 'side panel';
+  })();
   if (!opts.noExamples) {
     const examplesDir = envVar('EXAMPLES_DIR') ? path.resolve(envVar('EXAMPLES_DIR')) : path.join(root, 'examples', 'sites');
     const { added, on, sites } = preinstallMods(home, ws.modsDir, examplesDir);
     const off = added.filter((id) => !on.includes(id));
     if (on.length) say(`mods          preinstalled, on: ${on.join(', ')}`);
-    if (off.length) say(`mods          preinstalled, off until you switch them on in the side panel: ${off.join(', ')}`);
+    if (off.length) say(`mods          preinstalled, off until you switch them on in the ${panelWord}: ${off.join(', ')}`);
     if (sites.length) say(`sites         TRIF starts on for ${sites.join(', ')} (off everywhere else until you turn it on there)`);
+    if (added.length) tell(`✓ Added the mods TRIF comes with${sites.length ? ` (it starts on for ${sites.join(', ')})` : ''}`);
     // Later versions of the shipped mods: unchanged copies are replaced, edited ones offered the new version.
     const vers = (m) => `${m.id}${m.version ? ` (version ${m.version})` : ''}`;
     try {
       const { updated, waiting } = updateShippedMods(home, ws.modsDir, examplesDir);
       if (updated.length) say(`mods          updated to the new version: ${updated.map(vers).join(', ')}`);
       if (waiting.length) {
-        say(`mods          new version waiting, not installed because you changed these: ${waiting.map(vers).join(', ')}`);
-        say('              (the side panel offers it on each: use it, keep yours, or merge them with your agent)');
+        note(`mods          new version waiting, not installed because you changed these: ${waiting.map(vers).join(', ')}`);
+        note(`              (the ${panelWord} offers it on each: use it, keep yours, or merge them with your agent)`);
       }
     } catch (e) {
-      say(`mods          couldn't update the mods TRIF ships: ${e.message}`);
+      note(`mods          couldn't update the mods TRIF ships: ${e.message}`);
     }
   }
   const claudeSrc = path.join(helperDir, 'workspace', 'CLAUDE.md');
@@ -450,9 +488,13 @@ function setup(opts = {}) {
   fs.mkdirSync(path.join(home, '.claude'), { recursive: true });
   fs.writeFileSync(path.join(home, '.claude', 'settings.json'), JSON.stringify(agents.CLAUDE_SETTINGS, null, 2) + '\n');
   const rec = recordPath(home, cleanPath(process.env.PATH), ws.modsDir);
-  if (rec.error) say(`              couldn't record PATH for agents: ${rec.error}`);
+  if (rec.error) note(`              couldn't record PATH for agents: ${rec.error}`);
   const found = agents.listAgents(P.workspace(opts.home), { version: false }).agents;
   say(`agents        ${found.map((a) => (a.available ? `${a.id} (${a.path})` : `${a.id} not found`)).join(', ')}`);
+  // (The open model runs through Codex: found with it.)
+  const agentNames = found.filter((a) => a.available && a.id !== 'codex-oss').map((a) => a.name);
+  if (agentNames.length) tell(`✓ Found ${agentNames.join(' and ')}`);
+  else note('agents        No coding agent found: install Claude Code (https://claude.com/claude-code) or Codex, then run setup again.');
 
   // 3. Wrappers
   const nodePath = pickNodePath();
@@ -484,11 +526,11 @@ function setup(opts = {}) {
   } else {
     targets = selectBrowsers(opts.browser, opts.homedir, platform, opts.env);
     if (!targets.length) {
-      say('browsers      no browser profile folder found; installing for Google Chrome anyway');
+      note('browsers      no browser profile folder found; installing for Google Chrome anyway');
       targets = selectBrowsers('chrome', opts.homedir, platform, opts.env);
     }
     if (legacySafari && !targets.some((t) => t.safari)) {
-      say('browsers      also Safari: its bridge from before 0.2.0 was installed, and is replaced by the new one');
+      note('browsers      also Safari: its bridge from before 0.2.0 was installed, and is replaced by the new one');
       targets.push(...selectBrowsers('safari'));
     }
   }
@@ -503,10 +545,10 @@ function setup(opts = {}) {
       if (!fs.existsSync(tokenFile)) fs.writeFileSync(tokenFile, require('crypto').randomBytes(32).toString('hex') + '\n', { mode: 0o600 });
       fs.chmodSync(tokenFile, 0o600);
       if (!P.isDefaultHome(home) || ws.private !== P.defaultPrivateDir()) {
-        say(`              warning: Safari's TRIF app only looks for ${path.join(P.defaultPrivateDir(), 'safari-token')}, so Safari`);
-        say(`              can't connect to a workspace elsewhere (${home})`);
+        note(`              warning: Safari's TRIF app only looks for ${path.join(P.defaultPrivateDir(), 'safari-token')}, so Safari`);
+        note(`              can't connect to a workspace elsewhere (${home})`);
       } else if (priv.moved.includes('safari-token')) {
-        say('              the key moved: install TRIF.app from this version (older ones look for it in ~/.trif)');
+        note('              the key moved: install TRIF.app from this version (older ones look for it in ~/.trif)');
       }
       const plist = opts.launchAgentsDir ? path.join(path.resolve(opts.launchAgentsDir), path.basename(safariAgentPlist())) : safariAgentPlist();
       const bridgeJs = path.join(helperDir, 'safari-bridge.js');
@@ -519,13 +561,13 @@ function setup(opts = {}) {
         if (fs.existsSync(legacyPlist)) { fs.rmSync(legacyPlist, { force: true }); say(`              removed ${legacyPlist} (its name before 0.2.0)`); }
         if (useLaunchctl) {
           const { error, later } = loadSafariAgent(plist, { changed: how !== 'unchanged' });
-          if (error) { ok = false; say(`              FAILED to start it: ${error}`); }
+          if (error) { ok = false; note(`              FAILED to start it: ${error}`); }
           else if (later) say('              restarting in a few seconds, onto this version');
           else say('              running (it starts again whenever you log in)');
         }
       } catch (e) {
         ok = false;
-        say(`Safari bridge FAILED to write ${plist}: ${e.message}`);
+        note(`Safari bridge FAILED to write ${plist}: ${e.message}`);
       }
       continue;
     }
@@ -539,27 +581,32 @@ function setup(opts = {}) {
       // Windows: the browser finds the manifest through its registry key (win/registry.js).
       if (win && t.regKeys) {
         const r = require('./win/setup').registerNativeHost(t, file, opts.regOpts);
-        if (r.error) { ok = false; say(`              FAILED: ${r.error}`); }
+        if (r.error) { ok = false; note(`native host   ${t.label}: FAILED: ${r.error}`); }
         else say(`              registered: ${r.keys.join(', ')}`);
       }
     } catch (e) {
       ok = false;
-      say(`native host   ${t.label}: FAILED to write ${file}: ${e.message}`);
+      note(`native host   ${t.label}: FAILED to write ${file}: ${e.message}`);
     }
   }
 
-  // 5. CLI link (Windows: <home>\bin goes on the user's PATH instead, win/setup.js userPathStep)
+  const setUp = targets.filter((t) => manifests.some((m) => m.browser === t.key)).map((t) => (t.key === 'custom' ? t.nativeDir : t.label));
+  if (setUp.length) tell(`✓ Set up for ${setUp.join(' and ')}`);
+
+  // 5. CLI link (Windows: <home>\\bin goes on the user's PATH instead, win/setup.js userPathStep)
   const binDir = opts.binDir ? path.resolve(opts.binDir) : '/usr/local/bin';
   const link = path.join(binDir, P.CLI_NAME);
+  let winPath = null;
   if (win) {
-    for (const l of require('./win/setup').userPathStep(ws, { noLink: !!opts.noLink, ...(opts.addToUserPath ? { add: opts.addToUserPath } : {}) })) say(l);
+    winPath = require('./win/setup').userPathStep(ws, { noLink: !!opts.noLink, ...(opts.addToUserPath ? { add: opts.addToUserPath } : {}) });
+    for (const l of winPath.lines) note(l);
   } else if (opts.noLink) {
     say('CLI link      skipped (--no-link)');
   } else {
     let lst = null;
     try { lst = fs.lstatSync(link); } catch { /* none */ }
     if (lst && !lst.isSymbolicLink()) {
-      say(`CLI link      ${link} exists and is not a symlink; left it alone`);
+      note(`CLI link      ${link} exists and is not a symlink; left it alone`);
     } else if (lst && fs.readlinkSync(link) === ws.cliWrapper) {
       say(`CLI link      ${link} -> ${ws.cliWrapper} (already)`);
     } else {
@@ -580,17 +627,29 @@ function setup(opts = {}) {
   const onPath = pathDirs.includes(path.resolve(ws.bin)) || (linked && pathDirs.includes(binDir));
   if (!onPath && !win) {
     const rc = rcFileHint();
-    say('');
-    say(`PATH          ${ws.bin} is not on your PATH. Add it with:`);
-    if (rc) say(`                echo 'export PATH="${ws.bin}:$PATH"' >> ${rc}   (then open a new terminal)`);
-    else say(`                fish_add_path ${ws.bin}`);
+    note('');
+    note(`PATH          ${ws.bin} is not on your PATH. Add it with:`);
+    if (rc) note(`                echo 'export PATH="${ws.bin}:$PATH"' >> ${rc}   (then open a new terminal)`);
+    else note(`                fish_add_path ${ws.bin}`);
   }
 
-  // 7. Next steps (Firefox's or Safari's alone when it's the only browser set up)
-  say('');
-  say('Next steps:');
+  // 7. Next steps (Firefox's or Safari's alone when it's the only browser set up). The `trif` commands in
+  // them as they work from this terminal: plain `trif` only when it's on PATH (just said if it isn't).
+  // (Windows: `trif` once it's on the user's PATH, in a new terminal as setup said; else the wrapper's full
+  // path, quoted as Command Prompt wants it.)
+  const trif = win ? (onPath || winPath.onPath ? P.CLI_NAME : `"${ws.cliWrapper}"`) : onPath ? P.CLI_NAME : homeRelative(ws.cliWrapper);
+  // The last words: the panel first (where a newcomer starts), the terminal route as an aside.
+  const sayThen = () => {
+    note('  Then open any website, click the TRIF icon, and ask for a change.');
+    note(`  (Or work with your coding agent in ${home}: it reads AGENTS.md there.)`);
+  };
+  note('');
+  note('Next steps:');
   const safariSteps = (n) => [
-    `${n}. Open TRIF.app (from the Safari download) once: it adds the TRIF extension to Safari.`,
+    // (No download yet: TRIF.app is built from a checkout, scripts/build-safari.js.)
+    `${n}. TRIF for Safari isn't a download yet: in a checkout of the TRIF repo, run`,
+    '   node scripts/build-safari.js (needs Xcode), then open dist/safari-app/TRIF.app once: it adds the',
+    '   TRIF extension to Safari.',
     `${n + 1}. Until TRIF is signed by Apple, let Safari run it: Safari → Settings → Advanced, tick "Show`,
     '   features for web developers"; then Settings → Developer, tick "Allow unsigned extensions" (Safari',
     '   turns this off whenever it quits, so tick it again after restarting Safari).',
@@ -598,54 +657,75 @@ function setup(opts = {}) {
     `${n + 3}. Click the TRIF toolbar button to open the panel (in Safari it's a window of its own).`,
   ];
   if (targets.every((t) => t.safari)) {
-    for (const l of safariSteps(1)) say(`  ${l}`);
-    say('  5. Check everything with: trif doctor');
-    say(`  Then ask your coding agent to work in ${home} (it reads AGENTS.md there).`);
-    return { ok, lines, ws, manifests, nodePath, mode, root, migration };
+    for (const l of safariSteps(1)) note(`  ${l}`);
+    note(`  5. Check everything with: ${trif} doctor`);
+    sayThen();
+    return { ok, lines: shown(), ws, manifests, nodePath, mode, root, migration, targets, trif };
   }
+  // setup installs no add-on: Firefox only keeps signed ones, and Mozilla signs each release's. The
+  // newest is on the latest GitHub release (scripts/release.js), from package.json's repository.
+  const xpiUrl = firefoxAddonUrl();
   if (!targets.some((t) => !t.firefox && !t.safari)) {
-    say('  1. Open the signed TRIF add-on (trif-firefox.xpi) in Firefox, e.g. drag it onto a Firefox');
-    say('     window, and click Add.');
-    say('  2. Click the TRIF toolbar button to open the sidebar, then "Allow user scripts" and Allow.');
-    say('  3. If Firefox was already running before this setup, quit it completely and reopen it.');
-    say('  4. Check everything with: trif doctor');
-    if (targets.some((t) => t.safari)) { say('  Safari:'); for (const l of safariSteps(1)) say(`    ${l}`); }
-    say(`  Then ask your coding agent to work in ${home} (it reads AGENTS.md there).`);
-    return { ok, lines, ws, manifests, nodePath, mode, root, migration };
+    if (xpiUrl) {
+      note('  1. Open this link in Firefox to install the TRIF add-on, and click Add:');
+      note(`       ${xpiUrl}`);
+      note('     (If Firefox downloads it instead, drag trif-firefox.xpi onto a Firefox window.)');
+    } else {
+      note('  1. Open the signed TRIF add-on (trif-firefox.xpi) in Firefox, e.g. drag it onto a Firefox');
+      note('     window, and click Add.');
+    }
+    note('  2. On the TRIF tab Firefox opens, click "Allow user scripts", then Allow.');
+    note('  3. If Firefox was already running before this setup, quit it completely and reopen it.');
+    note(`  4. Check everything with: ${trif} doctor`);
+    if (targets.some((t) => t.safari)) { note('  Safari:'); for (const l of safariSteps(1)) note(`    ${l}`); }
+    sayThen();
+    return { ok, lines: shown(), ws, manifests, nodePath, mode, root, migration, targets, trif };
   }
   // The extension folder is hidden (~/.trif) from Load unpacked's file picker, so on a Mac show it in
   // Finder, ready to drag onto chrome://extensions, and put its path on the clipboard for Cmd-Shift-G.
   // (Windows: in Explorer, the path ready to paste into the picker's address bar.)
   const revealed = !!opts.reveal && revealFolder(extensionDir);
-  say('  1. Install the extension. Until TRIF is on the Chrome Web Store, load it unpacked:');
+  const openedChrome = revealed && !win && targets.some((t) => t.key === 'chrome') && openChromeExtensions().opened;
+  note('  1. Install the extension. Until TRIF is on the Chrome Web Store, load it unpacked:');
   if (revealed && win) {
-    say('     open chrome://extensions and turn on "Developer mode" (top right). Then drag the "extension"');
-    say('     folder from the Explorer window that just opened onto that page. (Or click "Load unpacked",');
-    say(`     click the address bar and paste: the folder's path, ${extensionDir}, is on your clipboard.)`);
+    note('     open chrome://extensions and turn on "Developer mode" (top right). Then drag the "extension"');
+    note('     folder from the Explorer window that just opened onto that page. (Or click "Load unpacked",');
+    note(`     click the address bar and paste: the folder's path, ${extensionDir}, is on your clipboard.)`);
+  } else if (revealed && openedChrome) {
+    note('     on the chrome://extensions tab that just opened in Chrome, turn on "Developer mode" (top right).');
+    note('     Then drag the "extension" folder from the Finder window that just opened onto that page. (Or click');
+    note(`     "Load unpacked", press Cmd-Shift-G and paste: the folder's path, ${extensionDir}, is on your clipboard.)`);
   } else if (revealed) {
-    say('     open chrome://extensions and turn on "Developer mode" (top right). Then drag the "extension"');
-    say('     folder from the Finder window that just opened onto that page. (Or click "Load unpacked",');
-    say(`     press Cmd-Shift-G and paste: the folder's path, ${extensionDir}, is on your clipboard.)`);
+    note('     open chrome://extensions and turn on "Developer mode" (top right). Then drag the "extension"');
+    note('     folder from the Finder window that just opened onto that page. (Or click "Load unpacked",');
+    note(`     press Cmd-Shift-G and paste: the folder's path, ${extensionDir}, is on your clipboard.)`);
   } else {
-    say('     open chrome://extensions, turn on "Developer mode" (top right), click "Load unpacked"');
-    say(`     and choose ${extensionDir}`);
+    note('     open chrome://extensions, turn on "Developer mode" (top right), click "Load unpacked"');
+    note(`     and choose ${extensionDir}`);
   }
-  say(`     (its ID must be ${P.EXTENSION_ID}).${mode === 'copy' ? ' Keep that folder: Chrome runs the extension from it,' : ''}`);
-  if (mode === 'copy') say('     and setup updates it in place. (A Web Store listing will replace this step later.)');
-  say('  2. Turn on "Allow User Scripts": click "Open extension settings" on the TRIF tab Chrome opens,');
-  say('     or "Details" on TRIF in chrome://extensions.');
-  say('  3. Check everything with: trif doctor');
+  note(`     (its ID must be ${P.EXTENSION_ID}).${mode === 'copy' ? ' Keep that folder: Chrome runs the extension from it,' : ''}`);
+  if (mode === 'copy') note('     and setup updates it in place. (A Web Store listing will replace this step later.)');
+  note('  2. Turn on "Allow User Scripts": click "Open TRIF’s Chrome settings" on the TRIF tab Chrome opens,');
+  note('     or "Details" on TRIF in chrome://extensions.');
+  note(`  3. Check everything with: ${trif} doctor`);
   if (targets.some((t) => t.firefox)) {
-    say('  Firefox: open the signed TRIF add-on (.xpi) in Firefox to install it, then click the TRIF');
-    say('     toolbar button and "Allow user scripts". Restart Firefox if it was running before this setup.');
+    if (xpiUrl) {
+      note('  Firefox: open this link in Firefox to install the TRIF add-on:');
+      note(`       ${xpiUrl}`);
+      note('     Then click "Allow user scripts" on the TRIF tab Firefox opens. Restart Firefox if it was');
+      note('     running before this setup.');
+    } else {
+      note('  Firefox: open the signed TRIF add-on (.xpi) in Firefox to install it, then click "Allow user');
+      note('     scripts" on the TRIF tab it opens. Restart Firefox if it was running before this setup.');
+    }
   }
-  if (targets.some((t) => t.safari)) { say('  Safari:'); for (const l of safariSteps(1)) say(`    ${l}`); }
-  say(`  Then ask your coding agent to work in ${home} (it reads AGENTS.md there).`);
+  if (targets.some((t) => t.safari)) { note('  Safari:'); for (const l of safariSteps(1)) note(`    ${l}`); }
+  sayThen();
 
-  return { ok, lines, ws, manifests, nodePath, mode, root, migration };
+  return { ok, lines: shown(), ws, manifests, nodePath, mode, root, migration, targets, trif };
 }
 
 module.exports = {
   setup, recordPath, cleanPath, hostWrapperContent, cliWrapperContent, manifestFor, pickNodePath, shq, isExecutable,
-  chooseMode, installApp, sameTree, COPY_ITEMS, safariAgentContent, loadSafariAgent,
+  chooseMode, installApp, sameTree, COPY_ITEMS, safariAgentContent, loadSafariAgent, openChromeExtensions,
 };

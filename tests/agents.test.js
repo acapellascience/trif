@@ -997,7 +997,7 @@ test('setup records PATH (merging config.json) and writes .claude/settings.json;
   fs.writeFileSync(path.join(fakeBin, 'claude'), FAKE_CLAUDE);
   fs.chmodSync(path.join(fakeBin, 'claude'), 0o755);
   const termPath = `${fakeBin}:/usr/bin:/bin`;
-  let r = await runCli(['setup', '--native-dir', path.join(root, 'native'), '--no-link'], { home: ws, env: { PATH: termPath } });
+  let r = await runCli(['setup', '--verbose', '--native-dir', path.join(root, 'native'), '--no-link'], { home: ws, env: { PATH: termPath } });
   assert.equal(r.code, 0, r.stderr);
   // (Moved out of the workspace into the private folder, where runs can't read it.)
   assert.ok(!fs.existsSync(path.join(ws, 'config.json')));
@@ -1017,7 +1017,7 @@ test('setup records PATH (merging config.json) and writes .claude/settings.json;
   // Overwritten on every setup; a broken config.json is left alone.
   fs.writeFileSync(path.join(ws, '.claude', 'settings.json'), '{"permissions":{"allow":["Bash"]}}');
   fs.writeFileSync(path.join(privDir(ws), 'config.json'), '{ broken');
-  r = await runCli(['setup', '--native-dir', path.join(root, 'native'), '--no-link'], { home: ws, env: { PATH: termPath } });
+  r = await runCli(['setup', '--verbose', '--native-dir', path.join(root, 'native'), '--no-link'], { home: ws, env: { PATH: termPath } });
   assert.match(r.stdout, /couldn't record PATH for agents: .*not valid JSON/);
   assert.equal(fs.readFileSync(path.join(privDir(ws), 'config.json'), 'utf8'), '{ broken');
   assert.deepEqual(JSON.parse(fs.readFileSync(path.join(ws, '.claude', 'settings.json'), 'utf8')), settings);
@@ -1034,6 +1034,36 @@ test('setup records PATH (merging config.json) and writes .claude/settings.json;
   r = await runCli(['doctor', '--native-dir', path.join(root, 'native')], { home: ws, env: { PATH: termPath } });
   assert.match(r.stdout, /warn {2}Claude Code is at .*fakebin\/claude, but the helper won't find it there/);
   assert.match(r.stdout, /fix: run trif setup in this terminal/);
+});
+
+test('doctor: an agent that isn\'t logged in is only a warning when the side panel\'s default can\'t run either', async () => {
+  const root = tempDir();
+  const ws = path.join(root, 'ws');
+  const fakeBin = path.join(root, 'fakebin');
+  fs.mkdirSync(fakeBin);
+  const script = (name, body) => { fs.writeFileSync(path.join(fakeBin, name), `#!/bin/sh\n${body}\n`); fs.chmodSync(path.join(fakeBin, name), 0o755); };
+  const flag = path.join(root, 'claude-logged-in');
+  script('claude', `case "$1" in --version) echo "9.9.9 (Claude Code)";; auth) if [ -e ${JSON.stringify(flag)} ]; then echo '{"loggedIn": true, "authMethod": "claude.ai"}'; else echo '{"loggedIn": false}'; exit 1; fi;; esac`);
+  script('codex', 'case "$1" in --version) echo "codex-cli 0.140.0";; login) echo "Not logged in"; exit 1;; esac');
+  const termPath = `${fakeBin}:/usr/bin:/bin`;
+  await runCli(['setup', '--native-dir', path.join(root, 'native'), '--no-link', '--no-examples'], { home: ws, env: { PATH: termPath } });
+  fs.writeFileSync(flag, 'yes');
+  let r = await runCli(['doctor', '--native-dir', path.join(root, 'native')], { home: ws });
+  assert.match(r.stdout, /^ok {4}Claude Code is logged in \(claude\.ai\)$/m);
+  assert.match(r.stdout, /^- {5}Codex isn't logged in \(only needed if you pick it in the side panel\)$/m);
+  assert.doesNotMatch(r.stdout, /^warn .*Codex/m);
+  // The default (Claude Code, the first found) logged out too: both are warnings.
+  fs.rmSync(flag);
+  r = await runCli(['doctor', '--native-dir', path.join(root, 'native')], { home: ws });
+  assert.match(r.stdout, /^warn {2}Claude Code isn't logged in, so the side panel can't use it$/m);
+  assert.match(r.stdout, /^warn {2}Codex isn't logged in, so the side panel can't use it$/m);
+});
+
+test('doctor: real plurals', () => {
+  const { formatDoctor } = require('../helper/lib/doctor');
+  const fail = { status: 'fail', title: 'x' };
+  assert.match(formatDoctor({ ok: false, checks: [fail] }), /\n1 problem found\./);
+  assert.match(formatDoctor({ ok: false, checks: [fail, fail] }), /\n2 problems found\./);
 });
 
 // ------------------------------------------------------------------ merging a new version of a shipped mod

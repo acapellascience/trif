@@ -3,7 +3,7 @@
 // panel and the helper. See docs/PROTOCOL.md.
 
 import {
-  SETTINGS_URL, USER_SCRIPTS_OFF, FIREFOX, BROWSER, userScriptsAvailable, syncUserScripts, resolveTab, lastFocusedNormalWindow, tabInfo,
+  SETTINGS_URL, SETUP_COMMAND, USER_SCRIPTS_OFF, FIREFOX, BROWSER, userScriptsAvailable, syncUserScripts, resolveTab, lastFocusedNormalWindow, tabInfo,
   normalizeUrl, normalizeSite, hostMatchesSite, buildRunCode, buildPollCode, parseRunEnvelope, pageGuard,
   firstInjectionResult, withTimeout, filterRequests, nextBackoff, chromeVersion, toolLine,
   normalizeDisabled, modAppliesTo, urlInScope, modInScope, applyStartOff, modSites,
@@ -22,7 +22,7 @@ const CHROME = chromeVersion(navigator.userAgent);
 // which runs are still going (agent.running) and the others are finished.
 const PERSISTENT_HOST = !!chrome.runtime.getURL?.('')?.startsWith('safari-web-extension:');
 const LOAD_TIMEOUT = 30000;
-const NOT_CONNECTED = `The TRIF helper isn't connected. Run \`npx trif setup\` in a terminal (needs Node 18+), then restart ${BROWSER}.`;
+const NOT_CONNECTED = `The TRIF helper isn't connected. Run \`${SETUP_COMMAND}\` in a terminal (needs Node 18+), then restart ${BROWSER}.`;
 
 const state = {
   port: null,
@@ -296,42 +296,61 @@ function log(level, message) {
   post({ type: 'log', level, message });
 }
 
+// Commands that load a page: they wait for the mods the helper sent before them to be registered, so a
+// mod written just before (an agent's write, then `trif reload`) runs on the page they load.
+const LOADS_PAGE = new Set(['reload', 'navigate', 'open']);
+let modsApplied = Promise.resolve(); // the last mods message, until it's applied
+
 async function onHelperMessage(msg) {
   if (!msg || typeof msg !== 'object') return;
   if (msg.type === 'mods') {
-    state.mods = Array.isArray(msg.mods) ? msg.mods : [];
-    // Preinstalled mods, and mods made from another browser, arrive switched off the first time (before
-    // they're ever registered).
-    // These two take effect even if they can't be saved: then they're applied again, the same way, on
-    // the next start (startedOff and sitesOffered weren't saved either), so memory and storage agree in
-    // effect. And a failed write mustn't stop the mods from being applied.
-    const off = applyStartOff(state.mods, state.disabled, state.startedOff, state.installId);
-    if (off.changed) {
-      state.disabled = off.disabled;
-      state.startedOff = off.startedOff;
-      await save({ disabled: state.disabled, startedOff: state.startedOff }).catch((e) => log('warn', errMsg(e)));
-    }
-    // Sites setup starts TRIF on for (the preinstalled mods' sites), each turned on once.
-    const sites = applyStartSites(state.sitesOn, state.sitesOffered, msg.sitesOn);
-    if (sites.changed) {
-      state.sitesOn = sites.sitesOn;
-      state.sitesOffered = sites.offered;
-      await save({ sitesOn: state.sitesOn, sitesOffered: state.sitesOffered }).catch((e) => log('warn', errMsg(e)));
-      notifyPanels();
-    }
-    const modsJson = JSON.stringify(state.mods);
-    if (modsJson !== savedModsJson) {
-      await save({ mods: state.mods }).then(() => { savedModsJson = modsJson; }, (e) => log('warn', errMsg(e)));
-    }
-    reportApplied(await serial(applyMods));
-  } else if (msg.type === 'request') {
+    const applying = onModsMessage(msg);
+    modsApplied = applying.catch(() => {});
+    return applying;
+  }
+  if (msg.type === 'request') {
+    if (LOADS_PAGE.has(msg.cmd)) await modsApplied;
     try {
       const result = await runCommand(msg.cmd, msg.args || {});
       post({ type: 'response', id: msg.id, ok: true, result: result === undefined ? null : result });
     } catch (e) {
       post({ type: 'response', id: msg.id, ok: false, error: errMsg(e) });
     }
-  } else if (msg.type === 'response') {
+    return;
+  }
+  return onOtherHelperMessage(msg);
+}
+
+async function onModsMessage(msg) {
+  state.mods = Array.isArray(msg.mods) ? msg.mods : [];
+  // Preinstalled mods, and mods made from another browser, arrive switched off the first time (before
+  // they're ever registered).
+  // These two take effect even if they can't be saved: then they're applied again, the same way, on
+  // the next start (startedOff and sitesOffered weren't saved either), so memory and storage agree in
+  // effect. And a failed write mustn't stop the mods from being applied.
+  const off = applyStartOff(state.mods, state.disabled, state.startedOff, state.installId);
+  if (off.changed) {
+    state.disabled = off.disabled;
+    state.startedOff = off.startedOff;
+    await save({ disabled: state.disabled, startedOff: state.startedOff }).catch((e) => log('warn', errMsg(e)));
+  }
+  // Sites setup starts TRIF on for (the preinstalled mods' sites), each turned on once.
+  const sites = applyStartSites(state.sitesOn, state.sitesOffered, msg.sitesOn);
+  if (sites.changed) {
+    state.sitesOn = sites.sitesOn;
+    state.sitesOffered = sites.offered;
+    await save({ sitesOn: state.sitesOn, sitesOffered: state.sitesOffered }).catch((e) => log('warn', errMsg(e)));
+    notifyPanels();
+  }
+  const modsJson = JSON.stringify(state.mods);
+  if (modsJson !== savedModsJson) {
+    await save({ mods: state.mods }).then(() => { savedModsJson = modsJson; }, (e) => log('warn', errMsg(e)));
+  }
+  reportApplied(await serial(applyMods));
+}
+
+async function onOtherHelperMessage(msg) {
+  if (msg.type === 'response') {
     const p = state.pending.get(msg.id);
     if (!p) return;
     state.pending.delete(msg.id);

@@ -45,6 +45,17 @@ function githubRepo(pkg = packageJson()) {
   return m ? `${m[1]}/${m[2]}` : null;
 }
 
+// The signed Firefox add-on's name on every GitHub release, next to the versioned copy
+// (trif-firefox-<version>.xpi) that updates/firefox.json points at. With the same name on each release,
+// GitHub's releases/latest/download/ link always gets the newest one: setup prints it, the README links it.
+const FIREFOX_XPI = 'trif-firefox.xpi';
+
+/** Where to get the newest Firefox add-on: the GitHub repo's latest release, or null without a repo. */
+function firefoxAddonUrl(pkg = packageJson()) {
+  const repo = githubRepo(pkg);
+  return repo ? `https://github.com/${repo}/releases/latest/download/${FIREFOX_XPI}` : null;
+}
+
 /** Where the feed is: config.json "updateFeed" (a URL to latest.json), else the GitHub repo's. */
 function feedUrl(ws, pkg) {
   if (typeof ws.config?.updateFeed === 'string' && ws.config.updateFeed.trim()) return ws.config.updateFeed.trim();
@@ -306,7 +317,7 @@ function installedVersion(ws) {
 }
 
 module.exports = {
-  UpdateError, CHECK_EVERY_MS, githubRepo, feedUrl, compareVersions, allowedUrl, fetchUrl, verifyFeed, fetchFeed,
+  UpdateError, CHECK_EVERY_MS, githubRepo, FIREFOX_XPI, firefoxAddonUrl, feedUrl, compareVersions, allowedUrl, fetchUrl, verifyFeed, fetchFeed,
   readState, writeState, setConfigKey, autoUpdateOn, checksOn, installable, summary, check, install, installedVersion,
   browsersSetUp,
 };

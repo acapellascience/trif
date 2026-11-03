@@ -3,11 +3,12 @@
 // chrome.storage.local `chat:<site>`; this page renders that record and reacts to storage changes.
 // See docs/PROTOCOL.md, "Side panel and agent runs".
 
-import { siteForUrl, modAppliesTo, modSites, isMultiSite, offOnSite, normalizeOffSites, isLoginUrl, scopeFor, limitToSites, withOffSites, FIREFOX, BROWSER,
+import { siteForUrl, modAppliesTo, modSites, isMultiSite, offOnSite, normalizeOffSites, scopeFor, limitToSites, withOffSites, FIREFOX, BROWSER, SETUP_COMMAND,
   normalizeSettings, normalizePicks, siteSettings, withoutModel } from './lib.js';
-import { renderMarkdown, MARKDOWN_ELEMENTS, MARKDOWN_ATTRIBUTES } from './markdown.js';
+import { setMarkdown } from './markdown.js';
+import { createLogin } from './login.js';
 import { modSwitch, syncSwitches, shownEnabled, switchError, enabledIn, onSwitchChange } from './modswitch.js';
-import { mountOpenModel, renderOpenModel } from './openmodel.js';
+import { mountOpenModel, renderOpenModel, openModelKeyMissing, watchOpenModel } from './openmodel.js';
 
 const $ = (sel) => document.querySelector(sel);
 const chatKey = (site) => `chat:${site}`;
@@ -15,12 +16,13 @@ const emptyChat = () => ({ sessionId: null, agent: null, messages: [], run: null
 
 const ui = {
   dot: $('#dot'), site: $('#site'), barRobot: $('#bar-robot'), siteSwitch: $('#site-switch'), newChat: $('#new-chat'), settingsBtn: $('#settings-btn'),
-  gate: $('#gate'), gateBtn: $('#gate-btn'), gateErr: $('#gate-err'), landing: $('#landing'), landingVersion: $('#landing-version'),
+  gate: $('#gate'), gateBtn: $('#gate-btn'), gateErr: $('#gate-err'), gateNote: $('#gate-note'),
+  landing: $('#landing'), landingIcon: $('#landing-icon'), landingVersion: $('#landing-version'), landingNote: $('#landing-note'),
   settings: $('#settings'), agent: $('#agent'), agentNote: $('#agent-note'), model: $('#model'),
   modelCustomRow: $('#model-custom-row'), modelCustom: $('#model-custom'), modelNote: $('#model-note'),
   instructions: $('#instructions'), instructionsNote: $('#instructions-note'),
   autoUpdate: $('#auto-update'), updateNote: $('#update-note'), update: $('#update'),
-  notice: $('#notice'), mods: $('#mods'), modsCount: $('#mods-count'), modList: $('#mod-list'),
+  notice: $('#notice'), paused: $('#paused'), mods: $('#mods'), modsCount: $('#mods-count'), modList: $('#mod-list'),
   chat: $('#chat'), empty: $('#empty'), messages: $('#messages'), working: $('#working'),
 
   composer: $('#composer'), input: $('#input'), send: $('#send'), stop: $('#stop'),
@@ -47,7 +49,6 @@ const view = {
   disabled: {},              // chrome.storage.local `disabled`: mods switched off (by anyone: panel, agent, CLI)
   offSites: {},              // chrome.storage.local `offSites`: mods switched off on some of their sites
   myRuns: new Set(),         // runs this panel started
-  login: null,               // agent login in progress: {loginId, agent, name, fix, phase, url, error, early}
   updated: null,             // chrome.storage.local `updated`: {from, to, notes, at} after an update's reload
   updateBusy: null,          // 'checking' | 'installing' while the panel waits on the helper
   updateError: null,
@@ -86,9 +87,7 @@ function onPortMessage(msg) {
     pending.delete(msg.reqId);
     if (msg.ok) p.resolve(msg.result); else p.reject(new Error(msg.error || 'error'));
   } else if (msg?.type === 'agentEvent') {
-    const L = view.login;
-    if (L && L.loginId && msg.runId === L.loginId) return onLoginEvent(L, msg.event);
-    if (L && !L.loginId && !view.myRuns.has(msg.runId) && L.early.length < 50) L.early.push(msg); // before agent.login's reply
+    if (login.onAgentEvent(msg, (runId) => view.myRuns.has(runId))) return;
     // The transcript arrives through storage; only our own runs matter here.
     if (!view.myRuns.has(msg.runId)) return;
     if (msg.event?.kind === 'done') {
@@ -129,6 +128,7 @@ async function loadAgents() {
   try {
     view.agents = await request({ type: 'agent.list' });
     view.agentsError = null;
+    watchOpenModel(currentAgent().id, true, true); // its key may have been saved from a terminal meanwhile
   } catch (e) {
     view.agents = null;
     view.agentsError = String(e?.message ?? e);
@@ -252,17 +252,6 @@ function code(text) {
   return el('code', null, text);
 }
 
-/** Insert renderMarkdown output (already safe by construction) through the Sanitizer as a second fence. */
-function setMarkdown(node, text) {
-  const html = renderMarkdown(text);
-  if (typeof node.setHTML === 'function') {
-    try {
-      node.setHTML(html, { sanitizer: { elements: MARKDOWN_ELEMENTS, attributes: MARKDOWN_ATTRIBUTES } });
-      return;
-    } catch { /* older Sanitizer API shape: fall through */ }
-  }
-  node.innerHTML = html;
-}
 
 function messageNode(m) {
   const li = el('li', `msg ${m.role}`);
@@ -299,16 +288,27 @@ function render() {
   ui.site.title = view.tab?.url || '';
   document.title = site ? `TRIF · ${site}` : 'Tim\'s Robot Internet Fixer';
 
+  // What's in the way (problemNow): the dot, the colours (body.blocked: red; body.needs-login: yellow,
+  // not on the landing page, where no agent is needed yet) and the gate's and landing page's one line all
+  // follow it, so they can't disagree.
+  watchOpenModel(agentInfo?.id, helperOk);
+  const problem = problemNow({ helperOk, agentInfo });
+  const red = RED.has(problem);
+  document.body.classList.toggle('blocked', red);
+  document.body.classList.toggle('needs-login', !!problem && !red && !!site);
+  document.body.dataset.problem = problem || '';
+
   // Status dot
   let dot = 'bad';
   let dotLabel = 'Helper not connected';
   if (!status) { dot = ''; dotLabel = 'Checking…'; }
   else if (helperOk) {
-    const agentOk = agentInfo ? agentInfo.available && agentInfo.loggedIn !== false : anyAgent;
-    dot = status.userScripts && agentOk && !runsOff ? 'ok' : 'warn';
-    dotLabel = !status.userScripts ? 'User scripts are off'
+    const agentOk = !problem && !runsOff && (agentInfo ? agentInfo.available : anyAgent);
+    dot = red ? 'bad' : agentOk ? 'ok' : 'warn';
+    dotLabel = problem === 'scripts' ? 'User scripts are off'
+      : problem === 'login' ? `${agentInfo?.name || 'The agent'} isn’t logged in`
+      : problem === 'key' ? `No ${openModelKeyMissing()} API key yet`
       : runsOff ? runsOff.title
-      : agentInfo?.available && agentInfo.loggedIn === false ? `${agentInfo.name} isn’t logged in`
       : !agentOk ? 'Coding agent not available'
       : `Ready${agentInfo ? ` · ${agentInfo.name}` : ''}`;
   }
@@ -317,10 +317,17 @@ function render() {
   ui.dot.setAttribute('aria-label', dotLabel);
 
   // Before the mods: a mod's "Merge with my agent" starts a run too.
-  const canSend = !runsOff && !!site && helperOk && (agentInfo ? agentInfo.available : (view.agents ? anyAgent : true));
+  // Not while the agent is known to be logged out (or the open model has no key): the run would only fail
+  // with that, under the notice that says it. Send's tooltip says what to do. Nor where the helper says
+  // chats from the panel aren't available (runsOff).
+  const waitsForLogin = (problem === 'login' && agentInfo?.loggedIn === false) || problem === 'key';
+  const canSend = !runsOff && !!site && helperOk && !waitsForLogin && (agentInfo ? agentInfo.available : (view.agents ? anyAgent : true));
   ui.composer.dataset.canSend = canSend ? '1' : '';
+  ui.send.title = !waitsForLogin ? 'Send'
+    : problem === 'key' ? `Add your ${openModelKeyMissing()} API key in Settings first`
+      : `Log in to ${agentInfo?.name || 'your agent'} first`;
 
-  renderGate();
+  renderGate(problem, agentInfo);
   renderNotice({ helperOk, agentInfo, anyAgent });
   renderUpdate();
   renderMods();
@@ -338,18 +345,104 @@ function render() {
   ui.send.disabled = !canSend;
 }
 
+// Red (mods can't run): the helper isn't connected, or user scripts are off. Yellow, the rest: the agent
+// can't run until the user logs in (or saves the open model's key).
+const RED = new Set(['helper', 'scripts']);
+
+/** What's in the way: 'helper', 'scripts', 'login', 'key' (in that order: red first), or null. */
+function problemNow({ helperOk, agentInfo }) {
+  const { status } = view;
+  if (!status) return null;
+  if (!helperOk) return 'helper';
+  if (!status.userScripts) return 'scripts';
+  if (needsLogin(agentInfo)) return 'login';
+  if (agentInfo?.id === 'codex-oss' && agentInfo.available && openModelKeyMissing()) return 'key';
+  return null;
+}
+
+/**
+ * The problem in one line, for the gate and the landing page (the site's own page has the notices):
+ * the notice's words, shortened, with its action as a link.
+ */
+function problemLine(problem, agentInfo) {
+  const link = (text, onClick) => {
+    const a = el('a', null, text);
+    a.href = '#';
+    a.addEventListener('click', (e) => { e.preventDefault(); onClick(); });
+    return a;
+  };
+  const p = el('p');
+  switch (problem) {
+    case 'helper':
+      p.append('The TRIF helper isn’t connected. Run ', code(SETUP_COMMAND), ` in a terminal, then restart ${BROWSER}. `, link('Setup page', openSetup));
+      break;
+    case 'scripts':
+      if (FIREFOX) p.append('Mods are paused. ', link('Allow user scripts', allowUserScripts));
+      else p.append('Mods are paused: turn on “Allow User Scripts” for TRIF. ', link('Open extension settings', allowUserScripts));
+      break;
+    case 'login': {
+      const name = agentInfo?.name || 'The agent';
+      const fix = agentInfo?.loginFix || '';
+      if (agentInfo?.canLogin) p.append(`${name} isn’t logged in. `, link('Log in', () => login.start(agentInfo.id, name, fix)));
+      else return markdownBlock('', `${name} isn’t logged in.${fix ? ` To log in, ${fix}.` : ''}`);
+      break;
+    }
+    case 'key':
+      p.append(`No ${openModelKeyMissing()} API key yet: add it in `, link('Settings', openSettings), '.');
+      break;
+    default:
+      return null;
+  }
+  return p;
+}
+
+/** Fill a one-line problem spot (rebuilt only when what it says changes, so a link isn't swapped mid-click). */
+function renderProblemLine(node, problem, agentInfo) {
+  const key = problem ? JSON.stringify([problem, BROWSER, agentInfo?.name, agentInfo?.canLogin, agentInfo?.loginFix, problem === 'key' && openModelKeyMissing()]) : '';
+  if (node.dataset.key === key) return;
+  node.dataset.key = key;
+  const line = problem ? problemLine(problem, agentInfo) : null;
+  node.replaceChildren(...(line ? [line] : []));
+  node.hidden = !line;
+}
+
+// Turning user scripts on: in Firefox a permission prompt, which must open from the click itself; in
+// Chrome, the extension's settings page, where the switch is.
+function allowUserScripts() {
+  if (FIREFOX) chrome.permissions.request({ permissions: ['userScripts'] }).then(() => setTimeout(refreshStatus, 300), () => {});
+  else chrome.tabs.create({ url: view.status?.settingsUrl || `chrome://extensions/?id=${chrome.runtime.id}` });
+}
+
+/** User scripts off: "Mods are paused", in a notice of its own above the rest (a login notice too). */
+function renderPaused(helperOk) {
+  const n = ui.paused;
+  const off = !!view.site && helperOk && !view.status.userScripts;
+  n.hidden = !off;
+  if (!off || n.childElementCount) return;
+  const actions = el('p', 'actions');
+  actions.append(button(FIREFOX ? 'Allow user scripts' : 'Open extension settings', 'primary', allowUserScripts));
+  n.replaceChildren(el('p', 'title', 'Mods are paused'), el('p', null, FIREFOX
+    ? 'Allow user scripts for TRIF so mods can run on websites.'
+    : 'Turn on “Allow User Scripts” for TRIF so mods can run on websites.'), actions);
+}
+
 function renderNotice({ helperOk, agentInfo, anyAgent }) {
   const n = ui.notice;
   const { site, status } = view;
   const parts = [];
   let bad = false;
-  if (helperOk && (view.login || needsLogin(agentInfo))) {
+  renderPaused(helperOk);
+  // A login started from the gate's line goes on in the gate (renderGate leaves the line out meanwhile).
+  const inGate = !ui.gate.hidden && !!login.current && !document.body.classList.contains('blocked');
+  if (inGate && n.parentElement !== ui.gate) ui.gate.append(n);
+  else if (!inGate && n.nextElementSibling !== ui.update) ui.update.before(n);
+  if (helperOk && (login.current || needsLogin(agentInfo))) {
     // Built once per state, so the status refresh doesn't wipe the code being typed.
-    const L = view.login;
+    const L = login.current;
     const key = JSON.stringify(['login', L?.phase, L?.error, L?.name || agentInfo?.name, agentInfo?.canLogin, agentInfo?.loginFix]);
     if (n.dataset.key === key && !n.hidden) return;
     n.dataset.key = key;
-    const { nodes, tone } = loginNotice(agentInfo);
+    const { nodes, tone } = login.nodes(agentInfo);
     n.replaceChildren(...nodes);
     n.classList.toggle('bad', tone === 'bad');
     n.classList.toggle('ok', tone === 'ok');
@@ -364,7 +457,7 @@ function renderNotice({ helperOk, agentInfo, anyAgent }) {
   } else if (status && !helperOk) {
     bad = true;
     const p = el('p');
-    p.append('Run ', code('npx trif setup'), ` in a terminal (needs Node 18+), then restart ${BROWSER}.`);
+    p.append('Run ', code(SETUP_COMMAND), ` in a terminal (needs Node 18+), then restart ${BROWSER}.`);
     parts.push(el('p', 'title', 'The TRIF helper isn’t connected'), p);
     if (status.helper.error) parts.push(el('p', 'note', `${BROWSER} says: ${status.helper.error}`));
     const actions = el('p', 'actions');
@@ -383,20 +476,7 @@ function renderNotice({ helperOk, agentInfo, anyAgent }) {
     actions.append(retry, setup, report);
     parts.push(actions);
   } else if (status && !status.userScripts) {
-    parts.push(el('p', 'title', 'Mods are paused'));
-    parts.push(el('p', null, FIREFOX
-      ? 'Allow user scripts for TRIF so mods can run on websites.'
-      : 'Turn on “Allow User Scripts” for TRIF so mods can run on websites.'));
-    const actions = el('p', 'actions');
-    const open = el('button', 'btn primary', FIREFOX ? 'Allow user scripts' : 'Open extension settings');
-    open.type = 'button';
-    open.addEventListener('click', () => {
-      // Firefox grants userScripts only through this prompt, which must open from the click itself.
-      if (FIREFOX) chrome.permissions.request({ permissions: ['userScripts'] }).then(() => setTimeout(refreshStatus, 300), () => {});
-      else chrome.tabs.create({ url: status.settingsUrl || `chrome://extensions/?id=${chrome.runtime.id}` });
-    });
-    actions.append(open);
-    parts.push(actions);
+    // "Mods are paused" (renderPaused).
   } else if (helperOk && view.agents?.runsOff) {
     parts.push(el('p', 'title', view.agents.runsOff.title), el('p', null, view.agents.runsOff.text));
   } else if (helperOk && view.agents && (agentInfo ? !agentInfo.available : !anyAgent)) {
@@ -406,7 +486,7 @@ function renderNotice({ helperOk, agentInfo, anyAgent }) {
       if (agentInfo.note) { const p = el('p'); setMarkdown(p, agentInfo.note); parts.push(p); }
     } else {
       parts.push(el('p', 'title', 'No coding agent found'));
-      parts.push(el('p', null, 'Install Claude Code, then run npx trif setup again from the same terminal.'));
+      parts.push(el('p', null, `Install Claude Code, then run ${SETUP_COMMAND} again from the same terminal.`));
     }
     if (anyAgent) parts.push(el('p', 'note', 'Pick another agent in Settings.'));
   } else if (helperOk && view.agentsError && !view.agents) {
@@ -445,160 +525,21 @@ function markdownBlock(className, text) {
   return d;
 }
 
-/** Notice contents for the login flow: {nodes, tone: ''|'bad'|'ok'}. */
-function loginNotice(agentInfo) {
-  const L = view.login;
-  const name = L?.name || agentInfo?.name || 'The agent';
-  const fix = L?.fix || agentInfo?.loginFix || '';
-  const fallback = () => (fix ? markdownBlock('note', `Or ${fix}.`) : null);
-  const cancel = () => button('Cancel', '', cancelLogin);
-  const nodes = [];
-  let tone = '';
-  switch (L?.phase) {
-    case 'starting':
-      nodes.push(el('p', 'title', `Logging in to ${name}…`), el('p', null, 'Opening the sign-in page…'), actions(cancel()));
-      break;
-    case 'code': {
-      nodes.push(el('p', 'title', `Logging in to ${name}`),
-        el('p', null, 'Finish signing in in the tab that opened, then paste the code it shows here:'));
-      const form = el('form', 'login-form');
-      const input = el('input');
-      Object.assign(input, { type: 'text', name: 'code', placeholder: 'Code', autocomplete: 'off', spellcheck: false, required: true });
-      input.setAttribute('aria-label', 'Login code');
-      form.append(input, Object.assign(el('button', 'btn primary', 'Submit'), { type: 'submit' }));
-      form.addEventListener('submit', (e) => { e.preventDefault(); submitLoginCode(input.value); });
-      nodes.push(form);
-      if (L.error) nodes.push(el('p', 'note', L.error));
-      const again = el('a', null, 'Open the sign-in page again');
-      again.href = '#';
-      again.addEventListener('click', (e) => { e.preventDefault(); if (isLoginUrl(L.url)) chrome.tabs.create({ url: L.url, active: true }); });
-      nodes.push(actions(cancel(), again));
-      break;
-    }
-    case 'checking':
-      nodes.push(el('p', 'title', `Logging in to ${name}`), el('p', null, 'Checking the code…'), actions(cancel()));
-      break;
-    case 'success':
-      tone = 'ok';
-      nodes.push(el('p', 'title', 'Logged in'), el('p', null, `${name} is ready.`));
-      break;
-    case 'failed':
-      tone = 'bad';
-      nodes.push(el('p', 'title', `Couldn’t log in to ${name}`));
-      if (L.error) nodes.push(markdownBlock('', L.error));
-      nodes.push(actions(button('Try again', 'primary', () => startLogin(L.agent, name, fix))));
-      nodes.push(fallback());
-      break;
-    default: // not started
-      nodes.push(el('p', 'title', `${name} isn’t logged in`));
-      if (agentInfo?.canLogin) {
-        nodes.push(el('p', null, 'Log in with your account to use it from this panel.'));
-        nodes.push(actions(button('Log in', 'primary', () => startLogin(agentInfo.id, name, fix))));
-        nodes.push(fallback());
-      } else if (fix) {
-        nodes.push(markdownBlock('', `To log in, ${fix}.`));
-      }
-  }
-  return { nodes: nodes.filter(Boolean), tone };
+// Logging in (login.js): the notice shows its steps.
+const login = createLogin({ request, changed: () => render(), succeeded: () => { loadAgents(); answerLoginError(); } });
+
+// Logged in: a chat whose last message is a run's "isn't logged in" error gets a line saying it's sorted,
+// so the error doesn't sit there as if it still applied (and the login notice doesn't come back for it).
+function answerLoginError() {
+  const last = view.site ? view.chat.messages.at(-1) : null;
+  if (last?.role !== 'error' || !/isn[’']t logged in/i.test(String(last.text))) return;
+  request({ type: 'chat.note', site: view.site, text: `${login.current?.name || 'Your agent'} is logged in now: send your message again.` }).catch(() => {});
 }
 
 function actions(...children) {
   const p = el('p', 'actions');
   p.append(...children.filter(Boolean));
   return p;
-}
-
-async function startLogin(agent, name, fix) {
-  const L = { loginId: null, agent, name, fix, phase: 'starting', url: null, error: null, early: [] };
-  view.login = L;
-  render();
-  let loginId;
-  try {
-    ({ loginId } = await request({ type: 'agent.login', agent: agent || undefined }));
-  } catch (e) {
-    if (view.login === L) loginFailed(L, String(e?.message ?? e));
-    return;
-  }
-  if (view.login !== L) { // cancelled meanwhile
-    request({ type: 'agent.loginCancel', loginId }).catch(() => {});
-    return;
-  }
-  L.loginId = loginId;
-  const early = L.early.filter((m) => m.runId === loginId);
-  L.early = [];
-  for (const m of early) onLoginEvent(L, m.event);
-}
-
-function onLoginEvent(L, event) {
-  if (view.login !== L || !event) return;
-  switch (event.kind) {
-    case 'login': {
-      if (L.url) return;
-      if (!isLoginUrl(event.url)) {
-        request({ type: 'agent.loginCancel', loginId: L.loginId }).catch(() => {});
-        loginFailed(L, `${L.name} gave a sign-in link that isn’t on claude.com, claude.ai or anthropic.com, so TRIF didn’t open it.`);
-        return;
-      }
-      L.url = event.url;
-      L.phase = 'code';
-      chrome.tabs.create({ url: L.url, active: true }).catch((e) => console.warn('[TRIF] could not open the sign-in page', e));
-      break;
-    }
-    case 'text':
-      // A complaint about the code while it's being checked: let the user paste it again.
-      if (L.phase === 'checking' && /invalid|error|fail|expired|try again/i.test(String(event.text))) {
-        L.phase = 'code';
-        L.error = String(event.text);
-      }
-      break;
-    case 'error':
-      L.error = String(event.message || '');
-      break;
-    case 'done':
-      if (event.ok) {
-        L.phase = 'success';
-        L.error = null;
-        loadAgents();
-        setTimeout(() => { if (view.login === L) { view.login = null; render(); } }, 2500);
-      } else if (event.cancelled) {
-        view.login = null;
-      } else {
-        loginFailed(L, L.error || 'The login didn’t finish.');
-        return;
-      }
-      break;
-    default:
-      return;
-  }
-  render();
-}
-
-function loginFailed(L, message) {
-  L.phase = 'failed';
-  L.error = message;
-  render();
-}
-
-async function submitLoginCode(value) {
-  const L = view.login;
-  const code = String(value ?? '').trim();
-  if (!L || L.phase !== 'code' || !code) return;
-  L.phase = 'checking';
-  L.error = null;
-  render();
-  try {
-    await request({ type: 'agent.loginCode', loginId: L.loginId, code });
-  } catch (e) {
-    if (view.login === L && L.phase === 'checking') { L.phase = 'code'; L.error = String(e?.message ?? e); render(); }
-  }
-}
-
-function cancelLogin() {
-  const L = view.login;
-  if (!L) return;
-  view.login = null;
-  if (L.loginId) request({ type: 'agent.loginCancel', loginId: L.loginId }).catch(() => {});
-  render();
 }
 
 let modLabelSeq = 0;
@@ -652,11 +593,16 @@ const siteScope = () => (view.site ? scopeFor(view.site) : null);
 const siteIsOn = () => !!siteScope() && (view.status?.sitesOn || []).includes(siteScope());
 let siteSwitching = false;
 
-function renderGate() {
-  // No website in this tab: the landing page, only the robot and settings (body.no-site hides the rest).
+function renderGate(problem, agentInfo) {
+  const red = RED.has(problem);
+  // No website in this tab: the landing page, only the robot and settings (body.no-site hides the rest),
+  // and when something red is in the way, the robot in red and a line saying what.
   const noSite = !!view.tab && !view.site;
   document.body.classList.toggle('no-site', noSite);
   ui.landing.hidden = !noSite;
+  renderProblemLine(ui.landingNote, noSite && red ? problem : null, agentInfo);
+  const icon = `icons/robot-shaded${noSite && red ? '-red' : ''}.svg`;
+  if (ui.landingIcon.getAttribute('src') !== icon) ui.landingIcon.setAttribute('src', icon);
   // This extension's own version (the helper's is in settings: they can differ while one updates).
   if (noSite) ui.landingVersion.textContent = `TRIF ${chrome.runtime.getManifest().version}`;
   const scope = siteScope();
@@ -667,14 +613,18 @@ function renderGate() {
   ui.siteSwitch.hidden = !known;
   ui.siteSwitch.setAttribute('aria-checked', String(siteIsOn()));
   ui.siteSwitch.setAttribute('aria-busy', String(siteSwitching));
-  ui.siteSwitch.title = ui.siteSwitch.dataset.error || (scope ? `Turn the robot ${siteIsOn() ? 'off' : 'on'} on ${scope}` : '');
+  ui.siteSwitch.title = ui.siteSwitch.dataset.error || (scope ? `Turn the robot ${siteIsOn() ? 'off' : 'on'} for ${scope}` : '');
   ui.siteSwitch.setAttribute('aria-label', ui.siteSwitch.title);
   // The robot in the bar: the same switch, so the same words and the same busy look.
   ui.barRobot.hidden = !known;
   ui.barRobot.setAttribute('aria-busy', String(siteSwitching));
   ui.barRobot.title = ui.siteSwitch.title;
   ui.barRobot.setAttribute('aria-label', ui.siteSwitch.title);
+  // The problem in one line under "The robot is off." (but not during a login started from it: its
+  // notice shows there instead, renderNotice). Red: no Fix button, which couldn't work.
+  renderProblemLine(ui.gateNote, gated && !(login.current && !red) ? problem : null, agentInfo);
   if (!gated) return;
+  ui.gateBtn.hidden = red;
   ui.gateBtn.textContent = `Fix ${scope}`;
   ui.gateBtn.disabled = siteSwitching;
 }
@@ -861,7 +811,7 @@ function updateModItem(li, m) {
   if (merge) {
     merge.disabled = view.merging.has(m.id) || !!view.chat.run || !ui.composer.dataset.canSend;
     merge.title = view.chat.run ? 'Your agent is busy in this chat; this waits until it\'s done.'
-      : !ui.composer.dataset.canSend ? 'No coding agent is available here yet.'
+      : !ui.composer.dataset.canSend ? (ui.send.title !== 'Send' ? `${ui.send.title}.` : 'No coding agent is available here yet.')
         : 'Your agent looks at both versions and suggests how to merge them; nothing changes until you say so.';
   }
   const rowErr = view.modErrors.get(m.id)?.message;
@@ -1118,12 +1068,14 @@ for (const chip of document.querySelectorAll('.chip')) {
     ui.input.focus();
   });
 }
-ui.settingsBtn.addEventListener('click', () => {
-  const open = ui.settings.hidden;
+ui.settingsBtn.addEventListener('click', () => toggleSettings());
+/** Open or close Settings (open: true just opens them). */
+function toggleSettings(open = ui.settings.hidden) {
   ui.settings.hidden = !open;
   ui.settingsBtn.setAttribute('aria-expanded', String(open));
   if (open && view.status?.helper?.connected) { loadAgents().then(() => loadModels(currentAgent().id)); loadInstructions(); }
-});
+}
+const openSettings = () => { if (ui.settings.hidden) toggleSettings(true); };
 
 // The user's standing instructions for every agent run: ~/.trif/instructions.md, read and written
 // through the helper (helper/lib/instructions.js). Loaded when settings open; saved as they type.
@@ -1191,7 +1143,7 @@ ui.modelCustom.addEventListener('input', () => {
 });
 ui.modelCustom.addEventListener('change', () => { clearTimeout(modelTimer); saveModel(currentAgent().id, ui.modelCustom.value.trim()); });
 $('#setup-link').addEventListener('click', (e) => { e.preventDefault(); openSetup(); });
-mountOpenModel({ request, onChange: async () => { await forgetModelPicks('codex-oss'); loadModels('codex-oss', true); } });
+mountOpenModel({ request, onChange: async () => { await forgetModelPicks('codex-oss'); loadModels('codex-oss', true); }, changed: () => render() });
 
 // ---- updates ------------------------------------------------------------------------------------
 // The helper checks for a newer TRIF (helper/lib/update.js) and its summary rides on the status. The

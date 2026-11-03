@@ -69,20 +69,23 @@ function checkNativeHost(t, file, opts = {}) {
   return null;
 }
 
-/** Setup's PATH step: lines to say. `noLink`: leave the user's PATH alone (updates pass --no-link). */
+/**
+ * Setup's PATH step: {lines, onPath} (onPath: `trif` works in a new terminal). `noLink`: leave the user's
+ * PATH alone (updates pass --no-link).
+ */
 function userPathStep(ws, { noLink = false, pathEnv = process.env.PATH, add = addToUserPath } = {}) {
   const dirs = String(pathEnv || '').split(';').filter(Boolean).map((d) => d.replace(/[\\/]+$/, '').toLowerCase());
   const here = dirs.includes(ws.bin.replace(/[\\/]+$/, '').toLowerCase());
   if (noLink) {
-    return here ? [] : ['', `PATH          ${ws.bin} is not on your PATH (left alone: --no-link). Run setup without --no-link to add it.`];
+    return { onPath: here, lines: here ? [] : ['', `PATH          ${ws.bin} is not on your PATH (left alone: --no-link). Run setup without --no-link to add it.`] };
   }
   const r = add(ws.bin);
   if (r.error) {
-    return ['', `PATH          couldn't add ${ws.bin} to your PATH: ${r.error}`,
-      '              Add it yourself: Settings → System → About → Advanced system settings → Environment Variables.'];
+    return { onPath: here, lines: ['', `PATH          couldn't add ${ws.bin} to your PATH: ${r.error}`,
+      '              Add it yourself: Settings → System → About → Advanced system settings → Environment Variables.'] };
   }
-  if (r.how === 'added') return [`PATH          added ${ws.bin} to your PATH (open a new terminal to use trif)`];
-  return here ? [] : [`PATH          ${ws.bin} is on your PATH (open a new terminal to use trif)`];
+  if (r.how === 'added') return { onPath: true, lines: [`PATH          added ${ws.bin} to your PATH (open a new terminal to use trif)`] };
+  return { onPath: true, lines: here ? [] : [`PATH          ${ws.bin} is on your PATH (open a new terminal to use trif)`] };
 }
 
 /** Selects `dir` in an Explorer window and copies its path. Returns whether Explorer was started. */

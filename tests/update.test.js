@@ -11,7 +11,7 @@ const crypto = require('crypto');
 const { execFileSync } = require('child_process');
 const { tempDir, runCli, privDir } = require('./fake-extension');
 const U = require('../helper/lib/update');
-const { changelogSection, unreleasedSection, repoMismatch, remoteRepo, latestFeed, signBytes, firefoxFeed, xpiMatches } = require('../scripts/release');
+const { changelogSection, unreleasedSection, repoMismatch, remoteRepo, latestFeed, signBytes, firefoxFeed, xpiMatches, releaseAssets } = require('../scripts/release');
 
 const keys = () => {
   const { publicKey, privateKey } = crypto.generateKeyPairSync('ed25519');
@@ -85,6 +85,30 @@ test('githubRepo reads package.json "repository" in its usual spellings', () => 
   assert.equal(U.githubRepo({ repository: 'https://gitlab.com/tim/trif' }), null);
   assert.equal(U.feedUrl({ config: {} }, { repository: 'github:tim/trif' }), 'https://raw.githubusercontent.com/tim/trif/main/updates/latest.json');
   assert.equal(U.feedUrl({ config: { updateFeed: 'https://example.com/f.json' } }, {}), 'https://example.com/f.json');
+});
+
+test('the Firefox add-on link is the latest release\'s trif-firefox.xpi, and the README links the same', () => {
+  assert.equal(U.firefoxAddonUrl({ repository: 'github:tim/trif' }), 'https://github.com/tim/trif/releases/latest/download/trif-firefox.xpi');
+  assert.equal(U.firefoxAddonUrl({}), null);
+  // The README can't work it out from package.json, so it spells it out: it has to be this repo's.
+  const readme = fs.readFileSync(path.join(__dirname, '..', 'README.md'), 'utf8');
+  assert.ok(readme.includes(`(${U.firefoxAddonUrl()})`), `README.md links ${U.firefoxAddonUrl()}`);
+});
+
+test('release script: the signed add-on goes on the release twice, versioned and as trif-firefox.xpi', () => {
+  const out = fs.mkdtempSync(path.join(require('os').tmpdir(), 'wm-assets-'));
+  try {
+    const f = (name, body = name) => { fs.writeFileSync(path.join(out, name), body); return path.join(out, name); };
+    const files = { tgz: f('trif-9.9.9.tgz'), chromeZip: f('trif-chrome-9.9.9.zip'), zips: [f('trif-beta-chrome-9.9.9.zip')] };
+    const xpi = f('trif-firefox-9.9.9.xpi', 'signed');
+    const names = releaseAssets(out, { ...files, xpi }).map((a) => path.basename(a));
+    assert.deepEqual(names, ['trif-9.9.9.tgz', 'trif-chrome-9.9.9.zip', 'trif-firefox-9.9.9.xpi', U.FIREFOX_XPI, 'trif-beta-chrome-9.9.9.zip']);
+    assert.equal(fs.readFileSync(path.join(out, U.FIREFOX_XPI), 'utf8'), 'signed');
+    assert.ok(U.firefoxAddonUrl().endsWith(`/${U.FIREFOX_XPI}`), 'the link setup prints is that file');
+    fs.rmSync(path.join(out, U.FIREFOX_XPI));
+    assert.deepEqual(releaseAssets(out, { ...files, xpi: null }).map((a) => path.basename(a)), ['trif-9.9.9.tgz', 'trif-chrome-9.9.9.zip', 'trif-beta-chrome-9.9.9.zip']);
+    assert.ok(!fs.existsSync(path.join(out, U.FIREFOX_XPI)), 'no add-on, no copy');
+  } finally { fs.rmSync(out, { recursive: true, force: true }); }
 });
 
 test('compareVersions and allowedUrl', () => {

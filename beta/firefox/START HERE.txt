@@ -1,18 +1,19 @@
 TRIF {{VERSION}} beta (Firefox, Mac)
 ==============================
 
-TRIF (Tim's Robot Internet Fixer) lets your coding agent (Claude Code) customize websites for you. It comes with mods for
+TRIF (Tim's Robot Internet Fixer) lets your coding agent (Claude Code or Codex) customize websites for you. It comes with mods for
 Google, X, Amazon and Instagram, already on; everywhere else it stays off until you turn it on.
 
 You need
 - Firefox, up to date (Firefox menu > About Firefox).
-- Claude Code installed (https://claude.com/claude-code).
+- Claude Code (https://claude.com/claude-code) or Codex (https://github.com/openai/codex) installed.
+  (Or an open model through Codex, experimental: https://github.com/acapellascience/trif#open-models-experimental)
 - Node 18 or newer. Check in Terminal with:  node --version
   If that says "command not found", install it from https://nodejs.org (the LTS button).
 
 Already have an earlier beta? (It was called WebMods before version 0.2.0.)
   Do step 2 again from this folder (your mods and settings are kept; WebMods' folder ~/.webmods moves
-  to ~/.trif, leaving a link behind: don't delete ~/.webmods), then step 3 again to install the
+  to ~/.trif, leaving a link behind: don't delete ~/.webmods), then step 4 again to install the
   new add-on over the old one. From this version on, Firefox updates the add-on by itself, and the
   TRIF panel tells you when there's an update for the rest.
 
@@ -23,18 +24,20 @@ Install (about 2 minutes)
      cd ~/Downloads/trif-beta-firefox
      npx --yes --package ./trif-{{VERSION}}.tgz trif setup --browser firefox
 
-   It ends with a list of next steps (the ones below). You can ignore its notes about PATH or sudo.
+   It prints a few lines saying what it set up, then a list of next steps (the ones below). You can
+   ignore its note about PATH.
 
-3. Drag trif-firefox.xpi from this folder onto a Firefox window, and click Add.
-4. Click the TRIF button in the Firefox toolbar (if you don't see it, it's under the puzzle-piece
-   menu; pin it). In the sidebar, click "Allow user scripts", then Allow.
-5. Quit Firefox completely (Cmd-Q) and open it again.
+3. If Firefox was already running before this setup, quit it completely (Cmd-Q) and reopen it.
+4. Drag trif-firefox.xpi from this folder onto a Firefox window, and click Add.
+5. On the TRIF setup tab that opened in Firefox, click "Allow user scripts", then Allow.
+   (The TRIF button in the Firefox toolbar opens the sidebar, which offers it too. Don't see the
+   button? It's under the puzzle-piece menu: pin it.)
 
 Try it
 - Visit google.com, x.com, amazon.com or instagram.com: the mods are already working. Click the TRIF
   button to see them; each has a switch, and a green light when it's running on the page you're on.
 - On any other site, the sidebar says "The robot is off." Click "Fix <site>", then
-  describe the change you want ("hide the comments", "make it dark") and Claude writes a mod for it.
+  describe the change you want ("hide the comments", "make it dark") and your agent writes a mod for it.
   The first time, it may ask you to log in to Claude: click Log in and follow the steps.
 
 If something's wrong, click the gear in the TRIF panel, then "Report a problem". Or, if the panel

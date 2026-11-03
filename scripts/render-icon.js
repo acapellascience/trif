@@ -2,7 +2,9 @@
 'use strict';
 // Draws the TRIF icon (the robot's head: a dark squircle in a switch-green rim, with two mint eyes) into
 // extension/icons/robot-<size>.png, antialiased with 8x8 supersampling, and writes the same shapes to
-// store/icon.svg and the side panel's big shaded robot to extension/icons/robot-shaded.svg. No dependencies: shapes are superellipses, PNGs are written by hand.
+// store/icon.svg and the side panel's big shaded robot to extension/icons/robot-shaded.svg (and in red,
+// robot-shaded-red.svg, for when TRIF can't run mods). No dependencies: shapes are superellipses, PNGs are
+// written by hand.
 // A new design gets new file names (manifest.json, sidepanel.html, onboarding.html): Firefox keeps an
 // icon it has drawn in its image cache, keyed by URL, until it quits, so new pixels at an old path keep
 // showing the old icon after an update or reload (the W outlived the switch to the robot that way).
@@ -16,6 +18,7 @@ const outDir = require.main === module && process.argv[2] || path.join(__dirname
 const sizes = require.main === module && process.argv.length > 3 ? process.argv.slice(3).map(Number) : [16, 32, 48, 128];
 const SVG_FILE = path.join(__dirname, '..', 'store', 'icon.svg');
 const SHADED_FILE = path.join(__dirname, '..', 'extension', 'icons', 'robot-shaded.svg');
+const SHADED_RED_FILE = path.join(__dirname, '..', 'extension', 'icons', 'robot-shaded-red.svg');
 
 // Geometry in 128-unit icon space. A superellipse |x/a|^n + |y/b|^n = 1: the head is n 3 (a squircle), the
 // eyes n 2.3 (rounder, a touch taller than wide).
@@ -24,6 +27,13 @@ const EYES = { cy: 63, xs: [45, 83], a: 12.35, b: 13.3, n: 2.3, color: [0x59, 0x
 // The toolbar sizes drop the 8-unit margin (the head fills the square, like other toolbar icons); the
 // 128 px icon keeps it for the Web Store and chrome://extensions.
 const FULL_BLEED_MAX = 48;
+// The shaded robot's colours: the rim's gradient (top left to bottom right), the eyes' (centre to edge),
+// and the eyes' glow (r g b, 0 to 1). Green as usual; red when the helper isn't connected or user scripts
+// are off (the side panel's --bad).
+const SHADED = {
+  green: { rim: ['#44e0a8', '#1e9a6c'], eye: ['#a7f3d0', '#2fc58d'], glow: [0.204, 0.827, 0.6] },
+  red: { rim: ['#ff8a80', '#c4372d'], eye: ['#ffd0cb', '#e5484d'], glow: [1, 0.45, 0.42] },
+};
 
 const inside = (x, y, cx, cy, a, b, n) => (Math.abs(x - cx) / a) ** n + (Math.abs(y - cy) / b) ** n <= 1;
 
@@ -65,7 +75,7 @@ function svg() {
  * glow. Points are spaced evenly by angle about each centre, so the outline has no visible corners even
  * where a superellipse is flattest (the 180 points of svg() show facets there at 160 px).
  */
-function shadedSvg() {
+function shadedSvg({ rim, eye, glow } = SHADED.green) {
   const shape = (cx, cy, a, b, n) => {
     const pts = [];
     for (let i = 0; i < 360; i++) {
@@ -81,9 +91,9 @@ function shadedSvg() {
     '<svg xmlns="http://www.w3.org/2000/svg" width="128" height="128" viewBox="0 0 128 128">',
     '  <!-- Written by scripts/render-icon.js (edit the numbers there, not this file). -->',
     '  <defs>',
-    '    <linearGradient id="r" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#44e0a8"/><stop offset="1" stop-color="#1e9a6c"/></linearGradient>',
-    '    <radialGradient id="e" cx="50%" cy="50%" r="55%"><stop offset="0" stop-color="#a7f3d0"/><stop offset="1" stop-color="#2fc58d"/></radialGradient>',
-    '    <filter id="h" x="-100%" y="-100%" width="300%" height="300%"><feGaussianBlur in="SourceGraphic" stdDeviation="1.5" result="b"/><feColorMatrix in="b" type="matrix" values="0 0 0 0 0.204  0 0 0 0 0.827  0 0 0 0 0.6  0 0 0 0.5 0" result="g"/><feMerge><feMergeNode in="g"/><feMergeNode in="SourceGraphic"/></feMerge></filter>',
+    `    <linearGradient id="r" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="${rim[0]}"/><stop offset="1" stop-color="${rim[1]}"/></linearGradient>`,
+    `    <radialGradient id="e" cx="50%" cy="50%" r="55%"><stop offset="0" stop-color="${eye[0]}"/><stop offset="1" stop-color="${eye[1]}"/></radialGradient>`,
+    `    <filter id="h" x="-100%" y="-100%" width="300%" height="300%"><feGaussianBlur in="SourceGraphic" stdDeviation="1.5" result="b"/><feColorMatrix in="b" type="matrix" values="${glow.map((c) => `0 0 0 0 ${c}`).join('  ')}  0 0 0 0.5 0" result="g"/><feMerge><feMergeNode in="g"/><feMergeNode in="SourceGraphic"/></feMerge></filter>`,
     '  </defs>',
     `  <polygon points="${shape(cx, cy, mid, mid, n)}" fill="#18181a" stroke="url(#r)" stroke-width="${outer - inner}" stroke-linejoin="round"/>`,
     `  <g filter="url(#h)">${EYES.xs.map((ex) => `<polygon points="${shape(ex, EYES.cy, EYES.a, EYES.b, EYES.n)}" fill="url(#e)"/>`).join('')}</g>`,
@@ -169,6 +179,7 @@ if (require.main === module) {
   if (!process.argv[2]) {
     fs.writeFileSync(SVG_FILE, svg()); console.log(SVG_FILE);
     fs.writeFileSync(SHADED_FILE, shadedSvg()); console.log(SHADED_FILE);
+    fs.writeFileSync(SHADED_RED_FILE, shadedSvg(SHADED.red)); console.log(SHADED_RED_FILE);
   }
 }
 

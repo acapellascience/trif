@@ -140,7 +140,8 @@ function buildReport(info = {}, scrubOpts) {
     const c = info.doctor.checks;
     const count = (s) => c.filter((x) => x.status === s).length;
     lines.push('');
-    lines.push(`Doctor      ${count('ok')} ok, ${count('warn')} warning(s), ${count('fail')} problem(s)`);
+    const n = (k, word) => `${count(k)} ${word}${count(k) === 1 ? '' : 's'}`;
+    lines.push(`Doctor      ${count('ok')} ok, ${n('warn', 'warning')}, ${n('fail', 'problem')}`);
     for (const x of c.filter((y) => y.status === 'warn' || y.status === 'fail')) lines.push(`  ${x.status}  ${x.title}`);
   }
   const problems = info.logFile ? logProblems(info.logFile) : [];

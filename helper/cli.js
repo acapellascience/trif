@@ -28,8 +28,8 @@ const VALUE_FLAGS = new Set(['--tab', '--url', '-o', '--out', '--output', '--fil
   '--browser', '--home', '--native-dir', '--bin-dir', '--timeout', '--agent', '--session', '--model', '--site', '--auto',
   '--provider', '--base-url', '--key-env', '--selector', '--color', '--text', '--tolerance']);
 const BOOL_FLAGS = new Set(['--json', '--hard', '--help', '-h', '--force', '--no-link', '--no-examples', '--copy', '--link', '--install', '--open',
-  '--use-new', '--keep', '--merged', '--set-key', '--remove-key', '--scroll', '--full']);
-const ALIASES = { '--out': '-o', '--output': '-o', '--file': '-f', '-h': '--help' };
+  '--use-new', '--keep', '--merged', '--set-key', '--remove-key', '--scroll', '--full', '--verbose', '-v', '--no-wait']);
+const ALIASES = { '--out': '-o', '--output': '-o', '--file': '-f', '-h': '--help', '-v': '--verbose' };
 
 class UsageError extends Error {}
 
@@ -233,6 +233,7 @@ const handlers = {
       binDir: ctx.opts['--bin-dir'],
       noLink: !!ctx.opts['--no-link'],
       noExamples: !!ctx.opts['--no-examples'],
+      verbose: !!ctx.opts['--verbose'],
       mode: ctx.opts['--copy'] ? 'copy' : ctx.opts['--link'] ? 'link' : undefined,
       // Only for a person at a terminal (not scripts, tests or --json).
       reveal: !!process.stdout.isTTY && !ctx.json,
@@ -241,13 +242,28 @@ const handlers = {
     if (r.ws && r.ws.home) {
       try {
         const k = await require('./lib/agentkeys').migrateKeys(r.ws.home);
-        const at = r.lines.findIndex((l) => l.startsWith('agents '));
-        if (k.notes.length) r.lines.splice(at === -1 ? r.lines.length : at + 1, 0, ...k.notes.map((n) => `              ${n}`));
+        // (After the agents line, or else before the next steps.)
+        const at = r.lines.findIndex((l) => l.startsWith('agents ') || l.startsWith('✓ Found '));
+        const next = r.lines.indexOf('Next steps:');
+        if (k.notes.length) r.lines.splice(at !== -1 ? at + 1 : next > 0 ? next - 1 : r.lines.length, 0, ...k.notes.map((n) => `API keys      ${n}`));
       } catch (e) { r.lines.push(`API keys      couldn't move them out of config.json: ${e.message}`); }
     }
     if (ctx.json) printJson({ ok: r.ok, home: r.ws.home, mode: r.mode, app: r.root, manifests: r.manifests, node: r.nodePath });
     else out(r.lines.join('\n'));
     if (!r.ok) process.exitCode = 1;
+    // At a terminal, wait for the browser and say as each step gets done (lib/setupwait.js).
+    if (r.ok && r.targets && process.stdout.isTTY && !ctx.json && !ctx.opts['--no-wait']) {
+      const { waitForBrowser, probe } = require('./lib/setupwait');
+      let stop = () => {};
+      const onInt = () => stop();
+      process.on('SIGINT', onInt);
+      try {
+        const res = await waitForBrowser({ targets: r.targets, print: out, probe: () => probe(r.ws.home), trif: r.trif, onStop: (fn) => { stop = fn; } });
+        if (res === 'skipped') out('\nSkipped the wait: the steps above still work.');
+      } finally {
+        process.removeListener('SIGINT', onInt);
+      }
+    }
   },
 
   async doctor(ctx) {

@@ -930,6 +930,22 @@ test('background: sweep --scroll is refused on the tab the user is looking at, u
   } finally { bg.restore(); }
 });
 
+test('background: trif reload right after new mods waits for them to be registered, so they run on that load', async () => {
+  const tabs = [{ id: 5, windowId: 1, active: true, url: 'https://x.com/home' }];
+  const bg = await loadBackground({ tabs });
+  try {
+    const registeredAtReload = [];
+    const reload = bg.chrome.tabs.reload;
+    bg.chrome.tabs.reload = async (id, o) => { registeredAtReload.push(bg.chrome.userScripts.scripts.map((x) => x.id)); return reload(id, o); };
+    // The helper sends the mods, then (an agent's `trif reload`) the reload, back to back.
+    bg.native.emit({ type: 'mods', mods: [mod('x.com/fresh')] });
+    const r = await bg.native.call('reload', { tab: 5 });
+    assert.strictEqual(r.ok, true, r.error);
+    assert.strictEqual(registeredAtReload.length, 1);
+    assert.ok(registeredAtReload[0].some((id) => id.includes('x.com/fresh')), `registered at the reload: ${registeredAtReload[0]}`);
+  } finally { bg.restore(); }
+});
+
 test('background: install opens onboarding and sets the side panel to open on action click', async () => {
   const bg = await loadBackground();
   try {

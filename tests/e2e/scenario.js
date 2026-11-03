@@ -55,6 +55,9 @@ const USER_MOD = `// ==WebMod==
 document.documentElement.dataset.trifE2eUser = 'ran';
 `;
 
+// The gate's top bar: the status dot, the robot (asleep) and settings.
+const GATE_BAR = ['#dot', '#bar-robot', '#settings-btn'];
+
 class Scenario {
   /**
    * opts: { browser: 'firefox'|'chrome', kind: 'fresh'|'upgrade', work, newTgz, oldTgz, results, servers,
@@ -97,6 +100,52 @@ class Scenario {
     const file = this.r.file(`${this.label}-${String(++this.shots).padStart(2, '0')}-${name}.png`);
     try { await this.d.screenshot(ctx, file); } catch (e) { this.r.note(`screenshot ${name} failed: ${e.message}`); }
     return file;
+  }
+
+  /** The setup page's checklist: each step done / now / later / hidden, and what the open one says. */
+  async setupState() {
+    return this.ext(`async () => {
+      const q = (s) => document.querySelector(s);
+      const step = (id) => { const e = q('#step-' + id); return e.hidden ? 'hidden' : ['done', 'now', 'later'].find((c) => e.classList.contains(c)) || '?'; };
+      return { docTitle: document.title, title: q('#title').textContent, sub: q('#sub').textContent,
+        steps: ['helper', 'browser', 'scripts', 'login', 'try'].map(step),
+        states: [...document.querySelectorAll('.step.done .state')].map((e) => e.textContent),
+        now: q('.step.now')?.innerText.trim() || '',
+        buttons: [...document.querySelectorAll('.step.now .body button')].map((b) => b.textContent) };
+    }`);
+  }
+
+  async waitSetup(what, pred, timeoutMs = 20000) {
+    let last = null;
+    try {
+      return await waitFor(`the setup page: ${what}`, async () => { last = await this.setupState(); return pred(last) ? last : null; }, { timeoutMs });
+    } catch (e) { throw new Error(`${e.message}: ${JSON.stringify(last)}`); }
+  }
+
+  /**
+   * The setup page all ticked: the agent can run (here: an API key for Claude Code in the scratch keychain,
+   * which counts as logged in; taken out again after). Then "TRIF is ready" and Try it, with the sites
+   * where a mod TRIF comes with is on.
+   */
+  async setupDoneCheck() {
+    const st = await this.setupState();
+    let keyed = false;
+    if (st.steps[3] !== 'done') {
+      const set = run(path.join(this.trif, 'bin', 'trif'), ['agent', 'key', '--agent', 'claude', '--set-key'], { env: this.env(), cwd: this.home, input: 'sk-ant-e2e-not-a-real-key-0000\n' });
+      if (set.status !== 0) throw new Error(`trif agent key --set-key: ${set.stderr || set.stdout}`);
+      keyed = true;
+    }
+    try {
+      // (The helper keeps an agent's login state for 30 s; the page asks every 5.)
+      const x = await this.waitSetup('all ticked', (s) => s.steps.join() === 'done,done,done,done,now' && s.title === 'TRIF is ready', 60000);
+      // Try it: a button for each site where a shipped mod is on and TRIF is on for the site (x.com's Plain X).
+      if (x.sub !== 'Open any website, click the TRIF icon, and ask for a change.' || !x.buttons.includes('Open x.com')
+        || !x.buttons.every((b) => /^Open [\w-]+(\.[\w-]+)+$/.test(b))) throw new Error(JSON.stringify(x));
+      await this.shot(this.control, 'setup-page-done');
+      return `"${x.title}"; ${x.buttons.join(', ')}`;
+    } finally {
+      if (keyed) run(path.join(this.trif, 'bin', 'trif'), ['agent', 'key', '--agent', 'claude', '--remove-key'], { env: this.env(), cwd: this.home });
+    }
   }
 
   /** Runs `fn` in the extension's own setup page, which has the chrome.* APIs. */
@@ -405,15 +454,29 @@ class Scenario {
     const origin = d.origin;
 
     // The setup page: our handle on the extension's chrome.* APIs, and the user scripts permission.
+    this.control = await d.openTab(`${origin}/onboarding.html`);
+    await r.check('setup page: a checklist, the helper and the browser ticked, user scripts next', async () => {
+      const x = await this.waitSetup('step 3 open', (st) => st.steps.join() === 'done,done,now,later,later');
+      if (x.docTitle !== 'TRIF setup' || x.title !== 'Set up TRIF' || x.states.join() !== 'connected,done') throw new Error(JSON.stringify(x));
+      const want = d.name === 'Firefox' ? /Firefox asks before an add-on runs them\.[\s\S]*Allow user scripts/ : /One switch:[\s\S]*flip this[\s\S]*Open TRIF’s Chrome settings/;
+      if (!want.test(x.now)) throw new Error(`step 3 says: ${x.now}`);
+      await this.shot(this.control, 'setup-page-scripts-off');
+      return x.now.split('\n').slice(0, 2).join(' / ');
+    });
     const allowed = await r.check('user scripts allowed', async () => {
-      this.control = await d.openTab(`${origin}/onboarding.html`);
-      await sleep(1000);
       const how = await d.grantUserScripts(this.control);
       await waitFor('status.userScripts', async () => (await this.cli(['status'], { json: true })).json?.extension?.userScripts, { timeoutMs: 20000 });
       return how;
     });
-    await sleep(500);
-    await this.shot(this.control, 'setup-page');
+    if (allowed) {
+      await r.check('setup page: user scripts ticked by themselves; the agent\'s login next', async () => {
+        const x = await this.waitSetup('step 4 open', (st) => (st.steps.join() === 'done,done,done,now,later' && /\n\n/.test(st.now) && !/Checking your coding agent/.test(st.now))
+          || st.steps.join() === 'done,done,done,done,now');
+        if (x.steps[3] === 'now' && !/isn’t logged in on this computer yet|needs a coding agent|isn’t available/.test(x.now)) throw new Error(`step 4 says: ${x.now}`);
+        await this.shot(this.control, 'setup-page-login');
+        return x.steps[3] === 'now' ? x.now.split('\n').slice(0, 2).join(' / ') : 'the agent is logged in already';
+      });
+    }
 
     const connected = await r.check('helper connected (trif status, extension hello)', async () => {
       const s = (await this.cli(['status'], { json: true })).json;
@@ -481,10 +544,10 @@ class Scenario {
       const p = await this.waitPanel('the panel to show the gate', (x) => x.site === '127.0.0.1' && x.gate);
       return `panel: "${p.gateText}"`;
     });
-    await r.check('gate: the top bar keeps only the robot, grey and dim, and settings', async () => {
-      const b = await this.waitBar('the gate\'s bar', ['#bar-robot', '#settings-btn'], Scenario.dim);
+    await r.check('gate: the top bar keeps only the dot, the robot, grey and dim, and settings', async () => {
+      const b = await this.waitBar('the gate\'s bar', GATE_BAR, Scenario.dim);
       if (!b.robotButton) throw new Error('the robot isn\'t a focusable button');
-      if (b.robotLabel !== 'Turn the robot on on 127.0.0.1' || b.robotLabel !== b.switchLabel) throw new Error(`labelled "${b.robotLabel}" (the power button: "${b.switchLabel}")`);
+      if (b.robotLabel !== 'Turn the robot on for 127.0.0.1' || b.robotLabel !== b.switchLabel) throw new Error(`labelled "${b.robotLabel}" (the power button: "${b.switchLabel}")`);
       return `"${b.robotLabel}"; ${b.filter}, opacity ${b.opacity}`;
     });
     await this.shot(this.panelCtx, 'panel-gate');
@@ -546,14 +609,14 @@ class Scenario {
     await r.check('the robot in the top bar: on a site TRIF is on for, it puts it to sleep like the power button; on the gate, it wakes it like Fix', async () => {
       const all = ['#dot', '#site', '#bar-robot', '#site-switch', '#new-chat', '#settings-btn'];
       const on = await this.waitBar('the bar on a site TRIF is on for', all, Scenario.awake);
-      if (on.robotLabel !== 'Turn the robot off on 127.0.0.1' || on.robotLabel !== on.switchLabel) throw new Error(`labelled "${on.robotLabel}" (the power button: "${on.switchLabel}")`);
+      if (on.robotLabel !== 'Turn the robot off for 127.0.0.1' || on.robotLabel !== on.switchLabel) throw new Error(`labelled "${on.robotLabel}" (the power button: "${on.switchLabel}")`);
       await d.click(this.panelCtx, '#bar-robot');
       await this.waitPanel('the gate', (x) => x.gate && !x.siteOn);
       await this.waitPage('the page without the mod', (x) => !x.banner);
       // The mouse is still on him: grey, but brighter than at rest; moved away, dim.
-      const lit = await this.waitBar('the gate\'s bar, the robot under the mouse', ['#bar-robot', '#settings-btn'], Scenario.stirring);
+      const lit = await this.waitBar('the gate\'s bar, the robot under the mouse', GATE_BAR, Scenario.stirring);
       await d.pointerAway(this.panelCtx);
-      const rest = await this.waitBar('the gate\'s bar, the mouse elsewhere', ['#bar-robot', '#settings-btn'], Scenario.dim);
+      const rest = await this.waitBar('the gate\'s bar, the mouse elsewhere', GATE_BAR, Scenario.dim);
       await d.click(this.panelCtx, '#bar-robot');
       await this.waitPage('the mod again', (x) => x.banner === 'ran');
       await this.waitPanel('the panel awake, the mod on and running', (x) => !x.gate && x.siteOn && x.mods.some((m) => m.id === '127.0.0.1/e2e-banner' && m.on && m.running));
@@ -623,11 +686,14 @@ class Scenario {
       return p.mods.map((m) => `${m.id.split('/')[1]} ${m.on ? 'on' : 'off'}`).join(', ');
     });
     await this.narrowShots();
+    await this.colourChecks().catch((e) => r.check('colour checks', () => { throw e; }));
     if (!this.o.oss) await r.check('open model key: saved, then Replace (and Cancel) and Remove', () => this.openModelKey());
     await this.sweepAndScreenshotChecks(base, win);
     if (this.o.kind === 'upgrade') await this.mergeChecks();
     await this.ext(`async (id) => { await chrome.tabs.remove(id); }`, [this.xTab]).catch(() => {});
     await this.ext(`async (id) => { await chrome.tabs.update(id, { active: true }); }`, [win.tabId]).catch(() => {});
+
+    await r.check('setup page: all ticked once the agent can run, then "TRIF is ready" and Try it', () => this.setupDoneCheck());
 
     if (this.o.agent) await this.agentChecks('claude');
     if (this.o.codex) await this.agentChecks('codex');
@@ -802,25 +868,27 @@ class Scenario {
 
   // ---- screenshots of the panel as narrow as a side panel (for people to look at; no checks)
 
+  /** The panel as narrow as a side panel (on), or back to its usual size. */
+  async narrow(on) {
+    const panelWin = await this.panel(`async () => (await chrome.windows.getCurrent()).id`);
+    await this.ext(`async (id, width, height) => { await chrome.windows.update(id, { width, height }); }`, [panelWin, on ? 380 : 420, on ? 640 : 900]);
+    // (Headless Chrome keeps its pages 1280 wide whatever the window: emulate the size there.)
+    if (!this.d.cdp) return;
+    const sid = await this.d._attach(this.panelCtx);
+    if (on) await this.d.cdp.send('Emulation.setDeviceMetricsOverride', { width: 380, height: 640, deviceScaleFactor: 2, mobile: false }, sid);
+    else await this.d.cdp.send('Emulation.clearDeviceMetricsOverride', {}, sid);
+  }
+
   async narrowShots() {
     try {
-      const panelWin = await this.panel(`async () => (await chrome.windows.getCurrent()).id`);
-      await this.ext(`async (id) => { await chrome.windows.update(id, { width: 380, height: 640 }); }`, [panelWin]);
-      // (Headless Chrome keeps its pages 1280 wide whatever the window: emulate the size there.)
-      const metrics = async (on) => {
-        if (!this.d.cdp) return;
-        const sid = await this.d._attach(this.panelCtx);
-        if (on) await this.d.cdp.send('Emulation.setDeviceMetricsOverride', { width: 380, height: 640, deviceScaleFactor: 2, mobile: false }, sid);
-        else await this.d.cdp.send('Emulation.clearDeviceMetricsOverride', {}, sid);
-      };
-      await metrics(true);
+      await this.narrow(true);
       await sleep(800);
       await this.shot(this.panelCtx, 'panel-narrow-x');
       // A site TRIF is off for (localhost): "The robot is off.", and in the bar the dim robot and settings.
       await this.ext(`async (id, url) => { await chrome.tabs.update(id, { url }); }`, [this.xTab, `http://localhost:${this.o.servers.port}/?e2e=narrow`]);
       await this.waitPanel('the panel on localhost\'s gate', (x) => x.site === 'localhost' && x.gate, 10000);
       await this.d.pointerAway(this.panelCtx); // the robot at rest, not under the last click
-      await this.waitBar('the gate\'s bar', ['#bar-robot', '#settings-btn'], Scenario.dim);
+      await this.waitBar('the gate\'s bar', GATE_BAR, Scenario.dim);
       await sleep(300);
       await this.shot(this.panelCtx, 'panel-narrow-gate');
       await this.r.check('settings open from the gate', () => this.settingsOpen('panel-narrow-gate-settings'));
@@ -847,9 +915,204 @@ class Scenario {
       await this.r.check('settings open from the landing page', () => this.settingsOpen('panel-narrow-no-site-settings'));
       await this.ext(`async (id, url) => { await chrome.tabs.update(id, { url }); }`, [this.xTab, `https://x.com:${this.o.servers.tlsPort}/home`]);
       await this.waitPanel('the panel back on x.com', (x) => x.site === 'x.com' && x.mods.length >= 3, 15000);
-      await metrics(false);
-      await this.ext(`async (id) => { await chrome.windows.update(id, { width: 420, height: 900 }); }`, [panelWin]);
+      await this.narrow(false);
     } catch (e) { this.r.note(`narrow panel screenshots: ${e.message}`); }
+  }
+
+  // ---- what's in the way, in colour (sidepanel.js problemNow): every green in the panel turns red while
+  // TRIF is missing a part (user scripts off: the mod switches too; the helper not connected: not them,
+  // since mods still run), or yellow while the agent isn't logged in (not on the landing page). The gate
+  // and the landing page say what in one line; the site's page has the notices, "Mods are paused" first.
+
+  /** How the panel looks: its problem, colours (as computed rgb) and the words it shows. */
+  async looks() {
+    return this.panel(`async () => {
+      const q = (s) => document.querySelector(s);
+      const shown = (s) => { const e = q(s); return !!e && e.getClientRects().length > 0; };
+      const colour = (v) => { const i = document.createElement('i'); i.style.color = v; document.body.append(i); const c = getComputedStyle(i).color; i.remove(); return c; };
+      const style = (s, prop) => (shown(s) ? getComputedStyle(q(s))[prop] : null);
+      const img = q('#landing-icon');
+      if (img && shown('#landing-icon') && !img.complete) await new Promise((ok) => { img.onload = img.onerror = ok; });
+      return {
+        classes: ['blocked', 'needs-login'].filter((c) => document.body.classList.contains(c)),
+        problem: document.body.dataset.problem || '',
+        dot: q('#dot').className, dotShown: shown('#dot'), dotLabel: q('#dot').getAttribute('aria-label'),
+        green: colour('var(--trif-green)'), bad: colour('var(--bad)'), warn: colour('var(--warn)'),
+        rim: style('#bar-robot .rim', 'fill'), gateRim: style('.gate-icon .rim', 'fill'), power: style('#site-switch', 'color'),
+        modSwitch: style('#mod-list button.switch[aria-checked="true"]', 'backgroundColor'), light: style('#mod-list .light.on', 'backgroundColor'),
+        send: { disabled: q('#send').disabled, title: q('#send').title },
+        fix: shown('#gate-btn'), gateNote: shown('#gate-note') ? q('#gate-note').innerText.trim() : '',
+        landingNote: shown('#landing-note') ? q('#landing-note').innerText.trim() : '',
+        landingIcon: shown('#landing-icon') ? img.getAttribute('src') : null, landingIconLoaded: !!img && img.naturalWidth > 0,
+        notices: [...document.querySelectorAll('body > .notice')].filter((n) => n.getClientRects().length).map((n) => n.querySelector('.title')?.textContent || ''),
+      };
+    }`);
+  }
+
+  /** Points the test tab at `where` ('site': 127.0.0.1, TRIF on; 'gate': localhost, off; 'landing': no website). */
+  async goColour(where) {
+    const { port } = this.o.servers;
+    const url = where === 'site' ? `http://127.0.0.1:${port}/?e2e=colour` : where === 'gate' ? `http://localhost:${port}/?e2e=colour` : 'about:blank';
+    await this.ext(`async (id, url) => { await chrome.tabs.update(id, { url, active: true }); }`, [this.xTab, url]);
+    if (where === 'landing') await this.waitLooks('the panel on the landing page', (l) => !!l.landingIcon, 15000);
+    else await this.waitPanel(`the panel on ${where}`, (x) => x.site === (where === 'site' ? '127.0.0.1' : 'localhost') && x.gate === (where === 'gate'), 15000);
+    await this.d.pointerAway(this.panelCtx);
+  }
+
+  /** Whether two computed rgb() colours are the same, give or take rounding (and a transition's last step). */
+  static same(a, b) {
+    const n = (c) => (String(c).match(/[\d.]+/g) || []).slice(0, 3).map(Number);
+    const [x, y] = [n(a), n(b)];
+    return x.length === 3 && y.length === 3 && x.every((v, i) => Math.abs(v - y[i]) <= 3);
+  }
+
+  /** Waits until the panel looks as `pred` wants, then returns how it looks (or throws with that). */
+  async waitLooks(what, pred, timeoutMs = 20000) {
+    let last = null;
+    try {
+      await waitFor(what, async () => { last = await this.looks(); return pred(last) ? last : null; }, { timeoutMs });
+      await sleep(400); // the switches' colour transition
+      return await this.looks();
+    } catch (e) { throw new Error(`${e.message}: ${JSON.stringify(last)}`); }
+  }
+
+  async colourChecks() {
+    const r = this.r;
+    await this.narrow(true);
+    try {
+      // The harness's helper runs with the scratch HOME, where the agent isn't logged in (without --agent).
+      await this.goColour('site');
+      const first = await this.waitLooks('the panel\'s status', (x) => !!x.dot && !/Checking/.test(x.dotLabel));
+      const loggedOut = /isn’t logged in/.test(first.dotLabel);
+      if (loggedOut) {
+        await r.check('agent not logged in, on the site\'s page: the greens turn yellow, the login notice shows', async () => {
+          const x = await this.waitLooks('yellow', (l) => l.classes.join() === 'needs-login' && l.dot === 'dot warn');
+          const want = { rim: x.warn, power: x.warn, modSwitch: x.warn };
+          for (const [k, v] of Object.entries(want)) if (!Scenario.same(x[k], v)) throw new Error(`${k} is ${x[k]}, not ${v}: ${JSON.stringify(x)}`);
+          if (x.light && !Scenario.same(x.light, x.warn)) throw new Error(`the running light is ${x.light}`);
+          if (!x.notices.some((t) => /isn’t logged in/.test(t))) throw new Error(`no login notice: ${x.notices}`);
+          // F14: no sending into a run that can only fail with that; the button says why.
+          if (!x.send.disabled || !/^Log in to .+ first$/.test(x.send.title)) throw new Error(`Send: ${JSON.stringify(x.send)}`);
+          await this.shot(this.panelCtx, 'panel-yellow-site');
+          return `"${x.dotLabel}"; ${x.warn}`;
+        });
+        await r.check('agent not logged in, on the gate: the small robot yellow, a line saying so, Fix still there', async () => {
+          await this.goColour('gate');
+          const x = await this.waitLooks('yellow gate', (l) => l.classes.join() === 'needs-login' && !!l.gateNote);
+          if (!Scenario.same(x.gateRim, x.warn) || !x.fix || !x.dotShown || x.dot !== 'dot warn' || !/isn’t logged in/.test(x.gateNote)) throw new Error(JSON.stringify(x));
+          await this.waitBar('the gate\'s bar', GATE_BAR, Scenario.dim);
+          await this.shot(this.panelCtx, 'panel-yellow-gate');
+          return `"${x.gateNote}"`;
+        });
+        await r.check('agent not logged in, no website: the landing page as usual (no yellow there)', async () => {
+          await this.goColour('landing');
+          const x = await this.waitLooks('the landing page', (l) => !!l.landingIcon);
+          if (x.classes.length || x.landingNote || x.dotShown || x.landingIcon !== 'icons/robot-shaded.svg') throw new Error(JSON.stringify(x));
+          return 'green robot, no line, no dot';
+        });
+      } else r.note(`the agent is logged in here ("${first.dotLabel}"): no yellow checks`);
+
+      // User scripts off: red, everything.
+      const off = await r.check('user scripts off, on the site\'s page: everything red, "Mods are paused" first', async () => {
+        this.scriptsRevoked = true; // the "user scripts were turned off" warnings are expected (consoleCheck, helperLogCheck)
+        await this.d.revokeUserScripts(this.control);
+        try {
+          await waitFor('status.userScripts off', async () => (await this.cli(['status'], { json: true })).json?.extension?.userScripts === false, { timeoutMs: 20000 });
+        } catch (e) {
+          const probe = await this.ext(`async () => ({ api: typeof chrome.userScripts, granted: await chrome.permissions.contains({ permissions: ['userScripts'] }),
+            getScripts: (() => { try { chrome.userScripts.getScripts().catch(() => {}); return 'no throw'; } catch (x) { return 'throws: ' + x.message; } })() })`).catch((x) => x.message);
+          throw new Error(`${e.message}; on the setup page: ${JSON.stringify(probe)}`);
+        }
+        await this.goColour('site');
+        const x = await this.waitLooks('red', (l) => l.problem === 'scripts' && l.classes.join() === 'blocked' && l.notices.length > 0);
+        for (const k of ['rim', 'power', 'modSwitch']) if (!Scenario.same(x[k], x.bad)) throw new Error(`${k} is ${x[k]}, not ${x.bad}: ${JSON.stringify(x)}`);
+        if (x.light && !Scenario.same(x.light, x.bad)) throw new Error(`the running light is ${x.light}`);
+        if (x.dot !== 'dot bad') throw new Error(`dot ${x.dot}`);
+        if (x.notices[0] !== 'Mods are paused') throw new Error(`notices: ${JSON.stringify(x.notices)}`);
+        // F3: not logged in as well, both notices show, the paused one first.
+        if (loggedOut && !x.notices.slice(1).some((t) => /isn’t logged in/.test(t))) throw new Error(`no login notice under it: ${JSON.stringify(x.notices)}`);
+        await this.shot(this.panelCtx, loggedOut ? 'panel-scripts-off-logged-out' : 'panel-scripts-off');
+        return x.notices.join(' / ');
+      });
+      if (off) {
+        await r.check('user scripts off, on the gate: red robot, the line, no Fix button', async () => {
+          await this.goColour('gate');
+          const x = await this.waitLooks('red gate', (l) => l.problem === 'scripts' && !!l.gateNote);
+          if (!Scenario.same(x.gateRim, x.bad) || x.fix || x.dot !== 'dot bad' || !x.dotShown || !/^Mods are paused/.test(x.gateNote)) throw new Error(JSON.stringify(x));
+          await this.waitBar('the gate\'s bar', GATE_BAR, Scenario.dim);
+          await this.shot(this.panelCtx, 'panel-scripts-off-gate');
+          return `"${x.gateNote}"`;
+        });
+        await r.check('user scripts off, no website: the red robot, the line, the dot', async () => {
+          await this.goColour('landing');
+          const x = await this.waitLooks('red landing', (l) => l.problem === 'scripts' && !!l.landingNote);
+          if (x.landingIcon !== 'icons/robot-shaded-red.svg' || !x.landingIconLoaded || !x.dotShown || !/^Mods are paused/.test(x.landingNote)) throw new Error(JSON.stringify(x));
+          await this.shot(this.panelCtx, 'panel-scripts-off-landing');
+          return `"${x.landingNote}"`;
+        });
+      }
+      await r.check('user scripts on again', async () => {
+        const how = await this.d.grantUserScripts(this.control);
+        await waitFor('status.userScripts', async () => (await this.cli(['status'], { json: true })).json?.extension?.userScripts, { timeoutMs: 20000 });
+        return how;
+      });
+
+      // The helper not connected: its wrapper gone (as before setup), and the running helper stopped.
+      const host = path.join(this.trif, 'bin', 'trif-host');
+      const proc = pidsMatching('host.js').find((p) => p.pid === this.helperPid);
+      if (!proc || !proc.command.includes(this.trif)) throw new Error(`the helper (pid ${this.helperPid}) isn't the scratch one: ${proc && proc.command}`);
+      fs.renameSync(host, `${host}.off`);
+      this.helperStopped = true; // its "helper disconnected" warnings are expected (consoleCheck)
+      try {
+        process.kill(this.helperPid, 'SIGTERM');
+        await r.check('helper not connected, on the site\'s page: the robot and power button red, the mods (still running) green', async () => {
+          await this.goColour('site');
+          const x = await this.waitLooks('red, helper', (l) => l.problem === 'helper' && l.classes.join() === 'blocked' && l.notices.length > 0);
+          if (!Scenario.same(x.rim, x.bad) || !Scenario.same(x.power, x.bad) || x.dot !== 'dot bad') throw new Error(JSON.stringify(x));
+          if (!Scenario.same(x.modSwitch, x.green) || (x.light && !Scenario.same(x.light, x.green))) throw new Error(`the mods aren't green: ${JSON.stringify(x)}`);
+          if (!x.notices.includes('The TRIF helper isn’t connected')) throw new Error(`notices: ${JSON.stringify(x.notices)}`);
+          await this.shot(this.panelCtx, 'panel-helper-site');
+          return `rim ${x.rim}, mods ${x.modSwitch}`;
+        });
+        await r.check('helper not connected, on the gate: red robot, the line, no Fix button', async () => {
+          await this.goColour('gate');
+          const x = await this.waitLooks('red gate, helper', (l) => l.problem === 'helper' && !!l.gateNote);
+          if (!Scenario.same(x.gateRim, x.bad) || x.fix || !x.dotShown || !/^The TRIF helper isn’t connected\. Run npx trif setup in a terminal, then restart \w+\. Setup page$/.test(x.gateNote)) throw new Error(JSON.stringify(x));
+          await this.waitBar('the gate\'s bar', GATE_BAR, Scenario.dim);
+          await this.shot(this.panelCtx, 'panel-helper-gate');
+          return `"${x.gateNote}"`;
+        });
+        await r.check('helper not connected, no website: the red robot, the line, the dot', async () => {
+          await this.goColour('landing');
+          const x = await this.waitLooks('red landing, helper', (l) => l.problem === 'helper' && !!l.landingNote);
+          if (x.landingIcon !== 'icons/robot-shaded-red.svg' || !x.landingIconLoaded || !x.dotShown || x.dot !== 'dot bad') throw new Error(JSON.stringify(x));
+          await this.waitBar('the landing page\'s bar', ['#dot', '#settings-btn']);
+          await this.shot(this.panelCtx, 'panel-helper-landing');
+          return `"${x.landingNote}"`;
+        });
+      } finally {
+        fs.renameSync(`${host}.off`, host);
+      }
+      await r.check('helper back (Try again): the colours back to normal', async () => {
+        await this.goColour('site');
+        await this.waitLooks('the helper notice', (l) => l.notices.includes('The TRIF helper isn’t connected'));
+        await this.d.click(this.panelCtx, '#notice .actions button');
+        const st = await waitFor('the helper to answer `trif status`', async () => {
+          const s = await this.cli(['status'], { json: true, timeoutMs: 15000 });
+          return s.json && s.json.extension ? s.json : null;
+        }, { timeoutMs: 30000 });
+        this.helperPid = st.helper.pid;
+        const p = pidsMatching('host.js').find((q) => q.pid === this.helperPid);
+        if (!p || !p.command.includes(this.trif)) throw new Error(`the new helper (pid ${this.helperPid}) isn't the scratch one: ${p && p.command}`);
+        const x = await this.waitLooks('no red', (l) => !l.classes.includes('blocked'));
+        if (!Scenario.same(x.rim, (loggedOut ? x.warn : x.green))) throw new Error(JSON.stringify(x));
+        return `helper pid ${this.helperPid}; ${x.classes.join() || 'green'}`;
+      });
+    } finally {
+      await this.ext(`async (id, url) => { await chrome.tabs.update(id, { url }); }`, [this.xTab, `https://x.com:${this.o.servers.tlsPort}/home`]).catch(() => {});
+      await this.waitPanel('the panel back on x.com', (x) => x.site === 'x.com', 15000).catch(() => {});
+      await this.narrow(false).catch(() => {});
+    }
   }
 
   // ---- "Merge with my agent" on the edited shipped mod (upgrade scenarios, panel on x.com)
@@ -1059,7 +1322,11 @@ class Scenario {
   }
 
   async consoleCheck() {
-    const problems = await this.d.consoleProblems();
+    // The helper stopped and user scripts turned off on purpose (colourChecks): the background's warnings
+    // about either are expected.
+    const expected = (p) => p.level === 'warn' && ((this.helperStopped && /helper disconnected|native messaging host/i.test(String(p.text)))
+      || (this.scriptsRevoked && /user scripts were turned off/.test(String(p.text))));
+    const problems = (await this.d.consoleProblems()).filter((p) => !expected(p));
     // The agent-made mod and the stand-in pages aren't ours to judge; everything else counts.
     const lines = problems.map((p) => `${p.level} [${p.from}] ${String(p.text).slice(0, 300)}${p.source ? ` (${String(p.source).slice(0, 120)})` : ''}`);
     fs.writeFileSync(this.r.file(`${this.label}-console.txt`), lines.join('\n') + '\n');
@@ -1075,7 +1342,8 @@ class Scenario {
     const lines = fs.readFileSync(file, 'utf8').split('\n');
     fs.copyFileSync(file, this.r.file(`${this.label}-helper.log`));
     // Before the harness allows user scripts, every sync logs that each mod couldn't register: expected.
-    const expected = (l) => /User scripts aren't allowed for TRIF|User scripts are off for TRIF/.test(l); // Firefox's wording, Chrome's
+    const expected = (l) => /User scripts aren't allowed for TRIF|User scripts are off for TRIF/.test(l) // Firefox's wording, Chrome's
+      || (this.scriptsRevoked && /user scripts were turned off/.test(l)); // colourChecks turned them off
     const skipped = lines.filter(expected).length;
     const bad = lines.filter((l) => !expected(l) && /\b(WARN|ERROR|warn|error)\b/.test(l.slice(0, 60)));
     const errors = bad.filter((l) => /\bERROR\b|\berror\b/.test(l.slice(0, 60)));

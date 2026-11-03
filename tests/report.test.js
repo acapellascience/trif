@@ -57,7 +57,7 @@ test('buildReport lists what helps and nothing personal', () => {
   }, { home: '/Users/zed', user: 'zed' });
   for (const want of ['What happened\nPlain X shows nothing', 'Browser     Firefox 153 (extension 0.1.1)', 'claude 2.1.312 (logged in), codex not found',
     'Updates     0.1.2 available', 'Site        x.com, TRIF on', 'x.com/plain-x: on, running', 'x.com/punk: off', 'x.com/new: on, not running (error: SyntaxError)',
-    'Doctor      1 ok, 1 warning(s), 0 problem(s)', 'warn  CLI not on PATH (~/.trif/bin)']) {
+    'Doctor      1 ok, 1 warning, 0 problems', 'warn  CLI not on PATH (~/.trif/bin)']) {
     assert.ok(text.includes(want), `report has ${JSON.stringify(want)}:\n${text}`);
   }
   assert.doesNotMatch(text, /zed/);

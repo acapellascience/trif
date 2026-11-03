@@ -377,7 +377,8 @@ function deniedInHome(home, readable) {
  * The only denies inside readable folders are the skill folders' secrets. No network at all: `trif`
  * reaches the helper through the mailbox. Real paths, as sandboxes compare.
  */
-function runLimits(ws, { scope, box, screenshots, screenshotsReal, modsReal }) {
+function runLimits(ws, { scope, box, screenshotsReal, modsReal }) {
+  ws = withPrivatePaths(ws);
   const real = realOrResolved;
   const node = real(process.execPath);
   const home = real(os.homedir());

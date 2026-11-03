@@ -145,8 +145,11 @@ test('locked folders: a linked site folder gets Edit deny rules by its workspace
   }
   assert.deepEqual(c.locked.sort(), lim.locked.sort());
   assert.deepEqual(codex.command({ bin: '/x/codex', prompt: 'P', ...lim }).locked.sort(), lim.locked.sort());
-  // An adapter that says nothing about it protects nothing: no folder is exempt from holding.
-  assert.deepEqual(codex.command({ bin: '/x/codex', prompt: 'P', ...lim, readOnly: [] }).locked, []);
+  // A folder that is a link out of the mods folder isn't made read-only (that would open where it leads)
+  // but isn't writable either: still protected.
+  assert.ok(!lim.readOnly.includes(fs.realpathSync(elsewhere)));
+  // Without the read-only list, nothing else is protected: no other folder is exempt from holding.
+  assert.deepEqual(codex.command({ bin: '/x/codex', prompt: 'P', ...lim, readOnly: [] }).locked, [path.join('sites', 'other.com')]);
 });
 
 test('held mods: a locked folder named in another case is the same folder (APFS)', { skip: !fs.existsSync(os.tmpdir().toUpperCase()) }, () => {

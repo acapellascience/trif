@@ -1,6 +1,6 @@
 // ==WebMod==
 // @name        Neon Title
-// @description The page title glows like a pink neon sign, flickering on at load like an old tube warming up, its letters bobbing in a wave, with one letter that sputters now and then
+// @description The title glows like a neon sign
 // @match       https://timsrobot.com/*
 // @match       https://*.timsrobot.com/*
 // @run-at      document-start

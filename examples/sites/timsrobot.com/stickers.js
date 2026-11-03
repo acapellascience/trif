@@ -1,6 +1,6 @@
 // ==WebMod==
 // @name        Sticker Badges
-// @description Turns "Free and open source. In beta, for Mac." into sticker badges that pop in one after another
+// @description Turns the small print into stickers
 // @match       https://timsrobot.com/*
 // @match       https://*.timsrobot.com/*
 // @run-at      document-start

@@ -1,6 +1,6 @@
 // ==WebMod==
 // @name        Rainbow Rave
-// @description All text white, over a rolling psychedelic rainbow background, with a trance loop and switchable kick zoom; the robot logo (legs too) and the "Get it" button get the fast mini-rainbow of X's rave badges, and the robot's rolls faster as the space shooter hurts him
+// @description Rainbow background, trance music, total rave
 // @match       https://timsrobot.com/*
 // @match       https://*.timsrobot.com/*
 // @run-at      document-start

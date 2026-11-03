@@ -1,6 +1,6 @@
 // ==WebMod==
 // @name        Jelly Buttons
-// @description Buttons wobble like jelly when you hover them
+// @description Buttons wobble like jelly on hover
 // @match       https://timsrobot.com/*
 // @match       https://*.timsrobot.com/*
 // @run-at      document-start

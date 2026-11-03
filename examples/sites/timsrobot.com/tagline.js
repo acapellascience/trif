@@ -1,6 +1,6 @@
 // ==WebMod==
 // @name        Typing Tagline
-// @description The line under the title types itself out like a terminal, with a blinking cursor; then "your own coding agent" glows green
+// @description The tagline types itself like a terminal
 // @match       https://timsrobot.com/*
 // @match       https://*.timsrobot.com/*
 // @run-at      document-start

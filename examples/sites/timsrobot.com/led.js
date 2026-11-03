@@ -1,6 +1,6 @@
 // ==WebMod==
 // @name        LED Footer
-// @description Turns the footer into a scrolling LED sign; the links scroll through it and stay clickable
+// @description The footer becomes a scrolling LED sign
 // @match       https://timsrobot.com/*
 // @match       https://*.timsrobot.com/*
 // @run-at      document-start
@@ -113,6 +113,6 @@
     window.trif?.log('LED footer built with', links.length, 'links');
   };
 
-  const run = () => { try { build(); } catch (e) { window.trif?.warn('led-footer failed', String(e)); const f = document.querySelector('footer'); f && f.setAttribute('data-led-done', ''); } };
+  const run = () => { try { build(); } catch (e) { window.trif?.warn('led failed', String(e)); const f = document.querySelector('footer'); f && f.setAttribute('data-led-done', ''); } };
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', run); else run();
 })();

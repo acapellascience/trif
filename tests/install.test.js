@@ -406,8 +406,8 @@ test('doctor: which host.js the wrapper may run', () => {
 });
 
 // The mods on TRIF's own home page (0.2.0), in the order the side panel starts them in.
-const HOMEPAGE = ['typing-tagline', 'jelly-buttons', 'gravity-mode', 'fireworks', 'neon-title', 'space-shooter', 'sticker-badges',
-  'need-checklist', 'terminal-box', 'rainbow-rave', 'led-footer', 'living-robot', 'tilt-card'].map((m) => `timsrobot.com/${m}`);
+const HOMEPAGE = ['tagline', 'jelly', 'gravity', 'fireworks', 'neon', 'shooter', 'stickers',
+  'checklist', 'terminal', 'rainbow-rave', 'led', 'robot', 'tilt'].map((m) => `timsrobot.com/${m}`);
 
 test('the home page mods: shipped, all off, TRIF not turned on for timsrobot.com, listed in Tim\'s order', () => {
   const { DEFAULT_ORDER } = require('../helper/lib/preinstalled');
@@ -436,18 +436,18 @@ test('the home page mods reach a workspace from before 0.2.0 off, and never repl
   fs.writeFileSync(path.join(home, 'preinstalled.json'), JSON.stringify({ offered: before, startOff: [], sitesOn: SITES_ON }));
   const dir = path.join(sites, 'timsrobot.com');
   fs.mkdirSync(dir, { recursive: true });
-  const mine = { 'fireworks.js': '// my fireworks, still being worked on\n', 'space-shooter.js': '// my shooter\n' };
+  const mine = { 'fireworks.js': '// my fireworks, still being worked on\n', 'shooter.js': '// my shooter\n' };
   for (const [f, code] of Object.entries(mine)) fs.writeFileSync(path.join(dir, f), code);
-  fs.copyFileSync(path.join(examples, 'timsrobot.com', 'tilt-card.js'), path.join(dir, 'tilt-card.js'));
+  fs.copyFileSync(path.join(examples, 'timsrobot.com', 'tilt.js'), path.join(dir, 'tilt.js'));
   const r = preinstallMods(home, sites, examples);
-  const theirs = ['timsrobot.com/fireworks', 'timsrobot.com/space-shooter', 'timsrobot.com/tilt-card'];
+  const theirs = ['timsrobot.com/fireworks', 'timsrobot.com/shooter', 'timsrobot.com/tilt'];
   assert.deepStrictEqual(r.added, ['www.google.com/dvd-logo', ...HOMEPAGE.filter((id) => !theirs.includes(id))]);
   assert.deepStrictEqual(r.on, [], 'all off');
   assert.deepStrictEqual(r.sites, [], 'no new site turned on');
   for (const [f, code] of Object.entries(mine)) assert.strictEqual(fs.readFileSync(path.join(dir, f), 'utf8'), code, `${f} untouched`);
   const st = loadPreinstalled(home);
   assert.deepStrictEqual(st.startOff, r.added, 'the user\'s own files keep their switches');
-  assert.deepStrictEqual(st.shipped, { 'timsrobot.com/fireworks': { own: true }, 'timsrobot.com/space-shooter': { own: true } },
+  assert.deepStrictEqual(st.shipped, { 'timsrobot.com/fireworks': { own: true }, 'timsrobot.com/shooter': { own: true } },
     'their own versions are never updated; an exact copy counts as the shipped one');
   assert.ok(theirs.every((id) => st.offered.includes(id)));
   // Updates leave them alone too.

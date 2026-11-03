@@ -1,6 +1,6 @@
 // ==WebMod==
 // @name        Click Fireworks
-// @description Every click launches a firework from the bottom of the screen that bursts where you clicked; hovering "Get it" sprays confetti
+// @description Every click launches a firework
 // @match       https://timsrobot.com/*
 // @match       https://*.timsrobot.com/*
 // @run-at      document-idle

@@ -1,6 +1,6 @@
 // ==WebMod==
 // @name        Press G for Gravity
-// @description Press G: everything on the page falls, bounces and piles up at the bottom. Grab pieces and throw them (links stay clickable). G or Esc again puts it all back
+// @description Press G and everything falls down
 // @match       https://timsrobot.com/*
 // @match       https://*.timsrobot.com/*
 // @run-at      document-idle

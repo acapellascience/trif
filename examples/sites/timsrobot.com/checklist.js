@@ -1,6 +1,6 @@
 // ==WebMod==
 // @name        Need Checklist
-// @description Turns the "What you need" list into a checklist with an icon per item (Mac, browser, Node, robot) whose boxes tick themselves one by one; click a box to tick or untick it
+// @description The requirements tick themselves off
 // @match       https://timsrobot.com/*
 // @match       https://*.timsrobot.com/*
 // @run-at      document-idle

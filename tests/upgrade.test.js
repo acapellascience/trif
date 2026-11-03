@@ -137,4 +137,12 @@ test(`upgrade: the ${TAG} updater installs this checkout's package; everything m
   assert.deepStrictEqual(pre.shipped['www.google.com/hide-sponsored'], { retired: { into: 'www.google.com/hide-extra-sections', kept: true } });
   assert.strictEqual(pre.shipped['www.google.com/hide-ai-mode'].retired.into, 'www.google.com/hide-ai-in-results');
   assert.ok(pre.offered.includes('www.google.com/hide-ai-mode'), 'still counted as offered: never offered again');
+  // The home page mods, new in 0.2.0, came with the update, off; TRIF isn't turned on for timsrobot.com.
+  const homepage = require('../helper/lib/preinstalled').PREINSTALLED.map((p) => p.id).filter((id) => id.startsWith('timsrobot.com/'));
+  assert.strictEqual(homepage.length, 13);
+  for (const id of homepage) {
+    assert.strictEqual(fs.readFileSync(path.join(sites, `${id}.js`), 'utf8'), fs.readFileSync(path.join(REPO, 'examples', 'sites', `${id}.js`), 'utf8'), `${id}\n${info}`);
+    assert.ok(pre.startOff.includes(id), `${id} starts off`);
+  }
+  assert.ok(!pre.sitesOn.includes('timsrobot.com'));
 });

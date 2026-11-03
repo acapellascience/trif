@@ -554,7 +554,7 @@ function renderMods() {
   // the pointer by a status refresh or by another mod changing. Everything else updates in place.
   const rows = new Map();
   for (const m of mods) {
-    const key = JSON.stringify([site, m.name, m.file, !!m.held, m.risk?.tier ?? null, m.risk?.why ?? null, m.matches,
+    const key = JSON.stringify([site, m.name, m.description || '', m.file, !!m.held, m.risk?.tier ?? null, m.risk?.why ?? null, m.matches,
       m.source ?? null, m.version ?? null, m.update ?? null]);
     const old = view.modRows.get(m.id);
     rows.set(m.id, old && old.key === key ? old : { key, li: modItem(m) });
@@ -680,10 +680,13 @@ function modItem(m) {
     name.append(' ', badge);
   }
   const main = el('div', 'mod-main');
+  // What the mod does, from its header's @description: one line, the whole of it in the tooltip.
+  const desc = m.description ? el('div', 'mod-desc', m.description) : null;
+  if (desc) desc.title = m.description;
   // The mods TRIF ships say so (their header's @source and @version).
   const file = el('div', 'mod-file', (m.file || m.id).split('/').pop());
   if (m.source === 'webmods' || m.source === 'trif') file.append(' ', el('span', 'mod-source', `Tim's mod${m.version ? `, v${m.version}` : ''}`));
-  main.append(light, name, file);
+  main.append(light, name, ...(desc ? [desc] : []), file);
   const row = el('div', 'mod-row');
   if (m.held) {
     // Written by an agent run here but reaching other sites: not running until the user allows it.

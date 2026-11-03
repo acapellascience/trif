@@ -1,6 +1,6 @@
 // ==WebMod==
 // @name        Living Robot
-// @description The robot comes alive and hunts you
+// @description The robot comes alive
 // @match       *://timsrobot.com/*
 // @match       *://*.timsrobot.com/*
 // @run-at      document-idle

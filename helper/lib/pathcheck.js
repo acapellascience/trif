@@ -9,6 +9,16 @@
 // macOS also gives each existing component the case it has on disk), and a path that doesn't exist yet is
 // the real path of its nearest existing parent plus the rest. Then they're compared with a separator
 // boundary (/a/bc isn't inside /a/b), ignoring case (and Unicode normalization) on volumes that do.
+//
+// Windows adds its own ways for one path to mean another, handled here too:
+//   - drive letters and names in any case (C:\Users and c:\USERS): NTFS ignores case, so this does;
+//   - \\?\C:\... and \\?\UNC\server\share: the same paths, in the long form; compared without it;
+//   - 8.3 short names (PROGRA~1): only existing entries have them, and the system's realpath gives
+//     their long names;
+//   - names Windows changes or reads specially: a trailing dot or space is dropped (so ".. ." is ".."),
+//     `name:stream` is a hidden stream of a file, and CON, NUL, COM1... are devices in every folder.
+//     A path with any of these after its drive isn't inside anything (winOddPath): no real file needs
+//     them, and Explorer can't even make them.
 
 const fs = require('fs');
 const path = require('path');
@@ -72,12 +82,32 @@ function fold(s, ci) { return ci ? s.normalize('NFC').toLowerCase() : s; }
  * Whether `child` is inside `parent` (both already real, e.g. from realish), `ci` saying whether to ignore
  * case. `orEqual`: the folder itself counts.
  */
-function within(child, parent, { ci = false, orEqual = false } = {}) {
-  const c = fold(child, ci);
-  const p = fold(parent, ci);
+function within(child, parent, { ci = false, orEqual = false, sep = path.sep } = {}) {
+  const c = fold(sep === '\\' ? stripLongPrefix(child) : child, ci);
+  const p = fold(sep === '\\' ? stripLongPrefix(parent) : parent, ci);
   if (c === p) return orEqual;
-  const prefix = p.endsWith(path.sep) ? p : p + path.sep;
+  const prefix = p.endsWith(sep) ? p : p + sep;
   return c.startsWith(prefix);
+}
+
+/** Windows: \\?\C:\a -> C:\a, \\?\UNC\srv\share -> \\srv\share (the same paths). */
+function stripLongPrefix(p) {
+  const s = String(p);
+  if (/^\\\\\?\\UNC\\/i.test(s)) return `\\\\${s.slice(8)}`;
+  if (/^\\\\\?\\[A-Za-z]:/.test(s)) return s.slice(4);
+  return s;
+}
+
+/**
+ * Windows: whether a path has, after its root, a component Windows reads differently from how it's
+ * written (see the top of this file): a trailing dot or space (other than . and ..), a `:` (a stream),
+ * or a device name. Such a path isn't inside anything.
+ */
+function winOddPath(p) {
+  const s = stripLongPrefix(String(p));
+  const root = path.win32.parse(s).root;
+  return s.slice(root.length).split(/[\\/]+/).filter(Boolean).some((c) => (c !== '.' && c !== '..' && /[. ]$/.test(c))
+    || c.includes(':') || RESERVED.test(c.replace(/[. ]+$/, '')));
 }
 
 /**
@@ -85,12 +115,14 @@ function within(child, parent, { ci = false, orEqual = false } = {}) {
  * boundary, case ignored where the parent's volume ignores it. `orEqual`: the folder itself counts.
  */
 function isInside(child, parent, { orEqual = false } = {}) {
+  if (process.platform === 'win32' && winOddPath(path.resolve(String(child)))) return false;
   const p = realish(parent);
   return within(realish(child), p, { ci: ignoresCase(p), orEqual });
 }
 
 /** Whether two paths name the same place (real paths, case as the volume treats it). */
 function samePath(a, b) {
+  if (process.platform === 'win32' && (winOddPath(path.resolve(String(a))) || winOddPath(path.resolve(String(b))))) return false;
   const rb = realish(b);
   return within(realish(a), rb, { ci: ignoresCase(rb), orEqual: true });
 }
@@ -112,4 +144,4 @@ function badName(name) {
   return '';
 }
 
-module.exports = { realish, ignoresCase, within, isInside, samePath, badName, platformIgnoresCase };
+module.exports = { realish, ignoresCase, within, isInside, samePath, badName, platformIgnoresCase, winOddPath, stripLongPrefix };

@@ -20,6 +20,13 @@ function defaultDirs() {
     return envVar('DEFAULT_AGENT_DIRS').split(path.delimiter).filter(Boolean);
   }
   const home = os.homedir();
+  if (process.platform === 'win32') {
+    // Anthropic's installer, npm's global folder, winget, Scoop, pnpm, Volta.
+    const local = require('../paths').localAppData();
+    const roaming = process.env.APPDATA || path.join(home, 'AppData', 'Roaming');
+    return [path.join(home, '.local', 'bin'), path.join(roaming, 'npm'), path.join(local, 'Microsoft', 'WinGet', 'Links'),
+      path.join(home, 'scoop', 'shims'), path.join(local, 'pnpm'), path.join(local, 'Volta', 'bin')];
+  }
   return [path.join(home, '.local', 'bin'), '/usr/local/bin', '/opt/homebrew/bin', path.join(home, '.npm-global', 'bin')];
 }
 

@@ -9,12 +9,24 @@ function isExecutableFile(p) {
   try { fs.accessSync(p, fs.constants.X_OK); return fs.statSync(p).isFile(); } catch { return false; }
 }
 
+function isFile(p) {
+  try { return fs.statSync(p).isFile(); } catch { return false; }
+}
+
+// Windows finds programs by extension (PATHEXT), not by an executable bit: claude.exe from Anthropic's
+// installer, codex.cmd from npm. A real .exe first: a .cmd can only be started through cmd.exe.
+const WINDOWS_EXTS = ['.exe', '.com', '.cmd', '.bat'];
+
 // First `name` found in `dirs` (absolute directories, in order), or null.
-function findExecutable(name, dirs) {
+function findExecutable(name, dirs, { platform = process.platform } = {}) {
+  const names = platform === 'win32' && !path.extname(name) ? WINDOWS_EXTS.map((e) => name + e) : [name];
   for (const d of dirs) {
     if (!d || !path.isAbsolute(d)) continue;
-    const p = path.join(d, name);
-    if (isExecutableFile(p)) return p;
+    for (const n of names) {
+      const p = path.join(d, n);
+      // (Windows has no executable bit: a file with one of those extensions is a program.)
+      if (platform === 'win32' ? isFile(p) : isExecutableFile(p)) return p;
+    }
   }
   return null;
 }
@@ -27,7 +39,7 @@ function versionOf(file, env, args = ['--version']) {
   if (versionCache.has(key)) return versionCache.get(key);
   let version = null;
   try {
-    const r = spawnSync(file, args, { env, encoding: 'utf8', timeout: 8000, stdio: ['ignore', 'pipe', 'pipe'] });
+    const r = spawnSync(file, args, { env, encoding: 'utf8', timeout: 8000, stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true });
     const text = String(r.stdout || '').trim().split('\n')[0] || '';
     const m = /\d+\.\d+(?:\.\d+)?(?:[-+.\w]*)?/.exec(text);
     version = m ? m[0] : (text || null);
@@ -61,7 +73,7 @@ function parseJsonLine(line) {
 // Run a short command (stdin closed) and collect {status, error, stdout, stderr}. Never throws.
 function captureSync(file, args, { env, cwd, timeout = 10000 } = {}) {
   try {
-    const r = spawnSync(file, args, { env, cwd, encoding: 'utf8', timeout, stdio: ['ignore', 'pipe', 'pipe'] });
+    const r = spawnSync(file, args, { env, cwd, encoding: 'utf8', timeout, stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true });
     return { status: r.status, error: r.error || null, stdout: String(r.stdout || ''), stderr: String(r.stderr || '') };
   } catch (e) {
     return { status: null, error: e, stdout: '', stderr: '' };
@@ -84,7 +96,7 @@ function capture(file, args, { env, cwd, timeout = 10000, maxBytes = 65536 } = {
     };
     let child;
     try {
-      child = spawn(file, args, { env, cwd, stdio: ['ignore', 'pipe', 'pipe'] });
+      child = spawn(file, args, { env, cwd, stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true });
     } catch (e) {
       resolve({ status: null, error: e, stdout, stderr });
       return;

@@ -5,6 +5,9 @@
 // Safari has no such manifests: its extension reaches the helper through the Safari bridge, which setup
 // installs as a launchd agent (SAFARI_AGENT_LABEL). Every Mac has Safari, so it only counts as detected
 // once that agent is installed (`trif setup --browser safari` installs it).
+// Windows: browsers find native hosts through the registry instead (lib/win/registry.js): setup writes the
+// manifests into %LOCALAPPDATA%\TRIF\NativeMessagingHosts\<browser> and points each browser's key there.
+// A browser counts as detected when its user data folder exists, as elsewhere.
 
 const fs = require('fs');
 const os = require('os');
@@ -27,6 +30,32 @@ const LINUX = {
   edge: { label: 'Microsoft Edge', userData: '.config/microsoft-edge' },
   firefox: { label: 'Firefox', userData: '.mozilla/firefox', nativeDir: '.mozilla/native-messaging-hosts', firefox: true },
 };
+
+// userData under %LOCALAPPDATA% (Firefox: %APPDATA%); regKeys: under HKCU\Software (registry.js), each
+// followed by \NativeMessagingHosts\<host name>.
+const WINDOWS = {
+  chrome: { label: 'Google Chrome', local: 'Google\\Chrome\\User Data', regKeys: ['Google\\Chrome'] },
+  chromium: { label: 'Chromium', local: 'Chromium\\User Data', regKeys: ['Chromium'] },
+  // (Brave's own key, and Chrome's, which Brave is reported to read as well: unverified.)
+  brave: { label: 'Brave', local: 'BraveSoftware\\Brave-Browser\\User Data', regKeys: ['BraveSoftware\\Brave-Browser', 'Google\\Chrome'] },
+  edge: { label: 'Microsoft Edge', local: 'Microsoft\\Edge\\User Data', regKeys: ['Microsoft\\Edge'] },
+  firefox: { label: 'Firefox', roaming: 'Mozilla\\Firefox', regKeys: ['Mozilla'], firefox: true },
+};
+
+function windowsTable(homedir, env) {
+  const { localAppData } = require('./paths');
+  const local = localAppData({ env, homedir });
+  const roaming = env.APPDATA && path.isAbsolute(env.APPDATA) ? env.APPDATA : path.join(homedir, 'AppData', 'Roaming');
+  const split = (p) => p.split('\\');
+  return Object.entries(WINDOWS).map(([key, b]) => {
+    const userData = b.local ? path.join(local, ...split(b.local)) : path.join(roaming, ...split(b.roaming));
+    return {
+      key, label: b.label, userData, firefox: !!b.firefox, detected: fs.existsSync(userData),
+      nativeDir: path.join(local, 'TRIF', 'NativeMessagingHosts', key),
+      regKeys: b.regKeys,
+    };
+  });
+}
 
 const ALL_KEYS = ['chrome', 'chromium', 'brave', 'edge', 'arc', 'firefox', 'safari'];
 
@@ -53,7 +82,8 @@ function legacySafariAgentLoaded({ env = process.env, run } = {}) {
   try { return run(['print', `gui/${process.getuid()}/${LEGACY_SAFARI_AGENT_LABEL}`]).status === 0; } catch { return false; }
 }
 
-function browserTable(homedir = os.homedir(), platform = process.platform) {
+function browserTable(homedir = os.homedir(), platform = process.platform, env = process.env) {
+  if (platform === 'win32') return windowsTable(homedir, env);
   const table = platform === 'darwin' ? MAC : LINUX;
   return Object.entries(table).map(([key, b]) => {
     const userData = path.join(homedir, b.userData);
@@ -64,8 +94,8 @@ function browserTable(homedir = os.homedir(), platform = process.platform) {
 }
 
 // Resolve `--browser` (undefined = detected ones) to a list of targets, or throw on a bad name.
-function selectBrowsers(choice, homedir, platform) {
-  const table = browserTable(homedir, platform);
+function selectBrowsers(choice, homedir, platform, env) {
+  const table = browserTable(homedir, platform, env);
   if (!choice) return table.filter((b) => b.detected);
   const wanted = String(choice).split(',').map((s) => s.trim().toLowerCase()).filter(Boolean);
   if (wanted.includes('all')) return table;
@@ -81,4 +111,11 @@ function selectBrowsers(choice, homedir, platform) {
   return out;
 }
 
-module.exports = { browserTable, selectBrowsers, ALL_KEYS, SAFARI_AGENT_LABEL, LEGACY_SAFARI_AGENT_LABEL, safariAgentPlist, legacySafariAgentPlist, legacySafariAgentLoaded };
+/** A browser's registry keys for TRIF's native host (Windows), full: HKCU\Software\...\<host name>. */
+function nativeRegKeys(b, opts = {}) {
+  const { fullKey } = require('./win/registry');
+  const { HOST_NAME } = require('./paths');
+  return (b.regKeys || []).map((k) => fullKey(`${k}\\NativeMessagingHosts\\${HOST_NAME}`, opts));
+}
+
+module.exports = { nativeRegKeys, WINDOWS, browserTable, selectBrowsers, ALL_KEYS, SAFARI_AGENT_LABEL, LEGACY_SAFARI_AGENT_LABEL, safariAgentPlist, legacySafariAgentPlist, legacySafariAgentLoaded };

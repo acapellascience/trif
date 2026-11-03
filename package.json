@@ -28,7 +28,8 @@
   },
   "os": [
     "darwin",
-    "linux"
+    "linux",
+    "win32"
   ],
   "keywords": [
     "chrome-extension",

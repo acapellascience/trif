@@ -5,6 +5,7 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 const { envVar } = require('./env');
+const pipes = require('./win/pipes');
 
 // The product: "Tim's Robot Internet Fixer", TRIF for short (called WebMods before 0.2.0).
 const NAME = 'TRIF';
@@ -72,8 +73,14 @@ function extensionOrigins(config = {}) {
 
 function expandHome(p) {
   if (p === '~') return os.homedir();
-  if (p.startsWith('~/')) return path.join(os.homedir(), p.slice(2));
+  if (p.startsWith('~/') || (process.platform === 'win32' && p.startsWith('~\\'))) return path.join(os.homedir(), p.slice(2));
   return p;
+}
+
+// Whether two resolved paths are the same name: ignoring case on Windows, whose file names do (and where
+// C:\Users\Tim and c:\users\tim are the same folder). (pathcheck.js compares real paths, for boundaries.)
+function sameName(a, b, platform = process.platform) {
+  return platform === 'win32' ? String(a).toLowerCase() === String(b).toLowerCase() : a === b;
 }
 
 const HOME_DIR_NAME = '.trif';
@@ -115,13 +122,13 @@ function resolveHome(override) {
   const h = override || envVar('HOME');
   if (!h) return currentDefaultHome();
   const resolved = path.resolve(expandHome(String(h)));
-  return resolved === legacyHome() || resolved === defaultHome() ? currentDefaultHome() : resolved;
+  return sameName(resolved, legacyHome()) || sameName(resolved, defaultHome()) ? currentDefaultHome() : resolved;
 }
 
 /** Whether `home` (resolved) is the default workspace, under either name. */
 function isDefaultHome(home) {
   const resolved = path.resolve(expandHome(String(home)));
-  return resolved === defaultHome() || resolved === legacyHome();
+  return sameName(resolved, defaultHome()) || sameName(resolved, legacyHome());
 }
 
 // ---------------------------------------------------------------- the private folder
@@ -133,14 +140,22 @@ function isDefaultHome(home) {
 // out of them. Until 0.2.0 they were in the workspace; migrate.js migratePrivate moves them.
 //   macOS    ~/Library/Application Support/TRIF
 //   Linux    $XDG_STATE_HOME/trif, or ~/.local/state/trif
+//   Windows  %LOCALAPPDATA%\TRIF (C:\Users\<you>\AppData\Local\TRIF: per user, per computer, private to
+//            the user like the rest of the profile folder)
 //   a workspace elsewhere ($TRIF_HOME, --home): <workspace>-private beside it
 //   $TRIF_PRIVATE overrides all of these (not inside the workspace, nor holding it).
 const PRIVATE_FILES = ['config.json', 'safari-token', 'helper.log', 'helper.log.1', 'safari-bridge.err', 'runs', 'screenshots'];
 
 function defaultPrivateDir({ env = process.env, platform = process.platform, homedir = os.homedir() } = {}) {
   if (platform === 'darwin') return path.join(homedir, 'Library', 'Application Support', NAME);
+  if (platform === 'win32') return path.join(localAppData({ env, homedir }), NAME);
   const state = env.XDG_STATE_HOME && path.isAbsolute(env.XDG_STATE_HOME) ? env.XDG_STATE_HOME : path.join(homedir, '.local', 'state');
   return path.join(state, CLI_NAME);
+}
+
+/** %LOCALAPPDATA% (Windows), or where it normally is when it isn't set. */
+function localAppData({ env = process.env, homedir = os.homedir() } = {}) {
+  return env.LOCALAPPDATA && path.isAbsolute(env.LOCALAPPDATA) ? env.LOCALAPPDATA : path.join(homedir, 'AppData', 'Local');
 }
 
 /** {dir, error}: the private folder for workspace `home` (error: why $TRIF_PRIVATE was ignored). */
@@ -175,10 +190,37 @@ function readConfig(home) {
   }
 }
 
-function workspace(homeOverride) {
+// The wrappers in <home>/bin: #!/bin/sh scripts, or on Windows a .bat for the browsers, a .cmd for
+// Command Prompt and PowerShell and an extensionless sh script for Git Bash (lib/win/launchers.js). Windows
+// never had the names from before 0.2.0, so there are none of those there.
+function wrapperPaths(home, platform = process.platform) {
+  const bin = path.join(home, 'bin');
+  if (platform === 'win32') {
+    return {
+      bin,
+      hostWrapper: path.join(bin, `${CLI_NAME}-host.bat`),
+      cliWrapper: path.join(bin, `${CLI_NAME}.cmd`),
+      cliShWrapper: path.join(bin, CLI_NAME),
+      legacyHostWrapper: null,
+      legacyCliWrapper: null,
+    };
+  }
+  return {
+    bin,
+    hostWrapper: path.join(bin, `${CLI_NAME}-host`),
+    cliWrapper: path.join(bin, CLI_NAME),
+    cliShWrapper: null,
+    // The same wrappers under their names from before 0.2.0: native host manifests and PATHs may still
+    // point at them.
+    legacyHostWrapper: path.join(bin, `${LEGACY_CLI_NAME}-host`),
+    legacyCliWrapper: path.join(bin, LEGACY_CLI_NAME),
+  };
+}
+
+function workspace(homeOverride, { platform = process.platform } = {}) {
   const home = resolveHome(homeOverride);
   const { config, error } = readConfig(home);
-  const priv = privateDirInfo(home);
+  const priv = privateDirInfo(home, { platform });
   let modsDir = path.join(home, 'sites');
   if (typeof config.modsDir === 'string' && config.modsDir.trim()) {
     modsDir = path.resolve(home, expandHome(config.modsDir.trim()));
@@ -189,7 +231,9 @@ function workspace(homeOverride) {
   return {
     home,
     modsDir,
-    sock: path.join(home, 'helper.sock'),
+    // Where the CLI finds the default helper: <home>/helper.sock, or on Windows the named pipe that
+    // <home>\helper.pipe names (lib/win/pipes.js).
+    sock: pipes.usesPipes({ platform }) ? pipes.defaultEndpoint(home, { platform }) : path.join(home, 'helper.sock'),
     // The private folder (see above) and what's in it.
     private: priv.dir,
     privateError: priv.error,
@@ -199,13 +243,7 @@ function workspace(homeOverride) {
     screenshots: path.join(priv.dir, 'screenshots'),
     safariToken: path.join(priv.dir, 'safari-token'),
     safariBridgeErr: path.join(priv.dir, 'safari-bridge.err'),
-    bin: path.join(home, 'bin'),
-    hostWrapper: path.join(home, 'bin', `${CLI_NAME}-host`),
-    cliWrapper: path.join(home, 'bin', CLI_NAME),
-    // The same wrappers under their names from before 0.2.0: native host manifests and PATHs may still
-    // point at them.
-    legacyHostWrapper: path.join(home, 'bin', `${LEGACY_CLI_NAME}-host`),
-    legacyCliWrapper: path.join(home, 'bin', LEGACY_CLI_NAME),
+    ...wrapperPaths(home, platform),
     appDir: path.join(home, APP_DIR_NAME),
     config,
     configError: error,
@@ -223,5 +261,5 @@ module.exports = {
   HOST_NAME, DEV_EXTENSION_ID, FIREFOX_EXTENSION_ID, STORE_EXTENSION_IDS, EXTENSION_ID, EXTENSION_ORIGIN, HELPER_DIR, REPO_ROOT,
   HOST_JS, CLI_JS, APP_DIR_NAME, VERSION,
   expandHome, defaultHome, resolveHome, readConfig, workspace, examplesDir, isGitCheckout, extensionIds, extensionOrigins,
-  PRIVATE_FILES, defaultPrivateDir, privateDir, privateDirInfo, configFile,
+  PRIVATE_FILES, defaultPrivateDir, privateDir, privateDirInfo, configFile, localAppData, sameName, wrapperPaths,
 };

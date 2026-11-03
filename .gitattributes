@@ -1,0 +1,4 @@
+# Every text file is checked out with LF line endings, Windows included (Git for Windows would otherwise
+# turn them into CRLF): the shipped mods' sha1s must match what preinstalled.js recorded, and tests
+# compare files byte for byte. Binary files (icons) are detected as such and left alone.
+* text=auto eol=lf

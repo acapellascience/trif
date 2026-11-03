@@ -27,6 +27,8 @@ const DROP_REQUEST = new Set(['host', 'connection', 'keep-alive', 'proxy-connect
   'transfer-encoding', 'authorization', 'cookie', 'origin', 'referer', 'x-api-key', 'api-key']);
 const DROP_RESPONSE = new Set(['connection', 'keep-alive', 'proxy-connection', 'te', 'trailer', 'upgrade', 'transfer-encoding', 'set-cookie']);
 const ALLOWED_PATH = /^\/(responses|models)(?:[/?]|$)/;
+// The largest request body passed on (the agent's requests: JSON, with its conversation, images included).
+const MAX_BODY = 64 * 1024 * 1024;
 // The two ways of passing it: OpenAI's (and OpenRouter's, and most servers') bearer token, Anthropic's
 // x-api-key (the base URL Claude Code gets is the proxy's root: it adds /v1/messages itself).
 const STYLES = {
@@ -56,7 +58,8 @@ function sameText(a, b) {
  *   headers  extra headers for the provider (none by default)
  *   onStatus called with each answer's HTTP status (a 401 means the key was refused)
  *   url      what the agent gets as its base URL: http://127.0.0.1:<port>/<32 hex>[/v1]
- *   stats    {forwarded, refused} counts (for tests and the log)
+ *   stats    {forwarded, refused, retried} counts (for tests and the log; retried: requests sent again
+ *            after a kept-alive connection to the provider turned out closed)
  */
 function startKeyProxy({ target, key, style = 'bearer', headers = {}, logger = null, onStatus = null }) {
   const how = STYLES[style];
@@ -68,7 +71,7 @@ function startKeyProxy({ target, key, style = 'bearer', headers = {}, logger = n
   const secret = crypto.randomBytes(16).toString('hex');
   const mount = `/${secret}${how.mount}`;
   const upstreams = new Set();
-  const stats = { forwarded: 0, refused: 0 };
+  const stats = { forwarded: 0, refused: 0, retried: 0 };
   let port = 0;
   let closed = false;
 
@@ -93,33 +96,60 @@ function startKeyProxy({ target, key, style = 'bearer', headers = {}, logger = n
     if (!how.paths.test(rest) || (req.method !== 'POST' && req.method !== 'GET')) return deny(404, 'not found');
 
     const out = {};
-    for (const [k, v] of Object.entries(h)) if (!DROP_REQUEST.has(k)) out[k] = v;
+    for (const [k, v] of Object.entries(h)) if (!DROP_REQUEST.has(k) && k !== 'content-length') out[k] = v;
     Object.assign(out, headers, { host: base.host }, how.headers(key));
-    const up = client.request({
-      protocol: base.protocol, hostname: base.hostname, port: base.port || undefined, method: req.method,
-      path: basePath + rest, headers: out,
-    }, (upRes) => {
-      if (onStatus) { try { onStatus(upRes.statusCode); } catch { /* ignore */ } }
-      const back = {};
-      for (const [k, v] of Object.entries(upRes.headers)) if (!DROP_RESPONSE.has(k) && !k.startsWith('access-control-')) back[k] = v;
-      res.writeHead(upRes.statusCode || 502, back);
-      res.flushHeaders();
-      // Server-sent events go through as they come: pipe writes each chunk at once (no buffering here).
-      upRes.pipe(res);
-      upRes.on('error', () => res.destroy());
+    // The request body is read whole first (the agent's requests are JSON, and bounded), so it can be sent
+    // again: a kept-alive connection to the provider that the provider closed meanwhile fails at once
+    // (ECONNRESET, "socket hang up") before any answer, and is retried once on a fresh one.
+    let current = null;
+    const send = (body, attempt) => {
+      let answered = false;
+      const up = client.request({
+        protocol: base.protocol, hostname: base.hostname, port: base.port || undefined, method: req.method,
+        path: basePath + rest, headers: { ...out, ...(body.length || req.method === 'POST' ? { 'content-length': body.length } : {}) },
+      }, (upRes) => {
+        answered = true;
+        if (onStatus) { try { onStatus(upRes.statusCode); } catch { /* ignore */ } }
+        const back = {};
+        for (const [k, v] of Object.entries(upRes.headers)) if (!DROP_RESPONSE.has(k) && !k.startsWith('access-control-')) back[k] = v;
+        res.writeHead(upRes.statusCode || 502, back);
+        res.flushHeaders();
+        // Server-sent events go through as they come: pipe writes each chunk at once (no buffering here).
+        upRes.pipe(res);
+        upRes.on('error', () => res.destroy());
+      });
+      current = up;
+      upstreams.add(up);
+      up.on('close', () => upstreams.delete(up));
+      up.on('error', (e) => {
+        if (closed) return res.destroy();
+        if (!answered && up.reusedSocket && attempt === 0 && !res.headersSent && !res.destroyed) {
+          stats.retried++;
+          if (logger && logger.debug) logger.debug(`key proxy: ${base.host}: ${e.code || e.message} on a kept-alive connection; trying a new one`);
+          return send(body, 1);
+        }
+        if (logger) logger.warn(`key proxy: ${base.host}: ${e.code || e.message}`);
+        // (The error is about the connection, never the key.)
+        refuse(res, 502, `couldn't reach ${base.host}: ${e.code || e.message}`);
+      });
+      up.end(body);
+    };
+    const chunks = [];
+    let size = 0;
+    let tooBig = false;
+    req.on('data', (c) => {
+      if (tooBig) return;
+      size += c.length;
+      if (size > MAX_BODY) { tooBig = true; chunks.length = 0; deny(413, 'request too large'); return; }
+      chunks.push(c);
     });
-    upstreams.add(up);
-    up.on('close', () => upstreams.delete(up));
-    up.on('error', (e) => {
-      if (closed) return res.destroy();
-      if (logger) logger.warn(`key proxy: ${base.host}: ${e.code || e.message}`);
-      // (The error is about the connection, never the key.)
-      refuse(res, 502, `couldn't reach ${base.host}: ${e.code || e.message}`);
+    req.on('end', () => {
+      if (tooBig || closed || res.destroyed) return;
+      stats.forwarded++;
+      send(Buffer.concat(chunks), 0);
     });
-    req.on('aborted', () => up.destroy());
-    res.on('close', () => { if (!res.writableFinished) up.destroy(); });
-    stats.forwarded++;
-    req.pipe(up);
+    req.on('aborted', () => current && current.destroy());
+    res.on('close', () => { if (!res.writableFinished && current) current.destroy(); });
   });
   server.on('connection', (sock) => sock.setNoDelay(true));
 

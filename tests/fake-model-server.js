@@ -45,6 +45,9 @@ function startFakeModelServer({ script = [{ say: 'ok' }], models = ['gpt-oss:20b
       res.end();
     });
   });
+  // Longer than Node's 5 s default: a connection Codex (or the key proxy) keeps alive between two steps
+  // isn't closed under it while the agent's command runs.
+  server.keepAliveTimeout = 60000;
   return new Promise((resolve) => {
     server.listen(0, '127.0.0.1', () => {
       const { port } = server.address();

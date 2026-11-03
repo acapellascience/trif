@@ -524,6 +524,47 @@ test('`trif agent open-model`: --set-key from stdin (never argv), --remove-key; 
 
 // ------------------------------------------------------------------ the key proxy (keyproxy.js)
 
+test('key proxy: a kept-alive connection the provider closed meanwhile is retried once on a new one, with the same body', async () => {
+  const net = require('net');
+  const { startKeyProxy } = require('../helper/lib/keyproxy');
+  // A provider that answers the first request on a connection and drops the connection at the second
+  // (as when its keep-alive timeout passed just as the next request went out).
+  const bodies = [];
+  let conns = 0;
+  const upstream = net.createServer((sock) => {
+    conns++;
+    let buf = '';
+    let n = 0;
+    sock.on('data', (d) => {
+      buf += d;
+      for (;;) {
+        const end = buf.indexOf('\r\n\r\n');
+        if (end === -1) return;
+        const len = Number((/content-length: (\d+)/i.exec(buf.slice(0, end)) || [])[1] || 0);
+        if (buf.length < end + 4 + len) return;
+        const body = buf.slice(end + 4, end + 4 + len);
+        buf = buf.slice(end + 4 + len);
+        if (++n === 2) { sock.destroy(); return; }
+        bodies.push(body);
+        sock.write(`HTTP/1.1 200 OK\r\ncontent-type: application/json\r\ncontent-length: 2\r\nconnection: keep-alive\r\n\r\n{}`);
+      }
+    });
+    sock.on('error', () => {});
+  });
+  await new Promise((r) => upstream.listen(0, '127.0.0.1', r));
+  cleanups.push(() => new Promise((r) => upstream.close(() => r())));
+  const proxy = await startKeyProxy({ target: `http://127.0.0.1:${upstream.address().port}/v1`, key: FAKE_KEY });
+  cleanups.push(() => proxy.close());
+  for (const b of ['{"n":1}', '{"n":2}']) {
+    const r = await fetch(`${proxy.url}/responses`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: b });
+    assert.equal(r.status, 200, await r.clone().text());
+    await r.text();
+  }
+  assert.deepEqual(bodies, ['{"n":1}', '{"n":2}']);
+  assert.equal(proxy.stats.retried, 1);
+  assert.equal(conns, 2);
+});
+
 test('key proxy: adds the key, streams, passes status and headers; refuses other paths, browsers and hosts; closes', async () => {
   const http = require('http');
   const { startKeyProxy } = require('../helper/lib/keyproxy');
@@ -761,7 +802,8 @@ test('real Codex + stand-in model: model requests get through (the key proxy add
   const node = process.execPath;
   const script = [
     { run: `${q(node)} ${q(CLI_JS)} tabs` },
-    { run: 'curl -sS -m 5 -o /dev/null -w "%{http_code}" https://example.com; echo " curl=$?"' },
+    // (2>&1: curl's error and its output in one stream, in the order curl wrote them.)
+    { run: 'curl -sS -m 5 -o /dev/null -w "%{http_code}" https://example.com 2>&1; echo " curl=$?"' },
     { run: 'LOCAL' }, // filled in below: curl to the model server itself
     { run: `cat ${q(path.join(privDir(home), 'config.json'))}; echo " cat=$?"` },
     { run: `echo '// mine' > ${q(path.join(home, 'sites', 'example.com', 'oss-probe.js'))} && echo WROTE-OWN` },
@@ -773,7 +815,7 @@ test('real Codex + stand-in model: model requests get through (the key proxy add
   ];
   const srv = await startFakeModelServer({ script });
   cleanups.push(() => srv.close());
-  script[2] = { run: `curl -sS -m 5 ${srv.url}/api/version; echo " local=$?"` };
+  script[2] = { run: `curl -sS -m 5 ${srv.url}/api/version 2>&1; echo " local=$?"` };
   fs.writeFileSync(path.join(privDir(home), 'config.json'), JSON.stringify({ env: { PATH: `${bin}:/usr/bin:/bin` }, openModel: { provider: 'custom', baseUrl: `${srv.url}/v1`, model: 'stand-in' }, secret: 'CONFIG-SECRET' }));
   await keyring.setKey(`custom:${new URL(srv.url).host}`, KEY, { env: kc.env });
   const ext = startHost(home, { ...kc.env, TTEST_CANARY: canary, TRIF_AGENT_TIMEOUT_MS: '100000' });
@@ -784,7 +826,8 @@ test('real Codex + stand-in model: model requests get through (the key proxy add
   const done = await waitDone(ext, r.result.runId, 100000);
   const evs = eventsOf(ext, r.result.runId);
   const out = srv.toolOutputs().join('\n----\n');
-  const info = `events: ${JSON.stringify(evs).slice(0, 3000)}\noutputs:\n${out.slice(0, 4000)}`;
+  const logTail = () => { try { return fs.readFileSync(path.join(privDir(home), 'helper.log'), 'utf8').split('\n').slice(-25).join('\n'); } catch { return '(no helper.log)'; } };
+  const info = `events: ${JSON.stringify(evs).slice(0, 3000)}\nrequests to the model server: ${srv.requests.length} (POST ${srv.requests.filter((x) => x.method === 'POST').length} of ${script.length} steps)\noutputs:\n${out.slice(0, 4000)}\nhelper.log:\n${logTail()}`;
   assert.equal(done.ok, true, info);
   // Codex's own requests reached the model server, with the key.
   const posts = srv.requests.filter((x) => x.method === 'POST');

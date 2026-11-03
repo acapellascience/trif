@@ -675,8 +675,11 @@ function modItem(m) {
   label.id = labelId;
   const tag = el('span', 'tag');
   tag.hidden = true;
-  // Spaces between the name and its badges, so a badge can wrap to the next line on its own.
-  name.append(label, ' ', tag);
+  // The file name right after the name, and the mods TRIF ships say so (their header's @source and @version).
+  const file = el('span', 'mod-file', (m.file || m.id).split('/').pop());
+  const source = m.source === 'webmods' || m.source === 'trif' ? el('span', 'mod-source', `Tim's mod${m.version ? `, v${m.version}` : ''}`) : null;
+  // Spaces between the name and the rest, so each can wrap to the next line on its own.
+  name.append(label, ' ', file, ...(source ? [' ', source] : []), ' ', tag);
   // Risk tier from the mod's header (AGENTS.md "Account safety"): nothing for 0, a badge for 1 and 2.
   if (m.risk?.tier >= 1) {
     const badge = el('span', `tag risk risk-${m.risk.tier}`, m.risk.tier >= 2 ? 'changes requests' : 'detectable');
@@ -695,13 +698,9 @@ function modItem(m) {
     name.append(' ', badge);
   }
   const main = el('div', 'mod-main');
-  // What the mod does, from its header's @description: one line, the whole of it in the tooltip.
+  // What the mod does, from its header's @description, under the name.
   const desc = m.description ? el('div', 'mod-desc', m.description) : null;
-  if (desc) desc.title = m.description;
-  // The mods TRIF ships say so (their header's @source and @version).
-  const file = el('div', 'mod-file', (m.file || m.id).split('/').pop());
-  if (m.source === 'webmods' || m.source === 'trif') file.append(' ', el('span', 'mod-source', `Tim's mod${m.version ? `, v${m.version}` : ''}`));
-  main.append(light, name, ...(desc ? [desc] : []), file);
+  main.append(light, name, ...(desc ? [desc] : []));
   const row = el('div', 'mod-row');
   if (m.held) {
     // Written by an agent run here but reaching other sites: not running until the user allows it.

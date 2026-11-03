@@ -303,10 +303,10 @@ body[data-problem="helper"] .mod-list, body.needs-login .mod-list { --switch-on:
   background: color-mix(in srgb, var(--muted) 45%, transparent); }
 .light.on { background: var(--switch-on); }
 .mod-list li.off .mod-name { color: var(--muted); }
-.mod-desc { color: var(--muted); font-size: 12px; line-height: 1.35; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.mod-file { color: var(--muted); font: 11px/1.4 var(--mono); overflow-wrap: anywhere; }
+.mod-desc { color: var(--muted); font-size: 12px; line-height: 1.35; overflow-wrap: anywhere; }
+.mod-file { color: var(--muted); font: 11px/1.4 var(--mono); font-weight: 400; overflow-wrap: anywhere; }
 .mod-err { color: var(--bad); font-size: 12px; }
-.mod-source { font: 11px/1.4 system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; color: var(--faint); }
+.mod-source { font: 400 11px/1.4 system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; color: var(--faint); }
 .mod-source::before { content: "· "; }
 /* A new version of a shipped mod the user changed, with what they can do about it. */
 .mod-update { margin: 6px 0 2px 34px; padding: 6px 8px; border: 1px solid var(--line); border-radius: 7px; font-size: 12px; }

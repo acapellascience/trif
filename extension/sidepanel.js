@@ -15,7 +15,7 @@ const emptyChat = () => ({ sessionId: null, agent: null, messages: [], run: null
 
 const ui = {
   dot: $('#dot'), site: $('#site'), siteSwitch: $('#site-switch'), newChat: $('#new-chat'), settingsBtn: $('#settings-btn'),
-  gate: $('#gate'), gateBtn: $('#gate-btn'), gateErr: $('#gate-err'),
+  gate: $('#gate'), gateBtn: $('#gate-btn'), gateErr: $('#gate-err'), landing: $('#landing'),
   settings: $('#settings'), agent: $('#agent'), agentNote: $('#agent-note'), model: $('#model'),
   modelCustomRow: $('#model-custom-row'), modelCustom: $('#model-custom'), modelNote: $('#model-note'),
   instructions: $('#instructions'), instructionsNote: $('#instructions-note'),
@@ -357,7 +357,7 @@ function renderNotice({ helperOk, agentInfo, anyAgent }) {
   n.dataset.key = '';
   n.classList.remove('ok');
   if (!site) {
-    parts.push(el('p', null, 'Open a website in this window to customize it.'));
+    // The landing page (renderGate) shows instead.
   } else if (status && !helperOk) {
     bad = true;
     const p = el('p');
@@ -646,6 +646,10 @@ const siteIsOn = () => !!siteScope() && (view.status?.sitesOn || []).includes(si
 let siteSwitching = false;
 
 function renderGate() {
+  // No website in this tab: the landing page, only the robot (body.no-site hides the rest).
+  const noSite = !!view.tab && !view.site;
+  document.body.classList.toggle('no-site', noSite);
+  ui.landing.hidden = !noSite;
   const scope = siteScope();
   const known = !!scope && !!view.status;
   const gated = known && !siteIsOn();

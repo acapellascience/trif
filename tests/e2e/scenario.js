@@ -687,6 +687,17 @@ class Scenario {
       await this.waitPanel('the panel on a page without a site', (x) => !x.site || !/x\.com/.test(x.site), 10000).catch(() => {});
       await sleep(500);
       await this.shot(this.panelCtx, 'panel-narrow-no-site');
+      await this.r.check('landing page: only the robot when the tab has no website', async () => {
+        const x = await this.panel(`async () => {
+          const shown = (sel) => { const e = document.querySelector(sel); return !!e && e.getClientRects().length > 0; };
+          const img = document.querySelector('#landing .landing-icon');
+          if (img && !img.complete) await new Promise((ok) => { img.onload = img.onerror = ok; });
+          return { landing: shown('#landing'), bar: shown('.bar'), composer: shown('.composer'), notice: shown('#notice'),
+            loaded: !!img && img.naturalWidth > 0, width: img ? Math.round(img.getBoundingClientRect().width) : 0 };
+        }`);
+        if (!x.landing || x.bar || x.composer || x.notice || !x.loaded || x.width !== 160) throw new Error(JSON.stringify(x));
+        return 'the 160px shaded robot, no bar, notice or composer';
+      });
       await this.ext(`async (id, url) => { await chrome.tabs.update(id, { url }); }`, [this.xTab, `https://x.com:${this.o.servers.tlsPort}/home`]);
       await this.waitPanel('the panel back on x.com', (x) => x.site === 'x.com' && x.mods.length >= 3, 15000);
       await metrics(false);

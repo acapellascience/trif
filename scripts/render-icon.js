@@ -2,7 +2,7 @@
 'use strict';
 // Draws the TRIF icon (the robot's head: a dark squircle in a switch-green rim, with two mint eyes) into
 // extension/icons/robot-<size>.png, antialiased with 8x8 supersampling, and writes the same shapes to
-// store/icon.svg. No dependencies: shapes are superellipses, PNGs are written by hand.
+// store/icon.svg and the side panel's big shaded robot to extension/icons/robot-shaded.svg. No dependencies: shapes are superellipses, PNGs are written by hand.
 // A new design gets new file names (manifest.json, sidepanel.html, onboarding.html): Firefox keeps an
 // icon it has drawn in its image cache, keyed by URL, until it quits, so new pixels at an old path keep
 // showing the old icon after an update or reload (the W outlived the switch to the robot that way).
@@ -15,6 +15,7 @@ const zlib = require('zlib');
 const outDir = require.main === module && process.argv[2] || path.join(__dirname, '..', 'extension', 'icons');
 const sizes = require.main === module && process.argv.length > 3 ? process.argv.slice(3).map(Number) : [16, 32, 48, 128];
 const SVG_FILE = path.join(__dirname, '..', 'store', 'icon.svg');
+const SHADED_FILE = path.join(__dirname, '..', 'extension', 'icons', 'robot-shaded.svg');
 
 // Geometry in 128-unit icon space. A superellipse |x/a|^n + |y/b|^n = 1: the head is n 3 (a squircle), the
 // eyes n 2.3 (rounder, a touch taller than wide).
@@ -53,6 +54,39 @@ function svg() {
     shape(cx, cy, outer, outer, n, HEAD.rim),
     shape(cx, cy, inner, inner, n, HEAD.face),
     ...EYES.xs.map((ex) => shape(ex, EYES.cy, EYES.a, EYES.b, EYES.n, EYES.color)),
+    '</svg>',
+    '',
+  ].join('\n');
+}
+
+/**
+ * The shaded robot (store/icon-alt-shaded.svg's look), drawn big in the side panel when no website is open:
+ * the rim as a stroke along the head's midline, darker toward the bottom right; gradient eyes with a soft
+ * glow. Points are spaced evenly by angle about each centre, so the outline has no visible corners even
+ * where a superellipse is flattest (the 180 points of svg() show facets there at 160 px).
+ */
+function shadedSvg() {
+  const shape = (cx, cy, a, b, n) => {
+    const pts = [];
+    for (let i = 0; i < 360; i++) {
+      const t = (i / 360) * 2 * Math.PI, c = Math.cos(t), s = Math.sin(t);
+      const r = (Math.abs(c / a) ** n + Math.abs(s / b) ** n) ** (-1 / n);
+      pts.push(`${+(cx + r * c).toFixed(2)},${+(cy + r * s).toFixed(2)}`);
+    }
+    return pts.join(' ');
+  };
+  const { cx, cy, outer, inner, n } = HEAD;
+  const mid = (outer + inner) / 2;
+  return [
+    '<svg xmlns="http://www.w3.org/2000/svg" width="128" height="128" viewBox="0 0 128 128">',
+    '  <!-- Written by scripts/render-icon.js (edit the numbers there, not this file). -->',
+    '  <defs>',
+    '    <linearGradient id="r" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#44e0a8"/><stop offset="1" stop-color="#1e9a6c"/></linearGradient>',
+    '    <radialGradient id="e" cx="50%" cy="50%" r="55%"><stop offset="0" stop-color="#a7f3d0"/><stop offset="1" stop-color="#2fc58d"/></radialGradient>',
+    '    <filter id="h" x="-100%" y="-100%" width="300%" height="300%"><feGaussianBlur in="SourceGraphic" stdDeviation="1.5" result="b"/><feColorMatrix in="b" type="matrix" values="0 0 0 0 0.204  0 0 0 0 0.827  0 0 0 0 0.6  0 0 0 0.5 0" result="g"/><feMerge><feMergeNode in="g"/><feMergeNode in="SourceGraphic"/></feMerge></filter>',
+    '  </defs>',
+    `  <polygon points="${shape(cx, cy, mid, mid, n)}" fill="#18181a" stroke="url(#r)" stroke-width="${outer - inner}" stroke-linejoin="round"/>`,
+    `  <g filter="url(#h)">${EYES.xs.map((ex) => `<polygon points="${shape(ex, EYES.cy, EYES.a, EYES.b, EYES.n)}" fill="url(#e)"/>`).join('')}</g>`,
     '</svg>',
     '',
   ].join('\n');
@@ -132,7 +166,10 @@ if (require.main === module) {
     fs.writeFileSync(file, render(size));
     console.log(file);
   }
-  if (!process.argv[2]) { fs.writeFileSync(SVG_FILE, svg()); console.log(SVG_FILE); }
+  if (!process.argv[2]) {
+    fs.writeFileSync(SVG_FILE, svg()); console.log(SVG_FILE);
+    fs.writeFileSync(SHADED_FILE, shadedSvg()); console.log(SHADED_FILE);
+  }
 }
 
 module.exports = { render, renderMac };

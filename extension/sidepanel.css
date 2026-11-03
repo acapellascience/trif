@@ -131,7 +131,11 @@ svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width:
 .gate-icon .face { fill: #18181a; }
 .btn.go { padding: 8px 16px; border-color: transparent; background: var(--switch-on); color: #04291c; font-size: 13px; font-weight: 600; }
 .btn.go:hover { background: color-mix(in srgb, var(--switch-on) 85%, #000); }
-body.site-off :is(.bar, .settings, .notice, .mods, .chat, .composer) { display: none; }
+body:is(.site-off, .no-site) :is(.bar, .settings, .notice, .mods, .chat, .composer) { display: none; }
+/* No website in this tab (a new tab, the browser's own pages): only the shaded robot, where the gate's sits. */
+.landing { flex: 1; display: flex; align-items: center; justify-content: center; padding: 24px 16px 64px; }
+.landing[hidden] { display: none; }
+.landing-icon { width: 160px; height: 160px; }
 /* The power, + and settings buttons: close together, at the right edge (the power button can be hidden). */
 .bar-actions { flex: none; display: flex; align-items: center; gap: 2px; margin-left: auto; }
 /* The robot in the middle of the bar (the toolbar icon); the bar only shows on sites TRIF is on for. */

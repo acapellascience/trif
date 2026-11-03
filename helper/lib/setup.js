@@ -575,6 +575,11 @@ function setup(opts = {}) {
   // 7. Next steps (Firefox's or Safari's alone when it's the only browser set up). The `trif` commands in
   // them as they work from this terminal: plain `trif` only when it's on PATH (just said if it isn't).
   const trif = onPath ? P.CLI_NAME : homeRelative(ws.cliWrapper);
+  // The last words: the panel first (where a newcomer starts), the terminal route as an aside.
+  const sayThen = () => {
+    say('  Then open any website, click the TRIF icon, and ask for a change.');
+    say(`  (Or work with your coding agent in ${home}: it reads AGENTS.md there.)`);
+  };
   say('');
   say('Next steps:');
   const safariSteps = (n) => [
@@ -591,7 +596,7 @@ function setup(opts = {}) {
   if (targets.every((t) => t.safari)) {
     for (const l of safariSteps(1)) say(`  ${l}`);
     say(`  5. Check everything with: ${trif} doctor`);
-    say(`  Then ask your coding agent to work in ${home} (it reads AGENTS.md there).`);
+    sayThen();
     return { ok, lines, ws, manifests, nodePath, mode, root, migration };
   }
   // setup installs no add-on: Firefox only keeps signed ones, and Mozilla signs each release's. The
@@ -610,7 +615,7 @@ function setup(opts = {}) {
     say('  3. If Firefox was already running before this setup, quit it completely and reopen it.');
     say(`  4. Check everything with: ${trif} doctor`);
     if (targets.some((t) => t.safari)) { say('  Safari:'); for (const l of safariSteps(1)) say(`    ${l}`); }
-    say(`  Then ask your coding agent to work in ${home} (it reads AGENTS.md there).`);
+    sayThen();
     return { ok, lines, ws, manifests, nodePath, mode, root, migration };
   }
   // The extension folder is hidden (~/.trif) from Load unpacked's file picker, so on a Mac show it in
@@ -642,7 +647,7 @@ function setup(opts = {}) {
     }
   }
   if (targets.some((t) => t.safari)) { say('  Safari:'); for (const l of safariSteps(1)) say(`    ${l}`); }
-  say(`  Then ask your coding agent to work in ${home} (it reads AGENTS.md there).`);
+  sayThen();
 
   return { ok, lines, ws, manifests, nodePath, mode, root, migration };
 }

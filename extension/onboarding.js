@@ -72,7 +72,7 @@ function renderMods() {
   const list = $('#mod-list');
   const modsDetail = $('#mods .detail');
   if (!s.mods.length) {
-    modsDetail.replaceChildren('No mods yet. Open your coding agent in ', code('~/.trif'), ' and ask it to change a website.');
+    modsDetail.replaceChildren('No mods yet. Open any website, click the TRIF icon, and ask for a change.');
   } else {
     modsDetail.replaceChildren();
   }

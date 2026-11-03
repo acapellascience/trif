@@ -60,7 +60,8 @@ test(`upgrade: the ${TAG} updater installs this checkout's package; everything m
   // The old release, installed by its own setup, as a 0.1.2 user has it.
   const old = path.join(root, 'old');
   fs.mkdirSync(old);
-  sh('/bin/sh', ['-c', `git archive ${TAG} | tar -x -C "${old}"`], { cwd: REPO });
+  sh('git', ['archive', '-o', path.join(root, 'old.tar'), TAG], { cwd: REPO });
+  sh('/usr/bin/tar', ['-xf', path.join(root, 'old.tar'), '-C', old]);
   sh(process.execPath, [path.join(old, 'helper', 'cli.js'), 'setup', '--copy', '--no-link', '--browser', 'chrome'], { cwd: home });
   const legacy = path.join(home, '.webmods');
   assert.ok(fs.existsSync(path.join(legacy, 'app', 'helper', 'lib', 'update.js')));

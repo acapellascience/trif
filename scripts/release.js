@@ -258,11 +258,16 @@ async function release(version, { dryRun, skipTests }) {
   let src = ROOT;
   if (dryRun) {
     src = path.join(out, 'src');
-    fs.mkdirSync(src);
-    // Everything git tracks (the tests read CHANGELOG.md, site/, store/…), not build output or .git.
-    const tracked = new Set(sh('git', ['ls-files']).split('\n').filter(Boolean).map((f) => f.split('/')[0]));
-    for (const item of tracked) {
-      if (fs.existsSync(path.join(ROOT, item))) fs.cpSync(path.join(ROOT, item), path.join(src, item), { recursive: true });
+    // A git checkout of its own (some tests need one: setup links to a checkout, the upgrade test reads
+    // the last release's tag), sharing this repo's objects without changing it, at this commit, with the
+    // working tree's tracked files on top (a dry run tests what's here, committed or not).
+    sh('git', ['clone', '--quiet', '--shared', '--no-checkout', ROOT, src]);
+    sh('git', ['checkout', '--quiet', '--detach', sh('git', ['rev-parse', 'HEAD'])], { cwd: src });
+    for (const f of sh('git', ['ls-files']).split('\n').filter(Boolean)) {
+      const from = path.join(ROOT, f);
+      if (!fs.existsSync(from)) continue; // deleted here, not yet committed
+      fs.mkdirSync(path.dirname(path.join(src, f)), { recursive: true });
+      fs.cpSync(from, path.join(src, f), { recursive: true });
     }
     fs.symlinkSync(path.join(ROOT, 'node_modules'), path.join(src, 'node_modules'));
   }

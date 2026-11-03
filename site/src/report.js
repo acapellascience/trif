@@ -1,7 +1,7 @@
-// Checking a submitted problem report and turning it into the email the maintainer gets. No Worker APIs
-// here, so tests run it in Node (tests/site.test.js).
+// Checking a submitted problem report or Windows waitlist signup and turning it into the email the
+// maintainer gets. No Worker APIs here, so tests run it in Node (tests/site.test.js).
 
-export const LIMITS = { what: 5000, details: 30000, site: 200, email: 200, body: 64 * 1024 };
+export const LIMITS = { what: 5000, details: 30000, site: 200, email: 200, body: 64 * 1024, signup: 4 * 1024 };
 
 const EMAIL_RE = /^[^\s@<>()",;]+@[^\s@<>()",;]+\.[^\s@<>()",;]+$/;
 
@@ -46,4 +46,27 @@ export function reportEmail(r, meta = {}) {
   if (meta.userAgent) lines.push(`Browser: ${oneLine(meta.userAgent, 200)}`);
   lines.push('', r.details ? `Details from TRIF\n${r.details}` : 'No details from TRIF were included.');
   return { subject, text: lines.join('\n') + '\n', replyTo: r.email || null };
+}
+
+/**
+ * A Windows waitlist signup from the /windows form ({ email, website }, as JSON or form fields): the
+ * address, or { spam: true } when the hidden `website` field is filled in.
+ */
+export function parseSignup(body) {
+  if (!body || typeof body !== 'object' || Array.isArray(body)) throw new ReportError('expected a JSON object');
+  if (text(body.website)) return { spam: true };
+  const email = text(body.email);
+  if (!email) throw new ReportError('Please enter your email address.');
+  if (email.length > LIMITS.email) throw new ReportError(`That email address is too long (at most ${LIMITS.email} characters).`);
+  if (!EMAIL_RE.test(email)) throw new ReportError("That email address doesn't look right.");
+  return { email };
+}
+
+/** The email for a waitlist signup: { subject, text, replyTo }. meta: { country, at }. */
+export function signupEmail(s, meta = {}) {
+  return {
+    subject: `TRIF Windows waitlist: ${s.email}`,
+    text: `${s.email} joined the Windows waitlist.\n\nSigned up: ${meta.at || new Date().toISOString()}${meta.country ? ` from ${meta.country}` : ''}\n`,
+    replyTo: s.email,
+  };
 }

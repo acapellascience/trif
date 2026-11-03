@@ -9,7 +9,7 @@ const fs = require('fs');
 const path = require('path');
 const { spawn } = require('child_process');
 const { FakeExtension, writeMod, tempDir, waitFor, sleep, privDir } = require('./fake-extension');
-const { loadOrigins, recordOrigins, markRunActive, markRunEnded, activeRuns, ENDED_GRACE_MS } = require('../helper/lib/origins');
+const { loadOrigins, recordOrigins, renameOrigins, markRunActive, markRunEnded, activeRuns, ENDED_GRACE_MS } = require('../helper/lib/origins');
 
 const cleanups = [];
 test.after(async () => {
@@ -221,6 +221,41 @@ test('two browsers: a mod made by A\'s run carries origin A in both helpers\' mo
   assert.equal(loadOrigins(home)['x.com/by-hand'], undefined);
   // The run's mod keeps its origin.
   assert.deepStrictEqual(modIn(handB, 'x.com/rainbow').origin, want);
+});
+
+test('renameOrigins: a renamed mod keeps its origin (or none), even through a swap', () => {
+  const home = tempDir();
+  recordOrigins(home, ['x.com/a', 'x.com/b'], [{ by: 'B', browser: 'Firefox', site: 'x.com' }], 1000);
+  recordOrigins(home, ['x.com/stale'], [{ by: 'C', browser: 'Edge', site: 'x.com' }], 1000);
+  assert.equal(renameOrigins(home, []), false);
+  // a -> c keeps B; an origin-less mod renamed over a stale entry drops it.
+  assert.equal(renameOrigins(home, [{ from: 'x.com/a', to: 'x.com/c' }, { from: 'x.com/none', to: 'x.com/stale' }]), true);
+  assert.deepStrictEqual(loadOrigins(home), { 'x.com/b': { by: 'B', browser: 'Firefox', at: 1000 }, 'x.com/c': { by: 'B', browser: 'Firefox', at: 1000 } });
+  recordOrigins(home, ['x.com/d'], [{ by: 'D', browser: 'Arc', site: 'x.com' }], 2000);
+  renameOrigins(home, [{ from: 'x.com/c', to: 'x.com/d' }, { from: 'x.com/d', to: 'x.com/c' }]);
+  assert.deepStrictEqual([loadOrigins(home)['x.com/c'].by, loadOrigins(home)['x.com/d'].by], ['D', 'B']);
+});
+
+test('a mod renamed while another browser\'s run is going keeps its own origin; a new file gets the run\'s', async () => {
+  const { home } = makeHome();
+  writeMod(home, 'x.com', 'wobble.js', '// ==WebMod==\n// @name Wobble\n// ==/WebMod==\n// made by hand\n');
+  const ext = startHost(home);
+  ext.hello({ browser: 'Chrome', installId: 'A' });
+  await ext.waitForSocket(15000);
+  await ext.nextMods((mods) => !!modIn(mods, 'x.com/wobble'), { timeout: 15000 });
+  await sleep(300);
+  // Firefox (B) has a run going on x.com (this test process stands in for its helper).
+  markRunActive(home, { runId: 'rB1', by: 'B', browser: 'Firefox', site: 'x.com' });
+  const since = ext.messages.length;
+  fs.renameSync(path.join(home, 'sites', 'x.com', 'wobble.js'), path.join(home, 'sites', 'x.com', 'jelly.js'));
+  writeMod(home, 'x.com', 'new.js', '// made during the run');
+  const mods = await ext.nextMods((m) => !!modIn(m, 'x.com/jelly') && !!modIn(m, 'x.com/new'), { since, timeout: 15000 });
+  assert.equal(modIn(mods, 'x.com/wobble'), undefined, 'the old id is gone');
+  assert.equal(path.basename(modIn(mods, 'x.com/jelly').file), 'jelly.js', 'the new file name is sent');
+  assert.equal(modIn(mods, 'x.com/jelly').name, 'Wobble');
+  assert.equal(modIn(mods, 'x.com/jelly').origin, undefined, 'renamed: still nobody\'s run');
+  assert.deepStrictEqual(modIn(mods, 'x.com/new').origin, { by: 'B', browser: 'Firefox' }, 'a new file is the run\'s');
+  markRunEnded(home, 'rB1');
 });
 
 test('a run on a host whose extension sent no install id isn\'t marked', async () => {

@@ -22,7 +22,7 @@ const { envVar } = require('./lib/env');
 const { workspace, VERSION } = require('./lib/paths');
 const { createLogger } = require('./lib/log');
 const { encode, Decoder, MAX_TO_EXTENSION } = require('./lib/framing');
-const { scanMods, planModsMessage, folderFingerprint, summarize } = require('./lib/mods');
+const { scanMods, planModsMessage, folderFingerprint, summarize, findRenames } = require('./lib/mods');
 const { Runs } = require('./lib/runs');
 const { Logins } = require('./lib/logins');
 const agents = require('./lib/agents');
@@ -30,7 +30,7 @@ const { updateHeld, approveHeld, heldFile } = require('./lib/held');
 const { startOffIds, startSitesOn, pendingUpdates, useNewVersion, keepMine, mergeRequest, mergeSettled, restoreMod, absorbedIds } = require('./lib/preinstalled');
 const { readInstructions, writeInstructions, instructionsFile, MAX_LENGTH } = require('./lib/instructions');
 const { ownSock, removeStaleSockets, codeStamp } = require('./lib/helpers');
-const { loadOrigins, recordOrigins, activeRuns } = require('./lib/origins');
+const { loadOrigins, recordOrigins, renameOrigins, activeRuns } = require('./lib/origins');
 const { deleteMod, emptyTrash } = require('./lib/trash');
 const { scopeFor } = require('./lib/scope');
 const update = require('./lib/update');
@@ -236,7 +236,13 @@ function syncMods(reason, force) {
 function trackOrigins(mods) {
   const ids = new Set(mods.map((m) => m.id));
   if (state.knownIds) {
-    const fresh = [...ids].filter((id) => !state.knownIds.has(id));
+    // A renamed file (same code, same site folder; state.mods is the last scan) keeps its mod's origin.
+    const renames = findRenames(state.mods, mods);
+    if (renames.length) {
+      try { if (renameOrigins(ws.home, renames)) logger.info(`kept where ${renames.map((r) => r.to).join(', ')} came from (renamed)`); } catch (e) { logger.error(`origins: ${e.message}`); }
+    }
+    const renamed = new Set(renames.map((r) => r.to));
+    const fresh = [...ids].filter((id) => !state.knownIds.has(id) && !renamed.has(id));
     if (fresh.length) {
       // Every helper reads the same run markers (this one's runs included), so they all agree.
       const me = state.hello?.installId || null;

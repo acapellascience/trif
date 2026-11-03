@@ -125,6 +125,21 @@ test('buildMod: hash changes with code and with metadata', () => {
   assert.notEqual(buildMod({ site: 'b.com', file: '/s/b.com/m.js', code: 'x' }).mod.hash, a);
 });
 
+test('findRenames: same code in the same site folder under a new file name is the same mod', () => {
+  const { findRenames } = require('../helper/lib/mods');
+  const m = (site, base, code) => buildMod({ site, file: `/m/${site}/${base}.js`, code }).mod;
+  const prev = [m('x.com', 'a', 'A'), m('x.com', 'b', 'B'), m('x.com', 'c', 'C'), m('y.com', 'd', 'D')];
+  const next = [m('x.com', 'a2', 'A'), m('x.com', 'b', 'B'), m('x.com', 'c2', 'C changed'), m('z.com', 'd', 'D'), m('x.com', 'copy', 'B')];
+  // a -> a2 (same code); b stays (its copy isn't a rename); c changed too; d moved to another site folder.
+  assert.deepStrictEqual(findRenames(prev, next), [{ from: 'x.com/a', to: 'x.com/a2' }]);
+  assert.deepStrictEqual(findRenames(next, next), []);
+  // A case-only rename (on macOS, the same file).
+  assert.deepStrictEqual(findRenames([m('x.com', 'Wob', 'W')], [m('x.com', 'wob', 'W')]), [{ from: 'x.com/Wob', to: 'x.com/wob' }]);
+  // Two identical old mods: each new one pairs with a different one.
+  assert.deepStrictEqual(findRenames([m('x.com', 'p', 'S'), m('x.com', 'q', 'S')], [m('x.com', 'r', 'S'), m('x.com', 's', 'S')]),
+    [{ from: 'x.com/p', to: 'x.com/r' }, { from: 'x.com/q', to: 'x.com/s' }]);
+});
+
 test('defaultMatches: ports stripped, IPs get exact pattern only', () => {
   assert.deepEqual(defaultMatches('localhost:3000'), ['*://localhost/*', '*://*.localhost/*']);
   assert.deepEqual(defaultMatches('127.0.0.1'), ['*://127.0.0.1/*']);
@@ -343,6 +358,28 @@ test('host: syncs on file add, change, delete, ignored files, and site folders c
   writeMod(home, 'c.net', 'three.js', '3');
   await ext.nextMods((mods) => mods.map((m) => m.id).join() === 'c.net/three', { since, timeout: 8000 });
   assert.deepEqual(ext.badFrames, []);
+});
+
+test('host: a renamed mod file goes out under its new name (mv, case-only, an editor\'s temp file renamed into place)', async () => {
+  const home = tempDir();
+  const ext = startHost(home);
+  const dir = path.join(home, 'sites', 'a.com');
+  writeMod(home, 'a.com', 'wobble.js', '// ==WebMod==\n// @name Wobble\n// ==/WebMod==\nconsole.log(1)');
+  ext.hello();
+  await ext.nextMods((mods) => mods.some((m) => m.id === 'a.com/wobble'));
+  const renamedTo = async (base, act) => {
+    const since = ext.messages.length;
+    act();
+    const mods = await ext.nextMods((ms) => ms.some((m) => m.id === `a.com/${base}`), { since, timeout: 4000 });
+    assert.deepStrictEqual(mods.map((m) => [m.id, path.basename(m.file), m.name]), [[`a.com/${base}`, `${base}.js`, 'Wobble']]);
+  };
+  await renamedTo('jelly', () => fs.renameSync(path.join(dir, 'wobble.js'), path.join(dir, 'jelly.js')));
+  await renamedTo('Jelly', () => fs.renameSync(path.join(dir, 'jelly.js'), path.join(dir, 'Jelly.js')));
+  await renamedTo('wiggle', () => {
+    fs.writeFileSync(path.join(dir, '.wiggle.js.tmp'), fs.readFileSync(path.join(dir, 'Jelly.js')));
+    fs.unlinkSync(path.join(dir, 'Jelly.js'));
+    fs.renameSync(path.join(dir, '.wiggle.js.tmp'), path.join(dir, 'wiggle.js'));
+  });
 });
 
 test('host: rapid edits are debounced into few pushes', async () => {

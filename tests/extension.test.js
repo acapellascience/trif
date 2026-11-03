@@ -1758,6 +1758,103 @@ test('background: a retired shipped mod\'s switch carries over to the mod it wen
   } finally { bg.restore(); }
 });
 
+test('findRenames / carryRenames: a mod renamed on disk keeps its switches (off, off on a site) and isn\'t new again', () => {
+  const m = (id, code) => mod(id, { code });
+  const prev = [m('x.com/wobble', 'W'), m('x.com/keep', 'K'), m('x.com/edited', 'E'), m('y.com/moved', 'M')];
+  const next = [m('x.com/keep', 'K'), m('x.com/jelly', 'W'), m('x.com/edited2', 'E changed'), m('z.com/moved', 'M'), m('x.com/copy', 'K')];
+  // Same code, same site folder: renamed. Edited as well, moved to another site, or a copy: not.
+  const renames = lib.findRenames(prev, next);
+  assert.deepStrictEqual(renames, [{ from: 'x.com/wobble', to: 'x.com/jelly' }]);
+  assert.deepStrictEqual(lib.findRenames(next, next), []);
+  assert.deepStrictEqual(lib.findRenames([], next), [], 'nothing before (first start)');
+  assert.deepStrictEqual(lib.findRenames([{ id: 'x.com/a', site: 'x.com' }], [{ id: 'x.com/b', site: 'x.com' }]), [], 'no code: no guess');
+  // Off stays off and dead entries go; the new id counts as already seen, so it isn't switched off as new.
+  const before = { disabled: { 'x.com/wobble': true, 'x.com/keep': true }, offSites: {}, startedOff: { 'x.com/keep': true } };
+  const r = lib.carryRenames(renames, before);
+  assert.deepStrictEqual(r, { disabled: { 'x.com/keep': true, 'x.com/jelly': true }, offSites: {}, startedOff: { 'x.com/keep': true, 'x.com/jelly': true }, changed: true });
+  assert.deepStrictEqual(before.disabled, { 'x.com/wobble': true, 'x.com/keep': true }, 'pure');
+  // On stays on (a stale entry under the new name doesn't switch it off); per-site offs move too.
+  assert.deepStrictEqual(lib.carryRenames(renames, { disabled: { 'x.com/jelly': true }, offSites: { 'x.com/wobble': ['x.com'] } }),
+    { disabled: {}, offSites: { 'x.com/jelly': ['x.com'] }, startedOff: { 'x.com/jelly': true }, changed: true });
+  // A swap keeps both.
+  const swap = lib.carryRenames([{ from: 'x.com/a', to: 'x.com/b' }, { from: 'x.com/b', to: 'x.com/a' }], { disabled: { 'x.com/a': true } });
+  assert.deepStrictEqual(swap.disabled, { 'x.com/b': true });
+  const same = { disabled: {} };
+  assert.strictEqual(lib.carryRenames([], same).changed, false);
+});
+
+test('orderMods / moveId / setModOrder: the panel\'s own order, per site, new mods last, gone ones skipped', () => {
+  const ids = (list) => list.map((x) => x.id);
+  const mods = ['a', 'b', 'c', 'd'].map((x) => mod(`x.com/${x}`));
+  assert.deepStrictEqual(ids(lib.orderMods(mods, undefined)), ['x.com/a', 'x.com/b', 'x.com/c', 'x.com/d'], 'no order saved: as they come');
+  assert.notStrictEqual(lib.orderMods(mods, []), mods, 'a copy');
+  // Saved c, a; b and d are new since: after, as they came. A gone id (x.com/z) is skipped.
+  assert.deepStrictEqual(ids(lib.orderMods(mods, ['x.com/c', 'x.com/z', 'x.com/a'])), ['x.com/c', 'x.com/a', 'x.com/b', 'x.com/d']);
+  // One brought back from the trash takes its old place.
+  assert.deepStrictEqual(ids(lib.orderMods([mods[0], mods[3]], ['x.com/d', 'x.com/c', 'x.com/a'])), ['x.com/d', 'x.com/a']);
+
+  const list = ['a', 'b', 'c', 'd'];
+  assert.deepStrictEqual(lib.moveId(list, 'a', 2), ['b', 'c', 'a', 'd']);
+  assert.deepStrictEqual(lib.moveId(list, 'd', 0), ['d', 'a', 'b', 'c']);
+  assert.deepStrictEqual(lib.moveId(list, 'b', 99), ['a', 'c', 'd', 'b'], 'clamped');
+  assert.deepStrictEqual(lib.moveId(list, 'b', -5), ['b', 'a', 'c', 'd'], 'clamped');
+  assert.strictEqual(lib.moveId(list, 'b', 1), list, 'no move: the same array');
+  assert.strictEqual(lib.moveId(list, 'zz', 0), list, 'not there');
+
+  const natural = ['x.com/a', 'x.com/b'];
+  const saved = lib.setModOrder({ 'y.com': ['y.com/q'] }, 'x.com', ['x.com/b', 'x.com/a'], natural);
+  assert.deepStrictEqual(saved, { 'y.com': ['y.com/q'], 'x.com': ['x.com/b', 'x.com/a'] });
+  // Back to the order they come in anyway: the entry goes (new mods come in where they would again).
+  assert.deepStrictEqual(lib.setModOrder(saved, 'x.com', natural, natural), { 'y.com': ['y.com/q'] });
+  assert.deepStrictEqual(lib.normalizeModOrder({ a: ['x', 'x', 3, ''], b: [], c: 'no', d: ['y'] }), { a: ['x'], d: ['y'] });
+  assert.deepStrictEqual(lib.normalizeModOrder(null), {});
+  assert.deepStrictEqual(lib.normalizeModOrder(['x']), {});
+});
+
+test('renameInOrder: a renamed mod keeps its place in every site\'s order', () => {
+  const order = { 'x.com': ['x.com/c', 'x.com/wobble', 'all-sites/glow'], 'y.com': ['all-sites/glow', 'y.com/a'] };
+  const r = lib.renameInOrder(order, [{ from: 'x.com/wobble', to: 'x.com/jelly' }, { from: 'all-sites/glow', to: 'all-sites/shine' }]);
+  assert.strictEqual(r.changed, true);
+  assert.deepStrictEqual(r.modOrder, { 'x.com': ['x.com/c', 'x.com/jelly', 'all-sites/shine'], 'y.com': ['all-sites/shine', 'y.com/a'] });
+  assert.deepStrictEqual(order['x.com'], ['x.com/c', 'x.com/wobble', 'all-sites/glow'], 'pure');
+  assert.strictEqual(lib.renameInOrder(order, [{ from: 'z.com/q', to: 'z.com/r' }]).changed, false);
+  assert.deepStrictEqual(lib.renameInOrder(order, [{ from: 'x.com/c', to: 'x.com/wobble' }, { from: 'x.com/wobble', to: 'x.com/c' }]).modOrder['x.com'],
+    ['x.com/wobble', 'x.com/c', 'all-sites/glow'], 'a swap');
+});
+
+test('background: a mod file renamed on disk keeps its switch, its per-site switches and its place in the panel', async () => {
+  const W = 'x.com/wobble';
+  const J = 'x.com/jelly';
+  const G = 'all-sites/glow';
+  const glow = (id) => mod(id, { site: 'all-sites', matches: ['*://*/*'], code: 'GLOW' });
+  const bg = await loadBackground({ storage: {
+    sitesOn: ['x.com', 'y.com'], disabled: { [W]: true }, offSites: { [G]: ['y.com'] }, startedOff: {},
+    modOrder: { 'x.com': [G, W, 'x.com/other'] },
+    mods: [mod(W, { code: 'WOBBLE' }), mod('x.com/other'), glow(G)],
+  } });
+  try {
+    // Renamed (in an editor, by an agent's mv…); the new one is also marked startOff, as a shipped mod would be.
+    bg.native.emit({ type: 'mods', mods: [mod(J, { code: 'WOBBLE', startOff: true }), mod('x.com/other'), glow('all-sites/shine')] });
+    await settle(40);
+    assert.deepStrictEqual(bg.store.disabled, { [J]: true }, 'still off, under its new name; no dead entry');
+    assert.deepStrictEqual(bg.store.offSites, { 'all-sites/shine': ['y.com'] }, 'still off on y.com');
+    assert.deepStrictEqual(bg.store.modOrder, { 'x.com': ['all-sites/shine', J, 'x.com/other'] });
+    assert.ok(!scriptIds(bg).includes(J), 'off: not registered');
+    assert.ok(scriptIds(bg).includes('all-sites/shine') && !scriptIds(bg).includes(G));
+    // Its switch is the user's: on again, it stays on (the startOff above was already spent by the rename).
+    const r = await bg.native.call('mod.enable', { id: J, enabled: true });
+    assert.strictEqual(r.ok, true, r.error);
+    bg.native.emit({ type: 'mods', mods: [mod(J, { code: 'WOBBLE', startOff: true, hash: 'h2' }), mod('x.com/other'), glow('all-sites/shine')] });
+    await settle(30);
+    assert.deepStrictEqual(bg.store.disabled, {});
+    // The panel's status has the new file name.
+    const reply = await bg.connectPanel().ask({ type: 'status' });
+    assert.ok(reply.ok, JSON.stringify(reply));
+    assert.deepStrictEqual(reply.result.mods.map((m) => [m.id, m.file, m.enabled]),
+      [[J, '/w/sites/x.com/jelly.js', true], ['x.com/other', '/w/sites/x.com/other.js', true], ['all-sites/shine', '/w/sites/all-sites/shine.js', true]]);
+  } finally { bg.restore(); }
+});
+
 test('background: the hello carries an install id that persists across a service worker restart', async () => {
   // Every hello on this instance's native ports (an earlier test's background may reconnect onto the
   // newest chrome mock under load, so natives[0] isn't necessarily ours).

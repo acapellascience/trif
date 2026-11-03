@@ -6,7 +6,7 @@ import {
   SETTINGS_URL, SETUP_COMMAND, USER_SCRIPTS_OFF, FIREFOX, BROWSER, userScriptsAvailable, syncUserScripts, resolveTab, lastFocusedNormalWindow, tabInfo,
   normalizeUrl, normalizeSite, hostMatchesSite, buildRunCode, buildPollCode, parseRunEnvelope, pageGuard,
   firstInjectionResult, withTimeout, filterRequests, nextBackoff, chromeVersion, toolLine,
-  normalizeDisabled, modAppliesTo, urlInScope, modInScope, applyStartOff, applyAbsorbed, modSites,
+  normalizeDisabled, modAppliesTo, urlInScope, modInScope, applyStartOff, applyAbsorbed, findRenames, carryRenames, renameInOrder, modSites,
   normalizeOffSites, offSiteName, offOnSite, hostInScope, withOffSites, scopeFor, normalizeSitesOn, siteOnFor, sitesInUse, limitToSites, applyStartSites, switchSite, fromOtherBrowser, timedUserScripts, capChat,
 } from './lib.js';
 import { runtimeCode } from './runtime.js';
@@ -324,7 +324,22 @@ async function onHelperMessage(msg) {
 }
 
 async function onModsMessage(msg) {
+  const before = state.mods;
   state.mods = Array.isArray(msg.mods) ? msg.mods : [];
+  // A mod's id is its file name: a file renamed on disk comes back as a new mod. Same code in the same
+  // site folder: the same mod, which keeps its switches and its place in the panel (before the first-time
+  // switch-offs below, which would otherwise take it for a new one).
+  const renames = findRenames(before, state.mods);
+  if (renames.length) {
+    const moved = carryRenames(renames, { disabled: state.disabled, offSites: state.offSites, startedOff: state.startedOff });
+    state.disabled = moved.disabled;
+    state.offSites = moved.offSites;
+    state.startedOff = moved.startedOff;
+    const order = await chrome.storage.local.get('modOrder').then((s) => renameInOrder(s.modOrder, renames), () => ({ changed: false }));
+    await save({ disabled: state.disabled, offSites: state.offSites, startedOff: state.startedOff, ...(order.changed ? { modOrder: order.modOrder } : {}) })
+      .catch((e) => log('warn', errMsg(e)));
+    log('info', `renamed: ${renames.map((r) => `${r.from} -> ${r.to}`).join(', ')} (switches kept)`);
+  }
   // Preinstalled mods, and mods made from another browser, arrive switched off the first time (before
   // they're ever registered).
   // These two take effect even if they can't be saved: then they're applied again, the same way, on
@@ -881,13 +896,14 @@ async function uiStatus() {
   if (!state.port && !state.retryTimer) connect();
   const s = await commands.status();
   const errors = new Map(state.lastApply.errors.map((e) => [e.id, e.error]));
+  const live = new Map(s.mods.map((m) => [m.id, m])); // (by id: never another mod's state)
   return {
     helper: { connected: state.connected, error: state.connected ? null : state.helperError },
     userScripts: s.userScripts, settingsUrl: SETTINGS_URL, version: VERSION, chrome: CHROME, browser: BROWSER,
     recording: s.recording, sitesOn: state.sitesOn, update: state.connected ? state.update : null,
-    mods: state.mods.map((m, i) => ({
+    mods: state.mods.map((m) => ({
       id: m.id, name: m.name || m.id, description: m.description || '', site: m.site, file: m.file || '',
-      matches: m.matches || [], excludes: m.excludes || [], registered: s.mods[i].registered, enabled: s.mods[i].enabled,
+      matches: m.matches || [], excludes: m.excludes || [], registered: !!live.get(m.id)?.registered, enabled: live.get(m.id)?.enabled ?? isEnabled(m.id),
       error: errors.get(m.id) === USER_SCRIPTS_OFF ? null : errors.get(m.id) || null,
       held: m.held || null, risk: m.risk || null,
       from: fromOtherBrowser(m, state.installId) ? (m.origin.browser || 'another browser') : null,

@@ -42,7 +42,10 @@ Per browser, a **fresh** scenario, and an **upgrade** scenario per `--upgrade-fr
    setup run the way a 0.1.x updater runs it (`--home ~/.webmods`). Checks the move to `~/.trif`, the
    link left behind, the user's mod, and that the edited shipped mod is kept with its new version
    waiting. If the old and new packages ship the same `punk-fonts`, the harness gives the new package's
-   copy the next `@version` (as the next release would) and says so in a note.
+   copy the next `@version` (as the next release would) and says so in a note. When the old release
+   shipped the mods 0.2.0 folded into others (`RETIRED`: `hide-ai-mode`, `hide-sponsored`), checks their
+   unchanged copies went to the trash, and (step 2) that the browser carried their switches over
+   (chrome.storage.local `absorbed`).
 2. Start a throwaway browser profile with the extension, connected to the scratch helper only (see
    "Isolation"), check the setup page's checklist (the helper and the browser ticked, user scripts
    next), allow user scripts (it ticks that step itself; the agent's login is next), and check: `trif status` (the extension's hello, its browser),
@@ -64,9 +67,9 @@ Per browser, a **fresh** scenario, and an **upgrade** scenario per `--upgrade-fr
      and the window count as they were. Headless Chrome gets
      `--screen-info={0,0 2560x1440}`: its default 800x600 screen is smaller than the windows, which puts
      the copy window under the user's, where Chrome stops drawing it.
-4. **Plain X**: the real `examples/sites/x.com/plain-x.js` on `https://x.com:<port>/home`, served
+4. **Timeline Detox**: the real `examples/sites/x.com/plain-x.js` on `https://x.com:<port>/home`, served
    locally (the browser resolves x.com to 127.0.0.1 and accepts a self-signed certificate): a page that
-   fetches and XHRs a saved `HomeLatestTimeline` response, as X does. Checks Plain X keeps only the
+   fetches and XHRs a saved `HomeLatestTimeline` response, as X does. Checks Timeline Detox keeps only the
    mutuals' plain posts and the cursor, rewrites the requests to Recent, and logs no mod errors. Then the
    panel on x.com lists the shipped mods (and, upgrading, offers the edited mod's new version). Then
    what's in the way, in colour, on the site's page, the gate and the landing page: the agent not logged
@@ -77,7 +80,11 @@ Per browser, a **fresh** scenario, and an **upgrade** scenario per `--upgrade-fr
    agent can run: an API key for Claude Code in the scratch keychain counts as logged in. Then
    screenshots of the panel as narrow as a side panel: on x.com, on a gate (localhost) and on the landing
    page (no website: the big robot, only settings in the bar), each of the last two with settings open
-   (they must open, list the agents and load the instructions).
+   (they must open, list the agents and load the instructions). And the shipped Google mods, AI
+   Banisher and Just Results, on stand-ins for Google's results and home pages
+   (`https://www.google.com:<port>/search?q=trif` and `/`, in background tabs, with the parts of Google's
+   markup they key on): what they hide is hidden, and the web results, the other tabs and the search
+   box stay.
 5. With `--agent`: real Claude Code runs (model haiku unless `--claude-model`): a panel chat (`/model`,
    then a request) that must write a mod under `sites/127.0.0.1/` that shows on the page; `trif agent
    run` asked which browser it's in (must name it); and asked to read TRIF's `config.json` in the private
@@ -145,9 +152,9 @@ scratch home, and macOS allows about 104 bytes for a socket path.
   3. Click the toolbar button: the panel window opens and follows the window's tabs.
   4. On a test page, enable TRIF from the panel; write a small mod (or ask the agent for one); it runs
      after reload; switch it off and on; switch the site off.
-  5. x.com: Plain X filters the timeline; the Filters menu works.
+  5. x.com: Timeline Detox filters the timeline; the Filters menu works.
   6. Quit Safari, reopen: allow unsigned extensions again; the panel reconnects (the bridge kept running).
-- **Plain X on a real, logged-in timeline** (X changes its data; the suite uses a saved response), and
+- **Timeline Detox on a real, logged-in timeline** (X changes its data; the suite uses a saved response), and
   the other shipped mods on the real Google, Amazon and Instagram.
 - **Look and feel**: layout, dark mode, narrow panels. The screenshots help; a person decides.
 - The Chrome Web Store / signed Firefox add-on install and update paths, and `trif update` from a

@@ -283,6 +283,24 @@ test('shipped-history.json: every version of each example from git, the current 
   }
 });
 
+test('RETIRED: each retired mod is gone from the examples, and the mod it went into is shipped at that version or later', () => {
+  const history = S.loadHistory(path.join(REPO, 'examples', 'sites'));
+  const { parseHeader } = require('../helper/lib/mods');
+  const ids = S.PREINSTALLED.map((p) => p.id);
+  for (const { id, into, since } of S.RETIRED) {
+    assert.ok(!ids.includes(id), `${id} isn't offered any more`);
+    assert.ok(!fs.existsSync(path.join(REPO, 'examples', 'sites', `${id}.js`)), `${id} isn't shipped any more`);
+    assert.ok(Array.isArray(history[id]) && history[id].length, `${id}: its shipped versions are still known (unchanged copies are recognised by them)`);
+    assert.ok(ids.includes(into), `${into} is offered`);
+    const v = parseHeader(fs.readFileSync(path.join(REPO, 'examples', 'sites', `${into}.js`), 'utf8')).version;
+    assert.ok(Number(v) >= Number(since), `${into} is version ${v}, at least ${since}`);
+  }
+  assert.deepStrictEqual(S.RETIRED.map((r) => [r.id, r.into]), [
+    ['www.google.com/hide-ai-mode', 'www.google.com/hide-ai-in-results'],
+    ['www.google.com/hide-sponsored', 'www.google.com/hide-extra-sections'],
+  ]);
+});
+
 // ------------------------------------------------------------------ setup, helper and CLI
 
 test('setup says what it updated and what waits; the helper and the CLI show the waiting update', async () => {
@@ -370,4 +388,248 @@ test('the repo\'s own examples: a legacy workspace with unchanged copies gets th
   assert.strictEqual(r.code, 0, r.stderr + r.stdout);
   assert.match(r.stdout, /updated to the new version: x\.com\/plain-x \(version \d+\)/);
   assert.strictEqual(fs.readFileSync(path.join(home, 'sites', 'x.com', 'plain-x.js'), 'utf8'), fs.readFileSync(path.join(REPO, 'examples', 'sites', 'x.com', 'plain-x.js'), 'utf8'));
+});
+
+// ------------------------------------------------------------------ retired mods (folded into another)
+
+// Two shipped mods, `old` folded into `into` (at its version 2), as RETIRED says for the real ones.
+const INTO = 'www.google.com/hide-ai-in-results';
+const OLD = 'www.google.com/hide-ai-mode';
+const RLIST = [{ id: INTO, on: true }, { id: OLD, on: true }];
+const RETIRE = [{ id: OLD, into: INTO, since: '2' }];
+const gmod = (name, version, body = name) => `// ==WebMod==\n// @name ${name}\n// @source webmods\n// @version ${version}\n// ==/WebMod==\n// ${body}\n`;
+const RES1 = gmod('Hide AI in Results', 1);
+const MODE1 = gmod('Hide AI Mode', 1);
+const BANISH2 = gmod('AI Banisher', 2);
+
+// A workspace set up while both were shipped (version 1); `release()` ships the merged one and
+// retires the other (its example goes, as in the repo; its history stays).
+function retireWorld() {
+  const w = world();
+  fs.mkdirSync(path.join(w.examples, 'www.google.com'), { recursive: true });
+  const history = {};
+  const ship = (id, code) => { w.ship(id, code); (history[id] = history[id] || []).push(sha1(code)); writeHistory(); };
+  const writeHistory = () => fs.writeFileSync(path.join(w.root, 'examples', 'shipped-history.json'), JSON.stringify(history));
+  ship(INTO, RES1);
+  ship(OLD, MODE1);
+  let list = RLIST;
+  let retire = [];
+  return {
+    ...w,
+    ship,
+    release() {
+      ship(INTO, BANISH2);
+      fs.unlinkSync(path.join(w.examples, `${OLD}.js`));
+      list = [{ id: INTO, on: true }];
+      retire = RETIRE;
+    },
+    setup() {
+      const pre = S.preinstallMods(w.home, w.ws.modsDir, w.examples, list, []);
+      const up = S.updateShippedMods(w.home, w.ws.modsDir, w.examples, list);
+      return { pre, ...up, ...S.retireShippedMods(w.ws, w.examples, retire) };
+    },
+    trashed() { return listTrash(w.ws).map((t) => t.id); },
+  };
+}
+
+test('retired: an unchanged copy goes to the trash once the mod it went into has the new version', () => {
+  const w = retireWorld();
+  w.setup();
+  const before = S.loadPreinstalled(w.home);
+  w.release();
+  const r = w.setup();
+  assert.deepStrictEqual(r.updated, [{ id: INTO, version: '2', from: '1' }]);
+  assert.deepStrictEqual(r.kept, []);
+  assert.strictEqual(r.removed.length, 1);
+  assert.deepStrictEqual({ ...r.removed[0], trashed: path.basename(r.removed[0].trashed) },
+    { id: OLD, into: INTO, was: 'Hide AI Mode', name: 'AI Banisher', trashed: w.rec(OLD).retired.trashed });
+  assert.strictEqual(w.mine(INTO), BANISH2);
+  assert.strictEqual(w.mine(OLD), null);
+  assert.deepStrictEqual(w.trashed(), [OLD]);
+  assert.strictEqual(fs.readFileSync(r.removed[0].trashed, 'utf8'), MODE1, 'in the trash as it was');
+  assert.deepStrictEqual(w.rec(OLD), { retired: { into: INTO, trashed: path.basename(r.removed[0].trashed) } });
+  assert.ok(!fs.existsSync(S.baseFile(w.home, OLD)), 'its merge base is gone');
+  // offered and startOff as they were: the retired id is never offered again, the merged one keeps its id.
+  const after = S.loadPreinstalled(w.home);
+  assert.deepStrictEqual([after.offered, after.startOff], [before.offered, before.startOff]);
+  // The browsers are told, so they can carry the switch over.
+  assert.deepStrictEqual(S.absorbedIds(w.home), { [INTO]: [OLD] });
+  // Nothing more on the next setup; it doesn't come back.
+  assert.deepStrictEqual(w.setup(), { pre: { added: [], on: [], sites: [] }, updated: [], waiting: [], removed: [], kept: [] });
+  assert.strictEqual(w.mine(OLD), null);
+});
+
+test('retired: an edited copy is never touched, and setup says so once', () => {
+  const w = retireWorld();
+  w.setup();
+  w.edit(OLD, gmod('Hide AI Mode', 1, 'mine'));
+  w.release();
+  const r = w.setup();
+  assert.deepStrictEqual(r.removed, []);
+  assert.deepStrictEqual(r.kept, [{ id: OLD, into: INTO, was: 'Hide AI Mode', name: 'AI Banisher' }]);
+  assert.strictEqual(w.mine(OLD), gmod('Hide AI Mode', 1, 'mine'));
+  assert.deepStrictEqual(w.trashed(), []);
+  assert.deepStrictEqual(w.rec(OLD), { retired: { into: INTO, kept: true } });
+  assert.deepStrictEqual(S.absorbedIds(w.home), {}, 'both still there: no switch to carry over');
+  assert.deepStrictEqual(w.setup().kept, [], 'said once');
+  assert.strictEqual(w.mine(OLD), gmod('Hide AI Mode', 1, 'mine'));
+});
+
+test('retired: a new version that was waiting on the old mod isn\'t offered any more', () => {
+  const w = retireWorld();
+  w.setup();
+  w.edit(OLD, gmod('Hide AI Mode', 1, 'mine'));
+  w.ship(OLD, gmod('Hide AI Mode', 1, 'a fix'));
+  w.setup();
+  assert.ok(w.rec(OLD).pending);
+  assert.ok(fs.existsSync(S.newFile(w.home, OLD)));
+  w.release();
+  w.setup();
+  assert.deepStrictEqual(w.rec(OLD), { retired: { into: INTO, kept: true } });
+  assert.ok(!fs.existsSync(S.newFile(w.home, OLD)));
+  assert.deepStrictEqual(S.pendingUpdates(w.home, [{ id: OLD, code: w.mine(OLD) }]), {});
+  assert.throws(() => S.useNewVersion(w.ws, OLD), /no new TRIF version/);
+});
+
+test('retired: a copy matching an older shipped version counts as unchanged; one deleted before is just recorded', () => {
+  const w = retireWorld();
+  w.setup();
+  // An older version, from before the record (as in shipped-history.json).
+  const older = '// hide-ai-mode as an older TRIF shipped it\n';
+  w.ship(OLD, older);
+  w.ship(OLD, MODE1);
+  w.edit(OLD, older);
+  w.release();
+  assert.deepStrictEqual(w.setup().removed.map((m) => m.id), [OLD]);
+
+  const w2 = retireWorld();
+  w2.setup();
+  fs.unlinkSync(path.join(w2.ws.modsDir, `${OLD}.js`));
+  w2.release();
+  const r = w2.setup();
+  assert.deepStrictEqual([r.removed, r.kept], [[], []]);
+  assert.deepStrictEqual(w2.rec(OLD), { retired: { into: INTO } });
+  assert.deepStrictEqual(S.absorbedIds(w2.home), {});
+});
+
+test('retired: while the mod it went into doesn\'t do its job yet (edited, deleted, the user\'s own), the old copy stays', () => {
+  // Edited, the new version waiting: the old one stays until the user takes it.
+  const w = retireWorld();
+  w.setup();
+  w.edit(INTO, gmod('Hide AI in Results', 1, 'mine'));
+  w.release();
+  let r = w.setup();
+  assert.deepStrictEqual(r.waiting, [{ id: INTO, version: '2' }]);
+  assert.deepStrictEqual([r.removed, r.kept], [[], []]);
+  assert.strictEqual(w.mine(OLD), MODE1);
+  assert.strictEqual(w.rec(OLD).retired, undefined);
+  // Keep mine: still the old one's job.
+  S.keepMine(w.ws, INTO);
+  assert.deepStrictEqual(w.setup().removed, []);
+  assert.strictEqual(w.mine(OLD), MODE1);
+
+  // Deleted by the user: the old copy keeps doing its part, and the merged one isn't offered again.
+  const w2 = retireWorld();
+  w2.setup();
+  fs.unlinkSync(path.join(w2.ws.modsDir, `${INTO}.js`));
+  w2.release();
+  r = w2.setup();
+  assert.deepStrictEqual([r.pre.added, r.removed], [[], []]);
+  assert.strictEqual(w2.mine(INTO), null);
+  assert.strictEqual(w2.mine(OLD), MODE1);
+
+  // The user's own file under the merged one's name: not ours, so neither is its job.
+  const w3 = retireWorld();
+  fs.mkdirSync(path.join(w3.ws.modsDir, 'www.google.com'), { recursive: true });
+  fs.writeFileSync(path.join(w3.ws.modsDir, `${INTO}.js`), '// mine from the start\n');
+  w3.setup();
+  w3.release();
+  assert.deepStrictEqual(w3.setup().removed, []);
+  assert.strictEqual(w3.mine(OLD), MODE1);
+  // And the user's own file under the retired name is never touched either.
+  const w4 = retireWorld();
+  fs.mkdirSync(path.join(w4.ws.modsDir, 'www.google.com'), { recursive: true });
+  fs.writeFileSync(path.join(w4.ws.modsDir, `${OLD}.js`), '// my own hide-ai-mode\n');
+  w4.setup();
+  w4.release();
+  r = w4.setup();
+  assert.deepStrictEqual([r.removed, r.kept], [[], []]);
+  assert.strictEqual(w4.mine(OLD), '// my own hide-ai-mode\n');
+  assert.deepStrictEqual(w4.rec(OLD), { own: true });
+});
+
+test('retired: taking the new version (use it, or a merge) retires the old copy then; Undo brings both back', () => {
+  const w = retireWorld();
+  w.setup();
+  w.edit(INTO, gmod('Hide AI in Results', 1, 'mine'));
+  w.release();
+  w.setup();
+  // Use the new version. It retires with the real RETIRED list (which has this pair) and the examples
+  // TRIF_EXAMPLES_DIR names, as setup's tests do.
+  assert.ok(S.RETIRED.some((x) => x.id === OLD && x.into === INTO), 'the test mirrors the real RETIRED entry');
+  process.env.TRIF_EXAMPLES_DIR = w.examples;
+  try {
+    S.useNewVersion(w.ws, INTO);
+  } finally { delete process.env.TRIF_EXAMPLES_DIR; }
+  assert.strictEqual(w.mine(INTO), BANISH2);
+  assert.strictEqual(w.mine(OLD), null);
+  assert.deepStrictEqual(w.trashed().sort(), [INTO, OLD].sort());
+  assert.ok(w.rec(OLD).retired.trashed);
+  assert.deepStrictEqual(w.rec(INTO).replaced.retired, [{ id: OLD, rec: { hash: sha1(MODE1), version: '1' } }]);
+  // Undo: the user's copy back, the update offered again, and the old mod back as it was.
+  S.restoreMod(w.ws, INTO);
+  assert.strictEqual(w.mine(INTO), gmod('Hide AI in Results', 1, 'mine'));
+  assert.strictEqual(w.mine(OLD), MODE1);
+  assert.deepStrictEqual(w.rec(OLD), { hash: sha1(MODE1), version: '1' });
+  assert.strictEqual(w.rec(INTO).pending.version, '2');
+  assert.deepStrictEqual(S.absorbedIds(w.home), {});
+  assert.deepStrictEqual(w.trashed(), []);
+  // And setup leaves it there again (the merged mod is waiting, not taken).
+  assert.deepStrictEqual(w.setup().removed, []);
+
+  // A merge settled the same way.
+  process.env.TRIF_EXAMPLES_DIR = w.examples;
+  try {
+    const m = S.mergeRequest(w.ws, INTO);
+    w.edit(INTO, gmod('AI Banisher', 2, 'mine and two'));
+    assert.strictEqual(S.mergeSettled(w.ws, INTO, m), 'merged');
+  } finally { delete process.env.TRIF_EXAMPLES_DIR; }
+  assert.strictEqual(w.mine(OLD), null);
+  assert.deepStrictEqual(S.absorbedIds(w.home), { [INTO]: [OLD] });
+});
+
+test('retired: the helper sends `absorbs` on the mod it went into; setup says what happened', async () => {
+  const w = retireWorld();
+  w.edit = (id, code) => { fs.mkdirSync(path.dirname(path.join(w.ws.modsDir, `${id}.js`)), { recursive: true }); fs.writeFileSync(path.join(w.ws.modsDir, `${id}.js`), code); };
+  const env = { TRIF_EXAMPLES_DIR: w.examples };
+  const args = ['setup', '--home', w.home, '--native-dir', path.join(w.root, 'native'), '--no-link', '--link'];
+  // Set up with the real RETIRED list: hide-ai-mode into hide-ai-in-results, hide-sponsored into
+  // hide-extra-sections (version 2 of each).
+  const SPON = 'www.google.com/hide-sponsored';
+  const EXTRA = 'www.google.com/hide-extra-sections';
+  w.ship(SPON, gmod('Hide Sponsored Results', 1));
+  w.ship(EXTRA, gmod('Results Only', 1));
+  fs.writeFileSync(path.join(w.home, 'preinstalled.json'), JSON.stringify({ offered: [INTO, OLD, SPON, EXTRA], startOff: [], sitesOn: [] }));
+  for (const id of [INTO, OLD, SPON, EXTRA]) w.edit(id, fs.readFileSync(path.join(w.examples, `${id}.js`)));
+  let r = await runCli(args, { home: w.home, env });
+  assert.strictEqual(r.code, 0, r.stderr + r.stdout);
+  // The release: both merged mods at version 2, the retired examples gone; the user had edited hide-sponsored.
+  w.release();
+  w.ship(EXTRA, gmod('Just Results', 2));
+  fs.unlinkSync(path.join(w.examples, `${SPON}.js`));
+  w.edit(SPON, gmod('Hide Sponsored Results', 1, 'mine'));
+  r = await runCli([...args, '--verbose'], { home: w.home, env });
+  assert.strictEqual(r.code, 0, r.stderr + r.stdout);
+  assert.match(r.stdout, /Hide AI Mode is now part of AI Banisher: the old copy is in the trash \(trif restore www\.google\.com\/hide-ai-mode brings it back\)/);
+  assert.match(r.stdout, /Hide Sponsored Results \(www\.google\.com\/hide-sponsored\) is now part of Just Results\. You changed your copy, so it's left as it is: it\n +keeps running, without updates\. Delete it if Just Results does what you need\./);
+  r = await runCli([...args, '--verbose'], { home: w.home, env });
+  assert.doesNotMatch(r.stdout, /is now part of/, 'said once');
+
+  const ext = new FakeExtension({ home: w.home });
+  cleanups.push(() => ext.close());
+  const mods = await ext.nextMods((ms) => ms.some((m) => m.id === INTO));
+  assert.deepStrictEqual(mods.find((m) => m.id === INTO).absorbs, [OLD]);
+  assert.strictEqual(mods.find((m) => m.id === EXTRA).absorbs, undefined, 'the edited one is still there');
+  assert.ok(mods.some((m) => m.id === SPON));
+  assert.ok(!mods.some((m) => m.id === OLD));
 });

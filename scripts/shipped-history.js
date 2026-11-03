@@ -21,7 +21,8 @@ const sha1 = (buf) => crypto.createHash('sha1').update(buf).digest('hex');
 
 /** {id: [sha1…]} from the git history of `root` (committed versions only, oldest first). */
 function shippedHistory(root = ROOT) {
-  const git = (args) => execFileSync('git', args, { cwd: root, maxBuffer: 256 * 1024 * 1024 });
+  // (stderr captured: `git show` of the commit that deleted an example fails, and that's expected.)
+  const git = (args) => execFileSync('git', args, { cwd: root, maxBuffer: 256 * 1024 * 1024, stdio: ['ignore', 'pipe', 'pipe'] });
   const files = git(['log', '--format=', '--name-only', '--', EXAMPLES]).toString('utf8').split('\n')
     .filter((f) => /^examples\/sites\/[^/]+\/[^/_.][^/]*\.js$/.test(f) && !f.endsWith('.test.js'));
   const history = {};

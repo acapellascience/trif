@@ -14,7 +14,7 @@ const { envVar } = require('./env');
 const P = require('./paths');
 const { selectBrowsers, SAFARI_AGENT_LABEL, LEGACY_SAFARI_AGENT_LABEL, safariAgentPlist, legacySafariAgentPlist, legacySafariAgentLoaded } = require('./browsers');
 const { migrateHome, describeMigration, migratePrivate } = require('./migrate');
-const { preinstallMods, updateShippedMods } = require('./preinstalled');
+const { preinstallMods, updateShippedMods, retireShippedMods } = require('./preinstalled');
 const { acquireInstallLock, pidAlive } = require('./lock');
 const { firefoxAddonUrl } = require('./update');
 
@@ -465,6 +465,13 @@ function setup(opts = {}) {
       if (waiting.length) {
         note(`mods          new version waiting, not installed because you changed these: ${waiting.map(vers).join(', ')}`);
         note(`              (the ${panelWord} offers it on each: use it, keep yours, or merge them with your agent)`);
+      }
+      // Shipped mods folded into another one: unchanged copies go to the trash, edited ones stay (said once).
+      const { removed, kept } = retireShippedMods(ws, examplesDir);
+      for (const m of removed) say(`mods          ${m.was} is now part of ${m.name}: the old copy is in the trash (trif restore ${m.id} brings it back)`);
+      for (const m of kept) {
+        note(`mods          ${m.was} (${m.id}) is now part of ${m.name}. You changed your copy, so it's left as it is: it`);
+        note(`              keeps running, without updates. Delete it if ${m.name} does what you need.`);
       }
     } catch (e) {
       note(`mods          couldn't update the mods TRIF ships: ${e.message}`);

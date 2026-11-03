@@ -126,17 +126,17 @@ Settings → Extensions and delete the old WebMods app.
 TRIF starts on for Google, X, Amazon and Instagram, with these mods. Each has a switch in the side
 panel on its site; the ones marked *(off)* wait for you to switch them on.
 
-- **Google:** Hide AI in Results, Hide AI Mode and Gemini Promo, Results Only (no extra sections), Hide
-  Sponsored Results, and DVD Logo *(off)*: the logo on the home page bounces around like an old DVD
+- **Google:** AI Banisher (no AI Overview, AI Mode or Gemini promo), Just Results (no sponsored results
+  or extra sections), and DVD Logo *(off)*: the logo on the home page bounces around like an old DVD
   screensaver.
-- **X:** **Plain X**: Home is just the people you follow, newest first, with no ads or suggestions. It
+- **X:** **Timeline Detox**: Home is just the people you follow, newest first, with no ads or suggestions. It
   starts as plain as it gets (only original text posts from people who follow you back); the **Filters**
   menu turns each kind back on (reposts, quotes, replies, links, videos, images, non-mutuals…). It also hides the
   trends column, tidies post pages, and turns Explore into a plain search field. Punk Fonts *(off)* and
   Rainbow Rave *(off)*, for fun.
 - **Amazon:** Simple Home (just a search box) and Simple Shopping (results show only picture, price and
   stars; no sponsored items, ads or recommendations).
-- **Instagram:** Following-only feed (no suggested posts or ads), Hide reposts, Hide AI content, and
+- **Instagram:** Only Following (no suggested posts or ads), Hide Reposts, Hide AI, and
   Desaturate *(off)*: colours down to 35%.
 
 ## Open models (experimental)
@@ -259,7 +259,7 @@ with `node --test --test-concurrency=2 --test-timeout=120000`.
 
 Before a release, also run the end-to-end browser suite, which installs the npm package into a scratch
 home and drives a throwaway Firefox (and Chrome for Testing) profile through setup, the panel, switches,
-Plain X and real agent runs, saving screenshots:
+Timeline Detox and real agent runs, saving screenshots:
 `node tests/e2e/run.js firefox --agent --codex --upgrade-from <previous release .tgz>`. It never touches
 your real browsers, profiles or `~/.trif`. What it covers and what stays manual (Safari, a real X
 timeline, look and feel): [docs/TESTING.md](docs/TESTING.md).

@@ -1,15 +1,15 @@
 // ==WebMod==
-// @name        Plain X
+// @name        Timeline Detox
 // @description Home is just the people you follow, filtered (no ads, reposts or recommendations); a plainer X around it
 // @match       https://x.com/*
 // @run-at      document-start
 // @risk        1 drops ads, so their impressions never report; patches fetch and XMLHttpRequest
 // @source      webmods
-// @version     1
+// @version     2
 // ==/WebMod==
 
 /*
- * Plain X: Home is just the people you follow, filtered; recommendations go elsewhere too.
+ * Timeline Detox: Home is just the people you follow, filtered; recommendations go elsewhere too.
  *
  * - Timeline filter. The home timeline's data (the `HomeLatestTimeline` / `HomeTimeline` GraphQL
  *   responses) is filtered before X sees it. Ads and who-to-follow-style modules always go; reposts,

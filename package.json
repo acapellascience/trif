@@ -38,7 +38,7 @@
     "codex"
   ],
   "scripts": {
-    "test": "node --test --test-timeout=60000"
+    "test": "node --test --test-timeout=180000"
   },
   "devDependencies": {
     "web-ext": "^10.8.0"

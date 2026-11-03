@@ -12,7 +12,8 @@
 //
 // Updates. A shipped mod (an example whose header says `@source webmods`) gets fixes in later TRIF
 // versions, and every setup (which is also how updates install) brings them to the user's copy, but
-// never over the user's own changes. shipped[id] = {hash, version, pending?, declined?, replaced?, own?}:
+// never over the user's own changes. shipped[id] = {hash, version, pending?, declined?, replaced?, own?}
+// (or {retired}, below):
 //  - hash, version: the sha1 and @version of the shipped version the user's copy is based on (hash null
 //    for a copy edited before TRIF kept this record: which version it started from isn't known). That
 //    exact version is kept in <home>/.shipped/<site>/<mod>.js, the base for merging;
@@ -21,12 +22,19 @@
 //    `trif mod-update`): use it, keep theirs, or have their agent merge the two (it proposes first, and
 //    edits once the user agrees);
 //  - declined: the hash of a version the user chose not to use ("Keep mine"); a later one is offered again;
-//  - replaced {hash, version, pending, trashed}: how things were before "Use the new version", so
-//    `trif restore` (the panel's Undo) can put the user's copy back and offer the update again;
+//  - replaced {hash, version, pending, trashed, retired?}: how things were before "Use the new version",
+//    so `trif restore` (the panel's Undo) can put the user's copy back and offer the update again (and
+//    bring back the retired mods that went to the trash because of it: retired [{id, rec}]);
 //  - own: the user had their own file under that name before TRIF offered the mod: never touched.
 // A copy that is still exactly what was shipped is replaced with the new version silently. Workspaces set
 // up before the record existed have none: there, a copy matching any version TRIF ever shipped
 // (examples/shipped-history.json, from git) counts as unchanged.
+//
+// Retired mods. A shipped mod can be folded into another one (RETIRED: AI Banisher took in Hide AI Mode
+// and Gemini Promo, Just Results took in Hide Sponsored Results). It's no longer offered to anyone, and
+// retireShippedMods deals with the copies users have: an unchanged one goes to the trash once the mod it
+// was folded into has the version that does its job, an edited one is left alone (setup says so once).
+// shipped[id] = {retired: {into, trashed?, kept?}} from then on: never updated or offered again.
 //
 // <home>/.shipped starts with a dot, so the mod scanner never loads it; side-panel runs can read it (the
 // merge needs to) but not write it: they may only write the mods folder.
@@ -35,13 +43,12 @@ const fs = require('fs');
 const path = require('path');
 const { parseHeader, sha1, isShippedSource } = require('./mods');
 const trash = require('./trash');
+const { envVar } = require('./env');
 
 // on: switched on from the start; the rest wait for the user to switch them on.
 const PREINSTALLED = [
-  { id: 'www.google.com/hide-ai-in-results', on: true },
-  { id: 'www.google.com/hide-ai-mode', on: true },
-  { id: 'www.google.com/hide-extra-sections', on: true },
-  { id: 'www.google.com/hide-sponsored', on: true },
+  { id: 'www.google.com/hide-ai-in-results', on: true }, // AI Banisher
+  { id: 'www.google.com/hide-extra-sections', on: true }, // Just Results
   { id: 'x.com/plain-x', on: true },
   { id: 'x.com/punk-fonts', on: false },
   { id: 'x.com/rainbow-rave', on: false },
@@ -54,6 +61,13 @@ const PREINSTALLED = [
   // Added in 0.2.0: existing workspaces get it (off) with the setup that installs the update, since it
   // isn't in their `offered` list yet.
   { id: 'www.google.com/dvd-logo', on: false },
+];
+
+// Shipped mods folded into another one (`into`, from its @version `since`), so no longer shipped
+// (0.2.0: AI Banisher and Just Results). retireShippedMods, below, handles the copies users have.
+const RETIRED = [
+  { id: 'www.google.com/hide-ai-mode', into: 'www.google.com/hide-ai-in-results', since: '2' },
+  { id: 'www.google.com/hide-sponsored', into: 'www.google.com/hide-extra-sections', since: '2' },
 ];
 
 // TRIF is off on every site until the user turns it on there; it starts on for these, the sites the
@@ -220,6 +234,96 @@ function updateShippedMods(home, modsDir, examplesDir, list = PREINSTALLED) {
   return { updated, waiting };
 }
 
+// ---------------------------------------------------------------- retired mods
+
+// '2' >= '2', '10' >= '2'; nothing (no version) is older than everything.
+function versionAtLeast(v, min) {
+  const a = String(v || '').split('.').map(Number);
+  const b = String(min).split('.').map(Number);
+  if (!v || a.some(Number.isNaN)) return false;
+  for (let i = 0; i < Math.max(a.length, b.length); i++) if ((a[i] || 0) !== (b[i] || 0)) return (a[i] || 0) > (b[i] || 0);
+  return true;
+}
+
+/** The examples TRIF ships (setup and tests point TRIF_EXAMPLES_DIR elsewhere). */
+function examplesDir() {
+  return envVar('EXAMPLES_DIR') ? path.resolve(envVar('EXAMPLES_DIR')) : path.join(__dirname, '..', '..', 'examples', 'sites');
+}
+
+/**
+ * The user's copies of shipped mods TRIF folded into another one (RETIRED). Run by every setup, after
+ * updateShippedMods, and when the user takes the new version of the mod they were folded into
+ * (useNewVersion, resolveMerge). For each one the user was offered:
+ *  - still exactly as shipped (any version): moved to the trash, so it doesn't run beside the mod that
+ *    now does its job, but only once the user has that mod at version `since` or later. Until then (they
+ *    deleted it, have their own file under its name, or changed it and haven't taken the new version)
+ *    the old copy is what does the job, so it stays. Each browser then switches the mod it went into on
+ *    if either was on (the helper sends `absorbs`; extension/lib.js applyAbsorbed);
+ *  - edited: never touched. It keeps running as it is, without updates, and setup says so (once);
+ *  - deleted already: just recorded.
+ * Returns {removed: [{id, into, was, name, trashed}], kept: [{id, into, was, name}]} (was: the @name of the
+ * user's copy, name: of `into`'s).
+ */
+function retireShippedMods(ws, exDir = examplesDir(), retired = RETIRED) {
+  const state = load(ws.home);
+  const history = loadHistory(exDir);
+  const removed = [];
+  const kept = [];
+  let changed = false;
+  for (const { id, into, since } of retired) {
+    const rec = state.shipped[id] || null;
+    if (!state.offered.includes(id) || (rec && (rec.own || rec.retired))) continue;
+    const target = readShipped(exDir, into);
+    const name = (target && parseHeader(target.code.toString('utf8')).name) || into;
+    const mine = readOrNull(modFile(ws.modsDir, id));
+    const was = (mine && parseHeader(mine.toString('utf8')).name) || id;
+    let next;
+    if (!mine) {
+      next = { retired: { into } };
+    } else {
+      const h = sha1(mine);
+      const unchanged = shippedBefore(history, id, h) || (rec && (h === rec.hash || (rec.pending && h === rec.pending.hash)));
+      if (!unchanged) {
+        next = { retired: { into, kept: true } };
+        kept.push({ id, into, was, name });
+      } else {
+        const t = state.shipped[into];
+        if (!t || t.own || t.retired || !t.hash || !versionAtLeast(t.version, since) || !fs.existsSync(modFile(ws.modsDir, into))) continue;
+        let trashed;
+        try { trashed = trash.deleteMod(ws, id).trashed; } catch { continue; } // (not a plain file: left alone)
+        next = { retired: { into, trashed: path.basename(trashed) } };
+        removed.push({ id, into, was, name, trashed });
+        // While "Use the new version" of `into` can be undone, the undo brings this back too.
+        if (t.replaced) t.replaced = { ...t.replaced, retired: [...(t.replaced.retired || []), { id, rec }] };
+      }
+    }
+    for (const f of [baseFile, newFile, prevFile]) removeFile(f(ws.home, id));
+    state.shipped[id] = next;
+    changed = true;
+  }
+  if (changed) save(ws.home, state);
+  return { removed, kept };
+}
+
+// After the user took the new version of `id` (used or merged): retire what it took in, if anything.
+function retireInto(ws, id) {
+  if (!ws || !RETIRED.some((r) => r.into === id)) return;
+  try { retireShippedMods(ws); } catch { /* setup tries again */ }
+}
+
+/**
+ * The retired mods whose unchanged copy went to the trash, by the mod each went into: {into: [ids]}.
+ * The helper sends them as that mod's `absorbs`, for the browsers to carry the switches over.
+ */
+function absorbedIds(home) {
+  const out = {};
+  for (const [id, rec] of Object.entries(load(home).shipped)) {
+    const r = rec.retired;
+    if (r && r.trashed && typeof r.into === 'string') (out[r.into] = out[r.into] || []).push(id);
+  }
+  return out;
+}
+
 // ---------------------------------------------------------------- the helper and the CLI
 
 /**
@@ -232,7 +336,7 @@ function pendingUpdates(home, mods) {
   const out = {};
   for (const m of mods) {
     const rec = shipped[m.id];
-    if (!rec || rec.own || !rec.pending) continue;
+    if (!rec || rec.own || rec.retired || !rec.pending) continue;
     const mine = sha1(m.code);
     if (mine === rec.pending.hash) continue;
     out[m.id] = { version: rec.pending.version || null, from: rec.version || null, modified: mine !== rec.hash };
@@ -242,7 +346,7 @@ function pendingUpdates(home, mods) {
 
 function pendingRecord(state, id) {
   const rec = state.shipped[id];
-  if (!rec || rec.own || !rec.pending) throw new trash.TrashError(`there's no new TRIF version of ${id} waiting`);
+  if (!rec || rec.own || rec.retired || !rec.pending) throw new trash.TrashError(`there's no new TRIF version of ${id} waiting`);
   return rec;
 }
 
@@ -266,6 +370,7 @@ function useNewVersion(ws, id) {
   state.shipped[id] = { hash: rec.pending.hash, version: rec.pending.version || null };
   if (trashed) state.shipped[id].replaced = { hash: rec.hash || null, version: rec.version || null, pending: rec.pending, trashed: path.basename(trashed) };
   save(ws.home, state);
+  retireInto(ws, id);
   return { id, file: dest, trashed, version: rec.pending.version || null };
 }
 
@@ -334,15 +439,16 @@ function mergeSettled(ws, id, m) {
   if (!now) return 'gone';
   if (sha1(now) === m.before) return 'waiting';
   if (m.version && String(parseHeader(now.toString('utf8')).version || '') !== String(m.version)) return 'waiting';
-  return resolveMerge(ws.home, id, m.hash) ? 'merged' : 'gone';
+  return resolveMerge(ws.home, id, m.hash, ws) ? 'merged' : 'gone';
 }
 
 /**
  * The merge is settled (mergeSettled, or `trif mod-update --merged` after a merge in a terminal): the new
  * version becomes the base, so it isn't offered again. Only if it's still the version waiting (`hash`).
- * Returns whether it was resolved.
+ * With the workspace `ws`, the mods it took in are retired (retireShippedMods). Returns whether it was
+ * resolved.
  */
-function resolveMerge(home, id, hash) {
+function resolveMerge(home, id, hash, ws = null) {
   const state = load(home);
   const rec = state.shipped[id];
   if (!rec || !rec.pending || (hash && rec.pending.hash !== hash)) return false;
@@ -350,6 +456,7 @@ function resolveMerge(home, id, hash) {
   state.shipped[id] = { hash: rec.pending.hash, version: rec.pending.version || null };
   removeFile(prevFile(home, id));
   save(home, state);
+  retireInto(ws, id);
   return true;
 }
 
@@ -379,6 +486,15 @@ function restoreMod(ws, id, opts = {}) {
   moveFile(baseFile(ws.home, id), newFile(ws.home, id));
   moveFile(prevFile(ws.home, id), baseFile(ws.home, id));
   state.shipped[id] = { hash: replaced.hash || null, version: replaced.version || null, pending: replaced.pending };
+  // The retired mods that went to the trash because of the new version come back, with their records.
+  for (const { id: rid, rec: before } of Array.isArray(replaced.retired) ? replaced.retired : []) {
+    const was = state.shipped[rid];
+    if (!was || !was.retired || !was.retired.trashed) continue;
+    const t = trash.listTrash(ws).find((e) => e.id === rid); // (restoreMod brings back the newest)
+    if (!t || path.basename(t.file) !== was.retired.trashed || fs.existsSync(modFile(ws.modsDir, rid))) continue;
+    try { trash.restoreMod(ws, rid); } catch { continue; }
+    if (before) state.shipped[rid] = before; else delete state.shipped[rid];
+  }
   save(ws.home, state);
   return r;
 }
@@ -390,6 +506,6 @@ function startOffIds(home) { return new Set(load(home).startOff); }
 function startSitesOn(home) { return load(home).sitesOn; }
 
 module.exports = {
-  PREINSTALLED, SITES_ON, SHIPPED_DIR, preinstallMods, updateShippedMods, startOffIds, startSitesOn, loadPreinstalled: load,
-  pendingUpdates, useNewVersion, keepMine, mergeRequest, mergeSettled, resolveMerge, restoreMod, baseFile, newFile, loadHistory,
+  PREINSTALLED, RETIRED, SITES_ON, SHIPPED_DIR, preinstallMods, updateShippedMods, retireShippedMods, absorbedIds,
+  startOffIds, startSitesOn, loadPreinstalled: load, pendingUpdates, useNewVersion, keepMine, mergeRequest, mergeSettled, resolveMerge, restoreMod, baseFile, newFile, loadHistory,
 };

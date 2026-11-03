@@ -2,10 +2,14 @@
 // The local test sites the browsers load:
 //   http://127.0.0.1:<port>/        the main test site (its mod is written by the harness, then the agent's)
 //   http://localhost:<port>/        a second site with a mod of its own, where TRIF stays off
-//   https://x.com:<tlsPort>/home    a stand-in for X's home timeline, for the real Plain X mod: the page
-//                                   fetches (and XHRs) a saved HomeLatestTimeline response, as X does, and
-//                                   lists the posts it got back. The browsers resolve x.com to 127.0.0.1
-//                                   and accept the self-signed certificate (set up by each driver).
+//   https://x.com:<tlsPort>/home    a stand-in for X's home timeline, for the real Timeline Detox mod
+//                                   (x.com/plain-x): the page fetches (and XHRs) a saved HomeLatestTimeline
+//                                   response, as X does, and lists the posts it got back.
+//   https://www.google.com:<tlsPort>/ and /search?q=…   stand-ins for Google's home and results pages,
+//                                   with the parts the shipped Google mods hide (AI Banisher, Just Results)
+//                                   and the parts they must keep, each marked data-e2e="hide…" or "keep…".
+// The browsers resolve x.com and www.google.com to 127.0.0.1 and accept the self-signed certificate (set
+// up by each driver).
 
 const fs = require('fs');
 const http = require('http');
@@ -138,7 +142,7 @@ const tweet = (id, { following = true, followedBy = true, legacy = {}, extra = {
 });
 
 /**
- * A HomeLatestTimeline response, and which entries Plain X keeps out of the box (every filter off:
+ * A HomeLatestTimeline response, and which entries Timeline Detox keeps out of the box (every filter off:
  * only original text posts from people who follow you back; cursors always stay).
  */
 function timeline() {
@@ -185,15 +189,48 @@ window.__xDone = Promise.all([
          (e) => { document.getElementById('status').textContent = 'error: ' + e.message; window.__xError = String(e); });
 </script>`);
 
+// Google's markup, cut down to what the shipped Google mods key on (see their comments): ids, data
+// attributes, jsname values, the udm=50 AI Mode links and the <promo-middle-slot> tag. data-e2e says what
+// each mod must do to it ("hide-ai": AI Banisher, "hide-results": Just Results, "keep": neither).
+const GOOGLE_SEARCH_BOX = `
+<form role="search"><textarea name="q" data-e2e="keep-box"></textarea>
+  <button type="button" jsname="B6rgad" data-e2e="hide-ai-mode-button">AI Mode</button>
+  <button type="submit" data-e2e="keep-search-button">Google Search</button></form>
+<div jsslot data-e2e="hide-ai-promo-slot"><div><promo-middle-slot>Try Gemini, Google's AI</promo-middle-slot></div></div>`;
+const GOOGLE_HOME = () => PAGE('Google (TRIF e2e stand-in)', `<div id="logo" data-e2e="keep-logo">Google</div>${GOOGLE_SEARCH_BOX}`);
+const GOOGLE_RESULTS = () => PAGE('trif - Google Search (TRIF e2e stand-in)', `
+${GOOGLE_SEARCH_BOX}
+<div role="list">
+  <div role="listitem" data-e2e="keep-tab"><a href="/search?q=trif">All</a></div>
+  <div role="listitem" data-e2e="hide-ai-mode-tab"><a href="/search?q=trif&amp;udm=50">AI Mode</a></div>
+  <div role="listitem" data-e2e="keep-images-tab"><a href="/search?q=trif&amp;udm=2">Images</a></div>
+</div>
+<div id="rcnt">
+  <div data-e2e="hide-ai-overview"><div id="m-x-content">AI Overview: TRIF is… <textarea>Ask anything</textarea></div></div>
+  <div id="center_col" data-e2e="keep-center">
+    <div id="tads" data-e2e="hide-results-top-ads"><div data-text-ad="1"><a href="https://ads.example/"><h3>Sponsored: buy TRIF</h3></a></div></div>
+    <div data-dsktp-pla-or-su data-e2e="hide-results-products">Featured products</div>
+    <div id="rso">
+      <div data-rpos="0" data-e2e="keep-result-1"><a href="https://example.com/one"><h3>A plain web result</h3></a></div>
+      <div data-rpos="1" data-e2e="hide-results-paa"><div data-initq="trif">People also ask</div></div>
+      <div data-rpos="2" data-e2e="hide-results-videos"><span>Short videos</span></div>
+      <div data-rpos="3" data-e2e="keep-result-2"><a href="https://example.com/two"><h3>Another web result</h3></a></div>
+    </div>
+    <div id="bottomads" data-e2e="hide-results-bottom-ads">Sponsored at the bottom</div>
+    <div id="bres" data-e2e="hide-results-related">People also search for</div>
+  </div>
+</div>`);
+
 // ---- servers
 
 function selfSignedCert(dir) {
-  const key = path.join(dir, 'x-key.pem');
-  const cert = path.join(dir, 'x-cert.pem');
+  // (Named for the hosts it covers: a cached certificate without www.google.com isn't reused.)
+  const key = path.join(dir, 'x-google-key.pem');
+  const cert = path.join(dir, 'x-google-cert.pem');
   if (!fs.existsSync(key) || !fs.existsSync(cert)) {
     fs.mkdirSync(dir, { recursive: true });
     const r = run('/usr/bin/openssl', ['req', '-x509', '-newkey', 'rsa:2048', '-nodes', '-keyout', key, '-out', cert, '-days', '7',
-      '-subj', '/CN=x.com', '-addext', 'subjectAltName=DNS:x.com,DNS:*.x.com']);
+      '-subj', '/CN=x.com', '-addext', 'subjectAltName=DNS:x.com,DNS:*.x.com,DNS:www.google.com']);
     if (r.status !== 0) throw new Error(`openssl failed: ${r.stderr}`);
   }
   return { key: fs.readFileSync(key), cert: fs.readFileSync(cert) };
@@ -211,6 +248,12 @@ async function startServers(dir) {
     if (host === 'x.com') {
       if (u.pathname.startsWith('/i/api/graphql/')) return send(200, 'application/json', JSON.stringify(tl.body));
       if (u.pathname === '/home' || u.pathname === '/') return send(200, 'text/html; charset=utf-8', X_PAGE());
+      if (u.pathname === '/favicon.ico') return send(204, 'image/x-icon', '');
+      return send(404, 'text/plain', 'not found');
+    }
+    if (host === 'www.google.com') {
+      if (u.pathname === '/search') return send(200, 'text/html; charset=utf-8', GOOGLE_RESULTS());
+      if (u.pathname === '/') return send(200, 'text/html; charset=utf-8', GOOGLE_HOME());
       if (u.pathname === '/favicon.ico') return send(204, 'image/x-icon', '');
       return send(404, 'text/plain', 'not found');
     }

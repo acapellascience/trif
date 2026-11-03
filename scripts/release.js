@@ -13,7 +13,9 @@
 // makes the two beta zips, and writes the update feeds: updates/latest.json (+ .sig, signed with the
 // release key) for the helper, updates/firefox.json for Firefox. Then it asks before publishing
 // anything: a commit and tag, a GitHub release with the files, and the feeds (pushed last, once the files
-// they point at exist).
+// they point at exist). The release holds the signed add-on twice: trif-firefox-<version>.xpi for the
+// Firefox feed, and trif-firefox.xpi, the name GitHub's releases/latest/download/ link (in the README and
+// setup's next steps) needs to always get the newest.
 //
 // --dry-run does everything up to publishing, into dist/release/<version>, and changes no tracked file
 // (no Mozilla signing, so no .xpi; feeds are signed only if the release key is there).
@@ -29,7 +31,7 @@ const path = require('path');
 const crypto = require('crypto');
 const readline = require('readline');
 const { execFileSync, spawnSync } = require('child_process');
-const { githubRepo, compareVersions } = require('../helper/lib/update');
+const { githubRepo, compareVersions, FIREFOX_XPI } = require('../helper/lib/update');
 const { writeShippedHistory, OUT: SHIPPED_HISTORY } = require('./shipped-history');
 
 const ROOT = path.resolve(__dirname, '..');
@@ -199,6 +201,17 @@ function preflight(version, { dryRun }) {
   return { pkg, repo, notes, priv: keyOk ? priv : null };
 }
 
+/**
+ * The files to attach to the GitHub release. With a signed add-on (`xpi`), that's it and a copy named
+ * FIREFOX_XPI, made here in `out`: every release has one by that name, so
+ * releases/latest/download/trif-firefox.xpi is a link to the newest add-on that never changes.
+ */
+function releaseAssets(out, { tgz, chromeZip, xpi, zips }) {
+  const latestXpi = xpi && path.join(out, FIREFOX_XPI);
+  if (latestXpi) fs.copyFileSync(xpi, latestXpi);
+  return [tgz, chromeZip, ...(xpi ? [xpi, latestXpi] : []), ...zips];
+}
+
 function bump(version, dir = ROOT) {
   const pkgFile = path.join(dir, 'package.json');
   const pkg = readJson(pkgFile);
@@ -311,7 +324,7 @@ async function release(version, { dryRun, skipTests }) {
   }
 
   const zips = [betaZip(out, 'chrome', version, [[tgz, tgzName]])];
-  if (xpi) zips.push(betaZip(out, 'firefox', version, [[tgz, tgzName], [xpi, 'trif-firefox.xpi']]));
+  if (xpi) zips.push(betaZip(out, 'firefox', version, [[tgz, tgzName], [xpi, FIREFOX_XPI]]));
 
   // Feeds, pointing at the release's files on GitHub.
   const base = `https://github.com/${repo || 'OWNER/trif'}/releases/download/v${version}`;
@@ -333,7 +346,7 @@ async function release(version, { dryRun, skipTests }) {
     writeJson(ffPath, firefoxFeed(existing, { id: require('../helper/lib/paths').FIREFOX_EXTENSION_ID, version, url: `${base}/trif-firefox-${version}.xpi`, sha256: sha256(xpi) }));
   }
 
-  const assets = [tgz, path.join(out, `trif-chrome-${version}.zip`), ...(xpi ? [xpi] : []), ...zips];
+  const assets = releaseAssets(out, { tgz, chromeZip: path.join(out, `trif-chrome-${version}.zip`), xpi, zips });
   console.log(`\nReady in ${path.relative(ROOT, out)}:`);
   for (const a of assets) console.log(`  ${path.basename(a)}`);
   console.log(`\nWhat's new in ${version}:\n${notes}\n`);
@@ -379,4 +392,4 @@ if (require.main === module) {
   else release(cmd, { dryRun: flags.has('--dry-run'), skipTests: flags.has('--skip-tests') }).catch((e) => fail(e.stack || e.message));
 }
 
-module.exports = { changelogSection, unreleasedSection, remoteRepo, repoMismatch, latestFeed, signBytes, firefoxFeed, bump, xpiMatches };
+module.exports = { changelogSection, unreleasedSection, remoteRepo, repoMismatch, latestFeed, signBytes, firefoxFeed, bump, xpiMatches, releaseAssets };

@@ -468,7 +468,7 @@ test('setup --browser firefox writes a manifest with allowed_extensions; doctor 
   assert.equal(fx.path, path.join(ws, 'bin', 'trif-host'));
   const chrome = browserTable(fakehome).find((b) => b.key === 'chrome');
   assert.deepEqual(readManifest(chrome.nativeDir).allowed_origins, [DEV_ORIGIN]);
-  assert.match(r.stdout, /Firefox: open the signed TRIF add-on/);
+  assert.match(r.stdout, /Firefox: open this link in Firefox to install the TRIF add-on:\n {7}https:\/\/github\.com\/[\w.-]+\/[\w.-]+\/releases\/latest\/download\/trif-firefox\.xpi\n/);
 
   let d = await runCli(['doctor'], { home: ws });
   assert.match(d.stdout, /ok {4}Firefox: native host manifest/);
@@ -505,7 +505,8 @@ test('setup for Firefox alone gives only Firefox\'s next steps', async () => {
   const r = await runCli(['setup', '--browser', 'firefox', '--no-link', '--no-examples'], { home: ws });
   assert.equal(r.code, 0, r.stderr);
   const next = r.stdout.slice(r.stdout.indexOf('Next steps:'));
-  assert.match(next, /1\. Open the signed TRIF add-on \(trif-firefox\.xpi\) in Firefox/);
+  assert.match(next, /1\. Open this link in Firefox to install the TRIF add-on, and click Add:/);
+  assert.ok(next.includes(`       ${require('../helper/lib/update').firefoxAddonUrl()}\n`), 'the latest release\'s add-on');
   assert.match(next, /"Allow user scripts"/);
   assert.doesNotMatch(next, /chrome:\/\/extensions|Load unpacked/);
 });

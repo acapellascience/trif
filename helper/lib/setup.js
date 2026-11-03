@@ -16,6 +16,7 @@ const { selectBrowsers, SAFARI_AGENT_LABEL, LEGACY_SAFARI_AGENT_LABEL, safariAge
 const { migrateHome, describeMigration, migratePrivate } = require('./migrate');
 const { preinstallMods, updateShippedMods } = require('./preinstalled');
 const { acquireInstallLock, pidAlive } = require('./lock');
+const { firefoxAddonUrl } = require('./update');
 
 // Quote for a POSIX shell double-quoted string.
 function shq(s) {
@@ -580,9 +581,18 @@ function setup(opts = {}) {
     say(`  Then ask your coding agent to work in ${home} (it reads AGENTS.md there).`);
     return { ok, lines, ws, manifests, nodePath, mode, root, migration };
   }
+  // setup installs no add-on: Firefox only keeps signed ones, and Mozilla signs each release's. The
+  // newest is on the latest GitHub release (scripts/release.js), from package.json's repository.
+  const xpiUrl = firefoxAddonUrl();
   if (!targets.some((t) => !t.firefox && !t.safari)) {
-    say('  1. Open the signed TRIF add-on (trif-firefox.xpi) in Firefox, e.g. drag it onto a Firefox');
-    say('     window, and click Add.');
+    if (xpiUrl) {
+      say('  1. Open this link in Firefox to install the TRIF add-on, and click Add:');
+      say(`       ${xpiUrl}`);
+      say('     (If Firefox downloads it instead, drag trif-firefox.xpi onto a Firefox window.)');
+    } else {
+      say('  1. Open the signed TRIF add-on (trif-firefox.xpi) in Firefox, e.g. drag it onto a Firefox');
+      say('     window, and click Add.');
+    }
     say('  2. Click the TRIF toolbar button to open the sidebar, then "Allow user scripts" and Allow.');
     say('  3. If Firefox was already running before this setup, quit it completely and reopen it.');
     say('  4. Check everything with: trif doctor');
@@ -608,8 +618,15 @@ function setup(opts = {}) {
   say('     or "Details" on TRIF in chrome://extensions.');
   say('  3. Check everything with: trif doctor');
   if (targets.some((t) => t.firefox)) {
-    say('  Firefox: open the signed TRIF add-on (.xpi) in Firefox to install it, then click the TRIF');
-    say('     toolbar button and "Allow user scripts". Restart Firefox if it was running before this setup.');
+    if (xpiUrl) {
+      say('  Firefox: open this link in Firefox to install the TRIF add-on:');
+      say(`       ${xpiUrl}`);
+      say('     Then click the TRIF toolbar button and "Allow user scripts". Restart Firefox if it was');
+      say('     running before this setup.');
+    } else {
+      say('  Firefox: open the signed TRIF add-on (.xpi) in Firefox to install it, then click the TRIF');
+      say('     toolbar button and "Allow user scripts". Restart Firefox if it was running before this setup.');
+    }
   }
   if (targets.some((t) => t.safari)) { say('  Safari:'); for (const l of safariSteps(1)) say(`    ${l}`); }
   say(`  Then ask your coding agent to work in ${home} (it reads AGENTS.md there).`);

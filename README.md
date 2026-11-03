@@ -58,9 +58,11 @@ switches stay as they were; in Safari, install the new TRIF.app (see Safari belo
 ### Firefox
 
 TRIF also runs in Firefox 153 or newer. Open Firefox once before running `npx trif setup`, so setup
-finds it (or run `npx trif setup --browser firefox`). Then open the signed `trif-firefox.xpi` you were
-sent in Firefox to install the add-on, click the TRIF toolbar button to open the sidebar, and click
-**Allow user scripts**. Restart Firefox if it was open during setup.
+finds it (or run `npx trif setup --browser firefox`). Then open
+[trif-firefox.xpi](https://github.com/acapellascience/trif/releases/latest/download/trif-firefox.xpi)
+in Firefox and click **Add** to install the add-on (if Firefox downloads it instead, drag the file onto
+a Firefox window). Click the TRIF toolbar button to open the sidebar, and click **Allow user scripts**.
+Restart Firefox if it was open during setup.
 
 Chrome and Firefox can both be open: they share your mods, and each sidebar or side panel chat works
 on its own browser. Switching a mod off is per browser.

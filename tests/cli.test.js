@@ -509,7 +509,7 @@ test('doctor: broken setup lists failures with fixes and exits 1', async () => {
   assert.match(r.stdout, /FAIL {2}helper isn't running/);
   assert.match(r.stdout, /fix: run: trif setup/);
   assert.match(r.stdout, /fix: first fix the failures above/);
-  assert.match(r.stdout, /problem\(s\) found/);
+  assert.match(r.stdout, /\d+ problems? found/);
 });
 
 test('doctor: the helper isn\'t running: advice for the browsers set up, a line each when there are several', async () => {
@@ -729,7 +729,7 @@ test('doctor: the last line says so when there were warnings', () => {
   assert.match(formatDoctor({ ok: true, checks: [ok, warn] }), /\nNo problems, but 1 warning above\.$/);
   assert.doesNotMatch(formatDoctor({ ok: true, checks: [ok, warn, warn] }), /All good/);
   assert.match(formatDoctor({ ok: true, checks: [ok, warn, warn] }), /2 warnings above\.$/);
-  assert.match(formatDoctor({ ok: false, checks: [warn, fail] }), /1 problem\(s\) found/);
+  assert.match(formatDoctor({ ok: false, checks: [warn, fail] }), /1 problem found/);
 });
 
 test('a mailbox request works where watching a folder fails (as in an agent run\'s sandbox)', async () => {

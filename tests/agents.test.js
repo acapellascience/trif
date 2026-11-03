@@ -1036,6 +1036,36 @@ test('setup records PATH (merging config.json) and writes .claude/settings.json;
   assert.match(r.stdout, /fix: run trif setup in this terminal/);
 });
 
+test('doctor: an agent that isn\'t logged in is only a warning when the side panel\'s default can\'t run either', async () => {
+  const root = tempDir();
+  const ws = path.join(root, 'ws');
+  const fakeBin = path.join(root, 'fakebin');
+  fs.mkdirSync(fakeBin);
+  const script = (name, body) => { fs.writeFileSync(path.join(fakeBin, name), `#!/bin/sh\n${body}\n`); fs.chmodSync(path.join(fakeBin, name), 0o755); };
+  const flag = path.join(root, 'claude-logged-in');
+  script('claude', `case "$1" in --version) echo "9.9.9 (Claude Code)";; auth) if [ -e ${JSON.stringify(flag)} ]; then echo '{"loggedIn": true, "authMethod": "claude.ai"}'; else echo '{"loggedIn": false}'; exit 1; fi;; esac`);
+  script('codex', 'case "$1" in --version) echo "codex-cli 0.140.0";; login) echo "Not logged in"; exit 1;; esac');
+  const termPath = `${fakeBin}:/usr/bin:/bin`;
+  await runCli(['setup', '--native-dir', path.join(root, 'native'), '--no-link', '--no-examples'], { home: ws, env: { PATH: termPath } });
+  fs.writeFileSync(flag, 'yes');
+  let r = await runCli(['doctor', '--native-dir', path.join(root, 'native')], { home: ws });
+  assert.match(r.stdout, /^ok {4}Claude Code is logged in \(claude\.ai\)$/m);
+  assert.match(r.stdout, /^- {5}Codex isn't logged in \(only needed if you pick it in the side panel\)$/m);
+  assert.doesNotMatch(r.stdout, /^warn .*Codex/m);
+  // The default (Claude Code, the first found) logged out too: both are warnings.
+  fs.rmSync(flag);
+  r = await runCli(['doctor', '--native-dir', path.join(root, 'native')], { home: ws });
+  assert.match(r.stdout, /^warn {2}Claude Code isn't logged in, so the side panel can't use it$/m);
+  assert.match(r.stdout, /^warn {2}Codex isn't logged in, so the side panel can't use it$/m);
+});
+
+test('doctor: real plurals', () => {
+  const { formatDoctor } = require('../helper/lib/doctor');
+  const fail = { status: 'fail', title: 'x' };
+  assert.match(formatDoctor({ ok: false, checks: [fail] }), /\n1 problem found\./);
+  assert.match(formatDoctor({ ok: false, checks: [fail, fail] }), /\n2 problems found\./);
+});
+
 // ------------------------------------------------------------------ merging a new version of a shipped mod
 
 // A workspace where TRIF shipped example.com/plain version 1, the user changed it, and version 2 waits.

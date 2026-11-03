@@ -59,6 +59,9 @@ function checkWrapperScript(script, ws) {
 
 const SAFARI_PORT = require('../safari-bridge').PORT;
 
+/** "1 mod", "14 mods". */
+const plural = (n, word) => `${n} ${word}${n === 1 ? '' : 's'}`;
+
 /**
  * What to do when the helper isn't running, for the browsers set up (their native host manifests, or
  * Safari's bridge): the browser starts the helper, so each needs TRIF installed and turned on. One
@@ -338,7 +341,7 @@ async function doctor(opts = {}) {
   const plan = planModsMessage(mods);
   const modProblems = [...problems, ...plan.errors];
   if (fs.existsSync(ws.modsDir)) {
-    if (!modProblems.length) add('ok', `${mods.length} mod(s) in ${ws.modsDir}`);
+    if (!modProblems.length) add('ok', `${plural(mods.length, 'mod')} in ${ws.modsDir}`);
     for (const p of modProblems) add('fail', `mod ${p.id}: ${p.error}`, p.error.includes('1 MB') ? 'make the mod smaller (move data out, or split it)' : 'check the file');
     for (const w of warnings) add('warn', `mod ${w.id}: ${w.warning}`, 'fix the header (see AGENTS.md)');
   }
@@ -351,6 +354,19 @@ async function doctor(opts = {}) {
   const env = agents.agentEnv(ws);
   const termDirs = String(process.env.PATH || '').split(path.delimiter).filter(Boolean);
   const { findExecutable } = require('./agents/util');
+  // Each available agent's login (a saved API key counts: runs use it through a key proxy), first: an
+  // agent that isn't logged in is only a warning when it's the default one, or the default can't run
+  // either; otherwise it's only needed if picked in the side panel.
+  const keys = require('./agentkeys');
+  const logins = new Map();
+  for (const a of listed.agents) {
+    const adapter = agents.getAdapter(a.id);
+    if (!a.available || adapter.doctorChecks || !adapter.loginStatus) continue;
+    if (keys.AGENT_KEYS[a.id] && (await keys.hasAgentKey(a.id, { config: ws.config })).stored) continue;
+    logins.set(a.id, adapter.loginStatus({ path: a.path, env, cwd: fs.existsSync(ws.home) ? ws.home : undefined }));
+  }
+  const def = listed.agents.find((a) => a.id === listed.default);
+  const defaultReady = !!def?.available && logins.get(def.id)?.loggedIn !== false;
   for (const a of listed.agents) {
     const adapter = agents.getAdapter(a.id);
     if (adapter.doctorChecks) continue; // the open model, below
@@ -364,13 +380,10 @@ async function doctor(opts = {}) {
       continue;
     }
     add('ok', `${label} ${a.version || ''} (${a.path})`.replace(/ {2,}/g, ' '));
-    // (A saved API key counts as logged in: runs use it through a key proxy; listed below.)
-    const keyed = require('./agentkeys').AGENT_KEYS[a.id] ? (await require('./agentkeys').hasAgentKey(a.id, { config: ws.config })).stored : false;
-    if (adapter.loginStatus && !keyed) {
-      const st = adapter.loginStatus({ path: a.path, env, cwd: fs.existsSync(ws.home) ? ws.home : undefined });
-      if (st.loggedIn === true) add('ok', `${a.name} is logged in${st.detail ? ` (${st.detail})` : ''}`);
-      else if (st.loggedIn === false) add('warn', `${a.name} isn't logged in, so the side panel can't use it`, adapter.loginFix);
-    }
+    const st = logins.get(a.id);
+    if (st?.loggedIn === true) add('ok', `${a.name} is logged in${st.detail ? ` (${st.detail})` : ''}`);
+    else if (st?.loggedIn === false && a.id !== listed.default && defaultReady) add('info', `${a.name} isn't logged in (only needed if you pick it in the side panel)`, adapter.loginFix);
+    else if (st?.loggedIn === false) add('warn', `${a.name} isn't logged in, so the side panel can't use it`, adapter.loginFix);
   }
   // Open models through Codex (experimental, agents/codex-oss.js): set up in config.json `openModel`?
   const oss = listed.agents.find((a) => a.id === 'codex-oss');
@@ -401,7 +414,7 @@ function formatDoctor({ ok, checks }) {
   out.push('');
   const fails = checks.filter((c) => c.status === 'fail').length;
   const warns = checks.filter((c) => c.status === 'warn').length;
-  out.push(!ok ? `${fails} problem(s) found. Fix them in order (top first) and run trif doctor again.`
+  out.push(!ok ? `${plural(fails, 'problem')} found. Fix them in order (top first) and run trif doctor again.`
     : warns ? `No problems, but ${warns} warning${warns === 1 ? '' : 's'} above.` : 'All good.');
   return out.join('\n');
 }

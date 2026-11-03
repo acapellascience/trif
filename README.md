@@ -5,7 +5,8 @@ Safari), say what you want ("hide the trending sidebar", "only show people I fol
 writes a small mod that runs every time that site loads. Mods are plain JavaScript files on your computer; switch each one off
 and on from the side panel.
 
-TRIF uses the coding agent you already have (Claude Code or Codex), on your own account.
+TRIF uses the coding agent you already have (Claude Code or Codex), on your own account, or an open model
+through Codex (experimental: see [Open models](#open-models-experimental)).
 TRIF collects nothing: the only thing that ever reaches its developer is a problem report you choose to send.
 
 **Beta.** Expect rough edges, and please send feedback.
@@ -19,7 +20,7 @@ switches stay as they were; in Safari, install the new TRIF.app (see Safari belo
 ## What you need
 
 - A Mac (or Linux). Windows isn't supported yet.
-- Google Chrome 135 or newer (or Firefox 153, or Safari 27.2: see below).
+- Google Chrome 138 or newer (or Firefox 153, or Safari 27.2: see below).
 - Node 18 or newer: check with `node --version`, or install it from [nodejs.org](https://nodejs.org).
 - A coding agent: [Claude Code](https://claude.com/claude-code) (you can log in from the side panel), or
   [Codex](https://github.com/openai/codex) 0.138 or newer (`brew install codex`, then `codex login` in a terminal).
@@ -27,6 +28,8 @@ switches stay as they were; in Safari, install the new TRIF.app (see Safari belo
   agent and model). If you use an Anthropic or OpenAI API key instead of logging in, save it with `trif agent key --agent claude --set-key` (or `--agent codex`):
   it's kept in your Mac's Keychain, and TRIF adds it to the agent's requests itself, so neither the agent
   nor its commands ever get it. (A key you put in TRIF's `config.json` before moves there by itself.)
+  - Or an open model, on your computer or from a provider like OpenRouter, through Codex
+    (experimental): see [Open models](#open-models-experimental).
 
 ## Install
 
@@ -42,15 +45,17 @@ switches stay as they were; in Safari, install the new TRIF.app (see Safari belo
    npx --yes --package ./trif-0.2.0.tgz trif setup
    ```
 
-   This creates `~/.trif` (your mods live in `~/.trif/sites`) and connects it to Chrome. It's safe to
-   run again.
+   npx asks once whether to install the `trif` package: type `y`. This creates `~/.trif` (your mods
+   live in `~/.trif/sites`) and connects it to Chrome. It's safe to run again. On a Mac it then shows the
+   extension folder in Finder and opens `chrome://extensions` in Chrome, and waits, saying as each of
+   the next steps gets done (Ctrl-C skips that).
 
-2. **Add the extension to Chrome.** Open `chrome://extensions`, turn on **Developer mode** (top right),
-   click **Load unpacked**, and choose `~/.trif/app/extension`. (On a Mac, press ⌘⇧. in the file picker
-   to show hidden folders like `.trif`.)
+2. **Add the extension to Chrome.** On `chrome://extensions`, turn on **Developer mode** (top right),
+   then drag the `extension` folder from the Finder window onto the page. (Or click **Load unpacked**,
+   press ⌘⇧G and paste: setup put the folder's path, `~/.trif/app/extension`, on your clipboard.)
 
-3. **Allow it to run mods.** On `chrome://extensions`, click **Details** under TRIF and turn on
-   **Allow User Scripts**.
+3. **Allow it to run mods.** On the **TRIF setup** tab that opens, click **Open TRIF’s Chrome
+   settings** and turn on **Allow User Scripts**.
 
 4. **Open the side panel.** Click the TRIF icon in the toolbar (pin it from the puzzle-piece menu). If
    it asks you to log in to Claude, click **Log in** and follow the steps.
@@ -58,21 +63,25 @@ switches stay as they were; in Safari, install the new TRIF.app (see Safari belo
 ### Firefox
 
 TRIF also runs in Firefox 153 or newer. Open Firefox once before running `npx trif setup`, so setup
-finds it (or run `npx trif setup --browser firefox`). Then open the signed `trif-firefox.xpi` you were
-sent in Firefox to install the add-on, click the TRIF toolbar button to open the sidebar, and click
-**Allow user scripts**. Restart Firefox if it was open during setup.
+finds it (or run `npx trif setup --browser firefox`). Then open
+[trif-firefox.xpi](https://github.com/acapellascience/trif/releases/latest/download/trif-firefox.xpi)
+in Firefox and click **Add** to install the add-on (if Firefox downloads it instead, drag the file onto
+a Firefox window). On the TRIF tab Firefox opens, click **Allow user scripts** (the TRIF sidebar, from
+its toolbar button, offers it too).
+Restart Firefox if it was open during setup.
 
 Chrome and Firefox can both be open: they share your mods, and each sidebar or side panel chat works
 on its own browser. Switching a mod off is per browser.
 
 ### Safari (Mac, test builds)
 
-TRIF runs in Safari 27.2 or newer on a Mac. Until it's signed by Apple it only runs on the Mac it was
-built on, so for now this is for trying it out:
+TRIF runs in Safari 27.2 or newer on a Mac. It isn't available as a download yet: you build it from a
+checkout of this repo, and until it's signed by Apple it only runs on the Mac it was built on. So for now
+this is for trying it out:
 
 1. From a checkout of this repo, `node scripts/build-safari.js` (needs Xcode) makes
    `dist/safari-app/TRIF.app`. Open it once: it adds the TRIF extension to Safari.
-2. `~/.trif/bin/trif setup --browser safari` starts the Safari bridge, a small background program
+2. `npx trif setup --browser safari` starts the Safari bridge, a small background program
    Safari's extension talks to (Safari can't start the helper itself the way Chrome does). It starts again
    whenever you log in.
 3. In Safari: Settings → Advanced, tick "Show features for web developers"; Settings → Developer, tick

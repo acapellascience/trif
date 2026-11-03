@@ -6,7 +6,7 @@ const P = require('./paths');
 
 const COMMANDS = {
   setup: {
-    usage: 'trif setup [--browser chrome|chromium|brave|edge|arc|firefox|safari|all] [--home DIR] [--copy|--link] [--no-link] [--no-examples]',
+    usage: 'trif setup [--browser chrome|chromium|brave|edge|arc|firefox|safari|all] [--home DIR] [--copy|--link] [--no-link] [--no-examples] [--verbose] [--no-wait]',
     summary: 'install the workspace, native messaging host and CLI link (safe to re-run)',
     details: `First time: npx trif setup   (needs Node 18 or newer).
 Creates the workspace (~/.trif, unless --home or TRIF_HOME says otherwise; a ~/.webmods from before 0.2.0,
@@ -21,7 +21,9 @@ and bin/trif wrappers with an absolute node path (and the same as bin/webmods-ho
 names before 0.2.0), writes the native messaging host manifest for each
 browser (default: every browser whose profile folder exists) allowing every TRIF extension ID (plus
 any in config.json "extensionIds"), and symlinks /usr/local/bin/trif when that folder is writable.
-Prints next steps, including the extension folder to load in Chrome.
+Prints a short summary, any problems, and the next steps, including the extension folder to load in
+Chrome; --verbose (-v) prints every detail instead of the summary. At a terminal it then waits for the
+browser and says as each step gets done (Ctrl-C or --no-wait skips that).
 Where the wrappers point:
   --copy     copy helper/, extension/ and examples/ into <home>/app and run that copy (the default
              unless run from a git checkout; npx's own folder is a cache npm may delete). Updates swap

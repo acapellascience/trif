@@ -53,7 +53,7 @@ FEATURES
 • Open models (experimental): run your agent on a model on your own computer (Ollama, LM Studio) or from a provider like OpenRouter, through Codex
 
 REQUIREMENTS (PRIVATE BETA)
-• Chrome 135 or later on macOS or Linux
+• Chrome 138 or later on macOS or Linux
 • The free TRIF helper, installed on your computer with one terminal command (instructions: <HELPER INSTALL URL>). The extension uses the helper to talk to your coding agent and to read your mods folder
 • A coding agent: Claude Code or OpenAI Codex, logged in with your own account or with your own API key (kept in your computer's keychain)
 • Chrome's "Allow User Scripts" switch turned on for TRIF. The setup page that opens after install walks you through it

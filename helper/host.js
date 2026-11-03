@@ -61,6 +61,7 @@ const GRACE_MS = Number(envVar('TIMEOUT_GRACE')) >= 0 && envVar('TIMEOUT_GRACE')
   ? Number(envVar('TIMEOUT_GRACE')) : 5000;
 const DEFAULT_TIMEOUT_MS = 30000 + GRACE_MS; // 35 s with the default grace
 const DEBOUNCE_MS = 150;
+const LOADS_PAGE = new Set(['reload', 'navigate', 'open']);
 const POLL_MS = 2000;
 const SECONDARY_CHECK_MS = 500;
 
@@ -894,7 +895,10 @@ function onClientLine(sock, line) {
     return;
   }
 
-  // Everything else is a page command for the extension.
+  // Everything else is a page command for the extension. One that loads a page: a mod file changed since
+  // the last sync (written just before `trif reload`, inside the 150 ms debounce, or before the watcher
+  // fired) goes to the extension first, which registers it before loading the page (background.js).
+  if (LOADS_PAGE.has(cmd) && fingerprint() !== state.lastFingerprint) syncMods(`before ${cmd}`, false);
   const extId = `h${++requestCounter}`;
   const timeoutMs = typeof args.timeout === 'number' && args.timeout > 0 ? args.timeout + GRACE_MS : DEFAULT_TIMEOUT_MS;
   try {

@@ -12,22 +12,31 @@
 // back. It's in no storage here, no log and no message but that one; the field is emptied once it's sent,
 // whatever the answer. The panel only learns whether a key is saved (`hasKey`). Saved, the row says so,
 // with Replace (which brings the field back, with Cancel) and Remove; not saved, it's the field.
+//
+// A provider that needs a key (OpenRouter) and none saved: the open model can't run, which the panel
+// shows like a logged-out agent (openModelKeyMissing). So while it's the chosen agent the settings are
+// loaded even with Settings closed (watchOpenModel), and the panel hears of every change (onData).
 
 const AGENT = 'codex-oss';
 const $ = (sel) => document.querySelector(sel);
 
 let request = null;
 let onProviderChange = () => {};
+let onData = () => {};
 let data = null; // agent.openModel result
 let loading = false;
 let busy = false; // saving or removing the key
 let replacing = false; // a key is saved and Replace was clicked: the field shows until saved or cancelled
 let ui = null;
 
-/** Wire the controls once. request: the panel's request(); onChange: after the provider changes. */
-export function mountOpenModel({ request: req, onChange }) {
+/**
+ * Wire the controls once. request: the panel's request(); onChange: after the provider changes;
+ * changed: whenever what openModelKeyMissing says may have changed.
+ */
+export function mountOpenModel({ request: req, onChange, changed }) {
   request = req;
   onProviderChange = onChange || (() => {});
+  onData = changed || (() => {});
   ui = {
     box: $('#open-model'), provider: $('#om-provider'), urlRow: $('#om-url-row'), url: $('#om-url'),
     keyRow: $('#om-key-row'), key: $('#om-key'), keySave: $('#om-key-save'), keyRemove: $('#om-key-remove'), keyStatus: $('#om-key-status'),
@@ -54,6 +63,7 @@ async function load() {
   try { data = await request({ type: 'agent.openModel' }); data.error = null; } catch (e) { data = { error: String(e?.message ?? e) }; }
   loading = false;
   paint();
+  onData();
   if (data?.openModel) await syncProvider(data.openModel.provider);
 }
 
@@ -78,6 +88,7 @@ async function save(patch, providerChanged = false) {
   try {
     data = { ...(await request({ type: 'agent.openModel.set', ...patch })), error: null };
     paint();
+    onData();
     if (providerChanged) await syncProvider(data.openModel.provider, true);
   } catch (e) {
     showError(String(e?.message ?? e));
@@ -96,6 +107,7 @@ async function saveKey() {
     busy = false;
     replacing = false;
     paint();
+    onData();
   } catch (e) {
     busy = false;
     paint();
@@ -117,11 +129,26 @@ async function removeKey() {
     data = { ...(await request({ type: 'agent.openModel.removeKey' })), error: null };
     busy = false;
     paint();
+    onData();
   } catch (e) {
     busy = false;
     paint();
     paintKey(`Couldn’t remove the key: ${String(e?.message ?? e)}`, true);
   }
+}
+
+/**
+ * The provider's name when the open model needs an API key and none is saved ("OpenRouter"), else null
+ * (also while the settings aren't loaded yet).
+ */
+export function openModelKeyMissing() {
+  if (!data?.effective?.keyRequired || data.hasKey || data.key?.error) return null;
+  return (data.providers || []).find((p) => p.id === data.effective.provider)?.label || 'the provider';
+}
+
+/** Load the settings (once; `fresh`: again) while the open model is the chosen agent, Settings open or not. */
+export function watchOpenModel(agentId, connected, fresh = false) {
+  if (agentId === AGENT && connected && (fresh || !data)) load();
 }
 
 /** Show the block when the chosen agent is the open model (and the helper is connected). */

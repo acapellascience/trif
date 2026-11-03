@@ -244,6 +244,18 @@ function createBridge(opts = {}) {
   return { server, hosts };
 }
 
+const CODE_CHECK_MS = 30000;
+
+/**
+ * Whether the bridge should exit to restart on new code: its code is newer than when it started, no host
+ * has a connection (Safari's background is away) and no agent run is going.
+ */
+function shouldRestart({ hosts, runActive, startedCode, stamp }) {
+  if ([...hosts.values()].some((h) => h.socket && !h.socket.destroyed)) return false;
+  if (runActive()) return false;
+  return stamp() > startedCode;
+}
+
 /** Whether any agent run is going (host.js lists them in <home>/active-runs). */
 function agentRunActive(home) {
   try { return fs.readdirSync(path.join(home, 'active-runs')).some((f) => f.endsWith('.json')); } catch { return false; }
@@ -264,7 +276,21 @@ function main() {
   const at = process.argv.indexOf('--port');
   const port = at > 0 ? Number(process.argv[at + 1]) : PORT;
   const token = () => { try { return fs.readFileSync(ws.safariToken, 'utf8').trim() || null; } catch { return null; } };
-  const { server } = createBridge({ log, runActive: () => agentRunActive(ws.home), token });
+  const runActive = () => agentRunActive(ws.home);
+  const { server, hosts } = createBridge({ log, runActive, token });
+  // Like host.js: when TRIF's code changes on disk (an update), the bridge exits once nothing is connected
+  // and no agent run is going, and launchd (KeepAlive) starts it again on the new code.
+  const { codeStamp } = require('./lib/helpers');
+  const startedCode = codeStamp(__dirname);
+  const codeCheck = setInterval(() => {
+    if (!shouldRestart({ hosts, runActive, startedCode, stamp: () => codeStamp(__dirname) })) return;
+    log.info('safari bridge: its code changed on disk; exiting so launchd starts it on the new code');
+    clearInterval(codeCheck);
+    for (const h of hosts.values()) { try { h.child.stdin.end(); } catch {} }
+    server.close();
+    setTimeout(() => process.exit(0), 500).unref();
+  }, CODE_CHECK_MS);
+  codeCheck.unref?.();
   server.on('error', (e) => {
     log.error(`safari bridge: ${e.code === 'EADDRINUSE' ? `port ${port} is in use (is the bridge already running?)` : e.message}`);
     process.exit(1);
@@ -273,4 +299,4 @@ function main() {
 }
 
 if (require.main === module) main();
-module.exports = { createBridge, allowed, wsFrame, WsReader, agentRunActive, ALLOWED_ORIGIN, PORT };
+module.exports = { createBridge, allowed, wsFrame, WsReader, agentRunActive, shouldRestart, ALLOWED_ORIGIN, PORT };

@@ -12,7 +12,7 @@ const os = require('os');
 const path = require('path');
 const { envVar } = require('./env');
 const P = require('./paths');
-const { selectBrowsers, SAFARI_AGENT_LABEL, LEGACY_SAFARI_AGENT_LABEL, safariAgentPlist, legacySafariAgentPlist } = require('./browsers');
+const { selectBrowsers, SAFARI_AGENT_LABEL, LEGACY_SAFARI_AGENT_LABEL, safariAgentPlist, legacySafariAgentPlist, legacySafariAgentLoaded } = require('./browsers');
 const { migrateHome, describeMigration, migratePrivate } = require('./migrate');
 const { preinstallMods, updateShippedMods } = require('./preinstalled');
 const { acquireInstallLock, pidAlive } = require('./lock');
@@ -338,6 +338,21 @@ function setup(opts = {}) {
   const home = ws.home;
   let ok = true;
 
+  // 0a. The Safari bridge from before 0.2.0 (dev.webmods.safari-bridge): it writes its errors into the
+  // workspace and wants the same port as its replacement, so it's stopped now, before the private files
+  // move (unless this setup runs inside one of its hosts, an update installed from Safari: stopping it
+  // would stop this setup; loadSafariAgent stops it a few seconds later instead), and replaced below
+  // whatever browsers this setup is for.
+  const legacyPlist = opts.launchAgentsDir ? path.join(path.resolve(opts.launchAgentsDir), path.basename(legacySafariAgentPlist())) : legacySafariAgentPlist();
+  const useLaunchctl = opts.launchctl !== false && !envVar('NO_LAUNCHCTL');
+  const legacyLoaded = useLaunchctl && legacySafariAgentLoaded();
+  const legacySafari = legacyLoaded || fs.existsSync(legacyPlist);
+  if (legacyLoaded && !envVar('SAFARI_BRIDGE')) {
+    const { spawnSync } = require('child_process');
+    const r = spawnSync('launchctl', ['bootout', `gui/${process.getuid()}/${LEGACY_SAFARI_AGENT_LABEL}`], { encoding: 'utf8' });
+    say(r.status === 0 ? `Safari bridge stopped the one from before 0.2.0 (${LEGACY_SAFARI_AGENT_LABEL})` : `Safari bridge couldn't stop the one from before 0.2.0 (${LEGACY_SAFARI_AGENT_LABEL}): ${(r.stderr || '').trim()}`);
+  }
+
   // 0b. The helper's private files leave the workspace (0.2.0; migrate.js migratePrivate): runs may read
   // all of the workspace, never the private folder.
   const priv = migratePrivate(home, { privateDir: ws.private });
@@ -457,6 +472,10 @@ function setup(opts = {}) {
       say('browsers      no browser profile folder found; installing for Google Chrome anyway');
       targets = selectBrowsers('chrome');
     }
+    if (legacySafari && !targets.some((t) => t.safari)) {
+      say('browsers      also Safari: its bridge from before 0.2.0 was installed, and is replaced by the new one');
+      targets.push(...selectBrowsers('safari'));
+    }
   }
   const origins = P.extensionOrigins(ws.config);
   const manifests = [];
@@ -482,9 +501,8 @@ function setup(opts = {}) {
         manifests.push({ browser: t.key, file: plist });
         say(`Safari bridge ${plist} -> ${bridgeJs} (${how})`);
         // The agent from before 0.2.0: loadSafariAgent stops it; its file goes now.
-        const oldPlist = opts.launchAgentsDir ? path.join(path.resolve(opts.launchAgentsDir), path.basename(legacySafariAgentPlist())) : legacySafariAgentPlist();
-        if (fs.existsSync(oldPlist)) { fs.rmSync(oldPlist, { force: true }); say(`              removed ${oldPlist} (its name before 0.2.0)`); }
-        if (opts.launchctl !== false && !envVar('NO_LAUNCHCTL')) {
+        if (fs.existsSync(legacyPlist)) { fs.rmSync(legacyPlist, { force: true }); say(`              removed ${legacyPlist} (its name before 0.2.0)`); }
+        if (useLaunchctl) {
           const { error, later } = loadSafariAgent(plist, { changed: how !== 'unchanged' });
           if (error) { ok = false; say(`              FAILED to start it: ${error}`); }
           else if (later) say('              restarting in a few seconds, onto this version');

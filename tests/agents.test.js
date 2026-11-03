@@ -1247,6 +1247,18 @@ test('in a run: screenshot -o NAME saves in the run\'s screenshots folder, other
   await waitDone(ext, r.result.runId);
 });
 
+test('private files that reappear in the workspace during a run (an old helper\'s log) are moved out when it ends', async () => {
+  const { home, bin } = makeHome();
+  const ext = startHost(home);
+  await ext.waitForSocket();
+  const r = await extRequest(ext, 'agent.start', { ...START, prompt: 'SLEEP' });
+  await waitFor(() => callFor(bin, 'SLEEP'), { message: 'the agent to start' });
+  fs.writeFileSync(path.join(home, 'helper.log'), 'an older helper still logging here\n');
+  await extRequest(ext, 'agent.stop', { runId: r.result.runId });
+  await waitDone(ext, r.result.runId);
+  await waitFor(() => !fs.existsSync(path.join(home, 'helper.log')), { message: 'helper.log moved out of the workspace' });
+});
+
 test('recording a run switched on goes off when that run ends; the user\'s own recording stays', async () => {
   const { home, bin } = makeHome();
   const ext = startHost(home);

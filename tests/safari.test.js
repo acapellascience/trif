@@ -519,4 +519,28 @@ test('setup --browser safari installs the bridge\'s login item and gives Safari\
   assert.equal(upgrade.code, 0, upgrade.stderr + upgrade.stdout);
   assert.ok(!fs.existsSync(oldPlist));
   assert.ok(fs.existsSync(plist));
+  // Also when setup runs for another browser (a 0.1.x updater installing from Chrome): the old bridge
+  // isn't left running, nor Safari without one.
+  fs.rmSync(plist);
+  fs.writeFileSync(oldPlist, '<plist/>');
+  const fromChrome = await runCli(['setup', '--browser', 'chrome', '--no-link', '--no-examples'], { home });
+  assert.equal(fromChrome.code, 0, fromChrome.stderr + fromChrome.stdout);
+  assert.match(fromChrome.stdout, /also Safari: its bridge from before 0\.2\.0 was installed/);
+  assert.ok(!fs.existsSync(oldPlist));
+  assert.ok(fs.existsSync(plist));
+  // doctor warns about an old bridge still installed.
+  fs.writeFileSync(oldPlist, '<plist/>');
+  const doc = await runCli(['doctor'], { home });
+  assert.match(doc.stdout, /the bridge from before 0\.2\.0 \(dev\.webmods\.safari-bridge\) is still installed/);
+});
+
+test('the Safari bridge exits to restart on new code only when nothing is connected and no run is going', () => {
+  const { shouldRestart } = require('../helper/safari-bridge');
+  const hosts = new Map([['o', { socket: { destroyed: false } }]]);
+  const base = { hosts, runActive: () => false, startedCode: 100, stamp: () => 200 };
+  assert.equal(shouldRestart(base), false, 'connected');
+  hosts.get('o').socket = null;
+  assert.equal(shouldRestart(base), true);
+  assert.equal(shouldRestart({ ...base, runActive: () => true }), false, 'a run is going');
+  assert.equal(shouldRestart({ ...base, stamp: () => 100 }), false, 'same code');
 });

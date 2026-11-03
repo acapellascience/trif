@@ -335,6 +335,12 @@ function migratePrivate(home, { privateDir = P.privateDir(home), now = new Date(
     } else if (s.isFile() && d.isFile() && sameFile(from, to)) {
       fs.rmSync(from, { force: true });
       r.removed.push(path.relative(home, from));
+    } else if (name === 'safari-bridge.err' && s.isFile() && d.isFile()) {
+      // (An older bridge may still be writing it: its lines go on the end of the private one, then it goes.
+      // A writer that's still running writes on into the removed file, unseen; setup stops that bridge.)
+      try { fs.appendFileSync(to, fs.readFileSync(from)); } catch { /* the private one stays as it is */ }
+      fs.rmSync(from, { force: true });
+      r.removed.push(path.relative(home, from));
     } else if (DISPOSABLE.has(name)) {
       fs.rmSync(from, { recursive: true, force: true });
       r.removed.push(path.relative(home, from));

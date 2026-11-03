@@ -41,6 +41,18 @@ function legacySafariAgentPlist(homedir = os.homedir()) {
   return safariAgentPlist(homedir, LEGACY_SAFARI_AGENT_LABEL);
 }
 
+/**
+ * Whether launchd has the Safari bridge's agent from before 0.2.0 loaded (macOS; false where launchctl
+ * isn't to be used: elsewhere, or TRIF_NO_LAUNCHCTL=1, as in tests).
+ */
+function legacySafariAgentLoaded({ env = process.env, run } = {}) {
+  const { envVar } = require('./env');
+  if (process.platform !== 'darwin' || envVar('NO_LAUNCHCTL', env)) return false;
+  const { spawnSync } = require('child_process');
+  run = run || ((args) => spawnSync('launchctl', args, { encoding: 'utf8' }));
+  try { return run(['print', `gui/${process.getuid()}/${LEGACY_SAFARI_AGENT_LABEL}`]).status === 0; } catch { return false; }
+}
+
 function browserTable(homedir = os.homedir(), platform = process.platform) {
   const table = platform === 'darwin' ? MAC : LINUX;
   return Object.entries(table).map(([key, b]) => {
@@ -69,4 +81,4 @@ function selectBrowsers(choice, homedir, platform) {
   return out;
 }
 
-module.exports = { browserTable, selectBrowsers, ALL_KEYS, SAFARI_AGENT_LABEL, LEGACY_SAFARI_AGENT_LABEL, safariAgentPlist, legacySafariAgentPlist };
+module.exports = { browserTable, selectBrowsers, ALL_KEYS, SAFARI_AGENT_LABEL, LEGACY_SAFARI_AGENT_LABEL, safariAgentPlist, legacySafariAgentPlist, legacySafariAgentLoaded };

@@ -6,7 +6,7 @@ const path = require('path');
 const { envVar } = require('./env');
 const { spawnSync } = require('child_process');
 const P = require('./paths');
-const { browserTable, safariAgentPlist } = require('./browsers');
+const { browserTable, safariAgentPlist, legacySafariAgentPlist, legacySafariAgentLoaded, LEGACY_SAFARI_AGENT_LABEL } = require('./browsers');
 const { request } = require('./client');
 const { listHelpers, describeHelper } = require('./helpers');
 const { scanMods, planModsMessage } = require('./mods');
@@ -228,6 +228,14 @@ async function doctor(opts = {}) {
       else if (await portOpen(SAFARI_PORT)) add('ok', `Safari: the bridge is running (127.0.0.1:${SAFARI_PORT})`);
       else add('fail', `Safari: the bridge isn't running (nothing on 127.0.0.1:${SAFARI_PORT})`, `${fix}   (errors: ${ws.safariBridgeErr})`);
       if (!fs.existsSync(ws.safariToken)) add('fail', `Safari: the bridge's key ${ws.safariToken} is missing, so Safari can't connect`, fix);
+    }
+    // The bridge from before 0.2.0: wants the same port, and writes its errors into the workspace.
+    if (!opts.nativeDir) {
+      const legacyLoaded = legacySafariAgentLoaded();
+      if (legacyLoaded || fs.existsSync(legacySafariAgentPlist())) {
+        add('warn', `Safari: the bridge from before 0.2.0 (${LEGACY_SAFARI_AGENT_LABEL}) is still ${legacyLoaded ? 'running' : 'installed'}; it wants the new bridge's port and writes its errors into the workspace`,
+          `${setupFix} --browser safari   (replaces it)`);
+      }
     }
   }
 

@@ -823,6 +823,14 @@ class Runs {
     this._log(run, { webmods: 'done', ...done, exitCode: code, signal, stderrTail: run.stderr.slice(-4000), time: Date.now() });
     this.logger.info(`agent run ${run.id} done: ok=${done.ok} code=${code} signal=${signal} changed=${changedFiles.length}`);
     if (run.marked) markRunEnded(run.ws.home, run.id);
+    // Private files that reappeared in the workspace meanwhile (an older helper or bridge still running
+    // writes its log where it used to) go back to the private folder now, not only before the next run.
+    try {
+      if (privateLeftovers(run.ws.home).length) {
+        const m = migratePrivate(run.ws.home, { privateDir: run.ws.private });
+        for (const n of [...m.notes, ...m.errors]) this.logger.warn(`after agent run ${run.id}: ${n}`);
+      }
+    } catch (e) { this.logger.warn(`after agent run ${run.id}: couldn't check for private files in the workspace: ${e.message}`); }
     if (run.before) this.recent.push({ runId: run.id, site: run.site, scope: run.scope, before: run.before, locked: run.locked || [], startedAt: run.startedAt, until: Date.now() + RECENT_MS });
     this.runs.delete(run.id);
     if (this.bySite.get(run.site) === run.id) this.bySite.delete(run.site);

@@ -66,7 +66,7 @@ dependencies, no build step.**
    `preinstalled.json`, `origins.json`, `active-runs/`, `update.json`, `trash/`, `.shipped/`,
    `instructions.md`): run sandboxes keep them read-only. `readConfig` still reads a workspace
    `config.json` until it's moved. `trif doctor` warns about anything private left in the workspace.
-4. **Examples** (`examples/sites/<site>/<mod>.js`): ready-made mods (Plain X first). Setup copies them
+4. **Examples** (`examples/sites/<site>/<mod>.js`): ready-made mods (Timeline Detox, `x.com/plain-x`, first). Setup copies them
    into a new workspace (see "Native host installation") and later setups keep them up to date (see
    "Updates to shipped mods"); `trif install-example <site>/<mod>` copies one in by hand.
 
@@ -89,7 +89,7 @@ patch `fetch`/`XMLHttpRequest`, read React state, etc.). An optional header sets
 
 ```js
 // ==WebMod==
-// @name        Plain X
+// @name        Timeline Detox
 // @description Following-only, filtered X timeline
 // @match       https://x.com/*
 // @match       https://twitter.com/*
@@ -142,7 +142,7 @@ logs it and exits (the extension reconnects to a fresh one) instead of misreadin
 | `{type:"updated", from, to, notes}` | An update was installed. The extension keeps it in storage (`updated`) so the panel can say so after the reload. |
 | `{type:"reload", reason}` | The extension should `chrome.runtime.reload()`: <home>/app now holds a newer version (installed by this helper, another browser's, or `trif setup`). Chrome reloads the unpacked extension from the new files; either browser starts the new helper on reconnect. |
 
-`Mod = { id, site, file, name, description, matches:[…], excludes:[…], runAt:"document_start"|"document_end"|"document_idle", risk:{tier, why}|null, source, version, code, hash, held?, startOff?, origin?:{by, browser}, update?:{version, from, modified} }`
+`Mod = { id, site, file, name, description, matches:[…], excludes:[…], runAt:"document_start"|"document_end"|"document_idle", risk:{tier, why}|null, source, version, code, hash, held?, startOff?, origin?:{by, browser}, update?:{version, from, modified}, absorbs?:[id…] }`
 (`file` is the absolute path; `hash` is a sha1 of code+metadata so the extension can skip unchanged mods;
 `update`: a newer version of this shipped mod is waiting, see "Updates to shipped mods".)
 
@@ -616,13 +616,13 @@ builds a shorter report without it; `--open` opens the form with it filled in.
 
 ## Updates to shipped mods
 
-`helper/lib/preinstalled.js`. The preinstalled mods get fixes in later TRIF versions (Plain X when X
+`helper/lib/preinstalled.js`. The preinstalled mods get fixes in later TRIF versions (Timeline Detox when X
 changes). Every setup, which is also how an update installs, brings them to the user's copy without ever
 overwriting the user's own changes. Only examples whose header says `@source webmods` and that are in
 `PREINSTALLED` are managed.
 
 - **What was shipped.** `preinstalled.json` `shipped` = `{"<id>": {hash, version, pending?, declined?,
-  replaced?, own?}}`: `hash`/`version` are the sha1 and `@version` of the shipped version the user's copy
+  replaced?, own?}}` (or `{retired}`, see "Retired mods"): `hash`/`version` are the sha1 and `@version` of the shipped version the user's copy
   is based on, and `<home>/.shipped/<site>/<mod>.js` keeps that exact file (the merge base). `hash` is
   null for a copy edited before the record existed (its starting point is unknown). `own: true`: the
   user had their own file under that name before it was offered; never touched.
@@ -674,6 +674,30 @@ overwriting the user's own changes. Only examples whose header says `@source web
   (old `@version`) leave it waiting; runs on other sites never settle it. If the update was used, kept
   or settled otherwise meanwhile, the proposal is dropped. After a helper restart, Merge proposes again.
   `trif mod-update <id> --merged` settles it after a merge in a terminal.
+- **Retired mods.** A shipped mod can be folded into another one: `RETIRED` = `[{id, into, since}]`
+  (0.2.0: `www.google.com/hide-ai-mode` into `hide-ai-in-results`, AI Banisher; `hide-sponsored` into
+  `hide-extra-sections`, Just Results; both `since: "2"`). The merged mod keeps its id, so its switch,
+  sites, edits and `offered` entry carry over and its new version arrives as any update does; the
+  retired id leaves `PREINSTALLED` and `examples/` (its versions stay in `shipped-history.json`), so it's
+  never offered again. `retireShippedMods` runs after the updates in every setup, and after
+  `mod.update new` or a settled merge of an `into` mod. For each retired id the user was offered and
+  doesn't own:
+  - their copy is gone: `shipped[id] = {retired: {into}}`;
+  - edited (its sha1 isn't a shipped version, `hash` or `pending.hash`): untouched, still running, no
+    more updates: `{retired: {into, kept: true}}` (its pending update and `.shipped` files dropped).
+    Setup says once: "<name> (<id>) is now part of <into's name>. You changed your copy, so it's left as
+    it is: it keeps running, without updates. Delete it if <into's name> does what you need.";
+  - unchanged: to the trash (trash.js), `{retired: {into, trashed: "<file>"}}`, but only when `into` is
+    there, not `own`, with `hash` set and `version` ≥ `since` (an edited `into` with the merged version
+    still waiting, or kept, needs the old copy to keep doing its part). Setup says "<name> is now part of
+    <into's name>: the old copy is in the trash (trif restore <id> brings it back)". While "Use the new
+    version" of `into` can be undone, its `replaced.retired = [{id, rec}]` lets `mod.restore` bring
+    these back with their records.
+  Each mods message gives `into` `absorbs: [ids trashed]`. The extension (`applyAbsorbed`), the first time
+  it sees each such id and only if it isn't back in the mods, gives `into` the switch state "on if either
+  was on": unchanged if the old one was off; the old one's `disabled`/`offSites` if only it was on; both
+  on: off only on sites both were off on. It remembers that in chrome.storage.local `absorbed`, so after
+  that the switch is the user's. A new workspace just gets the merged mods.
 
 ## Repository layout
 

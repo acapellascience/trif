@@ -1,20 +1,32 @@
 // ==WebMod==
-// @name        Hide AI in Results
-// @description Hides the AI Overview (and its "Ask anything" box) and the AI Mode tab on Google results pages
+// @name        AI Banisher
+// @description Hides Google's AI: the AI Overview (and its "Ask anything" box) and the AI Mode tab on results pages, and the AI Mode button and Gemini promo in the search box
+// @match       https://www.google.com/
+// @match       https://www.google.com/?*
+// @match       https://www.google.com/webhp*
 // @match       https://www.google.com/search*
 // @run-at      document-start
 // @risk        0 render-only
 // @source      webmods
-// @version     1
+// @version     2
 // ==/WebMod==
 
 (() => {
   const style = document.createElement('style');
-  // On results pages, AI Mode is also a tab in the tab row: its link carries udm=50 (Google's AI Mode
-  // URL parameter), which is language-neutral, so hide the tab's listitem and any other link to it.
+  // Google's class names are generated, so these key on steadier things: a URL parameter, ids, jsname
+  // values and a custom tag. One stylesheet for the home page and results pages (both have the search
+  // box); each part is its own rule, so a selector one browser doesn't take can't drop the others.
   style.textContent = `
+    /* AI Mode. In the search box it's a button (jsname B6rgad). On results pages it's also a tab in the
+       tab row, whose link carries udm=50 (Google's AI Mode URL parameter, which is language-neutral):
+       hide the tab's listitem and any other link to it. */
+    button[jsname=B6rgad] { display: none !important; }
     [role=listitem]:has(a[href*="udm=50&"], a[href$="udm=50"]),
     a[href*="udm=50&"], a[href$="udm=50"] { display: none !important; }
+    /* The promo line under the search box's buttons (currently a Gemini ad), and its jsslot wrapper so
+       no empty gap is left. */
+    promo-middle-slot,
+    [jsslot]:has(> div > promo-middle-slot) { display: none !important; }
     /* AI Overview at the top of results, including its sticky "Ask anything" follow-up box: both live
        in #m-x-content. Google serves two layouts: the overview in its own block in #rcnt, next to
        #center_col, or as the first block inside #rso with the results. Never hide #center_col or #rso. */

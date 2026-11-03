@@ -15,6 +15,7 @@ const { makeFakeKeychain } = require('../fake-keychain');
 
 const REAL_HOME = os.userInfo().homedir;
 const SHIPPED_IDS = require('../../helper/lib/preinstalled').PREINSTALLED.map((p) => p.id || p);
+const { RETIRED } = require('../../helper/lib/preinstalled');
 
 // Files of the real setup the suite must never change: checked before and after (read only).
 const REAL_FILES = [
@@ -383,6 +384,20 @@ class Scenario {
         if (!/new version waiting/.test(s.out)) throw new Error('setup didn\'t say a new version is waiting');
         return `pending version ${rec.pending.version}`;
       });
+      // The shipped mods 0.2.0 folded into others (preinstalled.js RETIRED), unchanged here: in the trash.
+      const retired = RETIRED.filter((x) => fs.existsSync(path.join(oldPkg, 'examples', 'sites', `${x.id}.js`)));
+      if (retired.length) {
+        await this.r.check('upgrade: the shipped mods folded into others went to the trash', () => {
+          const pre = I.readJson(path.join(this.trif, 'preinstalled.json')) || {};
+          for (const { id, into } of retired) {
+            if (fs.existsSync(path.join(this.trif, 'sites', `${id}.js`))) throw new Error(`${id} is still in sites`);
+            const rec = (pre.shipped || {})[id];
+            if (!rec || !rec.retired || rec.retired.into !== into || !rec.retired.trashed) throw new Error(`${id}: ${JSON.stringify(rec)}`);
+            if (!fs.existsSync(path.join(this.trif, 'trash', id.split('/')[0], rec.retired.trashed))) throw new Error(`${id} isn't in the trash`);
+          }
+          return retired.map((x) => `${x.id.split('/')[1]} -> ${x.into.split('/')[1]}`).join(', ');
+        });
+      }
     }
     // Where setup put the browser's native host manifest: inside the scratch home.
     const manifest = o.browser === 'firefox'
@@ -523,6 +538,11 @@ class Scenario {
       if (this.o.kind === 'upgrade') {
         const u = list.find((m) => m.id === 'x.com/punk-fonts');
         if (!u || !u.update) throw new Error(`trif mods shows no update for x.com/punk-fonts: ${JSON.stringify(u)}`);
+        // The retired mods' switches were handed to the mods they went into (once; both on here).
+        const gone = RETIRED.filter((x) => !ids.has(x.id) && ((I.readJson(path.join(this.trif, 'preinstalled.json')) || {}).shipped || {})[x.id]?.retired?.trashed);
+        const { absorbed = {} } = await this.ext(`async () => chrome.storage.local.get('absorbed')`);
+        const missed = gone.filter((x) => absorbed[x.id] !== true || byId.get(x.into)?.enabled === false);
+        if (missed.length) throw new Error(`switches not carried over for ${missed.map((x) => x.id).join(', ')}: absorbed ${JSON.stringify(absorbed)}`);
       }
       return `${shipped.length} shipped (${shipped.filter((m) => byId.get(m.id)?.enabled !== false).length} on), sites on: ${st.sitesOn.join(', ')}`;
     });
@@ -643,8 +663,8 @@ class Scenario {
       await this.waitPanel('the panel back on 127.0.0.1', (x) => x.site === '127.0.0.1');
     });
 
-    // ---- Plain X against the X stand-in
-    await r.check('Plain X filters a saved X home timeline (fetch and XHR)', async () => {
+    // ---- Timeline Detox (x.com/plain-x) against the X stand-in
+    await r.check('Timeline Detox filters a saved X home timeline (fetch and XHR)', async () => {
       const xUrl = `https://x.com:${tlsPort}/home`;
       const xtab = await this.ext(`async (url, windowId) => (await chrome.tabs.create({ windowId, url, active: true })).id`, [xUrl, win.windowId]);
       this.xTab = xtab;
@@ -658,7 +678,7 @@ class Scenario {
       });
       await this.shot(ctx, 'plain-x');
       if (st.error) throw new Error(`the page failed: ${st.error}`);
-      if (!st.guard) throw new Error('Plain X didn\'t run (no window.__dmGuard)');
+      if (!st.guard) throw new Error('Timeline Detox didn\'t run (no window.__dmGuard)');
       const want = JSON.stringify(timeline.kept);
       if (JSON.stringify(st.fetch) !== want) throw new Error(`fetch got ${JSON.stringify(st.fetch)}, want ${want}`);
       if (JSON.stringify(st.xhr) !== want) throw new Error(`XHR got ${JSON.stringify(st.xhr)}, want ${want}`);
@@ -690,6 +710,7 @@ class Scenario {
     if (!this.o.oss) await r.check('open model key: saved, then Replace (and Cancel) and Remove', () => this.openModelKey());
     await this.sweepAndScreenshotChecks(base, win);
     if (this.o.kind === 'upgrade') await this.mergeChecks();
+    await r.check('AI Banisher and Just Results on the Google stand-ins (results and home page)', () => this.googleChecks(win));
     await this.ext(`async (id) => { await chrome.tabs.remove(id); }`, [this.xTab]).catch(() => {});
     await this.ext(`async (id) => { await chrome.tabs.update(id, { active: true }); }`, [win.tabId]).catch(() => {});
 
@@ -699,6 +720,41 @@ class Scenario {
     if (this.o.codex) await this.agentChecks('codex');
     if (this.o.oss) await this.agentChecks('oss');
     if (this.o.guidance) await this.guidanceComparison(base);
+  }
+
+  // ---- the shipped Google mods against the stand-ins (tests/e2e/lib/server.js): every data-e2e="hide…"
+  // element hidden, every "keep…" one still showing, in a background tab.
+  async googleChecks(win) {
+    const d = this.d;
+    const { tlsPort } = this.o.servers;
+    const out = [];
+    for (const [pathName, at] of [['/search?q=trif', 'results'], ['/', 'home']]) {
+      const url = `https://www.google.com:${tlsPort}${pathName}`;
+      const tab = await this.ext(`async (url, windowId) => (await chrome.tabs.create({ windowId, url, active: false })).id`, [url, win.windowId]);
+      try {
+        const ctx = await d.findPage((u) => u === url);
+        let st;
+        try {
+          st = await waitFor(`the mods on the Google ${at} page`, async () => {
+            const s = await d.eval(ctx, `async () => document.readyState === 'complete'
+              ? [...document.querySelectorAll('[data-e2e]')].map((e) => [e.dataset.e2e, e.getClientRects().length > 0]) : null`);
+            return s && s.length && s.every(([name, shown]) => name.startsWith('keep') === shown) ? s : null;
+          }, { timeoutMs: 15000 });
+        } catch (e) {
+          const s = await d.eval(ctx, `async () => [...document.querySelectorAll('[data-e2e]')].map((e) => [e.dataset.e2e, e.getClientRects().length > 0])`).catch(() => []);
+          const wrong = s.filter(([name, shown]) => name.startsWith('keep') !== shown).map(([name, shown]) => `${name} ${shown ? 'showing' : 'hidden'}`);
+          await this.shot(ctx, `google-${at}`);
+          throw new Error(`on the ${at} page: ${wrong.join(', ') || e.message}`);
+        }
+        await this.shot(ctx, `google-${at}`);
+        out.push(`${at}: ${st.filter(([n]) => n.startsWith('hide')).length} hidden, ${st.filter(([n]) => n.startsWith('keep')).length} kept`);
+      } finally {
+        await this.ext(`async (id) => { await chrome.tabs.remove(id); }`, [tab]).catch(() => {});
+      }
+    }
+    const errs = await this.cli(['errors', '--url', 'www.google.com'], { json: true });
+    if (errs.json && errs.json.length) throw new Error(`mod errors: ${JSON.stringify(errs.json)}`);
+    return out.join('; ');
   }
 
   // ---- --guidance: the same requests with the AGENTS.md from main and the one in this checkout, with
@@ -985,11 +1041,12 @@ class Scenario {
       const first = await this.waitLooks('the panel\'s status', (x) => !!x.dot && !/Checking/.test(x.dotLabel));
       const loggedOut = /isn’t logged in/.test(first.dotLabel);
       if (loggedOut) {
-        await r.check('agent not logged in, on the site\'s page: the greens turn yellow, the login notice shows', async () => {
+        await r.check('agent not logged in, on the site\'s page: the robot and power button turn yellow (mods stay green), the login notice shows', async () => {
           const x = await this.waitLooks('yellow', (l) => l.classes.join() === 'needs-login' && l.dot === 'dot warn');
-          const want = { rim: x.warn, power: x.warn, modSwitch: x.warn };
+          // Mods still run without a login, so their switches and lights stay green.
+          const want = { rim: x.warn, power: x.warn, modSwitch: x.green };
           for (const [k, v] of Object.entries(want)) if (!Scenario.same(x[k], v)) throw new Error(`${k} is ${x[k]}, not ${v}: ${JSON.stringify(x)}`);
-          if (x.light && !Scenario.same(x.light, x.warn)) throw new Error(`the running light is ${x.light}`);
+          if (x.light && !Scenario.same(x.light, x.green)) throw new Error(`the running light is ${x.light}`);
           if (!x.notices.some((t) => /isn’t logged in/.test(t))) throw new Error(`no login notice: ${x.notices}`);
           // F14: no sending into a run that can only fail with that; the button says why.
           if (!x.send.disabled || !/^Log in to .+ first$/.test(x.send.title)) throw new Error(`Send: ${JSON.stringify(x.send)}`);
@@ -1130,6 +1187,19 @@ class Scenario {
       // This site chat's own agent and model (the panel's Settings write the same).
       await this.ext(`async (model) => { const { sitePicks = {} } = await chrome.storage.local.get('sitePicks'); sitePicks['x.com'] = { agent: 'claude', models: { claude: model } }; await chrome.storage.local.set({ sitePicks }); }`, [model]);
     }
+    if (!this.o.agent) {
+      // Without your login the agent can't run, so the button waits for one (F14) and says why.
+      await r.check('Merge with my agent: waits for a login, and says so', async () => {
+        const b = await waitFor('the merge button', () => this.panel(`async () => {
+          const m = document.querySelector('li[data-mod="x.com/punk-fonts"] .mod-update .merge');
+          return m ? { disabled: m.disabled, title: m.title } : null;
+        }`), { timeoutMs: 10000 });
+        if (!b.disabled || !/^Log in to .+ first/.test(b.title)) throw new Error(JSON.stringify(b));
+        await this.shot(this.panelCtx, 'panel-merge-needs-login');
+        return `disabled: "${b.title}"`;
+      });
+      return;
+    }
     await r.check('Merge with my agent: one click starts it, while the panel keeps refreshing', async () => {
       // Busy the panel the way real use does (status refreshes, storage changes) right before the click.
       await this.panel(`async () => { for (let i = 0; i < 5; i++) { await chrome.storage.local.set({ e2eTick: i }); document.dispatchEvent(new Event('visibilitychange')); } }`);
@@ -1141,12 +1211,6 @@ class Scenario {
       await this.shot(this.panelCtx, 'panel-merge-started');
       return `chat: "${c.messages.find((m) => m.role === 'user').text}"`;
     });
-    if (!this.o.agent) {
-      // Without your login the run ends at once (not logged in); let it, so nothing writes to the browser
-      // as it closes.
-      await waitFor('the merge run to end', async () => { const x = await chat(); return x && !x.run ? x : null; }, { timeoutMs: 60000, intervalMs: 500 }).catch(() => {});
-      return;
-    }
     const done = (n0) => waitFor('the run to finish', async () => {
       const x = await chat();
       return x && !x.run && x.messages.length > n0 ? x : null;

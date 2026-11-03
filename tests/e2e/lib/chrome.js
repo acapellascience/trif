@@ -111,7 +111,7 @@ class ChromeDriver {
       '--disable-features=DisableLoadExtensionCommandLineSwitch',
       '--no-first-run', '--no-default-browser-check', '--disable-sync', '--disable-component-update',
       '--disable-background-networking', '--password-store=basic', '--use-mock-keychain',
-      '--host-resolver-rules=MAP x.com 127.0.0.1, MAP *.x.com 127.0.0.1',
+      '--host-resolver-rules=MAP x.com 127.0.0.1, MAP *.x.com 127.0.0.1, MAP www.google.com 127.0.0.1',
       '--ignore-certificate-errors',
       '--window-size=1280,900',
       'about:blank',

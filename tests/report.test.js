@@ -104,12 +104,33 @@ function sockRequest(sock, msg) {
   });
 }
 
+test('a Firefox add-on older than the helper is told to update itself; an unknown command says the add-on is behind', async (t) => {
+  const VERSION = require('../package.json').version;
+  const home = tempDir();
+  const ext = new FakeExtension({ home });
+  t.after(() => ext.close());
+  await ext.waitForSocket();
+  const since = ext.messages.length;
+  ext.send({ type: 'hello', version: '0.0.1', userScripts: true, chrome: '153', browser: 'Firefox' });
+  const u = await ext.next((m) => m.type === 'update', { since });
+  // (What an older panel already shows: "<latest> is available", with `why` under it.)
+  assert.equal(u.update.available, true);
+  assert.equal(u.update.latest, VERSION);
+  assert.equal(u.update.canInstall, false);
+  assert.match(u.update.why, /The Firefox add-on is still 0\.0\.1.*about:addons.*Check for Updates/);
+  ext.handlers.sweep = () => { throw new Error('unknown command: sweep'); };
+  const r = await sockRequest(ext.sock, { id: 's', cmd: 'sweep', args: { selector: 'a' } });
+  assert.equal(r.ok, false);
+  assert.match(r.error, /Firefox extension is version 0\.0\.1 and doesn't know `sweep` yet.*Check for Updates/);
+});
+
 test('the helper answers report.build and update.*, and tells the extension about updates on hello', async (t) => {
   const home = tempDir();
   const ext = new FakeExtension({ home });
   t.after(() => ext.close());
   await ext.waitForSocket();
-  ext.send({ type: 'hello', version: '0.1.1', userScripts: true, chrome: '153', browser: 'Firefox' });
+  const VERSION = require('../package.json').version;
+  ext.send({ type: 'hello', version: VERSION, userScripts: true, chrome: '153', browser: 'Firefox' });
   const u = await ext.next((m) => m.type === 'update');
   // The repo isn't an installed copy, so it can't update itself.
   assert.equal(u.update.canInstall, false);
@@ -119,7 +140,7 @@ test('the helper answers report.build and update.*, and tells the extension abou
   let r = await extRequest(ext, 'report.build', { site: 'x.com', siteOn: true, mods: [{ id: 'x.com/plain-x', enabled: true, registered: true }] });
   assert.equal(r.ok, true, r.error);
   assert.match(r.result.text, /^TRIF problem report/);
-  assert.match(r.result.text, /Browser {5}Firefox 153 \(extension 0\.1\.1\)/);
+  assert.match(r.result.text, new RegExp(`Browser {5}Firefox 153 \\(extension ${VERSION.replace(/\./g, '\\.')}\\)`));
   assert.match(r.result.text, /x\.com\/plain-x: on, running/);
   assert.equal(r.result.url, 'https://timsrobot.com/report');
   assert.equal(r.result.email, 'reports@timsrobot.com');

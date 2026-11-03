@@ -543,7 +543,21 @@ const UPDATE_EVERY_MS = 6 * 60 * 60 * 1000; // the feed itself is fetched at mos
 let updateTimers = [];
 
 function updateInfo(summary = update.summary(workspace(ws.home))) {
-  return { ...summary, installing: state.installing };
+  const info = { ...summary, installing: state.installing };
+  // The Firefox add-on updates on Firefox's schedule, so after an update it can lag behind the helper.
+  // Its panel (old or new) shows an available update with `why`, so that's how it's told.
+  const behind = extensionBehind();
+  if (behind && !info.available && !info.installing) Object.assign(info, { available: true, latest: VERSION, canInstall: false, why: behind, extensionBehind: true });
+  return info;
+}
+
+/** Why the extension is behind the helper (a message for its panel), or null. Firefox only. */
+function extensionBehind() {
+  const h = state.hello;
+  if (!h || h.browser !== 'Firefox' || !h.version) return null;
+  let older = false;
+  try { older = update.compareVersions(String(h.version), VERSION) < 0; } catch { return null; }
+  return older ? `The Firefox add-on is still ${h.version} (the helper is ${VERSION}): open about:addons, click the gear, then Check for Updates.` : null;
 }
 
 function sendUpdate(info = updateInfo()) {
@@ -900,7 +914,15 @@ function onExtensionResponse(msg) {
   clearTimeout(p.timer);
   if (p.cmd === 'record' && msg.ok) noteRecording(p.runId, msg.result);
   if (msg.ok) reply(p.sock, { id: p.clientId, ok: true, result: msg.result === undefined ? null : msg.result });
-  else reply(p.sock, { id: p.clientId, ok: false, error: String(msg.error ?? 'unknown error from extension') });
+  else {
+    let error = String(msg.error ?? 'unknown error from extension');
+    // A command an older extension doesn't know yet (sweep, say): say how to get the newer one.
+    if (/^unknown command\b/i.test(error) && state.hello?.version && state.hello.version !== VERSION) {
+      error = `the ${state.hello.browser || 'browser'} extension is version ${state.hello.version} and doesn't know \`${p.cmd}\` yet (the helper is ${VERSION})` +
+        (state.hello.browser === 'Firefox' ? ': update the add-on (about:addons, the gear, Check for Updates)' : state.hello.browser === 'Safari' ? ': build and open TRIF.app from this version' : ': reload TRIF on chrome://extensions');
+    }
+    reply(p.sock, { id: p.clientId, ok: false, error });
+  }
 }
 
 // ---------------------------------------------------------------- lifecycle

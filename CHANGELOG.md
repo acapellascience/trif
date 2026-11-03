@@ -37,6 +37,10 @@ needs a section here for the version it releases.
   where other programs could read it. Your agent can read your skill folders (read only), but never
   TRIF's settings, logs or other sites' screenshots, and one chat can't widen the next one's limits.
   `trif screenshot --copy` won't reload one-time links, and checks where the copy ends up.
+- **The mods that come with TRIF have new names.** Plain X is now **Timeline Detox**; on Instagram,
+  **Only Following** and **Hide AI**. On Google, four mods are now two: **AI Banisher** (no AI Overview,
+  AI Mode or Gemini promo) and **Just Results** (no sponsored results or extra sections). Each is on if
+  either of the two it replaces was. If you changed one of those, yours stays as it is.
 - New shipped mod: **DVD Logo** for Google (off until you switch it on).
 - The panel: "What should I fix on x.com?", a power button for the site, the robot with its eyes off
   where TRIF is off, and a mods list that scrolls on its own.

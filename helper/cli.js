@@ -462,7 +462,7 @@ const handlers = {
       out(`kept your ${r.id}; ${r.version ? `version ${r.version}` : 'this version'} won't be offered again (a later one will)`);
     } else {
       const rec = shipped.loadPreinstalled(ctx.ws.home).shipped[id];
-      if (!rec || !rec.pending || !shipped.resolveMerge(ctx.ws.home, id, rec.pending.hash)) throw new trash.TrashError(`there's no new TRIF version of ${id} waiting`);
+      if (!rec || !rec.pending || !shipped.resolveMerge(ctx.ws.home, id, rec.pending.hash, ctx.ws)) throw new trash.TrashError(`there's no new TRIF version of ${id} waiting`);
       if (ctx.json) return printJson({ id, choice: 'merged', version: rec.pending.version || null });
       out(`${id}: marked as merged with ${rec.pending.version ? `version ${rec.pending.version}` : 'the new version'}`);
     }

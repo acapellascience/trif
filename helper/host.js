@@ -27,7 +27,7 @@ const { Runs } = require('./lib/runs');
 const { Logins } = require('./lib/logins');
 const agents = require('./lib/agents');
 const { updateHeld, approveHeld, heldFile } = require('./lib/held');
-const { startOffIds, startSitesOn, pendingUpdates, useNewVersion, keepMine, mergeRequest, mergeSettled, restoreMod } = require('./lib/preinstalled');
+const { startOffIds, startSitesOn, pendingUpdates, useNewVersion, keepMine, mergeRequest, mergeSettled, restoreMod, absorbedIds } = require('./lib/preinstalled');
 const { readInstructions, writeInstructions, instructionsFile, MAX_LENGTH } = require('./lib/instructions');
 const { ownSock, removeStaleSockets, codeStamp } = require('./lib/helpers');
 const { loadOrigins, recordOrigins, activeRuns } = require('./lib/origins');
@@ -192,16 +192,21 @@ function syncMods(reason, force) {
   let updates = {};
   try { updates = pendingUpdates(ws.home, mods); } catch (e) { logger.warn(`shipped mod updates: ${e.message}`); }
   state.updates = updates;
+  // Shipped mods folded into this one whose old copy went to the trash: each browser carries their
+  // switches over, once (preinstalled.js retireShippedMods).
+  let absorbed = {};
+  try { absorbed = absorbedIds(ws.home); } catch (e) { logger.warn(`retired mods: ${e.message}`); }
   const sent = plan.mods.map((m) => {
     const out = state.held[m.id] ? { ...m, held: { site: state.held[m.id].site, reason: state.held[m.id].reason } } : m;
     const o = origins[m.id];
     const withOrigin = o ? { ...out, origin: { by: o.by, browser: o.browser } } : out;
     const withUpdate = updates[m.id] ? { ...withOrigin, update: updates[m.id] } : withOrigin;
-    return startOff.has(m.id) ? { ...withUpdate, startOff: true } : withUpdate;
+    const withAbsorbs = absorbed[m.id] ? { ...withUpdate, absorbs: absorbed[m.id] } : withUpdate;
+    return startOff.has(m.id) ? { ...withAbsorbs, startOff: true } : withAbsorbs;
   });
   // Sites TRIF starts on for (preinstalled.json): each browser turns each one on the first time it sees it.
   const sitesOn = startSitesOn(ws.home);
-  const signature = sent.map((m) => `${m.id}:${m.hash}${m.held ? ':held' : ''}${m.startOff ? ':off' : ''}${m.origin ? `:${m.origin.by}` : ''}${m.update ? `:update ${JSON.stringify(m.update)}` : ''}`).join('|') +
+  const signature = sent.map((m) => `${m.id}:${m.hash}${m.held ? ':held' : ''}${m.startOff ? ':off' : ''}${m.origin ? `:${m.origin.by}` : ''}${m.update ? `:update ${JSON.stringify(m.update)}` : ''}${m.absorbs ? `:absorbs ${m.absorbs.join(',')}` : ''}`).join('|') +
     `|sites:${sitesOn.join(',')}`;
   const errors = [...problems, ...plan.errors];
   const errorsChanged = JSON.stringify(errors) !== JSON.stringify(state.modErrors) || JSON.stringify(warnings) !== JSON.stringify(state.modWarnings);

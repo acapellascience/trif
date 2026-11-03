@@ -288,6 +288,39 @@ export function applyStartOff(mods, disabled = {}, startedOff = {}, installId = 
   return { disabled: d, startedOff: s, changed: true };
 }
 
+/**
+ * Shipped mods folded into another one (helper/lib/preinstalled.js retireShippedMods): the helper sends
+ * the ids whose old copy went to the trash as that mod's `absorbs`. The first time this browser sees each
+ * one, the mod it went into takes over its switch: on if either was on (and on a site, on there if either
+ * was). `absorbed` remembers that, so after it the switch is the user's. One that's back in the mods
+ * (restored from the trash) is only remembered: the two keep their own switches. Pure: returns
+ * {disabled, offSites, absorbed, changed} with new objects when something changed.
+ */
+export function applyAbsorbed(mods, disabled = {}, offSites = {}, absorbed = {}) {
+  const present = new Set((mods || []).map((m) => m?.id));
+  let d = disabled;
+  let o = offSites;
+  let a = absorbed;
+  let changed = false;
+  for (const m of mods || []) {
+    if (typeof m?.id !== 'string' || !Array.isArray(m.absorbs)) continue;
+    for (const old of m.absorbs) {
+      if (typeof old !== 'string' || a[old] === true) continue;
+      if (!changed) { d = { ...disabled }; o = { ...offSites }; a = { ...absorbed }; changed = true; }
+      a[old] = true;
+      if (present.has(old)) continue;
+      const was = { disabled: d[old] === true, offSites: o[old] || [] };
+      const mine = { disabled: d[m.id] === true, offSites: o[m.id] || [] };
+      const next = was.disabled ? mine // the old one was off: as it was
+        : mine.disabled ? was // only the old one was on: on, where it was
+          : { disabled: false, offSites: mine.offSites.filter((s) => was.offSites.includes(s)) }; // both: on wherever either was
+      if (next.disabled) d[m.id] = true; else delete d[m.id];
+      if (next.offSites.length) o[m.id] = next.offSites; else delete o[m.id];
+    }
+  }
+  return { disabled: d, offSites: o, absorbed: a, changed };
+}
+
 // ---- run scope ----------------------------------------------------------------------------------
 // Requests from a side-panel agent run carry args.scope, a registrable domain set by the helper
 // (helper/lib/scope.js, which these mirror): they may only touch tabs and URLs on that site.

@@ -2,7 +2,8 @@
 // A real upgrade: the updater of the last WebMods release (v0.1.2, from git), as installed by that
 // release's own setup in a scratch home, installs a package built from this checkout, the way a user's
 // panel "Update" button does it. Then the migration's results are checked: the move to ~/.trif and the
-// link left behind, TRIF's private files out of the workspace, the user's mod kept, the new wrappers.
+// link left behind, TRIF's private files out of the workspace, the user's mod kept, the new wrappers, and
+// the shipped mods: renamed ones updated, the ones folded into another retired (to the trash if unchanged).
 // Skipped when the tag isn't there (a shallow clone).
 
 const test = require('node:test');
@@ -68,6 +69,10 @@ test(`upgrade: the ${TAG} updater installs this checkout's package; everything m
   fs.mkdirSync(path.join(legacy, 'sites', 'example.com'), { recursive: true });
   fs.writeFileSync(path.join(legacy, 'sites', 'example.com', 'mine.js'), '// ==WebMod==\n// @match https://example.com/*\n// ==/WebMod==\nconsole.log("mine");\n');
   fs.appendFileSync(path.join(legacy, 'helper.log'), 'an old helper was here\n');
+  // A shipped mod 0.2.0 folds into another one, edited by the user (hide-ai-mode is left as shipped).
+  const google = path.join(legacy, 'sites', 'www.google.com');
+  assert.ok(fs.existsSync(path.join(google, 'hide-ai-mode.js')));
+  fs.appendFileSync(path.join(google, 'hide-sponsored.js'), '// the user changed this\n');
 
   // This checkout, packed at a newer version (as the next release would be).
   const src = path.join(root, 'src');
@@ -116,4 +121,20 @@ test(`upgrade: the ${TAG} updater installs this checkout's package; everything m
   // The new trif works on the moved workspace.
   const mods = sh(path.join(trif, 'bin', 'trif'), ['mods'], { cwd: home });
   assert.match(mods, /example\.com\/mine/);
+
+  // The shipped mods. Unchanged copies are the new versions (renamed: Timeline Detox; merged: AI Banisher,
+  // Just Results); the unchanged copy of a mod folded into another is in the trash; the edited one stays.
+  const sites = path.join(trif, 'sites');
+  for (const id of ['x.com/plain-x', 'www.instagram.com/following-only-feed', 'www.google.com/hide-ai-in-results', 'www.google.com/hide-extra-sections']) {
+    assert.strictEqual(fs.readFileSync(path.join(sites, `${id}.js`), 'utf8'), fs.readFileSync(path.join(REPO, 'examples', 'sites', `${id}.js`), 'utf8'), `${id}\n${info}`);
+  }
+  assert.match(fs.readFileSync(path.join(sites, 'x.com', 'plain-x.js'), 'utf8'), /@name +Timeline Detox\n/);
+  assert.match(fs.readFileSync(path.join(sites, 'www.google.com', 'hide-ai-in-results.js'), 'utf8'), /@name +AI Banisher\n/);
+  assert.ok(!fs.existsSync(path.join(sites, 'www.google.com', 'hide-ai-mode.js')), `hide-ai-mode.js is still there\n${info}`);
+  assert.deepStrictEqual(fs.readdirSync(path.join(trif, 'trash', 'www.google.com')).map((f) => f.replace(/@.*/, '')), ['hide-ai-mode']);
+  assert.match(fs.readFileSync(path.join(sites, 'www.google.com', 'hide-sponsored.js'), 'utf8'), /the user changed this/);
+  const pre = JSON.parse(fs.readFileSync(path.join(trif, 'preinstalled.json'), 'utf8'));
+  assert.deepStrictEqual(pre.shipped['www.google.com/hide-sponsored'], { retired: { into: 'www.google.com/hide-extra-sections', kept: true } });
+  assert.strictEqual(pre.shipped['www.google.com/hide-ai-mode'].retired.into, 'www.google.com/hide-ai-in-results');
+  assert.ok(pre.offered.includes('www.google.com/hide-ai-mode'), 'still counted as offered: never offered again');
 });

@@ -1694,6 +1694,54 @@ test('applyStartOff: a mod made in another browser is switched off once; own and
   assert.strictEqual(lib.applyStartOff(mods, {}, {}).changed, false, 'old 3-argument call: no foreign switching');
 });
 
+test('applyAbsorbed: a retired shipped mod hands its switch to the mod it went into, once: on if either was on', () => {
+  const INTO = 'www.google.com/hide-ai-in-results';
+  const OLD = 'www.google.com/hide-ai-mode';
+  const mods = [{ id: INTO, absorbs: [OLD] }, { id: 'x.com/plain' }];
+  const carry = (disabled, offSites = {}) => lib.applyAbsorbed(mods, disabled, offSites, {});
+  // Only the old one was on: the merged one comes on.
+  assert.deepStrictEqual(carry({ [INTO]: true, 'x.com/plain': true }),
+    { disabled: { 'x.com/plain': true }, offSites: {}, absorbed: { [OLD]: true }, changed: true });
+  // Both off: stays off. Old one off, merged one on: stays on. Both on: on.
+  assert.deepStrictEqual(carry({ [INTO]: true, [OLD]: true }).disabled, { [INTO]: true, [OLD]: true });
+  assert.deepStrictEqual(carry({ [OLD]: true }).disabled, { [OLD]: true });
+  assert.deepStrictEqual(carry({}).disabled, {});
+  // Per site: on wherever either was on.
+  assert.deepStrictEqual(carry({}, { [INTO]: ['google.com', 'google.ca'], [OLD]: ['google.com'] }).offSites,
+    { [INTO]: ['google.com'], [OLD]: ['google.com'] });
+  assert.deepStrictEqual(carry({ [INTO]: true }, { [OLD]: ['google.ca'] }).offSites, { [OLD]: ['google.ca'], [INTO]: ['google.ca'] });
+  assert.deepStrictEqual(carry({}, { [INTO]: ['google.ca'] }).offSites, {});
+  // Once: after that the switch is the user's.
+  const disabled = { [INTO]: true };
+  const again = lib.applyAbsorbed(mods, disabled, {}, { [OLD]: true });
+  assert.strictEqual(again.changed, false);
+  assert.strictEqual(again.disabled, disabled);
+  // The old one back (restored from the trash): only remembered; each keeps its own switch.
+  const back = lib.applyAbsorbed([...mods, { id: OLD }], { [INTO]: true }, {}, {});
+  assert.deepStrictEqual(back, { disabled: { [INTO]: true }, offSites: {}, absorbed: { [OLD]: true }, changed: true });
+  assert.strictEqual(lib.applyAbsorbed([{ id: 'a/b' }], {}, {}, {}).changed, false);
+});
+
+test('background: a retired shipped mod\'s switch carries over to the mod it went into, once', async () => {
+  const INTO = 'www.google.com/hide-extra-sections';
+  const OLD = 'www.google.com/hide-sponsored';
+  // The user had switched the merged one off and kept the old one on.
+  const bg = await loadBackground({ storage: { sitesOn: ['google.com'], disabled: { [INTO]: true }, mods: [mod(INTO), mod(OLD)] } });
+  try {
+    bg.native.emit({ type: 'mods', mods: [mod(INTO, { absorbs: [OLD] })] });
+    await settle(30);
+    assert.deepStrictEqual(bg.store.disabled, {});
+    assert.deepStrictEqual(bg.store.absorbed, { [OLD]: true });
+    assert.ok(scriptIds(bg).includes(INTO));
+    // Switched off again: stays off.
+    const r = await bg.native.call('mod.enable', { id: INTO, enabled: false });
+    assert.strictEqual(r.ok, true, r.error);
+    bg.native.emit({ type: 'mods', mods: [mod(INTO, { absorbs: [OLD], hash: 'h2' })] });
+    await settle(30);
+    assert.deepStrictEqual(bg.store.disabled, { [INTO]: true });
+  } finally { bg.restore(); }
+});
+
 test('background: the hello carries an install id that persists across a service worker restart', async () => {
   // Every hello on this instance's native ports (an earlier test's background may reconnect onto the
   // newest chrome mock under load, so natives[0] isn't necessarily ours).

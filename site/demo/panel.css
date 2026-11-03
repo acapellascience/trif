@@ -1,0 +1,31 @@
+/* The homepage demo's additions to the real side panel (shim.js adds the "Recorded chats" box). */
+
+/* The panel's own suggestions ("Hide distractions"…) would only get "this demo replays recordings":
+   the recorded prompts below take their place. */
+#empty .chips { display: none; }
+
+.demo-replays {
+  flex: none;
+  margin: 2px 12px 0;
+  padding: 7px 10px;
+  border: 1px dashed var(--line);
+  border-radius: var(--radius);
+}
+.demo-replays summary {
+  cursor: pointer;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 500;
+}
+.demo-replays summary::marker { color: var(--faint); }
+.demo-chips {
+  margin-top: 7px;
+  max-height: 20vh;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-width: thin;
+}
+.demo-chips .chip { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-align: left; }
+.demo-chips .chip:disabled { opacity: 0.5; cursor: default; }
+.demo-note { margin: 0; color: var(--muted); font-size: 12px; }
+body:is(.site-off, .no-site) .demo-replays { display: none; }

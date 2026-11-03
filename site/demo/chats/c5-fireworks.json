@@ -1,0 +1,46 @@
+{
+ "id": "c5-fireworks",
+ "prompt": "fireworks! every click launches a firework from the bottom of the screen that bursts where I clicked. and the Get it button sprays confetti when I hover it",
+ "secs": 57,
+ "mods": [
+  "fireworks"
+ ],
+ "after": [],
+ "messages": [
+  {
+   "role": "user",
+   "text": "fireworks! every click launches a firework from the bottom of the screen that bursts where I clicked. and the Get it button sprays confetti when I hover it",
+   "t": 0
+  },
+  {
+   "role": "tool",
+   "text": "ran cat instructions.md 2>/dev/null; ls sites/timsrobot.com 2>/dev/null; trif run 'return [...document.querySelectorAll(\"a,button\")].filter(e=>/get it/i.test(e.textContent)).map(e=>({tag:e.tagName,text:e.textContent.trim(),href:e.getAttribut…",
+   "t": 3393
+  },
+  {
+   "role": "tool",
+   "text": "ran trif new timsrobot.com fireworks; trif status | tail -15",
+   "t": 8436
+  },
+  {
+   "role": "tool",
+   "text": "wrote sites/timsrobot.com/fireworks.js",
+   "t": 33712
+  },
+  {
+   "role": "tool",
+   "text": "ran trif check timsrobot.com/fireworks && trif reload >/dev/null && trif run 'document.documentElement.dispatchEvent(new PointerEvent(\"pointerdown\",{bubbles:true,clientX:400,clientY:200,button:0})); const b=[...document.query…",
+   "t": 38028
+  },
+  {
+   "role": "tool",
+   "text": "read ~/Library/Application Support/TRIF/screenshots/timsrobot.com/fw.png",
+   "t": 40776
+  },
+  {
+   "role": "assistant",
+   "text": "I added a new mod, **timsrobot.com/fireworks**. It's on now.\n\n- **Every click** sends a rocket up from the bottom of the screen with a sparkly trail. It slows near the top and bursts where you clicked, with a flash and coloured sparks that fall slowly. Some bursts are rings and some sparks twinkle.\n- **Hovering \"Get it\"** sprays confetti out of the button for as long as your mouse is on it.\n- Your clicks still work normally. The effects are drawn on a see-through layer that clicks pass through.\n\n**What I checked:** I faked a click and a hover on \"Get it\", then took a screenshot. It showed the rocket climbing and confetti flying off the button. There were no errors, and your other mods (gravity, jelly buttons, living robot, neon title) are still running. I haven't seen a full burst in a screenshot: the rocket was still rising when I took it.\n\n**To undo it:** switch it off in the side panel, or ask me to.",
+   "t": 45496
+  }
+ ]
+}

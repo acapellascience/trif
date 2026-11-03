@@ -147,7 +147,10 @@ function bundleClassic(dir, entry) {
   // A worker that fails to start leaves no console to read, and Safari stops it before anything it sent
   // gets out, so the error is caught (the worker stays up, doing nothing else) and sent to the helper's
   // Safari bridge, which logs it (helper/safari-bridge.js).
-  return `// Built by scripts/build-extension.js from ${order.join(', ')}. Edit those, not this.
+  // Safari reads a background page's script without a charset, as Latin-1, so everything past ASCII (the
+  // ’ in "isn’t", →, …) would reach the panel garbled. It all goes in as \u escapes (the sources only have it
+  // in strings, template literals, regular expressions and comments, where those mean the same).
+  return asciiOnly(`// Built by scripts/build-extension.js from ${order.join(', ')}. Edit those, not this.
 'use strict';
 let __chrome = globalThis.chrome;
 try {
@@ -156,7 +159,12 @@ ${parts.join('\n\n')}
   console.error('[TRIF] the background failed to start:', e);
   fetch('http://127.0.0.1:47615/startup-error', { method: 'POST', body: String((e && e.stack) || e) }).catch(() => {});
 }
-`;
+`);
+}
+
+/** `code` with every character past ASCII written as a \uXXXX escape. */
+function asciiOnly(code) {
+  return code.replace(/[\u0080-\uffff]/g, (c) => `\\u${c.charCodeAt(0).toString(16).padStart(4, '0')}`);
 }
 
 function readPackage() {
@@ -220,4 +228,4 @@ function main() {
 }
 
 if (require.main === module) main();
-module.exports = { bundleClassic, safariManifest, firefoxManifest };
+module.exports = { asciiOnly, bundleClassic, safariManifest, firefoxManifest };

@@ -243,6 +243,20 @@ test('Safari build: manifest has the adapter\'s background page and no Chrome-on
   for (const p of ['userScripts', 'sidePanel']) assert.ok(!m.permissions.includes(p), p);
 });
 
+test("Safari build: the background bundle is ASCII (Safari reads it as Latin-1), and means the same", () => {
+  const dir = tempDir();
+  fs.writeFileSync(path.join(dir, 'a.js'), "export const s = 'isn’t → é';\nexport const re = /[’']/;\n// a comment: …\n");
+  fs.writeFileSync(path.join(dir, 'entry.js'), "import { s, re } from './a.js';\nglobalThis.out = [s, re.test('’'), `t’${s.length}`];\n");
+  const src = bundleClassic(dir, 'entry.js');
+  assert.ok(/^[\x00-\x7f]*$/.test(src), 'only ASCII');
+  const ctx = { chrome: {}, console };
+  ctx.globalThis = ctx;
+  vm.runInNewContext(src, ctx);
+  assert.deepEqual([...ctx.out], ['isn’t → é', true, 't’9']);
+  // The real one too.
+  assert.ok(/^[\x00-\x7f]*$/.test(bundleClassic(path.join(REPO, 'extension'), 'safari-background.js')));
+});
+
 test('Safari build: the background is one classic script that starts against Safari-like APIs', () => {
   const src = bundleClassic(path.join(REPO, 'extension'), 'safari-background.js');
   assert.doesNotMatch(src, /^\s*(import|export)\s/m);

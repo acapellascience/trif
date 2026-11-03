@@ -91,7 +91,7 @@ Settings → Extensions and delete the old WebMods app.
 - TRIF is off on every site until you turn it on there: the side panel says "The robot is off."
   and a "Fix <site>" button that turns it on. Until then nothing from TRIF runs on the site or reads
   it, not even a mod for all sites, and agents (in the panel or a terminal) can't touch its tabs. The
-  switch next to the site name turns it back off.
+  power button at the top of the panel turns it back off.
 - Go to a site, open the side panel, and tell it what to fix. The agent looks at the page,
   writes a mod, and reloads the tab so you can see it. Keep chatting to adjust it.
 - Each mod has a switch in the side panel, so you can turn it off without deleting it. Its trash icon

@@ -70,8 +70,9 @@ on its own browser. Switching a mod off is per browser.
 
 ### Safari (Mac, test builds)
 
-TRIF runs in Safari 27.2 or newer on a Mac. Until it's signed by Apple it only runs on the Mac it was
-built on, so for now this is for trying it out:
+TRIF runs in Safari 27.2 or newer on a Mac. It isn't available as a download yet: you build it from a
+checkout of this repo, and until it's signed by Apple it only runs on the Mac it was built on. So for now
+this is for trying it out:
 
 1. From a checkout of this repo, `node scripts/build-safari.js` (needs Xcode) makes
    `dist/safari-app/TRIF.app`. Open it once: it adds the TRIF extension to Safari.

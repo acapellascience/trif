@@ -505,7 +505,7 @@ test('setup --browser safari installs the bridge\'s login item and gives Safari\
   const xml = fs.readFileSync(plist, 'utf8');
   assert.match(xml, /helper\/safari-bridge\.js<\/string>/);
   const next = r.stdout.slice(r.stdout.indexOf('Next steps:'));
-  assert.match(next, /Open TRIF\.app/);
+  assert.match(next, /isn't a download yet: in a checkout of the TRIF repo, run\n\s+node scripts\/build-safari\.js \(needs Xcode\), then open dist\/safari-app\/TRIF\.app once/);
   assert.match(next, /Allow unsigned extensions/);
   assert.doesNotMatch(next, /chrome:\/\/extensions|Load unpacked|\.xpi/);
   assert.doesNotMatch(r.stdout, /native host/, 'no native messaging manifest for Safari');

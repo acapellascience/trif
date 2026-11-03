@@ -578,7 +578,10 @@ function setup(opts = {}) {
   say('');
   say('Next steps:');
   const safariSteps = (n) => [
-    `${n}. Open TRIF.app (from the Safari download) once: it adds the TRIF extension to Safari.`,
+    // (No download yet: TRIF.app is built from a checkout, scripts/build-safari.js.)
+    `${n}. TRIF for Safari isn't a download yet: in a checkout of the TRIF repo, run`,
+    '   node scripts/build-safari.js (needs Xcode), then open dist/safari-app/TRIF.app once: it adds the',
+    '   TRIF extension to Safari.',
     `${n + 1}. Until TRIF is signed by Apple, let Safari run it: Safari → Settings → Advanced, tick "Show`,
     '   features for web developers"; then Settings → Developer, tick "Allow unsigned extensions" (Safari',
     '   turns this off whenever it quits, so tick it again after restarting Safari).',

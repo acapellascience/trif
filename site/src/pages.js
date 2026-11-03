@@ -125,7 +125,7 @@ export function homePage({ head = '', tail = '' } = {}) {
   <h1>Tim's Robot Internet Fixer</h1>
   <p class="tagline">Fix any website with your own coding agent.</p>
   <p class="small">Free and open source. In beta, for Mac.</p>
-  <p class="links"><a class="btn" href="${REPO}#install">Get it</a><a class="btn plain" href="${REPO}">GitHub</a></p>
+  <p class="links"><a class="btn" href="${REPO}#install" target="_blank" rel="noopener">Get it</a><a class="btn plain" href="${REPO}" target="_blank" rel="noopener">GitHub</a></p>
 </section>
 <section class="two">
   <div>

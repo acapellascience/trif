@@ -60,7 +60,8 @@ test('the Worker: pages with strict headers, reports emailed, bad ones refused',
   // The home page: what TRIF is, where to get it, how to report a problem.
   const home = await (await worker.fetch(new Request('https://timsrobot.com/'), e)).text();
   assert.match(home, /Fix any website with your own coding agent\./);
-  assert.match(home, /href="https:\/\/github\.com\/acapellascience\/trif#install">Get it</);
+  assert.match(home, /href="https:\/\/github\.com\/acapellascience\/trif#install" target="_blank" rel="noopener">Get it</);
+  assert.match(home, /href="https:\/\/github\.com\/acapellascience\/trif" target="_blank" rel="noopener">GitHub</, "the buttons open a new tab");
   assert.match(home, /href="\/report">Report a problem</);
   // Its only script is the demo tab's (deferred, so the page is all there before it runs).
   assert.deepStrictEqual(home.match(/<script[^>]*>/g), ['<script src="/demo.js" defer>']);

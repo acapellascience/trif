@@ -1,12 +1,13 @@
 TRIF {{VERSION}} beta (Firefox, Mac)
 ==============================
 
-TRIF (Tim's Robot Internet Fixer) lets your coding agent (Claude Code) customize websites for you. It comes with mods for
+TRIF (Tim's Robot Internet Fixer) lets your coding agent (Claude Code or Codex) customize websites for you. It comes with mods for
 Google, X, Amazon and Instagram, already on; everywhere else it stays off until you turn it on.
 
 You need
 - Firefox, up to date (Firefox menu > About Firefox).
-- Claude Code installed (https://claude.com/claude-code).
+- Claude Code (https://claude.com/claude-code) or Codex (https://github.com/openai/codex) installed.
+  (Or an open model through Codex, experimental: https://github.com/acapellascience/trif#open-models-experimental)
 - Node 18 or newer. Check in Terminal with:  node --version
   If that says "command not found", install it from https://nodejs.org (the LTS button).
 
@@ -36,7 +37,7 @@ Try it
 - Visit google.com, x.com, amazon.com or instagram.com: the mods are already working. Click the TRIF
   button to see them; each has a switch, and a green light when it's running on the page you're on.
 - On any other site, the sidebar says "The robot is off." Click "Fix <site>", then
-  describe the change you want ("hide the comments", "make it dark") and Claude writes a mod for it.
+  describe the change you want ("hide the comments", "make it dark") and your agent writes a mod for it.
   The first time, it may ask you to log in to Claude: click Log in and follow the steps.
 
 If something's wrong, click the gear in the TRIF panel, then "Report a problem". Or, if the panel

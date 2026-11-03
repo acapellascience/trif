@@ -5,7 +5,8 @@ Safari), say what you want ("hide the trending sidebar", "only show people I fol
 writes a small mod that runs every time that site loads. Mods are plain JavaScript files on your computer; switch each one off
 and on from the side panel.
 
-TRIF uses the coding agent you already have (Claude Code or Codex), on your own account.
+TRIF uses the coding agent you already have (Claude Code or Codex), on your own account, or an open model
+through Codex (experimental: see [Open models](#open-models-experimental)).
 TRIF collects nothing: the only thing that ever reaches its developer is a problem report you choose to send.
 
 **Beta.** Expect rough edges, and please send feedback.
@@ -27,6 +28,8 @@ switches stay as they were; in Safari, install the new TRIF.app (see Safari belo
   agent and model). If you use an Anthropic or OpenAI API key instead of logging in, save it with `trif agent key --agent claude --set-key` (or `--agent codex`):
   it's kept in your Mac's Keychain, and TRIF adds it to the agent's requests itself, so neither the agent
   nor its commands ever get it. (A key you put in TRIF's `config.json` before moves there by itself.)
+  - Or an open model, on your computer or from a provider like OpenRouter, through Codex
+    (experimental): see [Open models](#open-models-experimental).
 
 ## Install
 

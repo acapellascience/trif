@@ -183,6 +183,9 @@ function workspace(homeOverride) {
   if (typeof config.modsDir === 'string' && config.modsDir.trim()) {
     modsDir = path.resolve(home, expandHome(config.modsDir.trim()));
   }
+  // Inside a side-panel agent run, config.json (in the private folder) can't be read: the helper passes
+  // the mods folder as TRIF_RUN_MODS_DIR, so a custom modsDir holds for the run's `trif` too.
+  if (envVar('RUN_BOX') && envVar('RUN_MODS_DIR') && path.isAbsolute(envVar('RUN_MODS_DIR'))) modsDir = path.resolve(envVar('RUN_MODS_DIR'));
   return {
     home,
     modsDir,

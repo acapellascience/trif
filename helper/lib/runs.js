@@ -596,7 +596,7 @@ class Runs {
       return this._finish(run, { code: null, signal: null });
     }
     this._serveBox(run);
-    const env = { ...agents.agentEnv(ws), TRIF_RUN_TOKEN: run.token, TRIF_RUN_BOX: run.box, TRIF_RUN_SCREENSHOTS: run.screenshots };
+    const env = { ...agents.agentEnv(ws), TRIF_RUN_TOKEN: run.token, TRIF_RUN_BOX: run.box, TRIF_RUN_SCREENSHOTS: run.screenshots, TRIF_RUN_MODS_DIR: ws.modsDir };
     const found = adapter.detect({ dirs: agents.searchDirs(ws), env, version: false });
     if (!found.available) {
       this._emit(run, { kind: 'error', message: adapter.missing });

@@ -555,6 +555,9 @@ const handlers = {
     const m = /^data:image\/(\w+);base64,(.*)$/s.exec((r && r.dataUrl) || '');
     if (!m) throw new HelperError('the extension returned no image data', 'command');
     let file = ctx.opts['-o'];
+    const runShots = envVar('RUN_SCREENSHOTS');
+    // In a run, `-o name.png` is a name in the run's screenshots folder.
+    if (file && envVar('RUN_BOX') && runShots && !path.isAbsolute(String(file))) file = path.join(runShots, String(file));
     if (!file) {
       // In a run, its own screenshots folder (it may not see other sites').
       const dir = envVar('RUN_SCREENSHOTS') || ctx.ws.screenshots;
@@ -562,7 +565,10 @@ const handlers = {
       file = path.join(dir, `${stamp}.png`);
       for (let n = 2; fs.existsSync(file); n++) file = path.join(dir, `${stamp}-${n}.png`);
     }
-    file = optionPath(ctx, file, { write: true });
+    try { file = optionPath(ctx, file, { write: true }); } catch (e) {
+      if (!(e instanceof UsageError) || !envVar('RUN_BOX')) throw e;
+      throw new UsageError(`inside a side-panel agent run, screenshots are saved in the run's screenshots folder${runShots ? ` (${runShots})` : ''} or the mods folder: leave out -o to save to the run's screenshots folder, or give just a file name (-o page.png)`);
+    }
     writeOptionFile(file, Buffer.from(m[2], 'base64'));
     if (ctx.json) return printJson({ file, how: r.how || 'visible', full: !!r.full, note: r.note || null, ...(r.cut ? { cut: true } : {}), ...(r.stale ? { stale: true } : {}), ...(r.slices ? { slices: r.slices, viewport: r.viewport } : {}) });
     out(file);

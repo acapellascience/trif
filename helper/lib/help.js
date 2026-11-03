@@ -136,7 +136,9 @@ element, text and the properties that matched. Bounded: --timeout (default 4000 
     usage: 'trif screenshot [TAB] [--full] [--copy] [-o file.png]',
     summary: 'save a PNG of the tab and print its path',
     details: `Default path: screenshots/<time>.png in TRIF's private folder (on a Mac, ~/Library/Application
-Support/TRIF; in a side-panel run, its site's folder there). Open the printed file to look at it.
+Support/TRIF; in a side-panel run, its site's folder there, $TRIF_RUN_SCREENSHOTS). Open the printed file
+to look at it. -o FILE saves elsewhere; in a side-panel run, -o with just a name (-o page.png) saves in the
+run's screenshots folder, and other places are refused (leave out -o).
 TRIF never switches tabs or focuses windows (the user may be browsing, or other agents working), so:
   - a tab that's showing: captured as it is;
   - Firefox, a tab that isn't showing: captured as it is, in the background;
@@ -151,7 +153,7 @@ TRIF never switches tabs or focuses windows (the user may be browsing, or other 
 --full captures the whole page (up to 12000 px): Firefox from the tab itself; Chrome only with --copy,
 stitched from several captures of the copy (fixed and sticky elements only at the top). --json prints
 {file, how: visible|tab|copy, full, note}.`,
-    examples: ['trif screenshot --url x.com', 'trif screenshot --url x.com --full -o /tmp/x-full.png   # Firefox; Chrome needs --copy'],
+    examples: ['trif screenshot --url x.com', 'trif screenshot --url x.com --full -o x-full.png   # Firefox; Chrome needs --copy'],
   },
   record: {
     usage: 'trif record <site> [on|off]',

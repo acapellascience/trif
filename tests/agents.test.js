@@ -1221,6 +1221,32 @@ test('run mailbox: whatever a request in it says, it\'s the run\'s; links aren\'
   assert.match(res.stderr, /has the agent run ended/);
 });
 
+test('in a run: screenshot -o NAME saves in the run\'s screenshots folder, other places are refused plainly; a custom modsDir holds', async () => {
+  const custom = tempDir();
+  const { home, bin } = makeHome({ config: { modsDir: custom } });
+  const ext = startHost(home);
+  ext.handlers.screenshot = () => ({ dataUrl: 'data:image/png;base64,' + Buffer.from('PNG').toString('base64'), how: 'visible' });
+  await ext.waitForSocket();
+  const r = await extRequest(ext, 'agent.start', { ...START, prompt: 'SLEEP' });
+  const call = await waitFor(() => callFor(bin, 'SLEEP'), { message: 'the agent to start' });
+  const env = { TRIF_RUN_TOKEN: call.env.TRIF_RUN_TOKEN, TRIF_RUN_BOX: call.env.TRIF_RUN_BOX, TRIF_RUN_SCREENSHOTS: call.env.TRIF_RUN_SCREENSHOTS, TRIF_RUN_MODS_DIR: call.env.TRIF_RUN_MODS_DIR };
+  assert.equal(env.TRIF_RUN_MODS_DIR, custom);
+  let res = await runCli(['screenshot', '-o', 'page.png'], { home, env });
+  assert.equal(res.code, 0, res.stderr);
+  assert.equal(res.stdout.trim(), path.join(fs.realpathSync(env.TRIF_RUN_SCREENSHOTS), 'page.png'));
+  res = await runCli(['screenshot', '-o', path.join(home, 'x.png')], { home, env });
+  assert.equal(res.code, 1);
+  assert.match(res.stderr, /leave out -o to save to the run's screenshots folder/);
+  // The run's `trif` can't read config.json (private), so the mods folder comes from TRIF_RUN_MODS_DIR.
+  fs.renameSync(path.join(privDir(home), 'config.json'), path.join(privDir(home), 'config.json.away'));
+  try {
+    res = await runCli(['screenshot', '-o', path.join(custom, 'example.com', 'shot.png')], { home, env });
+    assert.equal(res.code, 0, res.stderr);
+  } finally { fs.renameSync(path.join(privDir(home), 'config.json.away'), path.join(privDir(home), 'config.json')); }
+  await extRequest(ext, 'agent.stop', { runId: r.result.runId });
+  await waitDone(ext, r.result.runId);
+});
+
 test('recording a run switched on goes off when that run ends; the user\'s own recording stays', async () => {
   const { home, bin } = makeHome();
   const ext = startHost(home);

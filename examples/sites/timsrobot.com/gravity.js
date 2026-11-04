@@ -591,8 +591,14 @@
   // Grabbing and throwing.
   // (the pointer arrives in screen coordinates; `pointer` is it on the card, refreshed every frame)
   const screenPtr = { x: 0, y: 0 }, pointer = { x: 0, y: 0 };
+  // On a touchscreen a finger on Space shooter's ship takes the ship, not the piece under it (the ship says
+  // where in its `tss-ship` event).
+  let shipGrab = null;
+  addEventListener('tss-ship', (e) => { shipGrab = e.detail?.grab || null; });
+  const onShip = (e) => e.pointerType === 'touch' && shipGrab && e.clientX >= shipGrab.left && e.clientX <= shipGrab.right
+    && e.clientY >= shipGrab.top && e.clientY <= shipGrab.bottom;
   addEventListener('pointerdown', (e) => {
-    if (!active || returning || e.button !== 0) return;
+    if (!active || returning || e.button !== 0 || onShip(e)) return;
     if (e.target.closest?.('a[href]')) return; // links stay links: clicking one follows it
     const el = e.target.closest?.('[data-gm-body]');
     const b = el && bodies.find((x) => x.el === el);
@@ -646,6 +652,78 @@
       } else if (e.key === 'Escape' && active && !returning) stop();
     } catch (err) { window.trif?.warn(String(err)); try { finish(); } catch {} }
   }, true);
+
+  // The row of round buttons along the top of the window, shared by Space shooter (restart, on the left),
+  // Rainbow Rave (music and kick zoom, once won) and Gravity mode (drop, on the right). Whichever mod
+  // needs it first makes it; the others find it. With a left-hand button the row spreads out evenly along
+  // the top; otherwise it gathers at the right. Light buttons, or the rave's dark ones while it's on.
+  // On <html>, not <body>: the tilt card transforms <body>, and Gravity mode piles up what's in it. And
+  // pinned to the window: when <html> has a `perspective` (tilt card) or a `translate` (the shooter's
+  // screen shake), "fixed" is placed against the page instead, so it's measured and nudged back.
+  const topBar = () => {
+    let bar = document.getElementById('trif-top-bar');
+    if (bar) return bar;
+    bar = document.createElement('div');
+    bar.id = 'trif-top-bar';
+    const style = document.createElement('style');
+    style.textContent = `
+      #trif-top-bar { position: fixed; left: 0; top: 0; z-index: 2147483647; box-sizing: border-box; width: 100vw;
+        padding: 16px; display: flex; justify-content: flex-end; gap: 8px; pointer-events: none; }
+      #trif-top-bar:has(> .trif-top-left) { justify-content: space-between; }
+      #trif-top-bar > button { pointer-events: auto; flex: none; margin: 0; -webkit-tap-highlight-color: transparent; }
+      :where(#trif-top-bar) > button.trif-top-btn { width: 40px; height: 40px; border-radius: 50%; padding: 0;
+        display: flex; align-items: center; justify-content: center; cursor: pointer; color: #18181a;
+        border: 1px solid rgba(0,0,0,0.15); background: rgba(255,255,255,0.88); box-shadow: 0 2px 8px rgba(0,0,0,0.35); }
+      .trif-top-btn svg { width: 20px; height: 20px; display: block; fill: none; stroke: currentColor;
+        stroke-width: 2.2; stroke-linecap: round; stroke-linejoin: round; }
+      .trif-top-left { order: 0; } .wm-rainbow-zoom { order: 1; } .wm-rainbow-play { order: 2; } .trif-top-right { order: 3; }`;
+    bar.append(style);
+    document.documentElement.append(bar);
+    let px = 0, py = 0;
+    const pin = () => {
+      if (!bar.isConnected) return;
+      try {
+        const w = `${document.documentElement.clientWidth}px`; // (the demo's panel narrows it)
+        if (bar.style.width !== w) bar.style.width = w;
+        const r = bar.getBoundingClientRect();
+        if (Math.abs(r.left) > 0.5 || Math.abs(r.top) > 0.5) {
+          px -= r.left; py -= r.top;
+          bar.style.translate = `${px.toFixed(1)}px ${py.toFixed(1)}px`;
+        }
+      } catch {}
+      requestAnimationFrame(pin);
+    };
+    requestAnimationFrame(pin);
+    return bar;
+  };
+
+  // On a touchscreen (no G or Escape to press), a button in the top right does what they do: a down arrow
+  // drops the page, and while it's down an up arrow puts it back.
+  const toggle = () => {
+    try { if (!active) start(); else if (!returning) stop(); } catch (err) { window.trif?.warn(String(err)); try { finish(); } catch {} }
+  };
+  if (matchMedia('(pointer: coarse)').matches) {
+    const NS = 'http://www.w3.org/2000/svg';
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.className = 'trif-top-btn trif-top-right';
+    const sync = () => {
+      const down = root.hasAttribute('data-gm-on');
+      const svg = document.createElementNS(NS, 'svg');
+      svg.setAttribute('viewBox', '0 0 24 24');
+      const path = document.createElementNS(NS, 'path');
+      path.setAttribute('d', down ? 'M12 19V5M6 11l6-6 6 6' : 'M12 5v14M6 13l6 6 6-6');
+      svg.append(path);
+      button.replaceChildren(svg);
+      button.setAttribute('aria-label', down ? 'Put the page back' : 'Drop the page (gravity)');
+      button.title = down ? 'Put the page back' : 'Gravity: drop the page';
+    };
+    sync();
+    // (whoever switches it: this button, or Space shooter turning gravity off for its You Win screen)
+    new MutationObserver(sync).observe(root, { attributes: true, attributeFilter: ['data-gm-on'] });
+    button.addEventListener('click', (e) => { e.stopPropagation(); toggle(); });
+    topBar().append(button);
+  }
 
   root.setAttribute('data-gm-ready', ''); // tells Space shooter to list "G gravity" in its controls
   window.trif?.log('gravity mode ready: press G');

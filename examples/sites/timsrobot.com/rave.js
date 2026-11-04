@@ -221,11 +221,14 @@
     }
     @keyframes rave-bn-wave { from { translate: 0 -5px; } to { translate: 0 5px; } }
 
-    .wm-rainbow-music { position: fixed; right: 16px; top: 16px; z-index: 2147483647; width: 40px; height: 40px;
+    /* (in the row of buttons along the top: see topBar) */
+    .wm-rainbow-music { width: 40px; height: 40px;
       border-radius: 50%; border: 1px solid rgba(255,255,255,0.6) !important; background-color: rgba(0,0,0,0.5) !important;
       padding: 0; display: flex; align-items: center; justify-content: center; cursor: pointer; }
     .wm-rainbow-music svg { width: 20px; height: 20px; fill: #fff; display: block; }
-    .wm-rainbow-zoom { right: 64px; }
+    /* the other mods' buttons in the row (Space shooter's restart, Gravity mode's drop) go dark like these */
+    #trif-top-bar > .trif-top-btn { color: #fff; border: 1px solid rgba(255,255,255,0.6) !important;
+      background: rgba(0,0,0,0.5) !important; box-shadow: none; }
     /* unlocked by winning: they pop in, with a glow that fades */
     .wm-rainbow-music.wm-rainbow-new { animation: wm-rainbow-pop 1.1s cubic-bezier(.2,1.6,.4,1) both; }
     .wm-rainbow-zoom.wm-rainbow-new { animation-delay: .25s; }
@@ -429,6 +432,7 @@
   });
   const unstick = () => { if (musicOn && stale) { try { start(); } catch (err) { window.trif?.warn('music restart failed', String(err)); } } };
   addEventListener('pointerdown', unstick, true);
+  addEventListener('touchend', unstick, true); // (a touchscreen only allows sound once a finger lifts)
   addEventListener('keydown', unstick, true);
   const stop = () => { clearInterval(timer); timer = 0; ctx?.suspend(); };
   const sync = () => {
@@ -465,6 +469,7 @@
     if (e.isTrusted && musicOn && ctx && ctx.state === 'suspended' && !document.hidden) { try { start(); } catch {} }
   };
   addEventListener('pointerdown', wakeMusic, true);
+  addEventListener('touchend', wakeMusic, true); // (a touchscreen only allows sound once a finger lifts)
   addEventListener('keydown', wakeMusic, true);
 
   // ---- Kick zoom: the page's blocks zoom with each kick, around the centre of the screen. ----
@@ -550,7 +555,7 @@
     });
     syncZoom();
     button = document.createElement('button');
-    button.className = 'wm-rainbow-music';
+    button.className = 'wm-rainbow-music wm-rainbow-play';
     button.title = 'Play/pause rainbow music';
     button.addEventListener('click', (e) => {
       e.stopPropagation();
@@ -560,29 +565,52 @@
       try { if (musicOn) start(); } catch (err) { window.trif?.warn('music failed', String(err)); musicOn = false; }
       sync();
     });
-    // On <html>, not <body>: the tilt card transforms <body>, which would carry "fixed" buttons with it.
-    // (Also keeps them out of Gravity mode's pile.)
     if (fresh) { zoomButton.classList.add('wm-rainbow-new'); button.classList.add('wm-rainbow-new'); } // the unlock: they pop in
-    document.documentElement.append(zoomButton, button);
+    topBar().append(zoomButton, button);
     sync();
-    requestAnimationFrame(pinButtons);
   };
-  // Keep them in the window's top-right corner. When <html> gets a `perspective` (tilt card) or a
-  // `translate` (the space shooter's screen shake), it becomes the box "fixed" elements are placed in,
-  // so they'd scroll and shake with the page (or end up below it): measure and nudge them back.
-  let pinX = 0, pinY = 0;
-  const pinButtons = () => {
-    try {
-      if (button?.isConnected) {
-        const r = button.getBoundingClientRect();
-        const dx = r.right - (document.documentElement.clientWidth - 16), dy = r.top - 16;
-        if (Math.abs(dx) > 0.5 || Math.abs(dy) > 0.5) {
-          pinX -= dx; pinY -= dy;
-          button.style.translate = zoomButton.style.translate = `${pinX.toFixed(1)}px ${pinY.toFixed(1)}px`;
+  // The row of round buttons along the top of the window, shared by Space shooter (restart, on the left),
+  // Rainbow Rave (music and kick zoom, once won) and Gravity mode (drop, on the right). Whichever mod
+  // needs it first makes it; the others find it. With a left-hand button the row spreads out evenly along
+  // the top; otherwise it gathers at the right. Light buttons, or the rave's dark ones while it's on.
+  // On <html>, not <body>: the tilt card transforms <body>, and Gravity mode piles up what's in it. And
+  // pinned to the window: when <html> has a `perspective` (tilt card) or a `translate` (the shooter's
+  // screen shake), "fixed" is placed against the page instead, so it's measured and nudged back.
+  const topBar = () => {
+    let bar = document.getElementById('trif-top-bar');
+    if (bar) return bar;
+    bar = document.createElement('div');
+    bar.id = 'trif-top-bar';
+    const style = document.createElement('style');
+    style.textContent = `
+      #trif-top-bar { position: fixed; left: 0; top: 0; z-index: 2147483647; box-sizing: border-box; width: 100vw;
+        padding: 16px; display: flex; justify-content: flex-end; gap: 8px; pointer-events: none; }
+      #trif-top-bar:has(> .trif-top-left) { justify-content: space-between; }
+      #trif-top-bar > button { pointer-events: auto; flex: none; margin: 0; -webkit-tap-highlight-color: transparent; }
+      :where(#trif-top-bar) > button.trif-top-btn { width: 40px; height: 40px; border-radius: 50%; padding: 0;
+        display: flex; align-items: center; justify-content: center; cursor: pointer; color: #18181a;
+        border: 1px solid rgba(0,0,0,0.15); background: rgba(255,255,255,0.88); box-shadow: 0 2px 8px rgba(0,0,0,0.35); }
+      .trif-top-btn svg { width: 20px; height: 20px; display: block; fill: none; stroke: currentColor;
+        stroke-width: 2.2; stroke-linecap: round; stroke-linejoin: round; }
+      .trif-top-left { order: 0; } .wm-rainbow-zoom { order: 1; } .wm-rainbow-play { order: 2; } .trif-top-right { order: 3; }`;
+    bar.append(style);
+    document.documentElement.append(bar);
+    let px = 0, py = 0;
+    const pin = () => {
+      if (!bar.isConnected) return;
+      try {
+        const w = `${document.documentElement.clientWidth}px`; // (the demo's panel narrows it)
+        if (bar.style.width !== w) bar.style.width = w;
+        const r = bar.getBoundingClientRect();
+        if (Math.abs(r.left) > 0.5 || Math.abs(r.top) > 0.5) {
+          px -= r.left; py -= r.top;
+          bar.style.translate = `${px.toFixed(1)}px ${py.toFixed(1)}px`;
         }
-      }
-    } catch {}
-    requestAnimationFrame(pinButtons);
+      } catch {}
+      requestAnimationFrame(pin);
+    };
+    requestAnimationFrame(pin);
+    return bar;
   };
   // On timsrobot.com the play/pause and kick-zoom buttons are a prize: until you've won Space Shooter's game
   // (its `tss-win` event), the music and the zoom are simply part of the rave. Winning unlocks them; they pop

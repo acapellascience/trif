@@ -24,6 +24,8 @@
     #tss-canvas { position: fixed; inset: 0; width: 100vw; height: 100vh; pointer-events: none; z-index: 2147483646; }
     #tss-hud { position: fixed; left: 12px; top: 8px; /* top, not bottom: see pin() */ z-index: 2147483647; pointer-events: none;
       font: 600 12px/1.4 ui-monospace, Menlo, monospace; color: #7ff; text-shadow: 0 0 6px #0ff; opacity: .85; }
+    /* on a touchscreen, under the row of buttons along the top (the restart button has its corner) */
+    #tss-hud.tss-touch { left: 16px; top: 64px; }
     /* "ROBOT DESTROYED": outside <body>, so Gravity mode leaves it hanging; its words are targets */
     #tss-banner { position: fixed; left: 50vw; top: 50vh; transform: translate(-50%, -50%); z-index: 2147483645;
       pointer-events: none; white-space: nowrap; }
@@ -186,6 +188,7 @@
     };
     addEventListener('keydown', wake, true);
     addEventListener('pointerdown', wake, true);
+    addEventListener('touchend', wake, true); // (a touchscreen only allows sound once a finger lifts)
     const run = (fn) => { if (ac && ac.state === 'running' && !document.hidden) try { fn(ac.currentTime); } catch {} };
     const env = (t, peak, attack, decay, wet = 0, bus = verb) => { // a gain node that rises to peak, then dies away
       const g = ac.createGain();
@@ -381,10 +384,9 @@
       if (e.key === ' ' && !e.repeat) presses++; // a fresh press (not the key repeating while held)
       keys[e.key] = true;
       lastInput = performance.now();
-    } else if (e.key === 'r' || e.key === 'R') {
-      if (winEl) playAgainEased(); else if (!againBusy) restoreAll();
-    }
+    } else if (e.key === 'r' || e.key === 'R') restart();
   }, true);
+  const restart = () => { if (winEl) playAgainEased(); else if (!againBusy) restoreAll(); };
   const restoreAll = () => {
     removeBanner();
     // words and bombed pieces come back; the robot is rebuilt separately
@@ -394,6 +396,39 @@
   };
   addEventListener('keyup', (e) => { keys[e.key] = false; }, true);
   addEventListener('blur', () => { for (const k in keys) keys[k] = false; });
+
+  // --- On a touchscreen there are no keys: hold the ship and drag it, and while you hold it, it fires as
+  // fast as it can (or, in Gravity mode, drops bombs). A touch anywhere else is left to the page (it
+  // scrolls, a firework goes up). Restart is a button in the top left (below), and the HUD keeps only
+  // the counts.
+  const coarse = matchMedia('(pointer: coarse)').matches;
+  if (coarse) hud.classList.add('tss-touch');
+  const GRAB = 36; // px of slack around the ship for a finger
+  const grabBox = () => ({ left: ship.x - ship.w / 2 - GRAB, right: ship.x + ship.w / 2 + GRAB, top: ship.y - ship.h - GRAB, bottom: ship.y + GRAB });
+  const touch = { id: null, x: 0, y: 0, dx: 0, dy: 0, vx: 0, vy: 0 }; // dx, dy: the finger's move since the last frame
+  // Capture phase on the window, ahead of the page: a grab isn't also a click, a firework or (in Gravity
+  // mode, which checks the box in the ship's `tss-ship` event) grabbing the piece under the ship.
+  addEventListener('pointerdown', (e) => {
+    if (e.pointerType !== 'touch' || touch.id !== null || !e.isTrusted) return;
+    if (performance.now() < deadUntil || e.target.closest?.('#trif-top-bar')) return;
+    const b = grabBox();
+    if (e.clientX < b.left || e.clientX > b.right || e.clientY < b.top || e.clientY > b.bottom) return;
+    touch.id = e.pointerId; touch.x = e.clientX; touch.y = e.clientY; touch.dx = touch.dy = 0;
+    presses++; // (the first shot straight away)
+    e.stopPropagation();
+  }, true);
+  addEventListener('pointermove', (e) => {
+    if (e.pointerId !== touch.id) return;
+    touch.dx += e.clientX - touch.x; touch.dy += e.clientY - touch.y;
+    touch.x = e.clientX; touch.y = e.clientY;
+  }, true);
+  const letGo = (e) => { if (e.pointerId === touch.id) { touch.id = null; touch.vx = touch.vy = 0; } };
+  addEventListener('pointerup', letGo, true);
+  addEventListener('pointercancel', letGo, true);
+  // While the ship is held, the finger mustn't scroll or zoom the page (only touch events can stop that).
+  const holdStill = (e) => { if (touch.id !== null && e.cancelable) e.preventDefault(); };
+  addEventListener('touchstart', holdStill, { capture: true, passive: false });
+  addEventListener('touchmove', holdStill, { capture: true, passive: false });
 
   const fire = (now) => {
     lastShot = now;
@@ -1020,8 +1055,9 @@
   let bank = 0, thrust = 0.5, muzzle = 0;
   const ENGINES = [-20, 20];
   const drawShip = (now, dt, visible) => {
-    const wantBank = leaving || returning ? 0 : (keys.ArrowRight ? 1 : 0) - (keys.ArrowLeft ? 1 : 0);
-    const wantThrust = leaving && now > leaving ? 2.2 : returning ? 1 : keys.ArrowUp ? 1 : keys.ArrowDown ? 0.15 : 0.5; // 2.2: afterburners
+    const dragBank = Math.max(-1, Math.min(1, touch.vx / 520)), dragUp = -touch.vy / 420;
+    const wantBank = leaving || returning ? 0 : (keys.ArrowRight ? 1 : 0) - (keys.ArrowLeft ? 1 : 0) || dragBank;
+    const wantThrust = leaving && now > leaving ? 2.2 : returning ? 1 : keys.ArrowUp || dragUp > 0.4 ? 1 : keys.ArrowDown || dragUp < -0.4 ? 0.15 : 0.5; // 2.2: afterburners
     bank += (wantBank - bank) * Math.min(1, dt * 9);
     thrust += (wantThrust - thrust) * Math.min(1, dt * 7);
     muzzle = Math.max(0, muzzle - dt);
@@ -1197,6 +1233,69 @@
     }
   };
 
+  // The row of round buttons along the top of the window, shared by Space shooter (restart, on the left),
+  // Rainbow Rave (music and kick zoom, once won) and Gravity mode (drop, on the right). Whichever mod
+  // needs it first makes it; the others find it. With a left-hand button the row spreads out evenly along
+  // the top; otherwise it gathers at the right. Light buttons, or the rave's dark ones while it's on.
+  // On <html>, not <body>: the tilt card transforms <body>, and Gravity mode piles up what's in it. And
+  // pinned to the window: when <html> has a `perspective` (tilt card) or a `translate` (the shooter's
+  // screen shake), "fixed" is placed against the page instead, so it's measured and nudged back.
+  const topBar = () => {
+    let bar = document.getElementById('trif-top-bar');
+    if (bar) return bar;
+    bar = document.createElement('div');
+    bar.id = 'trif-top-bar';
+    const style = document.createElement('style');
+    style.textContent = `
+      #trif-top-bar { position: fixed; left: 0; top: 0; z-index: 2147483647; box-sizing: border-box; width: 100vw;
+        padding: 16px; display: flex; justify-content: flex-end; gap: 8px; pointer-events: none; }
+      #trif-top-bar:has(> .trif-top-left) { justify-content: space-between; }
+      #trif-top-bar > button { pointer-events: auto; flex: none; margin: 0; -webkit-tap-highlight-color: transparent; }
+      :where(#trif-top-bar) > button.trif-top-btn { width: 40px; height: 40px; border-radius: 50%; padding: 0;
+        display: flex; align-items: center; justify-content: center; cursor: pointer; color: #18181a;
+        border: 1px solid rgba(0,0,0,0.15); background: rgba(255,255,255,0.88); box-shadow: 0 2px 8px rgba(0,0,0,0.35); }
+      .trif-top-btn svg { width: 20px; height: 20px; display: block; fill: none; stroke: currentColor;
+        stroke-width: 2.2; stroke-linecap: round; stroke-linejoin: round; }
+      .trif-top-left { order: 0; } .wm-rainbow-zoom { order: 1; } .wm-rainbow-play { order: 2; } .trif-top-right { order: 3; }`;
+    bar.append(style);
+    document.documentElement.append(bar);
+    let px = 0, py = 0;
+    const pin = () => {
+      if (!bar.isConnected) return;
+      try {
+        const w = `${document.documentElement.clientWidth}px`; // (the demo's panel narrows it)
+        if (bar.style.width !== w) bar.style.width = w;
+        const r = bar.getBoundingClientRect();
+        if (Math.abs(r.left) > 0.5 || Math.abs(r.top) > 0.5) {
+          px -= r.left; py -= r.top;
+          bar.style.translate = `${px.toFixed(1)}px ${py.toFixed(1)}px`;
+        }
+      } catch {}
+      requestAnimationFrame(pin);
+    };
+    requestAnimationFrame(pin);
+    return bar;
+  };
+
+  if (coarse) {
+    const NS = 'http://www.w3.org/2000/svg';
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.className = 'trif-top-btn trif-top-left';
+    button.title = 'Restart: bring back everything blasted';
+    button.setAttribute('aria-label', 'Restart the space shooter');
+    const svg = document.createElementNS(NS, 'svg');
+    svg.setAttribute('viewBox', '0 0 24 24');
+    for (const d of ['M20 12a8 8 0 1 1-2.34-5.66', 'M20 4v4.5h-4.5']) {
+      const path = document.createElementNS(NS, 'path');
+      path.setAttribute('d', d);
+      svg.append(path);
+    }
+    button.append(svg);
+    button.addEventListener('click', (e) => { e.stopPropagation(); restart(); });
+    topBar().append(button);
+  }
+
   let prev = performance.now();
   const frame = (now) => {
     const dt = Math.min(0.05, (now - prev) / 1000);
@@ -1216,24 +1315,31 @@
         if (keys.ArrowRight) ship.x += 520 * dt;
         if (keys.ArrowUp) ship.y -= 420 * dt;
         if (keys.ArrowDown) ship.y += 420 * dt;
+        ship.x += touch.dx; ship.y += touch.dy; // (dragged)
         ship.x = Math.max(ship.w / 2, Math.min(W - ship.w / 2, ship.x));
         ship.y = Math.max(ship.h + 4, Math.min(H - 14, ship.y));
         // space: lasers normally; in Gravity mode (where lasers can't do much) it drops bombs instead,
         // one in the air at a time
         // Holding space fires at most every 150 ms; each new press fires straight away, however soon
         // after the last shot (even a tap too quick for a frame to see the key down).
-        if (gravityOn()) { if (presses || keys[' ']) dropBomb(now); } // (bombs: one in the air at a time)
-        else if (presses || (keys[' '] && now - lastShot > 150)) fire(now);
+        const firing = keys[' '] || touch.id !== null;
+        if (gravityOn()) { if (presses || firing) dropBomb(now); } // (bombs: one in the air at a time)
+        else if (presses || (firing && now - lastShot > 150)) fire(now);
         if (now > safeUntil && touchesRobot()) blowUpShip(now);
       }
       presses = 0; // (presses while the ship is down or on autopilot don't save up)
+      // (nor drags; the drag's speed, smoothed, banks the ship and works its engines like the arrows)
+      const k = Math.min(1, dt * 12);
+      touch.vx += ((dt ? touch.dx / dt : 0) - touch.vx) * k; touch.vy += ((dt ? touch.dy / dt : 0) - touch.vy) * k;
+      touch.dx = touch.dy = 0;
       // Tell the Living robot mod where the ship is (it chases an active ship). "Active" = flown
       // or fired in the last 5 s and not exploded.
-      if (keys.ArrowLeft || keys.ArrowRight || keys.ArrowUp || keys.ArrowDown || keys[' ']) lastInput = now;
+      if (keys.ArrowLeft || keys.ArrowRight || keys.ArrowUp || keys.ArrowDown || keys[' '] || touch.id !== null) lastInput = now;
       // (plus the bombs in the air, so the robot can see them coming and dodge)
       dispatchEvent(new CustomEvent('tss-ship', { detail: {
         x: ship.x, y: ship.y - ship.h * 0.45, active: !dead && !autopilot && now - lastInput < 5000,
         bombs: bombs.map((b) => ({ x: b.x, y: b.y, vx: b.vx, vy: b.vy })), bombGravity: BOMB_GRAVITY,
+        grab: coarse && !dead && !autopilot ? grabBox() : null, // (where a finger takes the ship)
         deaths } })); // (the robot greets a fresh player differently from one he's already blown up)
 
       ctx.clearRect(0, 0, W, H);
@@ -1334,9 +1440,9 @@
       // hidden while dead; blinks while safe after respawning
       updateBombs(now, dt);
       drawShip(now, dt, now >= deadUntil && (now > safeUntil || Math.floor(now / 100) % 2));
-      hud.textContent = `← → ↑ ↓ fly · space ${gravityOn() ? 'bomb' : 'fire'}`
+      hud.textContent = (coarse ? '' : `← → ↑ ↓ fly · space ${gravityOn() ? 'bomb' : 'fire'}`
         + (document.documentElement.hasAttribute('data-gm-ready') ? ' · G gravity' : '') // the Gravity mode mod is on
-        + ` · R restore · ${score} words blasted`
+        + ' · R restore · ') + `${score} words blasted`
         + (deaths ? ` · ${deaths} death${deaths > 1 ? 's' : ''}` : '')
         + (robotHp && robotHp < ROBOT_HP ? ` · robot ${robotHp}/${ROBOT_HP}` : ''); // (destroyed: the big banner says so)
     } catch (e) { window.trif?.warn('frame failed', String(e)); }

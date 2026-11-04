@@ -82,6 +82,7 @@
       } catch (err) { window.trif?.warn('firework sound failed', String(err)); }
     };
     addEventListener('pointerdown', wake, true);
+    addEventListener('touchend', wake, true); // (a touchscreen only allows sound once a finger lifts)
     addEventListener('keydown', wake, true);
     const env = (t, peak, attack, decay, wet, bus = verb) => {
       const g = ac.createGain();

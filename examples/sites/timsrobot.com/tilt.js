@@ -75,14 +75,51 @@
   };
   const kick = () => { if (!raf) raf = requestAnimationFrame(frame); };
 
+  let oriented = false; // the device's tilt is steering (below): the mouse doesn't
   addEventListener('mousemove', (e) => {
+    if (oriented) return; // (a tap on a touchscreen sends one too)
     tx = (e.clientX / innerWidth - 0.5) * 2;   // -1 .. 1
     ty = (e.clientY / innerHeight - 0.5) * 2;
     const r = document.body?.getBoundingClientRect();
     if (r && r.width) { gx = ((e.clientX - r.left) / r.width) * 100; gy = ((e.clientY - r.top) / r.height) * 100; }
     kick();
   }, { passive: true });
-  document.addEventListener('mouseleave', () => { tx = 0; ty = 0; gx = 50; gy = 50; kick(); });
+  document.addEventListener('mouseleave', () => { if (oriented) return; tx = 0; ty = 0; gx = 50; gy = 50; kick(); });
+
+  // On a phone or tablet: tilt the device and the card tilts with it (its orientation sensor). Measured from
+  // however you're holding it, and that "level" slowly follows your hand, so a held angle eases back
+  // flat. Turned sideways, the axes turn with the screen. iPhones and iPads ask first, and only from a
+  // tap: the first tap on the page asks.
+  const RANGE = 20; // degrees of tilting the device for the full tilt
+  const clamp = (v) => Math.max(-1, Math.min(1, v));
+  let level = null; // { beta, gamma }: the device's angles that count as flat
+  addEventListener('deviceorientation', (e) => {
+    try {
+      if (e.beta == null || e.gamma == null) return;
+      oriented = true;
+      if (!level) level = { beta: e.beta, gamma: e.gamma };
+      level.beta += (e.beta - level.beta) * 0.01; level.gamma += (e.gamma - level.gamma) * 0.01;
+      const dx = (e.gamma - level.gamma) / RANGE, dy = (e.beta - level.beta) / RANGE; // in the device's upright frame
+      const angle = ((screen.orientation?.angle ?? window.orientation ?? 0) % 360 + 360) % 360;
+      const [sx, sy] = angle === 90 ? [dy, -dx] : angle === 180 ? [-dx, -dy] : angle === 270 ? [-dy, dx] : [dx, dy];
+      tx = clamp(sx); ty = clamp(sy);
+      gx = 50 + tx * 40; gy = 50 + ty * 40;
+      kick();
+    } catch (err) { window.trif?.warn(String(err)); }
+  });
+  addEventListener('orientationchange', () => { level = null; });
+  if (typeof DeviceOrientationEvent !== 'undefined' && typeof DeviceOrientationEvent.requestPermission === 'function') {
+    let asking = false;
+    const ask = () => {
+      if (asking) return;
+      asking = true;
+      DeviceOrientationEvent.requestPermission().then(() => {
+        removeEventListener('touchend', ask, true); removeEventListener('click', ask, true);
+      }, () => { asking = false; }); // (not from a tap after all: the next one asks)
+    };
+    addEventListener('touchend', ask, true);
+    addEventListener('click', ask, true);
+  }
 
   window.trif?.log('tilt card on');
 })();

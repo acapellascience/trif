@@ -111,6 +111,7 @@
         } catch (err) { window.trif?.warn('robot sound failed', String(err)); }
       };
       addEventListener('pointerdown', wake, true);
+      addEventListener('touchend', wake, true); // (a touchscreen only allows sound once a finger lifts)
       addEventListener('keydown', wake, true);
       const live = () => ac && ac.state === 'running' && !document.hidden;
       const env = (t, peak, attack, decay) => {

@@ -118,6 +118,13 @@ const DEMO_STYLE = `
    open (innerWidth / innerHeight): the same here, or they'd stretch and what's drawn would land off target. */
 @media (min-width: 701px) { html.demo-open > canvas { width: calc(100vw - 360px) !important; right: auto !important; } }
 @media (max-width: 700px) { html.demo-open > canvas { height: 28vh !important; height: 28dvh !important; bottom: auto !important; } }
+/* The shooter's "ROBOT DESTROYED" is centred, and its letters sized, by the window's width in CSS: by the
+   part beside the panel here (or above the sheet). */
+@media (min-width: 701px) {
+  html.demo-open > #tss-banner { left: calc((100vw - 360px) / 2) !important; }
+  html.demo-open > #tss-banner .tss-bn { font-size: clamp(40px, calc((100vw - 360px) * 0.09), 120px) !important; }
+}
+@media (max-width: 700px) { html.demo-open > #tss-banner { top: 14vh !important; top: 14dvh !important; } }
 @media (max-width: 700px) {
   .demo-panel { inset: auto 0 0 0; width: auto; height: 72vh; height: 72dvh; border-left: 0; border-top: 1px solid var(--line);
     border-radius: 12px 12px 0 0; box-shadow: 0 -6px 24px rgb(0 0 0 / 0.15); }

@@ -122,7 +122,7 @@ const DEMO_STYLE = `
   .demo-panel-top::before { content: ''; position: absolute; left: 50%; top: 6px; width: 36px; height: 4px; margin-left: -18px;
     border-radius: 2px; background: var(--line); }
   .demo-close { font-size: 20px; padding: 0 12px; }
-  html.demo-min .demo-panel { height: 35px; }
+  html.demo-min .demo-panel { height: 35px; min-height: 0; }
   /* (no room for it on a phone: the page says what the demo is) */
   .demo-panel-note { display: none; }
 }

@@ -112,20 +112,8 @@ const DEMO_STYLE = `
 .demo-panel iframe { flex: 1; min-height: 0; width: 100%; border: 0; display: block; }
 .demo-panel-note { margin: 0; padding: 6px 12px; border-top: 1px solid var(--line); color: var(--muted); font-size: 11px; line-height: 1.4; }
 @media (min-width: 701px) { html.demo-open body { margin-right: 360px; } }
-/* Mods' full-window canvases (the shooter's, the fireworks', the rave's glow layers: all outside <body>) are
-   the window's size in CSS (100vw x 100vh) but draw at the size demo.js says the window is with the panel
-   open (innerWidth / innerHeight): the same here, or they'd stretch and what's drawn would land off target. */
-@media (min-width: 701px) { html.demo-open > canvas { width: calc(100vw - 360px) !important; right: auto !important; } }
-@media (max-width: 700px) { html.demo-open > canvas { height: 28vh !important; height: 28dvh !important; bottom: auto !important; } }
-@media (max-width: 700px) { html.demo-open.demo-min > canvas { height: calc(100vh - 45px) !important; height: calc(100dvh - 45px) !important; } }
-/* The shooter's "ROBOT DESTROYED" is centred, and its letters sized, by the window's width in CSS: by the
-   part beside the panel here (or above the sheet). */
-@media (min-width: 701px) {
-  html.demo-open > #tss-banner { left: calc((100vw - 360px) / 2) !important; }
-  html.demo-open > #tss-banner .tss-bn { font-size: clamp(40px, calc((100vw - 360px) * 0.09), 120px) !important; }
-}
-@media (max-width: 700px) { html.demo-open > #tss-banner { top: 14vh !important; top: 14dvh !important; } }
-@media (max-width: 700px) { html.demo-open.demo-min > #tss-banner { top: calc(50vh - 22px) !important; top: calc(50dvh - 22px) !important; } }
+/* (Mods' full-window layers, the shooter's banner among them, size and place themselves by the window as
+   innerWidth / innerHeight measure it, which demo.js narrows to the part beside the panel or above the sheet.) */
 @media (max-width: 700px) {
   .demo-panel { inset: auto 0 0 0; width: auto; height: 72vh; height: 72dvh; border-left: 0; border-top: 1px solid var(--line);
     border-radius: 12px 12px 0 0; box-shadow: 0 -6px 24px rgb(0 0 0 / 0.15); transition: height .25s ease; }

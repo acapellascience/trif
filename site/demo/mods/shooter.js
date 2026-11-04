@@ -21,15 +21,18 @@
     /* Living robot's legs follow the damage colour */
     svg.robot[data-tss-hp] .lr-legs line { stroke: var(--tss-robot-leg) !important; }
     svg.robot[data-tss-hp] .lr-legs ellipse { fill: var(--tss-robot-leg) !important; }
-    #tss-canvas { position: fixed; inset: 0; width: 100vw; height: 100vh; pointer-events: none; z-index: 2147483646; }
+    /* (sized in pixels to the window as innerWidth/innerHeight measure it, like what's drawn: see resize) */
+    #tss-canvas { position: fixed; left: 0; top: 0; pointer-events: none; z-index: 2147483646; }
     #tss-hud { position: fixed; left: 12px; top: 8px; /* top, not bottom: see pin() */ z-index: 2147483647; pointer-events: none;
       font: 600 12px/1.4 ui-monospace, Menlo, monospace; color: #7ff; text-shadow: 0 0 6px #0ff; opacity: .85; }
     /* on a touchscreen, under the row of buttons along the top (the restart button has its corner) */
     #tss-hud.tss-touch { left: 16px; top: 64px; }
     /* "ROBOT DESTROYED": outside <body>, so Gravity mode leaves it hanging; its words are targets */
+    /* (centred on, and its letters sized to, the window as innerWidth/innerHeight measure it: placeBanner) */
     #tss-banner { position: fixed; left: 50vw; top: 50vh; transform: translate(-50%, -50%); z-index: 2147483645;
       pointer-events: none; white-space: nowrap; }
     #tss-banner .tss-bn { display: inline-block; font: 900 clamp(40px, 9vw, 120px)/1 ui-monospace, Menlo, monospace;
+      font-size: var(--tss-bn-size, clamp(40px, 9vw, 120px));
       letter-spacing: .06em; color: #7ff; text-shadow: 0 0 12px #0ff, 0 0 42px #08f;
       animation: tss-bn-in 900ms ease-out both, tss-bn-flicker 1.7s 900ms infinite; }
     #tss-banner .tss-gap { display: inline-block; width: .6em; }
@@ -123,7 +126,20 @@
     const dpr = devicePixelRatio || 1;
     W = innerWidth; H = innerHeight;
     canvas.width = W * dpr; canvas.height = H * dpr;
+    // In pixels, not 100vw/100vh: those can differ from what's drawn (a phone's 100vh includes the space
+    // under its toolbar, which stretched the ship off the bottom of the screen).
+    canvas.style.width = `${W}px`; canvas.style.height = `${H}px`;
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    placeBanner();
+  };
+  // "ROBOT DESTROYED" in the middle of the window, its letters as big as fit: 15 letters and a gap in a
+  // wide monospace come to about 10.5 em, so about 8.5% of the width leaves a margin (a small phone too).
+  const placeBanner = () => {
+    let b;
+    try { b = banner; } catch { return; } // (the first resize runs before `banner` is declared, below)
+    if (!b) return;
+    b.style.left = `${W / 2}px`; b.style.top = `${H / 2}px`;
+    b.style.setProperty('--tss-bn-size', `${Math.round(Math.max(14, Math.min(120, W * 0.085)))}px`);
   };
   resize();
   addEventListener('resize', resize);
@@ -817,6 +833,7 @@
     banner.append(text);
     banner.style.translate = canvas.style.translate; // see pin()
     document.documentElement.append(banner);
+    placeBanner();
     // Shots pass through it until every letter's entrance animation (ours, or a theme's like Rainbow
     // Rave's staggered spin-in) has finished; then it's fair game. Capped at 4 s in case one never ends.
     const b = banner;

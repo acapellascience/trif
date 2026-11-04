@@ -194,7 +194,8 @@
       text-shadow: none !important; /* the glow is light, added on the glow canvas (see raveGlow) */
     }
     /* the additive glow layer: above the page, below the shooter's canvas */
-    #rave-glow, #rave-glow-z { position: fixed; inset: 0; width: 100vw; height: 100vh; pointer-events: none;
+    /* (sized in pixels to the window as innerWidth/innerHeight measure it, like what's drawn: see paint) */
+    #rave-glow, #rave-glow-z { position: fixed; left: 0; top: 0; pointer-events: none;
       z-index: 2147483644; mix-blend-mode: plus-lighter; }
 
     /* Space shooter's "ROBOT DESTROYED": rainbow letters (--tss-i is each one's index) that spin down
@@ -687,6 +688,8 @@
         if (W !== innerWidth || H !== innerHeight || cv.width !== Math.round(innerWidth * dpr)) {
           W = innerWidth; H = innerHeight;
           cv.width = cvz.width = Math.round(W * dpr); cv.height = cvz.height = Math.round(H * dpr);
+          // (not 100vw/100vh: a phone's 100vh includes the space under its toolbar, stretching the glows)
+          for (const c of [cv, cvz]) { c.style.width = `${W}px`; c.style.height = `${H}px`; }
         }
         // pin to the window (the tilt card's `perspective` and the shooter's shake `translate` on <html>
         // make it the box "fixed" elements are placed in). The zoomed layer is placed the same way, so it

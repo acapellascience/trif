@@ -16,7 +16,9 @@
   // One full-screen canvas on top of everything; pointer-events: none so clicks pass through.
   const canvas = document.createElement('canvas');
   canvas.setAttribute('data-fw-canvas', '');
-  canvas.style.cssText = 'position:fixed;inset:0;width:100vw;height:100vh;pointer-events:none;z-index:2147483647;';
+  // (sized in pixels to the window as innerWidth/innerHeight measure it, like what it draws: 100vw/100vh can
+  // differ, e.g. a phone's 100vh includes the space under its toolbar, which stretched the drawing)
+  canvas.style.cssText = 'position:fixed;left:0;top:0;pointer-events:none;z-index:2147483647;';
   document.documentElement.append(canvas);
   const ctx = canvas.getContext('2d');
   let dpr = 1, W = 0, H = 0;
@@ -24,7 +26,17 @@
     dpr = window.devicePixelRatio || 1;
     W = innerWidth; H = innerHeight;
     canvas.width = W * dpr; canvas.height = H * dpr;
+    canvas.style.width = `${W}px`; canvas.style.height = `${H}px`;
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  };
+  // Keep it on the window: when <html> has a `perspective` (Tilt Card) or a `translate` (the shooter's
+  // shake), "fixed" is placed against the page instead, so the bursts landed off target once scrolled.
+  let pinX = 0, pinY = 0;
+  const pin = () => {
+    const r = canvas.getBoundingClientRect();
+    if (Math.abs(r.left) < 0.5 && Math.abs(r.top) < 0.5) return;
+    pinX -= r.left; pinY -= r.top;
+    canvas.style.translate = `${pinX}px ${pinY}px`;
   };
   resize();
   addEventListener('resize', resize);
@@ -246,6 +258,7 @@
   let running = false;
   const frame = () => {
     try {
+      pin();
       ctx.clearRect(0, 0, W, H);
       ctx.globalCompositeOperation = 'lighter';
 

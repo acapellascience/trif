@@ -69,17 +69,17 @@ const PREINSTALLED = [
   // Added in 0.2.0, the same way: the mods on TRIF's own home page, all off (and TRIF stays off on
   // timsrobot.com, not in SITES_ON, until the user turns it on there).
   { id: 'timsrobot.com/tagline', on: false },
+  { id: 'timsrobot.com/robot', on: false },
   { id: 'timsrobot.com/jelly', on: false },
   { id: 'timsrobot.com/gravity', on: false },
-  { id: 'timsrobot.com/fireworks', on: false },
   { id: 'timsrobot.com/neon', on: false },
-  { id: 'timsrobot.com/shooter', on: false },
   { id: 'timsrobot.com/stickers', on: false },
+  { id: 'timsrobot.com/shooter', on: false },
+  { id: 'timsrobot.com/fireworks', on: false },
   { id: 'timsrobot.com/checklist', on: false },
   { id: 'timsrobot.com/terminal', on: false },
-  { id: 'timsrobot.com/rave', on: false },
   { id: 'timsrobot.com/led', on: false },
-  { id: 'timsrobot.com/robot', on: false },
+  { id: 'timsrobot.com/rave', on: false },
   { id: 'timsrobot.com/tilt', on: false },
 ];
 

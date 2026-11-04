@@ -36,9 +36,158 @@
   const launch = (tx, ty) => {
     const x = tx + rand(-60, 60);
     rockets.push({ x, y: H + 5, sx: x, sy: H + 5, tx, ty, t: 0, dur: rand(0.55, 0.8), trail: [], hue: rand(0, 360) });
+    sound.thud();
   };
 
   const MAX_SPARKS = 5000; // keep it smooth when clicking like mad
+
+  // --- The boom of each big burst: the same recipe as Space Shooter's robot explosion (a crack, a deep
+  // saturated "dmmm" with a fifth above, a dark roar whose highs roll off fast, aftershocks and a low
+  // rolling rumble), in a reverb half as long (1.5 s). Synthesized with Web Audio, nothing loaded; starts
+  // on your first real click (browsers only allow sound after one).
+  const sound = (() => {
+    let ac = null, out = null, noise = null, verb = null, short = null, curve = null, last = 0;
+    const wake = (e) => {
+      if (!e.isTrusted) return;
+      try {
+        if (!ac) {
+          ac = new AudioContext();
+          const comp = ac.createDynamicsCompressor();
+          out = ac.createGain(); out.gain.value = 0.5;
+          // +6 dB (×2) after the compressor, to sit level with Rainbow Rave's music
+          const boost = ac.createGain(); boost.gain.value = 2;
+          out.connect(comp); comp.connect(boost); boost.connect(ac.destination);
+          noise = ac.createBuffer(1, ac.sampleRate * 2, ac.sampleRate);
+          const d = noise.getChannelData(0);
+          for (let i = 0; i < d.length; i++) d[i] = Math.random() * 2 - 1;
+          const makeVerb = (sec) => { // a dark made-up room: decaying, smoothed noise
+            const len = Math.round(ac.sampleRate * sec), ir = ac.createBuffer(2, len, ac.sampleRate);
+            for (let ch = 0; ch < 2; ch++) {
+              const b = ir.getChannelData(ch);
+              let lp = 0;
+              for (let i = 0; i < len; i++) { lp += 0.08 * (Math.random() * 2 - 1 - lp); b[i] = lp * 3 * Math.pow(1 - i / len, 2.5); }
+            }
+            const conv = ac.createConvolver();
+            conv.buffer = ir;
+            const send = ac.createGain();
+            send.connect(conv); conv.connect(out);
+            return send;
+          };
+          verb = makeVerb(1.5);
+          short = makeVerb(0.5); // the launch thud's
+          curve = new Float32Array(1024);
+          for (let i = 0; i < 1024; i++) curve[i] = Math.tanh((i / 511.5 - 1) * 3);
+        }
+        if (ac.state === 'suspended') ac.resume();
+      } catch (err) { window.trif?.warn('firework sound failed', String(err)); }
+    };
+    addEventListener('pointerdown', wake, true);
+    addEventListener('keydown', wake, true);
+    const env = (t, peak, attack, decay, wet, bus = verb) => {
+      const g = ac.createGain();
+      // Silent from the start: a new gain node is at full volume (1) until its first scheduled value
+      // takes over, and that can land a render block late, letting a few ms of sound through at full
+      // volume (a loud snap that no level setting turned down).
+      g.gain.value = 0.0001;
+      g.gain.setValueAtTime(0.0001, t);
+      g.gain.exponentialRampToValueAtTime(peak, t + attack);
+      g.gain.exponentialRampToValueAtTime(0.0001, t + attack + decay);
+      g.connect(out);
+      if (wet > 0) { const s = ac.createGain(); s.gain.value = wet; g.connect(s); s.connect(bus); }
+      return g;
+    };
+    const dmm = (t, f0, len, peak, wet) => { // a low tone sagging in pitch, saturated for body, darkened
+      const o = ac.createOscillator(), pre = ac.createGain(), sh = ac.createWaveShaper(), f = ac.createBiquadFilter();
+      o.type = 'sine';
+      o.frequency.setValueAtTime(f0, t);
+      o.frequency.exponentialRampToValueAtTime(f0 * 0.6, t + len);
+      pre.gain.value = 1.6; sh.curve = curve;
+      f.type = 'lowpass'; f.frequency.value = 420; f.Q.value = 0.7;
+      o.connect(pre); pre.connect(sh); sh.connect(f); f.connect(env(t, peak, 0.012, len, wet));
+      o.start(t); o.stop(t + len + 0.1);
+    };
+    const rumble = (t, from, to, len, peak, wet, attack = 0.01, fall = 0) => { // filtered noise
+      const src = ac.createBufferSource(), f = ac.createBiquadFilter();
+      src.buffer = noise; src.loop = true;
+      f.type = 'lowpass'; f.Q.value = 0.5;
+      f.frequency.setValueAtTime(from, t);
+      if (fall) f.frequency.setTargetAtTime(to, t, fall / 3); else f.frequency.exponentialRampToValueAtTime(to, t + len);
+      src.connect(f); f.connect(env(t, peak, attack, len, wet));
+      src.start(t, Math.random()); src.stop(t + len + 0.1);
+    };
+    const live = () => ac && ac.state === 'running' && !document.hidden;
+    let lastCrackle = 0;
+    return {
+      // launch: a small, dull thud (a short low tone and a puff of dark noise), in a 0.5 s room
+      thud: () => {
+        try {
+          if (!live()) return;
+          const t = ac.currentTime, o = ac.createOscillator();
+          o.type = 'sine';
+          o.frequency.setValueAtTime(150, t);
+          o.frequency.exponentialRampToValueAtTime(55, t + 0.12);
+          o.connect(env(t, 0.22, 0.004, 0.13, 0.5, short));
+          o.start(t); o.stop(t + 0.2);
+          const src = ac.createBufferSource(), f = ac.createBiquadFilter();
+          src.buffer = noise;
+          f.type = 'lowpass'; f.frequency.setValueAtTime(450, t); f.frequency.exponentialRampToValueAtTime(120, t + 0.08);
+          src.connect(f); f.connect(env(t, 0.07, 0.003, 0.08, 0.5, short));
+          src.start(t, Math.random()); src.stop(t + 0.15);
+        } catch {}
+      },
+      // the secondary sprays: a smooth wash of white noise that fades in as the volley starts and out
+      // after it (one per volley: later sprays in the same volley ride on it)
+      crackle: () => {
+        try {
+          if (!live()) return;
+          const t = ac.currentTime;
+          if (t < lastCrackle) return; // a wash is still playing
+          const IN = 0.25, HOLD = 0.175, OUT = 0.8, LEVEL = 0.0135;
+          lastCrackle = t + IN + HOLD + OUT; // one at a time: never overlapping
+          // stereo width: two unrelated stretches of noise, one hard left, one hard right (the same noise in
+          // both ears would sit in the middle)
+          const g = ac.createGain(), merge = ac.createChannelMerger(2), srcs = [];
+          for (const ch of [0, 1]) {
+            const src = ac.createBufferSource(), f = ac.createBiquadFilter();
+            src.buffer = noise; src.loop = true;
+            f.type = 'highpass'; f.frequency.value = 2500;
+            src.connect(f); f.connect(merge, 0, ch);
+            srcs.push(src);
+          }
+          g.gain.value = 0; // (silent from the start: see env)
+          merge.connect(g);
+          g.gain.setValueAtTime(0, t);
+          g.gain.linearRampToValueAtTime(LEVEL, t + IN);
+          g.gain.setValueAtTime(LEVEL, t + IN + HOLD);
+          g.gain.linearRampToValueAtTime(0, t + IN + HOLD + OUT);
+          g.connect(out);
+          // into the firework's reverb, as much as the boom's aftershocks (it's dark, and this is bright
+          // hiss, so it needs a strong send to be heard there)
+          const s = ac.createGain(); s.gain.value = 0.6; g.connect(s); s.connect(verb);
+          const at = Math.random();
+          srcs.forEach((src, i) => { src.start(t, (at + i * 0.9) % 2); src.stop(t + IN + HOLD + OUT + 0.05); });
+        } catch {}
+      },
+      boom: () => {
+        try {
+          if (!ac || ac.state !== 'running' || document.hidden) return;
+          const t = ac.currentTime;
+          if (t - last < 0.06) return; // clicking like mad: not a wall of booms
+          last = t;
+          const f0 = 46 + Math.random() * 8, len = 1.2;
+          dmm(t, f0, len, 0.45, 0.45);
+          dmm(t, f0 * 1.5, len * 0.6, 0.12, 0.2);
+          rumble(t, 1100, 50, len, 0.24, 0.3, 0.01, 0.3);     // the roar
+          rumble(t, 2000, 200, 0.12, 0.2, 0.3, 0.003, 0.05);  // the crack
+          rumble(t, 220, 35, 1.6, 0.18, 0.6, 0.12);           // the low rolling rumble (half the robot's)
+          [[0.14, 0.55], [0.35, 0.35], [0.62, 0.2]].forEach(([dt, k], i) => { // aftershocks, closer together
+            dmm(t + dt, f0 * (0.9 - i * 0.08), len * 0.6, 0.35 * k + 0.05, 0.6);
+            rumble(t + dt, 320, 40, len * 0.6, 0.12 * k + 0.02, 0.6, 0.03, 0.2);
+          });
+        } catch {}
+      },
+    };
+  })();
 
   // HUGE bursts: radius scales with the window (about half the screen across).
   // A spark at speed v with drag 0.965/frame travels ~v/0.035 px, so v = R * 0.035.
@@ -47,6 +196,7 @@
     // Big bursts (not the little crackles) are announced, in window coordinates, so other mods can
     // react (Living robot shies away from ones near him).
     if (scale >= 0.5) dispatchEvent(new CustomEvent('firework-burst', { detail: { x, y, radius: R } }));
+    if (scale >= 1) sound.boom(); else sound.crackle(); // (the little bursts are the secondary sprays)
     const vmax = R * 0.035;
     const style = Math.random();
     const rainbow = style < 0.45; // full spectrum around the circle
@@ -184,6 +334,16 @@
   }, true);
   // Space shooter's "play again?" fades the page out and resets it: the rocket its click launched (and
   // anything still in the air) goes, so nothing bursts over the fresh page.
+  // Other mods can set one off: `firework-launch` { x, y } (window coordinates) sends a rocket up to burst
+  // there, like a click would (Space Shooter's You Win launches an arc of them).
+  addEventListener('firework-launch', (e) => {
+    try {
+      const { x, y } = e.detail || {};
+      if (!Number.isFinite(x) || !Number.isFinite(y)) return;
+      launch(x, y);
+      start();
+    } catch (err) { window.trif?.warn(String(err)); }
+  });
   const clearAll = () => { rockets.length = 0; sparks.length = 0; confetti.length = 0; };
   addEventListener('tss-again-out', clearAll);
   addEventListener('tss-again-in', clearAll);

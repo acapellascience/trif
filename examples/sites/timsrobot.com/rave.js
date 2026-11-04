@@ -226,6 +226,14 @@
       padding: 0; display: flex; align-items: center; justify-content: center; cursor: pointer; }
     .wm-rainbow-music svg { width: 20px; height: 20px; fill: #fff; display: block; }
     .wm-rainbow-zoom { right: 64px; }
+    /* unlocked by winning: they pop in, with a glow that fades */
+    .wm-rainbow-music.wm-rainbow-new { animation: wm-rainbow-pop 1.1s cubic-bezier(.2,1.6,.4,1) both; }
+    .wm-rainbow-zoom.wm-rainbow-new { animation-delay: .25s; }
+    @keyframes wm-rainbow-pop {
+      0% { transform: scale(0); opacity: 0; box-shadow: 0 0 0 0 rgba(255,255,255,0.9); }
+      60% { transform: scale(1.15); opacity: 1; box-shadow: 0 0 24px 8px rgba(255,255,255,0.6); }
+      100% { transform: scale(1); opacity: 1; box-shadow: 0 0 0 0 rgba(255,255,255,0); }
+    }
     .wm-rainbow-zoom[aria-pressed=false] { opacity: 0.6; }
   `;
   (document.head || document.documentElement).append(style);
@@ -437,9 +445,12 @@
   };
   document.addEventListener('visibilitychange', sync);
 
-  // Autoplay on the first click or keypress (browsers only allow sound after a gesture).
+  // Autoplay on the first click or keypress (browsers only allow sound after a gesture). On timsrobot.com
+  // the music is always on (no play/pause or zoom buttons): it starts with your first real click or key
+  // press, and any later one wakes it if the browser held it back.
   const firstGesture = (e) => {
-    if (button && e.composedPath().includes(button)) return;
+    if (!e.isTrusted) return; // (a click sent by code can't unlock sound: wait for a real one)
+    if (button && e.composedPath().includes(button)) return; // (the play/pause button, once unlocked, decides itself)
     if (zoomButton && e.composedPath().includes(zoomButton)) return;
     removeEventListener('pointerdown', firstGesture, true);
     removeEventListener('keydown', firstGesture, true);
@@ -450,12 +461,18 @@
   };
   addEventListener('pointerdown', firstGesture, true);
   addEventListener('keydown', firstGesture, true);
+  const wakeMusic = (e) => {
+    if (e.isTrusted && musicOn && ctx && ctx.state === 'suspended' && !document.hidden) { try { start(); } catch {} }
+  };
+  addEventListener('pointerdown', wakeMusic, true);
+  addEventListener('keydown', wakeMusic, true);
 
   // ---- Kick zoom: the page's blocks zoom with each kick, around the centre of the screen. ----
   // One endless beat-long animation per block, sharing one start time locked to the kicks (see X's version
   // for why: restarting per kick re-rasterizes everything twice a beat).
+  // (always on until the buttons are unlocked by winning, see below; then your choice is remembered)
   let zoomOn = true;
-  try { zoomOn = localStorage.getItem('wmRainbow.zoom') !== 'off'; } catch {}
+  try { if (localStorage.getItem('wmRainbow.unlocked') === '1') zoomOn = localStorage.getItem('wmRainbow.zoom') !== 'off'; } catch {}
   const BEAT = 60000 / BPM;
   const PULSE = [{ scale: 1.05, easing: 'steps(4)' }, { scale: 1, offset: 280 / BEAT }, { scale: 1 }];
   const TIMING = { duration: BEAT, iterations: Infinity };
@@ -521,7 +538,8 @@
     zoomButton.setAttribute('aria-label', zoomOn ? 'Turn off kick zoom' : 'Turn on kick zoom');
     zoomButton.title = zoomOn ? 'Kick zoom on: click to turn it off' : 'Kick zoom off: click to turn it on';
   };
-  const addButtons = () => {
+  const addButtons = (fresh) => {
+    if (button) return;
     zoomButton = document.createElement('button');
     zoomButton.className = 'wm-rainbow-music wm-rainbow-zoom';
     zoomButton.addEventListener('click', (e) => {
@@ -544,6 +562,7 @@
     });
     // On <html>, not <body>: the tilt card transforms <body>, which would carry "fixed" buttons with it.
     // (Also keeps them out of Gravity mode's pile.)
+    if (fresh) { zoomButton.classList.add('wm-rainbow-new'); button.classList.add('wm-rainbow-new'); } // the unlock: they pop in
     document.documentElement.append(zoomButton, button);
     sync();
     requestAnimationFrame(pinButtons);
@@ -565,7 +584,35 @@
     } catch {}
     requestAnimationFrame(pinButtons);
   };
-  if (document.body) addButtons(); else addEventListener('DOMContentLoaded', addButtons);
+  // On timsrobot.com the play/pause and kick-zoom buttons are a prize: until you've won Space Shooter's game
+  // (its `tss-win` event), the music and the zoom are simply part of the rave. Winning unlocks them; they pop
+  // in when you come back from the win ("play again?": as the white fades away, `tss-again-in`), and stay
+  // unlocked (remembered in this browser).
+  const UNLOCK = 'wmRainbow.unlocked';
+  let unlocked = false;
+  try { unlocked = localStorage.getItem(UNLOCK) === '1'; } catch {}
+  const showButtons = (fresh) => { if (document.body) addButtons(fresh); else addEventListener('DOMContentLoaded', () => addButtons(fresh)); };
+  if (unlocked) showButtons(false);
+  let justWon = false;
+  addEventListener('tss-win', () => {
+    if (button) return;
+    justWon = true;
+    try { localStorage.setItem(UNLOCK, '1'); } catch {}
+  });
+  // …and they arrive switched off: as the win fades to white, the music (already fading out) stays off and
+  // the zoom stops, so you come back to a quiet page, with the buttons to turn them on
+  addEventListener('tss-again-out', () => {
+    if (!justWon) return;
+    musicOn = false;
+    zoomOn = false;
+    try { localStorage.setItem('wmRainbow.zoom', 'off'); } catch {}
+    clearTimeout(stopTimer); stopAll();
+  });
+  addEventListener('tss-again-in', () => {
+    if (!justWon) return;
+    justWon = false;
+    setTimeout(() => showButtons(true), 700); // (once the page is mostly back from the white)
+  });
 
   // ---- Additive glow for the neon title and Space shooter's "ROBOT DESTROYED" ----
   // A CSS text-shadow paints plain colour (a smudge on the rainbow) and can't blend, and mix-blend-mode

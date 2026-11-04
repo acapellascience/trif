@@ -11,7 +11,17 @@ body.site-off .bar-robot:hover:not([aria-busy="true"]) svg { opacity: 0.7; }
    the recorded prompt waiting in the message box takes their place. */
 #empty .chips { display: none; }
 
-/* Until every recording has played, the message box holds the next recorded prompt and can't be typed in
+/* At a desk, "Recorded chats" above the message box: the chats not played yet (shim.js). */
+.demo-replays { margin: 0 14px 6px; }
+.demo-replays[hidden] { display: none; }
+.demo-replays summary { cursor: pointer; color: var(--muted); font-size: 12px; font-weight: 500; }
+.demo-replays summary::marker { color: var(--faint); }
+.demo-chips { margin-top: 7px; max-height: 20vh; overflow-y: auto; overscroll-behavior: contain; scrollbar-width: thin; }
+.demo-chips .chip { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-align: left; }
+.demo-chips .chip:disabled { opacity: 0.5; cursor: default; }
+body:is(.site-off, .no-site) .demo-replays { display: none; }
+
+/* On a phone, until every recording has played, the message box holds the next recorded prompt and can't be typed in
    or focused (on a phone: no keyboard, no zooming in on it); Send replays it (shim.js). */
 html.demo-guided #input { pointer-events: none; caret-color: transparent; }
 /* On a phone, everything the visitor could still focus (the settings) is at least 16px, or the phone zooms

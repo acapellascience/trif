@@ -328,12 +328,14 @@ function render() {
 
   // Before the mods: a mod's "Merge with my agent" starts a run too.
   // Not while the agent is known to be logged out (or the open model has no key): the run would only fail
-  // with that, under the notice that says it. Send's tooltip says what to do.
-  const waitsForLogin = (problem === 'login' && agentInfo?.loggedIn === false) || problem === 'key';
+  // with that. From the agent itself, not the panel's main problem: a red one (user scripts off) takes
+  // that slot, and the login is still missing. Send's tooltip says what to do.
+  const keyMissing = agentInfo?.id === 'codex-oss' && agentInfo.available && openModelKeyMissing();
+  const waitsForLogin = (!!agentInfo?.available && agentInfo.loggedIn === false) || !!keyMissing;
   const canSend = !!site && helperOk && !waitsForLogin && (agentInfo ? agentInfo.available : (view.agents ? anyAgent : true));
   ui.composer.dataset.canSend = canSend ? '1' : '';
   ui.send.title = !waitsForLogin ? 'Send'
-    : problem === 'key' ? `Add your ${openModelKeyMissing()} API key in Settings first`
+    : keyMissing ? `Add your ${keyMissing} API key in Settings first`
       : `Log in to ${agentInfo?.name || 'your agent'} first`;
 
   renderGate(problem, agentInfo);

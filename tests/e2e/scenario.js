@@ -1088,6 +1088,8 @@ class Scenario {
         if (x.notices[0] !== 'Mods are paused') throw new Error(`notices: ${JSON.stringify(x.notices)}`);
         // F3: not logged in as well, both notices show, the paused one first.
         if (loggedOut && !x.notices.slice(1).some((t) => /isn’t logged in/.test(t))) throw new Error(`no login notice under it: ${JSON.stringify(x.notices)}`);
+        // Still no sending while logged out, though the red problem holds the panel's main slot.
+        if (loggedOut && (!x.send.disabled || !/^Log in to .+ first$/.test(x.send.title))) throw new Error(`Send: ${JSON.stringify(x.send)}`);
         await this.shot(this.panelCtx, loggedOut ? 'panel-scripts-off-logged-out' : 'panel-scripts-off');
         return x.notices.join(' / ');
       });

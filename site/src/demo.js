@@ -4,7 +4,7 @@
 // site/demo/, and so are the mods (site/demo/mods/: the site's own, which TRIF doesn't ship), all bundled
 // into demo-files.js by site/build-demo.js.
 
-import { FILES, MODS, CHATS, ORDER, PATHS } from './demo-files.js';
+import { FILES, MODS, CHATS, ORDER } from './demo-files.js';
 import { HOME, homePage } from './pages.js';
 
 // The extension files the side panel loads (sidepanel.html's links and scripts, and everything they
@@ -21,8 +21,6 @@ export const typeFor = (file) => TYPES[file.split('.').pop()] || 'application/oc
 
 // What the demo says itself (the panel's own words are the extension's).
 const WORDS = {
-  recorded: 'Recorded chats: pick one to play it',
-  replaying: 'Playing a chat, sped up about {n}×',
   notLive: 'This demo only plays example chats, so nothing reads what you type here. ' +
     'The real TRIF sends your message to your own coding agent (Claude Code, Codex or an open model) on your computer, and it writes the mod.',
   codexModels: 'In TRIF, this lists the models your Codex account can use.',
@@ -97,7 +95,6 @@ const SHIM_DATA = {
   mods: MODS.map(({ slug, id, name, description, matches, risk }) => ({ slug, id, name, description, matches, risk })),
   order: ORDER, // the panel's order for them, as TRIF ships it (the extension's defaultOrder)
   chats: CHATS,
-  paths: PATHS, // the desk demo's chats and order, and the phone's (build-demo.js)
   words: WORDS,
 };
 const placeholder = '/*DEMO_DATA*/null';

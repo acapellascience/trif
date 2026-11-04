@@ -18,21 +18,14 @@ const DEMO = path.join(HERE, 'demo');
 export const MODS_DIR = path.join(DEMO, 'mods');
 export const OUT = path.join(HERE, 'src', 'demo-files.js');
 
-// Two demos (shim.js picks one when it first opens in a tab):
-// - desk (wider than a phone): a sandbox. Every mod is listed from the start, off, in DEMO_ORDER, to
-//   switch on and off at will, and every one of CHAT_ORDER's recorded chats (one per mod) can be played,
-//   in any order, from "Recorded chats".
-// - phone: a garden path. PHONE_PATH's chats, one after another, each one bigger than the last (the
-//   makeover chat makes six mods at once); a mod is listed once its chat has played, in PHONE_ORDER.
-//   No Tilt Card: too much for a phone with everything else running.
-const CHAT_ORDER = ['tagline', 'robot', 'jelly', 'gravity', 'neon', 'stickers', 'shooter', 'fireworks', 'checklist', 'terminal', 'led',
-  'tilt', 'rave'];
-export const PHONE_PATH = ['tagline', 'robot', 'fireworks', 'makeover', 'gravity', 'shooter', 'rave'];
-export const PHONE_ORDER = ['tagline', 'robot', 'fireworks', 'neon', 'jelly', 'stickers', 'checklist', 'terminal', 'led', 'gravity', 'shooter', 'rave'];
+// The order the recorded chats are offered in, one at a time, each one bigger than the last (the title
+// chat makes two mods, the makeover four). Follow-ups (a chat's `after`) are offered once the chats they
+// follow have been replayed.
+const CHAT_ORDER = ['tagline', 'robot', 'title', 'fireworks', 'makeover', 'gravity', 'shooter', 'rave'];
 
-// The order the demo panel lists its mods in (every one in mods/, by file name).
-export const DEMO_ORDER = ['tagline', 'robot', 'jelly', 'gravity', 'neon', 'stickers', 'shooter', 'fireworks', 'checklist',
-  'terminal', 'led', 'tilt', 'rave'];
+// The order the demo panel lists its mods in (every one in mods/, by file name): the order they're made in.
+export const DEMO_ORDER = ['tagline', 'robot', 'neon', 'jelly', 'fireworks', 'stickers', 'checklist', 'terminal', 'led',
+  'gravity', 'shooter', 'rave'];
 
 const read = (...p) => fs.readFileSync(path.join(DEMO, ...p), 'utf8');
 
@@ -68,35 +61,26 @@ export function demoModule() {
   const order = DEMO_ORDER.map((slug) => `timsrobot.com/${slug}`);
   const chats = fs.readdirSync(path.join(DEMO, 'chats')).filter((f) => f.endsWith('.json')).map((f) => JSON.parse(read('chats', f)));
   for (const c of chats) {
-    if (!CHAT_ORDER.includes(c.id) && !PHONE_PATH.includes(c.id)) throw new Error(`chat ${c.id} isn't in CHAT_ORDER or PHONE_PATH`);
+    if (!CHAT_ORDER.includes(c.id)) throw new Error(`chat ${c.id} isn't in CHAT_ORDER`);
     for (const s of c.mods) if (!slugs.has(s)) throw new Error(`chat ${c.id}: no mod ${s}`);
     if (c.focus !== undefined && !c.mods.includes(c.focus)) throw new Error(`chat ${c.id}: focus ${c.focus} isn't one of its mods`);
-    if (PHONE_PATH.includes(c.id)) for (const s of c.mods) if (!PHONE_ORDER.includes(s)) throw new Error(`chat ${c.id}: ${s} isn't in PHONE_ORDER`);
-    if (c.touch !== undefined) { // its touchscreen version (shim.js): a prompt, and texts by message index
-      if (typeof c.touch.prompt !== 'string' || !c.touch.prompt.trim()) throw new Error(`chat ${c.id}: touch.prompt`);
+    if (c.touch !== undefined) { // its touchscreen version (shim.js): a prompt (or the same one), and texts by message index
+      if (c.touch.prompt !== undefined && (typeof c.touch.prompt !== 'string' || !c.touch.prompt.trim())) throw new Error(`chat ${c.id}: touch.prompt`);
       for (const [i, text] of Object.entries(c.touch.texts || {})) {
         if (!/^[1-9]\d*$/.test(i) || Number(i) >= c.messages.length || typeof text !== 'string') throw new Error(`chat ${c.id}: touch.texts[${i}]`);
       }
     }
   }
-  const ids = new Set(chats.map((c) => c.id));
-  for (const id of [...CHAT_ORDER, ...PHONE_PATH]) if (!ids.has(id)) throw new Error(`no chats/${id}.json`);
-  for (const slug of PHONE_ORDER) if (!slugs.has(slug)) throw new Error(`PHONE_ORDER has ${slug}, which isn't in mods/`);
-  const prompts = chats.flatMap((c) => [c.prompt, ...(c.touch ? [c.touch.prompt] : [])]);
+  for (const id of CHAT_ORDER) if (!chats.some((c) => c.id === id)) throw new Error(`no chats/${id}.json`);
+  const prompts = chats.flatMap((c) => [c.prompt, ...(c.touch?.prompt ? [c.touch.prompt] : [])]);
   if (new Set(prompts).size !== prompts.length) throw new Error('two chats (or touch versions) have the same prompt');
-  const rank = (id) => (CHAT_ORDER.includes(id) ? CHAT_ORDER.indexOf(id) : CHAT_ORDER.length + PHONE_PATH.indexOf(id));
-  chats.sort((a, b) => rank(a.id) - rank(b.id));
-  const paths = {
-    desk: { chats: CHAT_ORDER, order: DEMO_ORDER.map((slug) => `timsrobot.com/${slug}`) },
-    phone: { chats: PHONE_PATH, order: PHONE_ORDER.map((slug) => `timsrobot.com/${slug}`) },
-  };
+  chats.sort((a, b) => CHAT_ORDER.indexOf(a.id) - CHAT_ORDER.indexOf(b.id));
   const files = Object.fromEntries(['tab.js', 'shim.js', 'panel.css'].map((f) => [f, read(f)]));
   return `// Generated by site/build-demo.js from site/demo/: don't edit. Run node site/build-demo.js instead.
 export const FILES = ${JSON.stringify(files, null, 1)};
 export const MODS = ${JSON.stringify(mods, null, 1)};
 export const CHATS = ${JSON.stringify(chats, null, 1)};
 export const ORDER = ${JSON.stringify(order)};
-export const PATHS = ${JSON.stringify(paths)};
 `;
 }
 

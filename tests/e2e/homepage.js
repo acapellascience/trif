@@ -9,7 +9,7 @@
 // throwaway profile, as the e2e suite does (tests/e2e/lib). It checks that the demo works, and that with
 // the real TRIF installed the home page is like any other website:
 //  - TRIF off for timsrobot.com: nothing marks the page; the demo's tab is outside <body> (top layer); each
-//    demo mod works alone and all together, and gravity, the shooter, tilting and the rave leave the tab
+//    demo mod works alone and all together, and gravity, the shooter and the rave leave the tab
 //    alone; Escape on the page is the page's (Gravity's), not the panel's;
 //  - then TRIF turned on for the site in the real side panel (Fix): still nothing marks the page, and the
 //    demo and its mods work as before;
@@ -43,7 +43,6 @@ const PROBES = {
   'rave': '#rave-glow',
   'led': '.led-sign',
   'robot': 'svg.robot[data-lr]',
-  'tilt': 'style[data-tc]',
 };
 
 function parseArgs(argv) {
@@ -172,18 +171,17 @@ async function main() {
       return `tab at ${s0.tab.rect}`;
     });
 
-    await check('the demo panel at a desk is a sandbox: every mod listed, off, in Tim\'s order, every recorded chat offered, a box that takes typing', async () => {
+    await check('the demo panel starts with no mods, and the first recorded prompt (the first mod in Tim\'s order) waiting in a box that can\'t be typed in', async () => {
       await page(`async () => { document.querySelector('.demo-tab').click(); }`);
       await sleep(2500);
-      const p = await demoPanel(`(doc) => ({ rows: doc.querySelectorAll('#mod-list > li').length,
-        on: [...doc.querySelectorAll('#mod-list > li [role=switch]')].filter((s) => s.getAttribute('aria-checked') === 'true').length,
-        chips: doc.querySelectorAll('.demo-replays:not([hidden]) .demo-chips .chip').length, first: doc.querySelector('.demo-chips .chip')?.title,
-        ro: doc.getElementById('input').readOnly })`);
       const first = require('../../site/demo/chats/tagline.json');
+      // (the waiting prompt types itself in: give it a few seconds)
+      await waitFor('the first prompt typed in', async () => (await demoPanel(`(doc) => doc.getElementById('input').value`)) === first.prompt, { timeoutMs: 8000 }).catch(() => {});
+      const p = await demoPanel(`(doc) => ({ rows: doc.querySelectorAll('#mod-list > li').length, value: doc.getElementById('input').value, ro: doc.getElementById('input').readOnly })`);
       if (ORDER[0] !== 'tagline') throw new Error(`Tim's order starts with ${ORDER[0]}: update this check`);
-      if (p.rows !== ORDER.length || p.on !== 0 || p.chips !== ORDER.length || p.first !== first.prompt || p.ro) throw new Error(JSON.stringify(p));
+      if (p.rows !== 0 || !p.ro || p.value !== (first.prompt ?? first.messages?.[0]?.text)) throw new Error(JSON.stringify(p));
       await shot('demo-panel');
-      return `${p.rows} mods, all off; ${p.chips} recorded chats`;
+      return `waiting: ${p.value.slice(0, 50)}…`;
     });
 
     for (const slug of ORDER) {
@@ -199,7 +197,7 @@ async function main() {
       });
     }
 
-    await check('demo: all 13 together, each once; gravity, the shooter, tilting and the rave leave the tab alone; Escape is the page\'s', async () => {
+    await check(`demo: all ${ORDER.length} together, each once; gravity, the shooter and the rave leave the tab alone; Escape is the page's`, async () => {
       // Closed panel, so the tab shows.
       await page(`async () => sessionStorage.setItem('trif-demo-open', '')`);
       await load(`?mods=${ORDER.join(',')}`);
@@ -208,7 +206,7 @@ async function main() {
       if (twice.length) throw new Error(`not once: ${JSON.stringify(twice)}`);
       const before = s.tab;
       if (!before?.shown || !before.hit || before.parent !== 'HTML') throw new Error(JSON.stringify(before));
-      // Tilt (the mouse over the page), rave (white text), the shooter firing, then gravity.
+      // The mouse over the page, rave (white text), the shooter firing, then gravity.
       await d.cdp.send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: 200, y: 200 }, sid);
       await sleep(400);
       for (let i = 0; i < 6; i++) { await key(' ', 'Space', 32); await sleep(120); }

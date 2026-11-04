@@ -2,20 +2,18 @@
 // Worker adds it to the extension's own sidepanel.html; see site/src/demo.js). It provides the chrome.*
 // calls the panel makes and answers the panel's port messages the way extension/background.js does, from
 // made-up state: the helper is connected, Claude Code is logged in, the tab shows timsrobot.com, and the
-// robot is on there. Two demos (build-demo.js PATHS), picked when the panel first opens in a tab:
-// - desk (wider than a phone): a sandbox. All the demo's mods (site/demo/mods/) are listed from the
-//   start, off (bar the ones the page's address runs), to switch on and off at will, and any of the
-//   recorded chats can be played from "Recorded chats"; the message box takes anything.
-// - phone: a garden path. No mods at first: the next chat's prompt waits in the message box, and each
-//   chat's mods turn up in the list, on, once it has played.
+// robot is on there. No mods at first (just the ones the page's address runs): each of the demo's mods
+// (site/demo/mods/) turns up in the list, on, once the recorded chat that made it has played, in the
+// demo's order (build-demo.js DEMO_ORDER).
 //
 // What really happens:
 // - A mod switch (or the robot) reloads the home page the panel is docked to with the mods that are on
 //   (tab.js loads /?mods=…, and the Worker adds only mods from its bundled list). The panel opens again
 //   after the reload, and this picks up where it was from sessionStorage (the chat, the switches, settings,
 //   a replay in progress).
-// - Chats are recordings: Send replays a recorded prompt's session, sped up, then switches its mods on.
-//   (Anything else that reaches it gets a note saying this demo only plays example chats.)
+// - Chats are recordings: the next recording's prompt waits in the message box (which can't be typed in),
+//   and Send replays that session, sped up, then switches its mod on. (Anything else that reaches it gets
+//   a note saying this demo only replays recordings.)
 // Nothing leaves the page: no messages to a helper, no keys kept, nothing stored but this tab's
 // sessionStorage.
 //
@@ -30,38 +28,26 @@
   const TAB = { id: 7, windowId: 1, index: 0, active: true, status: 'complete', url: `https://${SITE}/`, title: "Tim's Robot Internet Fixer" };
   const clone = (v) => (v === undefined ? undefined : JSON.parse(JSON.stringify(v)));
 
-  // Which demo: the phone's garden path when the panel first opens as the short sheet, else the desk's
-  // sandbox; kept for the tab (in the saved state), so turning the phone or resizing doesn't swap it.
-  const SAVED = 'trif-demo-state';
-  let MODE = 'desk';
-  try {
-    const was = JSON.parse(sessionStorage.getItem(SAVED) || 'null')?.mode;
-    MODE = was === 'phone' || was === 'desk' ? was
-      : window.parent !== window && window.parent.matchMedia('(max-width: 700px)').matches ? 'phone' : 'desk';
-  } catch {}
-  const PHONE = MODE === 'phone';
-  if (DEMO.paths?.[MODE]) {
-    const path = DEMO.paths[MODE];
-    DEMO.chats = path.chats.map((id) => DEMO.chats.find((c) => c.id === id)).filter(Boolean);
-    DEMO.order = path.order;
-  }
-
   // On a phone (the panel is the short sheet), "Mods on this site" starts closed, to leave the chat room; the
   // panel remembers it once it's been opened or closed (sidepanel.js: localStorage modsOpen).
   try {
-    if (PHONE && localStorage.getItem('modsOpen') === null) localStorage.setItem('modsOpen', 'false');
+    if (window.parent !== window && window.parent.matchMedia('(max-width: 700px)').matches && localStorage.getItem('modsOpen') === null) {
+      localStorage.setItem('modsOpen', 'false');
+    }
   } catch {}
 
   // On a touchscreen, a chat that talks about keys or the mouse plays its touch version instead
-  // (chat.touch: its prompt, and replacement texts by message index; an empty text cuts that message).
+  // (chat.touch: its prompt, if it has its own, and replacement texts by message index; an empty text cuts
+  // that message).
   const touchscreen = (() => { try { return (window.parent || window).matchMedia('(pointer: coarse)').matches; } catch { return false; } })();
   if (touchscreen) {
     DEMO.chats = DEMO.chats.map((c) => {
       if (!c.touch) return c;
       const texts = c.touch.texts || {};
-      const messages = c.messages.map((m, i) => (i === 0 ? { ...m, text: c.touch.prompt }
+      const prompt = c.touch.prompt || c.prompt;
+      const messages = c.messages.map((m, i) => (i === 0 ? { ...m, text: prompt }
         : Object.hasOwn(texts, i) ? { ...m, text: texts[i] } : m)).filter((m) => m.text !== '');
-      return { ...c, prompt: c.touch.prompt, messages };
+      return { ...c, prompt, messages };
     });
   }
   const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -136,11 +122,12 @@
 
   // ---- across the page's reloads: this tab's sessionStorage ---------------------------------------
 
+  const SAVED = 'trif-demo-state';
   let restoring = true;
   function persist() {
     if (restoring) return;
     const out = {
-      v: 1, mode: MODE, store: Object.fromEntries(store), sitesOn: state.sitesOn, mods: state.mods.map((m) => m.slug), trash: [...state.trash.values()].map((m) => m.slug),
+      v: 1, store: Object.fromEntries(store), sitesOn: state.sitesOn, mods: state.mods.map((m) => m.slug), trash: [...state.trash.values()].map((m) => m.slug),
       instructions: state.instructions, autoUpdate: state.autoUpdate, openModel: state.openModel, replayed: [...state.replayed],
       active: state.active, runSeq,
     };
@@ -162,14 +149,13 @@
     state.active = saved.active || null;
     runSeq = Number(saved.runSeq) || 0;
   } else {
-    // First time. On a phone: only the mods running on the page (its ?mods=), on. At a desk: all of them,
-    // the ones running on the page on, the rest off.
+    // First time: only the mods running on the page (its ?mods=), on.
     let running = new Set();
     try { running = new Set(new URLSearchParams(window.parent.location.search).get('mods')?.split(',') || []); } catch {}
-    state.mods = DEMO.mods.filter((m) => !PHONE || running.has(m.slug)).map((m) => ({ ...m }));
-    store.set('disabled', Object.fromEntries(state.mods.filter((m) => !running.has(m.slug)).map((m) => [m.id, true])));
+    state.mods = DEMO.mods.filter((m) => running.has(m.slug)).map((m) => ({ ...m }));
+    store.set('disabled', {});
   }
-  // The panel lists the mods in the demo's order (build-demo.js PATHS) until the visitor drags them,
+  // The panel lists the mods in the demo's order (build-demo.js DEMO_ORDER) until the visitor drags them,
   // through the defaultOrder the real extension gets from the helper; the visitor's own order (modOrder)
   // lives in `store`.
   store.set('defaultOrder', { [SITE]: (DEMO.order || []).slice() });
@@ -361,7 +347,7 @@
       state.mods.sort((a, b) => a.slug.localeCompare(b.slug));
       setNow({ disabled: off });
       state.replayed.add(run.recording.id);
-      const mods = run.recording.mods;
+      const mods = run.recording.mods; // (`focus`: the one to show, on a phone, of a chat that makes several)
       later(() => loadPage(run.recording.focus || mods[mods.length - 1], true), 700);
     }
     ui.finished(run); // (after it's counted as played: the next prompt is the next one)
@@ -552,25 +538,23 @@
     }, { capture: true, passive: false });
   })();
 
-  // ---- The recorded chats -------------------------------------------------------------------------
-  // On a phone, one at a time: the next chat's prompt waits in the panel's own message box, which can't be
-  // typed in (typing would bring up the keyboard and zoom the page in), and Send replays it, in the path's
-  // order. Once they all have, the box is the visitor's to type in, and what they send gets the note
-  // saying what the real TRIF would do with it.
-  // At a desk, "Recorded chats" above the message box offers the ones not played yet, in any order: one
-  // types itself into the box and sends. The box takes anything else too (and gets that note).
+  // ---- The recorded chats, one at a time ----------------------------------------------------------
+  // The next recording's prompt waits in the panel's own message box, which can't be typed in (on a
+  // phone, typing would bring up the keyboard and zoom the page in), and Send replays it. One after
+  // another, in the demo's order (build-demo.js CHAT_ORDER: each one bigger than the last), each once the
+  // ones it follows on from are done.
+  // Once they all have, the box is the visitor's to type in, and what they send gets the note saying what
+  // the real TRIF would do with it.
 
   const ui = (() => {
     let busy = null; // the run being replayed
     let mounted = false;
-    // (a chat counts as done once it has played, or, on a phone, if it starts a mod off rather than
-    // following on from another chat, when its mods are all listed already: from a link with them in the
-    // page's address. At a desk they're all listed from the start.)
+    // (a chat counts as done once it has played, or, if it starts a mod off rather than following on from
+    // another chat, when its mods are all listed already: from a link with them in the page's address)
     const byId = new Map(DEMO.chats.map((c) => [c.id, c]));
-    const done = (c) => !!c && (state.replayed.has(c.id)
-      || (PHONE && !c.after.length && c.mods.every((slug) => state.mods.some((m) => m.slug === slug))));
+    const done = (c) => !!c && (state.replayed.has(c.id) || (!c.after.length && c.mods.every((slug) => state.mods.some((m) => m.slug === slug))));
     const offered = () => DEMO.chats.filter((c) => !done(c) && c.after.every((a) => done(byId.get(a))));
-    const next = () => offered()[0] || null; // (DEMO.chats is in the path's order)
+    const next = () => offered()[0] || null; // (DEMO.chats is in CHAT_ORDER)
 
     // (the panel clears the box when it sends)
     // The waiting prompt types itself into the box, as if someone were typing it, at a steady speed: the
@@ -578,7 +562,7 @@
     // at what the last one made). Send while it's waiting or typing sends all of it (see mount).
     const TYPE_MS = 33;       // per character (about 30 a second), a little uneven
     const PAUSE_FIRST = 400, PAUSE_NEXT = 5000;
-    let typing = null; // { text, timer, then } while a prompt is being typed
+    let typing = null; // { text, timer } while a prompt is being typed
     const show = (input, text) => {
       input.value = text;
       input.dispatchEvent(new Event('input', { bubbles: true })); // (the box grows to fit)
@@ -590,25 +574,24 @@
       if (finish) show(input, typing.text);
       typing = null;
     }
-    // (`then`: once it's all typed. Not if it's cut short, or finished early by a Send.)
-    function typeInto(input, text, { pause = state.replayed.size ? PAUSE_NEXT : PAUSE_FIRST, ms = TYPE_MS, then = null } = {}) {
-      if (typing?.text === text || (!typing && input.value === text && !then)) return; // (already there, or on its way)
+    function typeInto(input, text) {
+      if (typing?.text === text || (!typing && input.value === text)) return; // (already there, or on its way)
       stopTyping(input, false);
-      if (!text || matchMedia('(prefers-reduced-motion: reduce)').matches) { show(input, text); if (then) then(); return; }
+      if (!text || matchMedia('(prefers-reduced-motion: reduce)').matches) return show(input, text);
       let i = 0;
       typing = { text, timer: 0 };
       const step = () => {
         i = Math.min(text.length, i + 1);
         show(input, text.slice(0, i));
-        if (i < text.length) typing.timer = setTimeout(step, ms * (0.6 + Math.random() * 0.8));
-        else { typing = null; if (then) then(); }
+        if (i < text.length) typing.timer = setTimeout(step, TYPE_MS * (0.6 + Math.random() * 0.8));
+        else typing = null;
       };
-      typing.timer = setTimeout(step, pause);
+      typing.timer = setTimeout(step, state.replayed.size ? PAUSE_NEXT : PAUSE_FIRST);
     }
 
     function fill() {
       const input = document.getElementById('input');
-      if (!input || !PHONE) return;
+      if (!input) return;
       const c = busy ? null : next();
       const free = !busy && !c; // every recording played: the box is theirs
       const was = !document.documentElement.classList.contains('demo-guided');
@@ -634,52 +617,12 @@
       if (on) chat.scrollTop = chat.scrollHeight;
     }
 
-    // At a desk: "Recorded chats", the ones not played yet. One types itself into the box (quickly) and sends.
-    let box = null, summary = null, list = null, picked = null;
-    const el = (tag, cls, text) => { const e = document.createElement(tag); if (cls) e.className = cls; if (text !== undefined) e.textContent = text; return e; };
-    const short = (s) => (s.length > 64 ? `${s.slice(0, 62).replace(/\s+\S*$/, '')}…` : s);
-    function paint() {
-      if (!box) return;
-      const chats = offered();
-      box.hidden = !chats.length && !busy;
-      summary.textContent = busy?.recording ? DEMO.words.replaying.replace('{n}', busy.speedup) : DEMO.words.recorded;
-      list.replaceChildren(...chats.map((c) => {
-        const b = el('button', 'chip', short(c.prompt));
-        b.type = 'button';
-        b.title = c.prompt;
-        b.disabled = !!busy || !!picked;
-        b.addEventListener('click', () => choose(c));
-        return b;
-      }));
-    }
-    function choose(c) {
-      const input = document.getElementById('input');
-      const form = document.getElementById('composer');
-      if (busy || picked || !input || input.disabled || !form) return;
-      picked = c;
-      paint();
-      typeInto(input, c.prompt, { pause: 0, ms: 12, then: () => form.requestSubmit() });
-      setTimeout(() => { if (picked === c) { picked = null; paint(); } }, 400 + c.prompt.length * 20); // (if the send didn't go)
-    }
-
     function mount() {
       const form = document.getElementById('composer');
       const input = document.getElementById('input');
       if (!form || !input || mounted) return;
       mounted = true;
-      if (PHONE) document.documentElement.classList.add('demo-phone');
-      if (!PHONE) {
-        box = el('details', 'demo-replays');
-        box.open = true;
-        summary = el('summary');
-        list = el('div', 'chips demo-chips');
-        box.append(summary, list);
-        form.before(box);
-        paint();
-        document.addEventListener('submit', (e) => { if (e.target === form) stopTyping(input, true); }, true);
-        later(resume);
-        return;
-      }
+      try { if (window.parent !== window && window.parent.matchMedia('(max-width: 700px)').matches) document.documentElement.classList.add('demo-phone'); } catch {}
       input.rows = 3; // (where the box can't grow to fit its text: Safari)
       // On a phone the waiting prompt can be scrolled with a finger, but a tap mustn't focus it (no
       // keyboard): it gives the focus straight back while it's a waiting prompt.
@@ -693,11 +636,10 @@
     if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', mount, { once: true }); else mount();
 
     return {
-      replaying(run) { busy = run; picked = null; follow(true); fill(); paint(); },
+      replaying(run) { busy = run; follow(true); fill(); },
       finished(run) {
         if (busy === run) busy = null;
         fill();
-        paint();
         setTimeout(() => { if (!busy) follow(false); }, 1500);
       },
     };

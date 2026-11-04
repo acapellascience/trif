@@ -7,7 +7,7 @@
 // the reload (sessionStorage), where shim.js picks up its state. Without this script there's no tab.
 //
 // The tab and the panel live outside <body>, in the top layer where the browser has it (popover): mods that
-// take the page apart (gravity, the shooter, tilting) walk or transform the body, and mustn't take the demo
+// take the page apart (gravity, the shooter) walk or transform the body, and mustn't take the demo
 // with it. (Someone running the real TRIF here gets the demo like anyone else: the extension never marks a
 // page, so this site can't tell, and its mods are theirs to make, as on any other site.)
 (() => {
@@ -240,7 +240,7 @@
   // page back with it).
   addEventListener('keydown', (e) => { if (e.key === 'Escape' && box && box.contains(document.activeElement) && !e.defaultPrevented) hide(); });
   // On a phone, after the reload a chat's mod causes: the part of the page that mod changes, scrolled into
-  // the space above the sheet (mods that change the whole page, like Gravity or Tilt Card, have none).
+  // the space above the sheet (mods that change the whole page, like Gravity, have none).
   const heading = (words) => [...document.querySelectorAll('h2')].find((h) => h.textContent.toLowerCase().includes(words))?.parentElement;
   const FOCUS_ON = {
     tagline: () => document.querySelector('.hero .tagline'),

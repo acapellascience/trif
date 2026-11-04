@@ -274,7 +274,7 @@ test('the demo\'s bundle is up to date with site/demo/, its chats are clean and 
   const { demoModule, OUT } = await import('../site/build-demo.js');
   assert.equal(fs.readFileSync(OUT, 'utf8'), demoModule(), 'run node site/build-demo.js');
   const { MODS, CHATS, FILES } = await import('../site/src/demo-files.js');
-  assert.equal(MODS.length, 13);
+  assert.equal(MODS.length, 12);
   const slugs = new Set(MODS.map((m) => m.slug));
   for (const c of CHATS) {
     assert.equal(c.messages[0].role, 'user', c.id);
@@ -305,7 +305,7 @@ test('the demo runs its own mods (site/demo/mods/, which TRIF doesn\'t ship), li
   assert.deepStrictEqual(MODS.map((m) => m.slug), [...files].sort(), 'every mod in site/demo/mods, nothing else');
   for (const m of MODS) assert.strictEqual(m.code, fs.readFileSync(path.join(dir, `${m.slug}.js`), 'utf8'), `${m.slug}: the file as it is`);
   assert.deepStrictEqual(ORDER, DEMO_ORDER.map((slug) => `timsrobot.com/${slug}`));
-  assert.deepStrictEqual(DEMO_ORDER, ['tagline', 'robot', 'jelly', 'gravity', 'neon', 'stickers', 'shooter', 'fireworks', 'checklist', 'terminal', 'led', 'tilt', 'rave']);
+  assert.deepStrictEqual(DEMO_ORDER, ['tagline', 'robot', 'neon', 'jelly', 'fireworks', 'stickers', 'checklist', 'terminal', 'led', 'gravity', 'shooter', 'rave']);
   // TRIF ships none of them: the home page is like any other website.
   assert.ok(!PREINSTALLED.some((p) => p.id.startsWith('timsrobot.com/')) && !DEFAULT_ORDER['timsrobot.com']);
   assert.ok(!fs.existsSync(path.join(REPO_DIR, 'examples', 'sites', 'timsrobot.com')));

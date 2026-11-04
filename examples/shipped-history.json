@@ -25,7 +25,8 @@
   ],
   "timsrobot.com/gravity": [
     "620680d11197ae7fd88e861dd60fd865b10c89aa",
-    "d60a48ba03addf5d736dc5bdbfb869ade0f6d714"
+    "d60a48ba03addf5d736dc5bdbfb869ade0f6d714",
+    "d065f362787d43429472db765adfb9ac5d2a4557"
   ],
   "timsrobot.com/jelly-buttons": [
     "72e10b6586ac0cf27973a2b9d7313d6f533c1711"
@@ -57,7 +58,8 @@
   "timsrobot.com/rave": [
     "f50b02d8a1ebeb52fb929ccb9a08a9c13579868f",
     "13df013f9c5187d82faa1ed59a0055cfbbaebfc6",
-    "970fb55e6d1a1f5af139e3f5b98a3645c1d45f68"
+    "970fb55e6d1a1f5af139e3f5b98a3645c1d45f68",
+    "9932dbb98c49368f3d3baeb3978a22c73fbe3969"
   ],
   "timsrobot.com/robot": [
     "b675716e42205c4eef642a9b881798c013877078",
@@ -68,7 +70,9 @@
   "timsrobot.com/shooter": [
     "781148177a8fd07ccf84aa63f474246fedd36c0b",
     "193319c349435402c970e1d79a141f417bc79f0e",
-    "377dc33e748332c8ad35438823562dbdd365b31b"
+    "377dc33e748332c8ad35438823562dbdd365b31b",
+    "69a2721a2168b81cfb6f9f86ecd665d0de99a04e",
+    "c4e866c532fcdd645a6d6af6d5ef2bb01e9d9256"
   ],
   "timsrobot.com/space-shooter": [
     "0294ddce661b7e50fd1f84b9deed05552e080809"
@@ -94,7 +98,8 @@
   "timsrobot.com/tilt": [
     "b8fb46fdcffc95bb50449c059f68bf5cd65958cb",
     "e1436f5ecd614d9ea5f3ad5f1d82d28718c027b9",
-    "8d983995be1e66cb7f7e58900c9f65f0bd7e3f19"
+    "8d983995be1e66cb7f7e58900c9f65f0bd7e3f19",
+    "cf3dd40c060d82923e80bcc2f28548d4d4604952"
   ],
   "timsrobot.com/typing-tagline": [
     "d22b4f9de2a2eea19ea632b5c9938bb671cbdc9f"

@@ -153,7 +153,7 @@ export function homePage({ head = '', tail = '' } = {}) {
   </div>
   <div>
     <h2>Yours, on your computer</h2>
-    <p>Mods are plain JavaScript files in <code>~/.trif</code>: read them, change them, switch them off. TRIF collects nothing. The only thing that ever reaches Tim is a problem report you choose to send.</p>
+    <p>Mods are plain JavaScript files in <code>~/.trif</code>: you can read them, edit them, share them, or switch them off. TRIF collects nothing. The only thing that ever reaches me is a problem report, if you choose to send one.</p>
   </div>
 </section>`, {
     style: HOME_STYLE + DEMO_STYLE,

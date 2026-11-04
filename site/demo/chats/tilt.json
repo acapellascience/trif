@@ -39,7 +39,7 @@
   },
   {
    "role": "assistant",
-   "text": "Plan: the body becomes a 3D card and each section lifts off it at its own depth. The tilt goes on the page as two CSS variables, so Living Robot can slide with it and gravity mode can keep its pile on the card.",
+   "text": "Plan: the body becomes a 3D card and each section lifts off it at its own depth. The tilt goes on the page as two CSS variables, so Living Robot can slide with it and gravity mode's pile can slide downhill.",
    "t": 45200
   },
   {
@@ -74,7 +74,7 @@
   },
   {
    "role": "assistant",
-   "text": "Now the robot's slide, and gravity mode on the tilted card.",
+   "text": "Now the robot's slide, and gravity mode's pile sliding on the tilted card.",
    "t": 86800
   },
   {
@@ -104,7 +104,7 @@
   },
   {
    "role": "assistant",
-   "text": "The whole page is now a rounded card floating in dark space. I added a new mod, **Tilt Card**.\n\n- **Tilt:** the card tilts toward your mouse, up to 24° at the edge of the window, with a soft glare that follows the pointer. When the mouse leaves the window it eases back flat. On a phone or tablet, tilting the device tilts the card.\n- **Depth:** each part of the page floats at its own height above the card: the buttons highest, then the title, the tagline and the badges, then the two columns, with the footer just above the surface.\n- **The robot** slides toward wherever the card dips, so moving the mouse pulls him around the page. He stops at the edges of the window.\n- **Gravity mode:** the card keeps tilting with the whole pile lying on it, so the fallen blocks tilt with it as you move the mouse, and you can still grab and throw them right where you see them. The robot gets pushed along the floor toward the low side.\n\n**What I checked:** with a fake mouse in opposite corners, the card and its layers tilted and the robot slid toward the mouse side. Clicks still land on the right link. With gravity on, the pile stayed on the tilted card. No errors.\n\nTo undo it, switch off **Tilt Card** in the side panel, or ask me to.",
+   "text": "The whole page is now a rounded card floating in dark space. I added a new mod, **Tilt Card**.\n\n- **Tilt:** the card tilts toward your mouse, up to 24° at the edge of the window, with a soft glare that follows the pointer. When the mouse leaves the window it eases back flat. On a phone or tablet, tilting the device tilts the card.\n- **Depth:** each part of the page floats at its own height above the card: the buttons highest, then the title, the tagline and the badges, then the two columns, with the footer just above the surface.\n- **The robot** slides toward wherever the card dips, so moving the mouse pulls him around the page. He stops at the edges of the window.\n- **Gravity mode:** the card keeps tilting with the whole pile lying on it, and the fallen blocks slide toward the low side, so moving the mouse sloshes the pile from one side of the card to the other. The robot gets pushed along with them, and you can still grab and throw blocks right where you see them.\n\n**What I checked:** with a fake mouse in opposite corners, the card and its layers tilted and the robot slid toward the mouse side. Clicks still land on the right link. With gravity on, the pile slid to whichever side the card dipped. No errors.\n\nTo undo it, switch off **Tilt Card** in the side panel, or ask me to.",
    "t": 141800
   }
  ]

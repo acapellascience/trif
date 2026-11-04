@@ -26,16 +26,15 @@ panel (the page moves over; at phone width it's a sheet over the bottom of the p
   and answers its messages from made-up state (helper connected, Claude Code logged in, timsrobot.com, the
   robot on). Nothing leaves the page; its state lasts across reloads in the tab's sessionStorage.
 - The mod switches are real: a switch reloads the home page as `/?mods=a,b`, and the Worker adds only mods
-  from its bundled list (the home page mods TRIF ships, `examples/sites/timsrobot.com/`, listed in the order
-  it ships them in); other names are ignored. The panel opens again after the reload where it was.
-- Someone running the real TRIF, on for timsrobot.com, has those mods already: the extension marks the page
-  (`<html data-trif="on">`, timsrobot.com only), and then the demo's tab doesn't show and its mods do
-  nothing, so nothing runs twice.
+  from its bundled list (the demo's own mods, `demo/mods/`, listed in `DEMO_ORDER` in `build-demo.js`;
+  TRIF doesn't ship them); other names are ignored. The panel opens again after the reload where it was.
+- Someone running the real TRIF gets the demo like anyone else: the extension never marks a page, so the
+  site can't tell, and TRIF has no mods for timsrobot.com unless they make some.
 - Chats are recordings (`demo/chats/`, from the promo video's sessions, paths and tab ids taken out):
   "Recorded chats" above the message box replays one, sped up, then switches its mod on (the page reloads
   with it). Anything typed gets a note saying so.
 
-`site/demo/` and the shipped home page mods are bundled into `src/demo-files.js` by `node site/build-demo.js` (`dev.js` does it on start;
+`site/demo/`, its mods included, is bundled into `src/demo-files.js` by `node site/build-demo.js` (`dev.js` does it on start;
 a test checks it's up to date).
 
 The side panel's "Report a problem" (and `trif report --open`) opens `/report#r=<report>&s=<site>`.

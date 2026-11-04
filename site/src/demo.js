@@ -1,7 +1,7 @@
 // The home page's demo: the real TRIF side panel (the extension's own files, /demo/ext/…, with shim.js
 // standing in for the extension's background) docked to the right of the home page itself, whose mods it
 // switches: the page reloads as /?mods=a,b with them. The demo's own scripts and the recorded chats are in
-// site/demo/, the mods are the ones TRIF ships for this page (examples/sites/timsrobot.com), all bundled
+// site/demo/, and so are the mods (site/demo/mods/: the site's own, which TRIF doesn't ship), all bundled
 // into demo-files.js by site/build-demo.js.
 
 import { FILES, MODS, CHATS, ORDER } from './demo-files.js';
@@ -32,13 +32,9 @@ const WORDS = {
 
 const MOD_BY_SLUG = new Map(MODS.map((m) => [m.slug, m]));
 
-// Someone running the real TRIF here, on for this site, has its own copies of these mods: the extension
-// marks the page (<html data-trif="on">, before any of the page's scripts) and the demo stands aside, so
-// each mod's script does nothing then. Wrapped as TRIF wraps a mod (in a function), so it runs the same.
-const MARKED = 'document.documentElement.getAttribute("data-trif") === "on"';
-
 /**
- * A bundled mod's script by file name ("fireworks.js"), or null. A document-idle mod's script is deferred
+ * A bundled mod's script by file name ("fireworks.js"), or null, wrapped as TRIF wraps a mod (in a
+ * function), so it runs the same. A document-idle mod's script is deferred
  * (homeWith), and deferred scripts run before DOMContentLoaded, where TRIF runs such a mod after it: so it
  * waits for DOMContentLoaded, and the mods meet the page (and each other) as they do with TRIF.
  */
@@ -46,7 +42,7 @@ export function modScript(file) {
   const m = /^([a-z0-9-]+)\.js$/.exec(file);
   const mod = m && MOD_BY_SLUG.get(m[1]);
   if (!mod) return null;
-  const body = `(() => { if (${MARKED}) return;\n${mod.code}\n})();\n`;
+  const body = `(() => {\n${mod.code}\n})();\n`;
   if (mod.runAt === 'document-start') return body;
   return `(() => { const run = () => {\n${body}};\nif (document.readyState === 'complete') run(); else addEventListener('DOMContentLoaded', run, { once: true }); })();\n`;
 }

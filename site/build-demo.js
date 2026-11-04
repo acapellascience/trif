@@ -3,27 +3,29 @@
 // tests/site.test.js checks the module is up to date).
 //
 // site/demo/ holds the demo's own scripts (tab.js on the home page, which docks the side panel to it;
-// shim.js, which stands in for the extension's background under the real side panel; and panel.css) and
-// the recorded chats (chats/*.json, from the promo video's sessions). The mods it can switch on are the
-// home page mods TRIF ships, examples/sites/timsrobot.com (one copy: what the demo runs is what users get),
-// listed in the order TRIF ships them in (helper/lib/preinstalled.js DEFAULT_ORDER). The side panel itself
-// isn't here: the Worker serves the extension's own files (wrangler.toml [assets]).
+// shim.js, which stands in for the extension's background under the real side panel; and panel.css), the
+// recorded chats (chats/*.json, from the promo video's sessions) and the mods it can switch on (mods/*.js,
+// the home page's own: TRIF doesn't ship them, so the real TRIF has none for this site), listed in
+// DEMO_ORDER. The side panel itself isn't here: the Worker serves the extension's own files (wrangler.toml
+// [assets]).
 
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
-import { createRequire } from 'node:module';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const DEMO = path.join(HERE, 'demo');
-export const MODS_DIR = path.join(HERE, '..', 'examples', 'sites', 'timsrobot.com');
-const { DEFAULT_ORDER } = createRequire(import.meta.url)('../helper/lib/preinstalled.js');
+export const MODS_DIR = path.join(DEMO, 'mods');
 export const OUT = path.join(HERE, 'src', 'demo-files.js');
 
 // The order the recorded chats are offered in. Follow-ups (a chat's `after`) are offered once the chats
 // they follow have been replayed.
 const CHAT_ORDER = ['tagline', 'robot', 'jelly', 'gravity', 'neon', 'stickers', 'shooter', 'fireworks', 'checklist', 'terminal', 'led',
   'tilt', 'rave'];
+
+// The order the demo panel lists its mods in (every one in mods/, by file name).
+export const DEMO_ORDER = ['tagline', 'robot', 'jelly', 'gravity', 'neon', 'stickers', 'shooter', 'fireworks', 'checklist',
+  'terminal', 'led', 'tilt', 'rave'];
 
 const read = (...p) => fs.readFileSync(path.join(DEMO, ...p), 'utf8');
 
@@ -54,8 +56,9 @@ export function demoModule() {
     };
   });
   const slugs = new Set(mods.map((m) => m.slug));
-  const order = DEFAULT_ORDER['timsrobot.com'] || [];
-  for (const id of order) if (!slugs.has(id.split('/')[1])) throw new Error(`DEFAULT_ORDER has ${id}, which isn't shipped`);
+  for (const slug of DEMO_ORDER) if (!slugs.has(slug)) throw new Error(`DEMO_ORDER has ${slug}, which isn't in mods/`);
+  for (const slug of slugs) if (!DEMO_ORDER.includes(slug)) throw new Error(`mods/${slug}.js isn't in DEMO_ORDER`);
+  const order = DEMO_ORDER.map((slug) => `timsrobot.com/${slug}`);
   const chats = fs.readdirSync(path.join(DEMO, 'chats')).filter((f) => f.endsWith('.json')).map((f) => JSON.parse(read('chats', f)));
   for (const c of chats) {
     if (!CHAT_ORDER.includes(c.id)) throw new Error(`chat ${c.id} isn't in CHAT_ORDER`);

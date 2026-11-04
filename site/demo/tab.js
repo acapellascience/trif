@@ -8,9 +8,8 @@
 //
 // The tab and the panel live outside <body>, in the top layer where the browser has it (popover): mods that
 // take the page apart (gravity, the shooter, tilting) walk or transform the body, and mustn't take the demo
-// with it. Someone running the real TRIF, on for this site, has the real mods: the extension marks the page
-// (<html data-trif="on">, before the page's scripts run; extension/lib.js homeMarkerScript), and then
-// there's no tab, the panel doesn't come back after a reload, and the demo's mods do nothing (src/demo.js).
+// with it. (Someone running the real TRIF here gets the demo like anyone else: the extension never marks a
+// page, so this site can't tell, and its mods are theirs to make, as on any other site.)
 (() => {
   const tab = document.querySelector('.demo-tab');
   if (!tab) return;
@@ -19,7 +18,6 @@
   const MIN = 'trif-demo-min';
   const remember = (on) => { try { sessionStorage.setItem(OPEN, on ? '1' : ''); } catch {} };
   const phone = () => matchMedia('(max-width: 700px)').matches; // the sheet over the bottom of the page
-  const realTrif = () => root.getAttribute('data-trif') === 'on';
   const topLayer = typeof tab.showPopover === 'function';
   let box = null;
   let frame = null;
@@ -32,13 +30,10 @@
   // when the window resizes, which mods hear about (a resize event).
   const cut = { w: 0, h: 0 };
   const lookup = (o, k) => { for (let p = o; p; p = Object.getPrototypeOf(p)) { const d = Object.getOwnPropertyDescriptor(p, k); if (d) return d; } return null; };
-  const shrunk = [];
   function shrink(obj, key, axis) {
     const d = lookup(obj, key);
     if (!d || !d.get || !d.configurable) return;
-    const own = Object.getOwnPropertyDescriptor(obj, key);
     Object.defineProperty(obj, key, { configurable: true, enumerable: d.enumerable, set: d.set, get() { return Math.max(0, d.get.call(obj) - cut[axis]); } });
-    shrunk.push(() => { if (own) Object.defineProperty(obj, key, own); else delete obj[key]; });
   }
   shrink(window, 'innerWidth', 'w');
   shrink(window, 'innerHeight', 'h');
@@ -59,18 +54,6 @@
   // when the panel opens or closes.
   addEventListener('resize', (e) => { if (e.isTrusted) measure(); });
   const remeasure = () => { if (measure()) dispatchEvent(new Event('resize')); };
-
-  // The real TRIF is on here: no demo at all (and it doesn't reopen after the next reload either).
-  function standAside() {
-    remember(false);
-    if (box) { if (box.popover && box.matches(':popover-open')) box.hidePopover(); box.remove(); box = null; frame = null; }
-    root.classList.remove('demo-open', 'demo-min');
-    if (tab.popover && tab.matches(':popover-open')) tab.hidePopover();
-    tab.remove();
-    cut.w = cut.h = 0;
-    while (shrunk.length) shrunk.pop()();
-  }
-  if (realTrif()) { standAside(); return; }
 
   // Back on the plain home page (no ?mods=: its address typed again, a link back here) with demo mods
   // switched on earlier in this tab: the page runs only the mods its address names, so ask for it again with
@@ -93,15 +76,12 @@
     if (params.has('mods')) sessionStorage.removeItem('trif-demo-synced');
   } catch { /* no sessionStorage: nothing was remembered */ }
 
-  new MutationObserver(() => { if (realTrif()) standAside(); }).observe(root, { attributes: true, attributeFilter: ['data-trif'] });
-
   // The site's other pages (the report form, the Windows waitlist) run the same mods when their address
   // names them (the Worker adds them, as on this page): a link to one carries this page's ?mods=, so the
   // visitor's demo mods follow them there, as TRIF's would. Set as the link is followed (mods like the LED
   // sign copy the footer's links, so the copies count too).
   const OTHER_PAGES = new Set(['/report', '/windows']);
   const carryMods = (e) => {
-    if (realTrif()) return;
     const mods = new URLSearchParams(location.search).get('mods');
     const a = e.target.closest?.('a[href]');
     if (!mods || !a) return;
@@ -191,7 +171,6 @@
   }
 
   function show() {
-    if (realTrif()) return standAside();
     if (!box) build();
     if (box.popover) { if (!box.matches(':popover-open')) box.showPopover(); } else box.hidden = false;
     root.classList.add('demo-open');

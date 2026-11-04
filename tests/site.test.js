@@ -294,31 +294,30 @@ test('the demo\'s bundle is up to date with site/demo/, its chats are clean and 
   for (const [name, code] of Object.entries(FILES)) assert.ok(!/\beval\(|new Function|innerHTML|document\.write/.test(code), `${name}: no eval or raw HTML`);
 });
 
-test('the demo runs the home page mods TRIF ships (one copy), lists them in its order, and stands aside for the real TRIF', async () => {
+test('the demo runs its own mods (site/demo/mods/, which TRIF doesn\'t ship), lists them in its order, and wraps each as TRIF does', async () => {
   const { MODS, ORDER } = await import('../site/src/demo-files.js');
   const { modScript } = await import('../site/src/demo.js');
-  const { DEFAULT_ORDER, PREINSTALLED } = require('../helper/lib/preinstalled');
-  const dir = path.join(REPO_DIR, 'examples', 'sites', 'timsrobot.com');
-  const shipped = PREINSTALLED.filter((p) => p.id.startsWith('timsrobot.com/')).map((p) => p.id.split('/')[1]);
-  assert.deepStrictEqual(MODS.map((m) => m.slug), [...shipped].sort(), 'every shipped home page mod, nothing else');
-  for (const m of MODS) assert.strictEqual(m.code, fs.readFileSync(path.join(dir, `${m.slug}.js`), 'utf8'), `${m.slug}: the shipped copy`);
-  assert.deepStrictEqual(ORDER, DEFAULT_ORDER['timsrobot.com']);
-  assert.strictEqual(ORDER[0], 'timsrobot.com/tagline');
-  // Each mod's script does nothing on a page the real TRIF marked (and runs as before otherwise).
+  const { DEMO_ORDER } = await import('../site/build-demo.js');
+  const { PREINSTALLED, DEFAULT_ORDER } = require('../helper/lib/preinstalled');
+  const dir = path.join(REPO_DIR, 'site', 'demo', 'mods');
+  const files = fs.readdirSync(dir).filter((f) => f.endsWith('.js')).map((f) => f.replace(/\.js$/, ''));
+  assert.deepStrictEqual(MODS.map((m) => m.slug), [...files].sort(), 'every mod in site/demo/mods, nothing else');
+  for (const m of MODS) assert.strictEqual(m.code, fs.readFileSync(path.join(dir, `${m.slug}.js`), 'utf8'), `${m.slug}: the file as it is`);
+  assert.deepStrictEqual(ORDER, DEMO_ORDER.map((slug) => `timsrobot.com/${slug}`));
+  assert.deepStrictEqual(DEMO_ORDER, ['tagline', 'robot', 'jelly', 'gravity', 'neon', 'stickers', 'shooter', 'fireworks', 'checklist', 'terminal', 'led', 'tilt', 'rave']);
+  // TRIF ships none of them: the home page is like any other website.
+  assert.ok(!PREINSTALLED.some((p) => p.id.startsWith('timsrobot.com/')) && !DEFAULT_ORDER['timsrobot.com']);
+  assert.ok(!fs.existsSync(path.join(REPO_DIR, 'examples', 'sites', 'timsrobot.com')));
+  // Each mod's script is wrapped as TRIF wraps a mod (a function), and runs whatever the page says.
   const code = modScript('neon.js'); // (document-start: as it is; a document-idle one waits for DOMContentLoaded, as with TRIF)
-  assert.ok(code.startsWith('(() => { if (document.documentElement.getAttribute("data-trif") === "on") return;\n'), code.slice(0, 120));
+  assert.ok(code.startsWith('(() => {\n'), code.slice(0, 60));
   assert.ok(code.includes(MODS.find((m) => m.slug === 'neon').code));
+  assert.ok(!code.includes('data-trif'));
   const idle = modScript('fireworks.js');
   assert.ok(idle.includes(MODS.find((m) => m.slug === 'fireworks').code) && idle.includes("addEventListener('DOMContentLoaded', run, { once: true })"));
-  assert.ok(idle.includes('if (document.documentElement.getAttribute("data-trif") === "on") return;'));
-  const vm = require('node:vm');
-  const run = (marked) => {
-    const ran = [];
-    const ctx = { ran, document: { documentElement: { getAttribute: (a) => (a === 'data-trif' && marked ? 'on' : null) } } };
-    vm.runInNewContext(`${code.slice(0, code.indexOf('\n') + 1)}ran.push(1)\n})();`, ctx); // (the wrapper as served, around a stand-in)
-    return ran.length;
-  };
-  assert.deepStrictEqual([run(false), run(true)], [1, 0]);
+  // The demo's tab never looks for the real TRIF (nothing marks a page for it to find).
+  const { FILES } = await import('../site/src/demo-files.js');
+  assert.ok(!/data-trif|realTrif|standAside/.test(FILES['tab.js']));
   // The recorded chats switch on mods the bundle has.
   const { CHATS } = await import('../site/src/demo-files.js');
   for (const c of CHATS) for (const s of c.mods) assert.ok(MODS.some((m) => m.slug === s), `${c.id}: ${s}`);

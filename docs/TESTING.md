@@ -148,20 +148,18 @@ scratch home, and macOS allows about 104 bytes for a socket path.
 `--out <dir>` for the screenshots, `--headful` to watch). It serves the home page, demo and all, from this
 checkout over HTTPS as `timsrobot.com` (the site's Worker, as `site/dev.js` runs it; Chrome resolves the name
 to 127.0.0.1 and takes the self-signed certificate), installs TRIF from this checkout into a scratch home
-(`setup --copy`, so the 13 home page mods are there, off) and drives headless Chrome for Testing with the
-same isolation as the suite. It checks that the demo and the real TRIF stay out of each other's way:
+(`setup --copy`; TRIF ships no mods for timsrobot.com) and drives headless Chrome for Testing with the
+same isolation as the suite. It checks the demo, and that with the real TRIF the home page is like any
+other website:
 
-- TRIF off for timsrobot.com: no `data-trif` marker; the demo's tab sits outside `<body>` in the top layer;
-  the demo panel lists the 13 mods in the shipped order, off, with descriptions; each demo mod runs once
-  alone, and all 13 together; gravity, the shooter, tilting and the rave leave the tab where it was, as it
-  was; Escape on the page is Gravity's (it doesn't close the panel), Escape on the panel's close button
-  closes it.
-- A visitor's way in: the demo open with its space shooter on, then TRIF turned on in the real side panel
-  (Fix) and the real space shooter switched on (the tab reloads): the marker is there, the tab is gone,
-  the demo panel doesn't come back (its flag is cleared), and there's one ship, not two, though the address
-  still asks for the demo's.
-- Every real mod on (and the address asking for every demo mod): each effect once; gravity and Escape work;
-  other sites (127.0.0.1, localhost) are never marked. The robot off again: no marker, the tab is back.
+- TRIF off for timsrobot.com: nothing marks the page; the demo's tab sits outside `<body>` in the top layer;
+  the demo panel starts empty, with the first recorded prompt waiting; each demo mod runs once alone, and
+  all 13 together; gravity, the shooter, tilting and the rave leave the tab where it was, as it was; Escape
+  on the page is Gravity's (it doesn't close the panel), Escape on the panel's close button closes it.
+- TRIF turned on for the site in the real side panel (Fix): still nothing marks the page, and the demo and
+  its space shooter work as before (one ship).
+- A mod of the visitor's own for timsrobot.com runs alongside the demo; nothing marks the page, nor other
+  sites (127.0.0.1, localhost). The robot off again: their mod stops, the demo is still there.
 
 Each mod's effect is found by something it leaves in the page (`PROBES` in the script); when a mod changes
 what it leaves, update its probe.

@@ -66,29 +66,16 @@ const PREINSTALLED = [
   { id: 'www.google.com/rainbow-rave', on: false },
   { id: 'amazon.com/rainbow-rave', on: false },
   { id: 'www.instagram.com/rainbow-rave', on: false },
-  // Added in 0.2.0, the same way: the mods on TRIF's own home page, all off (and TRIF stays off on
-  // timsrobot.com, not in SITES_ON, until the user turns it on there).
-  { id: 'timsrobot.com/tagline', on: false },
-  { id: 'timsrobot.com/robot', on: false },
-  { id: 'timsrobot.com/jelly', on: false },
-  { id: 'timsrobot.com/gravity', on: false },
-  { id: 'timsrobot.com/neon', on: false },
-  { id: 'timsrobot.com/stickers', on: false },
-  { id: 'timsrobot.com/shooter', on: false },
-  { id: 'timsrobot.com/fireworks', on: false },
-  { id: 'timsrobot.com/checklist', on: false },
-  { id: 'timsrobot.com/terminal', on: false },
-  { id: 'timsrobot.com/led', on: false },
-  { id: 'timsrobot.com/tilt', on: false },
-  { id: 'timsrobot.com/rave', on: false },
 ];
+// (TRIF's own home page, timsrobot.com, gets none: it's like any other website, modded if the user wants.
+// Its demo's mods are the site's own, site/demo/mods/. Copies an earlier build put in a workspace stay
+// there, untouched: setup only goes through this list.)
 
 // The order the side panel lists a site's shipped mods in until the user drags them into their own (display
 // only: mods run in their usual order). By site, as the extension's scopeFor gives it; the helper sends it
 // with every mods message (`defaultOrder`), and extension/lib.js orderMods puts mods it doesn't list after.
-const DEFAULT_ORDER = {
-  'timsrobot.com': PREINSTALLED.filter((p) => p.id.startsWith('timsrobot.com/')).map((p) => p.id),
-};
+// (None at the moment: each site's few shipped mods list in the order they always did.)
+const DEFAULT_ORDER = {};
 
 // Shipped mods folded into another one (`into`, from its @version `since`), so no longer shipped
 // (0.2.0: AI Banisher and Just Results). retireShippedMods, below, handles the copies users have.

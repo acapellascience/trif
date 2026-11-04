@@ -389,7 +389,6 @@ test('host: every mods message carries the side panel\'s default order for the s
   ext.hello();
   const msg = await ext.next((m) => m.type === 'mods' && m.mods.length === 1);
   assert.deepStrictEqual(msg.defaultOrder, require('../helper/lib/preinstalled').DEFAULT_ORDER);
-  assert.strictEqual(msg.defaultOrder['timsrobot.com'][0], 'timsrobot.com/tagline');
 });
 
 test('host: rapid edits are debounced into few pushes', async () => {

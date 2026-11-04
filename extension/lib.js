@@ -85,23 +85,6 @@ export function runtimeMatches(mods, recording = []) {
   return [...set].sort();
 }
 
-// TRIF's own home page, timsrobot.com, has a demo of TRIF (the real side panel on a stand-in, running the
-// home page mods). Someone visiting with the real TRIF on for the site would get both: every mod twice. So
-// there, and only there, a tiny user script marks the page (<html data-trif="on">) while TRIF is on for the
-// site, and the demo stands aside. No other site is ever marked: a marker anywhere else would tell sites who
-// runs TRIF (see "Account safety" in the agents' guide), which is also why the runtime only goes where
-// mods run (runtimeMatches).
-export const HOME_MARKER_ID = 'trif-home';
-export const HOME_SITE = 'timsrobot.com';
-export const HOME_MARKER_CODE = 'document.documentElement.setAttribute("data-trif", "on");';
-export function homeMarkerScript() {
-  return { id: HOME_MARKER_ID, matches: [`*://${HOME_SITE}/*`, `*://*.${HOME_SITE}/*`], excludeMatches: [], js: [{ code: HOME_MARKER_CODE }], runAt: 'document_start', world: 'MAIN', allFrames: false };
-}
-/** Whether the home page marker belongs: TRIF is on for timsrobot.com (sitesOn as stored; null: never). */
-export function wantsHomeMarker(sitesOn) {
-  return Array.isArray(sitesOn) && sitesOn.some((s) => hostInScope(HOME_SITE, s));
-}
-
 /** Small non-cryptographic string hash (FNV-1a), used to remember the registered runtime. */
 export function quickHash(s) {
   let h = 0x811c9dc5;
@@ -132,26 +115,10 @@ export function normalizeDisabled(value) {
  * everything is unregistered and re-registered with the runtime first (registration order = injection
  * order). It only runs where a registered mod does, or on a site in `recording` (runtimeMatches); with
  * neither, nothing is registered at all. With `sitesOn`, mods are limited to those sites (limitToSites)
- * and so is `recording`. The home page marker (homeMarkerScript) is registered alongside while sitesOn
- * has timsrobot.com, whatever else is; it's not a mod, so it's never in `registered`.
+ * and so is `recording`.
  * Returns {registered, errors, applied, reset}.
  */
-export async function syncUserScripts(us, opts) {
-  const res = await syncModScripts(us, opts);
-  // The home page marker: there exactly while TRIF is on for timsrobot.com (re-registered if its code changed).
-  const want = wantsHomeMarker(opts.sitesOn);
-  try {
-    const now = (await us.getScripts()).find((x) => x.id === HOME_MARKER_ID);
-    const stale = now && now.js?.[0]?.code !== undefined && now.js[0].code !== HOME_MARKER_CODE;
-    if (now && (!want || stale)) await us.unregister({ ids: [HOME_MARKER_ID] });
-    if (want && (!now || stale)) await us.register([homeMarkerScript()]);
-  } catch (e) {
-    res.errors.push({ id: HOME_MARKER_ID, error: errMsg(e) });
-  }
-  return res;
-}
-
-async function syncModScripts(us, { mods, runtimeCode, applied = {}, disabled = {}, offSites = {}, recording = [], sitesOn = null }) {
+export async function syncUserScripts(us, { mods, runtimeCode, applied = {}, disabled = {}, offSites = {}, recording = [], sitesOn = null }) {
   // sitesOn (null: no limit): mods and recording only on the sites TRIF is on for (limitToSites).
   if (sitesOn) recording = (recording || []).filter((site) => (sitesOn || []).some((s) => hostInScope(site, s)));
   const errors = [];
@@ -159,7 +126,7 @@ async function syncModScripts(us, { mods, runtimeCode, applied = {}, disabled = 
   const seen = new Set();
   for (const mod of mods || []) {
     if (!mod || typeof mod.id !== 'string' || !mod.id) { errors.push({ id: String(mod?.id ?? ''), error: 'mod has no id' }); continue; }
-    if (mod.id === RUNTIME_ID || mod.id === HOME_MARKER_ID || seen.has(mod.id)) { errors.push({ id: mod.id, error: 'duplicate or reserved mod id' }); continue; }
+    if (mod.id === RUNTIME_ID || seen.has(mod.id)) { errors.push({ id: mod.id, error: 'duplicate or reserved mod id' }); continue; }
     if (disabled[mod.id] === true) continue; // switched off: not desired, so unregistered below if registered
     if (mod.held) continue; // held for the user's approval (an agent wrote it for another site): same
     seen.add(mod.id);
@@ -168,14 +135,12 @@ async function syncModScripts(us, { mods, runtimeCode, applied = {}, disabled = 
     desired.push(withOffSites(limited, offSites[mod.id]));
   }
 
-  // (The home page marker is synced by syncUserScripts, after this: left alone here.)
-  const all = await us.getScripts();
-  const existing = all.filter((s) => s.id !== HOME_MARKER_ID);
+  // (Anything registered that isn't wanted goes: a home page marker left by a development build too.)
+  const existing = await us.getScripts();
   const existingIds = new Set(existing.map((s) => s.id));
-  const unregisterAll = () => (existing.length === all.length ? us.unregister() : us.unregister({ ids: existing.map((s) => s.id) }));
   const matches = runtimeMatches(desired, recording);
   if (!matches.length) {
-    if (existing.length) await unregisterAll();
+    if (existing.length) await us.unregister();
     return { registered: [], errors, applied: {}, reset: existing.length > 0 };
   }
   const runtimeHash = quickHash(runtimeCode + '\n' + JSON.stringify(matches));
@@ -201,7 +166,7 @@ async function syncModScripts(us, { mods, runtimeCode, applied = {}, disabled = 
   };
 
   if (!runtimeOk) {
-    if (existing.length) await unregisterAll();
+    if (existing.length) await us.unregister();
     // A mod with an invalid pattern makes the union invalid too; then the runtime goes everywhere
     // (the mod itself fails to register and is reported).
     try { await us.register([runtimeUserScript(runtimeCode, matches)]); } catch { await us.register([runtimeUserScript(runtimeCode)]); }

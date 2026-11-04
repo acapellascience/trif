@@ -5,16 +5,16 @@
 //   node tests/e2e/homepage.js [--work <short dir>] [--out <dir>] [--headful]
 //
 // The home page (site/, with its demo) is served over HTTPS as timsrobot.com from this checkout; TRIF from
-// this checkout is installed into a scratch home (setup --copy, which ships the 13 home page mods, off), and
-// Chrome for Testing runs headless in a throwaway profile, as the e2e suite does (tests/e2e/lib). It checks
-// that the demo and the real TRIF don't get in each other's way:
-//  - TRIF off for timsrobot.com: no marker; the demo's tab is outside <body> (top layer); each demo mod
-//    works alone and all together, and gravity, the shooter, tilting and the rave leave the tab alone;
-//    Escape on the page is the page's (Gravity's), not the panel's;
-//  - then, the way a visitor gets there: the demo open with a demo mod on, TRIF turned on for the site in the
-//    real side panel, a real mod switched on (the tab reloads): the marker is there, the tab is gone, the
-//    demo panel doesn't come back, and the demo's mod stands aside (one ship, not two);
-//  - every real mod on: each effect once; other sites never get the marker.
+// this checkout is installed into a scratch home (setup --copy), and Chrome for Testing runs headless in a
+// throwaway profile, as the e2e suite does (tests/e2e/lib). It checks that the demo works, and that with
+// the real TRIF installed the home page is like any other website:
+//  - TRIF off for timsrobot.com: nothing marks the page; the demo's tab is outside <body> (top layer); each
+//    demo mod works alone and all together, and gravity, the shooter, tilting and the rave leave the tab
+//    alone; Escape on the page is the page's (Gravity's), not the panel's;
+//  - then TRIF turned on for the site in the real side panel (Fix): still nothing marks the page, and the
+//    demo and its mods work as before;
+//  - a mod of the visitor's own for timsrobot.com runs, alongside the demo; nothing marks this page or any
+//    other; with the robot off again it stops, and the demo is still there.
 // Nothing in your real browsers, profiles or ~/.trif is touched (scratch home, HOME pointed at it).
 
 const fs = require('fs');
@@ -27,7 +27,7 @@ const { run, waitFor, sleep, killMatching } = require('./lib/util');
 
 const REPO = I.REPO;
 const SITE = 'timsrobot.com';
-const ORDER = require('../../helper/lib/preinstalled').DEFAULT_ORDER[SITE].map((id) => id.split('/')[1]);
+let ORDER = []; // the demo's mods, in its order (site/build-demo.js DEMO_ORDER)
 
 // What each home page mod leaves in the page (a count: 1 when it runs once).
 const PROBES = {
@@ -100,7 +100,7 @@ async function main() {
     const r = run('/usr/bin/openssl', ['req', '-x509', '-newkey', 'rsa:2048', '-nodes', '-keyout', key, '-out', cert, '-days', '7', '-subj', `/CN=${SITE}`, '-addext', `subjectAltName=DNS:${SITE},DNS:*.${SITE}`]);
     if (r.status !== 0) throw new Error(`openssl: ${r.stderr}`);
   }
-  await import(pathToFileURL(path.join(REPO, 'site', 'build-demo.js')).href).then((m) => m.writeDemoModule());
+  await import(pathToFileURL(path.join(REPO, 'site', 'build-demo.js')).href).then((m) => { m.writeDemoModule(); ORDER = m.DEMO_ORDER; });
   const { default: worker } = await import(pathToFileURL(path.join(REPO, 'site', 'src', 'index.js')).href);
   const { localAssets } = await import(pathToFileURL(path.join(REPO, 'site', 'local-assets.js')).href);
   const siteEnv = { REPORT_TO: 'x@example.com', REPORT_FROM: 'r@example.com', EMAIL: { async send() { return {}; } }, EXTENSION: localAssets(path.join(REPO, 'extension')) };
@@ -139,13 +139,14 @@ async function main() {
       if (k.length === 1) await d.cdp.send('Input.dispatchKeyEvent', { type: 'char', text: k, key: k, code }, sid);
       await d.cdp.send('Input.dispatchKeyEvent', { type: 'keyUp', key: k, code, windowsVirtualKeyCode: vk }, sid);
     };
-    // What's on the page: the marker, the demo's tab and panel, and each mod's effect.
+    // What's on the page: any marker (there must be none), the demo's tab and panel, and each mod's effect.
     const state = () => page(`async (probes) => {
       const tab = document.querySelector('.demo-tab');
       const r = tab?.getBoundingClientRect();
       const count = (p) => p.startsWith('style:') ? [...document.querySelectorAll('style')].filter((s) => s.textContent.includes(p.slice(6))).length : document.querySelectorAll(p).length;
       return {
         marker: document.documentElement.getAttribute('data-trif'),
+        mine: document.documentElement.dataset.e2eMine || null,
         tab: tab ? { parent: tab.parentElement.tagName, top: tab.matches(':popover-open'), shown: !tab.hidden && r.width > 0 && r.height > 0,
           inView: r.right <= innerWidth + 1 && r.left >= innerWidth - 60, rect: [Math.round(r.x), Math.round(r.y), Math.round(r.width), Math.round(r.height)],
           color: getComputedStyle(tab).color, bg: getComputedStyle(tab).backgroundColor, transform: getComputedStyle(tab).transform,
@@ -161,7 +162,7 @@ async function main() {
 
     // ---- TRIF off for timsrobot.com: the demo
     let s0;
-    await check('TRIF off for timsrobot.com: no marker; the demo tab is outside <body>, in the top layer, on screen', async () => {
+    await check('TRIF off for timsrobot.com: nothing marks the page; the demo tab is outside <body>, in the top layer, on screen', async () => {
       await load();
       s0 = await state();
       if (s0.marker !== null) throw new Error(`marker ${s0.marker}`);
@@ -241,9 +242,9 @@ async function main() {
       return `tab unmoved at ${after.rect}, colour ${after.color}`;
     });
 
-    // ---- the visitor turns the real TRIF on
+    // ---- the real TRIF on for timsrobot.com: the home page is like any other website
     let panelCtx;
-    await check('demo open with a demo mod on, then the real TRIF on and a real mod on: the tab goes, the demo doesn\'t reopen, one ship', async () => {
+    await check('the real TRIF on for timsrobot.com (Fix): nothing marks the page; the demo stays, its mod runs once', async () => {
       // The demo's space shooter on (a fresh demo on the page's address with it: listed and on), the panel open.
       await load();
       await page(`async () => { sessionStorage.removeItem('trif-demo-state'); sessionStorage.setItem('trif-demo-open', ''); }`);
@@ -252,66 +253,54 @@ async function main() {
       await sleep(2500);
       const listed = await demoPanel(`(doc) => doc.querySelector('li[data-mod="timsrobot.com/shooter"] button.switch')?.getAttribute('aria-checked')`);
       if (listed !== 'true') throw new Error(`the demo's shooter: ${listed}`);
-      let s = await state();
-      if (s.mods['shooter'] !== 1 || !s.panel || s.flag !== '1') throw new Error(JSON.stringify(s));
-      // The real side panel: Fix (TRIF on for timsrobot.com): no reload for that alone.
+      // The real side panel: Fix (TRIF on for timsrobot.com).
       await ext(`async (url) => { await chrome.windows.create({ url, width: 400, height: 860 }); }`, [`${d.origin}/sidepanel.html?window=${win.windowId}`]);
       panelCtx = await d.findPage('sidepanel.html');
       await waitFor('the gate', () => d.eval(panelCtx, `async () => !document.querySelector('#gate').hidden`), { timeoutMs: 20000 });
       await d.click(panelCtx, '#gate-btn');
-      await waitFor('the real mods listed', () => d.eval(panelCtx, `async () => document.querySelectorAll('#mod-list > li').length === 13`), { timeoutMs: 20000 });
-      const realOrder = await d.eval(panelCtx, `async () => [...document.querySelectorAll('#mod-list > li')].map((li) => li.dataset.mod.split('/')[1])`);
-      if (JSON.stringify(realOrder) !== JSON.stringify(ORDER)) throw new Error(`the real panel's order: ${realOrder}`);
-      // A real mod on: the tab reloads.
-      await d.click(panelCtx, 'li[data-mod="timsrobot.com/shooter"] button.switch');
-      await waitFor('the marker after the reload', async () => { try { return (await state()).marker === 'on'; } catch { return false; } }, { timeoutMs: 15000 });
-      await sleep(2500);
-      s = await state();
-      if (s.tab || s.panel) throw new Error(`demo still there: ${JSON.stringify({ tab: s.tab, panel: s.panel })}`);
-      if (s.flag) throw new Error(`the open flag is still set: ${s.flag}`);
-      if (s.mods['shooter'] !== 1) throw new Error(`ships: ${s.mods['shooter']} (url ${s.url})`);
-      await shot('real-one-ship');
-      return `url ${s.url}: marker on, no tab, no panel, 1 ship`;
+      await waitFor('TRIF on for the site', () => d.eval(panelCtx, `async () => document.querySelector('#gate').hidden && document.querySelector('#site-switch').getAttribute('aria-checked') === 'true'`), { timeoutMs: 20000 });
+      await load('?mods=shooter');
+      const s = await state();
+      if (s.marker !== null) throw new Error(`the page is marked: ${s.marker}`);
+      if (!s.panel && !s.tab?.shown) throw new Error(`the demo is gone: ${JSON.stringify({ tab: s.tab, panel: s.panel })}`);
+      if (s.mods.shooter !== 1) throw new Error(`ships: ${s.mods.shooter} (url ${s.url})`);
+      await shot('real-on-demo-stays');
+      return `url ${s.url}: no marker, demo ${s.panel ? 'panel open' : 'tab shown'}, 1 ship`;
     });
 
-    await check('the real TRIF with every home page mod on: each once, no demo; other sites unmarked', async () => {
-      for (const slug of ORDER) {
-        if (slug === 'shooter') continue;
-        await d.click(panelCtx, `li[data-mod="timsrobot.com/${slug}"] button.switch`);
-        await sleep(400);
-      }
-      await load(`?mods=${ORDER.join(',')}`); // (even asking for the demo's copies of all of them)
+    await check('a mod of the visitor\'s own for timsrobot.com runs alongside the demo; nothing marks this page or any other', async () => {
+      const dir = path.join(trif, 'sites', SITE);
+      fs.mkdirSync(dir, { recursive: true });
+      fs.writeFileSync(path.join(dir, 'e2e-mine.js'), [
+        '// ==WebMod==', '// @name        E2E Mine', '// @description A visitor\'s own mod for TRIF\'s home page',
+        `// @match       https://${SITE}/*`, '// @run-at      document-start', '// ==/WebMod==',
+        'document.documentElement.dataset.e2eMine = "ran";', ''].join('\n'));
+      await waitFor('the panel to list it', () => d.eval(panelCtx, `async () => !!document.querySelector('li[data-mod="timsrobot.com/e2e-mine"] button.switch[aria-checked="true"]')`), { timeoutMs: 20000 });
+      await load('?mods=shooter');
       const s = await state();
-      const wrong = Object.entries(s.mods).filter(([, n]) => n !== 1);
-      if (wrong.length) throw new Error(`not once: ${JSON.stringify(wrong)}`);
-      if (s.tab || s.panel || s.marker !== 'on') throw new Error(JSON.stringify(s));
-      await shot('real-all');
-      await key('g', 'KeyG', 71);
-      await sleep(2000);
-      if (!(await state()).gravity) throw new Error('gravity didn\'t start');
-      await key('Escape', 'Escape', 27);
-      await sleep(1500);
-      if ((await state()).gravity) throw new Error('Escape didn\'t end gravity');
-      // Other sites: no marker.
+      if (s.mine !== 'ran') throw new Error(`the visitor's mod didn't run: ${JSON.stringify(s)}`);
+      if (s.marker !== null) throw new Error(`the page is marked: ${s.marker}`);
+      if (!s.panel && !s.tab?.shown) throw new Error('the demo is gone');
+      if (s.mods.shooter !== 1) throw new Error(`ships: ${s.mods.shooter}`);
+      await shot('real-own-mod');
       for (const url of [`https://127.0.0.1:${other.address().port}/`, `http://localhost:${other.address().port}/`]) {
         await d.navigate(pageCtx, url);
         await sleep(1200);
         const m = await page(`async () => document.documentElement.getAttribute('data-trif')`);
         if (m !== null) throw new Error(`${url} is marked: ${m}`);
       }
-      return 'each effect once, gravity and Escape work';
+      return 'the visitor\'s mod ran, the demo too, no marker anywhere';
     });
 
-    await check('the robot off for timsrobot.com again: no marker after a reload, the demo is back', async () => {
-      await d.eval(panelCtx, `async () => true`);
+    await check('the robot off for timsrobot.com again: the visitor\'s mod stops, the demo is still there', async () => {
       await d.navigate(pageCtx, `${base}/`);
       await sleep(1500);
       await d.click(panelCtx, '#site-switch');
       await sleep(1500);
       await load();
       const s = await state();
-      if (s.marker !== null || !s.tab?.shown) throw new Error(JSON.stringify(s));
-      return 'tab back';
+      if (s.mine !== null || s.marker !== null || (!s.tab?.shown && !s.panel)) throw new Error(JSON.stringify(s));
+      return s.panel ? 'panel open' : 'tab shown';
     });
 
     const problems = (await d.consoleProblems()).filter((p) => /^(chrome-extension|https:\/\/timsrobot)/.test(p.source || '') && p.level === 'error' && !/favicon\.ico/.test(p.source));

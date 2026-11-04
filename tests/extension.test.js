@@ -60,35 +60,13 @@ const mod = (id, extra = {}) => ({
   matches: [`*://${id.split('/')[0]}/*`], excludes: [], runAt: 'document_start', code: `/* ${id} */`, hash: 'h1', ...extra,
 });
 
-test('the home page marker: only on timsrobot.com, only while TRIF is on there, never a mod', async () => {
+test('no page is ever marked, timsrobot.com included; a home page marker left by a development build goes', async () => {
   const us = mockUserScripts();
-  const markerOn = () => us.scripts.filter((s) => s.id === lib.HOME_MARKER_ID);
-  // TRIF on for other sites (with mods there): no marker anywhere.
-  let r = await lib.syncUserScripts(us, { mods: [mod('x.com/a')], runtimeCode: 'RT', sitesOn: ['x.com', 'google.com'] });
-  assert.deepStrictEqual(markerOn(), []);
-  assert.ok(!us.scripts.some((s) => s.js.some((j) => j.code.includes('data-trif'))), 'nothing else marks pages');
-  // On for timsrobot.com: the marker, matching timsrobot.com and its subdomains only, at document_start.
-  r = await lib.syncUserScripts(us, { mods: [mod('x.com/a')], runtimeCode: 'RT', applied: r.applied, sitesOn: ['x.com', 'timsrobot.com'] });
-  assert.strictEqual(markerOn().length, 1);
-  assert.deepStrictEqual(markerOn()[0].matches, ['*://timsrobot.com/*', '*://*.timsrobot.com/*']);
-  assert.strictEqual(markerOn()[0].runAt, 'document_start');
-  assert.match(markerOn()[0].js[0].code, /setAttribute\("data-trif", "on"\)/);
-  assert.deepStrictEqual(r.registered, ['x.com/a'], 'not reported as a mod');
-  for (const host of ['https://timsrobot.com/', 'https://www.timsrobot.com/x']) assert.ok(markerOn()[0].matches.some((p) => lib.matchesPattern(p, host)), host);
-  for (const host of ['https://x.com/', 'https://nottimsrobot.com/', 'https://timsrobot.com.evil.net/']) assert.ok(!markerOn()[0].matches.some((p) => lib.matchesPattern(p, host)), host);
-  // Even with no mods at all (they're off), and through a full re-register (the runtime changed): still once.
-  r = await lib.syncUserScripts(us, { mods: [], runtimeCode: 'RT', applied: r.applied, sitesOn: ['timsrobot.com'] });
-  assert.deepStrictEqual(us.scripts.map((s) => s.id), [lib.HOME_MARKER_ID]);
-  r = await lib.syncUserScripts(us, { mods: [mod('timsrobot.com/fireworks')], runtimeCode: 'RT2', applied: r.applied, sitesOn: ['timsrobot.com'] });
-  assert.strictEqual(markerOn().length, 1);
-  assert.deepStrictEqual(us.scripts.filter((s) => s.id !== lib.HOME_MARKER_ID).map((s) => s.id), ['webmods-runtime', 'timsrobot.com/fireworks']);
-  // The robot off there: gone.
-  await lib.syncUserScripts(us, { mods: [mod('timsrobot.com/fireworks')], runtimeCode: 'RT2', applied: r.applied, sitesOn: ['x.com'] });
-  assert.deepStrictEqual(markerOn(), []);
-  // No sitesOn (no limit, as before sites had to be turned on): no marker either.
-  await lib.syncUserScripts(us, { mods: [mod('x.com/a')], runtimeCode: 'RT', sitesOn: null });
-  assert.deepStrictEqual(markerOn(), []);
-  assert.strictEqual(lib.wantsHomeMarker(['www.timsrobot.com']), false, 'sitesOn holds scopes (timsrobot.com), not hosts');
+  await us.register([{ id: 'trif-home', matches: ['*://timsrobot.com/*'], js: [{ code: 'document.documentElement.setAttribute("data-trif", "on");' }], runAt: 'document_start', world: 'MAIN' }]);
+  const r = await lib.syncUserScripts(us, { mods: [mod('x.com/a'), mod('timsrobot.com/fireworks')], runtimeCode: 'RT', sitesOn: ['x.com', 'timsrobot.com'] });
+  assert.deepStrictEqual(us.scripts.map((s) => s.id), ['webmods-runtime', 'x.com/a', 'timsrobot.com/fireworks']);
+  assert.deepStrictEqual(r.registered, ['x.com/a', 'timsrobot.com/fireworks']);
+  assert.ok(!us.scripts.some((s) => s.js.some((j) => j.code.includes('data-trif'))), 'nothing marks pages');
 });
 
 test('first sync registers the runtime first, then each mod, wrapped and in the MAIN world', async () => {
@@ -1857,20 +1835,17 @@ test('orderMods: a site\'s shipped default order first (the rest after, as they 
   assert.deepStrictEqual(lib.setModOrder({ 'timsrobot.com': theirs }, 'timsrobot.com', ids(natural), ids(natural)), {});
 });
 
-test('background: the home page marker follows the robot on timsrobot.com', async () => {
+test('background: TRIF on for timsrobot.com registers its mods, and nothing that marks the page', async () => {
   const bg = await loadBackground({ storage: { sitesOn: ['x.com'], mods: [mod('x.com/a'), mod('timsrobot.com/fireworks', { matches: ['https://timsrobot.com/*'] })] } });
   try {
     await settle(30);
-    assert.ok(!scriptIds(bg).includes(lib.HOME_MARKER_ID));
     const panel = bg.connectPanel();
     const on = await panel.ask({ type: 'site.set', site: 'timsrobot.com', on: true });
     assert.strictEqual(on.ok, true, on.error);
     await settle(30);
-    assert.ok(scriptIds(bg).includes(lib.HOME_MARKER_ID));
-    const off = await panel.ask({ type: 'site.set', site: 'timsrobot.com', on: false });
-    assert.strictEqual(off.ok, true, off.error);
-    await settle(30);
-    assert.ok(!scriptIds(bg).includes(lib.HOME_MARKER_ID));
+    assert.ok(scriptIds(bg).includes('timsrobot.com/fireworks'));
+    assert.ok(!scriptIds(bg).includes('trif-home'));
+    assert.ok(!bg.chrome.userScripts.scripts.some((x) => x.js.some((j) => String(j.code).includes('data-trif'))));
   } finally { bg.restore(); }
 });
 

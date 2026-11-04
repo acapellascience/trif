@@ -110,6 +110,26 @@
     };
     size();
     addEventListener('resize', size);
+
+    // The loop is seamless only while the two copies match. Space Shooter blasts words (and whole links)
+    // one at a time, marking each [data-tss-dead], and its R brings them back: whatever happens to a part
+    // of one copy happens to the same part of the other, or each wrap-around would jump-cut between them.
+    const twin = (el) => {
+      const from = group.contains(el) ? group : copy.contains(el) ? copy : null;
+      if (!from) return null;
+      const all = [...from.querySelectorAll('*')];
+      const i = all.indexOf(el);
+      return i < 0 ? null : ((from === group ? copy : group).querySelectorAll('*')[i] || null);
+    };
+    new MutationObserver((records) => {
+      for (const r of records) {
+        const el = r.target, other = twin(el);
+        if (!other) continue;
+        const v = el.getAttribute('data-tss-dead');
+        if (v === other.getAttribute('data-tss-dead')) continue;
+        if (v === null) other.removeAttribute('data-tss-dead'); else other.setAttribute('data-tss-dead', v);
+      }
+    }).observe(track, { subtree: true, attributes: true, attributeFilter: ['data-tss-dead'] });
     window.trif?.log('LED footer built with', links.length, 'links');
   };
 

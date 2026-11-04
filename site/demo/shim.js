@@ -484,14 +484,18 @@
   // The next recording's prompt waits in the panel's own message box, which can't be typed in (on a
   // phone, typing would bring up the keyboard and zoom the page in), and Send replays it. One after
   // another, in the order the panel lists the mods (the visitor's own, if they've dragged them): each
-  // recording by the last of its mods in that order, and only once the ones it follows on from have played.
+  // recording by the last of its mods in that order, and only once the ones it follows on from are done.
   // Once they all have, the box is the visitor's to type in, and what they send gets the note saying what
   // the real TRIF would do with it.
 
   const ui = (() => {
     let busy = null; // the run being replayed
     let note = null; // "That's all the recordings…", once they have all played
-    const offered = () => DEMO.chats.filter((c) => !state.replayed.has(c.id) && c.after.every((a) => state.replayed.has(a)));
+    // (a chat counts as done once it has played, or, if it starts a mod off rather than following on from
+    // another chat, when its mods are all listed already: from a link with them in the page's address)
+    const byId = new Map(DEMO.chats.map((c) => [c.id, c]));
+    const done = (c) => !!c && (state.replayed.has(c.id) || (!c.after.length && c.mods.every((slug) => state.mods.some((m) => m.slug === slug))));
+    const offered = () => DEMO.chats.filter((c) => !done(c) && c.after.every((a) => done(byId.get(a))));
     function next() {
       const own = store.get('modOrder');
       const order = (Array.isArray(own?.[SITE]) && own[SITE].length ? own[SITE] : DEMO.order || []).map((id) => String(id).split('/').pop());

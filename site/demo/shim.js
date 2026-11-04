@@ -563,10 +563,12 @@
   const ui = (() => {
     let busy = null; // the run being replayed
     let mounted = false;
-    // (a chat counts as done once it has played, or, if it starts a mod off rather than following on from
-    // another chat, when its mods are all listed already: from a link with them in the page's address)
+    // (a chat counts as done once it has played, or, on a phone, if it starts a mod off rather than
+    // following on from another chat, when its mods are all listed already: from a link with them in the
+    // page's address. At a desk they're all listed from the start.)
     const byId = new Map(DEMO.chats.map((c) => [c.id, c]));
-    const done = (c) => !!c && (state.replayed.has(c.id) || (!c.after.length && c.mods.every((slug) => state.mods.some((m) => m.slug === slug))));
+    const done = (c) => !!c && (state.replayed.has(c.id)
+      || (PHONE && !c.after.length && c.mods.every((slug) => state.mods.some((m) => m.slug === slug))));
     const offered = () => DEMO.chats.filter((c) => !done(c) && c.after.every((a) => done(byId.get(a))));
     const next = () => offered()[0] || null; // (DEMO.chats is in the path's order)
 

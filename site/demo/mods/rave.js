@@ -464,7 +464,8 @@
   };
   document.addEventListener('visibilitychange', sync);
   // The courtesy mute: the music stops while it's on, and starts again (if it's on) when it's off.
-  addEventListener('trif-mute', () => { try { if (isMuted()) stop(); else sync(); } catch {} });
+  // (unmuting is a click: the music can start then, even if it never has yet)
+  addEventListener('trif-mute', () => { try { if (isMuted()) stop(); else if (musicOn && !document.hidden) { start(); sync(); } } catch {} });
 
   // Autoplay on the first click or keypress (browsers only allow sound after a gesture). On timsrobot.com
   // the music is always on (no play/pause or zoom buttons): it starts with your first real click or key

@@ -2,18 +2,35 @@
 // emails the report to the maintainer (the EMAIL send_email binding, to the REPORT_TO secret). Also the
 // Windows waitlist: /windows, whose POST emails each signup the same way (the maintainer's inbox is the list).
 //
+// And the home page's demo (demo.js): the home page with the mods it switched on (/?mods=a,b), the
+// extension's side panel files (/demo/ext/…, from the EXTENSION assets binding: wrangler.toml), the demo's
+// scripts and its mods. The side panel may be framed by this site only; everything else by nothing.
+//
 // It also answers for webmods.dev, TRIF's address before 0.2.0 (when it was called WebMods), sending
 // everything there to the same path on timsrobot.com: older installs open webmods.dev/report#r=… (a
 // browser keeps the # part across the redirect).
 
-import { HOME, REPORT, REPORT_JS, WINDOWS, WINDOWS_JS, windowsPage } from './pages.js';
+import { REPORT, REPORT_JS, WINDOWS, WINDOWS_JS, windowsPage } from './pages.js';
 import { LIMITS, ReportError, parseReport, parseSignup, reportEmail, signupEmail } from './report.js';
+import { DEMO_FILES, EXTENSION_FILES, homeWith, modScript, panelHtml, typeFor } from './demo.js';
+
+const CSP = {
+  'default-src': "'none'", 'script-src': "'self'", 'style-src': "'unsafe-inline'", 'connect-src': "'self'", 'img-src': "'self'",
+  'form-action': "'self'", 'base-uri': "'none'", 'frame-ancestors': "'none'",
+};
+/** The Content-Security-Policy: CSP with `changes` (a page that frames the demo, or is framed by it). */
+export const csp = (changes = {}) => Object.entries({ ...CSP, ...changes }).map(([k, v]) => `${k} ${v}`).join('; ');
 
 const SECURITY_HEADERS = {
-  'Content-Security-Policy': "default-src 'none'; script-src 'self'; style-src 'unsafe-inline'; connect-src 'self'; img-src 'self'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'",
+  'Content-Security-Policy': csp(),
   'Referrer-Policy': 'no-referrer',
   'X-Content-Type-Options': 'nosniff',
 };
+
+// The demo: the home page frames the side panel.
+const FRAMES_DEMO = { 'Content-Security-Policy': csp({ 'frame-src': "'self'" }) };
+const PANEL = { 'Content-Security-Policy': csp({ 'style-src': "'self' 'unsafe-inline'", 'frame-ancestors': "'self'" }) };
+const CACHE = { 'Cache-Control': 'public, max-age=300' };
 
 const respond = (body, type, status = 200, extra = {}) =>
   new Response(body, { status, headers: { 'Content-Type': type, ...SECURITY_HEADERS, ...extra } });
@@ -23,8 +40,18 @@ const html = (body, status = 200, cache = 'public, max-age=300', extra = {}) => 
 // "Origin: null" with the post, which the origin check can't tell from another site's. 'same-origin'
 // still sends nothing to other sites.
 const FORM_PAGE = { 'Referrer-Policy': 'same-origin' };
-const script = (body) => respond(body, 'text/javascript; charset=utf-8', 200, { 'Cache-Control': 'public, max-age=300' });
+const script = (body) => respond(body, 'text/javascript; charset=utf-8', 200, CACHE);
 const bodyType = (request) => (request.headers.get('Content-Type') || '').split(';')[0].trim().toLowerCase();
+const notFound = () => respond('Not found', 'text/plain', 404);
+
+/** A side panel file from the extension's folder (the EXTENSION assets binding), if the panel uses it. */
+async function extensionFile(request, env, file) {
+  if (!EXTENSION_FILES.has(file) || !env.EXTENSION) return notFound();
+  const res = await env.EXTENSION.fetch(new Request(new URL(`/${file}`, request.url)));
+  if (!res.ok) return notFound();
+  if (file === 'sidepanel.html') return html(panelHtml(await res.text()), 200, undefined, PANEL);
+  return respond(res.body, typeFor(file), 200, CACHE);
+}
 
 /**
  * The rate limit's key for an address: IPv4 as is, IPv6 by its /64 (one household or server usually
@@ -162,15 +189,21 @@ export default {
   async fetch(request, env) {
     const moved = redirectFor(request.url);
     if (moved) return moved;
-    const { pathname } = new URL(request.url);
+    const { pathname, searchParams } = new URL(request.url);
     if (pathname === '/report' && request.method === 'POST') return receiveReport(request, env);
     if (pathname === '/windows' && request.method === 'POST') return receiveSignup(request, env);
     if (request.method !== 'GET' && request.method !== 'HEAD') return respond('Method not allowed', 'text/plain', 405);
-    if (pathname === '/') return html(HOME);
+    if (pathname === '/') return html(homeWith(searchParams.get('mods')), 200, undefined, FRAMES_DEMO);
     if (pathname === '/report' || pathname === '/report/') return html(REPORT);
     if (pathname === '/report.js') return script(REPORT_JS);
     if (pathname === '/windows' || pathname === '/windows/') return html(WINDOWS, 200, undefined, FORM_PAGE);
     if (pathname === '/windows.js') return script(WINDOWS_JS);
-    return respond('Not found', 'text/plain', 404);
+    if (Object.hasOwn(DEMO_FILES, pathname)) return respond(DEMO_FILES[pathname].body, DEMO_FILES[pathname].type, 200, CACHE);
+    if (pathname.startsWith('/demo/mods/')) {
+      const code = modScript(pathname.slice('/demo/mods/'.length));
+      return code ? respond(code, 'text/javascript; charset=utf-8', 200, CACHE) : notFound();
+    }
+    if (pathname.startsWith('/demo/ext/')) return extensionFile(request, env, pathname.slice('/demo/ext/'.length));
+    return notFound();
   },
 };

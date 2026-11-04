@@ -81,7 +81,7 @@ class Cdp {
 }
 
 class ChromeDriver {
-  /** opts: { userDataDir, home (scratch HOME for Chrome and so the helper), extensionDir, headless, env } */
+  /** opts: { userDataDir, home (scratch HOME for Chrome and so the helper), extensionDir, headless, env, hosts (more to resolve to 127.0.0.1) } */
   constructor(opts) {
     this.opts = opts;
     this.name = 'Chrome';
@@ -111,7 +111,7 @@ class ChromeDriver {
       '--disable-features=DisableLoadExtensionCommandLineSwitch',
       '--no-first-run', '--no-default-browser-check', '--disable-sync', '--disable-component-update',
       '--disable-background-networking', '--password-store=basic', '--use-mock-keychain',
-      '--host-resolver-rules=MAP x.com 127.0.0.1, MAP *.x.com 127.0.0.1, MAP www.google.com 127.0.0.1',
+      `--host-resolver-rules=MAP x.com 127.0.0.1, MAP *.x.com 127.0.0.1, MAP www.google.com 127.0.0.1${(this.opts.hosts || []).map((h) => `, MAP ${h} 127.0.0.1`).join('')}`,
       '--ignore-certificate-errors',
       '--window-size=1280,900',
       'about:blank',
@@ -248,18 +248,21 @@ class ChromeDriver {
   async click(ctx, selector) {
     const sid = await this._attach(ctx);
     const [x, y] = await this.eval(ctx, `async (sel) => {
-      const el = document.querySelector(sel);
+      let el = document.querySelector(sel);
       if (!el) throw new Error('no element ' + sel);
       el.scrollIntoView({ block: 'center' });
       // Wait for the layout to settle (a notice appearing above can move the element mid-click), and for
-      // nothing to cover the element's centre.
+      // nothing to cover the element's centre. A list re-rendered meanwhile (the side panel relists its mods
+      // when TRIF comes on) replaces the element and can scroll it back out of view: find it and scroll to it again.
       const rect = () => JSON.stringify(el.getBoundingClientRect());
-      for (let i = 0, last = rect(); i < 20; i++) {
+      for (let i = 0, last = rect(); i < 40; i++) {
         await new Promise((r) => setTimeout(r, 150));
+        el = document.querySelector(sel) || el;
         const now = rect();
         const c = el.getBoundingClientRect();
         const hit = document.elementFromPoint(c.x + c.width / 2, c.y + c.height / 2);
         if (now === last && hit && (hit === el || el.contains(hit))) break;
+        if (!hit || (hit !== el && !el.contains(hit))) el.scrollIntoView({ block: 'center' });
         last = now;
       }
       const b = el.getBoundingClientRect();

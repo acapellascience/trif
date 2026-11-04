@@ -1,0 +1,51 @@
+{
+ "id": "c11-checklist",
+ "prompt": "turn the What you need list into a checklist: each item gets a checkbox that ticks itself one by one, with a little icon for each (Mac, browser, Node, robot)",
+ "secs": 219,
+ "mods": [
+  "checklist"
+ ],
+ "after": [],
+ "messages": [
+  {
+   "role": "user",
+   "text": "turn the What you need list into a checklist: each item gets a checkbox that ticks itself one by one, with a little icon for each (Mac, browser, Node, robot)",
+   "t": 0
+  },
+  {
+   "role": "tool",
+   "text": "ran trif mods; ls sites/timsrobot.com 2>/dev/null; trif run 'const h=[...document.querySelectorAll(\"h1,h2,h3,h4\")].find(e=>/what you need/i.test(e.textContent)); if(!h) return null; let n=h.nextElementSibling; return {tag:h.tagName, outer:h.…",
+   "t": 36481
+  },
+  {
+   "role": "tool",
+   "text": "ran trif run 'const h=[...document.querySelectorAll(\"h2\")].find(e=>/what you need/i.test(e.textContent)); const ul=h.nextElementSibling, li=ul.querySelector(\"li\"); const s=getComputedStyle(li), u=getComputedStyle(ul); return {count:document.…",
+   "t": 76192
+  },
+  {
+   "role": "tool",
+   "text": "read sites/timsrobot.com/need-checklist.js",
+   "t": 92662
+  },
+  {
+   "role": "tool",
+   "text": "wrote sites/timsrobot.com/need-checklist.js",
+   "t": 129216
+  },
+  {
+   "role": "tool",
+   "text": "ran trif check timsrobot.com/need-checklist && trif reload && trif run 'document.querySelector(\"ul[data-nc]\")?.scrollIntoView({block:\"center\"}); await new Promise(r=>setTimeout(r,3500)); const ul=document.querySelector(\"ul[da…",
+   "t": 156420
+  },
+  {
+   "role": "tool",
+   "text": "read ~/Library/Application Support/TRIF/screenshots/timsrobot.com/2026-11-03T10-15-44.png",
+   "t": 181290
+  },
+  {
+   "role": "assistant",
+   "text": "I've turned the **What you need** list into a checklist. Each item now has a checkbox and a small icon: a laptop for Mac, a browser window for Chrome/Firefox, a hexagon for Node, and a robot for the coding agent. When the list scrolls into view, the boxes tick themselves green one by one, about half a second apart, and each icon lights up green as its box ticks. People whose system asks for less motion get the ticks without the animation.\n\nI reloaded the page and checked it: all 4 items got their box and icon, all 4 ticked in turn, and the mod threw no errors. I also looked at a screenshot to confirm the layout. Your other mods on the page (neon title, stickers, typing tagline and the rest) still show as before.\n\nTo undo it, switch off **Need checklist** in the side panel.",
+   "t": 185960
+  }
+ ]
+}

@@ -1,11 +1,15 @@
-// The pages timsrobot.com serves. Plain HTML and two small scripts; nothing loaded from anywhere else.
+// The pages timsrobot.com serves. Plain HTML and a few small scripts (the report and waitlist forms', and the
+// home page's demo tab: demo.js); nothing loaded from anywhere else.
 
-const STYLE = `
+// The colours, light and dark (the demo's window uses them too: demo.js).
+export const TOKENS = `
 :root { color-scheme: light dark; --bg: #f6f6f4; --card: #fff; --fg: #1b1b1a; --muted: #6a6a66; --line: #ddddd8;
   --accent: #1f9d6b; --on-accent: #fff; --bad: #b3261e; }
 @media (prefers-color-scheme: dark) { :root { --bg: #18181a; --card: #222225; --fg: #ececea; --muted: #a2a29d;
   --line: #3a3a3e; --accent: #43c98d; --on-accent: #04291c; --bad: #ff8a80; } }
-* { box-sizing: border-box; }
+* { box-sizing: border-box; }`;
+
+const STYLE = `${TOKENS}
 body { margin: 0; background: var(--bg); color: var(--fg); font: 15px/1.5 -apple-system, system-ui, "Segoe UI", sans-serif; }
 main { max-width: 640px; margin: 0 auto; padding: 48px 16px 64px; }
 h1 { font-size: 28px; margin: 0 0 4px; letter-spacing: -0.01em; }
@@ -32,14 +36,14 @@ a { color: var(--accent); }
 code { font: 13px ui-monospace, Menlo, monospace; }
 `;
 
-function page(title, body, { script = '', style = '', after = '' } = {}) {
+function page(title, body, { script = '', style = '', after = '', head = '' } = {}) {
   return `<!doctype html>
 <html lang="en">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>${title}</title>
-<style>${STYLE}${style}</style>
+<style>${STYLE}${style}</style>${head}
 </head>
 <body>
 <main>
@@ -86,7 +90,50 @@ footer a { color: var(--muted); }
 @media (max-width: 720px) { .two { grid-template-columns: 1fr; } }
 `;
 
-export const HOME = page("Tim's Robot Internet Fixer", `
+// The demo: a tab on the right edge, shown by demo.js (site/demo/tab.js), opens the real side panel docked
+// to the right of the page (in the top layer, above mods' full-window layers); the page moves over to make
+// room. At phone width the panel is a sheet over the bottom of the page.
+const DEMO_STYLE = `
+/* (The tab and the panel are moved out of <body> by demo.js, into the top layer where there is one: mods
+   that take the page apart leave them alone. Their own styles say everything, so page-wide ones don't.) */
+.demo-tab { position: fixed; z-index: 2147483646; inset: 50% 0 auto auto; margin: 0; transform: translateY(-50%); writing-mode: vertical-rl;
+  padding: 14px 7px; background: var(--card); color: var(--fg); border: 1px solid var(--line); border-right: 0;
+  border-radius: 8px 0 0 8px; font: 600 13px/1 -apple-system, system-ui, "Segoe UI", sans-serif; cursor: pointer; overflow: visible; }
+.demo-tab:hover { color: var(--accent); }
+.demo-tab[hidden] { display: none; }
+.demo-panel { position: fixed; z-index: 2147483647; inset: 0 0 0 auto; width: 360px; height: auto; max-width: 100%; max-height: none;
+  margin: 0; padding: 0; border: 0; border-left: 1px solid var(--line); background: var(--card); color: var(--fg);
+  font: 13px/1.4 -apple-system, system-ui, "Segoe UI", sans-serif; display: none; flex-direction: column; overflow: hidden; }
+.demo-panel:popover-open { display: flex; }
+.demo-panel:not([popover]):not([hidden]) { display: flex; }
+.demo-panel-top { display: flex; align-items: center; justify-content: space-between; padding: 3px 6px 3px 12px;
+  border-bottom: 1px solid var(--line); color: var(--muted); font-size: 12px; }
+.demo-close { padding: 2px 8px; background: none; color: var(--muted); font-size: 18px; font-weight: 400; line-height: 1.2; border-radius: 6px; }
+.demo-close:hover { background: var(--bg); color: var(--fg); }
+.demo-panel iframe { flex: 1; min-height: 0; width: 100%; border: 0; display: block; }
+.demo-panel-note { margin: 0; padding: 6px 12px; border-top: 1px solid var(--line); color: var(--muted); font-size: 11px; line-height: 1.4; }
+@media (min-width: 701px) { html.demo-open body { margin-right: 360px; } }
+/* Mods' full-window canvases (the shooter's, the fireworks', the rave's glow layers: all outside <body>) are
+   the window's size in CSS (100vw x 100vh) but draw at the size demo.js says the window is with the panel
+   open (innerWidth / innerHeight): the same here, or they'd stretch and what's drawn would land off target. */
+@media (min-width: 701px) { html.demo-open > canvas { width: calc(100vw - 360px) !important; right: auto !important; } }
+@media (max-width: 700px) { html.demo-open > canvas { height: 28vh !important; height: 28dvh !important; bottom: auto !important; } }
+/* The shooter's "ROBOT DESTROYED" is centred, and its letters sized, by the window's width in CSS: by the
+   part beside the panel here (or above the sheet). */
+@media (min-width: 701px) {
+  html.demo-open > #tss-banner { left: calc((100vw - 360px) / 2) !important; }
+  html.demo-open > #tss-banner .tss-bn { font-size: clamp(40px, calc((100vw - 360px) * 0.09), 120px) !important; }
+}
+@media (max-width: 700px) { html.demo-open > #tss-banner { top: 14vh !important; top: 14dvh !important; } }
+@media (max-width: 700px) {
+  .demo-panel { inset: auto 0 0 0; width: auto; height: 72vh; height: 72dvh; border-left: 0; border-top: 1px solid var(--line);
+    border-radius: 12px 12px 0 0; box-shadow: 0 -6px 24px rgb(0 0 0 / 0.15); }
+}
+`;
+
+/** The home page, with the demo's tab, and `head` and `tail` (the mods the demo switched on: demo.js). */
+export function homePage({ head = '', tail = '' } = {}) {
+  return page("Tim's Robot Internet Fixer", `
 <section class="hero">
   ${ROBOT_SVG}
   <h1>Tim's Robot Internet Fixer</h1>
@@ -109,9 +156,14 @@ export const HOME = page("Tim's Robot Internet Fixer", `
     <p>Mods are plain JavaScript files in <code>~/.trif</code>: read them, change them, switch them off. TRIF collects nothing. The only thing that ever reaches Tim is a problem report you choose to send.</p>
   </div>
 </section>`, {
-  style: HOME_STYLE,
-  after: `\n<footer><a href="${REPO}">GitHub</a><a href="/report">Report a problem</a><a href="/windows">Windows waitlist</a><a href="${REPO}/blob/main/store/PRIVACY.md">Privacy</a></footer>`,
-}).replace('<main>', '<main class="home">');
+    style: HOME_STYLE + DEMO_STYLE,
+    head,
+    after: `\n<footer><a href="${REPO}">GitHub</a><a href="/report">Report a problem</a><a href="/windows">Windows waitlist</a><a href="${REPO}/blob/main/store/PRIVACY.md">Privacy</a></footer>` +
+      '\n<button type="button" class="demo-tab" hidden>Try the demo</button>\n<script src="/demo.js" defer></script>' + tail,
+  }).replace('<main>', '<main class="home">');
+}
+
+export const HOME = homePage();
 
 export const REPORT = page('Report a problem · TRIF', `
 <h1>Report a problem</h1>

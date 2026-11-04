@@ -22,6 +22,10 @@
     html {
       background: radial-gradient(ellipse at 50% 40%, #1d1d2b 0%, #0b0b12 70%) fixed, #0b0b12 !important;
       perspective: 1400px; overflow-x: hidden;
+      /* (the perspective makes <html> the box "fixed" layers are placed in, so one wider than the window,
+         like Rainbow Rave's sliding stripes, would widen the page; on a phone, the whole page zoomed out.
+         overflow-x doesn't stop that there: paint containment does) */
+      contain: paint;
     }
     html body {
       position: relative;

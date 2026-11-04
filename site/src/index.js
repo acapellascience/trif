@@ -175,7 +175,8 @@ async function receiveSignup(request, env) {
 }
 
 export const HOME_HOST = 'timsrobot.com';
-const OLD_HOSTS = new Set(['webmods.dev', 'www.webmods.dev']);
+// (and www.timsrobot.com, to the bare name)
+const OLD_HOSTS = new Set(['webmods.dev', 'www.webmods.dev', 'www.timsrobot.com']);
 
 /** The redirect for a request to an old address (OLD_HOSTS), or null. */
 export function redirectFor(url) {

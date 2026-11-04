@@ -144,14 +144,11 @@
   const findMod = (id) => state.mods.find((m) => m.id === id);
   const fileOf = (m) => `~/.trif/sites/${SITE}/${m.slug}.js`;
 
-  /**
-   * Load the page again with the mods that run there now (tab.js does it; this panel comes back after).
-   * `made`: a recorded chat just made a mod (on a phone, the sheet comes back tucked away, to show it).
-   */
-  function loadPage(made = false) {
+  /** Load the page again with the mods that run there now (tab.js does it; this panel comes back after). */
+  function loadPage() {
     const mods = siteOn() ? state.mods.filter((m) => !disabled()[m.id]).map((m) => m.slug) : [];
     persist();
-    if (window.parent !== window) window.parent.postMessage({ type: 'trif-demo:load', mods, made }, location.origin);
+    if (window.parent !== window) window.parent.postMessage({ type: 'trif-demo:load', mods }, location.origin);
   }
 
   async function status() {
@@ -324,7 +321,7 @@
       state.mods.sort((a, b) => a.slug.localeCompare(b.slug));
       setNow({ disabled: off });
       state.replayed.add(run.recording.id);
-      later(() => loadPage(true), 1200);
+      later(loadPage, 1200);
     }
   }
 
@@ -484,6 +481,33 @@
     permissions: { request: async () => true, contains: async () => true },
   };
   Object.defineProperty(window, 'chrome', { value: chrome, configurable: true, writable: true });
+
+  // ---- Scrolling stays in the panel ---------------------------------------------------------------
+  // On a phone, a swipe the panel can't use (on a part that doesn't scroll, or past the end of a list)
+  // goes on to the page under the demo, which then scrolls away behind it. A swipe moves whatever in the
+  // panel can scroll that way, or nothing.
+  (() => {
+    let last = null;
+    const canScroll = (el, dx, dy) => {
+      for (let e = el; e && e !== document.documentElement; e = e.parentElement) {
+        const cs = getComputedStyle(e);
+        if (Math.abs(dy) >= Math.abs(dx)) {
+          if (/(auto|scroll)/.test(cs.overflowY) && e.scrollHeight > e.clientHeight + 1
+            && (dy > 0 ? e.scrollTop > 0 : e.scrollTop + e.clientHeight < e.scrollHeight - 1)) return true;
+        } else if (/(auto|scroll)/.test(cs.overflowX) && e.scrollWidth > e.clientWidth + 1
+          && (dx > 0 ? e.scrollLeft > 0 : e.scrollLeft + e.clientWidth < e.scrollWidth - 1)) return true;
+      }
+      return false;
+    };
+    addEventListener('touchstart', (e) => { const t = e.touches[0]; last = t ? { x: t.clientX, y: t.clientY } : null; }, { capture: true, passive: true });
+    addEventListener('touchmove', (e) => {
+      const t = e.touches[0];
+      if (!t || e.touches.length !== 1 || !last) return; // (two fingers: leave pinching to the phone)
+      const dx = t.clientX - last.x, dy = t.clientY - last.y; // (finger down: dy > 0, scrolling up)
+      last = { x: t.clientX, y: t.clientY };
+      if (e.cancelable && !canScroll(e.target, dx, dy)) e.preventDefault();
+    }, { capture: true, passive: false });
+  })();
 
   // ---- The recorded chats, one at a time ----------------------------------------------------------
   // The next recording's prompt waits in the panel's own message box, which can't be typed in (on a

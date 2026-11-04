@@ -7,6 +7,7 @@ compatibility_date = "2026-10-01"
 # redirects it to timsrobot.com (src/index.js redirectFor).
 routes = [
   { pattern = "timsrobot.com", custom_domain = true },
+  { pattern = "www.timsrobot.com", custom_domain = true }, # redirects to timsrobot.com (index.js redirectFor)
   { pattern = "webmods.dev", custom_domain = true },
   { pattern = "www.webmods.dev", custom_domain = true },
 ]

@@ -18,3 +18,8 @@ html.demo-guided #input { pointer-events: none; caret-color: transparent; }
    the page in on it. */
 html.demo-phone #input { font-size: 16px; }
 html.demo-phone :is(input, select, textarea) { font-size: 16px; }
+
+/* Scrolling inside the panel stays inside it: the page under the demo doesn't scroll along when a list
+   reaches its end (shim.js also stops swipes on the parts that don't scroll at all). */
+html, body { overscroll-behavior: none; }
+* { overscroll-behavior: contain; }

@@ -130,6 +130,7 @@ test('webmods.dev (the address before 0.2.0) redirects to the same place on tims
   assert.equal(res.status, 308);
   assert.equal(res.headers.get('Location'), 'https://timsrobot.com/report?x=1');
   assert.equal((await worker.fetch(new Request('https://www.webmods.dev/'), e)).headers.get('Location'), 'https://timsrobot.com/');
+  assert.equal((await worker.fetch(new Request('https://www.timsrobot.com/windows?mods=rave'), e)).headers.get('Location'), 'https://timsrobot.com/windows?mods=rave', 'www goes to the bare name');
   const post = await worker.fetch(new Request('https://webmods.dev/report', { method: 'POST', body: '{}', headers: { 'Content-Type': 'application/json' } }), e);
   assert.equal(post.status, 308);
   assert.equal(e.sent.length, 0, 'nothing is sent from the old address');

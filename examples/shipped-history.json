@@ -17,13 +17,15 @@
   "timsrobot.com/fireworks": [
     "edd9f969bd91bc9c6ad8e7910d475b06f2e5ba2c",
     "b8223926a2fd4c05e871adb9bba6789f6fbc7d92",
-    "1988a9c372d150300e41b28f9b27999391dd2c3c"
+    "1988a9c372d150300e41b28f9b27999391dd2c3c",
+    "81107e37ca42911fdb56d4a12e25272ddfe22215"
   ],
   "timsrobot.com/gravity-mode": [
     "963edd7fb4f416567586c28df850989d65a0d241"
   ],
   "timsrobot.com/gravity": [
-    "620680d11197ae7fd88e861dd60fd865b10c89aa"
+    "620680d11197ae7fd88e861dd60fd865b10c89aa",
+    "d60a48ba03addf5d736dc5bdbfb869ade0f6d714"
   ],
   "timsrobot.com/jelly-buttons": [
     "72e10b6586ac0cf27973a2b9d7313d6f533c1711"
@@ -54,16 +56,19 @@
   ],
   "timsrobot.com/rave": [
     "f50b02d8a1ebeb52fb929ccb9a08a9c13579868f",
-    "13df013f9c5187d82faa1ed59a0055cfbbaebfc6"
+    "13df013f9c5187d82faa1ed59a0055cfbbaebfc6",
+    "970fb55e6d1a1f5af139e3f5b98a3645c1d45f68"
   ],
   "timsrobot.com/robot": [
     "b675716e42205c4eef642a9b881798c013877078",
     "c3a927c40557997d3880e7e1ac35c4860f0124d0",
-    "71e3ce683da6a35b8b13a0c56940d3ac42dce277"
+    "71e3ce683da6a35b8b13a0c56940d3ac42dce277",
+    "25c769bd0e05e991d5fdb655ae4d4c6cc5aa0f21"
   ],
   "timsrobot.com/shooter": [
     "781148177a8fd07ccf84aa63f474246fedd36c0b",
-    "193319c349435402c970e1d79a141f417bc79f0e"
+    "193319c349435402c970e1d79a141f417bc79f0e",
+    "377dc33e748332c8ad35438823562dbdd365b31b"
   ],
   "timsrobot.com/space-shooter": [
     "0294ddce661b7e50fd1f84b9deed05552e080809"
@@ -87,7 +92,8 @@
     "d667f8572c92ab03f030acc7bef2414af2d67471"
   ],
   "timsrobot.com/tilt": [
-    "b8fb46fdcffc95bb50449c059f68bf5cd65958cb"
+    "b8fb46fdcffc95bb50449c059f68bf5cd65958cb",
+    "e1436f5ecd614d9ea5f3ad5f1d82d28718c027b9"
   ],
   "timsrobot.com/typing-tagline": [
     "d22b4f9de2a2eea19ea632b5c9938bb671cbdc9f"

@@ -117,6 +117,7 @@ const DEMO_STYLE = `
    open (innerWidth / innerHeight): the same here, or they'd stretch and what's drawn would land off target. */
 @media (min-width: 701px) { html.demo-open > canvas { width: calc(100vw - 360px) !important; right: auto !important; } }
 @media (max-width: 700px) { html.demo-open > canvas { height: 28vh !important; height: 28dvh !important; bottom: auto !important; } }
+@media (max-width: 700px) { html.demo-open.demo-min > canvas { height: calc(100vh - 45px) !important; height: calc(100dvh - 45px) !important; } }
 /* The shooter's "ROBOT DESTROYED" is centred, and its letters sized, by the window's width in CSS: by the
    part beside the panel here (or above the sheet). */
 @media (min-width: 701px) {
@@ -124,9 +125,18 @@ const DEMO_STYLE = `
   html.demo-open > #tss-banner .tss-bn { font-size: clamp(40px, calc((100vw - 360px) * 0.09), 120px) !important; }
 }
 @media (max-width: 700px) { html.demo-open > #tss-banner { top: 14vh !important; top: 14dvh !important; } }
+@media (max-width: 700px) { html.demo-open.demo-min > #tss-banner { top: calc(50vh - 22px) !important; top: calc(50dvh - 22px) !important; } }
 @media (max-width: 700px) {
   .demo-panel { inset: auto 0 0 0; width: auto; height: 72vh; height: 72dvh; border-left: 0; border-top: 1px solid var(--line);
-    border-radius: 12px 12px 0 0; box-shadow: 0 -6px 24px rgb(0 0 0 / 0.15); }
+    border-radius: 12px 12px 0 0; box-shadow: 0 -6px 24px rgb(0 0 0 / 0.15); transition: height .25s ease; }
+  /* the top bar is the handle: swipe it down to tuck the sheet away, up (or tap it) to bring it back (demo.js) */
+  .demo-panel-top { position: relative; height: 44px; flex: none; padding: 0 6px 0 14px; touch-action: none; cursor: grab; user-select: none; -webkit-user-select: none; }
+  .demo-panel-top::before { content: ''; position: absolute; left: 50%; top: 6px; width: 36px; height: 4px; margin-left: -18px;
+    border-radius: 2px; background: var(--line); }
+  .demo-close { font-size: 22px; padding: 4px 12px; }
+  html.demo-min .demo-panel { height: 45px; }
+  /* (no room for it on a phone: the page says what the demo is) */
+  .demo-panel-note { display: none; }
 }
 `;
 

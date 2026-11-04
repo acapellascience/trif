@@ -16,7 +16,9 @@
   if (!tab) return;
   const root = document.documentElement;
   const OPEN = 'trif-demo-open';
+  const MIN = 'trif-demo-min';
   const remember = (on) => { try { sessionStorage.setItem(OPEN, on ? '1' : ''); } catch {} };
+  const phone = () => matchMedia('(max-width: 700px)').matches; // the sheet over the bottom of the page
   const realTrif = () => root.getAttribute('data-trif') === 'on';
   const topLayer = typeof tab.showPopover === 'function';
   let box = null;
@@ -62,7 +64,7 @@
   function standAside() {
     remember(false);
     if (box) { if (box.popover && box.matches(':popover-open')) box.hidePopover(); box.remove(); box = null; frame = null; }
-    root.classList.remove('demo-open');
+    root.classList.remove('demo-open', 'demo-min');
     if (tab.popover && tab.matches(':popover-open')) tab.hidePopover();
     tab.remove();
     cut.w = cut.h = 0;
@@ -109,6 +111,7 @@
     close.textContent = '×';
     close.addEventListener('click', () => hide());
     top.append(name, close);
+    swipe(top, close);
     frame = document.createElement('iframe');
     frame.src = '/demo/ext/sidepanel.html';
     frame.title = 'The TRIF side panel';
@@ -124,6 +127,41 @@
   }
 
   const isOpen = () => !!box && root.classList.contains('demo-open');
+
+  // At phone width, the sheet's top bar can be swiped down to tuck the sheet away (only the bar stays, at
+  // the bottom of the window) and swiped up, or tapped, to bring it back. Remembered across the page's
+  // reloads in this tab. The window as mods see it grows and shrinks with it (remeasure, after the slide).
+  const minimized = () => root.classList.contains('demo-min');
+  function minimize(on) {
+    root.classList.toggle('demo-min', on);
+    try { sessionStorage.setItem(MIN, on ? '1' : ''); } catch {}
+    const done = () => { box?.removeEventListener('transitionend', done); clearTimeout(timer); remeasure(); };
+    const timer = setTimeout(done, 400); // (in case no transition runs)
+    box?.addEventListener('transitionend', done);
+  }
+  function swipe(bar, except) {
+    let start = null;
+    bar.addEventListener('pointerdown', (e) => {
+      if (!phone() || except.contains(e.target) || (e.pointerType === 'mouse' && e.button !== 0)) return;
+      start = { id: e.pointerId, y: e.clientY };
+      try { bar.setPointerCapture(e.pointerId); } catch {}
+    });
+    bar.addEventListener('pointermove', (e) => {
+      if (start?.id !== e.pointerId || minimized()) return;
+      box.style.translate = `0 ${Math.max(0, e.clientY - start.y).toFixed(0)}px`; // the sheet follows the finger down
+    });
+    const end = (e) => {
+      if (start?.id !== e.pointerId) return;
+      const dy = e.clientY - start.y;
+      start = null;
+      box.style.translate = '';
+      if (e.type === 'pointercancel') return;
+      if (!minimized() && dy > 40) minimize(true);
+      else if (minimized() && (dy < -20 || Math.abs(dy) < 8)) minimize(false); // swiped up, or tapped
+    };
+    bar.addEventListener('pointerup', end);
+    bar.addEventListener('pointercancel', end);
+  }
 
   function showTab(on) {
     tab.hidden = !on;
@@ -141,11 +179,16 @@
     remember(true);
     remeasure();
   }
+  function open() { // from the tab: the whole sheet
+    if (minimized()) minimize(false);
+    show();
+  }
 
   function hide() {
     if (!isOpen()) return;
     if (box.popover) box.hidePopover(); else box.hidden = true;
-    root.classList.remove('demo-open');
+    root.classList.remove('demo-open', 'demo-min');
+    try { sessionStorage.setItem(MIN, ''); } catch {}
     showTab(true);
     tab.focus();
     remember(false);
@@ -166,11 +209,14 @@
   root.append(tab);
   if (topLayer) tab.popover = 'manual';
   showTab(true);
-  tab.addEventListener('click', show);
+  tab.addEventListener('click', open);
   // Escape closes the panel only from the demo's own controls: on the page, mods use it (Gravity puts the
   // page back with it).
   addEventListener('keydown', (e) => { if (e.key === 'Escape' && box && box.contains(document.activeElement) && !e.defaultPrevented) hide(); });
   let reopen = false;
   try { reopen = sessionStorage.getItem(OPEN) === '1'; } catch {}
-  if (reopen) show();
+  if (reopen) {
+    try { if (sessionStorage.getItem(MIN) === '1' && phone()) root.classList.add('demo-min'); } catch {}
+    show();
+  }
 })();

@@ -469,6 +469,11 @@
   Object.defineProperty(window, 'chrome', { value: chrome, configurable: true, writable: true });
 
   // ---- "Recorded chats": the prompts the demo can replay, above the message box -------------------
+  // On a phone (the panel is the sheet over the bottom of the page) there's no room for the list, and
+  // typing would bring up the keyboard and zoom the page: instead the next recording's prompt waits in the
+  // message box, which can't be typed in, and Send replays it. One after another, in the order the panel
+  // lists the mods (the visitor's own, if they've dragged them): each recording by the last of its mods
+  // in that order, and only once the ones it follows on from have played.
 
   const ui = (() => {
     let box = null;
@@ -478,6 +483,25 @@
     const el = (tag, cls, text) => { const e = document.createElement(tag); if (cls) e.className = cls; if (text !== undefined) e.textContent = text; return e; };
     const short = (s) => (s.length > 64 ? `${s.slice(0, 62).replace(/\s+\S*$/, '')}…` : s);
     const offered = () => DEMO.chats.filter((c) => !state.replayed.has(c.id) && c.after.every((a) => state.replayed.has(a)));
+    const phone = (() => { try { return window.parent !== window && window.parent.matchMedia('(max-width: 700px)').matches; } catch { return false; } })();
+    if (phone) document.documentElement.classList.add('demo-phone');
+    function next() {
+      const own = store.get('modOrder');
+      const order = (Array.isArray(own?.[SITE]) && own[SITE].length ? own[SITE] : DEMO.order || []).map((id) => String(id).split('/').pop());
+      const rank = (c) => Math.max(...c.mods.map((slug) => { const i = order.indexOf(slug); return i < 0 ? order.length : i; }));
+      return offered().map((c, i) => ({ c, i, r: rank(c) })).sort((a, b) => a.r - b.r || a.i - b.i)[0]?.c || null;
+    }
+    // The waiting prompt, in the panel's own message box (the panel clears it when it sends).
+    let note = null;
+    function fill() {
+      const input = document.getElementById('input');
+      if (!input) return;
+      const c = busy ? null : next();
+      input.value = c ? c.prompt : '';
+      input.dispatchEvent(new Event('input', { bubbles: true })); // (the box grows to fit)
+      if (!note) { note = el('p', 'demo-note demo-done', DEMO.words.allReplayedNote); document.getElementById('composer')?.before(note); }
+      note.hidden = !!(c || busy);
+    }
 
     function paint() {
       if (!box) return;
@@ -516,7 +540,17 @@
 
     function mount() {
       const form = document.getElementById('composer');
-      if (!form || box) return;
+      if (!form || box || note) return;
+      if (phone) {
+        const input = document.getElementById('input');
+        input.readOnly = true;
+        input.tabIndex = -1;
+        input.rows = 3; // (where the box can't grow to fit its text: Safari)
+        input.setAttribute('aria-label', 'The next recorded prompt: Send replays it');
+        fill();
+        later(resume);
+        return;
+      }
       box = el('details', 'demo-replays');
       box.open = state.chipsOpen;
       box.addEventListener('toggle', () => { state.chipsOpen = box.open; persist(); });
@@ -530,8 +564,8 @@
     if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', mount, { once: true }); else mount();
 
     return {
-      replaying(run) { busy = run; paint(); },
-      finished(run) { if (busy === run) busy = null; paint(); },
+      replaying(run) { busy = run; if (phone) fill(); else paint(); },
+      finished(run) { if (busy === run) busy = null; if (phone) fill(); else paint(); },
     };
   })();
 })(/*DEMO_DATA*/null);

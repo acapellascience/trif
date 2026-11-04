@@ -487,7 +487,7 @@ class Scenario {
       await r.check('setup page: user scripts ticked by themselves; the agent\'s login next', async () => {
         const x = await this.waitSetup('step 4 open', (st) => (st.steps.join() === 'done,done,done,now,later' && /\n\n/.test(st.now) && !/Checking your coding agent/.test(st.now))
           || st.steps.join() === 'done,done,done,done,now');
-        if (x.steps[3] === 'now' && !/isn’t logged in on this computer yet|needs a coding agent|isn’t available/.test(x.now)) throw new Error(`step 4 says: ${x.now}`);
+        if (x.steps[3] === 'now' && !/isn’t logged in on this computer yet|couldn’t tell whether .* is logged in|needs a coding agent|isn’t available/.test(x.now)) throw new Error(`step 4 says: ${x.now}`);
         await this.shot(this.control, 'setup-page-login');
         return x.steps[3] === 'now' ? x.now.split('\n').slice(0, 2).join(' / ') : 'the agent is logged in already';
       });

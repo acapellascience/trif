@@ -190,7 +190,10 @@ function loginStep(connected) {
     setBody(step, 'checking', () => [el('p', null, 'Checking your coding agent…')]);
     return { el: step, done: false };
   }
-  const done = !!info?.available && !login.current && (info.loggedIn === true || (info.loggedIn !== false && !missing));
+  // Logged in only when the agent says so. The open model has no login to check (only its key); for the
+  // others, no answer (an old or slow `auth status`) is not a yes: the step stays open, asking again.
+  const done = !!info?.available && !login.current && (info.loggedIn === true || (info.id === OPEN_MODEL && !missing));
+  const unknown = !!info?.available && info.id !== OPEN_MODEL && info.loggedIn !== true && info.loggedIn !== false;
   if (done) return { el: step, done: true, state: info.loggedIn ? 'logged in' : 'ready' };
 
   const chooser = () => (choosing && others.length
@@ -224,8 +227,10 @@ function loginStep(connected) {
     if (another()) row.append(another());
     const wait = el('div', 'wait');
     setMarkdown(wait, info.canLogin ? `${fix ? `Or ${fix}. ` : ''}This ticks itself off either way.` : `To log in, ${fix || 'log in to it in a terminal'}. This ticks itself off once you have.`);
-    return [el('p', null, `TRIF runs ${info.name}, your coding agent, on your account. It isn’t logged in on this computer yet.`),
-      row.childElementCount ? row : null, chooser(), wait];
+    return [el('p', null, unknown
+      ? `TRIF runs ${info.name}, your coding agent, on your account. It couldn’t tell whether ${info.name} is logged in on this computer.`
+      : `TRIF runs ${info.name}, your coding agent, on your account. It isn’t logged in on this computer yet.`),
+    row.childElementCount ? row : null, chooser(), wait];
   });
   return { el: step, done: false };
 }

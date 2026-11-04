@@ -1,5 +1,5 @@
-// Run timsrobot.com locally without Cloudflare: node site/dev.js [port]. Reports are printed here instead of
-// emailed. (Node 18+ has the Request/Response the Worker uses.)
+// Run timsrobot.com locally without Cloudflare: node site/dev.js [port], then open http://localhost:<port>.
+// Reports and waitlist signups are printed here instead of emailed. (Node 18+ has the Request/Response the Worker uses.)
 import http from 'node:http';
 import worker from './src/index.js';
 
@@ -18,4 +18,4 @@ http.createServer(async (req, res) => {
   const response = await worker.fetch(request, env);
   res.writeHead(response.status, Object.fromEntries(response.headers));
   res.end(Buffer.from(await response.arrayBuffer()));
-}).listen(port, '127.0.0.1', () => console.log(`timsrobot.com on http://127.0.0.1:${port}`));
+}).listen(port, '127.0.0.1', () => console.log(`timsrobot.com on http://localhost:${port}`));

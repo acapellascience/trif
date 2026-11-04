@@ -1,4 +1,4 @@
-// The pages timsrobot.com serves. Plain HTML and one small script; nothing loaded from anywhere else.
+// The pages timsrobot.com serves. Plain HTML and two small scripts; nothing loaded from anywhere else.
 
 const STYLE = `
 :root { color-scheme: light dark; --bg: #f6f6f4; --card: #fff; --fg: #1b1b1a; --muted: #6a6a66; --line: #ddddd8;
@@ -32,7 +32,7 @@ a { color: var(--accent); }
 code { font: 13px ui-monospace, Menlo, monospace; }
 `;
 
-function page(title, body, { script = false, style = '', after = '' } = {}) {
+function page(title, body, { script = '', style = '', after = '' } = {}) {
   return `<!doctype html>
 <html lang="en">
 <head>
@@ -44,7 +44,7 @@ function page(title, body, { script = false, style = '', after = '' } = {}) {
 <body>
 <main>
 ${body}
-</main>${after}${script ? '\n<script src="/report.js"></script>' : ''}
+</main>${after}${script ? `\n<script src="${script}"></script>` : ''}
 </body>
 </html>
 `;
@@ -110,7 +110,7 @@ export const HOME = page("Tim's Robot Internet Fixer", `
   </div>
 </section>`, {
   style: HOME_STYLE,
-  after: `\n<footer><a href="${REPO}">GitHub</a><a href="/report">Report a problem</a><a href="${REPO}/blob/main/PRIVACY.md">Privacy</a></footer>`,
+  after: `\n<footer><a href="${REPO}">GitHub</a><a href="/report">Report a problem</a><a href="/windows">Windows waitlist</a><a href="${REPO}/blob/main/PRIVACY.md">Privacy</a></footer>`,
 }).replace('<main>', '<main class="home">');
 
 export const REPORT = page('Report a problem · TRIF', `
@@ -150,7 +150,7 @@ export const REPORT = page('Report a problem · TRIF', `
 <div id="done" class="card done" hidden>
   <h2>Thanks, it's sent.</h2>
   <p style="margin:0">Thanks for helping make TRIF better. If you left your email, you may hear back.</p>
-</div>`, { script: true });
+</div>`, { script: '/report.js' });
 
 // The form's script. Details from TRIF arrive after the # (r=<report>&s=<site>): browsers never send
 // that part to a server, so nothing leaves the computer until the person presses Send.
@@ -186,6 +186,64 @@ export const REPORT_JS = `(() => {
     } catch (err) {
       $('send').disabled = false;
       status(err.message + ' You can also email it to reports@timsrobot.com.', true);
+    }
+  });
+})();
+`;
+
+const esc = (s) => String(s).replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`);
+
+const THANKS = `<h2>Thanks, you're on the list.</h2>
+  <p style="margin:0">Tim will email you when TRIF works on Windows.</p>`;
+
+/**
+ * The Windows waitlist page. With no options, the form. After a plain form post (no script): { thanks }
+ * for the thanks page, or { error, email } for the form again with what was wrong and what was typed.
+ */
+export function windowsPage({ thanks = false, error = '', email = '' } = {}) {
+  const body = thanks ? `<div class="card done">
+  ${THANKS}
+</div>` : `<form id="form" class="card" method="post" action="/windows">
+  <div class="field">
+    <label for="email">Your email</label>
+    <input id="email" name="email" type="email" maxlength="200" autocomplete="email" required value="${esc(email)}">
+  </div>
+  <div class="trap" aria-hidden="true"><label for="website">Website</label><input id="website" name="website" type="text" tabindex="-1" autocomplete="off"></div>
+  <button id="send" type="submit">Join the waitlist</button>
+  <p id="status" class="note error" role="status"${error ? '' : ' hidden'}>${esc(error)}</p>
+  <p class="note">Your email is used only to tell you when TRIF is ready for Windows, nothing else.
+    To be removed, ask at <a href="mailto:reports@timsrobot.com">reports@timsrobot.com</a>.</p>
+</form>
+<div id="done" class="card done" hidden>
+  ${THANKS}
+</div>`;
+  return page('Windows waitlist · TRIF', `
+<h1>Windows waitlist</h1>
+<p class="lead">TRIF works on Mac and Linux for now. Windows is coming.</p>
+${body}`, { script: thanks ? '' : '/windows.js' });
+}
+
+export const WINDOWS = windowsPage();
+
+// The waitlist form's script: sends the signup without leaving the page. Without it, the form posts and
+// the Worker answers with a page.
+export const WINDOWS_JS = `(() => {
+  const $ = (id) => document.getElementById(id);
+  const status = (msg) => { $('status').textContent = msg; $('status').hidden = !msg; };
+  $('form').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    $('send').disabled = true;
+    status('');
+    try {
+      const res = await fetch('/windows', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email: $('email').value, website: $('website').value }) });
+      const r = await res.json().catch(() => ({}));
+      if (!res.ok || !r.ok) throw new Error(r.error || 'You couldn’t be added just now. Please try again later.');
+      $('form').hidden = true;
+      $('done').hidden = false;
+    } catch (err) {
+      $('send').disabled = false;
+      status(err instanceof TypeError ? 'You couldn’t be added just now. Please try again later.' : err.message);
     }
   });
 })();

@@ -95,6 +95,14 @@ or sell them. Data reaches a third party (your AI provider) only when you send a
 own agent, and only for the purpose you asked for. Reports pass through Cloudflare, which hosts the
 report form and delivers its email. It isn't used for advertising, profiling, or creditworthiness or lending.
 
+## The Windows waitlist (the website, not the extension)
+
+The timsrobot.com website has a waitlist for the Windows version at timsrobot.com/windows. The extension
+has nothing to do with it and never sends anything to it. If you join, the email address you enter and
+the time go to the developer by email. The address is used only to tell you when TRIF is ready for
+Windows, nothing else, and isn't shared or sold. Ask at reports@timsrobot.com to be removed and it's
+deleted. Like reports, it passes through Cloudflare, which hosts the website and delivers its email.
+
 ## Keeping and deleting your data
 
 Everything stays on your computer until you delete it:

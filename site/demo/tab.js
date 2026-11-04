@@ -204,6 +204,8 @@
     remember(true);
     // A chat just made this mod: after the reload, on a phone, show the part of the page it changed.
     try { sessionStorage.setItem(FOCUS, typeof d.made === 'string' && /^[a-z0-9-]{1,40}$/.test(d.made) ? d.made : ''); } catch {}
+    // The shooter is a game: on a phone, the sheet comes back tucked away, out of the way of the ship.
+    if (d.made === 'shooter' && phone()) { try { sessionStorage.setItem(MIN, '1'); } catch {} }
     location.replace(names.length ? `/?mods=${names.join(',')}` : '/');
   });
 

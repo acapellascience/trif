@@ -201,9 +201,12 @@
           for (let i = 0; i < 1024; i++) { const x = i / 511.5 - 1; curve[i] = Math.tanh(x * 3); }
           shaper.curve = curve;
         }
-        if (ac.state === 'suspended') ac.resume();
+        muteButton(); // (its first sound: the courtesy mute appears)
+        if (ac.state === 'suspended' && !isMuted()) ac.resume();
       } catch (err) { window.trif?.warn('sound failed', String(err)); }
     };
+    // The courtesy mute: suspended while it's on, back on when it's off.
+    addEventListener('trif-mute', () => { try { if (ac) { if (isMuted()) ac.suspend(); else ac.resume(); } } catch {} });
     addEventListener('keydown', wake, true);
     addEventListener('pointerdown', wake, true);
     addEventListener('touchend', wake, true); // (a touchscreen only allows sound once a finger lifts)
@@ -1252,10 +1255,10 @@
     }
   };
 
-  // The row of round buttons along the top of the window, shared by Space shooter (restart, on the left),
-  // Rainbow Rave (music and kick zoom, once won) and Gravity mode (drop, on the right). Whichever mod
-  // needs it first makes it; the others find it. With a left-hand button the row spreads out evenly along
-  // the top; otherwise it gathers at the right. Light buttons, or the rave's dark ones while it's on.
+  // The row of round buttons along the top of the window: five places, evenly spread, each button always in
+  // its own (whichever others are there): Space shooter's restart, Rainbow Rave's kick zoom (once won), the
+  // courtesy mute (from the first sound on), Rainbow Rave's music (once won), Gravity mode's drop. Whichever
+  // mod needs it first makes it; the others find it. Light buttons, or the rave's dark ones while it's on.
   // On <html>, not <body> (the tilt card transforms <body>, and Gravity mode piles up what's in it), and
   // in the top layer where the browser has one (popover): there it stays on the window whatever <html>
   // does (the tilt card's perspective, the shooter's screen shake). Where there's no top layer, it's
@@ -1269,15 +1272,16 @@
     style.textContent = `
       #trif-top-bar { position: fixed; inset: 0 auto auto 0; margin: 0; border: 0; background: none; color: inherit;
         overflow: visible; height: auto; z-index: 2147483647; box-sizing: border-box; width: 100vw;
-        padding: 16px; display: flex; justify-content: flex-end; gap: 8px; pointer-events: none; }
-      #trif-top-bar:has(> .trif-top-left) { justify-content: space-between; }
-      #trif-top-bar > button { pointer-events: auto; flex: none; margin: 0; -webkit-tap-highlight-color: transparent; }
+        padding: 16px; display: grid; grid-template-columns: repeat(5, 40px); justify-content: space-between;
+        pointer-events: none; }
+      #trif-top-bar > button { pointer-events: auto; grid-row: 1; margin: 0; -webkit-tap-highlight-color: transparent; }
       :where(#trif-top-bar) > button.trif-top-btn { width: 40px; height: 40px; border-radius: 50%; padding: 0;
         display: flex; align-items: center; justify-content: center; cursor: pointer; color: #18181a;
         border: 1px solid rgba(0,0,0,0.15); background: rgba(255,255,255,0.88); box-shadow: 0 2px 8px rgba(0,0,0,0.35); }
       .trif-top-btn svg { width: 20px; height: 20px; display: block; fill: none; stroke: currentColor;
         stroke-width: 2.2; stroke-linecap: round; stroke-linejoin: round; }
-      .trif-top-left { order: 0; } .wm-rainbow-zoom { order: 1; } .wm-rainbow-play { order: 2; } .trif-top-right { order: 3; }`;
+      .trif-top-left { grid-column: 1; } .wm-rainbow-zoom { grid-column: 2; } .trif-top-mute { grid-column: 3; }
+      .wm-rainbow-play { grid-column: 4; } .trif-top-right { grid-column: 5; }`;
     bar.append(style);
     document.documentElement.append(bar);
     const fit = () => { bar.style.width = `${document.documentElement.clientWidth}px`; };
@@ -1302,6 +1306,50 @@
     };
     requestAnimationFrame(pin);
     return bar;
+  };
+
+  // The courtesy mute, shared by the mods that make sound (Living Robot, Space Shooter, Click Fireworks,
+  // Rainbow Rave): the middle button in the row along the top, there from the first sound on. It silences
+  // all of them (each one suspends its own audio while it's on: the `trif-mute` event), and this browser
+  // remembers it.
+  const MUTED = 'trif.muted';
+  const isMuted = () => { try { return localStorage.getItem(MUTED) === '1'; } catch { return false; } };
+  const muteButton = () => {
+    if (document.getElementById('trif-mute')) return;
+    const NS = 'http://www.w3.org/2000/svg';
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.id = 'trif-mute';
+    b.className = 'trif-top-btn trif-top-mute';
+    const sync = () => {
+      const muted = isMuted();
+      const svg = document.createElementNS(NS, 'svg');
+      svg.setAttribute('viewBox', '0 0 24 24');
+      const add = (d, filled, opacity = 1) => {
+        const p = document.createElementNS(NS, 'path');
+        p.setAttribute('d', d);
+        if (filled) p.setAttribute('fill', 'currentColor');
+        p.setAttribute('opacity', String(opacity));
+        svg.append(p);
+      };
+      add('M12 9.75a2.25 2.25 0 1 0 0 4.5a2.25 2.25 0 1 0 0-4.5z', true);
+      add('M15.5 8.5a5 5 0 0 1 0 7M8.5 8.5a5 5 0 0 0 0 7');
+      add('M18.5 5.5a9.2 9.2 0 0 1 0 13M5.5 5.5a9.2 9.2 0 0 0 0 13', false, 0.55);
+      if (muted) add('M4 4 20 20');
+      b.replaceChildren(svg);
+      b.setAttribute('aria-pressed', String(muted));
+      b.setAttribute('aria-label', muted ? 'Sound off: turn it back on' : 'Mute the sound');
+      b.title = muted ? 'Sound off (click to turn it on)' : 'Mute';
+    };
+    b.addEventListener('click', (e) => {
+      e.stopPropagation();
+      try { localStorage.setItem(MUTED, isMuted() ? '' : '1'); } catch {}
+      sync();
+      dispatchEvent(new CustomEvent('trif-mute', { detail: { muted: isMuted() } }));
+    });
+    addEventListener('trif-mute', sync);
+    sync();
+    topBar().append(b);
   };
 
   if (coarse) {

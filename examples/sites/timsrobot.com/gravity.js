@@ -657,9 +657,10 @@
   // Rainbow Rave (music and kick zoom, once won) and Gravity mode (drop, on the right). Whichever mod
   // needs it first makes it; the others find it. With a left-hand button the row spreads out evenly along
   // the top; otherwise it gathers at the right. Light buttons, or the rave's dark ones while it's on.
-  // On <html>, not <body>: the tilt card transforms <body>, and Gravity mode piles up what's in it. And
-  // pinned to the window: when <html> has a `perspective` (tilt card) or a `translate` (the shooter's
-  // screen shake), "fixed" is placed against the page instead, so it's measured and nudged back.
+  // On <html>, not <body> (the tilt card transforms <body>, and Gravity mode piles up what's in it), and
+  // in the top layer where the browser has one (popover): there it stays on the window whatever <html>
+  // does (the tilt card's perspective, the shooter's screen shake). Where there's no top layer, it's
+  // measured every frame and nudged back. As wide as the window measures (the demo's panel narrows it).
   const topBar = () => {
     let bar = document.getElementById('trif-top-bar');
     if (bar) return bar;
@@ -667,7 +668,8 @@
     bar.id = 'trif-top-bar';
     const style = document.createElement('style');
     style.textContent = `
-      #trif-top-bar { position: fixed; left: 0; top: 0; z-index: 2147483647; box-sizing: border-box; width: 100vw;
+      #trif-top-bar { position: fixed; inset: 0 auto auto 0; margin: 0; border: 0; background: none; color: inherit;
+        overflow: visible; height: auto; z-index: 2147483647; box-sizing: border-box; width: 100vw;
         padding: 16px; display: flex; justify-content: flex-end; gap: 8px; pointer-events: none; }
       #trif-top-bar:has(> .trif-top-left) { justify-content: space-between; }
       #trif-top-bar > button { pointer-events: auto; flex: none; margin: 0; -webkit-tap-highlight-color: transparent; }
@@ -679,12 +681,18 @@
       .trif-top-left { order: 0; } .wm-rainbow-zoom { order: 1; } .wm-rainbow-play { order: 2; } .trif-top-right { order: 3; }`;
     bar.append(style);
     document.documentElement.append(bar);
+    const fit = () => { bar.style.width = `${document.documentElement.clientWidth}px`; };
+    fit();
+    addEventListener('resize', fit);
+    if (typeof bar.showPopover === 'function') {
+      bar.popover = 'manual';
+      bar.showPopover();
+      return bar;
+    }
     let px = 0, py = 0;
     const pin = () => {
       if (!bar.isConnected) return;
       try {
-        const w = `${document.documentElement.clientWidth}px`; // (the demo's panel narrows it)
-        if (bar.style.width !== w) bar.style.width = w;
         const r = bar.getBoundingClientRect();
         if (Math.abs(r.left) > 0.5 || Math.abs(r.top) > 0.5) {
           px -= r.left; py -= r.top;

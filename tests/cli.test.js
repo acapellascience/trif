@@ -280,6 +280,18 @@ test('enable / disable: mod.enable through the helper; status shows off; mods ma
   assert.match(r.stdout, /switched off by the user \(not running; trif enable example\.com\/banner turns it on\)/);
   r = await runCli(['mods', '--json'], { home });
   assert.equal(JSON.parse(r.stdout).mods[0].enabled, false);
+  // A mod TRIF ships switched off is off as TRIF ships it, not "switched off by the user".
+  const pre = path.join(home, 'preinstalled.json');
+  fs.writeFileSync(pre, JSON.stringify({ offered: ['example.com/banner'], startOff: ['example.com/banner'] }));
+  try {
+    r = await runCli(['status'], { home });
+    assert.match(r.stdout, /example\.com\/banner\s+off \(as TRIF ships it\)\n/);
+    assert.match(r.stdout, /off \(as TRIF ships it\) = a mod TRIF comes with, off until switched on/);
+    assert.doesNotMatch(r.stdout, /switched off by the user/);
+    r = await runCli(['mods'], { home });
+    assert.match(r.stdout, /^ {2}off, as TRIF ships it \(not running; trif enable example\.com\/banner turns it on\)$/m);
+    assert.doesNotMatch(r.stdout, /switched off by the user/);
+  } finally { fs.rmSync(pre, { force: true }); }
 
   // a file path works as the id; no reload → says how to see it
   r = await runCli(['enable', path.join(home, 'sites', 'example.com', 'banner.js')], { home });

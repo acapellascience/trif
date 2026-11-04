@@ -202,6 +202,8 @@
     if (d.type !== 'trif-demo:load') return;
     const names = (Array.isArray(d.mods) ? d.mods : []).filter((n) => typeof n === 'string' && /^[a-z0-9-]{1,40}$/.test(n));
     remember(true);
+    // A recorded chat made a mod: on a phone the sheet comes back tucked away, so the page shows it off.
+    if (d.made === true && phone()) { try { sessionStorage.setItem(MIN, '1'); } catch {} }
     location.replace(names.length ? `/?mods=${names.join(',')}` : '/');
   });
 

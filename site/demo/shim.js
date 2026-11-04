@@ -142,11 +142,14 @@
   const findMod = (id) => state.mods.find((m) => m.id === id);
   const fileOf = (m) => `~/.trif/sites/${SITE}/${m.slug}.js`;
 
-  /** Load the page again with the mods that run there now (tab.js does it; this panel comes back after). */
-  function loadPage() {
+  /**
+   * Load the page again with the mods that run there now (tab.js does it; this panel comes back after).
+   * `made`: a recorded chat just made a mod (on a phone, the sheet comes back tucked away, to show it).
+   */
+  function loadPage(made = false) {
     const mods = siteOn() ? state.mods.filter((m) => !disabled()[m.id]).map((m) => m.slug) : [];
     persist();
-    if (window.parent !== window) window.parent.postMessage({ type: 'trif-demo:load', mods }, location.origin);
+    if (window.parent !== window) window.parent.postMessage({ type: 'trif-demo:load', mods, made }, location.origin);
   }
 
   async function status() {
@@ -316,7 +319,7 @@
       state.mods.sort((a, b) => a.slug.localeCompare(b.slug));
       setNow({ disabled: off });
       state.replayed.add(run.recording.id);
-      later(loadPage, 1200);
+      later(() => loadPage(true), 1200);
     }
   }
 

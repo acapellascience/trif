@@ -171,14 +171,15 @@ async function main() {
       return `tab at ${s0.tab.rect}`;
     });
 
-    await check('the demo panel lists the 13 home page mods in Tim\'s order, all off, with descriptions', async () => {
+    await check('the demo panel starts with no mods, and the first recorded prompt (the first mod in Tim\'s order) waiting in a box that can\'t be typed in', async () => {
       await page(`async () => { document.querySelector('.demo-tab').click(); }`);
       await sleep(2500);
-      const rows = await demoPanel(`(doc) => [...doc.querySelectorAll('#mod-list > li')].map((li) => ({ slug: li.dataset.mod.split('/')[1], on: li.querySelector('button.switch')?.getAttribute('aria-checked'), desc: li.querySelector('.mod-desc')?.textContent || '', file: li.querySelector('.mod-file')?.textContent }))`);
-      if (JSON.stringify(rows.map((r) => r.slug)) !== JSON.stringify(ORDER)) throw new Error(`order: ${rows.map((r) => r.slug)}`);
-      if (rows.some((r) => r.on !== 'false' || !r.desc || r.file !== `${r.slug}.js`)) throw new Error(JSON.stringify(rows));
+      const p = await demoPanel(`(doc) => ({ rows: doc.querySelectorAll('#mod-list > li').length, value: doc.getElementById('input').value, ro: doc.getElementById('input').readOnly })`);
+      const first = require('../../site/demo/chats/c9-tagline.json');
+      if (ORDER[0] !== 'tagline') throw new Error(`Tim's order starts with ${ORDER[0]}: update this check`);
+      if (p.rows !== 0 || !p.ro || p.value !== (first.prompt ?? first.messages?.[0]?.text)) throw new Error(JSON.stringify(p));
       await shot('demo-panel');
-      return rows.map((r) => r.slug).join(', ');
+      return `waiting: ${p.value.slice(0, 50)}…`;
     });
 
     for (const slug of ORDER) {
@@ -243,13 +244,14 @@ async function main() {
     // ---- the visitor turns the real TRIF on
     let panelCtx;
     await check('demo open with a demo mod on, then the real TRIF on and a real mod on: the tab goes, the demo doesn\'t reopen, one ship', async () => {
+      // The demo's space shooter on (a fresh demo on the page's address with it: listed and on), the panel open.
       await load();
+      await page(`async () => { sessionStorage.removeItem('trif-demo-state'); sessionStorage.setItem('trif-demo-open', ''); }`);
+      await load('?mods=shooter');
       await page(`async () => { document.querySelector('.demo-tab').click(); }`);
       await sleep(2500);
-      // The demo's space shooter on (the page reloads with it, the panel back).
-      await demoPanel(`(doc) => doc.querySelector('li[data-mod="timsrobot.com/shooter"] button.switch').click()`);
-      await waitFor('the demo\'s reload', async () => (await state()).url.includes('mods=shooter'), { timeoutMs: 10000 });
-      await sleep(2500);
+      const listed = await demoPanel(`(doc) => doc.querySelector('li[data-mod="timsrobot.com/shooter"] button.switch')?.getAttribute('aria-checked')`);
+      if (listed !== 'true') throw new Error(`the demo's shooter: ${listed}`);
       let s = await state();
       if (s.mods['shooter'] !== 1 || !s.panel || s.flag !== '1') throw new Error(JSON.stringify(s));
       // The real side panel: Fix (TRIF on for timsrobot.com): no reload for that alone.

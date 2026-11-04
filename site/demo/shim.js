@@ -28,6 +28,14 @@
   const TAB = { id: 7, windowId: 1, index: 0, active: true, status: 'complete', url: `https://${SITE}/`, title: "Tim's Robot Internet Fixer" };
   const clone = (v) => (v === undefined ? undefined : JSON.parse(JSON.stringify(v)));
 
+  // On a phone (the panel is the short sheet), "Mods on this site" starts closed, to leave the chat room; the
+  // panel remembers it once it's been opened or closed (sidepanel.js: localStorage modsOpen).
+  try {
+    if (window.parent !== window && window.parent.matchMedia('(max-width: 700px)').matches && localStorage.getItem('modsOpen') === null) {
+      localStorage.setItem('modsOpen', 'false');
+    }
+  } catch {}
+
   // On a touchscreen, a chat that talks about keys or the mouse plays its touch version instead
   // (chat.touch: its prompt, and replacement texts by message index; an empty text cuts that message).
   const touchscreen = (() => { try { return (window.parent || window).matchMedia('(pointer: coarse)').matches; } catch { return false; } })();

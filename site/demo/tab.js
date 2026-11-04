@@ -108,8 +108,8 @@
     let u;
     try { u = new URL(a.href, location.href); } catch { return; }
     if (u.origin !== location.origin || !OTHER_PAGES.has(u.pathname.replace(/\/$/, '')) || u.searchParams.has('mods')) return;
-    u.searchParams.set('mods', mods);
-    a.href = u.pathname + u.search + u.hash;
+    const names = mods.split(',').map(encodeURIComponent).join(','); // (commas kept readable)
+    a.href = `${u.pathname}${u.search ? `${u.search}&` : '?'}mods=${names}${u.hash}`;
   };
   addEventListener('click', carryMods, true);
   addEventListener('auxclick', carryMods, true);

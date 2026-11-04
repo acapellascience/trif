@@ -21,7 +21,6 @@ export const typeFor = (file) => TYPES[file.split('.').pop()] || 'application/oc
 
 // What the demo says itself (the panel's own words are the extension's).
 const WORDS = {
-  allReplayedNote: 'That’s all the recordings. Switch the mods above on and off, or get TRIF and make your own.',
   notLive: 'This demo only replays recorded chats, so nothing reads what you type here. ' +
     'The real TRIF sends your message to your own coding agent (Claude Code, Codex or an open model) on your computer, and it writes the mod.',
   codexModels: 'In TRIF, this lists the models your Codex account can use.',

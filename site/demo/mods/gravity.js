@@ -26,6 +26,9 @@
   // same elements, and the living robot moves with the `translate` property.
   style.textContent = `
     html[data-gm-on] { overflow: hidden !important; }
+    /* on a touchscreen too: no scrolling, pinching or pull-to-refresh while the page is in pieces (the
+       touch handlers below stop what CSS alone doesn't, like Safari's pinch) */
+    html[data-gm-on], html[data-gm-on] body { touch-action: none !important; overscroll-behavior: none !important; }
     html[data-gm-on] body { user-select: none !important; -webkit-user-select: none !important; }
     html[data-gm-on] [data-gm-body][data-gm-body] {
       transform: translate(var(--gm-x, 0px), var(--gm-y, 0px)) rotate(var(--gm-r, 0rad)) scale(var(--gm-sx, 1), var(--gm-sy, 1)) !important;
@@ -635,6 +638,11 @@
   };
   addEventListener('pointerup', release, true);
   addEventListener('pointercancel', release, true);
+  // While it's on, a finger moves pieces, never the page: no scrolling and no pinch zoom (they shift the
+  // window under the pile). Taps still go through; only moves and pinches are stopped.
+  const still = (e) => { if (active && e.cancelable) e.preventDefault(); };
+  addEventListener('touchmove', still, { capture: true, passive: false });
+  for (const g of ['gesturestart', 'gesturechange']) addEventListener(g, still, { capture: true, passive: false }); // (Safari's pinch)
   addEventListener('blur', release);
   // Buttons don't fire while they're toys; links still work (they can't be grabbed, see pointerdown).
   addEventListener('click', (e) => {

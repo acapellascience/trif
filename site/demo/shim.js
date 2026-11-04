@@ -495,7 +495,7 @@
 
   const ui = (() => {
     let busy = null; // the run being replayed
-    let note = null; // "That's all the recordings…", once they have all played
+    let mounted = false;
     // (a chat counts as done once it has played, or, if it starts a mod off rather than following on from
     // another chat, when its mods are all listed already: from a link with them in the page's address)
     const byId = new Map(DEMO.chats.map((c) => [c.id, c]));
@@ -522,19 +522,15 @@
       if (!free) input.value = c ? c.prompt : '';
       else if (!was) input.value = ''; // (just freed: clear the box; after that, it keeps what they type)
       input.dispatchEvent(new Event('input', { bubbles: true })); // (the box grows to fit)
-      note.hidden = !free;
     }
 
     function mount() {
       const form = document.getElementById('composer');
       const input = document.getElementById('input');
-      if (!form || !input || note) return;
+      if (!form || !input || mounted) return;
+      mounted = true;
       try { if (window.parent !== window && window.parent.matchMedia('(max-width: 700px)').matches) document.documentElement.classList.add('demo-phone'); } catch {}
       input.rows = 3; // (where the box can't grow to fit its text: Safari)
-      note = document.createElement('p');
-      note.className = 'demo-note demo-done';
-      note.textContent = DEMO.words.allReplayedNote;
-      form.before(note);
       fill();
       later(resume);
     }

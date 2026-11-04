@@ -11,8 +11,6 @@ body.site-off .bar-robot:hover:not([aria-busy="true"]) svg { opacity: 0.7; }
    the recorded prompt waiting in the message box takes their place. */
 #empty .chips { display: none; }
 
-body:is(.site-off, .no-site) .demo-done { display: none; }
-
 /* Until every recording has played, the message box holds the next recorded prompt and can't be typed in
    or focused (on a phone: no keyboard, no zooming in on it); Send replays it (shim.js). */
 html.demo-guided #input { pointer-events: none; caret-color: transparent; }
@@ -20,4 +18,3 @@ html.demo-guided #input { pointer-events: none; caret-color: transparent; }
    the page in on it. */
 html.demo-phone #input { font-size: 16px; }
 html.demo-phone :is(input, select, textarea) { font-size: 16px; }
-.demo-done { margin: 2px 14px 6px; }

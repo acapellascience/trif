@@ -305,7 +305,7 @@
     });
     broadcast({ type: 'agentEvent', runId: run.runId, event: { kind: 'done', ok, result: '', changedFiles: [], costUsd: null, sessionId: null } });
     broadcast({ type: 'statusChanged' });
-    ui.finished(run);
+    ui.finished(run, ok && !!run.recording); // (the page reloads with its mod: the next prompt comes after)
     // The mod the recorded session made: in the list (as the agent's new file would be), on, as it was at
     // the end of the session, and the page reloaded with it (after a moment, so the reply has been seen
     // arriving).
@@ -604,7 +604,11 @@
 
     return {
       replaying(run) { busy = run; follow(true); fill(); },
-      finished(run) { if (busy === run) busy = null; fill(); setTimeout(() => { if (!busy) follow(false); }, 1500); },
+      finished(run, reloading) {
+        if (busy === run) busy = null;
+        if (!reloading) fill(); // (else the box stays empty until the page is back: the played chat isn't counted yet)
+        setTimeout(() => { if (!busy) follow(false); }, 1500);
+      },
     };
   })();
 })(/*DEMO_DATA*/null);

@@ -409,7 +409,7 @@
   // Capture phase on the window, ahead of the page: a grab isn't also a click, a firework or (in Gravity
   // mode, which checks the box in the ship's `tss-ship` event) grabbing the piece under the ship.
   addEventListener('pointerdown', (e) => {
-    if (e.pointerType !== 'touch' || touch.id !== null || !e.isTrusted) return;
+    if (e.pointerType !== 'touch' || touch.id !== null) return;
     if (performance.now() < deadUntil || e.target.closest?.('#trif-top-bar')) return;
     const b = grabBox();
     if (e.clientX < b.left || e.clientX > b.right || e.clientY < b.top || e.clientY > b.bottom) return;

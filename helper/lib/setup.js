@@ -666,20 +666,19 @@ function setup(opts = {}) {
   const revealed = !!opts.reveal && revealFolder(extensionDir);
   const openedChrome = revealed && targets.some((t) => t.key === 'chrome') && openChromeExtensions().opened;
   note('  1. Install the extension. Until TRIF is on the Chrome Web Store, load it unpacked:');
-  if (revealed && openedChrome) {
-    note('     on the chrome://extensions tab that just opened in Chrome, turn on "Developer mode" (top right).');
-    note('     Then drag the "extension" folder from the Finder window that just opened onto that page. (Or click');
-    note(`     "Load unpacked", press Cmd-Shift-G and paste: the folder's path, ${extensionDir}, is on your clipboard.)`);
-  } else if (revealed) {
-    note('     open chrome://extensions and turn on "Developer mode" (top right). Then drag the "extension"');
-    note('     folder from the Finder window that just opened onto that page. (Or click "Load unpacked",');
-    note(`     press Cmd-Shift-G and paste: the folder's path, ${extensionDir}, is on your clipboard.)`);
+  if (revealed) {
+    note(openedChrome
+      ? '     on the chrome://extensions tab that just opened in Chrome, turn on "Developer mode" (top right),'
+      : '     open chrome://extensions and turn on "Developer mode" (top right),');
+    note('     then drag the "extension" folder from the Finder window that just opened onto that page. If');
+    note('     dragging doesn\'t work, click "Load unpacked", press Cmd-Shift-G and paste the folder\'s path');
+    note(`     (it's on your clipboard): ${extensionDir}`);
   } else {
     note('     open chrome://extensions, turn on "Developer mode" (top right), click "Load unpacked"');
     note(`     and choose ${extensionDir}`);
   }
-  note(`     (its ID must be ${P.EXTENSION_ID}).${mode === 'copy' ? ' Keep that folder: Chrome runs the extension from it,' : ''}`);
-  if (mode === 'copy') note('     and setup updates it in place. (A Web Store listing will replace this step later.)');
+  note(`     Its ID on that page should be ${P.EXTENSION_ID}.${mode === 'copy' ? ' Keep that folder: Chrome runs the extension' : ''}`);
+  if (mode === 'copy') note('     from it, and setup updates it in place. A Web Store listing will replace this step later.');
   note('  2. Turn on "Allow User Scripts": click "Open TRIF’s Chrome settings" on the TRIF tab Chrome opens,');
   note('     or "Details" on TRIF in chrome://extensions.');
   note(`  3. Check everything with: ${trif} doctor`);

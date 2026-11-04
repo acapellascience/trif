@@ -33,5 +33,7 @@ html.demo-phone .mod-list li { padding: 3px 0; }
 html.demo-phone .chat { padding: 8px 12px 2px; }
 html.demo-phone .composer { margin: 4px 10px 8px; }
 html.demo-phone .composer textarea { padding: 6px 40px 6px 10px; max-block-size: calc(3lh + 12px); }
-/* (the waiting prompt can't be focused, so it can be smaller than the 16px a typed message needs) */
-html.demo-phone.demo-guided #input { font-size: 14px; }
+/* The waiting prompt, two lines at a time: it scrolls with a finger (and follows the typing), but still
+   can't be focused (shim.js), and 16px, so a phone never zooms in on it. */
+html.demo-phone.demo-guided #input { pointer-events: auto; overflow-y: auto; touch-action: pan-y; font-size: 16px;
+  max-block-size: calc(2lh + 12px); -webkit-user-select: none; user-select: none; }

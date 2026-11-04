@@ -539,7 +539,11 @@
     const TYPE_MS = 33;       // per character (about 30 a second), a little uneven
     const PAUSE_FIRST = 400, PAUSE_NEXT = 5000;
     let typing = null; // { text, timer } while a prompt is being typed
-    const show = (input, text) => { input.value = text; input.dispatchEvent(new Event('input', { bubbles: true })); }; // (the box grows to fit)
+    const show = (input, text) => {
+      input.value = text;
+      input.dispatchEvent(new Event('input', { bubbles: true })); // (the box grows to fit)
+      input.scrollTop = input.scrollHeight; // (where it's capped, the newest words stay in view)
+    };
     function stopTyping(input, finish) {
       if (!typing) return;
       clearTimeout(typing.timer);
@@ -596,6 +600,9 @@
       mounted = true;
       try { if (window.parent !== window && window.parent.matchMedia('(max-width: 700px)').matches) document.documentElement.classList.add('demo-phone'); } catch {}
       input.rows = 3; // (where the box can't grow to fit its text: Safari)
+      // On a phone the waiting prompt can be scrolled with a finger, but a tap mustn't focus it (no
+      // keyboard): it gives the focus straight back while it's a waiting prompt.
+      input.addEventListener('focus', () => { if (input.readOnly) input.blur(); });
       // Send (or Enter) while the prompt is still typing: the whole prompt goes, not the part typed so far.
       // (Capture phase on the document, ahead of the panel's own submit handler on the form.)
       document.addEventListener('submit', (e) => { if (e.target === form) stopTyping(input, true); }, true);

@@ -71,9 +71,14 @@
   // all of them (each one suspends its own audio while it's on: the `trif-mute` event), and this browser
   // remembers it.
   const MUTED = 'trif.muted';
-  // (touchscreens only: a computer has its own mute)
+  // (touchscreens only: a computer has its own mute. It starts muted, so the struck-through button says
+  // there's sound to be had; unmuted is remembered. Without storage, it's remembered for the page.)
   const TOUCH_UI = matchMedia('(pointer: coarse)').matches;
-  const isMuted = () => { try { return TOUCH_UI && localStorage.getItem(MUTED) === '1'; } catch { return false; } };
+  const isMuted = () => {
+    if (!TOUCH_UI) return false;
+    try { const v = localStorage.getItem(MUTED); return v === null ? window.__trifMuted !== false : v === '1'; } catch { return window.__trifMuted !== false; }
+  };
+  const setMuted = (on) => { window.__trifMuted = on; try { localStorage.setItem(MUTED, on ? '1' : '0'); } catch {} };
   const muteButton = () => {
     if (!TOUCH_UI || document.getElementById('trif-mute')) return;
     const NS = 'http://www.w3.org/2000/svg';
@@ -103,7 +108,7 @@
     };
     b.addEventListener('click', (e) => {
       e.stopPropagation();
-      try { localStorage.setItem(MUTED, isMuted() ? '' : '1'); } catch {}
+      setMuted(!isMuted());
       sync();
       dispatchEvent(new CustomEvent('trif-mute', { detail: { muted: isMuted() } }));
     });

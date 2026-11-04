@@ -79,8 +79,8 @@ const PREINSTALLED = [
   { id: 'timsrobot.com/checklist', on: false },
   { id: 'timsrobot.com/terminal', on: false },
   { id: 'timsrobot.com/led', on: false },
-  { id: 'timsrobot.com/rave', on: false },
   { id: 'timsrobot.com/tilt', on: false },
+  { id: 'timsrobot.com/rave', on: false },
 ];
 
 // The order the side panel lists a site's shipped mods in until the user drags them into their own (display

@@ -23,7 +23,7 @@ export const OUT = path.join(HERE, 'src', 'demo-files.js');
 // The order the recorded chats are offered in. Follow-ups (a chat's `after`) are offered once the chats
 // they follow have been replayed.
 const CHAT_ORDER = ['c9-tagline', 'c1-neon', 'c3-robot', 'c5-fireworks', 'c4-gravity', 'c7-shooter', 'c6-3d', 'c10-badges',
-  'c11-checklist', 'c12-terminal', 'c13-footer', 'c2-wave', 'c3b-legs', 'c5b-bigger', 'c7b-shake', 'c8-fix'];
+  'c11-checklist', 'c12-terminal', 'c13-footer', 'c2-wave', 'c3b-legs', 'c5b-bigger', 'c7b-shake', 'c8-fix', 'c14-rave'];
 
 const read = (...p) => fs.readFileSync(path.join(DEMO, ...p), 'utf8');
 

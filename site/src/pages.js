@@ -110,7 +110,7 @@ export const HOME = page("Tim's Robot Internet Fixer", `
   </div>
 </section>`, {
   style: HOME_STYLE,
-  after: `\n<footer><a href="${REPO}">GitHub</a><a href="/report">Report a problem</a><a href="/windows">Windows waitlist</a><a href="${REPO}/blob/main/PRIVACY.md">Privacy</a></footer>`,
+  after: `\n<footer><a href="${REPO}">GitHub</a><a href="/report">Report a problem</a><a href="/windows">Windows waitlist</a><a href="${REPO}/blob/main/store/PRIVACY.md">Privacy</a></footer>`,
 }).replace('<main>', '<main class="home">');
 
 export const REPORT = page('Report a problem · TRIF', `

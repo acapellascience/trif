@@ -89,12 +89,214 @@
     }, 2500 + Math.random() * 3500);
     scheduleBlink();
 
+    // --- Sounds (Web Audio, nothing loaded; they start after your first real click or key press, since
+    // browsers only allow sound after one): a dull little tap for each footstep, a boing for each jump.
+    const sfx = (() => {
+      let ac = null, out = null, noise = null;
+      const wake = (e) => {
+        if (!e.isTrusted) return;
+        try {
+          if (!ac) {
+            ac = new AudioContext();
+            const comp = ac.createDynamicsCompressor();
+            out = ac.createGain(); out.gain.value = 0.5;
+            // +6 dB (×2) after the compressor, to sit level with Rainbow Rave's music
+            const boost = ac.createGain(); boost.gain.value = 2;
+            out.connect(comp); comp.connect(boost); boost.connect(ac.destination);
+            noise = ac.createBuffer(1, ac.sampleRate, ac.sampleRate);
+            const d = noise.getChannelData(0);
+            for (let i = 0; i < d.length; i++) d[i] = Math.random() * 2 - 1;
+          }
+          if (ac.state === 'suspended') ac.resume();
+        } catch (err) { window.trif?.warn('robot sound failed', String(err)); }
+      };
+      addEventListener('pointerdown', wake, true);
+      addEventListener('keydown', wake, true);
+      const live = () => ac && ac.state === 'running' && !document.hidden;
+      const env = (t, peak, attack, decay) => {
+        const g = ac.createGain();
+        g.gain.value = 0.0001; // silent from the start (a new gain node is at 1 until its schedule takes over)
+        g.gain.setValueAtTime(0.0001, t);
+        g.gain.exponentialRampToValueAtTime(peak, t + attack);
+        g.gain.exponentialRampToValueAtTime(0.0001, t + attack + decay);
+        g.connect(out);
+        return g;
+      };
+      return {
+        // a muffled little foot tap, barely there: a short low tone and a puff of noise, both through a
+        // steep low cut-off (most of the high end gone) and with a softened attack (a sharp one clicks)
+        // (k: 0–1, how hard he's walking)
+        step: (k = 1) => {
+          try {
+            if (!live()) return;
+            const t = ac.currentTime;
+            const muffle = ac.createBiquadFilter(), muffle2 = ac.createBiquadFilter();
+            muffle.type = muffle2.type = 'lowpass';
+            muffle.frequency.value = muffle2.frequency.value = 170; // two in a row: a steep roll-off
+            muffle.connect(muffle2); muffle2.connect(env(t, 0.035 * k, 0.008, 0.07));
+            const o = ac.createOscillator();
+            o.type = 'sine';
+            o.frequency.setValueAtTime(120 + Math.random() * 20, t);
+            o.frequency.exponentialRampToValueAtTime(65, t + 0.06);
+            o.connect(muffle);
+            o.start(t); o.stop(t + 0.12);
+            const src = ac.createBufferSource(), ng = ac.createGain();
+            src.buffer = noise; ng.gain.value = 0.4;
+            src.connect(ng); ng.connect(muffle);
+            src.start(t, Math.random() * 0.9); src.stop(t + 0.1);
+          } catch {}
+        },
+        // "er-or-o-ee-eh": a little robot voice when he notices you. FM synthesis for the robotic tone: a
+        // sine carrier whose frequency is wobbled by a second sine at twice its pitch (a strong wobble:
+        // bright, buzzy and a bit metallic), doubled an octave below by a second FM voice for weight. The
+        // upper voice goes through a band that moves per syllable, so it reads as vowels.
+        // Two lines, in the same voice: 'greet' (the full "er-or-o-ee-eh", for a fresh player) and 'grumble'
+        // (a short low "brr-grrp", once he's already blown you up: the long one gets tiring).
+        notice: (line = 'greet') => {
+          try {
+            if (!live()) return;
+            const t = ac.currentTime, bp = ac.createBiquadFilter(), g = ac.createGain();
+            bp.type = 'bandpass'; bp.Q.value = 1.6;
+            g.gain.value = 0.0001; // (silent from the start: see env)
+            // The pitch is written once as a list of events, then played on every oscillator that follows
+            // it (carriers, modulators, wobble depths), each scaled
+            const pitch = [];
+            const o = { frequency: {
+              setValueAtTime: (v, at) => pitch.push(['set', v, at]),
+              exponentialRampToValueAtTime: (v, at) => pitch.push(['exp', v, at]),
+            } };
+            const follow = (param, k) => {
+              for (const [type, v, at] of pitch) {
+                if (type === 'set') param.setValueAtTime(v * k, at); else param.exponentialRampToValueAtTime(v * k, at);
+              }
+            };
+            // The tune: A3 → F3 → E3 → A♭3 → D3, each syllable on its note. The "ee" is staccato (cut off
+            // clean), then a full note's rest; the last note is held, and slides down to A2 over its last
+            // half. The vowel bands are what make it sound like syllables.
+            const NOTE = 0.16;
+            const LINES = {
+              greet: { // [note Hz, length s, vowel band Hz, staccato?]
+                syl: [
+                  [220.0, NOTE, 700],          // er: A3
+                  [174.61, NOTE, 900],         // or: F3
+                  [164.81, NOTE, 1100],        // o:  E3
+                  [207.65, 0.18, 2400, true],  // ee: A♭3, staccato… (its slot a bit longer, to fit its sound)
+                  [0, NOTE],                   // …a full note's rest
+                  [146.83, 0.45, 1500],        // eh: D3, held, sliding down
+                ],
+                slide: [0.5, 110],             // the last note holds for half its length, then slides to A2
+              },
+              grumble: { // "brr-grrp": two low syllables with a rolled r (a fast flutter), the second dropping
+                syl: [
+                  [146.83, 0.12, 600],         // brr: D3
+                  [110.0, 0.17, 750],          // grrp: A2…
+                ],
+                slide: [0.6, 82.41],           // …dropping to E2 at the end (the "p")
+                flutter: 28,                   // the rolled r: the volume trembles 28 times a second
+              },
+              // Happy little murmurs while he wanders and stops to consider: short, softer, ending upwards
+              hum: { // "mm-hm?": D3, then F3 lifting to A3
+                syl: [[146.83, 0.13, 600], [174.61, 0.2, 800]],
+                slide: [0.4, 220], vol: 0.6,
+              },
+              hmhm: { // "hm, hm!": E3, a breath, then A3 lifting a tone
+                syl: [[164.81, 0.1, 700], [0, 0.06], [220.0, 0.16, 1000]],
+                slide: [0.5, 246.94], vol: 0.55,
+              },
+              brrup: { // "brr-up?": a happy rolled r, A2 then D3 lifting to E3
+                syl: [[110.0, 0.12, 650], [146.83, 0.17, 900]],
+                slide: [0.5, 164.81], flutter: 22, vol: 0.6,
+              },
+            };
+            const { syl: SYL, slide, flutter, vol = 1 } = LINES[line] || LINES.greet;
+            const PEAK = 0.09 * vol, LOW = 0.06 * vol;
+            let s = t;
+            g.gain.setValueAtTime(0.0001, s);
+            SYL.forEach(([note, len, band, staccato], i) => {
+              if (!note) { g.gain.setValueAtTime(0.0001, s); s += len; return; } // rest: silence
+              o.frequency.setValueAtTime(note, s);
+              if (i === SYL.length - 1) {
+                o.frequency.setValueAtTime(note, s + len * slide[0]); // (holds, then slides)
+                o.frequency.exponentialRampToValueAtTime(slide[1], s + len);
+              }
+              bp.frequency.setValueAtTime(band, s);
+              if (staccato) { // straight up, a clean cut-off, silent for the rest of its length
+                const on = 0.1625; // (sounding for 0.1625 s of its 0.18, then cut off)
+                g.gain.setValueAtTime(0.0001, s);
+                g.gain.linearRampToValueAtTime(PEAK, s + 0.012);
+                g.gain.setValueAtTime(PEAK, s + on - 0.012);
+                g.gain.linearRampToValueAtTime(0.0001, s + on);
+                g.gain.setValueAtTime(0.0001, s + len);
+                s += len;
+                return;
+              }
+              if (!SYL[i - 1]?.[0] && i > 0) g.gain.setValueAtTime(0.0001, s); // after a rest: from silence
+              g.gain.linearRampToValueAtTime(PEAK, s + 0.024); // each syllable swells in…
+              g.gain.linearRampToValueAtTime(LOW, s + len - 0.03); // …and dips before the next
+              s += len;
+            });
+            g.gain.linearRampToValueAtTime(0.0001, s + 0.08);
+            // an FM voice at k × the tune: carrier + modulator at RATIO × its pitch, wobbling it by INDEX × the
+            // modulator's frequency
+            const RATIO = 2, INDEX = 2.2, end = s + 0.1;
+            const fmVoice = (k, dest, level) => {
+              const car = ac.createOscillator(), mod = ac.createOscillator(), depth = ac.createGain(), lv = ac.createGain();
+              car.type = mod.type = 'sine';
+              depth.gain.value = 0;
+              follow(car.frequency, k);
+              follow(mod.frequency, k * RATIO);
+              follow(depth.gain, k * RATIO * INDEX);
+              mod.connect(depth); depth.connect(car.frequency);
+              lv.gain.value = level;
+              car.connect(lv); lv.connect(dest);
+              car.start(t); mod.start(t); car.stop(end); mod.stop(end);
+            };
+            fmVoice(1, bp, 0.5);                        // the voice, through the vowel band
+            const sub = ac.createBiquadFilter();        // an octave below, darker, straight in under it
+            sub.type = 'lowpass'; sub.frequency.value = 700;
+            sub.connect(g);
+            fmVoice(0.5, sub, 0.18);
+            bp.connect(g);
+            if (flutter) { // the rolled r: an LFO trembling the volume between about 30% and 100%
+              const trem = ac.createGain(), lfo = ac.createOscillator(), lfoDepth = ac.createGain();
+              trem.gain.value = 0.65;
+              lfo.frequency.value = flutter; lfoDepth.gain.value = 0.35;
+              lfo.connect(lfoDepth); lfoDepth.connect(trem.gain);
+              g.connect(trem); trem.connect(out);
+              lfo.start(t); lfo.stop(end);
+            } else g.connect(out);
+          } catch {}
+        },
+        // boing: a square-wave blip sweeping up, like a platformer jump (higher jumps sweep further)
+        boing: (k = 1) => {
+          try {
+            if (!live()) return;
+            const t = ac.currentTime, o = ac.createOscillator(), f = ac.createBiquadFilter();
+            o.type = 'square';
+            o.frequency.setValueAtTime(260, t);
+            o.frequency.exponentialRampToValueAtTime(260 * (2.4 + 0.8 * Math.min(1, k)), t + 0.18);
+            f.type = 'lowpass'; f.frequency.value = 2600;
+            o.connect(f); f.connect(env(t, 0.05, 0.005, 0.22));
+            o.start(t); o.stop(t + 0.26);
+          } catch {}
+        },
+      };
+    })();
+
     // Hop on click.
-    const hop = () => {
+    let landTimer = 0;
+    // what he says on noticing you: the full greeting until he's blown your ship up (Space Shooter's
+    // death count, sent with its `tss-ship` event), then just a grumble
+    const noticeLine = () => (ship?.deaths > 0 ? 'grumble' : 'greet');
+    const hop = (voice) => {
+      if (voice === 'notice') sfx.notice(noticeLine()); else sfx.boing();
       svg.classList.remove('lr-hop');
       void svg.getBoundingClientRect(); // restart the animation on rapid clicks
       svg.classList.add('lr-hop');
       blink();
+      // he touches down at the hop's 75% keyframe: 450 ms into its 600 (a restarted hop restarts the timer)
+      clearTimeout(landTimer);
+      landTimer = setTimeout(() => sfx.step(1), 450);
     };
     svg.addEventListener('click', hop);
     svg.addEventListener('animationend', (e) => { if (e.animationName === 'lr-hop') svg.classList.remove('lr-hop'); });
@@ -135,8 +337,11 @@
       amt += ((speed > 15 ? Math.min(1, speed / 90) : 0) - amt) * Math.min(1, dt * 8);
       const side = speed > 1 ? vS.x / speed : 0, updown = speed > 1 ? Math.abs(vS.y) / speed : 0;
       const stride = 42 + speed * 0.08; // px of travel per full cycle (two steps)
+      const before = phase;
       if (amt > 0.02) phase += speed * dt / stride * Math.PI * 2;
       else phase = 0;
+      // a foot comes down each time the phase passes π/2 + nπ (where that leg's lift reaches zero)
+      if (amt > 0.3 && Math.floor((phase - Math.PI / 2) / Math.PI) > Math.floor((before - Math.PI / 2) / Math.PI)) sfx.step(amt);
       legEls.forEach((leg, i) => {
         const p = phase + i * Math.PI;
         // rotate(+) is clockwise, which moves a foot below the hip to the left: so negative = forward when going right
@@ -223,6 +428,21 @@
         wrap.style.transform = `translate(${(ux * MAX_LOOK * 0.8).toFixed(2)}px, ${(uy * MAX_LOOK * 0.8).toFixed(2)}px)`;
     };
 
+    // Now and then, when he stops to consider (a pause of half a second or more, not a hop), a happy
+    // little murmur a moment after he's stopped: about one stop in three, never within 6 s of the last.
+    let lastMurmur = 0, murmurTimer = 0, lastSaid = null;
+    const murmur = (now) => {
+      if (now - lastMurmur < 6000 || Math.random() > 0.35) return;
+      lastMurmur = now;
+      clearTimeout(murmurTimer);
+      murmurTimer = setTimeout(() => {
+        if (chasing || svg.hasAttribute('data-tss-dead')) return; // (he's busy, or blown up)
+        // never the same one twice in a row: one of the other two
+        const choices = ['hum', 'hmhm', 'brrup'].filter((m) => m !== lastSaid);
+        lastSaid = choices[Math.floor(Math.random() * choices.length)];
+        sfx.notice(lastSaid);
+      }, 250 + Math.random() * 300);
+    };
     const wander = (now, dt, b) => { // → is he walking?
       if (hovering || svg.classList.contains('lr-hop') || now < waitUntil) {
         if (scanning) lookAt(Math.sin(now / 280), Math.sin(now / 900) * 0.3);
@@ -236,6 +456,7 @@
         waitUntil = now + s.pause;
         scanning = !!s.scan;
         if (s.hop) hop();
+        else if (s.pause >= 500) murmur(now); // stopping to consider
         return false;
       }
       const dx = s.x - pos.x, dy = s.y - pos.y, d = Math.hypot(dx, dy);
@@ -250,7 +471,7 @@
     const chase = (now, dt, b) => {
       if (!chasing) { // spotted it: alert hop, then go
         chasing = true; chaseStart = now; plan = []; scanning = false; vel = { x: 0, y: 0 };
-        hop();
+        hop('notice'); // (his robot voice instead of the boing)
       }
       const cx = b.r.left + b.r.width / 2, cy = b.r.top + b.r.height / 2;
       const dx = ship.x - cx, dy = ship.y - cy, d = Math.hypot(dx, dy) || 1;
@@ -324,7 +545,21 @@
       }
       return best;
     };
+    // Gravity mode landings: a footstep when he comes down on something after being in the air a moment,
+    // as hard as he was falling
+    let airborneSince = 0, fallSpeed = 0;
+    const landing = (now) => {
+      if (!gw) return;
+      if (!gw.supported) {
+        if (!airborneSince) airborneSince = now;
+        fallSpeed = Math.max(fallSpeed, gw.vy || 0);
+      } else {
+        if (airborneSince && now - airborneSince > 150 && fallSpeed > 150) sfx.step(Math.min(1, fallSpeed / 900));
+        airborneSince = 0; fallSpeed = 0;
+      }
+    };
     const gravityStep = (now, dt) => {
+      landing(now);
       wasGravity = true; plan = [];
       // gravity positions him itself: drop our offset (Gravity mode hands back where he ends up)
       if (pos.x || pos.y) { pos = { x: 0, y: 0 }; svg.style.translate = ''; }
@@ -333,7 +568,7 @@
       const shipActive = ship && ship.active && now - shipAt < 500;
       // `chasing` carries over when gravity ends, so a chase in progress continues without the
       // surprised hop (that's only for spotting the ship from a standstill)
-      if (shipActive && !chasing) chaseStart = now;
+      if (shipActive && !chasing) { chaseStart = now; sfx.notice(noticeLine()); } // he's noticed you
       chasing = !!shipActive;
       const W = document.documentElement.clientWidth;
       let want = 0, jump = 0, kick = 0; // kick: set his sideways speed outright, once
@@ -382,6 +617,7 @@
       } else if (Math.abs(gw.vx) > 60) stuckHops = 0;
       if (jump) nextHop = now + 450;
       jump *= Math.sqrt(1 + 1.5 * dmg); // hurt, he jumps higher (up to 2.5× as high)
+      if (jump && gw.supported) sfx.boing(jump / 900); // (Gravity mode only jumps him from something solid)
       if (!gw.held) want += tilt().x * SLIDE_GRAVITY; // the card's tilt pushes him along the floor
       dispatchEvent(new CustomEvent('lr-walk', { detail: { vx: want, jump, kick } }));
       walkCycle(gw.supported ? gw.vx * dt : 0, 0, dt); // legs only move while he's on something

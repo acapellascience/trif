@@ -137,18 +137,248 @@
     if (banner) banner.style.translate = canvas.style.translate;
   };
 
+  // --- Sound effects, synthesized with Web Audio (nothing is loaded). Browsers only allow sound after a
+  // gesture, so the audio starts on your first real key press or click.
+  const sfx = (() => {
+    let ac = null, out = null, noise = null, verb = null, room = null, mid = null, half = null, sheen = null, shaper = null, lastSmall = 0;
+    const wake = (e) => {
+      if (!e.isTrusted) return;
+      try {
+        if (!ac) {
+          ac = new AudioContext();
+          const comp = ac.createDynamicsCompressor();
+          out = ac.createGain(); out.gain.value = 0.55;
+          // +6 dB (×2) after the compressor, to sit level with Rainbow Rave's music
+          const boost = ac.createGain(); boost.gain.value = 2;
+          out.connect(comp); comp.connect(boost); boost.connect(ac.destination);
+          noise = ac.createBuffer(1, ac.sampleRate * 2, ac.sampleRate);
+          const d = noise.getChannelData(0);
+          for (let i = 0; i < d.length; i++) d[i] = Math.random() * 2 - 1;
+          // A big, dark reverb for the explosions (a made-up room: 3 s of decaying noise, smoothed so the tail
+          // is a low roar, not a hiss). Explosions send some of their sound into it.
+          const makeVerb = (sec, gain) => {
+            const len = Math.round(ac.sampleRate * sec), ir = ac.createBuffer(2, len, ac.sampleRate);
+            for (let ch = 0; ch < 2; ch++) {
+              const b = ir.getChannelData(ch);
+              let lp = 0;
+              for (let i = 0; i < len; i++) { lp += 0.08 * (Math.random() * 2 - 1 - lp); b[i] = lp * 3 * Math.pow(1 - i / len, 2.5); }
+            }
+            const conv = ac.createConvolver();
+            conv.buffer = ir;
+            const send = ac.createGain(); send.gain.value = gain;
+            send.connect(conv); conv.connect(out);
+            return send;
+          };
+          verb = makeVerb(3, 1);
+          room = makeVerb(0.3, 1.4); // and a small room, for the word pops: a short tail
+          mid = makeVerb(0.8, 1.2);  // and a middling one for bombs and boxes (the long one is the robot's)
+          half = makeVerb(1.5, 1);   // and the fireworks' length, for the ship's explosion
+
+          // Soft saturation: gives a low tone overtones a small speaker can play (a pure 50 Hz sine is
+          // mostly inaudible on a laptop: what was left was the hiss, which is what sounded tinny).
+          shaper = ac.createWaveShaper();
+          const curve = new Float32Array(1024);
+          for (let i = 0; i < 1024; i++) { const x = i / 511.5 - 1; curve[i] = Math.tanh(x * 3); }
+          shaper.curve = curve;
+        }
+        if (ac.state === 'suspended') ac.resume();
+      } catch (err) { window.trif?.warn('sound failed', String(err)); }
+    };
+    addEventListener('keydown', wake, true);
+    addEventListener('pointerdown', wake, true);
+    const run = (fn) => { if (ac && ac.state === 'running' && !document.hidden) try { fn(ac.currentTime); } catch {} };
+    const env = (t, peak, attack, decay, wet = 0, bus = verb) => { // a gain node that rises to peak, then dies away
+      const g = ac.createGain();
+      // Silent from the start: a new gain node is at full volume (1) until its first scheduled value
+      // takes over, which can land a render block late (a loud snap at the start of a sound).
+      g.gain.value = 0.0001;
+      g.gain.setValueAtTime(0.0001, t);
+      g.gain.exponentialRampToValueAtTime(peak, t + attack);
+      g.gain.exponentialRampToValueAtTime(0.0001, t + attack + decay);
+      g.connect(out);
+      if (wet > 0 && bus) { const s = ac.createGain(); s.gain.value = wet; g.connect(s); s.connect(bus); }
+      return g;
+    };
+    // "dmmm": a low tone sagging in pitch, saturated for body, then darkened
+    const dmm = (t, f0, len, peak, wet, bus = verb, attack = 0.012) => {
+      const o = ac.createOscillator(), pre = ac.createGain(), f = ac.createBiquadFilter();
+      o.type = 'sine';
+      o.frequency.setValueAtTime(f0, t);
+      o.frequency.exponentialRampToValueAtTime(f0 * 0.6, t + len);
+      pre.gain.value = 1.6;
+      f.type = 'lowpass'; f.frequency.value = 420; f.Q.value = 0.7;
+      const s = ac.createWaveShaper(); s.curve = shaper.curve; // (one per sound: a node can't be shared mid-chain)
+      o.connect(pre); pre.connect(s); s.connect(f);
+      f.connect(env(t, peak, attack, len, wet, bus));
+      o.start(t); o.stop(t + len + 0.1);
+    };
+    // filtered noise: the roar and rumble
+    // (fall: how fast the highs roll off, in seconds; by default over the whole sound)
+    const rumble = (t, from, to, len, peak, wet, attack = 0.01, fall = 0, bus = verb) => {
+      const src = ac.createBufferSource(), f = ac.createBiquadFilter();
+      src.buffer = noise; src.loop = true;
+      f.type = 'lowpass'; f.Q.value = 0.5;
+      f.frequency.setValueAtTime(from, t);
+      if (fall) f.frequency.setTargetAtTime(to, t, fall / 3);
+      else f.frequency.exponentialRampToValueAtTime(to, t + len);
+      src.connect(f); f.connect(env(t, peak, attack, len, wet, bus));
+      src.start(t, Math.random()); src.stop(t + len + 0.1);
+    };
+    return {
+      // pew: a bright square-wave zap sweeping down
+      laser: () => run((t) => {
+        const o = ac.createOscillator(), f = ac.createBiquadFilter();
+        o.type = 'square';
+        o.frequency.setValueAtTime(1500 + Math.random() * 200, t);
+        o.frequency.exponentialRampToValueAtTime(220, t + 0.12);
+        f.type = 'lowpass'; f.frequency.value = 3200;
+        o.connect(f); f.connect(env(t, 0.05, 0.004, 0.12));
+        o.start(t); o.stop(t + 0.15);
+      }),
+      // a falling whistle as a bomb drops
+      bombDrop: () => run((t) => {
+        const o = ac.createOscillator();
+        o.type = 'sine';
+        o.frequency.setValueAtTime(1700, t);
+        o.frequency.exponentialRampToValueAtTime(450, t + 0.5);
+        o.connect(env(t, 0.035, 0.02, 0.5));
+        o.start(t); o.stop(t + 0.55);
+      }),
+      // fwwwsssshh: the ship's engines at full thrust as it shoots off the top. Noise through a band that
+      // sweeps up (the jet rising away), swelling in and trailing off, over a low rumble of thrust.
+      whoosh: () => run((t) => {
+        const src = ac.createBufferSource(), bp = ac.createBiquadFilter(), g = ac.createGain();
+        g.gain.value = 0.0001; // (silent from the start: see env)
+        src.buffer = noise; src.loop = true;
+        bp.type = 'bandpass'; bp.Q.value = 1.2;
+        // the ignition lingers low for a moment before the sweep takes off
+        bp.frequency.setValueAtTime(350, t);
+        bp.frequency.setValueAtTime(350, t + 0.35);
+        bp.frequency.exponentialRampToValueAtTime(3200, t + 1.65);
+        g.gain.setValueAtTime(0.0001, t);
+        g.gain.exponentialRampToValueAtTime(0.32, t + 0.6);
+        g.gain.exponentialRampToValueAtTime(0.0001, t + 2.05);
+        src.connect(bp); bp.connect(g); g.connect(out);
+        const s = ac.createGain(); s.gain.value = 0.2; g.connect(s); s.connect(mid);
+        src.start(t, Math.random()); src.stop(t + 2.15);
+        rumble(t, 260, 90, 1.3, 0.12, 0, 0.3);
+      }),
+      // the ship blowing up: the Click Fireworks boom (the robot's recipe, lower and bigger than the bombs'):
+      // a crack, a deep "dmmm" around 50 Hz with a fifth above, a roar whose highs roll off fast, three
+      // aftershocks close together, and a low rolling rumble, in a 1.5 s reverb
+      shipBoom: () => run((t) => {
+        const f0 = 46 + Math.random() * 8, len = 1.2;
+        dmm(t, f0, len, 0.45, 0.45, half);
+        dmm(t, f0 * 1.5, len * 0.6, 0.12, 0.2, half);
+        rumble(t, 1100, 50, len, 0.24, 0.3, 0.01, 0.3, half);     // the roar
+        rumble(t, 2000, 200, 0.12, 0.2, 0.3, 0.003, 0.05, half);  // the crack
+        rumble(t, 220, 35, 1.6, 0.18, 0.6, 0.12, 0, half);        // the low rolling rumble
+        [[0.14, 0.55], [0.35, 0.35], [0.62, 0.2]].forEach(([dt, k], i) => { // aftershocks
+          dmm(t + dt, f0 * (0.9 - i * 0.08), len * 0.6, 0.35 * k + 0.05, 0.6, half);
+          rumble(t + dt, 320, 40, len * 0.6, 0.12 * k + 0.02, 0.6, 0.03, 0.2, half);
+        });
+      }),
+      // You Win: a shimmering wash of high white noise, 3.5 s, fading in as the win appears and out.
+      // Two layers, each two unrelated noise streams (one per ear: wide): a wash above ~6 kHz with a gentle
+      // flutter (7 and 11 a second), and a sparkle above ~10 kHz with a faster, deeper one (17 and 23 a
+      // second): that's the shimmer in the highs. Both go into a bright reverb of their own (the long one is
+      // dark, built for booms: hiss barely shows in it).
+      winShimmer: () => run((t) => {
+        const IN = 0.9, HOLD = 0.8, OUT = 1.8, END = IN + HOLD + OUT, LEVEL = 0.02;
+        if (!sheen) { // bright 2.5 s reverb: plain decaying noise, not smoothed
+          const len = Math.round(ac.sampleRate * 2.5), ir = ac.createBuffer(2, len, ac.sampleRate);
+          for (let ch = 0; ch < 2; ch++) {
+            const b = ir.getChannelData(ch);
+            for (let i = 0; i < len; i++) b[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / len, 3);
+          }
+          const conv = ac.createConvolver(); conv.buffer = ir;
+          sheen = ac.createGain(); sheen.connect(conv); conv.connect(out);
+        }
+        const g = ac.createGain();
+        g.gain.value = 0; // (silent from the start: see env)
+        const srcs = [], at = Math.random();
+        const layer = (cutoff, level, flutters) => {
+          const merge = ac.createChannelMerger(2), trem = ac.createGain();
+          for (const ch of [0, 1]) {
+            const src = ac.createBufferSource(), f = ac.createBiquadFilter();
+            src.buffer = noise; src.loop = true;
+            f.type = 'highpass'; f.frequency.value = cutoff;
+            src.connect(f); f.connect(merge, 0, ch);
+            srcs.push(src);
+          }
+          const depthSum = flutters.reduce((a, [, d]) => a + d, 0);
+          trem.gain.value = level * (1 - depthSum); // the flutter swings it between about (1 − 2·depth) and full
+          for (const [rate, depth] of flutters) {
+            const lfo = ac.createOscillator(), d = ac.createGain();
+            lfo.frequency.value = rate; d.gain.value = level * depth;
+            lfo.connect(d); d.connect(trem.gain);
+            lfo.start(t); lfo.stop(t + END + 0.1);
+          }
+          merge.connect(trem); trem.connect(g);
+        };
+        layer(6000, 1, [[7, 0.15], [11, 0.1]]);    // the wash
+        layer(10000, 1.2, [[17, 0.3], [23, 0.2]]); // the sparkle
+        g.gain.setValueAtTime(0, t);
+        g.gain.linearRampToValueAtTime(LEVEL, t + IN);
+        g.gain.setValueAtTime(LEVEL, t + IN + HOLD);
+        g.gain.linearRampToValueAtTime(0, t + END);
+        g.connect(out);
+        const s = ac.createGain(); s.gain.value = 0.8; g.connect(s); s.connect(sheen);
+        srcs.forEach((src, i) => { src.start(t, (at + i * 0.45) % 2); src.stop(t + END + 0.1); });
+      }),
+      // a clank when a laser hits the robot without finishing him
+      clank: () => run((t) => {
+        const o = ac.createOscillator();
+        o.type = 'triangle';
+        o.frequency.setValueAtTime(620, t);
+        o.frequency.exponentialRampToValueAtTime(280, t + 0.08);
+        o.connect(env(t, 0.06, 0.002, 0.09));
+        o.start(t); o.stop(t + 0.12);
+      }),
+      // An explosion, built on a deep "dmmm" (see dmm) with a dark roar of noise, and some of it sent into the
+      // reverb. size: 0.15 for a word (just the dmmm and a puff), about 0.5–0.9 for boxes, bombs and the
+      // ship, 1.5 for the robot. Small ones are rate-limited, since a bomb can burst several words at once.
+      boom: (size = 0.5) => run((t) => {
+        if (size < 0.3) { if (t - lastSmall < 0.05) return; lastSmall = t; }
+        if (size < 0.3) { // a word: a quick, deep thump, with a short room tail
+          dmm(t, 92 + Math.random() * 10, 0.17, 0.36, 0.3, room, 0.004);
+          rumble(t, 360, 60, 0.13, 0.07, 0, 0.003, 0.09); // the puff at the start
+          return;
+        }
+        const big = size >= 1.2;
+        const f0 = Math.max(42, 78 - size * 22);
+        const len = big ? 0.5 + size * 0.7 : 0.35 + size * 0.4; // (bombs, boxes, the ship: tighter)
+        const bus = big ? verb : mid;
+        dmm(t, f0, len, 0.3 + size * 0.15, 0.25 + size * 0.15, bus);
+        dmm(t, f0 * 1.5, len * 0.6, 0.12, 0.2, bus); // a fifth above, for weight
+        // the roar (the robot's highs roll off fast, leaving the low end ringing)
+        rumble(t, 500 + size * 300, 50, len, 0.14 + size * 0.1, 0.3, 0.01, big ? 0.3 : 0, bus);
+        if (!big) rumble(t, 1400, 180, 0.16, 0.12 + size * 0.06, 0.2, 0.003, 0.1, bus); // the crack at the start
+        if (big) { // the robot: a crack, then a shockwave that rolls on and reverberates
+          rumble(t, 2000, 200, 0.12, 0.2, 0.3, 0.003, 0.05); // the crack
+          rumble(t, 220, 35, 3.2, 0.2, 0.6, 0.25);            // a long, low rolling rumble swelling in
+          [[0.28, 0.55], [0.7, 0.35], [1.25, 0.2]].forEach(([dt, k], i) => { // aftershocks, each deeper
+            dmm(t + dt, f0 * (0.9 - i * 0.08), len * 0.9, 0.35 * k + 0.05, 0.6);
+            rumble(t + dt, 320, 40, len, 0.12 * k + 0.02, 0.6, 0.03, 0.2);
+          });
+        }
+      }),
+    };
+  })();
+
   // --- Game state
   const ship = { x: innerWidth / 2, y: innerHeight - 14, w: 102, h: 78 }; // y = bottom of the ship
   const keys = {};
   const lasers = [];
   const bits = []; // letters and sparks
-  let lastShot = 0, score = 0, lastInput = -1e9;
+  let lastShot = 0, score = 0, lastInput = -1e9, presses = 0; // presses: fresh space presses since the last frame
 
   const editable = (el) => el && (el.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(el.tagName));
   addEventListener('keydown', (e) => {
     if (editable(e.target) || e.metaKey || e.ctrlKey || e.altKey) return;
     if (['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown', ' '].includes(e.key)) {
       e.preventDefault(); // no page scrolling, no pressing the focused button
+      if (e.key === ' ' && !e.repeat) presses++; // a fresh press (not the key repeating while held)
       keys[e.key] = true;
       lastInput = performance.now();
     } else if (e.key === 'r' || e.key === 'R') {
@@ -170,6 +400,7 @@
     muzzle = 0.07;
     const y = ship.y - ship.h * 0.6;
     lasers.push({ x: ship.x - 27, y }, { x: ship.x + 27, y });
+    sfx.laser();
   };
 
   // Screen shake: nudges <html> with the `translate` property, which no other mod here sets on <html>
@@ -218,6 +449,7 @@
     const R = 90 + r0.width * 0.8;
     rings.push({ x: cx, y: cy, t: 0, R });
     shake = Math.min(shake + 9, 20);
+    sfx.boom(0.15);
     word.setAttribute('data-tss-dead', '');
     score++;
   };
@@ -250,6 +482,7 @@
     rings.push({ x: cx, y: cy, t: 0, R: 260 }, { x: cx, y: cy, t: 0.1, R: 140 });
     shake = 24;
     lasers.length = 0;
+    sfx.shipBoom();
     deadUntil = now + 1800;
     deaths++;
     // in Gravity mode the blast throws the pieces around it
@@ -289,6 +522,7 @@
       robot.classList.remove('tss-hurt');
       void robot.getBoundingClientRect(); // restart the flash
       robot.classList.add('tss-hurt');
+      if (robotHp) sfx.clank(); // (the last hit gets the big boom instead)
       dispatchEvent(new CustomEvent('tss-robot-hit'));
       if (!robotHp) {
         const r = robot.getBoundingClientRect();
@@ -348,6 +582,7 @@
         rings.push({ x, y, t: 0, R: 520 }, { x, y, t: 0.1, R: 340 }, { x, y, t: 0.2, R: 200 });
       }
       shake = 34;
+      sfx.boom(1.5); // the big one (with its own aftershocks)
       dispatchEvent(new CustomEvent('tss-blast', { detail: { x, y, radius: 320, power: 2300 } })); // Gravity mode: the big one
     } catch (err) { window.trif?.warn(String(err)); }
   }
@@ -400,6 +635,7 @@
     }
     rings.push({ x: cx, y: cy, t: 0, R: 90 + Math.max(r.width, r.height) * 0.6 });
     shake = Math.min(shake + 12, 22);
+    sfx.boom(0.45);
     el.setAttribute('data-tss-dead', '');
     score++;
   };
@@ -419,22 +655,24 @@
     return null;
   };
 
-  // --- Bombs, only while Gravity mode is on (html[data-gm-on]). space (held: one per cooldown) drops one from the ship's belly instead of firing; it
+  // --- Bombs, only while Gravity mode is on (html[data-gm-on]). space drops one from the ship's belly instead of
+  // firing (only one in the air at a time); it
   // falls, and blows up on the first piece it touches (or the floor). The piece it hits is removed
   // (its words burst into letters; the piece itself is hidden with data-tss-dead, which Gravity mode
   // treats as gone, and R brings back). A direct hit on the robot does BOMB_DAMAGE instead. The blast
   // goes to Gravity mode as a `tss-blast` { x, y, radius, power } event, which flings the pieces
   // around it (Gravity mode owns their physics).
-  const BOMB_DAMAGE = 5, BOMB_GRAVITY = 1800, BOMB_COOLDOWN = 350, BLAST_RADIUS = 170, BLAST_POWER = 1500;
+  const BOMB_DAMAGE = 5, BOMB_GRAVITY = 1800, BLAST_RADIUS = 170, BLAST_POWER = 1500;
   const bombs = [];
-  let lastBomb = 0;
   const gravityOn = () => document.documentElement.hasAttribute('data-gm-on');
   const dropBomb = (now) => {
-    if (now - lastBomb < BOMB_COOLDOWN || now < deadUntil) return;
-    lastBomb = now;
+    // one bomb in the air at a time: the next can drop once the last has gone off (holding space drops
+    // the next one the moment it does)
+    if (bombs.length || now < deadUntil) return;
     const vx = ((keys.ArrowRight ? 1 : 0) - (keys.ArrowLeft ? 1 : 0)) * 520 * 0.6; // carries some of the ship's motion
     const vy = 80 + ((keys.ArrowDown ? 1 : 0) - (keys.ArrowUp ? 1 : 0)) * 420 * 0.5;
     bombs.push({ x: ship.x, y: ship.y - 18, vx, vy, born: now });
+    sfx.bombDrop();
   };
   const pieceAt = (x, y) => { // a live Gravity mode piece under this point (not the robot)
     for (const el of document.querySelectorAll('[data-gm-body]:not([data-gm-ghost])')) {
@@ -472,6 +710,7 @@
         spark: true, size: 2 + Math.random() * (i < 20 ? 12 : 6), color: COLORS[i % COLORS.length] });
     }
     rings.push({ x, y, t: 0, R: BLAST_RADIUS * 1.3 }, { x, y, t: 0.1, R: BLAST_RADIUS * 0.7 });
+    sfx.boom(0.7);
     shake = Math.min(shake + 16, 26);
   };
   const drawBomb = (b, now) => {
@@ -521,7 +760,7 @@
   // mode leaves it hanging). Once they're all gone, the ship takes over: it fires its thrusters, flies off
   // the top of the screen, and the game resets itself (like R, plus the counters go back to zero), with
   // the ship flying back in from the bottom.
-  let banner = null, leaving = 0, leaveV = 0, resetAt = 0;
+  let banner = null, leaving = 0, leaveV = 0, resetAt = 0, whooshed = false;
   const showBanner = () => {
     if (banner) return;
     banner = document.createElement('div');
@@ -562,6 +801,7 @@
       lasers.length = 0;
     }
     if (!leaving) return false;
+    if (now > leaving && !whooshed) { whooshed = true; sfx.whoosh(); }
     if (now > leaving) { // full thrust, straight up, with a little wobble
       leaveV = Math.min(1600, leaveV + 1400 * dt);
       ship.y -= leaveV * dt;
@@ -621,7 +861,7 @@
     removeWin();
     restoreAll();
     score = 0; deaths = 0; bombs.length = 0;
-    leaving = 0; resetAt = 0;
+    leaving = 0; resetAt = 0; whooshed = false;
     ship.x = W / 2; ship.y = H + ship.h; // flies back in from below
     deadUntil = 0; safeUntil = performance.now() + 1800;
     returning = true;
@@ -728,8 +968,30 @@
       links.after(below);
       again.style.top = `${2 - (parseFloat(getComputedStyle(links).marginBottom) || 0)}px`; // tucked just under the buttons
       winEl.nodes.push(above, below);
+      sfx.winShimmer();
+      celebrate(h1);
+      dispatchEvent(new CustomEvent('tss-win')); // (Rainbow Rave unlocks its music and zoom buttons as a prize)
       window.trif?.log('you win!');
     } catch (e) { window.trif?.warn('you win failed', String(e)); }
+  };
+  // Five fireworks in an arc over "You Win!" (the Click Fireworks mod launches them, if it's on): around
+  // the upper half of a circle centred on the title, going off one after another from the outside in, the
+  // top one last.
+  const celebrate = (title) => {
+    try {
+      const r = title.getBoundingClientRect(), vw = innerWidth;
+      const cx = r.left + r.width / 2, cy = r.top + r.height / 2;
+      // an arc (half an ellipse) just clear of the title, kept inside the window: 70 px from the sides,
+      // 50 px from the top
+      const rx = Math.max(120, Math.min(r.width / 2 + 90, cx - 70, vw - cx - 70));
+      const ry = Math.max(60, Math.min(rx * 0.75, cy - 50));
+      // angles (degrees, 180 = left, 90 = straight up), in firing order, each with its delay in ms
+      [[180, 300], [0, 1300], [135, 2300], [45, 3300], [90, 4300]].forEach(([deg, ms]) => { // a second apart
+        const a = deg * Math.PI / 180;
+        const x = cx + Math.cos(a) * rx, y = cy - Math.sin(a) * ry;
+        setTimeout(() => { if (winEl) dispatchEvent(new CustomEvent('firework-launch', { detail: { x, y } })); }, ms);
+      });
+    } catch (e) { window.trif?.warn('celebration failed', String(e)); }
   };
   const removeWin = () => {
     if (!winEl) return;
@@ -957,20 +1219,22 @@
         ship.x = Math.max(ship.w / 2, Math.min(W - ship.w / 2, ship.x));
         ship.y = Math.max(ship.h + 4, Math.min(H - 14, ship.y));
         // space: lasers normally; in Gravity mode (where lasers can't do much) it drops bombs instead,
-        // one per BOMB_COOLDOWN while held
-        if (keys[' ']) {
-          if (gravityOn()) dropBomb(now);
-          else if (now - lastShot > 150) fire(now);
-        }
+        // one in the air at a time
+        // Holding space fires at most every 150 ms; each new press fires straight away, however soon
+        // after the last shot (even a tap too quick for a frame to see the key down).
+        if (gravityOn()) { if (presses || keys[' ']) dropBomb(now); } // (bombs: one in the air at a time)
+        else if (presses || (keys[' '] && now - lastShot > 150)) fire(now);
         if (now > safeUntil && touchesRobot()) blowUpShip(now);
       }
+      presses = 0; // (presses while the ship is down or on autopilot don't save up)
       // Tell the Living robot mod where the ship is (it chases an active ship). "Active" = flown
       // or fired in the last 5 s and not exploded.
       if (keys.ArrowLeft || keys.ArrowRight || keys.ArrowUp || keys.ArrowDown || keys[' ']) lastInput = now;
       // (plus the bombs in the air, so the robot can see them coming and dodge)
       dispatchEvent(new CustomEvent('tss-ship', { detail: {
         x: ship.x, y: ship.y - ship.h * 0.45, active: !dead && !autopilot && now - lastInput < 5000,
-        bombs: bombs.map((b) => ({ x: b.x, y: b.y, vx: b.vx, vy: b.vy })), bombGravity: BOMB_GRAVITY } }));
+        bombs: bombs.map((b) => ({ x: b.x, y: b.y, vx: b.vx, vy: b.vy })), bombGravity: BOMB_GRAVITY,
+        deaths } })); // (the robot greets a fresh player differently from one he's already blown up)
 
       ctx.clearRect(0, 0, W, H);
 

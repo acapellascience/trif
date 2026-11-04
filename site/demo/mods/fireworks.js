@@ -10,10 +10,12 @@
 // ==/WebMod==
 
 (() => {
-  // The row of round buttons along the top of the window, spread evenly from edge to edge, in this order:
-  // the courtesy mute (from the first sound on), Space shooter's restart, Rainbow Rave's kick zoom and music
-  // (once won), Gravity mode's drop. (Mute, restart and drop: left, middle and right.) Whichever mod needs it
-  // first makes it; the others find it. Light buttons, or the rave's dark ones while it's on.
+  // The row of round buttons along the top of the window. On a touchscreen it's spread evenly from edge to
+  // edge, in this order: the courtesy mute (from the first sound on), Space shooter's restart, Rainbow
+  // Rave's kick zoom and music (once won), Gravity mode's drop (mute, restart and drop: left, middle and
+  // right). With a mouse there are only the rave's two, together in the top right (no mute: the computer
+  // has its own). Whichever mod needs it first makes it; the others find it. Light buttons, or the rave's
+  // dark ones while it's on.
   // On <html>, not <body> (the tilt card transforms <body>, and Gravity mode piles up what's in it), and
   // in the top layer where the browser has one (popover): there it stays on the window whatever <html>
   // does (the tilt card's perspective, the shooter's screen shake). Where there's no top layer, it's
@@ -23,11 +25,13 @@
     if (bar) return bar;
     bar = document.createElement('div');
     bar.id = 'trif-top-bar';
+    if (matchMedia('(pointer: coarse)').matches) bar.classList.add('trif-top-touch');
     const style = document.createElement('style');
     style.textContent = `
       #trif-top-bar { position: fixed; inset: 0 auto auto 0; margin: 0; border: 0; background: none; color: inherit;
         overflow: visible; height: auto; z-index: 2147483647; box-sizing: border-box; width: 100vw;
-        padding: 16px; display: flex; justify-content: space-between; pointer-events: none; }
+        padding: 16px; display: flex; justify-content: flex-end; gap: 8px; pointer-events: none; }
+      #trif-top-bar.trif-top-touch { justify-content: space-between; gap: 0; }
       #trif-top-bar > button { pointer-events: auto; flex: none; margin: 0; -webkit-tap-highlight-color: transparent; }
       :where(#trif-top-bar) > button.trif-top-btn { width: 40px; height: 40px; border-radius: 50%; padding: 0;
         display: flex; align-items: center; justify-content: center; cursor: pointer; color: #18181a;
@@ -62,14 +66,16 @@
     return bar;
   };
 
-  // The courtesy mute, shared by the mods that make sound (Living Robot, Space Shooter, Click Fireworks,
-  // Rainbow Rave): the first button in the row along the top, there from the first sound on. It silences
+  // The courtesy mute on a touchscreen, shared by the mods that make sound (Living Robot, Space Shooter,
+  // Click Fireworks, Rainbow Rave): the first button in the row along the top, there from the first sound on. It silences
   // all of them (each one suspends its own audio while it's on: the `trif-mute` event), and this browser
   // remembers it.
   const MUTED = 'trif.muted';
-  const isMuted = () => { try { return localStorage.getItem(MUTED) === '1'; } catch { return false; } };
+  // (touchscreens only: a computer has its own mute)
+  const TOUCH_UI = matchMedia('(pointer: coarse)').matches;
+  const isMuted = () => { try { return TOUCH_UI && localStorage.getItem(MUTED) === '1'; } catch { return false; } };
   const muteButton = () => {
-    if (document.getElementById('trif-mute')) return;
+    if (!TOUCH_UI || document.getElementById('trif-mute')) return;
     const NS = 'http://www.w3.org/2000/svg';
     const b = document.createElement('button');
     b.type = 'button';

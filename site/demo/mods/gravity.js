@@ -668,10 +668,12 @@
     } catch (err) { window.trif?.warn(String(err)); try { finish(); } catch {} }
   }, true);
 
-  // The row of round buttons along the top of the window, spread evenly from edge to edge, in this order:
-  // the courtesy mute (from the first sound on), Space shooter's restart, Rainbow Rave's kick zoom and music
-  // (once won), Gravity mode's drop. (Mute, restart and drop: left, middle and right.) Whichever mod needs it
-  // first makes it; the others find it. Light buttons, or the rave's dark ones while it's on.
+  // The row of round buttons along the top of the window. On a touchscreen it's spread evenly from edge to
+  // edge, in this order: the courtesy mute (from the first sound on), Space shooter's restart, Rainbow
+  // Rave's kick zoom and music (once won), Gravity mode's drop (mute, restart and drop: left, middle and
+  // right). With a mouse there are only the rave's two, together in the top right (no mute: the computer
+  // has its own). Whichever mod needs it first makes it; the others find it. Light buttons, or the rave's
+  // dark ones while it's on.
   // On <html>, not <body> (the tilt card transforms <body>, and Gravity mode piles up what's in it), and
   // in the top layer where the browser has one (popover): there it stays on the window whatever <html>
   // does (the tilt card's perspective, the shooter's screen shake). Where there's no top layer, it's
@@ -681,11 +683,13 @@
     if (bar) return bar;
     bar = document.createElement('div');
     bar.id = 'trif-top-bar';
+    if (matchMedia('(pointer: coarse)').matches) bar.classList.add('trif-top-touch');
     const style = document.createElement('style');
     style.textContent = `
       #trif-top-bar { position: fixed; inset: 0 auto auto 0; margin: 0; border: 0; background: none; color: inherit;
         overflow: visible; height: auto; z-index: 2147483647; box-sizing: border-box; width: 100vw;
-        padding: 16px; display: flex; justify-content: space-between; pointer-events: none; }
+        padding: 16px; display: flex; justify-content: flex-end; gap: 8px; pointer-events: none; }
+      #trif-top-bar.trif-top-touch { justify-content: space-between; gap: 0; }
       #trif-top-bar > button { pointer-events: auto; flex: none; margin: 0; -webkit-tap-highlight-color: transparent; }
       :where(#trif-top-bar) > button.trif-top-btn { width: 40px; height: 40px; border-radius: 50%; padding: 0;
         display: flex; align-items: center; justify-content: center; cursor: pointer; color: #18181a;

@@ -1,7 +1,7 @@
 {
  "id": "fireworks",
  "prompt": "make a mod where every click launches a firework, and when it hits the robot gets scared and flinces. don't forget the sound.",
- "secs": 108,
+ "secs": 136,
  "mods": [
   "fireworks"
  ],
@@ -15,62 +15,72 @@
   {
    "role": "tool",
    "text": "ran cat instructions.md 2>/dev/null; ls sites/timsrobot.com 2>/dev/null; trif run 'return [...document.querySelectorAll(\"a,button\")].filter(e=>/get it/i.test(e.textContent)).map(e=>({tag:e.tagName,text:e.textContent.trim(),href:e.getAttribut…",
-   "t": 3393
+   "t": 3400
   },
   {
    "role": "tool",
    "text": "ran trif new timsrobot.com fireworks; trif status | tail -15",
-   "t": 8436
+   "t": 8400
+  },
+  {
+   "role": "assistant",
+   "text": "The fireworks go on one see-through canvas over the page, so clicks still reach it. Each big burst will announce where it went off, so Living Robot can react.",
+   "t": 12400
   },
   {
    "role": "tool",
    "text": "wrote sites/timsrobot.com/fireworks.js",
-   "t": 33712
-  },
-  {
-   "role": "tool",
-   "text": "ran trif check timsrobot.com/fireworks && trif reload >/dev/null && trif run 'document.documentElement.dispatchEvent(new PointerEvent(\"pointerdown\",{bubbles:true,clientX:400,clientY:200,button:0})); const b=[...document.query…",
-   "t": 38028
-  },
-  {
-   "role": "tool",
-   "text": "read ~/Library/Application Support/TRIF/screenshots/timsrobot.com/fw.png",
-   "t": 40776
-  },
-  {
-   "role": "assistant",
-   "text": "I added a new mod, **Click Fireworks**. It's on now.\n\n- **Every click** sends a rocket up from the bottom of the screen with a sparkly trail. It slows near the top and bursts where you clicked, with a flash and coloured sparks that fall slowly. Some bursts are rings and some sparks twinkle.\n- **Hovering \"Get it\"** sprays confetti out of the button for as long as your mouse is on it.\n- Your clicks still work normally. The effects are drawn on a see-through layer that clicks pass through.\n\n**What I checked:** I faked a click and a hover on \"Get it\", then took a screenshot. It showed the rocket climbing and confetti flying off the button. There were no errors, and your other mods (gravity, jelly buttons, living robot, neon title) are still running. I haven't seen a full burst in a screenshot: the rocket was still rising when I took it.",
-   "t": 45496
-  },
-  {
-   "role": "assistant",
-   "text": "Making the bursts much bigger: more sparks that fly further and last longer, full-rainbow colours, and second-stage crackle bursts.",
-   "t": 66395
-  },
-  {
-   "role": "tool",
-   "text": "edited sites/timsrobot.com/fireworks.js",
-   "t": 77416
-  },
-  {
-   "role": "tool",
-   "text": "edited sites/timsrobot.com/fireworks.js",
-   "t": 84600
+   "t": 33700
   },
   {
    "role": "tool",
    "text": "ran trif check timsrobot.com/fireworks && trif reload >/dev/null && trif run 'document.documentElement.dispatchEvent(new PointerEvent(\"pointerdown\",{bubbles:true,clientX:640,clientY:300,button:0})); await new Promise(r=>setTi…",
-   "t": 88335
+   "t": 38000
   },
   {
    "role": "tool",
    "text": "read ~/Library/Application Support/TRIF/screenshots/timsrobot.com/fw2.png",
-   "t": 93244
+   "t": 42900
   },
   {
    "role": "assistant",
-   "text": "The bursts are now huge. My test burst was about 600px across, roughly three-quarters of the screen's height, and it covered the robot, title, buttons and both text columns.\n\n**What changed:**\n- **Size:** bursts scale with your window, so they stay about half the screen across at any size.\n- **Colour:** about half the bursts sweep the whole rainbow around the circle. The rest use a mixed palette with an outer ring and an inner core in contrasting colours.\n- **More fireworks:** each burst has about 470 sparks instead of 90, with longer trails, and they hang in the air about twice as long before fading.\n- **Crackles:** some sparks pop into small bursts of their own partway out, and sparks twinkle as they fade.\n- I capped the total number of sparks so the page stays smooth if you click a lot.\n\n**What I checked:** I faked a click, waited about a second and took a screenshot. It showed the full rainbow burst with crackles going off inside it, and there were no errors. The \"Get it\" confetti is unchanged.\n\nTo undo it, switch off **Click Fireworks** in the side panel, or ask me to.",
-   "t": 97555
+   "text": "The burst fills about half the screen. Now the robot's fright.",
+   "t": 47200
+  },
+  {
+   "role": "tool",
+   "text": "read sites/timsrobot.com/robot.js",
+   "t": 50200
+  },
+  {
+   "role": "tool",
+   "text": "edited sites/timsrobot.com/robot.js",
+   "t": 76200
+  },
+  {
+   "role": "tool",
+   "text": "ran trif check timsrobot.com/robot && trif reload && trif run 'const s=document.querySelector(\"svg.robot\"), r=s.getBoundingClientRect(); dispatchEvent(new CustomEvent(\"firework-burst\",{detail:{x:r.left-60,y:r.top+40,radius:300}})); await new Promise(r=>setTimeout(r,400)); return getCompute…",
+   "t": 80200
+  },
+  {
+   "role": "assistant",
+   "text": "He jolts, steps away from a burst on his left and leans away from it. Now the sound: a thud on launch, a boom for each burst.",
+   "t": 87200
+  },
+  {
+   "role": "tool",
+   "text": "edited sites/timsrobot.com/fireworks.js",
+   "t": 115200
+  },
+  {
+   "role": "tool",
+   "text": "ran trif check timsrobot.com/fireworks && trif reload && trif errors",
+   "t": 119200
+  },
+  {
+   "role": "assistant",
+   "text": "I added a new mod, **Click Fireworks**, and taught Living Robot to be scared of it.\n\n- **Every click** sends a rocket up from the bottom of the screen with a sparkly trail. It bursts where you clicked, about half the screen across: hundreds of sparks with an outer ring and an inner core (about half the bursts are full rainbows), with crackles popping inside and sparks that twinkle as they fade.\n- **The robot flinches** when one goes off near him: a startled jolt, a quick step away, a lean away from the bang and wide, scared eyes for a moment. The closer the burst, the bigger the fright, and even far-off ones get a little twitch. In gravity mode he scurries sideways with a startled hop.\n- **Sound:** a dull thud on launch, a deep boom for each burst, and a soft hiss for the crackles. It starts after your first click.\n- **Bonus:** hovering \"Get it\" sprays confetti out of the button.\n- Your clicks still work normally: the fireworks are drawn on a see-through layer that clicks pass through.\n\n**What I checked:** a fake click launched a rocket and the screenshot shows the full burst, and a burst just beside the robot made him jump away and lean. No errors. I can't hear from here, so have a listen.\n\nTo undo it, switch off **Click Fireworks** in the side panel, or ask me to.",
+   "t": 124200
   }
  ]
 }

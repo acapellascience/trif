@@ -30,9 +30,10 @@ panel (the page moves over; at phone width it's a sheet over the bottom of the p
   TRIF doesn't ship them); other names are ignored. The panel opens again after the reload where it was.
 - Someone running the real TRIF gets the demo like anyone else: the extension never marks a page, so the
   site can't tell, and TRIF has no mods for timsrobot.com unless they make some.
-- Chats are recordings (`demo/chats/`, from the promo video's sessions, paths and tab ids taken out):
-  "Recorded chats" above the message box replays one, sped up, then switches its mod on (the page reloads
-  with it). Anything typed gets a note saying so.
+- Chats are examples (`demo/chats/`), written from the real sessions that made these mods and checked
+  against the mods' code. The next example's prompt waits in the message box; Send plays it, sped up, then
+  switches its mod on (the page reloads with it). Once they've all played, anything typed gets a note
+  saying so.
 
 `site/demo/`, its mods included, is bundled into `src/demo-files.js` by `node site/build-demo.js` (`dev.js` does it on start;
 a test checks it's up to date).

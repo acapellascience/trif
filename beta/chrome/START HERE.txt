@@ -27,9 +27,12 @@ Install (about 2 minutes)
    It prints a few lines saying what it set up, then a list of next steps (the ones below). You can
    ignore its note about PATH.
 
-   Setup also opens a Finder window with a folder called "extension" selected. Leave it open.
+   Setup also opens a Finder window with a folder called "extension" selected, and Chrome's
+   extensions page (chrome://extensions). Leave both open. Then it waits in Terminal, saying as each
+   of the next steps gets done, until Chrome has TRIF and user scripts are on (Ctrl-C skips the wait).
 
-3. In Chrome, go to  chrome://extensions  and turn on "Developer mode" (top right).
+3. On the chrome://extensions page that opened (or go there in Chrome), turn on "Developer mode"
+   (top right).
 4. Drag the "extension" folder from that Finder window onto the chrome://extensions page.
    TRIF appears in the list, and opens a "TRIF setup" tab. Leave the folder where it is: Chrome runs
    TRIF from it.

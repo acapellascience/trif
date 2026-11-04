@@ -646,16 +646,17 @@ function setup(opts = {}) {
   // newest is on the latest GitHub release (scripts/release.js), from package.json's repository.
   const xpiUrl = firefoxAddonUrl();
   if (!targets.some((t) => !t.firefox && !t.safari)) {
+    // (The restart first, as in the Firefox START HERE: the add-on and its tab then come up in the new Firefox.)
+    note('  1. If Firefox was already running before this setup, quit it completely and reopen it.');
     if (xpiUrl) {
-      note('  1. Open this link in Firefox to install the TRIF add-on, and click Add:');
+      note('  2. Open this link in Firefox to install the TRIF add-on, and click Add:');
       note(`       ${xpiUrl}`);
       note('     (If Firefox downloads it instead, drag trif-firefox.xpi onto a Firefox window.)');
     } else {
-      note('  1. Open the signed TRIF add-on (trif-firefox.xpi) in Firefox, e.g. drag it onto a Firefox');
+      note('  2. Open the signed TRIF add-on (trif-firefox.xpi) in Firefox, e.g. drag it onto a Firefox');
       note('     window, and click Add.');
     }
-    note('  2. On the TRIF tab Firefox opens, click "Allow user scripts", then Allow.');
-    note('  3. If Firefox was already running before this setup, quit it completely and reopen it.');
+    note('  3. On the TRIF tab Firefox opens, click "Allow user scripts", then Allow.');
     note(`  4. Check everything with: ${trif} doctor`);
     if (targets.some((t) => t.safari)) { note('  Safari:'); for (const l of safariSteps(1)) note(`    ${l}`); }
     sayThen();
@@ -684,13 +685,14 @@ function setup(opts = {}) {
   note(`  3. Check everything with: ${trif} doctor`);
   if (targets.some((t) => t.firefox)) {
     if (xpiUrl) {
-      note('  Firefox: open this link in Firefox to install the TRIF add-on:');
+      note('  Firefox: if it was running before this setup, quit it completely and reopen it. Then open this');
+      note('     link in Firefox to install the TRIF add-on:');
       note(`       ${xpiUrl}`);
-      note('     Then click "Allow user scripts" on the TRIF tab Firefox opens. Restart Firefox if it was');
-      note('     running before this setup.');
+      note('     Then click "Allow user scripts" on the TRIF tab Firefox opens.');
     } else {
-      note('  Firefox: open the signed TRIF add-on (.xpi) in Firefox to install it, then click "Allow user');
-      note('     scripts" on the TRIF tab it opens. Restart Firefox if it was running before this setup.');
+      note('  Firefox: if it was running before this setup, quit it completely and reopen it. Then open the');
+      note('     signed TRIF add-on (.xpi) in Firefox to install it, and click "Allow user scripts" on the TRIF');
+      note('     tab it opens.');
     }
   }
   if (targets.some((t) => t.safari)) { note('  Safari:'); for (const l of safariSteps(1)) note(`    ${l}`); }

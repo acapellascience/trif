@@ -1118,7 +1118,7 @@ export const CHATS = [
  },
  {
   "id": "tilt",
-  "prompt": "make the whole page tilt in 3d and more around with the mouse. robot should get pulled around a bit as the card shifts. in gravity mode make it affect the blocks",
+  "prompt": "make the whole page tilt in 3d and move around with the mouse. robot should get pulled around a bit as the card shifts. in gravity mode make it affect the blocks",
   "secs": 154,
   "mods": [
    "tilt"
@@ -1127,7 +1127,7 @@ export const CHATS = [
   "messages": [
    {
     "role": "user",
-    "text": "make the whole page tilt in 3d and more around with the mouse. robot should get pulled around a bit as the card shifts. in gravity mode make it affect the blocks",
+    "text": "make the whole page tilt in 3d and move around with the mouse. robot should get pulled around a bit as the card shifts. in gravity mode make it affect the blocks",
     "t": 0
    },
    {

@@ -533,8 +533,11 @@
     }
 
     // (the panel clears the box when it sends)
-    // The waiting prompt types itself into the box, as if someone were typing it: a few seconds at most,
-    // however long it is. Send while it's typing sends all of it (see mount).
+    // The waiting prompt types itself into the box, as if someone were typing it, at a steady speed: the
+    // first one soon after the panel opens, each one after a chat after a few seconds' pause (time to look
+    // at what the last one made). Send while it's waiting or typing sends all of it (see mount).
+    const TYPE_MS = 33;       // per character (about 30 a second), a little uneven
+    const PAUSE_FIRST = 400, PAUSE_NEXT = 5000;
     let typing = null; // { text, timer } while a prompt is being typed
     const show = (input, text) => { input.value = text; input.dispatchEvent(new Event('input', { bubbles: true })); }; // (the box grows to fit)
     function stopTyping(input, finish) {
@@ -547,16 +550,15 @@
       if (typing?.text === text || (!typing && input.value === text)) return; // (already there, or on its way)
       stopTyping(input, false);
       if (!text || matchMedia('(prefers-reduced-motion: reduce)').matches) return show(input, text);
-      const each = Math.max(12, Math.min(38, 2600 / text.length)); // ms per character
       let i = 0;
       typing = { text, timer: 0 };
       const step = () => {
-        i = Math.min(text.length, i + 1 + (Math.random() < 0.25 ? 1 : 0));
+        i = Math.min(text.length, i + 1);
         show(input, text.slice(0, i));
-        if (i < text.length) typing.timer = setTimeout(step, each * (0.6 + Math.random() * 0.8));
+        if (i < text.length) typing.timer = setTimeout(step, TYPE_MS * (0.6 + Math.random() * 0.8));
         else typing = null;
       };
-      typing.timer = setTimeout(step, 350);
+      typing.timer = setTimeout(step, state.replayed.size ? PAUSE_NEXT : PAUSE_FIRST);
     }
 
     function fill() {

@@ -155,7 +155,7 @@ export function homePage({ head = '', tail = '' } = {}) {
 </section>`, {
     style: HOME_STYLE + DEMO_STYLE,
     head,
-    after: `\n<footer><a href="${REPO}">GitHub</a><a href="/report">Report a problem</a><a href="/windows">Windows waitlist</a><a href="${REPO}/blob/main/store/PRIVACY.md">Privacy</a></footer>` +
+    after: `\n<footer><a href="${REPO}" target="_blank" rel="noopener">GitHub</a><a href="/report" target="_blank" rel="noopener">Report a problem</a><a href="/windows" target="_blank" rel="noopener">Windows waitlist</a><a href="${REPO}/blob/main/store/PRIVACY.md" target="_blank" rel="noopener">Privacy</a></footer>` +
       '\n<button type="button" class="demo-tab" hidden>Try the demo</button>\n<script src="/demo.js" defer></script>' + tail,
   }).replace('<main>', '<main class="home">');
 }

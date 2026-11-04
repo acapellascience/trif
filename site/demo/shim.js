@@ -509,6 +509,32 @@
     }
 
     // (the panel clears the box when it sends)
+    // The waiting prompt types itself into the box, as if someone were typing it: a few seconds at most,
+    // however long it is. Send while it's typing sends all of it (see mount).
+    let typing = null; // { text, timer } while a prompt is being typed
+    const show = (input, text) => { input.value = text; input.dispatchEvent(new Event('input', { bubbles: true })); }; // (the box grows to fit)
+    function stopTyping(input, finish) {
+      if (!typing) return;
+      clearTimeout(typing.timer);
+      if (finish) show(input, typing.text);
+      typing = null;
+    }
+    function typeInto(input, text) {
+      if (typing?.text === text || (!typing && input.value === text)) return; // (already there, or on its way)
+      stopTyping(input, false);
+      if (!text || matchMedia('(prefers-reduced-motion: reduce)').matches) return show(input, text);
+      const each = Math.max(12, Math.min(38, 2600 / text.length)); // ms per character
+      let i = 0;
+      typing = { text, timer: 0 };
+      const step = () => {
+        i = Math.min(text.length, i + 1 + (Math.random() < 0.25 ? 1 : 0));
+        show(input, text.slice(0, i));
+        if (i < text.length) typing.timer = setTimeout(step, each * (0.6 + Math.random() * 0.8));
+        else typing = null;
+      };
+      typing.timer = setTimeout(step, 350);
+    }
+
     function fill() {
       const input = document.getElementById('input');
       if (!input) return;
@@ -519,9 +545,8 @@
       input.readOnly = !free;
       input.tabIndex = free ? 0 : -1;
       input.setAttribute('aria-label', free ? 'Message' : 'The next recorded prompt: Send replays it');
-      if (!free) input.value = c ? c.prompt : '';
-      else if (!was) input.value = ''; // (just freed: clear the box; after that, it keeps what they type)
-      input.dispatchEvent(new Event('input', { bubbles: true })); // (the box grows to fit)
+      if (!free) typeInto(input, c ? c.prompt : '');
+      else if (!was) { stopTyping(input, false); show(input, ''); } // (just freed: clear the box; after that, it keeps what they type)
     }
 
     function mount() {
@@ -531,6 +556,9 @@
       mounted = true;
       try { if (window.parent !== window && window.parent.matchMedia('(max-width: 700px)').matches) document.documentElement.classList.add('demo-phone'); } catch {}
       input.rows = 3; // (where the box can't grow to fit its text: Safari)
+      // Send (or Enter) while the prompt is still typing: the whole prompt goes, not the part typed so far.
+      // (Capture phase on the document, ahead of the panel's own submit handler on the form.)
+      document.addEventListener('submit', (e) => { if (e.target === form) stopTyping(input, true); }, true);
       fill();
       later(resume);
     }

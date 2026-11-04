@@ -16,6 +16,7 @@
   const root = document.documentElement;
   const OPEN = 'trif-demo-open';
   const MIN = 'trif-demo-min';
+  const FOCUS = 'trif-demo-focus';
   const remember = (on) => { try { sessionStorage.setItem(OPEN, on ? '1' : ''); } catch {} };
   const phone = () => matchMedia('(max-width: 700px)').matches; // the sheet over the bottom of the page
   const topLayer = typeof tab.showPopover === 'function';
@@ -201,6 +202,8 @@
     if (d.type !== 'trif-demo:load') return;
     const names = (Array.isArray(d.mods) ? d.mods : []).filter((n) => typeof n === 'string' && /^[a-z0-9-]{1,40}$/.test(n));
     remember(true);
+    // A chat just made this mod: after the reload, on a phone, show the part of the page it changed.
+    try { sessionStorage.setItem(FOCUS, typeof d.made === 'string' && /^[a-z0-9-]{1,40}$/.test(d.made) ? d.made : ''); } catch {}
     location.replace(names.length ? `/?mods=${names.join(',')}` : '/');
   });
 
@@ -212,10 +215,41 @@
   // Escape closes the panel only from the demo's own controls: on the page, mods use it (Gravity puts the
   // page back with it).
   addEventListener('keydown', (e) => { if (e.key === 'Escape' && box && box.contains(document.activeElement) && !e.defaultPrevented) hide(); });
+  // On a phone, after the reload a chat's mod causes: the part of the page that mod changes, scrolled into
+  // the space above the sheet (mods that change the whole page, like Gravity or Tilt Card, have none).
+  const heading = (words) => [...document.querySelectorAll('h2')].find((h) => h.textContent.toLowerCase().includes(words))?.parentElement;
+  const FOCUS_ON = {
+    tagline: () => document.querySelector('.hero .tagline'),
+    robot: () => document.querySelector('svg.robot'),
+    jelly: () => document.querySelector('.hero .links'),
+    neon: () => document.querySelector('.hero h1'),
+    stickers: () => document.querySelector('.sb-row') || document.querySelector('.hero .small'),
+    fireworks: () => document.querySelector('.hero .links'),
+    checklist: () => heading('what you need'),
+    terminal: () => document.querySelector('[data-tb]') || heading('yours, on your computer'),
+    led: () => document.querySelector('footer'),
+  };
+  function showMade() {
+    let slug = '';
+    try { slug = sessionStorage.getItem(FOCUS) || ''; sessionStorage.removeItem(FOCUS); } catch {}
+    if (!slug || !phone() || !FOCUS_ON[slug]) return;
+    setTimeout(() => { // (once the mod has had its moment to change the page)
+      try {
+        const el = FOCUS_ON[slug]();
+        if (!el) return;
+        const r = el.getBoundingClientRect(), room = innerHeight; // (innerHeight stops at the sheet: see cut)
+        if (r.top >= 8 && r.bottom <= room - 8) return; // already in view
+        const top = r.height > room - 16 ? r.top - 8 : r.top - (room - r.height) / 2;
+        scrollBy({ top, behavior: 'smooth' });
+      } catch {}
+    }, 700);
+  }
+
   let reopen = false;
   try { reopen = sessionStorage.getItem(OPEN) === '1'; } catch {}
   if (reopen) {
     try { if (sessionStorage.getItem(MIN) === '1' && phone()) root.classList.add('demo-min'); } catch {}
     show();
+    if (document.readyState === 'complete') showMade(); else addEventListener('load', showMade, { once: true });
   }
 })();

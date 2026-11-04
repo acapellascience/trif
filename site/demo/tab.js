@@ -239,8 +239,7 @@
         if (!el) return;
         const r = el.getBoundingClientRect(), room = innerHeight; // (innerHeight stops at the sheet: see cut)
         if (r.top >= 8 && r.bottom <= room - 8) return; // already in view
-        const top = r.height > room - 16 ? r.top - 8 : r.top - (room - r.height) / 2;
-        scrollBy({ top, behavior: 'smooth' });
+        scrollBy({ top: r.top - 12, behavior: 'smooth' }); // (near the top: some, like Terminal Box, grow as they play)
       } catch {}
     }, 700);
   }

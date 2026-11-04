@@ -123,6 +123,9 @@ const DEMO_STYLE = `
     border-radius: 2px; background: var(--line); }
   .demo-close { font-size: 20px; padding: 0 12px; }
   html.demo-min .demo-panel { height: 35px; min-height: 0; }
+  /* room under the page for the sheet, so the end of it (the footer) can scroll up above the sheet */
+  html.demo-open body { padding-bottom: max(40vh, 260px); padding-bottom: max(40dvh, 260px); }
+  html.demo-open.demo-min body { padding-bottom: 35px; }
   /* (no room for it on a phone: the page says what the demo is) */
   .demo-panel-note { display: none; }
 }

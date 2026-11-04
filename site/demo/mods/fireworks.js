@@ -63,6 +63,8 @@
       if (!e.isTrusted) return;
       try {
         if (!ac) {
+          // (on an iPhone, sound plays as media, so the silent switch doesn't mute it: Safari's audio session)
+          try { if (navigator.audioSession) navigator.audioSession.type = 'playback'; } catch {}
           ac = new AudioContext();
           const comp = ac.createDynamicsCompressor();
           out = ac.createGain(); out.gain.value = 0.5;

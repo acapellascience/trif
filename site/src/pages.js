@@ -118,11 +118,11 @@ const DEMO_STYLE = `
   .demo-panel { inset: auto 0 0 0; width: auto; height: 40vh; height: 40dvh; min-height: 260px; border-left: 0; border-top: 1px solid var(--line);
     border-radius: 12px 12px 0 0; box-shadow: 0 -6px 24px rgb(0 0 0 / 0.15); transition: height .25s ease; }
   /* the top bar is the handle: swipe it down to tuck the sheet away, up (or tap it) to bring it back (demo.js) */
-  .demo-panel-top { position: relative; height: 44px; flex: none; padding: 0 6px 0 14px; touch-action: none; cursor: grab; user-select: none; -webkit-user-select: none; }
+  .demo-panel-top { position: relative; height: 34px; flex: none; padding: 4px 6px 0 14px; touch-action: none; cursor: grab; user-select: none; -webkit-user-select: none; }
   .demo-panel-top::before { content: ''; position: absolute; left: 50%; top: 6px; width: 36px; height: 4px; margin-left: -18px;
     border-radius: 2px; background: var(--line); }
-  .demo-close { font-size: 22px; padding: 4px 12px; }
-  html.demo-min .demo-panel { height: 45px; }
+  .demo-close { font-size: 20px; padding: 0 12px; }
+  html.demo-min .demo-panel { height: 35px; }
   /* (no room for it on a phone: the page says what the demo is) */
   .demo-panel-note { display: none; }
 }

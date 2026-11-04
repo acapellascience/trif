@@ -23,3 +23,15 @@ html.demo-phone :is(input, select, textarea) { font-size: 16px; }
    reaches its end (shim.js also stops swipes on the parts that don't scroll at all). */
 html, body { overscroll-behavior: none; }
 * { overscroll-behavior: contain; }
+
+/* On a phone the panel is a short sheet (40% of the screen): everything a little tighter, so the chat
+   keeps some room and the message box and Send stay in view. */
+html.demo-phone .bar { padding: 5px 8px 5px 12px; }
+html.demo-phone .mods { margin: 6px 10px 0; padding: 5px 10px; }
+html.demo-phone .mod-list { max-height: calc(34vh - 30px); }
+html.demo-phone .mod-list li { padding: 3px 0; }
+html.demo-phone .chat { padding: 8px 12px 2px; }
+html.demo-phone .composer { margin: 4px 10px 8px; }
+html.demo-phone .composer textarea { padding: 6px 40px 6px 10px; max-block-size: calc(3lh + 12px); }
+/* (the waiting prompt can't be focused, so it can be smaller than the 16px a typed message needs) */
+html.demo-phone.demo-guided #input { font-size: 14px; }

@@ -394,6 +394,8 @@
   const start = () => {
     if (ctx && (stale || ctx.state === 'closed')) { try { ctx.close(); } catch {} ctx = null; stale = false; }
     if (!ctx) {
+      // (on an iPhone, sound plays as media, so the silent switch doesn't mute it: Safari's audio session)
+      try { if (navigator.audioSession) navigator.audioSession.type = 'playback'; } catch {}
       ctx = new AudioContext();
       const comp = ctx.createDynamicsCompressor();
       master = ctx.createGain(); master.gain.value = 0.3;

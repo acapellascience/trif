@@ -1,12 +1,11 @@
 // The pages timsrobot.com serves. Plain HTML and a few small scripts (the report and waitlist forms', and the
 // home page's demo tab: demo.js); nothing loaded from anywhere else.
 
-// The colours, light and dark (the demo's window uses them too: demo.js).
+// The colours: dark only, whatever the visitor's system is set to. The home page's mods (neon, the rave, the
+// robot's glow) are made for a dark page, and the demo's panel matches it (demo/panel.css).
 export const TOKENS = `
-:root { color-scheme: light dark; --bg: #f6f6f4; --card: #fff; --fg: #1b1b1a; --muted: #6a6a66; --line: #ddddd8;
-  --accent: #1f9d6b; --on-accent: #fff; --bad: #b3261e; }
-@media (prefers-color-scheme: dark) { :root { --bg: #18181a; --card: #222225; --fg: #ececea; --muted: #a2a29d;
-  --line: #3a3a3e; --accent: #43c98d; --on-accent: #04291c; --bad: #ff8a80; } }
+:root { color-scheme: dark; --bg: #18181a; --card: #222225; --fg: #ececea; --muted: #a2a29d;
+  --line: #3a3a3e; --accent: #43c98d; --on-accent: #04291c; --bad: #ff8a80; }
 * { box-sizing: border-box; }`;
 
 const STYLE = `${TOKENS}

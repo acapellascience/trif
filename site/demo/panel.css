@@ -1,5 +1,12 @@
 /* The homepage demo's additions to the real side panel (shim.js adds the "Recorded chats" box). */
 
+/* Dark, like the page around it, whatever the visitor's system is set to: the panel's colours are
+   light-dark() pairs, which follow color-scheme. (Its one light-only rule, the sleeping robot's
+   opacity, is put back to the dark values.) */
+:root { color-scheme: dark; }
+body.site-off .bar-robot svg { opacity: 0.45; }
+body.site-off .bar-robot:hover:not([aria-busy="true"]) svg { opacity: 0.7; }
+
 /* The panel's own suggestions ("Hide distractions"…) would only get "this demo replays recordings":
    the recorded prompts below take their place. */
 #empty .chips { display: none; }

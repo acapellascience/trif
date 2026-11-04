@@ -16,6 +16,11 @@
   const FRICTION = 0.25;       // share of sliding speed lost per contact, per substep
   const FLOOR_FRICTION = 0.5;  // sliding on the floor: deceleration as a share of gravity
   const SUBSTEPS = 3, ITERS = 6;
+  // With the Tilt Card on, the card's tilt (--tc-ry / --tc-rx on <html>, up to ±24°) tips the pile: pieces
+  // slide toward where the card dips, the side the mouse is on, like the walker does (Living Robot). A
+  // hard push, and less floor friction the more it tips, so it shows once the card tilts noticeably.
+  const TILT_MAX = 24, TILT_PUSH = 1.2;  // full tilt: 1.2 × gravity, sideways
+  const tiltX = () => Math.max(-1, Math.min(1, (parseFloat(root.style.getPropertyValue('--tc-ry')) || 0) / TILT_MAX));
 
   // Elements whose whole box moves as one piece, without looking inside.
   const SOLID = new Set(['svg', 'img', 'video', 'canvas', 'picture', 'iframe', 'input', 'button', 'select', 'textarea', 'hr', 'a']);
@@ -399,6 +404,7 @@
   const HELD_MAX_SPEED = 2200; // px/s: how hard a held piece can hit things
   const simulate = (dt, stepsLeft = 1) => {
     const W = root.clientWidth, H = innerHeight;
+    const tilt = tiltX();
     const live = bodies.filter((b) => !b.ghost);
     for (const b of live) {
       if (b === held) continue;
@@ -410,6 +416,7 @@
         walkCmd.jump = 0;
       }
       b.vy += GRAVITY * dt;
+      if (!b.walker) b.vx += tilt * TILT_PUSH * GRAVITY * dt; // (the walker gets his from Living Robot)
       b.x += b.vx * dt; b.y += b.vy * dt; b.a += b.va * dt;
       b.support = false; b.onFloor = false;
     }
@@ -512,14 +519,14 @@
       if (b.walker) { b.a = 0; b.va = 0; b.supported = b.support; } // stays upright
       if (b === held || b.walker) continue;
       if (b.onFloor) { // sliding friction against the floor: a shoved piece slows to a stop, not ice-skates
-        const dv = FLOOR_FRICTION * GRAVITY * dt;
+        const dv = FLOOR_FRICTION * (1 - 0.7 * Math.abs(tilt)) * GRAVITY * dt;
         b.vx = Math.abs(b.vx) <= dv ? 0 : b.vx - Math.sign(b.vx) * dv;
       }
       if (b.support) {
         // Resting pieces settle flat (any side down) and stop spinning; rolling feeds the tilt.
         b.va = b.va * 0.7 + b.vx * 0.0006;
         b.a += (nearestQuarter(b.a) - b.a) * Math.min(1, 12 * dt);
-        if (Math.abs(b.vx) < 4) b.vx = 0;
+        if (Math.abs(b.vx) < 4 && Math.abs(tilt) < 0.15) b.vx = 0;
       }
       b.vx *= 0.999; b.va *= 0.995;
     }

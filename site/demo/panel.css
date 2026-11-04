@@ -13,9 +13,9 @@ body.site-off .bar-robot:hover:not([aria-busy="true"]) svg { opacity: 0.7; }
 
 body:is(.site-off, .no-site) .demo-done { display: none; }
 
-/* The message box holds the next recorded prompt, and can't be typed in or focused (on a phone: no
-   keyboard, no zooming in on it); Send replays it (shim.js). */
-#input { pointer-events: none; caret-color: transparent; }
+/* Until every recording has played, the message box holds the next recorded prompt and can't be typed in
+   or focused (on a phone: no keyboard, no zooming in on it); Send replays it (shim.js). */
+html.demo-guided #input { pointer-events: none; caret-color: transparent; }
 /* On a phone, everything the visitor could still focus (the settings) is at least 16px, or the phone zooms
    the page in on it. */
 html.demo-phone #input { font-size: 16px; }

@@ -482,6 +482,8 @@
   // phone, typing would bring up the keyboard and zoom the page in), and Send replays it. One after
   // another, in the order the panel lists the mods (the visitor's own, if they've dragged them): each
   // recording by the last of its mods in that order, and only once the ones it follows on from have played.
+  // Once they all have, the box is the visitor's to type in, and what they send gets the note saying what
+  // the real TRIF would do with it.
 
   const ui = (() => {
     let busy = null; // the run being replayed
@@ -499,9 +501,16 @@
       const input = document.getElementById('input');
       if (!input) return;
       const c = busy ? null : next();
-      input.value = c ? c.prompt : '';
+      const free = !busy && !c; // every recording played: the box is theirs
+      const was = !document.documentElement.classList.contains('demo-guided');
+      document.documentElement.classList.toggle('demo-guided', !free);
+      input.readOnly = !free;
+      input.tabIndex = free ? 0 : -1;
+      input.setAttribute('aria-label', free ? 'Message' : 'The next recorded prompt: Send replays it');
+      if (!free) input.value = c ? c.prompt : '';
+      else if (!was) input.value = ''; // (just freed: clear the box; after that, it keeps what they type)
       input.dispatchEvent(new Event('input', { bubbles: true })); // (the box grows to fit)
-      note.hidden = !!(c || busy);
+      note.hidden = !free;
     }
 
     function mount() {
@@ -509,10 +518,7 @@
       const input = document.getElementById('input');
       if (!form || !input || note) return;
       try { if (window.parent !== window && window.parent.matchMedia('(max-width: 700px)').matches) document.documentElement.classList.add('demo-phone'); } catch {}
-      input.readOnly = true;
-      input.tabIndex = -1;
       input.rows = 3; // (where the box can't grow to fit its text: Safari)
-      input.setAttribute('aria-label', 'The next recorded prompt: Send replays it');
       note = document.createElement('p');
       note.className = 'demo-note demo-done';
       note.textContent = DEMO.words.allReplayedNote;

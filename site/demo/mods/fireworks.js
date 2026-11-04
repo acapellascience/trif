@@ -190,7 +190,7 @@
           for (let i = 0; i < 1024; i++) curve[i] = Math.tanh((i / 511.5 - 1) * 3);
         }
         muteButton(); // (its first sound: the courtesy mute appears)
-        if (ac.state === 'suspended' && !isMuted()) ac.resume();
+        if (isMuted()) { if (ac.state === 'running') ac.suspend(); } else if (ac.state === 'suspended') ac.resume(); // (one made during a tap starts out running)
       } catch (err) { window.trif?.warn('firework sound failed', String(err)); }
     };
     // The courtesy mute: suspended while it's on, back on when it's off.

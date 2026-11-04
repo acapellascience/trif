@@ -207,7 +207,7 @@
             for (let i = 0; i < d.length; i++) d[i] = Math.random() * 2 - 1;
           }
           muteButton(); // (its first sound: the courtesy mute appears)
-          if (ac.state === 'suspended' && !isMuted()) ac.resume();
+          if (isMuted()) { if (ac.state === 'running') ac.suspend(); } else if (ac.state === 'suspended') ac.resume(); // (one made during a tap starts out running)
         } catch (err) { window.trif?.warn('robot sound failed', String(err)); }
       };
       // The courtesy mute: suspended while it's on, back on when it's off.

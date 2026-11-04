@@ -117,7 +117,7 @@
     frame.title = 'The TRIF side panel';
     const note = document.createElement('p');
     note.className = 'demo-panel-note';
-    note.textContent = 'Demo: the real TRIF side panel, playing example chats with a coding agent, sped up. They\'re based on real Claude Code sessions. The switches really run the mods on this page.';
+    note.textContent = 'Demo: based on real Claude Code sessions';
     box.append(top, frame, note);
     // Outside <body> (mods that take the page apart walk the body), and in the top layer where the browser
     // has it (popover), above mods' full-window layers.

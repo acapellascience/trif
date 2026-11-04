@@ -200,7 +200,27 @@
     if (!frame || e.origin !== location.origin || e.source !== frame.contentWindow) return;
     const d = e.data || {};
     if (d.type !== 'trif-demo:load') return;
-    const names = (Array.isArray(d.mods) ? d.mods : []).filter((n) => typeof n === 'string' && /^[a-z0-9-]{1,40}$/.test(n));
+    const ok = (n) => typeof n === 'string' && /^[a-z0-9-]{1,40}$/.test(n);
+    const names = (Array.isArray(d.mods) ? d.mods : []).filter(ok);
+    const made = ok(d.made) ? d.made : '';
+    // A chat made a mod (live): the page keeps what it has and only gains mods, so they're added to it as it
+    // is (their scripts, as the Worker serves them for ?mods=), with no reload: sound keeps playing and
+    // nothing flashes. The address follows, so a reload later gets the same page. Losing a mod, or anything
+    // other than a chat, reloads the page: mods can't take themselves back out.
+    const running = (new URLSearchParams(location.search).get('mods') || '').split(',').filter(ok);
+    if (d.live === true && running.every((n) => names.includes(n))) {
+      history.replaceState(history.state, '', `/?mods=${names.join(',')}${location.hash}`);
+      for (const n of names) {
+        if (running.includes(n)) continue;
+        const s = document.createElement('script');
+        s.src = `/demo/mods/${n}.js`;
+        s.async = false; // (in order, if there's more than one)
+        document.head.append(s);
+      }
+      if (made === 'shooter' && phone() && !minimized()) minimize(true); // (a game: the sheet out of the ship's way)
+      focusOn(made);
+      return;
+    }
     remember(true);
     // A chat just made this mod: after the reload, on a phone, show the part of the page it changed.
     try { sessionStorage.setItem(FOCUS, typeof d.made === 'string' && /^[a-z0-9-]{1,40}$/.test(d.made) ? d.made : ''); } catch {}
@@ -234,6 +254,9 @@
   function showMade() {
     let slug = '';
     try { slug = sessionStorage.getItem(FOCUS) || ''; sessionStorage.removeItem(FOCUS); } catch {}
+    focusOn(slug);
+  }
+  function focusOn(slug) {
     if (!slug || !phone() || !FOCUS_ON[slug]) return;
     setTimeout(() => { // (once the mod has had its moment to change the page)
       try {

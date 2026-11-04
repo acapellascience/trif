@@ -308,10 +308,10 @@
     } catch (e) { window.trif?.warn('robot rainbow failed', String(e)); return true; }
   };
   if (!rainbowRobot()) addEventListener('DOMContentLoaded', rainbowRobot);
-  // Another mod (Red robot) may reset the glow at DOMContentLoaded: set ours once more after load.
-  addEventListener('load', () => {
-    try { svgGlow(); } catch {}
-  });
+  // Another mod (Red robot) may reset the glow at DOMContentLoaded: set ours once more after load (or now,
+  // if the page has loaded already: the demo adds mods to the page as it is).
+  const afterLoad = () => { try { svgGlow(); } catch {} };
+  if (document.readyState === 'complete') setTimeout(afterLoad); else addEventListener('load', afterLoad);
   const svgGlow = () => {
     const m = document.querySelector('svg.robot filter feColorMatrix');
     if (m) m.setAttribute('values', '0 0 0 0 1  0 0 0 0 1  0 0 0 0 1  0 0 0 0.5 0');

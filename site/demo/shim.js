@@ -158,13 +158,15 @@
   const fileOf = (m) => `~/.trif/sites/${SITE}/${m.slug}.js`;
 
   /**
-   * Load the page again with the mods that run there now (tab.js does it; this panel comes back after).
-   * `made`: the mod a chat just made (on a phone, tab.js scrolls to the part of the page it changes).
+   * The page with the mods that run there now (tab.js does it). Usually a reload (this panel comes back
+   * after); `live`: the mods are only being added to, so tab.js adds them to the page as it is, without
+   * reloading (sound keeps playing, nothing flashes). `made`: the mod a chat just made (tab.js shows the
+   * part of the page it changes).
    */
-  function loadPage(made) {
+  function loadPage(made, live = false) {
     const mods = siteOn() ? state.mods.filter((m) => !disabled()[m.id]).map((m) => m.slug) : [];
     persist();
-    if (window.parent !== window) window.parent.postMessage({ type: 'trif-demo:load', mods, made: typeof made === 'string' ? made : null }, location.origin);
+    if (window.parent !== window) window.parent.postMessage({ type: 'trif-demo:load', mods, made: typeof made === 'string' ? made : null, live: live === true }, location.origin);
   }
 
   async function status() {
@@ -321,10 +323,8 @@
     });
     broadcast({ type: 'agentEvent', runId: run.runId, event: { kind: 'done', ok, result: '', changedFiles: [], costUsd: null, sessionId: null } });
     broadcast({ type: 'statusChanged' });
-    ui.finished(run, ok && !!run.recording); // (the page reloads with its mod: the next prompt comes after)
     // The mod the recorded session made: in the list (as the agent's new file would be), on, as it was at
-    // the end of the session, and the page reloaded with it (after a moment, so the reply has been seen
-    // arriving).
+    // the end of the session, and added to the page (after a moment, so the reply has been seen arriving).
     if (ok && run.recording) {
       const off = { ...disabled() };
       for (const slug of run.recording.mods) {
@@ -337,8 +337,9 @@
       state.mods.sort((a, b) => a.slug.localeCompare(b.slug));
       setNow({ disabled: off });
       state.replayed.add(run.recording.id);
-      later(() => loadPage(run.recording.mods[run.recording.mods.length - 1]), 1200);
+      later(() => loadPage(run.recording.mods[run.recording.mods.length - 1], true), 700);
     }
+    ui.finished(run); // (after it's counted as played: the next prompt is the next one)
   }
 
   // A run that was going when the page reloaded (a switch flipped mid-replay): carry on from where it was.
@@ -629,9 +630,9 @@
 
     return {
       replaying(run) { busy = run; follow(true); fill(); },
-      finished(run, reloading) {
+      finished(run) {
         if (busy === run) busy = null;
-        if (!reloading) fill(); // (else the box stays empty until the page is back: the played chat isn't counted yet)
+        fill();
         setTimeout(() => { if (!busy) follow(false); }, 1500);
       },
     };

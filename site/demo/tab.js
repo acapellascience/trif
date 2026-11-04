@@ -69,6 +69,28 @@
     while (shrunk.length) shrunk.pop()();
   }
   if (realTrif()) { standAside(); return; }
+
+  // Back on the plain home page (no ?mods=: its address typed again, a link back here) with demo mods
+  // switched on earlier in this tab: the page runs only the mods its address names, so ask for it again with
+  // the ones the panel says are on (shim.js keeps its switches in this tab's sessionStorage), as switching
+  // them does. Once per page: if the Worker leaves some out, the panel's switches still say what's on.
+  try {
+    const params = new URLSearchParams(location.search);
+    const saved = JSON.parse(sessionStorage.getItem('trif-demo-state') || 'null');
+    if (!params.has('mods') && saved?.v === 1) {
+      const off = saved.store?.disabled || {};
+      const siteOn = Array.isArray(saved.sitesOn) && saved.sitesOn.length > 0;
+      const on = siteOn ? (saved.mods || []).filter((s) => typeof s === 'string' && /^[a-z0-9-]{1,40}$/.test(s) && !off[`timsrobot.com/${s}`]) : [];
+      const want = on.join(',');
+      if (on.length && sessionStorage.getItem('trif-demo-synced') !== want) {
+        sessionStorage.setItem('trif-demo-synced', want);
+        location.replace(`/?mods=${want}${location.hash}`);
+        return;
+      }
+    }
+    if (params.has('mods')) sessionStorage.removeItem('trif-demo-synced');
+  } catch { /* no sessionStorage: nothing was remembered */ }
+
   new MutationObserver(() => { if (realTrif()) standAside(); }).observe(root, { attributes: true, attributeFilter: ['data-trif'] });
 
   function build() {

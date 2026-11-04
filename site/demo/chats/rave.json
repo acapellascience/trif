@@ -1,6 +1,6 @@
 {
- "id": "c14-rave",
- "prompt": "import rainbow rave from X. get creative.",
+ "id": "rave",
+ "prompt": "now import Rainbow Rave. get creative..",
  "secs": 182,
  "mods": [
   "rave"
@@ -9,7 +9,7 @@
  "messages": [
   {
    "role": "user",
-   "text": "import rainbow rave from X. get creative.",
+   "text": "now import Rainbow Rave. get creative..",
    "t": 0
   },
   {
@@ -49,67 +49,57 @@
   },
   {
    "role": "assistant",
-   "text": "I'm porting the X Rainbow Rave to this page and adding extras for it: a dancing robot in shades, wavy rainbow title, lasers, and a drop in the music.",
+   "text": "I'm porting your Rainbow Rave mod for x.com to this page and adding extras for it: a dancing robot in shades, wavy rainbow title, lasers, and a drop in the music.",
    "t": 46797
   },
   {
    "role": "tool",
-   "text": "ran trif new timsrobot.com rainbow-rave",
+   "text": "ran trif new timsrobot.com rave",
    "t": 47296
   },
   {
    "role": "tool",
-   "text": "read sites/timsrobot.com/rainbow-rave.js",
+   "text": "read sites/timsrobot.com/rave.js",
    "t": 48710
   },
   {
    "role": "tool",
-   "text": "wrote sites/timsrobot.com/rainbow-rave.js",
+   "text": "wrote sites/timsrobot.com/rave.js",
    "t": 137281
   },
   {
    "role": "tool",
-   "text": "ran cd ~/.trif/sites/timsrobot.com && python3 - <<'EOF' 2>/dev/null || echo nopython EOF true",
-   "t": 141553
-  },
-  {
-   "role": "assistant",
-   "text": "Fixing a few lines with edits instead.",
-   "t": 142716
-  },
-  {
-   "role": "tool",
-   "text": "edited sites/timsrobot.com/rainbow-rave.js",
+   "text": "edited sites/timsrobot.com/rave.js",
    "t": 143826
   },
   {
    "role": "tool",
-   "text": "edited sites/timsrobot.com/rainbow-rave.js",
+   "text": "edited sites/timsrobot.com/rave.js",
    "t": 145173
   },
   {
    "role": "tool",
-   "text": "edited sites/timsrobot.com/rainbow-rave.js",
+   "text": "edited sites/timsrobot.com/rave.js",
    "t": 146187
   },
   {
    "role": "tool",
-   "text": "edited sites/timsrobot.com/rainbow-rave.js",
+   "text": "edited sites/timsrobot.com/rave.js",
    "t": 147188
   },
   {
    "role": "tool",
-   "text": "edited sites/timsrobot.com/rainbow-rave.js",
+   "text": "edited sites/timsrobot.com/rave.js",
    "t": 149232
   },
   {
    "role": "tool",
-   "text": "edited sites/timsrobot.com/rainbow-rave.js",
+   "text": "edited sites/timsrobot.com/rave.js",
    "t": 150253
   },
   {
    "role": "tool",
-   "text": "ran trif check timsrobot.com/rainbow-rave && trif reload && trif errors; trif run 'return {letters: document.querySelectorAll(\"h1 .rr-l\").length, shades: !!document.querySelector(\".rr-shades\"), lasers: !!document.querySelector(\".rr-lasers\"), btns: document…",
+   "text": "ran trif check timsrobot.com/rave && trif reload && trif errors; trif run 'return {letters: document.querySelectorAll(\"h1 .rr-l\").length, shades: !!document.querySelector(\".rr-shades\"), lasers: !!document.querySelector(\".rr-lasers\"), btns: document…",
    "t": 154987
   },
   {
@@ -134,7 +124,7 @@
   },
   {
    "role": "assistant",
-   "text": "I brought Rainbow Rave over from your X mod and added extras made for this page. It's a new mod, `timsrobot.com/rainbow-rave`, and it's working now. I checked it in screenshots and it threw no errors.\n\n**From the X version:**\n- The rolling rainbow background with white text.\n- The trance loop you made with code, so no sound files.\n- The page zooms with the kick drum.\n- The play/pause and zoom buttons in the bottom right.\n\n**New for this page:**\n- 🕶️ **The robot** keeps changing colour and glowing. When the music starts it drops on a pair of shades, then head-bangs on every kick, tilting side to side.\n- 🌊 **The title** waves letter by letter and shimmers through colours.\n- 🔦 **Lasers:** two fans of white beams sweep up from the bottom corners and flash on each kick.\n- 🌈 **Buttons:** \"Get it\" is a moving rainbow, and GitHub gets a rainbow ring.\n- 🎶 **The track builds up:** six bars of full groove, a breakdown bar (the lasers dim and the kick drops out), then a bar of speeding-up snare with a rising whoosh. Then **the drop**: a crash, a white flash, the robot does a flip, and rainbow sparks burst out of it.\n\nThe music starts on your first click or key press. I couldn't play it from here, so I've only checked the sound and dancing in the code; I saw the shades and lasers by turning the \"music on\" look on directly. Have a listen and tell me what to tweak.",
+   "text": "I brought over your Rainbow Rave mod for x.com and added extras made for this page. It's a new mod here, **Rainbow Rave**, and it's working now. I checked it in screenshots and it threw no errors.\n\n**From the x.com version:**\n- The rolling rainbow background with white text.\n- The trance loop you made with code, so no sound files.\n- The page zooms with the kick drum.\n- The play/pause and zoom buttons in the bottom right.\n\n**New for this page:**\n- 🕶️ **The robot** keeps changing colour and glowing. When the music starts it drops on a pair of shades, then head-bangs on every kick, tilting side to side.\n- 🌊 **The title** waves letter by letter and shimmers through colours.\n- 🔦 **Lasers:** two fans of white beams sweep up from the bottom corners and flash on each kick.\n- 🌈 **Buttons:** \"Get it\" is a moving rainbow, and GitHub gets a rainbow ring.\n- 🎶 **The track builds up:** six bars of full groove, a breakdown bar (the lasers dim and the kick drops out), then a bar of speeding-up snare with a rising whoosh. Then **the drop**: a crash, a white flash, the robot does a flip, and rainbow sparks burst out of it.\n\nThe music starts on your first click or key press. I couldn't play it from here, so I've only checked the sound and dancing in the code; I saw the shades and lasers by turning the \"music on\" look on directly. Have a listen and tell me what to tweak.",
    "t": 181565
   }
  ]

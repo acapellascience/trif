@@ -175,7 +175,7 @@ async function main() {
       await page(`async () => { document.querySelector('.demo-tab').click(); }`);
       await sleep(2500);
       const p = await demoPanel(`(doc) => ({ rows: doc.querySelectorAll('#mod-list > li').length, value: doc.getElementById('input').value, ro: doc.getElementById('input').readOnly })`);
-      const first = require('../../site/demo/chats/c9-tagline.json');
+      const first = require('../../site/demo/chats/tagline.json');
       if (ORDER[0] !== 'tagline') throw new Error(`Tim's order starts with ${ORDER[0]}: update this check`);
       if (p.rows !== 0 || !p.ro || p.value !== (first.prompt ?? first.messages?.[0]?.text)) throw new Error(JSON.stringify(p));
       await shot('demo-panel');

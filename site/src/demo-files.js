@@ -195,7 +195,7 @@ export const MODS = [
    "tier": 0,
    "why": "render-only"
   },
-  "code": "// ==WebMod==\n// @name        Terminal Box\n// @description Turns a box into a terminal\n// @match       https://timsrobot.com/*\n// @match       https://*.timsrobot.com/*\n// @run-at      document-idle\n// @risk        0 render-only\n// @source      trif\n// @version     1\n// ==/WebMod==\n\n(() => {\n  // Mods can't read the disk, so the listing is written here. Add new mods to it as they're made.\n  const MODS = ['checklist.js', 'jelly.js', 'neon.js', 'rave.js', 'robot.js',\n    'stickers.js', 'tagline.js', 'terminal.js'];\n  const COMMAND = 'ls ~/.trif/sites/timsrobot.com';\n\n  const h2 = [...document.querySelectorAll('h2')].find((h) => /yours, on your computer/i.test(h.textContent));\n  const box = h2?.parentElement;\n  const para = h2?.nextElementSibling;\n  if (!box || !para || para.tagName !== 'P' || box.hasAttribute('data-tb')) return;\n  box.setAttribute('data-tb', '');\n\n  const style = document.createElement('style');\n  style.textContent = `\n    [data-tb] { background: #0e0f10 !important; border: 1px solid #2c2d30; border-radius: 10px;\n      box-shadow: 0 12px 30px rgba(0,0,0,.45); overflow: hidden; align-self: start;\n      font-family: ui-monospace, Menlo, monospace; font-size: 13.5px; line-height: 1.55; }\n    .tb-bar { display: flex; align-items: center; gap: 7px; padding: 8px 12px; background: #1f2023;\n      border-bottom: 1px solid #2c2d30; }\n    .tb-dot { width: 11px; height: 11px; border-radius: 50%; flex: none; }\n    [data-tb] .tb-bar h2 { flex: 1; margin: 0 !important; padding-right: 47px; text-align: center;\n      font: 600 12.5px -apple-system, system-ui, sans-serif !important; color: #a9a9a4 !important;\n      letter-spacing: 0 !important; }\n    .tb-body { padding: 12px 14px 14px; color: #d7d7d2; min-height: 11em; }\n    .tb-line { white-space: pre-wrap; word-break: break-all; }\n    .tb-ps { color: #3ddc84; }\n    .tb-path { color: #6cb6ff; }\n    .tb-ls { display: grid; grid-template-columns: repeat(auto-fill, minmax(16ch, 1fr)); gap: 0 1.5ch; margin: 2px 0 10px; }\n    .tb-ls span { color: #f0c674; opacity: 0; transition: opacity .15s; }\n    .tb-ls span.tb-on { opacity: 1; }\n    [data-tb] .tb-body p { margin: 0 0 10px !important; font: inherit !important; color: #d7d7d2 !important;\n      opacity: 0; transform: translateY(3px); transition: opacity .5s, transform .5s; }\n    [data-tb] .tb-body p.tb-on { opacity: 1; transform: none; }\n    [data-tb] .tb-body p code { color: #6cb6ff; background: none !important; border: 0 !important; padding: 0 !important; font: inherit; }\n    .tb-cursor { display: inline-block; width: .6em; height: 1.1em; vertical-align: -.2em; background: #d7d7d2;\n      animation: tb-blink 1s steps(1) infinite; }\n    .tb-typing .tb-cursor { animation: none; }\n    @keyframes tb-blink { 50% { opacity: 0; } }\n    @media (prefers-reduced-motion: reduce) { .tb-cursor { animation: none; } .tb-ls span, [data-tb] .tb-body p { transition: none; } }\n  `;\n  document.head.append(style);\n\n  const el = (tag, cls, text) => {\n    const e = document.createElement(tag);\n    if (cls) e.className = cls;\n    if (text) e.textContent = text;\n    return e;\n  };\n  const prompt = () => {\n    const line = el('div', 'tb-line');\n    line.append(el('span', 'tb-ps', 'you@mac'), ':', el('span', 'tb-path', '~'), '$ ');\n    return line;\n  };\n\n  // Title bar with the traffic lights; the real h2 moves into it, so headings stay as they were.\n  const bar = el('div', 'tb-bar');\n  for (const c of ['#ff5f57', '#febc2e', '#28c840']) { const d = el('span', 'tb-dot'); d.style.background = c; bar.append(d); }\n  bar.append(h2);\n\n  const body = el('div', 'tb-body');\n  const first = prompt();\n  const typed = el('span');\n  const cursor = el('span', 'tb-cursor');\n  first.append(typed, cursor);\n  const ls = el('div', 'tb-ls');\n  ls.setAttribute('aria-label', 'Mods: ' + MODS.join(', '));\n  for (const m of MODS) ls.append(el('span', '', m));\n  body.append(first, ls, para);\n  box.prepend(bar);\n  box.append(body);\n\n  const finish = () => {\n    typed.textContent = COMMAND;\n    ls.querySelectorAll('span').forEach((s) => s.classList.add('tb-on'));\n    para.classList.add('tb-on');\n    const last = prompt();\n    last.append(cursor);\n    body.append(last);\n    body.classList.remove('tb-typing');\n  };\n\n  const play = () => {\n    if (matchMedia('(prefers-reduced-motion: reduce)').matches) return finish();\n    body.classList.add('tb-typing');\n    let i = 0;\n    const type = () => {\n      try {\n        if (i < COMMAND.length) { typed.textContent += COMMAND[i++]; return setTimeout(type, 45 + Math.random() * 70); }\n        // \"Enter\": the listing appears file by file, then the paragraph, then a fresh prompt.\n        const spans = [...ls.querySelectorAll('span')];\n        spans.forEach((s, k) => setTimeout(() => s.classList.add('tb-on'), 250 + k * 70));\n        setTimeout(finish, 250 + spans.length * 70 + 350);\n      } catch (e) { window.trif?.warn('terminal', String(e)); finish(); }\n    };\n    setTimeout(type, 400);\n  };\n\n  // Start when the box scrolls into view, so it isn't over before anyone sees it.\n  if ('IntersectionObserver' in window) {\n    const io = new IntersectionObserver((entries) => {\n      if (entries.some((e) => e.isIntersecting)) { io.disconnect(); play(); }\n    }, { threshold: 0.4 });\n    io.observe(box);\n  } else finish();\n})();\n"
+  "code": "// ==WebMod==\n// @name        Terminal Box\n// @description Turns a box into a terminal\n// @match       https://timsrobot.com/*\n// @match       https://*.timsrobot.com/*\n// @run-at      document-idle\n// @risk        0 render-only\n// @source      trif\n// @version     1\n// ==/WebMod==\n\n(() => {\n  // Mods can't read the disk. On the home page's demo, the listing is the mods the demo has made so far\n  // (its side panel keeps them in this tab's sessionStorage; else the ones the page's address runs);\n  // anywhere else, the list written here.\n  const FALLBACK = ['checklist.js', 'jelly.js', 'neon.js', 'rave.js', 'robot.js', 'stickers.js', 'tagline.js', 'terminal.js'];\n  const demoMods = () => {\n    const ok = (s) => typeof s === 'string' && /^[a-z0-9-]{1,40}$/.test(s);\n    try {\n      const saved = JSON.parse(sessionStorage.getItem('trif-demo-state') || 'null');\n      if (saved?.v === 1 && Array.isArray(saved.mods) && saved.mods.filter(ok).length) return saved.mods.filter(ok);\n    } catch {}\n    const param = new URLSearchParams(location.search).get('mods');\n    return param ? param.split(',').filter(ok) : null;\n  };\n  const listed = demoMods();\n  const MODS = listed ? [...new Set([...listed, 'terminal'])].map((m) => `${m}.js`).sort() : FALLBACK;\n  const COMMAND = 'ls ~/.trif/sites/timsrobot.com';\n\n  const h2 = [...document.querySelectorAll('h2')].find((h) => /yours, on your computer/i.test(h.textContent));\n  const box = h2?.parentElement;\n  const para = h2?.nextElementSibling;\n  if (!box || !para || para.tagName !== 'P' || box.hasAttribute('data-tb')) return;\n  box.setAttribute('data-tb', '');\n\n  const style = document.createElement('style');\n  style.textContent = `\n    [data-tb] { background: #0e0f10 !important; border: 1px solid #2c2d30; border-radius: 10px;\n      box-shadow: 0 12px 30px rgba(0,0,0,.45); overflow: hidden; align-self: start;\n      font-family: ui-monospace, Menlo, monospace; font-size: 13.5px; line-height: 1.55; }\n    .tb-bar { display: flex; align-items: center; gap: 7px; padding: 8px 12px; background: #1f2023;\n      border-bottom: 1px solid #2c2d30; }\n    .tb-dot { width: 11px; height: 11px; border-radius: 50%; flex: none; }\n    [data-tb] .tb-bar h2 { flex: 1; margin: 0 !important; padding-right: 47px; text-align: center;\n      font: 600 12.5px -apple-system, system-ui, sans-serif !important; color: #a9a9a4 !important;\n      letter-spacing: 0 !important; }\n    .tb-body { padding: 12px 14px 14px; color: #d7d7d2; min-height: 11em; }\n    .tb-line { white-space: pre-wrap; word-break: break-all; }\n    .tb-ps { color: #3ddc84; }\n    .tb-path { color: #6cb6ff; }\n    .tb-ls { display: grid; grid-template-columns: repeat(auto-fill, minmax(16ch, 1fr)); gap: 0 1.5ch; margin: 2px 0 10px; }\n    .tb-ls span { color: #f0c674; opacity: 0; transition: opacity .15s; }\n    .tb-ls span.tb-on { opacity: 1; }\n    [data-tb] .tb-body p { margin: 0 0 10px !important; font: inherit !important; color: #d7d7d2 !important;\n      opacity: 0; transform: translateY(3px); transition: opacity .5s, transform .5s; }\n    [data-tb] .tb-body p.tb-on { opacity: 1; transform: none; }\n    [data-tb] .tb-body p code { color: #6cb6ff; background: none !important; border: 0 !important; padding: 0 !important; font: inherit; }\n    .tb-cursor { display: inline-block; width: .6em; height: 1.1em; vertical-align: -.2em; background: #d7d7d2;\n      animation: tb-blink 1s steps(1) infinite; }\n    .tb-typing .tb-cursor { animation: none; }\n    @keyframes tb-blink { 50% { opacity: 0; } }\n    @media (prefers-reduced-motion: reduce) { .tb-cursor { animation: none; } .tb-ls span, [data-tb] .tb-body p { transition: none; } }\n  `;\n  document.head.append(style);\n\n  const el = (tag, cls, text) => {\n    const e = document.createElement(tag);\n    if (cls) e.className = cls;\n    if (text) e.textContent = text;\n    return e;\n  };\n  const prompt = () => {\n    const line = el('div', 'tb-line');\n    line.append(el('span', 'tb-ps', 'you@mac'), ':', el('span', 'tb-path', '~'), '$ ');\n    return line;\n  };\n\n  // Title bar with the traffic lights; the real h2 moves into it, so headings stay as they were.\n  const bar = el('div', 'tb-bar');\n  for (const c of ['#ff5f57', '#febc2e', '#28c840']) { const d = el('span', 'tb-dot'); d.style.background = c; bar.append(d); }\n  bar.append(h2);\n\n  const body = el('div', 'tb-body');\n  const first = prompt();\n  const typed = el('span');\n  const cursor = el('span', 'tb-cursor');\n  first.append(typed, cursor);\n  const ls = el('div', 'tb-ls');\n  ls.setAttribute('aria-label', 'Mods: ' + MODS.join(', '));\n  for (const m of MODS) ls.append(el('span', '', m));\n  body.append(first, ls, para);\n  box.prepend(bar);\n  box.append(body);\n\n  const finish = () => {\n    typed.textContent = COMMAND;\n    ls.querySelectorAll('span').forEach((s) => s.classList.add('tb-on'));\n    para.classList.add('tb-on');\n    const last = prompt();\n    last.append(cursor);\n    body.append(last);\n    body.classList.remove('tb-typing');\n  };\n\n  const play = () => {\n    if (matchMedia('(prefers-reduced-motion: reduce)').matches) return finish();\n    body.classList.add('tb-typing');\n    let i = 0;\n    const type = () => {\n      try {\n        if (i < COMMAND.length) { typed.textContent += COMMAND[i++]; return setTimeout(type, 45 + Math.random() * 70); }\n        // \"Enter\": the listing appears file by file, then the paragraph, then a fresh prompt.\n        const spans = [...ls.querySelectorAll('span')];\n        spans.forEach((s, k) => setTimeout(() => s.classList.add('tb-on'), 250 + k * 70));\n        setTimeout(finish, 250 + spans.length * 70 + 350);\n      } catch (e) { window.trif?.warn('terminal', String(e)); finish(); }\n    };\n    setTimeout(type, 400);\n  };\n\n  // Start when the box scrolls into view, so it isn't over before anyone sees it.\n  if ('IntersectionObserver' in window) {\n    const io = new IntersectionObserver((entries) => {\n      if (entries.some((e) => e.isIntersecting)) { io.disconnect(); play(); }\n    }, { threshold: 0.4 });\n    io.observe(box);\n  } else finish();\n})();\n"
  },
  {
   "slug": "tilt",
@@ -216,8 +216,8 @@ export const MODS = [
 ];
 export const CHATS = [
  {
-  "id": "c9-tagline",
-  "prompt": "now the line under the title, \"Fix any website with your own coding agent.\" make it type itself out letter by letter like a terminal, with a blinking cursor, and when it finishes make \"your own coding agent\" glow green",
+  "id": "tagline",
+  "prompt": "make the subtitle appear typed like a terminal, with a little green cursor. \"your own coding agent\" glows green.",
   "secs": 136,
   "mods": [
    "tagline"
@@ -226,7 +226,7 @@ export const CHATS = [
   "messages": [
    {
     "role": "user",
-    "text": "now the line under the title, \"Fix any website with your own coding agent.\" make it type itself out letter by letter like a terminal, with a blinking cursor, and when it finishes make \"your own coding agent\" glow green",
+    "text": "make the subtitle appear typed like a terminal, with a little green cursor. \"your own coding agent\" glows green.",
     "t": 0
    },
    {
@@ -236,17 +236,17 @@ export const CHATS = [
    },
    {
     "role": "tool",
-    "text": "ran grep -l tagline sites/timsrobot.com/*.js; head -15 sites/timsrobot.com/neon-title.js; trif run 'const t=document.querySelector(\".tagline\"),s=getComputedStyle(t);return {font:s.fontFamily,color:s.color,size:s.fontSize,align:s.textAlign,co…",
+    "text": "ran grep -l tagline sites/timsrobot.com/*.js; trif run 'const t=document.querySelector(\".tagline\"),s=getComputedStyle(t);return {font:s.fontFamily,color:s.color,size:s.fontSize,align:s.textAlign,co…",
     "t": 38748
    },
    {
     "role": "tool",
-    "text": "wrote sites/timsrobot.com/typing-tagline.js",
+    "text": "wrote sites/timsrobot.com/tagline.js",
     "t": 68154
    },
    {
     "role": "tool",
-    "text": "ran trif check timsrobot.com/typing-tagline && trif reload >/dev/null; trif run 'await new Promise(r=>setTimeout(r,2000)); const p=document.querySelector(\".tagline\"); return {mid:p.querySelector(\".tt-typed\")?.textContent, vis…",
+    "text": "ran trif check timsrobot.com/tagline && trif reload >/dev/null; trif run 'await new Promise(r=>setTimeout(r,2000)); const p=document.querySelector(\".tagline\"); return {mid:p.querySelector(\".tt-typed\")?.textContent, vis…",
     "t": 73645
    },
    {
@@ -266,91 +266,15 @@ export const CHATS = [
    },
    {
     "role": "assistant",
-    "text": "The line under the title now types itself out like a terminal, and when it finishes, \"your own coding agent\" glows green.\n\n- **Typing:** A green block cursor blinks for a moment at an empty line, then the sentence types out letter by letter. The speed varies a little, with short pauses after spaces and the full stop. The cursor stays solid while typing and keeps blinking at the end of the line afterwards.\n- **Glow:** \"your own coding agent\" fades into a soft green neon glow that pulses gently.\n- **Layout:** Each letter appears where it ends up, so the centred line doesn't shift and nothing below it jumps.\n- **Reduced motion:** If your system asks for reduced motion, the full line shows straight away with a steady glow.\n\n**What I checked:** After a reload, I sampled the line every 0.6 s and it typed through (\"Fix \", \"Fix any webs\", … ) and finished in about 4.5 s. The finished line has the green glow, and the screenshot looks right next to your neon title. There were no mod errors. Your other mods don't touch this line.\n\nTo undo it, switch off **Typing tagline** in the side panel, or ask me to.",
+    "text": "The line under the title now types itself out like a terminal, and when it finishes, \"your own coding agent\" glows green.\n\n- **Typing:** A green block cursor blinks for a moment at an empty line, then the sentence types out letter by letter. The speed varies a little, with short pauses after spaces and the full stop. The cursor stays solid while typing and keeps blinking at the end of the line afterwards.\n- **Glow:** \"your own coding agent\" fades into a soft green neon glow that pulses gently.\n- **Layout:** Each letter appears where it ends up, so the centred line doesn't shift and nothing below it jumps.\n- **Reduced motion:** If your system asks for reduced motion, the full line shows straight away with a steady glow.\n\n**What I checked:** After a reload, I sampled the line every 0.6 s and it typed through (\"Fix \", \"Fix any webs\", … ) and finished in about 4.5 s. The finished line has the green glow, and the screenshot looks right. There were no mod errors.\n\nTo undo it, switch off **Typing Tagline** in the side panel, or ask me to.",
     "t": 115343
    }
   ]
  },
  {
-  "id": "c1-neon",
-  "prompt": "make the title glow like a neon sign, and have it flicker on when the page loads like an old tube warming up",
-  "secs": 65,
-  "mods": [
-   "neon"
-  ],
-  "after": [],
-  "messages": [
-   {
-    "role": "user",
-    "text": "make the title glow like a neon sign, and have it flicker on when the page loads like an old tube warming up",
-    "t": 0
-   },
-   {
-    "role": "tool",
-    "text": "ran ls sites/timsrobot.com 2>/dev/null; trif run 'const hs=[...document.querySelectorAll(\"h1,h2,header,[class*=title],[class*=logo]\")].slice(0,10).map(e=>({tag:e.tagName,id:e.id,cls:e.className,text:e.textContent.trim().slice(0,60),font:getC…",
-    "t": 4734
-   },
-   {
-    "role": "tool",
-    "text": "ran trif status; cat sites/timsrobot.com/rainbow-rave.js | head -60; trif run 'const h=document.querySelector(\"h1\"); return {n:document.querySelectorAll(\"h1\").length, html:h.outerHTML.slice(0,300), parent:h.parentElement.tagN…",
-    "t": 9946
-   },
-   {
-    "role": "tool",
-    "text": "ran trif status; trif run 'const h=document.querySelector(\"h1\"); return {n:document.querySelectorAll(\"h1\").length, html:h.outerHTML.slice(0,300), parent:h.parentElement.tagName, anim:getComputedStyle(h).animationName, ts:getC…",
-    "t": 11948
-   },
-   {
-    "role": "tool",
-    "text": "read sites/timsrobot.com/rainbow-rave.js",
-    "t": 12429
-   },
-   {
-    "role": "tool",
-    "text": "ran trif new timsrobot.com neon-title",
-    "t": 17985
-   },
-   {
-    "role": "tool",
-    "text": "wrote sites/timsrobot.com/neon-title.js",
-    "t": 34246
-   },
-   {
-    "role": "assistant",
-    "text": "Mod written; reloading the page to check it.",
-    "t": 35631
-   },
-   {
-    "role": "tool",
-    "text": "ran trif check timsrobot.com/neon-title && trif reload && trif run 'const h=document.querySelector(\"main h1\"); return {c:getComputedStyle(h).color, a:getComputedStyle(h).animationName}'; trif run 'await new Pr…",
-    "t": 38044
-   },
-   {
-    "role": "tool",
-    "text": "ran trif screenshot -o neon.png",
-    "t": 44830
-   },
-   {
-    "role": "tool",
-    "text": "read ~/Library/Application Support/TRIF/screenshots/timsrobot.com/neon.png",
-    "t": 46615
-   },
-   {
-    "role": "tool",
-    "text": "edited sites/timsrobot.com/neon-title.js",
-    "t": 49488
-   },
-   {
-    "role": "assistant",
-    "text": "The title \"Tim's Robot Internet Fixer\" now glows like a hot-pink neon sign.\n\n- **On page load:** the title starts out as dark, faint pink glass. After a moment it flickers on and off a few times over about 2½ seconds, then comes on for good and brightens to full glow.\n- **After that:** the glow hums very slightly. The \"o\" in \"Robot\" acts like a faulty tube and sputters out for a split second every 7 seconds or so.\n- **Reduced motion:** if your system is set to reduce motion, the title just glows steadily with no flicker.\n\nI reloaded the page and checked it. The title starts unlit, finishes lit with the glow, and the mod reported no errors. I took a screenshot to confirm how it looks. Your existing \"Rainbow Rave\" mod is still off, and I didn't touch it.\n\nTo undo it, switch off **Neon title** in the side panel, or ask me to.",
-    "t": 52895
-   }
-  ]
- },
- {
-  "id": "c3-robot",
-  "prompt": "bring the robot to life! its eyes should follow my mouse, it should blink every few seconds, and when I click it it should hop",
-  "secs": 79,
+  "id": "robot",
+  "prompt": "bring the robot to life! give it legs and have it walk around making occasional robot noises.",
+  "secs": 195,
   "mods": [
    "robot"
   ],
@@ -358,7 +282,7 @@ export const CHATS = [
   "messages": [
    {
     "role": "user",
-    "text": "bring the robot to life! its eyes should follow my mouse, it should blink every few seconds, and when I click it it should hop",
+    "text": "bring the robot to life! give it legs and have it walk around making occasional robot noises.",
     "t": 0
    },
    {
@@ -373,22 +297,22 @@ export const CHATS = [
    },
    {
     "role": "tool",
-    "text": "ran trif new timsrobot.com living-robot",
+    "text": "ran trif new timsrobot.com robot",
     "t": 19220
    },
    {
     "role": "tool",
-    "text": "wrote sites/timsrobot.com/living-robot.js",
+    "text": "wrote sites/timsrobot.com/robot.js",
     "t": 33625
    },
    {
     "role": "tool",
-    "text": "edited sites/timsrobot.com/living-robot.js",
+    "text": "edited sites/timsrobot.com/robot.js",
     "t": 36416
    },
    {
     "role": "tool",
-    "text": "ran trif check timsrobot.com/living-robot && trif reload && trif run 'const s=document.querySelector(\"svg.robot\"); dispatchEvent(new PointerEvent(\"pointermove\",{clientX:0,clientY:0})); await new Promise(r=>setTimeout(r,200));…",
+    "text": "ran trif check timsrobot.com/robot && trif reload && trif run 'const s=document.querySelector(\"svg.robot\"); dispatchEvent(new PointerEvent(\"pointermove\",{clientX:0,clientY:0})); await new Promise(r=>setTimeout(r,200));…",
     "t": 39312
    },
    {
@@ -408,15 +332,645 @@ export const CHATS = [
    },
    {
     "role": "assistant",
-    "text": "The robot on timsrobot.com now moves. I added a new mod, **Living robot**:\n\n- **Eyes follow your mouse.** They slide up to about 6 px toward the pointer, and their glow moves with them.\n- **It blinks** every 2.5–6 seconds, and sometimes blinks twice.\n- **Clicking it makes it hop.** It squashes, jumps about 38 px, lands, and bounces a little. It also blinks as it jumps. You can click again during a hop and it starts a new one.\n\n**What I checked after a reload:**\n- With a pretend mouse in the top-left corner, the eyes shifted up and to the left. You can see it in the screenshot.\n- In the middle of a click, the robot was 37 px up.\n- It blinked 6 times in 8 seconds. That's a bit more than usual because of the random double blinks.\n- There were no errors, and your neon title and jelly buttons still work.\n\nI tested with simulated mouse moves and clicks, so give it a real wiggle to see how it feels.\n\n**To undo it,** switch off \"Living robot\" in the side panel, or ask me to.",
+    "text": "The robot on timsrobot.com now moves. I added a new mod, **Living Robot**:\n\n- **Eyes follow your mouse.** They slide up to about 6 px toward the pointer, and their glow moves with them.\n- **It blinks** every 2.5–6 seconds, and sometimes blinks twice.\n- **Clicking it makes it hop.** It squashes, jumps about 38 px, lands, and bounces a little. It also blinks as it jumps. You can click again during a hop and it starts a new one.\n\n**What I checked after a reload:**\n- With a pretend mouse in the top-left corner, the eyes shifted up and to the left. You can see it in the screenshot.\n- In the middle of a click, the robot was 37 px up.\n- It blinked 6 times in 8 seconds. That's a bit more than usual because of the random double blinks.\n- There were no errors.\n\nI tested with simulated mouse moves and clicks, so give it a real wiggle to see how it feels.",
     "t": 66828
+   },
+   {
+    "role": "tool",
+    "text": "read sites/timsrobot.com/robot.js",
+    "t": 112219
+   },
+   {
+    "role": "assistant",
+    "text": "Now adding legs and a wander loop to the same mod.",
+    "t": 113719
+   },
+   {
+    "role": "tool",
+    "text": "edited sites/timsrobot.com/robot.js",
+    "t": 124936
+   },
+   {
+    "role": "tool",
+    "text": "edited sites/timsrobot.com/robot.js",
+    "t": 127965
+   },
+   {
+    "role": "tool",
+    "text": "ran sed -i '' 's|^// @description .*|// @description The hero robot has little legs and wanders the page; its eyes follow the mouse, it blinks, and hops when clicked|' sites/timsrobot.com/robot.js; trif check timsrobot.com/robot && trif reload…",
+    "t": 132947
+   },
+   {
+    "role": "tool",
+    "text": "edited sites/timsrobot.com/robot.js",
+    "t": 134969
+   },
+   {
+    "role": "tool",
+    "text": "ran trif check timsrobot.com/robot && trif reload && trif run 'const s=document.querySelector(\"svg.robot\"); const out=[]; for(let i=0;i<8;i++){ await new Promise(r=>setTimeout(r,1000)); out.push([s.style.translate, s.c…",
+    "t": 136913
+   },
+   {
+    "role": "tool",
+    "text": "read ~/Library/Application Support/TRIF/screenshots/timsrobot.com/2026-11-03T08-08-14.png",
+    "t": 153544
+   },
+   {
+    "role": "assistant",
+    "text": "The legs barely show: a gradient on a perfectly vertical line doesn't paint in SVG. I'm switching to a solid colour and making the legs longer.",
+    "t": 157443
+   },
+   {
+    "role": "tool",
+    "text": "edited sites/timsrobot.com/robot.js",
+    "t": 160050
+   },
+   {
+    "role": "tool",
+    "text": "ran trif reload && trif run 'const s=document.querySelector(\"svg.robot\"); s.dispatchEvent(new PointerEvent(\"pointerenter\")); await new Promise(r=>setTimeout(r,300)); s.dispatchEvent(new MouseEvent(\"click\",{bubbles:true})); aw…",
+    "t": 162795
+   },
+   {
+    "role": "tool",
+    "text": "read ~/Library/Application Support/TRIF/screenshots/timsrobot.com/2026-11-03T08-08-37.png",
+    "t": 176139
+   },
+   {
+    "role": "assistant",
+    "text": "The robot now has two little legs and wanders around the page on his own. I added this to the same **Living Robot** mod.\n\n- **Walking:** He picks a random spot in the part of the page you can see and walks there. His legs swing in turn, and he waddles a little as he goes. Then he rests for 1.5–5 seconds and sets off again. About one walk in four, he goes back to his home spot above the title.\n- **Looking:** While he walks, he looks where he's going. When you move the mouse, his eyes follow it again.\n- **Clicking:** He stops walking while your pointer is over him, so he's easy to click. Clicking still makes him hop.\n- He stays inside the visible page, walks over the text, and never adds a scrollbar.\n\n**What I checked after a reload:**\n- He set off on his own within a few seconds and walked at a steady pace, about 75 px a second.\n- The screenshot shows him mid-stride up in the top-left corner with his legs showing.\n- When I clicked him, he hopped, then went back to walking.\n- The mod threw no errors, and the page width stayed at 1280 px.\n\nThe legs didn't show on my first try because of an SVG drawing quirk, so I made them a solid green.\n\n**Two things I didn't check:**\n- I only tried it at the page's current size, which fits in one screen.\n- If you scroll, he picks places in the new view on his next walk, but he doesn't follow you while you scroll.\n\nTo undo it, switch off **Living Robot** in the side panel, or ask me to. That also turns off the eye-following, blinking and hopping.",
+    "t": 182844
    }
   ]
  },
  {
-  "id": "c5-fireworks",
-  "prompt": "fireworks! every click launches a firework from the bottom of the screen that bursts where I clicked. and the Get it button sprays confetti when I hover it",
-  "secs": 57,
+  "id": "jelly",
+  "prompt": "make the buttons wobble like jelly when I hover them",
+  "secs": 47,
+  "mods": [
+   "jelly"
+  ],
+  "after": [],
+  "messages": [
+   {
+    "role": "user",
+    "text": "make the buttons wobble like jelly when I hover them",
+    "t": 0
+   },
+   {
+    "role": "tool",
+    "text": "ran trif sweep --selector 'button, .btn, [role=button], input[type=submit]'; trif run '[...document.querySelectorAll(\".btn\")].map(b=>({t:b.textContent.trim(),cls:b.className,d:getComputedStyle(b).display,tr:getComputedStyle(b…",
+    "t": 10408
+   },
+   {
+    "role": "assistant",
+    "text": "Two buttons on the page. Now adding a jelly buttons mod.",
+    "t": 13794
+   },
+   {
+    "role": "tool",
+    "text": "ran trif new timsrobot.com jelly",
+    "t": 17153
+   },
+   {
+    "role": "tool",
+    "text": "wrote sites/timsrobot.com/jelly.js",
+    "t": 22599
+   },
+   {
+    "role": "tool",
+    "text": "ran trif check timsrobot.com/jelly && trif reload",
+    "t": 27215
+   },
+   {
+    "role": "assistant",
+    "text": "One last check on the button wobble:",
+    "t": 28822
+   },
+   {
+    "role": "tool",
+    "text": "ran trif run 'const b=document.querySelector(\".btn\"); b.style.animation=\"jb-jelly 0.7s ease-out both\"; await new Promise(r=>setTimeout(r,170)); const t=getComputedStyle(b).transform; b.style.animation=\"\"; return t'",
+    "t": 30081
+   },
+   {
+    "role": "assistant",
+    "text": "Done: when you hover over \"Get it\" or \"GitHub\", the button squashes, stretches and settles back, like jelly. Those are the only two buttons on the page.\n\n**What I checked after reloading:** I can't hover the mouse from here, so I tested the wobble by running its animation on \"Get it\" directly, and it squashed as expected. I haven't seen a real hover myself. The mod reported no errors.\n\nIf your system is set to reduce motion, the wobble is switched off.\n\nThe wobble is a new mod. To undo it, switch off **Jelly Buttons** in the side panel, or ask me to.",
+    "t": 34868
+   }
+  ]
+ },
+ {
+  "id": "gravity",
+  "prompt": "gravity mode! when i press G make everything fall down and pile up at the bottom. let me grab things and throw them. robot should walk around and hop :)",
+  "secs": 248,
+  "mods": [
+   "gravity"
+  ],
+  "after": [],
+  "messages": [
+   {
+    "role": "user",
+    "text": "gravity mode! when i press G make everything fall down and pile up at the bottom. let me grab things and throw them. robot should walk around and hop :)",
+    "t": 0
+   },
+   {
+    "role": "tool",
+    "text": "ran trif mods; ls sites/timsrobot.com 2>/dev/null; trif run 'return {n: document.querySelectorAll(\"body *\").length, w: innerWidth, h: innerHeight, sh: document.documentElement.scrollHeight, top: [...document.body.children].map(e=>e.tagName+\"…",
+    "t": 4656
+   },
+   {
+    "role": "tool",
+    "text": "ran trif run 'const out=[]; const walk=(e,d)=>{ if(d>7) return; for (const c of e.children){ const r=c.getBoundingClientRect(); out.push(\" \".repeat(d)+c.tagName.toLowerCase()+(c.id?\"#\"+c.id:\"\")+(c.className&&typeof c.className==\"string\"?\".\"+…",
+    "t": 11292
+   },
+   {
+    "role": "tool",
+    "text": "read ~/Library/Application Support/TRIF/screenshots/timsrobot.com/2026-11-03T08-10-23.png",
+    "t": 13135
+   },
+   {
+    "role": "tool",
+    "text": "read sites/timsrobot.com/robot.js",
+    "t": 13444
+   },
+   {
+    "role": "tool",
+    "text": "searched style\\.|important|setProperty",
+    "t": 77952
+   },
+   {
+    "role": "tool",
+    "text": "ran trif new timsrobot.com gravity",
+    "t": 81301
+   },
+   {
+    "role": "assistant",
+    "text": "I'm writing the gravity mod now: each word-block, letter, button and the robot become physics bodies.",
+    "t": 82901
+   },
+   {
+    "role": "tool",
+    "text": "wrote sites/timsrobot.com/gravity.js",
+    "t": 121646
+   },
+   {
+    "role": "tool",
+    "text": "ran trif check timsrobot.com/gravity && trif reload && trif run 'dispatchEvent(new KeyboardEvent(\"keydown\",{key:\"g\",bubbles:true})); await new Promise(r=>setTimeout(r,4000)); const b=[...document.querySelectorAll(\"[data-…",
+    "t": 126589
+   },
+   {
+    "role": "tool",
+    "text": "read ~/Library/Application Support/TRIF/screenshots/timsrobot.com/2026-11-03T08-12-23.png",
+    "t": 134771
+   },
+   {
+    "role": "tool",
+    "text": "ran trif run 'const c=document.querySelector(\".nt-ch\"); const cs=getComputedStyle(c); return {d:getComputedStyle(c.parentNode).display, dc:cs.display, an:cs.animationName, h1an:getComputedStyle(c.closest(\"h1\")).animationName}'",
+    "t": 144882
+   },
+   {
+    "role": "tool",
+    "text": "edited sites/timsrobot.com/gravity.js",
+    "t": 148852
+   },
+   {
+    "role": "tool",
+    "text": "edited sites/timsrobot.com/gravity.js",
+    "t": 150327
+   },
+   {
+    "role": "assistant",
+    "text": "Now making the pile solid (heavy pieces were sinking through lighter ones).",
+    "t": 152170
+   },
+   {
+    "role": "tool",
+    "text": "edited sites/timsrobot.com/gravity.js",
+    "t": 162435
+   },
+   {
+    "role": "tool",
+    "text": "ran trif check timsrobot.com/gravity && trif reload && trif run 'dispatchEvent(new KeyboardEvent(\"keydown\",{key:\"g\",bubbles:true})); await new Promise(r=>setTimeout(r,5000)); const b=[...document.querySelectorAll(\"[data-…",
+    "t": 169161
+   },
+   {
+    "role": "tool",
+    "text": "read ~/Library/Application Support/TRIF/screenshots/timsrobot.com/2026-11-03T08-13-06.png",
+    "t": 176460
+   },
+   {
+    "role": "assistant",
+    "text": "Piles up with no overlaps. Adding a livelier tumble at the start, then testing grab/throw and putting it back.",
+    "t": 179728
+   },
+   {
+    "role": "tool",
+    "text": "edited sites/timsrobot.com/gravity.js",
+    "t": 181925
+   },
+   {
+    "role": "tool",
+    "text": "ran trif reload && trif run 'const w=ms=>new Promise(r=>setTimeout(r,ms)); dispatchEvent(new KeyboardEvent(\"keydown\",{key:\"g\",bubbles:true})); await w(5000); const svg=document.querySelector(\"svg.robot\"); let r=svg.getBoundin…",
+    "t": 188169
+   },
+   {
+    "role": "assistant",
+    "text": "Grab works, but the throw lost its speed (velocity was measured per physics substep). Fixing it to use the pointer's recent motion.",
+    "t": 202005
+   },
+   {
+    "role": "tool",
+    "text": "ran grep -n \"b.vx = (nx\\|pointermove', (e)\\|const sp = Math.hypot\" sites/timsrobot.com/gravity.js",
+    "t": 203195
+   },
+   {
+    "role": "tool",
+    "text": "edited sites/timsrobot.com/gravity.js",
+    "t": 207482
+   },
+   {
+    "role": "tool",
+    "text": "edited sites/timsrobot.com/gravity.js",
+    "t": 210287
+   },
+   {
+    "role": "tool",
+    "text": "ran trif check timsrobot.com/gravity && trif reload && trif run 'const w=ms=>new Promise(r=>setTimeout(r,ms)); dispatchEvent(new KeyboardEvent(\"keydown\",{key:\"g\",bubbles:true})); await w(4000); const svg=document.querySe…",
+    "t": 215919
+   },
+   {
+    "role": "tool",
+    "text": "read ~/Library/Application Support/TRIF/screenshots/timsrobot.com/2026-11-03T08-13-57.png",
+    "t": 227415
+   },
+   {
+    "role": "tool",
+    "text": "ran trif run 'dispatchEvent(new KeyboardEvent(\"keydown\",{key:\"Escape\",bubbles:true})); await new Promise(r=>setTimeout(r,1000)); return {left:document.querySelectorAll(\"[data-gm-body],[data-gm-bare]\").length, on:document.documentElement.hasA…",
+    "t": 231143
+   },
+   {
+    "role": "assistant",
+    "text": "Gravity mode is ready on timsrobot.com. Press **G** and the page collapses.\n\n- **Falling:** the paragraphs, list items, headings, buttons, footer links, the robot and each letter of the title fall separately. They tumble, bounce and pile up at the bottom of the screen. Pieces that land on their side stay that way.\n- **Grab and throw:** drag any piece and let go while it's moving to fling it. Pieces bounce off the sides of the window. While gravity is on, links don't open when you click them, so you can grab buttons safely.\n- **G or Esc again:** everything flies back into place.\n\n**What I checked on the live page:** 38 pieces fell, including 23 title letters. After they settled, none overlapped and none sank below the bottom. I grabbed the robot and threw it with simulated mouse movements: it flew off, hit the left wall and landed on the pile. Clicking \"Get it\" didn't navigate. After pressing Esc the page was back to normal, and no errors were logged. Your other timsrobot.com mods (living robot, jelly buttons) still work alongside it. I didn't try it with a real mouse or on a scrolled-down page; only what's on screen when you press G falls.\n\nTo undo it, switch off **Press G for Gravity** in the side panel, or ask me to.",
+    "t": 237641
+   }
+  ]
+ },
+ {
+  "id": "neon",
+  "prompt": "make the title flicker and glow like a neon sign on startup, and give it like a wave effect",
+  "secs": 112,
+  "mods": [
+   "neon"
+  ],
+  "after": [],
+  "messages": [
+   {
+    "role": "user",
+    "text": "make the title flicker and glow like a neon sign on startup, and give it like a wave effect",
+    "t": 0
+   },
+   {
+    "role": "tool",
+    "text": "ran ls sites/timsrobot.com 2>/dev/null; trif run 'const hs=[...document.querySelectorAll(\"h1,h2,header,[class*=title],[class*=logo]\")].slice(0,10).map(e=>({tag:e.tagName,id:e.id,cls:e.className,text:e.textContent.trim().slice(0,60),font:getC…",
+    "t": 4734
+   },
+   {
+    "role": "tool",
+    "text": "ran trif status; trif run 'const h=document.querySelector(\"h1\"); return {n:document.querySelectorAll(\"h1\").length, html:h.outerHTML.slice(0,300), parent:h.parentElement.tagName, anim:getComputedStyle(h).animationName, ts:getC…",
+    "t": 11948
+   },
+   {
+    "role": "tool",
+    "text": "ran trif new timsrobot.com neon",
+    "t": 17985
+   },
+   {
+    "role": "tool",
+    "text": "wrote sites/timsrobot.com/neon.js",
+    "t": 34246
+   },
+   {
+    "role": "assistant",
+    "text": "Mod written; reloading the page to check it.",
+    "t": 35631
+   },
+   {
+    "role": "tool",
+    "text": "ran trif check timsrobot.com/neon && trif reload && trif run 'const h=document.querySelector(\"main h1\"); return {c:getComputedStyle(h).color, a:getComputedStyle(h).animationName}'; trif run 'await new Pr…",
+    "t": 38044
+   },
+   {
+    "role": "tool",
+    "text": "ran trif screenshot -o neon.png",
+    "t": 44830
+   },
+   {
+    "role": "tool",
+    "text": "read ~/Library/Application Support/TRIF/screenshots/timsrobot.com/neon.png",
+    "t": 46615
+   },
+   {
+    "role": "tool",
+    "text": "edited sites/timsrobot.com/neon.js",
+    "t": 49488
+   },
+   {
+    "role": "assistant",
+    "text": "The title \"Tim's Robot Internet Fixer\" now glows like a hot-pink neon sign.\n\n- **On page load:** the title starts out as dark, faint pink glass. After a moment it flickers on and off a few times over about 2½ seconds, then comes on for good and brightens to full glow.\n- **After that:** the glow hums very slightly. The \"o\" in \"Robot\" acts like a faulty tube and sputters out for a split second every 7 seconds or so.\n- **Reduced motion:** if your system is set to reduce motion, the title just glows steadily with no flicker.\n\nI reloaded the page and checked it. The title starts unlit, finishes lit with the glow, and the mod reported no errors. I took a screenshot to confirm how it looks.",
+    "t": 52895
+   },
+   {
+    "role": "assistant",
+    "text": "Now updating the title mod with the wave.",
+    "t": 69886
+   },
+   {
+    "role": "tool",
+    "text": "edited sites/timsrobot.com/neon.js",
+    "t": 73408
+   },
+   {
+    "role": "tool",
+    "text": "edited sites/timsrobot.com/neon.js",
+    "t": 74748
+   },
+   {
+    "role": "tool",
+    "text": "edited sites/timsrobot.com/neon.js",
+    "t": 80330
+   },
+   {
+    "role": "tool",
+    "text": "edited sites/timsrobot.com/neon.js",
+    "t": 81469
+   },
+   {
+    "role": "tool",
+    "text": "ran trif check timsrobot.com/neon && trif reload && trif run 'await new Promise(r=>setTimeout(r,3200)); const h=document.querySelector(\"main h1\"); const chs=[...h.querySelectorA…",
+    "t": 86085
+   },
+   {
+    "role": "tool",
+    "text": "ran trif run 'return [...document.querySelectorAll(\"main h1 .nt-ch\")].map(c=>Math.round(c.getBoundingClientRect().top)).join(\" \")'; trif screenshot -o wave.png",
+    "t": 93573
+   },
+   {
+    "role": "tool",
+    "text": "read ~/Library/Application Support/TRIF/screenshots/timsrobot.com/wave.png",
+    "t": 95334
+   },
+   {
+    "role": "assistant",
+    "text": "I added the wave. Each letter of the title bobs up and down in turn, so a wave rolls across it from left to right. The neon flicker at load and the sputtering \"o\" in \"Robot\" still work. The title can still wrap between words if the page gets narrow, but never in the middle of a word. Screen readers still read it as the normal title.\n\n**What I checked after reloading:** I measured the letter heights and saw the wave travelling across the title, and confirmed it in a screenshot. The mod reported no errors.\n\nIf your system is set to reduce motion, the wave is switched off.\n\nThe wave is part of the **Neon Title** mod, with the glow. To undo it, switch off **Neon Title** in the side panel, or ask me to.",
+    "t": 100121
+   }
+  ]
+ },
+ {
+  "id": "stickers",
+  "prompt": "Make the \"Free and open source\" line be little sticker badges that pop in one after the other",
+  "secs": 166,
+  "mods": [
+   "stickers"
+  ],
+  "after": [],
+  "messages": [
+   {
+    "role": "user",
+    "text": "Make the \"Free and open source\" line be little sticker badges that pop in one after the other",
+    "t": 0
+   },
+   {
+    "role": "tool",
+    "text": "ran ls sites/timsrobot.com 2>/dev/null; trif run 'const w=document.evaluate(\"//*[contains(text(),\\\"Free and open source\\\")]\",document,null,9,null).singleNodeValue; return {tag:w?.tagName, cls:w?.className, html:w?.outerHTML.slice(0,500), par…",
+    "t": 28660
+   },
+   {
+    "role": "tool",
+    "text": "ran grep -l \"small\\|hero\" sites/timsrobot.com/*.js; trif status | tail -8; trif new timsrobot.com stickers",
+    "t": 59559
+   },
+   {
+    "role": "tool",
+    "text": "ran trif status | tail -8; trif new timsrobot.com stickers",
+    "t": 64245
+   },
+   {
+    "role": "tool",
+    "text": "searched \\.small|p\\.small",
+    "t": 65055
+   },
+   {
+    "role": "tool",
+    "text": "wrote sites/timsrobot.com/stickers.js",
+    "t": 81003
+   },
+   {
+    "role": "tool",
+    "text": "ran trif check timsrobot.com/stickers && trif reload && trif run 'await new Promise(r=>setTimeout(r,1500)); return [...document.querySelectorAll(\".sb-badge\")].map(b=>[b.textContent,getComputedStyle(b).opacity])' && trif errors && trif screenshot --t…",
+    "t": 85035
+   },
+   {
+    "role": "assistant",
+    "text": "Mod's written and loaded; checking it on the page now.",
+    "t": 126151
+   },
+   {
+    "role": "tool",
+    "text": "ran trif run '[...document.querySelectorAll(\".sb-badge\")].map(b=>[b.textContent,getComputedStyle(b).opacity])'; trif errors; trif screenshot",
+    "t": 127175
+   },
+   {
+    "role": "tool",
+    "text": "read ~/Library/Application Support/TRIF/screenshots/timsrobot.com/2026-11-03T10-10-44.png",
+    "t": 144553
+   },
+   {
+    "role": "assistant",
+    "text": "The line under the tagline is now three tilted stickers: **Free & open source** (green), **In beta** (yellow) and **For Mac** (pink). Each has a white border and a drop shadow. When the page loads they pop in one after another with a small bounce, and each one straightens and grows a little when you hover over it.\n\n- **What I checked:** after a reload, all three badges showed up on the page, the mod threw no errors, and a screenshot showed them as intended. The robot that was partly covering the first badge in the screenshot is your \"Living Robot\" mod walking past.\n- **Accessibility:** screen readers still read the original sentence. If your Mac is set to reduce motion, the badges appear without the animation.\n\nTo undo it, switch off **Sticker Badges** in the side panel, or ask me to.",
+    "t": 150136
+   }
+  ]
+ },
+ {
+  "id": "shooter",
+  "prompt": "space shooter! gimme a ship that flies around using arrow keys and blasts the words off the page. robot is the enemy and chases you. make it drop bombs in gravity mode and explode stuff, and add sound effects!",
+  "secs": 233,
+  "mods": [
+   "shooter"
+  ],
+  "after": [],
+  "messages": [
+   {
+    "role": "user",
+    "text": "space shooter! gimme a ship that flies around using arrow keys and blasts the words off the page. robot is the enemy and chases you. make it drop bombs in gravity mode and explode stuff, and add sound effects!",
+    "t": 0
+   },
+   {
+    "role": "tool",
+    "text": "ran ls sites/timsrobot.com 2>/dev/null; trif run 'return {title: document.title, n: document.body.innerText.length, w: innerWidth, h: innerHeight, bg: getComputedStyle(document.body).backgroundColor, sh: document.documentElement.scrollHeight}'",
+    "t": 5057
+   },
+   {
+    "role": "tool",
+    "text": "ran trif status | tail -15; trif new timsrobot.com shooter",
+    "t": 16987
+   },
+   {
+    "role": "tool",
+    "text": "searched keydown|key ===|addEventListener\\('key|@description",
+    "t": 19947
+   },
+   {
+    "role": "tool",
+    "text": "wrote sites/timsrobot.com/shooter.js",
+    "t": 63213
+   },
+   {
+    "role": "tool",
+    "text": "ran trif check timsrobot.com/shooter && trif reload && trif run 'await new Promise(r=>setTimeout(r,1500)); const words=[...document.querySelectorAll(\".tss-w\")]; const t=words.find(w=>{const r=w.getBoundingClientRect(); return r.top>50&&r.width>20}); const r=t.getBo…",
+    "t": 69163
+   },
+   {
+    "role": "assistant",
+    "text": "Shooting works: 120 words became targets, and a test shot blew up \"Firefox\" and \"model\". Next I'm taking a screenshot to check how it looks.",
+    "t": 75875
+   },
+   {
+    "role": "tool",
+    "text": "ran trif run 'const k=(t,key)=>dispatchEvent(new KeyboardEvent(t,{key})); k(\"keydown\",\" \"); await new Promise(r=>setTimeout(r,600)); k(\"keyup\",\" \"); await new Promise(r=>setTimeout(r,250)); return 1' && trif screenshot -o shooter.png",
+    "t": 77342
+   },
+   {
+    "role": "tool",
+    "text": "read ~/Library/Application Support/TRIF/screenshots/timsrobot.com/shooter.png",
+    "t": 80365
+   },
+   {
+    "role": "tool",
+    "text": "ran trif run 'dispatchEvent(new KeyboardEvent(\"keydown\",{key:\"r\"})); return document.querySelectorAll(\"[data-tss-dead]\").length'",
+    "t": 83242
+   },
+   {
+    "role": "assistant",
+    "text": "The page is now a space shooter. A small glowing ship sits at the bottom of the screen.\n\n- **← →** fly the ship left and right.\n- **Space** fires twin pink lasers. Hold it down for rapid fire.\n- **Any word you hit** blows up. Its letters spin out in the word's own font and colour, fall, bounce off the bottom and fade. There's a small burst of sparks too.\n- **R** brings all the words back. A small readout in the bottom-left corner counts the words you've blasted.\n\n**What I checked:** The page loads without errors and all 120 words on it can be shot. In a test I flew to a word and fired: \"Firefox\" and \"model\" blew up and the counter went up. A screenshot shows the ship, the counter and letters flying. I put the test words back afterwards.\n\n**Things to know:**\n- Your neon title mod splits the big title into separate letters, so you shoot those one letter at a time.\n- The arrow keys and space no longer scroll the page. They still work normally while you're typing in a text box.",
+    "t": 87972
+   },
+   {
+    "role": "tool",
+    "text": "ran trif status | grep -A1 'this page'; grep -n \"ship\\.\\|ship =\\|fillRect(l\\|spark\\|14; i++\\|H - 14\" sites/timsrobot.com/shooter.js",
+    "t": 111879
+   },
+   {
+    "role": "assistant",
+    "text": "Now the edits: scale the ship ×3, fatten lasers, bigger blasts with a shockwave ring, and screen shake.",
+    "t": 115177
+   },
+   {
+    "role": "tool",
+    "text": "read sites/timsrobot.com/shooter.js",
+    "t": 116249
+   },
+   {
+    "role": "tool",
+    "text": "searched translate\\s*[:=]|style\\.translate|documentElement\\.style",
+    "t": 121500
+   },
+   {
+    "role": "tool",
+    "text": "edited sites/timsrobot.com/shooter.js",
+    "t": 128150
+   },
+   {
+    "role": "tool",
+    "text": "edited sites/timsrobot.com/shooter.js",
+    "t": 134446
+   },
+   {
+    "role": "tool",
+    "text": "edited sites/timsrobot.com/shooter.js",
+    "t": 136448
+   },
+   {
+    "role": "tool",
+    "text": "edited sites/timsrobot.com/shooter.js",
+    "t": 138544
+   },
+   {
+    "role": "tool",
+    "text": "edited sites/timsrobot.com/shooter.js",
+    "t": 139748
+   },
+   {
+    "role": "tool",
+    "text": "edited sites/timsrobot.com/shooter.js",
+    "t": 147600
+   },
+   {
+    "role": "tool",
+    "text": "edited sites/timsrobot.com/shooter.js",
+    "t": 150058
+   },
+   {
+    "role": "tool",
+    "text": "ran trif check timsrobot.com/shooter && trif reload && trif run 'await new Promise(r=>setTimeout(r,1200)); const k=(t,key)=>dispatchEvent(new KeyboardEvent(t,{key})); const shakes=new Set(); k(\"keydown\",\" \"); for(let i=0;i<8;i++){await new Promise(r=>setTimeout(r,6…",
+    "t": 154817
+   },
+   {
+    "role": "tool",
+    "text": "read ~/Library/Application Support/TRIF/screenshots/timsrobot.com/shooter2.png",
+    "t": 161488
+   },
+   {
+    "role": "tool",
+    "text": "ran trif run 'dispatchEvent(new KeyboardEvent(\"keydown\",{key:\"r\"})); return document.querySelectorAll(\"[data-tss-dead]\").length'",
+    "t": 163456
+   },
+   {
+    "role": "assistant",
+    "text": "I made the changes and tested them on the page.\n\n- **Ship:** 3 times bigger. The two lasers now fire from its wingtips.\n- **Lasers:** fat glowing pink bolts with a white-hot core. They're wider, so they also hit words that are only partly under them.\n- **Hits:** each word now blows up much bigger:\n  - a white flash and an orange shockwave ring that grows bigger for longer words\n  - about 70 coloured sparks\n  - the word's letters fly out much harder and swell to up to 3× their size as they tumble\n- **Screen shake:** the whole page jolts with each hit and settles in about a third of a second. Several quick hits shake it harder, up to a set limit.\n\n**What I checked:** I reloaded the page and fired a burst. Three words blew up, the page shook by a few pixels, and it settled back to normal afterwards. A screenshot shows the big ship, the fat bolts, the rings and the sparks. No errors came up, and I put the test words back.\n\nTo undo it, switch off **Space Shooter** in the side panel, or ask me to.",
+    "t": 168101
+   },
+   {
+    "role": "assistant",
+    "text": "Now checking it together with your gravity mod.",
+    "t": 181953
+   },
+   {
+    "role": "tool",
+    "text": "read sites/timsrobot.com/gravity.js",
+    "t": 183453
+   },
+   {
+    "role": "tool",
+    "text": "ran trif run 'const k=(t,key)=>dispatchEvent(new KeyboardEvent(t,{key})); k(\"keydown\",\"g\"); await new Promise(r=>setTimeout(r,1500)); const b=[...document.querySelectorAll(\"[data-gm-body]\")]; const out={n:b.length, ours:b.filter(e=>e.id).map(e=>e.id), above:b.filter(e=>e.getBoundingClie…",
+    "t": 194045
+   },
+   {
+    "role": "tool",
+    "text": "edited sites/timsrobot.com/gravity.js",
+    "t": 202225
+   },
+   {
+    "role": "tool",
+    "text": "ran trif check timsrobot.com/gravity && trif reload && trif run 'await new Promise(r=>setTimeout(r,1000)); const k=(t,key)=>dispatchEvent(new KeyboardEvent(t,{key})); k(\"keydown\",\"g\"); await new Promise(r=>setTimeout(r,2000)); const b=[...document.querySelectorAll(\"…",
+    "t": 207976
+   },
+   {
+    "role": "tool",
+    "text": "read ~/Library/Application Support/TRIF/screenshots/timsrobot.com/gravity.png",
+    "t": 215517
+   },
+   {
+    "role": "assistant",
+    "text": "With the shooter on, pressing G made everything fly up off the top of the screen instead of falling. Fixed. Gravity and the shooter now work together: pressing G makes the page fall and pile up at the bottom again, and the shooter keeps working on the fallen pile.\n\n**The cause:** gravity mode takes every visible thing on the page and lets it fall. That included the shooter's transparent drawing layer, which covers the whole screen. That layer landed on the floor like a screen-sized block and pushed everything else up off the top.\n\n**The fix:** I changed one line in your gravity mod. It now skips layers that are fixed in place and that clicks pass through, like the shooter's drawing layer and its score readout. Everything else falls as before.\n\n**What I checked, with the shooter on:**\n- After pressing G, 39 pieces fell, none ended up above the screen, and 38 piled in the bottom half.\n- I fired at the fallen pile and blew up 10 words.\n- Pressing G again put the page back, and R brought the words back.\n- No errors came up, and a screenshot shows the pile at the bottom with the ship in front.",
+    "t": 220662
+   }
+  ]
+ },
+ {
+  "id": "fireworks",
+  "prompt": "make a mod where every click launches a firework, and when it hits the robot gets scared and flinces. don't forget the sound.",
+  "secs": 108,
   "mods": [
    "fireworks"
   ],
@@ -424,7 +978,7 @@ export const CHATS = [
   "messages": [
    {
     "role": "user",
-    "text": "fireworks! every click launches a firework from the bottom of the screen that bursts where I clicked. and the Get it button sprays confetti when I hover it",
+    "text": "make a mod where every click launches a firework, and when it hits the robot gets scared and flinces. don't forget the sound.",
     "t": 0
    },
    {
@@ -454,236 +1008,237 @@ export const CHATS = [
    },
    {
     "role": "assistant",
-    "text": "I added a new mod, **timsrobot.com/fireworks**. It's on now.\n\n- **Every click** sends a rocket up from the bottom of the screen with a sparkly trail. It slows near the top and bursts where you clicked, with a flash and coloured sparks that fall slowly. Some bursts are rings and some sparks twinkle.\n- **Hovering \"Get it\"** sprays confetti out of the button for as long as your mouse is on it.\n- Your clicks still work normally. The effects are drawn on a see-through layer that clicks pass through.\n\n**What I checked:** I faked a click and a hover on \"Get it\", then took a screenshot. It showed the rocket climbing and confetti flying off the button. There were no errors, and your other mods (gravity, jelly buttons, living robot, neon title) are still running. I haven't seen a full burst in a screenshot: the rocket was still rising when I took it.\n\n**To undo it:** switch it off in the side panel, or ask me to.",
+    "text": "I added a new mod, **Click Fireworks**. It's on now.\n\n- **Every click** sends a rocket up from the bottom of the screen with a sparkly trail. It slows near the top and bursts where you clicked, with a flash and coloured sparks that fall slowly. Some bursts are rings and some sparks twinkle.\n- **Hovering \"Get it\"** sprays confetti out of the button for as long as your mouse is on it.\n- Your clicks still work normally. The effects are drawn on a see-through layer that clicks pass through.\n\n**What I checked:** I faked a click and a hover on \"Get it\", then took a screenshot. It showed the rocket climbing and confetti flying off the button. There were no errors, and your other mods (gravity, jelly buttons, living robot, neon title) are still running. I haven't seen a full burst in a screenshot: the rocket was still rising when I took it.",
     "t": 45496
+   },
+   {
+    "role": "assistant",
+    "text": "Making the bursts much bigger: more sparks that fly further and last longer, full-rainbow colours, and second-stage crackle bursts.",
+    "t": 66395
+   },
+   {
+    "role": "tool",
+    "text": "edited sites/timsrobot.com/fireworks.js",
+    "t": 77416
+   },
+   {
+    "role": "tool",
+    "text": "edited sites/timsrobot.com/fireworks.js",
+    "t": 84600
+   },
+   {
+    "role": "tool",
+    "text": "ran trif check timsrobot.com/fireworks && trif reload >/dev/null && trif run 'document.documentElement.dispatchEvent(new PointerEvent(\"pointerdown\",{bubbles:true,clientX:640,clientY:300,button:0})); await new Promise(r=>setTi…",
+    "t": 88335
+   },
+   {
+    "role": "tool",
+    "text": "read ~/Library/Application Support/TRIF/screenshots/timsrobot.com/fw2.png",
+    "t": 93244
+   },
+   {
+    "role": "assistant",
+    "text": "The bursts are now huge. My test burst was about 600px across, roughly three-quarters of the screen's height, and it covered the robot, title, buttons and both text columns.\n\n**What changed:**\n- **Size:** bursts scale with your window, so they stay about half the screen across at any size.\n- **Colour:** about half the bursts sweep the whole rainbow around the circle. The rest use a mixed palette with an outer ring and an inner core in contrasting colours.\n- **More fireworks:** each burst has about 470 sparks instead of 90, with longer trails, and they hang in the air about twice as long before fading.\n- **Crackles:** some sparks pop into small bursts of their own partway out, and sparks twinkle as they fade.\n- I capped the total number of sparks so the page stays smooth if you click a lot.\n\n**What I checked:** I faked a click, waited about a second and took a screenshot. It showed the full rainbow burst with crackles going off inside it, and there were no errors. The \"Get it\" confetti is unchanged.\n\nTo undo it, switch off **Click Fireworks** in the side panel, or ask me to.",
+    "t": 97555
    }
   ]
  },
  {
-  "id": "c4-gravity",
-  "prompt": "gravity mode: when I press G, everything on the page falls down, bounces and piles up at the bottom. and let me grab things and throw them",
-  "secs": 248,
+  "id": "checklist",
+  "prompt": "make What you Need a checklist that i can check off.",
+  "secs": 219,
   "mods": [
-   "gravity"
+   "checklist"
   ],
   "after": [],
   "messages": [
    {
     "role": "user",
-    "text": "gravity mode: when I press G, everything on the page falls down, bounces and piles up at the bottom. and let me grab things and throw them",
+    "text": "make What you Need a checklist that i can check off.",
     "t": 0
    },
    {
     "role": "tool",
-    "text": "ran trif mods; ls sites/timsrobot.com 2>/dev/null; trif run 'return {n: document.querySelectorAll(\"body *\").length, w: innerWidth, h: innerHeight, sh: document.documentElement.scrollHeight, top: [...document.body.children].map(e=>e.tagName+\"…",
-    "t": 4656
+    "text": "ran trif mods; ls sites/timsrobot.com 2>/dev/null; trif run 'const h=[...document.querySelectorAll(\"h1,h2,h3,h4\")].find(e=>/what you need/i.test(e.textContent)); if(!h) return null; let n=h.nextElementSibling; return {tag:h.tagName, outer:h.…",
+    "t": 36481
    },
    {
     "role": "tool",
-    "text": "ran trif run 'const out=[]; const walk=(e,d)=>{ if(d>7) return; for (const c of e.children){ const r=c.getBoundingClientRect(); out.push(\" \".repeat(d)+c.tagName.toLowerCase()+(c.id?\"#\"+c.id:\"\")+(c.className&&typeof c.className==\"string\"?\".\"+…",
-    "t": 11292
+    "text": "ran trif run 'const h=[...document.querySelectorAll(\"h2\")].find(e=>/what you need/i.test(e.textContent)); const ul=h.nextElementSibling, li=ul.querySelector(\"li\"); const s=getComputedStyle(li), u=getComputedStyle(ul); return {count:document.…",
+    "t": 76192
    },
    {
     "role": "tool",
-    "text": "read ~/Library/Application Support/TRIF/screenshots/timsrobot.com/2026-11-03T08-10-23.png",
-    "t": 13135
+    "text": "read sites/timsrobot.com/checklist.js",
+    "t": 92662
    },
    {
     "role": "tool",
-    "text": "read sites/timsrobot.com/living-robot.js",
-    "t": 13444
+    "text": "wrote sites/timsrobot.com/checklist.js",
+    "t": 129216
    },
    {
     "role": "tool",
-    "text": "searched style\\.|important|setProperty",
-    "t": 77952
+    "text": "ran trif check timsrobot.com/checklist && trif reload && trif run 'document.querySelector(\"ul[data-nc]\")?.scrollIntoView({block:\"center\"}); await new Promise(r=>setTimeout(r,3500)); const ul=document.querySelector(\"ul[da…",
+    "t": 156420
    },
    {
     "role": "tool",
-    "text": "ran trif new timsrobot.com gravity-mode",
-    "t": 81301
+    "text": "read ~/Library/Application Support/TRIF/screenshots/timsrobot.com/2026-11-03T10-15-44.png",
+    "t": 181290
    },
    {
     "role": "assistant",
-    "text": "I'm writing the gravity mod now: each word-block, letter, button and the robot become physics bodies.",
-    "t": 82901
-   },
-   {
-    "role": "tool",
-    "text": "wrote sites/timsrobot.com/gravity-mode.js",
-    "t": 121646
-   },
-   {
-    "role": "tool",
-    "text": "ran trif check timsrobot.com/gravity-mode && trif reload && trif run 'dispatchEvent(new KeyboardEvent(\"keydown\",{key:\"g\",bubbles:true})); await new Promise(r=>setTimeout(r,4000)); const b=[...document.querySelectorAll(\"[data-…",
-    "t": 126589
-   },
-   {
-    "role": "tool",
-    "text": "read ~/Library/Application Support/TRIF/screenshots/timsrobot.com/2026-11-03T08-12-23.png",
-    "t": 134771
-   },
-   {
-    "role": "tool",
-    "text": "ran trif run 'const c=document.querySelector(\".nt-ch\"); const cs=getComputedStyle(c); return {d:getComputedStyle(c.parentNode).display, dc:cs.display, an:cs.animationName, h1an:getComputedStyle(c.closest(\"h1\")).animationName}'",
-    "t": 144882
-   },
-   {
-    "role": "tool",
-    "text": "edited sites/timsrobot.com/gravity-mode.js",
-    "t": 148852
-   },
-   {
-    "role": "tool",
-    "text": "edited sites/timsrobot.com/gravity-mode.js",
-    "t": 150327
-   },
-   {
-    "role": "assistant",
-    "text": "Now making the pile solid (heavy pieces were sinking through lighter ones).",
-    "t": 152170
-   },
-   {
-    "role": "tool",
-    "text": "edited sites/timsrobot.com/gravity-mode.js",
-    "t": 162435
-   },
-   {
-    "role": "tool",
-    "text": "ran trif check timsrobot.com/gravity-mode && trif reload && trif run 'dispatchEvent(new KeyboardEvent(\"keydown\",{key:\"g\",bubbles:true})); await new Promise(r=>setTimeout(r,5000)); const b=[...document.querySelectorAll(\"[data-…",
-    "t": 169161
-   },
-   {
-    "role": "tool",
-    "text": "read ~/Library/Application Support/TRIF/screenshots/timsrobot.com/2026-11-03T08-13-06.png",
-    "t": 176460
-   },
-   {
-    "role": "assistant",
-    "text": "Piles up with no overlaps. Adding a livelier tumble at the start, then testing grab/throw and putting it back.",
-    "t": 179728
-   },
-   {
-    "role": "tool",
-    "text": "edited sites/timsrobot.com/gravity-mode.js",
-    "t": 181925
-   },
-   {
-    "role": "tool",
-    "text": "ran trif reload && trif run 'const w=ms=>new Promise(r=>setTimeout(r,ms)); dispatchEvent(new KeyboardEvent(\"keydown\",{key:\"g\",bubbles:true})); await w(5000); const svg=document.querySelector(\"svg.robot\"); let r=svg.getBoundin…",
-    "t": 188169
-   },
-   {
-    "role": "assistant",
-    "text": "Grab works, but the throw lost its speed (velocity was measured per physics substep). Fixing it to use the pointer's recent motion.",
-    "t": 202005
-   },
-   {
-    "role": "tool",
-    "text": "ran grep -n \"b.vx = (nx\\|pointermove', (e)\\|const sp = Math.hypot\" sites/timsrobot.com/gravity-mode.js",
-    "t": 203195
-   },
-   {
-    "role": "tool",
-    "text": "edited sites/timsrobot.com/gravity-mode.js",
-    "t": 207482
-   },
-   {
-    "role": "tool",
-    "text": "edited sites/timsrobot.com/gravity-mode.js",
-    "t": 210287
-   },
-   {
-    "role": "tool",
-    "text": "ran trif check timsrobot.com/gravity-mode && trif reload && trif run 'const w=ms=>new Promise(r=>setTimeout(r,ms)); dispatchEvent(new KeyboardEvent(\"keydown\",{key:\"g\",bubbles:true})); await w(4000); const svg=document.querySe…",
-    "t": 215919
-   },
-   {
-    "role": "tool",
-    "text": "read ~/Library/Application Support/TRIF/screenshots/timsrobot.com/2026-11-03T08-13-57.png",
-    "t": 227415
-   },
-   {
-    "role": "tool",
-    "text": "ran trif run 'dispatchEvent(new KeyboardEvent(\"keydown\",{key:\"Escape\",bubbles:true})); await new Promise(r=>setTimeout(r,1000)); return {left:document.querySelectorAll(\"[data-gm-body],[data-gm-bare]\").length, on:document.documentElement.hasA…",
-    "t": 231143
-   },
-   {
-    "role": "assistant",
-    "text": "Gravity mode is ready on timsrobot.com. Press **G** and the page collapses.\n\n- **Falling:** the paragraphs, list items, headings, buttons, footer links, the robot and each letter of the neon title fall separately. They tumble, bounce and pile up at the bottom of the screen. Pieces that land on their side stay that way. The neon glow keeps glowing while the letters fall.\n- **Grab and throw:** drag any piece and let go while it's moving to fling it. Pieces bounce off the sides of the window. While gravity is on, links don't open when you click them, so you can grab buttons safely.\n- **G or Esc again:** everything flies back into place.\n\n**What I checked on the live page:** 38 pieces fell, including 23 title letters. After they settled, none overlapped and none sank below the bottom. I grabbed the robot and threw it with simulated mouse movements: it flew off, hit the left wall and landed on the pile. Clicking \"Get it\" didn't navigate. After pressing Esc the page was back to normal, and no errors were logged. Your other timsrobot.com mods (living robot, neon title, jelly buttons) still work alongside it. I didn't try it with a real mouse or on a scrolled-down page; only what's on screen when you press G falls.\n\nTo undo it, switch off **Gravity mode** in the side panel or ask me to.",
-    "t": 237641
+    "text": "I've turned the **What you need** list into a checklist. Each item now has a checkbox and a small icon: a laptop for Mac, a browser window for Chrome/Firefox, a hexagon for Node, and a robot for the coding agent. When the list scrolls into view, the boxes tick themselves green one by one, about half a second apart, and each icon lights up green as its box ticks. People whose system asks for less motion get the ticks without the animation.\n\nI reloaded the page and checked it: all 4 items got their box and icon, all 4 ticked in turn, and the mod threw no errors. I also looked at a screenshot to confirm the layout. Your other mods on the page (neon title, stickers, typing tagline and the rest) still show as before.\n\nTo undo it, switch off **Need Checklist** in the side panel, or ask me to.",
+    "t": 185960
    }
   ]
  },
  {
-  "id": "c7-shooter",
-  "prompt": "turn the page into a space shooter. arrow keys fly a little ship along the bottom, space fires lasers, and any word I hit explodes into letters",
-  "secs": 100,
+  "id": "terminal",
+  "prompt": "turn \"yours on the computer\" into a little terminal window that types out ~/.trif/sites/timsrobot and lists the mods we've made so far.",
+  "secs": 80,
   "mods": [
-   "shooter"
+   "terminal"
   ],
   "after": [],
   "messages": [
    {
     "role": "user",
-    "text": "turn the page into a space shooter. arrow keys fly a little ship along the bottom, space fires lasers, and any word I hit explodes into letters",
+    "text": "turn \"yours on the computer\" into a little terminal window that types out ~/.trif/sites/timsrobot and lists the mods we've made so far.",
     "t": 0
    },
    {
     "role": "tool",
-    "text": "ran ls sites/timsrobot.com 2>/dev/null; trif run 'return {title: document.title, n: document.body.innerText.length, w: innerWidth, h: innerHeight, bg: getComputedStyle(document.body).backgroundColor, sh: document.documentElement.scrollHeight}'",
-    "t": 5057
+    "text": "ran ls sites/timsrobot.com; cat instructions.md 2>/dev/null; trif mods | grep timsrobot; trif run 'const els=[...document.querySelectorAll(\"*\")].filter(e=>/Yours, on your computer/.test(e.textContent) && e.children.length<8); return els.slic…",
+    "t": 5806
    },
    {
     "role": "tool",
-    "text": "ran trif status | tail -15; trif new timsrobot.com space-shooter",
-    "t": 16987
+    "text": "ran ls ~/.trif/sites/timsrobot.com; trif mods | grep timsrobot; trif run 'const els=[...document.querySelectorAll(\"*\")].filter(e=>/Yours, on your computer/.test(e.textContent) && e.children.length<8); return els.slice(-3).map(e=>({tag:e.tagName,id:e.id,…",
+    "t": 9205
    },
    {
     "role": "tool",
-    "text": "searched keydown|key ===|addEventListener\\('key|@description",
-    "t": 19947
+    "text": "ran cat sites/timsrobot.com/checklist.js | head -60; trif run 'const d=[...document.querySelectorAll(\"section.two > div\")]; return d.map(e=>{const s=getComputedStyle(e);return {h:e.querySelector(\"h2\")?.textContent,bg:s.backgroundColor,br:s.borderRadius,pad:s.padding,border:s.border…",
+    "t": 16470
    },
    {
     "role": "tool",
-    "text": "wrote sites/timsrobot.com/space-shooter.js",
-    "t": 63213
+    "text": "ran trif new timsrobot.com terminal",
+    "t": 22588
    },
    {
     "role": "tool",
-    "text": "ran trif check timsrobot.com/space-shooter && trif reload && trif run 'await new Promise(r=>setTimeout(r,1500)); const words=[...document.querySelectorAll(\".tss-w\")]; const t=words.find(w=>{const r=w.getBoundingClientRect(); return r.top>50&&r.width>20}); const r=t.getBo…",
-    "t": 69163
+    "text": "wrote sites/timsrobot.com/terminal.js",
+    "t": 44774
    },
    {
     "role": "assistant",
-    "text": "Shooting works: 120 words became targets, and a test shot blew up \"Firefox\" and \"model\". Next I'm taking a screenshot to check how it looks.",
-    "t": 75875
+    "text": "Mod's written; reloading to check it.",
+    "t": 47777
    },
    {
     "role": "tool",
-    "text": "ran trif run 'const k=(t,key)=>dispatchEvent(new KeyboardEvent(t,{key})); k(\"keydown\",\" \"); await new Promise(r=>setTimeout(r,600)); k(\"keyup\",\" \"); await new Promise(r=>setTimeout(r,250)); return 1' && trif screenshot -o shooter.png",
-    "t": 77342
+    "text": "ran trif check timsrobot.com/terminal && trif reload && trif run 'document.querySelector(\"[data-tb]\").scrollIntoView({block:\"center\"}); await new Promise(r=>setTimeout(r,5000)); const b=document.querySelector(\"[data-tb]\"); return {typed:b.querySelector(\".tb-line\").te…",
+    "t": 49820
    },
    {
     "role": "tool",
-    "text": "read ~/Library/Application Support/TRIF/screenshots/timsrobot.com/shooter.png",
-    "t": 80365
+    "text": "read ~/Library/Application Support/TRIF/screenshots/timsrobot.com/2026-11-03T10-24-03.png",
+    "t": 58107
    },
    {
     "role": "tool",
-    "text": "ran trif run 'dispatchEvent(new KeyboardEvent(\"keydown\",{key:\"r\"})); return document.querySelectorAll(\"[data-tss-dead]\").length'",
-    "t": 83242
+    "text": "edited sites/timsrobot.com/terminal.js",
+    "t": 61253
+   },
+   {
+    "role": "tool",
+    "text": "ran trif reload && trif errors",
+    "t": 61933
    },
    {
     "role": "assistant",
-    "text": "The page is now a space shooter. A small glowing ship sits at the bottom of the screen.\n\n- **← →** fly the ship left and right.\n- **Space** fires twin pink lasers. Hold it down for rapid fire.\n- **Any word you hit** blows up. Its letters spin out in the word's own font and colour, fall, bounce off the bottom and fade. There's a small burst of sparks too.\n- **R** brings all the words back. A small readout in the bottom-left corner counts the words you've blasted.\n\n**What I checked:** The page loads without errors and all 120 words on it can be shot. In a test I flew to a word and fired: \"Firefox\" and \"model\" blew up and the counter went up. A screenshot shows the ship, the counter and letters flying. I put the test words back afterwards.\n\n**Things to know:**\n- Your neon-title mod splits the big title into separate letters, so you shoot those one letter at a time.\n- The arrow keys and space no longer scroll the page. They still work normally while you're typing in a text box.\n- It works alongside your other mods here, including gravity mode on G.\n\n**To undo it:** switch off \"Space shooter\" in the side panel, or ask me to.",
-    "t": 87972
+    "text": "The \"Yours, on your computer\" box is now a little dark terminal window. It has red, yellow and green dots, and the heading sits in the title bar.\n\nWhen you scroll to it, it types `ls ~/.trif/sites/timsrobot.com` one key at a time. Then the 10 mod files show up one after another, then the paragraph appears, and it ends on a new prompt with a blinking cursor. If your computer is set to reduce motion, it shows everything at once instead.\n\n**Checked:** after a reload it typed the full command, showed all 10 files and the paragraph, and the screenshot looks right next to \"What you need\". No errors.\n\n**One catch:** mods can't look at your files, so the file list is written into the mod. It includes this new one, `terminal.js`. If you make more mods, ask me to add them to the list.\n\nTo undo it, switch off **Terminal Box** in the side panel, or ask me to.",
+    "t": 66019
    }
   ]
  },
  {
-  "id": "c6-3d",
-  "prompt": "make the whole page tilt in 3D as I move the mouse, like a card floating in space, with each section at a different depth",
+  "id": "led",
+  "prompt": "make the footer into like a scrolling LED sign",
+  "secs": 72,
+  "mods": [
+   "led"
+  ],
+  "after": [],
+  "messages": [
+   {
+    "role": "user",
+    "text": "make the footer into like a scrolling LED sign",
+    "t": 0
+   },
+   {
+    "role": "tool",
+    "text": "ran ls sites/timsrobot.com; trif status; trif run 'const f=document.querySelector(\"footer\"); if(!f) return null; const cs=getComputedStyle(f); return {html:f.outerHTML.slice(0,2000), bg:cs.backgroundColor, h:f.offsetHeight, f…",
+    "t": 5156
+   },
+   {
+    "role": "tool",
+    "text": "ran trif run 'const f=document.querySelector(\"footer\"); const cs=getComputedStyle(f); const a=f.querySelector(\"a\"); const r=f.getBoundingClientRect(); return {css:[...document.styleSheets].flatMap(s=>{try{return [...s.cssRules].map(r=>r.cssT…",
+    "t": 11599
+   },
+   {
+    "role": "tool",
+    "text": "ran trif new timsrobot.com led",
+    "t": 20186
+   },
+   {
+    "role": "tool",
+    "text": "wrote sites/timsrobot.com/led.js",
+    "t": 36380
+   },
+   {
+    "role": "tool",
+    "text": "ran trif check timsrobot.com/led && trif reload && trif errors; trif logs | tail -3; trif run 'const f=document.querySelector(\"footer\"); const s=f.querySelector(\".led-sign\"); const g=f.q…",
+    "t": 42636
+   },
+   {
+    "role": "tool",
+    "text": "read ~/Library/Application Support/TRIF/screenshots/timsrobot.com/led.png",
+    "t": 46142
+   },
+   {
+    "role": "assistant",
+    "text": "The sign works: it scrolls and the links can be clicked. I'm making the dots a little bigger so the text is easier to read.",
+    "t": 50264
+   },
+   {
+    "role": "tool",
+    "text": "edited sites/timsrobot.com/led.js",
+    "t": 51609
+   },
+   {
+    "role": "tool",
+    "text": "ran trif reload && trif errors; trif run 'document.querySelector(\"footer\").scrollIntoView({block:\"center\"})'; trif screenshot -o led2.png",
+    "t": 52442
+   },
+   {
+    "role": "tool",
+    "text": "read ~/Library/Application Support/TRIF/screenshots/timsrobot.com/led2.png",
+    "t": 55200
+   },
+   {
+    "role": "assistant",
+    "text": "The footer is now a scrolling LED sign. It has amber dot-matrix letters with a glow, a dark bezel and red stars between the items. GitHub, Report a problem and Privacy scroll right to left in a loop that doesn't jump.\n\n- **Clicking:** the sign stops scrolling when you hover over it or tab into it, so the links are easy to hit. They go to the same places as before. I checked that a click on a link lands on the link itself and not on the dot overlay.\n- **Accessibility:** the loop needs a second copy of the links. Tab and screen readers skip that copy, so you tab through just three links. If your system is set to reduce motion, the sign stays still.\n- **What I checked:** after reloading, there are no mod errors. All 3 links are in the sign with the right addresses. It scrolls at a steady speed, about 10 seconds per loop at this width. I took a screenshot to check the look, and made the dots a little bigger so the text is easier to read.\n\nTo undo it, switch off **LED Footer** in the side panel, or ask me to.",
+    "t": 60041
+   }
+  ]
+ },
+ {
+  "id": "tilt",
+  "prompt": "make the whole page tilt in 3d and more around with the mouse. robot should get pulled around a bit as the card shifts. in gravity mode make it affect the blocks",
   "secs": 112,
   "mods": [
    "tilt"
@@ -692,7 +1247,7 @@ export const CHATS = [
   "messages": [
    {
     "role": "user",
-    "text": "make the whole page tilt in 3D as I move the mouse, like a card floating in space, with each section at a different depth",
+    "text": "make the whole page tilt in 3d and more around with the mouse. robot should get pulled around a bit as the card shifts. in gravity mode make it affect the blocks",
     "t": 0
    },
    {
@@ -707,7 +1262,7 @@ export const CHATS = [
    },
    {
     "role": "tool",
-    "text": "ran cd ~/.trif/sites/timsrobot.com; head -30 gravity-mode.js; grep -n \"transform\\|perspective\" *.js | head -40",
+    "text": "ran cd ~/.trif/sites/timsrobot.com; head -30 gravity.js; grep -n \"transform\\|perspective\" *.js | head -40",
     "t": 14987
    },
    {
@@ -722,7 +1277,7 @@ export const CHATS = [
    },
    {
     "role": "tool",
-    "text": "read sites/timsrobot.com/gravity-mode.js",
+    "text": "read sites/timsrobot.com/gravity.js",
     "t": 27403
    },
    {
@@ -732,17 +1287,17 @@ export const CHATS = [
    },
    {
     "role": "tool",
-    "text": "ran trif new timsrobot.com tilt-card; trif run 'return {html:getComputedStyle(document.documentElement).backgroundColor, bodyMargin:getComputedStyle(document.body).margin, bodyPos:getComputedStyle(document.body).position, h1filter:getCompute…",
+    "text": "ran trif new timsrobot.com tilt; trif run 'return {html:getComputedStyle(document.documentElement).backgroundColor, bodyMargin:getComputedStyle(document.body).margin, bodyPos:getComputedStyle(document.body).position, h1filter:getCompute…",
     "t": 46868
    },
    {
     "role": "tool",
-    "text": "wrote sites/timsrobot.com/tilt-card.js",
+    "text": "wrote sites/timsrobot.com/tilt.js",
     "t": 63739
    },
    {
     "role": "tool",
-    "text": "ran trif check timsrobot.com/tilt-card && trif reload && trif run 'dispatchEvent(new MouseEvent(\"mousemove\",{clientX:1150,clientY:120})); await new Promise(r=>setTimeout(r,1200)); return {t:getComputedStyle(document.body).tra…",
+    "text": "ran trif check timsrobot.com/tilt && trif reload && trif run 'dispatchEvent(new MouseEvent(\"mousemove\",{clientX:1150,clientY:120})); await new Promise(r=>setTimeout(r,1200)); return {t:getComputedStyle(document.body).tra…",
     "t": 69499
    },
    {
@@ -757,7 +1312,7 @@ export const CHATS = [
    },
    {
     "role": "tool",
-    "text": "edited sites/timsrobot.com/tilt-card.js",
+    "text": "edited sites/timsrobot.com/tilt.js",
     "t": 82627
    },
    {
@@ -777,634 +1332,14 @@ export const CHATS = [
    },
    {
     "role": "assistant",
-    "text": "I added a new mod, **Tilt card**. The whole page is now a rounded card floating over a dark space background. It tilts up to 12° toward your mouse, eases back to flat when the mouse leaves the window, and a soft glare follows the pointer.\n\n**Depths:** each part of the page sits at its own height above the card. From highest to lowest:\n- the Get it and GitHub buttons\n- the title\n- the tagline\n- the \"What you need\" and \"Yours, on your computer\" columns\n- the footer, just above the card's surface\n\nThe robot rides along with the top section.\n\n**What I checked:**\n- I moved a fake mouse to two opposite corners and took screenshots. The tilt and the layers look right.\n- Clicks still land correctly: the point at the centre of \"Get it\" and of a footer link still hits that link.\n- The mod logged no errors.\n- With Gravity mode on (press G), the card goes flat so the falling pieces work as before. I only checked that it flattens, not a full drop.\n- Your neon title, jelly buttons, walking robot and fireworks mods are left alone and keep animating.\n\nI couldn't test a real mouse, only simulated movement, so wave yours around to see it live.\n\nTo undo it, switch off **Tilt card** in the side panel, or ask me to.",
+    "text": "I added a new mod, **Tilt Card**. The whole page is now a rounded card floating over a dark space background. It tilts up to 12° toward your mouse, eases back to flat when the mouse leaves the window, and a soft glare follows the pointer.\n\n**Depths:** each part of the page sits at its own height above the card. From highest to lowest:\n- the Get it and GitHub buttons\n- the title\n- the tagline\n- the \"What you need\" and \"Yours, on your computer\" columns\n- the footer, just above the card's surface\n\nThe robot rides along with the top section.\n\n**What I checked:**\n- I moved a fake mouse to two opposite corners and took screenshots. The tilt and the layers look right.\n- Clicks still land correctly: the point at the centre of \"Get it\" and of a footer link still hits that link.\n- The mod logged no errors.\n- With Gravity mode on (press G), the card goes flat so the falling pieces work as before. I only checked that it flattens, not a full drop.\n- Your neon title, jelly buttons, walking robot and fireworks mods are left alone and keep animating.\n\nI couldn't test a real mouse, only simulated movement, so wave yours around to see it live.\n\nTo undo it, switch off **Tilt Card** in the side panel, or ask me to.",
     "t": 100588
    }
   ]
  },
  {
-  "id": "c10-badges",
-  "prompt": "make \"Free and open source. In beta, for Mac.\" into little sticker badges that pop in one after another",
-  "secs": 166,
-  "mods": [
-   "stickers"
-  ],
-  "after": [],
-  "messages": [
-   {
-    "role": "user",
-    "text": "make \"Free and open source. In beta, for Mac.\" into little sticker badges that pop in one after another",
-    "t": 0
-   },
-   {
-    "role": "tool",
-    "text": "ran ls sites/timsrobot.com 2>/dev/null; trif run 'const w=document.evaluate(\"//*[contains(text(),\\\"Free and open source\\\")]\",document,null,9,null).singleNodeValue; return {tag:w?.tagName, cls:w?.className, html:w?.outerHTML.slice(0,500), par…",
-    "t": 28660
-   },
-   {
-    "role": "tool",
-    "text": "ran grep -l \"small\\|hero\" sites/timsrobot.com/*.js; trif status | tail -8; trif new timsrobot.com sticker-badges",
-    "t": 59559
-   },
-   {
-    "role": "tool",
-    "text": "ran trif status | tail -8; trif new timsrobot.com sticker-badges",
-    "t": 64245
-   },
-   {
-    "role": "tool",
-    "text": "searched \\.small|p\\.small",
-    "t": 65055
-   },
-   {
-    "role": "tool",
-    "text": "wrote sites/timsrobot.com/sticker-badges.js",
-    "t": 81003
-   },
-   {
-    "role": "tool",
-    "text": "ran trif check timsrobot.com/sticker-badges && trif reload && trif run 'await new Promise(r=>setTimeout(r,1500)); return [...document.querySelectorAll(\".sb-badge\")].map(b=>[b.textContent,getComputedStyle(b).opacity])' && trif errors && trif screenshot --t…",
-    "t": 85035
-   },
-   {
-    "role": "assistant",
-    "text": "Mod's written and loaded; checking it on the page now.",
-    "t": 126151
-   },
-   {
-    "role": "tool",
-    "text": "ran trif run '[...document.querySelectorAll(\".sb-badge\")].map(b=>[b.textContent,getComputedStyle(b).opacity])'; trif errors; trif screenshot",
-    "t": 127175
-   },
-   {
-    "role": "tool",
-    "text": "read ~/Library/Application Support/TRIF/screenshots/timsrobot.com/2026-11-03T10-10-44.png",
-    "t": 144553
-   },
-   {
-    "role": "assistant",
-    "text": "The line under the tagline is now three tilted stickers: **Free & open source** (green), **In beta** (yellow) and **For Mac** (pink). Each has a white border and a drop shadow. When the page loads they pop in one after another with a small bounce, and each one straightens and grows a little when you hover over it.\n\n- **What I checked:** after a reload, all three badges showed up on the page, the mod threw no errors, and a screenshot showed them as intended. The robot that was partly covering the first badge in the screenshot is your \"living robot\" mod walking past.\n- **Accessibility:** screen readers still read the original sentence. If your Mac is set to reduce motion, the badges appear without the animation.\n- **To undo:** switch off \"Sticker badges\" in the side panel, or ask me to.",
-    "t": 150136
-   }
-  ]
- },
- {
-  "id": "c11-checklist",
-  "prompt": "turn the What you need list into a checklist: each item gets a checkbox that ticks itself one by one, with a little icon for each (Mac, browser, Node, robot)",
-  "secs": 219,
-  "mods": [
-   "checklist"
-  ],
-  "after": [],
-  "messages": [
-   {
-    "role": "user",
-    "text": "turn the What you need list into a checklist: each item gets a checkbox that ticks itself one by one, with a little icon for each (Mac, browser, Node, robot)",
-    "t": 0
-   },
-   {
-    "role": "tool",
-    "text": "ran trif mods; ls sites/timsrobot.com 2>/dev/null; trif run 'const h=[...document.querySelectorAll(\"h1,h2,h3,h4\")].find(e=>/what you need/i.test(e.textContent)); if(!h) return null; let n=h.nextElementSibling; return {tag:h.tagName, outer:h.…",
-    "t": 36481
-   },
-   {
-    "role": "tool",
-    "text": "ran trif run 'const h=[...document.querySelectorAll(\"h2\")].find(e=>/what you need/i.test(e.textContent)); const ul=h.nextElementSibling, li=ul.querySelector(\"li\"); const s=getComputedStyle(li), u=getComputedStyle(ul); return {count:document.…",
-    "t": 76192
-   },
-   {
-    "role": "tool",
-    "text": "read sites/timsrobot.com/need-checklist.js",
-    "t": 92662
-   },
-   {
-    "role": "tool",
-    "text": "wrote sites/timsrobot.com/need-checklist.js",
-    "t": 129216
-   },
-   {
-    "role": "tool",
-    "text": "ran trif check timsrobot.com/need-checklist && trif reload && trif run 'document.querySelector(\"ul[data-nc]\")?.scrollIntoView({block:\"center\"}); await new Promise(r=>setTimeout(r,3500)); const ul=document.querySelector(\"ul[da…",
-    "t": 156420
-   },
-   {
-    "role": "tool",
-    "text": "read ~/Library/Application Support/TRIF/screenshots/timsrobot.com/2026-11-03T10-15-44.png",
-    "t": 181290
-   },
-   {
-    "role": "assistant",
-    "text": "I've turned the **What you need** list into a checklist. Each item now has a checkbox and a small icon: a laptop for Mac, a browser window for Chrome/Firefox, a hexagon for Node, and a robot for the coding agent. When the list scrolls into view, the boxes tick themselves green one by one, about half a second apart, and each icon lights up green as its box ticks. People whose system asks for less motion get the ticks without the animation.\n\nI reloaded the page and checked it: all 4 items got their box and icon, all 4 ticked in turn, and the mod threw no errors. I also looked at a screenshot to confirm the layout. Your other mods on the page (neon title, stickers, typing tagline and the rest) still show as before.\n\nTo undo it, switch off **Need checklist** in the side panel.",
-    "t": 185960
-   }
-  ]
- },
- {
-  "id": "c12-terminal",
-  "prompt": "make the \"Yours, on your computer\" box look like a little terminal window: it types out ls ~/.trif/sites/timsrobot.com, lists the mods we have made so far, then shows the paragraph",
-  "secs": 80,
-  "mods": [
-   "terminal"
-  ],
-  "after": [],
-  "messages": [
-   {
-    "role": "user",
-    "text": "make the \"Yours, on your computer\" box look like a little terminal window: it types out ls ~/.trif/sites/timsrobot.com, lists the mods we have made so far, then shows the paragraph",
-    "t": 0
-   },
-   {
-    "role": "tool",
-    "text": "ran ls sites/timsrobot.com; cat instructions.md 2>/dev/null; trif mods | grep timsrobot; trif run 'const els=[...document.querySelectorAll(\"*\")].filter(e=>/Yours, on your computer/.test(e.textContent) && e.children.length<8); return els.slic…",
-    "t": 5806
-   },
-   {
-    "role": "tool",
-    "text": "ran ls ~/.trif/sites/timsrobot.com; trif mods | grep timsrobot; trif run 'const els=[...document.querySelectorAll(\"*\")].filter(e=>/Yours, on your computer/.test(e.textContent) && e.children.length<8); return els.slice(-3).map(e=>({tag:e.tagName,id:e.id,…",
-    "t": 9205
-   },
-   {
-    "role": "tool",
-    "text": "ran cat sites/timsrobot.com/need-checklist.js | head -60; trif run 'const d=[...document.querySelectorAll(\"section.two > div\")]; return d.map(e=>{const s=getComputedStyle(e);return {h:e.querySelector(\"h2\")?.textContent,bg:s.backgroundColor,br:s.borderRadius,pad:s.padding,border:s.border…",
-    "t": 16470
-   },
-   {
-    "role": "tool",
-    "text": "ran trif new timsrobot.com terminal-box",
-    "t": 22588
-   },
-   {
-    "role": "tool",
-    "text": "wrote sites/timsrobot.com/terminal-box.js",
-    "t": 44774
-   },
-   {
-    "role": "assistant",
-    "text": "Mod's written; reloading to check it.",
-    "t": 47777
-   },
-   {
-    "role": "tool",
-    "text": "ran trif check timsrobot.com/terminal-box && trif reload && trif run 'document.querySelector(\"[data-tb]\").scrollIntoView({block:\"center\"}); await new Promise(r=>setTimeout(r,5000)); const b=document.querySelector(\"[data-tb]\"); return {typed:b.querySelector(\".tb-line\").te…",
-    "t": 49820
-   },
-   {
-    "role": "tool",
-    "text": "read ~/Library/Application Support/TRIF/screenshots/timsrobot.com/2026-11-03T10-24-03.png",
-    "t": 58107
-   },
-   {
-    "role": "tool",
-    "text": "edited sites/timsrobot.com/terminal-box.js",
-    "t": 61253
-   },
-   {
-    "role": "tool",
-    "text": "ran trif reload && trif errors",
-    "t": 61933
-   },
-   {
-    "role": "assistant",
-    "text": "The \"Yours, on your computer\" box is now a little dark terminal window. It has red, yellow and green dots, and the heading sits in the title bar.\n\nWhen you scroll to it, it types `ls ~/.trif/sites/timsrobot.com` one key at a time. Then the 8 mod files show up one after another, then the paragraph appears, and it ends on a new prompt with a blinking cursor. If your computer is set to reduce motion, it shows everything at once instead.\n\n**Checked:** after a reload it typed the full command, showed all 8 files and the paragraph, and the screenshot looks right next to \"What you need\". No errors.\n\n**One catch:** mods can't look at your files, so the file list is written into the mod. It includes this new one, `terminal-box.js`, and `rainbow-rave.js`, which is switched off. If you make more mods, ask me to add them to the list.\n\n**To undo:** switch off \"Terminal box\" in the side panel.",
-    "t": 66019
-   }
-  ]
- },
- {
-  "id": "c13-footer",
-  "prompt": "last one down here: turn the footer into a scrolling LED sign with the links in it (GitHub, Report a problem, Privacy), still clickable",
-  "secs": 72,
-  "mods": [
-   "led"
-  ],
-  "after": [],
-  "messages": [
-   {
-    "role": "user",
-    "text": "last one down here: turn the footer into a scrolling LED sign with the links in it (GitHub, Report a problem, Privacy), still clickable",
-    "t": 0
-   },
-   {
-    "role": "tool",
-    "text": "ran ls sites/timsrobot.com; trif status; trif run 'const f=document.querySelector(\"footer\"); if(!f) return null; const cs=getComputedStyle(f); return {html:f.outerHTML.slice(0,2000), bg:cs.backgroundColor, h:f.offsetHeight, f…",
-    "t": 5156
-   },
-   {
-    "role": "tool",
-    "text": "ran trif run 'const f=document.querySelector(\"footer\"); const cs=getComputedStyle(f); const a=f.querySelector(\"a\"); const r=f.getBoundingClientRect(); return {css:[...document.styleSheets].flatMap(s=>{try{return [...s.cssRules].map(r=>r.cssT…",
-    "t": 11599
-   },
-   {
-    "role": "tool",
-    "text": "ran trif new timsrobot.com led-footer",
-    "t": 20186
-   },
-   {
-    "role": "tool",
-    "text": "wrote sites/timsrobot.com/led-footer.js",
-    "t": 36380
-   },
-   {
-    "role": "tool",
-    "text": "ran trif check timsrobot.com/led-footer && trif reload && trif errors; trif logs | tail -3; trif run 'const f=document.querySelector(\"footer\"); const s=f.querySelector(\".led-sign\"); const g=f.q…",
-    "t": 42636
-   },
-   {
-    "role": "tool",
-    "text": "read ~/Library/Application Support/TRIF/screenshots/timsrobot.com/led.png",
-    "t": 46142
-   },
-   {
-    "role": "assistant",
-    "text": "The sign works: it scrolls and the links can be clicked. I'm making the dots a little bigger so the text is easier to read.",
-    "t": 50264
-   },
-   {
-    "role": "tool",
-    "text": "edited sites/timsrobot.com/led-footer.js",
-    "t": 51609
-   },
-   {
-    "role": "tool",
-    "text": "ran trif reload && trif errors; trif run 'document.querySelector(\"footer\").scrollIntoView({block:\"center\"})'; trif screenshot -o led2.png",
-    "t": 52442
-   },
-   {
-    "role": "tool",
-    "text": "read ~/Library/Application Support/TRIF/screenshots/timsrobot.com/led2.png",
-    "t": 55200
-   },
-   {
-    "role": "assistant",
-    "text": "The footer is now a scrolling LED sign. It has amber dot-matrix letters with a glow, a dark bezel and red stars between the items. GitHub, Report a problem and Privacy scroll right to left in a loop that doesn't jump.\n\n- **Clicking:** the sign stops scrolling when you hover over it or tab into it, so the links are easy to hit. They go to the same places as before. I checked that a click on a link lands on the link itself and not on the dot overlay.\n- **Accessibility:** the loop needs a second copy of the links. Tab and screen readers skip that copy, so you tab through just three links. If your system is set to reduce motion, the sign stays still.\n- **What I checked:** after reloading, there are no mod errors. All 3 links are in the sign with the right addresses. It scrolls at a steady speed, about 10 seconds per loop at this width. I took a screenshot to check the look, and made the dots a little bigger so the text is easier to read.\n- **Other mods:** your rainbow-rave mod also styles the footer, but it's switched off, so I didn't test the two together.\n\nTo undo it, switch off **LED footer** in the side panel (it's `timsrobot.com/led-footer`), or ask me to delete it.",
-    "t": 60041
-   }
-  ]
- },
- {
-  "id": "c2-wave",
-  "prompt": "now make the letters of the title bob up and down in a wave, one after another. and make the buttons wobble like jelly when I hover them",
-  "secs": 68,
-  "mods": [
-   "neon",
-   "jelly"
-  ],
-  "after": [],
-  "messages": [
-   {
-    "role": "user",
-    "text": "now make the letters of the title bob up and down in a wave, one after another. and make the buttons wobble like jelly when I hover them",
-    "t": 0
-   },
-   {
-    "role": "tool",
-    "text": "ran trif sweep --selector 'button, .btn, [role=button], input[type=submit]'; trif run '[...document.querySelectorAll(\".btn\")].map(b=>({t:b.textContent.trim(),cls:b.className,d:getComputedStyle(b).display,tr:getComputedStyle(b…",
-    "t": 10408
-   },
-   {
-    "role": "assistant",
-    "text": "Two buttons on the page. Now updating the title mod with the wave, and adding a separate jelly-buttons mod.",
-    "t": 13794
-   },
-   {
-    "role": "tool",
-    "text": "edited sites/timsrobot.com/neon-title.js",
-    "t": 17316
-   },
-   {
-    "role": "tool",
-    "text": "edited sites/timsrobot.com/neon-title.js",
-    "t": 18656
-   },
-   {
-    "role": "tool",
-    "text": "edited sites/timsrobot.com/neon-title.js",
-    "t": 24238
-   },
-   {
-    "role": "tool",
-    "text": "ran trif new timsrobot.com jelly-buttons",
-    "t": 27597
-   },
-   {
-    "role": "tool",
-    "text": "edited sites/timsrobot.com/neon-title.js",
-    "t": 28736
-   },
-   {
-    "role": "tool",
-    "text": "wrote sites/timsrobot.com/jelly-buttons.js",
-    "t": 34182
-   },
-   {
-    "role": "tool",
-    "text": "ran trif check timsrobot.com/neon-title && trif check timsrobot.com/jelly-buttons && trif reload && trif run 'await new Promise(r=>setTimeout(r,3200)); const h=document.querySelector(\"main h1\"); const chs=[...h.querySelectorA…",
-    "t": 38798
-   },
-   {
-    "role": "tool",
-    "text": "ran trif run 'return [...document.querySelectorAll(\"main h1 .nt-ch\")].map(c=>Math.round(c.getBoundingClientRect().top)).join(\" \")'; trif screenshot -o wave.png",
-    "t": 46286
-   },
-   {
-    "role": "tool",
-    "text": "read ~/Library/Application Support/TRIF/screenshots/timsrobot.com/wave.png",
-    "t": 48047
-   },
-   {
-    "role": "assistant",
-    "text": "The wave works. One last check on the button wobble:",
-    "t": 49654
-   },
-   {
-    "role": "tool",
-    "text": "ran trif run 'const b=document.querySelector(\".btn\"); b.style.animation=\"jb-jelly 0.7s ease-out both\"; await new Promise(r=>setTimeout(r,170)); const t=getComputedStyle(b).transform; b.style.animation=\"\"; return t'",
-    "t": 50913
-   },
-   {
-    "role": "assistant",
-    "text": "I made both changes.\n\n- **Title wave:** each letter of the title bobs up and down in turn, so a wave rolls across it from left to right. The neon flicker at load and the sputtering \"o\" in \"Robot\" still work. The title can still wrap between words if the page gets narrow, but never in the middle of a word. Screen readers still read it as the normal title.\n- **Jelly buttons:** when you hover over \"Get it\" or \"GitHub\", the button squashes, stretches and settles back, like jelly. Those are the only two buttons on the page.\n\n**What I checked after reloading:** I measured the letter heights and saw the wave travelling across the title, and confirmed it in a screenshot. I can't hover the mouse from here, so I tested the wobble by running its animation on \"Get it\" directly, and it squashed as expected. I haven't seen a real hover myself. Neither mod reported any errors.\n\nIf your system is set to reduce motion, the wave and wobble are switched off.\n\nThe wave is part of the **Neon title** mod. The wobble is a new, separate mod, **Jelly buttons**, so you can switch either one off in the side panel.",
-    "t": 55700
-   }
-  ]
- },
- {
-  "id": "c3b-legs",
-  "prompt": "love it. now give him little legs and let him walk around the page on his own",
-  "secs": 114,
-  "mods": [
-   "robot"
-  ],
-  "after": [
-   "c3-robot"
-  ],
-  "messages": [
-   {
-    "role": "user",
-    "text": "love it. now give him little legs and let him walk around the page on his own",
-    "t": 0
-   },
-   {
-    "role": "tool",
-    "text": "read sites/timsrobot.com/living-robot.js",
-    "t": 31719
-   },
-   {
-    "role": "assistant",
-    "text": "Now adding legs and a wander loop to the same mod.",
-    "t": 33219
-   },
-   {
-    "role": "tool",
-    "text": "edited sites/timsrobot.com/living-robot.js",
-    "t": 44436
-   },
-   {
-    "role": "tool",
-    "text": "edited sites/timsrobot.com/living-robot.js",
-    "t": 47465
-   },
-   {
-    "role": "tool",
-    "text": "ran sed -i '' 's|^// @description .*|// @description The hero robot has little legs and wanders the page; its eyes follow the mouse, it blinks, and hops when clicked|' sites/timsrobot.com/living-robot.js; trif check timsrobot.com/living-robot && trif reload…",
-    "t": 52447
-   },
-   {
-    "role": "tool",
-    "text": "edited sites/timsrobot.com/living-robot.js",
-    "t": 54469
-   },
-   {
-    "role": "tool",
-    "text": "ran trif check timsrobot.com/living-robot && trif reload && trif run 'const s=document.querySelector(\"svg.robot\"); const out=[]; for(let i=0;i<8;i++){ await new Promise(r=>setTimeout(r,1000)); out.push([s.style.translate, s.c…",
-    "t": 56413
-   },
-   {
-    "role": "tool",
-    "text": "read ~/Library/Application Support/TRIF/screenshots/timsrobot.com/2026-11-03T08-08-14.png",
-    "t": 73044
-   },
-   {
-    "role": "assistant",
-    "text": "The legs barely show: a gradient on a perfectly vertical line doesn't paint in SVG. I'm switching to a solid colour and making the legs longer.",
-    "t": 76943
-   },
-   {
-    "role": "tool",
-    "text": "edited sites/timsrobot.com/living-robot.js",
-    "t": 79550
-   },
-   {
-    "role": "tool",
-    "text": "ran trif reload && trif run 'const s=document.querySelector(\"svg.robot\"); s.dispatchEvent(new PointerEvent(\"pointerenter\")); await new Promise(r=>setTimeout(r,300)); s.dispatchEvent(new MouseEvent(\"click\",{bubbles:true})); aw…",
-    "t": 82295
-   },
-   {
-    "role": "tool",
-    "text": "read ~/Library/Application Support/TRIF/screenshots/timsrobot.com/2026-11-03T08-08-37.png",
-    "t": 95639
-   },
-   {
-    "role": "assistant",
-    "text": "The robot now has two little legs and wanders around the page on his own. I added this to the same **Living robot** mod.\n\n- **Walking:** He picks a random spot in the part of the page you can see and walks there. His legs swing in turn, and he waddles a little as he goes. Then he rests for 1.5–5 seconds and sets off again. About one walk in four, he goes back to his home spot above the title.\n- **Looking:** While he walks, he looks where he's going. When you move the mouse, his eyes follow it again.\n- **Clicking:** He stops walking while your pointer is over him, so he's easy to click. Clicking still makes him hop.\n- He stays inside the visible page, walks over the text, and never adds a scrollbar.\n\n**What I checked after a reload:**\n- He set off on his own within a few seconds and walked at a steady pace, about 75 px a second.\n- The screenshot shows him mid-stride up in the top-left corner with his legs showing.\n- When I clicked him, he hopped, then went back to walking.\n- The mod threw no errors, and the page width stayed at 1280 px.\n\nThe legs didn't show on my first try because of an SVG drawing quirk, so I made them a solid green.\n\n**Two things I didn't check:**\n- I only tried it at the page's current size, which fits in one screen.\n- If you scroll, he picks places in the new view on his next walk, but he doesn't follow you while you scroll.\n\n**To undo it,** switch off \"Living robot\" in the side panel. That also turns off the eye-following, blinking and hopping.",
-    "t": 102344
-   }
-  ]
- },
- {
-  "id": "c5b-bigger",
-  "prompt": "bigger!! make the bursts HUGE, like real fireworks filling half the screen, and way more colourful",
-  "secs": 49,
-  "mods": [
-   "fireworks"
-  ],
-  "after": [
-   "c5-fireworks"
-  ],
-  "messages": [
-   {
-    "role": "user",
-    "text": "bigger!! make the bursts HUGE, like real fireworks filling half the screen, and way more colourful",
-    "t": 0
-   },
-   {
-    "role": "assistant",
-    "text": "Making the bursts much bigger: more sparks that fly further and last longer, full-rainbow colours, and second-stage crackle bursts.",
-    "t": 7895
-   },
-   {
-    "role": "tool",
-    "text": "edited sites/timsrobot.com/fireworks.js",
-    "t": 18916
-   },
-   {
-    "role": "tool",
-    "text": "edited sites/timsrobot.com/fireworks.js",
-    "t": 26100
-   },
-   {
-    "role": "tool",
-    "text": "ran trif check timsrobot.com/fireworks && trif reload >/dev/null && trif run 'document.documentElement.dispatchEvent(new PointerEvent(\"pointerdown\",{bubbles:true,clientX:640,clientY:300,button:0})); await new Promise(r=>setTi…",
-    "t": 29835
-   },
-   {
-    "role": "tool",
-    "text": "read ~/Library/Application Support/TRIF/screenshots/timsrobot.com/fw2.png",
-    "t": 34744
-   },
-   {
-    "role": "assistant",
-    "text": "The bursts are now huge. My test burst was about 600px across, roughly three-quarters of the screen's height, and it covered the robot, title, buttons and both text columns.\n\n**What changed:**\n- **Size:** bursts scale with your window, so they stay about half the screen across at any size.\n- **Colour:** about half the bursts sweep the whole rainbow around the circle. The rest use a mixed palette with an outer ring and an inner core in contrasting colours.\n- **More fireworks:** each burst has about 470 sparks instead of 90, with longer trails, and they hang in the air about twice as long before fading.\n- **Crackles:** some sparks pop into small bursts of their own partway out, and sparks twinkle as they fade.\n- I capped the total number of sparks so the page stays smooth if you click a lot.\n\n**What I checked:** I faked a click, waited about a second and took a screenshot. It showed the full rainbow burst with crackles going off inside it, and there were no errors. The \"Get it\" confetti is unchanged.",
-    "t": 39055
-   }
-  ]
- },
- {
-  "id": "c7b-shake",
-  "prompt": "awesome. make the ship 3x bigger, the lasers fatter, and every hit should blow up big with a little screen shake",
-  "secs": 77,
-  "mods": [
-   "shooter"
-  ],
-  "after": [
-   "c7-shooter"
-  ],
-  "messages": [
-   {
-    "role": "user",
-    "text": "awesome. make the ship 3x bigger, the lasers fatter, and every hit should blow up big with a little screen shake",
-    "t": 0
-   },
-   {
-    "role": "tool",
-    "text": "ran trif status | grep -A1 'this page'; grep -n \"ship\\.\\|ship =\\|fillRect(l\\|spark\\|14; i++\\|H - 14\" sites/timsrobot.com/space-shooter.js",
-    "t": 10379
-   },
-   {
-    "role": "assistant",
-    "text": "Now the edits: scale the ship ×3, fatten lasers, bigger blasts with a shockwave ring, and screen shake.",
-    "t": 13677
-   },
-   {
-    "role": "tool",
-    "text": "read sites/timsrobot.com/space-shooter.js",
-    "t": 14749
-   },
-   {
-    "role": "tool",
-    "text": "searched translate\\s*[:=]|style\\.translate|documentElement\\.style",
-    "t": 20000
-   },
-   {
-    "role": "tool",
-    "text": "edited sites/timsrobot.com/space-shooter.js",
-    "t": 26650
-   },
-   {
-    "role": "tool",
-    "text": "edited sites/timsrobot.com/space-shooter.js",
-    "t": 32946
-   },
-   {
-    "role": "tool",
-    "text": "edited sites/timsrobot.com/space-shooter.js",
-    "t": 34948
-   },
-   {
-    "role": "tool",
-    "text": "edited sites/timsrobot.com/space-shooter.js",
-    "t": 37044
-   },
-   {
-    "role": "tool",
-    "text": "edited sites/timsrobot.com/space-shooter.js",
-    "t": 38248
-   },
-   {
-    "role": "tool",
-    "text": "edited sites/timsrobot.com/space-shooter.js",
-    "t": 46100
-   },
-   {
-    "role": "tool",
-    "text": "edited sites/timsrobot.com/space-shooter.js",
-    "t": 48558
-   },
-   {
-    "role": "tool",
-    "text": "ran trif check timsrobot.com/space-shooter && trif reload && trif run 'await new Promise(r=>setTimeout(r,1200)); const k=(t,key)=>dispatchEvent(new KeyboardEvent(t,{key})); const shakes=new Set(); k(\"keydown\",\" \"); for(let i=0;i<8;i++){await new Promise(r=>setTimeout(r,6…",
-    "t": 53317
-   },
-   {
-    "role": "tool",
-    "text": "read ~/Library/Application Support/TRIF/screenshots/timsrobot.com/shooter2.png",
-    "t": 59988
-   },
-   {
-    "role": "tool",
-    "text": "ran trif run 'dispatchEvent(new KeyboardEvent(\"keydown\",{key:\"r\"})); return document.querySelectorAll(\"[data-tss-dead]\").length'",
-    "t": 61956
-   },
-   {
-    "role": "assistant",
-    "text": "I made all three changes and tested them on the page.\n\n- **Ship:** 3 times bigger. The two lasers now fire from its wingtips.\n- **Lasers:** fat glowing pink bolts with a white-hot core. They're wider, so they also hit words that are only partly under them.\n- **Hits:** each word now blows up much bigger:\n  - a white flash and an orange shockwave ring that grows bigger for longer words\n  - about 70 coloured sparks\n  - the word's letters fly out much harder and swell to up to 3× their size as they tumble\n- **Screen shake:** the whole page jolts with each hit and settles in about a third of a second. Several quick hits shake it harder, up to a set limit.\n\n**What I checked:** I reloaded the page and fired a burst. Three words blew up, the page shook by a few pixels, and it settled back to normal afterwards. A screenshot shows the big ship, the fat bolts, the rings and the sparks. No errors came up, and I put the test words back.\n\n**To undo it:** switch off \"Space shooter\" in the side panel.",
-    "t": 66601
-   }
-  ]
- },
- {
-  "id": "c8-fix",
-  "prompt": "one bug: with the space shooter on, pressing G makes everything fly UP off the top of the screen instead of falling. can you make gravity mode and the shooter work together?",
-  "secs": 53,
-  "mods": [
-   "gravity",
-   "shooter"
-  ],
-  "after": [
-   "c4-gravity",
-   "c7-shooter"
-  ],
-  "messages": [
-   {
-    "role": "user",
-    "text": "one bug: with the space shooter on, pressing G makes everything fly UP off the top of the screen instead of falling. can you make gravity mode and the shooter work together?",
-    "t": 0
-   },
-   {
-    "role": "tool",
-    "text": "read sites/timsrobot.com/gravity-mode.js",
-    "t": 3453
-   },
-   {
-    "role": "tool",
-    "text": "ran trif run 'const k=(t,key)=>dispatchEvent(new KeyboardEvent(t,{key})); k(\"keydown\",\"g\"); await new Promise(r=>setTimeout(r,1500)); const b=[...document.querySelectorAll(\"[data-gm-body]\")]; const out={n:b.length, ours:b.filter(e=>e.id).map(e=>e.id), above:b.filter(e=>e.getBoundingClie…",
-    "t": 14045
-   },
-   {
-    "role": "tool",
-    "text": "edited sites/timsrobot.com/gravity-mode.js",
-    "t": 22225
-   },
-   {
-    "role": "tool",
-    "text": "ran trif check timsrobot.com/gravity-mode && trif reload && trif run 'await new Promise(r=>setTimeout(r,1000)); const k=(t,key)=>dispatchEvent(new KeyboardEvent(t,{key})); k(\"keydown\",\"g\"); await new Promise(r=>setTimeout(r,2000)); const b=[...document.querySelectorAll(\"…",
-    "t": 27976
-   },
-   {
-    "role": "tool",
-    "text": "read ~/Library/Application Support/TRIF/screenshots/timsrobot.com/gravity.png",
-    "t": 35517
-   },
-   {
-    "role": "assistant",
-    "text": "Fixed. Gravity and the shooter now work together: pressing G makes the page fall and pile up at the bottom again, and the shooter keeps working on the fallen pile.\n\n**The cause:** gravity mode takes every visible thing on the page and lets it fall. That included the shooter's transparent drawing layer, which covers the whole screen. That layer landed on the floor like a screen-sized block and pushed everything else up off the top.\n\n**The fix:** I changed one line in your gravity-mode mod. It now skips layers that are fixed in place and that clicks pass through, like the shooter's drawing layer and its score readout. Everything else falls as before.\n\n**What I checked, with the shooter on:**\n- After pressing G, 39 pieces fell, none ended up above the screen, and 38 piled in the bottom half.\n- I fired at the fallen pile and blew up 10 words.\n- Pressing G again put the page back, and R brought the words back.\n- No errors came up, and a screenshot shows the pile at the bottom with the ship in front.\n\nOne more thing: the screenshot showed your rainbow-rave mod running too. I didn't touch it.",
-    "t": 40662
-   }
-  ]
- },
- {
-  "id": "c14-rave",
-  "prompt": "import rainbow rave from X. get creative.",
+  "id": "rave",
+  "prompt": "now import Rainbow Rave. get creative..",
   "secs": 182,
   "mods": [
    "rave"
@@ -1413,7 +1348,7 @@ export const CHATS = [
   "messages": [
    {
     "role": "user",
-    "text": "import rainbow rave from X. get creative.",
+    "text": "now import Rainbow Rave. get creative..",
     "t": 0
    },
    {
@@ -1453,67 +1388,57 @@ export const CHATS = [
    },
    {
     "role": "assistant",
-    "text": "I'm porting the X Rainbow Rave to this page and adding extras for it: a dancing robot in shades, wavy rainbow title, lasers, and a drop in the music.",
+    "text": "I'm porting your Rainbow Rave mod for x.com to this page and adding extras for it: a dancing robot in shades, wavy rainbow title, lasers, and a drop in the music.",
     "t": 46797
    },
    {
     "role": "tool",
-    "text": "ran trif new timsrobot.com rainbow-rave",
+    "text": "ran trif new timsrobot.com rave",
     "t": 47296
    },
    {
     "role": "tool",
-    "text": "read sites/timsrobot.com/rainbow-rave.js",
+    "text": "read sites/timsrobot.com/rave.js",
     "t": 48710
    },
    {
     "role": "tool",
-    "text": "wrote sites/timsrobot.com/rainbow-rave.js",
+    "text": "wrote sites/timsrobot.com/rave.js",
     "t": 137281
    },
    {
     "role": "tool",
-    "text": "ran cd ~/.trif/sites/timsrobot.com && python3 - <<'EOF' 2>/dev/null || echo nopython EOF true",
-    "t": 141553
-   },
-   {
-    "role": "assistant",
-    "text": "Fixing a few lines with edits instead.",
-    "t": 142716
-   },
-   {
-    "role": "tool",
-    "text": "edited sites/timsrobot.com/rainbow-rave.js",
+    "text": "edited sites/timsrobot.com/rave.js",
     "t": 143826
    },
    {
     "role": "tool",
-    "text": "edited sites/timsrobot.com/rainbow-rave.js",
+    "text": "edited sites/timsrobot.com/rave.js",
     "t": 145173
    },
    {
     "role": "tool",
-    "text": "edited sites/timsrobot.com/rainbow-rave.js",
+    "text": "edited sites/timsrobot.com/rave.js",
     "t": 146187
    },
    {
     "role": "tool",
-    "text": "edited sites/timsrobot.com/rainbow-rave.js",
+    "text": "edited sites/timsrobot.com/rave.js",
     "t": 147188
    },
    {
     "role": "tool",
-    "text": "edited sites/timsrobot.com/rainbow-rave.js",
+    "text": "edited sites/timsrobot.com/rave.js",
     "t": 149232
    },
    {
     "role": "tool",
-    "text": "edited sites/timsrobot.com/rainbow-rave.js",
+    "text": "edited sites/timsrobot.com/rave.js",
     "t": 150253
    },
    {
     "role": "tool",
-    "text": "ran trif check timsrobot.com/rainbow-rave && trif reload && trif errors; trif run 'return {letters: document.querySelectorAll(\"h1 .rr-l\").length, shades: !!document.querySelector(\".rr-shades\"), lasers: !!document.querySelector(\".rr-lasers\"), btns: document…",
+    "text": "ran trif check timsrobot.com/rave && trif reload && trif errors; trif run 'return {letters: document.querySelectorAll(\"h1 .rr-l\").length, shades: !!document.querySelector(\".rr-shades\"), lasers: !!document.querySelector(\".rr-lasers\"), btns: document…",
     "t": 154987
    },
    {
@@ -1538,7 +1463,7 @@ export const CHATS = [
    },
    {
     "role": "assistant",
-    "text": "I brought Rainbow Rave over from your X mod and added extras made for this page. It's a new mod, `timsrobot.com/rainbow-rave`, and it's working now. I checked it in screenshots and it threw no errors.\n\n**From the X version:**\n- The rolling rainbow background with white text.\n- The trance loop you made with code, so no sound files.\n- The page zooms with the kick drum.\n- The play/pause and zoom buttons in the bottom right.\n\n**New for this page:**\n- 🕶️ **The robot** keeps changing colour and glowing. When the music starts it drops on a pair of shades, then head-bangs on every kick, tilting side to side.\n- 🌊 **The title** waves letter by letter and shimmers through colours.\n- 🔦 **Lasers:** two fans of white beams sweep up from the bottom corners and flash on each kick.\n- 🌈 **Buttons:** \"Get it\" is a moving rainbow, and GitHub gets a rainbow ring.\n- 🎶 **The track builds up:** six bars of full groove, a breakdown bar (the lasers dim and the kick drops out), then a bar of speeding-up snare with a rising whoosh. Then **the drop**: a crash, a white flash, the robot does a flip, and rainbow sparks burst out of it.\n\nThe music starts on your first click or key press. I couldn't play it from here, so I've only checked the sound and dancing in the code; I saw the shades and lasers by turning the \"music on\" look on directly. Have a listen and tell me what to tweak.",
+    "text": "I brought over your Rainbow Rave mod for x.com and added extras made for this page. It's a new mod here, **Rainbow Rave**, and it's working now. I checked it in screenshots and it threw no errors.\n\n**From the x.com version:**\n- The rolling rainbow background with white text.\n- The trance loop you made with code, so no sound files.\n- The page zooms with the kick drum.\n- The play/pause and zoom buttons in the bottom right.\n\n**New for this page:**\n- 🕶️ **The robot** keeps changing colour and glowing. When the music starts it drops on a pair of shades, then head-bangs on every kick, tilting side to side.\n- 🌊 **The title** waves letter by letter and shimmers through colours.\n- 🔦 **Lasers:** two fans of white beams sweep up from the bottom corners and flash on each kick.\n- 🌈 **Buttons:** \"Get it\" is a moving rainbow, and GitHub gets a rainbow ring.\n- 🎶 **The track builds up:** six bars of full groove, a breakdown bar (the lasers dim and the kick drops out), then a bar of speeding-up snare with a rising whoosh. Then **the drop**: a crash, a white flash, the robot does a flip, and rainbow sparks burst out of it.\n\nThe music starts on your first click or key press. I couldn't play it from here, so I've only checked the sound and dancing in the code; I saw the shades and lasers by turning the \"music on\" look on directly. Have a listen and tell me what to tweak.",
     "t": 181565
    }
   ]

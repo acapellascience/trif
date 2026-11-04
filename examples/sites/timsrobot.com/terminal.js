@@ -10,9 +10,21 @@
 // ==/WebMod==
 
 (() => {
-  // Mods can't read the disk, so the listing is written here. Add new mods to it as they're made.
-  const MODS = ['checklist.js', 'jelly.js', 'neon.js', 'rave.js', 'robot.js',
-    'stickers.js', 'tagline.js', 'terminal.js'];
+  // Mods can't read the disk. On the home page's demo, the listing is the mods the demo has made so far
+  // (its side panel keeps them in this tab's sessionStorage; else the ones the page's address runs);
+  // anywhere else, the list written here.
+  const FALLBACK = ['checklist.js', 'jelly.js', 'neon.js', 'rave.js', 'robot.js', 'stickers.js', 'tagline.js', 'terminal.js'];
+  const demoMods = () => {
+    const ok = (s) => typeof s === 'string' && /^[a-z0-9-]{1,40}$/.test(s);
+    try {
+      const saved = JSON.parse(sessionStorage.getItem('trif-demo-state') || 'null');
+      if (saved?.v === 1 && Array.isArray(saved.mods) && saved.mods.filter(ok).length) return saved.mods.filter(ok);
+    } catch {}
+    const param = new URLSearchParams(location.search).get('mods');
+    return param ? param.split(',').filter(ok) : null;
+  };
+  const listed = demoMods();
+  const MODS = listed ? [...new Set([...listed, 'terminal'])].map((m) => `${m}.js`).sort() : FALLBACK;
   const COMMAND = 'ls ~/.trif/sites/timsrobot.com';
 
   const h2 = [...document.querySelectorAll('h2')].find((h) => /yours, on your computer/i.test(h.textContent));

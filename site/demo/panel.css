@@ -1,4 +1,4 @@
-/* The homepage demo's additions to the real side panel (shim.js adds the "Recorded chats" box). */
+/* The homepage demo's additions to the real side panel (shim.js puts the next recorded prompt in the message box). */
 
 /* Dark, like the page around it, whatever the visitor's system is set to: the panel's colours are
    light-dark() pairs, which follow color-scheme. (Its one light-only rule, the sleeping robot's
@@ -8,38 +8,16 @@ body.site-off .bar-robot svg { opacity: 0.45; }
 body.site-off .bar-robot:hover:not([aria-busy="true"]) svg { opacity: 0.7; }
 
 /* The panel's own suggestions ("Hide distractions"…) would only get "this demo replays recordings":
-   the recorded prompts below take their place. */
+   the recorded prompt waiting in the message box takes their place. */
 #empty .chips { display: none; }
 
-.demo-replays {
-  flex: none;
-  margin: 2px 12px 0;
-  padding: 7px 10px;
-  border: 1px dashed var(--line);
-  border-radius: var(--radius);
-}
-.demo-replays summary {
-  cursor: pointer;
-  color: var(--muted);
-  font-size: 12px;
-  font-weight: 500;
-}
-.demo-replays summary::marker { color: var(--faint); }
-.demo-chips {
-  margin-top: 7px;
-  max-height: 20vh;
-  overflow-y: auto;
-  overscroll-behavior: contain;
-  scrollbar-width: thin;
-}
-.demo-chips .chip { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-align: left; }
-.demo-chips .chip:disabled { opacity: 0.5; cursor: default; }
-.demo-note { margin: 0; color: var(--muted); font-size: 12px; }
-body:is(.site-off, .no-site) .demo-replays { display: none; }
+body:is(.site-off, .no-site) .demo-done { display: none; }
 
-/* On a phone (shim.js): the message box holds the next recorded prompt, and can't be typed in or focused
-   (no keyboard, no zooming in on it); Send replays it. Everything the visitor could still focus (the
-   settings) is at least 16px, or the phone zooms the page in on it. */
-html.demo-phone #input { pointer-events: none; caret-color: transparent; font-size: 16px; }
+/* The message box holds the next recorded prompt, and can't be typed in or focused (on a phone: no
+   keyboard, no zooming in on it); Send replays it (shim.js). */
+#input { pointer-events: none; caret-color: transparent; }
+/* On a phone, everything the visitor could still focus (the settings) is at least 16px, or the phone zooms
+   the page in on it. */
+html.demo-phone #input { font-size: 16px; }
 html.demo-phone :is(input, select, textarea) { font-size: 16px; }
-html.demo-phone .demo-done { margin: 2px 14px 6px; }
+.demo-done { margin: 2px 14px 6px; }

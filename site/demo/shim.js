@@ -1,16 +1,18 @@
 // The homepage demo's stand-in for the TRIF extension, loaded before the real side panel's scripts (the
 // Worker adds it to the extension's own sidepanel.html; see site/src/demo.js). It provides the chrome.*
 // calls the panel makes and answers the panel's port messages the way extension/background.js does, from
-// made-up state: the helper is connected, Claude Code is logged in, the tab shows timsrobot.com, the robot
-// is on there, and the home page mods TRIF ships are listed, in its order (all off at first).
+// made-up state: the helper is connected, Claude Code is logged in, the tab shows timsrobot.com, and the
+// robot is on there. No mods at first (just the ones the page's address runs): each of the home page mods
+// TRIF ships turns up in the list, on, once the recorded chat that made it has played, in TRIF's order.
 //
 // What really happens:
 // - A mod switch (or the robot) reloads the home page the panel is docked to with the mods that are on
 //   (tab.js loads /?mods=…, and the Worker adds only mods from its bundled list). The panel opens again
 //   after the reload, and this picks up where it was from sessionStorage (the chat, the switches, settings,
 //   a replay in progress).
-// - Chats are recordings: a recorded prompt (offered under "Recorded chats") replays that session, sped
-//   up, then switches its mod on. Anything else gets a note saying this demo only replays recordings.
+// - Chats are recordings: the next recording's prompt waits in the message box (which can't be typed in),
+//   and Send replays that session, sped up, then switches its mod on. (Anything else that reaches it gets
+//   a note saying this demo only replays recordings.)
 // Nothing leaves the page: no messages to a helper, no keys kept, nothing stored but this tab's
 // sessionStorage.
 //
@@ -84,7 +86,7 @@
 
   const state = {
     sitesOn: [SITE],
-    mods: DEMO.mods.map((m) => ({ ...m })), // listed (in the background's order: by file name)
+    mods: [], // listed (in the background's order: by file name)
     trash: new Map(),
     instructions: '',
     autoUpdate: false,
@@ -92,7 +94,6 @@
     runs: new Map(),
     replayed: new Set(), // recorded chats played to the end
     active: null,        // the run going: {runId, chat (recording id, or null for the demo's note), step}
-    chipsOpen: true,
   };
 
   // ---- across the page's reloads: this tab's sessionStorage ---------------------------------------
@@ -104,7 +105,7 @@
     const out = {
       v: 1, store: Object.fromEntries(store), sitesOn: state.sitesOn, mods: state.mods.map((m) => m.slug), trash: [...state.trash.values()].map((m) => m.slug),
       instructions: state.instructions, autoUpdate: state.autoUpdate, openModel: state.openModel, replayed: [...state.replayed],
-      active: state.active, chipsOpen: state.chipsOpen, runSeq,
+      active: state.active, runSeq,
     };
     try { sessionStorage.setItem(SAVED, JSON.stringify(out)); } catch { /* private window: lasts until the reload */ }
   }
@@ -122,13 +123,13 @@
     if (saved.openModel?.provider) state.openModel = saved.openModel;
     state.replayed = new Set(saved.replayed || []);
     state.active = saved.active || null;
-    state.chipsOpen = saved.chipsOpen !== false;
     runSeq = Number(saved.runSeq) || 0;
   } else {
-    // First time: the mods running on the page (its ?mods=) are on, the rest off.
+    // First time: only the mods running on the page (its ?mods=), on.
     let running = new Set();
     try { running = new Set(new URLSearchParams(window.parent.location.search).get('mods')?.split(',') || []); } catch {}
-    store.set('disabled', Object.fromEntries(state.mods.filter((m) => !running.has(m.slug)).map((m) => [m.id, true])));
+    state.mods = DEMO.mods.filter((m) => running.has(m.slug)).map((m) => ({ ...m }));
+    store.set('disabled', {});
   }
   // The panel lists the mods in the order TRIF ships them in until the visitor drags them (as the helper's
   // defaultOrder does for the real extension); the visitor's own order (modOrder) lives in `store`.
@@ -300,11 +301,19 @@
     broadcast({ type: 'agentEvent', runId: run.runId, event: { kind: 'done', ok, result: '', changedFiles: [], costUsd: null, sessionId: null } });
     broadcast({ type: 'statusChanged' });
     ui.finished(run);
-    // The mod the recorded session made: on, as it was at the end of the session, and the page reloaded
-    // with it (after a moment, so the reply has been seen arriving).
+    // The mod the recorded session made: in the list (as the agent's new file would be), on, as it was at
+    // the end of the session, and the page reloaded with it (after a moment, so the reply has been seen
+    // arriving).
     if (ok && run.recording) {
       const off = { ...disabled() };
-      for (const slug of run.recording.mods) delete off[`${SITE}/${slug}`];
+      for (const slug of run.recording.mods) {
+        const m = bySlug.get(slug);
+        if (!m) continue;
+        delete off[m.id];
+        state.trash.delete(m.id);
+        if (!findMod(m.id)) state.mods.push({ ...m });
+      }
+      state.mods.sort((a, b) => a.slug.localeCompare(b.slug));
       setNow({ disabled: off });
       state.replayed.add(run.recording.id);
       later(loadPage, 1200);
@@ -468,104 +477,54 @@
   };
   Object.defineProperty(window, 'chrome', { value: chrome, configurable: true, writable: true });
 
-  // ---- "Recorded chats": the prompts the demo can replay, above the message box -------------------
-  // On a phone (the panel is the sheet over the bottom of the page) there's no room for the list, and
-  // typing would bring up the keyboard and zoom the page: instead the next recording's prompt waits in the
-  // message box, which can't be typed in, and Send replays it. One after another, in the order the panel
-  // lists the mods (the visitor's own, if they've dragged them): each recording by the last of its mods
-  // in that order, and only once the ones it follows on from have played.
+  // ---- The recorded chats, one at a time ----------------------------------------------------------
+  // The next recording's prompt waits in the panel's own message box, which can't be typed in (on a
+  // phone, typing would bring up the keyboard and zoom the page in), and Send replays it. One after
+  // another, in the order the panel lists the mods (the visitor's own, if they've dragged them): each
+  // recording by the last of its mods in that order, and only once the ones it follows on from have played.
 
   const ui = (() => {
-    let box = null;
-    let summary = null;
-    let list = null;
     let busy = null; // the run being replayed
-    const el = (tag, cls, text) => { const e = document.createElement(tag); if (cls) e.className = cls; if (text !== undefined) e.textContent = text; return e; };
-    const short = (s) => (s.length > 64 ? `${s.slice(0, 62).replace(/\s+\S*$/, '')}…` : s);
+    let note = null; // "That's all the recordings…", once they have all played
     const offered = () => DEMO.chats.filter((c) => !state.replayed.has(c.id) && c.after.every((a) => state.replayed.has(a)));
-    const phone = (() => { try { return window.parent !== window && window.parent.matchMedia('(max-width: 700px)').matches; } catch { return false; } })();
-    if (phone) document.documentElement.classList.add('demo-phone');
     function next() {
       const own = store.get('modOrder');
       const order = (Array.isArray(own?.[SITE]) && own[SITE].length ? own[SITE] : DEMO.order || []).map((id) => String(id).split('/').pop());
       const rank = (c) => Math.max(...c.mods.map((slug) => { const i = order.indexOf(slug); return i < 0 ? order.length : i; }));
       return offered().map((c, i) => ({ c, i, r: rank(c) })).sort((a, b) => a.r - b.r || a.i - b.i)[0]?.c || null;
     }
-    // The waiting prompt, in the panel's own message box (the panel clears it when it sends).
-    let note = null;
+
+    // (the panel clears the box when it sends)
     function fill() {
       const input = document.getElementById('input');
       if (!input) return;
       const c = busy ? null : next();
       input.value = c ? c.prompt : '';
       input.dispatchEvent(new Event('input', { bubbles: true })); // (the box grows to fit)
-      if (!note) { note = el('p', 'demo-note demo-done', DEMO.words.allReplayedNote); document.getElementById('composer')?.before(note); }
       note.hidden = !!(c || busy);
-    }
-
-    function paint() {
-      if (!box) return;
-      const chats = offered();
-      summary.textContent = busy ? DEMO.words.replaying.replace('{n}', busy.speedup)
-        : chats.length ? DEMO.words.recorded : DEMO.words.allReplayed;
-      list.replaceChildren(...chats.map((c) => {
-        const b = el('button', 'chip', short(c.prompt));
-        b.type = 'button';
-        b.title = c.prompt;
-        b.disabled = !!busy;
-        b.addEventListener('click', () => choose(c));
-        return b;
-      }));
-      if (!chats.length && !busy) list.append(el('p', 'demo-note', DEMO.words.allReplayedNote));
-    }
-
-    // Type the prompt into the real message box, then send it the way Enter would.
-    async function choose(c) {
-      const input = document.getElementById('input');
-      const form = document.getElementById('composer');
-      if (busy || !input || input.disabled) return;
-      box.open = false;
-      state.chipsOpen = false;
-      persist();
-      input.focus();
-      const step = Math.max(1, Math.ceil(c.prompt.length / 45));
-      for (let i = 0; i <= c.prompt.length; i += step) {
-        input.value = c.prompt.slice(0, i);
-        input.dispatchEvent(new Event('input', { bubbles: true }));
-        await sleep(16);
-      }
-      input.value = c.prompt;
-      form.requestSubmit();
     }
 
     function mount() {
       const form = document.getElementById('composer');
-      if (!form || box || note) return;
-      if (phone) {
-        const input = document.getElementById('input');
-        input.readOnly = true;
-        input.tabIndex = -1;
-        input.rows = 3; // (where the box can't grow to fit its text: Safari)
-        input.setAttribute('aria-label', 'The next recorded prompt: Send replays it');
-        fill();
-        later(resume);
-        return;
-      }
-      box = el('details', 'demo-replays');
-      box.open = state.chipsOpen;
-      box.addEventListener('toggle', () => { state.chipsOpen = box.open; persist(); });
-      summary = el('summary');
-      list = el('div', 'chips demo-chips');
-      box.append(summary, list);
-      form.before(box);
-      paint();
+      const input = document.getElementById('input');
+      if (!form || !input || note) return;
+      try { if (window.parent !== window && window.parent.matchMedia('(max-width: 700px)').matches) document.documentElement.classList.add('demo-phone'); } catch {}
+      input.readOnly = true;
+      input.tabIndex = -1;
+      input.rows = 3; // (where the box can't grow to fit its text: Safari)
+      input.setAttribute('aria-label', 'The next recorded prompt: Send replays it');
+      note = document.createElement('p');
+      note.className = 'demo-note demo-done';
+      note.textContent = DEMO.words.allReplayedNote;
+      form.before(note);
+      fill();
       later(resume);
     }
     if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', mount, { once: true }); else mount();
 
     return {
-      replaying(run) { busy = run; if (phone) fill(); else paint(); },
-      finished(run) { if (busy === run) busy = null; if (phone) fill(); else paint(); },
+      replaying(run) { busy = run; fill(); },
+      finished(run) { if (busy === run) busy = null; fill(); },
     };
   })();
 })(/*DEMO_DATA*/null);

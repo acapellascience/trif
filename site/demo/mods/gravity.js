@@ -671,9 +671,9 @@
   // The row of round buttons along the top of the window. On a touchscreen it's spread evenly from edge to
   // edge, in this order: the courtesy mute (from the first sound on), Space shooter's restart, Rainbow
   // Rave's kick zoom and music (once won), Gravity mode's drop (mute, restart and drop: left, middle and
-  // right). With a mouse there are only the rave's two, together in the top right (no mute: the computer
-  // has its own). Whichever mod needs it first makes it; the others find it. Light buttons, or the rave's
-  // dark ones while it's on.
+  // right). With a mouse there's no restart or drop: the mute and the rave's two sit together in the top
+  // right. Whichever mod needs it first makes it; the others find it. Light buttons, or the rave's dark ones
+  // while it's on.
   // On <html>, not <body> (the tilt card transforms <body>, and Gravity mode piles up what's in it), and
   // in the top layer where the browser has one (popover): there it stays on the window whatever <html>
   // does (the tilt card's perspective, the shooter's screen shake). Where there's no top layer, it's

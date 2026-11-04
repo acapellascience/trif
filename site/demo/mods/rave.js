@@ -446,13 +446,12 @@
     if (button) {
       const svg = document.createElementNS(NS, 'svg');
       svg.setAttribute('viewBox', '0 0 24 24');
-      // on a touchscreen, a music note (struck through while the music is off); with a mouse, play / pause
+      // a music note; struck through while the music is off
       const path = document.createElementNS(NS, 'path');
-      if (!TOUCH_UI) path.setAttribute('d', musicOn ? 'M6 5h4v14H6zM14 5h4v14h-4z' : 'M8 5v14l11-7z');
-      else path.setAttribute('d', 'M12 3v10.55A4 4 0 1 0 14 17V7h4V3h-6z');
-      if (TOUCH_UI && !musicOn) path.setAttribute('opacity', '0.6');
+      path.setAttribute('d', 'M12 3v10.55A4 4 0 1 0 14 17V7h4V3h-6z');
+      if (!musicOn) path.setAttribute('opacity', '0.6');
       svg.append(path);
-      if (TOUCH_UI && !musicOn) {
+      if (!musicOn) {
         const slash = document.createElementNS(NS, 'path');
         slash.setAttribute('d', 'M4 4 20 20');
         slash.setAttribute('fill', 'none'); slash.setAttribute('stroke', '#fff');
@@ -552,14 +551,9 @@
       path.setAttribute('opacity', String(opacity));
       svg.append(path);
     };
-    if (TOUCH_UI) { // the page zooming out and back: four corners around a block (the sound waves are the mute's)
-      add('M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5', true);
-      add('M9 9h6v6H9z');
-    } else { // with a mouse (no mute button): sound waves
-      add('M12 9.75a2.25 2.25 0 1 0 0 4.5a2.25 2.25 0 1 0 0-4.5z');
-      add('M15.5 8.5a5 5 0 0 1 0 7M8.5 8.5a5 5 0 0 0 0 7', true);
-      add('M18.5 5.5a9.2 9.2 0 0 1 0 13M5.5 5.5a9.2 9.2 0 0 0 0 13', true, 0.55);
-    }
+    // the page zooming out and back: four corners around a block (the sound waves are the mute button's)
+    add('M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5', true);
+    add('M9 9h6v6H9z');
     if (!zoomOn) add('M4 4 20 20', true);
     zoomButton.replaceChildren(svg);
     zoomButton.setAttribute('aria-pressed', String(zoomOn));
@@ -595,9 +589,9 @@
   // The row of round buttons along the top of the window. On a touchscreen it's spread evenly from edge to
   // edge, in this order: the courtesy mute (from the first sound on), Space shooter's restart, Rainbow
   // Rave's kick zoom and music (once won), Gravity mode's drop (mute, restart and drop: left, middle and
-  // right). With a mouse there are only the rave's two, together in the top right (no mute: the computer
-  // has its own). Whichever mod needs it first makes it; the others find it. Light buttons, or the rave's
-  // dark ones while it's on.
+  // right). With a mouse there's no restart or drop: the mute and the rave's two sit together in the top
+  // right. Whichever mod needs it first makes it; the others find it. Light buttons, or the rave's dark ones
+  // while it's on.
   // On <html>, not <body> (the tilt card transforms <body>, and Gravity mode piles up what's in it), and
   // in the top layer where the browser has one (popover): there it stays on the window whatever <html>
   // does (the tilt card's perspective, the shooter's screen shake). Where there's no top layer, it's
@@ -648,21 +642,19 @@
     return bar;
   };
 
-  // The courtesy mute on a touchscreen, shared by the mods that make sound (Living Robot, Space Shooter,
-  // Click Fireworks, Rainbow Rave): the first button in the row along the top, there from the first sound on. It silences
+  // The courtesy mute, shared by the mods that make sound (Living Robot, Space Shooter, Click Fireworks,
+  // Rainbow Rave): the first button in the row along the top, there from the first sound on. It silences
   // all of them (each one suspends its own audio while it's on: the `trif-mute` event), and this browser
   // remembers it.
   const MUTED = 'trif.muted';
-  // (touchscreens only: a computer has its own mute. It starts muted, so the struck-through button says
-  // there's sound to be had; unmuted is remembered. Without storage, it's remembered for the page.)
-  const TOUCH_UI = matchMedia('(pointer: coarse)').matches;
+  // (It starts muted, so the struck-through button says there's sound to be had, and a click on it is the
+  // gesture browsers want before they play any; unmuted is remembered. Without storage, for the page.)
   const isMuted = () => {
-    if (!TOUCH_UI) return false;
     try { const v = localStorage.getItem(MUTED); return v === null ? window.__trifMuted !== false : v === '1'; } catch { return window.__trifMuted !== false; }
   };
   const setMuted = (on) => { window.__trifMuted = on; try { localStorage.setItem(MUTED, on ? '1' : '0'); } catch {} };
   const muteButton = () => {
-    if (!TOUCH_UI || document.getElementById('trif-mute')) return;
+    if (document.getElementById('trif-mute')) return;
     const NS = 'http://www.w3.org/2000/svg';
     const b = document.createElement('button');
     b.type = 'button';

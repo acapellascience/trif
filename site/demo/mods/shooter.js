@@ -1258,9 +1258,9 @@
   // The row of round buttons along the top of the window. On a touchscreen it's spread evenly from edge to
   // edge, in this order: the courtesy mute (from the first sound on), Space shooter's restart, Rainbow
   // Rave's kick zoom and music (once won), Gravity mode's drop (mute, restart and drop: left, middle and
-  // right). With a mouse there are only the rave's two, together in the top right (no mute: the computer
-  // has its own). Whichever mod needs it first makes it; the others find it. Light buttons, or the rave's
-  // dark ones while it's on.
+  // right). With a mouse there's no restart or drop: the mute and the rave's two sit together in the top
+  // right. Whichever mod needs it first makes it; the others find it. Light buttons, or the rave's dark ones
+  // while it's on.
   // On <html>, not <body> (the tilt card transforms <body>, and Gravity mode piles up what's in it), and
   // in the top layer where the browser has one (popover): there it stays on the window whatever <html>
   // does (the tilt card's perspective, the shooter's screen shake). Where there's no top layer, it's
@@ -1311,21 +1311,19 @@
     return bar;
   };
 
-  // The courtesy mute on a touchscreen, shared by the mods that make sound (Living Robot, Space Shooter,
-  // Click Fireworks, Rainbow Rave): the first button in the row along the top, there from the first sound on. It silences
+  // The courtesy mute, shared by the mods that make sound (Living Robot, Space Shooter, Click Fireworks,
+  // Rainbow Rave): the first button in the row along the top, there from the first sound on. It silences
   // all of them (each one suspends its own audio while it's on: the `trif-mute` event), and this browser
   // remembers it.
   const MUTED = 'trif.muted';
-  // (touchscreens only: a computer has its own mute. It starts muted, so the struck-through button says
-  // there's sound to be had; unmuted is remembered. Without storage, it's remembered for the page.)
-  const TOUCH_UI = matchMedia('(pointer: coarse)').matches;
+  // (It starts muted, so the struck-through button says there's sound to be had, and a click on it is the
+  // gesture browsers want before they play any; unmuted is remembered. Without storage, for the page.)
   const isMuted = () => {
-    if (!TOUCH_UI) return false;
     try { const v = localStorage.getItem(MUTED); return v === null ? window.__trifMuted !== false : v === '1'; } catch { return window.__trifMuted !== false; }
   };
   const setMuted = (on) => { window.__trifMuted = on; try { localStorage.setItem(MUTED, on ? '1' : '0'); } catch {} };
   const muteButton = () => {
-    if (!TOUCH_UI || document.getElementById('trif-mute')) return;
+    if (document.getElementById('trif-mute')) return;
     const NS = 'http://www.w3.org/2000/svg';
     const b = document.createElement('button');
     b.type = 'button';

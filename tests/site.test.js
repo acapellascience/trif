@@ -62,10 +62,10 @@ test('the Worker: pages with strict headers, reports emailed, bad ones refused',
   assert.match(home, /Fix any website with your own coding agent\./);
   assert.match(home, /href="https:\/\/github\.com\/acapellascience\/trif#install" target="_blank" rel="noopener">Get it</);
   assert.match(home, /href="https:\/\/github\.com\/acapellascience\/trif" target="_blank" rel="noopener">GitHub</, "the buttons open a new tab");
-  assert.match(home, /href="\/report">Report a problem</);
+  assert.match(home, /href="\/report" target="_blank" rel="noopener">Report a problem</); // (footer links open in a new tab)
   // Its only script is the demo tab's (deferred, so the page is all there before it runs).
   assert.deepStrictEqual(home.match(/<script[^>]*>/g), ['<script src="/demo.js" defer>']);
-  assert.match(home, /<footer>.*<a href="\/windows">Windows waitlist<\/a>.*<\/footer>/, 'the footer links to the Windows waitlist');
+  assert.match(home, /<footer>.*<a href="\/windows" target="_blank" rel="noopener">Windows waitlist<\/a>.*<\/footer>/, 'the footer links to the Windows waitlist');
 
   let res = await worker.fetch(post({ what: 'It broke', site: 'x.com', email: 'a@b.co', details: 'TRIF 0.1.1' }, { 'User-Agent': 'Firefox/159' }), e);
   assert.deepStrictEqual([res.status, await res.json()], [200, { ok: true }]);

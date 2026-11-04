@@ -217,6 +217,8 @@
         s.async = false; // (in order, if there's more than one)
         document.head.append(s);
       }
+      // (mods that list what's there, like Terminal Box, hear about the new ones)
+      dispatchEvent(new CustomEvent('trif-demo-mods', { detail: { mods: names.slice() } }));
       if (made === 'shooter' && phone() && !minimized()) minimize(true); // (a game: the sheet out of the ship's way)
       focusOn(made);
       return;

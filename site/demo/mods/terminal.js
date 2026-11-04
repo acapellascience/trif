@@ -88,6 +88,17 @@
   const ls = el('div', 'tb-ls');
   ls.setAttribute('aria-label', 'Mods: ' + MODS.join(', '));
   for (const m of MODS) ls.append(el('span', '', m));
+  // On the demo, mods made after this one join the page without a reload (its `trif-demo-mods` event):
+  // the listing gains them, in ls order, as if the command had been run again.
+  addEventListener('trif-demo-mods', (e) => {
+    try {
+      const ok = (s) => typeof s === 'string' && /^[a-z0-9-]{1,40}$/.test(s);
+      const files = [...new Set([...(e.detail?.mods || []).filter(ok), 'terminal'])].map((m) => `${m}.js`).sort();
+      const shown = ls.querySelectorAll('span').length && ls.querySelector('span.tb-on');
+      ls.replaceChildren(...files.map((m) => { const s = el('span', '', m); if (shown) s.classList.add('tb-on'); return s; }));
+      ls.setAttribute('aria-label', 'Mods: ' + files.join(', '));
+    } catch (err) { window.trif?.warn('terminal', String(err)); }
+  });
   body.append(first, ls, para);
   box.prepend(bar);
   box.append(body);

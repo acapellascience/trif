@@ -61,11 +61,7 @@ const PREINSTALLED = [
   // Added in 0.2.0: existing workspaces get it (off) with the setup that installs the update, since it
   // isn't in their `offered` list yet.
   { id: 'www.google.com/dvd-logo', on: false },
-  // Added in 0.2.0, the same way: Rainbow Rave (X has had one since 0.1) for Google, Amazon and
-  // Instagram, all off.
-  { id: 'www.google.com/rainbow-rave', on: false },
-  { id: 'amazon.com/rainbow-rave', on: false },
-  { id: 'www.instagram.com/rainbow-rave', on: false },
+  // (Rainbow Rave for Google, Amazon and Instagram waits for a later release: unreleased/sites/.)
 ];
 // (TRIF's own home page, timsrobot.com, gets none: it's like any other website, modded if the user wants.
 // Its demo's mods are the site's own, site/demo/mods/. Copies an earlier build put in a workspace stay

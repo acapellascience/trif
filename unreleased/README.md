@@ -1,0 +1,1 @@
+Mods written for a later release, kept out of the npm package (package.json "files" doesn't list this folder): setup doesn't ship them until they move to examples/sites/ and helper/lib/preinstalled.js lists them.

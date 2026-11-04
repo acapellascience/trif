@@ -1,6 +1,6 @@
 {
  "id": "robot",
- "prompt": "bring the robot to life! give it legs and have it walk around making occasional robot noises.",
+ "prompt": "bring the robot to life! make it startle when i tap on it. give it legs and have it walk around making occasional robot noises.",
  "secs": 138,
  "mods": [
   "robot"
@@ -9,7 +9,7 @@
  "messages": [
   {
    "role": "user",
-   "text": "bring the robot to life! give it legs and have it walk around making occasional robot noises.",
+   "text": "bring the robot to life! make it startle when i tap on it. give it legs and have it walk around making occasional robot noises.",
    "t": 0
   },
   {
@@ -79,7 +79,7 @@
   },
   {
    "role": "assistant",
-   "text": "The robot is alive. I added a new mod, **Living Robot**:\n\n- **Legs:** two little green legs. They swing with each step, his feet point where he's going and he leans into it. Walking up or down the page, he marches.\n- **Walking around:** he runs little routines on his own: strolls, a hop and a dash, loop-the-loops, figure eights, zigzags, pacing like a sentry, peeking from the edge of the screen, spirals and a hop dance, with pauses in between. Now and then he heads back home. He stays on screen, and stops while your pointer is over him.\n- **Robot noises:** a soft tap for each footstep, a boing when he hops, and now and then, when he stops to think, a happy little murmur (\"mm-hm?\", \"hm, hm!\" or \"brr-up?\", never the same one twice in a row).\n- **Also:** his eyes follow your mouse, he blinks every few seconds, and he hops when you click him.\n\n**What I checked:** after a reload he set off on his own, the screenshot shows him mid-stride with his legs showing, and clicking him made him hop. No errors. Browsers only play sound after you've clicked or pressed a key on the page, so he's quiet until then; I can't hear from here, so give him a listen.\n\nTo undo it, switch off **Living Robot** in the side panel, or ask me to.",
+   "text": "The robot is alive. I added a new mod, **Living Robot**:\n\n- **Legs:** two little green legs. They swing with each step, his feet point where he's going and he leans into it. Walking up or down the page, he marches.\n- **Walking around:** he runs little routines on his own: strolls, a hop and a dash, loop-the-loops, figure eights, zigzags, pacing like a sentry, peeking from the edge of the screen, spirals and a hop dance, with pauses in between. Now and then he heads back home. He stays on screen, and stops while your pointer is over him.\n- **Robot noises:** a soft tap for each footstep, a boing when he hops, and now and then, when he stops to think, a happy little murmur (\"mm-hm?\", \"hm, hm!\" or \"brr-up?\", never the same one twice in a row).\n- **Startle:** tap or click him and he jumps with a boing and a startled blink.\n- **Also:** his eyes follow your mouse, and he blinks every few seconds.\n\n**What I checked:** after a reload he set off on his own, the screenshot shows him mid-stride with his legs showing, and clicking him made him jump. No errors. Browsers only play sound after you've clicked or pressed a key on the page, so he's quiet until then; I can't hear from here, so give him a listen.\n\nTo undo it, switch off **Living Robot** in the side panel, or ask me to.",
    "t": 125600
   }
  ]

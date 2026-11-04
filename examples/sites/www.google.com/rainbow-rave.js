@@ -227,8 +227,6 @@
       background-color: rgba(10, 10, 14, 0.45) !important; box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.55) !important;
     }
     html body [data-trif-rave-bg=none] { background-color: transparent !important; }
-    /* Product shots and logos on white: the white keyed out (see whiteKey), so they float on the rainbow. */
-    html body [data-trif-rave-key] { filter: url(#trif-rave-white-key) !important; }
 
     /* The controls: kick zoom on/off and music play/pause, round dark glass buttons (timsrobot.com's). */
     /* (:not(#trif-rave) and !important: page styles for buttons, ids included, mustn't reach them) */
@@ -265,8 +263,8 @@
       defs.setAttribute('aria-hidden', 'true');
       defs.setAttribute('class', 'trif-rave-ui');
       defs.setAttribute('style', 'position:absolute !important;width:0;height:0;overflow:hidden;pointer-events:none;display:block !important');
-      // White key: alpha = 24 × A − 8 × (R + G + B), clamped: white (and near-white) goes see-through,
-      // what was see-through stays so.
+      // White key (filter: url(#trif-rave-white-key)), for pictures shot on white: alpha = 24 × A −
+      // 8 × (R + G + B), clamped, so white (and near-white) goes see-through, and what was stays so.
       const f = document.createElementNS(NS, 'filter');
       f.id = 'trif-rave-white-key';
       f.setAttribute('color-interpolation-filters', 'sRGB');
@@ -405,7 +403,11 @@
   new MutationObserver(queue).observe(document.documentElement, { childList: true, subtree: true });
   // (the first pass waits for the end of this script: everything below is set up by then)
   if (document.readyState === 'loading') addEventListener('DOMContentLoaded', pass); else setTimeout(pass, 0);
-  addEventListener('load', queue);
+  // Boxes classified before the page's stylesheets arrived looked clear: look at them again once it's loaded.
+  addEventListener('load', () => {
+    for (const el of document.querySelectorAll('[data-trif-rave-bg=none]')) el.removeAttribute('data-trif-rave-bg');
+    queue();
+  });
   // (Single-page apps: their route changes rebuild the page, which the observer above sees. History
   // isn't patched, so the page has nothing of ours to notice but styles and attributes.)
 
@@ -510,7 +512,8 @@
   const MAX_POPS = 80;
   const bouncing = new Map();   // element -> Animation
   let stopTimer = 0;
-  const stopBounce = () => { clearTimeout(stopTimer); for (const a of bouncing.values()) a.cancel(); bouncing.clear(); };
+  const popping = new Set();    // the icons and buttons among them
+  const stopBounce = () => { clearTimeout(stopTimer); for (const a of bouncing.values()) a.cancel(); bouncing.clear(); popping.clear(); };
   const bounce = (el, frames, origin) => {
     if (origin && el.style.transformOrigin !== origin) el.style.transformOrigin = origin;
     if (bouncing.has(el)) return;
@@ -523,23 +526,21 @@
     try {
       if (!musicOn || document.hidden) { stopBounce(); return; }
       const drift = ((at - phase) % BEAT + BEAT) % BEAT;
-      if (Math.min(drift, BEAT - drift) > 15) { phase = at; repinAll(); }
+      if (Math.min(drift, BEAT - drift) > 15) { phase = at; repinAll(); } else syncSvgClock();   // (SMIL drifts a frame or two)
       if (!zoomOn) { stopBounce(); return; }
-      for (const [el, a] of bouncing) if (!el.isConnected) { a.cancel(); bouncing.delete(el); }
+      for (const [el, a] of bouncing) if (!el.isConnected) { a.cancel(); bouncing.delete(el); popping.delete(el); }
       const cx = innerWidth / 2, cy = innerHeight / 2;
       for (const el of SITE.blocks()) {
         const r = el.getBoundingClientRect();
         if (inView(r)) bounce(el, ZOOM, `${Math.round(cx - r.left)}px ${Math.round(cy - r.top)}px`);
       }
-      let pops = 0;
-      for (const a of bouncing.values()) if (a.effect?.getKeyframes?.()[0]?.scale === '1.16') pops++;
       for (const el of document.querySelectorAll('[data-trif-rave-pop]')) {
-        if (pops >= MAX_POPS) break;
+        if (popping.size >= MAX_POPS) break;
         if (bouncing.has(el) || el.closest('[data-trif-rave-nopop]')) continue;
         const r = el.getBoundingClientRect();
         if (!inView(r) || r.width > 320 || r.height > 120) continue;
         bounce(el, POP, 'center');
-        pops++;
+        popping.add(el);
       }
       clearTimeout(stopTimer);
       stopTimer = setTimeout(stopBounce, BEAT * 2.5);

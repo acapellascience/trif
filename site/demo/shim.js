@@ -27,6 +27,19 @@
   const EXTENSION_ID = 'iaablflfafmonebdomeikadolkgdbkhe';
   const TAB = { id: 7, windowId: 1, index: 0, active: true, status: 'complete', url: `https://${SITE}/`, title: "Tim's Robot Internet Fixer" };
   const clone = (v) => (v === undefined ? undefined : JSON.parse(JSON.stringify(v)));
+
+  // On a touchscreen, a chat that talks about keys or the mouse plays its touch version instead
+  // (chat.touch: its prompt, and replacement texts by message index; an empty text cuts that message).
+  const touchscreen = (() => { try { return (window.parent || window).matchMedia('(pointer: coarse)').matches; } catch { return false; } })();
+  if (touchscreen) {
+    DEMO.chats = DEMO.chats.map((c) => {
+      if (!c.touch) return c;
+      const texts = c.touch.texts || {};
+      const messages = c.messages.map((m, i) => (i === 0 ? { ...m, text: c.touch.prompt }
+        : Object.hasOwn(texts, i) ? { ...m, text: texts[i] } : m)).filter((m) => m.text !== '');
+      return { ...c, prompt: c.touch.prompt, messages };
+    });
+  }
   const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
   const later = (fn, ms = 0) => setTimeout(fn, ms);
 

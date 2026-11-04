@@ -287,8 +287,8 @@ test('the demo\'s bundle is up to date with site/demo/, its chats are clean and 
   // The panel renders assistant (and error) lines as markdown: only its own few tags come out.
   const { renderMarkdown, MARKDOWN_ELEMENTS } = await import('../extension/markdown.js');
   for (const c of CHATS) {
-    for (const m of c.messages) {
-      const tags = [...renderMarkdown(m.text).matchAll(/<\/?([a-z0-9]+)/g)].map((x) => x[1]);
+    for (const text of [...c.messages.map((m) => m.text), ...Object.values(c.touch?.texts || {})]) { // (touch versions too)
+      const tags = [...renderMarkdown(text).matchAll(/<\/?([a-z0-9]+)/g)].map((x) => x[1]);
       for (const t of tags) assert.ok(MARKDOWN_ELEMENTS.includes(t), `${c.id}: <${t}>`);
     }
   }

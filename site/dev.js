@@ -1,6 +1,7 @@
-// Run timsrobot.com locally without Cloudflare: node site/dev.js [port]. Reports are printed here instead of
-// emailed. (Node 18+ has the Request/Response the Worker uses.) The demo's files are bundled again first
-// (build-demo.js), and the side panel's files are read from extension/ (as wrangler.toml [assets] serves them).
+// Run timsrobot.com locally without Cloudflare: node site/dev.js [port], then open http://localhost:<port>.
+// Reports and waitlist signups are printed here instead of emailed. (Node 18+ has the Request/Response the
+// Worker uses.) The demo's files are bundled again first (build-demo.js), and the side panel's files are read
+// from extension/ (as wrangler.toml [assets] serves them).
 import http from 'node:http';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -26,4 +27,4 @@ http.createServer(async (req, res) => {
   const response = await worker.fetch(request, env);
   res.writeHead(response.status, Object.fromEntries(response.headers));
   res.end(Buffer.from(await response.arrayBuffer()));
-}).listen(port, '127.0.0.1', () => console.log(`timsrobot.com on http://127.0.0.1:${port}`));
+}).listen(port, '127.0.0.1', () => console.log(`timsrobot.com on http://localhost:${port}`));

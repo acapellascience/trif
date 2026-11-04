@@ -6,7 +6,8 @@ It also answers for `webmods.dev`, the address from before 0.2.0 (when TRIF was 
 every request there to the same path on `timsrobot.com`, so older installs' "Report a problem" still works.
 
 - `src/index.js`: routes. `GET /`, `GET /report`, `GET /report.js`, and `POST /report` (JSON: `what`,
-  `site`, `email`, `details`, plus `website`, a hidden field only bots fill in).
+  `site`, `email`, `details`, plus `website`, a hidden field only bots fill in). `GET /windows`,
+  `GET /windows.js` and `POST /windows`: the Windows waitlist (below).
 - `src/pages.js`: the pages and the form's script. Nothing is loaded from anywhere else.
 - `src/report.js`: checking a report and writing its email (tested in `tests/site.test.js`).
 - `src/demo.js`: the home page's demo (below).
@@ -42,14 +43,28 @@ Browsers never send what's after the `#` to the server, so nothing leaves the co
 
 Reports are limited to 5 a minute per address, 64 KB each.
 
+## The Windows waitlist
+
+`timsrobot.com/windows` (linked from the home page's footer) takes an email address and emails it to the
+maintainer, the same way as reports (from `reports@timsrobot.com`, to `REPORT_TO`), with Reply-To set to
+the address. There's no database: the maintainer's inbox is the list. To pull it, search the inbox for
+the subject **`TRIF Windows waitlist:`**; each email's subject ends with the address. Remove anyone who
+asks (at reports@timsrobot.com) before announcing.
+
+`POST /windows` takes JSON (`email`, `website`) from the page's script, or a plain form post when the
+script doesn't run (answered with a thanks page). It uses the same checks as reports: the hidden
+`website` field, this site's Origin only, at most 4 KB, and the same rate limit (5 a minute per address,
+counted apart from reports).
+
 ## Try it locally
 
 ```sh
 node site/dev.js
 ```
 
-Then open http://127.0.0.1:8787/report. Reports are printed in the terminal instead of emailed. The demo is
-the tab on http://127.0.0.1:8787/.
+Then open http://localhost:8787/report (or /windows). Reports and waitlist signups are printed in the
+terminal instead of emailed. Use `localhost`, not `127.0.0.1`: the server checks that posts come from
+`http://localhost:<port>`. The demo is the tab on http://localhost:8787/.
 
 ## Deploy
 

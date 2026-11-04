@@ -65,6 +65,7 @@ test('the Worker: pages with strict headers, reports emailed, bad ones refused',
   assert.match(home, /href="\/report">Report a problem</);
   // Its only script is the demo tab's (deferred, so the page is all there before it runs).
   assert.deepStrictEqual(home.match(/<script[^>]*>/g), ['<script src="/demo.js" defer>']);
+  assert.match(home, /<footer>.*<a href="\/windows">Windows waitlist<\/a>.*<\/footer>/, 'the footer links to the Windows waitlist');
 
   let res = await worker.fetch(post({ what: 'It broke', site: 'x.com', email: 'a@b.co', details: 'TRIF 0.1.1' }, { 'User-Agent': 'Firefox/159' }), e);
   assert.deepStrictEqual([res.status, await res.json()], [200, { ok: true }]);
@@ -305,4 +306,119 @@ test('the demo runs the home page mods TRIF ships (one copy), lists them in its 
   // The recorded chats switch on mods the bundle has.
   const { CHATS } = await import('../site/src/demo-files.js');
   for (const c of CHATS) for (const s of c.mods) assert.ok(MODS.some((m) => m.slug === s), `${c.id}: ${s}`);
+});
+
+const signup = (body, headers = {}) => new Request('https://timsrobot.com/windows', {
+  method: 'POST', headers: { 'Content-Type': 'application/json', 'CF-Connecting-IP': '203.0.113.9', ...headers },
+  body: typeof body === 'string' ? body : JSON.stringify(body),
+});
+const formSignup = (fields, headers = {}) => signup(new URLSearchParams(fields).toString(), { 'Content-Type': 'application/x-www-form-urlencoded', Origin: 'https://timsrobot.com', ...headers });
+
+test('parseSignup / signupEmail: one checked address, emailed with a findable subject', async () => {
+  const [, { parseSignup, signupEmail, ReportError, LIMITS }] = await load();
+  assert.deepStrictEqual(parseSignup({ email: '  a@b.co ' }), { email: 'a@b.co' });
+  assert.throws(() => parseSignup({ email: '' }), /enter your email/);
+  assert.throws(() => parseSignup({ email: 'nope' }), /doesn't look right/);
+  assert.throws(() => parseSignup({ email: 'a@b.co\r\nBcc: x@y.z' }), /doesn't look right/);
+  assert.throws(() => parseSignup({ email: `${'x'.repeat(LIMITS.email)}@b.co` }), /too long/);
+  assert.throws(() => parseSignup([]), ReportError);
+  assert.deepStrictEqual(parseSignup({ email: 'a@b.co', website: 'http://spam' }), { spam: true });
+  const m = signupEmail({ email: 'a@b.co' }, { at: '2026-11-03T00:00:00Z' });
+  assert.equal(m.subject, 'TRIF Windows waitlist: a@b.co');
+  assert.equal(m.replyTo, 'a@b.co');
+  assert.equal(m.text, 'a@b.co joined the Windows waitlist.\n\nSigned up: 2026-11-03T00:00:00Z\n', 'just the address and the time');
+});
+
+test('/windows: the waitlist page, with strict headers and its own script', async () => {
+  const [{ default: worker }] = await load();
+  const e = env();
+  const res = await worker.fetch(new Request('https://timsrobot.com/windows'), e);
+  assert.equal(res.status, 200);
+  assert.match(res.headers.get('Content-Type'), /text\/html/);
+  assert.match(res.headers.get('Content-Security-Policy'), /default-src 'none'; script-src 'self'.*form-action 'self'/);
+  assert.equal(res.headers.get('Referrer-Policy'), 'same-origin', "so the form's post carries this site's Origin, not null");
+  const page = await res.text();
+  assert.match(page, /<form id="form" class="card" method="post" action="\/windows">/, 'works without the script');
+  assert.match(page, /<input id="email" name="email" type="email"[^>]* required/);
+  assert.match(page, /<input id="website" name="website"/, 'the bot trap');
+  assert.match(page, />Join the waitlist</);
+  assert.match(page, /used only to tell you when TRIF is ready for Windows/);
+  assert.ok(!/<script>/.test(page) && !/ on[a-z]+=/.test(page), 'no inline script');
+  assert.match(page, /<script src="\/windows.js"><\/script>/);
+  const js = await worker.fetch(new Request('https://timsrobot.com/windows.js'), e);
+  assert.equal(js.status, 200);
+  assert.match(js.headers.get('Content-Type'), /text\/javascript/);
+  assert.match(await js.text(), /fetch\('\/windows'/);
+});
+
+test('/windows: a signup is emailed to the maintainer, replies go to the address', async () => {
+  const [{ default: worker }] = await load();
+  const e = env();
+  let res = await worker.fetch(signup({ email: 'win@example.com', website: '' }, { Origin: 'https://timsrobot.com' }), e);
+  assert.deepStrictEqual([res.status, await res.json()], [200, { ok: true }]);
+  assert.equal(e.sent.length, 1);
+  const m = e.sent[0];
+  assert.deepStrictEqual([m.to, m.from, m.replyTo, m.subject], ['maintainer@example.com', { email: 'reports@timsrobot.com', name: 'TRIF waitlist' }, 'win@example.com', 'TRIF Windows waitlist: win@example.com']);
+  assert.match(m.text, /win@example\.com joined the Windows waitlist\.\n\nSigned up: \d{4}-\d\d-\d\dT/);
+
+  // Without the script: a plain form post, answered with a thanks page.
+  res = await worker.fetch(formSignup({ email: 'nojs@example.com', website: '' }), e);
+  assert.equal(res.status, 200);
+  assert.match(res.headers.get('Content-Type'), /text\/html/);
+  assert.equal(res.headers.get('Cache-Control'), 'no-store');
+  const thanks = await res.text();
+  assert.match(thanks, /Thanks, you're on the list\./);
+  assert.ok(!/<form/.test(thanks) && !/<script/.test(thanks));
+  assert.equal(e.sent.length, 2);
+  assert.equal(e.sent[1].replyTo, 'nojs@example.com');
+
+  // A plain form post with a bad address gets the form back, saying why, with what was typed (escaped).
+  res = await worker.fetch(formSignup({ email: 'no"pe<b>' }), e);
+  assert.equal(res.status, 400);
+  const again = await res.text();
+  assert.match(again, /<p id="status" class="note error" role="status">That email address doesn&#39;t look right\.<\/p>/);
+  assert.match(again, /value="no&#34;pe&#60;b&#62;"/);
+  assert.equal(e.sent.length, 2);
+});
+
+test('/windows: bad signups, bots, other sites and the wrong method are refused', async () => {
+  const [{ default: worker }] = await load();
+  const e = env();
+  const status = async (req) => (await worker.fetch(req, e)).status;
+  assert.equal(await status(signup({ email: 'not an address' })), 400);
+  assert.equal(await status(signup({ email: '' })), 400);
+  assert.equal(await status(signup({ email: `${'x'.repeat(300)}@b.co` })), 400);
+  assert.equal(await status(signup('{not json')), 400);
+  assert.equal(await status(signup({ email: 'a@b.co', pad: 'x'.repeat(5000) })), 413);
+  assert.equal(await status(signup({ email: 'a@b.co' }, { 'Content-Length': String(1024 * 1024) })), 413);
+  assert.equal(await status(signup({ email: 'a@b.co' }, { 'Content-Type': 'text/plain' })), 415);
+  assert.equal(await status(signup({ email: 'a@b.co' }, { Origin: 'https://evil.example' })), 403);
+  assert.equal(await status(formSignup({ email: 'a@b.co' }, { Origin: 'null' })), 403, 'a sandboxed page elsewhere');
+  for (const method of ['PUT', 'DELETE', 'PATCH']) {
+    assert.equal(await status(new Request('https://timsrobot.com/windows', { method, body: '{}' })), 405, method);
+  }
+  // Bots that fill in the hidden field are thanked and not emailed.
+  let res = await worker.fetch(signup({ email: 'bot@example.com', website: 'http://spam' }), e);
+  assert.deepStrictEqual([res.status, await res.json()], [200, { ok: true }]);
+  res = await worker.fetch(formSignup({ email: 'bot@example.com', website: 'http://spam' }), e);
+  assert.match(await res.text(), /Thanks, you're on the list\./);
+  assert.equal(e.sent.length, 0);
+  assert.equal((await worker.fetch(signup({ email: 'a@b.co' }), env({ REPORT_TO: '' }))).status, 503);
+});
+
+test('/windows: the reports rate limit applies, counted apart from reports', async () => {
+  const [{ default: worker }] = await load();
+  const keys = [];
+  let allow = true;
+  const limited = env({ REPORT_LIMIT: { async limit({ key }) { keys.push(key); return { success: allow }; } } });
+  assert.equal((await worker.fetch(signup({ email: 'one@example.com' }), limited)).status, 200);
+  allow = false;
+  let res = await worker.fetch(signup({ email: 'two@example.com' }), limited);
+  assert.equal(res.status, 429);
+  assert.match((await res.json()).error, /Too many signups/);
+  res = await worker.fetch(formSignup({ email: 'three@example.com' }), limited);
+  assert.equal(res.status, 429);
+  assert.match(await res.text(), /Too many signups from here just now/);
+  assert.deepStrictEqual(keys, ['windows:203.0.113.9', 'windows:203.0.113.9', 'windows:203.0.113.9']);
+  assert.equal(limited.sent.length, 1);
 });

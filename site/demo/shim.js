@@ -244,17 +244,20 @@
     return { runId };
   }
 
-  /** When each recorded message shows, in ms from the start: the session's rhythm, squeezed into seconds. */
+  /**
+   * When each recorded message shows, in ms from the start: the session's rhythm, squeezed into seconds
+   * (a few seconds for a short session, at most about 8 for a long one).
+   */
   function schedule(steps) {
     const gaps = steps.map((m, i) => Math.max(0, m.t - (i ? steps[i - 1].t : 0)));
     const real = gaps.reduce((a, b) => a + b, 0) || 1;
-    const floor = 420;
-    const budget = Math.min(15000, 1500 + steps.length * 600);
+    const floor = 210;
+    const budget = Math.min(7500, 750 + steps.length * 300);
     const spare = Math.max(0, budget - floor * steps.length);
     let t = 0;
     return gaps.map((g, i) => {
       t += floor + (spare * g) / real;
-      if (steps[i].role === 'assistant' && i < steps.length - 1) t += 500; // a moment to read a progress line
+      if (steps[i].role === 'assistant' && i < steps.length - 1) t += 250; // a moment to read a progress line
       return Math.round(t);
     });
   }
@@ -263,7 +266,7 @@
   function replay(run, from) {
     const steps = run.recording.messages.slice(1);
     const at = schedule(steps);
-    const total = at[at.length - 1] + 600;
+    const total = at[at.length - 1] + 300;
     const zero = from ? at[from - 1] : 0;
     run.speedup = Math.max(2, Math.round((run.recording.secs * 1000) / total));
     ui.replaying(run);

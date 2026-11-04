@@ -172,17 +172,18 @@ async function main() {
       return `tab at ${s0.tab.rect}`;
     });
 
-    await check('the demo panel starts with no mods, and the first recorded prompt (the first mod in Tim\'s order) waiting in a box that can\'t be typed in', async () => {
+    await check('the demo panel at a desk is a sandbox: every mod listed, off, in Tim\'s order, every recorded chat offered, a box that takes typing', async () => {
       await page(`async () => { document.querySelector('.demo-tab').click(); }`);
       await sleep(2500);
+      const p = await demoPanel(`(doc) => ({ rows: doc.querySelectorAll('#mod-list > li').length,
+        on: [...doc.querySelectorAll('#mod-list > li [role=switch]')].filter((s) => s.getAttribute('aria-checked') === 'true').length,
+        chips: doc.querySelectorAll('.demo-replays:not([hidden]) .demo-chips .chip').length, first: doc.querySelector('.demo-chips .chip')?.title,
+        ro: doc.getElementById('input').readOnly })`);
       const first = require('../../site/demo/chats/tagline.json');
-      // (the waiting prompt types itself in: give it a few seconds)
-      await waitFor('the first prompt typed in', async () => (await demoPanel(`(doc) => doc.getElementById('input').value`)) === first.prompt, { timeoutMs: 8000 }).catch(() => {});
-      const p = await demoPanel(`(doc) => ({ rows: doc.querySelectorAll('#mod-list > li').length, value: doc.getElementById('input').value, ro: doc.getElementById('input').readOnly })`);
       if (ORDER[0] !== 'tagline') throw new Error(`Tim's order starts with ${ORDER[0]}: update this check`);
-      if (p.rows !== 0 || !p.ro || p.value !== (first.prompt ?? first.messages?.[0]?.text)) throw new Error(JSON.stringify(p));
+      if (p.rows !== ORDER.length || p.on !== 0 || p.chips !== ORDER.length || p.first !== first.prompt || p.ro) throw new Error(JSON.stringify(p));
       await shot('demo-panel');
-      return `waiting: ${p.value.slice(0, 50)}…`;
+      return `${p.rows} mods, all off; ${p.chips} recorded chats`;
     });
 
     for (const slug of ORDER) {

@@ -12,7 +12,7 @@
 
 import { REPORT, REPORT_JS, WINDOWS, WINDOWS_JS, windowsPage } from './pages.js';
 import { LIMITS, ReportError, parseReport, parseSignup, reportEmail, signupEmail } from './report.js';
-import { DEMO_FILES, EXTENSION_FILES, homeWith, modScript, panelHtml, typeFor } from './demo.js';
+import { DEMO_FILES, EXTENSION_FILES, homeWith, modScript, pageWith, panelHtml, typeFor } from './demo.js';
 
 const CSP = {
   'default-src': "'none'", 'script-src': "'self'", 'style-src': "'unsafe-inline'", 'connect-src': "'self'", 'img-src': "'self'",
@@ -194,9 +194,9 @@ export default {
     if (pathname === '/windows' && request.method === 'POST') return receiveSignup(request, env);
     if (request.method !== 'GET' && request.method !== 'HEAD') return respond('Method not allowed', 'text/plain', 405);
     if (pathname === '/') return html(homeWith(searchParams.get('mods')), 200, undefined, FRAMES_DEMO);
-    if (pathname === '/report' || pathname === '/report/') return html(REPORT);
+    if (pathname === '/report' || pathname === '/report/') return html(pageWith(REPORT, searchParams.get('mods')));
     if (pathname === '/report.js') return script(REPORT_JS);
-    if (pathname === '/windows' || pathname === '/windows/') return html(WINDOWS, 200, undefined, FORM_PAGE);
+    if (pathname === '/windows' || pathname === '/windows/') return html(pageWith(WINDOWS, searchParams.get('mods')), 200, undefined, FORM_PAGE);
     if (pathname === '/windows.js') return script(WINDOWS_JS);
     if (Object.hasOwn(DEMO_FILES, pathname)) return respond(DEMO_FILES[pathname].body, DEMO_FILES[pathname].type, 200, CACHE);
     if (pathname.startsWith('/demo/mods/')) {

@@ -223,6 +223,22 @@ test('the demo: /?mods= runs only the bundled mods it names on the home page, un
   assert.deepStrictEqual(modsFrom(null).map((m) => m.slug), []);
 });
 
+test('the demo: the report form and the Windows waitlist run the bundled mods their ?mods= names (the demo carries it there)', async () => {
+  const [{ default: worker }] = await load();
+  const e = await demoEnv();
+  const page = async (p) => (await get(worker, e, p)).text();
+  const mods = (html) => (html.match(/<script src="\/demo\/mods\/[^"]+"[^>]*>/g) || []);
+  for (const p of ['/report', '/windows']) {
+    const plain = await page(p);
+    assert.deepStrictEqual(mods(plain), [], `${p}: no mods without ?mods=`);
+    assert.equal(await page(`${p}?mods=nope`), plain, `${p}: unknown names change nothing`);
+    const html = await page(`${p}?mods=${encodeURIComponent('fireworks,<img src=x onerror=alert(1)>,neon')}`);
+    assert.deepStrictEqual(mods(html), ['<script src="/demo/mods/neon.js">', '<script src="/demo/mods/fireworks.js" defer>'], p);
+    assert.ok(html.indexOf('/demo/mods/neon.js') < html.indexOf('</head>') && html.indexOf('/demo/mods/fireworks.js') < html.indexOf('</body>'), p);
+    assert.ok(!/onerror/.test(html), `${p}: nothing from the address is written into the page`);
+  }
+});
+
 test('the home page works without script: everything is in the HTML; the demo tab only shows with it', async () => {
   const [{ default: worker }] = await load();
   const home = await (await get(worker, await demoEnv(), '/')).text();

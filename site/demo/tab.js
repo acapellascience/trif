@@ -95,6 +95,26 @@
 
   new MutationObserver(() => { if (realTrif()) standAside(); }).observe(root, { attributes: true, attributeFilter: ['data-trif'] });
 
+  // The site's other pages (the report form, the Windows waitlist) run the same mods when their address
+  // names them (the Worker adds them, as on this page): a link to one carries this page's ?mods=, so the
+  // visitor's demo mods follow them there, as TRIF's would. Set as the link is followed (mods like the LED
+  // sign copy the footer's links, so the copies count too).
+  const OTHER_PAGES = new Set(['/report', '/windows']);
+  const carryMods = (e) => {
+    if (realTrif()) return;
+    const mods = new URLSearchParams(location.search).get('mods');
+    const a = e.target.closest?.('a[href]');
+    if (!mods || !a) return;
+    let u;
+    try { u = new URL(a.href, location.href); } catch { return; }
+    if (u.origin !== location.origin || !OTHER_PAGES.has(u.pathname.replace(/\/$/, '')) || u.searchParams.has('mods')) return;
+    u.searchParams.set('mods', mods);
+    a.href = u.pathname + u.search + u.hash;
+  };
+  addEventListener('click', carryMods, true);
+  addEventListener('auxclick', carryMods, true);
+  addEventListener('contextmenu', carryMods, true); // (copy link, open in new tab)
+
   function build() {
     box = document.createElement('aside');
     box.className = 'demo-panel';

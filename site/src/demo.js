@@ -64,11 +64,28 @@ export function modsFrom(param) {
 export function homeWith(param) {
   const mods = modsFrom(param);
   if (!mods.length) return HOME;
+  return homePage(modTags(mods));
+}
+
+/** The script tags for `mods`: { head, tail }. */
+function modTags(mods) {
   const tag = (m, defer) => `\n<script src="/demo/mods/${m.slug}.js"${defer ? ' defer' : ''}></script>`;
-  return homePage({
+  return {
     head: mods.filter((m) => m.runAt === 'document-start').map((m) => tag(m, false)).join(''),
     tail: mods.filter((m) => m.runAt !== 'document-start').map((m) => tag(m, true)).join(''),
-  });
+  };
+}
+
+/**
+ * Another page of the site (the report form, the Windows waitlist) with the mods named in `param`: the home
+ * page's demo carries its ?mods= to them (tab.js), so the visitor's mods follow them there, as TRIF's would.
+ */
+export function pageWith(html, param) {
+  const mods = modsFrom(param);
+  if (!mods.length) return html;
+  const { head, tail } = modTags(mods);
+  if (!html.includes('</head>') || !html.includes('</body>')) throw new Error('a page without </head> or </body>');
+  return html.replace('</head>', () => `${head}\n</head>`).replace('</body>', () => `${tail}\n</body>`);
 }
 
 /** The extension's sidepanel.html with the demo's stand-in for the extension (and its styles) added. */

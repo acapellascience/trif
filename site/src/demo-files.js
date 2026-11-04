@@ -824,7 +824,7 @@ export const CHATS = [
  },
  {
   "id": "fireworks",
-  "prompt": "make a mod where every click launches a firework, and when it hits the robot gets scared and flinces. don't forget the sound.",
+  "prompt": "make a mod where every click launches a firework, and when it hits the robot gets scared and flinches. don't forget the sound.",
   "secs": 136,
   "mods": [
    "fireworks"
@@ -833,7 +833,7 @@ export const CHATS = [
   "messages": [
    {
     "role": "user",
-    "text": "make a mod where every click launches a firework, and when it hits the robot gets scared and flinces. don't forget the sound.",
+    "text": "make a mod where every click launches a firework, and when it hits the robot gets scared and flinches. don't forget the sound.",
     "t": 0
    },
    {

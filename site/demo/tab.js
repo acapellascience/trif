@@ -22,6 +22,42 @@
   let box = null;
   let frame = null;
 
+  // The window as the mods see it. The browser's real side panel makes the window narrower; this one only sits
+  // over the page (the page moves over for it: pages.js). So while it's open, the window's size, as mods
+  // measure it (innerWidth / innerHeight, and the root's clientWidth / clientHeight), stops at the panel's
+  // edge (or, at phone width, at the top of the sheet), and mods that keep things inside the window (the
+  // robot, the shooter, gravity) keep them out from behind it. Measured when the panel opens or closes and
+  // when the window resizes, which mods hear about (a resize event).
+  const cut = { w: 0, h: 0 };
+  const lookup = (o, k) => { for (let p = o; p; p = Object.getPrototypeOf(p)) { const d = Object.getOwnPropertyDescriptor(p, k); if (d) return d; } return null; };
+  const shrunk = [];
+  function shrink(obj, key, axis) {
+    const d = lookup(obj, key);
+    if (!d || !d.get || !d.configurable) return;
+    const own = Object.getOwnPropertyDescriptor(obj, key);
+    Object.defineProperty(obj, key, { configurable: true, enumerable: d.enumerable, set: d.set, get() { return Math.max(0, d.get.call(obj) - cut[axis]); } });
+    shrunk.push(() => { if (own) Object.defineProperty(obj, key, own); else delete obj[key]; });
+  }
+  shrink(window, 'innerWidth', 'w');
+  shrink(window, 'innerHeight', 'h');
+  shrink(root, 'clientWidth', 'w');
+  shrink(root, 'clientHeight', 'h');
+  function measure() {
+    const was = `${cut.w},${cut.h}`;
+    cut.w = cut.h = 0;
+    if (isOpen()) {
+      const r = box.getBoundingClientRect();
+      const w = root.clientWidth + cut.w, h = root.clientHeight + cut.h; // (cut is 0 here: the whole window)
+      if (r.top <= 0 && r.left > 0) cut.w = Math.max(0, Math.round(w - r.left));
+      else if (r.top > 0) cut.h = Math.max(0, Math.round(h - r.top));
+    }
+    return was !== `${cut.w},${cut.h}`;
+  }
+  // First in line for the browser's resize events (mods' scripts come after this one), and one of our own
+  // when the panel opens or closes.
+  addEventListener('resize', (e) => { if (e.isTrusted) measure(); });
+  const remeasure = () => { if (measure()) dispatchEvent(new Event('resize')); };
+
   // The real TRIF is on here: no demo at all (and it doesn't reopen after the next reload either).
   function standAside() {
     remember(false);
@@ -29,6 +65,8 @@
     root.classList.remove('demo-open');
     if (tab.popover && tab.matches(':popover-open')) tab.hidePopover();
     tab.remove();
+    cut.w = cut.h = 0;
+    while (shrunk.length) shrunk.pop()();
   }
   if (realTrif()) { standAside(); return; }
   new MutationObserver(() => { if (realTrif()) standAside(); }).observe(root, { attributes: true, attributeFilter: ['data-trif'] });
@@ -79,6 +117,7 @@
     root.classList.add('demo-open');
     showTab(false);
     remember(true);
+    remeasure();
   }
 
   function hide() {
@@ -88,6 +127,7 @@
     showTab(true);
     tab.focus();
     remember(false);
+    remeasure();
   }
 
   // The panel (shim.js) asks for the page with other mods: only names, and the Worker checks them too.

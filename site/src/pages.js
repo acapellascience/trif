@@ -113,6 +113,10 @@ const DEMO_STYLE = `
 .demo-panel iframe { flex: 1; min-height: 0; width: 100%; border: 0; display: block; }
 .demo-panel-note { margin: 0; padding: 6px 12px; border-top: 1px solid var(--line); color: var(--muted); font-size: 11px; line-height: 1.4; }
 @media (min-width: 701px) { html.demo-open body { margin-right: 360px; } }
+/* The shooter's canvas is the window's size in CSS (100vw x 100vh) but draws at the size demo.js says the
+   window is with the panel open (innerWidth / innerHeight): the same here, or it would stretch. */
+@media (min-width: 701px) { html.demo-open #tss-canvas { width: calc(100vw - 360px) !important; right: auto !important; } }
+@media (max-width: 700px) { html.demo-open #tss-canvas { height: 28vh !important; height: 28dvh !important; bottom: auto !important; } }
 @media (max-width: 700px) {
   .demo-panel { inset: auto 0 0 0; width: auto; height: 72vh; height: 72dvh; border-left: 0; border-top: 1px solid var(--line);
     border-radius: 12px 12px 0 0; box-shadow: 0 -6px 24px rgb(0 0 0 / 0.15); }

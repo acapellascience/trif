@@ -24,7 +24,7 @@ const REAL_FILES = [
   path.join(REAL_HOME, '.trif/config.json'),
   path.join(REAL_HOME, '.webmods/config.json'),
   path.join(REAL_HOME, 'Library/Application Support/TRIF/config.json'), // the real private folder (0.2.0)
-  path.join(REAL_HOME, 'Library/Application Support/TRIF/helper.log'),
+  // (Not the real helper.log: the user's own helper writes it whenever their TRIF is in use, run or not.)
 ];
 function fingerprint(files) {
   return files.map((f) => {

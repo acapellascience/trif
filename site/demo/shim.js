@@ -573,6 +573,20 @@
       else if (!was) { stopTyping(input, false); show(input, ''); } // (just freed: clear the box; after that, it keeps what they type)
     }
 
+    // From Send to the end of the replay, the chat follows along at the bottom, even if it was scrolled up
+    // (the panel itself only follows when it's already near the bottom). Demo only, for now.
+    let following = false, watcher = null;
+    function follow(on) {
+      following = on;
+      const chat = document.getElementById('chat');
+      if (!chat) return;
+      if (!watcher) {
+        watcher = new MutationObserver(() => { if (following) chat.scrollTop = chat.scrollHeight; });
+        watcher.observe(chat, { childList: true, subtree: true, characterData: true });
+      }
+      if (on) chat.scrollTop = chat.scrollHeight;
+    }
+
     function mount() {
       const form = document.getElementById('composer');
       const input = document.getElementById('input');
@@ -589,8 +603,8 @@
     if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', mount, { once: true }); else mount();
 
     return {
-      replaying(run) { busy = run; fill(); },
-      finished(run) { if (busy === run) busy = null; fill(); },
+      replaying(run) { busy = run; follow(true); fill(); },
+      finished(run) { if (busy === run) busy = null; fill(); setTimeout(() => { if (!busy) follow(false); }, 1500); },
     };
   })();
 })(/*DEMO_DATA*/null);

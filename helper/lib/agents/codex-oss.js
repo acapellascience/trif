@@ -498,10 +498,14 @@ adapter.setKey = async function setKey(ws, key, { env = process.env } = {}) {
   return { account: om.keyAccount, keyring: b ? b.name : null };
 };
 
-/** agent.openModel.removeKey / `--remove-key`: forget the stored provider's key. Resolves {account, removed}. */
+/**
+ * agent.openModel.removeKey / `--remove-key`: forget the stored provider's key. Resolves {account, removed}.
+ * A provider without keys (a local server) has none to forget: {account: null, removed: false}, not an
+ * error (the README's uninstall steps run it whatever the provider).
+ */
 adapter.removeKey = async function removeKey(ws, { env = process.env } = {}) {
   const om = resolve(ws.config && ws.config.openModel);
-  if (!om.keyAccount) throw new Error(`${om.name} has no API key to remove`);
+  if (!om.keyAccount) return { account: null, removed: false };
   const r = await keyring.removeKey(om.keyAccount, { env });
   return { account: om.keyAccount, removed: r.removed };
 };

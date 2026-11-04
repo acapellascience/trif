@@ -459,6 +459,10 @@ test('`trif agent open-model`: --set-key from stdin (never argv), --remove-key; 
   assert.equal(res.code, 0, res.stderr);
   assert.match(res.stdout, /provider {2}ollama .*not set up yet/);
   assert.doesNotMatch(res.stdout, /API key/);
+  // A local server has no key: removing one (as the README's uninstall steps do) is fine, not an error.
+  res = await runCli(['agent', 'open-model', '--remove-key'], { home, env });
+  assert.equal(res.code, 0, res.stderr);
+  assert.match(res.stdout, /^There was no API key saved\.$/m);
   res = await runCli(['agent', 'open-model', '--provider', 'openrouter', '--model', 'z-ai/glm-5.3'], { home, env });
   assert.equal(res.code, 0, res.stderr);
   assert.match(res.stdout, /API key {3}none yet: trif agent open-model --set-key/);

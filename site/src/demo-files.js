@@ -355,7 +355,14 @@ export const CHATS = [
     "text": "The robot is alive. I added a new mod, **Living Robot**:\n\n- **Legs:** two little green legs. They swing with each step, his feet point where he's going and he leans into it. Walking up or down the page, he marches.\n- **Walking around:** he runs little routines on his own: strolls, a hop and a dash, loop-the-loops, figure eights, zigzags, pacing like a sentry, peeking from the edge of the screen, spirals and a hop dance, with pauses in between. Now and then he heads back home. He stays on screen, and stops while your pointer is over him.\n- **Robot noises:** a soft tap for each footstep, a boing when he hops, and now and then, when he stops to think, a happy little murmur (\"mm-hm?\", \"hm, hm!\" or \"brr-up?\", never the same one twice in a row).\n- **Startle:** tap or click him and he jumps with a boing and a startled blink.\n- **Also:** his eyes follow your mouse, and he blinks every few seconds.\n\n**What I checked:** after a reload he set off on his own, the screenshot shows him mid-stride with his legs showing, and clicking him made him jump. No errors. Browsers only play sound after you've clicked or pressed a key on the page, so he's quiet until then; I can't hear from here, so give him a listen.\n\nTo undo it, switch off **Living Robot** in the side panel, or ask me to.",
     "t": 125600
    }
-  ]
+  ],
+  "touch": {
+   "prompt": "bring the robot to life! give it legs, have it walk around making occasional robot noises, and make it startle when i tap it.",
+   "texts": {
+    "10": "ran trif reload && trif run 'const s=document.querySelector(\"svg.robot\"); s.dispatchEvent(new PointerEvent(\"pointerenter\")); await new Promise(r=>setTimeout(r,300)); s.dispatchEvent(new PointerEvent(\"click\",{pointerType:\"touch\",bubbles:true})); aw…",
+    "14": "The robot is alive. I added a new mod, **Living Robot**:\n\n- **Legs:** two little green legs. They swing with each step, his feet point where he's going and he leans into it. Walking up or down the page, he marches.\n- **Walking around:** he runs little routines on his own: strolls, a hop and a dash, loop-the-loops, figure eights, zigzags, pacing like a sentry, peeking from the edge of the screen, spirals and a hop dance, with pauses in between. Now and then he heads back home. He stays on screen, and holds still while your finger is on him.\n- **Robot noises:** a soft tap for each footstep, a boing when he hops, and now and then, when he stops to think, a happy little murmur (\"mm-hm?\", \"hm, hm!\" or \"brr-up?\", never the same one twice in a row).\n- **Startle:** tap him and he jumps with a boing and a startled blink.\n- **Also:** as he walks, his eyes look where he's going, and he blinks every few seconds.\n\n**What I checked:** after a reload he set off on his own, the screenshot shows him mid-stride with his legs showing, and a simulated tap on him made him jump. No errors. Browsers only play sound after you've tapped the page, so he's quiet until then; I can't hear from here, so give him a listen.\n\nTo undo it, switch off **Living Robot** in the side panel, or ask me to."
+   }
+  }
  },
  {
   "id": "jelly",
@@ -411,7 +418,13 @@ export const CHATS = [
     "text": "Done: when you hover over \"Get it\" or \"GitHub\", the button squashes, stretches and settles back, like jelly. Those are the only two buttons on the page.\n\n**What I checked after reloading:** I can't hover the mouse from here, so I tested the wobble by running its animation on \"Get it\" directly, and it squashed as expected. I haven't seen a real hover myself. The mod reported no errors.\n\nIf your system is set to reduce motion, the wobble is switched off.\n\nThe wobble is a new mod. To undo it, switch off **Jelly Buttons** in the side panel, or ask me to.",
     "t": 34868
    }
-  ]
+  ],
+  "touch": {
+   "prompt": "make the buttons wobble like jelly when i tap them",
+   "texts": {
+    "8": "Done: tap \"Get it\" or \"GitHub\" and the button squashes, stretches and settles back, like jelly, as its link opens in a new tab. Those are the only two buttons on the page.\n\n**What I checked after reloading:** I can't tap from here, so I tested the wobble by running its animation on \"Get it\" directly, and it squashed as expected. I haven't seen a real tap myself. The mod reported no errors.\n\nIf your system is set to reduce motion, the wobble is switched off.\n\nThe wobble is a new mod. To undo it, switch off **Jelly Buttons** in the side panel, or ask me to."
+   }
+  }
  },
  {
   "id": "gravity",
@@ -542,7 +555,20 @@ export const CHATS = [
     "text": "Gravity mode is ready. I added a new mod, **Press G for Gravity**. Press **G** and the page collapses.\n\n- **Falling:** the text falls apart word by word, the title letter by letter, and the buttons and the robot come down too. Everything tumbles, bounces and piles up at the bottom of the screen. The tagline stays hanging where it was.\n- **Grab and throw:** drag a piece and let go while it's moving to fling it. Links stay links: clicking one still takes you there.\n- **The robot** stays on his feet. He walks left and right along the pile, hops over whatever blocks him (and now and then just for fun), and shoves words up when he jumps into them. You can grab and throw him too.\n- **Jelly buttons** are extra squishy: they squash when they land, and hovering one still sets off its wobble, which bounces whatever sits on it.\n- **G or Esc again:** everything flies back into place, and the robot carries on walking from where he is.\n\n**What I checked:** after pressing G, the pieces settled with no overlaps and none below the bottom. The robot walked along the pile and hopped; I threw him with simulated mouse moves and he landed back on it. Esc put the page back, and no errors were logged. On a touchscreen, a button in the top right does what G does.\n\nTo undo it, switch off **Press G for Gravity** in the side panel, or ask me to.",
     "t": 250100
    }
-  ]
+  ],
+  "touch": {
+   "prompt": "gravity mode! when i tap a button make everything fall down and pile up at the bottom. let me grab things and throw them. robot should walk around and hop :)",
+   "texts": {
+    "7": "ran trif check timsrobot.com/gravity && trif reload && trif run 'document.querySelector(\"#trif-top-bar .trif-top-right\").click(); await new Promise(r=>setTimeout(r,4000)); const b=[...document.querySelectorAll(\"[data-…",
+    "11": "ran trif check timsrobot.com/gravity && trif reload && trif run 'document.querySelector(\"#trif-top-bar .trif-top-right\").click(); await new Promise(r=>setTimeout(r,5000)); const b=[...document.querySelectorAll(\"[data-…",
+    "15": "ran trif check timsrobot.com/robot && trif check timsrobot.com/gravity && trif reload && trif run 'document.querySelector(\"#trif-top-bar .trif-top-right\").click(); await new Promise(r=>setTimeout(r,5000)); const s=document.querySelector(\"svg.robot\"); const xs=[]; for(let i=0;i<6;i++){xs.push(Math.round(s.getBoundingClientRect().left)); await new P…",
+    "17": "ran trif reload && trif run 'const w=ms=>new Promise(r=>setTimeout(r,ms)); document.querySelector(\"#trif-top-bar .trif-top-right\").click(); await w(5000); const svg=document.querySelector(\"svg.robot\"); let r=svg.getBoundin…",
+    "18": "Grab works, but the throw lost its speed. Fixing it to use the finger's recent motion.",
+    "20": "ran trif check timsrobot.com/gravity && trif reload && trif run 'const w=ms=>new Promise(r=>setTimeout(r,ms)); document.querySelector(\"#trif-top-bar .trif-top-right\").click(); await w(4000); const svg=document.querySe…",
+    "22": "ran trif run 'document.querySelector(\"#trif-top-bar .trif-top-right\").click(); await new Promise(r=>setTimeout(r,1000)); return {left:document.querySelectorAll(\"[data-gm-body],[data-gm-bare]\").length, on:document.documentElement.hasA…",
+    "23": "Gravity mode is ready. I added a new mod, **Press G for Gravity**. On a touchscreen it puts a round button with a down arrow in the top right: tap it and the page collapses.\n\n- **Falling:** the text falls apart word by word, the title letter by letter, and the buttons and the robot come down too. Everything tumbles, bounces and piles up at the bottom of the screen. The tagline stays hanging where it was.\n- **Grab and throw:** drag a piece with your finger and let go while it's moving to fling it. While the page is in pieces, your finger moves pieces instead of scrolling or zooming the page. Links stay links: tapping one still opens it.\n- **The robot** stays on his feet. He walks left and right along the pile, hops over whatever blocks him (and now and then just for fun), and shoves words up when he jumps into them. You can grab and throw him too.\n- **Jelly buttons** are extra squishy: they squash when they land, and their wobble bounces whatever sits on them.\n- **Putting it back:** the button turns into an up arrow. Tap it and everything flies back into place, and the robot carries on walking from where he is.\n\n**What I checked:** after dropping the page, the pieces settled with no overlaps and none below the bottom. The robot walked along the pile and hopped; I threw him with a simulated drag and he landed back on it. The up-arrow button put the page back, and no errors were logged.\n\nTo undo it, switch off **Press G for Gravity** in the side panel, or ask me to."
+   }
+  }
  },
  {
   "id": "neon",
@@ -684,7 +710,13 @@ export const CHATS = [
     "text": "The line under the tagline is now three tilted stickers: **Free & open source** (green), **In beta** (yellow) and **For Mac** (pink). Each has a white border and a drop shadow. When the page loads they pop in one after another with a small bounce, and each one straightens and grows a little when you hover over it.\n\n- **What I checked:** after a reload, all three badges showed up on the page, the mod threw no errors, and a screenshot showed them as intended. The robot that was partly covering the first badge in the screenshot is your \"Living Robot\" mod walking past.\n- **Accessibility:** screen readers still read the original sentence. If your Mac is set to reduce motion, the badges appear without the animation.\n\nTo undo it, switch off **Sticker Badges** in the side panel, or ask me to.",
     "t": 150136
    }
-  ]
+  ],
+  "touch": {
+   "prompt": "turn the \"Free and open source\" line into little sticker badges that pop in one after the other",
+   "texts": {
+    "10": "The line under the tagline is now three tilted stickers: **Free & open source** (green), **In beta** (yellow) and **For Mac** (pink). Each has a white border and a drop shadow. When the page loads they pop in one after another with a small bounce.\n\n- **What I checked:** after a reload, all three badges showed up on the page, the mod threw no errors, and a screenshot showed them as intended. The robot that was partly covering the first badge in the screenshot is your \"Living Robot\" mod walking past.\n- **Accessibility:** screen readers still read the original sentence. If your device is set to reduce motion, the badges appear without the animation.\n\nTo undo it, switch off **Sticker Badges** in the side panel, or ask me to."
+   }
+  }
  },
  {
   "id": "shooter",
@@ -820,7 +852,18 @@ export const CHATS = [
     "text": "The page is now a space shooter. I added a new mod, **Space Shooter**, and gave Living Robot a chase mode.\n\n- **Flying:** the arrow keys fly the ship anywhere on screen. **Space** fires twin lasers: each press fires at once, and holding it keeps firing.\n- **Blasting:** any word you hit blows up into its letters, in its own font and colour, with sparks and a little screen shake. Once every word in a button or badge is gone, you can blast the box too. **R** brings everything back, and the top-left corner counts what you've blasted.\n- **The robot is the enemy:** when you fly or fire, he spots you, says something in his robot voice and hops, then chases the ship with momentum, so you can dodge and make him overshoot. Touch him and your ship blows up (it comes back blinking a moment later). Each hit takes 2 of his 100 health: he turns from green to yellow to red and gets faster as he's hurt. At zero he explodes and \"ROBOT DESTROYED\" flashes up. Shoot its letters too, and your ship flies off and the game starts over.\n- **Gravity mode (G):** space drops bombs instead, one at a time. A bomb blows up the first thing it lands on and flings the pieces around it. A direct hit on the robot takes 5, and he runs out from under bombs he sees coming.\n- **Sound effects:** a zap for each laser, deep booms for explosions (the robot's is the biggest), a whistle as a bomb falls, a clank when a laser hits him, and a whoosh as your ship flies off. They start after your first key press or click.\n\n**What I checked:** test shots blew up words and the counter went up, the robot chased the ship, and a test run destroyed him. With gravity on, bombs removed pieces and threw others around. No errors. I also fixed gravity mode picking up the shooter's drawing layer as a piece.\n\nTo undo it, switch off **Space Shooter** in the side panel, or ask me to.",
     "t": 222200
    }
-  ]
+  ],
+  "touch": {
+   "prompt": "space shooter! gimme a ship i can drag around with my finger that blasts the words off the page. robot is the enemy and chases you. make it drop bombs in gravity mode and explode stuff, and add sound effects!",
+   "texts": {
+    "9": "ran trif run 'const s=document.querySelector(\"svg.robot\"); const c=()=>{const r=s.getBoundingClientRect(); return [Math.round(r.left+r.width/2), Math.round(r.top+r.height/2)]}; const p=(t,x,y)=>dispatchEvent(new PointerEvent(t,{pointerType:\"touch\",pointerId:7,clientX:x,clientY:y,bubbles:true})); const a=c(); p(\"pointerdown\",640,690); await new P…",
+    "18": "ran trif run 'document.querySelector(\"#trif-top-bar .trif-top-right\").click(); await new Promise(r=>setTimeout(r,1500)); const b=[...document.querySelectorAll(\"[data-gm-body]\")]; const out={n:b.length, ours:b.filter(e=>e.id).map(e=>e.id), above:b.filter(e=>e.getBoundingClie…",
+    "19": "Dropping the page sent everything flying off the top: gravity mode picked up the shooter's full-screen layer as a piece, and it shoved the rest up. Making gravity skip layers that let touches through.",
+    "21": "ran trif check timsrobot.com/gravity && trif reload && trif run 'await new Promise(r=>setTimeout(r,1000)); document.querySelector(\"#trif-top-bar .trif-top-right\").click(); await new Promise(r=>setTimeout(r,2000)); const b=[...document.querySelectorAll(\"…",
+    "23": "ran trif run 'document.querySelector(\"#trif-top-bar .trif-top-left\").click(); return document.querySelectorAll(\"[data-tss-dead]\").length'",
+    "24": "The page is now a space shooter. I added a new mod, **Space Shooter**, and gave Living Robot a chase mode.\n\n- **Flying:** put your finger on the ship and drag it anywhere on screen. While you hold it, it fires twin lasers as fast as it can. A touch anywhere else still scrolls the page as usual.\n- **Blasting:** any word you hit blows up into its letters, in its own font and colour, with sparks and a little screen shake. Once every word in a button or badge is gone, you can blast the box too. The restart button in the top left brings everything back, and the counts sit just under it.\n- **The robot is the enemy:** when you fly, he spots you, says something in his robot voice and hops, then chases the ship with momentum, so you can dodge and make him overshoot. Touch him with the ship and it blows up (it comes back blinking a moment later). Each hit takes 2 of his 100 health: he turns from green to yellow to red and gets faster as he's hurt. At zero he explodes and \"ROBOT DESTROYED\" flashes up. Shoot its letters too, and your ship flies off and the game starts over.\n- **Gravity mode:** while the page is dropped, holding the ship drops bombs instead, one at a time. A bomb blows up the first thing it lands on and flings the pieces around it. A direct hit on the robot takes 5, and he runs out from under bombs he sees coming.\n- **Sound effects:** a zap for each laser, deep booms for explosions (the robot's is the biggest), a whistle as a bomb falls, a clank when a laser hits him, and a whoosh as your ship flies off. They start after your first tap.\n\n**What I checked:** test shots blew up words and the counter went up, the robot chased the ship, and a test run destroyed him. With gravity on, bombs removed pieces and threw others around. No errors. I also fixed gravity mode picking up the shooter's drawing layer as a piece.\n\nTo undo it, switch off **Space Shooter** in the side panel, or ask me to."
+   }
+  }
  },
  {
   "id": "fireworks",
@@ -906,7 +949,14 @@ export const CHATS = [
     "text": "I added a new mod, **Click Fireworks**, and taught Living Robot to be scared of it.\n\n- **Every click** sends a rocket up from the bottom of the screen with a sparkly trail. It bursts where you clicked, about half the screen across: hundreds of sparks with an outer ring and an inner core (about half the bursts are full rainbows), with crackles popping inside and sparks that twinkle as they fade.\n- **The robot flinches** when one goes off near him: a startled jolt, a quick step away, a lean away from the bang and wide, scared eyes for a moment. The closer the burst, the bigger the fright, and even far-off ones get a little twitch. In gravity mode he scurries sideways with a startled hop.\n- **Sound:** a dull thud on launch, a deep boom for each burst, and a soft hiss for the crackles. It starts after your first click.\n- **Bonus:** hovering \"Get it\" sprays confetti out of the button.\n- Your clicks still work normally: the fireworks are drawn on a see-through layer that clicks pass through.\n\n**What I checked:** a fake click launched a rocket and the screenshot shows the full burst, and a burst just beside the robot made him jump away and lean. No errors. I can't hear from here, so have a listen.\n\nTo undo it, switch off **Click Fireworks** in the side panel, or ask me to.",
     "t": 124200
    }
-  ]
+  ],
+  "touch": {
+   "prompt": "make a mod where every tap launches a firework, and when it hits the robot gets scared and flinches. don't forget the sound.",
+   "texts": {
+    "3": "The fireworks go on one see-through canvas over the page, so taps still reach it. Each big burst will announce where it went off, so Living Robot can react.",
+    "14": "I added a new mod, **Click Fireworks**, and taught Living Robot to be scared of it.\n\n- **Every tap** sends a rocket up from the bottom of the screen with a sparkly trail. It bursts where you tapped, about half the screen across: hundreds of sparks with an outer ring and an inner core (about half the bursts are full rainbows), with crackles popping inside and sparks that twinkle as they fade.\n- **The robot flinches** when one goes off near him: a startled jolt, a quick step away, a lean away from the bang and wide, scared eyes for a moment. The closer the burst, the bigger the fright, and even far-off ones get a little twitch. In gravity mode he scurries sideways with a startled hop.\n- **Sound:** a dull thud on launch, a deep boom for each burst, and a soft hiss for the crackles. It starts after your first tap.\n- **Bonus:** touching \"Get it\" sprays a puff of confetti out of the button.\n- Your taps still work normally: the fireworks are drawn on a see-through layer that taps pass through.\n\n**What I checked:** a simulated tap launched a rocket and the screenshot shows the full burst, and a burst just beside the robot made him jump away and lean. No errors. I can't hear from here, so have a listen.\n\nTo undo it, switch off **Click Fireworks** in the side panel, or ask me to."
+   }
+  }
  },
  {
   "id": "checklist",
@@ -972,7 +1022,14 @@ export const CHATS = [
     "text": "**What you need** is now a checklist. I added a new mod, **Need Checklist**.\n\n- **Check it off:** each item has a checkbox. Click one to tick or untick it, or tab to it and press Enter. Screen readers hear them as checkboxes.\n- **Icons:** each item gets a small icon: a laptop for Mac, a browser window for Chrome/Firefox, a hexagon for Node and a robot for the coding agent. Each lights up green when its box is ticked.\n- **A little show:** when the list first scrolls into view, the boxes tick themselves one by one, about half a second apart. Any box you've already touched is left alone.\n\n**What I checked:** after a reload all 4 items got their box and icon and ticked in turn, and a test click unticked the first one. No errors.\n\nTo undo it, switch off **Need Checklist** in the side panel, or ask me to.",
     "t": 102000
    }
-  ]
+  ],
+  "touch": {
+   "prompt": "make What you Need a checklist that i can tick off with a tap.",
+   "texts": {
+    "7": "All four boxes tick in. Now making them real checkboxes you can tick and untick.",
+    "10": "**What you need** is now a checklist. I added a new mod, **Need Checklist**.\n\n- **Check it off:** each item has a checkbox. Tap one to tick or untick it. Screen readers hear them as checkboxes.\n- **Icons:** each item gets a small icon: a laptop for Mac, a browser window for Chrome/Firefox, a hexagon for Node and a robot for the coding agent. Each lights up green when its box is ticked.\n- **A little show:** when the list first scrolls into view, the boxes tick themselves one by one, about half a second apart. Any box you've already touched is left alone.\n\n**What I checked:** after a reload all 4 items got their box and icon and ticked in turn, and a test tap unticked the first one. No errors.\n\nTo undo it, switch off **Need Checklist** in the side panel, or ask me to."
+   }
+  }
  },
  {
   "id": "terminal",
@@ -1114,7 +1171,14 @@ export const CHATS = [
     "text": "The footer is now a scrolling LED sign. It has amber dot-matrix letters with a glow, a dark bezel and red stars between the items. GitHub, Report a problem and Privacy scroll right to left in a loop that doesn't jump.\n\n- **Clicking:** the sign stops scrolling when you hover over it or tab into it, so the links are easy to hit. They go to the same places as before. I checked that a click on a link lands on the link itself and not on the dot overlay.\n- **Accessibility:** the loop needs a second copy of the links. Tab and screen readers skip that copy, so you tab through just three links. If your system is set to reduce motion, the sign stays still.\n- **What I checked:** after reloading, there are no mod errors. All 3 links are in the sign with the right addresses. It scrolls at a steady speed, about 10 seconds per loop at this width. I took a screenshot to check the look, and made the dots a little bigger so the text is easier to read.\n\nTo undo it, switch off **LED Footer** in the side panel, or ask me to.",
     "t": 60041
    }
-  ]
+  ],
+  "touch": {
+   "prompt": "turn the footer into like a scrolling LED sign",
+   "texts": {
+    "7": "The sign works: it scrolls and the links can be tapped. I'm making the dots a little bigger so the text is easier to read.",
+    "11": "The footer is now a scrolling LED sign. It has amber dot-matrix letters with a glow, a dark bezel and red stars between the items. GitHub, Report a problem and Privacy scroll right to left in a loop that doesn't jump.\n\n- **Tapping:** the links go to the same places as before. I checked that a tap on a link lands on the link itself and not on the dot overlay.\n- **Accessibility:** the loop needs a second copy of the links. Screen readers skip that copy, so they read out just three links. If your system is set to reduce motion, the sign stays still.\n- **What I checked:** after reloading, there are no mod errors. All 3 links are in the sign with the right addresses. It scrolls at a steady speed, about 10 seconds per loop at this width. I took a screenshot to check the look, and made the dots a little bigger so the text is easier to read.\n\nTo undo it, switch off **LED Footer** in the side panel, or ask me to."
+   }
+  }
  },
  {
   "id": "tilt",
@@ -1225,7 +1289,16 @@ export const CHATS = [
     "text": "The whole page is now a rounded card floating in dark space. I added a new mod, **Tilt Card**.\n\n- **Tilt:** the card tilts toward your mouse, up to 24° at the edge of the window, with a soft glare that follows the pointer. When the mouse leaves the window it eases back flat. On a phone or tablet, tilting the device tilts the card.\n- **Depth:** each part of the page floats at its own height above the card: the buttons highest, then the title, the tagline and the badges, then the two columns, with the footer just above the surface.\n- **The robot** slides toward wherever the card dips, so moving the mouse pulls him around the page. He stops at the edges of the window.\n- **Gravity mode:** the card keeps tilting with the whole pile lying on it, and the fallen blocks slide toward the low side, so moving the mouse sloshes the pile from one side of the card to the other. The robot gets pushed along with them, and you can still grab and throw blocks right where you see them.\n\n**What I checked:** with a fake mouse in opposite corners, the card and its layers tilted and the robot slid toward the mouse side. Clicks still land on the right link. With gravity on, the pile slid to whichever side the card dipped. No errors.\n\nTo undo it, switch off **Tilt Card** in the side panel, or ask me to.",
     "t": 141800
    }
-  ]
+  ],
+  "touch": {
+   "prompt": "make the whole page tilt in 3d when i tilt my phone. robot should get pulled around a bit as the card shifts. in gravity mode make it affect the blocks",
+   "texts": {
+    "9": "ran trif check timsrobot.com/tilt && trif reload && trif run 'dispatchEvent(new DeviceOrientationEvent(\"deviceorientation\",{beta:0,gamma:0})); dispatchEvent(new DeviceOrientationEvent(\"deviceorientation\",{beta:-14,gamma:18})); await new Promise(r=>setTimeout(r,1200)); return {t:getComputedStyle(document.body).tra…",
+    "16": "ran trif check timsrobot.com/robot && trif check timsrobot.com/gravity && trif reload && trif run 'dispatchEvent(new DeviceOrientationEvent(\"deviceorientation\",{beta:0,gamma:0})); dispatchEvent(new DeviceOrientationEvent(\"deviceorientation\",{beta:0,gamma:18})); await new Promise(r=>setTimeout(r,1500)); return getComputedStyle(document.querySelector(\"svg.robot\")).translate'",
+    "17": "ran trif run 'document.querySelector(\"#trif-top-bar .trif-top-right\").click(); await new Promise(r=>setTimeout(r,2500)); return {gm:document.documentElement.hasAttribute(\"data-gm-on\"), t:getComputedStyle(document.body).transform}'",
+    "19": "The whole page is now a rounded card floating in dark space. I added a new mod, **Tilt Card**.\n\n- **Tilt:** the card tilts as you tilt your phone or tablet, up to 24°, with a soft glare that moves with it. It measures from however you're holding it and slowly follows your hand, so an angle you hold eases back to flat. Turn the phone sideways and the tilt turns with it. On an iPhone or iPad, the first tap on the page asks for permission to use the motion sensor.\n- **Depth:** each part of the page floats at its own height above the card: the buttons highest, then the title, the tagline and the badges, then the two columns, with the footer just above the surface.\n- **The robot** slides toward wherever the card dips, so tilting your phone pulls him around the page. He stops at the edges of the screen.\n- **Gravity mode:** the card keeps tilting with the whole pile lying on it, and the fallen blocks slide toward the low side, so tilting your phone sloshes the pile from one side of the card to the other. The robot gets pushed along with them, and you can still grab and throw blocks with your finger right where you see them.\n\n**What I checked:** with simulated tilts each way, the card and its layers tilted and the robot slid toward the low side. Taps still land on the right link. With gravity on, the pile slid to whichever side the card dipped. No errors.\n\nTo undo it, switch off **Tilt Card** in the side panel, or ask me to."
+   }
+  }
  },
  {
   "id": "rave",
@@ -1351,7 +1424,13 @@ export const CHATS = [
     "text": "Rainbow Rave is on timsrobot.com. It's a new mod, **Rainbow Rave**, ported from your Rainbow Rave mod for x.com, with a rave look for every mod on this page.\n\n**From the x.com version:**\n- The rolling rainbow behind the whole page, with white text on top.\n- The trance loop, made in code (no sound files). It starts on your first click or key press.\n- The kick zoom: the page's blocks pulse with every kick drum.\n\n**Every mod raves:**\n- **Robot:** his outline, eyes and legs roll through the rainbow, faster the more you've hurt him in the shooter, and he blows up in a big rainbow blast.\n- **Title:** each letter a different neon colour around the rainbow, with a glow that adds light, and no flicker. It still waves.\n- **Tagline, checklist, LED sign:** \"your own coding agent\" glows rainbow letter by letter, ticked boxes and icons roll through the rainbow, and the LED letters change colour as they scroll.\n- **Buttons:** \"Get it\" is a rolling rainbow and \"GitHub\" gets rainbow letters. They still wobble.\n- **Ship:** rainbow exhaust, and a rainbow ring pulses out on every kick. \"ROBOT DESTROYED\" spins in, in rainbow letters.\n\n**A prize:** here the music and zoom have no buttons; they're part of the rave. Beat the robot in Space Shooter with every mod switched on, and when you come back from the win (\"play again?\"), play/pause and zoom buttons pop in along the top of the window, switched off for you to turn on. This browser remembers you've won.\n\n**What I checked:** after a reload there were no errors, the screenshot shows the rainbow page and robot, and a test win brought the buttons in. I can't hear from here, so turn it up.\n\nTo undo it, switch off **Rainbow Rave** in the side panel, or ask me to.",
     "t": 251000
    }
-  ]
+  ],
+  "touch": {
+   "prompt": "now bring in Rainbow Rave. get creative..",
+   "texts": {
+    "22": "Rainbow Rave is on timsrobot.com. It's a new mod, **Rainbow Rave**, ported from your Rainbow Rave mod for x.com, with a rave look for every mod on this page.\n\n**From the x.com version:**\n- The rolling rainbow behind the whole page, with white text on top.\n- The trance loop, made in code (no sound files). It starts on your first tap.\n- The kick zoom: the page's blocks pulse with every kick drum.\n\n**Every mod raves:**\n- **Robot:** his outline, eyes and legs roll through the rainbow, faster the more you've hurt him in the shooter, and he blows up in a big rainbow blast.\n- **Title:** each letter a different neon colour around the rainbow, with a glow that adds light, and no flicker. It still waves.\n- **Tagline, checklist, LED sign:** \"your own coding agent\" glows rainbow letter by letter, ticked boxes and icons roll through the rainbow, and the LED letters change colour as they scroll.\n- **Buttons:** \"Get it\" is a rolling rainbow and \"GitHub\" gets rainbow letters. They still wobble.\n- **Ship:** rainbow exhaust, and a rainbow ring pulses out on every kick. \"ROBOT DESTROYED\" spins in, in rainbow letters.\n\n**A prize:** here the music and zoom have no buttons; they're part of the rave. Beat the robot in Space Shooter with every mod switched on, and when you come back from the win (\"play again?\"), play/pause and zoom buttons pop in along the top of the screen, switched off for you to turn on. This browser remembers you've won.\n\n**What I checked:** after a reload there were no errors, the screenshot shows the rainbow page and robot, and a test win brought the buttons in. I can't hear from here, so turn it up.\n\nTo undo it, switch off **Rainbow Rave** in the side panel, or ask me to."
+   }
+  }
  }
 ];
 export const ORDER = ["timsrobot.com/tagline","timsrobot.com/robot","timsrobot.com/jelly","timsrobot.com/gravity","timsrobot.com/neon","timsrobot.com/stickers","timsrobot.com/shooter","timsrobot.com/fireworks","timsrobot.com/checklist","timsrobot.com/terminal","timsrobot.com/led","timsrobot.com/tilt","timsrobot.com/rave"];

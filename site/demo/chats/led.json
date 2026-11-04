@@ -67,5 +67,12 @@
    "text": "The footer is now a scrolling LED sign. It has amber dot-matrix letters with a glow, a dark bezel and red stars between the items. GitHub, Report a problem and Privacy scroll right to left in a loop that doesn't jump.\n\n- **Clicking:** the sign stops scrolling when you hover over it or tab into it, so the links are easy to hit. They go to the same places as before. I checked that a click on a link lands on the link itself and not on the dot overlay.\n- **Accessibility:** the loop needs a second copy of the links. Tab and screen readers skip that copy, so you tab through just three links. If your system is set to reduce motion, the sign stays still.\n- **What I checked:** after reloading, there are no mod errors. All 3 links are in the sign with the right addresses. It scrolls at a steady speed, about 10 seconds per loop at this width. I took a screenshot to check the look, and made the dots a little bigger so the text is easier to read.\n\nTo undo it, switch off **LED Footer** in the side panel, or ask me to.",
    "t": 60041
   }
- ]
+ ],
+ "touch": {
+  "prompt": "turn the footer into like a scrolling LED sign",
+  "texts": {
+   "7": "The sign works: it scrolls and the links can be tapped. I'm making the dots a little bigger so the text is easier to read.",
+   "11": "The footer is now a scrolling LED sign. It has amber dot-matrix letters with a glow, a dark bezel and red stars between the items. GitHub, Report a problem and Privacy scroll right to left in a loop that doesn't jump.\n\n- **Tapping:** the links go to the same places as before. I checked that a tap on a link lands on the link itself and not on the dot overlay.\n- **Accessibility:** the loop needs a second copy of the links. Screen readers skip that copy, so they read out just three links. If your system is set to reduce motion, the sign stays still.\n- **What I checked:** after reloading, there are no mod errors. All 3 links are in the sign with the right addresses. It scrolls at a steady speed, about 10 seconds per loop at this width. I took a screenshot to check the look, and made the dots a little bigger so the text is easier to read.\n\nTo undo it, switch off **LED Footer** in the side panel, or ask me to."
+  }
+ }
 }

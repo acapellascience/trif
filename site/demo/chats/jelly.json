@@ -52,5 +52,11 @@
    "text": "Done: when you hover over \"Get it\" or \"GitHub\", the button squashes, stretches and settles back, like jelly. Those are the only two buttons on the page.\n\n**What I checked after reloading:** I can't hover the mouse from here, so I tested the wobble by running its animation on \"Get it\" directly, and it squashed as expected. I haven't seen a real hover myself. The mod reported no errors.\n\nIf your system is set to reduce motion, the wobble is switched off.\n\nThe wobble is a new mod. To undo it, switch off **Jelly Buttons** in the side panel, or ask me to.",
    "t": 34868
   }
- ]
+ ],
+ "touch": {
+  "prompt": "make the buttons wobble like jelly when i tap them",
+  "texts": {
+   "8": "Done: tap \"Get it\" or \"GitHub\" and the button squashes, stretches and settles back, like jelly, as its link opens in a new tab. Those are the only two buttons on the page.\n\n**What I checked after reloading:** I can't tap from here, so I tested the wobble by running its animation on \"Get it\" directly, and it squashed as expected. I haven't seen a real tap myself. The mod reported no errors.\n\nIf your system is set to reduce motion, the wobble is switched off.\n\nThe wobble is a new mod. To undo it, switch off **Jelly Buttons** in the side panel, or ask me to."
+  }
+ }
 }

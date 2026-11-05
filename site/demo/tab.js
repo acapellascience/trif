@@ -176,10 +176,10 @@
     box?.addEventListener('transitionend', done);
   }
   // The sheet's sizes on a phone: tucked away (its bar), half (40% of the screen) and full (nearly all of
-  // it). Full is there once the demo's chats are done (the box is the visitor's: shim.js says so,
-  // trif-demo:free) and in sandbox mode.
+  // it). It opens at half (full only for the wrap-up and sandbox mode), and can be swiped to full at any
+  // time, to look at the chat or the mods list.
   const FREE = 'trif-demo-free';
-  let canFull = (() => { try { return !!sessionStorage.getItem(FREE) || !!sessionStorage.getItem(TALL); } catch { return false; } })();
+  const canFull = true;
   const size = () => (minimized() ? 'min' : root.classList.contains('demo-tall') ? 'full' : 'half');
   function setSize(s) {
     if (s === 'full' && !canFull) s = 'half';
@@ -278,16 +278,13 @@
     // (pages.js: --demo-grow), so the chat above it keeps its room.
     // The wrap-up chat was sent: on a phone the sheet comes up full height (shim.js opens the mods list).
     if (d.type === 'trif-demo:wrapup') {
-      canFull = true;
       try { sessionStorage.setItem(FREE, '1'); } catch {}
       if (phone()) setSize('full');
       return;
     }
     // The demo's chats are done (the box is the visitor's): the sheet can come up full height.
     if (d.type === 'trif-demo:free') {
-      canFull = d.free === true || !!sessionStorage.getItem(TALL);
       try { sessionStorage.setItem(FREE, d.free === true ? '1' : ''); } catch {}
-      if (!canFull && size() === 'full') setSize('half');
       return;
     }
     if (d.type === 'trif-demo:grow') {

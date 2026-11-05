@@ -763,6 +763,11 @@
       mounted = true;
       try { if (window.parent !== window && window.parent.matchMedia('(max-width: 700px)').matches) document.documentElement.classList.add('demo-phone'); } catch {}
       input.rows = 3; // (where the box can't grow to fit its text: Safari)
+      // Not a form to autofill: an iPhone's keyboard then leaves out its passwords and Wallet buttons (the
+      // arrows and Done are Safari's own), and its return key says "send".
+      input.setAttribute('autocomplete', 'off');
+      input.setAttribute('enterkeyhint', 'send');
+      form.setAttribute('autocomplete', 'off');
       if (document.documentElement.classList.contains('demo-phone')) {
         // (fitted to its text: fitBox, on every change, the panel clearing it after a send included)
         input.addEventListener('input', fitBox);

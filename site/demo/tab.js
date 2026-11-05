@@ -324,6 +324,10 @@
     // The visitor taps into the message box to type (the keyboard comes up): on a phone a sheet that was up
     // full height comes down to half (tucked away, it stays tucked away).
     if (d.type === 'trif-demo:typing') { if (phone() && size() === 'full') setSize('half'); return; }
+    // The keyboard is up (the panel's message box has the focus): on a phone, behind the sheet the bottom
+    // of the screen goes dark (its ::backdrop, pages.js), so the see-through bar Safari puts over the
+    // keyboard shows dark, not the page.
+    if (d.type === 'trif-demo:keyboard') { root.classList.toggle('demo-keyboard', d.on === true && phone()); return; }
     // The panel has loaded (again): it hears the sheet's size.
     if (d.type === 'trif-demo:hello') { tellSize(); return; }
     // The wrap-up chat was sent: on a phone the sheet comes up full height (shim.js opens the mods list).

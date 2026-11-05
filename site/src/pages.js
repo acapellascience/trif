@@ -134,6 +134,9 @@ const DEMO_STYLE = `
   html.demo-tall .demo-panel { height: 88dvh; max-height: 88dvh; }
   html.demo-open.demo-tall body { padding-bottom: 88dvh; }
   html.demo-min .demo-panel { height: 35px; min-height: 0; }
+  /* the keyboard up (demo.js: demo-keyboard): the bottom of the screen dark behind everything, the sheet and
+     the keyboard, so the see-through bar Safari puts over the keyboard shows dark, not the page */
+  html.demo-keyboard .demo-panel::backdrop { background: linear-gradient(transparent 50%, var(--card) 50%); }
   /* room under the page for the sheet, so the end of it (the footer) can scroll up above the sheet */
   html.demo-open body { padding-bottom: max(40vh, 260px); padding-bottom: max(calc(40dvh + var(--demo-grow, 0px)), calc(260px + var(--demo-grow, 0px))); }
   html.demo-open.demo-min body { padding-bottom: 35px; }

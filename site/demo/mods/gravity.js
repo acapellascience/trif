@@ -1,6 +1,6 @@
 // ==WebMod==
 // @name        G Toggles Gravity
-// @description Press G and everything falls down
+// @description Grab things and throw them!
 // @match       https://timsrobot.com/*
 // @match       https://*.timsrobot.com/*
 // @run-at      document-idle

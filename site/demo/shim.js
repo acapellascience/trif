@@ -263,7 +263,8 @@
     if (store.get(chatKey)?.run) throw new Error(`already working on ${SITE}`);
     const runId = `demo-${++runSeq}`;
     const startedAt = Date.now();
-    if (!state.sent) { state.sent = true; document.documentElement.classList.remove('demo-hint-send'); }
+    state.sent = true;
+    document.documentElement.classList.remove('demo-hint-send'); // (sent: Send stops pulsing)
     updateChat((c) => { c.messages.push({ role: 'user', text: prompt, time: startedAt }); c.run = { runId, startedAt }; c.last = null; });
     const recording = DEMO.chats.find((c) => c.prompt === prompt);
     const run = { runId, recording, timers: [] };
@@ -598,6 +599,8 @@
       if (!input) return;
       const c = busy ? null : next();
       const free = !busy && !c; // every recording played: the box is theirs
+      // Send pulses while a prompt waits: at a desk for each one, on a phone until it's first been clicked
+      document.documentElement.classList.toggle('demo-hint-send', !!c && (!document.documentElement.classList.contains('demo-phone') || !state.sent));
       const was = !document.documentElement.classList.contains('demo-guided');
       document.documentElement.classList.toggle('demo-guided', !free);
       input.readOnly = !free;
@@ -626,8 +629,6 @@
       const input = document.getElementById('input');
       if (!form || !input || mounted) return;
       mounted = true;
-      // Until Send has been clicked once, it's highlighted, so it's clear what to do (panel.css)
-      document.documentElement.classList.toggle('demo-hint-send', !state.sent);
       try { if (window.parent !== window && window.parent.matchMedia('(max-width: 700px)').matches) document.documentElement.classList.add('demo-phone'); } catch {}
       input.rows = 3; // (where the box can't grow to fit its text: Safari)
       // On a phone the waiting prompt can be scrolled with a finger, but a tap mustn't focus it (no

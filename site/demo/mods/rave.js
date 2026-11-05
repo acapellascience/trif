@@ -504,7 +504,12 @@
   const BEAT = 60000 / BPM;
   const PULSE = [{ scale: 1.05, easing: 'steps(4)' }, { scale: 1, offset: 280 / BEAT }, { scale: 1 }];
   const TIMING = { duration: BEAT, iterations: Infinity };
-  const blocks = () => [...document.querySelectorAll('main > section, body > footer')];
+  // (the home page's sections and footer; on a page whose <main> has no sections, like the report form and
+  // the Windows waitlist, <main> as a whole)
+  const BLOCK = 'main > section, body > footer';
+  const sectionless = () => !document.querySelector('main > section');
+  const blocks = () => [...document.querySelectorAll(sectionless() ? 'main, body > footer' : BLOCK)];
+  const blockOf = (el) => el.closest(BLOCK) || (sectionless() ? el.closest('main') : null);
 
   let phase = null, stopTimer = 0;
   const scales = new Map();
@@ -822,7 +827,7 @@
           if (el.closest('[data-tss-dead]') || (el.querySelector('.tss-w') && !el.querySelector('.tss-w:not([data-tss-dead])'))) continue;
           let r = el.getBoundingClientRect();
           // in a zooming block: drawn on the zoomed layer, where it was before the zoom
-          const blk = el.closest('main > section, body > footer');
+          const blk = blockOf(el);
           const z = blk ? zoomOf(blk) : 1;
           g = blk ? gz : g0;
           if (z !== 1) {

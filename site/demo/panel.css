@@ -11,7 +11,8 @@ body.site-off .bar-robot:hover:not([aria-busy="true"]) svg { opacity: 0.7; }
    the recorded prompt waiting in the message box takes their place. */
 #empty .chips { display: none; }
 
-/* Until Send has been clicked once, it pulses, so it's clear what to do (shim.js). */
+/* Send pulses while a recorded prompt waits for it, so it's clear what to do: at a desk for each one, on a
+   phone until it's first been clicked (shim.js). */
 html.demo-hint-send #send:not([hidden], :disabled) { animation: demo-send-pulse 1.6s ease-out infinite; }
 @keyframes demo-send-pulse {
   0% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--accent) 80%, transparent); }

@@ -161,6 +161,9 @@
        !important to beat "all text white", and animations can't override !important values). The cursor
        cycles through the rainbow. */
     html body .hero .tagline { animation: rave-cyc 3s linear infinite; }
+    /* (on a touchscreen the colour cycling steps, 15-20 times a second rather than every frame: each step
+       restyles every letter in the list and the tagline, which cost a phone a fifth of its frame rate) */
+    @media (pointer: coarse) { html body ul[data-nc], html body .hero .tagline { animation-timing-function: steps(60); } }
     @property --rave-tt-a { syntax: '<number>'; inherits: true; initial-value: 1; }
     @keyframes rave-tt-in { from { --rave-tt-a: 0; } to { --rave-tt-a: 1; } }
     html body .tagline .tt-glow { animation: rave-tt-in 1.2s ease-out both !important; text-shadow: none !important; }

@@ -72,7 +72,10 @@
       if (box.style.bottom !== bottom) box.style.bottom = bottom;
     };
     vv.addEventListener('resize', sit);
-    vv.addEventListener('scroll', sit);
+    // Not on the visible part's scrolling: a swipe in the strip by the keyboard slides it (the phone won't
+    // be stopped), and the sheet chasing it each frame, a frame late, jumped about. Left alone, the sheet
+    // just rides along with the slide and settles back with it.
+    vv.addEventListener('scroll', () => { if (!keyboardUp) sit(); });
   }
   const remeasure = () => { if (measure()) dispatchEvent(new Event('resize')); };
 

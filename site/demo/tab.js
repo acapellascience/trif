@@ -70,7 +70,16 @@
       const gap = phone() ? Math.round(layoutH - (vv.offsetTop + vv.height)) : 0;
       const bottom = gap > 60 ? `${gap}px` : '';
       if (box.style.bottom !== bottom) box.style.bottom = bottom;
+      if (DEBUG) note(`layout ${layoutH} (root ${root.clientHeight} + cut ${cut.h}) · vv top ${Math.round(vv.offsetTop)} h ${Math.round(vv.height)} · gap ${gap} · bottom ${bottom || '0'} · kb ${keyboardUp} · scrollY ${Math.round(scrollY)}`);
     };
+    // ?kbdebug: a line of numbers at the top of the sheet, for finding why it jumps with the keyboard up
+    const DEBUG = /[?&]kbdebug/.test(location.search);
+    const note = (t) => {
+      let n = box.querySelector('.kbdebug');
+      if (!n) { n = document.createElement('div'); n.className = 'kbdebug'; n.style.cssText = 'position:absolute;left:0;right:0;top:0;z-index:9;font:10px/1.3 monospace;background:#ff0;color:#000;padding:2px 4px;pointer-events:none'; box.append(n); }
+      n.textContent = t;
+    };
+    if (DEBUG) setInterval(sit, 250);
     vv.addEventListener('resize', sit);
     // Not on the visible part's scrolling: a swipe in the strip by the keyboard slides it (the phone won't
     // be stopped), and the sheet chasing it each frame, a frame late, jumped about. Left alone, the sheet

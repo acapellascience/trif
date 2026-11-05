@@ -609,9 +609,9 @@
       path.setAttribute('opacity', String(opacity));
       svg.append(path);
     };
-    // the page zooming out and back: four corners around a block (the sound waves are the mute button's)
-    add('M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5', true);
-    add('M9 9h6v6H9z');
+    // the page swelling on the beat: four arrows out from the middle, like a compass rose (dimmed, and
+    // struck through, while it's off: the music note's way)
+    add('M12 9.5V3.5M9.3 6.2 12 3.5l2.7 2.7M12 14.5v6M9.3 17.8 12 20.5l2.7-2.7M9.5 12h-6M6.2 9.3 3.5 12l2.7 2.7M14.5 12h6M17.8 9.3 20.5 12l-2.7 2.7', true, zoomOn ? 1 : 0.6);
     if (!zoomOn) add('M4 4 20 20', true);
     zoomButton.replaceChildren(svg);
     zoomButton.setAttribute('aria-pressed', String(zoomOn));

@@ -301,6 +301,9 @@
       else if (d.phase === 'end' || d.phase === 'cancel') dragEnd(dy, d.phase === 'cancel');
       return;
     }
+    // The next prompt starts typing itself in: on a phone a sheet that was up full height comes down to
+    // half (tucked away, it stays tucked away).
+    if (d.type === 'trif-demo:typing') { if (phone() && size() === 'full') setSize('half'); return; }
     // The panel has loaded (again): it hears the sheet's size.
     if (d.type === 'trif-demo:hello') { tellSize(); return; }
     // The wrap-up chat was sent: on a phone the sheet comes up full height (shim.js opens the mods list).

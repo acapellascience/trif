@@ -708,6 +708,8 @@
       let i = 0;
       typing = { text, timer: 0 };
       const step = () => {
+        // (the first letter: on a phone the sheet comes down to half if it was up full, tab.js)
+        if (i === 0 && window.parent !== window) { try { window.parent.postMessage({ type: 'trif-demo:typing' }, location.origin); } catch {} }
         i = Math.min(text.length, i + 1);
         show(input, text.slice(0, i));
         if (i < text.length) typing.timer = setTimeout(step, TYPE_MS * (0.6 + Math.random() * 0.8));

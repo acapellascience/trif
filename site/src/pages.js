@@ -134,9 +134,12 @@ const DEMO_STYLE = `
   html.demo-tall .demo-panel { height: 88dvh; max-height: 88dvh; }
   html.demo-open.demo-tall body { padding-bottom: 88dvh; }
   html.demo-min .demo-panel { height: 35px; min-height: 0; }
-  /* the keyboard up (demo.js: demo-keyboard): the bottom of the screen dark behind everything, the sheet and
-     the keyboard, so the see-through bar Safari puts over the keyboard shows dark, not the page */
-  html.demo-keyboard .demo-panel::backdrop { background: linear-gradient(transparent 50%, var(--card) 50%); }
+  /* the keyboard up (demo.js: demo-keyboard): the page is put out of sight, all but the sheet (the keyboard
+     and the sheet cover nearly all of the screen anyway), so whatever an iPhone shows through the
+     see-through bar over its keyboard (it scrolled the page's end into it: the LED sign, the rainbow) is
+     plain dark */
+  html.demo-keyboard { background: var(--card) !important; }
+  html.demo-keyboard > :not(head, .demo-panel, .demo-tab) { visibility: hidden !important; }
   /* room under the page for the sheet, so the end of it (the footer) can scroll up above the sheet */
   html.demo-open body { padding-bottom: max(40vh, 260px); padding-bottom: max(calc(40dvh + var(--demo-grow, 0px)), calc(260px + var(--demo-grow, 0px))); }
   html.demo-open.demo-min body { padding-bottom: 35px; }

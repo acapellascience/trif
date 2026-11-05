@@ -276,6 +276,13 @@
     const d = e.data || {};
     // On a phone the panel's message box fits its text, and the sheet grows by what the box gained
     // (pages.js: --demo-grow), so the chat above it keeps its room.
+    // The wrap-up chat was sent: on a phone the sheet comes up full height (shim.js opens the mods list).
+    if (d.type === 'trif-demo:wrapup') {
+      canFull = true;
+      try { sessionStorage.setItem(FREE, '1'); } catch {}
+      if (phone()) setSize('full');
+      return;
+    }
     // The demo's chats are done (the box is the visitor's): the sheet can come up full height.
     if (d.type === 'trif-demo:free') {
       canFull = d.free === true || !!sessionStorage.getItem(TALL);

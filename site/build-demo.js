@@ -22,7 +22,7 @@ export const OUT = path.join(HERE, 'src', 'demo-files.js');
 // chat makes two mods, the makeover four). Follow-ups (a chat's `after`) are offered once the chats they
 // follow have been replayed. A chat marked `desk` (Tilt Card's: the phone has the rest to run) is left out
 // of the phone's sheet (shim.js).
-const CHAT_ORDER = ['tagline', 'robot', 'title', 'fireworks', 'makeover', 'gravity', 'tilt', 'shooter', 'rave'];
+const CHAT_ORDER = ['tagline', 'robot', 'title', 'fireworks', 'makeover', 'gravity', 'tilt', 'shooter', 'rave', 'wrapup']; // (wrapup: "what should i do now?", no mods: the demo's last word)
 
 // The order the demo panel lists its mods in (every one in mods/, by file name): the order they're made in.
 export const DEMO_ORDER = ['tagline', 'robot', 'neon', 'jelly', 'fireworks', 'stickers', 'checklist', 'terminal', 'led',

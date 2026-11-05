@@ -287,6 +287,12 @@
     updateChat((c) => { c.messages.push({ role: 'user', text: prompt, time: startedAt }); c.run = { runId, startedAt }; c.last = null; });
     const run = { runId, recording, timers: [] };
     state.runs.set(runId, run);
+    // The wrap-up ("what should i do now?"): on a phone the sheet comes up full height with the mods list
+    // open, so the answer and every mod show (tab.js: trif-demo:wrapup).
+    if (recording?.id === 'wrapup') {
+      try { const m = document.getElementById('mods'); if (m && !m.open) m.open = true; localStorage.setItem('modsOpen', 'true'); } catch {}
+      if (window.parent !== window) window.parent.postMessage({ type: 'trif-demo:wrapup' }, location.origin);
+    }
     state.active = { runId, chat: recording ? recording.id : null, step: 0 };
     if (recording) replay(run, 0); else notLive(run);
     broadcast({ type: 'statusChanged' });
@@ -376,7 +382,7 @@
       setNow({ disabled: off });
       state.replayed.add(run.recording.id);
       const mods = run.recording.mods; // (`focus`: the one to show, on a phone, of a chat that makes several)
-      later(() => loadPage(run.recording.focus || mods[mods.length - 1], true), 700);
+      if (mods.length) later(() => loadPage(run.recording.focus || mods[mods.length - 1], true), 700); // (a chat with none, the wrap-up: nothing to load)
     }
     ui.finished(run); // (after it's counted as played: the next prompt is the next one)
   }

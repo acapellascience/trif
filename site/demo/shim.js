@@ -711,19 +711,24 @@
         window.parent.postMessage({ type: 'trif-demo:grow', px: extra }, location.origin);
       }
     }
+    // (in the pause before a prompt starts typing itself in, Send waits too: panel.css demo-waiting)
+    const waiting = (on) => document.documentElement.classList.toggle('demo-waiting', on);
     function stopTyping(input, finish) {
       if (!typing) return;
       clearTimeout(typing.timer);
       if (finish) show(input, typing.text);
       typing = null;
+      waiting(false);
     }
     function typeInto(input, text) {
       if (typing?.text === text || (!typing && input.value === text)) return; // (already there, or on its way)
       stopTyping(input, false);
       if (!text || matchMedia('(prefers-reduced-motion: reduce)').matches) return show(input, text);
       let i = 0;
-      typing = { text, timer: 0 };
+      typing = { text, timer: 0, started: false };
+      waiting(true);
       const step = () => {
+        if (!typing.started) { typing.started = true; waiting(false); }
         i = Math.min(text.length, i + 1);
         show(input, text.slice(0, i));
         if (i < text.length) typing.timer = setTimeout(step, TYPE_MS * (0.6 + Math.random() * 0.8));
@@ -821,7 +826,12 @@
       });
       // Send (or Enter) while the prompt is still typing: the whole prompt goes, not the part typed so far.
       // (Capture phase on the document, ahead of the panel's own submit handler on the form.)
-      document.addEventListener('submit', (e) => { if (e.target === form) stopTyping(input, true); }, true);
+      document.addEventListener('submit', (e) => {
+        if (e.target !== form) return;
+        // in the pause before the next prompt starts typing in, Send does nothing (it's not there yet)
+        if (typing && !typing.started) { e.preventDefault(); e.stopImmediatePropagation(); return; }
+        stopTyping(input, true);
+      }, true);
       fill();
       follow(false); // (the chat sticks to its bottom from the start: see follow)
       later(resume);

@@ -17,7 +17,7 @@
   const OPEN = 'trif-demo-open';
   const MIN = 'trif-demo-min';
   const TALL = 'trif-demo-tall'; // sandbox mode on a phone: the sheet nearly full height (pages.js .demo-tall)
-  try { sessionStorage.removeItem(TALL); } catch {} // (kb-simple: never full height)
+  try { if (sessionStorage.getItem(TALL)) root.classList.add('demo-tall'); } catch {}
   const FOCUS = 'trif-demo-focus';
   const remember = (on) => { try { sessionStorage.setItem(OPEN, on ? '1' : ''); } catch {} };
   // TEST BRANCH (kb-simple): the phone sheet as it was, half or tucked away; no drag, no full height,

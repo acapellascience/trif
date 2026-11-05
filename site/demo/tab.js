@@ -175,25 +175,61 @@
     const timer = setTimeout(done, 400); // (in case no transition runs)
     box?.addEventListener('transitionend', done);
   }
+  // The sheet's sizes on a phone: tucked away (its bar), half (40% of the screen) and full (nearly all of
+  // it). Full is there once the demo's chats are done (the box is the visitor's: shim.js says so,
+  // trif-demo:free) and in sandbox mode.
+  const FREE = 'trif-demo-free';
+  let canFull = (() => { try { return !!sessionStorage.getItem(FREE) || !!sessionStorage.getItem(TALL); } catch { return false; } })();
+  const size = () => (minimized() ? 'min' : root.classList.contains('demo-tall') ? 'full' : 'half');
+  function setSize(s) {
+    if (s === 'full' && !canFull) s = 'half';
+    root.classList.toggle('demo-tall', s === 'full');
+    try { sessionStorage.setItem(TALL, s === 'full' ? '1' : ''); } catch {}
+    minimize(s === 'min');
+  }
+  // The heights the sizes come to (pages.js), in the whole window (innerHeight stops at the sheet: see cut)
+  function heights() {
+    const H = innerHeight + cut.h;
+    const grow = parseFloat(root.style.getPropertyValue('--demo-grow')) || 0;
+    return { min: 35, half: Math.min(H * 0.85, Math.max(H * 0.4, 260) + grow), full: H * 0.88 };
+  }
+  // The top bar is the handle: the sheet follows the finger up or down, and on letting go settles at the
+  // nearest size (a quick flick goes one size on in its direction); a tap brings a tucked-away sheet back.
+  // It shrinks or grows from wherever the finger left it (no jump back first).
   function swipe(bar, except) {
     let start = null;
     bar.addEventListener('pointerdown', (e) => {
       if (!phone() || except.contains(e.target) || (e.pointerType === 'mouse' && e.button !== 0)) return;
-      start = { id: e.pointerId, y: e.clientY };
+      start = { id: e.pointerId, y: e.clientY, h: box.getBoundingClientRect().height, from: size() };
       try { bar.setPointerCapture(e.pointerId); } catch {}
     });
     bar.addEventListener('pointermove', (e) => {
-      if (start?.id !== e.pointerId || minimized()) return;
-      box.style.translate = `0 ${Math.max(0, e.clientY - start.y).toFixed(0)}px`; // the sheet follows the finger down
+      if (start?.id !== e.pointerId) return;
+      const top = canFull ? heights().full : heights().half;
+      box.style.transition = 'none';
+      box.style.minHeight = '0';
+      box.style.height = `${Math.round(Math.max(35, Math.min(top, start.h - (e.clientY - start.y))))}px`;
     });
     const end = (e) => {
       if (start?.id !== e.pointerId) return;
-      const dy = e.clientY - start.y;
+      const dy = e.clientY - start.y, from = start.from;
       start = null;
-      box.style.translate = '';
-      if (e.type === 'pointercancel') return;
-      if (!minimized() && dy > 40) minimize(true);
-      else if (minimized() && (dy < -20 || Math.abs(dy) < 8)) minimize(false); // swiped up, or tapped
+      let to = from;
+      if (e.type !== 'pointercancel') {
+        if (Math.abs(dy) < 8) to = from === 'min' ? 'half' : from; // a tap
+        else {
+          const hs = heights(), order = canFull ? ['min', 'half', 'full'] : ['min', 'half'];
+          const at = box.getBoundingClientRect().height;
+          to = order.reduce((a, b) => (Math.abs(hs[b] - at) < Math.abs(hs[a] - at) ? b : a));
+          if (to === from && Math.abs(dy) > 40) { // a flick: one size on
+            const i = order.indexOf(from) + (dy > 0 ? -1 : 1);
+            to = order[Math.max(0, Math.min(order.length - 1, i))];
+          }
+        }
+      }
+      setSize(to);
+      box.getBoundingClientRect(); // (from the height it was left at...)
+      box.style.transition = ''; box.style.height = ''; box.style.minHeight = ''; // (...to the size's, smoothly)
     };
     bar.addEventListener('pointerup', end);
     bar.addEventListener('pointercancel', end);
@@ -240,6 +276,13 @@
     const d = e.data || {};
     // On a phone the panel's message box fits its text, and the sheet grows by what the box gained
     // (pages.js: --demo-grow), so the chat above it keeps its room.
+    // The demo's chats are done (the box is the visitor's): the sheet can come up full height.
+    if (d.type === 'trif-demo:free') {
+      canFull = d.free === true || !!sessionStorage.getItem(TALL);
+      try { sessionStorage.setItem(FREE, d.free === true ? '1' : ''); } catch {}
+      if (!canFull && size() === 'full') setSize('half');
+      return;
+    }
     if (d.type === 'trif-demo:grow') {
       const px = Math.max(0, Math.min(400, Math.round(Number(d.px) || 0)));
       document.documentElement.style.setProperty('--demo-grow', `${px}px`);

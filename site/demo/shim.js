@@ -421,7 +421,7 @@
       case 'instructions.get': return { text: state.instructions, file: '~/.trif/instructions.md', max: 4000 };
       case 'instructions.set': state.instructions = String(msg.text ?? '').trim().slice(0, 4000); persist(); return { text: state.instructions };
       case 'agent.start': return startAgent(msg);
-      case 'agent.stop': { const run = state.runs.get(msg.runId); if (run) finish(run, false); return { ok: true }; }
+      case 'agent.stop': { const run = state.runs.get(msg.runId); if (run && !run.recording) finish(run, false); return { ok: true }; } // (a recorded chat plays to its end: Stop is locked, panel.css)
       case 'agent.login': throw new Error(DEMO.words.noLogin);
       case 'agent.loginCode': case 'agent.loginCancel': return { ok: true };
       case 'chat.clear': stopRuns(); await local.remove(chatKey); return { cleared: true };
@@ -641,6 +641,7 @@
       // every recording played: the box is theirs, until the robot has had enough (the last of its replies)
       const locked = state.typed > (DEMO.words.typedReplies || []).length;
       const free = !busy && !c && !locked;
+      if (!busy && window.parent !== window) window.parent.postMessage({ type: 'trif-demo:free', free: !c }, location.origin); // (tab.js: the sheet can go full height)
       document.documentElement.classList.toggle('demo-locked', locked && !busy);
       // Send pulses while a prompt waits for it
       document.documentElement.classList.toggle('demo-hint-send', !!c);

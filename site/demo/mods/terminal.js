@@ -49,8 +49,9 @@
     .tb-ps { color: #3ddc84; }
     .tb-path { color: #6cb6ff; }
     .tb-ls { display: grid; grid-template-columns: repeat(auto-fill, minmax(16ch, 1fr)); gap: 0 1.5ch; margin: 2px 0 10px; }
-    .tb-ls span { color: #f0c674; opacity: 0; transition: opacity .15s; }
-    .tb-ls span.tb-on { opacity: 1; }
+    /* (its own spans only, not ones another mod puts inside them: Gravity mode wraps each word in a span) */
+    .tb-ls > span { color: #f0c674; opacity: 0; transition: opacity .15s; }
+    .tb-ls > span.tb-on { opacity: 1; }
     [data-tb] .tb-body p { margin: 0 0 10px !important; font: inherit !important; color: #d7d7d2 !important;
       opacity: 0; transform: translateY(3px); transition: opacity .5s, transform .5s; }
     [data-tb] .tb-body p.tb-on { opacity: 1; transform: none; }
@@ -59,7 +60,7 @@
       animation: tb-blink 1s steps(1) infinite; }
     .tb-typing .tb-cursor { animation: none; }
     @keyframes tb-blink { 50% { opacity: 0; } }
-    @media (prefers-reduced-motion: reduce) { .tb-cursor { animation: none; } .tb-ls span, [data-tb] .tb-body p { transition: none; } }
+    @media (prefers-reduced-motion: reduce) { .tb-cursor { animation: none; } .tb-ls > span, [data-tb] .tb-body p { transition: none; } }
   `;
   document.head.append(style);
 
@@ -94,7 +95,7 @@
     try {
       const ok = (s) => typeof s === 'string' && /^[a-z0-9-]{1,40}$/.test(s);
       const files = [...new Set([...(e.detail?.mods || []).filter(ok), 'terminal'])].map((m) => `${m}.js`).sort();
-      const shown = ls.querySelectorAll('span').length && ls.querySelector('span.tb-on');
+      const shown = ls.querySelectorAll(':scope > span').length && ls.querySelector(':scope > span.tb-on');
       ls.replaceChildren(...files.map((m) => { const s = el('span', '', m); if (shown) s.classList.add('tb-on'); return s; }));
       ls.setAttribute('aria-label', 'Mods: ' + files.join(', '));
     } catch (err) { window.trif?.warn('terminal', String(err)); }
@@ -105,7 +106,7 @@
 
   const finish = () => {
     typed.textContent = COMMAND;
-    ls.querySelectorAll('span').forEach((s) => s.classList.add('tb-on'));
+    ls.querySelectorAll(':scope > span').forEach((s) => s.classList.add('tb-on'));
     para.classList.add('tb-on');
     const last = prompt();
     last.append(cursor);
@@ -121,7 +122,7 @@
       try {
         if (i < COMMAND.length) { typed.textContent += COMMAND[i++]; return setTimeout(type, 45 + Math.random() * 70); }
         // "Enter": the listing appears file by file, then the paragraph, then a fresh prompt.
-        const spans = [...ls.querySelectorAll('span')];
+        const spans = [...ls.querySelectorAll(':scope > span')];
         spans.forEach((s, k) => setTimeout(() => s.classList.add('tb-on'), 250 + k * 70));
         setTimeout(finish, 250 + spans.length * 70 + 350);
       } catch (e) { window.trif?.warn('terminal', String(e)); finish(); }

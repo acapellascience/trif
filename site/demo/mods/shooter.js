@@ -454,7 +454,8 @@
   // mode, which checks the box in the ship's `tss-ship` event) grabbing the piece under the ship.
   addEventListener('pointerdown', (e) => {
     if (e.pointerType !== 'touch' || touch.id !== null) return;
-    if (performance.now() < deadUntil || e.target.closest?.('#trif-top-bar')) return;
+    // (not through the buttons along the top, or the demo's panel and its tab, which sit over the page)
+    if (performance.now() < deadUntil || e.target.closest?.('#trif-top-bar, .demo-panel, .demo-tab')) return;
     const b = grabBox();
     if (e.clientX < b.left || e.clientX > b.right || e.clientY < b.top || e.clientY > b.bottom) return;
     touch.id = e.pointerId; touch.x = e.clientX; touch.y = e.clientY; touch.dx = touch.dy = 0;

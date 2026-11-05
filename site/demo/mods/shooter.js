@@ -56,7 +56,7 @@
     /* (centred with margins, not transform: Jelly buttons' hover wobble animates transform, which would
        knock it sideways) */
     .tss-win-opts { position: absolute; left: 0; right: 0; width: max-content; max-width: calc(100vw - 24px); margin: 0 auto; top: 6px;
-      display: flex; flex-wrap: wrap; justify-content: center; gap: 2px 12px; }
+      display: flex; flex-direction: column; align-items: center; gap: 6px; } /* (one under the other) */
     .tss-win-again { background: none; border: 0;
       padding: 2px 6px; cursor: pointer; font: 500 12px system-ui, -apple-system, sans-serif; color: rgba(255, 255, 255, 0.65);
       text-decoration: none; text-shadow: 0 1px 2px rgba(0, 0, 0, 0.6); }
@@ -1056,6 +1056,14 @@
       links.after(below);
       opts.style.top = `${2 - (parseFloat(getComputedStyle(links).marginBottom) || 0)}px`; // tucked just under the buttons
       winEl.nodes.push(above, below);
+      // On a touchscreen the page may be scrolled anywhere (it's long on a phone): bring "You Win!" up near
+      // the top, clear of the demo's sheet at the bottom.
+      if (TOUCH_SHIP) {
+        try {
+          const top = h1.getBoundingClientRect().top + scrollY - 70;
+          if (Math.abs(top - scrollY) > 40) scrollTo({ top: Math.max(0, top), behavior: 'smooth' });
+        } catch {}
+      }
       sfx.winShimmer();
       celebrate(h1);
       dispatchEvent(new CustomEvent('tss-win')); // (Rainbow Rave unlocks its music and zoom buttons as a prize)

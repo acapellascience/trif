@@ -357,13 +357,13 @@
     s.connect(f); f.connect(g); g.connect(master); env(g, t, peak, decay);
     s.start(t); s.stop(t + decay + 0.05);
   };
-  const KICK_LEAD = 200; // ms: other mods hear about each kick this much before it sounds
+  const KICK_LEAD = 0; // ms: other mods hear about each kick this much before it sounds (on the beat now: the
+  // page keeps up, so the ship's rings needn't start early)
   const announceKick = (t) => {
     const ms = (t - ctx.currentTime + (ctx.outputLatency || ctx.baseLatency || 0)) * 1000;
     const at = performance.now() + ms;
     setTimeout(() => kickPulse(at), Math.max(0, ms));
-    // Other mods can dance to it (Space shooter's ship pulses on each kick). Announced KICK_LEAD early:
-    // an expanding ring is only noticed once it has grown a bit, so firing on the beat reads as late.
+    // Other mods can dance to it (Space shooter's ship pulses on each kick), KICK_LEAD early.
     setTimeout(() => { if (musicOn && !document.hidden) dispatchEvent(new CustomEvent('rave-kick')); }, Math.max(0, ms - KICK_LEAD));
   };
   const play = (s, t) => {
@@ -390,7 +390,7 @@
       }
       lastClock = now; stalledSince = 0;
       if (next < now - 0.1) next = now + 0.05;
-      // schedule 0.4 s ahead: with a 0.1 s tick, every kick is known at least KICK_LEAD (0.2 s) early
+      // schedule 0.4 s ahead: with a 0.1 s tick, every kick is known well before it sounds
       while (next < now + 0.4) { play(step, next); next += STEP; step = (step + 1) % 64; }
     } catch (e) { window.trif?.warn('music failed', String(e)); stop(); }
   };

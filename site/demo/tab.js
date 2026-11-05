@@ -22,7 +22,7 @@
   const remember = (on) => { try { sessionStorage.setItem(OPEN, on ? '1' : ''); } catch {} };
   const phone = () => matchMedia('(max-width: 700px)').matches; // the sheet over the bottom of the page
   const topLayer = typeof tab.showPopover === 'function';
-  let box = null;
+  let box = null, under = null; // (under: see build)
   let frame = null;
 
   // The window as the mods see it. The browser's real side panel makes the window narrower; this one only sits
@@ -206,6 +206,20 @@
     if (typeof box.showPopover === 'function') box.popover = 'manual';
     else box.hidden = true;
     root.append(box);
+    // Under the sheet, down to the bottom of the whole screen: its colour, in an ordinary layer. With the
+    // keyboard up, an iPhone shows a band of the page under the sheet (behind its address pill, over the
+    // keyboard), outside what the sheet (in the top layer) may draw on, but not outside what a layer as
+    // tall as the screen reaches (Rainbow Rave's, which showed there). This one covers it.
+    under = document.createElement('div');
+    under.className = 'demo-under';
+    root.append(under);
+    new MutationObserver(() => { if (under.nextElementSibling && under.nextElementSibling !== box) root.append(under); }).observe(root, { childList: true }); // (last, so it's over layers the mods add later at the same height)
+    const place = () => { try { under.style.top = `${Math.round(box.getBoundingClientRect().top)}px`; } catch {} };
+    new ResizeObserver(place).observe(box);
+    if (window.visualViewport) { visualViewport.addEventListener('resize', place); visualViewport.addEventListener('scroll', place); }
+    addEventListener('scroll', place, { passive: true });
+    box.addEventListener('transitionend', place);
+    place();
   }
 
   const isOpen = () => !!box && root.classList.contains('demo-open');

@@ -1,6 +1,6 @@
 {
  "id": "fireworks",
- "prompt": "make a mod where every click launches a firework, and when it explodes the robot gets scared and flinches. don't forget the sound.",
+ "prompt": "make a mod where every double-click launches a firework, and when it explodes the robot gets scared and flinches. don't forget the sound.",
  "secs": 136,
  "mods": [
   "fireworks"
@@ -9,7 +9,7 @@
  "messages": [
   {
    "role": "user",
-   "text": "make a mod where every click launches a firework, and when it explodes the robot gets scared and flinches. don't forget the sound.",
+   "text": "make a mod where every double-click launches a firework, and when it explodes the robot gets scared and flinches. don't forget the sound.",
    "t": 0
   },
   {
@@ -79,7 +79,7 @@
   },
   {
    "role": "assistant",
-   "text": "I added a new mod, **Click Fireworks**, and taught Living Robot to be scared of it.\n\n- **Every click** sends a rocket up from the bottom of the screen with a sparkly trail. It bursts where you clicked, about half the screen across: hundreds of sparks with an outer ring and an inner core (about half the bursts are full rainbows), with crackles popping inside and sparks that twinkle as they fade.\n- **The robot flinches** when one goes off near him: a startled jolt, a quick step away, a lean away from the bang and wide, scared eyes for a moment. The closer the burst, the bigger the fright, and even far-off ones get a little twitch. In gravity mode he scurries sideways with a startled hop.\n- **Sound:** a dull thud on launch, a deep boom for each burst, and a soft hiss for the crackles. It starts after your first click.\n- **Bonus:** hovering \"Get it\" sprays confetti out of the button.\n- Your clicks still work normally: the fireworks are drawn on a see-through layer that clicks pass through.\n\n**What I checked:** a fake click launched a rocket and the screenshot shows the full burst, and a burst just beside the robot made him jump away and lean. No errors. I can't hear from here, so have a listen.\n\nTo undo it, switch off **Click Fireworks** in the side panel, or ask me to.",
+   "text": "I added a new mod, **Click Fireworks**, and taught Living Robot to be scared of it.\n\n- **Every double-click** sends a rocket up from the bottom of the screen with a sparkly trail. It bursts where you double-clicked, about half the screen across: hundreds of sparks with an outer ring and an inner core (about half the bursts are full rainbows), with crackles popping inside and sparks that twinkle as they fade.\n- **The robot flinches** when one goes off near him: a startled jolt, a quick step away, a lean away from the bang and wide, scared eyes for a moment. The closer the burst, the bigger the fright, and even far-off ones get a little twitch. In gravity mode he scurries sideways with a startled hop.\n- **Sound:** a dull thud on launch, a deep boom for each burst, and a soft hiss for the crackles. It starts after your first click.\n- **Bonus:** hovering \"Get it\" sprays confetti out of the button.\n- A single click is just a click, so they never go off by accident, and double-clicking doesn't select the text under it. Your clicks still work normally: the fireworks are drawn on a see-through layer that clicks pass through.\n\n**What I checked:** a fake double-click launched a rocket and the screenshot shows the full burst, and a burst just beside the robot made him jump away and lean. No errors. I can't hear from here, so have a listen.\n\nTo undo it, switch off **Click Fireworks** in the side panel, or ask me to.",
    "t": 124200
   }
  ],

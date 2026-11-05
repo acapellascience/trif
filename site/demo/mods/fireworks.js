@@ -1,6 +1,6 @@
 // ==WebMod==
 // @name        Click Fireworks
-// @description Every click launches a firework
+// @description Double-click (or tap) to launch a firework
 // @match       https://timsrobot.com/*
 // @match       https://*.timsrobot.com/*
 // @run-at      document-idle
@@ -442,13 +442,27 @@
   };
   const start = () => { if (!running) { running = true; requestAnimationFrame(frame); } };
 
-  // Every click (capture phase, so nothing on the page can swallow it) launches a rocket.
+  // A double-click launches a rocket (capture phase, so nothing on the page can swallow it): two clicks
+  // close together in time and place, so a single click doesn't set one off by accident. On a
+  // touchscreen, every tap.
+  let lastDown = null;
   document.addEventListener('pointerdown', (e) => {
     try {
       if (e.button !== 0) return;
+      if (e.pointerType === 'mouse' || e.pointerType === 'pen') {
+        const prev = lastDown;
+        lastDown = { t: e.timeStamp, x: e.clientX, y: e.clientY };
+        if (!prev || e.timeStamp - prev.t > 450 || Math.hypot(e.clientX - prev.x, e.clientY - prev.y) > 24) return;
+        lastDown = null; // (a third click starts the next pair)
+      }
       launch(e.clientX, e.clientY);
       start();
     } catch (err) { window.trif?.warn(String(err)); }
+  }, true);
+
+  // ...without the double-click selecting the word under it (text boxes keep theirs).
+  document.addEventListener('mousedown', (e) => {
+    if (e.detail > 1 && e.button === 0 && !e.target.closest?.('input, textarea, [contenteditable]:not([contenteditable="false"])')) e.preventDefault();
   }, true);
 
   // "Get it" button: matched by its text, since it has no id; any link/button reading "Get it".

@@ -76,6 +76,13 @@
   }
   const remeasure = () => { if (measure()) dispatchEvent(new Event('resize')); };
 
+  // With the keyboard up on a phone, a swipe on the page (the strip between the sheet and the keyboard,
+  // or above the sheet) doesn't move anything: the phone would slide the whole page, the sheet with it,
+  // and what follows it could only catch up a frame late (rainbow flashing under the see-through keyboard,
+  // the sheet jumping). The sheet's own swipes are its own (they're in its frame).
+  let keyboardUp = false;
+  addEventListener('touchmove', (e) => { if (keyboardUp && e.cancelable) e.preventDefault(); }, { capture: true, passive: false });
+
   // Testing shortcuts: /?skip=end jumps to the end of the demo (every chat played, every mod on, the panel
   // open, as a fresh tab would be after it), /?skip=win also beats the space game for you (You Win). The
   // panel does the rest (shim.js: trif-demo-skip), and the page reloads with every mod.
@@ -368,6 +375,9 @@
     // The visitor taps into the message box to type (the keyboard comes up): on a phone a sheet that was up
     // full height comes down to half (tucked away, it stays tucked away).
     if (d.type === 'trif-demo:typing') { if (phone() && size() === 'full') setSize('half'); return; }
+    // The keyboard is up (the panel's message box has the focus): on a phone the page holds still, see
+    // keyboardUp below.
+    if (d.type === 'trif-demo:keyboard') { keyboardUp = d.on === true && phone(); return; }
     // The panel has loaded (again): it hears the sheet's size.
     if (d.type === 'trif-demo:hello') { tellSize(); return; }
     // The wrap-up chat was sent: on a phone the sheet comes up full height (shim.js opens the mods list).

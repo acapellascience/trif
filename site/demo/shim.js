@@ -831,6 +831,10 @@
       const toHalf = () => { if (!input.readOnly && window.parent !== window) { try { window.parent.postMessage({ type: 'trif-demo:typing' }, location.origin); } catch {} } };
       input.addEventListener('pointerdown', toHalf);
       input.addEventListener('focus', toHalf);
+      // The keyboard is up while the box has the focus: tab.js holds the page still meanwhile.
+      const keyboard = (on) => { try { if (window.parent !== window) window.parent.postMessage({ type: 'trif-demo:keyboard', on }, location.origin); } catch {} };
+      input.addEventListener('focus', () => keyboard(true));
+      input.addEventListener('blur', () => keyboard(false));
       input.addEventListener('focus', () => {
         if (input.readOnly || (document.documentElement.classList.contains('demo-phone') && Date.now() - tappedBox > 1500)) {
           input.blur();

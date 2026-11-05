@@ -1414,7 +1414,9 @@
       const dead = now < deadUntil;
       if (deadUntil && !dead) { // respawn
         deadUntil = 0;
-        ship.x = W / 2; ship.y = H - 14;
+        // at the bottom middle; in Gravity mode three quarters of the way up, clear of the pile of fallen
+        // words and pieces along the bottom (it'd come back buried in them)
+        ship.x = W / 2; ship.y = gravityOn() ? Math.max(ship.h + 4, Math.round(H * 0.25)) : H - 14;
         safeUntil = now + 1500;
       }
       const autopilot = victory(now, dt) || flyBackIn(dt);

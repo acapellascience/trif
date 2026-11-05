@@ -1229,7 +1229,7 @@ export const CHATS = [
   ],
   "touch": {
    "texts": {
-    "1": "That’s as far as the demo goes! Thanks for thoroughly breaking my webpage. Lotta that going around. But you can fix it, with Tim’s Robot Internet Fixer! It runs on your Mac (Windows coming soon!) with your own Claude Code or Codex.\n\nGo get it on your computer and come back to this webpage. Build on the mayhem. We can do anything now.\n\n[How to install TRIF](https://github.com/acapellascience/trif#install)"
+    "1": "That’s as far as the demo goes! Thanks for thoroughly breaking my webpage. But you can fix it, with Tim’s Robot Internet Fixer! It runs on your Mac (Windows coming soon!) with your own Claude Code or Codex.\n\nGo get it on your computer and come back to this webpage. Build on the mayhem. We can do anything now.\n\n[How to install TRIF](https://github.com/acapellascience/trif#install)"
    }
   }
  }

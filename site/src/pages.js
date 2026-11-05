@@ -86,6 +86,17 @@ main.home { max-width: 920px; padding-top: 56px; display: grid; gap: 56px; }
 .two code { background: var(--card); border: 1px solid var(--line); padding: 1px 6px; border-radius: 5px; }
 footer { max-width: 920px; margin: 0 auto; padding: 22px 16px 40px; border-top: 1px solid var(--line); color: var(--muted); font-size: 14px; display: flex; gap: 18px; flex-wrap: wrap; }
 footer a { color: var(--muted); }
+/* On a computer, the space between the parts follows the window's height (once more each time it changes):
+   what the content leaves free (the window less about 560px, the page with no space between its parts)
+   shared out above the hero, between the sections, before the footer and around it, each within limits,
+   so the footer shows in a laptop's window and a big screen isn't all empty below. Space only: sizes
+   stay. (Mods find the page's parts and measure them as they are, so they see the new space.) */
+@media (min-width: 701px) {
+  :root { --home-free: calc(100dvh - 560px); }
+  main.home { padding-top: clamp(16px, calc(var(--home-free) * .24), 150px); gap: clamp(20px, calc(var(--home-free) * .30), 150px);
+    padding-bottom: clamp(12px, calc(var(--home-free) * .16), 90px); }
+  main.home + footer { padding-top: clamp(12px, calc(var(--home-free) * .12), 48px); padding-bottom: clamp(12px, calc(var(--home-free) * .18), 72px); }
+}
 /* (on a phone: less space between the hero and What you need, and less before the footer) */
 @media (max-width: 720px) { .two { grid-template-columns: 1fr; } main.home { gap: 20px; padding-bottom: 36px; } }
 /* (a narrow phone: the title and the line under it a little smaller, so each stays on one line, the home

@@ -437,11 +437,14 @@
     }
     // Bottom-most first, so support spreads up the pile in one pass.
     const order = live.slice().sort((p, q) => q.y - p.y);
+    // (each piece's half-size: its angle and squash don't change in here, so once, not once per pair per
+    // pass: with the Rainbow Rave's letters there are a lot of pieces, and that was most of a frame)
+    const ext = order.map(extents);
     for (let it = 0; it < ITERS; it++) {
       // Walls and floor. A piece on the floor, or resting on one that is, is "grounded": it
       // doesn't get pushed down by what lands on it, so heavy pieces can't sink a pile.
-      for (const b of order) {
-        const { hw, hh } = extents(b);
+      for (let k = 0; k < order.length; k++) {
+        const b = order[k], { hw, hh } = ext[k];
         const lock = b === held;
         b.grounded = lock;
         if (b.y + hh >= H - 0.5) {
@@ -456,9 +459,9 @@
       }
       // Pieces against each other (boxes around the rotated pieces).
       for (let i = 0; i < order.length; i++) {
-        const A = order[i], ea = extents(A);
+        const A = order[i], ea = ext[i];
         for (let j = i + 1; j < order.length; j++) {
-          const B = order[j], eb = extents(B);
+          const B = order[j], eb = ext[j];
           const dx = B.x - A.x, dy = B.y - A.y;
           const px = ea.hw + eb.hw - Math.abs(dx), py = ea.hh + eb.hh - Math.abs(dy);
           if (px <= 0 || py <= 0) continue;

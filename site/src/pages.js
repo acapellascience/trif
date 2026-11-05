@@ -88,6 +88,9 @@ footer { max-width: 920px; margin: 0 auto; padding: 22px 16px 40px; border-top: 
 footer a { color: var(--muted); }
 /* (on a phone: less space between the hero and What you need, and less before the footer) */
 @media (max-width: 720px) { .two { grid-template-columns: 1fr; } main.home { gap: 20px; padding-bottom: 36px; } }
+/* (a narrow phone: the title and the line under it a little smaller, so each stays on one line, the home
+   page's mods included: the neon title's letters, the typing tagline's cursor) */
+@media (max-width: 420px) { .hero h1 { font-size: 28px; } .tagline { font-size: 16.5px; } }
 `;
 
 // The demo: a tab on the right edge, shown by demo.js (site/demo/tab.js), opens the real side panel docked

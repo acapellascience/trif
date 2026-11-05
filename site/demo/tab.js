@@ -394,7 +394,7 @@
     if (d.type === 'trif-demo:typing') { if (phone() && size() === 'full') setSize('half'); return; }
     // The keyboard is up (the panel's message box has the focus): on a phone the page holds still, see
     // keyboardUp below.
-    if (d.type === 'trif-demo:keyboard') { if (SIMPLE) return; keyboardUp = d.on === true && phone(); root.classList.toggle('demo-kb', keyboardUp); return; }
+    if (d.type === 'trif-demo:keyboard') { keyboardUp = d.on === true && phone(); root.classList.toggle('demo-kb', keyboardUp); return; }
     // The panel has loaded (again): it hears the sheet's size.
     if (d.type === 'trif-demo:hello') { tellSize(); return; }
     // The wrap-up chat was sent: on a phone the sheet comes up full height (shim.js opens the mods list).

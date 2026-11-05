@@ -5,11 +5,13 @@
   ],
   "amazon.com/simple-home": [
     "f8f6cf6969b6e9e3aa20ca55f4963be54d69774d",
-    "6c536dfec92e237be07676a898ec164587e25711"
+    "6c536dfec92e237be07676a898ec164587e25711",
+    "1f86f68e570a782f0578a2688d6f911d4d9fb375"
   ],
   "amazon.com/simple-shopping": [
     "abe0bc7f4451b53f2a078d2a2e3c0276ee290aaf",
-    "a8dbfd6a318fee21d82647387d10c4e6878a327e"
+    "a8dbfd6a318fee21d82647387d10c4e6878a327e",
+    "055ab8926a8d47afcea86757637e1ee25042b996"
   ],
   "timsrobot.com/checklist": [
     "a7ab64ff35dd90203af61e4270ccc154b4de8132"
@@ -133,7 +135,8 @@
   "www.instagram.com/desaturate": [
     "c94ae1c6f6cb40c20f2ea1a70c1d1e6d8e8aa582",
     "14231260104b552fd6799a71bd5612824a612242",
-    "cea7ccddf950d7698a72e24916ea872896b062e7"
+    "cea7ccddf950d7698a72e24916ea872896b062e7",
+    "1dd14f7788958135895394bbd4cf5db8904e0f66"
   ],
   "www.instagram.com/following-only-feed": [
     "8b9ec1256e7d85fb2ff9fb0b401a0266106f52fc",
@@ -141,7 +144,8 @@
     "dbb1d93be16c5fbd803440e7b1e8c4e24653bc5d",
     "0d1d5b2fac23bdb5a1aa3a0155853cbe48d789e1",
     "3464d2ca09d7a94efdee9293185693d6522bac80",
-    "4a56014023208a077c33e4fafb6f97b80efabfa5"
+    "4a56014023208a077c33e4fafb6f97b80efabfa5",
+    "7a2e99dc6acaa60327d8a5e9ec502ae972fd7527"
   ],
   "www.instagram.com/hide-ai-content": [
     "8c5d41e49e791a1b0286c7db15273cf1e904a3d0",
@@ -149,18 +153,26 @@
     "d404e21b9f4ab6940ba7277bc37a205002170d58",
     "288948a2f1eb9068346c4c0f0d4a8d2a18c05f90",
     "b097bf2f71274382a4a18f950a2cb4d176602828",
-    "3daec95a1d9ab07fb77f8d72847862f2ef043e58"
+    "3daec95a1d9ab07fb77f8d72847862f2ef043e58",
+    "57c0675b9b4fe6634e13b0ab087c79e35e8bddec"
   ],
   "www.instagram.com/hide-reposts": [
     "6d47d9e1b7acceda13d117bf546dfbf51c03b902",
     "584643560683d3d88c000db2c18f707a3d8b46e7",
     "3831b13f98ecf128dec0bf56f7e59fd83edd0249",
     "ccc5ec4fe6907c76b76412450d0ae6c237c1cf65",
-    "f183ef9bcfb260ba853c14720fe1aaeb64466b23"
+    "f183ef9bcfb260ba853c14720fe1aaeb64466b23",
+    "b6752541f2f01de95692be602a87ae2ca0ff88d5"
   ],
   "www.instagram.com/rainbow-rave": [
     "2636ae7fb52967ccec4888e03f2b6887de49ef32",
     "c55729e92e00178dea2ed5d2ef1dfa83975d0638"
+  ],
+  "www.instagram.com/three-column-feed": [
+    "2efa6cc5b3d27bbd79af50038a7833974c1d027b"
+  ],
+  "x.com/follow-status": [
+    "ff41bd36d6f1e1aef7b131fffd63490809d7918f"
   ],
   "x.com/plain-x": [
     "b1acf27f42fd30d34c2102e1c9657a878b1f26cb",
@@ -173,15 +185,21 @@
     "3e0cb01ed3eb8d43e701f29602087ce32b499581",
     "f04d073d3dc889bd80260db211c08bfe162713b3",
     "f3243188e23a5b8b455d20f3a41b300790088c5f",
-    "a34818dcfeff240823cfabda5a3822cffcc36db4"
+    "a34818dcfeff240823cfabda5a3822cffcc36db4",
+    "9f16957f2e1eeef0d600b2a5747eb768b8d45f68"
   ],
   "x.com/punk-fonts": [
     "6b07d068f0f3632933133a3b8fb8d6657778160b",
     "edf90fb6a8c9fac514577be140aadee029201609",
-    "67ae93db12ad71b1ee693ee3df86ca73d7823677"
+    "67ae93db12ad71b1ee693ee3df86ca73d7823677",
+    "78571e0cd92ec6eab6524af5d7313f3c04664895"
   ],
   "x.com/rainbow-rave": [
     "94c30538c799f42ac4a4da2f698718e4b13ea2dd",
-    "87160c99ace91a8cd278d3dadda9e0cba552b8e6"
+    "87160c99ace91a8cd278d3dadda9e0cba552b8e6",
+    "1f9ed2b603c2ca801cd4e47382f35b4926fe3c45"
+  ],
+  "x.com/space-shooter": [
+    "5c3b015549b83bed66db4867571de8901b7f7e08"
   ]
 }

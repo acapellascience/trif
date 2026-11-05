@@ -73,7 +73,9 @@
       if (DEBUG) note(`layout ${layoutH} (root ${root.clientHeight} + cut ${cut.h}) · vv top ${Math.round(vv.offsetTop)} h ${Math.round(vv.height)} · gap ${gap} · bottom ${bottom || '0'} · kb ${keyboardUp} · scrollY ${Math.round(scrollY)}`);
     };
     // ?kbdebug: a line of numbers at the top of the sheet, for finding why it jumps with the keyboard up
-    const DEBUG = /[?&]kbdebug/.test(location.search);
+    // (kept for the tab, through the demo's own reloads: ?skip=end&kbdebug)
+    let DEBUG = false;
+    try { if (/[?&]kbdebug/.test(location.search)) sessionStorage.setItem('trif-kbdebug', '1'); DEBUG = !!sessionStorage.getItem('trif-kbdebug'); } catch {}
     const note = (t) => {
       let n = box.querySelector('.kbdebug');
       if (!n) { n = document.createElement('div'); n.className = 'kbdebug'; n.style.cssText = 'position:absolute;left:0;right:0;top:0;z-index:9;font:10px/1.3 monospace;background:#ff0;color:#000;padding:2px 4px;pointer-events:none'; box.append(n); }

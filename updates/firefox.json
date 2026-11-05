@@ -11,6 +11,11 @@
           "version": "0.1.2",
           "update_link": "https://github.com/acapellascience/WebMods/releases/download/v0.1.2/webmods-firefox-0.1.2.xpi",
           "update_hash": "sha256:fbc4470fa0a0dc8e120598d09b4cad69a3115c680a14775197e0c3531d1d9828"
+        },
+        {
+          "version": "0.2.0",
+          "update_link": "https://github.com/acapellascience/trif/releases/download/v0.2.0/trif-firefox-0.2.0.xpi",
+          "update_hash": "sha256:5f9ac8894e27106dba94dfb2c748b010d418fe30e5f5e6ce655f26b82e142656"
         }
       ]
     }

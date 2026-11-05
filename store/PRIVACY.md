@@ -1,12 +1,12 @@
 # TRIF privacy policy
 
-Last updated: November 2, 2026
+Last updated: November 4, 2026
 
 Tim's Robot Internet Fixer (TRIF, called WebMods before version 0.2.0) is a browser extension (for
 Chrome, Firefox and Safari) that runs website customizations ("mods") written by **your own coding
 agent** (for example Claude Code or OpenAI Codex) on your own computer. This policy explains what the
 extension does with your data. In short, **TRIF collects nothing.** The only thing that ever reaches
-its developer is a problem report, and only when you fill in the report form and press Send.
+its developer, Tim Blais, is a problem report, and only when you fill in the report form and press Send.
 
 ## Who handles your data
 
@@ -21,24 +21,28 @@ There are three parties:
    below). The helper starts it when you send a message in the TRIF side panel.
 
 The TRIF developer is none of these at run time. There is no TRIF account, analytics, telemetry,
-automatic crash reporting, advertising or tracking of any kind. The extension contains no code that
-makes network requests to anyone.
-
-Apart from your agent's own traffic (below), two things go over the network, neither carrying anything
-about you:
+automatic crash reporting, advertising or tracking of any kind. Neither the extension nor the helper
+sends anything about you, your pages or your mods to the developer or anyone else on its own. Apart
+from your agent's own traffic (below), the only network traffic TRIF causes is:
 
 - **Updates.** The helper checks for a newer TRIF about once a day by downloading a small public file
   from GitHub (`raw.githubusercontent.com`), and downloads the new version from GitHub when you choose
   to install it. GitHub sees an ordinary download request (your IP address and "trif/<version>");
   nothing about your mods, pages or chats is sent. You can turn the checks off with `"checkForUpdates":
-  false` in TRIF's `config.json` (`~/Library/Application Support/TRIF/config.json` on a Mac).
+  false` in TRIF's `config.json` (`~/Library/Application Support/TRIF/config.json` on a Mac). In
+  Firefox, the browser itself checks a similar public file on GitHub for new versions of the add-on, as
+  it does for any add-on.
+- **Pages you're already on.** In Chrome, a screenshot of a tab you're not looking at loads that page
+  again (see the table below). Nothing goes anywhere the page wouldn't go by itself.
 - **Problem reports, only when you send one.** "Report a problem" opens the report form at
   timsrobot.com/report with details from TRIF filled in: version numbers, setup checks, the mods for
   the site you're on, and recent errors, with your name, email addresses and full page addresses removed.
   You see exactly what's included and can leave it out. Nothing is sent until you press Send. Then the
   report, what you typed, the email address you give (if any) and your browser's name go to the
-  developer by email. They're used only to fix problems and to reply to you, and deleted when no longer
-  needed; ask at reports@timsrobot.com to have a report deleted.
+  developer by email. They're used only to fix problems and to reply to you, and kept until the problem
+  is fixed and you've had a reply, then deleted; ask at privacy@timsrobot.com to have a report deleted
+  sooner. To stop floods of reports, the form counts how many come from your IP address in a minute;
+  the address isn't stored.
 
 ## What the extension handles, and why
 
@@ -74,12 +78,14 @@ its commands never get it, and it's kept out of TRIF's files and logs. Those req
 page content your agent sends, then go from the helper to the provider: Anthropic or OpenAI. TRIF never
 sees your login, and the TRIF developer receives no copy of anything.
 
+Avoid asking the agent to work on pages that show information you don't want to send to your AI
+provider, such as banking or medical records. The agent only reads pages while it is working on
+something you asked for.
+
 **Open models (experimental).** If you pick "Open model (via Codex)", your agent's requests go to the
 model you chose: to **Ollama or LM Studio on your own computer**, in which case nothing leaves your
 computer; or to **OpenRouter** or **another server you name** (a custom URL), with the key you saved
-(kept and sent as above), under that provider's terms. Avoid asking the agent to work on pages that show information you don't want to send
-to your AI provider, such as banking or medical records. The agent only reads pages while it is
-working on something you asked for.
+(kept and sent as above), under that provider's terms.
 
 Web pages can contain text written to mislead AI agents ("prompt injection"). TRIF limits what
 the agent can do, with walls your operating system enforces: it can change mods only for the site
@@ -95,13 +101,19 @@ or sell them. Data reaches a third party (your AI provider) only when you send a
 own agent, and only for the purpose you asked for. Reports pass through Cloudflare, which hosts the
 report form and delivers its email. It isn't used for advertising, profiling, or creditworthiness or lending.
 
+## The website
+
+timsrobot.com has no analytics, no tracking and no cookies. Its demo keeps its state only in your
+browser (nothing is sent anywhere). Cloudflare, which hosts it, sees ordinary requests (your IP address, the pages you load)
+as any web host does.
+
 ## The Windows waitlist (the website, not the extension)
 
 The timsrobot.com website has a waitlist for the Windows version at timsrobot.com/windows. The extension
 has nothing to do with it and never sends anything to it. If you join, the email address you enter and
 the time go to the developer by email. The address is used only to tell you when TRIF is ready for
-Windows, nothing else, and isn't shared or sold. Ask at reports@timsrobot.com to be removed and it's
-deleted. Like reports, it passes through Cloudflare, which hosts the website and delivers its email.
+Windows, nothing else, and isn't shared or sold. Ask at privacy@timsrobot.com to be removed and it's
+deleted. The form counts signups from your IP address the same way the report form does. Like reports, it passes through Cloudflare, which hosts the website and delivers its email.
 
 ## Keeping and deleting your data
 
@@ -130,4 +142,5 @@ notes.
 
 ## Contact
 
-Questions about privacy: <CONTACT EMAIL>
+TRIF is made by Tim Blais. Questions about privacy, or requests to see or delete your data:
+privacy@timsrobot.com

@@ -1110,17 +1110,16 @@
       if (p.t >= 1) { pulses.splice(i, 1); continue; }
       // races out wide and fades fast: most of its light is gone by halfway
       const e = 1 - Math.pow(1 - p.t, 3), r = 30 + e * 230, fade = Math.pow(1 - p.t, 2.2);
-      for (let k = 0; k < 3; k++) { // three bands of the rainbow, each a soft halo plus a bright core
-        const h = (p.hue + k * 50) % 360, rr = r + k * 5;
-        ctx.shadowColor = `hsl(${h}, 100%, 60%)`;
-        ctx.shadowBlur = 22;
-        ctx.strokeStyle = `hsla(${h}, 100%, 60%, ${(fade * 0.35).toFixed(3)})`;
-        ctx.lineWidth = 12 * fade + 3;
-        ctx.beginPath(); ctx.arc(cx, cy, rr, 0, Math.PI * 2); ctx.stroke();
-        ctx.shadowBlur = 8;
-        ctx.strokeStyle = `hsla(${h}, 100%, 78%, ${(fade * 0.9).toFixed(3)})`;
-        ctx.lineWidth = 2.5 * fade + 1;
-        ctx.beginPath(); ctx.arc(cx, cy, rr, 0, Math.PI * 2); ctx.stroke();
+      // Three bands of the rainbow, each a soft halo plus a bright core. The softness is wide, faint strokes
+      // under narrower, brighter ones (added up: 'lighter'), not shadowBlur: a blur this big on a
+      // full-window canvas took the whole page down to a few frames a second.
+      for (let k = 0; k < 3; k++) {
+        const h = (p.hue + k * 50) % 360, rr = r + k * 5, w = 12 * fade + 3;
+        for (const [lw, light, a] of [[w + 40, 60, 0.05], [w + 22, 60, 0.09], [w, 60, 0.35], [w * 0.45 + 6, 70, 0.3], [2.5 * fade + 1, 78, 0.9]]) {
+          ctx.strokeStyle = `hsla(${h}, 100%, ${light}%, ${(fade * a).toFixed(3)})`;
+          ctx.lineWidth = lw;
+          ctx.beginPath(); ctx.arc(cx, cy, rr, 0, Math.PI * 2); ctx.stroke();
+        }
       }
     }
     ctx.restore();

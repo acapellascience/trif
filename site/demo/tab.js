@@ -276,7 +276,7 @@
     tellSize();
   }
   // The panel hears the sheet's size: on a phone its mods list is open at full height, closed at half.
-  function tellSize() { try { if (phone()) frame?.contentWindow?.postMessage({ type: 'trif-demo:size', size: SIMPLE ? 'half' : size() }, location.origin); } catch {} }
+  function tellSize() { try { if (phone()) frame?.contentWindow?.postMessage({ type: 'trif-demo:size', size: size() }, location.origin); } catch {} }
   // The heights the sizes come to (pages.js), in the whole window (innerHeight stops at the sheet: see cut)
   function heights() {
     const H = innerHeight + cut.h;

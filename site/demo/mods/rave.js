@@ -778,6 +778,7 @@
     const layers = [{ cv, g: g0 }, { cv: cvz, g: gz }];
     for (const L of layers) Object.assign(L, { x: 0, y: 0, w: 0, h: 0, dpr: 0 });
     const STEP = 64; // (the box snaps to this, so it doesn't change size every frame)
+    const GLOW_RES = 0.5; // canvas pixels per CSS pixel
     // pinned to the window by a 0-size probe (the tilt card's `perspective` and the shooter's shake
     // `translate` on <html> make it the box "fixed" elements are placed in; the zoomed layer can't be
     // measured itself: that would include its zoom)
@@ -806,7 +807,9 @@
         if (!cv.isConnected) document.documentElement.append(cv);
         if (!cvz.isConnected) document.documentElement.append(cvz);
         if (!pin.isConnected) document.documentElement.append(pin);
-        const dpr = devicePixelRatio || 1;
+        // (drawn at half a CSS pixel per pixel and scaled up: a glow is soft anyway, and its blurs, about 70
+        // a frame, cost by the pixel; at a retina display's full resolution they were most of the work)
+        const dpr = GLOW_RES;
         W = innerWidth; H = innerHeight;
         const pr = pin.getBoundingClientRect();
         if (Math.abs(pr.left) > 0.5 || Math.abs(pr.top) > 0.5) { px -= pr.left; py -= pr.top; pin.style.translate = `${px}px ${py}px`; }

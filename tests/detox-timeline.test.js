@@ -1,5 +1,5 @@
 // Plain X's filter tests, ported from the Plain X app (Tests/xfeed-tests.js), run against
-// examples/sites/x.com/plain-x.js with stub browser globals. Checks the timeline filter: reposts, ads
+// examples/sites/x.com/detox-timeline.js with stub browser globals. Checks the timeline filter: reposts, ads
 // and who-to-follow modules go; your follows' own posts, quotes, conversations and cursors stay.
 // The cases share the mod's state (options, the feed's seen/shown posts) and run in order.
 const fs = require('fs');
@@ -7,7 +7,7 @@ const path = require('path');
 const assert = require('assert');
 const { test } = require('node:test');
 
-const MOD = path.join(__dirname, '..', 'examples', 'sites', 'x.com', 'plain-x.js');
+const MOD = path.join(__dirname, '..', 'examples', 'sites', 'x.com', 'detox-timeline.js');
 
 class FakeXHR {}
 Object.defineProperty(FakeXHR.prototype, 'responseText', { configurable: true, get() { return this._text; } });

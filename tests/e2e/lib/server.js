@@ -3,7 +3,7 @@
 //   http://127.0.0.1:<port>/        the main test site (its mod is written by the harness, then the agent's)
 //   http://localhost:<port>/        a second site with a mod of its own, where TRIF stays off
 //   https://x.com:<tlsPort>/home    a stand-in for X's home timeline, for the real Timeline Detox mod
-//                                   (x.com/plain-x): the page fetches (and XHRs) a saved HomeLatestTimeline
+//                                   (x.com/detox-timeline): the page fetches (and XHRs) a saved HomeLatestTimeline
 //                                   response, as X does, and lists the posts it got back.
 //   https://www.google.com:<tlsPort>/ and /search?q=…   stand-ins for Google's home and results pages,
 //                                   with the parts the shipped Google mods hide (AI Banisher, Just Results)

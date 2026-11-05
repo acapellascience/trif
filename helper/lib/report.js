@@ -57,7 +57,7 @@ const MOD_ID = /\b[a-z0-9.-]+\.[a-z]{2,}\/[\w-]+\b|\ball-sites\/[\w-]+\b/gi;
 
 /**
  * The last warnings and errors in the helper log (the last 3 days), with repeats folded together: lines
- * that differ only in a mod id or a number count as one ("×15, e.g. x.com/plain-x").
+ * that differ only in a mod id or a number count as one ("×15, e.g. x.com/detox-timeline").
  */
 function logProblems(logFile, { max = MAX_LOG_LINES, now = Date.now() } = {}) {
   let text = '';

@@ -291,7 +291,7 @@ shipped before (what the user's copy started from), for merging.
 The user's choice: not available inside a side-panel run (the panel's "Merge with my agent" starts a
 chat in which the agent proposes the merge first and makes it once the user agrees; the update is settled
 when the user's copy has the new @version).`,
-    examples: ['trif mod-update x.com/plain-x', 'trif mod-update x.com/plain-x --use-new', 'trif mod-update x.com/plain-x --keep'],
+    examples: ['trif mod-update x.com/detox-timeline', 'trif mod-update x.com/detox-timeline --use-new', 'trif mod-update x.com/detox-timeline --keep'],
   },
   mods: {
     usage: 'trif mods',
@@ -311,7 +311,7 @@ the header plus helpers for injecting CSS and handling elements that appear late
     usage: 'trif install-example <site>/<mod> [--force]',
     summary: 'copy a ready-made example mod into the workspace',
     details: 'Run without an argument to list the available examples. --force overwrites an existing mod.',
-    examples: ['trif install-example x.com/plain-x'],
+    examples: ['trif install-example x.com/detox-timeline'],
   },
   agent: {
     usage: 'trif agent list | agent run [opts] "<prompt>" | agent login [--agent claude] | agent open-model [opts] | agent key [opts]',

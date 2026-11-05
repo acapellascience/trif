@@ -5,7 +5,7 @@
 // @run-at      document-start
 // @risk        1 drops ads, so their impressions never report; patches fetch and XMLHttpRequest
 // @source      webmods
-// @version     3
+// @version     1
 // ==/WebMod==
 
 /*

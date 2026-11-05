@@ -67,7 +67,7 @@ Per browser, a **fresh** scenario, and an **upgrade** scenario per `--upgrade-fr
      and the window count as they were. Headless Chrome gets
      `--screen-info={0,0 2560x1440}`: its default 800x600 screen is smaller than the windows, which puts
      the copy window under the user's, where Chrome stops drawing it.
-4. **Timeline Detox**: the real `examples/sites/x.com/plain-x.js` on `https://x.com:<port>/home`, served
+4. **Timeline Detox**: the real `examples/sites/x.com/detox-timeline.js` on `https://x.com:<port>/home`, served
    locally (the browser resolves x.com to 127.0.0.1 and accepts a self-signed certificate): a page that
    fetches and XHRs a saved `HomeLatestTimeline` response, as X does. Checks Timeline Detox keeps only the
    mutuals' plain posts and the cursor, rewrites the requests to Recent, and logs no mod errors. Then the

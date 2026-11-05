@@ -530,8 +530,8 @@ class Scenario {
       if (unmarked.length) throw new Error(`not recognised as shipped: ${unmarked.join(', ')}`);
       const st = (await this.cli(['status'], { json: true })).json.extension;
       const byId = new Map(st.mods.map((m) => [m.id, m]));
-      const px = byId.get('x.com/plain-x');
-      if (!px || px.enabled === false) throw new Error(`x.com/plain-x not on: ${JSON.stringify(px)}`);
+      const px = byId.get('x.com/detox-timeline');
+      if (!px || px.enabled === false) throw new Error(`x.com/detox-timeline not on: ${JSON.stringify(px)}`);
       const pf = byId.get('x.com/punk-fonts');
       if (!pf || pf.enabled !== false) throw new Error(`x.com/punk-fonts should start off: ${JSON.stringify(pf)}`);
       for (const s of ['google.com', 'x.com', 'amazon.com', 'instagram.com']) if (!(st.sitesOn || []).includes(s)) throw new Error(`TRIF isn't on for ${s}: ${st.sitesOn}`);
@@ -663,7 +663,7 @@ class Scenario {
       await this.waitPanel('the panel back on 127.0.0.1', (x) => x.site === '127.0.0.1');
     });
 
-    // ---- Timeline Detox (x.com/plain-x) against the X stand-in
+    // ---- Timeline Detox (x.com/detox-timeline) against the X stand-in
     await r.check('Timeline Detox filters a saved X home timeline (fetch and XHR)', async () => {
       const xUrl = `https://x.com:${tlsPort}/home`;
       const xtab = await this.ext(`async (url, windowId) => (await chrome.tabs.create({ windowId, url, active: true })).id`, [xUrl, win.windowId]);
@@ -676,7 +676,7 @@ class Scenario {
           xhr: [...document.querySelectorAll('#xhr-list li')].map((li) => li.dataset.entry) })`);
         return s.loaded || s.error ? s : null;
       });
-      await this.shot(ctx, 'plain-x');
+      await this.shot(ctx, 'detox-timeline');
       if (st.error) throw new Error(`the page failed: ${st.error}`);
       if (!st.guard) throw new Error('Timeline Detox didn\'t run (no window.__dmGuard)');
       const want = JSON.stringify(timeline.kept);
@@ -693,9 +693,9 @@ class Scenario {
 
     await r.check('panel on x.com lists the shipped mods' + (this.o.kind === 'upgrade' ? ' and offers the edited one\'s update' : ''), async () => {
       const p = await this.waitPanel('the panel on x.com', (x) => x.site === 'x.com' && x.mods.length >= 3);
-      const px = p.mods.find((m) => m.id === 'x.com/plain-x');
-      if (!px || !px.on || !px.running) throw new Error(`plain-x: ${JSON.stringify(px)}`);
-      if (!px.source || !/^Tim's mod, v\d+$/.test(px.source)) throw new Error(`plain-x isn't marked as Tim's mod: ${px.source}`);
+      const px = p.mods.find((m) => m.id === 'x.com/detox-timeline');
+      if (!px || !px.on || !px.running) throw new Error(`detox-timeline: ${JSON.stringify(px)}`);
+      if (!px.source || !/^Tim's mod, v\d+$/.test(px.source)) throw new Error(`detox-timeline isn't marked as Tim's mod: ${px.source}`);
       if (this.o.kind === 'upgrade') {
         const pf = p.mods.find((m) => m.id === 'x.com/punk-fonts');
         if (!pf || !pf.update) throw new Error(`no update notice on punk-fonts: ${JSON.stringify(pf)}`);

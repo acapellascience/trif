@@ -11,6 +11,8 @@ needs a section here for the version it releases.
   Feed lays Instagram's home feed out three posts wide.
 - The mods TRIF ships for X, Amazon and Instagram are updated, with new names and short descriptions.
   If you changed one, the side panel offers the new version; yours stays until you choose.
+- Plain X is now **Detox Timeline** (`x.com/detox-timeline`). If yours was unchanged, it's replaced, and it
+  stays on if it was on; if you changed it, yours stays as it is, and Detox Timeline arrives switched off.
 - Your agent now keeps mod descriptions short (4 to 9 words).
 
 ## 0.2.1

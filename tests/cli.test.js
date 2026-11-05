@@ -413,12 +413,12 @@ test('install-example copies from the examples folder', async () => {
 });
 
 test('install-example finds the repo examples by default', async () => {
-  const src = path.join(REPO, 'examples', 'sites', 'x.com', 'plain-x.js');
+  const src = path.join(REPO, 'examples', 'sites', 'x.com', 'detox-timeline.js');
   if (!fs.existsSync(src)) return; // written by another agent; skip if not there yet
   const home = tempDir();
-  const r = await runCli(['install-example', 'x.com/plain-x'], { home });
+  const r = await runCli(['install-example', 'x.com/detox-timeline'], { home });
   assert.equal(r.code, 0, r.stderr);
-  assert.ok(fs.existsSync(path.join(home, 'sites', 'x.com', 'plain-x.js')));
+  assert.ok(fs.existsSync(path.join(home, 'sites', 'x.com', 'detox-timeline.js')));
 });
 
 // ------------------------------------------------------------------ setup and doctor

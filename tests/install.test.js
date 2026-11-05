@@ -524,7 +524,7 @@ test('preinstalled mods: each once, switched on or off as listed; the start site
   const home = tempDir();
   const sites = path.join(home, 'sites');
   const examples = path.join(REPO, 'examples', 'sites');
-  const plainx = path.join(sites, 'x.com', 'plain-x.js');
+  const plainx = path.join(sites, 'x.com', 'detox-timeline.js');
   const ids = PREINSTALLED.map((p) => p.id);
   const off = PREINSTALLED.filter((p) => !p.on).map((p) => p.id);
   assert.deepStrictEqual(off, ['x.com/punk-fonts', 'x.com/rainbow-rave', 'www.instagram.com/desaturate', 'www.google.com/dvd-logo', 'x.com/follow-status', 'x.com/space-shooter', 'www.instagram.com/three-column-feed']);
@@ -533,7 +533,7 @@ test('preinstalled mods: each once, switched on or off as listed; the start site
   let r = preinstallMods(home, sites, examples);
   assert.deepStrictEqual(r, { added: ids, on: ids.filter((id) => !off.includes(id)), sites: SITES_ON });
   for (const id of ids) assert.ok(fs.existsSync(path.join(sites, `${id}.js`)), id);
-  assert.strictEqual(fs.readFileSync(plainx, 'utf8'), fs.readFileSync(path.join(examples, 'x.com', 'plain-x.js'), 'utf8'));
+  assert.strictEqual(fs.readFileSync(plainx, 'utf8'), fs.readFileSync(path.join(examples, 'x.com', 'detox-timeline.js'), 'utf8'));
   const { shipped, ...rest } = loadPreinstalled(home);
   assert.deepStrictEqual(rest, { offered: ids, startOff: off, sitesOn: SITES_ON });
   assert.deepStrictEqual(shipped, {}, 'recorded by updateShippedMods, not here');
@@ -558,7 +558,7 @@ test('preinstalled mods: each once, switched on or off as listed; the start site
   assert.match(res.stdout, /preinstalled, on: www\.google\.com\/hide-ai-in-results, /);
   assert.match(res.stdout, /preinstalled, off until you switch them on in the side panel: x\.com\/punk-fonts, x\.com\/rainbow-rave, www\.instagram\.com\/desaturate, www\.google\.com\/dvd-logo/);
   assert.match(res.stdout, /TRIF starts on for google\.com, x\.com, amazon\.com, instagram\.com/);
-  assert.ok(fs.existsSync(path.join(home3, 'sites', 'x.com', 'plain-x.js')));
+  assert.ok(fs.existsSync(path.join(home3, 'sites', 'x.com', 'detox-timeline.js')));
   // A new workspace gets the merged Google mods, never the ones folded into them (preinstalled.js RETIRED).
   assert.deepStrictEqual(fs.readdirSync(path.join(home3, 'sites', 'www.google.com')).sort(), ['dvd-logo.js', 'hide-ai-in-results.js', 'hide-extra-sections.js']);
   assert.ok(!loadPreinstalled(home3).offered.some((id) => /hide-ai-mode|hide-sponsored/.test(id)));

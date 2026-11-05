@@ -765,7 +765,7 @@ const handlers = {
       return;
     }
     const m = /^([^/]+)\/([^/]+?)(\.js)?$/.exec(pos[0]);
-    if (!m || badName(m[1]) || badName(m[2]) || isIgnoredName(m[1]) || isIgnoredName(m[2])) throw new UsageError('usage: trif install-example <site>/<mod>   (e.g. x.com/plain-x)');
+    if (!m || badName(m[1]) || badName(m[2]) || isIgnoredName(m[1]) || isIgnoredName(m[2])) throw new UsageError('usage: trif install-example <site>/<mod>   (e.g. x.com/detox-timeline)');
     const [, site, mod] = m;
     const src = path.join(dir, site, `${mod}.js`);
     if (!fs.existsSync(src)) {

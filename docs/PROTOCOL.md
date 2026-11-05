@@ -66,7 +66,7 @@ dependencies, no build step.**
    `preinstalled.json`, `origins.json`, `active-runs/`, `update.json`, `trash/`, `.shipped/`,
    `instructions.md`): run sandboxes keep them read-only. `readConfig` still reads a workspace
    `config.json` until it's moved. `trif doctor` warns about anything private left in the workspace.
-4. **Examples** (`examples/sites/<site>/<mod>.js`): ready-made mods (Timeline Detox, `x.com/plain-x`, first). Setup copies them
+4. **Examples** (`examples/sites/<site>/<mod>.js`): ready-made mods (Timeline Detox, `x.com/detox-timeline`, first). Setup copies them
    into a new workspace (see "Native host installation") and later setups keep them up to date (see
    "Updates to shipped mods"); `trif install-example <site>/<mod>` copies one in by hand.
 
@@ -116,7 +116,7 @@ patch `fetch`/`XMLHttpRequest`, read React state, etc.). An optional header sets
   "Updates to shipped mods").
 - Unknown keys are ignored. A file without a header is valid.
 
-**Mod id** = `<site>/<mod>` (e.g. `x.com/plain-x`). The helper parses headers; the extension never parses.
+**Mod id** = `<site>/<mod>` (e.g. `x.com/detox-timeline`). The helper parses headers; the extension never parses.
 
 **Links.** A mod file or site folder may be a symlink only to somewhere inside the mods folder (real
 paths compared, `mods.js` listModFiles/readModFile). One whose real path is outside it is ignored with a
@@ -337,10 +337,10 @@ window.webmods = window.trif;   // its name before 0.2.0 (when TRIF was called W
 Every mod is wrapped by the extension before registering:
 
 ```js
-(() => { const __mod = "x.com/plain-x"; window.__webmods && (window.__webmods.current = __mod);
+(() => { const __mod = "x.com/detox-timeline"; window.__webmods && (window.__webmods.current = __mod);
 try { /* mod code */ } catch (e) { window.__webmods?.errors.push({mod: __mod, message: String(e?.message ?? e), stack: String(e?.stack ?? ""), time: Date.now()}); console.error("[TRIF]", __mod, e); }
 })();
-//# sourceURL=trif://x.com/plain-x.js
+//# sourceURL=trif://x.com/detox-timeline.js
 ```
 
 (Errors thrown later from a mod's event handlers or timers aren't caught by this wrapper; the runtime

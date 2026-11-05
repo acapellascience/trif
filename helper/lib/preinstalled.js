@@ -49,7 +49,7 @@ const { envVar } = require('./env');
 const PREINSTALLED = [
   { id: 'www.google.com/hide-ai-in-results', on: true }, // AI Banisher
   { id: 'www.google.com/hide-extra-sections', on: true }, // Just Results
-  { id: 'x.com/plain-x', on: true },
+  { id: 'x.com/detox-timeline', on: true }, // (x.com/plain-x until 0.2.2: RETIRED, below)
   { id: 'x.com/punk-fonts', on: false },
   { id: 'x.com/rainbow-rave', on: false },
   { id: 'amazon.com/simple-home', on: true },
@@ -76,7 +76,7 @@ const PREINSTALLED = [
 // with every mods message (`defaultOrder`), and extension/lib.js orderMods puts mods it doesn't list after.
 // (0.2.2: X's, in Tim's order. The other sites' few shipped mods list in the order they always did.)
 const DEFAULT_ORDER = {
-  'x.com': ['x.com/plain-x', 'x.com/follow-status', 'x.com/punk-fonts', 'x.com/space-shooter', 'x.com/rainbow-rave'],
+  'x.com': ['x.com/detox-timeline', 'x.com/follow-status', 'x.com/punk-fonts', 'x.com/space-shooter', 'x.com/rainbow-rave'],
 };
 
 // Shipped mods folded into another one (`into`, from its @version `since`), so no longer shipped
@@ -84,6 +84,10 @@ const DEFAULT_ORDER = {
 const RETIRED = [
   { id: 'www.google.com/hide-ai-mode', into: 'www.google.com/hide-ai-in-results', since: '2' },
   { id: 'www.google.com/hide-sponsored', into: 'www.google.com/hide-extra-sections', since: '2' },
+  // 0.2.2: a rename (no "X" in a shipped mod's file name). Detox Timeline arrives like any new shipped mod,
+  // then the unchanged plain-x goes to the trash and each browser switches Detox Timeline on if plain-x
+  // was (absorbs); an edited plain-x stays, as the user's own.
+  { id: 'x.com/plain-x', into: 'x.com/detox-timeline', since: '1' },
 ];
 
 // TRIF is off on every site until the user turns it on there; it starts on for these, the sites the

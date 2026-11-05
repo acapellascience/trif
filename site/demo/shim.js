@@ -53,6 +53,9 @@
   // ...and a mod with a touchscreen name (its header's @touch-name) goes by it there.
   if (touchscreen) DEMO.mods = DEMO.mods.map((m) => (m.touchName ? { ...m, name: m.touchName } : m));
   const onPhone = () => { try { return window.parent !== window && window.parent.matchMedia('(max-width: 700px)').matches; } catch { return false; } };
+  // On a phone (the panel is the short sheet), chats marked for a desk (chat.desk: Tilt Card's, too much
+  // for a phone with the rest of the mods running) aren't offered.
+  try { if (window.parent !== window && window.parent.matchMedia('(max-width: 700px)').matches) DEMO.chats = DEMO.chats.filter((c) => !c.desk); } catch {}
   const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
   const later = (fn, ms = 0) => setTimeout(fn, ms);
 

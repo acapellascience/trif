@@ -20,12 +20,13 @@ export const OUT = path.join(HERE, 'src', 'demo-files.js');
 
 // The order the recorded chats are offered in, one at a time, each one bigger than the last (the title
 // chat makes two mods, the makeover four). Follow-ups (a chat's `after`) are offered once the chats they
-// follow have been replayed.
-const CHAT_ORDER = ['tagline', 'robot', 'title', 'fireworks', 'makeover', 'gravity', 'shooter', 'rave'];
+// follow have been replayed. A chat marked `desk` (Tilt Card's: the phone has the rest to run) is left out
+// of the phone's sheet (shim.js).
+const CHAT_ORDER = ['tagline', 'robot', 'title', 'fireworks', 'makeover', 'gravity', 'tilt', 'shooter', 'rave'];
 
 // The order the demo panel lists its mods in (every one in mods/, by file name): the order they're made in.
 export const DEMO_ORDER = ['tagline', 'robot', 'neon', 'jelly', 'fireworks', 'stickers', 'checklist', 'terminal', 'led',
-  'gravity', 'shooter', 'rave'];
+  'gravity', 'tilt', 'shooter', 'rave'];
 
 const read = (...p) => fs.readFileSync(path.join(DEMO, ...p), 'utf8');
 
@@ -65,6 +66,7 @@ export function demoModule() {
     if (!CHAT_ORDER.includes(c.id)) throw new Error(`chat ${c.id} isn't in CHAT_ORDER`);
     for (const s of c.mods) if (!slugs.has(s)) throw new Error(`chat ${c.id}: no mod ${s}`);
     if (c.focus !== undefined && !c.mods.includes(c.focus)) throw new Error(`chat ${c.id}: focus ${c.focus} isn't one of its mods`);
+    if (c.desk !== undefined && typeof c.desk !== 'boolean') throw new Error(`chat ${c.id}: desk is true or false`);
     if (c.touch !== undefined) { // its touchscreen version (shim.js): a prompt (or the same one), and texts by message index
       if (c.touch.prompt !== undefined && (typeof c.touch.prompt !== 'string' || !c.touch.prompt.trim())) throw new Error(`chat ${c.id}: touch.prompt`);
       for (const [i, text] of Object.entries(c.touch.texts || {})) {

@@ -43,6 +43,7 @@ const PROBES = {
   'rave': '#rave-glow',
   'led': '.led-sign',
   'robot': 'svg.robot[data-lr]',
+  'tilt': 'style[data-tc]',
 };
 
 function parseArgs(argv) {

@@ -1163,8 +1163,13 @@
       const pts = trail[e] || (trail[e] = []);
       for (const p of pts) { p.age += dt; p.y += (120 + thrust * 160) * dt; }
       while (pts.length && pts[0].age > life) pts.shift();
-      if (visible) pts.push({ x: ship.x + ex * (1 - Math.abs(bank) * 0.18), y: ship.y - 2, age: 0 });
-      else pts.length = 0;
+      if (visible) {
+        const x = ship.x + ex * (1 - Math.abs(bank) * 0.18), y = ship.y - 2, lastPt = pts[pts.length - 1];
+        // a jump no flight makes in one frame (back in after flying off, a respawn): the exhaust starts
+        // afresh where the ship is, instead of streaking across the screen after it
+        if (lastPt && Math.hypot(x - lastPt.x, y - lastPt.y) > 200) pts.length = 0;
+        pts.push({ x, y, age: 0 });
+      } else pts.length = 0;
       if (pts.length < 2) return;
       ctx.save();
       ctx.globalCompositeOperation = 'lighter';

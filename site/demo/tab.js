@@ -72,7 +72,7 @@
       const layoutH = root.clientHeight + cut.h; // (the page's viewport, unshrunk: see cut)
       const gap = phone() ? Math.round(layoutH - (vv.offsetTop + vv.height)) : 0;
       const bottom = gap > 60 ? `${gap}px` : '';
-      if (!SIMPLE && box.style.bottom !== bottom) box.style.bottom = bottom;
+      if (box.style.bottom !== bottom) box.style.bottom = bottom;
       if (DEBUG) note(`layout ${layoutH} (root ${root.clientHeight} + cut ${cut.h}) · vv top ${Math.round(vv.offsetTop)} h ${Math.round(vv.height)} · gap ${gap} · bottom ${bottom || '0'} · kb ${keyboardUp} · scrollY ${Math.round(scrollY)}`);
     };
     // ?kbdebug: a line of numbers at the top of the sheet, for finding why it jumps with the keyboard up
@@ -230,20 +230,6 @@
     if (typeof box.showPopover === 'function') box.popover = 'manual';
     else box.hidden = true;
     root.append(box);
-    // Under the sheet, down to the bottom of the whole screen: its colour, in an ordinary layer. With the
-    // keyboard up, an iPhone shows a band of the page under the sheet (behind its address pill, over the
-    // keyboard), outside what the sheet (in the top layer) may draw on, but not outside what a layer as
-    // tall as the screen reaches (Rainbow Rave's, which showed there). This one covers it.
-    under = document.createElement('div');
-    under.className = 'demo-under';
-    root.append(under);
-    new MutationObserver(() => { if (under.nextElementSibling && under.nextElementSibling !== box) root.append(under); }).observe(root, { childList: true }); // (last, so it's over layers the mods add later at the same height)
-    const place = () => { try { under.style.top = `${Math.round(box.getBoundingClientRect().top)}px`; } catch {} };
-    new ResizeObserver(place).observe(box);
-    if (window.visualViewport) { visualViewport.addEventListener('resize', place); visualViewport.addEventListener('scroll', place); }
-    addEventListener('scroll', place, { passive: true });
-    box.addEventListener('transitionend', place);
-    place();
   }
 
   const isOpen = () => !!box && root.classList.contains('demo-open');

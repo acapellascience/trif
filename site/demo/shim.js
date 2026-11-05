@@ -711,8 +711,6 @@
       let i = 0;
       typing = { text, timer: 0 };
       const step = () => {
-        // (the first letter: on a phone the sheet comes down to half if it was up full, tab.js)
-        if (i === 0 && window.parent !== window) { try { window.parent.postMessage({ type: 'trif-demo:typing' }, location.origin); } catch {} }
         i = Math.min(text.length, i + 1);
         show(input, text.slice(0, i));
         if (i < text.length) typing.timer = setTimeout(step, TYPE_MS * (0.6 + Math.random() * 0.8));
@@ -782,8 +780,9 @@
       // never because the sheet came back with it focused.
       let tappedBox = 0;
       input.addEventListener('pointerdown', () => { tappedBox = Date.now(); });
-      // A tap into the box to type (once it's the visitor's): a full-height sheet comes down to half, to
-      // leave room for the keyboard and the page (tab.js, as when a prompt starts typing itself in).
+      // A tap into the box to type (once it's the visitor's: the keyboard comes up): a full-height sheet
+      // comes down to half, to leave room for the keyboard and the page (tab.js). A recorded prompt typing
+      // itself in leaves the sheet as it is.
       const toHalf = () => { if (!input.readOnly && window.parent !== window) { try { window.parent.postMessage({ type: 'trif-demo:typing' }, location.origin); } catch {} } };
       input.addEventListener('pointerdown', toHalf);
       input.addEventListener('focus', toHalf);

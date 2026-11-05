@@ -303,8 +303,8 @@
     }
     // After the demo, the robot is answering what the visitor typed: on a phone the sheet comes up full height.
     if (d.type === 'trif-demo:answering') { if (phone() && size() !== 'full') setSize('full'); return; }
-    // The next prompt starts typing itself in: on a phone a sheet that was up full height comes down to
-    // half (tucked away, it stays tucked away).
+    // The visitor taps into the message box to type (the keyboard comes up): on a phone a sheet that was up
+    // full height comes down to half (tucked away, it stays tucked away).
     if (d.type === 'trif-demo:typing') { if (phone() && size() === 'full') setSize('half'); return; }
     // The panel has loaded (again): it hears the sheet's size.
     if (d.type === 'trif-demo:hello') { tellSize(); return; }

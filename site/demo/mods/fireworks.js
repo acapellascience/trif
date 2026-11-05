@@ -451,21 +451,35 @@
 
   // A double-click launches a rocket (capture phase, so nothing on the page can swallow it): two clicks
   // close together in time and place, so a single click doesn't set one off by accident. On a
-  // touchscreen, every tap.
-  let lastDown = null;
+  // touchscreen, a tap: launched as the finger lifts, and only if it barely moved, so grabbing and
+  // throwing something (Gravity mode's words and robot, the shooter's ship) isn't a tap. (Movement only,
+  // no time limit: a busy page can take a long while to see the finger lift, and a tap mustn't be lost.)
+  // Never from the buttons along the top (mute, restart, drop: they do their own thing).
+  const onTopBar = (e) => !!e.target.closest?.('#trif-top-bar');
+  let lastDown = null, touchDown = null;
   document.addEventListener('pointerdown', (e) => {
     try {
-      if (e.button !== 0) return;
-      if (e.pointerType === 'mouse' || e.pointerType === 'pen') {
-        const prev = lastDown;
-        lastDown = { t: e.timeStamp, x: e.clientX, y: e.clientY };
-        if (!prev || e.timeStamp - prev.t > 450 || Math.hypot(e.clientX - prev.x, e.clientY - prev.y) > 24) return;
-        lastDown = null; // (a third click starts the next pair)
-      }
+      if (e.button !== 0 || onTopBar(e)) return;
+      if (e.pointerType === 'touch') { touchDown = { id: e.pointerId, x: e.clientX, y: e.clientY }; return; }
+      const prev = lastDown;
+      lastDown = { t: e.timeStamp, x: e.clientX, y: e.clientY };
+      if (!prev || e.timeStamp - prev.t > 450 || Math.hypot(e.clientX - prev.x, e.clientY - prev.y) > 24) return;
+      lastDown = null; // (a third click starts the next pair)
       launch(e.clientX, e.clientY);
       start();
     } catch (err) { window.trif?.warn(String(err)); }
   }, true);
+  document.addEventListener('pointerup', (e) => {
+    try {
+      const down = touchDown;
+      if (e.pointerType !== 'touch' || !down || down.id !== e.pointerId) return;
+      touchDown = null;
+      if (Math.hypot(e.clientX - down.x, e.clientY - down.y) > 12) return; // a drag or a throw
+      launch(e.clientX, e.clientY);
+      start();
+    } catch (err) { window.trif?.warn(String(err)); }
+  }, true);
+  document.addEventListener('pointercancel', (e) => { if (touchDown?.id === e.pointerId) touchDown = null; }, true); // (the page scrolled)
 
   // ...without the double-click selecting the word under it (text boxes keep theirs).
   document.addEventListener('mousedown', (e) => {

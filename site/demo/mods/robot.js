@@ -528,8 +528,12 @@
       const vw = document.documentElement.clientWidth, vh = innerHeight;
       return { r, minX: 8 - homeX, maxX: vw - r.width - 8 - homeX, minY: 8 - homeY, maxY: vh - r.height - 30 - homeY }; // 30: room for the feet
     };
+    // Inside the window, a step goes no further than its edge. Outside it (partly or wholly: the page
+    // scrolled away from him), a step can't take him further out, but nothing pulls him in either: he walks
+    // back in on his own (his routines aim inside the window), never jumps.
+    const soft = (v, lo, hi, cur) => Math.max(Math.min(lo, cur), Math.min(Math.max(hi, cur), v));
     const clampPt = (p, b) => b.maxX <= b.minX || b.maxY <= b.minY ? { ...p, x: pos.x, y: pos.y }
-      : { ...p, x: Math.max(b.minX, Math.min(b.maxX, p.x)), y: Math.max(b.minY, Math.min(b.maxY, p.y)) };
+      : { ...p, x: soft(p.x, b.minX, b.maxX, pos.x), y: soft(p.y, b.minY, b.maxY, pos.y) };
     const rnd = (a, b) => a + Math.random() * (b - a);
     const pt = (x, y, speed) => ({ x, y, speed });
     const anywhere = (b, speed) => pt(rnd(b.minX, b.maxX), rnd(b.minY, b.maxY), speed);

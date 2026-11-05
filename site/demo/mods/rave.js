@@ -47,6 +47,11 @@
 
     /* The page paints its dark grey on <body>: clear it and every container. */
     html, body, body *:not(.wm-rainbow-music, .btn, code) { background-color: transparent !important; }
+    /* The kick zoom swells the sections past the window's sides for a moment: the page would get wider on
+       every beat, and a phone then rescales or pans it, shaking everything pinned to the screen (the demo's
+       panel). Whatever pokes out is clipped instead (clip, not hidden: nothing becomes a scroller). On <html>
+       too: otherwise <body>'s setting goes to the window, and <body> itself lets the footer out. */
+    html, body { overflow-x: clip !important; }
     /* The secondary (GitHub) button and inline code keep a frosted dark backing so they still read as boxes. */
     html body .btn.plain, html body code { background-color: rgba(10, 10, 14, 0.55) !important; border-color: rgba(255, 255, 255, 0.5) !important; }
     /* GitHub button: rolling rainbow lettering on its dark box. Two background layers: the rainbow,

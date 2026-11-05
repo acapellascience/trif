@@ -269,7 +269,7 @@
   const canFull = true;
   const size = () => (minimized() ? 'min' : root.classList.contains('demo-tall') ? 'full' : 'half');
   function setSize(s, byHand) {
-    if (s === 'full' && (!canFull || (SIMPLE && !byHand))) s = 'half'; // (kb-simple: full only by dragging)
+    if (s === 'full' && !canFull) s = 'half';
     root.classList.toggle('demo-tall', s === 'full');
     try { sessionStorage.setItem(TALL, s === 'full' ? '1' : ''); } catch {}
     minimize(s === 'min');

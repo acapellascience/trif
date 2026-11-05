@@ -1,5 +1,5 @@
 // ==WebMod==
-// @name        Press G for Gravity
+// @name        G Toggles Gravity
 // @description Press G and everything falls down
 // @match       https://timsrobot.com/*
 // @match       https://*.timsrobot.com/*

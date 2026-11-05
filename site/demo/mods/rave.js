@@ -472,6 +472,7 @@
   // press, and any later one wakes it if the browser held it back.
   const firstGesture = (e) => {
     if (!e.isTrusted) return; // (a click sent by code can't unlock sound: wait for a real one)
+    gestureUnmute(e); // (the courtesy mute's showing and nothing's chosen: this click turns the sound on)
     if (button && e.composedPath().includes(button)) return; // (the play/pause button, once unlocked, decides itself)
     if (zoomButton && e.composedPath().includes(zoomButton)) return;
     removeEventListener('pointerdown', firstGesture, true);
@@ -483,7 +484,11 @@
   };
   addEventListener('pointerdown', firstGesture, true);
   addEventListener('keydown', firstGesture, true);
+  // The music's meant to play from the start: the courtesy mute turns up now, muted, and the first click
+  // turns the sound on as it starts the music.
+  try { muteButton(); } catch {}
   const wakeMusic = (e) => {
+    gestureUnmute(e);
     if (e.isTrusted && musicOn && ctx && ctx.state === 'suspended' && !document.hidden) { try { start(); } catch {} }
   };
   addEventListener('pointerdown', wakeMusic, true);
@@ -645,15 +650,23 @@
 
   // The courtesy mute, shared by the mods that make sound (Living Robot, Space Shooter, Click Fireworks,
   // Rainbow Rave): the first button in the row along the top, there from the first sound on. It silences
-  // all of them (each one suspends its own audio while it's on: the `trif-mute` event), and this browser
-  // remembers it.
+  // all of them (each one suspends its own audio while it's on: the `trif-mute` event).
+  // It turns up the first time there's meant to be a sound, muted (a speaker with an X), and the next click,
+  // tap or key press anywhere on the page turns the sound on: that's the gesture browsers want before they
+  // play any. From then on only the button switches it. Kept for the visit (this tab's sessionStorage), so
+  // each visit starts muted; without storage, for the page.
   const MUTED = 'trif.muted';
-  // (It starts muted, so the struck-through button says there's sound to be had, and a click on it is the
-  // gesture browsers want before they play any; unmuted is remembered. Without storage, for the page.)
-  const isMuted = () => {
-    try { const v = localStorage.getItem(MUTED); return v === null ? window.__trifMuted !== false : v === '1'; } catch { return window.__trifMuted !== false; }
+  const muteChoice = () => { try { const v = sessionStorage.getItem(MUTED); if (v !== null) return v; } catch {} return window.__trifMuteChoice ?? null; };
+  const isMuted = () => muteChoice() !== '0';
+  const setMuted = (on) => { window.__trifMuteChoice = on ? '1' : '0'; try { sessionStorage.setItem(MUTED, window.__trifMuteChoice); } catch {} };
+  // A real click, tap or key press, not on the button, while the button's showing and nothing's been
+  // chosen yet: the sound comes on. (Each sound mod calls this from its gesture listener, then resumes.)
+  const gestureUnmute = (e) => {
+    if (!e.isTrusted || muteChoice() !== null || !document.getElementById('trif-mute')) return;
+    if (e.composedPath?.().some((n) => n.id === 'trif-mute')) return;
+    setMuted(false);
+    dispatchEvent(new CustomEvent('trif-mute', { detail: { muted: false } }));
   };
-  const setMuted = (on) => { window.__trifMuted = on; try { localStorage.setItem(MUTED, on ? '1' : '0'); } catch {} };
   const muteButton = () => {
     if (document.getElementById('trif-mute')) return;
     const NS = 'http://www.w3.org/2000/svg';
@@ -672,10 +685,9 @@
         p.setAttribute('opacity', String(opacity));
         svg.append(p);
       };
-      add('M12 9.75a2.25 2.25 0 1 0 0 4.5a2.25 2.25 0 1 0 0-4.5z', true);
-      add('M15.5 8.5a5 5 0 0 1 0 7M8.5 8.5a5 5 0 0 0 0 7');
-      add('M18.5 5.5a9.2 9.2 0 0 1 0 13M5.5 5.5a9.2 9.2 0 0 0 0 13', false, 0.55);
-      if (muted) add('M4 4 20 20');
+      add('M3.5 9.5h3l4.5-4v13l-4.5-4h-3z', true); // a speaker
+      if (muted) add('M15.5 9.5l5 5M20.5 9.5l-5 5'); // with an X
+      else { add('M14.5 9.2a4 4 0 0 1 0 5.6'); add('M17.3 6.6a7.6 7.6 0 0 1 0 10.8', false, 0.7); } // or sound waves
       b.replaceChildren(svg);
       b.setAttribute('aria-pressed', String(muted));
       b.setAttribute('aria-label', muted ? 'Sound off: turn it back on' : 'Mute the sound');

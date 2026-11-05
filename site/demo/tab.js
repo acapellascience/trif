@@ -184,11 +184,15 @@
     show();
   }
 
+  // Once the panel's been closed, the tab brings it back: "Show the fixer" (it says "Try the demo" until
+  // it's been open; at a desk it starts open).
+  const tabLabel = () => { tab.textContent = 'Show the fixer'; };
   function hide() {
     if (!isOpen()) return;
     if (box.popover) box.hidePopover(); else box.hidden = true;
     root.classList.remove('demo-open', 'demo-min');
     try { sessionStorage.setItem(MIN, ''); } catch {}
+    tabLabel();
     showTab(true);
     tab.focus();
     remember(false);
@@ -272,8 +276,14 @@
     }, 700);
   }
 
+  // Open again after a reload if it was open; at a desk, open from the start (the first visit to the page
+  // in this tab); on a phone, the tab waits to be tapped. Closed before: the tab says so.
   let reopen = false;
-  try { reopen = sessionStorage.getItem(OPEN) === '1'; } catch {}
+  try {
+    const was = sessionStorage.getItem(OPEN);
+    reopen = was === '1' || (was === null && !phone());
+    if (was === '') tabLabel();
+  } catch {}
   if (reopen) {
     try { if (sessionStorage.getItem(MIN) === '1' && phone()) root.classList.add('demo-min'); } catch {}
     show();

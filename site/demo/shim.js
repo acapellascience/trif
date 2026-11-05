@@ -117,6 +117,7 @@
     openModel: { provider: 'ollama', model: '', baseUrl: '' },
     runs: new Map(),
     replayed: new Set(), // recorded chats played to the end
+    sent: false,         // Send has been clicked (the highlight on it goes)
     active: null,        // the run going: {runId, chat (recording id, or null for the demo's note), step}
   };
 
@@ -129,7 +130,7 @@
     const out = {
       v: 1, store: Object.fromEntries(store), sitesOn: state.sitesOn, mods: state.mods.map((m) => m.slug), trash: [...state.trash.values()].map((m) => m.slug),
       instructions: state.instructions, autoUpdate: state.autoUpdate, openModel: state.openModel, replayed: [...state.replayed],
-      active: state.active, runSeq,
+      active: state.active, sent: state.sent, runSeq,
     };
     try { sessionStorage.setItem(SAVED, JSON.stringify(out)); } catch { /* private window: lasts until the reload */ }
   }
@@ -147,6 +148,7 @@
     if (saved.openModel?.provider) state.openModel = saved.openModel;
     state.replayed = new Set(saved.replayed || []);
     state.active = saved.active || null;
+    state.sent = !!saved.sent || state.replayed.size > 0;
     runSeq = Number(saved.runSeq) || 0;
   } else {
     // First time: only the mods running on the page (its ?mods=), on.
@@ -261,6 +263,7 @@
     if (store.get(chatKey)?.run) throw new Error(`already working on ${SITE}`);
     const runId = `demo-${++runSeq}`;
     const startedAt = Date.now();
+    if (!state.sent) { state.sent = true; document.documentElement.classList.remove('demo-hint-send'); }
     updateChat((c) => { c.messages.push({ role: 'user', text: prompt, time: startedAt }); c.run = { runId, startedAt }; c.last = null; });
     const recording = DEMO.chats.find((c) => c.prompt === prompt);
     const run = { runId, recording, timers: [] };
@@ -623,6 +626,8 @@
       const input = document.getElementById('input');
       if (!form || !input || mounted) return;
       mounted = true;
+      // Until Send has been clicked once, it's highlighted, so it's clear what to do (panel.css)
+      document.documentElement.classList.toggle('demo-hint-send', !state.sent);
       try { if (window.parent !== window && window.parent.matchMedia('(max-width: 700px)').matches) document.documentElement.classList.add('demo-phone'); } catch {}
       input.rows = 3; // (where the box can't grow to fit its text: Safari)
       // On a phone the waiting prompt can be scrolled with a finger, but a tap mustn't focus it (no

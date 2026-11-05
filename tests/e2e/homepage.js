@@ -147,7 +147,7 @@ async function main() {
         marker: document.documentElement.getAttribute('data-trif'),
         mine: document.documentElement.dataset.e2eMine || null,
         tab: tab ? { parent: tab.parentElement.tagName, top: tab.matches(':popover-open'), shown: !tab.hidden && r.width > 0 && r.height > 0,
-          inView: r.right <= innerWidth + 1 && r.left >= innerWidth - 60, rect: [Math.round(r.x), Math.round(r.y), Math.round(r.width), Math.round(r.height)],
+          label: tab.textContent.trim(), inView: r.right <= innerWidth + 1 && r.left >= innerWidth - 60, rect: [Math.round(r.x), Math.round(r.y), Math.round(r.width), Math.round(r.height)],
           color: getComputedStyle(tab).color, bg: getComputedStyle(tab).backgroundColor, transform: getComputedStyle(tab).transform,
           hit: document.elementFromPoint(r.x + r.width / 2, r.y + r.height / 2) === tab } : null,
         panel: !!document.querySelector('.demo-panel') && document.documentElement.classList.contains('demo-open'),
@@ -161,17 +161,21 @@ async function main() {
 
     // ---- TRIF off for timsrobot.com: the demo
     let s0;
-    await check('TRIF off for timsrobot.com: nothing marks the page; the demo tab is outside <body>, in the top layer, on screen', async () => {
+    await check('TRIF off for timsrobot.com: nothing marks the page; at a desk the demo panel starts open; closed, its tab ("Show the fixer") is outside <body>, in the top layer, on screen', async () => {
       await load();
+      const first = await state();
+      if (!first.panel) throw new Error('the panel didn\'t start open');
+      await page(`async () => document.querySelector('.demo-close').click()`);
+      await sleep(800);
       s0 = await state();
       if (s0.marker !== null) throw new Error(`marker ${s0.marker}`);
-      if (!s0.tab || s0.tab.parent !== 'HTML' || !s0.tab.top || !s0.tab.shown || !s0.tab.inView || !s0.tab.hit) throw new Error(JSON.stringify(s0.tab));
+      if (s0.panel || !s0.tab || s0.tab.parent !== 'HTML' || !s0.tab.top || !s0.tab.shown || !s0.tab.inView || !s0.tab.hit || s0.tab.label !== 'Show the fixer') throw new Error(JSON.stringify(s0.tab));
       if (Object.values(s0.mods).some((n) => n)) throw new Error(`mods running: ${JSON.stringify(s0.mods)}`);
       await shot('tab');
       return `tab at ${s0.tab.rect}`;
     });
 
-    await check('the demo panel starts with no mods, and the first recorded prompt (the first mod in Tim\'s order) waiting in a box that can\'t be typed in', async () => {
+    await check('the demo panel starts with no mods, the first recorded prompt (the first mod in Tim\'s order) waiting in a box that can\'t be typed in, and Send highlighted', async () => {
       await page(`async () => { document.querySelector('.demo-tab').click(); }`);
       await sleep(2500);
       const first = require('../../site/demo/chats/tagline.json');
@@ -180,6 +184,8 @@ async function main() {
       const p = await demoPanel(`(doc) => ({ rows: doc.querySelectorAll('#mod-list > li').length, value: doc.getElementById('input').value, ro: doc.getElementById('input').readOnly })`);
       if (ORDER[0] !== 'tagline') throw new Error(`Tim's order starts with ${ORDER[0]}: update this check`);
       if (p.rows !== 0 || !p.ro || p.value !== (first.prompt ?? first.messages?.[0]?.text)) throw new Error(JSON.stringify(p));
+      const hint = await demoPanel(`(doc) => doc.documentElement.classList.contains('demo-hint-send') && getComputedStyle(doc.getElementById('send')).animationName`);
+      if (hint !== 'demo-send-pulse') throw new Error(`Send isn't highlighted: ${hint}`);
       await shot('demo-panel');
       return `waiting: ${p.value.slice(0, 50)}…`;
     });

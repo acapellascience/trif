@@ -116,7 +116,11 @@ const DEMO_STYLE = `
    innerWidth / innerHeight measure it, which demo.js narrows to the part beside the panel or above the sheet.) */
 @media (max-width: 700px) {
   .demo-panel { inset: auto 0 0 0; width: auto; height: 40vh; height: calc(40dvh + var(--demo-grow, 0px)); min-height: calc(260px + var(--demo-grow, 0px)); max-height: 85dvh; border-left: 0; border-top: 1px solid var(--line);
-    border-radius: 12px 12px 0 0; box-shadow: 0 -6px 24px rgb(0 0 0 / 0.15); transition: height .25s ease; }
+    border-radius: 12px 12px 0 0; transition: height .25s ease;
+    /* its shadow, and two copies of itself below it (off the screen, normally): with the keyboard up, an
+       iPhone can leave a gap between the sheet and the keyboard, which would show the page behind (a
+       rainbow stripe under Rainbow Rave) */
+    box-shadow: 0 -6px 24px rgb(0 0 0 / 0.15), 0 240px 0 0 var(--card), 0 480px 0 0 var(--card); }
   /* the top bar is the handle: swipe it down to tuck the sheet away, up (or tap it) to bring it back (demo.js) */
   .demo-panel-top { position: relative; height: 34px; flex: none; padding: 4px 6px 0 14px; touch-action: none; cursor: grab; user-select: none; -webkit-user-select: none; }
   .demo-panel-top::before { content: ''; position: absolute; left: 50%; top: 6px; width: 36px; height: 4px; margin-left: -18px;

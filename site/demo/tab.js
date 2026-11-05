@@ -232,6 +232,13 @@
   addEventListener('message', (e) => {
     if (!frame || e.origin !== location.origin || e.source !== frame.contentWindow) return;
     const d = e.data || {};
+    // On a phone the panel's message box fits its text, and the sheet grows by what the box gained
+    // (pages.js: --demo-grow), so the chat above it keeps its room.
+    if (d.type === 'trif-demo:grow') {
+      const px = Math.max(0, Math.min(400, Math.round(Number(d.px) || 0)));
+      document.documentElement.style.setProperty('--demo-grow', `${px}px`);
+      return;
+    }
     if (d.type !== 'trif-demo:load') return;
     const ok = (n) => typeof n === 'string' && /^[a-z0-9-]{1,40}$/.test(n);
     const names = (Array.isArray(d.mods) ? d.mods : []).filter(ok);

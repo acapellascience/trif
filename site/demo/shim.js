@@ -582,8 +582,28 @@
     const show = (input, text) => {
       input.value = text;
       input.dispatchEvent(new Event('input', { bubbles: true })); // (the box grows to fit)
+      fitBox();
       input.scrollTop = input.scrollHeight; // (where it's capped, the newest words stay in view)
     };
+    // On a phone the message box fits its text (Safari can't size a box to its text by itself yet), and the
+    // sheet grows by what it gained over two lines, so the chat keeps its room (tab.js: trif-demo:grow).
+    let grown = -1;
+    function fitBox() {
+      const input = document.getElementById('input');
+      if (!input || !document.documentElement.classList.contains('demo-phone')) return;
+      input.style.height = 'auto';
+      const cs = getComputedStyle(input);
+      const lh = parseFloat(cs.lineHeight) || parseFloat(cs.fontSize) * 1.3;
+      const edges = parseFloat(cs.paddingTop) + parseFloat(cs.paddingBottom) + parseFloat(cs.borderTopWidth) + parseFloat(cs.borderBottomWidth);
+      const max = parseFloat(cs.maxBlockSize) || Infinity;
+      const h = Math.min(max, Math.max(lh * 2 + edges, input.scrollHeight + parseFloat(cs.borderTopWidth) + parseFloat(cs.borderBottomWidth)));
+      input.style.height = `${Math.ceil(h)}px`;
+      const extra = Math.max(0, Math.round(h - (lh * 2 + edges)));
+      if (extra !== grown && window.parent !== window) {
+        grown = extra;
+        window.parent.postMessage({ type: 'trif-demo:grow', px: extra }, location.origin);
+      }
+    }
     function stopTyping(input, finish) {
       if (!typing) return;
       clearTimeout(typing.timer);
@@ -610,8 +630,8 @@
       if (!input) return;
       const c = busy ? null : next();
       const free = !busy && !c; // every recording played: the box is theirs
-      // Send pulses while a prompt waits: at a desk for each one, on a phone until it's first been clicked
-      document.documentElement.classList.toggle('demo-hint-send', !!c && (!document.documentElement.classList.contains('demo-phone') || !state.sent));
+      // Send pulses while a prompt waits for it
+      document.documentElement.classList.toggle('demo-hint-send', !!c);
       const was = !document.documentElement.classList.contains('demo-guided');
       document.documentElement.classList.toggle('demo-guided', !free);
       input.readOnly = !free;
@@ -642,6 +662,14 @@
       mounted = true;
       try { if (window.parent !== window && window.parent.matchMedia('(max-width: 700px)').matches) document.documentElement.classList.add('demo-phone'); } catch {}
       input.rows = 3; // (where the box can't grow to fit its text: Safari)
+      if (document.documentElement.classList.contains('demo-phone')) {
+        // (fitted to its text: fitBox, on every change, the panel clearing it after a send included)
+        input.addEventListener('input', fitBox);
+        new MutationObserver(fitBox).observe(input, { attributes: true, attributeFilter: ['disabled', 'readonly'] });
+        document.addEventListener('submit', () => { setTimeout(fitBox, 0); setTimeout(fitBox, 120); });
+        addEventListener('resize', fitBox);
+        setTimeout(fitBox);
+      }
       // On a phone the waiting prompt can be scrolled with a finger, but a tap mustn't focus it (no
       // keyboard): it gives the focus straight back while it's a waiting prompt.
       input.addEventListener('focus', () => { if (input.readOnly) input.blur(); });

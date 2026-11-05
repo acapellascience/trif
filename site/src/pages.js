@@ -115,7 +115,7 @@ const DEMO_STYLE = `
 /* (Mods' full-window layers, the shooter's banner among them, size and place themselves by the window as
    innerWidth / innerHeight measure it, which demo.js narrows to the part beside the panel or above the sheet.) */
 @media (max-width: 700px) {
-  .demo-panel { inset: auto 0 0 0; width: auto; height: 40vh; height: 40dvh; min-height: 260px; border-left: 0; border-top: 1px solid var(--line);
+  .demo-panel { inset: auto 0 0 0; width: auto; height: 40vh; height: calc(40dvh + var(--demo-grow, 0px)); min-height: calc(260px + var(--demo-grow, 0px)); max-height: 85dvh; border-left: 0; border-top: 1px solid var(--line);
     border-radius: 12px 12px 0 0; box-shadow: 0 -6px 24px rgb(0 0 0 / 0.15); transition: height .25s ease; }
   /* the top bar is the handle: swipe it down to tuck the sheet away, up (or tap it) to bring it back (demo.js) */
   .demo-panel-top { position: relative; height: 34px; flex: none; padding: 4px 6px 0 14px; touch-action: none; cursor: grab; user-select: none; -webkit-user-select: none; }
@@ -124,7 +124,7 @@ const DEMO_STYLE = `
   .demo-close { font-size: 20px; padding: 0 12px; }
   html.demo-min .demo-panel { height: 35px; min-height: 0; }
   /* room under the page for the sheet, so the end of it (the footer) can scroll up above the sheet */
-  html.demo-open body { padding-bottom: max(40vh, 260px); padding-bottom: max(40dvh, 260px); }
+  html.demo-open body { padding-bottom: max(40vh, 260px); padding-bottom: max(calc(40dvh + var(--demo-grow, 0px)), calc(260px + var(--demo-grow, 0px))); }
   html.demo-open.demo-min body { padding-bottom: 35px; }
   /* (no room for it on a phone: the page says what the demo is) */
   .demo-panel-note { display: none; }

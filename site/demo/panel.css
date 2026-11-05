@@ -4,6 +4,9 @@
    light-dark() pairs, which follow color-scheme. (Its one light-only rule, the sleeping robot's
    opacity, is put back to the dark values.) */
 :root { color-scheme: dark; }
+/* Text at the size it's set: iPhone Safari's text autosizing otherwise enlarges the chat when the sheet
+   is swiped away (squashed to its bar) and brought back. */
+html { -webkit-text-size-adjust: 100%; text-size-adjust: 100%; }
 body.site-off .bar-robot svg { opacity: 0.45; }
 body.site-off .bar-robot:hover:not([aria-busy="true"]) svg { opacity: 0.7; }
 
@@ -11,8 +14,7 @@ body.site-off .bar-robot:hover:not([aria-busy="true"]) svg { opacity: 0.7; }
    the recorded prompt waiting in the message box takes their place. */
 #empty .chips { display: none; }
 
-/* Send pulses while a recorded prompt waits for it, so it's clear what to do: at a desk for each one, on a
-   phone until it's first been clicked (shim.js). */
+/* Send pulses while a recorded prompt waits for it, so it's clear what to do (shim.js). */
 html.demo-hint-send #send:not([hidden], :disabled) { animation: demo-send-pulse 1.6s ease-out infinite; }
 @keyframes demo-send-pulse {
   0% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--accent) 80%, transparent); }
@@ -43,8 +45,10 @@ html.demo-phone .mod-list { max-height: calc(34vh - 30px); }
 html.demo-phone .mod-list li { padding: 3px 0; }
 html.demo-phone .chat { padding: 8px 12px 2px; }
 html.demo-phone .composer { margin: 4px 10px 8px; }
-html.demo-phone .composer textarea { padding: 6px 40px 6px 10px; max-block-size: calc(3lh + 12px); }
+/* The message box fits its text (shim.js sizes it: Safari can't yet), and the sheet grows to make room
+   (tab.js); past eight lines it scrolls. */
+html.demo-phone .composer textarea { padding: 6px 40px 6px 10px; max-block-size: calc(8lh + 14px); overflow-y: auto; }
 /* The waiting prompt, two lines at a time: it scrolls with a finger (and follows the typing), but still
    can't be focused (shim.js), and 16px, so a phone never zooms in on it. */
 html.demo-phone.demo-guided #input { pointer-events: auto; overflow-y: auto; touch-action: pan-y; font-size: 16px;
-  max-block-size: calc(2lh + 12px); -webkit-user-select: none; user-select: none; }
+  max-block-size: calc(8lh + 14px); -webkit-user-select: none; user-select: none; }

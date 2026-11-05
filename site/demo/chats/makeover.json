@@ -104,7 +104,7 @@
  ],
  "touch": {
   "texts": {
-   "17": "Done: four new mods, one for each part of the page that was left.\n\n- **Sticker Badges:** \"Free and open source\" is now three tilted stickers (green, yellow and pink) that pop in one after another.\n- **Need Checklist:** **What you need** is a checklist with an icon for each item. The boxes tick themselves when you scroll to it, and you can tap them to tick or untick.\n- **Terminal Box:** **Yours, on your computer** is a little terminal window. It types out `ls ~/.trif/sites/timsrobot.com` and lists the mods we've made.\n- **LED Footer:** the footer is an amber LED sign, with its links scrolling past.\n\n**What I checked:** after a reload, all four ran with no errors, and the screenshots of each part look right. If your system is set to reduce motion, they keep still.\n\nEach one has its own switch in the side panel, so you can turn any of them off."
+   "17": "Four new mods: the “Free and open source” line is sticker badges, **What you need** is a checklist, **Yours, on your computer** is a terminal, and the footer is an LED sign."
   }
  }
 }

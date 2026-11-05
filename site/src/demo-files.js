@@ -270,7 +270,12 @@ export const CHATS = [
     "text": "The line under the title now types itself out like a terminal, and when it finishes, \"your own coding agent\" glows green.\n\n- **Typing:** A green block cursor blinks for a moment at an empty line, then the sentence types out letter by letter. The speed varies a little, with short pauses after spaces and the full stop. The cursor stays solid while typing and keeps blinking at the end of the line afterwards.\n- **Glow:** \"your own coding agent\" fades into a soft green neon glow that pulses gently.\n- **Layout:** Each letter appears where it ends up, so the centred line doesn't shift and nothing below it jumps.\n- **Reduced motion:** If your system asks for reduced motion, the full line shows straight away with a steady glow.\n\n**What I checked:** After a reload, I sampled the line every 0.6 s and it typed through (\"Fix \", \"Fix any webs\", … ) and finished in about 4.5 s. The finished line has the green glow, and the screenshot looks right. There were no mod errors.\n\nTo undo it, switch off **Typing Tagline** in the side panel, or ask me to.",
     "t": 115343
    }
-  ]
+  ],
+  "touch": {
+   "texts": {
+    "8": "Done: the line under the title now types itself out like a terminal, with a blinking green cursor, and “your own coding agent” glows green. New mod: **Typing Tagline**."
+   }
+  }
  },
  {
   "id": "robot",
@@ -361,7 +366,7 @@ export const CHATS = [
    "prompt": "bring the robot to life! give it legs, have it walk around making occasional robot noises, and make it startle when i tap it.",
    "texts": {
     "10": "ran trif reload && trif run 'const s=document.querySelector(\"svg.robot\"); s.dispatchEvent(new PointerEvent(\"pointerenter\")); await new Promise(r=>setTimeout(r,300)); s.dispatchEvent(new PointerEvent(\"click\",{pointerType:\"touch\",bubbles:true})); aw…",
-    "14": "The robot is alive. I added a new mod, **Living Robot**:\n\n- **Legs:** two little green legs. They swing with each step, his feet point where he's going and he leans into it. Walking up or down the page, he marches.\n- **Walking around:** he runs little routines on his own: strolls, a hop and a dash, loop-the-loops, figure eights, zigzags, pacing like a sentry, peeking from the edge of the screen, spirals and a hop dance, with pauses in between. Now and then he heads back home. He stays on screen, and holds still while your finger is on him.\n- **Robot noises:** a soft tap for each footstep, a boing when he hops, and now and then, when he stops to think, a happy little murmur (\"mm-hm?\", \"hm, hm!\" or \"brr-up?\", never the same one twice in a row).\n- **Startle:** tap him and he jumps with a boing and a startled blink.\n- **Also:** as he walks, his eyes look where he's going, and he blinks every few seconds.\n\n**What I checked:** after a reload he set off on his own, the screenshot shows him mid-stride with his legs showing, and a simulated tap on him made him jump. No errors. Browsers only play sound after you've tapped the page, so he's quiet until then; I can't hear from here, so give him a listen.\n\nTo undo it, switch off **Living Robot** in the side panel, or ask me to."
+    "14": "The robot is alive: he has legs, wanders the page on his own making little robot noises, and jumps when you tap him. New mod: **Living Robot**."
    }
   }
  },
@@ -450,7 +455,7 @@ export const CHATS = [
   "touch": {
    "prompt": "make the title a flickering pink neon sign with a wave running through it, and make the buttons wobble like jelly when i tap them",
    "texts": {
-    "13": "Done: two new mods.\n\n- **Neon Title:** \"Tim's Robot Internet Fixer\" starts out as dark pink glass, flickers on and off for a couple of seconds, then lights up for good. After that it hums, the \"o\" in \"Robot\" sputters now and then like a faulty tube, and a wave rolls through the letters, left to right.\n- **Jelly Buttons:** tap \"Get it\" or \"GitHub\" and the button squashes, stretches and settles back, like jelly, as its link opens in a new tab.\n\n**What I checked:** after a reload the title started unlit and finished lit, the letter heights showed the wave travelling across it, and running the wobble on \"Get it\" squashed it as expected (I can't tap from here, so I haven't seen a real tap). No errors. If your system is set to reduce motion, the title just glows and the buttons keep still.\n\nTo undo either one, switch it off in the side panel, or ask me to."
+    "13": "Done: the title is a flickering pink neon sign with a wave rolling through it, and the buttons wobble like jelly when you tap them. New mods: **Neon Title**, **Jelly Buttons**."
    }
   }
  },
@@ -543,7 +548,7 @@ export const CHATS = [
    "prompt": "make a mod where every tap launches a firework, and when it explodes the robot gets scared and flinches. don't forget the sound.",
    "texts": {
     "3": "The fireworks go on one see-through canvas over the page, so taps still reach it. Each big burst will announce where it went off, so Living Robot can react.",
-    "14": "I added a new mod, **Tap Fireworks**, and taught Living Robot to be scared of it.\n\n- **Every tap** sends a rocket up from the bottom of the screen with a sparkly trail. It bursts where you tapped, about half the screen across: hundreds of sparks with an outer ring and an inner core (about half the bursts are full rainbows), with crackles popping inside and sparks that twinkle as they fade.\n- **The robot flinches** when one goes off near him: a startled jolt, a quick step away, a lean away from the bang and wide, scared eyes for a moment. The closer the burst, the bigger the fright, and even far-off ones get a little twitch. In gravity mode he scurries sideways with a startled hop.\n- **Sound:** a dull thud on launch, a deep boom for each burst, and a soft hiss for the crackles. It starts after your first tap.\n- **Bonus:** touching \"Get it\" sprays a puff of confetti out of the button.\n- Your taps still work normally: the fireworks are drawn on a see-through layer that taps pass through.\n\n**What I checked:** a simulated tap launched a rocket and the screenshot shows the full burst, and a burst just beside the robot made him jump away and lean. No errors. I can't hear from here, so have a listen.\n\nTo undo it, switch off **Tap Fireworks** in the side panel, or ask me to."
+    "14": "Every tap now launches a firework that bursts where you tapped, with booms and crackles, and the robot flinches when one goes off near him. New mod: **Tap Fireworks**."
    }
   }
  },
@@ -653,7 +658,7 @@ export const CHATS = [
   ],
   "touch": {
    "texts": {
-    "17": "Done: four new mods, one for each part of the page that was left.\n\n- **Sticker Badges:** \"Free and open source\" is now three tilted stickers (green, yellow and pink) that pop in one after another.\n- **Need Checklist:** **What you need** is a checklist with an icon for each item. The boxes tick themselves when you scroll to it, and you can tap them to tick or untick.\n- **Terminal Box:** **Yours, on your computer** is a little terminal window. It types out `ls ~/.trif/sites/timsrobot.com` and lists the mods we've made.\n- **LED Footer:** the footer is an amber LED sign, with its links scrolling past.\n\n**What I checked:** after a reload, all four ran with no errors, and the screenshots of each part look right. If your system is set to reduce motion, they keep still.\n\nEach one has its own switch in the side panel, so you can turn any of them off."
+    "17": "Four new mods: the “Free and open source” line is sticker badges, **What you need** is a checklist, **Yours, on your computer** is a terminal, and the footer is an LED sign."
    }
   }
  },
@@ -797,7 +802,7 @@ export const CHATS = [
     "18": "Grab works, but the throw lost its speed. Fixing it to use the finger's recent motion.",
     "20": "ran trif check timsrobot.com/gravity && trif reload && trif run 'const w=ms=>new Promise(r=>setTimeout(r,ms)); document.querySelector(\"#trif-top-bar .trif-top-right\").click(); await w(4000); const svg=document.querySe…",
     "22": "ran trif run 'document.querySelector(\"#trif-top-bar .trif-top-right\").click(); await new Promise(r=>setTimeout(r,1000)); return {left:document.querySelectorAll(\"[data-gm-body],[data-gm-bare]\").length, on:document.documentElement.hasA…",
-    "23": "Gravity mode is ready. I added a new mod, **G Toggles Gravity**. On a touchscreen it puts a round button with a down arrow in the top right: tap it and the page collapses.\n\n- **Falling:** the text falls apart word by word, the title letter by letter, and the buttons and the robot come down too. Everything tumbles, bounces and piles up at the bottom of the screen. The tagline stays hanging where it was.\n- **Grab and throw:** drag a piece with your finger and let go while it's moving to fling it. While the page is in pieces, your finger moves pieces instead of scrolling or zooming the page. Links stay links: tapping one still opens it.\n- **The robot** stays on his feet. He walks left and right along the pile, hops over whatever blocks him (and now and then just for fun), and shoves words up when he jumps into them. You can grab and throw him too.\n- **Jelly buttons** are extra squishy: they squash when they land, and their wobble bounces whatever sits on them.\n- **Putting it back:** the button turns into an up arrow. Tap it and everything flies back into place, and the robot carries on walking from where he is.\n\n**What I checked:** after dropping the page, the pieces settled with no overlaps and none below the bottom. The robot walked along the pile and hopped; I threw him with a simulated drag and he landed back on it. The up-arrow button put the page back, and no errors were logged.\n\nTo undo it, switch off **G Toggles Gravity** in the side panel, or ask me to."
+    "23": "Gravity mode is ready: tap the down arrow at the top right and the page collapses into a pile you can grab and throw, robot included. The up arrow puts it back."
    }
   }
  },
@@ -1065,7 +1070,7 @@ export const CHATS = [
     "19": "Dropping the page sent everything flying off the top: gravity mode picked up the shooter's full-screen layer as a piece, and it shoved the rest up. Making gravity skip layers that let touches through.",
     "21": "ran trif check timsrobot.com/gravity && trif reload && trif run 'await new Promise(r=>setTimeout(r,1000)); document.querySelector(\"#trif-top-bar .trif-top-right\").click(); await new Promise(r=>setTimeout(r,2000)); const b=[...document.querySelectorAll(\"…",
     "23": "ran trif run 'document.querySelector(\"#trif-top-bar .trif-top-left\").click(); return document.querySelectorAll(\"[data-tss-dead]\").length'",
-    "24": "The page is now a space shooter. I added a new mod, **Space Shooter**, and gave Living Robot a chase mode.\n\n- **Flying:** put your finger on the ship and drag it anywhere on screen. While you hold it, it fires twin lasers as fast as it can. A touch anywhere else still scrolls the page as usual.\n- **Blasting:** any word you hit blows up into its letters, in its own font and colour, with sparks and a little screen shake. Once every word in a button or badge is gone, you can blast the box too. The restart button in the top left brings everything back, and the counts sit just under it.\n- **The robot is the enemy:** when you fly, he spots you, says something in his robot voice and hops, then chases the ship with momentum, so you can dodge and make him overshoot. Touch him with the ship and it blows up (it comes back blinking a moment later). Each hit takes 2 of his 100 health: he turns from green to yellow to red and gets faster as he's hurt. At zero he explodes and \"ROBOT DESTROYED\" flashes up. Shoot its letters too, and your ship flies off and the game starts over.\n- **Gravity mode:** while the page is dropped, holding the ship drops bombs instead, one at a time. A bomb blows up the first thing it lands on and flings the pieces around it. A direct hit on the robot takes 5, and he runs out from under bombs he sees coming.\n- **Sound effects:** a zap for each laser, deep booms for explosions (the robot's is the biggest), a whistle as a bomb falls, a clank when a laser hits him, and a whoosh as your ship flies off. They start after your first tap.\n\n**What I checked:** test shots blew up words and the counter went up, the robot chased the ship, and a test run destroyed him. With gravity on, bombs removed pieces and threw others around. No errors. I also fixed gravity mode picking up the shooter's drawing layer as a piece.\n\nTo undo it, switch off **Space Shooter** in the side panel, or ask me to."
+    "24": "The page is a space shooter: drag the ship to fly and fire, blast the words, and fight the robot, who chases you. In gravity mode you drop bombs. New mod: **Space Shooter**."
    }
   }
  },
@@ -1197,7 +1202,7 @@ export const CHATS = [
   "touch": {
    "prompt": "now bring in Rainbow Rave. get creative..",
    "texts": {
-    "22": "Rainbow Rave is on timsrobot.com. It's a new mod, **Rainbow Rave**, ported from your Rainbow Rave mod for x.com, with a rave look for every mod on this page.\n\n**From the x.com version:**\n- The rolling rainbow behind the whole page, with white text on top.\n- The trance loop, made in code (no sound files). It starts on your first tap.\n- The kick zoom: the page's blocks pulse with every kick drum.\n\n**Every mod raves:**\n- **Robot:** his outline, eyes and legs roll through the rainbow, faster the more you've hurt him in the shooter, and he blows up in a big rainbow blast.\n- **Title:** each letter a different neon colour around the rainbow, with a glow that adds light, and no flicker. It still waves.\n- **Tagline, checklist, LED sign:** \"your own coding agent\" glows rainbow letter by letter, ticked boxes and icons roll through the rainbow, and the LED letters change colour as they scroll.\n- **Buttons:** \"Get it\" is a rolling rainbow and \"GitHub\" gets rainbow letters. They still wobble.\n- **Ship:** rainbow exhaust, and a rainbow ring pulses out on every kick. \"ROBOT DESTROYED\" spins in, in rainbow letters.\n\n**A prize:** here the music and zoom have no buttons; they're part of the rave. Beat the robot in Space Shooter with every mod switched on, and when you come back from the win (\"play again?\"), play/pause and zoom buttons pop in along the top of the screen, switched off for you to turn on. This browser remembers you've won.\n\n**What I checked:** after a reload there were no errors, the screenshot shows the rainbow page and robot, and a test win brought the buttons in. I can't hear from here, so turn it up.\n\nTo undo it, switch off **Rainbow Rave** in the side panel, or ask me to."
+    "22": "Rainbow Rave is on: a rolling rainbow page, a trance loop, and every mod raves along. Beat the robot with every mod on to unlock the music and zoom buttons."
    }
   }
  },

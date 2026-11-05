@@ -52,5 +52,10 @@
    "text": "The line under the title now types itself out like a terminal, and when it finishes, \"your own coding agent\" glows green.\n\n- **Typing:** A green block cursor blinks for a moment at an empty line, then the sentence types out letter by letter. The speed varies a little, with short pauses after spaces and the full stop. The cursor stays solid while typing and keeps blinking at the end of the line afterwards.\n- **Glow:** \"your own coding agent\" fades into a soft green neon glow that pulses gently.\n- **Layout:** Each letter appears where it ends up, so the centred line doesn't shift and nothing below it jumps.\n- **Reduced motion:** If your system asks for reduced motion, the full line shows straight away with a steady glow.\n\n**What I checked:** After a reload, I sampled the line every 0.6 s and it typed through (\"Fix \", \"Fix any webs\", … ) and finished in about 4.5 s. The finished line has the green glow, and the screenshot looks right. There were no mod errors.\n\nTo undo it, switch off **Typing Tagline** in the side panel, or ask me to.",
    "t": 115343
   }
- ]
+ ],
+ "touch": {
+  "texts": {
+   "8": "Done: the line under the title now types itself out like a terminal, with a blinking green cursor, and “your own coding agent” glows green. New mod: **Typing Tagline**."
+  }
+ }
 }

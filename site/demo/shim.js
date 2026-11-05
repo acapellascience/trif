@@ -754,17 +754,25 @@
     }
 
     // From Send to the end of the replay, the chat follows along at the bottom, even if it was scrolled up
-    // (the panel itself only follows when it's already near the bottom). Demo only, for now.
-    let following = false, watcher = null;
+    // (the panel itself only follows when it's already near the bottom). And whenever it's at its bottom,
+    // it stays there: anything that makes it taller (a new message, a message that grows as it settles, a
+    // late layout) keeps the latest line in view, unless the visitor has scrolled up to read. Demo only.
+    let following = false, watcher = null, stuck = true;
     function follow(on) {
       following = on;
       const chat = document.getElementById('chat');
       if (!chat) return;
       if (!watcher) {
-        watcher = new MutationObserver(() => { if (following) chat.scrollTop = chat.scrollHeight; });
-        watcher.observe(chat, { childList: true, subtree: true, characterData: true });
+        const keep = () => { if (following || stuck) { chat.scrollTop = chat.scrollHeight; requestAnimationFrame(() => { if (following || stuck) chat.scrollTop = chat.scrollHeight; }); } };
+        watcher = new MutationObserver(() => { keep(); for (const el of chat.children) sizes.observe(el); });
+        watcher.observe(chat, { childList: true, subtree: true, characterData: true, attributes: true });
+        const sizes = new ResizeObserver(keep); // (a message changing height as it settles)
+        for (const el of chat.children) sizes.observe(el);
+        sizes.observe(chat);
+        // at the bottom, or scrolled up to read (our own scrolls land at the bottom, so they keep it stuck)
+        chat.addEventListener('scroll', () => { stuck = chat.scrollHeight - chat.clientHeight - chat.scrollTop < 24; }, { passive: true });
       }
-      if (on) chat.scrollTop = chat.scrollHeight;
+      if (on) { stuck = true; chat.scrollTop = chat.scrollHeight; }
     }
 
     function mount() {
@@ -815,6 +823,7 @@
       // (Capture phase on the document, ahead of the panel's own submit handler on the form.)
       document.addEventListener('submit', (e) => { if (e.target === form) stopTyping(input, true); }, true);
       fill();
+      follow(false); // (the chat sticks to its bottom from the start: see follow)
       later(resume);
     }
     if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', mount, { once: true }); else mount();

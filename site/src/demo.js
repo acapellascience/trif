@@ -25,9 +25,9 @@ const WORDS = {
     'With TRIF installed, your own coding agent (Claude Code, Codex or an open model) reads your message, looks at the page and writes the mod. ' +
     '[Get TRIF](https://github.com/acapellascience/trif#install) and ask it for real.',
   // The chat after You Win's "sandbox mode" (tab.js), in place of the demo's chats (Tim's words)
-  sandbox: "Welcome to sandbox mode. Every mod from the demo is in the list above, switched off. Toggle them on and off in any order and see what happens.\n\nThat’s as far as the demo goes! Thanks for thoroughly breaking my webpage. Lotta that going around. But you can fix it, with Tim's Robot Internet Fixer! It runs on your Mac (Windows coming soon!) with your own Claude Code or Codex.\n\nGo get it, then come back here. Build on the mayhem. We can do anything now.\n\n[How to install TRIF](https://github.com/acapellascience/trif#install)",
+  sandbox: "Welcome to sandbox mode. Every mod from the demo is in the list above, switched off. Toggle them on and off in any order and see what happens. Break it any way you can. Then get Tim's Robot Internet Fixer, come back here, and fix it.\n\n[How To Install TRIF](https://github.com/acapellascience/trif#install)",
   // ...and on a phone
-  sandboxPhone: "Welcome to sandbox mode. Every mod from the demo is in the list above, switched off. Toggle them on and off in any order and see what happens.\n\nThat’s as far as the demo goes! Thanks for thoroughly breaking my webpage. Lotta that going around. But you can fix it, with Tim's Robot Internet Fixer! It runs on your Mac (Windows coming soon!) with your own Claude Code or Codex.\n\nHappy fixin'!\n\n[How to get TRIF](https://github.com/acapellascience/trif#install)",
+  sandboxPhone: "Welcome to sandbox mode. Every mod from the demo is in the list above, switched off. Toggle them on and off in any order and see what happens. Break it any way you can. Then get Tim's Robot Internet Fixer, come back here, and fix it.\n\n[How To Install TRIF](https://github.com/acapellascience/trif#install)",
   // After the note above (notLive), each further message typed gets the next of these; after the last, the
   // chat locks (shim.js). The same on a phone. (Tim's words)
   typedReplies: [

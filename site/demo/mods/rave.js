@@ -525,7 +525,9 @@
   };
   const kickPulse = (at) => {
     try {
-      if (!zoomOn || !musicOn || document.hidden) { clearTimeout(stopTimer); stopAll(); return; }
+      // (paused in Gravity mode: zooming the sections while their pieces move every frame had them redrawn
+      // at the zoomed size constantly, halving a phone's frame rate; a pile doesn't need the pulse)
+      if (!zoomOn || !musicOn || document.hidden || document.documentElement.hasAttribute('data-gm-on')) { clearTimeout(stopTimer); stopAll(); return; }
       const drift = phase === null ? 0 : ((at - phase) % BEAT + BEAT) % BEAT;
       if (phase === null || Math.min(drift, BEAT - drift) > 15) {
         phase = at;

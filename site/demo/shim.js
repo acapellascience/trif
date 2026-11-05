@@ -693,6 +693,10 @@
     function fitBox() {
       const input = document.getElementById('input');
       if (!input || !document.documentElement.classList.contains('demo-phone')) return;
+      // (the chat above keeps its bottom in view if that's where it was: the box growing a line would push
+      // the end of the last reply out of sight while the sheet catches up)
+      const chat = document.getElementById('chat');
+      const atBottom = chat && chat.scrollHeight - chat.clientHeight - chat.scrollTop < 24;
       input.style.height = 'auto';
       const cs = getComputedStyle(input);
       const lh = parseFloat(cs.lineHeight) || parseFloat(cs.fontSize) * 1.3;
@@ -700,6 +704,7 @@
       const max = parseFloat(cs.maxBlockSize) || Infinity;
       const h = Math.min(max, Math.max(lh * 2 + edges, input.scrollHeight + parseFloat(cs.borderTopWidth) + parseFloat(cs.borderBottomWidth)));
       input.style.height = `${Math.ceil(h)}px`;
+      if (atBottom) { chat.scrollTop = chat.scrollHeight; requestAnimationFrame(() => { chat.scrollTop = chat.scrollHeight; }); }
       const extra = Math.max(0, Math.round(h - (lh * 2 + edges)));
       if (extra !== grown && window.parent !== window) {
         grown = extra;

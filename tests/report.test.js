@@ -48,15 +48,15 @@ test('logProblems keeps recent warnings and errors and folds repeats', () => {
 
 test('buildReport lists what helps and nothing personal', () => {
   const text = buildReport({
-    description: 'Plain X shows nothing',
+    description: 'Detox Timeline shows nothing',
     site: 'x.com', siteOn: true, browser: 'Firefox 153', extensionVersion: '0.1.1',
     agents: [{ id: 'claude', available: true, version: '2.1.312', loggedIn: true }, { id: 'codex', available: false }],
     update: { available: true, latest: '0.1.2' },
-    mods: [{ id: 'x.com/plain-x', enabled: true, registered: true }, { id: 'x.com/punk', enabled: false }, { id: 'x.com/new', enabled: true, registered: false, error: 'SyntaxError' }],
+    mods: [{ id: 'x.com/detox-timeline', enabled: true, registered: true }, { id: 'x.com/punk', enabled: false }, { id: 'x.com/new', enabled: true, registered: false, error: 'SyntaxError' }],
     doctor: { checks: [{ status: 'ok', title: 'node' }, { status: 'warn', title: 'CLI not on PATH (/Users/zed/.trif/bin)' }] },
   }, { home: '/Users/zed', user: 'zed' });
-  for (const want of ['What happened\nPlain X shows nothing', 'Browser     Firefox 153 (extension 0.1.1)', 'claude 2.1.312 (logged in), codex not found',
-    'Updates     0.1.2 available', 'Site        x.com, TRIF on', 'x.com/plain-x: on, running', 'x.com/punk: off', 'x.com/new: on, not running (error: SyntaxError)',
+  for (const want of ['What happened\nDetox Timeline shows nothing', 'Browser     Firefox 153 (extension 0.1.1)', 'claude 2.1.312 (logged in), codex not found',
+    'Updates     0.1.2 available', 'Site        x.com, TRIF on', 'x.com/detox-timeline: on, running', 'x.com/punk: off', 'x.com/new: on, not running (error: SyntaxError)',
     'Doctor      1 ok, 1 warning, 0 problems', 'warn  CLI not on PATH (~/.trif/bin)']) {
     assert.ok(text.includes(want), `report has ${JSON.stringify(want)}:\n${text}`);
   }
@@ -137,11 +137,11 @@ test('the helper answers report.build and update.*, and tells the extension abou
   assert.match(u.update.why, /git checkout|not .*app/);
   assert.equal(u.update.auto, false);
 
-  let r = await extRequest(ext, 'report.build', { site: 'x.com', siteOn: true, mods: [{ id: 'x.com/plain-x', enabled: true, registered: true }] });
+  let r = await extRequest(ext, 'report.build', { site: 'x.com', siteOn: true, mods: [{ id: 'x.com/detox-timeline', enabled: true, registered: true }] });
   assert.equal(r.ok, true, r.error);
   assert.match(r.result.text, /^TRIF problem report/);
   assert.match(r.result.text, new RegExp(`Browser {5}Firefox 153 \\(extension ${VERSION.replace(/\./g, '\\.')}\\)`));
-  assert.match(r.result.text, /x\.com\/plain-x: on, running/);
+  assert.match(r.result.text, /x\.com\/detox-timeline: on, running/);
   assert.equal(r.result.url, 'https://timsrobot.com/report');
   assert.equal(r.result.email, 'reports@timsrobot.com');
 

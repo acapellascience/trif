@@ -1,4 +1,4 @@
-// Plain X's filter tests, ported from the Plain X app (Tests/xfeed-tests.js), run against
+// Detox Timeline's filter tests, ported from its original app (Tests/xfeed-tests.js), run against
 // examples/sites/x.com/detox-timeline.js with stub browser globals. Checks the timeline filter: reposts, ads
 // and who-to-follow modules go; your follows' own posts, quotes, conversations and cursors stay.
 // The cases share the mod's state (options, the feed's seen/shown posts) and run in order.
@@ -448,7 +448,7 @@ for (const selector of ['#placeholder::after', 'header[role=banner] h1 a[href="/
 }
 });
 
-test("a feed page with a post type Plain X doesn't know is let through, not emptied", () => {
+test("a feed page with a post type Detox Timeline doesn't know is let through, not emptied", () => {
 const renamed = (id) => ({ entryId: `tweet-${id}`, content: { entryType: 'TimelineTimelineItem', itemContent: { itemType: 'TimelinePost', tweet_results: { result: { rest_id: id } } } } });
 const page = { data: { home: { home_timeline_urt: { instructions: [{ type: 'TimelineAddEntries', entries: [renamed('r1'), renamed('r2'), whoToFollow, cursor] }] } } } };
 const out = window.__dmFilterTimeline(JSON.stringify(page), 'https://x.com/i/api/graphql/abc/HomeLatestTimeline?variables={"cursor":"c9"}');

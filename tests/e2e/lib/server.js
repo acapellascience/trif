@@ -2,7 +2,7 @@
 // The local test sites the browsers load:
 //   http://127.0.0.1:<port>/        the main test site (its mod is written by the harness, then the agent's)
 //   http://localhost:<port>/        a second site with a mod of its own, where TRIF stays off
-//   https://x.com:<tlsPort>/home    a stand-in for X's home timeline, for the real Timeline Detox mod
+//   https://x.com:<tlsPort>/home    a stand-in for X's home timeline, for the real Detox Timeline mod
 //                                   (x.com/detox-timeline): the page fetches (and XHRs) a saved HomeLatestTimeline
 //                                   response, as X does, and lists the posts it got back.
 //   https://www.google.com:<tlsPort>/ and /search?q=…   stand-ins for Google's home and results pages,
@@ -142,7 +142,7 @@ const tweet = (id, { following = true, followedBy = true, legacy = {}, extra = {
 });
 
 /**
- * A HomeLatestTimeline response, and which entries Timeline Detox keeps out of the box (every filter off:
+ * A HomeLatestTimeline response, and which entries Detox Timeline keeps out of the box (every filter off:
  * only original text posts from people who follow you back; cursors always stay).
  */
 function timeline() {

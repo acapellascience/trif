@@ -42,7 +42,7 @@ function sockRequest(sock, msg, timeout = 10000) {
 
 test('parseHeader: full header', () => {
   const h = parseHeader(`// ==WebMod==
-// @name        Plain X
+// @name        Detox Timeline
 // @description Following-only, filtered X timeline
 // @match       https://x.com/*
 // @match       https://twitter.com/*
@@ -52,7 +52,7 @@ test('parseHeader: full header', () => {
 // ==/WebMod==
 console.log(1);`);
   assert.equal(h.hasHeader, true);
-  assert.equal(h.name, 'Plain X');
+  assert.equal(h.name, 'Detox Timeline');
   assert.equal(h.description, 'Following-only, filtered X timeline');
   assert.deepEqual(h.matches, ['https://x.com/*', 'https://twitter.com/*']);
   assert.deepEqual(h.excludes, ['https://x.com/settings/*']);
@@ -63,14 +63,14 @@ console.log(1);`);
 });
 
 test('parseHeader: @source and @version mark the mods TRIF ships', () => {
-  const h = parseHeader('// ==WebMod==\n// @name Plain X\n// @source      TRIF\n// @version     3\n// ==/WebMod==\n');
+  const h = parseHeader('// ==WebMod==\n// @name Detox Timeline\n// @source      TRIF\n// @version     3\n// ==/WebMod==\n');
   assert.equal(h.source, 'trif');
   // Shipped mods say webmods (TRIF's name before 0.2.0) or trif; both count.
   const { isShippedSource } = require('../helper/lib/mods');
   assert.ok(isShippedSource('webmods') && isShippedSource('trif') && isShippedSource('WebMods'));
   assert.ok(!isShippedSource('me') && !isShippedSource(null));
   assert.equal(h.version, '3');
-  const { mod } = buildMod({ site: 'x.com', file: '/s/x.com/plain-x.js', code: '// ==WebMod==\n// @source webmods\n// @version 2\n// ==/WebMod==\n' });
+  const { mod } = buildMod({ site: 'x.com', file: '/s/x.com/detox-timeline.js', code: '// ==WebMod==\n// @source webmods\n// @version 2\n// ==/WebMod==\n' });
   assert.deepEqual([mod.source, mod.version], ['webmods', '2']);
   // Every shipped example says so (the updater only manages those).
   const { PREINSTALLED } = require('../helper/lib/preinstalled');

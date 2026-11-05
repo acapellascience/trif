@@ -16,12 +16,12 @@ const { migrateHome, MARKER } = require('../helper/lib/migrate');
 function oldWorkspace(dir) {
   const w = (rel, text) => { fs.mkdirSync(path.dirname(path.join(dir, rel)), { recursive: true }); fs.writeFileSync(path.join(dir, rel), text); };
   w('sites/x.com/mine.js', '// my mod\n');
-  w('sites/x.com/plain-x.js', '// edited plain x\n');
+  w('sites/x.com/detox-timeline.js', '// edited detox timeline\n');
   w('config.json', '{"autoUpdate":true}\n');
   w('instructions.md', 'talk like a caveman\n');
-  w('preinstalled.json', '{"offered":["x.com/plain-x"]}\n');
+  w('preinstalled.json', '{"offered":["x.com/detox-timeline"]}\n');
   w('held.json', '{}\n');
-  w('.shipped/x.com/plain-x.js', '// shipped\n');
+  w('.shipped/x.com/detox-timeline.js', '// shipped\n');
   w('trash/x.com/old.js', '// deleted\n');
   w('runs/r1.jsonl', '{}\n');
   w('AGENTS.md', 'old guide\n');
@@ -62,7 +62,7 @@ test('migrate: both folders there: merged, ~/.trif wins conflicts, the other cop
   oldWorkspace(path.join(h, '.webmods'));
   const t = path.join(h, '.trif');
   fs.mkdirSync(path.join(t, 'sites', 'x.com'), { recursive: true });
-  fs.writeFileSync(path.join(t, 'sites', 'x.com', 'plain-x.js'), '// plain x edited in .trif\n');
+  fs.writeFileSync(path.join(t, 'sites', 'x.com', 'detox-timeline.js'), '// detox timeline edited in .trif\n');
   fs.writeFileSync(path.join(t, 'sites', 'x.com', 'new.js'), '// only in trif\n');
   fs.writeFileSync(path.join(t, 'instructions.md'), 'talk like a caveman\n'); // identical: no conflict
   fs.writeFileSync(path.join(t, 'AGENTS.md'), 'new guide\n'); // setup's own: no conflict
@@ -70,14 +70,14 @@ test('migrate: both folders there: merged, ~/.trif wins conflicts, the other cop
   assert.equal(m.how, 'merged', JSON.stringify(m));
   assert.equal(read(path.join(t, 'sites', 'x.com', 'mine.js')), '// my mod\n', 'only in .webmods: moved in');
   assert.equal(read(path.join(t, 'sites', 'x.com', 'new.js')), '// only in trif\n');
-  assert.equal(read(path.join(t, 'sites', 'x.com', 'plain-x.js')), '// plain x edited in .trif\n', ".trif's wins");
+  assert.equal(read(path.join(t, 'sites', 'x.com', 'detox-timeline.js')), '// detox timeline edited in .trif\n', ".trif's wins");
   assert.equal(read(path.join(t, 'config.json')), '{"autoUpdate":true}\n');
   assert.equal(read(path.join(t, 'AGENTS.md')), 'new guide\n');
   const kept = fs.readdirSync(t).filter((n) => n.startsWith('old-webmods-'));
   assert.equal(kept.length, 1, 'the conflicting copy is kept');
-  assert.equal(read(path.join(t, kept[0], 'sites', 'x.com', 'plain-x.js')), '// edited plain x\n');
+  assert.equal(read(path.join(t, kept[0], 'sites', 'x.com', 'detox-timeline.js')), '// edited detox timeline\n');
   assert.ok(!fs.existsSync(path.join(t, kept[0], 'instructions.md')), 'identical files are not kept twice');
-  assert.match(m.notes.join('\n'), /sites\/x\.com\/plain-x\.js/);
+  assert.match(m.notes.join('\n'), /sites\/x\.com\/detox-timeline\.js/);
   assert.ok(isLink(path.join(h, '.webmods')));
   assert.equal(migrateHome({ homedir: h }).how, 'already');
 });

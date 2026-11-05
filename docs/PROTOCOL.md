@@ -66,7 +66,7 @@ dependencies, no build step.**
    `preinstalled.json`, `origins.json`, `active-runs/`, `update.json`, `trash/`, `.shipped/`,
    `instructions.md`): run sandboxes keep them read-only. `readConfig` still reads a workspace
    `config.json` until it's moved. `trif doctor` warns about anything private left in the workspace.
-4. **Examples** (`examples/sites/<site>/<mod>.js`): ready-made mods (Timeline Detox, `x.com/detox-timeline`, first). Setup copies them
+4. **Examples** (`examples/sites/<site>/<mod>.js`): ready-made mods (Detox Timeline, `x.com/detox-timeline`, first). Setup copies them
    into a new workspace (see "Native host installation") and later setups keep them up to date (see
    "Updates to shipped mods"); `trif install-example <site>/<mod>` copies one in by hand.
 
@@ -89,7 +89,7 @@ patch `fetch`/`XMLHttpRequest`, read React state, etc.). An optional header sets
 
 ```js
 // ==WebMod==
-// @name        Timeline Detox
+// @name        Detox Timeline
 // @description Following-only, filtered X timeline
 // @match       https://x.com/*
 // @match       https://twitter.com/*
@@ -569,7 +569,7 @@ builds a shorter report without it; `--open` opens the form with it filled in.
 
 ## Updates to shipped mods
 
-`helper/lib/preinstalled.js`. The preinstalled mods get fixes in later TRIF versions (Timeline Detox when X
+`helper/lib/preinstalled.js`. The preinstalled mods get fixes in later TRIF versions (Detox Timeline when X
 changes). Every setup, which is also how an update installs, brings them to the user's copy without ever
 overwriting the user's own changes. Only examples whose header says `@source webmods` and that are in
 `PREINSTALLED` are managed.

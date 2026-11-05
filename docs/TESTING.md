@@ -67,9 +67,9 @@ Per browser, a **fresh** scenario, and an **upgrade** scenario per `--upgrade-fr
      and the window count as they were. Headless Chrome gets
      `--screen-info={0,0 2560x1440}`: its default 800x600 screen is smaller than the windows, which puts
      the copy window under the user's, where Chrome stops drawing it.
-4. **Timeline Detox**: the real `examples/sites/x.com/detox-timeline.js` on `https://x.com:<port>/home`, served
+4. **Detox Timeline**: the real `examples/sites/x.com/detox-timeline.js` on `https://x.com:<port>/home`, served
    locally (the browser resolves x.com to 127.0.0.1 and accepts a self-signed certificate): a page that
-   fetches and XHRs a saved `HomeLatestTimeline` response, as X does. Checks Timeline Detox keeps only the
+   fetches and XHRs a saved `HomeLatestTimeline` response, as X does. Checks Detox Timeline keeps only the
    mutuals' plain posts and the cursor, rewrites the requests to Recent, and logs no mod errors. Then the
    panel on x.com lists the shipped mods (and, upgrading, offers the edited mod's new version). Then
    what's in the way, in colour, on the site's page, the gate and the landing page: the agent not logged
@@ -174,9 +174,9 @@ what it leaves, update its probe.
   3. Click the toolbar button: the panel window opens and follows the window's tabs.
   4. On a test page, enable TRIF from the panel; write a small mod (or ask the agent for one); it runs
      after reload; switch it off and on; switch the site off.
-  5. x.com: Timeline Detox filters the timeline; the Filters menu works.
+  5. x.com: Detox Timeline filters the timeline; the Filters menu works.
   6. Quit Safari, reopen: allow unsigned extensions again; the panel reconnects (the bridge kept running).
-- **Timeline Detox on a real, logged-in timeline** (X changes its data; the suite uses a saved response), and
+- **Detox Timeline on a real, logged-in timeline** (X changes its data; the suite uses a saved response), and
   the other shipped mods on the real Google, Amazon and Instagram.
 - **Look and feel**: layout, dark mode, narrow panels. The screenshots help; a person decides.
 - The Chrome Web Store / signed Firefox add-on install and update paths, and `trif update` from a

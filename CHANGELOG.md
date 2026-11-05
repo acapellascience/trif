@@ -63,7 +63,7 @@ needs a section here for the version it releases.
   where other programs could read it. Your agent can read your skill folders (read only), but never
   TRIF's settings, logs or other sites' screenshots, and one chat can't widen the next one's limits.
   `trif screenshot --copy` won't reload one-time links, and checks where the copy ends up.
-- **The mods that come with TRIF have new names.** Plain X is now **Timeline Detox**; on Instagram,
+- **The mods that come with TRIF have new names.** Plain X is now **Detox Timeline**; on Instagram,
   **Only Following** and **Hide AI**. On Google, four mods are now two: **AI Banisher** (no AI Overview,
   AI Mode or Gemini promo) and **Just Results** (no sponsored results or extra sections). Each is on if
   either of the two it replaces was. If you changed one of those, yours stays as it is.
@@ -84,16 +84,16 @@ needs a section here for the version it releases.
   (no browser data, keys or documents), can't read your API keys, other chats' logs or other sites'
   screenshots, and has no internet access of its own, so a web page it reads can't talk it into
   sending your data anywhere. Claude Code 2.1.285 or newer is needed.
-- **The mods that come with WebMods get fixes.** Plain X and the Google, Amazon and Instagram mods now
+- **The mods that come with WebMods get fixes.** Detox Timeline and the Google, Amazon and Instagram mods now
   update with WebMods. If you never changed one, it just gets the new version. If you (or your agent)
   changed it, yours is left alone and the side panel offers the new version on that mod: use it (yours
   goes to the trash, with Undo), keep yours, or have your agent merge the two, keeping your changes.
   Each says which version it is ("from WebMods, version 1").
 - An agent working on one site can no longer see which other sites you have open, or switch on, from
   its own site, a mod that runs everywhere.
-- Plain X no longer flashes X's own tabs and narrow timeline for a moment when a page loads or you go
+- Detox Timeline no longer flashes X's own tabs and narrow timeline for a moment when a page loads or you go
   back to Home.
-- If X changes how its timeline data looks, Plain X shows the timeline unfiltered rather than an empty
+- If X changes how its timeline data looks, Detox Timeline shows the timeline unfiltered rather than an empty
   one, and some rarer X responses no longer break.
 - Two browsers installing an update at the same moment no longer trip over each other, and installing an
   update from Safari no longer leaves WebMods stopped in Safari until you log in again.
@@ -117,7 +117,7 @@ needs a section here for the version it releases.
 - The model picker shows the models your agent offers: for Codex, the ones your account can use.
 - Chrome setup is easier: setup opens the extension's folder in Finder, ready to drag onto
   chrome://extensions, and Chrome no longer needs a restart.
-- Plain X starts with every filter off, for the plainest timeline. Its logo follows X's light or dark
+- Detox Timeline starts with every filter off, for the plainest timeline. Its logo follows X's light or dark
   theme, and menus on the search page no longer hide behind it.
 - New commands for agents and terminals: `webmods update` and `webmods report`.
 

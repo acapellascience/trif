@@ -35,11 +35,11 @@ test('parseReport: needs a description, checks lengths and the email, ignores bo
 
 test('reportEmail: a readable subject and body, replies go to the reporter', async () => {
   const [, { reportEmail }] = await load();
-  const m = reportEmail({ what: 'Plain X shows\nnothing at all since this morning, and more words to make it long', site: 'x.com', email: 'a@b.co', details: 'TRIF 0.1.1' },
+  const m = reportEmail({ what: 'Detox Timeline shows\nnothing at all since this morning, and more words to make it long', site: 'x.com', email: 'a@b.co', details: 'TRIF 0.1.1' },
     { country: 'CA', userAgent: 'Firefox/159', at: '2026-11-01T00:00:00Z' });
-  assert.equal(m.subject, 'TRIF report (x.com): Plain X shows nothing at all since this morning, and more w…');
+  assert.equal(m.subject, 'TRIF report (x.com): Detox Timeline shows nothing at all since this morning, and…');
   assert.equal(m.replyTo, 'a@b.co');
-  for (const want of ['What went wrong\nPlain X shows\nnothing', 'Site: x.com', 'Reply to: a@b.co', 'Sent: 2026-11-01T00:00:00Z from CA', 'Browser: Firefox/159', 'Details from TRIF\nTRIF 0.1.1']) {
+  for (const want of ['What went wrong\nDetox Timeline shows\nnothing', 'Site: x.com', 'Reply to: a@b.co', 'Sent: 2026-11-01T00:00:00Z from CA', 'Browser: Firefox/159', 'Details from TRIF\nTRIF 0.1.1']) {
     assert.ok(m.text.includes(want), want);
   }
   assert.equal(reportEmail({ what: 'x y z', site: '', email: '', details: '' }).replyTo, null);

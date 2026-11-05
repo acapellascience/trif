@@ -972,7 +972,7 @@ test('background: install opens onboarding and sets the side panel to open on ac
 });
 
 test('background: panel status includes helper state and mods with match patterns', async () => {
-  const mods = [mod('x.com/plain-x', { name: 'Plain X', matches: ['*://x.com/*'], excludes: ['*://x.com/settings*'] })];
+  const mods = [mod('x.com/detox-timeline', { name: 'Detox Timeline', matches: ['*://x.com/*'], excludes: ['*://x.com/settings*'] })];
   const bg = await loadBackground({ storage: { mods } });
   try {
     const panel = bg.connectPanel();
@@ -987,7 +987,7 @@ test('background: panel status includes helper state and mods with match pattern
     assert.strictEqual(r.result.userScripts, true);
     const [m] = r.result.mods;
     assert.deepStrictEqual([m.id, m.name, m.file, m.matches, m.excludes, m.registered],
-      ['x.com/plain-x', 'Plain X', '/w/sites/x.com/plain-x.js', ['*://x.com/*'], ['*://x.com/settings*'], true]);
+      ['x.com/detox-timeline', 'Detox Timeline', '/w/sites/x.com/detox-timeline.js', ['*://x.com/*'], ['*://x.com/settings*'], true]);
     assert.deepStrictEqual(r.result.runs, []);
   } finally { bg.restore(); }
 });
@@ -1986,34 +1986,34 @@ test('background: deleting from the panel leaves a chat line with Undo; restorin
 });
 
 test('background: a shipped mod\'s new version: status carries it; use it (chat line with Undo), keep mine, merge as a run', async () => {
-  const mods = [mod('x.com/plain-x', { source: 'trif', version: '1', update: { version: '2', from: '1', modified: true } })];
+  const mods = [mod('x.com/detox-timeline', { source: 'trif', version: '1', update: { version: '2', from: '1', modified: true } })];
   const bg = await loadBackground({ storage: { mods } });
   try {
     bg.native.emit({ type: 'mods', mods });
     await settle(20);
     const panel = bg.connectPanel();
     const st = (await panel.ask({ type: 'status' })).result;
-    const m = st.mods.find((x) => x.id === 'x.com/plain-x');
+    const m = st.mods.find((x) => x.id === 'x.com/detox-timeline');
     assert.deepStrictEqual([m.source, m.version, m.update], ['trif', '1', { version: '2', from: '1', modified: true }]);
 
-    let p = panel.ask({ type: 'mod.update', id: 'x.com/plain-x', choice: 'new', site: 'x.com' });
-    let req = await answerNative(bg.native, 'mod.update', { id: 'x.com/plain-x', choice: 'new', version: '2', trashed: true });
-    assert.deepStrictEqual(req.args, { id: 'x.com/plain-x', choice: 'new' });
+    let p = panel.ask({ type: 'mod.update', id: 'x.com/detox-timeline', choice: 'new', site: 'x.com' });
+    let req = await answerNative(bg.native, 'mod.update', { id: 'x.com/detox-timeline', choice: 'new', version: '2', trashed: true });
+    assert.deepStrictEqual(req.args, { id: 'x.com/detox-timeline', choice: 'new' });
     assert.strictEqual((await p).ok, true);
     await settle(10);
     assert.deepStrictEqual(bg.store['chat:x.com'].messages.map((x) => [x.role, x.text, x.undo]),
-      [['mod', 'plain-x.js is now version 2 from TRIF; yours is in the trash.', 'x.com/plain-x']]);
+      [['mod', 'detox-timeline.js is now version 2 from TRIF; yours is in the trash.', 'x.com/detox-timeline']]);
 
-    p = panel.ask({ type: 'mod.update', id: 'x.com/plain-x', choice: 'mine', site: 'x.com' });
-    req = await answerNative(bg.native, 'mod.update', { id: 'x.com/plain-x', choice: 'mine', version: '2' });
-    assert.deepStrictEqual(req.args, { id: 'x.com/plain-x', choice: 'mine' });
+    p = panel.ask({ type: 'mod.update', id: 'x.com/detox-timeline', choice: 'mine', site: 'x.com' });
+    req = await answerNative(bg.native, 'mod.update', { id: 'x.com/detox-timeline', choice: 'mine', version: '2' });
+    assert.deepStrictEqual(req.args, { id: 'x.com/detox-timeline', choice: 'mine' });
     await p;
     await settle(10);
     assert.strictEqual(bg.store['chat:x.com'].messages.length, 1, 'keeping mine adds no line');
 
-    p = panel.ask({ type: 'agent.start', site: 'x.com', tabId: 12, url: 'https://x.com/home', prompt: 'Merge the new version', merge: 'x.com/plain-x' });
+    p = panel.ask({ type: 'agent.start', site: 'x.com', tabId: 12, url: 'https://x.com/home', prompt: 'Merge the new version', merge: 'x.com/detox-timeline' });
     req = await answerNative(bg.native, 'agent.start', { runId: 'r9' });
-    assert.strictEqual(req.args.merge, 'x.com/plain-x');
+    assert.strictEqual(req.args.merge, 'x.com/detox-timeline');
     await p;
   } finally { bg.restore(); }
 });

@@ -397,19 +397,19 @@ test('install-example copies from the examples folder', async () => {
   const home = tempDir();
   const examples = tempDir();
   fs.mkdirSync(path.join(examples, 'x.com'));
-  fs.writeFileSync(path.join(examples, 'x.com', 'plain-x.js'), '// example\n');
+  fs.writeFileSync(path.join(examples, 'x.com', 'detox-timeline.js'), '// example\n');
   const env = { TRIF_EXAMPLES_DIR: examples };
   let r = await runCli(['install-example'], { home, env });
-  assert.match(r.stdout, /x\.com\/plain-x/);
-  r = await runCli(['install-example', 'x.com/plain-x'], { home, env });
+  assert.match(r.stdout, /x\.com\/detox-timeline/);
+  r = await runCli(['install-example', 'x.com/detox-timeline'], { home, env });
   assert.equal(r.code, 0, r.stderr);
-  const dest = path.join(home, 'sites', 'x.com', 'plain-x.js');
+  const dest = path.join(home, 'sites', 'x.com', 'detox-timeline.js');
   assert.equal(fs.readFileSync(dest, 'utf8'), '// example\n');
-  assert.equal((await runCli(['install-example', 'x.com/plain-x'], { home, env })).code, 1);
-  assert.equal((await runCli(['install-example', 'x.com/plain-x', '--force'], { home, env })).code, 0);
+  assert.equal((await runCli(['install-example', 'x.com/detox-timeline'], { home, env })).code, 1);
+  assert.equal((await runCli(['install-example', 'x.com/detox-timeline', '--force'], { home, env })).code, 0);
   r = await runCli(['install-example', 'x.com/nope'], { home, env });
   assert.equal(r.code, 1);
-  assert.match(r.stderr, /available: x\.com\/plain-x/);
+  assert.match(r.stderr, /available: x\.com\/detox-timeline/);
 });
 
 test('install-example finds the repo examples by default', async () => {

@@ -139,7 +139,7 @@ class Scenario {
     try {
       // (The helper keeps an agent's login state for 30 s; the page asks every 5.)
       const x = await this.waitSetup('all ticked', (s) => s.steps.join() === 'done,done,done,done,now' && s.title === 'TRIF is ready', 60000);
-      // Try it: a button for each site where a shipped mod is on and TRIF is on for the site (x.com's Plain X).
+      // Try it: a button for each site where a shipped mod is on and TRIF is on for the site (x.com's Detox Timeline).
       if (x.sub !== 'Open any website, click the TRIF icon, and ask for a change.' || !x.buttons.includes('Open x.com')
         || !x.buttons.every((b) => /^Open [\w-]+(\.[\w-]+)+$/.test(b))) throw new Error(JSON.stringify(x));
       await this.shot(this.control, 'setup-page-done');
@@ -663,8 +663,8 @@ class Scenario {
       await this.waitPanel('the panel back on 127.0.0.1', (x) => x.site === '127.0.0.1');
     });
 
-    // ---- Timeline Detox (x.com/detox-timeline) against the X stand-in
-    await r.check('Timeline Detox filters a saved X home timeline (fetch and XHR)', async () => {
+    // ---- Detox Timeline (x.com/detox-timeline) against the X stand-in
+    await r.check('Detox Timeline filters a saved X home timeline (fetch and XHR)', async () => {
       const xUrl = `https://x.com:${tlsPort}/home`;
       const xtab = await this.ext(`async (url, windowId) => (await chrome.tabs.create({ windowId, url, active: true })).id`, [xUrl, win.windowId]);
       this.xTab = xtab;
@@ -678,7 +678,7 @@ class Scenario {
       });
       await this.shot(ctx, 'detox-timeline');
       if (st.error) throw new Error(`the page failed: ${st.error}`);
-      if (!st.guard) throw new Error('Timeline Detox didn\'t run (no window.__dmGuard)');
+      if (!st.guard) throw new Error('Detox Timeline didn\'t run (no window.__dmGuard)');
       const want = JSON.stringify(timeline.kept);
       if (JSON.stringify(st.fetch) !== want) throw new Error(`fetch got ${JSON.stringify(st.fetch)}, want ${want}`);
       if (JSON.stringify(st.xhr) !== want) throw new Error(`XHR got ${JSON.stringify(st.xhr)}, want ${want}`);

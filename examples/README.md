@@ -24,7 +24,7 @@ To turn one off, use its switch in the side panel (or `trif disable x.com/detox-
 delete `~/.trif/sites/<site>/<mod>.js`.
 
 Each example is a single plain JavaScript file with a `// ==WebMod==` header; read it to see how it
-works, or ask your coding agent to change it. Timeline Detox's tests live in `tests/detox-timeline.test.js`
+works, or ask your coding agent to change it. Detox Timeline's tests live in `tests/detox-timeline.test.js`
 (`node --test tests/`).
 
 Their headers say `// @source webmods` and `// @version <n>`: that marks them as shipped by TRIF.

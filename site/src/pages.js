@@ -105,6 +105,9 @@ const DEMO_STYLE = `
 .demo-tab:hover { color: var(--accent); }
 .demo-tab[hidden] { display: none; }
 .demo-under { display: none; }
+/* the phone keyboard is up for the demo's message box: the page itself can't scroll meanwhile (demo.js:
+   keyboardUp), or the phone moves it, and the sheet and its text cursor with it, a frame apart */
+html.demo-kb, html.demo-kb body { overflow: hidden !important; overscroll-behavior: none !important; }
 .demo-panel { position: fixed; z-index: 2147483647; inset: 0 0 0 auto; width: 360px; height: auto; max-width: 100%; max-height: none;
   margin: 0; padding: 0; border: 0; border-left: 1px solid var(--line); background: var(--card); color: var(--fg);
   font: 13px/1.4 -apple-system, system-ui, "Segoe UI", sans-serif; display: none; flex-direction: column; overflow: hidden; }

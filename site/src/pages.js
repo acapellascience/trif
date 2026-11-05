@@ -86,7 +86,8 @@ main.home { max-width: 920px; padding-top: 56px; display: grid; gap: 56px; }
 .two code { background: var(--card); border: 1px solid var(--line); padding: 1px 6px; border-radius: 5px; }
 footer { max-width: 920px; margin: 0 auto; padding: 22px 16px 40px; border-top: 1px solid var(--line); color: var(--muted); font-size: 14px; display: flex; gap: 18px; flex-wrap: wrap; }
 footer a { color: var(--muted); }
-@media (max-width: 720px) { .two { grid-template-columns: 1fr; } }
+/* (on a phone: less space between the hero and What you need, and less before the footer) */
+@media (max-width: 720px) { .two { grid-template-columns: 1fr; } main.home { gap: 20px; padding-bottom: 36px; } }
 `;
 
 // The demo: a tab on the right edge, shown by demo.js (site/demo/tab.js), opens the real side panel docked
@@ -165,7 +166,7 @@ export function homePage({ head = '', tail = '' } = {}) {
 </section>`, {
     style: HOME_STYLE + DEMO_STYLE,
     head,
-    after: `\n<footer><a href="${REPO}" target="_blank" rel="noopener">GitHub</a><a href="/report" target="_blank" rel="noopener">Report a problem</a><a href="/windows" target="_blank" rel="noopener">Windows waitlist</a><a href="${REPO}/blob/main/store/PRIVACY.md" target="_blank" rel="noopener">Privacy</a></footer>` +
+    after: `\n<footer><a href="${REPO}" target="_blank" rel="noopener">GitHub</a><a href="/report" target="_blank" rel="noopener">Report a problem</a><a href="/windows" target="_blank" rel="noopener">Windows</a><a href="${REPO}/blob/main/store/PRIVACY.md" target="_blank" rel="noopener">Privacy</a></footer>` +
       '\n<button type="button" class="demo-tab" hidden>Try the demo</button>\n<script src="/demo.js" defer></script>' + tail,
   }).replace('<main>', '<main class="home">');
 }

@@ -180,6 +180,19 @@
   // through the defaultOrder the real extension gets from the helper; the visitor's own order (modOrder)
   // lives in `store`.
   store.set('defaultOrder', { [SITE]: (DEMO.order || []).slice() });
+  // Testing shortcut (tab.js: ?skip=end or ?skip=win): the end of the demo, every chat played and every
+  // mod they make on; then the page loads with them all.
+  let skipTo = null;
+  try { skipTo = sessionStorage.getItem('trif-demo-skip'); } catch {}
+  if (skipTo === 'end' || skipTo === 'win') {
+    const made = new Set(DEMO.chats.flatMap((c) => c.mods));
+    state.mods = DEMO.mods.filter((m) => made.has(m.slug)).map((m) => ({ ...m }));
+    store.set('disabled', {});
+    state.replayed = new Set(DEMO.chats.map((c) => c.id));
+    state.sent = true; state.active = null;
+    try { if (skipTo === 'win') sessionStorage.setItem('trif-demo-skip', 'win-load'); else sessionStorage.removeItem('trif-demo-skip'); } catch {}
+    later(() => loadPage(), 300);
+  }
   restoring = false;
   persist();
 

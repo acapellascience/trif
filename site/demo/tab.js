@@ -76,6 +76,36 @@
   }
   const remeasure = () => { if (measure()) dispatchEvent(new Event('resize')); };
 
+  // Testing shortcuts: /?skip=end jumps to the end of the demo (every chat played, every mod on, the panel
+  // open, as a fresh tab would be after it), /?skip=win also beats the space game for you (You Win). The
+  // panel does the rest (shim.js: trif-demo-skip), and the page reloads with every mod.
+  const SKIP = 'trif-demo-skip';
+  try {
+    const p = new URLSearchParams(location.search), skip = p.get('skip');
+    if (skip === 'end' || skip === 'win') {
+      for (const k of Object.keys(sessionStorage)) if (k.startsWith('trif-demo') || k === 'trif.muted') sessionStorage.removeItem(k);
+      sessionStorage.setItem(SKIP, skip);
+      sessionStorage.setItem(OPEN, '1');
+      p.delete('skip');
+      history.replaceState(history.state, '', `${location.pathname}${p.toString() ? `?${p}` : ''}${location.hash}`);
+    } else if (sessionStorage.getItem(SKIP) === 'win-load') {
+      // (back with every mod: the robot destroyed and ROBOT DESTROYED shot away, through Space Shooter's
+      // test hook, which only listens with #tss-test in the address)
+      sessionStorage.removeItem(SKIP);
+      addEventListener('load', () => setTimeout(() => {
+        try {
+          const hash = location.hash, at = `${location.pathname}${location.search}`;
+          history.replaceState(history.state, '', `${at}#tss-test`);
+          dispatchEvent(new Event('tss-test-kill'));
+          setTimeout(() => {
+            document.querySelectorAll('#tss-banner .tss-w').forEach((w) => w.setAttribute('data-tss-dead', ''));
+            history.replaceState(history.state, '', `${at}${hash}`);
+          }, 1500);
+        } catch {}
+      }, 2500));
+    }
+  } catch {}
+
   // Back on the plain home page (no ?mods=: its address typed again, a link back here) with demo mods
   // switched on earlier in this tab: the page runs only the mods its address names, so ask for it again with
   // the ones the panel says are on (shim.js keeps its switches in this tab's sessionStorage), as switching

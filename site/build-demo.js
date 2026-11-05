@@ -66,6 +66,7 @@ export function demoModule() {
     if (!CHAT_ORDER.includes(c.id)) throw new Error(`chat ${c.id} isn't in CHAT_ORDER`);
     for (const s of c.mods) if (!slugs.has(s)) throw new Error(`chat ${c.id}: no mod ${s}`);
     if (c.focus !== undefined && !c.mods.includes(c.focus)) throw new Error(`chat ${c.id}: focus ${c.focus} isn't one of its mods`);
+    if (c.tour !== undefined && !(Array.isArray(c.tour) && c.tour.every((s) => c.mods.includes(s)))) throw new Error(`chat ${c.id}: tour is a list of its mods`);
     if (c.desk !== undefined && typeof c.desk !== 'boolean') throw new Error(`chat ${c.id}: desk is true or false`);
     if (c.touch !== undefined) { // its touchscreen version (shim.js): a prompt (or the same one), and texts by message index
       if (c.touch.prompt !== undefined && (typeof c.touch.prompt !== 'string' || !c.touch.prompt.trim())) throw new Error(`chat ${c.id}: touch.prompt`);

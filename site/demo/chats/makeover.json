@@ -106,5 +106,11 @@
   "texts": {
    "17": "Four new mods: the “Free and open source” line is sticker badges, **What you need** is a checklist, **Yours, on your computer** is a terminal, and the footer is an LED sign."
   }
- }
+ },
+ "tour": [
+  "stickers",
+  "checklist",
+  "terminal",
+  "led"
+ ]
 }

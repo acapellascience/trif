@@ -194,10 +194,10 @@
    * reloading (sound keeps playing, nothing flashes). `made`: the mod a chat just made (tab.js shows the
    * part of the page it changes).
    */
-  function loadPage(made, live = false) {
+  function loadPage(made, live = false, tour = null) {
     const mods = siteOn() ? state.mods.filter((m) => !disabled()[m.id]).map((m) => m.slug) : [];
     persist();
-    if (window.parent !== window) window.parent.postMessage({ type: 'trif-demo:load', mods, made: typeof made === 'string' ? made : null, live: live === true }, location.origin);
+    if (window.parent !== window) window.parent.postMessage({ type: 'trif-demo:load', mods, made: typeof made === 'string' ? made : null, live: live === true, tour: Array.isArray(tour) ? tour : null }, location.origin);
   }
 
   async function status() {
@@ -388,7 +388,8 @@
       state.replayed.add(run.recording.id);
       const mods = run.recording.mods; // (`focus`: the one to show, on a phone, of a chat that makes several)
       if (mods.length) { state.justAdded = mods[mods.length - 1]; persist(); }
-      if (mods.length) later(() => loadPage(run.recording.focus || mods[mods.length - 1], true), 700); // (a chat with none, the wrap-up: nothing to load)
+      // (`tour`: a chat that makes several, on a phone, shows each in turn)
+      if (mods.length) later(() => loadPage(run.recording.focus || mods[mods.length - 1], true, run.recording.tour || null), 700); // (a chat with none, the wrap-up: nothing to load)
     }
     ui.finished(run); // (after it's counted as played: the next prompt is the next one)
   }

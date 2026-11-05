@@ -346,7 +346,8 @@
       // (mods that list what's there, like Terminal Box, hear about the new ones)
       dispatchEvent(new CustomEvent('trif-demo-mods', { detail: { mods: names.slice() } }));
       if (made === 'shooter' && phone() && !minimized()) minimize(true); // (a game: the sheet out of the ship's way)
-      focusOn(made);
+      const tour = (Array.isArray(d.tour) ? d.tour : []).filter((n) => ok(n) && FOCUS_ON[n]);
+      if (tour.length > 1 && phone()) showEach(tour); else focusOn(made);
       return;
     }
     remember(true);
@@ -379,6 +380,20 @@
     terminal: () => document.querySelector('[data-tb]') || heading('yours, on your computer'),
     led: () => document.querySelector('footer'),
   };
+  // A chat that made several mods (the makeover): on a phone the page goes to each one's part in turn, a
+  // second for each (the scroll and a moment to see it), in the page's order.
+  function showEach(slugs) {
+    let i = 0;
+    const next = () => {
+      if (i >= slugs.length) return;
+      try {
+        const el = FOCUS_ON[slugs[i++]]();
+        if (el) scrollBy({ top: el.getBoundingClientRect().top - 12, behavior: 'smooth' });
+      } catch {}
+      setTimeout(next, 1000);
+    };
+    setTimeout(next, 700); // (once the mods have had their moment to change the page)
+  }
   function showMade() {
     let slug = '';
     try { slug = sessionStorage.getItem(FOCUS) || ''; sessionStorage.removeItem(FOCUS); } catch {}

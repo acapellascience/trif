@@ -86,7 +86,8 @@ main.home { max-width: 920px; padding-top: 56px; display: grid; gap: 56px; }
 .two code { background: var(--card); border: 1px solid var(--line); padding: 1px 6px; border-radius: 5px; }
 footer { max-width: 920px; margin: 0 auto; padding: 22px 16px 40px; border-top: 1px solid var(--line); color: var(--muted); font-size: 14px; display: flex; gap: 18px; flex-wrap: wrap; }
 footer a { color: var(--muted); }
-@media (max-width: 720px) { .two { grid-template-columns: 1fr; } }
+/* (on a phone: less space between the hero and What you need, and under the page before the footer) */
+@media (max-width: 720px) { .two { grid-template-columns: 1fr; } main.home { gap: 28px; padding-bottom: 24px; } }
 `;
 
 // The demo: a tab on the right edge, shown by demo.js (site/demo/tab.js), opens the real side panel docked

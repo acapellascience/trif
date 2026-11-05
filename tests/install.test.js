@@ -486,11 +486,16 @@ test('the other sites\' Rainbow Raves aren\'t shipped in 0.2.0 (X\'s is), and ar
 });
 
 
-test('TRIF ships no mods for its own home page (timsrobot.com is like any other website), and no default order', () => {
+test('TRIF ships no mods for its own home page (timsrobot.com is like any other website), and no default order for it', () => {
   const { DEFAULT_ORDER } = require('../helper/lib/preinstalled');
   assert.ok(!PREINSTALLED.some((p) => p.id.startsWith('timsrobot.com/')));
   assert.ok(!SITES_ON.some((s) => /timsrobot/.test(s)));
-  assert.deepStrictEqual(DEFAULT_ORDER, {});
+  assert.ok(!DEFAULT_ORDER['timsrobot.com']);
+  // Each default order lists shipped mods of its own site, each once.
+  for (const [site, ids] of Object.entries(DEFAULT_ORDER)) {
+    assert.deepStrictEqual([...new Set(ids)], ids, site);
+    for (const id of ids) assert.ok(id.startsWith(`${site}/`) && PREINSTALLED.some((p) => p.id === id), `${site}: ${id}`);
+  }
   assert.ok(!fs.existsSync(path.join(REPO, 'examples', 'sites', 'timsrobot.com')), 'the demo\'s mods live in site/demo/mods');
 });
 

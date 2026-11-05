@@ -74,8 +74,10 @@ const PREINSTALLED = [
 // The order the side panel lists a site's shipped mods in until the user drags them into their own (display
 // only: mods run in their usual order). By site, as the extension's scopeFor gives it; the helper sends it
 // with every mods message (`defaultOrder`), and extension/lib.js orderMods puts mods it doesn't list after.
-// (None at the moment: each site's few shipped mods list in the order they always did.)
-const DEFAULT_ORDER = {};
+// (0.2.2: X's, in Tim's order. The other sites' few shipped mods list in the order they always did.)
+const DEFAULT_ORDER = {
+  'x.com': ['x.com/plain-x', 'x.com/follow-status', 'x.com/punk-fonts', 'x.com/space-shooter', 'x.com/rainbow-rave'],
+};
 
 // Shipped mods folded into another one (`into`, from its @version `since`), so no longer shipped
 // (0.2.0: AI Banisher and Just Results). retireShippedMods, below, handles the copies users have.

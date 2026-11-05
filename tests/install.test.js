@@ -295,46 +295,113 @@ test('installApp: never touches another live install\'s folders or swaps while i
 
 test('Safari bridge agent: restarted in place when loaded, loaded afresh when changed, later and detached from inside the bridge', () => {
   const calls = [];
+  const sleeps = [];
+  const sleep = (ms) => sleeps.push(ms);
   const uid = process.getuid();
   const target = `gui/${uid}/com.timsrobot.trif.safari-bridge`;
   const legacyTarget = `gui/${uid}/dev.webmods.safari-bridge`;
-  // loaded: whether the agent is loaded; legacy: whether the one from before 0.2.0 is.
-  const fake = (loaded, fail, legacy = false) => (args) => {
-    calls.push(args);
-    if (args[0] === 'print') return { status: (args[1] === legacyTarget ? legacy : loaded) ? 0 : 113 };
-    return fail === args[0] ? { status: 5, stderr: 'Bootstrap failed: 5: Input/output error\n' } : { status: 0 };
+  // loaded: whether the agent is loaded; legacy: whether the one from before 0.2.0 is. A bootout unloads
+  // its service (even one that reports failing) unless lingers says how many prints still find it.
+  const fake = (loaded, fail, legacy = false, lingers = 0) => {
+    const up = { [target]: loaded, [legacyTarget]: legacy };
+    let left = 0;
+    return (args) => {
+      calls.push(args);
+      if (args[0] === 'print') {
+        if (up[args[1]] && left > 0 && --left === 0) up[args[1]] = false;
+        return { status: up[args[1]] ? 0 : 113 };
+      }
+      if (args[0] === 'bootout') { if (lingers) left = lingers; else up[args[1]] = false; }
+      return fail === args[0] ? { status: 5, stderr: 'Bootstrap failed: 5: Input/output error\n' } : { status: 0 };
+    };
   };
   const prints = [['print', target], ['print', legacyTarget]];
+  const bootstrap = ['bootstrap', `gui/${uid}`, '/p.plist'];
 
-  assert.deepEqual(loadSafariAgent('/p.plist', { changed: false, env: {}, run: fake(true) }), { error: null, later: false });
+  assert.deepEqual(loadSafariAgent('/p.plist', { changed: false, env: {}, run: fake(true), sleep }), { error: null, later: false });
   assert.deepEqual(calls.splice(0), [...prints, ['kickstart', '-k', target]]);
 
-  loadSafariAgent('/p.plist', { changed: true, env: {}, run: fake(true) });
-  assert.deepEqual(calls.splice(0), [...prints, ['bootout', target], ['bootstrap', `gui/${uid}`, '/p.plist']]);
+  // After a bootout, the bootstrap waits until launchctl no longer finds the service.
+  loadSafariAgent('/p.plist', { changed: true, env: {}, run: fake(true), sleep });
+  assert.deepEqual(calls.splice(0), [...prints, ['bootout', target], ['print', target], bootstrap]);
+  assert.deepEqual(sleeps.splice(0), []);
+  loadSafariAgent('/p.plist', { changed: true, env: {}, run: fake(true, null, false, 3), sleep });
+  assert.deepEqual(calls.splice(0), [...prints, ['bootout', target], ['print', target], ['print', target], ['print', target], bootstrap]);
+  assert.deepEqual(sleeps.splice(0), [200, 200]);
+  // ... but not forever: about 5 s, then the bootstrap is tried anyway.
+  assert.deepEqual(loadSafariAgent('/p.plist', { changed: true, env: {}, run: fake(true, null, false, 1000), sleep }), { error: null, later: false });
+  assert.equal(sleeps.splice(0).reduce((a, b) => a + b, 0), 5000);
+  assert.deepEqual(calls.splice(0).at(-1), bootstrap);
 
-  loadSafariAgent('/p.plist', { changed: false, env: {}, run: fake(false) });
-  assert.deepEqual(calls.splice(0), [...prints, ['bootstrap', `gui/${uid}`, '/p.plist']]);
+  loadSafariAgent('/p.plist', { changed: false, env: {}, run: fake(false), sleep });
+  assert.deepEqual(calls.splice(0), [...prints, bootstrap]);
 
-  assert.match(loadSafariAgent('/p.plist', { env: {}, run: fake(false, 'bootstrap') }).error, /Input\/output error/);
-  calls.splice(0);
+  // A bootstrap failing with error 5 (it raced the bootout) is tried again a second later ...
+  {
+    let n = 0;
+    const base = fake(true);
+    const flaky = (args) => (args[0] === 'bootstrap' && ++n === 1 ? (calls.push(args), { status: 5, stderr: 'Bootstrap failed: 5: Input/output error\n' }) : base(args));
+    assert.deepEqual(loadSafariAgent('/p.plist', { changed: true, env: {}, run: flaky, sleep }), { error: null, later: false });
+    assert.deepEqual(calls.splice(0), [...prints, ['bootout', target], ['print', target], bootstrap, bootstrap]);
+    assert.deepEqual(sleeps.splice(0), [1000]);
+  }
+  // ... up to 5 tries in all, then the error is reported.
+  assert.match(loadSafariAgent('/p.plist', { env: {}, run: fake(false, 'bootstrap'), sleep }).error, /Bootstrap failed: 5: Input\/output error/);
+  assert.equal(calls.splice(0).filter((a) => a[0] === 'bootstrap').length, 5);
+  assert.deepEqual(sleeps.splice(0), [1000, 1000, 1000, 1000]);
+  // Another error isn't retried.
+  const r122 = loadSafariAgent('/p.plist', { env: {}, sleep, run: (args) => (calls.push(args), args[0] === 'print' ? { status: 113 } : { status: 122, stderr: 'Bootstrap failed: 122: Path had bad ownership/permissions\n' }) });
+  assert.match(r122.error, /122/);
+  assert.equal(calls.splice(0).filter((a) => a[0] === 'bootstrap').length, 1);
+  assert.deepEqual(sleeps.splice(0), []);
 
   // An upgrade from 0.1.x: the old agent is stopped first (it holds the port), and its failing doesn't matter.
-  const r0 = loadSafariAgent('/p.plist', { changed: true, env: {}, run: fake(false, 'bootout', true) });
+  const r0 = loadSafariAgent('/p.plist', { changed: true, env: {}, run: fake(false, 'bootout', true), sleep });
   assert.deepEqual(r0, { error: null, later: false });
-  assert.deepEqual(calls.splice(0), [...prints, ['bootout', legacyTarget], ['bootstrap', `gui/${uid}`, '/p.plist']]);
+  assert.deepEqual(calls.splice(0), [...prints, ['bootout', legacyTarget], ['print', legacyTarget], bootstrap]);
 
   // Inside a host the bridge started (an update installed from Safari): nothing now, a detached script later.
   const scripts = [];
-  const r = loadSafariAgent('/p p.plist', { changed: true, env: { TRIF_SAFARI_BRIDGE: '123' }, run: fake(true), runDetached: (s) => scripts.push(s) });
+  const r = loadSafariAgent('/p p.plist', { changed: true, env: { TRIF_SAFARI_BRIDGE: '123' }, run: fake(true), runDetached: (s) => scripts.push(s), sleep });
   assert.deepEqual(r, { error: null, later: true });
   assert.deepEqual(calls.splice(0), prints);
   assert.equal(scripts.length, 1);
-  assert.equal(scripts[0], `sleep 3; "launchctl" "bootout" "${target}"; "launchctl" "bootstrap" "gui/${uid}" "/p p.plist"`);
+  const waitGone = (t) => `i=0; while [ $i -lt 25 ] && "launchctl" "print" "${t}" >/dev/null 2>&1; do sleep 0.2; i=$((i+1)); done`;
+  const retry = (plist) => `i=1; until "launchctl" "bootstrap" "gui/${uid}" "${plist}"; do [ $? -eq 5 ] && [ $i -lt 5 ] || break; sleep 1; i=$((i+1)); done`;
+  assert.equal(scripts[0], `sleep 3; "launchctl" "bootout" "${target}"; ${waitGone(target)}; ${retry('/p p.plist')}`);
   // An older bridge (0.1.x, updating to this version) says so as WEBMODS_SAFARI_BRIDGE.
-  const r2 = loadSafariAgent('/p.plist', { changed: true, env: { WEBMODS_SAFARI_BRIDGE: '9' }, run: fake(false, null, true), runDetached: (s) => scripts.push(s) });
+  const r2 = loadSafariAgent('/p.plist', { changed: true, env: { WEBMODS_SAFARI_BRIDGE: '9' }, run: fake(false, null, true), runDetached: (s) => scripts.push(s), sleep });
   assert.deepEqual(r2, { error: null, later: true });
-  assert.equal(scripts[1], `sleep 3; "launchctl" "bootout" "${legacyTarget}"; "launchctl" "bootstrap" "gui/${uid}" "/p.plist"`);
+  assert.equal(scripts[1], `sleep 3; "launchctl" "bootout" "${legacyTarget}"; ${waitGone(legacyTarget)}; ${retry('/p.plist')}`);
   calls.splice(0);
+  assert.deepEqual(sleeps, []);
+});
+
+test('Safari bridge agent: the detached script waits out the bootout and retries a bootstrap failing with 5', { skip: process.platform === 'win32' }, () => {
+  // A fake launchctl on PATH: print finds the service twice more after the bootout; bootstrap fails
+  // with 5 twice, then works. The script's leading "sleep 3" is dropped to keep the test quick.
+  const dir = tempDir();
+  const log = path.join(dir, 'log');
+  fs.writeFileSync(path.join(dir, 'launchctl'), `#!/bin/sh
+echo "$*" >> "${log}"
+n() { c=$(cat "${dir}/$1" 2>/dev/null || echo 0); c=$((c+1)); echo $c > "${dir}/$1"; echo $c; }
+case "$1" in
+  print) [ $(n print) -le 2 ] && exit 0; exit 113 ;;
+  bootstrap) [ $(n bootstrap) -le 2 ] && { echo "Bootstrap failed: 5: Input/output error" >&2; exit 5; }; exit 0 ;;
+esac
+exit 0
+`, { mode: 0o755 });
+  const uid = process.getuid();
+  const t = `gui/${uid}/com.timsrobot.trif.safari-bridge`;
+  let script;
+  loadSafariAgent('/p.plist', { changed: true, env: { TRIF_SAFARI_BRIDGE: '1' }, run: (a) => ({ status: a[1] === t ? 0 : 113 }), runDetached: (s) => { script = s; } });
+  const r = spawnSync('/bin/sh', ['-c', script.replace(/^sleep 3; /, '')], { env: { ...process.env, PATH: `${dir}:${process.env.PATH}` }, encoding: 'utf8' });
+  assert.equal(r.status, 0, r.stderr);
+  assert.deepEqual(fs.readFileSync(log, 'utf8').trim().split('\n'), [
+    `bootout ${t}`, `print ${t}`, `print ${t}`, `print ${t}`,
+    `bootstrap gui/${uid} /p.plist`, `bootstrap gui/${uid} /p.plist`, `bootstrap gui/${uid} /p.plist`,
+  ]);
+  fs.rmSync(dir, { recursive: true, force: true });
 });
 
 // ------------------------------------------------------------------ extension IDs

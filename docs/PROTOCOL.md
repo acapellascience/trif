@@ -189,7 +189,9 @@ messaging to an arbitrary program (Safari's only reaches the extension's own Mac
   run in `<home>/active-runs` is stopped. `trif setup --browser safari` installs the bridge as a
   launchd agent (`~/Library/LaunchAgents/com.timsrobot.trif.safari-bridge.plist`, KeepAlive); `trif doctor`
   checks that it's listening. Setup restarts a loaded agent with `launchctl kickstart -k` (bootout and
-  bootstrap only when the plist is new or changed). Stopping the bridge stops its hosts and their
+  bootstrap only when the plist is new or changed). bootout returns before launchd has removed the
+  service, so setup then waits (up to 5 s) until `launchctl print` no longer finds it, and retries a
+  bootstrap that fails with `5: Input/output error` (5 tries, 1 s apart). Stopping the bridge stops its hosts and their
   children, so a setup run inside one (an update installed from Safari: the bridge gives its hosts
   `TRIF_SAFARI_BRIDGE`) leaves the launchctl commands to a detached shell that runs them 3 s later,
   after the update has finished. The background's warnings, errors and failures to start are POSTed to the

@@ -103,8 +103,44 @@ ${env}  <key>RunAtLoad</key><true/>
  *
  * The agent from before 0.2.0 (LEGACY_SAFARI_AGENT_LABEL) is stopped first if it's loaded: both bridges
  * want the same port.
+ *
+ * `launchctl bootout` returns before launchd has finished removing the service, and a bootstrap right
+ * after it fails with "Bootstrap failed: 5: Input/output error". So after each bootout this waits (up to
+ * BOOTOUT_WAIT_MS) until `launchctl print` no longer finds the service, and a bootstrap failing with
+ * error 5 is tried again (BOOTSTRAP_TRIES in all, BOOTSTRAP_RETRY_MS apart). The detached script does
+ * the same. `run`, `runDetached` and `sleep` (synchronous, in ms) are injectable for tests.
  */
-function loadSafariAgent(plist, { changed = true, env = process.env, run, runDetached } = {}) {
+const BOOTOUT_WAIT_MS = 5000;
+const BOOTOUT_POLL_MS = 200;
+const BOOTSTRAP_TRIES = 5;
+const BOOTSTRAP_RETRY_MS = 1000;
+
+function sleepSync(ms) {
+  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
+}
+
+// launchctl's "5: Input/output error": what a bootstrap racing a bootout gets.
+function isBootstrapIoError(r) {
+  return r.status === 5 || /\b5: Input\/output error/.test(`${r.stderr || ''}${r.stdout || ''}`);
+}
+
+// The detached script's form of the steps: the same waits and retries, in sh.
+function safariAgentScript(steps) {
+  const lc = (args) => ['launchctl', ...args].map(shq).join(' ');
+  const polls = Math.ceil(BOOTOUT_WAIT_MS / BOOTOUT_POLL_MS);
+  const lines = steps.map((args) => {
+    if (args[0] === 'bootout') {
+      return `${lc(args)}; i=0; while [ $i -lt ${polls} ] && ${lc(['print', args[1]])} >/dev/null 2>&1; do sleep ${BOOTOUT_POLL_MS / 1000}; i=$((i+1)); done`;
+    }
+    if (args[0] === 'bootstrap') {
+      return `i=1; until ${lc(args)}; do [ $? -eq 5 ] && [ $i -lt ${BOOTSTRAP_TRIES} ] || break; sleep ${BOOTSTRAP_RETRY_MS / 1000}; i=$((i+1)); done`;
+    }
+    return lc(args);
+  });
+  return `sleep 3; ${lines.join('; ')}`;
+}
+
+function loadSafariAgent(plist, { changed = true, env = process.env, run, runDetached, sleep = sleepSync } = {}) {
   const { spawnSync, spawn } = require('child_process');
   run = run || ((args) => spawnSync('launchctl', args, { encoding: 'utf8' }));
   runDetached = runDetached || ((script) => spawn('/bin/sh', ['-c', script], { detached: true, stdio: 'ignore' }).unref());
@@ -116,11 +152,20 @@ function loadSafariAgent(plist, { changed = true, env = process.env, run, runDet
   const steps = [...legacy, ...(loaded && !changed ? [['kickstart', '-k', target]]
     : [...(loaded ? [['bootout', target]] : []), ['bootstrap', domain, plist]])];
   if (envVar('SAFARI_BRIDGE', env)) {
-    runDetached(`sleep 3; ${steps.map((a) => ['launchctl', ...a].map(shq).join(' ')).join('; ')}`);
+    runDetached(safariAgentScript(steps));
     return { error: null, later: true };
   }
   for (const args of steps) {
-    const r = run(args);
+    let r = run(args);
+    if (args[0] === 'bootout') {
+      // Wait whether or not it reported success: a bootout that says 5 may still be removing the service.
+      for (let waited = 0; waited < BOOTOUT_WAIT_MS && run(['print', args[1]]).status === 0; waited += BOOTOUT_POLL_MS) sleep(BOOTOUT_POLL_MS);
+    } else if (args[0] === 'bootstrap') {
+      for (let tries = 1; r.status !== 0 && tries < BOOTSTRAP_TRIES && isBootstrapIoError(r); tries++) {
+        sleep(BOOTSTRAP_RETRY_MS);
+        r = run(args);
+      }
+    }
     if (r.status !== 0 && args[1] !== legacyTarget) return { error: (r.stderr || r.stdout || `launchctl ${args[0]} exited ${r.status}`).trim(), later: false };
   }
   return { error: null, later: false };

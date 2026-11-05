@@ -75,11 +75,7 @@
     // Not on the visible part's scrolling: a swipe in the strip by the keyboard slides it (the phone won't
     // be stopped), and the sheet chasing it each frame, a frame late, jumped about. Left alone, the sheet
     // just rides along with the slide and settles back with it.
-    // ... but once it has settled (no more sliding for a moment), it sits again: a sheet left where it was
-    // mid-slide (as the keyboard came up, say) could be far up the screen, nearly all of it out of sight.
-    let settle = 0;
-    vv.addEventListener('scroll', () => { if (!keyboardUp) sit(); clearTimeout(settle); settle = setTimeout(sit, 150); });
-    vv.addEventListener('resize', () => { clearTimeout(settle); settle = setTimeout(sit, 150); });
+    vv.addEventListener('scroll', () => { if (!keyboardUp) sit(); });
   }
   const remeasure = () => { if (measure()) dispatchEvent(new Event('resize')); };
 

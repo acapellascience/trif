@@ -16,6 +16,8 @@
   const root = document.documentElement;
   const OPEN = 'trif-demo-open';
   const MIN = 'trif-demo-min';
+  const TALL = 'trif-demo-tall'; // sandbox mode on a phone: the sheet nearly full height (pages.js .demo-tall)
+  try { if (sessionStorage.getItem(TALL)) root.classList.add('demo-tall'); } catch {}
   const FOCUS = 'trif-demo-focus';
   const remember = (on) => { try { sessionStorage.setItem(OPEN, on ? '1' : ''); } catch {} };
   const phone = () => matchMedia('(max-width: 700px)').matches; // the sheet over the bottom of the page
@@ -97,6 +99,7 @@
         sessionStorage.setItem('trif-demo-state', JSON.stringify(saved));
         sessionStorage.setItem(OPEN, '1');
         sessionStorage.setItem(MIN, '');
+        sessionStorage.setItem(TALL, '1'); // (on a phone the sheet comes up nearly full height, for the note)
         try { localStorage.setItem('modsOpen', 'true'); } catch {}
       } else if (to === 'restart') {
         for (const k of Object.keys(sessionStorage)) if (k.startsWith('trif-demo') || k === 'trif.muted') sessionStorage.removeItem(k);
@@ -164,6 +167,9 @@
   const minimized = () => root.classList.contains('demo-min');
   function minimize(on) {
     root.classList.toggle('demo-min', on);
+    // (tucked away, nothing in the panel keeps the focus: on a phone the keyboard would come straight back
+    // with the sheet)
+    if (on) try { frame?.contentDocument?.activeElement?.blur?.(); } catch {}
     try { sessionStorage.setItem(MIN, on ? '1' : ''); } catch {}
     const done = () => { box?.removeEventListener('transitionend', done); clearTimeout(timer); remeasure(); };
     const timer = setTimeout(done, 400); // (in case no transition runs)

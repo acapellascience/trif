@@ -29,6 +29,14 @@ const WORDS = {
     'That\'s as far as the demo goes: it can only replay chats, not write new mods. ' +
     'To keep modding this page, or any other, get TRIF. It runs on your computer with your own Claude Code or Codex, so you can ask for anything here and watch it happen.\n\n' +
     '[How to install TRIF](https://github.com/acapellascience/trif#install)',
+  // ...and on a phone, where TRIF can't go (it's for a computer)
+  sandboxPhone: '**Sandbox mode.** Every mod from the demo is in the list above, switched off. Switch them on and off in any order you like.\n\n' +
+    'The demo can only replay chats. The real TRIF runs on a computer (a Mac for now), with your own Claude Code or Codex: ' +
+    'there you can ask for anything on this page, or any other, and watch it happen.\n\n' +
+    '[How to get TRIF](https://github.com/acapellascience/trif#install)',
+  notLivePhone: 'This demo only plays example chats, so nothing reads what you type here.\n\n' +
+    'The real TRIF runs on a computer (a Mac for now): your own coding agent (Claude Code, Codex or an open model) reads your message, looks at the page and writes the mod. ' +
+    '[Get TRIF](https://github.com/acapellascience/trif#install) there and ask it for real.',
   codexModels: 'In TRIF, this lists the models your Codex account can use.',
   noKeys: 'This demo doesn’t take keys.',
   noLogin: 'This demo is logged in already.',

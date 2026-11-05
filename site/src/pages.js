@@ -122,6 +122,9 @@ const DEMO_STYLE = `
   .demo-panel-top::before { content: ''; position: absolute; left: 50%; top: 6px; width: 36px; height: 4px; margin-left: -18px;
     border-radius: 2px; background: var(--line); }
   .demo-close { font-size: 20px; padding: 0 12px; }
+  /* sandbox mode (after You Win): nearly full height, so the open mod list and the note both show */
+  html.demo-tall .demo-panel { height: 88dvh; max-height: 88dvh; }
+  html.demo-open.demo-tall body { padding-bottom: 88dvh; }
   html.demo-min .demo-panel { height: 35px; min-height: 0; }
   /* room under the page for the sheet, so the end of it (the footer) can scroll up above the sheet */
   html.demo-open body { padding-bottom: max(40vh, 260px); padding-bottom: max(calc(40dvh + var(--demo-grow, 0px)), calc(260px + var(--demo-grow, 0px))); }

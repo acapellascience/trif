@@ -204,7 +204,18 @@
           shaper.curve = curve;
         }
         gestureUnmute(e); // (the button's showing and nothing's chosen: this click turns the sound on)
-        if (isMuted()) { if (ac.state === 'running') ac.suspend(); } else if (ac.state === 'suspended') ac.resume(); // (one made during a tap starts out running)
+        if (isMuted()) { if (ac.state === 'running') ac.suspend(); }
+        else {
+          if (ac.state !== 'running') ac.resume();
+          // iPhone Safari unlocks sound only as a finger lifts, and a context made as it went down can say it's
+          // running while it plays nothing (a mod added after the visitor unmuted: silent until the mute was
+          // toggled). So on the first lift, resume and play a silent blip, which unlocks it for good.
+          if (e.type === 'touchend' && !ac.__trifUnlocked) {
+            ac.__trifUnlocked = true;
+            ac.resume();
+            const blip = ac.createBufferSource(); blip.buffer = ac.createBuffer(1, 1, 22050); blip.connect(ac.destination); blip.start(0);
+          }
+        }
       } catch (err) { window.trif?.warn('sound failed', String(err)); }
     };
     // The courtesy mute: suspended while it's on, back on when it's off.
@@ -395,6 +406,13 @@
 
   // --- Game state
   const ship = { x: innerWidth / 2, y: innerHeight - 14, w: 102, h: 78 }; // y = bottom of the ship
+  // Where the ship starts and comes back: the bottom middle (on a touchscreen half a ship higher, clear of
+  // the thumb and the screen's edge); in Gravity mode three quarters of the way up, clear of the pile of
+  // fallen words along the bottom (on a touchscreen half a ship lower).
+  const TOUCH_SHIP = matchMedia('(pointer: coarse)').matches;
+  const homeY = () => Math.round(H - 14 - (TOUCH_SHIP ? ship.h / 2 : 0));
+  const bomberY = () => Math.max(ship.h + 4, Math.round(H * 0.25 + (TOUCH_SHIP ? ship.h / 2 : 0)));
+  ship.y = innerHeight - 14 - (TOUCH_SHIP ? ship.h / 2 : 0);
   const keys = {};
   const lasers = [];
   const bits = []; // letters and sparks
@@ -1074,7 +1092,7 @@
   const flyBackIn = (dt) => {
     if (!returning) return false;
     ship.y -= 380 * dt;
-    if (ship.y <= H - 14) { ship.y = H - 14; returning = false; }
+    if (ship.y <= homeY()) { ship.y = homeY(); returning = false; }
     return true;
   };
 
@@ -1414,9 +1432,7 @@
       const dead = now < deadUntil;
       if (deadUntil && !dead) { // respawn
         deadUntil = 0;
-        // at the bottom middle; in Gravity mode three quarters of the way up, clear of the pile of fallen
-        // words and pieces along the bottom (it'd come back buried in them)
-        ship.x = W / 2; ship.y = gravityOn() ? Math.max(ship.h + 4, Math.round(H * 0.25)) : H - 14;
+        ship.x = W / 2; ship.y = gravityOn() ? bomberY() : homeY(); // (see homeY)
         safeUntil = now + 1500;
       }
       const autopilot = victory(now, dt) || flyBackIn(dt);

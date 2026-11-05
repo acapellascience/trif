@@ -52,6 +52,7 @@
   }
   // ...and a mod with a touchscreen name (its header's @touch-name) goes by it there.
   if (touchscreen) DEMO.mods = DEMO.mods.map((m) => (m.touchName ? { ...m, name: m.touchName } : m));
+  const onPhone = () => { try { return window.parent !== window && window.parent.matchMedia('(max-width: 700px)').matches; } catch { return false; } };
   const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
   const later = (fn, ms = 0) => setTimeout(fn, ms);
 
@@ -159,7 +160,7 @@
       state.replayed = new Set(DEMO.chats.map((c) => c.id));
       state.active = null;
       state.sent = true;
-      store.set(`chat:${SITE}`, { sessionId: null, agent: null, messages: [{ role: 'assistant', text: DEMO.words.sandbox, time: Date.now() }], run: null, last: null });
+      store.set(`chat:${SITE}`, { sessionId: null, agent: null, messages: [{ role: 'assistant', text: onPhone() ? DEMO.words.sandboxPhone : DEMO.words.sandbox, time: Date.now() }], run: null, last: null });
     }
   } else {
     // First time: only the mods running on the page (its ?mods=), on.
@@ -329,7 +330,7 @@
     run.timers.push(later(() => {
       updateChat((c) => {
         if (c.run?.runId !== run.runId) return false;
-        c.messages.push({ role: 'assistant', text: DEMO.words.notLive, time: Date.now() }); // (assistant: its link works)
+        c.messages.push({ role: 'assistant', text: onPhone() ? DEMO.words.notLivePhone : DEMO.words.notLive, time: Date.now() }); // (assistant: its link works)
       });
       finish(run, true);
     }, 700));
@@ -672,7 +673,16 @@
       }
       // On a phone the waiting prompt can be scrolled with a finger, but a tap mustn't focus it (no
       // keyboard): it gives the focus straight back while it's a waiting prompt.
-      input.addEventListener('focus', () => { if (input.readOnly) input.blur(); });
+      // On a phone the box takes the focus (and brings up the keyboard) only from a tap on the box itself,
+      // never because the sheet came back with it focused.
+      let tappedBox = 0;
+      input.addEventListener('pointerdown', () => { tappedBox = Date.now(); });
+      input.addEventListener('focus', () => {
+        if (input.readOnly || (document.documentElement.classList.contains('demo-phone') && Date.now() - tappedBox > 1500)) {
+          input.blur();
+          setTimeout(() => { if (document.activeElement === input) input.blur(); }); // (a blur while it's still focusing can be ignored)
+        }
+      });
       // Send (or Enter) while the prompt is still typing: the whole prompt goes, not the part typed so far.
       // (Capture phase on the document, ahead of the panel's own submit handler on the form.)
       document.addEventListener('submit', (e) => { if (e.target === form) stopTyping(input, true); }, true);

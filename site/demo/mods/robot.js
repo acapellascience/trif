@@ -228,7 +228,18 @@
             for (let i = 0; i < d.length; i++) d[i] = Math.random() * 2 - 1;
           }
           gestureUnmute(e); // (the button's showing and nothing's chosen: this click turns the sound on)
-          if (isMuted()) { if (ac.state === 'running') ac.suspend(); } else if (ac.state === 'suspended') ac.resume(); // (one made during a tap starts out running)
+          if (isMuted()) { if (ac.state === 'running') ac.suspend(); }
+          else {
+            if (ac.state !== 'running') ac.resume();
+            // iPhone Safari unlocks sound only as a finger lifts, and a context made as it went down can say it's
+            // running while it plays nothing (a mod added after the visitor unmuted: silent until the mute was
+            // toggled). So on the first lift, resume and play a silent blip, which unlocks it for good.
+            if (e.type === 'touchend' && !ac.__trifUnlocked) {
+              ac.__trifUnlocked = true;
+              ac.resume();
+              const blip = ac.createBufferSource(); blip.buffer = ac.createBuffer(1, 1, 22050); blip.connect(ac.destination); blip.start(0);
+            }
+          }
         } catch (err) { window.trif?.warn('robot sound failed', String(err)); }
       };
       // The courtesy mute: suspended while it's on, back on when it's off.

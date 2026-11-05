@@ -212,7 +212,18 @@
           for (let i = 0; i < 1024; i++) curve[i] = Math.tanh((i / 511.5 - 1) * 3);
         }
         gestureUnmute(e); // (the button's showing and nothing's chosen: this click turns the sound on)
-        if (isMuted()) { if (ac.state === 'running') ac.suspend(); } else if (ac.state === 'suspended') ac.resume(); // (one made during a tap starts out running)
+        if (isMuted()) { if (ac.state === 'running') ac.suspend(); }
+        else {
+          if (ac.state !== 'running') ac.resume();
+          // iPhone Safari unlocks sound only as a finger lifts, and a context made as it went down can say it's
+          // running while it plays nothing (a mod added after the visitor unmuted: silent until the mute was
+          // toggled). So on the first lift, resume and play a silent blip, which unlocks it for good.
+          if (e.type === 'touchend' && !ac.__trifUnlocked) {
+            ac.__trifUnlocked = true;
+            ac.resume();
+            const blip = ac.createBufferSource(); blip.buffer = ac.createBuffer(1, 1, 22050); blip.connect(ac.destination); blip.start(0);
+          }
+        }
       } catch (err) { window.trif?.warn('firework sound failed', String(err)); }
     };
     // The courtesy mute: suspended while it's on, back on when it's off.
@@ -340,7 +351,9 @@
     const rainbow = style < 0.45; // full spectrum around the circle
     const pal = PALETTES[(Math.random() * PALETTES.length) | 0];
     const base = rand(0, 360);
-    const n = scale < 1 ? 40 : 320;
+    // (fewer sparks on a small screen, where the bursts are smaller anyway: a phone can't draw a desktop's)
+    const density = Math.max(0.5, Math.min(1, Math.sqrt((W * H) / (1440 * 900))));
+    const n = Math.round((scale < 1 ? 40 : 320) * density);
     const add = (vx, vy, hue, extra) => {
       if (sparks.length < MAX_SPARKS) sparks.push({ x, y, px: x, py: y, vx, vy, life: 1, decay: rand(0.006, 0.011) / Math.max(scale, 0.6),
         hue, glitter: Math.random() < 0.35, width: rand(2, 3.5) * Math.max(scale, 0.6), ...extra });
@@ -355,13 +368,14 @@
     }
     if (scale >= 1) {
       // Bright outer ring in a contrasting colour
-      for (let i = 0; i < 90; i++) {
-        const a = (i / 90) * Math.PI * 2;
-        add(Math.cos(a) * vmax * 1.05, Math.sin(a) * vmax * 1.05, base + 180 + i * 4, { width: 3.5 });
+      const ring = Math.round(90 * density), core = Math.round(60 * density);
+      for (let i = 0; i < ring; i++) {
+        const a = (i / ring) * Math.PI * 2;
+        add(Math.cos(a) * vmax * 1.05, Math.sin(a) * vmax * 1.05, base + 180 + i * 4 * (90 / ring), { width: 3.5 });
       }
       // Inner core of a third colour
-      for (let i = 0; i < 60; i++) {
-        const a = (i / 60) * Math.PI * 2;
+      for (let i = 0; i < core; i++) {
+        const a = (i / core) * Math.PI * 2;
         add(Math.cos(a) * vmax * 0.45, Math.sin(a) * vmax * 0.45, base + 90, null);
       }
     }
@@ -402,6 +416,10 @@
         if (r.t >= 1) { rockets.splice(i, 1); burst(r.tx, r.ty); }
       }
 
+      // Sparks are drawn in batches: those of about the same colour, brightness and width share one path
+      // and one stroke (a big burst is over a thousand sparks, and a stroke each, with its own colour
+      // string, every frame, was more than a phone could draw)
+      const batches = new Map();
       for (let i = sparks.length - 1; i >= 0; i--) {
         const s = sparks[i];
         s.life -= s.decay;
@@ -419,10 +437,19 @@
         if (s.glitter && s.life < 0.6 && Math.random() < 0.5) continue; // twinkle as it fades
         // Long streak behind each spark (a few frames of motion) so the shell looks like real trails
         const tx = s.x - s.vx * 6, ty = s.y - s.vy * 6;
-        ctx.strokeStyle = `hsla(${s.hue}, 100%, ${50 + s.life * 30}%, ${Math.min(1, s.life * 1.4)})`;
-        ctx.lineWidth = s.width;
-        ctx.lineCap = 'round';
-        ctx.beginPath(); ctx.moveTo(tx, ty); ctx.lineTo(s.x, s.y); ctx.stroke();
+        const hue = Math.round((((s.hue % 360) + 360) % 360) / 12) * 12, life = Math.ceil(s.life * 12) / 12, width = Math.round(s.width * 2) / 2;
+        const key = hue * 1e4 + life * 1e3 + width;
+        let b = batches.get(key);
+        if (!b) batches.set(key, (b = { hue, life, width, segs: [] }));
+        b.segs.push(tx, ty, s.x, s.y);
+      }
+      ctx.lineCap = 'round';
+      for (const b of batches.values()) {
+        ctx.strokeStyle = `hsla(${b.hue}, 100%, ${50 + b.life * 30}%, ${Math.min(1, b.life * 1.4)})`;
+        ctx.lineWidth = b.width;
+        ctx.beginPath();
+        for (let k = 0; k < b.segs.length; k += 4) { ctx.moveTo(b.segs[k], b.segs[k + 1]); ctx.lineTo(b.segs[k + 2], b.segs[k + 3]); }
+        ctx.stroke();
       }
 
       ctx.globalCompositeOperation = 'source-over';

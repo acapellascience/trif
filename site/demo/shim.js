@@ -546,11 +546,14 @@
   Object.defineProperty(window, 'chrome', { value: chrome, configurable: true, writable: true });
 
   // ---- Scrolling stays in the panel ---------------------------------------------------------------
-  // On a phone, a swipe the panel can't use (on a part that doesn't scroll, or past the end of a list)
-  // goes on to the page under the demo, which then scrolls away behind it. A swipe moves whatever in the
-  // panel can scroll that way, or nothing.
+  // On a phone, a swipe the panel can't use (on a part that doesn't scroll, or past the end of a list) went
+  // on to the page under the demo: it scrolled away behind the sheet, or a pull reloaded it. Now a swipe
+  // either scrolls what in the panel can scroll that way, or moves the sheet itself, as its handle does
+  // (tab.js: trif-demo:drag), or does nothing (sideways). Taps are still taps. The browser is told too, in
+  // CSS (panel.css: touch-action), so it never starts scrolling the page before this has decided: only the
+  // parts that have something to scroll right now (demo-scrolls) can be panned.
   (() => {
-    let last = null;
+    const onPhoneNow = () => { try { return window.parent !== window && window.parent.matchMedia('(max-width: 700px)').matches; } catch { return false; } };
     const canScroll = (el, dx, dy) => {
       for (let e = el; e && e !== document.documentElement; e = e.parentElement) {
         const cs = getComputedStyle(e);
@@ -562,14 +565,56 @@
       }
       return false;
     };
-    addEventListener('touchstart', (e) => { const t = e.touches[0]; last = t ? { x: t.clientX, y: t.clientY } : null; }, { capture: true, passive: true });
+    const SCROLLERS = '.gate, .landing, .mod-list, .chat, #input, pre, .msg.assistant table';
+    const mark = () => {
+      for (const el of document.querySelectorAll(SCROLLERS)) {
+        const y = el.scrollHeight > el.clientHeight + 1, x = el.scrollWidth > el.clientWidth + 1;
+        el.classList.toggle('demo-scrolls-y', y);
+        el.classList.toggle('demo-scrolls-x', x && !y);
+      }
+    };
+    setInterval(() => { if (document.documentElement.classList.contains('demo-phone')) mark(); }, 300);
+    const post = (phase, dy) => { try { window.parent.postMessage({ type: 'trif-demo:drag', phase, dy }, location.origin); } catch {} };
+    let g = null; // the finger: where it started (screen), and what its swipe does: scroll, sheet or none
+    addEventListener('touchstart', (e) => {
+      mark();
+      const t = e.touches[0];
+      g = t && e.touches.length === 1 ? { x: t.screenX, y: t.screenY, lx: t.clientX, ly: t.clientY, dy: 0, mode: null } : null;
+    }, { capture: true, passive: true });
     addEventListener('touchmove', (e) => {
       const t = e.touches[0];
-      if (!t || e.touches.length !== 1 || !last) return; // (two fingers: leave pinching to the phone)
-      const dx = t.clientX - last.x, dy = t.clientY - last.y; // (finger down: dy > 0, scrolling up)
-      last = { x: t.clientX, y: t.clientY };
-      if (e.cancelable && !canScroll(e.target, dx, dy)) e.preventDefault();
+      if (!t || e.touches.length !== 1 || !g) { if (g?.mode === 'sheet') post('cancel', 0); g = null; return; } // (two fingers: leave pinching to the phone)
+      const dx = t.screenX - g.x, dy = t.screenY - g.y; // (finger down: dy > 0)
+      const ldx = t.clientX - g.lx, ldy = t.clientY - g.ly;
+      g.lx = t.clientX; g.ly = t.clientY;
+      if (g.mode === null) {
+        if (canScroll(e.target, ldx, ldy)) g.mode = 'scroll';
+        else if (Math.abs(dy) >= Math.abs(dx) && onPhoneNow()) { g.mode = 'sheet'; post('start', 0); }
+        else g.mode = 'none';
+      }
+      // scrolling a list: as far as it goes, and no further (its end would hand the swipe to the page)
+      if (g.mode === 'scroll') { if (e.cancelable && !canScroll(e.target, ldx, ldy)) e.preventDefault(); return; }
+      if (e.cancelable) e.preventDefault();
+      if (g.mode === 'sheet') { g.dy = dy; post('move', dy); }
     }, { capture: true, passive: false });
+    const end = (e) => { if (g?.mode === 'sheet') post(e.type === 'touchcancel' ? 'cancel' : 'end', g.dy); g = null; };
+    addEventListener('touchend', end, { capture: true, passive: true });
+    addEventListener('touchcancel', end, { capture: true, passive: true });
+
+    // On a phone the mods list is open while the sheet is at full height, closed at half (tab.js says
+    // which: trif-demo:size).
+    addEventListener('message', (e) => {
+      if (e.source !== window.parent || e.origin !== location.origin || e.data?.type !== 'trif-demo:size') return;
+      if (!document.documentElement.classList.contains('demo-phone')) return;
+      const size = e.data.size;
+      if (size !== 'full' && size !== 'half') return;
+      const open = size === 'full';
+      try { localStorage.setItem('modsOpen', String(open)); } catch {}
+      const m = document.getElementById('mods');
+      if (m && m.open !== open) m.open = open;
+    });
+    const hello = () => { try { if (window.parent !== window) window.parent.postMessage({ type: 'trif-demo:hello' }, location.origin); } catch {} };
+    if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', () => setTimeout(hello, 50), { once: true }); else setTimeout(hello, 50);
   })();
 
   // ---- The recorded chats, one at a time ----------------------------------------------------------

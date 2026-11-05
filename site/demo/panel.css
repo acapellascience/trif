@@ -36,6 +36,12 @@ html.demo-locked .composer { opacity: 0.5; pointer-events: none; }
 html.demo-phone #input { font-size: 16px; }
 html.demo-phone :is(input, select, textarea) { font-size: 16px; }
 
+/* On a phone nothing in the panel pans the page under it: only what has something to scroll right now
+   (shim.js marks it) can be panned; every other swipe is the panel's own (it moves the sheet: shim.js). */
+html.demo-phone, html.demo-phone body { touch-action: none; }
+html.demo-phone .demo-scrolls-y { touch-action: pan-y; }
+html.demo-phone .demo-scrolls-x { touch-action: pan-x; }
+
 /* Scrolling inside the panel stays inside it: the page under the demo doesn't scroll along when a list
    reaches its end (shim.js also stops swipes on the parts that don't scroll at all). */
 html, body { overscroll-behavior: none; }
@@ -54,5 +60,5 @@ html.demo-phone .composer { margin: 4px 10px 8px; }
 html.demo-phone .composer textarea { padding: 6px 40px 6px 10px; max-block-size: calc(8lh + 14px); overflow-y: auto; }
 /* The waiting prompt, two lines at a time: it scrolls with a finger (and follows the typing), but still
    can't be focused (shim.js), and 16px, so a phone never zooms in on it. */
-html.demo-phone.demo-guided #input { pointer-events: auto; overflow-y: auto; touch-action: pan-y; font-size: 16px;
+html.demo-phone.demo-guided #input { pointer-events: auto; overflow-y: auto; font-size: 16px;
   max-block-size: calc(8lh + 14px); -webkit-user-select: none; user-select: none; }

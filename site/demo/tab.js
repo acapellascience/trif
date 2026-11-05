@@ -186,7 +186,10 @@
     root.classList.toggle('demo-tall', s === 'full');
     try { sessionStorage.setItem(TALL, s === 'full' ? '1' : ''); } catch {}
     minimize(s === 'min');
+    tellSize();
   }
+  // The panel hears the sheet's size: on a phone its mods list is open at full height, closed at half.
+  function tellSize() { try { if (phone()) frame?.contentWindow?.postMessage({ type: 'trif-demo:size', size: size() }, location.origin); } catch {} }
   // The heights the sizes come to (pages.js), in the whole window (innerHeight stops at the sheet: see cut)
   function heights() {
     const H = innerHeight + cut.h;
@@ -196,40 +199,52 @@
   // The top bar is the handle: the sheet follows the finger up or down, and on letting go settles at the
   // nearest size (a quick flick goes one size on in its direction); a tap brings a tucked-away sheet back.
   // It shrinks or grows from wherever the finger left it (no jump back first).
+  // A drag of the sheet: by its handle (swipe, below) or by a swipe anywhere inside the panel that isn't
+  // scrolling something there (shim.js: trif-demo:drag). dy: how far the finger has moved down.
+  let drag = null;
+  function dragStart() { drag = { h: box.getBoundingClientRect().height, from: size() }; }
+  function dragMove(dy) {
+    if (!drag) return;
+    const top = canFull ? heights().full : heights().half;
+    box.style.transition = 'none';
+    box.style.minHeight = '0';
+    box.style.height = `${Math.round(Math.max(35, Math.min(top, drag.h - dy)))}px`;
+  }
+  function dragEnd(dy, cancelled) {
+    if (!drag) return;
+    const from = drag.from;
+    drag = null;
+    let to = from;
+    if (!cancelled) {
+      if (Math.abs(dy) < 8) to = from === 'min' ? 'half' : from; // a tap
+      else {
+        const hs = heights(), order = canFull ? ['min', 'half', 'full'] : ['min', 'half'];
+        const at = box.getBoundingClientRect().height;
+        to = order.reduce((a, b) => (Math.abs(hs[b] - at) < Math.abs(hs[a] - at) ? b : a));
+        if (to === from && Math.abs(dy) > 40) { // a flick: one size on
+          const i = order.indexOf(from) + (dy > 0 ? -1 : 1);
+          to = order[Math.max(0, Math.min(order.length - 1, i))];
+        }
+      }
+    }
+    setSize(to);
+    box.getBoundingClientRect(); // (from the height it was left at...)
+    box.style.transition = ''; box.style.height = ''; box.style.minHeight = ''; // (...to the size's, smoothly)
+  }
   function swipe(bar, except) {
     let start = null;
     bar.addEventListener('pointerdown', (e) => {
       if (!phone() || except.contains(e.target) || (e.pointerType === 'mouse' && e.button !== 0)) return;
-      start = { id: e.pointerId, y: e.clientY, h: box.getBoundingClientRect().height, from: size() };
+      start = { id: e.pointerId, y: e.clientY };
+      dragStart();
       try { bar.setPointerCapture(e.pointerId); } catch {}
     });
-    bar.addEventListener('pointermove', (e) => {
-      if (start?.id !== e.pointerId) return;
-      const top = canFull ? heights().full : heights().half;
-      box.style.transition = 'none';
-      box.style.minHeight = '0';
-      box.style.height = `${Math.round(Math.max(35, Math.min(top, start.h - (e.clientY - start.y))))}px`;
-    });
+    bar.addEventListener('pointermove', (e) => { if (start?.id === e.pointerId) dragMove(e.clientY - start.y); });
     const end = (e) => {
       if (start?.id !== e.pointerId) return;
-      const dy = e.clientY - start.y, from = start.from;
+      const dy = e.clientY - start.y;
       start = null;
-      let to = from;
-      if (e.type !== 'pointercancel') {
-        if (Math.abs(dy) < 8) to = from === 'min' ? 'half' : from; // a tap
-        else {
-          const hs = heights(), order = canFull ? ['min', 'half', 'full'] : ['min', 'half'];
-          const at = box.getBoundingClientRect().height;
-          to = order.reduce((a, b) => (Math.abs(hs[b] - at) < Math.abs(hs[a] - at) ? b : a));
-          if (to === from && Math.abs(dy) > 40) { // a flick: one size on
-            const i = order.indexOf(from) + (dy > 0 ? -1 : 1);
-            to = order[Math.max(0, Math.min(order.length - 1, i))];
-          }
-        }
-      }
-      setSize(to);
-      box.getBoundingClientRect(); // (from the height it was left at...)
-      box.style.transition = ''; box.style.height = ''; box.style.minHeight = ''; // (...to the size's, smoothly)
+      dragEnd(dy, e.type === 'pointercancel');
     };
     bar.addEventListener('pointerup', end);
     bar.addEventListener('pointercancel', end);
@@ -276,6 +291,17 @@
     const d = e.data || {};
     // On a phone the panel's message box fits its text, and the sheet grows by what the box gained
     // (pages.js: --demo-grow), so the chat above it keeps its room.
+    // A swipe inside the panel that isn't scrolling anything there moves the sheet, as its handle does.
+    if (d.type === 'trif-demo:drag') {
+      if (!phone()) return;
+      const dy = Math.max(-2000, Math.min(2000, Number(d.dy) || 0));
+      if (d.phase === 'start') dragStart();
+      else if (d.phase === 'move') dragMove(dy);
+      else if (d.phase === 'end' || d.phase === 'cancel') dragEnd(dy, d.phase === 'cancel');
+      return;
+    }
+    // The panel has loaded (again): it hears the sheet's size.
+    if (d.type === 'trif-demo:hello') { tellSize(); return; }
     // The wrap-up chat was sent: on a phone the sheet comes up full height (shim.js opens the mods list).
     if (d.type === 'trif-demo:wrapup') {
       try { sessionStorage.setItem(FREE, '1'); } catch {}

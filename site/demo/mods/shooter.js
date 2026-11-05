@@ -997,6 +997,10 @@
       for (const n of hero.querySelectorAll(':scope > h1, :scope > .tagline, :scope > .small')) {
         n.classList.add('tss-win-faded'); winEl.faded.push(n);
       }
+      // ...and on a touchscreen (a phone's page is tight) the heading just under the buttons, which the
+      // options under them can run into
+      const below0 = TOUCH_SHIP && document.querySelector('main .two h2');
+      if (below0) { below0.classList.add('tss-win-faded'); winEl.faded.push(below0); }
       // the buttons: only one that's completely intact is left alone; anything blasted (the button, or
       // even one of its words) comes back, fading in
       const hurt = (a) => a.closest('[data-tss-dead]') || a.querySelector('[data-tss-dead]');

@@ -292,7 +292,8 @@ async function release(version, { dryRun, skipTests }) {
 
   if (!skipTests) {
     console.log('running tests…');
-    const t = spawnSync(process.execPath, ['--test', '--test-concurrency=2', '--test-timeout=120000'], { cwd: src, stdio: 'inherit' });
+    // (10 minutes per test file: agents.test.js runs real Claude Code, and can take over 2)
+    const t = spawnSync(process.execPath, ['--test', '--test-concurrency=2', '--test-timeout=600000'], { cwd: src, stdio: 'inherit' });
     if (t.status !== 0) fail('tests failed');
   }
   for (const target of ['chrome', 'firefox']) sh(process.execPath, [path.join(src, 'scripts', 'build-extension.js'), target], { cwd: src });

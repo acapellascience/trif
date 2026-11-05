@@ -301,6 +301,8 @@
       else if (d.phase === 'end' || d.phase === 'cancel') dragEnd(dy, d.phase === 'cancel');
       return;
     }
+    // After the demo, the robot is answering what the visitor typed: on a phone the sheet comes up full height.
+    if (d.type === 'trif-demo:answering') { if (phone() && size() !== 'full') setSize('full'); return; }
     // The next prompt starts typing itself in: on a phone a sheet that was up full height comes down to
     // half (tucked away, it stays tucked away).
     if (d.type === 'trif-demo:typing') { if (phone() && size() === 'full') setSize('half'); return; }

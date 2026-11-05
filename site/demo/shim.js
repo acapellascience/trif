@@ -289,6 +289,9 @@
     updateChat((c) => { c.messages.push({ role: 'user', text: prompt, time: startedAt }); c.run = { runId, startedAt }; c.last = null; });
     const run = { runId, recording, timers: [] };
     state.runs.set(runId, run);
+    // after the demo, the robot answers what the visitor typed: on a phone the sheet comes up full height
+    // to show it (tab.js). (The recorded chats leave the sheet as it is.)
+    if (!recording && window.parent !== window) { try { window.parent.postMessage({ type: 'trif-demo:answering' }, location.origin); } catch {} }
     // The wrap-up ("what should i do now?"): on a phone the sheet comes up full height with the mods list
     // open, so the answer and every mod show (tab.js: trif-demo:wrapup).
     if (recording?.id === 'wrapup') {

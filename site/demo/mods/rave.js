@@ -535,10 +535,9 @@
       const cx = innerWidth / 2, cy = innerHeight / 2;
       for (const el of blocks()) pulseOn(el, cx, cy);
       // the glow layer for what's in those blocks zooms with them, on the same clock (see raveGlow)
-      // (it sits at the window's top-left, so the zoom's centre is the window's centre in its own pixels)
+      // (its transform-origin, the window's centre in its own pixels, is set where it's drawn: it moves)
       const gz = document.getElementById('rave-glow-z');
       if (gz) {
-        gz.style.transformOrigin = `${cx}px ${cy}px`;
         if (!scales.has(gz)) { const a = gz.animate(PULSE, TIMING); a.startTime = phase; scales.set(gz, a); }
       }
       clearTimeout(stopTimer);
@@ -760,7 +759,6 @@
     const cvz = document.createElement('canvas');
     cvz.id = 'rave-glow-z';
     const g0 = cv.getContext('2d'), gz = cvz.getContext('2d');
-    let g = g0;
     document.documentElement.append(cv, cvz);
     let W = 0, H = 0, px = 0, py = 0;
     const fonts = new WeakMap();
@@ -773,24 +771,45 @@
       if (!gravityOn()) paint();
       requestAnimationFrame(draw);
     };
+    // Each layer covers only the box around what glows on it this frame (with room for the halos), not the
+    // whole window, and a layer with nothing to glow is hidden: two retina canvases the size of the window,
+    // redrawn and composited every frame, were most of the rave's cost with the other mods on. A canvas
+    // is only resized when it must grow, or could shrink by half (a resize reallocates it).
+    const layers = [{ cv, g: g0 }, { cv: cvz, g: gz }];
+    for (const L of layers) Object.assign(L, { x: 0, y: 0, w: 0, h: 0, dpr: 0 });
+    const STEP = 64; // (the box snaps to this, so it doesn't change size every frame)
+    // pinned to the window by a 0-size probe (the tilt card's `perspective` and the shooter's shake
+    // `translate` on <html> make it the box "fixed" elements are placed in; the zoomed layer can't be
+    // measured itself: that would include its zoom)
+    const pin = document.createElement('div');
+    pin.id = 'rave-glow-pin';
+    pin.style.cssText = 'position: fixed; left: 0; top: 0; width: 0; height: 0; pointer-events: none; visibility: hidden;';
+    const place = (L, box, dpr) => {
+      if (!box) { if (L.cv.style.display !== 'none') L.cv.style.display = 'none'; return; }
+      if (L.cv.style.display === 'none') L.cv.style.display = '';
+      const x = Math.floor(box.l / STEP) * STEP, y = Math.floor(box.t / STEP) * STEP;
+      const w = Math.ceil((box.r - x) / STEP) * STEP, h = Math.ceil((box.b - y) / STEP) * STEP;
+      if (w > L.w || h > L.h || w < L.w / 2 || h < L.h / 2 || L.dpr !== dpr) {
+        Object.assign(L, { w, h, dpr });
+        L.cv.width = Math.round(w * dpr); L.cv.height = Math.round(h * dpr);
+        L.cv.style.width = `${w}px`; L.cv.style.height = `${h}px`;
+      } else {
+        L.g.setTransform(1, 0, 0, 1, 0, 0);
+        L.g.clearRect(0, 0, L.cv.width, L.cv.height);
+      }
+      L.x = x; L.y = y;
+      const t = `${px + x}px ${py + y}px`;
+      if (L.cv.style.translate !== t) L.cv.style.translate = t;
+    };
     const paint = () => {
       try {
         if (!cv.isConnected) document.documentElement.append(cv);
         if (!cvz.isConnected) document.documentElement.append(cvz);
+        if (!pin.isConnected) document.documentElement.append(pin);
         const dpr = devicePixelRatio || 1;
-        if (W !== innerWidth || H !== innerHeight || cv.width !== Math.round(innerWidth * dpr)) {
-          W = innerWidth; H = innerHeight;
-          cv.width = cvz.width = Math.round(W * dpr); cv.height = cvz.height = Math.round(H * dpr);
-          // (not 100vw/100vh: a phone's 100vh includes the space under its toolbar, stretching the glows)
-          for (const c of [cv, cvz]) { c.style.width = `${W}px`; c.style.height = `${H}px`; }
-        }
-        // pin to the window (the tilt card's `perspective` and the shooter's shake `translate` on <html>
-        // make it the box "fixed" elements are placed in). The zoomed layer is placed the same way, so it
-        // takes the same nudge (measuring it would include its zoom).
-        const cr = cv.getBoundingClientRect();
-        if (Math.abs(cr.left) > 0.5 || Math.abs(cr.top) > 0.5) { px -= cr.left; py -= cr.top; cv.style.translate = `${px}px ${py}px`; }
-        if (cvz.style.translate !== cv.style.translate) cvz.style.translate = cv.style.translate;
-        for (const c of [g0, gz]) { c.setTransform(1, 0, 0, 1, 0, 0); c.clearRect(0, 0, cv.width, cv.height); }
+        W = innerWidth; H = innerHeight;
+        const pr = pin.getBoundingClientRect();
+        if (Math.abs(pr.left) > 0.5 || Math.abs(pr.top) > 0.5) { px -= pr.left; py -= pr.top; pin.style.translate = `${px}px ${py}px`; }
         const items = [];
         // [element, hue, size of the glow, strength]: the title's glow is gentler than the banner's
         for (const el of document.querySelectorAll('main h1 .nt-ch')) {
@@ -821,13 +840,14 @@
           }
           return Number.isFinite(opac.get(h)) ? opac.get(h) : 1;
         };
-        for (const c of [g0, gz]) { c.textAlign = 'center'; c.textBaseline = 'middle'; c.shadowOffsetX = -OFF * dpr; c.shadowOffsetY = 0; }
         const zooms = new Map(); // per frame: each block's current kick-zoom scale
         const zoomOf = (blk) => {
           if (!zooms.has(blk)) zooms.set(blk, parseFloat(getComputedStyle(blk).scale) || 1);
           return zooms.get(blk);
         };
         const zcx = W / 2, zcy = H / 2; // the zoom's centre (see kickPulse)
+        // First where each glow goes (and which layer), then each layer's box, then the drawing.
+        const todo = [[], []];
         for (const [el, hue, k, strength] of items) {
           // blasted (the mark can be on the letter, around it, or on Space shooter's word span inside it)
           if (el.closest('[data-tss-dead]') || (el.querySelector('.tss-w') && !el.querySelector('.tss-w:not([data-tss-dead])'))) continue;
@@ -835,7 +855,6 @@
           // in a zooming block: drawn on the zoomed layer, where it was before the zoom
           const blk = blockOf(el);
           const z = blk ? zoomOf(blk) : 1;
-          g = blk ? gz : g0;
           if (z !== 1) {
             const ux = (v) => zcx + (v - zcx) / z, uy = (v) => zcy + (v - zcy) / z;
             r = { left: ux(r.left), right: ux(r.right), top: uy(r.top), bottom: uy(r.bottom), width: r.width / z, height: r.height / z };
@@ -857,20 +876,42 @@
           const alpha = k > 1 ? Math.min(1, parseFloat(getComputedStyle(el).opacity) || 0) : titleOpacity(el.closest('h1, .tagline'));
           if (alpha <= 0.02) continue;
           const size = f.size * scale;
-          g.font = `${f.style} ${size}px ${f.family}`;
-          // the text sits OFF px to the right of the letter (the shadow offset, in device pixels whatever
-          // the transform, brings the glow back onto it), turned with the letter about that point
-          const x = (r.left + r.width / 2 + OFF) * dpr, y = (r.top + r.height / 2) * dpr;
-          const cos = Math.cos(ang) * dpr, sin = Math.sin(ang) * dpr;
-          g.setTransform(cos, sin, -sin, cos, x, y);
-          for (const [blur, light, a] of [[size * 0.12 * k, 70, 0.9], [size * 0.35 * k, 55, 0.7]]) { // a tight core, a wide halo
-            g.shadowBlur = blur * dpr;
-            g.shadowColor = `hsla(${hue % 360}, 100%, ${light}%, ${a * alpha * strength})`;
-            g.fillStyle = '#000';
-            g.fillText(el.textContent, 0, 0);
-          }
-          g.setTransform(1, 0, 0, 1, 0, 0);
+          const cx = r.left + r.width / 2, cy = r.top + r.height / 2;
+          const reach = Math.max(r.width, r.height) / 2 + size * 0.35 * k * 1.3 + 4; // the letter and its halo
+          todo[blk ? 1 : 0].push({ el, hue, k, strength, alpha, size, f, ang, cx, cy, reach });
         }
+        layers.forEach((L, i) => {
+          const list = todo[i];
+          let box = null;
+          for (const d of list) {
+            const l = Math.max(-100, d.cx - d.reach), t = Math.max(-100, d.cy - d.reach);
+            const rr = Math.min(W + 100, d.cx + d.reach), bb = Math.min(H + 100, d.cy + d.reach);
+            box = box ? { l: Math.min(box.l, l), t: Math.min(box.t, t), r: Math.max(box.r, rr), b: Math.max(box.b, bb) } : { l, t, r: rr, b: bb };
+          }
+          place(L, box, dpr);
+          if (!box) return;
+          if (i === 1) { // the zoom's centre, in this layer's own pixels (see kickPulse)
+            const o = `${zcx - L.x}px ${zcy - L.y}px`;
+            if (L.cv.style.transformOrigin !== o) L.cv.style.transformOrigin = o;
+          }
+          const g = L.g;
+          g.textAlign = 'center'; g.textBaseline = 'middle'; g.shadowOffsetX = -OFF * dpr; g.shadowOffsetY = 0;
+          for (const d of list) {
+            g.font = `${d.f.style} ${d.size}px ${d.f.family}`;
+            // the text sits OFF px to the right of the letter (the shadow offset, in device pixels whatever
+            // the transform, brings the glow back onto it), turned with the letter about that point
+            const x = (d.cx - L.x + OFF) * dpr, y = (d.cy - L.y) * dpr;
+            const cos = Math.cos(d.ang) * dpr, sin = Math.sin(d.ang) * dpr;
+            g.setTransform(cos, sin, -sin, cos, x, y);
+            for (const [blur, light, a] of [[d.size * 0.12 * d.k, 70, 0.9], [d.size * 0.35 * d.k, 55, 0.7]]) { // a tight core, a wide halo
+              g.shadowBlur = blur * dpr;
+              g.shadowColor = `hsla(${d.hue % 360}, 100%, ${light}%, ${a * d.alpha * d.strength})`;
+              g.fillStyle = '#000';
+              g.fillText(d.el.textContent, 0, 0);
+            }
+            g.setTransform(1, 0, 0, 1, 0, 0);
+          }
+        });
       } catch (e) { window.trif?.warn('rave glow failed', String(e)); }
     };
     requestAnimationFrame(draw);

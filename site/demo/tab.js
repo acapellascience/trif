@@ -56,6 +56,24 @@
   // First in line for the browser's resize events (mods' scripts come after this one), and one of our own
   // when the panel opens or closes.
   addEventListener('resize', (e) => { if (e.isTrusted) measure(); });
+
+  // On a phone with the keyboard up, the screen's visible part (the visual viewport) ends at the keyboard,
+  // but the sheet is fixed to the bottom of the page's own viewport, which an iPhone can leave well below it:
+  // the gap showed the page behind (a rainbow stripe under Rainbow Rave). So the sheet's bottom follows the
+  // visible part's bottom, sitting on the keyboard; with no keyboard (a gap of a toolbar's height or less)
+  // it's back at the bottom.
+  if (window.visualViewport) {
+    const vv = window.visualViewport;
+    const sit = () => {
+      if (!box) return;
+      const layoutH = root.clientHeight + cut.h; // (the page's viewport, unshrunk: see cut)
+      const gap = phone() ? Math.round(layoutH - (vv.offsetTop + vv.height)) : 0;
+      const bottom = gap > 60 ? `${gap}px` : '';
+      if (box.style.bottom !== bottom) box.style.bottom = bottom;
+    };
+    vv.addEventListener('resize', sit);
+    vv.addEventListener('scroll', sit);
+  }
   const remeasure = () => { if (measure()) dispatchEvent(new Event('resize')); };
 
   // Back on the plain home page (no ?mods=: its address typed again, a link back here) with demo mods

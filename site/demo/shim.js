@@ -150,6 +150,15 @@
     state.active = saved.active || null;
     state.sent = !!saved.sent || state.replayed.size > 0;
     runSeq = Number(saved.runSeq) || 0;
+    // You Win's "sandbox mode" (tab.js): the demo's chats are over (the box is the visitor's), and the chat
+    // starts afresh with the note on what's next: get TRIF to keep modding the page. (Once: persist below
+    // doesn't keep the flag.)
+    if (saved.sandbox) {
+      state.replayed = new Set(DEMO.chats.map((c) => c.id));
+      state.active = null;
+      state.sent = true;
+      store.set(`chat:${SITE}`, { sessionId: null, agent: null, messages: [{ role: 'assistant', text: DEMO.words.sandbox, time: Date.now() }], run: null, last: null });
+    }
   } else {
     // First time: only the mods running on the page (its ?mods=), on.
     let running = new Set();
@@ -318,7 +327,7 @@
     run.timers.push(later(() => {
       updateChat((c) => {
         if (c.run?.runId !== run.runId) return false;
-        c.messages.push({ role: 'mod', text: DEMO.words.notLive, time: Date.now() });
+        c.messages.push({ role: 'assistant', text: DEMO.words.notLive, time: Date.now() }); // (assistant: its link works)
       });
       finish(run, true);
     }, 700));

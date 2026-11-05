@@ -21,8 +21,14 @@ export const typeFor = (file) => TYPES[file.split('.').pop()] || 'application/oc
 
 // What the demo says itself (the panel's own words are the extension's).
 const WORDS = {
-  notLive: 'This demo only plays example chats, so nothing reads what you type here. ' +
-    'The real TRIF sends your message to your own coding agent (Claude Code, Codex or an open model) on your computer, and it writes the mod.',
+  notLive: 'This demo only plays example chats, so nothing reads what you type here.\n\n' +
+    'With TRIF installed, your own coding agent (Claude Code, Codex or an open model) reads your message, looks at the page and writes the mod. ' +
+    '[Get TRIF](https://github.com/acapellascience/trif#install) and ask it for real.',
+  // The chat after You Win's "sandbox mode" (tab.js), in place of the demo's chats
+  sandbox: '**Sandbox mode.** Every mod from the demo is in the list above, switched off. Switch them on and off in any order you like.\n\n' +
+    'That\'s as far as the demo goes: it can only replay chats, not write new mods. ' +
+    'To keep modding this page, or any other, get TRIF. It runs on your computer with your own Claude Code or Codex, so you can ask for anything here and watch it happen.\n\n' +
+    '[How to install TRIF](https://github.com/acapellascience/trif#install)',
   codexModels: 'In TRIF, this lists the models your Codex account can use.',
   noKeys: 'This demo doesn’t take keys.',
   noLogin: 'This demo is logged in already.',

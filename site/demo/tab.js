@@ -93,8 +93,7 @@
         saved.store = saved.store || {};
         saved.store.disabled = Object.fromEntries(saved.mods.map((s) => [`timsrobot.com/${s}`, true]));
         saved.active = null;
-        const chat = saved.store['chat:timsrobot.com'];
-        if (chat) chat.run = null;
+        saved.sandbox = true; // (the panel clears its chat for the sandbox's note: shim.js)
         sessionStorage.setItem('trif-demo-state', JSON.stringify(saved));
         sessionStorage.setItem(OPEN, '1');
         sessionStorage.setItem(MIN, '');

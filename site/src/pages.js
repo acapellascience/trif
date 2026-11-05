@@ -130,7 +130,10 @@ html.demo-kb, html.demo-kb body { overflow: hidden !important; overscroll-behavi
        rainbow stripe under Rainbow Rave) */
     box-shadow: 0 -6px 24px rgb(0 0 0 / 0.15); }
   /* under the open sheet, to the bottom of the whole screen, in the sheet's colour (demo.js: under) */
-  /* (the layer under the open sheet, demo.js: under, is off for now: .demo-under stays hidden) */
+  /* under the open sheet, to the bottom of the page's own viewport (no further: a layer reaching past it
+     gave the phone something to scroll, keyboard up), in the sheet's colour (demo.js: under) */
+  html.demo-open:not(.demo-min) .demo-under { display: block; position: fixed; left: 0; right: 0; bottom: 0;
+    background: var(--card); z-index: 2147483647; pointer-events: none; }
   /* the top bar is the handle: swipe it down to tuck the sheet away, up (or tap it) to bring it back (demo.js) */
   .demo-panel-top { position: relative; height: 34px; flex: none; padding: 4px 6px 0 14px; touch-action: none; cursor: grab; user-select: none; -webkit-user-select: none; }
   .demo-panel-top::before { content: ''; position: absolute; left: 50%; top: 6px; width: 36px; height: 4px; margin-left: -18px;

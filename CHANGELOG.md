@@ -6,10 +6,18 @@ needs a section here for the version it releases.
 
 ## 0.2.1
 
-- **Claude Code runs stay in your mods folder.** In 0.2.0, a side-panel run using Claude Code could search
-  files anywhere in your home folder (its search tools weren't limited the way its file reading was), and
-  on a Mac that made "node would like to access…" prompts pop up. Now its searches stay in `~/.trif`, like
-  everything else it reads.
+- **Side-panel agents are kept on a tighter leash.** In 0.2.0:
+  - a Claude Code run could search files anywhere in your home folder (its search tools weren't limited
+    the way its file reading was), and on a Mac that made "node would like to access…" prompts pop up;
+  - Claude Code runs also had a dozen more tools than TRIF uses (among them sending messages to your other
+    Claude sessions and notifications to you), and could write into the folder where your other Claude
+    sessions keep their scratch files;
+  - Codex runs could search the web, read other users' folders and other disks, and read and write the
+    computer's shared temporary folders, where other programs (Claude Code sessions among them) keep
+    their files.
+
+  Now Claude Code runs only get the tools TRIF needs, and both agents' searches, reads and writes stay
+  within what TRIF allows: no web search, no shared temporary folders, no other users' folders or disks.
 
 ## 0.2.0
 

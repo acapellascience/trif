@@ -5,7 +5,7 @@
 //
 //   codex exec <codex.js flags, the same permission profile>
 //              -c model_providers.trif-open={ name = "…", base_url = "…", wire_api = "responses" … }
-//              -c model_provider="trif-open" -c web_search="disabled"
+//              -c model_provider="trif-open"
 //              -c shell_environment_policy.exclude=[<API key patterns>] -m MODEL [resume THREAD_ID] -   (message on stdin)
 //
 // (base_url: the provider's, or for a provider with a key, the run's key proxy: see "The API key".)
@@ -177,9 +177,8 @@ function providerArgs(om) {
   fields.push('supports_websockets = false');
   // Local models can take minutes to load before the first token; and fail fast when nothing listens.
   if (om.server) fields.push('stream_idle_timeout_ms = 900000', 'request_max_retries = 1', 'stream_max_retries = 1');
-  const args = ['-c', `model_providers.${PROVIDER_ID}={ ${fields.join(', ')} }`, '-c', `model_provider="${PROVIDER_ID}"`,
-    // OpenAI's hosted web search tool: no other provider has it.
-    '-c', 'web_search="disabled"'];
+  // (No web search: codex.js turns OpenAI's hosted tool off for every run; no other provider has it anyway.)
+  const args = ['-c', `model_providers.${PROVIDER_ID}={ ${fields.join(', ')} }`, '-c', `model_provider="${PROVIDER_ID}"`];
   // (shell_environment_policy.exclude, keeping API key variables a shell profile still exports from the
   // commands: codex.js adds it to every Codex run.)
   return args;

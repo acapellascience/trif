@@ -1,11 +1,12 @@
 'use strict';
 // Claude Code adapter (tested with Claude Code 2.1.149). See docs/PROTOCOL.md "Agent adapters".
 
+const fs = require('fs');
 const path = require('path');
 const { findExecutable, versionOf, relToWorkspace, oneLine, parseJsonLine, captureSync } = require('./util');
 const { within, ignoresCase } = require('../pathcheck');
 
-// What a side-panel run may do (runs.js runLimits gives the paths). Two layers:
+// What a side-panel run may do (runs.js runLimits gives the paths). Only the tools in TOOLS, then two layers:
 //   - Claude Code's own tools, by permission rules passed on the command line (Claude Code 2.1.312
 //     ignored `Bash(...)` allow rules from the workspace's .claude/settings.json in -p runs). Edits are
 //     allowed under sites/ only (no --permission-mode acceptEdits, which allowed the whole workspace: its
@@ -22,6 +23,11 @@ const { within, ignoresCase } = require('../pathcheck');
 //     other sites' folders. failIfUnavailable: no sandbox, no commands.
 // No command that runs arbitrary code (not even `node --test`); `trif check` replaces `node --check`.
 const ALLOWED_TOOLS = ['Read(./**)', 'Edit(./sites/**)', 'Bash(trif:*)', 'Bash(webmods:*)', 'Bash(cd:*)', 'Bash(ls:*)'];
+// The only tools a run has at all (--tools; Write and Glob follow the Edit and Read rules). Not just
+// denies: every Claude Code release adds tools (2.1.316 offered 22 in these runs: sub-agents, messages to
+// the user's other Claude sessions, push notifications, background commands, claude.ai design sync...),
+// and in -p a tool that needs no approval runs. tests/agent-tools.test.js checks the list a real run gets.
+const TOOLS = ['Read', 'Edit', 'Write', 'Glob', 'Grep', 'Bash'];
 // (No Read denies for TRIF's secrets and logs: since 0.2.0 they're in the private folder, outside the
 // workspace, which a run's file tools can't read without approval and its sandbox denies.)
 const DENIED_TOOLS = ['WebFetch', 'WebSearch'];
@@ -49,7 +55,7 @@ function tooOld(version) {
  * The run's own rules (--settings): the sandbox for its shell commands, and per-run permission rules
  * (other sites' folders and screenshots). `limits` is runs.js runLimits.
  */
-function runSettings({ workspace = '', readOnly = [], lockedDirs = [], denied = [], home, readable = [], privateDir, box, screenshots, skills = [], skillSecrets = [], skillLinks = [], workspaceLinks = [] } = {}) {
+function runSettings({ workspace = '', readOnly = [], lockedDirs = [], denied = [], home, readable = [], privateDir, box, screenshots, skills = [], skillSecrets = [], skillLinks = [], workspaceLinks = [], systemTemp = [] } = {}) {
   // Absolute ("//" + path): a "./" rule follows the agent's current folder, so after `cd sites/x.com` it
   // would point somewhere else.
   const rel = (p) => `/${p}`;
@@ -66,10 +72,13 @@ function runSettings({ workspace = '', readOnly = [], lockedDirs = [], denied = 
         // Desktop, Documents and the like made macOS ask the user to allow that. The private folder by
         // name too (it can be outside the home folder), with the run's own screenshots folder inside it
         // allowed below.
-        denyRead: home ? [...new Set([home, ...(privateDir ? [privateDir] : []), ...skillSecrets.map((x) => x.path)])] : denied,
+        // And the system's temporary folders (runs.js runLimits systemTemp: /tmp, $TMPDIR), which hold
+        // other programs' files and every Claude Code session's scratch files: Claude Code's sandbox let
+        // a run's commands write into /tmp/claude-<uid> even with its own temporary folder moved (2.1.316).
+        denyRead: home ? [...new Set([home, ...(privateDir ? [privateDir] : []), ...skillSecrets.map((x) => x.path), ...systemTemp])] : denied,
         allowRead: [...(home ? readable : []), box, screenshots].filter(Boolean),
         allowWrite: [box, screenshots].filter(Boolean), // (writing there needs saying too)
-        denyWrite: [...(workspace ? STATE_FILES.map((f) => path.join(workspace, f)) : []), ...readOnly],
+        denyWrite: [...(workspace ? STATE_FILES.map((f) => path.join(workspace, f)) : []), ...readOnly, ...systemTemp],
       },
       network: { allowedDomains: [], strictAllowlist: true }, // and no unix sockets (none allowed)
     },
@@ -101,11 +110,36 @@ const NOT_LOGGED_IN = "Claude Code isn't logged in: run `claude` in a terminal a
 // With an Anthropic API key saved (agentkeys.js): the run's key proxy as ANTHROPIC_BASE_URL and a
 // placeholder key; the real key never reaches Claude Code. Without one: Claude Code's own login.
 async function prepare({ ws, logger }) {
+  workspaceSettings(ws, logger);
   return (await require('../agentkeys').prepareAgentKey('claude', { ws, logger })) || {};
+}
+
+/**
+ * The workspace's .claude/settings.json (which runs load: --setting-sources project) as `trif setup` writes
+ * it now, rewritten when it isn't: a workspace set up by an older version (or a checkout's helper, which
+ * no update re-sets up) could still allow more. 0.2.0's had bare Glob and Grep, which search anywhere.
+ */
+function workspaceSettings(ws, logger) {
+  if (!ws || !ws.home) return;
+  const dir = path.join(ws.home, '.claude');
+  const file = path.join(dir, 'settings.json');
+  const want = JSON.stringify({ permissions: { allow: ALLOWED_TOOLS, deny: DENIED_TOOLS } }, null, 2) + '\n';
+  try {
+    const st = fs.lstatSync(file, { throwIfNoEntry: false });
+    if (st && st.isFile() && fs.readFileSync(file, 'utf8') === want) return;
+    if (st && !st.isFile()) fs.rmSync(file, { recursive: true, force: true }); // never write through a link
+    fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(file, want);
+    if (logger) logger.info(`rewrote ${file} (it allowed what TRIF's runs no longer do)`);
+  } catch (e) {
+    if (logger) logger.warn(`couldn't check ${file}: ${e.message}`);
+  }
 }
 
 const adapter = {
   id: 'claude',
+  tools: TOOLS,
+  workspaceSettings,
   allowedTools: ALLOWED_TOOLS,
   deniedTools: DENIED_TOOLS,
   name: 'Claude Code',
@@ -146,6 +180,7 @@ const adapter = {
     const args = ['-p', '--output-format', 'stream-json', '--verbose',
       '--permission-mode', 'default', '--setting-sources', 'project', '--strict-mcp-config',
       '--settings', file('settings.json'),
+      '--tools', TOOLS.join(','), '--disable-slash-commands',
       '--allowedTools', ...absoluteRules(ALLOWED_TOOLS, limits.workspace),
       '--disallowedTools', ...absoluteRules(DENIED_TOOLS, limits.workspace)];
     if (context) {
@@ -155,7 +190,11 @@ const adapter = {
     if (sessionId) args.push('--resume', sessionId);
     if (model) args.push('--model', model);
     // Every other site's folder got its Edit deny rules (runSettings) and its sandbox denyWrite.
-    return { file: bin || adapter.binary, args, stdin: prompt, files, locked: (limits.lockedDirs || []).map((d) => d.rel) };
+    // Claude Code's own temporary folder (its commands' sandbox may always write there): the run's own
+    // (runs.js runLimits agentTmp), not /tmp/claude-<uid>, which every Claude Code session on the computer
+    // shares (their scratch files and task output: a run's commands could write into them, 2.1.316).
+    const env = limits.agentTmp ? { CLAUDE_CODE_TMPDIR: limits.agentTmp, TMPDIR: limits.agentTmp } : {};
+    return { file: bin || adapter.binary, args, stdin: prompt, files, env, locked: (limits.lockedDirs || []).map((d) => d.rel) };
   },
 
   // One stdout line -> zero or more normalized events. `state` is per run ({workspace}).

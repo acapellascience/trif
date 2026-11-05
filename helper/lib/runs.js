@@ -362,6 +362,46 @@ function deniedInHome(home, readable) {
   return out;
 }
 
+// Folders outside the home folder that hold other people's files or other disks: other users' home
+// folders, other volumes (external drives, disk images, network shares).
+const SHARED_ROOTS = process.platform === 'darwin' ? ['/Volumes', '/Users'] : ['/home', '/media', '/mnt', '/run/media'];
+
+/**
+ * macOS: the user's own folder beside the temporary one (/var/folders/xx/…/: C, the user's caches, X, 0),
+ * whose temporary folder T the agents deny by their own means. Each item but T, as real paths.
+ */
+function userTempSiblings(tmpdir = os.tmpdir()) {
+  const t = realOrResolved(tmpdir);
+  if (process.platform !== 'darwin' || !/^\/private\/var\/folders\//.test(t)) return [];
+  const parent = path.dirname(t);
+  try { return fs.readdirSync(parent).map((n) => path.join(parent, n)).filter((p) => p !== t); } catch { return []; }
+}
+
+/**
+ * What to deny outside the home folder: each item in SHARED_ROOTS (real paths, as sandboxes compare),
+ * except the home folder itself and what leads to it (deniedInHome handles it), what leads to
+ * something the run may read, and the link to the startup disk (/Volumes/Macintosh HD -> /). The
+ * system's temporary folders are denied by the agents' own means (codex.js :tmpdir, :slash_tmp);
+ * the user's own folder beside $TMPDIR (userTempSiblings) is added here.
+ */
+function deniedOutsideHome(home, readable, roots = SHARED_ROOTS) {
+  const ci = ignoresCase(home);
+  const holds = (outer, p) => within(p, outer, { ci, orEqual: true });
+  const out = [];
+  for (const root of roots) {
+    let names;
+    try { names = fs.readdirSync(root); } catch { continue; } // not on this system
+    for (const n of names) {
+      const p = path.join(root, n);
+      const rp = realOrResolved(p);
+      if (rp === path.parse(rp).root) continue; // the startup disk
+      if ([p, rp].some((x) => holds(x, home) || readable.some((r) => holds(x, r)))) continue;
+      out.push(rp);
+    }
+  }
+  return [...new Set([...out, ...userTempSiblings()])];
+}
+
 /**
  * What a run may touch, for the agents' sandboxes, which macOS enforces (docs/PROTOCOL.md "Run scope"):
  *   readable  the workspace, all of it (nothing private is kept there), the TRIF code `trif` runs
@@ -410,14 +450,33 @@ function runLimits(ws, { scope, box, screenshotsReal, modsReal }) {
   const deniedTarget = (t) => under(t, [privateDir]) || (within(t, home, { ci }) && (!under(t, readable) || under(t, inHome)));
   const { secrets, links } = skillSecrets(skills, deniedTarget);
   const skillDenied = secrets.map((x) => x.path);
-  const denied = [...inHome, privateDir, ...skillDenied];
+  const denied = [...inHome, ...deniedOutsideHome(home, readable), privateDir, ...skillDenied];
   // The same read-only folders relative to the workspace, as modSnapshot names files: a change under them
   // can't be the run's doing (held.js). Only once the agent's adapter has protected each one: its
   // command() returns `locked`, the ones it did (runs.js uses that, not this).
   const locked = lockedDirs.map((d) => d.rel);
   // Links in the mods folder and the trash that lead out of it (or where the run may not read).
   const wsLinks = workspaceLinks(ws, mods, (t) => !within(t, shots, { ci, orEqual: true }) && deniedTarget(t));
-  return { readable, writable, readOnly, locked, lockedDirs, denied, home, skills, skillSecrets: secrets, skillLinks: links, workspaceLinks: wsLinks, privateDir, workspace: real(ws.home), box: real(box), screenshots: shots, modsDir: mods };
+  // The run's temporary folder (its commands'; Codex's own stays where it is), in its box: runs.js makes it.
+  const tmp = path.join(real(box), 'tmp');
+  // Claude Code's own (CLAUDE_CODE_TMPDIR), which its commands' sandbox may always write: one of the run's
+  // own, short (Claude Code 2.1.316 falls back to the /tmp/claude-<uid> every session shares when
+  // <it>/claude-<uid> is longer than 44 bytes), as the literal /tmp path it measures. runs.js makes it.
+  const agentTmp = shortTmp(box);
+  // The system's temporary folders the run may neither read nor write: every Claude Code session's
+  // scratch files and task output (/tmp/claude-<uid>), and $TMPDIR. (codex.js denies /tmp and $TMPDIR
+  // whole, by its own names; Claude Code's commands need /tmp for agentTmp.)
+  const systemTemp = [...new Set([path.join(real('/tmp'), `claude-${typeof process.getuid === 'function' ? process.getuid() : 0}`), real(os.tmpdir())])]
+    .filter((p) => !within(tmp, p, { ci, orEqual: true }) && !within(real(agentTmp), p, { ci, orEqual: true }));
+  return { readable, writable, readOnly, locked, lockedDirs, denied, home, skills, skillSecrets: secrets, skillLinks: links, workspaceLinks: wsLinks, privateDir, workspace: real(ws.home), box: real(box), tmp, agentTmp, systemTemp, screenshots: shots, modsDir: mods };
+}
+
+/**
+ * A run's short temporary folder for Claude Code itself (runLimits agentTmp): /tmp/trif-<the last 8 of the
+ * run id>, its random end (newRunId: the start of it is the time, the same for runs started together).
+ */
+function shortTmp(box) {
+  return path.join('/tmp', `trif-${path.basename(box).replace(/[^\w-]/g, '').slice(-8)}`);
 }
 
 /** ws with its private folder's paths (paths.js workspace has them; a hand-made ws may not). */
@@ -577,6 +636,18 @@ class Runs {
         try { if (Date.now() - fs.statSync(p).mtimeMs > 2 * RUN_TIMEOUT_MS) fs.rmSync(p, { recursive: true, force: true }); } catch { /* ignore */ }
       }
     } catch { /* ignore */ }
+    // And their Claude Code temporary folders (runLimits agentTmp), only the user's own.
+    try {
+      const uid = typeof process.getuid === 'function' ? process.getuid() : null;
+      for (const f of fs.readdirSync('/tmp')) {
+        if (!/^trif-[\w-]{1,8}$/.test(f)) continue;
+        const p = path.join('/tmp', f);
+        try {
+          const st = fs.lstatSync(p);
+          if (st.isDirectory() && (uid === null || st.uid === uid) && Date.now() - st.mtimeMs > 2 * RUN_TIMEOUT_MS) fs.rmSync(p, { recursive: true, force: true });
+        } catch { /* ignore */ }
+      }
+    } catch { /* ignore */ }
     // Screenshots older than SCREENSHOT_KEEP_MS (store/PRIVACY.md says so), in every site's folder.
     pruneScreenshots(run.ws.screenshots);
     // Keep the last KEEP_RUN_LOGS - 1 (this run makes KEEP_RUN_LOGS).
@@ -607,6 +678,11 @@ class Runs {
     try {
       fs.mkdirSync(boxRoot(), { recursive: true, mode: 0o700 });
       fs.mkdirSync(run.box, { mode: 0o700 }); // (fresh: not recursive, so it can't already be a link)
+      fs.mkdirSync(path.join(run.box, 'tmp'), { mode: 0o700 }); // its temporary folder (runLimits tmp)
+      // Claude Code's own (runLimits agentTmp; fresh, not recursive: never one someone left there, a link
+      // included, nor another run's).
+      fs.mkdirSync(shortTmp(run.box), { mode: 0o700 });
+      run.agentTmp = shortTmp(run.box);
       const shots = screenshotsFolder(ws, run.scope);
       run.screenshots = shots.dir;
       run.screenshotsReal = shots.real;
@@ -674,6 +750,7 @@ class Runs {
       return this._finish(run, { code: null, signal: null });
     }
     const { file, args, locked } = cmd;
+    if (cmd.env) env = { ...env, ...cmd.env }; // (claude: its temporary folder)
 
     run.before = modSnapshot(ws.modsDir, ws.home);
     // Changes in these folders aren't held on this run's account (held.js): only the ones the adapter
@@ -811,6 +888,7 @@ class Runs {
     try { run.boxWatcher?.close(); } catch { /* ignore */ }
     if (run.box) setTimeout(() => { try { fs.rmSync(run.box, { recursive: true, force: true }); } catch { /* ignore */ } }, 2000).unref();
     if (run.agentDir) { try { fs.rmSync(run.agentDir, { recursive: true, force: true }); } catch { /* ignore */ } }
+    if (run.agentTmp) { try { fs.rmSync(run.agentTmp, { recursive: true, force: true }); } catch { /* ignore */ } }
     // Leftover processes of a finished run (backgrounded by a tool) go too, by force after a moment: a
     // write landing after the held-mod window (RECENT_MS) would never be held.
     if (run.child && run.child.pid && !run.stopped) {
@@ -857,5 +935,5 @@ class Runs {
 }
 
 module.exports = {
-  runLimits, Runs, snapshot, modSnapshot, diffSnapshots, normalizeSite, boxRoot, RUN_TIMEOUT_MS, PRIVATE_FILES, skillDirs, skillSecrets, deniedInHome, trifCode, withPrivatePaths,
+  runLimits, Runs, snapshot, modSnapshot, diffSnapshots, normalizeSite, boxRoot, RUN_TIMEOUT_MS, PRIVATE_FILES, skillDirs, skillSecrets, deniedInHome, deniedOutsideHome, trifCode, withPrivatePaths,
   pruneScreenshots, screenshotsFolder, checkModsFolder, SCREENSHOT_KEEP_MS };

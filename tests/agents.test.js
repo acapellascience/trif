@@ -192,6 +192,8 @@ test('claude adapter: command flags, resume and model; nothing private in argv',
   assert.equal(c.file, '/x/claude');
   assert.deepEqual(c.args, ['-p', '--output-format', 'stream-json', '--verbose', '--permission-mode', 'default',
     '--setting-sources', 'project', '--strict-mcp-config', '--settings', '/c/boxes/r1.agent/settings.json',
+    // The only tools it has (every Claude Code release adds some), and no skills or slash commands.
+    '--tools', 'Read,Edit,Write,Glob,Grep,Bash', '--disable-slash-commands',
     // Absolute rules ("//" + path): a "./" rule would follow the agent after a `cd`.
     '--allowedTools', 'Read(//h/**)', 'Edit(//h/sites/**)', 'Bash(trif:*)', 'Bash(webmods:*)', 'Bash(cd:*)', 'Bash(ls:*)',
     '--disallowedTools', 'WebFetch', 'WebSearch', '--append-system-prompt-file', '/c/boxes/r1.agent/context.md']);
@@ -308,6 +310,55 @@ test('run limits: the user\'s skill folders are readable (real paths, links foll
   assert.ok(!/skills" = "write"/.test(perm));
 });
 
+test('run limits: other users\' folders and other volumes are denied; the home folder, the startup disk and the way to what a run reads are not', () => {
+  const { deniedOutsideHome } = require('../helper/lib/runs');
+  const r = fs.realpathSync(tempDir());
+  const mk = (...p) => { fs.mkdirSync(path.join(r, ...p), { recursive: true }); return path.join(r, ...p); };
+  const users = mk('Users'); const volumes = mk('Volumes');
+  const home = mk('Users', 'me'); mk('Users', 'Shared'); mk('Users', 'other');
+  mk('Volumes', 'Backup'); const node = mk('Volumes', 'Tools', 'node');
+  fs.symlinkSync('/', path.join(volumes, 'Macintosh HD'));
+  const denied = deniedOutsideHome(home, [path.join(home, '.trif'), node], [users, volumes, path.join(r, 'missing')]);
+  const own = denied.filter((p) => p.startsWith(r)).map((p) => path.relative(r, p)).sort();
+  assert.deepEqual(own, ['Users/Shared', 'Users/other', 'Volumes/Backup']);
+});
+
+test('claude adapter: a run restores the workspace\'s .claude/settings.json (0.2.0\'s allowed Glob and Grep anywhere), never through a link', () => {
+  const h = fs.realpathSync(tempDir());
+  const file = path.join(h, '.claude', 'settings.json');
+  const want = JSON.stringify(agents.CLAUDE_SETTINGS, null, 2) + '\n';
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  fs.writeFileSync(file, JSON.stringify({ permissions: { allow: ['Read(./**)', 'Glob', 'Grep'] } }));
+  claude.workspaceSettings({ home: h });
+  assert.equal(fs.readFileSync(file, 'utf8'), want);
+  const before = fs.statSync(file).mtimeMs;
+  claude.workspaceSettings({ home: h });
+  assert.equal(fs.statSync(file).mtimeMs, before, 'left alone when it is right');
+  // A link there: replaced, and where it led untouched.
+  const elsewhere = path.join(h, 'elsewhere.json');
+  fs.writeFileSync(elsewhere, 'keep');
+  fs.rmSync(file);
+  fs.symlinkSync(elsewhere, file);
+  claude.workspaceSettings({ home: h });
+  assert.equal(fs.readFileSync(elsewhere, 'utf8'), 'keep');
+  assert.ok(fs.lstatSync(file).isFile());
+  assert.equal(fs.readFileSync(file, 'utf8'), want);
+});
+
+test('claude adapter: the run\'s own temporary folder, and no reading or writing the system\'s', () => {
+  const limits = { workspace: '/h', home: '/Users/u', readable: ['/h'], privateDir: '/p', box: '/c/boxes/r1', screenshots: '/p/screenshots/x.com',
+    agentTmp: '/tmp/trif-r1', systemTemp: ['/private/tmp/claude-501', '/private/var/folders/xx/T'] };
+  const c = claude.command({ bin: '/x/claude', prompt: 'hi', agentDir: '/c/boxes/r1.agent', ...limits });
+  assert.deepEqual(c.env, { CLAUDE_CODE_TMPDIR: '/tmp/trif-r1', TMPDIR: '/tmp/trif-r1' });
+  const fsb = JSON.parse(c.files[0].content).sandbox.filesystem;
+  for (const t of limits.systemTemp) {
+    assert.ok(fsb.denyRead.includes(t), `denyRead ${t}`);
+    assert.ok(fsb.denyWrite.includes(t), `denyWrite ${t}`);
+  }
+  // Without one (a hand-made limits object): nothing set.
+  assert.deepEqual(claude.command({ bin: '/x/claude', prompt: 'hi', agentDir: '/c/a', workspace: '/h' }).env, {});
+});
+
 test('run limits: inside skill folders, secrets and links out of what a run may read are denied', () => {
   const { runLimits } = require('../helper/lib/runs');
   const P = require('../helper/lib/paths');
@@ -372,7 +423,7 @@ test('run limits: inside skill folders, secrets and links out of what a run may 
 });
 
 test('codex adapter: command, resume, JSONL events', () => {
-  const c = codex.command({ bin: '/x/codex', prompt: 'P the secret', model: 'gpt-5', readable: ['/h', '/app'], writable: ['/h/sites', '/p/screenshots/x.com', '/c/r1'], readOnly: ['/h/sites/y.com'], denied: ['/Users/u/.ssh', '/p'] });
+  const c = codex.command({ bin: '/x/codex', prompt: 'P the secret', model: 'gpt-5', readable: ['/h', '/app'], writable: ['/h/sites', '/p/screenshots/x.com', '/c/r1'], readOnly: ['/h/sites/y.com'], denied: ['/Users/u/.ssh', '/p'], tmp: '/c/r1/tmp' });
   assert.equal(c.args[0], 'exec');
   assert.ok(c.args.includes('--json') && c.args.includes('--skip-git-repo-check'));
   // The message on stdin (`-`), not in argv.
@@ -386,7 +437,16 @@ test('codex adapter: command, resume, JSONL events', () => {
   assert.ok(c.args.includes('default_permissions="trif-run"'));
   // No network: `trif` reaches the helper through the run's mailbox.
   assert.equal(c.args.find((a) => a.startsWith('permissions=')),
-    'permissions={ trif-run = { extends = ":workspace", filesystem = { ":workspace_roots" = { "." = "read" }, "/Users/u/.ssh" = "deny", "/p" = "deny", "/h" = "read", "/app" = "read", "/h/sites" = "write", "/p/screenshots/x.com" = "write", "/c/r1" = "write", "/h/sites/y.com" = "read" }, network = { enabled = false } } }');
+    // (Nor the system's temporary folders, which :workspace makes writable: other programs' files, other
+    // Claude Code sessions' scratch files.)
+    'permissions={ trif-run = { extends = ":workspace", filesystem = { ":workspace_roots" = { "." = "read" }, ":tmpdir" = "deny", ":slash_tmp" = "deny", "/Users/u/.ssh" = "deny", "/p" = "deny", "/h" = "read", "/app" = "read", "/h/sites" = "write", "/p/screenshots/x.com" = "write", "/c/r1" = "write", "/h/sites/y.com" = "read" }, network = { enabled = false } } }');
+  // Its commands' temporary folder: the run's own (zsh's here-documents too).
+  assert.ok(c.args.includes('shell_environment_policy.set={ TMPDIR = "/c/r1/tmp", TMPPREFIX = "/c/r1/tmp/zsh" }'));
+  // No web search (on by default, network or not), and none of the features that act outside the sandbox.
+  assert.ok(c.args.includes('web_search="disabled"'));
+  for (const f of ['apps', 'plugins', 'browser_use', 'browser_use_external', 'browser_use_full_cdp_access', 'computer_use', 'image_generation', 'skill_mcp_dependency_install', 'hooks']) {
+    assert.ok(c.args.includes(`features.${f}=false`), f);
+  }
   assert.equal(codex.tooOld('codex-cli 0.137.9'), true);
   assert.equal(codex.tooOld('0.166.0'), false);
   assert.equal(codex.tooOld(null), false);
@@ -548,8 +608,11 @@ test('agent env is sanitized: no inherited CLAUDE*/ANTHROPIC_*/CODEX_*, never an
   const r = await extRequest(ext, 'agent.start', { ...START, prompt: 'ENVDUMP' });
   await waitDone(ext, r.result.runId);
   const env = callFor(bin, 'ENVDUMP').env;
-  const leaked = Object.keys(env).filter((k) => /^(CLAUDE|ANTHROPIC_|CODEX_)/.test(k) && !['ANTHROPIC_API_KEY', 'ANTHROPIC_BASE_URL'].includes(k));
+  const leaked = Object.keys(env).filter((k) => /^(CLAUDE|ANTHROPIC_|CODEX_)/.test(k) && !['ANTHROPIC_API_KEY', 'ANTHROPIC_BASE_URL', 'CLAUDE_CODE_TMPDIR'].includes(k));
   assert.deepEqual(leaked, []);
+  // (CLAUDE_CODE_TMPDIR is TRIF's: the run's own temporary folder, not the /tmp/claude-<uid> every session shares.)
+  assert.match(env.CLAUDE_CODE_TMPDIR, /^\/tmp\/trif-[\w-]{1,8}$/);
+  assert.equal(env.TMPDIR, env.CLAUDE_CODE_TMPDIR);
   // config.json's key (no keyring here to move it to): sent by the run's key proxy; the agent gets a
   // placeholder and the proxy's address, never the key or an inherited base URL.
   assert.ok(!JSON.stringify(callFor(bin, 'ENVDUMP')).includes('from-config'));

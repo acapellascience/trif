@@ -77,9 +77,10 @@ test('command: local Ollama, LM Studio, OpenRouter (through the key proxy), cust
   assert.equal(oss.modelNote(om), "(This chat's model is big-model, served by llm.example.com. Codex CLI is only the program running it: its built-in instructions are written for OpenAI's models. Asked which model you are, that's the answer: big-model.)");
   assert.match(oss.modelNote(oss.resolve({ provider: 'openrouter' }, null, 'moonshotai/kimi-k2')), /^\(This chat's model is moonshotai\/kimi-k2, served by OpenRouter\. /);
   assert.match(oss.modelNote(oss.resolve({ provider: 'ollama' })), /model is gpt-oss:20b, running on this computer in Ollama\./);
-  // The plain Codex option is untouched by all this.
+  // The plain Codex option is untouched by all this (no web search either: codex.js, every run).
   const plain = require('../helper/lib/agents/codex').command({ bin: 'codex', prompt: 'P', ...LIMITS });
-  assert.ok(!plain.args.some((a) => /trif-open|web_search/.test(a)));
+  assert.ok(!plain.args.some((a) => /trif-open/.test(a)));
+  assert.equal(plain.args.filter((a) => a === 'web_search="disabled"').length, 1);
 });
 
 test('settings: resolve (defaults, a run\'s own choice, model), keyring accounts, validation; never a key', () => {

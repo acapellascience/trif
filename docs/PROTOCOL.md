@@ -906,14 +906,36 @@ Suffix List). `helper/lib/scope.js` computes it; `extension/lib.js` mirrors the 
     `.env` beside it can't, in a run; a secret under some other name, deeper than four levels or past
     the first 5000 entries is still readable (skill folders are the user's own, but keep secrets out
     of them). These skill-folder denies are the only ones inside a readable folder.
-    "Allow-only" is about the home folder: outside it, reads are as the system allows, so a run can still
-    read `/Volumes` (other disks), `/Users/Shared`, `/tmp` and `$TMPDIR` (seen with Codex's profile), and
-    the system's own folders. Keep secrets out of those; TRIF doesn't put anything there.
+    "Allow-only" is about the home folder. Outside it, a run reads as the system allows, except: other
+    users' folders and other volumes (`deniedOutsideHome`: each item in `/Users` and `/Volumes`, or `/home`,
+    `/media`, `/mnt` and `/run/media` on Linux, but the home folder, the way to what the run may read, and
+    `/Volumes/Macintosh HD`, a link to `/`; Codex), the user's own folder beside `$TMPDIR` (its caches;
+    Codex), and the system's temporary folders (below). The system's own folders stay readable.
   - **Writes:** the mods folder, with every existing folder of another site (`all-sites/` included)
     read-only inside it; the run's screenshots folder; its mailbox. Not `held.json`, `preinstalled.json`, `.shipped/`,
     `origins.json`, `active-runs/`, `update.json`, `trash/`, `instructions.md`, `AGENTS.md`, `CLAUDE.md`,
     `.claude/`, `bin/` or `app/`. A run's commands can still create a folder for another site; its mods are
     held like any out-of-scope mod.
+  - **Temporary folders:** a run's own, never the system's (`/tmp` and `$TMPDIR` hold other programs'
+    files, and `/tmp/claude-<uid>` every Claude Code session's scratch files and task output, some of which
+    those sessions later run). Codex's `:workspace` profile makes both writable: the profile denies them
+    (`":tmpdir"`, `":slash_tmp"`) and its commands get `TMPDIR` (and zsh's `TMPPREFIX`) in the mailbox's
+    `tmp/` (`shell_environment_policy.set`; macOS's bash 3.2 writes here-documents to `/tmp` whatever
+    `TMPDIR` says, so those fail). Claude Code's sandbox always lets its commands write its own temporary
+    folder, `<CLAUDE_CODE_TMPDIR or /tmp>/claude-<uid>`, which it only uses when that path is at most 44
+    bytes (2.1.316): runs get `CLAUDE_CODE_TMPDIR` and `TMPDIR` = `/tmp/trif-<the run id's last 8>` (made fresh,
+    removed after; stale ones are swept with old mailboxes), and its sandbox denies reading and writing
+    `/tmp/claude-<uid>` and `$TMPDIR` (`systemTemp`).
+  - **Tools:** only what the limits above cover. Claude Code: `--tools Read,Edit,Write,Glob,Grep,Bash` (an
+    allowlist: 2.1.316 otherwise offers 22 in these runs, among them sub-agents, messages to the user's other
+    Claude sessions, push notifications, background commands and claude.ai design sync) and
+    `--disable-slash-commands`; Glob and Grep follow the Read rules (no bare `Glob`/`Grep` allow rule: in
+    0.2.0 they searched the whole home folder, outside the sandbox). Codex has no allowlist: web search off
+    (`web_search="disabled"`: on by default, "cached", network or not) and the features that act outside
+    the sandbox off (`codex.js` FEATURES_OFF: apps, plugins, browser and computer use, image generation,
+    MCP installs for skills, hooks); its shell, `apply_patch` and `view_image` run in the sandbox and its
+    sub-agents inherit the profile (Codex 0.166's source). `tests/agent-tools.test.js` checks the tools a
+    run gets from the installed agents, without reaching a model.
   - **Writable folders a run replaced.** The sandbox lets a run delete a folder it may write and put a
     link in its place, so the next run's limits never come from the realpath of such a folder
     (`runs.js` screenshotsFolder, checkModsFolder): a link or file where the run's screenshots folder (or
@@ -982,7 +1004,8 @@ The user's standing instructions (`instructions.md`) reach claude through the wo
 
 - **claude** (Claude Code 2.1.285+, tested with 2.1.312; older versions show as unavailable): `claude -p
   --output-format stream-json --verbose --permission-mode default --setting-sources project
-  --strict-mcp-config --settings <run settings file> --allowedTools Read(./**) "Edit(./sites/**)"
+  --strict-mcp-config --settings <run settings file> --tools Read,Edit,Write,Glob,Grep,Bash
+  --disable-slash-commands --allowedTools Read(./**) "Edit(./sites/**)"
   Bash(trif:*) Bash(webmods:*) Bash(cd:*) Bash(ls:*) --disallowedTools WebFetch WebSearch
   --append-system-prompt-file <context file> [--resume <sessionId>] [--model <model>]`, with the message
   on stdin (the rules are made absolute to the workspace, `//<path>`). In -p anything that would need approval is denied, so edits happen only under
@@ -990,7 +1013,9 @@ The user's standing instructions (`instructions.md`) reach claude through the wo
   rules: they'd search anywhere, outside the sandbox); the run settings add its sandbox and the per-run denies (see "Run scope"). (2.1.312 ignored
   `Bash(...)` allow rules from the workspace's settings file in -p runs; `trif setup` writes the same
   lists to the workspace's `.claude/settings.json` for interactive sessions there, and the deny rules
-  there apply to runs too.) Other Bash commands are denied. `--setting-sources project` keeps the user's own broader allow rules out;
+  there apply to runs too. Its allow rules do as well, so each Claude run rewrites the file first when
+  it isn't what setup writes now: 0.2.0's allowed bare `Glob` and `Grep`, and a checkout's helper is
+  never set up again by an update.) Other Bash commands are denied. `--setting-sources project` keeps the user's own broader allow rules out;
   `--strict-mcp-config` keeps their MCP servers out. stream-json lines: `{type:"system", subtype:"init",
   session_id}` → session; `{type:"assistant", message:{content:[{type:"text", text} | {type:"tool_use",
   name, input}]}}` → text / tool (summary: Bash → `input.command`; Edit/Write/Read → `input.file_path`
@@ -999,7 +1024,8 @@ The user's standing instructions (`instructions.md`) reach claude through the wo
   (type /login)".
 - **codex** (OpenAI Codex CLI 0.138+; tested with 0.166): `codex exec --json --skip-git-repo-check
   --ignore-user-config --ignore-rules -c approval_policy="never" -c default_permissions="trif-run"
-  -c permissions={…} -c shell_environment_policy.exclude=[…] [-m MODEL] [resume THREAD_ID] -`, the message
+  -c permissions={…} -c shell_environment_policy.exclude=[…] -c shell_environment_policy.set={ TMPDIR, TMPPREFIX }
+  -c web_search="disabled" -c features.<each of FEATURES_OFF>=false [-m MODEL] [resume THREAD_ID] -`, the message
   on stdin, the exec options before `resume`. JSONL
   events: thread.started (the session id), item.* (agent_message, command_execution, file_change…),
   turn.completed / turn.failed. Older versions show as unavailable, with an update hint. No side panel
@@ -1022,7 +1048,7 @@ OpenRouter serve `/v1/responses`. Every source is one custom provider passed inl
 codex exec <the codex flags and permission profile>
   -c model_providers.trif-open={ name = "OpenRouter (TRIF)", base_url = "http://127.0.0.1:<port>/<32 hex>/v1",
        wire_api = "responses", supports_websockets = false }
-  -c model_provider="trif-open" -c web_search="disabled"
+  -c model_provider="trif-open"
   -c shell_environment_policy.exclude=["*_API_KEY", "*_API_TOKEN", "*_ACCESS_TOKEN", "*_AUTH_TOKEN", "*_SECRET_KEY"]
   -m openai/gpt-oss-120b [resume THREAD_ID] -      (the message on stdin)
 ```
@@ -1036,7 +1062,8 @@ profile may still export (not `*TOKEN*`: `TRIF_RUN_TOKEN` must get through). Oll
 to load), `request_max_retries = 1`, `stream_max_retries = 1`. Not `--oss --local-provider`: in Codex
 0.166 `exec --oss` fails ("This chat uses ollama, but your current provider is openai") unless
 `model_provider` is set as well, and it **pulls** a model that isn't installed (`POST /api/pull`, many GB,
-mid-chat). `web_search` is OpenAI's hosted tool; other providers don't have it.
+mid-chat). (No `web_search` here: `codex.js` turns OpenAI's hosted tool off for every run, and other
+providers don't have it.)
 
 - **Providers** (`PROVIDERS`): `ollama` (`http://127.0.0.1:11434/v1`, default model `gpt-oss:20b`),
   `lmstudio` (`http://127.0.0.1:1234/v1`, `openai/gpt-oss-20b`), `openrouter`

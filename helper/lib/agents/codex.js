@@ -16,7 +16,17 @@
 //     files. A new folder for another site can still be created; mods in it are held until the user
 //     approves them, like any out-of-scope mod;
 //   - reach no network at all: `trif` talks to the helper through the run's mailbox (client.js), so
-//     a run can't send what it read anywhere, nor reach the helper's sockets without its site limit.
+//     a run can't send what it read anywhere, nor reach the helper's sockets without its site limit;
+//   - neither read nor write the system's temporary folders (/tmp, $TMPDIR: other programs' files,
+//     every Claude Code session's scratch files in /tmp/claude-<uid>), which Codex's :workspace profile
+//     makes writable: the commands get a temporary folder in the run's box instead (TMPDIR, and
+//     TMPPREFIX for zsh's here-documents; macOS's bash 3.2 only uses /tmp for them, so those fail);
+//   - nor read other users' folders and other volumes (runs.js deniedOutsideHome).
+// And no Codex tools beyond its shell, apply_patch and view_image (both sandboxed: checked in Codex
+// 0.166's source) and its sub-agents (which inherit the profile): web search off (on by default, even
+// with no network, "cached" mode), and the features that reach outside the sandbox off (FEATURES_OFF).
+// Codex has no tool allowlist like Claude Code's --tools: tests/agent-tools.test.js checks the tools a
+// run gets.
 // The user's own Codex config and rules files are ignored for these runs, since a sandbox_mode there would
 // replace the profile and an "allow" rule could run commands outside it.
 //
@@ -40,6 +50,12 @@ const PROFILE = 'trif-run';
 // through.)
 const EXCLUDED_VARS = ['*_API_KEY', '*_API_TOKEN', '*_ACCESS_TOKEN', '*_AUTH_TOKEN', '*_SECRET_KEY'];
 const MIN_VERSION = [0, 138, 0]; // permission profiles
+// Features on by default in Codex 0.166 that act outside the sandbox: ChatGPT apps (connectors on the
+// user's account), plugins, browser and computer use, image generation, MCP installs for skills, hooks.
+// (Unknown feature names are ignored, so older versions take these too.)
+const FEATURES_OFF = ['apps', 'plugins', 'remote_plugin', 'plugin_sharing', 'browser_use', 'browser_use_external',
+  'browser_use_full_cdp_access', 'in_app_browser', 'computer_use', 'in_app_local_automation', 'image_generation',
+  'skill_mcp_dependency_install', 'hooks', 'tool_suggest'];
 
 const tomlKey = (s) => JSON.stringify(String(s)); // a JSON string is a valid TOML basic string here
 
@@ -50,7 +66,7 @@ const tomlKey = (s) => JSON.stringify(String(s)); // a JSON string is a valid TO
  * folder is writable). No network.
  */
 function permissionsToml({ readable = [], writable = [], readOnly = [], denied = [] } = {}) {
-  const fsRules = [`${tomlKey(':workspace_roots')} = { "." = "read" }`,
+  const fsRules = [`${tomlKey(':workspace_roots')} = { "." = "read" }`, `${tomlKey(':tmpdir')} = "deny"`, `${tomlKey(':slash_tmp')} = "deny"`,
     ...denied.map((p) => `${tomlKey(p)} = "deny"`), ...readable.map((p) => `${tomlKey(p)} = "read"`),
     ...writable.map((p) => `${tomlKey(p)} = "write"`), ...readOnly.map((p) => `${tomlKey(p)} = "read"`)];
   return `{ ${PROFILE} = { extends = ":workspace", filesystem = { ${fsRules.join(', ')} }, network = { enabled = false } } }`;
@@ -112,11 +128,13 @@ const adapter = {
 
   // writable / readOnly / denied: absolute (real) paths; see permissionsToml. `config`: more -c pairs
   // (codex-oss: its provider; a plain run with an API key: the key proxy's provider, see keyProvider).
-  command({ bin, prompt, sessionId, model, readable = [], writable = [], readOnly = [], denied = [], lockedDirs = [], config = [] }) {
+  command({ bin, prompt, sessionId, model, readable = [], writable = [], readOnly = [], denied = [], lockedDirs = [], tmp = '', config = [] }) {
     // Exec options go before the `resume` subcommand (verified with Codex 0.166).
     const args = ['exec', '--json', '--skip-git-repo-check', '--ignore-user-config', '--ignore-rules',
       '-c', 'approval_policy="never"', '-c', `default_permissions="${PROFILE}"`, '-c', `permissions=${permissionsToml({ readable, writable, readOnly, denied })}`, ...config,
-      '-c', `shell_environment_policy.exclude=[${EXCLUDED_VARS.map(tomlKey).join(', ')}]`];
+      '-c', `shell_environment_policy.exclude=[${EXCLUDED_VARS.map(tomlKey).join(', ')}]`,
+      ...(tmp ? ['-c', `shell_environment_policy.set={ TMPDIR = ${tomlKey(tmp)}, TMPPREFIX = ${tomlKey(`${tmp}/zsh`)} }`] : []),
+      '-c', 'web_search="disabled"', ...FEATURES_OFF.flatMap((f) => ['-c', `features.${f}=false`])];
     if (model) args.push('-m', model);
     if (sessionId) args.push('resume', sessionId);
     // The message on stdin (`-`), not in argv, which any same-user process can read (`ps`, sysctl

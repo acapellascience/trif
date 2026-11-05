@@ -1,5 +1,6 @@
 // ==WebMod==
 // @name        G Toggles Gravity
+// @touch-name  Toggle Gravity
 // @description Grab things and throw them!
 // @match       https://timsrobot.com/*
 // @match       https://*.timsrobot.com/*

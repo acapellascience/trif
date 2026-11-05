@@ -410,7 +410,6 @@
       return;
     }
     if (d.type === 'trif-demo:grow') {
-      if (SIMPLE) return;
       const px = Math.max(0, Math.min(400, Math.round(Number(d.px) || 0)));
       document.documentElement.style.setProperty('--demo-grow', `${px}px`);
       return;

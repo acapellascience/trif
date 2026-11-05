@@ -805,6 +805,19 @@
       input.setAttribute('autocomplete', 'off');
       input.setAttribute('enterkeyhint', 'send');
       form.setAttribute('autocomplete', 'off');
+      // On a phone the box isn't in a form at all: Chrome on an iPhone still put its AutoFill bar (passwords,
+      // cards, addresses) over the keyboard for one, and swipes on that bar slid the whole screen about. The
+      // form stays, empty and hidden, for the panel's own sending (its submit event); the box, Send and Stop
+      // go in a look-alike next to it, and Send asks the form to submit.
+      if (document.documentElement.classList.contains('demo-phone')) {
+        const look = document.createElement('div');
+        look.className = form.className;
+        look.append(...form.childNodes);
+        form.after(look);
+        form.hidden = true;
+        const send = look.querySelector('#send');
+        if (send) send.addEventListener('click', (e) => { e.preventDefault(); if (!send.disabled) form.requestSubmit(); });
+      }
       if (document.documentElement.classList.contains('demo-phone')) {
         // (fitted to its text: fitBox, on every change, the panel clearing it after a send included)
         input.addEventListener('input', fitBox);

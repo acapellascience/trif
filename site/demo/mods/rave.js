@@ -878,7 +878,10 @@
           // Space shooter's You Win clears the hero's title, and adds its own "You Win!" h1)
           const alpha = k > 1 ? Math.min(1, parseFloat(getComputedStyle(el).opacity) || 0) : titleOpacity(el.closest('h1, .tagline'));
           if (alpha <= 0.02) continue;
-          const size = f.size * scale;
+          // (the scale snapped to 4% steps: the browser caches each letter's blurred glow by its size, and a
+          // size that changes every frame, under the Tilt card's perspective or the banner's entrance, made it
+          // redraw and re-blur every letter every frame, which was most of a frame's time)
+          const size = f.size * Math.max(0.04, Math.round(scale * 25) / 25);
           const cx = r.left + r.width / 2, cy = r.top + r.height / 2;
           const reach = Math.max(r.width, r.height) / 2 + size * 0.35 * k * 1.3 + 4; // the letter and its halo
           todo[blk ? 1 : 0].push({ el, hue, k, strength, alpha, size, f, ang, cx, cy, reach });

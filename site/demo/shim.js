@@ -644,6 +644,13 @@
       const m = document.getElementById('mods');
       if (m && m.open !== open) m.open = open;
     });
+    // The sheet changed size (swiped, or brought up or down): the chat ends up at its bottom, the latest
+    // message in view. (The panel is the sheet's iframe: it hears a resize; once it has settled.)
+    let settle = 0;
+    addEventListener('resize', () => {
+      clearTimeout(settle);
+      settle = setTimeout(() => { const chat = document.getElementById('chat'); if (chat) chat.scrollTop = chat.scrollHeight; }, 120);
+    });
     const hello = () => { try { if (window.parent !== window) window.parent.postMessage({ type: 'trif-demo:hello' }, location.origin); } catch {} };
     if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', () => setTimeout(hello, 50), { once: true }); else setTimeout(hello, 50);
   })();

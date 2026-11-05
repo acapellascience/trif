@@ -782,6 +782,11 @@
       // never because the sheet came back with it focused.
       let tappedBox = 0;
       input.addEventListener('pointerdown', () => { tappedBox = Date.now(); });
+      // A tap into the box to type (once it's the visitor's): a full-height sheet comes down to half, to
+      // leave room for the keyboard and the page (tab.js, as when a prompt starts typing itself in).
+      const toHalf = () => { if (!input.readOnly && window.parent !== window) { try { window.parent.postMessage({ type: 'trif-demo:typing' }, location.origin); } catch {} } };
+      input.addEventListener('pointerdown', toHalf);
+      input.addEventListener('focus', toHalf);
       input.addEventListener('focus', () => {
         if (input.readOnly || (document.documentElement.classList.contains('demo-phone') && Date.now() - tappedBox > 1500)) {
           input.blur();

@@ -11,14 +11,17 @@ const { within, ignoresCase } = require('../pathcheck');
 //     allowed under sites/ only (no --permission-mode acceptEdits, which allowed the whole workspace: its
 //     state files steer TRIF), minus every existing folder of another site; reads, the whole
 //     workspace (TRIF's private files are elsewhere: paths.js privateDir). In -p, anything else that
-//     would need approval (reading outside the workspace) is denied.
+//     would need approval (reading outside the workspace) is denied. Grep and Glob have no rules of
+//     their own: Claude Code applies the Read rules to them. A bare 'Grep' or 'Glob' allow rule would
+//     let them search anywhere (0.2.0 had them: a run grepped the whole home folder), and they run
+//     outside the sandbox below, which only wraps shell commands.
 //   - Shell commands, only `trif`, `cd` and `ls`, run in Claude Code's sandbox (macOS Seatbelt), which
 //     the system enforces whatever the command line says: no network and no sockets (so `trif`
 //     reaches the helper only through the run's mailbox, which limits it to the run's site), the same
 //     reads as Codex runs (nothing else in the home folder), and no writes to TRIF's state files or
 //     other sites' folders. failIfUnavailable: no sandbox, no commands.
 // No command that runs arbitrary code (not even `node --test`); `trif check` replaces `node --check`.
-const ALLOWED_TOOLS = ['Read(./**)', 'Glob', 'Grep', 'Edit(./sites/**)', 'Bash(trif:*)', 'Bash(webmods:*)', 'Bash(cd:*)', 'Bash(ls:*)'];
+const ALLOWED_TOOLS = ['Read(./**)', 'Edit(./sites/**)', 'Bash(trif:*)', 'Bash(webmods:*)', 'Bash(cd:*)', 'Bash(ls:*)'];
 // (No Read denies for TRIF's secrets and logs: since 0.2.0 they're in the private folder, outside the
 // workspace, which a run's file tools can't read without approval and its sandbox denies.)
 const DENIED_TOOLS = ['WebFetch', 'WebSearch'];

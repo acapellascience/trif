@@ -982,11 +982,12 @@ The user's standing instructions (`instructions.md`) reach claude through the wo
 
 - **claude** (Claude Code 2.1.285+, tested with 2.1.312; older versions show as unavailable): `claude -p
   --output-format stream-json --verbose --permission-mode default --setting-sources project
-  --strict-mcp-config --settings <run settings file> --allowedTools Read(./**) Glob Grep "Edit(./sites/**)"
+  --strict-mcp-config --settings <run settings file> --allowedTools Read(./**) "Edit(./sites/**)"
   Bash(trif:*) Bash(webmods:*) Bash(cd:*) Bash(ls:*) --disallowedTools WebFetch WebSearch
   --append-system-prompt-file <context file> [--resume <sessionId>] [--model <model>]`, with the message
   on stdin (the rules are made absolute to the workspace, `//<path>`). In -p anything that would need approval is denied, so edits happen only under
-  `sites/`; the run settings add its sandbox and the per-run denies (see "Run scope"). (2.1.312 ignored
+  `sites/`, and Grep and Glob, which follow the Read rules, only search the workspace (no bare `Grep`/`Glob`
+  rules: they'd search anywhere, outside the sandbox); the run settings add its sandbox and the per-run denies (see "Run scope"). (2.1.312 ignored
   `Bash(...)` allow rules from the workspace's settings file in -p runs; `trif setup` writes the same
   lists to the workspace's `.claude/settings.json` for interactive sessions there, and the deny rules
   there apply to runs too.) Other Bash commands are denied. `--setting-sources project` keeps the user's own broader allow rules out;

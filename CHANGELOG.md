@@ -4,6 +4,13 @@ What's new in each TRIF release (called WebMods before 0.2.0). The text under a 
 panel shows under "What's new", so it's written for people using TRIF. `node scripts/release.js <version>`
 needs a section here for the version it releases.
 
+## 0.2.1
+
+- **Claude Code runs stay in your mods folder.** In 0.2.0, a side-panel run using Claude Code could search
+  files anywhere in your home folder (its search tools weren't limited the way its file reading was), and
+  on a Mac that made "node would like to access…" prompts pop up. Now its searches stay in `~/.trif`, like
+  everything else it reads.
+
 ## 0.2.0
 
 - **WebMods is now TRIF: Tim's Robot Internet Fixer**, with a new icon: the robot himself. Your mods,

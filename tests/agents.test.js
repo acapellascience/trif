@@ -193,7 +193,7 @@ test('claude adapter: command flags, resume and model; nothing private in argv',
   assert.deepEqual(c.args, ['-p', '--output-format', 'stream-json', '--verbose', '--permission-mode', 'default',
     '--setting-sources', 'project', '--strict-mcp-config', '--settings', '/c/boxes/r1.agent/settings.json',
     // Absolute rules ("//" + path): a "./" rule would follow the agent after a `cd`.
-    '--allowedTools', 'Read(//h/**)', 'Glob', 'Grep', 'Edit(//h/sites/**)', 'Bash(trif:*)', 'Bash(webmods:*)', 'Bash(cd:*)', 'Bash(ls:*)',
+    '--allowedTools', 'Read(//h/**)', 'Edit(//h/sites/**)', 'Bash(trif:*)', 'Bash(webmods:*)', 'Bash(cd:*)', 'Bash(ls:*)',
     '--disallowedTools', 'WebFetch', 'WebSearch', '--append-system-prompt-file', '/c/boxes/r1.agent/context.md']);
   // The message on stdin, the settings and the context in the run's own files: none of it in argv,
   // which any same-user process can read.
@@ -1008,7 +1008,7 @@ test('setup records PATH (merging config.json) and writes .claude/settings.json;
   const settings = JSON.parse(fs.readFileSync(path.join(ws, '.claude', 'settings.json'), 'utf8'));
   assert.deepEqual(settings, {
     permissions: {
-      allow: ['Read(./**)', 'Glob', 'Grep', 'Edit(./sites/**)', 'Bash(trif:*)', 'Bash(webmods:*)', 'Bash(cd:*)', 'Bash(ls:*)'],
+      allow: ['Read(./**)', 'Edit(./sites/**)', 'Bash(trif:*)', 'Bash(webmods:*)', 'Bash(cd:*)', 'Bash(ls:*)'],
       deny: ['WebFetch', 'WebSearch'],
     },
   });

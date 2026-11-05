@@ -113,7 +113,7 @@ html.demo-kb, html.demo-kb body { overflow: hidden !important; overscroll-behavi
 html.demo-kb { background: var(--card) !important; }
 /* and the whole page is gone: only the sheet shows, on the sheet's colour (the phone slides the page
    about with the keyboard up, whatever a page says) */
-html.demo-kb > :not(.demo-panel, head) { visibility: hidden !important; }
+/* (and the bottom half of the screen is blacked out: demo.js, blackout) */
 .demo-panel { position: fixed; z-index: 2147483647; inset: 0 0 0 auto; width: 360px; height: auto; max-width: 100%; max-height: none;
   margin: 0; padding: 0; border: 0; border-left: 1px solid var(--line); background: var(--card); color: var(--fg);
   font: 13px/1.4 -apple-system, system-ui, "Segoe UI", sans-serif; display: none; flex-direction: column; overflow: hidden; }

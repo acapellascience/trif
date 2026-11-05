@@ -91,6 +91,26 @@
     // just rides along with the slide and settles back with it.
     vv.addEventListener('scroll', () => { if (!keyboardUp) sit(); });
   }
+  // With the keyboard up on a phone, the bottom half of the screen is blacked out (the page's background,
+  // the sheet's colour, shows there): everything but the sheet is clipped off below the screen's middle.
+  // The top half still shows the page. Each layer is clipped in its own box, so the line is worked out for
+  // each (and again when the screen changes, or a mod adds a layer).
+  const clipped = new Map(); // layer -> its own clip-path, to put back
+  function blackout() {
+    const on = root.classList.contains('demo-kb');
+    if (!on) { for (const [el, was] of clipped) el.style.clipPath = was; clipped.clear(); return; }
+    const vv = window.visualViewport;
+    const line = vv ? vv.offsetTop + vv.height / 2 : innerHeight / 2; // (the screen's middle, in the page's viewport)
+    for (const el of root.children) {
+      if (el === box || el.tagName === 'HEAD') continue;
+      if (!clipped.has(el)) clipped.set(el, el.style.clipPath);
+      const r = el.getBoundingClientRect();
+      const y = Math.round(line - r.top); // (a polygon, not an inset: a layer's box can be empty, its own layers anywhere)
+      el.style.clipPath = `polygon(-99999px -99999px, 99999px -99999px, 99999px ${y}px, -99999px ${y}px)`;
+    }
+  }
+  new MutationObserver(() => { if (root.classList.contains('demo-kb')) blackout(); }).observe(root, { childList: true });
+  if (window.visualViewport) { visualViewport.addEventListener('resize', blackout); visualViewport.addEventListener('scroll', blackout); }
   const remeasure = () => { if (measure()) dispatchEvent(new Event('resize')); };
 
   // With the keyboard up on a phone, a swipe on the page (the strip between the sheet and the keyboard,
@@ -381,7 +401,7 @@
     if (d.type === 'trif-demo:typing') { if (phone() && size() === 'full') setSize('half'); return; }
     // The keyboard is up (the panel's message box has the focus): on a phone the page holds still, see
     // keyboardUp below.
-    if (d.type === 'trif-demo:keyboard') { keyboardUp = d.on === true && phone(); root.classList.toggle('demo-kb', keyboardUp); return; }
+    if (d.type === 'trif-demo:keyboard') { keyboardUp = d.on === true && phone(); root.classList.toggle('demo-kb', keyboardUp); blackout(); return; }
     // The panel has loaded (again): it hears the sheet's size.
     if (d.type === 'trif-demo:hello') { tellSize(); return; }
     // The wrap-up chat was sent: on a phone the sheet comes up full height (shim.js opens the mods list).

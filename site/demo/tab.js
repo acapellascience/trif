@@ -289,10 +289,11 @@
   // A drag of the sheet: by its handle (swipe, below) or by a swipe anywhere inside the panel that isn't
   // scrolling something there (shim.js: trif-demo:drag). dy: how far the finger has moved down.
   let drag = null;
-  function dragStart() { if (SIMPLE) return; drag = { h: box.getBoundingClientRect().height, from: size() }; }
+  function dragStart(handle) { if (SIMPLE && !handle) return; // (kb-simple: only the top bar drags)
+    drag = { h: box.getBoundingClientRect().height, from: size() }; }
   function dragMove(dy) {
     if (!drag) return;
-    const top = canFull ? heights().full : heights().half;
+    const top = canFull && !SIMPLE ? heights().full : heights().half;
     box.style.transition = 'none';
     box.style.minHeight = '0';
     box.style.height = `${Math.round(Math.max(35, Math.min(top, drag.h - dy)))}px`;
@@ -305,7 +306,7 @@
     if (!cancelled) {
       if (Math.abs(dy) < 8) to = from === 'min' ? 'half' : from; // a tap
       else {
-        const hs = heights(), order = canFull ? ['min', 'half', 'full'] : ['min', 'half'];
+        const hs = heights(), order = canFull && !SIMPLE ? ['min', 'half', 'full'] : ['min', 'half'];
         const at = box.getBoundingClientRect().height;
         to = order.reduce((a, b) => (Math.abs(hs[b] - at) < Math.abs(hs[a] - at) ? b : a));
         if (to === from && Math.abs(dy) > 40) { // a flick: one size on
@@ -323,7 +324,7 @@
     bar.addEventListener('pointerdown', (e) => {
       if (!phone() || except.contains(e.target) || (e.pointerType === 'mouse' && e.button !== 0)) return;
       start = { id: e.pointerId, y: e.clientY };
-      dragStart();
+      dragStart(true);
       try { bar.setPointerCapture(e.pointerId); } catch {}
     });
     bar.addEventListener('pointermove', (e) => { if (start?.id === e.pointerId) dragMove(e.clientY - start.y); });

@@ -268,15 +268,15 @@
   const FREE = 'trif-demo-free';
   const canFull = true;
   const size = () => (minimized() ? 'min' : root.classList.contains('demo-tall') ? 'full' : 'half');
-  function setSize(s) {
-    if (s === 'full' && (!canFull || SIMPLE)) s = 'half';
+  function setSize(s, byHand) {
+    if (s === 'full' && (!canFull || (SIMPLE && !byHand))) s = 'half'; // (kb-simple: full only by dragging)
     root.classList.toggle('demo-tall', s === 'full');
     try { sessionStorage.setItem(TALL, s === 'full' ? '1' : ''); } catch {}
     minimize(s === 'min');
     tellSize();
   }
   // The panel hears the sheet's size: on a phone its mods list is open at full height, closed at half.
-  function tellSize() { try { if (phone()) frame?.contentWindow?.postMessage({ type: 'trif-demo:size', size: size() }, location.origin); } catch {} }
+  function tellSize() { try { if (phone()) frame?.contentWindow?.postMessage({ type: 'trif-demo:size', size: SIMPLE ? 'half' : size() }, location.origin); } catch {} }
   // The heights the sizes come to (pages.js), in the whole window (innerHeight stops at the sheet: see cut)
   function heights() {
     const H = innerHeight + cut.h;
@@ -293,7 +293,7 @@
     drag = { h: box.getBoundingClientRect().height, from: size() }; }
   function dragMove(dy) {
     if (!drag) return;
-    const top = canFull && !SIMPLE ? heights().full : heights().half;
+    const top = canFull ? heights().full : heights().half;
     box.style.transition = 'none';
     box.style.minHeight = '0';
     box.style.height = `${Math.round(Math.max(35, Math.min(top, drag.h - dy)))}px`;
@@ -306,7 +306,7 @@
     if (!cancelled) {
       if (Math.abs(dy) < 8) to = from === 'min' ? 'half' : from; // a tap
       else {
-        const hs = heights(), order = canFull && !SIMPLE ? ['min', 'half', 'full'] : ['min', 'half'];
+        const hs = heights(), order = canFull ? ['min', 'half', 'full'] : ['min', 'half'];
         const at = box.getBoundingClientRect().height;
         to = order.reduce((a, b) => (Math.abs(hs[b] - at) < Math.abs(hs[a] - at) ? b : a));
         if (to === from && Math.abs(dy) > 40) { // a flick: one size on
@@ -315,7 +315,7 @@
         }
       }
     }
-    setSize(to);
+    setSize(to, true);
     box.getBoundingClientRect(); // (from the height it was left at...)
     box.style.transition = ''; box.style.height = ''; box.style.minHeight = ''; // (...to the size's, smoothly)
   }

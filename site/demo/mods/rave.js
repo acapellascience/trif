@@ -486,7 +486,7 @@
   addEventListener('keydown', firstGesture, true);
   // The music's meant to play from the start: the courtesy mute turns up now, muted, and the first click
   // turns the sound on as it starts the music.
-  try { muteButton(); } catch {}
+  setTimeout(() => { try { muteButton(); } catch {} }); // (once this whole script has run: muteButton is further down)
   const wakeMusic = (e) => {
     gestureUnmute(e);
     if (e.isTrusted && musicOn && ctx && ctx.state === 'suspended' && !document.hidden) { try { start(); } catch {} }

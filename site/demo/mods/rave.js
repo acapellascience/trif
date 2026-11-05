@@ -35,8 +35,9 @@
 
   const style = document.createElement('style');
   style.textContent = `
-    html::before {
-      content: ''; position: fixed; top: 0; bottom: 0; left: 0; z-index: -1; pointer-events: none;
+    /* (a real element, not html::before: it's moved back into place while the page shakes, see rave-bg) */
+    #rave-bg {
+      position: fixed; top: 0; left: 0; height: 100vh; height: 100lvh; z-index: -1; pointer-events: none;
       width: ${WIDTH};
       background: ${RAINBOW};
       will-change: transform;
@@ -244,6 +245,33 @@
     .wm-rainbow-zoom[aria-pressed=false] { opacity: 0.6; }
   `;
   (document.head || document.documentElement).append(style);
+
+  // The rainbow behind the page: fixed to the window. But while Space Shooter shakes the page (a `translate`
+  // on <html>) or Tilt Card tilts it (a `perspective`), "fixed" means fixed to <html>, at the top of the
+  // page: scrolled down, the rainbow jumped away for every frame of the shake (a flicker on a phone). A probe
+  // at "fixed 0, 0" says where that is, and the rainbow is moved back by as much; only while it's off.
+  const bg = document.createElement('div');
+  bg.id = 'rave-bg';
+  const bgProbe = document.createElement('div');
+  bgProbe.style.cssText = 'position: fixed; left: 0; top: 0; width: 0; height: 0; pointer-events: none; visibility: hidden;';
+  let bgOff = '';
+  const bgPlace = () => {
+    try {
+      const root = document.documentElement;
+      if (!bg.isConnected) root.prepend(bg);
+      if (!bgProbe.isConnected) root.append(bgProbe);
+      if (root.style.translate || bgOff || document.querySelector('style[data-tc]')) {
+        const r = bgProbe.getBoundingClientRect();
+        const off = Math.abs(r.left) < 0.5 && Math.abs(r.top) < 0.5 ? '' : `${-r.left}px ${-r.top}px`;
+        if (off !== bgOff) { bgOff = off; bg.style.translate = off; }
+      }
+    } catch {}
+  };
+  // as soon as the shake moves <html> (before that frame is drawn, whatever order the frame's callbacks run
+  // in), and every frame for scrolling and tilting
+  new MutationObserver(bgPlace).observe(document.documentElement, { attributes: true, attributeFilter: ['style'] });
+  const bgFollow = () => { bgPlace(); requestAnimationFrame(bgFollow); };
+  requestAnimationFrame(bgFollow);
 
   // Keep every rainbow animation in phase, whenever its element appeared.
   addEventListener('animationstart', (e) => {

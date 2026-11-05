@@ -56,7 +56,9 @@
     /* (centred with margins, not transform: Jelly buttons' hover wobble animates transform, which would
        knock it sideways) */
     .tss-win-opts { position: absolute; left: 0; right: 0; width: max-content; max-width: calc(100vw - 24px); margin: 0 auto; top: 6px;
-      display: flex; flex-direction: column; align-items: center; gap: 6px; } /* (one under the other) */
+      display: flex; flex-direction: column; align-items: center; gap: 6px; } /* (on a touchscreen one under the other) */
+    /* (with a mouse: two on the first row, one under them) */
+    @media (pointer: fine) { .tss-win-opts { flex-direction: row; flex-wrap: wrap; justify-content: center; max-width: 230px; gap: 4px 10px; } }
     .tss-win-again { background: none; border: 0;
       padding: 2px 6px; cursor: pointer; font: 500 12px system-ui, -apple-system, sans-serif; color: rgba(255, 255, 255, 0.65);
       text-decoration: none; text-shadow: 0 1px 2px rgba(0, 0, 0, 0.6); }

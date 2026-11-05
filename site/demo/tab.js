@@ -85,15 +85,17 @@
     const to = e.detail?.to;
     try {
       if (to === 'sandbox') {
-        const saved = JSON.parse(sessionStorage.getItem('trif-demo-state') || 'null');
-        if (saved?.v === 1) {
-          saved.store = saved.store || {};
-          saved.store.disabled = Object.fromEntries((saved.mods || []).map((s) => [`timsrobot.com/${s}`, true]));
-          saved.active = null;
-          const chat = saved.store['chat:timsrobot.com'];
-          if (chat) chat.run = null;
-          sessionStorage.setItem('trif-demo-state', JSON.stringify(saved));
-        }
+        // the panel's mods (and any the page runs that it doesn't list yet, from a link), all off
+        let saved = JSON.parse(sessionStorage.getItem('trif-demo-state') || 'null');
+        if (saved?.v !== 1) saved = { v: 1, sitesOn: ['timsrobot.com'], store: {}, mods: [] };
+        const running = (new URLSearchParams(location.search).get('mods') || '').split(',').filter((n) => /^[a-z0-9-]{1,40}$/.test(n));
+        saved.mods = [...new Set([...(saved.mods || []), ...running])];
+        saved.store = saved.store || {};
+        saved.store.disabled = Object.fromEntries(saved.mods.map((s) => [`timsrobot.com/${s}`, true]));
+        saved.active = null;
+        const chat = saved.store['chat:timsrobot.com'];
+        if (chat) chat.run = null;
+        sessionStorage.setItem('trif-demo-state', JSON.stringify(saved));
         sessionStorage.setItem(OPEN, '1');
         sessionStorage.setItem(MIN, '');
         try { localStorage.setItem('modsOpen', 'true'); } catch {}

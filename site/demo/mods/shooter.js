@@ -1378,7 +1378,7 @@
   // listener, then resumes.)
   const gestureUnmute = (e) => {
     if (!e.isTrusted || muteChoice() === '1' || window.__trifSoundLive || !document.getElementById('trif-mute')) return;
-    if (e.composedPath?.().some((n) => n.id === 'trif-mute')) return;
+    if (e.composedPath?.().some((n) => n.id === 'trif-mute' || n.classList?.contains('demo-panel') || n.classList?.contains('demo-tab'))) return; // (nor the demo's panel)
     setMuted(false);
     dispatchEvent(new CustomEvent('trif-mute', { detail: { muted: false } }));
   };

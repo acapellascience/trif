@@ -88,7 +88,7 @@
   // listener, then resumes.)
   const gestureUnmute = (e) => {
     if (!e.isTrusted || muteChoice() === '1' || window.__trifSoundLive || !document.getElementById('trif-mute')) return;
-    if (e.composedPath?.().some((n) => n.id === 'trif-mute')) return;
+    if (e.composedPath?.().some((n) => n.id === 'trif-mute' || n.classList?.contains('demo-panel') || n.classList?.contains('demo-tab'))) return; // (nor the demo's panel)
     setMuted(false);
     dispatchEvent(new CustomEvent('trif-mute', { detail: { muted: false } }));
   };
@@ -495,7 +495,8 @@
   // throwing something (Gravity mode's words and robot, the shooter's ship) isn't a tap. (Movement only,
   // no time limit: a busy page can take a long while to see the finger lift, and a tap mustn't be lost.)
   // Never from the buttons along the top (mute, restart, drop: they do their own thing).
-  const onTopBar = (e) => !!e.target.closest?.('#trif-top-bar');
+  // (nor from the demo's panel or tab, which sit over the page: their touches are theirs)
+  const onTopBar = (e) => !!e.target.closest?.('#trif-top-bar, .demo-panel, .demo-tab');
   let lastDown = null, touchDown = null;
   document.addEventListener('pointerdown', (e) => {
     try {
@@ -523,7 +524,7 @@
 
   // ...without the double-click selecting the word under it (text boxes keep theirs).
   document.addEventListener('mousedown', (e) => {
-    if (e.detail > 1 && e.button === 0 && !e.target.closest?.('input, textarea, [contenteditable]:not([contenteditable="false"])')) e.preventDefault();
+    if (e.detail > 1 && e.button === 0 && !e.target.closest?.('input, textarea, [contenteditable]:not([contenteditable="false"]), .demo-panel, .demo-tab')) e.preventDefault();
   }, true);
 
   // "Get it" button: matched by its text, since it has no id; any link/button reading "Get it".

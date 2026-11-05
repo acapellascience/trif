@@ -548,8 +548,10 @@
 
   // Hovering a jelly button sets off its wobble (the first squash of Jelly buttons' animation: wider
   // and flatter), at most every 0.3 s.
+  // (the demo's panel and tab sit over the page: touches and clicks there are theirs, never the pile's)
+  const onDemoUi = (e) => !!e.target?.closest?.('.demo-panel, .demo-tab');
   addEventListener('pointerover', (e) => {
-    if (!active || returning) return;
+    if (!active || returning || onDemoUi(e)) return;
     const el = e.target.closest?.('[data-gm-body]');
     const b = el && bodies.find((x) => x.el === el);
     if (!b?.jelly || b.ghost) return;
@@ -612,7 +614,7 @@
   const onShip = (e) => e.pointerType === 'touch' && shipGrab && e.clientX >= shipGrab.left && e.clientX <= shipGrab.right
     && e.clientY >= shipGrab.top && e.clientY <= shipGrab.bottom;
   addEventListener('pointerdown', (e) => {
-    if (!active || returning || e.button !== 0 || onShip(e)) return;
+    if (!active || returning || e.button !== 0 || onShip(e) || onDemoUi(e)) return;
     if (e.target.closest?.('a[href]')) return; // links stay links: clicking one follows it
     const el = e.target.closest?.('[data-gm-body]');
     const b = el && bodies.find((x) => x.el === el);
@@ -657,7 +659,7 @@
   addEventListener('blur', release);
   // Buttons don't fire while they're toys; links still work (they can't be grabbed, see pointerdown).
   addEventListener('click', (e) => {
-    if (active && !e.target.closest?.('a[href]') && e.target.closest?.('[data-gm-body]')) { e.preventDefault(); e.stopImmediatePropagation(); }
+    if (active && !onDemoUi(e) && !e.target.closest?.('a[href]') && e.target.closest?.('[data-gm-body]')) { e.preventDefault(); e.stopImmediatePropagation(); }
   }, true);
   addEventListener('dragstart', (e) => { if (active) e.preventDefault(); }, true);
 

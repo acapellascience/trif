@@ -91,6 +91,7 @@
   let oriented = false; // the device's tilt is steering (below): the mouse doesn't
   addEventListener('mousemove', (e) => {
     if (oriented) return; // (a tap on a touchscreen sends one too)
+    if (e.target?.closest?.('.demo-panel, .demo-tab')) return; // (over the demo's panel: the card stays as it was)
     tx = (e.clientX / innerWidth - 0.5) * 2;   // -1 .. 1
     ty = (e.clientY / innerHeight - 0.5) * 2;
     // the glare under the pointer, from where it is in the window (measuring the card on every move

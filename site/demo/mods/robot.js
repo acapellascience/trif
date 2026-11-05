@@ -87,7 +87,7 @@
   // listener, then resumes.)
   const gestureUnmute = (e) => {
     if (!e.isTrusted || muteChoice() === '1' || window.__trifSoundLive || !document.getElementById('trif-mute')) return;
-    if (e.composedPath?.().some((n) => n.id === 'trif-mute')) return;
+    if (e.composedPath?.().some((n) => n.id === 'trif-mute' || n.classList?.contains('demo-panel') || n.classList?.contains('demo-tab'))) return; // (nor the demo's panel)
     setMuted(false);
     dispatchEvent(new CustomEvent('trif-mute', { detail: { muted: false } }));
   };
@@ -187,6 +187,7 @@
     // Eyes follow the mouse (except while chasing the ship: then they stare at it).
     let pending = null, queued = false, chasing = false;
     addEventListener('pointermove', (ev) => {
+      if (ev.target?.closest?.('.demo-panel, .demo-tab')) return; // (the demo's panel: not something to look at)
       pending = ev;
       if (queued) return;
       queued = true;

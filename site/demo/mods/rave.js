@@ -508,6 +508,7 @@
     gestureUnmute(e); // (the courtesy mute's showing and nothing's chosen: this click turns the sound on)
     if (button && e.composedPath().includes(button)) return; // (the play/pause button, once unlocked, decides itself)
     if (zoomButton && e.composedPath().includes(zoomButton)) return;
+    if (e.target?.closest?.('.demo-panel, .demo-tab')) return; // (the demo's panel and tab: their touches are theirs)
     removeEventListener('pointerdown', firstGesture, true);
     removeEventListener('keydown', firstGesture, true);
     if (musicOn) return;
@@ -715,7 +716,7 @@
   // listener, then resumes.)
   const gestureUnmute = (e) => {
     if (!e.isTrusted || muteChoice() === '1' || window.__trifSoundLive || !document.getElementById('trif-mute')) return;
-    if (e.composedPath?.().some((n) => n.id === 'trif-mute')) return;
+    if (e.composedPath?.().some((n) => n.id === 'trif-mute' || n.classList?.contains('demo-panel') || n.classList?.contains('demo-tab'))) return; // (nor the demo's panel)
     setMuted(false);
     dispatchEvent(new CustomEvent('trif-mute', { detail: { muted: false } }));
   };

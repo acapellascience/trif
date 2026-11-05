@@ -17,9 +17,12 @@
   const OPEN = 'trif-demo-open';
   const MIN = 'trif-demo-min';
   const TALL = 'trif-demo-tall'; // sandbox mode on a phone: the sheet nearly full height (pages.js .demo-tall)
-  try { if (sessionStorage.getItem(TALL)) root.classList.add('demo-tall'); } catch {}
+  try { sessionStorage.removeItem(TALL); } catch {} // (kb-simple: never full height)
   const FOCUS = 'trif-demo-focus';
   const remember = (on) => { try { sessionStorage.setItem(OPEN, on ? '1' : ''); } catch {} };
+  // TEST BRANCH (kb-simple): the phone sheet as it was, half or tucked away; no drag, no full height,
+  // no growing, no keyboard handling.
+  const SIMPLE = true;
   const phone = () => matchMedia('(max-width: 700px)').matches; // the sheet over the bottom of the page
   const topLayer = typeof tab.showPopover === 'function';
   let box = null, under = null; // (under: see build)
@@ -69,7 +72,7 @@
       const layoutH = root.clientHeight + cut.h; // (the page's viewport, unshrunk: see cut)
       const gap = phone() ? Math.round(layoutH - (vv.offsetTop + vv.height)) : 0;
       const bottom = gap > 60 ? `${gap}px` : '';
-      if (box.style.bottom !== bottom) box.style.bottom = bottom;
+      if (!SIMPLE && box.style.bottom !== bottom) box.style.bottom = bottom;
       if (DEBUG) note(`layout ${layoutH} (root ${root.clientHeight} + cut ${cut.h}) · vv top ${Math.round(vv.offsetTop)} h ${Math.round(vv.height)} · gap ${gap} · bottom ${bottom || '0'} · kb ${keyboardUp} · scrollY ${Math.round(scrollY)}`);
     };
     // ?kbdebug: a line of numbers at the top of the sheet, for finding why it jumps with the keyboard up
@@ -266,7 +269,7 @@
   const canFull = true;
   const size = () => (minimized() ? 'min' : root.classList.contains('demo-tall') ? 'full' : 'half');
   function setSize(s) {
-    if (s === 'full' && !canFull) s = 'half';
+    if (s === 'full' && (!canFull || SIMPLE)) s = 'half';
     root.classList.toggle('demo-tall', s === 'full');
     try { sessionStorage.setItem(TALL, s === 'full' ? '1' : ''); } catch {}
     minimize(s === 'min');
@@ -286,7 +289,7 @@
   // A drag of the sheet: by its handle (swipe, below) or by a swipe anywhere inside the panel that isn't
   // scrolling something there (shim.js: trif-demo:drag). dy: how far the finger has moved down.
   let drag = null;
-  function dragStart() { drag = { h: box.getBoundingClientRect().height, from: size() }; }
+  function dragStart() { if (SIMPLE) return; drag = { h: box.getBoundingClientRect().height, from: size() }; }
   function dragMove(dy) {
     if (!drag) return;
     const top = canFull ? heights().full : heights().half;
@@ -391,7 +394,7 @@
     if (d.type === 'trif-demo:typing') { if (phone() && size() === 'full') setSize('half'); return; }
     // The keyboard is up (the panel's message box has the focus): on a phone the page holds still, see
     // keyboardUp below.
-    if (d.type === 'trif-demo:keyboard') { keyboardUp = d.on === true && phone(); root.classList.toggle('demo-kb', keyboardUp); return; }
+    if (d.type === 'trif-demo:keyboard') { if (SIMPLE) return; keyboardUp = d.on === true && phone(); root.classList.toggle('demo-kb', keyboardUp); return; }
     // The panel has loaded (again): it hears the sheet's size.
     if (d.type === 'trif-demo:hello') { tellSize(); return; }
     // The wrap-up chat was sent: on a phone the sheet comes up full height (shim.js opens the mods list).
@@ -406,6 +409,7 @@
       return;
     }
     if (d.type === 'trif-demo:grow') {
+      if (SIMPLE) return;
       const px = Math.max(0, Math.min(400, Math.round(Number(d.px) || 0)));
       document.documentElement.style.setProperty('--demo-grow', `${px}px`);
       return;

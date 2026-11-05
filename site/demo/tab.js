@@ -153,7 +153,7 @@
     const top = document.createElement('div');
     top.className = 'demo-panel-top';
     const name = document.createElement('span');
-    name.textContent = 'Tim\'s Robot Internet Fixer (TRIF): Demo';
+    name.textContent = 'Tim\'s Robot Internet Fixer: Demo';
     name.style.cssText = 'min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;'; // (a narrow phone: it ends in … rather than pushing the close button off)
     const close = document.createElement('button');
     close.type = 'button';

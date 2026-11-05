@@ -939,7 +939,6 @@
     'shooter': '#tss-canvas',
     'stickers': '.sb-badge',
     'terminal': '[data-tb]',
-    'tilt': 'style[data-tc]',
     'tagline': 'html[data-tt-ready], [data-tt-done]',
   };
   const modsOff = () => Object.entries(MOD_MARKS).filter(([, m]) => !(typeof m === 'function' ? m() : document.querySelector(m))).map(([n]) => n);

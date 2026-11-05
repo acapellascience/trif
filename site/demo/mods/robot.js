@@ -685,6 +685,7 @@
     // that we steer: `lr-walk` { vx, jump } out, `gm-walker` { x, y, vx, supported, … } back each frame.
     // He can only walk left and right; he hops when something blocks him (and now and then for fun),
     // and jumps at the ship when it's just above him. Jumping into words shoves them up.
+    const TOUCH_JUMP = matchMedia('(pointer: coarse)').matches;
     let gw = null, gwAt = 0, gTarget = null, gPauseUntil = 0, blockedFor = 0, nextHop = 0, stuckHops = 0, wasGravity = false;
     addEventListener('gm-walker', (e) => { gw = e.detail; gwAt = performance.now(); });
     // when gravity ends, Gravity mode leaves him where he stands and says where that is
@@ -788,6 +789,7 @@
       } else if (Math.abs(gw.vx) > 60) stuckHops = 0;
       if (jump) nextHop = now + 450;
       jump *= Math.sqrt(1 + 1.5 * dmg); // hurt, he jumps higher (up to 2.5× as high)
+      if (TOUCH_JUMP) jump *= Math.SQRT1_2; // (on a touchscreen half as high: a phone's screen is small, and he cleared it)
       if (jump && gw.supported) sfx.boing(jump / 900); // (Gravity mode only jumps him from something solid)
       if (!gw.held) want += tilt().x * SLIDE_GRAVITY; // the card's tilt pushes him along the floor
       dispatchEvent(new CustomEvent('lr-walk', { detail: { vx: want, jump, kick } }));

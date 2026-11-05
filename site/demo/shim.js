@@ -125,6 +125,7 @@
     replayed: new Set(), // recorded chats played to the end
     sent: false,         // Send has been clicked (the highlight on it goes)
     typed: 0,            // messages typed after the demo's chats (each gets the next reply: notLive, typedReplies)
+    justAdded: null,     // the mod a chat just added (at a desk, the mods list scrolls to it after the reload)
     active: null,        // the run going: {runId, chat (recording id, or null for the demo's note), step}
   };
 
@@ -136,7 +137,7 @@
     if (restoring) return;
     const out = {
       v: 1, store: Object.fromEntries(store), sitesOn: state.sitesOn, mods: state.mods.map((m) => m.slug), trash: [...state.trash.values()].map((m) => m.slug),
-      instructions: state.instructions, autoUpdate: state.autoUpdate, openModel: state.openModel, replayed: [...state.replayed], typed: state.typed,
+      instructions: state.instructions, autoUpdate: state.autoUpdate, openModel: state.openModel, replayed: [...state.replayed], typed: state.typed, justAdded: state.justAdded,
       active: state.active, sent: state.sent, runSeq,
     };
     try { sessionStorage.setItem(SAVED, JSON.stringify(out)); } catch { /* private window: lasts until the reload */ }
@@ -157,6 +158,7 @@
     state.active = saved.active || null;
     state.sent = !!saved.sent || state.replayed.size > 0;
     state.typed = Math.max(0, Number(saved.typed) || 0);
+    state.justAdded = typeof saved.justAdded === 'string' ? saved.justAdded : null;
     runSeq = Number(saved.runSeq) || 0;
     // You Win's "sandbox mode" (tab.js): the demo's chats are over (the box is the visitor's), and the chat
     // starts afresh with the note on what's next: get TRIF to keep modding the page. (Once: persist below
@@ -382,6 +384,7 @@
       setNow({ disabled: off });
       state.replayed.add(run.recording.id);
       const mods = run.recording.mods; // (`focus`: the one to show, on a phone, of a chat that makes several)
+      if (mods.length) { state.justAdded = mods[mods.length - 1]; persist(); }
       if (mods.length) later(() => loadPage(run.recording.focus || mods[mods.length - 1], true), 700); // (a chat with none, the wrap-up: nothing to load)
     }
     ui.finished(run); // (after it's counted as played: the next prompt is the next one)
@@ -544,6 +547,31 @@
     permissions: { request: async () => true, contains: async () => true },
   };
   Object.defineProperty(window, 'chrome', { value: chrome, configurable: true, writable: true });
+
+  // ---- At a desk, the mods list shows the mod a chat just added --------------------------------------
+  // After the reload that adds it, if the list is open, it scrolls (inside itself) to the new mod's row,
+  // usually at the bottom. Once.
+  (() => {
+    const show = () => {
+      const slug = state.justAdded;
+      if (!slug) return;
+      if (document.documentElement.classList.contains('demo-phone')) { state.justAdded = null; persist(); return; }
+      let tries = 0;
+      const look = () => {
+        const list = document.getElementById('mod-list'), mods = document.getElementById('mods');
+        const row = list && [...list.children].find((li) => li.querySelector('.mod-file')?.textContent.trim() === `${slug}.js`);
+        if (!row) { if (++tries < 40) setTimeout(look, 100); return; }
+        state.justAdded = null; persist();
+        if (!mods?.open || list.scrollHeight <= list.clientHeight) return;
+        const top = row.getBoundingClientRect().top - list.getBoundingClientRect().top + list.scrollTop, bottom = top + row.offsetHeight;
+        if (top < list.scrollTop || bottom > list.scrollTop + list.clientHeight) {
+          list.scrollTo({ top: Math.max(0, bottom - list.clientHeight + 4), behavior: 'smooth' });
+        }
+      };
+      setTimeout(look, 300);
+    };
+    if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', show, { once: true }); else show();
+  })();
 
   // ---- Scrolling stays in the panel ---------------------------------------------------------------
   // On a phone, a swipe the panel can't use (on a part that doesn't scroll, or past the end of a list) went

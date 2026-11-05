@@ -108,6 +108,9 @@ const DEMO_STYLE = `
 /* the phone keyboard is up for the demo's message box: the page itself can't scroll meanwhile (demo.js:
    keyboardUp), or the phone moves it, and the sheet and its text cursor with it, a frame apart */
 html.demo-kb, html.demo-kb body { overflow: hidden !important; overscroll-behavior: none !important; }
+/* and the page's own background (what shows past its edges when the phone slides or bounces it) is the
+   sheet's colour meanwhile */
+html.demo-kb { background: var(--card) !important; }
 .demo-panel { position: fixed; z-index: 2147483647; inset: 0 0 0 auto; width: 360px; height: auto; max-width: 100%; max-height: none;
   margin: 0; padding: 0; border: 0; border-left: 1px solid var(--line); background: var(--card); color: var(--fg);
   font: 13px/1.4 -apple-system, system-ui, "Segoe UI", sans-serif; display: none; flex-direction: column; overflow: hidden; }
@@ -130,10 +133,7 @@ html.demo-kb, html.demo-kb body { overflow: hidden !important; overscroll-behavi
        rainbow stripe under Rainbow Rave) */
     box-shadow: 0 -6px 24px rgb(0 0 0 / 0.15); }
   /* under the open sheet, to the bottom of the whole screen, in the sheet's colour (demo.js: under) */
-  /* under the open sheet, to the bottom of the page's own viewport (no further: a layer reaching past it
-     gave the phone something to scroll, keyboard up), in the sheet's colour (demo.js: under) */
-  html.demo-open:not(.demo-min) .demo-under { display: block; position: fixed; left: 0; right: 0; bottom: 0;
-    background: var(--card); z-index: 2147483647; pointer-events: none; }
+  /* (the layer under the open sheet, demo.js: under, is off: .demo-under stays hidden) */
   /* the top bar is the handle: swipe it down to tuck the sheet away, up (or tap it) to bring it back (demo.js) */
   .demo-panel-top { position: relative; height: 34px; flex: none; padding: 4px 6px 0 14px; touch-action: none; cursor: grab; user-select: none; -webkit-user-select: none; }
   .demo-panel-top::before { content: ''; position: absolute; left: 50%; top: 6px; width: 36px; height: 4px; margin-left: -18px;

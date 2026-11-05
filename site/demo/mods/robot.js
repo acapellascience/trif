@@ -530,8 +530,9 @@
     };
     // Inside the window, a step goes no further than its edge. Outside it (partly or wholly: the page
     // scrolled away from him), a step can't take him further out, but nothing pulls him in either: he walks
-    // back in on his own (his routines aim inside the window), never jumps.
-    const soft = (v, lo, hi, cur) => Math.max(Math.min(lo, cur), Math.min(Math.max(hi, cur), v));
+    // back in on his own (his routines aim inside the window), never jumps. Except while he's chasing Space
+    // Shooter's ship: then he's held inside the window, so he scrolls along with the ship.
+    const soft = (v, lo, hi, cur) => (chasing ? Math.max(lo, Math.min(hi, v)) : Math.max(Math.min(lo, cur), Math.min(Math.max(hi, cur), v)));
     const clampPt = (p, b) => b.maxX <= b.minX || b.maxY <= b.minY ? { ...p, x: pos.x, y: pos.y }
       : { ...p, x: soft(p.x, b.minX, b.maxX, pos.x), y: soft(p.y, b.minY, b.maxY, pos.y) };
     const rnd = (a, b) => a + Math.random() * (b - a);

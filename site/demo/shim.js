@@ -334,7 +334,8 @@
     broadcast({ type: 'agentEvent', runId: run.runId, event: { kind: 'done', ok, result: '', changedFiles: [], costUsd: null, sessionId: null } });
     broadcast({ type: 'statusChanged' });
     // The mod the recorded session made: in the list (as the agent's new file would be), on, as it was at
-    // the end of the session, and added to the page (after a moment, so the reply has been seen arriving).
+    // the end of the session, and on the page (after a moment, so the reply has been seen arriving): a
+    // reload at a desk, as with the real TRIF; added to the page as it is on a phone (tab.js).
     if (ok && run.recording) {
       const off = { ...disabled() };
       for (const slug of run.recording.mods) {
@@ -417,7 +418,7 @@
         const off = { ...disabled() };
         if (msg.enabled) delete off[m.id]; else off[m.id] = true;
         setNow({ disabled: off });
-        // once the switch shows its new state; switched on, it joins the page as it is (no reload)
+        // once the switch shows its new state (switched on, on a phone, it joins the page as it is: tab.js)
         later(() => loadPage(msg.enabled ? m.slug : null, !!msg.enabled), 150);
         broadcast({ type: 'statusChanged' });
         return { id: m.id, enabled: !!msg.enabled };

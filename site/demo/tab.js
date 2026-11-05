@@ -203,12 +203,13 @@
     const ok = (n) => typeof n === 'string' && /^[a-z0-9-]{1,40}$/.test(n);
     const names = (Array.isArray(d.mods) ? d.mods : []).filter(ok);
     const made = ok(d.made) ? d.made : '';
-    // A chat made a mod (live): the page keeps what it has and only gains mods, so they're added to it as it
-    // is (their scripts, as the Worker serves them for ?mods=), with no reload: sound keeps playing and
-    // nothing flashes. The address follows, so a reload later gets the same page. Losing a mod, or anything
-    // other than a chat, reloads the page: mods can't take themselves back out.
+    // At a desk, every change of mods reloads the page, as it does with the real TRIF installed. On a phone,
+    // a chat's mod (live: the page keeps what it has and only gains mods) is added to the page as it is
+    // (their scripts, as the Worker serves them for ?mods=), with no reload: sound keeps playing and
+    // nothing flashes. The address follows, so a reload later gets the same page. Losing a mod reloads the
+    // page there too: mods can't take themselves back out.
     const running = (new URLSearchParams(location.search).get('mods') || '').split(',').filter(ok);
-    if (d.live === true && running.every((n) => names.includes(n))) {
+    if (d.live === true && phone() && running.every((n) => names.includes(n))) {
       history.replaceState(history.state, '', `/?mods=${names.join(',')}${location.hash}`);
       for (const n of names) {
         if (running.includes(n)) continue;

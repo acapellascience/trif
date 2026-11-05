@@ -733,6 +733,22 @@
     }
     return a;
   }
+  // The demo's Send (in its panel, a frame of its own: its taps never reach the page) counts as the tap that
+  // turns the sound on. On a phone the next thing is often the ship, grabbed and held, and a hold never
+  // lets a browser start sound: so the panel calls this from inside its tap (shim.js), while the tap still
+  // counts. Not if the sound was switched off with the button.
+  if (!window.__trifSendGesture) window.__trifSendGesture = () => {
+    try {
+      if (muteChoice() === '1' || !document.getElementById('trif-mute')) return;
+      const a = trifAudio();
+      if (!window.__trifSoundLive) { setMuted(false); dispatchEvent(new CustomEvent('trif-mute', { detail: { muted: false } })); }
+      a.resume();
+      if (!a.__trifUnlocked) { // (as on a finger's first lift: a silent blip unlocks it for good)
+        a.__trifUnlocked = true;
+        const blip = a.createBufferSource(); blip.buffer = a.createBuffer(1, 1, 22050); blip.connect(a.destination); blip.start(0);
+      }
+    } catch {}
+  };
   const muteButton = () => {
     if (document.getElementById('trif-mute')) return;
     const NS = 'http://www.w3.org/2000/svg';

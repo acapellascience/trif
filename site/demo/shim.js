@@ -787,6 +787,12 @@
       // never because the sheet came back with it focused.
       let tappedBox = 0;
       input.addEventListener('pointerdown', () => { tappedBox = Date.now(); });
+      // A tap on Send also turns the page's sound on (the sound mods' __trifSendGesture), from inside the tap,
+      // so a browser counts it: the page's own taps can't reach through the panel.
+      const sendBtn = document.getElementById('send');
+      const soundOn = () => { try { window.parent.__trifSendGesture?.(); } catch {} };
+      sendBtn?.addEventListener('touchend', soundOn);
+      sendBtn?.addEventListener('click', soundOn);
       // A tap into the box to type (once it's the visitor's: the keyboard comes up): a full-height sheet
       // comes down to half, to leave room for the keyboard and the page (tab.js). A recorded prompt typing
       // itself in leaves the sheet as it is.

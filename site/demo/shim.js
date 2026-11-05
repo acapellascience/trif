@@ -121,6 +121,7 @@
     runs: new Map(),
     replayed: new Set(), // recorded chats played to the end
     sent: false,         // Send has been clicked (the highlight on it goes)
+    typed: 0,            // messages typed after the demo's chats (each gets the next reply: notLive, typedReplies)
     active: null,        // the run going: {runId, chat (recording id, or null for the demo's note), step}
   };
 
@@ -132,7 +133,7 @@
     if (restoring) return;
     const out = {
       v: 1, store: Object.fromEntries(store), sitesOn: state.sitesOn, mods: state.mods.map((m) => m.slug), trash: [...state.trash.values()].map((m) => m.slug),
-      instructions: state.instructions, autoUpdate: state.autoUpdate, openModel: state.openModel, replayed: [...state.replayed],
+      instructions: state.instructions, autoUpdate: state.autoUpdate, openModel: state.openModel, replayed: [...state.replayed], typed: state.typed,
       active: state.active, sent: state.sent, runSeq,
     };
     try { sessionStorage.setItem(SAVED, JSON.stringify(out)); } catch { /* private window: lasts until the reload */ }
@@ -152,6 +153,7 @@
     state.replayed = new Set(saved.replayed || []);
     state.active = saved.active || null;
     state.sent = !!saved.sent || state.replayed.size > 0;
+    state.typed = Math.max(0, Number(saved.typed) || 0);
     runSeq = Number(saved.runSeq) || 0;
     // You Win's "sandbox mode" (tab.js): the demo's chats are over (the box is the visitor's), and the chat
     // starts afresh with the note on what's next: get TRIF to keep modding the page. (Once: persist below
@@ -273,12 +275,13 @@
     if (!prompt) throw new Error('empty message');
     if (!siteOn()) throw new Error(`TRIF is off on ${SITE}: turn it on first`);
     if (store.get(chatKey)?.run) throw new Error(`already working on ${SITE}`);
+    const recording = DEMO.chats.find((c) => c.prompt === prompt);
+    if (!recording && state.typed > (DEMO.words.typedReplies || []).length) throw new Error('Locked out. Go get TRIF.'); // (the robot has had enough: ui)
     const runId = `demo-${++runSeq}`;
     const startedAt = Date.now();
     state.sent = true;
     document.documentElement.classList.remove('demo-hint-send'); // (sent: Send stops pulsing)
     updateChat((c) => { c.messages.push({ role: 'user', text: prompt, time: startedAt }); c.run = { runId, startedAt }; c.last = null; });
-    const recording = DEMO.chats.find((c) => c.prompt === prompt);
     const run = { runId, recording, timers: [] };
     state.runs.set(runId, run);
     state.active = { runId, chat: recording ? recording.id : null, step: 0 };
@@ -330,8 +333,13 @@
     run.timers.push(later(() => {
       updateChat((c) => {
         if (c.run?.runId !== run.runId) return false;
-        c.messages.push({ role: 'assistant', text: onPhone() ? DEMO.words.notLivePhone : DEMO.words.notLive, time: Date.now() }); // (assistant: its link works)
+        // the first gets the note on what's happening; each one after, the next of Tim's replies
+        const replies = DEMO.words.typedReplies || [];
+        const text = state.typed === 0 ? (onPhone() ? DEMO.words.notLivePhone : DEMO.words.notLive) : replies[Math.min(state.typed, replies.length) - 1];
+        c.messages.push({ role: 'assistant', text, time: Date.now() }); // (assistant: its links work)
       });
+      state.typed++;
+      persist();
       finish(run, true);
     }, 700));
   }
@@ -630,14 +638,18 @@
       const input = document.getElementById('input');
       if (!input) return;
       const c = busy ? null : next();
-      const free = !busy && !c; // every recording played: the box is theirs
+      // every recording played: the box is theirs, until the robot has had enough (the last of its replies)
+      const locked = state.typed > (DEMO.words.typedReplies || []).length;
+      const free = !busy && !c && !locked;
+      document.documentElement.classList.toggle('demo-locked', locked && !busy);
       // Send pulses while a prompt waits for it
       document.documentElement.classList.toggle('demo-hint-send', !!c);
       const was = !document.documentElement.classList.contains('demo-guided');
       document.documentElement.classList.toggle('demo-guided', !free);
       input.readOnly = !free;
       input.tabIndex = free ? 0 : -1;
-      input.setAttribute('aria-label', free ? 'Message' : 'The next recorded prompt: Send replays it');
+      input.setAttribute('aria-label', free ? 'Message' : locked ? 'The chat is locked' : 'The next recorded prompt: Send replays it');
+      if (locked) { stopTyping(input, false); show(input, ''); return; }
       if (!free) typeInto(input, c ? c.prompt : '');
       else if (!was) { stopTyping(input, false); show(input, ''); } // (just freed: clear the box; after that, it keeps what they type)
     }

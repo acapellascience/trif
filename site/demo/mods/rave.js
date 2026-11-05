@@ -47,6 +47,10 @@
 
     /* The page paints its dark grey on <body>: clear it and every container. */
     html, body, body *:not(.wm-rainbow-music, .btn, code) { background-color: transparent !important; }
+    /* The kick zoom gives each section a layer of its own while it pulses, and later sections paint over
+       earlier ones: the hero's above the rest, so Living Robot (who lives in it) still walks in front of
+       everything below it, as he does without the rave. */
+    main > section.hero { position: relative; z-index: 3; }
     /* The kick zoom swells the sections past the window's sides for a moment: the page would get wider on
        every beat, and a phone then rescales or pans it, shaking everything pinned to the screen (the demo's
        panel). Whatever pokes out is clipped instead (clip, not hidden: nothing becomes a scroller). On <html>

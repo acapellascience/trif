@@ -1,11 +1,11 @@
 // ==WebMod==
 // @name        Simple Home
-// @description Replaces the amazon.com home page with just the logo, a greeting and a centered search box
+// @description Just search, nothing else
 // @match       https://www.amazon.com/*
 // @run-at      document-start
 // @risk        1 covers the whole home page, ads included, so their impressions never report
 // @source      webmods
-// @version     1
+// @version     2
 // ==/WebMod==
 
 (() => {

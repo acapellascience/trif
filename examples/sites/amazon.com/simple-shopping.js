@@ -1,11 +1,11 @@
 // ==WebMod==
 // @name        Simple Shopping
-// @description amazon.com search results with no sidebar, sponsored items or recommendations; each product shows only its picture, price and stars. Product pages without ads, carousels, brand marketing or videos. Ad slots, recommendation carousels and the footer hidden site-wide
+// @description Buy without influence
 // @match       https://www.amazon.com/*
 // @run-at      document-start
 // @risk        1 hides sponsored results and ad slots, so their ad impressions never report (looks like an ad blocker)
 // @source      webmods
-// @version     1
+// @version     2
 // ==/WebMod==
 
 (() => {

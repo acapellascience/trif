@@ -455,7 +455,7 @@ test('preinstalled mods: each once, switched on or off as listed; the start site
   const plainx = path.join(sites, 'x.com', 'plain-x.js');
   const ids = PREINSTALLED.map((p) => p.id);
   const off = PREINSTALLED.filter((p) => !p.on).map((p) => p.id);
-  assert.deepStrictEqual(off, ['x.com/punk-fonts', 'x.com/rainbow-rave', 'www.instagram.com/desaturate', 'www.google.com/dvd-logo']);
+  assert.deepStrictEqual(off, ['x.com/punk-fonts', 'x.com/rainbow-rave', 'www.instagram.com/desaturate', 'www.google.com/dvd-logo', 'x.com/follow-status', 'x.com/space-shooter', 'www.instagram.com/three-column-feed']);
   assert.deepStrictEqual(SITES_ON, ['google.com', 'x.com', 'amazon.com', 'instagram.com']);
   for (const id of ids) assert.ok(fs.existsSync(path.join(examples, `${id}.js`)), `examples has ${id}`);
   let r = preinstallMods(home, sites, examples);
@@ -476,7 +476,7 @@ test('preinstalled mods: each once, switched on or off as listed; the start site
   r = preinstallMods(home2, path.join(home2, 'sites'), examples);
   assert.deepStrictEqual(r.added, ids.filter((id) => id !== 'x.com/rainbow-rave'));
   assert.strictEqual(fs.readFileSync(own, 'utf8'), '// mine');
-  assert.deepStrictEqual(loadPreinstalled(home2).startOff, ['x.com/punk-fonts', 'www.instagram.com/desaturate', 'www.google.com/dvd-logo'], 'the user\'s own file isn\'t switched off');
+  assert.deepStrictEqual(loadPreinstalled(home2).startOff, ['x.com/punk-fonts', 'www.instagram.com/desaturate', 'www.google.com/dvd-logo', 'x.com/follow-status', 'x.com/space-shooter', 'www.instagram.com/three-column-feed'], 'the user\'s own file isn\'t switched off');
   assert.deepStrictEqual(loadPreinstalled(home2).shipped, { 'x.com/rainbow-rave': { own: true } }, 'nor ever updated');
 
   // Through setup, and --no-examples.

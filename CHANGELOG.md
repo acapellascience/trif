@@ -4,6 +4,15 @@ What's new in each TRIF release (called WebMods before 0.2.0). The text under a 
 panel shows under "What's new", so it's written for people using TRIF. `node scripts/release.js <version>`
 needs a section here for the version it releases.
 
+## 0.2.2
+
+- **New mods, off until you switch them on:** X-Flyer flies a fighter over X (Shift+S, or the rocket
+  button) to blast the timeline; Follow status marks the people on X who follow you back; Three-Column
+  Feed lays Instagram's home feed out three posts wide.
+- The mods TRIF ships for X, Amazon and Instagram are updated, with new names and short descriptions.
+  If you changed one, the side panel offers the new version; yours stays until you choose.
+- Your agent now keeps mod descriptions short (4 to 9 words).
+
 ## 0.2.1
 
 - **Side-panel agents are kept on a tighter leash.** In 0.2.0:

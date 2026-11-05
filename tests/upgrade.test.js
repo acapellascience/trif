@@ -122,13 +122,13 @@ test(`upgrade: the ${TAG} updater installs this checkout's package; everything m
   const mods = sh(path.join(trif, 'bin', 'trif'), ['mods'], { cwd: home });
   assert.match(mods, /example\.com\/mine/);
 
-  // The shipped mods. Unchanged copies are the new versions (renamed: Timeline Detox; merged: AI Banisher,
+  // The shipped mods. Unchanged copies are the new versions (renamed: Detox Timeline; merged: AI Banisher,
   // Just Results); the unchanged copy of a mod folded into another is in the trash; the edited one stays.
   const sites = path.join(trif, 'sites');
   for (const id of ['x.com/plain-x', 'www.instagram.com/following-only-feed', 'www.google.com/hide-ai-in-results', 'www.google.com/hide-extra-sections']) {
     assert.strictEqual(fs.readFileSync(path.join(sites, `${id}.js`), 'utf8'), fs.readFileSync(path.join(REPO, 'examples', 'sites', `${id}.js`), 'utf8'), `${id}\n${info}`);
   }
-  assert.match(fs.readFileSync(path.join(sites, 'x.com', 'plain-x.js'), 'utf8'), /@name +Timeline Detox\n/);
+  assert.match(fs.readFileSync(path.join(sites, 'x.com', 'plain-x.js'), 'utf8'), /@name +Detox Timeline\n/);
   assert.match(fs.readFileSync(path.join(sites, 'www.google.com', 'hide-ai-in-results.js'), 'utf8'), /@name +AI Banisher\n/);
   assert.ok(!fs.existsSync(path.join(sites, 'www.google.com', 'hide-ai-mode.js')), `hide-ai-mode.js is still there\n${info}`);
   assert.deepStrictEqual(fs.readdirSync(path.join(trif, 'trash', 'www.google.com')).map((f) => f.replace(/@.*/, '')), ['hide-ai-mode']);

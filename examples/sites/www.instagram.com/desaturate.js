@@ -1,11 +1,11 @@
 // ==WebMod==
 // @name        Desaturate
-// @description Turns Instagram's colour saturation down to 35% across the whole site
+// @description Turns Instagram's colours down to 35% saturation
 // @match       https://www.instagram.com/*
 // @run-at      document-start
 // @risk        0 render-only
 // @source      webmods
-// @version     1
+// @version     2
 // ==/WebMod==
 
 (() => {

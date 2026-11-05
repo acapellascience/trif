@@ -1,15 +1,15 @@
 // ==WebMod==
-// @name        Timeline Detox
-// @description Home is just the people you follow, filtered (no ads, reposts or recommendations); a plainer X around it
+// @name        Detox Timeline
+// @description a calmer scroll
 // @match       https://x.com/*
 // @run-at      document-start
 // @risk        1 drops ads, so their impressions never report; patches fetch and XMLHttpRequest
 // @source      webmods
-// @version     2
+// @version     3
 // ==/WebMod==
 
 /*
- * Timeline Detox: Home is just the people you follow, filtered; recommendations go elsewhere too.
+ * Plain X: Home is just the people you follow, filtered; recommendations go elsewhere too.
  *
  * - Timeline filter. The home timeline's data (the `HomeLatestTimeline` / `HomeTimeline` GraphQL
  *   responses) is filtered before X sees it. Ads and who-to-follow-style modules always go; reposts,
@@ -462,7 +462,8 @@
   style.textContent = `
     [data-testid=sidebarColumn] { display: none !important; }
     /* X's side bar sits right-aligned in a column that stretches; keep the column to the bar's width. */
-    header[role=banner] { flex-grow: 0 !important; }
+    /* (not with X-Flyer installed, html[data-tss-ready]: X's own layout then, the timeline where X puts it) */
+    html:not([data-tss-ready]) header[role=banner] { flex-grow: 0 !important; }
     [data-dm-hide] { display: none !important; }
     /* Plain X's logo, a plain lowercase x, in place of X's. The loading screen (#placeholder, in X's HTML)
        is styled before it's parsed; its theme isn't known yet, so the x inverts whatever is behind it. */
@@ -477,9 +478,12 @@
     header[role=banner] h1 a[href="/home"] > div::after { content: "x"; position: absolute; left: 50%; top: 50%; transform: translate(-50%, -56%);
       font: 400 42px/1 -apple-system, system-ui, sans-serif; color: inherit; pointer-events: none; }
     /* The timeline fills the window instead of sitting in a 600px column on the left. */
-    main[role=main] > div, main[role=main] > div > div, main[role=main] > div > div > div { width: 100% !important; max-width: none !important; }
-    [data-testid=primaryColumn] { max-width: none !important; border-right: none !important; border-left: none !important; }
-    [data-dm-wide] { max-width: none !important; }
+    /* (not with X-Flyer, x.com/space-shooter, installed (html[data-tss-ready]): the timeline keeps X's own
+       width and margins then, with room for the game's panel in the strip beside it) */
+    html:not([data-tss-ready]) main[role=main] > div, html:not([data-tss-ready]) main[role=main] > div > div,
+    html:not([data-tss-ready]) main[role=main] > div > div > div { width: 100% !important; max-width: none !important; }
+    html:not([data-tss-ready]) [data-testid=primaryColumn] { max-width: none !important; border-right: none !important; border-left: none !important; }
+    html:not([data-tss-ready]) [data-dm-wide] { max-width: none !important; }
     /* Explore: X's page hidden, a centered search field instead. */
     /* Hidden from the first frame (the flag is set as the route changes, before X draws anything). */
     html[data-dm-explore] [data-testid=primaryColumn], html[data-dm-explore] main[role=main] > * { visibility: hidden !important; }

@@ -1,11 +1,11 @@
 // ==WebMod==
 // @name        Punk Fonts
-// @description A grungy chalk font everywhere on X, chat included (goes with Punk theme)
+// @description add some edge
 // @match       https://x.com/*
 // @run-at      document-start
 // @risk        1 patches attachShadow (to style chat), which the page's scripts could notice
 // @source      webmods
-// @version     1
+// @version     2
 // ==/WebMod==
 
 (() => {

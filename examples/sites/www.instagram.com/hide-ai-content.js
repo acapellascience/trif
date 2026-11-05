@@ -1,11 +1,11 @@
 // ==WebMod==
-// @name        Hide AI
-// @description Removes posts labeled "AI content" (and posts by accounts labeled as AI) from Instagram feeds and lists
+// @name        Hide AI Content
+// @description Removes posts labeled as AI content from feeds
 // @match       https://www.instagram.com/*
 // @run-at      document-start
 // @risk        1 patches JSON.parse, which the page's scripts could notice
 // @source      webmods
-// @version     2
+// @version     3
 // ==/WebMod==
 
 (() => {

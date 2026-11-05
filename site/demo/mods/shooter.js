@@ -1327,18 +1327,24 @@
   // The courtesy mute, shared by the mods that make sound (Living Robot, Space Shooter, Click Fireworks,
   // Rainbow Rave): the first button in the row along the top, there from the first sound on. It silences
   // all of them (each one suspends its own audio while it's on: the `trif-mute` event).
-  // It turns up the first time there's meant to be a sound, muted (a speaker with an X), and the next click,
-  // tap or key press anywhere on the page turns the sound on: that's the gesture browsers want before they
-  // play any. From then on only the button switches it. Kept for the visit (this tab's sessionStorage), so
-  // each visit starts muted; without storage, for the page.
+  // It turns up the first time there's meant to be a sound, muted (a speaker with an X), on every page load
+  // (browsers won't play sound before a click anyway), and the next click, tap or key press anywhere on the
+  // page turns the sound on, unless the button was used to switch it off: then it stays off until the
+  // button turns it back on. The choice is kept for the visit (this tab's sessionStorage: '1' switched
+  // off, '0' on, nothing yet: on at the first click); without storage, for the page.
   const MUTED = 'trif.muted';
   const muteChoice = () => { try { const v = sessionStorage.getItem(MUTED); if (v !== null) return v; } catch {} return window.__trifMuteChoice ?? null; };
-  const isMuted = () => muteChoice() !== '0';
-  const setMuted = (on) => { window.__trifMuteChoice = on ? '1' : '0'; try { sessionStorage.setItem(MUTED, window.__trifMuteChoice); } catch {} };
-  // A real click, tap or key press, not on the button, while the button's showing and nothing's been
-  // chosen yet: the sound comes on. (Each sound mod calls this from its gesture listener, then resumes.)
+  const isMuted = () => muteChoice() !== '0' || !window.__trifSoundLive; // (live: since a click on this page)
+  const setMuted = (on) => {
+    if (!on) window.__trifSoundLive = true;
+    window.__trifMuteChoice = on ? '1' : '0';
+    try { sessionStorage.setItem(MUTED, window.__trifMuteChoice); } catch {}
+  };
+  // A real click, tap or key press, not on the button, while the button's showing on this page and the
+  // sound wasn't switched off with it: the sound comes on. (Each sound mod calls this from its gesture
+  // listener, then resumes.)
   const gestureUnmute = (e) => {
-    if (!e.isTrusted || muteChoice() !== null || !document.getElementById('trif-mute')) return;
+    if (!e.isTrusted || muteChoice() === '1' || window.__trifSoundLive || !document.getElementById('trif-mute')) return;
     if (e.composedPath?.().some((n) => n.id === 'trif-mute')) return;
     setMuted(false);
     dispatchEvent(new CustomEvent('trif-mute', { detail: { muted: false } }));

@@ -92,6 +92,19 @@
     setMuted(false);
     dispatchEvent(new CustomEvent('trif-mute', { detail: { muted: false } }));
   };
+  // One audio engine for every mod that makes sound (window.__trifAudio). A browser, an iPhone's above all,
+  // only lets an engine play once a real tap has switched it on, and dragging the ship around may not count:
+  // with one engine, any tap that switched it on lets every mod play, the ship and the rave's music (which
+  // arrives later) included. The mute suspends and resumes it; nothing closes it.
+  function trifAudio() {
+    let a = window.__trifAudio;
+    if (!a || a.state === 'closed') {
+      // (on an iPhone, sound plays as media, so the silent switch doesn't mute it: Safari's audio session)
+      try { if (navigator.audioSession) navigator.audioSession.type = 'playback'; } catch {}
+      a = window.__trifAudio = new AudioContext();
+    }
+    return a;
+  }
   const muteButton = () => {
     if (document.getElementById('trif-mute')) return;
     const NS = 'http://www.w3.org/2000/svg';
@@ -184,7 +197,7 @@
         if (!ac) {
           // (on an iPhone, sound plays as media, so the silent switch doesn't mute it: Safari's audio session)
           try { if (navigator.audioSession) navigator.audioSession.type = 'playback'; } catch {}
-          ac = new AudioContext();
+          ac = trifAudio(); // (shared by all the sound mods: see trifAudio)
           const comp = ac.createDynamicsCompressor();
           out = ac.createGain(); out.gain.value = 0.5;
           // +6 dB (×2) after the compressor, to sit level with Rainbow Rave's music

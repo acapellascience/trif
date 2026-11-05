@@ -397,11 +397,12 @@
   const start = () => {
     muteButton(); // (the music is ready to play: the courtesy mute appears, before it decides)
     if (isMuted()) return; // (the courtesy mute: the music waits for it to go off)
-    if (ctx && (stale || ctx.state === 'closed')) { try { ctx.close(); } catch {} ctx = null; stale = false; }
+    // (the engine is shared with the other sound mods (trifAudio), so a stuck clock is resumed and the loop
+    // restarted, never closed and rebuilt; a closed one, if a page ever closed it, is replaced)
+    if (ctx && ctx.state === 'closed') ctx = null;
+    if (stale) { stale = false; clearInterval(timer); timer = 0; }
     if (!ctx) {
-      // (on an iPhone, sound plays as media, so the silent switch doesn't mute it: Safari's audio session)
-      try { if (navigator.audioSession) navigator.audioSession.type = 'playback'; } catch {}
-      ctx = new AudioContext();
+      ctx = trifAudio();
       const comp = ctx.createDynamicsCompressor();
       master = ctx.createGain(); master.gain.value = 0.3;
       master.connect(comp); comp.connect(ctx.destination);
@@ -443,7 +444,8 @@
   addEventListener('pointerdown', unstick, true);
   addEventListener('touchend', unstick, true); // (a touchscreen only allows sound once a finger lifts)
   addEventListener('keydown', unstick, true);
-  const stop = () => { clearInterval(timer); timer = 0; ctx?.suspend(); };
+  // (the music only: the engine is shared, and the mute suspends it, see trif-mute below)
+  const stop = () => { clearInterval(timer); timer = 0; };
   const sync = () => {
     if (musicOn && !document.hidden && ctx) start(); else stop();
     if (button) {
@@ -468,7 +470,7 @@
   document.addEventListener('visibilitychange', sync);
   // The courtesy mute: the music stops while it's on, and starts again (if it's on) when it's off.
   // (unmuting is a click: the music can start then, even if it never has yet)
-  addEventListener('trif-mute', () => { try { if (isMuted()) stop(); else if (musicOn && !document.hidden) { start(); sync(); } } catch {} });
+  addEventListener('trif-mute', () => { try { if (isMuted()) { stop(); ctx?.suspend(); } else if (musicOn && !document.hidden) { start(); sync(); } } catch {} });
 
   // Autoplay on the first click or keypress (browsers only allow sound after a gesture). On timsrobot.com
   // the music is always on (no play/pause or zoom buttons): it starts with your first real click or key
@@ -489,7 +491,14 @@
   addEventListener('keydown', firstGesture, true);
   // The music's meant to play from the start: the courtesy mute turns up now, muted, and the first click
   // turns the sound on as it starts the music.
-  setTimeout(() => { try { muteButton(); } catch {} }); // (once this whole script has run: muteButton is further down)
+  // If the sound is already on (another mod's engine running: the rave was added to a page that's playing,
+  // as on a phone after its chat), the music starts at once, no tap needed.
+  setTimeout(() => { // (once this whole script has run: muteButton is further down)
+    try {
+      muteButton();
+      if (!musicOn && window.__trifAudio?.state === 'running' && !isMuted() && !document.hidden) { musicOn = true; start(); sync(); }
+    } catch {}
+  });
   const wakeMusic = (e) => {
     gestureUnmute(e);
     if (e.isTrusted && musicOn && ctx && ctx.state === 'suspended' && !document.hidden) { try { start(); } catch {} }
@@ -682,6 +691,19 @@
     setMuted(false);
     dispatchEvent(new CustomEvent('trif-mute', { detail: { muted: false } }));
   };
+  // One audio engine for every mod that makes sound (window.__trifAudio). A browser, an iPhone's above all,
+  // only lets an engine play once a real tap has switched it on, and dragging the ship around may not count:
+  // with one engine, any tap that switched it on lets every mod play, the ship and the rave's music (which
+  // arrives later) included. The mute suspends and resumes it; nothing closes it.
+  function trifAudio() {
+    let a = window.__trifAudio;
+    if (!a || a.state === 'closed') {
+      // (on an iPhone, sound plays as media, so the silent switch doesn't mute it: Safari's audio session)
+      try { if (navigator.audioSession) navigator.audioSession.type = 'playback'; } catch {}
+      a = window.__trifAudio = new AudioContext();
+    }
+    return a;
+  }
   const muteButton = () => {
     if (document.getElementById('trif-mute')) return;
     const NS = 'http://www.w3.org/2000/svg';

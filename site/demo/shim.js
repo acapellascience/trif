@@ -50,6 +50,8 @@
       return { ...c, prompt, messages };
     });
   }
+  // ...and a mod with a touchscreen name (its header's @touch-name) goes by it there.
+  if (touchscreen) DEMO.mods = DEMO.mods.map((m) => (m.touchName ? { ...m, name: m.touchName } : m));
   const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
   const later = (fn, ms = 0) => setTimeout(fn, ms);
 

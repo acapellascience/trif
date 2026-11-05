@@ -98,7 +98,7 @@ export function panelHtml(html) {
 
 // The data shim.js runs with: the mods as the panel lists them, the recordings, the words above.
 const SHIM_DATA = {
-  mods: MODS.map(({ slug, id, name, description, matches, risk }) => ({ slug, id, name, description, matches, risk })),
+  mods: MODS.map(({ slug, id, name, touchName, description, matches, risk }) => ({ slug, id, name, ...(touchName ? { touchName } : {}), description, matches, risk })),
   order: ORDER, // the panel's order for them, as TRIF ships it (the extension's defaultOrder)
   chats: CHATS,
   words: WORDS,

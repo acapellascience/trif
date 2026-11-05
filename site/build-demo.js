@@ -51,6 +51,7 @@ export function demoModule() {
     const risk = /^(\d)\s*(.*)$/.exec(h.risk || '');
     return {
       slug, id: `timsrobot.com/${slug}`, name: h.name || slug, description: h.description || '', matches: h.match,
+      ...(h['touch-name'] ? { touchName: h['touch-name'] } : {}), // (the demo's name for it on a touchscreen)
       runAt: h['run-at'] === 'document-start' ? 'document-start' : 'document-idle',
       risk: risk ? { tier: Number(risk[1]), why: risk[2] } : null, code,
     };

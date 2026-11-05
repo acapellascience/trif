@@ -1,5 +1,6 @@
 // ==WebMod==
-// @name        Click Fireworks
+// @name        Double-Click Fireworks
+// @touch-name  Tap Fireworks
 // @description Double-click (or tap) to launch a firework
 // @match       https://timsrobot.com/*
 // @match       https://*.timsrobot.com/*

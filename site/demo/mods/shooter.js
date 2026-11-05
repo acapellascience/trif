@@ -55,7 +55,9 @@
     .tss-win-below { text-align: center; }
     /* (centred with margins, not transform: Jelly buttons' hover wobble animates transform, which would
        knock it sideways) */
-    .tss-win-again { position: absolute; left: 0; right: 0; width: max-content; margin: 0 auto; top: 6px; background: none; border: 0;
+    .tss-win-opts { position: absolute; left: 0; right: 0; width: max-content; max-width: calc(100vw - 24px); margin: 0 auto; top: 6px;
+      display: flex; flex-wrap: wrap; justify-content: center; gap: 2px 12px; }
+    .tss-win-again { background: none; border: 0;
       padding: 2px 6px; cursor: pointer; font: 500 12px system-ui, -apple-system, sans-serif; color: rgba(255, 255, 255, 0.65);
       text-decoration: none; text-shadow: 0 1px 2px rgba(0, 0, 0, 0.6); }
     /* its fade-in is a class, dropped when done: Jelly buttons' hover wobble replaces the animation, and
@@ -1012,18 +1014,29 @@
       head.append(h1, sub);
       above.append(head);
       links.before(above);
-      // "play again?", just under the buttons
+      // "play again?", just under the buttons. In the home page's demo, two more: "sandbox mode" (every mod
+      // switched off, to try them one by one) and "restart the demo" (back to a first visit); the demo's
+      // own script (site/demo/tab.js) does those, on the `trif-demo-reset` event.
       const below = el('div', 'tss-win-below');
-      const again = el('button', 'tss-win-again', 'play again?');
-      again.type = 'button';
-      again.classList.add('tss-win-again-in');
-      again.addEventListener('animationend', function done(e) {
-        if (e.animationName === 'tss-win-fadein') { again.classList.remove('tss-win-again-in'); again.removeEventListener('animationend', done); }
-      });
-      again.addEventListener('click', (e) => { e.stopPropagation(); playAgainEased(); });
-      below.append(again);
+      const opts = el('div', 'tss-win-opts');
+      const option = (text, go) => {
+        const b = el('button', 'tss-win-again', text);
+        b.type = 'button';
+        b.classList.add('tss-win-again-in');
+        b.addEventListener('animationend', function done(e) {
+          if (e.animationName === 'tss-win-fadein') { b.classList.remove('tss-win-again-in'); b.removeEventListener('animationend', done); }
+        });
+        b.addEventListener('click', (e) => { e.stopPropagation(); go(); });
+        opts.append(b);
+      };
+      option('play again?', playAgainEased);
+      if (document.querySelector('.demo-tab')) {
+        option('sandbox mode', () => dispatchEvent(new CustomEvent('trif-demo-reset', { detail: { to: 'sandbox' } })));
+        option('restart the demo', () => dispatchEvent(new CustomEvent('trif-demo-reset', { detail: { to: 'restart' } })));
+      }
+      below.append(opts);
       links.after(below);
-      again.style.top = `${2 - (parseFloat(getComputedStyle(links).marginBottom) || 0)}px`; // tucked just under the buttons
+      opts.style.top = `${2 - (parseFloat(getComputedStyle(links).marginBottom) || 0)}px`; // tucked just under the buttons
       winEl.nodes.push(above, below);
       sfx.winShimmer();
       celebrate(h1);

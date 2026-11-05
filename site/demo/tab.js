@@ -77,6 +77,34 @@
     if (params.has('mods')) sessionStorage.removeItem('trif-demo-synced');
   } catch { /* no sessionStorage: nothing was remembered */ }
 
+  // Space Shooter's You Win screen, in the demo, offers two more ways on (its `trif-demo-reset` event):
+  // "sandbox mode": every mod switched off, the panel open on its switches, to try them one by one; and
+  // "restart the demo": back to how a first visit finds it (the demo's state, the mute, the rave's
+  // unlocked buttons and the panel's open mod list all forgotten). Both load the plain home page again.
+  addEventListener('trif-demo-reset', (e) => {
+    const to = e.detail?.to;
+    try {
+      if (to === 'sandbox') {
+        const saved = JSON.parse(sessionStorage.getItem('trif-demo-state') || 'null');
+        if (saved?.v === 1) {
+          saved.store = saved.store || {};
+          saved.store.disabled = Object.fromEntries((saved.mods || []).map((s) => [`timsrobot.com/${s}`, true]));
+          saved.active = null;
+          const chat = saved.store['chat:timsrobot.com'];
+          if (chat) chat.run = null;
+          sessionStorage.setItem('trif-demo-state', JSON.stringify(saved));
+        }
+        sessionStorage.setItem(OPEN, '1');
+        sessionStorage.setItem(MIN, '');
+        try { localStorage.setItem('modsOpen', 'true'); } catch {}
+      } else if (to === 'restart') {
+        for (const k of Object.keys(sessionStorage)) if (k.startsWith('trif-demo') || k === 'trif.muted') sessionStorage.removeItem(k);
+        for (const k of ['wmRainbow.unlocked', 'wmRainbow.zoom', 'modsOpen']) localStorage.removeItem(k);
+      } else return;
+    } catch { /* no storage: the page comes back as it would anyway */ }
+    location.replace('/');
+  });
+
   // The site's other pages (the report form, the Windows waitlist) run the same mods when their address
   // names them (the Worker adds them, as on this page): a link to one carries this page's ?mods=, so the
   // visitor's demo mods follow them there, as TRIF's would. Set as the link is followed (mods like the LED

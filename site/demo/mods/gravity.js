@@ -96,7 +96,9 @@
       const allInline = [...c.querySelectorAll('*')].every((k) => SKIP.has(k.tagName.toLowerCase()) || k.closest('svg') || getComputedStyle(k).display === 'inline');
       if (SOLID.has(tag) || ownText || !kids.length || allInline) { out.push(c); continue; }
       const deco = parseFloat(cs.borderTopWidth) || parseFloat(cs.borderBottomWidth) || parseFloat(cs.borderLeftWidth) || cs.boxShadow !== 'none';
-      if (deco) c.setAttribute('data-gm-bare', '');
+      // (its frame goes while its pieces are out of it; but a big card, the report form's or the waitlist's,
+      // stays as it is: its border vanishing and coming back read as the box being deleted)
+      if (deco && !c.matches('.card')) c.setAttribute('data-gm-bare', '');
       c.setAttribute('data-gm-open', ''); // its pieces will fall out of it: don't clip them (see the CSS)
       collect(c, out);
     }

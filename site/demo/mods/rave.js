@@ -53,7 +53,11 @@
        too: otherwise <body>'s setting goes to the window, and <body> itself lets the footer out. */
     html, body { overflow-x: clip !important; }
     /* The secondary (GitHub) button and inline code keep a frosted dark backing so they still read as boxes. */
-    html body .btn.plain, html body code { background-color: rgba(10, 10, 14, 0.55) !important; border-color: rgba(255, 255, 255, 0.5) !important; }
+    html body .btn.plain, html body code { background-color: rgba(10, 10, 14, 0.55) !important; }
+    /* Boxes framed in white, not a dark grey lost in the rainbow: the GitHub button, code, the line over the
+       footer, and on the site's other pages (the report form, the Windows waitlist) the card and its fields. */
+    html body .btn.plain, html body code, html body > footer,
+    html body .card, html body .card :is(textarea, input[type=text], input[type=email], pre) { border-color: rgba(255, 255, 255, 0.8) !important; }
     /* GitHub button: rolling rainbow lettering on its dark box. Two background layers: the rainbow,
        clipped to the text, over the dark backing, clipped to the box (background-color would be clipped
        to the text along with the top layer, so the backing is an image layer instead). */

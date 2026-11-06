@@ -33,6 +33,18 @@ const EXTENSION_ID = 'iaablflfafmonebdomeikadolkgdbkhe';
 // The sites the suite turns TRIF on for (scenario.js, homepage.js): each with its subdomains, as TRIF asks.
 const SITE_ACCESS_HOSTS = ['127.0.0.1', 'x.com', 'google.com', 'timsrobot.com'];
 
+// The test build's side panel can be made not to open, as in Arc (which has chrome.sidePanel but not
+// Chrome's side panel: open() resolves and nothing shows): with chrome.storage.local `e2eNoSidePanel`
+// true, sidePanel.open does just that. It runs before background.js (imported first), so the background's
+// clicks call this one.
+const NO_SIDE_PANEL = `// e2e only (tests/e2e/lib/chrome.js): sidePanel.open resolving without opening, as in Arc.
+let off = false;
+chrome.storage.local.get('e2eNoSidePanel').then((s) => { off = s.e2eNoSidePanel === true; });
+chrome.storage.onChanged.addListener((c, area) => { if (area === 'local' && c.e2eNoSidePanel) off = c.e2eNoSidePanel.newValue === true; });
+const open = chrome.sidePanel.open.bind(chrome.sidePanel);
+chrome.sidePanel.open = (o) => (off ? Promise.resolve() : open(o));
+`;
+
 /** A copy of the extension in `to` with the test manifest described above. Returns `to`. */
 function testExtension(from, to, siteAccess = SITE_ACCESS_HOSTS) {
   fs.rmSync(to, { recursive: true, force: true });
@@ -40,6 +52,9 @@ function testExtension(from, to, siteAccess = SITE_ACCESS_HOSTS) {
   const file = path.join(to, 'manifest.json');
   const m = JSON.parse(fs.readFileSync(file, 'utf8'));
   m.host_permissions = siteAccess === 'all' ? ['<all_urls>'] : siteAccess.flatMap((h) => [`*://${h}/*`, `*://*.${h}/*`]);
+  fs.writeFileSync(path.join(to, 'e2e-no-side-panel.js'), NO_SIDE_PANEL);
+  fs.writeFileSync(path.join(to, 'e2e-background.js'), `import './e2e-no-side-panel.js';\nimport './${m.background.service_worker}';\n`);
+  m.background = { ...m.background, service_worker: 'e2e-background.js' };
   fs.writeFileSync(file, JSON.stringify(m, null, 2));
   return to;
 }

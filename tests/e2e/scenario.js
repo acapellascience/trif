@@ -838,6 +838,7 @@ class Scenario {
     await this.colourChecks().catch((e) => r.check('colour checks', () => { throw e; }));
     if (!this.o.oss) await r.check('open model key: saved, then Replace (and Cancel) and Remove', () => this.openModelKey());
     await this.sweepAndScreenshotChecks(base, win);
+    if (this.o.browser === 'chrome') await this.panelWindowChecks(base, win);
     if (this.o.kind === 'upgrade') await this.mergeChecks();
     await r.check('AI Banisher and Just Results on the Google stand-ins (results and home page)', () => this.googleChecks(win));
     await this.ext(`async (id) => { await chrome.tabs.remove(id); }`, [this.xTab]).catch(() => {});
@@ -962,6 +963,155 @@ class Scenario {
     fs.writeFileSync(this.r.file('guidance.json'), JSON.stringify({ baseline: base0, rows }, null, 2));
     fs.writeFileSync(agentsFile, guides.new);
     await this.cli(['enable', '127.0.0.1/e2e-banner', '--url', '127.0.0.1']);
+  }
+
+  // ---- the toolbar button: Chrome's side panel, and the panel in a window where there's none (Arc)
+
+  /**
+   * Chrome: the toolbar button opens the real side panel (and no panel window), and closes it. Then with
+   * the test build's side panel made not to open, as in Arc (`e2eNoSidePanel`, lib/chrome.js): the click
+   * opens the panel in a window beside the browser window, which follows that window's tabs, closes on the
+   * next click, opens at once after that (remembered), closes with its browser window, and is closed again
+   * when a side panel shows up after all. Fresh: the click still gives activeTab for a screenshot.
+   */
+  async panelWindowChecks(base, win) {
+    const r = this.r;
+    const d = this.d;
+    const { port } = this.o.servers;
+    const PANEL = `${d.origin}/sidepanel.html`;
+    const sidePanels = async () => (await d.targets()).filter((t) => t.url === PANEL).length;
+    const panelWindows = () => this.ext(`async (url) => (await chrome.windows.getAll({ populate: true, windowTypes: ['popup'] }))
+      .filter((w) => w.tabs.length === 1 && w.tabs[0].url.startsWith(url))
+      .map((w) => ({ id: w.id, left: w.left, top: w.top, width: w.width, height: w.height, url: w.tabs[0].url.slice(url.length - 1) }))`, [`${PANEL}?`]);
+    const stored = () => this.ext(`async () => chrome.storage.local.get(['panelInWindow', 'e2eNoSidePanel'])`);
+    const newTab = (url, windowId = win.windowId) => this.ext(`async (url, windowId) => (await chrome.tabs.create({ windowId, url, active: true })).id`, [url, windowId]);
+    // Clicks TRIF's toolbar button on tab `id` (put in front in its window first).
+    const click = async (id) => {
+      const url = await this.ext(`async (id) => { const t = await chrome.tabs.update(id, { active: true }); return t.url || t.pendingUrl; }`, [id]);
+      await d.clickToolbarButton(await d.findPage((u) => u === url));
+    };
+    const tabs = [];
+    const screenshot = async (id, name) => this.cli(['screenshot', '--tab', String(id), '-o', this.r.file(`${this.label}-${String(++this.shots).padStart(2, '0')}-${name}.png`)], { json: true, timeoutMs: 30000 });
+
+    await r.check('toolbar button (Chrome): opens the side panel, no panel window, and closes it again', async () => {
+      const a = await newTab(`${base}/?e2e=side-panel`);
+      tabs.push(a);
+      if (await sidePanels()) { // (left open by an earlier check)
+        await click(a);
+        await waitFor('the side panel left open to close', async () => (await sidePanels()) === 0, { timeoutMs: 5000 });
+      }
+      const t0 = Date.now();
+      await click(a);
+      let shown = 0;
+      let sawWindow = null;
+      while (Date.now() - t0 < 2000) { // past the wait for it, looking for a panel window all the while
+        if (!shown && (await sidePanels()) === 1) shown = Date.now() - t0;
+        const w = await panelWindows();
+        if (w.length) sawWindow = w;
+        await sleep(100);
+      }
+      const st = await stored();
+      if (!shown) throw new Error('no side panel');
+      if (sawWindow || st.panelInWindow) throw new Error(`a panel window too: ${JSON.stringify(sawWindow)} ${JSON.stringify(st)}`);
+      await click(a);
+      await waitFor('the side panel to close', async () => (await sidePanels()) === 0, { timeoutMs: 5000 });
+      return `the side panel after ${shown} ms; closed again; no panel window, nothing remembered`;
+    });
+
+    let b = null;
+    let panelWin = null;
+    const opened = await r.check('no side panel (as in Arc): the click opens the panel in a window beside the browser window', async () => {
+      await this.ext(`async () => chrome.storage.local.set({ e2eNoSidePanel: true })`);
+      b = await newTab(`${base}/?e2e=panel-window`);
+      tabs.push(b);
+      await sleep(500);
+      let before = null;
+      if (!this.allSites) {
+        before = await screenshot(b, 'panel-window-refused');
+        if (before.status === 0) throw new Error('trif screenshot of the tab worked before the click');
+      }
+      const t0 = Date.now();
+      await click(b);
+      const wins = await waitFor('the panel window', async () => { const w = await panelWindows(); return w.length ? w : null; }, { timeoutMs: 6000, intervalMs: 100 });
+      const ms = Date.now() - t0;
+      if (wins.length !== 1 || wins[0].url !== `?window=${win.windowId}&fallback=1`) throw new Error(`panel windows: ${JSON.stringify(wins)}`);
+      [panelWin] = wins;
+      if (await sidePanels()) throw new Error('a side panel too');
+      if ((await stored()).panelInWindow !== true) throw new Error('not remembered (panelInWindow)');
+      const bw = await this.ext(`async (id) => { const w = await chrome.windows.get(id); return { left: w.left, top: w.top, width: w.width, height: w.height }; }`, [win.windowId]);
+      // (Headless Chrome's screen is 2560x1440: room beside the test window.)
+      const beside = bw.left + bw.width + 400 <= 2560;
+      await sleep(500); // (it may move itself beside the window once it knows its screen)
+      [panelWin] = await panelWindows();
+      const p = panelWin;
+      if (p.top !== bw.top || p.height !== bw.height || p.width !== 400
+        || (beside ? p.left !== bw.left + bw.width : p.left !== bw.left + bw.width - 400)) {
+        throw new Error(`at ${JSON.stringify(p)}, the browser window at ${JSON.stringify(bw)}`);
+      }
+      let shot = '';
+      if (!this.allSites) {
+        const x = await screenshot(b, 'panel-window-active-tab');
+        if (x.status !== 0 || !x.json || x.json.how !== 'visible') throw new Error(`trif screenshot after the click: ${x.stderr || x.stdout}`);
+        shot = '; the click gave activeTab: trif screenshot of the tab works now';
+      }
+      return `after ${ms} ms, at ${p.left},${p.top} ${p.width}x${p.height} (${beside ? 'beside' : 'over the right edge of'} the browser window at ${bw.left},${bw.top} ${bw.width}x${bw.height})${shot}`;
+    });
+    if (!opened || !panelWin) {
+      await this.ext(`async () => chrome.storage.local.remove(['e2eNoSidePanel', 'panelInWindow'])`).catch(() => {});
+      return;
+    }
+
+    await r.check('the panel window follows the browser window\'s tabs, not its own', async () => {
+      const ctx = await d.findPage((u) => u.includes('fallback=1'));
+      const site = () => d.eval(ctx, `async () => document.querySelector('#site').textContent`);
+      await waitFor('the panel window on 127.0.0.1', async () => (await site()) === '127.0.0.1', { timeoutMs: 8000 });
+      await this.shot(ctx, 'panel-window');
+      const c = await newTab(`http://localhost:${port}/?e2e=panel-window`);
+      tabs.push(c);
+      await waitFor('the panel window to follow to localhost', async () => (await site()) === 'localhost', { timeoutMs: 8000 });
+      await this.ext(`async (id) => { await chrome.tabs.update(id, { active: true }); }`, [b]);
+      await waitFor('the panel window to follow back', async () => (await site()) === '127.0.0.1', { timeoutMs: 8000 });
+      return '127.0.0.1, localhost, 127.0.0.1';
+    });
+
+    await r.check('the next click closes the panel window; the one after opens it at once (remembered)', async () => {
+      await click(b);
+      await waitFor('the panel window to close', async () => (await panelWindows()).length === 0, { timeoutMs: 5000, intervalMs: 100 });
+      const t0 = Date.now();
+      await click(b);
+      await waitFor('the panel window', async () => (await panelWindows()).length === 1, { timeoutMs: 5000, intervalMs: 50 });
+      const ms = Date.now() - t0;
+      if (ms >= 1000) throw new Error(`took ${ms} ms: it waited for the side panel again`);
+      return `closed; opened again after ${ms} ms`;
+    });
+
+    await r.check('closing a browser window closes its panel window (and only its)', async () => {
+      const w2 = await this.ext(`async (url) => { const w = await chrome.windows.create({ url, width: 900, height: 700, focused: true }); return { windowId: w.id, tabId: w.tabs[0].id }; }`, [`${base}/?e2e=window-two`]);
+      await sleep(500);
+      await click(w2.tabId);
+      await waitFor('its panel window', async () => (await panelWindows()).some((w) => w.url === `?window=${w2.windowId}&fallback=1`), { timeoutMs: 5000, intervalMs: 100 });
+      await this.ext(`async (id) => { await chrome.windows.remove(id); }`, [w2.windowId]);
+      const left = await waitFor('its panel window to close', async () => { const w = await panelWindows(); return w.some((x) => x.url.includes(`window=${w2.windowId}&`)) ? null : w; }, { timeoutMs: 5000, intervalMs: 100 });
+      if (left.length !== 1 || left[0].url !== `?window=${win.windowId}&fallback=1`) throw new Error(`panel windows left: ${JSON.stringify(left)}`);
+      if (!(await d.contexts()).some((c) => c.url === `${PANEL}?window=${win.windowId}`)) throw new Error('the suite\'s own panel window went too');
+      await click(b);
+      await waitFor('the test window\'s panel window to close', async () => (await panelWindows()).length === 0, { timeoutMs: 5000, intervalMs: 100 });
+      return 'closed with its window; the test window\'s stayed until its click';
+    });
+
+    await r.check('a side panel that shows up after all closes the panel window, and the browser is forgotten', async () => {
+      await this.ext(`async () => chrome.storage.local.remove('e2eNoSidePanel')`);
+      await sleep(300);
+      await click(b);
+      await waitFor('the side panel, and no panel window', async () => (await sidePanels()) === 1 && (await panelWindows()).length === 0 && (await stored()).panelInWindow === undefined, { timeoutMs: 8000 });
+      await click(b);
+      await waitFor('the side panel to close', async () => (await sidePanels()) === 0, { timeoutMs: 5000 });
+      return 'side panel shown, panel window closed, panelInWindow gone';
+    });
+
+    await this.ext(`async () => chrome.storage.local.remove(['e2eNoSidePanel', 'panelInWindow'])`).catch(() => {});
+    for (const id of tabs) await this.ext(`async (id) => { await chrome.tabs.remove(id); }`, [id]).catch(() => {});
+    await this.ext(`async (id) => { await chrome.tabs.update(id, { active: true }); }`, [win.tabId]).catch(() => {});
   }
 
   // ---- trif sweep on a page of repeated things, and screenshots of a tab that isn't showing

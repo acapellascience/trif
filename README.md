@@ -55,8 +55,11 @@ switches stay as they were; in Safari, install the new TRIF.app (see Safari belo
    press ⌘⇧G and paste: setup put the folder's path, `~/.trif/app/extension`, on your clipboard.)
 
 3. **Allow it to run mods.** On the **TRIF setup** tab that opens, click **Open TRIF’s Chrome
-   settings** and turn on **Allow User Scripts**. Then choose **Permissive** (TRIF can reach every site;
-   Chrome asks you once) or **Restrictive** (you connect TRIF one site at a time). You can change it later.
+   settings** and turn on **Allow User Scripts**. Then choose whether to add **Tim's starter mods** (a
+   few small mods for Google, X, Amazon and Instagram; nothing of them is on your computer until you
+   click **Add them**, and **Start with none** is fine too), and **Permissive** (TRIF can reach every
+   site; Chrome asks you once) or **Restrictive** (you connect TRIF one site at a time). You can change
+   both later, in the side panel's settings.
 
 4. **Open the side panel.** Click the TRIF icon in the toolbar (pin it from the puzzle-piece menu). If
    it asks you to log in to Claude, click **Log in** and follow the steps.
@@ -128,10 +131,13 @@ Settings → Extensions and delete the old WebMods app.
 - Commands: `/model sonnet` (or `opus`, `haiku`, `default`) switches the model, `/clear` starts a new
   chat, `/compact` shrinks a long conversation, `/context` shows how full it is, `/help` lists these.
 
-### Mods that come with it
+### Tim's starter mods
 
-TRIF starts on for Google, X, Amazon and Instagram, with these mods. Each has a switch in the side
-panel on its site; the ones marked *(off)* wait for you to switch them on.
+Optional: the setup page asks before adding them (or `trif setup --examples`; Settings in the side panel
+can add them later). They're plain JavaScript in `~/.trif/sites`, which you can read first
+([examples/sites](examples/sites)). Added, TRIF starts on for Google, X, Amazon and Instagram, with these
+mods. Each has a switch in the side panel on its site; the ones marked *(off)* wait for you to switch
+them on.
 
 - **Google:** AI Banisher (no AI Overview, AI Mode or Gemini promo), Just Results (no sponsored results
   or extra sections), and DVD Logo *(off)*: the logo on the home page bounces around like an old DVD

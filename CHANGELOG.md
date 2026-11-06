@@ -6,6 +6,10 @@ needs a section here for the version it releases.
 
 ## Unreleased
 
+- **Tim's starter mods are your choice.** Setting TRIF up no longer puts any of the mods TRIF ships on
+  your computer. The setup page asks: **Add them** (small mods for Google, X, Amazon and Instagram, plain
+  JavaScript you can read first) or **Start with none**. Settings in the side panel can add them later.
+  Already have them? Nothing changes: they stay, and keep getting updates.
 - **You choose what TRIF can reach: permissive or restrictive.** Installing TRIF used to give it "all your
   data on all websites". Now it asks for nothing until the setup page's new step, Site permissions:
   **Permissive** gives TRIF access to every site by default (your browser asks once); **Restrictive**

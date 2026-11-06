@@ -405,7 +405,7 @@ const BANISH2 = gmod('AI Banisher', 2);
 
 // A workspace set up while both were shipped (version 1); `release()` ships the merged one and
 // retires the other (its example goes, as in the repo; its history stays).
-function retireWorld() {
+function retireWorld(retireList = RETIRE) {
   const w = world();
   fs.mkdirSync(path.join(w.examples, 'www.google.com'), { recursive: true });
   const history = {};
@@ -422,7 +422,7 @@ function retireWorld() {
       ship(INTO, BANISH2);
       fs.unlinkSync(path.join(w.examples, `${OLD}.js`));
       list = [{ id: INTO, on: true }];
-      retire = RETIRE;
+      retire = retireList;
     },
     setup() {
       const pre = S.preinstallMods(w.home, w.ws.modsDir, w.examples, list, []);
@@ -458,6 +458,23 @@ test('retired: an unchanged copy goes to the trash once the mod it went into has
   // Nothing more on the next setup; it doesn't come back.
   assert.deepStrictEqual(w.setup(), { pre: { added: [], on: [], sites: [] }, updated: [], waiting: [], removed: [], kept: [] });
   assert.strictEqual(w.mine(OLD), null);
+});
+
+test('retired: a rename is marked as one (setup says "now called", not "now part of")', () => {
+  const RENAME = [{ ...RETIRE[0], renamed: true }];
+  const w = retireWorld(RENAME);
+  w.setup();
+  w.release();
+  const r = w.setup();
+  assert.strictEqual(r.removed.length, 1);
+  assert.strictEqual(r.removed[0].renamed, true);
+  const w2 = retireWorld(RENAME);
+  w2.setup();
+  w2.edit(OLD, gmod('Hide AI Mode', 1, 'mine'));
+  w2.release();
+  assert.deepStrictEqual(w2.setup().kept, [{ id: OLD, into: INTO, was: 'Hide AI Mode', name: 'AI Banisher', renamed: true }]);
+  // The real one: Plain X became Detox Timeline; the Google merges stay merges.
+  assert.deepStrictEqual(S.RETIRED.filter((x) => x.renamed).map((x) => x.id), ['x.com/plain-x']);
 });
 
 test('retired: an edited copy is never touched, and setup says so once', () => {

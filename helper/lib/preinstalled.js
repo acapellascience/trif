@@ -87,7 +87,7 @@ const RETIRED = [
   // 0.2.2: a rename (no "X" in a shipped mod's file name). Detox Timeline arrives like any new shipped mod,
   // then the unchanged plain-x goes to the trash and each browser switches Detox Timeline on if plain-x
   // was (absorbs); an edited plain-x stays, as the user's own.
-  { id: 'x.com/plain-x', into: 'x.com/detox-timeline', since: '1' },
+  { id: 'x.com/plain-x', into: 'x.com/detox-timeline', since: '1', renamed: true },
 ];
 
 // TRIF is off on every site until the user turns it on there; it starts on for these, the sites the
@@ -290,7 +290,8 @@ function retireShippedMods(ws, exDir = examplesDir(), retired = RETIRED) {
   const removed = [];
   const kept = [];
   let changed = false;
-  for (const { id, into, since } of retired) {
+  for (const { id, into, since, renamed } of retired) {
+    const how = renamed ? { renamed: true } : {}; // (setup says "now called", not "now part of")
     const rec = state.shipped[id] || null;
     if (!state.offered.includes(id) || (rec && (rec.own || rec.retired))) continue;
     const target = readShipped(exDir, into);
@@ -305,14 +306,14 @@ function retireShippedMods(ws, exDir = examplesDir(), retired = RETIRED) {
       const unchanged = shippedBefore(history, id, h) || (rec && (h === rec.hash || (rec.pending && h === rec.pending.hash)));
       if (!unchanged) {
         next = { retired: { into, kept: true } };
-        kept.push({ id, into, was, name });
+        kept.push({ id, into, was, name, ...how });
       } else {
         const t = state.shipped[into];
         if (!t || t.own || t.retired || !t.hash || !versionAtLeast(t.version, since) || !fs.existsSync(modFile(ws.modsDir, into))) continue;
         let trashed;
         try { trashed = trash.deleteMod(ws, id).trashed; } catch { continue; } // (not a plain file: left alone)
         next = { retired: { into, trashed: path.basename(trashed) } };
-        removed.push({ id, into, was, name, trashed });
+        removed.push({ id, into, was, name, trashed, ...how });
         // While "Use the new version" of `into` can be undone, the undo brings this back too.
         if (t.replaced) t.replaced = { ...t.replaced, retired: [...(t.replaced.retired || []), { id, rec }] };
       }

@@ -513,9 +513,10 @@ function setup(opts = {}) {
       }
       // Shipped mods folded into another one: unchanged copies go to the trash, edited ones stay (said once).
       const { removed, kept } = retireShippedMods(ws, examplesDir);
-      for (const m of removed) say(`mods          ${m.was} is now part of ${m.name}: the old copy is in the trash (trif restore ${m.id} brings it back)`);
+      const now = (m) => (m.renamed ? 'now called' : 'now part of'); // (a renamed mod, or one folded into another)
+      for (const m of removed) say(`mods          ${m.was} is ${now(m)} ${m.name}: the old copy is in the trash (trif restore ${m.id} brings it back)`);
       for (const m of kept) {
-        note(`mods          ${m.was} (${m.id}) is now part of ${m.name}. You changed your copy, so it's left as it is: it`);
+        note(`mods          ${m.was} (${m.id}) is ${now(m)} ${m.name}. You changed your copy, so it's left as it is: it`);
         note(`              keeps running, without updates. Delete it if ${m.name} does what you need.`);
       }
     } catch (e) {

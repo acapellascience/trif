@@ -111,7 +111,8 @@ class Scenario {
       const q = (s) => document.querySelector(s);
       const step = (id) => { const e = q('#step-' + id); return e.hidden ? 'hidden' : ['done', 'now', 'later'].find((c) => e.classList.contains(c)) || '?'; };
       return { docTitle: document.title, title: q('#title').textContent, sub: q('#sub').textContent,
-        steps: ['helper', 'browser', 'scripts', 'sites', 'login', 'try'].map(step),
+        steps: ['helper', 'browser', 'scripts', 'starter', 'sites', 'login', 'try'].map(step),
+        links: [...document.querySelectorAll('.step.now .body a')].map((a) => a.textContent + ' ' + a.href),
         states: [...document.querySelectorAll('.step.done .state')].map((e) => e.textContent),
         now: q('.step.now')?.innerText.trim() || '',
         buttons: [...document.querySelectorAll('.step.now .body button')].map((b) => b.textContent) };
@@ -133,14 +134,14 @@ class Scenario {
   async setupDoneCheck() {
     const st = await this.setupState();
     let keyed = false;
-    if (st.steps[4] !== 'done') {
+    if (st.steps[5] !== 'done') {
       const set = run(path.join(this.trif, 'bin', 'trif'), ['agent', 'key', '--agent', 'claude', '--set-key'], { env: this.env(), cwd: this.home, input: 'sk-ant-e2e-not-a-real-key-0000\n' });
       if (set.status !== 0) throw new Error(`trif agent key --set-key: ${set.stderr || set.stdout}`);
       keyed = true;
     }
     try {
       // (The helper keeps an agent's login state for 30 s; the page asks every 5.)
-      const x = await this.waitSetup('all ticked', (s) => s.steps.join() === 'done,done,done,done,done,now' && s.title === 'TRIF is ready', 60000);
+      const x = await this.waitSetup('all ticked', (s) => s.steps.join() === 'done,done,done,done,done,done,now' && s.title === 'TRIF is ready', 60000);
       // Try it: a button for each site where a shipped mod is on and TRIF is on for the site (x.com's Detox Timeline).
       if (x.sub !== 'Open any website, click the TRIF icon, and ask for a change.' || !x.buttons.includes('Open x.com')
         || !x.buttons.every((b) => /^Open [\w-]+(\.[\w-]+)+$/.test(b))) throw new Error(JSON.stringify(x));
@@ -492,9 +493,10 @@ class Scenario {
     // The setup page: our handle on the extension's chrome.* APIs, and the user scripts permission.
     this.control = await d.openTab(`${origin}/onboarding.html`);
     await r.check('setup page: a checklist, the helper and the browser ticked, user scripts next', async () => {
-      // (With access to every site, the sites step is ticked already.)
-      const x = await this.waitSetup('step 3 open', (st) => st.steps.join() === `done,done,now,${this.allSites ? 'done' : 'later'},later,later`);
-      if (x.docTitle !== 'TRIF setup' || x.title !== 'Set up TRIF' || x.states.join() !== (this.allSites ? 'connected,done,permissive' : 'connected,done')) throw new Error(JSON.stringify(x));
+      // (Upgrading, the starter mods are there already and TRIF has every site: those steps are ticked.)
+      const later = this.o.kind === 'upgrade' ? 'done,done' : 'later,later';
+      const x = await this.waitSetup('step 3 open', (st) => st.steps.join() === `done,done,now,${later},later,later`);
+      if (x.docTitle !== 'TRIF setup' || x.title !== 'Set up TRIF' || x.states.join() !== (this.o.kind === 'upgrade' ? 'connected,done,added,permissive' : 'connected,done')) throw new Error(JSON.stringify(x));
       const want = d.name === 'Firefox' ? /Firefox asks before an add-on runs them\.[\s\S]*Allow user scripts/ : /One switch:[\s\S]*flip this[\s\S]*Open TRIF’s Chrome settings/;
       if (!want.test(x.now)) throw new Error(`step 3 says: ${x.now}`);
       await this.shot(this.control, 'setup-page-scripts-off');
@@ -505,20 +507,55 @@ class Scenario {
       await waitFor('status.userScripts', async () => (await this.cli(['status'], { json: true })).json?.extension?.userScripts, { timeoutMs: 20000 });
       return how;
     });
-    // Site permissions, the setup page's step 4: permissive or restrictive. Upgrading, TRIF has <all_urls>
+    // Tim's starter mods, step 4: nothing of his on disk until the user chooses. Upgrading, the old setup
+    // copied them: ticked "added". Fresh Firefox: "Add them". Fresh Chrome: "Start with none" (they're added
+    // later from the panel's Settings, the way back).
+    this.starterNone = this.o.kind !== 'upgrade' && this.o.browser !== 'firefox';
+    if (allowed) {
+      await r.check(this.o.kind === 'upgrade' ? 'setup page: Tim\'s starter mods ticked "added" (copied by the setup before there was a choice)'
+        : this.starterNone ? 'setup page: Tim\'s starter mods next, nothing on disk; "Start with none": ticked "none", no mods, no start sites'
+          : 'setup page: Tim\'s starter mods next, nothing on disk; "Add them": ticked "added", the mods there', async () => {
+        if (this.o.kind === 'upgrade') {
+          const x = await this.waitSetup('step 4 ticked', (st) => st.steps[3] === 'done');
+          if (x.states[3] !== 'added') throw new Error(`step 4 ticked as ${x.states[3]}`);
+          return 'added';
+        }
+        const x = await this.waitSetup('step 4 open', (st) => st.steps.join() === 'done,done,done,now,later,later,later');
+        const offer = require('../../helper/lib/preinstalled').PREINSTALLED.length;
+        const words = ['Tim\'s starter mods', `${offer} small mods for Google, X, Amazon and Instagram: no ads or AI clutter, calmer feeds. They’re plain JavaScript you can read before they run.`];
+        if (!words.every((w) => x.now.includes(w)) || x.buttons.join() !== 'Add them,Start with none'
+          || JSON.stringify(x.links) !== JSON.stringify(['See what’s in them https://github.com/acapellascience/trif/tree/main/examples/sites'])) throw new Error(`step 4: ${JSON.stringify(x)}`);
+        if (fs.existsSync(path.join(this.trif, 'sites', 'x.com'))) throw new Error('Tim\'s mods are on disk before the user chose them');
+        await this.shot(this.control, 'setup-page-starter-mods');
+        await d.click(this.control, this.starterNone ? '#starter-none' : '#starter-add');
+        const want = this.starterNone ? 'none' : 'added';
+        const y = await this.waitSetup('step 4 ticked', (st) => st.steps[3] === 'done', 15000);
+        if (y.states[3] !== want) throw new Error(`step 4 ticked as ${y.states[3]}`);
+        const there = fs.existsSync(path.join(this.trif, 'sites', 'x.com', 'detox-timeline.js'));
+        if (there === this.starterNone) throw new Error(`x.com/detox-timeline.js ${there ? 'is' : 'isn\'t'} on disk`);
+        const pre = I.readJson(path.join(this.trif, 'preinstalled.json')) || {};
+        if (pre.starter !== want) throw new Error(`preinstalled.json: ${JSON.stringify(pre.starter)}`);
+        if (this.starterNone) {
+          const st = (await this.cli(['status'], { json: true })).json.extension;
+          if (SITES_START.some((site) => (st.sitesOn || []).includes(site))) throw new Error(`start sites on: ${st.sitesOn}`);
+        }
+        return `${want}: "${words[1].slice(0, 60)}…"`;
+      });
+    }
+    // Site permissions, the setup page's step 5: permissive or restrictive. Upgrading, TRIF has <all_urls>
     // already (lib/chrome.js, or asked for and the add-on restarted in Firefox): permissive, ticked. Fresh,
     // it's open; it's chosen after the shipped mods are checked.
     const asksMode = !this.allSites;
     if (allowed) {
       await r.check(asksMode ? 'setup page: user scripts ticked by themselves; Site permissions next: Permissive or Restrictive'
         : 'setup page: user scripts ticked by themselves; Site permissions ticked too (permissive, kept from before)', async () => {
-        const x = await this.waitSetup('step 4 open', (st) => (asksMode ? st.steps.join() === 'done,done,done,now,later,later' : st.steps[3] === 'done'));
+        const x = await this.waitSetup('step 5 open', (st) => (asksMode ? st.steps.join() === 'done,done,done,done,now,later,later' : st.steps[4] === 'done'));
         if (!asksMode) {
-          if (x.states[3] !== 'permissive') throw new Error(`step 4 ticked as ${x.states[3]}`);
+          if (x.states[4] !== 'permissive') throw new Error(`step 5 ticked as ${x.states[4]}`);
           return `ticked: ${x.states.join(', ')}`;
         }
         const words = ['Site permissions', 'Permissive', 'access to every site by default', 'Restrictive', 'connect TRIF on a site-to-site basis', 'You can change this later.'];
-        if (!words.every((w) => x.now.includes(w))) throw new Error(`step 4: ${JSON.stringify(x.now)}`);
+        if (!words.every((w) => x.now.includes(w))) throw new Error(`step 5: ${JSON.stringify(x.now)}`);
         await this.shot(this.control, 'setup-page-site-permissions');
         return x.now.split('\n').slice(0, 3).join(' / ');
       });
@@ -548,35 +585,7 @@ class Scenario {
       return warns.length ? { status: 'warn', detail: `warnings: ${warns.map((c) => c.title).join('; ')}` } : `${doc.json.checks.length} checks ok`;
     });
 
-    await r.check('shipped mods present and recognised (trif mods, trif status)', async () => {
-      const mods = (await this.cli(['mods'], { json: true })).json;
-      const list = Array.isArray(mods) ? mods : (mods && (mods.mods || [])) || [];
-      const shipped = list.filter((m) => m.source === 'webmods' || m.source === 'trif');
-      // Every mod TRIF ships is there; each is marked as shipped (@source), except a copy the user edited
-      // before 0.1.2, when the shipped mods had no @source line yet.
-      const ids = new Set(list.map((m) => m.id));
-      const missing = SHIPPED_IDS.filter((id) => !ids.has(id));
-      if (missing.length) throw new Error(`missing: ${missing.join(', ')}`);
-      const unmarked = SHIPPED_IDS.filter((id) => !shipped.some((m) => m.id === id) && !(this.o.kind === 'upgrade' && id === 'x.com/punk-fonts'));
-      if (unmarked.length) throw new Error(`not recognised as shipped: ${unmarked.join(', ')}`);
-      const st = (await this.cli(['status'], { json: true })).json.extension;
-      const byId = new Map(st.mods.map((m) => [m.id, m]));
-      const px = byId.get('x.com/detox-timeline');
-      if (!px || px.enabled === false) throw new Error(`x.com/detox-timeline not on: ${JSON.stringify(px)}`);
-      const pf = byId.get('x.com/punk-fonts');
-      if (!pf || pf.enabled !== false) throw new Error(`x.com/punk-fonts should start off: ${JSON.stringify(pf)}`);
-      for (const s of ['google.com', 'x.com', 'amazon.com', 'instagram.com']) if (!(st.sitesOn || []).includes(s)) throw new Error(`TRIF isn't on for ${s}: ${st.sitesOn}`);
-      if (this.o.kind === 'upgrade') {
-        const u = list.find((m) => m.id === 'x.com/punk-fonts');
-        if (!u || !u.update) throw new Error(`trif mods shows no update for x.com/punk-fonts: ${JSON.stringify(u)}`);
-        // The retired mods' switches were handed to the mods they went into (once; both on here).
-        const gone = RETIRED.filter((x) => !ids.has(x.id) && ((I.readJson(path.join(this.trif, 'preinstalled.json')) || {}).shipped || {})[x.id]?.retired?.trashed);
-        const { absorbed = {} } = await this.ext(`async () => chrome.storage.local.get('absorbed')`);
-        const missed = gone.filter((x) => absorbed[x.id] !== true || byId.get(x.into)?.enabled === false);
-        if (missed.length) throw new Error(`switches not carried over for ${missed.map((x) => x.id).join(', ')}: absorbed ${JSON.stringify(absorbed)}`);
-      }
-      return `${shipped.length} shipped (${shipped.filter((m) => byId.get(m.id)?.enabled !== false).length} on), sites on: ${st.sitesOn.join(', ')}`;
-    });
+    if (!this.starterNone) await this.shippedChecks();
 
     // Fresh: Firefox clicks Permissive and says no to Firefox's prompt (answered from the browser's side),
     // so TRIF is restrictive, said under the ticked step; Chrome (its prompt can't be answered here) clicks
@@ -592,21 +601,21 @@ class Scenario {
           await d.answerPermissionPrompt(false);
           await d.setPermissionPrompts(false);
         } else if (asksMode) await d.click(this.control, '#mode-restrictive');
-        const x = await this.waitSetup('step 5 open', (st) => (st.steps.join() === 'done,done,done,done,now,later' && /\n\n/.test(st.now) && !/Checking your coding agent/.test(st.now))
-          || st.steps.join() === 'done,done,done,done,done,now');
-        if (x.steps[4] === 'now' && !/is logged in on this computer yet|couldn’t tell whether .* (is|are) logged in|needs a coding agent/.test(x.now) || /Use another agent/.test(x.now)) throw new Error(`step 5 says: ${x.now}`);
+        const x = await this.waitSetup('step 6 open', (st) => (st.steps.join() === 'done,done,done,done,done,now,later' && /\n\n/.test(st.now) && !/Checking your coding agent/.test(st.now))
+          || st.steps.join() === 'done,done,done,done,done,done,now');
+        if (x.steps[5] === 'now' && !/is logged in on this computer yet|couldn’t tell whether .* (is|are) logged in|needs a coding agent/.test(x.now) || /Use another agent/.test(x.now)) throw new Error(`step 6 says: ${x.now}`);
         const want = asksMode ? 'restrictive' : 'permissive';
-        if (x.states[3] !== want) throw new Error(`step 4 ticked as ${x.states[3]}`);
+        if (x.states[4] !== want) throw new Error(`step 5 ticked as ${x.states[4]}`);
         const note = await this.ext(`async () => { const n = document.querySelector('#step-sites .step-note'); return n.hidden ? '' : n.textContent; }`);
         if (asksMode && ff && note !== 'Firefox didn’t get your OK, so TRIF is restrictive. You can switch to permissive later in the sidebar’s Settings.') throw new Error(`the note: ${JSON.stringify(note)}`);
         if (!(asksMode && ff) && note) throw new Error(`a note: ${note}`);
         const st = (await this.cli(['status'], { json: true })).json.extension;
-        const disconnected = asksMode ? (ff ? SITES_START : ['amazon.com', 'instagram.com']) : [];
+        const disconnected = asksMode && !this.starterNone ? (ff ? SITES_START : ['amazon.com', 'instagram.com']) : [];
         if (st.siteMode !== want || JSON.stringify(st.disconnected) !== JSON.stringify(disconnected)) throw new Error(`status: ${JSON.stringify([st.siteMode, st.disconnected])}`);
         const text = await this.cli(['status']);
         if (!new RegExp(`^site mode {5}${want}`, 'm').test(text.stdout)) throw new Error(`trif status: ${text.stdout}`);
         await this.shot(this.control, 'setup-page-login');
-        return `${want}${note ? ` ("${note}")` : ''}; disconnected ${st.disconnected.join(', ') || 'none'}`;
+        return `${want}${note ? ` ("${note}")` : ''}; disconnected ${st.disconnected.join(', ') || 'none'}; ${x.steps[5] === 'now' ? x.now.split('\n').slice(0, 2).join(' / ') : 'the agent is logged in already'}`;
       });
     }
 
@@ -620,6 +629,24 @@ class Scenario {
     await this.waitPage('the test page', (s) => s.ready === 'complete');
     await this.ext(`async (url, win) => { await chrome.windows.create({ url, width: 420, height: 900 }); }`, [`${origin}/sidepanel.html?window=${win.windowId}`, win.windowId]);
     this.panelCtx = await d.findPage('sidepanel.html');
+
+    // Fresh Chrome started with none: Settings in the panel adds them later (the way back), then the same
+    // checks as where they were added at setup.
+    if (this.starterNone) {
+      await r.check('Settings → "Add Tim\'s starter mods" (after "Start with none"): the mods arrive, their sites on, and the button goes', async () => {
+        await this.waitPanel('the panel to load', (x) => x.site === '127.0.0.1');
+        await d.click(this.panelCtx, '#settings-btn');
+        const shown = await waitFor('the button', () => this.panel(`async () => !document.querySelector('#settings').hidden && !document.querySelector('#starter-block').hidden && document.querySelector('#starter-block').innerText`), { timeoutMs: 8000 });
+        await this.shot(this.panelCtx, 'settings-starter-mods');
+        await d.click(this.panelCtx, '#starter-add');
+        await waitFor('the starter mods', () => fs.existsSync(path.join(this.trif, 'sites', 'x.com', 'detox-timeline.js')), { timeoutMs: 15000 });
+        await waitFor('the button to go', () => this.panel(`async () => document.querySelector('#starter-block').hidden`), { timeoutMs: 10000 });
+        await waitFor('the start sites on', async () => (((await this.cli(['status'], { json: true })).json.extension || {}).sitesOn || []).includes('x.com'), { timeoutMs: 10000 });
+        await d.click(this.panelCtx, '#settings-btn');
+        return shown.replace(/\n+/g, ' / ');
+      });
+      await this.shippedChecks();
+    }
 
     // Fresh Firefox is restrictive with no site connected: 127.0.0.1 is disconnected (the panel all grey).
     // Chrome's fresh test build has 127.0.0.1 (restrictive, connected), and upgrading TRIF has every site
@@ -917,6 +944,40 @@ class Scenario {
 
   // ---- the shipped Google mods against the stand-ins (tests/e2e/lib/server.js): every data-e2e="hide…"
   // element hidden, every "keep…" one still showing, in a background tab.
+  /** Tim's starter mods, once added: every one there, recognised, on or off as shipped, their sites on. */
+  async shippedChecks() {
+    const r = this.r;
+    await r.check('shipped mods present and recognised (trif mods, trif status)', async () => {
+      const mods = (await this.cli(['mods'], { json: true })).json;
+      const list = Array.isArray(mods) ? mods : (mods && (mods.mods || [])) || [];
+      const shipped = list.filter((m) => m.source === 'webmods' || m.source === 'trif');
+      // Every mod TRIF ships is there; each is marked as shipped (@source), except a copy the user edited
+      // before 0.1.2, when the shipped mods had no @source line yet.
+      const ids = new Set(list.map((m) => m.id));
+      const missing = SHIPPED_IDS.filter((id) => !ids.has(id));
+      if (missing.length) throw new Error(`missing: ${missing.join(', ')}`);
+      const unmarked = SHIPPED_IDS.filter((id) => !shipped.some((m) => m.id === id) && !(this.o.kind === 'upgrade' && id === 'x.com/punk-fonts'));
+      if (unmarked.length) throw new Error(`not recognised as shipped: ${unmarked.join(', ')}`);
+      const st = (await this.cli(['status'], { json: true })).json.extension;
+      const byId = new Map(st.mods.map((m) => [m.id, m]));
+      const px = byId.get('x.com/detox-timeline');
+      if (!px || px.enabled === false) throw new Error(`x.com/detox-timeline not on: ${JSON.stringify(px)}`);
+      const pf = byId.get('x.com/punk-fonts');
+      if (!pf || pf.enabled !== false) throw new Error(`x.com/punk-fonts should start off: ${JSON.stringify(pf)}`);
+      for (const s of ['google.com', 'x.com', 'amazon.com', 'instagram.com']) if (!(st.sitesOn || []).includes(s)) throw new Error(`TRIF isn't on for ${s}: ${st.sitesOn}`);
+      if (this.o.kind === 'upgrade') {
+        const u = list.find((m) => m.id === 'x.com/punk-fonts');
+        if (!u || !u.update) throw new Error(`trif mods shows no update for x.com/punk-fonts: ${JSON.stringify(u)}`);
+        // The retired mods' switches were handed to the mods they went into (once; both on here).
+        const gone = RETIRED.filter((x) => !ids.has(x.id) && ((I.readJson(path.join(this.trif, 'preinstalled.json')) || {}).shipped || {})[x.id]?.retired?.trashed);
+        const { absorbed = {} } = await this.ext(`async () => chrome.storage.local.get('absorbed')`);
+        const missed = gone.filter((x) => absorbed[x.id] !== true || byId.get(x.into)?.enabled === false);
+        if (missed.length) throw new Error(`switches not carried over for ${missed.map((x) => x.id).join(', ')}: absorbed ${JSON.stringify(absorbed)}`);
+      }
+      return `${shipped.length} shipped (${shipped.filter((m) => byId.get(m.id)?.enabled !== false).length} on), sites on: ${st.sitesOn.join(', ')}`;
+    });
+  }
+
   /**
    * Firefox, permissive: "Switch to restrictive mode" in the card Disconnect opens gives every site's access
    * back, no prompt: 127.0.0.1 goes grey, as every other site; Connect brings it back (the prompt is off).

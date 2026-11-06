@@ -48,8 +48,9 @@ Per browser, a **fresh** scenario, and an **upgrade** scenario per `--upgrade-fr
    (chrome.storage.local `absorbed`).
 2. Start a throwaway browser profile with the extension, connected to the scratch helper only (see
    "Isolation"), check the setup page's checklist (the helper and the browser ticked, user scripts
-   next), allow user scripts (it ticks that step itself; Site permissions is next: Permissive or
-   Restrictive), and check: `trif status` (the extension's hello, its browser),
+   next), allow user scripts (it ticks that step itself; Tim's starter mods are next, none on disk yet: Firefox
+   clicks "Add them", Chrome "Start with none" and adds them later from the panel's Settings; upgrading,
+   the step is ticked "added"), and check: `trif status` (the extension's hello, its browser),
    `trif doctor`, the shipped mods (`trif mods`, which start on and off, the sites TRIF starts on for).
    Then Site permissions (see "Site access" below): Firefox clicks Permissive and says no to its prompt
    (answered from the browser's side), so TRIF is restrictive and the step says so; Chrome clicks

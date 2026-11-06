@@ -49,7 +49,7 @@ const { envVar } = require('./env');
 const PREINSTALLED = [
   { id: 'www.google.com/hide-ai-in-results', on: true }, // AI Banisher
   { id: 'www.google.com/hide-extra-sections', on: true }, // Just Results
-  { id: 'x.com/detox-timeline', on: true }, // (x.com/plain-x until 0.2.2: RETIRED, below)
+  { id: 'x.com/detox-timeline', on: true }, // (x.com/plain-x until 0.2.3: RETIRED, below)
   { id: 'x.com/punk-fonts', on: false },
   { id: 'x.com/rainbow-rave', on: false },
   { id: 'amazon.com/simple-home', on: true },
@@ -61,7 +61,7 @@ const PREINSTALLED = [
   // Added in 0.2.0: existing workspaces get it (off) with the setup that installs the update, since it
   // isn't in their `offered` list yet.
   { id: 'www.google.com/dvd-logo', on: false },
-  // Added in 0.2.2 (off, like any shipped mod an update brings).
+  // Added in 0.2.3 (off, like any shipped mod an update brings).
   { id: 'x.com/follow-status', on: false },
   { id: 'x.com/space-shooter', on: false }, // X-Flyer
   { id: 'www.instagram.com/three-column-feed', on: false },
@@ -74,7 +74,7 @@ const PREINSTALLED = [
 // The order the side panel lists a site's shipped mods in until the user drags them into their own (display
 // only: mods run in their usual order). By site, as the extension's scopeFor gives it; the helper sends it
 // with every mods message (`defaultOrder`), and extension/lib.js orderMods puts mods it doesn't list after.
-// (0.2.2: X's, in Tim's order. The other sites' few shipped mods list in the order they always did.)
+// (0.2.3: X's, in Tim's order. The other sites' few shipped mods list in the order they always did.)
 const DEFAULT_ORDER = {
   'x.com': ['x.com/detox-timeline', 'x.com/follow-status', 'x.com/punk-fonts', 'x.com/space-shooter', 'x.com/rainbow-rave'],
 };
@@ -84,7 +84,7 @@ const DEFAULT_ORDER = {
 const RETIRED = [
   { id: 'www.google.com/hide-ai-mode', into: 'www.google.com/hide-ai-in-results', since: '2' },
   { id: 'www.google.com/hide-sponsored', into: 'www.google.com/hide-extra-sections', since: '2' },
-  // 0.2.2: a rename (no "X" in a shipped mod's file name). Detox Timeline arrives like any new shipped mod,
+  // 0.2.3: a rename (no "X" in a shipped mod's file name). Detox Timeline arrives like any new shipped mod,
   // then the unchanged plain-x goes to the trash and each browser switches Detox Timeline on if plain-x
   // was (absorbs); an edited plain-x stays, as the user's own.
   { id: 'x.com/plain-x', into: 'x.com/detox-timeline', since: '1', renamed: true },

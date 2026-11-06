@@ -129,7 +129,7 @@ test(`upgrade: the ${TAG} updater installs this checkout's package; everything m
     assert.strictEqual(fs.readFileSync(path.join(sites, `${id}.js`), 'utf8'), fs.readFileSync(path.join(REPO, 'examples', 'sites', `${id}.js`), 'utf8'), `${id}\n${info}`);
   }
   assert.match(fs.readFileSync(path.join(sites, 'x.com', 'detox-timeline.js'), 'utf8'), /@name +Detox Timeline\n/);
-  // (plain-x was renamed detox-timeline in 0.2.2: the unchanged copy is in the trash, its switch carried over)
+  // (plain-x was renamed detox-timeline in 0.2.3: the unchanged copy is in the trash, its switch carried over)
   assert.ok(!fs.existsSync(path.join(sites, 'x.com', 'plain-x.js')), `plain-x.js is still there\n${info}`);
   assert.deepStrictEqual(fs.readdirSync(path.join(trif, 'trash', 'x.com')).map((f) => f.replace(/@.*/, '')), ['plain-x']);
   assert.match(fs.readFileSync(path.join(sites, 'www.google.com', 'hide-ai-in-results.js'), 'utf8'), /@name +AI Banisher\n/);

@@ -298,7 +298,7 @@ test('RETIRED: each retired mod is gone from the examples, and the mod it went i
   assert.deepStrictEqual(S.RETIRED.map((r) => [r.id, r.into]), [
     ['www.google.com/hide-ai-mode', 'www.google.com/hide-ai-in-results'],
     ['www.google.com/hide-sponsored', 'www.google.com/hide-extra-sections'],
-    ['x.com/plain-x', 'x.com/detox-timeline'], // (0.2.2: a rename)
+    ['x.com/plain-x', 'x.com/detox-timeline'], // (0.2.3: a rename)
   ]);
 });
 

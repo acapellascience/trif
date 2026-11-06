@@ -166,7 +166,7 @@ async function init() {
   const stored = await chrome.storage.local.get(['settings', 'sitePicks', 'disabled', 'offSites', 'updated', 'modOrder', 'defaultOrder', 'defaultModelsReset']);
   view.updated = stored.updated || null;
   view.settings = normalizeSettings(stored.settings);
-  // Once (0.2.2): the default's models, which models picked on sites used to be copied into (see
+  // Once (0.2.3): the default's models, which models picked on sites used to be copied into (see
   // saveSettings), back to each agent's default. Each site's own picks stay.
   if (!stored.defaultModelsReset) {
     view.settings = { ...view.settings, models: {} };

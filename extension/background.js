@@ -8,7 +8,7 @@ import {
   firstInjectionResult, withTimeout, filterRequests, nextBackoff, chromeVersion, toolLine,
   normalizeDisabled, modAppliesTo, urlInScope, modInScope, applyStartOff, applyAbsorbed, findRenames, carryRenames, renameInOrder, normalizeModOrder, modSites,
   normalizeOffSites, offSiteName, offOnSite, hostInScope, withOffSites, scopeFor, normalizeSitesOn, siteOnFor, sitesInUse, limitToSites, applyStartSites, switchSite, fromOtherBrowser, timedUserScripts, capChat,
-  ALL_ACCESS, readAccess, activeSites, sitesWithoutAccess, hasSiteAccess, siteOrigins,
+  ALL_ACCESS, readAccess, activeSites, hasSiteAccess, siteOrigins, sitesFromOrigins, siteState, siteRefusal,
 } from './lib.js';
 import { runtimeCode } from './runtime.js';
 import { sweepPage } from './sweep.js';
@@ -44,6 +44,8 @@ const state = {
   sitesOn: [],           // registrable domains TRIF is on for; off everywhere else (persisted)
   sitesOffered: [],      // sites the helper said to start on that were turned on once already (persisted)
   access: ALL_ACCESS,    // what the browser gives TRIF (readAccess): a site in sitesOn counts only with it
+  sitesConnected: [],    // sites TRIF has had access to (persisted): without it now, they're "disconnected"
+  neverSites: [],        // sites the user put on the never list: nothing from TRIF touches them (persisted)
   panelWindows: new Map(), // side panel port -> the window it's in (Chrome), so the toolbar button can close it
   startedOff: {},        // mod id → true for mods already switched off once: preinstalled, or from another browser (persisted)
   absorbed: {},          // mod id → true for retired shipped mods whose switch was carried over (persisted)
@@ -120,6 +122,8 @@ const ready = chrome.storage.local.get(null).then(async (s) => {
   state.absorbed = normalizeDisabled(s.absorbed);
   state.defaultOrder = normalizeModOrder(s.defaultOrder);
   state.sitesOffered = normalizeSitesOn(s.sitesOffered);
+  state.sitesConnected = normalizeSitesOn(s.sitesConnected);
+  state.neverSites = normalizeSitesOn(s.neverSites);
   if (Array.isArray(s.sitesOn)) state.sitesOn = normalizeSitesOn(s.sitesOn);
   else {
     // First start since TRIF has to be turned on per site: keep it on where it's already in use.
@@ -197,7 +201,10 @@ function setPanelBehavior() {
 // See "site access" in lib.js: the sites TRIF works on are the ones it's on for that the browser gives
 // it. Everything that touches a page goes by onSites(), never by sitesOn alone.
 
-const onSites = () => activeSites(state.sitesOn, state.access);
+const onSites = () => activeSites(state.sitesOn, state.access).filter((s) => !state.neverSites.includes(s));
+// Sites TRIF has been connected to or set up for: without access, they're "disconnected", not new.
+const knownSites = () => normalizeSitesOn([...state.sitesOn, ...state.sitesConnected, ...state.sitesOffered]);
+const stateOf = (site) => siteState(site, { sitesOn: state.sitesOn, access: state.access, known: knownSites(), never: state.neverSites });
 
 /** Read what the browser gives TRIF again. Returns whether the sites TRIF works on changed. */
 async function refreshAccess() {
@@ -206,6 +213,12 @@ async function refreshAccess() {
     // The browser keeps enforcing its own access either way; TRIF just can't tell which sites it has.
     console.warn('[TRIF] couldn\'t read the site permissions:', errMsg(e));
     state.access = ALL_ACCESS;
+  }
+  // Remember the sites TRIF has been connected to: the ones granted by name, and the ones on with access.
+  const connected = normalizeSitesOn([...state.sitesConnected, ...sitesFromOrigins(state.access.origins), ...activeSites(state.sitesOn, state.access)]);
+  if (JSON.stringify(connected) !== JSON.stringify(state.sitesConnected)) {
+    state.sitesConnected = connected;
+    await save({ sitesConnected: connected }).catch((e) => console.warn('[TRIF]', errMsg(e)));
   }
   return JSON.stringify(onSites()) !== before;
 }
@@ -507,16 +520,9 @@ function checkScopeUrl(url, scope, what) {
   if (!siteOnFor(url, onSites())) {
     const host = hostOf(url);
     if (!host || !/^https?:/.test(url)) throw new Error(`${what} isn't a web page (${url || 'no URL'}); TRIF only works on http and https pages`);
-    const site = siteOnFor(url, state.sitesOn);
-    throw new Error(site
-      ? noAccess(site)
-      : `TRIF is off on ${scopeFor(host)}: nothing from TRIF runs there or reads it until the user turns it on (the side panel on that site has the switch)`);
+    const site = siteOnFor(url, [...state.neverSites, ...state.sitesOn]) || scopeFor(host);
+    throw new Error(siteRefusal(site, stateOf(site)) || siteRefusal(site, 'off'));
   }
-}
-
-function noAccess(site) {
-  return `TRIF is on for ${site}, but ${BROWSER} doesn't give it access to that site (not allowed yet, or taken back in ${BROWSER}'s settings): ` +
-    `nothing from TRIF runs there or reads it until the user allows it (the side panel on that site has the button)`;
 }
 
 function hostOf(url) {
@@ -548,7 +554,7 @@ const commands = {
         if (errors.has(m.id) && errors.get(m.id) !== USER_SCRIPTS_OFF) o.error = errors.get(m.id);
         return o;
       }),
-      recording: state.recording, sitesOn: state.sitesOn, noAccess: sitesWithoutAccess(state.sitesOn, state.access),
+      recording: state.recording, sitesOn: state.sitesOn, ...siteLists(),
       ...(args && (args.tab !== undefined || args.url !== undefined) ? { page: await modsOnPage(args) } : {}),
     };
   },
@@ -770,6 +776,15 @@ const commands = {
 
 // `status --url`: the mods that run on a tab's page (on, not held, not off on its site, its site on),
 // so an agent can see what its change will meet.
+/** For status: the sites without access that TRIF knows, the never list, and what the browser gives TRIF. */
+function siteLists() {
+  return {
+    disconnected: knownSites().filter((s) => stateOf(s) === 'disconnected'),
+    neverSites: state.neverSites,
+    access: { all: state.access.all, allUrls: state.access.allUrls, origins: state.access.origins },
+  };
+}
+
 async function modsOnPage(args) {
   const tab = await scopedTab(args);
   const url = tab.url || tab.pendingUrl || '';
@@ -965,7 +980,7 @@ async function uiStatus() {
   return {
     helper: { connected: state.connected, error: state.connected ? null : state.helperError },
     userScripts: s.userScripts, settingsUrl: SETTINGS_URL, version: VERSION, chrome: CHROME, browser: BROWSER,
-    recording: s.recording, sitesOn: state.sitesOn, noAccess: s.noAccess, siteAccess: SITE_ACCESS, update: state.connected ? state.update : null,
+    recording: s.recording, sitesOn: state.sitesOn, disconnected: s.disconnected, neverSites: s.neverSites, access: s.access, siteAccess: SITE_ACCESS, update: state.connected ? state.update : null,
     mods: state.mods.map((m) => ({
       id: m.id, name: m.name || m.id, description: m.description || '', site: m.site, file: m.file || '',
       matches: m.matches || [], excludes: m.excludes || [], registered: !!live.get(m.id)?.registered, enabled: live.get(m.id)?.enabled ?? isEnabled(m.id),
@@ -1042,6 +1057,8 @@ async function onPanelMessage(msg) {
     case 'agent.loginCancel': return helperRequest('agent.loginCancel', { loginId: String(msg.loginId ?? '') }, 10000);
     case 'chat.clear': return clearChat(msg.site);
     case 'site.set': return setSiteOn(msg);
+    case 'site.disconnect': return disconnectSite(msg);
+    case 'site.never': return setNever(msg);
     case 'chat.note': {
       // A line from the panel itself (a slash command's answer), shown like a tool line.
       const site = normalizeSite(msg.site);
@@ -1123,8 +1140,9 @@ async function startAgent(msg) {
   const prompt = String(msg.prompt ?? '').trim();
   if (!prompt) throw new Error('empty message');
   if (!siteOnFor(`https://${site}/`, onSites())) {
-    const on = siteOnFor(`https://${site}/`, state.sitesOn);
-    throw new Error(on ? `TRIF needs your OK to work on ${on}: allow it first` : `TRIF is off on ${scopeFor(site)}: turn it on first`);
+    const scope = siteOnFor(`https://${site}/`, [...state.neverSites, ...state.sitesOn]) || scopeFor(site);
+    const st = stateOf(scope);
+    throw new Error(st === 'never' ? `${scope} is on TRIF's never list` : st === 'disconnected' ? `TRIF is disconnected from ${scope}: connect it first` : `TRIF is off on ${scope}: turn it on first`);
   }
   const agent = msg.agent ? String(msg.agent) : undefined;
   const tabId = Number.isInteger(msg.tabId) ? msg.tabId : undefined;
@@ -1184,11 +1202,13 @@ async function startLogin(msg) {
 // The panel's switch for the site it's showing (the registrable domain: x.com covers m.x.com). Off stops
 // everything there: its mods, chats in progress, and page commands. Mod switches are kept for next time.
 // On needs the browser's access to the site first (the panel asks for it, from the click): without it
-// the site stays off. Off gives that access back, so TRIF holds only the sites it's on for.
+// the site stays off. Off keeps that access, so turning it on again is instant (a quick before and after);
+// "Disconnect" (disconnectSite) gives it back.
 async function setSiteOn(msg) {
   const site = scopeFor(normalizeSite(msg.site));
   if (!site) throw new Error('missing site');
   const on = msg.on !== false;
+  if (on && state.neverSites.includes(site)) throw new Error(`${site} is on TRIF's never list: take it off the list first.`);
   if (on) {
     await refreshAccess(); // (the grant may be newer than permissions.onAdded)
     if (!hasSiteAccess(state.access, site)) throw new Error(`TRIF needs your OK to work on ${site}, so it stays off there.`);
@@ -1198,25 +1218,68 @@ async function setSiteOn(msg) {
   const sitesOn = [...set].sort();
   await save({ sitesOn }, { switches: true });
   state.sitesOn = sitesOn;
-  if (!on) {
-    for (const r of state.runs.values()) {
-      if (hostInScope(r.site, site)) { r.stopping = true; helperRequest('agent.stop', { runId: r.runId }, 10000).catch(() => {}); }
-    }
-    // (A no-op with access to every site, which covers it anyway; refused for a site the manifest requires,
-    // as in the e2e suite's Chrome build.)
-    if (SITE_ACCESS && !state.access.all) {
-      await Promise.resolve().then(() => chrome.permissions.remove({ origins: siteOrigins(site) })).catch(() => {});
-      await refreshAccess();
-    }
+  if (!on) stopRunsOn(site);
+  await afterSiteChange(msg.tab);
+  return { site, on, sitesOn: state.sitesOn };
+}
+
+function stopRunsOn(site) {
+  for (const r of state.runs.values()) {
+    if (hostInScope(r.site, site) && !r.stopping) { r.stopping = true; helperRequest('agent.stop', { runId: r.runId }, 10000).catch(() => {}); }
   }
-  // Reload the tab if a mod starts or stops running on it.
-  const tab = msg.tab !== undefined ? await chrome.tabs.get(msg.tab).catch(() => null) : null;
+}
+
+// Mods applied again; the tab reloaded if a mod starts or stops running on it.
+async function afterSiteChange(tabId) {
+  const tab = tabId !== undefined ? await chrome.tabs.get(tabId).catch(() => null) : null;
   const url = tab ? tab.url || tab.pendingUrl || '' : '';
   const runsThere = url && state.mods.some((m) => isEnabled(m.id) && !m.held && modAppliesTo(withOffSites(m, state.offSites[m.id]), url));
   if (checkUserScripts()) reportApplied(await serial(applyMods));
   if (runsThere) await chrome.tabs.reload(tab.id).catch(() => {});
   notifyPanels();
-  return { site, on, sitesOn: state.sitesOn };
+}
+
+// Off and access given back ("Disconnect from <site>"): the site is as if TRIF had never been allowed there,
+// except that it's remembered as connected once (so the panel says "disconnected"). With <all_urls> one site
+// can't be given back (Chrome keeps the whole grant), so the panel doesn't offer it.
+async function disconnectSite(msg) {
+  const site = scopeFor(normalizeSite(msg.site));
+  if (!site) throw new Error('missing site');
+  if (!SITE_ACCESS) throw new Error(`${BROWSER} decides which sites TRIF can work on, in its own settings`);
+  if (state.access.all) throw new Error(`TRIF can work on every site; that's changed in ${BROWSER}'s extension settings, or with "Limit TRIF to the sites it's on" in Settings`);
+  await giveBack(site, msg.tab);
+  await refreshAccess();
+  if (hasSiteAccess(state.access, site)) throw new Error(`couldn't disconnect from ${site}: ${BROWSER} still gives TRIF access to it`);
+  notifyPanels();
+  return { site, disconnected: true };
+}
+
+// The site off (out of sitesOn), its runs stopped, and its own access given back (not <all_urls>).
+async function giveBack(site, tabId) {
+  if (state.sitesOn.includes(site)) {
+    const sitesOn = state.sitesOn.filter((s) => s !== site);
+    await save({ sitesOn }, { switches: true });
+    state.sitesOn = sitesOn;
+  }
+  stopRunsOn(site);
+  if (SITE_ACCESS) await Promise.resolve().then(() => chrome.permissions.remove({ origins: siteOrigins(site) })).catch(() => {});
+  await afterSiteChange(tabId);
+}
+
+// The never list (chrome.storage.local `neverSites`): only from the panel, i.e. the user. Adding a site turns
+// it off and gives its own access back; taking it off leaves it off.
+async function setNever(msg) {
+  const site = scopeFor(normalizeSite(msg.site));
+  if (!site) throw new Error('missing site');
+  const never = msg.never !== false;
+  const list = normalizeSitesOn(never ? [...state.neverSites, site] : state.neverSites.filter((s) => s !== site));
+  await save({ neverSites: list }, { switches: true });
+  state.neverSites = list;
+  if (never) await giveBack(site, msg.tab);
+  await refreshAccess();
+  if (!never) await afterSiteChange(undefined);
+  notifyPanels();
+  return { site, never, neverSites: state.neverSites };
 }
 
 async function clearChat(site) {

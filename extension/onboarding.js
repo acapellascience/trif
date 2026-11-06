@@ -4,7 +4,7 @@
 // (which also re-checks the user scripts switch); the agent list and the login go over a `panel` port,
 // as in the side panel (login.js). Switches follow chrome.storage.local `disabled` live.
 
-import { modSites, offOnSite, normalizeOffSites, normalizeSettings, scopeFor, originsFor, SITE_ACCESS, FIREFOX, SAFARI, BROWSER, PANEL, SETUP_COMMAND } from './lib.js';
+import { modSites, offOnSite, normalizeOffSites, normalizeSettings, scopeFor, originsFor, hasSiteAccess, allowEverySite, SITE_ACCESS, FIREFOX, SAFARI, BROWSER, PANEL, SETUP_COMMAND } from './lib.js';
 import { modSwitch, syncSwitches, shownEnabled, switchError, enabledIn, onSwitchChange } from './modswitch.js';
 import { createLogin } from './login.js';
 import { setMarkdown } from './markdown.js';
@@ -241,32 +241,40 @@ function loginStep(connected) {
   return { el: step, done: false };
 }
 
-// Sites setup turned TRIF on for (and any whose access was taken back) need the browser's OK, which only a
-// click can ask for: one prompt for all of them. "Not now" turns TRIF off on them instead (the panel on each
-// site can turn it on again), so nothing waits on an OK that never came.
+// Sites setup turned TRIF on for (and any it's on for whose access was taken back) need the browser's OK,
+// which only a click can ask for: one prompt for all of them, or for every site at once (no prompt after
+// that). "Not now" turns TRIF off on them, leaving them disconnected (the panel on each site connects it),
+// so nothing waits on an OK that never came.
+const waitingSites = (s) => (s.sitesOn || []).filter((x) => (s.disconnected || []).includes(x));
+
 function sitesStep(s, connected) {
   const step = $('#step-sites');
-  const need = s.noAccess || [];
+  const need = waitingSites(s);
   if (!connected) return { el: step, done: false };
-  if (!need.length) return { el: step, done: true, state: 'done' };
+  if (!need.length) return { el: step, done: true, state: s.access?.all ? 'every site' : 'done' };
   const list = need.length === 1 ? need[0] : `${need.slice(0, -1).join(', ')} and ${need.at(-1)}`;
   setBody(step, JSON.stringify([need, sitesAsked]), () => {
     const row = el('div', 'row');
-    row.append(button(need.length === 1 ? `Allow ${need[0]}` : 'Allow these sites', 'primary', () => allowSites(need)),
-      button('Not now', '', () => notNow(need)));
+    const allow = button(need.length === 1 ? `Allow ${need[0]}` : 'Allow these sites', 'primary', () => allowSites(need));
+    const every = button('Allow TRIF on every site', '', () => allowSites(null));
+    const later = button('Not now', '', () => notNow(need));
+    [allow.id, every.id, later.id] = ['sites-allow', 'sites-every', 'sites-later'];
+    row.append(allow, every, later);
     return [
       el('p', null, `TRIF is on for ${list}, and ${BROWSER} asks before it can read and change a website.`),
       row,
       sitesAsked === 'no' ? el('p', 'problem', `${BROWSER} didn’t get your OK, so TRIF stays off there for now.`) : null,
-      el('p', 'note', `Not now turns TRIF off on ${need.length === 1 ? 'it' : 'them'}; you can turn it on for any site later, from the ${PANEL}.`),
+      el('p', 'note', `Every site: TRIF can then work on any site you turn it on for without asking again. ${BROWSER}’s prompt will say it can ${FIREFOX ? 'access your data for all websites' : 'read and change all your data on all websites'}.`),
+      el('p', 'note', `Not now leaves TRIF disconnected from ${need.length === 1 ? 'it' : 'them'}; you can connect it to any site later, from the ${PANEL}.`),
     ];
   });
   return { el: step, done: false };
 }
 
+// `sites`, or every site (null).
 function allowSites(sites) {
   // From the click itself: nothing awaited before it (Firefox's rule for permissions.request).
-  const asked = chrome.permissions.request({ origins: originsFor(sites) });
+  const asked = sites ? chrome.permissions.request({ origins: originsFor(sites) }) : allowEverySite(chrome);
   sitesAsked = 'asking';
   asked.then((ok) => { sitesAsked = ok ? null : 'no'; }, () => { sitesAsked = 'no'; }).finally(() => { renderSteps(); refresh(); });
 }
@@ -279,8 +287,8 @@ async function notNow(sites) {
 
 // The sites to try it on: where a mod TRIF comes with is switched on, and TRIF works on the site.
 function trySites(s) {
-  const without = new Set(s.noAccess || []);
-  const on = new Set((s.sitesOn || []).filter((x) => !without.has(x)));
+  const never = s.neverSites || [];
+  const on = new Set((s.sitesOn || []).filter((x) => !never.includes(x) && hasSiteAccess(s.access || { all: true }, x)));
   const sites = [];
   for (const m of s.mods) {
     if (!['trif', 'webmods'].includes(m.source) || !isOn(m.id)) continue;

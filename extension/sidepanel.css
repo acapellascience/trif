@@ -127,6 +127,17 @@ svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width:
 .gate .mod-err { margin: 0; text-align: center; }
 .gate-title { margin: 0; font-size: 15px; font-weight: 600; }
 .gate-why { margin: -6px 0 0; color: var(--muted); text-align: center; }
+/* Quiet links under the gate's button: give the site's access back, or never on it. */
+.gate-links { margin: 0; display: flex; gap: 14px; font-size: 12px; }
+.gate-links a { color: var(--muted); }
+/* Settings, "Sites": every site or per site, and the never list. */
+.sites-block { display: grid; gap: 6px; border-top: 1px solid var(--line); padding-top: 8px; }
+.sites-title { margin: 0; font-size: 12px; font-weight: 600; }
+.sites-block .actions { margin: 0; }
+.sites-block .actions:has(> [hidden]:only-child) { display: none; }
+.never-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 4px; font-size: 12px; }
+.never-list li { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.never-list:empty { display: none; }
 .gate-icon { stroke: none; }
 .gate-icon .rim { fill: var(--switch-on); }
 .gate-icon .face { fill: #18181a; }

@@ -332,12 +332,17 @@ const handlers = {
     if ([...off].some((id) => shipsOff.has(id))) lines.push('              off (as TRIF ships it) = a mod TRIF comes with, off until switched on (trif enable <id>)');
     if (Object.keys(held).length) lines.push('              HELD = written by a side-panel agent for another site; not running until the user approves it');
     if (Object.keys(updates).length) lines.push('              update available = TRIF has a new version of a mod it ships; see trif mod-update <id>');
-    if (sitesOff.size) lines.push('              waiting = not running until the user turns TRIF on for the site, or allows it there (side panel)');
+    if (sitesOff.size) lines.push('              waiting = not running until the user turns TRIF on for the site, or connects it (side panel)');
     if (st && Array.isArray(st.sitesOn)) {
       lines.push(`sites on      ${st.sitesOn.length ? st.sitesOn.join(', ') : '(none)'}; TRIF is off everywhere else: no mods, no page commands`);
-      // The browser gives TRIF a site only when the user allows it (extension/lib.js "site access").
-      if (Array.isArray(st.noAccess) && st.noAccess.length) {
-        lines.push(`not allowed   ${st.noAccess.join(', ')}: on, but the browser doesn't give TRIF access yet, so off for now; the user allows it in the side panel there`);
+      // The browser gives TRIF a site only when the user connects it (extension/lib.js "site access"), and the
+      // user's never list keeps TRIF off a site whatever access it has. Only the user changes either, in the panel.
+      if (st.access && st.access.all) lines.push('access        every site (the user allowed TRIF on all of them); sites still follow their switch');
+      if (Array.isArray(st.disconnected) && st.disconnected.length) {
+        lines.push(`disconnected  ${st.disconnected.join(', ')}: TRIF has no access there until the user connects it (side panel on the site)`);
+      }
+      if (Array.isArray(st.neverSites) && st.neverSites.length) {
+        lines.push(`never         ${st.neverSites.join(', ')}: on TRIF's never list; nothing from TRIF touches them (only the user changes the list, in the side panel's settings)`);
       }
     }
     if (st) lines.push(`recording     ${(st.recording || []).length ? st.recording.join(', ') : '(none)'}`);

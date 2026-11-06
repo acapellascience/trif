@@ -600,13 +600,17 @@ test('status: lists the sites TRIF is on for and marks mods waiting for theirs',
   cleanups.push(() => ext.close());
   ext.hello();
   ext.handlers.status = () => ({ userScripts: true, chrome: '140', version: '0.1.0', recording: [], sitesOn: ['x.com'],
+    disconnected: ['google.com'], neverSites: ['bank.com'], access: { all: false },
     mods: [{ id: 'bank.com/a', registered: false, enabled: true, sitesOff: true }] });
   await ext.waitForSocket();
   await ext.nextMods((mods) => mods.length === 1);
   const r = await runCli(['status'], { home });
   assert.match(r.stdout, /bank\.com\/a\s+waiting: TRIF is off on its site\n/);
-  assert.match(r.stdout, /waiting = not running until the user turns TRIF on for the site/);
+  assert.match(r.stdout, /waiting = not running until the user turns TRIF on for the site, or connects it/);
   assert.match(r.stdout, /^sites on {6}x\.com; TRIF is off everywhere else/m);
+  assert.match(r.stdout, /^disconnected  google\.com: TRIF has no access there until the user connects it/m);
+  assert.match(r.stdout, /^never {9}bank\.com: on TRIF's never list; nothing from TRIF touches them \(only the user changes the list/m);
+  assert.doesNotMatch(r.stdout, /^access /m);
 });
 
 test('inside a side-panel run, -f/-o/check paths are compared as the file system does: case, links, ..', async () => {

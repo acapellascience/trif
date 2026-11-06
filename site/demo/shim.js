@@ -234,7 +234,8 @@
     return {
       helper: { connected: true, error: null },
       userScripts: true, settingsUrl: `chrome://extensions/?id=${EXTENSION_ID}`, version: v, chrome: '142.0.7444.60', browser: 'Chrome',
-      recording: [], sitesOn: state.sitesOn.slice(), noAccess: [], siteAccess: true,
+      recording: [], sitesOn: state.sitesOn.slice(), disconnected: [], neverSites: [], siteAccess: true,
+      access: { all: true, allUrls: true, origins: ['<all_urls>'] },
       update: { current: v, latest: v, available: false, canInstall: true, auto: state.autoUpdate, source: 'npm', notes: '', installing: false, error: null },
       mods: state.mods.map((m) => ({
         id: m.id, name: m.name, description: m.description, site: SITE, file: fileOf(m), matches: m.matches, excludes: [],
@@ -469,6 +470,7 @@
       case 'agent.loginCode': case 'agent.loginCancel': return { ok: true };
       case 'chat.clear': stopRuns(); await local.remove(chatKey); return { cleared: true };
       case 'panel.window': return null; // (which window the side panel is in: for the toolbar button)
+      case 'site.disconnect': case 'site.never': throw new Error(DEMO.words.notHere);
       case 'chat.note': updateChat((c) => { c.messages.push({ role: 'tool', text: String(msg.text ?? ''), time: Date.now() }); }); return { ok: true };
       case 'site.set': {
         const on = msg.on !== false;

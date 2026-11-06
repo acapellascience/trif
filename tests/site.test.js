@@ -438,3 +438,30 @@ test('/windows: the reports rate limit applies, counted apart from reports', asy
   assert.deepStrictEqual(keys, ['windows:203.0.113.9', 'windows:203.0.113.9', 'windows:203.0.113.9']);
   assert.equal(limited.sent.length, 1);
 });
+
+test('the Worker: the robot as the tab icon, the home-screen icon and the link preview card, on every page', async () => {
+  const [{ default: worker }] = await load();
+  const e = await demoEnv();
+  for (const p of ['/', '/report', '/windows']) {
+    const html = await (await get(worker, e, p)).text();
+    for (const tag of ['<link rel="icon" href="/favicon.svg" type="image/svg+xml">', '<link rel="apple-touch-icon" href="/apple-touch-icon.png">',
+      '<meta property="og:image" content="https://timsrobot.com/og.png">', '<meta name="twitter:card" content="summary_large_image">']) {
+      assert.ok(html.includes(tag), `${p}: ${tag}`);
+    }
+  }
+  const svg = await get(worker, e, '/favicon.svg');
+  assert.equal(svg.status, 200);
+  assert.equal(svg.headers.get('Content-Type'), 'image/svg+xml');
+  assert.match(await svg.text(), /^<svg xmlns="http:\/\/www.w3.org\/2000\/svg"/);
+  const ico = await get(worker, e, '/favicon.ico');
+  assert.equal(ico.status, 200);
+  assert.deepEqual(Buffer.from(await ico.arrayBuffer()), fs.readFileSync(path.join(REPO_DIR, 'extension', 'icons', 'robot-32.png')));
+  for (const [p, w, h] of [['/og.png', 1200, 630], ['/apple-touch-icon.png', 180, 180]]) {
+    const res = await get(worker, e, p);
+    assert.equal(res.status, 200, p);
+    assert.equal(res.headers.get('Content-Type'), 'image/png', p);
+    const png = Buffer.from(await res.arrayBuffer());
+    assert.equal(png.subarray(1, 4).toString(), 'PNG', p);
+    assert.deepEqual([png.readUInt32BE(16), png.readUInt32BE(20)], [w, h], p);
+  }
+});

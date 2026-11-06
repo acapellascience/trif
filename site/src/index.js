@@ -10,9 +10,10 @@
 // everything there to the same path on timsrobot.com: older installs open webmods.dev/report#r=… (a
 // browser keeps the # part across the redirect).
 
-import { REPORT, REPORT_JS, WINDOWS, WINDOWS_JS, windowsPage } from './pages.js';
+import { FAVICON_SVG, REPORT, REPORT_JS, WINDOWS, WINDOWS_JS, windowsPage } from './pages.js';
 import { LIMITS, ReportError, parseReport, parseSignup, reportEmail, signupEmail } from './report.js';
 import { DEMO_FILES, EXTENSION_FILES, homeWith, modScript, pageWith, panelHtml, typeFor } from './demo.js';
+import { IMAGES } from './images.js';
 
 const CSP = {
   'default-src': "'none'", 'script-src': "'self'", 'style-src': "'unsafe-inline'", 'connect-src': "'self'", 'img-src': "'self'",
@@ -199,6 +200,10 @@ export default {
     if (pathname === '/report.js') return script(REPORT_JS);
     if (pathname === '/windows' || pathname === '/windows/') return html(pageWith(WINDOWS, searchParams.get('mods')), 200, undefined, FORM_PAGE);
     if (pathname === '/windows.js') return script(WINDOWS_JS);
+    // The icons and the link preview card (pages.js HEAD_TAGS).
+    if (pathname === '/favicon.svg') return respond(FAVICON_SVG, 'image/svg+xml', 200, CACHE);
+    if (pathname === '/favicon.ico') return extensionFile(request, env, 'icons/robot-32.png');
+    if (Object.hasOwn(IMAGES, pathname)) return respond(Uint8Array.from(atob(IMAGES[pathname]), (c) => c.charCodeAt(0)), 'image/png', 200, CACHE);
     if (Object.hasOwn(DEMO_FILES, pathname)) return respond(DEMO_FILES[pathname].body, DEMO_FILES[pathname].type, 200, CACHE);
     if (pathname.startsWith('/demo/mods/')) {
       const code = modScript(pathname.slice('/demo/mods/'.length));

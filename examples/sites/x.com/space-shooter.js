@@ -989,7 +989,33 @@
     [data-tss-dmg].tss-hit { animation: tss-media-hit 120ms ease-out; }
     @keyframes tss-media-hit { from { outline: 3px solid rgba(255, 255, 255, 0.9); outline-offset: -3px; } to { outline-color: transparent; } }
   `;
+  // X: what has scrolled up behind the timeline's sticky top bar ("For you / Following", or a page's title
+  // bar) can't be shot or bombed until it comes out below it: shots pass over it. The bar itself (its tab
+  // names) is fair game. Found every 250 ms: the sticky ancestor, inside the timeline column, of whatever
+  // is at the column's top edge (only when it's stuck there).
+  let coverAt = 0, coverEl = null, coverBox = null;
+  const topCover = () => {
+    const now = performance.now();
+    if (now - coverAt > 250 || (coverEl && !coverEl.isConnected)) {
+      coverAt = now; coverEl = null; coverBox = null;
+      try {
+        const col = document.querySelector('[data-testid=primaryColumn]'), cr = col?.getBoundingClientRect();
+        const el = cr?.width ? document.elementFromPoint(cr.left + cr.width / 2, 3) : null;
+        for (let e = el; e && e !== col && col.contains(e); e = e.parentElement) {
+          if (getComputedStyle(e).position !== 'sticky') continue;
+          const r = e.getBoundingClientRect();
+          if (r.top <= 4 && r.bottom > 0) { coverEl = e; coverBox = r; }
+          break;
+        }
+      } catch {}
+    }
+    return coverEl;
+  };
+  // under the bar: a point there, or a box whose middle is (and not part of the bar)
+  const coveredAt = (x, y, el) => !!topCover() && y < coverBox.bottom && x >= coverBox.left && x <= coverBox.right && !(el && coverEl.contains(el));
+  const coveredBox = (r, el) => coveredAt((r.left + r.right) / 2, (r.top + r.bottom) / 2, el);
   const mediaAt = (x, y) => {
+    if (coveredAt(x, y)) return null;
     for (const el of document.elementsFromPoint(x, y)) {
       let m = el.closest?.(MEDIA);
       if (!m) continue;
@@ -1085,10 +1111,11 @@
   const relationOf = (u) => (u?.followed_by ? (u.following ? 'mutual' : 'follower') : 'stranger');
   // Size: 1K followers keeps the picture's own size on the page (base); every ×1000 in followers is ×3 in
   // size (1M: 3×, 1B: 9×), smaller accounts shrink (10 followers: about half). Between 14px and 200px.
-  // Health follows size, so what looks big is tough: 10 hits at 40px (a post's picture at 1K followers),
+  // Health follows size, so what looks big is tough: 5 hits at 40px (a post's picture at 1K followers),
   // growing a bit faster than the size (^1.25). So a quoted post's smaller picture is weaker for the same
-  // followers (24px at 1K: 5 hits), and big accounts are hard: 112px (660K followers) about 36 hits, 200px
-  // (the cap) 60. Between 2 and 60. Unknown followers: its own size.
+  // followers (24px at 1K: 3 hits), and big accounts are harder: 112px (660K followers) about 18 hits,
+  // 200px (the cap) 30. Between 1 and 30 (ENEMY_HP_SCALE: half what it was). Unknown followers: its own size.
+  const ENEMY_HP_SCALE = 0.5;
   const sizeFor = (followers, base) => {
     let size = base;
     if (Number.isFinite(followers)) {
@@ -1096,7 +1123,8 @@
       size = base * 3 ** ((L - 3) / 3);
     }
     size = Math.round(Math.max(14, Math.min(200, size)));
-    return { size, hp: Math.round(Math.max(2, Math.min(60, AVATAR_HP * (size / 40) ** 1.25))) };
+    // (halved: they were too hard to beat; the boss has his own BOSS_HP, unchanged)
+    return { size, hp: Math.round(Math.max(1, Math.min(30, ENEMY_HP_SCALE * AVATAR_HP * (size / 40) ** 1.25))) };
   };
   const wakeAvatar = (word) => {
     if (!word.closest('article') || winMsg) return;
@@ -1545,6 +1573,7 @@
         if (shielded(w)) continue;
         const r = w.getBoundingClientRect();
         if (!r.width && !r.height) continue;
+        if (coveredBox(r, w)) continue; // X: behind the sticky top bar (see topCover)
         wordBoxes.push({ w, l: r.left, t: r.top, r: r.right, b: r.bottom,
           clipped: !!tl && (r.top < tlBand.top || r.bottom > tlBand.bottom) && tl.contains(w) }); // X: clipped away (Timeline mode)
       }
@@ -1556,7 +1585,7 @@
     const boxes = liveWordBoxes();
     if (!boxes.some((b) => x >= b.l && x <= b.r && y >= b.t && y <= b.b && !b.w.hasAttribute('data-tss-dead'))) return null;
     for (const el of document.elementsFromPoint(x, y)) {
-      if (el.classList?.contains('tss-w') && !el.hasAttribute('data-tss-dead') && !shielded(el)) return el;
+      if (el.classList?.contains('tss-w') && !el.hasAttribute('data-tss-dead') && !shielded(el) && !coveredAt(x, y, el)) return el;
     }
     // elementsFromPoint skips pointer-events:none text: fall back to rects
     for (const b of boxes) {
@@ -1598,7 +1627,7 @@
     for (const w of document.querySelectorAll('.tss-w:not([data-tss-dead])')) {
       if (w.closest('[data-gm-body]') || shielded(w)) continue;
       const r = w.getBoundingClientRect();
-      if (r.width && x >= r.left && x <= r.right && y >= r.top && y <= r.bottom) return w;
+      if (r.width && x >= r.left && x <= r.right && y >= r.top && y <= r.bottom && !coveredBox(r, w)) return w;
     }
     return null;
   };
@@ -1691,7 +1720,7 @@
       for (const w of document.querySelectorAll('.tss-w:not([data-tss-dead])')) {
         if (shielded(w)) continue;
         const r = w.getBoundingClientRect();
-        if (!r.width || !inBand(r) || !near(r)) continue;
+        if (!r.width || !inBand(r) || !near(r) || coveredBox(r, w)) continue; // (X: not behind the top bar)
         if (n++ < 6) explode(w); // (the first few burst into letters; a whole paragraph would be a blizzard)
         else { w.setAttribute('data-tss-dead', ''); score++; try { wakeAvatar(w); } catch {} }
       }
@@ -1702,7 +1731,7 @@
         if (seen.has(m) || m.closest('[data-tss-dead]')) continue;
         seen.add(m);
         const r = m.getBoundingClientRect();
-        if (!r.width || !inBand(r) || !near(r)) continue;
+        if (!r.width || !inBand(r) || !near(r) || coveredBox(r)) continue; // (X: not behind the top bar)
         const hits = (parseInt(m.getAttribute('data-tss-hits'), 10) || 0) + REAR_MEDIA_DMG;
         if (hits >= MEDIA_HP) explodeMedia(m);
         else { m.setAttribute('data-tss-hits', String(hits - 1)); hitMedia(m, Math.max(r.left, Math.min(x, r.right)), Math.max(r.top, Math.min(y, r.bottom))); }
@@ -2778,9 +2807,11 @@
         if (keys.ArrowUp) ship.y -= 420 * dt;
         if (keys.ArrowDown) ship.y += 420 * dt;
         ship.x = Math.max(ship.w / 2, Math.min(W - ship.w / 2, ship.x));
-        // X: Timeline mode: holding ↑ also scrolls the timeline down at you (at the ship's climbing speed), but
-        // the ship still flies anywhere on screen: the scrolling doesn't hold it back
-        if (tl && keys.ArrowUp) { tlScroll += 420 * dt; const n = Math.floor(tlScroll); if (n) { tlScroll -= n; scrollBy(0, n); } }
+        // X: Timeline mode: holding ↑ also scrolls the timeline down at you (TL_SCROLL px/s, faster than the
+        // ship climbs), but the ship still flies anywhere on screen: the scrolling doesn't hold it back
+        // (still a person's pace: a quick mouse-wheel flick is faster)
+        const TL_SCROLL = 650;
+        if (tl && keys.ArrowUp) { tlScroll += TL_SCROLL * dt; const n = Math.floor(tlScroll); if (n) { tlScroll -= n; scrollBy(0, n); } }
         ship.y = Math.max(ship.h + 4, Math.min(H - 14, ship.y));
         // space: lasers normally; in Gravity mode (where lasers can't do much) it drops bombs instead,
         // one in the air at a time

@@ -8,7 +8,8 @@
 // nothing of it is logged or stored here.
 
 // The model, and what it costs in neurons per million tokens (developers.cloudflare.com/workers-ai/platform/pricing),
-// for the daily budget below. (Llama 3.3: the persona holds best of the ones tried; see the branch's notes.)
+// for the daily budget below. (Llama 3.3 70B: a strong role-player, and the Workers AI model this was first
+// written for; not yet tried live. Another model: change both, and the "Built with Llama" credit in demo.js.)
 export const MODEL = '@cf/meta/llama-3.3-70b-instruct-fp8-fast';
 const NEURONS_PER_M = { input: 26668, output: 204805 };
 

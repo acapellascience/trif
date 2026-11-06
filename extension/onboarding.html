@@ -14,14 +14,14 @@
     /* TRIF's green (switch.css), and a darker one for words on the light background. */
     --green: var(--trif-green); --green-text: #1f8a4c;
     /* The picture of Chrome's own "Allow User Scripts" row, in Chrome's colours. */
-    --c-bg: #ffffff; --c-line: #dadce0; --c-text: #202124; --c-sub: #5f6368; --c-track: #bdc1c6; --c-knob: #ffffff;
+    --c-bg: #ffffff; --c-line: #dadce0; --c-text: #202124; --c-sub: #5f6368;
   }
   @media (prefers-color-scheme: dark) {
     :root {
       --bg: #161617; --card: #1f1f21; --text: #ececee; --muted: #9a9aa0; --faint: #6f6f75; --line: #333336;
       --ok: #4cc27f; --bad: #ff6b5e; --accent: #7d9cff; --code: #2a2a2d;
       --green-text: var(--trif-green);
-      --c-bg: #202124; --c-line: #3c4043; --c-text: #e8eaed; --c-sub: #9aa0a6; --c-track: #5f6368; --c-knob: #dadce0;
+      --c-bg: #202124; --c-line: #3c4043; --c-text: #e8eaed; --c-sub: #9aa0a6;
     }
   }
   * { box-sizing: border-box; }
@@ -85,9 +85,12 @@
   .chrome-row .t { flex: 1; }
   .chrome-row .t b { display: block; font-weight: 500; font-size: 13px; }
   .chrome-row .t span { color: var(--c-sub); font-size: 12px; }
-  .chrome-toggle { width: 34px; height: 14px; border-radius: 7px; background: var(--c-track); position: relative; flex: none; margin-right: 6px; }
-  .chrome-toggle::after { content: ""; position: absolute; left: -2px; top: -3px; width: 20px; height: 20px; border-radius: 50%; background: var(--c-knob);
-    box-shadow: 0 1px 3px rgb(0 0 0 / 0.4); }
+  /* Its switch, off: a pill with the knob inside, as Chrome draws it now (and as TRIF's own switch.css
+     does; the old Material thin track with an overhanging knob is gone from Chrome). */
+  .chrome-toggle { box-sizing: border-box; width: 30px; height: 18px; border-radius: 999px; position: relative; flex: none; margin-right: 6px;
+    background: color-mix(in srgb, var(--c-sub) 45%, transparent); }
+  .chrome-toggle::after { content: ""; position: absolute; left: 2px; top: 2px; width: 12px; height: 12px; border-radius: 50%; background: #fff;
+    box-shadow: 0 1px 2px rgb(0 0 0 / 0.25); }
   .flip { color: var(--green-text); font-weight: 700; font-size: 13px; white-space: nowrap; }
 
   /* Your mods: one line, opening to the list by site with a switch per mod. */

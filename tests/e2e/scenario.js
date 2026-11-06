@@ -729,7 +729,7 @@ class Scenario {
     await r.check('setup page: all ticked once the agent can run, then "TRIF is ready" and Try it', () => this.setupDoneCheck());
     // (A stand-in Claude Code: only when the helper has the scratch HOME, never your real agent.)
     if (!this.o.agent && !this.o.codex && !this.o.oss && !this.o.guidance) {
-      await r.check('an expired login (a stand-in Claude Code): the login notice and one plain line, not the raw error; the message back in the box', () => this.expiredLoginCheck());
+      await r.check('an expired login (a stand-in Claude Code): the login notice and one plain line, not the raw error; the message back in the box', () => this.expiredLoginCheck(win));
     }
 
     if (this.o.agent) await this.agentChecks('claude');
@@ -1267,7 +1267,7 @@ class Scenario {
    * Code's `auth status` does with an expired login) and answers every run the way Claude Code 2.1.319 does
    * when its login can't be refreshed. It reaches nothing. Put back after.
    */
-  async expiredLoginCheck() {
+  async expiredLoginCheck(win) {
     const dir = path.join(this.work, 'standin');
     fs.mkdirSync(dir, { recursive: true });
     fs.writeFileSync(path.join(dir, 'claude'), `#!${process.execPath}
@@ -1296,8 +1296,10 @@ process.exitCode = 1;
     };
     try {
       await this.ext(`async (k) => { await chrome.storage.local.remove(k); }`, [`chat:${site}`]);
-      await this.goColour('site');
+      // (The test window's own tab: x.com's is gone by now.)
+      await this.ext(`async (id, url) => { await chrome.tabs.update(id, { url, active: true }); }`, [win.tabId, `http://${site}:${this.o.servers.port}/?e2e=expired`]);
       await reopen();
+      await this.waitPanel(`the panel on ${site}`, (x) => x.site === site && !x.gate, 15000);
       await this.waitLooks('Claude Code ready (the stand-in)', (l) => l.dotLabel === 'Ready · Claude Code' && !l.send.disabled, 30000);
       const message = 'hide the banner please';
       await this.panel(`async (text) => { const i = document.getElementById('input'); i.value = text; i.dispatchEvent(new Event('input', { bubbles: true })); }`, [message]);

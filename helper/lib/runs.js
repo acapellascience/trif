@@ -618,6 +618,7 @@ class Runs {
     if (run.doneSent) return;
     if (run.secrets.length) { const t = JSON.stringify(event); const r = redactSecrets(t, run.secrets); if (r !== t) event = JSON.parse(r); }
     if (event.kind === 'done') run.doneSent = true;
+    if (event.kind === 'error' && event.reason === 'login') { run.loginFailed = event.message; event = { ...event, agent: run.agent }; }
     try { this.onEvent(run.id, event); } catch (e) { this.logger.error(`agent event handler: ${e.message}`); }
   }
 
@@ -908,13 +909,24 @@ class Runs {
     } else {
       if (!run.stopped && !run.timedOut && run.child) {
         const tail = run.stderr.trim().split('\n').slice(-12).join('\n').slice(-2000);
+        // (A message, or a whole error event: util.js loginError.)
         const friendly = run.adapter.explainExit ? run.adapter.explainExit({ code, signal, stderr: run.stderr, state: run.state }) : null;
         const how = signal ? `was killed (${signal})` : `exited with code ${code}`;
-        this._emit(run, { kind: 'error', message: friendly || `${run.adapter.name} ${how} without finishing${tail ? `:\n${tail}` : ''}` });
+        this._emit(run, friendly && typeof friendly === 'object' ? friendly
+          : { kind: 'error', message: friendly || `${run.adapter.name} ${how} without finishing${tail ? `:\n${tail}` : ''}` });
       }
       done = { kind: 'done', ok: false, result: null, costUsd: null, changedFiles, sessionId: run.lastSessionId || null };
     }
     if (run.stopped && !run.shuttingDown) done.stopped = true;
+    // Failed for want of a login: say so in `done` (the panel shows its login notice instead of an error),
+    // and agent.list says logged out from now on, whatever the agent's own status check says (Claude
+    // Code's still says logged in with an expired login it can't refresh), until a login or a run works.
+    if (run.loginFailed && !done.ok) {
+      done.error = { kind: 'login', agent: run.agent, message: run.loginFailed };
+      agents.noteLoginFailed(run.agent);
+    } else if (done.ok) {
+      agents.noteLoginWorked(run.agent);
+    }
     if (run.shuttingDown) this._emit(run, { kind: 'error', message: 'the helper shut down (Chrome closed?) before the agent finished' });
     this._emit(run, done);
     this._log(run, { webmods: 'done', ...done, exitCode: code, signal, stderrTail: run.stderr.slice(-4000), time: Date.now() });

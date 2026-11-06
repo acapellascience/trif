@@ -22,8 +22,9 @@ test.after(async () => {
 // ------------------------------------------------------------------ fake agent
 
 // A fake Claude Code. Behaviour comes from words in the prompt (its env is sanitized, so env vars
-// can't steer it): NOTLOGGEDIN, CRASH, SLEEP, STUBBORN (ignores SIGTERM), EDIT (changes a mod file),
-// EVIL (writes a mod for its site and one for <all_urls>).
+// can't steer it): NOTLOGGEDIN, EXPIRED (a login it can't refresh, as Claude Code says it), LOSTLOGIN (the
+// same on stderr, no result line), SAYSLOGIN (a reply that only mentions logins), CRASH, SLEEP, STUBBORN
+// (ignores SIGTERM), EDIT (changes a mod file), EVIL (writes a mod for its site and one for <all_urls>).
 // Every call is dumped to <dir>/calls/<time>-<pid>.json with argv, env and cwd.
 // `auth status --json` says logged in once <dir>/logged-in exists; `auth login` prints the sign-in
 // lines, dumps its env to <dir>/login-env.json, reads one line and logs in if it's GOODCODE (anything
@@ -74,6 +75,24 @@ if (prompt.includes('NOTLOGGEDIN')) {
   say({ type: 'assistant', message: { model: '<synthetic>', content: [{ type: 'text', text: 'Not logged in · Please run /login' }] } });
   say({ type: 'result', subtype: 'success', is_error: true, result: 'Not logged in · Please run /login', session_id: session, total_cost_usd: 0 });
   process.exit(1);
+}
+if (prompt.includes('EXPIRED')) {
+  // Claude Code 2.1.319 with a login it can't refresh (its \`auth status\` still says logged in): the error
+  // as a reply, then as the result.
+  const t = 'Failed to authenticate: OAuth session expired and could not be refreshed';
+  say({ type: 'assistant', message: { model: '<synthetic>', content: [{ type: 'text', text: t }] }, error: 'authentication_failed', session_id: session });
+  say({ type: 'result', subtype: 'success', is_error: true, result: t, session_id: session, total_cost_usd: 0 });
+  process.exit(1);
+}
+if (prompt.includes('LOSTLOGIN')) {
+  process.stderr.write('Error: Login expired \u00b7 Please run /login\\n');
+  process.exit(1);
+}
+if (prompt.includes('SAYSLOGIN')) {
+  // A reply that only talks about logins: shown as usual, the run fine.
+  say({ type: 'assistant', message: { content: [{ type: 'text', text: 'The page says you are not logged in, so I hid its sign-in banner.' }] } });
+  say({ type: 'result', subtype: 'success', is_error: false, result: 'The page says you are not logged in, so I hid its sign-in banner.', session_id: session, total_cost_usd: 0.01 });
+  process.exit(0);
 }
 if (prompt.includes('CRASH')) {
   process.stderr.write('starting up\\nTypeError: boom went the fake agent\\n');
@@ -258,10 +277,30 @@ test('claude adapter: parses init, text, tools, result; maps "Not logged in"', (
   ]);
   ev.length = 0;
   claude.parse(JSON.stringify({ type: 'result', is_error: true, result: 'Not logged in · Please run /login', session_id: 's' }), emit, st);
-  assert.equal(ev[0].kind, 'error');
-  assert.equal(ev[0].message, "Claude Code isn't logged in: run `claude` in a terminal and log in (type /login)");
+  assert.deepEqual(ev[0], { kind: 'error', reason: 'login', message: 'Claude Code needs you to log in again.' });
   assert.equal(ev[1].kind, 'done');
   assert.equal(ev[1].ok, false);
+  assert.equal(ev[1].discardSession, true);
+  // An expired login: its reply in those words is dropped, one login error instead of the raw text twice.
+  ev.length = 0;
+  const expired = 'Failed to authenticate: OAuth session expired and could not be refreshed';
+  claude.parse(JSON.stringify({ type: 'assistant', message: { model: '<synthetic>', content: [{ type: 'text', text: expired }] }, error: 'authentication_failed' }), emit, st);
+  assert.deepEqual(ev, [], 'held until the result');
+  claude.parse(JSON.stringify({ type: 'result', subtype: 'success', is_error: true, result: expired, session_id: 's' }), emit, st);
+  assert.deepEqual(ev.map((e) => [e.kind, e.reason, e.message]), [['error', 'login', 'Claude Code needs you to log in again.'], ['done', undefined, undefined]]);
+  // A reply in those words in a run that went on is shown after all, in its place.
+  ev.length = 0;
+  claude.parse(JSON.stringify({ type: 'assistant', message: { content: [{ type: 'text', text: 'It says: Please run /login' }] } }), emit, st);
+  claude.parse(JSON.stringify({ type: 'assistant', message: { content: [{ type: 'tool_use', name: 'Bash', input: { command: 'trif reload' } }] } }), emit, st);
+  claude.parse(JSON.stringify({ type: 'result', is_error: false, subtype: 'success', result: 'ok', session_id: 's' }), emit, st);
+  assert.deepEqual(ev.map((e) => e.kind), ['text', 'tool', 'done']);
+  assert.equal(ev[2].ok, true);
+  // With a saved API key the run never used the login: the agent's own words.
+  ev.length = 0;
+  claude.parse(JSON.stringify({ type: 'result', is_error: true, result: 'Invalid API key · Fix external API key', session_id: 's' }), emit, { ...st, apiKey: { account: 'a' } });
+  assert.deepEqual(ev[0], { kind: 'error', message: 'Invalid API key · Fix external API key' });
+  assert.deepEqual(claude.explainExit({ stderr: 'Error: Login expired · Please run /login\n' }), { kind: 'error', reason: 'login', message: 'Claude Code needs you to log in again.' });
+  assert.equal(claude.explainExit({ stderr: 'TypeError: boom' }), null);
   ev.length = 0;
   claude.parse(JSON.stringify({ type: 'result', is_error: true, subtype: 'error_max_turns', session_id: 's' }), emit, st);
   assert.match(ev[0].message, /error_max_turns/);
@@ -476,8 +515,50 @@ test('codex adapter: command, resume, JSONL events', () => {
   ]);
   ev.length = 0;
   line({ type: 'turn.failed', error: { message: 'unexpected status 401 Unauthorized' } });
-  assert.match(ev[0].message, /Codex isn't logged in/);
+  assert.deepEqual(ev[0], { kind: 'error', reason: 'login', message: 'Codex needs you to log in again.' });
   assert.equal(ev[1].ok, false);
+  ev.length = 0;
+  line({ type: 'error', message: 'Your access token could not be refreshed because your refresh token has expired. Please log out and sign in again.' });
+  assert.equal(ev[0].reason, 'login');
+  assert.deepEqual(codex.explainExit({ stderr: 'Error: Not logged in\n' }), { kind: 'error', reason: 'login', message: 'Codex needs you to log in again.' });
+  // With a saved API key: Codex's own words.
+  ev.length = 0;
+  codex.parse(JSON.stringify({ type: 'turn.failed', error: { message: 'unexpected status 401 Unauthorized' } }), emit, { apiKey: { account: 'a' } });
+  assert.deepEqual(ev[0], { kind: 'error', message: 'unexpected status 401 Unauthorized' });
+});
+
+test('login failures: what the agents say when their login is gone, and what they say otherwise', () => {
+  const { isLoginFailure } = require('../helper/lib/agents/util');
+  for (const t of [
+    // Claude Code 2.1.319
+    'Not logged in · Please run /login',
+    'Failed to authenticate: OAuth session expired and could not be refreshed',
+    'Failed to authenticate: OAuth token revoked. Please log in again or contact your administrator.',
+    'OAuth token revoked · Please run /login',
+    'Login expired · Please run /login',
+    'Login reached its time limit · Please run /login',
+    'Failed to authenticate: this login reached its time limit and cannot be renewed. Run `claude auth login` to sign in again',
+    'Authentication required · Sign in again to continue',
+    'Your session has expired. Please run /login to sign in again.',
+    'API Error: 401 Invalid API key · Please run /login',
+    'API Error: 401 {"type":"error","error":{"type":"authentication_error","message":"invalid x-api-key"}}',
+    // Codex 0.166
+    'unexpected status 401 Unauthorized: Missing bearer or basic authentication in header',
+    'Your access token could not be refreshed because your refresh token was revoked. Please log out and sign in again.',
+    'Your authentication session could not be refreshed automatically. Please log out and sign in again.',
+    'Codex account has no refresh token; sign in again',
+    'Not logged in',
+  ]) assert.ok(isLoginFailure(t), t);
+  for (const t of [
+    '', 'TypeError: boom went the fake agent',
+    // Claude Code: logging in again wouldn't fix these.
+    'OAuth access token could not be refreshed: another Claude Code process is holding the refresh lock',
+    'Failed to refresh OAuth token: another Claude Code process is refreshing it or exited mid-refresh. This is usually transient; retry in a minute',
+    "Could not refresh your login because the disk is full · Signing in again won't help",
+    'API Error: 529 Overloaded', 'API Error: 429 rate limited', 'Claude Opus is not available with the Claude Pro plan. If you have updated your subscription plan recently, run /logout and /login for the plan to take effect.',
+    'stream disconnected before completion: quota exceeded', 'This chat has grown longer than the model can hold',
+    'Error: line 401 of the file',
+  ]) assert.ok(!isLoginFailure(t), t);
 });
 
 test('codex adapter: WebSocket reconnects and the HTTPS fallback are one quiet line; real errors still show', () => {
@@ -703,7 +784,8 @@ test('errors: not logged in, crash with stderr tail, agent missing, 15-minute li
   let r = await extRequest(ext, 'agent.start', { ...START, prompt: 'NOTLOGGEDIN please' });
   let done = await waitDone(ext, r.result.runId);
   let errs = eventsOf(ext, r.result.runId).filter((e) => e.kind === 'error');
-  assert.deepEqual(errs, [{ kind: 'error', message: "Claude Code isn't logged in: run `claude` in a terminal and log in (type /login)" }]);
+  assert.deepEqual(errs, [{ kind: 'error', reason: 'login', message: 'Claude Code needs you to log in again.', agent: 'claude' }]);
+  assert.deepEqual(done.error, { kind: 'login', agent: 'claude', message: 'Claude Code needs you to log in again.' });
   assert.equal(eventsOf(ext, r.result.runId).filter((e) => e.kind === 'text').length, 0, 'no "Not logged in" chat text');
   assert.equal(done.ok, false);
   assert.equal(done.sessionId, null, "a logged-out run's empty session isn't kept");
@@ -874,6 +956,63 @@ test('agent.login: URL event, code, done ok; agent.list then says loggedIn (cach
   assert.equal((await sockRequest(ext.sock, { id: 'p2', cmd: 'ping' })).result.login, null);
 });
 
+test('an expired login: one "log in again" error, no reply; agent.list says logged out until a login or a run works', async () => {
+  const { home, bin } = makeHome();
+  fs.writeFileSync(path.join(bin, 'logged-in'), 'yes'); // Claude Code's own check keeps saying logged in
+  const ext = startHost(home);
+  const claudeIn = async () => (await extRequest(ext, 'agent.list')).result.agents.find((a) => a.id === 'claude');
+  assert.equal((await claudeIn()).loggedIn, true);
+
+  let r = await extRequest(ext, 'agent.start', { ...START, prompt: 'EXPIRED login', sessionId: 'sess-keep' });
+  let done = await waitDone(ext, r.result.runId);
+  const evs = eventsOf(ext, r.result.runId);
+  assert.deepEqual(evs.filter((e) => e.kind === 'text'), [], 'the error isn\'t a reply');
+  assert.deepEqual(evs.filter((e) => e.kind === 'error'), [{ kind: 'error', reason: 'login', message: 'Claude Code needs you to log in again.', agent: 'claude' }]);
+  assert.equal(done.ok, false);
+  assert.deepEqual(done.error, { kind: 'login', agent: 'claude', message: 'Claude Code needs you to log in again.' });
+  assert.equal(done.sessionId, 'sess-keep', 'the chat resumes where it was');
+  let c = await claudeIn();
+  assert.deepEqual([c.loggedIn, c.loginExpired], [false, true]);
+  // Still, though its own check says logged in (and the cache would have run out).
+  assert.equal((await claudeIn()).loggedIn, false);
+
+  // No result line, the error on stderr: the same.
+  r = await extRequest(ext, 'agent.start', { ...START, prompt: 'LOSTLOGIN' });
+  done = await waitDone(ext, r.result.runId);
+  assert.deepEqual(eventsOf(ext, r.result.runId).filter((e) => e.kind === 'error').map((e) => e.reason), ['login']);
+  assert.equal(done.error.kind, 'login');
+
+  // Another failure isn't a login one; a run that works ends it.
+  r = await extRequest(ext, 'agent.start', { ...START, prompt: 'CRASH now' });
+  done = await waitDone(ext, r.result.runId);
+  assert.equal(done.error, undefined);
+  assert.equal((await claudeIn()).loggedIn, false);
+  r = await extRequest(ext, 'agent.start', { ...START, prompt: 'SAYSLOGIN' });
+  done = await waitDone(ext, r.result.runId);
+  assert.equal(done.ok, true);
+  assert.deepEqual(eventsOf(ext, r.result.runId).filter((e) => e.kind === 'text').map((e) => e.text), ['The page says you are not logged in, so I hid its sign-in banner.']);
+  c = await claudeIn();
+  assert.deepEqual([c.loggedIn, c.loginExpired], [true, undefined]);
+
+  // ...and so does logging in.
+  r = await extRequest(ext, 'agent.start', { ...START, prompt: 'EXPIRED again' });
+  await waitDone(ext, r.result.runId);
+  assert.equal((await claudeIn()).loggedIn, false);
+  const { loginId } = await startLogin(ext);
+  await extRequest(ext, 'agent.loginCode', { loginId, code: 'GOODCODE' });
+  assert.equal((await waitDone(ext, loginId)).ok, true);
+  c = await claudeIn();
+  assert.deepEqual([c.loggedIn, c.loginExpired], [true, undefined]);
+
+  // From a terminal: the plain message and how to log in.
+  ext.hello();
+  await ext.waitForSocket();
+  const cli = await runCli(['agent', 'run', '--url', 'https://example.com/', 'EXPIRED from a terminal'], { home });
+  assert.equal(cli.code, 1);
+  assert.equal(cli.stderr, 'error: Claude Code needs you to log in again. Run `trif agent login --agent claude`, or run `claude` in a terminal and log in (type /login).\n');
+  assert.ok(!cli.stdout.includes('OAuth'), cli.stdout);
+});
+
 test('agent.login: bad code fails (redacted), cancel, one login at a time, bad requests, codex unsupported, time limit', async () => {
   const { home, bin } = makeHome();
   const ext = startHost(home);
@@ -996,7 +1135,7 @@ test('CLI: agent run streams events and prints a summary; agent list with and wi
   // Failures exit 1 with the error on stderr.
   r = await runCli(['agent', 'run', '--url', 'https://example.com/', 'NOTLOGGEDIN'], { home });
   assert.equal(r.code, 1);
-  assert.match(r.stderr, /error: Claude Code isn't logged in/);
+  assert.equal(r.stderr, 'error: Claude Code needs you to log in again. Run `trif agent login --agent claude`, or run `claude` in a terminal and log in (type /login).\n');
   assert.match(r.stdout, /done: failed/);
   r = await runCli(['agent', 'run', '--url', 'https://example.com/'], { home });
   assert.equal(r.code, 1);

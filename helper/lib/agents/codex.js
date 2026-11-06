@@ -37,10 +37,7 @@
 // exit_code, status}, file_change {changes:[{path, kind}]}, mcp_tool_call {server, tool},
 // web_search {query}, todo_list, error {message}.
 
-const { findExecutable, versionOf, relToWorkspace, oneLine, parseJsonLine, captureSync, capture } = require('./util');
-
-const NOT_LOGGED_IN = "Codex isn't logged in: run `codex login` in a terminal (or save an OpenAI API key: trif agent key --agent codex --set-key)";
-const AUTH_RE = /not logged in|unauthori[sz]ed|\b401\b|please (run )?`?codex login|missing (api key|credentials)/i;
+const { findExecutable, versionOf, relToWorkspace, oneLine, parseJsonLine, captureSync, capture, isLoginFailure, loginError } = require('./util');
 
 const PROFILE = 'trif-run';
 // Codex builds its commands' environment from a snapshot of the user's login shell, taken by Codex itself
@@ -152,7 +149,7 @@ const adapter = {
     const msg = parseJsonLine(line);
     if (!msg) return;
     state.seen = state.seen || new Set();
-    const friendly = state.friendly || friendlyDefault; // codex-oss.js words errors for its providers
+    const errorEvent = (m) => errorFor(m, state);
     switch (msg.type) {
       case 'thread.started':
         if (msg.thread_id) { state.sessionId = msg.thread_id; emit({ kind: 'session', sessionId: msg.thread_id }); }
@@ -165,7 +162,7 @@ const adapter = {
         if (item.type === 'agent_message') {
           if (done && typeof item.text === 'string' && item.text.trim()) { state.lastText = item.text; emit({ kind: 'text', text: item.text }); }
         } else if (item.type === 'error') {
-          if (done && item.message && !transportNoise(item.message, emit, state)) emit({ kind: 'error', message: friendly(item.message) });
+          if (done && item.message && !transportNoise(item.message, emit, state)) emit(errorEvent(item.message));
         } else {
           const tool = toolEvent(item, state.workspace);
           // Show tools as soon as they start; don't repeat them on completion.
@@ -183,20 +180,20 @@ const adapter = {
         break;
       case 'turn.failed': {
         const m = (msg.error && msg.error.message) || 'Codex failed';
-        emit({ kind: 'error', message: friendly(m) });
+        emit(errorEvent(m));
         emit({ kind: 'done', ok: false, result: m, costUsd: null, sessionId: state.sessionId || null });
         break;
       }
       case 'error':
-        if (msg.message && !transportNoise(msg.message, emit, state)) emit({ kind: 'error', message: friendly(msg.message) });
+        if (msg.message && !transportNoise(msg.message, emit, state)) emit(errorEvent(msg.message));
         break;
       default:
         break;
     }
   },
 
-  explainExit({ stderr }) {
-    return AUTH_RE.test(String(stderr || '')) ? NOT_LOGGED_IN : null; // (codex-oss.js has its own)
+  explainExit({ stderr, state = {} }) {
+    return loginFailed(String(stderr || ''), state) ? loginError(adapter.name) : null; // (codex-oss.js has its own)
   },
 
   // `codex login status` exits 0 when logged in (no tokens spent).
@@ -217,8 +214,16 @@ const adapter = {
   login: null,
 };
 
-function friendlyDefault(message) {
-  return AUTH_RE.test(String(message)) ? NOT_LOGGED_IN : String(message);
+// A run that failed for want of a login (util.js isLoginFailure). Not with a saved API key (state.apiKey),
+// which the run used instead of the login, nor for codex-oss (state.friendly words errors for its
+// providers: their API keys, not an OpenAI login).
+function loginFailed(message, state) {
+  return !state.friendly && !state.apiKey && isLoginFailure(message);
+}
+
+function errorFor(message, state) {
+  if (loginFailed(message, state)) return loginError(adapter.name);
+  return { kind: 'error', message: state.friendly ? state.friendly(message) : String(message) };
 }
 
 function toolEvent(item, workspace) {
@@ -244,4 +249,3 @@ module.exports = adapter;
 adapter.permissionsToml = permissionsToml;
 adapter.EXCLUDED_VARS = EXCLUDED_VARS;
 adapter.tooOld = tooOld;
-module.exports.NOT_LOGGED_IN = NOT_LOGGED_IN;

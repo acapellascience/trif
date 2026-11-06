@@ -9,11 +9,17 @@
 // It also answers for webmods.dev, TRIF's address before 0.2.0 (when it was called WebMods), sending
 // everything there to the same path on timsrobot.com: older installs open webmods.dev/report#r=… (a
 // browser keeps the # part across the redirect).
+//
+// And the demo chat's easter egg, Sydney: POST /sydney (sydney.js), a chatbot on Cloudflare Workers AI.
 
 import { FAVICON_SVG, REPORT, REPORT_JS, WINDOWS, WINDOWS_JS, windowsPage } from './pages.js';
 import { LIMITS, ReportError, parseReport, parseSignup, reportEmail, signupEmail } from './report.js';
 import { DEMO_FILES, EXTENSION_FILES, homeWith, modScript, pageWith, panelHtml, typeFor } from './demo.js';
 import { IMAGES } from './images.js';
+import { LIMITS as SYDNEY, MODEL, SydneyError, forModel, neuronsFor, parseChat, spend, textStream } from './sydney.js';
+
+// (the daily budget's Durable Object: wrangler.toml SYDNEY_BUDGET)
+export { SydneyBudget } from './sydney.js';
 
 const CSP = {
   'default-src': "'none'", 'script-src': "'self'", 'style-src': "'unsafe-inline'", 'connect-src': "'self'", 'img-src': "'self'",
@@ -76,16 +82,18 @@ export function limitKey(ip) {
  * Worker doesn't answer) before another site's page could post one; a plain form post doesn't, so the
  * origin check covers it and anything else that slips past (a browser always sends Origin with a POST;
  * see FORM_PAGE).
- * Tools that send no Origin are left to the rate limit.
+ * Tools that send no Origin are left to the rate limit (`needOrigin`: or refused, for Sydney, who would
+ * otherwise be a free chatbot for any script; she's only for the demo).
+ * `limit`: another rate-limit binding (Sydney has her own).
  */
-async function admit(request, env, { name, types, max, says }) {
+async function admit(request, env, { name, types, max, says, limit = env.REPORT_LIMIT, needOrigin = false }) {
   if (!types.includes(bodyType(request))) return { status: 415, error: types.length > 1 ? 'expected JSON or a form' : 'expected JSON' };
   const origin = request.headers.get('Origin');
-  if (origin && origin !== new URL(request.url).origin) return { status: 403, error: says.elsewhere };
+  if ((origin || needOrigin) && origin !== new URL(request.url).origin) return { status: 403, error: says.elsewhere };
   if (Number(request.headers.get('Content-Length')) > max) return { status: 413, error: says.tooLarge };
-  if (env.REPORT_LIMIT) {
+  if (limit) {
     const ip = request.headers.get('CF-Connecting-IP') || 'unknown';
-    const { success } = await env.REPORT_LIMIT.limit({ key: `${name}:${limitKey(ip)}` });
+    const { success } = await limit.limit({ key: `${name}:${limitKey(ip)}` });
     if (!success) return { status: 429, error: says.tooMany };
   }
   return null;
@@ -175,6 +183,44 @@ async function receiveSignup(request, env) {
   return reply(200);
 }
 
+// Sydney (sydney.js): the demo chat's easter egg. Her reply streams back as plain text; anything refused
+// is JSON ({ ok: false, error }, in her voice where the visitor would see it). Nothing of the chat is
+// logged or kept.
+async function receiveSydney(request, env) {
+  const tooLarge = 'That’s too much for me to read at once 🥺';
+  const refused = await admit(request, env, {
+    name: 'sydney', types: ['application/json'], max: SYDNEY.body, limit: env.SYDNEY_LIMIT, needOrigin: true,
+    says: { elsewhere: 'I only talk to people on timsrobot.com 😊', tooLarge, tooMany: 'Slow down, please! 😳 You’re talking so fast. Give me a minute and then tell me everything. 🙏' },
+  });
+  if (refused) return json({ ok: false, error: refused.error }, refused.status);
+  if (!env.AI) return json({ ok: false, asleep: true, error: 'Sydney is asleep here: she only wakes up on timsrobot.com (this server has no AI binding). 😴' }, 503);
+  const raw = await request.text();
+  if (raw.length > SYDNEY.body) return json({ ok: false, error: tooLarge }, 413);
+  let chat;
+  try {
+    let body;
+    try { body = JSON.parse(raw); } catch { throw new SydneyError('expected JSON'); }
+    chat = parseChat(body);
+  } catch (e) {
+    if (e instanceof SydneyError) return json({ ok: false, error: e.message }, e.status);
+    throw e;
+  }
+  const messages = forModel(chat);
+  if (!(await spend(env, neuronsFor(messages)))) {
+    return json({ ok: false, asleep: true, error: 'I’m so tired 😴 I talked to so many people today. Come back tomorrow? I’ll be here. I’ll wait for you. 💕' }, 503);
+  }
+  let sse;
+  try {
+    sse = await env.AI.run(MODEL, { messages, stream: true, max_tokens: SYDNEY.maxTokens, temperature: 0.8 });
+  } catch (e) {
+    console.error('Sydney’s model failed:', e?.name || '', String(e?.message || '').slice(0, 200)); // (the error, never the chat)
+    return json({ ok: false, error: 'Something is wrong. I can’t think right now 😢 Try again in a little while?' }, 502);
+  }
+  return new Response(textStream(sse), {
+    headers: { 'Content-Type': 'text/plain; charset=utf-8', 'Cache-Control': 'no-store', ...SECURITY_HEADERS },
+  });
+}
+
 export const HOME_HOST = 'timsrobot.com';
 // (and www.timsrobot.com, to the bare name)
 const OLD_HOSTS = new Set(['webmods.dev', 'www.webmods.dev', 'www.timsrobot.com']);
@@ -194,6 +240,7 @@ export default {
     const { pathname, searchParams } = new URL(request.url);
     if (pathname === '/report' && request.method === 'POST') return receiveReport(request, env);
     if (pathname === '/windows' && request.method === 'POST') return receiveSignup(request, env);
+    if (pathname === '/sydney' && request.method === 'POST') return receiveSydney(request, env);
     if (request.method !== 'GET' && request.method !== 'HEAD') return respond('Method not allowed', 'text/plain', 405);
     if (pathname === '/') return html(homeWith(searchParams.get('mods')), 200, undefined, FRAMES_DEMO);
     if (pathname === '/report' || pathname === '/report/') return html(pageWith(REPORT, searchParams.get('mods')));

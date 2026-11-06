@@ -19,6 +19,7 @@ name = "EMAIL"
 
 [vars]
 REPORT_FROM = "reports@timsrobot.com"
+SYDNEY_DAILY_NEURONS = "100000" # Sydney's daily budget (see [ai] below)
 
 # At most 5 reports a minute from one address (approximate, per Cloudflare location), and, counted
 # separately, 5 Windows waitlist signups.
@@ -28,6 +29,31 @@ namespace_id = "1001"
   [ratelimits.simple]
   limit = 5
   period = 60
+
+# Sydney, the demo chat's easter egg (src/sydney.js): a chatbot on Workers AI. Billed in neurons to this
+# account (10,000 a day are free); the budget below caps it.
+[ai]
+binding = "AI"
+
+# At most 6 messages a minute to Sydney from one address (approximate, per Cloudflare location).
+[[ratelimits]]
+name = "SYDNEY_LIMIT"
+namespace_id = "1002"
+  [ratelimits.simple]
+  limit = 6
+  period = 60
+
+# ...and a daily budget for everyone together, in neurons: each reply counts what it could cost at most
+# (about 95 to 165 neurons), so 600 to 1,000 replies a day, and at most about $1. Counted by one small Durable Object (SydneyBudget: just today's date and a
+# number), created by the first deploy with it (the migration below). The budget is SYDNEY_DAILY_NEURONS in
+# [vars] above; "0" puts her to sleep.
+[[durable_objects.bindings]]
+name = "SYDNEY_BUDGET"
+class_name = "SydneyBudget"
+
+[[migrations]]
+tag = "v1-sydney-budget"
+new_sqlite_classes = ["SydneyBudget"]
 
 # The home page's demo shows the real side panel: the Worker serves the files it needs (src/demo.js
 # EXTENSION_FILES, nothing else) from the extension's own folder through this binding. run_worker_first:

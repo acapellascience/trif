@@ -1188,12 +1188,18 @@ async function onAgentEvent(runId, event, relay = true) {
         push('tool', toolLine(event.name, event.summary));
         break;
       case 'error':
-        push('error', event.message || 'Something went wrong.');
+        // The agent's login is gone or expired: one plain line, not an error (the panel shows its login
+        // notice for it), and at most one per run.
+        if (event.reason === 'login') {
+          if (!run.loginSaid) { run.loginSaid = true; push('login', event.message || 'Your agent needs you to log in again.'); }
+        } else push('error', event.message || 'Something went wrong.');
         break;
       case 'done': {
         if (event.sessionId) { chat.sessionId = String(event.sessionId); chat.agent = run.agent ?? chat.agent ?? null; }
         if (event.ok && !run.texts && String(event.result ?? '').trim()) push('assistant', event.result);
-        if (!event.ok && !run.errored) {
+        if (!event.ok && event.error?.kind === 'login') {
+          if (!run.loginSaid) push('login', event.error.message || 'Your agent needs you to log in again.');
+        } else if (!event.ok && !run.errored) {
           if (run.stopping) push('tool', 'stopped');
           else push('error', String(event.result ?? '').trim() || 'The agent stopped without finishing.');
         }

@@ -404,6 +404,9 @@ body[data-problem="helper"] .mod-list, body.needs-login .mod-list { --switch-on:
 .msg.mod { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 0 2px; color: var(--muted); font-size: 12px; }
 .msg.mod .btn { padding: 2px 10px; }
 
+/* The agent needs logging in (the notice above says how): a plain line, not an error. */
+.msg.login { padding: 0 2px 0 8px; border-left: 2px solid var(--warn); color: var(--muted); font-size: 12px; }
+
 .msg.error {
   padding: 7px 10px;
   border-radius: 8px;

@@ -1046,6 +1046,38 @@ test('background: agent.start becomes a native request; agentEvents reach panels
   } finally { bg.restore(); }
 });
 
+test('background: a run that needs a login leaves one plain line in the chat, not an error; the message stays', async () => {
+  const bg = await loadBackground();
+  try {
+    const panel = bg.connectPanel();
+    const startP = panel.ask({ type: 'agent.start', site: 'x.com', tabId: 12, url: 'https://x.com/home', prompt: 'hide reposts', agent: 'claude', sessionId: 's-0' });
+    await answerNative(bg.native, 'agent.start', { runId: 'r1' });
+    await startP;
+    await settle(10);
+    const message = 'Claude Code needs you to log in again.';
+    for (const event of [
+      { kind: 'session', sessionId: 's-0' },
+      { kind: 'error', reason: 'login', message, agent: 'claude' },
+      { kind: 'done', ok: false, result: 'Failed to authenticate: OAuth session expired and could not be refreshed', costUsd: 0, changedFiles: [], sessionId: 's-0', error: { kind: 'login', agent: 'claude', message } },
+    ]) bg.native.emit({ type: 'agentEvent', runId: 'r1', event });
+    await settle(30);
+    let chat = bg.store['chat:x.com'];
+    assert.deepStrictEqual(chat.messages.map((m) => [m.role, m.text]), [['user', 'hide reposts'], ['login', message]]);
+    assert.strictEqual(chat.run, null);
+    assert.strictEqual(chat.sessionId, 's-0');
+    assert.strictEqual(panel.sent.filter((m) => m.type === 'agentEvent').at(-1).event.error.kind, 'login', 'the panel gets the kind');
+
+    // A done saying so without the error event first (it's the done that counts): the same one line.
+    const againP = panel.ask({ type: 'agent.start', site: 'x.com', tabId: 12, url: 'https://x.com/home', prompt: 'again', agent: 'claude' });
+    await answerNative(bg.native, 'agent.start', { runId: 'r2' });
+    await againP;
+    bg.native.emit({ type: 'agentEvent', runId: 'r2', event: { kind: 'done', ok: false, result: null, changedFiles: [], sessionId: null, error: { kind: 'login', agent: 'claude', message } } });
+    await settle(30);
+    chat = bg.store['chat:x.com'];
+    assert.deepStrictEqual(chat.messages.slice(2).map((m) => [m.role, m.text]), [['user', 'again'], ['login', message]]);
+  } finally { bg.restore(); }
+});
+
 test('background: agent.list is forwarded; failures are replied and recorded', async () => {
   const bg = await loadBackground();
   try {

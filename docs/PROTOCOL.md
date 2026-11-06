@@ -25,7 +25,7 @@ dependencies, no build step.**
      watches the mods folder, pushing mods to the extension.
    - `cli.js`: the `trif` command agents (and people) run.
    - `trif setup` installs everything: workspace, native host manifest, wrapper script, CLI link.
-     Strangers run it as `npx trif setup` (npm package `trif`, see "Native host installation").
+     Strangers run it as `npx timsrobot setup` (npm package `timsrobot`, see "Native host installation").
 3. **Workspace** (`~/.trif/`, overridable with env `TRIF_HOME`, or `WEBMODS_HOME` as it was called before 0.2.0). The agent's working directory:
    ```
    ~/.trif/
@@ -429,7 +429,7 @@ the panel tags it "from <browser>" while it's off.
 
 ## Native host installation (`trif setup`)
 
-First install, for anyone with Node ≥ 18: **`npx trif setup`**. The npm package `trif` (root
+First install, for anyone with Node ≥ 18: **`npx timsrobot setup`**. The npm package `timsrobot` (root
 `package.json`, `bin: trif → helper/cli.js`) ships `helper/`, `extension/`, `examples/` and this file.
 Re-running setup is safe; run it again to update.
 
@@ -484,9 +484,9 @@ Re-running setup is safe; run it again to update.
 TRIF was WebMods until 0.2.0. What changed name: everything a person sees (the extension's name TRIF, its
 description, the panel, setup and doctor output, docs), the command (`trif`; `webmods` is kept as an alias:
 both wrappers are written, the npm package has both bins, and Claude runs may use either), the workspace
-(`~/.trif`), the npm package (`trif`), environment variables (`TRIF_*`; `WEBMODS_*` still read, see
+(`~/.trif`), the npm package (`timsrobot`), environment variables (`TRIF_*`; `WEBMODS_*` still read, see
 `helper/lib/env.js`), the website (timsrobot.com; the Worker redirects webmods.dev there), release asset
-names (`trif-<version>.tgz` …), the in-page API (`window.trif`, with `window.webmods` the same object), the
+names (`timsrobot-<version>.tgz` …), the in-page API (`window.trif`, with `window.webmods` the same object), the
 Safari app (`TRIF.app`, bundle IDs `com.timsrobot.trif[.extension]`, a new extension to Safari), the Safari
 bridge's launchd label (`com.timsrobot.trif.safari-bridge`; setup stops and removes
 `dev.webmods.safari-bridge`), run mailboxes (`~/Library/Caches/TRIF/boxes`) and keychain names in
@@ -657,7 +657,7 @@ overwriting the user's own changes. Only examples whose header says `@source web
 ```
 extension/   manifest.json, background.js (service worker), runtime.js (page runtime source),
              onboarding.html/.js, icons/, safari.js + safari-background.js (Safari build only)
-package.json the npm package `trif` (version, bin, files allowlist)
+package.json the npm package `timsrobot` (version, bin, files allowlist)
 helper/      host.js, cli.js, safari-bridge.js, lib/*.js, workspace/AGENTS.md, workspace/CLAUDE.md, templates/mod.js
 examples/    sites/<site>/<mod>.js (the shipped mods), shipped-history.json (scripts/shipped-history.js)
 tests/       node tests (node --test), incl. a fake extension for the helper and a chrome.* mock for the extension;
@@ -712,7 +712,7 @@ Nothing is hosted; the agent uses the user's own login/subscription.
     page groups mods by site: the folder (minus `www.`) if the mod runs there, else its one site, else
     "Several sites"; mods matching any host go under "Every site".
   - No reload prompt: the agent reloads the tab after each change (AGENTS.md), and switches reload it too.
-  - **States:** helper not connected → short setup instructions (`npx trif setup`, link to Setup page);
+  - **States:** helper not connected → short setup instructions (`npx timsrobot setup`, link to Setup page);
     user scripts off → button opening chrome://extensions/?id=…; agent missing → the error text from the
     helper (it includes the fix); agent not logged in (`loggedIn === false` in `agent.list`, or a run
     failed with the not-logged-in error) → "Claude Code isn't logged in" with a **Log in** button (see

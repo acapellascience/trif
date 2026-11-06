@@ -59,7 +59,7 @@ REQUIREMENTS (PRIVATE BETA)
 • Chrome's "Allow User Scripts" switch turned on for TRIF. The setup page that opens after install walks you through it
 
 HOW TO USE
-1. Install the helper: run "npx trif setup" in a terminal (details: <HELPER INSTALL URL>).
+1. Install the helper: run "npx timsrobot setup" in a terminal (details: <HELPER INSTALL URL>).
 2. On the setup page that opens, turn on "Allow User Scripts" for TRIF.
 3. Go to any website and click the TRIF toolbar icon to open the side panel.
 4. Describe the change you want. Your agent writes the mod and reloads the page to show it.

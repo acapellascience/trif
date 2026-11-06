@@ -82,7 +82,7 @@ const mod = (id, code, extra = {}) => ({ id, matches: ['https://x.com/*'], js: [
 
 test('Safari build: the helper-not-connected advice runs setup for Safari (plain setup has no bridge)', () => {
   assert.equal(lib.BROWSER, 'Safari');
-  assert.equal(lib.SETUP_COMMAND, 'npx trif setup --browser safari');
+  assert.equal(lib.SETUP_COMMAND, 'npx timsrobot setup --browser safari');
 });
 
 test('Safari adapter: a function that Safari would inject as the given source', () => {

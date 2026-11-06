@@ -1090,7 +1090,7 @@ test('background: helper disconnect mid-run synthesizes error then done for the 
     // not connected: start fails without reaching a helper
     const r = await panel.ask({ type: 'agent.start', site: 'x.com', tabId: 1, url: 'https://x.com/', prompt: 'again' });
     assert.strictEqual(r.ok, false);
-    assert.match(r.error, /trif setup/);
+    assert.match(r.error, /timsrobot setup/);
   } finally { bg.restore(); }
 });
 

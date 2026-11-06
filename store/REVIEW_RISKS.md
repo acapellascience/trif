@@ -22,8 +22,8 @@ under the **minimum functionality** policy, or "couldn't verify functionality".
 
 Mitigations:
 - **Make the helper installable by a stranger before submitting.** Today the repo has no git remote
-  and the npm package `trif` isn't published (the name was free on npm on 2026-11-01). The
-  setup page and listing say `npx trif setup`, so that command must work for the reviewer.
+  and the npm package `timsrobot` isn't published (npm refused `trif` on 2026-11-05 as too close to other names). The
+  setup page and listing say `npx timsrobot setup`, so that command must work for the reviewer.
   Either publish the npm package, or host a tarball or public repo and change the instructions.
 - Say clearly in the **listing description** (already done in `listing.md`) that a separately
   installed helper and a coding agent are required.
@@ -159,7 +159,7 @@ holding these steps.
 TRIF runs site customizations ("mods") written by the user's own coding agent. It needs a small helper program on the computer (macOS or Linux, Node.js 18+). Without the helper, the extension only shows its setup page. The steps below take about 3 minutes, and the main path needs no AI account.
 
 1. Install the extension, then install the helper in a terminal:
-     npx trif setup
+     npx timsrobot setup
    (or: <alternative install instructions / tarball URL>)
    Quit and reopen Chrome.
 2. A "TRIF setup" page opens (or click the toolbar icon, then "Setup"). Turn on "Allow User Scripts": click "Open TRIF’s Chrome settings" and switch it on. The setup page ticks off "Install the helper" and "Allow user scripts".

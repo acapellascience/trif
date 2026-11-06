@@ -623,7 +623,7 @@ function reloadExtension(reason) {
   try { sendToExtension({ type: 'reload', reason }); } catch (e) { logger.warn(`could not ask the extension to reload: ${e.message}`); }
 }
 
-// Another helper (the other browser's) or `npx trif setup` replaced <home>/app under this one: this
+// Another helper (the other browser's) or `npx timsrobot setup` replaced <home>/app under this one: this
 // process is running old code, so reload onto the new version.
 function checkAppReplaced() {
   checkCodeChanged();

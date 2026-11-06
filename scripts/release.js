@@ -195,7 +195,7 @@ function preflight(version, { dryRun }) {
   for (const s of [AMO_ISSUER, AMO_SECRET]) if (!keychain(s)) problems.push(`the keychain has no ${s} (or ${LEGACY_SERVICES[s]})`);
   if (problems.length && !dryRun) fail(`not ready:\n  - ${problems.join('\n  - ')}`);
   for (const p of problems) console.warn(`release (dry run, would stop a real release): ${p}`);
-  // Not checked here (it would need the network): README and listing say `npx trif setup`, which only
+  // Not checked here (it would need the network): README and listing say `npx timsrobot setup`, which only
   // works once `trif` is published on npm, by you. This script doesn't publish to npm.
   console.warn(`release: reminder: this doesn't publish to npm. \`npx ${pkg.name} setup\` needs "${pkg.name}" published there by you (npm view ${pkg.name}; npm publish ${'<'}the .tgz${'>'} after the release).`);
   return { pkg, repo, notes, priv: keyOk ? priv : null };

@@ -39,7 +39,7 @@ function runOtherCli(cliJs, args, home, env = {}) {
   });
 }
 
-// A package folder like npm's (no .git): what `npx trif` runs from.
+// A package folder like npm's (no .git): what `npx timsrobot` runs from.
 function fakePackage(root) {
   const pkg = path.join(root, 'pkg', 'node_modules', 'trif');
   const r = installApp(REPO, pkg);
@@ -52,8 +52,8 @@ function fakePackage(root) {
 
 test('package: npm metadata, files allowlist and one version everywhere', () => {
   const pkg = JSON.parse(fs.readFileSync(path.join(REPO, 'package.json'), 'utf8'));
-  assert.equal(pkg.name, 'trif');
-  assert.deepEqual(pkg.bin, { trif: 'helper/cli.js', webmods: 'helper/cli.js' }, '`webmods` stays an alias');
+  assert.equal(pkg.name, 'timsrobot');
+  assert.deepEqual(pkg.bin, { timsrobot: 'helper/cli.js', trif: 'helper/cli.js', webmods: 'helper/cli.js' }, '`npx timsrobot` runs the bin named like the package; `webmods` stays an alias');
   assert.equal(pkg.license, 'MIT');
   assert.equal(pkg.engines.node, '>=18');
   for (const f of ['helper/', 'extension/', 'examples/', 'docs/PROTOCOL.md']) assert.ok(pkg.files.includes(f), f);

@@ -36,13 +36,13 @@ switches stay as they were; in Safari, install the new TRIF.app (see Safari belo
 1. **Install the helper.** In a terminal:
 
    ```sh
-   npx trif setup
+   npx timsrobot setup
    ```
 
-   If you were sent a file (`trif-0.2.0.tgz`) instead, run this from the folder it's in:
+   If you were sent a file (`timsrobot-0.2.4.tgz`) instead, run this from the folder it's in:
 
    ```sh
-   npx --yes --package ./trif-0.2.0.tgz trif setup
+   npx --yes --package ./timsrobot-0.2.4.tgz trif setup
    ```
 
    npx asks once whether to install the `trif` package: type `y`. This creates `~/.trif` (your mods
@@ -62,8 +62,8 @@ switches stay as they were; in Safari, install the new TRIF.app (see Safari belo
 
 ### Firefox
 
-TRIF also runs in Firefox 153 or newer. Open Firefox once before running `npx trif setup`, so setup
-finds it (or run `npx trif setup --browser firefox`). If Firefox was open during setup, quit it
+TRIF also runs in Firefox 153 or newer. Open Firefox once before running `npx timsrobot setup`, so setup
+finds it (or run `npx timsrobot setup --browser firefox`). If Firefox was open during setup, quit it
 completely and reopen it. Then open
 [trif-firefox.xpi](https://github.com/acapellascience/trif/releases/latest/download/trif-firefox.xpi)
 in Firefox and click **Add** to install the add-on (if Firefox downloads it instead, drag the file onto
@@ -81,7 +81,7 @@ this is for trying it out:
 
 1. From a checkout of this repo, `node scripts/build-safari.js` (needs Xcode) makes
    `dist/safari-app/TRIF.app`. Open it once: it adds the TRIF extension to Safari.
-2. `npx trif setup --browser safari` starts the Safari bridge, a small background program
+2. `npx timsrobot setup --browser safari` starts the Safari bridge, a small background program
    Safari's extension talks to (Safari can't start the helper itself the way Chrome does). It starts again
    whenever you log in.
 3. In Safari: Settings → Advanced, tick "Show features for web developers"; Settings → Developer, tick
@@ -211,9 +211,9 @@ else is refused.
 checks every piece and says how to fix what's broken. Common fixes:
 
 - **"Helper isn't connected"**: quit the browser completely and reopen it. If that doesn't help, run
-  `npx trif setup` again, then restart the browser.
+  `npx timsrobot setup` again, then restart the browser.
 - **Mods don't run**: make sure **Allow User Scripts** is on (step 3), then reload the page.
-- **Claude Code isn't found**: install it, then run `npx trif setup` again in the same terminal.
+- **Claude Code isn't found**: install it, then run `npx timsrobot setup` again in the same terminal.
 - **"rg" Not Opened** while Codex works: a search tool that ships with Codex hasn't been checked by
   Apple. It's harmless: click Done (Codex works without it).
 
@@ -306,7 +306,7 @@ Two things it doesn't do, both yours: **rename the GitHub repo** from `acapellas
 stops while the git remote and package.json disagree), then check that the old
 `raw.githubusercontent.com/acapellascience/WebMods/main/updates/…` URLs redirect, since installs from
 before the rename fetch updates there; and **publish `trif` on npm** (`npm publish` the release's .tgz),
-which `npx trif setup` above needs. The script also stops while CHANGELOG.md has a non-empty
+which `npx timsrobot setup` above needs. The script also stops while CHANGELOG.md has a non-empty
 "## Unreleased" section.
 
 It needs, on the releasing Mac: `gh auth login`; the addons.mozilla.org API key and secret in the

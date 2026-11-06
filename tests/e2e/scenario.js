@@ -1136,7 +1136,7 @@ class Scenario {
         await r.check('helper not connected, on the gate: red robot, the line, no Fix button', async () => {
           await this.goColour('gate');
           const x = await this.waitLooks('red gate, helper', (l) => l.problem === 'helper' && !!l.gateNote);
-          if (!Scenario.same(x.gateRim, x.bad) || x.fix || !x.dotShown || !/^The TRIF helper isn’t connected\. Run npx trif setup in a terminal, then restart \w+\. Setup page$/.test(x.gateNote)) throw new Error(JSON.stringify(x));
+          if (!Scenario.same(x.gateRim, x.bad) || x.fix || !x.dotShown || !/^The TRIF helper isn’t connected\. Run npx timsrobot setup in a terminal, then restart \w+\. Setup page$/.test(x.gateNote)) throw new Error(JSON.stringify(x));
           await this.waitBar('the gate\'s bar', GATE_BAR, Scenario.dim);
           await this.shot(this.panelCtx, 'panel-helper-gate');
           return `"${x.gateNote}"`;

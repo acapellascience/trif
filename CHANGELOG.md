@@ -4,6 +4,11 @@ What's new in each TRIF release (called WebMods before 0.2.0). The text under a 
 panel shows under "What's new", so it's written for people using TRIF. `node scripts/release.js <version>`
 needs a section here for the version it releases.
 
+## 0.2.4
+
+- **TRIF installs with `npx timsrobot setup`.** npm wouldn't take the name "trif", so the package is
+  called timsrobot (after timsrobot.com). Once it's installed you still type `trif`, as before.
+
 ## 0.2.3
 
 - **New mods, off until you switch them on:** X-Flyer flies a fighter over X (Shift+S, or the rocket

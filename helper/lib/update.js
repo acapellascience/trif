@@ -181,7 +181,7 @@ function installable(ws, root = P.REPO_ROOT) {
   if (realOrResolved(root) !== realOrResolved(ws.appDir)) {
     return { ok: false, why: P.isGitCheckout(root)
       ? `${P.FULL_NAME} is running from a git checkout (${root}), so it updates with git pull, not from here.`
-      : `TRIF runs from ${root}, not ${ws.appDir}; run \`npx trif setup\` to install a copy that can update` };
+      : `TRIF runs from ${root}, not ${ws.appDir}; run \`npx timsrobot setup\` to install a copy that can update` };
   }
   return { ok: true, why: null };
 }
@@ -308,7 +308,7 @@ async function installLocked(ws, { feed, from, fetch, browsers, node, lock }) {
   }
 }
 
-/** The version now installed in <home>/app (another helper, or `npx trif setup`, may have updated it). */
+/** The version now installed in <home>/app (another helper, or `npx timsrobot setup`, may have updated it). */
 function installedVersion(ws) {
   return packageJson(ws.appDir).version || null;
 }

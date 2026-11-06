@@ -4,7 +4,7 @@
 //
 // Install modes (where the wrappers point):
 //   link  the package itself (a git checkout: the maintainer's way of working)
-//   copy  a self-contained copy in <home>/app (default when not a git checkout, e.g. `npx trif setup`,
+//   copy  a self-contained copy in <home>/app (default when not a git checkout, e.g. `npx timsrobot setup`,
 //         whose package lives in npm's cache, which npm may delete)
 
 const fs = require('fs');
@@ -319,7 +319,7 @@ function rcFileHint() {
   return '~/.profile';
 }
 
-// Drop the folders npm/npx put on PATH for the duration of `npx trif setup` (npm's cache, which it
+// Drop the folders npm/npx put on PATH for the duration of `npx timsrobot setup` (npm's cache, which it
 // may delete, and its node-gyp shim): the helper and agents shouldn't keep using them.
 function cleanPath(pathValue) {
   const sep = path.sep;

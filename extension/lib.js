@@ -13,7 +13,7 @@ export const BROWSER = FIREFOX ? 'Firefox' : SAFARI ? 'Safari' : 'Chrome';
 // What the browser calls TRIF's panel: Chrome's side panel, Firefox's sidebar, Safari's window.
 export const PANEL = FIREFOX ? 'sidebar' : SAFARI ? 'panel' : 'side panel';
 // What sets the helper up for this browser: plain setup doesn't install Safari's bridge.
-export const SETUP_COMMAND = SAFARI ? 'npx trif setup --browser safari' : 'npx trif setup';
+export const SETUP_COMMAND = SAFARI ? 'npx timsrobot setup --browser safari' : 'npx timsrobot setup';
 export const SETTINGS_URL = FIREFOX ? 'about:addons' : SAFARI ? 'Safari Settings → Extensions' : `chrome://extensions/?id=${EXTENSION_ID}`;
 // PROTOCOL.md calls this `__webmods_runtime`, but chrome.userScripts rejects ids starting with "_"
 // (reserved for generated ids), so it is registered under this id.

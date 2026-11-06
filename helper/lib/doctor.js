@@ -33,7 +33,7 @@ function isInside(child, parent) {
 
 /**
  * Is the host wrapper's script a sensible one? Copy installs run <home>/app/helper/host.js (whichever
- * copy of the CLI is asking, e.g. `npx trif doctor`); link installs run this checkout's host.js.
+ * copy of the CLI is asking, e.g. `npx timsrobot doctor`); link installs run this checkout's host.js.
  * Returns null when fine, else { status, title, fix? }.
  */
 function checkWrapperScript(script, ws) {
@@ -137,7 +137,7 @@ async function doctor(opts = {}) {
   // From a git checkout, point at its CLI; otherwise npx fetches TRIF again if the install is broken.
   const setupFix = P.isGitCheckout()
     ? 'run: trif setup   (or: node ' + P.CLI_JS + ' setup)'
-    : 'run: npx trif setup   (or: trif setup)';
+    : 'run: npx timsrobot setup   (or: trif setup)';
   let installRoot = P.REPO_ROOT; // where the wrapper's files are: its extension/ is what Chrome should load
 
   // Node

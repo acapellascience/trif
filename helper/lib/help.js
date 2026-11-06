@@ -8,7 +8,7 @@ const COMMANDS = {
   setup: {
     usage: 'trif setup [--browser chrome|chromium|brave|edge|arc|firefox|safari|all] [--home DIR] [--copy|--link] [--no-link] [--no-examples] [--verbose] [--no-wait]',
     summary: 'install the workspace, native messaging host and CLI link (safe to re-run)',
-    details: `First time: npx trif setup   (needs Node 18 or newer).
+    details: `First time: npx timsrobot setup   (needs Node 18 or newer).
 Creates the workspace (~/.trif, unless --home or TRIF_HOME says otherwise; a ~/.webmods from before 0.2.0,
 when TRIF was called WebMods, is moved there first and left as a link to it) with sites/ and bin/, and the
 private folder (settings, logs, screenshots; ~/Library/Application Support/TRIF on a Mac, moved out of the
@@ -35,7 +35,7 @@ agent for the side panel, and writes .claude/settings.json (what Claude Code may
 Other options: --no-link skips the /usr/local/bin link; --native-dir DIR writes the manifest only to DIR;
 --bin-dir DIR links the CLI there instead of /usr/local/bin.
 Run it again after upgrading TRIF, moving the repo or upgrading Node.`,
-    examples: ['npx trif setup', 'trif setup', 'trif setup --browser brave', 'trif setup --browser all', 'node helper/cli.js setup --copy'],
+    examples: ['npx timsrobot setup', 'trif setup', 'trif setup --browser brave', 'trif setup --browser all', 'node helper/cli.js setup --copy'],
   },
   status: {
     usage: 'trif status [TAB]',

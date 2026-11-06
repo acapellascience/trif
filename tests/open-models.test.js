@@ -809,6 +809,10 @@ test('real Codex + stand-in model: model requests get through (the key proxy add
   fs.copyFileSync(path.join(__dirname, 'procargs-probe.py'), probe);
   const q = (s) => `'${s}'`;
   const node = process.execPath;
+  // The real interpreter, not /usr/bin/python3: with Xcode installed that's a launcher that stalls in the
+  // sandbox (it wants the user cache folder, which runs can't use), past Codex's 10 s for a command.
+  let py = 'python3';
+  try { py = require('child_process').execFileSync('python3', ['-I', '-c', 'import sys; print(sys.executable)'], { encoding: 'utf8' }).trim() || py; } catch { /* python3 as is */ }
   const script = [
     { run: `${q(node)} ${q(CLI_JS)} tabs` },
     // (2>&1: curl's error and its output in one stream, in the order curl wrote them.)
@@ -819,7 +823,7 @@ test('real Codex + stand-in model: model requests get through (the key proxy add
     { run: `echo x > ${q(path.join(home, 'sites', 'other.org', 'oss-probe.js'))}; echo " other=$?"` },
     { run: 'echo "key=[$TTEST_OR_API_KEY]"; env | grep -c TTEST_OR_API_KEY' },
     // Every same-user process's argv and environment (KERN_PROCARGS2, which the sandbox allows): no key.
-    { run: `python3 -I ${q(probe)} ${sha(KEY)} ${KEY.length} ${sha(canary)} ${canary.length} ${sha(MESSAGE)} ${MESSAGE.length}` },
+    { run: `${q(py)} -I ${q(probe)} ${sha(KEY)} ${KEY.length} ${sha(canary)} ${canary.length} ${sha(MESSAGE)} ${MESSAGE.length}` },
     { say: 'Done: probed.' },
   ];
   const srv = await startFakeModelServer({ script });

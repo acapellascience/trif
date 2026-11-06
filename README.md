@@ -55,9 +55,8 @@ switches stay as they were; in Safari, install the new TRIF.app (see Safari belo
    press ⌘⇧G and paste: setup put the folder's path, `~/.trif/app/extension`, on your clipboard.)
 
 3. **Allow it to run mods.** On the **TRIF setup** tab that opens, click **Open TRIF’s Chrome
-   settings** and turn on **Allow User Scripts**. Then click **Allow these sites**, so TRIF can work on
-   the sites its mods are for (Chrome asks you once, for all of them), **Allow TRIF on every site** (no
-   more asking after that), or **Not now**.
+   settings** and turn on **Allow User Scripts**. Then choose **Permissive** (TRIF can reach every site;
+   Chrome asks you once) or **Restrictive** (you connect TRIF one site at a time). You can change it later.
 
 4. **Open the side panel.** Click the TRIF icon in the toolbar (pin it from the puzzle-piece menu). If
    it asks you to log in to Claude, click **Log in** and follow the steps.
@@ -103,12 +102,12 @@ Settings → Extensions and delete the old WebMods app.
   and a "Fix <site>" button that turns it on. Until then nothing from TRIF runs on the site or reads
   it, not even a mod for all sites, and agents (in the panel or a terminal) can't touch its tabs. The
   power button at the top of the panel turns it back off.
-- Turning TRIF on for a site is also when your browser asks you to let TRIF read and change that site
-  (or allow every site once, on the setup page or in Settings → Sites): TRIF asks for no websites when you
-  install it. Turning the robot off keeps that access, so it comes back on at once; "Disconnect from
-  <site>" under the robot gives it back. "Never on <site>" keeps TRIF off a site whatever access it has
-  (Settings → Sites lists them). Installed TRIF before this? It keeps the access to all sites it had.
-  Safari asks per site itself.
+- Site permissions (the setup page, or Settings in the panel): **Permissive** gives TRIF access to every
+  site by default; **Restrictive** keeps it disconnected on each site (the panel all grey) until you click
+  **Connect** there, which is when your browser asks. Turning the robot off keeps a site connected, so it
+  comes back on at once. Under Fix, "Disconnect from <site>" gives that site's access back (permissive: it
+  offers to switch to restrictive, since one site can't lose access then), and "Block on <site>" keeps TRIF
+  away from it whatever it can reach (the panel red; Unblock, or Settings → Blocked sites). Installed TRIF before this? You're permissive, as before. Safari asks per site itself.
 - Go to a site, open the side panel, and tell it what to fix. The agent looks at the page,
   writes a mod, and reloads the tab so you can see it. Keep chatting to adjust it.
 - Each mod has a switch in the side panel, so you can turn it off without deleting it. Its trash icon

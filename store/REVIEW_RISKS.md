@@ -79,14 +79,12 @@ Mitigations:
 
 ## 4. Permission scope: optional `<all_urls>`, `tabs`, `scripting`, `activeTab` (medium-low)
 
-- Sites are asked for one at a time, from a click in the side panel (`chrome.permissions.request` for
-  `*://*.<site>/*`, which covers the domain and its subdomains), and given back with "Disconnect" (the power button's off keeps it,
-  for a quick before and after). `<all_urls>` is requested only when the user picks "Allow TRIF on every
-  site" (setup page or panel settings, with a line saying Chrome will say it can read and change all data
-  on all websites), and "Limit TRIF to the sites it's on" gives it back. Say so if asked: mods can be for
-  any site the user picks, hence the wide optional entry. A never list keeps TRIF off chosen sites.
-  Users who installed while `<all_urls>` was required keep it (Chrome keeps a granted permission that
-  moves to optional); that isn't something new users get.
+- The user picks Permissive or Restrictive on the setup page (and can switch in the panel's settings).
+  Permissive requests `<all_urls>` from that click, so Chrome's own prompt says what it means. Restrictive
+  asks for one site (`*://*.<site>/*`) when the user clicks Connect in the panel there, and "Disconnect from
+  <site>" gives it back. Say so if asked: mods can be for any site the user picks, hence the wide
+  optional entry. Users who installed while `<all_urls>` was required keep it (Chrome keeps a granted
+  permission that moves to optional). A block list keeps TRIF off chosen sites whatever access it has.
 - **`tabs` is needed now.** Without host access, Chrome hides `tab.url` and `tab.title` of sites TRIF
   isn't allowed on unless it has `tabs`, and the side panel must know the site of the current tab to offer turning TRIF on
   there; `trif tabs` and tab selection by URL need them too. It brings the "Read your browsing history"

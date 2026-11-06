@@ -60,8 +60,8 @@ REQUIREMENTS (PRIVATE BETA)
 
 HOW TO USE
 1. Install the helper: run "npx timsrobot setup" in a terminal (details: <HELPER INSTALL URL>).
-2. On the setup page that opens, turn on "Allow User Scripts" for TRIF, and allow the sites its mods are for (or choose Not now).
-3. Go to any website, click the TRIF toolbar icon to open the side panel, and turn TRIF on for the site. Chrome asks you to allow that site.
+2. On the setup page that opens, turn on "Allow User Scripts" for TRIF, and choose Permissive (every site) or Restrictive (site by site).
+3. Go to any website, click the TRIF toolbar icon to open the side panel, and turn TRIF on for the site (Restrictive: click Connect, and Chrome asks you to allow that site).
 4. Describe the change you want. Your agent writes the mod and reloads the page to show it.
 5. Don't like it? Ask for a tweak, switch the mod off, or start a new chat.
 
@@ -69,7 +69,7 @@ PRIVACY
 TRIF collects nothing. The extension talks only to the helper on your own computer. The only thing that reaches the developer is a problem report, when you fill in the report form and press Send. When you ask your coding agent for a change, the agent can read the page you're on (its text, the address, and screenshots) so it can write the mod. It sends that to its own AI provider (for example Anthropic or OpenAI, or the open-model provider you picked; nobody, for a model on your own computer) under that provider's terms, the same as any other time you use the agent. Chats and settings are stored only on your computer. Full policy: <PRIVACY POLICY URL>
 
 PERMISSIONS
-• Websites: TRIF asks for none when you install it. When you turn TRIF on for a site in the side panel, Chrome asks you to let it read and change that site, so mods can run there and your agent can read the page you're asking about. "Disconnect" in the side panel gives that access back, and you can take it back any time in Chrome's extension settings. You can also allow every site at once, on the setup page or in the panel's settings (Chrome then says TRIF can read and change all your data on all websites), and go back to single sites the same way. A never list in the panel keeps TRIF away from sites you name, whatever access it has.
+• Websites: TRIF asks for none when you install it. On its setup page you choose: Permissive (Chrome asks once to let TRIF read and change your data on all websites) or Restrictive (Chrome asks for each site when you connect TRIF to it in the side panel). You can switch any time in the panel's settings, disconnect a site, block one, or take access back in Chrome's extension settings.
 • "Communicate with cooperating native applications": talks to the TRIF helper on your computer. It talks to nothing else.
 • "Read your browsing history": the side panel shows the mods for the site in the current tab, and your agent can find the tab you're talking about by its address.
 
@@ -135,7 +135,7 @@ Lets the user's agent take a screenshot of the tab the user is looking at, after
 
 **Optional host permission: `<all_urls>`** (no host permission is required at install)
 ```
-TRIF requests no websites at install. Users write mods for websites they choose, so the sites can't be listed in advance; instead, when the user turns TRIF on for a site in the side panel (a click), the extension calls chrome.permissions.request for that site only (the domain and its subdomains), and Chrome asks the user. "Disconnect from <site>" in the side panel removes that access again (chrome.permissions.remove), and the user can revoke it in Chrome's settings, after which nothing from TRIF runs on that site. With access to a site, TRIF runs the user's mods there (each mod's own match patterns, limited to the allowed sites) and, when the user asks their agent about a page there, reads its text, reloads it and reads mod errors. TRIF requests <all_urls> only when the user explicitly chooses "Allow TRIF on every site" (on the setup page or in the side panel's settings, with a line saying what it means), so they aren't asked for each new site; "Limit TRIF to the sites it's on" gives it back. Users who installed a version where it was required keep it. Whatever access TRIF has, a never list the user keeps in the side panel keeps it off the sites on it.
+TRIF requests no websites at install. Users write mods for websites they choose, so the sites can't be listed in advance. On the setup page (and later in the side panel's settings) the user chooses Permissive, which requests <all_urls> from that click (Chrome's prompt says what it means), or Restrictive, where the extension calls chrome.permissions.request for one site (the domain and its subdomains) when the user clicks Connect in the side panel on that site, and Chrome asks the user. "Disconnect from <site>" removes that site's access again (chrome.permissions.remove); switching to Restrictive removes all of it; the user can also revoke access in Chrome's settings, after which nothing from TRIF runs on those sites. With access to a site, TRIF runs the user's mods there (each mod's own match patterns, limited to the sites the user turned TRIF on for) and, when the user asks their agent about a page there, reads its text, reloads it and reads mod errors. Users who installed a version where <all_urls> was required keep it (Permissive). Whatever access TRIF has, a block list the user keeps in the side panel keeps it off the sites on it.
 ```
 
 ### Remote code

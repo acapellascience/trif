@@ -6,17 +6,18 @@ needs a section here for the version it releases.
 
 ## Unreleased
 
-- **TRIF only gets the websites you connect it to.** Installing it used to give it "all your data on all
-  websites". Now it asks for none: turning TRIF on for a site in the side panel is when your browser asks
-  you to allow that site. The setup page asks once for the sites TRIF's own mods are for, or lets you allow
-  every site, so you're never asked again. Already using TRIF? Nothing changes for you: it keeps the access
-  it had.
-- Turning the robot off on a site keeps that access, so it comes back on at once. **Disconnect** gives a
-  site's access back; **Never on** a site keeps TRIF away from it whatever access it has (listed in
-  Settings → Sites, where you can also limit TRIF to the sites it's on).
-- With only the sites you allowed, your agent's screenshots are of the tab you're on, after you click the
-  TRIF toolbar button there (Chrome and Firefox want that, or access to every site, before an extension
-  can capture a tab).
+- **You choose what TRIF can reach: permissive or restrictive.** Installing TRIF used to give it "all your
+  data on all websites". Now it asks for nothing until the setup page's new step, Site permissions:
+  **Permissive** gives TRIF access to every site by default (your browser asks once); **Restrictive**
+  connects TRIF site by site, so a site stays disconnected (the panel all grey) until you click Connect
+  there. You can change it any time in Settings. Already using TRIF? Nothing changes for you: you're
+  permissive, as before.
+- Turning the robot off on a site keeps it connected, so it comes back on at once. Under Fix, "Disconnect
+  from <site>" gives the site's access back (with every site allowed, it offers to switch to restrictive),
+  and "Block on <site>" keeps TRIF away from it whatever it can reach (the panel turns red there; Settings
+  lists blocked sites, each with Unblock).
+- Without access to every site, your agent's screenshots are of the tab you're on, after you click the
+  TRIF toolbar button there (Chrome and Firefox want that before an extension can capture a tab).
 
 ## 0.2.4
 

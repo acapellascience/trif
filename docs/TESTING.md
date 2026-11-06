@@ -77,7 +77,11 @@ Per browser, a **fresh** scenario, and an **upgrade** scenario per `--upgrade-fr
    notice), and the helper not connected (its wrapper moved aside and the scratch helper stopped: red,
    but the mods' switches green, since mods still run; then put back and reconnected with Try again). Then
    the setup page all ticked ("TRIF is ready", Try it with the sites where a shipped mod is on) once the
-   agent can run: an API key for Claude Code in the scratch keychain counts as logged in. Then
+   agent can run: an API key for Claude Code in the scratch keychain counts as logged in. Then (without
+   `--agent`/`--codex`) an expired login, with a stand-in `claude` put first on the helper's PATH for the
+   check: it says it's logged in and fails every run as Claude Code does when its login can't be
+   refreshed; a panel chat must show the login notice and one plain "needs you to log in again" line (not
+   the agent's error), with the message back in the box, and `trif agent run` must say how to log in. Then
    screenshots of the panel as narrow as a side panel: on x.com, on a gate (localhost) and on the landing
    page (no website: the big robot, only settings in the bar), each of the last two with settings open
    (they must open, list the agents and load the instructions). And the shipped Google mods, AI

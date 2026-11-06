@@ -727,6 +727,10 @@ class Scenario {
     await this.ext(`async (id) => { await chrome.tabs.update(id, { active: true }); }`, [win.tabId]).catch(() => {});
 
     await r.check('setup page: all ticked once the agent can run, then "TRIF is ready" and Try it', () => this.setupDoneCheck());
+    // (A stand-in Claude Code: only when the helper has the scratch HOME, never your real agent.)
+    if (!this.o.agent && !this.o.codex && !this.o.oss && !this.o.guidance) {
+      await r.check('an expired login (a stand-in Claude Code): the login notice and one plain line, not the raw error; the message back in the box', () => this.expiredLoginCheck());
+    }
 
     if (this.o.agent) await this.agentChecks('claude');
     if (this.o.codex) await this.agentChecks('codex');
@@ -1254,6 +1258,76 @@ class Scenario {
       const p = await this.waitPanel('the offer to go', (x) => x.mods.some((m) => m.id === 'x.com/punk-fonts' && !m.update), 15000);
       return `@version ${v && v[1]}; ${p ? 'the panel no longer offers it' : ''}`;
     });
+  }
+
+  // ---- an expired login, with a stand-in Claude Code (sidepanel.js loginLine, runs.js loginFailed)
+
+  /**
+   * A stand-in `claude` first on the helper's PATH (config.json env.PATH) that says it's logged in (as Claude
+   * Code's `auth status` does with an expired login) and answers every run the way Claude Code 2.1.319 does
+   * when its login can't be refreshed. It reaches nothing. Put back after.
+   */
+  async expiredLoginCheck() {
+    const dir = path.join(this.work, 'standin');
+    fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(path.join(dir, 'claude'), `#!${process.execPath}
+const a = process.argv.slice(2);
+if (a[0] === '--version') { console.log('2.1.319 (Claude Code)'); process.exit(0); }
+if (a[0] === 'auth') { console.log('{"loggedIn": true, "authMethod": "claude.ai"}'); process.exit(0); }
+const t = 'Failed to authenticate: OAuth session expired and could not be refreshed';
+const say = (o) => process.stdout.write(JSON.stringify(o) + '\\n');
+say({ type: 'system', subtype: 'init', session_id: 'e2e-expired' });
+say({ type: 'assistant', message: { model: '<synthetic>', content: [{ type: 'text', text: t }] }, error: 'authentication_failed' });
+say({ type: 'result', subtype: 'success', is_error: true, result: t, session_id: 'e2e-expired' });
+process.exitCode = 1;
+`, { mode: 0o755 });
+    const cfgFile = path.join(this.priv, 'config.json');
+    const saved = fs.readFileSync(cfgFile, 'utf8');
+    const cfg = JSON.parse(saved);
+    cfg.env = { ...(cfg.env || {}), PATH: [dir, cfg.env?.PATH].filter(Boolean).join(':') };
+    fs.writeFileSync(cfgFile, JSON.stringify(cfg, null, 2) + '\n');
+    const site = '127.0.0.1';
+    const chat = () => this.ext(`async (k) => (await chrome.storage.local.get(k))[k] || null`, [`chat:${site}`]);
+    // The panel asks for the agents when it opens: open it again so it sees the stand-in.
+    const reopen = async () => {
+      await this.panel(`async () => { setTimeout(() => location.reload(), 20); return true; }`).catch(() => {});
+      await sleep(800);
+      this.panelCtx = await this.d.findPage('sidepanel.html');
+    };
+    try {
+      await this.ext(`async (k) => { await chrome.storage.local.remove(k); }`, [`chat:${site}`]);
+      await this.goColour('site');
+      await reopen();
+      await this.waitLooks('Claude Code ready (the stand-in)', (l) => l.dotLabel === 'Ready · Claude Code' && !l.send.disabled, 30000);
+      const message = 'hide the banner please';
+      await this.panel(`async (text) => { const i = document.getElementById('input'); i.value = text; i.dispatchEvent(new Event('input', { bubbles: true })); }`, [message]);
+      await this.d.click(this.panelCtx, '#send');
+      const c = await waitFor('the run to finish', async () => { const x = await chat(); return x && !x.run && x.messages.length >= 2 ? x : null; }, { timeoutMs: 30000, intervalMs: 300 });
+      const roles = c.messages.map((m) => [m.role, m.text]);
+      if (JSON.stringify(roles) !== JSON.stringify([['user', message], ['login', 'Claude Code needs you to log in again.']])) throw new Error(`the chat: ${JSON.stringify(roles)}`);
+      const x = await this.waitLooks('the login notice', (l) => l.classes.join() === 'needs-login' && l.notices.some((t) => /isn’t logged in/.test(t)), 20000);
+      const shown = await waitFor('the message back in the box', () => this.panel(`async () => {
+        const msgs = [...document.querySelectorAll('#messages > li')].map((li) => [li.className, li.innerText.trim()]);
+        const input = document.getElementById('input').value;
+        return input ? { msgs, input } : null;
+      }`), { timeoutMs: 10000 });
+      if (shown.input !== message) throw new Error(`the box has "${shown.input}"`);
+      if (shown.msgs.some(([cls, text]) => /error|assistant/.test(cls) || /OAuth/.test(text))) throw new Error(`the chat shows: ${JSON.stringify(shown.msgs)}`);
+      if (!shown.msgs.some(([cls, text]) => cls === 'msg login' && text === 'Claude Code needs you to log in again.')) throw new Error(`no login line: ${JSON.stringify(shown.msgs)}`);
+      // Its own check still says logged in, so after logging in from a terminal, sending is how to tell.
+      if (x.send.disabled) throw new Error(`Send is off: ${JSON.stringify(x.send)}`);
+      await this.shot(this.panelCtx, 'panel-login-expired');
+      // From a terminal: the plain message, and how to log in.
+      const t = await this.cli(['agent', 'run', '--url', `http://${site}:${this.o.servers.port}/`, 'hi from a terminal'], { timeoutMs: 60000 });
+      if (t.status !== 1 || !t.stderr.includes('error: Claude Code needs you to log in again. Run `trif agent login --agent claude`') || /OAuth/.test(t.stdout + t.stderr)) {
+        throw new Error(`trif agent run: ${t.status} ${t.stderr} ${t.stdout}`);
+      }
+      return `"${x.notices.find((n) => /logged in/.test(n))}"; chat: ${roles.map((m) => m[0]).join(', ')}; the box: "${shown.input}"`;
+    } finally {
+      fs.writeFileSync(cfgFile, saved);
+      await this.panel(`async () => { document.getElementById('input').value = ''; }`).catch(() => {});
+      await this.ext(`async (k) => { await chrome.storage.local.remove(k); }`, [`chat:${site}`]).catch(() => {});
+    }
   }
 
   // ---- agent runs (real ones: they use your Claude Code / Codex login and cost a little)

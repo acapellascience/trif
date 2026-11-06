@@ -13,6 +13,16 @@
 // flips it the way that page does, with chrome.developerPrivate.updateExtensionConfiguration
 // ({userScriptsAccess: true}) evaluated in chrome://extensions, after turning on developer mode in the
 // profile's Preferences.
+//
+// Site access. TRIF's sites are optional host permissions, which Chrome only grants through its own prompt,
+// and nothing in automation can answer that prompt (no flag, CDP command or developerPrivate call does it
+// for optional host permissions; checked in Chrome for Testing 156). So the driver loads a copy of the
+// extension whose manifest makes the sites the suite turns TRIF on for *required* host permissions
+// (`siteAccess`, by default SITE_ACCESS_HOSTS): to TRIF that's the same as a user who allowed those sites
+// (permissions.request for them says yes without a prompt; removing them is refused, which TRIF ignores),
+// and every other site (localhost, amazon.com, instagram.com) stays without access. `siteAccess: 'all'`
+// makes <all_urls> required instead: a user who installed TRIF when it was. The copy is in the scratch
+// home, next to the profile.
 
 const fs = require('fs');
 const path = require('path');
@@ -20,6 +30,19 @@ const { spawn } = require('child_process');
 const { sleep, waitFor, freePort, killMatching } = require('./util');
 
 const EXTENSION_ID = 'iaablflfafmonebdomeikadolkgdbkhe';
+// The sites the suite turns TRIF on for (scenario.js, homepage.js): each with its subdomains, as TRIF asks.
+const SITE_ACCESS_HOSTS = ['127.0.0.1', 'x.com', 'google.com', 'timsrobot.com'];
+
+/** A copy of the extension in `to` with the test manifest described above. Returns `to`. */
+function testExtension(from, to, siteAccess = SITE_ACCESS_HOSTS) {
+  fs.rmSync(to, { recursive: true, force: true });
+  fs.cpSync(from, to, { recursive: true });
+  const file = path.join(to, 'manifest.json');
+  const m = JSON.parse(fs.readFileSync(file, 'utf8'));
+  m.host_permissions = siteAccess === 'all' ? ['<all_urls>'] : siteAccess.flatMap((h) => [`*://${h}/*`, `*://*.${h}/*`]);
+  fs.writeFileSync(file, JSON.stringify(m, null, 2));
+  return to;
+}
 
 function findChrome() {
   if (process.env.TRIF_E2E_CHROME) return process.env.TRIF_E2E_CHROME;
@@ -93,7 +116,9 @@ class ChromeDriver {
   async start() {
     const bin = findChrome();
     if (!bin) throw new Error('Chrome for Testing not found: set TRIF_E2E_CHROME to its binary (…/Google Chrome for Testing.app/Contents/MacOS/Google Chrome for Testing)');
-    const { userDataDir, home, extensionDir, headless = true } = this.opts;
+    const { userDataDir, home, headless = true } = this.opts;
+    const extensionDir = testExtension(this.opts.extensionDir, path.join(path.dirname(userDataDir), 'TRIF-e2e-extension'), this.opts.siteAccess);
+    this.siteAccess = this.opts.siteAccess || SITE_ACCESS_HOSTS;
     // Developer mode on, before Chrome first reads the profile (needed for the user scripts switch).
     const prefsDir = path.join(userDataDir, 'Default');
     fs.mkdirSync(prefsDir, { recursive: true });
@@ -182,6 +207,18 @@ class ChromeDriver {
   async installExtension() {
     await waitFor('the TRIF service worker', async () => (await this.targets()).find((t) => t.type === 'service_worker' && t.url.startsWith(this.origin)), { timeoutMs: 20000 });
     return EXTENSION_ID;
+  }
+
+  /**
+   * Clicks TRIF's toolbar button on the tab `ctx` shows, as Extensions.triggerAction does: TRIF's
+   * action.onClicked opens the side panel, and Chrome gives TRIF activeTab on that tab.
+   */
+  async clickToolbarButton(ctx) {
+    const { targetInfos } = await this.cdp.send('Target.getTargets', { filter: [{ type: 'tab' }] });
+    const page = (await this.targets()).find((t) => t.targetId === ctx);
+    const tab = targetInfos.find((t) => t.type === 'tab' && page && t.url === page.url);
+    if (!tab) throw new Error(`no tab target for ${page ? page.url : ctx}`);
+    await this.cdp.send('Extensions.triggerAction', { id: EXTENSION_ID, targetId: tab.targetId });
   }
 
   /** Turns on "Allow User Scripts" for TRIF, as the switch on chrome://extensions does. */
@@ -303,4 +340,4 @@ class ChromeDriver {
   }
 }
 
-module.exports = { ChromeDriver, EXTENSION_ID, findChrome };
+module.exports = { ChromeDriver, EXTENSION_ID, SITE_ACCESS_HOSTS, findChrome };

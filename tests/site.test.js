@@ -306,9 +306,8 @@ test('the demo runs its own mods (site/demo/mods/, which TRIF doesn\'t ship), li
   for (const m of MODS) assert.strictEqual(m.code, fs.readFileSync(path.join(dir, `${m.slug}.js`), 'utf8'), `${m.slug}: the file as it is`);
   assert.deepStrictEqual(ORDER, DEMO_ORDER.map((slug) => `timsrobot.com/${slug}`));
   assert.deepStrictEqual(DEMO_ORDER, ['tagline', 'robot', 'neon', 'jelly', 'fireworks', 'stickers', 'checklist', 'terminal', 'led', 'gravity', 'tilt', 'shooter', 'rave']);
-  // TRIF ships none of them: the home page is like any other website.
-  assert.ok(!PREINSTALLED.some((p) => p.id.startsWith('timsrobot.com/')) && !DEFAULT_ORDER['timsrobot.com']);
-  assert.ok(!fs.existsSync(path.join(REPO_DIR, 'examples', 'sites', 'timsrobot.com')));
+  // TRIF ships none of them (only two mods that drive the demo, skip-to-sandbox and random-mods), and no order.
+  assert.ok(!PREINSTALLED.some((p) => DEMO_ORDER.some((slug) => p.id === `timsrobot.com/${slug}`)) && !DEFAULT_ORDER['timsrobot.com']);
   // Each mod's script is wrapped as TRIF wraps a mod (a function), and runs whatever the page says.
   const code = modScript('neon.js'); // (document-start: as it is; a document-idle one waits for DOMContentLoaded, as with TRIF)
   assert.ok(code.startsWith('(() => {\n'), code.slice(0, 60));

@@ -65,11 +65,13 @@ const PREINSTALLED = [
   { id: 'x.com/follow-status', on: false },
   { id: 'x.com/space-shooter', on: false }, // X-Flyer
   { id: 'www.instagram.com/three-column-feed', on: false },
+  // Added after 0.2.4: two for TRIF's own home page, timsrobot.com, whose demo's mods are the site's own
+  // (site/demo/mods/): these two drive that demo (skip its game to sandbox mode with every mod listed; R
+  // switches a random set on). Off, and TRIF starts off on timsrobot.com (not in SITES_ON).
+  { id: 'timsrobot.com/skip-to-sandbox', on: false },
+  { id: 'timsrobot.com/random-mods', on: false }, // R for Random
   // (Rainbow Rave for Google, Amazon and Instagram waits for a later release: unreleased/sites/.)
 ];
-// (TRIF's own home page, timsrobot.com, gets none: it's like any other website, modded if the user wants.
-// Its demo's mods are the site's own, site/demo/mods/. Copies an earlier build put in a workspace stay
-// there, untouched: setup only goes through this list.)
 
 // The order the side panel lists a site's shipped mods in until the user drags them into their own (display
 // only: mods run in their usual order). By site, as the extension's scopeFor gives it; the helper sends it

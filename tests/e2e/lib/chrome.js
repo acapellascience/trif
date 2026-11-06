@@ -312,6 +312,15 @@ class ChromeDriver {
     }
   }
 
+  /** A trusted press of `key` ('Escape') in the page `ctx`. */
+  async key(ctx, key) {
+    const sid = await this._attach(ctx);
+    const codes = { Escape: 27 };
+    for (const type of ['rawKeyDown', 'keyUp']) {
+      await this.cdp.send('Input.dispatchKeyEvent', { type, key, code: key, windowsVirtualKeyCode: codes[key] || 0 }, sid);
+    }
+  }
+
   /** Moves the mouse off whatever it last clicked (to the bottom left corner), so nothing shows hovered. */
   async pointerAway(ctx) {
     const sid = await this._attach(ctx);

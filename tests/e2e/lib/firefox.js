@@ -215,6 +215,36 @@ class FirefoxDriver {
     await this.bidi.send('input.releaseActions', { context: ctx }).catch(() => {});
   }
 
+  /** A trusted press of `key` ('Escape') in the page `ctx`. */
+  async key(ctx, key) {
+    const value = { Escape: '\uE00C' }[key] || key;
+    await this.bidi.send('input.performActions', {
+      context: ctx, actions: [{ type: 'key', id: 'keyboard', actions: [{ type: 'keyDown', value }, { type: 'keyUp', value }] }],
+    });
+    await this.bidi.send('input.releaseActions', { context: ctx }).catch(() => {});
+  }
+
+  /** Firefox's prompt for optional permissions on (on) or off (as this profile starts: requests are granted). */
+  async setPermissionPrompts(on) {
+    await this.chrome(`async (on) => { Services.prefs.setBoolPref('extensions.webextOptionalPermissionPrompts', on); }`, [on]);
+  }
+
+  /** Answers the permission prompt an add-on's permissions.request opened: yes or no, as its buttons do. */
+  async answerPermissionPrompt(accept, { timeoutMs = 8000 } = {}) {
+    return waitFor('the permission prompt', () => this.chrome(`async (accept) => {
+      for (const win of Services.wm.getEnumerator('navigator:browser')) {
+        for (const b of win.gBrowser.browsers) {
+          const n = win.PopupNotifications.getNotification('addon-webext-permissions', b);
+          if (!n) continue;
+          (accept ? n.mainAction : n.secondaryActions?.[0])?.callback?.();
+          win.PopupNotifications.remove(n);
+          return accept ? 'accepted' : 'declined';
+        }
+      }
+      return null;
+    }`, [accept]), { timeoutMs });
+  }
+
   /** Moves the mouse off whatever it last clicked (to the bottom left corner), so nothing shows hovered. */
   async pointerAway(ctx) {
     const h = await this.bidi.call(ctx, 'async () => innerHeight');

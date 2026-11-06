@@ -14,9 +14,7 @@
   const GRAVITY = 2600;        // px/s²
   const BOUNCE_FLOOR = 0.45;   // restitution against walls and floor
   const BOUNCE_BODY = 0.2;     // restitution between pieces
-  const FRICTION = 0.25;       // share of sliding speed lost per contact, per substep
-  const FLOOR_FRICTION = 0.5;  // sliding on the floor: deceleration as a share of gravity
-  const SUBSTEPS = 3, ITERS = 6;
+  const SUBSTEPS = 3;          // physics steps per frame (the solver: see "Physics: rigid boxes")
   // With the Tilt Card on, the card's tilt (--tc-ry / --tc-rx on <html>, up to ±24°) tips the pile: pieces
   // slide toward where the card dips, the side the mouse is on, like the walker does (Living Robot). A
   // hard push, and less floor friction the more it tips, so it shows once the card tilts noticeably.
@@ -319,6 +317,7 @@
   };
 
   const stop = () => { // fly home, then let go
+    if (window.__gm) (window.__gm.stops ||= []).push(new Error('stop').stack.split('\n').slice(1, 4).join(' | '));
     returning = true; held = null;
     releaseWalker();
     for (const b of bodies) { b.fromX = b.x; b.fromY = b.y; b.fromA = b.a; }
@@ -341,6 +340,7 @@
   };
 
   const finish = () => {
+    if (window.__gm) (window.__gm.stops ||= []).push(new Error('finish').stack.split('\n').slice(1, 4).join(' | '));
     releaseWalker();
     removeProbes();
     for (const b of bodies) {
@@ -374,13 +374,12 @@
         const ux = d > 1 ? dx / d : 0, uy = d > 1 ? dy / d : -1;
         const light = Math.max(0.35, Math.min(1.6, Math.sqrt(3000 / b.m))) * (b.walker ? 1.6 : 1);
         const dv = Math.min(power, power * k * light);
+        wake(b); // (a sleeping piece takes the hit too)
         b.vx += ux * dv; b.vy += uy * dv - 350 * k;
         if (!b.walker) b.va += (Math.random() - 0.5) * 14 * k;
       }
     } catch (err) { window.trif?.warn(String(err)); }
   });
-
-  const nearestQuarter =(a) => Math.round(a / (Math.PI / 2)) * (Math.PI / 2);
 
   // Pieces the Space shooter has blasted are only hidden (data-tss-dead), so their boxes would still
   // hold things up. A piece that's gone (blasted itself, inside a blasted word, or a block whose words
@@ -404,13 +403,94 @@
     return !el.querySelector('svg, img, video, canvas, picture, input, button'); // e.g. an icon still shows
   };
 
-  const HELD_MAX_SPEED = 2200; // px/s: how hard a held piece can hit things
+  // ---- Physics: rigid boxes ------------------------------------------------------------------------------
+  // Every piece is a box with a mass and a moment of inertia, turning about its middle. Contacts are found box
+  // against box (separating axes, then the touching edges clipped against each other: one or two points) and
+  // against the floor and the window's sides (the corners past them), and solved with impulses at those
+  // points (sequential impulses: a push along the contact's normal, then Coulomb friction along it), so a piece
+  // hanging off an edge turns over it, a stack balances or doesn't, and a thrown piece spins as it should. A
+  // piece that has come to rest sleeps (stays exactly put, and costs nothing) until something hits it, the
+  // card tilts, or what held it up goes.
+  const HELD_MAX_SPEED = 2200;          // px/s: how hard a held piece can hit things
+  const MU = 0.8, MU_FLOOR = 0.8;       // friction between pieces; against the floor and sides
+  const ITERS = 10;                     // solver passes per substep
+  const SLOP = 0.5, CORRECT = 0.3;      // px of overlap left alone; share of the rest put right per substep
+  const WARM = 0.85;                    // share of last substep's push each contact starts from
+  const SPIN_MAX = 18;                  // rad/s: no piece spins faster
+  const BOUNCE_MIN = 120;               // px/s: slower impacts don't bounce
+  const SLEEP_V = 15, SLEEP_W = 0.2, SLEEP_T = 0.4, WAKE_V = 40; // px/s, rad/s, s, px/s
+  const cross = (ax, ay, bx, by) => ax * by - ay * bx;
+  const half = (b) => (b.jelly ? [b.w * (1 - b.u) / 2, b.h * (1 + b.u) / 2] : [b.w / 2, b.h / 2]);
+  const shapeOf = (b) => { const [hw, hh] = half(b); return { b, x: b.x, y: b.y, c: Math.cos(b.a), s: Math.sin(b.a), hw, hh }; };
+  const corners = (S) => [[-1, -1], [1, -1], [1, 1], [-1, 1]].map(([i, j]) =>
+    [S.x + i * S.hw * S.c - j * S.hh * S.s, S.y + i * S.hw * S.s + j * S.hh * S.c]);
+  const radius = (S, ax, ay) => S.hw * Math.abs(ax * S.c + ay * S.s) + S.hh * Math.abs(-ax * S.s + ay * S.c);
+  // the part of p–q within `lim` of `c` along t (null: none)
+  const clipSeg = (p, q, cx, cy, tx, ty, lim) => {
+    const a = (p[0] - cx) * tx + (p[1] - cy) * ty, d = (q[0] - cx) * tx + (q[1] - cy) * ty;
+    if ((a > lim && d > lim) || (a < -lim && d < -lim)) return null;
+    const at = (k) => [p[0] + (q[0] - p[0]) * k, p[1] + (q[1] - p[1]) * k];
+    const cut = (v) => (v > lim ? at((a - lim) / (a - d)) : v < -lim ? at((a + lim) / (a - d)) : null);
+    return [cut(a) || p, cut(d) || q];
+  };
+  // Box against box: null, or { nx, ny (from A to B), pts: [[x, y, depth]] }.
+  const collide = (A, B) => {
+    const dx = B.x - A.x, dy = B.y - A.y;
+    let best = Infinity, score = Infinity, nx = 0, ny = 0, ref = null, onU = true;
+    for (const [S, ax, ay, u] of [[A, A.c, A.s, true], [A, -A.s, A.c, false], [B, B.c, B.s, true], [B, -B.s, B.c, false]]) {
+      const d = dx * ax + dy * ay;
+      const o = radius(A, ax, ay) + radius(B, ax, ay) - Math.abs(d);
+      if (o <= 0) return null;
+      const sc = S === A ? o : o * 1.02 + 0.01; // (a slight preference for A's faces: no flicker between equals)
+      if (sc < score) { score = sc; best = o; const sg = d < 0 ? -1 : 1; nx = ax * sg; ny = ay * sg; ref = S; onU = u; }
+    }
+    const inc = ref === A ? B : A;
+    const rx = ref === A ? nx : -nx, ry = ref === A ? ny : -ny; // the reference face's normal, toward the other box
+    const off = onU ? ref.hw : ref.hh, lim = onU ? ref.hh : ref.hw;
+    const fx = ref.x + rx * off, fy = ref.y + ry * off, tx = -ry, ty = rx;
+    // the incident box's face most against it
+    let fn = null, fd = Infinity;
+    for (const [ex, ey, u] of [[inc.c, inc.s, true], [-inc.c, -inc.s, true], [-inc.s, inc.c, false], [inc.s, -inc.c, false]]) {
+      const d = ex * rx + ey * ry;
+      if (d < fd) { fd = d; fn = [ex, ey, u]; }
+    }
+    const [ex, ey, eu] = fn, eOff = eu ? inc.hw : inc.hh, eHalf = eu ? inc.hh : inc.hw;
+    const cx = inc.x + ex * eOff, cy = inc.y + ey * eOff, etx = -ey, ety = ex;
+    const seg = clipSeg([cx - etx * eHalf, cy - ety * eHalf], [cx + etx * eHalf, cy + ety * eHalf], fx, fy, tx, ty, lim);
+    if (!seg) return null;
+    const pts = [];
+    for (const p of seg) {
+      const sep = (p[0] - fx) * rx + (p[1] - fy) * ry;
+      if (sep <= 0) pts.push([p[0], p[1], -sep]);
+    }
+    return pts.length ? { nx, ny, pts, depth: best } : null;
+  };
+  const wake = (b, why = '?') => { if (b && b.asleep) { b.asleep = false; b.still = 0; if (window.__gm) (window.__gm.why ||= {})[why] = (window.__gm.why[why] || 0) + 1; } };
+  let lastTilt = 0, lastLive = -1, nextId = 1;
+  // (#gmdebug in the address: window.__gm for looking inside, while tuning)
+  let dbg = location.hash.includes('gmdebug'); try { dbg ||= !!localStorage.getItem('gmdebug'); } catch {}
+  if (dbg) window.__gm = { bodies: () => bodies, wakes: 0 };
+  // Each contact's push carries over to the next substep (warm starting: a stack that held last step holds
+  // now, instead of being worked out from nothing and jittering), matched by the pair and where on the second
+  // piece it touches.
+  let cache = new Map();
+  const keyOf = (A, B, px, py) => {
+    const ida = A ? (A.id ||= nextId++) : 0, idb = B.id ||= nextId++;
+    const c = Math.cos(B.a), sn = Math.sin(B.a), lx = (px - B.x) * c + (py - B.y) * sn, ly = -(px - B.x) * sn + (py - B.y) * c;
+    return `${ida}:${idb}:${Math.round(lx / 6)}:${Math.round(ly / 6)}`;
+  };
+
   const simulate = (dt, stepsLeft = 1) => {
     const W = root.clientWidth, H = innerHeight;
     const tilt = tiltX();
     const live = bodies.filter((b) => !b.ghost);
+    // The world changed under the sleepers: the card tilted, or a piece left (blasted).
+    if (Math.abs(tilt - lastTilt) > 0.01 || live.length !== lastLive) live.forEach((b) => wake(b, 'world'));
+    lastTilt = tilt; lastLive = live.length;
+
+    // Forces, and what steers itself.
     for (const b of live) {
-      if (b === held) continue;
+      if (b === held || b.asleep) continue;
       if (b.walker) { // steer: walk on whatever he stands on (a little air control), jump from it
         b.jumpWait = Math.max(0, b.jumpWait - dt);
         if (walkCmd.kick) { b.vx = walkCmd.kick; walkCmd.kick = 0; } // a flinch: straight away, air or not
@@ -420,121 +500,161 @@
       }
       b.vy += GRAVITY * dt;
       if (!b.walker) b.vx += tilt * TILT_PUSH * GRAVITY * dt; // (the walker gets his from Living Robot)
-      b.x += b.vx * dt; b.y += b.vy * dt; b.a += b.va * dt;
-      b.support = false; b.onFloor = false;
     }
     for (const b of live) if (b.jelly) stepJelly(b, dt); // (held ones too: they wobble in your hand)
     if (held) { // follow the pointer
-      // The pointer moves once per frame; spread that move evenly over the frame's substeps. (Taking it
-      // all in the first substep made the held piece momentarily 3× faster than the hand, and that spike
-      // was handed up through any stack resting on it until the top flew off.) Its speed is also capped
-      // for the collisions it causes.
+      // The pointer moves once per frame; spread that move evenly over the frame's substeps (all of it at once
+      // made the held piece momentarily 3× faster than the hand). Its speed is capped for what it hits.
       const b = held;
-      const nx = pointer.x - b.grabX, ny = pointer.y - b.grabY;
-      const mx = (nx - b.x) / stepsLeft, my = (ny - b.y) / stepsLeft;
+      const mx = (pointer.x - b.grabX - b.x) / stepsLeft, my = (pointer.y - b.grabY - b.y) / stepsLeft;
       b.x += mx; b.y += my;
       b.vx = mx / dt; b.vy = my / dt;
       const sp = Math.hypot(b.vx, b.vy);
       if (sp > HELD_MAX_SPEED) { b.vx *= HELD_MAX_SPEED / sp; b.vy *= HELD_MAX_SPEED / sp; }
-      b.va *= 0.9;
+      b.va *= 0.9; b.a += b.va * dt;
     }
-    // Bottom-most first, so support spreads up the pile in one pass.
-    const order = live.slice().sort((p, q) => q.y - p.y);
-    // (each piece's half-size: its angle and squash don't change in here, so once, not once per pair per
-    // pass: with the Rainbow Rave's letters there are a lot of pieces, and that was most of a frame)
-    const ext = order.map(extents);
+
+    // Contacts. Broad phase: the boxes' bounds, sorted by left edge.
+    const shapes = live.map(shapeOf);
+    const bounds = shapes.map((S) => { const ex = radius(S, 1, 0), ey = radius(S, 0, 1); return [S.x - ex, S.x + ex, S.y - ey, S.y + ey, S]; });
+    bounds.sort((p, q) => p[0] - q[0]);
+    const contacts = [];
+    for (const b of live) { b.support = false; b.touch = false; }
+    const vel = (b, px, py) => [b.vx - b.va * (py - b.y), b.vy + b.va * (px - b.x)];
+    const add = (A, B, nx, ny, pts, world) => {
+      // a sleeper hit hard enough, or touched by the hand's piece, wakes up
+      const vA = A ? [A.vx, A.vy] : [0, 0], vB = [B.vx, B.vy];
+      const rv = (vB[0] - vA[0]) * nx + (vB[1] - vA[1]) * ny;
+      if (A && (A.asleep || B.asleep) && (Math.abs(rv) > WAKE_V || A === held || B === held)) { wake(A, A.walker || B.walker ? 'walker' : 'hit'); wake(B, A.walker || B.walker ? 'walker' : 'hit'); }
+      // what holds what up: the box above the other (or the floor) along this normal
+      if (ny < -0.5) B.support = true; else if (A && ny > 0.5) A.support = true;
+      B.touch = true; if (A) A.touch = true;
+      contacts.push({ A, B, nx, ny, pts, world });
+    };
+    for (let i = 0; i < bounds.length; i++) {
+      const [, ar, at, ab, SA] = bounds[i];
+      for (let j = i + 1; j < bounds.length && bounds[j][0] <= ar; j++) {
+        const [, , bt, bb, SB] = bounds[j];
+        if (bt > ab || bb < at) continue;
+        const A = SA.b, B = SB.b;
+        if (A === held && B === held) continue;
+        if ((A.asleep || A === held) && (B.asleep || B === held) && !(A === held || B === held)) {
+          // two sleepers: nothing to solve, but they still hold each other up
+          const m = collide(SA, SB);
+          if (m) { A.touch = B.touch = true; if (m.ny < -0.5) B.support = true; else if (m.ny > 0.5) A.support = true; }
+          continue;
+        }
+        const m = collide(SA, SB);
+        if (m) add(A, B, m.nx, m.ny, m.pts, false);
+      }
+      // the floor and the sides (contacts from the world, A = null, normal into the piece)
+      const B = SA.b;
+      if (B === held) continue;
+      const cs = corners(SA), floor = [], left = [], right = [];
+      for (const [x, y] of cs) {
+        if (y > H) floor.push([x, y, y - H]);
+        if (x < 0) left.push([x, y, -x]);
+        if (x > W) right.push([x, y, x - W]);
+      }
+      if (floor.length) add(null, B, 0, -1, floor, 'floor');
+      if (left.length) add(null, B, 1, 0, left, 'side');
+      if (right.length) add(null, B, -1, 0, right, 'side');
+    }
+    // Sleepers left without anything holding them up wake and fall.
+    for (const b of live) if (b.asleep && !b.touch) wake(b, 'unsupported');
+
+    // Solve: prepare each contact point, then push and rub until it settles.
+    const inv = new Map();
+    const invOf = (b) => {
+      if (!b) return [0, 0];
+      let v = inv.get(b);
+      if (!v) {
+        const fixed = b === held || b.asleep;
+        const [hw, hh] = half(b);
+        v = [fixed ? 0 : 1 / b.m, fixed || b.walker ? 0 : 3 / (b.m * (hw * hw + hh * hh))]; // a box about its middle: m (w² + h²) / 12
+        inv.set(b, v);
+      }
+      return v;
+    };
+    const points = [];
+    for (const k of contacts) {
+      const { A, B, nx, ny } = k;
+      const [ma, ia] = invOf(A), [mb, ib] = invOf(B);
+      if (!ma && !ia && !mb && !ib) continue;
+      const tx = -ny, ty = nx;
+      const mu = (A?.walker || B.walker) ? 0 // the walker steers himself: his steps don't shove what he's on
+        : k.world === 'floor' ? MU_FLOOR * (1 - 0.7 * Math.abs(tilt)) : k.world ? MU_FLOOR : MU;
+      for (const [px, py, depth] of k.pts) {
+        const rax = A ? px - A.x : 0, ray = A ? py - A.y : 0, rbx = px - B.x, rby = py - B.y;
+        const rna = cross(rax, ray, nx, ny), rnb = cross(rbx, rby, nx, ny);
+        const rta = cross(rax, ray, tx, ty), rtb = cross(rbx, rby, tx, ty);
+        const nMass = 1 / (ma + mb + ia * rna * rna + ib * rnb * rnb);
+        const tMass = 1 / (ma + mb + ia * rta * rta + ib * rtb * rtb);
+        const [vax, vay] = A ? vel(A, px, py) : [0, 0], [vbx, vby] = vel(B, px, py);
+        const vn = (vbx - vax) * nx + (vby - vay) * ny;
+        const e = vn < -BOUNCE_MIN ? (k.world ? BOUNCE_FLOOR : BOUNCE_BODY) : 0;
+        const bias = -e * vn; // (overlap is put right afterwards, by moving, not by speed: see below)
+        // a hit squashes a jelly: flatter from above or below, taller from the side (its share of the hit)
+        if (vn < -30 && k.pts[0][0] === px) {
+          const flat = Math.abs(ny) > 0.7 ? -1 : 1;
+          if (A?.jelly) squish(A, flat * -vn * ma / (ma + mb || 1));
+          if (B.jelly) squish(B, flat * -vn * mb / (ma + mb || 1));
+        }
+        const key = keyOf(A, B, px, py), was = cache.get(key);
+        points.push({ A, B, nx, ny, tx, ty, rax, ray, rbx, rby, ma, ia, mb, ib, nMass, tMass, bias, mu, depth, key,
+          pn: was ? was[0] * WARM : 0, pt: was ? was[1] * WARM : 0 });
+      }
+    }
+    const push = (p, jx, jy) => {
+      const { A, B } = p;
+      if (A) { A.vx -= jx * p.ma; A.vy -= jy * p.ma; A.va -= cross(p.rax, p.ray, jx, jy) * p.ia; }
+      B.vx += jx * p.mb; B.vy += jy * p.mb; B.va += cross(p.rbx, p.rby, jx, jy) * p.ib;
+    };
+    for (const p of points) if (p.pn || p.pt) push(p, p.pn * p.nx + p.pt * p.tx, p.pn * p.ny + p.pt * p.ty); // warm start
     for (let it = 0; it < ITERS; it++) {
-      // Walls and floor. A piece on the floor, or resting on one that is, is "grounded": it
-      // doesn't get pushed down by what lands on it, so heavy pieces can't sink a pile.
-      for (let k = 0; k < order.length; k++) {
-        const b = order[k], { hw, hh } = ext[k];
-        const lock = b === held;
-        b.grounded = lock;
-        if (b.y + hh >= H - 0.5) {
-          b.y = H - hh;
-          if (!lock && b.vy > 0) { if (it === 0) squish(b, -b.vy); b.vy = b.vy > 120 ? -b.vy * BOUNCE_FLOOR : 0; b.vx *= 1 - FRICTION; }
-          // a jelly growing taller pushes off the floor (its bottom can't go down, so its middle goes up)
-          if (!lock && b.jelly && b.ry > 0 && b.vy > -b.ry) b.vy = -b.ry;
-          b.support = true; b.grounded = true; b.onFloor = true;
-        }
-        if (b.x - hw < 0) { b.x = hw; if (!lock && b.vx < 0) b.vx = -b.vx * BOUNCE_FLOOR; }
-        if (b.x + hw > W) { b.x = W - hw; if (!lock && b.vx > 0) b.vx = -b.vx * BOUNCE_FLOOR; }
-      }
-      // Pieces against each other (boxes around the rotated pieces).
-      for (let i = 0; i < order.length; i++) {
-        const A = order[i], ea = ext[i];
-        for (let j = i + 1; j < order.length; j++) {
-          const B = order[j], eb = ext[j];
-          const dx = B.x - A.x, dy = B.y - A.y;
-          const px = ea.hw + eb.hw - Math.abs(dx), py = ea.hh + eb.hh - Math.abs(dy);
-          if (px <= 0 || py <= 0) continue;
-          const ia = A === held ? 0 : 1 / A.m, ib = B === held ? 0 : 1 / B.m;
-          if (!ia && !ib) continue;
-          let share = ia / (ia + ib);
-          if (py < px) { // vertical contact
-            const s = dy > 0 ? 1 : -1; // +1: B below A
-            const lower = s > 0 ? B : A, upper = s > 0 ? A : B;
-            // A piece resting on the grounded pile acts as solid ground for what lands on it, for the
-            // push apart AND the velocity: if the bounce were shared by mass, a heavy piece (the walker)
-            // on a light one would hand nearly all of it to the light one, keep its own downward speed,
-            // and build it up for as long as it stands there, then plummet off the next edge.
-            let na = ia, nb = ib;
-            if (lower.grounded && upper !== held) {
-              share = s > 0 ? 1 : 0; upper.grounded = true;
-              if (lower === A) na = 0; else nb = 0;
-            }
-            A.y -= s * py * share; B.y += s * py * (1 - share);
-            // (the facing sides' speeds: a jelly's sides move as it wobbles, see JELLY_K)
-            const rel = (B.vy - A.vy) * s - (A.ry || 0) - (B.ry || 0);
-            if (rel < 0) {
-              // no bounce off a held piece or off the settled pile: a stack pushed from below moves as one,
-              // instead of each level bouncing the next a little harder
-              const e = -rel > 150 && A !== held && B !== held && !lower.grounded ? BOUNCE_BODY : 0;
-              const jn = -(1 + e) * rel / (na + nb);
-              A.vy -= s * jn * na; B.vy += s * jn * nb;
-              // a hit from above or below flattens a jelly (by its own mass: one in the settled pile, which
-              // doesn't move, still feels what lands on it)
-              squish(A, -jn * ia); squish(B, -jn * ib);
-              // Friction. Something moving on top of the settled pile slows down against it, but doesn't
-              // drag the pile along (in reality the pile's own, heavier contacts below hold it still).
-              // The walker steers himself: his feet grip, and his steps don't shove what he stands on.
-              if (!A.walker && !B.walker) {
-                let fa = ia, fb = ib;
-                if (lower.grounded && upper !== held) { if (lower === A) fa = 0; else fb = 0; }
-                if (fa || fb) {
-                  const rt = B.vx - A.vx, jt = rt * FRICTION / (fa + fb);
-                  A.vx += jt * fa; B.vx -= jt * fb;
-                }
-              }
-            }
-            if (s > 0) A.support = true; else B.support = true;
-          } else { // sideways contact
-            const s = dx > 0 ? 1 : -1;
-            A.x -= s * px * share; B.x += s * px * (1 - share);
-            const rel = (B.vx - A.vx) * s - (A.rx || 0) - (B.rx || 0);
-            if (rel < 0) {
-              const jn = -(1 + (A === held || B === held ? 0 : BOUNCE_BODY)) * rel / (ia + ib);
-              A.vx -= s * jn * ia; B.vx += s * jn * ib;
-              squish(A, jn * ia); squish(B, jn * ib); // a hit from the side makes a jelly taller and thinner
-            }
-          }
-        }
+      for (const p of points) {
+        const { A, B } = p;
+        const vax = A ? A.vx - A.va * p.ray : 0, vay = A ? A.vy + A.va * p.rax : 0;
+        const dvx = B.vx - B.va * p.rby - vax, dvy = B.vy + B.va * p.rbx - vay;
+        // along the normal: no pulling, only pushing apart
+        const vn = dvx * p.nx + dvy * p.ny;
+        let j = p.nMass * (p.bias - vn);
+        const pn = Math.max(0, p.pn + j); j = pn - p.pn; p.pn = pn;
+        push(p, j * p.nx, j * p.ny);
+        // along the surface: friction, at most mu × the push
+        const vax2 = A ? A.vx - A.va * p.ray : 0, vay2 = A ? A.vy + A.va * p.rax : 0;
+        const vt = (B.vx - B.va * p.rby - vax2) * p.tx + (B.vy + B.va * p.rbx - vay2) * p.ty;
+        const max = p.mu * p.pn;
+        let jt = -p.tMass * vt;
+        const pt = Math.max(-max, Math.min(max, p.pt + jt)); jt = pt - p.pt; p.pt = pt;
+        push(p, jt * p.tx, jt * p.ty);
       }
     }
+
+    cache = new Map(points.map((p) => [p.key, [p.pn, p.pt]]));
+
+    // Move, and put to sleep what has come to rest.
     for (const b of live) {
       if (b.walker) { b.a = 0; b.va = 0; b.supported = b.support; } // stays upright
-      if (b === held || b.walker) continue;
-      if (b.onFloor) { // sliding friction against the floor: a shoved piece slows to a stop, not ice-skates
-        const dv = FLOOR_FRICTION * (1 - 0.7 * Math.abs(tilt)) * GRAVITY * dt;
-        b.vx = Math.abs(b.vx) <= dv ? 0 : b.vx - Math.sign(b.vx) * dv;
-      }
-      if (b.support) {
-        // Resting pieces settle flat (any side down) and stop spinning; rolling feeds the tilt.
-        b.va = b.va * 0.7 + b.vx * 0.0006;
-        b.a += (nearestQuarter(b.a) - b.a) * Math.min(1, 12 * dt);
-        if (Math.abs(b.vx) < 4 && Math.abs(tilt) < 0.15) b.vx = 0;
-      }
+      if (b === held || b.asleep) continue;
+      b.va = Math.max(-SPIN_MAX, Math.min(SPIN_MAX, b.va));
+      b.x += b.vx * dt; b.y += b.vy * dt; b.a += b.va * dt;
       b.vx *= 0.999; b.va *= 0.995;
+    }
+    // Overlap put right by moving the pieces apart (their share by mass), not by giving them speed, which
+    // would feed a pile energy and keep it twitching.
+    for (const p of points) {
+      const over = p.depth - SLOP;
+      if (over <= 0 || !(p.ma + p.mb)) continue;
+      const k = CORRECT * over / (p.ma + p.mb);
+      if (p.A) { p.A.x -= p.nx * k * p.ma; p.A.y -= p.ny * k * p.ma; }
+      p.B.x += p.nx * k * p.mb; p.B.y += p.ny * k * p.mb;
+    }
+    for (const b of live) {
+      if (b === held || b.asleep || b.walker) continue; // (he's never still for long, and Living Robot steers him)
+      const quiet = b.touch && Math.hypot(b.vx, b.vy) < SLEEP_V && Math.abs(b.va) < SLEEP_W;
+      b.still = quiet ? (b.still || 0) + dt : 0;
+      if (b.still > SLEEP_T) { b.asleep = true; b.vx = 0; b.vy = 0; b.va = 0; }
     }
   };
 
@@ -560,6 +680,7 @@
     const now = performance.now();
     if (now - (b.hoverAt || 0) < 300) return;
     b.hoverAt = now;
+    wake(b); // (its wobble pushes on what it touches)
     b.uv -= 5.5; // ≈ the 1.18 × 0.82 of the hover animation at its widest
   }, true);
 
@@ -602,7 +723,7 @@
             vx: w.vx, vy: w.vy, supported: !!w.supported, held: w === held } }));
         }
       }
-    } catch (e) { window.trif?.warn(String(e)); finish(); return; }
+    } catch (e) { if (window.__gm) window.__gm.err = String(e && e.stack || e); window.trif?.warn(String(e)); finish(); return; }
     raf = requestAnimationFrame(frame);
   };
 
@@ -626,7 +747,7 @@
     updateMap();
     [pointer.x, pointer.y] = toFlat(e.clientX, e.clientY);
     b.grabX = pointer.x - b.x; b.grabY = pointer.y - b.y;
-    held = b; el.setAttribute('data-gm-held', '');
+    wake(b); held = b; el.setAttribute('data-gm-held', '');
   }, true);
   const trail = []; // recent pointer positions (on the card), for the throw's speed
   addEventListener('pointermove', (e) => {
@@ -645,6 +766,7 @@
     // Throw with the pointer's speed over its last ~100 ms (a still pointer just drops it).
     const first = trail[0], lastP = trail[trail.length - 1];
     const span = first && lastP ? (performance.now() - first.t) / 1000 : 0;
+    wake(b);
     if (span > 0.005) { b.vx = (lastP.x - first.x) / span; b.vy = (lastP.y - first.y) / span; } else { b.vx = 0; b.vy = 0; }
     trail.length = 0;
     const sp = Math.hypot(b.vx, b.vy), max = 4000; // cap a twitchy flick

@@ -257,43 +257,72 @@ is enforced, for everyone:
 
 The manifest asks for no sites at install: `"optional_host_permissions": ["<all_urls>"]`, no
 `host_permissions`. So the install prompt says nothing about websites, and the browser gives TRIF a site
-only when the user allows it ("site access" in `extension/lib.js`):
+only when the user connects it ("site access" in `extension/lib.js`):
 
-- **Asking.** A site needs `*://<site>/*` and `*://*.<site>/*` (`siteOrigins`). The panel's Fix button
-  (and the power button, and the robot in the bar) call `chrome.permissions.request` for them from the
-  click itself, before anything else (Chrome needs a user gesture; Firefox allows nothing awaited before
-  it); for a site TRIF has already, the browser says yes without asking. Declined: `TRIF needs your OK to
-  work on <site>, so it stays off there.`, and no `site.set` is sent. `site.set` with `on` checks again
-  (`permissions.getAll`) and refuses a site without access with the same words, so a site never counts as
-  on without it.
-- **Which sites count.** The sites TRIF works on are `sitesOn` ∩ access (`activeSites`), and everything
-  above (mods, the runtime, recording, page commands, `tabs`, the in-page guard, `agent.start`, `status`'s
-  `sitesOff`) goes by them. A site in `sitesOn` without access: page commands get `TRIF is on for <site>,
-  but <browser> doesn't give it access to that site …`, `agent.start` gets `TRIF needs your OK to work on
-  <site>: allow it first`. `status` and the panel's status carry `noAccess` (those sites; `trif status`
-  prints them as "not allowed"), and the panel's status `siteAccess` (false in Safari).
-- **Taken back.** The user can remove a site (or everything) in the browser's extension settings.
-  `permissions.onAdded`/`onRemoved` re-read the access, re-sync the mods and stop runs on sites that lost it.
-  The site stays in `sitesOn`, so allowing it again brings it back as it was.
-- **Off gives it back.** `site.set` off removes the site's origins (`permissions.remove`), so TRIF holds
-  only the sites it's on for.
-- **Start sites.** The sites setup turns on (`applyStartSites`, no click) start without access. The setup
-  page's step "Allow TRIF on its sites" asks for all of `noAccess` in one prompt ("Allow these sites"), or
-  "Not now" turns them off (`site.set` off each). The panel on such a site shows the gate with `TRIF needs
-  your OK to work on <site>.` and `Allow TRIF on <site>`.
+- **A site's state** (`siteState`, the same words in the panel and in what agents are told, `siteRefusal`):
+  - **on**: in `sitesOn`, with access. TRIF works there.
+  - **off**: with access, not in `sitesOn` (the power button, the robot in the bar). Turning it on again
+    doesn't ask the browser anything: a quick before and after. Agents get `TRIF is off on <site>: …`.
+  - **disconnected**: no access, and TRIF has been connected to it or was set up for it (`sitesOn`, the
+    start sites in `sitesOffered`, or chrome.storage.local **`sitesConnected`**, the sites it has had
+    access to: named in `permissions.getAll()` or on with access). Agents get `TRIF is disconnected from
+    <site>: … until the user connects it …`; `agent.start`, `TRIF is disconnected from <site>: connect it first`.
+  - **new**: no access, never connected (a first visit). Shown and refused like off.
+  - **never**: on the user's never list (below), whatever the access.
+- **Which sites count.** The sites TRIF works on are `sitesOn` ∩ access − `neverSites` (`onSites()` in
+  background.js), and everything (mods, the runtime, recording, page commands, `tabs`, the in-page guard,
+  `agent.start`, `status`'s `sitesOff`) goes by them. `status` and the panel's status carry `sitesOn`,
+  `disconnected` (the known sites without access), `neverSites` and `access` (`{all, allUrls, origins}`), and
+  the panel's status `siteAccess` (false in Safari). `trif status` prints `disconnected`, `never` and, with
+  every site, `access`.
+- **Connecting.** The panel's button on a new or disconnected site (`Fix <site>`, `Connect to <site>`, or
+  the power button / robot) calls `chrome.permissions.request` for `*://<site>/*` and `*://*.<site>/*`
+  (`siteOrigins`) from the click itself, before anything else (Chrome needs a user gesture; Firefox allows
+  nothing awaited before it), then `site.set` on. On an off site it has access, so it doesn't ask. Declined:
+  `TRIF needs your OK to work on <site>, so it stays off there.` `site.set` on checks again and refuses a
+  site without access with the same words.
+- **Disconnecting.** `{type: "site.disconnect", site, tab}` (the quiet "Disconnect from <site>" link on an
+  off site): out of `sitesOn`, runs there stopped, `permissions.remove` of its origins. Refused with every
+  site (Chrome can't take one site out of `<all_urls>`; the panel doesn't offer it then) and in Safari.
+- **Taken back** in the browser's settings: `permissions.onAdded`/`onRemoved` re-read the access, re-sync
+  the mods and stop runs on sites that lost it. The site stays in `sitesOn`, so connecting it brings it back
+  as it was.
+- **Start sites.** The sites setup turns on (`applyStartSites`, no click) start disconnected. The setup
+  page's step "Allow TRIF on its sites" asks for all of them in one prompt ("Allow these sites"), or for
+  every site ("Allow TRIF on every site"), or "Not now" turns them off (`site.set` off each), leaving them
+  disconnected.
+- **Every site.** "Allow TRIF on every site" (setup page, or the panel's Settings → Sites) requests
+  `<all_urls>`; sites still follow their switch, but turning one on never asks. "Limit TRIF to the sites
+  it's on" (Settings) goes back (`limitToSitesOn`): Firefox requests the origins of `sitesOn` and only then
+  removes `<all_urls>` (it keeps origins granted on top of `<all_urls>`; checked in Firefox 159, where a no
+  changes nothing); Chrome removes `<all_urls>` first, then requests them in the same click (Chrome asks
+  again for origins `<all_urls>` covers, and whether it keeps them after could not be checked; the click
+  still counts after the remove, checked in Chrome 156), so a no there leaves those sites disconnected.
+- **The never list**, chrome.storage.local **`neverSites`** (registrable domains, like `sitesOn`): TRIF's own
+  way to keep off a site whatever access it has (with `<all_urls>` Chrome can't take one site away).
+  `{type: "site.never", site, never: bool, tab}` from the panel only (its settings' "Never on <site>", the
+  quiet link on an off, new or disconnected site, a Remove per site in Settings, "Take it off the list" on
+  the gate). Adding: out of `sitesOn`, runs stopped, the site's own origins given back, mods re-synced.
+  Then nothing of TRIF's runs there or reads it: `<site> is on TRIF's never list: …` for page commands and
+  screenshots, `<site> is on TRIF's never list` for `agent.start`, and `site.set` on is refused (`… take it
+  off the list first.`). Nothing in the CLI or the protocol changes the list (only the user, in the panel);
+  `trif status` shows it.
+- **The browser's own blocked sites** (Chrome's "Don't allow extensions on these sites") don't show in
+  `chrome.permissions`: `contains` still says yes there (checked in Chrome 156), so TRIF can't tell; the
+  browser refuses TRIF's injections there.
 - **Updating from `<all_urls>` required.** Chrome and Firefox keep a granted permission when an update moves
   it from required to optional (Chromium bounds the stored active permissions by required ∪ optional,
   `PermissionsManager::GetBoundedExtensionDesiredPermissions`; Firefox migrates them, its
   `test_ext_permissions_migrate.js`; checked in Chrome for Testing 156 by loading a build with
   `host_permissions: ["<all_urls>"]`, then the same profile with it optional: `permissions.getAll()` still
-  has `<all_urls>`). So for those users every site has access and nothing changes; `site.set` off doesn't
-  remove anything (`<all_urls>` covers it, and Chrome can't take one site out of it).
+  has `<all_urls>`). So those users have every site; "Limit TRIF to the sites it's on" narrows it.
 - **Safari** keeps `host_permissions: ["<all_urls>"]` (it asks per site itself, whatever the manifest
-  says); TRIF doesn't ask or check there.
+  says); TRIF doesn't ask or check there, and no site is disconnected. The never list works there too.
 - **Screenshots.** A site's own access isn't enough for `captureVisibleTab` (Chrome wants `<all_urls>` or
-  `activeTab`) or Firefox's `captureTab` (`<all_urls>`). So the manifest has `activeTab`, and in Chrome the
-  toolbar button opens the side panel from `action.onClicked` (`sidePanel.open`, and `sidePanel.close` on
-  the next click in that window: the panel says which window it's in with `{type: "panel.window",
+  `activeTab`) or Firefox's `captureTab` (`<all_urls>`, and only in pages loaded while TRIF had it: given
+  later, the background gets it when Firefox starts again). So the manifest has `activeTab`, and in Chrome
+  the toolbar button opens the side panel from `action.onClicked` (`sidePanel.open`, and `sidePanel.close`
+  on the next click in that window: the panel says which window it's in with `{type: "panel.window",
   windowId}`) instead of `openPanelOnActionClick`, because only then does the click give TRIF `activeTab`
   on that tab. Without `<all_urls>`, `screenshot` captures only the tab in front, after that click; a tab
   that isn't showing, `full` and `copy` are an error that says so (see `screenshot`).

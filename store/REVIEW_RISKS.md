@@ -80,9 +80,11 @@ Mitigations:
 ## 4. Permission scope: optional `<all_urls>`, `tabs`, `scripting`, `activeTab` (medium-low)
 
 - Sites are asked for one at a time, from a click in the side panel (`chrome.permissions.request` for
-  `*://<site>/*` and `*://*.<site>/*`), and given back when the user turns the site off. `<all_urls>` is
-  only listed as optional, the upper bound of what may be requested; TRIF never requests it itself. Say
-  so if asked: it's the reason the optional entry is that wide (mods can be for any site the user picks).
+  `*://<site>/*` and `*://*.<site>/*`), and given back with "Disconnect" (the power button's off keeps it,
+  for a quick before and after). `<all_urls>` is requested only when the user picks "Allow TRIF on every
+  site" (setup page or panel settings, with a line saying Chrome will say it can read and change all data
+  on all websites), and "Limit TRIF to the sites it's on" gives it back. Say so if asked: mods can be for
+  any site the user picks, hence the wide optional entry. A never list keeps TRIF off chosen sites.
   Users who installed while `<all_urls>` was required keep it (Chrome keeps a granted permission that
   moves to optional); that isn't something new users get.
 - **`tabs` is needed now.** Without host access, Chrome hides `tab.url` and `tab.title` of sites TRIF

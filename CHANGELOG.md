@@ -6,10 +6,14 @@ needs a section here for the version it releases.
 
 ## Unreleased
 
-- **TRIF only gets the websites you turn it on for.** Installing it used to give it "all your data on all
+- **TRIF only gets the websites you connect it to.** Installing it used to give it "all your data on all
   websites". Now it asks for none: turning TRIF on for a site in the side panel is when your browser asks
-  you to allow that site, and turning the site off gives it back. The setup page asks once for the sites
-  TRIF's own mods are for. Already using TRIF? Nothing changes for you: it keeps the access it had.
+  you to allow that site. The setup page asks once for the sites TRIF's own mods are for, or lets you allow
+  every site, so you're never asked again. Already using TRIF? Nothing changes for you: it keeps the access
+  it had.
+- Turning the robot off on a site keeps that access, so it comes back on at once. **Disconnect** gives a
+  site's access back; **Never on** a site keeps TRIF away from it whatever access it has (listed in
+  Settings → Sites, where you can also limit TRIF to the sites it's on).
 - With only the sites you allowed, your agent's screenshots are of the tab you're on, after you click the
   TRIF toolbar button there (Chrome and Firefox want that, or access to every site, before an extension
   can capture a tab).

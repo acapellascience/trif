@@ -30,6 +30,12 @@
 
   const css = document.createElement('style');
   css.textContent = `
+    /* (the per-frame custom properties don't pass down to the thousands of elements inside what they're set
+       on: changing an inherited one every frame restyled every post's whole contents, every frame) */
+    @property --tss-y { syntax: '<length>'; inherits: false; initial-value: 0px; }
+    @property --tss-tl-ct { syntax: '<length>'; inherits: false; initial-value: 0px; }
+    @property --tss-tl-cb { syntax: '<length>'; inherits: false; initial-value: 0px; }
+    @property --tss-dmg { syntax: '<number>'; inherits: false; initial-value: 0; }
     [data-tss-dead] { visibility: hidden !important; } /* blasted words, bombed pieces, the destroyed robot */
     /* robot hit flash, on its parts: the <svg>'s own animation slot is Living robot's waddle and hop */
     svg.robot.tss-hurt > * { animation: tss-hurt 110ms ease-out; }
@@ -52,6 +58,8 @@
     #tss-hud .tss-lives-cv { position: absolute; pointer-events: none; } /* (see drawLives) */
     #tss-glow, #tss-glow-z { position: fixed; inset: 0; width: 100vw; height: 100vh; pointer-events: none;
       mix-blend-mode: plus-lighter; z-index: 2147483647; }
+    #tss-glow-z { inset: auto; left: 0; top: 0; width: 0; height: 0; } /* (the title's size and place: see paintGlow) */
+    #tss-glow[data-tss-empty] { display: none !important; }
     #tss-glow { z-index: 2147483645; }
     html:not([data-tss-on]) :is(#tss-glow, #tss-glow-z), html:not([data-tss-rave]) :is(#tss-glow, #tss-glow-z) { display: none !important; } #tss-hud .tss-g-btns { height: var(--tss-btns-h, 40px); }
     /* X: the title: big, in the game's font, cyan into pink like the ship's glow and stripes */
@@ -1356,25 +1364,39 @@
   // left part (its health) is coloured, the rest grey. Full: all green. Hit: the colour goes through
   // yellow to red as it shrinks to the left, until only a red sliver is left at the start. It glows in
   // its colour. It flies there from the post when the avatar comes out (half a second).
+  // (Drawn once into its own little canvas whenever its health changes, and stamped from there each frame:
+  // glowing text (a shadowBlur), redrawn every frame for every avatar, cost a third of the frame in the
+  // boss fight.)
+  const HB_PAD = 14; // (room for the glow and the edge)
   const drawHealthBar = (c, r) => {
     const health = Math.max(0.04, 1 - c.hits / c.maxHp); // (the last hit leaves a sliver: then it pops)
     const text = c.handle || '@?';
-    ctx.save();
-    ctx.font = c.tag.font;
-    ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-    const w = ctx.measureText(text).width;
+    const dpr = devicePixelRatio || 1;
+    const key = `${text}|${c.tag.font}|${health}|${dpr}`;
+    if (c.hb?.key !== key) {
+      const cv = c.hb?.cv || document.createElement('canvas'), g = cv.getContext('2d');
+      g.font = c.tag.font;
+      const w = g.measureText(text).width, size = parseFloat(/(\d+(?:\.\d+)?)px/.exec(c.tag.font)?.[1]) || 15;
+      const cw = Math.ceil(w + 2 * HB_PAD), ch = Math.ceil(size * 1.6 + 2 * HB_PAD);
+      cv.width = Math.ceil(cw * dpr); cv.height = Math.ceil(ch * dpr);
+      g.setTransform(dpr, 0, 0, dpr, 0, 0);
+      g.font = c.tag.font;
+      g.textAlign = 'center'; g.textBaseline = 'middle';
+      const x = cw / 2, y = ch / 2;
+      const col = `hsl(${Math.round(120 * Math.min(1, (health - 0.04) / 0.96))}, 95%, 52%)`;
+      const grad = g.createLinearGradient(x - w / 2, 0, x + w / 2, 0);
+      grad.addColorStop(0, col); grad.addColorStop(health, col);
+      grad.addColorStop(Math.min(1, health + 0.001), '#8b8f96'); grad.addColorStop(1, '#8b8f96');
+      g.lineWidth = 3; g.strokeStyle = 'rgba(0, 0, 0, 0.55)'; // (a dark edge: readable over anything)
+      g.strokeText(text, x, y);
+      g.shadowColor = col; g.shadowBlur = 10; // the glow
+      g.fillStyle = grad;
+      g.fillText(text, x, y);
+      c.hb = { key, cv, cw, ch };
+    }
     const k = Math.min(1, (performance.now() - c.born) / 500), e = 1 - Math.pow(1 - k, 3); // fly-out
     const x = c.tag.x + (c.x - c.tag.x) * e, y = c.tag.y + (c.y - r - 14 - c.tag.y) * e;
-    const col = `hsl(${Math.round(120 * Math.min(1, (health - 0.04) / 0.96))}, 95%, 52%)`;
-    const g = ctx.createLinearGradient(x - w / 2, 0, x + w / 2, 0);
-    g.addColorStop(0, col); g.addColorStop(health, col);
-    g.addColorStop(Math.min(1, health + 0.001), '#8b8f96'); g.addColorStop(1, '#8b8f96');
-    ctx.lineWidth = 3; ctx.strokeStyle = 'rgba(0, 0, 0, 0.55)'; // (a dark edge: readable over anything)
-    ctx.strokeText(text, x, y);
-    ctx.shadowColor = col; ctx.shadowBlur = 10; // the glow
-    ctx.fillStyle = g;
-    ctx.fillText(text, x, y);
-    ctx.restore();
+    ctx.drawImage(c.hb.cv, x - c.hb.cw / 2, y - c.hb.ch / 2, c.hb.cw, c.hb.ch);
   };
 
   // --- The win: "You won the timeline!" and "Play again?" assemble in the middle of the screen, letter by
@@ -1504,18 +1526,42 @@
 
   // The "ROBOT DESTROYED" banner can't be hit until its letters have finished coming in (see showBanner).
   // X: @handles on posts can't be shot (they're the avatars' health bars, see wakeAvatar): shots pass through.
-  const shielded = (w) => !!w.closest('#tss-banner:not([data-tss-ready])')
-    || (w.textContent.startsWith('@') && !!w.closest('[data-testid=User-Name]'));
+  // (whether a word is an @handle never changes: remembered, as this is asked for every word, every frame)
+  const handles = new WeakMap();
+  const isHandle = (w) => {
+    let h = handles.get(w);
+    if (h === undefined) { h = w.textContent.startsWith('@') && !!w.closest('[data-testid=User-Name]'); handles.set(w, h); }
+    return h;
+  };
+  const shielded = (w) => (!!banner && !banner.hasAttribute('data-tss-ready') && banner.contains(w)) || isHandle(w);
+  // The live words' boxes, measured once a frame (frame clears it before the lasers move): every laser
+  // checks three points a frame, and measuring every word for each of them was most of a frame's time.
+  // (Nothing a hit does in a frame moves a word: blasted things are only hidden.)
+  let wordBoxes = null;
+  const liveWordBoxes = () => {
+    if (!wordBoxes) {
+      wordBoxes = [];
+      for (const w of document.querySelectorAll('.tss-w:not([data-tss-dead])')) {
+        if (shielded(w)) continue;
+        const r = w.getBoundingClientRect();
+        if (!r.width && !r.height) continue;
+        wordBoxes.push({ w, l: r.left, t: r.top, r: r.right, b: r.bottom,
+          clipped: !!tl && (r.top < tlBand.top || r.bottom > tlBand.bottom) && tl.contains(w) }); // X: clipped away (Timeline mode)
+      }
+    }
+    return wordBoxes;
+  };
   const hitWord = (x, y) => {
+    // (a word can only be under the point if its box is: no box there, no word, without asking the page)
+    const boxes = liveWordBoxes();
+    if (!boxes.some((b) => x >= b.l && x <= b.r && y >= b.t && y <= b.b && !b.w.hasAttribute('data-tss-dead'))) return null;
     for (const el of document.elementsFromPoint(x, y)) {
       if (el.classList?.contains('tss-w') && !el.hasAttribute('data-tss-dead') && !shielded(el)) return el;
     }
     // elementsFromPoint skips pointer-events:none text: fall back to rects
-    for (const w of document.querySelectorAll('.tss-w:not([data-tss-dead])')) {
-      if (shielded(w)) continue;
-      const r = w.getBoundingClientRect();
-      if (tl && (r.top < tlBand.top || r.bottom > tlBand.bottom) && tl.contains(w)) continue; // X: clipped away (Timeline mode)
-      if (x >= r.left && x <= r.right && y >= r.top && y <= r.bottom) return w;
+    for (const b of boxes) {
+      if (b.clipped || b.w.hasAttribute('data-tss-dead')) continue;
+      if (x >= b.l && x <= b.r && y >= b.t && y <= b.b) return b.w;
     }
     return null;
   };
@@ -1998,17 +2044,17 @@
       if (p.t >= 1) { pulses.splice(i, 1); continue; }
       // races out wide and fades fast: most of its light is gone by halfway
       const e = 1 - Math.pow(1 - p.t, 3), r = 30 + e * 230, fade = Math.pow(1 - p.t, 2.2);
-      for (let k = 0; k < 3; k++) { // three bands of the rainbow, each a soft halo plus a bright core
-        const h = (p.hue + k * 50) % 360, rr = r + k * 5;
-        ctx.shadowColor = `hsl(${h}, 100%, 60%)`;
-        ctx.shadowBlur = 22;
-        ctx.strokeStyle = `hsla(${h}, 100%, 60%, ${(fade * 0.35).toFixed(3)})`;
-        ctx.lineWidth = 12 * fade + 3;
-        ctx.beginPath(); ctx.arc(cx, cy, rr, 0, Math.PI * 2); ctx.stroke();
-        ctx.shadowBlur = 8;
-        ctx.strokeStyle = `hsla(${h}, 100%, 78%, ${(fade * 0.9).toFixed(3)})`;
-        ctx.lineWidth = 2.5 * fade + 1;
-        ctx.beginPath(); ctx.arc(cx, cy, rr, 0, Math.PI * 2); ctx.stroke();
+      // Three bands of the rainbow, each a soft halo plus a bright core. The softness is wide, faint strokes
+      // under narrower, brighter ones (added up: 'lighter'), not shadowBlur: a blur this big on a
+      // full-window canvas took X down to about 30 frames a second while the music played (timsrobot.com's
+      // fix for the same rings).
+      for (let k = 0; k < 3; k++) {
+        const h = (p.hue + k * 50) % 360, rr = r + k * 5, w = 12 * fade + 3;
+        for (const [lw, light, a] of [[w + 40, 60, 0.05], [w + 22, 60, 0.09], [w, 60, 0.35], [w * 0.45 + 6, 70, 0.3], [2.5 * fade + 1, 78, 0.9]]) {
+          ctx.strokeStyle = `hsla(${h}, 100%, ${light}%, ${(fade * a).toFixed(3)})`;
+          ctx.lineWidth = lw;
+          ctx.beginPath(); ctx.arc(cx, cy, rr, 0, Math.PI * 2); ctx.stroke();
+        }
       }
     }
     ctx.restore();
@@ -2342,12 +2388,18 @@
     tlBand.top = Math.max(top, 0); tlBand.bottom = H;
     const axis = (tlBand.top + tlBand.bottom) / 2 - top; // in the list's own pixels
     const set = (el, p, v) => { if (el.style.getPropertyValue(p) !== v) el.style.setProperty(p, v); };
-    set(tl, '--tss-tl-ct', `${Math.max(0, tlBand.top - top).toFixed(1)}px`);
-    set(tl, '--tss-tl-cb', `${Math.max(0, top + h - tlBand.bottom).toFixed(1)}px`);
+    // (every post measured first, then every post moved: a write between two reads made the browser
+    // recompute the page's styles for the next read, once per post, every frame)
+    const moves = [];
     for (const c of tl.children) {
       const n = parseFloat(/translateY\((-?[\d.]+)px\)/.exec(c.style.transform)?.[1]);
       if (!Number.isFinite(n)) continue; // (not placed by X the usual way: left alone)
-      set(c, '--tss-y', `${(2 * axis - n - c.offsetHeight).toFixed(1)}px`);
+      moves.push([c, `${(2 * axis - n - c.offsetHeight).toFixed(1)}px`]);
+    }
+    set(tl, '--tss-tl-ct', `${Math.max(0, tlBand.top - top).toFixed(1)}px`);
+    set(tl, '--tss-tl-cb', `${Math.max(0, top + h - tlBand.bottom).toFixed(1)}px`);
+    for (const [c, y] of moves) {
+      set(c, '--tss-y', y);
       if (!c.hasAttribute('data-tss-y')) c.setAttribute('data-tss-y', '');
     }
   };
@@ -2621,27 +2673,51 @@
   };
   const glowQueue = []; // the end screens' letters this frame: [ch, font, size, x, y, hue, alpha, rot, scale]
   const glowFonts = new WeakMap();
+  // (Both glow layers used to be window-sized canvases, cleared and redrawn every frame: two more
+  // full-window layers for the GPU to blend (plus-lighter) every frame, which alone cost a quarter of the
+  // frame rate while playing. Now #tss-glow is only drawn while it has letters, and hidden otherwise, and
+  // #tss-glow-z is only as big as the title and its glow.)
+  let glowDrawn = false; // (anything on glowCv)
+  const zBox = { l: 0, t: 0, r: 0, b: 0 }; // where glowZ is, in window pixels
   const paintGlow = () => {
-    for (const cv of [glowCv, glowZ]) {
-      if (cv.width !== canvas.width || cv.height !== canvas.height) { cv.width = canvas.width; cv.height = canvas.height; }
-      if (cv.style.translate !== canvas.style.translate) cv.style.translate = canvas.style.translate; // (see pin)
-    }
-    for (const g of [glowG, glowZG]) { g.setTransform(1, 0, 0, 1, 0, 0); g.clearRect(0, 0, glowCv.width, glowCv.height); }
+    const dpr = devicePixelRatio || 1;
+    for (const cv of [glowCv, glowZ]) if (cv.style.translate !== canvas.style.translate) cv.style.translate = canvas.style.translate; // (see pin)
     const queued = glowQueue.splice(0);
-    if (!root.hasAttribute('data-tss-rave')) return;
-    for (const [ch, font, size, x, y, hue, alpha, rot, scale] of queued) glowText(glowG, ch, font, size, x, y, hue, alpha, 1.5, 1, rot, scale);
+    const rave = root.hasAttribute('data-tss-rave');
+    // the end screens' letters
+    const letters = rave && queued.length > 0;
+    if (letters || glowDrawn) {
+      if (glowCv.width !== canvas.width || glowCv.height !== canvas.height) { glowCv.width = canvas.width; glowCv.height = canvas.height; }
+      glowG.setTransform(1, 0, 0, 1, 0, 0); glowG.clearRect(0, 0, glowCv.width, glowCv.height);
+      glowDrawn = false;
+    }
+    if (letters) { for (const [ch, font, size, x, y, hue, alpha, rot, scale] of queued) glowText(glowG, ch, font, size, x, y, hue, alpha, 1.5, 1, rot, scale); glowDrawn = true; }
+    glowCv.toggleAttribute('data-tss-empty', !glowDrawn);
+    if (!rave) return;
     // The title: where its letters would be without the beat's zoom (about the window's centre, as
     // Rainbow Rave does it), since the zoom is applied to this layer too.
     const hr = hud.getBoundingClientRect(), z = hud.offsetHeight && hr.height ? hr.height / hud.offsetHeight : 1;
     const zx = innerWidth / 2, zy = innerHeight / 2;
+    const title = [];
+    let l = Infinity, t = Infinity, r = -Infinity, b = -Infinity;
     for (const el of hud.querySelectorAll('.tss-tch')) {
-      const r = el.getBoundingClientRect();
-      if (!r.width) continue;
+      const rc = el.getBoundingClientRect();
+      if (!rc.width) continue;
       let f = glowFonts.get(el);
       if (!f) { const cs = getComputedStyle(el); f = { size: parseFloat(cs.fontSize) || 24, font: `${cs.fontStyle} ${cs.fontWeight} ${cs.fontSize} ${cs.fontFamily}` }; glowFonts.set(el, f); }
-      const x = zx + (r.left + r.width / 2 - zx) / z, y = zy + (r.top + r.height / 2 - zy) / z;
-      glowText(glowZG, el.textContent, f.font, f.size, x, y, parseFloat(el.style.getPropertyValue('--h')) || 0, 1, 1, 0.6);
+      const x = zx + (rc.left + rc.width / 2 - zx) / z, y = zy + (rc.top + rc.height / 2 - zy) / z;
+      const pad = f.size * 1.3; // (the letter and all of its glow)
+      l = Math.min(l, x - pad); r = Math.max(r, x + pad); t = Math.min(t, y - pad); b = Math.max(b, y + pad);
+      title.push([el, f, x, y]);
     }
+    if (!title.length) { glowZG.setTransform(1, 0, 0, 1, 0, 0); glowZG.clearRect(0, 0, glowZ.width, glowZ.height); return; }
+    if (l < zBox.l || t < zBox.t || r > zBox.r || b > zBox.b) { // (moved: the layer follows, with room to spare for the letters' wave)
+      Object.assign(zBox, { l: Math.floor(l - 16), t: Math.floor(t - 16), r: Math.ceil(r + 16), b: Math.ceil(b + 16) });
+      glowZ.width = Math.round((zBox.r - zBox.l) * dpr); glowZ.height = Math.round((zBox.b - zBox.t) * dpr);
+      Object.assign(glowZ.style, { left: `${zBox.l}px`, top: `${zBox.t}px`, width: `${zBox.r - zBox.l}px`, height: `${zBox.b - zBox.t}px` });
+    }
+    glowZG.setTransform(1, 0, 0, 1, 0, 0); glowZG.clearRect(0, 0, glowZ.width, glowZ.height);
+    for (const [el, f, x, y] of title) glowText(glowZG, el.textContent, f.font, f.size, x - zBox.l, y - zBox.t, parseFloat(el.style.getPropertyValue('--h')) || 0, 1, 1, 0.6);
   };
   // Rainbow Rave's look for the end screens (timsrobot.com's rainbow "ROBOT DESTROYED"): each letter its
   // own hue, a step around the wheel from the last, all of them rolling round it every 2.4 s, with a
@@ -2655,6 +2731,26 @@
   };
   const raveBob = (i, now) => 5 * Math.sin((now / 1000 - i * 0.09) * Math.PI / 1.1);
 
+  // A laser bolt: a pink capsule with a white core, glowing pink. Every bolt looks the same, so it's drawn
+  // once (with its glow, a shadowBlur) into a little canvas and stamped from there: a blurred shadow per
+  // bolt per frame was a fifth of the frame while firing.
+  let laserSprite = null;
+  const LASER_PAD = 16; // (room for the glow: shadowBlur 18 device pixels is about 14px)
+  const drawLaser = (l) => {
+    const dpr = devicePixelRatio || 1;
+    if (laserSprite?.dpr !== dpr) {
+      const cv = document.createElement('canvas'), g = cv.getContext('2d');
+      cv.width = Math.ceil((10 + 2 * LASER_PAD) * dpr); cv.height = Math.ceil((34 + 2 * LASER_PAD) * dpr);
+      g.setTransform(dpr, 0, 0, dpr, LASER_PAD * dpr, LASER_PAD * dpr);
+      g.shadowColor = '#f0f'; g.shadowBlur = 18;
+      g.fillStyle = '#ff6bf0';
+      g.beginPath(); g.roundRect(0, 0, 10, 34, 5); g.fill();
+      g.fillStyle = '#fff';
+      g.beginPath(); g.roundRect(3, 3, 4, 28, 2); g.fill();
+      laserSprite = { cv, dpr };
+    }
+    ctx.drawImage(laserSprite.cv, l.x - 5 - LASER_PAD, l.y - LASER_PAD, laserSprite.cv.width / dpr, laserSprite.cv.height / dpr);
+  };
   let prev = performance.now(), raf = 0;
   const frame = (now) => {
     raf = 0;
@@ -2723,8 +2819,8 @@
       ctx.setTransform(dpr, 0, 0, dpr, shakeX * dpr, shakeY * dpr); // X: the game layer shakes with the timeline
       pin();
 
+      wordBoxes = null; // (measured again this frame, if a laser needs them: see hitWord)
       ctx.save();
-      ctx.shadowColor = '#f0f'; ctx.shadowBlur = 18;
       const rr = lasers.length ? robotRect() : null;
       for (let i = lasers.length - 1; i >= 0; i--) {
         const l = lasers[i];
@@ -2743,10 +2839,7 @@
         if (wl) { lasers.splice(i, 1); shootWinLetter(wl); if (winLeaving) break; continue; } // (the last letter clears the lasers)
         if (winMsg) { // (while it's up, only its letters are targets: shots pass through the page)
           if (l.y < -40) { lasers.splice(i, 1); continue; }
-          ctx.fillStyle = '#ff6bf0';
-          ctx.beginPath(); ctx.roundRect(l.x - 5, l.y, 10, 34, 5); ctx.fill();
-          ctx.fillStyle = '#fff';
-          ctx.beginPath(); ctx.roundRect(l.x - 2, l.y + 3, 4, 28, 2); ctx.fill();
+          drawLaser(l);
           continue;
         }
         // fat bolt: hit anything under its centre or either edge
@@ -2758,10 +2851,7 @@
         const box = !w && !media && l.y > 0 && !gravityOn() ? hitBox(l.x, l.y, now) : null;
         if (box) explodeBox(box);
         if (w || media || box || l.y < -40) { lasers.splice(i, 1); continue; }
-        ctx.fillStyle = '#ff6bf0';
-        ctx.beginPath(); ctx.roundRect(l.x - 5, l.y, 10, 34, 5); ctx.fill();
-        ctx.fillStyle = '#fff';
-        ctx.beginPath(); ctx.roundRect(l.x - 2, l.y + 3, 4, 28, 2); ctx.fill();
+        drawLaser(l);
       }
       ctx.restore();
 

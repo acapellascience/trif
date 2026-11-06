@@ -1065,7 +1065,11 @@ to load), `request_max_retries = 1`, `stream_max_retries = 1`. Not `--oss --loca
 0.166 `exec --oss` fails ("This chat uses ollama, but your current provider is openai") unless
 `model_provider` is set as well, and it **pulls** a model that isn't installed (`POST /api/pull`, many GB,
 mid-chat). (No `web_search` here: `codex.js` turns OpenAI's hosted tool off for every run, and other
-providers don't have it.)
+providers don't have it.) Codex knows only OpenAI's models, so for an open model it neither compacts a long
+chat nor limits the answer, and a long chat failed with "maximum context length": runs add
+`-c model_context_window=<window>` and `-c model_auto_compact_token_limit=<40% of it, at least 8192>`, the
+window from OpenRouter's public model list (`/api/v1/models` `context_length`, looked up once per helper),
+else 65536.
 
 - **Providers** (`PROVIDERS`): `ollama` (`http://127.0.0.1:11434/v1`, default model `gpt-oss:20b`),
   `lmstudio` (`http://127.0.0.1:1234/v1`, `openai/gpt-oss-20b`), `openrouter`

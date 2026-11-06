@@ -881,3 +881,25 @@ test('real Codex + stand-in model: model requests get through (the key proxy add
   assert.equal(d2.sessionId, done.sessionId);
   await waitFor(() => srv.requests.length > before);
 });
+
+test('a model\'s context window: from OpenRouter\'s list, else a cautious default; Codex compacts the chat at 40% of it', async () => {
+  const list = { data: [{ id: 'moonshotai/kimi-k2.7-code', context_length: 262144 }, { id: 'tiny/model', context_length: 8000 }] };
+  const fetchImpl = async (url) => {
+    assert.equal(url, 'https://openrouter.ai/api/v1/models');
+    return { ok: true, json: async () => list };
+  };
+  assert.equal(await oss.contextWindow({ provider: 'openrouter', model: 'moonshotai/kimi-k2.7-code' }, { fetchImpl }), 262144);
+  assert.equal(await oss.contextWindow({ provider: 'openrouter', model: 'not/listed-model' }, { fetchImpl }), 65536);
+  assert.equal(await oss.contextWindow({ provider: 'openrouter', model: 'down/model' }, { fetchImpl: async () => { throw new Error('offline'); } }), 65536);
+  assert.equal(await oss.contextWindow({ provider: 'ollama', model: 'qwen3-coder:30b' }, { fetchImpl: () => assert.fail('no lookup for local models') }), 65536);
+  const om = oss.resolve({ provider: 'openrouter' }, null, 'moonshotai/kimi-k2.7-code');
+  const args = oss.providerArgs({ ...om, contextWindow: 262144 });
+  assert.ok(args.includes('model_context_window=262144'));
+  assert.ok(args.includes(`model_auto_compact_token_limit=${Math.floor(262144 * 0.4)}`));
+  // (a tiny window still leaves Codex something to work with)
+  assert.ok(oss.providerArgs({ ...om, contextWindow: 8000 }).includes('model_auto_compact_token_limit=8192'));
+  assert.ok(!oss.providerArgs(om).some((a) => /model_context_window/.test(a)), 'unknown: nothing said');
+  // The provider's error, when a chat is too long anyway, in the user's terms.
+  const raw = '{"error":{"message":"Provider returned error","code":400,"metadata":{"raw":"{\\"error\\":{\\"code\\":400,\\"message\\":\\"This model\'s maximum context length is 262144 tokens. However, you requested 126417 output tokens and your prompt contains 148903 input tokens"}}"}}}';
+  assert.equal(oss.friendlyFor(om)(raw), 'This chat has grown longer than moonshotai/kimi-k2.7-code can hold. Start a new chat (the + button) and say what you were working on.');
+});

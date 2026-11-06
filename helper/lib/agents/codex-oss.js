@@ -67,6 +67,27 @@ const OPENROUTER_MODELS = [
 
 const MAX_MODEL = 200;
 
+// How much the model can hold. Codex knows only OpenAI's models ("Model metadata for … not found"), so for an
+// open model it never compacts a long chat, and the provider fills in a big answer size of its own: a long
+// chat then fails with "maximum context length" (seen: 149K tokens in, 126K asked for out, 262K window).
+// TRIF tells Codex the window (model_context_window) and has it compact the chat once it reaches
+// COMPACT_SHARE of it (model_auto_compact_token_limit), leaving the rest for the answer. OpenRouter publishes
+// each model's window; elsewhere, or when that list can't be had, DEFAULT_WINDOW.
+const DEFAULT_WINDOW = 65536, COMPACT_SHARE = 0.4, MIN_COMPACT = 8192;
+const windows = new Map(); // OpenRouter model id -> context length (this helper's lifetime)
+async function contextWindow(om, { fetchImpl = globalThis.fetch } = {}) {
+  if (om.provider !== 'openrouter') return DEFAULT_WINDOW;
+  if (!windows.has(om.model)) {
+    try {
+      const list = await getJson('https://openrouter.ai/api/v1/models', { timeout: 4000, fetchImpl });
+      for (const m of Array.isArray(list && list.data) ? list.data : []) {
+        if (m && typeof m.id === 'string' && Number.isFinite(m.context_length) && m.context_length > 0) windows.set(m.id, m.context_length);
+      }
+    } catch { /* offline, or the list moved: the default */ }
+  }
+  return windows.get(om.model) || DEFAULT_WINDOW;
+}
+
 function cleanUrl(u) {
   if (typeof u !== 'string' || !u.trim()) return '';
   try {
@@ -179,6 +200,11 @@ function providerArgs(om) {
   if (om.server) fields.push('stream_idle_timeout_ms = 900000', 'request_max_retries = 1', 'stream_max_retries = 1');
   // (No web search: codex.js turns OpenAI's hosted tool off for every run; no other provider has it anyway.)
   const args = ['-c', `model_providers.${PROVIDER_ID}={ ${fields.join(', ')} }`, '-c', `model_provider="${PROVIDER_ID}"`];
+  // How much it holds, and when to compact the chat (see DEFAULT_WINDOW)
+  if (Number.isFinite(om.contextWindow) && om.contextWindow > 0) {
+    args.push('-c', `model_context_window=${om.contextWindow}`,
+      '-c', `model_auto_compact_token_limit=${Math.max(MIN_COMPACT, Math.floor(om.contextWindow * COMPACT_SHARE))}`);
+  }
   // (shell_environment_policy.exclude, keeping API key variables a shell profile still exports from the
   // commands: codex.js adds it to every Codex run.)
   return args;
@@ -200,6 +226,9 @@ function friendlyFor(om) {
       return om.keyAccount ? `${om.name} wants an API key (401): ${keyHelp(om)}` : `${om.name} wants an API key (401)`;
     }
     if (/\b402\b|insufficient (credits|balance|funds)|payment required/i.test(m)) return `${om.name} says the account is out of credit (402)`;
+    if (/maximum context length|context[_ ]length[_ ]exceeded|context window|reduce the length of the (input|prompt)/i.test(m)) {
+      return `This chat has grown longer than ${om.model} can hold. Start a new chat (the + button) and say what you were working on.`;
+    }
     if (/not found, try pulling|model .*not found|\b404\b.*model|no such model/i.test(m)) {
       return om.provider === 'ollama' ? `${om.model} isn't installed in Ollama: run \`ollama pull ${om.model}\` in a terminal` : `${om.name} doesn't have the model ${om.model}: pick another in Settings (${oneLine(m, 160)})`;
     }
@@ -268,7 +297,7 @@ const adapter = {
   note: '',
   missing: 'Open models run through Codex, which isn\'t installed or can\'t be found. Install it (brew install codex), ' +
     'then run `trif setup` in the same terminal so the helper finds it. (No OpenAI account needed for open models.)',
-  PROVIDERS, RECOMMENDED_LOCAL, OPENROUTER_MODELS, EXCLUDED_VARS, normalize, resolve, keyAccount, modelNote, insecureKey, providerArgs, parseModelList, orderLocal, friendlyFor, installedModels, isLoopback, localModel,
+  PROVIDERS, RECOMMENDED_LOCAL, OPENROUTER_MODELS, EXCLUDED_VARS, normalize, resolve, keyAccount, modelNote, insecureKey, providerArgs, contextWindow, parseModelList, orderLocal, friendlyFor, installedModels, isLoopback, localModel,
 
   detect(opts) {
     const d = codex.detect(opts);
@@ -334,6 +363,7 @@ const adapter = {
       const onStatus = (status) => { if (status === 401 && !said && logger) { said = true; logger.warn(`open model: ${om.name} refused the API key (401)`); } };
       try { proxy = await startKeyProxy({ target: om.baseUrl, key, logger, onStatus }); } catch (e) { throw new Error(`couldn't start the key proxy for ${om.name}: ${e.message}`); }
     }
+    om.contextWindow = await contextWindow(om, { fetchImpl });
     const forCodex = proxy ? { ...om, proxyUrl: proxy.url } : om;
     return {
       env: {}, unsetEnv: [...PASSED_KEYS], secrets,

@@ -1,10 +1,10 @@
 {
-  "version": "0.2.3",
+  "version": "0.2.4",
   "published": "2026-11-06",
-  "notes": "- **New mods, off until you switch them on:** X-Flyer flies a fighter over X (Shift+S, or the rocket\n  button) to blast the timeline; Follow status marks the people on X who follow you back; Three-Column\n  Feed lays Instagram's home feed out three posts wide.\n- The mods TRIF ships for X, Amazon, Instagram and Google are updated, with new names and short\n  descriptions. DVD Logo also finds Google's newer logo and bounces it off its real edges.\n  If you changed one, the side panel offers the new version; yours stays until you choose.\n- Plain X is now **Detox Timeline** (`x.com/detox-timeline`). If yours was unchanged, it's replaced, and it\n  stays on if it was on; if you changed it, yours stays as it is, and Detox Timeline arrives switched off.\n- Your agent now keeps mod descriptions short (4 to 9 words).\n- **A model you pick stays in that chat.** Picking a model for one site's chat used to make it the model of\n  every site you chatted on next, without saying so. Now each chat keeps its own, new chats start on the\n  agent's default, and a small line over the message box always says which agent and model this chat\n  uses (click it to change them).\n- **Open models handle long chats.** A long chat with an open model could stop with a \"maximum context\n  length\" error. TRIF now tells it how much the model holds, so the chat gets summarized well before it\n  outgrows it; and if a chat ever does, you're told to start a new one instead of seeing the raw error.",
+  "notes": "- **TRIF installs with `npx timsrobot setup`.** npm wouldn't take the name \"trif\", so the package is\n  called timsrobot (after timsrobot.com). Once it's installed you still type `trif`, as before.",
   "package": {
-    "url": "https://github.com/acapellascience/trif/releases/download/v0.2.3/trif-0.2.3.tgz",
-    "sha256": "a5fdf1f9281824431b85462f137e11920442723b37273b02af0ec4dc7c31502a",
-    "size": 478689
+    "url": "https://github.com/acapellascience/trif/releases/download/v0.2.4/timsrobot-0.2.4.tgz",
+    "sha256": "de1ee771900af850c645d2922a858fe01ac104cfb10db6b87c5f18568bc53ec9",
+    "size": 478725
   }
 }

@@ -26,6 +26,11 @@
           "version": "0.2.3",
           "update_link": "https://github.com/acapellascience/trif/releases/download/v0.2.3/trif-firefox-0.2.3.xpi",
           "update_hash": "sha256:6ee7759c0f63a43739ad90ba272e1ce3c4c046381652bb95b04122c7467cb3da"
+        },
+        {
+          "version": "0.2.4",
+          "update_link": "https://github.com/acapellascience/trif/releases/download/v0.2.4/trif-firefox-0.2.4.xpi",
+          "update_hash": "sha256:d8ff369be837bbd83ad93348486b3abca9ed60b02878b3e4283cfc8f7e842b38"
         }
       ]
     }

@@ -138,7 +138,7 @@ logs it and exits (the extension reconnects to a fresh one) instead of misreadin
 
 | message | meaning |
 |---|---|
-| `{type:"mods", mods:[Mod…], sitesOn:[site…], defaultOrder}` | The full set of mods, and the sites setup said to start on (`preinstalled.json`; each browser turns each on once, see "Sites TRIF is on for"). Sent on connect and after every change in the mods folder (debounced 150 ms). The extension makes `chrome.userScripts` match it exactly (register new, update changed, unregister missing). Over 1 MB it goes in parts, or (before the hello says the extension can take them) waits for the hello. |
+| `{type:"mods", mods:[Mod…], sitesOn:[site…], defaultOrder}` | The full set of mods, and the sites setup said to start on (`preinstalled.json`; each browser turns each on once, see "Sites TRIF is on for"). Sent on connect and after every change in the mods folder (debounced 150 ms). The extension makes `chrome.userScripts` match it exactly (register new, update changed, unregister missing). To an extension whose hello lists `modsSame`, a mod with the same id and hash as in the last set sent to it goes without `code`, marked `same: true`; the extension takes the code from the copy it has (`fillSameMods` in lib.js), or, if it hasn't one with that hash, applies nothing and sends `modsResend`. Every mod goes whole in the first set after each hello and after a `modsResend`. Over 1 MB it goes in parts, or (before the hello says the extension can take them) waits for the hello. |
 | `{type:"modsPart", set, i, n, data}` | Part `i` of `n` (0-based, in order) of a `mods` message too big for one native message: `data` is a slice of its JSON text, each part under 1 MB as sent. `set` (`"<pid>-<k>"`) names the set. The extension joins the parts and applies the set only when the last is in, all at once, as if it had come whole (`ModsParts` in lib.js). A new set's first part, or a whole `mods` message, drops an unfinished one. A part missing, out of order or malformed, or joined text that doesn't parse, drops that set (the rest of its parts are ignored), logs an error and sends `modsResend`; the last whole set stays applied. |
 | `{type:"request", id, cmd, args}` | A page command from the CLI (table below). The extension answers with a `response`. |
 | `{type:"update", update:Summary}` | What the helper knows about updates (see "Updates"), after the extension's hello, after each check and while installing. The panel shows it. |
@@ -149,12 +149,49 @@ logs it and exits (the extension reconnects to a fresh one) instead of misreadin
 (`file` is the absolute path; `hash` is a sha1 of code+metadata so the extension can skip unchanged mods;
 `update`: a newer version of this shipped mod is waiting, see "Updates to shipped mods".)
 
+The extension keeps the mods it last had in `chrome.storage.local`, one per key: **`mod:<id>`** = the Mod,
+and **`modIds`** = their ids in order, so it can apply them before the helper connects. Only the mods that
+changed are written (0.2.4 and older kept them all in one key, `mods`, rewritten on every change; it's read
+until the first write and then removed).
+
+### How big mods can be
+
+A mod can be up to **4 MB** of code, and all mods together up to **16 MB** (`MAX_MOD_BYTES` and
+`MAX_MODS_BYTES` in helper/lib/mods.js). A mod over 4 MB isn't sent to the browser; if the rest are over
+16 MB together, the largest are left out until they fit. Either way the helper logs an error naming the mod,
+`trif status` shows it as NOT SENT with the reason, `trif mods` lists it under errors, and `trif doctor`
+fails it with what to do (`limit` in the error: `mod`, `total`, or `extension` for an extension from before
+sets could go in parts, which takes 1 MB in all).
+
+Why those numbers (measured with tests/e2e/measure-big-mods.js, headless, on an M-series Mac with 16 GB;
+memory is the footprint of all the browser's processes; Firefox's baseline is about 600 MB, Chrome's 440):
+
+- A 48 MB set (33 mods, 49 parts) once took headless Firefox 159 to 7.4 GB and the Mac ran out of memory.
+  Not the size itself: the extension checked the user scripts switch with `chrome.userScripts.getScripts()`
+  for every message from the helper, and `trif status` and every sync called it too. That hands back every
+  script with all its code, so each part of a set made a copy of the whole set, and Firefox's parent process
+  collects such copies (strings and structured-clone buffers) late: with 2 MB of mods, 188 MB of strings and
+  131 MB of structured-clone buffers sat in the parent, 2-3 times the 1 MB figures (+214 MB at the peak for
+  1 MB, +417 MB for 2 MB). After "Minimize memory usage" in about:memory it was back to the baseline:
+  garbage, not a leak, but made faster than Firefox frees it, and in proportion to parts × size. Now the
+  switch is checked with `getScripts({ids: [an id never registered]})`, `trif status` and syncs go by what
+  the last sync registered (`known` in syncUserScripts), a change sends only the changed mods' code
+  (`modsSame`) and writes only those to storage.
+- Now, with 16 MB (four 4 MB mods): registering them costs Firefox about +170 MB, a page load with them
+  +200 MB; eight changes to a 4 MB mod in a row, 2.5 s apart, peak at 1.2 GB in all (parent process 550
+  MB) and settle about 1.0-1.1 GB, back to the baseline once garbage is collected. 16 MB of code (functions,
+  compiled on each page load) peaks at 1.3 GB. Chrome 156: 16 MB peaks at 640-660 MB in all, and changes
+  in a row stay under 500 MB.
+- Each change to a mod still passes its code through the browser several times (native messaging, the
+  extension, storage, `userScripts.update`, every renderer), and Firefox frees those copies late, so the
+  cost of a change grows with the mod's size: 4 MB a mod keeps that a few hundred MB at worst.
+
 **extension → helper**
 
 | message | meaning |
 |---|---|
-| `{type:"hello", version, userScripts: bool, chrome: "<version>", browser, installId, features:[…]}` | Sent on connect. `userScripts` is false when the "Allow User Scripts" switch is off. `features`: what this extension can do beyond 0.2.4's protocol, so the helper doesn't have to go by the version: `modsParts` (takes `modsPart`). No `features` means 0.2.4 or older. |
-| `{type:"modsResend", reason}` | A set in parts didn't arrive whole (`reason` says how). The helper logs it and sends the set again, once per set; if that fails too, the next change or reconnect sends it again. |
+| `{type:"hello", version, userScripts: bool, chrome: "<version>", browser, installId, features:[…]}` | Sent on connect. `userScripts` is false when the "Allow User Scripts" switch is off. `features`: what this extension can do beyond 0.2.4's protocol, so the helper doesn't have to go by the version: `modsParts` (takes `modsPart`), `modsSame` (takes mods it has without their code). No `features` means 0.2.4 or older. |
+| `{type:"modsResend", reason}` | A set in parts didn't arrive whole, or a mod sent as `same` wasn't there (`reason` says how). The helper logs it and sends the set again, every mod whole, once per set; if that fails too, the next change or reconnect sends it again (whole). |
 | `{type:"response", id, ok:true, result}` / `{type:"response", id, ok:false, error:"message"}` | Answer to a request. |
 | `{type:"modsApplied", registered:[ids], errors:[{id, error}]}` | After applying a `mods` message. |
 | `{type:"log", level, message}` | Extension-side diagnostics; the helper writes them to `helper.log` (private folder). |

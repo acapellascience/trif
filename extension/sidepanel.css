@@ -126,6 +126,7 @@ svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width:
 .gate[hidden] { display: none; }
 .gate .mod-err { margin: 0; text-align: center; }
 .gate-title { margin: 0; font-size: 15px; font-weight: 600; }
+.gate-why { margin: -6px 0 0; color: var(--muted); text-align: center; }
 .gate-icon { stroke: none; }
 .gate-icon .rim { fill: var(--switch-on); }
 .gate-icon .face { fill: #18181a; }

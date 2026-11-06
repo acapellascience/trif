@@ -1,10 +1,10 @@
 // The setup page: a checklist that ticks itself off (the helper, TRIF in this browser, user scripts, the
-// coding agent's login, then trying it), and the user's mods below (each with an on/off switch, shared
-// with the side panel). Opens by itself when TRIF is installed. Polls the service worker for status
+// browser's OK for the sites TRIF is on for, the coding agent's login, then trying it), and the user's mods
+// below (each with an on/off switch, shared with the side panel). Opens by itself when TRIF is installed. Polls the service worker for status
 // (which also re-checks the user scripts switch); the agent list and the login go over a `panel` port,
 // as in the side panel (login.js). Switches follow chrome.storage.local `disabled` live.
 
-import { modSites, offOnSite, normalizeOffSites, normalizeSettings, scopeFor, FIREFOX, SAFARI, BROWSER, PANEL, SETUP_COMMAND } from './lib.js';
+import { modSites, offOnSite, normalizeOffSites, normalizeSettings, scopeFor, originsFor, SITE_ACCESS, FIREFOX, SAFARI, BROWSER, PANEL, SETUP_COMMAND } from './lib.js';
 import { modSwitch, syncSwitches, shownEnabled, switchError, enabledIn, onSwitchChange } from './modswitch.js';
 import { createLogin } from './login.js';
 import { setMarkdown } from './markdown.js';
@@ -20,6 +20,7 @@ let settings = normalizeSettings(); // chrome.storage.local `settings`: the defa
 let agents = null;      // agent.list: {agents, default}, once the helper answers
 let openModel = null;   // agent.openModel, while the open model is the agent
 let choosing = false;   // "Use another agent" open
+let sitesAsked = null;  // 'asking' while the browser's prompt is open, 'no' after the user said no
 
 function code(text) {
   const c = document.createElement('code');
@@ -158,10 +159,15 @@ function renderSteps() {
   scripts.hidden = SAFARI;
   if (!SAFARI) steps.push({ el: scripts, done: !!s.userScripts, state: 'on' });
 
-  // 4. The coding agent, logged in.
+  // 4. The browser's OK for the sites TRIF is on for (Safari asks per site itself).
+  const sites = $('#step-sites');
+  sites.hidden = !SITE_ACCESS;
+  if (SITE_ACCESS) steps.push(sitesStep(s, connected));
+
+  // 5. The coding agent, logged in.
   steps.push(loginStep(connected));
 
-  // 5. Try it: never ticked; once the rest are, it's what's left.
+  // 6. Try it: never ticked; once the rest are, it's what's left.
   steps.push(tryStep(s));
 
   const now = steps.findIndex((x) => !x.done);
@@ -235,9 +241,46 @@ function loginStep(connected) {
   return { el: step, done: false };
 }
 
-// The sites to try it on: where a mod TRIF comes with is switched on, and TRIF is on for the site.
+// Sites setup turned TRIF on for (and any whose access was taken back) need the browser's OK, which only a
+// click can ask for: one prompt for all of them. "Not now" turns TRIF off on them instead (the panel on each
+// site can turn it on again), so nothing waits on an OK that never came.
+function sitesStep(s, connected) {
+  const step = $('#step-sites');
+  const need = s.noAccess || [];
+  if (!connected) return { el: step, done: false };
+  if (!need.length) return { el: step, done: true, state: 'done' };
+  const list = need.length === 1 ? need[0] : `${need.slice(0, -1).join(', ')} and ${need.at(-1)}`;
+  setBody(step, JSON.stringify([need, sitesAsked]), () => {
+    const row = el('div', 'row');
+    row.append(button(need.length === 1 ? `Allow ${need[0]}` : 'Allow these sites', 'primary', () => allowSites(need)),
+      button('Not now', '', () => notNow(need)));
+    return [
+      el('p', null, `TRIF is on for ${list}, and ${BROWSER} asks before it can read and change a website.`),
+      row,
+      sitesAsked === 'no' ? el('p', 'problem', `${BROWSER} didn’t get your OK, so TRIF stays off there for now.`) : null,
+      el('p', 'note', `Not now turns TRIF off on ${need.length === 1 ? 'it' : 'them'}; you can turn it on for any site later, from the ${PANEL}.`),
+    ];
+  });
+  return { el: step, done: false };
+}
+
+function allowSites(sites) {
+  // From the click itself: nothing awaited before it (Firefox's rule for permissions.request).
+  const asked = chrome.permissions.request({ origins: originsFor(sites) });
+  sitesAsked = 'asking';
+  asked.then((ok) => { sitesAsked = ok ? null : 'no'; }, () => { sitesAsked = 'no'; }).finally(() => { renderSteps(); refresh(); });
+}
+
+async function notNow(sites) {
+  sitesAsked = null;
+  for (const site of sites) await request({ type: 'site.set', site, on: false }).catch(() => {});
+  refresh();
+}
+
+// The sites to try it on: where a mod TRIF comes with is switched on, and TRIF works on the site.
 function trySites(s) {
-  const on = new Set(s.sitesOn || []);
+  const without = new Set(s.noAccess || []);
+  const on = new Set((s.sitesOn || []).filter((x) => !without.has(x)));
   const sites = [];
   for (const m of s.mods) {
     if (!['trif', 'webmods'].includes(m.source) || !isOn(m.id)) continue;

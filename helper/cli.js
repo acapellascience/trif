@@ -332,9 +332,13 @@ const handlers = {
     if ([...off].some((id) => shipsOff.has(id))) lines.push('              off (as TRIF ships it) = a mod TRIF comes with, off until switched on (trif enable <id>)');
     if (Object.keys(held).length) lines.push('              HELD = written by a side-panel agent for another site; not running until the user approves it');
     if (Object.keys(updates).length) lines.push('              update available = TRIF has a new version of a mod it ships; see trif mod-update <id>');
-    if (sitesOff.size) lines.push('              waiting = not running until the user turns TRIF on for the site (side panel)');
+    if (sitesOff.size) lines.push('              waiting = not running until the user turns TRIF on for the site, or allows it there (side panel)');
     if (st && Array.isArray(st.sitesOn)) {
       lines.push(`sites on      ${st.sitesOn.length ? st.sitesOn.join(', ') : '(none)'}; TRIF is off everywhere else: no mods, no page commands`);
+      // The browser gives TRIF a site only when the user allows it (extension/lib.js "site access").
+      if (Array.isArray(st.noAccess) && st.noAccess.length) {
+        lines.push(`not allowed   ${st.noAccess.join(', ')}: on, but the browser doesn't give TRIF access yet, so off for now; the user allows it in the side panel there`);
+      }
     }
     if (st) lines.push(`recording     ${(st.recording || []).length ? st.recording.join(', ') : '(none)'}`);
     if (st && st.page) {

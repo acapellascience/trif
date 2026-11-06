@@ -569,6 +569,83 @@ export function limitToSites(mod, sitesOn) {
   return { ...mod, matches: [...out].sort(), hash: mod.hash ? `${mod.hash}|sites:${tag}` : mod.hash };
 }
 
+// ---- site access ----------------------------------------------------------------------------
+// TRIF asks for no sites at install (the manifest's host permissions are all optional), so the browser
+// gives it a site only when the user says yes: turning TRIF on for a site in the side panel asks for that
+// site's origins (siteOrigins), from the click, which permissions.request needs. A site in `sitesOn`
+// counts only while the browser still gives TRIF access to it (activeSites): the user can take it back in
+// the browser's extension settings, and sites setup turns on (applyStartSites) start without it until the
+// setup page or the panel asks. Whoever installed TRIF when <all_urls> was required keeps it after the
+// update (Chrome and Firefox keep a granted permission that moves to optional), so for them every site
+// has access. Safari asks per site itself and its build keeps <all_urls> (scripts/build-extension.js), so
+// there TRIF doesn't ask or check.
+
+export const SITE_ACCESS = !SAFARI;
+
+/** The origins a site (a registrable domain) needs: the domain and its subdomains, http and https. */
+export function siteOrigins(site) {
+  return [`*://${site}/*`, `*://*.${site}/*`];
+}
+
+export function originsFor(sites) {
+  return [...new Set((sites || []).flatMap(siteOrigins))];
+}
+
+/**
+ * What the browser gives TRIF, from permissions.getAll(): {origins, all, allUrls}. `all`: every http(s)
+ * site (<all_urls>, *://*\/*). `allUrls`: <all_urls> itself, which Chrome's and Firefox's tab capture
+ * want (a site's own origins aren't enough for it; see screenshot.js).
+ */
+export function normalizeAccess(granted) {
+  const origins = [...new Set((Array.isArray(granted?.origins) ? granted.origins : []).filter((o) => typeof o === 'string'))].sort();
+  const allUrls = origins.includes('<all_urls>');
+  const all = allUrls || ['http', 'https'].every((scheme) => origins.some((o) => originCovers(o, scheme, '*', false)));
+  return { origins, all, allUrls };
+}
+
+/** The access when TRIF doesn't check (Safari, or a browser without chrome.permissions): everything. */
+export const ALL_ACCESS = Object.freeze({ origins: ['<all_urls>'], all: true, allUrls: true });
+
+/** What the browser gives TRIF now (ALL_ACCESS where TRIF doesn't check). */
+export async function readAccess(chromeApi, check = SITE_ACCESS) {
+  if (!check || typeof chromeApi?.permissions?.getAll !== 'function') return ALL_ACCESS;
+  return normalizeAccess(await chromeApi.permissions.getAll());
+}
+
+// Whether a granted origin pattern covers pages of `host` (any port, any path) for `scheme`; with
+// `wild`, of all its subdomains too. `host` '*' asks for every host.
+function originCovers(pattern, scheme, host, wild) {
+  const p = String(pattern).trim();
+  if (p === '<all_urls>') return true;
+  const m = /^(\*|https?):\/\/([^/]*)(\/.*)$/i.exec(p);
+  if (!m || m[3] !== '/*') return false;
+  if (m[1] !== '*' && m[1].toLowerCase() !== scheme) return false;
+  const hp = /^(.*?)(?::(\*|\d+))?$/.exec(m[2]);
+  if (hp[2] !== undefined && hp[2] !== '*') return false;
+  const g = hp[1].toLowerCase().replace(/\.$/, '');
+  if (g === '*') return true;
+  if (host === '*') return false;
+  if (g.startsWith('*.')) return hostInScope(host, g.slice(2));
+  return !wild && g === host;
+}
+
+/** Whether the browser gives TRIF all of `site` (siteOrigins, both schemes). */
+export function hasSiteAccess(access, site) {
+  if (!access || access.all) return !!access;
+  return ['http', 'https'].every((scheme) => access.origins.some((o) => originCovers(o, scheme, site, false))
+    && access.origins.some((o) => originCovers(o, scheme, site, true)));
+}
+
+/** The sites TRIF works on: on in `sitesOn`, with access. */
+export function activeSites(sitesOn, access) {
+  return (sitesOn || []).filter((s) => hasSiteAccess(access, s));
+}
+
+/** The sites in `sitesOn` the browser doesn't give TRIF (yet, or any more). */
+export function sitesWithoutAccess(sitesOn, access) {
+  return (sitesOn || []).filter((s) => !hasSiteAccess(access, s));
+}
+
 /** The side panel's "site" for a tab URL: hostname without a leading "www.", or null for pages mods can't run on. */
 export function siteForUrl(url) {
   let u;

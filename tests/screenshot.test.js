@@ -290,3 +290,29 @@ test('trif screenshot: the path on stdout, the note on stderr, --full and --copy
   const j = JSON.parse(r.stdout);
   assert.deepStrictEqual(j, { file: out, how: 'copy', full: false, note: 'this is a fresh copy of the page' });
 });
+
+test('without access to every site: only the tab in front, after the toolbar click; a clear error otherwise', async () => {
+  // Firefox's captureTab and Chrome's copy both want <all_urls>.
+  for (const plan of [
+    S.screenshotPlan({ showing: false, copy: true, allUrls: false }),
+    S.screenshotPlan({ showing: true, full: true, copy: true, allUrls: false }),
+    S.screenshotPlan({ showing: false, captureTab: true, browser: 'Firefox', allUrls: false }),
+  ]) assert.match(plan.error, /wants TRIF to have access to every site, and TRIF only has the sites the user turned it on for.*clicked the TRIF toolbar button on that tab.*`trif sweep`/);
+  assert.strictEqual(S.screenshotPlan({ showing: true, captureTab: true, browser: 'Firefox', allUrls: false }), 'visible');
+  assert.strictEqual(S.screenshotPlan({ showing: true, copy: true, allUrls: false }), 'visible');
+  // Firefox given <all_urls> after it started: no captureTab in the running background until a restart.
+  assert.match(S.screenshotPlan({ showing: false, browser: 'Firefox', copy: true }).error, /after Firefox started.*quit and reopen Firefox/);
+
+  // Chrome refuses captureVisibleTab without activeTab: the agent is told what the user can do.
+  const api = mockApi();
+  api.tabs.captureVisibleTab = async () => { throw new Error("Either the '<all_urls>' or 'activeTab' permission is required."); };
+  await assert.rejects(S.captureScreenshot(api, { id: 5, windowId: 1, active: true, url: 'https://example.com/' }, {}, { browser: 'Chrome', allUrls: false, pageCall: async () => null }),
+    /lets TRIF capture this tab only after the user clicks the TRIF toolbar button on it.*Ask the user to click the TRIF button on this tab/);
+  // After the click it works as before; and with <all_urls> nothing changes.
+  const ok = mockApi();
+  const r = await S.captureScreenshot(ok, { id: 5, windowId: 1, active: true, url: 'https://example.com/' }, {}, { browser: 'Chrome', allUrls: false, pageCall: async () => null });
+  assert.strictEqual(r.how, 'visible');
+  const ff = mockApi({ active: false, captureTab: true });
+  await assert.rejects(S.captureScreenshot(ff, { id: 5, windowId: 1, active: false, url: 'https://example.com/' }, {}, { browser: 'Firefox', allUrls: false, pageCall: async () => null }), /access to every site/);
+  assert.ok(!ff.calls.some((c) => c[0] === 'captureTab' || c[0] === 'windows.create'), 'nothing tried, no window opened');
+});

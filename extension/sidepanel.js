@@ -4,6 +4,7 @@
 // See docs/PROTOCOL.md, "Side panel and agent runs".
 
 import { siteForUrl, modAppliesTo, modSites, isMultiSite, offOnSite, normalizeOffSites, scopeFor, limitToSites, withOffSites, FIREFOX, BROWSER, SETUP_COMMAND,
+  SITE_ACCESS, siteOrigins,
   normalizeModOrder, orderMods, moveId, setModOrder,
   normalizeSettings, normalizePicks, siteSettings, withoutModel } from './lib.js';
 import { setMarkdown } from './markdown.js';
@@ -17,7 +18,7 @@ const emptyChat = () => ({ sessionId: null, agent: null, messages: [], run: null
 
 const ui = {
   dot: $('#dot'), site: $('#site'), barRobot: $('#bar-robot'), siteSwitch: $('#site-switch'), newChat: $('#new-chat'), settingsBtn: $('#settings-btn'),
-  gate: $('#gate'), gateBtn: $('#gate-btn'), gateErr: $('#gate-err'), gateNote: $('#gate-note'),
+  gate: $('#gate'), gateWhy: $('#gate-why'), gateBtn: $('#gate-btn'), gateErr: $('#gate-err'), gateNote: $('#gate-note'),
   landing: $('#landing'), landingIcon: $('#landing-icon'), landingVersion: $('#landing-version'), landingNote: $('#landing-note'),
   settings: $('#settings'), agent: $('#agent'), agentNote: $('#agent-note'), model: $('#model'),
   using: $('#using'), modelCustomRow: $('#model-custom-row'), modelCustom: $('#model-custom'), modelNote: $('#model-note'),
@@ -68,16 +69,24 @@ const EDGE_PX = 28; // how near the list's top or bottom edge it scrolls
 let port = null;
 let reqSeq = 0;
 const pending = new Map();
+// Chrome's side panel (not Safari's panel window, opened with ?window=): the background closes it on the
+// toolbar button's next click, so it says which window it's in.
+const OPENED_FOR = Number(new URLSearchParams(location.search).get('window')) || null;
 
 function connectPort() {
   port = chrome.runtime.connect({ name: 'panel' });
   port.onMessage.addListener(onPortMessage);
+  sayWindow();
   port.onDisconnect.addListener(() => {
     port = null;
     for (const p of pending.values()) p.reject(new Error('lost connection to the TRIF service worker'));
     pending.clear();
     setTimeout(() => { if (!port) connectPort(); refreshStatus(); }, 500); // the service worker restarted
   });
+}
+
+function sayWindow() {
+  if (!OPENED_FOR && view.windowId !== null) try { port?.postMessage({ type: 'panel.window', windowId: view.windowId }); } catch { /* reconnects */ }
 }
 
 function request(msg) {
@@ -161,8 +170,8 @@ function currentAgent() {
 async function init() {
   connectPort();
   // In Safari the panel is a window of its own, opened with ?window=<the window whose tabs it follows>.
-  const opener = Number(new URLSearchParams(location.search).get('window'));
-  view.windowId = opener || (await chrome.windows.getCurrent()).id;
+  view.windowId = OPENED_FOR || (await chrome.windows.getCurrent()).id;
+  sayWindow();
   const stored = await chrome.storage.local.get(['settings', 'sitePicks', 'disabled', 'offSites', 'updated', 'modOrder', 'defaultOrder', 'defaultModelsReset']);
   view.updated = stored.updated || null;
   view.settings = normalizeSettings(stored.settings);
@@ -610,8 +619,12 @@ function renderMods() {
 // grey and dim, and settings), and nothing runs or reads the site. Once on, the header's switch turns it
 // back off. The robot in the bar does what the switch does: wakes the panel, or puts it to sleep.
 // (Unknown until the first status: neither shows.)
+// A site the user turned TRIF on for also needs the browser's OK (see "site access" in lib.js): without it
+// (a site setup turned on, or access taken back in the browser's settings) it's off here too, and the gate
+// asks for it.
 const siteScope = () => (view.site ? scopeFor(view.site) : null);
-const siteIsOn = () => !!siteScope() && (view.status?.sitesOn || []).includes(siteScope());
+const siteNeedsAccess = () => !!siteScope() && (view.status?.noAccess || []).includes(siteScope());
+const siteIsOn = () => !!siteScope() && (view.status?.sitesOn || []).includes(siteScope()) && !siteNeedsAccess();
 let siteSwitching = false;
 
 function renderGate(problem, agentInfo) {
@@ -644,19 +657,32 @@ function renderGate(problem, agentInfo) {
   // The problem in one line under "The robot is off." (but not during a login started from it: its
   // notice shows there instead, renderNotice). Red: no Fix button, which couldn't work.
   renderProblemLine(ui.gateNote, gated && !(login.current && !red) ? problem : null, agentInfo);
+  const asking = gated && siteNeedsAccess();
+  ui.gateWhy.hidden = !asking;
   if (!gated) return;
+  ui.gateWhy.textContent = asking ? `TRIF needs your OK to work on ${scope}.` : '';
   ui.gateBtn.hidden = red;
-  ui.gateBtn.textContent = `Fix ${scope}`;
+  ui.gateBtn.textContent = asking ? `Allow TRIF on ${scope}` : `Fix ${scope}`;
   ui.gateBtn.disabled = siteSwitching;
 }
 
 async function setSiteOn(on) {
   if (siteSwitching || !view.site) return;
+  // On asks the browser for the site first. permissions.request must come from the click itself (Firefox
+  // allows nothing awaited before it), so it's the first thing here; for a site it has already, the browser
+  // says yes without asking.
+  const scope = siteScope();
+  const asking = on && SITE_ACCESS ? chrome.permissions.request({ origins: siteOrigins(scope) }) : null;
   siteSwitching = true;
   ui.gateErr.hidden = true;
   delete ui.siteSwitch.dataset.error;
   render();
   try {
+    if (asking && !(await asking)) {
+      ui.gateErr.textContent = `TRIF needs your OK to work on ${scope}, so it stays off there.`;
+      ui.gateErr.hidden = false;
+      return;
+    }
     await request({ type: 'site.set', site: view.site, on, tab: view.tab?.id });
     await refreshStatus();
   } catch (e) {

@@ -11,6 +11,14 @@
 //   error that says how. Safari: only a tab that's showing. The copy loads the page again with the
 //   user's cookies, so an address that looks like a one-time link is refused (unless `force`), and where
 //   the copy ended up is checked like any URL a command touches (`checkUrl`) before every capture.
+// - Without access to every site (`allUrls` false: TRIF only has the sites the user turned it on for; see
+//   "site access" in lib.js): Chrome's captureVisibleTab wants <all_urls> or activeTab, a site's own host
+//   permission isn't enough (Chromium's PermissionsData::CanCaptureVisiblePage, checked in Chrome 156), and
+//   Firefox's captureTab wants <all_urls> (its tabs.json schema; captureVisibleTab takes activeTab since
+//   Firefox 126). activeTab comes from the user clicking TRIF's toolbar button on that tab (in Chrome the
+//   button opens the panel from action.onClicked for that reason, background.js). So then only the tab in
+//   front can be captured, after that click; anything else is a clear error. Users who installed TRIF when
+//   <all_urls> was required keep it, and keep everything above.
 // Every function takes the browser API and helpers as parameters, so the tests can drive them.
 
 export const FULL_MAX_HEIGHT = 12000;   // CSS px of a full-page capture; longer pages are cut
@@ -43,9 +51,17 @@ export function copyBounds(win, screen) {
  * How to capture: 'visible' (captureVisibleTab), 'tab' (Firefox's captureTab), 'copy' (a fresh copy in
  * an unfocused window), or {error}.
  */
-export function screenshotPlan({ showing, full = false, captureTab = false, browser = 'Chrome', copy = false }) {
-  if (captureTab) return 'tab';
+export function screenshotPlan({ showing, full = false, captureTab = false, browser = 'Chrome', copy = false, allUrls = true }) {
+  if (captureTab && allUrls) return 'tab';
   if (showing && !full) return 'visible';
+  if (!allUrls) return { error: notAllSites(browser, full ? 'To capture a full page' : "To capture a tab that isn't showing") };
+  // Firefox puts captureTab in a page only if the add-on had <all_urls> when that page loaded (checked in
+  // Firefox 159: granted later, it shows up in new pages and after the add-on restarts, not in the running
+  // background). So access to every site given since Firefox started needs a restart for this.
+  if (browser === 'Firefox') {
+    return { error: 'TRIF got access to every site after Firefox started, and Firefox only lets it capture tabs in the background ' +
+      `once TRIF starts again: ask the user to quit and reopen Firefox. ${CHECK_INSTEAD}` };
+  }
   if (browser === 'Safari') {
     return { error: full
       ? "Safari can only capture the visible part of a tab (no --full)"
@@ -60,6 +76,17 @@ export function screenshotPlan({ showing, full = false, captureTab = false, brow
       'For checks, prefer `trif sweep`, `trif text` or `trif run`, which work on tabs that aren\'t showing' };
   }
   return 'copy';
+}
+
+// Without access to every site: what can still be captured, and how to check the page otherwise.
+const CHECK_INSTEAD = 'For checks, use `trif sweep`, `trif text` or `trif run`, which work on any tab of the site';
+function notAllSites(browser, what) {
+  return `${what}, ${browser} wants TRIF to have access to every site, and TRIF only has the sites the user turned it on for. ` +
+    `It can capture the tab in front once the user has clicked the TRIF toolbar button on that tab. ${CHECK_INSTEAD}`;
+}
+function needsClick(browser) {
+  return `${browser} lets TRIF capture this tab only after the user clicks the TRIF toolbar button on it (TRIF has access to the sites ` +
+    `it's on, which isn't enough for ${browser} to let it take screenshots). Ask the user to click the TRIF button on this tab, then try again. ${CHECK_INSTEAD}`;
 }
 
 /** Scroll offsets for a stitched full page: viewport-sized steps, the last one flush with the bottom. */
@@ -132,10 +159,17 @@ export async function captureScreenshot(api, tab, { full = false, copy = false, 
   const sleep = deps.sleep || sleepDefault;
   const win = await api.windows.get(tab.windowId).catch(() => null);
   const showing = !!(tab.active && win && win.state !== 'minimized');
-  const plan = screenshotPlan({ showing, full, captureTab: typeof api.tabs.captureTab === 'function', browser: deps.browser, copy });
+  const allUrls = deps.allUrls !== false;
+  const plan = screenshotPlan({ showing, full, captureTab: typeof api.tabs.captureTab === 'function', browser: deps.browser, copy, allUrls });
   if (plan.error) throw new Error(plan.error);
   if (plan === 'visible') {
-    return { dataUrl: await api.tabs.captureVisibleTab(tab.windowId, { format: 'png' }), how: 'visible', note: null, full: false };
+    let dataUrl;
+    try { dataUrl = await api.tabs.captureVisibleTab(tab.windowId, { format: 'png' }); } catch (e) {
+      // ("Either the '<all_urls>' or 'activeTab' permission is required.")
+      if (!allUrls && /activeTab|all_urls|permission/i.test(String(e?.message ?? e))) throw new Error(needsClick(deps.browser));
+      throw e;
+    }
+    return { dataUrl, how: 'visible', note: null, full: false };
   }
   if (plan === 'tab') {
     if (!full) return { dataUrl: await api.tabs.captureTab(tab.id, { format: 'png' }), how: 'tab', note: captureNote({ how: 'tab', showing }), full: false };

@@ -564,3 +564,26 @@ test('the Safari bridge exits to restart on new code only when nothing is connec
   assert.equal(shouldRestart({ ...base, runActive: () => true }), false, 'a run is going');
   assert.equal(shouldRestart({ ...base, stamp: () => 100 }), false, 'same code');
 });
+
+test('Safari bridge: a mods set over 1 MB goes through in parts, and joins back whole', async () => {
+  const { testEnv, writeMod, HOST_JS } = require('./fake-extension');
+  const home = tempDir();
+  const code = `const sound = "${crypto.randomBytes(2.25 * 1024 * 1024).toString('base64')}";`; // 3 MB, like a mod with its audio in it
+  writeMod(home, 'a.com', 'big.js', code);
+  writeMod(home, 'a.com', 'small.js', 'small()');
+  // The real helper, in a scratch home (env -i: nothing of the real one gets through).
+  const env = Object.entries(testEnv(home)).map(([k, v]) => `${k}=${v}`);
+  const b = await startBridge({ hostCommand: (origin) => ['/usr/bin/env', '-i', ...env, process.execPath, HOST_JS, origin + '/'] });
+  try {
+    const c = await wsConnect(b.port, ORIGIN);
+    c.send({ type: 'hello', version: '0.2.5', userScripts: true, chrome: '27.2', browser: 'Safari', features: ['modsParts'] });
+    const parts = await waitFor(() => {
+      const p = c.messages.filter((m) => m.type === 'modsPart');
+      return p.length && p.length === p[0].n ? p : null;
+    }, { timeout: 15000, message: 'the parts' });
+    assert.ok(parts.length >= 3, `${parts.length} parts`);
+    assert.ok(parts.every((p, i) => p.i === i && p.set === parts[0].set));
+    const msg = JSON.parse(parts.map((p) => p.data).join(''));
+    assert.deepEqual(msg.mods.map((m) => [m.id, m.code]), [['a.com/big', code], ['a.com/small', 'small()']]);
+  } finally { await b.stop(); }
+});

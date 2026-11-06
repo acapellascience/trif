@@ -4,6 +4,14 @@ What's new in each TRIF release (called WebMods before 0.2.0). The text under a 
 panel shows under "What's new", so it's written for people using TRIF. `node scripts/release.js <version>`
 needs a section here for the version it releases.
 
+## Unreleased
+
+- **Bigger mods.** A mod can now be up to 10 MB, and all your mods together up to 50 MB. Until now they
+  had to fit in 1 MB in all, and past that the biggest ones were left out: a game, or a mod with
+  its sounds or pictures in it, could use that up alone. If a mod is ever too big, `trif doctor` says which
+  one and what to do. (The helper and the browser extension both need this version; with an older
+  extension, mods still stop at 1 MB in all, and `trif doctor` says to update it.)
+
 ## 0.2.4
 
 - **TRIF installs with `npx timsrobot setup`.** npm wouldn't take the name "trif", so the package is

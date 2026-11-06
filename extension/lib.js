@@ -165,25 +165,112 @@ export async function syncUserScripts(us, { mods, runtimeCode, applied = {}, dis
     }
   };
 
+  // Several mods in one call: Chrome shares every user script with its pages again after each call, so
+  // ten 5 MB mods took 2-4 s one by one and 0.2-0.9 s in one call (Chrome 156). One bad mod fails the whole
+  // call, so then they go one at a time and only that one is reported (any the call did register, updated).
+  const registerMods = async (mods, update) => {
+    if (!mods.length) return;
+    if (mods.length > 1) {
+      try {
+        if (update) await us.update(mods.map(modToUserScript));
+        else await us.register(mods.map(modToUserScript));
+        for (const mod of mods) { next[mod.id] = mod.hash ?? null; registered.push(mod.id); }
+        return;
+      } catch { /* one at a time, below */ }
+    }
+    const there = update || mods.length === 1 ? null : new Set((await us.getScripts()).map((s) => s.id));
+    for (const mod of mods) await registerMod(mod, update || !!there?.has(mod.id));
+  };
+
   if (!runtimeOk) {
     if (existing.length) await us.unregister();
     // A mod with an invalid pattern makes the union invalid too; then the runtime goes everywhere
     // (the mod itself fails to register and is reported).
     try { await us.register([runtimeUserScript(runtimeCode, matches)]); } catch { await us.register([runtimeUserScript(runtimeCode)]); }
     next[RUNTIME_ID] = runtimeHash;
-    for (const mod of desired) await registerMod(mod, false);
+    await registerMods(desired, false);
     return { registered, errors, applied: next, reset: true };
   }
 
   next[RUNTIME_ID] = runtimeHash;
   const stale = existing.map((s) => s.id).filter((id) => id !== RUNTIME_ID && !seen.has(id));
   if (stale.length) await us.unregister({ ids: stale });
+  const fresh = [];
+  const changed = [];
   for (const mod of desired) {
-    if (!existingIds.has(mod.id)) await registerMod(mod, false);
+    if (!existingIds.has(mod.id)) fresh.push(mod);
     else if (mod.hash && applied[mod.id] === mod.hash) { next[mod.id] = mod.hash; registered.push(mod.id); }
-    else await registerMod(mod, true);
+    else changed.push(mod);
   }
+  await registerMods(changed, true);
+  await registerMods(fresh, false);
+  const order = new Map(desired.map((m, i) => [m.id, i]));
+  registered.sort((a, b) => order.get(a) - order.get(b)); // (in the mods' order, as before they were batched)
   return { registered, errors, applied: next, reset: false };
+}
+
+// ---- mods sets in parts ---------------------------------------------------------------------------
+
+/**
+ * What this extension can do beyond 0.2.4's native messaging protocol, sent in its hello so the helper
+ * never has to guess from the version: 'modsParts' takes a mods set bigger than one native message (1 MB)
+ * as {type:"modsPart"} messages (ModsParts).
+ */
+export const FEATURES = ['modsParts'];
+
+/**
+ * Joins {type:"modsPart", set, i, n, data} messages back into the {type:"mods"} message the helper cut up
+ * (helper/lib/mods.js modsParts): `data` is a slice of its JSON text, parts 0..n-1 of one `set` in order.
+ * push(part) returns {message} once the last part is in (the whole set, to apply at once), {error} when the
+ * sequence is broken (a part missing, out of order or malformed, or text that doesn't parse: the set so far
+ * is dropped, and the helper should send it again; the rest of its parts are then ignored), else {}. A new
+ * set's first part drops an unfinished older one (`superseded`: its id), as does a whole `mods` message
+ * (reset()).
+ */
+export class ModsParts {
+  constructor() {
+    this.current = null;
+    this.dropped = null; // the last set given up on: the rest of its parts are ignored, not more errors
+  }
+
+  reset() {
+    const had = this.current;
+    this.current = null;
+    if (had) this.dropped = had.set;
+    return had ? had.set : null;
+  }
+
+  push(part) {
+    const { set, i, n, data } = part || {};
+    const okSet = (typeof set === 'string' && set) || Number.isInteger(set);
+    if (!okSet || !Number.isInteger(n) || n < 1 || !Number.isInteger(i) || i < 0 || i >= n || typeof data !== 'string') {
+      const had = this.reset();
+      return { error: `a malformed part of a mods set${had !== null ? ` (dropped set ${had})` : ''}` };
+    }
+    let superseded = null;
+    if (i === 0) {
+      superseded = this.reset();
+      this.current = { set, n, parts: [] };
+    } else if (set === this.dropped && this.current?.set !== set) {
+      return {};
+    } else if (!this.current || this.current.set !== set) {
+      const had = this.reset();
+      this.dropped = set;
+      return { error: `part ${i + 1} of ${n} of mods set ${set} came without the parts before it${had !== null ? ` (dropped set ${had})` : ''}` };
+    } else if (i !== this.current.parts.length || n !== this.current.n) {
+      const had = this.current;
+      this.reset();
+      return { error: `mods set ${set}: got part ${i + 1} of ${n} after part ${had.parts.length} of ${had.n}; dropped it` };
+    }
+    this.current.parts.push(data);
+    if (this.current.parts.length < n) return superseded !== null ? { superseded } : {};
+    const text = this.current.parts.join('');
+    this.current = null;
+    let message;
+    try { message = JSON.parse(text); } catch (e) { this.dropped = set; return { error: `mods set ${set} doesn't parse (${errMsg(e)}); dropped it` }; }
+    if (!message || message.type !== 'mods' || !Array.isArray(message.mods)) { this.dropped = set; return { error: `mods set ${set} isn't a mods message; dropped it` }; }
+    return superseded !== null ? { message, superseded } : { message };
+  }
 }
 
 // ---- tabs ---------------------------------------------------------------------------------------

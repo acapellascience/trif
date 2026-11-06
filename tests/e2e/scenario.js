@@ -663,6 +663,8 @@ class Scenario {
       await this.waitPanel('the panel back on 127.0.0.1', (x) => x.site === '127.0.0.1');
     });
 
+    await r.check('mods over 1 MB in all (a 3 MB mod, 1.5 MB of code) reach the page in parts; a change goes out again; removed, they go', () => this.bigModsCheck());
+
     // ---- Detox Timeline (x.com/detox-timeline) against the X stand-in
     await r.check('Detox Timeline filters a saved X home timeline (fetch and XHR)', async () => {
       const xUrl = `https://x.com:${tlsPort}/home`;
@@ -1400,6 +1402,67 @@ class Scenario {
     if (errors.length) throw new Error(`${errors.length} error(s), ${problems.length - errors.length} warning(s):\n${lines.slice(0, 15).join('\n')}`);
     if (problems.length) return { status: 'warn', detail: `${problems.length} warning(s):\n${lines.slice(0, 15).join('\n')}` };
     return 'none';
+  }
+
+  /**
+   * A set over Chrome's and Firefox's 1 MB per native message: a 3 MB mod (a base64 literal, like a mod
+   * with its sounds in it) and 1.5 MB of functions, on the test site, which is on. Times each step from the
+   * file written to the helper's "extension registered" line, and the page load with them.
+   */
+  async bigModsCheck() {
+    const dir = path.join(this.trif, 'sites', '127.0.0.1');
+    const log = path.join(this.priv, 'helper.log');
+    const size = () => fs.statSync(log).size;
+    const since = (at) => { const b = fs.readFileSync(log); return b.subarray(at).toString('utf8'); };
+    const bigMod = (tag) => {
+      const d = crypto.randomBytes(3 * 1024 * 1024 * 3 / 4).toString('base64');
+      return `// ==WebMod==\n// @name E2E Big\n// ==/WebMod==\nconst d = "${d}";\ndocument.documentElement.dataset.trifE2eBig = "${tag}:" + d.length;\n`;
+    };
+    const fns = [];
+    for (let i = 0, n = 0; n < 1.5 * 1024 * 1024; i++) { const f = `function f${i}(a) { const x = a * ${i} + ${i % 13}; return x % 7 === 3 ? String(x) + "${crypto.randomBytes(12).toString('hex')}" : x; }\n`; fns.push(f); n += f.length; }
+    const codeMod = `// ==WebMod==\n// @name E2E Code\n// ==/WebMod==\n${fns.join('')}let s = 0;\n${fns.map((_, i) => `s += String(f${i}(${i})).length;`).join('\n')}\ndocument.documentElement.dataset.trifE2eCode = String(s);\n`;
+    const state = () => this.page(`async () => ({ big: document.documentElement.dataset.trifE2eBig || null, code: document.documentElement.dataset.trifE2eCode || null, banner: document.documentElement.dataset.trifE2e || null, nav: Math.round(performance.getEntriesByType('navigation')[0]?.domContentLoadedEventEnd || 0) })`);
+    // From the write to the extension's modsApplied (its "registered" line in the helper's log).
+    const delivered = async (what, write, pred) => {
+      const at = size();
+      const t0 = Date.now();
+      write();
+      const text = await waitFor(`the helper to send ${what} and the extension to apply it`, () => {
+        const t = since(at);
+        const sent = /sent (\d+) mod\(s\) to the extension[^\n]*?, (\d+) KB(?: in (\d+) parts)?/.exec(t);
+        return sent && pred(sent) && /extension registered \d+ mod\(s\)/.test(t.slice(sent.index)) ? t : null;
+      }, { timeoutMs: 60000, intervalMs: 50 });
+      const ms = Date.now() - t0;
+      const sent = /sent (\d+) mod\(s\) to the extension[^\n]*?, (\d+) KB(?: in (\d+) parts)?/.exec(text);
+      return { ms, kb: Number(sent[2]), parts: Number(sent[3] || 0) };
+    };
+    const reload = async (pred) => {
+      await this.ext(`async (id) => { await chrome.tabs.reload(id); }`, [this.win.tabId]);
+      return waitFor('the test page with the big mods', async () => {
+        this.pageCtx = await this.d.findPage((u) => u.startsWith(this.pageUrlPrefix), { timeoutMs: 5000 });
+        const s = await state();
+        return pred(s) ? s : null;
+      }, { timeoutMs: 60000 });
+    };
+    // (TRIF_E2E_BIG_MODS=<n>: n more 3 MB mods besides, to time a set near the cap.)
+    const more = Math.max(0, Number(process.env.TRIF_E2E_BIG_MODS) || 0);
+    const files = [path.join(dir, 'e2e-big.js'), path.join(dir, 'e2e-code.js'), ...Array.from({ length: more }, (_, i) => path.join(dir, `e2e-big-${i}.js`))];
+    try {
+      const first = await delivered('the big set', () => { fs.writeFileSync(files[0], bigMod('v1')); fs.writeFileSync(files[1], codeMod); for (const f of files.slice(2)) fs.writeFileSync(f, bigMod('more').replace('trifE2eBig', 'trifE2eMore')); }, (m) => Number(m[3]) > 1 && Number(m[2]) > 4000 + more * 3000);
+      const want = String(fns.reduce((n, f, i) => n + String(new Function(`${f}; return f${i}(${i});`)()).length, 0));
+      const p1 = await reload((s) => s.big === `v1:${3 * 1024 * 1024}` && s.code === want && s.banner === 'ran');
+      const p2 = await reload((s) => s.big === `v1:${3 * 1024 * 1024}`);
+      const change = await delivered('the changed set', () => fs.writeFileSync(files[0], bigMod('v2')), (m) => Number(m[3]) > 1);
+      await reload((s) => s.big === `v2:${3 * 1024 * 1024}`);
+      const status = (await this.cli(['status'], { json: true })).json;
+      const errs = [...(status?.helper?.modErrors || []), ...((status?.helper?.modsApplied || {}).errors || [])].filter((e) => /e2e-(big|code)/.test(e.id));
+      if (errs.length) throw new Error(`errors: ${JSON.stringify(errs).slice(0, 300)}`);
+      const gone = await delivered('the set without them', () => files.forEach((f) => fs.rmSync(f)), (m) => !m[3]);
+      await reload((s) => !s.big && !s.code && s.banner === 'ran');
+      return `${first.kb} KB in ${first.parts} parts, applied ${first.ms} ms after the write; page with them: DOMContentLoaded ${p1.nav} ms (first load), ${p2.nav} ms (next); a change to the 3 MB mod: ${change.ms} ms; removed (one message, ${gone.kb} KB): ${gone.ms} ms`;
+    } finally {
+      for (const f of files) fs.rmSync(f, { force: true });
+    }
   }
 
   async helperLogCheck() {

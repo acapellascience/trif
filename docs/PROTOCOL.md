@@ -127,8 +127,10 @@ device and inode after opening), so swapping a link in between doesn't work eith
 
 ## Messages: helper ⇄ extension (native messaging)
 
-Chrome native messaging framing: 4-byte little-endian length + UTF-8 JSON. Host→extension messages must
-stay under 1 MB (the helper rejects bigger mods with an error logged to stderr, and the CLI reports it).
+Chrome native messaging framing: 4-byte little-endian length + UTF-8 JSON. Chrome and Firefox refuse a
+host→extension message over 1 MB, so a mods set bigger than that goes in parts (`modsPart`, below) to an
+extension whose hello lists the `modsParts` feature; an extension without it (0.2.4 and older) gets at most
+1 MB of mods, the largest left out with an error naming the extension's version (see "How big mods can be").
 Extension→host frames may be up to 256 MB; a bigger length means the stream is out of step, so the host
 logs it and exits (the extension reconnects to a fresh one) instead of misreading every later frame.
 
@@ -136,7 +138,8 @@ logs it and exits (the extension reconnects to a fresh one) instead of misreadin
 
 | message | meaning |
 |---|---|
-| `{type:"mods", mods:[Mod…], sitesOn:[site…]}` | The full set of mods, and the sites setup said to start on (`preinstalled.json`; each browser turns each on once, see "Sites TRIF is on for"). Sent on connect and after every change in the mods folder (debounced 150 ms). The extension makes `chrome.userScripts` match it exactly (register new, update changed, unregister missing). |
+| `{type:"mods", mods:[Mod…], sitesOn:[site…], defaultOrder}` | The full set of mods, and the sites setup said to start on (`preinstalled.json`; each browser turns each on once, see "Sites TRIF is on for"). Sent on connect and after every change in the mods folder (debounced 150 ms). The extension makes `chrome.userScripts` match it exactly (register new, update changed, unregister missing). Over 1 MB it goes in parts, or (before the hello says the extension can take them) waits for the hello. |
+| `{type:"modsPart", set, i, n, data}` | Part `i` of `n` (0-based, in order) of a `mods` message too big for one native message: `data` is a slice of its JSON text, each part under 1 MB as sent. `set` (`"<pid>-<k>"`) names the set. The extension joins the parts and applies the set only when the last is in, all at once, as if it had come whole (`ModsParts` in lib.js). A new set's first part, or a whole `mods` message, drops an unfinished one. A part missing, out of order or malformed, or joined text that doesn't parse, drops that set (the rest of its parts are ignored), logs an error and sends `modsResend`; the last whole set stays applied. |
 | `{type:"request", id, cmd, args}` | A page command from the CLI (table below). The extension answers with a `response`. |
 | `{type:"update", update:Summary}` | What the helper knows about updates (see "Updates"), after the extension's hello, after each check and while installing. The panel shows it. |
 | `{type:"updated", from, to, notes}` | An update was installed. The extension keeps it in storage (`updated`) so the panel can say so after the reload. |
@@ -150,7 +153,8 @@ logs it and exits (the extension reconnects to a fresh one) instead of misreadin
 
 | message | meaning |
 |---|---|
-| `{type:"hello", version, userScripts: bool, chrome: "<version>"}` | Sent on connect. `userScripts` is false when the "Allow User Scripts" switch is off. |
+| `{type:"hello", version, userScripts: bool, chrome: "<version>", browser, installId, features:[…]}` | Sent on connect. `userScripts` is false when the "Allow User Scripts" switch is off. `features`: what this extension can do beyond 0.2.4's protocol, so the helper doesn't have to go by the version: `modsParts` (takes `modsPart`). No `features` means 0.2.4 or older. |
+| `{type:"modsResend", reason}` | A set in parts didn't arrive whole (`reason` says how). The helper logs it and sends the set again, once per set; if that fails too, the next change or reconnect sends it again. |
 | `{type:"response", id, ok:true, result}` / `{type:"response", id, ok:false, error:"message"}` | Answer to a request. |
 | `{type:"modsApplied", registered:[ids], errors:[{id, error}]}` | After applying a `mods` message. |
 | `{type:"log", level, message}` | Extension-side diagnostics; the helper writes them to `helper.log` (private folder). |

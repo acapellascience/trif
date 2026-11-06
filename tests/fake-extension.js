@@ -69,7 +69,9 @@ async function waitFor(fn, { timeout = 5000, interval = 25, message = 'condition
 class FakeExtension {
   constructor({ home, env = {} }) {
     this.home = home;
-    this.messages = [];      // every message received from the host
+    this.messages = [];      // every message received from the host (a set in parts as the mods message it makes)
+    this.parts = [];         // the modsPart messages received
+    this.assembling = null;
     this.badFrames = [];     // anything that wasn't valid framing/JSON
     this.handlers = {};      // cmd -> (args, msg) => result | Promise<result>; throw to answer ok:false
     this.autoRespond = true;
@@ -93,11 +95,27 @@ class FakeExtension {
 
   send(msg) { this.child.stdin.write(encode(msg)); }
 
-  hello({ userScripts = true, version = '0.1.0', chrome = '140.0.0.0', browser, installId } = {}) {
-    this.send({ type: 'hello', version, userScripts, chrome, ...(browser ? { browser } : {}), ...(installId ? { installId } : {}) });
+  // (Without `features`, an extension from before sets of mods could come in parts: 0.2.4 and older.)
+  hello({ userScripts = true, version = '0.1.0', chrome = '140.0.0.0', browser, installId, features } = {}) {
+    this.send({ type: 'hello', version, userScripts, chrome, ...(browser ? { browser } : {}), ...(installId ? { installId } : {}), ...(features ? { features } : {}) });
   }
 
   _onMessage(msg) {
+    // A mods set in parts is joined back like the extension does (simply: in order, or it's a bad frame),
+    // and recorded as the {type:"mods"} message it was, with `parts` (how many it came in).
+    if (msg.type === 'modsPart') {
+      this.parts.push(msg);
+      if (msg.i === 0) this.assembling = { set: msg.set, data: [] };
+      if (!this.assembling || this.assembling.set !== msg.set || this.assembling.data.length !== msg.i) {
+        this.badFrames.push(`mods part ${msg.i} of set ${msg.set} out of order`);
+        this.assembling = null;
+        return;
+      }
+      this.assembling.data.push(msg.data);
+      if (this.assembling.data.length < msg.n) return;
+      msg = { ...JSON.parse(this.assembling.data.join('')), parts: msg.n, set: msg.set };
+      this.assembling = null;
+    }
     this.messages.push(msg);
     this.waiters = this.waiters.filter((w) => {
       if (w.pred(msg)) { clearTimeout(w.timer); w.resolve(msg); return false; }

@@ -86,6 +86,10 @@ you to from their terminal (side-panel runs can't).
 - Wrap the body in an IIFE as above: early `return`s work, nothing leaks into the page's globals, and
   `trif check` can parse the file.
 - Start new mods with `trif new <site> <mod>`; it creates the file from a template and prints its path.
+- A mod can be up to **10 MB**, and all mods together up to **50 MB** (`trif doctor` names one that's
+  over). Data is cheap: sounds or pictures as a base64 string cost the page little. Code isn't: after each
+  change the browser compiles the mod again on the next page load (Chrome took 1 to 4 s for 10 MB of
+  code), so don't paste in libraries the mod doesn't need.
 
 ### Mods TRIF ships
 

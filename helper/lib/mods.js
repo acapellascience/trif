@@ -227,15 +227,57 @@ function scanMods(modsDir) {
   return { mods, problems, warnings };
 }
 
-// Make the {type:"mods"} message fit Chrome's 1 MB host->extension limit. Mods that are too big on
-// their own are rejected; if the set as a whole is still too big, the largest are dropped.
-function planModsMessage(mods, limit = MAX_TO_EXTENSION - 4096) {
+// How big mods may be. Chrome and Firefox take at most 1 MB per native message, so a set bigger than that
+// goes in parts (modsParts below) to an extension that says it can take them (hello `features`). The caps
+// come from registering big user scripts in Chrome 156 and Firefox 159 (docs/PROTOCOL.md "How big mods can
+// be" has the numbers): a 10 MB mod that's mostly code takes seconds to compile on the first page load after
+// each change, and at 50 MB in all every change to one mod costs the browser about half a second of
+// re-sharing every user script with its pages, plus the write to its storage.
+const MAX_MOD_BYTES = 10 * 1024 * 1024;
+const MAX_MODS_BYTES = 50 * 1024 * 1024;
+const MB = (n) => `${(n / (1024 * 1024)).toFixed(1)} MB`;
+
+/**
+ * The mods TRIF sends, within the caps: a mod over `perMod` bytes of code is rejected; if the rest are over
+ * `total` together, the largest are left out until they fit. Returns { mods, errors: [{id, error, limit}] }
+ * (`limit`: 'mod' or 'total', so `trif doctor` can say what to do).
+ */
+function planMods(mods, { perMod = MAX_MOD_BYTES, total = MAX_MODS_BYTES } = {}) {
   const errors = [];
+  let kept = [];
+  for (const m of mods) {
+    const size = Buffer.byteLength(String(m.code ?? ''));
+    if (size > perMod) errors.push({ id: m.id, limit: 'mod', error: `mod is ${MB(size)}; a mod can be up to ${MB(perMod)}, so it was not sent to the browser` });
+    else kept.push({ m, size });
+  }
+  let sum = kept.reduce((n, s) => n + s.size, 0);
+  if (sum > total) {
+    const dropped = new Set();
+    for (const s of [...kept].sort((a, b) => b.size - a.size)) {
+      if (sum <= total) break;
+      dropped.add(s);
+      sum -= s.size;
+      errors.push({ id: s.m.id, limit: 'total', error: `all mods together are over ${MB(total)}, the most TRIF sends to the browser; this one (the largest, ${MB(s.size)}) was not sent` });
+    }
+    kept = kept.filter((s) => !dropped.has(s));
+  }
+  return { mods: kept.map((s) => s.m), errors };
+}
+
+/**
+ * For an extension that can't take a set in parts (0.2.4 and older): the {type:"mods"} message must fit in one
+ * 1 MB native message. Mods that are too big on their own are rejected; if the set as a whole is still too
+ * big, the largest are dropped. `who` names the extension in the errors ("TRIF 0.2.4 in Chrome"), whose
+ * `limit` is 'extension': updating the extension lifts it.
+ */
+function planModsMessage(mods, { limit = MAX_TO_EXTENSION - 4096, who = 'this version of the extension' } = {}) {
+  const errors = [];
+  const update = `${who} takes at most 1 MB of mods; update it to send more`;
   const sized = mods.map((m) => ({ m, size: Buffer.byteLength(JSON.stringify(m)) }));
   let kept = [];
   for (const s of sized) {
     if (s.size > limit - 64) {
-      errors.push({ id: s.m.id, error: `mod is ${Math.ceil(s.size / 1024)} KB; Chrome's native messaging limit is 1 MB, so it was not sent to the extension` });
+      errors.push({ id: s.m.id, limit: 'extension', error: `mod is ${Math.ceil(s.size / 1024)} KB and ${update}, so it was not sent` });
     } else {
       kept.push(s);
     }
@@ -249,11 +291,34 @@ function planModsMessage(mods, limit = MAX_TO_EXTENSION - 4096) {
       if (total <= limit) break;
       dropped.add(s);
       total -= s.size + 1;
-      errors.push({ id: s.m.id, error: 'all mods together exceed Chrome\'s 1 MB native messaging limit; this (largest) mod was not sent to the extension' });
+      errors.push({ id: s.m.id, limit: 'extension', error: `all mods together are over 1 MB and ${update}; this (largest) mod was not sent` });
     }
     kept = kept.filter((s) => !dropped.has(s));
   }
   return { mods: kept.map((s) => s.m), errors };
+}
+
+/**
+ * A message's JSON text cut into {type:"modsPart", set, i, n, data} messages, each under `limit` bytes as
+ * sent (the slices are JSON-escaped again inside a part, so quotes and backslashes count twice, and anything
+ * past ASCII up to three times). The extension joins the `data` of parts 0..n-1 of one `set` and parses it.
+ */
+function modsParts(json, set, limit = MAX_TO_EXTENSION) {
+  const budget = limit - 256; // room for the part's own fields
+  const slices = [];
+  for (let pos = 0; pos < json.length;) {
+    let want = Math.min(json.length - pos, budget);
+    for (;;) {
+      let end = pos + want;
+      // (Not between the halves of a surrogate pair: each half alone would be escaped as \uXXXX.)
+      if (end < json.length && end > pos + 1 && /[\ud800-\udbff]/.test(json[end - 1])) end--;
+      const slice = json.slice(pos, end);
+      const size = Buffer.byteLength(JSON.stringify(slice));
+      if (size <= budget) { slices.push(slice); pos = end; break; }
+      want = Math.max(1, Math.floor(want * (budget / size) * 0.98));
+    }
+  }
+  return slices.map((data, i) => ({ type: 'modsPart', set, i, n: slices.length, data }));
 }
 
 /**
@@ -287,5 +352,5 @@ function summarize(mod) {
 module.exports = {
   SHIPPED_SOURCES, isShippedSource,
   RUN_AT, ALL_SITES, parseHeader, defaultMatches, buildMod, listModFiles, readModFile, folderFingerprint, scanMods, LINK_OUTSIDE,
-  planModsMessage, summarize, isIgnoredName, sha1, findRenames,
+  planMods, planModsMessage, modsParts, MAX_MOD_BYTES, MAX_MODS_BYTES, summarize, isIgnoredName, sha1, findRenames,
 };

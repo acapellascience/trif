@@ -318,11 +318,12 @@ test('release script: changelog sections and feeds the helper and Firefox accept
   const real = fs.readFileSync(path.join(__dirname, '..', 'CHANGELOG.md'), 'utf8');
   const version = JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'package.json'), 'utf8')).version;
   assert.ok(changelogSection(real, version), `CHANGELOG.md has a section for the current version ${version}`);
-  // No "## Unreleased" left behind (release.js stops on it), and every section short enough for a 0.1.x
-  // updater, which cuts the notes at 4000 characters.
+  // An "## Unreleased" section is found (release.js stops on it until it's moved under the version: a
+  // branch may have one meanwhile), and every section is short enough for a 0.1.x updater, which cuts the
+  // notes at 4000 characters.
   assert.equal(unreleasedSection('# C\n\n## Unreleased\n\n- new\n\n## 0.1.2\n\n- x\n'), '- new');
   assert.equal(unreleasedSection('# C\n\n## Unreleased\n\n## 0.1.2\n\n- x\n'), null, 'an empty one is fine');
-  assert.equal(unreleasedSection(real), null, 'CHANGELOG.md has a non-empty "## Unreleased" section');
+  assert.ok((unreleasedSection(real) || '').length < 3900, 'the "## Unreleased" notes are too long');
   for (const v of [...real.matchAll(/^## (\d+\.\d+\.\d+)/gm)].map((m) => m[1])) assert.ok(changelogSection(real, v).length < 3900, `${v}'s notes are too long`);
   // package.json's repository against the git remote.
   assert.equal(remoteRepo('https://github.com/acapellascience/WebMods.git'), 'acapellascience/WebMods');

@@ -8,6 +8,7 @@ import {
   firstInjectionResult, withTimeout, filterRequests, nextBackoff, chromeVersion, toolLine,
   normalizeDisabled, modAppliesTo, urlInScope, modInScope, applyStartOff, applyAbsorbed, findRenames, carryRenames, renameInOrder, normalizeModOrder, modSites,
   normalizeOffSites, offSiteName, offOnSite, hostInScope, withOffSites, scopeFor, normalizeSitesOn, siteOnFor, sitesInUse, limitToSites, applyStartSites, switchSite, fromOtherBrowser, timedUserScripts, capChat,
+  FEATURES, ModsParts,
 } from './lib.js';
 import { runtimeCode } from './runtime.js';
 import { sweepPage } from './sweep.js';
@@ -205,7 +206,7 @@ function checkUserScripts() {
   if (before !== null && before !== now) {
     log(now ? 'info' : 'warn', now ? 'user scripts were turned on' : 'user scripts were turned off');
     // A fresh hello keeps the helper's view of the switch (shown by `trif doctor`) current.
-    post({ type: 'hello', version: VERSION, userScripts: now, chrome: CHROME, browser: BROWSER, installId: state.installId });
+    post({ type: 'hello', version: VERSION, userScripts: now, chrome: CHROME, browser: BROWSER, installId: state.installId, features: FEATURES });
     if (now) serial(applyMods).then(reportApplied, () => {});
     notifyPanels();
   }
@@ -281,7 +282,7 @@ function connect() {
     scheduleReconnect();
   });
   // After storage is read, so the hello carries the install id.
-  ready.then(() => { if (state.port === port) post({ type: 'hello', version: VERSION, userScripts: checkUserScripts(), chrome: CHROME, browser: BROWSER, installId: state.installId }); });
+  ready.then(() => { if (state.port === port) post({ type: 'hello', version: VERSION, userScripts: checkUserScripts(), chrome: CHROME, browser: BROWSER, installId: state.installId, features: FEATURES }); });
 }
 
 function scheduleReconnect() {
@@ -304,10 +305,24 @@ function log(level, message) {
 // mod written just before (an agent's write, then `trif reload`) runs on the page they load.
 const LOADS_PAGE = new Set(['reload', 'navigate', 'open']);
 let modsApplied = Promise.resolve(); // the last mods message, until it's applied
+// A set too big for one native message comes in parts, applied only once the last is in (never half a set).
+const modsParts = new ModsParts();
 
 async function onHelperMessage(msg) {
   if (!msg || typeof msg !== 'object') return;
+  if (msg.type === 'modsPart') {
+    const r = modsParts.push(msg);
+    if (r.superseded !== undefined) log('info', `mods set ${r.superseded} was replaced by a newer one before it was complete`);
+    if (r.error) {
+      log('error', r.error);
+      post({ type: 'modsResend', reason: r.error });
+    }
+    if (!r.message) return;
+    msg = r.message;
+  }
   if (msg.type === 'mods') {
+    const dropped = modsParts.reset();
+    if (dropped !== null) log('info', `mods set ${dropped} was replaced by a newer one before it was complete`);
     const applying = onModsMessage(msg);
     modsApplied = applying.catch(() => {});
     return applying;

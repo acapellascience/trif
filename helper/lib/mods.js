@@ -229,13 +229,15 @@ function scanMods(modsDir) {
 
 // How big mods may be. Chrome and Firefox take at most 1 MB per native message, so a set bigger than that
 // goes in parts (modsParts below) to an extension that says it can take them (hello `features`). The caps
-// come from registering big user scripts in Chrome 156 and Firefox 159 (docs/PROTOCOL.md "How big mods can
-// be" has the numbers): a 10 MB mod that's mostly code takes seconds to compile on the first page load after
-// each change, and at 50 MB in all every change to one mod costs the browser about half a second of
-// re-sharing every user script with its pages, plus the write to its storage.
-const MAX_MOD_BYTES = 10 * 1024 * 1024;
-const MAX_MODS_BYTES = 50 * 1024 * 1024;
-const MB = (n) => `${(n / (1024 * 1024)).toFixed(1)} MB`;
+// leave room under what browsers handle well (docs/PROTOCOL.md "How big mods can be" has the numbers):
+// with 16 MB and eight changes in a row, headless Firefox 159 peaked at 1.2-1.3 GB in all (Chrome 156 at
+// 0.7), where a 48 MB set, before the extension stopped asking Firefox for every script's code on every
+// message, took it to 7.4 GB. Each change still passes the changed mod through the browser several times,
+// and Firefox frees those copies late, so the per-mod cap matters as much as the total.
+const MAX_MOD_BYTES = 4 * 1024 * 1024;
+const MAX_MODS_BYTES = 16 * 1024 * 1024;
+// (Sizes rounded up, so one just over a cap never reads as the cap itself: "4.1 MB; up to 4 MB".)
+const MB = (n) => `${Math.ceil(n / (1024 * 1024) * 10) / 10} MB`;
 
 /**
  * The mods TRIF sends, within the caps: a mod over `perMod` bytes of code is rejected; if the rest are over
@@ -247,7 +249,7 @@ function planMods(mods, { perMod = MAX_MOD_BYTES, total = MAX_MODS_BYTES } = {})
   let kept = [];
   for (const m of mods) {
     const size = Buffer.byteLength(String(m.code ?? ''));
-    if (size > perMod) errors.push({ id: m.id, limit: 'mod', error: `mod is ${MB(size)}; a mod can be up to ${MB(perMod)}, so it was not sent to the browser` });
+    if (size > perMod) errors.push({ id: m.id, limit: 'mod', error: `mod is ${MB(size)}; a mod can be up to ${MB(perMod)}, so it was not sent to the browser (keep sounds, pictures and other big data out of its code)` });
     else kept.push({ m, size });
   }
   let sum = kept.reduce((n, s) => n + s.size, 0);
@@ -322,6 +324,17 @@ function modsParts(json, set, limit = MAX_TO_EXTENSION) {
 }
 
 /**
+ * The mods to send an extension that takes 'modsSame' (hello `features`): a mod it already has, the same
+ * id and hash as in the last set sent to it (`had`: id -> hash), goes without its code, marked `same`; the
+ * extension takes the code from the copy it has. So a change to one mod sends that mod's code, not every
+ * mod's again: with big mods, each whole copy costs the browser memory it can be slow to give back.
+ */
+function withSame(mods, had) {
+  if (!had) return mods;
+  return mods.map((m) => (typeof m.hash === 'string' && had.get(m.id) === m.hash ? { ...m, code: undefined, same: true } : m));
+}
+
+/**
  * Mods renamed on disk between two scans: a mod's id is its site folder and file name, so a renamed file
  * is a new id while the old one is gone; the same code in the same site folder is the same mod. Returns
  * [{from, to}], each old id paired once. (extension/lib.js findRenames does the same with the mods the
@@ -352,5 +365,5 @@ function summarize(mod) {
 module.exports = {
   SHIPPED_SOURCES, isShippedSource,
   RUN_AT, ALL_SITES, parseHeader, defaultMatches, buildMod, listModFiles, readModFile, folderFingerprint, scanMods, LINK_OUTSIDE,
-  planMods, planModsMessage, modsParts, MAX_MOD_BYTES, MAX_MODS_BYTES, summarize, isIgnoredName, sha1, findRenames,
+  planMods, planModsMessage, modsParts, withSame, MAX_MOD_BYTES, MAX_MODS_BYTES, summarize, isIgnoredName, sha1, findRenames,
 };

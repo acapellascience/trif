@@ -116,6 +116,16 @@ class FakeExtension {
       msg = { ...JSON.parse(this.assembling.data.join('')), parts: msg.n, set: msg.set };
       this.assembling = null;
     }
+    // Mods sent without their code (`same`, to an extension whose hello has 'modsSame') get it back from the
+    // last set, as the extension does; `sameIds` says which they were.
+    if (msg.type === 'mods' && Array.isArray(msg.mods)) {
+      const had = new Map((this._hadMods || []).map((m) => [m.id, m]));
+      const sameIds = msg.mods.filter((m) => m.same).map((m) => m.id);
+      if (sameIds.length) {
+        msg = { ...msg, sameIds, mods: msg.mods.map((m) => (m.same ? (had.get(m.id)?.hash === m.hash ? { ...m, same: undefined, code: had.get(m.id).code } : (this.badFrames.push(`mod ${m.id} sent as same, not here`), m)) : m)) };
+      }
+      this._hadMods = msg.mods;
+    }
     this.messages.push(msg);
     this.waiters = this.waiters.filter((w) => {
       if (w.pred(msg)) { clearTimeout(w.timer); w.resolve(msg); return false; }

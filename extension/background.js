@@ -8,7 +8,7 @@ import {
   firstInjectionResult, withTimeout, filterRequests, nextBackoff, chromeVersion, toolLine,
   normalizeDisabled, modAppliesTo, urlInScope, modInScope, applyStartOff, applyAbsorbed, findRenames, carryRenames, renameInOrder, normalizeModOrder, modSites,
   normalizeOffSites, offSiteName, offOnSite, hostInScope, withOffSites, scopeFor, normalizeSitesOn, siteOnFor, sitesInUse, limitToSites, applyStartSites, switchSite, fromOtherBrowser, timedUserScripts, capChat,
-  FEATURES, ModsParts,
+  FEATURES, ModsParts, fillSameMods, storedMods, modsStorageState, modsStoragePlan,
 } from './lib.js';
 import { runtimeCode } from './runtime.js';
 import { sweepPage } from './sweep.js';
@@ -45,6 +45,7 @@ const state = {
   defaultOrder: {},      // site → mod ids: the panel's order for its shipped mods until the user drags them (from the helper; persisted)
   installId: null,       // random id of this install (persisted): the helper records it as the origin of mods made here
   applied: {},           // script id → hash last registered (persisted)
+  known: null,           // the script ids the last sync left registered (syncUserScripts `known`); null: ask the browser
   lastApply: { registered: [], errors: [] },
   requestSeq: 0,
   pending: new Map(),    // our native request id → {resolve, reject, timer}
@@ -93,8 +94,8 @@ async function save(items, { switches = false } = {}) {
   }
 }
 
-// What last went into storage as `mods`, so the same list isn't written again on every sync.
-let savedModsJson = null;
+// What storage holds of the mods (lib.js modsStorageState), so only what changed is written.
+let storedModsState = { ids: null, keys: new Map(), legacy: false };
 
 // `applied` (script id → hash last registered: a shortcut for the next sync) lives in session storage,
 // which outlasts a restarted worker but not the browser, and isn't worth a write to local storage on
@@ -107,7 +108,7 @@ function saveApplied(applied) {
 // ---- startup ------------------------------------------------------------------------------------
 
 const ready = chrome.storage.local.get(null).then(async (s) => {
-  if (Array.isArray(s.mods)) state.mods = s.mods;
+  state.mods = storedMods(s);
   if (Array.isArray(s.recording)) state.recording = s.recording;
   state.disabled = normalizeDisabled(s.disabled);
   state.offSites = normalizeOffSites(s.offSites);
@@ -124,7 +125,7 @@ const ready = chrome.storage.local.get(null).then(async (s) => {
   }
   state.installId = typeof s.installId === 'string' && s.installId ? s.installId : crypto.randomUUID();
   if (state.installId !== s.installId) await save({ installId: state.installId }).catch((e) => console.warn('[TRIF]', errMsg(e)));
-  savedModsJson = Array.isArray(s.mods) ? JSON.stringify(s.mods) : null;
+  storedModsState = modsStorageState(s);
   try {
     const sess = sessionStore ? await sessionStore.get('applied') : {};
     if (sess && sess.applied && typeof sess.applied === 'object') state.applied = sess.applied;
@@ -204,6 +205,8 @@ function checkUserScripts() {
   const before = state.userScripts;
   state.userScripts = now;
   if (before !== null && before !== now) {
+    // (Firefox drops every user script when its permission goes: the next sync asks what's registered.)
+    state.known = null;
     log(now ? 'info' : 'warn', now ? 'user scripts were turned on' : 'user scripts were turned off');
     // A fresh hello keeps the helper's view of the switch (shown by `trif doctor`) current.
     post({ type: 'hello', version: VERSION, userScripts: now, chrome: CHROME, browser: BROWSER, installId: state.installId, features: FEATURES });
@@ -221,21 +224,24 @@ async function applyMods() {
 
 async function applyModsNow() {
   if (!checkUserScripts()) {
+    state.known = null;
     state.lastApply = { registered: [], errors: state.mods.filter((m) => isEnabled(m.id)).map((m) => ({ id: m.id, error: USER_SCRIPTS_OFF })) };
     return state.lastApply;
   }
   try {
     const res = await syncUserScripts(timedUserScripts(chrome.userScripts), {
       mods: state.mods, runtimeCode: runtimeCode(state.recording), applied: state.applied, disabled: state.disabled,
-      offSites: state.offSites, recording: state.recording, sitesOn: state.sitesOn,
+      offSites: state.offSites, recording: state.recording, sitesOn: state.sitesOn, known: state.known,
     });
     state.applied = res.applied;
+    state.known = res.known;
     state.lastApply = { registered: res.registered, errors: res.errors };
     // Only a shortcut for the next sync (unsaved, the next worker re-registers everything).
     saveApplied(state.applied);
     for (const e of res.errors) log('error', `mod ${e.id}: ${e.error}`);
   } catch (e) {
     state.applied = {}; // unknown state: force a full re-register next time
+    state.known = null;
     state.lastApply = { registered: [], errors: state.mods.filter((m) => isEnabled(m.id)).map((m) => ({ id: m.id, error: errMsg(e) })) };
     log('error', `applying mods failed: ${errMsg(e)}`);
   }
@@ -342,7 +348,14 @@ async function onHelperMessage(msg) {
 
 async function onModsMessage(msg) {
   const before = state.mods;
-  state.mods = Array.isArray(msg.mods) ? msg.mods : [];
+  // (Before any await: mods sent without their code take it from the set before this one, in order.)
+  const filled = fillSameMods(msg.mods, before);
+  if (filled.missing) {
+    log('error', `mods sent as already here aren't: ${filled.missing.slice(0, 5).join(', ')}${filled.missing.length > 5 ? '…' : ''}; asked for them all`);
+    post({ type: 'modsResend', reason: `missing ${filled.missing.length} mod(s) sent without their code` });
+    return;
+  }
+  state.mods = filled.mods;
   // A mod's id is its file name: a file renamed on disk comes back as a new mod. Same code in the same
   // site folder: the same mod, which keeps its switches and its place in the panel (before the first-time
   // switch-offs below, which would otherwise take it for a new one).
@@ -390,9 +403,15 @@ async function onModsMessage(msg) {
     state.absorbed = ab.absorbed;
     await save({ disabled: state.disabled, offSites: state.offSites, absorbed: state.absorbed }).catch((e) => log('warn', errMsg(e)));
   }
-  const modsJson = JSON.stringify(state.mods);
-  if (modsJson !== savedModsJson) {
-    await save({ mods: state.mods }).then(() => { savedModsJson = modsJson; }, (e) => log('warn', errMsg(e)));
+  const plan = modsStoragePlan(state.mods, storedModsState);
+  if (Object.keys(plan.set).length || plan.remove.length) {
+    try {
+      if (Object.keys(plan.set).length) await save(plan.set);
+      if (plan.remove.length) await chrome.storage.local.remove(plan.remove);
+      storedModsState = plan.stored;
+    } catch (e) {
+      log('warn', errMsg(e));
+    }
   }
   reportApplied(await serial(applyMods));
 }
@@ -491,10 +510,10 @@ const commands = {
   async status(args) {
     // Let pending mod syncs finish first, but answer within a few seconds even if one is stuck.
     await Promise.race([serial(() => {}), sleep(3000)]);
-    let ids = new Set();
-    if (checkUserScripts()) {
-      try { ids = new Set((await timedUserScripts(chrome.userScripts).getScripts()).map((s) => s.id)); } catch { /* switched off meanwhile, or stuck */ }
-    }
+    // What the last sync registered, not getScripts(): that hands back every mod's code, a copy of all of
+    // them for each `trif status` (agents and the e2e suite ask often). Only this extension registers its
+    // scripts, and every sync makes them match the list exactly.
+    const ids = new Set(checkUserScripts() ? state.lastApply.registered : []);
     const errors = new Map(state.lastApply.errors.map((e) => [e.id, e.error]));
     return {
       userScripts: state.userScripts, chrome: CHROME, browser: BROWSER, version: VERSION,

@@ -22,7 +22,7 @@ const { envVar } = require('./lib/env');
 const { workspace, VERSION } = require('./lib/paths');
 const { createLogger } = require('./lib/log');
 const { encode, Decoder, MAX_TO_EXTENSION } = require('./lib/framing');
-const { scanMods, planMods, planModsMessage, modsParts, folderFingerprint, summarize, findRenames } = require('./lib/mods');
+const { scanMods, planMods, planModsMessage, modsParts, withSame, folderFingerprint, summarize, findRenames } = require('./lib/mods');
 const { Runs } = require('./lib/runs');
 const { Logins } = require('./lib/logins');
 const agents = require('./lib/agents');
@@ -81,6 +81,7 @@ const state = {
   lastFingerprint: null,
   modsSet: 0, // numbers the sets sent in parts (modsPart `set`)
   resentFor: null, // the signature of the last set re-sent because the extension asked (modsResend)
+  sentMods: null, // id -> hash of the last set sent to this extension, for 'modsSame' (null: send every mod whole)
   stdoutOpen: true,
   shuttingDown: false,
   installing: false, // an update is being installed
@@ -119,20 +120,27 @@ function takesParts() {
 
 /**
  * Sends a {type:"mods"} message: as it is when it fits in one native message (what every extension
- * understands), else in modsPart messages the extension joins and applies all at once. Returns how it
- * went: 'whole', 'parts' (with the count), or 'waiting' (too big for one message, and no hello yet to say
- * the extension can take parts: the hello sends it again).
+ * understands), else in modsPart messages the extension joins and applies all at once; to an extension
+ * that takes 'modsSame', the mods it has already go without their code. Returns how it went: 'whole',
+ * 'parts' (with the count), or 'waiting' (too big for one message, and no hello yet to say the extension
+ * can take parts: the hello sends it again), with `bytes` sent and how many went without code (`same`).
  */
 function sendMods(msg) {
-  const json = JSON.stringify(msg);
-  if (Buffer.byteLength(json) <= MAX_TO_EXTENSION) { sendToExtension(msg); return { how: 'whole', bytes: Buffer.byteLength(json) }; }
+  // Mods the extension already has go without their code, if it can take that (withSame).
+  const same = state.hello?.features.includes('modsSame') ? state.sentMods : null;
+  const out = same ? { ...msg, mods: withSame(msg.mods, same) } : msg;
+  const nSame = same ? out.mods.filter((m) => m.same).length : 0;
+  const json = JSON.stringify(out);
+  const bytes = Buffer.byteLength(json);
+  const sent = (r) => { state.sentMods = new Map(msg.mods.map((m) => [m.id, m.hash])); return { ...r, bytes, same: nSame }; };
+  if (bytes <= MAX_TO_EXTENSION) { sendToExtension(out); return sent({ how: 'whole' }); }
   const parts = takesParts();
-  if (parts === null) return { how: 'waiting', bytes: Buffer.byteLength(json) };
-  if (!parts) throw new Error(`the mods are ${Math.ceil(Buffer.byteLength(json) / 1024)} KB, and this extension takes at most 1 MB in one message`);
+  if (parts === null) return { how: 'waiting', bytes };
+  if (!parts) throw new Error(`the mods are ${Math.ceil(bytes / 1024)} KB, and this extension takes at most 1 MB in one message`);
   const set = `${process.pid}-${++state.modsSet}`;
   const list = modsParts(json, set);
   for (const part of list) sendToExtension(part);
-  return { how: 'parts', parts: list.length, bytes: Buffer.byteLength(json) };
+  return sent({ how: 'parts', parts: list.length });
 }
 
 process.stdout.on('error', (e) => {
@@ -165,6 +173,8 @@ function onExtensionMessage(msg) {
         features: Array.isArray(msg.features) ? msg.features.filter((f) => typeof f === 'string') : [],
       };
       state.helloAt = Date.now();
+      // (Every mod whole after a hello: it may come from an extension that just started, with other mods.)
+      state.sentMods = null;
       logger.info(`hello from extension ${msg.version} on ${state.hello.browser} ${msg.chrome}; userScripts=${!!msg.userScripts}`);
       syncMods('hello', true);
       sendUpdate();
@@ -176,9 +186,11 @@ function onExtensionMessage(msg) {
       onExtensionRequest(msg);
       break;
     case 'modsResend':
-      // A set in parts didn't arrive whole (the extension logged why). Sent again once; if that fails too,
-      // the next change or reconnect sends it again.
+      // A set in parts didn't arrive whole, or a mod sent without its code wasn't there (the extension
+      // logged why). Sent again once; if that fails too, the next change or reconnect sends it again.
       logger.warn(`the extension asked for the mods again: ${String(msg.reason ?? 'no reason given').slice(0, 300)}`);
+      // (Whole: what it has may not be what we think, if a set didn't arrive or a mod sent as `same` was missing.)
+      state.sentMods = null;
       if (state.lastSignature && state.resentFor !== state.lastSignature) {
         state.resentFor = state.lastSignature;
         syncMods('resend', true);
@@ -274,7 +286,7 @@ function syncMods(reason, force) {
       state.lastSignature = null;
       logger.info(`${sent.length} mod(s), ${kb}: too big for one message, waiting for the extension's hello (${reason})`);
     } else {
-      logger.info(`sent ${sent.length} mod(s) to the extension${nHeld ? ` (${nHeld} held)` : ''}, ${kb}${r.how === 'parts' ? ` in ${r.parts} parts` : ''}, in ${Date.now() - t0} ms (${reason})`);
+      logger.info(`sent ${sent.length} mod(s) to the extension${nHeld ? ` (${nHeld} held)` : ''}${r.same ? ` (${r.same} it has already, without their code)` : ''}, ${kb}${r.how === 'parts' ? ` in ${r.parts} parts` : ''}, in ${Date.now() - t0} ms (${reason})`);
     }
   } catch (e) {
     logger.error(`could not send mods: ${e.message}`);

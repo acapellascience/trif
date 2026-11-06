@@ -344,8 +344,8 @@ async function doctor(opts = {}) {
   if (info) for (const e of info.modErrors || []) if (e.limit === 'extension') modProblems.push(e);
   const mb = (n) => `${n / (1024 * 1024)} MB`;
   const advice = {
-    mod: `make the mod smaller (move data out, or split it into several mods): each can be up to ${mb(MAX_MOD_BYTES)}`,
-    total: `remove or shrink mods you don't use: all of them together can be up to ${mb(MAX_MODS_BYTES)}`,
+    mod: `make the mod smaller: keep sounds, pictures and other big data out of its code (a mod can be up to ${mb(MAX_MOD_BYTES)})`,
+    total: `remove mods you don't use, or make big ones smaller: all of them together can be up to ${mb(MAX_MODS_BYTES)}`,
     extension: info?.extension?.browser === 'Firefox' ? 'update the add-on: about:addons, the gear, Check for Updates'
       : info?.extension?.browser === 'Safari' ? 'build and open TRIF.app from this version' : `update the extension: reload TRIF on ${EXT_URL}`,
   };

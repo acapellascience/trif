@@ -8,7 +8,7 @@ const net = require('net');
 const path = require('path');
 const { spawn } = require('child_process');
 const { FakeExtension, runCli, writeMod, tempDir, waitFor, sleep, REPO, privDir } = require('./fake-extension');
-const { parseHeader, buildMod, scanMods, planMods, planModsMessage, modsParts, MAX_MOD_BYTES, MAX_MODS_BYTES, defaultMatches } = require('../helper/lib/mods');
+const { parseHeader, buildMod, scanMods, planMods, planModsMessage, modsParts, withSame, MAX_MOD_BYTES, MAX_MODS_BYTES, defaultMatches } = require('../helper/lib/mods');
 const { encode, Decoder } = require('../helper/lib/framing');
 
 const cleanups = [];
@@ -193,17 +193,22 @@ test('scanMods: ignores links out of the mods folder (a run could plant one), ke
 
 test('planMods: a mod over the per-mod cap is rejected; over the total, the largest go first', () => {
   const MB = 1024 * 1024;
-  assert.equal(MAX_MOD_BYTES, 10 * MB);
-  assert.equal(MAX_MODS_BYTES, 50 * MB);
+  assert.equal(MAX_MOD_BYTES, 4 * MB);
+  assert.equal(MAX_MODS_BYTES, 16 * MB);
   const m = (name, bytes) => buildMod({ site: 'a.com', file: `/s/a.com/${name}.js`, code: 'x'.repeat(bytes) }).mod;
-  const p = planMods([m('small', 10), m('huge', 10 * MB + 1), m('max', 10 * MB)]);
+  const p = planMods([m('small', 10), m('huge', 4 * MB + 1), m('max', 4 * MB)]);
   assert.deepEqual(p.mods.map((x) => x.id), ['a.com/small', 'a.com/max']);
   assert.deepEqual(p.errors.map((e) => [e.id, e.limit]), [['a.com/huge', 'mod']]);
-  assert.match(p.errors[0].error, /mod is 10\.0 MB; a mod can be up to 10\.0 MB/);
+  assert.match(p.errors[0].error, /mod is 4\.1 MB; a mod can be up to 4 MB, so it was not sent/);
+  // Five at the cap are over the total: the last of the largest goes.
+  const t = planMods([1, 2, 3, 4, 5].map((i) => m(`m${i}`, 4 * MB - i)));
+  assert.deepEqual(t.mods.map((x) => x.id), ['a.com/m2', 'a.com/m3', 'a.com/m4', 'a.com/m5']);
+  assert.deepEqual(t.errors.map((e) => [e.id, e.limit]), [['a.com/m1', 'total']]);
+  assert.match(t.errors[0].error, /all mods together are over 16 MB, the most TRIF sends to the browser; this one \(the largest, 4 MB\) was not sent/);
   const q = planMods([m('a', 3 * MB), m('b', 4 * MB), m('c', 2 * MB), m('d', 2 * MB)], { total: 7 * MB });
   assert.deepEqual(q.mods.map((x) => x.id), ['a.com/a', 'a.com/c', 'a.com/d']);
   assert.deepEqual(q.errors.map((e) => [e.id, e.limit]), [['a.com/b', 'total']]);
-  assert.match(q.errors[0].error, /all mods together are over 7\.0 MB/);
+  assert.match(q.errors[0].error, /all mods together are over 7 MB/);
   // Multi-byte characters count as the bytes they are.
   assert.equal(planMods([m('e', 0), { ...m('f', 0), code: 'é'.repeat(6) }], { perMod: 11 }).errors[0].id, 'a.com/f');
 });
@@ -222,6 +227,13 @@ test('planModsMessage (an extension that takes one message): rejects a mod over 
   assert.equal(p2.errors.length, 1);
   assert.equal(p2.errors[0].id, 'a.com/m3'); // the largest is dropped
   assert.ok(Buffer.byteLength(JSON.stringify({ type: 'mods', mods: p2.mods })) < 1024 * 1024);
+});
+
+test('withSame: a mod the extension has (same id and hash as last sent) goes without its code', () => {
+  const mods = [{ id: 'a', hash: 'h1', code: 'A' }, { id: 'b', hash: 'h2', code: 'B' }, { id: 'c', hash: 'h1', code: 'C' }];
+  assert.equal(withSame(mods, null), mods);
+  assert.deepEqual(JSON.parse(JSON.stringify(withSame(mods, new Map([['a', 'h1'], ['b', 'h1']])))),
+    [{ id: 'a', hash: 'h1', same: true }, { id: 'b', hash: 'h2', code: 'B' }, { id: 'c', hash: 'h1', code: 'C' }]);
 });
 
 test('modsParts: every part fits in a native message, and the parts join back into the same JSON', () => {
@@ -502,6 +514,27 @@ test('host: a set over 1 MB waits for the hello, then goes in parts to an extens
   await sleep(500);
   assert.equal(ext.messages.slice(before).filter((m) => m.type === 'mods').length, 1, 'only once for the same set');
   await waitFor(() => fs.readFileSync(path.join(privDir(home), 'helper.log'), 'utf8').includes('asked for the mods again: part 2 of 3'), { message: 'logged' });
+
+  // An extension that takes mods without their code (modsSame): after the hello, every mod whole; then a
+  // change sends only the changed one's code.
+  ext.hello({ features: ['modsParts', 'modsSame'], version: '0.2.5' });
+  const whole = await ext.next((m) => m.type === 'mods' && m.mods.length === 3, { since: ext.messages.length });
+  assert.equal(whole.sameIds, undefined);
+  const since1 = ext.messages.length;
+  writeMod(home, 'a.com', 'small.js', 'small 3');
+  const delta = await ext.next((m) => m.type === 'mods', { since: since1 });
+  assert.deepEqual(delta.sameIds, ['a.com/big', 'a.com/data']);
+  assert.equal(delta.parts, undefined, 'small enough for one message now');
+  assert.equal(delta.mods[1].code, fs.readFileSync(path.join(home, 'sites', 'a.com', 'data.js'), 'utf8'), 'the fake took it from the last set');
+  assert.equal(delta.mods[2].code, 'small 3');
+  await waitFor(() => fs.readFileSync(path.join(privDir(home), 'helper.log'), 'utf8').includes('(2 it has already, without their code)'), { message: 'logged' });
+  // Asked again: every mod whole.
+  const since3 = ext.messages.length;
+  ext.send({ type: 'modsResend', reason: 'missing 2 mod(s) sent without their code' });
+  const full = await ext.next((m) => m.type === 'mods', { since: since3 });
+  assert.equal(full.sameIds, undefined);
+  assert.equal(full.mods[2].code, 'small 3');
+  assert.deepEqual(ext.badFrames, []);
 
   // A set that fits in one message still goes as one.
   const since2 = ext.messages.length;

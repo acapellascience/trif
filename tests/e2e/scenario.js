@@ -583,7 +583,7 @@ class Scenario {
         if (asksSites) await d.click(this.control, ff ? '#sites-allow' : '#sites-later');
         const x = await this.waitSetup('step 5 open', (st) => (st.steps.join() === 'done,done,done,done,now,later' && /\n\n/.test(st.now) && !/Checking your coding agent/.test(st.now))
           || st.steps.join() === 'done,done,done,done,done,now');
-        if (x.steps[4] === 'now' && !/isn’t logged in on this computer yet|couldn’t tell whether .* is logged in|needs a coding agent|isn’t available/.test(x.now)) throw new Error(`step 5 says: ${x.now}`);
+        if (x.steps[4] === 'now' && !/is logged in on this computer yet|couldn’t tell whether .* (is|are) logged in|needs a coding agent/.test(x.now) || /Use another agent/.test(x.now)) throw new Error(`step 5 says: ${x.now}`);
         const st = (await this.cli(['status'], { json: true })).json.extension;
         const want = !asksSites || ff ? ['amazon.com', 'google.com', 'instagram.com', 'x.com'] : ['google.com', 'x.com'];
         if (JSON.stringify(st.sitesOn.filter((site) => SITES_START.includes(site))) !== JSON.stringify(want) || (st.noAccess || []).length) {

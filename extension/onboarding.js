@@ -19,7 +19,6 @@ let offSites = {};      // chrome.storage.local `offSites`: mods switched off on
 let settings = normalizeSettings(); // chrome.storage.local `settings`: the default agent (as the panel's Settings)
 let agents = null;      // agent.list: {agents, default}, once the helper answers
 let openModel = null;   // agent.openModel, while the open model is the agent
-let choosing = false;   // "Use another agent" open
 let sitesAsked = null;  // 'asking' while the browser's prompt is open, 'no' after the user said no
 
 function code(text) {
@@ -114,7 +113,6 @@ function keyMissing() {
 }
 
 async function useAgent(id) {
-  choosing = false;
   settings = normalizeSettings({ ...settings, agent: id });
   await chrome.storage.local.set({ settings }).catch(() => {});
   openModel = null;
@@ -183,14 +181,21 @@ function renderSteps() {
   $('#sub').textContent = ready ? 'Open any website, click the TRIF icon, and ask for a change.' : 'A few steps. Each one ticks itself off.';
 }
 
+// The agents stand on an equal footing here: the step names none of them, offers each one on this computer
+// the same button (alphabetically), and ticks off as soon as any one of them is logged in, which then
+// becomes the agent TRIF uses if the one it would have used (the default) isn't.
+let adopting = null; // (the logged-in agent being made the choice, so a re-render doesn't ask again)
+let terminalLogin = null; // an agent that logs in only in a terminal, whose button was clicked: its instructions show
+const ready = (a, info, missing) => !!a?.available && (a.id === OPEN_MODEL ? a.id === info?.id && !missing : a.loggedIn === true);
+const andList = (xs) => (xs.length < 2 ? xs.join('') : `${xs.slice(0, -1).join(', ')} and ${xs.at(-1)}`);
+
 function loginStep(connected) {
   const step = $('#step-login');
   const name = step.querySelector('.name');
   const info = currentAgent();
   const list = agents?.agents || [];
-  const others = list.filter((a) => a.available && a.id !== info?.id);
   const missing = info?.id === OPEN_MODEL ? keyMissing() : null;
-  name.textContent = !info ? 'Log in to your coding agent' : info.id === OPEN_MODEL ? 'Set up the open model' : `Log in to ${info.name}`;
+  name.textContent = info?.id === OPEN_MODEL ? 'Set up the open model' : 'Log in to your coding agent';
   if (!connected) return { el: step, done: false };
   if (!agents) {
     setBody(step, 'checking', () => [el('p', null, 'Checking your coding agent…')]);
@@ -198,45 +203,49 @@ function loginStep(connected) {
   }
   // Logged in only when the agent says so. The open model has no login to check (only its key); for the
   // others, no answer (an old or slow `auth status`) is not a yes: the step stays open, asking again.
-  const done = !!info?.available && !login.current && (info.loggedIn === true || (info.id === OPEN_MODEL && !missing));
-  const unknown = !!info?.available && info.id !== OPEN_MODEL && info.loggedIn !== true && info.loggedIn !== false;
-  if (done) return { el: step, done: true, state: info.loggedIn ? 'logged in' : 'ready' };
+  const here = list.filter((a) => a.available && a.id !== OPEN_MODEL).sort((a, b) => a.name.localeCompare(b.name));
+  const openModelHere = list.find((a) => a.id === OPEN_MODEL && a.available);
+  const readyOne = ready(info, info, missing) ? info : here.find((a) => ready(a, info, missing));
+  if (readyOne && !login.current) {
+    if (readyOne.id !== info?.id && adopting !== readyOne.id) { adopting = readyOne.id; useAgent(readyOne.id); }
+    return { el: step, done: true, state: readyOne.id === OPEN_MODEL ? 'ready' : `${readyOne.name} logged in` };
+  }
 
-  const chooser = () => (choosing && others.length
-    ? (() => { const r = el('div', 'row'); r.append(...others.map((a) => button(`Use ${a.name}`, '', () => useAgent(a.id)))); return r; })()
-    : null);
-  const another = () => (others.length && !choosing ? button('Use another agent', '', () => { choosing = true; renderSteps(); }) : null);
-  const key = JSON.stringify([info?.id, info?.available, info?.loggedIn, missing, choosing, others.map((a) => a.id),
+  const key = JSON.stringify([info?.id, missing, terminalLogin, here.map((a) => [a.id, a.loggedIn, a.canLogin]), !!openModelHere,
     login.current && [login.current.phase, login.current.error]]);
   setBody(step, key, () => {
     if (login.current) return login.nodes(info).nodes;
-    if (!list.some((a) => a.available)) {
+    if (!here.length && !openModelHere) {
       const p = el('p');
       p.append('TRIF needs a coding agent on this computer: ', link('Claude Code', 'https://claude.com/claude-code'), ' or ',
         link('Codex', 'https://github.com/openai/codex'), '. Install one, then run ', code(SETUP_COMMAND), ' again from the same terminal.');
       return [p];
     }
-    if (!info?.available) {
-      const p = el('p', null, `${info?.name || 'Your chosen agent'} isn’t available on this computer.`);
-      const note = info?.note ? el('div', 'md') : null;
-      if (note) setMarkdown(note, info.note);
-      return [p, note, (() => { const r = el('div', 'row'); r.append(...others.map((a) => button(`Use ${a.name}`, '', () => useAgent(a.id)))); return r; })()];
+    // One button each, the same: logging in to one makes it the agent TRIF uses.
+    const row = el('div', 'row');
+    for (const a of here) {
+      // (an agent with no login here, Codex today, gets the same button: it shows how, in a terminal)
+      row.append(button(`Log in to ${a.name}`, 'primary', a.canLogin
+        ? async () => { terminalLogin = null; if (a.id !== currentAgent()?.id) await useAgent(a.id); login.start(a.id, a.name, a.loginFix || ''); }
+        : () => { terminalLogin = a.id; if (a.id !== currentAgent()?.id) useAgent(a.id); else renderSteps(); }));
     }
+    if (openModelHere && info?.id !== OPEN_MODEL) row.append(button('Use an open model', '', () => useAgent(OPEN_MODEL)));
     if (missing) {
       return [el('p', null, `The open model needs your ${missing} API key: paste it in Settings, in the TRIF ${PANEL}.`),
-        another() && (() => { const r = el('div', 'row'); r.append(another()); return r; })(), chooser(),
-        el('p', 'wait', 'This ticks itself off once it’s saved.')];
+        row.childElementCount ? row : null, el('p', 'wait', 'This ticks itself off once it’s saved, or once an agent is logged in.')];
     }
-    const fix = info.loginFix || '';
-    const row = el('div', 'row');
-    if (info.canLogin) row.append(button('Log in', 'primary', () => login.start(info.id, info.name, fix)));
-    if (another()) row.append(another());
+    const names = here.map((a) => a.name);
+    const unknown = here.some((a) => a.loggedIn !== true && a.loggedIn !== false);
+    const intro = !here.length ? 'TRIF runs your coding agent on your account.'
+      : `TRIF runs your coding agent on your account. ${unknown
+        ? `It couldn’t tell whether ${andList(names)} ${names.length > 1 ? 'are' : 'is'} logged in on this computer.`
+        : `${here.length === 1 ? names[0] : here.length === 2 ? `Neither ${names[0]} nor ${names[1]}` : `None of ${andList(names)}`} is logged in on this computer yet.`}`;
+    const shown = here.find((a) => a.id === terminalLogin && !a.canLogin);
+    const how = shown ? el('div', 'md') : null;
+    if (how) setMarkdown(how, `To log in to ${shown.name}, ${shown.loginFix || 'log in to it in a terminal'}.`);
     const wait = el('div', 'wait');
-    setMarkdown(wait, info.canLogin ? `${fix ? `Or ${fix}. ` : ''}This ticks itself off either way.` : `To log in, ${fix || 'log in to it in a terminal'}. This ticks itself off once you have.`);
-    return [el('p', null, unknown
-      ? `TRIF runs ${info.name}, your coding agent, on your account. It couldn’t tell whether ${info.name} is logged in on this computer.`
-      : `TRIF runs ${info.name}, your coding agent, on your account. It isn’t logged in on this computer yet.`),
-    row.childElementCount ? row : null, chooser(), wait];
+    setMarkdown(wait, 'This ticks itself off once one is logged in.');
+    return [el('p', null, intro), row.childElementCount ? row : null, how, wait];
   });
   return { el: step, done: false };
 }

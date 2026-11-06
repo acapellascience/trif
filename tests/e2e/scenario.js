@@ -175,7 +175,10 @@ class Scenario {
       return {
         site: q('#site')?.textContent || '',
         gate: !q('#gate').hidden,
+        gateTitle: q('#gate-title')?.textContent || '',
         gateText: q('#gate-btn')?.textContent || '',
+        disconnectLink: q('#gate-disconnect')?.hidden === false && q('#gate-links')?.hidden === false,
+        neverLink: q('#gate-never')?.hidden === false && q('#gate-links')?.hidden === false,
         gateWhy: q('#gate-why')?.hidden === false ? q('#gate-why').textContent : '',
         gateErr: q('#gate-err')?.hidden === false ? q('#gate-err').textContent : '',
         siteOn: q('#site-switch')?.getAttribute('aria-checked') === 'true',
@@ -488,7 +491,7 @@ class Scenario {
     await r.check('setup page: a checklist, the helper and the browser ticked, user scripts next', async () => {
       // (With access to every site, the sites step is ticked already.)
       const x = await this.waitSetup('step 3 open', (st) => st.steps.join() === `done,done,now,${this.allSites ? 'done' : 'later'},later,later`);
-      if (x.docTitle !== 'TRIF setup' || x.title !== 'Set up TRIF' || x.states.join() !== (this.allSites ? 'connected,done,done' : 'connected,done')) throw new Error(JSON.stringify(x));
+      if (x.docTitle !== 'TRIF setup' || x.title !== 'Set up TRIF' || x.states.join() !== (this.allSites ? 'connected,done,every site' : 'connected,done')) throw new Error(JSON.stringify(x));
       const want = d.name === 'Firefox' ? /Firefox asks before an add-on runs them\.[\s\S]*Allow user scripts/ : /One switch:[\s\S]*flip this[\s\S]*Open TRIF’s Chrome settings/;
       if (!want.test(x.now)) throw new Error(`step 3 says: ${x.now}`);
       await this.shot(this.control, 'setup-page-scripts-off');
@@ -512,7 +515,7 @@ class Scenario {
         if (!asksSites) return `sites: ${x.states.join(', ')}`;
         const want = this.o.browser === 'firefox' ? ['amazon.com', 'google.com', 'instagram.com', 'x.com'] : ['amazon.com', 'instagram.com'];
         const listed = want.map((site) => x.now.includes(site));
-        if (listed.includes(false) || !/asks before it can read and change a website/.test(x.now) || x.buttons.join() !== 'Allow these sites,Not now') throw new Error(`step 4: ${JSON.stringify(x)}`);
+        if (listed.includes(false) || !/asks before it can read and change a website/.test(x.now) || x.buttons.join() !== 'Allow these sites,Allow TRIF on every site,Not now') throw new Error(`step 4: ${JSON.stringify(x)}`);
         await this.shot(this.control, 'setup-page-sites');
         return x.now.split('\n').slice(0, 2).join(' / ');
       });
@@ -577,7 +580,7 @@ class Scenario {
         : this.o.browser === 'firefox' ? 'setup page: "Allow these sites" gets the browser\'s OK for all of them at once; the agent\'s login next'
           : 'setup page: "Not now" turns TRIF off on the sites the browser hasn\'t allowed; the agent\'s login next', async () => {
         const ff = this.o.browser === 'firefox';
-        if (asksSites) await d.click(this.control, ff ? '#step-sites .btn.primary' : '#step-sites .btn:not(.primary)');
+        if (asksSites) await d.click(this.control, ff ? '#sites-allow' : '#sites-later');
         const x = await this.waitSetup('step 5 open', (st) => (st.steps.join() === 'done,done,done,done,now,later' && /\n\n/.test(st.now) && !/Checking your coding agent/.test(st.now))
           || st.steps.join() === 'done,done,done,done,done,now');
         if (x.steps[4] === 'now' && !/isn’t logged in on this computer yet|couldn’t tell whether .* is logged in|needs a coding agent|isn’t available/.test(x.now)) throw new Error(`step 5 says: ${x.now}`);
@@ -661,42 +664,96 @@ class Scenario {
       await this.waitPanel('the panel switch to go on', (x) => x.mods.some((m) => m.id === '127.0.0.1/e2e-banner' && m.on));
     });
 
-    await r.check('site switch off in the panel: nothing runs; on again: it does', async () => {
+    const SITE = ['*://127.0.0.1/*', '*://*.127.0.0.1/*'];
+    const hasSite = () => this.ext(`async (o) => chrome.permissions.contains({ origins: o })`, [SITE]);
+    await r.check('site switch off in the panel: nothing runs, the access stays (on again asks nothing), Disconnect offered unless TRIF has every site; on again: it runs', async () => {
       await d.click(this.panelCtx, '#site-switch');
-      await this.waitPanel('the gate', (x) => x.gate && !x.siteOn);
+      const p = await this.waitPanel('the gate', (x) => x.gate && !x.siteOn);
       await this.waitPage('the page without the mod', (x) => !x.banner);
       const blocked = await this.cli(['text', '--url', '127.0.0.1']);
-      if (blocked.status === 0) throw new Error('trif text worked on a site TRIF is off for');
+      if (blocked.status === 0 || !/^trif text: TRIF is off on 127\.0\.0\.1/.test(blocked.stderr)) throw new Error(`trif text: ${blocked.status} ${blocked.stderr}`);
+      if (!(await hasSite())) throw new Error('turning the site off gave its access back');
+      if (p.gateTitle !== 'The robot is off.' || p.gateText !== 'Fix 127.0.0.1' || !p.neverLink || p.disconnectLink === !!this.allSites) throw new Error(`the gate: ${JSON.stringify(p)}`);
       await this.shot(this.panelCtx, 'panel-site-off');
       await d.click(this.panelCtx, '#gate-btn');
       await this.waitPage('the mod again', (x) => x.banner === 'ran');
       return `page commands refused while off: ${(blocked.stderr || blocked.stdout).trim().split('\n')[0]}`;
     });
 
-    // Firefox: the site's access, given when Fix asked for it (prompts are off in this profile), and given
-    // back when the site went off; then taken away as the browser's settings would. (Chrome's test build
-    // has 127.0.0.1 as a required host, which can't be taken away: the unit tests cover it there.)
+    // Firefox (prompts are off in this profile, so the asking is real): Disconnect gives the access back, the
+    // panel says disconnected, and Connect asks for it and turns the site on in one click; then the same
+    // when it's taken away as the browser's settings would. (Chrome's test build has 127.0.0.1 as a
+    // required host, which can't be given back: the unit tests cover it there.)
     if (this.o.browser === 'firefox' && !this.allSites) {
-      const SITE = ['*://127.0.0.1/*', '*://*.127.0.0.1/*'];
-      await r.check('site access: Fix asked the browser for 127.0.0.1; taken back, the panel asks "Allow TRIF on 127.0.0.1" and nothing runs; allowed again, the mod runs', async () => {
-        const has = () => this.ext(`async (o) => chrome.permissions.contains({ origins: o })`, [SITE]);
-        if (!(await has())) throw new Error('TRIF is on for 127.0.0.1 without the browser\'s access to it');
+      const disconnected = async (how) => {
+        const p = await this.waitPanel('the disconnected gate', (x) => x.gate && x.gateTitle === 'The robot is disconnected from 127.0.0.1.');
+        if (p.gateText !== 'Connect to 127.0.0.1' || p.disconnectLink || !p.neverLink) throw new Error(`${how}: the gate: ${JSON.stringify(p)}`);
+        const blocked = await this.cli(['text', '--url', '127.0.0.1']);
+        if (blocked.status === 0 || !/TRIF is disconnected from 127\.0\.0\.1: .*until the user connects it/.test(blocked.stderr)) throw new Error(`${how}: trif text: ${blocked.status} ${blocked.stderr}`);
+        const st = (await this.cli(['status'], { json: true })).json.extension;
+        if (!st.disconnected.includes('127.0.0.1')) throw new Error(`${how}: status: ${JSON.stringify(st.disconnected)}`);
+        const text = await this.cli(['status']);
+        if (!/^disconnected  .*127\.0\.0\.1/m.test(text.stdout)) throw new Error(`${how}: trif status says: ${text.stdout}`);
+        return blocked.stderr.trim().split('\n')[0];
+      };
+      const connect = async (how) => {
+        await d.click(this.panelCtx, '#gate-btn');
+        await this.waitPage(`the mod again (${how})`, (x) => x.banner === 'ran');
+        if (!(await hasSite())) throw new Error(`${how}: connected, but the browser has no access recorded`);
+      };
+      await r.check('Disconnect from 127.0.0.1 (off): the access goes, the panel says disconnected, agents are told; Connect asks for it and turns it on in one click', async () => {
+        await d.click(this.panelCtx, '#site-switch');
+        await this.waitPanel('the gate', (x) => x.gate && x.disconnectLink);
+        await this.waitPage('the page without the mod', (x) => !x.banner);
+        await d.click(this.panelCtx, '#gate-disconnect');
+        const said = await disconnected('disconnected');
+        if (await hasSite()) throw new Error('disconnected, but the browser still gives TRIF the site');
+        await this.shot(this.panelCtx, 'panel-site-disconnected');
+        await connect('Connect');
+        return said;
+      });
+      await r.check('taken away as the browser\'s settings would: disconnected, nothing runs; Connect brings it back', async () => {
         if (!(await this.ext(`async (o) => chrome.permissions.remove({ origins: o })`, [SITE]))) throw new Error('permissions.remove said no');
-        const p = await this.waitPanel('the gate asking for access', (x) => x.gate && x.gateText === 'Allow TRIF on 127.0.0.1');
-        if (p.gateWhy !== 'TRIF needs your OK to work on 127.0.0.1.') throw new Error(`the gate says: ${JSON.stringify(p)}`);
         await this.ext(`async (id) => { await chrome.tabs.reload(id); }`, [this.win.tabId]);
         await this.waitPage('the page without the mod', (x) => !x.banner);
-        const blocked = await this.cli(['text', '--url', '127.0.0.1']);
-        if (blocked.status === 0 || !/doesn't give it access to that site/.test(blocked.stderr)) throw new Error(`trif text: ${blocked.status} ${blocked.stderr}`);
-        const st = (await this.cli(['status'], { json: true })).json.extension;
-        if (!st.sitesOn.includes('127.0.0.1') || !st.noAccess.includes('127.0.0.1')) throw new Error(`status: ${JSON.stringify([st.sitesOn, st.noAccess])}`);
-        await this.shot(this.panelCtx, 'panel-site-not-allowed');
-        await d.click(this.panelCtx, '#gate-btn');
-        await this.waitPage('the mod again', (x) => x.banner === 'ran');
-        if (!(await has())) throw new Error('allowed, but the browser has no access recorded');
-        return `refused while taken back: ${blocked.stderr.trim().split('\n')[0]}`;
+        const said = await disconnected('taken away');
+        await connect('Connect');
+        return said;
       });
     }
+
+    // The never list: from the panel's settings while the site is on; whatever access TRIF has (upgrading:
+    // <all_urls>), nothing from TRIF touches the site, it can't be turned on, and taking it off the list
+    // leaves it off.
+    await r.check('Never on 127.0.0.1 (settings): the mod stops, agents are refused, the gate says so; off the list, it\'s off, and Fix turns it on', async () => {
+      await d.click(this.panelCtx, '#settings-btn');
+      await waitFor('settings', () => this.panel(`async () => !document.querySelector('#settings').hidden && document.querySelector('#never-link').textContent === 'Never on 127.0.0.1'`), { timeoutMs: 5000 });
+      await d.click(this.panelCtx, '#never-link');
+      await waitFor('127.0.0.1 on the never list', async () => {
+        const e = (await this.cli(['status'], { json: true })).json.extension;
+        return (e.neverSites || []).includes('127.0.0.1');
+      }, { timeoutMs: 8000 }).catch(async (e) => { throw new Error(`${e.message}; the panel: ${JSON.stringify(await this.panel(`async () => ({ err: document.querySelector('#gate-err').textContent, here: document.querySelector('#never-here').hidden })`))}`); });
+      await this.waitPage('the page without the mod', (x) => !x.banner);
+      const listed = await waitFor('the never list', () => this.panel(`async () => { const li = [...document.querySelectorAll('#never-list li')]; return li.length ? li.map((x) => x.textContent) : null; }`), { timeoutMs: 5000 });
+      await this.shot(this.panelCtx, 'panel-never-list');
+      await d.click(this.panelCtx, '#settings-btn');
+      const p = await this.waitPanel('the never gate', (x) => x.gate && x.gateTitle === '127.0.0.1 is on TRIF’s never list.');
+      if (p.gateWhy !== 'Nothing from TRIF runs on it or reads it.' || p.gateText !== 'Take it off the list' || p.neverLink || p.disconnectLink) throw new Error(`the gate: ${JSON.stringify(p)}`);
+      for (const args of [['text', '--url', '127.0.0.1'], ['screenshot', '--url', '127.0.0.1', '-o', path.join(this.work, 'never.png')], ['run', '--url', '127.0.0.1', '1']]) {
+        const x = await this.cli(args);
+        if (x.status === 0 || !/127\.0\.0\.1 is on TRIF's never list: nothing from TRIF runs there or reads it/.test(x.stderr)) throw new Error(`trif ${args[0]}: ${x.status} ${x.stderr}`);
+      }
+      const st = (await this.cli(['status'], { json: true })).json.extension;
+      if (JSON.stringify(st.neverSites) !== '["127.0.0.1"]' || st.sitesOn.includes('127.0.0.1') || st.disconnected.includes('127.0.0.1')) throw new Error(`status: ${JSON.stringify([st.neverSites, st.sitesOn, st.disconnected])}`);
+      await this.shot(this.panelCtx, 'panel-never-gate');
+      await d.click(this.panelCtx, '#gate-btn');
+      // Off the list: off (Chrome's test build and every-site TRIF keep access), or disconnected (Firefox: its access went with it).
+      const off = await this.waitPanel('the gate after', (x) => x.gate && x.gateTitle !== p.gateTitle);
+      if (!/^(The robot is off\.|The robot is disconnected from 127\.0\.0\.1\.)$/.test(off.gateTitle)) throw new Error(`after: ${JSON.stringify(off)}`);
+      await d.click(this.panelCtx, '#gate-btn');
+      await this.waitPage('the mod again', (x) => x.banner === 'ran');
+      return `listed: ${listed.join(', ')}; after: "${off.gateTitle}"`;
+    });
 
     await r.check('the robot in the top bar: on a site TRIF is on for, it puts it to sleep like the power button; on the gate, it wakes it like Fix', async () => {
       const all = ['#dot', '#site', '#bar-robot', '#site-switch', '#new-chat', '#settings-btn'];
@@ -1011,10 +1068,16 @@ class Scenario {
         return results[0];
       });
     }
-    // Fresh Firefox, given <all_urls> while it runs (from the add-on's about:addons permissions, say).
-    const grantedNow = !this.allSites && !chrome && await r.check('Firefox: TRIF given <all_urls> while it runs', async () => {
-      if (!(await d.setAllSites(this.control, true))) throw new Error('permissions.request said no');
+    // Fresh Firefox: "Allow TRIF on every site" in the panel's settings, while it runs (asked for for real).
+    const grantedNow = !this.allSites && !chrome && await r.check('Firefox: "Allow TRIF on every site" in the panel\'s settings gets <all_urls>', async () => {
+      await d.click(this.panelCtx, '#settings-btn');
+      await waitFor('the button', () => this.panel(`async () => !document.querySelector('#settings').hidden && document.querySelector('#access-btn').textContent === 'Allow TRIF on every site'`), { timeoutMs: 5000 });
+      await d.click(this.panelCtx, '#access-btn');
       await waitFor('<all_urls> granted', () => this.ext(`async () => chrome.permissions.contains({ origins: ['<all_urls>'] })`), { timeoutMs: 5000 });
+      const x = await waitFor('the panel to say so', () => this.panel(`async () => document.querySelector('#access-btn').textContent === 'Limit TRIF to the sites it’s on' && document.querySelector('#access-note').textContent`), { timeoutMs: 8000 });
+      await this.shot(this.panelCtx, 'panel-every-site');
+      await d.click(this.panelCtx, '#settings-btn');
+      return x;
     });
     // Firefox only gives the running background captureTab if it had <all_urls> when it started (screenshot.js):
     // given now, a background capture says to restart Firefox. (Someone who updated from a version that
@@ -1048,7 +1111,19 @@ class Scenario {
         return `${x.json.how}, ${size.w}x${size.h}, ${size.bytes} bytes${x.json.slices ? `, slices at ${x.json.slices.join('/')} of ${x.json.viewport}px` : ''}; note: ${x.json.note || '(none)'}`;
       });
     }
-    if (grantedNow) await d.setAllSites(this.control, false).catch((e) => r.note(`couldn't take <all_urls> back: ${e.message}`));
+    if (grantedNow) {
+      await r.check('Firefox: "Limit TRIF to the sites it\'s on" gives <all_urls> back and keeps the sites that are on', async () => {
+        await d.click(this.panelCtx, '#settings-btn');
+        await waitFor('the button', () => this.panel(`async () => !document.querySelector('#settings').hidden && document.querySelector('#access-btn').textContent === 'Limit TRIF to the sites it’s on'`), { timeoutMs: 5000 });
+        await d.click(this.panelCtx, '#access-btn');
+        const origins = await waitFor('<all_urls> gone', async () => { const o = await this.ext(`async () => (await chrome.permissions.getAll()).origins`); return o.includes('<all_urls>') ? null : o; }, { timeoutMs: 8000 });
+        const st = (await this.cli(['status'], { json: true })).json.extension;
+        if (st.access.all || st.disconnected.some((x) => st.sitesOn.includes(x))) throw new Error(`status: ${JSON.stringify([st.access, st.sitesOn, st.disconnected])}`);
+        if (!['*://127.0.0.1/*', '*://*.x.com/*'].every((o) => origins.includes(o))) throw new Error(`granted: ${JSON.stringify(origins)}`);
+        await d.click(this.panelCtx, '#settings-btn');
+        return `sites on ${st.sitesOn.join(', ')}; granted ${origins.join(' ')}`;
+      });
+    }
     await this.ext(`async (id) => { await chrome.tabs.remove(id); }`, [sweepTab]).catch(() => {});
   }
 

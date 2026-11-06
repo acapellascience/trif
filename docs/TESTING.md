@@ -51,8 +51,9 @@ Per browser, a **fresh** scenario, and an **upgrade** scenario per `--upgrade-fr
    next), allow user scripts (it ticks that step itself; the sites TRIF starts on are next, waiting for
    the browser's OK), and check: `trif status` (the extension's hello, its browser),
    `trif doctor`, the shipped mods (`trif mods`, which start on and off, the sites TRIF starts on for).
-   Then the sites step (see "Site access" below): Firefox clicks "Allow these sites" and checks all four
-   are granted; Chrome clicks "Not now" for the two its test build doesn't have, and checks they're off.
+   Then the sites step (see "Site access" below; its buttons: Allow these sites, Allow TRIF on every site,
+   Not now): Firefox clicks "Allow these sites" and checks all four are granted; Chrome clicks "Not now"
+   for the two its test build doesn't have, and checks they're off.
    The agent's login is next.
 3. Against a local test site (`http://127.0.0.1:<port>`, `http://localhost:<port>`) with a mod the
    harness writes, and the panel opened as a window following the test window (`sidepanel.html?window=<id>`):
@@ -62,18 +63,24 @@ Per browser, a **fresh** scenario, and an **upgrade** scenario per `--upgrade-fr
      `trif enable` from the CLI (page and panel follow), the site switch off (nothing runs, page
      commands refused) and on again; the same with the robot in the top bar (off like the power button,
      on from the gate like Fix, a little brighter under the mouse);
-   - Firefox: Fix asked the browser for 127.0.0.1 (granted: prompts are off), turning the site off gave it
-     back; then it's taken away (`permissions.remove`, as the browser's settings would): the panel shows
-     "Allow TRIF on 127.0.0.1" with "TRIF needs your OK to work on 127.0.0.1.", the mod stops, `trif text`
-     is refused saying why, and clicking the button brings it all back;
+   - the site switch off keeps the site's access (on again asks nothing), and the gate offers "Disconnect
+     from 127.0.0.1" unless TRIF has every site; Firefox: Disconnect gives the access back, the panel says
+     "The robot is disconnected from 127.0.0.1.", `trif text` and `trif status` say disconnected, and
+     "Connect to 127.0.0.1" asks (granted: prompts are off) and turns it on in one click; the same after
+     the access is taken away as the browser's settings would (`permissions.remove`);
+   - "Never on 127.0.0.1" from the panel's settings: the mod stops, `trif text`, `screenshot` and `run`
+     are refused with the never list's words, the gate says so; "Take it off the list" leaves it off or
+     disconnected, and its button turns it on again;
    - the panel follows tab switches and navigation; a mod for `localhost`, where TRIF stays off, never runs.
    - `trif sweep --selector/--text/--color` on a page of repeated things (`/sweep.html`: regions, a sticky
      header, a shadow root, a same-origin frame, a CSS variable) finds the expected counts; `trif status
      --tab` lists the mods on that page. Screenshots, without access to every site (fresh): of that tab
      while it's in the background, `--full` and (Chrome) `--copy` are refused with a hint and change
      nothing; Chrome: the tab in front is refused until TRIF's toolbar button is clicked on it
-     (`Extensions.triggerAction`, which gives `activeTab`), then captured; Firefox, given `<all_urls>` while
-     it runs: a background capture says to restart Firefox (its running background gets no `captureTab`).
+     (`Extensions.triggerAction`, which gives `activeTab`), then captured; Firefox: "Allow TRIF on every
+     site" in the panel's settings gets `<all_urls>` for real, a background capture then says to restart
+     Firefox (its running background gets no `captureTab`), and "Limit TRIF to the sites it's on" gives
+     `<all_urls>` back while keeping the sites that are on.
      With access to every site from the start (upgrade scenarios): `trif screenshot` and `--full` of the
      background tab work (Firefox: the tab itself; Chrome: refused with a hint about `--copy`, then with
      `--copy`, a copy in a window of its own) and leave every window's active tab, the focused window and

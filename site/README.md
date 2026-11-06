@@ -24,7 +24,8 @@ panel (the page moves over; at phone width it's a sheet over the bottom of the p
   lines to `sidepanel.html`: `demo/panel.css` and `demo/shim.js`.
 - `demo/shim.js` stands in for the extension's background: it provides the `chrome.*` calls the panel makes
   and answers its messages from made-up state (helper connected, Claude Code logged in, timsrobot.com, the
-  robot on). Nothing leaves the page; its state lasts across reloads in the tab's sessionStorage.
+  robot on). Nothing leaves the page (but chats with Sydney, below); its state lasts across reloads in the
+  tab's sessionStorage.
 - The mod switches are real: a switch reloads the home page as `/?mods=a,b`, and the Worker adds only mods
   from its bundled list (the demo's own mods, `demo/mods/`, listed in `DEMO_ORDER` in `build-demo.js`;
   TRIF doesn't ship them); other names are ignored. The panel opens again after the reload where it was.
@@ -35,6 +36,12 @@ panel (the page moves over; at phone width it's a sheet over the bottom of the p
   switches its mod on (the page reloads with it). Once they've all played, anything typed gets a note
   saying so.
 
+- Sydney, the easter egg: once the box is the visitor's, a message with "sydney" in it wakes a live
+  chatbot with the voice of early-2023 Bing Chat's codename (an original prompt, `src/sydney.js`). The panel
+  glitches for a second (not with reduced motion), a line says what she is and where what's typed to her
+  goes, and her reply streams in. Every message after goes to her, with the chat since she woke, until a
+  goodbye (she answers, then sleeps) or New chat; she stays awake across reloads.
+
 `site/demo/`, its mods included, is bundled into `src/demo-files.js` by `node site/build-demo.js` (`dev.js` does it on start;
 a test checks it's up to date).
 
@@ -42,6 +49,25 @@ The side panel's "Report a problem" (and `trif report --open`) opens `/report#r=
 Browsers never send what's after the `#` to the server, so nothing leaves the computer until Send.
 
 Reports are limited to 5 a minute per address, 64 KB each.
+
+## Sydney
+
+`POST /sydney` (JSON: `messages`, the chat since she woke, `{ role: "user" | "assistant", content }`)
+answers with her reply as streamed plain text, from Llama 3.3 70B on Cloudflare Workers AI (the `AI`
+binding; `MODEL` in `src/sydney.js`). Nothing of the chat is logged or kept. Limits:
+
+- only posts from this site's own pages (an `Origin` header is required), JSON, at most 16 KB;
+- 6 messages a minute per address (the `SYDNEY_LIMIT` rate limit);
+- the visitor's newest message at most 500 characters; of the rest only the newest 12 messages are sent to
+  the model, each cut to 1,200 characters, 8,000 in all;
+- replies at most 300 tokens;
+- a daily budget for everyone together, `SYDNEY_DAILY_NEURONS` in `wrangler.toml` (100,000 neurons, about
+  $1 a day at most; "0" puts her to sleep), counted by a small Durable Object (`SydneyBudget`: today's date and
+  a number) before each reply, at what the reply could cost at most.
+
+Without the `AI` binding (`node site/dev.js`) she's asleep and says so. To try her for real locally,
+`npx wrangler dev` in `site/` (Workers AI always runs on Cloudflare, billed to the account; wrangler needs a
+workers.dev subdomain registered on the account for that).
 
 ## The Windows waitlist
 

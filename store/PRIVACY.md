@@ -1,6 +1,6 @@
 # TRIF privacy policy
 
-Last updated: November 4, 2026
+Last updated: November 6, 2026
 
 Tim's Robot Internet Fixer (TRIF, called WebMods before version 0.2.0) is a browser extension (for
 Chrome, Firefox and Safari) that runs website customizations ("mods") written by **your own coding
@@ -104,7 +104,12 @@ report form and delivers its email. It isn't used for advertising, profiling, or
 ## The website
 
 timsrobot.com has no analytics, no tracking and no cookies. Its demo keeps its state only in your
-browser (nothing is sent anywhere). Cloudflare, which hosts it, sees ordinary requests (your IP address, the pages you load)
+browser (nothing is sent anywhere), with one exception: if you wake Sydney, the chatbot hidden in the
+demo's chat box (by typing her name there), what you type while she's awake, with the chat since she
+woke, is sent through timsrobot.com to Cloudflare Workers AI, which runs the open model that writes her
+replies, under Cloudflare's privacy policy. The site doesn't store or log those chats, and the developer
+never sees them; to limit use, it counts messages to her from your IP address in a minute (the address
+isn't stored). Cloudflare, which hosts the site, sees ordinary requests (your IP address, the pages you load)
 as any web host does.
 
 ## The Windows waitlist (the website, not the extension)

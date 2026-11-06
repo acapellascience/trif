@@ -62,6 +62,9 @@
       animation: tb-blink 1s steps(1) infinite; }
     .tb-typing .tb-cursor { animation: none; }
     @keyframes tb-blink { 50% { opacity: 0; } }
+    /* (on a computer, smaller: it sits beside What you need, and a long terminal pushed the page's end out of
+       the window) */
+    @media (min-width: 701px) { [data-tb] { font-size: 12px; line-height: 1.5; } }
     @media (prefers-reduced-motion: reduce) { .tb-cursor { animation: none; } .tb-ls > span, [data-tb] .tb-body p { transition: none; } }
   `;
   document.head.append(style);

@@ -134,7 +134,7 @@ svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width:
 /* There the top bar keeps only the dot, the robot (grey and dim, below) and settings; with no website, only
    settings, and the dot when something red is wrong. Settings are for every site, so they open from both.
    (A notice moved into the gate, the login in progress, shows: only the body's own notices hide.) */
-body:is(.site-off, .no-site) :is(.site, #site-switch, #new-chat, .mods, .chat, .composer),
+body:is(.site-off, .no-site) :is(.site, #site-switch, #new-chat, .mods, .chat, .composer, .using),
 body:is(.site-off, .no-site) > .notice { display: none; }
 body.no-site .bar-robot, body.no-site:not(.blocked) .dot { display: none; }
 /* No website in this tab (a new tab, the browser's own pages): only the shaded robot, where the gate's sits. */
@@ -433,6 +433,12 @@ body[data-problem="helper"] .mod-list, body.needs-login .mod-list { --switch-on:
 
 /* ---- composer -------------------------------------------------------------------------------- */
 
+/* which agent and model this chat uses, small, over the message box */
+.using { display: block; margin: 0 12px 2px auto; padding: 0 2px; border: 0; background: none; color: var(--faint);
+  font: 11px/1.4 inherit; text-align: right; cursor: pointer; max-width: calc(100% - 24px); overflow: hidden;
+  text-overflow: ellipsis; white-space: nowrap; }
+.using:hover { color: var(--muted); text-decoration: underline; }
+.using[hidden] { display: none; }
 .composer {
   flex: none;
   position: relative;

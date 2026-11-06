@@ -14,6 +14,10 @@ needs a section here for the version it releases.
 - Plain X is now **Detox Timeline** (`x.com/detox-timeline`). If yours was unchanged, it's replaced, and it
   stays on if it was on; if you changed it, yours stays as it is, and Detox Timeline arrives switched off.
 - Your agent now keeps mod descriptions short (4 to 9 words).
+- **A model you pick stays in that chat.** Picking a model for one site's chat used to make it the model of
+  every site you chatted on next, without saying so. Now each chat keeps its own, new chats start on the
+  agent's default, and a small line over the message box always says which agent and model this chat
+  uses (click it to change them).
 - **Open models handle long chats.** A long chat with an open model could stop with a "maximum context
   length" error. TRIF now tells it how much the model holds, so the chat gets summarized well before it
   outgrows it; and if a chat ever does, you're told to start a new one instead of seeing the raw error.

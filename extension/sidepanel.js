@@ -20,7 +20,7 @@ const ui = {
   gate: $('#gate'), gateBtn: $('#gate-btn'), gateErr: $('#gate-err'), gateNote: $('#gate-note'),
   landing: $('#landing'), landingIcon: $('#landing-icon'), landingVersion: $('#landing-version'), landingNote: $('#landing-note'),
   settings: $('#settings'), agent: $('#agent'), agentNote: $('#agent-note'), model: $('#model'),
-  modelCustomRow: $('#model-custom-row'), modelCustom: $('#model-custom'), modelNote: $('#model-note'),
+  using: $('#using'), modelCustomRow: $('#model-custom-row'), modelCustom: $('#model-custom'), modelNote: $('#model-note'),
   instructions: $('#instructions'), instructionsNote: $('#instructions-note'),
   autoUpdate: $('#auto-update'), updateNote: $('#update-note'), update: $('#update'),
   notice: $('#notice'), paused: $('#paused'), mods: $('#mods'), modsCount: $('#mods-count'), modList: $('#mod-list'), modsLive: $('#mods-live'),
@@ -163,9 +163,15 @@ async function init() {
   // In Safari the panel is a window of its own, opened with ?window=<the window whose tabs it follows>.
   const opener = Number(new URLSearchParams(location.search).get('window'));
   view.windowId = opener || (await chrome.windows.getCurrent()).id;
-  const stored = await chrome.storage.local.get(['settings', 'sitePicks', 'disabled', 'offSites', 'updated', 'modOrder', 'defaultOrder']);
+  const stored = await chrome.storage.local.get(['settings', 'sitePicks', 'disabled', 'offSites', 'updated', 'modOrder', 'defaultOrder', 'defaultModelsReset']);
   view.updated = stored.updated || null;
   view.settings = normalizeSettings(stored.settings);
+  // Once (0.2.2): the default's models, which models picked on sites used to be copied into (see
+  // saveSettings), back to each agent's default. Each site's own picks stay.
+  if (!stored.defaultModelsReset) {
+    view.settings = { ...view.settings, models: {} };
+    chrome.storage.local.set({ settings: view.settings, defaultModelsReset: true }).catch(() => {});
+  }
   view.picks = normalizePicks(stored.sitePicks);
   view.disabled = stored.disabled || {};
   view.offSites = normalizeOffSites(stored.offSites);
@@ -1114,6 +1120,21 @@ function renderModels() {
   ui.modelNote.textContent = note;
   ui.modelNote.hidden = !note;
   ui.modelNote.classList.toggle('error', !!list?.error || (!known && !allowsOther));
+  renderUsing(info, chosen, models, def);
+}
+
+/**
+ * The line over the message box: this chat's agent and model ("Open model · Kimi K2.7 Code", "Claude Code ·
+ * Default (Opus)"), so a model picked somewhere else is never a surprise. The model's name once its list has
+ * loaded (settings), its id until then.
+ */
+function renderUsing(info, chosen, models, def) {
+  if (!info) { ui.using.hidden = true; return; }
+  const named = chosen && models.find((m) => m.id === chosen);
+  const model = chosen ? (named ? named.name : chosen) : def ? `Default (${def.name})` : 'Default model';
+  ui.using.textContent = `${info.name} · ${model}`;
+  ui.using.title = 'Change the agent or model';
+  ui.using.hidden = false;
 }
 
 async function saveModel(agentId, model) {
@@ -1124,12 +1145,15 @@ async function saveModel(agentId, model) {
 // ---- actions ------------------------------------------------------------------------------------
 
 /**
- * Changes this site chat's agent settings (its pick), and makes them the default for sites without one.
- * (No site: just the default.)
+ * Changes this site chat's agent settings (its pick), and makes its agent (not its models) the default for
+ * sites without one. (No site: just the default, models too.)
  */
 async function saveSettings(patch) {
   const next = { ...chatSettings(), ...patch };
-  view.settings = normalizeSettings(next);
+  // On a site, its models stay its own: they don't become every new chat's (0.2.1 copied them into the
+  // default, so a model tried once on one site quietly became the model of every site chatted on later).
+  // The agent still does. With no site open (settings on the landing page), this is the default itself.
+  view.settings = normalizeSettings(view.site ? { ...next, models: view.settings.models } : next);
   if (!view.site) return chrome.storage.local.set({ settings: view.settings });
   view.picks = { ...view.picks, [view.site]: normalizeSettings(next) };
   await chrome.storage.local.set({ settings: view.settings, sitePicks: view.picks });
@@ -1262,6 +1286,7 @@ function toggleSettings(open = ui.settings.hidden) {
   if (open && view.status?.helper?.connected) { loadAgents().then(() => loadModels(currentAgent().id)); loadInstructions(); }
 }
 const openSettings = () => { if (ui.settings.hidden) toggleSettings(true); };
+ui.using.addEventListener('click', () => { openSettings(); try { ui.model.focus(); } catch { /* disabled */ } });
 
 // The user's standing instructions for every agent run: ~/.trif/instructions.md, read and written
 // through the helper (helper/lib/instructions.js). Loaded when settings open; saved as they type.

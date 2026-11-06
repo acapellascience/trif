@@ -234,7 +234,7 @@
     return {
       helper: { connected: true, error: null },
       userScripts: true, settingsUrl: `chrome://extensions/?id=${EXTENSION_ID}`, version: v, chrome: '142.0.7444.60', browser: 'Chrome',
-      recording: [], sitesOn: state.sitesOn.slice(),
+      recording: [], sitesOn: state.sitesOn.slice(), noAccess: [], siteAccess: true,
       update: { current: v, latest: v, available: false, canInstall: true, auto: state.autoUpdate, source: 'npm', notes: '', installing: false, error: null },
       mods: state.mods.map((m) => ({
         id: m.id, name: m.name, description: m.description, site: SITE, file: fileOf(m), matches: m.matches, excludes: [],
@@ -468,6 +468,7 @@
       case 'agent.login': throw new Error(DEMO.words.noLogin);
       case 'agent.loginCode': case 'agent.loginCancel': return { ok: true };
       case 'chat.clear': stopRuns(); await local.remove(chatKey); return { cleared: true };
+      case 'panel.window': return null; // (which window the side panel is in: for the toolbar button)
       case 'chat.note': updateChat((c) => { c.messages.push({ role: 'tool', text: String(msg.text ?? ''), time: Date.now() }); }); return { ok: true };
       case 'site.set': {
         const on = msg.on !== false;
@@ -575,7 +576,11 @@
       onActivated: event(), onUpdated: event(), onAttached: event(), onDetached: event(), onRemoved: event(),
     },
     windows: { getCurrent: async () => ({ id: TAB.windowId, focused: true }), update: async () => ({ id: TAB.windowId }) },
-    permissions: { request: async () => true, contains: async () => true },
+    // The browser's OK for a site (the panel asks for it when the robot is turned on): always yes here.
+    permissions: {
+      request: async () => true, contains: async () => true, remove: async () => true,
+      getAll: async () => ({ origins: ['<all_urls>'], permissions: [] }), onAdded: event(), onRemoved: event(),
+    },
   };
   Object.defineProperty(window, 'chrome', { value: chrome, configurable: true, writable: true });
 

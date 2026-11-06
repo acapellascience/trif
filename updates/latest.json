@@ -1,10 +1,10 @@
 {
-  "version": "0.2.1",
-  "published": "2026-11-05",
-  "notes": "- **Side-panel agents are kept on a tighter leash.** In 0.2.0:\n  - a Claude Code run could search files anywhere in your home folder (its search tools weren't limited\n    the way its file reading was), and on a Mac that made \"node would like to access…\" prompts pop up;\n  - Claude Code runs also had a dozen more tools than TRIF uses (among them sending messages to your other\n    Claude sessions and notifications to you), and could write into the folder where your other Claude\n    sessions keep their scratch files;\n  - Codex runs could search the web, read other users' folders and other disks, and read and write the\n    computer's shared temporary folders, where other programs (Claude Code sessions among them) keep\n    their files.\n\n  Now Claude Code runs only get the tools TRIF needs, and both agents' searches, reads and writes stay\n  within what TRIF allows: no web search, no shared temporary folders, no other users' folders or disks.",
+  "version": "0.2.3",
+  "published": "2026-11-06",
+  "notes": "- **New mods, off until you switch them on:** X-Flyer flies a fighter over X (Shift+S, or the rocket\n  button) to blast the timeline; Follow status marks the people on X who follow you back; Three-Column\n  Feed lays Instagram's home feed out three posts wide.\n- The mods TRIF ships for X, Amazon, Instagram and Google are updated, with new names and short\n  descriptions. DVD Logo also finds Google's newer logo and bounces it off its real edges.\n  If you changed one, the side panel offers the new version; yours stays until you choose.\n- Plain X is now **Detox Timeline** (`x.com/detox-timeline`). If yours was unchanged, it's replaced, and it\n  stays on if it was on; if you changed it, yours stays as it is, and Detox Timeline arrives switched off.\n- Your agent now keeps mod descriptions short (4 to 9 words).\n- **A model you pick stays in that chat.** Picking a model for one site's chat used to make it the model of\n  every site you chatted on next, without saying so. Now each chat keeps its own, new chats start on the\n  agent's default, and a small line over the message box always says which agent and model this chat\n  uses (click it to change them).\n- **Open models handle long chats.** A long chat with an open model could stop with a \"maximum context\n  length\" error. TRIF now tells it how much the model holds, so the chat gets summarized well before it\n  outgrows it; and if a chat ever does, you're told to start a new one instead of seeing the raw error.",
   "package": {
-    "url": "https://github.com/acapellascience/trif/releases/download/v0.2.1/trif-0.2.1.tgz",
-    "sha256": "68fc9783a0e87b20bb9ed8b4a0c25c90c17211bfcb9716d0389f50911d77d72f",
-    "size": 401743
+    "url": "https://github.com/acapellascience/trif/releases/download/v0.2.3/trif-0.2.3.tgz",
+    "sha256": "a5fdf1f9281824431b85462f137e11920442723b37273b02af0ec4dc7c31502a",
+    "size": 478689
   }
 }

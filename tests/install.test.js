@@ -596,6 +596,27 @@ test('setup --browser firefox writes a manifest with allowed_extensions; doctor 
   assert.match(d.stdout, new RegExp(`FAIL {2}Firefox: .*allowed_extensions doesn't include ${esc(P.FIREFOX_EXTENSION_ID)}`));
 });
 
+test('doctor: a browser whose profile folder is there but that setup didn\'t do is a note, not a failure, while others are set up', async () => {
+  const root = tempDir();
+  const ws = path.join(root, 'ws');
+  fs.mkdirSync(ws, { recursive: true });
+  const fakehome = path.join(ws, 'fakehome');
+  const r = await runCli(['setup', '--verbose', '--browser', 'arc', '--no-link', '--no-examples'], { home: ws });
+  assert.equal(r.code, 0, r.stderr);
+  // Brave and Edge show up after setup (installed later; updates keep the browsers set up as they were).
+  const table = browserTable(fakehome);
+  for (const k of ['brave', 'edge']) fs.mkdirSync(table.find((b) => b.key === k).userData, { recursive: true });
+  let d = await runCli(['doctor'], { home: ws });
+  assert.match(d.stdout, /ok {4}Arc: native host manifest/);
+  assert.match(d.stdout, /- {5}Brave: not set up \(only needed if you use TRIF in Brave\)\n {6}fix: .*setup.* --browser brave/);
+  assert.match(d.stdout, /- {5}Microsoft Edge: not set up/);
+  assert.doesNotMatch(d.stdout, /FAIL.*native host manifest missing/);
+  // Nothing set up anywhere: then a missing manifest is the problem.
+  fs.rmSync(path.join(table.find((b) => b.key === 'arc').nativeDir, `${P.HOST_NAME}.json`));
+  d = await runCli(['doctor'], { home: ws });
+  assert.match(d.stdout, /FAIL {2}Brave: native host manifest missing/);
+});
+
 test('browserTable: Firefox has one native host folder for every profile', () => {
   const mac = browserTable('/H', 'darwin').find((b) => b.key === 'firefox');
   assert.equal(mac.nativeDir, '/H/Library/Application Support/Mozilla/NativeMessagingHosts');

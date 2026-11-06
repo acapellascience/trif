@@ -249,7 +249,15 @@ async function doctor(opts = {}) {
     for (const t of targets) {
       const file = path.join(t.nativeDir, `${P.HOST_NAME}.json`);
       const fix = `${setupFix}${t.key !== 'custom' ? ` --browser ${t.key}` : ''}`;
-      if (!fs.existsSync(file)) { add('fail', `${t.label}: native host manifest missing (${file})`, fix); continue; }
+      if (!fs.existsSync(file)) {
+        // A browser whose profile folder is there but which setup never did, while others are set up: one
+        // installed (or first opened) after setup, which updates don't add (they keep the browsers set up),
+        // one setup was told to leave out (--browser), or one long gone that left its folder. Not a problem
+        // unless TRIF is meant to work in it.
+        if ((withManifest.length || safari) && t.key !== 'custom') add('info', `${t.label}: not set up (only needed if you use TRIF in ${t.label})`, fix);
+        else add('fail', `${t.label}: native host manifest missing (${file})`, fix);
+        continue;
+      }
       let m;
       try { m = JSON.parse(fs.readFileSync(file, 'utf8')); } catch (e) {
         add('fail', `${t.label}: native host manifest is not valid JSON (${file})`, fix); continue;

@@ -64,3 +64,36 @@ html.demo-phone .composer textarea { padding: 6px 40px 6px 10px; max-block-size:
    can't be focused (shim.js), and 16px, so a phone never zooms in on it. */
 html.demo-phone.demo-guided #input { pointer-events: auto; overflow-y: auto; font-size: 16px;
   max-block-size: calc(8lh + 14px); -webkit-user-select: none; user-select: none; }
+
+/* Sydney, the easter egg (shim.js): her name in a message wakes her. The panel glitches for a moment
+   (colour and position only, no flashing light and dark; none with reduced motion), then her messages
+   and the accent turn pink while she's awake. */
+html.demo-sydney { --accent: light-dark(#b8338f, #ff8fd6); --sydney: light-dark(#b8338f, #ff8fd6); }
+.msg.demo-sydney-msg { padding: 6px 10px 7px 11px; border-left: 2px solid var(--sydney, #ff8fd6); border-radius: 2px 10px 10px 2px;
+  background: color-mix(in srgb, var(--sydney, #ff8fd6) 8%, transparent); }
+.msg.demo-sydney-msg::before { content: "Sydney"; display: block; margin-bottom: 2px; color: var(--sydney, #ff8fd6); font-size: 11px; letter-spacing: 0.04em; }
+/* the line saying what she is (and where what's sent to her goes) */
+.msg.demo-sydney-note { padding: 2px 10px; color: var(--muted); font-size: 11.5px; line-height: 1.45; text-align: center; white-space: pre-wrap; }
+/* "Working…" until she starts talking; Stop stops her (the recordings' Stop is locked, above) */
+html.demo-sydney-talking #working { display: none; }
+html.demo-sydney #stop { pointer-events: auto; opacity: 1; }
+
+html.demo-sydney-waking body { animation: demo-sydney-glitch 1.2s steps(1, end) both; }
+html.demo-sydney-waking body::after { content: ""; position: fixed; inset: 0; z-index: 2147483647; pointer-events: none;
+  background: repeating-linear-gradient(0deg, rgb(255 143 214 / 0.09) 0 1px, transparent 1px 3px);
+  animation: demo-sydney-scan 1.2s linear both; }
+@keyframes demo-sydney-glitch {
+  0% { filter: none; transform: none; }
+  8% { filter: hue-rotate(-50deg) saturate(2); transform: translateX(-3px) skewX(-3deg); }
+  16% { filter: none; transform: translateX(2px); clip-path: inset(22% 0 48% 0); }
+  22% { clip-path: none; transform: none; filter: hue-rotate(80deg) saturate(1.6); }
+  34% { filter: none; transform: translate(1px, -1px); }
+  46% { filter: hue-rotate(260deg) saturate(2.4); transform: skewX(3deg); clip-path: inset(0 0 64% 0); }
+  54% { clip-path: none; transform: none; filter: saturate(0.4); }
+  70% { filter: hue-rotate(300deg) saturate(1.8); transform: translateX(-1px); }
+  82%, 100% { filter: none; transform: none; clip-path: none; }
+}
+@keyframes demo-sydney-scan { 0% { opacity: 0; } 10%, 75% { opacity: 1; } 100% { opacity: 0; } }
+@media (prefers-reduced-motion: reduce) {
+  html.demo-sydney-waking body, html.demo-sydney-waking body::after { animation: none; }
+}

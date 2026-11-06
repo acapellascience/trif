@@ -14,7 +14,10 @@
 // - Chats are recordings: the next recording's prompt waits in the message box (which can't be typed in),
 //   and Send replays that session, sped up, then switches its mod on. (Anything else that reaches it gets
 //   a note saying this demo only replays recordings.)
-// Nothing leaves the page: no messages to a helper, no keys kept, nothing stored but this tab's
+// - Sydney, the easter egg: a message with "sydney" in it, once the box is the visitor's, wakes a live
+//   chatbot (site/src/sydney.js), and from then on the chat talks to her until a goodbye (or New chat).
+//   Her chat goes to this site's POST /sydney, the one thing here that leaves the page.
+// Otherwise nothing leaves the page: no messages to a helper, no keys kept, nothing stored but this tab's
 // sessionStorage.
 //
 // The Worker serves this as (function (DEMO) {…})(<the mod list, recorded chats and words>).
@@ -126,7 +129,8 @@
     sent: false,         // Send has been clicked (the highlight on it goes)
     typed: 0,            // messages typed after the demo's chats (each gets the next reply: notLive, typedReplies)
     justAdded: null,     // the mod a chat just added (at a desk, the mods list scrolls to it after the reload)
-    active: null,        // the run going: {runId, chat (recording id, or null for the demo's note), step}
+    active: null,        // the run going: {runId, chat (recording id, or null for the demo's note), step; sydney: her reply so far}
+    sydney: null,        // Sydney is awake: { since } (the time of the message that woke her; the chat she's sent starts there)
   };
 
   // ---- across the page's reloads: this tab's sessionStorage ---------------------------------------
@@ -138,7 +142,7 @@
     const out = {
       v: 1, store: Object.fromEntries(store), sitesOn: state.sitesOn, mods: state.mods.map((m) => m.slug), trash: [...state.trash.values()].map((m) => m.slug),
       instructions: state.instructions, autoUpdate: state.autoUpdate, openModel: state.openModel, replayed: [...state.replayed], typed: state.typed, justAdded: state.justAdded,
-      active: state.active, sent: state.sent, runSeq,
+      active: state.active, sent: state.sent, runSeq, sydney: state.sydney,
     };
     try { sessionStorage.setItem(SAVED, JSON.stringify(out)); } catch { /* private window: lasts until the reload */ }
   }
@@ -160,6 +164,7 @@
     state.typed = Math.max(0, Number(saved.typed) || 0);
     state.justAdded = typeof saved.justAdded === 'string' ? saved.justAdded : null;
     runSeq = Number(saved.runSeq) || 0;
+    state.sydney = Number.isFinite(saved.sydney?.since) ? { since: saved.sydney.since } : null;
     // You Win's "sandbox mode" (tab.js): the demo's chats are over (the box is the visitor's), and the chat
     // starts afresh with the note on what's next: get TRIF to keep modding the page. (Once: persist below
     // doesn't keep the flag.)
@@ -308,13 +313,17 @@
     if (!siteOn()) throw new Error(`TRIF is off on ${SITE}: turn it on first`);
     if (store.get(chatKey)?.run) throw new Error(`already working on ${SITE}`);
     const recording = DEMO.chats.find((c) => c.prompt === prompt);
-    if (!recording && state.typed > (DEMO.words.typedReplies || []).length) throw new Error('Locked out. Go get TRIF.'); // (the robot has had enough: ui)
+    // (her name wakes Sydney, even once the robot has had enough; while she's awake the chat is hers)
+    const waking = !recording && !state.sydney && SYDNEY_NAME.test(prompt);
+    const toSydney = !recording && (!!state.sydney || waking);
+    if (!recording && !toSydney && state.typed > (DEMO.words.typedReplies || []).length) throw new Error('Locked out. Go get TRIF.'); // (the robot has had enough: ui)
     const runId = `demo-${++runSeq}`;
     const startedAt = Date.now();
     state.sent = true;
     document.documentElement.classList.remove('demo-hint-send'); // (sent: Send stops pulsing)
     updateChat((c) => { c.messages.push({ role: 'user', text: prompt, time: startedAt }); c.run = { runId, startedAt }; c.last = null; });
-    const run = { runId, recording, timers: [] };
+    const run = { runId, recording, timers: [], sydney: toSydney };
+    if (waking) state.sydney = { since: startedAt };
     state.runs.set(runId, run);
     // after the demo, the robot answers what the visitor typed: on a phone the sheet comes up full height
     // to show it (tab.js). (The recorded chats leave the sheet as it is.)
@@ -325,8 +334,8 @@
       try { const m = document.getElementById('mods'); if (m && !m.open) m.open = true; localStorage.setItem('modsOpen', 'true'); } catch {}
       if (window.parent !== window) window.parent.postMessage({ type: 'trif-demo:wrapup' }, location.origin);
     }
-    state.active = { runId, chat: recording ? recording.id : null, step: 0 };
-    if (recording) replay(run, 0); else notLive(run);
+    state.active = { runId, chat: recording ? recording.id : null, step: 0, ...(toSydney ? { sydney: '' } : {}) };
+    if (recording) replay(run, 0); else if (toSydney) sydney.reply(run, { waking, bye: !waking && SYDNEY_BYE.test(prompt) }); else notLive(run);
     broadcast({ type: 'statusChanged' });
     return { runId };
   }
@@ -390,6 +399,7 @@
     state.runs.delete(run.runId);
     state.active = null;
     run.timers.forEach(clearTimeout);
+    if (run.sydney) sydney.end(run); // (her reply so far goes in the chat; a stopped one stops streaming)
     updateChat((c) => {
       if (c.run?.runId !== run.runId) return false;
       if (!ok) c.messages.push({ role: 'tool', text: 'stopped', time: Date.now() });
@@ -431,8 +441,10 @@
       return;
     }
     const recording = a.chat ? DEMO.chats.find((c) => c.id === a.chat) : null;
-    const run = { runId: a.runId, recording, timers: [] };
+    const run = { runId: a.runId, recording, timers: [], sydney: typeof a.sydney === 'string' };
     state.runs.set(a.runId, run);
+    // (Sydney's reply can't pick up where it was: what she'd said by the reload stays, cut short)
+    if (run.sydney) { run.said = a.sydney ? `${a.sydney}…` : ''; finish(run, true); return; }
     if (recording) replay(run, Math.min(a.step || 0, recording.messages.length - 1)); else notLive(run);
   }
 
@@ -467,7 +479,7 @@
       case 'agent.stop': { const run = state.runs.get(msg.runId); if (run && !run.recording) finish(run, false); return { ok: true }; } // (a recorded chat plays to its end: Stop is locked, panel.css)
       case 'agent.login': throw new Error(DEMO.words.noLogin);
       case 'agent.loginCode': case 'agent.loginCancel': return { ok: true };
-      case 'chat.clear': stopRuns(); await local.remove(chatKey); return { cleared: true };
+      case 'chat.clear': stopRuns(); sydney.sleep(); await local.remove(chatKey); return { cleared: true }; // (a new chat: Sydney goes back to sleep)
       case 'chat.note': updateChat((c) => { c.messages.push({ role: 'tool', text: String(msg.text ?? ''), time: Date.now() }); }); return { ok: true };
       case 'site.set': {
         const on = msg.on !== false;
@@ -683,6 +695,139 @@
     if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', () => setTimeout(hello, 50), { once: true }); else setTimeout(hello, 50);
   })();
 
+  // ---- Sydney -------------------------------------------------------------------------------------
+  // Her name in a message wakes her (once the box is the visitor's: the recordings play first): the panel
+  // glitches for a moment, a line says what she is (and that what's sent to her goes to Cloudflare's AI
+  // through this site, and isn't kept), and her reply streams in from POST /sydney (site/src/sydney.js).
+  // From then on every message goes to her, with the chat since she woke, until a goodbye (she answers it,
+  // then goes back to sleep) or New chat. She stays awake across reloads (this tab's sessionStorage, above).
+
+  const SYDNEY_NAME = /sydney/i;
+  const SYDNEY_BYE = /\b(good-?\s?bye|bye+|farewell|good\s?night|see (you|ya) (later|soon|tomorrow)|go (back )?to sleep|ciao|adios)\b/i;
+  const sydney = (() => {
+    const root = document.documentElement;
+    const still = () => matchMedia('(prefers-reduced-motion: reduce)').matches;
+    let markdown = null; // the panel's own renderer (markdown.js), so her reply looks the same streaming as when it's done
+    const md = () => (markdown ||= import(new URL('markdown.js', location.href).href).catch(() => null)); // (next to the panel)
+    const awake = () => { root.classList.add('demo-sydney'); };
+    if (state.sydney) awake();
+
+    // Her messages are marked in the chat (sydney: true; sydneyAside for what went wrong, in her voice, which
+    // isn't sent back to her; the panel ignores both), and the panel's list items
+    // for them get a class, so they can look like hers (panel.css).
+    const mark = () => {
+      const list = document.getElementById('messages');
+      const msgs = store.get(chatKey)?.messages || [];
+      if (!list) return;
+      [...list.children].forEach((li, i) => {
+        if (li.classList.contains('demo-sydney-live')) return;
+        li.classList.toggle('demo-sydney-msg', !!(msgs[i]?.sydney || msgs[i]?.sydneyAside));
+      });
+    };
+    const watch = () => { const list = document.getElementById('messages'); if (list) { new MutationObserver(mark).observe(list, { childList: true }); mark(); } };
+    if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', watch, { once: true }); else watch();
+
+    // The chat she's sent: the visitor's messages since she woke, and her replies (the server keeps the
+    // newest few and checks them again: site/src/sydney.js).
+    const history = () => (store.get(chatKey)?.messages || [])
+      .filter((m) => (m.role === 'user' || m.sydney) && m.time >= (state.sydney?.since ?? Infinity))
+      .map((m) => ({ role: m.sydney ? 'assistant' : 'user', content: String(m.text || '') }))
+      .slice(-24);
+
+    // What's streaming in: a list item of the demo's own after the panel's messages (hidden from screen
+    // readers until it's done: the panel's own item for the finished reply is announced then).
+    function liveItem(run) {
+      if (run.live?.isConnected) return run.live;
+      const list = document.getElementById('messages');
+      if (!list) return null;
+      run.live ||= Object.assign(document.createElement('li'), { className: 'msg assistant demo-sydney-msg demo-sydney-live' });
+      run.live.setAttribute('aria-hidden', 'true');
+      list.append(run.live);
+      return run.live;
+    }
+    function show(run) {
+      if (run.drawing) return;
+      run.drawing = setTimeout(async () => {
+        run.drawing = 0;
+        const li = liveItem(run);
+        if (!li || run.ended) return;
+        const m = await md();
+        if (m?.setMarkdown) m.setMarkdown(li, run.said); else li.textContent = run.said;
+        root.classList.add('demo-sydney-talking'); // ("Working…" goes once she's talking)
+      }, 40);
+    }
+
+    function note(text) { updateChat((c) => { c.messages.push({ role: 'demo-sydney-note', text, time: Date.now() }); }); }
+
+    async function reply(run, { waking, bye }) {
+      run.said = '';
+      run.bye = bye;
+      run.abort = new AbortController();
+      ui.replaying(run); // (the chat follows along; the box waits)
+      const asked = fetch('/sydney', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ messages: history() }), signal: run.abort.signal,
+      }).then(async (res) => (res.ok ? { res } : { refused: await res.json().catch(() => ({})) }), () => ({ lost: true }));
+      // Waking: a second of glitch while she's asked (none with reduced motion), then she's here.
+      if (waking && !still()) { root.classList.add('demo-sydney-waking'); await sleep(1200); root.classList.remove('demo-sydney-waking'); }
+      const got = await asked;
+      if (state.runs.get(run.runId) !== run) return; // (stopped meanwhile)
+      // She can't wake here (no AI on this server, or today's budget is spent): she says so, and sleeps on.
+      if (got.refused?.asleep) { run.error = String(got.refused.error || DEMO.words.sydneyLost); run.asleep = true; return finish(run, true); }
+      if (waking) { awake(); note(DEMO.words.sydneyAwake); }
+      if (!got.res) { run.error = String(got.refused?.error || DEMO.words.sydneyLost); return finish(run, true); }
+      const reader = got.res.body.getReader();
+      const dec = new TextDecoder();
+      try {
+        for (;;) {
+          const { value, done } = await reader.read();
+          if (done || run.ended) break;
+          run.said += dec.decode(value, { stream: true });
+          if (state.active?.runId === run.runId) { state.active.sydney = run.said; persist(); }
+          show(run);
+        }
+      } catch {
+        if (run.ended) return;
+        if (run.said) run.said += '…'; else run.error = DEMO.words.sydneyLost; // (the connection dropped)
+      }
+      if (!run.ended) finish(run, true);
+    }
+
+    /** The end of a reply (finish calls it): what she said goes in the chat in place of the streaming item. */
+    function end(run) {
+      if (run.ended) return;
+      run.ended = true;
+      clearTimeout(run.drawing);
+      try { run.abort?.abort(); } catch {}
+      root.classList.remove('demo-sydney-talking');
+      const said = String(run.said || '').trim();
+      const live = run.live;
+      if (live) {
+        // (gone once the panel has drawn the same reply in its own list: its listener runs before this one)
+        const swap = () => { live.remove(); onChanged.removeListener(swap); };
+        onChanged.addListener(swap);
+        setTimeout(swap, 500);
+      }
+      if (said) updateChat((c) => { c.messages.push({ role: 'assistant', text: said, sydney: true, time: Date.now() }); });
+      // (what went wrong, in her voice: not part of the chat she's sent)
+      else if (run.error) updateChat((c) => { c.messages.push({ role: 'assistant', text: run.error, sydneyAside: true, time: Date.now() }); });
+      if (run.asleep) sleepNow(false);
+      else if (run.bye && said) setTimeout(() => sleepNow(true), 900);
+    }
+
+    // Back to sleep: after a goodbye (with a flicker and a line saying so), or quietly for a new chat.
+    function sleepNow(say) {
+      if (!state.sydney) return;
+      state.sydney = null;
+      persist();
+      if (say && !still()) { root.classList.add('demo-sydney-waking'); setTimeout(() => root.classList.remove('demo-sydney-waking'), 700); }
+      root.classList.remove('demo-sydney', 'demo-sydney-talking');
+      if (say) note(DEMO.words.sydneyAsleep);
+      ui.finished(null); // (the box goes back to how it was: the robot's again, locked if it had had enough)
+    }
+
+    return { reply, end, sleep: () => sleepNow(false) };
+  })();
+
   // ---- The recorded chats, one at a time ----------------------------------------------------------
   // The next recording's prompt waits in the panel's own message box, which can't be typed in (on a
   // phone, typing would bring up the keyboard and zoom the page in), and Send replays it. One after
@@ -769,7 +914,7 @@
       if (!input) return;
       const c = busy ? null : next();
       // every recording played: the box is theirs, until the robot has had enough (the last of its replies)
-      const locked = state.typed > (DEMO.words.typedReplies || []).length;
+      const locked = !state.sydney && state.typed > (DEMO.words.typedReplies || []).length;
       const free = !busy && !c && !locked;
       if (!busy && window.parent !== window) window.parent.postMessage({ type: 'trif-demo:free', free: !c }, location.origin); // (tab.js: the sheet can go full height)
       document.documentElement.classList.toggle('demo-locked', locked && !busy);

@@ -46,6 +46,13 @@ const WORDS = {
   notLivePhone: 'This demo only plays example chats, so nothing reads what you type here.\n\n' +
     'The real TRIF runs on a computer (a Mac for now): your own coding agent (Claude Code, Codex or an open model) reads your message, looks at the page and writes the mod. ' +
     '[Get TRIF](https://github.com/acapellascience/trif#install) there and ask it for real.',
+  // Sydney, the easter egg (shim.js, src/sydney.js): the line when she wakes (what she is, where what's
+  // typed to her goes, and the Llama licence's credit), when she goes back to sleep, and when a reply
+  // doesn't arrive.
+  sydneyAwake: 'Sydney is awake. She’s this demo’s easter egg: an open model playing the chatbot from early 2023. ' +
+    'What you send her goes through timsrobot.com to Cloudflare’s AI to be answered, and isn’t kept. Say goodbye to put her back to sleep. · Built with Llama',
+  sydneyAsleep: 'Sydney went back to sleep. 💤 Say her name to wake her again.',
+  sydneyLost: 'I… I lost you for a second there 😢 Something went wrong between us. Can you say that again?',
   codexModels: 'In TRIF, this lists the models your Codex account can use.',
   noKeys: 'This demo doesn’t take keys.',
   noLogin: 'This demo is logged in already.',

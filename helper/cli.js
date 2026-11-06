@@ -335,14 +335,18 @@ const handlers = {
     if (sitesOff.size) lines.push('              waiting = not running until the user turns TRIF on for the site, or connects it (side panel)');
     if (st && Array.isArray(st.sitesOn)) {
       lines.push(`sites on      ${st.sitesOn.length ? st.sitesOn.join(', ') : '(none)'}; TRIF is off everywhere else: no mods, no page commands`);
-      // The browser gives TRIF a site only when the user connects it (extension/lib.js "site access"), and the
-      // user's never list keeps TRIF off a site whatever access it has. Only the user changes either, in the panel.
-      if (st.access && st.access.all) lines.push('access        every site (the user allowed TRIF on all of them); sites still follow their switch');
-      if (Array.isArray(st.disconnected) && st.disconnected.length) {
-        lines.push(`disconnected  ${st.disconnected.join(', ')}: TRIF has no access there until the user connects it (side panel on the site)`);
+      // Permissive (every site by default) or restrictive (the user connects TRIF site by site), and TRIF's own
+      // block list (extension/lib.js "site access"). Only the user changes either, in the side panel.
+      if (st.siteMode) {
+        lines.push(st.siteMode === 'permissive'
+          ? 'site mode     permissive: access to every site by default; each site still follows its switch'
+          : 'site mode     restrictive: TRIF is disconnected on every site the user hasn\'t connected (side panel on the site)');
       }
-      if (Array.isArray(st.neverSites) && st.neverSites.length) {
-        lines.push(`never         ${st.neverSites.join(', ')}: on TRIF's never list; nothing from TRIF touches them (only the user changes the list, in the side panel's settings)`);
+      if (Array.isArray(st.disconnected) && st.disconnected.length) {
+        lines.push(`disconnected  ${st.disconnected.join(', ')}: on, but TRIF is disconnected there until the user connects it (side panel on the site)`);
+      }
+      if (Array.isArray(st.blockedSites) && st.blockedSites.length) {
+        lines.push(`blocked       ${st.blockedSites.join(', ')}: blocked in TRIF; nothing from TRIF touches them (only the user unblocks them, in the side panel)`);
       }
     }
     if (st) lines.push(`recording     ${(st.recording || []).length ? st.recording.join(', ') : '(none)'}`);

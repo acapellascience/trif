@@ -68,6 +68,14 @@
   .login-form input { flex: 1; min-width: 0; padding: 6px 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--bg); color: var(--text);
     font: 13px ui-monospace, SFMono-Regular, Menlo, monospace; }
   .note { font-size: 13px; }
+  /* Site permissions: two choices side by side; and, ticked, what declining the prompt chose. */
+  .modes { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+  .mode { font: inherit; text-align: left; display: grid; gap: 2px; padding: 10px 12px; border: 1px solid var(--line); border-radius: 10px;
+    background: var(--code); color: var(--text); cursor: pointer; }
+  .mode b { font-size: 14px; }
+  .mode span { color: var(--muted); font-size: 13px; }
+  .mode:hover { border-color: var(--green); }
+  .step-note { margin: 6px 0 0 36px; color: var(--muted); font-size: 13px; }
   .problem { color: var(--bad) !important; }
 
   /* A picture of Chrome's own switch row on TRIF's Details page, to know it when it's there (its words as
@@ -152,8 +160,9 @@
       </div>
     </li>
     <li id="step-sites" class="step">
-      <h2><span class="mark"></span><span class="name">Allow TRIF on its sites</span><span class="state"></span></h2>
+      <h2><span class="mark"></span><span class="name">Site permissions</span><span class="state"></span></h2>
       <div class="body"></div>
+      <p class="step-note" hidden></p>
     </li>
     <li id="step-login" class="step">
       <h2><span class="mark"></span><span class="name">Log in to your coding agent</span><span class="state"></span></h2>

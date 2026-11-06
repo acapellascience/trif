@@ -3,8 +3,8 @@
 // chrome.storage.local `chat:<site>`; this page renders that record and reacts to storage changes.
 // See docs/PROTOCOL.md, "Side panel and agent runs".
 
-import { siteForUrl, modAppliesTo, modSites, isMultiSite, offOnSite, normalizeOffSites, scopeFor, limitToSites, withOffSites, FIREFOX, BROWSER, PANEL, SETUP_COMMAND,
-  SITE_ACCESS, siteOrigins, siteState, hasSiteAccess, allowEverySite, limitToSitesOn,
+import { siteForUrl, modAppliesTo, modSites, isMultiSite, offOnSite, normalizeOffSites, scopeFor, limitToSites, withOffSites, FIREFOX, BROWSER, SETUP_COMMAND,
+  SITE_ACCESS, siteOrigins, siteState, hasSiteAccess, requestEverySite,
   normalizeModOrder, orderMods, moveId, setModOrder,
   normalizeSettings, normalizePicks, siteSettings, withoutModel } from './lib.js';
 import { setMarkdown } from './markdown.js';
@@ -19,9 +19,10 @@ const emptyChat = () => ({ sessionId: null, agent: null, messages: [], run: null
 const ui = {
   dot: $('#dot'), site: $('#site'), barRobot: $('#bar-robot'), siteSwitch: $('#site-switch'), newChat: $('#new-chat'), settingsBtn: $('#settings-btn'),
   gate: $('#gate'), gateTitle: $('#gate-title'), gateWhy: $('#gate-why'), gateBtn: $('#gate-btn'), gateErr: $('#gate-err'), gateNote: $('#gate-note'),
-  gateLinks: $('#gate-links'), gateDisconnect: $('#gate-disconnect'), gateNever: $('#gate-never'),
-  accessNote: $('#access-note'), accessBtn: $('#access-btn'), accessMore: $('#access-more'), accessErr: $('#access-err'),
-  neverHere: $('#never-here'), neverLink: $('#never-link'), neverList: $('#never-list'), neverEmpty: $('#never-empty'),
+  gateLinks: $('#gate-links'), gateBlock: $('#gate-block'), gateDisconnect: $('#gate-disconnect'),
+  modeDialog: $('#mode-dialog'), modeDialogClose: $('#mode-dialog-close'), modeDialogSwitch: $('#mode-dialog-switch'), modeDialogErr: $('#mode-dialog-err'),
+  modeChoice: $('#mode-choice'), modePermissive: $('#mode-permissive'), modeRestrictive: $('#mode-restrictive'), modeNote: $('#mode-note'),
+  blockedList: $('#blocked-list'), blockedEmpty: $('#blocked-empty'),
   landing: $('#landing'), landingIcon: $('#landing-icon'), landingVersion: $('#landing-version'), landingNote: $('#landing-note'),
   settings: $('#settings'), agent: $('#agent'), agentNote: $('#agent-note'), model: $('#model'),
   using: $('#using'), modelCustomRow: $('#model-custom-row'), modelCustom: $('#model-custom'), modelNote: $('#model-note'),
@@ -624,8 +625,8 @@ function renderMods() {
 // back off. The robot in the bar does what the switch does: wakes the panel, or puts it to sleep.
 // (Unknown until the first status: neither shows.)
 // The site's state (lib.js siteState): on; off (TRIF keeps the browser's access, so on again doesn't ask:
-// a quick before and after); disconnected (no access: connecting asks and turns it on); new (never
-// connected: the first visit's "The robot is off." and Fix, which asks too); never (on the never list).
+// a quick before and after); disconnected (restrictive, no access: a first visit too; the panel all grey,
+// and Connect asks the browser and turns it on); blocked (TRIF's block list: the panel red, and Unblock).
 // (Chrome's own list of sites extensions may not touch doesn't show in chrome.permissions: contains still
 // says yes there, checked in Chrome 156. Such a site looks on or off here; the browser refuses TRIF there.)
 const siteScope = () => (view.site ? scopeFor(view.site) : null);
@@ -633,7 +634,7 @@ const currentState = () => {
   const scope = siteScope();
   if (!scope || !view.status) return null;
   const st = view.status;
-  return siteState(scope, { sitesOn: st.sitesOn, access: st.access || { all: true, origins: [] }, known: st.disconnected, never: st.neverSites });
+  return siteState(scope, { sitesOn: st.sitesOn, access: st.access || { all: true, origins: [] }, blocked: st.blockedSites });
 };
 const siteIsOn = () => currentState() === 'on';
 let siteSwitching = false;
@@ -655,6 +656,8 @@ function renderGate(problem, agentInfo) {
   const state = currentState();
   const gated = known && state !== 'on';
   document.body.classList.toggle('site-off', gated);
+  document.body.classList.toggle('site-disconnected', gated && state === 'disconnected');
+  document.body.classList.toggle('site-blocked', gated && state === 'blocked');
   ui.gate.hidden = !gated;
   ui.siteSwitch.hidden = !known;
   ui.siteSwitch.setAttribute('aria-checked', String(siteIsOn()));
@@ -670,39 +673,54 @@ function renderGate(problem, agentInfo) {
   // notice shows there instead, renderNotice). Red: no Fix button, which couldn't work.
   renderProblemLine(ui.gateNote, gated && !(login.current && !red) ? problem : null, agentInfo);
   if (!gated) return;
-  const title = {
-    disconnected: `The robot is disconnected from ${scope}.`,
-    never: `${scope} is on TRIF’s never list.`,
-  }[state] || 'The robot is off.';
-  const why = {
-    never: 'Nothing from TRIF runs on it or reads it.',
-  }[state] || '';
-  ui.gateTitle.textContent = title;
-  ui.gateWhy.textContent = why;
-  ui.gateWhy.hidden = !why;
+  ui.gateTitle.textContent = state === 'disconnected' ? `TRIF is disconnected on ${scope}`
+    : state === 'blocked' ? `The robot is blocked on ${scope}` : 'The robot is off.';
+  ui.gateWhy.hidden = true;
   ui.gateBtn.hidden = red;
-  ui.gateBtn.textContent = state === 'disconnected' ? `Connect to ${scope}` : state === 'never' ? 'Take it off the list' : `Fix ${scope}`;
+  ui.gateBtn.textContent = state === 'disconnected' ? 'Connect' : state === 'blocked' ? 'Unblock' : `Fix ${scope}`;
   ui.gateBtn.disabled = siteSwitching;
-  // Quiet links under it: give the site's access back (only for a site TRIF has by itself: with every site,
-  // Chrome can't give one back), and the never list.
-  ui.gateDisconnect.hidden = !(state === 'off' && SITE_ACCESS && !view.status.access?.all);
+  // Quiet links under Fix: block the site in TRIF, and disconnect it (give the browser's permission back;
+  // with every site allowed, that offers restrictive mode instead). Not Disconnect in Safari, which keeps
+  // site access in its own settings.
+  ui.gateLinks.hidden = state !== 'off';
+  ui.gateBlock.textContent = `Block on ${scope}`;
   ui.gateDisconnect.textContent = `Disconnect from ${scope}`;
-  ui.gateNever.hidden = !['off', 'new', 'disconnected'].includes(state);
-  ui.gateNever.textContent = `Never on ${scope}`;
-  ui.gateLinks.hidden = ui.gateDisconnect.hidden && ui.gateNever.hidden;
+  ui.gateDisconnect.hidden = !SITE_ACCESS;
 }
 
-// The gate's main button: Fix (new, off), Connect (disconnected), or off the never list.
+// The gate's main button: Fix (off), Connect (disconnected), or Unblock.
 function gateClick() {
-  if (currentState() === 'never') return setNever(false);
+  if (currentState() === 'blocked') return setBlocked(false);
   return setSiteOn(true);
+}
+
+function disconnectClick(e) {
+  e.preventDefault();
+  if (!view.status?.access?.all) { siteAction({ type: 'site.disconnect' }); return; }
+  // Every site allowed: one site can't lose its access, so the card offers restrictive mode.
+  ui.modeDialogErr.hidden = true;
+  ui.modeDialog.showModal();
+}
+
+async function switchToRestrictive() {
+  ui.modeDialogSwitch.disabled = true;
+  try {
+    await request({ type: 'site.mode', mode: 'restrictive' });
+    ui.modeDialog.close();
+    await refreshStatus();
+  } catch (e) {
+    ui.modeDialogErr.textContent = String(e?.message ?? e);
+    ui.modeDialogErr.hidden = false;
+  } finally {
+    ui.modeDialogSwitch.disabled = false;
+  }
 }
 
 async function setSiteOn(on) {
   if (siteSwitching || !view.site) return;
   const state = currentState();
-  if (on && state === 'never') return;
-  // On without the browser's access (disconnected, new) asks for it first. permissions.request must come
+  if (on && state === 'blocked') return;
+  // On without the browser's access (disconnected: Connect) asks for it first. permissions.request must come
   // from the click itself (Firefox allows nothing awaited before it), so it's the first thing here. Off
   // keeps the access, so on again (off) doesn't ask.
   const scope = siteScope();
@@ -713,7 +731,7 @@ async function setSiteOn(on) {
   render();
   try {
     if (asking && !(await asking)) {
-      ui.gateErr.textContent = `TRIF needs your OK to work on ${scope}, so it stays off there.`;
+      ui.gateErr.textContent = `${BROWSER} didn’t get your OK, so TRIF stays disconnected on ${scope}.`;
       ui.gateErr.hidden = false;
       return;
     }
@@ -731,7 +749,7 @@ async function setSiteOn(on) {
   }
 }
 
-// Disconnecting, and the never list: a message to the background for this site, its error under the gate.
+// Disconnecting and blocking: a message to the background for this site, its error under the gate.
 async function siteAction(msg, site = view.site) {
   if (siteSwitching || !site) return;
   siteSwitching = true;
@@ -749,53 +767,54 @@ async function siteAction(msg, site = view.site) {
   }
 }
 
-function setNever(never, site = siteScope()) {
-  return siteAction({ type: 'site.never', never }, site);
+function setBlocked(blocked, site = siteScope()) {
+  return siteAction({ type: 'site.block', blocked }, site);
 }
 
-// Settings, "Sites": every site or per site (not in Safari, which decides that itself), and the never list.
+// Settings, "Site permissions": the mode (not in Safari, which asks per site itself), and the blocked sites.
 function renderSites() {
   const st = view.status;
-  const all = !!st?.access?.all;
-  const show = SITE_ACCESS && !!st;
-  ui.accessNote.hidden = ui.accessBtn.hidden = ui.accessMore.hidden = !show;
-  if (show) {
-    ui.accessNote.textContent = all ? 'TRIF can work on every site you turn it on for, without asking.' : 'TRIF asks before it works on a new site.';
-    ui.accessBtn.textContent = all ? 'Limit TRIF to the sites it’s on' : 'Allow TRIF on every site';
-    ui.accessMore.textContent = all ? 'Then TRIF asks again before it works on a new site.' : EVERY_SITE_NOTE;
-  }
-  const scope = siteScope();
-  const never = st?.neverSites || [];
-  ui.neverHere.hidden = !scope || never.includes(scope);
-  ui.neverLink.textContent = scope ? `Never on ${scope}` : '';
-  const key = JSON.stringify(never);
-  if (ui.neverList.dataset.key !== key) {
-    ui.neverList.dataset.key = key;
-    ui.neverList.replaceChildren(...never.map((site) => {
+  const mode = st?.access?.all ? 'permissive' : st?.siteMode ? 'restrictive' : null; // (null: not chosen yet)
+  ui.modeChoice.hidden = !SITE_ACCESS || !st;
+  ui.modePermissive.setAttribute('aria-pressed', String(mode === 'permissive'));
+  ui.modeRestrictive.setAttribute('aria-pressed', String(mode === 'restrictive'));
+  const blocked = st?.blockedSites || [];
+  const key = JSON.stringify(blocked);
+  if (ui.blockedList.dataset.key !== key) {
+    ui.blockedList.dataset.key = key;
+    ui.blockedList.replaceChildren(...blocked.map((site) => {
       const li = el('li', null, site);
-      li.append(' ', button('Remove', '', () => setNever(false, site)));
+      li.append(' ', button('Unblock', '', () => setBlocked(false, site)));
       return li;
     }));
   }
-  ui.neverEmpty.hidden = never.length > 0;
+  ui.blockedEmpty.hidden = blocked.length > 0;
 }
 
-const EVERY_SITE_NOTE = `TRIF can then work on any site you turn it on for without asking again. ${BROWSER}’s prompt will say it can ${FIREFOX ? 'access your data for all websites' : 'read and change all your data on all websites'}.`;
+function modeNote(text) {
+  ui.modeNote.textContent = text || '';
+  ui.modeNote.hidden = !text;
+}
 
-// From the click (permissions.request): every site, or back to the sites TRIF is on for (lib.js).
-function changeAccess() {
+// Permissive: the browser's prompt for every site, from the click (nothing awaited before it); declined, TRIF
+// stays restrictive. Restrictive: every site's access goes (the background), no prompt.
+function choosePermissive() {
+  if (view.status?.access?.all) return;
+  const asked = requestEverySite(chrome);
+  modeNote('');
+  asked.then((ok) => { if (!ok) modeNote(`${BROWSER} didn’t get your OK, so TRIF stays restrictive.`); },
+    (e) => modeNote(String(e?.message ?? e))).finally(() => setTimeout(refreshStatus, 300));
+}
+
+async function chooseRestrictive() {
   const all = !!view.status?.access?.all;
-  const asked = all ? limitToSitesOn(chrome, view.status.sitesOn || []) : allowEverySite(chrome).then((ok) => ({ ok, limited: false }));
-  ui.accessErr.hidden = true;
-  asked.then(({ ok, limited }) => {
-    if (all && !ok) {
-      ui.accessErr.textContent = limited
-        ? `TRIF no longer works on every site, and ${BROWSER} didn’t get your OK for the sites it’s on: connect each one from the ${PANEL} there.`
-        : 'Nothing changed: TRIF still works on every site.';
-      ui.accessErr.hidden = false;
-    }
-  }, (e) => { ui.accessErr.textContent = String(e?.message ?? e); ui.accessErr.hidden = false; })
-    .finally(() => setTimeout(refreshStatus, 300));
+  if (!all && view.status?.siteMode === 'restrictive') return;
+  modeNote('');
+  try {
+    await request({ type: 'site.mode', mode: 'restrictive' });
+    if (all) modeNote('Every site is disconnected now: connect each one when you visit it.');
+  } catch (e) { modeNote(String(e?.message ?? e)); }
+  refreshStatus();
 }
 
 // A mod on several sites gets a switch for this site only (the setup page has the whole-mod one);
@@ -1397,10 +1416,12 @@ ui.input.addEventListener('keydown', (e) => {
 ui.stop.addEventListener('click', stop);
 ui.newChat.addEventListener('click', newChat);
 ui.gateBtn.addEventListener('click', gateClick);
-ui.gateDisconnect.addEventListener('click', (e) => { e.preventDefault(); siteAction({ type: 'site.disconnect' }); });
-ui.gateNever.addEventListener('click', (e) => { e.preventDefault(); setNever(true); });
-ui.neverLink.addEventListener('click', (e) => { e.preventDefault(); setNever(true); });
-ui.accessBtn.addEventListener('click', changeAccess);
+ui.gateBlock.addEventListener('click', (e) => { e.preventDefault(); setBlocked(true); });
+ui.gateDisconnect.addEventListener('click', disconnectClick);
+ui.modeDialogClose.addEventListener('click', () => ui.modeDialog.close());
+ui.modeDialogSwitch.addEventListener('click', switchToRestrictive);
+ui.modePermissive.addEventListener('click', choosePermissive);
+ui.modeRestrictive.addEventListener('click', chooseRestrictive);
 ui.siteSwitch.addEventListener('click', () => setSiteOn(!siteIsOn()));
 ui.barRobot.addEventListener('click', () => setSiteOn(!siteIsOn())); // off: the Fix button; on: the power button
 for (const chip of document.querySelectorAll('.chip')) {

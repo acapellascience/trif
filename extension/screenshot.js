@@ -57,7 +57,7 @@ export function screenshotPlan({ showing, full = false, captureTab = false, brow
   if (!allUrls) return { error: notAllSites(browser, full ? 'To capture a full page' : "To capture a tab that isn't showing") };
   // Firefox puts captureTab in a page only if the add-on had <all_urls> when that page loaded (checked in
   // Firefox 159: granted later, it shows up in new pages and after the add-on restarts, not in the running
-  // background). So access to every site given since Firefox started needs a restart for this.
+  // background, until Firefox suspends that idle event page and starts it again). A restart settles it.
   if (browser === 'Firefox') {
     return { error: 'TRIF got access to every site after Firefox started, and Firefox only lets it capture tabs in the background ' +
       `once TRIF starts again: ask the user to quit and reopen Firefox. ${CHECK_INSTEAD}` };

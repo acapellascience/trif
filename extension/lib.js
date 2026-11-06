@@ -570,15 +570,17 @@ export function limitToSites(mod, sitesOn) {
 }
 
 // ---- site access ----------------------------------------------------------------------------
-// TRIF asks for no sites at install (the manifest's host permissions are all optional), so the browser
-// gives it a site only when the user says yes: turning TRIF on for a site in the side panel asks for that
-// site's origins (siteOrigins), from the click, which permissions.request needs. A site in `sitesOn`
-// counts only while the browser still gives TRIF access to it (activeSites): the user can take it back in
-// the browser's extension settings, and sites setup turns on (applyStartSites) start without it until the
-// setup page or the panel asks. Whoever installed TRIF when <all_urls> was required keeps it after the
-// update (Chrome and Firefox keep a granted permission that moves to optional), so for them every site
-// has access. Safari asks per site itself and its build keeps <all_urls> (scripts/build-extension.js), so
-// there TRIF doesn't ask or check.
+// TRIF asks for no sites at install (the manifest's host permissions are all optional). Each browser has a
+// site mode (chrome.storage.local `siteMode`), which follows what the browser gives TRIF:
+// - permissive: <all_urls>, every site by default. Chosen on the setup page or in Settings (the browser's
+//   prompt, from the click); whoever installed TRIF when <all_urls> was required keeps it after the update
+//   (Chrome and Firefox keep a granted permission that moves to optional), so they're permissive.
+// - restrictive: TRIF asks per site. A site without the browser's access is disconnected (a first visit
+//   too); "Connect" in the side panel asks for that site's origin (siteOrigins), from the click, and turns
+//   it on. Declining the permissive prompt makes TRIF restrictive.
+// A site in `sitesOn` counts only with access (activeSites), and never when it's blocked in TRIF
+// (`blockedSites`, TRIF's own list, whatever access it has). Safari asks per site itself and its build
+// keeps <all_urls> (scripts/build-extension.js), so there TRIF has no mode and doesn't ask or check.
 
 export const SITE_ACCESS = !SAFARI;
 
@@ -652,66 +654,37 @@ export function sitesWithoutAccess(sitesOn, access) {
   return (sitesOn || []).filter((s) => !hasSiteAccess(access, s));
 }
 
-// Every site (<all_urls>), or back to the sites TRIF is on for. Both must be called from a click, nothing
-// awaited before (permissions.request). Limiting: Firefox grants a site's origins on top of <all_urls> and
-// keeps them when <all_urls> goes, so it asks first and gives <all_urls> back only after a yes. Chrome asks
-// again for origins <all_urls> covers, and whether it keeps them once <all_urls> goes couldn't be checked
-// (its prompt can't be answered in automation), so there <all_urls> goes first, then the sites are asked
-// for (the click still counts after the remove: checked in Chrome 156); a no leaves TRIF without them.
-
-export function allowEverySite(chromeApi) {
+/** Permissive: <all_urls>, asked for from a click (nothing awaited before it). Resolves whether it was granted. */
+export function requestEverySite(chromeApi) {
   return chromeApi.permissions.request({ origins: ['<all_urls>'] });
 }
 
-/** Resolves {ok, limited}: limited = <all_urls> was given back; ok = the sites in `sites` were granted too. */
-export async function limitToSitesOn(chromeApi, sites, firefox = FIREFOX) {
-  const origins = originsFor(sites);
-  const all = { origins: ['<all_urls>'] };
-  if (!origins.length) { await chromeApi.permissions.remove(all); return { ok: true, limited: true }; }
-  if (firefox) {
-    const ok = await chromeApi.permissions.request({ origins });
-    if (ok) await chromeApi.permissions.remove(all);
-    return { ok, limited: ok };
-  }
-  await chromeApi.permissions.remove(all);
-  return { ok: await chromeApi.permissions.request({ origins }), limited: true };
-}
-
-/**
- * The sites a list of granted origins names one by one ("*://*.x.com/*" → x.com; "<all_urls>" or a
- * wildcard host names none): the sites TRIF has been connected to, remembered as `sitesConnected`.
- */
-export function sitesFromOrigins(origins) {
-  const out = [];
-  for (const o of origins || []) {
-    const m = /^(?:\*|https?):\/\/(?:\*\.)?([^/*:]+)(?::(?:\*|\d+))?\//i.exec(String(o));
-    if (m) out.push(m[1]);
-  }
-  return normalizeSitesOn(out);
+/** The mode TRIF is in: what the browser gives it decides; null before the user chose (and not given every site). */
+export function siteModeOf(stored, access) {
+  if (access?.all) return 'permissive';
+  return stored === 'permissive' || stored === 'restrictive' ? 'restrictive' : null;
 }
 
 // ---- a site's state in the side panel, and in what agents are told ---------------------------------
-// - on: in `sitesOn`, with access (and not on the never list): TRIF works there.
+// - on: in `sitesOn`, with access: TRIF works there.
 // - off: with access, not in `sitesOn` (the power button's off): turning it on again doesn't ask.
-// - disconnected: without access, and TRIF has been connected to it or was set up for it (`known`):
-//   connecting asks the browser and turns it on, in one click.
-// - new: without access, never connected (a first visit): "The robot is off." and Fix, which asks too.
-// - never: on the user's never list (`neverSites`): nothing from TRIF touches it, whatever access TRIF
+// - disconnected: without the browser's access (restrictive): a first visit, or a site disconnected,
+//   or one setup turned on that isn't connected yet. "Connect" asks and turns it on, in one click.
+// - blocked: in TRIF's block list (`blockedSites`): nothing from TRIF touches it, whatever access TRIF
 //   has (with <all_urls> one site can't be taken away in Chrome's own settings), and it can't be turned on.
 
-/** The state of `site` (a registrable domain): 'on', 'off', 'disconnected', 'new' or 'never' (see above). */
-export function siteState(site, { sitesOn = [], access = null, known = [], never = [] } = {}) {
-  if ((never || []).includes(site)) return 'never';
-  const has = hasSiteAccess(access, site);
-  if (has) return (sitesOn || []).includes(site) ? 'on' : 'off';
-  return (known || []).includes(site) ? 'disconnected' : 'new';
+/** The state of `site` (a registrable domain): 'on', 'off', 'disconnected' or 'blocked' (see above). */
+export function siteState(site, { sitesOn = [], access = null, blocked = [] } = {}) {
+  if ((blocked || []).includes(site)) return 'blocked';
+  if (!hasSiteAccess(access, site)) return 'disconnected';
+  return (sitesOn || []).includes(site) ? 'on' : 'off';
 }
 
 /** Why a page command or a run can't touch `site`, in the words the panel uses; null when it's on. */
 export function siteRefusal(site, state) {
-  if (state === 'never') return `${site} is on TRIF's never list: nothing from TRIF runs there or reads it, and only the user can take it off the list (in the side panel's settings)`;
-  if (state === 'disconnected') return `TRIF is disconnected from ${site}: nothing from TRIF runs there or reads it until the user connects it (the side panel on that site has the button)`;
-  if (state === 'off' || state === 'new') return `TRIF is off on ${site}: nothing from TRIF runs there or reads it until the user turns it on (the side panel on that site has the switch)`;
+  if (state === 'blocked') return `${site} is blocked in TRIF: nothing from TRIF runs there or reads it, and only the user can unblock it (in the side panel)`;
+  if (state === 'disconnected') return `TRIF is disconnected on ${site}: nothing from TRIF runs there or reads it until the user connects it (the side panel on that site has the button)`;
+  if (state === 'off') return `TRIF is off on ${site}: nothing from TRIF runs there or reads it until the user turns it on (the side panel on that site has the switch)`;
   return null;
 }
 

@@ -48,7 +48,9 @@
     .tb-line { white-space: pre-wrap; word-break: break-all; }
     .tb-ps { color: #3ddc84; }
     .tb-path { color: #6cb6ff; }
-    .tb-ls { display: grid; grid-template-columns: repeat(auto-fill, minmax(16ch, 1fr)); gap: 0 1.5ch; margin: 2px 0 10px; }
+    /* (as many columns as fit, ls-style: three in the half-width box on a computer, then two, then one as it
+       narrows; each as wide as the longest name, fireworks.js and checklist.js, so fewer rows) */
+    .tb-ls { display: grid; grid-template-columns: repeat(auto-fill, minmax(12ch, 1fr)); gap: 0 1.5ch; margin: 2px 0 10px; }
     /* (its own spans only, not ones another mod puts inside them: Gravity mode wraps each word in a span) */
     .tb-ls > span { color: #f0c674; opacity: 0; transition: opacity .15s; }
     .tb-ls > span.tb-on { opacity: 1; }

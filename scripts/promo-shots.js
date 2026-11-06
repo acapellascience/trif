@@ -15,7 +15,8 @@
 //
 // macOS has to allow it, for the app this runs from (Claude, or Terminal): Screen & System Audio Recording
 // (the captures), Automation of Chrome and Firefox (asked the first time: windows, tabs), Accessibility
-// (Firefox has no tab scripting: ⌘1… switches its tabs). The toolbar's height is measured in the page,
+// (Firefox has no tab scripting: ⌘1… switches its tabs). Run it in a terminal of that app (from Claude: its
+// Terminal tab, not Claude Code's own shell, which macOS counts as another app). The toolbar's height is measured in the page,
 // through TRIF (`trif run --browser …`), so TRIF must be on for these sites (it is, out of the box).
 
 const { execFileSync } = require('child_process');
@@ -38,11 +39,14 @@ function screen() {
     JSON.stringify({ x: v.origin.x, y: f.size.height - (v.origin.y + v.size.height), w: v.size.width, h: v.size.height, scale: s.backingScaleFactor })`, true));
 }
 
-/** [outerWidth, outerHeight, innerWidth, innerHeight] of the active tab of the browser's last-focused window. */
-function measure(browser) {
+/**
+ * [outerWidth, outerHeight, innerWidth, innerHeight] of a tab: `tab` (Chrome: AppleScript's tab ids are
+ * TRIF's), else the active tab of the browser's last-focused window.
+ */
+function measure(browser, tab) {
   for (let i = 0; i < 20; i++) {
     try {
-      const out = execFileSync(TRIF, ['run', '--browser', browser, '[outerWidth, outerHeight, innerWidth, innerHeight]'], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
+      const out = execFileSync(TRIF, ['run', '--browser', browser, ...(tab ? ['--tab', String(tab)] : []), '[outerWidth, outerHeight, innerWidth, innerHeight]'], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
       const v = JSON.parse(out); // (trif run prints what the page returns, as JSON)
       if (Array.isArray(v) && v.length === 4 && v.every(Number.isFinite)) return v;
     } catch { /* the page is still loading, or TRIF isn't there yet */ }
@@ -74,13 +78,15 @@ function openChrome(scr) {
     return id of w
   end tell`);
   sleep(4000);
-  // The toolbar's height (tabs, address bar, bookmarks), then the window that leaves 16:9 under it.
-  let [, oh, , ih] = measure('chrome');
+  // The toolbar's height (tabs, address bar, bookmarks), then the window that leaves 16:9 under it. (Its own
+  // tab: another Chrome window may be the last-focused one.)
+  const tab = osa(`tell application "Google Chrome" to get id of active tab of window id ${id}`);
+  let [, oh, , ih] = measure('chrome', tab);
   const top = oh - ih;
   const [w, h] = fit(scr, top);
   osa(`tell application "Google Chrome" to set bounds of window id ${id} to {${scr.x + MARGIN}, ${scr.y + MARGIN}, ${scr.x + MARGIN + w}, ${scr.y + MARGIN + top + h}}`);
   sleep(1500);
-  [, oh, , ih] = measure('chrome');
+  [, oh, , ih] = measure('chrome', tab);
   return { id: Number(id), top: oh - ih, w, h, tabs: SITES.length, check: { innerHeight: ih, want: h } };
 }
 function shootChrome(st, dir) {
@@ -121,11 +127,19 @@ function openFirefox(scr) {
   sleep(1000);
   let [, oh, , ih] = measure('firefox');
   const top = oh - ih;
-  const [w, h] = fit(scr, top);
+  let [w, h] = fit(scr, top);
+  const chrome = load().chrome; // (the same size as Chrome's, when that's open: matching shots)
+  if (chrome && chrome.w <= w) [w, h] = [chrome.w, chrome.h];
   ffWin(`set position of front window to {${scr.x + MARGIN}, ${scr.y + MARGIN}}
   set size of front window to {${w}, ${top + h}}`);
   sleep(1500);
   [, oh, , ih] = measure('firefox');
+  // (Firefox's frame and its page can be a point apart: nudge the height until the page is exactly h)
+  for (let k = 0; k < 3 && ih !== h; k++) {
+    ffWin(`set size of front window to {${w}, ${oh + (h - ih)}}`);
+    sleep(1000);
+    [, oh, , ih] = measure('firefox');
+  }
   return { top: oh - ih, w, h, tabs: SITES.length, check: { innerHeight: ih, want: h } };
 }
 function shootFirefox(st, dir) {

@@ -236,6 +236,7 @@ class Logins {
       // Exit code 0 isn't enough: ask the agent whether it's logged in now (this also refreshes agent.list).
       const st = await agents.loginStatus(adapter, login.ws, login.path, { fresh: true });
       ok = code === 0 && st.loggedIn === true;
+      if (ok) agents.noteLoginWorked(adapter.id); // (agent.list stops saying a run found it logged out)
       if (!ok) {
         const tail = login.notes.slice(-3).join('\n');
         if (code === 0) {

@@ -4,6 +4,11 @@ What's new in each TRIF release (called WebMods before 0.2.0). The text under a 
 panel shows under "What's new", so it's written for people using TRIF. `node scripts/release.js <version>`
 needs a section here for the version it releases.
 
+## Unreleased
+
+- When your coding agent's login runs out, the side panel asks you to log in again (and keeps your
+  message to send again) instead of showing the agent's error twice.
+
 ## 0.2.4
 
 - **TRIF installs with `npx timsrobot setup`.** npm wouldn't take the name "trif", so the package is

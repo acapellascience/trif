@@ -66,9 +66,23 @@ function listAgents(ws, opts = {}) {
 }
 
 // Login status, cached per agent binary: the panel asks for agent.list often and the check spawns the
-// agent. A login (or a run failing with "not logged in") forgets the cache.
+// agent. A login forgets the cache.
 const LOGIN_CACHE_MS = 30000;
 const loginCache = new Map(); // `${id}:${path}` -> {at, value} | {promise}
+
+// Agents whose last run failed for want of a login (runs.js; util.js isLoginFailure). Their own check
+// can still say logged in: Claude Code's `auth status` does with an expired login it can't refresh. So
+// the run's failure wins, until a login from TRIF works or a later run of that agent does (or the helper
+// restarts). In memory only.
+const loginFailed = new Set();
+function noteLoginFailed(id) {
+  if (!id) return;
+  loginFailed.add(id);
+  forgetLoginStatus(id);
+}
+function noteLoginWorked(id) {
+  if (id && loginFailed.delete(id)) forgetLoginStatus(id);
+}
 
 /**
  * Resolves {loggedIn: true|false|null, detail}. Never rejects. `fresh` skips the cache. A saved API key
@@ -76,6 +90,8 @@ const loginCache = new Map(); // `${id}:${path}` -> {at, value} | {promise}
  */
 function loginStatus(adapter, ws, file, { fresh = false } = {}) {
   if (!adapter.loginStatusArgs || !file) return Promise.resolve({ loggedIn: null, detail: '' });
+  // (`fresh`, after a login: what the agent says now.) `expired`: logged out by a run's failure.
+  if (!fresh && loginFailed.has(adapter.id)) return Promise.resolve({ loggedIn: false, detail: 'its last run needed a login', expired: true });
   const key = `${adapter.id}:${file}`;
   const hit = loginCache.get(key);
   if (!fresh && hit && (hit.promise || Date.now() - hit.at < LOGIN_CACHE_MS)) return hit.promise || Promise.resolve(hit.value);
@@ -105,11 +121,16 @@ function forgetLoginStatus(id) {
   for (const k of [...loginCache.keys()]) if (!id || k.startsWith(`${id}:`)) loginCache.delete(k);
 }
 
-/** agent.list result: listAgents plus `loggedIn` (true / false / null when unknown or not available). */
+/**
+ * agent.list result: listAgents plus `loggedIn` (true / false / null when unknown or not available), and
+ * `loginExpired: true` when it's false because a run failed for want of a login (see noteLoginFailed).
+ */
 async function listAgentsWithLogin(ws, opts = {}) {
   const r = listAgents(ws, opts);
   await Promise.all(r.agents.map(async (a) => {
-    a.loggedIn = a.available ? (await loginStatus(getAdapter(a.id), ws, a.path)).loggedIn : null;
+    const st = a.available ? await loginStatus(getAdapter(a.id), ws, a.path) : null;
+    a.loggedIn = st ? st.loggedIn : null;
+    if (st && st.expired) a.loginExpired = true;
   }));
   return r;
 }
@@ -175,5 +196,5 @@ const CLAUDE_SETTINGS = {
 
 module.exports = {
   ADAPTERS, getAdapter, defaultDirs, recordedPath, searchDirs, agentEnv, detect, listAgents,
-  listAgentsWithLogin, loginStatus, forgetLoginStatus, LOGIN_CACHE_MS, agentModels, MODELS_CACHE_MS, contextText, reminderText, hostOf, CLAUDE_SETTINGS, PASSED_KEYS,
+  listAgentsWithLogin, loginStatus, forgetLoginStatus, noteLoginFailed, noteLoginWorked, LOGIN_CACHE_MS, agentModels, MODELS_CACHE_MS, contextText, reminderText, hostOf, CLAUDE_SETTINGS, PASSED_KEYS,
 };

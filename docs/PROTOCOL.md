@@ -690,7 +690,7 @@ Nothing is hosted; the agent uses the user's own login/subscription.
   - **Mods on this site:** the mods whose matches cover the current tab (name, file name, on/off switch;
     see "Mod switches"), collapsed by default when there's a chat.
   - **Chat:** one conversation per site, persisted in `chrome.storage.local` under `chat:<site>` =
-    `{sessionId, agent, messages: [{role: "user"|"assistant"|"tool"|"error", text, time}]}`, at most 500
+    `{sessionId, agent, messages: [{role: "user"|"assistant"|"tool"|"error"|"login"|"mod", text, time}]}`, at most 500
     messages, each message's text cut at 20 000 characters and the chat at about 1 MB (oldest messages
     dropped first; `capChat` in lib.js). The manifest asks for `unlimitedStorage`, so Chrome's 10 MB quota
     doesn't apply. A text box
@@ -698,6 +698,10 @@ Nothing is hosted; the agent uses the user's own login/subscription.
     Assistant text renders as simple markdown (paragraphs, lists, `code`, code blocks, bold, links that
     open in a new tab), escaped first: never inject agent or page text as raw HTML. Tool events render
     as one compact line each ("ran trif reload --tab 12", "edited sites/x.com/hide-reposts.js").
+    A run that failed for want of a login (its `done` has `error.kind: "login"`, see below) leaves one
+    plain `login` line ("Claude Code needs you to log in again.") instead of an error, and none of the
+    agent's own text about it; the panel shows its login notice, and the message that run was sent goes
+    back in the text box (unless something was typed there meanwhile), to send again once logged in.
     While running: a working indicator, the Stop button.
   - **Slash commands.** The panel handles `/model [name|default]` (sets the model setting: each message
     is a new agent process, so the agent's own `/model` would last one message), `/clear` or `/new`
@@ -714,9 +718,11 @@ Nothing is hosted; the agent uses the user's own login/subscription.
   - No reload prompt: the agent reloads the tab after each change (AGENTS.md), and switches reload it too.
   - **States:** helper not connected → short setup instructions (`npx timsrobot setup`, link to Setup page);
     user scripts off → button opening chrome://extensions/?id=…; agent missing → the error text from the
-    helper (it includes the fix); agent not logged in (`loggedIn === false` in `agent.list`, or a run
-    failed with the not-logged-in error) → "Claude Code isn't logged in" with a **Log in** button (see
-    "Logging in" below; agents with `canLogin: false` show `loginFix` instead).
+    helper (it includes the fix); agent not logged in (`loggedIn === false` in `agent.list`, or the chat's
+    last line is a run's `login` line) → "Claude Code isn't logged in" with a **Log in** button (see
+    "Logging in" below; agents with `canLogin: false` show `loginFix` instead). Send waits for the login,
+    except when `loginExpired` (below): the agent's own check still says logged in then, so after
+    logging in from a terminal, sending again is the only way to tell.
   - **Settings:** agent (from `agent.list`; only available ones selectable), optional model name (free
     text with suggestions opus / sonnet / haiku, empty = agent default), for this site's chat: each site
     chat has its own (see "Agent and model per site chat" below).
@@ -740,7 +746,7 @@ New native request commands (answered with a normal `response`):
 
 | cmd | args | result |
 |---|---|---|
-| `agent.list` | – | `{agents: [{id, name, path, available, version, note, loggedIn, canLogin, loginFix}], default}` |
+| `agent.list` | – | `{agents: [{id, name, path, available, version, note, loggedIn, loginExpired?, canLogin, loginFix}], default}` |
 | `agent.start` | `agent, model?, site, url, tabId, prompt, sessionId?, merge?, openModel?` | `{runId}` right away; progress arrives as `agentEvent` messages. `merge`: a shipped mod's id, to merge its new version (see "Updates to shipped mods"). `openModel`: codex-oss only, this run's `{provider, model, baseUrl}` over the stored defaults (see "Open models") |
 | `agent.stop` | `runId` | `{stopped: true}` (SIGTERM, SIGKILL after 3 s) |
 | `agent.running` | – | `{runIds}`: the runs still going. In Safari the helper outlives the connection (the bridge keeps the host and queues its messages), so a chat's run survives a lost connection or a restarted background there instead of being marked interrupted; after reconnecting, the background finishes the ones that ended meanwhile (background.js `settleOrphans`) |
@@ -759,9 +765,12 @@ New native request commands (answered with a normal `response`):
 | `agent.openModel.removeKey` | | removes it from the keyring; same result. Not from a run |
 
 `loggedIn` is `true` / `false`, or `null` when unknown or the agent isn't available (from the adapter's
-`loginStatus`, which spends no tokens; cached 30 s per agent, forgotten when a login finishes or a run
-reports "isn't logged in"). `canLogin`: whether `agent.login` works for it; `loginFix`: the terminal
-instructions otherwise.
+`loginStatus`, which spends no tokens; cached 30 s per agent, forgotten when a login finishes). After a
+run of that agent fails for want of a login (`done.error.kind === "login"`), `loggedIn` is `false` with
+`loginExpired: true`, whatever the agent's own check says (Claude Code's `auth status` still says logged
+in with an expired login it can't refresh), until a login from TRIF works or a later run of that agent
+does (in the helper's memory: a restart forgets it). `canLogin`: whether `agent.login` works for it;
+`loginFix`: the terminal instructions otherwise.
 
 New helper → extension message: `{type: "agentEvent", runId, event}` where `event` is one of
 (normalized across agents):
@@ -770,14 +779,28 @@ New helper → extension message: `{type: "agentEvent", runId, event}` where `ev
 {kind: "session", sessionId}                       the agent's conversation id (for resuming)
 {kind: "text", text}                               a block of assistant text
 {kind: "tool", name, summary}                      a tool call, e.g. {name:"Bash", summary:"trif reload --tab 12"}
-{kind: "error", message}                           something went wrong (agent missing, not logged in, crashed…)
-{kind: "done", ok, result, costUsd, changedFiles, sessionId}   always the last event of a run
+{kind: "error", message}                           something went wrong (agent missing, crashed…)
+{kind: "error", reason: "login", agent, message}   the agent's login is gone, expired or refused: "<Agent> needs you to log in again."
+{kind: "done", ok, result, costUsd, changedFiles, sessionId, error?}   always the last event of a run
 {kind: "login", url}                               (logins) the sign-in page to open
 {kind: "done", ok, login: true, cancelled?}        (logins) always the last event of a login
 ```
 
 - `changedFiles`: paths relative to the workspace under `sites/` whose content changed during the run
   (snapshot hashes before and after).
+- `error: {kind: "login", agent, message}` on a failed run's `done`: it failed for want of a login (an
+  `error` event with `reason: "login"` came first). The adapters recognise it from the agent's own
+  words, in one place (`helper/lib/agents/util.js` `LOGIN_FAILURES`, from Claude Code 2.1.319's and Codex
+  0.166's messages: "Not logged in", "Please run /login", "OAuth session expired", "OAuth token revoked",
+  "login reached its time limit", "Invalid API key", `authentication_error`, HTTP 401 / Unauthorized,
+  "sign in again", "codex login", "missing api key"), in a failed run's result, error events or stderr,
+  never in a reply that worked. Not "could not be refreshed" alone (Claude Code also says that when
+  another of its processes holds the refresh lock, or the disk is full). Not with a saved API key (runs
+  then use the key, not the login: the agent's own words stay), nor for `codex-oss`. Claude Code also
+  says such an error as a reply: text in those words waits for the result line and is dropped when the
+  run failed that way. The run's session is dropped too (`done.sessionId` is the one the run resumed),
+  so the message sent again isn't in it twice. `trif agent run` prints the message and how to log in
+  (`trif agent login --agent claude`, or the agent's `loginFix`).
 - One run at a time per site; a second `agent.start` for a busy site fails with "already working on <site>".
   Runs are killed after 15 minutes. Raw agent output is kept in `runs/<runId>.jsonl` in the private folder
   (last 50 runs).
@@ -1022,8 +1045,7 @@ The user's standing instructions (`instructions.md`) reach claude through the wo
   session_id}` → session; `{type:"assistant", message:{content:[{type:"text", text} | {type:"tool_use",
   name, input}]}}` → text / tool (summary: Bash → `input.command`; Edit/Write/Read → `input.file_path`
   relative to the workspace); `{type:"result", is_error, result, total_cost_usd, session_id}` → done.
-  "Not logged in" in the result → error "Claude Code isn't logged in: run `claude` in a terminal and log in
-  (type /login)".
+  A login failure in a failed result (or on stderr, without one) → the `login` error (see `done.error`).
 - **codex** (OpenAI Codex CLI 0.138+; tested with 0.166): `codex exec --json --skip-git-repo-check
   --ignore-user-config --ignore-rules -c approval_policy="never" -c default_permissions="trif-run"
   -c permissions={…} -c shell_environment_policy.exclude=[…] -c shell_environment_policy.set={ TMPDIR, TMPPREFIX }

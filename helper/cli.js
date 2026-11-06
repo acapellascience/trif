@@ -1007,7 +1007,7 @@ async function agentRun(ctx, pos) {
         if (ctx.json) return out(JSON.stringify(ev));
         if (ev.kind === 'text') { out(String(ev.text).trim()); out(''); }
         else if (ev.kind === 'tool') out(`  [${ev.name}]${ev.summary ? ' ' + ev.summary : ''}`);
-        else if (ev.kind === 'error') process.stderr.write(`error: ${ev.message}\n`);
+        else if (ev.kind === 'error') process.stderr.write(`error: ${ev.reason === 'login' ? loginHelp(ev) : ev.message}\n`);
       },
     });
   } finally {
@@ -1021,6 +1021,14 @@ async function agentRun(ctx, pos) {
     out(files.length ? `changed: ${files.join(', ')}` : 'changed: (no files)');
   }
   if (!done.ok) process.exitCode = 1;
+}
+
+// A run that failed for want of a login (its error event has reason "login"): how to log in from here.
+function loginHelp(ev) {
+  const a = require('./lib/agents').getAdapter(String(ev.agent || ''));
+  if (!a) return ev.message;
+  if (a.login) return `${ev.message} Run \`trif agent login --agent ${a.id}\`${a.loginFix ? `, or ${a.loginFix}` : ''}.`;
+  return `${ev.message}${a.loginFix ? ` To log in, ${a.loginFix}.` : ''}`;
 }
 
 // Log the agent in through the helper, like the side panel's "Log in" button: print the sign-in URL,

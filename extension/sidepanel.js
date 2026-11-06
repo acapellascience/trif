@@ -52,7 +52,7 @@ const view = {
   modOrder: {},              // chrome.storage.local `modOrder`: the order the user dragged each site's mods into (lib.js)
   defaultOrder: {},          // chrome.storage.local `defaultOrder`: each site's order for its shipped mods until then (from the helper)
   modNatural: [],            // the ids of the mods listed, in the order they come before the user's (what an unsaved order is)
-  myRuns: new Set(),         // runs this panel started
+  myRuns: new Map(),         // runs this panel started: runId -> {prompt, tabId} for a message sent from the box, else null
   updated: null,             // chrome.storage.local `updated`: {from, to, notes, at} after an update's reload
   updateBusy: null,          // 'checking' | 'installing' while the panel waits on the helper
   updateError: null,
@@ -100,9 +100,12 @@ function onPortMessage(msg) {
     // The transcript arrives through storage; only our own runs matter here.
     if (!view.myRuns.has(msg.runId)) return;
     if (msg.event?.kind === 'done') {
+      const sent = view.myRuns.get(msg.runId);
       view.myRuns.delete(msg.runId);
       refreshStatus();
       if (!msg.event.ok) loadAgents(); // maybe "not logged in": refresh loggedIn
+      // The agent needs logging in: the message goes back in the box, to send again once logged in.
+      if (msg.event.error?.kind === 'login' && sent) restoreDraft(sent);
     }
   } else if (msg?.type === 'statusChanged') {
     refreshStatusSoon();
@@ -236,6 +239,12 @@ async function followActiveTab() {
 const drafts = new Map();
 chrome.tabs.onRemoved.addListener((tabId) => drafts.delete(tabId));
 
+/** Put an unsent message back in its tab's box, unless something else was typed there meanwhile. */
+function restoreDraft({ prompt, tabId }) {
+  if (view.tab?.id === tabId) { if (!ui.input.value.trim()) ui.input.value = prompt; }
+  else if (!drafts.get(tabId)) drafts.set(tabId, prompt);
+}
+
 async function setTab(tab) {
   const url = tab.url || tab.pendingUrl || '';
   if (view.tab && view.tab.id !== tab.id) {
@@ -284,6 +293,7 @@ function code(text) {
 
 function messageNode(m) {
   const li = el('li', `msg ${m.role}`);
+  // (Role 'login': the agent needs logging in, a plain line; the notice above has the Log in button.)
   if (m.role === 'assistant' || m.role === 'error') setMarkdown(li, m.text);
   else li.textContent = m.text;
   if (m.role === 'tool') li.title = m.text;
@@ -347,7 +357,9 @@ function render() {
   // with that. From the agent itself, not the panel's main problem: a red one (user scripts off) takes
   // that slot, and the login is still missing. Send's tooltip says what to do.
   const keyMissing = agentInfo?.id === 'codex-oss' && agentInfo.available && openModelKeyMissing();
-  const waitsForLogin = (!!agentInfo?.available && agentInfo.loggedIn === false) || !!keyMissing;
+  // (Except a login a run found gone, loginExpired: the agent's own check still says logged in then, so
+  // after logging in from a terminal, sending again is the only way to tell. The notice still shows.)
+  const waitsForLogin = (!!agentInfo?.available && agentInfo.loggedIn === false && !agentInfo.loginExpired) || !!keyMissing;
   const canSend = !!site && helperOk && !waitsForLogin && (agentInfo ? agentInfo.available : (view.agents ? anyAgent : true));
   ui.composer.dataset.canSend = canSend ? '1' : '';
   ui.send.title = !waitsForLogin ? 'Send'
@@ -533,9 +545,11 @@ function renderNotice({ helperOk, agentInfo, anyAgent }) {
 function needsLogin(agentInfo) {
   if (!agentInfo?.available || agentInfo.loggedIn === true) return false;
   if (agentInfo.loggedIn === false) return true;
-  const last = view.site ? view.chat.messages.at(-1) : null;
-  return last?.role === 'error' && /isn[’']t logged in/i.test(String(last.text));
+  return loginLine(view.site ? view.chat.messages.at(-1) : null);
 }
+
+// A run's "needs you to log in again" line (role 'login'), or an older helper's "isn't logged in" error.
+const loginLine = (m) => m?.role === 'login' || (m?.role === 'error' && /isn[’']t logged in/i.test(String(m.text)));
 
 function button(label, className, onClick) {
   const b = el('button', className ? `btn ${className}` : 'btn', label);
@@ -553,11 +567,10 @@ function markdownBlock(className, text) {
 // Logging in (login.js): the notice shows its steps.
 const login = createLogin({ request, changed: () => render(), succeeded: () => { loadAgents(); answerLoginError(); } });
 
-// Logged in: a chat whose last message is a run's "isn't logged in" error gets a line saying it's sorted,
-// so the error doesn't sit there as if it still applied (and the login notice doesn't come back for it).
+// Logged in: a chat whose last message is a run's login line (loginLine) gets a line saying it's sorted,
+// so it doesn't sit there as if it still applied (and the login notice doesn't come back for it).
 function answerLoginError() {
-  const last = view.site ? view.chat.messages.at(-1) : null;
-  if (last?.role !== 'error' || !/isn[’']t logged in/i.test(String(last.text))) return;
+  if (!loginLine(view.site ? view.chat.messages.at(-1) : null)) return;
   request({ type: 'chat.note', site: view.site, text: `${login.current?.name || 'Your agent'} is logged in now: send your message again.` }).catch(() => {});
 }
 
@@ -1222,8 +1235,10 @@ async function send() {
     try { if (await panelCommand(text)) return; } catch (e) { console.warn('[TRIF] command failed', e); }
   }
   ui.input.value = '';
+  const tabId = view.tab.id;
   try {
-    await startRun(text);
+    const runId = await startRun(text);
+    view.myRuns.set(runId, { prompt: text, tabId }); // (to put it back if the agent needs logging in)
   } catch (e) {
     // The background records start failures in the chat; anything earlier goes back in the box.
     const inChat = view.chat.messages.some((m) => m.role === 'user' && m.text === text);
@@ -1244,7 +1259,7 @@ async function startRun(text, extra = {}) {
     type: 'agent.start', site: view.site, tabId: view.tab.id, url: view.tab.url, prompt: text,
     sessionId, agent: agent || undefined, model: chosenModel(agent) || undefined, ...extra,
   });
-  view.myRuns.add(runId);
+  view.myRuns.set(runId, null);
   return runId;
 }
 

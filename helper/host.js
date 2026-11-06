@@ -391,8 +391,7 @@ function onAgentEvent(runId, event) {
     const held = Object.entries(state.held).filter(([, h]) => h.runId === runId).map(([id, h]) => ({ id, reason: h.reason }));
     if (held.length) event.held = held;
   }
-  // A run that found the agent logged out: agent.list shouldn't keep saying it's logged in.
-  if (event && event.kind === 'error' && /isn't logged in/.test(String(event.message))) agents.forgetLoginStatus();
+  // (A run that found the agent logged out: runs.js tells lib/agents, so agent.list says so.)
   // Every run goes to the extension (panels ignore runs they didn't start).
   if (state.stdoutOpen) {
     try { sendToExtension({ type: 'agentEvent', runId, event }); } catch (e) { logger.warn(`could not send agent event: ${e.message}`); }

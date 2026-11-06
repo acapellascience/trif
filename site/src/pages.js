@@ -92,7 +92,7 @@ footer a { color: var(--muted); }
    so the footer shows in a laptop's window and a big screen isn't all empty below. Space only: sizes
    stay. (Mods find the page's parts and measure them as they are, so they see the new space.) */
 @media (min-width: 701px) {
-  :root { --home-free: calc(100dvh - 560px); }
+  :root { --home-free: calc(100dvh - var(--home-content, 560px)); } /* (site/demo/space.js measures the content) */
   main.home { padding-top: clamp(16px, calc(var(--home-free) * .24), 150px); gap: clamp(20px, calc(var(--home-free) * .30), 150px);
     padding-bottom: clamp(12px, calc(var(--home-free) * .16), 90px); }
   main.home + footer { padding-top: clamp(12px, calc(var(--home-free) * .12), 48px); padding-bottom: clamp(12px, calc(var(--home-free) * .18), 72px); }
@@ -193,7 +193,7 @@ export function homePage({ head = '', tail = '' } = {}) {
     style: HOME_STYLE + DEMO_STYLE,
     head,
     after: `\n<footer><a href="${REPO}" target="_blank" rel="noopener">GitHub</a><a href="/report" target="_blank" rel="noopener">Report a problem</a><a href="/windows" target="_blank" rel="noopener">Windows</a><a href="${REPO}/blob/main/store/PRIVACY.md" target="_blank" rel="noopener">Privacy</a></footer>` +
-      '\n<button type="button" class="demo-tab" hidden>Try the demo</button>\n<script src="/demo.js" defer></script>' + tail,
+      '\n<button type="button" class="demo-tab" hidden>Try the demo</button>\n<script src="/space.js" defer></script>\n<script src="/demo.js" defer></script>' + tail,
   }).replace('<main>', '<main class="home">');
 }
 

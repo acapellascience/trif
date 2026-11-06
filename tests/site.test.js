@@ -64,7 +64,7 @@ test('the Worker: pages with strict headers, reports emailed, bad ones refused',
   assert.match(home, /href="https:\/\/github\.com\/acapellascience\/trif" target="_blank" rel="noopener">GitHub</, "the buttons open a new tab");
   assert.match(home, /href="\/report" target="_blank" rel="noopener">Report a problem</); // (footer links open in a new tab)
   // Its only script is the demo tab's (deferred, so the page is all there before it runs).
-  assert.deepStrictEqual(home.match(/<script[^>]*>/g), ['<script src="/demo.js" defer>']);
+  assert.deepStrictEqual(home.match(/<script[^>]*>/g), ['<script src="/space.js" defer>', '<script src="/demo.js" defer>']);
   assert.match(home, /<footer>.*<a href="\/windows" target="_blank" rel="noopener">Windows<\/a>.*<\/footer>/, 'the footer links to the Windows waitlist');
 
   let res = await worker.fetch(post({ what: 'It broke', site: 'x.com', email: 'a@b.co', details: 'TRIF 0.1.1' }, { 'User-Agent': 'Firefox/159' }), e);
@@ -162,7 +162,7 @@ const directives = (res) => Object.fromEntries(res.headers.get('Content-Security
 test('the demo: its routes, and the side panel from the extension\'s own files', async () => {
   const [{ default: worker }] = await load();
   const e = await demoEnv();
-  for (const [p, type] of [['/demo.js', 'text/javascript'], ['/demo/shim.js', 'text/javascript'], ['/demo/panel.css', 'text/css'],
+  for (const [p, type] of [['/demo.js', 'text/javascript'], ['/space.js', 'text/javascript'], ['/demo/shim.js', 'text/javascript'], ['/demo/panel.css', 'text/css'],
     ['/demo/mods/fireworks.js', 'text/javascript'], ['/demo/ext/sidepanel.html', 'text/html'], ['/demo/ext/sidepanel.js', 'text/javascript'],
     ['/demo/ext/sidepanel.css', 'text/css'], ['/demo/ext/manifest.json', 'application/json'], ['/demo/ext/icons/robot-shaded.svg', 'image/svg+xml']]) {
     const res = await get(worker, e, p);
@@ -209,13 +209,13 @@ test('the demo: /?mods= runs only the bundled mods it names on the home page, un
   const e = await demoEnv();
   const page = async (q) => (await get(worker, e, `/${q}`)).text();
   const scripts = (html) => html.match(/<script[^>]*>/g) || [];
-  const tabOnly = ['<script src="/demo.js" defer>'];
+  const tabOnly = ['<script src="/space.js" defer>', '<script src="/demo.js" defer>'];
   assert.deepStrictEqual(scripts(await page('')), tabOnly);
   assert.deepStrictEqual(scripts(await page('?mods=')), tabOnly);
   assert.deepStrictEqual(scripts(await page('?mods=nope,x')), tabOnly);
   assert.equal(await page('?mods=nope'), await page(''), 'unknown names: the plain home page');
   const html = await page(`?mods=${encodeURIComponent('fireworks,nope,../src/index,<img src=x onerror=alert(1)>,neon,fireworks')}`);
-  assert.deepStrictEqual(scripts(html), ['<script src="/demo/mods/neon.js">', '<script src="/demo.js" defer>', '<script src="/demo/mods/fireworks.js" defer>'],
+  assert.deepStrictEqual(scripts(html), ['<script src="/demo/mods/neon.js">', '<script src="/space.js" defer>', '<script src="/demo.js" defer>', '<script src="/demo/mods/fireworks.js" defer>'],
     'document-start mods before the page, the rest deferred; each once');
   assert.ok(!/nope|onerror|src\/index/.test(html), 'nothing from the address is written into the page');
   assert.match(html, /Fix any website with your own coding agent\./);

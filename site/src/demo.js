@@ -125,6 +125,7 @@ if (!FILES['shim.js'].includes(placeholder)) throw new Error('shim.js lost its d
 
 export const DEMO_FILES = {
   '/demo.js': { body: FILES['tab.js'], type: TYPES.js },
+  '/space.js': { body: FILES['space.js'], type: TYPES.js }, // (the home page's spacing, pages.js)
   '/demo/panel.css': { body: FILES['panel.css'], type: TYPES.css },
   '/demo/shim.js': { body: FILES['shim.js'].replace(placeholder, () => JSON.stringify(SHIM_DATA)), type: TYPES.js },
 };

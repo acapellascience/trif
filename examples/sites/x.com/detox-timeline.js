@@ -462,8 +462,9 @@
   style.textContent = `
     [data-testid=sidebarColumn] { display: none !important; }
     /* X's side bar sits right-aligned in a column that stretches; keep the column to the bar's width. */
-    /* (not with X-Flyer installed, html[data-tss-ready]: X's own layout then, the timeline where X puts it) */
-    html:not([data-tss-ready]) header[role=banner] { flex-grow: 0 !important; }
+    /* (not with X-Flyer installed, html[data-tss-ready], nor on profile pages, html[data-dm-profile]: X's
+       own layout there, the timeline where X puts it; the right-hand panel stays hidden) */
+    html:not([data-tss-ready], [data-dm-profile]) header[role=banner] { flex-grow: 0 !important; }
     [data-dm-hide] { display: none !important; }
     /* Detox Timeline's logo, a plain lowercase x, in place of X's. The loading screen (#placeholder, in X's HTML)
        is styled before it's parsed; its theme isn't known yet, so the x inverts whatever is behind it. */
@@ -479,11 +480,19 @@
       font: 400 42px/1 -apple-system, system-ui, sans-serif; color: inherit; pointer-events: none; }
     /* The timeline fills the window instead of sitting in a 600px column on the left. */
     /* (not with X-Flyer, x.com/space-shooter, installed (html[data-tss-ready]): the timeline keeps X's own
-       width and margins then, with room for the game's panel in the strip beside it) */
-    html:not([data-tss-ready]) main[role=main] > div, html:not([data-tss-ready]) main[role=main] > div > div,
-    html:not([data-tss-ready]) main[role=main] > div > div > div { width: 100% !important; max-width: none !important; }
-    html:not([data-tss-ready]) [data-testid=primaryColumn] { max-width: none !important; border-right: none !important; border-left: none !important; }
-    html:not([data-tss-ready]) [data-dm-wide] { max-width: none !important; }
+       width and margins then, with room for the game's panel in the strip beside it; nor on profile pages
+       (html[data-dm-profile]), which keep X's widths, limits and side lines) */
+    html:not([data-tss-ready], [data-dm-profile]) main[role=main] > div, html:not([data-tss-ready], [data-dm-profile]) main[role=main] > div > div,
+    html:not([data-tss-ready], [data-dm-profile]) main[role=main] > div > div > div { width: 100% !important; max-width: none !important; }
+    html:not([data-tss-ready], [data-dm-profile]) [data-testid=primaryColumn] { max-width: none !important; border-right: none !important; border-left: none !important; }
+    html:not([data-tss-ready], [data-dm-profile]) [data-dm-wide] { max-width: none !important; }
+    /* Profile pages in a wide window (html[data-dm-profile-wide], see sizeProfile): margins of --dm-pg on
+       both sides (the left one is X's header, holding the menu), the column --dm-pw between them. */
+    html[data-dm-profile-wide] header[role=banner] { flex: 0 0 var(--dm-pg) !important; width: var(--dm-pg) !important; }
+    html[data-dm-profile-wide] main[role=main] { flex: 1 1 auto !important; }
+    html[data-dm-profile-wide] :is(main[role=main] > div, main[role=main] > div > div, main[role=main] > div > div > div, [data-testid=primaryColumn]) {
+      width: var(--dm-pw) !important; max-width: var(--dm-pw) !important; }
+    html[data-dm-profile-wide] [data-dm-wide] { max-width: none !important; }
     /* Explore: X's page hidden, a centered search field instead. */
     /* Hidden from the first frame (the flag is set as the route changes, before X draws anything). */
     html[data-dm-explore] [data-testid=primaryColumn], html[data-dm-explore] main[role=main] > * { visibility: hidden !important; }
@@ -771,7 +780,38 @@
   // in history.state.state.previousPath; while one is over Explore, keep the search page under it.
   const OVERLAY_ROUTE = /^\/(compose\/|i\/display|i\/keyboard_shortcuts|[^/]+\/status\/\d+\/(photo|video)\/)/;
   const isExplore = (path) => /^\/explore(\/|$)/.test(path);
+  // Profile pages (/name and its tabs) keep X's own layout (see the CSS): flagged here too, on every route
+  // change, so the page has the right width from its first frame. (Over a dialog route, the page behind.)
+  const PROFILE = /^\/([A-Za-z0-9_]{1,15})(?:\/(?:with_replies|media|likes|highlights|articles|superfollows|affiliates|verified_followers|followers|following|followers_you_follow|creator-subscriptions))?\/?$/;
+  const NOT_PROFILE = /^(home|explore|notifications|messages|i|settings|search|compose|bookmarks|lists|communities|jobs|premium|hashtag|login|logout|signup|tos|privacy|chat|grok|account|intent|share|download)$/i;
+  const isProfile = (path) => { const m = PROFILE.exec(path); return !!m && !NOT_PROFILE.test(m[1]); };
+  const flagProfile = () => {
+    const behind = OVERLAY_ROUTE.test(location.pathname) ? String(history.state?.state?.previousPath || '') : location.pathname;
+    document.documentElement.toggleAttribute('data-dm-profile', isProfile(behind));
+    sizeProfile();
+  };
+  // In a wide window, a profile's column widens (up to PROFILE_MAX) with even margins: X gives the left
+  // side (the menu) a third of the spare room and leaves twice that empty on the right, where the hidden
+  // panel was. Here the spare room is split evenly: the menu sits at the right of the left margin (X
+  // right-aligns it in its header), and the right margin matches it. Needs room for the menu plus a
+  // 24px gap on each side; narrower, X's own layout.
+  const PROFILE_MAX = 1000;
+  const sizeProfile = () => {
+    const root = document.documentElement;
+    const nav = document.querySelector('header[role=banner]')?.firstElementChild;
+    const vw = root.clientWidth, menu = nav ? nav.getBoundingClientRect().width : 0;
+    const col = Math.floor(Math.min(PROFILE_MAX, vw - 2 * (menu + 24)));
+    const wide = root.hasAttribute('data-dm-profile') && menu > 0 && col > 620;
+    root.toggleAttribute('data-dm-profile-wide', wide);
+    if (wide) {
+      const set = (p, v) => { if (root.style.getPropertyValue(p) !== v) root.style.setProperty(p, v); };
+      set('--dm-pw', `${col}px`);
+      set('--dm-pg', `${Math.floor((vw - col) / 2)}px`);
+    }
+  };
+  flagProfile();
   const showSearch = () => {
+    flagProfile();
     const under = OVERLAY_ROUTE.test(location.pathname) && isExplore(String(history.state?.state?.previousPath || ''));
     const explore = isExplore(location.pathname) || under;
     document.documentElement.toggleAttribute('data-dm-explore', explore);
@@ -858,7 +898,7 @@
       if (!el.hasAttribute('data-dm-wide') && getComputedStyle(el).maxWidth !== 'none') el.setAttribute('data-dm-wide', '');
     }
     showUnfollowed();
-    showSearch();
+    showSearch(); // (and the profile flag and widths, once X's header is there: see sizeProfile)
     if (!location.pathname.startsWith('/home')) return;
     for (const article of document.querySelectorAll('[data-testid=cellInnerDiv] article:not([data-testid=tweet])')) {
       const cell = article.closest('[data-testid=cellInnerDiv]');

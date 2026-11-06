@@ -13,7 +13,7 @@ class FakeXHR {}
 Object.defineProperty(FakeXHR.prototype, 'responseText', { configurable: true, get() { return this._text; } });
 Object.defineProperty(FakeXHR.prototype, 'response', { configurable: true, get() { return this._text; } });
 FakeXHR.prototype.open = function () {};
-const node = { append() {}, addEventListener() {} };
+const node = { append() {}, addEventListener() {}, toggleAttribute() {}, setAttribute() {}, removeAttribute() {}, hasAttribute() { return false; }, style: { setProperty() {}, removeProperty() {} } };
 global.window = global;
 global.history = { pushState() {}, replaceState() {} };
 global.addEventListener = () => {};

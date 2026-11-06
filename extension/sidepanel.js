@@ -6,7 +6,7 @@
 import { siteForUrl, modAppliesTo, modSites, isMultiSite, offOnSite, normalizeOffSites, scopeFor, limitToSites, withOffSites, FIREFOX, BROWSER, PANEL, SETUP_COMMAND,
   SITE_ACCESS, siteOrigins, siteState, hasSiteAccess, allowEverySite, limitToSitesOn,
   normalizeModOrder, orderMods, moveId, setModOrder,
-  normalizeSettings, normalizePicks, siteSettings, withoutModel } from './lib.js';
+  normalizeSettings, normalizePicks, siteSettings, withoutModel, panelQuery, panelWindowBounds, rememberScreen } from './lib.js';
 import { setMarkdown } from './markdown.js';
 import { createLogin } from './login.js';
 import { modSwitch, syncSwitches, shownEnabled, switchError, enabledIn, onSwitchChange } from './modswitch.js';
@@ -72,9 +72,10 @@ const EDGE_PX = 28; // how near the list's top or bottom edge it scrolls
 let port = null;
 let reqSeq = 0;
 const pending = new Map();
-// Chrome's side panel (not Safari's panel window, opened with ?window=): the background closes it on the
-// toolbar button's next click, so it says which window it's in.
-const OPENED_FOR = Number(new URLSearchParams(location.search).get('window')) || null;
+// A panel window (?window=<id>) follows the tabs of that browser window, not its own: Safari's, and in
+// Chromium browsers without a side panel (Arc) the background's (&fallback=1; lib.js "the panel in a window").
+const { openedFor: OPENED_FOR, fallback: FALLBACK } = panelQuery(location.search);
+let ownWindowId = null; // the fallback's own window
 
 function connectPort() {
   port = chrome.runtime.connect({ name: 'panel' });
@@ -88,8 +89,38 @@ function connectPort() {
   });
 }
 
+// A side panel says which window it's in as soon as it can: that's how the background knows the toolbar
+// click opened it (else it opens the fallback), and closes it on the next click. The fallback says so too,
+// with its own window.
 function sayWindow() {
-  if (!OPENED_FOR && view.windowId !== null) try { port?.postMessage({ type: 'panel.window', windowId: view.windowId }); } catch { /* reconnects */ }
+  if (view.windowId === null || (OPENED_FOR && !FALLBACK)) return;
+  try { port?.postMessage({ type: 'panel.window', windowId: view.windowId, ...(FALLBACK ? { own: ownWindowId } : {}) }); } catch { /* reconnects */ }
+}
+
+/**
+ * The fallback panel window: closes with the browser window it follows (or at once, restored after a
+ * restart with that window gone), and moves beside it when the screen has room, which only the page can
+ * see (`screen`); the screen is kept in `panelScreens` so the next one opens there.
+ */
+async function setUpPanelWindow() {
+  const own = await chrome.windows.getCurrent().catch(() => null);
+  ownWindowId = own?.id ?? null;
+  const close = () => (ownWindowId !== null ? chrome.windows.remove(ownWindowId) : Promise.reject()).catch(() => window.close());
+  chrome.windows.onRemoved.addListener((id) => { if (id === OPENED_FOR) close(); });
+  const target = await chrome.windows.get(OPENED_FOR).catch(() => null);
+  if (!target) { close(); return; }
+  const here = { left: screen.availLeft, top: screen.availTop, width: screen.availWidth, height: screen.availHeight };
+  const screens = rememberScreen((await chrome.storage.local.get('panelScreens').catch(() => ({}))).panelScreens, here);
+  chrome.storage.local.set({ panelScreens: screens }).catch(() => {});
+  const want = panelWindowBounds(target, screens);
+  if (own && ['left', 'top', 'width', 'height'].some((k) => typeof want[k] === 'number' && Math.abs(want[k] - own[k]) > 2)) {
+    chrome.windows.update(ownWindowId, want).catch(() => {});
+  }
+}
+
+/** A new tab, in the browser window the panel follows (from a panel window, not in that). */
+function openTab(props) {
+  return chrome.tabs.create({ ...props, ...(FALLBACK ? { windowId: OPENED_FOR } : {}) });
 }
 
 function request(msg) {
@@ -172,8 +203,8 @@ function currentAgent() {
 
 async function init() {
   connectPort();
-  // In Safari the panel is a window of its own, opened with ?window=<the window whose tabs it follows>.
   view.windowId = OPENED_FOR || (await chrome.windows.getCurrent()).id;
+  if (FALLBACK) await setUpPanelWindow();
   sayWindow();
   const stored = await chrome.storage.local.get(['settings', 'sitePicks', 'disabled', 'offSites', 'updated', 'modOrder', 'defaultOrder', 'defaultModelsReset']);
   view.updated = stored.updated || null;
@@ -440,7 +471,7 @@ function renderProblemLine(node, problem, agentInfo) {
 // Chrome, the extension's settings page, where the switch is.
 function allowUserScripts() {
   if (FIREFOX) chrome.permissions.request({ permissions: ['userScripts'] }).then(() => setTimeout(refreshStatus, 300), () => {});
-  else chrome.tabs.create({ url: view.status?.settingsUrl || `chrome://extensions/?id=${chrome.runtime.id}` });
+  else openTab({ url: view.status?.settingsUrl || `chrome://extensions/?id=${chrome.runtime.id}` });
 }
 
 /** User scripts off: "Mods are paused", in a notice of its own above the rest (a login notice too). */
@@ -1382,7 +1413,7 @@ function openSetup() {
   const url = chrome.runtime.getURL('onboarding.html');
   chrome.tabs.query({ url }).then(([existing]) => {
     if (existing) chrome.tabs.update(existing.id, { active: true });
-    else chrome.tabs.create({ url });
+    else openTab({ url });
   });
 }
 
@@ -1622,7 +1653,7 @@ async function openReport() {
     const s = view.status;
     text = `TRIF problem report\n\nTRIF        ${s?.version || '?'}\nBrowser     ${s?.browser || BROWSER} ${s?.chrome || ''}\nHelper      not connected (${s?.helper?.error || String(e?.message ?? e)})`;
   }
-  chrome.tabs.create({ url: reportLink(url, text, view.site || '') });
+  openTab({ url: reportLink(url, text, view.site || '') });
 }
 
 $('#report-link').addEventListener('click', (e) => { e.preventDefault(); openReport(); });

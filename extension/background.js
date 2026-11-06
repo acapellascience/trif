@@ -9,6 +9,7 @@ import {
   normalizeDisabled, modAppliesTo, urlInScope, modInScope, applyStartOff, applyAbsorbed, findRenames, carryRenames, renameInOrder, normalizeModOrder, modSites,
   normalizeOffSites, offSiteName, offOnSite, hostInScope, withOffSites, scopeFor, normalizeSitesOn, siteOnFor, sitesInUse, limitToSites, applyStartSites, switchSite, fromOtherBrowser, timedUserScripts, capChat,
   ALL_ACCESS, readAccess, activeSites, hasSiteAccess, siteOrigins, sitesFromOrigins, siteState, siteRefusal,
+  PANEL_OPEN_WAIT_MS, PANEL_LATE_MS, panelWindowUrl, panelWindowTarget, panelWindowBounds, panelWindowClick,
 } from './lib.js';
 import { runtimeCode } from './runtime.js';
 import { sweepPage } from './sweep.js';
@@ -46,7 +47,8 @@ const state = {
   access: ALL_ACCESS,    // what the browser gives TRIF (readAccess): a site in sitesOn counts only with it
   sitesConnected: [],    // sites TRIF has had access to (persisted): without it now, they're "disconnected"
   neverSites: [],        // sites the user put on the never list: nothing from TRIF touches them (persisted)
-  panelWindows: new Map(), // side panel port -> the window it's in (Chrome), so the toolbar button can close it
+  panelWindows: new Map(), // panel port -> {windowId: the browser window it follows, own: its own window when it's a panel window, else null}
+  panelInWindow: false,  // this browser shows no side panel (Arc): the toolbar button opens a panel window at once (persisted)
   startedOff: {},        // mod id → true for mods already switched off once: preinstalled, or from another browser (persisted)
   absorbed: {},          // mod id → true for retired shipped mods whose switch was carried over (persisted)
   defaultOrder: {},      // site → mod ids: the panel's order for its shipped mods until the user drags them (from the helper; persisted)
@@ -124,6 +126,7 @@ const ready = chrome.storage.local.get(null).then(async (s) => {
   state.sitesOffered = normalizeSitesOn(s.sitesOffered);
   state.sitesConnected = normalizeSitesOn(s.sitesConnected);
   state.neverSites = normalizeSitesOn(s.neverSites);
+  state.panelInWindow = s.panelInWindow === true;
   if (Array.isArray(s.sitesOn)) state.sitesOn = normalizeSitesOn(s.sitesOn);
   else {
     // First start since TRIF has to be turned on per site: keep it on where it's already in use.
@@ -167,18 +170,13 @@ if (FIREFOX) {
   // Firefox has a sidebar instead of the side panel; the toolbar button toggles it (toggle() must run
   // synchronously in the click handler).
   chrome.action.onClicked.addListener(() => { (globalThis.browser ?? chrome).sidebarAction.toggle(); });
-} else if (chrome.sidePanel) {
-  // Chrome: the toolbar button opens the side panel from here rather than by itself
-  // (openPanelOnActionClick), because only a click that reaches the extension gives it activeTab on that
-  // tab, which is what lets `trif screenshot` capture it without access to every site (screenshot.js).
-  // A second click closes it again, as Chrome's own handling did. Both calls must come from the click
-  // itself, so nothing is awaited before them.
-  chrome.action.onClicked.addListener((tab) => {
-    const windowId = tab?.windowId;
-    const open = [...state.panelWindows.values()].includes(windowId);
-    const call = open && chrome.sidePanel.close ? chrome.sidePanel.close({ windowId }) : chrome.sidePanel.open({ windowId });
-    call?.catch?.((e) => console.warn('[TRIF] the side panel didn\'t open', e));
-  });
+} else if (!PERSISTENT_HOST) {
+  // Chrome and the other Chromium browsers (Safari's panel window is safari.js's): the toolbar button opens
+  // the side panel from here rather than by itself (openPanelOnActionClick), because only a click that
+  // reaches the extension gives it activeTab on that tab, which is what lets `trif screenshot` capture it
+  // without access to every site (screenshot.js). Where no side panel shows up, a panel window instead
+  // (see "the panel in a window" below).
+  chrome.action.onClicked.addListener(onToolbarClick);
 }
 // Optional permissions: Firefox's userScripts (the setup page or the panel asks for it), and in every
 // browser the sites the user lets TRIF work on, which they can also take back in the browser's settings.
@@ -995,6 +993,145 @@ async function uiStatus() {
   };
 }
 
+// ---- the toolbar button, and the panel in a window ---------------------------------------------
+//
+// The click opens Chrome's side panel. Browsers that have chrome.sidePanel but no side panel (Arc, whose
+// own browser UI replaced Chrome's) resolve sidePanel.open() and show nothing, so a click counts as
+// having opened it only once a side panel in that window says so (`panel.window`, as it loads). If none
+// does within PANEL_OPEN_WAIT_MS (or the call fails, or there's no chrome.sidePanel), the same page opens
+// in a popup window beside the browser window, following its tabs (lib.js "the panel in a window").
+//
+// The browser is then remembered (`panelInWindow`) and later clicks open the window at once. They still
+// ask for the side panel first, from the click: should a side panel show up after all (within
+// PANEL_LATE_MS: a slow start in Chrome, or a browser that gained one), the window is closed again and
+// the browser forgotten. So it costs nothing to keep trying, and nothing has to be retried on a schedule.
+
+const sidePanelIn = (windowId) => [...state.panelWindows.values()].some((p) => p.windowId === windowId && p.own === null);
+const panelWindowIn = (windowId) => [...state.panelWindows.values()].some((p) => p.windowId === windowId && p.own !== null);
+const panelWaiters = new Map(); // browser window -> callbacks waiting for its side panel to say it's there
+const lateWindows = new Map();  // browser window -> {id: the panel window opened for it, until}: closed if a side panel shows up after all
+const panelWindowOpening = new Set(); // browser windows a panel window is being opened for (a double click opens one)
+const focusedAt = new Map();    // window id -> when it was last focused (watched while panel windows are open)
+
+function onToolbarClick(tab) {
+  const windowId = tab?.windowId;
+  if (!Number.isInteger(windowId)) return;
+  const at = Date.now();
+  // Both side panel calls must come from the click itself, so nothing is awaited before them.
+  if (sidePanelIn(windowId) && chrome.sidePanel?.close) {
+    chrome.sidePanel.close({ windowId }).catch((e) => console.warn('[TRIF] the side panel didn\'t close', e));
+    return;
+  }
+  let opening = null;
+  if (chrome.sidePanel?.open && !panelWindowIn(windowId)) {
+    try { opening = Promise.resolve(chrome.sidePanel.open({ windowId })); } catch (e) { opening = Promise.reject(e); }
+    opening.catch((e) => { if (!state.panelInWindow) console.warn('[TRIF] the side panel didn\'t open', e); });
+  }
+  ready.then(() => panelOrWindow(windowId, opening, at)).catch((e) => console.warn('[TRIF] the panel didn\'t open', e));
+}
+
+async function panelOrWindow(windowId, opening, at) {
+  // A panel window open for it already: the click brings it back, or closes it.
+  const existing = await findPanelWindow(windowId);
+  if (existing) {
+    const browser = await chrome.windows.get(windowId).catch(() => null);
+    if (panelWindowClick({ panel: existing, browser, focusedAt: Object.fromEntries(focusedAt), now: at }) === 'focus') {
+      await chrome.windows.update(existing.id, { focused: true });
+    } else {
+      await chrome.windows.remove(existing.id);
+    }
+    return;
+  }
+  if (panelWindowOpening.has(windowId)) return;
+  if (opening && !state.panelInWindow && await sidePanelShows(windowId, opening)) return;
+  if (sidePanelIn(windowId)) { forgetPanelInWindow(); return; }
+  await openPanelWindow(windowId, { at, tried: !!opening });
+}
+
+/** A side panel showed up after all: this browser has one. */
+function forgetPanelInWindow() {
+  if (!state.panelInWindow) return;
+  state.panelInWindow = false;
+  chrome.storage.local.remove('panelInWindow').catch(() => {});
+}
+
+/** Whether a side panel in `windowId` says it's there within PANEL_OPEN_WAIT_MS (false at once if `opening` fails). */
+function sidePanelShows(windowId, opening) {
+  if (sidePanelIn(windowId)) return Promise.resolve(true);
+  return new Promise((resolve) => {
+    const done = (shown) => {
+      clearTimeout(timer);
+      panelWaiters.get(windowId)?.delete(done);
+      resolve(shown);
+    };
+    const timer = setTimeout(() => done(false), PANEL_OPEN_WAIT_MS);
+    if (!panelWaiters.has(windowId)) panelWaiters.set(windowId, new Set());
+    panelWaiters.get(windowId).add(done);
+    opening.catch(() => done(false));
+  });
+}
+
+/** A side panel said it's in `windowId`. */
+function sidePanelShowed(windowId) {
+  for (const done of [...(panelWaiters.get(windowId) || [])]) done(true);
+  panelWaiters.delete(windowId);
+  const late = lateWindows.get(windowId);
+  if (!late) return;
+  lateWindows.delete(windowId);
+  if (Date.now() > late.until) return;
+  chrome.windows.remove(late.id).catch(() => {});
+  forgetPanelInWindow();
+}
+
+/** The panel window following browser window `windowId` (windows.getAll's), or null. */
+async function findPanelWindow(windowId) {
+  const base = chrome.runtime.getURL('');
+  const wins = await chrome.windows.getAll({ populate: true, windowTypes: ['popup', 'normal'] }).catch(() => []);
+  return wins.find((w) => panelWindowTarget(w, base) === windowId) || null;
+}
+
+async function openPanelWindow(windowId, { at, tried }) {
+  panelWindowOpening.add(windowId);
+  try {
+    const [browser, stored] = await Promise.all([
+      chrome.windows.get(windowId).catch(() => null),
+      chrome.storage.local.get('panelScreens').catch(() => ({})),
+    ]);
+    if (!browser) return; // closed meanwhile
+    // The screens the panel windows reported (the background can't see them): beside the window when
+    // there's room. The window moves itself there once it knows its screen, if this didn't.
+    const bounds = panelWindowBounds(browser, stored.panelScreens);
+    const props = { url: panelWindowUrl(chrome.runtime.getURL, windowId), focused: true, ...bounds };
+    // (A browser that doesn't make popup windows gets an ordinary one.)
+    const win = await chrome.windows.create({ ...props, type: 'popup' }).catch(() => chrome.windows.create(props));
+    if (!Number.isInteger(win?.id)) return;
+    watchFocus();
+    focusedAt.set(win.id, Date.now());
+    if (!tried) return; // no side panel to wait for
+    if (sidePanelIn(windowId)) { // (it said so while the window was being made)
+      chrome.windows.remove(win.id).catch(() => {});
+      forgetPanelInWindow();
+      return;
+    }
+    lateWindows.set(windowId, { id: win.id, until: at + PANEL_LATE_MS });
+    if (!state.panelInWindow) {
+      state.panelInWindow = true;
+      chrome.storage.local.set({ panelInWindow: true }).catch(() => {});
+    }
+  } finally {
+    panelWindowOpening.delete(windowId);
+  }
+}
+
+// Which window had focus when, for a click while a panel window is open (panelWindowClick). Only watched
+// once there is one: it would wake the service worker at every focus change otherwise.
+let watchingFocus = false;
+function watchFocus() {
+  if (watchingFocus || !chrome.windows.onFocusChanged) return;
+  watchingFocus = true;
+  chrome.windows.onFocusChanged.addListener((id) => { if (id >= 0) focusedAt.set(id, Date.now()); });
+}
+
 // ---- side panel ---------------------------------------------------------------------------------
 //
 // Panels talk over a `panel` port. Requests carry a `reqId` and get `{type:"reply", reqId, ok,
@@ -1007,8 +1144,16 @@ function onPanelConnect(port) {
   state.panels.add(port);
   port.onDisconnect.addListener(() => { state.panels.delete(port); state.panelWindows.delete(port); });
   port.onMessage.addListener((msg) => {
-    // A side panel says which window it's in (for the toolbar button's second click, which closes it).
-    if (msg?.type === 'panel.window') { if (Number.isInteger(msg.windowId)) state.panelWindows.set(port, msg.windowId); return; }
+    // A panel says which window it follows (and, in a window of its own, which that is): the toolbar
+    // button's next click there closes it, and a side panel saying so is how a click knows it opened.
+    if (msg?.type === 'panel.window') {
+      if (!Number.isInteger(msg.windowId)) return;
+      const own = Number.isInteger(msg.own) ? msg.own : null;
+      state.panelWindows.set(port, { windowId: msg.windowId, own });
+      if (own === null) sidePanelShowed(msg.windowId);
+      else watchFocus();
+      return;
+    }
     ready.then(() => onPanelMessage(msg)).then(
       (result) => reply(port, msg, { ok: true, result: result === undefined ? null : result }),
       (e) => reply(port, msg, { ok: false, error: errMsg(e) }),

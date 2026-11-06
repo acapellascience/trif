@@ -324,7 +324,7 @@ only when the user connects it ("site access" in `extension/lib.js`):
   the toolbar button opens the side panel from `action.onClicked` (`sidePanel.open`, and `sidePanel.close`
   on the next click in that window: the panel says which window it's in with `{type: "panel.window",
   windowId}`) instead of `openPanelOnActionClick`, because only then does the click give TRIF `activeTab`
-  on that tab. Without `<all_urls>`, `screenshot` captures only the tab in front, after that click; a tab
+  on that tab (also where the panel opens in a window instead: see "The panel in a window"). Without `<all_urls>`, `screenshot` captures only the tab in front, after that click; a tab
   that isn't showing, `full` and `copy` are an error that says so (see `screenshot`).
 
 ### Mod switches (`mod.enable`)
@@ -758,8 +758,32 @@ Nothing is hosted; the agent uses the user's own login/subscription.
 - `manifest.json`: add permission `sidePanel` and `"side_panel": {"default_path": "sidepanel.html"}`.
   Clicking the toolbar icon opens the side panel, and clicking it again closes it: `action.onClicked` calls
   `chrome.sidePanel.open`/`close` (`openPanelOnActionClick` is false), so the click gives TRIF `activeTab`
-  for screenshots (see "Site access").
+  for screenshots (see "Site access"). In browsers without Chrome's side panel, a panel window instead (below).
   The onboarding/status page stays, opened from the panel's "Setup" link, and automatically on first install.
+- **The panel in a window.** Some Chromium browsers have `chrome.sidePanel` but not Chrome's side panel:
+  Arc replaced Chrome's browser UI, where the side panel lives, so `sidePanel.open()` resolves and nothing
+  shows (Chrome's own `open()` doesn't wait for the panel either). So a side panel posts `{type:
+  "panel.window", windowId}` on its port as soon as it loads, and a click counts as having opened it only
+  when that arrives. If it doesn't within 1 s (`PANEL_OPEN_WAIT_MS`), or `open()` fails, or there's no
+  `chrome.sidePanel`, the background opens `sidepanel.html?window=<id>&fallback=1` in a popup window (an
+  ordinary one if the browser makes no popups), 400 px wide and as tall as browser window `<id>`: beside its
+  right edge when that screen has room, else over it, inside the screen. The background can't see screens,
+  so the panel window reports its own (`screen.avail*`, kept in `chrome.storage.local` `panelScreens`, a few)
+  and moves itself beside the window when it opened over it but there's room.
+  - It follows window `<id>`'s active tab, not its own (`view.windowId`; tabs it opens go there too), and
+    says so with `{type: "panel.window", windowId: <id>, own: <its window>}`. It closes when window `<id>`
+    closes, and at once when that window isn't there (restored after a restart).
+  - The next click in window `<id>` closes it, or brings it back when it's minimized or behind that window
+    (it overlaps it, and the window was focused after it, not by the click itself: `panelWindowClick`; the
+    background watches window focus only while there's a panel window). A click while one is being opened
+    doesn't open another. One panel window per browser window, like side panels.
+  - The browser is remembered (`chrome.storage.local` `panelInWindow: true`): later clicks open the window
+    at once. They still call `sidePanel.open()` first, from the click; a side panel that says it's there
+    within 10 s of a click that opened a window (`PANEL_LATE_MS`: a slow start in Chrome, or a browser that
+    gained a side panel) closes that window and forgets `panelInWindow`. So nothing needs retrying.
+  - Found by URL (`windows.getAll`, `panelWindowTarget`), so a restarted service worker still finds it.
+  - The click is still what gives TRIF `activeTab` on the tab: a panel window changes nothing there.
+  - Not in Safari (its panel window is `safari.js`'s) or Firefox (its sidebar).
 - `sidepanel.html/.js/.css`: follows the active tab of its window.
   - **Header:** the current site (hostname without `www.`), a status dot (helper connected, user scripts
     on, agent available), a settings button.

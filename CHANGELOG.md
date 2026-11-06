@@ -17,6 +17,8 @@ needs a section here for the version it releases.
 - With only the sites you allowed, your agent's screenshots are of the tab you're on, after you click the
   TRIF toolbar button there (Chrome and Firefox want that, or access to every site, before an extension
   can capture a tab).
+- TRIF's panel now opens in Arc and other browsers without Chrome's side panel: in a window of its own,
+  beside the browser window.
 
 ## 0.2.4
 

@@ -1,11 +1,11 @@
 // ==WebMod==
 // @name        Just Results
-// @description Google results with just the web results: no sponsored results, People also ask, Images, Short videos, People also search for or other suggestion blocks
+// @description no sponsors, no mess
 // @match       https://www.google.com/search*
 // @run-at      document-start
 // @risk        1 hides ads, so Google's ad impression reports for them never fire
 // @source      webmods
-// @version     2
+// @version     3
 // ==/WebMod==
 
 (() => {

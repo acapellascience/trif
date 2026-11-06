@@ -1,6 +1,6 @@
 // ==WebMod==
 // @name        AI Banisher
-// @description Hides Google's AI: the AI Overview (and its "Ask anything" box) and the AI Mode tab on results pages, and the AI Mode button and Gemini promo in the search box
+// @description robots, begone!
 // @match       https://www.google.com/
 // @match       https://www.google.com/?*
 // @match       https://www.google.com/webhp*
@@ -8,7 +8,7 @@
 // @run-at      document-start
 // @risk        0 render-only
 // @source      webmods
-// @version     2
+// @version     3
 // ==/WebMod==
 
 (() => {

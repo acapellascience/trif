@@ -9,7 +9,8 @@ needs a section here for the version it releases.
 - **New mods, off until you switch them on:** X-Flyer flies a fighter over X (Shift+S, or the rocket
   button) to blast the timeline; Follow status marks the people on X who follow you back; Three-Column
   Feed lays Instagram's home feed out three posts wide.
-- The mods TRIF ships for X, Amazon and Instagram are updated, with new names and short descriptions.
+- The mods TRIF ships for X, Amazon, Instagram and Google are updated, with new names and short
+  descriptions. DVD Logo also finds Google's newer logo and bounces it off its real edges.
   If you changed one, the side panel offers the new version; yours stays until you choose.
 - Plain X is now **Detox Timeline** (`x.com/detox-timeline`). If yours was unchanged, it's replaced, and it
   stays on if it was on; if you changed it, yours stays as it is, and Detox Timeline arrives switched off.

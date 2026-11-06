@@ -20,6 +20,8 @@ function el(tagName, props = {}) {
     tagName, style: {}, children: [], attrs: {}, parent: null, rect: { left: 0, top: 0, width: 0, height: 0 },
     setAttribute(k, v) { this.attrs[k] = String(v); }, removeAttribute(k) { delete this.attrs[k]; },
     append(...c) { for (const x of c) { x.parent = this; this.children.push(x); } },
+    prepend(...c) { for (const x of c.reverse()) { x.parent = this; this.children.unshift(x); } },
+    querySelector() { return null; },
     remove() { if (this.parent) this.parent.children = this.parent.children.filter((x) => x !== this); this.parent = null; },
     getBoundingClientRect() { return { ...this.rect, right: this.rect.left + this.rect.width, bottom: this.rect.top + this.rect.height }; },
     cloneNode() { return el(this.tagName, { src: this.src }); },
@@ -74,9 +76,9 @@ function page({ w = 1000, h = 600, reduce = false, logo = true, src = 'https://w
 test('dvd-logo: a shipped mod for the Google home page, off at first, render-only', () => {
   const h = parseHeader(CODE);
   assert.strictEqual(h.name, 'DVD Logo');
-  assert.ok(h.description.length > 20);
+  assert.ok(h.description.length > 0);
   assert.deepStrictEqual(h.matches, ['https://www.google.com/', 'https://www.google.com/?*', 'https://www.google.com/webhp*']);
-  assert.deepStrictEqual([h.source, h.version, h.risk && h.risk.tier], ['webmods', '1', 0]);
+  assert.deepStrictEqual([h.source, h.version, h.risk && h.risk.tier], ['webmods', '2', 0]);
   assert.deepStrictEqual(PREINSTALLED.find((p) => p.id === 'www.google.com/dvd-logo'), { id: 'www.google.com/dvd-logo', on: false });
 });
 

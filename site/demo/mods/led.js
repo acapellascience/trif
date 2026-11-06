@@ -22,7 +22,8 @@
     footer[data-led-done] {
       display: block !important;
       flex-wrap: nowrap !important;
-      padding: 22px 16px 40px !important;
+      /* (the sides only: above and below it, the page's own space, which follows the window on a computer) */
+      padding-left: 16px !important; padding-right: 16px !important;
     }
     .led-sign {
       position: relative;

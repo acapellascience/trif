@@ -346,9 +346,11 @@
     show();
   }
 
-  // Once the panel's been closed, the tab brings it back: "Show the fixer" (it says "Try the demo" until
-  // it's been open; at a desk it starts open).
-  const tabLabel = () => { tab.textContent = 'Show the fixer'; };
+  // Once the panel's been closed, the tab brings it back. At a desk (where it starts open): "Try the demo"
+  // until the visitor has sent a prompt in it (the demo's saved state, shim.js `sent`), then "Continue the
+  // demo". On a phone: "Show the fixer" (it says "Try the demo" until it's been open).
+  const promptSent = () => { try { return !!JSON.parse(sessionStorage.getItem('trif-demo-state') || 'null')?.sent; } catch { return false; } };
+  const tabLabel = () => { tab.textContent = phone() ? 'Show the fixer' : promptSent() ? 'Continue the demo' : 'Try the demo'; };
   function hide() {
     if (!isOpen()) return;
     if (box.popover) box.hidePopover(); else box.hidden = true;

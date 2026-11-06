@@ -23,6 +23,7 @@ const ui = {
   modeDialog: $('#mode-dialog'), modeDialogClose: $('#mode-dialog-close'), modeDialogSwitch: $('#mode-dialog-switch'), modeDialogErr: $('#mode-dialog-err'),
   modeChoice: $('#mode-choice'), modePermissive: $('#mode-permissive'), modeRestrictive: $('#mode-restrictive'), modeNote: $('#mode-note'),
   blockedList: $('#blocked-list'), blockedEmpty: $('#blocked-empty'),
+  starterBlock: $('#starter-block'), starterAdd: $('#starter-add'), starterErr: $('#starter-err'),
   landing: $('#landing'), landingIcon: $('#landing-icon'), landingVersion: $('#landing-version'), landingNote: $('#landing-note'),
   settings: $('#settings'), agent: $('#agent'), agentNote: $('#agent-note'), model: $('#model'),
   using: $('#using'), modelCustomRow: $('#model-custom-row'), modelCustom: $('#model-custom'), modelNote: $('#model-note'),
@@ -315,6 +316,7 @@ function render() {
   const anyAgent = agentList.some((a) => a.available);
 
   renderSites();
+  renderStarter();
   ui.site.textContent = site || 'Tim\'s Robot Internet Fixer';
   ui.site.title = view.tab?.url || '';
   document.title = site ? `TRIF · ${site}` : 'Tim\'s Robot Internet Fixer';
@@ -769,6 +771,21 @@ async function siteAction(msg, site = view.site) {
 
 function setBlocked(blocked, site = siteScope()) {
   return siteAction({ type: 'site.block', blocked }, site);
+}
+
+// Settings: "Add Tim's starter mods", while they aren't added (the setup page asked; none, or not chosen).
+// Nothing to remove them in bulk: the user deletes mods one by one.
+function renderStarter() {
+  const st = view.status;
+  ui.starterBlock.hidden = !st?.starter || st.starter.choice === 'added';
+}
+
+async function addStarter() {
+  ui.starterAdd.disabled = true;
+  ui.starterErr.hidden = true;
+  try { await request({ type: 'shipped.install' }); } catch (e) { ui.starterErr.textContent = `Couldn’t add them: ${e?.message ?? e}`; ui.starterErr.hidden = false; }
+  ui.starterAdd.disabled = false;
+  refreshStatus();
 }
 
 // Settings, "Site permissions": the mode (not in Safari, which asks per site itself), and the blocked sites.
@@ -1421,6 +1438,7 @@ ui.gateDisconnect.addEventListener('click', disconnectClick);
 ui.modeDialogClose.addEventListener('click', () => ui.modeDialog.close());
 ui.modeDialogSwitch.addEventListener('click', switchToRestrictive);
 ui.modePermissive.addEventListener('click', choosePermissive);
+ui.starterAdd.addEventListener('click', addStarter);
 ui.modeRestrictive.addEventListener('click', chooseRestrictive);
 ui.siteSwitch.addEventListener('click', () => setSiteOn(!siteIsOn()));
 ui.barRobot.addEventListener('click', () => setSiteOn(!siteIsOn())); // off: the Fix button; on: the power button

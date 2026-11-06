@@ -1,5 +1,5 @@
-// The setup page: a checklist that ticks itself off (the helper, TRIF in this browser, user scripts, the
-// site permissions, the coding agent's login, then trying it), and the user's mods
+// The setup page: a checklist that ticks itself off (the helper, TRIF in this browser, user scripts, Tim's
+// starter mods (or none), site permissions, the coding agent's login, then trying it), and the user's mods
 // below (each with an on/off switch, shared with the side panel). Opens by itself when TRIF is installed. Polls the service worker for status
 // (which also re-checks the user scripts switch); the agent list and the login go over a `panel` port,
 // as in the side panel (login.js). Switches follow chrome.storage.local `disabled` live.
@@ -157,15 +157,18 @@ function renderSteps() {
   scripts.hidden = SAFARI;
   if (!SAFARI) steps.push({ el: scripts, done: !!s.userScripts, state: 'on' });
 
-  // 4. Site permissions: permissive or restrictive (Safari asks per site itself).
+  // 4. Tim's starter mods: added only if the user says so.
+  steps.push(starterStep(s, connected));
+
+  // 5. Site permissions: permissive or restrictive (Safari asks per site itself).
   const sites = $('#step-sites');
   sites.hidden = !SITE_ACCESS;
   if (SITE_ACCESS) steps.push(sitesStep(s, connected));
 
-  // 5. The coding agent, logged in.
+  // 6. The coding agent, logged in.
   steps.push(loginStep(connected));
 
-  // 6. Try it: never ticked; once the rest are, it's what's left.
+  // 7. Try it: never ticked; once the rest are, it's what's left.
   steps.push(tryStep(s));
 
   const now = steps.findIndex((x) => !x.done);
@@ -248,6 +251,46 @@ function loginStep(connected) {
     return [el('p', null, intro), row.childElementCount ? row : null, how, wait];
   });
   return { el: step, done: false };
+}
+
+// Tim's starter mods: nothing of his code is on disk until the user chooses (helper/lib/preinstalled.js).
+// "Add them" has the helper copy them in (and turn TRIF on for their sites, which the next step is about);
+// "Start with none" is remembered, so no setup or update adds them later. Settings in the panel can add them.
+const STARTER_SOURCE = 'https://github.com/acapellascience/trif/tree/main/examples/sites';
+let starterError = '';
+
+/** "google.com", "x.com" → "Google, X"; the last two joined with "and". */
+function siteNames(sites) {
+  const names = (sites || []).map((x) => { const w = String(x).split('.')[0]; return w.length <= 1 ? w.toUpperCase() : w[0].toUpperCase() + w.slice(1); });
+  return names.length < 2 ? names.join('') : `${names.slice(0, -1).join(', ')} and ${names.at(-1)}`;
+}
+
+function starterStep(s, connected) {
+  const step = $('#step-starter');
+  const st = s.starter;
+  if (!connected || !st) return { el: step, done: false };
+  if (st.choice) return { el: step, done: true, state: st.choice };
+  setBody(step, JSON.stringify(['starter', st.count, st.sites, starterError]), () => {
+    const row = el('div', 'row');
+    const add = button('Add them', 'primary', () => chooseStarter('shipped.install'));
+    const none = button('Start with none', '', () => chooseStarter('shipped.none'));
+    [add.id, none.id] = ['starter-add', 'starter-none'];
+    const see = link('See what’s in them', STARTER_SOURCE);
+    see.id = 'starter-source';
+    row.append(add, none, see);
+    return [
+      el('p', null, `${st.count} small mods for ${siteNames(st.sites)}: no ads or AI clutter, calmer feeds. They’re plain JavaScript you can read before they run.`),
+      row,
+      starterError ? el('p', 'problem', starterError) : null,
+    ];
+  });
+  return { el: step, done: false };
+}
+
+async function chooseStarter(type) {
+  starterError = '';
+  try { await request({ type }); } catch (e) { starterError = `Couldn’t do that: ${e?.message ?? e}`; }
+  refresh();
 }
 
 // Site permissions: permissive (every site by default: the browser's prompt for <all_urls>, from the click)

@@ -6,17 +6,19 @@ const P = require('./paths');
 
 const COMMANDS = {
   setup: {
-    usage: 'trif setup [--browser chrome|chromium|brave|edge|arc|firefox|safari|all] [--home DIR] [--copy|--link] [--no-link] [--no-examples] [--verbose] [--no-wait]',
+    usage: 'trif setup [--browser chrome|chromium|brave|edge|arc|firefox|safari|all] [--home DIR] [--copy|--link] [--no-link] [--examples|--no-examples] [--verbose] [--no-wait]',
     summary: 'install the workspace, native messaging host and CLI link (safe to re-run)',
     details: `First time: npx timsrobot setup   (needs Node 18 or newer).
 Creates the workspace (~/.trif, unless --home or TRIF_HOME says otherwise; a ~/.webmods from before 0.2.0,
 when TRIF was called WebMods, is moved there first and left as a link to it) with sites/ and bin/, and the
 private folder (settings, logs, screenshots; ~/Library/Application Support/TRIF on a Mac, moved out of the
 workspace if an older TRIF kept them there), installs the TRIF files the wrappers run,
-refreshes AGENTS.md and CLAUDE.md there from those files, adds the mods TRIF ships (Google, X, Amazon,
-Instagram; some on, some off) the first time, and each new one a later version brings, switched off
-(each once: never again after you delete one, never over your own file; --no-examples skips them),
-updates the ones you haven't changed (a changed one is offered the new version), writes bin/trif-host
+refreshes AGENTS.md and CLAUDE.md there from those files. Tim's starter mods (the mods TRIF ships for
+Google, X, Amazon and Instagram; some on, some off) are added only when you choose them: on the setup
+page in your browser ("Add them" or "Start with none"), in the panel's settings, or with --examples here
+(--no-examples says none). Once added, each new one a later version brings comes too, switched off
+(each once: never again after you delete one, never over your own file), and setup
+updates the ones you haven't changed (a changed one is offered the new version). It writes bin/trif-host
 and bin/trif wrappers with an absolute node path (and the same as bin/webmods-host and bin/webmods, their
 names before 0.2.0), writes the native messaging host manifest for each
 browser (default: every browser whose profile folder exists) allowing every TRIF extension ID (plus

@@ -26,7 +26,7 @@ process.stdout.on('error', (e) => { if (e.code === 'EPIPE') process.exit(0); thr
 const VALUE_FLAGS = new Set(['--tab', '--url', '-o', '--out', '--output', '--filter', '--limit', '-f', '--file',
   '--browser', '--home', '--native-dir', '--bin-dir', '--timeout', '--agent', '--session', '--model', '--site', '--auto',
   '--provider', '--base-url', '--key-env', '--selector', '--color', '--text', '--tolerance']);
-const BOOL_FLAGS = new Set(['--json', '--hard', '--help', '-h', '--force', '--no-link', '--no-examples', '--copy', '--link', '--install', '--open',
+const BOOL_FLAGS = new Set(['--json', '--hard', '--help', '-h', '--force', '--no-link', '--examples', '--no-examples', '--copy', '--link', '--install', '--open',
   '--use-new', '--keep', '--merged', '--set-key', '--remove-key', '--scroll', '--full', '--verbose', '-v', '--no-wait']);
 const ALIASES = { '--out': '-o', '--output': '-o', '--file': '-f', '-h': '--help', '-v': '--verbose' };
 
@@ -225,12 +225,14 @@ const handlers = {
   async setup(ctx) {
     const { setup } = require('./lib/setup');
     if (ctx.opts['--copy'] && ctx.opts['--link']) throw new UsageError('use --copy or --link, not both');
+    if (ctx.opts['--examples'] && ctx.opts['--no-examples']) throw new UsageError('use --examples or --no-examples, not both');
     const r = setup({
       home: ctx.opts['--home'],
       browser: ctx.opts['--browser'],
       nativeDir: ctx.opts['--native-dir'],
       binDir: ctx.opts['--bin-dir'],
       noLink: !!ctx.opts['--no-link'],
+      examples: !!ctx.opts['--examples'],
       noExamples: !!ctx.opts['--no-examples'],
       verbose: !!ctx.opts['--verbose'],
       mode: ctx.opts['--copy'] ? 'copy' : ctx.opts['--link'] ? 'link' : undefined,

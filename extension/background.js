@@ -46,6 +46,7 @@ const state = {
   access: ALL_ACCESS,    // what the browser gives TRIF (readAccess): a site in sitesOn counts only with it
   siteMode: null,        // 'permissive' (<all_urls>) or 'restrictive' (per site), as last chosen or seen (persisted)
   blockedSites: [],      // sites the user blocked in TRIF: nothing from TRIF touches them (persisted)
+  starter: null,         // Tim's starter mods, from the helper: {choice: 'added'|'none'|null, count, sites}
   panelWindows: new Map(), // side panel port -> the window it's in (Chrome), so the toolbar button can close it
   startedOff: {},        // mod id → true for mods already switched off once: preinstalled, or from another browser (persisted)
   absorbed: {},          // mod id → true for retired shipped mods whose switch was carried over (persisted)
@@ -422,6 +423,12 @@ async function onModsMessage(msg) {
     state.sitesOffered = sites.offered;
     await save({ sitesOn: state.sitesOn, sitesOffered: state.sitesOffered }).catch((e) => log('warn', errMsg(e)));
     notifyPanels();
+  }
+  // Tim's starter mods: whether the user added them, chose none, or hasn't chosen (the setup page asks).
+  if (msg.starter && typeof msg.starter === 'object') {
+    const changed = JSON.stringify(msg.starter) !== JSON.stringify(state.starter);
+    state.starter = msg.starter;
+    if (changed) notifyPanels();
   }
   // The order the side panel starts a site's shipped mods in (the panel reads it from storage).
   const defaultOrder = normalizeModOrder(msg.defaultOrder);
@@ -980,7 +987,8 @@ async function uiStatus() {
   return {
     helper: { connected: state.connected, error: state.connected ? null : state.helperError },
     userScripts: s.userScripts, settingsUrl: SETTINGS_URL, version: VERSION, chrome: CHROME, browser: BROWSER,
-    recording: s.recording, sitesOn: state.sitesOn, siteMode: s.siteMode, disconnected: s.disconnected, blockedSites: s.blockedSites, access: s.access, siteAccess: SITE_ACCESS, update: state.connected ? state.update : null,
+    recording: s.recording, sitesOn: state.sitesOn, siteMode: s.siteMode, disconnected: s.disconnected, blockedSites: s.blockedSites, access: s.access, siteAccess: SITE_ACCESS,
+    starter: state.connected ? state.starter : null, update: state.connected ? state.update : null,
     mods: state.mods.map((m) => ({
       id: m.id, name: m.name || m.id, description: m.description || '', site: m.site, file: m.file || '',
       matches: m.matches || [], excludes: m.excludes || [], registered: !!live.get(m.id)?.registered, enabled: live.get(m.id)?.enabled ?? isEnabled(m.id),
@@ -1060,6 +1068,9 @@ async function onPanelMessage(msg) {
     case 'site.disconnect': return disconnectSite(msg);
     case 'site.block': return setBlocked(msg);
     case 'site.mode': return setSiteMode(msg);
+    // Tim's starter mods, the user's choice: the helper adds them (or records none) and sends the mods again.
+    case 'shipped.install': return helperRequest('shipped.install', {}, 30000);
+    case 'shipped.none': return helperRequest('shipped.none', {}, 10000);
     case 'chat.note': {
       // A line from the panel itself (a slash command's answer), shown like a tool line.
       const site = normalizeSite(msg.site);

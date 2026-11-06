@@ -81,6 +81,12 @@
   <p id="instructions-note" class="note">Applies from your next message, here and in Claude Code in ~/.trif.</p>
   <label class="check"><input id="auto-update" type="checkbox"> Install updates automatically</label>
   <p id="update-note" class="note"></p>
+  <!-- Tim's starter mods, when the user hasn't added them (the setup page asked). -->
+  <div id="starter-block" class="sites-block" hidden>
+    <p class="actions"><button id="starter-add" class="btn" type="button">Add Tim's starter mods</button>
+      <a href="https://github.com/acapellascience/trif/tree/main/examples/sites" id="starter-source" class="note" target="_blank" rel="noopener">See what’s in them</a></p>
+    <p id="starter-err" class="note error" hidden></p>
+  </div>
   <!-- Site permissions: permissive or restrictive (not in Safari), and the sites blocked in TRIF. -->
   <div class="sites-block">
     <p class="sites-title">Site permissions</p>

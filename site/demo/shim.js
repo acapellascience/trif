@@ -192,6 +192,20 @@
     state.sent = true; state.active = null;
     try { if (skipTo === 'win') sessionStorage.setItem('trif-demo-skip', 'win-load'); else sessionStorage.removeItem('trif-demo-skip'); } catch {}
     later(() => loadPage(), 300);
+  } else if (skipTo && skipTo !== 'win-load') {
+    // ?skip=<chat>: every chat up to and including that one played, in the demo's order (on a phone, without
+    // the desk ones), their mods on, the panel on the next prompt, as if that one had just been sent.
+    try { sessionStorage.removeItem('trif-demo-skip'); } catch {}
+    const at = DEMO.chats.findIndex((c) => c.id === skipTo);
+    if (at !== -1) {
+      const played = DEMO.chats.slice(0, at + 1);
+      const made = new Set(played.flatMap((c) => c.mods));
+      state.mods = DEMO.mods.filter((m) => made.has(m.slug)).map((m) => ({ ...m }));
+      store.set('disabled', {});
+      state.replayed = new Set(played.map((c) => c.id));
+      state.sent = true; state.active = null;
+      later(() => loadPage(), 300);
+    }
   }
   restoring = false;
   persist();

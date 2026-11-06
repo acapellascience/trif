@@ -101,12 +101,14 @@
   addEventListener('touchmove', (e) => { if (keyboardUp && e.cancelable) e.preventDefault(); }, { capture: true, passive: false });
 
   // Testing shortcuts: /?skip=end jumps to the end of the demo (every chat played, every mod on, the panel
-  // open, as a fresh tab would be after it), /?skip=win also beats the space game for you (You Win). The
-  // panel does the rest (shim.js: trif-demo-skip), and the page reloads with every mod.
+  // open, as a fresh tab would be after it), /?skip=win also beats the space game for you (You Win), and
+  // /?skip=<chat> (makeover, gravity, rave...: site/build-demo.js CHAT_ORDER) plays every chat up to and
+  // including that one, the panel waiting on the next. The panel does the rest (shim.js: trif-demo-skip),
+  // and the page reloads with their mods.
   const SKIP = 'trif-demo-skip';
   try {
     const p = new URLSearchParams(location.search), skip = p.get('skip');
-    if (skip === 'end' || skip === 'win') {
+    if (skip === 'end' || skip === 'win' || /^[a-z][a-z0-9-]{0,39}$/.test(skip || '')) {
       for (const k of Object.keys(sessionStorage)) if (k.startsWith('trif-demo') || k === 'trif.muted') sessionStorage.removeItem(k);
       sessionStorage.setItem(SKIP, skip);
       sessionStorage.setItem(OPEN, '1');

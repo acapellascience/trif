@@ -652,6 +652,18 @@ class Scenario {
       if (ls) throw new Error('the localhost mod ran though TRIF is off there');
       await this.ext(`async (id) => { await chrome.tabs.update(id, { active: true }); }`, [win.tabId]);
       await this.waitPanel('the panel to follow back to 127.0.0.1', (x) => x.site === '127.0.0.1' && !x.gate);
+      // The message box keeps a draft per tab: what's typed in one tab doesn't show up in another.
+      const typeIn = (text) => this.panel(`async (t) => { const i = document.querySelector('#input'); i.value = t; i.dispatchEvent(new Event('input', { bubbles: true })); }`, [text]);
+      const boxText = () => this.panel(`async () => document.querySelector('#input').value`);
+      await typeIn('left in the test page');
+      await this.ext(`async (id) => { await chrome.tabs.update(id, { active: true }); }`, [other]);
+      await this.waitPanel('the panel to follow to localhost again', (x) => x.site === 'localhost');
+      if ((await boxText()) !== '') throw new Error(`the other tab's draft showed up on localhost: ${JSON.stringify(await boxText())}`);
+      await typeIn('left on localhost');
+      await this.ext(`async (id) => { await chrome.tabs.update(id, { active: true }); }`, [win.tabId]);
+      await this.waitPanel('the panel back to 127.0.0.1 again', (x) => x.site === '127.0.0.1' && !x.gate);
+      if ((await boxText()) !== 'left in the test page') throw new Error(`127.0.0.1's draft not back: ${JSON.stringify(await boxText())}`);
+      await typeIn('');
       await this.ext(`async (id, url) => { await chrome.tabs.update(id, { url }); }`, [win.tabId, `${base}/two.html`]);
       await this.waitPage('page two with the mod', (x) => x.url.endsWith('/two.html') && x.banner === 'ran');
       await this.waitPanel('the panel on page two', (x) => x.site === '127.0.0.1' && x.mods.some((m) => m.id === '127.0.0.1/e2e-banner' && m.running));

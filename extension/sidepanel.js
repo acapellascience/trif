@@ -230,8 +230,18 @@ async function followActiveTab() {
   if (tab) await setTab(tab);
 }
 
+// What was typed in the message box and not sent, by tab. One panel serves every tab in its window, so on a
+// tab switch the box would keep the other tab's words: each tab gets back what was left in it instead.
+// (This panel's memory only: a closed tab's goes with it, and a new panel starts empty.)
+const drafts = new Map();
+chrome.tabs.onRemoved.addListener((tabId) => drafts.delete(tabId));
+
 async function setTab(tab) {
   const url = tab.url || tab.pendingUrl || '';
+  if (view.tab && view.tab.id !== tab.id) {
+    if (ui.input.value) drafts.set(view.tab.id, ui.input.value); else drafts.delete(view.tab.id);
+    ui.input.value = drafts.get(tab.id) || '';
+  }
   view.tab = { id: tab.id, url };
   const site = siteForUrl(url);
   if (site !== view.site) {

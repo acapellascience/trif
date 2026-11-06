@@ -2225,8 +2225,13 @@ test('agent and model per site chat: each site its own pick; the default is the 
 // ---- site access: the browser's OK for each site TRIF is on for ---------------------------------
 
 test('site access: a site needs its domain and subdomains, http and https; <all_urls> or any host covers all', () => {
-  assert.deepStrictEqual(lib.siteOrigins('x.com'), ['*://x.com/*', '*://*.x.com/*']);
-  assert.deepStrictEqual(lib.originsFor(['x.com', 'bbc.co.uk', 'x.com']), ['*://x.com/*', '*://*.x.com/*', '*://bbc.co.uk/*', '*://*.bbc.co.uk/*']);
+  // One pattern a site: *.x.com covers x.com itself too, so the browser's prompt lists the site once.
+  assert.deepStrictEqual(lib.siteOrigins('x.com'), ['*://*.x.com/*']);
+  assert.deepStrictEqual(lib.siteOrigins('127.0.0.1'), ['*://127.0.0.1/*'], 'an IP: just the address');
+  assert.deepStrictEqual(lib.originsFor(['x.com', 'bbc.co.uk', 'x.com']), ['*://*.x.com/*', '*://*.bbc.co.uk/*']);
+  const one = lib.normalizeAccess({ origins: ['*://*.x.com/*', '*://127.0.0.1/*'] });
+  assert.ok(lib.hasSiteAccess(one, 'x.com') && lib.hasSiteAccess(one, '127.0.0.1'), 'the one pattern is enough, for a domain and an IP');
+  assert.ok(!lib.hasSiteAccess(lib.normalizeAccess({ origins: ['*://x.com/*'] }), 'x.com'), 'the bare domain alone misses its subdomains');
   const acc = (origins) => lib.normalizeAccess({ origins, permissions: ['tabs'] });
   assert.deepStrictEqual(acc(['<all_urls>']), { origins: ['<all_urls>'], all: true, allUrls: true });
   assert.deepStrictEqual(acc(['*://*/*']), { origins: ['*://*/*'], all: true, allUrls: false }, 'every site, but not <all_urls> itself (screenshots)');

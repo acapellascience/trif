@@ -39,7 +39,8 @@ function testExtension(from, to, siteAccess = SITE_ACCESS_HOSTS) {
   fs.cpSync(from, to, { recursive: true });
   const file = path.join(to, 'manifest.json');
   const m = JSON.parse(fs.readFileSync(file, 'utf8'));
-  m.host_permissions = siteAccess === 'all' ? ['<all_urls>'] : siteAccess.flatMap((h) => [`*://${h}/*`, `*://*.${h}/*`]);
+  // (as the extension asks for a site: lib.js siteOrigins, one pattern, just the address for an IP)
+  m.host_permissions = siteAccess === 'all' ? ['<all_urls>'] : siteAccess.map((h) => (/^\d{1,3}(\.\d{1,3}){3}$/.test(h) ? `*://${h}/*` : `*://*.${h}/*`));
   fs.writeFileSync(file, JSON.stringify(m, null, 2));
   return to;
 }

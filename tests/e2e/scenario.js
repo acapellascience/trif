@@ -590,7 +590,7 @@ class Scenario {
           throw new Error(`sites on ${JSON.stringify(st.sitesOn)}, not allowed ${JSON.stringify(st.noAccess)}`);
         }
         const origins = await this.ext(`async () => (await chrome.permissions.getAll()).origins`);
-        if (asksSites && ff && !['*://x.com/*', '*://*.x.com/*', '*://*.instagram.com/*'].every((o) => origins.includes(o))) throw new Error(`granted: ${JSON.stringify(origins)}`);
+        if (asksSites && ff && !['*://*.x.com/*', '*://*.instagram.com/*'].every((o) => origins.includes(o))) throw new Error(`granted: ${JSON.stringify(origins)}`);
         if (!asksSites && !origins.includes('<all_urls>')) throw new Error(`no <all_urls>: ${JSON.stringify(origins)}`);
         await this.shot(this.control, 'setup-page-login');
         return `sites on ${st.sitesOn.join(', ')}; granted ${origins.join(' ')}; ${x.steps[4] === 'now' ? x.now.split('\n').slice(0, 2).join(' / ') : 'the agent is logged in already'}`;
@@ -664,7 +664,7 @@ class Scenario {
       await this.waitPanel('the panel switch to go on', (x) => x.mods.some((m) => m.id === '127.0.0.1/e2e-banner' && m.on));
     });
 
-    const SITE = ['*://127.0.0.1/*', '*://*.127.0.0.1/*'];
+    const SITE = ['*://127.0.0.1/*']; // (an IP: just the address, as lib.js siteOrigins asks)
     const hasSite = () => this.ext(`async (o) => chrome.permissions.contains({ origins: o })`, [SITE]);
     await r.check('site switch off in the panel: nothing runs, the access stays (on again asks nothing), Disconnect offered unless TRIF has every site; on again: it runs', async () => {
       await d.click(this.panelCtx, '#site-switch');

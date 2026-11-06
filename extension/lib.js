@@ -582,9 +582,15 @@ export function limitToSites(mod, sitesOn) {
 
 export const SITE_ACCESS = !SAFARI;
 
-/** The origins a site (a registrable domain) needs: the domain and its subdomains, http and https. */
+/**
+ * The origins a site (a registrable domain) needs: the domain and its subdomains, http and https. One
+ * pattern does both: `*.amazon.com` matches amazon.com itself too (in Chrome's and Firefox's match
+ * patterns), and asking for amazon.com separately only made the browser's prompt list it twice. An IP
+ * address has no subdomains (and `*.` before one isn't a valid pattern): just the address.
+ */
+const isIp = (site) => /^(\d{1,3}(\.\d{1,3}){3}|\[.*\])$/.test(site);
 export function siteOrigins(site) {
-  return [`*://${site}/*`, `*://*.${site}/*`];
+  return isIp(site) ? [`*://${site}/*`] : [`*://*.${site}/*`];
 }
 
 export function originsFor(sites) {
@@ -629,11 +635,11 @@ function originCovers(pattern, scheme, host, wild) {
   return !wild && g === host;
 }
 
-/** Whether the browser gives TRIF all of `site` (siteOrigins, both schemes). */
+/** Whether the browser gives TRIF all of `site` (siteOrigins, both schemes; an IP has no subdomains). */
 export function hasSiteAccess(access, site) {
   if (!access || access.all) return !!access;
   return ['http', 'https'].every((scheme) => access.origins.some((o) => originCovers(o, scheme, site, false))
-    && access.origins.some((o) => originCovers(o, scheme, site, true)));
+    && (isIp(site) || access.origins.some((o) => originCovers(o, scheme, site, true))));
 }
 
 /** The sites TRIF works on: on in `sitesOn`, with access. */

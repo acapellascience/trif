@@ -276,8 +276,8 @@ only when the user connects it ("site access" in `extension/lib.js`):
   the panel's status `siteAccess` (false in Safari). `trif status` prints `disconnected`, `never` and, with
   every site, `access`.
 - **Connecting.** The panel's button on a new or disconnected site (`Fix <site>`, `Connect to <site>`, or
-  the power button / robot) calls `chrome.permissions.request` for `*://<site>/*` and `*://*.<site>/*`
-  (`siteOrigins`) from the click itself, before anything else (Chrome needs a user gesture; Firefox allows
+  the power button / robot) calls `chrome.permissions.request` for `*://*.<site>/*` (which covers `<site>` itself too, so the
+  prompt lists it once; just `*://<ip>/*` for an IP address) (`siteOrigins`) from the click itself, before anything else (Chrome needs a user gesture; Firefox allows
   nothing awaited before it), then `site.set` on. On an off site it has access, so it doesn't ask. Declined:
   `TRIF needs your OK to work on <site>, so it stays off there.` `site.set` on checks again and refuses a
   site without access with the same words.

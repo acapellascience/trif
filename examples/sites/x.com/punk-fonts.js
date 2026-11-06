@@ -14,11 +14,11 @@
 
   const style = document.createElement('style');
   style.textContent = `
-    /* Scoped to the app (#react-root) and Plain X's search page and Filters menu (in <body>, outside it),
+    /* Scoped to the app (#react-root) and Detox Timeline's search page and Filters menu (in <body>, outside it),
        never all of body: X signs some requests (search) with a code computed from the computed styles
        of hidden test elements it puts directly in <body>. Restyling those makes X answer 404. */
     #react-root, #react-root *, .dm-search, .dm-search *, .dm-menu, .dm-menu * { font-family: ${FONT} !important; }
-    /* Plain X draws its "x" logo (side bar, loading screen) as ::after, which body * doesn't reach. */
+    /* Detox Timeline draws its "x" logo (side bar, loading screen) as ::after, which body * doesn't reach. */
     header[role=banner] h1 a[href="/home"] > div::after, #placeholder::after { font-family: ${FONT} !important; }
   `;
   (document.head || document.documentElement).append(style);

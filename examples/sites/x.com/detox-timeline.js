@@ -9,7 +9,7 @@
 // ==/WebMod==
 
 /*
- * Plain X: Home is just the people you follow, filtered; recommendations go elsewhere too.
+ * Detox Timeline: Home is just the people you follow, filtered; recommendations go elsewhere too.
  *
  * - Timeline filter. The home timeline's data (the `HomeLatestTimeline` / `HomeTimeline` GraphQL
  *   responses) is filtered before X sees it. Ads and who-to-follow-style modules always go; reposts,
@@ -35,7 +35,7 @@
  * - Posts open as X's own post page (replies, reply box, likes); its back arrow returns to the feed.
  *   Its data (`TweetDetail`) is filtered too, but only for what's algorithmic: ads, "Discover more"
  *   (related posts) and who-to-follow-style cards. The toggles don't apply to replies.
- * - Plain X's logo (a plain lowercase x) replaces X's: in the side bar, on the search page, and on the
+ * - Detox Timeline's logo (a plain lowercase x) replaces X's: in the side bar, on the search page, and on the
  *   loading screen.
  * - Search is just a search field. Explore (trends, news, For You…) is replaced with one centered
  *   field; pressing Return opens X's results page.
@@ -51,7 +51,7 @@
  * Debugging: `webmods run 'window.__dmFilterStats'` shows, for the last 20 timeline responses, what the
  * filter saw, kept and why it dropped the rest.
  *
- * WebMods port: this is the page script of the Plain X macOS app (XFeedGuard.swift), unchanged except
+ * WebMods port: this is the page script of its original macOS app (XFeedGuard.swift), unchanged except
  * for comments. It never depended on the native app (no window.webkit message handlers, no native
  * routing); it ran as a WKUserScript at document start, the same timing as here. Notes marked
  * "WebMods port" below are the only edits.
@@ -465,7 +465,7 @@
     /* (not with X-Flyer installed, html[data-tss-ready]: X's own layout then, the timeline where X puts it) */
     html:not([data-tss-ready]) header[role=banner] { flex-grow: 0 !important; }
     [data-dm-hide] { display: none !important; }
-    /* Plain X's logo, a plain lowercase x, in place of X's. The loading screen (#placeholder, in X's HTML)
+    /* Detox Timeline's logo, a plain lowercase x, in place of X's. The loading screen (#placeholder, in X's HTML)
        is styled before it's parsed; its theme isn't known yet, so the x inverts whatever is behind it. */
     #placeholder > svg { visibility: hidden !important; }
     #placeholder::after { content: "x"; position: absolute; left: 50%; top: 50%; transform: translate(-50%, -56%);
@@ -765,7 +765,7 @@
 
   // ---- Explore becomes a plain search field. Return opens X's results page through its own router.
   const SEARCH_ICON = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M10.25 3.75c-3.59 0-6.5 2.91-6.5 6.5s2.91 6.5 6.5 6.5c1.795 0 3.419-.726 4.596-1.904 1.178-1.177 1.904-2.801 1.904-4.596 0-3.59-2.91-6.5-6.5-6.5zm-8.5 6.5c0-4.694 3.806-8.5 8.5-8.5s8.5 3.806 8.5 8.5c0 1.986-.682 3.815-1.824 5.262l4.781 4.781-1.414 1.414-4.781-4.781c-1.447 1.142-3.276 1.824-5.262 1.824-4.694 0-8.5-3.806-8.5-8.5z"/></svg>';
-  const X_LOGO = '<div class="logo" aria-hidden="true">x</div>';   // Plain X's logo
+  const X_LOGO = '<div class="logo" aria-hidden="true">x</div>';   // Detox Timeline's logo
   // A layer of its own over the main area, so it shows at once without waiting for X's page.
   // Routes X opens as a dialog over the current page (compose, media viewer). X keeps the page behind
   // in history.state.state.previousPath; while one is over Explore, keep the search page under it.

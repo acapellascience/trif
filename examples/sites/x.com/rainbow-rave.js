@@ -57,9 +57,9 @@
     }
     @keyframes wm-rainbow-roll { from { transform: translateX(0); } to { transform: translateX(${SLIDE}); } }
 
-    /* X (and Plain X) paint black/white on almost every container via generated classes: clear them
+    /* X (and Detox Timeline) paint black/white on almost every container via generated classes: clear them
        all. Only background-color, so avatars and media (background-image) still show. */
-    /* Scoped to the app (#react-root) and Plain X's search page, never all of body: X signs some
+    /* Scoped to the app (#react-root) and Detox Timeline's search page, never all of body: X signs some
        requests (search) with a code computed from the computed styles of hidden test elements it
        puts directly in <body>. Restyling those makes the code wrong and X answers 404. */
     html, body, #react-root, #react-root *, .dm-search, .dm-search * { background-color: transparent !important; }
@@ -75,7 +75,7 @@
     #react-root [data-testid=HoverCard] [role=listbox] { background-color: transparent !important; }
     /* Dialogs (compose, etc.) and menus are rainbow windows (see windowCss). Menus: More, a post's "...",
        hover cards (profile previews, but also the account menu under your avatar and the compose box's
-       "Everyone" audience picker), and Plain X's Filters menu (.dm-menu, in <body>, outside #react-root).
+       "Everyone" audience picker), and Detox Timeline's Filters menu (.dm-menu, in <body>, outside #react-root).
        After the dark rule above, which they override. */
     ${windowCss('#react-root [aria-modal=true]', 'box')}
     ${windowCss('#react-root :is([role=menu], [data-testid=HoverCard]), .dm-menu', 'menu')}
@@ -333,13 +333,13 @@
     if (!nav?.isConnected) {
       nav = [...document.querySelectorAll('header[role=banner] div')].find((el) => getComputedStyle(el).position === 'fixed') || null;
     }
-    // .dm-search is Plain X's search page on Explore (a fixed box over X's hidden columns).
+    // .dm-search is Detox Timeline's search page on Explore (a fixed box over X's hidden columns).
     // (#tss-hud and .tss-toggle: X-Flyer's side panel and its buttons, which bump along with the page;
     // #tss-glow-z: the glow layer of its title, drawn unzoomed so the same zoom lines it up)
     return [nav, ...document.querySelectorAll('[data-testid=primaryColumn], [data-testid=sidebarColumn], .dm-search, #tss-hud, .tss-toggle, #tss-glow-z')].filter(Boolean);
   };
   // Pop-ups: hover cards (profile previews, the account menu, the emoji picker) and menus (More, a post's
-  // "...") live in #layers, outside the columns; .dm-menu is Plain X's Filters menu, in <body>. They have
+  // "...") live in #layers, outside the columns; .dm-menu is Detox Timeline's Filters menu, in <body>. They have
   // their own `animation: ... !important` (windowCss); element.animate() runs alongside CSS animations.
   // Their rainbow is background-attachment: fixed, which the spec turns into "scroll" (pinned to the
   // element's padding box, not the screen) while the element or an ancestor is transformed, as it now

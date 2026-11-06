@@ -60,8 +60,8 @@ REQUIREMENTS (PRIVATE BETA)
 
 HOW TO USE
 1. Install the helper: run "npx timsrobot setup" in a terminal (details: <HELPER INSTALL URL>).
-2. On the setup page that opens, turn on "Allow User Scripts" for TRIF.
-3. Go to any website and click the TRIF toolbar icon to open the side panel.
+2. On the setup page that opens, turn on "Allow User Scripts" for TRIF, and allow the sites its mods are for (or choose Not now).
+3. Go to any website, click the TRIF toolbar icon to open the side panel, and turn TRIF on for the site. Chrome asks you to allow that site.
 4. Describe the change you want. Your agent writes the mod and reloads the page to show it.
 5. Don't like it? Ask for a tweak, switch the mod off, or start a new chat.
 
@@ -69,7 +69,7 @@ PRIVACY
 TRIF collects nothing. The extension talks only to the helper on your own computer. The only thing that reaches the developer is a problem report, when you fill in the report form and press Send. When you ask your coding agent for a change, the agent can read the page you're on (its text, the address, and screenshots) so it can write the mod. It sends that to its own AI provider (for example Anthropic or OpenAI, or the open-model provider you picked; nobody, for a model on your own computer) under that provider's terms, the same as any other time you use the agent. Chats and settings are stored only on your computer. Full policy: <PRIVACY POLICY URL>
 
 PERMISSIONS
-• "Read and change all your data on all websites": mods can be written for any site you choose, and your agent needs to read the page you're asking about. Nothing runs on a site unless you or your agent created a mod for it.
+• Websites: TRIF asks for none when you install it. When you turn TRIF on for a site in the side panel, Chrome asks you to let it read and change that site, so mods can run there and your agent can read the page you're asking about. Turning the site off gives that access back, and you can take it back any time in Chrome's extension settings.
 • "Communicate with cooperating native applications": talks to the TRIF helper on your computer. It talks to nothing else.
 • "Read your browsing history": the side panel shows the mods for the site in the current tab, and your agent can find the tab you're talking about by its address.
 
@@ -108,9 +108,9 @@ TRIF is a user script manager. Its mods are user scripts that the user's own cod
 The extension's only connection is to the TRIF helper, a local program the user installs on their own computer (native host "com.webmods.helper"). The helper sends the extension the mods from the user's mods folder, starts the user's coding agent when the user sends a message in the side panel, and relays the agent's page commands (read page text, reload, run a script) to the extension. No browsing data goes to the developer. (Separately, the helper checks GitHub for TRIF updates, and "Report a problem" opens a web form the user can choose to submit.)
 ```
 
-**tabs** (see REVIEW_RISKS.md §4: possibly redundant with `<all_urls>`; drop this block if `tabs` is removed)
+**tabs**
 ```
-Needed to read tab URLs and titles. The side panel follows the active tab and shows the mods and the chat for that tab's site. The user's agent targets tabs by URL (for example "the x.com tab"), lists open tabs, opens a page in a background tab to test a mod, reloads a tab after changing a mod, and captures a screenshot of the visible tab so it can check its work. For a tab that isn't showing, only when the agent asks for a copy (trif screenshot --copy), the extension loads the same page in a window of its own, at the edge of the screen and not focused, captures it and closes it at once; it refuses addresses that look like one-time links, and only on sites the user turned TRIF on for.
+Needed to read tab URLs and titles, including on sites the user hasn't allowed TRIF on yet: the side panel has to know which site the current tab is on to offer turning TRIF on there. The side panel follows the active tab and shows the mods and the chat for that tab's site. The user's agent targets tabs by URL (for example "the x.com tab"), lists open tabs, opens a page in a background tab to test a mod, reloads a tab after changing a mod, and captures a screenshot of the visible tab so it can check its work. For a tab that isn't showing, only when the agent asks for a copy (trif screenshot --copy), the extension loads the same page in a window of its own, at the edge of the screen and not focused, captures it and closes it at once; it refuses addresses that look like one-time links, and only on sites the user turned TRIF on for.
 ```
 
 **scripting**
@@ -128,9 +128,14 @@ Stores, only on the user's device: the list of mods received from the local help
 The main interface is a side panel: the user chats with their coding agent about the page they are looking at and switches the site's mods on and off. Clicking the toolbar icon opens it.
 ```
 
-**Host permission: `<all_urls>`**
+**activeTab**
 ```
-Users can write mods for any website they choose, so TRIF can't know the sites in advance. Mods use the user-chosen match patterns from each mod file, and nothing runs on a site without a mod for it. The host permission is also needed when the user asks their agent about a page: to read its text, take a screenshot of the visible tab, reload it, and read mod errors there. Narrowing it to a fixed list of sites would make the extension unable to customize the site the user is on.
+Lets the user's agent take a screenshot of the tab the user is looking at, after the user clicks the TRIF toolbar button on it. Chrome's captureVisibleTab needs activeTab or access to every site, and TRIF only asks for the sites the user turns it on for. Nothing else uses it: TRIF reads and changes only the sites the user allowed.
+```
+
+**Optional host permission: `<all_urls>`** (no host permission is required at install)
+```
+TRIF requests no websites at install. Users write mods for websites they choose, so the sites can't be listed in advance; instead, when the user turns TRIF on for a site in the side panel (a click), the extension calls chrome.permissions.request for that site only (the domain and its subdomains), and Chrome asks the user. Turning the site off removes that access again (chrome.permissions.remove), and the user can revoke it in Chrome's settings, after which nothing from TRIF runs on that site. With access to a site, TRIF runs the user's mods there (each mod's own match patterns, limited to the allowed sites) and, when the user asks their agent about a page there, reads its text, reloads it and reads mod errors. The optional <all_urls> entry is only the upper bound of what can be requested; TRIF never requests it. Users who installed a version where it was required keep it.
 ```
 
 ### Remote code

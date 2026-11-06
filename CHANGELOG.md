@@ -4,6 +4,16 @@ What's new in each TRIF release (called WebMods before 0.2.0). The text under a 
 panel shows under "What's new", so it's written for people using TRIF. `node scripts/release.js <version>`
 needs a section here for the version it releases.
 
+## Unreleased
+
+- **TRIF only gets the websites you turn it on for.** Installing it used to give it "all your data on all
+  websites". Now it asks for none: turning TRIF on for a site in the side panel is when your browser asks
+  you to allow that site, and turning the site off gives it back. The setup page asks once for the sites
+  TRIF's own mods are for. Already using TRIF? Nothing changes for you: it keeps the access it had.
+- With only the sites you allowed, your agent's screenshots are of the tab you're on, after you click the
+  TRIF toolbar button there (Chrome and Firefox want that, or access to every site, before an extension
+  can capture a tab).
+
 ## 0.2.4
 
 - **TRIF installs with `npx timsrobot setup`.** npm wouldn't take the name "trif", so the package is

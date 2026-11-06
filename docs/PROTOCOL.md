@@ -223,7 +223,7 @@ Without one, the target is the active tab of the last-focused normal window.
 | `open` | `to` (URL) | `{id, url}`: opens a new background tab (never takes focus), waits for load |
 | `text` | tab selector | `{url, title, text}`: `document.body.innerText`, capped at 200 000 chars |
 | `sweep` | `selector`, `text` (regex; `/re/flags`, else case-insensitive), `color` (any CSS colour), `tolerance` (0-255 per channel, default 2), `limit` (matches returned, default 200), `budget` (ms, default 4000), `scroll` (bool) + tab selector | Every instance of a kind of thing on the page, from `extension/sweep.js` run in the isolated world: `{url, query, target, scanned:{elements, roots, shadowRoots, closedShadowRoots, frames, ms}, partial, skipped:{crossOriginFrames, unreadableSheets}, total, summary:{visible, hidden, inViewport, fixed, sticky, inShadowRoots, inFrames, regions, props}, groups:[{signature, count, visible, regions, example}], matches:[{element, text, region, position, visible, inViewport, root, props?}], rules}`. Searches the document, shadow roots (closed ones through `chrome.dom.openOrClosedShadowRoot` / Firefox's `openOrClosedShadowRoot`) and same-origin frames. With `color`, `rules` lists the stylesheet rules and custom properties using it, and the rules using those (`var()`). `partial` says why it stopped early (time budget, 100 000 elements). |
-| `screenshot` | `full: bool`, `copy: bool`, `timeout` (ms) + tab selector | `{dataUrl, how, note, full, cut?}` PNG (`extension/screenshot.js`). The extension never switches tabs or focuses windows, since agents may run while the user browses. `how`: `visible` (captureVisibleTab of a tab that's showing), `tab` (Firefox's `tabs.captureTab`: any tab in its exact state, `full` from its page rect, up to 12 000 px), `copy` (Chrome, a tab that isn't showing or `full`, only with `copy: true`, otherwise an error that names `trif screenshot --copy` and suggests sweep/text/run: a fresh copy of the tab's URL loaded, muted, in a new unfocused window the size of the tab's, against the right edge of the screen with 45% of it past the edge (Chrome doesn't draw covered windows, and refuses bounds less than half on screen; refused bounds fall back to the tab's window position), at the tab's scroll position, captured, and closed; `stale: true` when the copy's page was hidden anyway, so captures after a scroll may be old frames; `full` stitches up to 14 captures, hiding fixed and sticky elements after the first). `note` tells the agent what it got when that isn't simply the tab on screen. Safari: a tab that isn't showing is an error. Copy windows are listed in `chrome.storage.session` `probes` while open, and closed on the next start if the worker stopped mid-capture. The CLI writes the image to a file and the note to stderr. |
+| `screenshot` | `full: bool`, `copy: bool`, `timeout` (ms) + tab selector | `{dataUrl, how, note, full, cut?}` PNG (`extension/screenshot.js`). The extension never switches tabs or focuses windows, since agents may run while the user browses. `how`: `visible` (captureVisibleTab of a tab that's showing), `tab` (Firefox's `tabs.captureTab`: any tab in its exact state, `full` from its page rect, up to 12 000 px), `copy` (Chrome, a tab that isn't showing or `full`, only with `copy: true`, otherwise an error that names `trif screenshot --copy` and suggests sweep/text/run: a fresh copy of the tab's URL loaded, muted, in a new unfocused window the size of the tab's, against the right edge of the screen with 45% of it past the edge (Chrome doesn't draw covered windows, and refuses bounds less than half on screen; refused bounds fall back to the tab's window position), at the tab's scroll position, captured, and closed; `stale: true` when the copy's page was hidden anyway, so captures after a scroll may be old frames; `full` stitches up to 14 captures, hiding fixed and sticky elements after the first). `note` tells the agent what it got when that isn't simply the tab on screen. Safari: a tab that isn't showing is an error. Without `<all_urls>` (see "Site access"): only `visible`, of a tab the user clicked TRIF's toolbar button on (`activeTab`); anything else is an error saying so. Copy windows are listed in `chrome.storage.session` `probes` while open, and closed on the next start if the worker stopped mid-capture. The CLI writes the image to a file and the note to stderr. |
 | `record` | `site`, `on: bool` | `{recording:[sites], site, changed}`. Turns the network recorder on/off for a hostname (and its subdomains). Takes effect on the next page load. `changed`: whether it was the other way before. Switching off is allowed on a site TRIF is off for. Recording a side-panel run switched on (changed, from its token) is switched off by the helper when that run's `done` goes out; recording that was already on, or that a terminal switched on, is left alone. |
 | `requests` | `filter` (regex string, matched against URL), `limit` (default 50) + tab selector | `[{i, method, url, status, type:"fetch"|"xhr", size, time}]`, newest last |
 | `request` | `i` + tab selector | `{method, url, status, requestBody, responseText}` (bodies capped at 2 MB each) |
@@ -252,6 +252,51 @@ is enforced, for everyone:
   on. `status` and the panel's status carry `sitesOn`.
 - **Updating.** A profile without `sitesOn` (from before) starts with the sites of its switched-on mods
   (not all-sites ones) and the sites it has chats for (`sitesInUse`).
+
+### Site access: the browser's OK per site
+
+The manifest asks for no sites at install: `"optional_host_permissions": ["<all_urls>"]`, no
+`host_permissions`. So the install prompt says nothing about websites, and the browser gives TRIF a site
+only when the user allows it ("site access" in `extension/lib.js`):
+
+- **Asking.** A site needs `*://<site>/*` and `*://*.<site>/*` (`siteOrigins`). The panel's Fix button
+  (and the power button, and the robot in the bar) call `chrome.permissions.request` for them from the
+  click itself, before anything else (Chrome needs a user gesture; Firefox allows nothing awaited before
+  it); for a site TRIF has already, the browser says yes without asking. Declined: `TRIF needs your OK to
+  work on <site>, so it stays off there.`, and no `site.set` is sent. `site.set` with `on` checks again
+  (`permissions.getAll`) and refuses a site without access with the same words, so a site never counts as
+  on without it.
+- **Which sites count.** The sites TRIF works on are `sitesOn` ∩ access (`activeSites`), and everything
+  above (mods, the runtime, recording, page commands, `tabs`, the in-page guard, `agent.start`, `status`'s
+  `sitesOff`) goes by them. A site in `sitesOn` without access: page commands get `TRIF is on for <site>,
+  but <browser> doesn't give it access to that site …`, `agent.start` gets `TRIF needs your OK to work on
+  <site>: allow it first`. `status` and the panel's status carry `noAccess` (those sites; `trif status`
+  prints them as "not allowed"), and the panel's status `siteAccess` (false in Safari).
+- **Taken back.** The user can remove a site (or everything) in the browser's extension settings.
+  `permissions.onAdded`/`onRemoved` re-read the access, re-sync the mods and stop runs on sites that lost it.
+  The site stays in `sitesOn`, so allowing it again brings it back as it was.
+- **Off gives it back.** `site.set` off removes the site's origins (`permissions.remove`), so TRIF holds
+  only the sites it's on for.
+- **Start sites.** The sites setup turns on (`applyStartSites`, no click) start without access. The setup
+  page's step "Allow TRIF on its sites" asks for all of `noAccess` in one prompt ("Allow these sites"), or
+  "Not now" turns them off (`site.set` off each). The panel on such a site shows the gate with `TRIF needs
+  your OK to work on <site>.` and `Allow TRIF on <site>`.
+- **Updating from `<all_urls>` required.** Chrome and Firefox keep a granted permission when an update moves
+  it from required to optional (Chromium bounds the stored active permissions by required ∪ optional,
+  `PermissionsManager::GetBoundedExtensionDesiredPermissions`; Firefox migrates them, its
+  `test_ext_permissions_migrate.js`; checked in Chrome for Testing 156 by loading a build with
+  `host_permissions: ["<all_urls>"]`, then the same profile with it optional: `permissions.getAll()` still
+  has `<all_urls>`). So for those users every site has access and nothing changes; `site.set` off doesn't
+  remove anything (`<all_urls>` covers it, and Chrome can't take one site out of it).
+- **Safari** keeps `host_permissions: ["<all_urls>"]` (it asks per site itself, whatever the manifest
+  says); TRIF doesn't ask or check there.
+- **Screenshots.** A site's own access isn't enough for `captureVisibleTab` (Chrome wants `<all_urls>` or
+  `activeTab`) or Firefox's `captureTab` (`<all_urls>`). So the manifest has `activeTab`, and in Chrome the
+  toolbar button opens the side panel from `action.onClicked` (`sidePanel.open`, and `sidePanel.close` on
+  the next click in that window: the panel says which window it's in with `{type: "panel.window",
+  windowId}`) instead of `openPanelOnActionClick`, because only then does the click give TRIF `activeTab`
+  on that tab. Without `<all_urls>`, `screenshot` captures only the tab in front, after that click; a tab
+  that isn't showing, `full` and `copy` are an error that says so (see `screenshot`).
 
 ### Mod switches (`mod.enable`)
 
@@ -682,7 +727,9 @@ Nothing is hosted; the agent uses the user's own login/subscription.
 ### Extension
 
 - `manifest.json`: add permission `sidePanel` and `"side_panel": {"default_path": "sidepanel.html"}`.
-  Clicking the toolbar icon opens the side panel (`chrome.sidePanel.setPanelBehavior({openPanelOnActionClick: true})`).
+  Clicking the toolbar icon opens the side panel, and clicking it again closes it: `action.onClicked` calls
+  `chrome.sidePanel.open`/`close` (`openPanelOnActionClick` is false), so the click gives TRIF `activeTab`
+  for screenshots (see "Site access").
   The onboarding/status page stays, opened from the panel's "Setup" link, and automatically on first install.
 - `sidepanel.html/.js/.css`: follows the active tab of its window.
   - **Header:** the current site (hostname without `www.`), a status dot (helper connected, user scripts

@@ -59,6 +59,10 @@ Per browser, a **fresh** scenario, and an **upgrade** scenario per `--upgrade-fr
      commands refused) and on again; the same with the robot in the top bar (off like the power button,
      on from the gate like Fix, a little brighter under the mouse);
    - the panel follows tab switches and navigation; a mod for `localhost`, where TRIF stays off, never runs.
+   - mods just over 1 MB in all (a 1 MB base64 mod and 0.4 MB of functions) go in parts and run; a change
+     to the small one goes without the big one's code (`modsSame`), and the big one still runs; a mod over
+     the 4 MB cap isn't sent, and `trif status` and `trif doctor` say why. Kept small on purpose: see "Big
+     mods and memory" below for sets up to the 16 MB cap.
    - `trif sweep --selector/--text/--color` on a page of repeated things (`/sweep.html`: regions, a sticky
      header, a shadow root, a same-origin frame, a CSS variable) finds the expected counts; `trif status
      --tab` lists the mods on that page; `trif screenshot` and `--full` of that tab while it's in the
@@ -145,6 +149,20 @@ native host manifests in `~/Library/Application Support/{Google/Chrome,Mozilla}/
 
 Paths stay short (`--work` defaults to `/tmp/trif-e2e-<uid>`): the helper's unix sockets live in the
 scratch home, and macOS allows about 104 bytes for a socket path.
+
+### Big mods and memory
+
+`node tests/e2e/measure-big-mods.js firefox|chrome --work <dir> --sizes 1,2,4,8,16 --mod-mb 4 [--kind code]
+[--changes 8] [--over] [--reports] [--minimize]` (not part of the suite; see the top of the script). It
+installs this checkout as the suite does, writes that many MB of mods for the test site (at most the 16 MB
+cap), and prints the footprint of all the browser's processes after registering them, after page loads,
+after changes in a row and after removing them; `--over` then writes mods over the caps, which the helper
+must refuse. The numbers it gave are in docs/PROTOCOL.md, "How big mods can be".
+
+A 48 MB set once took headless Firefox to 7.4 GB and the Mac ran out of memory, so: go up a size at a
+time and stop if memory grows faster than the mods do; one browser at a time; a `--work` folder of its
+own. The script kills the browser if all its processes together pass `--limit-mb` (2048 by default), but
+it samples once a second, so also run it under something that kills a runaway process sooner.
 
 ### TRIF's own home page with the real extension
 

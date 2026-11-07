@@ -86,6 +86,14 @@ you to from their terminal (side-panel runs can't).
 - Wrap the body in an IIFE as above: early `return`s work, nothing leaks into the page's globals, and
   `trif check` can parse the file.
 - Start new mods with `trif new <site> <mod>`; it creates the file from a template and prints its path.
+- **Keep mods small.** A mod can be up to **4 MB**, and all mods together up to **16 MB**; past that it
+  isn't sent to the browser (`trif status` says NOT SENT and why, `trif doctor` says what to do). Every
+  mod's code is held by the browser several times over and handed to each page it matches, and every
+  change to a mod sends all of it again, so size costs memory even when it's only data. Big media
+  doesn't belong in a mod's code: make sounds with Web Audio and pictures with CSS, SVG or a canvas; if
+  something must be embedded, compress it (a short Opus or MP3 clip, a small WebP) and keep it to a few
+  hundred KB. Something big the user wants (a long track, a video) is loaded from where it lives, with
+  their OK (see "Mods never send data anywhere"). Don't paste in libraries the mod doesn't need.
 
 ### Mods TRIF ships
 

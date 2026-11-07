@@ -675,6 +675,8 @@ class Scenario {
       await this.waitPanel('the panel back on 127.0.0.1', (x) => x.site === '127.0.0.1');
     });
 
+    await r.check('mods over 1 MB in all (a 1 MB mod, 0.4 MB of code) reach the page in parts; a change sends only that mod; one over 4 MB isn\'t sent, and says why', () => this.bigModsCheck());
+
     // ---- Detox Timeline (x.com/detox-timeline) against the X stand-in
     await r.check('Detox Timeline filters a saved X home timeline (fetch and XHR)', async () => {
       const xUrl = `https://x.com:${tlsPort}/home`;
@@ -1490,6 +1492,82 @@ process.exitCode = 1;
     return 'none';
   }
 
+  /**
+   * A set just over the 1 MB one native message can carry in Chrome and Firefox: a 1 MB mod (a base64
+   * string, like a mod with a sound in it) and 0.4 MB of functions, on the test site, which is on. It goes
+   * in parts and runs; a change to the small one goes without the big one's code (modsSame) and the big one
+   * still runs; a mod over the 4 MB cap isn't sent and `trif status` and `trif doctor` say why; removed, they
+   * go. This stays small on purpose (a 48 MB set once took headless Firefox to 7.4 GB and the Mac ran out of
+   * memory): tests/e2e/measure-big-mods.js measures sets up to the 16 MB cap, separately.
+   */
+  async bigModsCheck() {
+    const dir = path.join(this.trif, 'sites', '127.0.0.1');
+    const log = path.join(this.priv, 'helper.log');
+    const size = () => fs.statSync(log).size;
+    const since = (at) => { const b = fs.readFileSync(log); return b.subarray(at).toString('utf8'); };
+    const BIG = 1024 * 1024;
+    const bigMod = (tag) => {
+      const d = crypto.randomBytes(BIG * 3 / 4).toString('base64');
+      return `// ==WebMod==\n// @name E2E Big\n// ==/WebMod==\nconst d = "${d}";\ndocument.documentElement.dataset.trifE2eBig = "${tag}:" + d.length;\n`;
+    };
+    const fns = [];
+    for (let i = 0, n = 0; n < 0.4 * 1024 * 1024; i++) { const f = `function f${i}(a) { const x = a * ${i} + ${i % 13}; return x % 7 === 3 ? String(x) + "${crypto.randomBytes(12).toString('hex')}" : x; }\n`; fns.push(f); n += f.length; }
+    const codeMod = (tag) => `// ==WebMod==\n// @name E2E Code\n// ==/WebMod==\n${fns.join('')}let s = 0;\n${fns.map((_, i) => `s += String(f${i}(${i})).length;`).join('\n')}\ndocument.documentElement.dataset.trifE2eCode = "${tag}:" + s;\n`;
+    const want = String(fns.reduce((n, f, i) => n + String(new Function(`${f}; return f${i}(${i});`)()).length, 0));
+    const state = () => this.page(`async () => ({ big: document.documentElement.dataset.trifE2eBig || null, code: document.documentElement.dataset.trifE2eCode || null, huge: document.documentElement.dataset.trifE2eHuge || null, banner: document.documentElement.dataset.trifE2e || null, nav: Math.round(performance.getEntriesByType('navigation')[0]?.domContentLoadedEventEnd || 0) })`);
+    const SENT = /sent (\d+) mod\(s\) to the extension(?: \(\d+ held\))?(?: \((\d+) it has already, without their code\))?, (\d+) KB(?: in (\d+) parts)?/;
+    // From the write to the extension's modsApplied (its "registered" line in the helper's log).
+    const delivered = async (what, write, pred) => {
+      const at = size();
+      const t0 = Date.now();
+      write();
+      const text = await waitFor(`the helper to send ${what} and the extension to apply it`, () => {
+        const t = since(at);
+        const sent = SENT.exec(t);
+        return sent && pred({ same: Number(sent[2] || 0), kb: Number(sent[3]), parts: Number(sent[4] || 0) }) && /extension registered \d+ mod\(s\)/.test(t.slice(sent.index)) ? t : null;
+      }, { timeoutMs: 30000, intervalMs: 50 });
+      const sent = SENT.exec(text);
+      return { ms: Date.now() - t0, same: Number(sent[2] || 0), kb: Number(sent[3]), parts: Number(sent[4] || 0) };
+    };
+    const reload = async (pred) => {
+      await this.ext(`async (id) => { await chrome.tabs.reload(id); }`, [this.win.tabId]);
+      return waitFor('the test page with the big mods', async () => {
+        this.pageCtx = await this.d.findPage((u) => u.startsWith(this.pageUrlPrefix), { timeoutMs: 5000 });
+        const s = await state();
+        return pred(s) ? s : null;
+      }, { timeoutMs: 30000 });
+    };
+    const files = ['e2e-big.js', 'e2e-code.js', 'e2e-huge.js'].map((f) => path.join(dir, f));
+    try {
+      const first = await delivered('the big set', () => { fs.writeFileSync(files[0], bigMod('v1')); fs.writeFileSync(files[1], codeMod('v1')); }, (m) => m.parts > 1);
+      const p1 = await reload((s) => s.big === `v1:${BIG}` && s.code === `v1:${want}` && s.banner === 'ran');
+      // A change to the small one: the big one goes without its code, and still runs.
+      const change = await delivered('the changed set', () => fs.writeFileSync(files[1], codeMod('v2')), (m) => m.same >= 1);
+      if (change.parts || change.kb > 1024) throw new Error(`a change to the 0.4 MB mod sent ${change.kb} KB${change.parts ? ` in ${change.parts} parts` : ''}`);
+      await reload((s) => s.big === `v1:${BIG}` && s.code === `v2:${want}`);
+      // Over the cap: not sent, and said why.
+      fs.writeFileSync(files[2], `// ==WebMod==\n// @name E2E Huge\n// ==/WebMod==\n/*${'x'.repeat(4 * 1024 * 1024)}*/\ndocument.documentElement.dataset.trifE2eHuge = "ran";\n`);
+      const huge = await waitFor('trif status to say the huge mod was not sent', async () => {
+        const st = (await this.cli(['status'], { json: true })).json;
+        return (st?.helper?.modErrors || []).find((e) => e.id === '127.0.0.1/e2e-huge') || null;
+      }, { timeoutMs: 15000 });
+      if (huge.limit !== 'mod' || !/a mod can be up to 4 MB/.test(huge.error)) throw new Error(`huge: ${JSON.stringify(huge)}`);
+      const doc = (await this.cli(['doctor'], { json: true, timeoutMs: 60000 })).json;
+      const check = (doc?.checks || []).find((c) => /e2e-huge/.test(c.title));
+      if (!check || check.status !== 'fail' || !/keep sounds, pictures/.test(check.fix || '')) throw new Error(`trif doctor: ${JSON.stringify(check)}`);
+      const p2 = await reload((s) => s.big === `v1:${BIG}` && s.code === `v2:${want}`);
+      if (p2.huge) throw new Error('the mod over the cap ran');
+      const status = (await this.cli(['status'], { json: true })).json;
+      const errs = [...((status?.helper?.modErrors || []).filter((e) => e.id !== '127.0.0.1/e2e-huge')), ...((status?.helper?.modsApplied || {}).errors || [])].filter((e) => /e2e-(big|code)/.test(e.id));
+      if (errs.length) throw new Error(`errors: ${JSON.stringify(errs).slice(0, 300)}`);
+      const gone = await delivered('the set without them', () => files.forEach((f) => fs.rmSync(f, { force: true })), (m) => !m.parts);
+      await reload((s) => !s.big && !s.code && s.banner === 'ran');
+      return `${first.kb} KB in ${first.parts} parts, applied ${first.ms} ms after the write, page DOMContentLoaded ${p1.nav} ms; a change to the small mod: ${change.kb} KB (${change.same} sent without code), ${change.ms} ms; over 4 MB: not sent ("${huge.error.slice(0, 60)}…"); removed: ${gone.ms} ms`;
+    } finally {
+      for (const f of files) fs.rmSync(f, { force: true });
+    }
+  }
+
   async helperLogCheck() {
     const file = path.join(this.priv, 'helper.log');
     if (!fs.existsSync(file)) return { status: 'skip', detail: 'no helper.log' };
@@ -1497,7 +1575,8 @@ process.exitCode = 1;
     fs.copyFileSync(file, this.r.file(`${this.label}-helper.log`));
     // Before the harness allows user scripts, every sync logs that each mod couldn't register: expected.
     const expected = (l) => /User scripts aren't allowed for TRIF|User scripts are off for TRIF/.test(l) // Firefox's wording, Chrome's
-      || (this.scriptsRevoked && /user scripts were turned off/.test(l)); // colourChecks turned them off
+      || (this.scriptsRevoked && /user scripts were turned off/.test(l)) // colourChecks turned them off
+      || /mod 127\.0\.0\.1\/e2e-huge: mod is [\d.]+ MB; a mod can be up to 4 MB/.test(l); // bigModsCheck's, over the cap on purpose
     const skipped = lines.filter(expected).length;
     const bad = lines.filter((l) => !expected(l) && /\b(WARN|ERROR|warn|error)\b/.test(l.slice(0, 60)));
     const errors = bad.filter((l) => /\bERROR\b|\berror\b/.test(l.slice(0, 60)));

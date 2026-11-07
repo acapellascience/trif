@@ -143,7 +143,7 @@ test('a runtime change (recording set) re-registers everything with the runtime 
   us.calls.length = 0;
   r = await lib.syncUserScripts(us, { mods: [mod('x.com/a'), mod('x.com/b')], runtimeCode: rt.runtimeCode(['x.com']), applied: r.applied });
   assert.strictEqual(r.reset, true);
-  assert.deepStrictEqual(us.calls, [['unregister', 'all'], ['register', [lib.RUNTIME_ID]], ['register', ['x.com/a']], ['register', ['x.com/b']]]);
+  assert.deepStrictEqual(us.calls, [['unregister', 'all'], ['register', [lib.RUNTIME_ID]], ['register', ['x.com/a', 'x.com/b']]], 'the mods in one call, after the runtime');
   assert.match(us.scripts[0].js[0].code, /const RECORDING = \["x.com"\]/);
 });
 
@@ -168,6 +168,24 @@ test('one bad mod is reported without blocking the others; duplicates are reject
   assert.match(bad.error, /Invalid match pattern/);
   assert.match(r.errors.find((e) => e.id === 'x.com/good').error, /duplicate/);
   assert.ok(!('x.com/bad' in r.applied));
+});
+
+test('mods register in one call; when that fails part way (a browser that keeps the ones before), each is retried on its own', async () => {
+  const us = mockUserScripts();
+  const atomic = us.register.bind(us);
+  us.register = async (list) => { for (const s of list) await atomic([s]); }; // registers until the bad one throws
+  const mods = [mod('x.com/a'), mod('x.com/bad', { matches: ['not a pattern'] }), mod('x.com/c')];
+  const r = await lib.syncUserScripts(us, { mods, runtimeCode: rt.runtimeCode([]) });
+  assert.deepStrictEqual(r.registered, ['x.com/a', 'x.com/c']);
+  assert.deepStrictEqual(r.errors.map((e) => e.id), ['x.com/bad']);
+  assert.deepStrictEqual(us.scripts.map((s) => s.id), [lib.RUNTIME_ID, 'x.com/a', 'x.com/c']);
+  // Two changed and one new: one update call, one register call.
+  const us2 = mockUserScripts();
+  const r1 = await lib.syncUserScripts(us2, { mods: [mod('x.com/a'), mod('x.com/c')], runtimeCode: rt.runtimeCode([]) });
+  us2.calls.length = 0;
+  const r2 = await lib.syncUserScripts(us2, { mods: [mod('x.com/a', { hash: 'h2' }), mod('x.com/c', { hash: 'h2' }), mod('x.com/d')], runtimeCode: rt.runtimeCode([]), applied: r1.applied });
+  assert.deepStrictEqual(r2.registered, ['x.com/a', 'x.com/c', 'x.com/d']);
+  assert.deepStrictEqual(us2.calls, [['update', ['x.com/a', 'x.com/c']], ['register', ['x.com/d']]]);
 });
 
 test('sync skips switched-off mods, unregisters newly switched-off ones, re-registers them when switched on', async () => {
@@ -211,6 +229,68 @@ test('userScriptsAvailable detects the "Allow User Scripts" switch', () => {
   assert.strictEqual(lib.userScriptsAvailable({ userScripts: { getScripts() { throw new Error('off'); } } }), false);
   assert.strictEqual(lib.userScriptsAvailable({ userScripts: { getScripts: () => Promise.reject(new Error('x')) } }), true);
   assert.strictEqual(lib.userScriptsAvailable({ get userScripts() { throw new Error('off'); } }), false);
+  // It asks for no script in particular: every script with its code, on every message, cost Firefox gigabytes.
+  const asked = [];
+  assert.strictEqual(lib.userScriptsAvailable({ userScripts: { getScripts: (f) => { asked.push(f); return Promise.resolve([]); } } }), true);
+  assert.ok(Array.isArray(asked[0]?.ids) && asked[0].ids.length === 1, JSON.stringify(asked));
+});
+
+test('syncUserScripts with the ids it left registered (known) doesn\'t fetch the scripts; after a failure it does', async () => {
+  const us = mockUserScripts();
+  let fetched = 0;
+  const get = us.getScripts;
+  us.getScripts = async (f) => { fetched++; return get(f); };
+  const runtimeCode = rt.runtimeCode([]);
+  let r = await lib.syncUserScripts(us, { mods: [mod('x.com/a'), mod('x.com/b')], runtimeCode });
+  assert.strictEqual(fetched, 1);
+  assert.deepStrictEqual(r.known, [lib.RUNTIME_ID, 'x.com/a', 'x.com/b']);
+  us.calls.length = 0;
+  r = await lib.syncUserScripts(us, { mods: [mod('x.com/a', { hash: 'h2' }), mod('x.com/c')], runtimeCode, applied: r.applied, known: r.known });
+  assert.strictEqual(fetched, 1, 'not fetched again');
+  assert.deepStrictEqual(us.calls, [['unregister', ['x.com/b']], ['update', ['x.com/a']], ['register', ['x.com/c']]]);
+  assert.deepStrictEqual(r.known, [lib.RUNTIME_ID, 'x.com/a', 'x.com/c']);
+  // A mod that won't register: unsure what's there, so the next sync asks.
+  r = await lib.syncUserScripts(us, { mods: [mod('x.com/a', { hash: 'h2' }), mod('x.com/bad', { matches: ['nope'] })], runtimeCode, applied: r.applied, known: r.known });
+  assert.strictEqual(r.known, null);
+  assert.deepStrictEqual(r.errors.map((e) => e.id), ['x.com/bad']);
+  const before = fetched;
+  r = await lib.syncUserScripts(us, { mods: [mod('x.com/a', { hash: 'h2' })], runtimeCode, applied: r.applied, known: r.known });
+  assert.strictEqual(fetched, before + 1);
+  assert.deepStrictEqual(us.scripts.map((s) => s.id), [lib.RUNTIME_ID, 'x.com/a']);
+  // Nothing to register: none known.
+  r = await lib.syncUserScripts(us, { mods: [], runtimeCode, applied: r.applied, known: r.known });
+  assert.deepStrictEqual(r.known, []);
+  assert.deepStrictEqual(us.scripts, []);
+});
+
+test('fillSameMods puts the code back from the mods it had, by id and hash', () => {
+  const had = [{ id: 'a', hash: 'h1', code: 'A' }, { id: 'b', hash: 'h1', code: 'B' }];
+  assert.deepStrictEqual(lib.fillSameMods([{ id: 'a', hash: 'h1', same: true, name: 'n' }, { id: 'b', hash: 'h2', code: 'B2' }], had),
+    { mods: [{ id: 'a', hash: 'h1', name: 'n', code: 'A' }, { id: 'b', hash: 'h2', code: 'B2' }] });
+  assert.deepStrictEqual(lib.fillSameMods([{ id: 'a', hash: 'h2', same: true }, { id: 'c', hash: 'h1', same: true }], had), { missing: ['a', 'c'] });
+  assert.deepStrictEqual(lib.fillSameMods(undefined, had), { mods: [] });
+});
+
+test('modsStoragePlan writes the mods that changed and the list, removes the gone ones and the old `mods`', () => {
+  const a = mod('x.com/a');
+  const b = mod('x.com/b', { hash: 'hb' });
+  let st = lib.modsStorageState({ mods: [a] });
+  assert.deepStrictEqual(lib.storedMods({ mods: [a] }), [a]);
+  let p = lib.modsStoragePlan([a, b], st);
+  assert.deepStrictEqual(Object.keys(p.set).sort(), ['mod:x.com/a', 'mod:x.com/b', 'modIds']);
+  assert.deepStrictEqual(p.remove, ['mods']);
+  st = p.stored;
+  assert.deepStrictEqual(lib.modsStoragePlan([a, b], st), { set: {}, remove: [], stored: st });
+  // The header changed (same hash, held now): written again. The code alone is covered by the hash.
+  p = lib.modsStoragePlan([a, { ...b, held: { site: 'y.com' } }], st);
+  assert.deepStrictEqual(Object.keys(p.set), ['mod:x.com/b']);
+  p = lib.modsStoragePlan([{ ...b, held: { site: 'y.com' } }], p.stored);
+  assert.deepStrictEqual(p.set, { modIds: ['x.com/b'] });
+  assert.deepStrictEqual(p.remove, ['mod:x.com/a']);
+  // Read back the way the background does at startup.
+  const items = { modIds: ['x.com/b', 'x.com/gone'], 'mod:x.com/b': b };
+  assert.deepStrictEqual(lib.storedMods(items), [b]);
+  assert.deepStrictEqual(lib.modsStoragePlan([b], lib.modsStorageState(items)).set, { modIds: ['x.com/b'] });
 });
 
 // ---- tabs ---------------------------------------------------------------------------------------
@@ -1440,8 +1520,9 @@ test('background: a run\'s events are written to its chat in batches, not one wr
 });
 
 test('background: `applied` stays out of local storage (session storage), and an unchanged mods list isn\'t written again', async () => {
-  const mods = [mod('x.com/a')];
-  const bg = await loadBackground({ storage: { mods, applied: { old: 'x' } } });
+  const mods = [mod('x.com/a'), mod('x.com/b')];
+  const bg = await loadBackground({ storage: { modIds: ['x.com/a', 'x.com/b'], 'mod:x.com/a': mods[0], 'mod:x.com/b': mods[1], applied: { old: 'x' } } });
+  const modWrites = () => bg.ctl.writes.filter((k) => k.some((x) => x === 'mods' || x === 'modIds' || x.startsWith('mod:')));
   try {
     await settle(10);
     assert.ok(!('applied' in bg.store), 'the old local copy is removed');
@@ -1450,10 +1531,59 @@ test('background: `applied` stays out of local storage (session storage), and an
     bg.native.emit({ type: 'mods', mods });
     await settle(20);
     assert.ok(!bg.ctl.writes.some((k) => k.includes('applied')));
-    assert.strictEqual(bg.ctl.writes.filter((k) => k.includes('mods')).length, 0, 'same list as stored: not written');
-    bg.native.emit({ type: 'mods', mods: [mod('x.com/a', { hash: 'h9' })] });
+    assert.strictEqual(modWrites().length, 0, 'same list as stored: not written');
+    // A change writes that mod only.
+    bg.native.emit({ type: 'mods', mods: [mod('x.com/a', { hash: 'h9', code: 'new()' }), mods[1]] });
     await settle(20);
-    assert.strictEqual(bg.ctl.writes.filter((k) => k.includes('mods')).length, 1);
+    assert.deepStrictEqual(modWrites(), [['mod:x.com/a']]);
+    assert.strictEqual(bg.store['mod:x.com/a'].code, 'new()');
+    // One gone: the list, and its key removed.
+    bg.native.emit({ type: 'mods', mods: [mods[1]] });
+    await settle(20);
+    assert.deepStrictEqual(modWrites().at(-1), ['modIds']);
+    assert.ok(!('mod:x.com/a' in bg.store));
+    assert.deepStrictEqual(bg.store.modIds, ['x.com/b']);
+  } finally { bg.restore(); }
+});
+
+test('background: mods stored all in one key (0.2.4) are read, then stored one per key', async () => {
+  const mods = [mod('x.com/a'), mod('x.com/b', { hash: 'hb' })];
+  const bg = await loadBackground({ storage: { mods } });
+  try {
+    await settle(10);
+    // Applied from storage before the helper says anything.
+    await waitFor(() => bg.chrome.userScripts.scripts.length === 3);
+    bg.native.emit({ type: 'mods', mods });
+    await settle(20);
+    assert.ok(!('mods' in bg.store));
+    assert.deepStrictEqual(bg.store.modIds, ['x.com/a', 'x.com/b']);
+    assert.deepStrictEqual(bg.store['mod:x.com/b'], mods[1]);
+  } finally { bg.restore(); }
+});
+
+test('background: a mod sent without its code (same) takes it from the set before; one it doesn\'t have asks for them all', async () => {
+  const bg = await loadBackground();
+  try {
+    await settle(10);
+    const a = mod('x.com/a', { code: 'big()' });
+    const b = mod('x.com/b', { hash: 'hb', code: 'b1()' });
+    bg.native.emit({ type: 'mods', mods: [a, b] });
+    await waitFor(() => bg.native.sent.some((m) => m.type === 'modsApplied'));
+    const same = (m) => ({ ...m, code: undefined, same: true });
+    bg.native.emit({ type: 'mods', mods: [same(a), { ...b, hash: 'hb2', code: 'b2()' }] });
+    await waitFor(() => bg.native.sent.filter((m) => m.type === 'modsApplied').length === 2);
+    const code = (id) => bg.chrome.userScripts.scripts.find((s) => s.id === id).js[0].code;
+    assert.match(code('x.com/a'), /big\(\)/);
+    assert.match(code('x.com/b'), /b2\(\)/);
+    assert.strictEqual(bg.store['mod:x.com/a'].code, 'big()', 'stored with its code');
+    assert.ok(!('same' in bg.store['mod:x.com/a']));
+    // Not the hash it has: nothing changes, and the helper is asked for every mod again.
+    bg.native.emit({ type: 'mods', mods: [same({ ...a, hash: 'other' })] });
+    await waitFor(() => bg.native.sent.some((m) => m.type === 'modsResend'));
+    assert.match(bg.native.sent.find((m) => m.type === 'modsResend').reason, /missing 1 mod/);
+    await settle(20);
+    assert.deepStrictEqual(bg.chrome.userScripts.scripts.map((s) => s.id).sort(), ['webmods-runtime', 'x.com/a', 'x.com/b']);
+    assert.match(code('x.com/a'), /big\(\)/);
   } finally { bg.restore(); }
 });
 
@@ -2223,4 +2353,103 @@ test('agent and model per site chat: each site its own pick; the default is the 
   assert.equal(lib.siteSettings({ picks, snapshots: panelA, global, site: 'github.com' }).models.claude, 'opus', 'a copy, not the default itself');
   // No site (chrome://extensions): the default itself.
   assert.deepEqual(lib.siteSettings({ picks, snapshots: panelA, global: global2, site: null }), lib.normalizeSettings(global2));
+});
+
+// ---- mods sets in parts -------------------------------------------------------------------------
+
+// A mods message cut into modsPart messages the way the helper does (helper/lib/mods.js modsParts).
+function partsOf(msg, set, size = 50) {
+  const json = JSON.stringify(msg);
+  const out = [];
+  for (let i = 0; i * size < json.length; i++) out.push(json.slice(i * size, (i + 1) * size));
+  return out.map((data, i) => ({ type: 'modsPart', set, i, n: out.length, data }));
+}
+
+test('ModsParts: joins a set in order; a broken sequence is dropped with an error; a new set supersedes', () => {
+  const msg = { type: 'mods', mods: [mod('x.com/a'), mod('x.com/b', { code: '"quotes" \\ é 😀' })], sitesOn: ['x.com'] };
+  const parts = partsOf(msg, 's1', 40);
+  assert.ok(parts.length > 3);
+  const p = new lib.ModsParts();
+  for (const part of parts.slice(0, -1)) assert.deepStrictEqual(p.push(part), {});
+  assert.deepStrictEqual(p.push(parts.at(-1)), { message: msg });
+  // Missing a part: dropped, and the rest of that set too.
+  assert.match(p.push(parts[0]) && p.push(parts[2]).error, /got part 3 of \d+ after part 1/);
+  assert.deepStrictEqual(p.push(parts[3]), {}, 'the rest of a dropped set is ignored: one error is enough');
+  assert.deepStrictEqual(p.push(parts[0]), {}, 'its start again: a new try');
+  for (const part of parts.slice(1, -1)) p.push(part);
+  assert.deepStrictEqual(p.push(parts.at(-1)), { message: msg });
+  // Without its start.
+  assert.match(new lib.ModsParts().push(parts[1]).error, /part 2 of \d+ of mods set s1 came without the parts before it/);
+  // Malformed.
+  for (const bad of [{ ...parts[0], i: -1 }, { ...parts[0], n: 0 }, { ...parts[0], data: 5 }, { ...parts[0], set: '' }, { ...parts[0], i: 9, n: 3 }, null]) {
+    assert.match(new lib.ModsParts().push(bad).error, /malformed/);
+  }
+  // Text that doesn't parse, or isn't a mods message.
+  assert.match(new lib.ModsParts().push({ type: 'modsPart', set: 1, i: 0, n: 1, data: '{"type":"mo' }).error, /doesn't parse/);
+  assert.match(new lib.ModsParts().push({ type: 'modsPart', set: 1, i: 0, n: 1, data: '{"type":"other"}' }).error, /isn't a mods message/);
+  // A newer set's first part drops an unfinished older one, which is then ignored.
+  const newer = partsOf({ ...msg, sitesOn: [] }, 's2', 40);
+  const q = new lib.ModsParts();
+  q.push(parts[0]); q.push(parts[1]);
+  assert.deepStrictEqual(q.push(newer[0]), { superseded: 's1' });
+  assert.deepStrictEqual(q.push(parts[2]), {}, 'the old set is gone, its parts ignored');
+  for (const part of newer.slice(1, -1)) q.push(part);
+  assert.ok(q.push(newer.at(-1)).message);
+  const r = new lib.ModsParts();
+  r.push(parts[0]);
+  r.push(newer[0]);
+  for (const part of newer.slice(1, -1)) r.push(part);
+  assert.deepStrictEqual(r.push(newer.at(-1)).message.sitesOn, []);
+  // The helper's own cutting (quotes, backslashes, text past ASCII, emoji) joins back to the same message.
+  const { modsParts } = require('../helper/lib/mods');
+  const big = { type: 'mods', mods: [mod('x.com/big', { code: `"\\ é 😀 \u2028`.repeat(200000) })], sitesOn: ['x.com'], defaultOrder: {} };
+  const helperParts = modsParts(JSON.stringify(big), 'h-1').map((m) => JSON.parse(JSON.stringify(m)));
+  assert.ok(helperParts.length > 2);
+  const h = new lib.ModsParts();
+  for (const part of helperParts.slice(0, -1)) assert.deepStrictEqual(h.push(part), {});
+  assert.deepStrictEqual(h.push(helperParts.at(-1)), { message: big });
+  // reset (a whole mods message came) says what it dropped.
+  r.push(parts[0]);
+  assert.strictEqual(r.reset(), 's1');
+  assert.strictEqual(r.reset(), null);
+});
+
+test('background: hello says it takes mods in parts; a set in parts is applied once, whole, only after its last part', async () => {
+  const bg = await loadBackground();
+  try {
+    await settle(10);
+    const hello = bg.native.sent.find((m) => m.type === 'hello');
+    assert.deepStrictEqual(hello.features, ['modsParts', 'modsSame']);
+    const mods = [mod('x.com/a', { code: 'a()'.repeat(50) }), mod('x.com/b', { hash: 'hb' }), mod('y.com/c', { hash: 'hc' })];
+    const parts = partsOf({ type: 'mods', mods, sitesOn: [] }, 's1', 100);
+    for (const part of parts.slice(0, -1)) bg.native.emit(part);
+    await settle(20);
+    assert.deepStrictEqual(bg.chrome.userScripts.scripts.map((s) => s.id), [], 'nothing until the last part');
+    assert.ok(!bg.native.sent.some((m) => m.type === 'modsApplied'));
+    bg.native.emit(parts.at(-1));
+    await waitFor(() => bg.native.sent.some((m) => m.type === 'modsApplied'));
+    assert.deepStrictEqual(bg.chrome.userScripts.scripts.map((s) => s.id).sort(), ['webmods-runtime', 'x.com/a', 'x.com/b', 'y.com/c']);
+    assert.deepStrictEqual(bg.store.modIds, ['x.com/a', 'x.com/b', 'y.com/c']);
+
+    // A broken set changes nothing, is logged, and asks the helper to send it again.
+    const next = partsOf({ type: 'mods', mods: [mod('x.com/a')], sitesOn: [] }, 's2', 100);
+    bg.native.emit(next[0]);
+    bg.native.emit(next[2]);
+    await settle(20);
+    const resend = bg.native.sent.find((m) => m.type === 'modsResend');
+    assert.match(resend.reason, /mods set s2: got part 3 of \d+ after part 1/);
+    assert.ok(bg.native.sent.some((m) => m.type === 'log' && m.level === 'error' && /mods set s2/.test(m.message)));
+    for (const part of next.slice(3)) bg.native.emit(part);
+    await settle(20);
+    assert.deepStrictEqual(bg.chrome.userScripts.scripts.map((s) => s.id).sort(), ['webmods-runtime', 'x.com/a', 'x.com/b', 'y.com/c'], 'the last whole set stays');
+
+    // An unfinished set is superseded by a whole mods message (an older helper, or a set that fits).
+    bg.native.emit(next[0]);
+    bg.native.emit({ type: 'mods', mods: [mod('x.com/a')] });
+    await waitFor(() => bg.chrome.userScripts.scripts.length === 2);
+    for (const part of next.slice(1)) bg.native.emit(part);
+    await settle(20);
+    assert.strictEqual(bg.native.sent.filter((m) => m.type === 'modsResend').length, 1, 'one request per broken set; the rest of a superseded one is ignored');
+    assert.deepStrictEqual(bg.chrome.userScripts.scripts.map((s) => s.id).sort(), ['webmods-runtime', 'x.com/a']);
+  } finally { bg.restore(); }
 });

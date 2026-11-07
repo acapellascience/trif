@@ -8,6 +8,13 @@ needs a section here for the version it releases.
 
 - When your coding agent's login runs out, the side panel asks you to log in again (and keeps your
   message to send again) instead of showing the agent's error twice.
+- **Bigger mods.** A mod can now be up to 4 MB, and all your mods together up to 16 MB. Until now they
+  had to fit in 1 MB in all, and past that the biggest ones were left out: a game, or a mod with
+  its sounds or pictures in it, could use that up alone. If a mod is ever too big, `trif status` and
+  `trif doctor` say which one and what to do. A change to one mod now sends only that mod to the browser,
+  which keeps Firefox's memory in check with big mods. (The helper and the browser extension both need
+  this version; with an older extension, mods still stop at 1 MB in all, and `trif doctor` says to update
+  it.)
 
 ## 0.2.4
 

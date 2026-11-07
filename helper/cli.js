@@ -9,7 +9,7 @@ const vm = require('vm');
 const { envVar } = require('./lib/env');
 const P = require('./lib/paths');
 const { request, streamRun, streamLogin, HelperError } = require('./lib/client');
-const { ALL_SITES, scanMods, planModsMessage, isIgnoredName, isShippedSource } = require('./lib/mods');
+const { ALL_SITES, scanMods, planMods, isIgnoredName, isShippedSource } = require('./lib/mods');
 const { realish, isInside, badName } = require('./lib/pathcheck');
 const { COMMANDS, mainHelp, commandHelp } = require('./lib/help');
 const { loadHeld } = require('./lib/held');
@@ -670,7 +670,7 @@ const handlers = {
 
   async mods(ctx) {
     const { mods, problems, warnings } = scanMods(ctx.ws.modsDir);
-    const plan = planModsMessage(mods);
+    const plan = planMods(mods);
     const errors = [...problems, ...plan.errors];
     const { enabled, offSites } = await knownSwitches(ctx);
     const held = loadHeld(ctx.ws.home);

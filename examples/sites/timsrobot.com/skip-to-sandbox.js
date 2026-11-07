@@ -6,35 +6,44 @@
 // @run-at      document-start
 // @risk        0 render-only
 // @source      trif
-// @version     2
+// @version     3
 // ==/WebMod==
 
-// The homepage demo's panel (/demo/shim.js) lists only the mods in sessionStorage 'trif-demo-state'.mods:
-// the ones its chats have made so far. This mod lists every demo mod (store.defaultOrder, the demo's full
-// order) from the start, adding the missing ones switched off, so the visitor can switch any of them on
-// without playing through the chats first. Mods the visitor put in the demo's trash stay there.
+// Skips the homepage demo's chats: on arrival the demo goes straight to its sandbox mode (what the space
+// shooter's You Win screen offers: every mod switched off, the panel open on its switches, the chat the
+// visitor's), with every demo mod listed, so they can switch any of them on right away.
 //
-// It leaves the game alone: the space shooter's You Win screen shows as usual, with its own button for
-// sandbox mode. (An earlier version jumped from the win screen straight to sandbox mode, which took the
-// win away.) The demo keeps its state from its first load on, so on a first visit the list fills in from
-// the next reload.
+// How: the demo's page script (/demo.js, site/demo/tab.js) handles a `trif-demo-reset` event with
+// { to: 'sandbox' }: it marks the saved state (sessionStorage 'trif-demo-state') and reloads the home page.
+// Before that, this lists every demo mod in the saved state, switched off (the panel lists only those).
+// Once only: not when the demo's chats are already all played (sandbox mode marks them so) or right after
+// the reset (the state's `sandbox` flag, which the panel clears once it's applied), so no reload loop.
+// The You Win screen is left alone. Mods the visitor put in the demo's trash stay there.
 (() => {
   if (window.top !== window) return; // (the panel is an iframe on this site too: the page does this)
+  if (location.pathname !== '/') return; // (the demo lives on the home page)
   const SAVED = 'trif-demo-state';
+  // The demo's mods, in its order (site/build-demo.js DEMO_ORDER), for a first visit, before the demo has
+  // saved its own list (store.defaultOrder).
+  const ORDER = ['tagline', 'robot', 'neon', 'jelly', 'fireworks', 'stickers', 'checklist', 'terminal', 'led', 'gravity', 'tilt', 'shooter', 'rave'];
+  let s = null;
+  try { s = JSON.parse(sessionStorage.getItem(SAVED) || 'null'); } catch {}
+  if (s && s.v !== 1) return; // (a state this doesn't know: leave it be)
+  if (s?.sandbox || (s?.replayed || []).includes('wrapup')) return; // already in sandbox mode (or past the chats)
+
   try {
-    const s = JSON.parse(sessionStorage.getItem(SAVED) || 'null');
-    if (s?.v !== 1) return;
-    const all = (s.store?.defaultOrder?.['timsrobot.com'] || []).map((id) => id.replace(/^timsrobot\.com\//, ''))
-      .filter((slug) => /^[a-z0-9-]{1,40}$/.test(slug));
+    s = s || { v: 1, sitesOn: ['timsrobot.com'], store: {}, mods: [] };
+    const order = (s.store?.defaultOrder?.['timsrobot.com'] || []).map((id) => id.replace(/^timsrobot\.com\//, ''));
+    const all = (order.length ? order : ORDER).filter((slug) => /^[a-z0-9-]{1,40}$/.test(slug));
     const trashed = new Set(s.trash || []);
-    const have = new Set(s.mods || []);
-    const missing = all.filter((slug) => !have.has(slug) && !trashed.has(slug));
-    if (!missing.length) return;
-    s.mods = [...(s.mods || []), ...missing];
-    s.store = s.store || {};
-    s.store.disabled = s.store.disabled || {};
-    for (const slug of missing) s.store.disabled[`timsrobot.com/${slug}`] = true;
+    s.mods = [...new Set([...(s.mods || []), ...all.filter((slug) => !trashed.has(slug))])];
     sessionStorage.setItem(SAVED, JSON.stringify(s));
-    window.trif?.log('added to the panel (off):', missing.join(', '));
-  } catch (e) { window.trif?.warn('could not list all mods', String(e)); }
+  } catch (e) { window.trif?.warn('could not list all mods', String(e)); return; }
+
+  // The demo's script listens once it's run (it's deferred, so by DOMContentLoaded).
+  const go = () => {
+    window.trif?.log('skipping the demo\'s chats: sandbox mode');
+    dispatchEvent(new CustomEvent('trif-demo-reset', { detail: { to: 'sandbox' } }));
+  };
+  if (document.readyState === 'loading') addEventListener('DOMContentLoaded', go, { once: true }); else go();
 })();

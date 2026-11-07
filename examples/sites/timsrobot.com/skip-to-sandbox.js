@@ -6,7 +6,7 @@
 // @run-at      document-start
 // @risk        0 render-only
 // @source      trif
-// @version     1
+// @version     2
 // ==/WebMod==
 
 // The demo's Space Shooter (/demo/mods/shooter.js) shows a "You Win!" screen (h1.tss-win-title, with

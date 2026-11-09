@@ -545,3 +545,12 @@ h3.mod-name { margin: 0; font-size: inherit; line-height: inherit; }
 .mod-facts .facts-diff .add { color: var(--ok, #2f9e6e); }
 .mod-facts .facts-diff .del { color: var(--bad); }
 .mod-facts .facts-diff .gap, .mod-facts .facts-diff .ctx { color: var(--muted); }
+
+/* Groups: how TRIF runs the mods below each heading ("Rules", "Page scripts"), with a switch for this site */
+.mod-list li.mod-group { padding: 8px 0 2px; border-top: 0; }
+.mod-list li.mod-group + li { border-top: 0; }
+.mod-group-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.mod-group-name { margin: 0; font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); }
+.mod-group-note { margin: 0 0 2px; font-size: 11px; color: var(--muted); }
+.mod-list li.group-off { opacity: .45; }
+.mod-list li.mod-group.off .mod-group-name { text-decoration: line-through; }

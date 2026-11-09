@@ -188,7 +188,7 @@ class Scenario {
         siteOn: q('#site-switch')?.getAttribute('aria-checked') === 'true',
         notice: q('#notice').hidden ? '' : q('#notice').innerText,
         dot: q('#dot')?.className || '',
-        mods: [...document.querySelectorAll('#mod-list > li')].map((li) => ({
+        mods: [...document.querySelectorAll('#mod-list > li[data-mod]')].map((li) => ({
           id: li.dataset.mod,
           on: li.querySelector('button.switch')?.getAttribute('aria-checked') === 'true',
           running: !!li.querySelector('.light.on'),
@@ -953,6 +953,7 @@ class Scenario {
     if (!this.o.agent && !this.o.codex && !this.o.oss && !this.o.guidance) {
       await r.check('an expired login (a stand-in Claude Code): the login notice and one plain line, not the raw error; the message back in the box', () => this.expiredLoginCheck(win));
       await r.check('a rules mod: TRIF\'s own code applies its CSS, hides, replaces and filters (also what appears later); one that would load from an address is refused, not sent', () => this.rulesModCheck(win));
+      await r.check('groups: "Page scripts" off on a site from the panel stops its page scripts there (rules keep running, other sites\' page scripts untouched); on again, back', () => this.groupsCheck(win));
       await r.check('a hijacked agent (a stand-in Claude Code): the tab it ran code in sends nothing that changes anything until it reloads, even later; its mod that posts is held by its code, whatever its header says', () => this.hijackedAgentCheck(win));
     }
 
@@ -1717,6 +1718,54 @@ process.exitCode = 1;
     } finally {
       for (const f of [good, bad]) { try { fs.unlinkSync(f); } catch { /* gone */ } }
       await this.cli(['enable', '127.0.0.1/e2e-banner', '--url', site]).catch(() => {});
+    }
+  }
+
+  // ---- groups (extension/lib.js "Groups"): a group switched off per site, from the panel
+
+  async groupsCheck(win) {
+    const site = '127.0.0.1';
+    const base = `http://${site}:${this.o.servers.port}`;
+    const rulesFile = path.join(this.trif, 'sites', site, 'e2e-group-rules.js');
+    const look = async () => JSON.parse((await this.cli(['run', '--tab', String(win.tabId), `({ target: document.getElementById('target').textContent, color: getComputedStyle(document.getElementById('title')).color })`], { timeoutMs: 20000 })).stdout);
+    const scripts = () => this.ext(`async () => (await chrome.userScripts.getScripts()).map((s) => ({ id: s.id, ex: s.excludeMatches || [] }))`);
+    const clickGroup = async () => {
+      await waitFor('the Page scripts heading', () => this.panel(`async () => !!document.querySelector('li.mod-group[data-group="page"] .group-switch') || null`), { timeoutMs: 10000 });
+      await this.d.click(this.panelCtx, 'li.mod-group[data-group="page"] .group-switch');
+    };
+    try {
+      fs.writeFileSync(rulesFile, '// ==WebMod==\n// @name Group rules\n// @match *://127.0.0.1/*\n// @rules\n// ==/WebMod==\n{ "css": "#title { color: rgb(4, 5, 6) }" }\n');
+      await this.ext(`async (id, url) => { await chrome.tabs.update(id, { url, active: true }); }`, [win.tabId, `${base}/?e2e=groups`]);
+      await waitFor('the rules mod registered', async () => /e2e-group-rules\s+registered/.test((await this.cli(['status'], { timeoutMs: 20000 })).stdout) || null, { timeoutMs: 20000, intervalMs: 500 });
+      await this.cli(['reload', '--tab', String(win.tabId)], { timeoutMs: 30000 });
+      const before = new Map((await scripts()).map((x) => [x.id, x.ex]));
+      const on = await waitFor('both mods running', async () => { const x = await look(); return /Changed by the E2E Banner/.test(x.target) && x.color === 'rgb(4, 5, 6)' ? x : null; }, { timeoutMs: 10000, intervalMs: 300 });
+      // Page scripts off here, from the panel's heading switch (the tab reloads)
+      await clickGroup();
+      const off = await waitFor('the page script gone, the rules mod still there', async () => { const x = await look(); return !/Changed by the E2E Banner/.test(x.target) && x.color === 'rgb(4, 5, 6)' ? x : null; }, { timeoutMs: 15000, intervalMs: 400 });
+      const reg = await scripts();
+      const banner = reg.find((x) => x.id === '127.0.0.1/e2e-banner');
+      if (!banner || !banner.ex.includes('*://127.0.0.1/*')) throw new Error(`the page script isn't kept off 127.0.0.1: ${JSON.stringify(banner)}`);
+      if (reg.find((x) => x.id === '127.0.0.1/e2e-group-rules')?.ex.includes('*://127.0.0.1/*')) throw new Error('the rules mod was switched off too');
+      // other sites' page scripts: left out of 127.0.0.1 only, nothing else changed (they still run on their own sites)
+      const site127 = (e) => e === '*://127.0.0.1/*' || e === '*://*.127.0.0.1/*';
+      const others = reg.filter((x) => !x.id.startsWith('127.0.0.1/') && before.has(x.id))
+        .filter((x) => JSON.stringify(x.ex.filter((e) => !site127(e))) !== JSON.stringify((before.get(x.id) || []).filter((e) => !site127(e))));
+      if (others.length) throw new Error(`other mods changed beyond 127.0.0.1: ${JSON.stringify(others)}`);
+      const st = (await this.cli(['status'], { timeoutMs: 20000 })).stdout;
+      if (!/GROUPS OFF\s+page scripts off on 127\.0\.0\.1/.test(st)) throw new Error(`trif status: ${st.split('\n').find((l) => /GROUPS/.test(l)) || '(no GROUPS OFF line)'}`);
+      const greyed = await this.panel(`async () => ({ heading: document.querySelector('li.mod-group[data-group="page"]').classList.contains('off'), row: document.querySelector('li[data-mod="127.0.0.1/e2e-banner"]').classList.contains('group-off'), rules: document.querySelector('li[data-mod="127.0.0.1/e2e-group-rules"]').classList.contains('group-off') })`);
+      if (!greyed.heading || !greyed.row || greyed.rules) throw new Error(`the panel: ${JSON.stringify(greyed)}`);
+      await this.shot(this.panelCtx, 'panel-groups-page-off');
+      // on again: back
+      await clickGroup();
+      await waitFor('the page script back', async () => { const x = await look(); return /Changed by the E2E Banner/.test(x.target) ? x : null; }, { timeoutMs: 15000, intervalMs: 400 });
+      return `on: "${on.target}" + ${on.color}; Page scripts off: "${off.target}", rules still ${off.color}, banner excludes 127.0.0.1, other sites' mods untouched, status says so, rows greyed; on again: back`;
+    } finally {
+      try { fs.unlinkSync(rulesFile); } catch { /* gone */ }
+      // (left off by a failure: switch it on again the way the user would)
+      const stillOff = await this.panel(`async () => !!document.querySelector('li.mod-group[data-group="page"].off')`).catch(() => false);
+      if (stillOff) await this.d.click(this.panelCtx, 'li.mod-group[data-group="page"] .group-switch').catch(() => {});
     }
   }
 

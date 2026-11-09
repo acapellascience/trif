@@ -397,6 +397,18 @@ The whole-mod switch (no `site`) leaves the list alone. The reply adds `site`, `
 names several sites or any host (`isMultiSite`) gets a switch for the panel's site; the setup page
 shows the whole-mod switch plus one per site (the named sites and any in `offSites`).
 
+**Groups.** The side panel lists a site's mods in two groups, each with a switch: **Rules** (`@rules` mods,
+run by TRIF's own code from their data) and **Page scripts** (every other mod). A group switched off on a
+site lives in `chrome.storage.local` **`groupsOff`** = `{"<site>": ["page"]}` (groups `rules`, `page`;
+`normalizeGroupsOff` drops anything else, and empty sites). Like `offSites`, those sites go into
+`excludeMatches` when a mod of that group registers (`offSitesFor` in lib.js merges them with the mod's own
+`offSites`), so the browser keeps the mods off that site and its subdomains; a mod matching any host
+follows it site by site. Each mod's own switches are untouched, and come back as they were when the group
+is switched on again. The panel sends `{type: "mods.group", site, group, enabled, tab}` (`switchGroup`),
+reloads the tab and greys the group's rows; `status` reports `groupsOff` when non-empty (`trif status`:
+`GROUPS OFF`). Panel only: there's no CLI or agent command for it, so an agent run can't switch page
+scripts back on for a site the user turned them off on.
+
 **Renamed mod files.** A mod's id is its site folder and file name, so a file renamed on disk arrives as a
 new id with the old one gone. When the new mod has the same code as a vanished one in the same site folder
 (`findRenames`, against the mods the extension last had, which outlast restarts in storage), the extension

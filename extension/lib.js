@@ -129,7 +129,7 @@ export function normalizeDisabled(value) {
  * Returns {registered, errors, applied, reset, known} (`known` null when a register or update failed, as
  * then it's unclear what's registered).
  */
-export async function syncUserScripts(us, { mods, runtimeCode, applied = {}, disabled = {}, offSites = {}, recording = [], sitesOn = null, known = null }) {
+export async function syncUserScripts(us, { mods, runtimeCode, applied = {}, disabled = {}, offSites = {}, groupsOff = {}, recording = [], sitesOn = null, known = null }) {
   // sitesOn (null: no limit): mods and recording only on the sites TRIF is on for (limitToSites).
   if (sitesOn) recording = (recording || []).filter((site) => (sitesOn || []).some((s) => hostInScope(site, s)));
   const errors = [];
@@ -143,7 +143,8 @@ export async function syncUserScripts(us, { mods, runtimeCode, applied = {}, dis
     seen.add(mod.id);
     const limited = sitesOn ? limitToSites(mod, sitesOn) : mod;
     if (!limited) continue; // only on sites TRIF is off for
-    desired.push(withOffSites(limited, offSites[mod.id]));
+    // (its own switched-off sites, and the sites where its group is off: groupsOff)
+    desired.push(withOffSites(limited, offSitesFor(mod, offSites, groupsOff)));
   }
 
   // (Anything registered that isn't wanted goes: a home page marker left by a development build too.)
@@ -1161,6 +1162,54 @@ export function offOnSite(offSites, id, site) {
 /** Exclude patterns for a switched-off site and its subdomains (IPs: just the address). */
 export function siteExcludes(site) {
   return /^(\d{1,3}(\.\d{1,3}){3}|\[.*\])$/.test(site) ? [`*://${site}/*`] : [`*://${site}/*`, `*://*.${site}/*`];
+}
+
+// ---- Groups: how TRIF runs a mod, switched on and off per site (docs/PROTOCOL.md "Groups").
+// "rules": a rules mod (its header says @rules: TRIF runs its data); "page": every other mod (a page
+// script, run in the page with everything it has). `groupsOff` (chrome.storage.local) maps a site to
+// the groups switched off there: their mods don't run on it (or its subdomains), each mod's own
+// switch left as it is.
+export const GROUPS = ['rules', 'page'];
+export function modGroup(mod) { return mod && mod.rules ? 'rules' : 'page'; }
+
+/** `groupsOff` from storage, cleaned up: valid sites, known groups, no duplicates, no empty lists. */
+export function normalizeGroupsOff(value) {
+  const out = {};
+  if (value && typeof value === 'object' && !Array.isArray(value)) {
+    for (const [site, list] of Object.entries(value)) {
+      const s = offSiteName(site);
+      if (!s || !Array.isArray(list)) continue;
+      const groups = [...new Set(list.filter((g) => GROUPS.includes(g)))];
+      if (groups.length) out[s] = [...new Set([...(out[s] || []), ...groups])];
+    }
+  }
+  return out;
+}
+
+/** Whether `group` is switched off on `site` (an entry for it or a parent domain). */
+export function groupOffOn(groupsOff, group, site) {
+  const s = offSiteName(site);
+  return !!s && Object.entries(groupsOff || {}).some(([o, list]) => list.includes(group) && hostInScope(s, o));
+}
+
+/** `groupsOff` after switching `group` on or off on `site` (a new object). */
+export function switchGroup(groupsOff, site, group, enabled) {
+  const s = offSiteName(site);
+  if (!s) throw new Error(`"${site}" isn't a site (use a hostname like twitter.com)`);
+  if (!GROUPS.includes(group)) throw new Error(`"${group}" isn't a group (${GROUPS.join(' or ')})`);
+  const out = normalizeGroupsOff(groupsOff);
+  const list = new Set(out[s] || []);
+  if (enabled) list.delete(group); else list.add(group);
+  if (list.size) out[s] = [...list]; else delete out[s];
+  return out;
+}
+
+/** The sites a mod is switched off on: its own (offSites) and its group's (groupsOff). */
+export function offSitesFor(mod, offSites, groupsOff) {
+  const own = (offSites && offSites[mod.id]) || [];
+  const g = modGroup(mod);
+  const group = Object.entries(groupsOff || {}).filter(([, list]) => list.includes(g)).map(([s]) => s);
+  return group.length ? [...new Set([...own, ...group])] : own;
 }
 
 /** The mod as registered: its switched-off sites added to its excludes (and to its hash, so it re-registers). */

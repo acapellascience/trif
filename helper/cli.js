@@ -315,6 +315,10 @@ const handlers = {
     const review = info.review || {};
     const updates = info.updates || {};
     const ids = [...new Set([...(info.mods || []), ...registered.keys()])].sort();
+    if (st && st.groupsOff && Object.keys(st.groupsOff).length) {
+      const name = { rules: 'rules', page: 'page scripts' };
+      lines.push(`GROUPS OFF    ${Object.entries(st.groupsOff).map(([site, gs]) => `${gs.map((g) => name[g] || g).join(' and ')} off on ${site}`).join('; ')} (the user's choice, in the side panel: those mods don't run there)`);
+    }
     if (st && st.paused) lines.push('PAUSED        every mod is paused in this browser (the user\'s choice, in the side panel\'s Settings): nothing runs until they resume');
     lines.push(`mods          ${ids.length} in ${info.modsDir}`);
     for (const id of ids) {

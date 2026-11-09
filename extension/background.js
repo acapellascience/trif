@@ -7,7 +7,7 @@ import {
   normalizeUrl, normalizeSite, hostMatchesSite, buildRunCode, buildPollCode, parseRunEnvelope, pageGuard,
   firstInjectionResult, withTimeout, filterRequests, nextBackoff, chromeVersion, toolLine,
   normalizeDisabled, modAppliesTo, urlInScope, modInScope, applyStartOff, applyAbsorbed, findRenames, carryRenames, renameInOrder, normalizeModOrder, modSites,
-  normalizeOffSites, offSiteName, offOnSite, hostInScope, withOffSites, scopeFor, normalizeSitesOn, siteOnFor, sitesInUse, limitToSites, applyStartSites, switchSite, fromOtherBrowser, timedUserScripts, capChat,
+  normalizeOffSites, offSiteName, offOnSite, hostInScope, withOffSites, normalizeGroupsOff, switchGroup, offSitesFor, GROUPS, scopeFor, normalizeSitesOn, siteOnFor, sitesInUse, limitToSites, applyStartSites, switchSite, fromOtherBrowser, timedUserScripts, capChat,
   ALL_ACCESS, readAccess, activeSites, hasSiteAccess, siteOrigins, siteState, siteRefusal, siteModeOf,
   FEATURES, ModsParts, fillSameMods, storedMods, modsStorageState, modsStoragePlan,
 } from './lib.js';
@@ -43,6 +43,7 @@ const state = {
   recording: [],         // hostnames being recorded (persisted)
   disabled: {},          // mod id → true for mods the user switched off (persisted as `disabled`)
   offSites: {},          // mod id → sites it's switched off on, for mods on several sites (persisted)
+  groupsOff: {},         // site → groups ('rules', 'page') switched off there (persisted; lib.js "Groups")
   sitesOn: [],           // registrable domains TRIF is on for; off everywhere else (persisted)
   sitesOffered: [],      // sites the helper said to start on that were turned on once already (persisted)
   access: ALL_ACCESS,    // what the browser gives TRIF (readAccess): a site in sitesOn counts only with it
@@ -131,6 +132,7 @@ const ready = chrome.storage.local.get(null).then(async (s) => {
   if (Array.isArray(s.recording)) state.recording = s.recording;
   state.disabled = normalizeDisabled(s.disabled);
   state.offSites = normalizeOffSites(s.offSites);
+  state.groupsOff = normalizeGroupsOff(s.groupsOff);
   state.startedOff = normalizeDisabled(s.startedOff);
   state.absorbed = normalizeDisabled(s.absorbed);
   state.defaultOrder = normalizeModOrder(s.defaultOrder);
@@ -313,7 +315,7 @@ async function applyModsNow() {
     const res = await syncUserScripts(timedUserScripts(chrome.userScripts), {
       // (paused: as if TRIF were on for no site, so nothing registers; each switch stays as it is)
       mods: state.mods, runtimeCode: runtimeCode(state.recording), applied: state.applied, disabled: state.disabled,
-      offSites: state.offSites, recording: state.recording, sitesOn: state.paused ? [] : onSites(), known: state.known,
+      offSites: state.offSites, groupsOff: state.groupsOff, recording: state.recording, sitesOn: state.paused ? [] : onSites(), known: state.known,
     });
     state.applied = res.applied;
     state.known = res.known;
@@ -614,6 +616,7 @@ const commands = {
         return o;
       }),
       recording: state.recording, sitesOn: state.sitesOn, ...siteLists(), ...(state.paused ? { paused: true } : {}),
+      ...(Object.keys(state.groupsOff).length ? { groupsOff: state.groupsOff } : {}),
       ...(args && (args.tab !== undefined || args.url !== undefined) ? { page: await modsOnPage(args) } : {}),
     };
   },
@@ -872,7 +875,7 @@ function siteLists() {
 async function modsOnPage(args) {
   const tab = await scopedTab(args);
   const url = tab.url || tab.pendingUrl || '';
-  const mods = state.mods.filter((m) => isEnabled(m.id) && !m.held && limitToSites(m, onSites()) && modAppliesTo(withOffSites(m, state.offSites[m.id]), url));
+  const mods = state.mods.filter((m) => isEnabled(m.id) && !m.held && limitToSites(m, onSites()) && modAppliesTo(withOffSites(m, offSitesFor(m, state.offSites, state.groupsOff)), url));
   return { tab: tab.id, url, mods: mods.map((m) => ({ id: m.id, name: m.name || m.id, runAt: m.runAt || 'document_start' })) };
 }
 
@@ -954,7 +957,7 @@ async function runtimeList(args, key) {
   if (list) return list;
   // The runtime only runs where a mod that's on does (or on a recorded site): no such mod, nothing to report.
   const url = tab.url || tab.pendingUrl || '';
-  if (!state.mods.some((m) => isEnabled(m.id) && !m.held && modAppliesTo(withOffSites(m, state.offSites[m.id]), url))) return [];
+  if (!state.mods.some((m) => isEnabled(m.id) && !m.held && modAppliesTo(withOffSites(m, offSitesFor(m, state.offSites, state.groupsOff)), url))) return [];
   throw new Error(noRuntime());
 }
 
@@ -1044,6 +1047,16 @@ async function onPageMessage(msg) {
       return { ok: true };
     case 'status':
       return uiStatus();
+    case 'mods.group': {
+      // A group's switch on a site (the panel's "Rules" / "Page scripts"): its mods stop running on that
+      // site (or start again), each mod's own switch left as it is. Panel only: an agent run can't change it.
+      state.groupsOff = switchGroup(state.groupsOff, String(msg.site ?? ''), String(msg.group ?? ''), msg.enabled === true);
+      await save({ groupsOff: state.groupsOff });
+      await serial(applyMods).then(reportApplied).catch((e) => log('warn', errMsg(e)));
+      if (msg.tab !== undefined) await chrome.tabs.reload(Number(msg.tab)).catch(() => {});
+      notifyPanels();
+      return { groupsOff: state.groupsOff };
+    }
     case 'mods.pause': {
       // Settings' "Pause all mods": nothing runs in this browser until it's off again
       state.paused = msg.paused === true;
@@ -1081,10 +1094,11 @@ async function uiStatus() {
       error: errors.get(m.id) === USER_SCRIPTS_OFF ? null : errors.get(m.id) || null,
       held: m.held || null, pending: m.pending || null, review: m.held || m.pending ? null : m.review || null, risk: m.risk || null,
       from: fromOtherBrowser(m, state.installId) ? (m.origin.browser || 'another browser') : null,
-      source: m.source || null, version: m.version || null, update: m.update || null,
+      source: m.source || null, version: m.version || null, update: m.update || null, rules: !!m.rules,
     })),
     runs: [...state.runs.values()].map((r) => ({ runId: r.runId, site: r.site })),
     lockedTabs: tabLocks.list(),
+    groupsOff: state.groupsOff,
     // Storage stopped working: the panel can't read switches from it, so they come from here.
     ...(storageHealth.broken ? { storageBroken: true, disabled: state.disabled, offSites: state.offSites } : {}),
   };
@@ -1371,7 +1385,7 @@ function stopRunsOn(site) {
 async function afterSiteChange(tabId) {
   const tab = tabId !== undefined ? await chrome.tabs.get(tabId).catch(() => null) : null;
   const url = tab ? tab.url || tab.pendingUrl || '' : '';
-  const runsThere = url && state.mods.some((m) => isEnabled(m.id) && !m.held && modAppliesTo(withOffSites(m, state.offSites[m.id]), url));
+  const runsThere = url && state.mods.some((m) => isEnabled(m.id) && !m.held && modAppliesTo(withOffSites(m, offSitesFor(m, state.offSites, state.groupsOff)), url));
   if (checkUserScripts()) reportApplied(await serial(applyMods));
   if (runsThere) await chrome.tabs.reload(tab.id).catch(() => {});
   notifyPanels();

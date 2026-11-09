@@ -209,6 +209,10 @@ on and which are `off`.
   `trif status` shows `(off on bank.com)`. Use `--site` when the user means one site ("turn the
   dark mode off on Wikipedia"); without it the mod goes off everywhere. Turning a mod off on the last
   site it names switches the whole mod off.
+- The side panel also has a switch per group on each site, "Rules" (`@rules` mods) and "Page scripts"
+  (the rest). `trif status` shows `GROUPS OFF` when the user switched one off: those mods don't run
+  there, whatever their own switch says. Only the user can switch a group back on, in the panel; if a
+  page script you wrote is on a site where page scripts are off, say so, or offer a rules mod instead.
 
 To delete a mod, use `trif delete <site>/<mod>`, never `rm` (side-panel runs don't have `rm`). It
 moves the file to `~/.trif/trash`, where it stays for 30 days; `trif restore <site>/<mod>` puts it

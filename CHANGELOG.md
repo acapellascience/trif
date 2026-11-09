@@ -6,6 +6,8 @@ needs a section here for the version it releases.
 
 ## Unreleased
 
+- A site's mods now come in two groups, Rules and Page scripts, each with a switch for that site only.
+
 - **Tim's starter mods are your choice.** Setting TRIF up no longer puts any of the mods TRIF ships on
   your computer. The setup page asks: **Add them** (small mods for Google, X, Amazon and Instagram, plain
   JavaScript you can read first) or **Start with none**. Settings in the side panel can add them later.

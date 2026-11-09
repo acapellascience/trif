@@ -1121,6 +1121,25 @@ test('background: Pause all mods registers nothing (each switch kept); resuming 
   } finally { bg.restore(); }
 });
 
+test('background: a group switched off on a site (panel) is kept, shown in status, and its mods leave that site', async () => {
+  const mods = [mod('x.com/page'), mod('x.com/calm', { rules: true })];
+  const bg = await loadBackground({ storage: { mods, sitesOn: ['x.com'] } });
+  try {
+    const panel = bg.connectPanel();
+    bg.native.emit({ type: 'mods', mods });
+    await settle(20);
+    let r = await panel.ask({ type: 'mods.group', site: 'x.com', group: 'page', enabled: false });
+    assert.deepStrictEqual(r.result.groupsOff, { 'x.com': ['page'] });
+    assert.deepStrictEqual(bg.store.groupsOff, { 'x.com': ['page'] });
+    r = await panel.ask({ type: 'status' });
+    assert.deepStrictEqual(r.result.groupsOff, { 'x.com': ['page'] });
+    assert.deepStrictEqual(r.result.mods.map((m) => [m.id, m.rules, m.enabled]), [['x.com/page', false, true], ['x.com/calm', true, true]]);
+    await panel.ask({ type: 'mods.group', site: 'x.com', group: 'page', enabled: true });
+    r = await panel.ask({ type: 'status' });
+    assert.deepStrictEqual(r.result.groupsOff, {});
+  } finally { bg.restore(); }
+});
+
 test('background: agent.start becomes a native request; agentEvents reach panels and the chat', async () => {
   const bg = await loadBackground();
   try {
@@ -2761,4 +2780,23 @@ test('runtime: errors no mod threw are the page\'s own, kept apart (trif errors 
   fire('unhandledrejection', { reason: 'nope' });
   assert.deepStrictEqual(plain(W.errors.map((e) => e.mod)), ['x.com/boom']);
   assert.deepStrictEqual(plain(W.pageErrors.map((e) => [e.message, e.source])), [['Unexpected token } in JSON', 'https://x.com/app.js:12'], ['nope', '']]);
+});
+
+test('groups: switched off per site, page scripts and rules apart; registration leaves those sites out', async () => {
+  let g = lib.switchGroup({}, 'www.X.com', 'page', false);
+  assert.deepStrictEqual(g, { 'x.com': ['page'] });
+  assert.strictEqual(lib.groupOffOn(g, 'page', 'm.x.com'), true);
+  assert.strictEqual(lib.groupOffOn(g, 'rules', 'x.com'), false);
+  assert.deepStrictEqual(lib.switchGroup(g, 'x.com', 'page', true), {});
+  assert.deepStrictEqual(lib.normalizeGroupsOff({ 'X.com': ['page', 'bogus'], '': ['page'], 'y.com': 'page' }), { 'x.com': ['page'] });
+  assert.throws(() => lib.switchGroup({}, 'x.com', 'sandboxed', false), /isn't a group/);
+  // a page script for every site and a rules mod: with page scripts off on x.com, only the page script
+  // leaves x.com out (its own switched-off sites kept)
+  const us = mockUserScripts();
+  const page = mod('all-sites/dark', { matches: ['*://*/*'] });
+  const rules = mod('x.com/calm', { rules: true });
+  await lib.syncUserScripts(us, { mods: [page, rules], runtimeCode: 'RT', offSites: { 'all-sites/dark': ['y.com'] }, groupsOff: g });
+  const byId = Object.fromEntries(us.scripts.map((s) => [s.id, s]));
+  assert.deepStrictEqual(byId['all-sites/dark'].excludeMatches.sort(), ['*://*.x.com/*', '*://*.y.com/*', '*://x.com/*', '*://y.com/*']);
+  assert.deepStrictEqual(byId['x.com/calm'].excludeMatches, []);
 });

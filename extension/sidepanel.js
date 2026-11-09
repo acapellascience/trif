@@ -3,7 +3,7 @@
 // chrome.storage.local `chat:<site>`; this page renders that record and reacts to storage changes.
 // See docs/PROTOCOL.md, "Side panel and agent runs".
 
-import { siteForUrl, modAppliesTo, modSites, isMultiSite, offOnSite, normalizeOffSites, scopeFor, hostInScope, limitToSites, withOffSites, FIREFOX, BROWSER, SETUP_COMMAND,
+import { siteForUrl, modAppliesTo, modSites, isMultiSite, offOnSite, normalizeOffSites, scopeFor, hostInScope, limitToSites, withOffSites, modGroup, groupOffOn, offSitesFor, normalizeGroupsOff, FIREFOX, BROWSER, SETUP_COMMAND,
   SITE_ACCESS, siteOrigins, siteState, hasSiteAccess, requestEverySite,
   normalizeModOrder, orderMods, moveId, setModOrder,
   normalizeSettings, normalizePicks, siteSettings, withoutModel } from './lib.js';
@@ -653,6 +653,48 @@ function actions(...children) {
 let modLabelSeq = 0;
 onSwitchChange(() => renderMods());
 
+// ---- Groups: "Rules" and "Page scripts", each with a switch for this site (background's mods.group)
+const GROUP_TEXT = {
+  rules: ['Rules', 'Run by TRIF from data: they can\'t send, click or load anything.'],
+  page: ['Page scripts', 'Run in the page with everything it has.'],
+};
+const groupOff = (g) => !!view.site && groupOffOn(normalizeGroupsOff(view.status?.groupsOff), g, view.site);
+const groupHeadings = new Map();
+function groupHeading(g) {
+  let li = groupHeadings.get(g);
+  if (!li) {
+    li = el('li', 'mod-group');
+    li.dataset.group = g;
+    const id = `mod-group-${g}`;
+    const name = el('h3', 'mod-group-name', GROUP_TEXT[g][0]);
+    name.id = id;
+    const sw = el('button', 'switch group-switch');
+    sw.type = 'button';
+    sw.setAttribute('role', 'switch');
+    sw.setAttribute('aria-labelledby', id);
+    const knob = el('span', 'knob');
+    knob.setAttribute('aria-hidden', 'true');
+    sw.append(knob);
+    sw.addEventListener('click', async () => {
+      const on = sw.getAttribute('aria-checked') !== 'true';
+      sw.setAttribute('aria-busy', 'true');
+      try { await request({ type: 'mods.group', site: view.site, group: g, enabled: on, tab: view.tab?.id }); await refreshStatus(); } catch (e) {
+        request({ type: 'chat.note', site: view.site, text: `Couldn't switch ${GROUP_TEXT[g][0]} ${on ? 'on' : 'off'}: ${e?.message ?? e}` }).catch(() => {});
+      } finally { sw.removeAttribute('aria-busy'); }
+    });
+    const row = el('div', 'mod-group-row');
+    row.append(name, sw);
+    li.append(row, el('p', 'mod-group-note', GROUP_TEXT[g][1]));
+    groupHeadings.set(g, li);
+  }
+  const off = groupOff(g);
+  const sw = li.querySelector('.group-switch');
+  sw.setAttribute('aria-checked', String(!off));
+  sw.title = off ? `Off on ${view.site}: none of these run here. Click to switch them on here.` : `On on ${view.site}: click to stop all of these running here (each mod's own switch is kept).`;
+  li.classList.toggle('off', off);
+  return li;
+}
+
 function renderMods() {
   // A row being dragged stays where the pointer has it: the list catches up when it's dropped.
   if (modDrag) { modDrag.dirty = true; return; }
@@ -665,7 +707,9 @@ function renderMods() {
   const scope = site ? scopeFor(site) : null;
   const listed = orderMods(site && status ? status.mods.filter((m) => limitToSites(m, [scope]) || m.held?.site === site) : [], view.defaultOrder[scope]);
   view.modNatural = listed.map((m) => m.id);
-  const mods = orderMods(listed, view.modOrder[scope]);
+  // Grouped by how TRIF runs them (lib.js "Groups"): rules first, then page scripts, each in its own order.
+  const ordered = orderMods(listed, view.modOrder[scope]);
+  const mods = [...ordered.filter((m) => modGroup(m) === 'rules'), ...ordered.filter((m) => modGroup(m) === 'page')];
   ui.mods.hidden = mods.length === 0;
   if (!mods.length) { view.modRows.clear(); ui.modList.replaceChildren(); ui.modsReviewNote.hidden = true; return; }
   ui.modsCount.textContent = `(${mods.length})`;
@@ -687,7 +731,13 @@ function renderMods() {
     rows.set(m.id, old && old.key === key ? old : { key, li: modItem(m) });
   }
   view.modRows = rows;
-  const want = [...rows.values()].map((r) => r.li);
+  // A heading for each group with mods here (or switched off here), with its switch, before its rows
+  const want = [];
+  for (const g of ['rules', 'page']) {
+    const inGroup = mods.filter((m) => modGroup(m) === g);
+    if (!inGroup.length && !groupOff(g)) continue;
+    want.push(groupHeading(g), ...inGroup.map((m) => rows.get(m.id).li));
+  }
   want.forEach((li, i) => { if (ui.modList.children[i] !== li) ui.modList.insertBefore(li, ui.modList.children[i] || null); });
   while (ui.modList.children.length > want.length) ui.modList.lastElementChild.remove();
   const byId = new Map(mods.map((m) => [m.id, m]));
@@ -1168,7 +1218,7 @@ function gripButton(labelId) {
   return b;
 }
 
-const rowIds = () => [...ui.modList.children].map((li) => li.dataset.mod);
+const rowIds = () => [...ui.modList.children].filter((li) => li.dataset.mod).map((li) => li.dataset.mod);
 const rowName = (li) => li.querySelector('.mod-name > span:not(.light)')?.textContent || li.dataset.mod;
 
 /** Keep the list's current order as this site's (the rows are already where they belong). */
@@ -1181,19 +1231,22 @@ function saveModOrder(li) {
   ui.modsLive.textContent = `${rowName(li)} moved to position ${ids.indexOf(li.dataset.mod) + 1} of ${ids.length}.`;
 }
 
-/** Put row `li` at position `to` by moving the rows around it (so a pointer captured by `li` stays on it). */
+/**
+ * Put row `li` at position `to` among the mod rows by moving the rows around it (so a pointer captured by
+ * `li` stays on it). Rows stay within their group: the group headings aren't crossed.
+ */
 function placeRow(li, to) {
-  const list = ui.modList;
-  const at = () => [...list.children].indexOf(li);
-  while (at() < to && li.nextElementSibling) li.before(li.nextElementSibling);
-  while (at() > to && li.previousElementSibling) li.after(li.previousElementSibling);
+  const at = () => rowIds().indexOf(li.dataset.mod);
+  const same = (x) => x && x.dataset.mod && x.dataset.group === li.dataset.group;
+  while (at() < to && same(li.nextElementSibling)) li.before(li.nextElementSibling);
+  while (at() > to && same(li.previousElementSibling)) li.after(li.previousElementSibling);
 }
 
 // The keyboard: Alt+↑/↓ anywhere in a row; on the grip, ↑/↓, Home and End too.
 ui.modList.addEventListener('keydown', (e) => {
   if (modDrag) return;
   const li = e.target.closest?.('#mod-list > li');
-  if (!li || e.ctrlKey || e.metaKey || e.shiftKey) return;
+  if (!li || !li.dataset.mod || e.ctrlKey || e.metaKey || e.shiftKey) return;
   const onGrip = !!e.target.closest('.mod-grip');
   const ids = rowIds();
   const from = ids.indexOf(li.dataset.mod);
@@ -1218,7 +1271,7 @@ ui.modList.addEventListener('keydown', (e) => {
 ui.modList.addEventListener('pointerdown', (e) => {
   if (modDrag || e.button !== 0 || !e.isPrimary) return;
   const li = e.target.closest('#mod-list > li');
-  if (!li || ui.modList.children.length < 2) return;
+  if (!li || !li.dataset.mod || rowIds().length < 2) return;
   const onGrip = !!e.target.closest('.mod-grip');
   // Buttons (the switch, delete, Allow…), the update offer and error text keep their clicks and text
   // selection; on a touch screen only the grip drags (elsewhere a finger scrolls the list).
@@ -1272,10 +1325,11 @@ function followPointer(d) {
   const h = li.offsetHeight;
   const top = Math.max(0, Math.min(list.scrollHeight - h, d.y - r.top - list.clientTop + list.scrollTop - d.grabDy));
   const mid = top + h / 2;
-  const others = [...list.children].filter((x) => x !== li);
+  // (positions among the mod rows: the group headings aren't rows, and a row stays in its group: placeRow)
+  const others = [...list.children].filter((x) => x !== li && x.dataset.mod);
   let to = others.findIndex((x) => x.offsetTop + x.offsetHeight / 2 > mid);
   if (to === -1) to = others.length;
-  if (to !== [...list.children].indexOf(li)) {
+  if (to !== rowIds().indexOf(li.dataset.mod)) {
     // The rows that make way slide there (unless reduced motion turns that off, in CSS).
     const before = new Map(others.map((x) => [x, x.offsetTop]));
     placeRow(li, to);
@@ -1311,6 +1365,7 @@ function endModDrag(keep) {
     ui.modList.classList.remove('dragging');
     if (!keep) {
       for (const id of d.ids) { const x = [...ui.modList.children].find((c) => c.dataset.mod === id); if (x) ui.modList.append(x); }
+      renderMods(); // (the group headings back in their places)
     } else if (rowIds().join('\n') !== d.ids.join('\n')) saveModOrder(d.li);
     // The click that ends a drag isn't one.
     const swallow = (c) => { c.stopPropagation(); c.preventDefault(); };
@@ -1323,13 +1378,15 @@ function endModDrag(keep) {
 // Green when the mod runs on the tab's page: switched on (here), matching this URL, not on hold.
 function updateLight(li, m, on) {
   const light = li.querySelector('.light');
-  const running = on && !m.held && modAppliesTo(withOffSites(m, view.offSites[m.id]), view.tab?.url || '');
+  const running = on && !m.held && modAppliesTo(withOffSites(m, offSitesFor(m, view.offSites, normalizeGroupsOff(view.status?.groupsOff))), view.tab?.url || '');
   light.classList.toggle('on', running);
   light.title = running ? 'Running on this page' : m.held ? 'On hold' : !on ? 'Switched off' : 'Not running on this page';
 }
 
 function updateModItem(li, m) {
   if (!m) return;
+  li.dataset.group = modGroup(m);
+  li.classList.toggle('group-off', groupOff(modGroup(m)));
   // One chat run at a time per site: merging waits for the one going.
   const merge = li.querySelector('.mod-update .merge');
   if (merge) {

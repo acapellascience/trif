@@ -43,6 +43,7 @@ const { powersOf, modSites } = require('./powers');
 // powersOf reads every mod's code on each sync; a big mod takes a few hundred ms, so by hash.
 const cache = new Map();
 function powersFor(mod) {
+  if (mod.rules) return []; // (a rules mod runs TRIF's own code, its rules only data: lib/rules.js)
   const key = `${mod.hash}:${mod.id}`;
   if (!cache.has(key)) {
     if (cache.size > 500) cache.clear();
@@ -104,7 +105,7 @@ function saveRan(home, m) {
     const f = ranFile(home, m.id);
     fs.mkdirSync(path.dirname(f), { recursive: true });
     const tmp = `${f}.${process.pid}.tmp`;
-    fs.writeFileSync(tmp, m.code);
+    fs.writeFileSync(tmp, m.text ?? m.code); // (a rules mod's own text, not the code TRIF makes of it)
     fs.renameSync(tmp, f);
   } catch { /* the waiting version just won't have the old one running beside it */ }
 }

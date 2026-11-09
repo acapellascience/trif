@@ -35,7 +35,7 @@ function isIgnoredName(name) {
 // Parse the `// ==WebMod==` block. Returns raw header values plus warnings; defaults are applied
 // by buildMod because they depend on the folder and file name.
 function parseHeader(code) {
-  const out = { hasHeader: false, name: null, description: null, matches: [], excludes: [], runAt: null, risk: null, source: null, version: null, warnings: [] };
+  const out = { hasHeader: false, name: null, description: null, matches: [], excludes: [], runAt: null, risk: null, source: null, version: null, rules: false, warnings: [] };
   const lines = String(code).replace(/^﻿/, '').split(/\r?\n/);
   const start = lines.findIndex((l) => HEADER_START.test(l));
   if (start === -1) return out;
@@ -84,6 +84,10 @@ function parseHeader(code) {
       case 'version':
         if (value) out.version = value;
         break;
+      // `@rules`: a rules mod (lib/rules.js): data after the header, run by TRIF's own code
+      case 'rules':
+        out.rules = true;
+        break;
       case 'run-at': {
         const mapped = RUN_AT[value.toLowerCase()];
         if (mapped) out.runAt = mapped;
@@ -129,7 +133,12 @@ function buildMod({ site, file, code }) {
     source: header.source, // 'webmods' (or 'trif') for the mods TRIF ships, else what the header says, or null
     version: header.version, // the header's @version, or null
   };
-  const hash = sha1(JSON.stringify([meta.id, meta.name, meta.description, meta.matches, meta.excludes, meta.runAt, meta.risk]) + '\n' + code);
+  const hash = sha1(JSON.stringify([meta.id, meta.name, meta.description, meta.matches, meta.excludes, meta.runAt, meta.risk, header.rules]) + '\n' + code);
+  if (header.rules) {
+    // (what runs is TRIF's code with the checked rules; throws a RulesError for the scanner to report)
+    const rules = require('./rules');
+    return { mod: { ...meta, rules: true, text: code, code: rules.rulesCode(rules.parseRules(code), meta.id), hash }, warnings: header.warnings };
+  }
   return { mod: { ...meta, code, hash }, warnings: header.warnings };
 }
 
@@ -220,7 +229,9 @@ function scanMods(modsDir) {
       else problems.push({ id, file, error: `can't read file: ${e.message}` });
       continue;
     }
-    const { mod, warnings: w } = buildMod({ site, file, code });
+    let built;
+    try { built = buildMod({ site, file, code }); } catch (e) { problems.push({ id, file, error: e.message }); continue; }
+    const { mod, warnings: w } = built;
     for (const warning of w) warnings.push({ id, file, warning });
     mods.push(mod);
   }

@@ -324,11 +324,13 @@ TRIF, version N", and "update available" when a newer version is waiting (trif m
     examples: ['trif mods', 'trif mods --json'],
   },
   new: {
-    usage: 'trif new <site> <mod>',
-    summary: 'create sites/<site>/<mod>.js from a template and print its path',
+    usage: 'trif new <site> <mod> [--rules]',
+    summary: 'create sites/<site>/<mod>.js from a template and print its path (--rules: a rules mod, data instead of code)',
     details: `<site> is a hostname (x.com, news.ycombinator.com); <mod> is a kebab-case name. The template has
-the header plus helpers for injecting CSS and handling elements that appear later.`,
-    examples: ['trif new example.com hide-banner'],
+the header plus helpers for injecting CSS and handling elements that appear later. --rules makes a rules
+mod: CSS, things to hide, text to replace and items to filter, as data that TRIF's own code runs, so it
+can't send, click or load anything and never waits for the user's OK (see "Rules mods" in TECHNIQUES.md).`,
+    examples: ['trif new example.com hide-banner --rules', 'trif new example.com hide-banner'],
   },
   'install-example': {
     usage: 'trif install-example <site>/<mod> [--force]',

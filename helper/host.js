@@ -607,7 +607,7 @@ function agentCommand(cmd, args) {
       if (!m) throw new Error(`no mod ${id || '(no id)'}`);
       const before = lastRun(ws.home, id);
       const { lineDiff } = require('./lib/diff');
-      return { id, isNew: before === null, hash: m.hash, lines: lineDiff(before ?? '', m.code) };
+      return { id, isNew: before === null, hash: m.hash, lines: lineDiff(before ?? '', m.text ?? m.code) };
     }
     case 'mod.undo': {
       // Put back what a side-panel run changed (lib/history.js): the newest kept version, or the trash
@@ -626,7 +626,8 @@ function agentCommand(cmd, args) {
       const m = state.mods.find((x) => x.id === id);
       if (!m) throw new Error(`no mod ${id || '(no id)'}`);
       const CAP = 200000;
-      return { id, code: m.code.slice(0, CAP), truncated: m.code.length > CAP };
+      const text = m.text ?? m.code; // (a rules mod: its rules, not TRIF's code)
+      return { id, code: text.slice(0, CAP), truncated: text.length > CAP };
     }
     case 'mod.review': {
       // "Looks right" on a mod's review: what TRIF found in it is allowed for that mod (held.js).

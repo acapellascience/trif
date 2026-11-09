@@ -4,6 +4,43 @@ The how-to half of the guide, read when you need it: before you write a mod, bef
 when you test. AGENTS.md (next to this file) is the rest: the workspace, the CLI, the workflow and the
 safety rules, which always apply.
 
+## Rules mods: start here
+
+Most customizations are "make it look like this", "hide these", "rename that", "drop the items that say
+X". Write those as a **rules mod**: data instead of code, run by TRIF's own code. A rules mod can't send,
+click, load from anywhere or run code, whoever wrote it, so it never waits for the user's OK and nothing
+on a page can turn it against them. Reach for JavaScript only when rules can't do the job.
+
+`trif new <site> <mod> --rules` makes one. After the header (with `// @rules` in it), one JSON object:
+
+```js
+// ==WebMod==
+// @name        Calmer timeline
+// @description Hides promoted posts and the trends box
+// @match       https://x.com/*
+// @rules
+// @risk        1 hides promoted posts, so their ad impressions never report
+// ==/WebMod==
+{
+  "css": "[data-testid=primaryColumn] { max-width: 700px }",
+  "hide": ["[data-testid=sidebarColumn] [aria-label=Trending]"],
+  "replace": [{ "in": "article", "find": "Grok", "with": "the robot" }],
+  "filter": [{ "items": "[data-testid=cellInnerDiv]", "hideIfText": "Promoted" }]
+}
+```
+
+- `css`: any CSS that changes how things look. Nothing that loads from an address: `url()` only with
+  `data:`, no `@import`, `image-set()` and the like, and no backslash escapes outside strings.
+- `hide`: selectors to hide (`display: none !important`, including elements that appear later).
+- `replace`: `{ in?, find, with, regex?, caseless? }`: text to replace inside the elements `in` matches
+  (default the whole page). `with` is plain text. Patterns are capped and can't nest repeats.
+- `filter`: `{ items, hideIfText | hideIfRegex | hideIfHas }`: hide each element matching `items` whose
+  text contains the words (case-insensitive), matches the pattern, or that has an element matching the
+  selector inside it.
+
+Selectors can't contain `{`, `}`, `;` or `@`. `trif check <site>/<mod>` checks the rules and says what's
+wrong. Rules re-apply as the page changes, so single-page apps need nothing extra.
+
 ## Writing mods TRIF can read
 
 TRIF reads every mod's code before it runs, and a mod that can do certain things waits for the user's OK

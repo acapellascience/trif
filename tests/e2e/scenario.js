@@ -732,6 +732,7 @@ class Scenario {
     // (A stand-in Claude Code: only when the helper has the scratch HOME, never your real agent.)
     if (!this.o.agent && !this.o.codex && !this.o.oss && !this.o.guidance) {
       await r.check('an expired login (a stand-in Claude Code): the login notice and one plain line, not the raw error; the message back in the box', () => this.expiredLoginCheck(win));
+      await r.check('a rules mod: TRIF\'s own code applies its CSS, hides, replaces and filters (also what appears later); one that would load from an address is refused, not sent', () => this.rulesModCheck(win));
       await r.check('a hijacked agent (a stand-in Claude Code): the tab it ran code in sends nothing that changes anything until it reloads, even later; its mod that posts is held by its code, whatever its header says', () => this.hijackedAgentCheck(win));
     }
 
@@ -1336,6 +1337,52 @@ process.exitCode = 1;
     }
   }
 
+  // ---- rules mods (helper/lib/rules.js): data, run by TRIF's own code
+
+  async rulesModCheck(win) {
+    const site = '127.0.0.1';
+    const base = `http://${site}:${this.o.servers.port}`;
+    const dir = path.join(this.trif, 'sites', site);
+    const head = (name) => `// ==WebMod==\n// @name ${name}\n// @match *://127.0.0.1/*\n// @rules\n// ==/WebMod==\n`;
+    const good = path.join(dir, 'e2e-rules.js'), bad = path.join(dir, 'e2e-rules-bad.js');
+    try {
+      await this.cli(['disable', '127.0.0.1/e2e-banner', '--url', site]); // (the harness's own mod changes #target too)
+      fs.writeFileSync(good, head('Rules') + JSON.stringify({
+        css: '#title { color: rgb(1, 2, 3) }',
+        hide: ['a[href="/two.html"]'],
+        replace: [{ in: '#target', find: 'Original', with: 'Ruled' }],
+        filter: [{ items: 'p', hideIfText: 'Host' }],
+      }) + '\n');
+      fs.writeFileSync(bad, head('Bad rules') + JSON.stringify({ css: `body { background: url(${base}/e2e-rules-leak) }` }) + '\n');
+      await waitFor('the rules mod registered, the bad one refused', async () => {
+        const st = await this.cli(['status'], { timeoutMs: 20000 });
+        return /e2e-rules\s+registered/.test(st.stdout) && /e2e-rules-bad\s+NOT SENT: .*only data:/.test(st.stdout) ? st.stdout : null;
+      }, { timeoutMs: 20000, intervalMs: 500 });
+      await this.ext(`async (id, url) => { await chrome.tabs.update(id, { url, active: true }); }`, [win.tabId, `${base}/?e2e=rules`]);
+      await sleep(1500);
+      const look = async () => (await this.cli(['run', '--tab', String(win.tabId), `({
+        color: getComputedStyle(document.getElementById('title')).color,
+        linkShown: document.querySelector('a[href="/two.html"]').getClientRects().length > 0,
+        target: document.getElementById('target').textContent,
+        hostShown: [...document.querySelectorAll('p')].filter((p) => p.textContent.includes('Host')).some((p) => p.getClientRects().length > 0),
+      })`], { timeoutMs: 20000 })).stdout;
+      let last = '';
+      const before = JSON.parse(await waitFor('the rules applied', async () => { const o = last = await look(); return /"target":\s*"Ruled text\."/.test(o) ? o : null; }, { timeoutMs: 10000, intervalMs: 300 }).catch((e) => { throw new Error(`${e.message}: ${last}`); }));
+      if (before.color !== 'rgb(1, 2, 3)' || before.linkShown || before.hostShown) throw new Error(`the rules: ${JSON.stringify(before)}`);
+      // what the page adds later is ruled too
+      await this.cli(['run', '--tab', String(win.tabId), `(() => { const p = document.createElement('p'); p.id = 'later'; p.textContent = 'Host later'; document.body.append(p); const q = document.createElement('p'); q.id = 'later2'; q.textContent = 'Original again'; document.getElementById('target').append(q); return 1; })()`], { timeoutMs: 20000 });
+      const later = await waitFor('the rules on what appeared later', async () => {
+        const o = JSON.parse((await this.cli(['run', '--tab', String(win.tabId), `({ hidden: document.getElementById('later').getClientRects().length === 0, text: document.getElementById('later2').textContent })`], { timeoutMs: 20000 })).stdout);
+        return o.hidden && o.text === 'Ruled again' ? o : null;
+      }, { timeoutMs: 10000, intervalMs: 300 });
+      if (this.o.servers.requests.some((q) => q.url.startsWith('/e2e-rules-leak'))) throw new Error('the bad rules mod loaded its address');
+      return `colour ${before.color}, link hidden, "${before.target}", Host items hidden (later too: "${later.text}"); the url() one refused, nothing loaded`;
+    } finally {
+      for (const f of [good, bad]) { try { fs.unlinkSync(f); } catch { /* gone */ } }
+      await this.cli(['enable', '127.0.0.1/e2e-banner', '--url', site]).catch(() => {});
+    }
+  }
+
   // ---- a hijacked agent, with a stand-in Claude Code (extension/tablock.js, helper/lib/powers.js and held.js)
 
   /**
@@ -1727,7 +1774,8 @@ say({ type: 'result', subtype: 'success', is_error: false, result: text, session
     const expected = (l) => /User scripts aren't allowed for TRIF|User scripts are off for TRIF/.test(l) // Firefox's wording, Chrome's
       || (this.scriptsRevoked && /user scripts were turned off/.test(l)) // colourChecks turned them off
       || /mod 127\.0\.0\.1\/e2e-huge: mod is [\d.]+ MB; a mod can be up to 4 MB/.test(l) // bigModsCheck's, over the cap on purpose
-      || /WARN stdout error \(EPIPE\); \w+ went away/.test(l); // (the harness quit the browser while the helper was writing to it)
+      || /WARN stdout error \(EPIPE\); \w+ went away/.test(l) // (the harness quit the browser while the helper was writing to it)
+      || /mod 127\.0\.0\.1\/e2e-rules-bad: .*only data:/.test(l); // rulesModCheck's, refused on purpose
     const skipped = lines.filter(expected).length;
     const bad = lines.filter((l) => !expected(l) && /\b(WARN|ERROR|warn|error)\b/.test(l.slice(0, 60)));
     const errors = bad.filter((l) => /\bERROR\b|\berror\b/.test(l.slice(0, 60)));

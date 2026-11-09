@@ -26,7 +26,7 @@ process.stdout.on('error', (e) => { if (e.code === 'EPIPE') process.exit(0); thr
 const VALUE_FLAGS = new Set(['--tab', '--url', '-o', '--out', '--output', '--filter', '--limit', '-f', '--file',
   '--browser', '--home', '--native-dir', '--bin-dir', '--timeout', '--agent', '--session', '--model', '--site', '--auto',
   '--provider', '--base-url', '--key-env', '--selector', '--color', '--text', '--tolerance']);
-const BOOL_FLAGS = new Set(['--json', '--hard', '--help', '-h', '--force', '--page', '--no-link', '--no-examples', '--copy', '--link', '--install', '--open',
+const BOOL_FLAGS = new Set(['--json', '--hard', '--help', '-h', '--force', '--page', '--rules', '--no-link', '--no-examples', '--copy', '--link', '--install', '--open',
   '--use-new', '--keep', '--merged', '--set-key', '--remove-key', '--scroll', '--full', '--verbose', '-v', '--no-wait']);
 const ALIASES = { '--out': '-o', '--output': '-o', '--file': '-f', '-h': '--help', '-v': '--verbose' };
 
@@ -372,6 +372,17 @@ const handlers = {
     if (!fs.existsSync(file) && /^[^/\s]+\/[^/\s]+$/.test(file.replace(/\.js$/, ''))) file = path.join(ctx.ws.modsDir, `${file.replace(/\.js$/, '')}.js`);
     file = optionPath(ctx, file);
     const code = fs.readFileSync(file, 'utf8');
+    // A rules mod (lib/rules.js): its rules checked, nothing to compile; TRIF runs it with its own code
+    if (require('./lib/mods').parseHeader(code).rules) {
+      try { require('./lib/rules').parseRules(code); } catch (e) {
+        if (ctx.json) printJson({ ok: false, error: e.message }); else out(`${path.resolve(file)}: ${e.message}`);
+        process.exitCode = 1;
+        return;
+      }
+      if (ctx.json) return printJson({ ok: true, file: path.resolve(file), rules: true, powers: [] });
+      out(`ok: ${path.resolve(file)} is a rules mod and its rules check out`);
+      return out('TRIF runs it with its own code: it can\'t send, click, load from elsewhere or run code, so it never waits for the user\'s OK.');
+    }
     // Compiles without running anything (side-panel agents may not run code; this replaces node --check).
     try { new vm.Script(code, { filename: path.resolve(file) }); } catch (e) {
       const where = String(e.stack || '').split('\n').slice(0, 3).join('\n');
@@ -797,7 +808,7 @@ const handlers = {
     }
     const file = path.join(ctx.ws.modsDir, site, `${mod}.js`);
     if (fs.existsSync(file)) throw new HelperError(`${file} already exists`, 'command');
-    const tpl = fs.readFileSync(path.join(P.HELPER_DIR, 'templates', 'mod.js'), 'utf8');
+    const tpl = fs.readFileSync(path.join(P.HELPER_DIR, 'templates', ctx.opts['--rules'] ? 'rules.js' : 'mod.js'), 'utf8');
     let text = tpl;
     // all-sites mods run everywhere until the agent narrows the @match lines.
     if (site === ALL_SITES) text = text.replace(/^\/\/ @match .*\n(\/\/ @match .*\n)*/m, '// @match       *://*/*\n');

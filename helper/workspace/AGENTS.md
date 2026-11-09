@@ -314,7 +314,10 @@ the site (`trif tabs`; `trif open <url>` if none) and look:
 
 ### 3. Write the mod
 
-**Read TECHNIQUES.md first** (next to this file; once per session is enough): where mods run, the
+**Prefer a rules mod** (`trif new <site> <mod> --rules`): CSS, things to hide, text to replace and items to
+filter, as data TRIF's own code runs. It can't act for the user, so it never waits for their OK. Write
+JavaScript only when rules can't do the job. **Read TECHNIQUES.md first** (next to this file; once per
+session is enough; "Rules mods" is its first section): where mods run, the
 techniques most robust first (CSS; filtering data before the app sees it; DOM tweaks in single-page
 apps; React state; shadow DOM; adding UI), making mods resilient and repairing broken ones, and
 testing. Then `trif new <site> <mod>`, and edit. Pick the least invasive technique that does the job, and the lowest risk tier that gets the user what they want (see "Account safety"); set `@risk`. Saving the file updates the registered script automatically; it applies from the next load, so

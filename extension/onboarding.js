@@ -278,7 +278,6 @@ function starterStep(s, connected) {
       x.mods.forEach((m, i) => {
         if (i) mods.append(', ');
         mods.append(el('b', null, m.name));
-        if (m.description) mods.append(` (${m.description})`);
       });
       label.append(box, name, mods);
       li.append(label);

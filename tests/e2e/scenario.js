@@ -360,7 +360,7 @@ class Scenario {
       if (!/github\.com\/acapellascience\/trif\/.*examples\/sites/.test(st.source)) throw new Error(`see the code: ${st.source}`);
       if (st.buttons.map((b) => b[1]).join() !== 'Add these,Start with none') throw new Error(`buttons: ${JSON.stringify(st.buttons)}`);
       const x = st.rows.find((row) => row.site === 'x.com');
-      if (!/^X\b/.test(x.text) || !/Detox Timeline \(a calmer scroll\)/.test(x.text)) throw new Error(`X's row: ${x.text}`);
+      if (!/^X\b/.test(x.text) || !/Detox Timeline, Follow status/.test(x.text) || /\(/.test(x.text)) throw new Error(`X's row: ${x.text}`);
       if (fs.existsSync(path.join(this.trif, 'sites', 'x.com')) || fs.existsSync(path.join(this.trif, 'sites', 'www.google.com'))) throw new Error('Tim\'s mods on disk before the choice');
       await this.ext(`async () => document.querySelector('#starter-add').scrollIntoView({ block: 'end' })`);
       await sleep(200);

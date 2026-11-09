@@ -20,7 +20,12 @@ needs a section here for the version it releases.
   tick them on the setup page, a box for each site and each mod. Each one you add has its own switch in
   the side panel, and you can add the others later in Settings there, or from the link on that site's
   panel. If you already have Tim's mods, nothing changes.
+- **New for X, off until you switch them on: people's own colours.** Style Encoder stamps a style you
+  pick into the corner of the next profile picture you upload (X's round crop hides it). Profile Styler
+  then shows each styled profile in its owner's colours, and Post Styler their posts and people cards.
+  To find the styles they load people's profile pictures again from X's image server.
 - Detox Timeline keeps the margins beside the timeline equal when X-Flyer is installed and no game is on.
+  Rainbow Rave's and Follow status's rainbows no longer jump at their edges.
 - Amazon's Simple Home shows Amazon's own logo, sharper. Punk Fonts for X is no longer one of Tim's mods:
   if you have it, it stays as it is, without updates.
 - When your coding agent's login runs out, the side panel asks you to log in again (and keeps your

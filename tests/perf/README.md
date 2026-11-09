@@ -90,8 +90,8 @@ In `tests/perf/.work/<time>/` (or `--out`):
 (`no-xlate-scan`, `no-xlate`, `no-glow`, `no-wrap`, `no-chase`, `no-shadows`, `no-shadowblur`, `no-timeline`,
 `no-hud`, `no-shake`, `no-music`, `no-sfx`, `no-rave`, `no-detox`, `no-follow`, `no-punk`, and drawing ones:
 `no-letters`, `no-sparks`, `no-rings`, `no-laser-draw`, `no-ship-draw`, `no-lives`, `no-telegraph-blur`,
-`no-avatar-glow`, `no-boss-ring`). They're for
-attributing cost, not fixes: an ablated game doesn't look or play the same.
+`no-avatar-glow`, `no-boss-ring`). They're for attributing cost, not fixes: an ablated game doesn't look or
+play the same.
 
 ## Startup
 
@@ -102,10 +102,12 @@ mods' functions by time. (`--variants` works here too.)
 
 ## Leaks
 
-`--leak MIN` plays MIN minutes on Home (firing, scrolling) and every 15 s collects garbage and samples the JS
-heap, the nodes, the listeners, the word spans, canvases and `<style>`s; then the same with the game off
-(the page scrolled at the same speed), since the stand-in's own list grows as it loads more posts. It
-reports the growth per minute of each.
+`--leak MIN` plays MIN minutes on Home (firing, scrolling; the ship can die here, so game overs and restarts
+are part of it) and every 15 s collects garbage and samples the JS heap, the nodes (Chrome's count, which
+includes nodes no longer in the page but still held), the listeners, the word spans, canvases and
+`<style>`s, and the browser's memory (all its processes, and the biggest: decoded audio and pictures live
+outside the JS heap); then the same with the game off (the page scrolled at the same speed), since the
+stand-in's own list grows as it loads more posts. It reports the growth per minute of each.
 
 ## Headless vs a real window
 

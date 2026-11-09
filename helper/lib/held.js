@@ -25,7 +25,8 @@
 //   $TRIF_HOME/held.json     mod id -> {hash, site, scope, runId, at, reason, facts, needs, claim}
 //   $TRIF_HOME/allowed.json  mod id -> {powers: [key], lines: {key: [sha1 of a line]}, at}   (keys as
 //                            powers.js gives them, plus `match:<pattern>` and `risk2`)
-//   $TRIF_HOME/seen.json     mod id -> hash of the version TRIF last let run
+//   $TRIF_HOME/seen.json     mod id -> {hash, lines: {key: [line hash]}}: the version TRIF last let run, and
+//                            its lines that use a power (a change is judged on what it adds to those)
 // A held entry lasts while that version of the mod is there; an edit makes it be worked out again.
 // (Before 0.3.0 an approved hold stayed in held.json marked `approved`: it becomes allowed powers.)
 
@@ -118,11 +119,14 @@ const loadSeen = (home) => (fs.existsSync(seenFile(home)) ? loadJson(seenFile(ho
 
 // What's allowed for a mod: {keys: Set, lines: Map key -> Set of line hashes}, from allowed.json and, for
 // a mod TRIF ships, its shipped version.
-function allowedFor(home, mod, allowed = loadAllowed(home)) {
+function allowedFor(home, mod, allowed = loadAllowed(home), seenVersion = null) {
   const a = allowed[mod.id] || {};
   const keys = new Set(Array.isArray(a.powers) ? a.powers : []);
   const lines = new Map(Object.entries(a.lines && typeof a.lines === 'object' ? a.lines : {}).map(([k, v]) => [k, new Set(Array.isArray(v) ? v : [])]));
-  for (const b of shippedBaseline(home, mod) || []) {
+  // (and what the version TRIF last let run already did: a change is judged on what it adds)
+  const before = [...(shippedBaseline(home, mod) || []),
+    ...Object.entries(seenVersion && seenVersion.lines && typeof seenVersion.lines === 'object' ? seenVersion.lines : {}).map(([key, l]) => ({ key, lines: Array.isArray(l) ? l : [] }))];
+  for (const b of before) {
     keys.add(b.key);
     if (!lines.has(b.key)) lines.set(b.key, new Set());
     for (const h of b.lines) lines.get(b.key).add(h);
@@ -185,10 +189,8 @@ function updateHeld(ws, mods, scopes) {
   const allowed = loadAllowed(ws.home);
   let seen = loadSeen(ws.home);
   let seenChanged = false;
-  if (seen === null) { // the first time: what's there is the user's, as it is
-    seen = Object.fromEntries(mods.map((m) => [m.id, m.hash]));
-    seenChanged = true;
-  }
+  const record = (m) => ({ hash: m.hash, lines: Object.fromEntries(needsOf(m, null).filter((n) => n.lines.length).map((n) => [n.key, n.lines])) });
+  const seenHash = (v) => (typeof v === 'string' ? v : v && v.hash);
   // Which live run changed each mod, if one did (and could: not a folder it was locked out of)
   const byRun = new Map();
   const live = scopes.filter((s) => s.before);
@@ -204,11 +206,20 @@ function updateHeld(ws, mods, scopes) {
       }
     }
   }
+  if (seen === null) { // the first time: what's there is the user's, as it is
+    // (but not a mod a live run just wrote: that one is judged like any change)
+    seen = Object.fromEntries(mods.filter((m) => !byRun.has(m.id)).map((m) => [m.id, record(m)]));
+    seenChanged = true;
+  }
   for (const m of mods) {
     const same = held[m.id] && held[m.id].hash === m.hash; // (held as it is: waiting for the user, unless it's allowed now)
     const run = byRun.get(m.id) || (held[m.id] && live.find((s) => s.runId === held[m.id].runId)) || (same && held[m.id].scope ? { site: held[m.id].site, scope: held[m.id].scope, runId: held[m.id].runId } : null);
-    if (!run && seen[m.id] === m.hash) { if (held[m.id]) { delete held[m.id]; changed = true; } continue; }
-    const ok = allowedFor(ws.home, m, allowed);
+    if (!run && seenHash(seen[m.id]) === m.hash) {
+      if (typeof seen[m.id] === 'string') { seen[m.id] = record(m); seenChanged = true; } // (recorded before lines were)
+      if (held[m.id]) { delete held[m.id]; changed = true; }
+      continue;
+    }
+    const ok = allowedFor(ws.home, m, allowed, typeof seen[m.id] === 'object' ? seen[m.id] : null);
     const needs = needsOf(m, run ? run.scope : null)
       .filter((n) => (run || n.key !== 'risk2') && !isAllowed(n, ok, true))
       .map((n) => described(n, ok));
@@ -222,7 +233,7 @@ function updateHeld(ws, mods, scopes) {
       changed = true;
     } else {
       if (held[m.id]) { delete held[m.id]; changed = true; }
-      if (seen[m.id] !== m.hash) { seen[m.id] = m.hash; seenChanged = true; }
+      if (seenHash(seen[m.id]) !== m.hash) { seen[m.id] = record(m); seenChanged = true; }
     }
   }
   const ids = new Set(mods.map((m) => m.id));
@@ -240,7 +251,7 @@ function approveHeld(home, id) {
   const lines = held[id].lines || {};
   allowPowers(home, id, (held[id].needs || []).map((key) => ({ key, lines: lines[key] || [] })));
   const seen = loadSeen(home) || {};
-  seen[id] = held[id].hash;
+  seen[id] = { hash: held[id].hash }; // (its lines are allowed now; the next sync records them)
   saveJson(seenFile(home), seen);
   delete held[id];
   saveHeld(home, held);

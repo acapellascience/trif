@@ -141,3 +141,16 @@ test('modSites: the folder and the @match hosts', () => {
   assert.deepStrictEqual(modSites({ id: 'x.com/a', matches: ['https://x.com/*', 'https://*.twitter.com/*'] }).sort(), ['twitter.com', 'x.com']);
   assert.deepStrictEqual(modSites({ id: 'all-sites/a', matches: ['*://*/*'] }), []);
 });
+
+test('everyday code that only looks like hiding a name', () => {
+  // an embedded sound decoded to bytes isn't a decoded name; an array's reverse isn't a string's
+  none('const bytes = Uint8Array.from(atob(m.base64), (c) => c.charCodeAt(0)); for (let i = 0; i < n; i++) d[i] = bytes[i] / 255');
+  none('const order = list.slice().reverse(); for (const k in keys) keys[k] = false; el.setAttribute(name, v)');
+  // strings only compared with aren't handed on; "once" isn't an onX handler
+  none('if (el.tagName === "SCRIPT" || typeof x === "object") return; const mk = (t) => document.createElement(t); mk("div")');
+  none('const opts = { once: true, oneUp: 1 }; for (const k in a) e.setAttribute(k, a[k])');
+  // but the real thing still counts
+  has('const k = "fe" + "tch"; const w = self; w[k]("/x")', 'hidden');
+  has('const k = "hctef".split("").reverse().join(""); w[k]("/x")', 'hidden');
+  has('const a = { onload: "fetch(1)" }; for (const k in a) e.setAttribute(k, a[k])', 'hidden');
+});

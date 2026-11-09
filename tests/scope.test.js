@@ -294,3 +294,17 @@ test('@risk header: parsed into {tier, why}; a panel run\'s tier-2 mod is held, 
   assert.strictEqual(held['x.com/two'].reason, 'says it changes what the site receives (risk 2)');
   assert.strictEqual(held['x.com/two'].claim, 'loads more in the background');
 });
+
+test('updateHeld: a change is judged on what it adds to the version that already ran', () => {
+  const ws = makeWs();
+  const v1 = 'const x = document.createElement(tagFromSomewhere); el.setAttribute(attr, v);\n// "script" and "onload" are in here\nfetch("/a", { method: "POST" });\n';
+  write(ws, 'x.com/mine.js', v1);
+  assert.deepEqual(updateHeld(ws, scanMods(ws.modsDir).mods, []), {}); // (there first: as it is)
+  // an edit elsewhere (a comment, CSS): runs, though the mod could already do things never reviewed
+  write(ws, 'x.com/mine.js', v1 + 'document.body.style.color = "red";\n');
+  assert.deepEqual(updateHeld(ws, scanMods(ws.modsDir).mods, []), {});
+  // an edit that adds a line that sends: held, for that
+  write(ws, 'x.com/mine.js', v1 + 'document.body.style.color = "red";\nfetch("/b", { method: "POST" });\n');
+  const held = updateHeld(ws, scanMods(ws.modsDir).mods, []);
+  assert.deepEqual(held['x.com/mine'].needs, ['sends']);
+});

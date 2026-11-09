@@ -215,6 +215,9 @@ const GLOBALS = new Set(['window', 'self', 'globalThis', 'top', 'parent', 'frame
   'HTMLElement', 'Element', 'Node', 'EventTarget', 'HTMLFormElement', 'HTMLInputElement', 'Document', 'Window', 'prototype']);
 const LOAD_PROPS = new Set(['src', 'srcset', 'href', 'action', 'formAction', 'formaction', 'poster', 'ping', 'codebase', 'imageSrcset', 'xlink:href']);
 const DANGER_TAGS = /^(script|iframe|object|embed|frame|base|meta|portal|fencedframe)$/i;
+// Inline handler attributes (on + an event's name) and srcdoc: an attribute name worked out at run time is
+// only a worry when it could be one of these. (Not just /^on/: "once" and "oneUp" aren't handlers.)
+const HANDLER_ATTR = /^(srcdoc|on(abort|afterprint|animation(end|iteration|start)|auxclick|before(input|print|unload)|blur|cancel|canplay(through)?|change|click|close|contextmenu|copy|cuechange|cut|dblclick|drag(end|enter|leave|over|start)?|drop|durationchange|emptied|ended|error|focus(in|out)?|formdata|hashchange|input|invalid|key(down|press|up)|load(eddata|edmetadata|start)?|message(error)?|mouse(down|enter|leave|move|out|over|up|wheel)|offline|online|page(hide|show)|paste|pause|play(ing)?|pointer(cancel|down|enter|leave|move|out|over|up)|popstate|progress|ratechange|reset|resize|scroll(end)?|search|seek(ed|ing)|select(start|ionchange)?|show|stalled|storage|submit|suspend|timeupdate|toggle|touch(cancel|end|move|start)|transition(cancel|end|run|start)|unload|volumechange|waiting|wheel))$/i;
 // Namespace URIs (xmlns), not places a request goes
 const NOT_SITES = new Set(['www.w3.org', 'w3.org']);
 const HTML_SINKS = new Set(['innerHTML', 'outerHTML', 'insertAdjacentHTML', 'write', 'writeln', 'parseFromString', 'setHTMLUnsafe']);
@@ -253,9 +256,11 @@ function powersOf(code, { sites = [] } = {}) {
   // Every string the code could hand to something worked out at run time: its string literals, template
   // pieces, literals joined with +, and object keys ({ onload: … } then setAttribute(k, v)).
   const cands = new Set();
+  const CMP = new Set(['===', '!==', '==', '!=', 'case']);
   for (let k = 0; k < toks.length; k++) {
     const t = toks[k];
-    if (t.t === 'str') cands.add(t.v);
+    // (a string only compared with, el.tagName === 'SCRIPT' or typeof x === 'object', is never handed on)
+    if (t.t === 'str' && !(CMP.has(toks[k - 1]?.v) || CMP.has(toks[k + 1]?.v))) cands.add(t.v);
     if (t.t === 'tpl') for (const piece of t.v.split('\u0000')) cands.add(piece.trim());
     if (t.t === 'id' && toks[k + 1] && toks[k + 1].t === 'p' && toks[k + 1].v === ':') cands.add(t.v);
     if (t.t === 'str' && toks[k + 1] && toks[k + 1].v === '+' && toks[k + 2] && toks[k + 2].t === 'str' && !(toks[k - 1] && toks[k - 1].v === '+')) {
@@ -266,7 +271,14 @@ function powersOf(code, { sites = [] } = {}) {
       if (/<\s*(script|iframe|object|embed)\b|\son[a-z]+\s*=|javascript:/i.test(joined)) add('hidden', 'HTML or code spelled out in pieces', t.line);
     }
   }
-  const decodes = toks.some((t) => t.t === 'id' && DECODERS.has(t.v));
+  const decodes = toks.some((t, k) => {
+    if (t.t !== 'id' || !DECODERS.has(t.v)) return false;
+    // atob straight into bytes (Uint8Array.from(atob(…)): an embedded sound or picture), not a name
+    if (t.v === 'atob' && toks.slice(Math.max(0, k - 4), k).map((x) => x.v).join(' ') === 'Uint8Array . from (') return false;
+    // .reverse() on an array is everyday code; only a string's ('…'.split('').reverse()) makes names
+    if (t.v === 'reverse') return toks.slice(Math.max(0, k - 8), k).some((x, i, a) => x.v === 'split' && a[i + 2]?.t === 'str' && a[i + 2].v === '');
+    return true;
+  });
   const could = (re) => decodes || [...cands].some((c) => re.test(c));
   const RISKY_NAMES = new RegExp(`^(${[...SENDS, ...ACTS, ...HIDDEN, 'eval', 'open', 'location', 'innerHTML', 'outerHTML', 'insertAdjacentHTML', 'src', 'href', 'action', 'srcdoc', 'setAttribute', 'createElement', 'write'].join('|')})$`);
 
@@ -367,7 +379,7 @@ function powersOf(code, { sites = [] } = {}) {
       const arg = ts[k + 2], comma = ts[k + 3];
       const name = arg && (arg.t === 'str' || (arg.t === 'tpl' && !arg.interp)) && comma && comma.v === ',' ? arg.v.toLowerCase() : null;
       if (name === null) {
-        if (could(/^on[a-z]+$|^srcdoc$/i)) add('hidden', 'setAttribute with a name worked out at run time', line);
+        if (could(HANDLER_ATTR)) add('hidden', 'setAttribute with a name worked out at run time', line);
         else if (could(/^(src|srcset|href|xlink:href|action|formaction|poster|ping|style)$/i)) add('loads', 'setAttribute with a name worked out at run time', line);
       }
       else if (/^on/.test(name)) add('hidden', 'an inline event handler', line);

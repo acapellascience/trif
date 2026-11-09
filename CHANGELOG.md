@@ -4,10 +4,8 @@ What's new in each TRIF release (called WebMods before 0.2.0). The text under a 
 panel shows under "What's new", so it's written for people using TRIF. `node scripts/release.js <version>`
 needs a section here for the version it releases.
 
-## Unreleased
+## 0.2.5
 
-- When your coding agent's login runs out, the side panel asks you to log in again (and keeps your
-  message to send again) instead of showing the agent's error twice.
 - **Bigger mods.** A mod can now be up to 4 MB, and all your mods together up to 16 MB. Until now they
   had to fit in 1 MB in all, and past that the biggest ones were left out: a game, or a mod with
   its sounds or pictures in it, could use that up alone. If a mod is ever too big, `trif status` and
@@ -15,6 +13,14 @@ needs a section here for the version it releases.
   which keeps Firefox's memory in check with big mods. (The helper and the browser extension both need
   this version; with an older extension, mods still stop at 1 MB in all, and `trif doctor` says to update
   it.)
+- **X-Flyer has music**, in the mod itself: Blast the Evil Eye while you fly and Big Boss once @elonmusk
+  is full size (both by Tim), then the end of Stravinsky's Firebird (Stokowski, 1940) when he explodes.
+  That makes it about 2 MB, so it needs this version.
+- Detox Timeline keeps the margins beside the timeline equal when X-Flyer is installed and no game is on.
+- When your coding agent's login runs out, the side panel asks you to log in again (and keeps your
+  message to send again) instead of showing the agent's error twice.
+- Each tab keeps its own draft in the side panel's message box.
+- The page's address reaches your agent without the part after `?` or `#`, which anyone can fill.
 
 ## 0.2.4
 

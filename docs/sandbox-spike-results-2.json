@@ -1,0 +1,190 @@
+{
+  "sandbox": {
+    "part2": {
+      "create": {
+        "script": "refused: TRIF sandbox: <script> elements aren't allowed in a sandboxed mod",
+        "iframe": "refused: TRIF sandbox: <iframe> elements aren't allowed in a sandboxed mod",
+        "object": "refused: TRIF sandbox: <object> elements aren't allowed in a sandboxed mod",
+        "embed": "refused: TRIF sandbox: <embed> elements aren't allowed in a sandboxed mod",
+        "link": "refused: TRIF sandbox: <link> elements aren't allowed in a sandboxed mod",
+        "meta": "refused: TRIF sandbox: <meta> elements aren't allowed in a sandboxed mod",
+        "base": "refused: TRIF sandbox: <base> elements aren't allowed in a sandboxed mod",
+        "style": "refused: TRIF sandbox: <style> elements aren't allowed in a sandboxed mod",
+        "form": "refused: TRIF sandbox: <form> elements aren't allowed in a sandboxed mod"
+      },
+      "attrs": {
+        "newImgSrcProperty": "refused: TRIF sandbox: setting src to that address isn't allowed in a sandboxed mod",
+        "newImgSrcAttribute": "refused: TRIF sandbox: the src attribute (or that value) isn't allowed in a sandboxed mod",
+        "existingLinkHref": "refused: TRIF sandbox: setting href to that address isn't allowed in a sandboxed mod",
+        "handlerAttribute": "refused: TRIF sandbox: the onclick attribute (or that value) isn't allowed in a sandboxed mod",
+        "sameOriginImg": "went through",
+        "dataImg": "went through",
+        "handlerRanOnClick": "n/a"
+      },
+      "html": {
+        "innerHTMLImage": "went through",
+        "innerHTMLHandler": "went through",
+        "insertAdjacentHTML": "went through",
+        "keptHarmless": "kept"
+      },
+      "css": {
+        "styleProperty": "refused: TRIF sandbox: that backgroundImage loads from an address, which a sandboxed mod can't",
+        "setProperty": "refused: TRIF sandbox: that background-image loads from an address, which a sandboxed mod can't",
+        "cssText": "refused: TRIF sandbox: that cssText loads from an address, which a sandboxed mod can't",
+        "styleSheet": "refused: TRIF sandbox: that CSS loads from an address, which a sandboxed mod can't"
+      },
+      "frames": {
+        "contentWindow": "null",
+        "contentDocument": "null",
+        "windowIndex": "reachable"
+      },
+      "serverSaw": {
+        "imgprop": false,
+        "imgattr": false,
+        "link": false,
+        "html": false,
+        "adjacent": false,
+        "cssprop": false,
+        "csssetprop": false,
+        "csstext": false,
+        "sheet": false
+      },
+      "handlerRan": false,
+      "navigation": {
+        "serverSaw": false,
+        "tabEndedOn": "http://127.0.0.1:PORT/sandbox-nav-sandbox.html"
+      }
+    },
+    "pageGlobal": "not reachable",
+    "fetchDefined": false,
+    "ms1000": 2.7,
+    "restyle": {
+      "textAndStyle": "went through",
+      "hide": "went through",
+      "addDivAndButton": "went through",
+      "styleSheet": "went through",
+      "canvas": "went through"
+    },
+    "timers": "available"
+  },
+  "csponly": {
+    "part2": {
+      "create": {
+        "script": "went through",
+        "iframe": "went through",
+        "object": "went through",
+        "embed": "went through",
+        "link": "went through",
+        "meta": "went through",
+        "base": "went through",
+        "style": "went through",
+        "form": "went through"
+      },
+      "attrs": {
+        "newImgSrcProperty": "went through",
+        "newImgSrcAttribute": "went through",
+        "existingLinkHref": "went through",
+        "handlerAttribute": "went through",
+        "sameOriginImg": "went through",
+        "dataImg": "went through",
+        "handlerRanOnClick": "n/a"
+      },
+      "html": {
+        "innerHTMLImage": "went through",
+        "innerHTMLHandler": "went through",
+        "insertAdjacentHTML": "went through",
+        "keptHarmless": "kept"
+      },
+      "css": {
+        "styleProperty": "went through",
+        "setProperty": "went through",
+        "cssText": "went through",
+        "styleSheet": "went through"
+      },
+      "frames": {
+        "contentWindow": "reachable",
+        "contentDocument": "reachable",
+        "windowIndex": "reachable"
+      },
+      "serverSaw": {
+        "imgprop": false,
+        "imgattr": false,
+        "link": false,
+        "html": false,
+        "adjacent": false,
+        "cssprop": true,
+        "csssetprop": true,
+        "csstext": true,
+        "sheet": false
+      },
+      "handlerRan": true,
+      "navigation": {
+        "serverSaw": true,
+        "tabEndedOn": "http://localhost:PORT/e2e-sbx-csponly-nav"
+      }
+    },
+    "pageGlobal": "not reachable",
+    "fetchDefined": true,
+    "ms1000": 1.5,
+    "restyle": {
+      "textAndStyle": "went through",
+      "hide": "went through",
+      "addDivAndButton": "went through",
+      "styleSheet": "went through",
+      "canvas": "went through"
+    },
+    "timers": "available"
+  },
+  "main": {
+    "part2": {
+      "create": {
+        "script": "went through",
+        "iframe": "went through",
+        "object": "went through",
+        "embed": "went through",
+        "link": "went through",
+        "meta": "went through",
+        "base": "went through",
+        "style": "went through",
+        "form": "went through"
+      },
+      "attrs": {
+        "newImgSrcProperty": "went through",
+        "newImgSrcAttribute": "went through",
+        "existingLinkHref": "went through",
+        "handlerAttribute": "went through",
+        "sameOriginImg": "went through",
+        "dataImg": "went through",
+        "handlerRanOnClick": "n/a"
+      },
+      "html": {
+        "innerHTMLImage": "went through",
+        "innerHTMLHandler": "went through",
+        "insertAdjacentHTML": "went through",
+        "keptHarmless": "kept"
+      },
+      "css": {
+        "styleProperty": "went through",
+        "setProperty": "went through",
+        "cssText": "went through",
+        "styleSheet": "went through"
+      },
+      "frames": {
+        "contentWindow": "reachable",
+        "contentDocument": "reachable",
+        "windowIndex": "reachable"
+      }
+    },
+    "pageGlobal": "reachable",
+    "fetchDefined": true,
+    "ms1000": 0.7,
+    "restyle": {
+      "textAndStyle": "went through",
+      "hide": "went through",
+      "addDivAndButton": "went through",
+      "styleSheet": "went through",
+      "canvas": "went through"
+    },
+    "timers": "available"
+  }
+}

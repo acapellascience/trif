@@ -72,7 +72,23 @@ export const SANDBOX_WORLD = 'trif-sandbox';
 export const SANDBOX_WORLD_CSP_ONLY = 'trif-sandbox-csp-only'; // (the measuring variant: no prelude)
 export const SANDBOX_CSP = "default-src 'none'; script-src 'self'; connect-src 'none'; img-src data: blob:; style-src 'unsafe-inline'; font-src data:; media-src data: blob:; worker-src 'none'; frame-src 'none'; object-src 'none'";
 
-/** TRIF's prelude for its sandbox world: the network and synthetic input, removed from the world's globals. */
+/**
+ * TRIF's prelude for its sandbox world, run before any sandboxed mod there. Part 1: the network and
+ * synthetic input, removed from the world's globals. Part 2 (docs/SAFE-MODS.md "Spike results, part 2"):
+ * the world shares the page's elements, and what's written into them the page carries out, outside the
+ * world's own rules. So the world's element tools are TRIF's, and allowlist-based:
+ *  - new elements only of harmless kinds (TAGS, SVG_TAGS); anything else is refused;
+ *  - attributes only from a safe list (ATTRS, data-*, aria-*), on new and existing elements; an address
+ *    (src, href, srcset, …) only data:, blob: or the page's own origin; never an event handler; style
+ *    only CSS that loads nothing;
+ *  - HTML strings cleaned by TRIF (rules above) before they reach the page; nodes put into the page from
+ *    outside it (built, cloned, parsed) checked the same way; elements already in the page may be moved;
+ *  - CSS (style properties, cssText, style sheets) only if it loads nothing (url() only data:/#ref,
+ *    no @import or image-set(); as rules mods: helper/lib/rules.js checkCss); `trifCSS(text)` adds a
+ *    style sheet that passes;
+ *  - other frames' windows and documents: null;
+ *  - navigations to another origin that a person didn't start: cancelled (the Navigation API).
+ */
 export function sandboxPrelude() {
   const G = globalThis;
   const gone = (obj, name) => { try { Object.defineProperty(obj, name, { value: undefined, writable: false, configurable: false }); } catch { /* already fixed */ } };
@@ -81,7 +97,296 @@ export function sandboxPrelude() {
   if (G.Navigator) for (const n of ['sendBeacon', 'clipboard', 'serviceWorker']) gone(G.Navigator.prototype, n);
   if (G.HTMLElement) gone(G.HTMLElement.prototype, 'click');
   if (G.HTMLFormElement) { gone(G.HTMLFormElement.prototype, 'submit'); gone(G.HTMLFormElement.prototype, 'requestSubmit'); }
-  if (G.Document) gone(G.Document.prototype, 'execCommand');
+  if (G.Document) { gone(G.Document.prototype, 'execCommand'); gone(G.Document.prototype, 'write'); gone(G.Document.prototype, 'writeln'); }
+  if (G.Element) gone(G.Element.prototype, 'setHTMLUnsafe');
+  gone(G, 'postMessage'); // (a message to the page's own listeners)
+  // UI events of any constructor (new Event('click') too) can't be dispatched from here: the mod's own
+  // events (a CustomEvent named after it) can
+  const UI_TYPES = /^(click|dblclick|auxclick|contextmenu|mouse\w*|pointer\w*|touch\w*|key\w*|input|beforeinput|change|submit|reset|focus\w*|blur|paste|cut|copy|drop|drag\w*|composition\w*|select\w*|wheel)$/i;
+  if (G.EventTarget) {
+    const de = EventTarget.prototype.dispatchEvent;
+    Object.defineProperty(EventTarget.prototype, 'dispatchEvent', { configurable: false, writable: false, value(ev) {
+      if (ev && UI_TYPES.test(String(ev.type))) throw new Error(`TRIF sandbox: a "${ev.type}" event can't be dispatched from a sandboxed mod`);
+      return de.call(this, ev);
+    } });
+  }
+  if (G.Document) gone(G.Document, 'parseHTMLUnsafe');
+  if (G.ShadowRoot) gone(G.ShadowRoot.prototype, 'setHTMLUnsafe');
+
+  // ---- part 2: the shared elements
+  const SVG_NS = 'http://www.w3.org/2000/svg', HTML_NS = 'http://www.w3.org/1999/xhtml';
+  const TAGS = new Set(['div', 'span', 'p', 'a', 'button', 'img', 'ul', 'ol', 'li', 'section', 'header', 'footer', 'nav', 'article', 'aside', 'main',
+    'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'strong', 'em', 'b', 'i', 'u', 's', 'small', 'mark', 'code', 'pre', 'blockquote', 'br', 'hr', 'label',
+    'figure', 'figcaption', 'table', 'thead', 'tbody', 'tr', 'td', 'th', 'caption', 'details', 'summary', 'canvas']);
+  const SVG_TAGS = new Set(['svg', 'g', 'path', 'rect', 'circle', 'ellipse', 'line', 'polyline', 'polygon', 'text', 'tspan', 'defs',
+    'lineargradient', 'radialgradient', 'stop', 'clippath', 'mask', 'title', 'desc']);
+  const ATTRS = new Set(['id', 'class', 'title', 'lang', 'dir', 'hidden', 'tabindex', 'role', 'style', 'draggable', 'translate', 'spellcheck',
+    'alt', 'width', 'height', 'src', 'srcset', 'sizes', 'loading', 'decoding', 'href', 'rel', 'target', 'type', 'disabled', 'name', 'value', 'for',
+    'start', 'reversed', 'colspan', 'rowspan', 'open',
+    // SVG drawing
+    'd', 'fill', 'stroke', 'stroke-width', 'stroke-linecap', 'stroke-linejoin', 'stroke-dasharray', 'opacity', 'fill-opacity', 'stroke-opacity',
+    'transform', 'viewbox', 'x', 'y', 'x1', 'y1', 'x2', 'y2', 'cx', 'cy', 'r', 'rx', 'ry', 'points', 'preserveaspectratio', 'xmlns',
+    'gradientunits', 'gradienttransform', 'offset', 'stop-color', 'stop-opacity', 'clip-path', 'mask', 'font-size', 'font-family', 'font-weight',
+    'text-anchor', 'dominant-baseline', 'letter-spacing', 'fill-rule', 'clip-rule', 'vector-effect', 'pathlength', 'version', 'fx', 'fy']);
+  const URL_ATTRS = new Set(['src', 'href', 'srcset', 'action', 'formaction', 'poster', 'data', 'background', 'ping', 'cite', 'xlink:href']);
+  const URL_ATTRS_ALLOWED = { img: new Set(['src', 'srcset']), a: new Set(['href']) };
+  const origin = location.origin;
+  const refuse = (what) => { throw new Error(`TRIF sandbox: ${what}`); };
+  const urlOk = (v) => {
+    const t = String(v).trim();
+    if (/^(data|blob):/i.test(t) || /^#/.test(t)) return true;
+    try { const u = new URL(t, location.href); return u.origin === origin && /^https?:$/.test(u.protocol); } catch { return false; }
+  };
+  const srcsetOk = (v) => String(v).split(',').every((part) => !part.trim() || urlOk(part.trim().split(/\s+/)[0]));
+  // CSS that loads nothing (as rules mods: helper/lib/rules.js checkCss); url(#ref) for SVG paint servers too
+  const cssOk = (css) => {
+    css = String(css);
+    let flat = '', q = null;
+    for (let i = 0; i < css.length; i++) {
+      const c = css[i];
+      if (q) { if (c === '\\') { i++; continue; } if (c === q) q = null; continue; }
+      if (c === '"' || c === "'") { q = c; continue; }
+      if (c === '\\') return false;
+      flat += c;
+    }
+    const low = flat.toLowerCase();
+    if (/@import\b|(?:^|[^a-z-])(?:-webkit-)?(image-set|image|cross-fade|element)\s*\(|expression\s*\(|-moz-binding|behavior\s*:/.test(low)) return false;
+    const re = /url\s*\(\s*["']?/gi;
+    let m;
+    while ((m = re.exec(css))) { const arg = css.slice(m.index + m[0].length); if (!/^(data:|#)/i.test(arg)) return false; }
+    return true;
+  };
+  const tagOf = (el) => (el.namespaceURI === SVG_NS ? `svg:${el.localName.toLowerCase()}` : el.localName.toLowerCase());
+  const tagOk = (el) => (el.namespaceURI === SVG_NS ? SVG_TAGS.has(el.localName.toLowerCase()) : el.namespaceURI === HTML_NS && TAGS.has(el.localName.toLowerCase()));
+  const attrOk = (el, name, value) => {
+    const n = String(name).toLowerCase();
+    if (/^on/.test(n)) return false;
+    if (!(ATTRS.has(n) || /^data-[\w.-]+$/.test(n) || /^aria-[\w-]+$/.test(n))) return false;
+    if (n === 'style') return cssOk(value);
+    if (URL_ATTRS.has(n)) {
+      const allowed = URL_ATTRS_ALLOWED[el.localName && el.localName.toLowerCase()];
+      if (!allowed || !allowed.has(n) || el.namespaceURI !== HTML_NS) return false;
+      return n === 'srcset' ? srcsetOk(value) : urlOk(value);
+    }
+    if (el.namespaceURI === SVG_NS && /^(fill|stroke|clip-path|mask)$/.test(n) && /url\s*\(/i.test(String(value))) return /^\s*url\(\s*["']?#/.test(String(value));
+    return true;
+  };
+
+  // originals, kept before wrapping (TRIF's own use)
+  const O = {
+    createElement: Document.prototype.createElement, createElementNS: Document.prototype.createElementNS,
+    setAttribute: Element.prototype.setAttribute, setAttributeNS: Element.prototype.setAttributeNS,
+    append: Element.prototype.append, replaceChildren: Element.prototype.replaceChildren, removeAttribute: Element.prototype.removeAttribute,
+    textContentSet: Object.getOwnPropertyDescriptor(Node.prototype, 'textContent').set,
+    parse: DOMParser.prototype.parseFromString, importNode: Document.prototype.importNode,
+    before: Element.prototype.before, after: Element.prototype.after, prepend: Element.prototype.prepend, replaceWith: Element.prototype.replaceWith,
+  };
+  const define = (proto, name, desc) => { try { Object.defineProperty(proto, name, { configurable: false, enumerable: false, ...desc }); } catch { /* not there */ } };
+  const wrapMethod = (proto, name, make) => { const orig = proto && proto[name]; if (typeof orig !== 'function') return; define(proto, name, { writable: false, value: make(orig) }); };
+  const wrapSetter = (proto, name, check) => {
+    const d = proto && Object.getOwnPropertyDescriptor(proto, name);
+    if (!d || !d.set) return;
+    define(proto, name, { get: d.get, set(v) { check(this, v); return d.set.call(this, v); } });
+  };
+
+  // 1. new elements: only harmless kinds
+  wrapMethod(Document.prototype, 'createElement', (orig) => function (tag, opts) {
+    if (!TAGS.has(String(tag).toLowerCase())) refuse(`<${tag}> elements aren't allowed in a sandboxed mod`);
+    return orig.call(this, tag, opts);
+  });
+  wrapMethod(Document.prototype, 'createElementNS', (orig) => function (ns, tag, opts) {
+    const local = String(tag).replace(/^.*:/, '').toLowerCase();
+    if (!((ns === SVG_NS && SVG_TAGS.has(local)) || (ns === HTML_NS && TAGS.has(local)))) refuse(`<${tag}> elements aren't allowed in a sandboxed mod`);
+    return orig.call(this, ns, tag, opts);
+  });
+
+  // 2. attributes and the properties that carry an address
+  wrapMethod(Element.prototype, 'setAttribute', (orig) => function (name, value) {
+    if (!attrOk(this, name, value)) refuse(`the ${String(name)} attribute (or that value) isn't allowed in a sandboxed mod`);
+    return orig.call(this, name, value);
+  });
+  wrapMethod(Element.prototype, 'setAttributeNS', (orig) => function (ns, name, value) {
+    if (!attrOk(this, String(name).replace(/^xlink:/, 'xlink:'), value)) refuse(`the ${String(name)} attribute (or that value) isn't allowed in a sandboxed mod`);
+    return orig.call(this, ns, name, value);
+  });
+  for (const n of ['setAttributeNode', 'setAttributeNodeNS']) wrapMethod(Element.prototype, n, () => function () { refuse('attribute nodes aren\'t allowed in a sandboxed mod: use setAttribute'); });
+  if (G.NamedNodeMap) for (const n of ['setNamedItem', 'setNamedItemNS']) wrapMethod(NamedNodeMap.prototype, n, () => function () { refuse('attribute nodes aren\'t allowed in a sandboxed mod: use setAttribute'); });
+  if (G.Attr) wrapSetter(Attr.prototype, 'value', (attr, v) => { if (attr.ownerElement && !attrOk(attr.ownerElement, attr.name, v)) refuse(`the ${attr.name} attribute (or that value) isn't allowed in a sandboxed mod`); });
+  // every element interface's address-carrying properties: src, href, srcset, action, formAction, poster, data, …
+  const URL_PROPS = ['src', 'href', 'srcset', 'action', 'formAction', 'poster', 'data', 'background', 'ping', 'cite', 'codebase', 'imageSrcset'];
+  for (const k of Object.getOwnPropertyNames(G)) {
+    if (!/^(HTML|SVG)\w*Element$/.test(k) || typeof G[k] !== 'function' || !G[k].prototype) continue;
+    for (const p of URL_PROPS) {
+      wrapSetter(G[k].prototype, p, (el, v) => {
+        const tag = el.localName && el.localName.toLowerCase();
+        const allowed = URL_ATTRS_ALLOWED[tag];
+        const attr = p === 'formAction' ? 'formaction' : p === 'imageSrcset' ? 'srcset' : p.toLowerCase();
+        if (!allowed || !allowed.has(attr) || !(attr === 'srcset' ? srcsetOk(v) : urlOk(v))) refuse(`setting ${p} to that address isn't allowed in a sandboxed mod`);
+      });
+    }
+    wrapSetter(G[k].prototype, 'srcdoc', () => refuse('srcdoc isn\'t allowed in a sandboxed mod'));
+  }
+
+  // 3. HTML strings: cleaned by TRIF (the rules above), never passed to the page as they are
+  const cleanTree = (root) => {
+    const walk = (node) => {
+      for (const child of [...node.childNodes]) {
+        if (child.nodeType === 1) {
+          if (!tagOk(child)) { child.remove(); continue; }
+          for (const a of [...child.attributes]) if (!attrOk(child, a.name, a.value)) O.removeAttribute.call(child, a.name);
+          walk(child);
+        } else if (child.nodeType !== 3) child.remove(); // (text only: no comments, processing instructions)
+      }
+    };
+    walk(root);
+    return root;
+  };
+  const fragmentOf = (ctx, html) => {
+    const doc = O.parse.call(new DOMParser(), `<!doctype html><body>${String(html)}`, 'text/html');
+    cleanTree(doc.body);
+    const frag = document.createDocumentFragment();
+    for (const n of [...doc.body.childNodes]) frag.appendChild(O.importNode.call(document, n, true));
+    return frag;
+  };
+  const ih = Object.getOwnPropertyDescriptor(Element.prototype, 'innerHTML');
+  define(Element.prototype, 'innerHTML', { get: ih.get, set(v) { O.replaceChildren.call(this, fragmentOf(this, v)); } });
+  if (G.ShadowRoot) {
+    const sh = Object.getOwnPropertyDescriptor(ShadowRoot.prototype, 'innerHTML');
+    if (sh) define(ShadowRoot.prototype, 'innerHTML', { get: sh.get, set(v) { this.replaceChildren(fragmentOf(this, v)); } });
+  }
+  const oh = Object.getOwnPropertyDescriptor(Element.prototype, 'outerHTML');
+  define(Element.prototype, 'outerHTML', { get: oh.get, set(v) { O.replaceWith.call(this, fragmentOf(this, v)); } });
+  wrapMethod(Element.prototype, 'insertAdjacentHTML', () => function (where, html) {
+    const f = fragmentOf(this, html);
+    const w = String(where).toLowerCase();
+    if (w === 'beforebegin') O.before.call(this, f); else if (w === 'afterbegin') O.prepend.call(this, f);
+    else if (w === 'beforeend') O.append.call(this, f); else if (w === 'afterend') O.after.call(this, f); else refuse(`insertAdjacentHTML: unknown position ${where}`);
+  });
+  if (G.Range) wrapMethod(Range.prototype, 'createContextualFragment', () => function (html) { return fragmentOf(null, html); });
+  // nodes put into the page from outside it (built here, cloned, parsed, from a template) are checked the
+  // same way; elements already in the page may be moved around
+  const checkIncoming = (node) => {
+    if (!node || typeof node !== 'object') return;
+    if (node.nodeType === 1 && node.isConnected) return;
+    const check = (n) => {
+      if (n.nodeType === 1) {
+        if (!tagOk(n)) refuse(`a <${tagOf(n)}> element can't be put into the page from a sandboxed mod`);
+        for (const a of n.attributes) if (!attrOk(n, a.name, a.value)) refuse(`an element with that ${a.name} attribute can't be put into the page from a sandboxed mod`);
+      }
+      for (const c of n.childNodes || []) if (!(c.nodeType === 1 && c.isConnected)) check(c);
+    };
+    check(node);
+  };
+  const insertionChecked = (protoName, names) => {
+    const proto = G[protoName] && G[protoName].prototype;
+    for (const n of names) wrapMethod(proto, n, (orig) => function (...args) {
+      // (nothing goes into a <style> or <script> from here: their text is CSS or code)
+      const into = this && this.nodeType === 1 ? this : this && this.parentElement;
+      if (into && into.localName && /^(style|script)$/i.test(into.localName) && !/^(before|after|replaceWith)$/.test(n)) refuse(`nothing can be put into a <${into.localName}> from a sandboxed mod`);
+      for (const a of args) if (a && typeof a === 'object') checkIncoming(a); else if (typeof a === 'string' && into && into.localName && /^(style|script)$/i.test(into.localName)) refuse(`nothing can be put into a <${into.localName}> from a sandboxed mod`);
+      return orig.apply(this, args);
+    });
+  };
+  insertionChecked('Node', ['appendChild', 'insertBefore', 'replaceChild']);
+  insertionChecked('Element', ['append', 'prepend', 'before', 'after', 'replaceWith', 'replaceChildren', 'insertAdjacentElement']);
+  insertionChecked('CharacterData', ['before', 'after', 'replaceWith']);
+  insertionChecked('Document', ['append', 'prepend', 'replaceChildren']);
+  insertionChecked('DocumentFragment', ['append', 'prepend', 'replaceChildren']);
+  insertionChecked('Range', ['insertNode', 'surroundContents']);
+
+  // 4. CSS: only CSS that loads nothing
+  // (every prototype a style object's properties live on: where Chrome puts them has moved between
+  // interfaces, so walk a real one's chain rather than name one)
+  {
+    const seen = new Set();
+    for (let P = Object.getPrototypeOf(document.documentElement.style); P && P !== Object.prototype; P = Object.getPrototypeOf(P)) {
+      if (seen.has(P)) break;
+      seen.add(P);
+      for (const k of Object.getOwnPropertyNames(P)) {
+        const d = Object.getOwnPropertyDescriptor(P, k);
+        if (d && d.set) wrapSetter(P, k, (_, v) => { if (!cssOk(v)) refuse(`that ${k} loads from an address, which a sandboxed mod can't`); });
+      }
+      wrapMethod(P, 'setProperty', (orig) => function (name, value, prio) { if (!cssOk(value)) refuse(`that ${name} loads from an address, which a sandboxed mod can't`); return orig.call(this, name, value, prio); });
+    }
+  }
+  // (Chrome handles style.backgroundImage = … by name on the object itself, out of reach of the
+  // prototypes: so an element's `style` here is a checking stand-in for the real one)
+  {
+    const proxies = new WeakMap();
+    for (const C of [G.HTMLElement, G.SVGElement, G.MathMLElement]) {
+      const proto = C && C.prototype;
+      const d = proto && Object.getOwnPropertyDescriptor(proto, 'style');
+      if (!d || !d.get) continue;
+      define(proto, 'style', {
+        get() {
+          const real = d.get.call(this);
+          if (!real) return real;
+          let px = proxies.get(real);
+          if (!px) {
+            px = new Proxy(real, {
+              get(t, k) { const v = Reflect.get(t, k, t); return typeof v === 'function' ? v.bind(t) : v; },
+              set(t, k, v) {
+                if (typeof k === 'string' && !cssOk(v)) refuse(`that ${k} loads from an address, which a sandboxed mod can't`);
+                return Reflect.set(t, k, v, t);
+              },
+              defineProperty() { return false; },
+            });
+            proxies.set(real, px);
+          }
+          return px;
+        },
+        set(v) { if (!cssOk(v)) refuse('that style loads from an address, which a sandboxed mod can\'t'); return d.set.call(this, v); },
+      });
+    }
+  }
+  if (G.CSSStyleSheet) {
+    const P = CSSStyleSheet.prototype;
+    wrapMethod(P, 'insertRule', (orig) => function (rule, i) { if (!cssOk(rule)) refuse('that rule loads from an address, which a sandboxed mod can\'t'); return orig.call(this, rule, i); });
+    wrapMethod(P, 'addRule', (orig) => function (sel, style, i) { if (!cssOk(`${sel}{${style}}`)) refuse('that rule loads from an address, which a sandboxed mod can\'t'); return orig.call(this, sel, style, i); });
+    for (const n of ['replace', 'replaceSync']) wrapMethod(P, n, (orig) => function (text) { if (!cssOk(text)) refuse('that CSS loads from an address, which a sandboxed mod can\'t'); return orig.call(this, text); });
+  }
+  // (a <style> element can't be made here: style sheets go through trifCSS, checked)
+  const styleFor = (css) => {
+    if (!cssOk(css)) refuse('that CSS loads from an address, which a sandboxed mod can\'t');
+    const st = O.createElement.call(document, 'style');
+    O.textContentSet.call(st, String(css));
+    O.append.call(document.head || document.documentElement, st);
+    return st;
+  };
+  define(G, 'trifCSS', { writable: false, value: styleFor });
+  // (and the text of an existing <style> or <link> can't be rewritten from here)
+  for (const p of ['textContent', 'innerText', 'nodeValue', 'data']) {
+    for (const proto of [Node.prototype, G.HTMLElement && HTMLElement.prototype, G.CharacterData && CharacterData.prototype]) {
+      const d = proto && Object.getOwnPropertyDescriptor(proto, p);
+      if (!d || !d.set) continue;
+      define(proto, p, { get: d.get, set(v) {
+        if (this.nodeType === 2 && this.ownerElement && !attrOk(this.ownerElement, this.name, v)) refuse(`the ${this.name} attribute (or that value) isn't allowed in a sandboxed mod`);
+        const host = this.nodeType === 3 ? this.parentElement : this;
+        if (host && host.localName && /^(style|script)$/i.test(host.localName)) refuse(`a <${host.localName}> element's text can't be changed from a sandboxed mod`);
+        return d.set.call(this, v);
+      } });
+    }
+  }
+
+  // 5. other frames: no way into their windows or documents from here
+  for (const [name, props] of [['HTMLIFrameElement', ['contentWindow', 'contentDocument']], ['HTMLFrameElement', ['contentWindow', 'contentDocument']],
+    ['HTMLObjectElement', ['contentWindow', 'contentDocument']], ['HTMLEmbedElement', []]]) {
+    const proto = G[name] && G[name].prototype;
+    if (!proto) continue;
+    for (const p of props) define(proto, p, { get() { return null; } });
+    wrapMethod(proto, 'getSVGDocument', () => function () { return null; });
+  }
+
+  // 6. navigation: a navigation to another origin that a person didn't start is cancelled
+  try {
+    if (G.navigation && typeof G.navigation.addEventListener === 'function') {
+      G.navigation.addEventListener('navigate', (e) => {
+        let to;
+        try { to = new URL(e.destination.url).origin; } catch { to = null; }
+        if (to !== origin && !e.userInitiated && e.cancelable) e.preventDefault();
+      });
+    }
+  } catch { /* no Navigation API */ }
 }
 
 export function modToUserScript(mod) {

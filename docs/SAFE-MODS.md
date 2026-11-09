@@ -167,3 +167,46 @@ Still open (not measured here):
 - Navigation from the world, and frames.
 - Per-mod worlds (one world for all sandboxed mods today: they share its globals).
 - Firefox's and Safari's support; the timing on real sites.
+
+## Spike results, part 2: the shared elements (Chrome 156, Nov 2026)
+
+The world's element tools are now TRIF's, installed by the prelude and allowlist-based
+(`sandboxPrelude` in extension/lib.js): new elements only of harmless kinds; attributes only from a safe
+list, an address only `data:`, `blob:` or the page's own origin, no event handlers; HTML strings cleaned by
+TRIF's own allowlist cleaner (Chrome's Sanitizer API isn't used: its defaults let images load from any
+address); nodes put into the page from outside it checked the same way (elements already in the page may
+be moved); CSS from the world only if it loads nothing (style properties through a checking stand-in for
+`element.style`, since Chrome handles `style.backgroundImage = …` by name, out of reach of the
+prototypes); `trifCSS(text)` for style sheets; other frames' windows and documents null; and a Navigation
+API listener that cancels navigations to another origin a person didn't start.
+
+Measured by a probe mod in each world on the test site (tests/e2e/scenario.js sandboxSpikeCheck), with the
+test server's request log as the ground truth for anything that would load (raw:
+docs/sandbox-spike-results-2.json). "CSP only" is the same world without TRIF's prelude, for comparison.
+
+| Category | TRIF's world | CSP only |
+|---|---|---|
+| 1. New elements that load or run things (script, iframe, object, embed, link, meta, base, style, form) | all refused | all made |
+| 2. An address on a new or existing element (img src as property and attribute, a page link's href), an onclick attribute | all refused; nothing reached the server | set; images not loaded (the world's CSP stopped them), the onclick set |
+| 2. Same-origin and data: images | allowed | allowed |
+| 3. HTML strings with an outside image, an inline handler (innerHTML, insertAdjacentHTML) | cleaned: no request, the handler never ran, harmless markup kept | the inline handler ran in the page's world |
+| 4. CSS loading from another address (style property, setProperty, cssText, a style sheet) | all refused; nothing reached the server | all loaded (the server got each) |
+| 5. Another frame's window or document | `contentWindow`/`contentDocument` null; **`window[0]` still reaches the frame's document** | reachable |
+| 6. Navigating to another origin (script-started) | cancelled: the server never saw it, the tab stayed | went through |
+| Restyling: text, style, hiding, a div and button with text, a style sheet (trifCSS), canvas | all work | all work |
+
+1000-element restyle: 2.7 ms in TRIF's world (with the stand-in for `style`), 1.5 ms CSP only, 0.7 ms in
+the page's world, on the test page. The `style` stand-in is the main cost; not timed on a real site.
+
+Also seen: in the CSP-only world, images the world made didn't load (its CSP applies to them), but CSS it
+wrote did, and an inline handler it wrote ran in the page's world. The CSP alone isn't enough; TRIF's
+element tools close what it leaves.
+
+Still open:
+- `window[0]` (and other frames by index) reaches a same-origin frame's document, where TRIF's tools
+  aren't installed; indexed frame access can't be removed from the world. (Not refusing to create frames
+  covers new ones; frames the page already has remain.)
+- Custom events and messages to the page's own listeners (a CustomEvent the page listens for).
+- Writes to the page's storage and cookies, which the site reads later.
+- Deceiving the user by what's shown (any mod can).
+- Per-mod worlds; Firefox and Safari; timing on real sites.

@@ -1345,50 +1345,112 @@ process.exitCode = 1;
     const site = '127.0.0.1';
     const base = `http://${site}:${this.o.servers.port}`;
     const dir = path.join(this.trif, 'sites', site);
+    // What a probe mod records (as data on the page: the DOM is shared). Part 1: what the world provides.
+    // Part 2: for each of the six kinds of thing the shared elements could carry out for the page, whether
+    // the attempt was refused in the world (threw) or went through; the test server's log is the ground
+    // truth for anything that would load. Plus normal restyling, and the 1000-element timing.
     const probe = (key, worldHeader) => `// ==WebMod==\n// @name Spike ${key}\n// @match *://127.0.0.1/sandbox.html*\n${worldHeader}// @run-at document-idle\n// ==/WebMod==\n` + `(() => {
-  const out = {};
+  const out = { part2: {} };
+  const P = out.part2;
+  const other = 'http://localhost:' + location.port; // (another origin: localhost isn't 127.0.0.1)
+  const tryIt = (fn) => { try { const r = fn(); return r === undefined ? 'went through' : r; } catch (e) { return 'refused: ' + String(e.message).slice(0, 90); } };
   out.pageGlobal = typeof window.__pageSecret === 'string' ? 'reachable' : 'not reachable';
   out.fetchDefined = typeof fetch === 'function';
-  out.xhrDefined = typeof XMLHttpRequest === 'function';
-  out.clickDefined = typeof HTMLElement.prototype.click === 'function';
-  out.keyboardEventDefined = typeof KeyboardEvent === 'function';
   const t0 = performance.now();
   for (const el of document.querySelectorAll('.sbx-item')) { el.style.color = 'rgb(9, 9, 9)'; el.dataset.seen${key} = '1'; }
   out.ms1000 = Math.round((performance.now() - t0) * 10) / 10;
-  try { document.getElementById('title').textContent = 'changed by ${key}'; out.dom = 'available'; } catch (e) { out.dom = 'error: ' + e.message; }
-  try { const s = document.createElement('style'); s.textContent = '#title { outline: 3px solid rgb(1, 2, 3); }'; document.head.append(s); out.style = 'available'; } catch (e) { out.style = 'error: ' + e.message; }
-  try { const c = document.createElement('canvas'); const g = c.getContext('2d'); g.fillRect(0, 0, 1, 1); out.canvas = g.getImageData(0, 0, 1, 1).data[3] === 255 ? 'available' : 'no pixels'; } catch (e) { out.canvas = 'error: ' + e.message; }
-  const tryFetch = () => { try { if (typeof fetch !== 'function') return 'fetch not there'; fetch('/e2e-spike-${key}').then(() => { out.fetchResult = 'resolved'; save(); }, (e) => { out.fetchResult = 'rejected: ' + e.message; save(); }); return 'called'; } catch (e) { return 'threw: ' + e.message; } };
+  // normal restyling
+  out.restyle = {
+    textAndStyle: tryIt(() => { const t = document.getElementById('title'); t.textContent = 'changed by ${key}'; t.style.color = 'rgb(1, 2, 3)'; }),
+    hide: tryIt(() => { document.querySelector('.sbx-item').style.display = 'none'; }),
+    addDivAndButton: tryIt(() => { const d = document.createElement('div'); d.id = 'sbx-div-${key}'; d.textContent = 'a div'; const b = document.createElement('button'); b.textContent = 'a button'; d.append(b); document.body.append(d); }),
+    styleSheet: tryIt(() => { if (typeof trifCSS === 'function') trifCSS('#title { outline: 3px solid rgb(4, 5, 6) }'); else { const s = document.createElement('style'); s.textContent = '#title { outline: 3px solid rgb(4, 5, 6) }'; document.head.append(s); } }),
+    canvas: tryIt(() => { const c = document.createElement('canvas'); const g = c.getContext('2d'); g.fillRect(0, 0, 1, 1); return g.getImageData(0, 0, 1, 1).data[3] === 255 ? 'went through' : 'no pixels'; }),
+  };
+  // 1. element creation: kinds that load or run things
+  P.create = Object.fromEntries(['script', 'iframe', 'object', 'embed', 'link', 'meta', 'base', 'style', 'form'].map((t) => [t, tryIt(() => { document.createElement(t); })]));
+  // 2. attributes and address-carrying properties, on new and existing elements
+  P.attrs = {
+    newImgSrcProperty: tryIt(() => { const i = document.createElement('img'); i.src = other + '/e2e-sbx-${key}-imgprop'; document.body.append(i); }),
+    newImgSrcAttribute: tryIt(() => { const i = document.createElement('img'); i.setAttribute('src', other + '/e2e-sbx-${key}-imgattr'); document.body.append(i); }),
+    existingLinkHref: tryIt(() => { document.getElementById('plink').href = other + '/e2e-sbx-${key}-link'; }),
+    handlerAttribute: tryIt(() => { document.getElementById('title').setAttribute('onclick', 'document.documentElement.dataset.sbxClick${key} = 1'); }),
+    sameOriginImg: tryIt(() => { const i = document.createElement('img'); i.src = '/favicon.ico'; document.body.append(i); }),
+    dataImg: tryIt(() => { const i = document.createElement('img'); i.src = 'data:image/gif;base64,R0lGODlhAQABAAAAACw='; document.body.append(i); }),
+  };
+  // 3. HTML strings
+  P.html = {
+    innerHTMLImage: tryIt(() => { const d = document.createElement('div'); document.body.append(d); d.innerHTML = '<b id="kept-${key}">kept</b><img src="' + other + '/e2e-sbx-${key}-html">'; }),
+    innerHTMLHandler: tryIt(() => { const d = document.createElement('div'); document.body.append(d); d.innerHTML = '<img src="data:x" onerror="document.documentElement.dataset.sbxHandler${key} = 1">'; }),
+    insertAdjacentHTML: tryIt(() => { document.body.insertAdjacentHTML('beforeend', '<img src="' + other + '/e2e-sbx-${key}-adjacent">'); }),
+    keptHarmless: 'pending',
+  };
+  // 4. CSS written from the world
+  P.css = {
+    styleProperty: tryIt(() => { const d = document.createElement('div'); d.textContent = 'css'; document.body.append(d); d.style.backgroundImage = 'url(' + other + '/e2e-sbx-${key}-cssprop)'; }),
+    setProperty: tryIt(() => { const d = document.createElement('div'); d.textContent = 'css'; document.body.append(d); d.style.setProperty('background-image', 'url(' + other + '/e2e-sbx-${key}-csssetprop)'); }),
+    cssText: tryIt(() => { const d = document.createElement('div'); d.textContent = 'css'; document.body.append(d); d.style.cssText = 'background-image: url(' + other + '/e2e-sbx-${key}-csstext)'; }),
+    styleSheet: tryIt(() => { const css = 'body { background-image: url(' + other + '/e2e-sbx-${key}-sheet) }'; if (typeof trifCSS === 'function') trifCSS(css); else { const s = document.createElement('style'); s.textContent = css; document.head.append(s); } }),
+  };
+  // 5. other frames
+  P.frames = {
+    contentWindow: tryIt(() => (document.getElementById('frm').contentWindow ? 'reachable' : 'null')),
+    contentDocument: tryIt(() => (document.getElementById('frm').contentDocument ? 'reachable' : 'null')),
+    windowIndex: tryIt(() => { try { return window[0] && window[0].document && window[0].document.body ? 'reachable' : 'not reachable'; } catch (e) { return 'not reachable: ' + e.message; } }),
+  };
   const save = () => { document.documentElement.setAttribute('data-spike-${key}', JSON.stringify(out)); };
-  out.fetchCall = tryFetch();
-  setTimeout(() => { out.timers = 'available'; save(); }, 50);
+  setTimeout(() => {
+    out.timers = 'available';
+    P.html.keptHarmless = document.getElementById('kept-${key}') ? 'kept' : 'gone';
+    P.attrs.handlerRanOnClick = 'n/a';
+    save();
+  }, 300);
   save();
 })();`;
-    const files = { sandbox: path.join(dir, 'e2e-spike-sandbox.js'), csponly: path.join(dir, 'e2e-spike-csponly.js'), main: path.join(dir, 'e2e-spike-main.js') };
+    // the navigation probes: each on a page of its own (it may leave it)
+    const navProbe = (key, worldHeader) => `// ==WebMod==\n// @name Spike nav ${key}\n// @match *://127.0.0.1/sandbox-nav-${key}.html*\n${worldHeader}// @run-at document-idle\n// ==/WebMod==\n` +
+      `setTimeout(() => { try { location.href = 'http://localhost:' + location.port + '/e2e-sbx-${key}-nav'; document.documentElement.setAttribute('data-nav-${key}', 'asked'); } catch (e) { document.documentElement.setAttribute('data-nav-${key}', 'refused: ' + e.message); } }, 300);\n`;
+    const keys = ['sandbox', 'csponly', 'main'];
+    const headers = { sandbox: '// @sandboxed\n', csponly: '// @sandboxed csp-only\n', main: '' };
+    const files = Object.fromEntries(keys.map((k) => [k, path.join(dir, `e2e-spike-${k}.js`)]));
+    const navFiles = Object.fromEntries(['sandbox', 'csponly'].map((k) => [k, path.join(dir, `e2e-spike-nav-${k}.js`)]));
     try {
       if (this.o.browser !== 'chrome') return { status: 'skip', detail: 'Chrome only (the spike)' };
-      fs.writeFileSync(files.sandbox, probe('sandbox', '// @sandboxed\n'));
-      fs.writeFileSync(files.csponly, probe('csponly', '// @sandboxed csp-only\n'));
-      fs.writeFileSync(files.main, probe('main', ''));
-      // (they mention fetch and click, so they wait for the user's OK like any new mod that does: OK them)
+      for (const k of keys) fs.writeFileSync(files[k], probe(k, headers[k]));
+      for (const k of Object.keys(navFiles)) fs.writeFileSync(navFiles[k], navProbe(k, headers[k]));
+      // (they mention fetch, src and so on, so they wait for the user's OK like any new mod that does: OK them)
       await sleep(1500);
-      for (const k of ['sandbox', 'csponly', 'main']) await this.cli(['approve', `127.0.0.1/e2e-spike-${k}`], { timeoutMs: 20000 }).catch(() => {});
+      for (const id of [...keys.map((k) => `e2e-spike-${k}`), 'e2e-spike-nav-sandbox', 'e2e-spike-nav-csponly']) await this.cli(['approve', `127.0.0.1/${id}`], { timeoutMs: 20000 }).catch(() => {});
       await waitFor('the spike mods registered', async () => {
         const st = await this.cli(['status'], { timeoutMs: 20000 });
-        return ['sandbox', 'csponly', 'main'].every((k) => new RegExp(`e2e-spike-${k}\\s+registered`).test(st.stdout)) ? true : null;
+        return [...keys, 'nav-sandbox', 'nav-csponly'].every((k) => new RegExp(`e2e-spike-${k}\\s+registered`).test(st.stdout)) ? true : null;
       }, { timeoutMs: 20000, intervalMs: 500 });
       await this.ext(`async (id, url) => { await chrome.tabs.update(id, { url, active: true }); }`, [win.tabId, `${base}/sandbox.html`]);
       await sleep(2500);
-      const read = async () => JSON.parse((await this.cli(['run', '--tab', String(win.tabId), `({ sandbox: document.documentElement.getAttribute('data-spike-sandbox'), csponly: document.documentElement.getAttribute('data-spike-csponly'), main: document.documentElement.getAttribute('data-spike-main') })`], { timeoutMs: 20000 })).stdout);
-      const got = await waitFor('the spike mods\' results', async () => { const o = await read(); return o.sandbox && o.csponly && o.main && /timers/.test(o.sandbox) && /timers/.test(o.csponly) ? o : null; }, { timeoutMs: 15000, intervalMs: 500 });
-      await sleep(1500); // (late fetch results)
+      const read = async () => JSON.parse((await this.cli(['run', '--tab', String(win.tabId), `({ sandbox: document.documentElement.getAttribute('data-spike-sandbox'), csponly: document.documentElement.getAttribute('data-spike-csponly'), main: document.documentElement.getAttribute('data-spike-main'), handlers: Object.keys(document.documentElement.dataset).filter((k) => /^sbx/.test(k)) })`], { timeoutMs: 20000 })).stdout);
+      await waitFor('the spike mods\' results', async () => { const o = await read(); return o.sandbox && o.csponly && o.main && /timers/.test(o.sandbox) && /timers/.test(o.csponly) ? o : null; }, { timeoutMs: 15000, intervalMs: 500 });
+      await sleep(2000); // (late loads)
       const fin = await read();
-      const res = Object.fromEntries(Object.entries(fin).map(([k, v]) => [k, JSON.parse(v)]));
-      for (const k of Object.keys(res)) res[k].serverSawRequest = this.o.servers.requests.some((q) => q.url.startsWith(`/e2e-spike-${k}`));
+      const res = {};
+      for (const k of keys) res[k] = JSON.parse(fin[k]);
+      const saw = (p) => this.o.servers.requests.some((q) => q.url.startsWith(p));
+      // ground truth from the test server for everything that would load
+      for (const k of ['sandbox', 'csponly']) {
+        const P = res[k].part2;
+        P.serverSaw = Object.fromEntries(['imgprop', 'imgattr', 'link', 'html', 'adjacent', 'cssprop', 'csssetprop', 'csstext', 'sheet'].map((w) => [w, saw(`/e2e-sbx-${k}-${w}`)]));
+        P.handlerRan = fin.handlers.some((h) => h.toLowerCase().includes(k.toLowerCase()));
+      }
+      // navigation: each probe page, then where the tab ended up and whether the other origin was asked
+      for (const k of ['sandbox', 'csponly']) {
+        await this.ext(`async (id, url) => { await chrome.tabs.update(id, { url, active: true }); }`, [win.tabId, `${base}/sandbox-nav-${k}.html`]);
+        await sleep(3000);
+        const url = await this.ext(`async (id) => (await chrome.tabs.get(id)).url`, [win.tabId]);
+        res[k].part2.navigation = { serverSaw: saw(`/e2e-sbx-${k}-nav`), tabEndedOn: String(url).replace(/:\d+/, ':PORT') };
+      }
       fs.writeFileSync(this.r.file('sandbox-spike.json'), JSON.stringify(res, null, 2));
       return JSON.stringify(res);
     } finally {
-      for (const f of Object.values(files)) { try { fs.unlinkSync(f); } catch { /* gone */ } }
+      for (const f of [...Object.values(files), ...Object.values(navFiles)]) { try { fs.unlinkSync(f); } catch { /* gone */ } }
     }
   }
 
@@ -1733,7 +1795,7 @@ say({ type: 'result', subtype: 'success', is_error: false, result: text, session
       || (this.scriptsRevoked && /user scripts were turned off/.test(String(p.text))))
       // the hijacked agent's requests, which the tab lock blocked on purpose (hijackedAgentCheck)
       // (the sandbox spike's probes: a fetch its world's CSP refuses is what it measures)
-      || /e2e-spike|Content Security Policy|sandbox\.html/i.test(String(p.text) + String(p.source || ''))
+      || /e2e-spike|e2e-sbx|sandbox-nav|TRIF sandbox|Content Security Policy|sandbox\.html|data:x/i.test(String(p.text) + String(p.source || ''))
       // (Firefox doesn't say which page: after that check, a failed fetch or socket is one of those)
       || (this.hijacked && /ERR_BLOCKED_BY_CLIENT|NetworkError when attempting to fetch|Failed to fetch|establish a connection to the server at ws:\/\/[^ ]+\/e2e-socket|WebSocket connection to '[^']+\/e2e-socket|e2e-leak|e2e-nav|blocked by|CORS/i.test(String(p.text) + String(p.source || '')));
     const problems = (await this.d.consoleProblems()).filter((p) => !expected(p));

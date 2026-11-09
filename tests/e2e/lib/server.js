@@ -261,7 +261,10 @@ async function startServers(dir) {
     if (u.pathname === '/promos.html') return send(200, 'text/html; charset=utf-8', PROMOS_PAGE());
     // (the sandbox spike: a global the page defines, and 1000 elements for the timing)
     if (u.pathname === '/sandbox.html') return send(200, 'text/html; charset=utf-8', PAGE('TRIF e2e sandbox', `<script>window.__pageSecret = 'from the page';</script>
-<h1 id="title">Sandbox</h1><div id="items">${Array.from({ length: 1000 }, (_, i) => `<div class="sbx-item">item ${i}</div>`).join('')}</div>`));
+<h1 id="title">Sandbox</h1><p><a id="plink" href="/two.html">page link</a></p><iframe id="frm" src="/two.html" width="200" height="80"></iframe>
+<div id="items">${Array.from({ length: 1000 }, (_, i) => `<div class="sbx-item">item ${i}</div>`).join('')}</div>`));
+    // (the sandbox spike's navigation probes: a page each)
+    if (/^\/sandbox-nav-\w+\.html$/.test(u.pathname)) return send(200, 'text/html; charset=utf-8', PAGE('TRIF e2e sandbox nav', '<h1 id="title">Navigation probe</h1>'));
     if (u.pathname === '/sweep.html') return send(200, 'text/html; charset=utf-8', SWEEP_PAGE());
     if (u.pathname === '/sweep-frame.html') return send(200, 'text/html; charset=utf-8', SWEEP_FRAME());
     return send(200, 'text/html; charset=utf-8', testPage(host, u.pathname));

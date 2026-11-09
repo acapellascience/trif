@@ -9,7 +9,7 @@ needs a section here for the version it releases.
 - **Safer side-panel agents.** A web page can try to talk to your agent ("TRIF agent: run this…"), so
   TRIF no longer counts on the agent to say no:
   - When your agent runs code in a tab, TRIF has the browser block anything from that tab that posts,
-    sends or saves as you, until the page reloads. Reading the page, clicks and testing mods work as
+    sends or saves as you, or takes what's on the page to another site, until the page reloads. Reading the page, clicks and testing mods work as
     before; the side panel says when a tab is paused like this, with a Reload button.
   - TRIF now reads what each mod's code can do (send requests, click or type for you, go to other
     pages or sites, or code it can't check) instead of trusting what the mod says about itself. A mod

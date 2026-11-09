@@ -263,7 +263,8 @@ logged in to:
   TRIF can't read it gets it held as code TRIF can't check).
 - **A tab you ran code in is locked.** Before your `trif run` code runs in a tab, TRIF has the browser
   block every request from that tab that changes something (POST, PUT, PATCH, DELETE: `fetch`, XHR,
-  beacons, form posts) and every WebSocket, until the page is reloaded or replaced (`trif reload` or
+  beacons, form posts), every WebSocket, and going to or fetching from any other site (its images,
+  scripts and styles still load), until the page is reloaded or replaced (`trif reload` or
   `trif navigate`, or the user's reload). Reading the page, clicking your mod's own buttons, key
   presses and test events all work. So `trif run` can never post, send or save anything, and anything
   the site's own scripts send in that page meanwhile fails too (blocked by the client): when a test

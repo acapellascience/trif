@@ -1,7 +1,9 @@
 // Tab locks (docs/SECURITY.md, "Agent code in a tab"). Before a side-panel agent's `trif run` code runs
 // in a tab, the tab is locked: the browser itself blocks every request from it that changes something
-// (POST, PUT, PATCH, DELETE: fetch, XHR, sendBeacon, form posts) and every WebSocket, with
-// declarativeNetRequest session rules for that tab. Page code can't get around a rule the browser applies
+// (POST, PUT, PATCH, DELETE: fetch, XHR, sendBeacon, form posts) and every WebSocket, and anything that
+// could carry what the page shows to another site: going to another site's page, or a frame, fetch,
+// XHR or event stream to one (the page's images, scripts, styles and fonts still load from wherever they
+// do, so it keeps working), with declarativeNetRequest session rules for that tab. Page code can't get around a rule the browser applies
 // (the agent's code runs in the page, and anything it leaves behind, timers or wrapped functions, only
 // lives as long as the page does). Clicks, keys and reading the page work as before.
 //
@@ -25,12 +27,19 @@ export const WRITE_METHODS = ['post', 'put', 'patch', 'delete', 'connect'];
  * matches every kind but whole pages, so: changing requests of every kind, then changing page loads
  * (form posts), then sockets, whatever the method.
  */
-export function lockRules(tabId, ids) {
+// Requests that could carry data out to another site, whatever their method: going there (a page or a
+// frame), or asking it (fetch and XHR, event streams, plugins). Not images, scripts, styles, fonts or media:
+// a page loads those from other sites all the time (X from twimg.com), and blocking them would break it.
+export const CROSS_SITE_TYPES = ['main_frame', 'sub_frame', 'xmlhttprequest', 'other', 'object'];
+
+export function lockRules(tabId, ids, site) {
   const block = { type: 'block' };
   return [
     { id: ids[0], priority: 1000, action: block, condition: { tabIds: [tabId], requestMethods: WRITE_METHODS } },
     { id: ids[1], priority: 1000, action: block, condition: { tabIds: [tabId], requestMethods: WRITE_METHODS, resourceTypes: ['main_frame'] } },
     { id: ids[2], priority: 1000, action: block, condition: { tabIds: [tabId], resourceTypes: ['websocket'] } },
+    // (excludedRequestDomains: the site and its subdomains stay reachable, so the tab can reload)
+    { id: ids[3], priority: 1000, action: block, condition: { tabIds: [tabId], resourceTypes: CROSS_SITE_TYPES, excludedRequestDomains: [site] } },
   ];
 }
 
@@ -70,14 +79,17 @@ export function createTabLocks({ chrome, log = () => {}, changed = () => {}, key
   })();
   const save = () => chrome.storage.session.set({ [key]: Object.fromEntries(locks) }).catch(() => {});
 
-  async function addRules(tabId) {
-    const ids = [nextId++, nextId++, nextId++];
-    await chrome.declarativeNetRequest.updateSessionRules({ addRules: lockRules(tabId, ids) });
+  async function addRules(tabId, site) {
+    if (!site) throw new Error('no site to lock the tab to');
+    const ids = [nextId++, nextId++, nextId++, nextId++];
+    await chrome.declarativeNetRequest.updateSessionRules({ addRules: lockRules(tabId, ids, site) });
     // A browser that dropped the per-tab condition would block every tab's requests, and one that dropped
     // the methods would block everything: either way, not what was asked for. Check what it kept.
     const got = (await chrome.declarativeNetRequest.getSessionRules()).filter((r) => ids.includes(r.id));
     const ok = got.length === ids.length && got.every((r) => Array.isArray(r.condition?.tabIds) && r.condition.tabIds.length === 1 && r.condition.tabIds[0] === tabId)
-      && got.filter((r) => r.id !== ids[2]).every((r) => Array.isArray(r.condition?.requestMethods) && r.condition.requestMethods.length === WRITE_METHODS.length);
+      && got.filter((r) => r.id === ids[0] || r.id === ids[1]).every((r) => Array.isArray(r.condition?.requestMethods) && r.condition.requestMethods.length === WRITE_METHODS.length)
+      // (and the site left out of the cross-site rule: without that, the tab couldn't even reload)
+      && JSON.stringify(got.find((r) => r.id === ids[3])?.condition?.excludedRequestDomains) === JSON.stringify([site]);
     if (!ok) {
       await chrome.declarativeNetRequest.updateSessionRules({ removeRuleIds: ids }).catch(() => {});
       throw new Error("this browser can't block requests for one tab");
@@ -91,12 +103,12 @@ export function createTabLocks({ chrome, log = () => {}, changed = () => {}, key
   }
 
   /** Lock a tab (or keep it locked, marking its current document too). Throws if it can't. */
-  async function lock(tabId, site, parent = null) {
+  async function lock(tabId, site, parent = null, url = '') {
     await ready;
     let l = locks.get(tabId);
     if (!l) {
-      const ids = await addRules(tabId);
-      l = { token: crypto.randomUUID(), ids, site: site || '', since: Date.now(), parent };
+      const ids = await addRules(tabId, site);
+      l = { token: crypto.randomUUID(), ids, site: site || '', url: String(url || ''), since: Date.now(), parent };
       locks.set(tabId, l);
       log(`locked tab ${tabId}${site ? ` (${site})` : ''}${parent != null ? `, opened by locked tab ${parent}` : ''}`);
     }
@@ -138,19 +150,21 @@ export function createTabLocks({ chrome, log = () => {}, changed = () => {}, key
   return {
     ready, lock, unlock, check,
     isLocked: (tabId) => locks.has(tabId),
-    list: () => [...locks.entries()].map(([tabId, l]) => ({ tabId, site: l.site, since: l.since })),
+    // (url: the page it was locked on, for the panel's button: a tab sent to another site shows the
+    // browser's "blocked" page, and reloading that only asks for the blocked address again)
+    list: () => [...locks.entries()].map(([tabId, l]) => ({ tabId, site: l.site, url: l.url || '', since: l.since })),
     /** A document back from the back/forward cache with its marker: lock its tab again. */
-    async restored(tabId, token) {
+    async restored(tabId, token, site, url) {
       await ready;
-      if (locks.has(tabId) || typeof token !== 'string' || !token) return; // (only the marker, in our isolated world, sends this)
-      const ids = await addRules(tabId);
-      locks.set(tabId, { token, ids, site: '', since: Date.now(), parent: null });
+      if (locks.has(tabId) || typeof token !== 'string' || !token || !site) return; // (only the marker, in our isolated world, sends this)
+      const ids = await addRules(tabId, site);
+      locks.set(tabId, { token, ids, site, url: String(url || ''), since: Date.now(), parent: null });
       await save();
       changed();
       log(`locked tab ${tabId} again: a locked page came back from the back/forward cache`);
     },
     async opened(tab) {
-      if (tab.openerTabId != null && locks.has(tab.openerTabId)) await lock(tab.id, locks.get(tab.openerTabId).site, tab.openerTabId).catch((e) => log(`couldn't lock tab ${tab.id}: ${e?.message ?? e}`));
+      if (tab.openerTabId != null && locks.has(tab.openerTabId)) await lock(tab.id, locks.get(tab.openerTabId).site, tab.openerTabId, locks.get(tab.openerTabId).url).catch((e) => log(`couldn't lock tab ${tab.id}: ${e?.message ?? e}`));
     },
   };
 }

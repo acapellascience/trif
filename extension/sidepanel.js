@@ -3,7 +3,7 @@
 // chrome.storage.local `chat:<site>`; this page renders that record and reacts to storage changes.
 // See docs/PROTOCOL.md, "Side panel and agent runs".
 
-import { siteForUrl, modAppliesTo, modSites, isMultiSite, offOnSite, normalizeOffSites, scopeFor, limitToSites, withOffSites, FIREFOX, BROWSER, SETUP_COMMAND,
+import { siteForUrl, modAppliesTo, modSites, isMultiSite, offOnSite, normalizeOffSites, scopeFor, hostInScope, limitToSites, withOffSites, FIREFOX, BROWSER, SETUP_COMMAND,
   normalizeModOrder, orderMods, moveId, setModOrder,
   normalizeSettings, normalizePicks, siteSettings, withoutModel } from './lib.js';
 import { setMarkdown } from './markdown.js';
@@ -459,12 +459,20 @@ function allowUserScripts() {
  */
 function renderTabLock() {
   const n = ui.tabLock;
-  const locked = view.tab && (view.status?.lockedTabs || []).some((l) => l.tabId === view.tab.id);
-  n.hidden = !locked;
-  if (!locked) { n.replaceChildren(); return; }
+  const lock = view.tab && (view.status?.lockedTabs || []).find((l) => l.tabId === view.tab.id);
+  n.hidden = !lock;
+  if (!lock) { n.replaceChildren(); return; }
   if (n.childElementCount) return;
-  const reload = button('Reload the page', 'primary', () => { if (view.tab) chrome.tabs.reload(view.tab.id).catch(() => {}); });
-  const p = el('p', null, 'Your agent ran code in this page, so TRIF has blocked anything here from posting, sending or saving as you until the page reloads. Reading, scrolling, clicks and mods work as usual.');
+  // Back to the page it was locked on if the tab is somewhere else now (a blocked page: reloading that
+  // would only ask for the blocked address again), else a reload. Either way a new page: unlocked.
+  const reload = button('Reload the page', 'primary', () => {
+    const t = view.tab;
+    if (!t) return;
+    let away = true;
+    try { away = !hostInScope(new URL(t.url || '').hostname, lock.site); } catch { /* no URL: away */ }
+    (away && /^https?:/.test(lock.url) ? chrome.tabs.update(t.id, { url: lock.url }) : chrome.tabs.reload(t.id)).catch(() => {});
+  });
+  const p = el('p', null, 'Your agent ran code in this page, so TRIF has blocked anything here from posting, sending or saving as you, or opening other sites, until the page reloads. Reading, scrolling, clicks and mods work as usual.');
   n.replaceChildren(el('p', 'title', 'Posting is paused on this tab'), p, actions(reload));
 }
 

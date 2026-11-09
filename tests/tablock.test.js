@@ -48,7 +48,7 @@ test('a locked tab: its changing requests and sockets are blocked, for that tab 
   await locks.lock(7, 'x.com');
   assert.ok(locks.isLocked(7));
   const rules = [...chrome.rules.values()];
-  assert.equal(rules.length, 3);
+  assert.equal(rules.length, 4);
   for (const r of rules) { assert.deepEqual(r.condition.tabIds, [7]); assert.equal(r.action.type, 'block'); }
   // every kind of request but page loads (no list: browsers name them differently), page loads, sockets
   assert.deepEqual(rules[0].condition.requestMethods, WRITE_METHODS);
@@ -57,10 +57,14 @@ test('a locked tab: its changing requests and sockets are blocked, for that tab 
   assert.deepEqual(rules[1].condition.requestMethods, WRITE_METHODS);
   assert.deepEqual(rules[2].condition.resourceTypes, ['websocket']);
   assert.ok(!rules[2].condition.requestMethods, 'sockets are blocked whatever the method');
-  assert.equal(lockRules(1, [5, 6, 7])[0].id, 5);
+  // going to, or asking, another site: blocked whatever the method; the site itself stays reachable
+  assert.deepEqual(rules[3].condition.excludedRequestDomains, ['x.com']);
+  for (const t of ['main_frame', 'sub_frame', 'xmlhttprequest']) assert.ok(rules[3].condition.resourceTypes.includes(t), t);
+  for (const t of ['image', 'script', 'stylesheet', 'font']) assert.ok(!rules[3].condition.resourceTypes.includes(t), `${t} still loads`);
+  assert.equal(lockRules(1, [5, 6, 7, 8], 'x.com')[0].id, 5);
   // the same tab again: still one lock
   await locks.lock(7, 'x.com');
-  assert.equal(chrome.rules.size, 3);
+  assert.equal(chrome.rules.size, 4);
   assert.deepEqual(locks.list().map((l) => l.tabId), [7]);
 });
 
@@ -130,7 +134,8 @@ test('a page back from the back/forward cache locks its tab again', async () => 
   const { createTabLocks } = await load();
   const chrome = fakeChrome();
   const locks = createTabLocks({ chrome });
-  await locks.restored(5, 'tok');
+  await locks.restored(5, 'tok', 'x.com', 'https://x.com/home');
   assert.ok(locks.isLocked(5));
-  assert.equal(chrome.rules.size, 3);
+  assert.equal(chrome.rules.size, 4);
+  assert.equal(locks.list()[0].url, 'https://x.com/home');
 });

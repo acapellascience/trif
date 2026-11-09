@@ -158,7 +158,9 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   if (sender.id !== chrome.runtime.id) return false;
   // A locked page back from the back/forward cache (its marker, in our isolated world: tablock.js)
   if (msg?.type === 'tabLock.restored' && sender.tab?.id != null) {
-    tabLocks.restored(sender.tab.id, msg.token).then(() => sendResponse({ ok: true }), (e) => sendResponse({ error: errMsg(e) }));
+    // (the site from the page's own address, not from the message)
+    const url = sender.url || sender.tab.url || '';
+    tabLocks.restored(sender.tab.id, msg.token, scopeFor(hostOf(url)), url).then(() => sendResponse({ ok: true }), (e) => sendResponse({ error: errMsg(e) }));
     return true;
   }
   ready.then(() => onPageMessage(msg)).then(sendResponse, (e) => sendResponse({ error: errMsg(e) }));
@@ -560,7 +562,7 @@ const commands = {
     // A side-panel agent's code (args.scope): lock the tab first, so nothing it does can post, send or
     // change anything as the user (tablock.js). No lock, no code.
     if (args.scope) {
-      try { await tabLocks.lock(tab.id, args.scope); } catch (e) {
+      try { await tabLocks.lock(tab.id, args.scope, null, tab.url || ''); } catch (e) {
         throw new Error(`TRIF couldn't lock tab ${tab.id} against sending requests (${errMsg(e)}), so it won't run agent code there`);
       }
     }

@@ -703,7 +703,7 @@ test('Tim\'s mods, site by site: added ones get their mods, new ones and updates
     ['instagram.com', 'Instagram', true, null], ['timsrobot.com', 'timsrobot.com', false, null]]);
   assert.deepStrictEqual(offer.sites.flatMap((x) => x.mods.map((m) => m.id)).sort(), PREINSTALLED.map((p) => p.id).sort(), 'every mod, from PREINSTALLED');
   assert.deepStrictEqual(offer.sites.find((x) => x.site === 'x.com').mods.map((m) => [m.name, m.on]),
-    [['Detox Timeline', true], ['Follow status', false], ['X-Flyer', false], ['Rainbow Rave', false], ['Profile Styler', false], ['Post Styler', false], ['Style Encoder', false]], 'X\'s in the panel\'s order');
+    [['Detox Timeline', true], ['Follow Status', false], ['X-Flyer', false], ['Rainbow Rave', false], ['Profile Styler', false], ['Post Styler', false], ['Style Encoder', false]], 'X\'s in the panel\'s order');
   assert.ok(offer.sites.every((x) => x.mods.every((m) => m.name && typeof m.description === 'string')));
   assert.match(offer.sites.find((x) => x.site === 'timsrobot.com').note, /demo/);
 

@@ -1,5 +1,5 @@
 // ==WebMod==
-// @name        Follow status
+// @name        Follow Status
 // @description see your moots
 // @match       https://x.com/*
 // @run-at      document-start

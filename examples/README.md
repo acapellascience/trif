@@ -12,7 +12,7 @@ one in yourself with `trif install-example <site>/<mod>`, then reload the site.
 | Mod | What it does |
 |---|---|
 | `x.com/detox-timeline` | **Detox Timeline.** Home is just the people you follow, sorted Recent, filtered before X sees the data: no ads, no who-to-follow, and every kind of post off to start (the plainest timeline: original text posts from people who follow you back), with a "Filters" menu to turn each back on (reposts, quotes, replies, conversations, long posts, links, videos, images, non-mutuals). Also hides the trends column, widens the timeline, cleans ads and "Discover more" from post pages and profiles, tucks replies from people you don't follow into a collapsed section, turns Explore into a plain search field, and plays YouTube cards in place. |
-| `x.com/follow-status` | **Follow status.** Marks the people who follow you back. |
+| `x.com/follow-status` | **Follow Status.** Marks the people who follow you back. |
 | `x.com/space-shooter` | **X-Flyer.** Shift+S (or the rocket button) flies a fighter over X: blast the words, to its own soundtrack. |
 | `www.instagram.com/three-column-feed` | **Three-Column Feed.** The home feed three posts wide, still scrolling. |
 | `www.instagram.com/following-only-feed` | Home feed shows only people you follow: suggested posts, suggested accounts and ads are removed from the feed data. |

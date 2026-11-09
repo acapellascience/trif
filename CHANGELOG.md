@@ -25,7 +25,7 @@ needs a section here for the version it releases.
   then shows each styled profile in its owner's colours, and Post Styler their posts and people cards.
   To find the styles they load people's profile pictures again from X's image server.
 - Detox Timeline keeps the margins beside the timeline equal when X-Flyer is installed and no game is on.
-  Rainbow Rave's and Follow status's rainbows no longer jump at their edges.
+  Rainbow Rave's and Follow Status's rainbows no longer jump at their edges.
 - Amazon's Simple Home shows Amazon's own logo, sharper. Punk Fonts for X is no longer one of Tim's mods:
   if you have it, it stays as it is, without updates.
 - When your coding agent's login runs out, the side panel asks you to log in again (and keeps your

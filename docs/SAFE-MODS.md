@@ -210,3 +210,61 @@ Still open:
 - Writes to the page's storage and cookies, which the site reads later.
 - Deceiving the user by what's shown (any mod can).
 - Per-mod worlds; Firefox and Safari; timing on real sites.
+
+## Stand-in design (branch sandbox-standin, Chrome)
+
+The sandbox above is built by removal: a full browser world, with what's known to be dangerous taken out,
+so anything nobody thought of (or that Chrome adds later) is reachable until someone notices. The stand-in
+design starts empty instead: a mod reaches only what TRIF hands it.
+
+**Mechanism.** Secure EcmaScript (SES, the `ses` package 2.3.0, Apache-2.0; `extension/vendor/`,
+237 KB minified, shipped inside the extension, no network loads). In TRIF's own userScripts world
+(`trif-standin`: connect-src 'none', no messaging; 'unsafe-eval' because SES evaluates code inside its
+compartment), `lockdown()` freezes the JavaScript language once per page, then each `// @sandboxed standin`
+mod's code is evaluated in its own `Compartment`, whose global holds only the language and TRIF's
+endowments. SES also drops language built-ins newer than it knows (Chrome 156's new iterator helpers, here).
+The code: `extension/standin.js`.
+
+**What's granted** (everything else is absent, not blocked):
+- `page`: `find`/`findAll` (selectors), `create(tag)` (an allowlist of tags), `css(text)` (CSS that loads
+  nothing, the rules-mod check), `observe(selector, fn)` (now and as the page adds them), `on(type, fn)`
+  (an allowlist of input events, read as plain data), `url`, `title`, `width`, `height`, `root`, `body`,
+  `prefersReducedMotion`.
+- Elements only as stand-ins: frozen TRIF-made objects, one per node, the node itself never handed out:
+  `text`/`setText`, `attr`/`setAttr`/`removeAttr` (an allowlist; `href` on `a` and `src` on `img` only for
+  this site's addresses or data:/blob: images), `classes`, `style(prop, value)` (values that load nothing),
+  `hide`/`show`, `find`/`findAll`/`closest`/`matches`, `parent`/`children`, `append`/`prepend`/`before`/
+  `after`/`remove`, `clone()` (a copy keeping only allowed elements and attributes), `rect()`, `on(...)`,
+  and `canvas()`: 2D drawing with numbers and text only.
+- `timers` (functions only: `setTimeout`, `setInterval`, `onFrame` and clears), `trif.log/warn/error`,
+  `trif.settings(key, defaults)` (the mod's own namespaced settings, not the site's storage), `Math`, `Date`.
+
+**Measured** (tests/e2e/scenario.js standinCheck, headless Chrome 156; outcomes only):
+
+| | Result |
+|---|---|
+| Names on a stand-in mod's global | 63, against 1,239 on the page's world. Beyond the language (Node's bare global as the reference): `page`, `timers`, `trif` (TRIF's), `harden`, `lockdown`, `Compartment` (SES's), and `Temporal`, `TextEncoder`, `TextDecoder` (built-ins SES passes through: data transforms with no reach). |
+| `window`, `document`, `fetch`, `XMLHttpRequest`, `localStorage`, `location`, `navigator`, `chrome`, `setTimeout`, `postMessage`, `Image`, `URL`, the page's own global | all `undefined` |
+| An image pointed at another site (`setAttr('src', …)`) | refused; the test server saw nothing |
+| Restyling: a style, a style sheet, a new element with text, a canvas drawing, a timer | all work |
+| Sample: Simple Shopping (docs/standin-samples/amazon.com) on a page shaped like Amazon's results | the sponsored row and the "Customers also bought" carousel hidden, the plain results kept |
+| Sample: DVD Logo (docs/standin-samples/www.google.com) | the logo hidden, its copy bouncing |
+| 1,000 elements restyled | about 2 ms, against 0.7 ms for a page mod |
+
+**Porting the samples, how it felt.** Simple Shopping went over almost unchanged: its CSS through
+`page.css`, its observer as `page.observe`. The DVD logo needed real changes, which are the API's gaps:
+copying an element (added as `clone()`), "reduce motion" (added), and two things left out: tinting a
+same-site image with a CSS mask (a mask's `url()` to the site isn't offered) and measuring an SVG's drawn
+box (`getBBox`). So: hiding, filtering and restyling fit well; effects that lean on browser APIs need each
+API added, deliberately, as a stand-in.
+
+**Still open.**
+- Each mod's own compartment shares one locked-down world per page (one `lockdown`); compartments can't
+  reach each other's endowments, but a world per source (see above) would separate them further.
+- `trif.settings` lives in the site's localStorage under a TRIF prefix: the mod can't touch the site's
+  keys, but the site can read the mod's.
+- Listening to the page's input events (`on`) means a stand-in mod can see keystrokes on the page; it has
+  no way to send them anywhere, but that's a capability to say out loud.
+- Denial of service (a mod looping forever) isn't contained: SES doesn't, and the world's one thread is
+  the page's.
+- Firefox and Safari: not tried. Timing on real sites: not measured. The API is a first cut.

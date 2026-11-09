@@ -263,6 +263,17 @@ async function startServers(dir) {
     if (u.pathname === '/sandbox.html') return send(200, 'text/html; charset=utf-8', PAGE('TRIF e2e sandbox', `<script>window.__pageSecret = 'from the page';</script>
 <h1 id="title">Sandbox</h1><p><a id="plink" href="/two.html">page link</a></p><iframe id="frm" src="/two.html" width="200" height="80"></iframe>
 <div id="items">${Array.from({ length: 1000 }, (_, i) => `<div class="sbx-item">item ${i}</div>`).join('')}</div>`));
+    // (the stand-in design: a global the page defines; Amazon-like results for the Simple Shopping port, with a
+    // sponsored row, a carousel and plain results; a logo for the DVD port; and 1000 cells for the timing)
+    if (u.pathname === '/standin.html') return send(200, 'text/html; charset=utf-8', PAGE('TRIF e2e stand-in', `<script>window.__pageSecret = 'from the page';</script>
+<div id="logo" style="display:inline-block;width:120px;height:40px;font:700 28px sans-serif">Google</div>
+<div class="s-main-slot">
+  <div data-component-type="s-search-result" id="r1"><h2>Plain result one</h2></div>
+  <div id="r-ad"><span class="puis-sponsored-label-text">Sponsored</span> An ad</div>
+  <div id="r-carousel"><h2>Customers also bought</h2><div>things</div></div>
+  <div data-component-type="s-search-result" id="r2"><h2>Plain result two</h2></div>
+</div>
+<div id="cells">${Array.from({ length: 1000 }, (_, i) => `<span class="cell">${i}</span>`).join(' ')}</div>`));
     // (the sandbox spike's navigation probes: a page each)
     if (/^\/sandbox-nav-\w+\.html$/.test(u.pathname)) return send(200, 'text/html; charset=utf-8', PAGE('TRIF e2e sandbox nav', '<h1 id="title">Navigation probe</h1>'));
     if (u.pathname === '/sweep.html') return send(200, 'text/html; charset=utf-8', SWEEP_PAGE());

@@ -8,12 +8,13 @@ import {
   firstInjectionResult, withTimeout, filterRequests, nextBackoff, chromeVersion, toolLine,
   normalizeDisabled, modAppliesTo, urlInScope, modInScope, applyStartOff, applyAbsorbed, findRenames, carryRenames, renameInOrder, normalizeModOrder, modSites,
   normalizeOffSites, offSiteName, offOnSite, hostInScope, withOffSites, scopeFor, normalizeSitesOn, siteOnFor, sitesInUse, limitToSites, applyStartSites, switchSite, fromOtherBrowser, timedUserScripts, capChat,
-  FEATURES, ModsParts, fillSameMods, storedMods, modsStorageState, modsStoragePlan, SANDBOX_WORLD, SANDBOX_WORLD_CSP_ONLY, SANDBOX_CSP,
+  FEATURES, ModsParts, fillSameMods, storedMods, modsStorageState, modsStoragePlan, SANDBOX_WORLD, SANDBOX_WORLD_CSP_ONLY, SANDBOX_CSP, setSesCode,
 } from './lib.js';
 import { runtimeCode } from './runtime.js';
 import { sweepPage } from './sweep.js';
 import { captureScreenshot, stitchShots, isCopyWindow } from './screenshot.js';
 import { createTabLocks } from './tablock.js';
+import { STANDIN_WORLD, STANDIN_CSP } from './standin.js';
 
 const HOST = 'com.webmods.helper';
 const VERSION = chrome.runtime.getManifest().version;
@@ -277,6 +278,9 @@ function sandboxWorlds() {
     if (FIREFOX || BROWSER === 'Safari' || typeof chrome.userScripts?.configureWorld !== 'function') return false;
     try {
       for (const worldId of [SANDBOX_WORLD, SANDBOX_WORLD_CSP_ONLY]) await chrome.userScripts.configureWorld({ worldId, csp: SANDBOX_CSP, messaging: false });
+      // the stand-in world (standin.js): SES evaluates mods inside it, so eval is allowed there; no network
+      await chrome.userScripts.configureWorld({ worldId: STANDIN_WORLD, csp: STANDIN_CSP, messaging: false });
+      setSesCode(await (await fetch(chrome.runtime.getURL('vendor/ses.umd.min.js'))).text());
       return true;
     } catch (e) { log('warn', `sandbox world: ${errMsg(e)}`); return false; }
   })();

@@ -1,3 +1,4 @@
+import { standinBootCode, STANDIN_WORLD } from './standin.js';
 // Logic shared by background.js and the tests. Nothing here touches `chrome` at import time; the
 // functions that need Chrome APIs take them as parameters.
 
@@ -389,6 +390,11 @@ export function sandboxPrelude() {
   } catch { /* no Navigation API */ }
 }
 
+// SES's code (vendor/ses.umd.min.js), set by the background once read: stand-in mods load it guarded, so a
+// page with several of them locks the language down once (standin.js).
+let sesCode = null;
+export function setSesCode(code) { sesCode = typeof code === 'string' ? code : null; }
+
 export function modToUserScript(mod) {
   const base = {
     id: mod.id,
@@ -397,6 +403,10 @@ export function modToUserScript(mod) {
     runAt: normalizeRunAt(mod.runAt),
     allFrames: false,
   };
+  if (mod.sandboxed === 'standin') {
+    if (!sesCode) throw new Error('the stand-in sandbox (SES) isn\'t loaded');
+    return { ...base, js: [{ code: `if (!globalThis.Compartment) {\n${sesCode}\n}` }, { code: standinBootCode(mod.id, String(mod.code ?? '')) }], world: 'USER_SCRIPT', worldId: STANDIN_WORLD };
+  }
   if (mod.sandboxed === 'csp-only') return { ...base, js: [{ code: wrapModCode(mod.id, String(mod.code ?? '')) }], world: 'USER_SCRIPT', worldId: SANDBOX_WORLD_CSP_ONLY };
   if (mod.sandboxed) return { ...base, js: [{ code: `(${sandboxPrelude.toString()})();` }, { code: wrapModCode(mod.id, String(mod.code ?? '')) }], world: 'USER_SCRIPT', worldId: SANDBOX_WORLD };
   return { ...base, js: [{ code: wrapModCode(mod.id, String(mod.code ?? '')) }], world: 'MAIN' };

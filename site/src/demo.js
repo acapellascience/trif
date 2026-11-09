@@ -12,7 +12,7 @@ import { HOME, homePage } from './pages.js';
 // still covers what the panel loads.
 export const EXTENSION_FILES = new Set([
   'sidepanel.html', 'sidepanel.css', 'switch.css', 'sidepanel.js', 'lib.js', 'runtime.js', 'markdown.js', 'login.js',
-  'modswitch.js', 'openmodel.js', 'manifest.json', 'icons/robot-32.png', 'icons/robot-shaded.svg', 'icons/robot-shaded-red.svg',
+  'modswitch.js', 'openmodel.js', 'standin.js', 'manifest.json', 'icons/robot-32.png', 'icons/robot-shaded.svg', 'icons/robot-shaded-red.svg',
 ]);
 
 const TYPES = { js: 'text/javascript; charset=utf-8', css: 'text/css; charset=utf-8', json: 'application/json; charset=utf-8',

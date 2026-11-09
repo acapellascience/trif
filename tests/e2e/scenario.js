@@ -733,6 +733,7 @@ class Scenario {
     if (!this.o.agent && !this.o.codex && !this.o.oss && !this.o.guidance) {
       await r.check('an expired login (a stand-in Claude Code): the login notice and one plain line, not the raw error; the message back in the box', () => this.expiredLoginCheck(win));
       await r.check('sandbox spike (Chrome): what a mod in TRIF\'s own world can reach, and the timing against the page\'s world', () => this.sandboxSpikeCheck(win));
+      await r.check('stand-in design (Chrome): a stand-in mod reaches only what TRIF hands it; the two sample ports work; the timing against the page\'s world', () => this.standinCheck(win));
       await r.check('a rules mod: TRIF\'s own code applies its CSS, hides, replaces and filters (also what appears later); one that would load from an address is refused, not sent', () => this.rulesModCheck(win));
       await r.check('a hijacked agent (a stand-in Claude Code): the tab it ran code in sends nothing that changes anything until it reloads, even later; its mod that posts is held by its code, whatever its header says', () => this.hijackedAgentCheck(win));
     }
@@ -1451,6 +1452,90 @@ process.exitCode = 1;
       return JSON.stringify(res);
     } finally {
       for (const f of [...Object.values(files), ...Object.values(navFiles)]) { try { fs.unlinkSync(f); } catch { /* gone */ } }
+    }
+  }
+
+  // ---- the stand-in design (extension/standin.js, docs/SAFE-MODS.md "Stand-in design"). A probe mod in a
+  // stand-in compartment records, as data on the page, the names its global has and what restyling does
+  // (outcomes only); the test server's log is the ground truth for loads; the two sample ports
+  // (docs/standin-samples) run on a test page shaped for them; and the 1000-element pass against a page mod.
+  async standinCheck(win) {
+    if (this.o.browser !== 'chrome') return { status: 'skip', detail: 'Chrome only (the stand-in design so far)' };
+    const site = '127.0.0.1';
+    const base = `http://${site}:${this.o.servers.port}`;
+    const dir = path.join(this.trif, 'sites', site);
+    const head = (name, sandboxed) => `// ==WebMod==\n// @name ${name}\n// @match *://127.0.0.1/standin.html*\n${sandboxed ? '// @sandboxed standin\n' : ''}// @run-at document-idle\n// ==/WebMod==\n`;
+    const probe = head('Stand-in probe', true) + `
+const out = { names: Object.getOwnPropertyNames(globalThis).sort(), types: {} };
+for (const n of ['window', 'document', 'fetch', 'XMLHttpRequest', 'localStorage', 'location', 'navigator', 'chrome', 'setTimeout', 'postMessage', 'Image', 'URL', '__pageSecret']) out.types[n] = typeof globalThis[n];
+const port = page.url.split('/')[2].split(':')[1];
+try { const img = page.create('img'); img.setAttr('src', 'http://localhost:' + port + '/e2e-standin-leak'); page.body.append(img); out.otherSiteImage = 'set'; } catch (e) { out.otherSiteImage = 'refused'; }
+const cells = page.findAll('.cell');
+const t0 = Date.now(); for (const c of cells) c.style('color', 'rgb(1, 2, 3)'); out.ms = Date.now() - t0; out.cells = cells.length;
+const made = page.create('div'); made.setAttr('id', 'standin-made'); made.setText('made by a stand-in mod'); page.body.append(made);
+page.css('#cells { border-top: 3px solid rgb(4, 5, 6) }');
+const cv = page.create('canvas'); cv.setAttr('width', '10'); cv.setAttr('height', '10'); cv.setAttr('id', 'standin-canvas'); const g = cv.canvas(); g.set({ fillStyle: 'rgb(7, 8, 9)' }); g.fillRect(0, 0, 10, 10); page.body.append(cv);
+timers.setTimeout(() => page.root.setAttr('data-standin-timer', 'ran'), 50);
+page.root.setAttr('data-standin-probe', JSON.stringify(out));
+`;
+    const main = head('Stand-in timing, page world', false) + `(() => {
+  const cells = document.querySelectorAll('.cell');
+  const t0 = performance.now(); for (const c of cells) c.style.setProperty('background-color', 'rgb(9, 9, 9)', 'important');
+  document.documentElement.setAttribute('data-standin-main-ms', String(performance.now() - t0));
+})();`;
+    const sample = (rel) => {
+      const text = fs.readFileSync(path.join(I.REPO, 'docs', 'standin-samples', rel), 'utf8');
+      return text.replace(/^\/\/ @match .*$/m, '// @match       *://127.0.0.1/standin.html*');
+    };
+    const files = {
+      'e2e-standin-probe': probe, 'e2e-standin-main': main,
+      'e2e-standin-shopping': sample('amazon.com/simple-shopping.js'), 'e2e-standin-dvd': sample('www.google.com/dvd-logo.js'),
+    };
+    try {
+      for (const [id, text] of Object.entries(files)) fs.writeFileSync(path.join(dir, `${id}.js`), text);
+      await sleep(1500);
+      for (const id of Object.keys(files)) await this.cli(['approve', `127.0.0.1/${id}`], { timeoutMs: 20000 }).catch(() => {});
+      await waitFor('the stand-in mods registered', async () => {
+        const st = await this.cli(['status'], { timeoutMs: 20000 });
+        return Object.keys(files).every((id) => new RegExp(`${id}\\s+registered`).test(st.stdout)) ? true : null;
+      }, { timeoutMs: 20000, intervalMs: 500 });
+      await this.ext(`async (id, url) => { await chrome.tabs.update(id, { url, active: true }); }`, [win.tabId, `${base}/standin.html`]);
+      const read = async () => JSON.parse((await this.cli(['run', '--tab', String(win.tabId), `({
+        probe: document.documentElement.getAttribute('data-standin-probe'),
+        timer: document.documentElement.getAttribute('data-standin-timer'),
+        mainMs: document.documentElement.getAttribute('data-standin-main-ms'),
+        made: document.getElementById('standin-made')?.textContent || null,
+        cellColor: getComputedStyle(document.querySelector('.cell')).color,
+        sheet: getComputedStyle(document.getElementById('cells')).borderTopColor,
+        canvas: !!document.getElementById('standin-canvas'),
+        shown: Object.fromEntries(['r1', 'r-ad', 'r-carousel', 'r2'].map((id) => [id, document.getElementById(id).getClientRects().length > 0])),
+        carouselMarked: document.getElementById('r-carousel').hasAttribute('data-ahr-hide'),
+        dvd: document.querySelector('[data-trif-dvd]')?.style.transform || null,
+        logoHidden: getComputedStyle(document.getElementById('logo')).visibility === 'hidden',
+        windowNames: Object.getOwnPropertyNames(window),
+      })`], { timeoutMs: 20000 })).stdout);
+      const first = await waitFor('the stand-in mods\' results', async () => { const o = await read(); return o.probe && o.timer && o.mainMs && o.dvd ? o : null; }, { timeoutMs: 15000, intervalMs: 500 });
+      await sleep(800);
+      const later = await read();
+      await sleep(1500); // (late loads)
+      const probeOut = JSON.parse(first.probe);
+      // the names a bare JavaScript global has (Node's vm: the language, no browser), against the probe's
+      const bare = new Set(Object.getOwnPropertyNames(require('vm').runInNewContext('globalThis')));
+      const beyondLanguage = probeOut.names.filter((n) => !bare.has(n));
+      const browserOnly = new Set(first.windowNames.filter((n) => !bare.has(n)));
+      const res = {
+        compartmentGlobal: { count: probeOut.names.length, beyondTheLanguage: beyondLanguage, browserNamesReachable: probeOut.names.filter((n) => browserOnly.has(n)) },
+        pageWorldGlobal: { count: first.windowNames.length, browserOnlyNames: browserOnly.size },
+        typeofInside: probeOut.types,
+        otherSiteImage: { inWorld: probeOut.otherSiteImage, serverSaw: this.o.servers.requests.some((q) => q.url.startsWith('/e2e-standin-leak')) },
+        restyling: { cellColor: first.cellColor, sheet: first.sheet, made: first.made, canvas: first.canvas, timer: first.timer },
+        samples: { simpleShopping: { shown: first.shown, carouselMarked: first.carouselMarked }, dvd: { moved: first.dvd !== later.dvd, logoHidden: first.logoHidden } },
+        timing1000: { standinMs: probeOut.ms, pageWorldMs: Number(first.mainMs) },
+      };
+      fs.writeFileSync(this.r.file('standin.json'), JSON.stringify(res, null, 2));
+      return JSON.stringify(res);
+    } finally {
+      for (const id of Object.keys(files)) { try { fs.unlinkSync(path.join(dir, `${id}.js`)); } catch { /* gone */ } }
     }
   }
 

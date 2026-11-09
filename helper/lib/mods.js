@@ -90,8 +90,9 @@ function parseHeader(code) {
         break;
       // `@sandboxed` (SPIKE, docs/SAFE-MODS.md): run in TRIF's own userScripts world, not the page's.
       // `@sandboxed csp-only` is the spike's measuring variant: the same kind of world, without TRIF's prelude.
+      // `@sandboxed standin`: the default-deny design (docs/SAFE-MODS.md "Stand-in design", extension/standin.js).
       case 'sandboxed':
-        out.sandboxed = value.toLowerCase() === 'csp-only' ? 'csp-only' : 'yes';
+        out.sandboxed = value.toLowerCase() === 'csp-only' ? 'csp-only' : value.toLowerCase() === 'standin' ? 'standin' : 'yes';
         break;
       case 'run-at': {
         const mapped = RUN_AT[value.toLowerCase()];

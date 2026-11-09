@@ -2639,6 +2639,8 @@ test('background (Safari): TRIF doesn\'t check site access (Safari asks per site
     await settle(20);
     assert.deepStrictEqual(scriptIds(bg).filter((id) => id !== lib.RUNTIME_ID), ['bank.com/a']);
   } finally { bg.restore(); }
+});
+
 // ---- mods sets in parts -------------------------------------------------------------------------
 
 // A mods message cut into modsPart messages the way the helper does (helper/lib/mods.js modsParts).

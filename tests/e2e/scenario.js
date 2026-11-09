@@ -794,7 +794,8 @@ class Scenario {
     await this.cli(['disable', '127.0.0.1/e2e-banner', '--url', '127.0.0.1']);
     await this.ext(`async (id, url) => { await chrome.tabs.update(id, { url, active: true }); }`, [this.win.tabId, `${base}/promos.html`]);
     await sleep(1500);
-    const sweep = async (...args) => (await this.cli(['sweep', '--url', 'promos.html', '--scroll', ...args], { json: true })).json;
+    // (--force: it's the tab in front, and sweep --scroll won't scroll that one otherwise)
+    const sweep = async (...args) => (await this.cli(['sweep', '--url', 'promos.html', '--scroll', '--force', ...args], { json: true })).json;
     // Ground truth after a run: visible "Promoted" labels (lazy ones loaded by scrolling), visible posts,
     // visible elements still using the blue.
     const measure = async () => {

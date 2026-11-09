@@ -28,6 +28,9 @@
 //   --startup          instead: trace and profile page load, X-Flyer's start (Shift+S) and its first frames
 //   --out DIR          results folder (default tests/perf/.work/<time>): results.jsonl, summary.md, summary.json
 //   --label NAME       a name for this run's mods in the summary (default: the X-Flyer file's name)
+//   --lock DIR         share the machine's test browser with others: take DIR (mkdir) before a browser
+//                      starts, keep it for a turn of --lock-minutes (9), then give it up for a minute
+//                      (or XFLYER_BROWSER_LOCK=DIR)
 // Safety: one browser at a time, each under memguard.sh (killed past 1.5 GB a process, 4 GB in all) and
 // `nice`; headless with --mute-audio always; waits while another Chrome for Testing is running.
 
@@ -37,7 +40,7 @@ const path = require('path');
 const crypto = require('crypto');
 const { sleep } = require('../e2e/lib/util');
 const { startXPage } = require('./lib/xpage');
-const { Browser, waitForQuiet } = require('./lib/browser');
+const { Browser, waitForQuiet, setLock, takeLock, turnOver, releaseLock } = require('./lib/browser');
 const { frameStats, traceSummary, profileSummary, median, round } = require('./lib/analyze');
 const { VARIANTS, applyVariant } = require('./lib/variants');
 
@@ -87,6 +90,8 @@ function parseArgs(argv) {
     else if (a === '--startup') o.startup = true;
     else if (a === '--out') o.out = path.resolve(val());
     else if (a === '--label') o.label = val();
+    else if (a === '--lock') o.lock = path.resolve(val());
+    else if (a === '--lock-minutes') o.lockMinutes = Number(val());
     else if (a === '--help' || a === '-h') { console.log(fs.readFileSync(__filename, 'utf8').split('\n').slice(2, 30).map((l) => l.replace(/^\/\/ ?/, '')).join('\n')); process.exit(0); }
     else if (a.startsWith('--')) throw new Error(`unknown option ${a}`);
     else o.mods.push(path.resolve(a.replace(/^~(?=\/)/, os.homedir())));
@@ -257,6 +262,7 @@ async function session(ctx, { size, config, variant, stateName, mode }) {
   const v = applyVariant(alt ? 'none' : variant, { flyer, others }, { mortal: ctx.o.mortal });
   const mods = [...v.others, ...(state.gravity ? [readMod(GRAVITY, 'x.com/gravity')] : []), v.flyer]
     .sort((a, b) => path.basename(a.file).localeCompare(path.basename(b.file))); // (TRIF: by name, all document-start here)
+  await takeLock(ctx.log);
   await waitForQuiet(ctx.log);
   const b = await new Browser({ ...SIZES[size], workDir: ctx.work }).start();
   const rec = { size, config, variant, state: stateName, mode, chrome: b.version, load: { before: busyElsewhere(b.profile) }, mods: mods.map(({ id, file, sha1, mtime, bytes }) => ({ id, file, sha1, mtime, bytes })), windows: {} };
@@ -359,6 +365,7 @@ async function session(ctx, { size, config, variant, stateName, mode }) {
     rec.warnings = (await p()).logs.filter(([, l]) => l === 'warn').map(([, , x]) => x.slice(0, 160)).slice(0, 10);
   } finally {
     await b.close();
+    await turnOver();
   }
   return rec;
 }
@@ -393,6 +400,7 @@ function loafSummary(list, secs) {
 async function leakRun(ctx, size, config, minutes) {
   const out = {};
   for (const game of [true, false]) {
+    await takeLock(ctx.log);
     await waitForQuiet(ctx.log);
     const flyer = readMod(ctx.o.mods[0], 'x.com/space-shooter');
     const others = config === 'all' ? ctx.o.mods.slice(1).map((f) => readMod(f, `x.com/${path.basename(f, '.js')}`)) : [];
@@ -422,7 +430,7 @@ async function leakRun(ctx, size, config, minutes) {
       }
       if (drv) await drv.stop();
       if (scroller) clearInterval(scroller);
-    } finally { await b.close(); }
+    } finally { await b.close(); await turnOver(); }
     const slope = (k) => { const n = samples.length, xs = samples.map((s) => s.s / 60), ys = samples.map((s) => s[k]); const mx = xs.reduce((a, x) => a + x, 0) / n, my = ys.reduce((a, y) => a + y, 0) / n; return round(xs.reduce((a, x, i) => a + (x - mx) * (ys[i] - my), 0) / Math.max(1e-9, xs.reduce((a, x) => a + (x - mx) ** 2, 0)), 2); };
     out[game ? 'gameOn' : 'gameOff'] = { samples, perMinute: { heapMB: slope('heapMB'), nodes: slope('nodes'), listeners: slope('listeners'), words: slope('words'), posts: slope('posts'), rssMB: slope('rssMB'), biggestMB: slope('biggestMB') } };
   }
@@ -509,6 +517,7 @@ function table(summary) {
 // ---- main
 async function main() {
   const o = parseArgs(process.argv.slice(2));
+  if (o.lock || process.env.XFLYER_BROWSER_LOCK) setLock(o.lock || process.env.XFLYER_BROWSER_LOCK, o.lockMinutes);
   fs.mkdirSync(o.out, { recursive: true });
   const work = path.join(__dirname, '.work');
   fs.mkdirSync(work, { recursive: true });
@@ -567,6 +576,7 @@ async function main() {
     }
     log(`\n${table(summarise(records))}\n\nsummary: ${path.join(o.out, 'summary.md')} (details: summary.json, every run: results.jsonl)`);
   } finally {
+    releaseLock();
     await srv.close();
   }
 }

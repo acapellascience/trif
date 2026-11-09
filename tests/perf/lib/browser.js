@@ -63,9 +63,39 @@ async function waitForQuiet(log, maxMs = 30 * 60 * 1000) {
 
 // (if this process is stopped mid-run, its browser goes with it: matched by its own profile folder)
 const live = new Set();
-const cleanUp = () => { for (const prof of live) { try { require('child_process').spawnSync('/usr/bin/pkill', ['-9', '-f', prof]); } catch { /* gone */ } } };
+const cleanUp = () => {
+  for (const prof of live) {
+    if (prof.startsWith('lock:')) { try { fs.rmSync(prof.slice(5), { recursive: true, force: true }); } catch { /* gone */ } continue; }
+    try { require('child_process').spawnSync('/usr/bin/pkill', ['-9', '-f', prof]); } catch { /* gone */ }
+  }
+};
 process.on('exit', cleanUp);
 for (const sig of ['SIGINT', 'SIGTERM', 'SIGHUP']) process.on(sig, () => { cleanUp(); process.exit(130); });
+
+// A lock shared with other agents' test browsers (a directory: mkdir is atomic): taken before a browser
+// starts, kept for a turn of about --lock-minutes, then given up for a while so the others get theirs.
+const lock = { dir: process.env.XFLYER_BROWSER_LOCK || null, since: 0, turnMs: 9 * 60000 };
+function setLock(dir, minutes) { lock.dir = dir; if (minutes) lock.turnMs = minutes * 60000; }
+async function takeLock(log) {
+  if (!lock.dir || lock.since) return;
+  let said = false;
+  for (;;) {
+    try { fs.mkdirSync(lock.dir); lock.since = Date.now(); live.add(`lock:${lock.dir}`); return; } catch { /* someone has it */ }
+    if (!said) { log?.(`  (waiting for the browser lock ${lock.dir})`); said = true; }
+    await sleep(30000);
+  }
+}
+/** After a run: give the lock up if this turn is over (and wait a minute, so another can take it). */
+async function turnOver() {
+  if (!lock.dir || !lock.since || Date.now() - lock.since < lock.turnMs) return;
+  releaseLock();
+  await sleep(60000);
+}
+function releaseLock() {
+  if (!lock.dir || !lock.since) return;
+  try { fs.rmSync(lock.dir, { recursive: true, force: true }); } catch { /* gone */ }
+  lock.since = 0; live.delete(`lock:${lock.dir}`);
+}
 
 class Browser {
   /** opts: {width, height, dpr, workDir, extraArgs} */
@@ -141,4 +171,4 @@ class Browser {
   }
 }
 
-module.exports = { Browser, Cdp, waitForQuiet, foreignChromes };
+module.exports = { Browser, Cdp, waitForQuiet, foreignChromes, setLock, takeLock, turnOver, releaseLock };

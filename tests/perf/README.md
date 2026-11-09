@@ -20,6 +20,11 @@ and Rainbow Rave from the same folder (whichever of them exist; other mods there
 state, both window sizes, both configs, three runs (about two hours; narrow it with the options). Every file is read fresh for every run, and every result records each mod's sha1 and
 modification time, so it's clear which version was measured. Nothing in `~/.trif` is written to.
 
+Sharing the machine's test browser with others (other agents, the e2e suite): `--lock DIR` (or
+`XFLYER_BROWSER_LOCK=DIR`) takes DIR with mkdir before each browser starts, keeps it for a turn of about
+nine minutes (`--lock-minutes`), then gives it up for a minute; it's removed when the suite ends or is
+stopped.
+
 ## What it outputs
 
 In `tests/perf/.work/<time>/` (or `--out`):

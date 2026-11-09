@@ -311,6 +311,20 @@ function messageNode(m) {
     });
     li.append(' ', undo);
   }
+  // "Changed x.js." after a run: put back what the mods were before it (the helper keeps them: history/)
+  if (Array.isArray(m.undoChange) && m.undoChange.length && !m.undone) {
+    const undo = button('Undo these changes', '', async () => {
+      undo.disabled = true;
+      try {
+        await request({ type: 'mod.undo', ids: m.undoChange, site: view.site, tab: view.tab?.id });
+        undo.remove();
+      } catch (e) {
+        undo.disabled = false;
+        request({ type: 'chat.note', site: view.site, text: `Couldn't undo: ${e?.message ?? e}` }).catch(() => {});
+      }
+    });
+    li.append(' ', undo);
+  }
   return li;
 }
 

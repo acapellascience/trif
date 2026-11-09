@@ -27,6 +27,7 @@ const { Runs } = require('./lib/runs');
 const { Logins } = require('./lib/logins');
 const agents = require('./lib/agents');
 const { updateHeld, approveHeld, heldFile, reviewItems, reviewMod } = require('./lib/held');
+const history = require('./lib/history');
 const { DEFAULT_ORDER, startOffIds, startSitesOn, pendingUpdates, useNewVersion, keepMine, mergeRequest, mergeSettled, restoreMod, absorbedIds } = require('./lib/preinstalled');
 const { readInstructions, writeInstructions, instructionsFile, MAX_LENGTH } = require('./lib/instructions');
 const { ownSock, removeStaleSockets, codeStamp } = require('./lib/helpers');
@@ -424,7 +425,7 @@ function onRunRequest(run, line, respond) {
 }
 const logins = new Logins({ getWorkspace: () => workspace(ws.home), logger, onEvent: onAgentEvent });
 const runSubscribers = new Map(); // runId or loginId -> Set of CLI sockets that started it (see onClientLine)
-const AGENT_COMMANDS = new Set(['agent.list', 'agent.start', 'agent.stop', 'agent.running', 'agent.login', 'agent.loginCode', 'agent.loginCancel', 'mod.approve', 'mod.review',
+const AGENT_COMMANDS = new Set(['agent.list', 'agent.start', 'agent.stop', 'agent.running', 'agent.login', 'agent.loginCode', 'agent.loginCancel', 'mod.approve', 'mod.review', 'mod.undo', 'mod.history',
   'mod.update', 'instructions.get', 'instructions.set', 'agent.models', 'agent.openModel', 'agent.openModel.set', 'agent.openModel.setKey', 'agent.openModel.removeKey', 'update.check', 'update.install', 'update.setAuto', 'report.build']);
 // Helper-local too, but a run may use them (on mods inside its scope; see lib/trash.js).
 const MOD_FILE_COMMANDS = new Set(['mod.delete', 'mod.restore']);
@@ -570,6 +571,17 @@ function agentCommand(cmd, args) {
       logger.info(`approved held mod ${id}`);
       syncMods('approve', false);
       return { id, approved: true };
+    }
+    case 'mod.undo': {
+      // Put back what a side-panel run changed (lib/history.js): the newest kept version, or the trash
+      // for a mod it created. The user's: refused from a run (AGENT_COMMANDS).
+      const r = history.undoChange(workspace(ws.home), String(args.id ?? ''));
+      logger.info(`undid the last change to ${r.id} (${r.restored === 'removed' ? 'it was new: to the trash' : 'the previous version back'})`);
+      syncMods('undo', false);
+      return r;
+    }
+    case 'mod.history': {
+      return { id: String(args.id ?? ''), entries: history.listHistory(workspace(ws.home), String(args.id ?? '')).map((e) => ({ at: e.at, kind: e.kind })) };
     }
     case 'mod.code': {
       // The panel's "Show code" (a held mod, or one to review): the code TRIF read, capped for the panel

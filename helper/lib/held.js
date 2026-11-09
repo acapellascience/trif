@@ -189,7 +189,13 @@ function updateHeld(ws, mods, scopes) {
   const allowed = loadAllowed(ws.home);
   let seen = loadSeen(ws.home);
   let seenChanged = false;
-  const record = (m) => ({ hash: m.hash, lines: Object.fromEntries(needsOf(m, null).filter((n) => n.lines.length).map((n) => [n.key, n.lines])) });
+  // (the lines of every version that ran, kept together: an undo back to one of them isn't new)
+  const record = (m) => {
+    const was = seen && typeof seen[m.id] === 'object' && seen[m.id] && seen[m.id].lines ? seen[m.id].lines : {};
+    const lines = { ...was };
+    for (const n of needsOf(m, null)) if (n.lines.length) lines[n.key] = [...new Set([...(lines[n.key] || []), ...n.lines])].slice(-2000);
+    return { hash: m.hash, lines };
+  };
   const seenHash = (v) => (typeof v === 'string' ? v : v && v.hash);
   // Which live run changed each mod, if one did (and could: not a folder it was locked out of)
   const byRun = new Map();

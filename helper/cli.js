@@ -18,7 +18,7 @@ const trash = require('./lib/trash');
 const shipped = require('./lib/preinstalled');
 
 // Inside a side-panel agent run (the helper set TRIF_RUN_TOKEN) these are the user's alone.
-const NOT_IN_RUNS = new Set(['setup', 'agent', 'approve', 'mod-update']);
+const NOT_IN_RUNS = new Set(['setup', 'agent', 'approve', 'mod-update', 'undo']);
 
 // Output piped into something that stops reading early (`trif tabs | head -1`) isn't an error.
 process.stdout.on('error', (e) => { if (e.code === 'EPIPE') process.exit(0); throw e; });
@@ -557,6 +557,24 @@ const handlers = {
     const r = await ctx.call('open', { to: normalizeUrl(pos[0]) });
     if (ctx.json) return printJson(r);
     out(`opened tab ${r && r.id}: ${r && r.url}`);
+  },
+
+  async history(ctx, pos) {
+    if (!pos[0]) throw new UsageError('usage: trif history <site>/<mod>');
+    const id = modId(pos[0]);
+    const historyLib = require('./lib/history');
+    const r = { id, entries: historyLib.listHistory(ctx.ws, id).map((e) => ({ at: e.at, kind: e.kind })) }; // (works without the browser)
+    if (ctx.json) return printJson(r);
+    if (!r.entries.length) return out(`(no changes kept for ${r.id}: only side-panel runs' changes are, for 30 days)`);
+    out(`${r.id}: what side-panel runs changed, newest first (trif undo ${r.id} puts back the newest)`);
+    for (const e of r.entries) out(`  ${new Date(e.at).toLocaleString()}  ${e.kind === 'created' ? 'created by a run' : 'changed by a run (the version before is kept)'}`);
+  },
+
+  async undo(ctx, pos) {
+    if (!pos[0]) throw new UsageError('usage: trif undo <site>/<mod>');
+    const r = require('./lib/history').undoChange(ctx.ws, modId(pos[0])); // (works without the browser; the helper picks the change up)
+    if (ctx.json) return printJson(r);
+    out(r.restored === 'removed' ? `${r.id}: a run created it, so it's in the trash now (trif restore ${r.id} brings it back)` : `${r.id}: back to the version before ${new Date(r.at).toLocaleString()}; reload the page to see it (trif undo again goes back further)`);
   },
 
   async close(ctx) {

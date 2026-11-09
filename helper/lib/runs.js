@@ -14,6 +14,7 @@ const { scopeFor } = require('./scope');
 const { readInstructions, instructionsContext } = require('./instructions');
 const { markRunActive, markRunEnded } = require('./origins');
 const { listModFiles } = require('./mods');
+const history = require('./history');
 const { redactSecrets } = require('./agents/util');
 const { within, ignoresCase } = require('./pathcheck');
 const { migratePrivate, privateLeftovers } = require('./migrate');
@@ -758,6 +759,8 @@ class Runs {
     // says it kept the run out of; an adapter that doesn't say exempts none.
     run.locked = Array.isArray(locked) ? locked.filter((d) => limits.locked.includes(d)) : [];
     run.beforeFiles = snapshot(ws.modsDir, ws.home);
+    // The mods' text as it was, so what this run changes can be undone (lib/history.js)
+    try { run.beforeContents = history.contentsSnapshot(ws); } catch (e) { this.logger.warn(`couldn't keep the mods' text for undo: ${e.message}`); }
     // Tell the other browsers' helpers a run is going, so mods it creates start off there (lib/origins.js).
     if (ws.installId) {
       try { markRunActive(ws.home, { runId: run.id, by: ws.installId, browser: ws.browser || '', site: run.site }); run.marked = true; } catch (e) { this.logger.warn(`couldn't mark run ${run.id} active: ${e.message}`); }
@@ -902,6 +905,11 @@ class Runs {
     if (run.beforeFiles) {
       try { changedFiles = diffSnapshots(run.beforeFiles, snapshot(run.ws.modsDir, run.ws.home)); } catch { /* ignore */ }
     }
+    // What it changed, kept for undo (history/), named in `done` for the chat's Undo line
+    let undoable = [];
+    if (run.beforeContents && changedFiles.length) {
+      try { undoable = history.recordChanges(run.ws, run.beforeContents, changedFiles); } catch (e) { this.logger.warn(`couldn't keep run ${run.id}'s changes for undo: ${e.message}`); }
+    }
     const d = run.agentDone;
     let done;
     if (d) {
@@ -917,6 +925,7 @@ class Runs {
       }
       done = { kind: 'done', ok: false, result: null, costUsd: null, changedFiles, sessionId: run.lastSessionId || null };
     }
+    if (undoable.length) done.undoable = undoable;
     if (run.stopped && !run.shuttingDown) done.stopped = true;
     // Failed for want of a login: say so in `done` (the panel shows its login notice instead of an error),
     // and agent.list says logged out from now on, whatever the agent's own status check says (Claude

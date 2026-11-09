@@ -99,6 +99,17 @@ The result is printed as pretty JSON, or as-is if it's a string. DOM nodes come 
     details: 'https:// is added when the URL has no scheme.',
     examples: ['trif open example.com'],
   },
+  history: {
+    usage: 'trif history <site>/<mod>',
+    summary: "what side-panel runs changed in a mod (kept 30 days), newest first",
+    examples: ['trif history x.com/hide-reposts'],
+  },
+  undo: {
+    usage: 'trif undo <site>/<mod>',
+    summary: "put back the version before a side-panel run's last change (a mod it created goes to the trash); refused inside a run",
+    details: 'Each undo keeps what it replaced, so undoing can be undone the same way; trif history lists what is kept.',
+    examples: ['trif undo x.com/hide-reposts'],
+  },
   close: {
     usage: 'trif close --tab <id> | --url <part of its address> [--force]',
     summary: 'close a tab (one you opened with trif open); not the one the user is looking at, unless --force',
@@ -362,7 +373,7 @@ sent by a proxy the helper runs for each chat: the agent never has it.`,
 
 const GROUPS = [
   ['Setup and diagnosis', ['setup', 'status', 'doctor', 'update', 'report']],
-  ['Mod files (work without Chrome)', ['mods', 'new', 'check', 'delete', 'restore', 'install-example', 'mod-update']],
+  ['Mod files (work without Chrome)', ['mods', 'new', 'check', 'delete', 'restore', 'history', 'undo', 'install-example', 'mod-update']],
   ['Switching mods off and on (need Chrome running with the extension)', ['disable', 'enable', 'approve']],
   ['Pages (need Chrome running with the extension)', ['tabs', 'run', 'reload', 'open', 'close', 'navigate', 'text', 'sweep', 'screenshot', 'record', 'requests', 'request', 'errors', 'logs']],
   ['Agent runs (what the side panel does)', ['agent']],

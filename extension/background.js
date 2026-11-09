@@ -1094,6 +1094,25 @@ async function onPanelMessage(msg) {
       if (mod && msg.tab !== undefined) { await serial(() => {}); await reloadIfApplies(mod, { tab: msg.tab }, { onlyIfRunning: true }); }
       return r;
     }
+    case 'mod.undo': {
+      // "Undo these changes" on the chat line after a run: each mod back to what it was before it
+      const ids = (Array.isArray(msg.ids) ? msg.ids : []).map(String).slice(0, 20);
+      const done = [];
+      for (const id of ids) done.push(await helperRequest('mod.undo', { id }, 10000));
+      if (msg.site) {
+        await updateChat(normalizeSite(msg.site), (chat) => {
+          const line = chat.messages.findLast((m) => Array.isArray(m.undoChange) && !m.undone && m.undoChange.join() === ids.join());
+          if (line) line.undone = true;
+          chat.messages.push({ role: 'mod', text: `Undone: ${done.map((r) => `${modFileName(r.id)}${r.restored === 'removed' ? ' (new: in the trash)' : ''}`).join(', ')}.`, time: Date.now() });
+        });
+      }
+      await serial(() => {});
+      for (const r of done) {
+        const mod = state.mods.find((m) => m.id === r.id);
+        if (mod && msg.tab !== undefined) await reloadIfApplies(mod, { tab: msg.tab });
+      }
+      return { undone: done };
+    }
     case 'mod.restore': {
       const r = await helperRequest('mod.restore', { id: String(msg.id ?? '') }, 10000);
       if (msg.site) {
@@ -1285,6 +1304,11 @@ async function onAgentEvent(runId, event, relay = true) {
         } else if (!event.ok && !run.errored) {
           if (run.stopping) push('tool', 'stopped');
           else push('error', String(event.result ?? '').trim() || 'The agent stopped without finishing.');
+        }
+        // What the run changed can be undone (the helper kept the versions before: lib/history.js)
+        const undoable = Array.isArray(event.undoable) ? event.undoable.filter((id) => typeof id === 'string').slice(0, 20) : [];
+        if (undoable.length) {
+          chat.messages.push({ role: 'mod', text: `Changed ${undoable.map(modFileName).join(', ')}.`, undoChange: undoable, time });
         }
         for (const h of Array.isArray(event.held) ? event.held : []) {
           push('error', `${h.id} is on hold: TRIF found that it ${(Array.isArray(h.facts) && h.facts.length ? h.facts : [h.reason]).join('; it ')}. It won't run until you allow it (in Mods above).`);

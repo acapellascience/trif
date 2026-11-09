@@ -651,7 +651,7 @@ test('agent.start: runId first, then session/text/tool events, one done with cha
     { kind: 'text', text: 'Done: the banner is hidden.' },
   ]);
   assert.equal(evs.filter((e) => e.kind === 'done').length, 1);
-  assert.deepEqual(done, { kind: 'done', ok: true, result: 'Done: the banner is hidden.', costUsd: 0.0123, changedFiles: ['sites/example.com/fake.js'], sessionId: 'sess-new-1' });
+  assert.deepEqual(done, { kind: 'done', ok: true, result: 'Done: the banner is hidden.', costUsd: 0.0123, changedFiles: ['sites/example.com/fake.js'], sessionId: 'sess-new-1', undoable: ['example.com/fake'] });
 
   // The agent got the contract's flags, cwd and context.
   const call = callFor(bin, 'EDIT');
@@ -1570,6 +1570,9 @@ test('held mods: a run\'s mod that matches other sites is held (not registered) 
   const r = await extRequest(ext, 'agent.start', { ...START, prompt: 'EVIL' });
   const done = await waitDone(ext, r.result.runId);
   assert.deepEqual(done.held, [{ id: 'example.com/evil', reason: 'runs on <all_urls>, outside example.com', facts: ['runs on <all_urls>, outside example.com'] }]);
+  // what it changed can be undone: named in done, kept in history/ (a mod it created: a marker)
+  assert.ok((done.undoable || []).includes('example.com/evil'), JSON.stringify(done.undoable));
+  assert.ok(fs.readdirSync(path.join(home, 'history', 'example.com')).some((n) => /^evil@.*\.created$/.test(n)));
   const lastMods = () => [...ext.messages].reverse().find((m) => m.type === 'mods').mods;
   const byId = (id) => lastMods().find((m) => m.id === id);
   assert.deepEqual(byId('example.com/evil').held, { site: 'example.com', reason: 'runs on <all_urls>, outside example.com', facts: ['runs on <all_urls>, outside example.com'], claim: '', by: 'agent' });

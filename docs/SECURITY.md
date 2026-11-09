@@ -85,6 +85,14 @@ nothing at all. The mod's `@risk` header plays no part: whoever wrote the code w
   (`~/.trif/.shipped/`, which runs can't write, written before the mod itself): an unchanged one, or an
   update TRIF brings, has nothing to ask about.
 
+Writes through a name worked out at run time (`x[k] = v`, `setAttribute(k, v)`) can't be told apart from
+setting an element's `src` or `href` by reading the code: whether `k` can be `"src"` is undecidable. TRIF
+stays strict: such a write counts whenever the mod's text mentions a load attribute anywhere, including
+spelled from literal pieces (`'sr' + 'c'`, `['s','r','c'].join('')`, `'sr'.concat('c')`), or the mod
+decodes strings it can't read. That flags ordinary array writes in some mods; the answer is in the
+instructions, not a looser rule: TECHNIQUES.md "Writing mods TRIF can read" tells agents the plain way
+round each pattern, and `trif check` shows them what TRIF reads, line by line, before anything waits.
+
 Not covered: a mod reusing an allowed function of its own (an approved `send(x)` called with new data
 from a new line). A terminal agent (which has the user's shell) could run `trif approve` or edit
 allowed.json itself; AGENTS.md tells it never to, but only the side panel's sandbox enforces it. A dev

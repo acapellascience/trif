@@ -782,3 +782,21 @@ test('a mailbox request works where watching a folder fails (as in an agent run\
     if (saved === undefined) delete process.env.TRIF_RUN_BOX; else process.env.TRIF_RUN_BOX = saved;
   }
 });
+
+test('check says what TRIF reads in a mod that would make it wait, the lines, and how to avoid it', async () => {
+  const home = tempDir();
+  const dir = path.join(home, 'sites', 'x.com');
+  fs.mkdirSync(dir, { recursive: true });
+  fs.writeFileSync(path.join(dir, 'keys.js'), 'document.body.style.color = "red";\ndispatchEvent(new KeyboardEvent("keydown", { key: "g" }));\n');
+  fs.writeFileSync(path.join(dir, 'plain.js'), 'document.body.style.color = "red";\ndispatchEvent(new CustomEvent("plain-reset"));\n');
+  let r = await runCli(['check', 'x.com/keys'], { home });
+  assert.equal(r.code, 0, r.stderr);
+  assert.match(r.stdout, /waits for the user's OK/);
+  assert.match(r.stdout, /click, type or press keys/);
+  assert.match(r.stdout, /line 2: dispatchEvent\(new KeyboardEvent/);
+  assert.match(r.stdout, /how: to reach your own code, dispatch a CustomEvent/);
+  r = await runCli(['check', 'x.com/plain'], { home });
+  assert.match(r.stdout, /TRIF finds nothing in it that waits/);
+  r = await runCli(['check', 'x.com/keys', '--json'], { home });
+  assert.deepEqual(JSON.parse(r.stdout).powers.map((p) => p.key), ['acts']);
+});

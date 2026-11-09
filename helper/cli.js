@@ -379,7 +379,25 @@ const handlers = {
       process.exitCode = 1;
       return;
     }
-    if (ctx.json) printJson({ ok: true, file: path.resolve(file) }); else out(`ok: ${path.resolve(file)} parses`);
+    // What TRIF reads in it (lib/powers.js): what would make it wait for the user's OK, line by line, and
+    // how to write it so it doesn't, where that's possible. So an agent can check its own mod first.
+    const { powersOf, modSites } = require('./lib/powers');
+    const { parseHeader } = require('./lib/mods');
+    const rel = path.relative(ctx.ws.modsDir, path.resolve(file)).split(path.sep);
+    const id = rel.length === 2 ? `${rel[0]}/${rel[1].replace(/\.js$/, '')}` : path.basename(file, '.js');
+    const powers = powersOf(code, { sites: modSites({ id, matches: parseHeader(code).matches }) });
+    const lines = code.split('\n');
+    if (ctx.json) return printJson({ ok: true, file: path.resolve(file), powers: powers.map(({ key, fact, found, lines: at }) => ({ key, fact, found, lines: at })) });
+    out(`ok: ${path.resolve(file)} parses`);
+    if (!powers.length) return out('TRIF finds nothing in it that waits for the user\'s OK.');
+    out(`\nTRIF reads this in it, so it waits for the user's OK (unless they've allowed it before):`);
+    for (const p of powers) {
+      out(`- it ${p.fact}`);
+      for (const n of p.lines.slice(0, 5)) out(`    line ${n}: ${lines[n - 1].trim().slice(0, 140)}`);
+      if (p.lines.length > 5) out(`    (${p.lines.length - 5} more)`);
+      for (const tip of checkTips(p)) out(`    how: ${tip}`);
+    }
+    out('\nIf the mod really needs it, keep it and tell the user what it does and why it waits. See "Writing mods TRIF can read" in TECHNIQUES.md.');
   },
 
   async enable(ctx, pos) { return switchMod(ctx, pos, true); },
@@ -838,6 +856,25 @@ const handlers = {
     out(realFile(dest));
   },
 };
+
+// For `trif check`: how to write each kind of flagged thing so TRIF can read it, where there's a way that
+// does the same job
+function checkTips(p) {
+  const tips = [];
+  for (const f of p.found) {
+    if (p.key === 'acts' && /dispatchEvent|Event/.test(f)) tips.push('to reach your own code, dispatch a CustomEvent named after the mod (new CustomEvent("my-mod-reset")) and listen for it, not a fake key press or click');
+    else if (p.key === 'acts' && /click/.test(f)) tips.push('on your own button, call its handler directly; clicking the site\'s controls is acting for the user');
+    else if (/createElement with a tag/.test(f)) tips.push('pass the tag as text: document.createElement("div"), one call per kind of element');
+    else if (/setAttribute with a name/.test(f)) tips.push('name the attribute: el.setAttribute("aria-label", …), or set the property (el.title = …)');
+    else if (/x\[…\] =/.test(f)) tips.push('x[k] = v: TRIF can\'t tell that from setting an element\'s src or href (which this mod\'s text mentions); keep data in a Map or use array methods (m.set(k, v), list.push(v), list.map(…)), or name the property');
+    else if (/x\[…\]\(\)/.test(f)) tips.push('call the method by name (el.remove()), not through x[name]()');
+    else if (/innerHTML with HTML built/.test(f)) tips.push('build the elements with createElement and set textContent, rather than HTML with values inside its tags');
+    else if (/property name built|decod|spelled/.test(f)) tips.push('don\'t build names from pieces; for embedded data, Uint8Array.from(atob(s), (c) => c.charCodeAt(0)) is read as data');
+    else if (p.key === 'loads') tips.push('a fixed address (or data:/blob:) is fine; an address built at run time can carry what the mod reads to another site');
+    else if (p.key.startsWith('site:')) tips.push('mods only use their own site, unless the user asked for something that lives elsewhere');
+  }
+  return [...new Set(tips)];
+}
 
 // A path as the system knows it (links resolved, /tmp as /private/tmp): what `trif new` and the like print,
 // because an agent's run rules are built from the workspace's real path, and a path through a link (a

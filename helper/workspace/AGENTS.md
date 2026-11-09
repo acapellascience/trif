@@ -222,9 +222,12 @@ click or type for the user, navigate, load from addresses it works out while run
 or run code TRIF can't read waits, not running, until the user allows it (in the side panel, or `trif
 approve <site>/<mod>` in their terminal). TRIF reads this from the code, not from your `@risk` header.
 Once allowed, later edits run straight away unless they add such a power or add or change a line that
-uses one. `trif status` and `trif mods` show what's waiting (HELD) and what TRIF found. When a mod needs
-one of these powers, write it, then tell the user in plain words what it can do and that it's waiting
-for their OK. Mods that only restyle, hide, filter what comes back, or use their own UI and events
+uses one. `trif status` and `trif mods` show what's waiting (HELD) and what TRIF found, and `trif check
+<site>/<mod>` shows what it reads in a mod before anything waits, line by line, with how to avoid each
+thing where there's a way. Write mods it can read ("Writing mods TRIF can read" in TECHNIQUES.md): a fake
+key press to reach your own code, `x[k] = v` in a mod that mentions `href`, or a tag name in a variable
+each make it ask the user, and each has a plain way round. When a mod needs one of these powers, write
+it, then tell the user in plain words what it can do and that it's waiting for their OK. Mods that only restyle, hide, filter what comes back, or use their own UI and events
 (`dispatchEvent(new CustomEvent('my-mod-…'))`) never wait.
 
 ## Side-panel runs
@@ -321,8 +324,10 @@ testing. Then `trif new <site> <mod>`, and edit. Pick the least invasive techniq
 
 - Re-run the sweeps from "Finish the job" on each page type and state, and compare with the counts
   from before.
+- `trif check <site>/<mod>`: it parses, and what TRIF reads in it that would make it wait for the
+  user's OK (rewrite what has a plain way round; tell the user about what's left).
 - `trif status`: is the mod registered? (A syntax error or a bad header shows up here; `off` means
-  the user switched it off.)
+  the user switched it off; HELD means it's waiting for the user's OK.)
 - `trif errors --url <site>` and `trif logs --url <site>`.
 - Check the effect with `trif run`: the hidden thing's count is 0, the thing that should stay is still
   there, your element exists, your hook is installed (`String(window.fetch).includes('...')`).

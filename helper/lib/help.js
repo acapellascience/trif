@@ -234,8 +234,8 @@ yourself also releases it. Not available to agents inside a side-panel run.`,
   },
   check: {
     usage: 'trif check <file|site/mod>',
-    summary: 'check that a mod file parses (compiles it without running it)',
-    details: 'Prints the syntax error and where it is, or "ok". Use it instead of node --check.',
+    summary: 'check that a mod parses, and what TRIF reads in it that would make it wait for the user\'s OK',
+    details: 'Prints the syntax error and where it is, or "ok", then each thing TRIF reads in the code that would make the mod wait for the user\'s OK (sending, clicking for the user, loading from addresses it builds, code it can\'t read), the lines, and how to avoid it where there\'s a way. Use it instead of node --check.',
     examples: ['trif check sites/x.com/hide-reposts.js', 'trif check x.com/hide-reposts'],
   },
   enable: {

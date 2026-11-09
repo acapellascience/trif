@@ -4,6 +4,33 @@ The how-to half of the guide, read when you need it: before you write a mod, bef
 when you test. AGENTS.md (next to this file) is the rest: the workspace, the CLI, the workflow and the
 safety rules, which always apply.
 
+## Writing mods TRIF can read
+
+TRIF reads every mod's code before it runs, and a mod that can do certain things waits for the user's OK
+(AGENTS.md, "Mods that wait for the user's OK"). It goes by the code, not your `@risk` header, and it's
+cautious: where it can't tell what a line does, it assumes the worst. Each new or changed line that it
+flags asks the user again. So write mods it can read: the user gets fewer questions, and the ones they
+get mean something. `trif check <site>/<mod>` shows what TRIF reads in a mod, line by line, with how to
+avoid each thing where there's a way: run it after writing or changing one.
+
+What it flags, and the plain way to do the same job:
+
+| It flags | Because | Instead |
+|---|---|---|
+| `dispatchEvent(new KeyboardEvent(…))`, `new MouseEvent`, `.click()` on the page | that's acting for the user | to reach your own code (or another of your mods), dispatch a `CustomEvent` named after the mod (`new CustomEvent('my-mod-reset')`) and listen for it |
+| `x[k] = v` when the mod's text mentions `src`, `href` or the like | it can't tell that from setting an element's `src` to an address it built | keep data in a `Map` (`m.set(k, v)`) or use array methods (`push`, `map`, `fill`); set element properties by name (`img.src = …`) |
+| `document.createElement(tag)` with a variable | it can't rule out `<script>` | literal tags: `createElement('div')`; one small helper per kind of element if you want one |
+| `el.setAttribute(name, …)` with a variable | it can't rule out `onclick` or `src` | name the attribute, or set the property (`el.title = …`, `el.dataset.x = …`) |
+| `innerHTML` with values inside a tag (`` `<img src=${u}>` ``) | an attribute could be an inline handler | build elements with `createElement` and set `textContent` (values between tags, `` `<b>${name}</b>` ``, are fine) |
+| `window[k]`, `x[k](…)`, names built from pieces, `atob`/`fromCharCode` | the name could be `fetch` or `eval` | call things by name; embedded data is fine as `Uint8Array.from(atob(s), (c) => c.charCodeAt(0))` |
+| `eval`, `new Function`, `setTimeout('code')`, `<script>`, `javascript:` | code it can't read | write the code itself |
+| `fetch`, `XMLHttpRequest`, `sendBeacon`, `WebSocket`, `location = …`, `window.open` | sending, or going somewhere | only when the user asked for it: then it's right that it waits; say so |
+| an address of another site, or one built at run time | it can carry what the mod reads elsewhere | the mod's own site, or `data:`/`blob:` |
+
+Don't contort a mod to dodge the reader: if it genuinely needs to send, click or load, write it plainly
+and tell the user why it waits. Code bent to look harmless (names built at run time, aliases of `window`)
+is flagged as code TRIF can't check, which is a worse question to put to the user.
+
 ## Where mods run
 
 - In the page's **MAIN world**: you share `window` with the site. You can patch `fetch`,

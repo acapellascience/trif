@@ -270,6 +270,37 @@ function powersOf(code, { sites = [] } = {}) {
       classifyName(joined, t.line, true, [{}, { t: 'p', v: '(' }], 0); // ('fe' + 'tch': what it spells)
       if (/<\s*(script|iframe|object|embed)\b|\son[a-z]+\s*=|javascript:/i.test(joined)) add('hidden', 'HTML or code spelled out in pieces', t.line);
     }
+    // Strings put together from literal pieces in other ways spell names too: ['s', 'r', 'c'].join(''),
+    // 'sr'.concat('c'), `${'s'}rc`. Work them out, and count what they spell like any other string.
+    const spelled = (joined) => {
+      cands.add(joined);
+      classifyName(joined, t.line, true, [{}, { t: 'p', v: '(' }], 0);
+      if (/<\s*(script|iframe|object|embed)\b|\son[a-z]+\s*=|javascript:/i.test(joined)) add('hidden', 'HTML or code spelled out in pieces', t.line);
+    };
+    const lit = (x) => x && (x.t === 'str' || (x.t === 'tpl' && !x.interp));
+    if (t.t === 'p' && t.v === '[' && lit(toks[k + 1])) { // [ 'a', 'b', … ].join( 'sep'? )
+      const parts = [];
+      let j = k + 1;
+      while (lit(toks[j])) { parts.push(toks[j].v); if (toks[j + 1]?.v === ',') j += 2; else { j++; break; } }
+      if (toks[j]?.v === ']' && toks[j + 1]?.v === '.' && toks[j + 2]?.v === 'join' && toks[j + 3]?.v === '(') {
+        const sep = lit(toks[j + 4]) && toks[j + 5]?.v === ')' ? toks[j + 4].v : toks[j + 4]?.v === ')' ? ',' : null;
+        if (sep !== null) spelled(parts.join(sep));
+      }
+    }
+    if (lit(t) && toks[k + 1]?.v === '.' && toks[k + 2]?.v === 'concat' && toks[k + 3]?.v === '(') { // 'a'.concat('b', …)
+      let joined = t.v, j = k + 4;
+      while (lit(toks[j])) { joined += toks[j].v; if (toks[j + 1]?.v === ',') j += 2; else { j++; break; } }
+      if (toks[j]?.v === ')') spelled(joined);
+    }
+    if (t.t === 'tpl' && t.interp) { // `${'s'}rc`: a template whose every ${} is one literal
+      const pieces = t.v.split('\u0000');
+      const inner = [];
+      let j = k + 1, ok = true;
+      for (let n = 0; n < pieces.length - 1 && ok; n++) {
+        if (toks[j]?.v === '${' && lit(toks[j + 1]) && toks[j + 2]?.v === '}$') { inner.push(toks[j + 1].v); j += 3; } else ok = false;
+      }
+      if (ok) spelled(pieces.map((p, n) => p + (inner[n] ?? '')).join(''));
+    }
   }
   const decodes = toks.some((t, k) => {
     if (t.t !== 'id' || !DECODERS.has(t.v)) return false;

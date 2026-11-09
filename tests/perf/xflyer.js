@@ -354,6 +354,7 @@ async function session(ctx, { size, config, variant, stateName, mode }) {
     }
     if (drv) await drv.stop();
     rec.load.after = busyElsewhere(b.profile);
+    rec.memory = treeRss(b.proc.pid); // (at the end of the run: MB, all the browser's processes and the biggest)
     rec.errors = await b.eval('JSON.stringify(__perf.errors.map((e) => e.mod + ": " + e.message))').then(JSON.parse);
     rec.warnings = (await p()).logs.filter(([, l]) => l === 'warn').map(([, , x]) => x.slice(0, 160)).slice(0, 10);
   } finally {
@@ -414,7 +415,7 @@ async function leakRun(ctx, size, config, minutes) {
         await b.send('HeapProfiler.collectGarbage');
         const m = await metrics(b);
         const page = await b.eval('JSON.stringify({ els: document.getElementsByTagName("*").length, words: document.getElementsByClassName("tss-w").length, canvases: document.getElementsByTagName("canvas").length, styles: document.getElementsByTagName("style").length, posts: window.__xPosts, scrollY: Math.round(scrollY), deaths: __perf.deaths })').then(JSON.parse);
-        samples.push({ s: Math.round((Date.now() - t0) / 1000), heapMB: round(m.JSHeapUsedSize / 1048576, 2), nodes: m.Nodes, listeners: m.JSEventListeners, docs: m.Documents, ...page });
+        samples.push({ s: Math.round((Date.now() - t0) / 1000), heapMB: round(m.JSHeapUsedSize / 1048576, 2), nodes: m.Nodes, listeners: m.JSEventListeners, docs: m.Documents, ...page, ...treeRss(b.proc.pid) });
         ctx.log(`    leak ${game ? 'game on' : 'game off'} ${JSON.stringify(samples[samples.length - 1])}`);
         // (every minute, R: the game's own reset, as a player does after a while)
         await sleep(15000);
@@ -423,9 +424,22 @@ async function leakRun(ctx, size, config, minutes) {
       if (scroller) clearInterval(scroller);
     } finally { await b.close(); }
     const slope = (k) => { const n = samples.length, xs = samples.map((s) => s.s / 60), ys = samples.map((s) => s[k]); const mx = xs.reduce((a, x) => a + x, 0) / n, my = ys.reduce((a, y) => a + y, 0) / n; return round(xs.reduce((a, x, i) => a + (x - mx) * (ys[i] - my), 0) / Math.max(1e-9, xs.reduce((a, x) => a + (x - mx) ** 2, 0)), 2); };
-    out[game ? 'gameOn' : 'gameOff'] = { samples, perMinute: { heapMB: slope('heapMB'), nodes: slope('nodes'), listeners: slope('listeners'), words: slope('words'), posts: slope('posts') } };
+    out[game ? 'gameOn' : 'gameOff'] = { samples, perMinute: { heapMB: slope('heapMB'), nodes: slope('nodes'), listeners: slope('listeners'), words: slope('words'), posts: slope('posts'), rssMB: slope('rssMB'), biggestMB: slope('biggestMB') } };
   }
   return out;
+}
+
+// The browser's memory: resident size of all its processes, and of the biggest one (the page's renderer,
+// usually: decoded audio and images live outside the JS heap), in MB.
+function treeRss(rootPid) {
+  const r = require('../e2e/lib/util').run('/bin/ps', ['-Ao', 'pid=,ppid=,rss=']);
+  const procs = r.stdout.split('\n').map((l) => l.trim().split(/\s+/).map(Number)).filter((x) => x.length === 3);
+  const kids = new Map();
+  for (const [pid, ppid] of procs) { if (!kids.has(ppid)) kids.set(ppid, []); kids.get(ppid).push(pid); }
+  const rss = new Map(procs.map(([pid, , kb]) => [pid, kb]));
+  let all = 0, max = 0;
+  for (const todo = [rootPid]; todo.length;) { const p = todo.pop(); const kb = rss.get(p) || 0; all += kb; max = Math.max(max, kb); todo.push(...(kids.get(p) || [])); }
+  return { rssMB: Math.round(all / 1024), biggestMB: Math.round(max / 1024) };
 }
 
 // ---- the summary: per state, median of the runs
@@ -433,9 +447,9 @@ function summarise(records) {
   const groups = new Map();
   for (const r of records) for (const [wname, w] of Object.entries(r.windows)) {
     const k = `${r.size}|${r.config}|${r.variant}|${wname}`;
-    if (!groups.has(k)) groups.set(k, { size: r.size, config: r.config, variant: r.variant, state: wname, frames: [], traces: [], profiles: [], metrics: [], loaf: [], page: [], loads: [], sha1: r.mods.find((m) => m.id === 'x.com/space-shooter')?.sha1 });
+    if (!groups.has(k)) groups.set(k, { size: r.size, config: r.config, variant: r.variant, state: wname, frames: [], traces: [], profiles: [], metrics: [], loaf: [], page: [], loads: [], mems: [], sha1: r.mods.find((m) => m.id === 'x.com/space-shooter')?.sha1 });
     const g = groups.get(k);
-    if (w.frames && (r.mode === 'full' || r.mode === 'plain')) { g.loads.push(((r.load?.before?.otherCpu || 0) + (r.load?.after?.otherCpu || 0)) / 2); g.frames.push(w.frames); g.metrics.push(w.metrics); g.loaf.push(w.loaf); g.page.push(w.page); }
+    if (w.frames && (r.mode === 'full' || r.mode === 'plain')) { g.mems.push(r.memory?.rssMB); g.loads.push(((r.load?.before?.otherCpu || 0) + (r.load?.after?.otherCpu || 0)) / 2); g.frames.push(w.frames); g.metrics.push(w.metrics); g.loaf.push(w.loaf); g.page.push(w.page); }
     if (w.trace) g.traces.push(w.trace);
     if (w.profile) g.profiles.push(w.profile);
   }
@@ -460,7 +474,7 @@ function summarise(records) {
       max: med(g.frames, (f) => f.max), long50: med(g.frames, (f) => f.long50), missed: med(g.frames, (f) => f.missed),
       metrics: g.metrics.length ? Object.fromEntries(Object.keys(g.metrics[0] || {}).map((k) => [k, med(g.metrics, (m) => m?.[k])])) : null,
       loafPerS: med(g.loaf, (l) => l?.perSecond || 0), loafTop: g.loaf.find((l) => l?.top)?.top,
-      page: g.page[0], otherCpu: med(g.loads, (l) => l), 
+      page: g.page[0], otherCpu: med(g.loads, (l) => l), memoryMB: med(g.mems, (m) => m), 
       main, mainBusy: med(g.traces, (t) => t.mainBusy), threads: Object.fromEntries(Object.keys(threads).map((k) => [k, med(g.traces, (t) => t.threads[k] || 0)])),
       recalc: g.traces.length ? { perS: med(g.traces, (t) => t.recalcs?.perSecond), msPerS: med(g.traces, (t) => t.recalcs?.msPerSecond), elementsPerS: med(g.traces, (t) => t.recalcs?.elementsPerSecond), maxElements: med(g.traces, (t) => t.recalcs?.maxElements), medianElements: med(g.traces, (t) => t.recalcs?.medianElements) } : null,
       layout: g.traces.length ? { perS: med(g.traces, (t) => t.layouts?.perSecond), msPerS: med(g.traces, (t) => t.layouts?.msPerSecond) } : null,
@@ -557,7 +571,8 @@ async function main() {
   }
 }
 
-if (require.main === module) main().catch((e) => { console.error(e.stack || e.message); process.exit(1); });
+// (exit when done: a stray timer from a browser that's gone mustn't keep the next queued run waiting)
+if (require.main === module) main().then(() => process.exit(0), (e) => { console.error(e.stack || e.message); process.exit(1); });
 // (for one-off scripts: the page set up as a run sets it up, keys, the driver)
 async function _prepare(b, { flyer, others = [], storage = {}, seed = 12345, bossImg = null }) {
   await b.send('Page.enable'); await b.send('Runtime.enable');

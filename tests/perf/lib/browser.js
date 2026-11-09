@@ -16,7 +16,7 @@ class Cdp {
       const ws = new WebSocket(this.url);
       ws.onopen = () => { this.ws = ws; resolve(this); };
       ws.onerror = () => reject(new Error('websocket error'));
-      ws.onclose = () => { for (const w of this.waiting.values()) w.reject(new Error('connection closed')); this.waiting.clear(); };
+      ws.onclose = () => { for (const w of this.waiting.values()) { clearTimeout(w.timer); w.reject(new Error('connection closed')); } this.waiting.clear(); };
       ws.onmessage = (e) => {
         const m = JSON.parse(e.data);
         if (m.id !== undefined && this.waiting.has(m.id)) {
@@ -96,6 +96,7 @@ class Browser {
     const logFile = path.join(this.opts.workDir, 'chrome.log');
     const out = fs.openSync(logFile, 'w');
     this.proc = spawn('/bin/bash', [guard, '/usr/bin/nice', '-n', '10', bin, ...args], { stdio: ['ignore', out, out] });
+    fs.closeSync(out); // (the browser has its own copy)
     this.exited = new Promise((r) => this.proc.on('exit', r));
     let ver;
     for (let i = 0; i < 100 && !ver; i++) {

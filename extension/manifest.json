@@ -32,7 +32,8 @@
     "tabs",
     "nativeMessaging",
     "scripting",
-    "sidePanel"
+    "sidePanel",
+    "declarativeNetRequestWithHostAccess"
   ],
   "host_permissions": [
     "<all_urls>"

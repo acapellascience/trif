@@ -26,7 +26,7 @@ const { scanMods, planMods, planModsMessage, modsParts, withSame, folderFingerpr
 const { Runs } = require('./lib/runs');
 const { Logins } = require('./lib/logins');
 const agents = require('./lib/agents');
-const { updateHeld, approveHeld, heldFile } = require('./lib/held');
+const { updateHeld, approveHeld, heldFile, reviewItems, reviewMod } = require('./lib/held');
 const { DEFAULT_ORDER, startOffIds, startSitesOn, pendingUpdates, useNewVersion, keepMine, mergeRequest, mergeSettled, restoreMod, absorbedIds } = require('./lib/preinstalled');
 const { readInstructions, writeInstructions, instructionsFile, MAX_LENGTH } = require('./lib/instructions');
 const { ownSock, removeStaleSockets, codeStamp } = require('./lib/helpers');
@@ -76,6 +76,7 @@ const state = {
   modErrors: [],
   modWarnings: [],
   held: {}, // mod id -> held entry (see lib/held.js)
+  review: {}, // mod id -> {facts, needs, claim}: what a mod the user has can do that they haven't seen (lib/held.js)
   updates: {}, // mod id -> new shipped version waiting (see lib/preinstalled.js pendingUpdates)
   lastSignature: null,
   lastFingerprint: null,
@@ -240,6 +241,8 @@ function syncMods(reason, force) {
     ? planModsMessage(mods, { who: `TRIF ${state.hello.version || '(an old version)'} in ${state.hello.browser}` })
     : planMods(mods);
   try { state.held = updateHeld(ws, mods, runs.scopes()); } catch (e) { logger.error(`held mods: ${e.message}`); }
+  // What mods the user has can do that they haven't seen yet (held.js reviewItems): the panel asks once.
+  try { state.review = reviewItems(ws.home, mods, state.held); } catch (e) { logger.error(`mods to review: ${e.message}`); state.review = {}; }
   const origins = trackOrigins(mods);
   // Held mods still go to the extension (the panel lists them with an Allow button), marked so they aren't
   // registered. Preinstalled mods are marked startOff: the extension switches them off when it first sees them.
@@ -253,7 +256,10 @@ function syncMods(reason, force) {
   let absorbed = {};
   try { absorbed = absorbedIds(ws.home); } catch (e) { logger.warn(`retired mods: ${e.message}`); }
   const sent = plan.mods.map((m) => {
-    const out = state.held[m.id] ? { ...m, held: { site: state.held[m.id].site, reason: state.held[m.id].reason } } : m;
+    // (facts: TRIF's own reading of the code; claim: what the agent says it does, shown apart as the agent's)
+    const h = state.held[m.id], r = state.review && state.review[m.id];
+    const out = h ? { ...m, held: { site: h.site, reason: h.reason, facts: h.facts || [h.reason], claim: h.claim || '' } }
+      : r ? { ...m, review: { facts: r.facts, claim: r.claim } } : m;
     const o = origins[m.id];
     const withOrigin = o ? { ...out, origin: { by: o.by, browser: o.browser } } : out;
     const withUpdate = updates[m.id] ? { ...withOrigin, update: updates[m.id] } : withOrigin;
@@ -418,7 +424,7 @@ function onRunRequest(run, line, respond) {
 }
 const logins = new Logins({ getWorkspace: () => workspace(ws.home), logger, onEvent: onAgentEvent });
 const runSubscribers = new Map(); // runId or loginId -> Set of CLI sockets that started it (see onClientLine)
-const AGENT_COMMANDS = new Set(['agent.list', 'agent.start', 'agent.stop', 'agent.running', 'agent.login', 'agent.loginCode', 'agent.loginCancel', 'mod.approve',
+const AGENT_COMMANDS = new Set(['agent.list', 'agent.start', 'agent.stop', 'agent.running', 'agent.login', 'agent.loginCode', 'agent.loginCancel', 'mod.approve', 'mod.review',
   'mod.update', 'instructions.get', 'instructions.set', 'agent.models', 'agent.openModel', 'agent.openModel.set', 'agent.openModel.setKey', 'agent.openModel.removeKey', 'update.check', 'update.install', 'update.setAuto', 'report.build']);
 // Helper-local too, but a run may use them (on mods inside its scope; see lib/trash.js).
 const MOD_FILE_COMMANDS = new Set(['mod.delete', 'mod.restore']);
@@ -451,7 +457,7 @@ function onAgentEvent(runId, event) {
   // Before the run's last event goes out: hold what it wrote for other sites, and say so in `done`.
   if (event && event.kind === 'done' && String(runId).startsWith('r')) {
     syncMods('agent done', false);
-    const held = Object.entries(state.held).filter(([, h]) => h.runId === runId).map(([id, h]) => ({ id, reason: h.reason }));
+    const held = Object.entries(state.held).filter(([, h]) => h.runId === runId).map(([id, h]) => ({ id, reason: h.reason, facts: h.facts || [h.reason] }));
     if (held.length) event.held = held;
   }
   // (A run that found the agent logged out: runs.js tells lib/agents, so agent.list says so.)
@@ -543,6 +549,25 @@ function agentCommand(cmd, args) {
       logger.info(`approved held mod ${id}`);
       syncMods('approve', false);
       return { id, approved: true };
+    }
+    case 'mod.code': {
+      // The panel's "Show code" (a held mod, or one to review): the code TRIF read, capped for the panel
+      const id = typeof args.id === 'string' ? args.id.trim() : '';
+      const m = state.mods.find((x) => x.id === id);
+      if (!m) throw new Error(`no mod ${id || '(no id)'}`);
+      const CAP = 200000;
+      return { id, code: m.code.slice(0, CAP), truncated: m.code.length > CAP };
+    }
+    case 'mod.review': {
+      // "Looks right" on a mod's review: what TRIF found in it is allowed for that mod (held.js).
+      const id = typeof args.id === 'string' ? args.id.trim() : '';
+      const m = state.mods.find((x) => x.id === id);
+      if (!m) throw new Error(`no mod ${id || '(no id)'}`);
+      if (state.held[id]) throw new Error(`${id} is on hold: allow it instead`);
+      const allowed = reviewMod(ws.home, m);
+      logger.info(`reviewed ${id}: ${allowed.join(', ') || 'nothing to allow'}`);
+      syncMods('review', false);
+      return { id, allowed };
     }
     case 'mod.delete': {
       const r = deleteMod(ws, args.id, { scope: args.scope });
@@ -909,6 +934,7 @@ function helperInfo() {
     pending: pending.size,
     runs: runs.list(),
     held: state.held,
+    review: state.review,
     updates: state.updates,
     login: logins.info(),
   };
@@ -930,8 +956,8 @@ function onClientLine(sock, line) {
     run = runs.byToken(req.token);
     if (!run) return reply(sock, { id, ok: false, error: 'this agent run has ended (or its token is wrong)' });
     if (AGENT_COMMANDS.has(cmd)) {
-      return reply(sock, { id, ok: false, error: cmd === 'mod.approve'
-        ? 'only the user can approve a held mod (in the side panel, or `trif approve` in their terminal)'
+      return reply(sock, { id, ok: false, error: cmd === 'mod.approve' || cmd === 'mod.review'
+        ? 'only the user can allow what a mod can do (in the side panel, or `trif approve` in their terminal)'
         : cmd === 'mod.update'
           ? 'only the user can choose what happens with a new version of a TRIF mod (in the side panel, or `trif mod-update` in their terminal)'
           : `"${cmd}" isn't available inside an agent run` });

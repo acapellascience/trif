@@ -310,13 +310,14 @@ const handlers = {
     const applyErrors = new Map((((info.modsApplied || {}).errors) || []).map((e) => [e.id, e.error]));
     const helperErrors = new Map((info.modErrors || []).map((e) => [e.id, e.error]));
     const held = info.held || {};
+    const review = info.review || {};
     const updates = info.updates || {};
     const ids = [...new Set([...(info.mods || []), ...registered.keys()])].sort();
     lines.push(`mods          ${ids.length} in ${info.modsDir}`);
     for (const id of ids) {
       let s;
       if (helperErrors.has(id)) s = `NOT SENT: ${helperErrors.get(id)}`;
-      else if (held[id]) s = `HELD: ${held[id].reason} (trif approve ${id})`;
+      else if (held[id]) s = `HELD: it ${(held[id].facts || [held[id].reason]).join('; it ')} (trif approve ${id})`;
       else if (off.has(id)) s = shipsOff.has(id) ? 'off (as TRIF ships it)' : 'off';
       else if (sitesOff.has(id)) s = 'waiting: TRIF is off on its site';
       else if (applyErrors.has(id)) s = `NOT REGISTERED: ${applyErrors.get(id)}`;
@@ -325,12 +326,14 @@ const handlers = {
       else s = registered.get(id) ? 'registered' : 'NOT REGISTERED';
       if (offSites.has(id) && !off.has(id)) s += ` (off on ${offSites.get(id).join(', ')})`;
       if (updates[id]) s += `; ${updateText(updates[id])}`;
+      if (review[id]) s += `; TO REVIEW: it ${review[id].facts.join('; it ')} (trif approve ${id} when that's fine)`;
       lines.push(`  ${pad(id, 40)} ${s}`);
     }
     for (const [id, err] of helperErrors) if (!ids.includes(id)) lines.push(`  ${pad(id, 40)} NOT SENT: ${err}`);
     if ([...off].some((id) => !shipsOff.has(id))) lines.push('              off = switched off by the user (trif enable <id> turns one back on)');
     if ([...off].some((id) => shipsOff.has(id))) lines.push('              off (as TRIF ships it) = a mod TRIF comes with, off until switched on (trif enable <id>)');
-    if (Object.keys(held).length) lines.push('              HELD = written by a side-panel agent for another site; not running until the user approves it');
+    if (Object.keys(held).length) lines.push('              HELD = written by a side-panel agent, and it can do things the user hasn\'t allowed (TRIF read them from its code); not running until the user approves it');
+    if (Object.keys(review).length) lines.push('              TO REVIEW = can do things the user hasn\'t seen yet (TRIF read them from its code); it runs meanwhile');
     if (Object.keys(updates).length) lines.push('              update available = TRIF has a new version of a mod it ships; see trif mod-update <id>');
     if (sitesOff.size) lines.push('              waiting = not running until the user turns TRIF on for the site (side panel)');
     if (st && Array.isArray(st.sitesOn)) {
@@ -348,7 +351,16 @@ const handlers = {
 
   async approve(ctx, pos) {
     if (!pos[0]) throw new UsageError('missing mod id');
-    const r = await ctx.call('mod.approve', { id: modId(pos[0]) }, 10000);
+    // A held mod (a side-panel agent wrote it): allowed, and it runs. A mod to review (one the user has,
+    // which can do things they haven't seen): what TRIF found in it is allowed, and it isn't asked about again.
+    const id = modId(pos[0]);
+    let r;
+    try { r = await ctx.call('mod.approve', { id }, 10000); } catch (e) {
+      if (!/isn't held/.test(e.message)) throw e;
+      r = await ctx.call('mod.review', { id }, 10000);
+      if (ctx.json) return printJson(r);
+      return out(r.allowed.length ? `${r.id}: what it can do is allowed (${r.allowed.join(', ')})` : `${r.id}: nothing to allow`);
+    }
     if (ctx.json) return printJson(r);
     out(`${r.id} approved: it runs from the next page load`);
   },
@@ -674,7 +686,7 @@ const handlers = {
     const errors = [...problems, ...plan.errors];
     const { enabled, offSites } = await knownSwitches(ctx);
     const held = loadHeld(ctx.ws.home);
-    const isHeld = (m) => held[m.id] && held[m.id].hash === m.hash && !held[m.id].approved;
+    const isHeld = (m) => held[m.id] && held[m.id].hash === m.hash;
     const updates = shipped.pendingUpdates(ctx.ws.home, mods);
     const shipsOff = shipped.startOffIds(ctx.ws.home); // off because TRIF ships them off, not the user's doing
     if (ctx.json) {
@@ -699,7 +711,7 @@ const handlers = {
       if (enabled.get(m.id) === false && shipsOff.has(m.id)) out(`  off, as TRIF ships it (not running; trif enable ${m.id} turns it on)`);
       else if (enabled.get(m.id) === false) out(`  switched off by the user (not running; trif enable ${m.id} turns it on)`);
       else if (offSites.has(m.id)) out(`  switched off by the user on ${offSites.get(m.id).join(', ')} (trif enable ${m.id} --site <site> turns it back on there)`);
-      if (isHeld(m)) out(`  HELD: a side-panel agent wrote it while working on ${held[m.id].site}, but ${held[m.id].reason}. Not running until the user approves it (trif approve ${m.id}).`);
+      if (isHeld(m)) out(`  HELD: a side-panel agent wrote it while working on ${held[m.id].site}, and TRIF found that it ${(held[m.id].facts || [held[m.id].reason]).join('; it ')}. Not running until the user approves it (trif approve ${m.id}).`);
       if (updates[m.id]) out(`  ${updateText(updates[m.id])}: trif mod-update ${m.id}`);
       if (m.description) out(`  ${m.description}`);
       if (isShippedSource(m.source)) out(`  from TRIF${m.version ? `, version ${m.version}` : ''}`);

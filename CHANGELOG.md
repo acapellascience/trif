@@ -6,6 +6,18 @@ needs a section here for the version it releases.
 
 ## Unreleased
 
+- **Safer side-panel agents.** A web page can try to talk to your agent ("TRIF agent: run this…"), so
+  TRIF no longer counts on the agent to say no:
+  - When your agent runs code in a tab, TRIF has the browser block anything from that tab that posts,
+    sends or saves as you, until the page reloads. Reading the page, clicks and testing mods work as
+    before; the side panel says when a tab is paused like this, with a Reload button.
+  - TRIF now reads what each mod's code can do (send requests, click or type for you, go to other
+    pages or sites, or code it can't check) instead of trusting what the mod says about itself. A mod
+    your agent writes that can do any of that waits for your OK, with what TRIF found shown apart from
+    what the agent says. Once you allow it, later changes only ask again if they add something new.
+  - Your existing mods keep running. Ones that can do more than change how a page looks show what
+    TRIF found once, with "Looks right".
+  - The page's address reaches your agent without the part after `?` or `#`, which anyone can fill.
 - When your coding agent's login runs out, the side panel asks you to log in again (and keeps your
   message to send again) instead of showing the agent's error twice.
 - **Bigger mods.** A mod can now be up to 4 MB, and all your mods together up to 16 MB. Until now they

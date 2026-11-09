@@ -794,7 +794,9 @@ New native request commands (answered with a normal `response`):
 | `agent.login` | `agent?` | `{loginId}` right away; progress arrives as `agentEvent` messages with `runId` = the loginId |
 | `agent.loginCode` | `loginId, code` | `{sent: true}` (writes the code and a newline to the login's stdin) |
 | `agent.loginCancel` | `loginId` | `{cancelled: true}` |
-| `mod.approve` | `id` | `{id, approved: true}`: releases a held mod (see "Run scope"); also on the socket, not from a run |
+| `mod.approve` | `id` | `{id, approved: true}`: releases a held mod, allowing what was found in it (see "Run scope"); also on the socket, not from a run |
+| `mod.review` | `id` | `{id, allowed: [key]}`: "Looks right" on a mod to review: what TRIF found in it is allowed; not from a run |
+| `mod.code` | `id` | `{id, code, truncated}`: the mod's code as the helper read it (the panel's Show code), capped at 200 000 characters |
 | `mod.delete` | `id` | `{id, deleted: true}`: moves `sites/<site>/<mod>.js` to `trash/<site>/<mod>@<UTC stamp>.js` (entries older than 30 days are removed), then re-sends the mods; also on the socket, and from a run for mods inside its scope |
 | `mod.restore` | `id` | `{id, restored: true, file}`: moves the newest trashed copy back (fails if the mod exists again, except to undo `mod.update` `new`); same rules as `mod.delete`. The extension keeps a deleted mod's switch state, so it comes back as it was |
 | `mod.update` | `id, choice: "new"\|"mine"` | a shipped mod's new version: use it or keep the user's copy (see "Updates to shipped mods"); also on the socket, not from a run |
@@ -928,17 +930,28 @@ Suffix List). `helper/lib/scope.js` computes it; `extension/lib.js` mirrors the 
   unsubscribe paths) unless `force`, since the copy loads the page again with the user's cookies.
   `sweep --scroll` scrolls the tab itself, so it's refused on the tab the user is looking at (active in
   the focused window) unless `force`.
+- **Locked tabs.** Before a run's `run` command executes code in a tab, the extension locks the tab
+  (extension/tablock.js; docs/SECURITY.md): declarativeNetRequest session rules block every POST, PUT,
+  PATCH, DELETE and WebSocket from it until it shows a new document (a marker in the extension's isolated
+  world tells documents apart). If the lock can't be set up, `run` fails and the code doesn't run. The
+  panel's status has `lockedTabs: [{tabId, site, since}]`.
 - **Held mods.** The helper snapshots the mod files when a run starts (the same files the scanner loads:
   `mods.js` listModFiles: links within the mods folder followed, links out of it ignored, no cap). On every mods sync while a run is live (and for 10 s
   after it ends; a finished run's leftover processes get SIGTERM, then SIGKILL after 3 s, so nothing
-  writes later), a mod that the run added or changed and that has an `@match`
-  outside the scope (`<all_urls>`, a `*` host, another domain, `file://`), or whose `@risk` is 2, is **held**: recorded in
-  `~/.trif/held.json` (`{id: {hash, site, scope, runId, reason, at, approved?}}`) and sent to the
-  extension with `held: {site, reason}`, which the extension doesn't register. The run's `done` event
-  carries `held: [{id, reason}]`; the panel says so in the chat and lists the mod (also when it doesn't
-  apply to the tab) with an Allow button (`mod.approve`). Approving marks the entry approved so that
-  version isn't held again; any change to the file drops the entry (a later run's change is checked
-  afresh). `trif status`/`mods` show held mods. A change in another site's existing folder, which the
+  writes later), a mod that the run added or changed is **held** while it can do something not allowed
+  for it: what TRIF reads in its code (`powers.js`: sends, acts, navigates, loads, another site, hidden
+  code; see docs/SECURITY.md), an `@match` outside the scope (`<all_urls>`, a `*` host, another domain,
+  `file://`), or an `@risk` of 2. Recorded in `~/.trif/held.json` (`{id: {hash, site, scope, runId, at,
+  reason, facts, needs, lines, claim}}`) and sent to the extension with `held: {site, reason, facts,
+  claim}` (facts: TRIF's words; claim: the mod's own @risk reason or description), which the extension
+  doesn't register. The run's `done` event carries `held: [{id, reason, facts}]`; the panel says so in the
+  chat and lists the mod (also when it doesn't apply to the tab) with TRIF's facts, the claim apart, Allow
+  (`mod.approve`) and Show code (`mod.code`). Allowing records what was found in `~/.trif/allowed.json`
+  (`{id: {powers: [key], lines: {key: [line hash]}, at}}`) and drops the hold; a run's later change is held
+  only for a power or a line using one that isn't allowed. A held mod the run changes again is worked
+  out again; one changed after its run ended (by the user) is released. Mods the user has that can do
+  something not allowed are sent with `review: {facts, claim}` (not held; the panel's "Looks right" is
+  `mod.review`). `trif status`/`mods` show held mods and mods to review. A change in another site's existing folder, which the
   run's limits make read-only, isn't held on the run's account (someone else made it), but only for the
   folders the agent's adapter says it protected (`command()` returns `locked`; none if it doesn't say).
 - **Agent sandboxes.** The scope only holds if the agent can't reach the helper some other way or

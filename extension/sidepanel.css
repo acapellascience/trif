@@ -493,3 +493,19 @@ body[data-problem="helper"] .mod-list, body.needs-login .mod-list { --switch-on:
 .check input { margin: 0; }
 
 #update .md { margin-top: 6px; font-size: 12px; color: var(--muted); }
+
+/* What a mod can do (held, or to review): TRIF's facts, read from its code, apart from what the mod says */
+.mods-review-note { margin: 4px 0 6px; font-size: 12px; color: var(--muted); }
+.mod-facts { margin: 6px 0 2px 34px; padding: 6px 8px; border: 1px solid var(--line); border-radius: 7px; font-size: 12px; }
+.mod-facts.held { border-color: var(--bad); }
+.mod-facts p { margin: 0; }
+.mod-facts .facts-head { font-weight: 600; }
+.mod-facts ul.facts { margin: 4px 0; padding-left: 18px; font-weight: 600; }
+.mod-facts .facts-note { color: var(--muted); }
+.mod-facts .facts-claim { margin-top: 4px; color: var(--muted); font-style: italic; }
+.mod-facts .facts-who { font-style: normal; }
+.mod-facts .actions { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; }
+.mod-facts .facts-code { max-height: 220px; overflow: auto; margin: 6px 0 0; padding: 6px; background: var(--field, rgba(127,127,127,.08)); border-radius: 5px; font-size: 11px; white-space: pre-wrap; word-break: break-word; }
+
+/* A tab the agent ran code in (tablock.js) */
+.notice.tab-lock .title { font-weight: 600; }

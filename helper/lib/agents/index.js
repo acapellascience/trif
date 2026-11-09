@@ -162,13 +162,29 @@ function hostOf(url) {
   try { return new URL(url).hostname.replace(/^www\./, ''); } catch { return ''; }
 }
 
+// The page's address as the prompt says it: its origin and path only, quoted and capped. The rest (the
+// query and fragment, ?q=… and #…) is the page's to fill: a link someone sends could put words meant for
+// the agent there, and the prompt is the most trusted thing the agent reads. (The agent can still see the
+// full address with trif tabs, as page content.)
+function promptUrl(url) {
+  let u;
+  try { u = new URL(String(url)); } catch { return null; }
+  if (!/^https?:$/.test(u.protocol)) return null;
+  let path = u.pathname;
+  try { path = decodeURI(path); } catch { /* keep it encoded */ }
+  path = path.replace(/[^\w\-./~%@+:,;=!*'()$&\u00a0-\uffff]/g, '').replace(/[\u0000-\u001f\u007f-\u009f\u2028\u2029]/g, '');
+  if (path.length > 120) path = `${path.slice(0, 120)}…`;
+  return JSON.stringify(`${u.origin}${path}`);
+}
+
 // Full context: appended system prompt (claude, every run) or prepended to a session's first message.
 function contextText({ url, tabId, scope, browser }) {
-  const where = url
-    ? `They're looking at ${url}${tabId != null ? ` (tab ${tabId}): pass \`--tab ${tabId}\` to trif commands` : ''}.`
+  const shown = url ? promptUrl(url) : null;
+  const where = shown
+    ? `They're looking at ${shown}${tabId != null ? ` (tab ${Number(tabId)}): pass \`--tab ${Number(tabId)}\` to trif commands` : ''}.`
     : "They didn't say which page they're on: run `trif tabs` if you need it.";
   const limit = scope
-    ? ` This run is limited to ${scope}: trif commands only work on its tabs, and a mod you write that matches other sites is held until the user approves it (see "Side-panel runs" in AGENTS.md). You can only change files in ${scope}'s folders under sites/ (start a mod with \`trif new ${scope} <name>\`); writes anywhere else are refused, so if one is, check the folder rather than giving up.`
+    ? ` This run is limited to ${scope}: trif commands only work on its tabs; a tab you run code in can't send requests that change anything until it reloads; and a mod you write is held until the user approves it if its code can send requests, click or type, navigate or load from addresses it works out, or if it matches other sites (see "Side-panel runs" in AGENTS.md). You can only change files in ${scope}'s folders under sites/ (start a mod with \`trif new ${scope} <name>\`); writes anywhere else are refused, so if one is, check the folder rather than giving up.`
     : '';
   // The browser whose panel started the run (its hello names it); "browser" when unknown, e.g. from a terminal.
   return `You're running inside the TRIF side panel in the user's ${browser || 'browser'}. ` + where + limit +
@@ -179,8 +195,9 @@ function contextText({ url, tabId, scope, browser }) {
 
 // One-line reminder for later messages of a session (agents without a system prompt flag).
 function reminderText({ url, tabId }) {
-  if (!url) return '(TRIF side panel.)';
-  return `(TRIF side panel: the user is now on ${url}${tabId != null ? `, tab ${tabId}: use --tab ${tabId}` : ''}.)`;
+  const shown = url ? promptUrl(url) : null;
+  if (!shown) return '(TRIF side panel.)';
+  return `(TRIF side panel: the user is now on ${shown}${tabId != null ? `, tab ${Number(tabId)}: use --tab ${Number(tabId)}` : ''}.)`;
 }
 
 // Claude Code permissions for the workspace (written by `trif setup`).

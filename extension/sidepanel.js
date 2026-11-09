@@ -23,7 +23,7 @@ const ui = {
   using: $('#using'), modelCustomRow: $('#model-custom-row'), modelCustom: $('#model-custom'), modelNote: $('#model-note'),
   instructions: $('#instructions'), instructionsNote: $('#instructions-note'),
   autoUpdate: $('#auto-update'), updateNote: $('#update-note'), update: $('#update'),
-  notice: $('#notice'), paused: $('#paused'), mods: $('#mods'), modsCount: $('#mods-count'), modList: $('#mod-list'), modsLive: $('#mods-live'),
+  notice: $('#notice'), paused: $('#paused'), tabLock: $('#tab-lock'), mods: $('#mods'), modsCount: $('#mods-count'), modList: $('#mod-list'), modsReviewNote: $('#mods-review-note'), modsLive: $('#mods-live'),
   chat: $('#chat'), empty: $('#empty'), messages: $('#messages'), working: $('#working'),
 
   composer: $('#composer'), input: $('#input'), send: $('#send'), stop: $('#stop'),
@@ -367,6 +367,7 @@ function render() {
       : `Log in to ${agentInfo?.name || 'your agent'} first`;
 
   renderGate(problem, agentInfo);
+  renderTabLock();
   renderNotice({ helperOk, agentInfo, anyAgent });
   renderUpdate();
   renderMods();
@@ -450,6 +451,21 @@ function renderProblemLine(node, problem, agentInfo) {
 function allowUserScripts() {
   if (FIREFOX) chrome.permissions.request({ permissions: ['userScripts'] }).then(() => setTimeout(refreshStatus, 300), () => {});
   else chrome.tabs.create({ url: view.status?.settingsUrl || `chrome://extensions/?id=${chrome.runtime.id}` });
+}
+
+/**
+ * This tab is locked (background's tabLocks, tablock.js): the agent ran code in it, so the browser blocks
+ * every request from it that changes something (posting, sending, saving) until the page is reloaded.
+ */
+function renderTabLock() {
+  const n = ui.tabLock;
+  const locked = view.tab && (view.status?.lockedTabs || []).some((l) => l.tabId === view.tab.id);
+  n.hidden = !locked;
+  if (!locked) { n.replaceChildren(); return; }
+  if (n.childElementCount) return;
+  const reload = button('Reload the page', 'primary', () => { if (view.tab) chrome.tabs.reload(view.tab.id).catch(() => {}); });
+  const p = el('p', null, 'Your agent ran code in this page, so TRIF has blocked anything here from posting, sending or saving as you until the page reloads. Reading, scrolling, clicks and mods work as usual.');
+  n.replaceChildren(el('p', 'title', 'Posting is paused on this tab'), p, actions(reload));
 }
 
 /** User scripts off: "Mods are paused", in a notice of its own above the rest (a login notice too). */
@@ -597,14 +613,21 @@ function renderMods() {
   view.modNatural = listed.map((m) => m.id);
   const mods = orderMods(listed, view.modOrder[scope]);
   ui.mods.hidden = mods.length === 0;
-  if (!mods.length) { view.modRows.clear(); ui.modList.replaceChildren(); return; }
+  if (!mods.length) { view.modRows.clear(); ui.modList.replaceChildren(); ui.modsReviewNote.hidden = true; return; }
   ui.modsCount.textContent = `(${mods.length})`;
+  // Mods TRIF found can do more than change the page's look, which the user hasn't looked at yet (helper
+  // lib/held.js): they keep running; each gets its facts once, below it.
+  const toReview = mods.filter((m) => m.review && !m.held).length;
+  ui.modsReviewNote.hidden = !toReview;
+  ui.modsReviewNote.textContent = toReview
+    ? `TRIF now reads what each mod's code can do. ${toReview === 1 ? 'One mod here can' : `${toReview} mods here can`} do more than change how the page looks: have a look below. ${toReview === 1 ? 'It keeps' : 'They keep'} running meanwhile.`
+    : '';
   // Each row is built once and rebuilt only when its own mod changes; rows that stay are left where they
   // are (not even moved), so a button being clicked or a focused switch is never swapped out from under
   // the pointer by a status refresh or by another mod changing. Everything else updates in place.
   const rows = new Map();
   for (const m of mods) {
-    const key = JSON.stringify([site, m.name, m.description || '', m.file, !!m.held, m.risk?.tier ?? null, m.risk?.why ?? null, m.matches,
+    const key = JSON.stringify([site, m.name, m.description || '', m.file, m.held ?? null, m.review ?? null, m.risk?.tier ?? null, m.risk?.why ?? null, m.matches,
       m.source ?? null, m.version ?? null, m.update ?? null]);
     const old = view.modRows.get(m.id);
     rows.set(m.id, old && old.key === key ? old : { key, li: modItem(m) });
@@ -738,7 +761,8 @@ function modItem(m) {
   main.append(light, name, ...(desc ? [desc] : []));
   const row = el('div', 'mod-row');
   if (m.held) {
-    // Written by an agent run here but reaching other sites: not running until the user allows it.
+    // Written by an agent run here, and it can do something the user hasn't allowed (what TRIF read in
+    // its code, or matches outside the site): not running until the user allows it.
     li.classList.add('held');
     const allow = el('button', 'btn allow', 'Allow');
     allow.type = 'button';
@@ -762,8 +786,54 @@ function modItem(m) {
   const err = el('div', 'mod-err');
   err.hidden = true;
   li.append(row, err);
+  if (m.held) li.append(factsBox(m, m.held, 'held'));
+  else if (m.review) li.append(factsBox(m, m.review, 'review'));
   if (m.update && !m.held) li.append(updateNotice(m, err));
   return li;
+}
+
+// What a mod can do, in two clearly separate parts: TRIF's own facts, read from the code (the helper's
+// lib/powers.js and held.js), and what the mod says about itself (its header's @risk reason or
+// description: whoever wrote the mod wrote that too), labelled as such. Held: Allow is on the row.
+// Review (a mod the user has, still running): "Looks right" allows what was found; or switch it off.
+function factsBox(m, info, kind) {
+  const box = el('div', `mod-facts ${kind}`);
+  box.append(el('p', 'facts-head', kind === 'held'
+    ? 'Waiting for your OK. TRIF found that this mod:'
+    : 'TRIF found that this mod:'));
+  const list = el('ul', 'facts');
+  for (const f of (Array.isArray(info.facts) ? info.facts : [String(info.reason || '')]).filter(Boolean)) list.append(el('li', null, f));
+  box.append(list);
+  const where = m.matches && m.matches.length ? ` It runs by itself on every page it's for (${m.matches.slice(0, 3).join(', ')}${m.matches.length > 3 ? '…' : ''}).` : '';
+  box.append(el('p', 'facts-note', `${kind === 'held' ? 'An agent wrote it while working here.' : 'It keeps running until you switch it off.'}${where}`));
+  if (info.claim) {
+    const claim = el('p', 'facts-claim');
+    claim.append(el('span', 'facts-who', kind === 'held' ? 'The agent says: ' : 'The mod says: '), document.createTextNode(`“${info.claim}”`));
+    box.append(claim);
+  }
+  const shown = el('pre', 'facts-code');
+  shown.hidden = true;
+  const showCode = button('Show code', '', async () => {
+    if (!shown.hidden) { shown.hidden = true; showCode.textContent = 'Show code'; return; }
+    showCode.disabled = true;
+    try {
+      const r = await request({ type: 'mod.code', id: m.id });
+      shown.textContent = r.code + (r.truncated ? '\n…' : '');
+      shown.hidden = false;
+      showCode.textContent = 'Hide code';
+    } catch (e) { rowError(m.id, String(e?.message ?? e)); } finally { showCode.disabled = false; }
+  });
+  if (kind === 'review') {
+    const ok = button('Looks right', '', async () => {
+      ok.disabled = true;
+      clearRowError(m.id);
+      try { await request({ type: 'mod.review', id: m.id }); } catch (e) { ok.disabled = false; rowError(m.id, String(e?.message ?? e)); }
+    });
+    ok.title = 'TRIF won\'t ask about these again for this mod (only if it gains something new).';
+    box.append(actions(ok, showCode));
+  } else box.append(actions(showCode));
+  box.append(shown);
+  return box;
 }
 
 // A newer version of a mod TRIF ships, which didn't replace this copy because the user changed it
@@ -1036,10 +1106,7 @@ function updateModItem(li, m) {
     tag.textContent = 'on hold';
     tag.hidden = false;
     const err = li.querySelector('.mod-err');
-    if (rowErr) { err.textContent = rowErr; err.hidden = false; } else if (!li.querySelector('.allow')?.disabled) {
-      err.textContent = `An agent wrote this while working here, but ${m.held.reason}. It won't run until you allow it.`;
-      err.hidden = false;
-    }
+    if (rowErr) { err.textContent = rowErr; err.hidden = false; } else { err.textContent = ''; err.hidden = true; } // (the facts box says why)
     return;
   }
   const site = switchSite(m);

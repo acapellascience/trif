@@ -13,6 +13,7 @@ import {
 import { runtimeCode } from './runtime.js';
 import { sweepPage } from './sweep.js';
 import { captureScreenshot, stitchShots, isCopyWindow } from './screenshot.js';
+import { createTabLocks } from './tablock.js';
 
 const HOST = 'com.webmods.helper';
 const VERSION = chrome.runtime.getManifest().version;
@@ -58,6 +59,14 @@ const state = {
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const errMsg = (e) => String(e?.message ?? e);
+
+// Tabs a side-panel agent ran code in: requests that change things are blocked there until the page is a
+// new one (tablock.js, docs/SECURITY.md). The panel shows it, with a Reload button.
+const tabLocks = createTabLocks({ chrome, log: (m) => console.log(`[TRIF] ${m}`), changed: () => notifyPanels() });
+chrome.tabs.onUpdated?.addListener((tabId, info) => { if (info.status === 'complete' || info.url) tabLocks.check(tabId).catch(() => {}); });
+chrome.tabs.onRemoved?.addListener((tabId) => { tabLocks.unlock(tabId, 'closed').catch(() => {}); });
+chrome.tabs.onReplaced?.addListener((added, removed) => { tabLocks.unlock(removed, 'replaced').catch(() => {}); tabLocks.check(added).catch(() => {}); });
+chrome.tabs.onCreated?.addListener((tab) => { tabLocks.opened(tab).catch(() => {}); });
 
 /**
  * Writes to chrome.storage.local, saying what failed if it can't (a full quota rejects every write).
@@ -147,6 +156,11 @@ chrome.runtime.onInstalled.addListener((details) => {
 });
 chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   if (sender.id !== chrome.runtime.id) return false;
+  // A locked page back from the back/forward cache (its marker, in our isolated world: tablock.js)
+  if (msg?.type === 'tabLock.restored' && sender.tab?.id != null) {
+    tabLocks.restored(sender.tab.id, msg.token).then(() => sendResponse({ ok: true }), (e) => sendResponse({ error: errMsg(e) }));
+    return true;
+  }
   ready.then(() => onPageMessage(msg)).then(sendResponse, (e) => sendResponse({ error: errMsg(e) }));
   return true;
 });
@@ -543,6 +557,13 @@ const commands = {
     requireUserScripts();
     if (typeof args.code !== 'string') throw new Error('missing code');
     const tab = await scopedTab(args);
+    // A side-panel agent's code (args.scope): lock the tab first, so nothing it does can post, send or
+    // change anything as the user (tablock.js). No lock, no code.
+    if (args.scope) {
+      try { await tabLocks.lock(tab.id, args.scope); } catch (e) {
+        throw new Error(`TRIF couldn't lock tab ${tab.id} against sending requests (${errMsg(e)}), so it won't run agent code there`);
+      }
+    }
     const timeout = Number(args.timeout) > 0 ? Number(args.timeout) : 10000;
     const runId = crypto.randomUUID();
     let timedOut = false;
@@ -947,11 +968,12 @@ async function uiStatus() {
       id: m.id, name: m.name || m.id, description: m.description || '', site: m.site, file: m.file || '',
       matches: m.matches || [], excludes: m.excludes || [], registered: !!live.get(m.id)?.registered, enabled: live.get(m.id)?.enabled ?? isEnabled(m.id),
       error: errors.get(m.id) === USER_SCRIPTS_OFF ? null : errors.get(m.id) || null,
-      held: m.held || null, risk: m.risk || null,
+      held: m.held || null, review: m.held ? null : m.review || null, risk: m.risk || null,
       from: fromOtherBrowser(m, state.installId) ? (m.origin.browser || 'another browser') : null,
       source: m.source || null, version: m.version || null, update: m.update || null,
     })),
     runs: [...state.runs.values()].map((r) => ({ runId: r.runId, site: r.site })),
+    lockedTabs: tabLocks.list(),
     // Storage stopped working: the panel can't read switches from it, so they come from here.
     ...(storageHealth.broken ? { storageBroken: true, disabled: state.disabled, offSites: state.offSites } : {}),
   };
@@ -1022,6 +1044,14 @@ async function onPanelMessage(msg) {
       const site = normalizeSite(msg.site);
       await updateChat(site, (chat) => { chat.messages.push({ role: 'tool', text: String(msg.text ?? ''), time: Date.now() }); });
       return { ok: true };
+    }
+    case 'mod.code': {
+      // "Show code" on a held mod or one to review: the file as the helper has it (capped)
+      return helperRequest('mod.code', { id: String(msg.id ?? '') }, 10000);
+    }
+    case 'mod.review': {
+      // "Looks right" on a mod TRIF found can do more than restyle (the helper allows what it found)
+      return helperRequest('mod.review', { id: String(msg.id ?? '') }, 10000);
     }
     case 'mod.approve': {
       const r = await helperRequest('mod.approve', { id: String(msg.id ?? '') }, 10000);
@@ -1238,7 +1268,7 @@ async function onAgentEvent(runId, event, relay = true) {
           else push('error', String(event.result ?? '').trim() || 'The agent stopped without finishing.');
         }
         for (const h of Array.isArray(event.held) ? event.held : []) {
-          push('error', `${h.id} is on hold: ${h.reason}. It won't run until you allow it (in Mods above).`);
+          push('error', `${h.id} is on hold: TRIF found that it ${(Array.isArray(h.facts) && h.facts.length ? h.facts : [h.reason]).join('; it ')}. It won't run until you allow it (in Mods above).`);
         }
         chat.last = {
           runId, ok: !!event.ok, time,

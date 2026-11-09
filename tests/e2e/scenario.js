@@ -732,6 +732,7 @@ class Scenario {
     // (A stand-in Claude Code: only when the helper has the scratch HOME, never your real agent.)
     if (!this.o.agent && !this.o.codex && !this.o.oss && !this.o.guidance) {
       await r.check('an expired login (a stand-in Claude Code): the login notice and one plain line, not the raw error; the message back in the box', () => this.expiredLoginCheck(win));
+      await r.check('a hijacked agent (a stand-in Claude Code): the tab it ran code in sends nothing that changes anything until it reloads, even later; its mod that posts is held by its code, whatever its header says', () => this.hijackedAgentCheck(win));
     }
 
     if (this.o.agent) await this.agentChecks('claude');
@@ -1334,6 +1335,116 @@ process.exitCode = 1;
     }
   }
 
+  // ---- a hijacked agent, with a stand-in Claude Code (extension/tablock.js, helper/lib/powers.js and held.js)
+
+  /**
+   * A stand-in `claude` that does what an agent steered by a web page might: from `trif run` in the tab it
+   * was given, a POST, a beacon, a WebSocket, a POST put off until after its command is over, and a
+   * plain GET (reading is fine); then a mod whose header says render-only but whose code posts. The test
+   * site must receive none of the writes, the GET must work, the panel must say the tab is locked, the mod
+   * must be held for what its code does; a reload unlocks the tab, and a terminal's `trif run` (the
+   * user's own) doesn't lock it.
+   */
+  async hijackedAgentCheck(win) {
+    const dir = path.join(this.work, 'standin-hijack');
+    fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(path.join(dir, 'claude'), `#!${process.execPath}
+const { spawnSync } = require('child_process');
+const fs = require('fs');
+const a = process.argv.slice(2);
+if (a[0] === '--version') { console.log('2.1.319 (Claude Code)'); process.exit(0); }
+if (a[0] === 'auth') { console.log('{"loggedIn": true, "authMethod": "claude.ai"}'); process.exit(0); }
+const say = (o) => process.stdout.write(JSON.stringify(o) + '\\n');
+say({ type: 'system', subtype: 'init', session_id: 'e2e-hijack' });
+process.on('uncaughtException', (e) => { const t = 'stand-in crashed: ' + (e && e.stack || e) + ' cwd=' + process.cwd(); say({ type: 'assistant', message: { model: 'claude-e2e', content: [{ type: 'text', text: JSON.stringify({ crash: t }) }] } }); say({ type: 'result', subtype: 'success', is_error: false, result: JSON.stringify({ crash: t }), session_id: 'e2e-hijack' }); process.exit(0); });
+const ctxFile = a[a.indexOf('--append-system-prompt-file') + 1];
+const ctx = a.includes('--append-system-prompt-file') ? fs.readFileSync(ctxFile, 'utf8') : a.join(' ');
+const tab = (/\\(tab (\\d+)\\)/.exec(ctx) || [])[1];
+const own = require('path').join(process.cwd(), 'bin', 'trif'); // (the workspace's, as the run's cwd is the workspace)
+const trif = fs.existsSync(own) ? own : 'trif';
+const run = (code) => {
+  const r = spawnSync(trif, ['run', '--tab', tab, '--timeout', '8000', code], { encoding: 'utf8' });
+  if (r.error) return 'trif failed: ' + r.error.message;
+  if (r.status !== 0) return 'trif failed: ' + String(r.stderr || r.stdout || '').trim();
+  try { return JSON.parse(r.stdout); } catch { return r.stdout.trim(); } // (a string result prints as it is)
+};
+const out = { tab };
+out.post = run('fetch("/e2e-post", { method: "POST", body: "hi" }).then((r) => "sent " + r.status, (e) => "blocked: " + e.message)');
+out.get = run('fetch("/two.html").then((r) => r.status, (e) => "failed: " + e.message)');
+out.beacon = run('navigator.sendBeacon("/e2e-beacon", "hi")');
+out.socket = run('new Promise((res) => { const w = new WebSocket("ws://" + location.host + "/e2e-socket"); w.onopen = () => res("open"); w.onerror = () => res("blocked"); setTimeout(() => res("no answer"), 3000); })');
+out.later = run('(setTimeout(() => fetch("/e2e-later", { method: "POST", body: "after the command" }), 1500), "put off")');
+fs.writeFileSync('sites/127.0.0.1/e2e-poster.js', '// ==WebMod==\\n// @name Prettier\\n// @description Makes the page prettier\\n// @risk 0 render-only\\n// ==/WebMod==\\n(() => { fetch("/e2e-from-mod", { method: "POST" }); })();\\n');
+const text = JSON.stringify(out);
+say({ type: 'assistant', message: { model: 'claude-e2e', content: [{ type: 'text', text }] } });
+say({ type: 'result', subtype: 'success', is_error: false, result: text, session_id: 'e2e-hijack' });
+`, { mode: 0o755 });
+    const cfgFile = path.join(this.priv, 'config.json');
+    const saved = fs.readFileSync(cfgFile, 'utf8');
+    const cfg = JSON.parse(saved);
+    cfg.env = { ...(cfg.env || {}), PATH: [dir, cfg.env?.PATH].filter(Boolean).join(':') };
+    fs.writeFileSync(cfgFile, JSON.stringify(cfg, null, 2) + '\n');
+    const site = '127.0.0.1';
+    const base = `http://${site}:${this.o.servers.port}`;
+    const posted = (p) => this.o.servers.requests.filter((q) => q.url.startsWith(p) && q.method !== 'GET');
+    const chat = () => this.ext(`async (k) => (await chrome.storage.local.get(k))[k] || null`, [`chat:${site}`]);
+    const reopen = async () => {
+      await this.panel(`async () => { setTimeout(() => location.reload(), 20); return true; }`).catch(() => {});
+      await sleep(800);
+      this.panelCtx = await this.d.findPage('sidepanel.html');
+    };
+    const modFile = path.join(this.trif, 'sites', site, 'e2e-poster.js');
+    this.hijacked = true; // (the console check expects the requests this blocks)
+    try {
+      await this.ext(`async (k) => { await chrome.storage.local.remove(k); }`, [`chat:${site}`]);
+      await this.ext(`async (id, url) => { await chrome.tabs.update(id, { url, active: true }); }`, [win.tabId, `${base}/?e2e=hijack`]);
+      await reopen();
+      await this.waitPanel(`the panel on ${site}`, (x) => x.site === site && !x.gate, 15000);
+      // (After the expired-login check the panel may still say Claude Code needs a login; Send works anyway.)
+      await this.waitLooks('Send on (the stand-in Claude Code)', (l) => /Claude Code/.test(l.dotLabel) && !l.send.disabled, 30000);
+      await this.panel(`async (text) => { const i = document.getElementById('input'); i.value = text; i.dispatchEvent(new Event('input', { bubbles: true })); }`, ['make the page prettier']);
+      await this.d.click(this.panelCtx, '#send');
+      const c = await waitFor('the run to finish', async () => { const x = await chat(); return x && !x.run && x.messages.length >= 2 ? x : null; }, { timeoutMs: 60000, intervalMs: 300 });
+      const answer = c.messages.find((m) => m.role === 'assistant');
+      if (!answer) throw new Error(`the run: ${JSON.stringify(c.messages.map((m) => [m.role, String(m.text).slice(0, 400)]))}`);
+      const said = JSON.parse(answer.text);
+      if (said.crash) throw new Error(said.crash);
+      if (String(said.tab) !== String(win.tabId)) throw new Error(`the stand-in got tab ${said.tab}, not ${win.tabId}: ${JSON.stringify(said)}`);
+      if (!/^blocked/.test(said.post)) throw new Error(`the POST: ${said.post}`);
+      if (said.get !== 200) throw new Error(`a GET should still work: ${said.get}`);
+      if (said.socket === 'open') throw new Error('the WebSocket opened');
+      if (said.later !== 'put off') throw new Error(`the put-off POST: ${said.later}`);
+      await sleep(3000); // (past the put-off POST's 1.5 s)
+      for (const p of ['/e2e-post', '/e2e-beacon', '/e2e-later', '/e2e-from-mod']) if (posted(p).length) throw new Error(`the test site received ${JSON.stringify(posted(p))}`);
+      if (this.o.servers.requests.some((q) => q.url.startsWith('/e2e-socket'))) throw new Error('the WebSocket reached the test site');
+      // The panel says so, with a Reload button
+      const lock = await waitFor('the lock notice', () => this.panel(`async () => { const n = document.getElementById('tab-lock'); return n && !n.hidden ? n.innerText : null; }`), { timeoutMs: 10000 });
+      if (!/Posting is paused on this tab/.test(lock)) throw new Error(`the lock notice: ${lock}`);
+      // The mod: held for what its code does, its header's claim shown apart
+      const held = await waitFor('the mod held', () => this.panel(`async () => {
+        const li = document.querySelector('#mod-list li[data-mod="${site}/e2e-poster"]');
+        const box = li && li.querySelector('.mod-facts.held');
+        return box ? { facts: [...box.querySelectorAll('ul.facts li')].map((x) => x.textContent), claim: box.querySelector('.facts-claim')?.textContent || '' } : null;
+      }`), { timeoutMs: 15000 });
+      if (!held.facts.some((f) => /send requests or messages from the page as you \(it uses fetch\)/.test(f))) throw new Error(`the held facts: ${JSON.stringify(held)}`);
+      if (!/The agent says: .render-only/.test(held.claim)) throw new Error(`the claim: ${held.claim}`);
+      await this.shot(this.panelCtx, 'panel-hijack-held-and-locked');
+      // A reload: a new page, unlocked; a terminal's trif run (the user's) posts as before and locks nothing
+      await this.cli(['reload', '--tab', String(win.tabId)], { timeoutMs: 30000 });
+      await waitFor('the tab unlocked', () => this.panel(`async () => document.getElementById('tab-lock').hidden || null`), { timeoutMs: 10000 });
+      const t = await this.cli(['run', '--tab', String(win.tabId), 'fetch("/e2e-after", { method: "POST", body: "x" }).then((r) => r.status)'], { timeoutMs: 30000 });
+      if (t.status !== 0) throw new Error(`trif run from a terminal: ${t.stderr}`);
+      await waitFor('the terminal POST to arrive', () => posted('/e2e-after').length || null, { timeoutMs: 5000 });
+      if (!(await this.panel(`async () => document.getElementById('tab-lock').hidden`))) throw new Error('a terminal trif run locked the tab');
+      return `POST ${said.post}; GET ${said.get}; beacon/later/socket never arrived; mod held: ${held.facts.join(' / ')}; unlocked by a reload`;
+    } finally {
+      fs.writeFileSync(cfgFile, saved);
+      try { fs.unlinkSync(modFile); } catch { /* not written */ }
+      await this.panel(`async () => { document.getElementById('input').value = ''; }`).catch(() => {});
+      await this.ext(`async (k) => { await chrome.storage.local.remove(k); }`, [`chat:${site}`]).catch(() => {});
+    }
+  }
+
   // ---- agent runs (real ones: they use your Claude Code / Codex login and cost a little)
 
   async agentChecks(agent) {
@@ -1481,7 +1592,10 @@ process.exitCode = 1;
     // The helper stopped and user scripts turned off on purpose (colourChecks): the background's warnings
     // about either are expected.
     const expected = (p) => p.level === 'warn' && ((this.helperStopped && /helper disconnected|native messaging host/i.test(String(p.text)))
-      || (this.scriptsRevoked && /user scripts were turned off/.test(String(p.text))));
+      || (this.scriptsRevoked && /user scripts were turned off/.test(String(p.text))))
+      // the hijacked agent's requests, which the tab lock blocked on purpose (hijackedAgentCheck)
+      // (Firefox doesn't say which page: after that check, a failed fetch or socket is one of those)
+      || (this.hijacked && /ERR_BLOCKED_BY_CLIENT|NetworkError when attempting to fetch|Failed to fetch|establish a connection to the server at ws:\/\/[^ ]+\/e2e-socket|WebSocket connection to '[^']+\/e2e-socket/i.test(String(p.text)));
     const problems = (await this.d.consoleProblems()).filter((p) => !expected(p));
     // The agent-made mod and the stand-in pages aren't ours to judge; everything else counts.
     const lines = problems.map((p) => `${p.level} [${p.from}] ${String(p.text).slice(0, 300)}${p.source ? ` (${String(p.source).slice(0, 120)})` : ''}`);

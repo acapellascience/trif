@@ -188,6 +188,8 @@ function preinstallMods(home, modsDir, examplesDir, list = PREINSTALLED, sitesOn
     const dest = modFile(modsDir, id);
     if (!fs.existsSync(dest)) {
       fs.mkdirSync(path.dirname(dest), { recursive: true });
+      // (its base first: the helper judges a new shipped mod against it, held.js)
+      writeAtomic(baseFile(home, id), fs.readFileSync(src));
       fs.copyFileSync(src, dest);
       added.push(id);
       if (startOn) on.push(id); else state.startOff.push(id);
@@ -238,8 +240,9 @@ function updateShippedMods(home, modsDir, examplesDir, list = PREINSTALLED) {
       continue; // the user kept theirs over this version
     } else if (rec && rec.hash ? mineHash === rec.hash : shippedBefore(history, id, mineHash)) {
       // Unchanged since it was shipped: the new version replaces it (its switch, kept by id, carries over).
-      writeAtomic(modFile(modsDir, id), shipped.code);
+      // (the base first: the helper judges a changed shipped mod against it, held.js)
       writeAtomic(baseFile(home, id), shipped.code);
+      writeAtomic(modFile(modsDir, id), shipped.code);
       removeFile(newFile(home, id));
       next = current;
       updated.push({ id, version: shipped.version, from: rec ? rec.version || null : null });

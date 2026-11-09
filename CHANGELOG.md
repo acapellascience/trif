@@ -14,7 +14,9 @@ needs a section here for the version it releases.
   - TRIF now reads what each mod's code can do (send requests, click or type for you, go to other
     pages or sites, or code it can't check) instead of trusting what the mod says about itself. A mod
     your agent writes that can do any of that waits for your OK, with what TRIF found shown apart from
-    what the agent says. Once you allow it, later changes only ask again if they add something new.
+    what the agent says. The same goes for a mod from anywhere else: your terminal agent, a file you
+    paste in, a mod someone shares. Once you allow it, later changes only ask again if they add
+    something new.
   - Your existing mods keep running. Ones that can do more than change how a page looks show what
     TRIF found once, with "Looks right".
   - The page's address reaches your agent without the part after `?` or `#`, which anyone can fill.

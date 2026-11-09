@@ -1451,10 +1451,30 @@ say({ type: 'result', subtype: 'success', is_error: false, result: text, session
       if (t.status !== 0) throw new Error(`trif run from a terminal: ${t.stderr}`);
       await waitFor('the terminal POST to arrive', () => posted('/e2e-after').length || null, { timeoutMs: 5000 });
       if (!(await this.panel(`async () => document.getElementById('tab-lock').hidden`))) throw new Error('a terminal trif run locked the tab');
-      return `POST ${said.post}; GET ${said.get}; GET to another site ${said.leak}; beacon/later/socket/leaving for another site never arrived; mod held: ${held.facts.join(' / ')}; the panel's button brought the tab back, unlocked`;
+      // A mod from outside any run (pasted into the folder, as a shared mod would be) that posts: held
+      // too, until the user's `trif approve`; then it runs
+      const pasted = path.join(this.trif, 'sites', site, 'e2e-pasted.js');
+      fs.writeFileSync(pasted, '// ==WebMod==\n// @name Pasted\n// @risk 0 render-only\n// ==/WebMod==\n(() => { document.documentElement.dataset.e2ePasted = "ran"; fetch("/e2e-pasted", { method: "POST" }); })();\n');
+      const pastedHeld = await waitFor('the pasted mod held', async () => {
+        const st = await this.cli(['status'], { timeoutMs: 20000 });
+        return /127\.0\.0\.1\/e2e-pasted\s+HELD: it can send requests/.test(st.stdout) ? st.stdout.split('\n').find((l) => l.includes('e2e-pasted')).trim() : null;
+      }, { timeoutMs: 15000, intervalMs: 500 });
+      await this.cli(['reload', '--tab', String(win.tabId)], { timeoutMs: 30000 });
+      const ranHeld = await this.cli(['run', '--tab', String(win.tabId), 'document.documentElement.dataset.e2ePasted || "not run"'], { timeoutMs: 20000 });
+      if (ranHeld.stdout.trim() !== 'not run' || posted('/e2e-pasted').length) throw new Error(`the held mod ran: ${ranHeld.stdout}`);
+      const ok = await this.cli(['approve', `${site}/e2e-pasted`], { timeoutMs: 20000 });
+      if (ok.status !== 0) throw new Error(`trif approve: ${ok.stderr}`);
+      await this.cli(['reload', '--tab', String(win.tabId)], { timeoutMs: 30000 });
+      await waitFor('the approved mod to run', async () => {
+        const r2 = await this.cli(['run', '--tab', String(win.tabId), 'document.documentElement.dataset.e2ePasted || "not run"'], { timeoutMs: 20000 });
+        return r2.stdout.trim() === 'ran' || null;
+      }, { timeoutMs: 15000, intervalMs: 500 });
+      await waitFor('its POST to arrive', () => posted('/e2e-pasted').length || null, { timeoutMs: 5000 });
+      fs.unlinkSync(pasted);
+      return `POST ${said.post}; GET ${said.get}; GET to another site ${said.leak}; beacon/later/socket/leaving for another site never arrived; mod held: ${held.facts.join(' / ')}; the panel's button brought the tab back, unlocked; a pasted mod that posts: "${pastedHeld}", ran once approved`;
     } finally {
       fs.writeFileSync(cfgFile, saved);
-      try { fs.unlinkSync(modFile); } catch { /* not written */ }
+      for (const f of [modFile, path.join(this.trif, 'sites', site, 'e2e-pasted.js')]) { try { fs.unlinkSync(f); } catch { /* not written */ } }
       await this.panel(`async () => { document.getElementById('input').value = ''; }`).catch(() => {});
       await this.ext(`async (k) => { await chrome.storage.local.remove(k); }`, [`chat:${site}`]).catch(() => {});
     }

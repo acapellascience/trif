@@ -332,7 +332,7 @@ const handlers = {
     for (const [id, err] of helperErrors) if (!ids.includes(id)) lines.push(`  ${pad(id, 40)} NOT SENT: ${err}`);
     if ([...off].some((id) => !shipsOff.has(id))) lines.push('              off = switched off by the user (trif enable <id> turns one back on)');
     if ([...off].some((id) => shipsOff.has(id))) lines.push('              off (as TRIF ships it) = a mod TRIF comes with, off until switched on (trif enable <id>)');
-    if (Object.keys(held).length) lines.push('              HELD = written by a side-panel agent, and it can do things the user hasn\'t allowed (TRIF read them from its code); not running until the user approves it');
+    if (Object.keys(held).length) lines.push('              HELD = new or changed, and it can do things the user hasn\'t allowed (TRIF read them from its code); not running until the user approves it');
     if (Object.keys(review).length) lines.push('              TO REVIEW = can do things the user hasn\'t seen yet (TRIF read them from its code); it runs meanwhile');
     if (Object.keys(updates).length) lines.push('              update available = TRIF has a new version of a mod it ships; see trif mod-update <id>');
     if (sitesOff.size) lines.push('              waiting = not running until the user turns TRIF on for the site (side panel)');
@@ -711,7 +711,7 @@ const handlers = {
       if (enabled.get(m.id) === false && shipsOff.has(m.id)) out(`  off, as TRIF ships it (not running; trif enable ${m.id} turns it on)`);
       else if (enabled.get(m.id) === false) out(`  switched off by the user (not running; trif enable ${m.id} turns it on)`);
       else if (offSites.has(m.id)) out(`  switched off by the user on ${offSites.get(m.id).join(', ')} (trif enable ${m.id} --site <site> turns it back on there)`);
-      if (isHeld(m)) out(`  HELD: a side-panel agent wrote it while working on ${held[m.id].site}, and TRIF found that it ${(held[m.id].facts || [held[m.id].reason]).join('; it ')}. Not running until the user approves it (trif approve ${m.id}).`);
+      if (isHeld(m)) out(`  HELD: ${held[m.id].by === 'outside' ? 'new or changed since TRIF last let it run' : `a side-panel agent wrote it while working on ${held[m.id].site}`}, and TRIF found that it ${(held[m.id].facts || [held[m.id].reason]).join('; it ')}. Not running until the user approves it (trif approve ${m.id}).`);
       if (updates[m.id]) out(`  ${updateText(updates[m.id])}: trif mod-update ${m.id}`);
       if (m.description) out(`  ${m.description}`);
       if (isShippedSource(m.source)) out(`  from TRIF${m.version ? `, version ${m.version}` : ''}`);

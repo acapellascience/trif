@@ -161,9 +161,43 @@ test('updateHeld: a run can\'t rewrite what an allowed mod sends; edits elsewher
   before = snapshot(ws.modsDir, ws.home);
   write(ws, 'x.com/poster.js', code('/i/api/graphql/x/CreateTweet', 'green'));
   assert.deepEqual(updateHeld(ws, scanMods(ws.modsDir).mods, [{ runId: 'r3', site: 'x.com', scope: 'x.com', before }]), {});
-  // the user's own edits (no run) are only reviewed by power: changing the line doesn't ask again
+  // an edit from outside a run (the terminal, a pasted file) is held the same way
   write(ws, 'x.com/poster.js', code('/i/api/other', 'green'));
-  assert.deepEqual(reviewItems(ws.home, scanMods(ws.modsDir).mods), {});
+  const outside = updateHeld(ws, scanMods(ws.modsDir).mods, []);
+  assert.deepEqual(outside['x.com/poster'].needs, ['sends']);
+  assert.equal(outside['x.com/poster'].by, 'outside');
+});
+
+test('updateHeld: any new or changed mod that can do something not allowed waits, whoever wrote it; mods there at first keep running, to review', () => {
+  const ws = makeWs();
+  write(ws, 'x.com/old-poster.js', 'fetch("/x", { method: "POST" })');
+  write(ws, 'x.com/plain.js', 'document.body.style.color = "red"');
+  // the first time: what's there is the user's, as it is: nothing held, the poster to review
+  assert.deepEqual(updateHeld(ws, scanMods(ws.modsDir).mods, []), {});
+  assert.deepEqual(Object.keys(reviewItems(ws.home, scanMods(ws.modsDir).mods)), ['x.com/old-poster']);
+  // a new mod pasted in (no run) that clicks: held, as from outside
+  write(ws, 'x.com/pasted.js', 'document.querySelector("button").click()');
+  let held = updateHeld(ws, scanMods(ws.modsDir).mods, []);
+  assert.deepEqual(Object.keys(held), ['x.com/pasted']);
+  assert.equal(held['x.com/pasted'].by, 'outside');
+  assert.equal(held['x.com/pasted'].runId, null);
+  assert.equal(held['x.com/pasted'].site, 'x.com');
+  // a plain edit to a plain mod: runs
+  write(ws, 'x.com/plain.js', 'document.body.style.color = "blue"');
+  assert.deepEqual(Object.keys(updateHeld(ws, scanMods(ws.modsDir).mods, [])), ['x.com/pasted']);
+  // the old poster, edited: held now (it was grandfathered as it was, not for anything)
+  write(ws, 'x.com/old-poster.js', 'fetch("/y", { method: "POST" })');
+  assert.deepEqual(Object.keys(updateHeld(ws, scanMods(ws.modsDir).mods, [])).sort(), ['x.com/old-poster', 'x.com/pasted']);
+  // allowed: it runs, and stays allowed as it is
+  approveHeld(ws.home, 'x.com/pasted');
+  held = updateHeld(ws, scanMods(ws.modsDir).mods, []);
+  assert.deepEqual(Object.keys(held), ['x.com/old-poster']);
+  // its own @match is the user's to choose outside a run, and a header saying risk 2 is only a claim
+  write(ws, 'x.com/wide.js', header('<all_urls>') + '// @risk 2 says so\ndocument.body.style.color = "red"');
+  assert.deepEqual(Object.keys(updateHeld(ws, scanMods(ws.modsDir).mods, [])), ['x.com/old-poster']);
+  // gone: dropped
+  fs.unlinkSync(path.join(ws.modsDir, 'x.com/old-poster.js'));
+  assert.deepEqual(updateHeld(ws, scanMods(ws.modsDir).mods, []), {});
 });
 
 test('reviewItems: mods the user has that can act, until "Looks right"; shipped mods start from their shipped version', () => {

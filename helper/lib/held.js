@@ -10,19 +10,22 @@
 //   user hasn't allowed for it. The panel shows what TRIF found, separately from what the agent says
 //   (its @risk reason and description), with Allow.
 // - Allowing keeps what was found allowed for that mod: each power, and the lines of code that use it.
-//   A run's later edit runs straight away unless it adds a power or adds or changes a line that uses one
-//   (a run on the site of a mod that may already send can't quietly rewrite what it sends); edits
-//   elsewhere in it (its CSS, its selectors) don't ask again. For the user's own edits the review goes by
-//   power alone.
-// - Mods the user already has, and mods written outside a side-panel run (the user's own terminal), are
-//   never held, but one that can do something not yet allowed is marked for REVIEW: the panel shows the
-//   same facts once, with "Looks right" (allows them) and the mod's switch. (Mods TRIF ships start from
-//   what their shipped version can do: an unchanged one has nothing to review.)
+//   A later edit runs straight away unless it adds a power or adds or changes a line that uses one (a
+//   run on the site of a mod that may already send can't quietly rewrite what it sends); edits elsewhere
+//   in it (its CSS, its selectors) don't ask again.
+// - The same goes for a mod written any other way (the user's terminal agent, a file pasted or copied
+//   in, a mod someone shared): new or changed, it waits while it can do something not allowed for it.
+//   (A run's mod is also held for @match outside the run's site, or for saying risk 2.)
+// - Mods the user had when this started keep running, but one that can do something not yet allowed is
+//   marked for REVIEW: the panel shows the same facts once, with "Looks right" (allows them) and the
+//   mod's switch. (Mods TRIF ships start from what their shipped version can do: an unchanged one, or an
+//   update TRIF brings, has nothing to ask about.)
 //
 // Files (the helper's, outside sites/: side-panel runs can't write them):
 //   $TRIF_HOME/held.json     mod id -> {hash, site, scope, runId, at, reason, facts, needs, claim}
 //   $TRIF_HOME/allowed.json  mod id -> {powers: [key], lines: {key: [sha1 of a line]}, at}   (keys as
 //                            powers.js gives them, plus `match:<pattern>` and `risk2`)
+//   $TRIF_HOME/seen.json     mod id -> hash of the version TRIF last let run
 // A held entry lasts while that version of the mod is there; an edit makes it be worked out again.
 // (Before 0.3.0 an approved hold stayed in held.json marked `approved`: it becomes allowed powers.)
 
@@ -92,6 +95,7 @@ function holdReason(mod, scope, allowed = []) {
 }
 
 function heldFile(home) { return path.join(home, 'held.json'); }
+function seenFile(home) { return path.join(home, 'seen.json'); }
 function allowedFile(home) { return path.join(home, 'allowed.json'); }
 
 function loadJson(file) {
@@ -109,6 +113,8 @@ function saveJson(file, obj) {
 const loadHeld = (home) => loadJson(heldFile(home));
 const saveHeld = (home, held) => saveJson(heldFile(home), held);
 const loadAllowed = (home) => loadJson(allowedFile(home));
+// seen.json: mod id -> the hash of the version TRIF last let run; null before the first time
+const loadSeen = (home) => (fs.existsSync(seenFile(home)) ? loadJson(seenFile(home)) : null);
 
 // What's allowed for a mod: {keys: Set, lines: Map key -> Set of line hashes}, from allowed.json and, for
 // a mod TRIF ships, its shipped version.
@@ -153,13 +159,16 @@ function allowPowers(home, id, needs) {
 }
 
 /**
- * Update the held set for the current mods. `scopes` are the runs to check ({runId, site, scope,
- * before, locked}: `before` is the runs.js modSnapshot taken when the run started, `locked` the mods
- * folders it couldn't write). A mod those runs changed that can do something not allowed for it gets
- * held. A change in a folder the run couldn't write (another site's, which its sandbox makes read-only)
- * isn't the run's: another run, the user or another browser made it meanwhile, so it isn't held on this
- * run's account. A held mod that changes is worked out again while its run is going, else released (the
- * user or another run rewrote it); one that's gone is dropped.
+ * Update the held set for the current mods. Every mod that is new or changed since TRIF last let it run
+ * (seen.json) is worked out: if it can do something not allowed for it (by power and by line), it's held,
+ * whoever wrote it; otherwise it's let run, and recorded as seen. Mods there when this started (the first
+ * time, seen.json missing) are recorded as seen as they are: they keep running, and the panel asks the
+ * user to review what they can do (reviewItems).
+ * `scopes` are the side-panel runs to check ({runId, site, scope, before, locked}: `before` is the runs.js
+ * modSnapshot taken when the run started, `locked` the mods folders it couldn't write): a mod a live run
+ * changed is also held for matching outside the run's site, or for saying risk 2, and the hold names the
+ * run. A change in a folder the run couldn't write (another site's) isn't the run's: it's judged like any
+ * other change.
  * Returns the mods held now (mod id -> entry).
  */
 function updateHeld(ws, mods, scopes) {
@@ -174,26 +183,15 @@ function updateHeld(ws, mods, scopes) {
     changed = true;
   }
   const allowed = loadAllowed(ws.home);
-  const live = scopes.filter((s) => s.before);
-  const entry = (m, s, needs) => ({
-    hash: m.hash, site: s.site, scope: s.scope, runId: s.runId, at: Date.now(),
-    reason: reasonOf(needs), facts: needs.map((n) => n.fact), needs: needs.map((n) => n.key),
-    lines: Object.fromEntries(needs.filter((n) => n.lines && n.lines.length).map((n) => [n.key, n.lines])), claim: claimOf(m),
-  });
-  // a run's change: what it can do now, less what's allowed (by power and line)
-  const runNeeds = (m, scope) => {
-    const ok = allowedFor(ws.home, m, allowed);
-    return needsOf(m, scope).filter((n) => !isAllowed(n, ok, true)).map((n) => described(n, ok));
-  };
-  for (const id of Object.keys(held)) {
-    const m = mods.find((x) => x.id === id);
-    if (!m) { delete held[id]; changed = true; continue; }
-    if (m.hash === held[id].hash) continue;
-    const run = live.find((s) => s.runId === held[id].runId);
-    const needs = run ? runNeeds(m, held[id].scope) : [];
-    if (needs.length) held[id] = entry(m, run, needs); else delete held[id];
-    changed = true;
+  let seen = loadSeen(ws.home);
+  let seenChanged = false;
+  if (seen === null) { // the first time: what's there is the user's, as it is
+    seen = Object.fromEntries(mods.map((m) => [m.id, m.hash]));
+    seenChanged = true;
   }
+  // Which live run changed each mod, if one did (and could: not a folder it was locked out of)
+  const byRun = new Map();
+  const live = scopes.filter((s) => s.before);
   if (live.length) {
     const now = modSnapshot(ws.modsDir, ws.home);
     const ci = ignoresCase(ws.home); // (APFS: sites/X.com is sites/x.com)
@@ -202,17 +200,36 @@ function updateHeld(ws, mods, scopes) {
       const locked = s.locked || [];
       for (const m of mods) {
         const rel = path.relative(ws.home, m.file);
-        if (!touched.has(rel)) continue;
-        if (locked.some((d) => within(rel, d, { ci, orEqual: true }))) continue;
-        if (held[m.id] && held[m.id].hash === m.hash) continue;
-        const needs = runNeeds(m, s.scope);
-        if (!needs.length) continue;
-        held[m.id] = entry(m, s, needs);
-        changed = true;
+        if (touched.has(rel) && !locked.some((d) => within(rel, d, { ci, orEqual: true }))) byRun.set(m.id, s);
       }
     }
   }
+  for (const m of mods) {
+    const same = held[m.id] && held[m.id].hash === m.hash; // (held as it is: waiting for the user, unless it's allowed now)
+    const run = byRun.get(m.id) || (held[m.id] && live.find((s) => s.runId === held[m.id].runId)) || (same && held[m.id].scope ? { site: held[m.id].site, scope: held[m.id].scope, runId: held[m.id].runId } : null);
+    if (!run && seen[m.id] === m.hash) { if (held[m.id]) { delete held[m.id]; changed = true; } continue; }
+    const ok = allowedFor(ws.home, m, allowed);
+    const needs = needsOf(m, run ? run.scope : null)
+      .filter((n) => (run || n.key !== 'risk2') && !isAllowed(n, ok, true))
+      .map((n) => described(n, ok));
+    if (needs.length && same) continue;
+    if (needs.length) {
+      held[m.id] = {
+        hash: m.hash, site: run ? run.site : m.site, scope: run ? run.scope : null, runId: run ? run.runId : null, by: run ? 'agent' : 'outside', at: Date.now(),
+        reason: reasonOf(needs), facts: needs.map((n) => n.fact), needs: needs.map((n) => n.key),
+        lines: Object.fromEntries(needs.filter((n) => n.lines && n.lines.length).map((n) => [n.key, n.lines])), claim: claimOf(m),
+      };
+      changed = true;
+    } else {
+      if (held[m.id]) { delete held[m.id]; changed = true; }
+      if (seen[m.id] !== m.hash) { seen[m.id] = m.hash; seenChanged = true; }
+    }
+  }
+  const ids = new Set(mods.map((m) => m.id));
+  for (const id of Object.keys(held)) if (!ids.has(id)) { delete held[id]; changed = true; }
+  for (const id of Object.keys(seen)) if (!ids.has(id)) { delete seen[id]; seenChanged = true; }
   if (changed) saveHeld(ws.home, held);
+  if (seenChanged) saveJson(seenFile(ws.home), seen);
   return held;
 }
 
@@ -222,6 +239,9 @@ function approveHeld(home, id) {
   if (!held[id] || held[id].approved) throw new Error(`${id} isn't held`);
   const lines = held[id].lines || {};
   allowPowers(home, id, (held[id].needs || []).map((key) => ({ key, lines: lines[key] || [] })));
+  const seen = loadSeen(home) || {};
+  seen[id] = held[id].hash;
+  saveJson(seenFile(home), seen);
   delete held[id];
   saveHeld(home, held);
 }
@@ -251,6 +271,6 @@ function reviewMod(home, mod) {
 }
 
 module.exports = {
-  loadHeld, saveHeld, updateHeld, approveHeld, heldFile, allowedFile, holdReason,
+  loadHeld, saveHeld, updateHeld, approveHeld, heldFile, allowedFile, seenFile, holdReason,
   needsOf, reviewItems, reviewMod, allowPowers, loadAllowed, powersFor, allowedKeys,
 };

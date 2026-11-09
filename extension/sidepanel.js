@@ -813,10 +813,12 @@ function factsBox(m, info, kind) {
   for (const f of (Array.isArray(info.facts) ? info.facts : [String(info.reason || '')]).filter(Boolean)) list.append(el('li', null, f));
   box.append(list);
   const where = m.matches && m.matches.length ? ` It runs by itself on every page it's for (${m.matches.slice(0, 3).join(', ')}${m.matches.length > 3 ? '…' : ''}).` : '';
-  box.append(el('p', 'facts-note', `${kind === 'held' ? 'An agent wrote it while working here.' : 'It keeps running until you switch it off.'}${where}`));
+  const fromAgent = kind === 'held' && info.by !== 'outside';
+  box.append(el('p', 'facts-note', `${kind === 'review' ? 'It keeps running until you switch it off.'
+    : fromAgent ? 'An agent wrote it while working here.' : 'It\'s new or changed since TRIF last let it run.'}${where}`));
   if (info.claim) {
     const claim = el('p', 'facts-claim');
-    claim.append(el('span', 'facts-who', kind === 'held' ? 'The agent says: ' : 'The mod says: '), document.createTextNode(`“${info.claim}”`));
+    claim.append(el('span', 'facts-who', fromAgent ? 'The agent says: ' : 'The mod says: '), document.createTextNode(`“${info.claim}”`));
     box.append(claim);
   }
   const shown = el('pre', 'facts-code');

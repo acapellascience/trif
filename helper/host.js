@@ -258,7 +258,7 @@ function syncMods(reason, force) {
   const sent = plan.mods.map((m) => {
     // (facts: TRIF's own reading of the code; claim: what the agent says it does, shown apart as the agent's)
     const h = state.held[m.id], r = state.review && state.review[m.id];
-    const out = h ? { ...m, held: { site: h.site, reason: h.reason, facts: h.facts || [h.reason], claim: h.claim || '' } }
+    const out = h ? { ...m, held: { site: h.site, reason: h.reason, facts: h.facts || [h.reason], claim: h.claim || '', by: h.by || 'agent' } }
       : r ? { ...m, review: { facts: r.facts, claim: r.claim } } : m;
     const o = origins[m.id];
     const withOrigin = o ? { ...out, origin: { by: o.by, browser: o.browser } } : out;

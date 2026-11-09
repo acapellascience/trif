@@ -70,19 +70,25 @@ division the browser reads as a regex, hiding a call in what looks like a string
 It's conservative: what it can't follow is `hidden`, so getting past it takes code that looks like
 nothing at all. The mod's `@risk` header plays no part: whoever wrote the code wrote the header.
 
-- **Held** (helper/lib/held.js): a mod a side-panel run wrote or changed doesn't run while it can do
-  something not allowed for it (or matches other sites, or says risk 2). The panel shows TRIF's facts,
-  and apart from them, labelled as the agent's, what the mod says about itself; Allow and Show code.
+- **Held** (helper/lib/held.js), whoever wrote it: any mod that's new or changed since TRIF last let it
+  run (`~/.trif/seen.json`) doesn't run while it can do something not allowed for it. That covers a
+  side-panel agent's mods, a terminal agent's, a file pasted or copied in, a mod someone shared. A
+  side-panel run's mod is also held for matching other sites or saying risk 2. The panel shows TRIF's
+  facts, and apart from them what the mod says about itself (labelled as the agent's when an agent in
+  the panel wrote it); Allow and Show code. `trif approve` from the user's terminal does the same.
 - **Allowed** (`~/.trif/allowed.json`, which runs can't write): each power, and the lines that use it. A
-  run's later edit runs straight away unless it adds a power or adds or changes a line that uses one, so
-  a run can't rewrite what an allowed mod sends, and edits to the rest (its CSS) don't ask again.
-- **Review**: mods the user already has, or writes outside a side-panel run, are never held; one that
-  can do something not yet allowed shows its facts once in the panel ("Looks right" allows them by
-  power). A mod TRIF ships is judged against its shipped version (`~/.trif/.shipped/`, which runs can't
-  write): an unchanged one has nothing to review.
+  later edit runs straight away unless it adds a power or adds or changes a line that uses one, so no one
+  can quietly rewrite what an allowed mod sends, and edits to the rest (its CSS) don't ask again.
+- **Review**: mods the user had when this started (the first time, seen.json missing) keep running; one
+  that can do something not yet allowed shows its facts once in the panel ("Looks right" allows them).
+  Edited, they're held like any other. A mod TRIF ships is judged against its shipped version
+  (`~/.trif/.shipped/`, which runs can't write, written before the mod itself): an unchanged one, or an
+  update TRIF brings, has nothing to ask about.
 
 Not covered: a mod reusing an allowed function of its own (an approved `send(x)` called with new data
-from a new line).
+from a new line). A terminal agent (which has the user's shell) could run `trif approve` or edit
+allowed.json itself; AGENTS.md tells it never to, but only the side panel's sandbox enforces it. A dev
+mode that skips these checks, for people who'd rather not be asked, may come later, with a warning.
 
 ## The prompt
 

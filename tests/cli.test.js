@@ -372,7 +372,7 @@ test('new creates a mod from the template; refuses to overwrite', async () => {
   const r = await runCli(['new', 'Example.com', 'hide-banner'], { home });
   assert.equal(r.code, 0, r.stderr);
   const file = path.join(home, 'sites', 'example.com', 'hide-banner.js');
-  assert.equal(r.stdout.trim(), file);
+  assert.equal(r.stdout.trim(), path.join(fs.realpathSync(path.dirname(file)), 'hide-banner.js'));
   const text = fs.readFileSync(file, 'utf8');
   assert.match(text, /\/\/ @name {8}Hide Banner/);
   assert.match(text, /@match {7}\*:\/\/example\.com\/\*/);
@@ -381,6 +381,16 @@ test('new creates a mod from the template; refuses to overwrite', async () => {
   assert.equal((await runCli(['new', 'example.com', 'Bad Name!'], { home })).code, 1);
   // The template must be valid JS.
   assert.doesNotThrow(() => new Function(text));
+});
+
+test('new prints the real path when the workspace is reached through a link (an agent\'s run rules use real paths)', async () => {
+  const real = tempDir();
+  const link = path.join(tempDir(), 'linked-home');
+  fs.symlinkSync(real, link);
+  const r = await runCli(['new', 'example.com', 'via-link'], { home: link });
+  assert.equal(r.code, 0, r.stderr);
+  assert.equal(r.stdout.trim(), path.join(fs.realpathSync(real), 'sites', 'example.com', 'via-link.js'));
+  assert.ok(fs.existsSync(r.stdout.trim()));
 });
 
 test('new all-sites: one @match for every site', async () => {
@@ -439,6 +449,9 @@ test('setup: workspace, wrappers, manifest, link; idempotent; leaves sites alone
   assert.equal(fs.statSync(privDir(ws)).mode & 0o777, 0o700);
   assert.equal(fs.readFileSync(path.join(ws, 'CLAUDE.md'), 'utf8').trim(), '@AGENTS.md\n@instructions.md');
   if (fs.existsSync(path.join(REPO, 'helper', 'workspace', 'AGENTS.md'))) assert.ok(fs.existsSync(path.join(ws, 'AGENTS.md')));
+  // the how-to half, beside it (read on demand, not pulled into every message by CLAUDE.md)
+  assert.ok(fs.existsSync(path.join(ws, 'TECHNIQUES.md')));
+  assert.doesNotMatch(fs.readFileSync(path.join(ws, 'CLAUDE.md'), 'utf8'), /TECHNIQUES/);
 
   const hostWrapper = path.join(ws, 'bin', 'trif-host');
   const host = fs.readFileSync(hostWrapper, 'utf8');
@@ -772,4 +785,22 @@ test('a mailbox request works where watching a folder fails (as in an agent run\
     clearInterval(helper);
     if (saved === undefined) delete process.env.TRIF_RUN_BOX; else process.env.TRIF_RUN_BOX = saved;
   }
+});
+
+test('check says what TRIF reads in a mod that would make it wait, the lines, and how to avoid it', async () => {
+  const home = tempDir();
+  const dir = path.join(home, 'sites', 'x.com');
+  fs.mkdirSync(dir, { recursive: true });
+  fs.writeFileSync(path.join(dir, 'keys.js'), 'document.body.style.color = "red";\ndispatchEvent(new KeyboardEvent("keydown", { key: "g" }));\n');
+  fs.writeFileSync(path.join(dir, 'plain.js'), 'document.body.style.color = "red";\ndispatchEvent(new CustomEvent("plain-reset"));\n');
+  let r = await runCli(['check', 'x.com/keys'], { home });
+  assert.equal(r.code, 0, r.stderr);
+  assert.match(r.stdout, /waits for the user's OK/);
+  assert.match(r.stdout, /click, type or press keys/);
+  assert.match(r.stdout, /line 2: dispatchEvent\(new KeyboardEvent/);
+  assert.match(r.stdout, /how: to reach your own code, dispatch a CustomEvent/);
+  r = await runCli(['check', 'x.com/plain'], { home });
+  assert.match(r.stdout, /TRIF finds nothing in it that waits/);
+  r = await runCli(['check', 'x.com/keys', '--json'], { home });
+  assert.deepEqual(JSON.parse(r.stdout).powers.map((p) => p.key), ['acts']);
 });

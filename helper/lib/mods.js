@@ -227,15 +227,59 @@ function scanMods(modsDir) {
   return { mods, problems, warnings };
 }
 
-// Make the {type:"mods"} message fit Chrome's 1 MB host->extension limit. Mods that are too big on
-// their own are rejected; if the set as a whole is still too big, the largest are dropped.
-function planModsMessage(mods, limit = MAX_TO_EXTENSION - 4096) {
+// How big mods may be. Chrome and Firefox take at most 1 MB per native message, so a set bigger than that
+// goes in parts (modsParts below) to an extension that says it can take them (hello `features`). The caps
+// leave room under what browsers handle well (docs/PROTOCOL.md "How big mods can be" has the numbers):
+// with 16 MB and eight changes in a row, headless Firefox 159 peaked at 1.2-1.3 GB in all (Chrome 156 at
+// 0.7), where a 48 MB set, before the extension stopped asking Firefox for every script's code on every
+// message, took it to 7.4 GB. Each change still passes the changed mod through the browser several times,
+// and Firefox frees those copies late, so the per-mod cap matters as much as the total.
+const MAX_MOD_BYTES = 4 * 1024 * 1024;
+const MAX_MODS_BYTES = 16 * 1024 * 1024;
+// (Sizes rounded up, so one just over a cap never reads as the cap itself: "4.1 MB; up to 4 MB".)
+const MB = (n) => `${Math.ceil(n / (1024 * 1024) * 10) / 10} MB`;
+
+/**
+ * The mods TRIF sends, within the caps: a mod over `perMod` bytes of code is rejected; if the rest are over
+ * `total` together, the largest are left out until they fit. Returns { mods, errors: [{id, error, limit}] }
+ * (`limit`: 'mod' or 'total', so `trif doctor` can say what to do).
+ */
+function planMods(mods, { perMod = MAX_MOD_BYTES, total = MAX_MODS_BYTES } = {}) {
   const errors = [];
+  let kept = [];
+  for (const m of mods) {
+    const size = Buffer.byteLength(String(m.code ?? ''));
+    if (size > perMod) errors.push({ id: m.id, limit: 'mod', error: `mod is ${MB(size)}; a mod can be up to ${MB(perMod)}, so it was not sent to the browser (keep sounds, pictures and other big data out of its code)` });
+    else kept.push({ m, size });
+  }
+  let sum = kept.reduce((n, s) => n + s.size, 0);
+  if (sum > total) {
+    const dropped = new Set();
+    for (const s of [...kept].sort((a, b) => b.size - a.size)) {
+      if (sum <= total) break;
+      dropped.add(s);
+      sum -= s.size;
+      errors.push({ id: s.m.id, limit: 'total', error: `all mods together are over ${MB(total)}, the most TRIF sends to the browser; this one (the largest, ${MB(s.size)}) was not sent` });
+    }
+    kept = kept.filter((s) => !dropped.has(s));
+  }
+  return { mods: kept.map((s) => s.m), errors };
+}
+
+/**
+ * For an extension that can't take a set in parts (0.2.4 and older): the {type:"mods"} message must fit in one
+ * 1 MB native message. Mods that are too big on their own are rejected; if the set as a whole is still too
+ * big, the largest are dropped. `who` names the extension in the errors ("TRIF 0.2.4 in Chrome"), whose
+ * `limit` is 'extension': updating the extension lifts it.
+ */
+function planModsMessage(mods, { limit = MAX_TO_EXTENSION - 4096, who = 'this version of the extension' } = {}) {
+  const errors = [];
+  const update = `${who} takes at most 1 MB of mods; update it to send more`;
   const sized = mods.map((m) => ({ m, size: Buffer.byteLength(JSON.stringify(m)) }));
   let kept = [];
   for (const s of sized) {
     if (s.size > limit - 64) {
-      errors.push({ id: s.m.id, error: `mod is ${Math.ceil(s.size / 1024)} KB; Chrome's native messaging limit is 1 MB, so it was not sent to the extension` });
+      errors.push({ id: s.m.id, limit: 'extension', error: `mod is ${Math.ceil(s.size / 1024)} KB and ${update}, so it was not sent` });
     } else {
       kept.push(s);
     }
@@ -249,11 +293,45 @@ function planModsMessage(mods, limit = MAX_TO_EXTENSION - 4096) {
       if (total <= limit) break;
       dropped.add(s);
       total -= s.size + 1;
-      errors.push({ id: s.m.id, error: 'all mods together exceed Chrome\'s 1 MB native messaging limit; this (largest) mod was not sent to the extension' });
+      errors.push({ id: s.m.id, limit: 'extension', error: `all mods together are over 1 MB and ${update}; this (largest) mod was not sent` });
     }
     kept = kept.filter((s) => !dropped.has(s));
   }
   return { mods: kept.map((s) => s.m), errors };
+}
+
+/**
+ * A message's JSON text cut into {type:"modsPart", set, i, n, data} messages, each under `limit` bytes as
+ * sent (the slices are JSON-escaped again inside a part, so quotes and backslashes count twice, and anything
+ * past ASCII up to three times). The extension joins the `data` of parts 0..n-1 of one `set` and parses it.
+ */
+function modsParts(json, set, limit = MAX_TO_EXTENSION) {
+  const budget = limit - 256; // room for the part's own fields
+  const slices = [];
+  for (let pos = 0; pos < json.length;) {
+    let want = Math.min(json.length - pos, budget);
+    for (;;) {
+      let end = pos + want;
+      // (Not between the halves of a surrogate pair: each half alone would be escaped as \uXXXX.)
+      if (end < json.length && end > pos + 1 && /[\ud800-\udbff]/.test(json[end - 1])) end--;
+      const slice = json.slice(pos, end);
+      const size = Buffer.byteLength(JSON.stringify(slice));
+      if (size <= budget) { slices.push(slice); pos = end; break; }
+      want = Math.max(1, Math.floor(want * (budget / size) * 0.98));
+    }
+  }
+  return slices.map((data, i) => ({ type: 'modsPart', set, i, n: slices.length, data }));
+}
+
+/**
+ * The mods to send an extension that takes 'modsSame' (hello `features`): a mod it already has, the same
+ * id and hash as in the last set sent to it (`had`: id -> hash), goes without its code, marked `same`; the
+ * extension takes the code from the copy it has. So a change to one mod sends that mod's code, not every
+ * mod's again: with big mods, each whole copy costs the browser memory it can be slow to give back.
+ */
+function withSame(mods, had) {
+  if (!had) return mods;
+  return mods.map((m) => (typeof m.hash === 'string' && had.get(m.id) === m.hash ? { ...m, code: undefined, same: true } : m));
 }
 
 /**
@@ -287,5 +365,5 @@ function summarize(mod) {
 module.exports = {
   SHIPPED_SOURCES, isShippedSource,
   RUN_AT, ALL_SITES, parseHeader, defaultMatches, buildMod, listModFiles, readModFile, folderFingerprint, scanMods, LINK_OUTSIDE,
-  planModsMessage, summarize, isIgnoredName, sha1, findRenames,
+  planMods, planModsMessage, modsParts, withSame, MAX_MOD_BYTES, MAX_MODS_BYTES, summarize, isIgnoredName, sha1, findRenames,
 };

@@ -106,9 +106,9 @@ export function formatError(e) {
 /** The body of `__webmods_runtime`. Runs once per page at document_start, before any mod. */
 export function runtimeMain(RECORDING, safeStringify) {
   if (window.__webmods && window.__webmods.errors) return; // already installed
-  const W = window.__webmods = { errors: [], logs: [], requests: [], recording: false, current: null };
+  const W = window.__webmods = { errors: [], pageErrors: [], logs: [], requests: [], recording: false, current: null };
   const nativeConsole = { log: console.log, warn: console.warn, error: console.error };
-  const MAX_ERRORS = 200, MAX_LOGS = 500, MAX_REQUESTS = 300, MAX_BODY = 2 * 1024 * 1024;
+  const MAX_ERRORS = 200, MAX_PAGE_ERRORS = 100, MAX_LOGS = 500, MAX_REQUESTS = 300, MAX_BODY = 2 * 1024 * 1024;
   const MAX_KEPT = 32 * 1024 * 1024; // characters of bodies kept across all recorded requests
 
   const push = (arr, item, max) => { arr.push(item); if (arr.length > max) arr.splice(0, arr.length - max); };
@@ -130,18 +130,19 @@ export function runtimeMain(RECORDING, safeStringify) {
   };
   window.webmods = window.trif = { log: logger('log'), warn: logger('warn'), error: logger('error') };
 
-  // Errors from mods' event handlers and timers (the per-mod wrapper only catches top-level throws).
-  const recordError = (err, filename) => {
+  // Errors from mods' event handlers and timers (the per-mod wrapper only catches top-level throws); the
+  // rest are the page's own (`trif errors --page`), kept apart and fewer.
+  const recordError = (err, filename, line) => {
     try {
       const stack = err && typeof err === 'object' ? String(err.stack || '') : '';
       const mod = modFromStack(stack) || modFromStack(filename);
-      if (!mod) return;
       const message = err && typeof err === 'object' && 'message' in err ? String(err.message) : String(err);
-      push(W.errors, { mod, message, stack, time: Date.now() }, MAX_ERRORS);
+      if (mod) push(W.errors, { mod, message, stack, time: Date.now() }, MAX_ERRORS);
+      else push(W.pageErrors, { message: message.slice(0, 2000), stack: stack.slice(0, 4000), source: filename ? String(filename).slice(0, 500) + (line ? ':' + line : '') : '', time: Date.now() }, MAX_PAGE_ERRORS);
     } catch (e) { /* ignore */ }
   };
   try {
-    window.addEventListener('error', (ev) => recordError(ev.error != null ? ev.error : ev.message, ev.filename), true);
+    window.addEventListener('error', (ev) => recordError(ev.error != null ? ev.error : ev.message, ev.filename, ev.lineno), true);
     window.addEventListener('unhandledrejection', (ev) => recordError(ev.reason), true);
   } catch (e) { /* ignore */ }
 

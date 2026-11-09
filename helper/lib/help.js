@@ -101,6 +101,28 @@ The result is printed as pretty JSON, or as-is if it's a string. DOM nodes come 
     details: 'https:// is added when the URL has no scheme.',
     examples: ['trif open example.com'],
   },
+  reject: {
+    usage: 'trif reject <site>/<mod>',
+    summary: "don't allow a waiting change to a mod: the version before is put back (a mod that never ran goes to the trash); refused inside a run",
+    examples: ['trif reject all-sites/dark-everywhere'],
+  },
+  history: {
+    usage: 'trif history <site>/<mod>',
+    summary: "what side-panel runs changed in a mod (kept 30 days), newest first",
+    examples: ['trif history x.com/hide-reposts'],
+  },
+  undo: {
+    usage: 'trif undo <site>/<mod>',
+    summary: "put back the version before a side-panel run's last change (a mod it created goes to the trash); refused inside a run",
+    details: 'Each undo keeps what it replaced, so undoing can be undone the same way; trif history lists what is kept.',
+    examples: ['trif undo x.com/hide-reposts'],
+  },
+  close: {
+    usage: 'trif close --tab <id> | --url <part of its address> [--force]',
+    summary: 'close a tab (one you opened with trif open); not the one the user is looking at, unless --force',
+    details: 'Tabs a side-panel run opened with trif open are closed when the run ends anyway.',
+    examples: ['trif close --tab 123'],
+  },
   navigate: {
     usage: 'trif navigate [TAB] <url>',
     summary: 'point an existing tab at a URL and wait for it to load',
@@ -193,9 +215,10 @@ responses you want to grep.`,
     examples: ['trif request --url x.com 12', 'trif request 12 -o /tmp/timeline.json'],
   },
   errors: {
-    usage: 'trif errors [TAB]',
-    summary: 'errors thrown by mods in that page (check after every reload)',
-    examples: ['trif errors --url example.com'],
+    usage: 'trif errors [TAB] [--page]',
+    summary: 'errors thrown by mods in that page (check after every reload); --page: the page\'s own errors',
+    details: "TRIF's runtime only runs on sites where a mod is on or recording is on, so elsewhere neither list has anything; reload after switching one on to catch errors from the page's start.",
+    examples: ['trif errors --url example.com', 'trif errors --page'],
   },
   logs: {
     usage: 'trif logs [TAB]',
@@ -213,8 +236,8 @@ yourself also releases it. Not available to agents inside a side-panel run.`,
   },
   check: {
     usage: 'trif check <file|site/mod>',
-    summary: 'check that a mod file parses (compiles it without running it)',
-    details: 'Prints the syntax error and where it is, or "ok". Use it instead of node --check.',
+    summary: 'check that a mod parses, and what TRIF reads in it that would make it wait for the user\'s OK',
+    details: 'Prints the syntax error and where it is, or "ok", then each thing TRIF reads in the code that would make the mod wait for the user\'s OK (sending, clicking for the user, loading from addresses it builds, code it can\'t read), the lines, and how to avoid it where there\'s a way. Use it instead of node --check.',
     examples: ['trif check sites/x.com/hide-reposts.js', 'trif check x.com/hide-reposts'],
   },
   enable: {
@@ -357,9 +380,9 @@ sent by a proxy the helper runs for each chat: the agent never has it.`,
 
 const GROUPS = [
   ['Setup and diagnosis', ['setup', 'status', 'doctor', 'update', 'report']],
-  ['Mod files (work without Chrome)', ['mods', 'new', 'check', 'delete', 'restore', 'install-example', 'mod-update']],
-  ['Switching mods off and on (need Chrome running with the extension)', ['disable', 'enable', 'approve']],
-  ['Pages (need Chrome running with the extension)', ['tabs', 'run', 'reload', 'open', 'navigate', 'text', 'sweep', 'screenshot', 'record', 'requests', 'request', 'errors', 'logs']],
+  ['Mod files (work without Chrome)', ['mods', 'new', 'check', 'delete', 'restore', 'history', 'undo', 'install-example', 'mod-update']],
+  ['Switching mods off and on (need Chrome running with the extension)', ['disable', 'enable', 'approve', 'reject']],
+  ['Pages (need Chrome running with the extension)', ['tabs', 'run', 'reload', 'open', 'close', 'navigate', 'text', 'sweep', 'screenshot', 'record', 'requests', 'request', 'errors', 'logs']],
   ['Agent runs (what the side panel does)', ['agent']],
   ['', ['help']],
 ];

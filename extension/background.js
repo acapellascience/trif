@@ -9,10 +9,12 @@ import {
   normalizeDisabled, modAppliesTo, urlInScope, modInScope, applyStartOff, applyAbsorbed, findRenames, carryRenames, renameInOrder, normalizeModOrder, modSites,
   normalizeOffSites, offSiteName, offOnSite, hostInScope, withOffSites, scopeFor, normalizeSitesOn, siteOnFor, sitesInUse, limitToSites, applyStartSites, switchSite, fromOtherBrowser, timedUserScripts, capChat,
   ALL_ACCESS, readAccess, activeSites, hasSiteAccess, siteOrigins, siteState, siteRefusal, siteModeOf,
+  FEATURES, ModsParts, fillSameMods, storedMods, modsStorageState, modsStoragePlan,
 } from './lib.js';
 import { runtimeCode } from './runtime.js';
 import { sweepPage } from './sweep.js';
 import { captureScreenshot, stitchShots, isCopyWindow } from './screenshot.js';
+import { createTabLocks } from './tablock.js';
 
 const HOST = 'com.webmods.helper';
 const VERSION = chrome.runtime.getManifest().version;
@@ -48,11 +50,13 @@ const state = {
   blockedSites: [],      // sites the user blocked in TRIF: nothing from TRIF touches them (persisted)
   starter: null,         // Tim's starter mods, from the helper: {choice: 'added'|'none'|null, count, sites}
   panelWindows: new Map(), // side panel port -> the window it's in (Chrome), so the toolbar button can close it
+  paused: false,         // every mod paused in this browser, each mod's own switch left as it is (persisted)
   startedOff: {},        // mod id → true for mods already switched off once: preinstalled, or from another browser (persisted)
   absorbed: {},          // mod id → true for retired shipped mods whose switch was carried over (persisted)
   defaultOrder: {},      // site → mod ids: the panel's order for its shipped mods until the user drags them (from the helper; persisted)
   installId: null,       // random id of this install (persisted): the helper records it as the origin of mods made here
   applied: {},           // script id → hash last registered (persisted)
+  known: null,           // the script ids the last sync left registered (syncUserScripts `known`); null: ask the browser
   lastApply: { registered: [], errors: [] },
   requestSeq: 0,
   pending: new Map(),    // our native request id → {resolve, reject, timer}
@@ -65,6 +69,14 @@ const state = {
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const errMsg = (e) => String(e?.message ?? e);
+
+// Tabs a side-panel agent ran code in: requests that change things are blocked there until the page is a
+// new one (tablock.js, docs/SECURITY.md). The panel shows it, with a Reload button.
+const tabLocks = createTabLocks({ chrome, log: (m) => console.log(`[TRIF] ${m}`), changed: () => notifyPanels() });
+chrome.tabs.onUpdated?.addListener((tabId, info) => { if (info.status === 'complete' || info.url) tabLocks.check(tabId).catch(() => {}); });
+chrome.tabs.onRemoved?.addListener((tabId) => { tabLocks.unlock(tabId, 'closed').catch(() => {}); });
+chrome.tabs.onReplaced?.addListener((added, removed) => { tabLocks.unlock(removed, 'replaced').catch(() => {}); tabLocks.check(added).catch(() => {}); });
+chrome.tabs.onCreated?.addListener((tab) => { tabLocks.opened(tab).catch(() => {}); });
 
 /**
  * Writes to chrome.storage.local, saying what failed if it can't (a full quota rejects every write).
@@ -101,8 +113,8 @@ async function save(items, { switches = false } = {}) {
   }
 }
 
-// What last went into storage as `mods`, so the same list isn't written again on every sync.
-let savedModsJson = null;
+// What storage holds of the mods (lib.js modsStorageState), so only what changed is written.
+let storedModsState = { ids: null, keys: new Map(), legacy: false };
 
 // `applied` (script id → hash last registered: a shortcut for the next sync) lives in session storage,
 // which outlasts a restarted worker but not the browser, and isn't worth a write to local storage on
@@ -115,7 +127,7 @@ function saveApplied(applied) {
 // ---- startup ------------------------------------------------------------------------------------
 
 const ready = chrome.storage.local.get(null).then(async (s) => {
-  if (Array.isArray(s.mods)) state.mods = s.mods;
+  state.mods = storedMods(s);
   if (Array.isArray(s.recording)) state.recording = s.recording;
   state.disabled = normalizeDisabled(s.disabled);
   state.offSites = normalizeOffSites(s.offSites);
@@ -125,6 +137,7 @@ const ready = chrome.storage.local.get(null).then(async (s) => {
   state.sitesOffered = normalizeSitesOn(s.sitesOffered);
   state.siteMode = s.siteMode === 'permissive' || s.siteMode === 'restrictive' ? s.siteMode : null;
   state.blockedSites = normalizeSitesOn(s.blockedSites);
+  state.paused = s.paused === true;
   if (Array.isArray(s.sitesOn)) state.sitesOn = normalizeSitesOn(s.sitesOn);
   else {
     // First start since TRIF has to be turned on per site: keep it on where it's already in use.
@@ -134,7 +147,7 @@ const ready = chrome.storage.local.get(null).then(async (s) => {
   }
   state.installId = typeof s.installId === 'string' && s.installId ? s.installId : crypto.randomUUID();
   if (state.installId !== s.installId) await save({ installId: state.installId }).catch((e) => console.warn('[TRIF]', errMsg(e)));
-  savedModsJson = Array.isArray(s.mods) ? JSON.stringify(s.mods) : null;
+  storedModsState = modsStorageState(s);
   try {
     const sess = sessionStore ? await sessionStore.get('applied') : {};
     if (sess && sess.applied && typeof sess.applied === 'object') state.applied = sess.applied;
@@ -157,6 +170,13 @@ chrome.runtime.onInstalled.addListener((details) => {
 });
 chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   if (sender.id !== chrome.runtime.id) return false;
+  // A locked page back from the back/forward cache (its marker, in our isolated world: tablock.js)
+  if (msg?.type === 'tabLock.restored' && sender.tab?.id != null) {
+    // (the site from the page's own address, not from the message)
+    const url = sender.url || sender.tab.url || '';
+    tabLocks.restored(sender.tab.id, msg.token, scopeFor(hostOf(url)), url).then(() => sendResponse({ ok: true }), (e) => sendResponse({ error: errMsg(e) }));
+    return true;
+  }
   ready.then(() => onPageMessage(msg)).then(sendResponse, (e) => sendResponse({ error: errMsg(e) }));
   return true;
 });
@@ -266,9 +286,11 @@ function checkUserScripts() {
   const before = state.userScripts;
   state.userScripts = now;
   if (before !== null && before !== now) {
+    // (Firefox drops every user script when its permission goes: the next sync asks what's registered.)
+    state.known = null;
     log(now ? 'info' : 'warn', now ? 'user scripts were turned on' : 'user scripts were turned off');
     // A fresh hello keeps the helper's view of the switch (shown by `trif doctor`) current.
-    post({ type: 'hello', version: VERSION, userScripts: now, chrome: CHROME, browser: BROWSER, installId: state.installId });
+    post({ type: 'hello', version: VERSION, userScripts: now, chrome: CHROME, browser: BROWSER, installId: state.installId, features: FEATURES });
     if (now) serial(applyMods).then(reportApplied, () => {});
     notifyPanels();
   }
@@ -283,21 +305,25 @@ async function applyMods() {
 
 async function applyModsNow() {
   if (!checkUserScripts()) {
+    state.known = null;
     state.lastApply = { registered: [], errors: state.mods.filter((m) => isEnabled(m.id)).map((m) => ({ id: m.id, error: USER_SCRIPTS_OFF })) };
     return state.lastApply;
   }
   try {
     const res = await syncUserScripts(timedUserScripts(chrome.userScripts), {
+      // (paused: as if TRIF were on for no site, so nothing registers; each switch stays as it is)
       mods: state.mods, runtimeCode: runtimeCode(state.recording), applied: state.applied, disabled: state.disabled,
-      offSites: state.offSites, recording: state.recording, sitesOn: onSites(),
+      offSites: state.offSites, recording: state.recording, sitesOn: state.paused ? [] : onSites(), known: state.known,
     });
     state.applied = res.applied;
+    state.known = res.known;
     state.lastApply = { registered: res.registered, errors: res.errors };
     // Only a shortcut for the next sync (unsaved, the next worker re-registers everything).
     saveApplied(state.applied);
     for (const e of res.errors) log('error', `mod ${e.id}: ${e.error}`);
   } catch (e) {
     state.applied = {}; // unknown state: force a full re-register next time
+    state.known = null;
     state.lastApply = { registered: [], errors: state.mods.filter((m) => isEnabled(m.id)).map((m) => ({ id: m.id, error: errMsg(e) })) };
     log('error', `applying mods failed: ${errMsg(e)}`);
   }
@@ -344,7 +370,7 @@ function connect() {
     scheduleReconnect();
   });
   // After storage is read, so the hello carries the install id.
-  ready.then(() => { if (state.port === port) post({ type: 'hello', version: VERSION, userScripts: checkUserScripts(), chrome: CHROME, browser: BROWSER, installId: state.installId }); });
+  ready.then(() => { if (state.port === port) post({ type: 'hello', version: VERSION, userScripts: checkUserScripts(), chrome: CHROME, browser: BROWSER, installId: state.installId, features: FEATURES }); });
 }
 
 function scheduleReconnect() {
@@ -367,10 +393,24 @@ function log(level, message) {
 // mod written just before (an agent's write, then `trif reload`) runs on the page they load.
 const LOADS_PAGE = new Set(['reload', 'navigate', 'open']);
 let modsApplied = Promise.resolve(); // the last mods message, until it's applied
+// A set too big for one native message comes in parts, applied only once the last is in (never half a set).
+const modsParts = new ModsParts();
 
 async function onHelperMessage(msg) {
   if (!msg || typeof msg !== 'object') return;
+  if (msg.type === 'modsPart') {
+    const r = modsParts.push(msg);
+    if (r.superseded !== undefined) log('info', `mods set ${r.superseded} was replaced by a newer one before it was complete`);
+    if (r.error) {
+      log('error', r.error);
+      post({ type: 'modsResend', reason: r.error });
+    }
+    if (!r.message) return;
+    msg = r.message;
+  }
   if (msg.type === 'mods') {
+    const dropped = modsParts.reset();
+    if (dropped !== null) log('info', `mods set ${dropped} was replaced by a newer one before it was complete`);
     const applying = onModsMessage(msg);
     modsApplied = applying.catch(() => {});
     return applying;
@@ -390,7 +430,14 @@ async function onHelperMessage(msg) {
 
 async function onModsMessage(msg) {
   const before = state.mods;
-  state.mods = Array.isArray(msg.mods) ? msg.mods : [];
+  // (Before any await: mods sent without their code take it from the set before this one, in order.)
+  const filled = fillSameMods(msg.mods, before);
+  if (filled.missing) {
+    log('error', `mods sent as already here aren't: ${filled.missing.slice(0, 5).join(', ')}${filled.missing.length > 5 ? '…' : ''}; asked for them all`);
+    post({ type: 'modsResend', reason: `missing ${filled.missing.length} mod(s) sent without their code` });
+    return;
+  }
+  state.mods = filled.mods;
   // A mod's id is its file name: a file renamed on disk comes back as a new mod. Same code in the same
   // site folder: the same mod, which keeps its switches and its place in the panel (before the first-time
   // switch-offs below, which would otherwise take it for a new one).
@@ -444,9 +491,15 @@ async function onModsMessage(msg) {
     state.absorbed = ab.absorbed;
     await save({ disabled: state.disabled, offSites: state.offSites, absorbed: state.absorbed }).catch((e) => log('warn', errMsg(e)));
   }
-  const modsJson = JSON.stringify(state.mods);
-  if (modsJson !== savedModsJson) {
-    await save({ mods: state.mods }).then(() => { savedModsJson = modsJson; }, (e) => log('warn', errMsg(e)));
+  const plan = modsStoragePlan(state.mods, storedModsState);
+  if (Object.keys(plan.set).length || plan.remove.length) {
+    try {
+      if (Object.keys(plan.set).length) await save(plan.set);
+      if (plan.remove.length) await chrome.storage.local.remove(plan.remove);
+      storedModsState = plan.stored;
+    } catch (e) {
+      log('warn', errMsg(e));
+    }
   }
   reportApplied(await serial(applyMods));
 }
@@ -545,10 +598,10 @@ const commands = {
   async status(args) {
     // Let pending mod syncs finish first, but answer within a few seconds even if one is stuck.
     await Promise.race([serial(() => {}), sleep(3000)]);
-    let ids = new Set();
-    if (checkUserScripts()) {
-      try { ids = new Set((await timedUserScripts(chrome.userScripts).getScripts()).map((s) => s.id)); } catch { /* switched off meanwhile, or stuck */ }
-    }
+    // What the last sync registered, not getScripts(): that hands back every mod's code, a copy of all of
+    // them for each `trif status` (agents and the e2e suite ask often). Only this extension registers its
+    // scripts, and every sync makes them match the list exactly.
+    const ids = new Set(checkUserScripts() ? state.lastApply.registered : []);
     const errors = new Map(state.lastApply.errors.map((e) => [e.id, e.error]));
     return {
       userScripts: state.userScripts, chrome: CHROME, browser: BROWSER, version: VERSION,
@@ -560,7 +613,7 @@ const commands = {
         if (errors.has(m.id) && errors.get(m.id) !== USER_SCRIPTS_OFF) o.error = errors.get(m.id);
         return o;
       }),
-      recording: state.recording, sitesOn: state.sitesOn, ...siteLists(),
+      recording: state.recording, sitesOn: state.sitesOn, ...siteLists(), ...(state.paused ? { paused: true } : {}),
       ...(args && (args.tab !== undefined || args.url !== undefined) ? { page: await modsOnPage(args) } : {}),
     };
   },
@@ -578,6 +631,13 @@ const commands = {
     requireUserScripts();
     if (typeof args.code !== 'string') throw new Error('missing code');
     const tab = await scopedTab(args);
+    // A side-panel agent's code (args.scope): lock the tab first, so nothing it does can post, send or
+    // change anything as the user (tablock.js). No lock, no code.
+    if (args.scope) {
+      try { await tabLocks.lock(tab.id, args.scope, null, tab.url || ''); } catch (e) {
+        throw new Error(`TRIF couldn't lock tab ${tab.id} against sending requests (${errMsg(e)}), so it won't run agent code there`);
+      }
+    }
     const timeout = Number(args.timeout) > 0 ? Number(args.timeout) : 10000;
     const runId = crypto.randomUUID();
     let timedOut = false;
@@ -631,6 +691,22 @@ const commands = {
     } finally {
       waiter.stop();
     }
+  },
+
+  // Close a tab (an agent's own, from `trif open`): it must be named (no "the active tab" default), and
+  // not the one the user is looking at, unless forced. (The helper also closes a run's opened tabs when
+  // the run ends.)
+  async close(args) {
+    if (args.tab === undefined && args.url === undefined) throw new Error('say which tab to close: --tab <id> (from trif tabs or trif open) or --url <part of its address>');
+    const tab = await scopedTab(args);
+    if (!args.force && tab.active) {
+      const win = await chrome.windows.get(tab.windowId).catch(() => null);
+      if (win && win.focused && win.state !== 'minimized') {
+        throw new Error("that's the tab the user is looking at; leave it open, or add --force if closing it is what they want");
+      }
+    }
+    await chrome.tabs.remove(tab.id);
+    return { id: tab.id, url: tab.url || '' };
   },
 
   async text(args) {
@@ -730,7 +806,8 @@ const commands = {
   },
 
   async errors(args) {
-    return runtimeList(args, 'errors');
+    // (--page: the page's own errors, the ones no mod threw)
+    return runtimeList(args, args.page ? 'pageErrors' : 'errors');
   },
 
   /**
@@ -967,6 +1044,15 @@ async function onPageMessage(msg) {
       return { ok: true };
     case 'status':
       return uiStatus();
+    case 'mods.pause': {
+      // Settings' "Pause all mods": nothing runs in this browser until it's off again
+      state.paused = msg.paused === true;
+      await save({ paused: state.paused });
+      await serial(applyMods).then(reportApplied).catch((e) => log('warn', errMsg(e)));
+      if (msg.tab !== undefined) await chrome.tabs.reload(Number(msg.tab)).catch(() => {});
+      notifyPanels();
+      return { paused: state.paused };
+    }
     case 'mod.enable': {
       const args = { id: msg.id, enabled: msg.enabled };
       if (msg.tab !== undefined) args.tab = msg.tab;
@@ -987,17 +1073,18 @@ async function uiStatus() {
   return {
     helper: { connected: state.connected, error: state.connected ? null : state.helperError },
     userScripts: s.userScripts, settingsUrl: SETTINGS_URL, version: VERSION, chrome: CHROME, browser: BROWSER,
-    recording: s.recording, sitesOn: state.sitesOn, siteMode: s.siteMode, disconnected: s.disconnected, blockedSites: s.blockedSites, access: s.access, siteAccess: SITE_ACCESS,
+    recording: s.recording, sitesOn: state.sitesOn, siteMode: s.siteMode, disconnected: s.disconnected, blockedSites: s.blockedSites, access: s.access, siteAccess: SITE_ACCESS, paused: state.paused,
     starter: state.connected ? state.starter : null, update: state.connected ? state.update : null,
     mods: state.mods.map((m) => ({
       id: m.id, name: m.name || m.id, description: m.description || '', site: m.site, file: m.file || '',
       matches: m.matches || [], excludes: m.excludes || [], registered: !!live.get(m.id)?.registered, enabled: live.get(m.id)?.enabled ?? isEnabled(m.id),
       error: errors.get(m.id) === USER_SCRIPTS_OFF ? null : errors.get(m.id) || null,
-      held: m.held || null, risk: m.risk || null,
+      held: m.held || null, pending: m.pending || null, review: m.held || m.pending ? null : m.review || null, risk: m.risk || null,
       from: fromOtherBrowser(m, state.installId) ? (m.origin.browser || 'another browser') : null,
       source: m.source || null, version: m.version || null, update: m.update || null,
     })),
     runs: [...state.runs.values()].map((r) => ({ runId: r.runId, site: r.site })),
+    lockedTabs: tabLocks.list(),
     // Storage stopped working: the panel can't read switches from it, so they come from here.
     ...(storageHealth.broken ? { storageBroken: true, disabled: state.disabled, offSites: state.offSites } : {}),
   };
@@ -1077,8 +1164,28 @@ async function onPanelMessage(msg) {
       await updateChat(site, (chat) => { chat.messages.push({ role: 'tool', text: String(msg.text ?? ''), time: Date.now() }); });
       return { ok: true };
     }
+    case 'mod.code': {
+      // "Show code" on a held mod or one to review: the file as the helper has it (capped)
+      return helperRequest('mod.code', { id: String(msg.id ?? '') }, 10000);
+    }
+    case 'mod.review': {
+      // "Looks right" on a mod TRIF found can do more than restyle (the helper allows what it found)
+      return helperRequest('mod.review', { id: String(msg.id ?? '') }, 10000);
+    }
+    case 'mod.diff': {
+      // "Show what changed" on a change waiting for the user's OK
+      return helperRequest('mod.diff', { id: String(msg.id ?? '') }, 15000);
+    }
+    case 'mod.reject': {
+      // "Don't allow": the helper puts the version before back (or, for a new mod, moves it to the trash)
+      const r = await helperRequest('mod.reject', { id: String(msg.id ?? ''), ...(typeof msg.hash === 'string' ? { hash: msg.hash } : {}) }, 10000);
+      await serial(() => {});
+      const mod = state.mods.find((m) => m.id === r.id);
+      if (mod && msg.tab !== undefined) await reloadIfApplies(mod, { tab: msg.tab }, { onlyIfRunning: true });
+      return r;
+    }
     case 'mod.approve': {
-      const r = await helperRequest('mod.approve', { id: String(msg.id ?? '') }, 10000);
+      const r = await helperRequest('mod.approve', { id: String(msg.id ?? ''), ...(typeof msg.hash === 'string' ? { hash: msg.hash } : {}) }, 10000);
       if (msg.tab !== undefined) {
         await serial(() => {}); // the helper re-sent the mods before answering: let them register first
         const mod = state.mods.find((m) => m.id === r.id);
@@ -1098,6 +1205,25 @@ async function onPanelMessage(msg) {
       }
       if (mod && msg.tab !== undefined) { await serial(() => {}); await reloadIfApplies(mod, { tab: msg.tab }, { onlyIfRunning: true }); }
       return r;
+    }
+    case 'mod.undo': {
+      // "Undo these changes" on the chat line after a run: each mod back to what it was before it
+      const ids = (Array.isArray(msg.ids) ? msg.ids : []).map(String).slice(0, 20);
+      const done = [];
+      for (const id of ids) done.push(await helperRequest('mod.undo', { id }, 10000));
+      if (msg.site) {
+        await updateChat(normalizeSite(msg.site), (chat) => {
+          const line = chat.messages.findLast((m) => Array.isArray(m.undoChange) && !m.undone && m.undoChange.join() === ids.join());
+          if (line) line.undone = true;
+          chat.messages.push({ role: 'mod', text: `Undone: ${done.map((r) => `${modFileName(r.id)}${r.restored === 'removed' ? ' (new: in the trash)' : ''}`).join(', ')}.`, time: Date.now() });
+        });
+      }
+      await serial(() => {});
+      for (const r of done) {
+        const mod = state.mods.find((m) => m.id === r.id);
+        if (mod && msg.tab !== undefined) await reloadIfApplies(mod, { tab: msg.tab });
+      }
+      return { undone: done };
     }
     case 'mod.restore': {
       const r = await helperRequest('mod.restore', { id: String(msg.id ?? '') }, 10000);
@@ -1359,17 +1485,28 @@ async function onAgentEvent(runId, event, relay = true) {
         push('tool', toolLine(event.name, event.summary));
         break;
       case 'error':
-        push('error', event.message || 'Something went wrong.');
+        // The agent's login is gone or expired: one plain line, not an error (the panel shows its login
+        // notice for it), and at most one per run.
+        if (event.reason === 'login') {
+          if (!run.loginSaid) { run.loginSaid = true; push('login', event.message || 'Your agent needs you to log in again.'); }
+        } else push('error', event.message || 'Something went wrong.');
         break;
       case 'done': {
         if (event.sessionId) { chat.sessionId = String(event.sessionId); chat.agent = run.agent ?? chat.agent ?? null; }
         if (event.ok && !run.texts && String(event.result ?? '').trim()) push('assistant', event.result);
-        if (!event.ok && !run.errored) {
+        if (!event.ok && event.error?.kind === 'login') {
+          if (!run.loginSaid) push('login', event.error.message || 'Your agent needs you to log in again.');
+        } else if (!event.ok && !run.errored) {
           if (run.stopping) push('tool', 'stopped');
           else push('error', String(event.result ?? '').trim() || 'The agent stopped without finishing.');
         }
+        // What the run changed can be undone (the helper kept the versions before: lib/history.js)
+        const undoable = Array.isArray(event.undoable) ? event.undoable.filter((id) => typeof id === 'string').slice(0, 20) : [];
+        if (undoable.length) {
+          chat.messages.push({ role: 'mod', text: `Changed ${undoable.map(modFileName).join(', ')}.`, undoChange: undoable, time });
+        }
         for (const h of Array.isArray(event.held) ? event.held : []) {
-          push('error', `${h.id} is on hold: ${h.reason}. It won't run until you allow it (in Mods above).`);
+          push('error', `${h.id} is on hold: TRIF found that it ${(Array.isArray(h.facts) && h.facts.length ? h.facts : [h.reason]).join('; it ')}. It won't run until you allow it (in Mods above).`);
         }
         chat.last = {
           runId, ok: !!event.ok, time,

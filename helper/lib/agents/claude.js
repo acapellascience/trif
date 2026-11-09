@@ -3,7 +3,7 @@
 
 const fs = require('fs');
 const path = require('path');
-const { findExecutable, versionOf, relToWorkspace, oneLine, parseJsonLine, captureSync } = require('./util');
+const { findExecutable, versionOf, relToWorkspace, oneLine, parseJsonLine, captureSync, isLoginFailure, loginError } = require('./util');
 const { within, ignoresCase } = require('../pathcheck');
 
 // What a side-panel run may do (runs.js runLimits gives the paths). Only the tools in TOOLS, then two layers:
@@ -34,7 +34,7 @@ const DENIED_TOOLS = ['WebFetch', 'WebSearch'];
 // The workspace's files that steer TRIF (or the agents): never written by a run's commands. (.shipped
 // holds the versions of shipped mods a merge run reads: readable, never written.)
 const STATE_FILES = ['held.json', 'preinstalled.json', 'origins.json', 'active-runs', 'trash', 'update.json', 'instructions.md',
-  'AGENTS.md', 'CLAUDE.md', '.claude', 'bin', 'app', '.shipped'];
+  'AGENTS.md', 'TECHNIQUES.md', 'CLAUDE.md', '.claude', 'bin', 'app', '.shipped'];
 /** Rules like Read(./config.json) made absolute to the workspace (see runSettings `rel`). */
 function absoluteRules(rules, workspace) {
   if (!workspace) return rules;
@@ -105,7 +105,10 @@ function runSettings({ workspace = '', readOnly = [], lockedDirs = [], denied = 
   };
 }
 
-const NOT_LOGGED_IN = "Claude Code isn't logged in: run `claude` in a terminal and log in (type /login)";
+// A run that failed for want of a login (util.js isLoginFailure): "Claude Code needs you to log in again."
+// With a saved API key (state.apiKey) the run never used the login, so logging in wouldn't help: the
+// agent's own words stay.
+const loginFailed = (text, state) => !state.apiKey && isLoginFailure(text);
 
 // With an Anthropic API key saved (agentkeys.js): the run's key proxy as ANTHROPIC_BASE_URL and a
 // placeholder key; the real key never reaches Claude Code. Without one: Claude Code's own login.
@@ -226,17 +229,25 @@ const adapter = {
     } else if (msg.type === 'assistant' && msg.message && Array.isArray(msg.message.content)) {
       for (const c of msg.message.content) {
         if (!c || typeof c !== 'object') continue;
-        // (A logged-out CLI also "says" the login message; the result line turns it into an error.)
-        if (c.type === 'text' && typeof c.text === 'string' && c.text.trim() && !isLoginMessage(c.text)) emit({ kind: 'text', text: c.text });
-        else if (c.type === 'tool_use') emit({ kind: 'tool', name: String(c.name || 'tool'), summary: toolSummary(c.name, c.input, state.workspace) });
+        if (c.type === 'text' && typeof c.text === 'string' && c.text.trim()) {
+          // A logged-out or expired login also "says" its error as a reply ("Failed to authenticate: OAuth
+          // session expired…"), then again in the result line. Text in those words waits for the result:
+          // dropped if the run failed for want of a login, shown as usual otherwise.
+          if (loginFailed(c.text, state)) (state.heldText = state.heldText || []).push(c.text);
+          else { flushHeld(emit, state); emit({ kind: 'text', text: c.text }); }
+        } else if (c.type === 'tool_use') {
+          flushHeld(emit, state);
+          emit({ kind: 'tool', name: String(c.name || 'tool'), summary: toolSummary(c.name, c.input, state.workspace) });
+        }
       }
     } else if (msg.type === 'result') {
       const text = typeof msg.result === 'string' ? msg.result : '';
-      let ok = !msg.is_error && (!msg.subtype || msg.subtype === 'success');
-      const loggedOut = isLoginMessage(text);
+      const ok = !msg.is_error && (!msg.subtype || msg.subtype === 'success');
+      const loggedOut = !ok && loginFailed(text || (state.heldText || []).join('\n'), state);
+      if (loggedOut) state.heldText = null;
+      else flushHeld(emit, state);
       if (loggedOut) {
-        ok = false;
-        emit({ kind: 'error', message: NOT_LOGGED_IN });
+        emit(loginError(adapter.name));
       } else if (!ok) {
         emit({ kind: 'error', message: text || `Claude Code stopped (${msg.subtype || 'error'})` });
       }
@@ -246,16 +257,17 @@ const adapter = {
         result: text || null,
         costUsd: typeof msg.total_cost_usd === 'number' ? msg.total_cost_usd : null,
         sessionId: msg.session_id || null,
-        // A logged-out run's session is empty: keep resuming the previous one (runs.js handles this).
+        // A logged-out run's session holds nothing but the message and the error: keep resuming the
+        // previous one (runs.js handles this), so the message sent again after logging in isn't there twice.
         ...(loggedOut ? { discardSession: true } : {}),
       });
     }
   },
 
   // The process ended without a result line: a friendlier message than the raw stderr when we can.
-  explainExit({ stderr }) {
+  explainExit({ stderr, state = {} }) {
     const s = String(stderr || '');
-    if (/not logged in|please run \/login|invalid api key/i.test(s)) return NOT_LOGGED_IN;
+    if (loginFailed(s, state)) return loginError(adapter.name);
     if (/no conversation found/i.test(s)) return "Claude Code couldn't resume this conversation (it may have been deleted): start a new chat.";
     return null;
   },
@@ -293,8 +305,11 @@ function parseLoginLine(line) {
   return { kind: 'text', text: t };
 }
 
-function isLoginMessage(text) {
-  return /not logged in|please run \/login/i.test(String(text));
+// Text held back by parse (see the assistant case), shown after all: the run went on.
+function flushHeld(emit, state) {
+  const held = state.heldText;
+  state.heldText = null;
+  for (const text of held || []) emit({ kind: 'text', text });
 }
 
 function toolSummary(name, input, workspace) {
@@ -313,7 +328,6 @@ function toolSummary(name, input, workspace) {
 
 module.exports = adapter;
 module.exports.toolSummary = toolSummary;
-module.exports.NOT_LOGGED_IN = NOT_LOGGED_IN;
 module.exports.parseLoginLine = parseLoginLine;
 module.exports.runSettings = runSettings;
 module.exports.tooOld = tooOld;

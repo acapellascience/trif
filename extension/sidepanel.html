@@ -32,7 +32,8 @@
   </div>
 </header>
 
-<section id="settings" class="settings" hidden>
+<section id="settings" class="settings" aria-labelledby="settings-title" hidden>
+  <h2 id="settings-title" class="visually-hidden">Settings</h2>
   <label class="field">
     <span>Agent</span>
     <select id="agent"><option value="">Default</option></select>
@@ -75,10 +76,11 @@
   <p id="model-note" class="note" hidden></p>
   <label class="field field-stacked">
     <span>Instructions for your agent</span>
-    <textarea id="instructions" rows="3" maxlength="4000" spellcheck="true" disabled
+    <textarea id="instructions" rows="3" maxlength="4000" spellcheck="true" aria-describedby="instructions-note" disabled
       placeholder="Read by every chat. For example: talk like a caveman; don't bring up detectability."></textarea>
   </label>
-  <p id="instructions-note" class="note">Applies from your next message, here and in Claude Code in ~/.trif.</p>
+  <p id="instructions-note" class="note" role="status">Applies from your next message, here and in Claude Code in ~/.trif.</p>
+  <label class="check"><input id="pause-all" type="checkbox"> Pause all mods in this browser</label>
   <label class="check"><input id="auto-update" type="checkbox"> Install updates automatically</label>
   <p id="update-note" class="note"></p>
   <!-- Tim's starter mods, when the user hasn't added them (the setup page asked). -->
@@ -137,12 +139,15 @@
 </section>
 
 <!-- User scripts off: a notice of its own, above any other (a login one too). -->
+<section id="paused-all" class="notice" hidden></section>
+<section id="tab-lock" class="notice tab-lock" hidden></section>
 <section id="paused" class="notice" hidden></section>
 <section id="notice" class="notice" hidden></section>
 <section id="update" class="notice" hidden></section>
 
 <details id="mods" class="mods" hidden>
   <summary>Mods on this site <span id="mods-count" class="count"></span></summary>
+  <p id="mods-review-note" class="mods-review-note" hidden></p>
   <ul id="mod-list" class="mod-list"></ul>
   <p id="mods-live" class="visually-hidden" aria-live="polite"></p>
 </details>

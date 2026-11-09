@@ -13,7 +13,8 @@ const agents = require('./agents');
 const { scopeFor } = require('./scope');
 const { readInstructions, instructionsContext } = require('./instructions');
 const { markRunActive, markRunEnded } = require('./origins');
-const { listModFiles } = require('./mods');
+const { listModFiles, ALL_SITES: ALL_SITES_DIR } = require('./mods');
+const history = require('./history');
 const { redactSecrets } = require('./agents/util');
 const { within, ignoresCase } = require('./pathcheck');
 const { migratePrivate, privateLeftovers } = require('./migrate');
@@ -433,7 +434,10 @@ function runLimits(ws, { scope, box, screenshotsReal, modsReal }) {
   const writable = [mods, shots, real(box)];
   let names = [];
   try { names = fs.readdirSync(mods, { withFileTypes: true }).filter((d) => d.isDirectory() || d.isSymbolicLink()).map((d) => d.name); } catch { /* none yet */ }
-  const otherSites = names.filter((n) => scopeFor(n) !== scope);
+  // Every other site's folder is read-only to the run. Not all-sites/: a mod for every site may be
+  // edited from any site's chat, and every such change waits for the user's OK (its @match is outside
+  // the run's scope: held.js), with the version before running meanwhile.
+  const otherSites = names.filter((n) => scopeFor(n) !== scope && n !== ALL_SITES_DIR);
   // Each such folder by its path in the workspace (`literal`, what Claude Code's file tools match rules
   // against: a site folder can be a link) and its real path (`real`, what sandboxes compare); `rel` names
   // it as modSnapshot names files.
@@ -618,6 +622,7 @@ class Runs {
     if (run.doneSent) return;
     if (run.secrets.length) { const t = JSON.stringify(event); const r = redactSecrets(t, run.secrets); if (r !== t) event = JSON.parse(r); }
     if (event.kind === 'done') run.doneSent = true;
+    if (event.kind === 'error' && event.reason === 'login') { run.loginFailed = event.message; event = { ...event, agent: run.agent }; }
     try { this.onEvent(run.id, event); } catch (e) { this.logger.error(`agent event handler: ${e.message}`); }
   }
 
@@ -757,6 +762,8 @@ class Runs {
     // says it kept the run out of; an adapter that doesn't say exempts none.
     run.locked = Array.isArray(locked) ? locked.filter((d) => limits.locked.includes(d)) : [];
     run.beforeFiles = snapshot(ws.modsDir, ws.home);
+    // The mods' text as it was, so what this run changes can be undone (lib/history.js)
+    try { run.beforeContents = history.contentsSnapshot(ws); } catch (e) { this.logger.warn(`couldn't keep the mods' text for undo: ${e.message}`); }
     // Tell the other browsers' helpers a run is going, so mods it creates start off there (lib/origins.js).
     if (ws.installId) {
       try { markRunActive(ws.home, { runId: run.id, by: ws.installId, browser: ws.browser || '', site: run.site }); run.marked = true; } catch (e) { this.logger.warn(`couldn't mark run ${run.id} active: ${e.message}`); }
@@ -901,6 +908,11 @@ class Runs {
     if (run.beforeFiles) {
       try { changedFiles = diffSnapshots(run.beforeFiles, snapshot(run.ws.modsDir, run.ws.home)); } catch { /* ignore */ }
     }
+    // What it changed, kept for undo (history/), named in `done` for the chat's Undo line
+    let undoable = [];
+    if (run.beforeContents && changedFiles.length) {
+      try { undoable = history.recordChanges(run.ws, run.beforeContents, changedFiles); } catch (e) { this.logger.warn(`couldn't keep run ${run.id}'s changes for undo: ${e.message}`); }
+    }
     const d = run.agentDone;
     let done;
     if (d) {
@@ -908,13 +920,25 @@ class Runs {
     } else {
       if (!run.stopped && !run.timedOut && run.child) {
         const tail = run.stderr.trim().split('\n').slice(-12).join('\n').slice(-2000);
+        // (A message, or a whole error event: util.js loginError.)
         const friendly = run.adapter.explainExit ? run.adapter.explainExit({ code, signal, stderr: run.stderr, state: run.state }) : null;
         const how = signal ? `was killed (${signal})` : `exited with code ${code}`;
-        this._emit(run, { kind: 'error', message: friendly || `${run.adapter.name} ${how} without finishing${tail ? `:\n${tail}` : ''}` });
+        this._emit(run, friendly && typeof friendly === 'object' ? friendly
+          : { kind: 'error', message: friendly || `${run.adapter.name} ${how} without finishing${tail ? `:\n${tail}` : ''}` });
       }
       done = { kind: 'done', ok: false, result: null, costUsd: null, changedFiles, sessionId: run.lastSessionId || null };
     }
+    if (undoable.length) done.undoable = undoable;
     if (run.stopped && !run.shuttingDown) done.stopped = true;
+    // Failed for want of a login: say so in `done` (the panel shows its login notice instead of an error),
+    // and agent.list says logged out from now on, whatever the agent's own status check says (Claude
+    // Code's still says logged in with an expired login it can't refresh), until a login or a run works.
+    if (run.loginFailed && !done.ok) {
+      done.error = { kind: 'login', agent: run.agent, message: run.loginFailed };
+      agents.noteLoginFailed(run.agent);
+    } else if (done.ok) {
+      agents.noteLoginWorked(run.agent);
+    }
     if (run.shuttingDown) this._emit(run, { kind: 'error', message: 'the helper shut down (Chrome closed?) before the agent finished' });
     this._emit(run, done);
     this._log(run, { webmods: 'done', ...done, exitCode: code, signal, stderrTail: run.stderr.slice(-4000), time: Date.now() });

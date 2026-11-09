@@ -162,7 +162,7 @@ async function main() {
 
     // ---- TRIF off for timsrobot.com: the demo
     let s0;
-    await check('TRIF off for timsrobot.com: nothing marks the page; at a desk the demo panel starts open; closed, its tab ("Show the fixer") is outside <body>, in the top layer, on screen', async () => {
+    await check('TRIF off for timsrobot.com: nothing marks the page; at a desk the demo panel starts open; closed, its tab ("Try the demo" before a prompt) is outside <body>, in the top layer, on screen', async () => {
       await load();
       const first = await state();
       if (!first.panel) throw new Error('the panel didn\'t start open');
@@ -170,7 +170,7 @@ async function main() {
       await sleep(800);
       s0 = await state();
       if (s0.marker !== null) throw new Error(`marker ${s0.marker}`);
-      if (s0.panel || !s0.tab || s0.tab.parent !== 'HTML' || !s0.tab.top || !s0.tab.shown || !s0.tab.inView || !s0.tab.hit || s0.tab.label !== 'Show the fixer') throw new Error(JSON.stringify(s0.tab));
+      if (s0.panel || !s0.tab || s0.tab.parent !== 'HTML' || !s0.tab.top || !s0.tab.shown || !s0.tab.inView || !s0.tab.hit || s0.tab.label !== 'Try the demo') throw new Error(JSON.stringify(s0.tab));
       if (Object.values(s0.mods).some((n) => n)) throw new Error(`mods running: ${JSON.stringify(s0.mods)}`);
       await shot('tab');
       return `tab at ${s0.tab.rect}`;

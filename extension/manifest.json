@@ -33,7 +33,8 @@
     "nativeMessaging",
     "scripting",
     "sidePanel",
-    "activeTab"
+    "activeTab",
+    "declarativeNetRequest"
   ],
   "optional_host_permissions": [
     "<all_urls>"

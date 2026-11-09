@@ -3,7 +3,7 @@
 // chrome.storage.local `chat:<site>`; this page renders that record and reacts to storage changes.
 // See docs/PROTOCOL.md, "Side panel and agent runs".
 
-import { siteForUrl, modAppliesTo, modSites, isMultiSite, offOnSite, normalizeOffSites, scopeFor, limitToSites, withOffSites, FIREFOX, BROWSER, SETUP_COMMAND,
+import { siteForUrl, modAppliesTo, modSites, isMultiSite, offOnSite, normalizeOffSites, scopeFor, hostInScope, limitToSites, withOffSites, FIREFOX, BROWSER, SETUP_COMMAND,
   SITE_ACCESS, siteOrigins, siteState, hasSiteAccess, requestEverySite,
   normalizeModOrder, orderMods, moveId, setModOrder,
   normalizeSettings, normalizePicks, siteSettings, withoutModel } from './lib.js';
@@ -28,8 +28,8 @@ const ui = {
   settings: $('#settings'), agent: $('#agent'), agentNote: $('#agent-note'), model: $('#model'),
   using: $('#using'), modelCustomRow: $('#model-custom-row'), modelCustom: $('#model-custom'), modelNote: $('#model-note'),
   instructions: $('#instructions'), instructionsNote: $('#instructions-note'),
-  autoUpdate: $('#auto-update'), updateNote: $('#update-note'), update: $('#update'),
-  notice: $('#notice'), paused: $('#paused'), mods: $('#mods'), modsCount: $('#mods-count'), modList: $('#mod-list'), modsLive: $('#mods-live'),
+  autoUpdate: $('#auto-update'), pauseAll: $('#pause-all'), pausedAll: $('#paused-all'), updateNote: $('#update-note'), update: $('#update'),
+  notice: $('#notice'), paused: $('#paused'), tabLock: $('#tab-lock'), mods: $('#mods'), modsCount: $('#mods-count'), modList: $('#mod-list'), modsReviewNote: $('#mods-review-note'), modsLive: $('#mods-live'),
   chat: $('#chat'), empty: $('#empty'), messages: $('#messages'), working: $('#working'),
 
   composer: $('#composer'), input: $('#input'), send: $('#send'), stop: $('#stop'),
@@ -58,7 +58,7 @@ const view = {
   modOrder: {},              // chrome.storage.local `modOrder`: the order the user dragged each site's mods into (lib.js)
   defaultOrder: {},          // chrome.storage.local `defaultOrder`: each site's order for its shipped mods until then (from the helper)
   modNatural: [],            // the ids of the mods listed, in the order they come before the user's (what an unsaved order is)
-  myRuns: new Set(),         // runs this panel started
+  myRuns: new Map(),         // runs this panel started: runId -> {prompt, tabId} for a message sent from the box, else null
   updated: null,             // chrome.storage.local `updated`: {from, to, notes, at} after an update's reload
   updateBusy: null,          // 'checking' | 'installing' while the panel waits on the helper
   updateError: null,
@@ -114,9 +114,12 @@ function onPortMessage(msg) {
     // The transcript arrives through storage; only our own runs matter here.
     if (!view.myRuns.has(msg.runId)) return;
     if (msg.event?.kind === 'done') {
+      const sent = view.myRuns.get(msg.runId);
       view.myRuns.delete(msg.runId);
       refreshStatus();
       if (!msg.event.ok) loadAgents(); // maybe "not logged in": refresh loggedIn
+      // The agent needs logging in: the message goes back in the box, to send again once logged in.
+      if (msg.event.error?.kind === 'login' && sent) restoreDraft(sent);
     }
   } else if (msg?.type === 'statusChanged') {
     refreshStatusSoon();
@@ -244,8 +247,24 @@ async function followActiveTab() {
   if (tab) await setTab(tab);
 }
 
+// What was typed in the message box and not sent, by tab. One panel serves every tab in its window, so on a
+// tab switch the box would keep the other tab's words: each tab gets back what was left in it instead.
+// (This panel's memory only: a closed tab's goes with it, and a new panel starts empty.)
+const drafts = new Map();
+chrome.tabs.onRemoved.addListener((tabId) => drafts.delete(tabId));
+
+/** Put an unsent message back in its tab's box, unless something else was typed there meanwhile. */
+function restoreDraft({ prompt, tabId }) {
+  if (view.tab?.id === tabId) { if (!ui.input.value.trim()) ui.input.value = prompt; }
+  else if (!drafts.get(tabId)) drafts.set(tabId, prompt);
+}
+
 async function setTab(tab) {
   const url = tab.url || tab.pendingUrl || '';
+  if (view.tab && view.tab.id !== tab.id) {
+    if (ui.input.value) drafts.set(view.tab.id, ui.input.value); else drafts.delete(view.tab.id);
+    ui.input.value = drafts.get(tab.id) || '';
+  }
   view.tab = { id: tab.id, url };
   const site = siteForUrl(url);
   if (site !== view.site) {
@@ -288,6 +307,7 @@ function code(text) {
 
 function messageNode(m) {
   const li = el('li', `msg ${m.role}`);
+  // (Role 'login': the agent needs logging in, a plain line; the notice above has the Log in button.)
   if (m.role === 'assistant' || m.role === 'error') setMarkdown(li, m.text);
   else li.textContent = m.text;
   if (m.role === 'tool') li.title = m.text;
@@ -301,6 +321,20 @@ function messageNode(m) {
       } catch (e) {
         undo.disabled = false;
         request({ type: 'chat.note', site: view.site, text: `Couldn't restore ${m.undo}: ${e?.message ?? e}` }).catch(() => {});
+      }
+    });
+    li.append(' ', undo);
+  }
+  // "Changed x.js." after a run: put back what the mods were before it (the helper keeps them: history/)
+  if (Array.isArray(m.undoChange) && m.undoChange.length && !m.undone) {
+    const undo = button('Undo these changes', '', async () => {
+      undo.disabled = true;
+      try {
+        await request({ type: 'mod.undo', ids: m.undoChange, site: view.site, tab: view.tab?.id });
+        undo.remove();
+      } catch (e) {
+        undo.disabled = false;
+        request({ type: 'chat.note', site: view.site, text: `Couldn't undo: ${e?.message ?? e}` }).catch(() => {});
       }
     });
     li.append(' ', undo);
@@ -353,7 +387,9 @@ function render() {
   // with that. From the agent itself, not the panel's main problem: a red one (user scripts off) takes
   // that slot, and the login is still missing. Send's tooltip says what to do.
   const keyMissing = agentInfo?.id === 'codex-oss' && agentInfo.available && openModelKeyMissing();
-  const waitsForLogin = (!!agentInfo?.available && agentInfo.loggedIn === false) || !!keyMissing;
+  // (Except a login a run found gone, loginExpired: the agent's own check still says logged in then, so
+  // after logging in from a terminal, sending again is the only way to tell. The notice still shows.)
+  const waitsForLogin = (!!agentInfo?.available && agentInfo.loggedIn === false && !agentInfo.loginExpired) || !!keyMissing;
   const canSend = !!site && helperOk && !waitsForLogin && (agentInfo ? agentInfo.available : (view.agents ? anyAgent : true));
   ui.composer.dataset.canSend = canSend ? '1' : '';
   ui.send.title = !waitsForLogin ? 'Send'
@@ -361,6 +397,8 @@ function render() {
       : `Log in to ${agentInfo?.name || 'your agent'} first`;
 
   renderGate(problem, agentInfo);
+  renderTabLock();
+  renderPausedAll();
   renderNotice({ helperOk, agentInfo, anyAgent });
   renderUpdate();
   renderMods();
@@ -444,6 +482,44 @@ function renderProblemLine(node, problem, agentInfo) {
 function allowUserScripts() {
   if (FIREFOX) chrome.permissions.request({ permissions: ['userScripts'] }).then(() => setTimeout(refreshStatus, 300), () => {});
   else chrome.tabs.create({ url: view.status?.settingsUrl || `chrome://extensions/?id=${chrome.runtime.id}` });
+}
+
+/** Every mod paused (Settings): a notice saying so, with Resume, and the checkbox follows. */
+function setPaused(paused) {
+  return request({ type: 'mods.pause', paused, tab: view.tab?.id }).then(refreshStatus, (e) => request({ type: 'chat.note', site: view.site, text: `Couldn't ${paused ? 'pause' : 'resume'} mods: ${e?.message ?? e}` }).catch(() => {}));
+}
+function renderPausedAll() {
+  const paused = !!view.status?.paused;
+  ui.pauseAll.checked = paused;
+  ui.pausedAll.hidden = !paused;
+  if (!paused) { ui.pausedAll.replaceChildren(); return; }
+  if (ui.pausedAll.childElementCount) return;
+  ui.pausedAll.replaceChildren(el('p', 'title', 'All mods are paused'),
+    el('p', null, 'Nothing from TRIF runs on any site in this browser until you resume. Each mod keeps its own switch.'),
+    actions(button('Resume', 'primary', () => setPaused(false))));
+}
+
+/**
+ * This tab is locked (background's tabLocks, tablock.js): the agent ran code in it, so the browser blocks
+ * every request from it that changes something (posting, sending, saving) until the page is reloaded.
+ */
+function renderTabLock() {
+  const n = ui.tabLock;
+  const lock = view.tab && (view.status?.lockedTabs || []).find((l) => l.tabId === view.tab.id);
+  n.hidden = !lock;
+  if (!lock) { n.replaceChildren(); return; }
+  if (n.childElementCount) return;
+  // Back to the page it was locked on if the tab is somewhere else now (a blocked page: reloading that
+  // would only ask for the blocked address again), else a reload. Either way a new page: unlocked.
+  const reload = button('Reload the page', 'primary', () => {
+    const t = view.tab;
+    if (!t) return;
+    let away = true;
+    try { away = !hostInScope(new URL(t.url || '').hostname, lock.site); } catch { /* no URL: away */ }
+    (away && /^https?:/.test(lock.url) ? chrome.tabs.update(t.id, { url: lock.url }) : chrome.tabs.reload(t.id)).catch(() => {});
+  });
+  const p = el('p', null, 'Your agent ran code in this page, so TRIF has blocked anything here from posting, sending or saving as you, or opening other sites, until the page reloads. Reading, scrolling, clicks and mods work as usual.');
+  n.replaceChildren(el('p', 'title', 'Posting is paused on this tab'), p, actions(reload));
 }
 
 /** User scripts off: "Mods are paused", in a notice of its own above the rest (a login notice too). */
@@ -539,9 +615,11 @@ function renderNotice({ helperOk, agentInfo, anyAgent }) {
 function needsLogin(agentInfo) {
   if (!agentInfo?.available || agentInfo.loggedIn === true) return false;
   if (agentInfo.loggedIn === false) return true;
-  const last = view.site ? view.chat.messages.at(-1) : null;
-  return last?.role === 'error' && /isn[’']t logged in/i.test(String(last.text));
+  return loginLine(view.site ? view.chat.messages.at(-1) : null);
 }
+
+// A run's "needs you to log in again" line (role 'login'), or an older helper's "isn't logged in" error.
+const loginLine = (m) => m?.role === 'login' || (m?.role === 'error' && /isn[’']t logged in/i.test(String(m.text)));
 
 function button(label, className, onClick) {
   const b = el('button', className ? `btn ${className}` : 'btn', label);
@@ -559,11 +637,10 @@ function markdownBlock(className, text) {
 // Logging in (login.js): the notice shows its steps.
 const login = createLogin({ request, changed: () => render(), succeeded: () => { loadAgents(); answerLoginError(); } });
 
-// Logged in: a chat whose last message is a run's "isn't logged in" error gets a line saying it's sorted,
-// so the error doesn't sit there as if it still applied (and the login notice doesn't come back for it).
+// Logged in: a chat whose last message is a run's login line (loginLine) gets a line saying it's sorted,
+// so it doesn't sit there as if it still applied (and the login notice doesn't come back for it).
 function answerLoginError() {
-  const last = view.site ? view.chat.messages.at(-1) : null;
-  if (last?.role !== 'error' || !/isn[’']t logged in/i.test(String(last.text))) return;
+  if (!loginLine(view.site ? view.chat.messages.at(-1) : null)) return;
   request({ type: 'chat.note', site: view.site, text: `${login.current?.name || 'Your agent'} is logged in now: send your message again.` }).catch(() => {});
 }
 
@@ -590,14 +667,21 @@ function renderMods() {
   view.modNatural = listed.map((m) => m.id);
   const mods = orderMods(listed, view.modOrder[scope]);
   ui.mods.hidden = mods.length === 0;
-  if (!mods.length) { view.modRows.clear(); ui.modList.replaceChildren(); return; }
+  if (!mods.length) { view.modRows.clear(); ui.modList.replaceChildren(); ui.modsReviewNote.hidden = true; return; }
   ui.modsCount.textContent = `(${mods.length})`;
+  // Mods TRIF found can do more than change the page's look, which the user hasn't looked at yet (helper
+  // lib/held.js): they keep running; each gets its facts once, below it.
+  const toReview = mods.filter((m) => m.review && !m.held).length;
+  ui.modsReviewNote.hidden = !toReview;
+  ui.modsReviewNote.textContent = toReview
+    ? `TRIF now reads what each mod's code can do. ${toReview === 1 ? 'One mod here can' : `${toReview} mods here can`} do more than change how the page looks: have a look below. ${toReview === 1 ? 'It keeps' : 'They keep'} running meanwhile.`
+    : '';
   // Each row is built once and rebuilt only when its own mod changes; rows that stay are left where they
   // are (not even moved), so a button being clicked or a focused switch is never swapped out from under
   // the pointer by a status refresh or by another mod changing. Everything else updates in place.
   const rows = new Map();
   for (const m of mods) {
-    const key = JSON.stringify([site, m.name, m.description || '', m.file, !!m.held, m.risk?.tier ?? null, m.risk?.why ?? null, m.matches,
+    const key = JSON.stringify([site, m.name, m.description || '', m.file, m.held ?? null, m.pending ?? null, m.review ?? null, m.risk?.tier ?? null, m.risk?.why ?? null, m.matches,
       m.source ?? null, m.version ?? null, m.update ?? null]);
     const old = view.modRows.get(m.id);
     rows.set(m.id, old && old.key === key ? old : { key, li: modItem(m) });
@@ -844,7 +928,8 @@ function modItem(m) {
   li.dataset.mod = m.id;
   li.title = m.file || m.id;
   const labelId = `mod-name-${++modLabelSeq}`;
-  const name = el('div', 'mod-name');
+  // (a heading, so a screen reader's heading navigation goes mod to mod)
+  const name = el('h3', 'mod-name');
   const light = el('span', 'light');
   const label = el('span', null, m.name);
   label.id = labelId;
@@ -878,7 +963,8 @@ function modItem(m) {
   main.append(light, name, ...(desc ? [desc] : []));
   const row = el('div', 'mod-row');
   if (m.held) {
-    // Written by an agent run here but reaching other sites: not running until the user allows it.
+    // Written by an agent run here, and it can do something the user hasn't allowed (what TRIF read in
+    // its code, or matches outside the site): not running until the user allows it.
     li.classList.add('held');
     const allow = el('button', 'btn allow', 'Allow');
     allow.type = 'button';
@@ -886,7 +972,7 @@ function modItem(m) {
     allow.addEventListener('click', async () => {
       allow.disabled = true;
       clearRowError(m.id);
-      try { await request({ type: 'mod.approve', id: m.id, tab: view.tab?.id }); } catch (e) {
+      try { await request({ type: 'mod.approve', id: m.id, hash: m.held.hash, tab: view.tab?.id }); } catch (e) {
         allow.disabled = false;
         rowError(m.id, String(e?.message ?? e));
       }
@@ -902,8 +988,91 @@ function modItem(m) {
   const err = el('div', 'mod-err');
   err.hidden = true;
   li.append(row, err);
+  if (m.held) li.append(factsBox(m, m.held, 'held'));
+  else if (m.pending) li.append(factsBox(m, m.pending, 'pending'));
+  else if (m.review) li.append(factsBox(m, m.review, 'review'));
   if (m.update && !m.held) li.append(updateNotice(m, err));
   return li;
+}
+
+// What a mod can do, in two clearly separate parts: TRIF's own facts, read from the code (the helper's
+// lib/powers.js and held.js), and what the mod says about itself (its header's @risk reason or
+// description: whoever wrote the mod wrote that too), labelled as such. Held: Allow is on the row.
+// Review (a mod the user has, still running): "Looks right" allows what was found; or switch it off.
+function factsBox(m, info, kind) {
+  const box = el('div', `mod-facts ${kind}`);
+  box.append(el('p', 'facts-head', kind === 'held' ? 'Waiting for your OK. TRIF found that this mod:'
+    : kind === 'pending' ? 'A change to this mod is waiting for your OK. TRIF found that the new version:'
+      : 'TRIF found that this mod:'));
+  const list = el('ul', 'facts');
+  for (const f of (Array.isArray(info.facts) ? info.facts : [String(info.reason || '')]).filter(Boolean)) list.append(el('li', null, f));
+  box.append(list);
+  const where = m.matches && m.matches.length ? ` It runs by itself on every page it's for (${m.matches.slice(0, 3).join(', ')}${m.matches.length > 3 ? '…' : ''}).` : '';
+  const fromAgent = kind !== 'review' && info.by !== 'outside';
+  const who = fromAgent ? `An agent ${kind === 'pending' ? 'changed' : 'wrote'} it in your chat on ${info.site || view.site}.` : 'It\'s new or changed since TRIF last let it run.';
+  box.append(el('p', 'facts-note', `${kind === 'review' ? 'It keeps running until you switch it off.'
+    : kind === 'pending' ? `${who} The version before keeps running until you decide.` : who}${where}`));
+  if (info.claim) {
+    const claim = el('p', 'facts-claim');
+    claim.append(el('span', 'facts-who', fromAgent ? 'The agent says: ' : 'The mod says: '), document.createTextNode(`“${info.claim}”`));
+    box.append(claim);
+  }
+  const shown = el('pre', 'facts-code');
+  shown.hidden = true;
+  const showCode = button('Show code', '', async () => {
+    if (!shown.hidden) { shown.hidden = true; showCode.textContent = 'Show code'; return; }
+    showCode.disabled = true;
+    try {
+      const r = await request({ type: 'mod.code', id: m.id });
+      shown.textContent = r.code + (r.truncated ? '\n…' : '');
+      shown.hidden = false;
+      showCode.textContent = 'Hide code';
+    } catch (e) { rowError(m.id, String(e?.message ?? e)); } finally { showCode.disabled = false; }
+  });
+  // The waiting change itself, against the version that last ran (the helper's lib/diff.js)
+  const diffView = el('pre', 'facts-diff');
+  diffView.hidden = true;
+  const showDiff = button('Show what changed', '', async () => {
+    if (!diffView.hidden) { diffView.hidden = true; showDiff.textContent = 'Show what changed'; return; }
+    showDiff.disabled = true;
+    try {
+      const r = await request({ type: 'mod.diff', id: m.id });
+      diffView.replaceChildren(...r.lines.map((l) => el('span', l.t === '+' ? 'add' : l.t === '-' ? 'del' : l.t === '…' ? 'gap' : 'ctx', `${l.t === '…' ? '…' : l.t} ${l.s}\n`)));
+      diffView.hidden = false;
+      showDiff.textContent = 'Hide what changed';
+    } catch (e) { rowError(m.id, String(e?.message ?? e)); } finally { showDiff.disabled = false; }
+  });
+  const decide = (type, label, title) => {
+    const b = button(label, type === 'mod.approve' ? 'primary' : '', async () => {
+      b.disabled = true;
+      clearRowError(m.id);
+      try { await request({ type, id: m.id, hash: info.hash, tab: view.tab?.id }); } catch (e) { b.disabled = false; rowError(m.id, String(e?.message ?? e)); }
+    });
+    b.title = title;
+    return b;
+  };
+  if (kind === 'pending') {
+    box.append(actions(decide('mod.approve', 'Allow', 'The new version runs from the next page load.'),
+      decide('mod.reject', 'Don\'t allow', 'The version before stays; the change is kept in its history (trif history).'), showDiff));
+    box.append(diffView);
+    return box;
+  }
+  if (kind === 'held') {
+    box.append(actions(decide('mod.reject', 'Don\'t allow', 'It goes to the trash (trif restore brings it back).'), showCode));
+    box.append(shown);
+    return box;
+  }
+  if (kind === 'review') {
+    const ok = button('Looks right', '', async () => {
+      ok.disabled = true;
+      clearRowError(m.id);
+      try { await request({ type: 'mod.review', id: m.id }); } catch (e) { ok.disabled = false; rowError(m.id, String(e?.message ?? e)); }
+    });
+    ok.title = 'TRIF won\'t ask about these again for this mod (only if it gains something new).';
+    box.append(actions(ok, showCode));
+  } else box.append(actions(showCode));
+  box.append(shown);
+  return box;
 }
 
 // A newer version of a mod TRIF ships, which didn't replace this copy because the user changed it
@@ -990,7 +1159,7 @@ function deleteButton(m, labelId, li) {
 function gripButton(labelId) {
   const b = el('button', 'icon-btn mod-grip');
   b.type = 'button';
-  b.title = 'Drag to move (or Alt+↑ / Alt+↓)';
+  b.title = 'Drag to reorder the list (or Alt+↑ / Alt+↓). It only changes how they\'re listed, not the order they run in.';
   b.setAttribute('aria-label', 'Move');
   b.setAttribute('aria-describedby', labelId);
   b.setAttribute('aria-keyshortcuts', 'Alt+ArrowUp Alt+ArrowDown');
@@ -1176,10 +1345,7 @@ function updateModItem(li, m) {
     tag.textContent = 'on hold';
     tag.hidden = false;
     const err = li.querySelector('.mod-err');
-    if (rowErr) { err.textContent = rowErr; err.hidden = false; } else if (!li.querySelector('.allow')?.disabled) {
-      err.textContent = `An agent wrote this while working here, but ${m.held.reason}. It won't run until you allow it.`;
-      err.hidden = false;
-    }
+    if (rowErr) { err.textContent = rowErr; err.hidden = false; } else { err.textContent = ''; err.hidden = true; } // (the facts box says why)
     return;
   }
   const site = switchSite(m);
@@ -1375,8 +1541,10 @@ async function send() {
     try { if (await panelCommand(text)) return; } catch (e) { console.warn('[TRIF] command failed', e); }
   }
   ui.input.value = '';
+  const tabId = view.tab.id;
   try {
-    await startRun(text);
+    const runId = await startRun(text);
+    view.myRuns.set(runId, { prompt: text, tabId }); // (to put it back if the agent needs logging in)
   } catch (e) {
     // The background records start failures in the chat; anything earlier goes back in the box.
     const inChat = view.chat.messages.some((m) => m.role === 'user' && m.text === text);
@@ -1397,7 +1565,7 @@ async function startRun(text, extra = {}) {
     type: 'agent.start', site: view.site, tabId: view.tab.id, url: view.tab.url, prompt: text,
     sessionId, agent: agent || undefined, model: chosenModel(agent) || undefined, ...extra,
   });
-  view.myRuns.add(runId);
+  view.myRuns.set(runId, null);
   return runId;
 }
 
@@ -1622,6 +1790,8 @@ async function installUpdate() {
     renderUpdate();
   }
 }
+
+ui.pauseAll.addEventListener('change', () => setPaused(ui.pauseAll.checked));
 
 ui.autoUpdate.addEventListener('change', async () => {
   const on = ui.autoUpdate.checked;

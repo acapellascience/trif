@@ -106,4 +106,35 @@ function redactSecrets(text, secrets) {
   return s;
 }
 
-module.exports = { isExecutableFile, findExecutable, versionOf, relToWorkspace, oneLine, parseJsonLine, captureSync, capture, redactSecrets };
+// What an agent says when a run fails because its login is gone, expired or refused: such a run shows
+// as "log in again" (loginError) rather than as the agent's raw error. The wordings are Claude Code
+// 2.1.319's and Codex 0.166's own (read from their binaries), plus the APIs' (Anthropic's
+// `authentication_error`, HTTP 401). Only checked on a run that failed, never on a reply that worked.
+// Not "could not be refreshed" on its own: Claude Code also says that when another of its processes
+// holds the refresh lock or the disk is full, which logging in again doesn't fix.
+const LOGIN_FAILURES = [
+  /not logged in/i,                                     // Claude Code "Not logged in · Please run /login"; Codex
+  /\brun \/login\b/i,                                    // Claude Code "Login expired · Please run /login", "OAuth token revoked · …"
+  /OAuth session expired/i,                             // Claude Code "Failed to authenticate: OAuth session expired and could not be refreshed"
+  /OAuth token (has been )?revoked/i,                   // Claude Code "Failed to authenticate: OAuth token revoked. Please log in again…"
+  /login reached its time limit/i,                      // Claude Code (the login's own lifetime is over)
+  /invalid api key/i,                                   // Claude Code "API Error: 401 Invalid API key · Please run /login"
+  /\bauthentication_error\b/,                            // Anthropic API error type
+  /\b(api error|status|http)\W{0,3}401\b|unauthori[sz]ed/i, // HTTP 401
+  /\bsign in again\b/i,                                  // Codex "Your access token could not be refreshed… Please log out and sign in again."; Claude Code "Authentication required · Sign in again to continue"
+  /please (run )?`?codex login/i,                       // Codex
+  /missing (api key|credentials)/i,                     // Codex
+];
+
+function isLoginFailure(text) {
+  const t = String(text ?? '');
+  return !!t && LOGIN_FAILURES.some((re) => re.test(t));
+}
+
+/** The error event for a run that failed for want of a login. `reason: 'login'` lets runs.js and the panel tell it apart. */
+function loginError(name) {
+  return { kind: 'error', reason: 'login', message: `${name} needs you to log in again.` };
+}
+
+module.exports = { isExecutableFile, findExecutable, versionOf, relToWorkspace, oneLine, parseJsonLine, captureSync, capture, redactSecrets,
+  LOGIN_FAILURES, isLoginFailure, loginError };

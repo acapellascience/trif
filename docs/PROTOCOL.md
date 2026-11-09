@@ -127,8 +127,10 @@ device and inode after opening), so swapping a link in between doesn't work eith
 
 ## Messages: helper ⇄ extension (native messaging)
 
-Chrome native messaging framing: 4-byte little-endian length + UTF-8 JSON. Host→extension messages must
-stay under 1 MB (the helper rejects bigger mods with an error logged to stderr, and the CLI reports it).
+Chrome native messaging framing: 4-byte little-endian length + UTF-8 JSON. Chrome and Firefox refuse a
+host→extension message over 1 MB, so a mods set bigger than that goes in parts (`modsPart`, below) to an
+extension whose hello lists the `modsParts` feature; an extension without it (0.2.4 and older) gets at most
+1 MB of mods, the largest left out with an error naming the extension's version (see "How big mods can be").
 Extension→host frames may be up to 256 MB; a bigger length means the stream is out of step, so the host
 logs it and exits (the extension reconnects to a fresh one) instead of misreading every later frame.
 
@@ -136,7 +138,8 @@ logs it and exits (the extension reconnects to a fresh one) instead of misreadin
 
 | message | meaning |
 |---|---|
-| `{type:"mods", mods:[Mod…], sitesOn:[site…], starter:{choice, count, sites}}` | The full set of mods, the sites the starter mods start TRIF on for (`preinstalled.json`; each browser turns each on once, see "Sites TRIF is on for"), and whether the user added Tim's starter mods (see "Native host installation"). Sent on connect and after every change in the mods folder (debounced 150 ms). The extension makes `chrome.userScripts` match it exactly (register new, update changed, unregister missing). |
+| `{type:"mods", mods:[Mod…], sitesOn:[site…], defaultOrder, starter:{choice, count, sites}}` | The full set of mods, the sites the starter mods start TRIF on for (`preinstalled.json`; each browser turns each on once, see "Sites TRIF is on for"), and whether the user added Tim's starter mods (see "Native host installation"). Sent on connect and after every change in the mods folder (debounced 150 ms). The extension makes `chrome.userScripts` match it exactly (register new, update changed, unregister missing). To an extension whose hello lists `modsSame`, a mod with the same id and hash as in the last set sent to it goes without `code`, marked `same: true`; the extension takes the code from the copy it has (`fillSameMods` in lib.js), or, if it hasn't one with that hash, applies nothing and sends `modsResend`. Every mod goes whole in the first set after each hello and after a `modsResend`. Over 1 MB it goes in parts, or (before the hello says the extension can take them) waits for the hello. |
+| `{type:"modsPart", set, i, n, data}` | Part `i` of `n` (0-based, in order) of a `mods` message too big for one native message: `data` is a slice of its JSON text, each part under 1 MB as sent. `set` (`"<pid>-<k>"`) names the set. The extension joins the parts and applies the set only when the last is in, all at once, as if it had come whole (`ModsParts` in lib.js). A new set's first part, or a whole `mods` message, drops an unfinished one. A part missing, out of order or malformed, or joined text that doesn't parse, drops that set (the rest of its parts are ignored), logs an error and sends `modsResend`; the last whole set stays applied. |
 | `{type:"request", id, cmd, args}` | A page command from the CLI (table below). The extension answers with a `response`. |
 | `{type:"update", update:Summary}` | What the helper knows about updates (see "Updates"), after the extension's hello, after each check and while installing. The panel shows it. |
 | `{type:"updated", from, to, notes}` | An update was installed. The extension keeps it in storage (`updated`) so the panel can say so after the reload. |
@@ -146,11 +149,49 @@ logs it and exits (the extension reconnects to a fresh one) instead of misreadin
 (`file` is the absolute path; `hash` is a sha1 of code+metadata so the extension can skip unchanged mods;
 `update`: a newer version of this shipped mod is waiting, see "Updates to shipped mods".)
 
+The extension keeps the mods it last had in `chrome.storage.local`, one per key: **`mod:<id>`** = the Mod,
+and **`modIds`** = their ids in order, so it can apply them before the helper connects. Only the mods that
+changed are written (0.2.4 and older kept them all in one key, `mods`, rewritten on every change; it's read
+until the first write and then removed).
+
+### How big mods can be
+
+A mod can be up to **4 MB** of code, and all mods together up to **16 MB** (`MAX_MOD_BYTES` and
+`MAX_MODS_BYTES` in helper/lib/mods.js). A mod over 4 MB isn't sent to the browser; if the rest are over
+16 MB together, the largest are left out until they fit. Either way the helper logs an error naming the mod,
+`trif status` shows it as NOT SENT with the reason, `trif mods` lists it under errors, and `trif doctor`
+fails it with what to do (`limit` in the error: `mod`, `total`, or `extension` for an extension from before
+sets could go in parts, which takes 1 MB in all).
+
+Why those numbers (measured with tests/e2e/measure-big-mods.js, headless, on an M-series Mac with 16 GB;
+memory is the footprint of all the browser's processes; Firefox's baseline is about 600 MB, Chrome's 440):
+
+- A 48 MB set (33 mods, 49 parts) once took headless Firefox 159 to 7.4 GB and the Mac ran out of memory.
+  Not the size itself: the extension checked the user scripts switch with `chrome.userScripts.getScripts()`
+  for every message from the helper, and `trif status` and every sync called it too. That hands back every
+  script with all its code, so each part of a set made a copy of the whole set, and Firefox's parent process
+  collects such copies (strings and structured-clone buffers) late: with 2 MB of mods, 188 MB of strings and
+  131 MB of structured-clone buffers sat in the parent, 2-3 times the 1 MB figures (+214 MB at the peak for
+  1 MB, +417 MB for 2 MB). After "Minimize memory usage" in about:memory it was back to the baseline:
+  garbage, not a leak, but made faster than Firefox frees it, and in proportion to parts × size. Now the
+  switch is checked with `getScripts({ids: [an id never registered]})`, `trif status` and syncs go by what
+  the last sync registered (`known` in syncUserScripts), a change sends only the changed mods' code
+  (`modsSame`) and writes only those to storage.
+- Now, with 16 MB (four 4 MB mods): registering them costs Firefox about +170 MB, a page load with them
+  +200 MB; eight changes to a 4 MB mod in a row, 2.5 s apart, peak at 1.2 GB in all (parent process 550
+  MB) and settle about 1.0-1.1 GB, back to the baseline once garbage is collected. 16 MB of code (functions,
+  compiled on each page load) peaks at 1.3 GB. Chrome 156: 16 MB peaks at 640-660 MB in all, and changes
+  in a row stay under 500 MB.
+- Each change to a mod still passes its code through the browser several times (native messaging, the
+  extension, storage, `userScripts.update`, every renderer), and Firefox frees those copies late, so the
+  cost of a change grows with the mod's size: 4 MB a mod keeps that a few hundred MB at worst.
+
 **extension → helper**
 
 | message | meaning |
 |---|---|
-| `{type:"hello", version, userScripts: bool, chrome: "<version>"}` | Sent on connect. `userScripts` is false when the "Allow User Scripts" switch is off. |
+| `{type:"hello", version, userScripts: bool, chrome: "<version>", browser, installId, features:[…]}` | Sent on connect. `userScripts` is false when the "Allow User Scripts" switch is off. `features`: what this extension can do beyond 0.2.4's protocol, so the helper doesn't have to go by the version: `modsParts` (takes `modsPart`), `modsSame` (takes mods it has without their code). No `features` means 0.2.4 or older. |
+| `{type:"modsResend", reason}` | A set in parts didn't arrive whole, or a mod sent as `same` wasn't there (`reason` says how). The helper logs it and sends the set again, every mod whole, once per set; if that fails too, the next change or reconnect sends it again (whole). |
 | `{type:"response", id, ok:true, result}` / `{type:"response", id, ok:false, error:"message"}` | Answer to a request. |
 | `{type:"modsApplied", registered:[ids], errors:[{id, error}]}` | After applying a `mods` message. |
 | `{type:"log", level, message}` | Extension-side diagnostics; the helper writes them to `helper.log` (private folder). |
@@ -774,7 +815,7 @@ Nothing is hosted; the agent uses the user's own login/subscription.
   - **Mods on this site:** the mods whose matches cover the current tab (name, file name, on/off switch;
     see "Mod switches"), collapsed by default when there's a chat.
   - **Chat:** one conversation per site, persisted in `chrome.storage.local` under `chat:<site>` =
-    `{sessionId, agent, messages: [{role: "user"|"assistant"|"tool"|"error", text, time}]}`, at most 500
+    `{sessionId, agent, messages: [{role: "user"|"assistant"|"tool"|"error"|"login"|"mod", text, time}]}`, at most 500
     messages, each message's text cut at 20 000 characters and the chat at about 1 MB (oldest messages
     dropped first; `capChat` in lib.js). The manifest asks for `unlimitedStorage`, so Chrome's 10 MB quota
     doesn't apply. A text box
@@ -782,6 +823,10 @@ Nothing is hosted; the agent uses the user's own login/subscription.
     Assistant text renders as simple markdown (paragraphs, lists, `code`, code blocks, bold, links that
     open in a new tab), escaped first: never inject agent or page text as raw HTML. Tool events render
     as one compact line each ("ran trif reload --tab 12", "edited sites/x.com/hide-reposts.js").
+    A run that failed for want of a login (its `done` has `error.kind: "login"`, see below) leaves one
+    plain `login` line ("Claude Code needs you to log in again.") instead of an error, and none of the
+    agent's own text about it; the panel shows its login notice, and the message that run was sent goes
+    back in the text box (unless something was typed there meanwhile), to send again once logged in.
     While running: a working indicator, the Stop button.
   - **Slash commands.** The panel handles `/model [name|default]` (sets the model setting: each message
     is a new agent process, so the agent's own `/model` would last one message), `/clear` or `/new`
@@ -798,9 +843,11 @@ Nothing is hosted; the agent uses the user's own login/subscription.
   - No reload prompt: the agent reloads the tab after each change (AGENTS.md), and switches reload it too.
   - **States:** helper not connected → short setup instructions (`npx timsrobot setup`, link to Setup page);
     user scripts off → button opening chrome://extensions/?id=…; agent missing → the error text from the
-    helper (it includes the fix); agent not logged in (`loggedIn === false` in `agent.list`, or a run
-    failed with the not-logged-in error) → "Claude Code isn't logged in" with a **Log in** button (see
-    "Logging in" below; agents with `canLogin: false` show `loginFix` instead).
+    helper (it includes the fix); agent not logged in (`loggedIn === false` in `agent.list`, or the chat's
+    last line is a run's `login` line) → "Claude Code isn't logged in" with a **Log in** button (see
+    "Logging in" below; agents with `canLogin: false` show `loginFix` instead). Send waits for the login,
+    except when `loginExpired` (below): the agent's own check still says logged in then, so after
+    logging in from a terminal, sending again is the only way to tell.
   - **Settings:** agent (from `agent.list`; only available ones selectable), optional model name (free
     text with suggestions opus / sonnet / haiku, empty = agent default), for this site's chat: each site
     chat has its own (see "Agent and model per site chat" below).
@@ -824,14 +871,16 @@ New native request commands (answered with a normal `response`):
 
 | cmd | args | result |
 |---|---|---|
-| `agent.list` | – | `{agents: [{id, name, path, available, version, note, loggedIn, canLogin, loginFix}], default}` |
+| `agent.list` | – | `{agents: [{id, name, path, available, version, note, loggedIn, loginExpired?, canLogin, loginFix}], default}` |
 | `agent.start` | `agent, model?, site, url, tabId, prompt, sessionId?, merge?, openModel?` | `{runId}` right away; progress arrives as `agentEvent` messages. `merge`: a shipped mod's id, to merge its new version (see "Updates to shipped mods"). `openModel`: codex-oss only, this run's `{provider, model, baseUrl}` over the stored defaults (see "Open models") |
 | `agent.stop` | `runId` | `{stopped: true}` (SIGTERM, SIGKILL after 3 s) |
 | `agent.running` | – | `{runIds}`: the runs still going. In Safari the helper outlives the connection (the bridge keeps the host and queues its messages), so a chat's run survives a lost connection or a restarted background there instead of being marked interrupted; after reconnecting, the background finishes the ones that ended meanwhile (background.js `settleOrphans`) |
 | `agent.login` | `agent?` | `{loginId}` right away; progress arrives as `agentEvent` messages with `runId` = the loginId |
 | `agent.loginCode` | `loginId, code` | `{sent: true}` (writes the code and a newline to the login's stdin) |
 | `agent.loginCancel` | `loginId` | `{cancelled: true}` |
-| `mod.approve` | `id` | `{id, approved: true}`: releases a held mod (see "Run scope"); also on the socket, not from a run |
+| `mod.approve` | `id` | `{id, approved: true}`: releases a held mod, allowing what was found in it (see "Run scope"); also on the socket, not from a run |
+| `mod.review` | `id` | `{id, allowed: [key]}`: "Looks right" on a mod to review: what TRIF found in it is allowed; not from a run |
+| `mod.code` | `id` | `{id, code, truncated}`: the mod's code as the helper read it (the panel's Show code), capped at 200 000 characters |
 | `mod.delete` | `id` | `{id, deleted: true}`: moves `sites/<site>/<mod>.js` to `trash/<site>/<mod>@<UTC stamp>.js` (entries older than 30 days are removed), then re-sends the mods; also on the socket, and from a run for mods inside its scope |
 | `mod.restore` | `id` | `{id, restored: true, file}`: moves the newest trashed copy back (fails if the mod exists again, except to undo `mod.update` `new`); same rules as `mod.delete`. The extension keeps a deleted mod's switch state, so it comes back as it was |
 | `mod.update` | `id, choice: "new"\|"mine"` | a shipped mod's new version: use it or keep the user's copy (see "Updates to shipped mods"); also on the socket, not from a run |
@@ -843,9 +892,12 @@ New native request commands (answered with a normal `response`):
 | `agent.openModel.removeKey` | | removes it from the keyring; same result. Not from a run |
 
 `loggedIn` is `true` / `false`, or `null` when unknown or the agent isn't available (from the adapter's
-`loginStatus`, which spends no tokens; cached 30 s per agent, forgotten when a login finishes or a run
-reports "isn't logged in"). `canLogin`: whether `agent.login` works for it; `loginFix`: the terminal
-instructions otherwise.
+`loginStatus`, which spends no tokens; cached 30 s per agent, forgotten when a login finishes). After a
+run of that agent fails for want of a login (`done.error.kind === "login"`), `loggedIn` is `false` with
+`loginExpired: true`, whatever the agent's own check says (Claude Code's `auth status` still says logged
+in with an expired login it can't refresh), until a login from TRIF works or a later run of that agent
+does (in the helper's memory: a restart forgets it). `canLogin`: whether `agent.login` works for it;
+`loginFix`: the terminal instructions otherwise.
 
 New helper → extension message: `{type: "agentEvent", runId, event}` where `event` is one of
 (normalized across agents):
@@ -854,14 +906,28 @@ New helper → extension message: `{type: "agentEvent", runId, event}` where `ev
 {kind: "session", sessionId}                       the agent's conversation id (for resuming)
 {kind: "text", text}                               a block of assistant text
 {kind: "tool", name, summary}                      a tool call, e.g. {name:"Bash", summary:"trif reload --tab 12"}
-{kind: "error", message}                           something went wrong (agent missing, not logged in, crashed…)
-{kind: "done", ok, result, costUsd, changedFiles, sessionId}   always the last event of a run
+{kind: "error", message}                           something went wrong (agent missing, crashed…)
+{kind: "error", reason: "login", agent, message}   the agent's login is gone, expired or refused: "<Agent> needs you to log in again."
+{kind: "done", ok, result, costUsd, changedFiles, sessionId, error?}   always the last event of a run
 {kind: "login", url}                               (logins) the sign-in page to open
 {kind: "done", ok, login: true, cancelled?}        (logins) always the last event of a login
 ```
 
 - `changedFiles`: paths relative to the workspace under `sites/` whose content changed during the run
   (snapshot hashes before and after).
+- `error: {kind: "login", agent, message}` on a failed run's `done`: it failed for want of a login (an
+  `error` event with `reason: "login"` came first). The adapters recognise it from the agent's own
+  words, in one place (`helper/lib/agents/util.js` `LOGIN_FAILURES`, from Claude Code 2.1.319's and Codex
+  0.166's messages: "Not logged in", "Please run /login", "OAuth session expired", "OAuth token revoked",
+  "login reached its time limit", "Invalid API key", `authentication_error`, HTTP 401 / Unauthorized,
+  "sign in again", "codex login", "missing api key"), in a failed run's result, error events or stderr,
+  never in a reply that worked. Not "could not be refreshed" alone (Claude Code also says that when
+  another of its processes holds the refresh lock, or the disk is full). Not with a saved API key (runs
+  then use the key, not the login: the agent's own words stay), nor for `codex-oss`. Claude Code also
+  says such an error as a reply: text in those words waits for the result line and is dropped when the
+  run failed that way. The run's session is dropped too (`done.sessionId` is the one the run resumed),
+  so the message sent again isn't in it twice. `trif agent run` prints the message and how to log in
+  (`trif agent login --agent claude`, or the agent's `loginFix`).
 - One run at a time per site; a second `agent.start` for a busy site fails with "already working on <site>".
   Runs are killed after 15 minutes. Raw agent output is kept in `runs/<runId>.jsonl` in the private folder
   (last 50 runs).
@@ -948,17 +1014,33 @@ Suffix List). `helper/lib/scope.js` computes it; `extension/lib.js` mirrors the 
   unsubscribe paths) unless `force`, since the copy loads the page again with the user's cookies.
   `sweep --scroll` scrolls the tab itself, so it's refused on the tab the user is looking at (active in
   the focused window) unless `force`.
-- **Held mods.** The helper snapshots the mod files when a run starts (the same files the scanner loads:
+- **Locked tabs.** Before a run's `run` command executes code in a tab, the extension locks the tab
+  (extension/tablock.js; docs/SECURITY.md): declarativeNetRequest session rules (the plain permission: block
+  rules need no host access, so they also cover sites TRIF has none for) block every POST, PUT,
+  PATCH, DELETE and WebSocket from it, and pages, frames, fetches and XHR to other sites, until it shows a
+  new document (a marker in the extension's isolated
+  world tells documents apart). If the lock can't be set up, `run` fails and the code doesn't run. The
+  panel's status has `lockedTabs: [{tabId, site, url, since}]`.
+- **Held mods.** Whoever wrote a mod, it's held while it's new or changed since the helper last let
+  it run (`~/.trif/seen.json`, mod id -> hash; the first time, every mod there is recorded as it is) and
+  it can do something not allowed for it (`held: {…, by: "outside"}`, `runId: null`; `trif approve` or the
+  panel's Allow releases it). For side-panel runs: the helper snapshots the mod files when a run starts (the same files the scanner loads:
   `mods.js` listModFiles: links within the mods folder followed, links out of it ignored, no cap). On every mods sync while a run is live (and for 10 s
   after it ends; a finished run's leftover processes get SIGTERM, then SIGKILL after 3 s, so nothing
-  writes later), a mod that the run added or changed and that has an `@match`
-  outside the scope (`<all_urls>`, a `*` host, another domain, `file://`), or whose `@risk` is 2, is **held**: recorded in
-  `~/.trif/held.json` (`{id: {hash, site, scope, runId, reason, at, approved?}}`) and sent to the
-  extension with `held: {site, reason}`, which the extension doesn't register. The run's `done` event
-  carries `held: [{id, reason}]`; the panel says so in the chat and lists the mod (also when it doesn't
-  apply to the tab) with an Allow button (`mod.approve`). Approving marks the entry approved so that
-  version isn't held again; any change to the file drops the entry (a later run's change is checked
-  afresh). `trif status`/`mods` show held mods. A change in another site's existing folder, which the
+  writes later), a mod that the run added or changed is **held** while it can do something not allowed
+  for it: what TRIF reads in its code (`powers.js`: sends, acts, navigates, loads, another site, hidden
+  code; see docs/SECURITY.md), an `@match` outside the scope (`<all_urls>`, a `*` host, another domain,
+  `file://`), or an `@risk` of 2. Recorded in `~/.trif/held.json` (`{id: {hash, site, scope, runId, at,
+  reason, facts, needs, lines, claim}}`) and sent to the extension with `held: {site, reason, facts,
+  claim}` (facts: TRIF's words; claim: the mod's own @risk reason or description), which the extension
+  doesn't register. The run's `done` event carries `held: [{id, reason, facts}]`; the panel says so in the
+  chat and lists the mod (also when it doesn't apply to the tab) with TRIF's facts, the claim apart, Allow
+  (`mod.approve`) and Show code (`mod.code`). Allowing records what was found in `~/.trif/allowed.json`
+  (`{id: {powers: [key], lines: {key: [line hash]}, at}}`) and drops the hold; a run's later change is held
+  only for a power or a line using one that isn't allowed. A held mod the run changes again is worked
+  out again; one changed after its run ended (by the user) is released. Mods the user has that can do
+  something not allowed are sent with `review: {facts, claim}` (not held; the panel's "Looks right" is
+  `mod.review`). `trif status`/`mods` show held mods and mods to review. A change in another site's existing folder, which the
   run's limits make read-only, isn't held on the run's account (someone else made it), but only for the
   folders the agent's adapter says it protected (`command()` returns `locked`; none if it doesn't say).
 - **Agent sandboxes.** The scope only holds if the agent can't reach the helper some other way or
@@ -999,7 +1081,7 @@ Suffix List). `helper/lib/scope.js` computes it; `extension/lib.js` mirrors the 
     Codex), and the system's temporary folders (below). The system's own folders stay readable.
   - **Writes:** the mods folder, with every existing folder of another site (`all-sites/` included)
     read-only inside it; the run's screenshots folder; its mailbox. Not `held.json`, `preinstalled.json`, `.shipped/`,
-    `origins.json`, `active-runs/`, `update.json`, `trash/`, `instructions.md`, `AGENTS.md`, `CLAUDE.md`,
+    `origins.json`, `active-runs/`, `update.json`, `trash/`, `history/`, `.ran/`, `seen.json`, `allowed.json`, `instructions.md`, `AGENTS.md`, `TECHNIQUES.md`, `CLAUDE.md`,
     `.claude/`, `bin/` or `app/`. A run's commands can still create a folder for another site; its mods are
     held like any out-of-scope mod.
   - **Temporary folders:** a run's own, never the system's (`/tmp` and `$TMPDIR` hold other programs'
@@ -1106,8 +1188,7 @@ The user's standing instructions (`instructions.md`) reach claude through the wo
   session_id}` → session; `{type:"assistant", message:{content:[{type:"text", text} | {type:"tool_use",
   name, input}]}}` → text / tool (summary: Bash → `input.command`; Edit/Write/Read → `input.file_path`
   relative to the workspace); `{type:"result", is_error, result, total_cost_usd, session_id}` → done.
-  "Not logged in" in the result → error "Claude Code isn't logged in: run `claude` in a terminal and log in
-  (type /login)".
+  A login failure in a failed result (or on stderr, without one) → the `login` error (see `done.error`).
 - **codex** (OpenAI Codex CLI 0.138+; tested with 0.166): `codex exec --json --skip-git-repo-check
   --ignore-user-config --ignore-rules -c approval_policy="never" -c default_permissions="trif-run"
   -c permissions={…} -c shell_environment_policy.exclude=[…] -c shell_environment_policy.set={ TMPDIR, TMPPREFIX }

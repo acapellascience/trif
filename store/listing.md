@@ -133,6 +133,11 @@ The main interface is a side panel: the user chats with their coding agent about
 Lets the user's agent take a screenshot of the tab the user is looking at, after the user clicks the TRIF toolbar button on it. Chrome's captureVisibleTab needs activeTab or access to every site, and TRIF only asks for the sites the user turns it on for. Nothing else uses it: TRIF reads and changes only the sites the user allowed.
 ```
 
+**declarativeNetRequest**
+```
+Used only to block requests, never to read or change them: when the user's side-panel agent runs code in a tab, TRIF adds session rules for that one tab that block requests that change something (POST, PUT, PATCH, DELETE), WebSockets, and going to or fetching from other sites, until the page reloads, so nothing a web page tricks the agent into doing can post, send or save as the user. Block rules need no host access, so this also covers requests to sites the user hasn't given TRIF.
+```
+
 **Optional host permission: `<all_urls>`** (no host permission is required at install)
 ```
 TRIF requests no websites at install. Users write mods for websites they choose, so the sites can't be listed in advance. On the setup page (and later in the side panel's settings) the user chooses Permissive, which requests <all_urls> from that click (Chrome's prompt says what it means), or Restrictive, where the extension calls chrome.permissions.request for one site (the domain and its subdomains) when the user clicks Connect in the side panel on that site, and Chrome asks the user. "Disconnect from <site>" removes that site's access again (chrome.permissions.remove); switching to Restrictive removes all of it; the user can also revoke access in Chrome's settings, after which nothing from TRIF runs on those sites. With access to a site, TRIF runs the user's mods there (each mod's own match patterns, limited to the sites the user turned TRIF on for) and, when the user asks their agent about a page there, reads its text, reloads it and reads mod errors. Users who installed a version where <all_urls> was required keep it (Permissive). Whatever access TRIF has, a block list the user keeps in the side panel keeps it off the sites on it.

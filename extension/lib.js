@@ -31,13 +31,20 @@ export const RUN_CAP = 1000000;
  */
 export function userScriptsAvailable(chromeApi) {
   try {
-    const p = chromeApi.userScripts.getScripts(); // throws when the switch is off
+    // Throws when the switch is off. Asked for an id that's never registered: a plain getScripts() hands back
+    // every script with all its code, a copy of every mod for each call. This runs for every message from the
+    // helper, so a 48 MB set in 49 parts made gigabytes of copies in Firefox's parent process faster than it
+    // collected them (7.4 GB, and the Mac ran out of memory).
+    const p = chromeApi.userScripts.getScripts({ ids: [PROBE_ID] });
     if (p && typeof p.catch === 'function') p.catch(() => {});
     return true;
   } catch {
     return false;
   }
 }
+
+// (Never registered: see userScriptsAvailable.)
+const PROBE_ID = 'trif-probe';
 
 const RUN_AT = {
   document_start: 'document_start', 'document-start': 'document_start',
@@ -116,9 +123,13 @@ export function normalizeDisabled(value) {
  * order). It only runs where a registered mod does, or on a site in `recording` (runtimeMatches); with
  * neither, nothing is registered at all. With `sitesOn`, mods are limited to those sites (limitToSites)
  * and so is `recording`.
- * Returns {registered, errors, applied, reset}.
+ * `known`: the ids registered after the last sync, as it returned them (null: not sure, ask the browser).
+ * With them the scripts aren't fetched: getScripts() hands back every script with all its code, a copy of
+ * every mod on every sync, which Firefox's parent process can be slow to free (see userScriptsAvailable).
+ * Returns {registered, errors, applied, reset, known} (`known` null when a register or update failed, as
+ * then it's unclear what's registered).
  */
-export async function syncUserScripts(us, { mods, runtimeCode, applied = {}, disabled = {}, offSites = {}, recording = [], sitesOn = null }) {
+export async function syncUserScripts(us, { mods, runtimeCode, applied = {}, disabled = {}, offSites = {}, recording = [], sitesOn = null, known = null }) {
   // sitesOn (null: no limit): mods and recording only on the sites TRIF is on for (limitToSites).
   if (sitesOn) recording = (recording || []).filter((site) => (sitesOn || []).some((s) => hostInScope(site, s)));
   const errors = [];
@@ -136,12 +147,13 @@ export async function syncUserScripts(us, { mods, runtimeCode, applied = {}, dis
   }
 
   // (Anything registered that isn't wanted goes: a home page marker left by a development build too.)
-  const existing = await us.getScripts();
+  // (Known ids carry no code: the runtime is then checked by its hash in `applied`.)
+  const existing = Array.isArray(known) ? known.map((id) => ({ id })) : await us.getScripts();
   const existingIds = new Set(existing.map((s) => s.id));
   const matches = runtimeMatches(desired, recording);
   if (!matches.length) {
     if (existing.length) await us.unregister();
-    return { registered: [], errors, applied: {}, reset: existing.length > 0 };
+    return { registered: [], errors, applied: {}, reset: existing.length > 0, known: [] };
   }
   const runtimeHash = quickHash(runtimeCode + '\n' + JSON.stringify(matches));
   const current = existing.find((s) => s.id === RUNTIME_ID);
@@ -154,6 +166,7 @@ export async function syncUserScripts(us, { mods, runtimeCode, applied = {}, dis
 
   const next = {};
   const registered = [];
+  let unsure = false; // a register or update failed: what's registered is then for the browser to say
   const registerMod = async (mod, update) => {
     try {
       if (update) await us.update([modToUserScript(mod)]);
@@ -161,8 +174,27 @@ export async function syncUserScripts(us, { mods, runtimeCode, applied = {}, dis
       next[mod.id] = mod.hash ?? null;
       registered.push(mod.id);
     } catch (e) {
+      unsure = true;
       errors.push({ id: mod.id, error: errMsg(e) });
     }
+  };
+  const knownNow = () => (unsure ? null : [RUNTIME_ID, ...registered]);
+
+  // Several mods in one call: Chrome shares every user script with its pages again after each call, so
+  // ten 5 MB mods took 2-4 s one by one and 0.2-0.9 s in one call (Chrome 156). One bad mod fails the whole
+  // call, so then they go one at a time and only that one is reported (any the call did register, updated).
+  const registerMods = async (mods, update) => {
+    if (!mods.length) return;
+    if (mods.length > 1) {
+      try {
+        if (update) await us.update(mods.map(modToUserScript));
+        else await us.register(mods.map(modToUserScript));
+        for (const mod of mods) { next[mod.id] = mod.hash ?? null; registered.push(mod.id); }
+        return;
+      } catch { unsure = true; /* one at a time, below (some of the call's may be registered) */ }
+    }
+    const there = update || mods.length === 1 ? null : new Set((await us.getScripts()).map((s) => s.id));
+    for (const mod of mods) await registerMod(mod, update || !!there?.has(mod.id));
   };
 
   if (!runtimeOk) {
@@ -171,19 +203,156 @@ export async function syncUserScripts(us, { mods, runtimeCode, applied = {}, dis
     // (the mod itself fails to register and is reported).
     try { await us.register([runtimeUserScript(runtimeCode, matches)]); } catch { await us.register([runtimeUserScript(runtimeCode)]); }
     next[RUNTIME_ID] = runtimeHash;
-    for (const mod of desired) await registerMod(mod, false);
-    return { registered, errors, applied: next, reset: true };
+    await registerMods(desired, false);
+    return { registered, errors, applied: next, reset: true, known: knownNow() };
   }
 
   next[RUNTIME_ID] = runtimeHash;
   const stale = existing.map((s) => s.id).filter((id) => id !== RUNTIME_ID && !seen.has(id));
   if (stale.length) await us.unregister({ ids: stale });
+  const fresh = [];
+  const changed = [];
   for (const mod of desired) {
-    if (!existingIds.has(mod.id)) await registerMod(mod, false);
+    if (!existingIds.has(mod.id)) fresh.push(mod);
     else if (mod.hash && applied[mod.id] === mod.hash) { next[mod.id] = mod.hash; registered.push(mod.id); }
-    else await registerMod(mod, true);
+    else changed.push(mod);
   }
-  return { registered, errors, applied: next, reset: false };
+  await registerMods(changed, true);
+  await registerMods(fresh, false);
+  const order = new Map(desired.map((m, i) => [m.id, i]));
+  registered.sort((a, b) => order.get(a) - order.get(b)); // (in the mods' order, as before they were batched)
+  return { registered, errors, applied: next, reset: false, known: knownNow() };
+}
+
+// ---- mods in storage -----------------------------------------------------------------------------
+
+/**
+ * The mods are kept in chrome.storage.local one per key (`mod:<id>`), in the order `modIds` gives, so a
+ * change to one mod writes only that one: each write is a copy for the browser to pass on (and to every
+ * open extension page, in storage.onChanged), and a whole set of big mods on every change was a lot of
+ * memory for Firefox to free. (0.2.4 and older kept them all under `mods`: read until the first write.)
+ */
+export const modStorageKey = (id) => `mod:${id}`;
+
+/** The mods in what chrome.storage.local.get(null) returned. */
+export function storedMods(items) {
+  const s = items || {};
+  if (Array.isArray(s.modIds)) return s.modIds.map((id) => s[modStorageKey(id)]).filter((m) => m && typeof m === 'object');
+  return Array.isArray(s.mods) ? s.mods : [];
+}
+
+// What tells a mod's stored copy is current: all of it but the code, which its hash covers (mods.js buildMod).
+const storedSignature = (m) => JSON.stringify(typeof m.hash === 'string' ? { ...m, code: undefined } : m);
+
+/** What's in storage, as storedMods read it, for modsStoragePlan. */
+export function modsStorageState(items) {
+  const s = items || {};
+  if (!Array.isArray(s.modIds)) return { ids: null, keys: new Map(), legacy: 'mods' in s };
+  return { ids: s.modIds, keys: new Map(storedMods(s).map((m) => [m.id, storedSignature(m)])), legacy: 'mods' in s };
+}
+
+/**
+ * How to bring storage (`stored`, from modsStorageState or a previous plan) to `mods`: `set` (the mods that
+ * changed, and `modIds` if the list did), then `remove` (gone mods' keys, and the old `mods`). `stored` is
+ * what storage holds once both are done.
+ */
+export function modsStoragePlan(mods, stored) {
+  const set = {};
+  const keys = new Map();
+  const list = (Array.isArray(mods) ? mods : []).filter((m) => m && typeof m.id === 'string' && m.id);
+  for (const m of list) {
+    const sig = storedSignature(m);
+    keys.set(m.id, sig);
+    if (stored.keys.get(m.id) !== sig) set[modStorageKey(m.id)] = m;
+  }
+  const ids = list.map((m) => m.id);
+  if (JSON.stringify(ids) !== JSON.stringify(stored.ids)) set.modIds = ids;
+  const remove = [...stored.keys.keys()].filter((id) => !keys.has(id)).map(modStorageKey);
+  if (stored.legacy) remove.push('mods');
+  return { set, remove, stored: { ids, keys, legacy: false } };
+}
+
+// ---- mods sets in parts ---------------------------------------------------------------------------
+
+/**
+ * What this extension can do beyond 0.2.4's native messaging protocol, sent in its hello so the helper
+ * never has to guess from the version: 'modsParts' takes a mods set bigger than one native message (1 MB)
+ * as {type:"modsPart"} messages (ModsParts); 'modsSame' takes a mod it already has without its code
+ * (fillSameMods).
+ */
+export const FEATURES = ['modsParts', 'modsSame'];
+
+/**
+ * A mods message's mods with the code put back in those sent without it (`same: true`: the helper sent
+ * them before, with this hash; helper/lib/mods.js withSame), from `had` (the mods as they were). Returns
+ * {mods}, or {missing: [ids]} when one isn't there with that hash (then the helper must send them all).
+ */
+export function fillSameMods(mods, had) {
+  const byId = new Map((Array.isArray(had) ? had : []).filter((m) => m && typeof m.id === 'string').map((m) => [m.id, m]));
+  const missing = [];
+  const out = (Array.isArray(mods) ? mods : []).map((m) => {
+    if (!m || m.same !== true) return m;
+    const was = byId.get(m.id);
+    if (!was || typeof was.code !== 'string' || typeof m.hash !== 'string' || was.hash !== m.hash) { missing.push(String(m.id)); return m; }
+    const { same, ...rest } = m;
+    return { ...rest, code: was.code };
+  });
+  return missing.length ? { missing } : { mods: out };
+}
+
+/**
+ * Joins {type:"modsPart", set, i, n, data} messages back into the {type:"mods"} message the helper cut up
+ * (helper/lib/mods.js modsParts): `data` is a slice of its JSON text, parts 0..n-1 of one `set` in order.
+ * push(part) returns {message} once the last part is in (the whole set, to apply at once), {error} when the
+ * sequence is broken (a part missing, out of order or malformed, or text that doesn't parse: the set so far
+ * is dropped, and the helper should send it again; the rest of its parts are then ignored), else {}. A new
+ * set's first part drops an unfinished older one (`superseded`: its id), as does a whole `mods` message
+ * (reset()).
+ */
+export class ModsParts {
+  constructor() {
+    this.current = null;
+    this.dropped = null; // the last set given up on: the rest of its parts are ignored, not more errors
+  }
+
+  reset() {
+    const had = this.current;
+    this.current = null;
+    if (had) this.dropped = had.set;
+    return had ? had.set : null;
+  }
+
+  push(part) {
+    const { set, i, n, data } = part || {};
+    const okSet = (typeof set === 'string' && set) || Number.isInteger(set);
+    if (!okSet || !Number.isInteger(n) || n < 1 || !Number.isInteger(i) || i < 0 || i >= n || typeof data !== 'string') {
+      const had = this.reset();
+      return { error: `a malformed part of a mods set${had !== null ? ` (dropped set ${had})` : ''}` };
+    }
+    let superseded = null;
+    if (i === 0) {
+      superseded = this.reset();
+      this.current = { set, n, parts: [] };
+    } else if (set === this.dropped && this.current?.set !== set) {
+      return {};
+    } else if (!this.current || this.current.set !== set) {
+      const had = this.reset();
+      this.dropped = set;
+      return { error: `part ${i + 1} of ${n} of mods set ${set} came without the parts before it${had !== null ? ` (dropped set ${had})` : ''}` };
+    } else if (i !== this.current.parts.length || n !== this.current.n) {
+      const had = this.current;
+      this.reset();
+      return { error: `mods set ${set}: got part ${i + 1} of ${n} after part ${had.parts.length} of ${had.n}; dropped it` };
+    }
+    this.current.parts.push(data);
+    if (this.current.parts.length < n) return superseded !== null ? { superseded } : {};
+    const text = this.current.parts.join('');
+    this.current = null;
+    let message;
+    try { message = JSON.parse(text); } catch (e) { this.dropped = set; return { error: `mods set ${set} doesn't parse (${errMsg(e)}); dropped it` }; }
+    if (!message || message.type !== 'mods' || !Array.isArray(message.mods)) { this.dropped = set; return { error: `mods set ${set} isn't a mods message; dropped it` }; }
+    return superseded !== null ? { message, superseded } : { message };
+  }
 }
 
 // ---- tabs ---------------------------------------------------------------------------------------

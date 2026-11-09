@@ -9,7 +9,7 @@ const P = require('./paths');
 const { browserTable, safariAgentPlist, legacySafariAgentPlist, legacySafariAgentLoaded, LEGACY_SAFARI_AGENT_LABEL } = require('./browsers');
 const { request } = require('./client');
 const { listHelpers, describeHelper } = require('./helpers');
-const { scanMods, planModsMessage } = require('./mods');
+const { scanMods, planMods, MAX_MOD_BYTES, MAX_MODS_BYTES } = require('./mods');
 const { isExecutable } = require('./setup');
 const { firefoxAddonUrl } = require('./update');
 
@@ -338,11 +338,20 @@ async function doctor(opts = {}) {
 
   // Mods
   const { mods, problems, warnings } = scanMods(ws.modsDir);
-  const plan = planModsMessage(mods);
+  const plan = planMods(mods);
   const modProblems = [...problems, ...plan.errors];
+  // The helper also leaves mods out for an extension too old to take more than 1 MB of them (limit 'extension').
+  if (info) for (const e of info.modErrors || []) if (e.limit === 'extension') modProblems.push(e);
+  const mb = (n) => `${n / (1024 * 1024)} MB`;
+  const advice = {
+    mod: `make the mod smaller: keep sounds, pictures and other big data out of its code (a mod can be up to ${mb(MAX_MOD_BYTES)})`,
+    total: `remove mods you don't use, or make big ones smaller: all of them together can be up to ${mb(MAX_MODS_BYTES)}`,
+    extension: info?.extension?.browser === 'Firefox' ? 'update the add-on: about:addons, the gear, Check for Updates'
+      : info?.extension?.browser === 'Safari' ? 'build and open TRIF.app from this version' : `update the extension: reload TRIF on ${EXT_URL}`,
+  };
   if (fs.existsSync(ws.modsDir)) {
     if (!modProblems.length) add('ok', `${plural(mods.length, 'mod')} in ${ws.modsDir}`);
-    for (const p of modProblems) add('fail', `mod ${p.id}: ${p.error}`, p.error.includes('1 MB') ? 'make the mod smaller (move data out, or split it)' : 'check the file');
+    for (const p of modProblems) add('fail', `mod ${p.id}: ${p.error}`, advice[p.limit] || 'check the file');
     for (const w of warnings) add('warn', `mod ${w.id}: ${w.warning}`, 'fix the header (see AGENTS.md)');
   }
 

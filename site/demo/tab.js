@@ -209,8 +209,21 @@
     const top = document.createElement('div');
     top.className = 'demo-panel-top';
     const name = document.createElement('span');
-    name.textContent = 'Tim\'s Robot Internet Fixer: Demo';
     name.style.cssText = 'min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;'; // (a narrow phone: it ends in … rather than pushing the close button off)
+    // "Demo: n/13 mods created", so visitors see how far they've got: from the demo's saved state
+    // (shim.js: `mods` are the ones its chats have made so far; the whole set is the default order). It
+    // follows the panel's changes (a storage event from its frame, and a check each second as a backstop).
+    const progress = () => {
+      let s = null;
+      try { s = JSON.parse(sessionStorage.getItem('trif-demo-state') || 'null'); } catch {}
+      const total = s?.store?.defaultOrder?.['timsrobot.com']?.length || 13;
+      const made = Math.min((s?.mods || []).length, total);
+      const text = `Demo: ${made}/${total} mods created`;
+      if (name.textContent !== text) name.textContent = text;
+    };
+    progress();
+    addEventListener('storage', (e) => { if (!e.key || e.key === 'trif-demo-state') progress(); });
+    setInterval(progress, 1000);
     const close = document.createElement('button');
     close.type = 'button';
     close.className = 'demo-close';
@@ -346,9 +359,11 @@
     show();
   }
 
-  // Once the panel's been closed, the tab brings it back: "Show the fixer" (it says "Try the demo" until
-  // it's been open; at a desk it starts open).
-  const tabLabel = () => { tab.textContent = 'Show the fixer'; };
+  // Once the panel's been closed, the tab brings it back. At a desk (where it starts open): "Try the demo"
+  // until the visitor has sent a prompt in it (the demo's saved state, shim.js `sent`), then "Continue the
+  // demo". On a phone: "Show the fixer" (it says "Try the demo" until it's been open).
+  const promptSent = () => { try { return !!JSON.parse(sessionStorage.getItem('trif-demo-state') || 'null')?.sent; } catch { return false; } };
+  const tabLabel = () => { tab.textContent = phone() ? 'Show the fixer' : promptSent() ? 'Continue the demo' : 'Try the demo'; };
   function hide() {
     if (!isOpen()) return;
     if (box.popover) box.hidePopover(); else box.hidden = true;

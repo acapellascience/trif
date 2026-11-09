@@ -77,6 +77,10 @@ Per browser, a **fresh** scenario, and an **upgrade** scenario per `--upgrade-fr
      wording, the panel is red ("The robot is blocked on 127.0.0.1", Unblock), Settings lists it; Unblock
      leaves it off or disconnected, and its button turns it on again;
    - the panel follows tab switches and navigation; a mod for `localhost`, where TRIF stays off, never runs.
+   - mods just over 1 MB in all (a 1 MB base64 mod and 0.4 MB of functions) go in parts and run; a change
+     to the small one goes without the big one's code (`modsSame`), and the big one still runs; a mod over
+     the 4 MB cap isn't sent, and `trif status` and `trif doctor` say why. Kept small on purpose: see "Big
+     mods and memory" below for sets up to the 16 MB cap.
    - `trif sweep --selector/--text/--color` on a page of repeated things (`/sweep.html`: regions, a sticky
      header, a shadow root, a same-origin frame, a CSS variable) finds the expected counts; `trif status
      --tab` lists the mods on that page. Screenshots, restrictive (fresh Chrome): of that tab while it's in
@@ -100,7 +104,11 @@ Per browser, a **fresh** scenario, and an **upgrade** scenario per `--upgrade-fr
    notice), and the helper not connected (its wrapper moved aside and the scratch helper stopped: red,
    but the mods' switches green, since mods still run; then put back and reconnected with Try again). Then
    the setup page all ticked ("TRIF is ready", Try it with the sites where a shipped mod is on) once the
-   agent can run: an API key for Claude Code in the scratch keychain counts as logged in. Then
+   agent can run: an API key for Claude Code in the scratch keychain counts as logged in. Then (without
+   `--agent`/`--codex`) an expired login, with a stand-in `claude` put first on the helper's PATH for the
+   check: it says it's logged in and fails every run as Claude Code does when its login can't be
+   refreshed; a panel chat must show the login notice and one plain "needs you to log in again" line (not
+   the agent's error), with the message back in the box, and `trif agent run` must say how to log in. Then
    screenshots of the panel as narrow as a side panel: on x.com, on a gate (localhost) and on the landing
    page (no website: the big robot, only settings in the bar), each of the last two with settings open
    (they must open, list the agents and load the instructions). And the shipped Google mods, AI
@@ -181,6 +189,20 @@ cover what TRIF does then), Firefox's `activeTab` screenshot after a toolbar cli
 
 Paths stay short (`--work` defaults to `/tmp/trif-e2e-<uid>`): the helper's unix sockets live in the
 scratch home, and macOS allows about 104 bytes for a socket path.
+
+### Big mods and memory
+
+`node tests/e2e/measure-big-mods.js firefox|chrome --work <dir> --sizes 1,2,4,8,16 --mod-mb 4 [--kind code]
+[--changes 8] [--over] [--reports] [--minimize]` (not part of the suite; see the top of the script). It
+installs this checkout as the suite does, writes that many MB of mods for the test site (at most the 16 MB
+cap), and prints the footprint of all the browser's processes after registering them, after page loads,
+after changes in a row and after removing them; `--over` then writes mods over the caps, which the helper
+must refuse. The numbers it gave are in docs/PROTOCOL.md, "How big mods can be".
+
+A 48 MB set once took headless Firefox to 7.4 GB and the Mac ran out of memory, so: go up a size at a
+time and stop if memory grows faster than the mods do; one browser at a time; a `--work` folder of its
+own. The script kills the browser if all its processes together pass `--limit-mb` (2048 by default), but
+it samples once a second, so also run it under something that kills a runaway process sooner.
 
 ### TRIF's own home page with the real extension
 

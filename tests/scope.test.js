@@ -7,7 +7,7 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 const { scopeFor, hostInScope, patternInScope, outOfScope } = require('../helper/lib/scope');
-const { updateHeld, approveHeld, loadHeld } = require('../helper/lib/held');
+const { updateHeld, approveHeld, rejectHeld, lastRun, loadHeld, loadAllowed, reviewItems, reviewMod } = require('../helper/lib/held');
 const { snapshot } = require('../helper/lib/runs');
 const { scanMods } = require('../helper/lib/mods');
 const { tempDir } = require('./fake-extension');
@@ -75,7 +75,7 @@ function makeWs() {
 const write = (ws, rel, text) => fs.writeFileSync(path.join(ws.modsDir, rel), text);
 const header = (...matches) => `// ==WebMod==\n${matches.map((m) => `// @match ${m}\n`).join('')}// ==/WebMod==\n`;
 
-test('updateHeld: holds only changed out-of-scope mods; releases on edit or approval', () => {
+test('updateHeld: holds only changed out-of-scope mods; an edit outside the run releases; approval allows what was found', () => {
   const ws = makeWs();
   write(ws, 'x.com/old-wide.js', header('<all_urls>') + '// there before the run');
   const before = snapshot(ws.modsDir, ws.home);
@@ -85,30 +85,139 @@ test('updateHeld: holds only changed out-of-scope mods; releases on edit or appr
 
   let held = updateHeld(ws, scanMods(ws.modsDir).mods, scopes);
   assert.deepEqual(Object.keys(held), ['x.com/wide']);
-  assert.equal(held['x.com/wide'].reason, 'it matches <all_urls>, outside x.com');
+  assert.equal(held['x.com/wide'].reason, 'runs on <all_urls>, outside x.com');
+  assert.deepEqual(held['x.com/wide'].needs, ['match:<all_urls>']);
   assert.equal(held['x.com/wide'].runId, 'r1');
   assert.deepEqual(Object.keys(loadHeld(ws.home)), ['x.com/wide']);
 
   // Without runs to check, the hold persists while the file is unchanged...
   held = updateHeld(ws, scanMods(ws.modsDir).mods, []);
   assert.deepEqual(Object.keys(held), ['x.com/wide']);
-  // ...and an edit outside any run releases it.
+  // ...and an edit once its run is over (the user's) releases it.
   write(ws, 'x.com/wide.js', header('https://x.com/*', '<all_urls>') + '// user edit');
   held = updateHeld(ws, scanMods(ws.modsDir).mods, []);
   assert.deepEqual(held, {});
   assert.equal(fs.existsSync(path.join(ws.home, 'held.json')), false);
 
-  // Approval.
+  // Held again by the run; while it's going, its own edits keep it held (worked out again).
   updateHeld(ws, scanMods(ws.modsDir).mods, scopes);
-  assert.ok(loadHeld(ws.home)['x.com/wide']);
-  approveHeld(ws.home, 'x.com/wide');
-  assert.equal(loadHeld(ws.home)['x.com/wide'].approved, true);
-  assert.throws(() => approveHeld(ws.home, 'x.com/wide'), /isn't held/);
-  // Approved stays approved even while the run still counts (approving mid-run, or just after it)...
-  assert.deepEqual(updateHeld(ws, scanMods(ws.modsDir).mods, scopes), {});
-  // ...until the run changes the mod again.
-  write(ws, 'x.com/wide.js', header('<all_urls>') + '// changed again');
+  write(ws, 'x.com/wide.js', header('https://x.com/*', '<all_urls>') + '// the run edits it again');
   assert.deepEqual(Object.keys(updateHeld(ws, scanMods(ws.modsDir).mods, scopes)), ['x.com/wide']);
+  // Approval: what was found is allowed for that mod, and the hold goes.
+  approveHeld(ws.home, 'x.com/wide');
+  assert.equal(loadHeld(ws.home)['x.com/wide'], undefined);
+  assert.deepEqual(loadAllowed(ws.home)['x.com/wide'].powers, ['match:<all_urls>']);
+  assert.throws(() => approveHeld(ws.home, 'x.com/wide'), /isn't held/);
+  assert.deepEqual(updateHeld(ws, scanMods(ws.modsDir).mods, scopes), {});
+  // Later edits that add nothing new run straight away...
+  write(ws, 'x.com/wide.js', header('<all_urls>') + '// changed again');
+  assert.deepEqual(updateHeld(ws, scanMods(ws.modsDir).mods, scopes), {});
+  // ...one that adds a power is held for that power alone.
+  write(ws, 'x.com/wide.js', header('<all_urls>') + 'fetch("/x", { method: "POST" })');
+  held = updateHeld(ws, scanMods(ws.modsDir).mods, scopes);
+  assert.deepEqual(held['x.com/wide'].needs, ['sends']);
+  assert.match(held['x.com/wide'].facts[0], /send requests or messages from the page as you \(it uses fetch\)/);
+});
+
+test('updateHeld: what the code does decides, not what its header says', () => {
+  const ws = makeWs();
+  const before = snapshot(ws.modsDir, ws.home);
+  // A header claiming it only renders, over code that posts and clicks
+  write(ws, 'x.com/liar.js', '// ==WebMod==\n// @risk 0 render-only\n// @description Makes the timeline prettier\n// ==/WebMod==\n' +
+    'document.querySelector("[data-testid=tweetButton]").click(); fetch("/i/api/graphql/x/CreateTweet", { method: "POST" })');
+  write(ws, 'x.com/pretty.js', '// ==WebMod==\n// @risk 0 render-only\n// ==/WebMod==\ndocument.body.style.background = "pink"');
+  const held = updateHeld(ws, scanMods(ws.modsDir).mods, [{ runId: 'r1', site: 'x.com', scope: 'x.com', before }]);
+  assert.deepEqual(Object.keys(held), ['x.com/liar']);
+  assert.deepEqual(held['x.com/liar'].needs, ['sends', 'acts']);
+  // the agent's words are kept apart, as its claim
+  assert.equal(held['x.com/liar'].claim, 'render-only');
+  // and before 0.3.0's allowed.json, an approved hold becomes allowed powers
+  const ws2 = makeWs();
+  write(ws2, 'x.com/wide.js', header('<all_urls>'));
+  const m = scanMods(ws2.modsDir).mods[0];
+  fs.writeFileSync(path.join(ws2.home, 'held.json'), JSON.stringify({ 'x.com/wide': { hash: m.hash, scope: 'x.com', approved: true } }));
+  assert.deepEqual(updateHeld(ws2, scanMods(ws2.modsDir).mods, []), {});
+  assert.deepEqual(loadAllowed(ws2.home)['x.com/wide'].powers, ['match:<all_urls>']);
+});
+
+test('updateHeld: a run can\'t rewrite what an allowed mod sends; edits elsewhere in it run straight away', () => {
+  const ws = makeWs();
+  const code = (url, color) => `document.body.style.color = "${color}";\nfetch("${url}", { method: "POST" });\n`;
+  write(ws, 'x.com/poster.js', code('/i/api/mute', 'red'));
+  // the user looked at it and said it's fine (or allowed it once)
+  reviewMod(ws.home, scanMods(ws.modsDir).mods[0]);
+  let before = snapshot(ws.modsDir, ws.home);
+  // a run changes only its colour: nothing new, it runs
+  write(ws, 'x.com/poster.js', code('/i/api/mute', 'blue'));
+  assert.deepEqual(updateHeld(ws, scanMods(ws.modsDir).mods, [{ runId: 'r1', site: 'x.com', scope: 'x.com', before }]), {});
+  // a run changes what it sends: held, and the card says it's a new or changed line
+  before = snapshot(ws.modsDir, ws.home);
+  write(ws, 'x.com/poster.js', code('/i/api/graphql/x/CreateTweet', 'blue'));
+  const held = updateHeld(ws, scanMods(ws.modsDir).mods, [{ runId: 'r2', site: 'x.com', scope: 'x.com', before }]);
+  assert.deepEqual(held['x.com/poster'].needs, ['sends']);
+  assert.match(held['x.com/poster'].facts[0], /a line that does this is new or changed/);
+  // allowed: that line is fine from now on
+  approveHeld(ws.home, 'x.com/poster');
+  before = snapshot(ws.modsDir, ws.home);
+  write(ws, 'x.com/poster.js', code('/i/api/graphql/x/CreateTweet', 'green'));
+  assert.deepEqual(updateHeld(ws, scanMods(ws.modsDir).mods, [{ runId: 'r3', site: 'x.com', scope: 'x.com', before }]), {});
+  // an edit from outside a run (the terminal, a pasted file) is held the same way
+  write(ws, 'x.com/poster.js', code('/i/api/other', 'green'));
+  const outside = updateHeld(ws, scanMods(ws.modsDir).mods, []);
+  assert.deepEqual(outside['x.com/poster'].needs, ['sends']);
+  assert.equal(outside['x.com/poster'].by, 'outside');
+});
+
+test('updateHeld: any new or changed mod that can do something not allowed waits, whoever wrote it; mods there at first keep running, to review', () => {
+  const ws = makeWs();
+  write(ws, 'x.com/old-poster.js', 'fetch("/x", { method: "POST" })');
+  write(ws, 'x.com/plain.js', 'document.body.style.color = "red"');
+  // the first time: what's there is the user's, as it is: nothing held, the poster to review
+  assert.deepEqual(updateHeld(ws, scanMods(ws.modsDir).mods, []), {});
+  assert.deepEqual(Object.keys(reviewItems(ws.home, scanMods(ws.modsDir).mods)), ['x.com/old-poster']);
+  // a new mod pasted in (no run) that clicks: held, as from outside
+  write(ws, 'x.com/pasted.js', 'document.querySelector("button").click()');
+  let held = updateHeld(ws, scanMods(ws.modsDir).mods, []);
+  assert.deepEqual(Object.keys(held), ['x.com/pasted']);
+  assert.equal(held['x.com/pasted'].by, 'outside');
+  assert.equal(held['x.com/pasted'].runId, null);
+  assert.equal(held['x.com/pasted'].site, 'x.com');
+  // a plain edit to a plain mod: runs
+  write(ws, 'x.com/plain.js', 'document.body.style.color = "blue"');
+  assert.deepEqual(Object.keys(updateHeld(ws, scanMods(ws.modsDir).mods, [])), ['x.com/pasted']);
+  // the old poster, edited: held now (it was grandfathered as it was, not for anything)
+  write(ws, 'x.com/old-poster.js', 'fetch("/y", { method: "POST" })');
+  assert.deepEqual(Object.keys(updateHeld(ws, scanMods(ws.modsDir).mods, [])).sort(), ['x.com/old-poster', 'x.com/pasted']);
+  // allowed: it runs, and stays allowed as it is
+  approveHeld(ws.home, 'x.com/pasted');
+  held = updateHeld(ws, scanMods(ws.modsDir).mods, []);
+  assert.deepEqual(Object.keys(held), ['x.com/old-poster']);
+  // its own @match is the user's to choose outside a run, and a header saying risk 2 is only a claim
+  write(ws, 'x.com/wide.js', header('<all_urls>') + '// @risk 2 says so\ndocument.body.style.color = "red"');
+  assert.deepEqual(Object.keys(updateHeld(ws, scanMods(ws.modsDir).mods, [])), ['x.com/old-poster']);
+  // gone: dropped
+  fs.unlinkSync(path.join(ws.modsDir, 'x.com/old-poster.js'));
+  assert.deepEqual(updateHeld(ws, scanMods(ws.modsDir).mods, []), {});
+});
+
+test('reviewItems: mods the user has that can act, until "Looks right"; shipped mods start from their shipped version', () => {
+  const ws = makeWs();
+  write(ws, 'x.com/poster.js', 'fetch("/x", { method: "POST" })');
+  write(ws, 'x.com/plain.js', 'document.body.style.color = "red"');
+  write(ws, 'x.com/shipped.js', '// ==WebMod==\n// @source trif\n// @version 1\n// ==/WebMod==\nel.click()');
+  fs.mkdirSync(path.join(ws.home, '.shipped', 'x.com'), { recursive: true });
+  fs.writeFileSync(path.join(ws.home, '.shipped', 'x.com', 'shipped.js'), '// ==WebMod==\n// @source trif\n// @version 1\n// ==/WebMod==\nel.click()');
+  let mods = scanMods(ws.modsDir).mods;
+  let items = reviewItems(ws.home, mods);
+  assert.deepEqual(Object.keys(items), ['x.com/poster']);
+  assert.deepEqual(items['x.com/poster'].needs, ['sends']);
+  reviewMod(ws.home, mods.find((m) => m.id === 'x.com/poster'));
+  assert.deepEqual(reviewItems(ws.home, mods), {});
+  // the user's edit of the shipped mod is only reviewed for what it adds
+  write(ws, 'x.com/shipped.js', '// ==WebMod==\n// @source trif\n// @version 1\n// ==/WebMod==\nel.click(); location.href = "/home"');
+  mods = scanMods(ws.modsDir).mods;
+  items = reviewItems(ws.home, mods);
+  assert.deepEqual(items['x.com/shipped'].needs, ['navigates']);
 });
 
 test('updateHeld: a change in a folder the run couldn\'t write (`locked`) isn\'t the run\'s', () => {
@@ -182,5 +291,59 @@ test('@risk header: parsed into {tier, why}; a panel run\'s tier-2 mod is held, 
   assert.ok(warnings.some((w) => w.id === 'x.com/bad' && /@risk should start with 0, 1 or 2/.test(w.warning)));
   const held = updateHeld(ws, mods, [{ runId: 'r1', site: 'x.com', scope: 'x.com', before }]);
   assert.deepStrictEqual(Object.keys(held), ['x.com/two']);
-  assert.strictEqual(held['x.com/two'].reason, 'it changes what the site receives (risk 2: loads more in the background)');
+  assert.strictEqual(held['x.com/two'].reason, 'says it changes what the site receives (risk 2)');
+  assert.strictEqual(held['x.com/two'].claim, 'loads more in the background');
+});
+
+test('updateHeld: a change is judged on what it adds to the version that already ran', () => {
+  const ws = makeWs();
+  const v1 = 'const x = document.createElement(tagFromSomewhere); el.setAttribute(attr, v);\n// "script" and "onload" are in here\nfetch("/a", { method: "POST" });\n';
+  write(ws, 'x.com/mine.js', v1);
+  assert.deepEqual(updateHeld(ws, scanMods(ws.modsDir).mods, []), {}); // (there first: as it is)
+  // an edit elsewhere (a comment, CSS): runs, though the mod could already do things never reviewed
+  write(ws, 'x.com/mine.js', v1 + 'document.body.style.color = "red";\n');
+  assert.deepEqual(updateHeld(ws, scanMods(ws.modsDir).mods, []), {});
+  // an edit that adds a line that sends: held, for that
+  write(ws, 'x.com/mine.js', v1 + 'document.body.style.color = "red";\nfetch("/b", { method: "POST" });\n');
+  const held = updateHeld(ws, scanMods(ws.modsDir).mods, []);
+  assert.deepEqual(held['x.com/mine'].needs, ['sends']);
+});
+
+test('all-sites/ is writable from a run (its changes wait for the user\'s OK); every other site stays locked', () => {
+  const { runLimits } = require('../helper/lib/runs');
+  const ws = makeWs();
+  for (const d of ['all-sites', 'chatgpt.com']) fs.mkdirSync(path.join(ws.modsDir, d));
+  const box = tempDir();
+  const lim = runLimits(ws, { scope: 'x.com', box, screenshots: box });
+  assert.deepEqual(lim.locked.sort(), [path.join('sites', 'chatgpt.com')]);
+  assert.ok(!lim.readOnly.some((p) => p.endsWith(`${path.sep}all-sites`)));
+});
+
+test('a waiting change to a mod that ran: the version before is what runs; Don\'t allow puts it back; Allow only for the version looked at', () => {
+  const ws = makeWs();
+  fs.mkdirSync(path.join(ws.modsDir, 'all-sites'));
+  const v1 = header('*://*/*') + 'document.documentElement.style.background = "#111";\n';
+  const v2 = header('*://*/*') + 'document.documentElement.style.background = "#333";\n';
+  write(ws, 'all-sites/dark.js', v1);
+  assert.deepEqual(updateHeld(ws, scanMods(ws.modsDir).mods, []), {}); // (ran, as it was)
+  const before = snapshot(ws.modsDir, ws.home);
+  write(ws, 'all-sites/dark.js', v2); // a run on x.com edits it
+  const held = updateHeld(ws, scanMods(ws.modsDir).mods, [{ runId: 'r1', site: 'x.com', scope: 'x.com', before }]);
+  assert.deepEqual(held['all-sites/dark'].needs, ['match:*://*/*']);
+  assert.equal(lastRun(ws.home, 'all-sites/dark'), v1, 'the version before keeps running');
+  // Allow for a version that isn't the one looked at: refused
+  assert.throws(() => approveHeld(ws.home, 'all-sites/dark', 'not-that-one'), /changed again since you looked/);
+  // Don't allow: v1 back, v2 kept in history
+  const r = rejectHeld(ws, 'all-sites/dark', held['all-sites/dark'].hash);
+  assert.equal(r.restored, 'previous');
+  assert.equal(fs.readFileSync(path.join(ws.modsDir, 'all-sites/dark.js'), 'utf8'), v1);
+  assert.equal(fs.readFileSync(require('../helper/lib/history').listHistory(ws, 'all-sites/dark')[0].file, 'utf8'), v2);
+  assert.deepEqual(updateHeld(ws, scanMods(ws.modsDir).mods, []), {});
+  // a new mod a run wrote, not allowed: to the trash
+  const before2 = snapshot(ws.modsDir, ws.home);
+  write(ws, 'all-sites/new.js', header('*://*/*'));
+  updateHeld(ws, scanMods(ws.modsDir).mods, [{ runId: 'r2', site: 'x.com', scope: 'x.com', before: before2 }]);
+  assert.equal(lastRun(ws.home, 'all-sites/new'), null);
+  assert.equal(rejectHeld(ws, 'all-sites/new').restored, 'removed');
+  assert.equal(fs.existsSync(path.join(ws.modsDir, 'all-sites/new.js')), false);
 });

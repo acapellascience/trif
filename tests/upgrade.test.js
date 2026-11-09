@@ -140,8 +140,8 @@ test(`upgrade: the ${TAG} updater installs this checkout's package; everything m
   assert.deepStrictEqual(pre.shipped['www.google.com/hide-sponsored'], { retired: { into: 'www.google.com/hide-extra-sections', kept: true } });
   assert.strictEqual(pre.shipped['www.google.com/hide-ai-mode'].retired.into, 'www.google.com/hide-ai-in-results');
   assert.ok(pre.offered.includes('www.google.com/hide-ai-mode'), 'still counted as offered: never offered again');
-  // TRIF ships no mods for its own home page: the update brings none, and TRIF isn't turned on for it.
-  assert.ok(!fs.existsSync(path.join(sites, 'timsrobot.com')), `timsrobot.com mods appeared\n${info}`);
-  assert.ok(!pre.offered.some((id) => id.startsWith('timsrobot.com/')));
+  // TRIF's own home page: the update brings its two demo mods, switched off, and doesn't turn TRIF on there.
+  assert.deepStrictEqual(fs.readdirSync(path.join(sites, 'timsrobot.com')).sort(), ['random-mods.js', 'skip-to-sandbox.js'], info);
+  assert.ok(['timsrobot.com/skip-to-sandbox', 'timsrobot.com/random-mods'].every((id) => pre.offered.includes(id) && pre.startOff.includes(id)));
   assert.ok(!pre.sitesOn.includes('timsrobot.com'));
 });

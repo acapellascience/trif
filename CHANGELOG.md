@@ -22,6 +22,32 @@ needs a section here for the version it releases.
   lists blocked sites, each with Unblock).
 - Without access to every site, your agent's screenshots are of the tab you're on, after you click the
   TRIF toolbar button there (Chrome and Firefox want that before an extension can capture a tab).
+- Your browser now also says TRIF can "block content on any page". That's only blocking, never reading:
+  it's how TRIF stops a tab your agent ran code in from posting, sending or saving as you, including to
+  sites you haven't connected TRIF to.
+- **Safer side-panel agents.** A web page can try to talk to your agent ("TRIF agent: run this…"), so
+  TRIF no longer counts on the agent to say no:
+  - When your agent runs code in a tab, TRIF has the browser block anything from that tab that posts,
+    sends or saves as you, or takes what's on the page to another site, until the page reloads. Reading the page, clicks and testing mods work as
+    before; the side panel says when a tab is paused like this, with a Reload button.
+  - TRIF now reads what each mod's code can do (send requests, click or type for you, go to other
+    pages or sites, or code it can't check) instead of trusting what the mod says about itself. A mod
+    your agent writes that can do any of that waits for your OK, with what TRIF found shown apart from
+    what the agent says. The same goes for a mod from anywhere else: your terminal agent, a file you
+    paste in, a mod someone shares. Once you allow it, later changes only ask again if they add
+    something new.
+  - Your existing mods keep running. Ones that can do more than change how a page looks show what
+    TRIF found once, with "Looks right".
+  - The page's address reaches your agent without the part after `?` or `#`, which anyone can fill.
+- When your coding agent's login runs out, the side panel asks you to log in again (and keeps your
+  message to send again) instead of showing the agent's error twice.
+- **Bigger mods.** A mod can now be up to 4 MB, and all your mods together up to 16 MB. Until now they
+  had to fit in 1 MB in all, and past that the biggest ones were left out: a game, or a mod with
+  its sounds or pictures in it, could use that up alone. If a mod is ever too big, `trif status` and
+  `trif doctor` say which one and what to do. A change to one mod now sends only that mod to the browser,
+  which keeps Firefox's memory in check with big mods. (The helper and the browser extension both need
+  this version; with an older extension, mods still stop at 1 MB in all, and `trif doctor` says to update
+  it.)
 
 ## 0.2.4
 

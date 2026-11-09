@@ -9,7 +9,7 @@ const vm = require('vm');
 const { envVar } = require('./lib/env');
 const P = require('./lib/paths');
 const { request, streamRun, streamLogin, HelperError } = require('./lib/client');
-const { ALL_SITES, scanMods, planModsMessage, isIgnoredName, isShippedSource } = require('./lib/mods');
+const { ALL_SITES, scanMods, planMods, isIgnoredName, isShippedSource } = require('./lib/mods');
 const { realish, isInside, badName } = require('./lib/pathcheck');
 const { COMMANDS, mainHelp, commandHelp } = require('./lib/help');
 const { loadHeld } = require('./lib/held');
@@ -18,7 +18,7 @@ const trash = require('./lib/trash');
 const shipped = require('./lib/preinstalled');
 
 // Inside a side-panel agent run (the helper set TRIF_RUN_TOKEN) these are the user's alone.
-const NOT_IN_RUNS = new Set(['setup', 'agent', 'approve', 'mod-update']);
+const NOT_IN_RUNS = new Set(['setup', 'agent', 'approve', 'reject', 'mod-update', 'undo']);
 
 // Output piped into something that stops reading early (`trif tabs | head -1`) isn't an error.
 process.stdout.on('error', (e) => { if (e.code === 'EPIPE') process.exit(0); throw e; });
@@ -26,7 +26,7 @@ process.stdout.on('error', (e) => { if (e.code === 'EPIPE') process.exit(0); thr
 const VALUE_FLAGS = new Set(['--tab', '--url', '-o', '--out', '--output', '--filter', '--limit', '-f', '--file',
   '--browser', '--home', '--native-dir', '--bin-dir', '--timeout', '--agent', '--session', '--model', '--site', '--auto',
   '--provider', '--base-url', '--key-env', '--selector', '--color', '--text', '--tolerance']);
-const BOOL_FLAGS = new Set(['--json', '--hard', '--help', '-h', '--force', '--no-link', '--examples', '--no-examples', '--copy', '--link', '--install', '--open',
+const BOOL_FLAGS = new Set(['--json', '--hard', '--help', '-h', '--force', '--page', '--no-link', '--examples', '--no-examples', '--copy', '--link', '--install', '--open',
   '--use-new', '--keep', '--merged', '--set-key', '--remove-key', '--scroll', '--full', '--verbose', '-v', '--no-wait']);
 const ALIASES = { '--out': '-o', '--output': '-o', '--file': '-f', '-h': '--help', '-v': '--verbose' };
 
@@ -312,13 +312,15 @@ const handlers = {
     const applyErrors = new Map((((info.modsApplied || {}).errors) || []).map((e) => [e.id, e.error]));
     const helperErrors = new Map((info.modErrors || []).map((e) => [e.id, e.error]));
     const held = info.held || {};
+    const review = info.review || {};
     const updates = info.updates || {};
     const ids = [...new Set([...(info.mods || []), ...registered.keys()])].sort();
+    if (st && st.paused) lines.push('PAUSED        every mod is paused in this browser (the user\'s choice, in the side panel\'s Settings): nothing runs until they resume');
     lines.push(`mods          ${ids.length} in ${info.modsDir}`);
     for (const id of ids) {
       let s;
       if (helperErrors.has(id)) s = `NOT SENT: ${helperErrors.get(id)}`;
-      else if (held[id]) s = `HELD: ${held[id].reason} (trif approve ${id})`;
+      else if (held[id]) s = `${(info.pending || []).includes(id) ? 'CHANGE WAITING (the version before runs meanwhile)' : 'HELD'}: it ${(held[id].facts || [held[id].reason]).join('; it ')} (trif approve ${id}, or trif reject ${id})`;
       else if (off.has(id)) s = shipsOff.has(id) ? 'off (as TRIF ships it)' : 'off';
       else if (sitesOff.has(id)) s = 'waiting: TRIF is off on its site';
       else if (applyErrors.has(id)) s = `NOT REGISTERED: ${applyErrors.get(id)}`;
@@ -327,12 +329,14 @@ const handlers = {
       else s = registered.get(id) ? 'registered' : 'NOT REGISTERED';
       if (offSites.has(id) && !off.has(id)) s += ` (off on ${offSites.get(id).join(', ')})`;
       if (updates[id]) s += `; ${updateText(updates[id])}`;
+      if (review[id]) s += `; TO REVIEW: it ${review[id].facts.join('; it ')} (trif approve ${id} when that's fine)`;
       lines.push(`  ${pad(id, 40)} ${s}`);
     }
     for (const [id, err] of helperErrors) if (!ids.includes(id)) lines.push(`  ${pad(id, 40)} NOT SENT: ${err}`);
     if ([...off].some((id) => !shipsOff.has(id))) lines.push('              off = switched off by the user (trif enable <id> turns one back on)');
     if ([...off].some((id) => shipsOff.has(id))) lines.push('              off (as TRIF ships it) = a mod TRIF comes with, off until switched on (trif enable <id>)');
-    if (Object.keys(held).length) lines.push('              HELD = written by a side-panel agent for another site; not running until the user approves it');
+    if (Object.keys(held).length) lines.push('              HELD = new or changed, and it can do things the user hasn\'t allowed (TRIF read them from its code); not running until the user approves it');
+    if (Object.keys(review).length) lines.push('              TO REVIEW = can do things the user hasn\'t seen yet (TRIF read them from its code); it runs meanwhile');
     if (Object.keys(updates).length) lines.push('              update available = TRIF has a new version of a mod it ships; see trif mod-update <id>');
     if (sitesOff.size) lines.push('              waiting = not running until the user turns TRIF on for the site, or connects it (side panel)');
     if (st && Array.isArray(st.sitesOn)) {
@@ -363,7 +367,16 @@ const handlers = {
 
   async approve(ctx, pos) {
     if (!pos[0]) throw new UsageError('missing mod id');
-    const r = await ctx.call('mod.approve', { id: modId(pos[0]) }, 10000);
+    // A held mod (a side-panel agent wrote it): allowed, and it runs. A mod to review (one the user has,
+    // which can do things they haven't seen): what TRIF found in it is allowed, and it isn't asked about again.
+    const id = modId(pos[0]);
+    let r;
+    try { r = await ctx.call('mod.approve', { id }, 10000); } catch (e) {
+      if (!/isn't held/.test(e.message)) throw e;
+      r = await ctx.call('mod.review', { id }, 10000);
+      if (ctx.json) return printJson(r);
+      return out(r.allowed.length ? `${r.id}: what it can do is allowed (${r.allowed.join(', ')})` : `${r.id}: nothing to allow`);
+    }
     if (ctx.json) return printJson(r);
     out(`${r.id} approved: it runs from the next page load`);
   },
@@ -381,7 +394,25 @@ const handlers = {
       process.exitCode = 1;
       return;
     }
-    if (ctx.json) printJson({ ok: true, file: path.resolve(file) }); else out(`ok: ${path.resolve(file)} parses`);
+    // What TRIF reads in it (lib/powers.js): what would make it wait for the user's OK, line by line, and
+    // how to write it so it doesn't, where that's possible. So an agent can check its own mod first.
+    const { powersOf, modSites } = require('./lib/powers');
+    const { parseHeader } = require('./lib/mods');
+    const rel = path.relative(ctx.ws.modsDir, path.resolve(file)).split(path.sep);
+    const id = rel.length === 2 ? `${rel[0]}/${rel[1].replace(/\.js$/, '')}` : path.basename(file, '.js');
+    const powers = powersOf(code, { sites: modSites({ id, matches: parseHeader(code).matches }) });
+    const lines = code.split('\n');
+    if (ctx.json) return printJson({ ok: true, file: path.resolve(file), powers: powers.map(({ key, fact, found, lines: at }) => ({ key, fact, found, lines: at })) });
+    out(`ok: ${path.resolve(file)} parses`);
+    if (!powers.length) return out('TRIF finds nothing in it that waits for the user\'s OK.');
+    out(`\nTRIF reads this in it, so it waits for the user's OK (unless they've allowed it before):`);
+    for (const p of powers) {
+      out(`- it ${p.fact}`);
+      for (const n of p.lines.slice(0, 5)) out(`    line ${n}: ${lines[n - 1].trim().slice(0, 140)}`);
+      if (p.lines.length > 5) out(`    (${p.lines.length - 5} more)`);
+      for (const tip of checkTips(p)) out(`    how: ${tip}`);
+    }
+    out('\nIf the mod really needs it, keep it and tell the user what it does and why it waits. See "Writing mods TRIF can read" in TECHNIQUES.md.');
   },
 
   async enable(ctx, pos) { return switchMod(ctx, pos, true); },
@@ -562,6 +593,38 @@ const handlers = {
     out(`opened tab ${r && r.id}: ${r && r.url}`);
   },
 
+  async reject(ctx, pos) {
+    if (!pos[0]) throw new UsageError('usage: trif reject <site>/<mod>');
+    const r = await ctx.call('mod.reject', { id: modId(pos[0]) }, 10000);
+    if (ctx.json) return printJson(r);
+    out(r.restored === 'removed' ? `${r.id}: it never ran, so it's in the trash now (trif restore ${r.id} brings it back)` : `${r.id}: the change wasn't allowed; the version before is back (the change is in trif history ${r.id})`);
+  },
+
+  async history(ctx, pos) {
+    if (!pos[0]) throw new UsageError('usage: trif history <site>/<mod>');
+    const id = modId(pos[0]);
+    const historyLib = require('./lib/history');
+    const r = { id, entries: historyLib.listHistory(ctx.ws, id).map((e) => ({ at: e.at, kind: e.kind })) }; // (works without the browser)
+    if (ctx.json) return printJson(r);
+    if (!r.entries.length) return out(`(no changes kept for ${r.id}: only side-panel runs' changes are, for 30 days)`);
+    out(`${r.id}: what side-panel runs changed, newest first (trif undo ${r.id} puts back the newest)`);
+    for (const e of r.entries) out(`  ${new Date(e.at).toLocaleString()}  ${e.kind === 'created' ? 'created by a run' : 'changed by a run (the version before is kept)'}`);
+  },
+
+  async undo(ctx, pos) {
+    if (!pos[0]) throw new UsageError('usage: trif undo <site>/<mod>');
+    const r = require('./lib/history').undoChange(ctx.ws, modId(pos[0])); // (works without the browser; the helper picks the change up)
+    if (ctx.json) return printJson(r);
+    out(r.restored === 'removed' ? `${r.id}: a run created it, so it's in the trash now (trif restore ${r.id} brings it back)` : `${r.id}: back to the version before ${new Date(r.at).toLocaleString()}; reload the page to see it (trif undo again goes back further)`);
+  },
+
+  async close(ctx) {
+    if (ctx.opts['--tab'] === undefined && ctx.opts['--url'] === undefined) throw new UsageError('usage: trif close --tab <id> | --url <part of its address> [--force]');
+    const r = await ctx.call('close', { ...(ctx.opts['--force'] ? { force: true } : {}), ...tabArgs(ctx.opts) });
+    if (ctx.json) return printJson(r);
+    out(`closed tab ${r && r.id}${r && r.url ? `: ${r.url}` : ''}`);
+  },
+
   async navigate(ctx, pos) {
     const r = await ctx.call('navigate', { to: normalizeUrl(pos[0]), ...tabArgs(ctx.opts) });
     if (ctx.json) return printJson(r);
@@ -604,6 +667,7 @@ const handlers = {
       throw new UsageError(`inside a side-panel agent run, screenshots are saved in the run's screenshots folder${runShots ? ` (${runShots})` : ''} or the mods folder: leave out -o to save to the run's screenshots folder, or give just a file name (-o page.png)`);
     }
     writeOptionFile(file, Buffer.from(m[2], 'base64'));
+    file = realFile(file);
     if (ctx.json) return printJson({ file, how: r.how || 'visible', full: !!r.full, note: r.note || null, ...(r.cut ? { cut: true } : {}), ...(r.stale ? { stale: true } : {}), ...(r.slices ? { slices: r.slices, viewport: r.viewport } : {}) });
     out(file);
     // On stderr, so $(trif screenshot) is still just the path; agents see it either way.
@@ -653,7 +717,7 @@ const handlers = {
       const file = optionPath(ctx, ctx.opts['-o'], { write: true });
       writeOptionFile(file, text == null ? '' : text);
       delete view.responseText;
-      view.responseFile = file;
+      view.responseFile = realFile(file);
       view.responseLength = typeof r.responseText === 'string' ? r.responseText.length : 0;
     } else if ('responseText' in view) {
       view.response = prettyBody(view.responseText);
@@ -663,8 +727,18 @@ const handlers = {
   },
 
   async errors(ctx) {
-    const r = await ctx.call('errors', tabArgs(ctx.opts));
+    const page = !!ctx.opts['--page'];
+    const r = await ctx.call('errors', { ...(page ? { page: true } : {}), ...tabArgs(ctx.opts) });
     if (ctx.json) return printJson(r);
+    if (page) {
+      if (!Array.isArray(r) || !r.length) return out("(no errors from the page's own code in this tab; TRIF only sees them where a mod is on or recording is on)");
+      for (const e of r) {
+        out(`[${clock(e.time)}] ${e.message}${e.source ? `  (${e.source})` : ''}`);
+        const stack = String(e.stack || '').split('\n').filter((l) => l.trim() && !l.includes(e.message)).slice(0, 8);
+        for (const l of stack) out(`    ${l.trim()}`);
+      }
+      return;
+    }
     if (!Array.isArray(r) || !r.length) return out('(no mod errors in this tab)');
     for (const e of r) {
       out(`[${clock(e.time)}] ${e.mod}: ${e.message}`);
@@ -685,11 +759,11 @@ const handlers = {
 
   async mods(ctx) {
     const { mods, problems, warnings } = scanMods(ctx.ws.modsDir);
-    const plan = planModsMessage(mods);
+    const plan = planMods(mods);
     const errors = [...problems, ...plan.errors];
     const { enabled, offSites } = await knownSwitches(ctx);
     const held = loadHeld(ctx.ws.home);
-    const isHeld = (m) => held[m.id] && held[m.id].hash === m.hash && !held[m.id].approved;
+    const isHeld = (m) => held[m.id] && held[m.id].hash === m.hash;
     const updates = shipped.pendingUpdates(ctx.ws.home, mods);
     const shipsOff = shipped.startOffIds(ctx.ws.home); // off because TRIF ships them off, not the user's doing
     if (ctx.json) {
@@ -714,7 +788,7 @@ const handlers = {
       if (enabled.get(m.id) === false && shipsOff.has(m.id)) out(`  off, as TRIF ships it (not running; trif enable ${m.id} turns it on)`);
       else if (enabled.get(m.id) === false) out(`  switched off by the user (not running; trif enable ${m.id} turns it on)`);
       else if (offSites.has(m.id)) out(`  switched off by the user on ${offSites.get(m.id).join(', ')} (trif enable ${m.id} --site <site> turns it back on there)`);
-      if (isHeld(m)) out(`  HELD: a side-panel agent wrote it while working on ${held[m.id].site}, but ${held[m.id].reason}. Not running until the user approves it (trif approve ${m.id}).`);
+      if (isHeld(m)) out(`  HELD: ${held[m.id].by === 'outside' ? 'new or changed since TRIF last let it run' : `a side-panel agent wrote it while working on ${held[m.id].site}`}, and TRIF found that it ${(held[m.id].facts || [held[m.id].reason]).join('; it ')}. Not running until the user approves it (trif approve ${m.id}).`);
       if (updates[m.id]) out(`  ${updateText(updates[m.id])}: trif mod-update ${m.id}`);
       if (m.description) out(`  ${m.description}`);
       if (isShippedSource(m.source)) out(`  from TRIF${m.version ? `, version ${m.version}` : ''}`);
@@ -745,8 +819,8 @@ const handlers = {
     text = text.replace(/\{\{site\}\}/g, site).replace(/\{\{mod\}\}/g, mod).replace(/\{\{name\}\}/g, titleCase(mod));
     fs.mkdirSync(path.dirname(file), { recursive: true });
     fs.writeFileSync(file, text);
-    if (ctx.json) return printJson({ id: `${site}/${mod}`, file });
-    out(file);
+    if (ctx.json) return printJson({ id: `${site}/${mod}`, file: realFile(file) });
+    out(realFile(file));
   },
 
   async agent(ctx, pos) {
@@ -793,10 +867,36 @@ const handlers = {
     }
     fs.mkdirSync(path.dirname(dest), { recursive: true });
     fs.copyFileSync(src, dest);
-    if (ctx.json) return printJson({ id: `${site}/${mod}`, file: dest });
-    out(dest);
+    if (ctx.json) return printJson({ id: `${site}/${mod}`, file: realFile(dest) });
+    out(realFile(dest));
   },
 };
+
+// For `trif check`: how to write each kind of flagged thing so TRIF can read it, where there's a way that
+// does the same job
+function checkTips(p) {
+  const tips = [];
+  for (const f of p.found) {
+    if (p.key === 'acts' && /dispatchEvent|Event/.test(f)) tips.push('to reach your own code, dispatch a CustomEvent named after the mod (new CustomEvent("my-mod-reset")) and listen for it, not a fake key press or click');
+    else if (p.key === 'acts' && /click/.test(f)) tips.push('on your own button, call its handler directly; clicking the site\'s controls is acting for the user');
+    else if (/createElement with a tag/.test(f)) tips.push('pass the tag as text: document.createElement("div"), one call per kind of element');
+    else if (/setAttribute with a name/.test(f)) tips.push('name the attribute: el.setAttribute("aria-label", …), or set the property (el.title = …)');
+    else if (/x\[…\] =/.test(f)) tips.push('x[k] = v: TRIF can\'t tell that from setting an element\'s src or href (which this mod\'s text mentions); keep data in a Map or use array methods (m.set(k, v), list.push(v), list.map(…)), or name the property');
+    else if (/x\[…\]\(\)/.test(f)) tips.push('call the method by name (el.remove()), not through x[name]()');
+    else if (/innerHTML with HTML built/.test(f)) tips.push('build the elements with createElement and set textContent, rather than HTML with values inside its tags');
+    else if (/property name built|decod|spelled/.test(f)) tips.push('don\'t build names from pieces; for embedded data, Uint8Array.from(atob(s), (c) => c.charCodeAt(0)) is read as data');
+    else if (p.key === 'loads') tips.push('a fixed address (or data:/blob:) is fine; an address built at run time can carry what the mod reads to another site');
+    else if (p.key.startsWith('site:')) tips.push('mods only use their own site, unless the user asked for something that lives elsewhere');
+  }
+  return [...new Set(tips)];
+}
+
+// A path as the system knows it (links resolved, /tmp as /private/tmp): what `trif new` and the like print,
+// because an agent's run rules are built from the workspace's real path, and a path through a link (a
+// TRIF_HOME under /tmp, a home folder behind a link) would be refused by them.
+function realFile(file) {
+  try { return path.join(fs.realpathSync(path.dirname(file)), path.basename(file)); } catch { return file; }
+}
 
 // ---------------------------------------------------------------- mod switches
 
@@ -1022,7 +1122,7 @@ async function agentRun(ctx, pos) {
         if (ctx.json) return out(JSON.stringify(ev));
         if (ev.kind === 'text') { out(String(ev.text).trim()); out(''); }
         else if (ev.kind === 'tool') out(`  [${ev.name}]${ev.summary ? ' ' + ev.summary : ''}`);
-        else if (ev.kind === 'error') process.stderr.write(`error: ${ev.message}\n`);
+        else if (ev.kind === 'error') process.stderr.write(`error: ${ev.reason === 'login' ? loginHelp(ev) : ev.message}\n`);
       },
     });
   } finally {
@@ -1036,6 +1136,14 @@ async function agentRun(ctx, pos) {
     out(files.length ? `changed: ${files.join(', ')}` : 'changed: (no files)');
   }
   if (!done.ok) process.exitCode = 1;
+}
+
+// A run that failed for want of a login (its error event has reason "login"): how to log in from here.
+function loginHelp(ev) {
+  const a = require('./lib/agents').getAdapter(String(ev.agent || ''));
+  if (!a) return ev.message;
+  if (a.login) return `${ev.message} Run \`trif agent login --agent ${a.id}\`${a.loginFix ? `, or ${a.loginFix}` : ''}.`;
+  return `${ev.message}${a.loginFix ? ` To log in, ${a.loginFix}.` : ''}`;
 }
 
 // Log the agent in through the helper, like the side panel's "Log in" button: print the sign-in URL,

@@ -100,6 +100,7 @@ test('setup --copy: copies helper/extension/examples into <home>/app and points 
   assert.equal(wrapperScript(path.join(ws, 'bin', 'trif')), path.join(app, 'helper', 'cli.js'));
   assert.equal(fs.statSync(path.join(app, 'helper', 'cli.js')).mode & 0o777, fs.statSync(path.join(REPO, 'helper', 'cli.js')).mode & 0o777);
   assert.equal(fs.readFileSync(path.join(ws, 'AGENTS.md'), 'utf8'), fs.readFileSync(path.join(app, 'helper', 'workspace', 'AGENTS.md'), 'utf8'));
+  assert.equal(fs.readFileSync(path.join(ws, 'TECHNIQUES.md'), 'utf8'), fs.readFileSync(path.join(app, 'helper', 'workspace', 'TECHNIQUES.md'), 'utf8'));
   assert.match(r.stdout, new RegExp(`app {11}${esc(app)} \\(v${esc(P.VERSION)}, created, copied from`));
   assert.match(r.stdout, new RegExp(`choose ${esc(path.join(app, 'extension'))}\n`));
   assert.match(r.stdout, /Web Store listing will replace this step/);

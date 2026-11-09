@@ -449,6 +449,9 @@ test('setup: workspace, wrappers, manifest, link; idempotent; leaves sites alone
   assert.equal(fs.statSync(privDir(ws)).mode & 0o777, 0o700);
   assert.equal(fs.readFileSync(path.join(ws, 'CLAUDE.md'), 'utf8').trim(), '@AGENTS.md\n@instructions.md');
   if (fs.existsSync(path.join(REPO, 'helper', 'workspace', 'AGENTS.md'))) assert.ok(fs.existsSync(path.join(ws, 'AGENTS.md')));
+  // the how-to half, beside it (read on demand, not pulled into every message by CLAUDE.md)
+  assert.ok(fs.existsSync(path.join(ws, 'TECHNIQUES.md')));
+  assert.doesNotMatch(fs.readFileSync(path.join(ws, 'CLAUDE.md'), 'utf8'), /TECHNIQUES/);
 
   const hostWrapper = path.join(ws, 'bin', 'trif-host');
   const host = fs.readFileSync(hostWrapper, 'utf8');

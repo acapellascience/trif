@@ -34,7 +34,7 @@ const DENIED_TOOLS = ['WebFetch', 'WebSearch'];
 // The workspace's files that steer TRIF (or the agents): never written by a run's commands. (.shipped
 // holds the versions of shipped mods a merge run reads: readable, never written.)
 const STATE_FILES = ['held.json', 'preinstalled.json', 'origins.json', 'active-runs', 'trash', 'update.json', 'instructions.md',
-  'AGENTS.md', 'CLAUDE.md', '.claude', 'bin', 'app', '.shipped'];
+  'AGENTS.md', 'TECHNIQUES.md', 'CLAUDE.md', '.claude', 'bin', 'app', '.shipped'];
 /** Rules like Read(./config.json) made absolute to the workspace (see runSettings `rel`). */
 function absoluteRules(rules, workspace) {
   if (!workspace) return rules;

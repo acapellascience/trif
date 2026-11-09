@@ -996,7 +996,7 @@ Suffix List). `helper/lib/scope.js` computes it; `extension/lib.js` mirrors the 
     Codex), and the system's temporary folders (below). The system's own folders stay readable.
   - **Writes:** the mods folder, with every existing folder of another site (`all-sites/` included)
     read-only inside it; the run's screenshots folder; its mailbox. Not `held.json`, `preinstalled.json`, `.shipped/`,
-    `origins.json`, `active-runs/`, `update.json`, `trash/`, `instructions.md`, `AGENTS.md`, `CLAUDE.md`,
+    `origins.json`, `active-runs/`, `update.json`, `trash/`, `history/`, `.ran/`, `seen.json`, `allowed.json`, `instructions.md`, `AGENTS.md`, `TECHNIQUES.md`, `CLAUDE.md`,
     `.claude/`, `bin/` or `app/`. A run's commands can still create a folder for another site; its mods are
     held like any out-of-scope mod.
   - **Temporary folders:** a run's own, never the system's (`/tmp` and `$TMPDIR` hold other programs'

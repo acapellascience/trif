@@ -1725,7 +1725,8 @@ say({ type: 'result', subtype: 'success', is_error: false, result: text, session
     // Before the harness allows user scripts, every sync logs that each mod couldn't register: expected.
     const expected = (l) => /User scripts aren't allowed for TRIF|User scripts are off for TRIF/.test(l) // Firefox's wording, Chrome's
       || (this.scriptsRevoked && /user scripts were turned off/.test(l)) // colourChecks turned them off
-      || /mod 127\.0\.0\.1\/e2e-huge: mod is [\d.]+ MB; a mod can be up to 4 MB/.test(l); // bigModsCheck's, over the cap on purpose
+      || /mod 127\.0\.0\.1\/e2e-huge: mod is [\d.]+ MB; a mod can be up to 4 MB/.test(l) // bigModsCheck's, over the cap on purpose
+      || /WARN stdout error \(EPIPE\); \w+ went away/.test(l); // (the harness quit the browser while the helper was writing to it)
     const skipped = lines.filter(expected).length;
     const bad = lines.filter((l) => !expected(l) && /\b(WARN|ERROR|warn|error)\b/.test(l.slice(0, 60)));
     const errors = bad.filter((l) => /\bERROR\b|\berror\b/.test(l.slice(0, 60)));

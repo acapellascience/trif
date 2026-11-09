@@ -41,6 +41,7 @@ const state = {
   offSites: {},          // mod id → sites it's switched off on, for mods on several sites (persisted)
   sitesOn: [],           // registrable domains TRIF is on for; off everywhere else (persisted)
   sitesOffered: [],      // sites the helper said to start on that were turned on once already (persisted)
+  paused: false,         // every mod paused in this browser, each mod's own switch left as it is (persisted)
   startedOff: {},        // mod id → true for mods already switched off once: preinstalled, or from another browser (persisted)
   absorbed: {},          // mod id → true for retired shipped mods whose switch was carried over (persisted)
   defaultOrder: {},      // site → mod ids: the panel's order for its shipped mods until the user drags them (from the helper; persisted)
@@ -125,6 +126,7 @@ const ready = chrome.storage.local.get(null).then(async (s) => {
   state.absorbed = normalizeDisabled(s.absorbed);
   state.defaultOrder = normalizeModOrder(s.defaultOrder);
   state.sitesOffered = normalizeSitesOn(s.sitesOffered);
+  state.paused = s.paused === true;
   if (Array.isArray(s.sitesOn)) state.sitesOn = normalizeSitesOn(s.sitesOn);
   else {
     // First start since TRIF has to be turned on per site: keep it on where it's already in use.
@@ -246,8 +248,9 @@ async function applyModsNow() {
   }
   try {
     const res = await syncUserScripts(timedUserScripts(chrome.userScripts), {
+      // (paused: as if TRIF were on for no site, so nothing registers; each switch stays as it is)
       mods: state.mods, runtimeCode: runtimeCode(state.recording), applied: state.applied, disabled: state.disabled,
-      offSites: state.offSites, recording: state.recording, sitesOn: state.sitesOn, known: state.known,
+      offSites: state.offSites, recording: state.recording, sitesOn: state.paused ? [] : state.sitesOn, known: state.known,
     });
     state.applied = res.applied;
     state.known = res.known;
@@ -541,7 +544,7 @@ const commands = {
         if (errors.has(m.id) && errors.get(m.id) !== USER_SCRIPTS_OFF) o.error = errors.get(m.id);
         return o;
       }),
-      recording: state.recording, sitesOn: state.sitesOn,
+      recording: state.recording, sitesOn: state.sitesOn, ...(state.paused ? { paused: true } : {}),
       ...(args && (args.tab !== undefined || args.url !== undefined) ? { page: await modsOnPage(args) } : {}),
     };
   },
@@ -962,6 +965,15 @@ async function onPageMessage(msg) {
       return { ok: true };
     case 'status':
       return uiStatus();
+    case 'mods.pause': {
+      // Settings' "Pause all mods": nothing runs in this browser until it's off again
+      state.paused = msg.paused === true;
+      await save({ paused: state.paused });
+      await serial(applyMods).then(reportApplied).catch((e) => log('warn', errMsg(e)));
+      if (msg.tab !== undefined) await chrome.tabs.reload(Number(msg.tab)).catch(() => {});
+      notifyPanels();
+      return { paused: state.paused };
+    }
     case 'mod.enable': {
       const args = { id: msg.id, enabled: msg.enabled };
       if (msg.tab !== undefined) args.tab = msg.tab;
@@ -982,7 +994,7 @@ async function uiStatus() {
   return {
     helper: { connected: state.connected, error: state.connected ? null : state.helperError },
     userScripts: s.userScripts, settingsUrl: SETTINGS_URL, version: VERSION, chrome: CHROME, browser: BROWSER,
-    recording: s.recording, sitesOn: state.sitesOn, update: state.connected ? state.update : null,
+    recording: s.recording, sitesOn: state.sitesOn, paused: state.paused, update: state.connected ? state.update : null,
     mods: state.mods.map((m) => ({
       id: m.id, name: m.name || m.id, description: m.description || '', site: m.site, file: m.file || '',
       matches: m.matches || [], excludes: m.excludes || [], registered: !!live.get(m.id)?.registered, enabled: live.get(m.id)?.enabled ?? isEnabled(m.id),

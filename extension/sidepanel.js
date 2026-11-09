@@ -22,7 +22,7 @@ const ui = {
   settings: $('#settings'), agent: $('#agent'), agentNote: $('#agent-note'), model: $('#model'),
   using: $('#using'), modelCustomRow: $('#model-custom-row'), modelCustom: $('#model-custom'), modelNote: $('#model-note'),
   instructions: $('#instructions'), instructionsNote: $('#instructions-note'),
-  autoUpdate: $('#auto-update'), updateNote: $('#update-note'), update: $('#update'),
+  autoUpdate: $('#auto-update'), pauseAll: $('#pause-all'), pausedAll: $('#paused-all'), updateNote: $('#update-note'), update: $('#update'),
   notice: $('#notice'), paused: $('#paused'), tabLock: $('#tab-lock'), mods: $('#mods'), modsCount: $('#mods-count'), modList: $('#mod-list'), modsReviewNote: $('#mods-review-note'), modsLive: $('#mods-live'),
   chat: $('#chat'), empty: $('#empty'), messages: $('#messages'), working: $('#working'),
 
@@ -382,6 +382,7 @@ function render() {
 
   renderGate(problem, agentInfo);
   renderTabLock();
+  renderPausedAll();
   renderNotice({ helperOk, agentInfo, anyAgent });
   renderUpdate();
   renderMods();
@@ -465,6 +466,21 @@ function renderProblemLine(node, problem, agentInfo) {
 function allowUserScripts() {
   if (FIREFOX) chrome.permissions.request({ permissions: ['userScripts'] }).then(() => setTimeout(refreshStatus, 300), () => {});
   else chrome.tabs.create({ url: view.status?.settingsUrl || `chrome://extensions/?id=${chrome.runtime.id}` });
+}
+
+/** Every mod paused (Settings): a notice saying so, with Resume, and the checkbox follows. */
+function setPaused(paused) {
+  return request({ type: 'mods.pause', paused, tab: view.tab?.id }).then(refreshStatus, (e) => request({ type: 'chat.note', site: view.site, text: `Couldn't ${paused ? 'pause' : 'resume'} mods: ${e?.message ?? e}` }).catch(() => {}));
+}
+function renderPausedAll() {
+  const paused = !!view.status?.paused;
+  ui.pauseAll.checked = paused;
+  ui.pausedAll.hidden = !paused;
+  if (!paused) { ui.pausedAll.replaceChildren(); return; }
+  if (ui.pausedAll.childElementCount) return;
+  ui.pausedAll.replaceChildren(el('p', 'title', 'All mods are paused'),
+    el('p', null, 'Nothing from TRIF runs on any site in this browser until you resume. Each mod keeps its own switch.'),
+    actions(button('Resume', 'primary', () => setPaused(false))));
 }
 
 /**
@@ -1604,6 +1620,8 @@ async function installUpdate() {
     renderUpdate();
   }
 }
+
+ui.pauseAll.addEventListener('change', () => setPaused(ui.pauseAll.checked));
 
 ui.autoUpdate.addEventListener('change', async () => {
   const on = ui.autoUpdate.checked;

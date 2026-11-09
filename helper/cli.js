@@ -313,6 +313,7 @@ const handlers = {
     const review = info.review || {};
     const updates = info.updates || {};
     const ids = [...new Set([...(info.mods || []), ...registered.keys()])].sort();
+    if (st && st.paused) lines.push('PAUSED        every mod is paused in this browser (the user\'s choice, in the side panel\'s Settings): nothing runs until they resume');
     lines.push(`mods          ${ids.length} in ${info.modsDir}`);
     for (const id of ids) {
       let s;

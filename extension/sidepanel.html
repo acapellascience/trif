@@ -80,6 +80,7 @@
       placeholder="Read by every chat. For example: talk like a caveman; don't bring up detectability."></textarea>
   </label>
   <p id="instructions-note" class="note" role="status">Applies from your next message, here and in Claude Code in ~/.trif.</p>
+  <label class="check"><input id="pause-all" type="checkbox"> Pause all mods in this browser</label>
   <label class="check"><input id="auto-update" type="checkbox"> Install updates automatically</label>
   <p id="update-note" class="note"></p>
   <p class="note"><a href="#" id="report-link">Report a problem</a> · <a href="#" id="setup-link">Setup and status</a></p>
@@ -106,6 +107,7 @@
 </section>
 
 <!-- User scripts off: a notice of its own, above any other (a login one too). -->
+<section id="paused-all" class="notice" hidden></section>
 <section id="tab-lock" class="notice tab-lock" hidden></section>
 <section id="paused" class="notice" hidden></section>
 <section id="notice" class="notice" hidden></section>

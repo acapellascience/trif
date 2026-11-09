@@ -1072,6 +1072,26 @@ test('background: panel status includes helper state and mods with match pattern
   } finally { bg.restore(); }
 });
 
+test('background: Pause all mods registers nothing (each switch kept); resuming brings them back', async () => {
+  const mods = [mod('x.com/a', { matches: ['*://x.com/*'] })];
+  const bg = await loadBackground({ storage: { mods, sitesOn: ['x.com'] } });
+  try {
+    const panel = bg.connectPanel();
+    bg.native.emit({ type: 'mods', mods });
+    await settle(20);
+    let r = await panel.ask({ type: 'status' });
+    assert.strictEqual(r.result.mods[0].registered, true);
+    assert.strictEqual(r.result.paused, false);
+    await panel.ask({ type: 'mods.pause', paused: true });
+    r = await panel.ask({ type: 'status' });
+    assert.deepStrictEqual([r.result.paused, r.result.mods[0].registered, r.result.mods[0].enabled], [true, false, true]);
+    assert.strictEqual(bg.store.paused, true);
+    await panel.ask({ type: 'mods.pause', paused: false });
+    r = await panel.ask({ type: 'status' });
+    assert.deepStrictEqual([r.result.paused, r.result.mods[0].registered], [false, true]);
+  } finally { bg.restore(); }
+});
+
 test('background: agent.start becomes a native request; agentEvents reach panels and the chat', async () => {
   const bg = await loadBackground();
   try {

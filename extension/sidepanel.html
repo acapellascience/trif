@@ -81,6 +81,13 @@
   <p id="instructions-note" class="note">Applies from your next message, here and in Claude Code in ~/.trif.</p>
   <label class="check"><input id="auto-update" type="checkbox"> Install updates automatically</label>
   <p id="update-note" class="note"></p>
+  <!-- Tim's mods, site by site: added, or an Add button (sidepanel.js renderStarter). -->
+  <div id="starter" class="starter" hidden>
+    <p class="starter-title">Tim’s mods</p>
+    <ul id="starter-list" class="starter-list"></ul>
+    <p class="note">Plain JavaScript you can read: <a href="https://github.com/acapellascience/trif/tree/main/examples/sites" id="starter-source" target="_blank" rel="noopener">see the code</a>.</p>
+    <p id="starter-err" class="note error" hidden></p>
+  </div>
   <p class="note"><a href="#" id="report-link">Report a problem</a> · <a href="#" id="setup-link">Setup and status</a></p>
 </section>
 <section id="gate" class="gate" hidden>
@@ -89,6 +96,9 @@
   <p class="gate-title">The robot is off.</p>
   <button id="gate-btn" class="btn go" type="button"></button>
   <p id="gate-err" class="mod-err" hidden></p>
+  <!-- "Add Tim's mods for <site>", when this site has some the user hasn't added (sidepanel.js renderSiteStarter);
+       moved under the mods list while TRIF is on for the site. -->
+  <p id="site-starter" class="site-starter" hidden><a href="#" id="site-starter-link"></a><span id="site-starter-err" class="mod-err" hidden></span></p>
   <!-- What's in the way, in one line (sidepanel.js problemLine): red, or yellow for a login. -->
   <div id="gate-note" class="problem-line" hidden></div>
 </section>

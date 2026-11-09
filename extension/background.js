@@ -8,7 +8,7 @@ import {
   firstInjectionResult, withTimeout, filterRequests, nextBackoff, chromeVersion, toolLine,
   normalizeDisabled, modAppliesTo, urlInScope, modInScope, applyStartOff, applyAbsorbed, findRenames, carryRenames, renameInOrder, normalizeModOrder, modSites,
   normalizeOffSites, offSiteName, offOnSite, hostInScope, withOffSites, scopeFor, normalizeSitesOn, siteOnFor, sitesInUse, limitToSites, applyStartSites, switchSite, fromOtherBrowser, timedUserScripts, capChat,
-  FEATURES, ModsParts, fillSameMods, storedMods, modsStorageState, modsStoragePlan,
+  FEATURES, ModsParts, fillSameMods, storedMods, modsStorageState, modsStoragePlan, normalizeStarter,
 } from './lib.js';
 import { runtimeCode } from './runtime.js';
 import { sweepPage } from './sweep.js';
@@ -43,6 +43,7 @@ const state = {
   startedOff: {},        // mod id → true for mods already switched off once: preinstalled, or from another browser (persisted)
   absorbed: {},          // mod id → true for retired shipped mods whose switch was carried over (persisted)
   defaultOrder: {},      // site → mod ids: the panel's order for its shipped mods until the user drags them (from the helper; persisted)
+  starter: null,         // Tim's mods, site by site, from the helper (helper/lib/preinstalled.js starterOffer): {chosen, sites: [{site, name, choice, suggested, mods}]}
   installId: null,       // random id of this install (persisted): the helper records it as the origin of mods made here
   applied: {},           // script id → hash last registered (persisted)
   known: null,           // the script ids the last sync left registered (syncUserScripts `known`); null: ask the browser
@@ -387,6 +388,12 @@ async function onModsMessage(msg) {
     state.sitesOn = sites.sitesOn;
     state.sitesOffered = sites.offered;
     await save({ sitesOn: state.sitesOn, sitesOffered: state.sitesOffered }).catch((e) => log('warn', errMsg(e)));
+    notifyPanels();
+  }
+  // Tim's mods, site by site: which the user added, and what each site's are (the setup page, Settings).
+  const starter = normalizeStarter(msg.starter);
+  if (JSON.stringify(starter) !== JSON.stringify(state.starter)) {
+    state.starter = starter;
     notifyPanels();
   }
   // The order the side panel starts a site's shipped mods in (the panel reads it from storage).
@@ -943,6 +950,7 @@ async function uiStatus() {
     helper: { connected: state.connected, error: state.connected ? null : state.helperError },
     userScripts: s.userScripts, settingsUrl: SETTINGS_URL, version: VERSION, chrome: CHROME, browser: BROWSER,
     recording: s.recording, sitesOn: state.sitesOn, update: state.connected ? state.update : null,
+    starter: state.connected ? state.starter : null,
     mods: state.mods.map((m) => ({
       id: m.id, name: m.name || m.id, description: m.description || '', site: m.site, file: m.file || '',
       matches: m.matches || [], excludes: m.excludes || [], registered: !!live.get(m.id)?.registered, enabled: live.get(m.id)?.enabled ?? isEnabled(m.id),
@@ -1077,6 +1085,28 @@ async function onPanelMessage(msg) {
         const mod = state.mods.find((m) => m.id === r.id);
         if (mod) await reloadIfApplies(mod, { tab: msg.tab }, { onlyIfRunning: true });
       }
+      return r;
+    }
+    // Tim's mods, the user's choice (the setup page, Settings, a site's panel): the helper copies them in
+    // (or records none) and sends the mods again, with the sites to turn on. From a site's panel (`tab`),
+    // the tab reloads if one of them runs there now.
+    case 'shipped.install': {
+      const sites = [...new Set((Array.isArray(msg.sites) ? msg.sites : []).map((x) => scopeFor(String(x))).filter(Boolean))].slice(0, 50);
+      const r = await helperRequest('shipped.install', { sites, ...(msg.others === 'none' ? { others: 'none' } : {}) }, 60000);
+      await modsApplied;
+      if (msg.tab !== undefined) {
+        const tab = await chrome.tabs.get(msg.tab).catch(() => null);
+        const url = tab ? tab.url || tab.pendingUrl || '' : '';
+        const added = new Set(r?.added || []);
+        const runs = (m) => added.has(m.id) && isEnabled(m.id) && !m.held && modAppliesTo(withOffSites(m, state.offSites[m.id]), url);
+        if (url && siteOnFor(url, state.sitesOn) && state.mods.some(runs)) await chrome.tabs.reload(tab.id).catch(() => {});
+      }
+      notifyPanels();
+      return r;
+    }
+    case 'shipped.none': {
+      const r = await helperRequest('shipped.none', {}, 10000);
+      await modsApplied;
       return r;
     }
     case 'update.check': return helperRequest('update.check', { force: true }, 60000);

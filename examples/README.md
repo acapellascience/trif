@@ -1,8 +1,12 @@
 # Examples
 
-Ready-made mods. `trif setup` adds all of them to a new workspace once, **switched off**: turn one on
-with its switch in the side panel (`--no-examples` skips them). Or copy one in yourself with
-`trif install-example <site>/<mod>`, then reload the site.
+Ready-made mods: Tim's mods. Nothing of them is on your computer until you choose, site by site: the
+setup page in your browser has a checklist (X, Google, Amazon and Instagram ticked to start), and you can
+add any site's later in Settings in the side panel, with the "Add Tim's mods for <site>" link on that
+site's panel, or with `trif setup --examples` (every site) or `trif setup --examples x.com,google.com`
+(`--no-examples`: none). Adding a site's copies its mods in, each on or off as `PREINSTALLED` in
+`helper/lib/preinstalled.js` says (switch them in the side panel), and turns TRIF on for the site. Or copy
+one in yourself with `trif install-example <site>/<mod>`, then reload the site.
 
 | Mod | What it does |
 |---|---|

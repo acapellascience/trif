@@ -712,6 +712,56 @@ test('host: shuts down after a frame too big to be real, rather than misreading 
   assert.match(fs.readFileSync(path.join(privDir(home), 'helper.log'), 'utf8'), /unreadable input from the extension/);
 });
 
+test('Tim\'s mods: none until the user chooses; shipped.install adds the sites asked for (the rest none with `others`), and the mods message says so', async () => {
+  const home = tempDir();
+  const ext = new FakeExtension({ home, env: { TRIF_EXAMPLES_DIR: path.join(REPO, 'examples', 'sites') } });
+  cleanups.push(() => ext.close());
+  ext.hello({ features: ['modsParts', 'modsSame'], version: '0.2.5' }); // (X's mods take more than one message)
+  let msg = await ext.next((m) => m.type === 'mods');
+  const S = require('../helper/lib/preinstalled');
+  assert.deepStrictEqual([msg.mods, msg.sitesOn], [[], []]);
+  assert.strictEqual(msg.starter.chosen, false);
+  assert.deepStrictEqual(msg.starter.sites.map((x) => x.site), S.starterSites());
+  assert.ok(msg.starter.sites.every((x) => x.choice === null && x.mods.length));
+  let since = ext.messages.length;
+  ext.send({ type: 'request', id: 'a', cmd: 'shipped.install', args: { sites: ['x.com', 'google.com'], others: 'none' } });
+  let res = await ext.next((m) => m.type === 'response' && m.id === 'a', { since });
+  assert.strictEqual(res.ok, true, res.error);
+  assert.deepStrictEqual(res.result.sitesOn, ['google.com', 'x.com']);
+  assert.ok(res.result.added.includes('x.com/detox-timeline'));
+  // The mods went first (the extension turns the sites on from them), then the answer.
+  msg = ext.messages.slice(since).findLast((m) => m.type === 'mods');
+  assert.ok(msg && ext.messages.indexOf(msg) < ext.messages.indexOf(res), 'mods before the response');
+  assert.deepStrictEqual(msg.sitesOn, ['google.com', 'x.com']);
+  assert.ok(msg.mods.every((m) => /^(x\.com|www\.google\.com)\//.test(m.id)), msg.mods.map((m) => m.id).join());
+  assert.strictEqual(msg.starter.chosen, true);
+  assert.deepStrictEqual(msg.starter.sites.map((x) => [x.site, x.choice]), [['google.com', 'added'], ['x.com', 'added'], ['amazon.com', 'none'], ['instagram.com', 'none'], ['timsrobot.com', 'none']]);
+  // Settings' Add, later: one more site.
+  since = ext.messages.length;
+  ext.send({ type: 'request', id: 'b', cmd: 'shipped.install', args: { sites: ['amazon.com'] } });
+  res = await ext.next((m) => m.type === 'response' && m.id === 'b', { since });
+  assert.deepStrictEqual(res.result.sitesOn, ['amazon.com']);
+  msg = await ext.next((m) => m.type === 'mods' && m.starter.sites.find((x) => x.site === 'amazon.com').choice === 'added', { since });
+  assert.ok(msg.mods.some((m) => m.id === 'amazon.com/simple-home'));
+  // A site Tim has no mods for, or no sites: refused.
+  ext.send({ type: 'request', id: 'c', cmd: 'shipped.install', args: { sites: ['example.com'] } });
+  assert.match((await ext.next((m) => m.type === 'response' && m.id === 'c')).error, /Tim has no mods for example\.com/);
+  ext.send({ type: 'request', id: 'd', cmd: 'shipped.install', args: { sites: [] } });
+  assert.match((await ext.next((m) => m.type === 'response' && m.id === 'd')).error, /no sites/);
+
+  // "Start with none": remembered, nothing on disk.
+  const home2 = tempDir();
+  const ext2 = new FakeExtension({ home: home2 });
+  cleanups.push(() => ext2.close());
+  await ext2.next((m) => m.type === 'mods');
+  ext2.send({ type: 'request', id: 'n', cmd: 'shipped.none', args: {} });
+  res = await ext2.next((m) => m.type === 'response' && m.id === 'n');
+  assert.strictEqual(res.result.starter.chosen, true);
+  await ext2.next((m) => m.type === 'mods' && m.starter.chosen, { timeout: 8000 });
+  assert.strictEqual(fs.existsSync(path.join(home2, 'sites', 'x.com')), false);
+  assert.ok(Object.values(S.starterChoices(home2)).every((c) => c === 'none'));
+});
+
 test('mods messages carry the sites preinstalled.json says to start on', async () => {
   const home = tempDir();
   writeMod(home, 'www.google.com', 'a.js', '// ==WebMod==\n// @name A\n// ==/WebMod==\n');

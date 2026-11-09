@@ -38,7 +38,7 @@ function world({ history = {} } = {}) {
     mine(id) { try { return fs.readFileSync(path.join(ws.modsDir, `${id}.js`), 'utf8'); } catch { return null; } },
     edit(id, code) { fs.writeFileSync(path.join(ws.modsDir, `${id}.js`), code); },
     setup() {
-      S.preinstallMods(home, ws.modsDir, examples, LIST, []);
+      S.preinstallMods(home, ws.modsDir, examples, LIST, [], { add: 'all' }); // (the user added Tim's mods)
       return S.updateShippedMods(home, ws.modsDir, examples, LIST);
     },
     rec(id) { return S.loadPreinstalled(home).shipped[id]; },
@@ -310,7 +310,7 @@ test('setup says what it updated and what waits; the helper and the CLI show the
   w.ship('x.com/rainbow-rave', mod(1, 'punk'));
   const env = { TRIF_EXAMPLES_DIR: w.examples };
   const args = ['setup', '--verbose', '--home', w.home, '--native-dir', path.join(w.root, 'native'), '--no-link', '--link'];
-  let r = await runCli(args, { home: w.home, env });
+  let r = await runCli([...args, '--examples', 'x.com'], { home: w.home, env }); // (the first: the user adds X's)
   assert.strictEqual(r.code, 0, r.stderr + r.stdout);
   w.ship('x.com/detox-timeline', mod(2));
   w.ship('x.com/rainbow-rave', mod(2, 'punk'));
@@ -425,7 +425,7 @@ function retireWorld(retireList = RETIRE) {
       retire = retireList;
     },
     setup() {
-      const pre = S.preinstallMods(w.home, w.ws.modsDir, w.examples, list, []);
+      const pre = S.preinstallMods(w.home, w.ws.modsDir, w.examples, list, [], { add: 'all' });
       const up = S.updateShippedMods(w.home, w.ws.modsDir, w.examples, list);
       return { pre, ...up, ...S.retireShippedMods(w.ws, w.examples, retire) };
     },

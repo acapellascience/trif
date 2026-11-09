@@ -556,6 +556,32 @@ export function normalizeModOrder(value) {
   return out;
 }
 
+/**
+ * Tim's mods, site by site, as the helper sends them (helper/lib/preinstalled.js starterOffer), cleaned up:
+ * {chosen, sites: [{site, name, note, choice: 'added'|'none'|null, suggested, mods: [{id, name, description, on}]}]},
+ * or null (an older helper, or nothing usable).
+ */
+export function normalizeStarter(value) {
+  if (!value || typeof value !== 'object' || !Array.isArray(value.sites)) return null;
+  const str = (x, max = 200) => (typeof x === 'string' ? x.slice(0, max) : '');
+  const sites = [];
+  for (const s of value.sites.slice(0, 50)) {
+    const site = s && typeof s === 'object' ? scopeFor(str(s.site)) : '';
+    if (!site || sites.some((x) => x.site === site)) continue;
+    const mods = (Array.isArray(s.mods) ? s.mods : []).slice(0, 50).filter((m) => m && typeof m === 'object' && str(m.id))
+      .map((m) => ({ id: str(m.id), name: str(m.name) || str(m.id), description: str(m.description), on: !!m.on }));
+    if (!mods.length) continue;
+    sites.push({ site, name: str(s.name, 60) || site, note: str(s.note, 80), choice: s.choice === 'added' || s.choice === 'none' ? s.choice : null, suggested: !!s.suggested, mods });
+  }
+  return { chosen: !!value.chosen || sites.some((s) => s.choice), sites };
+}
+
+/** The sites' names as words: "X", "X and Google", "X, Google and Amazon". */
+export function siteNames(names) {
+  const list = (names || []).filter(Boolean);
+  return list.length < 2 ? list.join('') : `${list.slice(0, -1).join(', ')} and ${list.at(-1)}`;
+}
+
 /** `mods` in the saved order `ids` (mod ids, or nothing): the listed ones first, then the rest as they came. */
 export function orderMods(mods, ids) {
   const list = Array.isArray(mods) ? mods : [];

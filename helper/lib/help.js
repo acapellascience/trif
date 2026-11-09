@@ -3,20 +3,32 @@
 // what each command does, its options, and short copy-pasteable examples.
 
 const P = require('./paths');
+const S = require('./preinstalled');
+
+// The sites Tim has mods for, from PREINSTALLED ("Google, X, … and timsrobot.com"), and those TRIF doesn't
+// turn on for when they're added.
+const words = (list) => (list.length < 2 ? list.join('') : `${list.slice(0, -1).join(', ')} and ${list.at(-1)}`);
+const STARTER_SITES = words(S.starterSites().map(S.siteName));
+const STARTER_OFF = S.starterSites().filter((s) => !S.SITES_ON.includes(s));
 
 const COMMANDS = {
   setup: {
-    usage: 'trif setup [--browser chrome|chromium|brave|edge|arc|firefox|safari|all] [--home DIR] [--copy|--link] [--no-link] [--no-examples] [--verbose] [--no-wait]',
+    usage: 'trif setup [--browser chrome|chromium|brave|edge|arc|firefox|safari|all] [--home DIR] [--copy|--link] [--no-link] [--examples [SITES]|--no-examples] [--verbose] [--no-wait]',
     summary: 'install the workspace, native messaging host and CLI link (safe to re-run)',
     details: `First time: npx timsrobot setup   (needs Node 18 or newer).
 Creates the workspace (~/.trif, unless --home or TRIF_HOME says otherwise; a ~/.webmods from before 0.2.0,
 when TRIF was called WebMods, is moved there first and left as a link to it) with sites/ and bin/, and the
 private folder (settings, logs, screenshots; ~/Library/Application Support/TRIF on a Mac, moved out of the
 workspace if an older TRIF kept them there), installs the TRIF files the wrappers run,
-refreshes AGENTS.md and CLAUDE.md there from those files, adds the mods TRIF ships (Google, X, Amazon,
-Instagram; some on, some off) the first time, and each new one a later version brings, switched off
-(each once: never again after you delete one, never over your own file; --no-examples skips them),
-updates the ones you haven't changed (a changed one is offered the new version), writes bin/trif-host
+refreshes AGENTS.md and CLAUDE.md there from those files. Tim's mods (the mods TRIF ships, for
+${STARTER_SITES}; some on, some off) are added only for the sites you choose: on the
+setup page in your browser (a checklist, site by site, or "Start with none"), later in Settings in the
+panel or with the "Add Tim's mods" link on a site's panel, or here: --examples adds every site's,
+--examples x.com,google.com those sites', --no-examples none. Adding a site's turns TRIF on for it${STARTER_OFF.length ? ` (not
+${words(STARTER_OFF)})` : ''}. A site you added gets each new mod a later version brings for it, switched off (each
+once: never again after you delete one, never over your own file), and setup updates the ones you
+haven't changed (a changed one is offered the new version); a site you didn't add gets nothing. A
+workspace from before 0.2.5 counts as having added every site it has mods for. It writes bin/trif-host
 and bin/trif wrappers with an absolute node path (and the same as bin/webmods-host and bin/webmods, their
 names before 0.2.0), writes the native messaging host manifest for each
 browser (default: every browser whose profile folder exists) allowing every TRIF extension ID (plus
@@ -35,7 +47,7 @@ agent for the side panel, and writes .claude/settings.json (what Claude Code may
 Other options: --no-link skips the /usr/local/bin link; --native-dir DIR writes the manifest only to DIR;
 --bin-dir DIR links the CLI there instead of /usr/local/bin.
 Run it again after upgrading TRIF, moving the repo or upgrading Node.`,
-    examples: ['npx timsrobot setup', 'trif setup', 'trif setup --browser brave', 'trif setup --browser all', 'node helper/cli.js setup --copy'],
+    examples: ['npx timsrobot setup', 'trif setup', 'trif setup --browser brave', 'trif setup --browser all', 'trif setup --examples x.com,google.com', 'node helper/cli.js setup --copy'],
   },
   status: {
     usage: 'trif status [TAB]',

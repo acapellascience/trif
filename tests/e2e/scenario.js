@@ -15,7 +15,14 @@ const { makeFakeKeychain } = require('../fake-keychain');
 
 const REAL_HOME = os.userInfo().homedir;
 const SHIPPED_IDS = require('../../helper/lib/preinstalled').PREINSTALLED.map((p) => p.id || p);
-const { RETIRED } = require('../../helper/lib/preinstalled');
+const { RETIRED, siteOf, starterSites, SITES_ON } = require('../../helper/lib/preinstalled');
+// Tim's mods for a site (a scope: x.com, google.com).
+const shippedFor = (site) => SHIPPED_IDS.filter((id) => siteOf(id) === site);
+// The fresh scenario picks these on the setup page, adds this one from Settings and this one with the link on
+// its own panel; an upgrade (every site it had counts as added) has the link on the site that's new since.
+const FRESH_PICKS = ['x.com', 'google.com'];
+const SETTINGS_ADD = 'amazon.com';
+const LINK_SITE = { fresh: { site: 'instagram.com', host: 'www.instagram.com', name: 'Instagram' }, upgrade: { site: 'timsrobot.com', host: 'timsrobot.com', name: 'timsrobot.com' } };
 
 // Files of the real setup the suite must never change: checked before and after (read only).
 const REAL_FILES = [
@@ -109,7 +116,7 @@ class Scenario {
       const q = (s) => document.querySelector(s);
       const step = (id) => { const e = q('#step-' + id); return e.hidden ? 'hidden' : ['done', 'now', 'later'].find((c) => e.classList.contains(c)) || '?'; };
       return { docTitle: document.title, title: q('#title').textContent, sub: q('#sub').textContent,
-        steps: ['helper', 'browser', 'scripts', 'login', 'try'].map(step),
+        steps: ['helper', 'browser', 'scripts', 'starter', 'login', 'try'].map(step),
         states: [...document.querySelectorAll('.step.done .state')].map((e) => e.textContent),
         now: q('.step.now')?.innerText.trim() || '',
         buttons: [...document.querySelectorAll('.step.now .body button')].map((b) => b.textContent) };
@@ -131,14 +138,14 @@ class Scenario {
   async setupDoneCheck() {
     const st = await this.setupState();
     let keyed = false;
-    if (st.steps[3] !== 'done') {
+    if (st.steps[4] !== 'done') {
       const set = run(path.join(this.trif, 'bin', 'trif'), ['agent', 'key', '--agent', 'claude', '--set-key'], { env: this.env(), cwd: this.home, input: 'sk-ant-e2e-not-a-real-key-0000\n' });
       if (set.status !== 0) throw new Error(`trif agent key --set-key: ${set.stderr || set.stdout}`);
       keyed = true;
     }
     try {
       // (The helper keeps an agent's login state for 30 s; the page asks every 5.)
-      const x = await this.waitSetup('all ticked', (s) => s.steps.join() === 'done,done,done,done,now' && s.title === 'TRIF is ready', 60000);
+      const x = await this.waitSetup('all ticked', (s) => s.steps.join() === 'done,done,done,done,done,now' && s.title === 'TRIF is ready', 60000);
       // Try it: a button for each site where a shipped mod is on and TRIF is on for the site (x.com's Detox Timeline).
       if (x.sub !== 'Open any website, click the TRIF icon, and ask for a change.' || !x.buttons.includes('Open x.com')
         || !x.buttons.every((b) => /^Open [\w-]+(\.[\w-]+)+$/.test(b))) throw new Error(JSON.stringify(x));
@@ -303,6 +310,172 @@ class Scenario {
     return `saved ("${saved.status.slice(0, 60)}…"), replace and cancel, removed; agent and provider (${provider}) put back`;
   }
 
+  // ---- Tim's mods, site by site (helper/lib/preinstalled.js)
+
+  /** The sites preinstalled.json says were added. */
+  addedSites() {
+    const pre = I.readJson(path.join(this.trif, 'preinstalled.json')) || {};
+    const offered = new Set((pre.offered || []).map(siteOf));
+    return starterSites().filter((s) => (pre.starter || {})[s] === 'added' || offered.has(s));
+  }
+
+  /** What the setup page's "Tim's mods" step shows: a row per site, its box, its words. */
+  async starterStepState() {
+    return this.ext(`async () => {
+      const step = document.querySelector('#step-starter');
+      return { state: step.querySelector('.state').textContent, now: step.classList.contains('now'), done: step.classList.contains('done'),
+        text: step.querySelector('.body').innerText,
+        rows: [...step.querySelectorAll('li.pick')].map((li) => ({ site: li.dataset.site, ticked: li.querySelector('input').checked, text: li.innerText })),
+        source: step.querySelector('#starter-source')?.href || '',
+        buttons: [...step.querySelectorAll('.body button')].map((b) => [b.id, b.textContent, b.disabled]) };
+    }`);
+  }
+
+  /**
+   * The setup page, after user scripts: "Tim's mods". Fresh: nothing of Tim's on disk; a row per site,
+   * X, Google, Amazon and Instagram ticked, timsrobot.com not; the user leaves only X and Google ticked
+   * and adds them: their mods are there and TRIF is on for them, nothing for the rest. An upgrade: already
+   * ticked, every site it had added.
+   */
+  async starterSetupCheck() {
+    const r = this.r;
+    await r.check('setup page: Tim\'s mods, site by site (X and Google picked; nothing else on disk or on)', async () => {
+      if (this.o.kind === 'upgrade') {
+        const x = await this.waitSetup('Tim\'s mods ticked', (st) => st.steps[3] === 'done');
+        const st = await this.starterStepState();
+        const added = this.addedSites();
+        if (added.join() !== SITES_ON.join()) throw new Error(`added: ${added.join(', ')}`);
+        if (st.state !== 'Google, X, Amazon and Instagram') throw new Error(`the step says: ${st.state}`);
+        return `ticked already: ${st.state} (${x.steps.join(',')})`;
+      }
+      await this.waitSetup('Tim\'s mods open', (st) => st.steps[3] === 'now');
+      let st = await waitFor('the checklist', async () => { const v = await this.starterStepState(); return v.rows.length ? v : null; }, { timeoutMs: 10000 });
+      const sites = starterSites();
+      if (st.rows.map((x) => x.site).join() !== sites.join()) throw new Error(`rows: ${st.rows.map((x) => x.site).join(', ')}`);
+      const ticked = st.rows.filter((x) => x.ticked).map((x) => x.site);
+      if (ticked.join() !== SITES_ON.join()) throw new Error(`ticked to start: ${ticked.join(', ')}`);
+      for (const want of [/None of them is on your computer until you choose/, /plain JavaScript you can read first/, /add any site’s mods later, in Settings in the TRIF (side panel|sidebar)/]) {
+        if (!want.test(st.text)) throw new Error(`the step doesn't say ${want}: ${st.text}`);
+      }
+      if (!/github\.com\/acapellascience\/trif\/.*examples\/sites/.test(st.source)) throw new Error(`see the code: ${st.source}`);
+      if (st.buttons.map((b) => b[1]).join() !== 'Add these,Start with none') throw new Error(`buttons: ${JSON.stringify(st.buttons)}`);
+      const x = st.rows.find((row) => row.site === 'x.com');
+      if (!/^X\b/.test(x.text) || !/Detox Timeline \(a calmer scroll\)/.test(x.text)) throw new Error(`X's row: ${x.text}`);
+      if (fs.existsSync(path.join(this.trif, 'sites', 'x.com')) || fs.existsSync(path.join(this.trif, 'sites', 'www.google.com'))) throw new Error('Tim\'s mods on disk before the choice');
+      await this.ext(`async () => document.querySelector('#starter-add').scrollIntoView({ block: 'end' })`);
+      await sleep(200);
+      await this.shot(this.control, 'starter-setup-before');
+      for (const row of st.rows) {
+        if (row.ticked !== FRESH_PICKS.includes(row.site)) await this.d.click(this.control, `#step-starter li[data-site="${row.site}"] input`);
+      }
+      st = await this.starterStepState();
+      const now = st.rows.filter((row) => row.ticked).map((row) => row.site);
+      if (now.sort().join() !== [...FRESH_PICKS].sort().join()) throw new Error(`ticked: ${now.join(', ')}`);
+      await this.d.click(this.control, '#starter-add');
+      const done = await this.waitSetup('Tim\'s mods ticked', (v) => v.steps[3] === 'done');
+      st = await this.starterStepState();
+      if (st.state !== 'Google and X') throw new Error(`the ticked step says: ${st.state}`);
+      await this.shot(this.control, 'starter-setup-after');
+      // On disk: theirs, and the choice per site; TRIF on for them only.
+      const pre = I.readJson(path.join(this.trif, 'preinstalled.json')) || {};
+      const choice = Object.fromEntries(sites.map((s) => [s, FRESH_PICKS.includes(s) ? 'added' : 'none']));
+      if (JSON.stringify(pre.starter) !== JSON.stringify({ ...pre.starter, ...choice }) || Object.keys(pre.starter).length !== sites.length) throw new Error(`preinstalled.json starter: ${JSON.stringify(pre.starter)}`);
+      const folders = fs.readdirSync(path.join(this.trif, 'sites')).filter((f) => !['127.0.0.1', 'localhost'].includes(f)).sort();
+      if (folders.join() !== 'www.google.com,x.com') throw new Error(`sites/: ${folders.join(', ')}`);
+      const status = await waitFor('TRIF on for X and Google', async () => {
+        const e = (await this.cli(['status'], { json: true })).json?.extension;
+        return e && FRESH_PICKS.every((s) => e.sitesOn.includes(s)) ? e : null;
+      }, { timeoutMs: 15000 });
+      const stray = status.sitesOn.filter((s) => sites.includes(s) && !FRESH_PICKS.includes(s));
+      if (stray.length) throw new Error(`TRIF on for ${stray.join(', ')} too`);
+      return `"${st.state}" (${done.steps.join(',')}); sites/: ${folders.join(', ')}; on for ${status.sitesOn.join(', ')}`;
+    });
+  }
+
+  /** The panel's Settings, "Tim's mods": each site added or with Add. Fresh: Add for Amazon adds its mods and turns TRIF on there. */
+  async starterSettingsCheck() {
+    const r = this.r;
+    await r.check(`Settings: Tim's mods by site${this.o.kind === 'fresh' ? `, and Add for ${SETTINGS_ADD}` : ''}`, async () => {
+      const rows = () => this.panel(`async () => {
+        const e = document.querySelector('#starter');
+        return { shown: !!e && e.getClientRects().length > 0, text: e?.innerText || '',
+          rows: [...document.querySelectorAll('#starter-list li')].map((li) => ({ site: li.dataset.site, added: !!li.querySelector('.starter-state'), button: li.querySelector('button')?.textContent || null, text: li.innerText })) };
+      }`);
+      await this.d.click(this.panelCtx, '#settings-btn');
+      let last = null;
+      const until = (what, ok) => waitFor(what, async () => { last = await rows(); return ok(last) ? last : null; }, { timeoutMs: 15000 })
+        .catch((e) => { throw new Error(`${e.message}: ${JSON.stringify(last)}`); });
+      try {
+        let st = await until('Tim\'s mods in Settings', (x) => x.shown && x.rows.length === starterSites().length);
+        const added = this.addedSites();
+        const wrong = st.rows.filter((x) => x.added !== added.includes(x.site) || (!x.added && x.button !== 'Add'));
+        if (wrong.length) throw new Error(`rows: ${JSON.stringify(st.rows)} (added: ${added.join(', ')})`);
+        if (!/^Tim’s mods/.test(st.text) || !/see the code/.test(st.text)) throw new Error(`the section says: ${st.text}`);
+        await this.panel(`async () => document.querySelector('#starter').scrollIntoView({ block: 'center' })`);
+        await sleep(300);
+        await this.shot(this.panelCtx, 'starter-settings');
+        if (this.o.kind !== 'fresh') return st.rows.map((x) => `${x.site} ${x.added ? 'added' : 'Add'}`).join(', ');
+        await this.d.click(this.panelCtx, `#starter-list li[data-site="${SETTINGS_ADD}"] button`);
+        st = await until(`${SETTINGS_ADD} added`, (x) => x.rows.find((y) => y.site === SETTINGS_ADD)?.added);
+        const want = shippedFor(SETTINGS_ADD);
+        const missing = want.filter((id) => !fs.existsSync(path.join(this.trif, 'sites', `${id}.js`)));
+        if (missing.length) throw new Error(`not on disk: ${missing.join(', ')}`);
+        const e = await waitFor(`TRIF on for ${SETTINGS_ADD}`, async () => {
+          const x = (await this.cli(['status'], { json: true })).json?.extension;
+          return x && x.sitesOn.includes(SETTINGS_ADD) && want.every((id) => x.mods.some((m) => m.id === id)) ? x : null;
+        }, { timeoutMs: 15000 });
+        await sleep(300);
+        await this.shot(this.panelCtx, 'starter-settings-added');
+        return `${st.rows.map((x) => `${x.site} ${x.added ? 'added' : 'Add'}`).join(', ')}; ${want.length} mods for ${SETTINGS_ADD}, TRIF on for ${e.sitesOn.join(', ')}`;
+      } finally {
+        await this.d.click(this.panelCtx, '#settings-btn').catch(() => {});
+        await waitFor('settings to close', async () => this.panel(`async () => document.querySelector('#settings').hidden`), { timeoutMs: 5000 }).catch(() => {});
+      }
+    });
+  }
+
+  /**
+   * A site Tim has mods for that the user hasn't added: its panel has "Add Tim's mods for <site>" (in the
+   * gate, TRIF being off there). The link adds them; for a site in SITES_ON TRIF comes on there too.
+   */
+  async starterLinkCheck(win) {
+    const r = this.r;
+    const L = LINK_SITE[this.o.kind];
+    await r.check(`a site's panel: "Add Tim's mods for ${L.name}" adds them`, async () => {
+      const url = `https://${L.host}:${this.o.servers.tlsPort}/`;
+      const tab = await this.ext(`async (url, windowId) => (await chrome.tabs.create({ windowId, url, active: true })).id`, [url, win.windowId]);
+      const link = () => this.panel(`async () => {
+        const p = document.querySelector('#site-starter');
+        return { site: document.querySelector('#site').textContent, gate: !document.querySelector('#gate').hidden, shown: !!p && p.getClientRects().length > 0,
+          inGate: !!p?.closest('#gate'), text: document.querySelector('#site-starter-link').textContent, err: document.querySelector('#site-starter-err').textContent,
+          mods: [...document.querySelectorAll('#mod-list > li')].map((li) => li.dataset.mod) };
+      }`);
+      let last = null;
+      const until = (what, ok) => waitFor(what, async () => { last = await link(); return ok(last) ? last : null; }, { timeoutMs: 15000 })
+        .catch((e) => { throw new Error(`${e.message}: ${JSON.stringify(last)}`); });
+      try {
+        const st = await until('the link on the site\'s panel', (x) => x.site === L.host.replace(/^www\./, '') && x.shown); // (the panel names it without www.)
+        if (st.text !== `Add Tim’s mods for ${L.name}` || !st.gate || !st.inGate) throw new Error(JSON.stringify(st));
+        await sleep(300);
+        await this.shot(this.panelCtx, 'starter-site-link');
+        await this.d.click(this.panelCtx, '#site-starter-link');
+        const want = shippedFor(L.site);
+        const on = SITES_ON.includes(L.site);
+        const after = await until('the mods added', (x) => !x.shown && !x.err && want.every((id) => fs.existsSync(path.join(this.trif, 'sites', `${id}.js`)))
+          && (on ? !x.gate && want.every((id) => x.mods.includes(id)) : x.gate));
+        const e = (await this.cli(['status'], { json: true })).json.extension;
+        if (e.sitesOn.includes(L.site) !== on) throw new Error(`TRIF ${on ? 'not ' : ''}on for ${L.site}: ${e.sitesOn}`);
+        if (!this.addedSites().includes(L.site)) throw new Error(`${L.site} not recorded as added`);
+        await sleep(300);
+        await this.shot(this.panelCtx, 'starter-site-added');
+        return `${want.length} mods for ${L.site}${on ? `, TRIF on there, listed: ${after.mods.length}` : ', TRIF still off there (not in SITES_ON)'}`;
+      } finally {
+        await this.ext(`async (id) => { await chrome.tabs.remove(id); }`, [tab]).catch(() => {});
+        await this.ext(`async (id) => { await chrome.tabs.update(id, { active: true }); }`, [win.tabId]).catch(() => {});
+      }
+    });
+  }
+
   // ---- the scenario
 
   async run() {
@@ -441,6 +614,8 @@ class Scenario {
       this.d = new ChromeDriver({
         userDataDir: path.join(this.home, 'Library/Application Support/Google/Chrome'), home: env.HOME, env,
         extensionDir: path.join(this.trif, 'app', 'extension'), headless: o.headless,
+        // (The sites whose panel offers "Add Tim's mods": never the real ones. Firefox resolves every host here.)
+        hosts: [...new Set(Object.values(LINK_SITE).map((x) => x.host))],
       });
     }
     await this.d.start();
@@ -471,7 +646,8 @@ class Scenario {
     // The setup page: our handle on the extension's chrome.* APIs, and the user scripts permission.
     this.control = await d.openTab(`${origin}/onboarding.html`);
     await r.check('setup page: a checklist, the helper and the browser ticked, user scripts next', async () => {
-      const x = await this.waitSetup('step 3 open', (st) => st.steps.join() === 'done,done,now,later,later');
+      // (An upgrade has Tim's mods already: that step is ticked.)
+      const x = await this.waitSetup('step 3 open', (st) => st.steps.join() === `done,done,now,${this.o.kind === 'upgrade' ? 'done' : 'later'},later,later`);
       if (x.docTitle !== 'TRIF setup' || x.title !== 'Set up TRIF' || x.states.join() !== 'connected,done') throw new Error(JSON.stringify(x));
       const want = d.name === 'Firefox' ? /Firefox asks before an add-on runs them\.[\s\S]*Allow user scripts/ : /One switch:[\s\S]*flip this[\s\S]*Open TRIF’s Chrome settings/;
       if (!want.test(x.now)) throw new Error(`step 3 says: ${x.now}`);
@@ -483,13 +659,14 @@ class Scenario {
       await waitFor('status.userScripts', async () => (await this.cli(['status'], { json: true })).json?.extension?.userScripts, { timeoutMs: 20000 });
       return how;
     });
+    if (allowed) await this.starterSetupCheck();
     if (allowed) {
       await r.check('setup page: user scripts ticked by themselves; the agent\'s login next', async () => {
-        const x = await this.waitSetup('step 4 open', (st) => (st.steps.join() === 'done,done,done,now,later' && /\n\n/.test(st.now) && !/Checking your coding agent/.test(st.now))
-          || st.steps.join() === 'done,done,done,done,now');
-        if (x.steps[3] === 'now' && !/isn’t logged in on this computer yet|couldn’t tell whether .* is logged in|needs a coding agent|isn’t available/.test(x.now)) throw new Error(`step 4 says: ${x.now}`);
+        const x = await this.waitSetup('step 5 open', (st) => (st.steps.join() === 'done,done,done,done,now,later' && /\n\n/.test(st.now) && !/Checking your coding agent/.test(st.now))
+          || st.steps.join() === 'done,done,done,done,done,now');
+        if (x.steps[4] === 'now' && !/isn’t logged in on this computer yet|couldn’t tell whether .* is logged in|needs a coding agent|isn’t available/.test(x.now)) throw new Error(`step 5 says: ${x.now}`);
         await this.shot(this.control, 'setup-page-login');
-        return x.steps[3] === 'now' ? x.now.split('\n').slice(0, 2).join(' / ') : 'the agent is logged in already';
+        return x.steps[4] === 'now' ? x.now.split('\n').slice(0, 2).join(' / ') : 'the agent is logged in already';
       });
     }
 
@@ -517,16 +694,21 @@ class Scenario {
       return warns.length ? { status: 'warn', detail: `warnings: ${warns.map((c) => c.title).join('; ')}` } : `${doc.json.checks.length} checks ok`;
     });
 
-    await r.check('shipped mods present and recognised (trif mods, trif status)', async () => {
+    await r.check('shipped mods present and recognised (trif mods, trif status): the sites added, and only those', async () => {
       const mods = (await this.cli(['mods'], { json: true })).json;
       const list = Array.isArray(mods) ? mods : (mods && (mods.mods || [])) || [];
       const shipped = list.filter((m) => m.source === 'webmods' || m.source === 'trif');
-      // Every mod TRIF ships is there; each is marked as shipped (@source), except a copy the user edited
-      // before 0.1.2, when the shipped mods had no @source line yet.
+      // Every mod TRIF ships for the sites added is there (fresh: the ones picked on the setup page; an
+      // upgrade: every site it had); each is marked as shipped (@source), except a copy the user edited
+      // before 0.1.2, when the shipped mods had no @source line yet. None for the other sites.
+      const added = this.addedSites();
+      const want = SHIPPED_IDS.filter((id) => added.includes(siteOf(id)));
       const ids = new Set(list.map((m) => m.id));
-      const missing = SHIPPED_IDS.filter((id) => !ids.has(id));
+      const missing = want.filter((id) => !ids.has(id));
       if (missing.length) throw new Error(`missing: ${missing.join(', ')}`);
-      const unmarked = SHIPPED_IDS.filter((id) => !shipped.some((m) => m.id === id) && !(this.o.kind === 'upgrade' && id === 'x.com/rainbow-rave'));
+      const extra = SHIPPED_IDS.filter((id) => !added.includes(siteOf(id)) && ids.has(id));
+      if (extra.length) throw new Error(`there, for sites not added: ${extra.join(', ')}`);
+      const unmarked = want.filter((id) => !shipped.some((m) => m.id === id) && !(this.o.kind === 'upgrade' && id === 'x.com/rainbow-rave'));
       if (unmarked.length) throw new Error(`not recognised as shipped: ${unmarked.join(', ')}`);
       const st = (await this.cli(['status'], { json: true })).json.extension;
       const byId = new Map(st.mods.map((m) => [m.id, m]));
@@ -534,7 +716,9 @@ class Scenario {
       if (!px || px.enabled === false) throw new Error(`x.com/detox-timeline not on: ${JSON.stringify(px)}`);
       const pf = byId.get('x.com/rainbow-rave');
       if (!pf || pf.enabled !== false) throw new Error(`x.com/rainbow-rave should start off: ${JSON.stringify(pf)}`);
-      for (const s of ['google.com', 'x.com', 'amazon.com', 'instagram.com']) if (!(st.sitesOn || []).includes(s)) throw new Error(`TRIF isn't on for ${s}: ${st.sitesOn}`);
+      for (const s of SITES_ON) {
+        if (added.includes(s) !== (st.sitesOn || []).includes(s)) throw new Error(`TRIF is ${added.includes(s) ? 'not ' : ''}on for ${s}: ${st.sitesOn}`);
+      }
       if (this.o.kind === 'upgrade') {
         const u = list.find((m) => m.id === 'x.com/rainbow-rave');
         if (!u || !u.update) throw new Error(`trif mods shows no update for x.com/rainbow-rave: ${JSON.stringify(u)}`);
@@ -544,7 +728,7 @@ class Scenario {
         const missed = gone.filter((x) => absorbed[x.id] !== true || byId.get(x.into)?.enabled === false);
         if (missed.length) throw new Error(`switches not carried over for ${missed.map((x) => x.id).join(', ')}: absorbed ${JSON.stringify(absorbed)}`);
       }
-      return `${shipped.length} shipped (${shipped.filter((m) => byId.get(m.id)?.enabled !== false).length} on), sites on: ${st.sitesOn.join(', ')}`;
+      return `${shipped.length} shipped (${shipped.filter((m) => byId.get(m.id)?.enabled !== false).length} on) for ${added.join(', ')}; sites on: ${st.sitesOn.join(', ')}`;
     });
 
     if (!allowed) { r.note('user scripts are off, so the page checks were skipped'); return; }
@@ -719,6 +903,8 @@ class Scenario {
       await this.shot(this.panelCtx, 'panel-x');
       return p.mods.map((m) => `${m.id.split('/')[1]} ${m.on ? 'on' : 'off'}`).join(', ');
     });
+    await this.starterSettingsCheck();
+    await this.starterLinkCheck(win);
     await this.narrowShots();
     await this.colourChecks().catch((e) => r.check('colour checks', () => { throw e; }));
     if (!this.o.oss) await r.check('open model key: saved, then Replace (and Cancel) and Remove', () => this.openModelKey());

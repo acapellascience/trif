@@ -23,6 +23,8 @@ const ui = {
   using: $('#using'), modelCustomRow: $('#model-custom-row'), modelCustom: $('#model-custom'), modelNote: $('#model-note'),
   instructions: $('#instructions'), instructionsNote: $('#instructions-note'),
   autoUpdate: $('#auto-update'), updateNote: $('#update-note'), update: $('#update'),
+  starter: $('#starter'), starterList: $('#starter-list'), starterErr: $('#starter-err'),
+  siteStarter: $('#site-starter'), siteStarterLink: $('#site-starter-link'), siteStarterErr: $('#site-starter-err'),
   notice: $('#notice'), paused: $('#paused'), mods: $('#mods'), modsCount: $('#mods-count'), modList: $('#mod-list'), modsLive: $('#mods-live'),
   chat: $('#chat'), empty: $('#empty'), messages: $('#messages'), working: $('#working'),
 
@@ -370,6 +372,8 @@ function render() {
   renderNotice({ helperOk, agentInfo, anyAgent });
   renderUpdate();
   renderMods();
+  renderStarter();
+  renderSiteStarter();
   renderMessages();
 
   ui.empty.hidden = !site || chat.messages.length > 0;
@@ -626,6 +630,80 @@ function renderMods() {
     });
     view.modsOpenFor = site;
   }
+}
+
+// ---- Tim's mods, site by site (helper/lib/preinstalled.js) -----------------------------------------
+// Settings lists each site Tim has mods for, added or with an Add button; a site's own panel has a small
+// "Add Tim's mods for <site>" link while that site's aren't added. Both go to the helper (shipped.install),
+// which only the user can ask for: never an agent run. Nothing removes them in bulk: the user deletes mods
+// one by one.
+
+let starterBusy = null; // the site being added
+let starterError = null; // {site, message}
+
+function renderStarter() {
+  const st = view.status?.helper?.connected ? view.status.starter : null;
+  ui.starter.hidden = !st?.sites?.length;
+  if (ui.starter.hidden) return;
+  const key = JSON.stringify([st.sites, starterBusy, starterError]);
+  if (ui.starterList.dataset.key === key) return;
+  ui.starterList.dataset.key = key;
+  ui.starterList.replaceChildren(...st.sites.map((x) => {
+    const li = el('li');
+    li.dataset.site = x.site;
+    const name = el('span', 'starter-site', x.name);
+    const mods = el('span', 'starter-mods', x.mods.map((m) => m.name).join(', '));
+    if (x.choice === 'added') li.append(name, el('span', 'starter-state', 'Added'), mods);
+    else {
+      const add = button(starterBusy === x.site ? 'Adding…' : 'Add', null, () => addStarter(x.site));
+      add.disabled = !!starterBusy;
+      add.setAttribute('aria-label', `Add Tim’s mods for ${x.name}`);
+      li.append(name, add, mods);
+    }
+    return li;
+  }));
+  const err = starterError && !starterError.fromSite ? starterError.message : '';
+  ui.starterErr.textContent = err;
+  ui.starterErr.hidden = !err;
+}
+
+/** The site this panel is on, when Tim has mods for it that the user hasn't added. */
+function siteStarterOffer() {
+  const st = view.status?.helper?.connected ? view.status.starter : null;
+  const scope = siteScope();
+  return (scope && st?.sites?.find((x) => x.site === scope && x.choice !== 'added')) || null;
+}
+
+function renderSiteStarter() {
+  const x = siteStarterOffer();
+  const n = ui.siteStarter;
+  n.hidden = !x;
+  if (!x) return;
+  // In the gate under its button while TRIF is off for the site; under the mods list while it's on.
+  const home = ui.gate.hidden ? ui.chat : null;
+  if (home && n.nextElementSibling !== home) home.before(n);
+  else if (!home && n.previousElementSibling !== ui.gateErr) ui.gateErr.after(n);
+  ui.siteStarterLink.textContent = starterBusy === x.site ? `Adding Tim’s mods for ${x.name}…` : `Add Tim’s mods for ${x.name}`;
+  ui.siteStarterLink.title = x.mods.map((m) => m.name).join(', ');
+  ui.siteStarterLink.setAttribute('aria-disabled', String(!!starterBusy));
+  const err = starterError?.fromSite && starterError.site === x.site ? starterError.message : '';
+  ui.siteStarterErr.textContent = err;
+  ui.siteStarterErr.hidden = !err;
+}
+
+async function addStarter(site, { fromSite = false } = {}) {
+  if (starterBusy) return;
+  starterBusy = site;
+  starterError = null;
+  render();
+  try {
+    await request({ type: 'shipped.install', sites: [site], tab: view.tab?.id });
+  } catch (e) {
+    starterError = { site, fromSite, message: `Couldn’t add them: ${e?.message ?? e}` };
+  }
+  starterBusy = null;
+  await refreshStatus();
+  render();
 }
 
 // TRIF is off on a site until the user turns it on here (see "sites TRIF is on for" in lib.js):
@@ -1295,6 +1373,7 @@ ui.input.addEventListener('keydown', (e) => {
 ui.stop.addEventListener('click', stop);
 ui.newChat.addEventListener('click', newChat);
 ui.gateBtn.addEventListener('click', () => setSiteOn(true));
+ui.siteStarterLink.addEventListener('click', (e) => { e.preventDefault(); const x = siteStarterOffer(); if (x) addStarter(x.site, { fromSite: true }); });
 ui.siteSwitch.addEventListener('click', () => setSiteOn(!siteIsOn()));
 ui.barRobot.addEventListener('click', () => setSiteOn(!siteIsOn())); // off: the Fix button; on: the power button
 for (const chip of document.querySelectorAll('.chip')) {

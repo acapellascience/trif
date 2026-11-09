@@ -1,10 +1,10 @@
-// The setup page: a checklist that ticks itself off (the helper, TRIF in this browser, user scripts, the
-// coding agent's login, then trying it), and the user's mods below (each with an on/off switch, shared
+// The setup page: a checklist that ticks itself off (the helper, TRIF in this browser, user scripts, which
+// of Tim's mods to add, site by site, the coding agent's login, then trying it), and the user's mods below (each with an on/off switch, shared
 // with the side panel). Opens by itself when TRIF is installed. Polls the service worker for status
 // (which also re-checks the user scripts switch); the agent list and the login go over a `panel` port,
 // as in the side panel (login.js). Switches follow chrome.storage.local `disabled` live.
 
-import { modSites, offOnSite, normalizeOffSites, normalizeSettings, scopeFor, FIREFOX, SAFARI, BROWSER, PANEL, SETUP_COMMAND } from './lib.js';
+import { modSites, offOnSite, normalizeOffSites, normalizeSettings, scopeFor, siteNames, FIREFOX, SAFARI, BROWSER, PANEL, SETUP_COMMAND } from './lib.js';
 import { modSwitch, syncSwitches, shownEnabled, switchError, enabledIn, onSwitchChange } from './modswitch.js';
 import { createLogin } from './login.js';
 import { setMarkdown } from './markdown.js';
@@ -158,10 +158,13 @@ function renderSteps() {
   scripts.hidden = SAFARI;
   if (!SAFARI) steps.push({ el: scripts, done: !!s.userScripts, state: 'on' });
 
-  // 4. The coding agent, logged in.
+  // 4. Tim's mods: none until the user picks the sites.
+  steps.push(starterStep(s, connected));
+
+  // 5. The coding agent, logged in.
   steps.push(loginStep(connected));
 
-  // 5. Try it: never ticked; once the rest are, it's what's left.
+  // 6. Try it: never ticked; once the rest are, it's what's left.
   steps.push(tryStep(s));
 
   const now = steps.findIndex((x) => !x.done);
@@ -233,6 +236,76 @@ function loginStep(connected) {
     row.childElementCount ? row : null, chooser(), wait];
   });
   return { el: step, done: false };
+}
+
+// Tim's mods, site by site (helper/lib/preinstalled.js): nothing of his is on disk until the user picks the
+// sites. "Add these" has the helper copy the ticked sites' mods in (and turn TRIF on for them) and records
+// none for the rest; "Start with none" records none for all. Either way the step is done, and Settings in
+// the panel (or a site's own panel) adds any site's later. Ticked to start: the sites TRIF starts on for.
+const STARTER_SOURCE = 'https://github.com/acapellascience/trif/tree/main/examples/sites';
+const picks = new Map(); // site -> ticked, once the user changes one
+let starterBusy = false;
+let starterError = '';
+
+function starterStep(s, connected) {
+  const step = $('#step-starter');
+  const st = s.starter;
+  if (!connected || !st) return { el: step, done: false };
+  if (st.chosen) {
+    const added = st.sites.filter((x) => x.choice === 'added').map((x) => x.name);
+    return { el: step, done: true, state: added.length ? siteNames(added) : 'none' };
+  }
+  const ticked = (x) => (picks.has(x.site) ? picks.get(x.site) : x.suggested);
+  setBody(step, JSON.stringify(['starter', st.sites, starterBusy, starterError]), () => {
+    const intro = el('p', null, 'Tim made mods for a few sites. None of them is on your computer until you choose. They’re plain JavaScript you can read first: ');
+    const see = link('see the code', STARTER_SOURCE);
+    see.id = 'starter-source';
+    intro.append(see, '.');
+    const list = el('ul', 'picks');
+    for (const x of st.sites) {
+      const li = el('li', 'pick');
+      li.dataset.site = x.site;
+      const label = el('label');
+      const box = document.createElement('input');
+      box.type = 'checkbox';
+      box.checked = ticked(x);
+      box.disabled = starterBusy;
+      box.addEventListener('change', () => { picks.set(x.site, box.checked); add.disabled = starterBusy || !st.sites.some(ticked); });
+      const name = el('span', 'pick-name', x.name);
+      if (x.note) name.append(el('span', 'pick-note', x.note));
+      const mods = el('span', 'pick-mods');
+      x.mods.forEach((m, i) => {
+        if (i) mods.append(', ');
+        mods.append(el('b', null, m.name));
+        if (m.description) mods.append(` (${m.description})`);
+      });
+      label.append(box, name, mods);
+      li.append(label);
+      list.append(li);
+    }
+    const row = el('div', 'row');
+    const add = button('Add these', 'primary', () => chooseStarter({ type: 'shipped.install', sites: st.sites.filter(ticked).map((x) => x.site), others: 'none' }));
+    const none = button('Start with none', '', () => chooseStarter({ type: 'shipped.none' }));
+    [add.id, none.id] = ['starter-add', 'starter-none'];
+    add.disabled = starterBusy || !st.sites.some(ticked);
+    none.disabled = starterBusy;
+    row.append(add, none);
+    return [
+      intro, list, row,
+      el('p', 'note', `You can add any site’s mods later, in Settings in the TRIF ${PANEL}.`),
+      starterError ? el('p', 'problem', starterError) : null,
+    ];
+  });
+  return { el: step, done: false };
+}
+
+async function chooseStarter(msg) {
+  starterBusy = true;
+  starterError = '';
+  renderSteps();
+  try { await request(msg); } catch (e) { starterError = `Couldn’t do that: ${e?.message ?? e}`; }
+  starterBusy = false;
+  refresh();
 }
 
 // The sites to try it on: where a mod TRIF comes with is switched on, and TRIF is on for the site.

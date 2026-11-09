@@ -80,7 +80,12 @@ async function takeLock(log) {
   if (!lock.dir || lock.since) return;
   let said = false;
   for (;;) {
-    try { fs.mkdirSync(lock.dir); lock.since = Date.now(); live.add(`lock:${lock.dir}`); return; } catch { /* someone has it */ }
+    try {
+      fs.mkdirSync(lock.dir); lock.since = Date.now(); live.add(`lock:${lock.dir}`);
+      // (who has it, for the others waiting: PERF_LOCK_OWNER, or this suite and its pid)
+      try { fs.writeFileSync(path.join(lock.dir, 'owner'), `${process.env.PERF_LOCK_OWNER || path.basename(process.argv[1] || 'perf')} pid ${process.pid} since ${new Date().toISOString()}\n`); } catch { /* still ours */ }
+      return;
+    } catch { /* someone has it */ }
     if (!said) { log?.(`  (waiting for the browser lock ${lock.dir})`); said = true; }
     await sleep(30000);
   }

@@ -120,3 +120,57 @@ Headless Chrome for Testing renders with the GPU (ANGLE on Metal, Skia Graphite,
 raster), as a window does, and paces requestAnimationFrame at 60 Hz. What it doesn't have: a real display
 (no vsync from the screen; a ProMotion screen would allow 120 Hz), the browser's own UI, other tabs, and
 your extensions; and sound is muted (the Web Audio graph still runs).
+
+# The X stylers' suite (stylers.js)
+
+What Profile Styler, Post Styler, Site Inherits Profile Style and Style Encoder cost, with the rest of your X
+mods, sitting on a page (idle: what the CPU does while you read) and scrolling.
+
+```sh
+node tests/perf/stylers.js                                   # every state, idle and scrolling, 3 runs (about 25 min)
+node tests/perf/stylers.js --states own-allrb,home --runs 1  # some states
+node tests/perf/stylers.js --variants none,no-rainbow,no-rave,no-poststyler,no-inherit,no-panel,no-readcode
+node tests/perf/stylers.js --variants none,fixed             # the live stylers and the prototype fixes (lib/styler-fixes.js)
+node tests/perf/stylers.js --variants none,@path/to/dir      # the copies in dir replace the mods of the same name
+node tests/perf/stylers.js --selector-stats --runs 1         # which CSS selectors the style recalcs spent their time on
+node tests/perf/stylers.js --shots DIR --look-at 1234 --variants none,fixed   # screenshots, animations stopped at 1.234 s
+node tests/perf/stylers.js --states list
+node tests/perf/lib/styler-fixes.js ~/.trif/sites/x.com OUTDIR               # patched copies of the stylers
+```
+
+- **The mods**: every `.js` in `~/.trif/sites/x.com` not starting with `_` (TRIF's rule), read fresh for every
+  run (sha1 and mtime recorded; a file that changes mid-run is logged), injected as in xflyer.js.
+- **The page**: lib/xpage.js with `?pbs=1&theme=dark`: profile pictures at
+  `https://pbs.twimg.com/profile_images/<id>/<name>_<size>.png`, the sidebar's people as X's `UserCell`, X's
+  `icon-verified` test id, and `/<handle>` as X's profile page (top bar, header photo, picture linking to
+  `/<handle>/photo`, name and badge and handle in `UserName`, `editProfileButton` on your own (perf_me, also the
+  account button), `userActions` and Follow on others', bio, `UserProfileHeader_Items`, the tabs, then that
+  person's posts). Home has posts by styled and unstyled authors (and quoted posts, link cards, reposts).
+- **The pictures** (lib/styles.js): the stand-in's avatars redrawn by Style Encoder's own `encode()` (taken from
+  style-encoder.js as it is, run in the test browser) with three styles: `plain` (colours, no rainbow), `rbg` (a
+  rainbow background), `allrb` (everything rainbow). ada_l and mkbhd_fan carry plain, grace_h and chromium_dev
+  rbg, nasa_watch and acapella_news allrb, your own picture plain; the rest carry none. Served from disk by CDP
+  request interception (`Fetch`): pbs.twimg.com is answered there, x.com goes on to the stand-in, anything
+  else is refused and counted (`blocked` in results.jsonl); the browser also resolves nothing but x.com.
+- **Your style**: `trifProfileStyler.mine:perf_me` in localStorage, as Profile Styler stores it.
+- **States**: `own-plain`, `own-rbg`, `own-allrb` (your profile with each style), `own-panel` and
+  `own-plain-panel` (the Style profile panel open), `other` (@grace_h, a rainbow background; yours all rainbow),
+  `home` (yours all rainbow, inherited), `home-plain`.
+- **Windows**: each state is loaded and settled (pictures read, styles applied), then `idle` (nothing touched)
+  and `scroll` (mouse wheel, about 670 px/s) are each measured: the browser's CPU time by process (ps: renderer,
+  GPU process, browser) over `--seconds`, Chrome's counters, then a 3 s trace (main thread by kind, the GPU
+  process's and compositor's threads, frames drawn, style recalcs) and a 3 s CPU profile (the mods' functions by
+  file:line). No requestAnimationFrame loop runs while idle (it would keep the page drawing by itself); frames
+  are counted from the trace (`Display::FrameDisplayed`: frames put on screen; `BeginMainThreadFrame`: frames
+  the page's main thread worked on). While scrolling, rAF gives fps and frame times.
+- **Page checks** (results.jsonl `page`): elements, running animations by name (and how many are pinned to
+  time 0), styled and rainbow posts, cards, the html attributes on, the panel, emoji wrappers, localStorage
+  writes by key.
+- **Variants**: lib/styler-variants.js. Ablations: `no-rainbow` (every rainbow shown as its plain colour),
+  `no-rave`, `no-poststyler`, `no-inherit`, `no-encoder`, `no-xflyer`, `no-others`, `no-stylers`, `bare` (no
+  mods), `no-panel` (the Style profile button and panel never built), `no-readcode` (the picture reads
+  answered at once from the stand-in's table: no image, no canvas), `no-ticks` (the stylers' timers stopped
+  after 4 s), and one per kind of animation (`no-textroll`, `no-linehue`, `no-boxroll`, `no-smallroll`,
+  `no-bigroll`, `no-smil`, `no-fixed`, `no-emoji`). Fixes: lib/styler-fixes.js (`fix:<name>`, `fixed`).
+- Safety as xflyer.js: `--lock DIR` (an `owner` file is written in it), memguard.sh, `nice`, headless,
+  `--mute-audio`, one browser at a time.

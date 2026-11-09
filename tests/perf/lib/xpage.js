@@ -108,7 +108,7 @@ function userResult(u) {
     core: { screen_name: u.handle, name: u.name },
     relationship_perspectives: { following: u.following, followed_by: u.followedBy },
     legacy: { screen_name: u.handle, name: u.name, followers_count: u.followers, following: u.following, followed_by: u.followedBy,
-      profile_image_url_https: `/img/av${u.av}.jpg` } };
+      profile_image_url_https: u.av === 'me' ? '/img/me.jpg' : `/img/av${u.av}.jpg` } };
 }
 function tweetResult(R, id, u, opts = {}) {
   const text = postText(R);
@@ -125,21 +125,24 @@ function tweetResult(R, id, u, opts = {}) {
   return t;
 }
 /** One page of the timeline: {body (the GraphQL response), count}. */
-function timelinePage({ page = 0, size = 60, elonEvery = 0, seed = 1 } = {}) {
+// (`author`: a profile's timeline, UserTweets: every post theirs; perf_me is the signed-in account)
+const ME = { rest_id: '999', handle: 'perf_me', name: 'Perf Me', followers: 1234, following: false, followedBy: false, av: 'me', verified: true };
+const userOf = (handle) => (handle === 'perf_me' ? ME : userFor(rng(HANDLES.indexOf(handle) + 3), HANDLES.indexOf(handle) + 1, handle));
+function timelinePage({ page = 0, size = 60, elonEvery = 0, seed = 1, author = null } = {}) {
   const R = rng(seed * 1009 + page * 31);
   const entries = [{ entryId: `cursor-top-${page}`, content: { entryType: 'TimelineTimelineCursor', value: `top${page}`, cursorType: 'Top' } }];
   for (let k = 0; k < size; k++) {
     const i = page * size + k, id = String(1900000000000000000n + BigInt(i));
-    const elon = elonEvery ? i % elonEvery === elonEvery - 1 : i === 24;
-    const handle = elon ? 'elonmusk' : HANDLES[Math.floor(R() * HANDLES.length)];
-    const u = userFor(rng(HANDLES.indexOf(handle) + 3), HANDLES.indexOf(handle) + 1, handle);
+    const elon = !author && (elonEvery ? i % elonEvery === elonEvery - 1 : i === 24);
+    const handle = elon ? 'elonmusk' : author || HANDLES[Math.floor(R() * HANDLES.length)];
+    const u = handle === 'elonmusk' ? userFor(rng(HANDLES.indexOf(handle) + 3), HANDLES.indexOf(handle) + 1, handle) : userOf(handle);
     const r = R(), opts = {};
     if (r < 0.26) opts.photo = 1 + Math.floor(R() * N_PHOTOS);
     else if (r < 0.34) { const qh = HANDLES[Math.floor(R() * HANDLES.length)]; opts.quote = tweetResult(R, `q${id}`, userFor(rng(HANDLES.indexOf(qh) + 3), HANDLES.indexOf(qh) + 1, qh), R() < 0.5 ? { photo: 1 + Math.floor(R() * N_PHOTOS) } : {}); }
     else if (r < 0.41) opts.card = 1 + Math.floor(R() * N_CARDS);
     let result = tweetResult(R, id, u, opts);
     if (r > 0.95) { // a repost: someone you follow reposted it
-      const by = HANDLES[Math.floor(R() * HANDLES.length)], bu = userFor(rng(HANDLES.indexOf(by) + 3), HANDLES.indexOf(by) + 1, by);
+      const by = author || HANDLES[Math.floor(R() * HANDLES.length)], bu = userOf(by);
       result = { __typename: 'Tweet', rest_id: `rt${id}`, core: { user_results: { result: userResult(bu) } }, legacy: { full_text: `RT @${handle}`, user_id_str: bu.rest_id, retweeted_status_result: { result } } };
     }
     entries.push({ entryId: `tweet-${id}`, sortIndex: id, content: { entryType: 'TimelineTimelineItem', __typename: 'TimelineTimelineItem',
@@ -171,6 +174,15 @@ function APP() {
   document.cookie = 'twid=u%3D999; path=/';
   document.cookie = `night_mode=${DARK ? 2 : 0}; path=/`;
   const HOME = location.pathname === '/home';
+  // ?pbs=1 (tests/perf/stylers.js): profile pictures from X's image server (pbs.twimg.com/profile_images/…, PNGs
+  // served by that suite's request interception), the sidebar's people as X's UserCell cards, the verified
+  // checks with X's test id, and /<handle> as X's profile page (header photo, picture, name, Edit profile on
+  // your own (perf_me), Follow and the round buttons on others', tabs; then their posts). Off, the page is as before.
+  const PBS = Q.has('pbs');
+  const pbs = (src) => { const m = PBS && /\/img\/(av\d+|me)\.jpg$/.exec(src || ''); return m ? `https://pbs.twimg.com/profile_images/${m[1] === 'me' ? 999 : 1000 + Number(m[1].slice(2))}/${m[1]}_normal.png` : src; };
+  const ME_PIC = PBS ? pbs('/img/me.jpg') : '/img/av3.jpg';
+  const PROFILE = PBS && !HOME ? (/^\/(\w{1,15})(?:\/\w+)?\/?$/.exec(location.pathname) || [])[1] || null : null;
+  const nameOf = (handle) => handle.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase());
   // palette: X's light mode, or Lights out
   const P = DARK
     ? { text: 'rgba(231,233,234,1.00)', sub: 'rgba(113,118,123,1.00)', bg: 'rgba(0,0,0,1.00)', line: 'rgb(47,51,54)', hover: 'rgba(231,233,234,0.1)', card: 'rgba(22,24,28,1.00)', inv: 'rgba(239,243,244,1.00)', invText: 'rgba(15,20,25,1.00)', inlineText: 'rgb(231, 233, 234)', inlineSub: 'rgb(113, 118, 123)' }
@@ -236,6 +248,7 @@ function APP() {
   const icon = (d, cls) => h('svg', { viewBox: '0 0 24 24', 'aria-hidden': 'true', class: `${cls || C('height:1.25em;fill:currentcolor;max-width:100%;position:relative;user-select:none;vertical-align:text-bottom')}` }, h('g', null, h('path', { d })));
   const VERIFIED = 'M20.396 11c-.018-.646-.215-1.275-.57-1.816-.354-.54-.852-.972-1.438-1.246.223-.607.27-1.264.14-1.897-.131-.634-.437-1.218-.882-1.687-.47-.445-1.053-.75-1.687-.882-.633-.13-1.29-.083-1.897.14-.273-.587-.704-1.086-1.245-1.44S11.647 1.62 11 1.604c-.646.017-1.273.213-1.813.568s-.969.854-1.24 1.44c-.608-.223-1.267-.272-1.902-.14-.635.13-1.22.436-1.69.882-.445.47-.749 1.055-.878 1.688-.13.633-.08 1.29.144 1.896-.587.274-1.087.705-1.443 1.245-.356.54-.555 1.17-.574 1.817.02.647.218 1.276.574 1.817.356.54.856.972 1.443 1.245-.224.606-.274 1.263-.144 1.896.13.634.433 1.218.877 1.688.47.443 1.054.747 1.687.878.633.132 1.29.084 1.897-.136.274.586.705 1.084 1.246 1.439.54.354 1.17.551 1.816.569.647-.016 1.276-.213 1.817-.567s.972-.854 1.245-1.44c.604.239 1.266.296 1.903.164.636-.132 1.22-.447 1.68-.907.46-.46.776-1.044.908-1.681s.075-1.299-.165-1.903c.586-.274 1.084-.705 1.439-1.246.354-.54.551-1.17.569-1.816zM9.662 14.85l-3.429-3.428 1.293-1.302 2.072 2.072 4.4-4.794 1.347 1.246z';
 
+  const verified = (cls) => { const s = icon(VERIFIED, cls); if (PBS) s.setAttribute('data-testid', 'icon-verified'); return s; };
   // a picture, as X draws one: a background-image div, and an <img> under it (hidden) for saving and alt text
   const pic = (src, size, round = true) => v(`${C('overflow:hidden')} ${round ? C('border-radius:9999px') : ''}`.trim(),
     h('div', { class: C('padding-bottom:100%;width:100%') }),
@@ -244,7 +257,7 @@ function APP() {
       h('img', { alt: '', draggable: 'true', src, class: 'css-9pa8cd' })));
   const setBg = (el, src) => { const d = el.querySelector(`.${C('background-size:cover;background-position:center center;background-repeat:no-repeat;position:absolute;inset:0px;height:100%;width:100%').split(' ')[0]}`); if (d) d.style.backgroundImage = `url("${src}")`; };
   const avatar = (u, size, tweet) => {
-    const src = u.legacy.profile_image_url_https;
+    const src = pbs(u.legacy.profile_image_url_https);
     const box = h('div', { class: `${V} ${C(`width:${size}px;height:${size}px`)}`, 'data-testid': `UserAvatar-Container-${u.legacy.screen_name}`, style: `width:${size}px;height:${size}px` },
       h('a', { href: `/${u.legacy.screen_name}`, role: 'link', tabindex: '-1', class: `${V} ${C('cursor:pointer')}` }, pic(src, size)));
     setBg(box, src);
@@ -253,7 +266,7 @@ function APP() {
   const nameLine = (u, time) => h('div', { class: `${V} ${ROW} ${WRAP} ${SHRINK}`, 'data-testid': 'User-Name' },
     v(`${ROW} ${CENTER}`, h('a', { href: `/${u.legacy.screen_name}`, role: 'link', class: `${V} ${C('text-decoration-line:none')}` },
       v(`${ROW} ${CENTER}`, h('div', { dir: 'ltr', class: `${TD} ${FONT15} ${BOLD} ${TEXT}`, style: `color: ${P.inlineText};` }, txt(C('text-overflow:ellipsis;overflow:hidden;white-space:nowrap'), u.legacy.name)),
-        u.is_blue_verified ? h('div', { dir: 'ltr', class: `${TD} ${C('margin-left:2px')}` }, icon(VERIFIED, C(`fill:${BLUE};height:1.25em;vertical-align:text-bottom`))) : null))),
+        u.is_blue_verified ? h('div', { dir: 'ltr', class: `${TD} ${C('margin-left:2px')}` }, verified(C(`fill:${BLUE};height:1.25em;vertical-align:text-bottom`))) : null))),
     v(`${ROW} ${C('margin-left:4px')}`,
       h('a', { href: `/${u.legacy.screen_name}`, role: 'link', class: `${V} ${C('text-decoration-line:none')}` }, h('div', { dir: 'ltr', class: `${TD} ${FONT15} ${SUB}`, style: `color: ${P.inlineSub};` }, txt('', `@${u.legacy.screen_name}`))),
       h('div', { dir: 'ltr', class: `${TD} ${FONT15} ${SUB} ${C('padding-left:4px;padding-right:4px')}` }, txt('', '·')),
@@ -321,8 +334,49 @@ function APP() {
       v(C('margin:16px 0;width:90%'), h('a', { href: '/compose/post', role: 'link', 'data-testid': 'SideNav_NewTweet_Button', class: `${V} ${C(`background-color:${P.inv};border-radius:9999px;min-height:52px;align-items:center;justify-content:center`)}` },
         h('span', { class: `${T} ${C(`color:${P.invText};font-size:17px;font-weight:700`)}` }, 'Post'))),
       v(C('margin-top:auto;margin-bottom:12px'), h('button', { 'data-testid': 'SideNav_AccountSwitcher_Button', type: 'button', class: `${V} ${ROW} ${CENTER} ${C('background:none;border:0;padding:12px')}` },
-        h('div', { class: V, 'data-testid': 'UserAvatar-Container-perf_me', style: 'width:40px;height:40px' }, pic('/img/av3.jpg', 40)),
+        h('div', { class: V, 'data-testid': 'UserAvatar-Container-perf_me', style: 'width:40px;height:40px' }, pic(ME_PIC, 40)),
         v(C('margin-left:12px'), txt(`${TEXT} ${BOLD}`, 'Perf Me'), txt(SUB, '@perf_me')))))));
+  // (?pbs=1) the sidebar's people as X's UserCell: picture, name (and check), @handle, bio, Follow
+  const PEOPLE = [['ada_l', 1], ['grace_h', 2], ['nasa_watch', 5], ['jsconf', 6]];
+  const userCell = ([handle, av]) => h('div', { 'data-testid': 'UserCell', role: 'button', tabindex: '0', class: `${V} ${C('padding:12px 16px;cursor:pointer')}` },
+    v(`${ROW} ${C('gap:8px;align-items:flex-start')}`,
+      h('div', { class: V, 'data-testid': `UserAvatar-Container-${handle}`, style: 'width:40px;height:40px' }, h('a', { href: `/${handle}`, role: 'link', tabindex: '-1', class: V }, pic(pbs(`/img/av${av}.jpg`), 40))),
+      v(`${GROW} ${SHRINK}`,
+        h('a', { href: `/${handle}`, role: 'link', class: `${V} ${C('text-decoration-line:none')}` }, v(`${ROW} ${CENTER}`, h('div', { dir: 'ltr', class: `${TD} ${FONT15} ${BOLD} ${TEXT}` }, txt('', nameOf(handle))),
+          av % 2 ? h('div', { dir: 'ltr', class: `${TD} ${C('margin-left:2px')}` }, verified(C(`fill:${BLUE};height:1.25em;vertical-align:text-bottom`))) : null)),
+        h('a', { href: `/${handle}`, role: 'link', tabindex: '-1', class: `${V} ${C('text-decoration-line:none')}` }, h('div', { dir: 'ltr', class: `${TD} ${FONT15} ${SUB}` }, txt('', `@${handle}`))),
+        h('div', { dir: 'auto', class: `${TD} ${FONT15} ${TEXT} ${C('padding-top:4px')}` }, txt('', 'Science, songs and the web ✨ '), h('a', { href: '/hashtag/mods', role: 'link', class: `${T} ${C(`color:${BLUE}`)}` }, '#mods'))),
+      h('button', { type: 'button', 'data-testid': `${5000 + av}-follow`, class: C(`background-color:${P.inv};color:${P.invText};border:0;border-radius:9999px;padding:6px 16px;font-weight:700`) }, txt(C(`color:${P.invText}`), 'Follow'))));
+  // (?pbs=1) a profile's page: the bar along the top (sticky, see-through), and the header, filled once its posts load
+  const topBar = (title) => v(C(`position:sticky;top:0px;z-index:3;backdrop-filter:blur(12px);background-color:${DARK ? 'rgba(0,0,0,0.65)' : 'rgba(255,255,255,0.85)'}`),
+    v(`${ROW} ${CENTER} ${C('padding:0 16px;min-height:53px;gap:24px')}`, h('button', { 'data-testid': 'app-bar-back', 'aria-label': 'Back', type: 'button', class: C('background:none;border:0') }, v(TEXT, icon(ICONS[1]))),
+      v('', h('h2', { dir: 'ltr', 'aria-level': '2', role: 'heading', class: `${TD} ${BOLD} ${TEXT} ${C('font-size:20px;line-height:24px;margin:0')}` }, txt('', title)), txt(`${SUB} ${C('font-size:13px')}`, '2,345 posts'))));
+  const roundBtn = (label, d, extra = {}) => h('button', { 'aria-label': label, type: 'button', ...extra, class: `${V} ${C(`border:1px solid ${P.line};border-radius:9999px;width:36px;height:36px;background:none;align-items:center;justify-content:center`)}` }, v(TEXT, icon(d)));
+  const profileHeader = (u) => {
+    const L = u.legacy, handle = L.screen_name, own = handle === 'perf_me';
+    const big = pbs(L.profile_image_url_https).replace('_normal.', '_200x200.');
+    const banner = h('a', { href: `/${handle}/header_photo`, role: 'link', class: V }, (() => { const p = pic('/img/ph2.jpg', 0, false); p.firstChild.style.paddingBottom = '33.3333%'; setBg(p, '/img/ph2.jpg'); return p; })());
+    const photo = h('div', { class: `${V} ${C(`margin-top:-15%;width:25%;min-width:48px;border:4px solid ${P.bg};border-radius:9999px`)}` },
+      h('a', { href: `/${handle}/photo`, role: 'link', class: V }, h('div', { class: V, 'data-testid': `UserAvatar-Container-${handle}` }, (() => { const p = pic(big, 133); setBg(p, big); return p; })())));
+    const actionsRow = own
+      ? v(`${ROW} ${CENTER} ${C('margin-bottom:12px')}`, h('a', { href: '/settings/profile', role: 'link', 'data-testid': 'editProfileButton', class: `${V} ${C('border:1px solid rgba(83,100,113,1.00);border-radius:9999px;min-height:36px;padding:0 16px;justify-content:center;margin-bottom:0px')}` }, txt(`${TEXT} ${BOLD} ${FONT15}`, 'Edit profile')))
+      : v(`${ROW} ${CENTER} ${C('gap:8px;margin-bottom:12px')}`,
+        h('div', { 'data-testid': 'userActions', class: V }, roundBtn('More', 'M3 12c0-1.1.9-2 2-2s2 .9 2 2-.9 2-2 2-2-.9-2-2zm9 2c1.1 0 2-.9 2-2s-.9-2-2-2-2 .9-2 2 .9 2 2 2zm7 0c1.1 0 2-.9 2-2s-.9-2-2-2-2 .9-2 2 .9 2 2 2z')),
+        roundBtn('Message', ICONS[0], { 'data-testid': 'sendDMFromProfile' }), v('', roundBtn('Notify', ICONS[4])),
+        h('button', { 'data-testid': `${u.rest_id}-follow`, type: 'button', class: C(`background-color:${P.inv};border:0;border-radius:9999px;padding:0 16px;min-height:36px`) }, txt(`${C(`color:${P.invText}`)} ${BOLD}`, 'Follow')));
+    const nameBox = h('div', { 'data-testid': 'UserName', class: `${V} ${C('margin-top:4px;margin-bottom:12px')}` },
+      v('', v(`${ROW} ${CENTER}`, h('div', { dir: 'ltr', class: `${TD} ${BOLD} ${TEXT} ${C('font-size:20px;line-height:24px')}` }, txt('', L.name)),
+        u.is_blue_verified ? h('div', { dir: 'ltr', class: `${TD} ${C('margin-left:2px')}` }, verified(C(`fill:${BLUE};height:1.25em;vertical-align:text-bottom`))) : null)),
+      v('', h('div', { dir: 'ltr', class: `${TD} ${FONT15} ${SUB}` }, txt('', `@${handle}`))));
+    const desc = h('div', { 'data-testid': 'UserDescription', dir: 'auto', class: `${TD} ${FONT15} ${TEXT} ${C('margin-bottom:12px')}` }, txt('', 'Science songs, a cappella and the web. Mods for the browser 🎶 '), h('a', { href: '/hashtag/science', role: 'link', class: `${T} ${C(`color:${BLUE}`)}` }, '#science'));
+    const items = h('div', { 'data-testid': 'UserProfileHeader_Items', class: `${TD} ${FONT15} ${SUB} ${C('margin-bottom:12px')}` }, txt('', 'Montréal  '), h('a', { href: 'https://example.com', 'data-testid': 'UserUrl', role: 'link', class: `${T} ${C(`color:${BLUE}`)}` }, txt('', 'example.com')), txt('', '  Joined March 2009'));
+    const counts = v(`${ROW} ${C('gap:20px;margin-bottom:12px')}`, h('a', { href: `/${handle}/following`, role: 'link', class: `${V} ${ROW}` }, txt(`${TEXT} ${BOLD}`, '512'), txt(SUB, ' Following')),
+      h('a', { href: `/${handle}/verified_followers`, role: 'link', class: `${V} ${ROW}` }, txt(`${TEXT} ${BOLD}`, '12.3K'), txt(SUB, ' Followers')));
+    const tabBar = v(C(`border-bottom:1px solid ${P.line}`), h('nav', { role: 'navigation', 'aria-label': 'Profile timelines', class: V }, h('div', { role: 'tablist', 'data-testid': 'ScrollSnap-List', class: `${V} ${ROW}` },
+      ...['Posts', 'Replies', 'Highlights', 'Articles', 'Media', 'Likes'].map((s, i) => h('div', { role: 'presentation', class: `${V} ${GROW} ${CENTER}` },
+        h('a', { href: `/${handle}${['', '/with_replies', '/highlights', '/articles', '/media', '/likes'][i]}`, role: 'tab', 'aria-selected': String(i === 0), class: `${V} ${C('padding:16px 0')}` }, txt(`${i ? SUB : TEXT} ${BOLD}`, s)))))));
+    return [banner, v(C('padding:0 16px'), v(`${ROW} ${JSB} ${C('align-items:flex-end')}`, photo, actionsRow), nameBox, desc, items, counts), tabBar];
+  };
   const trend = (i) => v(C('padding:12px 16px'), txt(`${SUB} ${C('font-size:13px')}`, `Trending in Canada · ${i + 1}`), txt(`${TEXT} ${BOLD}`, `#${['WebMods', 'Choir', 'SpaceX', 'Science', 'Music', 'Chrome', 'Montreal', 'Rocket', 'Coffee', 'Pixel'][i]}`), txt(`${SUB} ${C('font-size:13px')}`, `${(i + 2) * 3.1}K posts`));
   const sidebar = () => h('div', { class: `${V} ${C('width:350px;margin-right:10px;margin-left:30px')}`, 'data-testid': 'sidebarColumn' },
     v(C('position:sticky;top:0px;gap:16px;padding-top:12px'),
@@ -333,7 +387,8 @@ function APP() {
         h('h2', { class: C('margin:12px 16px;font-size:20px') }, txt(TEXT, "What's happening")), ...Array.from({ length: 10 }, (_, i) => trend(i))),
       h('aside', { 'aria-label': 'Who to follow', role: 'complementary', class: `${V} ${C(`border:1px solid ${P.line};border-radius:16px`)}` },
         h('h2', { class: C('margin:12px 16px;font-size:20px') }, txt(TEXT, 'Who to follow')),
-        ...[5, 8, 11].map((i) => v(`${ROW} ${CENTER} ${C('padding:12px 16px;gap:8px')}`, h('div', { class: V, 'data-testid': `UserAvatar-Container-wtf${i}`, style: 'width:40px;height:40px' }, pic(`/img/av${i}.jpg`, 40)),
+        ...(PBS ? PEOPLE.map(userCell) : []),
+        ...(PBS ? [] : [5, 8, 11]).map((i) => v(`${ROW} ${CENTER} ${C('padding:12px 16px;gap:8px')}`, h('div', { class: V, 'data-testid': `UserAvatar-Container-wtf${i}`, style: 'width:40px;height:40px' }, pic(`/img/av${i}.jpg`, 40)),
           v(GROW, txt(`${TEXT} ${BOLD}`, `Suggested ${i}`), txt(SUB, `@suggested${i}`)),
           h('button', { type: 'button', 'data-testid': `${5000 + i}-follow`, class: C(`background-color:${P.inv};color:${P.invText};border:0;border-radius:9999px;padding:6px 16px;font-weight:700`) }, txt(C(`color:${P.invText}`), 'Follow'))))),
       h('nav', { 'aria-label': 'Footer', role: 'navigation', class: `${V} ${ROW} ${WRAP} ${C('padding:0 16px;gap:4px 12px')}` },
@@ -341,7 +396,7 @@ function APP() {
   const tabs = () => v(C(`position:sticky;top:0px;z-index:3;backdrop-filter:blur(12px);background-color:${DARK ? 'rgba(0,0,0,0.65)' : 'rgba(255,255,255,0.85)'};border-bottom:1px solid ${P.line}`),
     h('div', { role: 'tablist', 'data-testid': 'ScrollSnap-List', class: `${V} ${ROW}` }, ...['For you', 'Following'].map((s, i) => h('div', { role: 'presentation', class: `${V} ${GROW} ${CENTER}` },
       h('a', { href: '/home', role: 'tab', 'aria-selected': String(i === 1), class: `${V} ${C('padding:16px 0')}` }, txt(`${i === 1 ? TEXT : SUB} ${BOLD}`, s))))));
-  const composer = () => v(`${ROW} ${C(`padding:12px 16px;border-bottom:1px solid ${P.line};gap:8px`)}`, h('div', { class: V, style: 'width:40px;height:40px' }, pic('/img/av3.jpg', 40)),
+  const composer = () => v(`${ROW} ${C(`padding:12px 16px;border-bottom:1px solid ${P.line};gap:8px`)}`, h('div', { class: V, style: 'width:40px;height:40px' }, pic(ME_PIC, 40)),
     v(GROW, h('div', { role: 'textbox', 'aria-label': 'Post text', 'data-testid': 'tweetTextarea_0', class: C('font-size:20px;padding:12px 0;min-height:24px') }, txt(SUB, "What's happening?")),
       v(`${ROW} ${JSB} ${CENTER}`, v(`${ROW} ${C('gap:8px')}`, ...ICONS.slice(0, 5).map((d) => v(C(`color:${BLUE}`), icon(d)))), h('button', { type: 'button', 'data-testid': 'tweetButtonInline', class: C(`background-color:${BLUE};opacity:0.5;color:white;border:0;border-radius:9999px;padding:8px 16px;font-weight:700`) }, 'Post'))));
 
@@ -381,7 +436,7 @@ function APP() {
   const load = (c) => {
     loading = true;
     const vars = encodeURIComponent(JSON.stringify({ count: 20, cursor: c || undefined, includePromotedContent: true, latestControlAvailable: true }));
-    return fetch(`/i/api/graphql/perfQ/${OP}?variables=${vars}${location.search.replace('?', '&')}`, { headers: { 'content-type': 'application/json' } })
+    return fetch(`/i/api/graphql/perfQ/${OP}?variables=${vars}${location.search.replace('?', '&')}${PROFILE ? `&author=${PROFILE}` : ''}`, { headers: { 'content-type': 'application/json' } })
       .then((r) => r.json()).then((j) => {
         const ins = (j.data.home?.home_timeline_urt || j.data.user.result.timeline.timeline).instructions;
         const entries = ins.find((x) => x.type === 'TimelineAddEntries')?.entries || [];
@@ -399,16 +454,22 @@ function APP() {
     if (!DARK) document.documentElement.setAttribute('data-theme', 'light'); else document.documentElement.setAttribute('data-theme', 'dark');
     const app = document.getElementById('react-root');
     document.getElementById('placeholder')?.remove();
+    const head = PROFILE ? v('') : null;
     const primary = h('div', { class: `${V} ${C(`width:600px;max-width:600px;border-left:1px solid ${P.line};border-right:1px solid ${P.line};min-height:100vh`)}`, 'data-testid': 'primaryColumn' },
-      HOME ? tabs() : v(C('padding:12px 16px'), txt(`${TEXT} ${C('font-size:20px;font-weight:800')}`, 'Perf Profile')),
+      HOME ? tabs() : PROFILE ? topBar(nameOf(PROFILE)) : v(C('padding:12px 16px'), txt(`${TEXT} ${C('font-size:20px;font-weight:800')}`, 'Perf Profile')),
       HOME ? composer() : null,
+      head,
       h('section', { 'aria-labelledby': 'accessible-list-1', role: 'region', class: V },
         h('h1', { id: 'accessible-list-1', class: C('position:absolute;width:1px;height:1px;overflow:hidden') }, HOME ? 'Your Home Timeline' : 'Posts'),
         h('div', { 'aria-label': HOME ? 'Timeline: Your Home Timeline' : 'Timeline: Posts' }, list)));
     const main = h('main', { role: 'main', class: `${V} ${C('flex-grow:2;align-items:flex-start')}` },
       v(C('width:990px'), v(`${ROW} ${JSB} ${C('width:990px;min-height:100%')}`, primary, sidebar())));
     app.append(v(`${ROW} ${GROW} ${C(`background-color:${P.bg};min-height:100%`)}`, header(), main));
-    load(null).then(() => { window.__xLoaded = true; });
+    load(null).then(() => {
+      const u = head && posts[0]?.content.itemContent.tweet_results.result.core.user_results.result;
+      if (u) { head.append(...profileHeader(u)); schedule(); }
+      window.__xLoaded = true;
+    });
   };
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', start); else start();
 }
@@ -437,7 +498,8 @@ async function startXPage(workDir, { seed = 1 } = {}) {
       let vars = {};
       try { vars = JSON.parse(u.searchParams.get('variables') || '{}'); } catch {}
       const page = /^page:(\d+)$/.exec(vars.cursor || '')?.[1] || 0;
-      const body = JSON.stringify(timelinePage({ page: Number(page), size: Number(page) ? 30 : 60, elonEvery: Number(u.searchParams.get('elon')) || 0, seed }));
+      const author = /^\w{1,15}$/.test(u.searchParams.get('author') || '') ? u.searchParams.get('author') : null;
+      const body = JSON.stringify(timelinePage({ page: Number(page), size: Number(page) ? 30 : 60, elonEvery: Number(u.searchParams.get('elon')) || 0, seed, author }));
       return send(200, 'application/json', zlib.gzipSync(body), { 'content-encoding': 'gzip' });
     }
     if (u.pathname === '/app.js') return send(200, 'text/javascript', appJs);

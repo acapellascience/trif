@@ -587,4 +587,6 @@ async function _prepare(b, { flyer, others = [], storage = {}, seed = 12345, bos
   await b.send('Page.addScriptToEvaluateOnNewDocument', { source: `(${PREAMBLE.toString()})(${JSON.stringify({ seed, storage, bossImg })});` });
   for (const src of await modScripts(mods)) await b.send('Page.addScriptToEvaluateOnNewDocument', { source: src });
 }
-module.exports = { STATES, summarise, table, _prepare, _press: press, _drive: drive };
+module.exports = { STATES, summarise, table, _prepare, _press: press, _drive: drive,
+  // (for tests/perf/stylers.js: the same mod injection, preamble, tracing and profiling)
+  readMod, modScripts, PREAMBLE, traceStart, traceEnd, profileStart, profileStop, metrics, metricsDelta, busyElsewhere, loafSummary, treeRss, TRACE_CATEGORIES };

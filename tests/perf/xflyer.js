@@ -53,7 +53,7 @@ const TRACE_CATEGORIES = ['-*', 'devtools.timeline', 'disabled-by-default-devtoo
 // ---- the states. path: where; drive: the keys held (weave: ← and → in turn; fire: space held; up: ↑ held,
 // which on Home scrolls the timeline at you; dodge: ↑ and ↓ in turn too; steer: under the boss, firing;
 // bombs: the X key every 0.45 s);
-// bombs: the X key pressed every 0.45 s; pre: played first, unmeasured. Steady states are measured for --seconds after a settle; transient ones
+// pre: played first, unmeasured. Steady states are measured for --seconds after a settle; transient ones
 // from the moment a log line says it happened (trigger), for each window [from, to] seconds after it.
 const STATES = {
   off: { what: 'game off (mods loaded, page idle)', path: '/home', start: false },

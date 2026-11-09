@@ -5,7 +5,7 @@
 // @run-at      document-start
 // @risk        0 render-only: reads what X already loaded for each post; sends nothing
 // @source      trif
-// @version     1
+// @version     2
 // ==/WebMod==
 
 // Who the author is to you comes from the post data X already has in the page: React keeps the post (a
@@ -16,6 +16,10 @@
 // can be shot).
 (() => {
   const LABELS = { mutual: 'mutual', following: 'you follow', follower: 'follows you', suggested: 'not followed' };
+  // Rainbow Rave's badge rainbow, lighter, as a seamless 102px tile: 3 hue cycles across, so its stripes are
+  // 24.04px apart on the diagonal (see the mutual badge below)
+  const FS_P = 102 / (3 * Math.SQRT2);
+  const FS_RAINBOW = `repeating-linear-gradient(45deg, ${Array.from({ length: 13 }, (_, i) => `hsl(${i * 30} 100% 74%) ${(i * FS_P / 12).toFixed(4)}px`).join(', ')})`;
 
   const style = document.createElement('style');
   style.textContent = `
@@ -42,17 +46,14 @@
       border-color: rgb(var(--fs-rgb) / 0.95); }
     html[data-fs-rave] .fs-avdot:not([data-fs=mutual]) { background-image: linear-gradient(rgb(var(--fs-rgb)), rgb(var(--fs-rgb))); }
     html[data-fs-rave] :is(.fs-badge, .fs-avdot)[data-fs=mutual] {
-      background: repeating-linear-gradient(45deg,
-        hsl(0 100% 74%) 0px, hsl(30 100% 74%) 2px, hsl(60 100% 74%) 4px, hsl(90 100% 74%) 6px,
-        hsl(120 100% 74%) 8px, hsl(150 100% 74%) 10px, hsl(180 100% 74%) 12px, hsl(210 100% 74%) 14px,
-        hsl(240 100% 74%) 16px, hsl(270 100% 74%) 18px, hsl(300 100% 74%) 20px, hsl(330 100% 74%) 22px,
-        hsl(360 100% 74%) 24px);
+      background: ${FS_RAINBOW};
       border-color: rgba(255, 255, 255, 0.9); animation: wm-rainbow-fs-roll 0.8s linear infinite;
-      /* the image is bigger than the badge and slides exactly one stripe (24px) up the diagonal, so no edge
-         of it ever shows: an image the badge's own size jumped at its seams (Rainbow Rave's icons do this) */
-      background-size: calc(100% + 80px) calc(100% + 80px); background-repeat: no-repeat; }
+      /* a seamless tile exactly 3 hue cycles across (102px), repeating, sliding one cycle (an exact 17px across
+         and up) per turn: nothing runs out or meets itself at a seam, whatever the badge's size (Rainbow Rave's
+         and Profile Styler's rainbows use the same tile) */
+      background-size: 102px 102px; background-repeat: repeat; }
     /* (named wm-rainbow-*: Rainbow Rave keeps those in phase with each other) */
-    @keyframes wm-rainbow-fs-roll { from { background-position: -40px -20px; } to { background-position: -23.029437px -36.970563px; } }
+    @keyframes wm-rainbow-fs-roll { from { background-position: -40px -20px; } to { background-position: -23px -37px; } }
     .fs-avdot { position: absolute; right: -2px; bottom: -2px; width: 11px; height: 11px; border-radius: 50%; z-index: 1;
       background: rgb(var(--fs-rgb)); box-shadow: 0 0 0 2px var(--fs-ring, #000); }
   `;

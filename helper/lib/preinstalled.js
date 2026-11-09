@@ -80,6 +80,11 @@ const PREINSTALLED = [
   // switches a random set on). Off, and TRIF starts off on timsrobot.com (not in SITES_ON).
   { id: 'timsrobot.com/skip-to-sandbox', on: false },
   { id: 'timsrobot.com/random-mods', on: false }, // R for Random
+  // Added in 0.2.5 (off): people's own colours, read from codes in their profile pictures (Profile Styler on
+  // profiles, Post Styler on posts and people cards), and Style Encoder to stamp yours into your picture.
+  { id: 'x.com/profile-styler', on: false },
+  { id: 'x.com/post-styler', on: false },
+  { id: 'x.com/style-encoder', on: false },
   // (Rainbow Rave for Google, Amazon and Instagram waits for a later release: unreleased/sites/.)
 ];
 
@@ -88,7 +93,7 @@ const PREINSTALLED = [
 // with every mods message (`defaultOrder`), and extension/lib.js orderMods puts mods it doesn't list after.
 // (0.2.3: X's, in Tim's order. The other sites' few shipped mods list in the order they always did.)
 const DEFAULT_ORDER = {
-  'x.com': ['x.com/detox-timeline', 'x.com/follow-status', 'x.com/space-shooter', 'x.com/rainbow-rave'],
+  'x.com': ['x.com/detox-timeline', 'x.com/follow-status', 'x.com/space-shooter', 'x.com/rainbow-rave', 'x.com/profile-styler', 'x.com/post-styler', 'x.com/style-encoder'],
 };
 
 // Shipped mods folded into another one (`into`, from its @version `since`), so no longer shipped

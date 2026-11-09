@@ -5,7 +5,7 @@
 // @run-at      document-start
 // @risk        1 patches attachShadow (to style chat and calls), which the page's scripts could notice
 // @source      webmods
-// @version     2
+// @version     3
 // ==/WebMod==
 
 (() => {
@@ -507,24 +507,26 @@
   // verified checks, liked hearts and their counts, saved bookmarks and hovered post interactions. ----
   // In its own block so its names don't clash with the ones above.
   {
-    // One complete hue cycle every 24px, rolling past in 0.8s. Its small, local image is independent
+    // One complete hue cycle every ~24px, rolling past in 0.8s. Its small, local image is independent
     // of the viewport background above and of X's transformed feed rows.
-    const RAINBOW = `repeating-linear-gradient(45deg,
-      hsl(0 100% 60%) 0px, hsl(30 100% 60%) 2px, hsl(60 100% 60%) 4px,
-      hsl(90 100% 60%) 6px, hsl(120 100% 60%) 8px, hsl(150 100% 60%) 10px,
-      hsl(180 100% 60%) 12px, hsl(210 100% 60%) 14px, hsl(240 100% 60%) 16px,
-      hsl(270 100% 60%) 18px, hsl(300 100% 60%) 20px, hsl(330 100% 60%) 22px,
-      hsl(360 100% 60%) 24px)`;
+    // (A seamless tile, TILE: exactly 3 hue cycles across, 102 px, so tiles meet stripe to stripe on anything
+    // of any size (the old 96 px image was 2.83 cycles across and ran out, or met itself at a seam, on wider
+    // things like long counts). The stripes are 24.04 px apart on the diagonal, so one cycle is an exact 17 px
+    // step across and up: see trif-rave-icons-roll. Tim's: same tile as Profile Styler's RAVE_TILE.)
+    const RB_P = 102 / (3 * Math.SQRT2);
+    const RAINBOW = `repeating-linear-gradient(45deg, ${Array.from({ length: 13 }, (_, i) => `hsl(${i * 30} 100% 60%) ${(i * RB_P / 12).toFixed(4)}px`).join(', ')})`;
+    const TILE = 'background-size: 102px 102px; background-repeat: repeat;';
     const mask = (path, size, viewBox = `0 0 ${size} ${size}`) => `url("data:image/svg+xml,${encodeURIComponent(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="${viewBox}"><path fill="white" d="${path}"/></svg>`)}")`;
     const CHECK_MASK = `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 22 22'%3E%3Cpath fill='white' d='M20.396 11c-.018-.646-.215-1.275-.57-1.816-.354-.54-.852-.972-1.438-1.246.223-.607.27-1.264.14-1.897-.131-.634-.437-1.218-.882-1.687-.47-.445-1.053-.75-1.687-.882-.633-.13-1.29-.083-1.897.14-.273-.587-.704-1.086-1.245-1.44S11.647 1.62 11 1.604c-.646.017-1.273.213-1.813.568s-.969.854-1.24 1.44c-.608-.223-1.267-.272-1.902-.14-.635.13-1.22.436-1.69.882-.445.47-.749 1.055-.878 1.688-.13.633-.08 1.29.144 1.896-.587.274-1.087.705-1.443 1.245-.356.54-.555 1.17-.574 1.817.02.647.218 1.276.574 1.817.356.54.856.972 1.443 1.245-.224.606-.274 1.263-.144 1.896.13.634.433 1.218.877 1.688.47.443 1.054.747 1.687.878.633.132 1.29.084 1.897-.136.274.586.705 1.084 1.246 1.439.54.354 1.17.551 1.816.569.647-.016 1.276-.213 1.817-.567s.972-.854 1.245-1.44c.604.239 1.266.296 1.903.164.636-.132 1.22-.447 1.68-.907.46-.46.776-1.044.908-1.681s.075-1.299-.165-1.903c.586-.274 1.084-.705 1.439-1.246.354-.54.551-1.17.569-1.816zM9.662 14.85l-3.429-3.428 1.293-1.302 2.072 2.072 4.4-4.794 1.347 1.246z'/%3E%3C/svg%3E")`;
     const FILLED_HEART_MASK = mask('M20.884 13.19c-1.351 2.48-4.001 5.12-8.379 7.67l-.503.3-.504-.3c-4.379-2.55-7.029-5.19-8.382-7.67-1.36-2.5-1.41-4.86-.514-6.67.887-1.79 2.647-2.91 4.601-3.01 1.651-.09 3.368.56 4.798 2.01 1.429-1.45 3.146-2.1 4.796-2.01 1.954.1 3.714 1.22 4.601 3.01.896 1.81.846 4.17-.514 6.67z', 24);
     const BOOKMARK_MASK = mask('M4 4.5C4 3.12 5.119 2 6.5 2h11C18.881 2 20 3.12 20 4.5v18.44l-8-5.71-8 5.71V4.5z', 24);
     const iconStyle = document.createElement('style');
     iconStyle.textContent = `
-      /* Translate one 24px period along the up/right diagonal. Oversize the image to cover its travel. */
+      /* Translate one hue cycle along the up/right diagonal: an exact 17px across and up (the tile repeats,
+         so nothing runs out) */
       @keyframes trif-rave-icons-roll {
         from { background-position: -40px -20px; }
-        to { background-position: -23.029437px -36.970563px; }
+        to { background-position: -23px -37px; }
       }
       @keyframes trif-rave-heart-pop {
         0% { transform: scale(0.2); }
@@ -549,7 +551,7 @@
       button[data-testid="removeBookmark"] [data-trif-rave-bookmark]::after {
         content: ''; position: absolute; inset: 0; z-index: 2; pointer-events: none;
         background-image: ${RAINBOW} !important;
-        background-size: 96px 96px; background-repeat: no-repeat;
+        ${TILE}
         animation: trif-rave-icons-roll 0.8s linear infinite;
         -webkit-mask: var(--trif-rave-mask) center / contain no-repeat;
         mask: var(--trif-rave-mask) center / contain no-repeat;
@@ -562,7 +564,7 @@
       [data-trif-rave-like-pop] button[data-testid="unlike"] [data-trif-rave-heart]::before,
       button[data-trif-rave-like-pop][data-testid="unlike"] [data-trif-rave-heart]::before {
         content: ''; position: absolute; inset: -50%; pointer-events: none; z-index: 2;
-        background-image: ${RAINBOW} !important; background-size: 96px 96px;
+        background-image: ${RAINBOW} !important; ${TILE}
         mask: radial-gradient(transparent 53%, #000 56% 64%, transparent 67%);
         animation: trif-rave-icons-roll .8s linear infinite, trif-rave-heart-burst .52s ease-out both;
       }
@@ -571,7 +573,7 @@
       [data-trif-rave-hover]:hover [data-trif-rave-hover-icon] > svg { opacity: 0 !important; }
       [data-trif-rave-hover]:hover [data-trif-rave-hover-icon]::after {
         content: ''; position: absolute; inset: 0; z-index: 2; pointer-events: none;
-        background-image: ${RAINBOW} !important; background-size: 96px 96px; background-repeat: no-repeat;
+        background-image: ${RAINBOW} !important; ${TILE}
         animation: trif-rave-icons-roll .8s linear infinite;
         -webkit-mask: var(--trif-rave-hover-mask) center / contain no-repeat;
         mask: var(--trif-rave-hover-mask) center / contain no-repeat;
@@ -580,8 +582,8 @@
       [data-trif-rave-hover]:hover [data-testid="app-text-transition-container"] span:not(:has(span)),
       button[data-testid="unlike"] [data-testid="app-text-transition-container"] span:not(:has(span)) {
         color: transparent !important; -webkit-text-fill-color: transparent !important;
-        background-image: ${RAINBOW} !important; background-size: 96px 96px;
-        background-repeat: no-repeat; background-clip: text !important; -webkit-background-clip: text !important;
+        background-image: ${RAINBOW} !important; ${TILE}
+        background-clip: text !important; -webkit-background-clip: text !important;
         animation: trif-rave-icons-roll .8s linear infinite;
       }
       /* No text shadow on the counts (it muddies the rainbow ones); the rest of X keeps it. */

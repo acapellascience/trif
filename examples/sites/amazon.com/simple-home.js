@@ -39,7 +39,7 @@
   // Same width as the traced logo in simple-home-svg.js, so the page looks the same with either.
   const LOGO_WIDTH = 220;
 
-  // Amazon's sprite is only 98x34 (at 2x), so at this size the browser's upscaling leaves soft,
+  // Amazon's logo sprite is small (98x34 at 1x), so at this size the browser's upscaling leaves soft,
   // blurry edges. This filter smooths the jaggies (a slight blur) and then steepens the alpha
   // ramp, so the edges come out crisp and anti-aliased. The logo is flat colour on transparent,
   // so working on alpha alone sharpens it without halos.
@@ -68,6 +68,29 @@
     return holder;
   };
 
+  const navLogoStyle = () => {
+    const base = document.querySelector('#nav-logo-sprites .nav-logo-base');
+    const cs = base && getComputedStyle(base);
+    return cs && cs.backgroundImage !== 'none' && parseFloat(cs.width) > 0 ? cs : null;
+  };
+
+  // Copy the nav logo's sprite styles as they are, and enlarge with `zoom` (unlike a transform, zoom
+  // also enlarges the space the logo takes in the layout). Copied once, when the page is built: at
+  // that point the nav uses the 1x sprite. Amazon swaps in a 2x sprite later in loading, but its
+  // crop lines up a little differently, so following it made the logo shift; with the crisp filter
+  // the 1x one looks good, so we keep it.
+  const syncLogo = (img) => {
+    const cs = navLogoStyle();
+    if (!cs) return;
+    img.style.backgroundImage = cs.backgroundImage;
+    img.style.backgroundRepeat = cs.backgroundRepeat;
+    img.style.backgroundPosition = cs.backgroundPosition;
+    img.style.backgroundSize = cs.backgroundSize;
+    img.style.width = cs.width;
+    img.style.height = cs.height;
+    img.style.zoom = String(LOGO_WIDTH / parseFloat(cs.width));
+  };
+
   const build = () => {
     try {
       if (!document.body || document.getElementById('ash-home')) return;
@@ -80,23 +103,11 @@
       logo.className = 'ash-logo';
       logo.href = '/';
       logo.setAttribute('aria-label', 'Amazon.com');
-      const base = document.querySelector('#nav-logo-sprites .nav-logo-base');
-      const cs = base && getComputedStyle(base);
-      const w = cs && parseFloat(cs.width);
-      if (cs && cs.backgroundImage !== 'none' && w > 0) {
-        // Draw it LOGO_WIDTH px wide by scaling the box, the sprite's size and its offset together
-        // (a transform would scale the box, but layout would still reserve the original size).
-        const k = LOGO_WIDTH / w;
-        const px = (v) => v.replace(/-?[\d.]+px/g, (n) => `${parseFloat(n) * k}px`);
+      if (navLogoStyle()) {
         const img = document.createElement('span');
         img.className = 'ash-logo-img';
-        img.style.backgroundImage = cs.backgroundImage;
-        img.style.backgroundRepeat = cs.backgroundRepeat;
-        img.style.backgroundPosition = px(cs.backgroundPosition);
-        img.style.backgroundSize = px(cs.backgroundSize);
-        img.style.width = `${LOGO_WIDTH}px`;
-        img.style.height = `${parseFloat(cs.height) * k}px`;
         logo.append(img, crispFilter());
+        syncLogo(img);
       } else {
         const t = document.createElement('span');
         t.className = 'ash-logo-text';

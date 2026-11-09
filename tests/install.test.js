@@ -529,7 +529,7 @@ test('preinstalled mods: each once, switched on or off as listed; the start site
   const plainx = path.join(sites, 'x.com', 'detox-timeline.js');
   const ids = PREINSTALLED.map((p) => p.id);
   const off = PREINSTALLED.filter((p) => !p.on).map((p) => p.id);
-  assert.deepStrictEqual(off, ['x.com/rainbow-rave', 'www.instagram.com/desaturate', 'www.google.com/dvd-logo', 'x.com/follow-status', 'x.com/space-shooter', 'www.instagram.com/three-column-feed', 'timsrobot.com/skip-to-sandbox', 'timsrobot.com/random-mods']);
+  assert.deepStrictEqual(off, ['x.com/rainbow-rave', 'www.instagram.com/desaturate', 'www.google.com/dvd-logo', 'x.com/follow-status', 'x.com/space-shooter', 'www.instagram.com/three-column-feed', 'timsrobot.com/skip-to-sandbox', 'timsrobot.com/random-mods', 'x.com/profile-styler', 'x.com/post-styler', 'x.com/style-encoder']);
   assert.deepStrictEqual(SITES_ON, ['google.com', 'x.com', 'amazon.com', 'instagram.com']);
   for (const id of ids) assert.ok(fs.existsSync(path.join(examples, `${id}.js`)), `examples has ${id}`);
   assert.deepStrictEqual(preinstallMods(home, sites, examples), { added: [], on: [], sites: [] }, 'no site added: nothing');
@@ -554,7 +554,7 @@ test('preinstalled mods: each once, switched on or off as listed; the start site
   r = preinstallMods(home2, path.join(home2, 'sites'), examples, undefined, undefined, { add: 'all' });
   assert.deepStrictEqual(r.added, ids.filter((id) => id !== 'x.com/rainbow-rave'));
   assert.strictEqual(fs.readFileSync(own, 'utf8'), '// mine');
-  assert.deepStrictEqual(loadPreinstalled(home2).startOff, ['www.instagram.com/desaturate', 'www.google.com/dvd-logo', 'x.com/follow-status', 'x.com/space-shooter', 'www.instagram.com/three-column-feed', 'timsrobot.com/skip-to-sandbox', 'timsrobot.com/random-mods'], 'the user\'s own file isn\'t switched off');
+  assert.deepStrictEqual(loadPreinstalled(home2).startOff, ['www.instagram.com/desaturate', 'www.google.com/dvd-logo', 'x.com/follow-status', 'x.com/space-shooter', 'www.instagram.com/three-column-feed', 'timsrobot.com/skip-to-sandbox', 'timsrobot.com/random-mods', 'x.com/profile-styler', 'x.com/post-styler', 'x.com/style-encoder'], 'the user\'s own file isn\'t switched off');
   assert.deepStrictEqual(loadPreinstalled(home2).shipped, { 'x.com/rainbow-rave': { own: true } }, 'nor ever updated');
 
   // Through setup: a new workspace gets none until the user chooses (the setup page), unless --examples.
@@ -626,7 +626,7 @@ test('Tim\'s mods, mod by mod: the ticked ones of a site are added (off ones sti
   assert.deepStrictEqual(starterChoices(home), { 'x.com': 'added', 'google.com': 'added', 'amazon.com': 'none', 'instagram.com': 'none', 'timsrobot.com': 'none' });
   // Settings offers it: the site is added, that mod isn't.
   let x = starterOffer(home, examples).sites.find((s) => s.site === 'x.com');
-  assert.deepStrictEqual(x.mods.map((m) => [m.id, m.choice]), [['x.com/detox-timeline', 'added'], ['x.com/follow-status', 'added'], ['x.com/space-shooter', 'added'], ['x.com/rainbow-rave', 'skipped']]);
+  assert.deepStrictEqual(x.mods.map((m) => [m.id, m.choice]), [['x.com/detox-timeline', 'added'], ['x.com/follow-status', 'added'], ['x.com/space-shooter', 'added'], ['x.com/rainbow-rave', 'skipped'], ['x.com/profile-styler', 'added'], ['x.com/post-styler', 'added'], ['x.com/style-encoder', 'added']]);
   // Later setups and updates never bring it in; a new mod for X still comes (off).
   assert.deepStrictEqual(preinstallMods(home, sites, examples), { added: [], on: [], sites: [] });
   updateShipped(home, sites, examples);
@@ -662,7 +662,7 @@ test('Tim\'s mods, site by site: added ones get their mods, new ones and updates
     ['instagram.com', 'Instagram', true, null], ['timsrobot.com', 'timsrobot.com', false, null]]);
   assert.deepStrictEqual(offer.sites.flatMap((x) => x.mods.map((m) => m.id)).sort(), PREINSTALLED.map((p) => p.id).sort(), 'every mod, from PREINSTALLED');
   assert.deepStrictEqual(offer.sites.find((x) => x.site === 'x.com').mods.map((m) => [m.name, m.on]),
-    [['Detox Timeline', true], ['Follow status', false], ['X-Flyer', false], ['Rainbow Rave', false]], 'X\'s in the panel\'s order');
+    [['Detox Timeline', true], ['Follow status', false], ['X-Flyer', false], ['Rainbow Rave', false], ['Profile Styler', false], ['Post Styler', false], ['Style Encoder', false]], 'X\'s in the panel\'s order');
   assert.ok(offer.sites.every((x) => x.mods.every((m) => m.name && typeof m.description === 'string')));
   assert.match(offer.sites.find((x) => x.site === 'timsrobot.com').note, /demo/);
 

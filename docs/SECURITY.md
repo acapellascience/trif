@@ -93,6 +93,15 @@ decodes strings it can't read. That flags ordinary array writes in some mods; th
 instructions, not a looser rule: TECHNIQUES.md "Writing mods TRIF can read" tells agents the plain way
 round each pattern, and `trif check` shows them what TRIF reads, line by line, before anything waits.
 
+How far this reading goes, plainly: it's a list of known ways to send, act, load or hide, and it catches
+the common spellings of each, not every one. JavaScript and the browser offer many routes to the same
+thing (Object.assign onto an element, setAttributeNS, a property's setter taken out by name, CSS loaded
+from a style element's text, and, above all, the page's own functions: a mod can call the site's own code
+to post or fetch without writing either word). An agent writing to get past it can. So "TRIF finds
+nothing" means "nothing TRIF knows how to spot", not "safe": the holds are a checkpoint for honest code
+and lazy attacks, and the walls are elsewhere: the tab lock for an agent's live code, the run scope and
+sandbox, and (planned) mods that run where they can't act at all (docs/SAFE-MODS.md).
+
 Not covered: a mod reusing an allowed function of its own (an approved `send(x)` called with new data
 from a new line). A terminal agent (which has the user's shell) could run `trif approve` or edit
 allowed.json itself; AGENTS.md tells it never to, but only the side panel's sandbox enforces it. A dev

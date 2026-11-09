@@ -206,7 +206,9 @@ const UI_EVENT_CLASSES = new Set(['MouseEvent', 'PointerEvent', 'KeyboardEvent',
 const NAVIGATES = new Set(['location', 'open', 'assign', 'replace', 'navigate']);
 // Names that run code TRIF can't read (a reading by name can't see what's in it). Other frames' windows
 // (contentWindow, parent) aren't here: their fetch is still called fetch.
-const HIDDEN = new Set(['eval', 'Function', 'constructor', 'Reflect', 'createContextualFragment', 'srcdoc', 'GeneratorFunction', 'AsyncFunction']);
+const HIDDEN = new Set(['eval', 'Function', 'constructor', 'Reflect', 'createContextualFragment', 'srcdoc', 'GeneratorFunction', 'AsyncFunction',
+  // (a property's setter taken out and called reaches it by name as text: getOwnPropertyDescriptor(…, 'src').set.call(img, u))
+  'getOwnPropertyDescriptor', 'getOwnPropertyDescriptors', '__lookupSetter__', '__defineSetter__']);
 // Ways to make a string TRIF can't read off the page (base64, character codes, reversing): together with
 // a name worked out at run time, they can make "fetch" or "script" without writing it.
 const DECODERS = new Set(['atob', 'fromCharCode', 'fromCodePoint', 'unescape', 'TextDecoder', 'reverse']);
@@ -351,6 +353,13 @@ function powersOf(code, { sites = [] } = {}) {
       classifyName(v, t.line, afterDot, toks, k);
       continue;
     }
+    if ((t.t === 'str' || (t.t === 'tpl' && !t.interp)) && /url\(|@import|image-set\(/i.test(t.v) && (next?.v === '+' || prev?.v === '+')) {
+      // "url(" + something worked out + ")": CSS that loads from an address built at run time, wherever the
+      // string goes (a style element's text, cssText, a property)
+      const other = next?.v === '+' ? toks[k + 2] : toks[k - 2];
+      if (other && !(other.t === 'str' || other.t === 'num')) add('loads', 'CSS url(…) or @import with an address built at run time', t.line);
+    }
+    if (t.t === 'tpl' && t.interp && /(?:url\(|@import|image-set\()[^)\u0000]*\u0000/i.test(t.v)) add('loads', 'CSS url(…) or @import with an address built at run time', t.line);
     if (t.t === 'str' || t.t === 'tpl') {
       const text = t.v;
       for (const h of hostsIn(text)) if (!ownHost(h, site) && !NOT_SITES.has(h)) add(`site:${h}`, h, t.line);
@@ -390,6 +399,8 @@ function powersOf(code, { sites = [] } = {}) {
     if (HIDDEN.has(v)) {
       if (v === 'constructor' && !member) return;
       if (v === 'constructor' && !called && !(nx && nx.t === 'p' && nx.v === '.')) return; // (reading .constructor to compare classes)
+      if (v === 'getOwnPropertyDescriptor' || v === 'getOwnPropertyDescriptors') add('hidden', `Object.${v} (a property's setter by name)`, line), v = null;
+      if (v === null) return;
       add('hidden', v === 'Function' ? 'Function' : v, line);
       return;
     }
@@ -404,6 +415,32 @@ function powersOf(code, { sites = [] } = {}) {
       const tag = arg && (arg.t === 'str' || (arg.t === 'tpl' && !arg.interp)) && close && close.v === ')' ? arg.v.toLowerCase() : null;
       if (tag === null) { if (could(DANGER_TAGS)) add('hidden', 'createElement with a tag worked out at run time', line); }
       else if (DANGER_TAGS.test(tag)) add('hidden', `a <${tag}> element`, line);
+      return;
+    }
+    if (v === 'assign' && called && member && ts[k - 2]?.v === 'Object') {
+      // Object.assign(target, { src: u }) sets target.src like img.src = u does; { [k]: v } could be any name
+      let depth = 0;
+      for (let j = k + 1; j < ts.length; j++) {
+        const x = ts[j];
+        if (depth === 2 && x.v === '[' && (ts[j - 1]?.v === '{' || ts[j - 1]?.v === ',')) { add('loads', 'Object.assign with a property name worked out at run time', line); break; }
+        if (['(', '[', '{', '${'].includes(x.v)) depth++;
+        if ([')', ']', '}', '}$'].includes(x.v)) { depth--; if (!depth) break; }
+        if (depth === 2 && ts[j - 1]?.v !== '.' && (x.t === 'id' || x.t === 'str') && ts[j + 1]?.v === ':' && (ts[j - 1]?.v === '{' || ts[j - 1]?.v === ',')) {
+          if (LOAD_PROPS.has(x.v) && !literalValue(ts, j + 2)) { add('loads', `Object.assign with ${x.v}`, line); break; }
+          if (/^(innerHTML|outerHTML|srcdoc)$/.test(x.v) || /^on[a-z]+$/.test(x.v) && x.v !== 'once') { add('hidden', `Object.assign with ${x.v}`, line); break; }
+        }
+      }
+      return;
+    }
+    if (v === 'setAttributeNS' && called) {
+      // (namespace, name, value): the name second
+      let j = k + 2, depth = 0;
+      for (; j < ts.length; j++) { if (['(', '[', '{'].includes(ts[j].v)) depth++; if ([')', ']', '}'].includes(ts[j].v)) depth--; if (!depth && ts[j].v === ',') break; }
+      const arg = ts[j + 1], comma = ts[j + 2];
+      const name = arg && (arg.t === 'str' || (arg.t === 'tpl' && !arg.interp)) && comma && comma.v === ',' ? arg.v.toLowerCase().replace(/^xlink:/, '') : null;
+      if (name === null) add('hidden', 'setAttributeNS with a name worked out at run time', line);
+      else if (/^on/.test(name)) add('hidden', 'an inline event handler', line);
+      else if (LOAD_PROPS.has(name) || name === 'style') { if (!literalValue(ts, j + 3)) add('loads', `setAttributeNS(…, '${name}', …)`, line); }
       return;
     }
     if (v === 'setAttribute' && called) {

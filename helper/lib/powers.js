@@ -280,19 +280,6 @@ function powersOf(code, { sites = [] } = {}) {
     return true;
   });
   const could = (re) => decodes || [...cands].some((c) => re.test(c));
-  // Narrower, for writes through a name worked out at run time (x[k] = v, setAttribute(k, v)): only when
-  // the name provably can be one of these: a constant holding it (const k = 'src'), an object key a
-  // loop could hand on ({ href: u } then setAttribute(k, attrs[k])), or strings TRIF can't read. Not any
-  // string anywhere in the file: then every arr[i] = v in a mod that mentions "href" would count.
-  const consts = new Map(), objKeys = new Set();
-  for (let k = 0; k < toks.length; k++) {
-    const t = toks[k];
-    if (t.t === 'id' && /^(const|let|var)$/.test(t.v) && toks[k + 1]?.t === 'id' && toks[k + 2]?.v === '=' && (toks[k + 3]?.t === 'str' || (toks[k + 3]?.t === 'tpl' && !toks[k + 3].interp)) && [';', ',', undefined].includes(toks[k + 4]?.v)) consts.set(toks[k + 1].v, toks[k + 3].v);
-    if ((t.t === 'id' || t.t === 'str') && toks[k + 1]?.t === 'p' && toks[k + 1].v === ':' && toks[k - 1]?.t === 'p' && (toks[k - 1].v === '{' || toks[k - 1].v === ',')) objKeys.add(t.v);
-  }
-  const keyCould = (keyToks, re) => decodes
-    || (keyToks.length === 1 && keyToks[0].t === 'id' && consts.has(keyToks[0].v) && re.test(consts.get(keyToks[0].v)))
-    || (keyToks.length === 1 && keyToks[0].t === 'id' && !consts.has(keyToks[0].v) && [...objKeys].some((x) => re.test(x)));
   const RISKY_NAMES = new RegExp(`^(${[...SENDS, ...ACTS, ...HIDDEN, 'eval', 'open', 'location', 'innerHTML', 'outerHTML', 'insertAdjacentHTML', 'src', 'href', 'action', 'srcdoc', 'setAttribute', 'createElement', 'write'].join('|')})$`);
 
   const isName = (t) => t && (t.t === 'id' || ((t.t === 'str' || (t.t === 'tpl' && !t.interp))));
@@ -322,8 +309,8 @@ function powersOf(code, { sites = [] } = {}) {
         if ((callAfter || onGlobal) && could(RISKY_NAMES)) add('hidden', onGlobal ? `${prev.v}[…] with a name worked out at run time` : 'x[…]() with a name worked out at run time', t.line);
         else if (assignAfter) {
           // (el[k] = fn for an onclick is ordinary code: a handler property only takes functions)
-          if (keyCould(inner, /^(innerHTML|outerHTML|srcdoc)$/)) add('hidden', 'x[…] = with a name worked out at run time', t.line);
-          else if (keyCould(inner, /^(src|srcset|href|action|formAction|poster|ping)$/)) add('loads', 'x[…] = with a name worked out at run time', t.line);
+          if (could(/^(innerHTML|outerHTML|srcdoc)$/)) add('hidden', 'x[…] = with a name worked out at run time', t.line);
+          else if (could(/^(src|srcset|href|action|formAction|poster|ping)$/)) add('loads', 'x[…] = with a name worked out at run time', t.line);
         }
       }
       continue;
@@ -392,9 +379,8 @@ function powersOf(code, { sites = [] } = {}) {
       const arg = ts[k + 2], comma = ts[k + 3];
       const name = arg && (arg.t === 'str' || (arg.t === 'tpl' && !arg.interp)) && comma && comma.v === ',' ? arg.v.toLowerCase() : null;
       if (name === null) {
-        const keyToks = arg && ts[k + 3] && ts[k + 3].v === ',' ? [arg] : [];
-        if (keyCould(keyToks, HANDLER_ATTR) || (!keyToks.length && could(HANDLER_ATTR))) add('hidden', 'setAttribute with a name worked out at run time', line);
-        else if (keyCould(keyToks, /^(src|srcset|href|xlink:href|action|formaction|poster|ping|style)$/i) || (!keyToks.length && could(/^(src|srcset|href|xlink:href|action|formaction|poster|ping)$/i))) add('loads', 'setAttribute with a name worked out at run time', line);
+        if (could(HANDLER_ATTR)) add('hidden', 'setAttribute with a name worked out at run time', line);
+        else if (could(/^(src|srcset|href|xlink:href|action|formaction|poster|ping|style)$/i)) add('loads', 'setAttribute with a name worked out at run time', line);
       }
       else if (/^on/.test(name)) add('hidden', 'an inline event handler', line);
       else if (LOAD_PROPS.has(name) || name === 'style' || name === 'srcdoc') {

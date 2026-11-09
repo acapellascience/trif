@@ -154,13 +154,3 @@ test('everyday code that only looks like hiding a name', () => {
   has('const k = "hctef".split("").reverse().join(""); w[k]("/x")', 'hidden');
   has('const a = { onload: "fetch(1)" }; for (const k in a) e.setAttribute(k, a[k])', 'hidden');
 });
-
-test('writes through a run-time name count only when the name provably can be a risky one', () => {
-  // an array or counter write in a mod that mentions "href" somewhere: nothing
-  none('const link = "href"; const sizes = [1, 2]; for (let i = 0; i < 2; i++) sizes[i] = sizes[i] * 2; counts[c.kind] = (counts[c.kind] || 0) + 1');
-  none('const el = (tag, attrs) => { const e = document.createElementNS(NS, tag); for (const k in attrs) e.setAttribute(k, attrs[k]); return e; }; el("circle", { cx: 1, r: 2 }); const s = "href";');
-  // the name is a constant holding a load attribute, or an object key handed on to setAttribute
-  has('const k = "src"; img[k] = u', 'loads');
-  has('const a = { href: u }; for (const k in a) el.setAttribute(k, a[k])', 'loads');
-  has('const k = "innerHTML"; el[k] = html', 'hidden');
-});

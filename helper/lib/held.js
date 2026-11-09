@@ -27,6 +27,8 @@
 //                            powers.js gives them, plus `match:<pattern>` and `risk2`)
 //   $TRIF_HOME/seen.json     mod id -> {hash, lines: {key: [line hash]}}: the version TRIF last let run, and
 //                            its lines that use a power (a change is judged on what it adds to those)
+//   $TRIF_HOME/.ran/<site>/<mod>.js  that version's text: while a change to the mod waits, it's what runs
+//                            (lastRun), and "Don't allow" puts it back
 // A held entry lasts while that version of the mod is there; an edit makes it be worked out again.
 // (Before 0.3.0 an approved hold stayed in held.json marked `approved`: it becomes allowed powers.)
 
@@ -96,6 +98,25 @@ function holdReason(mod, scope, allowed = []) {
 }
 
 function heldFile(home) { return path.join(home, 'held.json'); }
+function ranFile(home, id) { const [site, ...rest] = String(id).split('/'); return path.join(home, '.ran', site, `${rest.join('/')}.js`); }
+function saveRan(home, m) {
+  try {
+    const f = ranFile(home, m.id);
+    fs.mkdirSync(path.dirname(f), { recursive: true });
+    const tmp = `${f}.${process.pid}.tmp`;
+    fs.writeFileSync(tmp, m.code);
+    fs.renameSync(tmp, f);
+  } catch { /* the waiting version just won't have the old one running beside it */ }
+}
+/** The text of the version of a mod TRIF last let run (seen.json's), or null. */
+function lastRun(home, id) {
+  const seen = loadSeen(home) || {};
+  const want = typeof seen[id] === 'string' ? seen[id] : seen[id] && seen[id].hash;
+  if (!want) return null;
+  let code;
+  try { code = fs.readFileSync(ranFile(home, id), 'utf8'); } catch { return null; }
+  return code;
+}
 function seenFile(home) { return path.join(home, 'seen.json'); }
 function allowedFile(home) { return path.join(home, 'allowed.json'); }
 
@@ -215,13 +236,15 @@ function updateHeld(ws, mods, scopes) {
   if (seen === null) { // the first time: what's there is the user's, as it is
     // (but not a mod a live run just wrote: that one is judged like any change)
     seen = Object.fromEntries(mods.filter((m) => !byRun.has(m.id)).map((m) => [m.id, record(m)]));
+    for (const m of mods) if (!byRun.has(m.id)) saveRan(ws.home, m);
     seenChanged = true;
   }
   for (const m of mods) {
     const same = held[m.id] && held[m.id].hash === m.hash; // (held as it is: waiting for the user, unless it's allowed now)
     const run = byRun.get(m.id) || (held[m.id] && live.find((s) => s.runId === held[m.id].runId)) || (same && held[m.id].scope ? { site: held[m.id].site, scope: held[m.id].scope, runId: held[m.id].runId } : null);
     if (!run && seenHash(seen[m.id]) === m.hash) {
-      if (typeof seen[m.id] === 'string') { seen[m.id] = record(m); seenChanged = true; } // (recorded before lines were)
+      if (typeof seen[m.id] === 'string') { seen[m.id] = record(m); seenChanged = true; saveRan(ws.home, m); } // (recorded before lines were)
+      else if (!fs.existsSync(ranFile(ws.home, m.id))) saveRan(ws.home, m);
       if (held[m.id]) { delete held[m.id]; changed = true; }
       continue;
     }
@@ -239,28 +262,61 @@ function updateHeld(ws, mods, scopes) {
       changed = true;
     } else {
       if (held[m.id]) { delete held[m.id]; changed = true; }
-      if (seenHash(seen[m.id]) !== m.hash) { seen[m.id] = record(m); seenChanged = true; }
+      if (seenHash(seen[m.id]) !== m.hash) { seen[m.id] = record(m); seenChanged = true; saveRan(ws.home, m); }
     }
   }
   const ids = new Set(mods.map((m) => m.id));
   for (const id of Object.keys(held)) if (!ids.has(id)) { delete held[id]; changed = true; }
-  for (const id of Object.keys(seen)) if (!ids.has(id)) { delete seen[id]; seenChanged = true; }
+  for (const id of Object.keys(seen)) if (!ids.has(id)) { delete seen[id]; seenChanged = true; try { fs.unlinkSync(ranFile(ws.home, id)); } catch { /* none */ } }
   if (changed) saveHeld(ws.home, held);
   if (seenChanged) saveJson(seenFile(ws.home), seen);
   return held;
 }
 
-/** Release a held mod: the user allowed what TRIF found in it. Throws if it isn't held. */
-function approveHeld(home, id) {
+/**
+ * Release a held mod: the user allowed what TRIF found in it. Throws if it isn't held, or (`hash`) if the
+ * waiting version isn't the one the user looked at any more.
+ */
+function approveHeld(home, id, hash = null) {
   const held = loadHeld(home);
   if (!held[id] || held[id].approved) throw new Error(`${id} isn't held`);
+  if (hash && held[id].hash !== hash) throw new Error(`${id} changed again since you looked at it: look at what's waiting now`);
   const lines = held[id].lines || {};
   allowPowers(home, id, (held[id].needs || []).map((key) => ({ key, lines: lines[key] || [] })));
   const seen = loadSeen(home) || {};
-  seen[id] = { hash: held[id].hash }; // (its lines are allowed now; the next sync records them)
+  seen[id] = { hash: held[id].hash, lines: (seen[id] && typeof seen[id] === 'object' && seen[id].lines) || {} }; // (its lines are allowed now)
   saveJson(seenFile(home), seen);
+  try { fs.unlinkSync(ranFile(home, id)); } catch { /* none */ } // (the next sync keeps the approved version's text)
   delete held[id];
   saveHeld(home, held);
+}
+
+/**
+ * "Don't allow": the waiting version goes (kept in history/, so nothing is lost) and the version that last
+ * ran is put back; a mod that never ran goes to the trash. Returns {id, restored: 'previous'|'removed'}.
+ */
+function rejectHeld(ws, id, hash = null) {
+  const held = loadHeld(ws.home);
+  if (!held[id]) throw new Error(`${id} isn't waiting for your OK`);
+  if (hash && held[id].hash !== hash) throw new Error(`${id} changed again since you looked at it: look at what's waiting now`);
+  const [site, ...rest] = String(id).split('/');
+  const file = path.join(ws.modsDir, site, `${rest.join('/')}.js`);
+  const before = lastRun(ws.home, id);
+  const history = require('./history');
+  let restored;
+  if (before !== null) {
+    try { history.writeEntry(ws, site, rest.join('/'), fs.readFileSync(file)); } catch { /* gone already */ }
+    const tmp = `${file}.${process.pid}.tmp`;
+    fs.writeFileSync(tmp, before);
+    fs.renameSync(tmp, file);
+    restored = 'previous';
+  } else {
+    require('./trash').deleteMod(ws, id);
+    restored = 'removed';
+  }
+  delete held[id];
+  saveHeld(ws.home, held);
+  return { id, restored };
 }
 
 /**
@@ -288,6 +344,6 @@ function reviewMod(home, mod) {
 }
 
 module.exports = {
-  loadHeld, saveHeld, updateHeld, approveHeld, heldFile, allowedFile, seenFile, holdReason,
+  loadHeld, saveHeld, updateHeld, approveHeld, rejectHeld, lastRun, heldFile, allowedFile, seenFile, holdReason,
   needsOf, reviewItems, reviewMod, allowPowers, loadAllowed, powersFor, allowedKeys,
 };

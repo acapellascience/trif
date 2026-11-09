@@ -987,7 +987,7 @@ async function uiStatus() {
       id: m.id, name: m.name || m.id, description: m.description || '', site: m.site, file: m.file || '',
       matches: m.matches || [], excludes: m.excludes || [], registered: !!live.get(m.id)?.registered, enabled: live.get(m.id)?.enabled ?? isEnabled(m.id),
       error: errors.get(m.id) === USER_SCRIPTS_OFF ? null : errors.get(m.id) || null,
-      held: m.held || null, review: m.held ? null : m.review || null, risk: m.risk || null,
+      held: m.held || null, pending: m.pending || null, review: m.held || m.pending ? null : m.review || null, risk: m.risk || null,
       from: fromOtherBrowser(m, state.installId) ? (m.origin.browser || 'another browser') : null,
       source: m.source || null, version: m.version || null, update: m.update || null,
     })),
@@ -1072,8 +1072,20 @@ async function onPanelMessage(msg) {
       // "Looks right" on a mod TRIF found can do more than restyle (the helper allows what it found)
       return helperRequest('mod.review', { id: String(msg.id ?? '') }, 10000);
     }
+    case 'mod.diff': {
+      // "Show what changed" on a change waiting for the user's OK
+      return helperRequest('mod.diff', { id: String(msg.id ?? '') }, 15000);
+    }
+    case 'mod.reject': {
+      // "Don't allow": the helper puts the version before back (or, for a new mod, moves it to the trash)
+      const r = await helperRequest('mod.reject', { id: String(msg.id ?? ''), ...(typeof msg.hash === 'string' ? { hash: msg.hash } : {}) }, 10000);
+      await serial(() => {});
+      const mod = state.mods.find((m) => m.id === r.id);
+      if (mod && msg.tab !== undefined) await reloadIfApplies(mod, { tab: msg.tab }, { onlyIfRunning: true });
+      return r;
+    }
     case 'mod.approve': {
-      const r = await helperRequest('mod.approve', { id: String(msg.id ?? '') }, 10000);
+      const r = await helperRequest('mod.approve', { id: String(msg.id ?? ''), ...(typeof msg.hash === 'string' ? { hash: msg.hash } : {}) }, 10000);
       if (msg.tab !== undefined) {
         await serial(() => {}); // the helper re-sent the mods before answering: let them register first
         const mod = state.mods.find((m) => m.id === r.id);

@@ -649,7 +649,7 @@ function renderMods() {
   // the pointer by a status refresh or by another mod changing. Everything else updates in place.
   const rows = new Map();
   for (const m of mods) {
-    const key = JSON.stringify([site, m.name, m.description || '', m.file, m.held ?? null, m.review ?? null, m.risk?.tier ?? null, m.risk?.why ?? null, m.matches,
+    const key = JSON.stringify([site, m.name, m.description || '', m.file, m.held ?? null, m.pending ?? null, m.review ?? null, m.risk?.tier ?? null, m.risk?.why ?? null, m.matches,
       m.source ?? null, m.version ?? null, m.update ?? null]);
     const old = view.modRows.get(m.id);
     rows.set(m.id, old && old.key === key ? old : { key, li: modItem(m) });
@@ -793,7 +793,7 @@ function modItem(m) {
     allow.addEventListener('click', async () => {
       allow.disabled = true;
       clearRowError(m.id);
-      try { await request({ type: 'mod.approve', id: m.id, tab: view.tab?.id }); } catch (e) {
+      try { await request({ type: 'mod.approve', id: m.id, hash: m.held.hash, tab: view.tab?.id }); } catch (e) {
         allow.disabled = false;
         rowError(m.id, String(e?.message ?? e));
       }
@@ -810,6 +810,7 @@ function modItem(m) {
   err.hidden = true;
   li.append(row, err);
   if (m.held) li.append(factsBox(m, m.held, 'held'));
+  else if (m.pending) li.append(factsBox(m, m.pending, 'pending'));
   else if (m.review) li.append(factsBox(m, m.review, 'review'));
   if (m.update && !m.held) li.append(updateNotice(m, err));
   return li;
@@ -821,16 +822,17 @@ function modItem(m) {
 // Review (a mod the user has, still running): "Looks right" allows what was found; or switch it off.
 function factsBox(m, info, kind) {
   const box = el('div', `mod-facts ${kind}`);
-  box.append(el('p', 'facts-head', kind === 'held'
-    ? 'Waiting for your OK. TRIF found that this mod:'
-    : 'TRIF found that this mod:'));
+  box.append(el('p', 'facts-head', kind === 'held' ? 'Waiting for your OK. TRIF found that this mod:'
+    : kind === 'pending' ? 'A change to this mod is waiting for your OK. TRIF found that the new version:'
+      : 'TRIF found that this mod:'));
   const list = el('ul', 'facts');
   for (const f of (Array.isArray(info.facts) ? info.facts : [String(info.reason || '')]).filter(Boolean)) list.append(el('li', null, f));
   box.append(list);
   const where = m.matches && m.matches.length ? ` It runs by itself on every page it's for (${m.matches.slice(0, 3).join(', ')}${m.matches.length > 3 ? '…' : ''}).` : '';
-  const fromAgent = kind === 'held' && info.by !== 'outside';
+  const fromAgent = kind !== 'review' && info.by !== 'outside';
+  const who = fromAgent ? `An agent ${kind === 'pending' ? 'changed' : 'wrote'} it in your chat on ${info.site || view.site}.` : 'It\'s new or changed since TRIF last let it run.';
   box.append(el('p', 'facts-note', `${kind === 'review' ? 'It keeps running until you switch it off.'
-    : fromAgent ? 'An agent wrote it while working here.' : 'It\'s new or changed since TRIF last let it run.'}${where}`));
+    : kind === 'pending' ? `${who} The version before keeps running until you decide.` : who}${where}`));
   if (info.claim) {
     const claim = el('p', 'facts-claim');
     claim.append(el('span', 'facts-who', fromAgent ? 'The agent says: ' : 'The mod says: '), document.createTextNode(`“${info.claim}”`));
@@ -848,6 +850,39 @@ function factsBox(m, info, kind) {
       showCode.textContent = 'Hide code';
     } catch (e) { rowError(m.id, String(e?.message ?? e)); } finally { showCode.disabled = false; }
   });
+  // The waiting change itself, against the version that last ran (the helper's lib/diff.js)
+  const diffView = el('pre', 'facts-diff');
+  diffView.hidden = true;
+  const showDiff = button('Show what changed', '', async () => {
+    if (!diffView.hidden) { diffView.hidden = true; showDiff.textContent = 'Show what changed'; return; }
+    showDiff.disabled = true;
+    try {
+      const r = await request({ type: 'mod.diff', id: m.id });
+      diffView.replaceChildren(...r.lines.map((l) => el('span', l.t === '+' ? 'add' : l.t === '-' ? 'del' : l.t === '…' ? 'gap' : 'ctx', `${l.t === '…' ? '…' : l.t} ${l.s}\n`)));
+      diffView.hidden = false;
+      showDiff.textContent = 'Hide what changed';
+    } catch (e) { rowError(m.id, String(e?.message ?? e)); } finally { showDiff.disabled = false; }
+  });
+  const decide = (type, label, title) => {
+    const b = button(label, type === 'mod.approve' ? 'primary' : '', async () => {
+      b.disabled = true;
+      clearRowError(m.id);
+      try { await request({ type, id: m.id, hash: info.hash, tab: view.tab?.id }); } catch (e) { b.disabled = false; rowError(m.id, String(e?.message ?? e)); }
+    });
+    b.title = title;
+    return b;
+  };
+  if (kind === 'pending') {
+    box.append(actions(decide('mod.approve', 'Allow', 'The new version runs from the next page load.'),
+      decide('mod.reject', 'Don\'t allow', 'The version before stays; the change is kept in its history (trif history).'), showDiff));
+    box.append(diffView);
+    return box;
+  }
+  if (kind === 'held') {
+    box.append(actions(decide('mod.reject', 'Don\'t allow', 'It goes to the trash (trif restore brings it back).'), showCode));
+    box.append(shown);
+    return box;
+  }
   if (kind === 'review') {
     const ok = button('Looks right', '', async () => {
       ok.disabled = true;

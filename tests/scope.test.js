@@ -7,7 +7,7 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 const { scopeFor, hostInScope, patternInScope, outOfScope } = require('../helper/lib/scope');
-const { updateHeld, approveHeld, loadHeld, loadAllowed, reviewItems, reviewMod } = require('../helper/lib/held');
+const { updateHeld, approveHeld, rejectHeld, lastRun, loadHeld, loadAllowed, reviewItems, reviewMod } = require('../helper/lib/held');
 const { snapshot } = require('../helper/lib/runs');
 const { scanMods } = require('../helper/lib/mods');
 const { tempDir } = require('./fake-extension');
@@ -307,4 +307,43 @@ test('updateHeld: a change is judged on what it adds to the version that already
   write(ws, 'x.com/mine.js', v1 + 'document.body.style.color = "red";\nfetch("/b", { method: "POST" });\n');
   const held = updateHeld(ws, scanMods(ws.modsDir).mods, []);
   assert.deepEqual(held['x.com/mine'].needs, ['sends']);
+});
+
+test('all-sites/ is writable from a run (its changes wait for the user\'s OK); every other site stays locked', () => {
+  const { runLimits } = require('../helper/lib/runs');
+  const ws = makeWs();
+  for (const d of ['all-sites', 'chatgpt.com']) fs.mkdirSync(path.join(ws.modsDir, d));
+  const box = tempDir();
+  const lim = runLimits(ws, { scope: 'x.com', box, screenshots: box });
+  assert.deepEqual(lim.locked.sort(), [path.join('sites', 'chatgpt.com')]);
+  assert.ok(!lim.readOnly.some((p) => p.endsWith(`${path.sep}all-sites`)));
+});
+
+test('a waiting change to a mod that ran: the version before is what runs; Don\'t allow puts it back; Allow only for the version looked at', () => {
+  const ws = makeWs();
+  fs.mkdirSync(path.join(ws.modsDir, 'all-sites'));
+  const v1 = header('*://*/*') + 'document.documentElement.style.background = "#111";\n';
+  const v2 = header('*://*/*') + 'document.documentElement.style.background = "#333";\n';
+  write(ws, 'all-sites/dark.js', v1);
+  assert.deepEqual(updateHeld(ws, scanMods(ws.modsDir).mods, []), {}); // (ran, as it was)
+  const before = snapshot(ws.modsDir, ws.home);
+  write(ws, 'all-sites/dark.js', v2); // a run on x.com edits it
+  const held = updateHeld(ws, scanMods(ws.modsDir).mods, [{ runId: 'r1', site: 'x.com', scope: 'x.com', before }]);
+  assert.deepEqual(held['all-sites/dark'].needs, ['match:*://*/*']);
+  assert.equal(lastRun(ws.home, 'all-sites/dark'), v1, 'the version before keeps running');
+  // Allow for a version that isn't the one looked at: refused
+  assert.throws(() => approveHeld(ws.home, 'all-sites/dark', 'not-that-one'), /changed again since you looked/);
+  // Don't allow: v1 back, v2 kept in history
+  const r = rejectHeld(ws, 'all-sites/dark', held['all-sites/dark'].hash);
+  assert.equal(r.restored, 'previous');
+  assert.equal(fs.readFileSync(path.join(ws.modsDir, 'all-sites/dark.js'), 'utf8'), v1);
+  assert.equal(fs.readFileSync(require('../helper/lib/history').listHistory(ws, 'all-sites/dark')[0].file, 'utf8'), v2);
+  assert.deepEqual(updateHeld(ws, scanMods(ws.modsDir).mods, []), {});
+  // a new mod a run wrote, not allowed: to the trash
+  const before2 = snapshot(ws.modsDir, ws.home);
+  write(ws, 'all-sites/new.js', header('*://*/*'));
+  updateHeld(ws, scanMods(ws.modsDir).mods, [{ runId: 'r2', site: 'x.com', scope: 'x.com', before: before2 }]);
+  assert.equal(lastRun(ws.home, 'all-sites/new'), null);
+  assert.equal(rejectHeld(ws, 'all-sites/new').restored, 'removed');
+  assert.equal(fs.existsSync(path.join(ws.modsDir, 'all-sites/new.js')), false);
 });

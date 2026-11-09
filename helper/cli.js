@@ -18,7 +18,7 @@ const trash = require('./lib/trash');
 const shipped = require('./lib/preinstalled');
 
 // Inside a side-panel agent run (the helper set TRIF_RUN_TOKEN) these are the user's alone.
-const NOT_IN_RUNS = new Set(['setup', 'agent', 'approve', 'mod-update', 'undo']);
+const NOT_IN_RUNS = new Set(['setup', 'agent', 'approve', 'reject', 'mod-update', 'undo']);
 
 // Output piped into something that stops reading early (`trif tabs | head -1`) isn't an error.
 process.stdout.on('error', (e) => { if (e.code === 'EPIPE') process.exit(0); throw e; });
@@ -317,7 +317,7 @@ const handlers = {
     for (const id of ids) {
       let s;
       if (helperErrors.has(id)) s = `NOT SENT: ${helperErrors.get(id)}`;
-      else if (held[id]) s = `HELD: it ${(held[id].facts || [held[id].reason]).join('; it ')} (trif approve ${id})`;
+      else if (held[id]) s = `${(info.pending || []).includes(id) ? 'CHANGE WAITING (the version before runs meanwhile)' : 'HELD'}: it ${(held[id].facts || [held[id].reason]).join('; it ')} (trif approve ${id}, or trif reject ${id})`;
       else if (off.has(id)) s = shipsOff.has(id) ? 'off (as TRIF ships it)' : 'off';
       else if (sitesOff.has(id)) s = 'waiting: TRIF is off on its site';
       else if (applyErrors.has(id)) s = `NOT REGISTERED: ${applyErrors.get(id)}`;
@@ -557,6 +557,13 @@ const handlers = {
     const r = await ctx.call('open', { to: normalizeUrl(pos[0]) });
     if (ctx.json) return printJson(r);
     out(`opened tab ${r && r.id}: ${r && r.url}`);
+  },
+
+  async reject(ctx, pos) {
+    if (!pos[0]) throw new UsageError('usage: trif reject <site>/<mod>');
+    const r = await ctx.call('mod.reject', { id: modId(pos[0]) }, 10000);
+    if (ctx.json) return printJson(r);
+    out(r.restored === 'removed' ? `${r.id}: it never ran, so it's in the trash now (trif restore ${r.id} brings it back)` : `${r.id}: the change wasn't allowed; the version before is back (the change is in trif history ${r.id})`);
   },
 
   async history(ctx, pos) {

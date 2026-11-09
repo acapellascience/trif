@@ -510,3 +510,9 @@ h3.mod-name { margin: 0; font-size: inherit; line-height: inherit; }
 
 /* A tab the agent ran code in (tablock.js) */
 .notice.tab-lock .title { font-weight: 600; }
+
+/* A waiting change, against the version that ran */
+.mod-facts .facts-diff { max-height: 260px; overflow: auto; margin: 6px 0 0; padding: 6px; background: var(--field, rgba(127,127,127,.08)); border-radius: 5px; font-size: 11px; white-space: pre-wrap; word-break: break-word; }
+.mod-facts .facts-diff .add { color: var(--ok, #2f9e6e); }
+.mod-facts .facts-diff .del { color: var(--bad); }
+.mod-facts .facts-diff .gap, .mod-facts .facts-diff .ctx { color: var(--muted); }

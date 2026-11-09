@@ -1575,7 +1575,9 @@ test('held mods: a run\'s mod that matches other sites is held (not registered) 
   assert.ok(fs.readdirSync(path.join(home, 'history', 'example.com')).some((n) => /^evil@.*\.created$/.test(n)));
   const lastMods = () => [...ext.messages].reverse().find((m) => m.type === 'mods').mods;
   const byId = (id) => lastMods().find((m) => m.id === id);
-  assert.deepEqual(byId('example.com/evil').held, { site: 'example.com', reason: 'runs on <all_urls>, outside example.com', facts: ['runs on <all_urls>, outside example.com'], claim: '', by: 'agent' });
+  const { hash, ...heldInfo } = byId('example.com/evil').held;
+  assert.deepEqual(heldInfo, { site: 'example.com', reason: 'runs on <all_urls>, outside example.com', facts: ['runs on <all_urls>, outside example.com'], claim: '', by: 'agent' });
+  assert.equal(hash, byId('example.com/evil').hash, 'the hold names the version it\'s for');
   assert.equal(byId('example.com/good').held, undefined);
   const stored = JSON.parse(fs.readFileSync(path.join(home, 'held.json'), 'utf8'));
   assert.deepEqual(Object.keys(stored), ['example.com/evil']);
@@ -1593,6 +1595,32 @@ test('held mods: a run\'s mod that matches other sites is held (not registered) 
   assert.deepEqual(JSON.parse(fs.readFileSync(path.join(home, 'allowed.json'), 'utf8'))['example.com/evil'].powers, ['match:<all_urls>']);
   const again = await extRequest(ext, 'mod.approve', { id: 'example.com/evil' });
   assert.match(again.error, /isn't held/);
+});
+
+test('a waiting change to a mod that ran: the extension gets the version before, marked pending; Don\'t allow puts it back', async () => {
+  const { home } = makeHome();
+  const file = path.join(home, 'sites', 'example.com', 'poster.js');
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  fs.writeFileSync(file, 'document.body.style.color = "red";\n');
+  const ext = startHost(home);
+  await ext.waitForSocket();
+  const lastMods = () => [...ext.messages].reverse().find((m) => m.type === 'mods')?.mods || [];
+  const byId = (id) => lastMods().find((m) => m.id === id);
+  await waitFor(() => byId('example.com/poster'), { message: 'the mod sent' });
+  // changed from outside to post: waits; the old version is what's sent, marked pending
+  fs.writeFileSync(file, 'document.body.style.color = "red";\nfetch("/x", { method: "POST" });\n');
+  const m = await waitFor(() => byId('example.com/poster')?.pending ? byId('example.com/poster') : null, { message: 'the change waiting' });
+  assert.equal(m.held, undefined);
+  assert.doesNotMatch(m.code, /fetch/, 'the version before runs meanwhile');
+  assert.deepEqual(m.pending.facts, ['can send requests or messages from the page as you (it uses fetch)']);
+  const code = await extRequest(ext, 'mod.code', { id: 'example.com/poster' });
+  assert.match(code.result.code, /fetch/, 'Show code: the waiting version');
+  const diff = await extRequest(ext, 'mod.diff', { id: 'example.com/poster' });
+  assert.ok(diff.result.lines.some((l) => l.t === '+' && /fetch/.test(l.s)), JSON.stringify(diff.result.lines));
+  const no = await extRequest(ext, 'mod.reject', { id: 'example.com/poster', hash: m.pending.hash });
+  assert.equal(no.result.restored, 'previous');
+  assert.equal(fs.readFileSync(file, 'utf8'), 'document.body.style.color = "red";\n');
+  await waitFor(() => byId('example.com/poster') && !byId('example.com/poster').pending, { message: 'nothing waiting' });
 });
 
 test('held mods: a change in another site\'s folder during a run isn\'t held on that run\'s account', async () => {

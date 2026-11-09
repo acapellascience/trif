@@ -13,7 +13,7 @@ const agents = require('./agents');
 const { scopeFor } = require('./scope');
 const { readInstructions, instructionsContext } = require('./instructions');
 const { markRunActive, markRunEnded } = require('./origins');
-const { listModFiles } = require('./mods');
+const { listModFiles, ALL_SITES: ALL_SITES_DIR } = require('./mods');
 const history = require('./history');
 const { redactSecrets } = require('./agents/util');
 const { within, ignoresCase } = require('./pathcheck');
@@ -434,7 +434,10 @@ function runLimits(ws, { scope, box, screenshotsReal, modsReal }) {
   const writable = [mods, shots, real(box)];
   let names = [];
   try { names = fs.readdirSync(mods, { withFileTypes: true }).filter((d) => d.isDirectory() || d.isSymbolicLink()).map((d) => d.name); } catch { /* none yet */ }
-  const otherSites = names.filter((n) => scopeFor(n) !== scope);
+  // Every other site's folder is read-only to the run. Not all-sites/: a mod for every site may be
+  // edited from any site's chat, and every such change waits for the user's OK (its @match is outside
+  // the run's scope: held.js), with the version before running meanwhile.
+  const otherSites = names.filter((n) => scopeFor(n) !== scope && n !== ALL_SITES_DIR);
   // Each such folder by its path in the workspace (`literal`, what Claude Code's file tools match rules
   // against: a site folder can be a link) and its real path (`real`, what sandboxes compare); `rel` names
   // it as modSnapshot names files.

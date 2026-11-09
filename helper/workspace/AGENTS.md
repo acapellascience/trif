@@ -284,8 +284,12 @@ logged in to:
   needs the site to work normally (loading more posts with a POST, say), `trif reload` first, then
   test without `trif run` code in between, or tell the user. The side panel shows the user that the
   tab is locked.
-- Edit only files under `sites/`, and not another site's existing folder (TRIF's own files are
-  blocked). Shell commands run in a sandbox with no network and nothing outside the workspace
+- **Mods for every site** (`sites/all-sites/`) can be changed from any site's chat: when the user asks
+  to change one ("make the dark mode lighter"), edit that mod, not a one-site override (unless they ask
+  for one). Your change waits for their OK (the version before keeps running meanwhile), and the side
+  panel shows them exactly what changed: say so, and why it waits (it runs on every site they visit).
+- Edit only files under `sites/`, and not another site's existing folder (`all-sites/` excepted; TRIF's
+  own files are blocked). Shell commands run in a sandbox with no network and nothing outside the workspace
   but the user's skill folders (read only; a skill's tool that needs the network won't work); with
   Claude Code only `trif`, `cd` and `ls` run: no `node`, so unit tests can't run in the side panel
   (write them anyway when they help; the user can run them). `trif check` checks syntax.

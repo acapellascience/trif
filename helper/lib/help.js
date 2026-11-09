@@ -99,6 +99,11 @@ The result is printed as pretty JSON, or as-is if it's a string. DOM nodes come 
     details: 'https:// is added when the URL has no scheme.',
     examples: ['trif open example.com'],
   },
+  reject: {
+    usage: 'trif reject <site>/<mod>',
+    summary: "don't allow a waiting change to a mod: the version before is put back (a mod that never ran goes to the trash); refused inside a run",
+    examples: ['trif reject all-sites/dark-everywhere'],
+  },
   history: {
     usage: 'trif history <site>/<mod>',
     summary: "what side-panel runs changed in a mod (kept 30 days), newest first",
@@ -374,7 +379,7 @@ sent by a proxy the helper runs for each chat: the agent never has it.`,
 const GROUPS = [
   ['Setup and diagnosis', ['setup', 'status', 'doctor', 'update', 'report']],
   ['Mod files (work without Chrome)', ['mods', 'new', 'check', 'delete', 'restore', 'history', 'undo', 'install-example', 'mod-update']],
-  ['Switching mods off and on (need Chrome running with the extension)', ['disable', 'enable', 'approve']],
+  ['Switching mods off and on (need Chrome running with the extension)', ['disable', 'enable', 'approve', 'reject']],
   ['Pages (need Chrome running with the extension)', ['tabs', 'run', 'reload', 'open', 'close', 'navigate', 'text', 'sweep', 'screenshot', 'record', 'requests', 'request', 'errors', 'logs']],
   ['Agent runs (what the side panel does)', ['agent']],
   ['', ['help']],

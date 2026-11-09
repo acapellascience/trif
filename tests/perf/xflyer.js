@@ -51,8 +51,9 @@ const TRACE_CATEGORIES = ['-*', 'devtools.timeline', 'disabled-by-default-devtoo
   'v8.execute', 'blink.user_timing', 'v8', 'disabled-by-default-v8.gc', 'toplevel', 'cc', 'viz', 'gpu', 'benchmark'];
 
 // ---- the states. path: where; drive: the keys held (weave: ← and → in turn; fire: space held; up: ↑ held,
-// which on Home scrolls the timeline at you; dodge: ↑ and ↓ in turn too; steer: under the boss, firing);
-// pre: played first, unmeasured. Steady states are measured for --seconds after a settle; transient ones
+// which on Home scrolls the timeline at you; dodge: ↑ and ↓ in turn too; steer: under the boss, firing;
+// bombs: the X key every 0.45 s);
+// bombs: the X key pressed every 0.45 s; pre: played first, unmeasured. Steady states are measured for --seconds after a settle; transient ones
 // from the moment a log line says it happened (trigger), for each window [from, to] seconds after it.
 const STATES = {
   off: { what: 'game off (mods loaded, page idle)', path: '/home', start: false },
@@ -60,6 +61,7 @@ const STATES = {
   fire: { what: 'flying and firing: blasting words (and the avatars it wakes)', path: '/perf_profile', drive: { weave: true, fire: true } },
   'home-fire': { what: 'Home, upside-down timeline, firing', path: '/home', drive: { weave: true, fire: true } },
   'home-scroll': { what: 'Home, holding ↑: the timeline scrolls at you, firing', path: '/home', drive: { weave: true, fire: true, up: true } },
+  'rear-bombs': { what: 'the X key: bombs dropped behind the ship, over the words, while flying', path: '/perf_profile', drive: { weave: true, dodge: true, bombs: true } },
   chase: { what: 'avatars chasing the ship (woken first, then dodged)', path: '/perf_profile', pre: { ms: 5000, drive: { weave: true, fire: true } }, drive: { weave: true, dodge: true } },
   boss: { what: '@elonmusk: growing to full size (Big Boss starts), then the fight', path: '/perf_profile?elon=4', drive: { steer: true, fire: true },
     trigger: /BOSS:/, windows: { 'boss-grow': [0, 3.5], 'boss-fight': [4, 10] } },
@@ -68,7 +70,7 @@ const STATES = {
   explosion: { what: 'the boss explodes (Firebird starts), then the ending (on Home: the fighter rolls into the bird)', path: '/home?elon=1', events: ['tss-test-boss'], eventDelay: 0, drive: { steer: true, fire: true },
     trigger: /^boss down/, windows: { explosion: [0, 4], ending: [4, 10] } },
 };
-const ORDER = ['off', 'fly', 'fire', 'home-fire', 'home-scroll', 'chase', 'gameover', 'boss-grow', 'boss-fight', 'explosion', 'ending'];
+const ORDER = ['off', 'fly', 'fire', 'rear-bombs', 'home-fire', 'home-scroll', 'chase', 'gameover', 'boss-grow', 'boss-fight', 'explosion', 'ending'];
 
 // ---- arguments
 function parseArgs(argv) {
@@ -174,7 +176,7 @@ function PREAMBLE(cfg) {
 // ---- keys
 const KEYS = {
   ArrowLeft: [37, 'ArrowLeft'], ArrowRight: [39, 'ArrowRight'], ArrowUp: [38, 'ArrowUp'], ArrowDown: [40, 'ArrowDown'],
-  ' ': [32, 'Space', ' '], S: [83, 'KeyS', 'S'], r: [82, 'KeyR', 'r'],
+  ' ': [32, 'Space', ' '], S: [83, 'KeyS', 'S'], x: [88, 'KeyX', 'x'], r: [82, 'KeyR', 'r'],
 };
 async function key(b, type, k, modifiers = 0) {
   const [vk, code, text] = KEYS[k];
@@ -189,6 +191,7 @@ function drive(b, d) {
   const set = async (k, on) => { if (on === held.has(k)) return; if (on) held.add(k); else held.delete(k); await key(b, on ? 'keyDown' : 'keyUp', k); };
   const loop = (async () => {
     const t0 = Date.now();
+    let lastX = -1e9;
     while (!stopped) {
       const t = Date.now() - t0;
       try {
@@ -204,6 +207,7 @@ function drive(b, d) {
         if (d.dodge) { const down = Math.floor(t / 1100) % 2 === 1; await set('ArrowUp', !down); await set('ArrowDown', down); }
         if (d.up) await set('ArrowUp', true);
         if (d.fire) await set(' ', true);
+        if (d.bombs && t - lastX > 450) { lastX = t; await key(b, 'keyDown', 'x'); await key(b, 'keyUp', 'x'); } // (one every 0.45 s: the game allows one per 0.4 s)
       } catch { /* page busy: next time */ }
       await sleep(d.steer ? 60 : 50);
     }

@@ -738,6 +738,125 @@ export function limitToSites(mod, sitesOn) {
   return { ...mod, matches: [...out].sort(), hash: mod.hash ? `${mod.hash}|sites:${tag}` : mod.hash };
 }
 
+// ---- site access ----------------------------------------------------------------------------
+// TRIF asks for no sites at install (the manifest's host permissions are all optional). Each browser has a
+// site mode (chrome.storage.local `siteMode`), which follows what the browser gives TRIF:
+// - permissive: <all_urls>, every site by default. Chosen on the setup page or in Settings (the browser's
+//   prompt, from the click); whoever installed TRIF when <all_urls> was required keeps it after the update
+//   (Chrome and Firefox keep a granted permission that moves to optional), so they're permissive.
+// - restrictive: TRIF asks per site. A site without the browser's access is disconnected (a first visit
+//   too); "Connect" in the side panel asks for that site's origin (siteOrigins), from the click, and turns
+//   it on. Declining the permissive prompt makes TRIF restrictive.
+// A site in `sitesOn` counts only with access (activeSites), and never when it's blocked in TRIF
+// (`blockedSites`, TRIF's own list, whatever access it has). Safari asks per site itself and its build
+// keeps <all_urls> (scripts/build-extension.js), so there TRIF has no mode and doesn't ask or check.
+
+export const SITE_ACCESS = !SAFARI;
+
+/**
+ * The origins a site (a registrable domain) needs: the domain and its subdomains, http and https. One
+ * pattern does both: `*.amazon.com` matches amazon.com itself too (in Chrome's and Firefox's match
+ * patterns), and asking for amazon.com separately only made the browser's prompt list it twice. An IP
+ * address has no subdomains (and `*.` before one isn't a valid pattern): just the address.
+ */
+const isIp = (site) => /^(\d{1,3}(\.\d{1,3}){3}|\[.*\])$/.test(site);
+export function siteOrigins(site) {
+  return isIp(site) ? [`*://${site}/*`] : [`*://*.${site}/*`];
+}
+
+export function originsFor(sites) {
+  return [...new Set((sites || []).flatMap(siteOrigins))];
+}
+
+/**
+ * What the browser gives TRIF, from permissions.getAll(): {origins, all, allUrls}. `all`: every http(s)
+ * site (<all_urls>, *://*\/*). `allUrls`: <all_urls> itself, which Chrome's and Firefox's tab capture
+ * want (a site's own origins aren't enough for it; see screenshot.js).
+ */
+export function normalizeAccess(granted) {
+  const origins = [...new Set((Array.isArray(granted?.origins) ? granted.origins : []).filter((o) => typeof o === 'string'))].sort();
+  const allUrls = origins.includes('<all_urls>');
+  const all = allUrls || ['http', 'https'].every((scheme) => origins.some((o) => originCovers(o, scheme, '*', false)));
+  return { origins, all, allUrls };
+}
+
+/** The access when TRIF doesn't check (Safari, or a browser without chrome.permissions): everything. */
+export const ALL_ACCESS = Object.freeze({ origins: ['<all_urls>'], all: true, allUrls: true });
+
+/** What the browser gives TRIF now (ALL_ACCESS where TRIF doesn't check). */
+export async function readAccess(chromeApi, check = SITE_ACCESS) {
+  if (!check || typeof chromeApi?.permissions?.getAll !== 'function') return ALL_ACCESS;
+  return normalizeAccess(await chromeApi.permissions.getAll());
+}
+
+// Whether a granted origin pattern covers pages of `host` (any port, any path) for `scheme`; with
+// `wild`, of all its subdomains too. `host` '*' asks for every host.
+function originCovers(pattern, scheme, host, wild) {
+  const p = String(pattern).trim();
+  if (p === '<all_urls>') return true;
+  const m = /^(\*|https?):\/\/([^/]*)(\/.*)$/i.exec(p);
+  if (!m || m[3] !== '/*') return false;
+  if (m[1] !== '*' && m[1].toLowerCase() !== scheme) return false;
+  const hp = /^(.*?)(?::(\*|\d+))?$/.exec(m[2]);
+  if (hp[2] !== undefined && hp[2] !== '*') return false;
+  const g = hp[1].toLowerCase().replace(/\.$/, '');
+  if (g === '*') return true;
+  if (host === '*') return false;
+  if (g.startsWith('*.')) return hostInScope(host, g.slice(2));
+  return !wild && g === host;
+}
+
+/** Whether the browser gives TRIF all of `site` (siteOrigins, both schemes; an IP has no subdomains). */
+export function hasSiteAccess(access, site) {
+  if (!access || access.all) return !!access;
+  return ['http', 'https'].every((scheme) => access.origins.some((o) => originCovers(o, scheme, site, false))
+    && (isIp(site) || access.origins.some((o) => originCovers(o, scheme, site, true))));
+}
+
+/** The sites TRIF works on: on in `sitesOn`, with access. */
+export function activeSites(sitesOn, access) {
+  return (sitesOn || []).filter((s) => hasSiteAccess(access, s));
+}
+
+/** The sites in `sitesOn` the browser doesn't give TRIF (yet, or any more). */
+export function sitesWithoutAccess(sitesOn, access) {
+  return (sitesOn || []).filter((s) => !hasSiteAccess(access, s));
+}
+
+/** Permissive: <all_urls>, asked for from a click (nothing awaited before it). Resolves whether it was granted. */
+export function requestEverySite(chromeApi) {
+  return chromeApi.permissions.request({ origins: ['<all_urls>'] });
+}
+
+/** The mode TRIF is in: what the browser gives it decides; null before the user chose (and not given every site). */
+export function siteModeOf(stored, access) {
+  if (access?.all) return 'permissive';
+  return stored === 'permissive' || stored === 'restrictive' ? 'restrictive' : null;
+}
+
+// ---- a site's state in the side panel, and in what agents are told ---------------------------------
+// - on: in `sitesOn`, with access: TRIF works there.
+// - off: with access, not in `sitesOn` (the power button's off): turning it on again doesn't ask.
+// - disconnected: without the browser's access (restrictive): a first visit, or a site disconnected,
+//   or one setup turned on that isn't connected yet. "Connect" asks and turns it on, in one click.
+// - blocked: in TRIF's block list (`blockedSites`): nothing from TRIF touches it, whatever access TRIF
+//   has (with <all_urls> one site can't be taken away in Chrome's own settings), and it can't be turned on.
+
+/** The state of `site` (a registrable domain): 'on', 'off', 'disconnected' or 'blocked' (see above). */
+export function siteState(site, { sitesOn = [], access = null, blocked = [] } = {}) {
+  if ((blocked || []).includes(site)) return 'blocked';
+  if (!hasSiteAccess(access, site)) return 'disconnected';
+  return (sitesOn || []).includes(site) ? 'on' : 'off';
+}
+
+/** Why a page command or a run can't touch `site`, in the words the panel uses; null when it's on. */
+export function siteRefusal(site, state) {
+  if (state === 'blocked') return `${site} is blocked in TRIF: nothing from TRIF runs there or reads it, and only the user can unblock it (in the side panel)`;
+  if (state === 'disconnected') return `TRIF is disconnected on ${site}: nothing from TRIF runs there or reads it until the user connects it (the side panel on that site has the button)`;
+  if (state === 'off') return `TRIF is off on ${site}: nothing from TRIF runs there or reads it until the user turns it on (the side panel on that site has the switch)`;
+  return null;
+}
+
 /** The side panel's "site" for a tab URL: hostname without a leading "www.", or null for pages mods can't run on. */
 export function siteForUrl(url) {
   let u;

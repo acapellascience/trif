@@ -70,7 +70,9 @@ function manifestPaths(m) {
  * The Chrome manifest rewritten for Firefox: a background page instead of a service worker, a sidebar
  * instead of the side panel, a fixed add-on ID (the helper's native manifest allows it by ID), and
  * userScripts as an optional permission, which is the only way Firefox grants it (the user allows it
- * from the setup page or the panel).
+ * from the setup page or the panel). The sites stay optional host permissions, as in Chrome: Firefox
+ * lets the user take any host permission back anyway, and asks for them with permissions.request from
+ * a click, as the panel does.
  */
 function firefoxManifest(m, repo = githubRepo(readPackage())) {
   const f = { ...m };
@@ -109,7 +111,15 @@ function safariManifest(m) {
   // Still one classic script (bundleClassic).
   f.background = { scripts: ['safari-background.js'], persistent: false };
   // nativeMessaging stays: in Safari it reaches the extension's own app, which hands out the bridge's key.
-  f.permissions = [...m.permissions.filter((p) => !['sidePanel', 'userScripts'].includes(p)), 'webNavigation'];
+  // (activeTab is for Chrome's and Firefox's screenshots without <all_urls>; Safari has <all_urls>.)
+  f.permissions = [...m.permissions.filter((p) => !['sidePanel', 'userScripts', 'activeTab'].includes(p)), 'webNavigation'];
+  // Safari keeps <all_urls> as a required host permission: Safari doesn't grant it at install anyway, it
+  // asks the user per site itself (the toolbar button, or Settings → Extensions → Websites), which is the
+  // per-site OK the other builds get from permissions.request. TRIF asking too would be a second question
+  // for the same thing, so the panel doesn't ask there, and every site counts as allowed (lib.js
+  // SITE_ACCESS): what Safari doesn't allow, it doesn't let TRIF touch either way.
+  f.host_permissions = ['<all_urls>'];
+  delete f.optional_host_permissions;
   return f;
 }
 

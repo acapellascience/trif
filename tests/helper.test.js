@@ -712,6 +712,33 @@ test('host: shuts down after a frame too big to be real, rather than misreading 
   assert.match(fs.readFileSync(path.join(privDir(home), 'helper.log'), 'utf8'), /unreadable input from the extension/);
 });
 
+test('starter mods: none until the user chooses; "Add them" (shipped.install) copies them in and the mods message says so; "Start with none" is remembered', async () => {
+  const home = tempDir();
+  const ext = new FakeExtension({ home, env: { TRIF_EXAMPLES_DIR: path.join(REPO, 'examples', 'sites') } });
+  cleanups.push(() => ext.close());
+  let msg = await ext.next((m) => m.type === 'mods');
+  const { PREINSTALLED, SITES_ON } = require('../helper/lib/preinstalled');
+  assert.deepStrictEqual(msg.starter, { choice: null, count: PREINSTALLED.length, sites: SITES_ON });
+  assert.deepStrictEqual([msg.mods, msg.sitesOn], [[], []]);
+  const since = ext.messages.length;
+  ext.send({ type: 'request', id: 'a', cmd: 'shipped.install', args: {} });
+  const res = await ext.next((m) => m.type === 'response' && m.id === 'a');
+  assert.strictEqual(res.ok, true, res.error);
+  assert.strictEqual(res.result.choice, 'added');
+  msg = await ext.next((m) => m.type === 'mods' && m.starter.choice === 'added' && m.mods.length > 0, { since, timeout: 8000 });
+  assert.deepStrictEqual(msg.sitesOn, SITES_ON);
+  assert.ok(msg.mods.some((m) => m.id === 'x.com/detox-timeline'));
+
+  const home2 = tempDir();
+  const ext2 = new FakeExtension({ home: home2 });
+  cleanups.push(() => ext2.close());
+  await ext2.next((m) => m.type === 'mods');
+  ext2.send({ type: 'request', id: 'n', cmd: 'shipped.none', args: {} });
+  assert.deepStrictEqual((await ext2.next((m) => m.type === 'response' && m.id === 'n')).result, { choice: 'none' });
+  await ext2.next((m) => m.type === 'mods' && m.starter.choice === 'none', { timeout: 8000 });
+  assert.strictEqual(fs.existsSync(path.join(home2, 'sites', 'x.com')), false);
+});
+
 test('mods messages carry the sites preinstalled.json says to start on', async () => {
   const home = tempDir();
   writeMod(home, 'www.google.com', 'a.js', '// ==WebMod==\n// @name A\n// ==/WebMod==\n');

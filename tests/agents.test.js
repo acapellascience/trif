@@ -1623,6 +1623,21 @@ test('a waiting change to a mod that ran: the extension gets the version before,
   await waitFor(() => byId('example.com/poster') && !byId('example.com/poster').pending, { message: 'nothing waiting' });
 });
 
+test('"Looks right": the mods go out again without the review, so the panel\'s card goes', async () => {
+  const { home } = makeHome();
+  const file = path.join(home, 'sites', 'example.com', 'clicker.js');
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  fs.writeFileSync(file, 'document.querySelector("button").click();\n');
+  const ext = startHost(home);
+  await ext.waitForSocket();
+  const lastMods = () => [...ext.messages].reverse().find((m) => m.type === 'mods')?.mods || [];
+  const byId = (id) => lastMods().find((m) => m.id === id);
+  await waitFor(() => byId('example.com/clicker')?.review, { message: 'the mod to review' });
+  const r = await extRequest(ext, 'mod.review', { id: 'example.com/clicker' });
+  assert.deepEqual(r.result.allowed, ['acts']);
+  await waitFor(() => byId('example.com/clicker') && !byId('example.com/clicker').review, { message: 'the mods sent again without the review' });
+});
+
 test('held mods: a change in another site\'s folder during a run isn\'t held on that run\'s account', async () => {
   // The run on example.com can't write sites/x.com/ (read-only to it), so a broad mod changed there
   // meanwhile (by a run on x.com, the user, another browser) isn't its doing.
@@ -1706,6 +1721,11 @@ test('instructions: saved and read through the helper, never from a run; claude 
   for (const cmd of ['agent.openModel', 'agent.openModel.set', 'agent.openModel.setKey', 'agent.openModel.removeKey']) {
     const k = await sockRequest(ext.sock, { id: 'k', cmd, args: { key: 'evil-key-0123456789', provider: 'custom' }, token: call.env.TRIF_RUN_TOKEN });
     assert.match(k.error, /isn't available inside an agent run/, cmd);
+  }
+  // Nor Tim's starter mods: only the user decides whether they're added.
+  for (const cmd of ['shipped.install', 'shipped.none']) {
+    const k = await sockRequest(ext.sock, { id: 's', cmd, args: {}, token: call.env.TRIF_RUN_TOKEN });
+    assert.match(k.error, /only the user decides whether Tim's starter mods are added/, cmd);
   }
   await extRequest(ext, 'agent.stop', { runId: r.result.runId });
   await waitDone(ext, r.result.runId);

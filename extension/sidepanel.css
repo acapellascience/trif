@@ -126,6 +126,35 @@ svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width:
 .gate[hidden] { display: none; }
 .gate .mod-err { margin: 0; text-align: center; }
 .gate-title { margin: 0; font-size: 15px; font-weight: 600; }
+.gate-why { margin: -6px 0 0; color: var(--muted); text-align: center; }
+/* Quiet links under Fix: block the site in TRIF, or disconnect it (the browser's permission). */
+.gate-links { margin: 0; display: flex; gap: 14px; font-size: 12px; }
+.gate-links a { color: var(--muted); }
+/* A card over the panel (Disconnect with every site allowed): × or Escape closes it. */
+.card-dialog { width: min(300px, calc(100% - 32px)); padding: 18px 18px 16px; border: 1px solid var(--line); border-radius: 12px;
+  background: var(--surface); color: var(--text); box-shadow: 0 10px 30px rgb(0 0 0 / 0.25); text-align: center; }
+.card-dialog::backdrop { background: rgb(0 0 0 / 0.3); }
+.card-dialog p { margin: 0 0 10px; }
+.card-title { font-weight: 600; font-size: 14px; }
+.card-text { color: var(--muted); }
+.card-close { position: absolute; top: 6px; right: 8px; border: 0; background: none; color: var(--muted); font-size: 18px; line-height: 1; padding: 2px 6px; }
+.card-close:hover { color: var(--text); }
+/* Disconnected (restrictive, no access): the whole panel grey. Blocked in TRIF: red. */
+body.site-disconnected :is(.bar, .gate) { filter: grayscale(1); }
+body.site-blocked, body.site-blocked.needs-login { --switch-on: var(--bad); } /* (red over a login's yellow) */
+body.site-blocked .gate-title { color: var(--bad); }
+body.site-blocked .btn.go { color: #fff; }
+/* Settings, "Site permissions": the two modes, the current one marked, and the blocked sites. */
+.sites-block { display: grid; gap: 6px; border-top: 1px solid var(--line); padding-top: 8px; }
+.sites-title { margin: 0; font-size: 12px; font-weight: 600; }
+.mode-choice { display: grid; gap: 6px; }
+.mode-choice[hidden] { display: none; }
+.mode { display: grid; gap: 1px; text-align: left; padding: 6px 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--raised); font-size: 12px; }
+.mode span { color: var(--muted); }
+.mode[aria-pressed="true"] { border-color: var(--switch-on); box-shadow: inset 0 0 0 1px var(--switch-on); }
+.blocked-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 4px; font-size: 12px; }
+.blocked-list li { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.blocked-list:empty { display: none; }
 .gate-icon { stroke: none; }
 .gate-icon .rim { fill: var(--switch-on); }
 .gate-icon .face { fill: #18181a; }

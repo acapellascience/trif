@@ -8,6 +8,7 @@ import {
   firstInjectionResult, withTimeout, filterRequests, nextBackoff, chromeVersion, toolLine,
   normalizeDisabled, modAppliesTo, urlInScope, modInScope, applyStartOff, applyAbsorbed, findRenames, carryRenames, renameInOrder, normalizeModOrder, modSites,
   normalizeOffSites, offSiteName, offOnSite, hostInScope, withOffSites, scopeFor, normalizeSitesOn, siteOnFor, sitesInUse, limitToSites, applyStartSites, switchSite, fromOtherBrowser, timedUserScripts, capChat,
+  ALL_ACCESS, readAccess, activeSites, hasSiteAccess, siteOrigins, siteState, siteRefusal, siteModeOf,
   FEATURES, ModsParts, fillSameMods, storedMods, modsStorageState, modsStoragePlan,
 } from './lib.js';
 import { runtimeCode } from './runtime.js';
@@ -23,6 +24,9 @@ const CHROME = chromeVersion(navigator.userAgent);
 // there a lost connection or a restarted background doesn't end a run; after reconnecting, the helper says
 // which runs are still going (agent.running) and the others are finished.
 const PERSISTENT_HOST = !!chrome.runtime.getURL?.('')?.startsWith('safari-web-extension:');
+// Whether the browser's OK per site is TRIF's to ask for and check: not in Safari (lib.js SITE_ACCESS, worked
+// out here from this background's own URL, as above).
+const SITE_ACCESS = !chrome.runtime.getURL?.('')?.startsWith('safari-web-extension:');
 const LOAD_TIMEOUT = 30000;
 const NOT_CONNECTED = `The TRIF helper isn't connected. Run \`${SETUP_COMMAND}\` in a terminal (needs Node 18+), then restart ${BROWSER}.`;
 
@@ -41,6 +45,11 @@ const state = {
   offSites: {},          // mod id → sites it's switched off on, for mods on several sites (persisted)
   sitesOn: [],           // registrable domains TRIF is on for; off everywhere else (persisted)
   sitesOffered: [],      // sites the helper said to start on that were turned on once already (persisted)
+  access: ALL_ACCESS,    // what the browser gives TRIF (readAccess): a site in sitesOn counts only with it
+  siteMode: null,        // 'permissive' (<all_urls>) or 'restrictive' (per site), as last chosen or seen (persisted)
+  blockedSites: [],      // sites the user blocked in TRIF: nothing from TRIF touches them (persisted)
+  starter: null,         // Tim's starter mods, from the helper: {choice: 'added'|'none'|null, count, sites}
+  panelWindows: new Map(), // side panel port -> the window it's in (Chrome), so the toolbar button can close it
   paused: false,         // every mod paused in this browser, each mod's own switch left as it is (persisted)
   startedOff: {},        // mod id → true for mods already switched off once: preinstalled, or from another browser (persisted)
   absorbed: {},          // mod id → true for retired shipped mods whose switch was carried over (persisted)
@@ -126,6 +135,8 @@ const ready = chrome.storage.local.get(null).then(async (s) => {
   state.absorbed = normalizeDisabled(s.absorbed);
   state.defaultOrder = normalizeModOrder(s.defaultOrder);
   state.sitesOffered = normalizeSitesOn(s.sitesOffered);
+  state.siteMode = s.siteMode === 'permissive' || s.siteMode === 'restrictive' ? s.siteMode : null;
+  state.blockedSites = normalizeSitesOn(s.blockedSites);
   state.paused = s.paused === true;
   if (Array.isArray(s.sitesOn)) state.sitesOn = normalizeSitesOn(s.sitesOn);
   else {
@@ -143,6 +154,7 @@ const ready = chrome.storage.local.get(null).then(async (s) => {
   } catch { /* no session storage: re-register everything */ }
   // (Kept in local storage before 0.2.0.)
   if ('applied' in s) chrome.storage.local.remove('applied').catch(() => {});
+  await refreshAccess();
   await cleanStaleRuns(s);
 }).catch((e) => console.error('[TRIF] failed to read storage', e));
 
@@ -176,19 +188,70 @@ if (FIREFOX) {
   // Firefox has a sidebar instead of the side panel; the toolbar button toggles it (toggle() must run
   // synchronously in the click handler).
   chrome.action.onClicked.addListener(() => { (globalThis.browser ?? chrome).sidebarAction.toggle(); });
-  // Its userScripts permission is optional: the setup page or the panel asks for it.
-  chrome.permissions.onAdded.addListener(() => ready.then(checkUserScripts));
-  chrome.permissions.onRemoved.addListener(() => ready.then(checkUserScripts));
+} else if (chrome.sidePanel) {
+  // Chrome: the toolbar button opens the side panel from here rather than by itself
+  // (openPanelOnActionClick), because only a click that reaches the extension gives it activeTab on that
+  // tab, which is what lets `trif screenshot` capture it without access to every site (screenshot.js).
+  // A second click closes it again, as Chrome's own handling did. Both calls must come from the click
+  // itself, so nothing is awaited before them.
+  chrome.action.onClicked.addListener((tab) => {
+    const windowId = tab?.windowId;
+    const open = [...state.panelWindows.values()].includes(windowId);
+    const call = open && chrome.sidePanel.close ? chrome.sidePanel.close({ windowId }) : chrome.sidePanel.open({ windowId });
+    call?.catch?.((e) => console.warn('[TRIF] the side panel didn\'t open', e));
+  });
+}
+// Optional permissions: Firefox's userScripts (the setup page or the panel asks for it), and in every
+// browser the sites the user lets TRIF work on, which they can also take back in the browser's settings.
+if (chrome.permissions?.onAdded) {
+  chrome.permissions.onAdded.addListener(() => ready.then(onPermissionsChanged));
+  chrome.permissions.onRemoved.addListener(() => ready.then(onPermissionsChanged));
 }
 
-/** The toolbar icon opens the side panel (the setting persists, so this only needs to run occasionally). */
+/** The toolbar icon opens the side panel: in Chrome, from action.onClicked above (the setting persists). */
 function setPanelBehavior() {
   if (FIREFOX) return;
   try {
-    chrome.sidePanel?.setPanelBehavior({ openPanelOnActionClick: true })?.catch?.((e) => console.warn('[TRIF] setPanelBehavior failed', e));
+    chrome.sidePanel?.setPanelBehavior({ openPanelOnActionClick: false })?.catch?.((e) => console.warn('[TRIF] setPanelBehavior failed', e));
   } catch (e) {
     console.warn('[TRIF] setPanelBehavior failed', e);
   }
+}
+
+// ---- site access --------------------------------------------------------------------------------
+// See "site access" in lib.js: the sites TRIF works on are the ones it's on for that the browser gives
+// it. Everything that touches a page goes by onSites(), never by sitesOn alone.
+
+const onSites = () => activeSites(state.sitesOn, state.access).filter((s) => !state.blockedSites.includes(s));
+const stateOf = (site) => siteState(site, { sitesOn: state.sitesOn, access: state.access, blocked: state.blockedSites });
+
+/** Read what the browser gives TRIF again. Returns whether the sites TRIF works on changed. */
+async function refreshAccess() {
+  const before = JSON.stringify(onSites());
+  try { state.access = await readAccess(chrome, SITE_ACCESS); } catch (e) {
+    // The browser keeps enforcing its own access either way; TRIF just can't tell which sites it has.
+    console.warn('[TRIF] couldn\'t read the site permissions:', errMsg(e));
+    state.access = ALL_ACCESS;
+  }
+  // The mode follows the grant: <all_urls> is permissive (an update from when it was required too); losing
+  // it (the user took it back in the browser's settings) is restrictive.
+  const mode = SITE_ACCESS ? siteModeOf(state.siteMode, state.access) : null;
+  if (mode && mode !== state.siteMode) {
+    state.siteMode = mode;
+    await save({ siteMode: mode }).catch((e) => console.warn('[TRIF]', errMsg(e)));
+  }
+  return JSON.stringify(onSites()) !== before;
+}
+
+async function onPermissionsChanged() {
+  if (FIREFOX) checkUserScripts();
+  if (!(await refreshAccess())) { notifyPanels(); return; }
+  // A site taken away stops like a site switched off: its mods, its runs, its page commands.
+  for (const r of state.runs.values()) {
+    if (!siteOnFor(`https://${r.site}/`, onSites()) && !r.stopping) { r.stopping = true; helperRequest('agent.stop', { runId: r.runId }, 10000).catch(() => {}); }
+  }
+  if (checkUserScripts()) reportApplied(await serial(applyMods));
+  notifyPanels();
 }
 
 ready.then(() => {
@@ -250,7 +313,7 @@ async function applyModsNow() {
     const res = await syncUserScripts(timedUserScripts(chrome.userScripts), {
       // (paused: as if TRIF were on for no site, so nothing registers; each switch stays as it is)
       mods: state.mods, runtimeCode: runtimeCode(state.recording), applied: state.applied, disabled: state.disabled,
-      offSites: state.offSites, recording: state.recording, sitesOn: state.paused ? [] : state.sitesOn, known: state.known,
+      offSites: state.offSites, recording: state.recording, sitesOn: state.paused ? [] : onSites(), known: state.known,
     });
     state.applied = res.applied;
     state.known = res.known;
@@ -408,6 +471,12 @@ async function onModsMessage(msg) {
     await save({ sitesOn: state.sitesOn, sitesOffered: state.sitesOffered }).catch((e) => log('warn', errMsg(e)));
     notifyPanels();
   }
+  // Tim's starter mods: whether the user added them, chose none, or hasn't chosen (the setup page asks).
+  if (msg.starter && typeof msg.starter === 'object') {
+    const changed = JSON.stringify(msg.starter) !== JSON.stringify(state.starter);
+    state.starter = msg.starter;
+    if (changed) notifyPanels();
+  }
   // The order the side panel starts a site's shipped mods in (the panel reads it from storage).
   const defaultOrder = normalizeModOrder(msg.defaultOrder);
   if (JSON.stringify(defaultOrder) !== JSON.stringify(state.defaultOrder)) {
@@ -507,11 +576,11 @@ function checkScopeUrl(url, scope, what) {
     throw new Error(`${what} is on ${hostOf(url) || url || 'a page'}, and this agent run is limited to ${scope}` +
       ' (it was started from the side panel on that site; the user can start another chat on the other site)');
   }
-  if (!siteOnFor(url, state.sitesOn)) {
+  if (!siteOnFor(url, onSites())) {
     const host = hostOf(url);
-    throw new Error(host && /^https?:/.test(url)
-      ? `TRIF is off on ${scopeFor(host)}: nothing from TRIF runs there or reads it until the user turns it on (the side panel on that site has the switch)`
-      : `${what} isn't a web page (${url || 'no URL'}); TRIF only works on http and https pages`);
+    if (!host || !/^https?:/.test(url)) throw new Error(`${what} isn't a web page (${url || 'no URL'}); TRIF only works on http and https pages`);
+    const site = siteOnFor(url, [...state.blockedSites, ...state.sitesOn]) || scopeFor(host);
+    throw new Error(siteRefusal(site, stateOf(site)) || siteRefusal(site, 'off'));
   }
 }
 
@@ -539,12 +608,12 @@ const commands = {
       mods: state.mods.map((m) => {
         const o = { id: m.id, registered: ids.has(m.id), enabled: isEnabled(m.id) };
         if (state.offSites[m.id]) o.offSites = state.offSites[m.id];
-        if (!limitToSites(m, state.sitesOn)) o.sitesOff = true; // every site it's for is off
+        if (!limitToSites(m, onSites())) o.sitesOff = true; // every site it's for is off (or without access)
         if (m.held) o.held = m.held;
         if (errors.has(m.id) && errors.get(m.id) !== USER_SCRIPTS_OFF) o.error = errors.get(m.id);
         return o;
       }),
-      recording: state.recording, sitesOn: state.sitesOn, ...(state.paused ? { paused: true } : {}),
+      recording: state.recording, sitesOn: state.sitesOn, ...siteLists(), ...(state.paused ? { paused: true } : {}),
       ...(args && (args.tab !== undefined || args.url !== undefined) ? { page: await modsOnPage(args) } : {}),
     };
   },
@@ -554,7 +623,7 @@ const commands = {
     tabs.sort((a, b) => (a.windowId - b.windowId) || (a.index - b.index));
     return tabs.filter((t) => {
       const url = t.url || t.pendingUrl || '';
-      return (!args.scope || urlInScope(url, args.scope)) && siteOnFor(url, state.sitesOn);
+      return (!args.scope || urlInScope(url, args.scope)) && siteOnFor(url, onSites());
     }).map(tabInfo);
   },
 
@@ -576,7 +645,7 @@ const commands = {
       target: { tabId: tab.id }, world: 'MAIN', injectImmediately: true, js: [{ code }],
     }));
     const work = (async () => {
-      let out = await execute(buildRunCode(args.code, !!args.expression, runId, { scope: args.scope || null, sitesOn: state.sitesOn }));
+      let out = await execute(buildRunCode(args.code, !!args.expression, runId, { scope: args.scope || null, sitesOn: onSites() }));
       // Fallback in case execute didn't wait for the promise: poll the stored envelope.
       while (out === null && !timedOut) {
         await sleep(100);
@@ -677,7 +746,7 @@ const commands = {
     const tab = await scopedTab(args);
     const timeout = Number(args.timeout) > 4000 ? Number(args.timeout) - 3000 : 45000;
     return captureScreenshot(chrome, tab, { full: !!args.full, copy: !!args.copy, force: !!args.force, timeout }, {
-      browser: BROWSER,
+      browser: BROWSER, allUrls: state.access.allUrls,
       pageCall: (tabId, func, a = []) => pageCall(tabId, 'ISOLATED', func, a),
       stitch: stitchShots,
       onProbe: rememberProbe,
@@ -790,10 +859,20 @@ const commands = {
 
 // `status --url`: the mods that run on a tab's page (on, not held, not off on its site, its site on),
 // so an agent can see what its change will meet.
+/** For status: the mode, the sites on but disconnected, the block list, and what the browser gives TRIF. */
+function siteLists() {
+  return {
+    siteMode: SITE_ACCESS ? state.siteMode : null,
+    disconnected: state.sitesOn.filter((s) => stateOf(s) === 'disconnected'), // on, but not connected (yet, or any more)
+    blockedSites: state.blockedSites,
+    access: { all: state.access.all, allUrls: state.access.allUrls, origins: state.access.origins },
+  };
+}
+
 async function modsOnPage(args) {
   const tab = await scopedTab(args);
   const url = tab.url || tab.pendingUrl || '';
-  const mods = state.mods.filter((m) => isEnabled(m.id) && !m.held && limitToSites(m, state.sitesOn) && modAppliesTo(withOffSites(m, state.offSites[m.id]), url));
+  const mods = state.mods.filter((m) => isEnabled(m.id) && !m.held && limitToSites(m, onSites()) && modAppliesTo(withOffSites(m, state.offSites[m.id]), url));
   return { tab: tab.id, url, mods: mods.map((m) => ({ id: m.id, name: m.name || m.id, runAt: m.runAt || 'document_start' })) };
 }
 
@@ -897,7 +976,7 @@ async function pageCall(tabId, world, func, args = [], guard = null) {
   // is checked again from inside (pageGuard: the run's scope, TRIF on there) and marked, the command runs,
   // and its result counts only if the mark is still there (the same document).
   const token = crypto.randomUUID();
-  const why = await rawPageCall(tabId, 'ISOLATED', pageGuard, [guard.scope || null, state.sitesOn, token]);
+  const why = await rawPageCall(tabId, 'ISOLATED', pageGuard, [guard.scope || null, onSites(), token]);
   if (why) throw new Error(why);
   const result = await rawPageCall(tabId, world, func, args);
   const same = await rawPageCall(tabId, 'ISOLATED', (t) => window.__trifPageGuard === t, [token]).catch(() => false);
@@ -994,7 +1073,8 @@ async function uiStatus() {
   return {
     helper: { connected: state.connected, error: state.connected ? null : state.helperError },
     userScripts: s.userScripts, settingsUrl: SETTINGS_URL, version: VERSION, chrome: CHROME, browser: BROWSER,
-    recording: s.recording, sitesOn: state.sitesOn, paused: state.paused, update: state.connected ? state.update : null,
+    recording: s.recording, sitesOn: state.sitesOn, siteMode: s.siteMode, disconnected: s.disconnected, blockedSites: s.blockedSites, access: s.access, siteAccess: SITE_ACCESS, paused: state.paused,
+    starter: state.connected ? state.starter : null, update: state.connected ? state.update : null,
     mods: state.mods.map((m) => ({
       id: m.id, name: m.name || m.id, description: m.description || '', site: m.site, file: m.file || '',
       matches: m.matches || [], excludes: m.excludes || [], registered: !!live.get(m.id)?.registered, enabled: live.get(m.id)?.enabled ?? isEnabled(m.id),
@@ -1020,8 +1100,10 @@ async function uiStatus() {
 
 function onPanelConnect(port) {
   state.panels.add(port);
-  port.onDisconnect.addListener(() => state.panels.delete(port));
+  port.onDisconnect.addListener(() => { state.panels.delete(port); state.panelWindows.delete(port); });
   port.onMessage.addListener((msg) => {
+    // A side panel says which window it's in (for the toolbar button's second click, which closes it).
+    if (msg?.type === 'panel.window') { if (Number.isInteger(msg.windowId)) state.panelWindows.set(port, msg.windowId); return; }
     ready.then(() => onPanelMessage(msg)).then(
       (result) => reply(port, msg, { ok: true, result: result === undefined ? null : result }),
       (e) => reply(port, msg, { ok: false, error: errMsg(e) }),
@@ -1070,6 +1152,12 @@ async function onPanelMessage(msg) {
     case 'agent.loginCancel': return helperRequest('agent.loginCancel', { loginId: String(msg.loginId ?? '') }, 10000);
     case 'chat.clear': return clearChat(msg.site);
     case 'site.set': return setSiteOn(msg);
+    case 'site.disconnect': return disconnectSite(msg);
+    case 'site.block': return setBlocked(msg);
+    case 'site.mode': return setSiteMode(msg);
+    // Tim's starter mods, the user's choice: the helper adds them (or records none) and sends the mods again.
+    case 'shipped.install': return helperRequest('shipped.install', {}, 30000);
+    case 'shipped.none': return helperRequest('shipped.none', {}, 10000);
     case 'chat.note': {
       // A line from the panel itself (a slash command's answer), shown like a tool line.
       const site = normalizeSite(msg.site);
@@ -1189,7 +1277,11 @@ async function startAgent(msg) {
   const site = normalizeSite(msg.site);
   const prompt = String(msg.prompt ?? '').trim();
   if (!prompt) throw new Error('empty message');
-  if (!siteOnFor(`https://${site}/`, state.sitesOn)) throw new Error(`TRIF is off on ${scopeFor(site)}: turn it on first`);
+  if (!siteOnFor(`https://${site}/`, onSites())) {
+    const scope = siteOnFor(`https://${site}/`, [...state.blockedSites, ...state.sitesOn]) || scopeFor(site);
+    const st = stateOf(scope);
+    throw new Error(st === 'blocked' ? `${scope} is blocked in TRIF` : st === 'disconnected' ? `TRIF is disconnected on ${scope}: connect it first` : `TRIF is off on ${scope}: turn it on first`);
+  }
   const agent = msg.agent ? String(msg.agent) : undefined;
   const tabId = Number.isInteger(msg.tabId) ? msg.tabId : undefined;
   const startedAt = Date.now();
@@ -1247,28 +1339,107 @@ async function startLogin(msg) {
 
 // The panel's switch for the site it's showing (the registrable domain: x.com covers m.x.com). Off stops
 // everything there: its mods, chats in progress, and page commands. Mod switches are kept for next time.
+// On needs the browser's access to the site first (the panel asks for it, from the click): without it
+// the site stays off. Off keeps that access, so turning it on again is instant (a quick before and after);
+// "Disconnect" (disconnectSite) gives it back.
 async function setSiteOn(msg) {
   const site = scopeFor(normalizeSite(msg.site));
   if (!site) throw new Error('missing site');
   const on = msg.on !== false;
+  if (on && state.blockedSites.includes(site)) throw new Error(`${site} is blocked in TRIF: unblock it first.`);
+  if (on) {
+    await refreshAccess(); // (the grant may be newer than permissions.onAdded)
+    if (!hasSiteAccess(state.access, site)) throw new Error(`TRIF is disconnected on ${site}: ${BROWSER} didn't give it access.`);
+  }
   const set = new Set(state.sitesOn);
   if (on) set.add(site); else set.delete(site);
   const sitesOn = [...set].sort();
   await save({ sitesOn }, { switches: true });
   state.sitesOn = sitesOn;
-  if (!on) {
-    for (const r of state.runs.values()) {
-      if (hostInScope(r.site, site)) { r.stopping = true; helperRequest('agent.stop', { runId: r.runId }, 10000).catch(() => {}); }
-    }
+  if (!on) stopRunsOn(site);
+  await afterSiteChange(msg.tab);
+  return { site, on, sitesOn: state.sitesOn };
+}
+
+function stopRunsOn(site) {
+  for (const r of state.runs.values()) {
+    if (hostInScope(r.site, site) && !r.stopping) { r.stopping = true; helperRequest('agent.stop', { runId: r.runId }, 10000).catch(() => {}); }
   }
-  // Reload the tab if a mod starts or stops running on it.
-  const tab = msg.tab !== undefined ? await chrome.tabs.get(msg.tab).catch(() => null) : null;
+}
+
+// Mods applied again; the tab reloaded if a mod starts or stops running on it.
+async function afterSiteChange(tabId) {
+  const tab = tabId !== undefined ? await chrome.tabs.get(tabId).catch(() => null) : null;
   const url = tab ? tab.url || tab.pendingUrl || '' : '';
   const runsThere = url && state.mods.some((m) => isEnabled(m.id) && !m.held && modAppliesTo(withOffSites(m, state.offSites[m.id]), url));
   if (checkUserScripts()) reportApplied(await serial(applyMods));
   if (runsThere) await chrome.tabs.reload(tab.id).catch(() => {});
   notifyPanels();
-  return { site, on, sitesOn: state.sitesOn };
+}
+
+// "Disconnect from <site>" (restrictive): off, and the site's access given back, so it's disconnected.
+// With <all_urls> (permissive) one site can't be given back (Chrome keeps the whole grant): the panel offers
+// restrictive mode instead (site.mode), and blocking is TRIF's own way to keep off one site.
+async function disconnectSite(msg) {
+  const site = scopeFor(normalizeSite(msg.site));
+  if (!site) throw new Error('missing site');
+  if (!SITE_ACCESS) throw new Error(`${BROWSER} decides which sites TRIF can work on, in its own settings`);
+  if (state.access.all) throw new Error(`TRIF is permissive (every site), so one site can't be disconnected: switch to restrictive mode first`);
+  await giveBack(site, msg.tab);
+  await refreshAccess();
+  if (hasSiteAccess(state.access, site)) throw new Error(`couldn't disconnect TRIF from ${site}: ${BROWSER} still gives it access`);
+  notifyPanels();
+  return { site, disconnected: true };
+}
+
+// The site off (out of sitesOn), its runs stopped, and its own access given back (not <all_urls>).
+async function giveBack(site, tabId) {
+  if (state.sitesOn.includes(site)) {
+    const sitesOn = state.sitesOn.filter((s) => s !== site);
+    await save({ sitesOn }, { switches: true });
+    state.sitesOn = sitesOn;
+  }
+  stopRunsOn(site);
+  if (SITE_ACCESS) await Promise.resolve().then(() => chrome.permissions.remove({ origins: siteOrigins(site) })).catch(() => {});
+  await afterSiteChange(tabId);
+}
+
+// TRIF's block list (chrome.storage.local `blockedSites`): only from the panel, i.e. the user. Blocking a site
+// turns it off and gives its own access back; unblocking leaves it off (or disconnected, without access).
+async function setBlocked(msg) {
+  const site = scopeFor(normalizeSite(msg.site));
+  if (!site) throw new Error('missing site');
+  const blocked = msg.blocked !== false;
+  const list = normalizeSitesOn(blocked ? [...state.blockedSites, site] : state.blockedSites.filter((s) => s !== site));
+  await save({ blockedSites: list }, { switches: true });
+  state.blockedSites = list;
+  if (blocked) await giveBack(site, msg.tab);
+  await refreshAccess();
+  if (!blocked) await afterSiteChange(undefined);
+  notifyPanels();
+  return { site, blocked, blockedSites: state.blockedSites };
+}
+
+// The site mode, from the setup page or Settings. Permissive comes from the browser's grant (the page asks
+// for <all_urls> from the click; permissions.onAdded follows it), so this records restrictive: chosen, or
+// the permissive prompt declined. From permissive, every site's access goes (so every site is disconnected
+// until it's connected again), with no prompt.
+async function setSiteMode(msg) {
+  if (!SITE_ACCESS) throw new Error(`${BROWSER} decides which sites TRIF can work on, in its own settings`);
+  if (msg.mode === 'restrictive') {
+    if (state.access.all && state.access.origins.length) {
+      await Promise.resolve().then(() => chrome.permissions.remove({ origins: state.access.origins })).catch((e) => log('warn', `couldn't give the sites back: ${errMsg(e)}`));
+    }
+    await save({ siteMode: 'restrictive' });
+    state.siteMode = 'restrictive';
+  }
+  // (Runs on the sites that lost their access stop here or in onPermissionsChanged, whichever sees it first.)
+  if (await refreshAccess()) {
+    for (const r of state.runs.values()) if (!siteOnFor(`https://${r.site}/`, onSites())) stopRunsOn(r.site);
+    if (checkUserScripts()) reportApplied(await serial(applyMods));
+  }
+  notifyPanels();
+  return { siteMode: state.siteMode };
 }
 
 async function clearChat(site) {

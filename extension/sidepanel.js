@@ -4,6 +4,7 @@
 // See docs/PROTOCOL.md, "Side panel and agent runs".
 
 import { siteForUrl, modAppliesTo, modSites, isMultiSite, offOnSite, normalizeOffSites, scopeFor, hostInScope, limitToSites, withOffSites, FIREFOX, BROWSER, SETUP_COMMAND,
+  SITE_ACCESS, siteOrigins, siteState, hasSiteAccess, requestEverySite,
   normalizeModOrder, orderMods, moveId, setModOrder,
   normalizeSettings, normalizePicks, siteSettings, withoutModel } from './lib.js';
 import { setMarkdown } from './markdown.js';
@@ -17,7 +18,12 @@ const emptyChat = () => ({ sessionId: null, agent: null, messages: [], run: null
 
 const ui = {
   dot: $('#dot'), site: $('#site'), barRobot: $('#bar-robot'), siteSwitch: $('#site-switch'), newChat: $('#new-chat'), settingsBtn: $('#settings-btn'),
-  gate: $('#gate'), gateBtn: $('#gate-btn'), gateErr: $('#gate-err'), gateNote: $('#gate-note'),
+  gate: $('#gate'), gateTitle: $('#gate-title'), gateWhy: $('#gate-why'), gateBtn: $('#gate-btn'), gateErr: $('#gate-err'), gateNote: $('#gate-note'),
+  gateLinks: $('#gate-links'), gateBlock: $('#gate-block'), gateDisconnect: $('#gate-disconnect'),
+  modeDialog: $('#mode-dialog'), modeDialogClose: $('#mode-dialog-close'), modeDialogSwitch: $('#mode-dialog-switch'), modeDialogErr: $('#mode-dialog-err'),
+  modeChoice: $('#mode-choice'), modePermissive: $('#mode-permissive'), modeRestrictive: $('#mode-restrictive'), modeNote: $('#mode-note'),
+  blockedList: $('#blocked-list'), blockedEmpty: $('#blocked-empty'),
+  starterBlock: $('#starter-block'), starterAdd: $('#starter-add'), starterErr: $('#starter-err'),
   landing: $('#landing'), landingIcon: $('#landing-icon'), landingVersion: $('#landing-version'), landingNote: $('#landing-note'),
   settings: $('#settings'), agent: $('#agent'), agentNote: $('#agent-note'), model: $('#model'),
   using: $('#using'), modelCustomRow: $('#model-custom-row'), modelCustom: $('#model-custom'), modelNote: $('#model-note'),
@@ -68,16 +74,24 @@ const EDGE_PX = 28; // how near the list's top or bottom edge it scrolls
 let port = null;
 let reqSeq = 0;
 const pending = new Map();
+// Chrome's side panel (not Safari's panel window, opened with ?window=): the background closes it on the
+// toolbar button's next click, so it says which window it's in.
+const OPENED_FOR = Number(new URLSearchParams(location.search).get('window')) || null;
 
 function connectPort() {
   port = chrome.runtime.connect({ name: 'panel' });
   port.onMessage.addListener(onPortMessage);
+  sayWindow();
   port.onDisconnect.addListener(() => {
     port = null;
     for (const p of pending.values()) p.reject(new Error('lost connection to the TRIF service worker'));
     pending.clear();
     setTimeout(() => { if (!port) connectPort(); refreshStatus(); }, 500); // the service worker restarted
   });
+}
+
+function sayWindow() {
+  if (!OPENED_FOR && view.windowId !== null) try { port?.postMessage({ type: 'panel.window', windowId: view.windowId }); } catch { /* reconnects */ }
 }
 
 function request(msg) {
@@ -164,8 +178,8 @@ function currentAgent() {
 async function init() {
   connectPort();
   // In Safari the panel is a window of its own, opened with ?window=<the window whose tabs it follows>.
-  const opener = Number(new URLSearchParams(location.search).get('window'));
-  view.windowId = opener || (await chrome.windows.getCurrent()).id;
+  view.windowId = OPENED_FOR || (await chrome.windows.getCurrent()).id;
+  sayWindow();
   const stored = await chrome.storage.local.get(['settings', 'sitePicks', 'disabled', 'offSites', 'updated', 'modOrder', 'defaultOrder', 'defaultModelsReset']);
   view.updated = stored.updated || null;
   view.settings = normalizeSettings(stored.settings);
@@ -335,6 +349,8 @@ function render() {
   const { info: agentInfo, list: agentList } = currentAgent();
   const anyAgent = agentList.some((a) => a.available);
 
+  renderSites();
+  renderStarter();
   ui.site.textContent = site || 'Tim\'s Robot Internet Fixer';
   ui.site.title = view.tab?.url || '';
   document.title = site ? `TRIF · ${site}` : 'Tim\'s Robot Internet Fixer';
@@ -694,8 +710,19 @@ function renderMods() {
 // grey and dim, and settings), and nothing runs or reads the site. Once on, the header's switch turns it
 // back off. The robot in the bar does what the switch does: wakes the panel, or puts it to sleep.
 // (Unknown until the first status: neither shows.)
+// The site's state (lib.js siteState): on; off (TRIF keeps the browser's access, so on again doesn't ask:
+// a quick before and after); disconnected (restrictive, no access: a first visit too; the panel all grey,
+// and Connect asks the browser and turns it on); blocked (TRIF's block list: the panel red, and Unblock).
+// (Chrome's own list of sites extensions may not touch doesn't show in chrome.permissions: contains still
+// says yes there, checked in Chrome 156. Such a site looks on or off here; the browser refuses TRIF there.)
 const siteScope = () => (view.site ? scopeFor(view.site) : null);
-const siteIsOn = () => !!siteScope() && (view.status?.sitesOn || []).includes(siteScope());
+const currentState = () => {
+  const scope = siteScope();
+  if (!scope || !view.status) return null;
+  const st = view.status;
+  return siteState(scope, { sitesOn: st.sitesOn, access: st.access || { all: true, origins: [] }, blocked: st.blockedSites });
+};
+const siteIsOn = () => currentState() === 'on';
 let siteSwitching = false;
 
 function renderGate(problem, agentInfo) {
@@ -712,8 +739,11 @@ function renderGate(problem, agentInfo) {
   if (noSite) ui.landingVersion.textContent = `TRIF ${chrome.runtime.getManifest().version}`;
   const scope = siteScope();
   const known = !!scope && !!view.status;
-  const gated = known && !siteIsOn();
+  const state = currentState();
+  const gated = known && state !== 'on';
   document.body.classList.toggle('site-off', gated);
+  document.body.classList.toggle('site-disconnected', gated && state === 'disconnected');
+  document.body.classList.toggle('site-blocked', gated && state === 'blocked');
   ui.gate.hidden = !gated;
   ui.siteSwitch.hidden = !known;
   ui.siteSwitch.setAttribute('aria-checked', String(siteIsOn()));
@@ -729,18 +759,68 @@ function renderGate(problem, agentInfo) {
   // notice shows there instead, renderNotice). Red: no Fix button, which couldn't work.
   renderProblemLine(ui.gateNote, gated && !(login.current && !red) ? problem : null, agentInfo);
   if (!gated) return;
+  ui.gateTitle.textContent = state === 'disconnected' ? `TRIF is disconnected on ${scope}`
+    : state === 'blocked' ? `The robot is blocked on ${scope}` : 'The robot is off.';
+  ui.gateWhy.hidden = true;
   ui.gateBtn.hidden = red;
-  ui.gateBtn.textContent = `Fix ${scope}`;
+  ui.gateBtn.textContent = state === 'disconnected' ? 'Connect' : state === 'blocked' ? 'Unblock' : `Fix ${scope}`;
   ui.gateBtn.disabled = siteSwitching;
+  // Quiet links under Fix: block the site in TRIF, and disconnect it (give the browser's permission back;
+  // with every site allowed, that offers restrictive mode instead). Not Disconnect in Safari, which keeps
+  // site access in its own settings.
+  ui.gateLinks.hidden = state !== 'off';
+  ui.gateBlock.textContent = `Block on ${scope}`;
+  ui.gateDisconnect.textContent = `Disconnect from ${scope}`;
+  ui.gateDisconnect.hidden = !SITE_ACCESS;
+}
+
+// The gate's main button: Fix (off), Connect (disconnected), or Unblock.
+function gateClick() {
+  if (currentState() === 'blocked') return setBlocked(false);
+  return setSiteOn(true);
+}
+
+function disconnectClick(e) {
+  e.preventDefault();
+  if (!view.status?.access?.all) { siteAction({ type: 'site.disconnect' }); return; }
+  // Every site allowed: one site can't lose its access, so the card offers restrictive mode.
+  ui.modeDialogErr.hidden = true;
+  ui.modeDialog.showModal();
+}
+
+async function switchToRestrictive() {
+  ui.modeDialogSwitch.disabled = true;
+  try {
+    await request({ type: 'site.mode', mode: 'restrictive' });
+    ui.modeDialog.close();
+    await refreshStatus();
+  } catch (e) {
+    ui.modeDialogErr.textContent = String(e?.message ?? e);
+    ui.modeDialogErr.hidden = false;
+  } finally {
+    ui.modeDialogSwitch.disabled = false;
+  }
 }
 
 async function setSiteOn(on) {
   if (siteSwitching || !view.site) return;
+  const state = currentState();
+  if (on && state === 'blocked') return;
+  // On without the browser's access (disconnected: Connect) asks for it first. permissions.request must come
+  // from the click itself (Firefox allows nothing awaited before it), so it's the first thing here. Off
+  // keeps the access, so on again (off) doesn't ask.
+  const scope = siteScope();
+  const asking = on && SITE_ACCESS && !hasSiteAccess(view.status?.access, scope) ? chrome.permissions.request({ origins: siteOrigins(scope) }) : null;
   siteSwitching = true;
   ui.gateErr.hidden = true;
   delete ui.siteSwitch.dataset.error;
   render();
   try {
+    if (asking && !(await asking)) {
+      ui.gateErr.textContent = `${BROWSER} didn’t get your OK, so TRIF stays disconnected on ${scope}.`;
+      ui.gateErr.hidden = false;
+      return;
+    }
     await request({ type: 'site.set', site: view.site, on, tab: view.tab?.id });
     await refreshStatus();
   } catch (e) {
@@ -753,6 +833,89 @@ async function setSiteOn(on) {
     siteSwitching = false;
     render();
   }
+}
+
+// Disconnecting and blocking: a message to the background for this site, its error under the gate.
+async function siteAction(msg, site = view.site) {
+  if (siteSwitching || !site) return;
+  siteSwitching = true;
+  ui.gateErr.hidden = true;
+  render();
+  try {
+    await request({ ...msg, site, tab: view.tab?.id });
+    await refreshStatus();
+  } catch (e) {
+    ui.gateErr.textContent = String(e?.message ?? e);
+    ui.gateErr.hidden = false;
+  } finally {
+    siteSwitching = false;
+    render();
+  }
+}
+
+function setBlocked(blocked, site = siteScope()) {
+  return siteAction({ type: 'site.block', blocked }, site);
+}
+
+// Settings: "Add Tim's starter mods", while they aren't added (the setup page asked; none, or not chosen).
+// Nothing to remove them in bulk: the user deletes mods one by one.
+function renderStarter() {
+  const st = view.status;
+  ui.starterBlock.hidden = !st?.starter || st.starter.choice === 'added';
+}
+
+async function addStarter() {
+  ui.starterAdd.disabled = true;
+  ui.starterErr.hidden = true;
+  try { await request({ type: 'shipped.install' }); } catch (e) { ui.starterErr.textContent = `Couldn’t add them: ${e?.message ?? e}`; ui.starterErr.hidden = false; }
+  ui.starterAdd.disabled = false;
+  refreshStatus();
+}
+
+// Settings, "Site permissions": the mode (not in Safari, which asks per site itself), and the blocked sites.
+function renderSites() {
+  const st = view.status;
+  const mode = st?.access?.all ? 'permissive' : st?.siteMode ? 'restrictive' : null; // (null: not chosen yet)
+  ui.modeChoice.hidden = !SITE_ACCESS || !st;
+  ui.modePermissive.setAttribute('aria-pressed', String(mode === 'permissive'));
+  ui.modeRestrictive.setAttribute('aria-pressed', String(mode === 'restrictive'));
+  const blocked = st?.blockedSites || [];
+  const key = JSON.stringify(blocked);
+  if (ui.blockedList.dataset.key !== key) {
+    ui.blockedList.dataset.key = key;
+    ui.blockedList.replaceChildren(...blocked.map((site) => {
+      const li = el('li', null, site);
+      li.append(' ', button('Unblock', '', () => setBlocked(false, site)));
+      return li;
+    }));
+  }
+  ui.blockedEmpty.hidden = blocked.length > 0;
+}
+
+function modeNote(text) {
+  ui.modeNote.textContent = text || '';
+  ui.modeNote.hidden = !text;
+}
+
+// Permissive: the browser's prompt for every site, from the click (nothing awaited before it); declined, TRIF
+// stays restrictive. Restrictive: every site's access goes (the background), no prompt.
+function choosePermissive() {
+  if (view.status?.access?.all) return;
+  const asked = requestEverySite(chrome);
+  modeNote('');
+  asked.then((ok) => { if (!ok) modeNote(`${BROWSER} didn’t get your OK, so TRIF stays restrictive.`); },
+    (e) => modeNote(String(e?.message ?? e))).finally(() => setTimeout(refreshStatus, 300));
+}
+
+async function chooseRestrictive() {
+  const all = !!view.status?.access?.all;
+  if (!all && view.status?.siteMode === 'restrictive') return;
+  modeNote('');
+  try {
+    await request({ type: 'site.mode', mode: 'restrictive' });
+    if (all) modeNote('Every site is disconnected now: connect each one when you visit it.');
+  } catch (e) { modeNote(String(e?.message ?? e)); }
+  refreshStatus();
 }
 
 // A mod on several sites gets a switch for this site only (the setup page has the whole-mod one);
@@ -1437,7 +1600,14 @@ ui.input.addEventListener('keydown', (e) => {
 });
 ui.stop.addEventListener('click', stop);
 ui.newChat.addEventListener('click', newChat);
-ui.gateBtn.addEventListener('click', () => setSiteOn(true));
+ui.gateBtn.addEventListener('click', gateClick);
+ui.gateBlock.addEventListener('click', (e) => { e.preventDefault(); setBlocked(true); });
+ui.gateDisconnect.addEventListener('click', disconnectClick);
+ui.modeDialogClose.addEventListener('click', () => ui.modeDialog.close());
+ui.modeDialogSwitch.addEventListener('click', switchToRestrictive);
+ui.modePermissive.addEventListener('click', choosePermissive);
+ui.starterAdd.addEventListener('click', addStarter);
+ui.modeRestrictive.addEventListener('click', chooseRestrictive);
 ui.siteSwitch.addEventListener('click', () => setSiteOn(!siteIsOn()));
 ui.barRobot.addEventListener('click', () => setSiteOn(!siteIsOn())); // off: the Fix button; on: the power button
 for (const chip of document.querySelectorAll('.chip')) {

@@ -55,7 +55,11 @@ switches stay as they were; in Safari, install the new TRIF.app (see Safari belo
    press ⌘⇧G and paste: setup put the folder's path, `~/.trif/app/extension`, on your clipboard.)
 
 3. **Allow it to run mods.** On the **TRIF setup** tab that opens, click **Open TRIF’s Chrome
-   settings** and turn on **Allow User Scripts**.
+   settings** and turn on **Allow User Scripts**. Then choose whether to add **Tim's starter mods** (a
+   few small mods for Google, X, Amazon and Instagram; nothing of them is on your computer until you
+   click **Add them**, and **Start with none** is fine too), and **Permissive** (TRIF can reach every
+   site; Chrome asks you once) or **Restrictive** (you connect TRIF one site at a time). You can change
+   both later, in the side panel's settings.
 
 4. **Open the side panel.** Click the TRIF icon in the toolbar (pin it from the puzzle-piece menu). If
    it asks you to log in to Claude, click **Log in** and follow the steps.
@@ -101,6 +105,12 @@ Settings → Extensions and delete the old WebMods app.
   and a "Fix <site>" button that turns it on. Until then nothing from TRIF runs on the site or reads
   it, not even a mod for all sites, and agents (in the panel or a terminal) can't touch its tabs. The
   power button at the top of the panel turns it back off.
+- Site permissions (the setup page, or Settings in the panel): **Permissive** gives TRIF access to every
+  site by default; **Restrictive** keeps it disconnected on each site (the panel all grey) until you click
+  **Connect** there, which is when your browser asks. Turning the robot off keeps a site connected, so it
+  comes back on at once. Under Fix, "Disconnect from <site>" gives that site's access back (permissive: it
+  offers to switch to restrictive, since one site can't lose access then), and "Block on <site>" keeps TRIF
+  away from it whatever it can reach (the panel red; Unblock, or Settings → Blocked sites). Installed TRIF before this? You're permissive, as before. Safari asks per site itself.
 - Go to a site, open the side panel, and tell it what to fix. The agent looks at the page,
   writes a mod, and reloads the tab so you can see it. Keep chatting to adjust it.
 - Each mod has a switch in the side panel, so you can turn it off without deleting it. Its trash icon
@@ -121,10 +131,13 @@ Settings → Extensions and delete the old WebMods app.
 - Commands: `/model sonnet` (or `opus`, `haiku`, `default`) switches the model, `/clear` starts a new
   chat, `/compact` shrinks a long conversation, `/context` shows how full it is, `/help` lists these.
 
-### Mods that come with it
+### Tim's starter mods
 
-TRIF starts on for Google, X, Amazon and Instagram, with these mods. Each has a switch in the side
-panel on its site; the ones marked *(off)* wait for you to switch them on.
+Optional: the setup page asks before adding them (or `trif setup --examples`; Settings in the side panel
+can add them later). They're plain JavaScript in `~/.trif/sites`, which you can read first
+([examples/sites](examples/sites)). Added, TRIF starts on for Google, X, Amazon and Instagram, with these
+mods. Each has a switch in the side panel on its site; the ones marked *(off)* wait for you to switch
+them on.
 
 - **Google:** AI Banisher (no AI Overview, AI Mode or Gemini promo), Just Results (no sponsored results
   or extra sections), and DVD Logo *(off)*: the logo on the home page bounces around like an old DVD

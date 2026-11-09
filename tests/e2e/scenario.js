@@ -10,6 +10,8 @@ const { sleep, waitFor, run, runAsync, pidsMatching, killMatching } = require('.
 const I = require('./lib/install');
 const { FirefoxDriver } = require('./lib/firefox');
 const { ChromeDriver } = require('./lib/chrome');
+// The sites setup turns TRIF on for (helper/lib/preinstalled.js SITES_ON).
+const SITES_START = ['amazon.com', 'google.com', 'instagram.com', 'x.com'];
 const { SWEEP_EXPECT } = require('./lib/server');
 const { makeFakeKeychain } = require('../fake-keychain');
 
@@ -109,7 +111,8 @@ class Scenario {
       const q = (s) => document.querySelector(s);
       const step = (id) => { const e = q('#step-' + id); return e.hidden ? 'hidden' : ['done', 'now', 'later'].find((c) => e.classList.contains(c)) || '?'; };
       return { docTitle: document.title, title: q('#title').textContent, sub: q('#sub').textContent,
-        steps: ['helper', 'browser', 'scripts', 'login', 'try'].map(step),
+        steps: ['helper', 'browser', 'scripts', 'starter', 'sites', 'login', 'try'].map(step),
+        links: [...document.querySelectorAll('.step.now .body a')].map((a) => a.textContent + ' ' + a.href),
         states: [...document.querySelectorAll('.step.done .state')].map((e) => e.textContent),
         now: q('.step.now')?.innerText.trim() || '',
         buttons: [...document.querySelectorAll('.step.now .body button')].map((b) => b.textContent) };
@@ -131,14 +134,14 @@ class Scenario {
   async setupDoneCheck() {
     const st = await this.setupState();
     let keyed = false;
-    if (st.steps[3] !== 'done') {
+    if (st.steps[5] !== 'done') {
       const set = run(path.join(this.trif, 'bin', 'trif'), ['agent', 'key', '--agent', 'claude', '--set-key'], { env: this.env(), cwd: this.home, input: 'sk-ant-e2e-not-a-real-key-0000\n' });
       if (set.status !== 0) throw new Error(`trif agent key --set-key: ${set.stderr || set.stdout}`);
       keyed = true;
     }
     try {
       // (The helper keeps an agent's login state for 30 s; the page asks every 5.)
-      const x = await this.waitSetup('all ticked', (s) => s.steps.join() === 'done,done,done,done,now' && s.title === 'TRIF is ready', 60000);
+      const x = await this.waitSetup('all ticked', (s) => s.steps.join() === 'done,done,done,done,done,done,now' && s.title === 'TRIF is ready', 60000);
       // Try it: a button for each site where a shipped mod is on and TRIF is on for the site (x.com's Detox Timeline).
       if (x.sub !== 'Open any website, click the TRIF icon, and ask for a change.' || !x.buttons.includes('Open x.com')
         || !x.buttons.every((b) => /^Open [\w-]+(\.[\w-]+)+$/.test(b))) throw new Error(JSON.stringify(x));
@@ -173,7 +176,15 @@ class Scenario {
       return {
         site: q('#site')?.textContent || '',
         gate: !q('#gate').hidden,
+        gateTitle: q('#gate-title')?.textContent || '',
         gateText: q('#gate-btn')?.textContent || '',
+        links: q('#gate-links')?.hidden === false
+          ? [...document.querySelectorAll('#gate-links a:not([hidden])')].map((a) => a.textContent + ' (' + a.title + ')') : [],
+        grey: document.body.classList.contains('site-disconnected'),
+        red: document.body.classList.contains('site-blocked'),
+        dialog: q('#mode-dialog')?.open ? q('#mode-dialog').innerText.trim() : '',
+        gateWhy: q('#gate-why')?.hidden === false ? q('#gate-why').textContent : '',
+        gateErr: q('#gate-err')?.hidden === false ? q('#gate-err').textContent : '',
         siteOn: q('#site-switch')?.getAttribute('aria-checked') === 'true',
         notice: q('#notice').hidden ? '' : q('#notice').innerText,
         dot: q('#dot')?.className || '',
@@ -431,6 +442,9 @@ class Scenario {
     // helper never looks up API keys for Claude Code or Codex in the real one.
     if (!o.oss) env.TRIF_KEYCHAIN_BIN = this.keychain().bin;
     this.helperHome = env.HOME;
+    // Upgrading: TRIF with access to every site, as for someone who installed it when <all_urls> was
+    // required (Chrome and Firefox keep it on the update). Fresh: only the sites the user allows.
+    this.allSites = o.kind === 'upgrade';
     if (o.browser === 'firefox') {
       this.d = new FirefoxDriver({
         profile: path.join(this.work, 'profile'), home: env.HOME, env,
@@ -438,15 +452,23 @@ class Scenario {
         extensionDir: o.extensionDirFirefox, headless: o.headless,
       });
     } else {
+      // Fresh: TRIF allowed on the suite's sites only (lib/chrome.js), as a new user who turned it on there.
       this.d = new ChromeDriver({
         userDataDir: path.join(this.home, 'Library/Application Support/Google/Chrome'), home: env.HOME, env,
-        extensionDir: path.join(this.trif, 'app', 'extension'), headless: o.headless,
+        extensionDir: path.join(this.trif, 'app', 'extension'), headless: o.headless, siteAccess: this.allSites ? 'all' : undefined,
       });
     }
     await this.d.start();
     const iso = await this.d.isolateNativeMessaging();
     this.r.log(`native messaging manifests read from: ${JSON.stringify(iso)}`);
     await this.d.installExtension();
+    if (this.allSites && o.browser === 'firefox') {
+      // Firefox: <all_urls> asked for from a click (prompts are off here), then the add-on restarted, so it
+      // has it from its start as an updated install does (Firefox gives captureTab only then: screenshot.js).
+      const ctx = await this.d.openTab(`${this.d.origin}/onboarding.html`);
+      if (!(await this.d.setAllSites(ctx, true))) throw new Error('permissions.request for <all_urls> said no');
+      await this.d.restartAddon();
+    }
     const st = await waitFor('the helper to answer `trif status`', async () => {
       const s = await this.cli(['status'], { json: true, timeoutMs: 15000 });
       return s.json && s.json.extension ? s.json : null;
@@ -471,8 +493,10 @@ class Scenario {
     // The setup page: our handle on the extension's chrome.* APIs, and the user scripts permission.
     this.control = await d.openTab(`${origin}/onboarding.html`);
     await r.check('setup page: a checklist, the helper and the browser ticked, user scripts next', async () => {
-      const x = await this.waitSetup('step 3 open', (st) => st.steps.join() === 'done,done,now,later,later');
-      if (x.docTitle !== 'TRIF setup' || x.title !== 'Set up TRIF' || x.states.join() !== 'connected,done') throw new Error(JSON.stringify(x));
+      // (Upgrading, the starter mods are there already and TRIF has every site: those steps are ticked.)
+      const later = this.o.kind === 'upgrade' ? 'done,done' : 'later,later';
+      const x = await this.waitSetup('step 3 open', (st) => st.steps.join() === `done,done,now,${later},later,later`);
+      if (x.docTitle !== 'TRIF setup' || x.title !== 'Set up TRIF' || x.states.join() !== (this.o.kind === 'upgrade' ? 'connected,done,added,permissive' : 'connected,done')) throw new Error(JSON.stringify(x));
       const want = d.name === 'Firefox' ? /Firefox asks before an add-on runs them\.[\s\S]*Allow user scripts/ : /One switch:[\s\S]*flip this[\s\S]*Open TRIF’s Chrome settings/;
       if (!want.test(x.now)) throw new Error(`step 3 says: ${x.now}`);
       await this.shot(this.control, 'setup-page-scripts-off');
@@ -483,13 +507,57 @@ class Scenario {
       await waitFor('status.userScripts', async () => (await this.cli(['status'], { json: true })).json?.extension?.userScripts, { timeoutMs: 20000 });
       return how;
     });
+    // Tim's starter mods, step 4: nothing of his on disk until the user chooses. Upgrading, the old setup
+    // copied them: ticked "added". Fresh Firefox: "Add them". Fresh Chrome: "Start with none" (they're added
+    // later from the panel's Settings, the way back).
+    this.starterNone = this.o.kind !== 'upgrade' && this.o.browser !== 'firefox';
     if (allowed) {
-      await r.check('setup page: user scripts ticked by themselves; the agent\'s login next', async () => {
-        const x = await this.waitSetup('step 4 open', (st) => (st.steps.join() === 'done,done,done,now,later' && /\n\n/.test(st.now) && !/Checking your coding agent/.test(st.now))
-          || st.steps.join() === 'done,done,done,done,now');
-        if (x.steps[3] === 'now' && !/isn’t logged in on this computer yet|couldn’t tell whether .* is logged in|needs a coding agent|isn’t available/.test(x.now)) throw new Error(`step 4 says: ${x.now}`);
-        await this.shot(this.control, 'setup-page-login');
-        return x.steps[3] === 'now' ? x.now.split('\n').slice(0, 2).join(' / ') : 'the agent is logged in already';
+      await r.check(this.o.kind === 'upgrade' ? 'setup page: Tim\'s starter mods ticked "added" (copied by the setup before there was a choice)'
+        : this.starterNone ? 'setup page: Tim\'s starter mods next, nothing on disk; "Start with none": ticked "none", no mods, no start sites'
+          : 'setup page: Tim\'s starter mods next, nothing on disk; "Add them": ticked "added", the mods there', async () => {
+        if (this.o.kind === 'upgrade') {
+          const x = await this.waitSetup('step 4 ticked', (st) => st.steps[3] === 'done');
+          if (x.states[3] !== 'added') throw new Error(`step 4 ticked as ${x.states[3]}`);
+          return 'added';
+        }
+        const x = await this.waitSetup('step 4 open', (st) => st.steps.join() === 'done,done,done,now,later,later,later');
+        const offer = require('../../helper/lib/preinstalled').PREINSTALLED.length;
+        const words = ['Tim\'s starter mods', `${offer} small mods for Google, X, Amazon and Instagram: no ads or AI clutter, calmer feeds. They’re plain JavaScript you can read before they run.`];
+        if (!words.every((w) => x.now.includes(w)) || x.buttons.join() !== 'Add them,Start with none'
+          || JSON.stringify(x.links) !== JSON.stringify(['See what’s in them https://github.com/acapellascience/trif/tree/main/examples/sites'])) throw new Error(`step 4: ${JSON.stringify(x)}`);
+        if (fs.existsSync(path.join(this.trif, 'sites', 'x.com'))) throw new Error('Tim\'s mods are on disk before the user chose them');
+        await this.shot(this.control, 'setup-page-starter-mods');
+        await d.click(this.control, this.starterNone ? '#starter-none' : '#starter-add');
+        const want = this.starterNone ? 'none' : 'added';
+        const y = await this.waitSetup('step 4 ticked', (st) => st.steps[3] === 'done', 15000);
+        if (y.states[3] !== want) throw new Error(`step 4 ticked as ${y.states[3]}`);
+        const there = fs.existsSync(path.join(this.trif, 'sites', 'x.com', 'detox-timeline.js'));
+        if (there === this.starterNone) throw new Error(`x.com/detox-timeline.js ${there ? 'is' : 'isn\'t'} on disk`);
+        const pre = I.readJson(path.join(this.trif, 'preinstalled.json')) || {};
+        if (pre.starter !== want) throw new Error(`preinstalled.json: ${JSON.stringify(pre.starter)}`);
+        if (this.starterNone) {
+          const st = (await this.cli(['status'], { json: true })).json.extension;
+          if (SITES_START.some((site) => (st.sitesOn || []).includes(site))) throw new Error(`start sites on: ${st.sitesOn}`);
+        }
+        return `${want}: "${words[1].slice(0, 60)}…"`;
+      });
+    }
+    // Site permissions, the setup page's step 5: permissive or restrictive. Upgrading, TRIF has <all_urls>
+    // already (lib/chrome.js, or asked for and the add-on restarted in Firefox): permissive, ticked. Fresh,
+    // it's open; it's chosen after the shipped mods are checked.
+    const asksMode = !this.allSites;
+    if (allowed) {
+      await r.check(asksMode ? 'setup page: user scripts ticked by themselves; Site permissions next: Permissive or Restrictive'
+        : 'setup page: user scripts ticked by themselves; Site permissions ticked too (permissive, kept from before)', async () => {
+        const x = await this.waitSetup('step 5 open', (st) => (asksMode ? st.steps.join() === 'done,done,done,done,now,later,later' : st.steps[4] === 'done'));
+        if (!asksMode) {
+          if (x.states[4] !== 'permissive') throw new Error(`step 5 ticked as ${x.states[4]}`);
+          return `ticked: ${x.states.join(', ')}`;
+        }
+        const words = ['Site permissions', 'Permissive', 'access to every site by default', 'Restrictive', 'connect TRIF on a site-to-site basis', 'You can change this later.'];
+        if (!words.every((w) => x.now.includes(w))) throw new Error(`step 5: ${JSON.stringify(x.now)}`);
+        await this.shot(this.control, 'setup-page-site-permissions');
+        return x.now.split('\n').slice(0, 3).join(' / ');
       });
     }
 
@@ -517,35 +585,39 @@ class Scenario {
       return warns.length ? { status: 'warn', detail: `warnings: ${warns.map((c) => c.title).join('; ')}` } : `${doc.json.checks.length} checks ok`;
     });
 
-    await r.check('shipped mods present and recognised (trif mods, trif status)', async () => {
-      const mods = (await this.cli(['mods'], { json: true })).json;
-      const list = Array.isArray(mods) ? mods : (mods && (mods.mods || [])) || [];
-      const shipped = list.filter((m) => m.source === 'webmods' || m.source === 'trif');
-      // Every mod TRIF ships is there; each is marked as shipped (@source), except a copy the user edited
-      // before 0.1.2, when the shipped mods had no @source line yet.
-      const ids = new Set(list.map((m) => m.id));
-      const missing = SHIPPED_IDS.filter((id) => !ids.has(id));
-      if (missing.length) throw new Error(`missing: ${missing.join(', ')}`);
-      const unmarked = SHIPPED_IDS.filter((id) => !shipped.some((m) => m.id === id) && !(this.o.kind === 'upgrade' && id === 'x.com/punk-fonts'));
-      if (unmarked.length) throw new Error(`not recognised as shipped: ${unmarked.join(', ')}`);
-      const st = (await this.cli(['status'], { json: true })).json.extension;
-      const byId = new Map(st.mods.map((m) => [m.id, m]));
-      const px = byId.get('x.com/detox-timeline');
-      if (!px || px.enabled === false) throw new Error(`x.com/detox-timeline not on: ${JSON.stringify(px)}`);
-      const pf = byId.get('x.com/punk-fonts');
-      if (!pf || pf.enabled !== false) throw new Error(`x.com/punk-fonts should start off: ${JSON.stringify(pf)}`);
-      for (const s of ['google.com', 'x.com', 'amazon.com', 'instagram.com']) if (!(st.sitesOn || []).includes(s)) throw new Error(`TRIF isn't on for ${s}: ${st.sitesOn}`);
-      if (this.o.kind === 'upgrade') {
-        const u = list.find((m) => m.id === 'x.com/punk-fonts');
-        if (!u || !u.update) throw new Error(`trif mods shows no update for x.com/punk-fonts: ${JSON.stringify(u)}`);
-        // The retired mods' switches were handed to the mods they went into (once; both on here).
-        const gone = RETIRED.filter((x) => !ids.has(x.id) && ((I.readJson(path.join(this.trif, 'preinstalled.json')) || {}).shipped || {})[x.id]?.retired?.trashed);
-        const { absorbed = {} } = await this.ext(`async () => chrome.storage.local.get('absorbed')`);
-        const missed = gone.filter((x) => absorbed[x.id] !== true || byId.get(x.into)?.enabled === false);
-        if (missed.length) throw new Error(`switches not carried over for ${missed.map((x) => x.id).join(', ')}: absorbed ${JSON.stringify(absorbed)}`);
-      }
-      return `${shipped.length} shipped (${shipped.filter((m) => byId.get(m.id)?.enabled !== false).length} on), sites on: ${st.sitesOn.join(', ')}`;
-    });
+    if (!this.starterNone) await this.shippedChecks();
+
+    // Fresh: Firefox clicks Permissive and says no to Firefox's prompt (answered from the browser's side),
+    // so TRIF is restrictive, said under the ticked step; Chrome (its prompt can't be answered here) clicks
+    // Restrictive. Either way no site TRIF starts on is connected yet but the test build's.
+    if (allowed) {
+      await r.check(!asksMode ? 'setup page: the agent\'s login next'
+        : this.o.browser === 'firefox' ? 'setup page: Permissive, the prompt declined: restrictive, and a line saying so; the agent\'s login next'
+          : 'setup page: Restrictive, no prompt: restrictive; the agent\'s login next', async () => {
+        const ff = this.o.browser === 'firefox';
+        if (asksMode && ff) {
+          await d.setPermissionPrompts(true);
+          await d.click(this.control, '#mode-permissive');
+          await d.answerPermissionPrompt(false);
+          await d.setPermissionPrompts(false);
+        } else if (asksMode) await d.click(this.control, '#mode-restrictive');
+        const x = await this.waitSetup('step 6 open', (st) => (st.steps.join() === 'done,done,done,done,done,now,later' && /\n\n/.test(st.now) && !/Checking your coding agent/.test(st.now))
+          || st.steps.join() === 'done,done,done,done,done,done,now');
+        if (x.steps[5] === 'now' && !/is logged in on this computer yet|couldn’t tell whether .* (is|are) logged in|needs a coding agent/.test(x.now) || /Use another agent/.test(x.now)) throw new Error(`step 6 says: ${x.now}`);
+        const want = asksMode ? 'restrictive' : 'permissive';
+        if (x.states[4] !== want) throw new Error(`step 5 ticked as ${x.states[4]}`);
+        const note = await this.ext(`async () => { const n = document.querySelector('#step-sites .step-note'); return n.hidden ? '' : n.textContent; }`);
+        if (asksMode && ff && note !== 'Firefox didn’t get your OK, so TRIF is restrictive. You can switch to permissive later in the sidebar’s Settings.') throw new Error(`the note: ${JSON.stringify(note)}`);
+        if (!(asksMode && ff) && note) throw new Error(`a note: ${note}`);
+        const st = (await this.cli(['status'], { json: true })).json.extension;
+        const disconnected = asksMode && !this.starterNone ? (ff ? SITES_START : ['amazon.com', 'instagram.com']) : [];
+        if (st.siteMode !== want || JSON.stringify(st.disconnected) !== JSON.stringify(disconnected)) throw new Error(`status: ${JSON.stringify([st.siteMode, st.disconnected])}`);
+        const text = await this.cli(['status']);
+        if (!new RegExp(`^site mode {5}${want}`, 'm').test(text.stdout)) throw new Error(`trif status: ${text.stdout}`);
+        await this.shot(this.control, 'setup-page-login');
+        return `${want}${note ? ` ("${note}")` : ''}; disconnected ${st.disconnected.join(', ') || 'none'}; ${x.steps[5] === 'now' ? x.now.split('\n').slice(0, 2).join(' / ') : 'the agent is logged in already'}`;
+      });
+    }
 
     if (!allowed) { r.note('user scripts are off, so the page checks were skipped'); return; }
 
@@ -558,11 +630,44 @@ class Scenario {
     await this.ext(`async (url, win) => { await chrome.windows.create({ url, width: 420, height: 900 }); }`, [`${origin}/sidepanel.html?window=${win.windowId}`, win.windowId]);
     this.panelCtx = await d.findPage('sidepanel.html');
 
-    await r.check('site off by default: the mod doesn\'t run, the panel shows the gate', async () => {
+    // Fresh Chrome started with none: Settings in the panel adds them later (the way back), then the same
+    // checks as where they were added at setup.
+    if (this.starterNone) {
+      await r.check('Settings → "Add Tim\'s starter mods" (after "Start with none"): the mods arrive, their sites on, and the button goes', async () => {
+        await this.waitPanel('the panel to load', (x) => x.site === '127.0.0.1');
+        await d.click(this.panelCtx, '#settings-btn');
+        const shown = await waitFor('the button', () => this.panel(`async () => !document.querySelector('#settings').hidden && !document.querySelector('#starter-block').hidden && document.querySelector('#starter-block').innerText`), { timeoutMs: 8000 });
+        await this.shot(this.panelCtx, 'settings-starter-mods');
+        await d.click(this.panelCtx, '#starter-add');
+        await waitFor('the starter mods', () => fs.existsSync(path.join(this.trif, 'sites', 'x.com', 'detox-timeline.js')), { timeoutMs: 15000 });
+        await waitFor('the button to go', () => this.panel(`async () => document.querySelector('#starter-block').hidden`), { timeoutMs: 10000 });
+        await waitFor('the start sites on', async () => (((await this.cli(['status'], { json: true })).json.extension || {}).sitesOn || []).includes('x.com'), { timeoutMs: 10000 });
+        await d.click(this.panelCtx, '#settings-btn');
+        return shown.replace(/\n+/g, ' / ');
+      });
+      await this.shippedChecks();
+    }
+
+    // Fresh Firefox is restrictive with no site connected: 127.0.0.1 is disconnected (the panel all grey).
+    // Chrome's fresh test build has 127.0.0.1 (restrictive, connected), and upgrading TRIF has every site
+    // (permissive): off.
+    this.restrictive = !this.allSites;
+    const firstDisconnected = this.o.browser === 'firefox' && !this.allSites;
+    await r.check(firstDisconnected ? 'site disconnected by default (restrictive): the mod doesn\'t run, the panel all grey with Connect'
+      : 'site off by default: the mod doesn\'t run, the panel shows "The robot is off.", Fix, and Block and Disconnect', async () => {
       const s = await this.pageState();
       if (s.banner) throw new Error('the mod ran on a site TRIF is off for');
       const p = await this.waitPanel('the panel to show the gate', (x) => x.site === '127.0.0.1' && x.gate);
-      return `panel: "${p.gateText}"`;
+      if (firstDisconnected) {
+        if (p.gateTitle !== 'TRIF is disconnected on 127.0.0.1' || p.gateText !== 'Connect' || !p.grey || p.links.length) throw new Error(`the gate: ${JSON.stringify(p)}`);
+        await this.shot(this.panelCtx, 'panel-disconnected');
+      } else {
+        const links = ['Block on 127.0.0.1 (Add to TRIF\'s block list)', 'Disconnect from 127.0.0.1 (Disable browser permissions)'];
+        if (p.gateTitle !== 'The robot is off.' || p.gateText !== 'Fix 127.0.0.1' || p.grey || JSON.stringify(p.links) !== JSON.stringify(links)) throw new Error(`the gate: ${JSON.stringify(p)}`);
+        await this.shot(this.panelCtx, 'panel-off-links');
+        await this.shot(this.panelCtx, this.allSites ? 'panel-off-permissive' : 'panel-off-restrictive');
+      }
+      return `panel: "${p.gateTitle}" / "${p.gateText}"${p.links.length ? `; ${p.links.join(', ')}` : ''}`;
     });
     await r.check('gate: the top bar keeps only the dot, the robot, grey and dim, and settings', async () => {
       const b = await this.waitBar('the gate\'s bar', GATE_BAR, Scenario.dim);
@@ -614,16 +719,130 @@ class Scenario {
       await this.waitPanel('the panel switch to go on', (x) => x.mods.some((m) => m.id === '127.0.0.1/e2e-banner' && m.on));
     });
 
-    await r.check('site switch off in the panel: nothing runs; on again: it does', async () => {
+    const SITE = ['*://127.0.0.1/*']; // (an IP: just the address, as lib.js siteOrigins asks)
+    const hasSite = () => this.ext(`async (o) => chrome.permissions.contains({ origins: o })`, [SITE]);
+    const offAgain = async () => {
       await d.click(this.panelCtx, '#site-switch');
-      await this.waitPanel('the gate', (x) => x.gate && !x.siteOn);
+      const p = await this.waitPanel('the off screen', (x) => x.gate && x.gateTitle === 'The robot is off.');
       await this.waitPage('the page without the mod', (x) => !x.banner);
+      return p;
+    };
+    await r.check('site switch off in the panel: nothing runs, the access stays (on again asks nothing), Block and Disconnect under Fix; on again: it runs', async () => {
+      const p = await offAgain();
       const blocked = await this.cli(['text', '--url', '127.0.0.1']);
-      if (blocked.status === 0) throw new Error('trif text worked on a site TRIF is off for');
+      if (blocked.status === 0 || !/^trif text: TRIF is off on 127\.0\.0\.1/.test(blocked.stderr)) throw new Error(`trif text: ${blocked.status} ${blocked.stderr}`);
+      if (!(await hasSite())) throw new Error('turning the site off gave its access back');
+      if (p.gateText !== 'Fix 127.0.0.1' || p.links.length !== 2) throw new Error(`the gate: ${JSON.stringify(p)}`);
       await this.shot(this.panelCtx, 'panel-site-off');
       await d.click(this.panelCtx, '#gate-btn');
       await this.waitPage('the mod again', (x) => x.banner === 'ran');
       return `page commands refused while off: ${(blocked.stderr || blocked.stdout).trim().split('\n')[0]}`;
+    });
+
+    // Restrictive, Firefox (prompts off in this profile, so the asking is real): Disconnect gives the access
+    // back and the panel goes grey, agents are told; Connect asks and turns it on in one click; the same
+    // after the access is taken away as the browser's settings would. (Chrome's test build has 127.0.0.1 as
+    // a required host, which can't be given back: the unit tests cover it there.)
+    if (this.o.browser === 'firefox' && !this.allSites) {
+      const disconnected = async (how) => {
+        const p = await this.waitPanel('the grey panel', (x) => x.gate && x.gateTitle === 'TRIF is disconnected on 127.0.0.1');
+        if (p.gateText !== 'Connect' || !p.grey || p.links.length) throw new Error(`${how}: the gate: ${JSON.stringify(p)}`);
+        const blocked = await this.cli(['text', '--url', '127.0.0.1']);
+        if (blocked.status === 0 || !/TRIF is disconnected on 127\.0\.0\.1: .*until the user connects it/.test(blocked.stderr)) throw new Error(`${how}: trif text: ${blocked.status} ${blocked.stderr}`);
+        return blocked.stderr.trim().split('\n')[0];
+      };
+      const connect = async (how) => {
+        await d.click(this.panelCtx, '#gate-btn');
+        await this.waitPage(`the mod again (${how})`, (x) => x.banner === 'ran');
+        if (!(await hasSite())) throw new Error(`${how}: connected, but the browser has no access recorded`);
+      };
+      await r.check('restrictive: "Disconnect from 127.0.0.1" gives the access back, the panel goes grey, agents are told; Connect asks and turns it on in one click', async () => {
+        await offAgain();
+        await d.click(this.panelCtx, '#gate-disconnect');
+        const said = await disconnected('disconnected');
+        if (await hasSite()) throw new Error('disconnected, but the browser still gives TRIF the site');
+        await connect('Connect');
+        return said;
+      });
+      await r.check('restrictive: taken away as the browser\'s settings would: grey, nothing runs; Connect brings it back', async () => {
+        if (!(await this.ext(`async (o) => chrome.permissions.remove({ origins: o })`, [SITE]))) throw new Error('permissions.remove said no');
+        await this.ext(`async (id) => { await chrome.tabs.reload(id); }`, [this.win.tabId]);
+        await this.waitPage('the page without the mod', (x) => !x.banner);
+        const said = await disconnected('taken away');
+        await connect('Connect');
+        return said;
+      });
+      // Then permissive, from Settings (the prompt answered yes): the rest of the suite runs with every site.
+      await r.check('Settings → Site permissions → Permissive: the browser\'s prompt (yes), and TRIF is permissive', async () => {
+        await d.click(this.panelCtx, '#settings-btn');
+        const before = await waitFor('Site permissions', () => this.panel(`async () => !document.querySelector('#settings').hidden && document.querySelector('#mode-restrictive').getAttribute('aria-pressed') === 'true' && document.querySelector('.sites-block').innerText`), { timeoutMs: 5000 });
+        await this.shot(this.panelCtx, 'settings-site-permissions');
+        await d.click(this.panelCtx, '#mode-permissive');
+        await waitFor('<all_urls> granted', () => this.ext(`async () => chrome.permissions.contains({ origins: ['<all_urls>'] })`), { timeoutMs: 5000 });
+        await waitFor('Permissive marked', () => this.panel(`async () => document.querySelector('#mode-permissive').getAttribute('aria-pressed') === 'true'`), { timeoutMs: 8000 });
+        const st = (await this.cli(['status'], { json: true })).json.extension;
+        if (st.siteMode !== 'permissive' || st.disconnected.length) throw new Error(`status: ${JSON.stringify([st.siteMode, st.disconnected])}`);
+        await d.click(this.panelCtx, '#settings-btn');
+        this.restrictive = false;
+        return before.replace(/\n+/g, ' / ');
+      });
+    }
+
+    // Permissive (upgrading, or fresh Firefox from here on): Disconnect can't take one site out of every
+    // site, so a card offers restrictive mode; × and Escape close it, doing nothing. (Switching is checked at
+    // the end in Firefox; Chrome's upgrade test build has <all_urls> as a required host, which can't go.)
+    if (!this.restrictive) {
+      await r.check('permissive: "Disconnect from 127.0.0.1" opens a card in the panel offering restrictive mode; × and Escape close it, nothing changes', async () => {
+        await offAgain();
+        await d.click(this.panelCtx, '#gate-disconnect');
+        const p = await this.waitPanel('the card', (x) => !!x.dialog);
+        const lines = p.dialog.split('\n').map((l) => l.trim()).filter(Boolean);
+        if (JSON.stringify(lines) !== JSON.stringify(['×', 'All-site access is on', 'You\'ll have to allow TRIF again on other sites.', 'Switch to restrictive mode'])) {
+          await this.panel(`async () => document.querySelector('#mode-dialog').close()`);
+          throw new Error(`the card says: ${JSON.stringify(p.dialog)}`);
+        }
+        await this.shot(this.panelCtx, 'panel-permissive-disconnect-dialog');
+        await d.click(this.panelCtx, '#mode-dialog-close');
+        await this.waitPanel('the card closed (×)', (x) => !x.dialog);
+        await d.click(this.panelCtx, '#gate-disconnect');
+        await this.waitPanel('the card again', (x) => !!x.dialog);
+        await d.key(this.panelCtx, 'Escape');
+        await this.waitPanel('the card closed (Escape)', (x) => !x.dialog);
+        const st = (await this.cli(['status'], { json: true })).json.extension;
+        if (st.siteMode !== 'permissive' || !(await hasSite())) throw new Error(`changed: ${JSON.stringify(st.siteMode)}`);
+        await d.click(this.panelCtx, '#gate-btn');
+        await this.waitPage('the mod again', (x) => x.banner === 'ran');
+        return lines.slice(1).join(' / ');
+      });
+    }
+
+    // Blocked in TRIF (both modes): nothing from TRIF touches the site whatever access it has; the panel red,
+    // and Unblock; Settings lists it.
+    await r.check('"Block on 127.0.0.1": the mod stops, agents are refused, the panel red with Unblock, Settings lists it; Unblock, then Fix (or Connect) turns it on', async () => {
+      await offAgain();
+      await d.click(this.panelCtx, '#gate-block');
+      const p = await this.waitPanel('the red panel', (x) => x.gate && x.gateTitle === 'The robot is blocked on 127.0.0.1');
+      if (p.gateText !== 'Unblock' || !p.red || p.grey || p.links.length) throw new Error(`the gate: ${JSON.stringify(p)}`);
+      await this.shot(this.panelCtx, 'panel-blocked');
+      for (const args of [['text', '--url', '127.0.0.1'], ['screenshot', '--url', '127.0.0.1', '-o', path.join(this.work, 'blocked.png')], ['run', '--url', '127.0.0.1', '1']]) {
+        const x = await this.cli(args);
+        if (x.status === 0 || !/127\.0\.0\.1 is blocked in TRIF: nothing from TRIF runs there or reads it/.test(x.stderr)) throw new Error(`trif ${args[0]}: ${x.status} ${x.stderr}`);
+      }
+      const st = (await this.cli(['status'], { json: true })).json.extension;
+      if (JSON.stringify(st.blockedSites) !== '["127.0.0.1"]' || st.sitesOn.includes('127.0.0.1')) throw new Error(`status: ${JSON.stringify([st.blockedSites, st.sitesOn])}`);
+      const text = await this.cli(['status']);
+      if (!/^blocked {7}127\.0\.0\.1: blocked in TRIF/m.test(text.stdout)) throw new Error(`trif status: ${text.stdout}`);
+      await d.click(this.panelCtx, '#settings-btn');
+      const listed = await waitFor('the blocked sites', () => this.panel(`async () => { const li = [...document.querySelectorAll('#blocked-list li')]; return !document.querySelector('#settings').hidden && li.length ? li.map((x) => x.textContent) : null; }`), { timeoutMs: 5000 });
+      if (this.o.browser !== 'firefox' || this.allSites) await this.shot(this.panelCtx, 'settings-site-permissions');
+      await d.click(this.panelCtx, '#settings-btn');
+      await d.click(this.panelCtx, '#gate-btn');
+      // Unblocked: off (TRIF has the site), or grey (restrictive Firefox gave its access back when blocking).
+      const after = await this.waitPanel('the gate after', (x) => x.gate && !x.red);
+      if (!['The robot is off.', 'TRIF is disconnected on 127.0.0.1'].includes(after.gateTitle)) throw new Error(`after: ${JSON.stringify(after)}`);
+      await d.click(this.panelCtx, '#gate-btn');
+      await this.waitPage('the mod again', (x) => x.banner === 'ran');
+      return `listed: ${listed.join(', ')}; after: "${after.gateTitle}"`;
     });
 
     await r.check('the robot in the top bar: on a site TRIF is on for, it puts it to sleep like the power button; on the gate, it wakes it like Fix', async () => {
@@ -729,6 +948,7 @@ class Scenario {
     await this.ext(`async (id) => { await chrome.tabs.update(id, { active: true }); }`, [win.tabId]).catch(() => {});
 
     await r.check('setup page: all ticked once the agent can run, then "TRIF is ready" and Try it', () => this.setupDoneCheck());
+    if (this.o.browser === 'firefox') await this.restrictiveAgainCheck();
     // (A stand-in Claude Code: only when the helper has the scratch HOME, never your real agent.)
     if (!this.o.agent && !this.o.codex && !this.o.oss && !this.o.guidance) {
       await r.check('an expired login (a stand-in Claude Code): the login notice and one plain line, not the raw error; the message back in the box', () => this.expiredLoginCheck(win));
@@ -744,6 +964,66 @@ class Scenario {
 
   // ---- the shipped Google mods against the stand-ins (tests/e2e/lib/server.js): every data-e2e="hide…"
   // element hidden, every "keep…" one still showing, in a background tab.
+  /** Tim's starter mods, once added: every one there, recognised, on or off as shipped, their sites on. */
+  async shippedChecks() {
+    const r = this.r;
+    await r.check('shipped mods present and recognised (trif mods, trif status)', async () => {
+      const mods = (await this.cli(['mods'], { json: true })).json;
+      const list = Array.isArray(mods) ? mods : (mods && (mods.mods || [])) || [];
+      const shipped = list.filter((m) => m.source === 'webmods' || m.source === 'trif');
+      // Every mod TRIF ships is there; each is marked as shipped (@source), except a copy the user edited
+      // before 0.1.2, when the shipped mods had no @source line yet.
+      const ids = new Set(list.map((m) => m.id));
+      const missing = SHIPPED_IDS.filter((id) => !ids.has(id));
+      if (missing.length) throw new Error(`missing: ${missing.join(', ')}`);
+      const unmarked = SHIPPED_IDS.filter((id) => !shipped.some((m) => m.id === id) && !(this.o.kind === 'upgrade' && id === 'x.com/punk-fonts'));
+      if (unmarked.length) throw new Error(`not recognised as shipped: ${unmarked.join(', ')}`);
+      const st = (await this.cli(['status'], { json: true })).json.extension;
+      const byId = new Map(st.mods.map((m) => [m.id, m]));
+      const px = byId.get('x.com/detox-timeline');
+      if (!px || px.enabled === false) throw new Error(`x.com/detox-timeline not on: ${JSON.stringify(px)}`);
+      const pf = byId.get('x.com/punk-fonts');
+      if (!pf || pf.enabled !== false) throw new Error(`x.com/punk-fonts should start off: ${JSON.stringify(pf)}`);
+      for (const s of ['google.com', 'x.com', 'amazon.com', 'instagram.com']) if (!(st.sitesOn || []).includes(s)) throw new Error(`TRIF isn't on for ${s}: ${st.sitesOn}`);
+      if (this.o.kind === 'upgrade') {
+        const u = list.find((m) => m.id === 'x.com/punk-fonts');
+        if (!u || !u.update) throw new Error(`trif mods shows no update for x.com/punk-fonts: ${JSON.stringify(u)}`);
+        // The retired mods' switches were handed to the mods they went into (once; both on here).
+        const gone = RETIRED.filter((x) => !ids.has(x.id) && ((I.readJson(path.join(this.trif, 'preinstalled.json')) || {}).shipped || {})[x.id]?.retired?.trashed);
+        const { absorbed = {} } = await this.ext(`async () => chrome.storage.local.get('absorbed')`);
+        const missed = gone.filter((x) => absorbed[x.id] !== true || byId.get(x.into)?.enabled === false);
+        if (missed.length) throw new Error(`switches not carried over for ${missed.map((x) => x.id).join(', ')}: absorbed ${JSON.stringify(absorbed)}`);
+      }
+      return `${shipped.length} shipped (${shipped.filter((m) => byId.get(m.id)?.enabled !== false).length} on), sites on: ${st.sitesOn.join(', ')}`;
+    });
+  }
+
+  /**
+   * Firefox, permissive: "Switch to restrictive mode" in the card Disconnect opens gives every site's access
+   * back, no prompt: 127.0.0.1 goes grey, as every other site; Connect brings it back (the prompt is off).
+   */
+  async restrictiveAgainCheck() {
+    const r = this.r;
+    const d = this.d;
+    await r.check('permissive → "Switch to restrictive mode" (the card): every site\'s access goes, the panel grey; Connect brings 127.0.0.1 back', async () => {
+      await this.ext(`async (id) => { await chrome.tabs.update(id, { active: true }); }`, [this.win.tabId]);
+      await this.waitPanel('the panel on 127.0.0.1', (x) => x.site === '127.0.0.1' && !x.gate);
+      await d.click(this.panelCtx, '#site-switch');
+      await this.waitPanel('the off screen', (x) => x.gate && x.gateTitle === 'The robot is off.');
+      await d.click(this.panelCtx, '#gate-disconnect');
+      await this.waitPanel('the card', (x) => !!x.dialog);
+      await d.click(this.panelCtx, '#mode-dialog-switch');
+      const p = await this.waitPanel('the grey panel', (x) => x.gate && x.gateTitle === 'TRIF is disconnected on 127.0.0.1' && !x.dialog);
+      if (!p.grey) throw new Error(`not grey: ${JSON.stringify(p)}`);
+      const origins = await this.ext(`async () => (await chrome.permissions.getAll()).origins`);
+      const st = (await this.cli(['status'], { json: true })).json.extension;
+      if (origins.length || st.siteMode !== 'restrictive' || !st.disconnected.includes('x.com')) throw new Error(`after: ${JSON.stringify([origins, st.siteMode, st.disconnected])}`);
+      await d.click(this.panelCtx, '#gate-btn');
+      await this.waitPage('the mod again', (x) => x.banner === 'ran');
+      return `granted after: none; disconnected: ${st.disconnected.join(', ')}`;
+    });
+  }
+
   async googleChecks(win) {
     const d = this.d;
     const { tlsPort } = this.o.servers;
@@ -860,6 +1140,7 @@ class Scenario {
 
   async sweepAndScreenshotChecks(base, win) {
     const r = this.r;
+    const d = this.d;
     const E = SWEEP_EXPECT;
     const url = `${base}/sweep.html`;
     // In the background of the test window, as `trif open` does: the test tab stays in front.
@@ -906,7 +1187,45 @@ class Scenario {
     }`);
     const pngSize = (file) => { const b = fs.readFileSync(file); return b.subarray(1, 4).toString() === 'PNG' ? { w: b.readUInt32BE(16), h: b.readUInt32BE(20), bytes: b.length } : null; };
     const chrome = this.o.browser !== 'firefox';
-    if (chrome) {
+    // Restrictive (Chrome's fresh test build: only the sites the user connected), Chrome's and Firefox's tab
+    // capture want activeTab, from a click on TRIF's toolbar button on that tab (extension/screenshot.js).
+    if (chrome && !this.allSites) {
+      await r.check('without access to every site: trif screenshot of a tab that isn\'t showing (--full, --copy) is refused with a hint, nothing opened', async () => {
+        const before = await view();
+        const results = [];
+        for (const extra of [[], ['--full'], ...(chrome ? [['--copy'], ['--copy', '--full']] : [])]) {
+          const x = await this.cli(['screenshot', '--tab', String(sweepTab), ...extra, '-o', path.join(this.work, 'refused.png')]);
+          if (x.status === 0) throw new Error(`trif screenshot ${extra.join(' ')} worked`);
+          if (!/access to every site/.test(x.stderr) || !/toolbar button/.test(x.stderr) || !/trif sweep/.test(x.stderr)) throw new Error(`no hint: ${x.stderr}`);
+          results.push(x.stderr.trim().split('\n')[0]);
+        }
+        const after = await view();
+        if (JSON.stringify(after) !== JSON.stringify(before)) throw new Error(`the user's view changed: ${JSON.stringify(before)} -> ${JSON.stringify(after)}`);
+        return results[0];
+      });
+    }
+    if (chrome && !this.allSites) {
+      await r.check('without access to every site (Chrome): the tab in front is refused until the user clicks the toolbar button on it, then captured', async () => {
+        // The test tab, in front in its window (earlier checks may have left another tab there).
+        const was = await this.ext(`async (w) => (await chrome.tabs.query({ active: true, windowId: w }))[0]?.id ?? null`, [this.win.windowId]);
+        const front = await this.ext(`async (id) => { const t = await chrome.tabs.update(id, { active: true }); return t.url; }`, [this.win.tabId]);
+        const tab = String(this.win.tabId);
+        const file = this.r.file(`${this.label}-${String(++this.shots).padStart(2, '0')}-trif-screenshot-front.png`);
+        const no = await this.cli(['screenshot', '--tab', tab, '-o', file]);
+        if (no.status === 0 || !/only after the user clicks the TRIF toolbar button on it/.test(no.stderr)) throw new Error(`before the click: ${no.status} ${no.stderr}`);
+        const ctx = await d.findPage((u) => u === front);
+        await d.clickToolbarButton(ctx);
+        await sleep(500);
+        const x = await this.cli(['screenshot', '--tab', tab, '-o', file], { json: true, timeoutMs: 30000 });
+        if (x.status !== 0 || !x.json || x.json.how !== 'visible') throw new Error(`after the click: ${x.stderr || x.stdout}`);
+        const size = pngSize(file);
+        if (!size || size.w < 200 || size.bytes < 3000) throw new Error(`not much of a PNG: ${JSON.stringify(size)}`);
+        await d.clickToolbarButton(ctx).catch(() => {}); // (the click opened the side panel: closed again)
+        if (was !== null && was !== this.win.tabId) await this.ext(`async (id) => { await chrome.tabs.update(id, { active: true }); }`, [was]).catch(() => {});
+        return `refused before: ${no.stderr.trim().split('\n')[0].slice(0, 120)}…; after: ${size.w}x${size.h}`;
+      });
+    }
+    if (chrome && this.allSites) {
       await r.check('trif screenshot of a tab that isn\'t showing, without --copy (Chrome): refused with the hint, nothing opened', async () => {
         const before = await view();
         const results = [];
@@ -921,7 +1240,25 @@ class Scenario {
         return results[0];
       });
     }
-    for (const full of [false, true]) {
+    // Fresh Firefox went permissive while running (Settings, above).
+    const grantedNow = !this.allSites && !chrome;
+    // Firefox only gives the running background captureTab if it had <all_urls> when it started (screenshot.js):
+    // given now, a background capture says to restart Firefox. (Someone who updated from a version that
+    // required it has it from the start, and gets captureTab, as this suite did before.)
+    if (grantedNow) {
+      // (Firefox's background is an event page: once it has been suspended and started again it has captureTab,
+      // so either answer is right, depending on whether that happened since.)
+      await r.check('Firefox: <all_urls> given while running: a background screenshot works, or says to restart Firefox; nothing opened', async () => {
+        const before = await view();
+        const x = await this.cli(['screenshot', '--tab', String(sweepTab), '-o', path.join(this.work, 'given.png')], { json: true });
+        const after = await view();
+        if (JSON.stringify(after) !== JSON.stringify(before)) throw new Error(`the user's view changed: ${JSON.stringify(before)} -> ${JSON.stringify(after)}`);
+        if (x.status === 0 && x.json && x.json.how === 'tab') return 'captured (the background had started again since)';
+        if (x.status === 0 || !/quit and reopen Firefox/.test(x.stderr)) throw new Error(`${x.status} ${x.stderr}`);
+        return x.stderr.trim().split('\n')[0];
+      });
+    }
+    for (const full of this.allSites ? [false, true] : []) {
       await r.check(`trif screenshot${chrome ? ' --copy' : ''}${full ? ' --full' : ''} of a tab that isn't showing: works, and the user's tabs and focus stay as they were`, async () => {
         const before = await view();
         const isActive = (await this.ext(`async (id) => (await chrome.tabs.get(id)).active`, [sweepTab]));

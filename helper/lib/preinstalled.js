@@ -1,7 +1,11 @@
 'use strict';
-// Mods a new workspace starts with, copied from the examples by `trif setup`, each switched on or off
-// as listed, and the sites TRIF starts on for; and keeping those mods up to date. $TRIF_HOME/
-// preinstalled.json = {offered: [ids], startOff: [ids], sitesOn: [sites], shipped: {id: record}}:
+// Tim's starter mods: the mods TRIF ships, copied from the examples into a workspace only when the user
+// says so (the setup page's "Add them", the panel's Settings, or `trif setup --examples`: nothing of Tim's
+// code is on disk before that), each switched on or off as listed, and the sites TRIF starts on for; and
+// keeping those mods up to date. $TRIF_HOME/preinstalled.json = {starter, offered: [ids], startOff: [ids],
+// sitesOn: [sites], shipped: {id: record}}:
+//  - starter: the user's choice, 'added' or 'none' (absent: not chosen yet). A workspace whose `offered`
+//    isn't empty got them before there was a choice (setup copied them): 'added', updates as before;
 //  - offered: ids already offered, so one the user deleted doesn't come back with the next setup (and an
 //    existing file, the user's own version, is never overwritten);
 //  - startOff: ids setup copied that start off. The helper sends those mods with `startOff: true`, and
@@ -109,12 +113,13 @@ function load(home) {
   if (s && typeof s === 'object' && !Array.isArray(s)) {
     for (const [id, r] of Object.entries(s)) if (r && typeof r === 'object' && !Array.isArray(r)) shipped[id] = r;
   }
-  return { offered: list(v && v.offered), startOff: list(v && v.startOff), sitesOn: list(v && v.sitesOn), shipped };
+  const starter = v && (v.starter === 'added' || v.starter === 'none') ? v.starter : null;
+  return { starter, offered: list(v && v.offered), startOff: list(v && v.startOff), sitesOn: list(v && v.sitesOn), shipped };
 }
 
 // Written whole and renamed into place: setup and the helpers (another browser's too) all write it.
 function save(home, state) {
-  const out = { offered: state.offered, startOff: state.startOff, sitesOn: state.sitesOn };
+  const out = { ...(state.starter ? { starter: state.starter } : {}), offered: state.offered, startOff: state.startOff, sitesOn: state.sitesOn };
   if (Object.keys(state.shipped || {}).length) out.shipped = state.shipped;
   const tmp = `${file(home)}.${process.pid}.tmp`;
   fs.writeFileSync(tmp, JSON.stringify(out, null, 2) + '\n');
@@ -180,7 +185,8 @@ function preinstallMods(home, modsDir, examplesDir, list = PREINSTALLED, sitesOn
   const history = loadHistory(examplesDir);
   const added = [];
   const on = [];
-  let changed = false;
+  let changed = state.starter !== 'added';
+  state.starter = 'added';
   for (const { id, on: startOn } of list) {
     if (state.offered.includes(id)) continue;
     const src = modFile(examplesDir, id);
@@ -525,6 +531,33 @@ function restoreMod(ws, id, opts = {}) {
   return r;
 }
 
+/** The user's choice about the starter mods: 'added', 'none', or null (not chosen yet). See the top. */
+function starterChoice(home) {
+  const state = load(home);
+  return state.starter || (state.offered.length ? 'added' : null);
+}
+
+/** "Start with none" (or `setup --no-examples`): recorded, so nothing adds them later. A no-op once added. */
+function chooseNoStarter(home) {
+  const state = load(home);
+  if (state.starter || state.offered.length) return starterChoice(home);
+  state.starter = 'none';
+  save(home, state);
+  return 'none';
+}
+
+/** "Add them": what setup did before there was a choice (the mods, their updates, the sites they're for). */
+function installStarter(home, modsDir, examplesDir) {
+  const r = preinstallMods(home, modsDir, examplesDir);
+  updateShippedMods(home, modsDir, examplesDir);
+  return r;
+}
+
+/** What the setup page says about them: how many mods, for which sites. */
+function starterOffer(list = PREINSTALLED, sites = SITES_ON) {
+  return { count: list.length, sites: sites.slice() };
+}
+
 /** The ids the extension should switch off when it first sees them. */
 function startOffIds(home) { return new Set(load(home).startOff); }
 
@@ -533,5 +566,6 @@ function startSitesOn(home) { return load(home).sitesOn; }
 
 module.exports = {
   PREINSTALLED, RETIRED, SITES_ON, DEFAULT_ORDER, SHIPPED_DIR, preinstallMods, updateShippedMods, retireShippedMods, absorbedIds,
+  starterChoice, chooseNoStarter, installStarter, starterOffer,
   startOffIds, startSitesOn, loadPreinstalled: load, pendingUpdates, useNewVersion, keepMine, mergeRequest, mergeSettled, resolveMerge, restoreMod, baseFile, newFile, loadHistory,
 };

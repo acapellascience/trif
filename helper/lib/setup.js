@@ -14,7 +14,7 @@ const { envVar } = require('./env');
 const P = require('./paths');
 const { selectBrowsers, SAFARI_AGENT_LABEL, LEGACY_SAFARI_AGENT_LABEL, safariAgentPlist, legacySafariAgentPlist, legacySafariAgentLoaded } = require('./browsers');
 const { migrateHome, describeMigration, migratePrivate } = require('./migrate');
-const { preinstallMods, updateShippedMods, retireShippedMods } = require('./preinstalled');
+const { preinstallMods, updateShippedMods, retireShippedMods, starterChoice, chooseNoStarter } = require('./preinstalled');
 const { acquireInstallLock, pidAlive } = require('./lock');
 const { firefoxAddonUrl } = require('./update');
 
@@ -376,7 +376,8 @@ function revealFolder(dir) {
 }
 
 /**
- * opts: { home, browser, nativeDir, binDir, noLink, noExamples, mode: 'copy'|'link'|undefined (auto),
+ * opts: { home, browser, nativeDir, binDir, noLink, examples (add Tim's starter mods now), noExamples (decline
+ *         them, and skip their updates), mode: 'copy'|'link'|undefined (auto),
  *         reveal (show the extension folder in Finder for Chrome's Load unpacked),
  *         launchAgentsDir (where the Safari bridge's agent goes; default ~/Library/LaunchAgents),
  *         launchctl (false: write the agent but don't start it; also TRIF_NO_LAUNCHCTL=1) }
@@ -490,6 +491,13 @@ function setup(opts = {}) {
   } else {
     note(`              AGENTS.md not found at ${agentsSrc}; skipped`);
   }
+  // The browsers being set up, by name ("your browser" when that can't be told).
+  const browserWord = () => {
+    let chosen = [];
+    try { chosen = opts.nativeDir ? [] : selectBrowsers(opts.browser); } catch { /* a bad --browser: reported below */ }
+    const names = [...new Set(chosen.map((t) => (t.firefox ? 'Firefox' : t.safari ? 'Safari' : 'Chrome')))];
+    return names.length === 1 ? names[0] : 'your browser';
+  };
   // What the browsers being set up call TRIF's panel (Chrome's side panel, Firefox's sidebar, Safari's).
   const panelWord = (() => {
     let chosen = [];
@@ -497,7 +505,18 @@ function setup(opts = {}) {
     const words = [...new Set(chosen.map((t) => (t.firefox ? 'sidebar' : t.safari ? 'panel' : 'side panel')))];
     return words.length ? words.join(' or ') : 'side panel';
   })();
-  if (!opts.noExamples) {
+  // Tim's starter mods (preinstalled.js): only with the user's say-so. A new workspace gets none here: the
+  // setup page asks ("Add them" or "Start with none"), or --examples adds them now and --no-examples
+  // declines. A workspace that has them (added, or copied by a setup before there was a choice) keeps
+  // getting new ones and updates, as before.
+  const starter = starterChoice(home);
+  if (opts.noExamples && !starter) chooseNoStarter(home);
+  if (!opts.noExamples && !opts.examples && starter !== 'added') {
+    say(starter === 'none'
+      ? 'mods          no starter mods (you chose none; trif setup --examples adds them)'
+      : `mods          Tim's starter mods: added only if you choose them, on the setup page in ${browserWord()} (or with trif setup --examples)`);
+  }
+  if (!opts.noExamples && (opts.examples || starter === 'added')) {
     const examplesDir = envVar('EXAMPLES_DIR') ? path.resolve(envVar('EXAMPLES_DIR')) : path.join(root, 'examples', 'sites');
     const { added, on, sites } = preinstallMods(home, ws.modsDir, examplesDir);
     const off = added.filter((id) => !on.includes(id));

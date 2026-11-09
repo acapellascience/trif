@@ -19,7 +19,7 @@ const fs = require('fs');
 const net = require('net');
 const path = require('path');
 const { envVar } = require('./lib/env');
-const { workspace, VERSION } = require('./lib/paths');
+const { workspace, VERSION, examplesDir } = require('./lib/paths');
 const { createLogger } = require('./lib/log');
 const { encode, Decoder, MAX_TO_EXTENSION } = require('./lib/framing');
 const { scanMods, buildMod, planMods, planModsMessage, modsParts, withSame, folderFingerprint, summarize, findRenames } = require('./lib/mods');
@@ -28,7 +28,7 @@ const { Logins } = require('./lib/logins');
 const agents = require('./lib/agents');
 const { updateHeld, approveHeld, rejectHeld, lastRun, heldFile, reviewItems, reviewMod } = require('./lib/held');
 const history = require('./lib/history');
-const { DEFAULT_ORDER, startOffIds, startSitesOn, pendingUpdates, useNewVersion, keepMine, mergeRequest, mergeSettled, restoreMod, absorbedIds } = require('./lib/preinstalled');
+const { DEFAULT_ORDER, startOffIds, startSitesOn, starterChoice, chooseNoStarter, installStarter, starterOffer, pendingUpdates, useNewVersion, keepMine, mergeRequest, mergeSettled, restoreMod, absorbedIds } = require('./lib/preinstalled');
 const { readInstructions, writeInstructions, instructionsFile, MAX_LENGTH } = require('./lib/instructions');
 const { ownSock, removeStaleSockets, codeStamp } = require('./lib/helpers');
 const { loadOrigins, recordOrigins, renameOrigins, activeRuns } = require('./lib/origins');
@@ -286,8 +286,11 @@ function syncMods(reason, force) {
   });
   // Sites TRIF starts on for (preinstalled.json): each browser turns each one on the first time it sees it.
   const sitesOn = startSitesOn(ws.home);
-  const signature = sent.map((m) => `${m.id}:${m.hash}${m.held ? ':held' : ''}${m.pending ? `:pending ${m.pending.hash}` : ''}${m.startOff ? ':off' : ''}${m.origin ? `:${m.origin.by}` : ''}${m.update ? `:update ${JSON.stringify(m.update)}` : ''}${m.absorbs ? `:absorbs ${m.absorbs.join(',')}` : ''}`).join('|') +
-    `|sites:${sitesOn.join(',')}`;
+  // Tim's starter mods: the user's choice ('added', 'none', or null: the setup page asks), and what they are.
+  const starter = { choice: starterChoice(ws.home), ...starterOffer() };
+  // (everything the panel shows about a mod, so a change to any of it goes out: a review done, say)
+  const signature = sent.map((m) => `${m.id}:${m.hash}${m.held ? ':held' : ''}${m.pending ? `:pending ${m.pending.hash}` : ''}${m.review ? `:review ${m.review.facts.join('|')}` : ''}${m.startOff ? ':off' : ''}${m.origin ? `:${m.origin.by}` : ''}${m.update ? `:update ${JSON.stringify(m.update)}` : ''}${m.absorbs ? `:absorbs ${m.absorbs.join(',')}` : ''}`).join('|') +
+    `|sites:${sitesOn.join(',')}|starter:${starter.choice}`;
   const errors = [...problems, ...plan.errors];
   const errorsChanged = JSON.stringify(errors) !== JSON.stringify(state.modErrors) || JSON.stringify(warnings) !== JSON.stringify(state.modWarnings);
   state.pending = [...pendingIds];
@@ -303,7 +306,7 @@ function syncMods(reason, force) {
   try {
     // (defaultOrder: the side panel's order for a site's shipped mods until the user drags them; preinstalled.js.)
     const t0 = Date.now();
-    const r = sendMods({ type: 'mods', mods: sent, sitesOn, defaultOrder: DEFAULT_ORDER });
+    const r = sendMods({ type: 'mods', mods: sent, sitesOn, defaultOrder: DEFAULT_ORDER, starter });
     const nHeld = sent.filter((m) => m.held).length;
     const kb = `${Math.ceil(r.bytes / 1024)} KB`;
     if (r.how === 'waiting') {
@@ -444,7 +447,8 @@ function onRunRequest(run, line, respond) {
 const logins = new Logins({ getWorkspace: () => workspace(ws.home), logger, onEvent: onAgentEvent });
 const runSubscribers = new Map(); // runId or loginId -> Set of CLI sockets that started it (see onClientLine)
 const AGENT_COMMANDS = new Set(['agent.list', 'agent.start', 'agent.stop', 'agent.running', 'agent.login', 'agent.loginCode', 'agent.loginCancel', 'mod.approve', 'mod.reject', 'mod.review', 'mod.undo', 'mod.history',
-  'mod.update', 'instructions.get', 'instructions.set', 'agent.models', 'agent.openModel', 'agent.openModel.set', 'agent.openModel.setKey', 'agent.openModel.removeKey', 'update.check', 'update.install', 'update.setAuto', 'report.build']);
+  'mod.update', 'instructions.get', 'instructions.set', 'agent.models', 'agent.openModel', 'agent.openModel.set', 'agent.openModel.setKey', 'agent.openModel.removeKey', 'update.check', 'update.install', 'update.setAuto', 'report.build',
+  'shipped.install', 'shipped.none']);
 // Helper-local too, but a run may use them (on mods inside its scope; see lib/trash.js).
 // (mod.code and mod.diff only read: a mod's text, a waiting change against the version that ran)
 const MOD_FILE_COMMANDS = new Set(['mod.delete', 'mod.restore', 'mod.code', 'mod.diff']);
@@ -645,6 +649,19 @@ function agentCommand(cmd, args) {
       logger.info(`deleted mod ${r.id} (to ${r.trashed})`);
       syncMods('delete', false);
       return { id: r.id, deleted: true };
+    }
+    // Tim's starter mods, the user's choice (the setup page, the panel's settings; never an agent run).
+    case 'shipped.install': {
+      const r = installStarter(ws.home, ws.modsDir, examplesDir());
+      logger.info(`starter mods added: ${r.added.length} mod(s)${r.sites.length ? `; TRIF starts on for ${r.sites.join(', ')}` : ''}`);
+      syncMods('starter mods', false);
+      return { choice: 'added', added: r.added, sites: r.sites };
+    }
+    case 'shipped.none': {
+      const choice = chooseNoStarter(ws.home);
+      logger.info(choice === 'none' ? 'starter mods: none' : `starter mods: already ${choice}`);
+      syncMods('starter mods', false);
+      return { choice };
     }
     case 'mod.update': {
       // The user's choice for a new version of a shipped mod they changed: 'new' (theirs goes to the
@@ -1032,7 +1049,9 @@ function onClientLine(sock, line) {
         ? 'only the user can allow what a mod can do (in the side panel, or `trif approve` in their terminal)'
         : cmd === 'mod.update'
           ? 'only the user can choose what happens with a new version of a TRIF mod (in the side panel, or `trif mod-update` in their terminal)'
-          : `"${cmd}" isn't available inside an agent run` });
+          : cmd.startsWith('shipped.')
+            ? 'only the user decides whether Tim\'s starter mods are added (on the setup page or in the side panel\'s settings)'
+            : `"${cmd}" isn't available inside an agent run` });
     }
     args.scope = run.scope;
   }

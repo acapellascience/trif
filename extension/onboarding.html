@@ -14,14 +14,14 @@
     /* TRIF's green (switch.css), and a darker one for words on the light background. */
     --green: var(--trif-green); --green-text: #1f8a4c;
     /* The picture of Chrome's own "Allow User Scripts" row, in Chrome's colours. */
-    --c-bg: #ffffff; --c-line: #dadce0; --c-text: #202124; --c-sub: #5f6368; --c-track: #bdc1c6; --c-knob: #ffffff;
+    --c-bg: #ffffff; --c-line: #dadce0; --c-text: #202124; --c-sub: #5f6368;
   }
   @media (prefers-color-scheme: dark) {
     :root {
       --bg: #161617; --card: #1f1f21; --text: #ececee; --muted: #9a9aa0; --faint: #6f6f75; --line: #333336;
       --ok: #4cc27f; --bad: #ff6b5e; --accent: #7d9cff; --code: #2a2a2d;
       --green-text: var(--trif-green);
-      --c-bg: #202124; --c-line: #3c4043; --c-text: #e8eaed; --c-sub: #9aa0a6; --c-track: #5f6368; --c-knob: #dadce0;
+      --c-bg: #202124; --c-line: #3c4043; --c-text: #e8eaed; --c-sub: #9aa0a6;
     }
   }
   * { box-sizing: border-box; }
@@ -68,6 +68,14 @@
   .login-form input { flex: 1; min-width: 0; padding: 6px 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--bg); color: var(--text);
     font: 13px ui-monospace, SFMono-Regular, Menlo, monospace; }
   .note { font-size: 13px; }
+  /* Site permissions: two choices side by side; and, ticked, what declining the prompt chose. */
+  .modes { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+  .mode { font: inherit; text-align: left; display: grid; gap: 2px; padding: 10px 12px; border: 1px solid var(--line); border-radius: 10px;
+    background: var(--code); color: var(--text); cursor: pointer; }
+  .mode b { font-size: 14px; }
+  .mode span { color: var(--muted); font-size: 13px; }
+  .mode:hover { border-color: var(--green); }
+  .step-note { margin: 6px 0 0 36px; color: var(--muted); font-size: 13px; }
   .problem { color: var(--bad) !important; }
 
   /* A picture of Chrome's own switch row on TRIF's Details page, to know it when it's there (its words as
@@ -77,9 +85,12 @@
   .chrome-row .t { flex: 1; }
   .chrome-row .t b { display: block; font-weight: 500; font-size: 13px; }
   .chrome-row .t span { color: var(--c-sub); font-size: 12px; }
-  .chrome-toggle { width: 34px; height: 14px; border-radius: 7px; background: var(--c-track); position: relative; flex: none; margin-right: 6px; }
-  .chrome-toggle::after { content: ""; position: absolute; left: -2px; top: -3px; width: 20px; height: 20px; border-radius: 50%; background: var(--c-knob);
-    box-shadow: 0 1px 3px rgb(0 0 0 / 0.4); }
+  /* Its switch, off: a pill with the knob inside, as Chrome draws it now (and as TRIF's own switch.css
+     does; the old Material thin track with an overhanging knob is gone from Chrome). */
+  .chrome-toggle { box-sizing: border-box; width: 30px; height: 18px; border-radius: 999px; position: relative; flex: none; margin-right: 6px;
+    background: color-mix(in srgb, var(--c-sub) 45%, transparent); }
+  .chrome-toggle::after { content: ""; position: absolute; left: 2px; top: 2px; width: 12px; height: 12px; border-radius: 50%; background: #fff;
+    box-shadow: 0 1px 2px rgb(0 0 0 / 0.25); }
   .flip { color: var(--green-text); font-weight: 700; font-size: 13px; white-space: nowrap; }
 
   /* Your mods: one line, opening to the list by site with a switch per mod. */
@@ -150,6 +161,15 @@
         <div class="row"><button id="settings" class="btn primary" type="button"></button></div>
         <p class="wait"></p>
       </div>
+    </li>
+    <li id="step-starter" class="step">
+      <h2><span class="mark"></span><span class="name">Tim's starter mods</span><span class="state"></span></h2>
+      <div class="body"></div>
+    </li>
+    <li id="step-sites" class="step">
+      <h2><span class="mark"></span><span class="name">Site permissions</span><span class="state"></span></h2>
+      <div class="body"></div>
+      <p class="step-note" hidden></p>
     </li>
     <li id="step-login" class="step">
       <h2><span class="mark"></span><span class="name">Log in to your coding agent</span><span class="state"></span></h2>

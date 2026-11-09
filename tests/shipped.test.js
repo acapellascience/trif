@@ -310,7 +310,7 @@ test('setup says what it updated and what waits; the helper and the CLI show the
   w.ship('x.com/punk-fonts', mod(1, 'punk'));
   const env = { TRIF_EXAMPLES_DIR: w.examples };
   const args = ['setup', '--verbose', '--home', w.home, '--native-dir', path.join(w.root, 'native'), '--no-link', '--link'];
-  let r = await runCli(args, { home: w.home, env });
+  let r = await runCli([...args, '--examples'], { home: w.home, env }); // (the first: the user adds them)
   assert.strictEqual(r.code, 0, r.stderr + r.stdout);
   w.ship('x.com/detox-timeline', mod(2));
   w.ship('x.com/punk-fonts', mod(2, 'punk'));

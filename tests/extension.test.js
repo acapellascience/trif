@@ -869,7 +869,9 @@ let bgCount = 0;
 // TRIF is on for the test sites unless a test says otherwise (storage.sitesOn), or migrate: true
 // leaves sitesOn out, as for someone updating from before sites had to be turned on.
 const TEST_SITES_ON = ['example.com', 'x.com', 'y.com', 'z.com'];
-async function loadBackground({ storage = {}, tabs = [], migrate = false, safari = false, windows = {}, scripting = {} } = {}) {
+// `granted`: the origins the browser gives TRIF (chrome.permissions); <all_urls> unless a test says
+// otherwise, as for someone who installed TRIF when it was required. `permissions: false` leaves the API out.
+async function loadBackground({ storage = {}, tabs = [], migrate = false, safari = false, windows = {}, scripting = {}, granted = ['<all_urls>'], permissions = true } = {}) {
   const store = structuredClone(migrate || 'sitesOn' in storage ? storage : { sitesOn: TEST_SITES_ON, ...storage });
   const ctl = { full: false, io: false, writes: [] }; // full: every storage write fails, like a full quota; io: like Safari's "Disk I/O error"; writes: the keys of each write
   const natives = [];
@@ -877,6 +879,16 @@ async function loadBackground({ storage = {}, tabs = [], migrate = false, safari
   const created = [];
   const reloaded = [];
   const onUpdated = chromeEvent();
+  const panelCalls = [];
+  const perms = {
+    origins: [...granted], removed: [],
+    onAdded: chromeEvent(), onRemoved: chromeEvent(),
+    async getAll() { return { origins: [...perms.origins], permissions: [] }; },
+    async remove({ origins = [] }) { perms.removed.push(origins); perms.origins = perms.origins.filter((o) => !origins.includes(o)); return true; },
+    /** As the user allowing (or the settings page taking back) origins: the list changes, then the event. */
+    grant(origins) { perms.origins = [...new Set([...perms.origins, ...origins])]; perms.onAdded.emit({ origins }); },
+    revoke(origins) { perms.origins = perms.origins.filter((o) => !origins.includes(o)); perms.onRemoved.emit({ origins }); },
+  };
   const chromeMock = {
     runtime: {
       id: lib.EXTENSION_ID, lastError: undefined,
@@ -909,9 +921,14 @@ async function loadBackground({ storage = {}, tabs = [], migrate = false, safari
       reload: async (id) => { reloaded.push(id); setImmediate(() => onUpdated.emit(id, { status: 'complete' })); },
     },
     windows: { update: async () => ({}), getLastFocused: async () => ({ id: 1 }), ...windows },
-    sidePanel: { setPanelBehavior: async (o) => { panelBehavior.push(o); } },
+    sidePanel: {
+      setPanelBehavior: async (o) => { panelBehavior.push(o); },
+      open: (o) => { panelCalls.push(['open', o]); return Promise.resolve(); },
+      close: (o) => { panelCalls.push(['close', o]); return Promise.resolve(); },
+    },
     scripting,
     action: { onClicked: chromeEvent() },
+    ...(permissions ? { permissions: perms } : {}),
   };
   globalThis.chrome = chromeMock;
   Object.defineProperty(globalThis, 'navigator', { value: { userAgent: 'Chrome/156.0.0.0' }, configurable: true, writable: true });
@@ -949,7 +966,7 @@ async function loadBackground({ storage = {}, tabs = [], migrate = false, safari
     }
     throw new Error(`no response to ${cmd}`);
   };
-  return { chrome: chromeMock, store, ctl, natives, native, connectPanel, panelBehavior, created, reloaded, restore };
+  return { chrome: chromeMock, store, ctl, natives, native, connectPanel, panelBehavior, panelCalls, perms, created, reloaded, restore };
 }
 
 /** Answer the extension's next native request for `cmd` like the helper would. */
@@ -1035,19 +1052,31 @@ test('background: trif reload right after new mods waits for them to be register
   } finally { bg.restore(); }
 });
 
-test('background: install opens onboarding and sets the side panel to open on action click', async () => {
+test('background: install opens onboarding; the toolbar button opens the side panel itself (for activeTab), and closes it', async () => {
   const bg = await loadBackground();
   try {
     bg.chrome.runtime.onInstalled.emit({ reason: 'install' });
     await settle(10);
-    assert.deepStrictEqual(bg.panelBehavior.at(-1), { openPanelOnActionClick: true });
+    assert.deepStrictEqual(bg.panelBehavior.at(-1), { openPanelOnActionClick: false });
     assert.strictEqual(bg.created.at(-1).url, `chrome-extension://${lib.EXTENSION_ID}/onboarding.html`);
     bg.chrome.runtime.onInstalled.emit({ reason: 'update' });
     await settle(10);
     assert.strictEqual(bg.created.length, 1);
     bg.chrome.runtime.onStartup.emit();
     assert.strictEqual(bg.panelBehavior.length, 3);
-    assert.strictEqual(bg.chrome.action.onClicked.fns.length, 0);
+    assert.strictEqual(bg.chrome.action.onClicked.fns.length, 1);
+    // Opened from the click, synchronously (it must come from the user's gesture).
+    bg.chrome.action.onClicked.emit({ id: 5, windowId: 2 });
+    assert.deepStrictEqual(bg.panelCalls, [['open', { windowId: 2 }]]);
+    // A side panel in window 2 says so; the next click there closes it; another window's opens.
+    const panel = bg.connectPanel();
+    panel.onMessage.emit({ type: 'panel.window', windowId: 2 });
+    bg.chrome.action.onClicked.emit({ id: 5, windowId: 2 });
+    bg.chrome.action.onClicked.emit({ id: 8, windowId: 3 });
+    assert.deepStrictEqual(bg.panelCalls.slice(1), [['close', { windowId: 2 }], ['open', { windowId: 3 }]]);
+    panel.onDisconnect.emit();
+    bg.chrome.action.onClicked.emit({ id: 5, windowId: 2 });
+    assert.deepStrictEqual(bg.panelCalls.at(-1), ['open', { windowId: 2 }]);
   } finally { bg.restore(); }
 });
 
@@ -2373,6 +2402,243 @@ test('agent and model per site chat: each site its own pick; the default is the 
   assert.equal(lib.siteSettings({ picks, snapshots: panelA, global, site: 'github.com' }).models.claude, 'opus', 'a copy, not the default itself');
   // No site (chrome://extensions): the default itself.
   assert.deepEqual(lib.siteSettings({ picks, snapshots: panelA, global: global2, site: null }), lib.normalizeSettings(global2));
+});
+
+// ---- site access: the browser's OK for each site TRIF is on for ---------------------------------
+
+test('site access: a site needs its domain and subdomains, http and https; <all_urls> or any host covers all', () => {
+  // One pattern a site: *.x.com covers x.com itself too, so the browser's prompt lists the site once.
+  assert.deepStrictEqual(lib.siteOrigins('x.com'), ['*://*.x.com/*']);
+  assert.deepStrictEqual(lib.siteOrigins('127.0.0.1'), ['*://127.0.0.1/*'], 'an IP: just the address');
+  assert.deepStrictEqual(lib.originsFor(['x.com', 'bbc.co.uk', 'x.com']), ['*://*.x.com/*', '*://*.bbc.co.uk/*']);
+  const one = lib.normalizeAccess({ origins: ['*://*.x.com/*', '*://127.0.0.1/*'] });
+  assert.ok(lib.hasSiteAccess(one, 'x.com') && lib.hasSiteAccess(one, '127.0.0.1'), 'the one pattern is enough, for a domain and an IP');
+  assert.ok(!lib.hasSiteAccess(lib.normalizeAccess({ origins: ['*://x.com/*'] }), 'x.com'), 'the bare domain alone misses its subdomains');
+  const acc = (origins) => lib.normalizeAccess({ origins, permissions: ['tabs'] });
+  assert.deepStrictEqual(acc(['<all_urls>']), { origins: ['<all_urls>'], all: true, allUrls: true });
+  assert.deepStrictEqual(acc(['*://*/*']), { origins: ['*://*/*'], all: true, allUrls: false }, 'every site, but not <all_urls> itself (screenshots)');
+  assert.strictEqual(acc(['https://*/*']).all, false, 'https only');
+  assert.strictEqual(acc(['https://*/*', 'http://*/*']).all, true);
+  assert.deepStrictEqual(acc(undefined), { origins: [], all: false, allUrls: false });
+
+  const site = acc(['*://x.com/*', '*://*.x.com/*', 'https://bank.com/*', '*://*.news.com/*', '*://a.com:8080/*']);
+  assert.strictEqual(lib.hasSiteAccess(site, 'x.com'), true);
+  assert.strictEqual(lib.hasSiteAccess(site, 'bank.com'), false, 'https only, and no subdomains');
+  assert.strictEqual(lib.hasSiteAccess(site, 'news.com'), true, '*.news.com covers news.com itself');
+  assert.strictEqual(lib.hasSiteAccess(site, 'a.com'), false, 'one port is not the site');
+  assert.strictEqual(lib.hasSiteAccess(site, 'notx.com'), false);
+  assert.strictEqual(lib.hasSiteAccess(acc(['*://x.com/*']), 'x.com'), false, 'without its subdomains');
+  assert.strictEqual(lib.hasSiteAccess(acc(['*://x.com/path*', '*://*.x.com/path*']), 'x.com'), false, 'part of a site');
+  assert.strictEqual(lib.hasSiteAccess(acc(['*://*.co.uk/*']), 'bbc.co.uk'), true);
+  assert.strictEqual(lib.hasSiteAccess(acc(['<all_urls>']), 'anything.org'), true);
+  assert.strictEqual(lib.hasSiteAccess(null, 'x.com'), false);
+  assert.deepStrictEqual(lib.activeSites(['bank.com', 'x.com'], site), ['x.com']);
+  assert.deepStrictEqual(lib.sitesWithoutAccess(['bank.com', 'x.com'], site), ['bank.com']);
+});
+
+test('readAccess: chrome.permissions.getAll, or everything where TRIF doesn\'t check (Safari, no API)', async () => {
+  const api = { permissions: { getAll: async () => ({ origins: ['*://x.com/*', '*://*.x.com/*'], permissions: [] }) } };
+  assert.deepStrictEqual(await lib.readAccess(api, true), { origins: ['*://*.x.com/*', '*://x.com/*'], all: false, allUrls: false });
+  assert.strictEqual((await lib.readAccess(api, false)).all, true, 'Safari');
+  assert.strictEqual((await lib.readAccess({}, true)).allUrls, true, 'no chrome.permissions');
+});
+
+const PER_SITE = (...sites) => lib.originsFor(sites);
+
+test('siteState / siteRefusal / siteModeOf: on, off, disconnected, blocked, in the panel\'s words; the mode follows the grant', () => {
+  const access = lib.normalizeAccess({ origins: PER_SITE('x.com', 'off.com') });
+  const ctx = { sitesOn: ['x.com', 'gone.com'], access, blocked: ['bank.com'] };
+  assert.deepStrictEqual(['x.com', 'off.com', 'gone.com', 'new.com', 'bank.com'].map((x) => lib.siteState(x, ctx)),
+    ['on', 'off', 'disconnected', 'disconnected', 'blocked']);
+  assert.strictEqual(lib.siteState('bank.com', { ...ctx, access: lib.ALL_ACCESS, sitesOn: ['bank.com'] }), 'blocked', 'whatever the access');
+  assert.strictEqual(lib.siteState('anything.org', { access: lib.ALL_ACCESS }), 'off', 'permissive: never disconnected');
+  assert.strictEqual(lib.siteRefusal('x.com', 'on'), null);
+  assert.match(lib.siteRefusal('a.com', 'off'), /^TRIF is off on a\.com: .*turns it on/);
+  assert.match(lib.siteRefusal('a.com', 'disconnected'), /^TRIF is disconnected on a\.com: .*until the user connects it/);
+  assert.match(lib.siteRefusal('a.com', 'blocked'), /^a\.com is blocked in TRIF: .*only the user can unblock it/);
+  assert.strictEqual(lib.siteModeOf(null, lib.ALL_ACCESS), 'permissive', 'an update that kept <all_urls>');
+  assert.strictEqual(lib.siteModeOf('permissive', access), 'restrictive', '<all_urls> taken back');
+  assert.strictEqual(lib.siteModeOf('restrictive', access), 'restrictive');
+  assert.strictEqual(lib.siteModeOf(null, access), null, 'not chosen yet');
+});
+
+test('background: restrictive: a site without the browser\'s access is disconnected (on or not): no mods, no page commands, no chats, said why', async () => {
+  const mods = [mod('x.com/a'), mod('bank.com/b'), mod('all-sites/dark', { matches: ['*://*/*'] })];
+  const bg = await loadBackground({ storage: { mods, sitesOn: ['bank.com', 'x.com'] }, tabs: GATE_TABS, granted: PER_SITE('x.com') });
+  try {
+    await settle(20);
+    assert.deepStrictEqual(scriptIds(bg), [lib.RUNTIME_ID, 'x.com/a', 'all-sites/dark']);
+    assert.deepStrictEqual(bg.chrome.userScripts.scripts.find((s) => s.id === 'all-sites/dark').matches, ['*://*.x.com/*', '*://x.com/*']);
+    let r = await bg.native.call('tabs');
+    assert.deepStrictEqual(r.result.map((t) => t.id), [5]);
+    r = await bg.native.call('text', { tab: 6 });
+    assert.strictEqual(r.error, lib.siteRefusal('bank.com', 'disconnected'));
+    r = await bg.native.call('status');
+    assert.deepStrictEqual([r.result.sitesOn, r.result.disconnected, r.result.blockedSites, r.result.access.all, r.result.siteMode], [['bank.com', 'x.com'], ['bank.com'], [], false, null]);
+    assert.strictEqual(r.result.mods.find((m) => m.id === 'bank.com/b').sitesOff, true);
+    const panel = bg.connectPanel();
+    const st = (await panel.ask({ type: 'status' })).result;
+    assert.deepStrictEqual([st.sitesOn, st.disconnected, st.siteAccess, st.access.origins], [['bank.com', 'x.com'], ['bank.com'], true, PER_SITE('x.com')]);
+    r = await panel.ask({ type: 'agent.start', site: 'bank.com', tabId: 6, url: 'https://bank.com/', prompt: 'hi' });
+    assert.deepStrictEqual([r.ok, r.error], [false, 'TRIF is disconnected on bank.com: connect it first']);
+    // A run's guard in the page has only the sites TRIF works on.
+    let guard = null;
+    bg.chrome.scripting.executeScript = async ({ func, args }) => { if (func.name === 'pageGuard') guard = args[1]; return [{ result: 'stop here' }]; };
+    await bg.native.call('text', { tab: 5 });
+    assert.deepStrictEqual(guard, ['x.com']);
+  } finally { bg.restore(); }
+});
+
+test('background: restrictive: Connect needs the browser\'s OK; off keeps it (on again asks nothing); Disconnect gives it back; taken back in the browser, it stops', async () => {
+  const mods = [mod('bank.com/a')];
+  const bg = await loadBackground({ storage: { mods, sitesOn: [], siteMode: 'restrictive' }, tabs: GATE_TABS, granted: [] });
+  try {
+    const panel = bg.connectPanel();
+    // A first visit: disconnected.
+    assert.strictEqual((await bg.native.call('text', { tab: 6 })).error, lib.siteRefusal('bank.com', 'disconnected'));
+    // No OK (the user said no to the browser's prompt): nothing saved.
+    let r = await panel.ask({ type: 'site.set', site: 'bank.com', on: true, tab: 6 });
+    assert.strictEqual(r.ok, false);
+    assert.deepStrictEqual(bg.store.sitesOn, []);
+    // Connect: the panel asked and the user said yes (the grant can land before permissions.onAdded is handled).
+    bg.perms.origins = PER_SITE('bank.com');
+    r = await panel.ask({ type: 'site.set', site: 'bank.com', on: true, tab: 6 });
+    assert.strictEqual(r.ok, true, r.error);
+    assert.deepStrictEqual(scriptIds(bg), [lib.RUNTIME_ID, 'bank.com/a']);
+    // Off: the access stays, so on again needs nothing from the browser.
+    await panel.ask({ type: 'site.set', site: 'bank.com', on: false, tab: 6 });
+    assert.deepStrictEqual([bg.perms.removed, bg.perms.origins, scriptIds(bg)], [[], PER_SITE('bank.com'), []]);
+    assert.strictEqual((await bg.native.call('text', { tab: 6 })).error, lib.siteRefusal('bank.com', 'off'));
+    assert.strictEqual((await panel.ask({ type: 'site.set', site: 'bank.com', on: true, tab: 6 })).ok, true);
+    // Disconnect: off, and the access given back.
+    r = await panel.ask({ type: 'site.disconnect', site: 'bank.com', tab: 6 });
+    assert.strictEqual(r.ok, true, r.error);
+    assert.deepStrictEqual([bg.store.sitesOn, bg.perms.removed, bg.perms.origins, scriptIds(bg)], [[], [PER_SITE('bank.com')], [], []]);
+    assert.strictEqual((await bg.native.call('text', { tab: 6 })).error, lib.siteRefusal('bank.com', 'disconnected'));
+    // Connected again, then taken back in chrome://extensions: mods go, runs there stop, the panel hears of it.
+    bg.perms.origins = PER_SITE('bank.com');
+    await panel.ask({ type: 'site.set', site: 'bank.com', on: true, tab: 6 });
+    const start = panel.ask({ type: 'agent.start', site: 'bank.com', tabId: 6, url: 'https://bank.com/', prompt: 'hi' });
+    await answerNative(bg.native, 'agent.start', { runId: 'r1' });
+    assert.strictEqual((await start).ok, true);
+    panel.sent.length = 0;
+    bg.perms.revoke(PER_SITE('bank.com'));
+    await settle(30);
+    assert.deepStrictEqual(scriptIds(bg), []);
+    assert.ok(bg.natives[0].sent.some((m) => m.cmd === 'agent.stop' && m.args.runId === 'r1'), 'the run there is stopped');
+    assert.ok(panel.sent.some((m) => m.type === 'statusChanged'));
+    assert.deepStrictEqual([bg.store.sitesOn, (await panel.ask({ type: 'status' })).result.disconnected], [['bank.com'], ['bank.com']]);
+    bg.perms.grant(PER_SITE('bank.com'));
+    await settle(30);
+    assert.deepStrictEqual(scriptIds(bg), [lib.RUNTIME_ID, 'bank.com/a']);
+  } finally { bg.restore(); }
+});
+
+test('background: the mode follows the grant: <all_urls> is permissive (an update too); restrictive from the panel gives every site back, no prompt', async () => {
+  const bg = await loadBackground({ storage: { mods: [mod('bank.com/a')], sitesOn: ['bank.com'] }, tabs: GATE_TABS, granted: ['<all_urls>', ...PER_SITE('x.com')] });
+  try {
+    await settle(20);
+    assert.strictEqual(bg.store.siteMode, 'permissive', 'kept <all_urls> from an update: permissive');
+    assert.deepStrictEqual(scriptIds(bg), [lib.RUNTIME_ID, 'bank.com/a']);
+    const panel = bg.connectPanel();
+    // Permissive: a single site can't be disconnected (blocking is TRIF's way there).
+    let r = await panel.ask({ type: 'site.disconnect', site: 'bank.com' });
+    assert.deepStrictEqual([r.ok, r.error], [false, "TRIF is permissive (every site), so one site can't be disconnected: switch to restrictive mode first"]);
+    r = await panel.ask({ type: 'site.mode', mode: 'restrictive' });
+    assert.deepStrictEqual(r.result, { siteMode: 'restrictive' });
+    assert.deepStrictEqual([bg.perms.origins, bg.store.siteMode, scriptIds(bg)], [[], 'restrictive', []]);
+    const st = (await panel.ask({ type: 'status' })).result;
+    assert.deepStrictEqual([st.siteMode, st.disconnected, st.access.all], ['restrictive', ['bank.com'], false]);
+    // Permissive again: the page's prompt said yes; the mode follows.
+    bg.perms.grant(['<all_urls>']);
+    await settle(30);
+    assert.deepStrictEqual([bg.store.siteMode, scriptIds(bg)], ['permissive', [lib.RUNTIME_ID, 'bank.com/a']]);
+    // Declined at setup: the page records restrictive (nothing to give back).
+    const bg2 = await loadBackground({ storage: { sitesOn: [] }, granted: [] });
+    try {
+      const p2 = bg2.connectPanel();
+      assert.strictEqual((await p2.ask({ type: 'status' })).result.siteMode, null);
+      await p2.ask({ type: 'site.mode', mode: 'restrictive' });
+      assert.deepStrictEqual([bg2.store.siteMode, bg2.perms.removed], ['restrictive', []]);
+    } finally { bg2.restore(); }
+  } finally { bg.restore(); }
+});
+
+test('background: the block list keeps TRIF off a site whatever its access: mods, page commands, screenshots, runs, turning on', async () => {
+  const mods = [mod('bank.com/a'), mod('all-sites/dark', { matches: ['*://*/*'] })];
+  for (const granted of [['<all_urls>'], PER_SITE('bank.com', 'x.com')]) {
+    const bg = await loadBackground({ storage: { mods, sitesOn: ['bank.com', 'x.com'] }, tabs: GATE_TABS, granted });
+    try {
+      await settle(20);
+      const panel = bg.connectPanel();
+      let r = await panel.ask({ type: 'site.block', site: 'www.bank.com', blocked: true, tab: 6 });
+      assert.strictEqual(r.ok, true, r.error);
+      assert.deepStrictEqual([bg.store.blockedSites, bg.store.sitesOn], [['bank.com'], ['x.com']]);
+      assert.deepStrictEqual(bg.perms.removed, [PER_SITE('bank.com')], 'its own access (a no-op under <all_urls>)');
+      assert.ok(!scriptIds(bg).includes('bank.com/a'));
+      assert.deepStrictEqual(bg.chrome.userScripts.scripts.find((s) => s.id === 'all-sites/dark').matches, ['*://*.x.com/*', '*://x.com/*']);
+      for (const cmd of ['text', 'screenshot']) assert.strictEqual((await bg.native.call(cmd, { tab: 6 })).error, lib.siteRefusal('bank.com', 'blocked'));
+      r = await panel.ask({ type: 'agent.start', site: 'bank.com', tabId: 6, url: 'https://bank.com/', prompt: 'hi' });
+      assert.deepStrictEqual([r.ok, r.error], [false, 'bank.com is blocked in TRIF']);
+      r = await panel.ask({ type: 'site.set', site: 'bank.com', on: true, tab: 6 });
+      assert.deepStrictEqual([r.ok, r.error], [false, 'bank.com is blocked in TRIF: unblock it first.']);
+      const st = (await bg.native.call('status')).result;
+      assert.deepStrictEqual([st.blockedSites, st.disconnected], [['bank.com'], []]);
+      // Unblocked: off (permissive) or disconnected (restrictive, its access went), as any site.
+      await panel.ask({ type: 'site.block', site: 'bank.com', blocked: false });
+      assert.deepStrictEqual(bg.store.blockedSites, []);
+      const want = granted.includes('<all_urls>') ? 'TRIF is off on bank.com' : 'TRIF is disconnected on bank.com';
+      assert.ok((await bg.native.call('text', { tab: 6 })).error.startsWith(want));
+    } finally { bg.restore(); }
+  }
+});
+
+test('background: sites setup turns on are disconnected until connected, then on; screenshots know whether TRIF has <all_urls>', async () => {
+  const mods = [mod('www.google.com/a', { matches: ['*://www.google.com/*'] })];
+  const bg = await loadBackground({ storage: { sitesOn: [] }, granted: [], tabs: [{ id: 5, windowId: 1, index: 0, active: true, url: 'https://www.google.com/' }],
+    windows: { get: async () => ({ id: 1, state: 'normal' }) } });
+  try {
+    bg.native.emit({ type: 'mods', mods, sitesOn: ['google.com', 'x.com'] });
+    await settle(20);
+    assert.deepStrictEqual(bg.store.sitesOn, ['google.com', 'x.com']);
+    assert.deepStrictEqual(scriptIds(bg), [], 'not connected yet: nothing registered');
+    const panel = bg.connectPanel();
+    assert.deepStrictEqual((await panel.ask({ type: 'status' })).result.disconnected, ['google.com', 'x.com']);
+    // Connect on google.com: on at once (its mods run).
+    bg.perms.grant(PER_SITE('google.com'));
+    await settle(30);
+    assert.deepStrictEqual(scriptIds(bg), [lib.RUNTIME_ID, 'www.google.com/a']);
+    assert.deepStrictEqual((await panel.ask({ type: 'status' })).result.disconnected, ['x.com']);
+    // A site's own access isn't enough for Chrome's captureVisibleTab: the screenshot says what to do.
+    bg.chrome.tabs.captureVisibleTab = async () => { throw new Error("Either the '<all_urls>' or 'activeTab' permission is required."); };
+    const r = await bg.native.call('screenshot', { tab: 5 });
+    assert.strictEqual(r.ok, false);
+    assert.match(r.error, /only after the user clicks the TRIF toolbar button on it/);
+  } finally { bg.restore(); }
+});
+
+test('background: the helper says whether Tim\'s starter mods were added; the setup page\'s choice goes to the helper', async () => {
+  const bg = await loadBackground({ storage: { sitesOn: [] } });
+  try {
+    const panel = bg.connectPanel();
+    assert.strictEqual((await panel.ask({ type: 'status' })).result.starter, null, 'not connected: unknown');
+    bg.native.emit({ type: 'mods', mods: [], sitesOn: [], starter: { choice: null, count: 15, sites: ['google.com'] } });
+    await settle(20);
+    assert.deepStrictEqual((await panel.ask({ type: 'status' })).result.starter, { choice: null, count: 15, sites: ['google.com'] });
+    for (const type of ['shipped.install', 'shipped.none']) {
+      const asked = panel.ask({ type });
+      await answerNative(bg.native, type, { choice: type === 'shipped.none' ? 'none' : 'added' });
+      assert.strictEqual((await asked).ok, true);
+    }
+  } finally { bg.restore(); }
+});
+
+test('background (Safari): TRIF doesn\'t check site access (Safari asks per site itself)', async () => {
+  const bg = await loadBackground({ safari: true, storage: { mods: [mod('bank.com/a')], sitesOn: ['bank.com'] }, granted: [] });
+  try {
+    await settle(20);
+    assert.deepStrictEqual(scriptIds(bg).filter((id) => id !== lib.RUNTIME_ID), ['bank.com/a']);
+  } finally { bg.restore(); }
 });
 
 // ---- mods sets in parts -------------------------------------------------------------------------

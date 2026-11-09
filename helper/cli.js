@@ -26,7 +26,7 @@ process.stdout.on('error', (e) => { if (e.code === 'EPIPE') process.exit(0); thr
 const VALUE_FLAGS = new Set(['--tab', '--url', '-o', '--out', '--output', '--filter', '--limit', '-f', '--file',
   '--browser', '--home', '--native-dir', '--bin-dir', '--timeout', '--agent', '--session', '--model', '--site', '--auto',
   '--provider', '--base-url', '--key-env', '--selector', '--color', '--text', '--tolerance']);
-const BOOL_FLAGS = new Set(['--json', '--hard', '--help', '-h', '--force', '--page', '--rules', '--no-link', '--no-examples', '--copy', '--link', '--install', '--open',
+const BOOL_FLAGS = new Set(['--json', '--hard', '--help', '-h', '--force', '--page', '--rules', '--no-link', '--examples', '--no-examples', '--copy', '--link', '--install', '--open',
   '--use-new', '--keep', '--merged', '--set-key', '--remove-key', '--scroll', '--full', '--verbose', '-v', '--no-wait']);
 const ALIASES = { '--out': '-o', '--output': '-o', '--file': '-f', '-h': '--help', '-v': '--verbose' };
 
@@ -225,12 +225,14 @@ const handlers = {
   async setup(ctx) {
     const { setup } = require('./lib/setup');
     if (ctx.opts['--copy'] && ctx.opts['--link']) throw new UsageError('use --copy or --link, not both');
+    if (ctx.opts['--examples'] && ctx.opts['--no-examples']) throw new UsageError('use --examples or --no-examples, not both');
     const r = setup({
       home: ctx.opts['--home'],
       browser: ctx.opts['--browser'],
       nativeDir: ctx.opts['--native-dir'],
       binDir: ctx.opts['--bin-dir'],
       noLink: !!ctx.opts['--no-link'],
+      examples: !!ctx.opts['--examples'],
       noExamples: !!ctx.opts['--no-examples'],
       verbose: !!ctx.opts['--verbose'],
       mode: ctx.opts['--copy'] ? 'copy' : ctx.opts['--link'] ? 'link' : undefined,
@@ -336,9 +338,22 @@ const handlers = {
     if (Object.keys(held).length) lines.push('              HELD = new or changed, and it can do things the user hasn\'t allowed (TRIF read them from its code); not running until the user approves it');
     if (Object.keys(review).length) lines.push('              TO REVIEW = can do things the user hasn\'t seen yet (TRIF read them from its code); it runs meanwhile');
     if (Object.keys(updates).length) lines.push('              update available = TRIF has a new version of a mod it ships; see trif mod-update <id>');
-    if (sitesOff.size) lines.push('              waiting = not running until the user turns TRIF on for the site (side panel)');
+    if (sitesOff.size) lines.push('              waiting = not running until the user turns TRIF on for the site, or connects it (side panel)');
     if (st && Array.isArray(st.sitesOn)) {
       lines.push(`sites on      ${st.sitesOn.length ? st.sitesOn.join(', ') : '(none)'}; TRIF is off everywhere else: no mods, no page commands`);
+      // Permissive (every site by default) or restrictive (the user connects TRIF site by site), and TRIF's own
+      // block list (extension/lib.js "site access"). Only the user changes either, in the side panel.
+      if (st.siteMode) {
+        lines.push(st.siteMode === 'permissive'
+          ? 'site mode     permissive: access to every site by default; each site still follows its switch'
+          : 'site mode     restrictive: TRIF is disconnected on every site the user hasn\'t connected (side panel on the site)');
+      }
+      if (Array.isArray(st.disconnected) && st.disconnected.length) {
+        lines.push(`disconnected  ${st.disconnected.join(', ')}: on, but TRIF is disconnected there until the user connects it (side panel on the site)`);
+      }
+      if (Array.isArray(st.blockedSites) && st.blockedSites.length) {
+        lines.push(`blocked       ${st.blockedSites.join(', ')}: blocked in TRIF; nothing from TRIF touches them (only the user unblocks them, in the side panel)`);
+      }
     }
     if (st) lines.push(`recording     ${(st.recording || []).length ? st.recording.join(', ') : '(none)'}`);
     if (st && st.page) {

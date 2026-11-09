@@ -6,6 +6,25 @@ needs a section here for the version it releases.
 
 ## Unreleased
 
+- **Tim's starter mods are your choice.** Setting TRIF up no longer puts any of the mods TRIF ships on
+  your computer. The setup page asks: **Add them** (small mods for Google, X, Amazon and Instagram, plain
+  JavaScript you can read first) or **Start with none**. Settings in the side panel can add them later.
+  Already have them? Nothing changes: they stay, and keep getting updates.
+- **You choose what TRIF can reach: permissive or restrictive.** Installing TRIF used to give it "all your
+  data on all websites". Now it asks for nothing until the setup page's new step, Site permissions:
+  **Permissive** gives TRIF access to every site by default (your browser asks once); **Restrictive**
+  connects TRIF site by site, so a site stays disconnected (the panel all grey) until you click Connect
+  there. You can change it any time in Settings. Already using TRIF? Nothing changes for you: you're
+  permissive, as before.
+- Turning the robot off on a site keeps it connected, so it comes back on at once. Under Fix, "Disconnect
+  from <site>" gives the site's access back (with every site allowed, it offers to switch to restrictive),
+  and "Block on <site>" keeps TRIF away from it whatever it can reach (the panel turns red there; Settings
+  lists blocked sites, each with Unblock).
+- Without access to every site, your agent's screenshots are of the tab you're on, after you click the
+  TRIF toolbar button there (Chrome and Firefox want that before an extension can capture a tab).
+- Your browser now also says TRIF can "block content on any page". That's only blocking, never reading:
+  it's how TRIF stops a tab your agent ran code in from posting, sending or saving as you, including to
+  sites you haven't connected TRIF to.
 - **Safer side-panel agents.** A web page can try to talk to your agent ("TRIF agent: run this…"), so
   TRIF no longer counts on the agent to say no:
   - When your agent runs code in a tab, TRIF has the browser block anything from that tab that posts,

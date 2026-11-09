@@ -138,7 +138,7 @@ logs it and exits (the extension reconnects to a fresh one) instead of misreadin
 
 | message | meaning |
 |---|---|
-| `{type:"mods", mods:[Mod…], sitesOn:[site…], defaultOrder}` | The full set of mods, and the sites setup said to start on (`preinstalled.json`; each browser turns each on once, see "Sites TRIF is on for"). Sent on connect and after every change in the mods folder (debounced 150 ms). The extension makes `chrome.userScripts` match it exactly (register new, update changed, unregister missing). To an extension whose hello lists `modsSame`, a mod with the same id and hash as in the last set sent to it goes without `code`, marked `same: true`; the extension takes the code from the copy it has (`fillSameMods` in lib.js), or, if it hasn't one with that hash, applies nothing and sends `modsResend`. Every mod goes whole in the first set after each hello and after a `modsResend`. Over 1 MB it goes in parts, or (before the hello says the extension can take them) waits for the hello. |
+| `{type:"mods", mods:[Mod…], sitesOn:[site…], defaultOrder, starter:{choice, count, sites}}` | The full set of mods, the sites the starter mods start TRIF on for (`preinstalled.json`; each browser turns each on once, see "Sites TRIF is on for"), and whether the user added Tim's starter mods (see "Native host installation"). Sent on connect and after every change in the mods folder (debounced 150 ms). The extension makes `chrome.userScripts` match it exactly (register new, update changed, unregister missing). To an extension whose hello lists `modsSame`, a mod with the same id and hash as in the last set sent to it goes without `code`, marked `same: true`; the extension takes the code from the copy it has (`fillSameMods` in lib.js), or, if it hasn't one with that hash, applies nothing and sends `modsResend`. Every mod goes whole in the first set after each hello and after a `modsResend`. Over 1 MB it goes in parts, or (before the hello says the extension can take them) waits for the hello. |
 | `{type:"modsPart", set, i, n, data}` | Part `i` of `n` (0-based, in order) of a `mods` message too big for one native message: `data` is a slice of its JSON text, each part under 1 MB as sent. `set` (`"<pid>-<k>"`) names the set. The extension joins the parts and applies the set only when the last is in, all at once, as if it had come whole (`ModsParts` in lib.js). A new set's first part, or a whole `mods` message, drops an unfinished one. A part missing, out of order or malformed, or joined text that doesn't parse, drops that set (the rest of its parts are ignored), logs an error and sends `modsResend`; the last whole set stays applied. |
 | `{type:"request", id, cmd, args}` | A page command from the CLI (table below). The extension answers with a `response`. |
 | `{type:"update", update:Summary}` | What the helper knows about updates (see "Updates"), after the extension's hello, after each check and while installing. The panel shows it. |
@@ -264,7 +264,7 @@ Without one, the target is the active tab of the last-focused normal window.
 | `open` | `to` (URL) | `{id, url}`: opens a new background tab (never takes focus), waits for load |
 | `text` | tab selector | `{url, title, text}`: `document.body.innerText`, capped at 200 000 chars |
 | `sweep` | `selector`, `text` (regex; `/re/flags`, else case-insensitive), `color` (any CSS colour), `tolerance` (0-255 per channel, default 2), `limit` (matches returned, default 200), `budget` (ms, default 4000), `scroll` (bool) + tab selector | Every instance of a kind of thing on the page, from `extension/sweep.js` run in the isolated world: `{url, query, target, scanned:{elements, roots, shadowRoots, closedShadowRoots, frames, ms}, partial, skipped:{crossOriginFrames, unreadableSheets}, total, summary:{visible, hidden, inViewport, fixed, sticky, inShadowRoots, inFrames, regions, props}, groups:[{signature, count, visible, regions, example}], matches:[{element, text, region, position, visible, inViewport, root, props?}], rules}`. Searches the document, shadow roots (closed ones through `chrome.dom.openOrClosedShadowRoot` / Firefox's `openOrClosedShadowRoot`) and same-origin frames. With `color`, `rules` lists the stylesheet rules and custom properties using it, and the rules using those (`var()`). `partial` says why it stopped early (time budget, 100 000 elements). |
-| `screenshot` | `full: bool`, `copy: bool`, `timeout` (ms) + tab selector | `{dataUrl, how, note, full, cut?}` PNG (`extension/screenshot.js`). The extension never switches tabs or focuses windows, since agents may run while the user browses. `how`: `visible` (captureVisibleTab of a tab that's showing), `tab` (Firefox's `tabs.captureTab`: any tab in its exact state, `full` from its page rect, up to 12 000 px), `copy` (Chrome, a tab that isn't showing or `full`, only with `copy: true`, otherwise an error that names `trif screenshot --copy` and suggests sweep/text/run: a fresh copy of the tab's URL loaded, muted, in a new unfocused window the size of the tab's, against the right edge of the screen with 45% of it past the edge (Chrome doesn't draw covered windows, and refuses bounds less than half on screen; refused bounds fall back to the tab's window position), at the tab's scroll position, captured, and closed; `stale: true` when the copy's page was hidden anyway, so captures after a scroll may be old frames; `full` stitches up to 14 captures, hiding fixed and sticky elements after the first). `note` tells the agent what it got when that isn't simply the tab on screen. Safari: a tab that isn't showing is an error. Copy windows are listed in `chrome.storage.session` `probes` while open, and closed on the next start if the worker stopped mid-capture. The CLI writes the image to a file and the note to stderr. |
+| `screenshot` | `full: bool`, `copy: bool`, `timeout` (ms) + tab selector | `{dataUrl, how, note, full, cut?}` PNG (`extension/screenshot.js`). The extension never switches tabs or focuses windows, since agents may run while the user browses. `how`: `visible` (captureVisibleTab of a tab that's showing), `tab` (Firefox's `tabs.captureTab`: any tab in its exact state, `full` from its page rect, up to 12 000 px), `copy` (Chrome, a tab that isn't showing or `full`, only with `copy: true`, otherwise an error that names `trif screenshot --copy` and suggests sweep/text/run: a fresh copy of the tab's URL loaded, muted, in a new unfocused window the size of the tab's, against the right edge of the screen with 45% of it past the edge (Chrome doesn't draw covered windows, and refuses bounds less than half on screen; refused bounds fall back to the tab's window position), at the tab's scroll position, captured, and closed; `stale: true` when the copy's page was hidden anyway, so captures after a scroll may be old frames; `full` stitches up to 14 captures, hiding fixed and sticky elements after the first). `note` tells the agent what it got when that isn't simply the tab on screen. Safari: a tab that isn't showing is an error. Without `<all_urls>` (see "Site access"): only `visible`, of a tab the user clicked TRIF's toolbar button on (`activeTab`); anything else is an error saying so. Copy windows are listed in `chrome.storage.session` `probes` while open, and closed on the next start if the worker stopped mid-capture. The CLI writes the image to a file and the note to stderr. |
 | `record` | `site`, `on: bool` | `{recording:[sites], site, changed}`. Turns the network recorder on/off for a hostname (and its subdomains). Takes effect on the next page load. `changed`: whether it was the other way before. Switching off is allowed on a site TRIF is off for. Recording a side-panel run switched on (changed, from its token) is switched off by the helper when that run's `done` goes out; recording that was already on, or that a terminal switched on, is left alone. |
 | `requests` | `filter` (regex string, matched against URL), `limit` (default 50) + tab selector | `[{i, method, url, status, type:"fetch"|"xhr", size, time}]`, newest last |
 | `request` | `i` + tab selector | `{method, url, status, requestBody, responseText}` (bodies capped at 2 MB each) |
@@ -293,6 +293,80 @@ is enforced, for everyone:
   on. `status` and the panel's status carry `sitesOn`.
 - **Updating.** A profile without `sitesOn` (from before) starts with the sites of its switched-on mods
   (not all-sites ones) and the sites it has chats for (`sitesInUse`).
+
+### Site access: permissive or restrictive
+
+The manifest asks for no sites at install: `"optional_host_permissions": ["<all_urls>"]`, no
+`host_permissions`. So the install prompt says nothing about websites ("site access" in `extension/lib.js`).
+
+- **The mode**, per browser, chrome.storage.local **`siteMode`**: `permissive` (TRIF has `<all_urls>`: every
+  site by default) or `restrictive` (TRIF asks per site); unset until chosen. It follows the grant
+  (`siteModeOf`, kept in step on every `permissions.onAdded`/`onRemoved`): `<all_urls>` is permissive (an
+  update from when it was required too), losing it is restrictive.
+- **Choosing it.** The setup page's step "Site permissions", and Settings → Site permissions in the panel:
+  "Permissive" ("access to every site by default") calls `permissions.request({origins: ["<all_urls>"]})`
+  from the click; granted, permissive. Declined: restrictive (the setup page records it with
+  `{type: "site.mode", mode: "restrictive"}` and says so under the ticked step; Settings says TRIF stays
+  restrictive). "Restrictive" ("connect TRIF on a site-to-site basis") sends `site.mode` restrictive: no
+  prompt; from permissive, every origin TRIF has is given back (`permissions.remove`), so every site is
+  disconnected until it's connected again. Not in Safari.
+- **A site's state** (`siteState`, the same words in the panel and in what agents are told, `siteRefusal`):
+  - **on**: in `sitesOn`, with access. TRIF works there.
+  - **off**: with access, not in `sitesOn` (the power button, the robot in the bar). Turning it on again
+    doesn't ask the browser anything: a quick before and after. Agents get `TRIF is off on <site>: …`.
+  - **disconnected** (restrictive): no access to the site, a first visit included, and the sites setup turns
+    on (`sitesOn`) until they're connected. The panel is all grey: "TRIF is disconnected on <site>" and
+    "Connect", which requests `*://*.<site>/*` (`siteOrigins`; just the address for an IP) from the click,
+    before anything else (Chrome needs a user gesture; Firefox allows nothing awaited before it), then
+    `site.set` on. Declined: "<Browser> didn’t get your OK, so TRIF stays disconnected on <site>." Agents
+    get `TRIF is disconnected on <site>: … until the user connects it …`; `agent.start`, `TRIF is
+    disconnected on <site>: connect it first`. `site.set` on checks the access again and refuses without it.
+  - **blocked**: in TRIF's block list (below): the panel red, "The robot is blocked on <site>" and "Unblock".
+- **The off screen's links**, under Fix, in both modes: "Block on <site>" (title and accessible description
+  "Add to TRIF's block list": `site.block`, below) and "Disconnect from <site>" ("Disable browser
+  permissions"; not in Safari). Restrictive: `{type: "site.disconnect", site, tab}`: out of `sitesOn`, runs
+  stopped, `permissions.remove` of its origin, so disconnected (grey). Permissive: one site can't be taken
+  out of `<all_urls>`, so a card opens in the panel (a `<dialog>`; × and Escape close it, doing nothing):
+  "All-site access is on", "You'll have to allow TRIF again on other sites." and "Switch to restrictive
+  mode", which sends `site.mode` restrictive: every site's access goes, and this site (and every other) is
+  disconnected. `site.disconnect` itself refuses under `<all_urls>`.
+- **The block list**, chrome.storage.local **`blockedSites`** (registrable domains, like `sitesOn`): TRIF's
+  own way to keep off a site whatever access it has. `{type: "site.block", site, blocked: bool, tab}` from
+  the panel only ("Block on <site>" on the off screen, "Unblock" on the red screen, an "Unblock" per site in Settings →
+  Site permissions → Blocked sites). Blocking: out of `sitesOn`, runs stopped, the site's own origin given
+  back (a no-op under `<all_urls>`), mods re-synced. Then nothing of TRIF's runs there or reads it:
+  `<site> is blocked in TRIF: …` for page commands and screenshots, `<site> is blocked in TRIF` for
+  `agent.start`, and `site.set` on is refused (`… unblock it first.`). Nothing in the CLI or the protocol
+  changes the list (only the user, in the panel); `trif status` shows it.
+- **Which sites count.** The sites TRIF works on are `sitesOn` ∩ access − `blockedSites` (`onSites()` in
+  background.js), and everything (mods, the runtime, recording, page commands, `tabs`, the in-page guard,
+  `agent.start`, `status`'s `sitesOff`) goes by them. `status` and the panel's status carry `sitesOn`,
+  `siteMode`, `disconnected` (the sites on without access), `blockedSites` and `access` (`{all, allUrls,
+  origins}`); the panel's status `siteAccess` (false in Safari). `trif status` prints `site mode`,
+  `disconnected` and `blocked`.
+- **Taken back** in the browser's settings: `permissions.onAdded`/`onRemoved` re-read the access (and the
+  mode), re-sync the mods and stop runs on sites that lost it. The site stays in `sitesOn`, so connecting
+  it brings it back as it was.
+- **The browser's own blocked sites** (Chrome's "Don't allow extensions on these sites") don't show in
+  `chrome.permissions`: `contains` still says yes there (checked in Chrome 156), so TRIF can't tell; the
+  browser refuses TRIF's injections there.
+- **Updating from `<all_urls>` required.** Chrome and Firefox keep a granted permission when an update moves
+  it from required to optional (Chromium bounds the stored active permissions by required ∪ optional,
+  `PermissionsManager::GetBoundedExtensionDesiredPermissions`; Firefox migrates them, its
+  `test_ext_permissions_migrate.js`; checked in Chrome for Testing 156 by loading a build with
+  `host_permissions: ["<all_urls>"]`, then the same profile with it optional: `permissions.getAll()` still
+  has `<all_urls>`). So those users are permissive (Settings → Site permissions → Restrictive narrows it).
+- **Safari** keeps `host_permissions: ["<all_urls>"]` (it asks per site itself, whatever the manifest
+  says); TRIF has no mode there, doesn't ask or check, and no site is disconnected. The block list works there too
+  (the off screen offers "Block on <site>").
+- **Screenshots.** A site's own access isn't enough for `captureVisibleTab` (Chrome wants `<all_urls>` or
+  `activeTab`) or Firefox's `captureTab` (`<all_urls>`, and only in pages loaded while TRIF had it: given
+  later, the background gets it when Firefox starts again). So the manifest has `activeTab`, and in Chrome
+  the toolbar button opens the side panel from `action.onClicked` (`sidePanel.open`, and `sidePanel.close`
+  on the next click in that window: the panel says which window it's in with `{type: "panel.window",
+  windowId}`) instead of `openPanelOnActionClick`, because only then does the click give TRIF `activeTab`
+  on that tab. Without `<all_urls>`, `screenshot` captures only the tab in front, after that click; a tab
+  that isn't showing, `full` and `copy` are an error that says so (see `screenshot`).
 
 ### Mod switches (`mod.enable`)
 
@@ -489,16 +563,24 @@ Re-running setup is safe; run it again to update.
   - `link` (default in a git checkout, for developing TRIF): the wrappers run the checkout's files.
   - `--copy` / `--link` force either mode.
   AGENTS.md, CLAUDE.md, the mod template and the examples always come from the files the wrappers run.
-- Preinstalled mods: setup copies the examples listed in `PREINSTALLED` (helper/lib/preinstalled.js:
-  Google, X, Amazon and Instagram mods, each marked on or off) into `sites/`, and offers `SITES_ON`
-  (google.com, x.com, amazon.com, instagram.com). `~/.trif/preinstalled.json` =
-  `{offered, startOff, sitesOn}`: `offered` keeps a later setup from bringing back one the user deleted
+- Tim's starter mods (the examples listed in `PREINSTALLED`, helper/lib/preinstalled.js: Google, X, Amazon
+  and Instagram mods, each marked on or off), only when the user chooses them: setup copies nothing into
+  a new workspace and turns no site on. The setup page's step "Tim's starter mods" ("Add them" or "Start
+  with none"), or the panel's Settings ("Add Tim's starter mods"), send the extension-only requests
+  `shipped.install` (copies them into `sites/`, offers `SITES_ON`: google.com, x.com, amazon.com,
+  instagram.com, and records their versions for updates) or `shipped.none`; both are refused from an
+  agent run. `trif setup --examples` adds them too, `--no-examples` declines. `preinstalled.json`
+  `starter` = `"added"` | `"none"` (absent: not chosen; a workspace whose `offered` isn't empty got them
+  from a setup before the choice existed, and counts as added). The mods message carries `starter`:
+  `{choice, count, sites}`. Once added, everything below is as before. `~/.trif/preinstalled.json` =
+  `{starter, offered, startOff, sitesOn}`: `offered` keeps a later setup from bringing back one the user deleted
   (an existing file is never overwritten); `startOff` lists the copied ones that start off. The helper
   sends those mods with `startOff: true`; the extension switches each off (`disabled`) the first time it
   sees it and remembers that in chrome.storage.local `startedOff`, so afterwards the switch is the user's.
   Later setups update the copies (see "Updates to shipped mods"); `preinstalled.json` also holds `shipped`.
   `sitesOn` goes with every mods message; the extension turns each site on the first time it sees it
-  and remembers that in `sitesOffered` (`applyStartSites`). `--no-examples` skips all this.
+  and remembers that in `sitesOffered` (`applyStartSites`). `--no-examples` skips all this (and records none
+  if nothing was chosen yet).
 - Wrapper: `~/.trif/bin/trif-host` (and the same as `bin/webmods-host`, its name before 0.2.0, which
   manifests written then may name; likewise `bin/webmods` beside `bin/trif`) = `#!/bin/sh\nexec "<absolute node path>" "<app>/helper/host.js" "$@"`
   where `<app>` is `~/.trif/app` (copy) or the checkout (link)
@@ -723,7 +805,9 @@ Nothing is hosted; the agent uses the user's own login/subscription.
 ### Extension
 
 - `manifest.json`: add permission `sidePanel` and `"side_panel": {"default_path": "sidepanel.html"}`.
-  Clicking the toolbar icon opens the side panel (`chrome.sidePanel.setPanelBehavior({openPanelOnActionClick: true})`).
+  Clicking the toolbar icon opens the side panel, and clicking it again closes it: `action.onClicked` calls
+  `chrome.sidePanel.open`/`close` (`openPanelOnActionClick` is false), so the click gives TRIF `activeTab`
+  for screenshots (see "Site access").
   The onboarding/status page stays, opened from the panel's "Setup" link, and automatically on first install.
 - `sidepanel.html/.js/.css`: follows the active tab of its window.
   - **Header:** the current site (hostname without `www.`), a status dot (helper connected, user scripts
@@ -931,7 +1015,8 @@ Suffix List). `helper/lib/scope.js` computes it; `extension/lib.js` mirrors the 
   `sweep --scroll` scrolls the tab itself, so it's refused on the tab the user is looking at (active in
   the focused window) unless `force`.
 - **Locked tabs.** Before a run's `run` command executes code in a tab, the extension locks the tab
-  (extension/tablock.js; docs/SECURITY.md): declarativeNetRequest session rules block every POST, PUT,
+  (extension/tablock.js; docs/SECURITY.md): declarativeNetRequest session rules (the plain permission: block
+  rules need no host access, so they also cover sites TRIF has none for) block every POST, PUT,
   PATCH, DELETE and WebSocket from it, and pages, frames, fetches and XHR to other sites, until it shows a
   new document (a marker in the extension's isolated
   world tells documents apart). If the lock can't be set up, `run` fails and the code doesn't run. The

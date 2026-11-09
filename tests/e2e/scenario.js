@@ -353,9 +353,9 @@ class Scenario {
       // The user's own mod, and an edit to a shipped one, before upgrading.
       fs.mkdirSync(path.join(legacy, 'sites', '127.0.0.1'), { recursive: true });
       fs.writeFileSync(path.join(legacy, 'sites', '127.0.0.1', 'e2e-user.js'), USER_MOD);
-      const shipped = path.join(legacy, 'sites', 'x.com', 'punk-fonts.js');
+      const shipped = path.join(legacy, 'sites', 'x.com', 'rainbow-rave.js');
       fs.appendFileSync(shipped, '\n// e2e: the user changed this shipped mod\n');
-      this.r.note(I.ensureShippedUpdate(oldPkg, pkg, 'x.com/punk-fonts'));
+      this.r.note(I.ensureShippedUpdate(oldPkg, pkg, 'x.com/rainbow-rave'));
       // The way a 0.1.x helper's updater runs the new version's setup (--home ~/.webmods).
       const s = I.runSetup(pkg, this.home, ['--home', legacy, '--browser', browserArg]);
       this.r.log(s.out);
@@ -376,10 +376,10 @@ class Scenario {
         if (!fs.existsSync(path.join(this.trif, 'sites', '127.0.0.1', 'e2e-user.js'))) throw new Error('sites/127.0.0.1/e2e-user.js is gone');
       });
       await this.r.check('upgrade: the edited shipped mod kept, new version waiting', () => {
-        const text = fs.readFileSync(path.join(this.trif, 'sites', 'x.com', 'punk-fonts.js'), 'utf8');
+        const text = fs.readFileSync(path.join(this.trif, 'sites', 'x.com', 'rainbow-rave.js'), 'utf8');
         if (!text.includes('the user changed this shipped mod')) throw new Error('the user\'s edit is gone');
         const pre = I.readJson(path.join(this.trif, 'preinstalled.json')) || {};
-        const rec = (pre.shipped || {})['x.com/punk-fonts'];
+        const rec = (pre.shipped || {})['x.com/rainbow-rave'];
         if (!rec || !rec.pending) throw new Error(`no pending update recorded: ${JSON.stringify(rec)}`);
         if (!/new version waiting/.test(s.out)) throw new Error('setup didn\'t say a new version is waiting');
         return `pending version ${rec.pending.version}`;
@@ -526,18 +526,18 @@ class Scenario {
       const ids = new Set(list.map((m) => m.id));
       const missing = SHIPPED_IDS.filter((id) => !ids.has(id));
       if (missing.length) throw new Error(`missing: ${missing.join(', ')}`);
-      const unmarked = SHIPPED_IDS.filter((id) => !shipped.some((m) => m.id === id) && !(this.o.kind === 'upgrade' && id === 'x.com/punk-fonts'));
+      const unmarked = SHIPPED_IDS.filter((id) => !shipped.some((m) => m.id === id) && !(this.o.kind === 'upgrade' && id === 'x.com/rainbow-rave'));
       if (unmarked.length) throw new Error(`not recognised as shipped: ${unmarked.join(', ')}`);
       const st = (await this.cli(['status'], { json: true })).json.extension;
       const byId = new Map(st.mods.map((m) => [m.id, m]));
       const px = byId.get('x.com/detox-timeline');
       if (!px || px.enabled === false) throw new Error(`x.com/detox-timeline not on: ${JSON.stringify(px)}`);
-      const pf = byId.get('x.com/punk-fonts');
-      if (!pf || pf.enabled !== false) throw new Error(`x.com/punk-fonts should start off: ${JSON.stringify(pf)}`);
+      const pf = byId.get('x.com/rainbow-rave');
+      if (!pf || pf.enabled !== false) throw new Error(`x.com/rainbow-rave should start off: ${JSON.stringify(pf)}`);
       for (const s of ['google.com', 'x.com', 'amazon.com', 'instagram.com']) if (!(st.sitesOn || []).includes(s)) throw new Error(`TRIF isn't on for ${s}: ${st.sitesOn}`);
       if (this.o.kind === 'upgrade') {
-        const u = list.find((m) => m.id === 'x.com/punk-fonts');
-        if (!u || !u.update) throw new Error(`trif mods shows no update for x.com/punk-fonts: ${JSON.stringify(u)}`);
+        const u = list.find((m) => m.id === 'x.com/rainbow-rave');
+        if (!u || !u.update) throw new Error(`trif mods shows no update for x.com/rainbow-rave: ${JSON.stringify(u)}`);
         // The retired mods' switches were handed to the mods they went into (once; both on here).
         const gone = RETIRED.filter((x) => !ids.has(x.id) && ((I.readJson(path.join(this.trif, 'preinstalled.json')) || {}).shipped || {})[x.id]?.retired?.trashed);
         const { absorbed = {} } = await this.ext(`async () => chrome.storage.local.get('absorbed')`);
@@ -711,10 +711,10 @@ class Scenario {
       if (!px || !px.on || !px.running) throw new Error(`detox-timeline: ${JSON.stringify(px)}`);
       if (!px.source || !/^Tim's mod, v\d+$/.test(px.source)) throw new Error(`detox-timeline isn't marked as Tim's mod: ${px.source}`);
       if (this.o.kind === 'upgrade') {
-        const pf = p.mods.find((m) => m.id === 'x.com/punk-fonts');
-        if (!pf || !pf.update) throw new Error(`no update notice on punk-fonts: ${JSON.stringify(pf)}`);
+        const pf = p.mods.find((m) => m.id === 'x.com/rainbow-rave');
+        if (!pf || !pf.update) throw new Error(`no update notice on rainbow-rave: ${JSON.stringify(pf)}`);
         await this.shot(this.panelCtx, 'panel-x-update');
-        return `punk-fonts: "${pf.update.split('\n')[0]}"`;
+        return `rainbow-rave: "${pf.update.split('\n')[0]}"`;
       }
       await this.shot(this.panelCtx, 'panel-x');
       return p.mods.map((m) => `${m.id.split('/')[1]} ${m.on ? 'on' : 'off'}`).join(', ');
@@ -1199,8 +1199,8 @@ class Scenario {
     const d = this.d;
     const chatKey = 'chat:x.com';
     const chat = () => this.ext(`async (k) => (await chrome.storage.local.get(k))[k] || null`, [chatKey]);
-    const file = path.join(this.trif, 'sites', 'x.com', 'punk-fonts.js');
-    const pending = () => (JSON.parse(fs.readFileSync(path.join(this.trif, 'preinstalled.json'), 'utf8')).shipped || {})['x.com/punk-fonts'] || {};
+    const file = path.join(this.trif, 'sites', 'x.com', 'rainbow-rave.js');
+    const pending = () => (JSON.parse(fs.readFileSync(path.join(this.trif, 'preinstalled.json'), 'utf8')).shipped || {})['x.com/rainbow-rave'] || {};
     const before = fs.readFileSync(file, 'utf8');
     const model = this.o.claudeModel || 'haiku';
     if (this.o.agent) {
@@ -1211,7 +1211,7 @@ class Scenario {
       // Without your login the agent can't run, so the button waits for one (F14) and says why.
       await r.check('Merge with my agent: waits for a login, and says so', async () => {
         const b = await waitFor('the merge button', () => this.panel(`async () => {
-          const m = document.querySelector('li[data-mod="x.com/punk-fonts"] .mod-update .merge');
+          const m = document.querySelector('li[data-mod="x.com/rainbow-rave"] .mod-update .merge');
           return m ? { disabled: m.disabled, title: m.title } : null;
         }`), { timeoutMs: 10000 });
         if (!b.disabled || !/^Log in to .+ first/.test(b.title)) throw new Error(JSON.stringify(b));
@@ -1223,7 +1223,7 @@ class Scenario {
     await r.check('Merge with my agent: one click starts it, while the panel keeps refreshing', async () => {
       // Busy the panel the way real use does (status refreshes, storage changes) right before the click.
       await this.panel(`async () => { for (let i = 0; i < 5; i++) { await chrome.storage.local.set({ e2eTick: i }); document.dispatchEvent(new Event('visibilitychange')); } }`);
-      await d.click(this.panelCtx, 'li[data-mod="x.com/punk-fonts"] .mod-update .merge');
+      await d.click(this.panelCtx, 'li[data-mod="x.com/rainbow-rave"] .mod-update .merge');
       const c = await waitFor('the merge request in the chat', async () => {
         const x = await chat();
         return x && x.messages.some((m) => m.role === 'user' && /suggest how to merge/.test(m.text)) ? x : null;
@@ -1240,7 +1240,7 @@ class Scenario {
       await this.shot(this.panelCtx, 'panel-merge-proposal');
       r.log(`merge proposal chat: ${JSON.stringify(c.messages, null, 2)}`);
       const said = c.messages.filter((m) => m.role === 'assistant').map((m) => m.text).join('\n');
-      if (fs.readFileSync(file, 'utf8') !== before) throw new Error(`punk-fonts.js changed before the user said go ahead:\n${said.slice(-600)}`);
+      if (fs.readFileSync(file, 'utf8') !== before) throw new Error(`rainbow-rave.js changed before the user said go ahead:\n${said.slice(-600)}`);
       if (!pending().pending) throw new Error('the update was settled by the proposal');
       if (!said.trim()) throw new Error(`no proposal in the chat: ${JSON.stringify(c.messages.slice(-3))}`);
       return said.replace(/\s+/g, ' ').slice(0, 300);
@@ -1253,11 +1253,11 @@ class Scenario {
       await this.shot(this.panelCtx, 'panel-merge-done');
       r.log(`merge go-ahead chat: ${JSON.stringify(c.messages.slice(n0), null, 2)}`);
       const now = fs.readFileSync(file, 'utf8');
-      if (now === before) throw new Error('punk-fonts.js is unchanged');
+      if (now === before) throw new Error('rainbow-rave.js is unchanged');
       const v = /@version\s+(\S+)/.exec(now);
       const rec = await waitFor('the update to settle', async () => (pending().pending ? null : pending()), { timeoutMs: 10000 }).catch(() => null);
       if (!rec) throw new Error(`the update is still waiting (the copy says @version ${v && v[1]})`);
-      const p = await this.waitPanel('the offer to go', (x) => x.mods.some((m) => m.id === 'x.com/punk-fonts' && !m.update), 15000);
+      const p = await this.waitPanel('the offer to go', (x) => x.mods.some((m) => m.id === 'x.com/rainbow-rave' && !m.update), 15000);
       return `@version ${v && v[1]}; ${p ? 'the panel no longer offers it' : ''}`;
     });
   }

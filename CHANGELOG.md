@@ -17,6 +17,8 @@ needs a section here for the version it releases.
   is full size (both by Tim), then the end of Stravinsky's Firebird (Stokowski, 1940) when he explodes.
   That makes it about 2 MB, so it needs this version.
 - Detox Timeline keeps the margins beside the timeline equal when X-Flyer is installed and no game is on.
+- Amazon's Simple Home shows Amazon's own logo, sharper. Punk Fonts for X is no longer one of Tim's mods:
+  if you have it, it stays as it is, without updates.
 - When your coding agent's login runs out, the side panel asks you to log in again (and keeps your
   message to send again) instead of showing the agent's error twice.
 - Each tab keeps its own draft in the side panel's message box.

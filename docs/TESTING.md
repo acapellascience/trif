@@ -38,10 +38,10 @@ Per browser, a **fresh** scenario, and an **upgrade** scenario per `--upgrade-fr
    --browser <b>` with `HOME` set to a scratch folder, so `~/.trif`, `~/.webmods` and the browsers'
    `NativeMessagingHosts` folders are all inside it.
    Upgrade: first the old release's setup (making `~/.webmods`), then a mod of the user's
-   (`sites/127.0.0.1/e2e-user.js`) and an edit to a shipped one (`x.com/punk-fonts`), then the new
+   (`sites/127.0.0.1/e2e-user.js`) and an edit to a shipped one (`x.com/rainbow-rave`), then the new
    setup run the way a 0.1.x updater runs it (`--home ~/.webmods`). Checks the move to `~/.trif`, the
    link left behind, the user's mod, and that the edited shipped mod is kept with its new version
-   waiting. If the old and new packages ship the same `punk-fonts`, the harness gives the new package's
+   waiting. If the old and new packages ship the same `rainbow-rave`, the harness gives the new package's
    copy the next `@version` (as the next release would) and says so in a note. When the old release
    shipped the mods 0.2.0 folded into others (`RETIRED`: `hide-ai-mode`, `hide-sponsored`), checks their
    unchanged copies went to the trash, and (step 2) that the browser carried their switches over

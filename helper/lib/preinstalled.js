@@ -50,7 +50,6 @@ const PREINSTALLED = [
   { id: 'www.google.com/hide-ai-in-results', on: true }, // AI Banisher
   { id: 'www.google.com/hide-extra-sections', on: true }, // Just Results
   { id: 'x.com/detox-timeline', on: true }, // (x.com/plain-x until 0.2.3: RETIRED, below)
-  { id: 'x.com/punk-fonts', on: false },
   { id: 'x.com/rainbow-rave', on: false },
   { id: 'amazon.com/simple-home', on: true },
   { id: 'amazon.com/simple-shopping', on: true },
@@ -78,7 +77,7 @@ const PREINSTALLED = [
 // with every mods message (`defaultOrder`), and extension/lib.js orderMods puts mods it doesn't list after.
 // (0.2.3: X's, in Tim's order. The other sites' few shipped mods list in the order they always did.)
 const DEFAULT_ORDER = {
-  'x.com': ['x.com/detox-timeline', 'x.com/follow-status', 'x.com/punk-fonts', 'x.com/space-shooter', 'x.com/rainbow-rave'],
+  'x.com': ['x.com/detox-timeline', 'x.com/follow-status', 'x.com/space-shooter', 'x.com/rainbow-rave'],
 };
 
 // Shipped mods folded into another one (`into`, from its @version `since`), so no longer shipped

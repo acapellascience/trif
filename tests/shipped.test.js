@@ -307,68 +307,68 @@ test('RETIRED: each retired mod is gone from the examples, and the mod it went i
 test('setup says what it updated and what waits; the helper and the CLI show the waiting update', async () => {
   const w = world();
   w.ship('x.com/detox-timeline', mod(1));
-  w.ship('x.com/punk-fonts', mod(1, 'punk'));
+  w.ship('x.com/rainbow-rave', mod(1, 'punk'));
   const env = { TRIF_EXAMPLES_DIR: w.examples };
   const args = ['setup', '--verbose', '--home', w.home, '--native-dir', path.join(w.root, 'native'), '--no-link', '--link'];
   let r = await runCli(args, { home: w.home, env });
   assert.strictEqual(r.code, 0, r.stderr + r.stdout);
   w.ship('x.com/detox-timeline', mod(2));
-  w.ship('x.com/punk-fonts', mod(2, 'punk'));
-  w.edit('x.com/punk-fonts', mod(1, 'my punk'));
+  w.ship('x.com/rainbow-rave', mod(2, 'punk'));
+  w.edit('x.com/rainbow-rave', mod(1, 'my punk'));
   r = await runCli(args, { home: w.home, env });
   assert.strictEqual(r.code, 0, r.stderr + r.stdout);
   assert.match(r.stdout, /updated to the new version: x\.com\/detox-timeline \(version 2\)/);
-  assert.match(r.stdout, /new version waiting, not installed because you changed these: x\.com\/punk-fonts \(version 2\)/);
+  assert.match(r.stdout, /new version waiting, not installed because you changed these: x\.com\/rainbow-rave \(version 2\)/);
 
   // trif mods / mod-update, without the browser.
   r = await runCli(['mods'], { home: w.home });
-  assert.match(r.stdout, /x\.com\/punk-fonts[\s\S]*update available \(you've changed it\): version 2: trif mod-update x\.com\/punk-fonts/);
+  assert.match(r.stdout, /x\.com\/rainbow-rave[\s\S]*update available \(you've changed it\): version 2: trif mod-update x\.com\/rainbow-rave/);
   assert.match(r.stdout, /from TRIF, version 2/);
   r = await runCli(['mods', '--json'], { home: w.home });
   const listed = JSON.parse(r.stdout).mods;
-  assert.deepStrictEqual(listed.find((m) => m.id === 'x.com/punk-fonts').update, { version: '2', from: '1', modified: true });
+  assert.deepStrictEqual(listed.find((m) => m.id === 'x.com/rainbow-rave').update, { version: '2', from: '1', modified: true });
   assert.strictEqual(listed.find((m) => m.id === 'x.com/detox-timeline').update, undefined);
-  r = await runCli(['mod-update', 'x.com/punk-fonts'], { home: w.home });
-  assert.match(r.stdout, /the new version: +.*\.shipped\/x\.com\/punk-fonts\.new\.js/);
+  r = await runCli(['mod-update', 'x.com/rainbow-rave'], { home: w.home });
+  assert.match(r.stdout, /the new version: +.*\.shipped\/x\.com\/rainbow-rave\.new\.js/);
 
   // The helper's mods message carries it, and drops it once the user chose.
   const ext = new FakeExtension({ home: w.home });
   cleanups.push(() => ext.close());
   const mods = await ext.nextMods((ms) => ms.length === 2);
-  const punk = mods.find((m) => m.id === 'x.com/punk-fonts');
+  const punk = mods.find((m) => m.id === 'x.com/rainbow-rave');
   assert.deepStrictEqual(punk.update, { version: '2', from: '1', modified: true });
   assert.deepStrictEqual([punk.source, punk.version], ['webmods', '1']);
   assert.strictEqual(mods.find((m) => m.id === 'x.com/detox-timeline').update, undefined);
   await ext.waitForSocket();
   r = await runCli(['status'], { home: w.home });
-  assert.match(r.stdout, /x\.com\/punk-fonts .*update available \(you've changed it\): version 2/);
+  assert.match(r.stdout, /x\.com\/rainbow-rave .*update available \(you've changed it\): version 2/);
 
   // Inside a side-panel run the choice isn't the agent's.
-  r = await runCli(['mod-update', 'x.com/punk-fonts', '--keep'], { home: w.home, env: { TRIF_RUN_TOKEN: 'x' } });
+  r = await runCli(['mod-update', 'x.com/rainbow-rave', '--keep'], { home: w.home, env: { TRIF_RUN_TOKEN: 'x' } });
   assert.strictEqual(r.code, 1);
   assert.match(r.stderr, /not available inside a side-panel agent run/);
 
   const since = ext.messages.length;
   const id = 'u1';
-  ext.send({ type: 'request', id, cmd: 'mod.update', args: { id: 'x.com/punk-fonts', choice: 'mine' } });
+  ext.send({ type: 'request', id, cmd: 'mod.update', args: { id: 'x.com/rainbow-rave', choice: 'mine' } });
   const resp = await ext.next((m) => m.type === 'response' && m.id === id);
-  assert.deepStrictEqual(resp.result, { id: 'x.com/punk-fonts', choice: 'mine', version: '2' });
-  await ext.nextMods((ms) => ms.some((m) => m.id === 'x.com/punk-fonts' && !m.update), { since });
+  assert.deepStrictEqual(resp.result, { id: 'x.com/rainbow-rave', choice: 'mine', version: '2' });
+  await ext.nextMods((ms) => ms.some((m) => m.id === 'x.com/rainbow-rave' && !m.update), { since });
 
   // A setup elsewhere (another browser's update) is noticed without any mod file changing.
-  w.ship('x.com/punk-fonts', mod(3, 'punk'));
+  w.ship('x.com/rainbow-rave', mod(3, 'punk'));
   r = await runCli(args, { home: w.home, env });
-  await ext.nextMods((ms) => ms.some((m) => m.id === 'x.com/punk-fonts' && m.update && m.update.version === '3'), { since, timeout: 8000 });
+  await ext.nextMods((ms) => ms.some((m) => m.id === 'x.com/rainbow-rave' && m.update && m.update.version === '3'), { since, timeout: 8000 });
 
   // Use the new version through the CLI; restore puts the user's copy back.
-  r = await runCli(['mod-update', 'x.com/punk-fonts', '--use-new'], { home: w.home });
+  r = await runCli(['mod-update', 'x.com/rainbow-rave', '--use-new'], { home: w.home });
   assert.strictEqual(r.code, 0, r.stderr);
   assert.match(r.stdout, /is now version 3; your copy is in the trash/);
-  assert.strictEqual(w.mine('x.com/punk-fonts'), mod(3, 'punk'));
-  r = await runCli(['restore', 'x.com/punk-fonts'], { home: w.home });
+  assert.strictEqual(w.mine('x.com/rainbow-rave'), mod(3, 'punk'));
+  r = await runCli(['restore', 'x.com/rainbow-rave'], { home: w.home });
   assert.strictEqual(r.code, 0, r.stderr);
-  assert.strictEqual(w.mine('x.com/punk-fonts'), mod(1, 'my punk'));
-  await waitFor(() => (ext.lastMods() || []).some((m) => m.id === 'x.com/punk-fonts' && m.update && m.update.version === '3'), { message: 'the update offered again' });
+  assert.strictEqual(w.mine('x.com/rainbow-rave'), mod(1, 'my punk'));
+  await waitFor(() => (ext.lastMods() || []).some((m) => m.id === 'x.com/rainbow-rave' && m.update && m.update.version === '3'), { message: 'the update offered again' });
 });
 
 test('the repo\'s own examples: a legacy workspace with unchanged copies gets them updated by setup', async () => {

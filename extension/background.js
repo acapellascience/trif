@@ -8,7 +8,7 @@ import {
   firstInjectionResult, withTimeout, filterRequests, nextBackoff, chromeVersion, toolLine,
   normalizeDisabled, modAppliesTo, urlInScope, modInScope, applyStartOff, applyAbsorbed, findRenames, carryRenames, renameInOrder, normalizeModOrder, modSites,
   normalizeOffSites, offSiteName, offOnSite, hostInScope, withOffSites, scopeFor, normalizeSitesOn, siteOnFor, sitesInUse, limitToSites, applyStartSites, switchSite, fromOtherBrowser, timedUserScripts, capChat,
-  FEATURES, ModsParts, fillSameMods, storedMods, modsStorageState, modsStoragePlan, normalizeStarter,
+  FEATURES, ModsParts, fillSameMods, storedMods, modsStorageState, modsStoragePlan, normalizeStarter, applyReadded, normalizeReadded,
 } from './lib.js';
 import { runtimeCode } from './runtime.js';
 import { sweepPage } from './sweep.js';
@@ -42,6 +42,7 @@ const state = {
   sitesOffered: [],      // sites the helper said to start on that were turned on once already (persisted)
   startedOff: {},        // mod id → true for mods already switched off once: preinstalled, or from another browser (persisted)
   absorbed: {},          // mod id → true for retired shipped mods whose switch was carried over (persisted)
+  readded: {},           // mod id → stamp: Tim's mods deleted and added again, switched as listed once per stamp (persisted)
   defaultOrder: {},      // site → mod ids: the panel's order for its shipped mods until the user drags them (from the helper; persisted)
   starter: null,         // Tim's mods, site by site, from the helper (helper/lib/preinstalled.js starterOffer): {chosen, sites: [{site, name, choice, suggested, mods}]}
   installId: null,       // random id of this install (persisted): the helper records it as the origin of mods made here
@@ -115,6 +116,7 @@ const ready = chrome.storage.local.get(null).then(async (s) => {
   state.offSites = normalizeOffSites(s.offSites);
   state.startedOff = normalizeDisabled(s.startedOff);
   state.absorbed = normalizeDisabled(s.absorbed);
+  state.readded = normalizeReadded(s.readded);
   state.defaultOrder = normalizeModOrder(s.defaultOrder);
   state.sitesOffered = normalizeSitesOn(s.sitesOffered);
   if (Array.isArray(s.sitesOn)) state.sitesOn = normalizeSitesOn(s.sitesOn);
@@ -381,6 +383,13 @@ async function onModsMessage(msg) {
     state.disabled = off.disabled;
     state.startedOff = off.startedOff;
     await save({ disabled: state.disabled, startedOff: state.startedOff }).catch((e) => log('warn', errMsg(e)));
+  }
+  // One of Tim's mods the user deleted and got back: switched as Tim set it, once (not as it was).
+  const re = applyReadded(state.mods, state.disabled, state.readded);
+  if (re.changed) {
+    state.disabled = re.disabled;
+    state.readded = re.readded;
+    await save({ disabled: state.disabled, readded: state.readded }).catch((e) => log('warn', errMsg(e)));
   }
   // Sites setup starts TRIF on for (the preinstalled mods' sites), each turned on once.
   const sites = applyStartSites(state.sitesOn, state.sitesOffered, msg.sitesOn);

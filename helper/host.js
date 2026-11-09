@@ -28,7 +28,7 @@ const { Logins } = require('./lib/logins');
 const agents = require('./lib/agents');
 const { updateHeld, approveHeld, heldFile } = require('./lib/held');
 const { DEFAULT_ORDER, startOffIds, startSitesOn, pendingUpdates, useNewVersion, keepMine, mergeRequest, mergeSettled, restoreMod, absorbedIds,
-  starterOffer, installStarter, chooseNoStarter, resolveSites, resolveIds, examplesDir } = require('./lib/preinstalled');
+  starterOffer, installStarter, chooseNoStarter, resolveSites, resolveIds, readdedIds, examplesDir } = require('./lib/preinstalled');
 const { readInstructions, writeInstructions, instructionsFile, MAX_LENGTH } = require('./lib/instructions');
 const { ownSock, removeStaleSockets, codeStamp } = require('./lib/helpers');
 const { loadOrigins, recordOrigins, renameOrigins, activeRuns } = require('./lib/origins');
@@ -253,21 +253,26 @@ function syncMods(reason, force) {
   // switches over, once (preinstalled.js retireShippedMods).
   let absorbed = {};
   try { absorbed = absorbedIds(ws.home); } catch (e) { logger.warn(`retired mods: ${e.message}`); }
+  // Tim's mods the user deleted and got back (Settings' "Add the rest"): each browser switches each one as
+  // listed once per stamp, as for a new one (preinstalled.js readded).
+  let readded = {};
+  try { readded = readdedIds(ws.home); } catch (e) { logger.warn(`Tim's mods: ${e.message}`); }
   const sent = plan.mods.map((m) => {
     const out = state.held[m.id] ? { ...m, held: { site: state.held[m.id].site, reason: state.held[m.id].reason } } : m;
     const o = origins[m.id];
     const withOrigin = o ? { ...out, origin: { by: o.by, browser: o.browser } } : out;
     const withUpdate = updates[m.id] ? { ...withOrigin, update: updates[m.id] } : withOrigin;
     const withAbsorbs = absorbed[m.id] ? { ...withUpdate, absorbs: absorbed[m.id] } : withUpdate;
-    return startOff.has(m.id) ? { ...withAbsorbs, startOff: true } : withAbsorbs;
+    const withReadded = readded[m.id] ? { ...withAbsorbs, readded: readded[m.id] } : withAbsorbs;
+    return startOff.has(m.id) ? { ...withReadded, startOff: true } : withReadded;
   });
   // Sites TRIF starts on for (preinstalled.json): each browser turns each one on the first time it sees it.
   const sitesOn = startSitesOn(ws.home);
   // Tim's mods, site by site: which the user added (or chose none for), and what each site's are, for the
   // setup page's checklist, Settings and a site's "Add Tim's mods" link.
   let starter = null;
-  try { starter = starterOffer(ws.home, examplesDir()); } catch (e) { logger.warn(`Tim's mods: ${e.message}`); }
-  const signature = sent.map((m) => `${m.id}:${m.hash}${m.held ? ':held' : ''}${m.startOff ? ':off' : ''}${m.origin ? `:${m.origin.by}` : ''}${m.update ? `:update ${JSON.stringify(m.update)}` : ''}${m.absorbs ? `:absorbs ${m.absorbs.join(',')}` : ''}`).join('|') +
+  try { starter = starterOffer(ws.home, examplesDir(), undefined, undefined, { modsDir: ws.modsDir }); } catch (e) { logger.warn(`Tim's mods: ${e.message}`); }
+  const signature = sent.map((m) => `${m.id}:${m.hash}${m.held ? ':held' : ''}${m.startOff ? ':off' : ''}${m.origin ? `:${m.origin.by}` : ''}${m.update ? `:update ${JSON.stringify(m.update)}` : ''}${m.absorbs ? `:absorbs ${m.absorbs.join(',')}` : ''}${m.readded ? `:readded ${m.readded}` : ''}`).join('|') +
     `|sites:${sitesOn.join(',')}|starter:${JSON.stringify(starter)}`;
   const errors = [...problems, ...plan.errors];
   const errorsChanged = JSON.stringify(errors) !== JSON.stringify(state.modErrors) || JSON.stringify(warnings) !== JSON.stringify(state.modWarnings);
@@ -566,13 +571,13 @@ function agentCommand(cmd, args) {
       const r = installStarter(ws.home, ws.modsDir, examplesDir(), sites, { ids, othersNone: args.others === 'none' });
       logger.info(`Tim's mods added (${ids ? ids.join(', ') : sites === 'all' ? 'every site' : sites.join(', ')}): ${r.added.length} mod(s)${r.sites.length ? `; TRIF starts on for ${r.sites.join(', ')}` : ''}`);
       syncMods('Tim\'s mods', false);
-      return { added: r.added, sitesOn: r.sites, starter: starterOffer(ws.home, examplesDir()) };
+      return { added: r.added, sitesOn: r.sites, starter: starterOffer(ws.home, examplesDir(), undefined, undefined, { modsDir: ws.modsDir }) };
     }
     case 'shipped.none': {
       chooseNoStarter(ws.home);
       logger.info('Tim\'s mods: none for the sites not chosen yet');
       syncMods('Tim\'s mods', false);
-      return { starter: starterOffer(ws.home, examplesDir()) };
+      return { starter: starterOffer(ws.home, examplesDir(), undefined, undefined, { modsDir: ws.modsDir }) };
     }
     case 'mod.update': {
       // The user's choice for a new version of a shipped mod they changed: 'new' (theirs goes to the

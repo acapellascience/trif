@@ -540,7 +540,7 @@ test('preinstalled mods: each once, switched on or off as listed; the start site
   assert.strictEqual(fs.readFileSync(plainx, 'utf8'), fs.readFileSync(path.join(examples, 'x.com', 'detox-timeline.js'), 'utf8'));
   const { shipped, ...rest } = loadPreinstalled(home);
   const all = Object.fromEntries(starterSites().map((x) => [x, 'added']));
-  assert.deepStrictEqual(rest, { starter: all, skipped: [], offered: ids, startOff: off, sitesOn: SITES_ON });
+  assert.deepStrictEqual(rest, { starter: all, skipped: [], readded: {}, offered: ids, startOff: off, sitesOn: SITES_ON });
   assert.deepStrictEqual(JSON.parse(fs.readFileSync(path.join(home, 'preinstalled.json'), 'utf8')).starter, all, 'the choice is in the file');
   assert.deepStrictEqual(shipped, {}, 'recorded by updateShippedMods, not here');
   fs.unlinkSync(plainx);
@@ -563,7 +563,7 @@ test('preinstalled mods: each once, switched on or off as listed; the start site
   assert.strictEqual(res.code, 0, res.stderr);
   assert.match(res.stdout, /^mods {10}Tim's mods: none until you choose them, site by site, on the setup page in your browser \(or trif setup --examples\)$/m);
   assert.strictEqual(fs.existsSync(path.join(home5, 'sites', 'x.com')), false, 'nothing of Tim\'s on disk');
-  assert.deepStrictEqual(loadPreinstalled(home5), { starter: {}, skipped: [], offered: [], startOff: [], sitesOn: [], shipped: {} });
+  assert.deepStrictEqual(loadPreinstalled(home5), { starter: {}, skipped: [], readded: {}, offered: [], startOff: [], sitesOn: [], shipped: {} });
   const home3 = tempDir();
   res = await runCli(['setup', '--verbose', '--native-dir', path.join(home3, 'native'), '--no-link', '--examples'], { home: home3 });
   assert.strictEqual(res.code, 0, res.stderr);
@@ -605,12 +605,12 @@ test('preinstalled mods: each once, switched on or off as listed; the start site
   assert.notStrictEqual(res.code, 0);
 });
 
-test('Tim\'s mods, mod by mod: the ticked ones of a site are added (off ones still off); the rest left out, never brought in by updates, offered until added', () => {
+test('Tim\'s mods by id (shipped.install {ids}): those of a site are added (off ones still off); the rest left out, never brought in by updates, offered until added', () => {
   const examples = path.join(REPO, 'examples', 'sites');
   const home = tempDir();
   const sites = path.join(home, 'sites');
   const of = (site) => PREINSTALLED.map((p) => p.id).filter((id) => id.split('/')[0].replace(/^www\./, '') === site);
-  // The setup page: X with Rainbow Rave unticked, all of Google's; the rest none.
+  // X without Rainbow Rave, all of Google's; the rest none.
   const ticked = [...of('x.com').filter((id) => id !== 'x.com/rainbow-rave'), ...of('google.com')];
   assert.throws(() => installStarter(home, sites, examples, [], { ids: [...ticked, 'x.com/evil'] }), /x\.com\/evil isn't one of Tim's mods/);
   assert.ok(!fs.existsSync(sites), 'nothing added when one id is wrong');
@@ -646,6 +646,47 @@ test('Tim\'s mods, mod by mod: the ticked ones of a site are added (off ones sti
   const r2 = installStarter(home, sites, examples, [], { ids: ['amazon.com/simple-home'] });
   assert.deepStrictEqual([r2.added, r2.sites], [['amazon.com/simple-home'], ['amazon.com']]);
   assert.deepStrictEqual(loadPreinstalled(home).skipped, ['amazon.com/simple-shopping']);
+});
+
+test('Tim\'s mods: one the user deleted stays gone (updates too), Settings offers it, and adding the site brings it back fresh, switched as listed', () => {
+  const examples = path.join(REPO, 'examples', 'sites');
+  const home = tempDir();
+  const sites = path.join(home, 'sites');
+  installStarter(home, sites, examples, ['x.com'], { othersNone: true });
+  const rr = path.join(sites, 'x.com', 'rainbow-rave.js');
+  fs.writeFileSync(rr, fs.readFileSync(rr, 'utf8') + '// the user changed it\n');
+  updateShipped(home, sites, examples);
+  fs.unlinkSync(rr); // deleted in the panel
+  const choice = (h = home) => Object.fromEntries(starterOffer(h, examples, undefined, undefined, { modsDir: path.join(h, 'sites') }).sites.find((s) => s.site === 'x.com').mods.map((m) => [m.id, m.choice]));
+  assert.strictEqual(choice()['x.com/rainbow-rave'], 'deleted');
+  assert.strictEqual(choice()['x.com/detox-timeline'], 'added');
+  assert.deepStrictEqual(preinstallMods(home, sites, examples).added, [], 'setup doesn\'t bring it back');
+  updateShipped(home, sites, examples);
+  assert.ok(!fs.existsSync(rr));
+  // "Add the rest" (or the site's link): a fresh copy, off as listed, recorded for updates; the browsers switch it once per stamp.
+  const r = installStarter(home, sites, examples, ['x.com']);
+  assert.deepStrictEqual([r.added, r.on], [['x.com/rainbow-rave'], []]);
+  assert.strictEqual(fs.readFileSync(rr, 'utf8'), fs.readFileSync(path.join(examples, 'x.com', 'rainbow-rave.js'), 'utf8'));
+  const st = loadPreinstalled(home);
+  assert.ok(st.startOff.includes('x.com/rainbow-rave'));
+  assert.match(st.readded['x.com/rainbow-rave'], /^\d{4}-/);
+  assert.strictEqual(st.shipped['x.com/rainbow-rave'].hash, require('crypto').createHash('sha1').update(fs.readFileSync(rr)).digest('hex'));
+  assert.strictEqual(choice()['x.com/rainbow-rave'], 'added');
+  // A mod that starts on comes back on (no startOff).
+  fs.unlinkSync(path.join(sites, 'x.com', 'detox-timeline.js'));
+  assert.deepStrictEqual(installStarter(home, sites, examples, ['x.com']).on, ['x.com/detox-timeline']);
+  assert.ok(!loadPreinstalled(home).startOff.includes('x.com/detox-timeline'));
+
+  // From before 0.2.5: deleted on purpose then. Setup leaves it gone; Settings just offers it.
+  const old = tempDir();
+  installStarter(old, path.join(old, 'sites'), examples, 'all');
+  const pre = JSON.parse(fs.readFileSync(path.join(old, 'preinstalled.json'), 'utf8'));
+  delete pre.starter;
+  fs.writeFileSync(path.join(old, 'preinstalled.json'), JSON.stringify(pre));
+  fs.unlinkSync(path.join(old, 'sites', 'x.com', 'follow-status.js'));
+  assert.deepStrictEqual(preinstallMods(old, path.join(old, 'sites'), examples).added, []);
+  assert.strictEqual(choice(old)['x.com/follow-status'], 'deleted');
+  assert.ok(!fs.existsSync(path.join(old, 'sites', 'x.com', 'follow-status.js')));
 });
 
 test('Tim\'s mods, site by site: added ones get their mods, new ones and updates; the others nothing; a workspace from before the choice counts as added', () => {

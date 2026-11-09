@@ -17,9 +17,9 @@ needs a section here for the version it releases.
   is full size (both by Tim), then the end of Stravinsky's Firebird (Stokowski, 1940) when he explodes.
   That makes it about 2 MB, so it needs this version.
 - **You choose which of Tim's mods to add.** A new setup puts none of them on your computer until you
-  tick them on the setup page, a box for each site and each mod. Each one you add has its own switch in
-  the side panel, and you can add the others later in Settings there, or from the link on that site's
-  panel. If you already have Tim's mods, nothing changes.
+  tick their sites on the setup page. Each mod has its own switch in the side panel; add other sites'
+  later in Settings there, or from the link on that site's panel. One you deleted can be brought back in
+  Settings too. If you already have Tim's mods, nothing changes.
 - **New for X, off until you switch them on: people's own colours.** Style Encoder stamps a style you
   pick into the corner of the next profile picture you upload (X's round crop hides it). Profile Styler
   then shows each styled profile in its owner's colours, and Post Styler their posts and people cards.

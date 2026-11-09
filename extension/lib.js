@@ -463,6 +463,32 @@ export function applyStartOff(mods, disabled = {}, startedOff = {}, installId = 
 }
 
 /**
+ * Tim's mods the user deleted and got back (Settings' "Add the rest", a site's link): the helper sends each
+ * with `readded` (a stamp). The first time this browser sees a stamp, the mod is switched as Tim set it,
+ * like a new one (off when it comes with `startOff`, else on), not as it was before it was deleted;
+ * `readded` (id -> stamp) remembers that, so after it the switch is the user's. Pure: returns {disabled,
+ * readded, changed} with new objects when something changed.
+ */
+export function applyReadded(mods, disabled = {}, readded = {}) {
+  const fresh = (mods || []).filter((m) => typeof m?.id === 'string' && typeof m.readded === 'string' && readded[m.id] !== m.readded);
+  if (!fresh.length) return { disabled, readded, changed: false };
+  const d = { ...disabled };
+  const r = { ...readded };
+  for (const m of fresh) {
+    if (m.startOff) d[m.id] = true; else delete d[m.id];
+    r[m.id] = m.readded;
+  }
+  return { disabled: d, readded: r, changed: true };
+}
+
+/** chrome.storage.local `readded`, cleaned up: mod id -> stamp. */
+export function normalizeReadded(value) {
+  const out = {};
+  if (value && typeof value === 'object' && !Array.isArray(value)) for (const [id, v] of Object.entries(value)) if (typeof v === 'string') out[id] = v;
+  return out;
+}
+
+/**
  * Shipped mods folded into another one (helper/lib/preinstalled.js retireShippedMods): the helper sends
  * the ids whose old copy went to the trash as that mod's `absorbs`. The first time this browser sees each
  * one, the mod it went into takes over its switch: on if either was on (and on a site, on there if either
@@ -558,7 +584,7 @@ export function normalizeModOrder(value) {
 
 /**
  * Tim's mods, site by site, as the helper sends them (helper/lib/preinstalled.js starterOffer), cleaned up:
- * {chosen, sites: [{site, name, note, choice: 'added'|'none'|null, suggested, mods: [{id, name, description, on, choice: 'added'|'skipped'|null}]}]},
+ * {chosen, sites: [{site, name, note, choice: 'added'|'none'|null, suggested, mods: [{id, name, description, on, choice: 'added'|'deleted'|'skipped'|null}]}]},
  * or null (an older helper, or nothing usable).
  */
 export function normalizeStarter(value) {
@@ -569,7 +595,7 @@ export function normalizeStarter(value) {
     const site = s && typeof s === 'object' ? scopeFor(str(s.site)) : '';
     if (!site || sites.some((x) => x.site === site)) continue;
     const mods = (Array.isArray(s.mods) ? s.mods : []).slice(0, 50).filter((m) => m && typeof m === 'object' && str(m.id))
-      .map((m) => ({ id: str(m.id), name: str(m.name) || str(m.id), description: str(m.description), on: !!m.on, choice: m.choice === 'added' || m.choice === 'skipped' ? m.choice : null }));
+      .map((m) => ({ id: str(m.id), name: str(m.name) || str(m.id), description: str(m.description), on: !!m.on, choice: ['added', 'deleted', 'skipped'].includes(m.choice) ? m.choice : null }));
     if (!mods.length) continue;
     sites.push({ site, name: str(s.name, 60) || site, note: str(s.note, 80), choice: s.choice === 'added' || s.choice === 'none' ? s.choice : null, suggested: !!s.suggested, mods });
   }

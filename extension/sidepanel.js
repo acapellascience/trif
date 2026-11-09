@@ -655,11 +655,12 @@ function renderStarter() {
     const li = el('li');
     li.dataset.site = x.site;
     const name = el('span', 'starter-site', x.name);
-    // A site added with some of its mods left out (unticked on the setup page): which are in, which aren't.
-    const out = x.choice === 'added' ? x.mods.filter((m) => m.choice === 'skipped') : [];
+    // A site added with some of its mods not on the computer (deleted, or left out): which are, which aren't.
+    // "Add the rest" brings them back, fresh, switched as Tim set them.
+    const out = x.choice === 'added' ? x.mods.filter((m) => m.choice !== 'added') : [];
     const names = (list) => list.map((m) => m.name).join(', ');
     const mods = el('span', 'starter-mods', out.length
-      ? `Added: ${names(x.mods.filter((m) => m.choice !== 'skipped'))}. Not added: ${names(out)}.`
+      ? `Added: ${names(x.mods.filter((m) => m.choice === 'added'))}. Not added: ${names(out)}.`
       : names(x.mods));
     if (x.choice === 'added' && !out.length) li.append(name, el('span', 'starter-state', 'Added'), mods);
     else {
@@ -676,7 +677,10 @@ function renderStarter() {
   ui.starterErr.hidden = !err;
 }
 
-/** The site this panel is on, when Tim has mods for it that the user hasn't added (all, or some left out). */
+/**
+ * The site this panel is on, when Tim has mods for it that the user hasn't added (all, or some left out).
+ * Not just for a mod the user deleted: that may be on purpose, so only Settings offers it back.
+ */
 function siteStarterOffer() {
   const st = view.status?.helper?.connected ? view.status.starter : null;
   const scope = siteScope();

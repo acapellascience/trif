@@ -2349,6 +2349,18 @@ test('normalizeStarter: Tim\'s mods by site, cleaned up; siteNames', () => {
   assert.deepStrictEqual(['', 'X', 'X and Google', 'X, Google and Amazon'], [[], ['X'], ['X', 'Google'], ['X', 'Google', 'Amazon']].map(lib.siteNames));
 });
 
+test('applyReadded: one of Tim\'s mods deleted and added again is switched as listed, once per stamp', () => {
+  const mods = [mod('x.com/a', { readded: 's1', startOff: true }), mod('x.com/b', { readded: 's1' }), mod('x.com/c')];
+  let r = lib.applyReadded(mods, { 'x.com/b': true }, {});
+  assert.deepStrictEqual(r, { disabled: { 'x.com/a': true }, readded: { 'x.com/a': 's1', 'x.com/b': 's1' }, changed: true });
+  // After that the switch is the user's: the same stamp changes nothing; a new one switches it again.
+  const again = lib.applyReadded(mods, {}, r.readded);
+  assert.strictEqual(again.changed, false);
+  r = lib.applyReadded([mod('x.com/a', { readded: 's2', startOff: true })], {}, r.readded);
+  assert.deepStrictEqual(r.disabled, { 'x.com/a': true });
+  assert.deepStrictEqual(lib.normalizeReadded({ a: 's', b: 3, c: null }), { a: 's' });
+});
+
 test('background: Tim\'s mods by site come with the mods; the panel\'s choice goes to the helper, and a site\'s tab reloads when one now runs there', async () => {
   const tabs = [{ id: 5, windowId: 1, active: true, url: 'https://x.com/home' }];
   const bg = await loadBackground({ storage: { sitesOn: [] }, tabs });

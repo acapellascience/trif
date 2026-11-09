@@ -501,11 +501,14 @@ Re-running setup is safe; run it again to update.
   `{starter, skipped, offered, startOff, sitesOn}`: `starter` = `{"<site>": "added"|"none"}`, the user's
   choice (no entry: not chosen, like a site a later version brings mods for, which Settings offers); a
   site with ids in `offered` counts as added (a workspace from before 0.2.5, whose setup added every site).
-  `skipped` = the ids of an added site's mods the user left unticked on the setup page (a box per mod):
-  never copied, by any setup or update, until the user adds them (Settings' "Add the rest", or the site's
-  link). Only added sites get new mods (off, as `PREINSTALLED` lists them) and updates. The mods message carries `starter`
+  `skipped` = the ids of an added site's mods the user chose not to add (`shipped.install` with `ids`; the
+  setup page adds whole sites): never copied, by any setup or update, until the user adds them. A mod the
+  user deleted stays gone too (it's in `offered`); Settings shows both as not added ("Add the rest"), and
+  adding the site brings them back fresh: `readded` = `{"<id>": stamp}`, sent on the mod as `readded`, and
+  each browser switches it as `PREINSTALLED` lists it once per stamp (`applyReadded`; chrome.storage.local
+  `readded`). Only added sites get new mods (off, as `PREINSTALLED` lists them) and updates. The mods message carries `starter`
   (`starterOffer`: `{chosen, sites: [{site, name, note, choice, suggested, mods: [{id, name, description,
-  on, choice: "added"|"skipped"|null}]}]}`) for the setup page and the panel. `offered` keeps a later setup from bringing back one the user deleted
+  on, choice: "added"|"deleted"|"skipped"|null}]}]}`) for the setup page and the panel. `offered` keeps a later setup from bringing back one the user deleted
   (an existing file is never overwritten); `startOff` lists the copied ones that start off. The helper
   sends those mods with `startOff: true`; the extension switches each off (`disabled`) the first time it
   sees it and remembers that in chrome.storage.local `startedOff`, so afterwards the switch is the user's.
@@ -812,7 +815,7 @@ New native request commands (answered with a normal `response`):
 | `mod.delete` | `id` | `{id, deleted: true}`: moves `sites/<site>/<mod>.js` to `trash/<site>/<mod>@<UTC stamp>.js` (entries older than 30 days are removed), then re-sends the mods; also on the socket, and from a run for mods inside its scope |
 | `mod.restore` | `id` | `{id, restored: true, file}`: moves the newest trashed copy back (fails if the mod exists again, except to undo `mod.update` `new`); same rules as `mod.delete`. The extension keeps a deleted mod's switch state, so it comes back as it was |
 | `mod.update` | `id, choice: "new"\|"mine"` | a shipped mod's new version: use it or keep the user's copy (see "Updates to shipped mods"); also on the socket, not from a run |
-| `shipped.install` | `ids?` or `sites?`, `others?: "none"` | Tim's mods: `ids`, just these (ids from `PREINSTALLED`, anything else refused; a site chosen for the first time this way gets its other mods `skipped`), or every mod not added yet of these sites (scopes: x.com, google.com; all of them without either): copied in, TRIF offered on for the sites in `SITES_ON`; `others: "none"` records none for every site not chosen yet. `{added: [ids], sitesOn: [sites newly offered], starter}` (see "Preinstalled mods"); also on the socket, not from a run |
+| `shipped.install` | `ids?` or `sites?`, `others?: "none"` | Tim's mods: `ids`, just these (ids from `PREINSTALLED`, anything else refused; a site chosen for the first time this way gets its other mods `skipped`), or every mod not on disk of these sites (left out or deleted before: added fresh) (scopes: x.com, google.com; all of them without either): copied in, TRIF offered on for the sites in `SITES_ON`; `others: "none"` records none for every site not chosen yet. `{added: [ids], sitesOn: [sites newly offered], starter}` (see "Preinstalled mods"); also on the socket, not from a run |
 | `shipped.none` | – | none for every site not chosen yet ("Start with none"): `{starter}`; also on the socket, not from a run |
 | `instructions.get` | | `{text, file, max}`: the user's standing instructions (`~/.trif/instructions.md`, `''` if none) |
 | `instructions.set` | `text` | same; trimmed, at most 4000 characters, empty removes the file. Not from a run |

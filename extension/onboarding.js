@@ -238,15 +238,14 @@ function loginStep(connected) {
   return { el: step, done: false };
 }
 
-// Tim's mods, site by site and mod by mod (helper/lib/preinstalled.js): nothing of his is on disk until the
-// user picks them. A box per site (ticking or unticking all its mods; half-ticked when only some are) and
-// one per mod. "Add these" has the helper copy the ticked mods in (each on or off as Tim set it; ticked
-// means on the computer, not switched on), turn TRIF on for their sites, leave the unticked ones out
-// (offered in Settings later) and record none for the sites with nothing ticked; "Start with none"
-// records none for all. Either way the step is done. Ticked to start: every mod of the sites TRIF starts on for.
+// Tim's mods, site by site (helper/lib/preinstalled.js): nothing of his is on disk until the user picks the
+// sites. "Add these" has the helper copy the ticked sites' mods in (each on or off as Tim set it: ticked
+// means on the computer, not switched on), turn TRIF on for them and record none for the rest; "Start
+// with none" records none for all. Either way the step is done, and Settings in the panel (or a site's
+// own panel) adds any site's later. Ticked to start: the sites TRIF starts on for.
 // (the code as this version shipped it: the release's tag)
 const STARTER_SOURCE = `https://github.com/acapellascience/trif/tree/v${chrome.runtime.getManifest().version}/examples/sites`;
-const picks = new Map(); // mod id -> ticked, once the user changes one
+const picks = new Map(); // site -> ticked, once the user changes one
 let starterBusy = false;
 let starterError = '';
 
@@ -258,56 +257,35 @@ function starterStep(s, connected) {
     const added = st.sites.filter((x) => x.choice === 'added').map((x) => x.name);
     return { el: step, done: true, state: added.length ? siteNames(added) : 'none' };
   }
-  const ticked = (x, m) => (picks.has(m.id) ? picks.get(m.id) : x.suggested);
-  const tickedIds = () => st.sites.flatMap((x) => x.mods.filter((m) => ticked(x, m)).map((m) => m.id));
+  const ticked = (x) => (picks.has(x.site) ? picks.get(x.site) : x.suggested);
   setBody(step, JSON.stringify(['starter', st.sites, starterBusy, starterError]), () => {
     const intro = el('p', null, 'Tim made mods for a few sites. None of them is on your computer until you choose. They’re plain JavaScript you can read first: ');
     const see = link('see the code', STARTER_SOURCE);
     see.id = 'starter-source';
     intro.append(see, '.');
     const list = el('ul', 'picks');
-    const boxes = []; // [site box, site, [mod boxes]]
-    const sync = () => {
-      for (const [siteBox, x, modBoxes] of boxes) {
-        const n = modBoxes.filter((b) => b.checked).length;
-        siteBox.checked = n === modBoxes.length;
-        siteBox.indeterminate = n > 0 && n < modBoxes.length;
-      }
-      add.disabled = starterBusy || !tickedIds().length;
-    };
     for (const x of st.sites) {
       const li = el('li', 'pick');
       li.dataset.site = x.site;
-      const head = el('label', 'pick-site');
-      const siteBox = checkbox(false);
+      const label = el('label');
+      const box = document.createElement('input');
+      box.type = 'checkbox';
+      box.checked = ticked(x);
+      box.disabled = starterBusy;
+      box.addEventListener('change', () => { picks.set(x.site, box.checked); add.disabled = starterBusy || !st.sites.some(ticked); });
       const name = el('span', 'pick-name', x.name);
       if (x.note) name.append(el('span', 'pick-note', x.note));
-      head.append(siteBox, name);
-      const mods = el('div', 'pick-mods');
-      const modBoxes = x.mods.map((m) => {
-        const label = el('label', 'pick-mod');
-        label.dataset.mod = m.id;
-        const box = checkbox(ticked(x, m));
-        box.addEventListener('change', () => { picks.set(m.id, box.checked); sync(); });
-        label.append(box, m.name);
-        mods.append(label);
-        return box;
-      });
-      siteBox.addEventListener('change', () => {
-        for (const [i, m] of x.mods.entries()) { modBoxes[i].checked = siteBox.checked; picks.set(m.id, siteBox.checked); }
-        sync();
-      });
-      boxes.push([siteBox, x, modBoxes]);
-      li.append(head, mods);
+      label.append(box, name, el('span', 'pick-mods', x.mods.map((m) => m.name).join(', ')));
+      li.append(label);
       list.append(li);
     }
     const row = el('div', 'row');
-    const add = button('Add these', 'primary', () => chooseStarter({ type: 'shipped.install', ids: tickedIds(), others: 'none' }));
+    const add = button('Add these', 'primary', () => chooseStarter({ type: 'shipped.install', sites: st.sites.filter(ticked).map((x) => x.site), others: 'none' }));
     const none = button('Start with none', '', () => chooseStarter({ type: 'shipped.none' }));
     [add.id, none.id] = ['starter-add', 'starter-none'];
+    add.disabled = starterBusy || !st.sites.some(ticked);
     none.disabled = starterBusy;
     row.append(add, none);
-    sync();
     return [
       intro, list, row,
       el('p', 'note', `Each mod has its own switch in the TRIF ${PANEL}: you can turn any of them off individually, any time. You can add the others later, in the panel’s Settings.`),
@@ -315,14 +293,6 @@ function starterStep(s, connected) {
     ];
   });
   return { el: step, done: false };
-}
-
-function checkbox(checked) {
-  const box = document.createElement('input');
-  box.type = 'checkbox';
-  box.checked = checked;
-  box.disabled = starterBusy;
-  return box;
 }
 
 async function chooseStarter(msg) {

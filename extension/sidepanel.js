@@ -164,6 +164,9 @@ function currentAgent() {
 // ---- tab following ------------------------------------------------------------------------------
 
 async function init() {
+  // Settings' "see the code" for Tim's mods: the code as this version shipped it (the release's tag).
+  const src = document.getElementById('starter-source');
+  if (src) src.href = `https://github.com/acapellascience/trif/tree/v${chrome.runtime.getManifest().version}/examples/sites`;
   connectPort();
   // In Safari the panel is a window of its own, opened with ?window=<the window whose tabs it follows>.
   const opener = Number(new URLSearchParams(location.search).get('window'));

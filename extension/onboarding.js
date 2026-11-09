@@ -242,7 +242,8 @@ function loginStep(connected) {
 // sites. "Add these" has the helper copy the ticked sites' mods in (and turn TRIF on for them) and records
 // none for the rest; "Start with none" records none for all. Either way the step is done, and Settings in
 // the panel (or a site's own panel) adds any site's later. Ticked to start: the sites TRIF starts on for.
-const STARTER_SOURCE = 'https://github.com/acapellascience/trif/tree/main/examples/sites';
+// (the code as this version shipped it: the release's tag)
+const STARTER_SOURCE = `https://github.com/acapellascience/trif/tree/v${chrome.runtime.getManifest().version}/examples/sites`;
 const picks = new Map(); // site -> ticked, once the user changes one
 let starterBusy = false;
 let starterError = '';

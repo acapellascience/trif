@@ -57,7 +57,12 @@ switches stay as they were; in Safari, install the new TRIF.app (see Safari belo
 3. **Allow it to run mods.** On the **TRIF setup** tab that opens, click **Open TRIF’s Chrome
    settings** and turn on **Allow User Scripts**.
 
-4. **Open the side panel.** Click the TRIF icon in the toolbar (pin it from the puzzle-piece menu). If
+4. **Pick Tim's mods, if you want them.** The same tab lists the mods Tim made for a few sites (X,
+   Google, Amazon, Instagram): tick the sites you want and click **Add these**, or **Start with none**.
+   Nothing of his is on your computer until you do, and you can add any site's later in **Settings** in
+   the side panel.
+
+5. **Open the side panel.** Click the TRIF icon in the toolbar (pin it from the puzzle-piece menu). If
    it asks you to log in to Claude, click **Log in** and follow the steps.
 
 ### Firefox

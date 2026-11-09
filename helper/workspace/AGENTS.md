@@ -169,6 +169,7 @@ to that one. In a side-panel run you're already on the browser the user is chatt
 | `trif disable <site>/<mod>` / `trif enable <site>/<mod>` | Switch a mod off / back on (the side panel's switch). Reloads the tab if the mod runs on it. |
 | `trif tabs` | Open tabs (id, url, title). |
 | `trif open <url>` / `trif navigate [TAB] <url>` | Open a new tab / load a URL in a tab. Wait for load. |
+| `trif close --tab <id>` | Close a tab you opened, when you're done with it (a side-panel run's are closed when it ends). |
 | `trif run [TAB] '<code>'` | Run JS in the page; prints the result as JSON. `-f file.js` runs a file, `-` reads stdin. |
 | `trif text [TAB]` | The page's visible text. |
 | `trif sweep [TAB] --selector <css> \| --color <colour> \| --text <regex>` | Every instance of a kind of thing: count, where (landmarks, menus, dialogs, fixed/sticky, shadow roots, frames), kinds with examples; for a colour also the stylesheet rules and CSS variables using it. `--scroll` loads lazy content first by scrolling the tab itself, which the user sees (refused on the tab they're looking at unless `--force`); `--json` lists each match. |
@@ -177,7 +178,7 @@ to that one. In a side-panel run you're already on the browser the user is chatt
 | `trif record <site> on\|off` | Record fetch/XHR traffic for a hostname, from the next load. |
 | `trif requests [TAB] [--filter <regex>] [--limit N]` | Recorded requests, newest last, with index `i`. |
 | `trif request [TAB] <i> [-o file]` | One request: method, URL, status, request body, response (JSON pretty-printed). |
-| `trif errors [TAB]` / `trif logs [TAB]` | Errors thrown by mods in that page / what mods logged. |
+| `trif errors [TAB]` / `trif logs [TAB]` | Errors thrown by mods in that page / what mods logged. `--page`: the page's own errors (where a mod or recording is on). |
 | `trif mods` | Mods in the workspace (id, matches, file; `[off]` = switched off, `HELD` = waiting for the user's OK). |
 | `trif check <file\|site/mod>` | Check that a mod parses, without running it (use instead of `node --check`). |
 | `trif install-example <site>/<mod>` | Copy a ready-made example mod into the workspace. |

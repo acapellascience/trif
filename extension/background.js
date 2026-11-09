@@ -621,6 +621,22 @@ const commands = {
     }
   },
 
+  // Close a tab (an agent's own, from `trif open`): it must be named (no "the active tab" default), and
+  // not the one the user is looking at, unless forced. (The helper also closes a run's opened tabs when
+  // the run ends.)
+  async close(args) {
+    if (args.tab === undefined && args.url === undefined) throw new Error('say which tab to close: --tab <id> (from trif tabs or trif open) or --url <part of its address>');
+    const tab = await scopedTab(args);
+    if (!args.force && tab.active) {
+      const win = await chrome.windows.get(tab.windowId).catch(() => null);
+      if (win && win.focused && win.state !== 'minimized') {
+        throw new Error("that's the tab the user is looking at; leave it open, or add --force if closing it is what they want");
+      }
+    }
+    await chrome.tabs.remove(tab.id);
+    return { id: tab.id, url: tab.url || '' };
+  },
+
   async text(args) {
     const tab = await scopedTab(args);
     // Isolated world via chrome.scripting: works even when user scripts are off and can't be
@@ -718,7 +734,8 @@ const commands = {
   },
 
   async errors(args) {
-    return runtimeList(args, 'errors');
+    // (--page: the page's own errors, the ones no mod threw)
+    return runtimeList(args, args.page ? 'pageErrors' : 'errors');
   },
 
   /**

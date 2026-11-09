@@ -735,7 +735,8 @@ function modItem(m) {
   li.dataset.mod = m.id;
   li.title = m.file || m.id;
   const labelId = `mod-name-${++modLabelSeq}`;
-  const name = el('div', 'mod-name');
+  // (a heading, so a screen reader's heading navigation goes mod to mod)
+  const name = el('h3', 'mod-name');
   const light = el('span', 'light');
   const label = el('span', null, m.name);
   label.id = labelId;
@@ -930,7 +931,7 @@ function deleteButton(m, labelId, li) {
 function gripButton(labelId) {
   const b = el('button', 'icon-btn mod-grip');
   b.type = 'button';
-  b.title = 'Drag to move (or Alt+↑ / Alt+↓)';
+  b.title = 'Drag to reorder the list (or Alt+↑ / Alt+↓). It only changes how they\'re listed, not the order they run in.';
   b.setAttribute('aria-label', 'Move');
   b.setAttribute('aria-describedby', labelId);
   b.setAttribute('aria-keyshortcuts', 'Alt+ArrowUp Alt+ArrowDown');

@@ -297,6 +297,7 @@ body[data-problem="helper"] .mod-list, body.needs-login .mod-list { --switch-on:
 @media (prefers-reduced-motion: reduce) { .mod-list.dragging > li:not(.drag) { transition: none; } }
 .mod-main { flex: 1; min-width: 0; }
 .mod-name { font-weight: 500; }
+h3.mod-name { margin: 0; font-size: inherit; line-height: inherit; }
 /* The light hangs left of the name and file, so wrapped lines line up with the name. */
 .mod-main { position: relative; padding-left: 14px; }
 .light { position: absolute; left: 0; top: 6px; width: 7px; height: 7px; border-radius: 50%;

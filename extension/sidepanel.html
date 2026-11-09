@@ -32,7 +32,8 @@
   </div>
 </header>
 
-<section id="settings" class="settings" hidden>
+<section id="settings" class="settings" aria-labelledby="settings-title" hidden>
+  <h2 id="settings-title" class="visually-hidden">Settings</h2>
   <label class="field">
     <span>Agent</span>
     <select id="agent"><option value="">Default</option></select>
@@ -75,10 +76,10 @@
   <p id="model-note" class="note" hidden></p>
   <label class="field field-stacked">
     <span>Instructions for your agent</span>
-    <textarea id="instructions" rows="3" maxlength="4000" spellcheck="true" disabled
+    <textarea id="instructions" rows="3" maxlength="4000" spellcheck="true" aria-describedby="instructions-note" disabled
       placeholder="Read by every chat. For example: talk like a caveman; don't bring up detectability."></textarea>
   </label>
-  <p id="instructions-note" class="note">Applies from your next message, here and in Claude Code in ~/.trif.</p>
+  <p id="instructions-note" class="note" role="status">Applies from your next message, here and in Claude Code in ~/.trif.</p>
   <label class="check"><input id="auto-update" type="checkbox"> Install updates automatically</label>
   <p id="update-note" class="note"></p>
   <p class="note"><a href="#" id="report-link">Report a problem</a> · <a href="#" id="setup-link">Setup and status</a></p>

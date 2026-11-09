@@ -372,7 +372,7 @@ test('new creates a mod from the template; refuses to overwrite', async () => {
   const r = await runCli(['new', 'Example.com', 'hide-banner'], { home });
   assert.equal(r.code, 0, r.stderr);
   const file = path.join(home, 'sites', 'example.com', 'hide-banner.js');
-  assert.equal(r.stdout.trim(), file);
+  assert.equal(r.stdout.trim(), path.join(fs.realpathSync(path.dirname(file)), 'hide-banner.js'));
   const text = fs.readFileSync(file, 'utf8');
   assert.match(text, /\/\/ @name {8}Hide Banner/);
   assert.match(text, /@match {7}\*:\/\/example\.com\/\*/);
@@ -381,6 +381,16 @@ test('new creates a mod from the template; refuses to overwrite', async () => {
   assert.equal((await runCli(['new', 'example.com', 'Bad Name!'], { home })).code, 1);
   // The template must be valid JS.
   assert.doesNotThrow(() => new Function(text));
+});
+
+test('new prints the real path when the workspace is reached through a link (an agent\'s run rules use real paths)', async () => {
+  const real = tempDir();
+  const link = path.join(tempDir(), 'linked-home');
+  fs.symlinkSync(real, link);
+  const r = await runCli(['new', 'example.com', 'via-link'], { home: link });
+  assert.equal(r.code, 0, r.stderr);
+  assert.equal(r.stdout.trim(), path.join(fs.realpathSync(real), 'sites', 'example.com', 'via-link.js'));
+  assert.ok(fs.existsSync(r.stdout.trim()));
 });
 
 test('new all-sites: one @match for every site', async () => {

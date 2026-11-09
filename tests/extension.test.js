@@ -2453,3 +2453,26 @@ test('background: hello says it takes mods in parts; a set in parts is applied o
     assert.deepStrictEqual(bg.chrome.userScripts.scripts.map((s) => s.id).sort(), ['webmods-runtime', 'x.com/a']);
   } finally { bg.restore(); }
 });
+
+const fs = require('node:fs');
+const path = require('node:path');
+test('panel markup: Settings is a labelled region with a heading; the instructions box\'s note is announced', () => {
+  const html = fs.readFileSync(path.join(__dirname, '..', 'extension', 'sidepanel.html'), 'utf8');
+  assert.match(html, /<section id="settings"[^>]*aria-labelledby="settings-title"/);
+  assert.match(html, /<h2 id="settings-title"[^>]*>Settings<\/h2>/);
+  assert.match(html, /<textarea id="instructions"[^>]*aria-describedby="instructions-note"/);
+  assert.match(html, /<p id="instructions-note"[^>]*role="status"/);
+  // each mod's name is a heading (heading navigation goes mod to mod)
+  assert.match(fs.readFileSync(path.join(__dirname, '..', 'extension', 'sidepanel.js'), 'utf8'), /const name = el\('h3', 'mod-name'\)/);
+});
+
+test('runtime: errors no mod threw are the page\'s own, kept apart (trif errors --page)', () => {
+  const page = makePage();
+  const W = loadRuntime(page);
+  const fire = (type, ev) => { for (const fn of page.__listeners[type] || []) fn(ev); };
+  fire('error', { error: new Error('Unexpected token } in JSON'), filename: 'https://x.com/app.js', lineno: 12 });
+  fire('error', { error: Object.assign(new Error('from a mod'), { stack: 'Error: from a mod\n    at trif://x.com/boom.js:1:1' }), filename: 'trif://x.com/boom.js' });
+  fire('unhandledrejection', { reason: 'nope' });
+  assert.deepStrictEqual(plain(W.errors.map((e) => e.mod)), ['x.com/boom']);
+  assert.deepStrictEqual(plain(W.pageErrors.map((e) => [e.message, e.source])), [['Unexpected token } in JSON', 'https://x.com/app.js:12'], ['nope', '']]);
+});

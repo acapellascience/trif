@@ -467,7 +467,7 @@ function onAgentEvent(runId, event) {
   }
   const subs = runSubscribers.get(runId);
   if (subs) for (const s of subs) reply(s, { type: 'agentEvent', runId, event });
-  if (event.kind === 'done') { runSubscribers.delete(runId); stopRunRecording(runId); }
+  if (event.kind === 'done') { runSubscribers.delete(runId); stopRunRecording(runId); closeRunTabs(runId); }
 }
 
 // The network recorder keeps whole request and response bodies (logins, API calls) for as long as it's
@@ -484,6 +484,27 @@ function noteRecording(runId, result) {
   } else if (runId && result.changed) {
     if (!recordingByRun.has(runId)) recordingByRun.set(runId, new Set());
     recordingByRun.get(runId).add(site);
+  }
+}
+
+// Tabs a run opened (`trif open`) are its own: closed when it ends, unless the user is looking at one
+// (the extension's close refuses that tab) or closed it already. runId -> tab ids.
+const tabsByRun = new Map();
+function noteOpened(runId, result) {
+  if (!runId || !result || !Number.isInteger(result.id)) return;
+  if (!tabsByRun.has(runId)) tabsByRun.set(runId, new Set());
+  tabsByRun.get(runId).add(result.id);
+}
+function closeRunTabs(runId) {
+  const tabs = tabsByRun.get(runId);
+  tabsByRun.delete(runId);
+  if (!tabs || !state.stdoutOpen) return;
+  for (const tab of tabs) {
+    const extId = `h${++requestCounter}`;
+    try { sendToExtension({ type: 'request', id: extId, cmd: 'close', args: { tab } }); } catch (e) { logger.warn(`couldn't close tab ${tab}: ${e.message}`); continue; }
+    // (an answer that it's gone, or that the user is on it, is fine: nothing to do)
+    const sink = { destroyed: false, writable: true, write(text) { const r = JSON.parse(text); if (r.ok) logger.info(`closed tab ${tab}: run ${runId} opened it and has ended`); } };
+    pending.set(extId, { sock: sink, clientId: null, cmd: 'close', runId: null, timer: setTimeout(() => pending.delete(extId), DEFAULT_TIMEOUT_MS) });
   }
 }
 
@@ -1020,6 +1041,7 @@ function onExtensionResponse(msg) {
   pending.delete(msg.id);
   clearTimeout(p.timer);
   if (p.cmd === 'record' && msg.ok) noteRecording(p.runId, msg.result);
+  if (p.cmd === 'open' && msg.ok) noteOpened(p.runId, msg.result);
   if (msg.ok) reply(p.sock, { id: p.clientId, ok: true, result: msg.result === undefined ? null : msg.result });
   else {
     let error = String(msg.error ?? 'unknown error from extension');

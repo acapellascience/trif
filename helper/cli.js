@@ -26,7 +26,7 @@ process.stdout.on('error', (e) => { if (e.code === 'EPIPE') process.exit(0); thr
 const VALUE_FLAGS = new Set(['--tab', '--url', '-o', '--out', '--output', '--filter', '--limit', '-f', '--file',
   '--browser', '--home', '--native-dir', '--bin-dir', '--timeout', '--agent', '--session', '--model', '--site', '--auto',
   '--provider', '--base-url', '--key-env', '--selector', '--color', '--text', '--tolerance']);
-const BOOL_FLAGS = new Set(['--json', '--hard', '--help', '-h', '--force', '--no-link', '--no-examples', '--copy', '--link', '--install', '--open',
+const BOOL_FLAGS = new Set(['--json', '--hard', '--help', '-h', '--force', '--page', '--no-link', '--no-examples', '--copy', '--link', '--install', '--open',
   '--use-new', '--keep', '--merged', '--set-key', '--remove-key', '--scroll', '--full', '--verbose', '-v', '--no-wait']);
 const ALIASES = { '--out': '-o', '--output': '-o', '--file': '-f', '-h': '--help', '-v': '--verbose' };
 
@@ -559,6 +559,13 @@ const handlers = {
     out(`opened tab ${r && r.id}: ${r && r.url}`);
   },
 
+  async close(ctx) {
+    if (ctx.opts['--tab'] === undefined && ctx.opts['--url'] === undefined) throw new UsageError('usage: trif close --tab <id> | --url <part of its address> [--force]');
+    const r = await ctx.call('close', { ...(ctx.opts['--force'] ? { force: true } : {}), ...tabArgs(ctx.opts) });
+    if (ctx.json) return printJson(r);
+    out(`closed tab ${r && r.id}${r && r.url ? `: ${r.url}` : ''}`);
+  },
+
   async navigate(ctx, pos) {
     const r = await ctx.call('navigate', { to: normalizeUrl(pos[0]), ...tabArgs(ctx.opts) });
     if (ctx.json) return printJson(r);
@@ -601,6 +608,7 @@ const handlers = {
       throw new UsageError(`inside a side-panel agent run, screenshots are saved in the run's screenshots folder${runShots ? ` (${runShots})` : ''} or the mods folder: leave out -o to save to the run's screenshots folder, or give just a file name (-o page.png)`);
     }
     writeOptionFile(file, Buffer.from(m[2], 'base64'));
+    file = realFile(file);
     if (ctx.json) return printJson({ file, how: r.how || 'visible', full: !!r.full, note: r.note || null, ...(r.cut ? { cut: true } : {}), ...(r.stale ? { stale: true } : {}), ...(r.slices ? { slices: r.slices, viewport: r.viewport } : {}) });
     out(file);
     // On stderr, so $(trif screenshot) is still just the path; agents see it either way.
@@ -650,7 +658,7 @@ const handlers = {
       const file = optionPath(ctx, ctx.opts['-o'], { write: true });
       writeOptionFile(file, text == null ? '' : text);
       delete view.responseText;
-      view.responseFile = file;
+      view.responseFile = realFile(file);
       view.responseLength = typeof r.responseText === 'string' ? r.responseText.length : 0;
     } else if ('responseText' in view) {
       view.response = prettyBody(view.responseText);
@@ -660,8 +668,18 @@ const handlers = {
   },
 
   async errors(ctx) {
-    const r = await ctx.call('errors', tabArgs(ctx.opts));
+    const page = !!ctx.opts['--page'];
+    const r = await ctx.call('errors', { ...(page ? { page: true } : {}), ...tabArgs(ctx.opts) });
     if (ctx.json) return printJson(r);
+    if (page) {
+      if (!Array.isArray(r) || !r.length) return out("(no errors from the page's own code in this tab; TRIF only sees them where a mod is on or recording is on)");
+      for (const e of r) {
+        out(`[${clock(e.time)}] ${e.message}${e.source ? `  (${e.source})` : ''}`);
+        const stack = String(e.stack || '').split('\n').filter((l) => l.trim() && !l.includes(e.message)).slice(0, 8);
+        for (const l of stack) out(`    ${l.trim()}`);
+      }
+      return;
+    }
     if (!Array.isArray(r) || !r.length) return out('(no mod errors in this tab)');
     for (const e of r) {
       out(`[${clock(e.time)}] ${e.mod}: ${e.message}`);
@@ -742,8 +760,8 @@ const handlers = {
     text = text.replace(/\{\{site\}\}/g, site).replace(/\{\{mod\}\}/g, mod).replace(/\{\{name\}\}/g, titleCase(mod));
     fs.mkdirSync(path.dirname(file), { recursive: true });
     fs.writeFileSync(file, text);
-    if (ctx.json) return printJson({ id: `${site}/${mod}`, file });
-    out(file);
+    if (ctx.json) return printJson({ id: `${site}/${mod}`, file: realFile(file) });
+    out(realFile(file));
   },
 
   async agent(ctx, pos) {
@@ -790,10 +808,17 @@ const handlers = {
     }
     fs.mkdirSync(path.dirname(dest), { recursive: true });
     fs.copyFileSync(src, dest);
-    if (ctx.json) return printJson({ id: `${site}/${mod}`, file: dest });
-    out(dest);
+    if (ctx.json) return printJson({ id: `${site}/${mod}`, file: realFile(dest) });
+    out(realFile(dest));
   },
 };
+
+// A path as the system knows it (links resolved, /tmp as /private/tmp): what `trif new` and the like print,
+// because an agent's run rules are built from the workspace's real path, and a path through a link (a
+// TRIF_HOME under /tmp, a home folder behind a link) would be refused by them.
+function realFile(file) {
+  try { return path.join(fs.realpathSync(path.dirname(file)), path.basename(file)); } catch { return file; }
+}
 
 // ---------------------------------------------------------------- mod switches
 

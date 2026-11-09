@@ -1501,6 +1501,30 @@ test('private files that reappear in the workspace during a run (an old helper\'
   await waitFor(() => !fs.existsSync(path.join(home, 'helper.log')), { message: 'helper.log moved out of the workspace' });
 });
 
+test('tabs a run opened are closed when it ends; trif close names a tab, and the user\'s own tabs stay', async () => {
+  const { home, bin } = makeHome();
+  const ext = startHost(home);
+  let next = 100;
+  const closed = [];
+  ext.handlers.open = (args) => ({ id: next++, url: args.to });
+  ext.handlers.close = (args) => { closed.push(args.tab); return { id: args.tab, url: '' }; };
+  await ext.waitForSocket();
+  // the user's own, from a terminal: not a run's
+  assert.equal((await runCli(['open', 'https://example.com/mine'], { home })).code, 0);
+  const r = await extRequest(ext, 'agent.start', { ...START, prompt: 'SLEEP' });
+  const call = await waitFor(() => callFor(bin, 'SLEEP'), { message: 'the agent to start' });
+  const env = { TRIF_RUN_TOKEN: call.env.TRIF_RUN_TOKEN, TRIF_RUN_BOX: call.env.TRIF_RUN_BOX };
+  for (const u of ['https://example.com/a', 'https://example.com/b']) assert.equal((await runCli(['open', u], { home, env })).code, 0);
+  // closing one itself: fine; and close needs a tab named
+  assert.equal((await runCli(['close', '--tab', '102'], { home, env })).code, 0);
+  assert.notEqual((await runCli(['close'], { home, env })).code, 0);
+  await extRequest(ext, 'agent.stop', { runId: r.result.runId });
+  await waitDone(ext, r.result.runId);
+  await waitFor(() => closed.includes(101), { message: 'the run\'s tab closed' });
+  assert.ok(!closed.includes(100), 'the user\'s tab stays');
+  assert.match(helperLog(home), /closed tab 101: run r\w+ opened it and has ended/);
+});
+
 test('recording a run switched on goes off when that run ends; the user\'s own recording stays', async () => {
   const { home, bin } = makeHome();
   const ext = startHost(home);

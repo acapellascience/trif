@@ -4,7 +4,7 @@ Measures what limits X-Flyer's frame rate (x.com/space-shooter), state by state,
 every change to the game. Opt-in: not part of `npm test` (nothing here is named `*.test.js`).
 
 ```sh
-node tests/perf/xflyer.js                                   # Tim's live X-Flyer, alone and with his X mods
+node tests/perf/xflyer.js                                   # your live X-Flyer, alone and with your X mods
 node tests/perf/xflyer.js path/to/space-shooter.js          # another copy (a patched one, examples/…), same company
 node tests/perf/xflyer.js a.js b.js c.js                    # X-Flyer (the first) with exactly these mods
 node tests/perf/xflyer.js --states fire,boss --sizes laptop --configs all --runs 3
@@ -48,7 +48,7 @@ In `tests/perf/.work/<time>/` (or `--out`):
   Detox Timeline's filter but not for a game that blasts words, avatars and photos, so this one is built
   the way X builds its page: React Native Web's atomic classes inserted into `#react-native-stylesheet` as
   they're first used (about 1,300 rules), X's inline colours, light mode (so the theme translator works,
-  as it does for Tim; `?theme=dark` to have it idle), the left nav, the sticky tabs and composer, the
+  as it does when X is in light mode; `?theme=dark` to have it idle), the left nav, the sticky tabs and composer, the
   sidebar (search, Premium, trends, who to follow), and the timeline as X's virtualised list
   (`cellInnerDiv` rows placed with `translateY`, only those within a window above and two below in the
   page, the next page fetched near the end) from a HomeLatestTimeline GraphQL response the page fetches
@@ -114,4 +114,4 @@ stand-in's own list grows as it loads more posts. It reports the growth per minu
 Headless Chrome for Testing renders with the GPU (ANGLE on Metal, Skia Graphite, GPU compositing and
 raster), as a window does, and paces requestAnimationFrame at 60 Hz. What it doesn't have: a real display
 (no vsync from the screen; a ProMotion screen would allow 120 Hz), the browser's own UI, other tabs, and
-Tim's extensions; and sound is muted (the Web Audio graph still runs).
+your extensions; and sound is muted (the Web Audio graph still runs).

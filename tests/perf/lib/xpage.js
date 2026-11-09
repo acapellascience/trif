@@ -5,8 +5,8 @@
 // - React Native Web's markup: nested <div class="css-175oi2r r-…"> Views and <span class="css-1jxf684"> Texts,
 //   every style an atomic class inserted into <style id="react-native-stylesheet"> with insertRule as it's
 //   first used (so the sheet grows as new kinds of things render, as X's does), plus X's inline colours.
-//   Light mode (data-theme="light"), so X-Flyer's theme translator (the xlate stylesheet) is at work, as it
-//   is for Tim (?theme=dark to have it idle).
+//   Light mode (data-theme="light"), so X-Flyer's theme translator (the xlate stylesheet) is at work
+//   (?theme=dark: X in Lights out, the translator idle).
 // - The left nav (header[role=banner]), the main column (data-testid=primaryColumn) with its sticky tabs and
 //   composer, and the sidebar (data-testid=sidebarColumn: search, Premium, trends, who to follow, footer).
 // - The timeline as X's virtualised list: absolutely placed cellInnerDiv rows (transform: translateY(Npx)),

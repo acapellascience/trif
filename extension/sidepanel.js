@@ -655,12 +655,18 @@ function renderStarter() {
     const li = el('li');
     li.dataset.site = x.site;
     const name = el('span', 'starter-site', x.name);
-    const mods = el('span', 'starter-mods', x.mods.map((m) => m.name).join(', '));
-    if (x.choice === 'added') li.append(name, el('span', 'starter-state', 'Added'), mods);
+    // A site added with some of its mods left out (unticked on the setup page): which are in, which aren't.
+    const out = x.choice === 'added' ? x.mods.filter((m) => m.choice === 'skipped') : [];
+    const names = (list) => list.map((m) => m.name).join(', ');
+    const mods = el('span', 'starter-mods', out.length
+      ? `Added: ${names(x.mods.filter((m) => m.choice !== 'skipped'))}. Not added: ${names(out)}.`
+      : names(x.mods));
+    if (x.choice === 'added' && !out.length) li.append(name, el('span', 'starter-state', 'Added'), mods);
     else {
-      const add = button(starterBusy === x.site ? 'Adding…' : 'Add', null, () => addStarter(x.site));
+      const label = out.length ? 'Add the rest' : 'Add';
+      const add = button(starterBusy === x.site ? 'Adding…' : label, null, () => addStarter(x.site));
       add.disabled = !!starterBusy;
-      add.setAttribute('aria-label', `Add Tim’s mods for ${x.name}`);
+      add.setAttribute('aria-label', out.length ? `Add Tim’s other mods for ${x.name}: ${names(out)}` : `Add Tim’s mods for ${x.name}`);
       li.append(name, add, mods);
     }
     return li;
@@ -670,11 +676,11 @@ function renderStarter() {
   ui.starterErr.hidden = !err;
 }
 
-/** The site this panel is on, when Tim has mods for it that the user hasn't added. */
+/** The site this panel is on, when Tim has mods for it that the user hasn't added (all, or some left out). */
 function siteStarterOffer() {
   const st = view.status?.helper?.connected ? view.status.starter : null;
   const scope = siteScope();
-  return (scope && st?.sites?.find((x) => x.site === scope && x.choice !== 'added')) || null;
+  return (scope && st?.sites?.find((x) => x.site === scope && (x.choice !== 'added' || x.mods.some((m) => m.choice === 'skipped')))) || null;
 }
 
 function renderSiteStarter() {
@@ -687,7 +693,7 @@ function renderSiteStarter() {
   if (home && n.nextElementSibling !== home) home.before(n);
   else if (!home && n.previousElementSibling !== ui.gateErr) ui.gateErr.after(n);
   ui.siteStarterLink.textContent = starterBusy === x.site ? `Adding Tim’s mods for ${x.name}…` : `Add Tim’s mods for ${x.name}`;
-  ui.siteStarterLink.title = x.mods.map((m) => m.name).join(', ');
+  ui.siteStarterLink.title = x.mods.filter((m) => m.choice !== 'added').map((m) => m.name).join(', ');
   ui.siteStarterLink.setAttribute('aria-disabled', String(!!starterBusy));
   const err = starterError?.fromSite && starterError.site === x.site ? starterError.message : '';
   ui.siteStarterErr.textContent = err;

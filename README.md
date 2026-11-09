@@ -58,7 +58,7 @@ switches stay as they were; in Safari, install the new TRIF.app (see Safari belo
    settings** and turn on **Allow User Scripts**.
 
 4. **Pick Tim's mods, if you want them.** The same tab lists the mods Tim made for a few sites (X,
-   Google, Amazon, Instagram): tick the sites you want and click **Add these**, or **Start with none**.
+   Google, Amazon, Instagram): tick the sites (or single mods) you want and click **Add these**, or **Start with none**.
    Nothing of his is on your computer until you do, and you can add any site's later in **Settings** in
    the side panel.
 

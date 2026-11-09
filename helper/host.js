@@ -28,7 +28,7 @@ const { Logins } = require('./lib/logins');
 const agents = require('./lib/agents');
 const { updateHeld, approveHeld, heldFile } = require('./lib/held');
 const { DEFAULT_ORDER, startOffIds, startSitesOn, pendingUpdates, useNewVersion, keepMine, mergeRequest, mergeSettled, restoreMod, absorbedIds,
-  starterOffer, installStarter, chooseNoStarter, resolveSites, examplesDir } = require('./lib/preinstalled');
+  starterOffer, installStarter, chooseNoStarter, resolveSites, resolveIds, examplesDir } = require('./lib/preinstalled');
 const { readInstructions, writeInstructions, instructionsFile, MAX_LENGTH } = require('./lib/instructions');
 const { ownSock, removeStaleSockets, codeStamp } = require('./lib/helpers');
 const { loadOrigins, recordOrigins, renameOrigins, activeRuns } = require('./lib/origins');
@@ -556,13 +556,15 @@ function agentCommand(cmd, args) {
       syncMods('delete', false);
       return { id: r.id, deleted: true };
     }
-    // Tim's mods, the user's choice, site by site (the setup page, Settings, a site's panel; never a run):
-    // `sites` to add (all of them without it); `others: 'none'` records none for every site not chosen yet.
+    // Tim's mods, the user's choice (the setup page, Settings, a site's panel; never a run): `ids`, the mods
+    // ticked on the setup page (a site's others are left out), or `sites` to add every mod of not added yet
+    // (all of them without either); `others: 'none'` records none for every site not chosen yet.
     case 'shipped.install': {
-      const sites = args.sites === undefined ? 'all' : resolveSites(Array.isArray(args.sites) ? args.sites : []);
-      if (sites !== 'all' && !sites.length) throw new Error('no sites to add Tim\'s mods for');
-      const r = installStarter(ws.home, ws.modsDir, examplesDir(), sites, { othersNone: args.others === 'none' });
-      logger.info(`Tim's mods added for ${sites === 'all' ? 'every site' : sites.join(', ')}: ${r.added.length} mod(s)${r.sites.length ? `; TRIF starts on for ${r.sites.join(', ')}` : ''}`);
+      const ids = args.ids === undefined ? null : resolveIds(args.ids);
+      const sites = ids ? [] : args.sites === undefined ? 'all' : resolveSites(Array.isArray(args.sites) ? args.sites : []);
+      if (ids ? !ids.length : sites !== 'all' && !sites.length) throw new Error('nothing to add: no sites or mods of Tim\'s named');
+      const r = installStarter(ws.home, ws.modsDir, examplesDir(), sites, { ids, othersNone: args.others === 'none' });
+      logger.info(`Tim's mods added (${ids ? ids.join(', ') : sites === 'all' ? 'every site' : sites.join(', ')}): ${r.added.length} mod(s)${r.sites.length ? `; TRIF starts on for ${r.sites.join(', ')}` : ''}`);
       syncMods('Tim\'s mods', false);
       return { added: r.added, sitesOn: r.sites, starter: starterOffer(ws.home, examplesDir()) };
     }

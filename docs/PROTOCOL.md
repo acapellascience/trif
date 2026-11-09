@@ -498,12 +498,14 @@ Re-running setup is safe; run it again to update.
   others?: 'none', tab?}` / `shipped.none` to the helper, which only the user can ask for (refused from an
   agent run, like `mod.approve`). Adding a site copies its mods and offers it if it's in `SITES_ON`
   (google.com, x.com, amazon.com, instagram.com). `~/.trif/preinstalled.json` =
-  `{starter, offered, startOff, sitesOn}`: `starter` = `{"<site>": "added"|"none"}`, the user's choice (no
-  entry: not chosen, like a site a later version brings mods for, which Settings offers); a site with ids
-  in `offered` counts as added (a workspace from before 0.2.5, whose setup added every site). Only added
-  sites get new mods (off, as `PREINSTALLED` lists them) and updates. The mods message carries `starter`
+  `{starter, skipped, offered, startOff, sitesOn}`: `starter` = `{"<site>": "added"|"none"}`, the user's
+  choice (no entry: not chosen, like a site a later version brings mods for, which Settings offers); a
+  site with ids in `offered` counts as added (a workspace from before 0.2.5, whose setup added every site).
+  `skipped` = the ids of an added site's mods the user left unticked on the setup page (a box per mod):
+  never copied, by any setup or update, until the user adds them (Settings' "Add the rest", or the site's
+  link). Only added sites get new mods (off, as `PREINSTALLED` lists them) and updates. The mods message carries `starter`
   (`starterOffer`: `{chosen, sites: [{site, name, note, choice, suggested, mods: [{id, name, description,
-  on}]}]}`) for the setup page and the panel. `offered` keeps a later setup from bringing back one the user deleted
+  on, choice: "added"|"skipped"|null}]}]}`) for the setup page and the panel. `offered` keeps a later setup from bringing back one the user deleted
   (an existing file is never overwritten); `startOff` lists the copied ones that start off. The helper
   sends those mods with `startOff: true`; the extension switches each off (`disabled`) the first time it
   sees it and remembers that in chrome.storage.local `startedOff`, so afterwards the switch is the user's.
@@ -787,7 +789,7 @@ Nothing is hosted; the agent uses the user's own login/subscription.
   `{type: "agent.openModel.setKey", key}`, `{type: "agent.openModel.removeKey"}`,
   `{type: "agent.list"}`, `{type: "agent.login", agent}`, `{type: "agent.loginCode", loginId, code}`,
   `{type: "agent.loginCancel", loginId}`, `{type: "status"}`, `{type: "mod.enable", id, enabled, tab}`,
-  `{type: "mod.approve", id, tab}`, `{type: "mod.update", id, choice, site, tab}`, `{type: "mod.delete", id, site, tab}`, `{type: "mod.restore", id, site, tab}` (the tab is reloaded if the mod runs there; with `site`, the chat gets a `{role: "mod", text: "x.js was deleted.", undo: id}` line, marked `undone: true` once restored, and a "was restored (off, as before)" line), `{type: "shipped.install", sites, others?, tab?}` and `{type: "shipped.none"}` (Tim's mods: the setup page, Settings, a site's panel; with `tab`, it reloads if one of the added mods runs there), `{type: "instructions.get"}`, `{type: "instructions.set", text}`, `{type: "chat.clear", site}`, `{type: "chat.note", site, text}`. Background forwards agent commands to the
+  `{type: "mod.approve", id, tab}`, `{type: "mod.update", id, choice, site, tab}`, `{type: "mod.delete", id, site, tab}`, `{type: "mod.restore", id, site, tab}` (the tab is reloaded if the mod runs there; with `site`, the chat gets a `{role: "mod", text: "x.js was deleted.", undo: id}` line, marked `undone: true` once restored, and a "was restored (off, as before)" line), `{type: "shipped.install", ids or sites, others?, tab?}` and `{type: "shipped.none"}` (Tim's mods: the setup page, Settings, a site's panel; with `tab`, it reloads if one of the added mods runs there), `{type: "instructions.get"}`, `{type: "instructions.set", text}`, `{type: "chat.clear", site}`, `{type: "chat.note", site, text}`. Background forwards agent commands to the
   helper as native `request`s with the same cmd and relays every native `{type: "agentEvent", runId,
   event}` to all panel ports (panels ignore runs and logins they didn't start, by id).
   If the helper disconnects mid-run (or mid-login), the background sends the panel `{kind: "error"}` then
@@ -810,7 +812,7 @@ New native request commands (answered with a normal `response`):
 | `mod.delete` | `id` | `{id, deleted: true}`: moves `sites/<site>/<mod>.js` to `trash/<site>/<mod>@<UTC stamp>.js` (entries older than 30 days are removed), then re-sends the mods; also on the socket, and from a run for mods inside its scope |
 | `mod.restore` | `id` | `{id, restored: true, file}`: moves the newest trashed copy back (fails if the mod exists again, except to undo `mod.update` `new`); same rules as `mod.delete`. The extension keeps a deleted mod's switch state, so it comes back as it was |
 | `mod.update` | `id, choice: "new"\|"mine"` | a shipped mod's new version: use it or keep the user's copy (see "Updates to shipped mods"); also on the socket, not from a run |
-| `shipped.install` | `sites?, others?: "none"` | Tim's mods for these sites (scopes: x.com, google.com; all of them without `sites`): copied in, TRIF offered on for those in `SITES_ON`; `others: "none"` records none for every site not chosen yet. `{added: [ids], sitesOn: [sites newly offered], starter}` (see "Preinstalled mods"); also on the socket, not from a run |
+| `shipped.install` | `ids?` or `sites?`, `others?: "none"` | Tim's mods: `ids`, just these (ids from `PREINSTALLED`, anything else refused; a site chosen for the first time this way gets its other mods `skipped`), or every mod not added yet of these sites (scopes: x.com, google.com; all of them without either): copied in, TRIF offered on for the sites in `SITES_ON`; `others: "none"` records none for every site not chosen yet. `{added: [ids], sitesOn: [sites newly offered], starter}` (see "Preinstalled mods"); also on the socket, not from a run |
 | `shipped.none` | – | none for every site not chosen yet ("Start with none"): `{starter}`; also on the socket, not from a run |
 | `instructions.get` | | `{text, file, max}`: the user's standing instructions (`~/.trif/instructions.md`, `''` if none) |
 | `instructions.set` | `text` | same; trimmed, at most 4000 characters, empty removes the file. Not from a run |

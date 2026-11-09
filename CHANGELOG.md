@@ -16,9 +16,10 @@ needs a section here for the version it releases.
 - **X-Flyer has music**, in the mod itself: Blast the Evil Eye while you fly and Big Boss once @elonmusk
   is full size (both by Tim), then the end of Stravinsky's Firebird (Stokowski, 1940) when he explodes.
   That makes it about 2 MB, so it needs this version.
-- **You choose which of Tim's mods to add, site by site.** A new setup puts none of them on your
-  computer until you pick the sites on the setup page; add any others later in Settings in the side panel,
-  or from the link on that site's panel. If you already have Tim's mods, nothing changes.
+- **You choose which of Tim's mods to add.** A new setup puts none of them on your computer until you
+  tick them on the setup page, a box for each site and each mod. Each one you add has its own switch in
+  the side panel, and you can add the others later in Settings there, or from the link on that site's
+  panel. If you already have Tim's mods, nothing changes.
 - Detox Timeline keeps the margins beside the timeline equal when X-Flyer is installed and no game is on.
 - Amazon's Simple Home shows Amazon's own logo, sharper. Punk Fonts for X is no longer one of Tim's mods:
   if you have it, it stays as it is, without updates.

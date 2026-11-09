@@ -69,14 +69,15 @@
     font: 13px ui-monospace, SFMono-Regular, Menlo, monospace; }
   .note { font-size: 13px; }
 
-  /* Tim's mods: a site per row, with its checkbox, its name and its mods. */
-  ul.picks { margin: 0; display: grid; gap: 2px; }
-  .pick label { display: grid; grid-template-columns: auto 1fr; gap: 2px 10px; align-items: baseline; padding: 6px 0; cursor: pointer; }
-  .pick input { margin: 0; width: 16px; height: 16px; accent-color: var(--green-text); align-self: center; }
+  /* Tim's mods: a site per row, its box and name, then a box per mod. */
+  ul.picks { margin: 0; display: grid; gap: 8px; }
+  .pick label { display: inline-flex; align-items: center; gap: 8px; cursor: pointer; }
+  .pick input { margin: 0; width: 15px; height: 15px; accent-color: var(--green-text); flex: none; }
   .pick .pick-name { color: var(--text); font-weight: 600; }
   .pick .pick-note { color: var(--muted); font-weight: 400; font-size: 13px; margin-left: 6px; }
-  .pick .pick-mods { grid-column: 2; color: var(--muted); font-size: 13px; }
-  .pick .pick-mods b { color: var(--text); font-weight: 500; }
+  .pick .pick-mods { display: flex; flex-wrap: wrap; gap: 4px 16px; margin: 4px 0 0 23px; }
+  .pick .pick-mod { color: var(--muted); font-size: 13px; gap: 6px; }
+  .pick .pick-mod input { width: 13px; height: 13px; }
   .problem { color: var(--bad) !important; }
 
   /* A picture of Chrome's own switch row on TRIF's Details page, to know it when it's there (its words as

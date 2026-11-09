@@ -1091,8 +1091,10 @@ async function onPanelMessage(msg) {
     // (or records none) and sends the mods again, with the sites to turn on. From a site's panel (`tab`),
     // the tab reloads if one of them runs there now.
     case 'shipped.install': {
+      // The setup page's ticked mods (`ids`), or the sites to add every mod of (Settings, a site's link).
+      const ids = Array.isArray(msg.ids) ? [...new Set(msg.ids.map(String).filter((x) => /^\w[\w.-]*\/\w[\w.-]*$/.test(x)))].slice(0, 200) : null;
       const sites = [...new Set((Array.isArray(msg.sites) ? msg.sites : []).map((x) => scopeFor(String(x))).filter(Boolean))].slice(0, 50);
-      const r = await helperRequest('shipped.install', { sites, ...(msg.others === 'none' ? { others: 'none' } : {}) }, 60000);
+      const r = await helperRequest('shipped.install', { ...(ids ? { ids } : { sites }), ...(msg.others === 'none' ? { others: 'none' } : {}) }, 60000);
       await modsApplied;
       if (msg.tab !== undefined) {
         const tab = await chrome.tabs.get(msg.tab).catch(() => null);

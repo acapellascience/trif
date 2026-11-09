@@ -2336,15 +2336,15 @@ test('normalizeStarter: Tim\'s mods by site, cleaned up; siteNames', () => {
   assert.strictEqual(lib.normalizeStarter(null), null);
   assert.strictEqual(lib.normalizeStarter({ sites: 3 }), null);
   const r = lib.normalizeStarter({ chosen: false, sites: [
-    { site: 'www.google.com', name: 'Google', choice: 'added', suggested: true, mods: [{ id: 'www.google.com/a', name: 'A', description: 'does a', on: 1 }] },
+    { site: 'www.google.com', name: 'Google', choice: 'added', suggested: true, mods: [{ id: 'www.google.com/a', name: 'A', description: 'does a', on: 1, choice: 'skipped' }] },
     { site: 'google.com', name: 'Again', mods: [{ id: 'www.google.com/b' }] }, // (the same site twice: the first)
     { site: 'x.com', choice: 'maybe', mods: [] }, // (no mods: left out)
     { site: 'timsrobot.com', note: 'for TRIF’s own demo', mods: [{ id: 'timsrobot.com/r', name: '', description: 7 }], choice: 'none' },
     'junk',
   ] });
   assert.deepStrictEqual(r, { chosen: true, sites: [
-    { site: 'google.com', name: 'Google', note: '', choice: 'added', suggested: true, mods: [{ id: 'www.google.com/a', name: 'A', description: 'does a', on: true }] },
-    { site: 'timsrobot.com', name: 'timsrobot.com', note: 'for TRIF’s own demo', choice: 'none', suggested: false, mods: [{ id: 'timsrobot.com/r', name: 'timsrobot.com/r', description: '', on: false }] },
+    { site: 'google.com', name: 'Google', note: '', choice: 'added', suggested: true, mods: [{ id: 'www.google.com/a', name: 'A', description: 'does a', on: true, choice: 'skipped' }] },
+    { site: 'timsrobot.com', name: 'timsrobot.com', note: 'for TRIF’s own demo', choice: 'none', suggested: false, mods: [{ id: 'timsrobot.com/r', name: 'timsrobot.com/r', description: '', on: false, choice: null }] },
   ] });
   assert.deepStrictEqual(['', 'X', 'X and Google', 'X, Google and Amazon'], [[], ['X'], ['X', 'Google'], ['X', 'Google', 'Amazon']].map(lib.siteNames));
 });
@@ -2354,7 +2354,7 @@ test('background: Tim\'s mods by site come with the mods; the panel\'s choice go
   const bg = await loadBackground({ storage: { sitesOn: [] }, tabs });
   try {
     const panel = bg.connectPanel();
-    const starter = (choice) => ({ chosen: !!choice, sites: [{ site: 'x.com', name: 'X', note: '', choice, suggested: true, mods: [{ id: 'x.com/a', name: 'A', description: '', on: true }] }] });
+    const starter = (choice) => ({ chosen: !!choice, sites: [{ site: 'x.com', name: 'X', note: '', choice, suggested: true, mods: [{ id: 'x.com/a', name: 'A', description: '', on: true, choice: choice === 'added' ? 'added' : null }] }] });
     assert.strictEqual((await panel.ask({ type: 'status' })).result.starter, null, 'not connected yet: unknown');
     bg.native.emit({ type: 'mods', mods: [], sitesOn: [], starter: starter(null) });
     await settle(20);
@@ -2372,10 +2372,10 @@ test('background: Tim\'s mods by site come with the mods; the panel\'s choice go
     assert.deepStrictEqual(bg.store.sitesOn, ['x.com']);
     assert.deepStrictEqual(bg.reloaded, [5], 'the tab, where the mod runs now');
     assert.strictEqual((await panel.ask({ type: 'status' })).result.starter.sites[0].choice, 'added');
-    // The setup page's "Add these" (the rest none), and "Start with none": no tab, nothing reloads.
-    const these = panel.ask({ type: 'shipped.install', sites: ['amazon.com'], others: 'none' });
+    // The setup page's "Add these": the ticked mods (ids only; the rest none), and "Start with none": no tab, nothing reloads.
+    const these = panel.ask({ type: 'shipped.install', ids: ['amazon.com/simple-home', 'amazon.com/simple-home', '../etc', 7], sites: ['x.com'], others: 'none' });
     const req2 = await answerNative(bg.native, 'shipped.install', { added: [], sitesOn: [] });
-    assert.deepStrictEqual(req2.args, { sites: ['amazon.com'], others: 'none' });
+    assert.deepStrictEqual(req2.args, { ids: ['amazon.com/simple-home'], others: 'none' }, 'mod ids, once; nothing that isn\'t one');
     assert.strictEqual((await these).ok, true);
     const none = panel.ask({ type: 'shipped.none' });
     await answerNative(bg.native, 'shipped.none', { starter: starter('none') });

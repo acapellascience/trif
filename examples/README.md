@@ -1,7 +1,8 @@
 # Examples
 
 Ready-made mods: Tim's mods. Nothing of them is on your computer until you choose, site by site: the
-setup page in your browser has a checklist (X, Google, Amazon and Instagram ticked to start), and you can
+setup page in your browser has a checklist, a box per site and per mod (X, Google, Amazon and Instagram
+ticked to start; a mod left unticked stays off your computer, and updates don't bring it), and you can
 add any site's later in Settings in the side panel, with the "Add Tim's mods for <site>" link on that
 site's panel, or with `trif setup --examples` (every site) or `trif setup --examples x.com,google.com`
 (`--no-examples`: none). Adding a site's copies its mods in, each on or off as `PREINSTALLED` in

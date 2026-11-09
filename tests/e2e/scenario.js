@@ -21,6 +21,7 @@ const shippedFor = (site) => SHIPPED_IDS.filter((id) => siteOf(id) === site);
 // The fresh scenario picks these on the setup page, adds this one from Settings and this one with the link on
 // its own panel; an upgrade (every site it had counts as added) has the link on the site that's new since.
 const FRESH_PICKS = ['x.com', 'google.com'];
+const FRESH_LEFT_OUT = 'x.com/rainbow-rave'; // unticked under X: stays off disk, offered in Settings
 const SETTINGS_ADD = 'amazon.com';
 const LINK_SITE = { fresh: { site: 'instagram.com', host: 'www.instagram.com', name: 'Instagram' }, upgrade: { site: 'timsrobot.com', host: 'timsrobot.com', name: 'timsrobot.com' } };
 
@@ -325,7 +326,11 @@ class Scenario {
       const step = document.querySelector('#step-starter');
       return { state: step.querySelector('.state').textContent, now: step.classList.contains('now'), done: step.classList.contains('done'),
         text: step.querySelector('.body').innerText,
-        rows: [...step.querySelectorAll('li.pick')].map((li) => ({ site: li.dataset.site, ticked: li.querySelector('input').checked, text: li.innerText })),
+        rows: [...step.querySelectorAll('li.pick')].map((li) => {
+          const box = li.querySelector('.pick-site input');
+          return { site: li.dataset.site, ticked: box.checked, mixed: box.indeterminate, text: li.innerText,
+            mods: [...li.querySelectorAll('.pick-mod')].map((m) => ({ id: m.dataset.mod, ticked: m.querySelector('input').checked, text: m.textContent })) };
+        }),
         source: step.querySelector('#starter-source')?.href || '',
         buttons: [...step.querySelectorAll('.body button')].map((b) => [b.id, b.textContent, b.disabled]) };
     }`);
@@ -354,13 +359,19 @@ class Scenario {
       if (st.rows.map((x) => x.site).join() !== sites.join()) throw new Error(`rows: ${st.rows.map((x) => x.site).join(', ')}`);
       const ticked = st.rows.filter((x) => x.ticked).map((x) => x.site);
       if (ticked.join() !== SITES_ON.join()) throw new Error(`ticked to start: ${ticked.join(', ')}`);
-      for (const want of [/None of them is on your computer until you choose/, /plain JavaScript you can read first/, /add any site’s mods later, in Settings in the TRIF (side panel|sidebar)/]) {
+      // A box per mod, every mod of a ticked site ticked.
+      for (const row of st.rows) {
+        if (row.mods.map((m) => m.id).sort().join() !== shippedFor(row.site).sort().join()) throw new Error(`${row.site}'s mods: ${JSON.stringify(row.mods)}`);
+        if (row.mixed || row.mods.some((m) => m.ticked !== row.ticked)) throw new Error(`${row.site}: ${JSON.stringify(row)}`);
+      }
+      for (const want of [/None of them is on your computer until you choose/, /plain JavaScript you can read first/,
+        /Each mod has its own switch in the TRIF (side panel|sidebar): you can turn any of them off individually, any time\. You can add the others later, in the panel’s Settings\./]) {
         if (!want.test(st.text)) throw new Error(`the step doesn't say ${want}: ${st.text}`);
       }
       if (!/github\.com\/acapellascience\/trif\/.*examples\/sites/.test(st.source)) throw new Error(`see the code: ${st.source}`);
       if (st.buttons.map((b) => b[1]).join() !== 'Add these,Start with none') throw new Error(`buttons: ${JSON.stringify(st.buttons)}`);
       const x = st.rows.find((row) => row.site === 'x.com');
-      if (!/^X\b/.test(x.text) || !/Detox Timeline, Follow status/.test(x.text) || /\(/.test(x.text)) throw new Error(`X's row: ${x.text}`);
+      if (!/^X\b/.test(x.text) || x.mods.map((m) => m.text).join() !== 'Detox Timeline,Follow status,X-Flyer,Rainbow Rave' || /\(/.test(x.text)) throw new Error(`X's row: ${JSON.stringify(x)}`);
       if (fs.existsSync(path.join(this.trif, 'sites', 'x.com')) || fs.existsSync(path.join(this.trif, 'sites', 'www.google.com'))) throw new Error('Tim\'s mods on disk before the choice');
       await this.ext(`async () => document.querySelector('#starter-add').scrollIntoView({ block: 'end' })`);
       await sleep(200);
@@ -371,6 +382,15 @@ class Scenario {
       st = await this.starterStepState();
       const now = st.rows.filter((row) => row.ticked).map((row) => row.site);
       if (now.sort().join() !== [...FRESH_PICKS].sort().join()) throw new Error(`ticked: ${now.join(', ')}`);
+      if (st.rows.some((row) => row.mods.some((m) => m.ticked !== row.ticked))) throw new Error(`a site's box didn't tick or untick its mods: ${JSON.stringify(st.rows)}`);
+      // One mod left out under X: X's box shows half-ticked.
+      await this.d.click(this.control, `#step-starter .pick-mod[data-mod="${FRESH_LEFT_OUT}"] input`);
+      st = await this.starterStepState();
+      const xr = st.rows.find((row) => row.site === 'x.com');
+      if (xr.ticked || !xr.mixed || xr.mods.find((m) => m.id === FRESH_LEFT_OUT).ticked) throw new Error(`X after unticking ${FRESH_LEFT_OUT}: ${JSON.stringify(xr)}`);
+      await this.ext(`async () => document.querySelector('#starter-add').scrollIntoView({ block: 'end' })`);
+      await sleep(200);
+      await this.shot(this.control, 'starter-setup-picked');
       await this.d.click(this.control, '#starter-add');
       const done = await this.waitSetup('Tim\'s mods ticked', (v) => v.steps[3] === 'done');
       st = await this.starterStepState();
@@ -380,6 +400,8 @@ class Scenario {
       const pre = I.readJson(path.join(this.trif, 'preinstalled.json')) || {};
       const choice = Object.fromEntries(sites.map((s) => [s, FRESH_PICKS.includes(s) ? 'added' : 'none']));
       if (JSON.stringify(pre.starter) !== JSON.stringify({ ...pre.starter, ...choice }) || Object.keys(pre.starter).length !== sites.length) throw new Error(`preinstalled.json starter: ${JSON.stringify(pre.starter)}`);
+      if (JSON.stringify(pre.skipped) !== JSON.stringify([FRESH_LEFT_OUT])) throw new Error(`preinstalled.json skipped: ${JSON.stringify(pre.skipped)}`);
+      if (fs.existsSync(path.join(this.trif, 'sites', `${FRESH_LEFT_OUT}.js`))) throw new Error(`${FRESH_LEFT_OUT} is on disk`);
       const folders = fs.readdirSync(path.join(this.trif, 'sites')).filter((f) => !['127.0.0.1', 'localhost'].includes(f)).sort();
       if (folders.join() !== 'www.google.com,x.com') throw new Error(`sites/: ${folders.join(', ')}`);
       const status = await waitFor('TRIF on for X and Google', async () => {
@@ -388,7 +410,7 @@ class Scenario {
       }, { timeoutMs: 15000 });
       const stray = status.sitesOn.filter((s) => sites.includes(s) && !FRESH_PICKS.includes(s));
       if (stray.length) throw new Error(`TRIF on for ${stray.join(', ')} too`);
-      return `"${st.state}" (${done.steps.join(',')}); sites/: ${folders.join(', ')}; on for ${status.sitesOn.join(', ')}`;
+      return `"${st.state}" (${done.steps.join(',')}); sites/: ${folders.join(', ')}; ${FRESH_LEFT_OUT} left out; on for ${status.sitesOn.join(', ')}`;
     });
   }
 
@@ -399,7 +421,7 @@ class Scenario {
       const rows = () => this.panel(`async () => {
         const e = document.querySelector('#starter');
         return { shown: !!e && e.getClientRects().length > 0, text: e?.innerText || '',
-          rows: [...document.querySelectorAll('#starter-list li')].map((li) => ({ site: li.dataset.site, added: !!li.querySelector('.starter-state'), button: li.querySelector('button')?.textContent || null, text: li.innerText })) };
+          rows: [...document.querySelectorAll('#starter-list li')].map((li) => ({ site: li.dataset.site, added: !!li.querySelector('.starter-state'), button: li.querySelector('button')?.textContent || null, text: li.innerText, mods: li.querySelector('.starter-mods')?.textContent || '' })) };
       }`);
       await this.d.click(this.panelCtx, '#settings-btn');
       let last = null;
@@ -408,13 +430,21 @@ class Scenario {
       try {
         let st = await until('Tim\'s mods in Settings', (x) => x.shown && x.rows.length === starterSites().length);
         const added = this.addedSites();
-        const wrong = st.rows.filter((x) => x.added !== added.includes(x.site) || (!x.added && x.button !== 'Add'));
+        const left = (I.readJson(path.join(this.trif, 'preinstalled.json')) || {}).skipped || [];
+        // Added: "Added"; added with a mod left out: "Add the rest", saying which; not added: "Add".
+        const partly = (site) => left.some((id) => siteOf(id) === site);
+        const expect = (site) => (!added.includes(site) ? 'Add' : partly(site) ? 'Add the rest' : null);
+        const wrong = st.rows.filter((x) => x.added !== (expect(x.site) === null) || (expect(x.site) && x.button !== expect(x.site)));
+        if (this.o.kind === 'fresh') {
+          const xr = st.rows.find((x) => x.site === 'x.com');
+          if (!/^Added: Detox Timeline, Follow status, X-Flyer\. Not added: Rainbow Rave\.$/.test(xr.mods)) throw new Error(`X in Settings: ${JSON.stringify(xr)}`);
+        }
         if (wrong.length) throw new Error(`rows: ${JSON.stringify(st.rows)} (added: ${added.join(', ')})`);
         if (!/^Tim’s mods/.test(st.text) || !/see the code/.test(st.text)) throw new Error(`the section says: ${st.text}`);
         await this.panel(`async () => document.querySelector('#starter').scrollIntoView({ block: 'center' })`);
         await sleep(300);
         await this.shot(this.panelCtx, 'starter-settings');
-        if (this.o.kind !== 'fresh') return st.rows.map((x) => `${x.site} ${x.added ? 'added' : 'Add'}`).join(', ');
+        if (this.o.kind !== 'fresh') return st.rows.map((x) => `${x.site} ${x.button || 'added'}`).join(', ');
         await this.d.click(this.panelCtx, `#starter-list li[data-site="${SETTINGS_ADD}"] button`);
         st = await until(`${SETTINGS_ADD} added`, (x) => x.rows.find((y) => y.site === SETTINGS_ADD)?.added);
         const want = shippedFor(SETTINGS_ADD);
@@ -426,7 +456,7 @@ class Scenario {
         }, { timeoutMs: 15000 });
         await sleep(300);
         await this.shot(this.panelCtx, 'starter-settings-added');
-        return `${st.rows.map((x) => `${x.site} ${x.added ? 'added' : 'Add'}`).join(', ')}; ${want.length} mods for ${SETTINGS_ADD}, TRIF on for ${e.sitesOn.join(', ')}`;
+        return `${st.rows.map((x) => `${x.site} ${x.button || 'added'}`).join(', ')}; ${want.length} mods for ${SETTINGS_ADD}, TRIF on for ${e.sitesOn.join(', ')}`;
       } finally {
         await this.d.click(this.panelCtx, '#settings-btn').catch(() => {});
         await waitFor('settings to close', async () => this.panel(`async () => document.querySelector('#settings').hidden`), { timeoutMs: 5000 }).catch(() => {});
@@ -702,11 +732,12 @@ class Scenario {
       // upgrade: every site it had); each is marked as shipped (@source), except a copy the user edited
       // before 0.1.2, when the shipped mods had no @source line yet. None for the other sites.
       const added = this.addedSites();
-      const want = SHIPPED_IDS.filter((id) => added.includes(siteOf(id)));
+      const left = (I.readJson(path.join(this.trif, 'preinstalled.json')) || {}).skipped || [];
+      const want = SHIPPED_IDS.filter((id) => added.includes(siteOf(id)) && !left.includes(id));
       const ids = new Set(list.map((m) => m.id));
       const missing = want.filter((id) => !ids.has(id));
       if (missing.length) throw new Error(`missing: ${missing.join(', ')}`);
-      const extra = SHIPPED_IDS.filter((id) => !added.includes(siteOf(id)) && ids.has(id));
+      const extra = SHIPPED_IDS.filter((id) => (!added.includes(siteOf(id)) || left.includes(id)) && ids.has(id));
       if (extra.length) throw new Error(`there, for sites not added: ${extra.join(', ')}`);
       const unmarked = want.filter((id) => !shipped.some((m) => m.id === id) && !(this.o.kind === 'upgrade' && id === 'x.com/rainbow-rave'));
       if (unmarked.length) throw new Error(`not recognised as shipped: ${unmarked.join(', ')}`);
@@ -714,8 +745,10 @@ class Scenario {
       const byId = new Map(st.mods.map((m) => [m.id, m]));
       const px = byId.get('x.com/detox-timeline');
       if (!px || px.enabled === false) throw new Error(`x.com/detox-timeline not on: ${JSON.stringify(px)}`);
-      const pf = byId.get('x.com/rainbow-rave');
-      if (!pf || pf.enabled !== false) throw new Error(`x.com/rainbow-rave should start off: ${JSON.stringify(pf)}`);
+      // A mod that starts off arrives off (ticked means on the computer, not switched on).
+      const offId = this.o.kind === 'fresh' ? 'x.com/space-shooter' : 'x.com/rainbow-rave';
+      const pf = byId.get(offId);
+      if (!pf || pf.enabled !== false) throw new Error(`${offId} should start off: ${JSON.stringify(pf)}`);
       for (const s of SITES_ON) {
         if (added.includes(s) !== (st.sitesOn || []).includes(s)) throw new Error(`TRIF is ${added.includes(s) ? 'not ' : ''}on for ${s}: ${st.sitesOn}`);
       }

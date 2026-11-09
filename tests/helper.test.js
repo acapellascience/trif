@@ -747,7 +747,17 @@ test('Tim\'s mods: none until the user chooses; shipped.install adds the sites a
   ext.send({ type: 'request', id: 'c', cmd: 'shipped.install', args: { sites: ['example.com'] } });
   assert.match((await ext.next((m) => m.type === 'response' && m.id === 'c')).error, /Tim has no mods for example\.com/);
   ext.send({ type: 'request', id: 'd', cmd: 'shipped.install', args: { sites: [] } });
-  assert.match((await ext.next((m) => m.type === 'response' && m.id === 'd')).error, /no sites/);
+  assert.match((await ext.next((m) => m.type === 'response' && m.id === 'd')).error, /nothing to add/);
+  // By mod (the setup page's ticked ones): only shipped mods' ids; a site's unticked ones left out.
+  ext.send({ type: 'request', id: 'e', cmd: 'shipped.install', args: { ids: ['www.instagram.com/desaturate', '../../etc/x'] } });
+  assert.match((await ext.next((m) => m.type === 'response' && m.id === 'e')).error, /\.\.\/\.\.\/etc\/x isn't one of Tim's mods/);
+  since = ext.messages.length;
+  ext.send({ type: 'request', id: 'f', cmd: 'shipped.install', args: { ids: ['www.instagram.com/desaturate'] } });
+  res = await ext.next((m) => m.type === 'response' && m.id === 'f', { since });
+  assert.deepStrictEqual([res.result.added, res.result.sitesOn], [['www.instagram.com/desaturate'], ['instagram.com']]);
+  const ig = res.result.starter.sites.find((x) => x.site === 'instagram.com');
+  assert.deepStrictEqual(ig.mods.filter((m) => m.choice === 'added').map((m) => m.id), ['www.instagram.com/desaturate']);
+  assert.ok(ig.mods.filter((m) => m.id !== 'www.instagram.com/desaturate').every((m) => m.choice === 'skipped'));
 
   // "Start with none": remembered, nothing on disk.
   const home2 = tempDir();

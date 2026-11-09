@@ -290,8 +290,6 @@ async function session(ctx, { size, config, variant, stateName, mode }) {
     const s0 = await p();
     rec.startup = {
       modExec: Object.fromEntries(Object.entries(s0.mods).map(([k, m]) => [k, round(m.end - m.start, 1)])),
-      // (the gap before a mod's first line ran: compiling it, mostly, after the one before it finished)
-      flyerCompileGap: (() => { const ids = Object.keys(s0.mods).sort((a, z) => s0.mods[a].start - s0.mods[z].start), i = ids.indexOf('x.com/space-shooter'); return i > 0 ? round(s0.mods[ids[i]].start - s0.mods[ids[i - 1]].end, 1) : round(s0.mods[ids[i]]?.start, 1); })(),
       ready: round(s0.logs.find(([, , t]) => t.startsWith('space shooter ready'))?.[0], 1),
       keyToFirstFrame: s0.keyAt.length && s0.firstShip ? round(s0.firstShip - s0.keyAt[0], 1) : null,
       wrapped: s0.logs.find(([, , t]) => t.startsWith('space shooter on'))?.[2],
@@ -300,7 +298,7 @@ async function session(ctx, { size, config, variant, stateName, mode }) {
       await sleep(2500);
       const prof = await profileStop(b);
       const { events, bytes } = await traceEnd(b);
-      rec.windows.startup = { trace: traceSummary(events), profile: profileSummary(prof), traceMB: round(bytes / 1048576, 1), compile: compileEvents(events) };
+      rec.windows.startup = { trace: traceSummary(events), profile: profileSummary(prof), traceMB: round(bytes / 1048576, 1) };
       return rec;
     }
     if (!state.trigger) { // steady: settle, then frames, then a trace, then a profile, each its own window
@@ -375,16 +373,6 @@ function busyElsewhere(ownProfile) {
   for (const [cpu, name] of others) by[name] = (by[name] || 0) + cpu;
   const top = Object.entries(by).sort((a, z) => z[1] - a[1]).slice(0, 4).map(([n, c]) => `${n} ${Math.round(c)}%`);
   return { loadavg: round(os.loadavg()[0], 1), otherCpu: Math.round(others.reduce((a, [c]) => a + c, 0)), top };
-}
-
-function compileEvents(events) {
-  const out = [];
-  for (const e of events) {
-    const url = e.args?.data?.url || e.args?.fileName || '';
-    if (!/space-shooter/.test(url)) continue;
-    if (e.ph === 'X' && e.dur > 200) out.push({ name: e.name, ms: round(e.dur / 1000, 1) });
-  }
-  return out.slice(0, 20);
 }
 
 function loafSummary(list, secs) {
@@ -462,6 +450,8 @@ function summarise(records) {
     // the mod's hottest functions: mean self time across the profiled runs
     const fn = new Map();
     for (const p of g.profiles) for (const f of p.top) { const k = `${f.fn} ${f.url}:${f.line}`; fn.set(k, (fn.get(k) || 0) + f.ms / g.profiles.length); }
+    const under = {};
+    for (const p of g.profiles) for (const [k, ms] of Object.entries(p.underMod || {})) under[k] = round((under[k] || 0) + ms / g.profiles.length, 2);
     const modFn = new Map();
     for (const p of g.profiles) for (const f of p.modTotal) { const k = `${f.fn} ${f.url}:${f.line}`; const e = modFn.get(k) || { self: 0, total: 0 }; e.self += f.ms / g.profiles.length; e.total += f.total / g.profiles.length; modFn.set(k, e); }
     out.push({
@@ -476,6 +466,7 @@ function summarise(records) {
       layout: g.traces.length ? { perS: med(g.traces, (t) => t.layouts?.perSecond), msPerS: med(g.traces, (t) => t.layouts?.msPerSecond) } : null,
       forcedMs: med(g.traces, (t) => t.forcedStyleLayoutMs || 0),
       topEvents: g.traces[0]?.topEvents?.slice(0, 8),
+      perMod: under, // (ms per second spent in each mod's code and whatever it called)
       topFunctions: [...fn].sort((a, z) => z[1] - a[1]).slice(0, 8).map(([k, ms]) => `${k} ${round(ms, 2)}ms/s`),
       modFunctions: [...modFn].sort((a, z) => z[1].total - a[1].total).slice(0, 12).map(([k, e]) => `${k} total ${round(e.total, 2)} self ${round(e.self, 2)} ms/s`),
     });
@@ -490,12 +481,13 @@ const biggest = (s) => {
   return `${top}${fn ? `; ${fn}` : ''}`;
 };
 function table(summary) {
-  const rows = ['| size | mods | variant | state | fps | fps (median frame) | p95 ms | p99 ms | >50 ms | main thread ms/s: script / style / layout / prepaint+paint / composite / gc | style recalcs/s (elements) | biggest cost |',
-    '|---|---|---|---|---|---|---|---|---|---|---|---|'];
+  const rows = ['| size | mods | variant | state | fps | fps (median frame) | p95 ms | p99 ms | >50 ms | main thread busy ms/s | of it: script / canvas / hittest / style / layout / prepaint+paint / composite / gc | GPU main thread ms/s | style recalcs/s (elements) | biggest cost |',
+    '|---|---|---|---|---|---|---|---|---|---|---|---|---|---|'];
   for (const s of summary) {
     const m = s.main || {};
-    const mt = s.mainBusy != null && Object.keys(m).length ? `${round((m.script || 0) + (m.compile || 0), 1)} / ${m.style ?? 0} / ${m.layout ?? 0} / ${round((m.prepaint || 0) + (m.paint || 0), 1)} / ${m.composite ?? 0} / ${m.gc ?? 0}` : '';
-    rows.push(`| ${s.size} | ${s.config} | ${s.variant.startsWith('@') ? path.basename(s.variant) : s.variant} | ${s.state} | ${s.fps} | ${s.fpsMedian} | ${s.p95} | ${s.p99} | ${s.long50} | ${mt} | ${s.recalc ? `${s.recalc.perS} (${s.recalc.medianElements}, max ${s.recalc.maxElements})` : ''} | ${biggest(s)} |`);
+    const mt = s.mainBusy != null && Object.keys(m).length ? `${round((m.script || 0) + (m.compile || 0), 1)} / ${m.canvas ?? 0} / ${m.hittest ?? 0} / ${m.style ?? 0} / ${m.layout ?? 0} / ${round((m.prepaint || 0) + (m.paint || 0), 1)} / ${m.composite ?? 0} / ${m.gc ?? 0}` : '';
+    const busy = Object.keys(m).length ? round(Object.values(m).reduce((a, x) => a + x, 0), 0) : '';
+    rows.push(`| ${s.size} | ${s.config} | ${s.variant.startsWith('@') ? path.basename(s.variant) : s.variant} | ${s.state} | ${s.fps} | ${s.fpsMedian} | ${s.p95} | ${s.p99} | ${s.long50} | ${busy} | ${mt} | ${s.threads?.CrGpuMain ?? ''} | ${s.recalc ? `${s.recalc.perS} (${s.recalc.medianElements}, max ${s.recalc.maxElements})` : ''} | ${biggest(s)} |`);
   }
   return rows.join('\n');
 }
@@ -524,11 +516,12 @@ async function main() {
       return;
     }
     if (o.startup) {
-      for (const size of o.sizes) for (const config of o.configs) for (let run = 0; run < o.runs; run++) {
-        const r = await session(ctx, { size, config, variant: 'none', stateName: 'fly', mode: 'startup' });
+      for (const size of o.sizes) for (const config of o.configs) for (let run = 0; run < o.runs; run++) for (const variant of o.variants) {
+        const r = await session(ctx, { size, config, variant, stateName: 'fly', mode: 'startup' });
         fs.appendFileSync(jsonl, `${JSON.stringify(r)}\n`);
-        const w = r.windows.startup;
-        log(`startup ${size} ${config} #${run + 1}: ${JSON.stringify(r.startup)} | main ${JSON.stringify(w.trace.mainMs)} | compile ${JSON.stringify(w.compile)} | mod fns ${w.profile.modTotal.slice(0, 6).map((f) => `${f.fn}:${f.line} ${f.total}`).join(', ')}`);
+        const w = r.windows.startup, secs = w.profile.seconds;
+        // (the profile's functions in ms over the whole window: page load, Shift+S, the first frames)
+        log(`startup ${size} ${config} ${variant.startsWith('@') ? path.basename(variant) : variant} #${run + 1}: ${JSON.stringify(r.startup)} | longest task ${w.trace.longestTaskMs} ms | mod functions (ms) ${w.profile.modTotal.slice(0, 8).map((f) => `${f.fn}:${f.line} ${round(f.total * secs, 0)}`).join(', ')}`);
       }
       return;
     }

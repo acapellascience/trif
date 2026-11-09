@@ -99,6 +99,8 @@ function traceSummary(events, { window } = {}) {
     const sp = spans(byThread.get(main));
     const { self, top } = selfTimes(sp);
     out.mainBusy = round(top / 1000 / secs);
+    // (the longest single task: a freeze)
+    { const stack = []; let longest = 0; for (const s of sp) { while (stack.length && stack[stack.length - 1].end <= s.ts) stack.pop(); if (!stack.length) longest = Math.max(longest, s.end - s.ts); stack.push(s); } out.longestTaskMs = round(longest / 1000, 1); }
     for (const [name, us] of self) { const k = kindOf(name); out.mainMs[k] = (out.mainMs[k] || 0) + us / 1000 / secs; }
     for (const k of Object.keys(out.mainMs)) out.mainMs[k] = round(out.mainMs[k], 2);
     out.topEvents = [...self].sort((a, b) => b[1] - a[1]).slice(0, 25).map(([n, us]) => [n, round(us / 1000 / secs, 2)]);
@@ -143,8 +145,13 @@ function profileSummary(profile, { lineOffset = 0, top = 20 } = {}) {
   for (let i = 0; i < profile.samples.length; i++) selfUs.set(profile.samples[i], (selfUs.get(profile.samples[i]) || 0) + (profile.timeDeltas[i + 1] ?? profile.timeDeltas[i] ?? 0));
   const secs = (profile.endTime - profile.startTime) / 1e6;
   const key = (cf) => `${cf.functionName || '(anonymous)'}|${cf.url}|${cf.lineNumber}`;
-  const self = new Map(), total = new Map();
+  const self = new Map(), total = new Map(), under = {};
   for (const [id, us] of selfUs) {
+    // (each sample's time to the innermost mod on its stack, whatever it called: a mod's whole cost)
+    for (let p = id; p !== undefined; p = parent.get(p)) {
+      const url = nodes.get(p).callFrame.url;
+      if (url.startsWith('trif://')) { const k = url.replace(/^trif:\/\//, ''); under[k] = (under[k] || 0) + us; break; }
+    }
     const n = nodes.get(id); if (!n) continue;
     const k = key(n.callFrame);
     self.set(k, (self.get(k) || 0) + us);
@@ -161,8 +168,9 @@ function profileSummary(profile, { lineOffset = 0, top = 20 } = {}) {
   const byUrl = {};
   for (const [k, us] of self) { const url = k.split('|')[1] || '(native/browser)'; byUrl[url] = (byUrl[url] || 0) + us / 1000 / secs; }
   for (const u of Object.keys(byUrl)) byUrl[u] = round(byUrl[u], 2);
+  for (const k of Object.keys(under)) under[k] = round(under[k] / 1000 / secs, 2);
   return {
-    seconds: round(secs, 2), byUrl,
+    seconds: round(secs, 2), byUrl, underMod: under,
     top: sorted.slice(0, top).map(fmt),
     mod: sorted.filter(([k]) => k.includes('trif://')).slice(0, top).map(fmt),
     modTotal: [...total].filter(([k]) => k.includes('trif://')).sort((a, b) => b[1] - a[1]).slice(0, top).map(([k]) => fmt([k, self.get(k) || 0])),

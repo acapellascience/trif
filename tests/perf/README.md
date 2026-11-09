@@ -9,14 +9,15 @@ node tests/perf/xflyer.js path/to/space-shooter.js          # another copy (a pa
 node tests/perf/xflyer.js a.js b.js c.js                    # X-Flyer (the first) with exactly these mods
 node tests/perf/xflyer.js --states fire,boss --sizes laptop --configs all --runs 3
 node tests/perf/xflyer.js --variants none,no-glow,no-rave   # ablations: what each feature costs
+node tests/perf/xflyer.js --variants none,@patched.js       # the live copy and a patched one, run for run
 node tests/perf/xflyer.js --startup                         # page load, Shift+S, the first frames
 node tests/perf/xflyer.js --leak 3                          # 3 minutes on Home: heap and DOM over time
 node tests/perf/xflyer.js --states list                     # the states
 ```
 
 The defaults: the live `~/.trif/sites/x.com/space-shooter.js`, with Detox Timeline, Follow status, Punk Fonts
-and Rainbow Rave from the same folder (whichever of them exist), every state, both window sizes, both
-configs, three runs. Every file is read fresh for every run, and every result records each mod's sha1 and
+and Rainbow Rave from the same folder (whichever of them exist; other mods there only when named), every
+state, both window sizes, both configs, three runs (about two hours; narrow it with the options). Every file is read fresh for every run, and every result records each mod's sha1 and
 modification time, so it's clear which version was measured. Nothing in `~/.trif` is written to.
 
 ## What it outputs
@@ -29,9 +30,13 @@ In `tests/perf/.work/<time>/` (or `--out`):
   `canvas`, the 2D canvas's recorded drawing being sent to the GPU, and `hittest`, elementsFromPoint),
   style recalcs per second and the elements they touch, and the biggest cost (the biggest kind of work,
   and the mod's function with the most time under it, file:line).
-- `summary.json`: the same with more: the other threads (compositor, GPU, raster workers), the top trace
-  events, the hottest functions overall and the mod's (self and total ms per second), Chrome's counters
-  (style recalcs, layouts, script and task time per second, heap, nodes), long animation frames.
+- `summary.json`: the same with more: the other threads (compositor, GPU, raster workers: for the canvas
+  and the page's pictures, the GPU process's main thread is where they're drawn), the top trace events, the
+  hottest functions overall and the mod's (self and total ms per second), each mod's whole time (its code
+  and what it called), Chrome's counters (style recalcs, layouts, script and task time per second, heap,
+  nodes), long animation frames, and how busy the rest of the machine was.
+- Every run notes the CPU the rest of the machine used before and after it (`load` in results.jsonl), since
+  other apps can't be stopped: compare runs from quiet stretches, and prefer the medians.
 - `results.jsonl`: every run, everything it recorded (and the mods' sha1s, the log lines around a
   transient state's trigger, startup times, errors).
 - `log.txt`: one line per run as it goes.
@@ -70,6 +75,8 @@ In `tests/perf/.work/<time>/` (or `--out`):
   the frame times). Transient states (the boss growing, the explosion, game over) are measured from the
   moment the game logs them, over fixed windows; their frame times are the median of `--runs` plain runs,
   plus one traced run and one profiled run.
+- **Variants are interleaved** run by run (A B A B…), so a machine that gets busier part way through
+  affects every variant alike.
 - **Frames**: requestAnimationFrame timestamps. **Trace**: CDP Tracing (devtools.timeline and friends),
   the main thread's self time by event, grouped into kinds; style recalcs (UpdateLayoutTree) and their
   element counts; the other threads' busy time. **Profile**: the Profiler domain at 250 µs; mod functions
@@ -81,8 +88,24 @@ In `tests/perf/.work/<time>/` (or `--out`):
 `--variants a,b,c` measures each as its own row; `a+b` combines. Each edits the mod's text as it's read
 (failing loudly if its anchor isn't there any more), or the page, or the company: see `lib/variants.js`
 (`no-xlate-scan`, `no-xlate`, `no-glow`, `no-wrap`, `no-chase`, `no-shadows`, `no-shadowblur`, `no-timeline`,
-`no-hud`, `no-shake`, `no-music`, `no-sfx`, `no-rave`, `no-detox`, `no-follow`, `no-punk`). They're for
+`no-hud`, `no-shake`, `no-music`, `no-sfx`, `no-rave`, `no-detox`, `no-follow`, `no-punk`, and drawing ones:
+`no-letters`, `no-sparks`, `no-rings`, `no-laser-draw`, `no-ship-draw`, `no-lives`, `no-telegraph-blur`,
+`no-avatar-glow`, `no-boss-ring`). They're for
 attributing cost, not fixes: an ablated game doesn't look or play the same.
+
+## Startup
+
+`--startup` traces and profiles the load of the page with the mods and X-Flyer's start (Shift+S) and first
+frames: each mod's own run time at document-start, when X-Flyer is ready, the time from Shift+S to the
+first frame of the game, the longest task (the freeze), the main thread by kind over it all, and the
+mods' functions by time. (`--variants` works here too.)
+
+## Leaks
+
+`--leak MIN` plays MIN minutes on Home (firing, scrolling) and every 15 s collects garbage and samples the JS
+heap, the nodes, the listeners, the word spans, canvases and `<style>`s; then the same with the game off
+(the page scrolled at the same speed), since the stand-in's own list grows as it loads more posts. It
+reports the growth per minute of each.
 
 ## Headless vs a real window
 

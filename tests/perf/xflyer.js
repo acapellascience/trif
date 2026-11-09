@@ -46,7 +46,6 @@ const { VARIANTS, applyVariant } = require('./lib/variants');
 
 const XDIR = path.join(os.homedir(), '.trif', 'sites', 'x.com');
 const DEFAULT_WITH = ['detox-timeline.js', 'follow-status.js', 'punk-fonts.js', 'rainbow-rave.js'].map((f) => path.join(XDIR, f));
-const GRAVITY = path.join(__dirname, '..', '..', 'site', 'demo', 'mods', 'gravity.js'); // (timsrobot.com's Gravity mode: see the gravity state)
 const SIZES = { desktop: { width: 1440, height: 900, dpr: 1 }, laptop: { width: 1280, height: 800, dpr: 2 } };
 const TRACE_CATEGORIES = ['-*', 'devtools.timeline', 'disabled-by-default-devtools.timeline', 'disabled-by-default-devtools.timeline.frame',
   'v8.execute', 'blink.user_timing', 'v8', 'disabled-by-default-v8.gc', 'toplevel', 'cc', 'viz', 'gpu', 'benchmark'];
@@ -62,7 +61,6 @@ const STATES = {
   'home-fire': { what: 'Home, upside-down timeline, firing', path: '/home', drive: { weave: true, fire: true } },
   'home-scroll': { what: 'Home, holding ↑: the timeline scrolls at you, firing', path: '/home', drive: { weave: true, fire: true, up: true } },
   chase: { what: 'avatars chasing the ship (woken first, then dodged)', path: '/perf_profile', pre: { ms: 5000, drive: { weave: true, fire: true } }, drive: { weave: true, dodge: true } },
-  gravity: { what: 'Gravity mode (timsrobot.com\'s mod): pieces fall, space bombs', path: '/perf_profile', gravity: true, keys: ['g'], drive: { weave: true, fire: true } },
   boss: { what: '@elonmusk: growing to full size (Big Boss starts), then the fight', path: '/perf_profile?elon=4', drive: { steer: true, fire: true },
     trigger: /BOSS:/, windows: { 'boss-grow': [0, 3.5], 'boss-fight': [4, 10] } },
   gameover: { what: 'the last life lost: the big explosion, YOU DIED, the restart', path: '/perf_profile', drive: { weave: true, fire: true }, events: ['tss-test-die', 'tss-test-die', 'tss-test-die'], eventGap: 2200,
@@ -70,7 +68,7 @@ const STATES = {
   explosion: { what: 'the boss explodes (Firebird starts), then the ending (on Home: the fighter rolls into the bird)', path: '/home?elon=1', events: ['tss-test-boss'], eventDelay: 0, drive: { steer: true, fire: true },
     trigger: /^boss down/, windows: { explosion: [0, 4], ending: [4, 10] } },
 };
-const ORDER = ['off', 'fly', 'fire', 'home-fire', 'home-scroll', 'chase', 'gravity', 'gameover', 'boss-grow', 'boss-fight', 'explosion', 'ending'];
+const ORDER = ['off', 'fly', 'fire', 'home-fire', 'home-scroll', 'chase', 'gameover', 'boss-grow', 'boss-fight', 'explosion', 'ending'];
 
 // ---- arguments
 function parseArgs(argv) {
@@ -176,7 +174,7 @@ function PREAMBLE(cfg) {
 // ---- keys
 const KEYS = {
   ArrowLeft: [37, 'ArrowLeft'], ArrowRight: [39, 'ArrowRight'], ArrowUp: [38, 'ArrowUp'], ArrowDown: [40, 'ArrowDown'],
-  ' ': [32, 'Space', ' '], S: [83, 'KeyS', 'S'], g: [71, 'KeyG', 'g'], x: [88, 'KeyX', 'x'], r: [82, 'KeyR', 'r'],
+  ' ': [32, 'Space', ' '], S: [83, 'KeyS', 'S'], r: [82, 'KeyR', 'r'],
 };
 async function key(b, type, k, modifiers = 0) {
   const [vk, code, text] = KEYS[k];
@@ -260,7 +258,7 @@ async function session(ctx, { size, config, variant, stateName, mode }) {
   const flyer = readMod(alt || ctx.o.mods[0], 'x.com/space-shooter');
   const others = config === 'all' ? ctx.o.mods.slice(1).map((f) => readMod(f, `x.com/${path.basename(f, '.js')}`)) : [];
   const v = applyVariant(alt ? 'none' : variant, { flyer, others }, { mortal: ctx.o.mortal });
-  const mods = [...v.others, ...(state.gravity ? [readMod(GRAVITY, 'x.com/gravity')] : []), v.flyer]
+  const mods = [...v.others, v.flyer]
     .sort((a, b) => path.basename(a.file).localeCompare(path.basename(b.file))); // (TRIF: by name, all document-start here)
   await takeLock(ctx.log);
   await waitForQuiet(ctx.log);
@@ -287,7 +285,6 @@ async function session(ctx, { size, config, variant, stateName, mode }) {
     const p = () => b.eval('JSON.stringify({ logs: __perf.logs, mods: __perf.mods, keyAt: __perf.keyAt, firstShip: __perf.firstShip, deaths: __perf.deaths, now: performance.now(), nodes: document.getElementsByTagName("*").length, words: document.getElementsByClassName("tss-w").length, rows: document.querySelectorAll("[data-testid=cellInnerDiv]").length })').then(JSON.parse);
     if (state.start !== false) {
       await press(b, 'S', 8); // Shift+S: the game starts (and, a real key press, the audio may)
-      for (const k of state.keys || []) { await sleep(600); await press(b, k); }
       if (state.events) (async () => { await sleep(state.eventDelay ?? 2500); for (const ev of state.events) { await b.eval(`dispatchEvent(new Event(${JSON.stringify(ev)}))`).catch(() => {}); await sleep(state.eventGap || 0); } })();
     }
     let drv = null;

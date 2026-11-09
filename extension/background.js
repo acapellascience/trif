@@ -8,7 +8,7 @@ import {
   firstInjectionResult, withTimeout, filterRequests, nextBackoff, chromeVersion, toolLine,
   normalizeDisabled, modAppliesTo, urlInScope, modInScope, applyStartOff, applyAbsorbed, findRenames, carryRenames, renameInOrder, normalizeModOrder, modSites,
   normalizeOffSites, offSiteName, offOnSite, hostInScope, withOffSites, scopeFor, normalizeSitesOn, siteOnFor, sitesInUse, limitToSites, applyStartSites, switchSite, fromOtherBrowser, timedUserScripts, capChat,
-  FEATURES, ModsParts, fillSameMods, storedMods, modsStorageState, modsStoragePlan,
+  FEATURES, ModsParts, fillSameMods, storedMods, modsStorageState, modsStoragePlan, SANDBOX_WORLD, SANDBOX_WORLD_CSP_ONLY, SANDBOX_CSP,
 } from './lib.js';
 import { runtimeCode } from './runtime.js';
 import { sweepPage } from './sweep.js';
@@ -251,6 +251,7 @@ async function applyModsNow() {
       // (paused: as if TRIF were on for no site, so nothing registers; each switch stays as it is)
       mods: state.mods, runtimeCode: runtimeCode(state.recording), applied: state.applied, disabled: state.disabled,
       offSites: state.offSites, recording: state.recording, sitesOn: state.paused ? [] : state.sitesOn, known: state.known,
+      canSandbox: await sandboxWorlds(),
     });
     state.applied = res.applied;
     state.known = res.known;
@@ -265,6 +266,21 @@ async function applyModsNow() {
     log('error', `applying mods failed: ${errMsg(e)}`);
   }
   return state.lastApply;
+}
+
+// SPIKE (docs/SAFE-MODS.md): TRIF's sandbox worlds, configured once per background start: their own CSP,
+// no messaging. Chrome only (Firefox's and Safari's userScripts don't give a mod a world of its own here).
+let sandboxReady = null;
+function sandboxWorlds() {
+  if (sandboxReady) return sandboxReady;
+  sandboxReady = (async () => {
+    if (FIREFOX || BROWSER === 'Safari' || typeof chrome.userScripts?.configureWorld !== 'function') return false;
+    try {
+      for (const worldId of [SANDBOX_WORLD, SANDBOX_WORLD_CSP_ONLY]) await chrome.userScripts.configureWorld({ worldId, csp: SANDBOX_CSP, messaging: false });
+      return true;
+    } catch (e) { log('warn', `sandbox world: ${errMsg(e)}`); return false; }
+  })();
+  return sandboxReady;
 }
 
 function reportApplied(res) {

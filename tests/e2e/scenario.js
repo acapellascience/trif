@@ -732,6 +732,7 @@ class Scenario {
     // (A stand-in Claude Code: only when the helper has the scratch HOME, never your real agent.)
     if (!this.o.agent && !this.o.codex && !this.o.oss && !this.o.guidance) {
       await r.check('an expired login (a stand-in Claude Code): the login notice and one plain line, not the raw error; the message back in the box', () => this.expiredLoginCheck(win));
+      await r.check('sandbox spike (Chrome): what a mod in TRIF\'s own world can reach, and the timing against the page\'s world', () => this.sandboxSpikeCheck(win));
       await r.check('a rules mod: TRIF\'s own code applies its CSS, hides, replaces and filters (also what appears later); one that would load from an address is refused, not sent', () => this.rulesModCheck(win));
       await r.check('a hijacked agent (a stand-in Claude Code): the tab it ran code in sends nothing that changes anything until it reloads, even later; its mod that posts is held by its code, whatever its header says', () => this.hijackedAgentCheck(win));
     }
@@ -1337,6 +1338,60 @@ process.exitCode = 1;
     }
   }
 
+  // ---- SPIKE: the sandboxed tier (docs/SAFE-MODS.md "Spike results"). A test mod in each world records, as
+  // data on the page (the DOM is shared), what it can reach there; the test server's log is the ground
+  // truth for the network. Plus a timing: the same 1000-element pass in TRIF's world and the page's.
+  async sandboxSpikeCheck(win) {
+    const site = '127.0.0.1';
+    const base = `http://${site}:${this.o.servers.port}`;
+    const dir = path.join(this.trif, 'sites', site);
+    const probe = (key, worldHeader) => `// ==WebMod==\n// @name Spike ${key}\n// @match *://127.0.0.1/sandbox.html*\n${worldHeader}// @run-at document-idle\n// ==/WebMod==\n` + `(() => {
+  const out = {};
+  out.pageGlobal = typeof window.__pageSecret === 'string' ? 'reachable' : 'not reachable';
+  out.fetchDefined = typeof fetch === 'function';
+  out.xhrDefined = typeof XMLHttpRequest === 'function';
+  out.clickDefined = typeof HTMLElement.prototype.click === 'function';
+  out.keyboardEventDefined = typeof KeyboardEvent === 'function';
+  const t0 = performance.now();
+  for (const el of document.querySelectorAll('.sbx-item')) { el.style.color = 'rgb(9, 9, 9)'; el.dataset.seen${key} = '1'; }
+  out.ms1000 = Math.round((performance.now() - t0) * 10) / 10;
+  try { document.getElementById('title').textContent = 'changed by ${key}'; out.dom = 'available'; } catch (e) { out.dom = 'error: ' + e.message; }
+  try { const s = document.createElement('style'); s.textContent = '#title { outline: 3px solid rgb(1, 2, 3); }'; document.head.append(s); out.style = 'available'; } catch (e) { out.style = 'error: ' + e.message; }
+  try { const c = document.createElement('canvas'); const g = c.getContext('2d'); g.fillRect(0, 0, 1, 1); out.canvas = g.getImageData(0, 0, 1, 1).data[3] === 255 ? 'available' : 'no pixels'; } catch (e) { out.canvas = 'error: ' + e.message; }
+  const tryFetch = () => { try { if (typeof fetch !== 'function') return 'fetch not there'; fetch('/e2e-spike-${key}').then(() => { out.fetchResult = 'resolved'; save(); }, (e) => { out.fetchResult = 'rejected: ' + e.message; save(); }); return 'called'; } catch (e) { return 'threw: ' + e.message; } };
+  const save = () => { document.documentElement.setAttribute('data-spike-${key}', JSON.stringify(out)); };
+  out.fetchCall = tryFetch();
+  setTimeout(() => { out.timers = 'available'; save(); }, 50);
+  save();
+})();`;
+    const files = { sandbox: path.join(dir, 'e2e-spike-sandbox.js'), csponly: path.join(dir, 'e2e-spike-csponly.js'), main: path.join(dir, 'e2e-spike-main.js') };
+    try {
+      if (this.o.browser !== 'chrome') return { status: 'skip', detail: 'Chrome only (the spike)' };
+      fs.writeFileSync(files.sandbox, probe('sandbox', '// @sandboxed\n'));
+      fs.writeFileSync(files.csponly, probe('csponly', '// @sandboxed csp-only\n'));
+      fs.writeFileSync(files.main, probe('main', ''));
+      // (they mention fetch and click, so they wait for the user's OK like any new mod that does: OK them)
+      await sleep(1500);
+      for (const k of ['sandbox', 'csponly', 'main']) await this.cli(['approve', `127.0.0.1/e2e-spike-${k}`], { timeoutMs: 20000 }).catch(() => {});
+      await waitFor('the spike mods registered', async () => {
+        const st = await this.cli(['status'], { timeoutMs: 20000 });
+        return ['sandbox', 'csponly', 'main'].every((k) => new RegExp(`e2e-spike-${k}\\s+registered`).test(st.stdout)) ? true : null;
+      }, { timeoutMs: 20000, intervalMs: 500 });
+      await this.ext(`async (id, url) => { await chrome.tabs.update(id, { url, active: true }); }`, [win.tabId, `${base}/sandbox.html`]);
+      await sleep(2500);
+      const read = async () => JSON.parse((await this.cli(['run', '--tab', String(win.tabId), `({ sandbox: document.documentElement.getAttribute('data-spike-sandbox'), csponly: document.documentElement.getAttribute('data-spike-csponly'), main: document.documentElement.getAttribute('data-spike-main') })`], { timeoutMs: 20000 })).stdout);
+      const got = await waitFor('the spike mods\' results', async () => { const o = await read(); return o.sandbox && o.csponly && o.main && /timers/.test(o.sandbox) && /timers/.test(o.csponly) ? o : null; }, { timeoutMs: 15000, intervalMs: 500 });
+      await sleep(1500); // (late fetch results)
+      const fin = await read();
+      const res = Object.fromEntries(Object.entries(fin).map(([k, v]) => [k, JSON.parse(v)]));
+      for (const k of Object.keys(res)) res[k].serverSawRequest = this.o.servers.requests.some((q) => q.url.startsWith(`/e2e-spike-${k}`));
+      fs.writeFileSync(this.r.file('sandbox-spike.json'), JSON.stringify(res, null, 2));
+      return JSON.stringify(res);
+    } finally {
+      for (const f of Object.values(files)) { try { fs.unlinkSync(f); } catch { /* gone */ } }
+    }
+  }
+
   // ---- rules mods (helper/lib/rules.js): data, run by TRIF's own code
 
   async rulesModCheck(win) {
@@ -1677,6 +1732,8 @@ say({ type: 'result', subtype: 'success', is_error: false, result: text, session
     const expected = (p) => p.level === 'warn' && ((this.helperStopped && /helper disconnected|native messaging host/i.test(String(p.text)))
       || (this.scriptsRevoked && /user scripts were turned off/.test(String(p.text))))
       // the hijacked agent's requests, which the tab lock blocked on purpose (hijackedAgentCheck)
+      // (the sandbox spike's probes: a fetch its world's CSP refuses is what it measures)
+      || /e2e-spike|Content Security Policy|sandbox\.html/i.test(String(p.text) + String(p.source || ''))
       // (Firefox doesn't say which page: after that check, a failed fetch or socket is one of those)
       || (this.hijacked && /ERR_BLOCKED_BY_CLIENT|NetworkError when attempting to fetch|Failed to fetch|establish a connection to the server at ws:\/\/[^ ]+\/e2e-socket|WebSocket connection to '[^']+\/e2e-socket|e2e-leak|e2e-nav|blocked by|CORS/i.test(String(p.text) + String(p.source || '')));
     const problems = (await this.d.consoleProblems()).filter((p) => !expected(p));

@@ -35,7 +35,7 @@ function isIgnoredName(name) {
 // Parse the `// ==WebMod==` block. Returns raw header values plus warnings; defaults are applied
 // by buildMod because they depend on the folder and file name.
 function parseHeader(code) {
-  const out = { hasHeader: false, name: null, description: null, matches: [], excludes: [], runAt: null, risk: null, source: null, version: null, rules: false, warnings: [] };
+  const out = { hasHeader: false, name: null, description: null, matches: [], excludes: [], runAt: null, risk: null, source: null, version: null, rules: false, sandboxed: null, warnings: [] };
   const lines = String(code).replace(/^﻿/, '').split(/\r?\n/);
   const start = lines.findIndex((l) => HEADER_START.test(l));
   if (start === -1) return out;
@@ -88,6 +88,11 @@ function parseHeader(code) {
       case 'rules':
         out.rules = true;
         break;
+      // `@sandboxed` (SPIKE, docs/SAFE-MODS.md): run in TRIF's own userScripts world, not the page's.
+      // `@sandboxed csp-only` is the spike's measuring variant: the same kind of world, without TRIF's prelude.
+      case 'sandboxed':
+        out.sandboxed = value.toLowerCase() === 'csp-only' ? 'csp-only' : 'yes';
+        break;
       case 'run-at': {
         const mapped = RUN_AT[value.toLowerCase()];
         if (mapped) out.runAt = mapped;
@@ -132,8 +137,9 @@ function buildMod({ site, file, code }) {
     risk: header.risk, // {tier, why} or null when the header doesn't say
     source: header.source, // 'webmods' (or 'trif') for the mods TRIF ships, else what the header says, or null
     version: header.version, // the header's @version, or null
+    ...(header.sandboxed ? { sandboxed: header.sandboxed } : {}), // (SPIKE: see `@sandboxed` above)
   };
-  const hash = sha1(JSON.stringify([meta.id, meta.name, meta.description, meta.matches, meta.excludes, meta.runAt, meta.risk, header.rules]) + '\n' + code);
+  const hash = sha1(JSON.stringify([meta.id, meta.name, meta.description, meta.matches, meta.excludes, meta.runAt, meta.risk, header.rules, header.sandboxed]) + '\n' + code);
   if (header.rules) {
     // (what runs is TRIF's code with the checked rules; throws a RulesError for the scanner to report)
     const rules = require('./rules');

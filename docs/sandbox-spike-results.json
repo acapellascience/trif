@@ -1,0 +1,46 @@
+{
+  "sandbox": {
+    "pageGlobal": "not reachable",
+    "fetchDefined": false,
+    "xhrDefined": false,
+    "clickDefined": false,
+    "keyboardEventDefined": false,
+    "ms1000": 1.1,
+    "dom": "available",
+    "style": "available",
+    "canvas": "available",
+    "fetchCall": "fetch not there",
+    "timers": "available",
+    "serverSawRequest": false
+  },
+  "csponly": {
+    "pageGlobal": "not reachable",
+    "fetchDefined": true,
+    "xhrDefined": true,
+    "clickDefined": true,
+    "keyboardEventDefined": true,
+    "ms1000": 1.2,
+    "dom": "available",
+    "style": "available",
+    "canvas": "available",
+    "fetchCall": "called",
+    "fetchResult": "rejected: Failed to fetch",
+    "timers": "available",
+    "serverSawRequest": false
+  },
+  "main": {
+    "pageGlobal": "reachable",
+    "fetchDefined": true,
+    "xhrDefined": true,
+    "clickDefined": true,
+    "keyboardEventDefined": true,
+    "ms1000": 0.7,
+    "dom": "available",
+    "style": "available",
+    "canvas": "available",
+    "fetchCall": "called",
+    "fetchResult": "resolved",
+    "timers": "available",
+    "serverSawRequest": true
+  }
+}

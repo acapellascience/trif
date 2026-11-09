@@ -133,3 +133,37 @@ What the hand-rolled patterns become, so mods don't need the page's powers for t
 4. **Sandboxed tier** for agents by default in Chrome; Firefox when it can; page tier stays for the rest.
 5. **Themes / shared styling** on top of rules (closed-world tokens, as discussed: no free text, no
    code).
+
+## Spike results (Chrome 156, Nov 2026)
+
+Built on the `sandbox-spike` branch: a `// @sandboxed` header registers the mod in a userScripts
+`USER_SCRIPT` world of TRIF's (`trif-sandbox`), configured with `configureWorld` (a restrictive CSP:
+`default-src 'none'; connect-src 'none'; …`, messaging off), with a TRIF prelude first that removes the
+network and synthetic-input APIs from the world's globals. Firefox and Safari refuse to register sandboxed
+mods (an error says so). Measured by tests/e2e/scenario.js `sandboxSpikeCheck`: three copies of one probe
+mod on a test page, in the sandbox world, in a second world with the same CSP but no prelude
+(`@sandboxed csp-only`, the spike's measuring variant), and in the page's world; the test server's request
+log is the ground truth for the network.
+
+| | sandbox world (CSP + prelude) | same CSP, no prelude | page's world (today's mods) |
+|---|---|---|---|
+| a global the page defined | not reachable | not reachable | reachable |
+| `fetch` / `XMLHttpRequest` / `.click()` / `KeyboardEvent` | not there | there | there |
+| a `fetch` to the page's own server | not attempted (no fetch) | rejected ("Failed to fetch"); server saw nothing | resolved; server saw it |
+| change the DOM, add a style element, canvas, timers | available | available | available |
+| styling 1000 elements | 1.1 ms | 1.2 ms | 0.7 ms |
+
+What this answers:
+- **The page's code is out of reach**: the world has its own globals; a page global isn't visible there.
+- **The world's CSP alone blocks `fetch` from the world** (connect-src): with the prelude's removal on
+  top, the network APIs aren't even there. The CSP is the wall; the prelude is belt and braces.
+- **What restyling needs works**: DOM, styles, canvas and timers are all there.
+- **Cost**: a little slower than the page's world on a 1000-element pass (about 0.4 ms here); not
+  measured yet on X's timeline with the real feed mods.
+
+Still open (not measured here):
+- What the page loads because of elements a sandboxed mod adds or changes (the shared DOM): the guards
+  described above are not built yet, and this spike didn't test them.
+- Navigation from the world, and frames.
+- Per-mod worlds (one world for all sandboxed mods today: they share its globals).
+- Firefox's and Safari's support; the timing on real sites.

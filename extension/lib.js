@@ -65,16 +65,36 @@ try { ${code}
 //# sourceURL=trif://${id}.js`;
 }
 
+// SPIKE (docs/SAFE-MODS.md "Spike results"): sandboxed mods run in a userScripts world of TRIF's, not the
+// page's: its own JavaScript globals (the page's aren't there), its own CSP (configureWorld, background),
+// and TRIF's prelude first, which removes the network and synthetic-input APIs from that world.
+export const SANDBOX_WORLD = 'trif-sandbox';
+export const SANDBOX_WORLD_CSP_ONLY = 'trif-sandbox-csp-only'; // (the measuring variant: no prelude)
+export const SANDBOX_CSP = "default-src 'none'; script-src 'self'; connect-src 'none'; img-src data: blob:; style-src 'unsafe-inline'; font-src data:; media-src data: blob:; worker-src 'none'; frame-src 'none'; object-src 'none'";
+
+/** TRIF's prelude for its sandbox world: the network and synthetic input, removed from the world's globals. */
+export function sandboxPrelude() {
+  const G = globalThis;
+  const gone = (obj, name) => { try { Object.defineProperty(obj, name, { value: undefined, writable: false, configurable: false }); } catch { /* already fixed */ } };
+  for (const n of ['fetch', 'XMLHttpRequest', 'WebSocket', 'EventSource', 'WebTransport', 'RTCPeerConnection', 'Worker', 'SharedWorker', 'BroadcastChannel', 'open',
+    'MouseEvent', 'PointerEvent', 'KeyboardEvent', 'InputEvent', 'TouchEvent', 'SubmitEvent', 'FocusEvent', 'WheelEvent', 'DragEvent', 'ClipboardEvent', 'CompositionEvent']) gone(G, n);
+  if (G.Navigator) for (const n of ['sendBeacon', 'clipboard', 'serviceWorker']) gone(G.Navigator.prototype, n);
+  if (G.HTMLElement) gone(G.HTMLElement.prototype, 'click');
+  if (G.HTMLFormElement) { gone(G.HTMLFormElement.prototype, 'submit'); gone(G.HTMLFormElement.prototype, 'requestSubmit'); }
+  if (G.Document) gone(G.Document.prototype, 'execCommand');
+}
+
 export function modToUserScript(mod) {
-  return {
+  const base = {
     id: mod.id,
     matches: Array.isArray(mod.matches) ? mod.matches : [],
     excludeMatches: Array.isArray(mod.excludes) ? mod.excludes : [],
-    js: [{ code: wrapModCode(mod.id, String(mod.code ?? '')) }],
     runAt: normalizeRunAt(mod.runAt),
-    world: 'MAIN',
     allFrames: false,
   };
+  if (mod.sandboxed === 'csp-only') return { ...base, js: [{ code: wrapModCode(mod.id, String(mod.code ?? '')) }], world: 'USER_SCRIPT', worldId: SANDBOX_WORLD_CSP_ONLY };
+  if (mod.sandboxed) return { ...base, js: [{ code: `(${sandboxPrelude.toString()})();` }, { code: wrapModCode(mod.id, String(mod.code ?? '')) }], world: 'USER_SCRIPT', worldId: SANDBOX_WORLD };
+  return { ...base, js: [{ code: wrapModCode(mod.id, String(mod.code ?? '')) }], world: 'MAIN' };
 }
 
 export function runtimeUserScript(code, matches = ['<all_urls>']) {
@@ -129,7 +149,7 @@ export function normalizeDisabled(value) {
  * Returns {registered, errors, applied, reset, known} (`known` null when a register or update failed, as
  * then it's unclear what's registered).
  */
-export async function syncUserScripts(us, { mods, runtimeCode, applied = {}, disabled = {}, offSites = {}, recording = [], sitesOn = null, known = null }) {
+export async function syncUserScripts(us, { mods, runtimeCode, applied = {}, disabled = {}, offSites = {}, recording = [], sitesOn = null, known = null, canSandbox = false }) {
   // sitesOn (null: no limit): mods and recording only on the sites TRIF is on for (limitToSites).
   if (sitesOn) recording = (recording || []).filter((site) => (sitesOn || []).some((s) => hostInScope(site, s)));
   const errors = [];
@@ -140,6 +160,8 @@ export async function syncUserScripts(us, { mods, runtimeCode, applied = {}, dis
     if (mod.id === RUNTIME_ID || seen.has(mod.id)) { errors.push({ id: mod.id, error: 'duplicate or reserved mod id' }); continue; }
     if (disabled[mod.id] === true) continue; // switched off: not desired, so unregistered below if registered
     if (mod.held) continue; // held for the user's approval (an agent wrote it for another site): same
+    // (SPIKE) a sandboxed mod only where TRIF can make its world; elsewhere it doesn't run at all
+    if (mod.sandboxed && !canSandbox) { errors.push({ id: mod.id, error: "sandboxed mods only run in Chrome so far (this browser can't give them a world of their own); it isn't registered" }); continue; }
     seen.add(mod.id);
     const limited = sitesOn ? limitToSites(mod, sitesOn) : mod;
     if (!limited) continue; // only on sites TRIF is off for

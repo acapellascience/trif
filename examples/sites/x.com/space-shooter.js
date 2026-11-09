@@ -12,7 +12,7 @@
 // does something on timsrobot.com or with its other mods: the robot (shooting him, his health and
 // colours, crashing into him, ROBOT DESTROYED and the ship's victory lap), the You Win screen (it needs
 // every timsrobot.com mod on), Click Fireworks' celebration, the Tilt card's pinning. On X there's no
-// robot yet, so those wait idle; blasting words, boxes and (with Gravity on) bombing pieces all work.
+// robot yet, so those wait idle; blasting words and boxes works.
 // What changed for X, each marked "X:" below:
 // - It's off until you start it (Shift+S or the rocket button), and Shift+S again puts everything back.
 //   On timsrobot.com the page is the game; on X the arrows, space and R are X's own keys the rest of the
@@ -325,7 +325,7 @@
     @property --tss-tl-ct { syntax: '<length>'; inherits: false; initial-value: 0px; }
     @property --tss-tl-cb { syntax: '<length>'; inherits: false; initial-value: 0px; }
     @property --tss-dmg { syntax: '<number>'; inherits: false; initial-value: 0; }
-    [data-tss-dead] { visibility: hidden !important; } /* blasted words, bombed pieces, the destroyed robot */
+    [data-tss-dead] { visibility: hidden !important; } /* blasted words and boxes, the destroyed robot */
     /* robot hit flash, on its parts: the <svg>'s own animation slot is Living robot's waddle and hop */
     svg.robot.tss-hurt > * { animation: tss-hurt 110ms ease-out; }
     @keyframes tss-hurt { from { filter: brightness(2.6) saturate(0.4); } to { filter: none; } }
@@ -366,13 +366,13 @@
       top: var(--tss-hud-top, 72px); height: var(--tss-hud-h, auto); box-sizing: border-box; }
     /* X: the Home timeline, upside down (see "Timeline mode"): the list is mirrored about the middle of
        its part on screen, each post flipped back upright, and clipped to that part (what's mirrored in
-       from off screen would otherwise land over the header). Not in Gravity mode: its pieces would fall up. */
+       from off screen would otherwise land over the header). */
     /* (each post is moved, not the list: X places posts by where the list is on screen, so a transform
        on the list made it draw posts far off screen, and the timeline went black) */
-    html[data-tss-on]:not([data-gm-on]) [data-tss-tl] {
+    html[data-tss-on] [data-tss-tl] {
       clip-path: inset(var(--tss-tl-ct, 0px) 0 var(--tss-tl-cb, 0px) 0) !important;
     }
-    html[data-tss-on]:not([data-gm-on]) [data-tss-tl] > [data-tss-y] { transform: translateY(var(--tss-y)) !important; }
+    html[data-tss-on] [data-tss-tl] > [data-tss-y] { transform: translateY(var(--tss-y)) !important; }
     /* X: wide windows look like narrow ones: no right-hand sidebar (Live on X, trends, who to follow), so
        the timeline stands alone with the empty strip beside it for the HUD; only while a game is on
        (html[data-tss-on]): otherwise X's own layout, in either world */
@@ -421,25 +421,25 @@
        (::after) keeps the middle dark under the icon; both under the icon (z-index -1 in the button's own
        stacking context). Dimmer while the game is off, like the cyan one. */
     /* (the little music and sound buttons beside it too, while playing: a smaller glow) */
-    html:has(.wm-rainbow-music) .tss-toggle { box-shadow: none; background-color: transparent !important;
+    html[data-tss-rave] .tss-toggle { box-shadow: none; background-color: transparent !important;
       border-color: rgba(255, 255, 255, 0.85) !important; isolation: isolate; }
-    html:has(.wm-rainbow-music) .tss-toggle::before,
-    html:has(.wm-rainbow-music) .tss-toggle::after { content: ''; position: absolute; border-radius: 50%; z-index: -1; pointer-events: none; }
-    html:has(.wm-rainbow-music) .tss-toggle::before { inset: -5px; filter: blur(5px); opacity: 0.55;
+    html[data-tss-rave] .tss-toggle::before,
+    html[data-tss-rave] .tss-toggle::after { content: ''; position: absolute; border-radius: 50%; z-index: -1; pointer-events: none; }
+    html[data-tss-rave] .tss-toggle::before { inset: -5px; filter: blur(5px); opacity: 0.55;
       background: conic-gradient(hsl(0 100% 60%), hsl(60 100% 60%), hsl(120 100% 60%), hsl(180 100% 60%),
         hsl(240 100% 60%), hsl(300 100% 60%), hsl(360 100% 60%));
       animation: tss-rave-spin 2.4s linear infinite; }
-    html:has(.wm-rainbow-music) .tss-toggle::after { inset: 0; background: rgba(0, 0, 0, 0.55); }
-    html:has(.wm-rainbow-music) .tss-toggle svg { fill: #fff; filter: drop-shadow(0 0 2px rgba(255, 255, 255, 0.6)); }
-    html[data-tss-on]:has(.wm-rainbow-music) .tss-toggle::before { inset: -8px; filter: blur(7px); opacity: 1; }
-    html[data-tss-on]:has(.wm-rainbow-music) .tss-toggle.tss-ctl::before { inset: -5px; filter: blur(4px); }
+    html[data-tss-rave] .tss-toggle::after { inset: 0; background: rgba(0, 0, 0, 0.55); }
+    html[data-tss-rave] .tss-toggle svg { fill: #fff; filter: drop-shadow(0 0 2px rgba(255, 255, 255, 0.6)); }
+    html[data-tss-on][data-tss-rave] .tss-toggle::before { inset: -8px; filter: blur(7px); opacity: 1; }
+    html[data-tss-on][data-tss-rave] .tss-toggle.tss-ctl::before { inset: -5px; filter: blur(4px); }
     @keyframes tss-rave-spin { to { rotate: 360deg; } }
     .tss-toggle.tss-ctl { width: 26px; height: 26px; bottom: 23px; }
     .tss-toggle.tss-ctl svg { width: 13px; height: 13px; fill: #fff; }
     .tss-toggle.tss-ctl[aria-pressed=false] { opacity: 0.55; }
     .tss-toggle.tss-music { right: 160px; } .tss-toggle.tss-sound { right: 70px; } /* (until placed in the strip) */
     html:not([data-tss-on]) .tss-toggle.tss-ctl { display: none !important; } /* (only while playing) */
-    /* "ROBOT DESTROYED": outside <body>, so Gravity mode leaves it hanging; its words are targets */
+    /* "ROBOT DESTROYED": outside <body>; its words are targets */
     #tss-banner { position: fixed; left: 50vw; top: 50vh; transform: translate(-50%, -50%); z-index: 2147483645;
       pointer-events: none; white-space: nowrap; }
     #tss-banner .tss-bn { display: inline-block; font: 900 clamp(40px, 9vw, 120px)/1 ui-monospace, Menlo, monospace;
@@ -647,10 +647,14 @@
             send.connect(conv); conv.connect(out);
             return send;
           };
-          verb = makeVerb(3, 1);
-          room = makeVerb(0.3, 1.4); // and a small room, for the word pops: a short tail
-          mid = makeVerb(0.8, 1.2);  // and a middling one for bombs and boxes (the long one is the robot's)
-          half = makeVerb(1.5, 1);   // and the fireworks' length, for the ship's explosion
+          // (made after the game's first frame, one a frame: made here, they held that frame back ~65 ms;
+          // a sound before then just has no reverb, and the first ones are long after)
+          const later = [() => { room = makeVerb(0.3, 1.4); }, // and a small room, for the word pops: a short tail
+            () => { verb = makeVerb(3, 1); },
+            () => { mid = makeVerb(0.8, 1.2); }, // and a middling one for bombs and boxes (the long one is the robot's)
+            () => { half = makeVerb(1.5, 1); }]; // and the fireworks' length, for the ship's explosion
+          const next = () => requestAnimationFrame(() => setTimeout(() => { const f = later.shift(); if (!f) return; try { f(); } catch {} next(); }, 0));
+          next();
 
           // Soft saturation: gives a low tone overtones a small speaker can play (a pure 50 Hz sine is
           // mostly inaudible on a laptop: what was left was the hiss, which is what sounded tinny).
@@ -681,7 +685,7 @@
       if (!decoding.has(name)) {
         const m = window.trifXFlyerMusic?.[name];
         if (!ac || !m?.base64) return Promise.reject(new Error(`no ${name} track`));
-        const bytes = Uint8Array.from(atob(m.base64), (c) => c.charCodeAt(0));
+        const bytes = typeof Uint8Array.fromBase64 === 'function' ? Uint8Array.fromBase64(m.base64) : Uint8Array.from(atob(m.base64), (c) => c.charCodeAt(0));
         decoding.set(name, ac.decodeAudioData(bytes.buffer).then((buf) => { bufs.set(name, buf); return buf; }).finally(() => { decoding.delete(name); }));
       }
       return decoding.get(name);
@@ -1061,7 +1065,7 @@
   const restoreAll = () => {
     removeBanner();
     chasers.length = 0; // X: the avatars go back in their circles (just below)
-    // words and bombed pieces come back; the robot is rebuilt separately
+    // blasted words and boxes come back; the robot is rebuilt separately
     document.querySelectorAll('[data-tss-dead]:not(svg.robot)').forEach((w) => w.removeAttribute('data-tss-dead'));
     document.querySelectorAll('[data-tss-hits]').forEach(clearDamage); // X: damaged photos and cards heal
     // Living robot listens: a rebuilt robot goes back home
@@ -1193,7 +1197,6 @@
     rings.push({ x, y, t: 0, R: 440, dur: 0.8 }, { x, y, t: 0.1, R: 300, dur: 0.7 }, { x, y, t: 0.2, R: 180, dur: 0.6 });
     shake = Math.min(shake + 16, 18);
     sfx.boom(1.5);
-    dispatchEvent(new CustomEvent('tss-blast', { detail: { x, y, radius: 300, power: 2200 } })); // (Gravity mode)
   };
   // Test hook: a `tss-test-die` event blows the ship up (as if hit), to check lives and game over.
   addEventListener('tss-test-die', () => { if (on && performance.now() >= deadUntil) blowUpShip(performance.now()); });
@@ -1245,8 +1248,6 @@
       const dx = c.x - cx, dy = c.y - cy, d = Math.hypot(dx, dy) || 1;
       c.vx = dx / d * 500; c.vy = dy / d * 500;
     }
-    // in Gravity mode the blast throws the pieces around it
-    dispatchEvent(new CustomEvent('tss-blast', { detail: { x: cx, y: cy, radius: 220, power: 1700 } }));
   };
 
   // --- Shooting the robot. His health lives here (so it works with or without Living robot): each hit
@@ -1301,8 +1302,7 @@
     }
     shake = Math.min(shake + 1.5, 20);
   };
-  // Test hook: in test mode, a `tss-test-kill` event destroys him outright (for scripted tests; bombing
-  // him from below in Gravity mode can take a while)
+  // Test hook: in test mode, a `tss-test-kill` event destroys him outright (for scripted tests)
   addEventListener('tss-test-kill', () => {
     if (!testMode()) return;
     const r = robotEl()?.getBoundingClientRect();
@@ -1345,14 +1345,13 @@
       }
       shake = 34;
       sfx.boom(1.5); // the big one (with its own aftershocks)
-      dispatchEvent(new CustomEvent('tss-blast', { detail: { x, y, radius: 320, power: 2300 } })); // Gravity mode: the big one
     } catch (err) { window.trif?.warn(String(err)); }
   }
 
   // --- Boxes (buttons, badges, the terminal window, the footer: anything with a visible background,
   // border or shadow that holds words). Their words shield them; once every word in a box is blasted
   // (and any box inside it is gone), lasers can blast the box itself, which counts as a word.
-  // Outside Gravity mode only (there, bombs remove whole pieces). R brings them back like words.
+  // R brings them back like words.
   const hasVisibleBox = (el) => {
     const cs = getComputedStyle(el);
     const bg = cs.backgroundColor.match(/[\d.]+/g);
@@ -1364,20 +1363,28 @@
   const allBoxes = (now) => { // re-scanned at most once a second, and only while lasers are flying
     if (now - boxListAt > 1000) {
       boxListAt = now;
-      boxList = [...document.body.querySelectorAll('*')].filter((el) => !/^(MAIN|SECTION|ARTICLE|HEADER|NAV)$/.test(el.tagName)
-        && !el.matches('.tss-w, #tss-hud, #tss-canvas') && el.querySelector('.tss-w') && hasVisibleBox(el));
+      const holders = new Set(); // (every element with a word in it: the words' ancestors)
+      for (const w of document.getElementsByClassName('tss-w')) for (let p = w.parentElement; p && !holders.has(p); p = p.parentElement) holders.add(p);
+      boxList = [...document.body.querySelectorAll('*')].filter((el) => holders.has(el) && !/^(MAIN|SECTION|ARTICLE|HEADER|NAV)$/.test(el.tagName)
+        && !el.matches('.tss-w, #tss-hud, #tss-canvas') && hasVisibleBox(el));
     }
     return boxList;
   };
+  let openBoxes = null; // (this frame's boxes with no live words or live boxes left in them, and their rects)
   const hitBox = (x, y, now) => {
-    const list = allBoxes(now);
+    if (!openBoxes) {
+      const list = allBoxes(now), live = list.filter((el) => el.isConnected && !el.closest('[data-tss-dead]'));
+      openBoxes = [];
+      for (const el of live) {
+        if (el.querySelector('.tss-w:not([data-tss-dead])')) continue; // still shielded by words
+        if (live.some((b) => b !== el && el.contains(b))) continue; // a box inside is still there
+        openBoxes.push({ el, r: el.getBoundingClientRect() });
+      }
+    }
     let best = null, bestArea = Infinity;
-    for (const el of list) {
-      if (el.closest('[data-tss-dead]') || !el.isConnected) continue;
-      if (el.querySelector('.tss-w:not([data-tss-dead])')) continue; // still shielded by words
-      if (list.some((b) => b !== el && el.contains(b) && !b.closest('[data-tss-dead]'))) continue; // a box inside is still there
-      const r = el.getBoundingClientRect();
+    for (const { el, r } of openBoxes) {
       if (x < r.left || x > r.right || y < r.top || y > r.bottom) continue;
+      if (el.hasAttribute('data-tss-dead')) continue; // (blasted earlier this frame)
       if (r.width * r.height < bestArea) { best = el; bestArea = r.width * r.height; }
     }
     return best;
@@ -1439,8 +1446,11 @@
   // under the bar: a point there, or a box whose middle is (and not part of the bar)
   const coveredAt = (x, y, el) => !!topCover() && y < coverBox.bottom && x >= coverBox.left && x <= coverBox.right && !(el && coverEl.contains(el));
   const coveredBox = (r, el) => coveredAt((r.left + r.right) / 2, (r.top + r.bottom) / 2, el);
+  let mediaBoxes = null; // (their boxes this frame: frame clears it with wordBoxes)
   const mediaAt = (x, y) => {
     if (coveredAt(x, y)) return null;
+    if (!mediaBoxes) { mediaBoxes = []; for (const m of document.querySelectorAll(MEDIA)) { const r = m.getBoundingClientRect(); if (r.width || r.height) mediaBoxes.push(r); } }
+    if (!mediaBoxes.some((r) => x >= r.left && x <= r.right && y >= r.top && y <= r.bottom)) return null; // (none there: no need to ask the page)
     for (const el of document.elementsFromPoint(x, y)) {
       let m = el.closest?.(MEDIA);
       if (!m) continue;
@@ -1493,7 +1503,6 @@
     }
     gone.setAttribute('data-tss-dead', '');
     graphics++; // (counted apart from words)
-    dispatchEvent(new CustomEvent('tss-blast', { detail: { x: cx, y: cy, radius: 200, power: 1600 } }));
   };
   const clearDamage = (el) => {
     el.removeAttribute('data-tss-hits'); el.removeAttribute('data-tss-dmg'); el.classList.remove('tss-hit');
@@ -1859,18 +1868,37 @@
     ctx.drawImage(shadowCv, 0, 0);
     ctx.restore();
   };
+  // The dive warning, drawn as before into a canvas covering it (and its glow), at the device's pixels;
+  // made again only when an end moves or the flash changes (two kept: on and off).
+  const telegraphSprite = (c, on2) => {
+    const dpr = devicePixelRatio || 1, t = c.telegraph;
+    const key = `${c.x.toFixed(2)},${c.y.toFixed(2)},${t.x.toFixed(2)},${t.y.toFixed(2)},${dpr}`;
+    if (c.tgKey !== key) { c.tgKey = key; c.tgOn = null; c.tgOff = null; }
+    const had = on2 ? c.tgOn : c.tgOff;
+    if (had) return had;
+    const pad = 40 + 3 + 24 / dpr + 2; // (the ring, the line's width, the glow: shadowBlur 12 reaches about 24 device pixels)
+    const l = Math.floor(Math.min(c.x, t.x) - pad), tp = Math.floor(Math.min(c.y, t.y) - pad);
+    const w = Math.ceil(Math.max(c.x, t.x) + pad) - l, h = Math.ceil(Math.max(c.y, t.y) + pad) - tp;
+    const cv = document.createElement('canvas'), g = cv.getContext('2d');
+    cv.width = Math.ceil(w * dpr); cv.height = Math.ceil(h * dpr);
+    g.setTransform(dpr, 0, 0, dpr, -l * dpr, -tp * dpr);
+    g.strokeStyle = `rgba(255, 50, 50, ${on2 ? 0.85 : 0.35})`; g.lineWidth = 3; g.setLineDash([12, 10]);
+    g.shadowColor = '#f00'; g.shadowBlur = 12;
+    g.beginPath(); g.moveTo(c.x, c.y); g.lineTo(t.x, t.y); g.stroke();
+    g.setLineDash([]);
+    g.beginPath(); g.arc(t.x, t.y, 40, 0, Math.PI * 2); g.stroke();
+    const s = { cv, l, t: tp, w, h };
+    if (on2) c.tgOn = s; else c.tgOff = s; // (by name: see setKey)
+    return s;
+  };
   const drawChasers = (now) => {
     for (const c of chasers) {
       const r = c.size / 2;
       if (c.telegraph) { // the boss's dive warning: a flashing red line to the spot, and a ring on it
         const on2 = Math.floor(now / 90) % 2;
-        ctx.save();
-        ctx.strokeStyle = `rgba(255, 50, 50, ${on2 ? 0.85 : 0.35})`; ctx.lineWidth = 3; ctx.setLineDash([12, 10]);
-        ctx.shadowColor = '#f00'; ctx.shadowBlur = 12;
-        ctx.beginPath(); ctx.moveTo(c.x, c.y); ctx.lineTo(c.telegraph.x, c.telegraph.y); ctx.stroke();
-        ctx.setLineDash([]);
-        ctx.beginPath(); ctx.arc(c.telegraph.x, c.telegraph.y, 40, 0, Math.PI * 2); ctx.stroke();
-        ctx.restore();
+        // (drawn once per flash state while neither end moves, and stamped: see telegraphSprite)
+        const s = telegraphSprite(c, on2);
+        ctx.drawImage(s.cv, s.l, s.t, s.w, s.h);
       }
       // X: with Rainbow Rave on, the boss's glow is a rainbow instead: a blurred ring of every hue, spinning
       // round him (wider while he's about to dive), and his rim is the same rainbow, sharp
@@ -2137,7 +2165,7 @@
   const startEndgame = () => {
     if (!on || endgame) return;
     endgame = { t0: performance.now(), sx: ship.x, sy: ship.y, roll: 0, bird: null, chirped: false, won: false };
-    lasers.length = 0; bombs.length = 0; rearBombs.length = 0; pickups.length = 0;
+    lasers.length = 0; rearBombs.length = 0; pickups.length = 0;
     clearKeys();
     root.setAttribute('data-tss-ending', ''); // (the timeline stays black: Bird mode restores it, see restoreStep)
     window.trif?.log('the end: the fighter rolls');
@@ -3295,7 +3323,10 @@
   const hitWord = (x, y) => {
     // (a word can only be under the point if its box is: no box there, no word, without asking the page)
     const boxes = liveWordBoxes();
-    if (!boxes.some((b) => x >= b.l && x <= b.r && y >= b.t && y <= b.b && !b.w.hasAttribute('data-tss-dead'))) return null;
+    let only = null, n = 0;
+    for (const b of boxes) if (x >= b.l && x <= b.r && y >= b.t && y <= b.b && !b.w.hasAttribute('data-tss-dead')) { only = b; if (++n > 1) break; }
+    if (!n) return null;
+    if (n === 1) return only.clipped ? null : only.w; // (the one word there: what both ways below would find)
     for (const el of document.elementsFromPoint(x, y)) {
       if (el.classList?.contains('tss-w') && !el.hasAttribute('data-tss-dead') && !shielded(el) && !coveredAt(x, y, el)) return el;
     }
@@ -3307,64 +3338,7 @@
     return null;
   };
 
-  // --- Bombs, only while Gravity mode is on (html[data-gm-on]). space drops one from the ship's belly instead of
-  // firing (only one in the air at a time); it
-  // falls, and blows up on the first piece it touches (or the floor). The piece it hits is removed
-  // (its words burst into letters; the piece itself is hidden with data-tss-dead, which Gravity mode
-  // treats as gone, and R brings back). A direct hit on the robot does BOMB_DAMAGE instead. The blast
-  // goes to Gravity mode as a `tss-blast` { x, y, radius, power } event, which flings the pieces
-  // around it (Gravity mode owns their physics).
-  const BOMB_DAMAGE = 5, BOMB_GRAVITY = 1800, BLAST_RADIUS = 170, BLAST_POWER = 1500;
-  const bombs = [];
-  const gravityOn = () => document.documentElement.hasAttribute('data-gm-on');
-  const dropBomb = (now) => {
-    // one bomb in the air at a time: the next can drop once the last has gone off (holding space drops
-    // the next one the moment it does)
-    if (bombs.length || now < deadUntil) return;
-    const vx = ((keys.ArrowRight ? 1 : 0) - (keys.ArrowLeft ? 1 : 0)) * 520 * 0.6; // carries some of the ship's motion
-    const vy = 80 + ((keys.ArrowDown ? 1 : 0) - (keys.ArrowUp ? 1 : 0)) * 420 * 0.5;
-    bombs.push({ x: ship.x, y: ship.y - 18, vx, vy, born: now });
-    sfx.bombDrop();
-  };
-  const pieceAt = (x, y) => { // a live Gravity mode piece under this point (not the robot)
-    for (const el of document.querySelectorAll('[data-gm-body]:not([data-gm-ghost])')) {
-      if (el.matches('svg.robot') || el.closest('[data-tss-dead]')) continue;
-      const r = el.getBoundingClientRect();
-      if (x >= r.left && x <= r.right && y >= r.top && y <= r.bottom) return el;
-    }
-    return null;
-  };
-  // Words that aren't Gravity mode pieces (the tagline, which hangs in place) can be bombed one by one.
-  const looseWordAt = (x, y) => {
-    for (const w of document.querySelectorAll('.tss-w:not([data-tss-dead])')) {
-      if (w.closest('[data-gm-body]') || shielded(w)) continue;
-      const r = w.getBoundingClientRect();
-      if (r.width && x >= r.left && x <= r.right && y >= r.top && y <= r.bottom && !coveredBox(r, w)) return w;
-    }
-    return null;
-  };
-  const detonate = (x, y, piece, robotHit, word) => {
-    if (word) explode(word);
-    if (piece) {
-      const words = (piece.matches('.tss-w') ? [piece] : [...piece.querySelectorAll('.tss-w:not([data-tss-dead])')]).filter((w) => !shielded(w));
-      words.forEach((w, i) => {
-        if (i < 6) explode(w); // letters fly (a few words' worth: a whole paragraph would be a blizzard)
-        else { w.setAttribute('data-tss-dead', ''); score++; }
-      });
-      piece.setAttribute('data-tss-dead', '');
-    }
-    if (robotHit) hitRobot(x, y, BOMB_DAMAGE);
-    dispatchEvent(new CustomEvent('tss-blast', { detail: { x, y, radius: BLAST_RADIUS, power: BLAST_POWER } }));
-    const COLORS = ['#ffffff', '#fff6c2', '#ffd36b', '#ff9a3c', '#ff4f4f', '#ff6bf0'];
-    for (let i = 0; i < 70; i++) { // X: (milder)
-      const a = Math.random() * Math.PI * 2, sp = 120 + Math.random() * 600;
-      bits.push({ x, y, vx: Math.cos(a) * sp, vy: Math.sin(a) * sp - 150, life: 0.4 + Math.random() * 0.7,
-        spark: true, size: 2 + Math.random() * (i < 12 ? 9 : 5), color: COLORS[i % COLORS.length] });
-    }
-    rings.push({ x, y, t: 0, R: BLAST_RADIUS * 0.8 }, { x, y, t: 0.1, R: BLAST_RADIUS * 0.45 });
-    sfx.boom(0.7);
-    shake = Math.min(shake + 5, 9);
-  };
+  // A bomb (the X key's, below), drawn nose first along its motion
   const drawBomb = (b, now) => {
     ctx.save();
     ctx.translate(b.x, b.y);
@@ -3386,25 +3360,6 @@
       ctx.beginPath(); ctx.arc(0, 6, 2.2, 0, Math.PI * 2); ctx.fill();
     }
     ctx.restore();
-  };
-  const updateBombs = (now, dt) => {
-    if (!bombs.length) return;
-    if (!gravityOn()) { bombs.length = 0; return; } // gravity switched off: they fizzle
-    const rr = robotRect();
-    for (let i = bombs.length - 1; i >= 0; i--) {
-      const b = bombs[i];
-      b.vy += BOMB_GRAVITY * dt;
-      b.x += b.vx * dt; b.y += b.vy * dt;
-      const sp = Math.hypot(b.vx, b.vy) || 1, tx = b.x + b.vx / sp * 10, ty = b.y + b.vy / sp * 10; // the nose
-      const robotHit = !!rr && tx > rr.left + rr.width * 0.1 && tx < rr.right - rr.width * 0.1 && ty > rr.top && ty < rr.bottom;
-      const piece = robotHit ? null : pieceAt(tx, ty);
-      const word = robotHit || piece ? null : looseWordAt(tx, ty);
-      if (robotHit || piece || word || ty >= H - 2) {
-        bombs.splice(i, 1);
-        detonate(tx, Math.min(ty, H - 2), piece, robotHit, word);
-      } else if (b.x < -60 || b.x > W + 60) bombs.splice(i, 1);
-      else drawBomb(b, now);
-    }
   };
 
   // --- X: rear bombs (the X key). Dropped out of the back of the ship, they fall behind it (down the screen) and
@@ -3462,7 +3417,6 @@
     rings.push({ x, y, t: 0, R: REAR_RADIUS * 1.1 }, { x, y, t: 0.1, R: REAR_RADIUS * 0.6 });
     sfx.boom(0.7);
     shake = Math.min(shake + 5, 9);
-    dispatchEvent(new CustomEvent('tss-blast', { detail: { x, y, radius: REAR_RADIUS, power: BLAST_POWER } })); // (Gravity mode)
   };
   const updateRearBombs = (now, dt) => {
     for (let i = rearBombs.length - 1; i >= 0; i--) {
@@ -3488,8 +3442,8 @@
   };
 
   // --- Victory. When the robot is destroyed, "ROBOT DESTROYED" flashes up in the middle of the screen.
-  // Each of its letters is a target like any word (lasers and bombs can blast them; it lives outside <body> so Gravity
-  // mode leaves it hanging). Once they're all gone, the ship takes over: it fires its thrusters, flies off
+  // Each of its letters is a target like any word (lasers and bombs can blast them; it lives outside <body>).
+  // Once they're all gone, the ship takes over: it fires its thrusters, flies off
   // the top of the screen, and the game resets itself (like R, plus the counters go back to zero), with
   // the ship flying back in from the bottom.
   let banner = null, leaving = 0, leaveV = 0, resetAt = 0, whooshed = false;
@@ -3597,7 +3551,7 @@
     removeWin();
     clearPowers(); // X: (power-ups, and their orbs, gone)
     if (keepPage) chasers.length = 0; else restoreAll();
-    score = 0; graphics = 0; deaths = 0; bombs.length = 0; rearBombs.length = 0; kills = noKills();
+    score = 0; graphics = 0; deaths = 0; rearBombs.length = 0; kills = noKills();
     lives = LIVES; lostLife = null; gameOverPending = false; pickups.length = 0; root.removeAttribute('data-tss-dying');
     leaving = 0; resetAt = 0; whooshed = false;
     // X: the exhaust trail goes too: kept, its last points (above the top, after the victory lap) joined the
@@ -3614,7 +3568,6 @@
   // (X: these are timsrobot.com's mods, so on X the game always just resets, until they come over.)
   const MOD_MARKS = {
     'fireworks': 'canvas[data-fw-canvas]',
-    'gravity': 'html[data-gm-ready]',
     'jelly': () => [...document.querySelectorAll('style')].some((s) => s.textContent.includes('jb-jelly')),
     'led': '.led-sign',
     'robot': 'svg.robot[data-lr]',
@@ -3638,7 +3591,7 @@
   // neon title's style (it's an <h1> in <main>, so Neon title's warm-up flicker and Rainbow Rave's
   // per-letter colours and glow apply to it), "Now go fix the internet." in the tagline's style, and a
   // small "play again?" under the buttons. Buttons that survived stay as they are; blasted ones fade
-  // back in where they belong. Gravity mode is switched off first, so everything's back in place.
+  // back in where they belong.
   let winEl = null; // { nodes: [...], faded: [...], revived: [...] } while the win is showing
   const HERO = 'main > section.hero';
   const showWin = () => {
@@ -3892,9 +3845,10 @@
     ctx.closePath();
   };
   const alongWing = (w, x) => { const t = (x - w.root[0]) / (w.tip[0] - w.root[0]); return w.root[1] + (w.tip[1] - w.root[1]) * t; };
-  const drawXFlyerHull = (now, bank, thrust, rave) => {
+  const drawXFlyerHull = (now, bank, thrust, rave, part = 'all') => { // (part: 'flames' or 'body' only, for the lives)
     const hueAt = (k) => ((now / 4 + k) % 360 + 360) % 360;
     // engine flames (the first ship's)
+    if (part !== 'body') {
     ctx.save();
     ctx.globalCompositeOperation = 'lighter';
     for (const ex of ENGINES) {
@@ -3909,6 +3863,8 @@
       ctx.beginPath(); ctx.moveTo(ex - 6, -6); ctx.quadraticCurveTo(ex - 5, -6 + len * 0.5, ex, -6 + len); ctx.quadraticCurveTo(ex + 5, -6 + len * 0.5, ex + 6, -6); ctx.fill();
     }
     ctx.restore();
+    }
+    if (part === 'flames') return;
     for (const s of [-1, 1]) {
       const lit = 0.5 - s * bank * 0.35; // (the raised side catches the light)
       // front wing: the lower level, in shadow
@@ -4114,7 +4070,7 @@
   let tlScroll = 0; // (fractions of a pixel left over between frames, see the ↑ scrolling in frame)
   const findTimeline = () => {
     // (Home, and Notifications with its tabs: the same kind of list)
-    if (!/^\/(home|notifications(\/[^/]+)?)\/?$/.test(location.pathname) || gravityOn()) return null;
+    if (!/^\/(home|notifications(\/[^/]+)?)\/?$/.test(location.pathname)) return null;
     return document.querySelector('[data-testid=primaryColumn] div:has(> [data-testid=cellInnerDiv])');
   };
   const unmirror = (list) => {
@@ -4250,11 +4206,32 @@
   // X: the lives, as little ships in a row above the buttons (unshaken). The one just lost blinks for
   // 1.5 s, then it's gone.
   // (a tiny copy of the real ship: the same drawing as the one you fly, scaled down, engines idling)
+  const miniBodies = new Map(); // (the lives' ship without its flames, per blink state, size and pixel density)
   const drawMiniShip = (x, y, s, alpha, now = performance.now()) => {
+    if (SHIP_STYLE !== 'xflyer') {
+      ctx.save(); ctx.globalAlpha = alpha; ctx.translate(x, y); ctx.scale(s, s); drawHull(now, 0, 0.35, raveOn()); ctx.restore();
+      return;
+    }
+    const dpr = devicePixelRatio || 1, k = s * dpr, blink = Math.floor(now / 500) % 2, key = `${blink}|${s}|${dpr}`;
+    let b = miniBodies.get(key);
+    if (!b) { // ship-local box: wings ±52, nose -78 to 0, plus the glows (shadowBlur is in device pixels: 24 of them)
+      const pad = 24 / k, L = -52 - pad, T = -78 - pad, Wd = 104 + 2 * pad, Ht = 78 + 2 * pad;
+      const cv = document.createElement('canvas'), g = cv.getContext('2d');
+      cv.width = Math.ceil(Wd * k); cv.height = Math.ceil(Ht * k);
+      g.setTransform(k, 0, 0, k, -L * k, -T * k);
+      const main = ctx;
+      ctx = g; try { drawXFlyerHull(now, 0, 0.35, false, 'body'); } finally { ctx = main; }
+      b = { cv, L, T };
+      miniBodies.set(key, b);
+    }
     ctx.save();
     ctx.globalAlpha = alpha;
-    ctx.translate(x, y); ctx.scale(s, s);
-    drawHull(now, 0, 0.35, raveOn());
+    // (on whole device pixels, as the drawing was: x, y are this canvas's CSS pixels)
+    const px = Math.round((x + b.L * s) * dpr) / dpr - b.L * s, py = Math.round((y + b.T * s) * dpr) / dpr - b.T * s;
+    ctx.translate(px, py); ctx.scale(s, s);
+    drawXFlyerHull(now, 0, 0.35, raveOn(), 'flames');
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.drawImage(b.cv, Math.round((px + b.L * s) * dpr), Math.round((py + b.T * s) * dpr));
     ctx.restore();
   };
   // X: extra lives, dropped by big accounts (see killChaser). A 3UP is a little blue bird that flies to you
@@ -4416,7 +4393,7 @@
     if (w) { explode(w); return true; }
     const media = !tl || (y > tlBand.top && y < tlBand.bottom) ? mediaAt(x, y) : null;
     if (media) { hitMedia(media, x, y); return true; }
-    const box = !gravityOn() ? hitBox(x, y, now) : null;
+    const box = hitBox(x, y, now);
     if (box) { explodeBox(box); return true; }
     return false;
   };
@@ -4479,7 +4456,7 @@
               if ((top - y) % 28 < 14) {
                 const media = !tl || (y > tlBand.top && y < tlBand.bottom) ? mediaAt(bx, y) : null;
                 if (media) hitMedia(media, bx, y);
-                else if (!gravityOn()) { const box = hitBox(bx, y, now); if (box) explodeBox(box); }
+                else { const box = hitBox(bx, y, now); if (box) explodeBox(box); }
               }
             }
           }
@@ -4627,7 +4604,24 @@
       Object.assign(glowZ.style, { left: `${zBox.l}px`, top: `${zBox.t}px`, width: `${zBox.r - zBox.l}px`, height: `${zBox.b - zBox.t}px` });
     }
     glowZG.setTransform(1, 0, 0, 1, 0, 0); glowZG.clearRect(0, 0, glowZ.width, glowZ.height);
-    for (const [el, f, x, y] of title) glowText(glowZG, el.textContent, f.font, f.size, x - zBox.l, y - zBox.t, parseFloat(el.style.getPropertyValue('--h')) || 0, 1, 1, 0.6);
+    for (const [el, f, x, y] of title) {
+      const s = titleGlow(el.textContent, f, parseFloat(el.style.getPropertyValue('--h')) || 0, dpr);
+      glowZG.drawImage(s.cv, (x - zBox.l) * dpr - s.half, (y - zBox.t) * dpr - s.half);
+    }
+  };
+  // (a title letter's glow, made once: glowText into a canvas just big enough for it, the letter at its middle)
+  const titleGlows = new Map();
+  const titleGlow = (ch, f, hue, dpr) => {
+    const key = `${ch}|${f.font}|${hue}|${dpr}`;
+    let s = titleGlows.get(key);
+    if (!s) {
+      const half = Math.ceil(f.size * 1.3 * dpr), cv = document.createElement('canvas'), g = cv.getContext('2d');
+      cv.width = cv.height = 2 * half;
+      glowText(g, ch, f.font, f.size, half / dpr, half / dpr, hue, 1, 1, 0.6);
+      s = { cv, half };
+      titleGlows.set(key, s);
+    }
+    return s;
   };
   // Rainbow Rave's look for the end screens (timsrobot.com's rainbow "ROBOT DESTROYED"): each letter its
   // own hue, a step around the wheel from the last, all of them rolling round it every 2.4 s, with a
@@ -4660,6 +4654,32 @@
       laserSprite = { cv, dpr };
     }
     ctx.drawImage(laserSprite.cv, l.x - 5 - LASER_PAD, l.y - LASER_PAD, laserSprite.cv.width / dpr, laserSprite.cv.height / dpr);
+  };
+  // A flying letter, drawn once (its character in its font and colour) into a little canvas and stamped
+  // from there: fillText at a new angle and size every frame made the GPU canvas rasterise every letter
+  // afresh every frame, most of the frame's drawing while firing. At 1.5× the device's pixels (letters
+  // grow to at most 1.4×), centred on the letter's middle as fillText's center/middle put it.
+  const letterSprites = new Map();
+  const LETTER_RES = 1.5;
+  const letterSprite = (ch, font, color) => {
+    const dpr = devicePixelRatio || 1, key = `${ch}|${font}|${color}|${dpr}`;
+    let s = letterSprites.get(key);
+    if (!s) {
+      if (letterSprites.size > 600) letterSprites.clear();
+      const cv = document.createElement('canvas'), g = cv.getContext('2d'), k = dpr * LETTER_RES;
+      g.font = font;
+      const m = g.measureText(ch);
+      if (!m.width) return null;
+      const hw = Math.ceil(Math.max(m.actualBoundingBoxLeft, m.actualBoundingBoxRight, m.width / 2)) + 2;
+      const hh = Math.ceil(Math.max(m.actualBoundingBoxAscent, m.actualBoundingBoxDescent)) + 2;
+      cv.width = Math.ceil(2 * hw * k); cv.height = Math.ceil(2 * hh * k);
+      g.setTransform(k, 0, 0, k, hw * k, hh * k);
+      g.font = font; g.fillStyle = color; g.textAlign = 'center'; g.textBaseline = 'middle';
+      g.fillText(ch, 0, 0);
+      s = { cv, cx: hw, cy: hh, w: 2 * hw, h: 2 * hh };
+      letterSprites.set(key, s);
+    }
+    return s;
   };
   let prev = performance.now(), raf = 0;
   const frame = (now) => {
@@ -4707,12 +4727,9 @@
         const TL_SCROLL = 650;
         if (tl && keys.ArrowUp && !winMsg) { tlScroll += TL_SCROLL * dt; const n = Math.floor(tlScroll); if (n) { tlScroll -= n; scrollBy(0, n); } } // (X: not while an end message is up)
         ship.y = Math.max(ship.h + 4, Math.min(H - 14, ship.y));
-        // space: lasers normally; in Gravity mode (where lasers can't do much) it drops bombs instead,
-        // one in the air at a time
-        // Holding space fires at most every 150 ms; each new press fires straight away, however soon
-        // after the last shot (even a tap too quick for a frame to see the key down).
-        if (gravityOn()) { if (presses || keys.space) dropBomb(now); } // (bombs: one in the air at a time)
-        else if (presses || (keys.space && now - lastShot > 150)) fire(now);
+        // space: lasers. Holding space fires at most every 150 ms; each new press fires straight away,
+        // however soon after the last shot (even a tap too quick for a frame to see the key down).
+        if (presses || (keys.space && now - lastShot > 150)) fire(now);
         if (now > safeUntil && (touchesRobot() || touchesChaser())) blowUpShip(now); // X: (or an avatar)
       }
       presses = 0; // (presses while the ship is down or on autopilot don't save up)
@@ -4728,10 +4745,8 @@
       // Tell the Living robot mod where the ship is (it chases an active ship). "Active" = flown
       // or fired in the last 5 s and not exploded.
       if (keys.ArrowLeft || keys.ArrowRight || keys.ArrowUp || keys.ArrowDown || keys.space) lastInput = now;
-      // (plus the bombs in the air, so the robot can see them coming and dodge)
       dispatchEvent(new CustomEvent('tss-ship', { detail: {
         x: ship.x, y: ship.y - ship.h * 0.45, active: !dead && !autopilot && now - lastInput < 5000,
-        bombs: bombs.map((b) => ({ x: b.x, y: b.y, vx: b.vx, vy: b.vy })), bombGravity: BOMB_GRAVITY,
         deaths } })); // (the robot greets a fresh player differently from one he's already blown up)
 
       const dpr = devicePixelRatio || 1;
@@ -4745,9 +4760,10 @@
       ctx.setTransform(dpr, 0, 0, dpr, shakeX * dpr, shakeY * dpr); // X: the game layer shakes with the timeline
       pin();
 
-      wordBoxes = null; // (measured again this frame, if a laser needs them: see hitWord)
+      wordBoxes = null; mediaBoxes = null; // (measured again this frame, if a laser needs them: see hitWord and mediaAt)
       ctx.save();
       const rr = lasers.length ? robotRect() : null;
+      openBoxes = null; // (worked out again this frame, if a laser needs them: see hitBox)
       for (let i = lasers.length - 1; i >= 0; i--) {
         const l = lasers[i];
         l.y -= 950 * dt;
@@ -4774,7 +4790,7 @@
         // X: photos, videos and link cards (outside what Timeline mode clips away)
         const media = !w && l.y > 0 && (!tl || (l.y > tlBand.top && l.y < tlBand.bottom)) ? mediaAt(l.x, l.y) : null;
         if (media) hitMedia(media, l.x, l.y);
-        const box = !w && !media && l.y > 0 && !gravityOn() ? hitBox(l.x, l.y, now) : null;
+        const box = !w && !media && l.y > 0 ? hitBox(l.x, l.y, now) : null;
         if (box) explodeBox(box);
         if (w || media || box || l.y < -40) { lasers.splice(i, 1); continue; }
         drawLaser(l);
@@ -4838,16 +4854,18 @@
           b.scale = Math.min(b.grow, b.scale + dt * 4);
           ctx.save();
           ctx.translate(b.x, b.y); ctx.rotate(b.rot); ctx.scale(b.scale, b.scale);
-          ctx.font = b.font; ctx.fillStyle = b.color;
-          ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-          ctx.fillText(b.ch, 0, 0);
+          if (b.hue == null) { const s = letterSprite(b.ch, b.font, b.color); if (s) ctx.drawImage(s.cv, -s.cx, -s.cy, s.w, s.h); }
+          else {
+            ctx.font = b.font; ctx.fillStyle = b.color;
+            ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+            ctx.fillText(b.ch, 0, 0);
+          }
           ctx.restore();
         }
       }
       ctx.globalAlpha = 1;
       // hidden while dead; blinks while safe after respawning
-      updateBombs(now, dt);
-      updateRearBombs(now, dt); // X: Z's bombs
+      updateRearBombs(now, dt); // X: the X key's bombs
       updatePickups(now, dt, !dead && !autopilot); // X: 1-ups
       updatePowers(now, dt, !dead && !autopilot); // X: power-ups, and what they fire
       drawChasers(now); // X
@@ -4861,8 +4879,7 @@
       // and counters after a gap, in yellow
       // (each line: the key, in cyan, then what it does, in pink)
       const lines = birdMode ? [['← → ↑ ↓', 'fly'], ...(canSing(now) ? [['space', 'sing']] : []), ['shift+S', 'quit']]
-        : [['← → ↑ ↓', 'fly'], ['space', gravityOn() ? 'bomb' : 'fire'], ['X', 'drop bomb']];
-      if (!birdMode && document.documentElement.hasAttribute('data-gm-ready')) lines.push(['G', 'gravity']); // the Gravity mode mod is on
+        : [['← → ↑ ↓', 'fly'], ['space', 'fire'], ['X', 'drop bomb']];
       if (!birdMode) lines.push(['R', 'restore'], ['shift+S', 'quit']);
       // (Bird mode: just your flock; no countdown, the finale simply comes)
       const stats = birdMode ? [`${flock.length} ${smallPlayer ? (flock.length === 1 ? 'friend' : 'friends') : (flock.length === 1 ? 'mutual' : 'mutuals')}\nin your flock`] : [`${score} ${score === 1 ? 'word' : 'words'} blasted`,
@@ -4875,8 +4892,14 @@
       // (free-play: "show your flock", under your flock's count, while you're flying)
       const flockBtn = !!birdMode?.free && !birdMode.end && !birdMode.back;
       const key = lines.map((l) => l.join(' ')).join('|') + '#' + stats.join('|') + (flockBtn ? '#flock' : '');
-      if (hud.dataset.key !== key) {
+      // (only the stats' numbers changed: their text in place; anything else, the panel rebuilt)
+      const shape = `${lines.map((l) => l.join(' ')).join('|')}#${stats.length}${flockBtn ? '#flock' : ''}`;
+      const statEls = hud.dataset.key !== key && hud.dataset.shape === shape ? hud.querySelectorAll('.tss-g-stats > .tss-hud-stat') : null;
+      if (statEls && statEls.length === stats.length && [...statEls].every((e) => e.childNodes.length === 1 && e.firstChild.nodeType === 3)) {
         hud.dataset.key = key;
+        stats.forEach((t, i) => { if (statEls[i].firstChild.data !== t) statEls[i].firstChild.data = t; });
+      } else if (hud.dataset.key !== key) {
+        hud.dataset.key = key; hud.dataset.shape = shape;
         // (tag names written out: see showWinNow)
         const el = (tag, cls, text) => { const d = tag === 'span' ? document.createElement('span') : document.createElement('div'); d.className = cls; if (text) d.textContent = text; return d; };
         // three groups (title, controls, stats), spread down the strip by placeHud
@@ -4900,7 +4923,7 @@
   };
 
   // --- X: starting and stopping. On: words become targets and the ship flies in from below. Off:
-  // gravity (if on) flies the page home, every blasted thing comes back, and the words are unwrapped.
+  // every blasted thing comes back, and the words are unwrapped.
   // Game over: everything comes back (words, photos, the avatars to their circles), the score goes to 0,
   // the page scrolls back to where the game started (the timeline from the top, in Timeline mode), and the
   // ship flies in from below.
@@ -4952,13 +4975,12 @@
     // (your own picture back in the side panel, if the finale took it)
     const ownPic = document.querySelector('[data-testid=SideNav_AccountSwitcher_Button] [data-testid^="UserAvatar-Container-"]');
     if (ownPic) ownPic.style.visibility = '';
-    const hadGravity = gravityOn(); // (no longer switched off for you: the page is just left to settle)
     on = false;
     root.removeAttribute('data-tss-on');
     sfx.musicStop();
     wordWatch.disconnect();
     clearKeys();
-    lasers.length = 0; bits.length = 0; rings.length = 0; bombs.length = 0; rearBombs.length = 0; pulses.length = 0; trail.length = 0;
+    lasers.length = 0; bits.length = 0; rings.length = 0; rearBombs.length = 0; pulses.length = 0; trail.length = 0;
     clearPowers();
     leaving = 0; resetAt = 0; whooshed = false; returning = false;
     shake = 0; shakeX = 0; shakeY = 0; root.style.translate = '';
@@ -4970,8 +4992,7 @@
     syncTimeline(); // X: the timeline the right way up again
     ctx.setTransform(devicePixelRatio || 1, 0, 0, devicePixelRatio || 1, 0, 0);
     ctx.clearRect(0, 0, W, H);
-    // after Gravity's pieces have flown home (they may be our word spans)
-    setTimeout(() => { if (!on) try { unwrapWords(); } catch (err) { window.trif?.warn('unwrap failed', String(err)); } }, hadGravity ? 900 : 0);
+    setTimeout(() => { if (!on) try { unwrapWords(); } catch (err) { window.trif?.warn('unwrap failed', String(err)); } }, 0);
     syncToggle();
     window.trif?.log('space shooter off');
   };
@@ -5004,7 +5025,7 @@
     if (on) stopGame(); else startGame(e); // (in the bird world, free-play Bird mode: see startGame)
   });
   syncToggle();
-  document.documentElement.append(toggle); // (on <html>, like the canvas: Gravity leaves it be)
+  document.documentElement.append(toggle); // (on <html>, like the canvas)
   // X: the way to the other world, once you've won (html[data-tss-won]): a small button in the top right
   // corner, while no game is on. In space, a white one with the blue bird (to the bird world); in the bird
   // world, a black one with the teal rocket (to space). (The button at the bottom plays this world's game.)

@@ -16,6 +16,8 @@ needs a section here for the version it releases.
 - **X-Flyer has music**, in the mod itself: Blast the Evil Eye while you fly and Big Boss once @elonmusk
   is full size (both by Tim), then the end of Stravinsky's Firebird (Stokowski, 1940) when he explodes.
   That makes it about 2 MB, so it needs this version.
+  It's also smoother: the boss fight and heavy firing stay at 60 frames a second with your other X mods
+  on. Its Gravity mode is gone (the X key's bombs stay).
 - **You choose which of Tim's mods to add.** A new setup puts none of them on your computer until you
   tick their sites on the setup page. Each mod has its own switch in the side panel; add other sites'
   later in Settings there, or from the link on that site's panel. One you deleted can be brought back in

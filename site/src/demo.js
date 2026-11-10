@@ -8,11 +8,13 @@ import { FILES, MODS, CHATS, ORDER } from './demo-files.js';
 import { HOME, homePage } from './pages.js';
 
 // The extension files the side panel loads (sidepanel.html's links and scripts, and everything they
-// import), served from the extension's folder: nothing else of it is. tests/site.test.js checks this list
-// still covers what the panel loads.
+// import). The demo has its own frozen copy of them, site/demo/panel/ (the extension's at 22383d9, the panel
+// the demo was made with), so work on the extension never changes the demo: a deploy once shipped main's
+// newer panel into the demo, and a phone holding the old files from its cache mixed the two. Nothing else of
+// the extension is served. tests/site.test.js checks this list still covers what the panel loads.
 export const EXTENSION_FILES = new Set([
   'sidepanel.html', 'sidepanel.css', 'switch.css', 'sidepanel.js', 'lib.js', 'runtime.js', 'markdown.js', 'login.js',
-  'modswitch.js', 'openmodel.js', 'sandbox.js', 'manifest.json', 'icons/robot-32.png', 'icons/robot-shaded.svg', 'icons/robot-shaded-red.svg',
+  'modswitch.js', 'openmodel.js', 'manifest.json', 'icons/robot-32.png', 'icons/robot-shaded.svg', 'icons/robot-shaded-red.svg',
 ]);
 
 const TYPES = { js: 'text/javascript; charset=utf-8', css: 'text/css; charset=utf-8', json: 'application/json; charset=utf-8',

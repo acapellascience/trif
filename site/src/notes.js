@@ -17,10 +17,9 @@ main { max-width: 680px; margin: 0 auto; padding: 32px 16px 80px; }
 .top a { color: var(--fg); text-decoration: none; font-weight: 600; display: inline-flex; align-items: center; gap: 8px; }
 .top .robot { width: 32px; height: 32px; }
 h1 { font-size: clamp(30px, 6vw, 42px); line-height: 1.15; margin: 0 0 12px; letter-spacing: -0.02em; }
-.byline { color: var(--muted); font-size: 15px; margin: 0 0 36px; }
+.byline { color: var(--muted); font-size: 18px; font-style: italic; margin: 0 0 4px; }
 .byline a { color: var(--muted); }
-.origin { margin: -28px 0 36px; font-size: 15px; }
-.origin a { color: var(--muted); }
+.date { color: var(--muted); font-size: 15px; margin: 0 0 36px; }
 h2 { font-size: 26px; line-height: 1.25; margin: 48px 0 12px; letter-spacing: -0.01em; }
 p { margin: 0 0 20px; overflow-wrap: anywhere; }
 ul { margin: 0 0 20px; padding-left: 26px; }
@@ -99,10 +98,10 @@ export function notePage(slug) {
 <article>
 <h1>${esc(n.title)}</h1>
 <p class="byline">Tim Blais (<a href="https://x.com/MasterTimBlais">@MasterTimBlais</a>)</p>
-<p class="origin">${n.x ? `<a href="${esc(n.x)}">` : ''}Originally published on X${date ? `, ${date}` : ''}${n.x ? '</a>' : ''}</p>
+${date ? `<p class="date"><time datetime="${esc(n.date)}">${date}</time></p>` : ''}
 ${parts.join('\n')}
 </article>
-<p class="source">First posted ${onX}${n.x ? '' : ' (link coming)'}. Embedded posts are pictures; click one to see it on X.</p>
+<p class="source">First posted ${onX}</p>
 </main>
 </body>
 </html>

@@ -552,24 +552,46 @@ function renderPausedAll() {
 /**
  * This tab is locked (background's tabLocks, tablock.js): the agent ran code in it, so the browser blocks
  * every request from it that changes something (posting, sending, saving) until the page is reloaded.
+ * One short line and a Reload button, so the rest of the panel stays in view; the details in the line's
+ * tooltip. Meanwhile the panel's state colour is white (body.tab-locked, sidepanel.css --paused) and the
+ * robot in the bar shows a pause sign for eyes, as the toolbar icon does.
+ * Another kind (TABLOCK-AUDIT TL-4): another tab of a site the agent ran code in, locked with it until
+ * that tab reloads, with a button to show that tab.
  */
 function renderTabLock() {
   const n = ui.tabLock;
   const lock = view.tab && (view.status?.lockedTabs || []).find((l) => l.tabId === view.tab.id);
   n.hidden = !lock;
-  if (!lock) { n.replaceChildren(); return; }
-  if (n.childElementCount) return;
+  document.body.classList.toggle('tab-locked', !!lock);
+  if (!lock) { n.replaceChildren(); delete n.dataset.kind; return; }
+  const kind = lock.kind === 'site' ? 'site' : 'code';
+  if (n.childElementCount && n.dataset.kind === kind) return;
+  n.dataset.kind = kind;
+  const line = (text, why) => {
+    const p = el('p', 'title', text);
+    p.title = why;
+    p.setAttribute('aria-description', why);
+    return p;
+  };
+  if (kind === 'site') {
+    const show = button('Show that tab', null, async () => {
+      if (lock.from == null) return;
+      try { const t = await chrome.tabs.update(lock.from, { active: true }); if (t?.windowId != null) await chrome.windows.update(t.windowId, { focused: true }); } catch { /* gone */ }
+    });
+    const why = `Your agent ran code in another ${lock.site} tab, so TRIF blocks ${lock.site}'s pages from posting, sending or saving as you until that tab reloads. Reading, scrolling, clicks and mods work as usual.`;
+    n.replaceChildren(line('Posting is paused on this site: your agent ran code in another tab.', why), show);
+    return;
+  }
   // Back to the page it was locked on if the tab is somewhere else now (a blocked page: reloading that
   // would only ask for the blocked address again), else a reload. Either way a new page: unlocked.
-  const reload = button('Reload the page', 'primary', () => {
+  const reload = button('Reload', null, () => {
     const t = view.tab;
     if (!t) return;
     let away = true;
     try { away = !hostInScope(new URL(t.url || '').hostname, lock.site); } catch { /* no URL: away */ }
     (away && /^https?:/.test(lock.url) ? chrome.tabs.update(t.id, { url: lock.url }) : chrome.tabs.reload(t.id)).catch(() => {});
   });
-  const p = el('p', null, 'Your agent ran code in this page, so TRIF has blocked anything here from posting, sending or saving as you, or opening other sites, until the page reloads. Reading, scrolling, clicks and mods work as usual.');
-  n.replaceChildren(el('p', 'title', 'Posting is paused on this tab'), p, actions(reload));
+  n.replaceChildren(line('Posting is paused: your agent ran code here.', 'Your agent ran code in this page, so TRIF has blocked anything here from posting, sending or saving as you, or opening other sites, until the page reloads. Reading, scrolling, clicks and mods work as usual.'), reload);
 }
 
 /** User scripts off: "Mods are paused", in a notice of its own above the rest (a login notice too). */

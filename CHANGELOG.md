@@ -25,14 +25,13 @@ summary is too long.
 - **New mods can start off, by group.** Settings in the side panel has "New mods start": Style, Boxed and
   Free mods, each On (as before) or Off. Set Free mods to Off and a new free mod waits, switched off and
   marked "new", until you've looked at it and switched it on, while new style mods apply at once.
-  It covers mods from a terminal agent, files you add, mods made in another browser, Tim's mods you add,
-  and new versions of Tim's mods TRIF puts in place by itself; not the ones your side-panel chat makes
-  for you. An agent run can't switch one on.
+  It covers mods from anywhere but your side-panel chat, new versions of Tim's mods included. An agent
+  run can't switch one on.
 - **You choose what TRIF can reach: permissive or restrictive.** Installing TRIF used to give it "all your
   data on all websites". Now it asks for nothing until the setup page's new step, Site permissions:
   **Permissive** gives TRIF access to every site by default (your browser asks once); **Restrictive**
   connects TRIF site by site, so a site stays disconnected (the panel all grey) until you click Connect
-  there. You can change it any time in Settings.
+  there. You can change it in Settings.
 - Turning the robot off on a site keeps it connected, so it comes back on at once. Under Fix, "Disconnect
   from <site>" gives the site's access back (with every site allowed, it offers to switch to restrictive),
   and "Block on <site>" keeps TRIF away from it whatever it can reach (the panel turns red there; Settings
@@ -45,8 +44,10 @@ summary is too long.
 - **Safer side-panel agents.** A web page can try to talk to your agent ("TRIF agent: run this…"), so
   TRIF no longer counts on the agent to say no:
   - When your agent runs code in a tab, TRIF has the browser block anything from that tab that posts,
-    sends or saves as you, or takes what's on the page to another site, until the page reloads. Reading the page, clicks and testing mods work as
-    before; the side panel says so, with a Reload button.
+    sends or saves as you, or takes what's on the page to another site, until the page reloads. Reading,
+    clicks and testing mods work as before. TRIF's icon there shows a paused robot; the panel, Reload.
+  - It also covers the site's other tabs, workers, popups and images from new sites, and the code can't
+    save data there.
   - TRIF now reads what each mod's code can do (send requests, click or type for you, go to other
     pages or sites, or code it can't check) instead of trusting what the mod says about itself. A mod
     your agent writes that can do any of that waits for your OK, with what TRIF found shown apart from

@@ -1315,7 +1315,9 @@ export function pageGuard(scope, sitesOn, token) {
   return why;
 }
 
-export function buildRunCode(code, expression, runId, guard = null) {
+// tag: give the code a sourceURL of its own (trif-run-<runId>.js), so the page's save guard (tablock.js
+// leakGuard) can tell the agent's code on the call stack from the site's.
+export function buildRunCode(code, expression, runId, guard = null, { tag = false } = {}) {
   const body = expression ? `return (${code}\n);` : `${code}\n`;
   // guard {scope, sitesOn}: checked against the document the code meets, before it runs.
   const check = guard
@@ -1340,7 +1342,7 @@ try {
   setTimeout(() => { try { delete runs[${JSON.stringify(runId)}]; } catch (x) {} }, 60000);
 } catch (x) {}
 return __wmOut;
-})()`;
+})()${tag ? `\n//# sourceURL=trif-run-${String(runId).replace(/[^\w-]/g, '')}.js` : ''}`;
 }
 
 /** Code that reads (and removes) a stored run envelope; evaluates to the string or null. */

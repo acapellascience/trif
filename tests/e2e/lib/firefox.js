@@ -160,6 +160,16 @@ class FirefoxDriver {
 
   // ---- pages
 
+  /** The icon (its 16 px URL) TRIF's toolbar button has for a tab, from Firefox's own record of it. */
+  async actionIcon(tabId) {
+    return this.chrome(`async (id, tabId) => {
+      const { ExtensionParent } = ChromeUtils.importESModule('resource://gre/modules/ExtensionParent.sys.mjs');
+      const action = ExtensionParent.apiManager.global.browserActionFor(WebExtensionPolicy.getByID(id).extension).action;
+      const icon = action.getIcon({ tabId });
+      return (icon && (icon[16] || icon[Object.keys(icon)[0]])) || null;
+    }`, [ADDON_ID, tabId]);
+  }
+
   async contexts() {
     const { contexts } = await this.bidi.send('browsingContext.getTree', { maxDepth: 0 });
     return contexts.map((c) => ({ id: c.context, url: c.url }));

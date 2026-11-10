@@ -17,7 +17,7 @@ import { SANDBOX_WORLD, SANDBOX_CSP, SETTINGS_MAX } from './sandbox.js';
 import { runtimeCode } from './runtime.js';
 import { sweepPage } from './sweep.js';
 import { captureScreenshot, stitchShots, isCopyWindow } from './screenshot.js';
-import { createTabLocks } from './tablock.js';
+import { createTabLocks, leakGuard } from './tablock.js';
 import { agentCheck, agentSiteOf, normalizeAgentSites, agentLevel, COMMAND_NEEDS } from './agentsites.js';
 
 const HOST = 'com.webmods.helper';
@@ -88,9 +88,20 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const errMsg = (e) => String(e?.message ?? e);
 
 // Tabs a side-panel agent ran code in: requests that change things are blocked there until the page is a
-// new one (tablock.js, docs/SECURITY.md). The panel shows it, with a Reload button.
-const tabLocks = createTabLocks({ chrome, log: (m) => console.log(`[TRIF] ${m}`), changed: () => notifyPanels() });
-chrome.tabs.onUpdated?.addListener((tabId, info) => { if (info.status === 'complete' || info.url) tabLocks.check(tabId).catch(() => {}); });
+// new one, and the site's own requests from its other tabs and from no tab while it is (tablock.js,
+// docs/SECURITY.md). The panel shows it, with a Reload button, and the tab's toolbar icon is the paused
+// robot meanwhile (tablock.js sets it).
+const tabLocks = createTabLocks({
+  chrome, log: (m) => console.log(`[TRIF] ${m}`), changed: () => notifyPanels(), inScope: hostInScope,
+  // (the site's saved data changed while the agent's code ran: one quiet line in its chat)
+  noted: (tabId, site) => updateChat(normalizeSite(site), (chat) => {
+    chat.messages.push({ role: 'tool', text: `${site} saved new data while your agent's code ran. If something on ${site} acts strangely, clear its site data in the browser's settings.`, time: Date.now() });
+  }).catch(() => {}),
+});
+chrome.tabs.onUpdated?.addListener((tabId, info, tab) => {
+  if (info.status === 'complete' || info.url) tabLocks.check(tabId).catch(() => {});
+  if (info.url && tab) tabLocks.seen(tab).catch(() => {}); // (a tab of a locked site is locked too)
+});
 chrome.tabs.onRemoved?.addListener((tabId) => { tabLocks.unlock(tabId, 'closed').catch(() => {}); });
 chrome.tabs.onReplaced?.addListener((added, removed) => { tabLocks.unlock(removed, 'replaced').catch(() => {}); tabLocks.check(added).catch(() => {}); });
 chrome.tabs.onCreated?.addListener((tab) => { tabLocks.opened(tab).catch(() => {}); });
@@ -822,8 +833,12 @@ const commands = {
     const execute = async (code) => firstInjectionResult(await chrome.userScripts.execute({
       target: { tabId: tab.id }, world: 'MAIN', injectImmediately: true, js: [{ code }],
     }));
+    // And the page's leak channels that aren't requests (WebRTC, preconnect and the like), and saves made
+    // by the agent's code (its code is tagged: buildRunCode's sourceURL), in the page itself, before the
+    // agent's code: a speed bump (tablock.js leakGuard).
+    if (args.scope) await execute(`(${leakGuard})(); 0`);
     const work = (async () => {
-      let out = await execute(buildRunCode(args.code, !!args.expression, runId, { scope: args.scope || null, sitesOn: onSites() }));
+      let out = await execute(buildRunCode(args.code, !!args.expression, runId, { scope: args.scope || null, sitesOn: onSites() }, { tag: !!args.scope }));
       // Fallback in case execute didn't wait for the promise: poll the stored envelope.
       while (out === null && !timedOut) {
         await sleep(100);

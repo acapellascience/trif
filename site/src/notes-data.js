@@ -103,7 +103,8 @@ export const NOTES = {
     "w": 548,
     "h": 375,
     "href": "https://x.com/vibecamp_/status/1470799330005209097",
-    "alt": "A post by vibecamp ✨ (@vibecamp_), Dec 14, 2021: we're happy to announce that @MasterTimBlais is running the Thunderdome at vibecamp 😈. quoting Tim 🙂⏹️🙂 (@MasterTimBlais), Dec 14, 2021: Replying to @egocv and @Rididelduol @tpotvibecamp how much can we know about ourselves if we've never been in a fight"
+    "alt": "A post by vibecamp ✨ (@vibecamp_), Dec 14, 2021: we're happy to announce that @MasterTimBlais is running the Thunderdome at vibecamp 😈. quoting Tim 🙂⏹️🙂 (@MasterTimBlais), Dec 14, 2021: Replying to @egocv and @Rididelduol @tpotvibecamp how much can we know about ourselves if we've never been in a fight",
+    "caption": "it was a simpler time"
    },
    {
     "t": "p",
@@ -208,9 +209,10 @@ export const NOTES = {
     "t": "post",
     "src": "post-2115627963903254641.png",
     "w": 548,
-    "h": 1259,
+    "h": 586,
     "href": "https://x.com/MasterTimBlais/status/2115627963903254641",
-    "alt": "A post by Tim 🙂⏹️🙂 (@MasterTimBlais), Oct 28: update: forget the shovel i'm building the shovel factory. quoting Tim 🙂⏹️🙂 (@MasterTimBlais), Oct 28: I have vibecoded Plain X: a MacOS wrapper for X that returns it to following-only TL with custom filters. everything suggested is gone. everything algorithmic is gone. it's beautiful. i'll use it for like a week and see what breaks, then maybe you can have it x.com/MasterTimBlais…"
+    "alt": "A post by Tim 🙂⏹️🙂 (@MasterTimBlais), Oct 28: update: forget the shovel i'm building the shovel factory",
+    "caption": ""
    },
    {
     "t": "video",

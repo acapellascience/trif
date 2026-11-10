@@ -5,7 +5,8 @@
 //   article.json  what the post is: the article read out of X (title, and its blocks: paragraphs with their
 //                 bold, italics and links, headings, list items, pictures, videos and embedded posts), from
 //                 the article's page by extract.js there (trif run --tab <id> -f site/notes/extract.js).
-//   note.json     what X doesn't say: { "x": the post's address on X, "date": "YYYY-MM-DD" }.
+//   note.json     what X doesn't say: { "x": the post's address on X, "date": "YYYY-MM-DD", "posts": { <id>:
+//                 { "caption": a caption under an embedded post, "noQuote": true to shoot it without the post it quotes } } }.
 // Its pictures and videos are copied here, into site/public/notes/<slug>/ (the Worker serves that folder:
 // wrangler.toml [assets], staged by stage-assets.js), so the page loads nothing from X:
 //   - pictures as X serves them (name=large), once: a file already there isn't downloaded again;
@@ -166,7 +167,7 @@ export async function buildNote(slug, { fetchMedia = true } = {}) {
       if (!fs.existsSync(file)) throw new Error(`${slug}: ${name} is missing: node site/shoot-posts.js ${slug} ${id}`);
       const { w, h } = size(file);
       files.push(name);
-      blocks.push({ t: 'post', src: name, w: Math.round(w / 2), h: Math.round(h / 2), href, alt: postAlt(b) });
+      blocks.push({ t: 'post', src: name, w: Math.round(w / 2), h: Math.round(h / 2), href, alt: postAlt(b, { noQuote: !!meta.posts?.[id]?.noQuote }), caption: meta.posts?.[id]?.caption || '' });
     }
   }
   // the link preview: the TL;DR (or the first paragraph), and the first picture
@@ -181,7 +182,7 @@ export async function buildNote(slug, { fetchMedia = true } = {}) {
 }
 
 /** An embedded post's alt text: who, when, what it says, and what it quotes (from the card's text). */
-export function postAlt(b) {
+export function postAlt(b, { noQuote = false } = {}) {
   const lines = (b.all || '').split('\n').map((s) => s.trim()).filter(Boolean);
   const parts = [];
   let i = 0;
@@ -196,7 +197,7 @@ export function postAlt(b) {
   };
   if (lines.length < 3) return (b.text || '').replace(/\s+/g, ' ').trim();
   parts.push(`A post by ${one()}`);
-  if (lines[i] === 'Quote') { i++; parts.push(`quoting ${one()}`); }
+  if (lines[i] === 'Quote' && !noQuote) { i++; parts.push(`quoting ${one()}`); }
   return parts.join('. ');
 }
 

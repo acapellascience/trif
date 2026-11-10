@@ -29,7 +29,7 @@ function chromePath() {
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 /** Each post's card, logged out, as a PNG (Buffer), with the post's text (for alt text). */
-export async function shootPosts(ids, { scale = 2, width = 550 } = {}) {
+export async function shootPosts(ids, { scale = 2, width = 550, noQuote = [] } = {}) {
   const port = 9400 + Math.floor(Math.random() * 400);
   const profile = fs.mkdtempSync(path.join(os.tmpdir(), 'trif-posts-'));
   const chrome = spawn(chromePath(), ['--headless=new', '--mute-audio', '--no-first-run', '--no-default-browser-check',
@@ -63,6 +63,14 @@ export async function shootPosts(ids, { scale = 2, width = 550 } = {}) {
           if (!a || !a.innerText.trim()) return null;
           const imgs = [...a.querySelectorAll('img')];
           if (imgs.some((im) => !im.complete || !im.naturalWidth)) return null;
+          // (note.json's posts.<id>.noQuote: the post without the post it quotes: the quoted one's box, the
+          // outermost rounded, bordered box in the card holding a second @handle, is taken out first)
+          if (${JSON.stringify(noQuote)}.includes(${JSON.stringify(id)})) {
+            const boxes = [...a.querySelectorAll('div, a')].filter((e) => { const cs = getComputedStyle(e);
+              return parseFloat(cs.borderTopWidth) >= 1 && parseFloat(cs.borderTopLeftRadius) >= 8 && /@\\w/.test(e.innerText) && !e.querySelector('video'); });
+            const q = boxes.find((e) => !boxes.some((o) => o !== e && o.contains(e)));
+            if (q) q.remove(); else return null;
+          }
           const r = a.getBoundingClientRect();
           return { x: r.x, y: r.y, width: r.width, height: r.height, text: (a.querySelector('[data-testid=tweetText]') || a).innerText };
         })()`);
@@ -88,7 +96,9 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
   const ids = given.length ? given : article.blocks.filter((b) => b.type === 'tweet').map((b) => /status\/(\d+)/.exec(b.urls[0])[1]);
   const out = path.join(HERE, 'public', 'notes', slug);
   fs.mkdirSync(out, { recursive: true });
-  const shots = await shootPosts(ids);
+  const meta = fs.existsSync(path.join(dir, 'note.json')) ? JSON.parse(fs.readFileSync(path.join(dir, 'note.json'), 'utf8')) : {};
+  const noQuote = Object.entries(meta.posts || {}).filter(([, o]) => o.noQuote).map(([pid]) => pid);
+  const shots = await shootPosts(ids, { noQuote });
   for (const [id, s] of Object.entries(shots)) {
     fs.writeFileSync(path.join(out, `post-${id}.png`), s.png);
     console.log(`post-${id}.png ${s.width}x${s.height}`);

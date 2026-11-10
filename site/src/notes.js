@@ -30,7 +30,7 @@ figure { margin: 28px 0 32px; }
 figure img, figure video { display: block; width: 100%; height: auto; border-radius: 10px; background: var(--card); }
 figcaption { color: var(--muted); font-size: 15px; line-height: 1.45; margin: 10px 2px 0; text-align: center; }
 /* embedded posts: a picture of the post, in TRIF's green frame, linking to it on X */
-.post { display: block; width: fit-content; max-width: 100%; margin: 0 auto; padding: 5px; border-radius: 17px;
+.post { display: block; width: fit-content; max-width: 100%; margin: 0 auto; padding: 3.5px; border-radius: 15.5px;
   background: linear-gradient(135deg, #6ee7b7, #34d399 50%, #059669); }
 .post img { display: block; max-width: 100%; height: auto; border-radius: 12px; background: #15202b; }
 .post:focus-visible { outline: 2px solid var(--fg); outline-offset: 3px; }
@@ -47,7 +47,7 @@ function block(b, slug) {
     case 'p': return `<p>${b.html}</p>`;
     case 'img': return `<figure><img src="${file(b.src)}" width="${b.w}" height="${b.h}" alt="${esc(b.caption)}" loading="lazy" decoding="async">${b.caption ? `<figcaption>${esc(b.caption)}</figcaption>` : ''}</figure>`;
     case 'video': return `<figure><video controls playsinline preload="metadata" poster="${file(b.poster)}" width="${b.w}" height="${b.h}"><source src="${file(b.src)}" type="video/mp4"></video>${b.caption ? `<figcaption>${esc(b.caption)}</figcaption>` : ''}</figure>`;
-    case 'post': return `<figure class="post-fig"><a class="post" href="${esc(b.href)}" title="See the post on X"><img src="${file(b.src)}" width="${b.w}" height="${b.h}" alt="${esc(b.alt)}" loading="lazy" decoding="async"></a></figure>`;
+    case 'post': return `<figure class="post-fig"><a class="post" href="${esc(b.href)}" title="See the post on X"><img src="${file(b.src)}" width="${b.w}" height="${b.h}" alt="${esc(b.alt)}" loading="lazy" decoding="async"></a>${b.caption ? `<figcaption>${esc(b.caption)}</figcaption>` : ''}</figure>`;
     default: return '';
   }
 }

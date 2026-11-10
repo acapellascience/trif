@@ -445,7 +445,8 @@ The user will forgive a mod that stops working; not one that breaks the site.
 - When the page shape changes (anchor element missing, JSON path gone), do nothing and log once:
   `trif.warn('timeline shape changed: no instructions array')`. Don't retry in a tight loop.
 - Call originals with `original.apply(this, arguments)` and return what they return.
-- Keep work cheap: debounce observers, limit `querySelectorAll` scopes, no polling faster than ~1 s.
+- Keep work cheap: debounce observers, limit `querySelectorAll` scopes, no polling faster than ~1 s, and
+  see "Keep mods fast" in TECHNIQUES.md.
 - Prefix everything you add: globals, attributes, classes, storage keys, CSS variables.
 - Don't touch login, payment, or account pages unless that's exactly what the user asked for; exclude
   them with `@exclude` when a broad `@match` would cover them.

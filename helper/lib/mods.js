@@ -35,7 +35,7 @@ function isIgnoredName(name) {
 // Parse the `// ==WebMod==` block. Returns raw header values plus warnings; defaults are applied
 // by buildMod because they depend on the folder and file name.
 function parseHeader(code) {
-  const out = { hasHeader: false, name: null, description: null, matches: [], excludes: [], runAt: null, risk: null, source: null, version: null, rules: false, sandboxed: false, powers: [], warnings: [] };
+  const out = { hasHeader: false, name: null, description: null, matches: [], excludes: [], runAt: null, risk: null, source: null, version: null, rules: false, sandboxed: false, powers: [], clicks: [], warnings: [] };
   const lines = String(code).replace(/^﻿/, '').split(/\r?\n/);
   const start = lines.findIndex((l) => HEADER_START.test(l));
   if (start === -1) return out;
@@ -100,6 +100,10 @@ function parseHeader(code) {
       // here, checked by buildMod
       case 'powers':
         if (value) out.powers.push(value);
+        break;
+      // `@click the play button: button.play`: what a boxed mod with the click power may click
+      case 'click':
+        if (value) out.clicks.push(value);
         break;
       case 'run-at': {
         const mapped = RUN_AT[value.toLowerCase()];
@@ -168,7 +172,12 @@ function buildMod({ site, file, code }) {
   if (header.powers.length && !header.sandboxed) throw new Error('powers (@powers) are for boxed mods (@boxed): a free mod has every power the page has, and a style mod none');
   if (header.sandboxed) {
     // (its powers, checked against the menu: throws a PowersError for the scanner to report)
-    const { names: powers, args: powerArgs } = require('./boxpowers').parsePowersWithArgs(header.powers, meta);
+    const bp = require('./boxpowers');
+    const { names: powers, args: powerArgs } = bp.parsePowersWithArgs(header.powers, meta);
+    const clicks = bp.parseClicks(header.clicks);
+    if (clicks.length && !powers.includes('click')) throw new bp.PowersError('@click lines are for a mod with the click power (@powers click)');
+    if (powers.includes('click') && !clicks.length) throw new bp.PowersError('the click power needs what it may click: // @click the play button: button.play');
+    if (clicks.length) powerArgs.click = clicks;
     return { mod: { ...meta, sandboxed: true, ...(powers.length ? { powers } : {}), ...(Object.keys(powerArgs).length ? { powerArgs } : {}), code, hash }, warnings: header.warnings };
   }
   if (header.rules) {

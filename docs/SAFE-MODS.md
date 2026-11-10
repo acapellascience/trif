@@ -147,7 +147,7 @@ What the hand-rolled patterns become, so mods don't need the page's powers for t
 **A boxed mod may only name things that are its own, or copy addresses the page already has.** Its ids,
 classes and data attributes are `trif-box-` ones; the page's own names, and other mods', aren't its to set or
 change; an address it puts on an image or a link is one the page already shows; what it writes goes into its
-own elements, never into the page's forms or editors. Each fix since the red team is this rule applied to
+own elements, never into the page's forms or editors (write-drafts, the one exception, below). Each fix since the red team is this rule applied to
 one more place the page's own code (or a free mod) reads. Every new piece of API, and every power
 (docs/POWERS.md), is checked against it: a power that lets a mod name something of the page's, or an
 address the page doesn't have, is a hole unless it's the power's whole point and narrowed (click names
@@ -296,7 +296,7 @@ none of them sends anything. The helper reads them from the header (helper/lib/b
 until the user approves that *set* (held.js keys `power:<name>`: an update with the same powers runs, a new
 power waits for itself; `controls` and `mods` are listed but never hold alone), and passes the set to the
 extension with the mod; the sandbox (extension/sandbox.js) gives each mod what its set grants and refuses
-the rest. Built so far (phase 1):
+the rest. All twelve are built (phases 1 to 3); phase 1's, with what each gives:
 - `sound`: `trif.audio()`, TRIF's facade over Web Audio (oscillators, gains, filters, delays, panners,
   noise, sounds decoded from `data:audio/…;base64`): no address, no microphone, no worklet, no page media;
   browser errors reach the mod as plain TypeErrors.
@@ -309,8 +309,8 @@ the rest. Built so far (phase 1):
   inputs), `.text` of editors and attributes inside them, `data` on input events, keys in fields; password
   and card fields (`type=password`, `autocomplete` cc-*, current-password, new-password, one-time-code)
   never.
-Each is tested both ways in the e2e (tests/e2e/scenario.js powersCheck): it works when declared, and is
-refused (or empty) when not.
+Each is tested both ways in the e2e (tests/e2e/scenario.js powersCheck, powers2Check, powers3Check): it
+works when declared, and is refused (or empty) when not.
 
 **The powers against the rule** ("a boxed mod may only name things that are its own, or copy addresses the
 page already has"):
@@ -333,7 +333,42 @@ page already has"):
 - `search-box` (built): TRIF's own box, which the mod can't fill or read, going to the address in the
   header (the mod's own site, checked by the helper) with only what the user typed, on their Enter. The mod
   names nothing of the page's. Fits.
-- Still to build, and to check the same way: `media` (the page's own players),
-  `go-to` (declared paths or the page's own links: copies), `click` (declared selectors: the exception the
-  power names, narrowed to non-submitting, same-site targets), `write-drafts` (the one that writes into
-  what's the user's: its whole point), `mods` (no DOM at all).
+- `media` (built): `play`/`pause`/`setMuted`/`setVolume`/`seek` and a `.media` state (paused, muted,
+  volume, time, duration) on the page's own `<video>` and `<audio>`; never their `src`. Names nothing; sets
+  no address. Fits.
+- `go-to` (built): `trif.goTo(where)` goes to a path the header lists, exactly (literal paths of the site:
+  no query, `#` or `*`, checked by the helper, so a path the mod built can't carry data), or to an address a
+  link on the page already shows, on the page's own origin (a copy; the hold names the site). Fits.
+- `click` (built): `el.click()` only on an element matching an `@click words: selector` line (the words
+  are what the hold shows; the selectors are under the same limits as everywhere in the box), and never one
+  that would submit or reset a form (a submit or reset button or input, a button with no type in a form, a
+  label for one of those), or a link (`a`, `area`) to another origin. The page's own element is named, but
+  by the header the user approved, not the mod: the exception the power names, narrowed. A click on a
+  `type=button` that the page's own code turns into a post can't be told apart: the hold lists what it
+  may click, in words and selectors, so the user can say no. Fits as narrowed.
+- `write-drafts` (built): `setValue` on the page's text fields and textareas (through the field's own
+  setter and an `input` event, so the page's code sees the change), and the editor writes AU-1 refused
+  (`setText`, adding, removing, attributes inside an editor). Never a password or card field (the same
+  test as read-drafts), a hidden, file or other non-text input, or a select. It's the one power that writes
+  into what's the user's: its whole point. Two things it allows that the rest don't: text the mod wrote
+  (any text, addresses too) going into a post, and the page's own visible text going from one place into
+  a post (a DM's text into a reply, say), both in what the user is about to post themselves. The hold
+  says "can change what you type and paste on this site before you post it". Pasted or dropped files
+  aren't touched.
+- The combination: write-drafts with a read (`read-drafts`, `keys`, `site-data`, `page-data`) could carry
+  what the mod read, not just what the page shows, into a post. The hold lists it as its own item
+  ("could put what it reads into something you post, with these powers together", key
+  `power:together:write-drafts+<reads>`), so a mod allowed write-drafts and keys one at a time still asks
+  for the pair. Boxed mods on a page can see each other's elements (one `created` set; a mod's own
+  elements are readable like the page's), so the per-mod item alone would leave a two-mod route (one with
+  keys writes what it saw into its element, one with write-drafts reads it and posts it). So the sandbox
+  also keeps the read powers of every boxed mod that has run on the page, and while one of them isn't in
+  a write-drafts mod's own set, that mod's writes are refused (draftsOk in sandbox.js). The cost: a
+  write-drafts mod stops changing drafts on a page where another boxed mod has a read it didn't ask for;
+  the error says which, and asking for that read too (which puts the combination in its hold) lifts it.
+- `mods` (built): `trif.channel(name)` with `send(data)`/`on(fn)` between this page's boxed mods with
+  the power, through TRIF (never the DOM), in plain data only (no functions, stand-ins or other objects
+  JSON would drop silently), delivered later (a timer), with the sender's id. It names nothing; with the
+  combination rule above it carries no read to a writer that didn't ask for it. Fits.
+  (In a browser without the sandbox, where a boxed mod runs as a free mod the user allowed, the channels
+  live on the page's window, where the page could reach them: the free tier's terms.)

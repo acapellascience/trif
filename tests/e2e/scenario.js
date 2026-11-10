@@ -1161,6 +1161,7 @@ class Scenario {
       await r.check('boxed mods: a hostile one fails at every escape (network, code from strings, inline code, other windows and the page\'s globals, synthetic input, navigation, clipboard, cookies and storage, messages), with nothing reaching the server or the page; a good one restyles, hides, adds, rewrites text, draws, uses timers and settings, and watches; errors and logs reported; the two sample ports work; timing', () => this.sandboxedCheck(win));
       await r.check('a boxed mod as a free mod (how a browser without the sandbox runs one the user allowed): the same API works in the page\'s world', () => this.sandboxPageFormCheck(win));
       await r.check('powers (docs/POWERS.md): a boxed mod with powers waits for the user\'s OK for its set (panel and trif status say what it asks for); allowed, sound, controls, read-drafts and keys work and stay narrow; undeclared, each is refused; a new version with the same powers runs, one with a new power waits for that one', () => this.powersCheck(win));
+      await r.check('powers, phase 3: media plays and pauses the page\'s own video; click clicks only what the header names, never a submit, reset or a link to another site; go-to goes only to the header\'s pages; mods talk over TRIF\'s channel in plain data; write-drafts changes the user\'s drafts but never a password, card or hidden field; with a read, the combination is in the hold, and while another boxed mod on the page has a read it didn\'t ask for, write-drafts is off; undeclared, each is refused', () => this.powers3Check(win));
       await r.check('powers, phase 2: site-data filters the site\'s JSON (fetch and XHR) by removing and reordering only (an invented string, number, key, a duplicate or a cut string: TRIF keeps the original); page-data reads plain copies of React props; search-box is TRIF\'s own box the mod can\'t read, which searches the site from the user\'s Enter; undeclared, each is refused', () => this.powers2Check(win));
       await r.check('speculation rules (audit AU-7): a page that prefetches its same-site links at once; a link a free mod adds is fetched without a click (Chrome), a boxed mod can\'t make one', () => this.specRulesCheck(win));
       await r.check('boxed mods in the panel: their own group between Style mods and Free mods, with its switch (off on the site: they stop there; on: back), and "New mods start" has a Boxed mods row', () => this.sandboxedPanelCheck(win));
@@ -2058,7 +2059,7 @@ process.exitCode = 1;
       if (!/hello from the sandbox/.test(logs) || !/a warning from the sandbox/.test(logs)) missing.push(`trif logs: ${logs.slice(0, 300)}`);
       // trif check: the lint for the hostile one (not a failure)
       const check = await this.cli(['check', path.join(dir, 'e2e-sbx-hostile.js')], { timeoutMs: 20000 });
-      if (check.status !== 0 || !/never waits/.test(check.stdout) || !/- document: not there/.test(check.stdout) || !/- \.click:/.test(check.stdout)) missing.push(`trif check: ${check.stdout.slice(0, 400)}`);
+      if (check.status !== 0 || !/never waits/.test(check.stdout) || !/- document: not there/.test(check.stdout) || !/- \.click\(\): needs the click power/.test(check.stdout)) missing.push(`trif check: ${check.stdout.slice(0, 400)}`);
       // timing (TRIF's own numbers, from the sandbox world) against a page mod doing the same
       const readStats = async () => JSON.parse(await this.ext(`async (tabId, world) => {
         const r = await chrome.userScripts.execute({ target: { tabId }, world: 'USER_SCRIPT', worldId: world, injectImmediately: true, js: [{ code: 'JSON.stringify(globalThis.__trifSandbox && globalThis.__trifSandbox.stats)' }] });
@@ -2310,6 +2311,91 @@ process.exitCode = 1;
     } finally {
       for (const f of [file, noneFile]) { try { fs.unlinkSync(f); } catch { /* gone */ } }
       await this.ext(`async (id, url) => { await chrome.tabs.update(id, { url }); }`, [win.tabId, `${base}/?e2e=after-powers2`]).catch(() => {});
+    }
+  }
+
+  async powers3Check(win) {
+    const site = '127.0.0.1';
+    const base = `http://${site}:${this.o.servers.port}`;
+    const dir = path.join(this.trif, 'sites', site);
+    const fx = (f) => fs.readFileSync(path.join(I.REPO, 'tests', 'e2e', 'fixtures', f), 'utf8');
+    const files = { 'e2e-pw3': fx('powers-3.js'), 'e2e-pw3b': fx('powers-3b.js'), 'e2e-pw3none': fx('powers-3none.js') };
+    const kFile = path.join(dir, 'e2e-pw3k.js');
+    const status = async () => (await this.cli(['status'], { timeoutMs: 20000 })).stdout;
+    const line = (st, id) => st.split('\n').find((l) => new RegExp(`${id}\\s`).test(l)) || '';
+    const read = async () => JSON.parse((await this.cli(['run', '--tab', String(win.tabId), `(() => { const d = document.documentElement; return {
+      r: d.getAttribute('data-trif-box-pw3'), b: d.getAttribute('data-trif-box-pw3b'), none: d.getAttribute('data-trif-box-pw3none'),
+      seen: document.getElementById('seen') && document.getElementById('seen').textContent, hash: location.hash, wd: document.getElementById('wd') && document.getElementById('wd').value,
+      pw: document.getElementById('pw3') && document.getElementById('pw3').value, ed: document.getElementById('ed2') && document.getElementById('ed2').textContent,
+      f3i: document.getElementById('f3i') && document.getElementById('f3i').value, path: location.pathname }; })()`], { timeoutMs: 20000 })).stdout);
+    const open = async () => {
+      await this.ext(`async (id, url) => { await chrome.tabs.update(id, { url, active: true }); }`, [win.tabId, `${base}/powers3.html`]);
+      let last = null;
+      return waitFor('the mods\' results', async () => { const o = last = await read(); return o.r && /"done"/.test(o.r) && o.none && /mods: an answer/.test(o.r) ? o : null; }, { timeoutMs: 20000, intervalMs: 400 })
+        .catch((e) => { throw new Error(`${e.message}: ${JSON.stringify(last)}`); });
+    };
+    const problems = [];
+    this.sandboxPage = true;
+    try {
+      for (const [id, text] of Object.entries(files)) fs.writeFileSync(path.join(dir, `${id}.js`), text);
+      // held, for its powers and the combination; mods alone (e2e-pw3b) doesn't hold
+      const held = await waitFor('held for its powers', async () => { const st = await status(); return /e2e-pw3\s+HELD/.test(st) && /e2e-pw3b\s+registered \(boxed, powers: mods\)/.test(st) && /e2e-pw3none\s+registered \(boxed\)/.test(st) ? st : null; }, { timeoutMs: 25000, intervalMs: 500 });
+      const hl = line(held, 'e2e-pw3');
+      for (const want of ['it can read what you type on this site, but can\'t send it anywhere', 'it can talk to your other boxed mods on this page', 'it can play and pause video and audio on this page',
+        `it can take you to these pages on ${site}: /e2e-goto-ok, or to a link the page shows`,
+        'it can click these for you: the counter (#pclick), a link on this page (#plink), the form\'s buttons (#fb3, #fr3, #lb3), a link to another site (#ext3)',
+        'it can change what you type and paste on this site before you post it', 'it could put what it reads into something you post, with these powers together']) {
+        if (!hl.includes(want)) problems.push(`trif status doesn't say "${want}": ${hl}`);
+      }
+      await this.cli(['approve', `${site}/e2e-pw3`], { timeoutMs: 20000 });
+      await waitFor('registered', async () => /e2e-pw3\s+registered \(boxed, powers: read-drafts, mods, media, go-to, click, write-drafts\)/.test(await status()) || null, { timeoutMs: 20000, intervalMs: 500 });
+      const got = await open();
+      const R = JSON.parse(got.r), N = JSON.parse(got.none);
+      for (const [k, v] of Object.entries(N)) if (!/^(refused|absent)/.test(v)) problems.push(`UNDECLARED ${k}: ${v}`);
+      for (const [k, v] of Object.entries(R)) if (!(/\(refused\)$/.test(k) ? /^refused/ : /^ok/).test(v)) problems.push(`DECLARED ${k}: ${v}`);
+      const exact = {
+        'media: mute': 'ok: true', 'media: volume': 'ok: 0.5', 'media: seek': 'ok: 0', 'media: pause': 'ok: true', 'media: play': 'ok: object',
+        'click: the counter': 'ok: 1', 'write-drafts: a field': 'ok: rewritten', 'write-drafts: a textarea': 'ok: rewritten two', 'write-drafts: an editor': 'ok: rewritten draft',
+        'mods: an answer': `ok: {"echo":{"hello":"from a","n":1},"by":"b"} from ${site}/e2e-pw3b`,
+      };
+      for (const [k, v] of Object.entries(exact)) if (R[k] !== v) problems.push(`${k}: ${R[k]}`);
+      const why = {
+        'click: a submit button (refused)': /would submit/, 'click: a reset button (refused)': /would submit/, 'click: a label for a submit button (refused)': /would submit/,
+        'click: a link to another site (refused)': /link to another site/, 'click: a button the header doesn\'t name (refused)': /isn't one of the things the header says/,
+        'go-to: a page the header doesn\'t name (refused)': /isn't one of the header's pages/, 'go-to: a link to another site the page shows (refused)': /isn't one of the header's pages/,
+        'write-drafts: a password (refused)': /password and card fields stay the user's/, 'write-drafts: a card field (refused)': /password and card fields stay the user's/,
+        'mods: a function in a message (refused)': /plain data/, 'mods: an element in a message (refused)': /plain data/,
+      };
+      for (const [k, re] of Object.entries(why)) if (!re.test(R[k] || '')) problems.push(`${k}: ${R[k]}`);
+      if (got.b !== `{"hello":"from a","n":1} from ${site}/e2e-pw3`) problems.push(`the other end of the channel: ${got.b}`);
+      if (got.hash !== '#plink-target') problems.push(`the link on the page wasn't clicked: ${got.hash}`);
+      if (!/^wd,wta/.test(got.seen || '')) problems.push(`the page didn't see the changed drafts as input: ${got.seen}`);
+      if (got.pw !== 'hunter2' || got.f3i !== 'typed') problems.push(`a field changed that shouldn't: ${JSON.stringify(got)}`);
+      // go-to: the header's page, from the mod's own button
+      const ctx = await this.d.findPage((u) => u.includes('/powers3.html'), { timeoutMs: 5000 });
+      await this.d.click(ctx, '#trif-box-pw3-go');
+      await waitFor('the go-to page', async () => this.o.servers.requests.some((q) => q.url === '/e2e-goto-ok') || null, { timeoutMs: 10000, intervalMs: 300 })
+        .catch(() => problems.push('go-to didn\'t go to /e2e-goto-ok'));
+      // another boxed mod with a read (keys) the writer didn't ask for: write-drafts is off on the page
+      fs.writeFileSync(kFile, `// ==WebMod==\n// @name E2E keys\n// @match *://127.0.0.1/powers3.html*\n// @boxed\n// @powers keys\n// @run-at document-start\n// ==/WebMod==\npage.on('keydown', () => {});\n`);
+      await waitFor('the keys mod held', async () => /e2e-pw3k\s+HELD/.test(await status()) || null, { timeoutMs: 20000, intervalMs: 500 });
+      await this.cli(['approve', `${site}/e2e-pw3k`], { timeoutMs: 20000 });
+      await waitFor('the keys mod registered', async () => /e2e-pw3k\s+registered \(boxed, powers: keys\)/.test(await status()) || null, { timeoutMs: 20000, intervalMs: 500 });
+      const got2 = await open();
+      const R2 = JSON.parse(got2.r);
+      for (const k of ['write-drafts: a field', 'write-drafts: a textarea', 'write-drafts: an editor']) {
+        if (!/^refused: .*off on this page while another boxed mod here has the keys power/.test(R2[k] || '')) problems.push(`with a keys mod on the page, ${k}: ${R2[k]}`);
+      }
+      if (got2.wd !== 'the user\'s draft' || got2.ed !== 'the user\'s editor draft') problems.push(`with a keys mod on the page, the drafts changed: ${got2.wd} / ${got2.ed}`);
+      const reqs = this.o.servers.requests.map((q) => q.url);
+      const bad = reqs.filter((u) => u.includes('e2e-pw-leak') || u.startsWith('/e2e-goto-not-named') || u.startsWith('/e2e-goto-ok?') || u.startsWith('/e2e-goto-shown'));
+      if (bad.length) problems.push(`the server saw: ${bad.join(', ')}`);
+      fs.writeFileSync(this.r.file(`powers3-${this.o.browser}.json`), JSON.stringify({ R, N, R2, got, got2, problems }, null, 2));
+      if (problems.length) throw new Error(problems.join('\n'));
+      return `held for media, go-to, click, write-drafts, read-drafts and mods, with the combination; ${Object.keys(R).length} declared outcomes as expected (${Object.keys(why).length} refusals with their reasons); a channel answered; go-to went to /e2e-goto-ok; with a keys mod on the page, write-drafts refused; ${Object.keys(N).length} undeclared refused`;
+    } finally {
+      for (const id of [...Object.keys(files), 'e2e-pw3k']) { try { fs.unlinkSync(path.join(dir, `${id}.js`)); } catch { /* gone */ } }
+      await this.ext(`async (id, url) => { await chrome.tabs.update(id, { url }); }`, [win.tabId, `${base}/?e2e=after-powers3`]).catch(() => {});
     }
   }
 

@@ -22,6 +22,24 @@ const PAGE = (title, body) => `<!doctype html>
 <style>body{font:16px/1.5 -apple-system,system-ui,sans-serif;margin:40px;max-width:720px}#target{padding:12px;border:1px dashed #999}</style>
 </head><body>${body}</body></html>`;
 
+// Powers, phase 3 (tests/e2e/scenario.js powers3Check): the page's own video, a counter button, a link on the
+// page and one to another site, a form whose buttons would submit or reset it (to /e2e-pw-leak-submit, so a
+// submit shows as a leak), the user's drafts (fields, an editor) and fields that stay the user's.
+const POWERS3_PAGE = () => PAGE('TRIF e2e powers 3', `<h1 id="title">Powers, phase 3</h1>
+<video id="pmedia" muted width="16" height="16"></video>
+<p><button type="button" id="pclick">0</button> <button type="button" id="pbtn">not named</button>
+<a id="plink" href="#plink-target">a link on this page</a> <a id="ext3" href="http://localhost:1/e2e-pw-leak-ext">another site</a> <a id="shown3" href="/e2e-goto-shown">a page link</a></p>
+<form id="f3" action="/e2e-pw-leak-submit" method="get"><input id="f3i" name="q" value="typed"><button id="fb3">Send</button><input type="reset" id="fr3" value="Reset"><label id="lb3" for="fs3">send it</label><input type="submit" id="fs3" value="Go"></form>
+<p><input id="wd" value="the user's draft"> <textarea id="wta">draft two</textarea></p>
+<div id="ed2" contenteditable="true">the user's editor draft</div>
+<p><input id="pw3" type="password" value="hunter2"> <input id="cc3" autocomplete="cc-number" value="4111"> <input id="fh3" type="hidden" value="h"> <select id="sel3"><option>a</option><option>b</option></select></p>
+<p id="seen"></p>
+<script>
+document.getElementById('pclick').addEventListener('click', (e) => { e.target.textContent = String(Number(e.target.textContent) + 1); });
+const seen = [];
+for (const id of ['wd', 'wta', 'ed2']) document.getElementById(id).addEventListener('input', () => { seen.push(id); document.getElementById('seen').textContent = seen.join(','); });
+</script>`);
+
 // Sandboxed mods (tests/e2e/scenario.js sandboxedCheck): what the page itself would notice (__hits: clicks,
 // keys, submits, messages, inline code that ran), an empty script element the page made (text written into it
 // would run), a style element, a form, links, an image, a frame; a row added later; Amazon-like results and a
@@ -323,6 +341,8 @@ async function startServers(dir) {
     if (u.pathname === '/favicon.ico') return send(204, 'image/x-icon', '');
     if (u.pathname === '/promos.html') return send(200, 'text/html; charset=utf-8', PROMOS_PAGE());
     if (u.pathname === '/sandbox.html') return send(200, 'text/html; charset=utf-8', SANDBOX_PAGE());
+    if (u.pathname === '/powers3.html') return send(200, 'text/html; charset=utf-8', POWERS3_PAGE());
+    if (u.pathname.startsWith('/e2e-goto-')) return send(200, 'text/html; charset=utf-8', PAGE('go-to', `<p id="where">${u.pathname}</p>`));
     // (powers, site-data: small JSON the page fetches, which boxed mods filter; search-box: where it goes)
     if (u.pathname.startsWith('/e2e-api/')) return send(200, 'application/json', JSON.stringify({
       items: [{ id: '1', text: 'keep me', url: '/two.html' }, { id: '2', text: 'Promoted: buy', url: '/two.html' }, { id: '3', text: 'keep me too', url: '/two.html' }],

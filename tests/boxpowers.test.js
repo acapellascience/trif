@@ -21,7 +21,8 @@ test('@powers: from the menu, in the menu\'s order, boxed mods only; not on the 
   assert.deepEqual(build(head('keys', '// @powers controls\n')).mod.powers, ['keys', 'controls']);
   assert.equal(build(head('')).mod.powers, undefined);
   assert.throws(() => build(head('fetch')), /"fetch" isn't a power/);
-  assert.throws(() => build(head('media')), /isn't in this version of TRIF yet/);
+  // (every power on the menu is built now; the "not in this version yet" error stays for later ones)
+  assert.deepEqual(bp.NAMES.filter((n) => !bp.MENU[n].built), []);
   assert.throws(() => buildMod({ site: 'x.com', file: '/w/a.js', code: '// ==WebMod==\n// @name A\n// @powers sound\n// ==/WebMod==\n' }), /powers \(@powers\) are for boxed mods/);
   // (the scanner reports it, not sent)
   const home = tempDir('trif-pw-');
@@ -138,4 +139,73 @@ test('search-box: takes the site\'s search address, with {query}, on the mod\'s 
   assert.throws(() => build(head('search-box https://evil.example/s?q={query}')), /evil\.example isn't this mod's site/);
   assert.throws(() => build(head('search-box https://x.com/search')), /needs to be an http\(s\) address with \{query\}/);
   assert.throws(() => build(head('sound loud')), /the sound power takes nothing after its name/);
+});
+
+test('go-to takes literal pages of the site (no query, # or *); click takes `@click words: selector` lines; both are in the key', () => {
+  const m = build(head('go-to /home /i/bookmarks, click, media', '// @click the play button: button.play\n// @click the next page: a.next\n')).mod;
+  assert.deepEqual(m.powers, ['media', 'go-to', 'click']);
+  assert.deepEqual(m.powerArgs, { 'go-to': ['/home', '/i/bookmarks'], click: ['the play button: button.play', 'the next page: a.next'] });
+  assert.deepEqual(bp.powerNeeds(m).map((n) => [n.key, n.fact]), [
+    ['power:media', 'can play and pause video and audio on this page'],
+    ['power:go-to:/home | /i/bookmarks', 'can take you to these pages on x.com: /home, /i/bookmarks, or to a link the page shows'],
+    ['power:click:the next page: a.next | the play button: button.play', 'can click these for you: the play button (button.play), the next page (a.next)'],
+  ]);
+  // (no pages: links the page shows only)
+  assert.equal(bp.powerNeeds(build(head('go-to')).mod)[0].fact, 'can take you to a link a page on x.com shows');
+  assert.throws(() => build(head('go-to /search?q=x')), /isn't a page of this site/);
+  assert.throws(() => build(head('go-to https://evil.example/')), /isn't a page of this site/);
+  assert.throws(() => build(head('go-to /a/*')), /isn't a page of this site/);
+  assert.throws(() => build(head('go-to /a/../b')), /isn't a page of this site/);
+  assert.throws(() => build(head('click')), /the click power needs what it may click/);
+  assert.throws(() => build(head('media', '// @click the play button: button.play\n')), /@click lines are for a mod with the click power/);
+  assert.throws(() => build(head('click', '// @click button.play\n')), /say what it is, then a colon and its selector/);
+  assert.throws(() => build(head('click', '// @click the field: input[value=x]\n')), /that selector isn't one TRIF takes/);
+  assert.throws(() => build(head('click', '// @click the field: a\\:b\n')), /that selector isn't one TRIF takes/);
+  // (a different selector asks again)
+  const k = (c) => bp.powerNeeds(build(head('click', `// @click the play button: ${c}\n`)).mod)[0].key;
+  assert.notEqual(k('button.play'), k('button'));
+});
+
+test('write-drafts with a read power: the combination is a need of its own, so it holds even when each was approved alone', () => {
+  assert.deepEqual(bp.powerNeeds(build(head('write-drafts')).mod).map((n) => n.key), ['power:write-drafts']);
+  const both = bp.powerNeeds(build(head('write-drafts, read-drafts, page-data, sound')).mod);
+  assert.deepEqual(both.map((n) => n.key), ['power:read-drafts', 'power:page-data', 'power:sound', 'power:write-drafts', 'power:together:write-drafts+read-drafts+page-data']);
+  assert.equal(both[4].fact, bp.TOGETHER);
+  const home = tempDir('trif-pw-');
+  const ws = { home, modsDir: path.join(home, 'sites') };
+  const dir = path.join(ws.modsDir, 'x.com');
+  fs.mkdirSync(dir, { recursive: true });
+  updateHeld(ws, [], []);
+  const file = path.join(dir, 'fixer.js');
+  const scan = () => scanMods(ws.modsDir).mods;
+  fs.writeFileSync(file, head('') + 'page.find("textarea");\n');
+  assert.deepEqual(updateHeld(ws, scan(), []), {});
+  fs.writeFileSync(file, head('write-drafts') + 'page.find("textarea");\n');
+  updateHeld(ws, scan(), []);
+  approveHeld(home, 'x.com/fixer');
+  fs.writeFileSync(file, head('keys') + 'page.find("textarea");\n');
+  updateHeld(ws, scan(), []);
+  approveHeld(home, 'x.com/fixer');
+  // (write-drafts and keys, each allowed before: the pair still asks)
+  fs.writeFileSync(file, head('keys, write-drafts') + 'page.find("textarea");\n');
+  const held = updateHeld(ws, scan(), []);
+  assert.deepEqual(held['x.com/fixer'].needs, ['power:together:write-drafts+keys']);
+  assert.deepEqual(held['x.com/fixer'].facts, [bp.TOGETHER]);
+});
+
+test('mods alone doesn\'t hold (like controls); the lint knows .click(), .play() and trif.goTo need their powers', () => {
+  const home = tempDir('trif-pw-');
+  const ws = { home, modsDir: path.join(home, 'sites') };
+  fs.mkdirSync(path.join(ws.modsDir, 'x.com'), { recursive: true });
+  updateHeld(ws, [], []);
+  fs.writeFileSync(path.join(ws.modsDir, 'x.com', 'talker.js'), head('mods') + 'trif.channel("a");\n');
+  assert.deepEqual(updateHeld(ws, scanMods(ws.modsDir).mods, []), {});
+  const msgs = (code, powers) => sandboxLint(code, { powers }).map((p) => p.why).join('\n');
+  assert.match(msgs('page.find("#b").click();', []), /click power/);
+  assert.doesNotMatch(msgs('page.find("#b").click();', ['click']), /click power/);
+  assert.match(msgs('page.find("video").play();', []), /media power/);
+  assert.match(msgs('trif.goTo("/home");', []), /go-to power/);
+  assert.match(msgs('trif.channel("x");', []), /mods power/);
+  assert.match(msgs('page.find("textarea").setValue("x");', []), /write-drafts power/);
+  assert.doesNotMatch(msgs('trif.goTo("/home"); trif.channel("x");', ['go-to', 'mods']), /power/);
 });

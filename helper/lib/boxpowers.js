@@ -1,7 +1,9 @@
 'use strict';
 // Powers: the named exceptions a boxed mod can ask for (docs/POWERS.md). A boxed mod declares them in its
 // header, `// @powers sound, read-drafts`; TRIF holds it until the user approves that set, and the sandbox
-// (extension/sandbox.js) gives it those and nothing more. None of them sends anything.
+// (extension/sandbox.js) gives it those and nothing more. None of them sends anything the mod makes up:
+// go-to and click go only where the header or the page's own links say, write-drafts changes only what the
+// user is about to post, and write-drafts with a read power is a combination the hold names on its own.
 //
 // The approval is for the set, not the code: each power is allowed for the mod by its key (`power:<name>`,
 // held.js allowed.json), so an update with the same powers runs without asking again, and one that adds a
@@ -17,12 +19,12 @@ const MENU = {
   'page-data': { hold: (site) => `can read the data ${site} keeps behind what's on the page`, built: true },
   sound: { hold: () => 'can play sounds', built: true },
   controls: { hold: () => 'can add its own controls (sliders, pickers)', built: true, soft: true },
-  mods: { hold: () => 'can talk to your other boxed mods on this page', built: false, soft: true },
-  media: { hold: () => 'can play and pause video and audio on this page', built: false },
+  mods: { hold: () => 'can talk to your other boxed mods on this page', built: true, soft: true },
+  media: { hold: () => 'can play and pause video and audio on this page', built: true },
   'search-box': { hold: (site, args) => `adds a search box that searches ${args && args[0] ? hostOf(args[0]) : site}`, built: true, args: 'one' },
-  'go-to': { hold: (site) => `can take you to these pages on ${site}`, built: false },
-  click: { hold: () => 'can click these for you', built: false },
-  'write-drafts': { hold: () => 'can change what you type and paste on this site before you post it', built: false },
+  'go-to': { hold: (site, args) => (args && args.length ? `can take you to these pages on ${site}: ${args.join(', ')}, or to a link the page shows` : `can take you to a link a page on ${site} shows`), built: true },
+  click: { hold: (site, args) => `can click these for you: ${(args || []).map((c) => { const i = c.indexOf(':'); return `${c.slice(0, i).trim()} (${c.slice(i + 1).trim()})`; }).join(', ')}`, built: true },
+  'write-drafts': { hold: () => 'can change what you type and paste on this site before you post it', built: true },
 };
 const NAMES = Object.keys(MENU);
 
@@ -61,12 +63,37 @@ function parsePowersWithArgs(values, mod = {}) {
         if (!/^https?:$/.test(u.protocol) || !t.includes('{query}')) throw new PowersError(`search-box: "${t}" needs to be an http(s) address with {query} in it`);
         if (!sameSite(u.hostname, mod)) throw new PowersError(`search-box: ${u.hostname} isn't this mod's site: a search box searches the site it's on`);
         args[name] = [t];
+      } else if (name === 'go-to') {
+        // (literal pages of this site: a path, no query, no wildcard, since a path the mod built could carry data)
+        for (const p of rest) {
+          if (!/^\/[\w\-./~%@!$&'()+;=]*$/.test(p) || p.includes('..') || /[?#*]/.test(p)) throw new PowersError(`go-to: "${p}" isn't a page of this site: a path starting with /, with no query, # or *`);
+        }
+        args[name] = [...new Set([...(args[name] || []), ...rest])];
       } else if (rest.length) throw new PowersError(`the ${name} power takes nothing after its name`);
       out.add(name);
     }
   }
   return { names: NAMES.filter((n) => out.has(n)), args };
 }
+
+/**
+ * `// @click words: selector` lines: what a mod with the click power may click, named in words the hold
+ * shows, with the selector. Returns ["words: selector", …]; throws for one without words or with a selector
+ * TRIF wouldn't take (escapes, the value attribute: as everywhere in the sandbox).
+ */
+function parseClicks(values) {
+  return (values || []).map((v) => {
+    const m = /^(.+?):\s+(.+)$/.exec(String(v).trim());
+    if (!m || !m[1].trim() || !m[2].trim()) throw new PowersError(`@click "${v}": say what it is, then a colon and its selector: // @click the play button: button.play`);
+    const sel = m[2].trim();
+    if (sel.includes('\\') || /\[\s*(?:[\w*-]*\|)?value\b|:(?:-webkit-)?autofill\b|[{};]/i.test(sel) || sel.length > 500) throw new PowersError(`@click "${v}": that selector isn't one TRIF takes (no \\ escapes, value attribute, :autofill, braces or semicolons)`);
+    return `${m[1].trim()}: ${sel}`;
+  });
+}
+
+// The reads that, with write-drafts, could put what they read into something the user posts.
+const READS = ['read-drafts', 'keys', 'site-data', 'page-data'];
+const TOGETHER = 'could put what it reads into something you post, with these powers together';
 function parsePowers(values, mod) { return parsePowersWithArgs(values, mod).names; }
 
 // The site a hold names: the mod's folder (x.com), or its sites in general.
@@ -82,9 +109,14 @@ function siteOf(mod) {
 function powerNeeds(mod) {
   const site = siteOf(mod);
   const args = (mod && mod.powerArgs) || {};
-  return (Array.isArray(mod.powers) ? mod.powers : []).filter((n) => MENU[n]).map((n) => ({
-    key: `power:${n}${args[n] && args[n].length ? `:${args[n].join(' ')}` : ''}`, fact: MENU[n].hold(site, args[n]), power: n, soft: !!MENU[n].soft, lines: [],
+  const list = Array.isArray(mod.powers) ? mod.powers : [];
+  const out = list.filter((n) => MENU[n]).map((n) => ({
+    key: `power:${n}${args[n] && args[n].length ? `:${[...args[n]].sort().join(' | ')}` : ''}`, fact: MENU[n].hold(site, args[n]), power: n, soft: !!MENU[n].soft, lines: [],
   }));
+  // write-drafts with any read: the combination is a need of its own (docs/POWERS.md "Combinations")
+  const reads = READS.filter((r) => list.includes(r));
+  if (list.includes('write-drafts') && reads.length) out.push({ key: `power:together:write-drafts+${reads.join('+')}`, fact: TOGETHER, power: 'together', soft: false, lines: [] });
+  return out;
 }
 
 /** Whether a need is a power that doesn't hold on its own (controls, mods). */
@@ -93,4 +125,4 @@ function isSoft(key) {
   return !!(m && MENU[m[1]] && MENU[m[1]].soft);
 }
 
-module.exports = { MENU, NAMES, PowersError, parsePowers, parsePowersWithArgs, powerNeeds, isSoft, siteOf, sameSite };
+module.exports = { MENU, NAMES, PowersError, parsePowers, parsePowersWithArgs, parseClicks, powerNeeds, isSoft, siteOf, sameSite, TOGETHER };

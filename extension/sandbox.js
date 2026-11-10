@@ -316,7 +316,28 @@ export function sandboxRuntime(mode, pageModId, pageFn, pagePowers) {
     }
   };
   // Writing into an editor is changing what the user typed: refused (audit AU-1); restyling, hiding it: fine.
-  const notInEditor = (n, what) => { if (inEditor(n)) fail(`${what} isn't offered inside an editor (what the user is typing)`); };
+  const mediaOf = (s) => { const n = nodeOf(s); if (!/^(video|audio)$/.test(n.localName)) fail('that\'s for the page\'s <video> and <audio>'); if (!cur().powers.has('media')) fail('playing the page\'s video and audio needs the media power (// @powers media)'); return n; };
+  // (would a click on it submit a form: a submit button or input, a button with no type in a form, or
+  // something inside one of those)
+  // (or reset one: what the user typed, wiped; a label clicks its control, so a label for one of those too)
+  const submits = (n) => {
+    const lb = n.closest('label');
+    const b = n.closest('button, input') || (lb && lb.control);
+    if (!b) return false;
+    const t = String(b.getAttribute('type') || '').toLowerCase();
+    if (b.localName === 'input') return t === 'submit' || t === 'image' || t === 'reset';
+    return b.localName === 'button' && (t === '' || t === 'submit' || t === 'reset') && !!b.form;
+  };
+  // write-drafts and the reads: a mod with write-drafts and a read power has the combination in its hold
+  // (docs/POWERS.md "Combinations"). Boxed mods on a page can see each other's elements, so what one mod
+  // reads could reach another through the page: while any boxed mod here has a read power, a mod changes
+  // what the user types only if it asked for that read too (and so the user saw the combination).
+  const draftsOk = (api) => {
+    if (!api.powers.has('write-drafts')) return false;
+    for (const r of readsHere) if (!api.powers.has(r)) fail(`changing what the user types is off on this page while another boxed mod here has the ${r} power: with both, what one reads could end up in what the user posts (a mod that asks for write-drafts and ${r} together shows the user that)`);
+    return true;
+  };
+  const notInEditor = (n, what) => { if (inEditor(n) && !draftsOk(cur())) fail(`${what} isn't offered inside an editor (what the user is typing)`); };
   const textInto = (parent, kids) => {
     formsOk(parent, kids);
     for (const k of kids) if (typeof k !== 'string' && insideEditor(k)) fail('a piece of an editor can\'t be moved out of it');
@@ -534,6 +555,11 @@ export function sandboxRuntime(mode, pageModId, pageFn, pagePowers) {
   };
   // ---- page-data: the page's side answers during the event (runtime.js pageBridge)
   let pageDataAnswer = null;
+  // (the read powers of the boxed mods that have run on this page: see draftsOk)
+  const READS = ['read-drafts', 'keys', 'site-data', 'page-data'];
+  const readsHere = new Set();
+  // (mods: channels between this page's boxed mods; in a page script, shared with the page's other ones)
+  const channels = SANDBOX ? new Map() : (G.__trifChannels || (Object.defineProperty(G, '__trifChannels', { value: new Map() }), G.__trifChannels));
   D.addEventListener('trif:page-data-answer', (e) => { pageDataAnswer = typeof e.detail === 'string' ? e.detail : null; }, true);
 
   const apiFor = (modId, powers) => {
@@ -544,6 +570,7 @@ export function sandboxRuntime(mode, pageModId, pageFn, pagePowers) {
     const has = (p) => self.powers.has(p);
     const needs = (p) => { if (!has(p)) fail(`that needs the ${p} power (// @powers ${p} in the mod's header, which the user approves)`); };
     apis.set(modId, self);
+    for (const r of READS) if (self.powers.has(r)) readsHere.add(r);
     // (a callback of the mod's: errors reported as its own, and stand-ins' listeners are its own)
     const call = (fn, ...args) => { const prev = current, t = now(); current = self; try { return fn(...args); } catch (e) { report(modId, e); return undefined; } finally { current = prev; stats.callbacks++; stats.callbackMs += now() - t; } };
     // TRIF's functions as the mod sees them: an error from the browser (a DOMException, say) is passed on
@@ -730,6 +757,45 @@ export function sandboxRuntime(mode, pageModId, pageFn, pagePowers) {
       },
       // search-box: TRIF's own box (the mod can place and style it, but not fill or read it); Enter, by the
       // user, goes to the address in the header with what they typed
+      // go-to: one of the header's pages, or a link the page shows
+      goTo: (where) => {
+        needs('go-to');
+        const p = str(where, 'a page', 2000);
+        const paths = self.args['go-to'] || [];
+        let abs = null;
+        if (paths.includes(p)) abs = new URL(p, location.href).href;
+        else { try { const u = new URL(p, location.href); if (u.origin === ORIGIN && shownLink(u.href)) abs = u.href; } catch { /* not an address */ } }
+        if (!abs) fail(`"${p.slice(0, 80)}" isn't one of the header's pages (${paths.join(', ') || 'none'}), or a link to this site that the page shows`);
+        location.assign(abs);
+      },
+      // mods: a channel between this page's boxed mods, through TRIF only (never the page's DOM)
+      channel: (name) => {
+        needs('mods');
+        const nm = str(name, 'a channel name', 100);
+        const ch = channels.get(nm) || new Set();
+        channels.set(nm, ch);
+        const me = { mod: modId, call, fns: new Set() };
+        ch.add(me);
+        return harden({
+          send: (data) => {
+            // (plain data only: text, numbers, true/false, null, and arrays and plain objects of those; no
+            // functions or stand-ins, which JSON would drop or turn into {} without a word)
+            const plain = (v, depth) => {
+              if (depth > 50) fail('a message is nested too deep');
+              if (v === null || typeof v === 'string' || typeof v === 'boolean' || (typeof v === 'number' && Number.isFinite(v))) return;
+              if (Array.isArray(v)) { for (const x of v) plain(x, depth + 1); return; }
+              const pr = typeof v === 'object' ? Object.getPrototypeOf(v) : undefined;
+              if (pr !== Object.prototype && pr !== null) fail('a message is plain data: text, numbers, true/false, null, arrays and plain objects (no functions or elements)');
+              for (const k of Object.keys(v)) plain(v[k], depth + 1);
+            };
+            plain(data, 0);
+            const text = JSON.stringify(data);
+            if (text.length > 256 * 1024) fail('a message is up to 256 KB');
+            for (const other of ch) if (other !== me) for (const f of other.fns) setTimeout(() => other.call(f, JSON.parse(text), harden({ from: modId })), 0);
+          },
+          on: (fn) => { if (typeof fn !== 'function') fail('on takes a function'); me.fns.add(fn); return harden(() => { me.fns.delete(fn); }); },
+        });
+      },
       searchBox: (o) => {
         needs('search-box');
         const tmpl = (self.args['search-box'] || [])[0];
@@ -845,8 +911,20 @@ export function sandboxRuntime(mode, pageModId, pageFn, pagePowers) {
     },
     setValue(v) {
       const n = nodeOf(this);
-      if (!created.has(n) || !/^(input|select)$/.test(n.localName)) fail('setValue is for the mod\'s own controls (changing what the user typed is the write-drafts power, not in this version)');
-      n.value = str(String(v), 'a value', 10000);
+      const val = str(String(v), 'a value', 100000);
+      if (created.has(n) && /^(input|select)$/.test(n.localName)) { n.value = val; return; }
+      // write-drafts: what the user typed in the page's text fields and editors, changed before they post it;
+      // never a password or card field, nor one the user doesn't type in
+      if (!isField(n)) fail(`<${n.localName}> has no value`);
+      if (!draftsOk(cur())) fail('changing what the user typed needs the write-drafts power (// @powers write-drafts)');
+      if (secretField(n)) fail('password and card fields stay the user\'s, whatever the mod\'s powers');
+      if (n.localName === 'select' || (n.localName === 'input' && !/^(text|search|email|url|tel|)$/i.test(String(n.type)))) fail(`a ${n.localName === 'select' ? 'select' : `${n.type} input`} isn't a text the user types`);
+      if (n.isContentEditable) { n.textContent = val; } else {
+        // (through the element's own value setter, and an input event, so the page's code sees the change)
+        const proto = n.localName === 'textarea' ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype;
+        Object.getOwnPropertyDescriptor(proto, 'value').set.call(n, val);
+      }
+      n.dispatchEvent(new Event('input', { bubbles: true }));
     },
     // page-data: the page's own data behind this element (React props and fiber), by a path, as a plain copy
     pageData(path) {
@@ -938,6 +1016,27 @@ export function sandboxRuntime(mode, pageModId, pageFn, pagePowers) {
     rect() { const r = nodeOf(this).getBoundingClientRect(); return harden({ x: r.x, y: r.y, width: r.width, height: r.height, top: r.top, left: r.left, right: r.right, bottom: r.bottom }); },
     on(type, fn, opts) { const n = nodeOf(this); return cur().listen(n, type, fn, opts); },
     // (only the mod's own: a page's canvas may be a signature pad or a drawing the page uploads: audit AU-6)
+    // media: the page's own audio and video
+    play() { const n = mediaOf(this); const p = n.play(); return p && typeof p.then === 'function' ? p.then(() => true, () => false) : true; },
+    pause() { mediaOf(this).pause(); },
+    setMuted(on) { mediaOf(this).muted = !!on; },
+    setVolume(v) { if (typeof v !== 'number' || !(v >= 0 && v <= 1)) fail('a volume is from 0 to 1'); mediaOf(this).volume = v; },
+    seek(t) { if (typeof t !== 'number' || !Number.isFinite(t) || t < 0) fail('seek takes a time in seconds'); mediaOf(this).currentTime = t; },
+    get media() { const n = nodeOf(this); return /^(video|audio)$/.test(n.localName) && cur().powers.has('media') ? harden({ paused: n.paused, muted: n.muted, volume: n.volume, currentTime: n.currentTime, duration: Number.isFinite(n.duration) ? n.duration : null }) : null; },
+    // click: only what the header names, never something that submits or a link to another site
+    click() {
+      const n = nodeOf(this);
+      const api = cur();
+      if (!api.powers.has('click')) fail('clicking for the user needs the click power, with what it may click named in the header (// @click words: selector)');
+      const named = (api.args.click || []).map((c) => String(c).replace(/^[^:]*:\s*/, '')).filter(Boolean);
+      let ok = false;
+      for (const sel of named) { try { if (n.matches(sel)) { ok = true; break; } } catch { /* not a selector */ } }
+      if (!ok) fail('that isn\'t one of the things the header says this mod may click');
+      if (submits(n)) fail('a click that would submit or reset a form isn\'t offered, whatever the header says');
+      const a = n.closest('a[href], area[href]');
+      if (a) { let u = null; try { u = new URL(a.href); } catch { /* none */ } if (!u || u.origin !== ORIGIN) fail('a click on a link to another site isn\'t offered'); }
+      n.click();
+    },
     canvas() { const n = nodeOf(this); if (n.localName !== 'canvas') fail('canvas() is for <canvas> elements'); if (!created.has(n)) fail('canvas() is for canvases the mod made'); return ctxOf(n); },
   };
   const protoOut = {};

@@ -454,7 +454,13 @@ const handlers = {
       let asked;
       const rel0 = path.relative(ctx.ws.modsDir, path.resolve(file)).split(path.sep);
       let askedArgs = {};
-      try { const pa = bp.parsePowersWithArgs(header.powers, { site: rel0.length === 2 ? rel0[0] : '', matches: header.matches }); asked = pa.names; askedArgs = pa.args; } catch (e) {
+      try {
+        const pa = bp.parsePowersWithArgs(header.powers, { site: rel0.length === 2 ? rel0[0] : '', matches: header.matches }); asked = pa.names; askedArgs = pa.args;
+        const clicks = bp.parseClicks(header.clicks);
+        if (clicks.length && !asked.includes('click')) throw new bp.PowersError('@click lines are for a mod with the click power (@powers click)');
+        if (asked.includes('click') && !clicks.length) throw new bp.PowersError('the click power needs what it may click: // @click the play button: button.play');
+        if (clicks.length) askedArgs.click = clicks;
+      } catch (e) {
         if (ctx.json) printJson({ ok: false, error: e.message }); else out(`${path.resolve(file)}: ${e.message}`);
         process.exitCode = 1;
         return;

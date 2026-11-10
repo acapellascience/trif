@@ -112,6 +112,13 @@ function sandboxLint(code, { powers = [] } = {}) {
     if (member && next && next.v === '(' && /^(add|remove|toggle)$/.test(t.v) && ts[k - 2] && ts[k - 2].v === 'classes' && arg(0) && arg(0).t === 'str' && !own(arg(0).v)) {
       add(`classes.${t.v}('${arg(0).v.slice(0, 40)}')`, 'classes a boxed mod adds, removes or toggles must start with trif-box- (the page\'s own code, or a free mod, acts on classes)', t.line);
     }
+    // (phase 3: the page's media, clicking what the header names, going to a page, a channel, changing drafts)
+    if (member && next && next.v === '(') {
+      if (t.v === 'click') { powerUse('.click()', 'click', t.line); continue; }
+      if (/^(play|pause|setMuted|setVolume|seek)$/.test(t.v)) powerUse(`.${t.v}()`, 'media', t.line);
+      if (t.v === 'setValue' && !has.has('controls')) powerUse('.setValue()', 'write-drafts', t.line);
+      if ((t.v === 'goTo' || t.v === 'channel') && ts[k - 2] && ts[k - 2].v === 'trif') powerUse(`trif.${t.v}`, t.v === 'goTo' ? 'go-to' : 'mods', t.line);
+    }
     if (member) {
       // (`.style.x`: a real element's style object; a stand-in's style is a function)
       if (t.v === 'style' && next && next.t === 'p' && next.v === '.') add('.style.…', 'a stand-in\'s style is style(property, value)', t.line);

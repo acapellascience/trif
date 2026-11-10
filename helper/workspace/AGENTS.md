@@ -335,7 +335,9 @@ the site (`trif tabs`; `trif open <url>` if none) and look:
    TRIF's API (elements as stand-ins, `trif.css`/`hide`/`observe`/`text`/`settings`, timers, canvas):
    for what a style mod can't express, like logic, new elements, animation or drawing. If it needs one
    exception (sound, its own sliders, hotkeys, reading what the user types, filtering the posts the
-   site loads, reading the app's data behind an element, a search box), it asks for that **power**
+   site loads, reading the app's data behind an element, a search box, the page's video, going to or
+   clicking what the header names, changing the user's draft, talking to its other mods), it asks for
+   that **power**
    (`// @powers sound`, see "Powers" in TECHNIQUES.md): the user approves the set once.
 3. **A free mod** (`trif new <site> <mod>`): only when it needs the page itself: changing what the
    site loads (not just leaving things out), patching its code, or acting for the user.

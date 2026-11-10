@@ -63,10 +63,10 @@ const o = { window: 1, document: 2 }; page.find('a').click();
 const s = '<!-- x';
 `);
   const what = lint.map((l) => l.what);
-  assert.deepEqual(what, ['document', '.innerHTML', 'window', 'localStorage', '.addEventListener', 'setTimeout("…")', '.style.…', 'import(', '.click', '<!-- or -->']);
+  assert.deepEqual(what, ['document', '.innerHTML', 'window', 'localStorage', '.addEventListener', 'setTimeout("…")', '.style.…', 'import(', '.click()', '<!-- or -->']);
   assert.deepEqual(lint.find((l) => l.what === 'document').lines, [2]);
   assert.match(lint.find((l) => l.what === '.innerHTML').why, /setText/);
-  assert.match(lint.find((l) => l.what === '.click').why, /can't click/);
+  assert.match(lint.find((l) => l.what === '.click()').why, /needs the click power/);
   // names a mod gives: TRIF's own
   assert.deepEqual(sandboxLint(`el.setAttr('data-hx-post', '/x'); el.setAttr('data-trif-box-ok', '1'); el.setAttr('id', 'config'); el.setAttr('id', 'trif-box-a');
 el.classes.add('js-x'); el.classes.add('trif-box-y'); el.classes.remove('done'); el.removeAttr('data-ahr');`).map((l) => l.what),
@@ -95,7 +95,7 @@ test('trif check: a sandboxed mod never waits; what the sandbox would refuse is 
   r = await runCli(['check', badFile], { home });
   assert.equal(r.code, 0, r.stderr);
   assert.match(r.stdout, /- document: not there in a boxed mod/);
-  assert.match(r.stdout, /- \.click: a boxed mod can't click for the user/);
+  assert.match(r.stdout, /- \.click\(\): needs the click power/);
   assert.match(r.stdout, /line 6: document\.querySelector/);
   // a syntax error is still one (with the file's own line numbers)
   const broken = writeMod(home, 'x.com', 'broken.js', header() + 'const = 1;\n');

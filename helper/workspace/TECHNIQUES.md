@@ -129,7 +129,8 @@ Good to know:
 A boxed mod that needs one exception asks for it in its header, `// @powers sound, read-drafts`, from this
 menu. TRIF holds the mod until the user approves that set of powers, once (an update that asks for nothing
 new doesn't ask again; one that adds a power waits for it), and gives it those and nothing more. No power
-sends anything, so ask only for what the mod needs; a mod that needs the network is a free mod.
+sends anything the mod makes up (go-to and click go only where the header or the page's links say), so ask
+only for what the mod needs; a mod that needs the network is a free mod.
 
 - `sound`: `trif.audio()`: `tone({frequency, duration, volume, type, at})`, `play(dataUrl, {volume})`,
   and nodes for your own graph: `oscillator({type, frequency})`, `gain(v)`, `filter({type, frequency, Q})`,
@@ -158,8 +159,26 @@ sends anything, so ask only for what the mod needs; a mod that needs the network
   any element; you can't fill or read it. When the user presses Enter, it goes to the address in the header
   with their words: `// @powers search-box https://www.example.com/search?q={query}` (on the mod's own site).
 
-The rest of the menu (`media`, `go-to`, `click`, `write-drafts`, `mods`) isn't in this version yet: `trif
-check` says so.
+- `media`: on the page's own `<video>` and `<audio>`: `play()` (a promise of true, or false if the browser
+  wouldn't), `pause()`, `setMuted(bool)`, `setVolume(0..1)`, `seek(seconds)`, and `.media` (`{paused, muted,
+  volume, currentTime, duration}`). Never their source.
+- `go-to`: `trif.goTo(where)`: to a page the header lists (`// @powers go-to /home /i/bookmarks`: literal
+  paths of the site, no query, `#` or `*`), or to an address a link on the page already shows, on the
+  same site. Nothing you build: no query you add.
+- `click`: `el.click()` on what the header names, each on a line of its own with words the user reads:
+  `// @click the play button: button.play` (the hold says "can click these for you: the play button
+  (button.play)"). Never something that submits or resets a form (submit or reset buttons, a button with
+  no type in a form, a label for those), and never a link to another site, whatever the header says.
+- `write-drafts`: change what the user is about to post: `setValue(text)` on the page's text fields and
+  textareas (TRIF sends the page an `input` event, so React and the like see it), and `setText`, adding
+  and removing inside editors. Never a password or card field, a hidden input or a select. To change what
+  they typed you need to read it too (`read-drafts`): the hold then also says the pair "could put what it
+  reads into something you post". While another boxed mod on the page has a read power (`keys`,
+  `read-drafts`, `site-data`, `page-data`) that yours didn't ask for, your writes are refused, with an
+  error that says which.
+- `mods`: `trif.channel(name)` gives `send(data)` and `on((data, {from}) => …)` between your boxed mods on
+  this page that have the power: plain data only (text, numbers, true/false, null, arrays, plain objects),
+  delivered a moment later. Doesn't make the mod wait on its own.
 
 ## Writing mods TRIF can read
 

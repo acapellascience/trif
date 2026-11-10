@@ -154,7 +154,8 @@ const REPO_DIR = path.join(__dirname, '..');
 
 async function demoEnv() {
   const { localAssets } = await import('../site/local-assets.js');
-  return env({ EXTENSION: localAssets(path.join(REPO_DIR, 'extension')) });
+  const { MOUNTS } = await import('../site/stage-assets.js');
+  return env({ ASSETS: localAssets(MOUNTS) });
 }
 const get = async (worker, e, p) => worker.fetch(new Request(`https://timsrobot.com${p}`), e);
 const directives = (res) => Object.fromEntries(res.headers.get('Content-Security-Policy').split(/;\s*/).map((d) => { const [k, ...v] = d.split(' '); return [k, v.join(' ')]; }));
@@ -463,4 +464,106 @@ test('the Worker: the robot as the tab icon, the home-screen icon and the link p
     assert.equal(png.subarray(1, 4).toString(), 'PNG', p);
     assert.deepEqual([png.readUInt32BE(16), png.readUInt32BE(20)], [w, h], p);
   }
+});
+
+// ---- the notes (site/src/notes.js, site/notes/, site/public/notes/) ----------------------------------------
+
+test('notes: each note\'s page, plain HTML that loads nothing from X or anywhere else, with its link preview', async () => {
+  const [{ default: worker }] = await load();
+  const e = await demoEnv();
+  const { NOTES } = await import('../site/src/notes.js');
+  assert.ok(Object.keys(NOTES).length >= 1);
+  for (const [slug, n] of Object.entries(NOTES)) {
+    const res = await get(worker, e, `/notes/${slug}`);
+    assert.equal(res.status, 200, slug);
+    assert.equal((await get(worker, e, `/notes/${slug}/`)).status, 200, `${slug}/`);
+    const d = directives(res);
+    assert.equal(d['default-src'], "'none'");
+    assert.equal(d['media-src'], "'self'");
+    assert.equal(d['img-src'], "'self'");
+    const html = await res.text();
+    assert.ok(!/<script/i.test(html), `${slug}: no script`);
+    // everything it loads (src, poster) is this site's own
+    for (const [, url] of html.matchAll(/\s(?:src|poster)="([^"]+)"/g)) assert.ok(url.startsWith(`/notes/${slug}/`), `${slug} loads ${url}`);
+    assert.ok(html.includes(`<meta property="og:title" content="`), slug);
+    assert.ok(html.includes(`<meta property="og:image" content="https://timsrobot.com/notes/${slug}/`), slug);
+    assert.ok(html.includes(`<link rel="canonical" href="https://timsrobot.com/notes/${slug}">`), slug);
+    // every post is a picture linking to it on X; every list item is in a list
+    for (const b of n.blocks.filter((x) => x.t === 'post')) assert.ok(html.includes(`<a class="post" href="${b.href}"`), b.href);
+    assert.ok(!/<\/ul>\s*<li>/.test(html) && !/<p><li>/.test(html), `${slug}: lists`);
+  }
+  assert.equal((await get(worker, e, '/notes/not-a-note')).status, 404);
+});
+
+test('notes: their pictures and videos are served from the site (byte ranges for the videos), and nothing else is', async () => {
+  const [{ default: worker }] = await load();
+  const e = await demoEnv();
+  const { NOTES } = await import('../site/src/notes.js');
+  const [slug, n] = Object.entries(NOTES)[0];
+  for (const f of n.files) {
+    assert.ok(fs.existsSync(path.join(REPO_DIR, 'site', 'public', 'notes', slug, f)), `${f}: run node site/build-notes.js`);
+    assert.ok(fs.statSync(path.join(REPO_DIR, 'site', 'public', 'notes', slug, f)).size < 24e6, `${f}: Cloudflare serves files up to 25 MB`);
+  }
+  const video = n.files.find((f) => f.endsWith('.mp4'));
+  const whole = fs.readFileSync(path.join(REPO_DIR, 'site', 'public', 'notes', slug, video));
+  const full = await get(worker, e, `/notes/${slug}/${video}`);
+  assert.equal(full.status, 200);
+  assert.equal(full.headers.get('Content-Type'), 'video/mp4');
+  assert.equal(full.headers.get('Accept-Ranges'), 'bytes');
+  const ranged = await worker.fetch(new Request(`https://timsrobot.com/notes/${slug}/${video}`, { headers: { Range: 'bytes=100-1123' } }), e);
+  assert.equal(ranged.status, 206);
+  assert.equal(ranged.headers.get('Content-Range'), `bytes 100-1123/${whole.length}`);
+  assert.deepEqual(Buffer.from(await ranged.arrayBuffer()), whole.subarray(100, 1124));
+  const tail = await worker.fetch(new Request(`https://timsrobot.com/notes/${slug}/${video}`, { headers: { Range: 'bytes=-10' } }), e);
+  assert.deepEqual(Buffer.from(await tail.arrayBuffer()), whole.subarray(whole.length - 10));
+  assert.equal((await worker.fetch(new Request(`https://timsrobot.com/notes/${slug}/${video}`, { headers: { Range: `bytes=${whole.length + 5}-` } }), e)).status, 416);
+  const img = n.files.find((f) => f.endsWith('.jpg'));
+  assert.equal((await get(worker, e, `/notes/${slug}/${img}`)).headers.get('Content-Type'), 'image/jpeg');
+  // only the note's own files: not its sources, not another folder's, not the extension's
+  for (const p of [`/notes/${slug}/article.json`, `/notes/${slug}/note.json`, `/notes/${slug}/../../ext/lib.js`, `/notes/${slug}/nope.jpg`, '/ext/lib.js', '/notes/x/lib.js']) {
+    assert.equal((await get(worker, e, p)).status, 404, p);
+  }
+});
+
+test('notes: site/src/notes-data.js is up to date with site/notes/ (node site/build-notes.js), and its text is the article\'s', async () => {
+  const { buildNote, notesModule, OUT, NOTES_DIR, cleanInline } = await import('../site/build-notes.js');
+  const slugs = fs.readdirSync(NOTES_DIR).filter((s) => fs.existsSync(path.join(NOTES_DIR, s, 'article.json')));
+  const notes = [];
+  for (const slug of slugs) notes.push(await buildNote(slug, { fetchMedia: false }));
+  assert.equal(fs.readFileSync(OUT, 'utf8'), notesModule(notes), 'run node site/build-notes.js');
+  // every paragraph's words survive, in order
+  const strip = (h) => h.replace(/<br>/g, ' ').replace(/<[^>]+>/g, '').replace(/&quot;/g, '"').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&amp;/g, '&').replace(/\s+/g, ' ').trim();
+  for (const slug of slugs) {
+    const raw = JSON.parse(fs.readFileSync(path.join(NOTES_DIR, slug, 'article.json'), 'utf8')).blocks.filter((b) => b.type === 'text').map((b) => strip(b.html)).filter(Boolean);
+    const built = notes.find((n) => n.slug === slug).blocks.filter((b) => b.html).map((b) => strip(b.html));
+    assert.deepEqual(built, raw, slug);
+  }
+  // runs: neighbours with the same style joined, links kept whole, X's short links shown as where they go
+  assert.equal(cleanInline('<b>a</b><b>b</b>c'), '<b>ab</b>c');
+  assert.equal(cleanInline('x <a href="https://e.com/" data-text="e.com"><i>e</i></a><a href="https://e.com/" data-text="e.com">.com</a>.'), 'x <a href="https://e.com/"><i>e</i>.com</a>.');
+  assert.equal(cleanInline('<a href="https://t.co/abc" data-text="github.com/x/y">github.com/x/y</a>'), '<a href="https://github.com/x/y">github.com/x/y</a>');
+  assert.equal(cleanInline('one\n\ntwo'), 'one<br><br>two');
+  assert.throws(() => cleanInline('<u>odd</u>'), /can't read/);
+});
+
+test('the site\'s files for deploys: the side panel\'s (only those the demo uses) and the notes\' pictures and videos', async () => {
+  const os = require('os');
+  const { stageAssets } = await import('../site/stage-assets.js');
+  const { EXTENSION_FILES } = await import('../site/src/demo.js');
+  const { NOTES } = await import('../site/src/notes.js');
+  const stage = fs.mkdtempSync(path.join(os.tmpdir(), 'trif-stage-'));
+  try {
+    stageAssets(stage);
+    const all = [];
+    const walk = (d, rel = '') => { for (const e of fs.readdirSync(path.join(d, rel), { withFileTypes: true })) e.isDirectory() ? walk(d, path.join(rel, e.name)) : all.push(path.join(rel, e.name).split(path.sep).join('/')); };
+    walk(stage);
+    for (const f of EXTENSION_FILES) assert.ok(all.includes(`ext/${f}`), f);
+    assert.equal(all.filter((f) => f.startsWith('ext/')).length, EXTENSION_FILES.size, 'nothing else from extension/');
+    for (const [slug, n] of Object.entries(NOTES)) for (const f of n.files) assert.ok(all.includes(`notes/${slug}/${f}`), f);
+  } finally {
+    fs.rmSync(stage, { recursive: true, force: true });
+  }
+  const toml = fs.readFileSync(path.join(REPO_DIR, 'site', 'wrangler.toml'), 'utf8');
+  assert.match(toml, /\[build\]\s*\ncommand = "node build-demo.js --stage"/);
+  assert.match(toml, /\[assets\]\s*\ndirectory = "\.assets"\s*\nbinding = "ASSETS"\s*\nrun_worker_first = true/);
 });

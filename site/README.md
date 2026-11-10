@@ -11,6 +11,7 @@ every request there to the same path on `timsrobot.com`, so older installs' "Rep
 - `src/pages.js`: the pages and the form's script. Nothing is loaded from anywhere else.
 - `src/report.js`: checking a report and writing its email (tested in `tests/site.test.js`).
 - `src/demo.js`: the home page's demo (below).
+- `src/notes.js`: `/notes/<slug>`, Tim's longer posts from X, for people who aren't on X (below).
 
 ## The demo
 
@@ -43,6 +44,49 @@ Browsers never send what's after the `#` to the server, so nothing leaves the co
 
 Reports are limited to 5 a minute per address, 64 KB each.
 
+## The Worker's files
+
+Besides what's in its code, the Worker serves files from its assets binding (`ASSETS`, wrangler.toml
+`[assets]`): the extension's side panel files the demo shows (under `ext/`: only `EXTENSION_FILES` in
+`src/demo.js`) and the notes' pictures and videos (`site/public/notes/`). They're staged into `site/.assets/`
+(not in git) by `node site/build-demo.js --stage` (`stage-assets.js`), which `wrangler.toml [build]` runs before
+every `wrangler deploy` (and `wrangler dev`). The Worker runs first for every request (`run_worker_first`), so a
+file there is only served when `src/index.js` asks for it. Locally, `dev.js` and the tests read the folders
+in place (`local-assets.js`, which answers byte ranges like the real binding).
+
+## Notes
+
+`timsrobot.com/notes/<slug>` is one of Tim's longer posts from X, ported so people who aren't on X can read
+it: plain HTML in the site's look, no script, and nothing loaded from X or anywhere else. Each note is a folder,
+`site/notes/<slug>/`:
+
+- `article.json`: the article, read out of its page on X (or its preview) by `site/notes/extract.js`, in the
+  browser you read X in:
+  `node helper/cli.js run --tab <id> --timeout 30000 -f site/notes/extract.js > site/notes/<slug>/article.json`
+- `note.json`: what X doesn't say: `x` (the post's address on X; until it's set, the page says the link is
+  coming), `date` (`YYYY-MM-DD`), and optionally `image` (the picture for the link preview card; by default the
+  first one shaped like a card).
+
+Then:
+
+```sh
+node site/shoot-posts.js <slug>    # the embedded posts, as pictures (needs Chrome for Testing: npm run browsers:install)
+node site/build-notes.js           # fetches the pictures and videos (once), writes src/notes-data.js
+```
+
+- **Pictures** are X's own (`name=large`), copied into `site/public/notes/<slug>/`.
+- **Videos** are re-encoded for the web: H.264 at most 1280 wide (960 for long ones), AAC, the index first so
+  they start at once, each under 14 MB (Cloudflare serves files up to 25 MB), with a still from each as its
+  poster. They play with the browser's own controls, never by themselves.
+- **Embedded posts** are pictures, not X's embed (which would load X, and its tracking, for every reader, and
+  often shows nothing to someone who isn't logged in): each post's card from X's public embed page, logged out,
+  in the dark theme, at 2x (`post-<id>.png`), in a TRIF-green frame, linking to the post on X. Its alt text is
+  the post's words.
+
+Run them again after an edit to the article (a new `article.json`): only what isn't there yet is fetched. A
+test checks `src/notes-data.js` is up to date, that the page loads only its own files, and that the text
+survives word for word.
+
 ## The Windows waitlist
 
 `timsrobot.com/windows` (linked from the home page's footer) takes an email address and emails it to the
@@ -64,7 +108,8 @@ node site/dev.js
 
 Then open http://localhost:8787/report (or /windows). Reports and waitlist signups are printed in the
 terminal instead of emailed. Use `localhost`, not `127.0.0.1`: the server checks that posts come from
-`http://localhost:<port>`. The demo is the tab on http://localhost:8787/.
+`http://localhost:<port>`. The demo is the tab on http://localhost:8787/; the notes are at
+http://localhost:8787/notes/<slug>.
 
 ## Deploy
 
@@ -76,6 +121,9 @@ Moving from the WebMods-era Worker (`webmods-site`, which served `webmods.dev`):
 `timsrobot-site`, a new one, so it needs its own `REPORT_TO` secret, and `webmods.dev` can only belong to one
 Worker. First remove `webmods.dev` from `webmods-site` (dashboard → Workers → webmods-site → Settings →
 Domains & Routes) or delete that Worker (`npx wrangler delete --name webmods-site`), then deploy this one.
+
+`wrangler deploy` first runs `node build-demo.js --stage` (`wrangler.toml [build]`), which bundles the demo
+and stages the Worker's files (above).
 
 ```sh
 cd site

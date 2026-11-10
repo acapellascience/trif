@@ -7,7 +7,7 @@ import { siteForUrl, modAppliesTo, modSites, isMultiSite, offOnSite, normalizeOf
   SITE_ACCESS, siteOrigins, siteState, hasSiteAccess, requestEverySite,
   normalizeModOrder, orderMods, moveId, setModOrder,
   normalizeSettings, normalizePicks, siteSettings, withoutModel } from './lib.js';
-import { setMarkdown } from './markdown.js';
+import { setMarkdown, unwrapMarkdown } from './markdown.js';
 import { createLogin } from './login.js';
 import { modSwitch, syncSwitches, shownEnabled, switchError, enabledIn, onSwitchChange } from './modswitch.js';
 import { mountOpenModel, renderOpenModel, openModelKeyMissing, watchOpenModel } from './openmodel.js';
@@ -1882,7 +1882,7 @@ function notesToggle(container, notes) {
     const shown = container.querySelector('.md');
     if (shown) { shown.remove(); e.target.textContent = 'What’s new'; return; }
     const md = el('div', 'md');
-    setMarkdown(md, notes);
+    setMarkdown(md, unwrapMarkdown(notes));
     container.append(md);
     e.target.textContent = 'Hide';
   });

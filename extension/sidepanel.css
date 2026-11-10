@@ -541,7 +541,9 @@ h3.mod-name { margin: 0; font-size: inherit; line-height: inherit; }
 .check { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--muted); }
 .check input { margin: 0; }
 
-#update .md { margin-top: 6px; font-size: 12px; color: var(--muted); }
+#update .md { margin-top: 6px; font-size: 12px; color: var(--muted); max-height: min(50vh, 320px); overflow-y: auto; overscroll-behavior: contain; }
+#update .md :is(ul, ol) { margin: 0; padding-left: 16px; }
+#update .md li + li { margin-top: 4px; }
 
 /* What a mod can do (held, or to review): TRIF's facts, read from its code, apart from what the mod says */
 .mods-review-note { margin: 4px 0 6px; font-size: 12px; color: var(--muted); }

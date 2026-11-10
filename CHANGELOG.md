@@ -1,10 +1,21 @@
 # Changelog
 
-What's new in each TRIF release (called WebMods before 0.2.0). The text under a version is what the side
-panel shows under "What's new", so it's written for people using TRIF. `node scripts/release.js <version>`
-needs a section here for the version it releases.
+What's new in each TRIF release (called WebMods before 0.2.0). From 0.2.6 on, each version starts with a
+short summary, at most 5 points: that's what the side panel shows under "What's new", with a link to the
+rest, which goes under "### More" (and on the GitHub release). It's written for people using TRIF.
+`node scripts/release.js <version>` needs a section here for the version it releases, and stops when its
+summary is too long.
 
 ## Unreleased
+
+- **Safer agents.** A mod that can post, click or send for you waits for your OK, and a tab your agent ran
+  code in can't post as you until it reloads.
+- **Choose what TRIF can reach:** every site (Permissive), or site by site with Connect (Restrictive).
+  Already using TRIF? You stay Permissive.
+- **Block a site** to keep TRIF away from it; the power button is now a quick pause.
+- A site's mods come in two groups, Rules and Page scripts, each with its own switch.
+
+### More
 
 - A site's mods now come in two groups, Rules and Page scripts, each with a switch for that site only.
 - **New mods can start off, by group.** Settings in the side panel has "New mods start": Rules and Page
@@ -51,7 +62,7 @@ needs a section here for the version it releases.
   which keeps Firefox's memory in check with big mods. (The helper and the browser extension both need
   this version; with an older extension, mods still stop at 1 MB in all, and `trif doctor` says to update
   it.)
-- **X-Flyer has music**, in the mod itself: Blast the Evil Eye while you fly and Big Boss once @elonmusk
+- **X-Flyer has music**, in the mod itself: Blast the Evil Eye while you fly and Big Boss once `@elonmusk`
   is full size (both by Tim), then the end of Stravinsky's Firebird (Stokowski, 1940) when he explodes.
   That makes it about 2 MB, so it needs this version.
   It's also smoother: the boss fight and heavy firing stay at 60 frames a second with your other X mods

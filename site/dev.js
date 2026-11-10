@@ -1,12 +1,12 @@
 // Run timsrobot.com locally without Cloudflare: node site/dev.js [port], then open http://localhost:<port>.
 // Reports and waitlist signups are printed here instead of emailed. (Node 18+ has the Request/Response the
 // Worker uses.) The demo's files are bundled again first (build-demo.js), and the side panel's files are read
-// from extension/ (as wrangler.toml [assets] serves them).
+// from extension/ and the notes' pictures and videos from site/public/ (as wrangler.toml [assets] serves them,
+// staged by stage-assets.js).
 import http from 'node:http';
-import path from 'node:path';
-import { fileURLToPath } from 'node:url';
 import { writeDemoModule } from './build-demo.js';
 import { localAssets } from './local-assets.js';
+import { MOUNTS } from './stage-assets.js';
 
 if (writeDemoModule()) console.log('bundled site/demo/ into site/src/demo-files.js');
 const { default: worker } = await import('./src/index.js');
@@ -16,7 +16,7 @@ const env = {
   REPORT_TO: 'you@example.com',
   REPORT_FROM: 'reports@timsrobot.com',
   EMAIL: { async send(msg) { console.log(`\n--- email to ${msg.to} (reply to ${msg.replyTo || '-'})\nSubject: ${msg.subject}\n\n${msg.text}`); return { messageId: 'dev' }; } },
-  EXTENSION: localAssets(path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'extension')),
+  ASSETS: localAssets(MOUNTS),
 };
 
 http.createServer(async (req, res) => {

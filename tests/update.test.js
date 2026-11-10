@@ -11,7 +11,7 @@ const crypto = require('crypto');
 const { execFileSync } = require('child_process');
 const { tempDir, runCli, privDir } = require('./fake-extension');
 const U = require('../helper/lib/update');
-const { changelogSection, unreleasedSection, repoMismatch, remoteRepo, latestFeed, signBytes, firefoxFeed, xpiMatches, releaseAssets } = require('../scripts/release');
+const { changelogSection, unreleasedSection, changelogSummary, unwrapMarkdown, summaryProblem, panelNotes, repoMismatch, remoteRepo, latestFeed, signBytes, firefoxFeed, xpiMatches, releaseAssets } = require('../scripts/release');
 
 const keys = () => {
   const { publicKey, privateKey } = crypto.generateKeyPairSync('ed25519');
@@ -325,6 +325,17 @@ test('release script: changelog sections and feeds the helper and Firefox accept
   assert.equal(unreleasedSection('# C\n\n## Unreleased\n\n## 0.1.2\n\n- x\n'), null, 'an empty one is fine');
   assert.ok((unreleasedSection(real) || '').length < 3900, 'the Unreleased notes are too long');
   for (const v of [...real.matchAll(/^## (\d+\.\d+\.\d+)/gm)].map((m) => m[1])) assert.ok(changelogSection(real, v).length < 3900, `${v}'s notes are too long`);
+  // The panel's "What's new" is a version's short summary (before "### More"), unwrapped, with a link to the
+  // rest; a release stops when the summary is too long. Unreleased has to pass, since it becomes the next one.
+  assert.equal(changelogSummary('- a\n- b\n\n### More\n\n- c'), '- a\n- b');
+  assert.equal(changelogSummary('- a'), '- a');
+  assert.equal(unwrapMarkdown('- **One.** a long\n  point\n- two\n\npara\ngoes on'), '- **One.** a long point\n- two\n\npara goes on');
+  assert.equal(summaryProblem('- a\n- b', '0.2.6'), null);
+  assert.match(summaryProblem('- 1\n- 2\n- 3\n- 4\n- 5\n- 6', '0.2.6'), /6 points/);
+  assert.match(summaryProblem(`- ${'x'.repeat(800)}`, '0.2.6'), /800|bytes/);
+  assert.match(summaryProblem('', '0.2.6'), /no summary/);
+  assert.equal(panelNotes('- a\n  b\n\n### More\n\n- c', { repo: 'o/r', version: '0.2.6' }), '- a b\n\n[All of what\'s new in 0.2.6](https://github.com/o/r/releases/tag/v0.2.6)');
+  assert.equal(summaryProblem(changelogSummary(unreleasedSection(real) || '- (nothing yet)'), 'Unreleased'), null, 'the Unreleased summary is too long for the panel');
   // package.json's repository against the git remote.
   assert.equal(remoteRepo('https://github.com/acapellascience/WebMods.git'), 'acapellascience/WebMods');
   assert.equal(remoteRepo('git@github.com:acapellascience/trif.git'), 'acapellascience/trif');

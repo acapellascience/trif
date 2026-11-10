@@ -12,7 +12,8 @@
 // everything there to the same path on timsrobot.com: older installs open webmods.dev/report#r=… (a
 // browser keeps the # part across the redirect).
 
-import { FAVICON_SVG, REPORT, REPORT_JS, WINDOWS, WINDOWS_JS, windowsPage } from './pages.js';
+import { REPORT, REPORT_JS, WINDOWS, WINDOWS_JS, windowsPage } from './pages.js';
+import { FAVICON_SVG } from './favicon.js';
 import { LIMITS, ReportError, parseReport, parseSignup, reportEmail, signupEmail } from './report.js';
 import { DEMO_FILES, EXTENSION_FILES, homeWith, modScript, pageWith, panelHtml, typeFor } from './demo.js';
 import { IMAGES } from './images.js';

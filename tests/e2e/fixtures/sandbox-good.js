@@ -38,7 +38,7 @@ trif.log('hello from the sandbox', { n: 1 });
 console.warn('a warning from the sandbox');
 (async () => {
   const s = await trif.settings('prefs', { visits: 0 });
-  await s.save({ visits: s.value.visits + 1 });
+  try { await s.save({ visits: s.value.visits + 1 }); } catch (e) { page.root.setAttr('data-sbx-visits', `not saved: ${e.message}`); return; }
   page.root.setAttr('data-sbx-visits', String(s.value.visits));
 })();
 const cells = page.findAll('.cell');

@@ -1,6 +1,8 @@
 # Design note: mods that can't act (a safe tier)
 
-Status: proposal, not built. Follows docs/SECURITY.md (0.3), which reads each mod's code (powers.js) and
+Status: **rules: built** (main). **Sandboxed: built on the `sandbox-tier` branch** (Chrome and Firefox;
+see "Sandboxed: what's built" below; spikes on `sandbox-spike` and `sandbox-standin`). `trif.filterResponse`
+and themes: not built. Follows docs/SECURITY.md (0.3), which reads each mod's code (powers.js) and
 holds mods that can act until the user allows them. That reading is careful but can never be a proof:
 deciding what arbitrary JavaScript will do is undecidable, and a determined author can always compute a
 name from page data at run time. This note is about the other way round: mods that **can't** act, so
@@ -62,7 +64,7 @@ executed by TRIF's runtime:
 - The runtime re-applies rules as the page changes (one shared observer for all rules mods), which is
   what most hiding mods hand-roll today.
 
-## Sandboxed: the world
+## Sandboxed: the world (the design; what's built is below)
 
 Chrome's userScripts API can run a script in a `USER_SCRIPT` world (and, since Chrome 133, a named world
 per mod via `worldId`) configured with `chrome.userScripts.configureWorld({ worldId, csp, messaging })`.
@@ -126,10 +128,72 @@ What the hand-rolled patterns become, so mods don't need the page's powers for t
 ## A plan
 
 1. **Rules tier**: schema, runtime support, `trif check` for it, AGENTS.md "prefer rules"; move the
-   CSS-only and pure-hiding mods (shipped ones first) to it. No browser questions; immediate win.
+   CSS-only and pure-hiding mods (shipped ones first) to it. No browser questions; immediate win. *(Built;
+   moving the shipped mods: not yet.)*
 2. **Spike the sandbox** in Chrome: one world, the guards, the hostile-mod e2e. Answer the CSP and
-   performance questions.
-3. **`trif.filterResponse`**, then move the data filters.
+   performance questions. *(Done: branches sandbox-spike, sandbox-standin.)*
+3. **`trif.filterResponse`**, then move the data filters. *(Not built.)*
 4. **Sandboxed tier** for agents by default in Chrome; Firefox when it can; page tier stays for the rest.
+   *(Built on branch sandbox-tier: AGENTS.md tells agents rules, then sandboxed, then page.)*
 5. **Themes / shared styling** on top of rules (closed-world tokens, as discussed: no free text, no
    code).
+
+## Sandboxed: what's built (branch sandbox-tier)
+
+Built on the stand-in design proved on the `sandbox-standin` branch (its notes there: "Stand-in design"):
+not a full browser world with the dangerous parts removed, but an empty one with what TRIF hands it. Working
+notes, decisions and open questions: docs/SANDBOX-TIER-NOTES.md.
+
+**Format.** `// @sandboxed` in the header (helper/lib/mods.js; `sandboxed: true` on the Mod). Never held
+for its code (held.js), like a rules mod. `trif check` lists what the sandbox wouldn't give it, as a lint
+(helper/lib/sandboxlint.js); `trif new --sandboxed`; `trif mods`/`status` say so.
+
+**The world** (extension/sandbox.js). TRIF's userScripts world `trif-sandbox`, configured once per
+background start with its own CSP (`connect-src 'none'`, loads only from data:/blob: and, for images, the
+page's site; 'unsafe-eval' only for SES's evaluator) and messaging for TRIF's own code (settings). Where any
+sandboxed mod runs, `trif-sandbox-runtime` loads SES (ses 2.3.0, Apache-2.0, extension/vendor, the npm
+file byte for byte) and runs `lockdown()` once per page; each mod is evaluated in a Compartment of its own,
+inside an async function. One world for all sandboxed mods, a compartment each (a world per mod would load
+SES and lock down again per mod per page).
+
+**What a mod has**: the language (frozen) and `page`, `trif`, `console`, the timers, `Math`, `Date`; no
+`eval`, `Function`, `Compartment` in the compartment, and SES's `Function.prototype.constructor` throws.
+Elements only as frozen stand-ins (one per node; one shared frozen prototype whose methods find the node in
+a WeakMap), with allowlisted operations. The TRIF API: `trif.css`, `trif.hide`, `trif.observe` and
+`trif.text` (one MutationObserver for every mod in the world), `trif.settings(key, defaults)` (per mod and
+per site, in the extension's storage, not the site's), `trif.log/warn/error`. Errors are caught (top level,
+callbacks, after an await) and kept in the world for `trif errors` / `trif logs`, which read them with
+`userScripts.execute`. The API in full: TECHNIQUES.md "Sandboxed mods".
+
+**The guards, as built** (each tried by the hostile e2e, below):
+- network: no fetch/XHR/WebSocket/EventSource/beacon/Worker in the compartment; the world's CSP; images only
+  data:/blob: or an address an image on the page already shows; links only this site's pages without a
+  query; CSS only if it loads nothing (rules mods' check); no `<link>`, `<script>`, `<iframe>`, `<object>`,
+  `<embed>`, `<form>`, `<input>`, `<style>`, `<svg>`, media...;
+- code from strings: none in the compartment; timers take functions; no `on*` attributes, `javascript:`,
+  `srcdoc`, `innerHTML`; no text written into `<script>`/`<style>` (an empty script the page made would run
+  it) or form controls' text;
+- other windows, frames, the page's globals and prototypes: not reachable (no window, frames by index or
+  `contentWindow`); the language is frozen; stand-ins and their prototype are frozen; a browser error
+  reaches the mod as a fresh TypeError (no DOMException object);
+- synthetic input: stand-ins have no click/dispatchEvent/focus/submit; no event constructors;
+- navigation: no location/open/history; no `target` attribute; no clicks;
+- clipboard, cookies, storage, postMessage: none of navigator, document, localStorage, postMessage.
+
+**Browsers.**
+- Chrome (138+; tested on 156): the sandbox as above.
+- Firefox (153+; tested on 159): see docs/SANDBOX-TIER-NOTES.md "Browsers".
+- Safari: no such world (TRIF's own adapter, extension/safari.js). Each sandboxed mod waits for the user's
+  OK, in the extension (`sandboxFallback` in lib.js: held by 'sandbox', with the reason), and once allowed
+  runs as a page script with the same API (sandbox.js `sandboxPageCode`), in the Page scripts group. Never
+  silently unsandboxed. The same applies to any browser whose `configureWorld` fails.
+
+**The hostile e2e** (tests/e2e/scenario.js `sandboxedCheck`, fixture tests/e2e/fixtures/sandbox-hostile.js):
+about 125 escapes tried; each must be refused or absent, the test server must see none of the `e2e-sbx-leak`
+addresses, the page must notice nothing (its own listeners for clicks, keys, submits, messages and inline
+code), its prototypes, form, script, style, link and image must be as they were, and the tab must stay where
+it was with no new tab. Plus a good mod (restyle, hide, add, text now and later, observe, canvas, timers,
+frames, a copy of a page image, listening, settings across a reload), errors and logs, the two sample ports
+(examples/sandboxed), and the panel's group switch. Results: docs/SANDBOX-TIER-NOTES.md "Measurements".
+
+**Not built**: `trif.filterResponse` (the data filters stay page scripts), themes.

@@ -369,6 +369,7 @@ function sandboxWorld() {
     if (typeof chrome.userScripts?.configureWorld !== 'function') { state.canSandbox = false; return false; }
     try {
       await chrome.userScripts.configureWorld({ worldId: SANDBOX_WORLD, csp: SANDBOX_CSP, messaging: true });
+      listenToSandbox(true);
       state.canSandbox = true;
     } catch (e) {
       if (!checkUserScripts()) return null; // (switched off meanwhile)
@@ -385,10 +386,27 @@ function sandboxWorld() {
 // is on (the browser says), not what the message says, so a mod can't carry what it read on one site to
 // another through its settings; the mod is the one TRIF's code in the world says (mods can't send).
 const SETTINGS_SITES_MAX = 200; // sites kept per mod (the oldest written go first)
-chrome.runtime.onUserScriptMessage?.addListener((msg, sender, sendResponse) => {
+// (Firefox has runtime.onUserScriptMessage only once its optional userScripts permission is granted, which can
+// be after this worker started: so it's listened for once user scripts are there, from sandboxWorld.)
+// (And there, a listener on `chrome.runtime`'s event, made before the grant, never heard a user script's
+// message in the e2e, while one on `browser.runtime`'s did: so in Firefox it's that one, looked at only once
+// the permission is there.)
+// The permission taken away and given back drops the listener too: then it's added again (`afterGrant`).
+let sandboxEvent = null;
+function listenToSandbox(afterGrant = false) {
+  if (sandboxEvent && !(afterGrant && FIREFOX)) return;
+  const ev = !FIREFOX ? chrome.runtime.onUserScriptMessage
+    : chrome.runtime.onUserScriptMessage || afterGrant ? globalThis.browser?.runtime?.onUserScriptMessage : null;
+  if (!ev) { if (afterGrant) log('warn', 'TRIF\'s sandbox: no runtime.onUserScriptMessage here, so sandboxed mods\' settings can\'t be kept until the browser starts again'); return; }
+  if (sandboxEvent) { try { sandboxEvent.removeListener(onSandboxMessage); } catch { /* gone with the permission */ } }
+  sandboxEvent = ev;
+  if (!ev.hasListener?.(onSandboxMessage)) ev.addListener(onSandboxMessage);
+}
+listenToSandbox();
+function onSandboxMessage(msg, sender, sendResponse) {
   if (!msg || typeof msg.trifSandbox !== 'string') return false;
   if (sender && sender.userScriptWorldId !== undefined && sender.userScriptWorldId !== SANDBOX_WORLD) return false;
-  (async () => {
+  const answer = (async () => {
     await ready;
     let host = '';
     try { host = new URL(sender?.url || sender?.origin || '').hostname; } catch { /* none */ }
@@ -416,9 +434,12 @@ chrome.runtime.onUserScriptMessage?.addListener((msg, sender, sendResponse) => {
       return { ok: true };
     }
     return { ok: false, error: 'unknown' };
-  })().then(sendResponse, (e) => sendResponse({ ok: false, error: errMsg(e) }));
+  })().catch((e) => ({ ok: false, error: errMsg(e) }));
+  // (Firefox takes the answer as a promise; Chrome through sendResponse)
+  if (FIREFOX) return answer;
+  answer.then(sendResponse);
   return true;
-});
+}
 
 function reportApplied(res) {
   post({ type: 'modsApplied', registered: res.registered, errors: res.errors });

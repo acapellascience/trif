@@ -19,7 +19,8 @@ summary is too long.
 
 ### More
 
-- A site's mods now come in two groups, Rules and Page scripts, each with a switch for that site only.
+- A site's mods come in three groups, each with a switch for that site: Rules, **Sandboxed** (JavaScript in
+  TRIF's sandbox: it can't send, click or load anything, so it never waits for your OK) and Page scripts.
 - **New mods can start off, by group.** Settings in the side panel has "New mods start": Rules and Page
   scripts, each On (as before) or Off. Set Page scripts to Off and a new page script waits, switched off
   and marked "new", until you've looked at it and switched it on, while new rules still apply at once.

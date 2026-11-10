@@ -1159,6 +1159,7 @@ class Scenario {
       await r.check('a rules mod: TRIF\'s own code applies its CSS, hides, replaces and filters (also what appears later); one that would load from an address is refused, not sent', () => this.rulesModCheck(win));
       await r.check('groups: "Page scripts" off on a site from the panel stops its page scripts there (rules keep running, other sites\' page scripts untouched); on again, back', () => this.groupsCheck(win));
       await r.check('sandboxed mods: a hostile one fails at every escape (network, code from strings, inline code, other windows and the page\'s globals, synthetic input, navigation, clipboard, cookies and storage, messages), with nothing reaching the server or the page; a good one restyles, hides, adds, rewrites text, draws, uses timers and settings, and watches; errors and logs reported; the two sample ports work; timing', () => this.sandboxedCheck(win));
+      await r.check('a sandboxed mod as a page script (how a browser without the sandbox runs one the user allowed): the same API works in the page\'s world', () => this.sandboxPageFormCheck(win));
       await r.check('sandboxed mods in the panel: their own group between Rules and Page scripts, with its switch (off on the site: they stop there; on: back), and "New mods start" has a Sandboxed row', () => this.sandboxedPanelCheck(win));
       await r.check('Settings → New mods start → Page scripts Off: a new page script arrives off, marked "new", and doesn\'t run; a new rules mod runs; switched on in the panel, it runs; Page scripts On again', () => this.startsOffCheck(win));
       await r.check('a hijacked agent (a stand-in Claude Code): the tab it ran code in sends nothing that changes anything until it reloads, even later; its mod that posts is held by its code, whatever its header says', () => this.hijackedAgentCheck(win));
@@ -1958,7 +1959,10 @@ process.exitCode = 1;
       const first = await waitFor('the sandboxed mods\' results', async () => {
         const o = last = await readPage();
         return o.hostile && o.good && o.timer && o.interval && o.frame && o.visits && o.mainMs && o.dvd && o.later && o.later[1] ? o : null;
-      }, { timeoutMs: 20000, intervalMs: 500 }).catch((e) => { throw new Error(`${e.message}: ${JSON.stringify(last)?.slice(0, 1500)}`); });
+      }, { timeoutMs: 20000, intervalMs: 500 }).catch((e) => {
+        const { hostile: h, windowNames: _w, good: g, ...rest } = last || {};
+        throw new Error(`${e.message}: ${JSON.stringify(rest).slice(0, 2500)} (hostile ${h ? 'done' : 'not done'}, good ${g ? 'done' : 'not done'})`);
+      });
       // a click the page gets (from the page's own world): the mod's listener hears it, as a stand-in
       await this.cli(['run', '--tab', String(win.tabId), `document.getElementById('target-click').click()`], { timeoutMs: 20000 });
       await sleep(1500); // (anything late: loads, timers)
@@ -2018,10 +2022,17 @@ process.exitCode = 1;
       const check = await this.cli(['check', path.join(dir, 'e2e-sbx-hostile.js')], { timeoutMs: 20000 });
       if (check.status !== 0 || !/never waits/.test(check.stdout) || !/- document: not there/.test(check.stdout) || !/- \.click:/.test(check.stdout)) missing.push(`trif check: ${check.stdout.slice(0, 400)}`);
       // timing (TRIF's own numbers, from the sandbox world) against a page mod doing the same
-      const stats = JSON.parse(await this.ext(`async (tabId, world) => {
+      const readStats = async () => JSON.parse(await this.ext(`async (tabId, world) => {
         const r = await chrome.userScripts.execute({ target: { tabId }, world: 'USER_SCRIPT', worldId: world, injectImmediately: true, js: [{ code: 'JSON.stringify(globalThis.__trifSandbox && globalThis.__trifSandbox.stats)' }] });
         return r[0].result;
       }`, [win.tabId, 'trif-sandbox']) || 'null');
+      const stats = await readStats();
+      // per frame: the DVD port's requestAnimationFrame callbacks over two seconds (the page otherwise idle)
+      if (stats) {
+        await sleep(2000);
+        const s2 = await readStats();
+        if (s2) stats.idle2s = { callbacks: s2.callbacks - stats.callbacks, ms: s2.callbackMs - stats.callbackMs, perCallbackMs: (s2.callbackMs - stats.callbackMs) / Math.max(1, s2.callbacks - stats.callbacks) };
+      }
       const samples = { simpleShopping: { shown: first.shown, carouselMarked: first.carouselMarked }, dvd: { moved: first.dvd !== later.dvd, logoHidden: first.logoHidden } };
       const samplesOk = first.shown.r1 && first.shown.r2 && !first.shown['r-ad'] && !first.shown['r-carousel'] && first.carouselMarked && samples.dvd.moved && first.logoHidden;
       if (!samplesOk) missing.push(`the samples: ${JSON.stringify(samples)}`);
@@ -2038,7 +2049,8 @@ process.exitCode = 1;
       const st2 = stats || {};
       return `${Object.keys(hostile).length} escapes tried, all refused or absent; server saw nothing; page noticed nothing; ${Object.keys(want).length} good things work; `
         + `${good.names.length} names on the global (${beyond.join(', ')} beyond the language); 1000 cells ${good.ms} ms sandboxed vs ${Number(first.mainMs).toFixed(1)} ms page; `
-        + `SES load ${st2.sesMs?.toFixed?.(1)} ms, lockdown ${st2.lockdownMs?.toFixed?.(1)} ms, mods' first runs ${Object.values(st2.mods || {}).map((m) => m.runMs.toFixed(1)).join('/')} ms, ${st2.callbacks} callbacks ${st2.callbackMs?.toFixed?.(1)} ms`;
+        + `SES load ${st2.sesMs?.toFixed?.(1)} ms, lockdown ${st2.lockdownMs?.toFixed?.(1)} ms, mods' first runs ${Object.values(st2.mods || {}).map((m) => m.runMs.toFixed(1)).join('/')} ms, ${st2.callbacks} callbacks ${st2.callbackMs?.toFixed?.(1)} ms`
+        + (st2.idle2s ? `; then 2 s of the DVD port: ${st2.idle2s.callbacks} frames, ${st2.idle2s.perCallbackMs.toFixed(3)} ms each` : '');
     } finally {
       for (const id of ids) { try { fs.unlinkSync(path.join(dir, `${id}.js`)); } catch { /* gone */ } }
     }
@@ -2072,6 +2084,35 @@ process.exitCode = 1;
     if (!/e2e-sbx-good\s+registered \(sandboxed mod, run as a page script/.test(st)) throw new Error(`trif status after Allow: ${st.split('\n').find((l) => l.includes('e2e-sbx-good'))}`);
     if (!/e2e-sbx-hostile\s+WAITING/.test(st)) throw new Error('the hostile one stopped waiting');
     return { status: 'pass', detail: `${this.d.name} has no sandbox: ${boxed.length} sandboxed mods waited (status WAITING, panel on hold under Page scripts, with the reason); Allow ran the good one as a page script (${JSON.parse(after.good).names.length} names), the others still wait` };
+  }
+
+  async sandboxPageFormCheck(win) {
+    const base = `http://127.0.0.1:${this.o.servers.port}`;
+    const source = fs.readFileSync(path.join(I.REPO, 'tests', 'e2e', 'fixtures', 'sandbox-good.js'), 'utf8')
+      .replace("const out = { names: Object.getOwnPropertyNames(globalThis).sort() };", 'const out = { names: [] };');
+    this.sandboxPage = true;
+    await this.ext(`async (id, url) => { await chrome.tabs.update(id, { url, active: true }); }`, [win.tabId, `${base}/sandbox.html?page-form`]);
+    await waitFor('the test page', async () => /complete/.test((await this.cli(['run', '--tab', String(win.tabId), 'document.readyState'], { timeoutMs: 20000 })).stdout) || null, { timeoutMs: 15000, intervalMs: 300 });
+    // (as lib.js registers an allowed one: sandbox.js sandboxPageCode, in the page's world)
+    await this.ext(`async (tabId, source) => {
+      const m = await import(chrome.runtime.getURL('sandbox.js'));
+      await chrome.userScripts.execute({ target: { tabId }, world: 'MAIN', injectImmediately: true, js: [{ code: m.sandboxPageCode('127.0.0.1/e2e-sbx-page-form', source) }] });
+    }`, [win.tabId, source]);
+    const read = async () => JSON.parse((await this.cli(['run', '--tab', String(win.tabId), `(() => { const d = document.documentElement, q = (s) => document.querySelector(s); return {
+      good: !!d.getAttribute('data-sbx-good'), timer: d.getAttribute('data-sbx-timer'), interval: d.getAttribute('data-sbx-interval'), frame: d.getAttribute('data-sbx-frame'),
+      visits: d.getAttribute('data-sbx-visits'), titleColor: getComputedStyle(q('#title')).color, hidden: q('.sbx-hide').getClientRects().length === 0,
+      made: q('#sbx-made')?.textContent || null, txt: q('#txt').textContent, seen: q('.later')?.getAttribute('data-seen') || null, copy: q('#sbx-copy')?.getAttribute('src') || null,
+      storage: Object.keys(localStorage) }; })()`], { timeoutMs: 20000 })).stdout);
+    let last = null;
+    const o = await waitFor('the page-script form\'s results', async () => { const x = last = await read(); return x.good && x.timer && x.interval && x.frame && x.visits && x.seen ? x : null; }, { timeoutMs: 15000, intervalMs: 400 })
+      .catch((e) => { throw new Error(`${e.message}: ${JSON.stringify(last)}`); });
+    const bad = Object.entries({ titleColor: o.titleColor === 'rgb(1, 2, 3)', hidden: o.hidden, made: o.made === 'made in the sandbox', txt: o.txt === 'the robot says hi',
+      copy: o.copy === '/favicon.ico', interval: o.interval === '3', frame: o.frame === 'number', visits: o.visits === '0',
+      storage: o.storage.includes('trif.settings.127.0.0.1/e2e-sbx-page-form.prefs') }).filter(([, v]) => !v).map(([k]) => k);
+    if (bad.length) throw new Error(`${bad.join(', ')}: ${JSON.stringify(o)}`);
+    // (its settings, in the page's storage as a page script, cleaned up)
+    await this.cli(['run', '--tab', String(win.tabId), `localStorage.clear()`], { timeoutMs: 20000 });
+    return 'restyle, hide, add, text, observe (later), timers, frames, image copy, settings (in the page\'s storage, as a page script): all work in the page\'s world';
   }
 
   async sandboxedPanelCheck(win) {

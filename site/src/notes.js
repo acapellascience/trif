@@ -18,7 +18,6 @@ main { max-width: 680px; margin: 0 auto; padding: 32px 16px 80px; }
 .top .robot { width: 32px; height: 32px; }
 h1 { font-size: clamp(30px, 6vw, 42px); line-height: 1.15; margin: 0 0 12px; letter-spacing: -0.02em; }
 .byline { color: var(--muted); font-size: 18px; font-style: italic; margin: 0 0 4px; }
-.byline a { color: var(--muted); }
 .date { color: var(--muted); font-size: 15px; margin: 0 0 36px; }
 h2 { font-size: 26px; line-height: 1.25; margin: 48px 0 12px; letter-spacing: -0.01em; }
 p { margin: 0 0 20px; overflow-wrap: anywhere; }
@@ -97,7 +96,7 @@ export function notePage(slug) {
 <div class="top"><a href="/">${ROBOT_SVG.replace('class="robot"', 'class="robot" width="32" height="32"').replace(/ width="128" height="128"/, '')}Tim's Robot Internet Fixer</a></div>
 <article>
 <h1>${esc(n.title)}</h1>
-<p class="byline">Tim Blais (<a href="https://x.com/MasterTimBlais">@MasterTimBlais</a>)</p>
+<p class="byline">Tim Blais</p>
 ${date ? `<p class="date"><time datetime="${esc(n.date)}">${date}</time></p>` : ''}
 ${parts.join('\n')}
 </article>

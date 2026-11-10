@@ -14,6 +14,8 @@ summary is too long.
   Already using TRIF? You stay Permissive.
 - **Block a site** to keep TRIF away from it; the power button is now a quick pause.
 - A site's mods come in two groups, Rules and Page scripts, each with its own switch.
+- **New mods can wait for you:** set Page scripts to start off (Settings), and a new one stays off
+  until you've looked at it.
 
 ### More
 

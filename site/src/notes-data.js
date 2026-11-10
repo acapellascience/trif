@@ -5,7 +5,7 @@ export const NOTES = {
   "title": "the internet is bad but now we can fix it",
   "description": "I made an open-source internet-fixer. It's called TRIF. It's a browser extension that lets you and your coding agent (claude, codex) easily change anything about any website. It's free and Mac users can try the beta now at timsrobot.com",
   "x": "",
-  "date": "",
+  "date": "2026-11-09",
   "image": {
    "src": "HWdxpOBXYAALVF6.jpg",
    "w": 2048,

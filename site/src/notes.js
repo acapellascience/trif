@@ -10,7 +10,8 @@ export { NOTES };
 const esc = (s) => String(s).replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`);
 
 const STYLE = `${TOKENS}
-body { margin: 0; background: var(--bg); color: var(--fg); font: 18px/1.6 -apple-system, system-ui, "Segoe UI", sans-serif; }
+html { background: #000; }
+body { margin: 0; background: #000; color: var(--fg); font: 18px/1.6 -apple-system, system-ui, "Segoe UI", sans-serif; }
 main { max-width: 680px; margin: 0 auto; padding: 32px 16px 80px; }
 .top { display: flex; align-items: center; gap: 10px; margin: 0 0 40px; font-size: 15px; }
 .top a { color: var(--fg); text-decoration: none; font-weight: 600; display: inline-flex; align-items: center; gap: 8px; }
@@ -18,6 +19,8 @@ main { max-width: 680px; margin: 0 auto; padding: 32px 16px 80px; }
 h1 { font-size: clamp(30px, 6vw, 42px); line-height: 1.15; margin: 0 0 12px; letter-spacing: -0.02em; }
 .byline { color: var(--muted); font-size: 15px; margin: 0 0 36px; }
 .byline a { color: var(--muted); }
+.origin { margin: -28px 0 36px; font-size: 15px; }
+.origin a { color: var(--muted); }
 h2 { font-size: 26px; line-height: 1.25; margin: 48px 0 12px; letter-spacing: -0.01em; }
 p { margin: 0 0 20px; overflow-wrap: anywhere; }
 ul { margin: 0 0 20px; padding-left: 26px; }
@@ -95,7 +98,8 @@ export function notePage(slug) {
 <div class="top"><a href="/">${ROBOT_SVG.replace('class="robot"', 'class="robot" width="32" height="32"').replace(/ width="128" height="128"/, '')}Tim's Robot Internet Fixer</a></div>
 <article>
 <h1>${esc(n.title)}</h1>
-<p class="byline">Tim Blais (<a href="https://x.com/MasterTimBlais">@MasterTimBlais</a>)${date ? ` · ${date}` : ''}</p>
+<p class="byline">Tim Blais (<a href="https://x.com/MasterTimBlais">@MasterTimBlais</a>)</p>
+<p class="origin">${n.x ? `<a href="${esc(n.x)}">` : ''}Originally published on X${date ? `, ${date}` : ''}${n.x ? '</a>' : ''}</p>
 ${parts.join('\n')}
 </article>
 <p class="source">First posted ${onX}${n.x ? '' : ' (link coming)'}. Embedded posts are pictures; click one to see it on X.</p>

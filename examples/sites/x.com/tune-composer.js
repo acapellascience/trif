@@ -19,7 +19,7 @@
 // - Each lane is a small piano roll over a 16-row pattern (16ths by default). Click to place a note, drag to set
 //   its length, click it again or right-click to remove it, Alt-click a pulse note to change its volume.
 //   One note at a time per channel, as on the chip.
-// - Patterns A–P, arranged into a song in the order strip (drag to move, right-click to remove).
+// - Patterns (A–Z, then AA…, up to 64), arranged into a song in the order strip (drag to move, right-click to remove).
 // - The space meter shows the tune's size in bytes, against what three picture corners hold: about 3.8 KB
 //   when X keeps the picture lossless (PNG), about 950 B if X re-saves it as a JPEG (see BUDGET).
 // - Save keeps the encoded bytes in this browser (localStorage), so what the meter shows is what's saved.
@@ -32,27 +32,12 @@
 // a power): no network, nothing of the page's own (no page globals, X's DOM only for the one button), only
 // localStorage and Web Audio.
 //
-// The format (TuneCodec below; bits are written most significant first; a song is at most 16 patterns of
-// 16 rows, played through an order list of up to 64 entries):
-//   header   version 3 (= 1) · tempo 8 (bpm = 32 + v, 32–287) · rows per beat 2 (2, 3, 4 or 6)
-//            Pulse 1 and Pulse 2: duty 2 · volume 4 · decay 3 (0 = hold, 1 fastest … 7 slowest) · sweep 1,
-//              and when sweep is on: negate 1 · period 3 · shift 3 (the NES's own sweep unit)
-//            Noise: volume 4 · custom kit 1, and when on: 8 × (period 4 · mode 1) (else the standard kit)
-//            (the triangle has no settings, like the chip's)
-//            patterns 4 (count − 1) · order 6 (length − 1) · order entries, ceil(log2(patterns)) bits each
-//   lanes    for each pattern, for each channel: 0 = lane data follows, 10 = empty, 11 + index = the same
-//            as this channel's lane in an earlier pattern (ceil(log2(this pattern's index)) bits)
-//   Pulse and Triangle lane data, events until the 16 rows are filled:
-//            pitch 6 · length 4 (1–16 rows)   10 bits, a note: pitch 0–61, from C2 on the pulses, C1 on the
-//                                                    triangle (about five octaves each)
-//            62 · length 4                   10 bits, a rest
-//            63 · kind 4 · 8 bits            18 bits, an escape, before the next note, for the rest of the
-//                                                    pattern (each pattern starts from the channel's settings):
-//                                                    kind 0 = volume 4 · decay 3 · 0, kind 1 = duty 2 · 000000
-//                                                    (pulses only; other kinds are reserved)
-//   Noise lane data: 1 · drum 3 · length 3 (1–8 rows), 7 bits, a hit; 0 · length 3, 4 bits, a rest
-//   then zero bits to the end of the byte, and a CRC-8 (polynomial 0x07) of everything before it.
-// A blank song is 8 bytes; the demo tune (TUNE_DEMO) is 215.
+// The format (TuneCodec below, where it's described in full): version 3 bits · length 13 bits · payload · CRC-8.
+// The payload describes the song by its structure: intervals from the last note (in steps of the song's key when
+// that's shorter), lengths as "the same again" or written out, lanes taken from earlier patterns or other
+// channels and moved, and repeats of earlier events in a lane. Those symbols then go through a small adaptive
+// binary range coder (integer maths only, so every browser reads it the same). Up to 64 patterns, 256 bars.
+// A blank song is 11 bytes; the demo tune (TUNE_DEMO) is 117. Measured: tests/dev/measure-tunes.js.
 
 (() => {
   if (window.top !== window) return;
@@ -62,30 +47,56 @@
   /* tune-codec:begin */
   // The song model and its bytes. Self-contained (no DOM, no audio), to be shared with Style Encoder and
   // Profile Styler when tunes go into pictures. A song:
-  //   { v: 1, tempo, rpb, inst: { p1, p2, noise }, patterns: [{ p1, p2, tri, noise }], order: [pattern index] }
+  //   { v, tempo, rpb, inst: { p1, p2, noise }, patterns: [{ p1, p2, tri, noise }], order: [pattern index] }
   //   pulse instrument { duty 0–3, vol 0–15, decay 0–7, sweep: null | { neg, period 0–7, shift 1–7 } }
   //   noise instrument { vol 0–15, kit: 8 × [period 0–15, mode 0 long | 1 short] }
   //   a note { row 0–15, len 1–16, pitch 0–61 } (pulse notes may also carry vol, decay, duty of their own)
   //   a hit  { row 0–15, len 1–8, drum 0–7 }
+  // Up to 64 patterns of 16 rows, and up to 256 entries in the order.
+  //
+  // The bytes: version 3 bits · payload length 13 bits · the payload · CRC-8 (polynomial 0x07) of all before it.
+  // The payload is a stream of symbols (below), written one of two ways:
+  //   version 3: a binary range coder (LZMA's kind, 11-bit odds), each symbol as the bits of a little binary
+  //     tree whose odds are kept per symbol kind and context, start from version 2's codes, and move by 1/2, 1/4,
+  //     1/4, 1/8 … then 1/16 of the way each time they're used (RATES: fast while there's little to go on)
+  //   version 2: plain prefix codes (each kind's short codes, then 1s and the symbol in full)
+  // Integer maths only, so every browser reads the same bytes the same way.
+  //
+  // The symbols. Settings first, in plain bits: tempo 8 (bpm − 32) · rows per beat 2 · key 4 (the tonic 0–11 of
+  // a major scale, or 12: none; the encoder tries all 13 and keeps the shortest) · Pulse 1 and 2: duty 2 ·
+  // volume 4 · decay 3 · sweep 1 (+ negate 1 · period 3 · shift 3) · Noise: volume 4 · custom kit 1 (+ 8 ×
+  // period 4 · mode 1) · patterns − 1: 6 · order length − 1: 8. The order: per entry, `ord` (the next pattern,
+  // the same again, or written out in full). Then per pattern and channel, `lane`:
+  //   empty · an earlier pattern's lane of this channel (`back` patterns back), moved by `shift` semitones ·
+  //   another melodic channel's lane (1 bit which, `back`, `shift`) · or its events, until 16 rows are filled:
+  //   a note: the interval from the channel's last note, `iv` in semitones (−61…61) or, in a key, `deg` in steps of
+  //     the scale (a note outside it: `deg` SHARP, then the step to the note below it); and `len` (0 = as the
+  //     last note, or 1–16)
+  //   a hit: `drum` (0–7) and `dlen` (0 = as the last hit, or 1–8)    a rest: `rlen` (0 = as the last, or 1–16)
+  //   a repeat: `repD` events back, `repN` events, moved by `shift` semitones (it may overlap itself: a repeat
+  //     of the last one, 7 times, is 7 more hats; moved, it climbs, a sequence)
+  //   a settings change (pulses, until the pattern ends): `esc` volume 4 / decay 3 / duty 2 bits
+  // Contexts (format 3): the event kind after the last one; intervals after the last interval (none, 0, up or down
+  // a little, up or down a lot) and per pulse/triangle; lengths after the last length; drums after the last drum.
   const TuneCodec = (() => {
-    const VERSION = 1, ROWS = 16, PITCHES = 62, REST = 62, ESC = 63;
+    const VERSION = 3, STATIC = 2, ROWS = 16, PITCHES = 62;
     const TEMPO_MIN = 32, TEMPO_MAX = 287, RPB = [2, 3, 4, 6];
-    const MAX_PATTERNS = 16, MAX_ORDER = 64, DRUMS = 8, MAX_DRUM_LEN = 8;
-    const CHANNELS = ['p1', 'p2', 'tri', 'noise'];
+    const MAX_PATTERNS = 64, MAX_ORDER = 256, DRUMS = 8, MAX_DRUM_LEN = 8, MAX_PAYLOAD = 8191;
+    const CHANNELS = ['p1', 'p2', 'tri', 'noise'], MELODIC = ['p1', 'p2', 'tri'];
     const BASE = { p1: 36, p2: 36, tri: 24 }; // (MIDI note of pitch 0: C2 on the pulses, C1 on the triangle)
     const DRUM_NAMES = ['Kick', 'Snare', 'Hat', 'Open hat', 'Low tom', 'High tom', 'Clap', 'Crash'];
     const DRUM_KEYS = 'KSHOLTCX'; // (for lanes written as text: Kick Snare Hat Open hat Low tom Tom high Clap X crash)
     const KIT = [[10, 0], [7, 0], [1, 0], [1, 0], [7, 1], [5, 1], [5, 0], [3, 0]]; // the standard kit: [period, mode]
     // Room: three corners of a 400×400 picture, 4×4-pixel cells outside X's round crop with a 4 px margin,
-    // 429 cells each, 9 of them kept for markers and a length (settled when this goes into pictures). A cell
-    // carries 24 bits when the picture stays lossless, 6 when X makes it a JPEG (each channel to 4 levels).
+    // 429 cells each, 9 of them kept for markers (settled when this goes into pictures). A cell carries 24 bits
+    // when the picture stays lossless, 6 when X makes it a JPEG (each channel to 4 levels).
     const CORNER_CELLS = 429, RESERVED_CELLS = 9, CORNERS = 3;
     const DATA_CELLS = (CORNER_CELLS - RESERVED_CELLS) * CORNERS;
     const BUDGET = { lossless: DATA_CELLS * 3, jpeg: Math.floor((DATA_CELLS * 6) / 8) }; // 3780 B, 945 B
 
     const fail = (msg) => { throw new RangeError(`tune: ${msg}`); };
     const int = (v, lo, hi, what) => (Number.isInteger(v) && v >= lo && v <= hi ? v : fail(`${what} must be a whole number from ${lo} to ${hi}, not ${v}`));
-    const bitsFor = (n) => (n <= 1 ? 0 : 32 - Math.clz32(n - 1));
+    const width = (n) => (n <= 1 ? 0 : 32 - Math.clz32(n - 1));
     const laneOf = (p, ch) => (ch === 'p1' ? p.p1 : ch === 'p2' ? p.p2 : ch === 'tri' ? p.tri : p.noise);
     const instOf = (inst, ch) => (ch === 'p1' ? inst.p1 : ch === 'p2' ? inst.p2 : null);
 
@@ -127,6 +138,7 @@
       for (let i = 1; i < out.length; i++) if (out[i].row < out[i - 1].row + out[i - 1].len) fail('Noise: hits overlap (one drum at a time)');
       return out;
     };
+    const laneNorm = (list, ch, inst) => (ch === 'noise' ? drums(list) : melodic(list, instOf(inst, ch), ch === 'p1' ? 'Pulse 1' : ch === 'p2' ? 'Pulse 2' : 'Triangle'));
     function normalize(s) {
       if (!s || typeof s !== 'object') fail('not a song');
       const si = s.inst || {};
@@ -135,7 +147,7 @@
       if (s.patterns.length > MAX_PATTERNS) fail(`a song has at most ${MAX_PATTERNS} patterns`);
       const patterns = s.patterns.map((p) => {
         p = p || {};
-        return { p1: melodic(p.p1, inst.p1, 'Pulse 1'), p2: melodic(p.p2, inst.p2, 'Pulse 2'), tri: melodic(p.tri, null, 'Triangle'), noise: drums(p.noise) };
+        return { p1: laneNorm(p.p1, 'p1', inst), p2: laneNorm(p.p2, 'p2', inst), tri: laneNorm(p.tri, 'tri', inst), noise: laneNorm(p.noise, 'noise', inst) };
       });
       if (!Array.isArray(s.order) || !s.order.length) fail('the song order is empty');
       if (s.order.length > MAX_ORDER) fail(`the song order has at most ${MAX_ORDER} entries`);
@@ -156,7 +168,6 @@
             n++;
           }
         },
-        get bits() { return n; },
         bytes: () => Uint8Array.from(bytes),
       };
     };
@@ -172,7 +183,6 @@
           }
           return v;
         },
-        get bits() { return n; },
       };
     };
     const crc8 = (bytes, end) => {
@@ -184,137 +194,408 @@
       return c;
     };
 
-    // --- encoding ---
-    const sameKit = (a, b) => a.every((k, i) => k[0] === b[i][0] && k[1] === b[i][1]);
-    const sameLane = (a, b) => JSON.stringify(a) === JSON.stringify(b);
-    function putMelodic(w, notes, inst) {
-      let row = 0;
-      const st = inst && { vol: inst.vol, decay: inst.decay, duty: inst.duty };
-      const rest = (to) => { while (row < to) { const l = Math.min(ROWS, to - row); w.put(REST, 6); w.put(l - 1, 4); row += l; } };
-      for (const n of notes) {
-        rest(n.row);
-        if (st) {
-          const vol = n.vol ?? inst.vol, decay = n.decay ?? inst.decay, duty = n.duty ?? inst.duty;
-          if (vol !== st.vol || decay !== st.decay) { w.put(ESC, 6); w.put(0, 4); w.put((vol << 4) | (decay << 1), 8); st.vol = vol; st.decay = decay; }
-          if (duty !== st.duty) { w.put(ESC, 6); w.put(1, 4); w.put(duty << 6, 8); st.duty = duty; }
+    // --- the symbols' alphabets, and their short codes: [size, [tier 0 values, tier 1 values, …]]. A value in
+    // tier t is t 1s, a 0 and its place in the tier; any other value, as many 1s as tiers and then itself ---
+    const IV = 63; // (an interval's symbol is the interval + 63)
+    // a key: the notes of a major scale (or its relative minor), its tonic's pitch class 0–11 (12: no key). Its
+    // notes are counted in steps of the scale; a note outside it is a sharp of the one below (one step: SHARP)
+    const MAJOR = [0, 2, 4, 5, 7, 9, 11], SHARP = 126, NO_KEY = 12;
+    const inKey = (p, k) => MAJOR.includes((p - k + 12) % 12);
+    const degree = (p, k) => { const d = p - k + 12 - (inKey(p, k) ? 0 : 1); return Math.floor(d / 12) * 7 + MAJOR.indexOf(d % 12); };
+    const pitchAt = (g, k) => Math.floor(g / 7) * 12 + MAJOR[g % 7] + k - 12;
+    const iv = (...xs) => xs.map((x) => x + IV);
+    const MODELS = {
+      ev: [4, [[0], [1, 2]]], // next in a lane: 0 a note (or a hit), 1 a rest, 2 a repeat, 3 a settings change
+      iv: [127, [iv(0, 2, -2, -1), iv(1, 3, -3, 4, -4, 5, -5, 7), iv(-7, 12, -12, 9, -9, 8, -8, 10)]], // in semitones
+      deg: [127, [iv(0, 1, -1, 2), iv(-2, 3, -3, 4, -4, 7, -7, 5), [...iv(-5, 6, -6, 9, -9, 8, -8), 126]]], // in steps of the key (126: sharp)
+      len: [17, [[0], [2, 1, 4, 8]]], // 0 = as the last one
+      rlen: [17, [[0], [2, 1, 4, 8]]],
+      drum: [8, [[2, 0], [1, 3]]],
+      dlen: [9, [[0], [1, 2, 4, 3]]],
+      repD: [16, [[0, 1, 3, 7]]], // (1 less than the distance and the count)
+      repN: [16, [[1, 3, 2, 7]]],
+      shift: [127, [iv(0), iv(12, -12, 5, -5, 7, -7, 2, -2)]],
+      lane: [4, [[0], [1, 2]]],
+      back: [64, [[1, 2, 4, 3]]],
+      ord: [3, [[0]]],
+      esc: [3, []],
+    };
+    const tierBits = (tier) => 31 - Math.clz32(tier.length);
+    const codeLen = (m, v) => {
+      const [n, tiers] = MODELS[m];
+      for (let t = 0; t < tiers.length; t++) if (tiers[t].includes(v)) return t + 1 + tierBits(tiers[t]);
+      return tiers.length + width(n);
+    };
+    // format 2: the codes as they are
+    const staticOut = () => {
+      const w = writer();
+      return {
+        minRepeat: 3, // (the shortest repeat worth its codes)
+        sym(m, ctx, v) {
+          const [n, tiers] = MODELS[m];
+          for (let t = 0; t < tiers.length; t++) {
+            const i = tiers[t].indexOf(v);
+            if (i >= 0) { w.put((1 << (t + 1)) - 2, t + 1); w.put(i, tierBits(tiers[t])); return; }
+          }
+          w.put((1 << tiers.length) - 1, tiers.length); w.put(v, width(n));
+        },
+        raw: (v, b) => w.put(v, b),
+        bytes: () => w.bytes(),
+      };
+    };
+    const staticIn = (bytes) => {
+      const r = reader(bytes);
+      return {
+        sym(m) {
+          const [n, tiers] = MODELS[m];
+          let t = 0;
+          while (t < tiers.length && r.get(1)) t++;
+          const v = t < tiers.length ? tiers[t][r.get(tierBits(tiers[t]))] : r.get(width(n));
+          return v < n ? v : fail('damaged data');
+        },
+        raw: (b) => r.get(b),
+      };
+    };
+    // format 3: a binary range coder. Each table holds, per node of a symbol's binary tree, the odds (of 2048)
+    // that the next bit is 0; it starts from the codes above (a value with a code k bits long: odds 2^−k)
+    const PB = 11, ONE = 1 << PB;
+    // (odds in the low 11 bits, and how often they've moved in the top 5: they move fast at first, then settle)
+    const RATES = [1, 2, 2, 3, 3, 3, 4];
+    const adapt = (p, i, b) => {
+      const q = p[i] & (ONE - 1), c = p[i] >> PB, r = RATES[Math.min(c, RATES.length - 1)];
+      p[i] = (b ? q - (q >> r) : q + ((ONE - q) >> r)) | (Math.min(c + 1, 31) << PB);
+    };
+    const priors = new Map();
+    const prior = (m) => {
+      if (!priors.has(m)) {
+        const n = MODELS[m][0], size = 1 << width(n), lens = [];
+        for (let v = 0; v < n; v++) lens.push(codeLen(m, v));
+        const top = Math.max(...lens), freq = (v) => (v < n ? 2 ** (top - lens[v]) : 0), p = new Uint16Array(size);
+        for (let node = 1; node < size; node++) {
+          const d = 31 - Math.clz32(node), span = size >> d, lo = (node - (1 << d)) * span;
+          let left = 0, all = 0;
+          for (let v = lo; v < lo + span; v++) { all += freq(v); if (v < lo + span / 2) left += freq(v); }
+          p[node] = all ? Math.min(ONE - 32, Math.max(32, Math.floor((left * ONE) / all))) : ONE >> 1;
         }
-        w.put(n.pitch, 6); w.put(n.len - 1, 4);
-        row += n.len;
+        priors.set(m, p);
       }
-      rest(ROWS);
-    }
-    function putDrums(w, hits) {
-      let row = 0;
-      const rest = (to) => { while (row < to) { const l = Math.min(MAX_DRUM_LEN, to - row); w.put(0, 1); w.put(l - 1, 3); row += l; } };
-      for (const h of hits) { rest(h.row); w.put(1, 1); w.put(h.drum, 3); w.put(h.len - 1, 3); row += h.len; }
-      rest(ROWS);
-    }
-    function encode(song) {
-      const s = normalize(song), w = writer();
-      w.put(VERSION, 3); w.put(s.tempo - TEMPO_MIN, 8); w.put(RPB.indexOf(s.rpb), 2);
-      for (const i of [s.inst.p1, s.inst.p2]) {
-        w.put(i.duty, 2); w.put(i.vol, 4); w.put(i.decay, 3); w.put(i.sweep ? 1 : 0, 1);
-        if (i.sweep) { w.put(i.sweep.neg ? 1 : 0, 1); w.put(i.sweep.period, 3); w.put(i.sweep.shift, 3); }
-      }
-      const nz = s.inst.noise, custom = !sameKit(nz.kit, KIT);
-      w.put(nz.vol, 4); w.put(custom ? 1 : 0, 1);
-      if (custom) for (const k of nz.kit) { w.put(k[0], 4); w.put(k[1], 1); }
-      w.put(s.patterns.length - 1, 4); w.put(s.order.length - 1, 6);
-      const ob = bitsFor(s.patterns.length);
-      for (const o of s.order) w.put(o, ob);
-      s.patterns.forEach((p, pi) => {
-        for (const ch of CHANNELS) {
-          const lane = laneOf(p, ch);
-          if (!lane.length) { w.put(2, 2); continue; }
-          const j = s.patterns.findIndex((q, qi) => qi < pi && sameLane(laneOf(q, ch), lane));
-          if (j >= 0) { w.put(3, 2); w.put(j, bitsFor(pi)); continue; }
-          w.put(0, 1);
-          if (ch === 'noise') putDrums(w, lane); else putMelodic(w, lane, instOf(s.inst, ch));
+      return priors.get(m);
+    };
+    const tableOf = (tables, m, ctx) => {
+      const k = `${m} ${ctx}`;
+      if (!tables.has(k)) tables.set(k, prior(m).slice());
+      return tables.get(k);
+    };
+    const acOut = () => {
+      const tables = new Map(), out = [];
+      let low = 0, range = 0xffffffff, cache = 0, pending = 1;
+      const shiftLow = () => {
+        if (low < 0xff000000 || low >= 0x100000000) {
+          const carry = low >= 0x100000000 ? 1 : 0;
+          let b = cache;
+          do { out.push((b + carry) & 0xff); b = 0xff; } while (--pending);
+          cache = (low >>> 24) & 0xff;
         }
-      });
-      const body = w.bytes();
-      return Uint8Array.from([...body, crc8(body, body.length)]);
-    }
+        pending++;
+        low = (low & 0xffffff) * 256;
+      };
+      const bit = (p, i, b) => {
+        const q = p ? p[i] & (ONE - 1) : ONE >> 1, bound = (range >>> PB) * q;
+        if (b) { low += bound; range -= bound; } else range = bound;
+        if (p) adapt(p, i, b);
+        while (range < 0x1000000) { range *= 256; shiftLow(); }
+      };
+      return {
+        minRepeat: 5, // (shorter ones cost more than the notes, once the odds have learnt the tune)
+        sym(m, ctx, v) {
+          const p = tableOf(tables, m, ctx), w = width(MODELS[m][0]);
+          for (let i = w - 1, node = 1; i >= 0; i--) { const b = (v >> i) & 1; bit(p, node, b); node = node * 2 + b; }
+        },
+        raw(v, w) { for (let i = w - 1; i >= 0; i--) bit(null, 0, (v >> i) & 1); },
+        bytes() {
+          // the shortest ending: the value in [low, low + range) with the most 0 bits after it (the reader
+          // reads 0s past the end)
+          for (let s = 32; s >= 0; s--) { const unit = 2 ** s, v = Math.ceil(low / unit) * unit; if (v < low + range) { low = v; break; } }
+          for (let i = 0; i < 5; i++) shiftLow();
+          out.shift(); // (the first byte is always 0)
+          while (out.length && !out[out.length - 1]) out.pop();
+          return Uint8Array.from(out);
+        },
+      };
+    };
+    const acIn = (bytes) => {
+      const tables = new Map();
+      let pos = 0, range = 0xffffffff, code = 0;
+      const next = () => (pos < bytes.length ? bytes[pos++] : 0);
+      for (let i = 0; i < 4; i++) code = code * 256 + next();
+      const bit = (p, i) => {
+        const q = p ? p[i] & (ONE - 1) : ONE >> 1, bound = (range >>> PB) * q;
+        let b = 0;
+        if (code < bound) range = bound; else { code -= bound; range -= bound; b = 1; }
+        if (p) adapt(p, i, b);
+        while (range < 0x1000000) { range *= 256; code = (code % 0x1000000) * 256 + next(); }
+        return b;
+      };
+      return {
+        sym(m, ctx) {
+          const n = MODELS[m][0], p = tableOf(tables, m, ctx), w = width(n);
+          let node = 1;
+          for (let i = 0; i < w; i++) node = node * 2 + bit(p, node);
+          return node - (1 << w) < n ? node - (1 << w) : fail('damaged data');
+        },
+        raw(w) { let v = 0; for (let i = 0; i < w; i++) v = v * 2 + bit(null, 0); return v; },
+      };
+    };
 
-    // --- decoding (trailing bytes after the checksum are ignored: a picture's corners may hold more) ---
-    function getMelodic(r, inst) {
-      const notes = [];
-      const st = inst && { vol: inst.vol, decay: inst.decay, duty: inst.duty };
+    // --- lanes as events: notes ({ pitch, len } and on the pulses their settings in full), hits, rests ---
+    const EV_NOTE = 0, EV_REST = 1, EV_REPEAT = 2, EV_SET = 3;
+    const settingOf = (e, k) => (k === 0 ? e.vol : k === 1 ? e.decay : e.duty);
+    const setSetting = (e, k, v) => { if (k === 0) e.vol = v; else if (k === 1) e.decay = v; else e.duty = v; };
+    const SETTING_BITS = [4, 3, 2];
+    function toEvents(lane, ch, inst) {
+      const out = [], pi = instOf(inst, ch);
       let row = 0;
-      while (row < ROWS) {
-        const p = r.get(6), l = r.get(4);
-        if (p === ESC) {
-          if (!st) fail('the triangle has no settings to change');
-          const a = r.get(8);
-          if (l === 0) { st.vol = a >>> 4; st.decay = (a >>> 1) & 7; } else if (l === 1) st.duty = a >>> 6; else fail(`escape ${l} is reserved`);
+      for (const n of lane) {
+        if (n.row > row) out.push({ rest: n.row - row });
+        out.push(ch === 'noise' ? { drum: n.drum, len: n.len } : pi ? { pitch: n.pitch, len: n.len, vol: n.vol ?? pi.vol, decay: n.decay ?? pi.decay, duty: n.duty ?? pi.duty } : { pitch: n.pitch, len: n.len });
+        row = n.row + n.len;
+      }
+      if (row < ROWS) out.push({ rest: ROWS - row });
+      return out;
+    }
+    function fromEvents(events, ch, inst) {
+      const lane = [];
+      let row = 0;
+      for (const e of events) {
+        if (e.rest) { row += e.rest; continue; }
+        lane.push(ch === 'noise' ? { row, len: e.len, drum: e.drum } : { row, len: e.len, pitch: e.pitch, vol: e.vol, decay: e.decay, duty: e.duty });
+        row += e.len;
+      }
+      return laneNorm(lane, ch, inst);
+    }
+    const sameEvent = (a, b, t) => (a.rest || b.rest ? a.rest === b.rest : a.len === b.len
+      && (a.drum !== undefined ? a.drum === b.drum : a.pitch === b.pitch + t && a.vol === b.vol && a.decay === b.decay && a.duty === b.duty));
+    const moved = (e, t) => (e.pitch === undefined || !t ? e : { ...e, pitch: e.pitch + t });
+    // what each channel remembers from lane to lane (the contexts)
+    const freshState = () => ({ pitch: 24, ivb: 0, len: 0, rlen: 0, dlen: 0, drum: 8, ev: 4, row: 0 });
+    const lenB = (l) => (l <= 4 ? l : l < 8 ? 5 : 6);
+    const ivB = (d) => (d === 0 ? 1 : d > 0 ? (d <= 4 ? 2 : 4) : d >= -4 ? 3 : 5);
+    const step = (st, e) => {
+      st.row += e.rest || e.len;
+      if (e.rest) st.rlen = e.rest;
+      else if (e.drum !== undefined) { st.drum = e.drum; st.dlen = e.len; } else { st.ivb = ivB(e.pitch - st.pitch); st.pitch = e.pitch; st.len = e.len; }
+    };
+    const kindOf = (ch) => (ch === 'noise' ? 'd' : ch === 'tri' ? 't' : 'p');
+    // the longest repeat of earlier events (distance d, count n, moved by t semitones) starting at event k
+    function findRepeat(events, k) {
+      let best = { n: 0, d: 0, t: 0 };
+      for (let d = 1; d <= Math.min(k, 16); d++) {
+        let n = 0, t = null;
+        while (k + n < events.length && n < 16) {
+          const a = events[k + n], b = events[k + n - d];
+          if (t === null && a.pitch !== undefined && b.pitch !== undefined) t = a.pitch - b.pitch;
+          if (!sameEvent(a, b, t || 0)) break;
+          n++;
+        }
+        if (n > best.n || (n === best.n && n && Math.abs(t || 0) < Math.abs(best.t))) best = { n, d, t: t || 0 };
+      }
+      return best;
+    }
+    function writeLane(io, events, ch, st, inst, key) {
+      const kind = kindOf(ch), pi = instOf(inst, ch), cur = pi && { vol: pi.vol, decay: pi.decay, duty: pi.duty };
+      const ev = (k) => { io.sym('ev', kind + st.ev, k); st.ev = k; };
+      st.row = 0;
+      const took = (e) => { step(st, e); if (cur && e.pitch !== undefined) { cur.vol = e.vol; cur.decay = e.decay; cur.duty = e.duty; } };
+      for (let k = 0; k < events.length;) {
+        const rep = findRepeat(events, k);
+        if (rep.n >= io.minRepeat) {
+          ev(EV_REPEAT); io.sym('repD', kind, rep.d - 1); io.sym('repN', kind, rep.n - 1);
+          if (ch !== 'noise') io.sym('shift', kind, rep.t + IV);
+          for (let i = 0; i < rep.n; i++) took(events[k++]);
           continue;
         }
-        const len = l + 1;
-        if (row + len > ROWS) fail('a note runs past the end of its pattern');
-        if (p !== REST) {
-          const n = { row, len, pitch: p };
-          if (st) {
-            if (st.vol !== inst.vol) n.vol = st.vol;
-            if (st.decay !== inst.decay) n.decay = st.decay;
-            if (st.duty !== inst.duty) n.duty = st.duty;
+        const e = events[k++];
+        if (e.rest) { ev(EV_REST); io.sym('rlen', kind, e.rest === st.rlen ? 0 : e.rest); }
+        else if (e.drum !== undefined) { ev(EV_NOTE); io.sym('drum', st.drum, e.drum); io.sym('dlen', lenB(st.dlen), e.len === st.dlen ? 0 : e.len); }
+        else {
+          if (cur) for (let s = 0; s < 3; s++) if (settingOf(e, s) !== settingOf(cur, s)) { ev(EV_SET); io.sym('esc', '', s); io.raw(settingOf(e, s), SETTING_BITS[s]); setSetting(cur, s, settingOf(e, s)); }
+          ev(EV_NOTE);
+          if (key === NO_KEY) io.sym('iv', kind + st.ivb, e.pitch - st.pitch + IV);
+          else {
+            if (!inKey(e.pitch, key)) io.sym('deg', kind + st.ivb, SHARP);
+            io.sym('deg', kind + st.ivb, degree(e.pitch, key) - degree(st.pitch, key) + IV);
           }
-          notes.push(n);
+          io.sym('len', kind + lenB(st.len), e.len === st.len ? 0 : e.len);
         }
-        row += len;
+        took(e);
       }
-      return notes;
     }
-    function getDrums(r) {
-      const hits = [];
-      let row = 0;
-      while (row < ROWS) {
-        if (r.get(1)) {
-          const drum = r.get(3), len = r.get(3) + 1;
-          if (row + len > ROWS) fail('a hit runs past the end of its pattern');
-          hits.push({ row, len, drum });
-          row += len;
-        } else {
-          const len = r.get(3) + 1;
-          if (row + len > ROWS) fail('a rest runs past the end of its pattern');
-          row += len;
+    function readLane(io, ch, st, inst, key) {
+      const kind = kindOf(ch), pi = instOf(inst, ch), cur = pi && { vol: pi.vol, decay: pi.decay, duty: pi.duty }, out = [];
+      let rows = 0, guard = 0;
+      st.row = 0;
+      const took = (e) => {
+        rows += e.rest || e.len || fail('damaged data');
+        if (rows > ROWS) fail('a lane runs past the end of its pattern');
+        out.push(e); step(st, e);
+        if (cur && e.pitch !== undefined) { cur.vol = e.vol; cur.decay = e.decay; cur.duty = e.duty; }
+      };
+      while (rows < ROWS) {
+        if (++guard > 64) fail('damaged data');
+        const k = io.sym('ev', kind + st.ev);
+        st.ev = k;
+        if (k === EV_REPEAT) {
+          const d = io.sym('repD', kind) + 1, n = io.sym('repN', kind) + 1, t = ch === 'noise' ? 0 : io.sym('shift', kind) - IV;
+          for (let i = 0; i < n; i++) {
+            const e = moved(out[out.length - d] || fail('a repeat reaches back too far'), t);
+            if (e.pitch !== undefined && (e.pitch < 0 || e.pitch >= PITCHES)) fail('a repeat moves a note out of range');
+            took(e);
+          }
+        } else if (k === EV_REST) took({ rest: io.sym('rlen', kind) || st.rlen });
+        else if (k === EV_SET) { if (!cur) fail('this channel has no settings to change'); const s = io.sym('esc', ''); setSetting(cur, s, io.raw(SETTING_BITS[s])); }
+        else if (ch === 'noise') { const drum = io.sym('drum', st.drum); took({ drum, len: io.sym('dlen', lenB(st.dlen)) || st.dlen }); }
+        else {
+          let pitch;
+          if (key === NO_KEY) pitch = st.pitch + io.sym('iv', kind + st.ivb) - IV;
+          else {
+            let v = io.sym('deg', kind + st.ivb);
+            const sharp = v === SHARP;
+            if (sharp) v = io.sym('deg', kind + st.ivb);
+            const g = degree(st.pitch, key) + v - IV;
+            pitch = g < 0 ? -1 : pitchAt(g, key) + (sharp ? 1 : 0);
+          }
+          const len = io.sym('len', kind + lenB(st.len)) || st.len;
+          if (pitch < 0 || pitch >= PITCHES) fail('a note out of range');
+          took(cur ? { pitch, len, vol: cur.vol, decay: cur.decay, duty: cur.duty } : { pitch, len });
         }
       }
-      return hits;
+      return fromEvents(out, ch, inst);
     }
-    function decode(input) {
-      const bytes = input instanceof Uint8Array ? input : Uint8Array.from(input || []);
-      const r = reader(bytes);
-      const v = r.get(3);
-      if (v !== VERSION) fail(`unknown format version ${v}`);
-      const tempo = r.get(8) + TEMPO_MIN, rpb = RPB[r.get(2)];
+    // a lane taken from another (moved by t semitones; pulse notes keep the settings they have of their own)
+    const copyLane = (lane, from, to, t, inst) => laneNorm(lane.map((n) => (to === 'noise' ? { ...n }
+      : to === 'tri' || from === 'tri' ? { row: n.row, len: n.len, pitch: n.pitch + t } : { ...n, pitch: n.pitch + t })), to, inst);
+    const others = (ch) => MELODIC.filter((c) => c !== ch);
+    function findCopy(s, pi, ch) {
+      const lane = laneOf(s.patterns[pi], ch), key = JSON.stringify(lane), tries = [];
+      for (let back = 1; back <= Math.min(pi, 63); back++) tries.push({ back, from: ch });
+      if (ch !== 'noise') {
+        for (const from of others(ch)) for (let back = 0; back <= Math.min(pi, 63); back++) if (back || CHANNELS.indexOf(from) < CHANNELS.indexOf(ch)) tries.push({ back, from });
+      }
+      for (const c of tries) {
+        const src = laneOf(s.patterns[pi - c.back], c.from);
+        if (src.length !== lane.length) continue;
+        const t = ch === 'noise' ? 0 : lane[0].pitch - src[0].pitch;
+        try { if (JSON.stringify(copyLane(src, c.from, ch, t, s.inst)) === key) return { ...c, t }; } catch { /* moved out of range */ }
+      }
+      return null;
+    }
+
+    function writeSong(s, io, key, copies) {
+      io.raw(s.tempo - TEMPO_MIN, 8); io.raw(RPB.indexOf(s.rpb), 2); io.raw(key, 4);
+      for (const i of [s.inst.p1, s.inst.p2]) {
+        io.raw(i.duty, 2); io.raw(i.vol, 4); io.raw(i.decay, 3); io.raw(i.sweep ? 1 : 0, 1);
+        if (i.sweep) { io.raw(i.sweep.neg ? 1 : 0, 1); io.raw(i.sweep.period, 3); io.raw(i.sweep.shift, 3); }
+      }
+      const nz = s.inst.noise, custom = nz.kit.some((k, i) => k[0] !== KIT[i][0] || k[1] !== KIT[i][1]);
+      io.raw(nz.vol, 4); io.raw(custom ? 1 : 0, 1);
+      if (custom) for (const k of nz.kit) { io.raw(k[0], 4); io.raw(k[1], 1); }
+      const np = s.patterns.length;
+      io.raw(np - 1, 6); io.raw(s.order.length - 1, 8);
+      let prev = -1, last = 3;
+      for (const o of s.order) {
+        const k = o === prev + 1 ? 0 : o === prev ? 1 : 2;
+        io.sym('ord', last, k);
+        if (k === 2) io.raw(o, width(np));
+        prev = o; last = k;
+      }
+      const states = { p1: freshState(), p2: freshState(), tri: freshState(), noise: freshState() };
+      s.patterns.forEach((p, pi) => {
+        for (const ch of CHANNELS) {
+          const lane = laneOf(p, ch), st = laneOf(states, ch);
+          if (!lane.length) { io.sym('lane', ch, 1); continue; }
+          const c = copies[pi * 4 + CHANNELS.indexOf(ch)];
+          if (c) {
+            io.sym('lane', ch, c.from === ch ? 2 : 3);
+            if (c.from !== ch) io.raw(others(ch).indexOf(c.from), 1);
+            io.sym('back', '', c.back);
+            if (ch !== 'noise') io.sym('shift', 'lane', c.t + IV);
+          } else {
+            io.sym('lane', ch, 0);
+            writeLane(io, toEvents(lane, ch, s.inst), ch, st, s.inst, key);
+            continue;
+          }
+          for (const e of toEvents(lane, ch, s.inst)) step(st, e);
+        }
+      });
+    }
+    function readSong(io) {
+      const tempo = io.raw(8) + TEMPO_MIN, rpb = RPB[io.raw(2)], key = io.raw(4);
+      if (key > NO_KEY) fail('damaged data');
       const pulse = () => {
-        const i = { duty: r.get(2), vol: r.get(4), decay: r.get(3), sweep: null };
-        if (r.get(1)) i.sweep = { neg: !!r.get(1), period: r.get(3), shift: r.get(3) };
+        const i = { duty: io.raw(2), vol: io.raw(4), decay: io.raw(3), sweep: null };
+        if (io.raw(1)) i.sweep = { neg: !!io.raw(1), period: io.raw(3), shift: io.raw(3) };
         return i;
       };
-      const p1 = pulse(), p2 = pulse();
-      const noise = { vol: r.get(4), kit: KIT.map((k) => k.slice()) };
-      if (r.get(1)) noise.kit = KIT.map(() => [r.get(4), r.get(1)]);
-      const inst = { p1, p2, noise };
-      const np = r.get(4) + 1, no = r.get(6) + 1, ob = bitsFor(np);
-      const order = [];
-      for (let i = 0; i < no; i++) order.push(r.get(ob));
-      const patterns = [];
-      for (let pi = 0; pi < np; pi++) {
-        const lanes = CHANNELS.map((ch) => {
-          if (r.get(1) === 0) return ch === 'noise' ? getDrums(r) : getMelodic(r, instOf(inst, ch));
-          if (r.get(1) === 0) return [];
-          if (!pi) fail('the first pattern can’t copy an earlier one');
-          const j = r.get(bitsFor(pi));
-          if (j >= pi) fail('a lane copies a pattern that isn’t earlier');
-          return laneOf(patterns[j], ch).map((n) => ({ ...n }));
-        });
-        patterns.push({ p1: lanes[0], p2: lanes[1], tri: lanes[2], noise: lanes[3] });
+      const p1 = pulseInst(pulse()), p2 = pulseInst(pulse());
+      const noise = { vol: io.raw(4), kit: KIT.map((k) => k.slice()) };
+      if (io.raw(1)) noise.kit = KIT.map(() => [io.raw(4), io.raw(1)]);
+      const inst = { p1, p2, noise: noiseInst(noise) };
+      const np = io.raw(6) + 1, no = io.raw(8) + 1, order = [];
+      let prev = -1, last = 3;
+      for (let i = 0; i < no; i++) {
+        const k = io.sym('ord', last), o = k === 0 ? prev + 1 : k === 1 ? prev : io.raw(width(np));
+        order.push(o); prev = o; last = k;
       }
-      const end = Math.ceil(r.bits / 8);
-      if (bytes.length <= end) fail('the checksum is missing');
-      if (crc8(bytes, end) !== bytes[end]) fail('the checksum doesn’t match (damaged data)');
-      return normalize({ tempo, rpb, inst, patterns, order });
+      const states = { p1: freshState(), p2: freshState(), tri: freshState(), noise: freshState() }, patterns = [];
+      for (let pi = 0; pi < np; pi++) {
+        const lanes = {};
+        for (const ch of CHANNELS) {
+          const k = io.sym('lane', ch), st = laneOf(states, ch);
+          let lane;
+          if (k === 1) lane = [];
+          else if (k === 0) lane = readLane(io, ch, st, inst, key);
+          else {
+            if (k === 3 && ch === 'noise') fail('the drums can only copy drums');
+            const from = k === 3 ? others(ch)[io.raw(1)] : ch, back = io.sym('back', ''), t = ch === 'noise' ? 0 : io.sym('shift', 'lane') - IV;
+            if (pi - back < 0 || (!back && (k === 2 || CHANNELS.indexOf(from) > CHANNELS.indexOf(ch)))) fail('a lane copies one that isn’t there yet');
+            const src = laneOf(back ? patterns[pi - back] : lanes, from);
+            lane = copyLane(src, from, ch, t, inst);
+            for (const e of toEvents(lane, ch, inst)) step(st, e);
+          }
+          if (ch === 'p1') lanes.p1 = lane; else if (ch === 'p2') lanes.p2 = lane; else if (ch === 'tri') lanes.tri = lane; else lanes.noise = lane;
+        }
+        patterns.push(lanes);
+      }
+      return { tempo, rpb, inst, patterns, order };
+    }
+
+    // --- the bytes: version 3 · payload length 13 · payload · CRC-8 ---
+    function encode(song, { format = VERSION } = {}) {
+      const s = normalize(song);
+      if (format !== STATIC && format !== VERSION) fail(`no format ${format}`);
+      // (in whichever key is shortest, or none)
+      let body = null;
+      const copies = s.patterns.flatMap((p, pi) => CHANNELS.map((ch) => (laneOf(p, ch).length ? findCopy(s, pi, ch) : null)));
+      for (let key = NO_KEY; key >= 0; key--) {
+        const io = format === STATIC ? staticOut() : acOut();
+        writeSong(s, io, key, copies);
+        const b = io.bytes();
+        if (!body || b.length < body.length) body = b;
+      }
+      if (body.length > MAX_PAYLOAD) fail('the song is too big');
+      const all = [(format << 5) | (body.length >> 8), body.length & 0xff, ...body];
+      return Uint8Array.from([...all, crc8(all, all.length)]);
+    }
+    // (bytes after the checksum are ignored: a picture's corners may hold more)
+    function decode(input) {
+      const bytes = input instanceof Uint8Array ? input : Uint8Array.from(input || []);
+      if (bytes.length < 3) fail('the data ends too soon');
+      const format = bytes[0] >> 5, len = ((bytes[0] & 31) << 8) | bytes[1];
+      if (format !== VERSION && format !== STATIC) fail(`unknown format version ${format}`);
+      if (bytes.length < len + 3) fail('the data ends too soon');
+      if (crc8(bytes, len + 2) !== bytes[len + 2]) fail('the checksum doesn’t match (damaged data)');
+      const body = bytes.subarray(2, 2 + len);
+      return normalize(readSong(format === STATIC ? staticIn(body) : acIn(body)));
     }
 
     const measure = (song) => {
@@ -372,7 +653,7 @@
     });
 
     return {
-      VERSION, ROWS, PITCHES, CHANNELS, BASE, KIT, DRUM_NAMES, DRUM_KEYS, RPB, TEMPO_MIN, TEMPO_MAX, MAX_PATTERNS, MAX_ORDER, MAX_DRUM_LEN, BUDGET,
+      VERSION, STATIC, ROWS, PITCHES, CHANNELS, BASE, KIT, DRUM_NAMES, DRUM_KEYS, RPB, TEMPO_MIN, TEMPO_MAX, MAX_PATTERNS, MAX_ORDER, MAX_DRUM_LEN, BUDGET, MODELS,
       normalize, encode, decode, measure, toBase64, fromBase64, blank, fromText, laneFromText, laneOf,
     };
   })();
@@ -620,7 +901,8 @@
     ['Deep', C.KIT.map((k) => [Math.min(15, k[0] + 2), k[1]])], ['Metal', C.KIT.map((k) => [k[0], 1])]];
   const DRUM_SHORT = ['Kick', 'Snare', 'Hat', 'Open', 'Tom L', 'Tom H', 'Clap', 'Crash'];
   const LENGTHS = [1, 2, 3, 4, 5, 6, 7, 8, 12, 16];
-  const LETTERS = 'ABCDEFGHIJKLMNOP';
+  const AZ = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ';
+  const label = (i) => (i < 26 ? AZ.charAt(i) : AZ.charAt(Math.floor(i / 26) - 1) + AZ.charAt(i % 26)); // A … Z, AA … BL
   const NAMES = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B'];
   const noteName = (midi) => `${NAMES[midi % 12]}${Math.floor(midi / 12) - 1}`;
   const isBlack = (midi) => [1, 3, 6, 8, 10].includes(midi % 12);
@@ -636,7 +918,9 @@
   // the tune: the saved one, or the demo
   let saved = store.get(STORE), song, firstNote = '';
   try { song = saved ? C.decode(C.fromBase64(saved)) : C.fromText(TUNE_DEMO); } catch {
-    song = C.fromText(TUNE_DEMO); saved = null; firstNote = 'The saved tune couldn’t be read, so here’s the demo.';
+    // (kept aside, never overwritten: a tune saved in an older format, say)
+    if (store.get(`${STORE}.unread`) == null) store.set(`${STORE}.unread`, saved);
+    song = C.fromText(TUNE_DEMO); saved = null; firstNote = 'The saved tune couldn’t be read (it’s kept aside), so here’s the demo.';
   }
   const ui = { open: false, pat: 0, lane: 'p1', cursor: 0, len: 2, oct: new Map([['p1', 5], ['p2', 4], ['tri', 2]]), loop: 'song', from: 0, drum: 1, muted: new Set(), status: firstNote, centred: false, scrolls: [] };
   const undo = [];
@@ -1117,7 +1401,7 @@
     // pattern tabs
     R.tabs.textContent = '';
     song.patterns.forEach((_, i) => {
-      const b = btn('tcp-tab', LETTERS[i], `Edit pattern ${LETTERS[i]}`, () => { ui.pat = i; render(); });
+      const b = btn('tcp-tab', label(i), `Edit pattern ${label(i)}`, () => { ui.pat = i; render(); });
       b.setAttribute('aria-pressed', String(i === ui.pat));
       R.tabs.append(b);
     });
@@ -1127,12 +1411,12 @@
     // the order strip (drag a chip to move it, right-click to remove it)
     R.order.textContent = '';
     R.chips = song.order.map((pi, i) => {
-      const b = btn('tcp-o', LETTERS[pi], `Bar ${i + 1}: pattern ${LETTERS[pi]}. Click to edit it and play from here, drag to move, right-click to remove`, () => { ui.from = i; ui.pat = pi; render(); });
+      const b = btn('tcp-o', label(pi), `Bar ${i + 1}: pattern ${label(pi)}. Click to edit it and play from here, drag to move, right-click to remove`, () => { ui.from = i; ui.pat = pi; render(); });
       b.draggable = true;
       b.toggleAttribute('data-sel', i === ui.from);
       b.toggleAttribute('data-cur', pi === ui.pat);
       b.addEventListener('contextmenu', (e) => { e.preventDefault(); if (song.order.length > 1) edit(() => { song.order.splice(i, 1); ui.from = Math.min(ui.from, song.order.length - 1); }); });
-      b.addEventListener('dragstart', (e) => { dragFrom = i; e.dataTransfer.effectAllowed = 'move'; e.dataTransfer.setData('text/plain', LETTERS[pi]); });
+      b.addEventListener('dragstart', (e) => { dragFrom = i; e.dataTransfer.effectAllowed = 'move'; e.dataTransfer.setData('text/plain', label(pi)); });
       b.addEventListener('dragover', (e) => { if (dragFrom >= 0) { e.preventDefault(); b.classList.add('tcp-over'); } });
       b.addEventListener('dragleave', () => b.classList.remove('tcp-over'));
       b.addEventListener('drop', (e) => {
@@ -1146,7 +1430,7 @@
       R.order.append(b);
       return b;
     });
-    R.place.textContent = `+ ${LETTERS[ui.pat]}`;
+    R.place.textContent = `+ ${label(ui.pat)}`;
     R.place.disabled = song.order.length >= C.MAX_ORDER;
     R.order.append(R.place);
     // lanes and their settings

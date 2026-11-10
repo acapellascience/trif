@@ -636,10 +636,42 @@ The user will forgive a mod that stops working; not one that breaks the site.
 - When the page shape changes (anchor element missing, JSON path gone), do nothing and log once:
   `trif.warn('timeline shape changed: no instructions array')`. Don't retry in a tight loop.
 - Call originals with `original.apply(this, arguments)` and return what they return.
-- Keep work cheap: debounce observers, limit `querySelectorAll` scopes, no polling faster than ~1 s.
+- Keep work cheap: debounce observers, limit `querySelectorAll` scopes, no polling faster than ~1 s, and
+  see "Keep mods fast" below.
 - Prefix everything you add: globals, attributes, classes, storage keys, CSS variables.
 - Don't touch login, payment, or account pages unless that's exactly what the user asked for; exclude
   them with `@exclude` when a broad `@match` would cover them.
+
+## Keep mods fast
+
+A mod runs on every page of its site, next to the user's other mods, often for hours. What they notice
+is a hot laptop or a page that stutters, so ask before anything runs every frame, on every element, or on
+a timer. These are what made TRIF's own mods slow, biggest first:
+
+- **Each running CSS animation restyles its element every frame**, `steps()` or not. One on every post
+  or every word means hundreds, and that can take a whole CPU core. Animate one element (a container,
+  an overlay, a background), not each piece. Animating `transform` and `opacity` is cheapest, since the
+  browser composites them without restyling. Pause what's out of view or switched off.
+- **Never animate or keep rewriting something the whole page inherits.** An animated custom property
+  registered with `inherits: true`, a variable set on `<html>` or `<body>` from a timer or a scroll
+  handler, or a class there that a `html:has(...)` rule watches: each change restyles every element on
+  the page. Put the variable on the elements that use it (`inherits: false`), and set your state as an
+  attribute of your own (`html[data-xx-on]`), only when it changes.
+- **Reading layout forces it.** `getComputedStyle`, `getBoundingClientRect`, `offsetWidth` and
+  `elementsFromPoint` make the browser bring style and layout up to date first, and that's costly on a
+  heavily styled page. That cost also lands on other mods' reads, so your styles can make their code
+  slow. Read once when something changes, not on a timer. In a loop, do all the reads before any writes,
+  or once per frame for everything that needs them, then share the result.
+- **Write only what changed.** Update a text node or a style when its value differs, not on every pass.
+- **Canvas:** draw text and blurred shapes (`shadowBlur`) once to an offscreen canvas and `drawImage`
+  them each frame. Calling `fillText` and blurring every frame is slow.
+- **Start light.** Do heavy setup only when it's needed, after the first frame: decoding embedded media,
+  building audio graphs, large tables. Decode base64 with `Uint8Array.fromBase64` where it exists.
+
+To check a mod, watch the page idle and while scrolling, with the mod on and off.
+`document.getAnimations().length` counts what's animating. The browser's Performance panel shows
+style, layout and paint time per second, and which functions are hot. If a mod is still costly when it
+does what the user asked, say so in your report, with what it costs and what would make it cheaper.
 
 ## Resilient mods, and repairing broken ones
 

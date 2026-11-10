@@ -96,7 +96,7 @@ const PREINSTALLED = [
 // with every mods message (`defaultOrder`), and extension/lib.js orderMods puts mods it doesn't list after.
 // (0.2.3: X's, in Tim's order. The other sites' few shipped mods list in the order they always did.)
 const DEFAULT_ORDER = {
-  'x.com': ['x.com/detox-timeline', 'x.com/follow-status', 'x.com/space-shooter', 'x.com/rainbow-rave', 'x.com/profile-styler', 'x.com/post-styler', 'x.com/style-encoder'],
+  'x.com': ['x.com/detox-timeline', 'x.com/follow-status', 'x.com/profile-styler', 'x.com/post-styler', 'x.com/style-encoder', 'x.com/space-shooter', 'x.com/rainbow-rave'],
 };
 
 // Shipped mods folded into another one (`into`, from its @version `since`), so no longer shipped

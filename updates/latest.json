@@ -1,10 +1,10 @@
 {
-  "version": "0.2.4",
-  "published": "2026-11-06",
-  "notes": "- **TRIF installs with `npx timsrobot setup`.** npm wouldn't take the name \"trif\", so the package is\n  called timsrobot (after timsrobot.com). Once it's installed you still type `trif`, as before.",
+  "version": "0.2.5",
+  "published": "2026-11-10",
+  "notes": "- **Bigger mods.** A mod can now be up to 4 MB, and all your mods together up to 16 MB. Until now they\n  had to fit in 1 MB in all, and past that the biggest ones were left out: a game, or a mod with\n  its sounds or pictures in it, could use that up alone. If a mod is ever too big, `trif status` and\n  `trif doctor` say which one and what to do. A change to one mod now sends only that mod to the browser,\n  which keeps Firefox's memory in check with big mods. (The helper and the browser extension both need\n  this version; with an older extension, mods still stop at 1 MB in all, and `trif doctor` says to update\n  it.)\n- **X-Flyer has music**, in the mod itself: Blast the Evil Eye while you fly and Big Boss once @elonmusk\n  is full size (both by Tim), then the end of Stravinsky's Firebird (Stokowski, 1940) when he explodes.\n  That makes it about 2 MB, so it needs this version.\n  It's also smoother: the boss fight and heavy firing stay at 60 frames a second with your other X mods\n  on. Its Gravity mode is gone (the X key's bombs stay).\n- **You choose which of Tim's mods to add.** A new setup puts none of them on your computer until you\n  tick their sites on the setup page. Each mod has its own switch in the side panel; add other sites'\n  later in Settings there, or from the link on that site's panel. One you deleted can be brought back in\n  Settings too. If you already have Tim's mods, nothing changes.\n- **New for X, off until you switch them on: people's own colours.** Style Encoder stamps a style you\n  pick into the corner of the next profile picture you upload (X's round crop hides it). Profile Styler\n  then shows each styled profile in its owner's colours, and Post Styler their posts and people cards.\n  To find the styles they load people's profile pictures again from X's image server.\n- Detox Timeline keeps the margins beside the timeline equal when X-Flyer is installed and no game is on.\n  Rainbow Rave's and Follow Status's rainbows no longer jump at their edges.\n- Amazon's Simple Home shows Amazon's own logo, sharper. Punk Fonts for X is no longer one of Tim's mods:\n  if you have it, it stays as it is, without updates.\n- When your coding agent's login runs out, the side panel asks you to log in again (and keeps your\n  message to send again) instead of showing the agent's error twice.\n- Each tab keeps its own draft in the side panel's message box.\n- The page's address reaches your agent without the part after `?` or `#`, which anyone can fill.",
   "package": {
-    "url": "https://github.com/acapellascience/trif/releases/download/v0.2.4/timsrobot-0.2.4.tgz",
-    "sha256": "de1ee771900af850c645d2922a858fe01ac104cfb10db6b87c5f18568bc53ec9",
-    "size": 478725
+    "url": "https://github.com/acapellascience/trif/releases/download/v0.2.5/timsrobot-0.2.5.tgz",
+    "sha256": "bba2c2e25a21811b333a62267541b0db033bc9c551e0715866d71d8d9eb89968",
+    "size": 2026487
   }
 }

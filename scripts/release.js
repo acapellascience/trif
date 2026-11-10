@@ -232,6 +232,14 @@ function bump(version, dir = ROOT) {
     if (lock.packages && lock.packages['']) lock.packages[''].version = version;
     writeJson(lockFile, lock);
   }
+  // (the README's install steps name the release they install)
+  const readmeFile = path.join(dir, 'README.md');
+  if (fs.existsSync(readmeFile)) {
+    const before = fs.readFileSync(readmeFile, 'utf8');
+    const after = before.replace(/timsrobot-\d+\.\d+\.\d+\.tgz/g, `timsrobot-${version}.tgz`)
+      .replace(/(These steps install the latest release, \*\*)\d+\.\d+\.\d+(\*\*)/, `$1${version}$2`);
+    if (after !== before) fs.writeFileSync(readmeFile, after);
+  }
 }
 
 function betaZip(out, kind, version, files) {

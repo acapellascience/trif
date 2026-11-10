@@ -67,13 +67,22 @@ export function sandboxRuntime(mode, pageModId, pageFn) {
   // put before it: sandboxRuntimeScript), lockdown, each mod's first run, and the mods' callbacks.
   const now = () => performance.now();
   let nativeStack = null; // (Firefox: Error.prototype's own stack getter, kept before lockdown)
-  const stats = { sesMs: typeof G.__trifT0 === 'number' ? now() - G.__trifT0 : null, lockdownMs: null, startedAt: now(), mods: {}, callbacks: 0, callbackMs: 0 };
+  let closedRootOf = null; // (el) -> its shadow root, open or closed, where TRIF's world can see that
+  const stats = { sesMs: typeof G.__trifT0 === 'number' ? now() - G.__trifT0 : null, lockdownMs: null, startedAt: now(), mods: {}, callbacks: 0, callbackMs: 0, closedRoots: 'none' };
+  if (!closedRootOf && typeof Element !== 'undefined') {
+    const od = Object.getOwnPropertyDescriptor(Element.prototype, 'openOrClosedShadowRoot');
+    if (od && typeof od.get === 'function') { closedRootOf = (el) => od.get.call(el); stats.closedRoots = 'Element.openOrClosedShadowRoot'; }
+  }
   // (TRIF's world: messaging to TRIF's background is for TRIF's code only, captured before any mod runs;
   // mods never get `chrome`: their global is the compartment's)
   let send = null;
   if (SANDBOX) {
     const rt = (G.chrome && G.chrome.runtime) || (G.browser && G.browser.runtime);
     if (rt && typeof rt.sendMessage === 'function') { const sm = rt.sendMessage; send = (m) => sm.call(rt, m); }
+    // (a way to see an element's closed shadow root, where the browser gives TRIF's world one: Chrome's
+    // chrome.dom for extensions, or Firefox's Element.openOrClosedShadowRoot; for the keys rule, below)
+    const dom = G.chrome && G.chrome.dom;
+    if (dom && typeof dom.openOrClosedShadowRoot === 'function') { const cd = dom.openOrClosedShadowRoot; closedRootOf = (el) => cd.call(dom, el); stats.closedRoots = 'chrome.dom'; }
     try { delete G.chrome; } catch { /* kept: unreachable from mods anyway */ }
     try { delete G.browser; } catch { /* as above */ }
     // The language locked down once per world (every sandboxed mod in this page shares it). Built-ins newer
@@ -217,8 +226,30 @@ export function sandboxRuntime(mode, pageModId, pageFn) {
       }
     }
   };
+  // What's typed into an editor (contenteditable, or a page in design mode) is the user's: a mod reads none
+  // of it (.text, trif.text, clone()), sees no attribute inside it, and can't move its pieces out to read them.
+  const inEditor = (n) => !!n && n.nodeType === 1 && !!n.isContentEditable;
+  const insideEditor = (n) => inEditor(n) && inEditor(n.parentElement);
+  const visibleText = (n) => {
+    if (inEditor(n)) return '';
+    if (D.designMode !== 'on' && !n.querySelector('[contenteditable]')) return n.textContent;
+    let out = '';
+    const tw = D.createTreeWalker(n, 4 /* NodeFilter.SHOW_TEXT */);
+    for (let t = tw.nextNode(); t; t = tw.nextNode()) if (!inEditor(t.parentElement)) out += t.data;
+    return out;
+  };
+  // Taking a page field out of its form (removing it, or what holds it, or writing over what holds it)
+  // changes what the form sends, as moving it does.
+  const fieldsOwned = (n) => [...(n.matches(FORM_FIELDS) ? [n] : []), ...n.querySelectorAll(FORM_FIELDS)].filter((f) => !created.has(f) && f.form);
+  const detachOk = (n, keepsItself) => {
+    for (const f of fieldsOwned(n)) {
+      if (!keepsItself && n.contains(f.form)) continue; // (its form goes with it: nothing else submits differently)
+      fail(`the page's own <${f.localName}> can't be taken out of its form`);
+    }
+  };
   const textInto = (parent, kids) => {
     formsOk(parent, kids);
+    for (const k of kids) if (typeof k !== 'string' && insideEditor(k)) fail('a piece of an editor can\'t be moved out of it');
     if (kids.some((k) => typeof k === 'string') && isRaw(parent)) fail(`text can't be written into <${parent.localName}>`);
   };
 
@@ -253,20 +284,37 @@ export function sandboxRuntime(mode, pageModId, pageFn) {
       to.setAttribute(a.name, a.value);
     }
     for (const c of from.childNodes) {
-      if (c.nodeType === 3) to.append(c.data);
+      if (c.nodeType === 3) { if (!inEditor(from)) to.append(c.data); }
       else if (c.nodeType === 1) { const k = safeCopy(c); if (k) to.append(k); }
     }
     created.add(to);
     return to;
   };
 
-  // Which key was pressed reaches a mod only when it wasn't typed into something editable (a field, an editor,
-  // or an element that may hold one in its shadow root): hotkeys work, passwords stay unseen.
+  // Which key was pressed reaches a mod only when TRIF can tell it wasn't typed into something editable:
+  // default-deny. Shown: the document, <html>, <body>, and elements that are no field or editor and can't hold
+  // one in a shadow root. A closed shadow root hides from the page's DOM (event targets stop at its host,
+  // `shadowRoot` is null), so where TRIF's world can't see closed roots (closedRootOf), any element that can
+  // host one (a custom element, or div, span, p, section, article and the other kinds attachShadow takes)
+  // counts as editable. Hotkeys with the focus on the page, a link, a button, a list item: shown.
+  const SHADOW_HOSTS = new Set(['article', 'aside', 'blockquote', 'body', 'div', 'footer', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'header', 'main', 'nav', 'p', 'section', 'span']);
+  const hasRoot = (t) => {
+    if (t.shadowRoot) return true;
+    if (closedRootOf) { try { return !!closedRootOf(t); } catch { return true; } }
+    return null; // (can't tell)
+  };
   const typedInto = (e) => {
     const p = typeof e.composedPath === 'function' ? e.composedPath() : [];
     const t = p[0] || e.target;
-    if (!t || t.nodeType !== 1 || t === D.body || t === D.documentElement) return false;
-    return /^(input|textarea|select)$/.test(t.localName) || t.isContentEditable || t.localName.includes('-') || !!t.shadowRoot;
+    if (p.length && p[0] !== e.target) return true; // (from inside an open shadow root)
+    if (!t || t.nodeType === 9) return false;
+    if (t.nodeType !== 1) return true;
+    if (t === D.documentElement) return false;
+    if (/^(input|textarea|select)$/.test(t.localName) || t.isContentEditable) return true;
+    const root = hasRoot(t);
+    if (t === D.body) return root === true; // (a closed root on <body> itself: only where TRIF can see it)
+    if (root !== null) return root || t.localName.includes('-');
+    return t.localName.includes('-') || SHADOW_HOSTS.has(t.localName);
   };
   const eventOf = (e) => harden({
     type: String(e.type), ...(typedInto(e) ? { key: null, code: null } : { key: typeof e.key === 'string' ? e.key : null, code: typeof e.code === 'string' ? e.code : null }),
@@ -293,7 +341,7 @@ export function sandboxRuntime(mode, pageModId, pageFn) {
   };
   const fixText = (t, tx) => {
     const p = t.parentNode;
-    if (!p || isRaw(p) || written.get(t) === t.data) return;
+    if (!p || isRaw(p) || inEditor(p) || written.get(t) === t.data) return;
     const out = tx.call(t.data);
     if (typeof out !== 'string' || out === t.data) { written.set(t, t.data); return; }
     written.set(t, out);
@@ -497,13 +545,14 @@ export function sandboxRuntime(mode, pageModId, pageFn) {
   const classesOf = new WeakMap();
   const protoDef = {
     get tag() { return nodeOf(this).localName; },
-    get text() { return nodeOf(this).textContent; },
+    get text() { return visibleText(nodeOf(this)); },
     setText(t) {
       const n = nodeOf(this);
       if (isRaw(n)) fail(`text can't be written into <${n.localName}>`);
+      detachOk(n, true);
       n.textContent = str(t, 'text');
     },
-    attr(name) { return nodeOf(this).getAttribute(str(name, 'an attribute name', 100)); },
+    attr(name) { const n = nodeOf(this); str(name, 'an attribute name', 100); return insideEditor(n) ? null : n.getAttribute(name); },
     setAttr(name, value) {
       const node = nodeOf(this);
       const n = str(name, 'an attribute name', 100).toLowerCase(), v = str(String(value), 'a value', 200000);
@@ -522,6 +571,8 @@ export function sandboxRuntime(mode, pageModId, pageFn) {
       const node = nodeOf(this);
       if (!nameOk(n)) fail(nameRefused(n));
       if ((n === 'id' || n === 'class') && !created.has(node) && node.hasAttribute(n) && !ownTokens(node.getAttribute(n))) fail(`the page's own ${n} isn't a mod's to remove`);
+      // (as for setting: an attribute only where it's offered, so not a form field's value)
+      if (ATTR_TAGS[n] && (!ATTR_TAGS[n].has(node.localName) || node.namespaceURI !== HTML_NS)) fail(`${n} isn't offered on <${node.localName}>`);
       node.removeAttribute(n);
     },
     get classes() {
@@ -566,7 +617,7 @@ export function sandboxRuntime(mode, pageModId, pageFn) {
     prepend(...kids) { const n = nodeOf(this); const k = kids.map(kidOf); textInto(n, k); n.prepend(...k); },
     before(...kids) { const n = nodeOf(this); const k = kids.map(kidOf); if (n.parentNode) textInto(n.parentNode, k); n.before(...k); },
     after(...kids) { const n = nodeOf(this); const k = kids.map(kidOf); if (n.parentNode) textInto(n.parentNode, k); n.after(...k); },
-    remove() { nodeOf(this).remove(); },
+    remove() { const n = nodeOf(this); detachOk(n, false); n.remove(); },
     // a copy of this element and what's inside it, keeping only allowed elements and attributes (an element
     // of another kind is left out, with what's inside it; other attributes are dropped)
     clone() { return wrap(safeCopy(nodeOf(this))); },

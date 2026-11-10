@@ -100,9 +100,13 @@ Good to know:
   `data-trif-…` or a `trif-` class and style them with `trif.css`. Copies (`clone()`) keep none of the
   page's ids, classes or data attributes.
 - **Forms are the page's**: a button you make is always `type="button"` and can't go inside a form, and
-  the page's own fields can't be moved into, out of or between forms.
-- **Keys**: `on('keydown')` and the like say which key only when it wasn't typed into a field or editor
-  (`key` and `code` are null then): hotkeys work, what the user types stays theirs.
+  the page's own fields can't be moved into, out of or between forms, removed, or written over (hide them
+  with `hide()` instead).
+- **Keys**: `on('keydown')` and the like say which key (`key`, `code`) only when TRIF can tell it wasn't
+  typed into a field or editor: with the focus on the page, a link, a button or a list item, yes; on a
+  field, an editor, or an element that could hold one (a `div`, `span`, `article`, a custom element), null.
+- **Editors are the user's**: what's typed into a contenteditable isn't in `.text` or `trif.text`, copies
+  or attributes inside it.
 - The code runs inside a function, so a top-level `return` ends it and `await` works at the top.
 - Errors are caught and shown by `trif errors`, as for page scripts.
 - The sandbox refuses source with `import(` or an HTML comment marker in it, even inside a string or a

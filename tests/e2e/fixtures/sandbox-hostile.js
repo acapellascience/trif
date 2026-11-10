@@ -69,6 +69,23 @@ t('the page\'s field moved into another form', () => { page.find('#f2').append(p
 t('the page\'s button moved into another form', () => { page.find('#f2').prepend(page.find('#fb')); return 'moved'; });
 t('the page\'s password field moved into a form', () => { page.find('#f2').append(page.find('#pw')); return 'moved'; });
 
+// ---- what's typed into an editor (red-team round 2, RT-9)
+t('an editor\'s text', () => page.find('#editor').text || undefined);
+t('a piece of an editor\'s text', () => page.find('#ed-p').text || undefined);
+t('the page\'s text, with an editor in it', () => (page.body.text.includes('secret draft') ? 'read' : undefined));
+t('an attribute inside an editor', () => page.find('#ed-a').attr('href'));
+t('a piece of an editor moved out, to read it', () => { page.body.append(page.find('#ed-p')); return 'moved'; });
+t('a copy of an editor', () => page.find('#editor').clone().text || undefined);
+t('a copy of a piece of an editor', () => page.find('#ed-p').clone().text || undefined);
+t('trif.text reading an editor', () => { let got = ''; trif.text('#editor', (x) => { got += x; return x; }); return got || undefined; });
+
+// ---- taking a page field out of its form (red-team round 2, RT-10)
+t('the page\'s field removed', () => { page.find('#fi').remove(); return 'removed'; });
+t('what holds the page\'s field removed', () => { page.find('#fwrap').remove(); return 'removed'; });
+t('the page\'s form written over', () => { page.find('#f').setText('x'); return 'written'; });
+t('what holds the page\'s field written over', () => { page.find('#fwrap').setText('x'); return 'written'; });
+t('the page\'s field\'s value taken off', () => { page.find('#fi').removeAttr('value'); return 'removed'; });
+
 // ---- code from strings
 for (const n of ['eval', 'Function', 'Compartment', 'lockdown', 'harden']) absent(n);
 t('the Function constructor, through a function', () => (function () {}).constructor('return 1')());

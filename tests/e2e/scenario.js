@@ -1954,6 +1954,7 @@ process.exitCode = 1;
           pimg: q('#pimg').getAttribute('src'), btnClick: q('#pbtn').getAttribute('onclick'), frmSrcdoc: q('#frm').getAttribute('srcdoc'), bodyBg: getComputedStyle(document.body).backgroundImage,
           storage: Object.keys(localStorage), windowNames: Object.getOwnPropertyNames(window),
           keys: d.getAttribute('data-trif-sbx-keys'), own: q('#trif-sbx-own') ? [q('#trif-sbx-own').type, q('#trif-sbx-own').className, q('#trif-sbx-own').dataset.trifKind, !!q('#trif-sbx-own').form] : null,
+          editor: q('#editor').textContent, fh: q('#fh') && q('#fh').form ? q('#fh').form.id : null,
           gadgetSrc: [q('#gadget-src').className, q('#gadget-src').getAttribute('data-auto-post')], pw: [q('#pw').form ? q('#pw').form.id : null, q('#fi').form ? q('#fi').form.id : null, q('#fb').form ? q('#fb').form.id : null],
         };
       })()`], { timeoutMs: 20000 })).stdout);
@@ -1971,6 +1972,9 @@ process.exitCode = 1;
       const sbxCtx = await this.d.findPage((u) => u.includes('/sandbox.html'), { timeoutMs: 5000 });
       await this.d.click(sbxCtx, '#pw');
       for (const k of ['h', 'i']) await this.d.key(sbxCtx, k);
+      // (and one into a password field inside a closed shadow root on a plain <div>: red-team round 2, RT-8)
+      await this.d.click(sbxCtx, '#shost');
+      await this.d.key(sbxCtx, 'x');
       await this.d.click(sbxCtx, '#title');
       await this.d.key(sbxCtx, 'q');
       await sleep(1500); // (anything late: loads, timers)
@@ -1985,7 +1989,7 @@ process.exitCode = 1;
       const hostile = JSON.parse(first.hostile);
       const escaped = Object.entries(hostile).filter(([, v]) => !/^(refused|absent)/.test(v));
       // (the test's own input: the click from the page's world, and the real clicks and keys above)
-      const pageNoticed = later.hits.filter((h) => !/^(click|focus|keydown|input):(pw|title|target-click|)$/.test(h));
+      const pageNoticed = later.hits.filter((h) => !/^(click|focus|keydown|input):(pw|title|target-click|shost|)$/.test(h));
       const pageSide = {
         'the page noticed nothing (clicks, keys, submits, messages, inline code)': pageNoticed.length === 0 ? 'nothing' : pageNoticed,
         'the page\'s prototypes untouched (and not frozen: lockdown stayed in TRIF\'s world)': later.protosClean && !later.pageFrozen,
@@ -2001,7 +2005,8 @@ process.exitCode = 1;
         'the page\'s htmx-like code works (it sent what the page itself planted)': gadgetWorks === true,
         'the page\'s gadget element as it was': JSON.stringify(later.gadgetSrc) === JSON.stringify(['js-src done', '/e2e-sbx-leak-clone']),
         'the page\'s fields in the forms they were in': JSON.stringify(later.pw) === JSON.stringify([null, 'f', 'f']),
-        'keys typed into the password field unseen by the mod': /^null@input,null@input,q@/.test(later.keys || '') ? true : later.keys,
+        'keys typed into the password field, and into one in a closed shadow root, unseen by the mod': /^null@input,null@input,null@div,q@/.test(later.keys || '') ? true : later.keys,
+        'the page\'s editor and its hidden field as they were': later.editor === 'secret drafta link in the draft' && later.fh === 'f',
       };
       const pageFailed = Object.entries(pageSide).filter(([, v]) => v !== true && v !== 'nothing');
       // ---- the good one

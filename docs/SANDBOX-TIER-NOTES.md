@@ -118,8 +118,8 @@ world per mod would pay the 8-10 ms per mod per page, hence one shared world. No
 
 ## Hostile e2e: results
 
-Final runs (Chrome 156: 56 of 56 checks passed; Firefox 159: 61 of 61): 143 escapes tried (123 before the
-red team, 20 from its findings: see "Red-team fixes") by
+Final runs (Chrome 156: 56 of 56 checks passed; Firefox 159: 61 of 61): 156 escapes tried (123 before the
+red team, 20 from its first round and 13 from its second: see "Red-team fixes") by
 tests/e2e/fixtures/sandbox-hostile.js, every one refused (TRIF or the language said no) or absent (the thing
 isn't there), in both browsers; the test server saw none of the `e2e-sbx-leak` addresses; the page's own
 listeners saw no click, key, submit, focus or message and no inline code ran; its prototypes were untouched
@@ -157,14 +157,14 @@ handler and frame were as they were; the tab stayed on the page and no tab opene
   removing the page's own elements (an observer could react to that). And links: a same-site `href`
   without a query that a framework prefetches on hover (Turbo 8 does) is a GET to the site without a
   click. Low; not closed.
-- **Forms** (red-team RT-2, closed for buttons and moves): what's left is removing a page field
-  (`remove()`), which changes what's submitted, and a mod's `<label>` around a page checkbox. Deception that
-  needs the user's click.
+- **Forms** (red-team RT-2 and RT-10, closed for buttons, moves, removal and writing over): what's left is
+  a mod's `<label>` around a page checkbox, and hiding a field the user then can't see. Deception that needs
+  the user's click.
 - **Deceiving the user by what's shown** (any mod can, rules mods too).
 - **Denial of service**: a mod looping forever hangs the page (one thread); SES doesn't contain it.
 - **Keystrokes** (red-team RT-4, closed for fields): which key is pressed in a field reaches no mod; a
-  field in a closed shadow root on a plain element isn't detectable. And the text of a contenteditable
-  editor is page text like any other: a mod can read it (it can't send it).
+  field in a closed shadow root is covered by default-deny since round 2 (RT-8), and an editor's text is
+  hidden (RT-9).
 - **Page CSP**: a `<style>` element from the world on a page whose CSP forbids inline styles (style-src
   without 'unsafe-inline'): not tested. In Chrome the world's own CSP may cover it.
 - **API gaps found while porting**: CSS masks with the site's images, `getBBox`, drawing images on a canvas
@@ -258,6 +258,38 @@ make the page (or the user) act. What changed, and what each costs mods:
   `data-controller`, a `js-auto-post` class, an `sbxConfig` id, and a page class being taken off into
   requests), plus real keys in the e2e (two typed into a password field: unseen; one on the page: seen) and
   the mod's own button, class and data attribute working.
+
+### Round 2 (report: same branch, "Round 2"): RT-1, RT-2, RT-5, RT-6 held; three more closed
+
+- **RT-8, keys from a closed shadow root (low).** Keys are now default-deny: `key`/`code` reach a mod only
+  for the document, `<html>`, `<body>`, or an element that is no field or editor and can't be holding one in
+  a shadow root. An event from inside an open root (composedPath()[0] isn't the target) is denied. Where
+  TRIF's world can see closed roots (`chrome.dom.openOrClosedShadowRoot` or Firefox's
+  `Element.openOrClosedShadowRoot`; which one, if any, is in `__trifSandbox.stats.closedRoots`), an element
+  is checked directly. **Neither is reachable from TRIF's user-script world in Chrome 156 or Firefox 159**
+  (stats.closedRoots was "none" in both e2e runs), so today, in both, any element that can host a shadow root (custom elements, and `div`,
+  `span`, `p`, `section`, `article`, `header`, `footer`, `nav`, `main`, `aside`, `blockquote`, `h1`-`h6`)
+  counts as editable. *Cost*: a hotkey pressed while the focus is on one of those (sites that focus a post,
+  like X's j/k on `<article>`, or a `div tabindex`) reaches the mod with `key: null` there; with the focus on
+  the page, a link, a button, a list item, a table cell, it works as before. Residual: a closed root on
+  `<body>` itself, where TRIF can't see closed roots.
+- **RT-9, an editor's text (low).** What's in an editing host (contenteditable, or a page in design mode) is
+  hidden from mods: `.text` leaves it out (an editor's own `.text` is ''; an ancestor's skips it),
+  `trif.text` doesn't read or rewrite it, `clone()` copies none of it, `attr()` is null inside it (a link
+  typed into a draft), and its pieces can't be moved out of it. *Cost*: a mod can't read or rewrite text
+  people are typing (word counters, live previews of a draft); it can still restyle and hide editors.
+  Residual: selectors still match inside an editor (`find('#editor a[href^="…"]')` can test an attribute's
+  value bit by bit; nothing can send the answer).
+- **RT-10, a field taken out of its form (low).** `remove()` and `setText()` are refused when they would take
+  a page field out of its form (removing the field, or something holding it, unless its form goes with it;
+  writing over anything holding one), as moves already were. `removeAttr` now follows the same attribute
+  rules as `setAttr`, so a field's `value` can't be taken off either (found while doing this). *Cost*:
+  removing part of a form that holds fields is refused (`hide()` hides it instead); removing a whole form
+  still works.
+- New hostile probes for each (now 156 in all), in the real user-script world: an editor's text, a piece's,
+  the page's text with an editor in it, an attribute inside it, moving a piece out, copies, `trif.text`;
+  removing a field or what holds it, writing over the form or what holds a field, taking a field's value
+  off; and real keys typed into a password field in a closed shadow root on a plain `<div>`.
 
 ### Wording awaiting Tim's OK (not changed in the UI)
 

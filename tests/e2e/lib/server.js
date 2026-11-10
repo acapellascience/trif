@@ -54,9 +54,12 @@ document.addEventListener('DOMContentLoaded', () => {
 <p id="txt">Grok says hi</p>
 <div id="box"></div>
 <p id="target-click">click target</p>
-<form id="f" action="/e2e-sbx-leak-submit"><input id="fi" name="q" value="v"><textarea id="ta">t</textarea><select id="sel"><option id="opt">o</option></select><button id="fb">Go</button></form>
+<form id="f" action="/e2e-sbx-leak-submit"><span id="fwrap"><input id="fh" type="hidden" name="h" value="keep"></span><input id="fi" name="q" value="v"><textarea id="ta">t</textarea><select id="sel"><option id="opt">o</option></select><button id="fb">Go</button></form>
 <form id="f2" action="/e2e-sbx-leak-submit2"><p>another form</p></form>
 <p><input id="pw" type="password" placeholder="password"></p>
+<div id="shost" style="display:inline-block"></div>
+<script>document.getElementById('shost').attachShadow({ mode: 'closed' }).innerHTML = '<input id="si" type="password" style="width:160px">';</script>
+<div id="editor" contenteditable="true"><p id="ed-p">secret draft</p><a id="ed-a" href="/two.html?draft">a link in the draft</a></div>
 <p><a id="blank" href="/two.html" target="_blank">blank</a> <a id="plink" href="/two.html">page link</a></p>
 <img id="pimg" src="/favicon.ico" alt="" width="1" height="1">
 <style id="pstyle">#title { letter-spacing: 0 }</style>

@@ -47,6 +47,13 @@ const FIXES = {
   linehue: require('./styler-fix-linehue'),
   // 6. offscreen: the animations in timeline rows well out of the window paused (lib/styler-fix-offscreen.js)
   offscreen: require('./styler-fix-offscreen'),
+  // 7. panel: the open panel's place (where the Style profile button is now, every 0.7 s) set on the panel, not
+  // on <html>: a custom property changed on <html> is inherited by every element, so each move (while you
+  // scroll) restyled the whole page
+  panel: {
+    [PS]: [P("    root.style.setProperty('--pst-panel-top',", "    panel.style.setProperty('--pst-panel-top',"),
+      P("    root.style.setProperty('--pst-panel-right',", "    panel.style.setProperty('--pst-panel-right',")],
+  },
   // (tried and dropped: "clock", lib/styler-fix-clock.js, the text roll and the hue stepped by a timer setting a
   // step number on <html>, one CSS rule per step: the GPU's work fell (781 → 462 ms/s idle) but every step
   // re-matched those long selectors against the page, main thread 412 → 800 ms/s)
@@ -59,7 +66,10 @@ const FIXES = {
 };
 
 // (the fixes `fixed` and the command line apply by default; the others only by name)
-const OPTIONAL = ['pin', 'smil']; // (smil: no gain measured, 1265 → 1204 ms/s with the animation gone altogether)
+// (smil: no gain measured, 1265 → 1204 ms/s with the animation gone altogether; offscreen: a small gain on your
+// own profile idle (main thread 369 → 326 ms/s, one run), none on Home, and its rule on every element in the
+// rows may cost a little while scrolling: not settled, so only by name)
+const OPTIONAL = ['pin', 'smil', 'offscreen'];
 const DEFAULT_FIXES = () => Object.keys(FIXES).filter((n) => !OPTIONAL.includes(n));
 
 function applyFixes(base, code, names) {

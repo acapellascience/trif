@@ -730,7 +730,7 @@ ui.waitingBadge?.addEventListener('click', () => openApproval(null));
 const GROUP_TEXT = {
   // (the lines for style and boxed mods: drafts awaiting Tim's OK, docs/TIER-NAMES-STRINGS.md)
   rules: [GROUP_NAMES.rules, 'Run by TRIF from data: they change how the page looks, and can\'t send, load or click anything themselves.'],
-  sandboxed: [GROUP_NAMES.sandboxed, 'Run in TRIF\'s sandbox: they change what the page shows, and can\'t send, load or click anything themselves.'],
+  sandboxed: [GROUP_NAMES.sandboxed, 'Run in TRIF\'s sandbox: they change what the page shows, and do only what you\'ve allowed.'],
   page: [GROUP_NAMES.page, 'Run in the page with everything it has.'],
 };
 const groupOff = (g) => !!view.site && groupOffOn(normalizeGroupsOff(view.status?.groupsOff), g, view.site);

@@ -1,5 +1,7 @@
 # The code card and Show in Finder: the new strings (branch powers)
 
+**Approved by Tim, 2026-11-10.**
+
 Every user-facing string the code viewer adds, exact, **all awaiting Tim's OK**.
 
 ## The mod row

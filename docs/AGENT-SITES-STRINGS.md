@@ -1,5 +1,7 @@
 # "Agent on this site": the new strings (branch powers)
 
+**Approved by Tim, 2026-11-10.**
+
 Every user- and agent-facing string the per-site agent setting adds, exact, **all awaiting Tim's OK**.
 
 ## How it works (decisions to check)

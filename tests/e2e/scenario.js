@@ -2852,7 +2852,7 @@ page.root.setAttr('data-trif-box-spec', r);\n`,
           starts: [...document.querySelectorAll('.starts-row')].map((l) => l.querySelector('span').textContent + '=' + l.querySelector('select').value) } : null;
       }`), { timeoutMs: 15000 });
       const order = layout.heads.join(',');
-      if (!/^(rules,)?sandboxed(,page)?$/.test(order) || layout.name !== 'Boxed mods' || layout.note !== 'Run in TRIF\'s sandbox: they change what the page shows, and can\'t send, load or click anything themselves.' || layout.rowGroup !== 'sandboxed') throw new Error(`the panel: ${JSON.stringify(layout)}`);
+      if (!/^(rules,)?sandboxed(,page)?$/.test(order) || layout.name !== 'Boxed mods' || layout.note !== 'Run in TRIF\'s sandbox: they change what the page shows, and do only what you\'ve allowed.' || layout.rowGroup !== 'sandboxed') throw new Error(`the panel: ${JSON.stringify(layout)}`);
       if (layout.order.indexOf('127.0.0.1/e2e-sbx-panel') < layout.order.indexOf('sandboxed') || (layout.order.includes('page') && layout.order.indexOf('127.0.0.1/e2e-sbx-panel') > layout.order.indexOf('page'))) throw new Error(`not under its heading: ${JSON.stringify(layout.order)}`);
       if (JSON.stringify(layout.starts) !== JSON.stringify(['Style mods=on', 'Boxed mods=on', 'Free mods=on'])) throw new Error(`New mods start: ${JSON.stringify(layout.starts)}`);
       await this.shot(this.panelCtx, 'panel-sandboxed-group');

@@ -2050,7 +2050,7 @@ async function onAgentEvent(runId, event, relay = true) {
           chat.messages.push({ role: 'mod', text: `Changed ${undoable.map(modFileName).join(', ')}.`, undoChange: undoable, time });
         }
         for (const h of Array.isArray(event.held) ? event.held : []) {
-          push('error', `${h.id} is on hold: TRIF found that it ${(Array.isArray(h.facts) && h.facts.length ? h.facts : [h.reason]).join('; it ')}. It won't run until you allow it (in Mods above).`);
+          push('error', `${h.id} is on hold: TRIF found that it ${(Array.isArray(h.facts) && h.facts.length ? h.facts : [h.reason]).join('; it ')}. It won't run until you allow it.`);
         }
         chat.last = {
           runId, ok: !!event.ok, time,

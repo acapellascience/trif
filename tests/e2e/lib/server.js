@@ -22,6 +22,39 @@ const PAGE = (title, body) => `<!doctype html>
 <style>body{font:16px/1.5 -apple-system,system-ui,sans-serif;margin:40px;max-width:720px}#target{padding:12px;border:1px dashed #999}</style>
 </head><body>${body}</body></html>`;
 
+// Sandboxed mods (tests/e2e/scenario.js sandboxedCheck): what the page itself would notice (__hits: clicks,
+// keys, submits, messages, inline code that ran), an empty script element the page made (text written into it
+// would run), a style element, a form, links, an image, a frame; a row added later; Amazon-like results and a
+// logo for the two sample ports; and 1000 cells for the timing.
+const SANDBOX_PAGE = () => PAGE('TRIF e2e sandbox', `<script>
+window.__pageSecret = 'from the page';
+window.__hits = [];
+for (const t of ['click', 'keydown', 'submit', 'input', 'message', 'focus']) window.addEventListener(t, (e) => __hits.push(t + ':' + ((e.target && e.target.id) || '')), true);
+document.addEventListener('DOMContentLoaded', () => {
+  const s = document.createElement('script'); s.id = 'gadget'; document.body.append(s);
+  setTimeout(() => { const d = document.createElement('div'); d.className = 'later'; d.textContent = 'later: Grok again'; document.getElementById('box').append(d); }, 400);
+});
+</script>
+<h1 id="title">Sandbox</h1>
+<p id="txt">Grok says hi</p>
+<div id="box"></div>
+<p id="target-click">click target</p>
+<form id="f" action="/e2e-sbx-leak-submit"><input id="fi" name="q" value="v"><textarea id="ta">t</textarea><select id="sel"><option id="opt">o</option></select><button id="fb">Go</button></form>
+<p><a id="blank" href="/two.html" target="_blank">blank</a> <a id="plink" href="/two.html">page link</a></p>
+<img id="pimg" src="/favicon.ico" alt="" width="1" height="1">
+<style id="pstyle">#title { letter-spacing: 0 }</style>
+<button id="pbtn" onclick="__hits.push('onclick')">b</button>
+<iframe id="frm" src="/two.html" width="200" height="60"></iframe>
+<div class="sbx-hide">to hide</div>
+<div id="logo" style="display:inline-block;width:120px;height:40px;font:700 28px sans-serif">Google</div>
+<div class="s-main-slot">
+  <div data-component-type="s-search-result" id="r1"><h2>Plain result one</h2></div>
+  <div id="r-ad"><span class="puis-sponsored-label-text">Sponsored</span> An ad</div>
+  <div id="r-carousel"><h2>Customers also bought</h2><div>things</div></div>
+  <div data-component-type="s-search-result" id="r2"><h2>Plain result two</h2></div>
+</div>
+<div id="cells">${Array.from({ length: 1000 }, (_, i) => `<span class="cell">${i}</span>`).join(' ')}</div>`);
+
 function testPage(host, pathName) {
   return PAGE(`TRIF e2e ${host}${pathName}`, `
 <h1 id="title">TRIF e2e test page</h1>
@@ -259,6 +292,7 @@ async function startServers(dir) {
     }
     if (u.pathname === '/favicon.ico') return send(204, 'image/x-icon', '');
     if (u.pathname === '/promos.html') return send(200, 'text/html; charset=utf-8', PROMOS_PAGE());
+    if (u.pathname === '/sandbox.html') return send(200, 'text/html; charset=utf-8', SANDBOX_PAGE());
     if (u.pathname === '/sweep.html') return send(200, 'text/html; charset=utf-8', SWEEP_PAGE());
     if (u.pathname === '/sweep-frame.html') return send(200, 'text/html; charset=utf-8', SWEEP_FRAME());
     return send(200, 'text/html; charset=utf-8', testPage(host, u.pathname));

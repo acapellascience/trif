@@ -3,7 +3,7 @@
 // chrome.storage.local `chat:<site>`; this page renders that record and reacts to storage changes.
 // See docs/PROTOCOL.md, "Side panel and agent runs".
 
-import { siteForUrl, modAppliesTo, modSites, isMultiSite, offOnSite, normalizeOffSites, scopeFor, hostInScope, limitToSites, withOffSites, modGroup, groupOffOn, offSitesFor, normalizeGroupsOff, FIREFOX, BROWSER, SETUP_COMMAND,
+import { siteForUrl, modAppliesTo, modSites, isMultiSite, offOnSite, normalizeOffSites, scopeFor, hostInScope, limitToSites, withOffSites, modGroup, GROUPS, groupOffOn, offSitesFor, normalizeGroupsOff, FIREFOX, BROWSER, SETUP_COMMAND,
   SITE_ACCESS, siteOrigins, siteState, hasSiteAccess, requestEverySite,
   normalizeModOrder, orderMods, moveId, setModOrder,
   normalizeSettings, normalizePicks, siteSettings, withoutModel } from './lib.js';
@@ -23,7 +23,7 @@ const ui = {
   modeDialog: $('#mode-dialog'), modeDialogClose: $('#mode-dialog-close'), modeDialogSwitch: $('#mode-dialog-switch'), modeDialogErr: $('#mode-dialog-err'),
   modeChoice: $('#mode-choice'), modePermissive: $('#mode-permissive'), modeRestrictive: $('#mode-restrictive'), modeNote: $('#mode-note'),
   blockedList: $('#blocked-list'), blockedEmpty: $('#blocked-empty'),
-  startsRules: $('#starts-rules'), startsPage: $('#starts-page'), startsNote: $('#starts-note'),
+  startsRules: $('#starts-rules'), startsSandboxed: $('#starts-sandboxed'), startsPage: $('#starts-page'), startsNote: $('#starts-note'),
   landing: $('#landing'), landingIcon: $('#landing-icon'), landingVersion: $('#landing-version'), landingNote: $('#landing-note'),
   settings: $('#settings'), agent: $('#agent'), agentNote: $('#agent-note'), model: $('#model'),
   using: $('#using'), modelCustomRow: $('#model-custom-row'), modelCustom: $('#model-custom'), modelNote: $('#model-note'),
@@ -662,6 +662,7 @@ onSwitchChange(() => renderMods());
 // ---- Groups: "Rules" and "Page scripts", each with a switch for this site (background's mods.group)
 const GROUP_TEXT = {
   rules: ['Rules', 'Run by TRIF from data: they can\'t send, click or load anything.'],
+  sandboxed: ['Sandboxed', 'Run in TRIF\'s sandbox: they can\'t send, click or load anything.'],
   page: ['Page scripts', 'Run in the page with everything it has.'],
 };
 const groupOff = (g) => !!view.site && groupOffOn(normalizeGroupsOff(view.status?.groupsOff), g, view.site);
@@ -713,9 +714,10 @@ function renderMods() {
   const scope = site ? scopeFor(site) : null;
   const listed = orderMods(site && status ? status.mods.filter((m) => limitToSites(m, [scope]) || m.held?.site === site) : [], view.defaultOrder[scope]);
   view.modNatural = listed.map((m) => m.id);
-  // Grouped by how TRIF runs them (lib.js "Groups"): rules first, then page scripts, each in its own order.
+  // Grouped by how TRIF runs them (lib.js "Groups"): rules first, then sandboxed mods, then page scripts,
+  // each in its own order.
   const ordered = orderMods(listed, view.modOrder[scope]);
-  const mods = [...ordered.filter((m) => modGroup(m) === 'rules'), ...ordered.filter((m) => modGroup(m) === 'page')];
+  const mods = GROUPS.flatMap((g) => ordered.filter((m) => modGroup(m) === g));
   ui.mods.hidden = mods.length === 0;
   if (!mods.length) { view.modRows.clear(); ui.modList.replaceChildren(); ui.modsReviewNote.hidden = true; return; }
   ui.modsCount.textContent = `(${mods.length})`;
@@ -739,7 +741,7 @@ function renderMods() {
   view.modRows = rows;
   // A heading for each group with mods here (or switched off here), with its switch, before its rows
   const want = [];
-  for (const g of ['rules', 'page']) {
+  for (const g of GROUPS) {
     const inGroup = mods.filter((m) => modGroup(m) === g);
     if (!inGroup.length && !groupOff(g)) continue;
     want.push(groupHeading(g), ...inGroup.map((m) => rows.get(m.id).li));
@@ -1018,6 +1020,7 @@ function renderSites() {
   // New mods start on or off, by group
   const startsOff = st?.startsOff || [];
   ui.startsRules.value = startsOff.includes('rules') ? 'off' : 'on';
+  ui.startsSandboxed.value = startsOff.includes('sandboxed') ? 'off' : 'on';
   ui.startsPage.value = startsOff.includes('page') ? 'off' : 'on';
   ui.startsNote.hidden = !startsOff.length;
 }
@@ -1135,15 +1138,18 @@ function modItem(m) {
 // Review (a mod the user has, still running): "Looks right" allows what was found; or switch it off.
 function factsBox(m, info, kind) {
   const box = el('div', `mod-facts ${kind}`);
-  box.append(el('p', 'facts-head', kind === 'held' ? 'Waiting for your OK. TRIF found that this mod:'
+  box.append(el('p', 'facts-head', kind === 'held' && info.by === 'sandbox' ? 'Waiting for your OK.'
+    : kind === 'held' ? 'Waiting for your OK. TRIF found that this mod:'
     : kind === 'pending' ? 'A change to this mod is waiting for your OK. TRIF found that the new version:'
       : 'TRIF found that this mod:'));
   const list = el('ul', 'facts');
   for (const f of (Array.isArray(info.facts) ? info.facts : [String(info.reason || '')]).filter(Boolean)) list.append(el('li', null, f));
   box.append(list);
   const where = m.matches && m.matches.length ? ` It runs by itself on every page it's for (${m.matches.slice(0, 3).join(', ')}${m.matches.length > 3 ? '…' : ''}).` : '';
-  const fromAgent = kind !== 'review' && info.by !== 'outside';
-  const who = fromAgent ? `An agent ${kind === 'pending' ? 'changed' : 'wrote'} it in your chat on ${info.site || view.site}.` : 'It\'s new or changed since TRIF last let it run.';
+  const fromAgent = kind !== 'review' && info.by !== 'outside' && info.by !== 'sandbox';
+  // (by 'sandbox': this browser can't sandbox it, so allowing it runs it as a page script: lib.js sandboxFallback)
+  const who = info.by === 'sandbox' ? 'Allow runs this version as a page script, in this browser only.'
+    : fromAgent ? `An agent ${kind === 'pending' ? 'changed' : 'wrote'} it in your chat on ${info.site || view.site}.` : 'It\'s new or changed since TRIF last let it run.';
   box.append(el('p', 'facts-note', `${kind === 'review' ? 'It keeps running until you switch it off.'
     : kind === 'pending' ? `${who} The version before keeps running until you decide.` : who}${where}`));
   if (info.claim) {
@@ -1189,6 +1195,11 @@ function factsBox(m, info, kind) {
     box.append(actions(decide('mod.approve', 'Allow', 'The new version runs from the next page load.'),
       decide('mod.reject', 'Don\'t allow', 'The version before stays; the change is kept in its history (trif history).'), showDiff));
     box.append(diffView);
+    return box;
+  }
+  if (kind === 'held' && info.by === 'sandbox') {
+    box.append(actions(showCode));
+    box.append(shown);
     return box;
   }
   if (kind === 'held') {
@@ -1498,7 +1509,7 @@ function updateModItem(li, m) {
   tag.textContent = on && m.enabled !== false && !m.registered ? (view.status.userScripts ? 'not active' : 'paused')
     : !on && m.from ? `from ${m.from}` : !on && m.newOff ? (m.newOff === 'update' ? 'updated' : 'new') : '';
   tag.title = !on && m.from ? `Made from ${m.from}. Mods made in another browser start off here; switch it on to use it.`
-    : !on && m.newOff ? `${m.newOff === 'update' ? 'TRIF updated it. ' : ''}New ${modGroup(m) === 'rules' ? 'rules' : 'page scripts'} start off (Settings): switch it on once you've looked at it.` : '';
+    : !on && m.newOff ? `${m.newOff === 'update' ? 'TRIF updated it. ' : ''}New ${{ rules: 'rules', sandboxed: 'sandboxed mods' }[modGroup(m)] || 'page scripts'} start off (Settings): switch it on once you've looked at it.` : '';
   tag.hidden = !tag.textContent;
   const err = li.querySelector('.mod-err');
   err.textContent = rowErr || switchError(m.id, site) || (on && m.error) || '';
@@ -1935,6 +1946,7 @@ async function installUpdate() {
 
 ui.pauseAll.addEventListener('change', () => setPaused(ui.pauseAll.checked));
 ui.startsRules.addEventListener('change', () => setStartsOff('rules', ui.startsRules.value === 'off'));
+ui.startsSandboxed.addEventListener('change', () => setStartsOff('sandboxed', ui.startsSandboxed.value === 'off'));
 ui.startsPage.addEventListener('change', () => setStartsOff('page', ui.startsPage.value === 'off'));
 
 ui.autoUpdate.addEventListener('change', async () => {

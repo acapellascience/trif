@@ -59,6 +59,10 @@ export function sandboxRuntime(mode, pageModId, pageFn) {
   const G = globalThis;
   const SANDBOX = mode === 'sandbox';
   if (SANDBOX && G.__trifSandbox) return;
+  // What it costs, for `trif`'s e2e and anyone measuring (__trifSandbox.stats): SES's own load (from the stamp
+  // put before it: sandboxRuntimeScript), lockdown, each mod's first run, and the mods' callbacks.
+  const now = () => performance.now();
+  const stats = { sesMs: typeof G.__trifT0 === 'number' ? now() - G.__trifT0 : null, lockdownMs: null, startedAt: now(), mods: {}, callbacks: 0, callbackMs: 0 };
   // (TRIF's world: messaging to TRIF's background is for TRIF's code only, captured before any mod runs;
   // mods never get `chrome`: their global is the compartment's)
   let send = null;
@@ -69,7 +73,9 @@ export function sandboxRuntime(mode, pageModId, pageFn) {
     try { delete G.browser; } catch { /* as above */ }
     // The language locked down once per world (every sandboxed mod in this page shares it). Built-ins newer
     // than SES knows are removed (reporting 'none': it would otherwise list them in the console each time).
+    const tl = now();
     G.lockdown({ errorTaming: 'unsafe', consoleTaming: 'unsafe', overrideTaming: 'severe', stackFiltering: 'concise', reporting: 'none' });
+    stats.lockdownMs = now() - tl;
   }
   const harden = SANDBOX ? G.harden : (o) => Object.freeze(o);
   const D = document;
@@ -288,7 +294,7 @@ export function sandboxRuntime(mode, pageModId, pageFn) {
     const self = {};
     apis.set(modId, self);
     // (a callback of the mod's: errors reported as its own, and stand-ins' listeners are its own)
-    const call = (fn, ...args) => { const prev = current; current = self; try { return fn(...args); } catch (e) { report(modId, e); return undefined; } finally { current = prev; } };
+    const call = (fn, ...args) => { const prev = current, t = now(); current = self; try { return fn(...args); } catch (e) { report(modId, e); return undefined; } finally { current = prev; stats.callbacks++; stats.callbackMs += now() - t; } };
     // TRIF's functions as the mod sees them: an error from the browser (a DOMException, say) is passed on
     // as plain text, so no object from outside the compartment reaches the mod through it.
     const guard = (fn) => function (...args) {
@@ -513,7 +519,7 @@ export function sandboxRuntime(mode, pageModId, pageFn) {
   const run = (modId, source) => {
     const id = String(modId);
     const api = apiFor(id);
-    const prev = current;
+    const prev = current, t = now();
     current = api;
     try {
       if (SANDBOX) {
@@ -531,6 +537,7 @@ export function sandboxRuntime(mode, pageModId, pageFn) {
       report(id, err);
     } finally {
       current = prev;
+      stats.mods[id] = { at: t, runMs: now() - t };
     }
   };
   if (!SANDBOX) { run(pageModId, pageFn); return; }
@@ -542,7 +549,7 @@ export function sandboxRuntime(mode, pageModId, pageFn) {
       if (m) report(m[1], r);
     });
   } catch { /* none */ }
-  Object.defineProperty(G, '__trifSandbox', { value: Object.freeze({ run, errors: store.errors, logs: store.logs }), configurable: false, writable: false });
+  Object.defineProperty(G, '__trifSandbox', { value: Object.freeze({ run, errors: store.errors, logs: store.logs, stats }), configurable: false, writable: false });
   // (mods that came before the runtime)
   const queued = G.__trifSandboxQueue;
   if (Array.isArray(queued)) { G.__trifSandboxQueue = null; for (const [id, source] of queued) run(id, source); }

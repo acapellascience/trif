@@ -86,8 +86,9 @@ export function modToUserScript(mod) {
 export function inSandboxWorld(mod) { return !!(mod && mod.sandboxed && !mod.unsandboxed); }
 
 /** The sandbox world's runtime (sandbox.js): SES, then TRIF's code; where any sandboxed mod runs. */
+const SES_STAMP = 'globalThis.__trifT0 = performance.now();'; // (so the runtime can say what loading SES took)
 export function sandboxRuntimeScript(matches) {
-  return { id: SANDBOX_RUNTIME_ID, matches, excludeMatches: [], js: [{ file: SES_FILE }, { code: sandboxRuntimeCode() }], runAt: 'document_start', world: 'USER_SCRIPT', worldId: SANDBOX_WORLD, allFrames: false };
+  return { id: SANDBOX_RUNTIME_ID, matches, excludeMatches: [], js: [{ code: SES_STAMP }, { file: SES_FILE }, { code: sandboxRuntimeCode() }], runAt: 'document_start', world: 'USER_SCRIPT', worldId: SANDBOX_WORLD, allFrames: false };
 }
 
 // ---- browsers without TRIF's sandbox world ------------------------------------------------------------
@@ -121,7 +122,7 @@ export function sandboxFallback(mods, { canSandbox = true, allowed = {}, browser
     // (held by the helper anyway: its own Allow first)
     if (m.held) return { ...m, unsandboxed: true };
     if (allowed[m.id] && allowed[m.id] === m.hash) return { ...m, unsandboxed: true };
-    const facts = [sandboxHoldReason(browser), ...(Array.isArray(m.pageFacts) ? m.pageFacts : [])];
+    const facts = [sandboxHoldReason(browser), ...(Array.isArray(m.pageFacts) ? m.pageFacts.map((f) => `as a page script, it ${f}`) : [])];
     return { ...m, unsandboxed: true, held: { by: 'sandbox', site: modSiteName(m), reason: facts.join('; '), facts, claim: String(m.risk?.why || m.description || '').slice(0, 300), hash: m.hash } };
   });
 }
@@ -220,7 +221,7 @@ export async function syncUserScripts(us, { mods, runtimeCode, applied = {}, dis
   const syncSandboxRuntime = async (fresh) => {
     const there = !fresh && !!sandboxNow;
     if (!sandboxMatches.length) { if (there) await us.unregister({ ids: [SANDBOX_RUNTIME_ID] }); return; }
-    const code = sandboxNow?.js?.[1]?.code;
+    const code = sandboxNow?.js?.[2]?.code;
     const same = there && (code !== undefined ? code === sandboxCode && JSON.stringify([...(sandboxNow.matches || [])].sort()) === JSON.stringify(sandboxMatches) : applied[SANDBOX_RUNTIME_ID] === sandboxHash);
     try {
       if (!same) { if (there) await us.update([sandboxRuntimeScript(sandboxMatches)]); else await us.register([sandboxRuntimeScript(sandboxMatches)]); }

@@ -2989,7 +2989,8 @@ test('sandboxed mods: TRIF\'s own world, their code as text for SES; the sandbox
   // the sandbox runtime: SES from the extension, then TRIF's code, in the same world, where the sandboxed mods run
   const run = byId[sbx.SANDBOX_RUNTIME_ID];
   assert.ok(run, 'the sandbox runtime is registered');
-  assert.deepStrictEqual(run.js[0], { file: 'vendor/ses.umd.min.js' });
+  assert.deepStrictEqual(run.js[1], { file: 'vendor/ses.umd.min.js' });
+  assert.strictEqual(run.js[2].code, sbx.sandboxRuntimeCode());
   assert.strictEqual(run.world, 'USER_SCRIPT');
   assert.strictEqual(run.worldId, sbx.SANDBOX_WORLD);
   assert.deepStrictEqual(run.matches, ['*://*.z.com/*', '*://y.com/*', '*://z.com/*']);
@@ -3051,8 +3052,8 @@ test('sandboxFallback: without the sandbox a sandboxed mod waits for the user\'s
   const [held, same] = lib.sandboxFallback([boxed, page], { canSandbox: false, browser: 'Safari' });
   assert.strictEqual(same, page);
   assert.strictEqual(held.unsandboxed, true);
-  assert.deepStrictEqual(held.held, { by: 'sandbox', site: 'y.com', reason: 'Safari can\'t run sandboxed mods, so here it would run as a page script, with everything the page has; can send requests',
-    facts: ['Safari can\'t run sandboxed mods, so here it would run as a page script, with everything the page has', 'can send requests'], claim: 'Bounces the logo', hash: 'H' });
+  assert.deepStrictEqual(held.held, { by: 'sandbox', site: 'y.com', reason: 'Safari can\'t run sandboxed mods, so here it would run as a page script, with everything the page has; as a page script, it can send requests',
+    facts: ['Safari can\'t run sandboxed mods, so here it would run as a page script, with everything the page has', 'as a page script, it can send requests'], claim: 'Bounces the logo', hash: 'H' });
   // a held mod isn't registered
   const us = mockUserScripts();
   await lib.syncUserScripts(us, { mods: [held, page], runtimeCode: 'RT' });

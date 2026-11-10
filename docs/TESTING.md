@@ -81,6 +81,14 @@ Per browser, a **fresh** scenario, and an **upgrade** scenario per `--upgrade-fr
      to the small one goes without the big one's code (`modsSame`), and the big one still runs; a mod over
      the 4 MB cap isn't sent, and `trif status` and `trif doctor` say why. Kept small on purpose: see "Big
      mods and memory" below for sets up to the 16 MB cap.
+   - Chrome: TRIF's toolbar button opens the real side panel (no panel window, nothing remembered) and
+     closes it. Then, as in Arc, with the side panel made not to open (the test build's `sidePanel.open`
+     resolves and does nothing while `chrome.storage.local` `e2eNoSidePanel` is true): the click opens the
+     panel in a window beside the test window, which follows that window's tabs (127.0.0.1, localhost,
+     back), closes on the next click, opens at once on the one after (remembered), closes with its browser
+     window (another window's, not the suite's own panel window); fresh, the click still gives `activeTab`
+     (a screenshot of that tab refused before it, captured after). Last, with the side panel back while
+     TRIF still remembers the window: the side panel shows, the window closes again, and it's forgotten.
    - `trif sweep --selector/--text/--color` on a page of repeated things (`/sweep.html`: regions, a sticky
      header, a shadow root, a same-origin frame, a CSS variable) finds the expected counts; `trif status
      --tab` lists the mods on that page. Screenshots, restrictive (fresh Chrome): of that tab while it's in
@@ -186,6 +194,10 @@ keep that grant when it moves to optional): Chrome's test build makes it require
 a click right after installing, then restarts the add-on. Firefox's prompt can be answered from the browser's own side, so the suite turns prompts on once to say no
 to Permissive at setup. Not covered by the suite: Chrome's prompt itself and saying no to it (unit tests
 cover what TRIF does then), Firefox's `activeTab` screenshot after a toolbar click.
+
+The Chrome test build also has `e2e-background.js` as its service worker: it imports `e2e-no-side-panel.js`
+(the `e2eNoSidePanel` switch above) before `background.js`. Nothing else changes; the switch is off unless a
+check turns it on.
 
 Paths stay short (`--work` defaults to `/tmp/trif-e2e-<uid>`): the helper's unix sockets live in the
 scratch home, and macOS allows about 104 bytes for a socket path.

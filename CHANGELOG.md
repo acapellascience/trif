@@ -55,6 +55,8 @@ summary is too long.
     something new.
   - Your existing mods keep running. Ones that can do more than change how a page looks show what
     TRIF found once, with "Looks right".
+- TRIF's panel now opens in Arc and other browsers without Chrome's side panel: in a window of its own,
+  beside the browser window.
 
 ## 0.2.5
 

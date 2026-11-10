@@ -128,6 +128,17 @@ export async function buildNote(slug, { fetchMedia = true } = {}) {
   const blocks = [];
   const files = [];
   const note = (msg) => console.log(`  ${slug}: ${msg}`);
+  // the header picture, above the title (X's cover image)
+  let cover = null;
+  if (article.cover) {
+    const ext = /format=(\w+)/.exec(article.cover)?.[1] || 'jpg';
+    const name = `${mediaId(article.cover) || 'cover'}.${ext}`;
+    const file = path.join(media, name);
+    if (fetchMedia && await download(article.cover, file)) note(`fetched ${name} (the header picture)`);
+    const { w, h } = size(file);
+    files.push(name);
+    cover = { src: name, w, h };
+  }
   for (const b of article.blocks) {
     if (b.type === 'text') {
       const kind = /header-one/.test(b.kind) ? 'h2' : /header/.test(b.kind) ? 'h2' : /list-item/.test(b.kind) ? 'li' : /blockquote/.test(b.kind) ? 'quote' : 'p';
@@ -176,13 +187,13 @@ export async function buildNote(slug, { fetchMedia = true } = {}) {
   const description = first ? plain(first.html).replace(/^TL;DR:\s*/i, '').slice(0, 300) : '';
   // (a picture shaped like a link card, 1.3 to 2.4 times as wide as it's tall, and big enough; note.json's
   // "image" picks one by name)
-  const image = blocks.find((x) => x.t === 'img' && x.src === meta.image)
+  const image = (cover && !meta.image ? cover : null) || blocks.find((x) => x.t === 'img' && x.src === meta.image)
     || blocks.find((x) => x.t === 'img' && x.w >= 600 && x.w / x.h >= 1.3 && x.w / x.h <= 2.4) || blocks.find((x) => x.t === 'img');
   if (!meta.x || /PLACEHOLDER/.test(meta.x)) note('note.json has no address on X yet ("x"): the page says it\'s coming');
   // (each file's version, from its content: the page asks for <file>?v=<it>, so a picture or video made again
   // reaches readers at once instead of after their browser's cached copy runs out)
   const versions = Object.fromEntries(files.map((f) => [f, createHash('sha1').update(fs.readFileSync(path.join(media, f))).digest('hex').slice(0, 8)]));
-  return { slug, title: article.title, description, x: meta.x && !/PLACEHOLDER/.test(meta.x) ? meta.x : '', date: meta.date || '', image: image ? { src: image.src, w: image.w, h: image.h } : null, files, versions, blocks };
+  return { slug, title: article.title, description, x: meta.x && !/PLACEHOLDER/.test(meta.x) ? meta.x : '', date: meta.date || '', image: image ? { src: image.src, w: image.w, h: image.h } : null, cover, files, versions, blocks };
 }
 
 /** An embedded post's alt text: who, when, what it says, and what it quotes (from the card's text). */

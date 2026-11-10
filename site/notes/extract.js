@@ -61,4 +61,10 @@ for (const b of top) {
 }
 // (the author: the article's own name line, not an embedded post's)
 const byline = [...document.querySelectorAll('[data-testid=User-Name]')].find((e) => !comp.contains(e))?.innerText;
-return JSON.stringify({ title, byline, url: location.href, at: new Date().toISOString(), n: out.length, blocks: out });
+// (the header picture: the one above the title, outside the article's text)
+const view = comp.closest('[data-testid=twitterArticleReadView]') || document;
+const titleEl = view.querySelector('[data-testid=twitter-article-title]');
+const coverEl = [...view.querySelectorAll('img')].find((i) => !comp.contains(i) && i.src.includes('pbs.twimg.com/media/')
+  && (!titleEl || i.compareDocumentPosition(titleEl) & Node.DOCUMENT_POSITION_FOLLOWING));
+const cover = coverEl ? big(coverEl.src) : null;
+return JSON.stringify({ title, byline, cover, url: location.href, at: new Date().toISOString(), n: out.length, blocks: out });

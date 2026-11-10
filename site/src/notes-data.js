@@ -7,11 +7,17 @@ export const NOTES = {
   "x": "https://x.com/MasterTimBlais/status/2119997660656468278",
   "date": "2026-11-09",
   "image": {
-   "src": "HWdxpOBXYAALVF6.jpg",
-   "w": 2048,
-   "h": 1161
+   "src": "HWjU1c4WEAAUvts.jpg",
+   "w": 1823,
+   "h": 729
+  },
+  "cover": {
+   "src": "HWjU1c4WEAAUvts.jpg",
+   "w": 1823,
+   "h": 729
   },
   "files": [
+   "HWjU1c4WEAAUvts.jpg",
    "HWt_FOYXsAAN9gf.jpg",
    "HWdxpOBXYAALVF6.jpg",
    "HWdxzHWWMAAyfL6.jpg",
@@ -44,6 +50,7 @@ export const NOTES = {
    "HWe1zlfWAAAKlKg.jpg"
   ],
   "versions": {
+   "HWjU1c4WEAAUvts.jpg": "6a4c9c75",
    "HWt_FOYXsAAN9gf.jpg": "5acf6289",
    "HWdxpOBXYAALVF6.jpg": "aaa44fe0",
    "HWdxzHWWMAAyfL6.jpg": "78de3be1",

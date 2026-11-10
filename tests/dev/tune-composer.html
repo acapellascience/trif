@@ -1,0 +1,112 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Tune Composer (dev)</title>
+<style>
+  /* a mock of X in Lights out: just enough page for the composer to sit on */
+  :root { color-scheme: dark; --bg: #000; --line: #2f3336; --ink: #e7e9ea; --muted: #71767b; --blue: #1d9bf0; }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; background: var(--bg); color: var(--ink); font: 15px/1.35 -apple-system, system-ui, "Segoe UI", sans-serif; }
+  .app { display: flex; justify-content: center; min-height: 100vh; }
+  nav { width: 240px; padding: 8px 12px; display: flex; flex-direction: column; gap: 4px; position: sticky; top: 0; height: 100vh; }
+  nav .logo { font-size: 28px; font-weight: 800; padding: 6px 12px 10px; }
+  nav a { color: var(--ink); text-decoration: none; font-size: 19px; padding: 10px 12px; border-radius: 9999px; }
+  nav a:hover { background: #181818; }
+  nav .post { margin-top: 12px; background: var(--ink); color: #000; text-align: center; font-weight: 700; font-size: 16px; padding: 14px; border-radius: 9999px; }
+  main { width: 600px; border-left: 1px solid var(--line); border-right: 1px solid var(--line); }
+  main header { position: sticky; top: 0; padding: 14px 16px; font-size: 20px; font-weight: 800; background: rgb(0 0 0 / .65); backdrop-filter: blur(12px); border-bottom: 1px solid var(--line); }
+  .compose { display: flex; gap: 12px; padding: 12px 16px; border-bottom: 1px solid var(--line); }
+  .compose [contenteditable] { flex: 1; min-height: 52px; padding: 10px 0; font-size: 20px; outline: none; color: var(--ink); }
+  .compose [contenteditable]:empty::before { content: "What is happening?!"; color: var(--muted); }
+  article { display: flex; gap: 12px; padding: 12px 16px; border-bottom: 1px solid var(--line); }
+  .av { width: 40px; height: 40px; border-radius: 50%; flex: none; }
+  article b { font-weight: 700; } article .h { color: var(--muted); }
+  article p { margin: 2px 0 0; }
+  aside { width: 350px; padding: 8px 24px; }
+  aside input { width: 100%; padding: 12px 18px; border-radius: 9999px; border: 1px solid var(--line); background: #202327; color: var(--ink); font: inherit; }
+  .card { margin-top: 16px; border: 1px solid var(--line); border-radius: 16px; padding: 12px 16px; }
+  .card h2 { margin: 0 0 8px; font-size: 20px; }
+  .card div { padding: 8px 0; color: var(--muted); font-size: 13px; } .card div b { display: block; color: var(--ink); font-size: 15px; }
+  /* Edit profile (x.com/settings/profile): a dialog over the page */
+  .mask { position: fixed; inset: 0; background: rgb(91 112 131 / .4); display: flex; justify-content: center; align-items: flex-start; padding-top: 5vh; }
+  .dialog { width: 600px; max-height: 90vh; overflow: auto; background: #000; border-radius: 16px; }
+  .dialog .top { display: flex; align-items: center; gap: 24px; padding: 8px 16px; height: 53px; }
+  .dialog .top .x { font-size: 22px; color: var(--ink); background: none; border: 0; width: 34px; height: 34px; border-radius: 50%; cursor: pointer; }
+  .dialog .top h2 { flex: 1; margin: 0; font-size: 20px; }
+  .dialog .top [data-testid=Profile_Save_Button] { background: var(--ink); color: #000; border: 0; border-radius: 9999px; min-height: 32px; padding: 0 16px; font: 700 14px -apple-system, system-ui, sans-serif; cursor: pointer; }
+  .banner { height: 190px; background: linear-gradient(120deg, #3b3f6e, #6a3b5d); }
+  .pic { width: 112px; height: 112px; border-radius: 50%; border: 4px solid #000; margin: -56px 0 0 16px; background: radial-gradient(circle at 40% 35%, #f4c27a, #c8553d); }
+  .fields { padding: 12px 16px 24px; display: grid; gap: 22px; }
+  .fields label { display: block; border: 1px solid var(--line); border-radius: 4px; padding: 6px 8px; color: var(--muted); font-size: 13px; }
+  .fields input, .fields textarea { display: block; width: 100%; margin-top: 2px; background: none; border: 0; color: var(--ink); font: 17px -apple-system, system-ui, sans-serif; outline: none; resize: none; }
+  .devnote { position: fixed; left: 16px; bottom: 16px; z-index: 10; max-width: 230px; padding: 10px 12px; border-radius: 12px; background: #16181c; border: 1px solid var(--line); color: var(--muted); font-size: 12px; line-height: 1.45; }
+  .devnote b { color: var(--ink); } .devnote a { color: var(--blue); cursor: pointer; }
+  .devnote kbd { font: 11px ui-monospace, Menlo, monospace; border: 1px solid var(--line); border-radius: 3px; padding: 0 3px; color: var(--ink); }
+</style>
+</head>
+<body>
+<div class="app">
+  <nav>
+    <div class="logo">𝕏</div>
+    <a href="/home">Home</a><a href="/home">Explore</a><a href="/home">Notifications</a><a href="/home">Messages</a><a href="/settings/profile">Profile</a>
+    <div class="post">Post</div>
+  </nav>
+  <main>
+    <header>Home</header>
+    <div class="compose"><div class="av" style="background:#c8553d"></div><div contenteditable="true" role="textbox" aria-label="Post text"></div></div>
+    <div id="posts"></div>
+  </main>
+  <aside>
+    <input placeholder="Search" aria-label="Search">
+    <div class="card"><h2>What’s happening</h2>
+      <div>Music · Trending<b>#ChiptuneTuesday</b>2,418 posts</div>
+      <div>Technology · Trending<b>2A03</b>1,207 posts</div>
+      <div>Trending<b>Square waves</b>903 posts</div>
+    </div>
+  </aside>
+</div>
+<div class="mask" id="edit-profile" hidden>
+  <div class="dialog" role="dialog" aria-label="Edit profile">
+    <div class="top"><button class="x" aria-label="Close">×</button><h2>Edit profile</h2><button data-testid="Profile_Save_Button">Save</button></div>
+    <div class="banner"></div><div class="pic"></div>
+    <div class="fields">
+      <label>Name<input id="name" value="Tim Blais"></label>
+      <label>Bio<textarea id="bio" rows="3">I make music about science.</textarea></label>
+      <label>Location<input id="where" value="Montréal"></label>
+    </div>
+  </div>
+</div>
+<div class="devnote"><b>Dev page</b>: a mock of X with Tune Composer loaded.<br>
+  <kbd>Alt</kbd>+<kbd>Shift</kbd>+<kbd>T</kbd> opens and closes it anywhere; on <a data-go="/settings/profile">Edit profile</a> it’s “♪ Tune” beside Save.<br>
+  <a id="reset">Back to the demo tune</a> (forgets the saved one) · <a data-go="/home">Home</a></div>
+<script>
+  // the mock's own bits: a few posts, the Edit profile dialog on /settings/profile, links that stay here
+  const posts = [
+    ['#4a8fe7', 'Ada', '@ada_codes', 'Wrote a sequencer in 200 lines today. It plays exactly one song and I love it.'],
+    ['#e7a14a', 'Square Wave Society', '@squarewaves', 'Reminder: 12.5% duty is a valid personality.'],
+    ['#5bbf6a', 'Noise Channel', '@lfsr15', 'Short mode is just long mode that found its voice.'],
+    ['#b46ae7', 'Bassline Bureau', '@triangle_only', 'No volume control, no problem.'],
+  ];
+  for (const [c, n, h, t] of posts) {
+    const a = document.createElement('article');
+    a.innerHTML = `<div class="av" style="background:${c}"></div><div><b>${n}</b> <span class="h">${h} · 2h</span><p>${t}</p></div>`;
+    document.getElementById('posts').append(a);
+  }
+  const route = () => { document.getElementById('edit-profile').hidden = !location.pathname.startsWith('/settings/profile'); };
+  route();
+  for (const a of document.querySelectorAll('[data-go], nav a')) a.addEventListener('click', (e) => { e.preventDefault(); history.pushState(null, '', a.dataset.go || a.getAttribute('href')); route(); });
+  document.querySelector('.dialog .x').addEventListener('click', () => { history.pushState(null, '', '/home'); route(); });
+  document.getElementById('reset').addEventListener('click', () => { localStorage.removeItem('trifTuneComposer.song'); location.reload(); });
+</script>
+<script src="/mod/tune-composer.js"></script>
+<script>
+  // open the composer at once on Edit profile (?closed: leave it closed)
+  if (location.pathname.startsWith('/settings/profile') && !new URLSearchParams(location.search).has('closed')) {
+    const go = () => { const b = document.getElementById('tcp-open'); if (b) b.click(); else setTimeout(go, 50); };
+    go();
+  }
+</script>
+</body>
+</html>

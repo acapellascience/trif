@@ -1,6 +1,7 @@
 // The site's pictures for browsers and link previews, drawn from the robot on the home page (pages.js
 // ROBOT_SVG): the link preview card (og.png, 1200x630: what iMessage, Slack, X, Discord… show for a link
-// to timsrobot.com) and the home-screen icon (apple-touch-icon.png, 180x180, on the page's background).
+// to timsrobot.com) and the home-screen icon (apple-touch-icon.png, 180x180: the robot alone, on a transparent background, so
+// a phone's tile or home screen shows its own colour around the robot's rounded corners).
 // The tab icon is the robot itself (favicon.svg, from ROBOT_SVG) and the extension's 32 px icon
 // (favicon.ico), so they need nothing drawn here.
 // Writes site/src/images.js (the PNGs, base64, for the Worker; it can't read files). Rerun after changing
@@ -35,8 +36,8 @@ function chrome() {
 }
 
 const robot = (size) => ROBOT_SVG.replace(/ class="robot" aria-hidden="true"/, '').replace('width="128" height="128"', `width="${size}" height="${size}"`);
-const doc = (w, h, body) => `<!doctype html><html><head><meta charset="utf-8"><style>${TOKENS}
-html, body { margin: 0; width: ${w}px; height: ${h}px; overflow: hidden; background: var(--bg); color: var(--fg);
+const doc = (w, h, body, bg = 'var(--bg)') => `<!doctype html><html><head><meta charset="utf-8"><style>${TOKENS}
+html, body { margin: 0; width: ${w}px; height: ${h}px; overflow: hidden; background: ${bg}; color: var(--fg);
   font-family: -apple-system, system-ui, "Segoe UI", sans-serif; }
 </style></head><body>${body}</body></html>`;
 
@@ -48,7 +49,7 @@ const CARDS = {
   <div style="font-size:34px;color:var(--muted)">Fix any website with your own coding agent.</div>
 </div>`)],
   'apple-touch-icon.png': [180, 180, doc(180, 180, `
-<div style="height:100%;display:flex;align-items:center;justify-content:center">${robot(150)}</div>`)],
+<div style="height:100%;display:flex;align-items:center;justify-content:center">${robot(180)}</div>`, 'transparent')],
 };
 
 function shoot(bin, w, h, html, out) {
@@ -56,7 +57,7 @@ function shoot(bin, w, h, html, out) {
   try {
     const page = path.join(dir, 'card.html');
     fs.writeFileSync(page, html);
-    execFileSync(bin, ['--headless', '--mute-audio', '--disable-gpu', '--hide-scrollbars', '--no-first-run',
+    execFileSync(bin, ['--headless', '--mute-audio', '--disable-gpu', '--hide-scrollbars', '--no-first-run', '--default-background-color=00000000',
       `--user-data-dir=${path.join(dir, 'profile')}`, '--force-device-scale-factor=1', `--window-size=${w},${h}`,
       `--screenshot=${out}`, `file://${page}`], { stdio: 'ignore', timeout: 60000 });
   } finally {

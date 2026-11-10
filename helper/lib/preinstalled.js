@@ -294,6 +294,8 @@ function updateShippedMods(home, modsDir, examplesDir, list = PREINSTALLED) {
       // Already the shipped version (just copied, or the user got there). An undo of "Use the new
       // version" stays possible while nothing else changed.
       next = rec && rec.replaced && rec.hash === shipped.hash ? { ...current, replaced: rec.replaced } : current;
+      // (still the version TRIF put in place by itself: keep its stamp, for browsers that haven't seen it)
+      if (rec && rec.auto && rec.hash === shipped.hash) next = { ...next, auto: rec.auto };
       if (!(readOrNull(baseFile(home, id)) || Buffer.alloc(0)).equals(shipped.code)) writeAtomic(baseFile(home, id), shipped.code);
       removeFile(newFile(home, id));
     } else if (rec && rec.hash === shipped.hash) {
@@ -306,7 +308,8 @@ function updateShippedMods(home, modsDir, examplesDir, list = PREINSTALLED) {
       writeAtomic(baseFile(home, id), shipped.code);
       writeAtomic(modFile(modsDir, id), shipped.code);
       removeFile(newFile(home, id));
-      next = current;
+      // (stamped: a browser where new mods of its group start off switches it off, once; autoUpdatedIds)
+      next = { ...current, auto: new Date().toISOString() };
       updated.push({ id, version: shipped.version, from: rec ? rec.version || null : null });
     } else {
       // Edited: left alone, with the new version kept for the user to use or merge.
@@ -723,11 +726,23 @@ function startOffIds(home) { return new Set(load(home).startOff); }
 /** The mods added again after being deleted: {id: stamp}; each browser switches each as listed once per stamp. */
 function readdedIds(home) { return load(home).readded; }
 
+/**
+ * Shipped mods TRIF replaced with a new version by itself (the user hadn't changed theirs): id -> stamp,
+ * while the copy is still that version. Sent with the mods as `autoUpdated`: a browser whose user set new
+ * mods of that group to start off switches it off once (extension/lib.js applyNewMods). Not one the user
+ * chose ("Use the new version"): they asked for that one.
+ */
+function autoUpdatedIds(home) {
+  const out = {};
+  for (const [id, r] of Object.entries(load(home).shipped)) if (typeof r.auto === 'string') out[id] = r.auto;
+  return out;
+}
+
 /** The sites each browser should turn TRIF on for when it first sees them. */
 function startSitesOn(home) { return load(home).sitesOn; }
 
 module.exports = {
   PREINSTALLED, RETIRED, SITES_ON, SITE_NAMES, DEFAULT_ORDER, SHIPPED_DIR, preinstallMods, updateShippedMods, retireShippedMods, absorbedIds,
-  starterSites, siteOf, siteName, resolveSites, resolveIds, readdedIds, starterChoices, chooseNoStarter, installStarter, starterOffer, examplesDir,
+  starterSites, siteOf, siteName, resolveSites, resolveIds, readdedIds, autoUpdatedIds, starterChoices, chooseNoStarter, installStarter, starterOffer, examplesDir,
   startOffIds, startSitesOn, loadPreinstalled: load, pendingUpdates, useNewVersion, keepMine, mergeRequest, mergeSettled, resolveMerge, restoreMod, baseFile, newFile, loadHistory,
 };

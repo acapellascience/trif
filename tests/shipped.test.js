@@ -68,14 +68,23 @@ test('unchanged copies get the new version silently; switches carry over (same i
   const r = w.setup();
   assert.deepStrictEqual(r.updated, [{ id: 'x.com/detox-timeline', version: '2', from: '1' }]);
   assert.strictEqual(w.mine('x.com/detox-timeline'), mod(2, 'two'));
-  assert.deepStrictEqual(w.rec('x.com/detox-timeline'), { hash: sha1(mod(2, 'two')), version: '2' });
+  // (stamped as put in place by TRIF itself, for browsers whose new mods start off: autoUpdatedIds)
+  const { auto, ...rec } = w.rec('x.com/detox-timeline');
+  assert.deepStrictEqual(rec, { hash: sha1(mod(2, 'two')), version: '2' });
+  assert.ok(!Number.isNaN(Date.parse(auto)));
+  assert.deepStrictEqual(S.autoUpdatedIds(w.home), { 'x.com/detox-timeline': auto });
   assert.strictEqual(fs.readFileSync(S.baseFile(w.home, 'x.com/detox-timeline'), 'utf8'), mod(2, 'two'));
   const after = S.loadPreinstalled(w.home);
   assert.deepStrictEqual([after.offered, after.startOff], [before.offered, before.startOff]);
   // No temp files left where the scanner looks.
   assert.deepStrictEqual(fs.readdirSync(path.join(w.ws.modsDir, 'x.com')).sort(), ['detox-timeline.js', 'punk-fonts.js']);
-  // Again with nothing new: nothing happens.
+  // Again with nothing new: nothing happens, and the stamp stays (a browser may not have seen it yet).
   assert.deepStrictEqual(w.setup(), { updated: [], waiting: [] });
+  assert.deepStrictEqual(S.autoUpdatedIds(w.home), { 'x.com/detox-timeline': auto });
+  // Edited since: it's the user's copy now, not TRIF's update.
+  w.edit('x.com/detox-timeline', mod(2, 'mine'));
+  w.setup();
+  assert.deepStrictEqual(S.autoUpdatedIds(w.home), {});
 });
 
 test('edited copies are never overwritten: the new version waits, kept beside the base', () => {
@@ -172,6 +181,8 @@ test('use the new version: the user\'s copy goes to the trash; restore brings it
   assert.strictEqual(w.rec('x.com/detox-timeline').hash, sha1(mod(2)));
   assert.strictEqual(fs.readFileSync(S.baseFile(w.home, 'x.com/detox-timeline'), 'utf8'), mod(2));
   assert.ok(!fs.existsSync(S.newFile(w.home, 'x.com/detox-timeline')));
+  // (the user's choice: not stamped as TRIF's own update, so it doesn't start off anywhere)
+  assert.deepStrictEqual(S.autoUpdatedIds(w.home), {});
   assert.throws(() => S.useNewVersion(w.ws, 'x.com/detox-timeline'), /no new TRIF version/);
   // A setup in between doesn't spoil the undo.
   w.setup();
@@ -339,6 +350,10 @@ test('setup says what it updated and what waits; the helper and the CLI show the
   assert.deepStrictEqual(punk.update, { version: '2', from: '1', modified: true });
   assert.deepStrictEqual([punk.source, punk.version], ['webmods', '1']);
   assert.strictEqual(mods.find((m) => m.id === 'x.com/detox-timeline').update, undefined);
+  // The one TRIF updated by itself carries its stamp (a browser where new page scripts start off switches it
+  // off once); the one waiting for the user doesn't.
+  assert.match(mods.find((m) => m.id === 'x.com/detox-timeline').autoUpdated || '', /^\d{4}-/);
+  assert.strictEqual(punk.autoUpdated, undefined);
   await ext.waitForSocket();
   r = await runCli(['status'], { home: w.home });
   assert.match(r.stdout, /x\.com\/rainbow-rave .*update available \(you've changed it\): version 2/);

@@ -98,6 +98,11 @@
       <button id="mode-restrictive" class="mode" type="button" aria-pressed="false"><b>Restrictive</b><span>connect TRIF on a site-to-site basis</span></button>
     </div>
     <p id="mode-note" class="note" hidden></p>
+    <!-- New mods start on or off, by group (sidepanel.js renderSites; lib.js applyNewMods). -->
+    <p class="sites-title">New mods start</p>
+    <label class="field starts-row"><span>Rules</span><select id="starts-rules"><option value="on">On</option><option value="off">Off</option></select></label>
+    <label class="field starts-row"><span>Page scripts</span><select id="starts-page"><option value="on">On</option><option value="off">Off</option></select></label>
+    <p id="starts-note" class="note" hidden>Mods your chat here makes still start on.</p>
     <p class="sites-title">Blocked sites</p>
     <ul id="blocked-list" class="blocked-list"></ul>
     <p id="blocked-empty" class="note">None.</p>

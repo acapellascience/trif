@@ -23,6 +23,7 @@ const ui = {
   modeDialog: $('#mode-dialog'), modeDialogClose: $('#mode-dialog-close'), modeDialogSwitch: $('#mode-dialog-switch'), modeDialogErr: $('#mode-dialog-err'),
   modeChoice: $('#mode-choice'), modePermissive: $('#mode-permissive'), modeRestrictive: $('#mode-restrictive'), modeNote: $('#mode-note'),
   blockedList: $('#blocked-list'), blockedEmpty: $('#blocked-empty'),
+  startsRules: $('#starts-rules'), startsPage: $('#starts-page'), startsNote: $('#starts-note'),
   landing: $('#landing'), landingIcon: $('#landing-icon'), landingVersion: $('#landing-version'), landingNote: $('#landing-note'),
   settings: $('#settings'), agent: $('#agent'), agentNote: $('#agent-note'), model: $('#model'),
   using: $('#using'), modelCustomRow: $('#model-custom-row'), modelCustom: $('#model-custom'), modelNote: $('#model-note'),
@@ -1014,6 +1015,15 @@ function renderSites() {
     }));
   }
   ui.blockedEmpty.hidden = blocked.length > 0;
+  // New mods start on or off, by group
+  const startsOff = st?.startsOff || [];
+  ui.startsRules.value = startsOff.includes('rules') ? 'off' : 'on';
+  ui.startsPage.value = startsOff.includes('page') ? 'off' : 'on';
+  ui.startsNote.hidden = !startsOff.length;
+}
+
+function setStartsOff(group, off) {
+  return request({ type: 'mods.startsOff', group, off }).then(refreshStatus, (e) => { modeNote(String(e?.message ?? e)); refreshStatus(); });
 }
 
 function modeNote(text) {
@@ -1486,8 +1496,9 @@ function updateModItem(li, m) {
   // "not active"/"paused" only once the status agrees the mod is on (not mid-switch).
   const tag = li.querySelector('.tag');
   tag.textContent = on && m.enabled !== false && !m.registered ? (view.status.userScripts ? 'not active' : 'paused')
-    : !on && m.from ? `from ${m.from}` : '';
-  tag.title = !on && m.from ? `Made from ${m.from}. Mods made in another browser start off here; switch it on to use it.` : '';
+    : !on && m.from ? `from ${m.from}` : !on && m.newOff ? (m.newOff === 'update' ? 'updated' : 'new') : '';
+  tag.title = !on && m.from ? `Made from ${m.from}. Mods made in another browser start off here; switch it on to use it.`
+    : !on && m.newOff ? `${m.newOff === 'update' ? 'TRIF updated it. ' : ''}New ${modGroup(m) === 'rules' ? 'rules' : 'page scripts'} start off (Settings): switch it on once you've looked at it.` : '';
   tag.hidden = !tag.textContent;
   const err = li.querySelector('.mod-err');
   err.textContent = rowErr || switchError(m.id, site) || (on && m.error) || '';
@@ -1923,6 +1934,8 @@ async function installUpdate() {
 }
 
 ui.pauseAll.addEventListener('change', () => setPaused(ui.pauseAll.checked));
+ui.startsRules.addEventListener('change', () => setStartsOff('rules', ui.startsRules.value === 'off'));
+ui.startsPage.addEventListener('change', () => setStartsOff('page', ui.startsPage.value === 'off'));
 
 ui.autoUpdate.addEventListener('change', async () => {
   const on = ui.autoUpdate.checked;

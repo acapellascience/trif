@@ -320,6 +320,8 @@ const handlers = {
     const shipsOff = shipped.startOffIds(ctx.ws.home);
     const offSites = new Map(((st && st.mods) || []).filter((m) => m.offSites).map((m) => [m.id, m.offSites]));
     const sitesOff = new Set(((st && st.mods) || []).filter((m) => m.sitesOff).map((m) => m.id));
+    // Off because new mods of their group start off here (the user's setting): id -> 'new' | 'update'.
+    const newOff = new Map(((st && st.mods) || []).filter((m) => m.newOff).map((m) => [m.id, m.newOff]));
     const applyErrors = new Map((((info.modsApplied || {}).errors) || []).map((e) => [e.id, e.error]));
     const helperErrors = new Map((info.modErrors || []).map((e) => [e.id, e.error]));
     const held = info.held || {};
@@ -330,13 +332,17 @@ const handlers = {
       const name = { rules: 'rules', page: 'page scripts' };
       lines.push(`GROUPS OFF    ${Object.entries(st.groupsOff).map(([site, gs]) => `${gs.map((g) => name[g] || g).join(' and ')} off on ${site}`).join('; ')} (the user's choice, in the side panel: those mods don't run there)`);
     }
+    if (st && Array.isArray(st.startsOff) && st.startsOff.length) {
+      const name = { rules: 'rules', page: 'page scripts' };
+      lines.push(`NEW MODS      new ${st.startsOff.map((g) => name[g] || g).join(' and ')} start off in this browser (the user's setting, in the side panel's Settings), except ones made in its side panel`);
+    }
     if (st && st.paused) lines.push('PAUSED        every mod is paused in this browser (the user\'s choice, in the side panel\'s Settings): nothing runs until they resume');
     lines.push(`mods          ${ids.length} in ${info.modsDir}`);
     for (const id of ids) {
       let s;
       if (helperErrors.has(id)) s = `NOT SENT: ${helperErrors.get(id)}`;
       else if (held[id]) s = `${(info.pending || []).includes(id) ? 'CHANGE WAITING (the version before runs meanwhile)' : 'HELD'}: it ${(held[id].facts || [held[id].reason]).join('; it ')} (trif approve ${id}, or trif reject ${id})`;
-      else if (off.has(id)) s = shipsOff.has(id) ? 'off (as TRIF ships it)' : 'off';
+      else if (off.has(id)) s = newOff.has(id) ? `off (${newOff.get(id) === 'update' ? 'updated by TRIF' : 'new'}: waiting for the user to look at it)` : shipsOff.has(id) ? 'off (as TRIF ships it)' : 'off';
       else if (sitesOff.has(id)) s = 'waiting: TRIF is off on its site';
       else if (applyErrors.has(id)) s = `NOT REGISTERED: ${applyErrors.get(id)}`;
       else if (!st) s = '?';
@@ -348,7 +354,8 @@ const handlers = {
       lines.push(`  ${pad(id, 40)} ${s}`);
     }
     for (const [id, err] of helperErrors) if (!ids.includes(id)) lines.push(`  ${pad(id, 40)} NOT SENT: ${err}`);
-    if ([...off].some((id) => !shipsOff.has(id))) lines.push('              off = switched off by the user (trif enable <id> turns one back on)');
+    if ([...off].some((id) => !shipsOff.has(id) && !newOff.has(id))) lines.push('              off = switched off by the user (trif enable <id> turns one back on)');
+    if (newOff.size) lines.push('              off (new) = new mods of its kind start off in this browser (the user\'s setting); only the user switches it on, in the side panel or trif enable <id> in their terminal');
     if ([...off].some((id) => shipsOff.has(id))) lines.push('              off (as TRIF ships it) = a mod TRIF comes with, off until switched on (trif enable <id>)');
     if (Object.keys(held).length) lines.push('              HELD = new or changed, and it can do things the user hasn\'t allowed (TRIF read them from its code); not running until the user approves it');
     if (Object.keys(review).length) lines.push('              TO REVIEW = can do things the user hasn\'t seen yet (TRIF read them from its code); it runs meanwhile');
@@ -787,7 +794,7 @@ const handlers = {
     const { mods, problems, warnings } = scanMods(ctx.ws.modsDir);
     const plan = planMods(mods);
     const errors = [...problems, ...plan.errors];
-    const { enabled, offSites } = await knownSwitches(ctx);
+    const { enabled, offSites, newOff } = await knownSwitches(ctx);
     const held = loadHeld(ctx.ws.home);
     const isHeld = (m) => held[m.id] && held[m.id].hash === m.hash;
     const updates = shipped.pendingUpdates(ctx.ws.home, mods);
@@ -797,6 +804,7 @@ const handlers = {
         modsDir: ctx.ws.modsDir,
         mods: mods.map(({ code, ...m }) => ({
           ...m, ...(enabled.has(m.id) ? { enabled: enabled.get(m.id) } : {}), ...(offSites.has(m.id) ? { offSites: offSites.get(m.id) } : {}),
+          ...(newOff.has(m.id) ? { newOff: newOff.get(m.id) } : {}),
           ...(isHeld(m) ? { held: held[m.id] } : {}), ...(updates[m.id] ? { update: updates[m.id] } : {}),
         })),
         errors,
@@ -811,7 +819,8 @@ const handlers = {
     const errById = new Map(errors.map((e) => [e.id, e.error]));
     for (const m of mods) {
       out(m.id + (m.name !== path.basename(m.file, '.js') ? `  (${m.name})` : '') + (enabled.get(m.id) === false ? '  [off]' : ''));
-      if (enabled.get(m.id) === false && shipsOff.has(m.id)) out(`  off, as TRIF ships it (not running; trif enable ${m.id} turns it on)`);
+      if (enabled.get(m.id) === false && newOff.has(m.id)) out(`  off: ${newOff.get(m.id) === 'update' ? 'TRIF updated it, and' : 'new, and'} new mods of its kind start off in this browser (the user's setting); not running until the user switches it on after looking at it (side panel, or trif enable ${m.id} in their terminal)`);
+      else if (enabled.get(m.id) === false && shipsOff.has(m.id)) out(`  off, as TRIF ships it (not running; trif enable ${m.id} turns it on)`);
       else if (enabled.get(m.id) === false) out(`  switched off by the user (not running; trif enable ${m.id} turns it on)`);
       else if (offSites.has(m.id)) out(`  switched off by the user on ${offSites.get(m.id).join(', ')} (trif enable ${m.id} --site <site> turns it back on there)`);
       if (isHeld(m)) out(`  HELD: ${held[m.id].by === 'outside' ? 'new or changed since TRIF last let it run' : `a side-panel agent wrote it while working on ${held[m.id].site}`}, and TRIF found that it ${(held[m.id].facts || [held[m.id].reason]).join('; it ')}. Not running until the user approves it (trif approve ${m.id}).`);
@@ -966,9 +975,10 @@ async function knownSwitches(ctx) {
     return {
       enabled: new Map(mods.map((m) => [m.id, m.enabled !== false])),
       offSites: new Map(mods.filter((m) => Array.isArray(m.offSites) && m.offSites.length).map((m) => [m.id, m.offSites])),
+      newOff: new Map(mods.filter((m) => m.newOff).map((m) => [m.id, m.newOff])),
     };
   } catch {
-    return { enabled: new Map(), offSites: new Map() };
+    return { enabled: new Map(), offSites: new Map(), newOff: new Map() };
   }
 }
 

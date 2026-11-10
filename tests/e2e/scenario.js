@@ -1158,6 +1158,7 @@ class Scenario {
       await r.check('an expired login (a stand-in Claude Code): the login notice and one plain line, not the raw error; the message back in the box', () => this.expiredLoginCheck(win));
       await r.check('a rules mod: TRIF\'s own code applies its CSS, hides, replaces and filters (also what appears later); one that would load from an address is refused, not sent', () => this.rulesModCheck(win));
       await r.check('groups: "Page scripts" off on a site from the panel stops its page scripts there (rules keep running, other sites\' page scripts untouched); on again, back', () => this.groupsCheck(win));
+      await r.check('Settings → New mods start → Page scripts Off: a new page script arrives off, marked "new", and doesn\'t run; a new rules mod runs; switched on in the panel, it runs; Page scripts On again', () => this.startsOffCheck(win));
       await r.check('a hijacked agent (a stand-in Claude Code): the tab it ran code in sends nothing that changes anything until it reloads, even later; its mod that posts is held by its code, whatever its header says', () => this.hijackedAgentCheck(win));
     }
 
@@ -1936,6 +1937,55 @@ process.exitCode = 1;
       // (left off by a failure: switch it on again the way the user would)
       const stillOff = await this.panel(`async () => !!document.querySelector('li.mod-group[data-group="page"].off')`).catch(() => false);
       if (stillOff) await this.d.click(this.panelCtx, 'li.mod-group[data-group="page"] .group-switch').catch(() => {});
+    }
+  }
+
+  // ---- new mods start on or off, by group (Settings; extension/lib.js applyNewMods)
+
+  async startsOffCheck(win) {
+    const site = '127.0.0.1';
+    const base = `http://${site}:${this.o.servers.port}`;
+    const pageFile = path.join(this.trif, 'sites', site, 'e2e-new-page.js');
+    const rulesFile = path.join(this.trif, 'sites', site, 'e2e-new-rules.js');
+    const look = async () => JSON.parse((await this.cli(['run', '--tab', String(win.tabId), `({ ran: document.documentElement.dataset.e2eNewPage || null, color: getComputedStyle(document.getElementById('title')).color })`], { timeoutMs: 20000 })).stdout);
+    const setPage = async (value) => {
+      await this.d.click(this.panelCtx, '#settings-btn');
+      await waitFor('Settings', () => this.panel(`async () => !document.querySelector('#settings').hidden || null`), { timeoutMs: 5000 });
+      // (as the user picking it in the menu: the select's value, then its change event)
+      await this.panel(`async (v) => { const s = document.querySelector('#starts-page'); s.value = v; s.dispatchEvent(new Event('change', { bubbles: true })); }`, [value]);
+      const want = value === 'off' ? '["page"]' : '[]';
+      await waitFor(`page scripts start ${value}`, async () => JSON.stringify((await this.cli(['status'], { json: true, timeoutMs: 20000 })).json.extension.startsOff || []) === want || null, { timeoutMs: 10000, intervalMs: 300 });
+      const shown = await this.panel(`async () => ({ rules: document.querySelector('#starts-rules').value, page: document.querySelector('#starts-page').value, note: document.querySelector('#starts-note').hidden ? '' : document.querySelector('#starts-note').textContent })`);
+      if (value === 'off') await this.shot(this.panelCtx, 'settings-new-mods-start');
+      await this.d.click(this.panelCtx, '#settings-btn');
+      return shown;
+    };
+    try {
+      const shown = await setPage('off');
+      if (shown.page !== 'off' || shown.rules !== 'on' || shown.note !== 'Mods your chat here makes still start on.') throw new Error(`Settings shows ${JSON.stringify(shown)}`);
+      // A page script and a rules mod appear, written outside the panel (a terminal agent, or by hand).
+      fs.writeFileSync(pageFile, '// ==WebMod==\n// @name New page script\n// @match *://127.0.0.1/*\n// ==/WebMod==\ndocument.documentElement.dataset.e2eNewPage = \'ran\';\n');
+      fs.writeFileSync(rulesFile, '// ==WebMod==\n// @name New rules\n// @match *://127.0.0.1/*\n// @rules\n// ==/WebMod==\n{ "css": "#title { color: rgb(7, 8, 9) }" }\n');
+      const st = await waitFor('the page script off as new, the rules mod registered', async () => {
+        const out = (await this.cli(['status'], { timeoutMs: 20000 })).stdout;
+        return /e2e-new-page\s+off \(new: waiting for the user to look at it\)/.test(out) && /e2e-new-rules\s+registered/.test(out) ? out : null;
+      }, { timeoutMs: 20000, intervalMs: 500 });
+      if (!/^NEW MODS {6}new page scripts start off in this browser/m.test(st)) throw new Error(`trif status: ${st.split('\n').find((l) => /NEW MODS/.test(l)) || '(no NEW MODS line)'}`);
+      await this.ext(`async (id, url) => { await chrome.tabs.update(id, { url, active: true }); }`, [win.tabId, `${base}/?e2e=starts-off`]);
+      const off = await waitFor('the rules mod running, not the page script', async () => { const x = await look(); return x.color === 'rgb(7, 8, 9)' ? x : null; }, { timeoutMs: 15000, intervalMs: 400 });
+      if (off.ran) throw new Error('the new page script ran');
+      const row = await waitFor('its row marked new', () => this.panel(`async () => { const li = document.querySelector('li[data-mod="127.0.0.1/e2e-new-page"]'); const t = li && li.querySelector('.tag'); return t && !t.hidden && t.textContent === 'new' ? { tag: t.textContent, title: t.title, off: li.classList.contains('off') } : null; }`), { timeoutMs: 10000 });
+      if (!row.off || row.title !== 'New page scripts start off (Settings): switch it on once you\'ve looked at it.') throw new Error(`the row: ${JSON.stringify(row)}`);
+      await this.shot(this.panelCtx, 'panel-new-mod-off');
+      // The user switches it on in the panel: it runs, and it's no longer "new".
+      await this.d.click(this.panelCtx, 'li[data-mod="127.0.0.1/e2e-new-page"] button.switch');
+      await waitFor('the page script running', async () => (await look()).ran === 'ran' || null, { timeoutMs: 15000, intervalMs: 400 });
+      const after = (await this.cli(['status'], { json: true, timeoutMs: 20000 })).json.extension.mods.find((m) => m.id === '127.0.0.1/e2e-new-page');
+      if (after.enabled === false || after.newOff) throw new Error(`after switching on: ${JSON.stringify(after)}`);
+      return `Settings: ${JSON.stringify(shown)}; the page script off ("${row.tag}"), the rules mod running (${off.color}); switched on: it runs`;
+    } finally {
+      for (const f of [pageFile, rulesFile]) { try { fs.unlinkSync(f); } catch { /* gone */ } }
+      await setPage('on').catch(() => {});
     }
   }
 

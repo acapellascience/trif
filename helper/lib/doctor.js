@@ -6,7 +6,7 @@ const path = require('path');
 const { envVar } = require('./env');
 const { spawnSync } = require('child_process');
 const P = require('./paths');
-const { browserTable, safariAgentPlist, legacySafariAgentPlist, legacySafariAgentLoaded, LEGACY_SAFARI_AGENT_LABEL } = require('./browsers');
+const { browserTable, browsersSetUp, manifestFiles, safariAgentPlist, legacySafariAgentPlist, legacySafariAgentLoaded, LEGACY_SAFARI_AGENT_LABEL } = require('./browsers');
 const { request } = require('./client');
 const { listHelpers, describeHelper } = require('./helpers');
 const { scanMods, planMods, MAX_MOD_BYTES, MAX_MODS_BYTES } = require('./mods');
@@ -224,14 +224,18 @@ async function doctor(opts = {}) {
   } else {
     // Native host manifests
     let targets;
+    let withManifest;
     if (opts.nativeDir) {
-      targets = [{ key: 'custom', label: opts.nativeDir, nativeDir: path.resolve(opts.nativeDir), detected: true }];
+      targets = [{ key: 'custom', label: opts.nativeDir, nativeDirs: [path.resolve(opts.nativeDir)], detected: true }];
+      withManifest = targets.filter((t) => fs.existsSync(manifestFiles(t)[0]));
     } else {
-      targets = browserTable().filter((b) => !b.safari && (b.detected || fs.existsSync(path.join(b.nativeDir, `${P.HOST_NAME}.json`))));
+      const table = browserTable();
+      // Set up: a manifest in one of its folders (browsers.js browsersSetUp: Chrome's folder alone, written
+      // for Arc, isn't Chrome set up). Else, detected: setup would set it up, and its failure is above.
+      withManifest = browsersSetUp(table).filter((b) => !b.safari);
+      targets = table.filter((b) => !b.safari && (b.detected || withManifest.includes(b)));
     }
     const safari = !opts.nativeDir && browserTable().find((b) => b.safari && b.detected);
-    // Set up: a manifest there (else, detected: setup would set it up, and its failure is above).
-    const withManifest = targets.filter((t) => fs.existsSync(path.join(t.nativeDir, `${P.HOST_NAME}.json`)));
     for (const t of withManifest.length ? withManifest : targets) {
       if (t.firefox) setUp.firefox = true;
       else if (t.key !== 'custom' && !setUp.chromium.includes(t.label)) setUp.chromium.push(t.label);
@@ -247,15 +251,17 @@ async function doctor(opts = {}) {
         `fix them (32 letters a-p each) in ${path.join(ws.home, 'config.json')}`);
     }
     for (const t of targets) {
-      const file = path.join(t.nativeDir, `${P.HOST_NAME}.json`);
+      // The manifest the browser reads (Arc: Chrome's folder's; setup also writes one in its own).
+      const file = manifestFiles(t)[0];
       const fix = `${setupFix}${t.key !== 'custom' ? ` --browser ${t.key}` : ''}`;
       if (!fs.existsSync(file)) {
         // A browser whose profile folder is there but which setup never did, while others are set up: one
         // installed (or first opened) after setup, which updates don't add (they keep the browsers set up),
         // one setup was told to leave out (--browser), or one long gone that left its folder. Not a problem
-        // unless TRIF is meant to work in it.
-        if ((withManifest.length || safari) && t.key !== 'custom') add('info', `${t.label}: not set up (only needed if you use TRIF in ${t.label})`, fix);
-        else add('fail', `${t.label}: native host manifest missing (${file})`, fix);
+        // unless TRIF is meant to work in it. (Set up, but not where it reads: Arc, by an older setup.)
+        const elsewhere = withManifest.includes(t);
+        if ((withManifest.length || safari) && t.key !== 'custom' && !elsewhere) add('info', `${t.label}: not set up (only needed if you use TRIF in ${t.label})`, fix);
+        else add('fail', `${t.label}: native host manifest missing (${file})${elsewhere ? `, where ${t.label} reads it` : ''}`, fix);
         continue;
       }
       let m;

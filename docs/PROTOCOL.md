@@ -674,8 +674,11 @@ Re-running setup is safe; run it again to update.
   identity"), written to each selected browser's `NativeMessagingHosts` dir (macOS:
   `~/Library/Application Support/Google/Chrome/NativeMessagingHosts`, `…/Chromium/…`,
   `…/BraveSoftware/Brave-Browser/…`, `…/Microsoft Edge/…`; Linux: `~/.config/google-chrome/NativeMessagingHosts` etc.).
-  Default: every one of those browsers whose parent folder exists. `trif doctor` fails a manifest
-  that is missing any of the IDs.
+  Arc reads Chrome's folder, not its own (`…/Arc/User Data/…`, as of Arc 1.169), so setup for Arc writes
+  both, the same file in Chrome's as Chrome's own (`helper/lib/browsers.js` `nativeDirs`).
+  Default: every one of those browsers whose parent folder exists (a Chromium one's holding only
+  `NativeMessagingHosts`, as Chrome's after setup for Arc, doesn't count). `trif doctor` fails a manifest
+  that is missing any of the IDs, and checks Arc's in Chrome's folder.
 - CLI link: `~/.trif/bin/trif` (shell wrapper like the host's), and it prints a line to add
   `~/.trif/bin` to PATH if it isn't there. If `/usr/local/bin` is writable, it also symlinks
   `/usr/local/bin/trif`.

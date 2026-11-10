@@ -31,8 +31,7 @@ summary is too long.
   data on all websites". Now it asks for nothing until the setup page's new step, Site permissions:
   **Permissive** gives TRIF access to every site by default (your browser asks once); **Restrictive**
   connects TRIF site by site, so a site stays disconnected (the panel all grey) until you click Connect
-  there. You can change it any time in Settings. Already using TRIF? Nothing changes for you: you're
-  permissive, as before.
+  there. You can change it any time in Settings.
 - Turning the robot off on a site keeps it connected, so it comes back on at once. Under Fix, "Disconnect
   from <site>" gives the site's access back (with every site allowed, it offers to switch to restrictive),
   and "Block on <site>" keeps TRIF away from it whatever it can reach (the panel turns red there; Settings
@@ -46,7 +45,7 @@ summary is too long.
   TRIF no longer counts on the agent to say no:
   - When your agent runs code in a tab, TRIF has the browser block anything from that tab that posts,
     sends or saves as you, or takes what's on the page to another site, until the page reloads. Reading the page, clicks and testing mods work as
-    before; the side panel says when a tab is paused like this, with a Reload button.
+    before; the side panel says so, with a Reload button.
   - TRIF now reads what each mod's code can do (send requests, click or type for you, go to other
     pages or sites, or code it can't check) instead of trusting what the mod says about itself. A mod
     your agent writes that can do any of that waits for your OK, with what TRIF found shown apart from
@@ -55,8 +54,8 @@ summary is too long.
     something new.
   - Your existing mods keep running. Ones that can do more than change how a page looks show what
     TRIF found once, with "Looks right".
-- TRIF's panel now opens in Arc and other browsers without Chrome's side panel: in a window of its own,
-  beside the browser window.
+- In Arc, TRIF's panel opens in a window of its own, and its helper connects without setting up Chrome
+  too.
 
 ## 0.2.5
 

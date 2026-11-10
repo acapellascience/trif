@@ -95,7 +95,9 @@ if (require.main === module) {
   const files = [...new Set(names.flatMap((n) => Object.keys(FIXES[n] || {})))];
   for (const base of files) {
     const code = fs.readFileSync(path.join(src, base), 'utf8');
-    for (const n of names) if (FIXES[n][base]) fs.writeFileSync(path.join(out, `${base.replace(/\.js$/, '')}.${n}.js`), applyFixes(base, code, [n]));
+    // (a fix that builds on another: rededge needs linehue first)
+    const NEEDS = { rededge: ['linehue'] };
+    for (const n of names) if (FIXES[n][base]) fs.writeFileSync(path.join(out, `${base.replace(/\.js$/, '')}.${n}.js`), applyFixes(base, code, [...(NEEDS[n] || []), n]));
     fs.writeFileSync(path.join(out, base), applyFixes(base, code, names));
     console.log(`${base}: ${names.filter((n) => FIXES[n][base]).join(', ')} → ${path.join(out, base)}`);
   }

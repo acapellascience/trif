@@ -103,19 +103,29 @@
       return [parts.slice(0, 3).join(','), parts.length > 3 ? +parts[3] : a];
     };
     let contrastHit = false;
-    const COLOR_RE = /rgba?\(\s*([\d.]+)[\s,]+([\d.]+)[\s,]+([\d.]+)(?:[\s,/]+([\d.]+)(%?))?\s*\)|#([0-9a-f]{6}|[0-9a-f]{3})\b/gi;
-    const xform = (cat, v) => v.replace(COLOR_RE, (all, r, g, b, a, pct, hex) => {
-      let alpha = 1;
+    // (an alpha can be a variable, as in X's newer "Jetfuel" panels (the live scores, the sports list) and its
+    // Tailwind ones: rgba(255, 255, 255, var(--jtxo)), rgb(0 0 0 / var(--tw-bg-opacity, 1)). Those are mapped as
+    // opaque colours, and the variable stays as their alpha.)
+    const COLOR_RE = /rgba?\(\s*([\d.]+)[\s,]+([\d.]+)[\s,]+([\d.]+)(?:[\s,/]+([\d.]+%?|var\([^)]*\)))?\s*\)|#([0-9a-f]{6}|[0-9a-f]{3})\b/gi;
+    // (Jetfuel's panels: white text there is ordinary text (on its own dark cards), not text on a blue button,
+    // so it's mapped like the page's other text: see xform's jet)
+    const JET_T = { light: new Map([['255,255,255', '15,20,25']]), dark: new Map([['15,20,25', '231,233,234']]) }[want];
+    const xform = (cat, v, jet = false) => v.replace(COLOR_RE, (all, r, g, b, a, hex) => {
+      let alpha = 1, varAlpha = null;
       if (hex) {
         if (v.includes('url(')) return all;
         const h = hex.length === 3 ? [...hex].map((c) => c + c).join('') : hex;
         r = parseInt(h.slice(0, 2), 16); g = parseInt(h.slice(2, 4), 16); b = parseInt(h.slice(4, 6), 16);
-      } else if (a !== undefined) alpha = pct ? +a / 100 : +a;
+      } else if (a !== undefined) {
+        if (a.startsWith('var(')) varAlpha = a;
+        else alpha = a.endsWith('%') ? parseFloat(a) / 100 : +a;
+      }
       r = Math.round(+r); g = Math.round(+g); b = Math.round(+b);
-      const to = look(cat, r, g, b, alpha);
+      const jt = jet && cat === 'T' && alpha >= 0.995 ? JET_T.get(`${r},${g},${b}`) : null;
+      const to = jt ? [jt, alpha] : look(cat, r, g, b, alpha);
       if (!to) return all;
       if (cat === 'B' && alpha >= 0.995 && CONTRAST.has(`${r},${g},${b}`)) contrastHit = true;
-      return `rgba(${to[0]},${to[1]})`;
+      return varAlpha ? `rgba(${to[0]},${varAlpha})` : `rgba(${to[0]},${to[1]})`;
     });
     const PRE = `html[data-tss-xlate=${want}]`;
     const INK = `color:rgb(${MAPS.ink}) !important`;
@@ -189,14 +199,17 @@
 
     // X's stylesheets (not other mods', not ours): React Native Web's, Draft.js's (the compose box), X's
     // others found by how they start
+    // (and Jetfuel's, X's newer panels like the live scores: their sheets mention .jetfuel-style-root or
+    // .jf-element near the top)
     const XS = ['/*! tailwindcss', '[data-vaul', ':root{--litepicker', 'input::placeholder', 'html,body{'];
+    const JET = /jetfuel-style-root|\.jf-element/;
     const isX = (ss) => {
       const n = ss.ownerNode;
-      if (!n || n === style) return false;
+      if (!n || n === style || n.classList?.contains('tss-xlate-more')) return false; // (ours: see flush)
       if (n.tagName === 'LINK') return /twimg\.com|x\.com/.test(ss.href || '');
       if (n.id === 'react-native-stylesheet' || n.id.startsWith('draftjs-styles')) return true;
       const t = n.textContent.trimStart();
-      return XS.some((s) => t.startsWith(s));
+      return XS.some((s) => t.startsWith(s)) || JET.test(t.slice(0, 400));
     };
     // (new overrides go in as text, a scan's worth at a time: rules put in with insertRule are lost whenever the
     // <style> is moved in the page, which happens while X starts up)
@@ -230,27 +243,35 @@
             if (decls.length) add(`${PRE}{${decls.join(';')}}`);
             continue;
           }
-          if (/data-theme|:root/.test(sel)) continue;
+          // (rules for one theme only, like Jetfuel's '[data-theme="dark"] .jetfuel-style-root .j-…': the ones
+          // for X's own theme are recoloured, kept to that theme (&[data-theme=…]: <html> is the element that
+          // carries it); the ones for the world's theme don't apply while X is in the other, so they're left)
+          let selOut = sel;
+          const themed = /^\[data-theme="(\w+)"\]\s+([^,]+)$/.exec(sel);
+          if (themed) { if (themed[1] === want) continue; selOut = `&[data-theme="${themed[1]}"] ${themed[2]}`; }
+          else if (/data-theme|:root/.test(sel)) continue;
           const decls = [];
           contrastHit = false;
           for (let i = 0; i < st.length; i++) {
             const p = st[i], cat = catOf(p);
             if (!cat) continue;
             const v = st.getPropertyValue(p);
-            if (!v || v.includes('var(')) continue;
+            // (a colour that's only a variable is X's theme variables' business, see above; a variable as a
+            // colour's alpha is fine, see COLOR_RE)
+            if (!v || v.replace(COLOR_RE, '').includes('var(')) continue;
             // (unchanged colours too, as they are: an element often has two of X's colour classes, its Text
             // default and the real one, and X's order decides. With only the changed ones !important, the
             // default won over the blue of a "Show more".)
             // (not !important: X's inline colours (a link's blue, say) beat its classes, and must beat ours; ours
             // beat X's classes by weight, html[…] in front)
-            decls.push(`${p}:${xform(cat, v)}`);
+            decls.push(`${p}:${xform(cat, v, /jetfuel-style-root|\.jf-element/.test(sel))}`);
           }
           if (!decls.length) continue;
           const body = contrastHit ? `${decls.join(';')};${INK}; & *{${INK}}` : decls.join(';');
           // (React Native Web's base classes, .css-…, are a Text's or View's defaults, under its atomic .r-…
           // ones; ours keep that by weight, :where(), since our rules don't keep X's order across loads)
           // (doubled, .css-x.css-x, to outweigh X's own .css-x: ours comes first in the page)
-          const rule = /^\.css-[\w-]+$/.test(sel) ? `:where(${PRE}) ${sel}${sel}{${body}}` : `${PRE}{${sel}{${body}}}`;
+          const rule = /^\.css-[\w-]+$/.test(sel) ? `:where(${PRE}) ${sel}${sel}{${body}}` : `${PRE}{${selOut}{${body}}}`;
           add(`${wrap.map((w) => `${w}{`).join('')}${rule}${'}'.repeat(wrap.length)}`);
         } else if (r instanceof CSSMediaRule) walk(r.cssRules, [...wrap, `@media ${r.conditionText}`]);
         else if (r instanceof CSSSupportsRule) walk(r.cssRules, [...wrap, `@supports ${r.conditionText}`]);
@@ -2119,14 +2140,22 @@
        out, over the time before you all fly off: FIN.win to FIN.away) */
     #tss-endwin.tss-flockwin { transform: translate(-50%, 0); padding: 0; background: none; box-shadow: none; border-radius: 0;
       animation: tss-flockwin 5s ease both; }
-    /* (on the white page now: no outline; Twitter's own font, Chirp) */
+    /* (no outline; Twitter's own font, Chirp. Behind it, a soft white badge: a rounded white glow, blurred so
+       its edges melt into whatever's under it) */
     #tss-endwin.tss-flockwin h2 { font-family: TwitterChirp, -apple-system, system-ui, "Segoe UI", Roboto, Helvetica, Arial, sans-serif !important;
-      -webkit-text-stroke: 0; animation: none; }
+      -webkit-text-stroke: 0; animation: none; position: relative; isolation: isolate; }
+    #tss-endwin.tss-flockwin h2::before { content: ''; position: absolute; inset: -0.45em -0.9em; z-index: -1; pointer-events: none;
+      background: #fff; border-radius: 9999px; filter: blur(14px); opacity: .95; }
     /* the panel in Twitter's font too, from the moment the page turns light (and in the bird world) */
     html:is([data-tss-whiteout], [data-tss-twitter]) #tss-hud, html:is([data-tss-whiteout], [data-tss-twitter]) #tss-hud * {
       font-family: TwitterChirp, -apple-system, system-ui, "Segoe UI", Roboto, Helvetica, Arial, sans-serif !important; }
     html:is([data-tss-whiteout], [data-tss-twitter]) #tss-hud .tss-hud-title { font-weight: 800 !important; letter-spacing: -0.02em !important; }
     @keyframes tss-flockwin { 0% { opacity: 0; } 22% { opacity: 1; } 78% { opacity: 1; } 100% { opacity: 0; } }
+    /* the white veil under the flock while "You won the timeline!" shows (see showFlockWin): up to 70% over
+       the first ~1.5 s, down with the words at the end */
+    #tss-veil { position: fixed; inset: 0; z-index: 2147483645; background: #fff; pointer-events: none; opacity: 0;
+      animation: tss-veil 13.5s ease-in-out both; }
+    @keyframes tss-veil { 0% { opacity: 0; } 11% { opacity: .7; } 78% { opacity: .7; } 100% { opacity: 0; } }
     @keyframes tss-end-pop { from { opacity: 0; scale: .6; } to { opacity: 1; scale: 1; } }
     @keyframes tss-end-up { from { opacity: 0; translate: 0 8px; } to { opacity: 1; translate: none; } }
   `;
@@ -2180,17 +2209,22 @@
     if (!g.bird) {
       const k = ease(s / END.glide);
       let x = g.sx + (cx - g.sx) * k, y = g.sy + (cy - g.sy) * k;
-      // a full roll to the left, dodging well out to the left and back, then the same to the right, each
-      // with a swoosh panning that way (DODGE: how far out, at most a third of the window).
-      // The dodge eases out and back (sin²: still at the start, the far point and the end), and the roll
-      // turns with the distance travelled, so it spins while the ship moves and pauses with it at the far
-      // point (half a turn out, half back): travelled(r) goes 0 → 1 (out) → 2 (back)
-      const r1 = (s - END.roll1) / END.rollLen, r2 = (s - END.roll2) / END.rollLen;
-      const DODGE = Math.min(200, W / 3);
-      const out = (r) => Math.pow(Math.sin(Math.PI * r), 2), travelled = (r) => (r < 0.5 ? out(r) : 2 - out(r));
-      g.roll = r1 > 0 && r1 < 1 ? -Math.PI * travelled(r1) : r2 > 0 && r2 < 1 ? Math.PI * travelled(r2) : 0;
-      if (r1 > 0 && r1 < 1) x -= DODGE * out(r1);
-      if (r2 > 0 && r2 < 1) x += DODGE * out(r2);
+      // Two barrel rolls, as a roll really goes: a full turn to the left while sliding out to the left (DODGE:
+      // at most a third of the window); a level drift halfway back toward the middle; a full turn to the
+      // right while sliding across to the other side (half a DODGE past the middle); a level drift back to
+      // the middle. Each turn goes with the distance slid (both eased: still at the start and the end), so it
+      // spins as it moves and finishes the turn as it arrives. A swoosh panning each way.
+      const L = END.rollLen, D = Math.min(200, W / 3);
+      const prog = (from, len) => ease((s - from) / len);
+      const back1 = END.roll2 - (END.roll1 + L), back2 = Math.min(L, END.shake - (END.roll2 + L));
+      let dx = 0;
+      g.roll = 0;
+      if (s >= END.roll1 && s < END.roll1 + L) { const e = prog(END.roll1, L); dx = -D * e; g.roll = -2 * Math.PI * e; }
+      else if (s >= END.roll1 + L && s < END.roll2) dx = -D + (D / 2) * prog(END.roll1 + L, back1);
+      else if (s >= END.roll2 && s < END.roll2 + L) { const e = prog(END.roll2, L); dx = -D / 2 + D * e; g.roll = 2 * Math.PI * e; }
+      else if (s >= END.roll2 + L && s < END.roll2 + L + back2) dx = D / 2 - (D / 2) * prog(END.roll2 + L, back2);
+      x += dx;
+      const r1 = (s - END.roll1) / L, r2 = (s - END.roll2) / L; // (for the swooshes below)
       if (r1 > 0 && !g.swooshed1) { g.swooshed1 = true; sfx.swoosh(-1); }
       if (r2 > 0 && !g.swooshed2) { g.swooshed2 = true; sfx.swoosh(1); }
       // then it shakes, harder and harder, until it bursts (up to SHAKE px each way)
@@ -2286,13 +2320,23 @@
   // on a beat of the track.
   // (kept in sessionStorage through the next reload: arming it from TRIF locks the tab, and the reload that
   // unlocks it would otherwise throw it away)
-  let cueArmed = false;
+  let cueArmed = false, finaleArmed = false; // (finaleArmed: the cue's second press, see below)
   try { if (sessionStorage.getItem('tssShooter.cue') === '1') { cueArmed = true; window.trif?.log('cue armed (from before the reload): press E during a game'); } } catch {}
   addEventListener('tss-test-cue', () => { cueArmed = true; try { sessionStorage.setItem('tssShooter.cue', '1'); } catch {} window.trif?.log('cue armed: press E to set off the ending'); });
   addEventListener('keydown', (e) => {
-    if (!cueArmed || !on || e.repeat || e.key.toLowerCase() !== 'e' || e.metaKey || e.ctrlKey || endgame || birdMode) return;
+    if (!on || e.repeat || e.key.toLowerCase() !== 'e' || e.metaKey || e.ctrlKey) return;
+    // (the cue's second press, once you're the bird: straight to the finale, 1.5 s on, instead of waiting out
+    // the 1:50; the music is left where it is, so it won't line up)
+    if (finaleArmed && birdMode && !birdMode.free && !birdMode.end) {
+      e.preventDefault(); e.stopImmediatePropagation();
+      finaleArmed = false;
+      birdMode.t0 = performance.now() - (BIRD_TIME - 1.5) * 1000;
+      window.trif?.log('cue: to the finale (1.5 s)');
+      return;
+    }
+    if (!cueArmed || endgame || birdMode) return;
     e.preventDefault(); e.stopImmediatePropagation();
-    cueArmed = false;
+    cueArmed = false; finaleArmed = true;
     try { sessionStorage.removeItem('tssShooter.cue'); } catch {}
     const x = ship.x, y = Math.max(160, ship.y - 280);
     bigExplosion(x, y, BOSS_SIZE);
@@ -2515,7 +2559,7 @@
     box.id = 'tss-flockchoices';
     const col = layoutBox(document.querySelector('[data-testid=primaryColumn]'));
     box.style.left = `${Math.round(col?.width ? col.left + col.width / 2 : innerWidth / 2)}px`;
-    box.append(pill('return to flying', 'tss-pill-ghost', backToFlying), pill('end', '', () => {
+    box.append(pill('return to flying', '', backToFlying), pill('end', 'tss-pill-ghost', () => {
       box.remove();
       const end = birdMode?.end;
       if (end && end.awayAt == null) end.awayAt = (performance.now() - end.t0) / 1000;
@@ -2556,12 +2600,16 @@
     .tss-pill:hover { background: #1a8cd8; border-color: #1a8cd8; }
     .tss-pill-ghost { color: #1d9bf0; background: #fff; border-color: #cfd9de; }
     .tss-pill-ghost:hover { background: #e8f5fd; border-color: #cfd9de; }
+    /* (show flock's two: their words' colours outright. The bird world's recolouring re-declares X's own
+       default button text with more weight than a class, which turned both words black) */
+    #tss-flockchoices .tss-pill { color: #fff !important; -webkit-text-fill-color: #fff !important; }
+    #tss-flockchoices .tss-pill.tss-pill-ghost { color: #1d9bf0 !important; -webkit-text-fill-color: #1d9bf0 !important; }
     /* (in the panel: over the panel's own Bird mode colours, which make everything in it plain dark text) */
     html #tss-hud .tss-g-flock { pointer-events: auto; }
     html:is([data-tss-birdmode], [data-tss-twitter]) #tss-hud button.tss-hud-flock { color: #fff !important; -webkit-text-fill-color: #fff !important;
       background: #1d9bf0 !important; font-size: 14px; padding: 7px 16px; }
     html:is([data-tss-birdmode], [data-tss-twitter]) #tss-hud button.tss-hud-flock:hover { background: #1a8cd8 !important; }
-    #tss-flockchoices { position: fixed; z-index: 2147483647; bottom: 28px; transform: translateX(-50%); display: flex; gap: 12px;
+    #tss-flockchoices { position: fixed; z-index: 2147483647; bottom: 72px; transform: translateX(-50%); display: flex; gap: 12px;
       animation: tss-choices-in .6s ease both; }
     @keyframes tss-choices-in { from { opacity: 0; transform: translate(-50%, 10px); } to { opacity: 1; transform: translate(-50%, 0); } }
     /* showing your flock: the page fades away under you all (and back, returning to flying or when the game's off) */
@@ -2638,12 +2686,27 @@
   };
   // Where the posts are, measured once a frame (one layout for all of them), so every note is tested with
   // plain arithmetic: [{ article, left, top, right, bottom }] for the posts on screen not yet sung to.
+  // (only posts wholly in view, as for the lasers' words (see wholePostShown): below the sticky top bar and
+  // above the window's bottom edge, or filling that whole view when taller than it)
+  // (but the timeline speeds up through the flight, and by the last quarter posts went by too fast to be
+  // wholly in view for long: through the last quarter of the flight the edge they come in at slowly moves
+  // back, so they count while still partly beyond it, up to half a screen by the finale. That edge: the top
+  // in Timeline mode (tl), where the timeline is turned upside down and comes down at you; the bottom
+  // otherwise)
   const postBoxes = () => {
     const out = [];
+    // (from three quarters of the way through the flight to the finale; Tweeter, free-play, keeps the strict
+    // rule throughout: the whole post in view)
+    const late = birdMode && !birdMode.free ? Math.max(0, Math.min(1, ((performance.now() - birdMode.t0) / 1000 / BIRD_TIME - 0.75) / 0.25)) : 0;
+    const slack = late * H * 0.5;
+    const top = Math.max(0, topCover() ? coverBox.bottom : 0, tl ? tlBand.top : 0) - (tl ? slack : 0);
+    const bottom = Math.min(H, tl ? tlBand.bottom : H) + (tl ? 0 : slack);
     for (const a of document.querySelectorAll('article')) {
       if (sungTo.has(a)) continue;
       const r = a.getBoundingClientRect();
-      if (r.bottom > 0 && r.top < H && r.width) out.push({ article: a, left: r.left, top: r.top, right: r.right, bottom: r.bottom });
+      if (!r.width) continue;
+      const inView = (r.top >= top - 1 && r.bottom <= bottom + 1) || (r.top <= top && r.bottom >= bottom);
+      if (inView) out.push({ article: a, left: r.left, top: r.top, right: r.right, bottom: r.bottom });
     }
     return out;
   };
@@ -2812,9 +2875,7 @@
       }
     }
     if (!me && es >= FIN.merge && !end.merged) end.merged = true; // (no picture of yours to be found: just carry on)
-    // (X-Flyer's ending, like show flock: the page fades to white under you all once you've become your picture,
-    // the win shows on the white, and the timeline fades back as you fly off (see the leaving, below))
-    if (!birdMode.free && end.merged && !end.faded) { end.faded = true; root.setAttribute('data-tss-flockshow', ''); }
+    // (X-Flyer's ending stays on the timeline: no fade to white, unlike show flock)
     // the halo: each friend has a spot of their own, the whole disc round you filled evenly out to its edge
     // (a sunflower: slot i of n at the golden angle, at the radius that gives every one an equal share of the
     // area; only a small clear space round you), drifting slowly round; they ease into it and face round the
@@ -2918,7 +2979,16 @@
   // (free-play: singing from the start; its cue is "collect 30 mutuals" instead, see startBirdMode)
   const SING_AT = 29;
   const canSing = (now) => !!birdMode && (birdMode.free || (now - birdMode.t0) / 1000 >= SING_AT);
+  // (it follows you: a short way behind the bird (below it, as you fly up the page), not fixed low on the
+  // screen where it was far behind you; eased, so it trails a little rather than sticking)
+  const CUE_BEHIND = 110;
   const singCue = (now) => {
+    const el = birdMode && document.getElementById('tss-singcue');
+    if (el?.classList.contains('tss-cue-teal')) {
+      const want = Math.max(90, Math.min(H - 40, ship.y + CUE_BEHIND));
+      el.tssY = el.tssY == null ? want : el.tssY + (want - el.tssY) * 0.12;
+      el.style.top = `${Math.round(el.tssY)}px`;
+    }
     if (!birdMode || birdMode.free || birdMode.singCued || !canSing(now)) return;
     birdMode.singCued = true;
     showCue('sing little bird', 'tss-cue-teal'); // (in X-Flyer's teal: the page is still dark then)
@@ -2937,7 +3007,7 @@
     window.trif?.log('bird mode: you can sing now');
   };
   css.textContent += `
-    #tss-singcue { position: fixed; z-index: 2147483647; top: 67vh; /* (a third of the way up the window) */ transform: translate(-50%, -50%); pointer-events: none;
+    #tss-singcue { position: fixed; z-index: 2147483647; top: 60vh; /* (a little below the middle; "sing little bird" follows the bird instead, see singCue) */ transform: translate(-50%, -50%); pointer-events: none;
       font-family: TwitterChirp, -apple-system, system-ui, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
       font-size: 34px; font-weight: 800; color: #1d9bf0; letter-spacing: -0.01em; white-space: pre; text-align: center; line-height: 1.25; /* (pre: line breaks in the text show) */
       text-shadow: 0 0 18px rgb(29 155 240 / .55); animation: tss-singcue 7s ease-in-out both; }
@@ -2962,6 +3032,13 @@
     box.style.left = `${Math.round(ship.x)}px`; box.style.top = `${Math.round(Math.min(H - 80, ship.y + RMAX * 0.8 + 40))}px`;
     box.style.animationDuration = `${FIN_STORY.away - FIN_STORY.win}s`; // (fades in, holds, and fades out by the time you fly off)
     document.documentElement.append(box);
+    // (and a white veil over the timeline, under you all: once the flock has settled it fades up to 70%,
+    // holds, and fades back down with the words, the same animation length, so they go together)
+    document.getElementById('tss-veil')?.remove();
+    const veil = document.createElement('div');
+    veil.id = 'tss-veil';
+    veil.style.animationDuration = box.style.animationDuration;
+    document.documentElement.append(veil);
     sfx.winShimmer();
     endWin = box;
     window.trif?.log('bird mode: you won the timeline!');
@@ -3306,11 +3383,31 @@
   // checks three points a frame, and measuring every word for each of them was most of a frame's time.
   // (Nothing a hit does in a frame moves a word: blasted things are only hidden.)
   let wordBoxes = null;
+  // X: a post's words can't be shot until the whole post is in view: below the sticky top bar (and inside
+  // Timeline mode's band) and above the window's bottom edge. A post taller than that view counts once it
+  // fills it. Only words: media and boxes are fair game as soon as they show. (Per post, once a frame: cleared
+  // with wordBoxes.)
+  let postInView = new Map();
+  const wholePostShown = (w) => {
+    const a = w.closest('article');
+    if (!a) return true; // (not in a post: the sidebar, the panel...)
+    let v = postInView.get(a);
+    if (v === undefined) {
+      const r = a.getBoundingClientRect();
+      const top = Math.max(0, topCover() ? coverBox.bottom : 0, tl ? tlBand.top : 0);
+      const bottom = Math.min(H, tl ? tlBand.bottom : H);
+      v = (r.top >= top - 1 && r.bottom <= bottom + 1) || (r.top <= top && r.bottom >= bottom);
+      postInView.set(a, v);
+    }
+    return v;
+  };
   const liveWordBoxes = () => {
     if (!wordBoxes) {
       wordBoxes = [];
+      postInView = new Map();
       for (const w of document.querySelectorAll('.tss-w:not([data-tss-dead])')) {
         if (shielded(w)) continue;
+        if (!wholePostShown(w)) continue;
         const r = w.getBoundingClientRect();
         if (!r.width && !r.height) continue;
         if (coveredBox(r, w)) continue; // X: behind the sticky top bar (see topCover)
@@ -3328,7 +3425,7 @@
     if (!n) return null;
     if (n === 1) return only.clipped ? null : only.w; // (the one word there: what both ways below would find)
     for (const el of document.elementsFromPoint(x, y)) {
-      if (el.classList?.contains('tss-w') && !el.hasAttribute('data-tss-dead') && !shielded(el) && !coveredAt(x, y, el)) return el;
+      if (el.classList?.contains('tss-w') && !el.hasAttribute('data-tss-dead') && !shielded(el) && !coveredAt(x, y, el) && wholePostShown(el)) return el;
     }
     // elementsFromPoint skips pointer-events:none text: fall back to rects
     for (const b of boxes) {
@@ -3769,7 +3866,10 @@
       const pts = trail[e];
       for (const p of pts) { p.age += dt; p.y += (120 + thrust * 160) * dt; }
       while (pts.length && pts[0].age > life) pts.shift();
-      if (visible) pts.push({ x: ship.x + ex * (1 - Math.abs(bank) * 0.18), y: ship.y - 2, age: 0 });
+      // (through the end's barrel rolls too: the nozzles close in and cross over with the ship, cos(roll), so
+      // the ribbons stay on them instead of trailing a second pair at full width)
+      const rollK = endgame?.roll ? Math.cos(endgame.roll) : 1;
+      if (visible) pts.push({ x: ship.x + ex * (1 - Math.abs(bank) * 0.18) * rollK, y: ship.y - 2, age: 0 });
       else pts.length = 0;
       if (pts.length < 2) return;
       ctx.save();
@@ -3789,14 +3889,21 @@
     });
     if (!visible) return;
 
-    const shipFrame = () => {
+    const shipFrame = (rolled = true) => {
       ctx.translate(ship.x, ship.y);
       ctx.rotate(bank * 0.1);
       ctx.scale(1 - Math.abs(bank) * 0.18, 1); // banking: the wings foreshorten
-      if (endgame?.roll) ctx.scale(Math.cos(endgame.roll), 1); // X: the end's barrel rolls (seen from above: it narrows, flips, comes back)
+      if (rolled && endgame?.roll) ctx.scale(Math.cos(endgame.roll), 1); // X: the end's barrel rolls (seen from above: it narrows, flips, comes back)
     };
-    // X: (the ship itself, see drawHull: also drawn tiny for the lives), with its drop shadow (see shadowed)
-    shadowed(ship.x, ship.y - 40, 110, () => { ctx.save(); shipFrame(); drawHull(now, bank, thrust, rave); ctx.restore(); });
+    // X: (the ship itself, see drawHull: also drawn tiny for the lives), with its drop shadow (see shadowed).
+    // The X-Flyer does the end's barrel rolls itself, part by part (see rollPart): the frame isn't squashed for
+    // it. Past the halfway point of a roll, cos < 0, you see its underside: drawXFlyerBelly, the same silhouette
+    // from below.
+    const xf = SHIP_STYLE === 'xflyer';
+    rollNow = xf ? (endgame?.roll || 0) : 0;
+    const belly = xf && Math.cos(rollNow) < 0;
+    shadowed(ship.x, ship.y - 40, 110, () => { ctx.save(); shipFrame(!xf); if (belly) drawXFlyerBelly(now, bank, thrust, rave); else drawHull(now, bank, thrust, rave); ctx.restore(); });
+    rollNow = 0; // (the lives' tiny ships never roll)
 
     // muzzle flashes
     if (muzzle > 0) { ctx.save(); shipFrame(); drawMuzzle(); ctx.restore(); }
@@ -3837,6 +3944,19 @@
     front: { root: [12, -31], tip: [50, -50], rc: 18, tc: 8 },
     pod: 30, // gun pod's x, on the front wing
   };
+  // The end's barrel roll, done properly: a part of the ship at height z above the wings' plane (z < 0: below
+  // it) is seen from above at x·cos(roll) + z·sin(roll). So everything narrows together, and the raised parts
+  // (spine, canopy, nacelles) slide toward the way it's rolling and go over the edge, while the belly's come
+  // up from the other side: that's what shows which way it turns. rollNow: the roll being drawn (0: none).
+  let rollNow = 0;
+  const rollPart = (z, fn) => {
+    if (!rollNow) { fn(); return; }
+    ctx.save();
+    ctx.translate(z * Math.sin(rollNow), 0);
+    ctx.scale(Math.cos(rollNow), 1);
+    fn();
+    ctx.restore();
+  };
   const wingPath = (s, w) => {
     const [rx, ry] = w.root, [tx, ty] = w.tip;
     ctx.beginPath();
@@ -3848,7 +3968,9 @@
   const drawXFlyerHull = (now, bank, thrust, rave, part = 'all') => { // (part: 'flames' or 'body' only, for the lives)
     const hueAt = (k) => ((now / 4 + k) % 360 + 360) % 360;
     // engine flames (the first ship's)
-    if (part !== 'body') {
+    // (not during the end's barrel rolls: the dodge is fast enough that the exhaust ribbons (drawShip) swing far
+    // out behind while these cones point straight back, which read as a second pair of exhausts)
+    if (part !== 'body' && !rollNow) rollPart(0, () => {
     ctx.save();
     ctx.globalCompositeOperation = 'lighter';
     for (const ex of ENGINES) {
@@ -3863,10 +3985,13 @@
       ctx.beginPath(); ctx.moveTo(ex - 6, -6); ctx.quadraticCurveTo(ex - 5, -6 + len * 0.5, ex, -6 + len); ctx.quadraticCurveTo(ex + 5, -6 + len * 0.5, ex + 6, -6); ctx.fill();
     }
     ctx.restore();
-    }
+    });
     if (part === 'flames') return;
+    // (heights for the roll, see rollPart: front wings 2 below the plane, back wings 2 above, nacelles 4,
+    // fuselage 6, its stripe 7.5, the canopy 10)
     for (const s of [-1, 1]) {
       const lit = 0.5 - s * bank * 0.35; // (the raised side catches the light)
+      rollPart(-2, () => {
       // front wing: the lower level, in shadow
       const fw = XF.front, gf = ctx.createLinearGradient(0, -36, s * fw.tip[0], fw.tip[1]);
       gf.addColorStop(0, `hsl(224, 26%, ${16 + lit * 14}%)`); gf.addColorStop(1, `hsl(224, 30%, ${24 + lit * 20}%)`);
@@ -3881,6 +4006,8 @@
       const py = alongWing(fw, XF.pod);
       ctx.fillStyle = '#7d8cad'; ctx.beginPath(); ctx.roundRect(s * XF.pod - 3.5, py - 8, 7, 18, 3); ctx.fill();
       ctx.fillStyle = '#c9d6ee'; ctx.fillRect(s * XF.pod - 1.5, py - 18, 3, 12);
+      });
+      rollPart(2, () => {
       // back wing: the upper level, lit (the first ship's wing)
       const bw = XF.back, gb = ctx.createLinearGradient(0, -40, s * bw.tip[0], bw.tip[1]);
       gb.addColorStop(0, `hsl(222, 30%, ${22 + lit * 20}%)`); gb.addColorStop(1, `hsl(222, 35%, ${32 + lit * 30}%)`);
@@ -3903,8 +4030,10 @@
         ctx.beginPath(); ctx.arc(s * bw.tip[0], bw.tip[1], 2.6, 0, Math.PI * 2); ctx.fill();
         ctx.restore();
       }
+      });
     }
     // engine nacelles (over the wing roots), fuselage, racing stripe, canopy: the first ship's
+    rollPart(4, () => {
     for (const ex of ENGINES) {
       const g = ctx.createLinearGradient(ex - 6, 0, ex + 6, 0);
       g.addColorStop(0, '#5d6c8e'); g.addColorStop(0.5, '#c4d2ec'); g.addColorStop(1, '#4a5878');
@@ -3912,6 +4041,8 @@
       ctx.fillStyle = '#ff6bf0'; ctx.fillRect(ex - 6, -24, 12, 2.5);
       ctx.fillStyle = '#20263a'; ctx.fillRect(ex - 5, -7, 10, 3);
     }
+    });
+    rollPart(6, () => {
     const fg = ctx.createLinearGradient(-14, 0, 14, 0);
     fg.addColorStop(0, bank > 0 ? '#f4fbff' : '#8fa3c7'); fg.addColorStop(0.5, '#e3eefc'); fg.addColorStop(1, bank > 0 ? '#8fa3c7' : '#f4fbff');
     ctx.save();
@@ -3920,12 +4051,104 @@
     ctx.lineTo(11, -8); ctx.lineTo(6, -2); ctx.lineTo(-6, -2); ctx.lineTo(-11, -8); ctx.lineTo(-13, -38);
     ctx.bezierCurveTo(-13, -55, -8, -70, 0, -78); ctx.fill();
     ctx.restore();
-    ctx.strokeStyle = '#ff6bf0'; ctx.lineWidth = 2; ctx.beginPath(); ctx.moveTo(0, -36); ctx.lineTo(0, -8); ctx.stroke();
+    });
+    rollPart(7.5, () => { ctx.strokeStyle = '#ff6bf0'; ctx.lineWidth = 2; ctx.beginPath(); ctx.moveTo(0, -36); ctx.lineTo(0, -8); ctx.stroke(); });
+    rollPart(10, () => {
     const cg = ctx.createLinearGradient(0, -64, 0, -40);
     cg.addColorStop(0, '#9ff'); cg.addColorStop(1, '#0870b8');
     ctx.fillStyle = cg; ctx.beginPath(); ctx.ellipse(0, -51, 6, 13, 0, 0, Math.PI * 2); ctx.fill();
     ctx.fillStyle = 'rgba(255,255,255,0.75)';
     ctx.beginPath(); ctx.ellipse(-2.2 - bank * 1.5, -56, 1.6, 5, -0.15, 0, Math.PI * 2); ctx.fill();
+    });
+  };
+  // The X-Flyer from below, for the far half of the end's barrel rolls: exactly the same silhouette (the same
+  // wing panels, gun pods, nacelles and fuselage outline, so the shape doesn't jump as it turns over), but
+  // its underside: dark gunmetal panels with panel lines, the front wing (the lower level) now nearest and
+  // lit, intake grilles on the nacelles, landing-gear hatches and a pink keel stripe down the belly, a cyan
+  // belly light, and a white beacon blinking under the nose. Flames and wingtip lights show from below too.
+  const drawXFlyerBelly = (now, bank, thrust, rave) => {
+    drawXFlyerHull(now, bank, thrust, rave, 'flames');
+    const panel = (w, s, l0, l1) => {
+      const g = ctx.createLinearGradient(0, -36, s * w.tip[0], w.tip[1]);
+      g.addColorStop(0, `hsl(222, 14%, ${l0}%)`); g.addColorStop(1, `hsl(222, 18%, ${l1}%)`);
+      ctx.fillStyle = g; wingPath(s, w); ctx.fill();
+      // a panel line along the wing's middle, and one across it
+      ctx.strokeStyle = 'rgba(150, 175, 215, 0.28)'; ctx.lineWidth = 0.8;
+      ctx.beginPath(); ctx.moveTo(s * w.root[0], w.root[1]); ctx.lineTo(s * w.tip[0], w.tip[1]); ctx.stroke();
+      const mx = (w.root[0] + w.tip[0]) / 2, my = alongWing(w, mx), hc = (w.rc + w.tc) / 4;
+      ctx.beginPath(); ctx.moveTo(s * mx, my - hc); ctx.lineTo(s * mx, my + hc); ctx.stroke();
+    };
+    // (the same heights as the top's for the roll, see rollPart: back wings +2, front wings -2, nacelles' bottoms
+    // about at the plane, the fuselage's belly -4, its hatches, keel and lights -5)
+    for (const s of [-1, 1]) rollPart(2, () => {
+      // back wing first now: from below it's the far level
+      const bw = XF.back;
+      panel(bw, s, 12, 20);
+      ctx.save();
+      ctx.strokeStyle = 'rgba(51, 255, 255, 0.35)'; ctx.lineWidth = 1.2; ctx.shadowColor = '#0ff'; ctx.shadowBlur = 6;
+      ctx.beginPath(); ctx.moveTo(s * bw.root[0], bw.root[1] - bw.rc / 2); ctx.lineTo(s * bw.tip[0], bw.tip[1] - bw.tc / 2); ctx.stroke();
+      ctx.restore();
+      if (Math.floor(now / 500) % 2 === (s < 0 ? 0 : 1)) { // (the tip lights show from below too)
+        ctx.save();
+        ctx.fillStyle = s < 0 ? '#ff3b5c' : '#3bff8a'; ctx.shadowColor = ctx.fillStyle; ctx.shadowBlur = 14;
+        ctx.beginPath(); ctx.arc(s * bw.tip[0], bw.tip[1], 2.6, 0, Math.PI * 2); ctx.fill();
+        ctx.restore();
+      }
+    });
+    // nacelles from below: darker, with intake grilles
+    rollPart(0.5, () => {
+    for (const ex of ENGINES) {
+      const g = ctx.createLinearGradient(ex - 6, 0, ex + 6, 0);
+      g.addColorStop(0, '#2e374f'); g.addColorStop(0.5, '#6b7a9a'); g.addColorStop(1, '#262e44');
+      ctx.fillStyle = g; ctx.beginPath(); ctx.roundRect(ex - 6, -38, 12, 33, [6, 6, 2, 2]); ctx.fill();
+      ctx.fillStyle = '#141a2a';
+      for (let k = 0; k < 4; k++) ctx.fillRect(ex - 4, -33 + k * 3.2, 8, 1.6); // intake grille
+      ctx.fillStyle = '#20263a'; ctx.fillRect(ex - 5, -7, 10, 3);
+    }
+    });
+    for (const s of [-1, 1]) rollPart(-2, () => {
+      // front wing: the near level from below, a little lighter, with the pod's mounting and barrel
+      const fw = XF.front;
+      panel(fw, s, 18, 30);
+      ctx.save();
+      ctx.strokeStyle = 'rgba(51, 255, 255, 0.5)'; ctx.lineWidth = 1.2; ctx.shadowColor = '#0ff'; ctx.shadowBlur = 6;
+      ctx.beginPath(); ctx.moveTo(s * fw.root[0], fw.root[1] - fw.rc / 2); ctx.lineTo(s * fw.tip[0], fw.tip[1] - fw.tc / 2); ctx.stroke();
+      ctx.fillStyle = '#7ff'; ctx.shadowBlur = 8;
+      ctx.beginPath(); ctx.arc(s * fw.tip[0], fw.tip[1], 1.8, 0, Math.PI * 2); ctx.fill();
+      ctx.restore();
+      const py = alongWing(fw, XF.pod);
+      ctx.fillStyle = '#4d5a76'; ctx.beginPath(); ctx.roundRect(s * XF.pod - 3.5, py - 8, 7, 18, 3); ctx.fill();
+      ctx.fillStyle = '#8796b3'; ctx.fillRect(s * XF.pod - 1.5, py - 18, 3, 12);
+      ctx.fillStyle = '#ff6bf0'; ctx.fillRect(s * XF.pod - 3.5, py + 4, 7, 1.5); // (a pink band round the pod's tail)
+    });
+    // fuselage: the same outline, the belly in gunmetal
+    rollPart(-4, () => {
+    const fg = ctx.createLinearGradient(-14, 0, 14, 0);
+    fg.addColorStop(0, '#3a4560'); fg.addColorStop(0.5, '#7b8aab'); fg.addColorStop(1, '#3a4560');
+    ctx.save();
+    ctx.fillStyle = fg; ctx.shadowColor = '#0ff'; ctx.shadowBlur = 8;
+    ctx.beginPath(); ctx.moveTo(0, -78); ctx.bezierCurveTo(8, -70, 13, -55, 13, -38);
+    ctx.lineTo(11, -8); ctx.lineTo(6, -2); ctx.lineTo(-6, -2); ctx.lineTo(-11, -8); ctx.lineTo(-13, -38);
+    ctx.bezierCurveTo(-13, -55, -8, -70, 0, -78); ctx.fill();
+    ctx.restore();
+    });
+    rollPart(-5, () => {
+    // landing-gear hatches (nose and two mains), their outlines in dark seams
+    ctx.strokeStyle = 'rgba(15, 20, 35, 0.85)'; ctx.lineWidth = 1;
+    ctx.beginPath(); ctx.roundRect(-3.5, -66, 7, 12, 2); ctx.stroke();
+    for (const s of [-1, 1]) { ctx.beginPath(); ctx.roundRect(s * 6.5 - 3, -30, 6, 14, 2); ctx.stroke(); }
+    // pink keel stripe down the middle, between the hatches
+    ctx.strokeStyle = '#ff6bf0'; ctx.lineWidth = 2; ctx.beginPath(); ctx.moveTo(0, -52); ctx.lineTo(0, -8); ctx.stroke();
+    // cyan belly light, and a white beacon blinking under the nose
+    ctx.save();
+    ctx.fillStyle = '#7ff'; ctx.shadowColor = '#0ff'; ctx.shadowBlur = 12;
+    ctx.beginPath(); ctx.arc(0, -40, 2.4, 0, Math.PI * 2); ctx.fill();
+    if (Math.floor(now / 350) % 3 === 0) {
+      ctx.fillStyle = '#fff'; ctx.shadowColor = '#fff'; ctx.shadowBlur = 14;
+      ctx.beginPath(); ctx.arc(0, -71, 1.8, 0, Math.PI * 2); ctx.fill();
+    }
+    ctx.restore();
+    });
   };
   // The original ship (a rocket with two gun pods), kept for if it's wanted back: not drawn any more.
   // (With splitWings it's the X-Flyer: see drawHull below.)
@@ -4972,6 +5195,7 @@
     birdMode = null; flock.length = 0; songs.length = 0;
     root.removeAttribute('data-tss-birdmode');
     document.getElementById('tss-flockchoices')?.remove(); root.removeAttribute('data-tss-flockshow'); // (the page fades back)
+    document.getElementById('tss-veil')?.remove();
     // (your own picture back in the side panel, if the finale took it)
     const ownPic = document.querySelector('[data-testid=SideNav_AccountSwitcher_Button] [data-testid^="UserAvatar-Container-"]');
     if (ownPic) ownPic.style.visibility = '';

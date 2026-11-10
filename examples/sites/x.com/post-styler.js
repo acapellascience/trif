@@ -140,7 +140,9 @@
   const NOBTN = ':not(button *):not([role=button] *)'; // (not on X's buttons)
   const ICONS = '[role=group] svg, [data-testid=caret] svg, button[aria-label="Grok actions"] svg';
   const LINKS = '[data-testid=tweetText] a, [data-testid=tweet-text-show-more-link]';
-  const rainbowText = (sel) => `${sel} { text-shadow: none !important; color: transparent !important; -webkit-text-fill-color: transparent !important;
+  // (never on text you can edit, :read-write: emojis there can't be wrapped, so they'd turn into rainbow blobs
+  // as you type; each part of the list gets it, before any pseudo-element)
+  const rainbowText = (sel) => `${sel.split(/,(?![^(]*\))/).map((s) => s.trim().replace(/(::[\w-]+)?$/, ':not(:read-write)$1')).join(', ')} { text-shadow: none !important; color: transparent !important; -webkit-text-fill-color: transparent !important;
       background-image: ${RAVE_SMALL} !important; background-size: auto !important; background-repeat: repeat !important;
       background-attachment: fixed !important; background-clip: text !important; -webkit-background-clip: text !important;
       animation: ps-text-roll .8s steps(12) infinite !important; }`;
@@ -312,7 +314,10 @@
     const loose = (n) => !!n.data.trim() && !!n.parentElement?.children.length;
     const walker = document.createTreeWalker(scope, NodeFilter.SHOW_TEXT, {
       acceptNode: (n) => (n.data && !emojiDone.has(n) && (/\p{Extended_Pictographic}/u.test(n.data) || loose(n))
-        && !n.parentElement?.closest('[data-ps-emoji], [data-ps-txt], [data-pst-emoji], [contenteditable=true], svg')
+        && !n.parentElement?.closest('[data-ps-emoji], [data-ps-txt], [data-pst-emoji], svg')
+        // (not text you can edit, which wrapping would break; but a post embedded in an editor, like an article
+        // draft's, is marked not editable inside it: isContentEditable goes by the nearest marking)
+        && !n.parentElement?.isContentEditable
         && (quoteOf(n) === null || quoteOf(n) === scope) ? NodeFilter.FILTER_ACCEPT : NodeFilter.FILTER_REJECT),
     });
     const found = [];
@@ -339,8 +344,16 @@
   // A person's card (the sidebar's "Relevant people", "You might like", Who to follow, follower lists): its
   // picture, and its handle from the picture's test id; the name is the card's first non-@ text in the link to
   // them; handle and badge as in a post
+  // (one person only: a container showing several people's pictures isn't a person's card, it's a list of
+  // them, like the account switcher, which X builds as a hover card; then its own people cards inside, if
+  // any, are styled one by one, and the container itself not at all)
   const cardParts = (cell) => {
-    const box = cell.querySelector('[data-testid^="UserAvatar-Container-"]');
+    const boxes = cell.querySelectorAll('[data-testid^="UserAvatar-Container-"]');
+    if (new Set([...boxes].map((b) => b.dataset.testid.toLowerCase())).size !== 1) {
+      if (cell.hasAttribute('data-ps-u')) unstyle(cell);
+      return {};
+    }
+    const box = boxes[0];
     const h = /^UserAvatar-Container-(\w{1,15})$/.exec(box?.dataset.testid || '')?.[1];
     const av = cell.querySelector('img[src*="/profile_images/"]');
     if (!h || !av) return {};

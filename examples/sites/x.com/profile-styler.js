@@ -180,7 +180,8 @@
   // one rainbow; it rolls one 24px stripe (33.94px across) every 0.8s, in steps to keep the redraws cheap)
   // (and no drop shadow: a text shadow paints over a background clipped to the letters, muddying the
   // rainbow; :not(#pst-never) lifts these rules above the shadow ones, see SHADOW)
-  const rainbowText = (sel) => `${sel.split(/,(?![^(]*\))/).map((s) => s.trim().replace(/(::[\w-]+)?$/, ':not(#pst-never)$1')).join(', ')} { text-shadow: none !important; color: transparent !important; -webkit-text-fill-color: transparent !important;
+  // (and never on text you can edit, :read-write: emojis there can't be wrapped, see wrapEmoji)
+  const rainbowText = (sel) => `${sel.split(/,(?![^(]*\))/).map((s) => s.trim().replace(/(::[\w-]+)?$/, ':not(#pst-never):not(:read-write)$1')).join(', ')} { text-shadow: none !important; color: transparent !important; -webkit-text-fill-color: transparent !important;
       background-image: ${RAVE_SMALL} !important; background-size: auto !important; background-repeat: repeat !important;
       background-attachment: fixed !important; background-clip: text !important; -webkit-background-clip: text !important;
       animation: pst-text-roll .8s steps(12) infinite !important; }`;
@@ -432,7 +433,7 @@
     const app = document.getElementById('react-root');
     if (!app) return;
     const walker = document.createTreeWalker(app, NodeFilter.SHOW_TEXT, {
-      acceptNode: (n) => (n.data && !emojiDone.has(n) && /\p{Extended_Pictographic}/u.test(n.data) && !n.parentElement?.closest('[data-pst-emoji], [data-ps-emoji], [contenteditable=true], input, textarea')
+      acceptNode: (n) => (n.data && !emojiDone.has(n) && /\p{Extended_Pictographic}/u.test(n.data) && !n.parentElement?.closest('[data-pst-emoji], [data-ps-emoji], input, textarea') && !n.parentElement?.isContentEditable
         ? NodeFilter.FILTER_ACCEPT : NodeFilter.FILTER_REJECT),
     });
     const found = [];

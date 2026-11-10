@@ -1,12 +1,12 @@
 // ==WebMod==
-// @name        Simple Shopping (sandboxed)
+// @name        Simple Shopping (boxed)
 // @description Amazon: just results, price and stars
 // @match       https://www.amazon.com/*
-// @sandboxed
+// @boxed
 // @risk        1 hides sponsored results, so their ad impressions never report
 // ==/WebMod==
 
-// examples/sites/amazon.com/simple-shopping.js (Tim's), ported to a sandboxed mod (TECHNIQUES.md "Sandboxed
+// examples/sites/amazon.com/simple-shopping.js (Tim's), ported to a boxed mod (TECHNIQUES.md "Boxed
 // mods"): the same CSS through trif.css (it loads nothing, so it passes), and the carousel marker through
 // trif.observe instead of a MutationObserver of its own. An example, not one TRIF ships.
 const R = '.s-main-slot [data-component-type="s-search-result"]';

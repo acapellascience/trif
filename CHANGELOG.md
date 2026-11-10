@@ -13,17 +13,18 @@ summary is too long.
 - **Choose what TRIF can reach:** every site (Permissive), or site by site with Connect (Restrictive).
   Already using TRIF? You stay Permissive.
 - **Block a site** to keep TRIF away from it; the power button is now a quick pause.
-- A site's mods come in two groups, Rules and Page scripts, each with its own switch.
-- **New mods can wait for you:** set Page scripts to start off (Settings), and a new one stays off
+- A site's mods come in three groups, Style, Boxed and Free mods, each with its own switch.
+- **New mods can wait for you:** set Free mods to start off (Settings), and a new one stays off
   until you've looked at it.
 
 ### More
 
-- A site's mods come in three groups, each with a switch for that site: Rules, **Sandboxed** (JavaScript in
-  TRIF's sandbox: it can't send, click or load anything, so it never waits for your OK) and Page scripts.
-- **New mods can start off, by group.** Settings in the side panel has "New mods start": Rules and Page
-  scripts, each On (as before) or Off. Set Page scripts to Off and a new page script waits, switched off
-  and marked "new", until you've looked at it and switched it on, while new rules still apply at once.
+- A site's mods come in three groups, each with a switch there: Style mods, **Boxed mods** (JavaScript in
+  TRIF's sandbox that changes what the page shows but can't send, load or click anything itself) and Free
+  mods.
+- **New mods can start off, by group.** Settings in the side panel has "New mods start": Style, Boxed and
+  Free mods, each On (as before) or Off. Set Free mods to Off and a new free mod waits, switched off and
+  marked "new", until you've looked at it and switched it on, while new style mods apply at once.
   It covers mods from a terminal agent, files you add, mods made in another browser, Tim's mods you add,
   and new versions of Tim's mods TRIF puts in place by itself; not the ones your side-panel chat makes
   for you. An agent run can't switch one on.

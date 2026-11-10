@@ -638,7 +638,7 @@ test('status and mods: a mod off because new mods of its group start off says so
   await ext.waitForSocket();
   await ext.nextMods((mods) => mods.length === 2);
   let r = await runCli(['status'], { home });
-  assert.match(r.stdout, /^NEW MODS {6}new page scripts start off in this browser \(the user's setting, in the side panel's Settings\), except ones made in its side panel$/m);
+  assert.match(r.stdout, /^NEW MODS {6}new free mods start off in this browser \(the user's setting, in the side panel's Settings\), except ones made in its side panel$/m);
   assert.match(r.stdout, /x\.com\/a\s+off \(new: waiting for the user to look at it\)\n/);
   assert.match(r.stdout, /x\.com\/b\s+off \(updated by TRIF: waiting for the user to look at it\)\n/);
   assert.match(r.stdout, /off \(new\) = new mods of its kind start off in this browser \(the user's setting\); only the user switches it on/);

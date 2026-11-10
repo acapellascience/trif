@@ -35,9 +35,9 @@ const ELEMENT_MEMBERS = {
   setAttribute: 'use setAttr', getAttribute: 'use attr', removeAttribute: 'use removeAttr', classList: 'use classes.add / remove / toggle / has',
   textContent: 'use text / setText', innerText: 'use text / setText', parentElement: 'use parent', parentNode: 'use parent',
   nextElementSibling: 'use next', previousElementSibling: 'use previous', cloneNode: 'use clone()', getBoundingClientRect: 'use rect()',
-  getContext: 'use canvas()', click: 'a sandboxed mod can\'t click for the user', dispatchEvent: 'a sandboxed mod can\'t act for the user',
-  submit: 'a sandboxed mod can\'t submit', requestSubmit: 'a sandboxed mod can\'t submit', focus: 'not offered in a sandboxed mod',
-  contentWindow: 'other frames are out of reach', contentDocument: 'other frames are out of reach', shadowRoot: 'not offered in a sandboxed mod',
+  getContext: 'use canvas()', click: 'a boxed mod can\'t click for the user', dispatchEvent: 'a boxed mod can\'t act for the user',
+  submit: 'a boxed mod can\'t submit', requestSubmit: 'a boxed mod can\'t submit', focus: 'not offered in a boxed mod',
+  contentWindow: 'other frames are out of reach', contentDocument: 'other frames are out of reach', shadowRoot: 'not offered in a boxed mod',
 };
 const DECLARE = new Set(['const', 'let', 'var', 'function', 'class']);
 
@@ -115,7 +115,7 @@ function sandboxLint(code) {
     }
     const key = next && next.t === 'p' && next.v === ':' && prev && prev.t === 'p' && (prev.v === '{' || prev.v === ',');
     if (key || declared.has(t.v)) continue;
-    if (PAGE_GLOBALS.has(t.v)) add(t.v, 'not there in a sandboxed mod: it has page, trif, console, the timers, Math, Date and the language', t.line);
+    if (PAGE_GLOBALS.has(t.v)) add(t.v, 'not there in a boxed mod: it has page, trif, console, the timers, Math, Date and the language', t.line);
     if ((t.v === 'setTimeout' || t.v === 'setInterval') && next && next.v === '(' && ts[k + 2] && (ts[k + 2].t === 'str' || ts[k + 2].t === 'tpl')) add(`${t.v}("…")`, 'timers take a function, not code in a string', t.line);
   }
   return finish(found);

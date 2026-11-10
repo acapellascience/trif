@@ -86,7 +86,7 @@ you to from their terminal (side-panel runs can't).
   include it; the side panel shows a badge for 1 and 2.
 - Wrap the body in an IIFE as above: early `return`s work, nothing leaks into the page's globals, and
   `trif check` can parse the file.
-- Start new mods with `trif new <site> <mod>` (`--rules` or `--sandboxed` for those kinds); it creates the file from a template and prints its path.
+- Start new mods with `trif new <site> <mod>` (`--style` or `--boxed` for those kinds); it creates the file from a template and prints its path.
 - **Keep mods small.** A mod can be up to **4 MB**, and all mods together up to **16 MB**; past that it
   isn't sent to the browser (`trif status` says NOT SENT and why, `trif doctor` says what to do). Every
   mod's code is held by the browser several times over and handed to each page it matches, and every
@@ -209,11 +209,11 @@ on and which are `off`.
   `trif status` shows `(off on bank.com)`. Use `--site` when the user means one site ("turn the
   dark mode off on Wikipedia"); without it the mod goes off everywhere. Turning a mod off on the last
   site it names switches the whole mod off.
-- The side panel also has a switch per group on each site, "Rules" (`@rules` mods), "Sandboxed"
-  (`@sandboxed` mods) and "Page scripts" (the rest). `trif status` shows `GROUPS OFF` when the user
-  switched one off: those mods don't run there, whatever their own switch says. Only the user can switch
-  a group back on, in the panel; if a page script you wrote is on a site where page scripts are off, say
-  so, or offer a rules or sandboxed mod instead.
+- The side panel also has a switch per group on each site, "Style mods" (`@style`), "Boxed mods"
+  (`@boxed`) and "Free mods" (the rest). `trif status` shows `GROUPS OFF` when the user switched one off:
+  those mods don't run there, whatever their own switch says. Only the user can switch a group back on, in
+  the panel; if a free mod you wrote is on a site where free mods are off, say so, or offer a style or
+  boxed mod instead.
 - The user can set new mods of a group to start off in a browser (Settings in the side panel; `trif
   status` shows `NEW MODS`). Then a new mod of that group arrives there switched off, `off (new)` in
   `trif status`, unless it was made in that browser's own side panel: one you write in a terminal, one
@@ -327,17 +327,18 @@ the site (`trif tabs`; `trif open <url>` if none) and look:
 ### 3. Write the mod
 
 **Write the lowest kind of mod that does the job**, in this order:
-1. **A rules mod** (`trif new <site> <mod> --rules`): CSS, things to hide, text to replace and items to
+1. **A style mod** (`trif new <site> <mod> --style`): CSS, things to hide, text to replace and items to
    filter, as data TRIF's own code runs.
-2. **A sandboxed mod** (`trif new <site> <mod> --sandboxed`): JavaScript in TRIF's sandbox, with only
+2. **A boxed mod** (`trif new <site> <mod> --boxed`): JavaScript in TRIF's sandbox, with only
    TRIF's API (elements as stand-ins, `trif.css`/`hide`/`observe`/`text`/`settings`, timers, canvas):
-   for what rules can't express, like logic, new elements, animation or drawing.
-3. **A page script** (`trif new <site> <mod>`): only when it needs the page itself: filtering the data
+   for what a style mod can't express, like logic, new elements, animation or drawing.
+3. **A free mod** (`trif new <site> <mod>`): only when it needs the page itself: filtering the data
    the site loads, reading the app's state, patching its code, or acting for the user.
 
-Rules and sandboxed mods can't act for the user, so they never wait for their OK (in a browser without
-the sandbox, Safari, a sandboxed mod waits, to run as a page script). **Read TECHNIQUES.md first** (next
-to this file; once per session is enough; "Rules mods" and "Sandboxed mods" are its first sections):
+Style and boxed mods can't act for the user themselves, so they never wait for their OK (in a browser
+without the sandbox, Safari, a boxed mod waits, to run as a free mod). (Their old names, `@rules` and
+`@sandboxed`, `--rules` and `--sandboxed`, still work.) **Read TECHNIQUES.md first** (next to this file;
+once per session is enough; "Style mods" and "Boxed mods" are its first sections):
 where mods run, the
 techniques most robust first (CSS; filtering data before the app sees it; DOM tweaks in single-page
 apps; React state; shadow DOM; adding UI), making mods resilient and repairing broken ones, and
@@ -349,7 +350,7 @@ testing. Then `trif new <site> <mod>`, and edit. Pick the least invasive techniq
 - Re-run the sweeps from "Finish the job" on each page type and state, and compare with the counts
   from before.
 - `trif check <site>/<mod>`: it parses, and what TRIF reads in it that would make it wait for the
-  user's OK (rewrite what has a plain way round; tell the user about what's left). For a sandboxed mod,
+  user's OK (rewrite what has a plain way round; tell the user about what's left). For a boxed mod,
   what the sandbox wouldn't give it (`window`, `document`, `.innerHTML`, ...): rewrite those with the
   API, since they'd fail when it runs.
 - `trif status`: is the mod registered? (A syntax error or a bad header shows up here; `off` means

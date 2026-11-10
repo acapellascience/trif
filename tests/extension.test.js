@@ -3052,8 +3052,8 @@ test('sandboxFallback: without the sandbox a sandboxed mod waits for the user\'s
   const [held, same] = lib.sandboxFallback([boxed, page], { canSandbox: false, browser: 'Safari' });
   assert.strictEqual(same, page);
   assert.strictEqual(held.unsandboxed, true);
-  assert.deepStrictEqual(held.held, { by: 'sandbox', site: 'y.com', reason: 'Safari can\'t run sandboxed mods, so here it would run as a page script, with everything the page has; as a page script, it can send requests',
-    facts: ['Safari can\'t run sandboxed mods, so here it would run as a page script, with everything the page has', 'as a page script, it can send requests'], claim: 'Bounces the logo', hash: 'H' });
+  assert.deepStrictEqual(held.held, { by: 'sandbox', site: 'y.com', reason: 'Safari can\'t run boxed mods, so here it would run as a free mod, with everything the page has; as a free mod, it can send requests',
+    facts: ['Safari can\'t run boxed mods, so here it would run as a free mod, with everything the page has', 'as a free mod, it can send requests'], claim: 'Bounces the logo', hash: 'H' });
   // a held mod isn't registered
   const us = mockUserScripts();
   await lib.syncUserScripts(us, { mods: [held, page], runtimeCode: 'RT' });

@@ -1,6 +1,6 @@
 'use strict';
 // Sandboxed mods, the helper's side: the header, the scanner, never held, `trif check`'s lint, `trif new
-// --sandboxed`, and the ported samples (examples/sandboxed). The sandbox itself (extension/sandbox.js) is
+// --sandboxed`, and the ported samples (examples/boxed). The sandbox itself (extension/sandbox.js) is
 // tested in the browsers (tests/e2e/scenario.js sandboxedChecks); its registration in tests/extension.test.js.
 
 const test = require('node:test');
@@ -29,7 +29,7 @@ test('@sandboxed: the scanner marks the mod; other mods\' hashes stay as they we
   const b = buildMod({ site: 'x.com', file: '/w/sites/x.com/b.js', code: header() + 'trif.hide(".ad");\n' }).mod;
   assert.equal(b.sandboxed, true);
   assert.match(b.code, /trif\.hide/);
-  assert.throws(() => buildMod({ site: 'x.com', file: '/w/sites/x.com/c.js', code: header('// @rules\n') + '{}' }), /either @rules .* or @sandboxed/);
+  assert.throws(() => buildMod({ site: 'x.com', file: '/w/sites/x.com/c.js', code: header('// @rules\n') + '{}' }), /either a style mod \(@style\) or a boxed mod \(@boxed\)/);
 });
 
 test('a sandboxed mod never waits for the user\'s OK, whoever wrote it, whatever its code names', () => {
@@ -85,14 +85,14 @@ test('trif check: a sandboxed mod never waits; what the sandbox would refuse is 
   const j = JSON.parse(r.stdout);
   assert.deepEqual([j.ok, j.sandboxed, j.powers, j.lint], [true, true, [], []]);
   r = await runCli(['check', 'x.com/calm'], { home });
-  assert.match(r.stdout, /is a sandboxed mod and parses/);
+  assert.match(r.stdout, /is a boxed mod and parses/);
   assert.match(r.stdout, /never waits for the user's OK/);
   assert.match(r.stdout, /nothing in it that the sandbox would refuse/);
   const badFile = writeMod(home, 'x.com', 'old.js', header() + 'document.querySelector("a").click();\n');
   r = await runCli(['check', badFile], { home });
   assert.equal(r.code, 0, r.stderr);
-  assert.match(r.stdout, /- document: not there in a sandboxed mod/);
-  assert.match(r.stdout, /- \.click: a sandboxed mod can't click for the user/);
+  assert.match(r.stdout, /- document: not there in a boxed mod/);
+  assert.match(r.stdout, /- \.click: a boxed mod can't click for the user/);
   assert.match(r.stdout, /line 6: document\.querySelector/);
   // a syntax error is still one (with the file's own line numbers)
   const broken = writeMod(home, 'x.com', 'broken.js', header() + 'const = 1;\n');
@@ -103,7 +103,7 @@ test('trif check: a sandboxed mod never waits; what the sandbox would refuse is 
   const both = writeMod(home, 'x.com', 'both.js', header('// @rules\n') + '{}\n');
   r = await runCli(['check', both], { home });
   assert.equal(r.code, 1);
-  assert.match(r.stdout, /either @rules/);
+  assert.match(r.stdout, /either a style mod/);
 });
 
 test('trif new --sandboxed: a sandboxed template that checks out clean', async () => {
@@ -121,7 +121,7 @@ test('trif new --sandboxed: a sandboxed template that checks out clean', async (
 });
 
 test('the sandboxed examples (ports of Tim\'s Simple Shopping and DVD Logo) are sandboxed mods that check out clean', () => {
-  const dir = path.join(REPO, 'examples', 'sandboxed');
+  const dir = path.join(REPO, 'examples', 'boxed');
   const files = ['amazon.com/simple-shopping.js', 'www.google.com/dvd-logo.js'];
   for (const f of files) {
     const text = fs.readFileSync(path.join(dir, f), 'utf8');
@@ -138,4 +138,31 @@ test('the sandbox\'s SES is ses 2.3.0\'s npm file, unchanged (its sha256), and t
   assert.equal(crypto.createHash('sha256').update(file).digest('hex'), SES_SHA256);
   assert.match(fs.readFileSync(path.join(REPO, 'extension', 'vendor', 'README.txt'), 'utf8'), new RegExp(SES_SHA256));
   assert.match(fs.readFileSync(path.join(REPO, 'scripts', 'build-extension.js'), 'utf8'), /SES_SHA256/);
+});
+
+test('the new names: @style and @boxed are @rules and @sandboxed; switching spelling keeps the hash; trif new --style / --boxed', async () => {
+  const h = (name) => `// ==WebMod==\n// @name A\n// @match https://x.com/*\n// @${name}\n// ==/WebMod==\n`;
+  const b = (name, body) => buildMod({ site: 'x.com', file: '/w/sites/x.com/a.js', code: h(name) + body }).mod;
+  const rules = b('rules', '{ "hide": ["a"] }\n'), style = b('style', '{ "hide": ["a"] }\n');
+  assert.equal(style.rules, true);
+  assert.equal(style.hash, rules.hash, 'a mod that only switches @rules to @style keeps its hash (approvals, holds, the extension\'s copy)');
+  const sb = b('sandboxed', 'trif.hide("a");\n'), boxed = b('boxed', 'trif.hide("a");\n');
+  assert.equal(boxed.sandboxed, true);
+  assert.equal(boxed.hash, sb.hash);
+  assert.match(boxed.code, /@boxed/, 'the code the extension gets is the file as it is');
+  // (only header lines: the same words in the code change the hash, as any edit does)
+  assert.notEqual(b('boxed', '// @boxed\ntrif.hide("a");\n').hash, b('boxed', '// @sandboxed\ntrif.hide("a");\n').hash);
+  assert.equal(parseHeader(h('Style')).rules, true);
+  assert.throws(() => buildMod({ site: 'x.com', file: '/w/sites/x.com/c.js', code: h('style').replace('// ==/WebMod==', '// @boxed\n// ==/WebMod==') + '{}' }), /either a style mod/);
+  const home = tempDir();
+  fs.mkdirSync(path.join(home, 'sites'), { recursive: true });
+  for (const [flag, want] of [['--style', /^\/\/ @style$/m], ['--boxed', /^\/\/ @boxed$/m], ['--rules', /^\/\/ @style$/m], ['--sandboxed', /^\/\/ @boxed$/m]]) {
+    const r = await runCli(['new', 'example.com', `m${flag.slice(2)}`, flag], { home });
+    assert.equal(r.code, 0, r.stderr);
+    assert.match(fs.readFileSync(path.join(home, 'sites', 'example.com', `m${flag.slice(2)}.js`), 'utf8'), want, flag);
+  }
+  const both = await runCli(['new', 'example.com', 'both', '--style', '--sandboxed'], { home });
+  assert.notEqual(both.code, 0);
+  const st = await runCli(['check', path.join(home, 'sites', 'example.com', 'mstyle.js')], { home });
+  assert.match(st.stdout, /is a style mod and its rules check out/);
 });

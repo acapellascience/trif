@@ -10,7 +10,7 @@ import {
   normalizeOffSites, offSiteName, offOnSite, hostInScope, withOffSites, normalizeGroupsOff, switchGroup, offSitesFor, GROUPS, scopeFor, normalizeSitesOn, siteOnFor, sitesInUse, limitToSites, applyStartSites, switchSite, fromOtherBrowser, timedUserScripts, capChat,
   ALL_ACCESS, readAccess, activeSites, hasSiteAccess, siteOrigins, siteState, siteRefusal, siteModeOf,
   FEATURES, ModsParts, fillSameMods, storedMods, modsStorageState, modsStoragePlan, normalizeStarter, applyReadded, normalizeReadded,
-  applyNewMods, normalizeStartsOff, normalizeNewOff, MOD_GROUPS, modGroup, sandboxFallback, inSandboxWorld, SAFARI,
+  applyNewMods, normalizeStartsOff, normalizeNewOff, MOD_GROUPS, modGroup, groupWord, sandboxFallback, inSandboxWorld, SAFARI,
 } from './lib.js';
 import { SANDBOX_WORLD, SANDBOX_CSP, SETTINGS_MAX } from './sandbox.js';
 import { runtimeCode } from './runtime.js';
@@ -386,7 +386,7 @@ function sandboxWorld() {
       state.canSandbox = true;
     } catch (e) {
       if (!checkUserScripts()) return null; // (switched off meanwhile)
-      log('warn', `TRIF's sandbox world: ${errMsg(e)} (sandboxed mods wait for your OK to run as page scripts)`);
+      log('warn', `TRIF's sandbox world: ${errMsg(e)} (boxed mods wait for your OK to run as free mods)`);
       state.canSandbox = false;
     }
     return state.canSandbox;
@@ -410,7 +410,7 @@ function listenToSandbox(afterGrant = false) {
   if (sandboxEvent && !(afterGrant && FIREFOX)) return;
   const ev = !FIREFOX ? chrome.runtime.onUserScriptMessage
     : chrome.runtime.onUserScriptMessage || afterGrant ? globalThis.browser?.runtime?.onUserScriptMessage : null;
-  if (!ev) { if (afterGrant) log('warn', 'TRIF\'s sandbox: no runtime.onUserScriptMessage here, so sandboxed mods\' settings can\'t be kept until the browser starts again'); return; }
+  if (!ev) { if (afterGrant) log('warn', 'TRIF\'s sandbox: no runtime.onUserScriptMessage here, so boxed mods\' settings can\'t be kept until the browser starts again'); return; }
   if (sandboxEvent) { try { sandboxEvent.removeListener(onSandboxMessage); } catch { /* gone with the permission */ } }
   sandboxEvent = ev;
   if (!ev.hasListener?.(onSandboxMessage)) ev.addListener(onSandboxMessage);
@@ -429,7 +429,7 @@ function onSandboxMessage(msg, sender, sendResponse) {
     try { host = new URL(sender?.url || sender?.origin || '').hostname; } catch { /* none */ }
     const site = scopeFor(host);
     const mod = String(msg.mod ?? ''), key = String(msg.key ?? '');
-    if (!site || !mod || !key || key.length > 100 || !state.mods.some((m) => m.id === mod && m.sandboxed)) return { ok: false, error: 'not a sandboxed mod here' };
+    if (!site || !mod || !key || key.length > 100 || !state.mods.some((m) => m.id === mod && m.sandboxed)) return { ok: false, error: 'not a boxed mod here' };
     const all = (await chrome.storage.local.get('sandboxSettings')).sandboxSettings;
     const store = all && typeof all === 'object' && !Array.isArray(all) ? all : {};
     if (msg.trifSandbox === 'settings.get') {
@@ -994,7 +994,7 @@ const commands = {
     // A mod switched off because new mods of its group start off (lib.js applyNewMods) waits for the user to
     // look at it: an agent run can't switch it on.
     if (args.scope && args.enabled && state.newOff[id]) {
-      throw new Error(`${id} is new and switched off until the user looks at it (their setting: new ${{ rules: 'rules', sandboxed: 'sandboxed mods' }[modGroup(mod)] || 'page scripts'} start off); only the user can switch it on, in the side panel or with trif enable in their terminal`);
+      throw new Error(`${id} is new and switched off until the user looks at it (their setting: new ${groupWord(modGroup(mod))} start off); only the user can switch it on, in the side panel or with trif enable in their terminal`);
     }
     const enabled = args.enabled;
     const res = await serial(async () => {
@@ -1144,7 +1144,7 @@ async function sandboxList(tab, key) {
     }));
     const list = typeof out === 'string' ? JSON.parse(out) : null;
     return Array.isArray(list) ? list : [];
-  } catch (e) { log('warn', `sandboxed mods' ${key}: ${errMsg(e)}`); return []; }
+  } catch (e) { log('warn', `boxed mods' ${key}: ${errMsg(e)}`); return []; }
 }
 
 function noRuntime() {

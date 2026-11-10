@@ -26,7 +26,7 @@ process.stdout.on('error', (e) => { if (e.code === 'EPIPE') process.exit(0); thr
 const VALUE_FLAGS = new Set(['--tab', '--url', '-o', '--out', '--output', '--filter', '--limit', '-f', '--file',
   '--browser', '--home', '--native-dir', '--bin-dir', '--timeout', '--agent', '--session', '--model', '--site', '--auto',
   '--provider', '--base-url', '--key-env', '--selector', '--color', '--text', '--tolerance']);
-const BOOL_FLAGS = new Set(['--json', '--hard', '--help', '-h', '--force', '--page', '--rules', '--sandboxed', '--no-link', '--examples', '--no-examples', '--copy', '--link', '--install', '--open',
+const BOOL_FLAGS = new Set(['--json', '--hard', '--help', '-h', '--force', '--page', '--rules', '--sandboxed', '--style', '--boxed', '--no-link', '--examples', '--no-examples', '--copy', '--link', '--install', '--open',
   '--use-new', '--keep', '--merged', '--set-key', '--remove-key', '--scroll', '--full', '--verbose', '-v', '--no-wait']);
 // Flags with a value that may be left out (`--examples` alone, or `--examples x.com,google.com`).
 const OPTIONAL_VALUE_FLAGS = new Set(['--examples']);
@@ -217,7 +217,8 @@ function makeCtx(opts) {
 function printJson(v) { out(JSON.stringify(v === undefined ? null : v, null, 2)); }
 
 // What the side panel calls each group of mods (extension/lib.js modGroup), in a sentence.
-const GROUP_NAMES = { rules: 'rules', sandboxed: 'sandboxed mods', page: 'page scripts' };
+// (the groups' stored names are rules, sandboxed and page; people know them as style, boxed and free mods)
+const GROUP_NAMES = { rules: 'style mods', sandboxed: 'boxed mods', page: 'free mods' };
 
 const handlers = {
   async help(ctx, pos) {
@@ -339,7 +340,7 @@ const handlers = {
       const name = GROUP_NAMES;
       lines.push(`NEW MODS      new ${st.startsOff.map((g) => name[g] || g).join(' and ')} start off in this browser (the user's setting, in the side panel's Settings), except ones made in its side panel`);
     }
-    if (st && st.sandbox === false) lines.push(`NO SANDBOX    ${st.browser || 'this browser'} can't run sandboxed mods: each waits for the user's OK (in the side panel) to run as a page script instead`);
+    if (st && st.sandbox === false) lines.push(`NO SANDBOX    ${st.browser || 'this browser'} can't run boxed mods: each waits for the user's OK (in the side panel) to run as a free mod instead`);
     // Sandboxed mods as the extension runs them: in TRIF's sandbox, or ('page') as page scripts
     const sandboxedAs = new Map(((st && st.mods) || []).filter((m) => m.sandboxed).map((m) => [m.id, m.sandboxed]));
     const sandboxHeld = new Map(((st && st.mods) || []).filter((m) => m.held && m.held.by === 'sandbox').map((m) => [m.id, m.held]));
@@ -356,7 +357,7 @@ const handlers = {
       else if (!st) s = '?';
       else if (!registered.has(id)) s = 'not known to the extension yet';
       else s = registered.get(id) ? 'registered' : 'NOT REGISTERED';
-      if (sandboxedAs.has(id) && !sandboxHeld.has(id)) s += sandboxedAs.get(id) === 'page' ? ' (sandboxed mod, run as a page script: the user allowed it, as this browser has no sandbox)' : ' (sandboxed)';
+      if (sandboxedAs.has(id) && !sandboxHeld.has(id)) s += sandboxedAs.get(id) === 'page' ? ' (boxed mod, run as a free mod: the user allowed it, as this browser has no sandbox)' : ' (boxed)';
       if (offSites.has(id) && !off.has(id)) s += ` (off on ${offSites.get(id).join(', ')})`;
       if (updates[id]) s += `; ${updateText(updates[id])}`;
       if (review[id]) s += `; TO REVIEW: it ${review[id].facts.join('; it ')} (trif approve ${id} when that's fine)`;
@@ -420,7 +421,7 @@ const handlers = {
     const code = fs.readFileSync(file, 'utf8');
     const header = require('./lib/mods').parseHeader(code);
     if (header.rules && header.sandboxed) {
-      const error = 'a mod is either @rules (data) or @sandboxed (JavaScript in TRIF\'s sandbox), not both';
+      const error = 'a mod is either a style mod (@style) or a boxed mod (@boxed), not both';
       if (ctx.json) printJson({ ok: false, error }); else out(`${path.resolve(file)}: ${error}`);
       process.exitCode = 1;
       return;
@@ -433,7 +434,7 @@ const handlers = {
         return;
       }
       if (ctx.json) return printJson({ ok: true, file: path.resolve(file), rules: true, powers: [] });
-      out(`ok: ${path.resolve(file)} is a rules mod and its rules check out`);
+      out(`ok: ${path.resolve(file)} is a style mod and its rules check out`);
       return out('TRIF runs it with its own code: it can\'t send, click, load from elsewhere or run code, so it never waits for the user\'s OK.');
     }
     // Compiles without running anything (side-panel agents may not run code; this replaces node --check).
@@ -449,11 +450,11 @@ const handlers = {
     if (header.sandboxed) {
       const lint = require('./lib/sandboxlint').sandboxLint(code);
       if (ctx.json) return printJson({ ok: true, file: path.resolve(file), sandboxed: true, powers: [], lint });
-      out(`ok: ${path.resolve(file)} is a sandboxed mod and parses`);
+      out(`ok: ${path.resolve(file)} is a boxed mod and parses`);
       out('It runs in TRIF\'s sandbox, with only TRIF\'s API: it can\'t send, click, navigate or load anything, so it never waits for the user\'s OK.');
       if (!lint.length) return out('TRIF finds nothing in it that the sandbox would refuse.');
       const lines = code.split('\n');
-      out('\nThe sandbox doesn\'t give it these, so they\'d fail when it runs (not a hold: rewrite them with the API, see "Sandboxed mods" in TECHNIQUES.md, or make it a page script if it really needs them):');
+      out('\nThe sandbox doesn\'t give it these, so they\'d fail when it runs (not a hold: rewrite them with the API, see "Boxed mods" in TECHNIQUES.md, or make it a free mod if it really needs them):');
       for (const l of lint) {
         out(`- ${l.what}: ${l.why}`);
         for (const n of l.lines.slice(0, 3)) out(`    line ${n}: ${lines[n - 1].trim().slice(0, 140)}`);
@@ -859,8 +860,8 @@ const handlers = {
       if (isHeld(m)) out(`  HELD: ${held[m.id].by === 'outside' ? 'new or changed since TRIF last let it run' : `a side-panel agent wrote it while working on ${held[m.id].site}`}, and TRIF found that it ${(held[m.id].facts || [held[m.id].reason]).join('; it ')}. Not running until the user approves it (trif approve ${m.id}).`);
       if (updates[m.id]) out(`  ${updateText(updates[m.id])}: trif mod-update ${m.id}`);
       if (m.description) out(`  ${m.description}`);
-      if (m.rules) out('  kind: rules (data TRIF runs; never waits for the user\'s OK)');
-      else if (m.sandboxed) out('  kind: sandboxed (runs in TRIF\'s sandbox with only TRIF\'s API; never waits for the user\'s OK, except in a browser without the sandbox)');
+      if (m.rules) out('  kind: style mod (data TRIF runs; never waits for the user\'s OK)');
+      else if (m.sandboxed) out('  kind: boxed mod (runs in TRIF\'s sandbox with only TRIF\'s API; never waits for the user\'s OK, except in a browser without the sandbox)');
       if (isShippedSource(m.source)) out(`  from TRIF${m.version ? `, version ${m.version}` : ''}`);
       out(`  matches: ${m.matches.join(' ')}`);
       if (m.risk) out(`  risk: ${m.risk.tier}${m.risk.why ? ` (${m.risk.why})` : ''}`);
@@ -882,8 +883,10 @@ const handlers = {
     }
     const file = path.join(ctx.ws.modsDir, site, `${mod}.js`);
     if (fs.existsSync(file)) throw new HelperError(`${file} already exists`, 'command');
-    if (ctx.opts['--rules'] && ctx.opts['--sandboxed']) throw new UsageError('--rules or --sandboxed, not both');
-    const tpl = fs.readFileSync(path.join(P.HELPER_DIR, 'templates', ctx.opts['--rules'] ? 'rules.js' : ctx.opts['--sandboxed'] ? 'sandboxed.js' : 'mod.js'), 'utf8');
+    // (--style and --boxed; --rules and --sandboxed, their names before, still work)
+    const style = !!(ctx.opts['--style'] || ctx.opts['--rules']), boxed = !!(ctx.opts['--boxed'] || ctx.opts['--sandboxed']);
+    if (style && boxed) throw new UsageError('--style or --boxed, not both');
+    const tpl = fs.readFileSync(path.join(P.HELPER_DIR, 'templates', style ? 'rules.js' : boxed ? 'sandboxed.js' : 'mod.js'), 'utf8');
     let text = tpl;
     // all-sites mods run everywhere until the agent narrows the @match lines.
     if (site === ALL_SITES) text = text.replace(/^\/\/ @match .*\n(\/\/ @match .*\n)*/m, '// @match       *://*/*\n');

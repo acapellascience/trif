@@ -115,14 +115,17 @@ patch `fetch`/`XMLHttpRequest`, read React state, etc.), unless its header says 
   its version (any text; the examples count 1, 2, 3…). Parsed into `source` (lowercased) and `version`
   (null when absent). The panel shows "Tim's mod, v3"; setup keeps such mods up to date (see
   "Updates to shipped mods").
-- `@rules`: a rules mod: after the header, a JSON object of rules (css, hide, replace, filter) that
+- `@style` (or `@rules`, its name before, accepted for good): a style mod: after the header, a JSON object of rules (css, hide, replace, filter) that
   TRIF's own code runs (helper/lib/rules.js; the Mod carries TRIF's code as `code`, the file as `text`,
   and `rules: true`).
-- `@sandboxed`: a sandboxed mod: JavaScript that runs in TRIF's own userScripts world, inside a Secure
+- `@boxed` (or `@sandboxed`, its name before, accepted for good): a boxed mod: JavaScript that runs in TRIF's own userScripts world, inside a Secure
   EcmaScript Compartment whose global has only TRIF's API (`page`, `trif`, `console`, the timers, `Math`,
   `Date`) and the language; elements only as TRIF's stand-ins (extension/sandbox.js; docs/SAFE-MODS.md
   "Sandboxed: what's built"). The Mod carries `sandboxed: true`. `@rules` and `@sandboxed` together are an
-  error (the mod isn't sent). See "Sandboxed mods" below.
+  error (the mod isn't sent). See "Boxed mods" below. Inside TRIF the old words stay (`rules`, `sandboxed`,
+  the groups `rules`, `sandboxed`, `page`): only what people see says style, boxed and free mods. A mod's
+  hash is taken with its header's `@style`/`@boxed` lines spelled `@rules`/`@sandboxed`, so switching
+  spelling alone keeps its hash (what was allowed for it, holds, the extension's `unsandboxedOk`).
 - Unknown keys are ignored. A file without a header is valid.
 
 **Mod id** = `<site>/<mod>` (e.g. `x.com/detox-timeline`). The helper parses headers; the extension never parses.
@@ -157,7 +160,7 @@ logs it and exits (the extension reconnects to a fresh one) instead of misreadin
 `Mod = { id, site, file, name, description, matches:[…], excludes:[…], runAt:"document_start"|"document_end"|"document_idle", risk:{tier, why}|null, source, version, code, hash, held?, startOff?, origin?:{by, browser, live?}, update?:{version, from, modified}, absorbs?:[id…], readded?, autoUpdated?, rules?, text?, sandboxed?, pageFacts? }`
 (`file` is the absolute path; `hash` is a sha1 of code+metadata so the extension can skip unchanged mods
 (`sandboxed` is part of it only when set, so other mods' hashes are as before); `pageFacts`, on a sandboxed
-mod: what its code could do as a page script (helper/lib/powers.js facts), for a browser without the sandbox;
+mod: what its code could do as a free mod (helper/lib/powers.js facts), for a browser without the sandbox;
 `update`: a newer version of this shipped mod is waiting, see "Updates to shipped mods"; `autoUpdated`: a stamp
 when TRIF itself replaced the user's unchanged copy of a shipped mod with a new version, kept while the copy is
 that version (`preinstalled.json` `shipped.<id>.auto`, `autoUpdatedIds`), see "New mods start on or off".)
@@ -410,11 +413,11 @@ The whole-mod switch (no `site`) leaves the list alone. The reply adds `site`, `
 names several sites or any host (`isMultiSite`) gets a switch for the panel's site; the setup page
 shows the whole-mod switch plus one per site (the named sites and any in `offSites`).
 
-**Groups.** The side panel lists a site's mods in three groups, each with a switch: **Rules** (`@rules` mods,
-run by TRIF's own code from their data), **Sandboxed** (`@sandboxed` mods, in TRIF's sandbox; in a browser
-without it they're page scripts) and **Page scripts** (every other mod). A group switched off on a
-site lives in `chrome.storage.local` **`groupsOff`** = `{"<site>": ["page"]}` (groups `rules`, `sandboxed`, `page`;
-`normalizeGroupsOff` drops anything else, and empty sites). Like `offSites`, those sites go into
+**Groups.** The side panel lists a site's mods in three groups, each with a switch: **Style mods** (`@style`/`@rules` mods,
+run by TRIF's own code from their data), **Boxed mods** (`@boxed`/`@sandboxed` mods, in TRIF's sandbox; in a browser
+without it they're free mods) and **Free mods** (every other mod). A group switched off on a
+site lives in `chrome.storage.local` **`groupsOff`** = `{"<site>": ["page"]}` (groups `rules`, `sandboxed`, `page`, shown as
+Style, Boxed and Free mods: lib.js `GROUP_NAMES`; `normalizeGroupsOff` drops anything else, and empty sites). Like `offSites`, those sites go into
 `excludeMatches` when a mod of that group registers (`offSitesFor` in lib.js merges them with the mod's own
 `offSites`), so the browser keeps the mods off that site and its subdomains; a mod matching any host
 follows it site by site. Each mod's own switches are untouched, and come back as they were when the group
@@ -424,7 +427,7 @@ reloads the tab and greys the group's rows; `status` reports `groupsOff` when no
 scripts back on for a site the user turned them off on.
 
 **New mods start on or off.** For each group, the user chooses in Settings whether its new mods start on (the
-default, as before; Sandboxed too) or off: `chrome.storage.local` **`startsOff`** = the groups set to start off (`["page"]`;
+default, as before; Boxed mods too) or off: `chrome.storage.local` **`startsOff`** = the groups set to start off (`["page"]`;
 `normalizeStartsOff`). The panel sends `{type: "mods.startsOff", group, off}`; panel only, like the groups'
 switches. It counts from then on: mods already there keep their switches. On each `mods` message
 (`applyNewMods` in lib.js, after `applyStartOff` and `applyReadded`), a mod arrives when its id isn't in
@@ -439,18 +442,18 @@ for the user's OK anyway, and allowing it is looking at it). A renamed file keep
 clears its `newOff`; from an agent run, `mod.enable` refuses to switch one on. `status` reports `startsOff`
 when non-empty and `newOff` on such a mod while it's off (`trif status`: `NEW MODS`, `off (new)`).
 
-**Sandboxed mods.** A Mod with `sandboxed: true` (header `@sandboxed`) never waits for the user's OK for
-its code: the helper's holds (held.js) find nothing in it, as for a rules mod (a side-panel run's is still
+**Boxed mods.** A Mod with `sandboxed: true` (header `@sandboxed`) never waits for the user's OK for
+its code: the helper's holds (held.js) find nothing in it, as for a style mod (a side-panel run's is still
 held for an `@match` outside the run's site, or `@risk 2`). The extension:
 - configures TRIF's world once per background start (`sandboxWorld` in background.js):
   `userScripts.configureWorld({worldId: "trif-sandbox", csp, messaging: true})`, the CSP from sandbox.js
   `SANDBOX_CSP` (`connect-src 'none'`, loads only from data:/blob: and, for images, the page's own site;
   'unsafe-eval' for SES's evaluator);
-- registers, where any sandboxed mod runs, the world's runtime **`trif-sandbox-runtime`**
+- registers, where any boxed mod runs, the world's runtime **`trif-sandbox-runtime`**
   (`sandboxRuntimeScript`: a timing stamp, `vendor/ses.umd.min.js` as a file, then sandbox.js
   `sandboxRuntimeCode`), `document_start`, `world: "USER_SCRIPT"`, `worldId: "trif-sandbox"`; it locks the
   language down once (`lockdown()`) and installs `__trifSandbox` in that world;
-- registers each sandboxed mod in the same world, its code as a JSON string handed to `__trifSandbox.run`
+- registers each boxed mod in the same world, its code as a JSON string handed to `__trifSandbox.run`
   (or queued until the runtime is there, so registration order doesn't matter), which evaluates it in a
   Compartment of its own, inside an async function;
 - keeps the mods' errors and logs in the world (`__trifSandbox.errors`, `.logs`, same shape as
@@ -464,13 +467,13 @@ held for an `@match` outside the run's site, or `@risk 2`). The extension:
   `sendMessage` and deletes `chrome`/`browser` from the world before any mod runs.
 
 A browser that can't host the world (Safari: its userScripts is TRIF's adapter, safari.js; or a
-`configureWorld` that fails) holds every sandboxed mod in the extension (`sandboxFallback` in lib.js):
+`configureWorld` that fails) holds every boxed mod in the extension (`sandboxFallback` in lib.js):
 `held = {by: "sandbox", site, reason, facts, claim, hash}`, `unsandboxed: true`, so it isn't registered and
-the panel shows it on hold, in the Page scripts group. Allow in the panel (`mod.approve` for such a mod is
+the panel shows it on hold, in the Free mods group. Allow in the panel (`mod.approve` for such a mod is
 answered by the extension, not the helper) stores **`unsandboxedOk`** = `{"<id>": "<hash>"}` and registers
-it in the MAIN world as a page script with the same API (sandbox.js `sandboxPageCode`; its settings in the
+it in the MAIN world as a free mod with the same API (sandbox.js `sandboxPageCode`; its settings in the
 page's localStorage under `trif.settings.<id>.<key>`); a new version waits again. Panel only. `status`
-says `sandbox: false` there, and each sandboxed mod's `sandboxed` is `true` (in the world) or `"page"`.
+says `sandbox: false` there, and each boxed mod's `sandboxed` is `true` (in the world) or `"page"`.
 
 **Renamed mod files.** A mod's id is its site folder and file name, so a file renamed on disk arrives as a
 new id with the old one gone. When the new mod has the same code as a vanished one in the same site folder

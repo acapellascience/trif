@@ -31,7 +31,7 @@ function parseRules(code) {
   const end = text.search(/^\s*\/\/\s*==\/WebMod==\s*$/m);
   let body = end === -1 ? text : text.slice(text.indexOf('\n', end) + 1);
   body = body.replace(/^\s*\/\/.*$/gm, '').trim().replace(/^\(([\s\S]*)\)\s*;?$/, '$1').trim();
-  if (!body) throw new RulesError('a @rules mod needs a JSON object after its header');
+  if (!body) throw new RulesError('a style mod needs a JSON object after its header');
   let spec;
   try { spec = JSON.parse(body); } catch (e) { throw new RulesError(`the rules aren't valid JSON: ${e.message}`); }
   return checkRules(spec);
@@ -41,7 +41,7 @@ function parseRules(code) {
 function checkRules(spec) {
   const problems = [];
   if (!spec || typeof spec !== 'object' || Array.isArray(spec)) throw new RulesError('the rules must be a JSON object');
-  for (const k of Object.keys(spec)) if (!KEYS.has(k)) problems.push(`unknown rule "${k}" (rules mods have ${[...KEYS].join(', ')})`);
+  for (const k of Object.keys(spec)) if (!KEYS.has(k)) problems.push(`unknown rule "${k}" (style mods have ${[...KEYS].join(', ')})`);
   const out = { css: '', hide: [], replace: [], filter: [] };
   if (spec.css !== undefined) {
     if (typeof spec.css !== 'string' || spec.css.length > MAX.css) problems.push(`"css" must be text, at most ${MAX.css} characters`);
@@ -123,7 +123,7 @@ function checkCss(css) {
   while ((m = re.exec(orig))) {
     const start = flat[m.index + m[0].length - 1][1] + 1;
     const arg = css.slice(start).replace(/^\s*["']?\s*/, '');
-    if (!/^data:/i.test(arg)) return 'url() loads from an address: only data: is allowed in a rules mod';
+    if (!/^data:/i.test(arg)) return 'url() loads from an address: only data: is allowed in a style mod';
   }
   return null;
 }

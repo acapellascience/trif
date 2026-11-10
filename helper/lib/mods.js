@@ -84,12 +84,15 @@ function parseHeader(code) {
       case 'version':
         if (value) out.version = value;
         break;
-      // `@rules`: a rules mod (lib/rules.js): data after the header, run by TRIF's own code
+      // `@style` (or `@rules`, its name before): a style mod (lib/rules.js): data after the header, run by
+      // TRIF's own code. Inside TRIF it's still a "rules" mod (`rules: true`).
+      case 'style':
       case 'rules':
         out.rules = true;
         break;
-      // `@sandboxed`: a sandboxed mod (docs/SAFE-MODS.md): its JavaScript runs in TRIF's own world, with only
-      // TRIF's API (extension/sandbox.js), so it can't send, click, navigate or load anything
+      // `@boxed` (or `@sandboxed`, its name before): a boxed mod (docs/SAFE-MODS.md): its JavaScript runs in
+      // TRIF's own world, with only TRIF's API (extension/sandbox.js). Inside TRIF it's `sandboxed: true`.
+      case 'boxed':
       case 'sandboxed':
         out.sandboxed = true;
         break;
@@ -117,6 +120,20 @@ function defaultMatches(site) {
   return [`*://${host}/*`, `*://*.${host}/*`];
 }
 
+// The header's `@style` and `@boxed` lines spelled `@rules` and `@sandboxed` (for the hash only: buildMod).
+const NEW_NAMES = { style: 'rules', boxed: 'sandboxed' };
+function oldSpelling(code) {
+  const text = String(code);
+  if (!/@(style|boxed)\b/i.test(text)) return text;
+  const lines = text.split('\n');
+  const start = lines.findIndex((l) => HEADER_START.test(l.replace(/\r$/, '')));
+  if (start === -1) return text;
+  for (let i = start + 1; i < lines.length && !HEADER_END.test(lines[i].replace(/\r$/, '')); i++) {
+    lines[i] = lines[i].replace(/^(\s*\/\/\s*@)(style|boxed)(?=\s|\r|$)/i, (m, pre, name) => pre + NEW_NAMES[name.toLowerCase()]);
+  }
+  return lines.join('\n');
+}
+
 function sha1(text) {
   return crypto.createHash('sha1').update(text).digest('hex');
 }
@@ -138,9 +155,11 @@ function buildMod({ site, file, code }) {
     source: header.source, // 'webmods' (or 'trif') for the mods TRIF ships, else what the header says, or null
     version: header.version, // the header's @version, or null
   };
-  // (`sandboxed` only when it is: the hashes of every other mod stay as they were)
-  const hash = sha1(JSON.stringify([meta.id, meta.name, meta.description, meta.matches, meta.excludes, meta.runAt, meta.risk, header.rules, ...(header.sandboxed ? ['sandboxed'] : [])]) + '\n' + code);
-  if (header.rules && header.sandboxed) throw new Error('a mod is either @rules (data) or @sandboxed (JavaScript in TRIF\'s sandbox), not both');
+  // (`sandboxed` only when it is: the hashes of every other mod stay as they were. The code is hashed with its
+  // header's new names spelled the old way, so a mod that only changes `@rules` to `@style`, or `@sandboxed` to
+  // `@boxed`, keeps its hash: what was allowed for it, and whether it waits, stay as they were.)
+  const hash = sha1(JSON.stringify([meta.id, meta.name, meta.description, meta.matches, meta.excludes, meta.runAt, meta.risk, header.rules, ...(header.sandboxed ? ['sandboxed'] : [])]) + '\n' + oldSpelling(code));
+  if (header.rules && header.sandboxed) throw new Error('a mod is either a style mod (@style) or a boxed mod (@boxed), not both');
   if (header.sandboxed) return { mod: { ...meta, sandboxed: true, code, hash }, warnings: header.warnings };
   if (header.rules) {
     // (what runs is TRIF's code with the checked rules; throws a RulesError for the scanner to report)

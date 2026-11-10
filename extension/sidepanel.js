@@ -3,7 +3,7 @@
 // chrome.storage.local `chat:<site>`; this page renders that record and reacts to storage changes.
 // See docs/PROTOCOL.md, "Side panel and agent runs".
 
-import { siteForUrl, modAppliesTo, modSites, isMultiSite, offOnSite, normalizeOffSites, scopeFor, hostInScope, limitToSites, withOffSites, modGroup, GROUPS, groupOffOn, offSitesFor, normalizeGroupsOff, FIREFOX, BROWSER, SETUP_COMMAND,
+import { siteForUrl, modAppliesTo, modSites, isMultiSite, offOnSite, normalizeOffSites, scopeFor, hostInScope, limitToSites, withOffSites, modGroup, GROUPS, GROUP_NAMES, groupWord, groupOffOn, offSitesFor, normalizeGroupsOff, FIREFOX, BROWSER, SETUP_COMMAND,
   SITE_ACCESS, siteOrigins, siteState, hasSiteAccess, requestEverySite,
   normalizeModOrder, orderMods, moveId, setModOrder,
   normalizeSettings, normalizePicks, siteSettings, withoutModel } from './lib.js';
@@ -661,9 +661,10 @@ onSwitchChange(() => renderMods());
 
 // ---- Groups: "Rules" and "Page scripts", each with a switch for this site (background's mods.group)
 const GROUP_TEXT = {
-  rules: ['Rules', 'Run by TRIF from data: they can\'t send, click or load anything.'],
-  sandboxed: ['Sandboxed', 'Run in TRIF\'s sandbox: they can\'t send, click or load anything.'],
-  page: ['Page scripts', 'Run in the page with everything it has.'],
+  // (the lines for style and boxed mods: drafts awaiting Tim's OK, docs/TIER-NAMES-STRINGS.md)
+  rules: [GROUP_NAMES.rules, 'Run by TRIF from data: they change how the page looks, and can\'t send, load or click anything themselves.'],
+  sandboxed: [GROUP_NAMES.sandboxed, 'Run in TRIF\'s sandbox: they change what the page shows, and can\'t send, load or click anything themselves.'],
+  page: [GROUP_NAMES.page, 'Run in the page with everything it has.'],
 };
 const groupOff = (g) => !!view.site && groupOffOn(normalizeGroupsOff(view.status?.groupsOff), g, view.site);
 const groupHeadings = new Map();
@@ -1148,7 +1149,7 @@ function factsBox(m, info, kind) {
   const where = m.matches && m.matches.length ? ` It runs by itself on every page it's for (${m.matches.slice(0, 3).join(', ')}${m.matches.length > 3 ? '…' : ''}).` : '';
   const fromAgent = kind !== 'review' && info.by !== 'outside' && info.by !== 'sandbox';
   // (by 'sandbox': this browser can't sandbox it, so allowing it runs it as a page script: lib.js sandboxFallback)
-  const who = info.by === 'sandbox' ? 'Allow runs this version as a page script, in this browser only.'
+  const who = info.by === 'sandbox' ? 'Allow runs this version as a free mod, in this browser only.'
     : fromAgent ? `An agent ${kind === 'pending' ? 'changed' : 'wrote'} it in your chat on ${info.site || view.site}.` : 'It\'s new or changed since TRIF last let it run.';
   box.append(el('p', 'facts-note', `${kind === 'review' ? 'It keeps running until you switch it off.'
     : kind === 'pending' ? `${who} The version before keeps running until you decide.` : who}${where}`));
@@ -1509,7 +1510,7 @@ function updateModItem(li, m) {
   tag.textContent = on && m.enabled !== false && !m.registered ? (view.status.userScripts ? 'not active' : 'paused')
     : !on && m.from ? `from ${m.from}` : !on && m.newOff ? (m.newOff === 'update' ? 'updated' : 'new') : '';
   tag.title = !on && m.from ? `Made from ${m.from}. Mods made in another browser start off here; switch it on to use it.`
-    : !on && m.newOff ? `${m.newOff === 'update' ? 'TRIF updated it. ' : ''}New ${{ rules: 'rules', sandboxed: 'sandboxed mods' }[modGroup(m)] || 'page scripts'} start off (Settings): switch it on once you've looked at it.` : '';
+    : !on && m.newOff ? `${m.newOff === 'update' ? 'TRIF updated it. ' : ''}New ${groupWord(modGroup(m))} start off (Settings): switch it on once you've looked at it.` : '';
   tag.hidden = !tag.textContent;
   const err = li.querySelector('.mod-err');
   err.textContent = rowErr || switchError(m.id, site) || (on && m.error) || '';

@@ -1,5 +1,9 @@
 # Design note: mods that can't act (a safe tier)
 
+Names (Nov 10): people see the tiers as **style mods** (this note's "rules"), **boxed mods** ("sandboxed")
+and **free mods** ("page"); headers `@style` and `@boxed` (the old `@rules` and `@sandboxed` still work).
+The code, storage and protocol keep rules / sandboxed / page.
+
 Status: **rules: built** (main). **Sandboxed: built on the `sandbox-tier` branch** (Chrome and Firefox;
 see "Sandboxed: what's built" below; spikes on `sandbox-spike` and `sandbox-standin`). `trif.filterResponse`
 and themes: not built. Follows docs/SECURITY.md (0.3), which reads each mod's code (powers.js) and
@@ -61,7 +65,7 @@ executed by TRIF's runtime:
 - CSS gets the same treatment as themes would: no `url()` to other sites (or only to the mod's own
   site), no `@import`, so a rule can't send what the page shows anywhere (attribute selectors plus
   `background: url()` can leak values otherwise).
-- The runtime re-applies rules as the page changes (one shared observer for all rules mods), which is
+- The runtime re-applies rules as the page changes (one shared observer for all style mods), which is
   what most hiding mods hand-roll today.
 
 ## Sandboxed: the world (the design; what's built is below)
@@ -92,7 +96,7 @@ That world shares the page's DOM but has its own JavaScript globals, so TRIF con
 - **What it keeps:** the DOM (read and change), CSS, MutationObserver, canvas, Web Audio, timers and
   requestAnimationFrame, `localStorage` (the page's, shared: fine for settings), and the TRIF API.
 
-The world's guards are TRIF's code, tested like tablock.js: an e2e "hostile sandboxed mod" that tries
+The world's guards are TRIF's code, tested like tablock.js: an e2e "hostile boxed mod" that tries
 every escape above and must fail at each.
 
 ## The TRIF API (for both tiers)
@@ -113,7 +117,7 @@ What the hand-rolled patterns become, so mods don't need the page's powers for t
 
 - **Browsers:** `worldId` and `configureWorld` are Chrome 133+; Firefox's userScripts has worlds and
   `configureWorld` but per-mod worlds and CSP support need checking; Safari's userScripts is TRIF's own
-  adapter (safari.js) and would need its own sandbox. A browser that can't sandbox runs sandboxed mods
+  adapter (safari.js) and would need its own sandbox. A browser that can't sandbox runs boxed mods
   as page mods behind review (never silently unsandboxed).
 - **Performance:** a wrapped DOM in the world costs something; measure on X's timeline with the feed
   mods.
@@ -145,15 +149,15 @@ not a full browser world with the dangerous parts removed, but an empty one with
 notes, decisions and open questions: docs/SANDBOX-TIER-NOTES.md.
 
 **Format.** `// @sandboxed` in the header (helper/lib/mods.js; `sandboxed: true` on the Mod). Never held
-for its code (held.js), like a rules mod. `trif check` lists what the sandbox wouldn't give it, as a lint
+for its code (held.js), like a style mod. `trif check` lists what the sandbox wouldn't give it, as a lint
 (helper/lib/sandboxlint.js); `trif new --sandboxed`; `trif mods`/`status` say so.
 
 **The world** (extension/sandbox.js). TRIF's userScripts world `trif-sandbox`, configured once per
 background start with its own CSP (`connect-src 'none'`, loads only from data:/blob: and, for images, the
 page's site; 'unsafe-eval' only for SES's evaluator) and messaging for TRIF's own code (settings). Where any
-sandboxed mod runs, `trif-sandbox-runtime` loads SES (ses 2.3.0, Apache-2.0, extension/vendor, the npm
+boxed mod runs, `trif-sandbox-runtime` loads SES (ses 2.3.0, Apache-2.0, extension/vendor, the npm
 file byte for byte) and runs `lockdown()` once per page; each mod is evaluated in a Compartment of its own,
-inside an async function. One world for all sandboxed mods, a compartment each (a world per mod would load
+inside an async function. One world for all boxed mods, a compartment each (a world per mod would load
 SES and lock down again per mod per page).
 
 **What a mod has**: the language (frozen) and `page`, `trif`, `console`, the timers, `Math`, `Date`; no
@@ -163,12 +167,12 @@ a WeakMap), with allowlisted operations. The TRIF API: `trif.css`, `trif.hide`, 
 `trif.text` (one MutationObserver for every mod in the world), `trif.settings(key, defaults)` (per mod and
 per site, in the extension's storage, not the site's), `trif.log/warn/error`. Errors are caught (top level,
 callbacks, after an await) and kept in the world for `trif errors` / `trif logs`, which read them with
-`userScripts.execute`. The API in full: TECHNIQUES.md "Sandboxed mods".
+`userScripts.execute`. The API in full: TECHNIQUES.md "Boxed mods".
 
 **The guards, as built** (each tried by the hostile e2e, below):
 - network: no fetch/XHR/WebSocket/EventSource/beacon/Worker in the compartment; the world's CSP; images only
   data:/blob: or an address an image on the page already shows; links only this site's pages without a
-  query; CSS only if it loads nothing (rules mods' check); no `<link>`, `<script>`, `<iframe>`, `<object>`,
+  query; CSS only if it loads nothing (style mods' check); no `<link>`, `<script>`, `<iframe>`, `<object>`,
   `<embed>`, `<form>`, `<input>`, `<style>`, `<svg>`, media...;
 - code from strings: none in the compartment; timers take functions; no `on*` attributes, `javascript:`,
   `srcdoc`, `innerHTML`; no text written into `<script>`/`<style>` (an empty script the page made would run
@@ -199,9 +203,9 @@ something else (clickjacking, RT-3). Wording and a mitigation are proposed in do
 - Firefox (153+; tested on 159): the same sandbox, and the hostile e2e passes as in Chrome (SES locks down
   in Firefox's user script sandbox; its world CSP governs eval). Two quirks of its messaging, handled:
   docs/SANDBOX-TIER-NOTES.md "Browsers".
-- Safari: no such world (TRIF's own adapter, extension/safari.js). Each sandboxed mod waits for the user's
+- Safari: no such world (TRIF's own adapter, extension/safari.js). Each boxed mod waits for the user's
   OK, in the extension (`sandboxFallback` in lib.js: held by 'sandbox', with the reason), and once allowed
-  runs as a page script with the same API (sandbox.js `sandboxPageCode`), in the Page scripts group. Never
+  runs as a free mod with the same API (sandbox.js `sandboxPageCode`), in the Free mods group. Never
   silently unsandboxed. The same applies to any browser whose `configureWorld` fails.
 
 **The hostile e2e** (tests/e2e/scenario.js `sandboxedCheck`, fixture tests/e2e/fixtures/sandbox-hostile.js):
@@ -210,15 +214,15 @@ addresses, the page must notice nothing (its own listeners for clicks, keys, sub
 code), its prototypes, form, script, style, link and image must be as they were, and the tab must stay where
 it was with no new tab. Plus a good mod (restyle, hide, add, text now and later, observe, canvas, timers,
 frames, a copy of a page image, listening, settings across a reload), errors and logs, the two sample ports
-(examples/sandboxed), and the panel's group switch. Results: docs/SANDBOX-TIER-NOTES.md "Measurements".
+(examples/boxed), and the panel's group switch. Results: docs/SANDBOX-TIER-NOTES.md "Measurements".
 
-**Not built**: `trif.filterResponse` (the data filters stay page scripts), themes.
+**Not built**: `trif.filterResponse` (the data filters stay free mods), themes.
 
-## Design (not built): `trif.filterResponse` for sandboxed mods
+## Design (not built): `trif.filterResponse` for boxed mods
 
 The data filters (Detox Timeline and the Instagram and Facebook feed filters) patch the page's `fetch` and
-`XMLHttpRequest` and rewrite what comes back. That needs the page's world, so they're page scripts today. A
-sandboxed mod could do the same job if TRIF did the patching and only handed it the data:
+`XMLHttpRequest` and rewrite what comes back. That needs the page's world, so they're free mods today. A
+boxed mod could do the same job if TRIF did the patching and only handed it the data:
 
 ```js
 // a sandboxed mod
@@ -232,7 +236,7 @@ trif.filterResponse('https://x.com/i/api/graphql/*/HomeTimeline*', (data, { url 
 
 **How it would work.**
 - TRIF's page runtime (runtime.js, in the page's world, TRIF's own code) wraps `fetch` and
-  `XMLHttpRequest` once, the way the recorder already does, on pages where a sandboxed mod has asked to
+  `XMLHttpRequest` once, the way the recorder already does, on pages where a boxed mod has asked to
   filter (the registration carries the mods' URL patterns, so nothing is wrapped elsewhere).
 - A response whose URL matches is read as text (JSON only; capped, like the recorder's 2 MB), and handed to
   TRIF's sandbox world **synchronously**, through a DOM event on a node only TRIF's two runtimes know about:
@@ -252,7 +256,7 @@ mod can't use the channel to reach anything: the reply goes to the page that alr
 event name, random per registration, is visible to the page once used (it can tell TRIF filters it, as it
 can today from the patched `fetch`).
 
-**What stays a page script.** Rewriting requests (Detox Timeline's "Recent" sort changes the request's
+**What stays a free mod.** Rewriting requests (Detox Timeline's "Recent" sort changes the request's
 variables): it changes what the site receives. A later `trif.rewriteRequest(urlPattern, {params})` could
 take a declared, checked list of changes; until then that part is a reviewed power.
 

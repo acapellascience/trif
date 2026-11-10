@@ -4,21 +4,22 @@ The how-to half of the guide, read when you need it: before you write a mod, bef
 when you test. AGENTS.md (next to this file) is the rest: the workspace, the CLI, the workflow and the
 safety rules, which always apply.
 
-## Rules mods: start here
+## Style mods: start here
 
 Most customizations are "make it look like this", "hide these", "rename that", "drop the items that say
-X". Write those as a **rules mod**: data instead of code, run by TRIF's own code. A rules mod can't send,
-click, load from anywhere or run code, whoever wrote it, so it never waits for the user's OK and nothing
-on a page can turn it against them. Reach for JavaScript only when rules can't do the job.
+X". Write those as a **style mod**: rules as data instead of code, run by TRIF's own code. A style mod
+can't send, load from anywhere or run code, whoever wrote it, so it never waits for the user's OK and
+nothing on a page can turn it against them. Reach for JavaScript only when a style mod can't do the job.
 
-`trif new <site> <mod> --rules` makes one. After the header (with `// @rules` in it), one JSON object:
+`trif new <site> <mod> --style` makes one. After the header (with `// @style` in it), one JSON object (a
+style mod's old name, `@rules`, still works):
 
 ```js
 // ==WebMod==
 // @name        Calmer timeline
 // @description Hides promoted posts and the trends box
 // @match       https://x.com/*
-// @rules
+// @style
 // @risk        1 hides promoted posts, so their ad impressions never report
 // ==/WebMod==
 {
@@ -41,22 +42,24 @@ on a page can turn it against them. Reach for JavaScript only when rules can't d
 Selectors can't contain `{`, `}`, `;` or `@`. `trif check <site>/<mod>` checks the rules and says what's
 wrong. Rules re-apply as the page changes, so single-page apps need nothing extra.
 
-## Sandboxed mods: when rules aren't enough
+## Boxed mods: when a style mod isn't enough
 
-When a mod needs logic, new elements, animation or drawing, but not the page itself, write a **sandboxed
+When a mod needs logic, new elements, animation or drawing, but not the page itself, write a **boxed
 mod**: JavaScript that TRIF runs in its own sandbox, not in the page. It has the language and TRIF's API,
-nothing else: no `window`, `document`, `fetch`, storage, frames or events to fire. So it can't send, click,
-navigate or load anything, it never waits for the user's OK, and the page can't reach it. Write a page
-script only for what needs the page: filtering the data the site loads, the app's state, its code.
+nothing else: no `window`, `document`, `fetch`, storage, frames or events to fire. So it can't send,
+navigate, load or click anything itself, it never waits for the user's OK, and the page can't reach it.
+Write a free mod (JavaScript in the page) only for what needs the page: filtering the data the site loads,
+the app's state, its code.
 
-`trif new <site> <mod> --sandboxed` makes one (`// @sandboxed` in the header):
+`trif new <site> <mod> --boxed` makes one (`// @boxed` in the header; its old name, `@sandboxed`, still
+works):
 
 ```js
 // ==WebMod==
 // @name        Calm feed
 // @description Hides promoted posts and marks long threads
 // @match       https://x.com/*
-// @sandboxed
+// @boxed
 // @risk        1 hides promoted posts, so their ad impressions never report
 // ==/WebMod==
 trif.css('[data-testid=sidebarColumn] { display: none !important }');
@@ -108,11 +111,11 @@ Good to know:
 - **Editors are the user's**: what's typed into a contenteditable isn't in `.text` or `trif.text`, copies
   or attributes inside it.
 - The code runs inside a function, so a top-level `return` ends it and `await` works at the top.
-- Errors are caught and shown by `trif errors`, as for page scripts.
+- Errors are caught and shown by `trif errors`, as for free mods.
 - The sandbox refuses source with `import(` or an HTML comment marker in it, even inside a string or a
   comment; `trif check` points them out.
-- Where it isn't enough (an API it doesn't offer), say so and write a page script; don't contort the
-  mod. Examples: examples/sandboxed in TRIF's folder (Simple Shopping, DVD Logo).
+- Where it isn't enough (an API it doesn't offer), say so and write a free mod; don't contort the mod.
+  Examples: examples/boxed in TRIF's folder (Simple Shopping, DVD Logo).
 
 ## Writing mods TRIF can read
 

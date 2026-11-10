@@ -1,5 +1,9 @@
 # Sandbox tier: working notes (branch sandbox-tier)
 
+Names (Nov 10, branch tier-names): what these notes call rules, sandboxed and page mods are, for people,
+**style mods**, **boxed mods** and **free mods** (headers `@style`, `@boxed`; the old ones still work).
+Identifiers, storage and protocol keep rules / sandboxed / page. UI strings: docs/TIER-NAMES-STRINGS.md.
+
 A running log of the overnight build of the sandboxed tier (docs/SAFE-MODS.md): decisions, measurements,
 browser findings, open questions for Tim. Newest findings are folded into the sections, not appended.
 
@@ -8,10 +12,10 @@ browser findings, open questions for Tim. Newest findings are folded into the se
 - `// @sandboxed` header (helper/lib/mods.js). A mod is `@rules` or `@sandboxed`, not both (an error).
   The hash of every other mod is unchanged (`sandboxed` only joins the hashed header fields when it's set),
   so seen.json and allowed.json keep matching.
-- Never held for its code (held.js powersFor returns nothing for it, like a rules mod). A side-panel run's
-  sandboxed mod is still held for an `@match` outside the run's site, or for `@risk 2`, exactly like a rules
+- Never held for its code (held.js powersFor returns nothing for it, like a style mod). A side-panel run's
+  boxed mod is still held for an `@match` outside the run's site, or for `@risk 2`, exactly like a rules
   mod: those are about the run's scope, not about what the code can do.
-- `trif check` on a sandboxed mod: parses it (inside an async function, as it runs), says it never waits,
+- `trif check` on a boxed mod: parses it (inside an async function, as it runs), says it never waits,
   and lists, as a lint, what the sandbox wouldn't give it (helper/lib/sandboxlint.js): page-only globals
   (`window`, `document`, `fetch`, `localStorage`, ...), real-element members (`.innerHTML`,
   `.addEventListener`, `.click`, `.style.x`, ...), string timers, and the two source patterns SES refuses
@@ -23,9 +27,9 @@ browser findings, open questions for Tim. Newest findings are folded into the se
   `sandboxRuntimeScript`, `syncUserScripts`), groups (`modGroup` → 'sandboxed'), the fallback
   (`sandboxFallback`). background.js: the world's configuration (`sandboxWorld`), settings storage
   (`onUserScriptMessage`), errors and logs from the world (`sandboxList`), Allow for the fallback.
-- Panel: a **Sandboxed** group between Rules and Page scripts with its own per-site switch; Settings →
-  New mods start → **Sandboxed** (default On).
-- Examples: examples/sandboxed (ports of Simple Shopping and DVD Logo; not shipped mods, nothing scans
+- Panel: a **Boxed mods** group between Rules and Free mods with its own per-site switch; Settings →
+  New mods start → **Boxed mods** (default On).
+- Examples: examples/boxed (ports of Simple Shopping and DVD Logo; not shipped mods, nothing scans
   that folder).
 
 ## Design decisions (for Tim to review)
@@ -42,7 +46,7 @@ browser findings, open questions for Tim. Newest findings are folded into the se
    asked to avoid: the site could read, change and detect the settings. With it, TRIF's runtime captures
    `chrome.runtime.sendMessage` before any mod runs and deletes `chrome`/`browser` from the world; mods'
    compartments never have them. The background accepts only `settings.get` / `settings.save` for a
-   sandboxed mod it knows, for the site the *browser* says the sender is on (not the message), capped at
+   boxed mod it knows, for the site the *browser* says the sender is on (not the message), capped at
    64 KB per mod per site, 200 sites per mod. Network is still off (the world's CSP and no API).
    Alternative, one line each in sandbox.js and background.js: messaging off and settings in the page's
    localStorage under a TRIF prefix (what the page-script fallback does).
@@ -64,8 +68,8 @@ browser findings, open questions for Tim. Newest findings are folded into the se
    built from strings. The world itself allows 'unsafe-eval' because SES needs it to evaluate the mod.
 9. **Errors**: anything a browser API throws (a DOMException, say) reaches the mod as a fresh TypeError with
    the message, so no object from outside the compartment's intrinsics leaks through an error.
-10. **Group of a sandboxed mod in a browser without the sandbox: "Page scripts"**, since that's how it runs
-    (or would) there. So switching Page scripts off on a site also covers them.
+10. **Group of a boxed mod in a browser without the sandbox: "Free mods"**, since that's how it runs
+    (or would) there. So switching Free mods off on a site also covers them.
 11. **Fallback hold lives in the extension**, not the helper: held.json is shared by every browser, and the
     hold is about where a mod can run in *this* browser. Allow (panel only) stores the allowed hash in
     `unsandboxedOk`; a new version waits again. No `trif approve` for it (like the group switches).
@@ -89,9 +93,9 @@ browser findings, open questions for Tim. Newest findings are folded into the se
   In Firefox, `TextEncoder`/`TextDecoder` aren't on the compartment's global (68 names vs Chrome's
   70); `performance.now()` is 1 ms coarse there, so its timings below are rounded.
 - **Safari**: no world of TRIF's own (its userScripts is TRIF's adapter, extension/safari.js, which runs
-  page scripts). Every sandboxed mod waits for the user's OK there, held by the extension with the reason
-  "Safari can't run sandboxed mods, so here it would run as a page script, with everything the page has",
-  under Page scripts; Allow runs it as a page script with the same API (sandbox.js `sandboxPageCode`).
+  free mods). Every boxed mod waits for the user's OK there, held by the extension with the reason
+  "Safari can't run boxed mods, so here it would run as a free mod, with everything the page has",
+  under Free mods; Allow runs it as a free mod with the same API (sandbox.js `sandboxPageCode`).
   Not run in Safari tonight (no Safari e2e); the page-script form is tested in Chrome and Firefox (e2e
   `sandboxPageFormCheck`: the API works in the page's world) and the hold in unit tests
   (tests/extension.test.js `sandboxFallback`). Any browser whose `configureWorld` fails gets the same.
@@ -99,11 +103,11 @@ browser findings, open questions for Tim. Newest findings are folded into the se
 ## Measurements
 
 From tests/e2e/scenario.js `sandboxedCheck` (sandbox-<browser>.json in the run's output), test page with
-1000 cells and five sandboxed mods (hostile, good, throws, the two samples) plus one page mod:
+1000 cells and five boxed mods (hostile, good, throws, the two samples) plus one page mod:
 
 | | Chrome 156 | Firefox 159 |
 |---|---|---|
-| SES loaded in the world (per page where a sandboxed mod runs) | 2.3-2.8 ms | 3 ms |
+| SES loaded in the world (per page where a boxed mod runs) | 2.3-2.8 ms | 3 ms |
 | `lockdown()` (once per page) | 5.8-6.9 ms | 4-5 ms |
 | a mod's first run (compartment + its top level) | 0.2-3 ms | 0-6 ms |
 | restyle 1000 elements through stand-ins (`style()`) | 3 ms | 2 ms |
@@ -160,7 +164,7 @@ handler and frame were as they were; the tab stayed on the page and no tab opene
 - **Forms** (red-team RT-2 and RT-10, closed for buttons, moves, removal and writing over): what's left is
   a mod's `<label>` around a page checkbox, and hiding a field the user then can't see. Deception that needs
   the user's click.
-- **Deceiving the user by what's shown** (any mod can, rules mods too).
+- **Deceiving the user by what's shown** (any mod can, style mods too).
 - **Denial of service**: a mod looping forever hangs the page (one thread); SES doesn't contain it.
 - **Keystrokes** (red-team RT-4, closed for fields): which key is pressed in a field reaches no mod; a
   field in a closed shadow root is covered by default-deny since round 2 (RT-8), and an editor's text is
@@ -169,9 +173,9 @@ handler and frame were as they were; the tab stayed on the page and no tab opene
   without 'unsafe-inline'): not tested. In Chrome the world's own CSP may cover it.
 - **API gaps found while porting**: CSS masks with the site's images, `getBBox`, drawing images on a canvas
   (`drawImage`), focus/scrollIntoView. Each is a deliberate addition.
-- **Where SES loads**: the sandbox runtime goes wherever any sandboxed mod *matches*, ignoring excludes and
-  per-site switches (those only stop the mods). A sandboxed mod for every site costs ~8-10 ms on every page
-  load. Could carry the excludes common to all sandboxed mods.
+- **Where SES loads**: the sandbox runtime goes wherever any boxed mod *matches*, ignoring excludes and
+  per-site switches (those only stop the mods). A boxed mod for every site costs ~8-10 ms on every page
+  load. Could carry the excludes common to all boxed mods.
 - **Settings of a deleted mod** stay in `sandboxSettings` (capped per mod); not cleaned up yet.
 - **`trif approve`** doesn't reach the extension's sandbox hold (Safari): Allow is in the panel only, like
   the group switches.
@@ -180,22 +184,24 @@ handler and frame were as they were; the tab stayed on the page and no tab opene
 
 ## New UI text (for Tim's review)
 
+(As built on sandbox-tier, before the names changed; the strings now: docs/TIER-NAMES-STRINGS.md.)
+
 Side panel:
-- Group heading **Sandboxed**, with the line *Run in TRIF's sandbox: they can't send, click or load anything.*
-- Settings → New mods start: a **Sandboxed** row (On / Off, default On).
-- Tag tooltip on a new sandboxed mod that started off: *New sandboxed mods start off (Settings): switch it on
+- Group heading **Boxed mods**, with the line *Run in TRIF's sandbox: they can't send, click or load anything.*
+- Settings → New mods start: a **Boxed mods** row (On / Off, default On).
+- Tag tooltip on a new boxed mod that started off: *New boxed mods start off (Settings): switch it on
   once you've looked at it.* (the existing sentence with the new group name).
-- A sandboxed mod on hold in a browser without the sandbox: head *Waiting for your OK.*; facts *Safari can't
-  run sandboxed mods, so here it would run as a page script, with everything the page has* (then any of
-  *as a page script, it <TRIF's usual fact>*); note *Allow runs this version as a page script, in this browser
+- A boxed mod on hold in a browser without the sandbox: head *Waiting for your OK.*; facts *Safari can't
+  run boxed mods, so here it would run as a free mod, with everything the page has* (then any of
+  *as a free mod, it <TRIF's usual fact>*); note *Allow runs this version as a free mod, in this browser
   only.* Buttons: Allow (on the row), Show code.
 - Errors via the existing "Couldn't switch …" note: *Couldn't switch Sandboxed on/off: …*
 
-CLI and agents (trif status / mods / check / new, help): `registered (sandboxed)`, `registered (sandboxed mod,
-run as a page script: the user allowed it, as this browser has no sandbox)`, `WAITING: <reason>; only the
-user can allow that, in the side panel`, `NO SANDBOX    <browser> can't run sandboxed mods: each waits for
-the user's OK (in the side panel) to run as a page script instead`, `kind: rules (…)` / `kind: sandboxed
-(…)` in trif mods, `sandboxed mods` in GROUPS OFF / NEW MODS, trif check's sandboxed output and lint lines,
+CLI and agents (trif status / mods / check / new, help): `registered (sandboxed)`, `registered (boxed mod,
+run as a free mod: the user allowed it, as this browser has no sandbox)`, `WAITING: <reason>; only the
+user can allow that, in the side panel`, `NO SANDBOX    <browser> can't run boxed mods: each waits for
+the user's OK (in the side panel) to run as a free mod instead`, `kind: rules (…)` / `kind: sandboxed
+(…)` in trif mods, `boxed mods` in GROUPS OFF / NEW MODS, trif check's sandboxed output and lint lines,
 `trif new --sandboxed`, the template's comments, and the mods' own error messages (`TRIF sandbox: …`).
 
 ## Packaging
@@ -229,12 +235,12 @@ make the page (or the user) act. What changed, and what each costs mods:
   forms (unless they name their form with `form=`, which moving doesn't change). Moving them within their
   form, and moving anything else, still works. *Cost*: rearranging a page's form into another form or out
   of it is refused; a mod can't add its own buttons inside a form (put them next to it).
-- **RT-3, clickjacking (medium, tier-wide).** Not changed in code (rules mods can do it with CSS alone).
+- **RT-3, clickjacking (medium, tier-wide).** Not changed in code (style mods can do it with CSS alone).
   Proposal, not built: on the page's own interactive elements (`a`, `button`, `input`, `select`,
   `textarea`, `label`, `summary`, `[role=button]`, `[onclick]`), `style()` refuses `opacity` below ~0.3,
   `visibility: hidden`, `clip-path`, `filter` and `transform`, and refuses `position`, `top/left/right/
   bottom` and `z-index` together with them; `hide()` (display none) stays. That stops "float the real control,
-  invisible, over a decoy" through stand-ins, cheaply; `trif.css` and rules mods can still do it with a
+  invisible, over a decoy" through stand-ins, cheaply; `trif.css` and style mods can still do it with a
   selector, so the honest fix is the wording (below), plus perhaps a later check of the CSS text for
   `opacity: 0`-like values on interactive selectors.
 - **RT-4, keystrokes (low).** `key` and `code` reach a mod only when the key wasn't pressed in something
@@ -251,8 +257,8 @@ make the page (or the user) act. What changed, and what each costs mods:
   `errorTaming: 'safe'`: a mod can't read any error's `stack` (which named TRIF's and SES's files); TRIF's
   runtime reads stacks with SES's `getStackString`, which only its start compartment has, so `trif errors`
   keeps stacks, and line numbers are now the file's own (the mod's source starts on the wrapper's first line,
-  in the sandbox and as a page script; before, they were one line off).
-- **Regression checks**: the red team's PoCs, adapted to run as real sandboxed mods through the extension, are
+  in the sandbox and as a free mod; before, they were one line off).
+- **Regression checks**: the red team's PoCs, adapted to run as real boxed mods through the extension, are
   in the hostile e2e (tests/e2e/fixtures/sandbox-hostile.js "the page's own code as the messenger" and
   "forms"; the test page runs an htmx-like observer that turns `data-auto-post`, `data-hx-post`,
   `data-controller`, a `js-auto-post` class, an `sbxConfig` id, and a page class being taken off into
@@ -293,6 +299,9 @@ make the page (or the user) act. What changed, and what each costs mods:
 
 ### Wording awaiting Tim's OK (not changed in the UI)
 
+(On branch tier-names, draft A and the Rules draft below are in the panel as the Boxed and Style mods
+lines, still awaiting Tim's OK: docs/TIER-NAMES-STRINGS.md.)
+
 The red team is right that "can't … click" overstates it: a mod (sandboxed or rules) can't click, but it can
 arrange the page so the user's own click does something else. Drafts:
 - Sandboxed group line, now *"Run in TRIF's sandbox: they can't send, click or load anything."*:
@@ -301,9 +310,9 @@ arrange the page so the user's own click does something else. Drafts:
 - Rules group line (same issue, RT-3 is tier-wide), now *"Run by TRIF from data: they can't send, click or
   load anything."*: *"Run by TRIF from data: they change how the page looks, and can't send, load or click
   anything themselves."*
-- Proposed CHANGELOG summary bullet (replacing the earlier proposal): *"- **Sandboxed mods:** JavaScript that
-  changes what pages show but can't send or click anything itself, so it never waits for you. Rules,
-  Sandboxed and Page scripts each have a switch per site."*
+- Proposed CHANGELOG summary bullet (replacing the earlier proposal): *"- **Boxed mods:** JavaScript that
+  changes what pages show but can't send or click anything itself, so it never waits for you. Style,
+  Boxed and Free mods each have a switch per site."*
 - The `### More` bullet already on the branch (*"…it can't send, click or load anything, so it never waits
   for your OK"*): *"…it changes what the page shows but can't send, load or click anything itself, so it
   never waits for your OK"*.

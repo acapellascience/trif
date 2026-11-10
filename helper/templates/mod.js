@@ -7,7 +7,7 @@
 // @risk        0 render-only
 // ==/WebMod==
 
-// This file runs in the page itself (same `window` as the site) every time a matching page loads,
+// A free mod: this file runs in the page itself (same `window` as the site) every time a matching page loads,
 // at document-start: before the site's own scripts, and before <head> and <body> exist.
 // Save the file, then `trif reload` to see the change; `trif errors` shows anything it threw.
 // window.trif?.log(...) records messages you can read back with `trif logs`.

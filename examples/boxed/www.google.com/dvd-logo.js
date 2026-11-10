@@ -1,12 +1,12 @@
 // ==WebMod==
-// @name        DVD Logo (sandboxed)
+// @name        DVD Logo (boxed)
 // @description The Google logo bounces like a DVD screensaver
 // @match       https://www.google.com/*
-// @sandboxed
+// @boxed
 // @risk        0 render-only
 // ==/WebMod==
 
-// examples/sites/www.google.com/dvd-logo.js (Tim's), ported to a sandboxed mod (TECHNIQUES.md "Sandboxed
+// examples/sites/www.google.com/dvd-logo.js (Tim's), ported to a boxed mod (TECHNIQUES.md "Boxed
 // mods"). An example, not one TRIF ships. What changed: the bouncing copy is clone() (TRIF's copy keeps
 // only allowed elements and attributes); colours come from hue-rotate only (the original tints a same-site
 // image with a CSS mask, and a mask's url() to the site isn't offered); it bounces on the copy's box (no

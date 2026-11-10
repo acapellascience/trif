@@ -1156,12 +1156,12 @@ class Scenario {
     // (A stand-in Claude Code: only when the helper has the scratch HOME, never your real agent.)
     if (!this.o.agent && !this.o.codex && !this.o.oss && !this.o.guidance) {
       await r.check('an expired login (a stand-in Claude Code): the login notice and one plain line, not the raw error; the message back in the box', () => this.expiredLoginCheck(win));
-      await r.check('a rules mod: TRIF\'s own code applies its CSS, hides, replaces and filters (also what appears later); one that would load from an address is refused, not sent', () => this.rulesModCheck(win));
-      await r.check('groups: "Page scripts" off on a site from the panel stops its page scripts there (rules keep running, other sites\' page scripts untouched); on again, back', () => this.groupsCheck(win));
-      await r.check('sandboxed mods: a hostile one fails at every escape (network, code from strings, inline code, other windows and the page\'s globals, synthetic input, navigation, clipboard, cookies and storage, messages), with nothing reaching the server or the page; a good one restyles, hides, adds, rewrites text, draws, uses timers and settings, and watches; errors and logs reported; the two sample ports work; timing', () => this.sandboxedCheck(win));
-      await r.check('a sandboxed mod as a page script (how a browser without the sandbox runs one the user allowed): the same API works in the page\'s world', () => this.sandboxPageFormCheck(win));
-      await r.check('sandboxed mods in the panel: their own group between Rules and Page scripts, with its switch (off on the site: they stop there; on: back), and "New mods start" has a Sandboxed row', () => this.sandboxedPanelCheck(win));
-      await r.check('Settings → New mods start → Page scripts Off: a new page script arrives off, marked "new", and doesn\'t run; a new rules mod runs; switched on in the panel, it runs; Page scripts On again', () => this.startsOffCheck(win));
+      await r.check('a style mod: TRIF\'s own code applies its CSS, hides, replaces and filters (also what appears later); one that would load from an address is refused, not sent', () => this.rulesModCheck(win));
+      await r.check('groups: "Free mods" off on a site from the panel stops its free mods there (style mods keep running, other sites\' free mods untouched); on again, back', () => this.groupsCheck(win));
+      await r.check('boxed mods: a hostile one fails at every escape (network, code from strings, inline code, other windows and the page\'s globals, synthetic input, navigation, clipboard, cookies and storage, messages), with nothing reaching the server or the page; a good one restyles, hides, adds, rewrites text, draws, uses timers and settings, and watches; errors and logs reported; the two sample ports work; timing', () => this.sandboxedCheck(win));
+      await r.check('a boxed mod as a free mod (how a browser without the sandbox runs one the user allowed): the same API works in the page\'s world', () => this.sandboxPageFormCheck(win));
+      await r.check('boxed mods in the panel: their own group between Style mods and Free mods, with its switch (off on the site: they stop there; on: back), and "New mods start" has a Boxed mods row', () => this.sandboxedPanelCheck(win));
+      await r.check('Settings → New mods start → Free mods Off: a new free mod arrives off, marked "new", and doesn\'t run; a new style mod runs; switched on in the panel, it runs; Free mods On again', () => this.startsOffCheck(win));
       await r.check('a hijacked agent (a stand-in Claude Code): the tab it ran code in sends nothing that changes anything until it reloads, even later; its mod that posts is held by its code, whatever its header says', () => this.hijackedAgentCheck(win));
     }
 
@@ -1897,10 +1897,10 @@ process.exitCode = 1;
 
   // ---- sandboxed mods (extension/sandbox.js; docs/SAFE-MODS.md "Sandboxed: what's built")
 
-  /** The sandboxed mods' files for the test page (tests/e2e/fixtures, examples/sandboxed), by id. */
+  /** The sandboxed mods' files for the test page (tests/e2e/fixtures, examples/boxed), by id. */
   sandboxFiles() {
     const fx = (f) => fs.readFileSync(path.join(I.REPO, 'tests', 'e2e', 'fixtures', f), 'utf8');
-    const sample = (rel) => fs.readFileSync(path.join(I.REPO, 'examples', 'sandboxed', rel), 'utf8').replace(/^\/\/ @match .*$/m, '// @match       *://127.0.0.1/sandbox.html*');
+    const sample = (rel) => fs.readFileSync(path.join(I.REPO, 'examples', 'boxed', rel), 'utf8').replace(/^\/\/ @match .*$/m, '// @match       *://127.0.0.1/sandbox.html*');
     const main = `// ==WebMod==\n// @name E2E sandbox timing, page world\n// @match *://127.0.0.1/sandbox.html*\n// @run-at document-idle\n// ==/WebMod==\n(() => {
   const cells = document.querySelectorAll('.cell');
   const t0 = performance.now(); for (const c of cells) c.style.setProperty('background-color', 'rgb(9, 9, 9)', 'important');
@@ -1931,7 +1931,7 @@ process.exitCode = 1;
       const heldByHelper = boxed.filter((id) => (ext.held || {})[`${site}/${id}`]);
       if (heldByHelper.length) throw new Error(`held by the helper: ${heldByHelper.join(', ')}`);
       if (ext.extension.sandbox === false) return await this.sandboxFallbackCheck(win, files, st);
-      for (const id of boxed) if (!new RegExp(`${id}\\s+registered \\(sandboxed\\)`).test(st)) throw new Error(`trif status: ${st.split('\n').find((l) => l.includes(id))}`);
+      for (const id of boxed) if (!new RegExp(`${id}\\s+registered \\(boxed\\)`).test(st)) throw new Error(`trif status: ${st.split('\n').find((l) => l.includes(id))}`);
       const tabsBefore = await this.ext(`async () => (await chrome.tabs.query({})).length`);
       await this.ext(`async (id, url) => { await chrome.tabs.update(id, { url, active: true }); }`, [win.tabId, `${base}/sandbox.html`]);
       const readPage = async () => JSON.parse((await this.cli(['run', '--tab', String(win.tabId), `(() => {
@@ -2094,7 +2094,7 @@ process.exitCode = 1;
     const site = '127.0.0.1';
     const base = `http://${site}:${this.o.servers.port}`;
     const boxed = Object.keys(files).filter((id) => id !== 'e2e-sbx-main');
-    for (const id of boxed) if (!new RegExp(`${id}\\s+WAITING: ${this.d.name} can't run sandboxed mods`).test(status)) throw new Error(`trif status: ${status.split('\n').find((l) => l.includes(id))}`);
+    for (const id of boxed) if (!new RegExp(`${id}\\s+WAITING: ${this.d.name} can't run boxed mods`).test(status)) throw new Error(`trif status: ${status.split('\n').find((l) => l.includes(id))}`);
     await this.ext(`async (id, url) => { await chrome.tabs.update(id, { url, active: true }); }`, [win.tabId, `${base}/sandbox.html`]);
     await sleep(1500);
     const ran = async () => JSON.parse((await this.cli(['run', '--tab', String(win.tabId), `({ good: document.documentElement.getAttribute('data-trif-sbx-good'), hostile: document.documentElement.getAttribute('data-trif-sbx-hostile'), main: document.documentElement.getAttribute('data-trif-sbx-main-ms') })`], { timeoutMs: 20000 })).stdout);
@@ -2105,12 +2105,12 @@ process.exitCode = 1;
       const li = document.querySelector('li[data-mod="127.0.0.1/e2e-sbx-good"]');
       return li && li.classList.contains('held') ? { group: li.dataset.group, facts: li.querySelector('.mod-facts')?.innerText || '' } : null;
     }`), { timeoutMs: 15000 });
-    if (row.group !== 'page' || !/can't run sandboxed mods, so here it would run as a page script/.test(row.facts)) throw new Error(`the panel row: ${JSON.stringify(row)}`);
+    if (row.group !== 'page' || !/can't run boxed mods, so here it would run as a free mod/.test(row.facts)) throw new Error(`the panel row: ${JSON.stringify(row)}`);
     await this.shot(this.panelCtx, 'panel-sandbox-fallback-held');
     await this.d.click(this.panelCtx, 'li[data-mod="127.0.0.1/e2e-sbx-good"] button.allow');
     const after = await waitFor('the allowed one running as a page script', async () => { const o = await ran(); return o.good ? o : null; }, { timeoutMs: 20000, intervalMs: 500 });
     const st = (await this.cli(['status'], { timeoutMs: 20000 })).stdout;
-    if (!/e2e-sbx-good\s+registered \(sandboxed mod, run as a page script/.test(st)) throw new Error(`trif status after Allow: ${st.split('\n').find((l) => l.includes('e2e-sbx-good'))}`);
+    if (!/e2e-sbx-good\s+registered \(boxed mod, run as a free mod/.test(st)) throw new Error(`trif status after Allow: ${st.split('\n').find((l) => l.includes('e2e-sbx-good'))}`);
     if (!/e2e-sbx-hostile\s+WAITING/.test(st)) throw new Error('the hostile one stopped waiting');
     return { status: 'pass', detail: `${this.d.name} has no sandbox: ${boxed.length} sandboxed mods waited (status WAITING, panel on hold under Page scripts, with the reason); Allow ran the good one as a page script (${JSON.parse(after.good).names.length} names), the others still wait` };
   }
@@ -2158,7 +2158,7 @@ process.exitCode = 1;
     };
     try {
       fs.writeFileSync(file, '// ==WebMod==\n// @name E2E Sandboxed in the panel\n// @match *://127.0.0.1/*\n// @sandboxed\n// ==/WebMod==\npage.root.setAttr(\'data-trif-sbx-panel\', \'ran\');\n');
-      await waitFor('it registered', async () => /e2e-sbx-panel\s+registered \(sandboxed\)/.test((await this.cli(['status'], { timeoutMs: 20000 })).stdout) || null, { timeoutMs: 20000, intervalMs: 500 });
+      await waitFor('it registered', async () => /e2e-sbx-panel\s+registered \(boxed\)/.test((await this.cli(['status'], { timeoutMs: 20000 })).stdout) || null, { timeoutMs: 20000, intervalMs: 500 });
       await this.ext(`async (id, url) => { await chrome.tabs.update(id, { url, active: true }); }`, [win.tabId, `${base}/?e2e=sandboxed-panel`]);
       await waitFor('the sandboxed mod running', async () => (/ran/.test(await look()) ? true : null), { timeoutMs: 15000, intervalMs: 400 });
       const layout = await waitFor('the groups in the panel', () => this.panel(`async () => {
@@ -2170,14 +2170,14 @@ process.exitCode = 1;
           starts: [...document.querySelectorAll('.starts-row')].map((l) => l.querySelector('span').textContent + '=' + l.querySelector('select').value) } : null;
       }`), { timeoutMs: 15000 });
       const order = layout.heads.join(',');
-      if (!/^(rules,)?sandboxed(,page)?$/.test(order) || layout.name !== 'Sandboxed' || layout.note !== 'Run in TRIF\'s sandbox: they can\'t send, click or load anything.' || layout.rowGroup !== 'sandboxed') throw new Error(`the panel: ${JSON.stringify(layout)}`);
+      if (!/^(rules,)?sandboxed(,page)?$/.test(order) || layout.name !== 'Boxed mods' || layout.note !== 'Run in TRIF\'s sandbox: they change what the page shows, and can\'t send, load or click anything themselves.' || layout.rowGroup !== 'sandboxed') throw new Error(`the panel: ${JSON.stringify(layout)}`);
       if (layout.order.indexOf('127.0.0.1/e2e-sbx-panel') < layout.order.indexOf('sandboxed') || (layout.order.includes('page') && layout.order.indexOf('127.0.0.1/e2e-sbx-panel') > layout.order.indexOf('page'))) throw new Error(`not under its heading: ${JSON.stringify(layout.order)}`);
-      if (JSON.stringify(layout.starts) !== JSON.stringify(['Rules=on', 'Sandboxed=on', 'Page scripts=on'])) throw new Error(`New mods start: ${JSON.stringify(layout.starts)}`);
+      if (JSON.stringify(layout.starts) !== JSON.stringify(['Style mods=on', 'Boxed mods=on', 'Free mods=on'])) throw new Error(`New mods start: ${JSON.stringify(layout.starts)}`);
       await this.shot(this.panelCtx, 'panel-sandboxed-group');
       await clickGroup();
       await waitFor('the sandboxed mod gone from the site', async () => (!/ran/.test(await look()) ? true : null), { timeoutMs: 15000, intervalMs: 400 });
       const st = (await this.cli(['status'], { timeoutMs: 20000 })).stdout;
-      if (!/GROUPS OFF\s+sandboxed mods off on 127\.0\.0\.1/.test(st)) throw new Error(`trif status: ${st.split('\n').find((l) => /GROUPS/.test(l)) || '(no GROUPS OFF line)'}`);
+      if (!/GROUPS OFF\s+boxed mods off on 127\.0\.0\.1/.test(st)) throw new Error(`trif status: ${st.split('\n').find((l) => /GROUPS/.test(l)) || '(no GROUPS OFF line)'}`);
       await clickGroup();
       await waitFor('the sandboxed mod back', async () => (/ran/.test(await look()) ? true : null), { timeoutMs: 15000, intervalMs: 400 });
       return `groups ${order}; "${layout.name}: ${layout.note}"; switched off on 127.0.0.1: it stopped (GROUPS OFF says so); on: back; New mods start: ${layout.starts.join(', ')}`;
@@ -2220,7 +2220,7 @@ process.exitCode = 1;
         .filter((x) => JSON.stringify(x.ex.filter((e) => !site127(e))) !== JSON.stringify((before.get(x.id) || []).filter((e) => !site127(e))));
       if (others.length) throw new Error(`other mods changed beyond 127.0.0.1: ${JSON.stringify(others)}`);
       const st = (await this.cli(['status'], { timeoutMs: 20000 })).stdout;
-      if (!/GROUPS OFF\s+page scripts off on 127\.0\.0\.1/.test(st)) throw new Error(`trif status: ${st.split('\n').find((l) => /GROUPS/.test(l)) || '(no GROUPS OFF line)'}`);
+      if (!/GROUPS OFF\s+free mods off on 127\.0\.0\.1/.test(st)) throw new Error(`trif status: ${st.split('\n').find((l) => /GROUPS/.test(l)) || '(no GROUPS OFF line)'}`);
       const greyed = await this.panel(`async () => ({ heading: document.querySelector('li.mod-group[data-group="page"]').classList.contains('off'), row: document.querySelector('li[data-mod="127.0.0.1/e2e-banner"]').classList.contains('group-off'), rules: document.querySelector('li[data-mod="127.0.0.1/e2e-group-rules"]').classList.contains('group-off') })`);
       if (!greyed.heading || !greyed.row || greyed.rules) throw new Error(`the panel: ${JSON.stringify(greyed)}`);
       await this.shot(this.panelCtx, 'panel-groups-page-off');
@@ -2268,12 +2268,12 @@ process.exitCode = 1;
         const out = (await this.cli(['status'], { timeoutMs: 20000 })).stdout;
         return /e2e-new-page\s+off \(new: waiting for the user to look at it\)/.test(out) && /e2e-new-rules\s+registered/.test(out) ? out : null;
       }, { timeoutMs: 20000, intervalMs: 500 });
-      if (!/^NEW MODS {6}new page scripts start off in this browser/m.test(st)) throw new Error(`trif status: ${st.split('\n').find((l) => /NEW MODS/.test(l)) || '(no NEW MODS line)'}`);
+      if (!/^NEW MODS {6}new free mods start off in this browser/m.test(st)) throw new Error(`trif status: ${st.split('\n').find((l) => /NEW MODS/.test(l)) || '(no NEW MODS line)'}`);
       await this.ext(`async (id, url) => { await chrome.tabs.update(id, { url, active: true }); }`, [win.tabId, `${base}/?e2e=starts-off`]);
       const off = await waitFor('the rules mod running, not the page script', async () => { const x = await look(); return x.color === 'rgb(7, 8, 9)' ? x : null; }, { timeoutMs: 15000, intervalMs: 400 });
       if (off.ran) throw new Error('the new page script ran');
       const row = await waitFor('its row marked new', () => this.panel(`async () => { const li = document.querySelector('li[data-mod="127.0.0.1/e2e-new-page"]'); const t = li && li.querySelector('.tag'); return t && !t.hidden && t.textContent === 'new' ? { tag: t.textContent, title: t.title, off: li.classList.contains('off') } : null; }`), { timeoutMs: 10000 });
-      if (!row.off || row.title !== 'New page scripts start off (Settings): switch it on once you\'ve looked at it.') throw new Error(`the row: ${JSON.stringify(row)}`);
+      if (!row.off || row.title !== 'New free mods start off (Settings): switch it on once you\'ve looked at it.') throw new Error(`the row: ${JSON.stringify(row)}`);
       await this.shot(this.panelCtx, 'panel-new-mod-off');
       // The user switches it on in the panel: it runs, and it's no longer "new".
       await this.d.click(this.panelCtx, 'li[data-mod="127.0.0.1/e2e-new-page"] button.switch');

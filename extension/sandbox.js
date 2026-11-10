@@ -516,7 +516,7 @@ export function sandboxRuntime(mode, pageModId, pageFn) {
   // the same object for every mod, so which mod listens is the one whose code is running (`current`).
   // (code after an await runs outside both: then the mod is the one in the call stack, by its sourceURL)
   const modFromStack = () => { const m = /trif-sandbox:\/\/([^\s/]+\/[^\s/:)]+?)\.js/.exec(String(stackOf(new Error()) || '')); return m ? m[1] : null; };
-  const cur = () => current || apiFor(modFromStack() || '(a sandboxed mod)');
+  const cur = () => current || apiFor(modFromStack() || '(a boxed mod)');
   // (each method guarded: a browser error reaches the mod as plain text)
   const guardShared = (fn) => function (...args) {
     try { return fn.apply(this, args); } catch (e) {

@@ -114,8 +114,35 @@ Good to know:
 - Errors are caught and shown by `trif errors`, as for free mods.
 - The sandbox refuses source with `import(` or an HTML comment marker in it, even inside a string or a
   comment; `trif check` points them out.
-- Where it isn't enough (an API it doesn't offer), say so and write a free mod; don't contort the mod.
+- Where it isn't enough, see if a power covers it (below); if none does, say so and write a free mod; don't
+  contort the mod.
   Examples: examples/boxed in TRIF's folder (Simple Shopping, DVD Logo).
+
+### Powers: what a boxed mod can ask for
+
+A boxed mod that needs one exception asks for it in its header, `// @powers sound, read-drafts`, from this
+menu. TRIF holds the mod until the user approves that set of powers, once (an update that asks for nothing
+new doesn't ask again; one that adds a power waits for it), and gives it those and nothing more. No power
+sends anything, so ask only for what the mod needs; a mod that needs the network is a free mod.
+
+- `sound`: `trif.audio()`: `tone({frequency, duration, volume, type, at})`, `play(dataUrl, {volume})`,
+  and nodes for your own graph: `oscillator({type, frequency})`, `gain(v)`, `filter({type, frequency, Q})`,
+  `delay(s)`, `panner(p)`, `noise(s)`, `sound(dataUrl)`; each has `connect(node | 'out')`, `start(at)`,
+  `stop(at)`, `param(name).set/ramp/expRamp/target`; `now`, `state`, `resume()`. Sounds only from
+  `data:audio/…;base64` (embed them); no addresses, no microphone. The browser starts sound after the user
+  clicks or types on the page; TRIF resumes it then.
+- `controls`: your own `page.create('input' | 'select' | 'option')` (and `label`): inputs of type `range`,
+  `color`, `checkbox`, `number` or `text`, with `min`/`max`/`step`/`value`/`placeholder`; read them with
+  `.value` / `.checked`, set with `setValue` / `setChecked`, listen with `on('input')`. Never a password box,
+  never `autocomplete` or `name`, never inside one of the page's forms. Doesn't make the mod wait on its
+  own.
+- `keys`: `key` and `code` on key events wherever the focus is, except in fields and editors (hotkeys on a
+  focused post).
+- `read-drafts`: what the user types: `.value` of the page's text fields, textareas and selects, `.text` of
+  editors, `data` on `input` events, and keys in fields. Password and card fields stay hidden, always.
+
+The rest of the menu (`site-data`, `page-data`, `search-box`, `media`, `go-to`, `click`, `write-drafts`,
+`mods`) isn't in this version yet: `trif check` says so.
 
 ## Writing mods TRIF can read
 

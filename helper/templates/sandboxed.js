@@ -4,6 +4,7 @@
 // @match       *://{{site}}/*
 // @match       *://*.{{site}}/*
 // @boxed
+// (if it needs an exception, ask for it: // @powers sound, controls, keys or read-drafts; see "Powers" in TECHNIQUES.md)
 // @risk        0 render-only
 // ==/WebMod==
 

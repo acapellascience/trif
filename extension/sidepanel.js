@@ -735,7 +735,7 @@ function renderMods() {
   const rows = new Map();
   for (const m of mods) {
     const key = JSON.stringify([site, m.name, m.description || '', m.file, m.held ?? null, m.pending ?? null, m.review ?? null, m.risk?.tier ?? null, m.risk?.why ?? null, m.matches,
-      m.source ?? null, m.version ?? null, m.update ?? null]);
+      m.source ?? null, m.version ?? null, m.update ?? null, m.powers ?? null]);
     const old = view.modRows.get(m.id);
     rows.set(m.id, old && old.key === key ? old : { key, li: modItem(m) });
   }
@@ -1098,7 +1098,9 @@ function modItem(m) {
   const main = el('div', 'mod-main');
   // What the mod does, from its header's @description, under the name.
   const desc = m.description ? el('div', 'mod-desc', m.description) : null;
-  main.append(light, name, ...(desc ? [desc] : []));
+  // A boxed mod's powers (docs/POWERS.md), on its row
+  const powers = Array.isArray(m.powers) && m.powers.length ? el('div', 'mod-powers', `Powers: ${m.powers.join(', ')}`) : null;
+  main.append(light, name, ...(desc ? [desc] : []), ...(powers ? [powers] : []));
   const row = el('div', 'mod-row');
   if (m.held) {
     // Written by an agent run here, and it can do something the user hasn't allowed (what TRIF read in
@@ -1139,12 +1141,13 @@ function modItem(m) {
 // Review (a mod the user has, still running): "Looks right" allows what was found; or switch it off.
 function factsBox(m, info, kind) {
   const box = el('div', `mod-facts ${kind}`);
-  box.append(el('p', 'facts-head', kind === 'held' && info.by === 'sandbox' ? 'Waiting for your OK.'
+  box.append(el('p', 'facts-head', kind === 'held' && info.asks ? 'Waiting for your OK. This boxed mod asks for these powers, and TRIF holds it to them:'
+    : kind === 'held' && info.by === 'sandbox' ? 'Waiting for your OK.'
     : kind === 'held' ? 'Waiting for your OK. TRIF found that this mod:'
     : kind === 'pending' ? 'A change to this mod is waiting for your OK. TRIF found that the new version:'
       : 'TRIF found that this mod:'));
   const list = el('ul', 'facts');
-  for (const f of (Array.isArray(info.facts) ? info.facts : [String(info.reason || '')]).filter(Boolean)) list.append(el('li', null, f));
+  for (const f of (Array.isArray(info.facts) ? info.facts : [String(info.reason || '')]).filter(Boolean)) list.append(el('li', null, info.asks ? `It ${f}.` : f));
   box.append(list);
   const where = m.matches && m.matches.length ? ` It runs by itself on every page it's for (${m.matches.slice(0, 3).join(', ')}${m.matches.length > 3 ? '…' : ''}).` : '';
   const fromAgent = kind !== 'review' && info.by !== 'outside' && info.by !== 'sandbox';
@@ -1152,7 +1155,7 @@ function factsBox(m, info, kind) {
   const who = info.by === 'sandbox' ? 'Allow runs this version as a free mod, in this browser only.'
     : fromAgent ? `An agent ${kind === 'pending' ? 'changed' : 'wrote'} it in your chat on ${info.site || view.site}.` : 'It\'s new or changed since TRIF last let it run.';
   box.append(el('p', 'facts-note', `${kind === 'review' ? 'It keeps running until you switch it off.'
-    : kind === 'pending' ? `${who} The version before keeps running until you decide.` : who}${where}`));
+    : kind === 'pending' ? `${who} The version before keeps running until you decide.` : who}${where}${info.asks ? ' Allow is for these powers: a new version that asks for nothing more runs without asking again.' : ''}`));
   if (info.claim) {
     const claim = el('p', 'facts-claim');
     claim.append(el('span', 'facts-who', fromAgent ? 'The agent says: ' : 'The mod says: '), document.createTextNode(`“${info.claim}”`));

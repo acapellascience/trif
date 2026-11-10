@@ -270,3 +270,26 @@ response (3,000 items) took 1.3 ms (Chrome) and about 1 ms (Firefox, 1 ms timer)
 parse and stringify included. Not tried: the wrapping itself (fetch's `Response`, XHR's getters, as Detox
 Timeline does), X's real responses, and streamed ones (NDJSON, server-sent events), which a text read would
 hold open: those would be left alone.
+
+## Powers (branch powers): named exceptions for boxed mods
+
+Design: docs/POWERS.md. A boxed mod may ask for powers from a fixed menu (`// @powers sound, read-drafts`);
+none of them sends anything. The helper reads them from the header (helper/lib/boxpowers.js), holds the mod
+until the user approves that *set* (held.js keys `power:<name>`: an update with the same powers runs, a new
+power waits for itself; `controls` and `mods` are listed but never hold alone), and passes the set to the
+extension with the mod; the sandbox (extension/sandbox.js) gives each mod what its set grants and refuses
+the rest. Built so far (phase 1):
+- `sound`: `trif.audio()`, TRIF's facade over Web Audio (oscillators, gains, filters, delays, panners,
+  noise, sounds decoded from `data:audio/…;base64`): no address, no microphone, no worklet, no page media;
+  browser errors reach the mod as plain TypeErrors.
+- `controls`: the mod's own `input` (range, color, checkbox, number, text; autocomplete off, set by TRIF),
+  `select`, `option`, `label`; no type=password, `autocomplete` or `name`; never inside one of the page's
+  forms; `.value`/`setValue`, `.checked`/`setChecked` on its own only.
+- `keys`: key and code wherever the focus is, except in fields and editors (accepting that a field in a
+  closed shadow root can't be told apart).
+- `read-drafts`: `.value` of the page's text fields, textareas and selects (not hidden, file or button
+  inputs), `.text` of editors and attributes inside them, `data` on input events, keys in fields; password
+  and card fields (`type=password`, `autocomplete` cc-*, current-password, new-password, one-time-code)
+  never.
+Each is tested both ways in the e2e (tests/e2e/scenario.js powersCheck): it works when declared, and is
+refused (or empty) when not.

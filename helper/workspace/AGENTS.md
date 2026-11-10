@@ -331,7 +331,9 @@ the site (`trif tabs`; `trif open <url>` if none) and look:
    filter, as data TRIF's own code runs.
 2. **A boxed mod** (`trif new <site> <mod> --boxed`): JavaScript in TRIF's sandbox, with only
    TRIF's API (elements as stand-ins, `trif.css`/`hide`/`observe`/`text`/`settings`, timers, canvas):
-   for what a style mod can't express, like logic, new elements, animation or drawing.
+   for what a style mod can't express, like logic, new elements, animation or drawing. If it needs one
+   exception (sound, its own sliders, hotkeys, reading what the user types), it asks for that **power**
+   (`// @powers sound`, see "Powers" in TECHNIQUES.md): the user approves the set once.
 3. **A free mod** (`trif new <site> <mod>`): only when it needs the page itself: filtering the data
    the site loads, reading the app's state, patching its code, or acting for the user.
 

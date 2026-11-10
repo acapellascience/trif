@@ -1,0 +1,126 @@
+'use strict';
+// Powers for boxed mods (docs/POWERS.md), the helper's side: the header, the menu, the hold on the set of
+// powers (not the code), trif check / trif mods. What each power gives is tested in the browsers
+// (tests/e2e/scenario.js powersCheck), its registration in tests/extension.test.js.
+
+const test = require('node:test');
+const assert = require('node:assert');
+const fs = require('fs');
+const path = require('path');
+const { buildMod, scanMods } = require('../helper/lib/mods');
+const { updateHeld, approveHeld, reviewItems } = require('../helper/lib/held');
+const bp = require('../helper/lib/boxpowers');
+const { sandboxLint } = require('../helper/lib/sandboxlint');
+const { runCli, writeMod, tempDir } = require('./fake-extension');
+
+const head = (powers, extra = '') => `// ==WebMod==\n// @name Beeper\n// @match https://x.com/*\n// @boxed\n${powers ? `// @powers ${powers}\n` : ''}${extra}// ==/WebMod==\n`;
+const build = (code) => buildMod({ site: 'x.com', file: '/w/sites/x.com/beeper.js', code });
+
+test('@powers: from the menu, in the menu\'s order, boxed mods only; not on the menu or not built yet: an error', () => {
+  assert.deepEqual(build(head('sound, read-drafts')).mod.powers, ['read-drafts', 'sound']);
+  assert.deepEqual(build(head('keys', '// @powers controls\n')).mod.powers, ['keys', 'controls']);
+  assert.equal(build(head('')).mod.powers, undefined);
+  assert.throws(() => build(head('fetch')), /"fetch" isn't a power/);
+  assert.throws(() => build(head('site-data')), /isn't in this version of TRIF yet/);
+  assert.throws(() => buildMod({ site: 'x.com', file: '/w/a.js', code: '// ==WebMod==\n// @name A\n// @powers sound\n// ==/WebMod==\n' }), /powers \(@powers\) are for boxed mods/);
+  // (the scanner reports it, not sent)
+  const home = tempDir('trif-pw-');
+  const dir = path.join(home, 'sites', 'x.com');
+  fs.mkdirSync(dir, { recursive: true });
+  fs.writeFileSync(path.join(dir, 'bad.js'), head('microphone'));
+  const { problems } = scanMods(path.join(home, 'sites'));
+  assert.match(problems[0].error, /"microphone" isn't a power/);
+});
+
+test('the hold: a boxed mod with powers waits once for its set; the same powers in a new version don\'t ask again; a new power does', () => {
+  const home = tempDir('trif-pw-');
+  const ws = { home, modsDir: path.join(home, 'sites') };
+  const dir = path.join(ws.modsDir, 'x.com');
+  fs.mkdirSync(dir, { recursive: true });
+  updateHeld(ws, [], []); // (first sync: nothing yet)
+  const file = path.join(dir, 'beeper.js');
+  const scan = () => scanMods(ws.modsDir).mods;
+  // no powers: never held
+  fs.writeFileSync(file, head('') + 'trif.hide("a");\n');
+  assert.deepEqual(updateHeld(ws, scan(), []), {});
+  // sound and read-drafts: held, with the two sentences
+  fs.writeFileSync(file, head('sound, read-drafts') + 'trif.audio().tone({});\n');
+  let held = updateHeld(ws, scan(), []);
+  assert.deepEqual(held['x.com/beeper'].needs, ['power:read-drafts', 'power:sound']);
+  assert.deepEqual(held['x.com/beeper'].facts, ['can read what you type on this site, but can\'t send it anywhere', 'can play sounds']);
+  approveHeld(home, 'x.com/beeper');
+  assert.deepEqual(updateHeld(ws, scan(), []), {});
+  // a new version of its code, the same powers: runs
+  fs.writeFileSync(file, head('read-drafts, sound') + 'trif.audio().tone({ frequency: 880 });\nconsole.log("changed");\n');
+  assert.deepEqual(updateHeld(ws, scan(), []), {});
+  // a new power: held for that one only
+  fs.writeFileSync(file, head('read-drafts, sound, keys') + 'trif.audio().tone({});\n');
+  held = updateHeld(ws, scan(), []);
+  assert.deepEqual(held['x.com/beeper'].needs, ['power:keys']);
+  approveHeld(home, 'x.com/beeper');
+  assert.deepEqual(updateHeld(ws, scan(), []), {});
+});
+
+test('controls don\'t hold on their own, but are listed when something else holds', () => {
+  const home = tempDir('trif-pw-');
+  const ws = { home, modsDir: path.join(home, 'sites') };
+  const dir = path.join(ws.modsDir, 'x.com');
+  fs.mkdirSync(dir, { recursive: true });
+  updateHeld(ws, [], []);
+  const file = path.join(dir, 'tuner.js');
+  fs.writeFileSync(file, head('controls') + 'page.create("input");\n');
+  assert.deepEqual(updateHeld(ws, scanMods(ws.modsDir).mods, []), {});
+  fs.writeFileSync(file, head('controls, sound') + 'page.create("input");\n');
+  const held = updateHeld(ws, scanMods(ws.modsDir).mods, []);
+  assert.deepEqual(held['x.com/tuner'].facts, ['can play sounds', 'can add its own controls (sliders, pickers)']);
+  // (a mod the user had before: listed to review, unless it's controls alone)
+  const mods = [build(head('controls')).mod, { ...build(head('keys')).mod, id: 'x.com/keys' }];
+  const review = reviewItems(home, mods, {});
+  assert.deepEqual(Object.keys(review), ['x.com/keys']);
+});
+
+test('the hold sentences name the site; the menu has twelve powers', () => {
+  assert.equal(bp.NAMES.length, 12);
+  assert.deepEqual(bp.powerNeeds({ site: 'x.com', powers: ['sound'] }), [{ key: 'power:sound', fact: 'can play sounds', power: 'sound', soft: false, lines: [] }]);
+  assert.match(bp.MENU['site-data'].hold('x.com'), /what x\.com sends this page/);
+  assert.match(bp.MENU['search-box'].hold(bp.siteOf({ site: 'all-sites' })), /the sites it runs on/);
+});
+
+test('trif check: a boxed mod\'s powers and what its hold says; an unknown one is an error; the lint knows what powers give', async () => {
+  const home = tempDir();
+  const f = writeMod(home, 'x.com', 'beeper.js', head('sound') + 'trif.audio().tone({});\n');
+  let r = await runCli(['check', f], { home });
+  assert.equal(r.code, 0, r.stderr);
+  assert.match(r.stdout, /with these powers, and only these \(TRIF enforces them\): sound\./);
+  assert.match(r.stdout, /waits for the user's OK once for this set of powers/);
+  assert.match(r.stdout, /^- it can play sounds$/m);
+  r = await runCli(['check', f, '--json'], { home });
+  assert.deepEqual(JSON.parse(r.stdout).powers, [{ key: 'power:sound', power: 'sound', fact: 'can play sounds', holds: true }]);
+  const c = writeMod(home, 'x.com', 'tuner.js', head('controls') + 'page.create("input");\n');
+  r = await runCli(['check', c], { home });
+  assert.match(r.stdout, /don't make it wait for the user's OK on their own/);
+  const bad = writeMod(home, 'x.com', 'bad.js', head('network'));
+  r = await runCli(['check', bad], { home });
+  assert.equal(r.code, 1);
+  assert.match(r.stdout, /"network" isn't a power/);
+  const undeclared = writeMod(home, 'x.com', 'quiet.js', head('') + 'trif.audio().tone({});\npage.create("select");\n');
+  r = await runCli(['check', undeclared], { home });
+  assert.match(r.stdout, /- trif\.audio: needs the sound power/);
+  assert.match(r.stdout, /- create\('select'\): needs the controls power/);
+  assert.deepEqual(sandboxLint('trif.audio()', { powers: ['sound'] }), []);
+});
+
+test('trif mods: a boxed mod with powers says so', async () => {
+  const home = tempDir();
+  writeMod(home, 'x.com', 'beeper.js', head('sound, keys') + 'trif.audio();\n');
+  const r = await runCli(['mods'], { home });
+  assert.match(r.stdout, /kind: boxed mod with powers: keys, sound \(runs in TRIF's sandbox, with only TRIF's API and those powers; waits for the user's OK once for that set\)/);
+});
+
+test('registration: a boxed mod\'s powers go with its code, from the header the helper read', async () => {
+  const lib = await import('../extension/lib.js');
+  const s = lib.modToUserScript({ id: 'x.com/beeper', matches: ['*://x.com/*'], sandboxed: true, powers: ['sound'], code: '// @powers keys\ntrif.audio();' });
+  assert.match(s.js[0].code, /__trifSandbox\.run\("x\.com\/beeper", ".*", \["sound"\]\)/);
+  const p = lib.modToUserScript({ id: 'x.com/beeper', matches: ['*://x.com/*'], sandboxed: true, unsandboxed: true, powers: ['sound'], code: 'x' });
+  assert.match(p.js[0].code, /\('page', "x\.com\/beeper", __trifMod, \["sound"\]\); \}\)\(\);/);
+});

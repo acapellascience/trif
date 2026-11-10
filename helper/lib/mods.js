@@ -35,7 +35,7 @@ function isIgnoredName(name) {
 // Parse the `// ==WebMod==` block. Returns raw header values plus warnings; defaults are applied
 // by buildMod because they depend on the folder and file name.
 function parseHeader(code) {
-  const out = { hasHeader: false, name: null, description: null, matches: [], excludes: [], runAt: null, risk: null, source: null, version: null, rules: false, sandboxed: false, warnings: [] };
+  const out = { hasHeader: false, name: null, description: null, matches: [], excludes: [], runAt: null, risk: null, source: null, version: null, rules: false, sandboxed: false, powers: [], warnings: [] };
   const lines = String(code).replace(/^﻿/, '').split(/\r?\n/);
   const start = lines.findIndex((l) => HEADER_START.test(l));
   if (start === -1) return out;
@@ -95,6 +95,11 @@ function parseHeader(code) {
       case 'boxed':
       case 'sandboxed':
         out.sandboxed = true;
+        break;
+      // `@powers sound, read-drafts`: what a boxed mod asks for beyond the sandbox (lib/boxpowers.js); raw
+      // here, checked by buildMod
+      case 'powers':
+        if (value) out.powers.push(value);
         break;
       case 'run-at': {
         const mapped = RUN_AT[value.toLowerCase()];
@@ -160,7 +165,12 @@ function buildMod({ site, file, code }) {
   // `@boxed`, keeps its hash: what was allowed for it, and whether it waits, stay as they were.)
   const hash = sha1(JSON.stringify([meta.id, meta.name, meta.description, meta.matches, meta.excludes, meta.runAt, meta.risk, header.rules, ...(header.sandboxed ? ['sandboxed'] : [])]) + '\n' + oldSpelling(code));
   if (header.rules && header.sandboxed) throw new Error('a mod is either a style mod (@style) or a boxed mod (@boxed), not both');
-  if (header.sandboxed) return { mod: { ...meta, sandboxed: true, code, hash }, warnings: header.warnings };
+  if (header.powers.length && !header.sandboxed) throw new Error('powers (@powers) are for boxed mods (@boxed): a free mod has every power the page has, and a style mod none');
+  if (header.sandboxed) {
+    // (its powers, checked against the menu: throws a PowersError for the scanner to report)
+    const powers = require('./boxpowers').parsePowers(header.powers);
+    return { mod: { ...meta, sandboxed: true, ...(powers.length ? { powers } : {}), code, hash }, warnings: header.warnings };
+  }
   if (header.rules) {
     // (what runs is TRIF's code with the checked rules; throws a RulesError for the scanner to report)
     const rules = require('./rules');

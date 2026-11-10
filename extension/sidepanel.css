@@ -575,3 +575,4 @@ h3.mod-name { margin: 0; font-size: inherit; line-height: inherit; }
 .mod-group-note { margin: 0 0 2px; font-size: 11px; color: var(--muted); }
 .mod-list li.group-off { opacity: .45; }
 .mod-list li.mod-group.off .mod-group-name { text-decoration: line-through; }
+.mod-powers { font-size: 11px; color: var(--muted); }

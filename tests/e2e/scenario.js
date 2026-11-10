@@ -1160,6 +1160,7 @@ class Scenario {
       await r.check('groups: "Free mods" off on a site from the panel stops its free mods there (style mods keep running, other sites\' free mods untouched); on again, back', () => this.groupsCheck(win));
       await r.check('boxed mods: a hostile one fails at every escape (network, code from strings, inline code, other windows and the page\'s globals, synthetic input, navigation, clipboard, cookies and storage, messages), with nothing reaching the server or the page; a good one restyles, hides, adds, rewrites text, draws, uses timers and settings, and watches; errors and logs reported; the two sample ports work; timing', () => this.sandboxedCheck(win));
       await r.check('a boxed mod as a free mod (how a browser without the sandbox runs one the user allowed): the same API works in the page\'s world', () => this.sandboxPageFormCheck(win));
+      await r.check('powers (docs/POWERS.md): a boxed mod with powers waits for the user\'s OK for its set (panel and trif status say what it asks for); allowed, sound, controls, read-drafts and keys work and stay narrow; undeclared, each is refused; a new version with the same powers runs, one with a new power waits for that one', () => this.powersCheck(win));
       await r.check('boxed mods in the panel: their own group between Style mods and Free mods, with its switch (off on the site: they stop there; on: back), and "New mods start" has a Boxed mods row', () => this.sandboxedPanelCheck(win));
       await r.check('Settings → New mods start → Free mods Off: a new free mod arrives off, marked "new", and doesn\'t run; a new style mod runs; switched on in the panel, it runs; Free mods On again', () => this.startsOffCheck(win));
       await r.check('a hijacked agent (a stand-in Claude Code): the tab it ran code in sends nothing that changes anything until it reloads, even later; its mod that posts is held by its code, whatever its header says', () => this.hijackedAgentCheck(win));
@@ -2144,6 +2145,93 @@ process.exitCode = 1;
     return 'restyle, hide, add, text, observe (later), timers, frames, image copy, settings (in the page\'s storage, as a page script): all work in the page\'s world';
   }
 
+  async powersCheck(win) {
+    const site = '127.0.0.1';
+    const base = `http://${site}:${this.o.servers.port}`;
+    const dir = path.join(this.trif, 'sites', site);
+    const fx = (f) => fs.readFileSync(path.join(I.REPO, 'tests', 'e2e', 'fixtures', f), 'utf8');
+    // (a tiny sound: 80 samples of 8-bit mono PCM, as a data: URL)
+    const pcm = Buffer.alloc(80, 128);
+    const hdr = Buffer.alloc(44);
+    hdr.write('RIFF', 0); hdr.writeUInt32LE(36 + pcm.length, 4); hdr.write('WAVEfmt ', 8); hdr.writeUInt32LE(16, 16); hdr.writeUInt16LE(1, 20); hdr.writeUInt16LE(1, 22);
+    hdr.writeUInt32LE(8000, 24); hdr.writeUInt32LE(8000, 28); hdr.writeUInt16LE(1, 32); hdr.writeUInt16LE(8, 34); hdr.write('data', 36); hdr.writeUInt32LE(pcm.length, 40);
+    const wav = `data:audio/wav;base64,${Buffer.concat([hdr, pcm]).toString('base64')}`;
+    const allFile = path.join(dir, 'e2e-pw-all.js'), noneFile = path.join(dir, 'e2e-pw-none.js');
+    const all = fx('powers-all.js').replace('__WAV__', wav);
+    const status = async () => (await this.cli(['status'], { timeoutMs: 20000 })).stdout;
+    const line = (st, id) => st.split('\n').find((l) => l.includes(id)) || '';
+    const read = async () => JSON.parse((await this.cli(['run', '--tab', String(win.tabId), `(() => { const d = document.documentElement; return {
+      all: d.getAttribute('data-trif-pw-all'), none: d.getAttribute('data-trif-pw-none'), keys: d.getAttribute('data-trif-pw-keys'), typed: d.getAttribute('data-trif-pw-typed'),
+      box: document.getElementById('trif-pw-box') ? document.getElementById('trif-pw-box').innerHTML.length : 0, formInputs: document.querySelectorAll('#f input').length }; })()`], { timeoutMs: 20000 })).stdout);
+    const typeKeys = async () => {
+      const ctx = await this.d.findPage((u) => u.includes('/sandbox.html'), { timeoutMs: 5000 });
+      for (const [sel, k] of [['#pw', 'h'], ['#fi', 'k'], ['#shost', 'x'], ['#title', 'q']]) { await this.d.click(ctx, sel); await this.d.key(ctx, k); }
+      await sleep(500);
+    };
+    const problems = [];
+    this.sandboxPage = true;
+    try {
+      fs.writeFileSync(noneFile, fx('powers-none.js'));
+      fs.writeFileSync(allFile, all);
+      // held, for its set of powers, with what it asks for
+      const held = await waitFor('the mod with powers held', async () => { const st = await status(); return /e2e-pw-all\s+HELD/.test(st) && /e2e-pw-none\s+registered \(boxed\)/.test(st) ? st : null; }, { timeoutMs: 25000, intervalMs: 500 });
+      const heldLine = line(held, 'e2e-pw-all');
+      if (!heldLine.includes('HELD: it can read what you type on this site, but can\'t send it anywhere; it can play sounds; it can add its own controls (sliders, pickers)')) problems.push(`trif status: ${heldLine}`);
+      await this.ext(`async (id, url) => { await chrome.tabs.update(id, { url, active: true }); }`, [win.tabId, `${base}/sandbox.html`]);
+      const row = await waitFor('the panel\'s hold', () => this.panel(`async () => {
+        const li = document.querySelector('li[data-mod="127.0.0.1/e2e-pw-all"]');
+        return li && li.classList.contains('held') ? { head: li.querySelector('.facts-head')?.textContent, items: [...li.querySelectorAll('.facts li')].map((x) => x.textContent),
+          powers: li.querySelector('.mod-powers')?.textContent, note: li.querySelector('.facts-note')?.textContent, group: li.dataset.group } : null;
+      }`), { timeoutMs: 15000 });
+      if (row.head !== 'Waiting for your OK. This boxed mod asks for these powers, and TRIF holds it to them:'
+        || JSON.stringify(row.items) !== JSON.stringify(['It can read what you type on this site, but can\'t send it anywhere.', 'It can play sounds.', 'It can add its own controls (sliders, pickers).'])
+        || row.powers !== 'Powers: read-drafts, sound, controls' || !/Allow is for these powers: a new version that asks for nothing more runs without asking again\./.test(row.note || '') || row.group !== 'sandboxed') problems.push(`the panel's hold: ${JSON.stringify(row)}`);
+      await this.shot(this.panelCtx, 'panel-powers-held');
+      await this.d.click(this.panelCtx, 'li[data-mod="127.0.0.1/e2e-pw-all"] button.allow');
+      await waitFor('allowed, registered with its powers', async () => /e2e-pw-all\s+registered \(boxed, powers: read-drafts, sound, controls\)/.test(await status()) || null, { timeoutMs: 20000, intervalMs: 500 });
+      await this.cli(['reload', '--tab', String(win.tabId)], { timeoutMs: 30000 });
+      let last = null;
+      const got = await waitFor('the powers\' results', async () => { const o = last = await read(); return o.all && o.none && !/pending/.test(o.all) ? o : null; }, { timeoutMs: 15000, intervalMs: 400 })
+        .catch((e) => { throw new Error(`${e.message}: ${JSON.stringify(last)}`); });
+      const A = JSON.parse(got.all), N = JSON.parse(got.none);
+      for (const [k, v] of Object.entries(N)) if (!/^(refused|absent)/.test(v)) problems.push(`UNDECLARED ${k}: ${v}`);
+      for (const [k, v] of Object.entries(A)) {
+        const want = /\(refused\)$/.test(k) ? /^refused/ : /^ok/;
+        if (!want.test(v)) problems.push(`DECLARED ${k}: ${v}`);
+      }
+      const exact = { 'controls: a slider': 'ok: 7', 'controls: its type': 'ok: text/off', 'controls: a select': 'ok: b', 'controls: a checkbox': 'ok: true', 'read-drafts: a field\'s value': 'ok: v', 'sound: a data: sound': 'ok: true' };
+      for (const [k, v] of Object.entries(exact)) if (A[k] !== v) problems.push(`${k}: ${A[k]}`);
+      if (!/secret draft/.test(A['read-drafts: an editor\'s text'] || '')) problems.push(`the editor's text: ${A['read-drafts: an editor\'s text']}`);
+      if (got.formInputs !== 2) problems.push(`the page's form has ${got.formInputs} inputs (a mod's control got in)`);
+      await typeKeys();
+      const k1 = (await read()).keys || '';
+      // (read-drafts: keys in a field, not a password; without keys, none on what could hide a field)
+      if (!/^null@pw,k@fi,null@shost,q@/.test(k1)) problems.push(`keys with read-drafts: ${k1}`);
+      // a new version, the same powers: runs without asking
+      fs.writeFileSync(allFile, all + '\n// a new version, the same powers\n');
+      await waitFor('the new version running', async () => { const st = await status(); return /e2e-pw-all\s+registered \(boxed, powers/.test(st) && !/e2e-pw-all\s+(HELD|CHANGE WAITING)/.test(st) ? st : null; }, { timeoutMs: 20000, intervalMs: 500 });
+      // a new power (keys): waits for that one only
+      fs.writeFileSync(allFile, all.replace('// @powers      sound, controls, read-drafts', '// @powers      sound, controls, read-drafts, keys'));
+      const held2 = await waitFor('held for the new power', async () => { const st = await status(); return /e2e-pw-all\s+CHANGE WAITING/.test(st) ? st : null; }, { timeoutMs: 20000, intervalMs: 500 });
+      if (!/CHANGE WAITING \(the version before runs meanwhile\): it can see the keys you press \(not in text fields\), so it can have shortcuts \(trif approve/.test(line(held2, 'e2e-pw-all'))) problems.push(`trif status for the new power: ${line(held2, 'e2e-pw-all')}`);
+      await this.cli(['approve', '127.0.0.1/e2e-pw-all'], { timeoutMs: 20000 });
+      await waitFor('keys allowed', async () => /e2e-pw-all\s+registered \(boxed, powers: read-drafts, keys, sound, controls\)/.test(await status()) || null, { timeoutMs: 20000, intervalMs: 500 });
+      await this.cli(['reload', '--tab', String(win.tabId)], { timeoutMs: 30000 });
+      await waitFor('reloaded', async () => { const o = await read(); return o.all && !/pending/.test(o.all) ? o : null; }, { timeoutMs: 15000, intervalMs: 400 });
+      await typeKeys();
+      const k2 = (await read()).keys || '';
+      // (keys: shown outside fields, the closed shadow root's host too: the risk the power accepts)
+      if (!/^null@pw,k@fi,x@shost,q@/.test(k2)) problems.push(`keys with keys: ${k2}`);
+      const leaks = this.o.servers.requests.filter((q) => q.url.includes('e2e-pw-leak')).map((q) => q.url);
+      if (leaks.length) problems.push(`the server saw: ${leaks.join(', ')}`);
+      fs.writeFileSync(this.r.file(`powers-${this.o.browser}.json`), JSON.stringify({ declared: A, undeclared: N, keys: [k1, k2], typed: got.typed, problems }, null, 2));
+      if (problems.length) throw new Error(problems.join('\n'));
+      return `held for "${row.items.join(' ')}"; allowed in the panel; ${Object.keys(A).length} declared outcomes as expected (sound, controls, read-drafts), ${Object.keys(N).length} undeclared refused; keys ${k1} then, with keys, ${k2}; same powers ran, a new one waited`;
+    } finally {
+      for (const f of [allFile, noneFile]) { try { fs.unlinkSync(f); } catch { /* gone */ } }
+    }
+  }
+
   async sandboxedPanelCheck(win) {
     const site = '127.0.0.1';
     const base = `http://${site}:${this.o.servers.port}`;
@@ -2584,7 +2672,7 @@ say({ type: 'result', subtype: 'success', is_error: false, result: text, session
       // (Firefox doesn't say which page: after that check, a failed fetch or socket is one of those)
       // (the sandboxed mods' test page: its hostile mod's refusals and the errors the good one throws on purpose)
       // (Chrome names the page the tab had when its console was first attached, so by the text)
-      || (this.sandboxPage && (/^\[TRIF\] 127\.0\.0\.1\/e2e-sbx-/.test(String(p.text)) || /willReadFrequently/.test(String(p.text)) || /\/sandbox\.html/.test(String(p.source || ''))))
+      || (this.sandboxPage && (/^\[TRIF\] 127\.0\.0\.1\/e2e-sbx-/.test(String(p.text)) || /willReadFrequently/.test(String(p.text)) || /AudioContext was not allowed to start/.test(String(p.text)) || /\/sandbox\.html/.test(String(p.source || ''))))
       || (this.hijacked && /ERR_BLOCKED_BY_CLIENT|NetworkError when attempting to fetch|Failed to fetch|establish a connection to the server at ws:\/\/[^ ]+\/e2e-socket|WebSocket connection to '[^']+\/e2e-socket|e2e-leak|e2e-nav|blocked by|CORS/i.test(String(p.text) + String(p.source || '')));
     const problems = (await this.d.consoleProblems()).filter((p) => !expected(p));
     // The agent-made mod and the stand-in pages aren't ours to judge; everything else counts.

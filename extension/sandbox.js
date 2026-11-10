@@ -41,25 +41,30 @@ export function sandboxRuntimeCode() {
   return `(${sandboxRuntime.toString()})('sandbox');\n//# sourceURL=trif-sandbox://runtime.js`;
 }
 
-/** One sandboxed mod, in TRIF's world: its source, handed to the runtime as text (SES evaluates it). */
-export function sandboxModCode(id, source) {
-  return `(globalThis.__trifSandbox ? globalThis.__trifSandbox.run(${J(id)}, ${J(source)}) : (globalThis.__trifSandboxQueue = globalThis.__trifSandboxQueue || []).push([${J(id)}, ${J(source)}]));\n//# sourceURL=trif-sandbox://${id}.js`;
+/**
+ * One sandboxed mod, in TRIF's world: its source, handed to the runtime as text (SES evaluates it), with its
+ * powers (docs/POWERS.md), which come from its header as the helper read it, not from its code.
+ */
+export function sandboxModCode(id, source, powers = []) {
+  const P = JSON.stringify((Array.isArray(powers) ? powers : []).map(String));
+  return `(globalThis.__trifSandbox ? globalThis.__trifSandbox.run(${J(id)}, ${J(source)}, ${P}) : (globalThis.__trifSandboxQueue = globalThis.__trifSandboxQueue || []).push([${J(id)}, ${J(source)}, ${P}]));\n//# sourceURL=trif-sandbox://${id}.js`;
 }
 
 /**
  * A sandboxed mod run as a page script (a browser without TRIF's world, once the user allowed it): the
  * same API, built in the page's world, around the mod's code, which has everything the page has.
  */
-export function sandboxPageCode(id, source) {
+export function sandboxPageCode(id, source, powers = []) {
   // (the mod's first line is the script's first line, so `trif errors` gives its own line numbers)
-  return `(() => { const __trifMod = async function (${SANDBOX_GLOBALS.filter((n) => n !== 'Math' && n !== 'Date').join(', ')}) { "use strict"; ${source}\n};\n(${sandboxRuntime.toString()})('page', ${J(id)}, __trifMod); })();\n//# sourceURL=trif://${id}.js`;
+  const P = JSON.stringify((Array.isArray(powers) ? powers : []).map(String));
+  return `(() => { const __trifMod = async function (${SANDBOX_GLOBALS.filter((n) => n !== 'Math' && n !== 'Date').join(', ')}) { "use strict"; ${source}\n};\n(${sandboxRuntime.toString()})('page', ${J(id)}, __trifMod, ${P}); })();\n//# sourceURL=trif://${id}.js`;
 }
 
 /**
  * The runtime. mode 'sandbox': in TRIF's world, with SES loaded; installs globalThis.__trifSandbox. mode
  * 'page': in the page's world (no SES, nothing confined), runs `fn` with the API as its arguments.
  */
-export function sandboxRuntime(mode, pageModId, pageFn) {
+export function sandboxRuntime(mode, pageModId, pageFn, pagePowers) {
   const G = globalThis;
   const SANDBOX = mode === 'sandbox';
   if (SANDBOX && G.__trifSandbox) return;
@@ -152,8 +157,24 @@ export function sandboxRuntime(mode, pageModId, pageFn) {
   const SVG_ATTRS = /^(viewbox|d|cx|cy|r|rx|ry|x|y|x1|y1|x2|y2|points|fill|stroke|stroke-width|stroke-linecap|stroke-linejoin|opacity|fill-opacity|stroke-opacity|fill-rule|clip-rule|transform|offset|stop-color|stop-opacity|gradientunits|gradienttransform|xmlns|preserveaspectratio|focusable|font-size|font-family|text-anchor|dominant-baseline|width|height)$/;
   // Text inside these is code or CSS the browser would carry out: never written by a mod.
   const RAW_TEXT = new Set(['script', 'style']);
-  // Text inside these is what a form sends: not rewritten by a mod either.
+  // Text inside these is what a form sends: not rewritten by a mod either (its own controls aside).
   const FORM_TEXT = new Set(['textarea', 'option', 'select']);
+  // The `controls` power: a mod's own sliders, pickers, checkboxes, number and text boxes, and selects. TRIF
+  // sets autocomplete off (the browser fills nothing into them) and keeps the type to these; never password.
+  const CONTROL_TAGS = new Set(['input', 'select', 'option', 'label']);
+  const CONTROL_TYPES = new Set(['range', 'color', 'checkbox', 'number', 'text']);
+  const controlAttrOk = (node, n, v) => {
+    const t = node.localName;
+    if (t === 'input') {
+      if (n === 'type') { if (!CONTROL_TYPES.has(v.toLowerCase())) fail(`a mod's input can be ${[...CONTROL_TYPES].join(', ')} (not ${v})`); return true; }
+      if (/^(min|max|step)$/.test(n)) { if (!/^-?[0-9.e+-]*$|^any$/i.test(v)) fail(`${n} takes a number`); return true; }
+      return n === 'value' || n === 'checked' || n === 'placeholder' || n === 'disabled';
+    }
+    if (t === 'option') return n === 'value' || n === 'selected';
+    if (t === 'select') return n === 'disabled';
+    if (t === 'label' && n === 'for') { if (!OWN_NAME.test(v)) fail('a label is for one of the mod\'s own controls (a trif- id)'); return true; }
+    return false;
+  };
   const ORIGIN = location.origin;
   const fail = (why) => { throw new TypeError(`TRIF sandbox: ${why}`); };
   const str = (v, what, max = 100000) => { if (typeof v !== 'string') fail(`${what} must be text`); if (v.length > max) fail(`${what} is too long`); return v; };
@@ -203,7 +224,7 @@ export function sandboxRuntime(mode, pageModId, pageFn) {
   const qs = (root, sel) => { try { return root.querySelector(sel); } catch { fail(`"${String(sel).slice(0, 80)}" isn't a valid selector`); } };
   const qsa = (root, sel) => { try { return root.querySelectorAll(sel); } catch { fail(`"${String(sel).slice(0, 80)}" isn't a valid selector`); } };
   const LISTEN = /^(click|dblclick|contextmenu|mouse(down|up|move|over|out|enter|leave)|pointer(down|up|move|over|out|enter|leave|cancel)|touch(start|move|end|cancel)|key(down|up)|wheel|scroll|resize|input|change|focus|blur|focusin|focusout|visibilitychange|transitionend|animationend)$/;
-  const isRaw = (n) => !!n && n.nodeType === 1 && (RAW_TEXT.has(n.localName) || FORM_TEXT.has(n.localName));
+  const isRaw = (n) => !!n && n.nodeType === 1 && (RAW_TEXT.has(n.localName) || (FORM_TEXT.has(n.localName) && !created.has(n)));
 
   // ---- the stand-ins: one per node (identity kept), frozen, sharing one frozen prototype whose methods
   // find their node in a WeakMap (an object TRIF didn't make has none)
@@ -220,7 +241,7 @@ export function sandboxRuntime(mode, pageModId, pageFn) {
     for (const k of kids) {
       if (typeof k === 'string' || k.nodeType !== 1) continue;
       for (const f of [...(k.matches(FORM_FIELDS) ? [k] : []), ...k.querySelectorAll(FORM_FIELDS)]) {
-        if (created.has(f)) { if (dest && f.localName === 'button') fail('a button a mod makes can\'t go inside a form'); continue; }
+        if (created.has(f)) { if (dest) fail(`a ${f.localName === 'button' ? 'button' : 'control'} a mod makes can't go inside a form`); continue; }
         if (f.hasAttribute('form')) continue; // (it names its form: where it is doesn't change that)
         if ((f.form || null) !== dest) fail(`the page's own <${f.localName}> can't be moved into, out of or between forms`);
       }
@@ -316,8 +337,26 @@ export function sandboxRuntime(mode, pageModId, pageFn) {
     if (root !== null) return root || t.localName.includes('-');
     return t.localName.includes('-') || SHADOW_HOSTS.has(t.localName);
   };
-  const eventOf = (e) => harden({
-    type: String(e.type), ...(typedInto(e) ? { key: null, code: null } : { key: typeof e.key === 'string' ? e.key : null, code: typeof e.code === 'string' ? e.code : null }),
+  // A field whose content stays hidden whatever the mod's powers: passwords and card details.
+  const secretField = (t) => !!t && t.nodeType === 1 && t.localName === 'input' && (String(t.type).toLowerCase() === 'password'
+    || /(^|\s)(cc-[a-z-]+|current-password|new-password|one-time-code)(\s|$)/i.test(String(t.getAttribute('autocomplete') || '')));
+  const isField = (t) => !!t && t.nodeType === 1 && (/^(input|textarea|select)$/.test(t.localName) || t.isContentEditable);
+  // Whether a key event's key is hidden from a mod with these powers: `keys` shows keys outside fields and
+  // editors (accepting that a field in a closed shadow root can't be seen); `read-drafts` shows them in
+  // fields and editors too; a password or card field's never.
+  const keyHidden = (e, powers) => {
+    const p = typeof e.composedPath === 'function' ? e.composedPath() : [];
+    const t = p[0] || e.target;
+    if (secretField(t)) return true;
+    if (powers && powers.has('read-drafts') && (isField(t) || (p.length && p[0] !== e.target && isField(p[0])))) return false;
+    if (isField(t)) return true;
+    if (powers && powers.has('keys')) return p.length > 0 && p[0] !== e.target && isField(p[0]);
+    return typedInto(e);
+  };
+  const eventOf = (e, powers) => harden({
+    type: String(e.type), ...(keyHidden(e, powers) ? { key: null, code: null } : { key: typeof e.key === 'string' ? e.key : null, code: typeof e.code === 'string' ? e.code : null }),
+    // (what an input event typed: read-drafts only, never in a password or card field)
+    ...(powers && powers.has('read-drafts') && typeof e.data === 'string' && !secretField(e.target) ? { data: e.data } : {}),
     shift: !!e.shiftKey, alt: !!e.altKey, ctrl: !!e.ctrlKey, meta: !!e.metaKey,
     x: typeof e.clientX === 'number' ? e.clientX : null, y: typeof e.clientY === 'number' ? e.clientY : null,
     deltaX: typeof e.deltaX === 'number' ? e.deltaX : null, deltaY: typeof e.deltaY === 'number' ? e.deltaY : null, repeat: !!e.repeat,
@@ -393,9 +432,12 @@ export function sandboxRuntime(mode, pageModId, pageFn) {
   let current = null; // the api of the mod whose code TRIF is running (its top level, or a callback)
   /** Everything one mod gets (its own error reporting, timers, settings, watchers). */
   const apis = new Map(); // mod id -> its api
-  const apiFor = (modId) => {
+  const apiFor = (modId, powers) => {
     if (apis.has(modId)) return apis.get(modId);
-    const self = {};
+    // (its powers: docs/POWERS.md; what's not in this set it doesn't get, and a mod TRIF can't name gets none)
+    const self = { powers: new Set(Array.isArray(powers) ? powers.map(String) : []) };
+    const has = (p) => self.powers.has(p);
+    const needs = (p) => { if (!has(p)) fail(`that needs the ${p} power (// @powers ${p} in the mod's header, which the user approves)`); };
     apis.set(modId, self);
     // (a callback of the mod's: errors reported as its own, and stand-ins' listeners are its own)
     const call = (fn, ...args) => { const prev = current, t = now(); current = self; try { return fn(...args); } catch (e) { report(modId, e); return undefined; } finally { current = prev; stats.callbacks++; stats.callbackMs += now() - t; } };
@@ -412,7 +454,7 @@ export function sandboxRuntime(mode, pageModId, pageFn) {
       if (!LISTEN.test(type)) fail(`listening for "${type}" isn't offered`);
       if (typeof fn !== 'function') fail('a listener must be a function');
       const capture = !!(opts && opts.capture);
-      const h = (e) => call(fn, eventOf(e));
+      const h = (e) => call(fn, eventOf(e, self.powers));
       target.addEventListener(type, h, { passive: !(opts && opts.preventDefault), capture });
       return harden(() => target.removeEventListener(type, h, { capture }));
     };
@@ -478,8 +520,98 @@ export function sandboxRuntime(mode, pageModId, pageFn) {
       };
       return harden({ value: harden(value), save: guard(save) });
     };
+    // The `sound` power: Web Audio through TRIF's own small set of nodes (oscillators, gains, filters, delays,
+    // panners, noise and sounds from data: URLs), so no address, no microphone, no worklet, no page media.
+    let audio = null;
+    const audioApi = () => {
+      needs('sound');
+      if (audio) return audio;
+      const AC = G.AudioContext || G.webkitAudioContext;
+      if (!AC) fail('this browser has no Web Audio');
+      const ctx = new AC();
+      // (the browser starts it only after the user does something on the page: TRIF resumes it then)
+      const wake = () => { if (ctx.state === 'suspended') ctx.resume().catch(() => {}); };
+      for (const t of ['pointerdown', 'keydown']) G.addEventListener(t, wake, { capture: true, passive: true });
+      const nodeOfFacade = new WeakMap();
+      // (every function here guarded: a browser error, thrown or rejected, reaches the mod as plain text)
+      const clean = (e) => (e instanceof TypeError && /^TRIF sandbox: /.test(e.message) ? e : new TypeError(`TRIF sandbox: ${String(e && e.message ? e.message : e).slice(0, 500)}`));
+      const hardenAll = (o) => { for (const k of Object.keys(o)) { const d = Object.getOwnPropertyDescriptor(o, k); if (typeof d.value === 'function') { const fn = d.value; o[k] = function (...a) { let r; try { r = fn.apply(this, a); } catch (e) { throw clean(e); } return r && typeof r.then === 'function' ? r.then((x) => x, (e) => { throw clean(e); }) : r; }; } } return harden(o); };
+      const num = (v, what) => { if (typeof v !== 'number' || !Number.isFinite(v)) fail(`${what} must be a number`); return v; };
+      const when = (at) => (at === undefined ? ctx.currentTime : num(at, 'a time'));
+      const paramOf = (ap) => hardenAll({
+        get value() { return ap.value; },
+        set: (v, at) => { ap.setValueAtTime(num(v, 'a value'), when(at)); },
+        ramp: (v, at) => { ap.linearRampToValueAtTime(num(v, 'a value'), num(at, 'a time')); },
+        expRamp: (v, at) => { ap.exponentialRampToValueAtTime(num(v, 'a value'), num(at, 'a time')); },
+        target: (v, at, tc) => { ap.setTargetAtTime(num(v, 'a value'), when(at), num(tc, 'a time constant')); },
+        cancel: (at) => { ap.cancelScheduledValues(when(at)); },
+      });
+      const PARAMS = ['frequency', 'detune', 'gain', 'Q', 'delayTime', 'pan', 'playbackRate'];
+      const facade = (node) => {
+        const f = hardenAll({
+          connect: (to) => { node.connect(to === 'out' ? ctx.destination : (nodeOfFacade.get(to) || fail('connect takes another of this mod\'s sound nodes, or \'out\''))); return to; },
+          disconnect: () => { node.disconnect(); },
+          start: (at) => { if (typeof node.start !== 'function') fail('only sources start'); node.start(when(at)); },
+          stop: (at) => { if (typeof node.stop !== 'function') fail('only sources stop'); node.stop(when(at)); },
+          param: (name) => { str(name, 'a parameter', 40); if (!PARAMS.includes(name) || !node[name]) fail(`no ${name} here`); return paramOf(node[name]); },
+        });
+        nodeOfFacade.set(f, node);
+        return f;
+      };
+      const opt = (o) => (o && typeof o === 'object' ? o : {});
+      const buffers = new Map(); // data: URL -> decoded buffer
+      const decode = async (url) => {
+        const u = str(url, 'a sound', 20 * 1024 * 1024);
+        const m = /^data:audio\/[a-z0-9.+-]+(?:;[a-z-]+=[^;,]*)*;base64,([A-Za-z0-9+/=\s]+)$/i.exec(u);
+        if (!m) fail('sounds come from data:audio/…;base64 addresses only');
+        if (!buffers.has(u)) {
+          const bin = atob(m[1].replace(/\s+/g, ''));
+          const bytes = new Uint8Array(bin.length);
+          for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+          buffers.set(u, await ctx.decodeAudioData(bytes.buffer));
+        }
+        return buffers.get(u);
+      };
+      audio = hardenAll({
+        get now() { return ctx.currentTime; },
+        get state() { return ctx.state; },
+        resume: () => ctx.resume().then(() => ctx.state, () => ctx.state),
+        out: 'out',
+        oscillator: (o) => { const n = ctx.createOscillator(); o = opt(o); if (o.type !== undefined) n.type = str(o.type, 'a wave type', 20); if (o.frequency !== undefined) n.frequency.value = num(o.frequency, 'a frequency'); return facade(n); },
+        gain: (v) => { const n = ctx.createGain(); if (v !== undefined) n.gain.value = num(v, 'a gain'); return facade(n); },
+        filter: (o) => { const n = ctx.createBiquadFilter(); o = opt(o); if (o.type !== undefined) n.type = str(o.type, 'a filter type', 20); for (const k of ['frequency', 'Q', 'gain']) if (o[k] !== undefined) n[k].value = num(o[k], k); return facade(n); },
+        delay: (sec) => { const n = ctx.createDelay(5); if (sec !== undefined) n.delayTime.value = num(sec, 'a delay'); return facade(n); },
+        panner: (pan) => { const n = ctx.createStereoPanner(); if (pan !== undefined) n.pan.value = num(pan, 'a pan'); return facade(n); },
+        noise: (sec) => {
+          const len = Math.max(1, Math.min(ctx.sampleRate * 10, Math.round(ctx.sampleRate * num(sec === undefined ? 1 : sec, 'a length'))));
+          const b = ctx.createBuffer(1, len, ctx.sampleRate);
+          const d = b.getChannelData(0);
+          for (let i = 0; i < len; i++) d[i] = Math.random() * 2 - 1;
+          const n = ctx.createBufferSource(); n.buffer = b; return facade(n);
+        },
+        sound: async (url, o) => { const b = await decode(url); const n = ctx.createBufferSource(); n.buffer = b; o = opt(o); if (o.loop) n.loop = true; if (o.rate !== undefined) n.playbackRate.value = num(o.rate, 'a rate'); return facade(n); },
+        // the simple ones: a beep, and a sound played once
+        tone: (o) => {
+          o = opt(o);
+          const t0 = when(o.at), dur = num(o.duration === undefined ? 0.15 : o.duration, 'a duration'), vol = num(o.volume === undefined ? 0.2 : o.volume, 'a volume');
+          const osc = ctx.createOscillator(), g = ctx.createGain();
+          if (o.type !== undefined) osc.type = str(o.type, 'a wave type', 20);
+          osc.frequency.value = num(o.frequency === undefined ? 440 : o.frequency, 'a frequency');
+          g.gain.setValueAtTime(0, t0); g.gain.linearRampToValueAtTime(vol, t0 + 0.005); g.gain.linearRampToValueAtTime(0, t0 + dur);
+          osc.connect(g).connect(ctx.destination); osc.start(t0); osc.stop(t0 + dur + 0.02);
+        },
+        play: async (url, o) => {
+          const b = await decode(url); o = opt(o);
+          const n = ctx.createBufferSource(), g = ctx.createGain();
+          n.buffer = b; g.gain.value = num(o.volume === undefined ? 1 : o.volume, 'a volume');
+          n.connect(g).connect(ctx.destination); n.start(when(o.at));
+          return hardenAll({ stop: () => { try { n.stop(); } catch { /* done */ } }, duration: b.duration });
+        },
+      });
+      return audio;
+    };
     const trifApi = {
-      css, observe, text, settings,
+      css, observe, text, settings, audio: audioApi,
       hide: (sel) => css(`${selectorOk(sel)} { display: none !important; }`),
       log: logTo(modId, 'log'), warn: logTo(modId, 'warn'), error: logTo(modId, 'error'),
     };
@@ -499,8 +631,10 @@ export function sandboxRuntime(mode, pageModId, pageFn) {
       findAll: (sel) => list(qsa(D, str(sel, 'a selector', 2000))),
       create(tag) {
         const t = str(tag, 'a tag', 40).toLowerCase();
-        if (!TAGS.has(t)) fail(`<${t}> elements aren't offered`);
+        if (CONTROL_TAGS.has(t) && t !== 'label') needs('controls');
+        if (!TAGS.has(t) && !CONTROL_TAGS.has(t)) fail(`<${t}> elements aren't offered`);
         const n = D.createElement(t);
+        if (t === 'input') { n.setAttribute('type', 'text'); n.setAttribute('autocomplete', 'off'); }
         // (a button that never submits a form, whatever it's in: its type isn't offered to change)
         if (t === 'button') n.setAttribute('type', 'button');
         created.add(n);
@@ -545,17 +679,37 @@ export function sandboxRuntime(mode, pageModId, pageFn) {
   const classesOf = new WeakMap();
   const protoDef = {
     get tag() { return nodeOf(this).localName; },
-    get text() { return visibleText(nodeOf(this)); },
+    get text() { const n = nodeOf(this); return cur().powers.has('read-drafts') ? n.textContent : visibleText(n); },
     setText(t) {
       const n = nodeOf(this);
       if (isRaw(n)) fail(`text can't be written into <${n.localName}>`);
       detachOk(n, true);
       n.textContent = str(t, 'text');
     },
-    attr(name) { const n = nodeOf(this); str(name, 'an attribute name', 100); return insideEditor(n) ? null : n.getAttribute(name); },
+    attr(name) { const n = nodeOf(this); str(name, 'an attribute name', 100); return insideEditor(n) && !cur().powers.has('read-drafts') ? null : n.getAttribute(name); },
+    // A field's value: the mod's own controls (`controls`), or what the user typed in the page's fields and
+    // editors (`read-drafts`; never a password or card field, nor a hidden one: that's the site's, not typed)
+    get value() {
+      const n = nodeOf(this);
+      if (created.has(n) && /^(input|select|option)$/.test(n.localName)) return String(n.value);
+      if (!isField(n)) fail(`<${n.localName}> has no value`);
+      if (!cur().powers.has('read-drafts')) fail('reading what\'s typed in the page needs the read-drafts power (// @powers read-drafts)');
+      if (secretField(n)) fail('password and card fields stay hidden, whatever the mod\'s powers');
+      if (n.localName === 'input' && /^(hidden|file|submit|button|reset|image)$/i.test(String(n.type))) fail(`a ${n.type} input isn't something the user typed`);
+      return n.isContentEditable ? n.textContent : String(n.value);
+    },
+    setValue(v) {
+      const n = nodeOf(this);
+      if (!created.has(n) || !/^(input|select)$/.test(n.localName)) fail('setValue is for the mod\'s own controls (changing what the user typed is the write-drafts power, not in this version)');
+      n.value = str(String(v), 'a value', 10000);
+    },
+    get checked() { const n = nodeOf(this); return n.localName === 'input' ? !!n.checked : false; },
+    setChecked(on) { const n = nodeOf(this); if (!created.has(n) || n.localName !== 'input') fail('setChecked is for the mod\'s own checkboxes'); n.checked = !!on; },
     setAttr(name, value) {
       const node = nodeOf(this);
       const n = str(name, 'an attribute name', 100).toLowerCase(), v = str(String(value), 'a value', 200000);
+      // (the mod's own controls: their few attributes; autocomplete and name never)
+      if (created.has(node) && CONTROL_TAGS.has(node.localName) && controlAttrOk(node, n, v)) { node.setAttribute(n, v); return; }
       if (!nameOk(n)) fail(nameRefused(n));
       if (ATTR_TAGS[n] && (!ATTR_TAGS[n].has(node.localName) || node.namespaceURI !== HTML_NS)) fail(`${n} isn't offered on <${node.localName}>`);
       if (n === 'id' || n === 'class') {
@@ -633,9 +787,9 @@ export function sandboxRuntime(mode, pageModId, pageFn) {
 
   // ---- running a mod
   const SANDBOX_GLOBALS_PAGE = ['page', 'trif', 'console', 'setTimeout', 'clearTimeout', 'setInterval', 'clearInterval', 'requestAnimationFrame', 'cancelAnimationFrame'];
-  const run = (modId, source) => {
+  const run = (modId, source, powers) => {
     const id = String(modId);
-    const api = apiFor(id);
+    const api = apiFor(id, powers);
     const prev = current, t = now();
     current = api;
     try {
@@ -663,7 +817,7 @@ export function sandboxRuntime(mode, pageModId, pageFn) {
       stats.mods[id] = { at: t, runMs: now() - t };
     }
   };
-  if (!SANDBOX) { run(pageModId, pageFn); return; }
+  if (!SANDBOX) { run(pageModId, pageFn, pagePowers); return; }
   // (a promise a mod left rejected: reported as that mod's, by the stack)
   try {
     G.addEventListener('unhandledrejection', (ev) => {
@@ -677,5 +831,5 @@ export function sandboxRuntime(mode, pageModId, pageFn) {
   Object.defineProperty(G, '__trifSandbox', { value: Object.freeze({ run, errors: store.errors, logs: store.logs, stats }), configurable: false, writable: false });
   // (mods that came before the runtime)
   const queued = G.__trifSandboxQueue;
-  if (Array.isArray(queued)) { G.__trifSandboxQueue = null; for (const [id, source] of queued) run(id, source); }
+  if (Array.isArray(queued)) { G.__trifSandboxQueue = null; for (const [id, source, powers] of queued) run(id, source, powers); }
 }

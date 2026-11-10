@@ -764,6 +764,7 @@ const commands = {
         if (!limitToSites(m, onSites())) o.sitesOff = true; // every site it's for is off (or without access)
         if (m.held) o.held = m.held;
         if (m.sandboxed) o.sandboxed = inSandboxWorld(m) ? true : 'page'; // ('page': this browser runs it as a page script)
+        if (Array.isArray(m.powers) && m.powers.length) o.powers = m.powers;
         if (state.newOff[m.id] && !isEnabled(m.id)) o.newOff = state.newOff[m.id];
         if (errors.has(m.id) && errors.get(m.id) !== USER_SCRIPTS_OFF) o.error = errors.get(m.id);
         return o;
@@ -1293,7 +1294,7 @@ async function uiStatus() {
       error: errors.get(m.id) === USER_SCRIPTS_OFF ? null : errors.get(m.id) || null,
       held: m.held || null, pending: m.pending || null, review: m.held || m.pending ? null : m.review || null, risk: m.risk || null,
       from: fromOtherBrowser(m, state.installId) ? (m.origin.browser || 'another browser') : null,
-      source: m.source || null, version: m.version || null, update: m.update || null, rules: !!m.rules, sandboxed: !!m.sandboxed, unsandboxed: !!m.unsandboxed,
+      source: m.source || null, version: m.version || null, update: m.update || null, rules: !!m.rules, sandboxed: !!m.sandboxed, unsandboxed: !!m.unsandboxed, powers: Array.isArray(m.powers) ? m.powers : [],
       newOff: state.newOff[m.id] && !(live.get(m.id)?.enabled ?? isEnabled(m.id)) ? state.newOff[m.id] : null,
     })),
     startsOff: state.startsOff, canSandbox: state.canSandbox !== false,

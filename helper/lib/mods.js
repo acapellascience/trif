@@ -35,7 +35,7 @@ function isIgnoredName(name) {
 // Parse the `// ==WebMod==` block. Returns raw header values plus warnings; defaults are applied
 // by buildMod because they depend on the folder and file name.
 function parseHeader(code) {
-  const out = { hasHeader: false, name: null, description: null, matches: [], excludes: [], runAt: null, risk: null, source: null, version: null, rules: false, warnings: [] };
+  const out = { hasHeader: false, name: null, description: null, matches: [], excludes: [], runAt: null, risk: null, source: null, version: null, rules: false, sandboxed: false, warnings: [] };
   const lines = String(code).replace(/^﻿/, '').split(/\r?\n/);
   const start = lines.findIndex((l) => HEADER_START.test(l));
   if (start === -1) return out;
@@ -88,6 +88,11 @@ function parseHeader(code) {
       case 'rules':
         out.rules = true;
         break;
+      // `@sandboxed`: a sandboxed mod (docs/SAFE-MODS.md): its JavaScript runs in TRIF's own world, with only
+      // TRIF's API (extension/sandbox.js), so it can't send, click, navigate or load anything
+      case 'sandboxed':
+        out.sandboxed = true;
+        break;
       case 'run-at': {
         const mapped = RUN_AT[value.toLowerCase()];
         if (mapped) out.runAt = mapped;
@@ -133,7 +138,10 @@ function buildMod({ site, file, code }) {
     source: header.source, // 'webmods' (or 'trif') for the mods TRIF ships, else what the header says, or null
     version: header.version, // the header's @version, or null
   };
-  const hash = sha1(JSON.stringify([meta.id, meta.name, meta.description, meta.matches, meta.excludes, meta.runAt, meta.risk, header.rules]) + '\n' + code);
+  // (`sandboxed` only when it is: the hashes of every other mod stay as they were)
+  const hash = sha1(JSON.stringify([meta.id, meta.name, meta.description, meta.matches, meta.excludes, meta.runAt, meta.risk, header.rules, ...(header.sandboxed ? ['sandboxed'] : [])]) + '\n' + code);
+  if (header.rules && header.sandboxed) throw new Error('a mod is either @rules (data) or @sandboxed (JavaScript in TRIF\'s sandbox), not both');
+  if (header.sandboxed) return { mod: { ...meta, sandboxed: true, code, hash }, warnings: header.warnings };
   if (header.rules) {
     // (what runs is TRIF's code with the checked rules; throws a RulesError for the scanner to report)
     const rules = require('./rules');

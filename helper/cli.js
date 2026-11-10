@@ -26,7 +26,7 @@ process.stdout.on('error', (e) => { if (e.code === 'EPIPE') process.exit(0); thr
 const VALUE_FLAGS = new Set(['--tab', '--url', '-o', '--out', '--output', '--filter', '--limit', '-f', '--file',
   '--browser', '--home', '--native-dir', '--bin-dir', '--timeout', '--agent', '--session', '--model', '--site', '--auto',
   '--provider', '--base-url', '--key-env', '--selector', '--color', '--text', '--tolerance']);
-const BOOL_FLAGS = new Set(['--json', '--hard', '--help', '-h', '--force', '--page', '--rules', '--no-link', '--examples', '--no-examples', '--copy', '--link', '--install', '--open',
+const BOOL_FLAGS = new Set(['--json', '--hard', '--help', '-h', '--force', '--page', '--rules', '--sandboxed', '--no-link', '--examples', '--no-examples', '--copy', '--link', '--install', '--open',
   '--use-new', '--keep', '--merged', '--set-key', '--remove-key', '--scroll', '--full', '--verbose', '-v', '--no-wait']);
 // Flags with a value that may be left out (`--examples` alone, or `--examples x.com,google.com`).
 const OPTIONAL_VALUE_FLAGS = new Set(['--examples']);
@@ -216,6 +216,9 @@ function makeCtx(opts) {
 
 function printJson(v) { out(JSON.stringify(v === undefined ? null : v, null, 2)); }
 
+// What the side panel calls each group of mods (extension/lib.js modGroup), in a sentence.
+const GROUP_NAMES = { rules: 'rules', sandboxed: 'sandboxed mods', page: 'page scripts' };
+
 const handlers = {
   async help(ctx, pos) {
     if (pos[0]) {
@@ -329,25 +332,31 @@ const handlers = {
     const updates = info.updates || {};
     const ids = [...new Set([...(info.mods || []), ...registered.keys()])].sort();
     if (st && st.groupsOff && Object.keys(st.groupsOff).length) {
-      const name = { rules: 'rules', page: 'page scripts' };
+      const name = GROUP_NAMES;
       lines.push(`GROUPS OFF    ${Object.entries(st.groupsOff).map(([site, gs]) => `${gs.map((g) => name[g] || g).join(' and ')} off on ${site}`).join('; ')} (the user's choice, in the side panel: those mods don't run there)`);
     }
     if (st && Array.isArray(st.startsOff) && st.startsOff.length) {
-      const name = { rules: 'rules', page: 'page scripts' };
+      const name = GROUP_NAMES;
       lines.push(`NEW MODS      new ${st.startsOff.map((g) => name[g] || g).join(' and ')} start off in this browser (the user's setting, in the side panel's Settings), except ones made in its side panel`);
     }
+    if (st && st.sandbox === false) lines.push(`NO SANDBOX    ${st.browser || 'this browser'} can't run sandboxed mods: each waits for the user's OK (in the side panel) to run as a page script instead`);
+    // Sandboxed mods as the extension runs them: in TRIF's sandbox, or ('page') as page scripts
+    const sandboxedAs = new Map(((st && st.mods) || []).filter((m) => m.sandboxed).map((m) => [m.id, m.sandboxed]));
+    const sandboxHeld = new Map(((st && st.mods) || []).filter((m) => m.held && m.held.by === 'sandbox').map((m) => [m.id, m.held]));
     if (st && st.paused) lines.push('PAUSED        every mod is paused in this browser (the user\'s choice, in the side panel\'s Settings): nothing runs until they resume');
     lines.push(`mods          ${ids.length} in ${info.modsDir}`);
     for (const id of ids) {
       let s;
       if (helperErrors.has(id)) s = `NOT SENT: ${helperErrors.get(id)}`;
       else if (held[id]) s = `${(info.pending || []).includes(id) ? 'CHANGE WAITING (the version before runs meanwhile)' : 'HELD'}: it ${(held[id].facts || [held[id].reason]).join('; it ')} (trif approve ${id}, or trif reject ${id})`;
+      else if (sandboxHeld.has(id)) s = `WAITING: ${sandboxHeld.get(id).facts[0]}; only the user can allow that, in the side panel`;
       else if (off.has(id)) s = newOff.has(id) ? `off (${newOff.get(id) === 'update' ? 'updated by TRIF' : 'new'}: waiting for the user to look at it)` : shipsOff.has(id) ? 'off (as TRIF ships it)' : 'off';
       else if (sitesOff.has(id)) s = 'waiting: TRIF is off on its site';
       else if (applyErrors.has(id)) s = `NOT REGISTERED: ${applyErrors.get(id)}`;
       else if (!st) s = '?';
       else if (!registered.has(id)) s = 'not known to the extension yet';
       else s = registered.get(id) ? 'registered' : 'NOT REGISTERED';
+      if (sandboxedAs.has(id) && !sandboxHeld.has(id)) s += sandboxedAs.get(id) === 'page' ? ' (sandboxed mod, run as a page script: the user allowed it, as this browser has no sandbox)' : ' (sandboxed)';
       if (offSites.has(id) && !off.has(id)) s += ` (off on ${offSites.get(id).join(', ')})`;
       if (updates[id]) s += `; ${updateText(updates[id])}`;
       if (review[id]) s += `; TO REVIEW: it ${review[id].facts.join('; it ')} (trif approve ${id} when that's fine)`;
@@ -409,8 +418,15 @@ const handlers = {
     if (!fs.existsSync(file) && /^[^/\s]+\/[^/\s]+$/.test(file.replace(/\.js$/, ''))) file = path.join(ctx.ws.modsDir, `${file.replace(/\.js$/, '')}.js`);
     file = optionPath(ctx, file);
     const code = fs.readFileSync(file, 'utf8');
+    const header = require('./lib/mods').parseHeader(code);
+    if (header.rules && header.sandboxed) {
+      const error = 'a mod is either @rules (data) or @sandboxed (JavaScript in TRIF\'s sandbox), not both';
+      if (ctx.json) printJson({ ok: false, error }); else out(`${path.resolve(file)}: ${error}`);
+      process.exitCode = 1;
+      return;
+    }
     // A rules mod (lib/rules.js): its rules checked, nothing to compile; TRIF runs it with its own code
-    if (require('./lib/mods').parseHeader(code).rules) {
+    if (header.rules) {
       try { require('./lib/rules').parseRules(code); } catch (e) {
         if (ctx.json) printJson({ ok: false, error: e.message }); else out(`${path.resolve(file)}: ${e.message}`);
         process.exitCode = 1;
@@ -421,19 +437,36 @@ const handlers = {
       return out('TRIF runs it with its own code: it can\'t send, click, load from elsewhere or run code, so it never waits for the user\'s OK.');
     }
     // Compiles without running anything (side-panel agents may not run code; this replaces node --check).
-    try { new vm.Script(code, { filename: path.resolve(file) }); } catch (e) {
+    // (a sandboxed mod's code is evaluated inside a function: a top-level return is fine there)
+    try { new vm.Script(header.sandboxed ? `(function () {\n${code}\n})` : code, { filename: path.resolve(file), lineOffset: header.sandboxed ? -1 : 0 }); } catch (e) {
       const where = String(e.stack || '').split('\n').slice(0, 3).join('\n');
       if (ctx.json) printJson({ ok: false, error: e.message, where }); else out(`${where}`);
       process.exitCode = 1;
       return;
     }
+    // A sandboxed mod (extension/sandbox.js): it never waits for the user's OK, as it can't act; what it uses
+    // that the sandbox doesn't give it is listed (lib/sandboxlint.js), as it would fail there when it runs.
+    if (header.sandboxed) {
+      const lint = require('./lib/sandboxlint').sandboxLint(code);
+      if (ctx.json) return printJson({ ok: true, file: path.resolve(file), sandboxed: true, powers: [], lint });
+      out(`ok: ${path.resolve(file)} is a sandboxed mod and parses`);
+      out('It runs in TRIF\'s sandbox, with only TRIF\'s API: it can\'t send, click, navigate or load anything, so it never waits for the user\'s OK.');
+      if (!lint.length) return out('TRIF finds nothing in it that the sandbox would refuse.');
+      const lines = code.split('\n');
+      out('\nThe sandbox doesn\'t give it these, so they\'d fail when it runs (not a hold: rewrite them with the API, see "Sandboxed mods" in TECHNIQUES.md, or make it a page script if it really needs them):');
+      for (const l of lint) {
+        out(`- ${l.what}: ${l.why}`);
+        for (const n of l.lines.slice(0, 3)) out(`    line ${n}: ${lines[n - 1].trim().slice(0, 140)}`);
+        if (l.lines.length > 3) out(`    (${l.lines.length - 3} more)`);
+      }
+      return;
+    }
     // What TRIF reads in it (lib/powers.js): what would make it wait for the user's OK, line by line, and
     // how to write it so it doesn't, where that's possible. So an agent can check its own mod first.
     const { powersOf, modSites } = require('./lib/powers');
-    const { parseHeader } = require('./lib/mods');
     const rel = path.relative(ctx.ws.modsDir, path.resolve(file)).split(path.sep);
     const id = rel.length === 2 ? `${rel[0]}/${rel[1].replace(/\.js$/, '')}` : path.basename(file, '.js');
-    const powers = powersOf(code, { sites: modSites({ id, matches: parseHeader(code).matches }) });
+    const powers = powersOf(code, { sites: modSites({ id, matches: header.matches }) });
     const lines = code.split('\n');
     if (ctx.json) return printJson({ ok: true, file: path.resolve(file), powers: powers.map(({ key, fact, found, lines: at }) => ({ key, fact, found, lines: at })) });
     out(`ok: ${path.resolve(file)} parses`);
@@ -826,6 +859,8 @@ const handlers = {
       if (isHeld(m)) out(`  HELD: ${held[m.id].by === 'outside' ? 'new or changed since TRIF last let it run' : `a side-panel agent wrote it while working on ${held[m.id].site}`}, and TRIF found that it ${(held[m.id].facts || [held[m.id].reason]).join('; it ')}. Not running until the user approves it (trif approve ${m.id}).`);
       if (updates[m.id]) out(`  ${updateText(updates[m.id])}: trif mod-update ${m.id}`);
       if (m.description) out(`  ${m.description}`);
+      if (m.rules) out('  kind: rules (data TRIF runs; never waits for the user\'s OK)');
+      else if (m.sandboxed) out('  kind: sandboxed (runs in TRIF\'s sandbox with only TRIF\'s API; never waits for the user\'s OK, except in a browser without the sandbox)');
       if (isShippedSource(m.source)) out(`  from TRIF${m.version ? `, version ${m.version}` : ''}`);
       out(`  matches: ${m.matches.join(' ')}`);
       if (m.risk) out(`  risk: ${m.risk.tier}${m.risk.why ? ` (${m.risk.why})` : ''}`);
@@ -847,7 +882,8 @@ const handlers = {
     }
     const file = path.join(ctx.ws.modsDir, site, `${mod}.js`);
     if (fs.existsSync(file)) throw new HelperError(`${file} already exists`, 'command');
-    const tpl = fs.readFileSync(path.join(P.HELPER_DIR, 'templates', ctx.opts['--rules'] ? 'rules.js' : 'mod.js'), 'utf8');
+    if (ctx.opts['--rules'] && ctx.opts['--sandboxed']) throw new UsageError('--rules or --sandboxed, not both');
+    const tpl = fs.readFileSync(path.join(P.HELPER_DIR, 'templates', ctx.opts['--rules'] ? 'rules.js' : ctx.opts['--sandboxed'] ? 'sandboxed.js' : 'mod.js'), 'utf8');
     let text = tpl;
     // all-sites mods run everywhere until the agent narrows the @match lines.
     if (site === ALL_SITES) text = text.replace(/^\/\/ @match .*\n(\/\/ @match .*\n)*/m, '// @match       *://*/*\n');

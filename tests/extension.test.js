@@ -2943,7 +2943,7 @@ test('groups: switched off per site, page scripts and rules apart; registration 
   assert.strictEqual(lib.groupOffOn(g, 'rules', 'x.com'), false);
   assert.deepStrictEqual(lib.switchGroup(g, 'x.com', 'page', true), {});
   assert.deepStrictEqual(lib.normalizeGroupsOff({ 'X.com': ['page', 'bogus'], '': ['page'], 'y.com': 'page' }), { 'x.com': ['page'] });
-  assert.throws(() => lib.switchGroup({}, 'x.com', 'sandboxed', false), /isn't a group/);
+  assert.throws(() => lib.switchGroup({}, 'x.com', 'bogus', false), /isn't a group/);
   // a page script for every site and a rules mod: with page scripts off on x.com, only the page script
   // leaves x.com out (its own switched-off sites kept)
   const us = mockUserScripts();
@@ -2961,4 +2961,124 @@ test('unwrapMarkdown: an update\'s notes flow to the panel\'s width (the file\'s
     '- **Bigger mods.** A mod can now be 4 MB.\n- Two\n\nA para that goes on.\n\n[All](https://x)');
   assert.doesNotMatch(renderMarkdown(unwrapMarkdown('- one\n  two')), /<br/);
   assert.equal(unwrapMarkdown(''), '');
+});
+
+// ---- sandboxed mods (extension/sandbox.js; docs/SAFE-MODS.md "Sandboxed: what's built")
+
+test('sandboxed mods: TRIF\'s own world, their code as text for SES; the sandbox runtime goes only where one runs', async () => {
+  const sbx = await import('../extension/sandbox.js');
+  const us = mockUserScripts();
+  const page = mod('x.com/page');
+  const boxed = mod('y.com/boxed', { sandboxed: true, code: 'trif.css("a { color: red }");' });
+  const boxed2 = mod('z.com/boxed', { sandboxed: true, matches: ['*://z.com/*', '*://*.z.com/*'] });
+  let r = await lib.syncUserScripts(us, { mods: [page, boxed, boxed2], runtimeCode: 'RT' });
+  assert.deepStrictEqual(r.errors, []);
+  assert.deepStrictEqual(r.registered, ['x.com/page', 'y.com/boxed', 'z.com/boxed']);
+  const byId = Object.fromEntries(us.scripts.map((s) => [s.id, s]));
+  assert.strictEqual(byId['x.com/page'].world, 'MAIN');
+  for (const id of ['y.com/boxed', 'z.com/boxed']) {
+    assert.strictEqual(byId[id].world, 'USER_SCRIPT');
+    assert.strictEqual(byId[id].worldId, sbx.SANDBOX_WORLD);
+  }
+  // (the mod's code is a string inside TRIF's code, evaluated by SES: it can't close the string)
+  const code = byId['y.com/boxed'].js[0].code;
+  assert.match(code, /__trifSandbox\.run\("y\.com\/boxed", "trif\.css\(\\"a \{ color: red \}\\"\);"\)/);
+  new Function(code); // parses
+  const tricky = sbx.sandboxModCode('a/b', '"); fetch("x"); ("');
+  assert.ok(tricky.includes(JSON.stringify('"); fetch("x"); ("')));
+  // the sandbox runtime: SES from the extension, then TRIF's code, in the same world, where the sandboxed mods run
+  const run = byId[sbx.SANDBOX_RUNTIME_ID];
+  assert.ok(run, 'the sandbox runtime is registered');
+  assert.deepStrictEqual(run.js[0], { file: 'vendor/ses.umd.min.js' });
+  assert.strictEqual(run.world, 'USER_SCRIPT');
+  assert.strictEqual(run.worldId, sbx.SANDBOX_WORLD);
+  assert.deepStrictEqual(run.matches, ['*://*.z.com/*', '*://y.com/*', '*://z.com/*']);
+  assert.ok(!r.registered.includes(sbx.SANDBOX_RUNTIME_ID));
+  // the page's runtime still goes everywhere a mod runs (trif errors --page, recording)
+  assert.deepStrictEqual(byId[lib.RUNTIME_ID].matches, ['*://*.z.com/*', '*://x.com/*', '*://y.com/*', '*://z.com/*']);
+  // again, the same: nothing re-registered (known ids, as the background passes them)
+  us.calls.length = 0;
+  r = await lib.syncUserScripts(us, { mods: [page, boxed, boxed2], runtimeCode: 'RT', applied: r.applied, known: r.known });
+  assert.deepStrictEqual(us.calls, []);
+  assert.ok(r.known.includes(sbx.SANDBOX_RUNTIME_ID));
+  // one sandboxed mod gone: the runtime's matches follow (updated, the page's runtime and the others left)
+  us.calls.length = 0;
+  r = await lib.syncUserScripts(us, { mods: [page, boxed], runtimeCode: 'RT', applied: r.applied, known: r.known });
+  assert.deepStrictEqual(us.scripts.find((s) => s.id === sbx.SANDBOX_RUNTIME_ID).matches, ['*://y.com/*']);
+  // none left: the sandbox runtime goes
+  r = await lib.syncUserScripts(us, { mods: [page], runtimeCode: 'RT', applied: r.applied, known: r.known });
+  assert.ok(!us.scripts.some((s) => s.id === sbx.SANDBOX_RUNTIME_ID));
+  assert.deepStrictEqual(us.scripts.map((s) => s.id), [lib.RUNTIME_ID, 'x.com/page']);
+});
+
+test('sandboxed mods: if the sandbox runtime can\'t be registered, its mods say why and aren\'t registered', async () => {
+  const sbx = await import('../extension/sandbox.js');
+  const us = mockUserScripts();
+  const register = us.register;
+  us.register = async (list) => { if (list.some((s) => s.id === sbx.SANDBOX_RUNTIME_ID)) throw new Error('no such world'); return register(list); };
+  const r = await lib.syncUserScripts(us, { mods: [mod('x.com/page'), mod('y.com/boxed', { sandboxed: true })], runtimeCode: 'RT' });
+  assert.deepStrictEqual(r.registered, ['x.com/page']);
+  assert.deepStrictEqual(r.errors, [{ id: 'y.com/boxed', error: 'TRIF\'s sandbox couldn\'t be set up: no such world' }]);
+  assert.strictEqual(r.known, null);
+});
+
+test('sandboxed mods: their own group, between rules and page scripts; as page scripts where the browser has no sandbox', () => {
+  assert.deepStrictEqual(lib.GROUPS, ['rules', 'sandboxed', 'page']);
+  assert.deepStrictEqual(lib.MOD_GROUPS, ['rules', 'sandboxed', 'page']);
+  assert.strictEqual(lib.modGroup(mod('a/b', { sandboxed: true })), 'sandboxed');
+  assert.strictEqual(lib.modGroup(mod('a/b', { sandboxed: true, unsandboxed: true })), 'page');
+  assert.strictEqual(lib.modGroup(mod('a/b', { rules: true })), 'rules');
+  assert.strictEqual(lib.modGroup(mod('a/b')), 'page');
+  // switched off on a site: only that group's mods leave it out
+  const g = lib.switchGroup({}, 'x.com', 'sandboxed', false);
+  assert.deepStrictEqual(g, { 'x.com': ['sandboxed'] });
+  assert.deepStrictEqual(lib.offSitesFor(mod('a/b', { sandboxed: true }), {}, g), ['x.com']);
+  assert.deepStrictEqual(lib.offSitesFor(mod('a/b'), {}, g), []);
+  assert.deepStrictEqual(lib.normalizeStartsOff(['sandboxed', 'bogus', 'page']), ['sandboxed', 'page']);
+  // new sandboxed mods start off when that's the setting, and only those
+  const m1 = mod('a/one', { sandboxed: true }), m2 = mod('a/two');
+  const nw = lib.applyNewMods([m1, m2], { seen: {}, autoUpdated: {}, startsOff: ['sandboxed'] });
+  assert.deepStrictEqual(nw.newOff, { 'a/one': 'new' });
+});
+
+test('sandboxFallback: without the sandbox a sandboxed mod waits for the user\'s OK, then runs as a page script; never silently', async () => {
+  const sbx = await import('../extension/sandbox.js');
+  const boxed = mod('y.com/boxed', { sandboxed: true, hash: 'H', description: 'Bounces the logo', pageFacts: ['can send requests'] });
+  const page = mod('x.com/page');
+  // a browser with the sandbox: as they are
+  assert.deepStrictEqual(lib.sandboxFallback([boxed, page], { canSandbox: true }), [boxed, page]);
+  // without: held, by TRIF's extension, with the reason first
+  const [held, same] = lib.sandboxFallback([boxed, page], { canSandbox: false, browser: 'Safari' });
+  assert.strictEqual(same, page);
+  assert.strictEqual(held.unsandboxed, true);
+  assert.deepStrictEqual(held.held, { by: 'sandbox', site: 'y.com', reason: 'Safari can\'t run sandboxed mods, so here it would run as a page script, with everything the page has; can send requests',
+    facts: ['Safari can\'t run sandboxed mods, so here it would run as a page script, with everything the page has', 'can send requests'], claim: 'Bounces the logo', hash: 'H' });
+  // a held mod isn't registered
+  const us = mockUserScripts();
+  await lib.syncUserScripts(us, { mods: [held, page], runtimeCode: 'RT' });
+  assert.deepStrictEqual(us.scripts.map((s) => s.id), [lib.RUNTIME_ID, 'x.com/page']);
+  // allowed (this version): a page script with TRIF's API around its code, no sandbox world
+  const [ok] = lib.sandboxFallback([held], { canSandbox: false, allowed: { 'y.com/boxed': 'H' } });
+  assert.strictEqual(ok.held, undefined);
+  assert.strictEqual(ok.unsandboxed, true);
+  assert.strictEqual(ok.hash, 'H');
+  const us2 = mockUserScripts();
+  const r = await lib.syncUserScripts(us2, { mods: [ok], runtimeCode: 'RT' });
+  assert.deepStrictEqual(r.registered, ['y.com/boxed']);
+  const s = us2.scripts.find((x) => x.id === 'y.com/boxed');
+  assert.strictEqual(s.world, 'MAIN');
+  assert.ok(!s.worldId);
+  assert.ok(!us2.scripts.some((x) => x.id === sbx.SANDBOX_RUNTIME_ID));
+  assert.ok(s.js[0].code.includes('(\'page\', "y.com/boxed", function (page, trif, console, setTimeout, clearTimeout, setInterval, clearInterval, requestAnimationFrame, cancelAnimationFrame) { "use strict";\n/* y.com/boxed */\n});'));
+  new Function(s.js[0].code);
+  assert.strictEqual(r.applied['y.com/boxed'], 'H:page', 'registered differently from the sandboxed form');
+  // a new version waits again
+  const [again] = lib.sandboxFallback([{ ...boxed, hash: 'H2' }], { canSandbox: false, allowed: { 'y.com/boxed': 'H' } });
+  assert.strictEqual(again.held.by, 'sandbox');
+  // idempotent, and undone where the sandbox is there after all
+  assert.deepStrictEqual(lib.sandboxFallback(lib.sandboxFallback([boxed], { canSandbox: false }), { canSandbox: false }), lib.sandboxFallback([boxed], { canSandbox: false }));
+  assert.deepStrictEqual(lib.sandboxFallback([held], { canSandbox: true }), [boxed]);
+  // held by the helper anyway: its hold stays, marked as a page script here
+  const helperHeld = { ...boxed, held: { by: 'agent', reason: 'x', hash: 'H' } };
+  assert.deepStrictEqual(lib.sandboxFallback([helperHeld], { canSandbox: false })[0], { ...helperHeld, unsandboxed: true });
 });

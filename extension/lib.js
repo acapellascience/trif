@@ -2,6 +2,7 @@
 // functions that need Chrome APIs take them as parameters.
 
 import { safeStringify, formatError } from './runtime.js';
+import { SANDBOX_WORLD, SANDBOX_RUNTIME_ID, SES_FILE, sandboxRuntimeCode, sandboxModCode, sandboxPageCode } from './sandbox.js';
 
 // The running extension's own id: the Web Store build has a different one from the unpacked dev build
 // (whose manifest key fixes it to this fallback, also used under Node in the tests).
@@ -66,16 +67,67 @@ try { ${code}
 }
 
 export function modToUserScript(mod) {
-  return {
+  const base = {
     id: mod.id,
     matches: Array.isArray(mod.matches) ? mod.matches : [],
     excludeMatches: Array.isArray(mod.excludes) ? mod.excludes : [],
-    js: [{ code: wrapModCode(mod.id, String(mod.code ?? '')) }],
     runAt: normalizeRunAt(mod.runAt),
-    world: 'MAIN',
     allFrames: false,
   };
+  // A sandboxed mod (sandbox.js): in TRIF's own world, its code evaluated by SES in a compartment of its
+  // own; or, in a browser without that world and once the user allowed it (sandboxFallback), in the page's
+  // world with the same API around it.
+  if (inSandboxWorld(mod)) return { ...base, js: [{ code: sandboxModCode(mod.id, String(mod.code ?? '')) }], world: 'USER_SCRIPT', worldId: SANDBOX_WORLD };
+  if (mod.sandboxed) return { ...base, js: [{ code: sandboxPageCode(mod.id, String(mod.code ?? '')) }], world: 'MAIN' };
+  return { ...base, js: [{ code: wrapModCode(mod.id, String(mod.code ?? '')) }], world: 'MAIN' };
 }
+
+/** Whether a mod registers in TRIF's sandbox world: sandboxed, in a browser that has the world. */
+export function inSandboxWorld(mod) { return !!(mod && mod.sandboxed && !mod.unsandboxed); }
+
+/** The sandbox world's runtime (sandbox.js): SES, then TRIF's code; where any sandboxed mod runs. */
+export function sandboxRuntimeScript(matches) {
+  return { id: SANDBOX_RUNTIME_ID, matches, excludeMatches: [], js: [{ file: SES_FILE }, { code: sandboxRuntimeCode() }], runAt: 'document_start', world: 'USER_SCRIPT', worldId: SANDBOX_WORLD, allFrames: false };
+}
+
+// ---- browsers without TRIF's sandbox world ------------------------------------------------------------
+// A sandboxed mod in a browser that can't host the world (background.js sandboxWorld: Safari, or a browser
+// whose userScripts has no configureWorld with a CSP) isn't silently run unsandboxed: it waits for the
+// user's OK, held here in the extension (held.by 'sandbox'; the helper's holds are about what a mod can do,
+// and this is about where it can run). Allowed (state `unsandboxedOk`: id -> the hash allowed), it runs as
+// a page script with the same API (sandbox.js sandboxPageCode), in the "Page scripts" group (modGroup), as
+// that's how it runs. A new version waits again.
+
+/** The text a sandboxed mod's hold shows in a browser without the sandbox. */
+export function sandboxHoldReason(browser = BROWSER) {
+  return `${browser} can't run sandboxed mods, so here it would run as a page script, with everything the page has`;
+}
+
+/**
+ * The mods as this browser runs them: unchanged where it can sandbox (`canSandbox`); otherwise each sandboxed
+ * mod marked `unsandboxed`, and held (by 'sandbox') unless `allowed[id]` is its hash. Idempotent: marks from
+ * a run before (with another canSandbox or `allowed`) are taken off first; `hash` is left as the helper sent
+ * it (syncUserScripts tells the two ways of registering apart). Pure.
+ */
+export function sandboxFallback(mods, { canSandbox = true, allowed = {}, browser = BROWSER } = {}) {
+  return (mods || []).map((m0) => {
+    let m = m0;
+    if (m && (m.unsandboxed || (m.held && m.held.by === 'sandbox'))) {
+      m = { ...m };
+      delete m.unsandboxed;
+      if (m.held && m.held.by === 'sandbox') delete m.held;
+    }
+    if (!m || !m.sandboxed || canSandbox) return m;
+    // (held by the helper anyway: its own Allow first)
+    if (m.held) return { ...m, unsandboxed: true };
+    if (allowed[m.id] && allowed[m.id] === m.hash) return { ...m, unsandboxed: true };
+    const facts = [sandboxHoldReason(browser), ...(Array.isArray(m.pageFacts) ? m.pageFacts : [])];
+    return { ...m, unsandboxed: true, held: { by: 'sandbox', site: modSiteName(m), reason: facts.join('; '), facts, claim: String(m.risk?.why || m.description || '').slice(0, 300), hash: m.hash } };
+  });
+}
+
+// (the site folder a mod is in: its id's first part)
+function modSiteName(m) { return String(m.site || String(m.id || '').split('/')[0] || ''); }
 
 export function runtimeUserScript(code, matches = ['<all_urls>']) {
   return { id: RUNTIME_ID, matches, excludeMatches: [], js: [{ code }], runAt: 'document_start', world: 'MAIN', allFrames: false };
@@ -144,7 +196,9 @@ export async function syncUserScripts(us, { mods, runtimeCode, applied = {}, dis
     const limited = sitesOn ? limitToSites(mod, sitesOn) : mod;
     if (!limited) continue; // only on sites TRIF is off for
     // (its own switched-off sites, and the sites where its group is off: groupsOff)
-    desired.push(withOffSites(limited, offSitesFor(mod, offSites, groupsOff)));
+    const reg = withOffSites(limited, offSitesFor(mod, offSites, groupsOff));
+    // (a sandboxed mod run as a page script registers differently: a hash of its own)
+    desired.push(reg.sandboxed && reg.unsandboxed ? { ...reg, hash: `${reg.hash ?? ''}:page` } : reg);
   }
 
   // (Anything registered that isn't wanted goes: a home page marker left by a development build too.)
@@ -156,6 +210,28 @@ export async function syncUserScripts(us, { mods, runtimeCode, applied = {}, dis
     if (existing.length) await us.unregister();
     return { registered: [], errors, applied: {}, reset: existing.length > 0, known: [] };
   }
+  // The sandbox world's runtime (sandbox.js) goes where a sandboxed mod runs in that world. Its mods queue
+  // themselves until it's there, so unlike the page's runtime it needn't be registered before them.
+  const sandboxMatches = runtimeMatches(desired.filter(inSandboxWorld), []);
+  const sandboxCode = sandboxMatches.length ? sandboxRuntimeCode() : null;
+  const sandboxHash = sandboxMatches.length ? quickHash(sandboxCode + '\n' + JSON.stringify(sandboxMatches)) : null;
+  const sandboxNow = existing.find((s) => s.id === SANDBOX_RUNTIME_ID);
+  let sandboxUp = false; // (the sandbox runtime registered after this sync)
+  const syncSandboxRuntime = async (fresh) => {
+    const there = !fresh && !!sandboxNow;
+    if (!sandboxMatches.length) { if (there) await us.unregister({ ids: [SANDBOX_RUNTIME_ID] }); return; }
+    const code = sandboxNow?.js?.[1]?.code;
+    const same = there && (code !== undefined ? code === sandboxCode && JSON.stringify([...(sandboxNow.matches || [])].sort()) === JSON.stringify(sandboxMatches) : applied[SANDBOX_RUNTIME_ID] === sandboxHash);
+    try {
+      if (!same) { if (there) await us.update([sandboxRuntimeScript(sandboxMatches)]); else await us.register([sandboxRuntimeScript(sandboxMatches)]); }
+      next[SANDBOX_RUNTIME_ID] = sandboxHash;
+      sandboxUp = true;
+    } catch (e) {
+      unsure = true;
+      // (its mods would wait for it forever: each says why instead, and isn't registered)
+      for (const m of desired.filter(inSandboxWorld)) errors.push({ id: m.id, error: `TRIF's sandbox couldn't be set up: ${errMsg(e)}` });
+    }
+  };
   const runtimeHash = quickHash(runtimeCode + '\n' + JSON.stringify(matches));
   const current = existing.find((s) => s.id === RUNTIME_ID);
   const currentCode = current?.js?.[0]?.code;
@@ -179,7 +255,7 @@ export async function syncUserScripts(us, { mods, runtimeCode, applied = {}, dis
       errors.push({ id: mod.id, error: errMsg(e) });
     }
   };
-  const knownNow = () => (unsure ? null : [RUNTIME_ID, ...registered]);
+  const knownNow = () => (unsure ? null : [RUNTIME_ID, ...(sandboxUp ? [SANDBOX_RUNTIME_ID] : []), ...registered]);
 
   // Several mods in one call: Chrome shares every user script with its pages again after each call, so
   // ten 5 MB mods took 2-4 s one by one and 0.2-0.9 s in one call (Chrome 156). One bad mod fails the whole
@@ -204,16 +280,19 @@ export async function syncUserScripts(us, { mods, runtimeCode, applied = {}, dis
     // (the mod itself fails to register and is reported).
     try { await us.register([runtimeUserScript(runtimeCode, matches)]); } catch { await us.register([runtimeUserScript(runtimeCode)]); }
     next[RUNTIME_ID] = runtimeHash;
-    await registerMods(desired, false);
+    await syncSandboxRuntime(true);
+    await registerMods(sandboxUp ? desired : desired.filter((m) => !inSandboxWorld(m)), false);
     return { registered, errors, applied: next, reset: true, known: knownNow() };
   }
 
   next[RUNTIME_ID] = runtimeHash;
-  const stale = existing.map((s) => s.id).filter((id) => id !== RUNTIME_ID && !seen.has(id));
+  const stale = existing.map((s) => s.id).filter((id) => id !== RUNTIME_ID && id !== SANDBOX_RUNTIME_ID && !seen.has(id));
   if (stale.length) await us.unregister({ ids: stale });
+  await syncSandboxRuntime(false);
   const fresh = [];
   const changed = [];
   for (const mod of desired) {
+    if (inSandboxWorld(mod) && !sandboxUp) continue; // (reported above)
     if (!existingIds.has(mod.id)) fresh.push(mod);
     else if (mod.hash && applied[mod.id] === mod.hash) { next[mod.id] = mod.hash; registered.push(mod.id); }
     else changed.push(mod);
@@ -483,7 +562,7 @@ export function applyReadded(mods, disabled = {}, readded = {}) {
 }
 
 // ---- new mods start on or off ----------------------------------------------------------------------
-// Settings' "New mods start": for each group of mods (modGroup: 'rules', 'page'), whether a mod of it that
+// Settings' "New mods start": for each group of mods (modGroup: 'rules', 'sandboxed', 'page'), whether a mod of it that
 // this browser hasn't seen before arrives switched on (as always) or off, so a page script can't run before
 // the user has looked at it while styles still apply at once. chrome.storage.local `startsOff` = the groups
 // set to start off (none: every group starts on, the default). What counts as arriving: a mod id this
@@ -497,7 +576,7 @@ export function applyReadded(mods, disabled = {}, readded = {}) {
 // was switched off, for the panel and `trif status`, until the user switches it on.
 
 /** The groups a mod can be in, for `startsOff`. */
-export const MOD_GROUPS = ['rules', 'page'];
+export const MOD_GROUPS = ['rules', 'sandboxed', 'page'];
 
 /** chrome.storage.local `startsOff`, cleaned up: known groups, once each. */
 export function normalizeStartsOff(value) {
@@ -1288,12 +1367,14 @@ export function siteExcludes(site) {
 }
 
 // ---- Groups: how TRIF runs a mod, switched on and off per site (docs/PROTOCOL.md "Groups").
-// "rules": a rules mod (its header says @rules: TRIF runs its data); "page": every other mod (a page
-// script, run in the page with everything it has). `groupsOff` (chrome.storage.local) maps a site to
+// "rules": a rules mod (its header says @rules: TRIF runs its data); "sandboxed": a sandboxed mod (its
+// header says @sandboxed: run in TRIF's own world, sandbox.js); "page": every other mod (a page script, run
+// in the page with everything it has), and a sandboxed mod in a browser without the sandbox (it runs, or
+// would run, as a page script there: sandboxFallback). `groupsOff` (chrome.storage.local) maps a site to
 // the groups switched off there: their mods don't run on it (or its subdomains), each mod's own
 // switch left as it is.
-export const GROUPS = ['rules', 'page'];
-export function modGroup(mod) { return mod && mod.rules ? 'rules' : 'page'; }
+export const GROUPS = ['rules', 'sandboxed', 'page'];
+export function modGroup(mod) { return mod && mod.rules ? 'rules' : inSandboxWorld(mod) ? 'sandboxed' : 'page'; }
 
 /** `groupsOff` from storage, cleaned up: valid sites, known groups, no duplicates, no empty lists. */
 export function normalizeGroupsOff(value) {

@@ -247,7 +247,7 @@ yourself also releases it. Not available to agents inside a side-panel run.`,
   check: {
     usage: 'trif check <file|site/mod>',
     summary: 'check that a mod parses, and what TRIF reads in it that would make it wait for the user\'s OK',
-    details: 'Prints the syntax error and where it is, or "ok", then each thing TRIF reads in the code that would make the mod wait for the user\'s OK (sending, clicking for the user, loading from addresses it builds, code it can\'t read), the lines, and how to avoid it where there\'s a way. Use it instead of node --check.',
+    details: 'Prints the syntax error and where it is, or "ok", then each thing TRIF reads in the code that would make the mod wait for the user\'s OK (sending, clicking for the user, loading from addresses it builds, code it can\'t read), the lines, and how to avoid it where there\'s a way. Use it instead of node --check. A rules mod: its rules checked. A sandboxed mod (@sandboxed): it never waits; instead it lists what the sandbox wouldn\'t give it (window, document, fetch, real elements\' methods, ...), which would fail when it runs.',
     examples: ['trif check sites/x.com/hide-reposts.js', 'trif check x.com/hide-reposts'],
   },
   enable: {
@@ -336,13 +336,16 @@ TRIF, version N", and "update available" when a newer version is waiting (trif m
     examples: ['trif mods', 'trif mods --json'],
   },
   new: {
-    usage: 'trif new <site> <mod> [--rules]',
-    summary: 'create sites/<site>/<mod>.js from a template and print its path (--rules: a rules mod, data instead of code)',
+    usage: 'trif new <site> <mod> [--rules | --sandboxed]',
+    summary: 'create sites/<site>/<mod>.js from a template and print its path (--rules: a rules mod, data instead of code; --sandboxed: JavaScript in TRIF\'s sandbox)',
     details: `<site> is a hostname (x.com, news.ycombinator.com); <mod> is a kebab-case name. The template has
 the header plus helpers for injecting CSS and handling elements that appear later. --rules makes a rules
 mod: CSS, things to hide, text to replace and items to filter, as data that TRIF's own code runs, so it
-can't send, click or load anything and never waits for the user's OK (see "Rules mods" in TECHNIQUES.md).`,
-    examples: ['trif new example.com hide-banner --rules', 'trif new example.com hide-banner'],
+can't send, click or load anything and never waits for the user's OK (see "Rules mods" in TECHNIQUES.md).
+--sandboxed makes a sandboxed mod: JavaScript that runs in TRIF's sandbox with only TRIF's API (page, trif,
+element stand-ins, timers), so it can't act either and never waits for the user's OK (see "Sandboxed mods"
+in TECHNIQUES.md). Write the lowest that does the job: rules, then sandboxed, then a page script.`,
+    examples: ['trif new example.com hide-banner --rules', 'trif new example.com bouncing-logo --sandboxed', 'trif new example.com hide-banner'],
   },
   'install-example': {
     usage: 'trif install-example <site>/<mod> [--force]',

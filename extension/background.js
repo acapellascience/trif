@@ -10,8 +10,9 @@ import {
   normalizeOffSites, offSiteName, offOnSite, hostInScope, withOffSites, normalizeGroupsOff, switchGroup, offSitesFor, GROUPS, scopeFor, normalizeSitesOn, siteOnFor, sitesInUse, limitToSites, applyStartSites, switchSite, fromOtherBrowser, timedUserScripts, capChat,
   ALL_ACCESS, readAccess, activeSites, hasSiteAccess, siteOrigins, siteState, siteRefusal, siteModeOf,
   FEATURES, ModsParts, fillSameMods, storedMods, modsStorageState, modsStoragePlan, normalizeStarter, applyReadded, normalizeReadded,
-  applyNewMods, normalizeStartsOff, normalizeNewOff, MOD_GROUPS, modGroup,
+  applyNewMods, normalizeStartsOff, normalizeNewOff, MOD_GROUPS, modGroup, sandboxFallback, inSandboxWorld, SAFARI,
 } from './lib.js';
+import { SANDBOX_WORLD, SANDBOX_CSP, SETTINGS_MAX } from './sandbox.js';
 import { runtimeCode } from './runtime.js';
 import { sweepPage } from './sweep.js';
 import { captureScreenshot, stitchShots, isCopyWindow } from './screenshot.js';
@@ -44,7 +45,7 @@ const state = {
   recording: [],         // hostnames being recorded (persisted)
   disabled: {},          // mod id → true for mods the user switched off (persisted as `disabled`)
   offSites: {},          // mod id → sites it's switched off on, for mods on several sites (persisted)
-  groupsOff: {},         // site → groups ('rules', 'page') switched off there (persisted; lib.js "Groups")
+  groupsOff: {},         // site → groups ('rules', 'sandboxed', 'page') switched off there (persisted; lib.js "Groups")
   sitesOn: [],           // registrable domains TRIF is on for; off everywhere else (persisted)
   sitesOffered: [],      // sites the helper said to start on that were turned on once already (persisted)
   access: ALL_ACCESS,    // what the browser gives TRIF (readAccess): a site in sitesOn counts only with it
@@ -55,7 +56,9 @@ const state = {
   startedOff: {},        // mod id → true for mods already switched off once: preinstalled, or from another browser (persisted)
   absorbed: {},          // mod id → true for retired shipped mods whose switch was carried over (persisted)
   readded: {},           // mod id → stamp: Tim's mods deleted and added again, switched as listed once per stamp (persisted)
-  startsOff: [],         // groups ('rules', 'page') whose new mods start off: Settings' "New mods start" (persisted; lib.js applyNewMods)
+  startsOff: [],         // groups ('rules', 'sandboxed', 'page') whose new mods start off: Settings' "New mods start" (persisted; lib.js applyNewMods)
+  canSandbox: null,      // whether this browser hosts TRIF's sandbox world (sandboxWorld); null until known
+  unsandboxedOk: {},     // mod id → hash: sandboxed mods the user allowed to run as page scripts, in a browser without the sandbox (persisted; lib.js sandboxFallback)
   seenMods: null,        // mod id → true for every mod this browser has seen; null: not stored yet (persisted)
   autoUpdated: null,     // mod id → stamp of the last new version of a shipped mod TRIF put in place by itself, once seen (persisted)
   newOff: {},            // mod id → 'new' | 'update': switched off because new mods of its group start off, until switched on (persisted)
@@ -146,6 +149,7 @@ const ready = chrome.storage.local.get(null).then(async (s) => {
   state.seenMods = s.seenMods && typeof s.seenMods === 'object' ? normalizeDisabled(s.seenMods) : null;
   state.autoUpdated = s.autoUpdated && typeof s.autoUpdated === 'object' ? normalizeReadded(s.autoUpdated) : null;
   state.newOff = normalizeNewOff(s.newOff);
+  state.unsandboxedOk = normalizeReadded(s.unsandboxedOk);
   state.defaultOrder = normalizeModOrder(s.defaultOrder);
   state.sitesOffered = normalizeSitesOn(s.sitesOffered);
   state.siteMode = s.siteMode === 'permissive' || s.siteMode === 'restrictive' ? s.siteMode : null;
@@ -317,6 +321,9 @@ async function applyMods() {
 }
 
 async function applyModsNow() {
+  // (sandboxed mods as this browser runs them: lib.js sandboxFallback)
+  await sandboxWorld();
+  state.mods = sandboxFallback(state.mods, { canSandbox: state.canSandbox !== false, allowed: state.unsandboxedOk });
   if (!checkUserScripts()) {
     state.known = null;
     state.lastApply = { registered: [], errors: state.mods.filter((m) => isEnabled(m.id)).map((m) => ({ id: m.id, error: USER_SCRIPTS_OFF })) };
@@ -342,6 +349,72 @@ async function applyModsNow() {
   }
   return state.lastApply;
 }
+
+// ---- TRIF's sandbox world (sandbox.js) --------------------------------------------------------------
+// Configured once per background start (the browser keeps it until the extension updates; configuring again
+// is harmless): its own CSP, which lets nothing connect anywhere, and messaging, which only TRIF's own code in
+// that world reaches (sandbox.js captures it before any mod runs; mods' compartments never see `chrome`), for
+// the mods' settings (onUserScriptMessage, below). Safari has no such world (its userScripts is TRIF's
+// adapter, safari.js); a browser whose userScripts has no configureWorld neither: there, sandboxed mods wait
+// for the user's OK to run as page scripts (lib.js sandboxFallback).
+let sandboxSetup = null;
+function sandboxWorld() {
+  if (state.canSandbox !== null) return Promise.resolve(state.canSandbox);
+  if (sandboxSetup) return sandboxSetup;
+  sandboxSetup = (async () => {
+    if (SAFARI || typeof chrome.userScripts?.configureWorld !== 'function') { state.canSandbox = false; return false; }
+    if (!checkUserScripts()) return null; // (user scripts off: asked again once they're on)
+    try {
+      await chrome.userScripts.configureWorld({ worldId: SANDBOX_WORLD, csp: SANDBOX_CSP, messaging: true });
+      state.canSandbox = true;
+    } catch (e) {
+      log('warn', `TRIF's sandbox world: ${errMsg(e)} (sandboxed mods wait for your OK to run as page scripts)`);
+      state.canSandbox = false;
+    }
+    return state.canSandbox;
+  })().finally(() => { sandboxSetup = null; });
+  return sandboxSetup;
+}
+
+// The mods' settings (sandbox.js trif.settings): per mod and per site, in chrome.storage.local
+// `sandboxSettings` = {"<mod id>": {"<site>": {"<key>": <JSON text>}}}. The site is the one the sender's page
+// is on (the browser says), not what the message says, so a mod can't carry what it read on one site to
+// another through its settings; the mod is the one TRIF's code in the world says (mods can't send).
+const SETTINGS_SITES_MAX = 200; // sites kept per mod (the oldest written go first)
+chrome.runtime.onUserScriptMessage?.addListener((msg, sender, sendResponse) => {
+  if (!msg || typeof msg.trifSandbox !== 'string') return false;
+  if (sender && sender.userScriptWorldId !== undefined && sender.userScriptWorldId !== SANDBOX_WORLD) return false;
+  (async () => {
+    await ready;
+    let host = '';
+    try { host = new URL(sender?.url || sender?.origin || '').hostname; } catch { /* none */ }
+    const site = scopeFor(host);
+    const mod = String(msg.mod ?? ''), key = String(msg.key ?? '');
+    if (!site || !mod || !key || key.length > 100 || !state.mods.some((m) => m.id === mod && m.sandboxed)) return { ok: false, error: 'not a sandboxed mod here' };
+    const all = (await chrome.storage.local.get('sandboxSettings')).sandboxSettings;
+    const store = all && typeof all === 'object' && !Array.isArray(all) ? all : {};
+    if (msg.trifSandbox === 'settings.get') {
+      const text = store[mod]?.[site]?.[key];
+      try { return { ok: true, value: typeof text === 'string' ? JSON.parse(text) : null }; } catch { return { ok: true, value: null }; }
+    }
+    if (msg.trifSandbox === 'settings.save') {
+      const json = String(msg.json ?? '');
+      if (json.length > SETTINGS_MAX) return { ok: false, error: `settings can take up to ${SETTINGS_MAX / 1024} KB` };
+      try { JSON.parse(json); } catch { return { ok: false, error: 'not JSON' }; }
+      const sites = { ...(store[mod] || {}) };
+      const here = { ...(sites[site] || {}), [key]: json };
+      delete sites[site];
+      sites[site] = here; // (last written last)
+      const names = Object.keys(sites);
+      for (const old of names.slice(0, Math.max(0, names.length - SETTINGS_SITES_MAX))) delete sites[old];
+      if (JSON.stringify(here).length > SETTINGS_MAX * 4) return { ok: false, error: 'too many settings on this site' };
+      await save({ sandboxSettings: { ...store, [mod]: sites } });
+      return { ok: true };
+    }
+    return { ok: false, error: 'unknown' };
+  })().then(sendResponse, (e) => sendResponse({ ok: false, error: errMsg(e) }));
+  return true;
+});
 
 function reportApplied(res) {
   post({ type: 'modsApplied', registered: res.registered, errors: res.errors });
@@ -450,7 +523,7 @@ async function onModsMessage(msg) {
     post({ type: 'modsResend', reason: `missing ${filled.missing.length} mod(s) sent without their code` });
     return;
   }
-  state.mods = filled.mods;
+  state.mods = sandboxFallback(filled.mods, { canSandbox: (await sandboxWorld()) !== false, allowed: state.unsandboxedOk });
   // A mod's id is its file name: a file renamed on disk comes back as a new mod. Same code in the same
   // site folder: the same mod, which keeps its switches and its place in the panel (before the first-time
   // switch-offs below, which would otherwise take it for a new one).
@@ -648,6 +721,7 @@ const commands = {
         if (state.offSites[m.id]) o.offSites = state.offSites[m.id];
         if (!limitToSites(m, onSites())) o.sitesOff = true; // every site it's for is off (or without access)
         if (m.held) o.held = m.held;
+        if (m.sandboxed) o.sandboxed = inSandboxWorld(m) ? true : 'page'; // ('page': this browser runs it as a page script)
         if (state.newOff[m.id] && !isEnabled(m.id)) o.newOff = state.newOff[m.id];
         if (errors.has(m.id) && errors.get(m.id) !== USER_SCRIPTS_OFF) o.error = errors.get(m.id);
         return o;
@@ -655,6 +729,7 @@ const commands = {
       recording: state.recording, sitesOn: state.sitesOn, ...siteLists(), ...(state.paused ? { paused: true } : {}),
       ...(Object.keys(state.groupsOff).length ? { groupsOff: state.groupsOff } : {}),
       ...(state.startsOff.length ? { startsOff: state.startsOff } : {}),
+      ...(state.canSandbox === false ? { sandbox: false } : {}),
       ...(args && (args.tab !== undefined || args.url !== undefined) ? { page: await modsOnPage(args) } : {}),
     };
   },
@@ -877,7 +952,7 @@ const commands = {
     // A mod switched off because new mods of its group start off (lib.js applyNewMods) waits for the user to
     // look at it: an agent run can't switch it on.
     if (args.scope && args.enabled && state.newOff[id]) {
-      throw new Error(`${id} is new and switched off until the user looks at it (their setting: new ${modGroup(mod) === 'rules' ? 'rules' : 'page scripts'} start off); only the user can switch it on, in the side panel or with trif enable in their terminal`);
+      throw new Error(`${id} is new and switched off until the user looks at it (their setting: new ${{ rules: 'rules', sandboxed: 'sandboxed mods' }[modGroup(mod)] || 'page scripts'} start off); only the user can switch it on, in the side panel or with trif enable in their terminal`);
     }
     const enabled = args.enabled;
     const res = await serial(async () => {
@@ -1004,11 +1079,30 @@ async function runtimeList(args, key) {
     const w = window.__webmods;
     return w && Array.isArray(w[k]) ? w[k].slice() : null;
   }, [key], args);
+  // (and the sandboxed mods', kept in TRIF's world: sandbox.js)
+  const sbx = await sandboxList(tab, key);
+  if (list && sbx.length) return [...list, ...sbx].sort((a, b) => (a.time || 0) - (b.time || 0));
   if (list) return list;
+  if (sbx.length) return sbx;
   // The runtime only runs where a mod that's on does (or on a recorded site): no such mod, nothing to report.
   const url = tab.url || tab.pendingUrl || '';
   if (!state.mods.some((m) => isEnabled(m.id) && !m.held && modAppliesTo(withOffSites(m, offSitesFor(m, state.offSites, state.groupsOff)), url))) return [];
   throw new Error(noRuntime());
+}
+
+/** A sandboxed mod's errors or logs (`key`) in the tab's page, from TRIF's world (sandbox.js keeps them there). */
+async function sandboxList(tab, key) {
+  if (state.canSandbox !== true || (key !== 'errors' && key !== 'logs') || typeof chrome.userScripts?.execute !== 'function') return [];
+  const url = tab.url || tab.pendingUrl || '';
+  if (!state.mods.some((m) => inSandboxWorld(m) && isEnabled(m.id) && !m.held && modAppliesTo(withOffSites(m, offSitesFor(m, state.offSites, state.groupsOff)), url))) return [];
+  try {
+    const out = firstInjectionResult(await chrome.userScripts.execute({
+      target: { tabId: tab.id }, world: 'USER_SCRIPT', worldId: SANDBOX_WORLD, injectImmediately: true,
+      js: [{ code: `(() => { const s = globalThis.__trifSandbox; return s && Array.isArray(s[${JSON.stringify(key)}]) ? JSON.stringify(s[${JSON.stringify(key)}]) : null; })()` }],
+    }));
+    const list = typeof out === 'string' ? JSON.parse(out) : null;
+    return Array.isArray(list) ? list : [];
+  } catch (e) { log('warn', `sandboxed mods' ${key}: ${errMsg(e)}`); return []; }
 }
 
 function noRuntime() {
@@ -1157,10 +1251,10 @@ async function uiStatus() {
       error: errors.get(m.id) === USER_SCRIPTS_OFF ? null : errors.get(m.id) || null,
       held: m.held || null, pending: m.pending || null, review: m.held || m.pending ? null : m.review || null, risk: m.risk || null,
       from: fromOtherBrowser(m, state.installId) ? (m.origin.browser || 'another browser') : null,
-      source: m.source || null, version: m.version || null, update: m.update || null, rules: !!m.rules,
+      source: m.source || null, version: m.version || null, update: m.update || null, rules: !!m.rules, sandboxed: !!m.sandboxed, unsandboxed: !!m.unsandboxed,
       newOff: state.newOff[m.id] && !(live.get(m.id)?.enabled ?? isEnabled(m.id)) ? state.newOff[m.id] : null,
     })),
-    startsOff: state.startsOff,
+    startsOff: state.startsOff, canSandbox: state.canSandbox !== false,
     runs: [...state.runs.values()].map((r) => ({ runId: r.runId, site: r.site })),
     lockedTabs: tabLocks.list(),
     groupsOff: state.groupsOff,
@@ -1261,6 +1355,18 @@ async function onPanelMessage(msg) {
       return r;
     }
     case 'mod.approve': {
+      // A sandboxed mod waiting because this browser can't sandbox it (lib.js sandboxFallback): allowed here,
+      // in this browser, to run as a page script, this version only. Panel only.
+      const sbx = state.mods.find((m) => m.id === msg.id && m.held && m.held.by === 'sandbox');
+      if (sbx) {
+        if (typeof msg.hash === 'string' && msg.hash !== sbx.held.hash) throw new Error(`${sbx.id} changed again since you looked at it: look at what's waiting now`);
+        state.unsandboxedOk = { ...state.unsandboxedOk, [sbx.id]: sbx.held.hash };
+        await save({ unsandboxedOk: state.unsandboxedOk });
+        await serial(applyMods).then(reportApplied);
+        const mod = state.mods.find((m) => m.id === sbx.id);
+        if (mod && msg.tab !== undefined) await reloadIfApplies(mod, { tab: msg.tab });
+        return { id: sbx.id, approved: true };
+      }
       const r = await helperRequest('mod.approve', { id: String(msg.id ?? ''), ...(typeof msg.hash === 'string' ? { hash: msg.hash } : {}) }, 10000);
       if (msg.tab !== undefined) {
         await serial(() => {}); // the helper re-sent the mods before answering: let them register first

@@ -232,6 +232,20 @@ function scheduleSync(reason) {
   debounceTimer = setTimeout(() => syncMods(reason, false), DEBOUNCE_MS);
 }
 
+// What a sandboxed mod's code would be able to do as a page script (lib/powers.js), by hash.
+const pageFactsCache = new Map();
+function pageFactsOf(m) {
+  const key = `${m.hash}:${m.id}`;
+  if (!pageFactsCache.has(key)) {
+    if (pageFactsCache.size > 500) pageFactsCache.clear();
+    const { powersOf, modSites } = require('./lib/powers');
+    let facts = [];
+    try { facts = powersOf(m.code || '', { sites: modSites(m) }).map((p) => p.fact); } catch { facts = []; }
+    pageFactsCache.set(key, facts);
+  }
+  return pageFactsCache.get(key);
+}
+
 function syncMods(reason, force) {
   if (state.shuttingDown) return;
   clearTimeout(debounceTimer);
@@ -293,7 +307,10 @@ function syncMods(reason, force) {
     const withAbsorbs = absorbed[m.id] ? { ...withUpdate, absorbs: absorbed[m.id] } : withUpdate;
     const withReadded0 = readded[m.id] ? { ...withAbsorbs, readded: readded[m.id] } : withAbsorbs;
     const withReadded = autoUpdated[m.id] ? { ...withReadded0, autoUpdated: autoUpdated[m.id] } : withReadded0;
-    return startOff.has(m.id) ? { ...withReadded, startOff: true } : withReadded;
+    // A sandboxed mod: what its code could do as a page script, for a browser without TRIF's sandbox, which
+    // holds it until the user allows that (extension/lib.js sandboxFallback)
+    const withFacts = m.sandboxed ? { ...withReadded, pageFacts: pageFactsOf(m) } : withReadded;
+    return startOff.has(m.id) ? { ...withFacts, startOff: true } : withFacts;
   });
   // Sites TRIF starts on for (preinstalled.json): each browser turns each one on the first time it sees it.
   const sitesOn = startSitesOn(ws.home);

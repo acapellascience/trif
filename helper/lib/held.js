@@ -44,6 +44,9 @@ const { powersOf, modSites } = require('./powers');
 const cache = new Map();
 function powersFor(mod) {
   if (mod.rules) return []; // (a rules mod runs TRIF's own code, its rules only data: lib/rules.js)
+  // (a sandboxed mod's code runs where it can't act: TRIF's world, with only TRIF's API (extension/sandbox.js).
+  // A browser without that world holds it there, in the extension, until the user allows it as a page script.)
+  if (mod.sandboxed) return [];
   const key = `${mod.hash}:${mod.id}`;
   if (!cache.has(key)) {
     if (cache.size > 500) cache.clear();

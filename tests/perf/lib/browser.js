@@ -86,6 +86,10 @@ async function takeLock(log) {
       try { fs.writeFileSync(path.join(lock.dir, 'owner'), `${process.env.PERF_LOCK_OWNER || path.basename(process.argv[1] || 'perf')} pid ${process.pid} since ${new Date().toISOString()}\n`); } catch { /* still ours */ }
       return;
     } catch { /* someone has it */ }
+    // (someone has paused all test browsers, PAUSED in the owner file: stop here, not wait)
+    let owner = '';
+    try { owner = fs.readFileSync(path.join(lock.dir, 'owner'), 'utf8'); } catch { /* none */ }
+    if (/PAUSED/.test(owner)) { log?.(`  the browser lock says PAUSED (${owner.trim().slice(0, 80)}): stopping`); process.exit(3); }
     if (!said) { log?.(`  (waiting for the browser lock ${lock.dir})`); said = true; }
     await sleep(30000);
   }

@@ -44,7 +44,9 @@ const FIXES = {
   // (4. textvar, tried and dropped: the roll as one inherited variable animated on <html> restyled the whole page
   // 15 times a second, which cost more than the span animations: main thread 609 vs 387 ms/s idle)
   // 5. linehue: the lines' hue animated on what it colours, not inherited from <html> (lib/styler-fix-linehue.js)
-  linehue: require('./styler-fix-linehue'),
+  linehue: { [PS]: require('./styler-fix-linehue')[PS], [POST]: require('./styler-fix-linehue')[POST] },
+  // rededge (by name, after linehue): the Post Styler red-edge bug fixed too (see lib/styler-fix-linehue.js)
+  rededge: { [POST]: require('./styler-fix-linehue').redEdge },
   // 6. offscreen: the animations in timeline rows well out of the window paused (lib/styler-fix-offscreen.js)
   offscreen: require('./styler-fix-offscreen'),
   // 7. panel: the open panel's place (where the Style profile button is now, every 0.7 s) set on the panel, not
@@ -69,7 +71,7 @@ const FIXES = {
 // (smil: no gain measured, 1265 → 1204 ms/s with the animation gone altogether; offscreen: a small gain on your
 // own profile idle (main thread 369 → 326 ms/s, one run), none on Home, and its rule on every element in the
 // rows may cost a little while scrolling: not settled, so only by name)
-const OPTIONAL = ['pin', 'smil', 'offscreen'];
+const OPTIONAL = ['pin', 'smil', 'offscreen', 'rededge'];
 const DEFAULT_FIXES = () => Object.keys(FIXES).filter((n) => !OPTIONAL.includes(n));
 
 function applyFixes(base, code, names) {

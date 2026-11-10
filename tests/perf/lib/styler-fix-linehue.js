@@ -58,4 +58,15 @@ const postStyler = [
   P("  const css = document.createElement('style');\n  css.id = 'ps-css';", pin('ps-line-hue') + "  const css = document.createElement('style');\n  css.id = 'ps-css';"),
 ];
 
-module.exports = { 'profile-styler.js': profileStyler, 'post-styler.js': postStyler };
+// "rededge" (lib/styler-fixes.js, by name only, after linehue): the Post Styler bug fixed as well, so card and
+// quoted-post edges in a post with a rainbow background cycle through the hues like every other rainbow line
+// (they stay red now): linehue's three rules without their :not([data-ps-r~=bg])
+const redEdge = [
+  P('    ${X}[data-ps-r~=lines]:not([data-ps-r~=bg]) :is([data-testid="card.wrapper"], [data-ps-quote]) {', '    ${X}[data-ps-r~=lines] :is([data-testid="card.wrapper"], [data-ps-quote]) {'),
+  P('    ${X}[data-ps-r~=lines][data-ps-r~=cards]:not([data-ps-r~=bg]) [data-testid="card.wrapper"]:not(#ps-l),', '    ${X}[data-ps-r~=lines][data-ps-r~=cards] [data-testid="card.wrapper"]:not(#ps-l),'),
+  P('    ${X}[data-ps-r~=lines][data-ps-r~=quotes]:not([data-ps-r~=bg]) [data-ps-quote]:not(#ps-l),', '    ${X}[data-ps-r~=lines][data-ps-r~=quotes] [data-ps-quote]:not(#ps-l),'),
+  // (and a post with a rainbow background's own rolling rainbow, on its card or quoted post: both animations)
+  P('    ${X}[data-ps-r~=lines]:not([data-ps-r~=bg]) [data-ps-quote][data-ps-r~=bg]:not(#ps-l):not(#ps-q):not(#ps-m) {', '    ${X}[data-ps-r~=lines] [data-ps-quote][data-ps-r~=bg]:not(#ps-l):not(#ps-q):not(#ps-m) {'),
+];
+
+module.exports = { 'profile-styler.js': profileStyler, 'post-styler.js': postStyler, redEdge };

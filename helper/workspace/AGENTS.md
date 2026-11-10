@@ -334,10 +334,11 @@ the site (`trif tabs`; `trif open <url>` if none) and look:
 2. **A boxed mod** (`trif new <site> <mod> --boxed`): JavaScript in TRIF's sandbox, with only
    TRIF's API (elements as stand-ins, `trif.css`/`hide`/`observe`/`text`/`settings`, timers, canvas):
    for what a style mod can't express, like logic, new elements, animation or drawing. If it needs one
-   exception (sound, its own sliders, hotkeys, reading what the user types), it asks for that **power**
+   exception (sound, its own sliders, hotkeys, reading what the user types, filtering the posts the
+   site loads, reading the app's data behind an element, a search box), it asks for that **power**
    (`// @powers sound`, see "Powers" in TECHNIQUES.md): the user approves the set once.
-3. **A free mod** (`trif new <site> <mod>`): only when it needs the page itself: filtering the data
-   the site loads, reading the app's state, patching its code, or acting for the user.
+3. **A free mod** (`trif new <site> <mod>`): only when it needs the page itself: changing what the
+   site loads (not just leaving things out), patching its code, or acting for the user.
 
 Style and boxed mods can't act for the user themselves, so they never wait for their OK (in a browser
 without the sandbox, Safari, a boxed mod waits, to run as a free mod). (Their old names, `@rules` and

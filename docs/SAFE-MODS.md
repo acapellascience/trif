@@ -319,8 +319,21 @@ page already has"):
   never `name` or `autocomplete`, never inside the page's forms. Fits.
 - `keys`, `read-drafts`: reads only; they name nothing and write nothing (`setValue` only on the mod's own
   controls; `attr('value')` stays null on the page's fields, `.value` is the read). Fits.
-- Still to build, and to check the same way: `site-data` (no inventing: every string out was in), `page-data`
-  (reads), `search-box` (TRIF's own box and the declared template), `media` (the page's own players),
+- `site-data` (built): the mod names nothing of the page's and sets no address; what it returns can only be
+  what the site sent, removed or reordered. "In what the site sent", exactly: every string *value* in the
+  output equals a string value in the input (no substrings, no joins: a cut URL is a new URL), and occurs no
+  more times than in the input (no duplicating an address the page would fetch twice); the same for numbers
+  and booleans (by type and value: `1` and `true` are different, so a count can't be bumped or a flag
+  invented where the input had none); every object *key* in the output is a key somewhere in the input (a mod
+  can't put an existing string under a new key the page would act on, like `media_url`); `null` is free
+  (it's removing). Each filter is checked against the original response, so filters in a row can't build
+  on each other's inventions. Removal and reordering do let a mod choose what the page sees, and so what it
+  reports back to its own site (impressions); that's the site's own data going to the site. Fits.
+- `page-data` (built): reads; plain copies with no functions or nodes, through events on the element. Fits.
+- `search-box` (built): TRIF's own box, which the mod can't fill or read, going to the address in the
+  header (the mod's own site, checked by the helper) with only what the user typed, on their Enter. The mod
+  names nothing of the page's. Fits.
+- Still to build, and to check the same way: `media` (the page's own players),
   `go-to` (declared paths or the page's own links: copies), `click` (declared selectors: the exception the
   power names, narrowed to non-submitting, same-site targets), `write-drafts` (the one that writes into
   what's the user's: its whole point), `mods` (no DOM at all).

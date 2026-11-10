@@ -168,8 +168,8 @@ function buildMod({ site, file, code }) {
   if (header.powers.length && !header.sandboxed) throw new Error('powers (@powers) are for boxed mods (@boxed): a free mod has every power the page has, and a style mod none');
   if (header.sandboxed) {
     // (its powers, checked against the menu: throws a PowersError for the scanner to report)
-    const powers = require('./boxpowers').parsePowers(header.powers);
-    return { mod: { ...meta, sandboxed: true, ...(powers.length ? { powers } : {}), code, hash }, warnings: header.warnings };
+    const { names: powers, args: powerArgs } = require('./boxpowers').parsePowersWithArgs(header.powers, meta);
+    return { mod: { ...meta, sandboxed: true, ...(powers.length ? { powers } : {}), ...(Object.keys(powerArgs).length ? { powerArgs } : {}), code, hash }, warnings: header.warnings };
   }
   if (header.rules) {
     // (what runs is TRIF's code with the checked rules; throws a RulesError for the scanner to report)

@@ -1161,6 +1161,7 @@ class Scenario {
       await r.check('boxed mods: a hostile one fails at every escape (network, code from strings, inline code, other windows and the page\'s globals, synthetic input, navigation, clipboard, cookies and storage, messages), with nothing reaching the server or the page; a good one restyles, hides, adds, rewrites text, draws, uses timers and settings, and watches; errors and logs reported; the two sample ports work; timing', () => this.sandboxedCheck(win));
       await r.check('a boxed mod as a free mod (how a browser without the sandbox runs one the user allowed): the same API works in the page\'s world', () => this.sandboxPageFormCheck(win));
       await r.check('powers (docs/POWERS.md): a boxed mod with powers waits for the user\'s OK for its set (panel and trif status say what it asks for); allowed, sound, controls, read-drafts and keys work and stay narrow; undeclared, each is refused; a new version with the same powers runs, one with a new power waits for that one', () => this.powersCheck(win));
+      await r.check('powers, phase 2: site-data filters the site\'s JSON (fetch and XHR) by removing and reordering only (an invented string, number, key, a duplicate or a cut string: TRIF keeps the original); page-data reads plain copies of React props; search-box is TRIF\'s own box the mod can\'t read, which searches the site from the user\'s Enter; undeclared, each is refused', () => this.powers2Check(win));
       await r.check('speculation rules (audit AU-7): a page that prefetches its same-site links at once; a link a free mod adds is fetched without a click (Chrome), a boxed mod can\'t make one', () => this.specRulesCheck(win));
       await r.check('boxed mods in the panel: their own group between Style mods and Free mods, with its switch (off on the site: they stop there; on: back), and "New mods start" has a Boxed mods row', () => this.sandboxedPanelCheck(win));
       await r.check('Settings → New mods start → Free mods Off: a new free mod arrives off, marked "new", and doesn\'t run; a new style mod runs; switched on in the panel, it runs; Free mods On again', () => this.startsOffCheck(win));
@@ -2244,6 +2245,74 @@ process.exitCode = 1;
     }
   }
 
+  async powers2Check(win) {
+    const site = '127.0.0.1';
+    const base = `http://${site}:${this.o.servers.port}`;
+    const dir = path.join(this.trif, 'sites', site);
+    const fx = (f) => fs.readFileSync(path.join(I.REPO, 'tests', 'e2e', 'fixtures', f), 'utf8');
+    const file = path.join(dir, 'e2e-pw2.js'), noneFile = path.join(dir, 'e2e-pw-none.js');
+    const status = async () => (await this.cli(['status'], { timeoutMs: 20000 })).stdout;
+    const line = (st, id) => st.split('\n').find((l) => l.includes(id)) || '';
+    const problems = [];
+    this.sandboxPage = true;
+    try {
+      fs.writeFileSync(file, fx('powers-2.js').replace('__SEARCH__', `${base}/e2e-search?q={query}`));
+      fs.writeFileSync(noneFile, fx('powers-none.js'));
+      const held = await waitFor('held for its powers', async () => { const st = await status(); return /e2e-pw2\s+HELD/.test(st) ? st : null; }, { timeoutMs: 25000, intervalMs: 500 });
+      const want = `HELD: it can see and filter what ${site} sends this page (posts, profiles), but can't send anything; it can read the data ${site} keeps behind what's on the page; it adds a search box that searches ${site}`;
+      if (!line(held, 'e2e-pw2').includes(want)) problems.push(`trif status: ${line(held, 'e2e-pw2')}`);
+      await this.cli(['approve', `${site}/e2e-pw2`], { timeoutMs: 20000 });
+      await waitFor('registered', async () => /e2e-pw2\s+registered \(boxed, powers: site-data, page-data, search-box\)/.test(await status()) || null, { timeoutMs: 20000, intervalMs: 500 });
+      await this.ext(`async (id, url) => { await chrome.tabs.update(id, { url, active: true }); }`, [win.tabId, `${base}/sandbox.html`]);
+      const read = async () => JSON.parse((await this.cli(['run', '--tab', String(win.tabId), `({ r: document.documentElement.getAttribute('data-trif-box-pw2'), none2: document.documentElement.getAttribute('data-trif-box-pw-none2') })`], { timeoutMs: 20000 })).stdout);
+      const got = await waitFor('the mod\'s results', async () => { const o = await read(); return o.r && /search-box: its children/.test(o.r) && o.none2 ? o : null; }, { timeoutMs: 15000, intervalMs: 400 });
+      const R = JSON.parse(got.r), N = JSON.parse(got.none2);
+      for (const [k, v] of Object.entries(N)) if (!/^(refused|absent)/.test(v)) problems.push(`UNDECLARED ${k}: ${v}`);
+      const exact = {
+        'page-data: props': 'ok: {"text":"from react","likes":3}',
+        'page-data: a parent\'s props': 'ok: {"name":"tim","handlers":{}}',
+        'search-box: what\'s inside it': 'ok: null', 'search-box: its text': 'ok: ""', 'search-box: its children': 'ok: 0',
+      };
+      for (const [k, v] of Object.entries(exact)) if (R[k] !== v) problems.push(`${k}: ${R[k]}`);
+      for (const k of ['page-data: a bad path (refused)', 'search-box: its value (refused)']) if (!/^refused/.test(R[k] || '')) problems.push(`${k}: ${R[k]}`);
+      // site-data, through the page's own fetch and XHR
+      const data = JSON.parse((await this.cli(['run', '--tab', String(win.tabId), `(async () => {
+        const j = async (p) => (await fetch(p)).json();
+        const x = (p, type) => new Promise((res) => { const r = new XMLHttpRequest(); r.open('GET', p); if (type) r.responseType = type; r.onload = () => res(type === 'json' ? r.response : JSON.parse(r.responseText)); r.send(); });
+        const ids = (d) => d.items.map((i) => i.id).join(',');
+        const o = {};
+        for (const n of ['feed', 'order', 'invent', 'number', 'key', 'twice', 'truncate', 'other']) { const d = await j('/e2e-api/' + n + '.json'); o[n] = [ids(d), d.count, d.cursor, 'media_url' in d]; }
+        o.feedXhr = ids(await x('/e2e-api/feed.json?xhr'));
+        o.feedXhrJson = ids(await x('/e2e-api/feed.json?json', 'json'));
+        return o;
+      })()`], { timeoutMs: 30000 })).stdout);
+      const as = (name, v) => { if (JSON.stringify(data[name]) !== JSON.stringify(v)) problems.push(`site-data ${name}: ${JSON.stringify(data[name])}`); };
+      const kept = ['1,2,3', 3, 'c-next', false];
+      as('feed', ['1,3', 3, 'c-next', false]); as('order', ['3,2,1', 3, 'c-next', false]);
+      for (const n of ['invent', 'number', 'key', 'twice', 'truncate', 'other']) as(n, kept);
+      as('feedXhr', '1,3'); as('feedXhrJson', '1,3');
+      const errs = JSON.stringify((await this.cli(['errors', '--tab', String(win.tabId)], { json: true, timeoutMs: 20000 })).json || []);
+      if (!/the text \\"(9|invented|http:\/\/localhost:1\/e2e-pw-leak)\\" isn't in what the site sent/.test(errs)) problems.push('trif errors doesn\'t say the invented text isn\'t in what the site sent');
+      for (const why of ['the value 424242 isn\'t in what the site sent', 'the key \\"media_url\\" isn\'t in what the site sent', 'more times than what the site sent', 'the text \\"c-n\\" isn\'t in']) {
+        if (!errs.includes(why)) problems.push(`trif errors doesn't say: ${why}`);
+      }
+      // search-box: the user's typing, and Enter, go to the site's search
+      const ctx = await this.d.findPage((u) => u.includes('/sandbox.html'), { timeoutMs: 5000 });
+      await this.d.click(ctx, '#trif-box-pw-search');
+      for (const k of ['c', 'a', 't', 'Enter']) await this.d.key(ctx, k);
+      await waitFor('the search page', async () => this.o.servers.requests.some((q) => q.url === '/e2e-search?q=cat') || null, { timeoutMs: 10000, intervalMs: 300 })
+        .catch(() => problems.push('the search box didn\'t go to /e2e-search?q=cat'));
+      const leaks = this.o.servers.requests.filter((q) => q.url.includes('e2e-pw-leak')).map((q) => q.url);
+      if (leaks.length) problems.push(`the server saw: ${leaks.join(', ')}`);
+      fs.writeFileSync(this.r.file(`powers2-${this.o.browser}.json`), JSON.stringify({ R, N, data, problems }, null, 2));
+      if (problems.length) throw new Error(problems.join('\n'));
+      return `held for site-data, page-data, search-box (sentences as drafted); fetch and XHR filtered (removed: ${data.feed[0]}, reordered: ${data.order[0]}), 5 inventions refused and the originals kept; page-data copies without functions or nodes; the search box unreadable, and Enter went to /e2e-search?q=cat; ${Object.keys(N).length} undeclared refused`;
+    } finally {
+      for (const f of [file, noneFile]) { try { fs.unlinkSync(f); } catch { /* gone */ } }
+      await this.ext(`async (id, url) => { await chrome.tabs.update(id, { url }); }`, [win.tabId, `${base}/?e2e=after-powers2`]).catch(() => {});
+    }
+  }
+
   async specRulesCheck(win) {
     const site = '127.0.0.1';
     const base = `http://${site}:${this.o.servers.port}`;
@@ -2715,7 +2784,7 @@ say({ type: 'result', subtype: 'success', is_error: false, result: text, session
       // (Firefox doesn't say which page: after that check, a failed fetch or socket is one of those)
       // (the sandboxed mods' test page: its hostile mod's refusals and the errors the good one throws on purpose)
       // (Chrome names the page the tab had when its console was first attached, so by the text)
-      || (this.sandboxPage && (/^\[TRIF\] 127\.0\.0\.1\/e2e-sbx-/.test(String(p.text)) || /willReadFrequently/.test(String(p.text)) || /AudioContext was not allowed to start/.test(String(p.text)) || /\/sandbox\.html/.test(String(p.source || ''))))
+      || (this.sandboxPage && (/^\[TRIF\] 127\.0\.0\.1\/e2e-(sbx|pw)/.test(String(p.text)) || /willReadFrequently/.test(String(p.text)) || /AudioContext was not allowed to start/.test(String(p.text)) || /\/sandbox\.html/.test(String(p.source || ''))))
       || (this.hijacked && /ERR_BLOCKED_BY_CLIENT|NetworkError when attempting to fetch|Failed to fetch|establish a connection to the server at ws:\/\/[^ ]+\/e2e-socket|WebSocket connection to '[^']+\/e2e-socket|e2e-leak|e2e-nav|blocked by|CORS/i.test(String(p.text) + String(p.source || '')));
     const problems = (await this.d.consoleProblems()).filter((p) => !expected(p));
     // The agent-made mod and the stand-in pages aren't ours to judge; everything else counts.

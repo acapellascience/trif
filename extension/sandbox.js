@@ -45,8 +45,14 @@ export function sandboxRuntimeCode() {
  * One sandboxed mod, in TRIF's world: its source, handed to the runtime as text (SES evaluates it), with its
  * powers (docs/POWERS.md), which come from its header as the helper read it, not from its code.
  */
+// (a mod's powers, from its header as the helper read it: a list of names, or {powers, args})
+const grantOf = (g) => {
+  const names = Array.isArray(g) ? g : g && Array.isArray(g.powers) ? g.powers : [];
+  const args = g && !Array.isArray(g) && g.args && typeof g.args === 'object' ? g.args : {};
+  return JSON.stringify({ powers: names.map(String), args: Object.fromEntries(Object.entries(args).map(([k, v]) => [String(k), (Array.isArray(v) ? v : []).map(String)])) });
+};
 export function sandboxModCode(id, source, powers = []) {
-  const P = JSON.stringify((Array.isArray(powers) ? powers : []).map(String));
+  const P = grantOf(powers);
   return `(globalThis.__trifSandbox ? globalThis.__trifSandbox.run(${J(id)}, ${J(source)}, ${P}) : (globalThis.__trifSandboxQueue = globalThis.__trifSandboxQueue || []).push([${J(id)}, ${J(source)}, ${P}]));\n//# sourceURL=trif-sandbox://${id}.js`;
 }
 
@@ -56,7 +62,7 @@ export function sandboxModCode(id, source, powers = []) {
  */
 export function sandboxPageCode(id, source, powers = []) {
   // (the mod's first line is the script's first line, so `trif errors` gives its own line numbers)
-  const P = JSON.stringify((Array.isArray(powers) ? powers : []).map(String));
+  const P = grantOf(powers);
   return `(() => { const __trifMod = async function (${SANDBOX_GLOBALS.filter((n) => n !== 'Math' && n !== 'Date').join(', ')}) { "use strict"; ${source}\n};\n(${sandboxRuntime.toString()})('page', ${J(id)}, __trifMod, ${P}); })();\n//# sourceURL=trif://${id}.js`;
 }
 
@@ -387,10 +393,11 @@ export function sandboxRuntime(mode, pageModId, pageFn, pagePowers) {
   // Whether a key event's key is hidden from a mod with these powers: `keys` shows keys outside fields and
   // editors (accepting that a field in a closed shadow root can't be seen); `read-drafts` shows them in
   // fields and editors too; a password or card field's never.
+  const trifBoxes = new WeakSet(); // search boxes TRIF drew for a mod (search-box)
   const keyHidden = (e, powers) => {
     const p = typeof e.composedPath === 'function' ? e.composedPath() : [];
     const t = p[0] || e.target;
-    if (secretField(t)) return true;
+    if (secretField(t) || trifBoxes.has(t) || trifBoxes.has(e.target)) return true; // (TRIF's own search boxes: never a mod's to read)
     if (powers && powers.has('read-drafts') && (isField(t) || (p.length && p[0] !== e.target && isField(p[0])))) return false;
     if (isField(t)) return true;
     if (powers && powers.has('keys')) return p.length > 0 && p[0] !== e.target && isField(p[0]);
@@ -475,10 +482,65 @@ export function sandboxRuntime(mode, pageModId, pageFn, pagePowers) {
   let current = null; // the api of the mod whose code TRIF is running (its top level, or a callback)
   /** Everything one mod gets (its own error reporting, timers, settings, watchers). */
   const apis = new Map(); // mod id -> its api
+  // ---- site-data (docs/POWERS.md, SAFE-MODS.md "trif.filterResponse"): the page's side (runtime.js
+  // pageBridge) hands JSON responses over as text, during an event; the mods' filters run on copies; what
+  // they return may only remove or reorder: every string, number and boolean in it, and every object key, has
+  // to be in what the site sent, a string or number no more times than it was, or TRIF keeps the original.
+  const filters = []; // {re, glob, call, mod}
+  const tally = (v, strs, nums, keys, depth = 0) => {
+    if (depth > 100) throw new TypeError('too deep');
+    if (typeof v === 'string') strs.set(v, (strs.get(v) || 0) + 1);
+    else if (typeof v === 'number' || typeof v === 'boolean') nums.set(`${typeof v}:${v}`, (nums.get(`${typeof v}:${v}`) || 0) + 1);
+    else if (Array.isArray(v)) for (const x of v) tally(x, strs, nums, keys, depth + 1);
+    else if (v && typeof v === 'object') for (const k of Object.keys(v)) { keys.add(k); tally(v[k], strs, nums, keys, depth + 1); }
+  };
+  const invented = (input, output) => {
+    const si = new Map(), ni = new Map(), ki = new Set(), so = new Map(), no = new Map(), ko = new Set();
+    tally(input, si, ni, ki); tally(output, so, no, ko);
+    for (const k of ko) if (!ki.has(k)) return `the key "${k.slice(0, 60)}" isn't in what the site sent`;
+    for (const [v, c] of so) if ((si.get(v) || 0) < c) return `the text "${v.slice(0, 60)}" ${si.has(v) ? 'more times than' : 'isn\'t in'} what the site sent`;
+    for (const [v, c] of no) if ((ni.get(v) || 0) < c) return `the value ${v.replace(/^\w+:/, '')} ${ni.has(v) ? 'more times than' : 'isn\'t in'} what the site sent`;
+    return null;
+  };
+  let filterListening = false;
+  const announceFilters = () => { D.dispatchEvent(new CustomEvent('trif:filter-patterns', { detail: JSON.stringify(filters.map((f) => f.glob)) })); };
+  const listenForFilters = () => {
+    if (filterListening) return;
+    filterListening = true;
+    D.addEventListener('trif:bridge-ready', announceFilters, true);
+    D.addEventListener('trif:filter-request', (e) => {
+      let req;
+      try { req = JSON.parse(String(e.detail)); } catch { return; }
+      if (!req || typeof req.url !== 'string' || typeof req.text !== 'string') return;
+      const mine = filters.filter((f) => f.re.test(req.url));
+      if (!mine.length) return;
+      let original;
+      try { original = JSON.parse(req.text); } catch { return; }
+      let current = original, changed = false;
+      for (const f of mine) {
+        let copy;
+        try { copy = JSON.parse(JSON.stringify(current)); } catch { return; }
+        const r = f.call(copy, harden({ url: req.url, method: String(req.method || 'GET'), status: Number(req.status) || 0 }));
+        if (r && typeof r.then === 'function') { report(f.mod, new TypeError('TRIF sandbox: a filter returns the data itself, not a promise: TRIF kept what the site sent')); continue; }
+        let out;
+        try { out = JSON.parse(JSON.stringify(r === undefined ? copy : r)); } catch { report(f.mod, new TypeError('TRIF sandbox: a filter returns plain data: TRIF kept what the site sent')); continue; }
+        let why;
+        try { why = invented(original, out); } catch { why = 'it was too deep to check'; }
+        if (why) { report(f.mod, new TypeError(`TRIF sandbox: a filter may only remove or reorder, and ${why}: TRIF kept what the site sent`)); continue; }
+        current = out; changed = true;
+      }
+      if (changed) D.dispatchEvent(new CustomEvent('trif:filter-response', { detail: JSON.stringify(current) }));
+    }, true);
+  };
+  // ---- page-data: the page's side answers during the event (runtime.js pageBridge)
+  let pageDataAnswer = null;
+  D.addEventListener('trif:page-data-answer', (e) => { pageDataAnswer = typeof e.detail === 'string' ? e.detail : null; }, true);
+
   const apiFor = (modId, powers) => {
     if (apis.has(modId)) return apis.get(modId);
     // (its powers: docs/POWERS.md; what's not in this set it doesn't get, and a mod TRIF can't name gets none)
-    const self = { powers: new Set(Array.isArray(powers) ? powers.map(String) : []) };
+    const grant = Array.isArray(powers) ? { powers, args: {} } : powers && typeof powers === 'object' ? powers : { powers: [], args: {} };
+    const self = { powers: new Set((Array.isArray(grant.powers) ? grant.powers : []).map(String)), args: grant.args && typeof grant.args === 'object' ? grant.args : {} };
     const has = (p) => self.powers.has(p);
     const needs = (p) => { if (!has(p)) fail(`that needs the ${p} power (// @powers ${p} in the mod's header, which the user approves)`); };
     apis.set(modId, self);
@@ -656,6 +718,42 @@ export function sandboxRuntime(mode, pageModId, pageFn, pagePowers) {
     };
     const trifApi = {
       css, observe, text, settings, audio: audioApi,
+      // site-data: filter the site's JSON responses whose address matches `glob` (* for anything)
+      filterResponse: (glob, fn) => {
+        needs('site-data');
+        str(glob, 'an address pattern', 500);
+        if (typeof fn !== 'function') fail('filterResponse takes a function');
+        const re = new RegExp('^' + glob.replace(/[.+?^${}()|[\]\\]/g, '\\$&').replace(/\*/g, '.*') + '$');
+        filters.push({ re, glob, call: (data, info) => call(fn, data, info), mod: modId });
+        listenForFilters();
+        announceFilters();
+      },
+      // search-box: TRIF's own box (the mod can place and style it, but not fill or read it); Enter, by the
+      // user, goes to the address in the header with what they typed
+      searchBox: (o) => {
+        needs('search-box');
+        const tmpl = (self.args['search-box'] || [])[0];
+        if (!tmpl) fail('the search-box power needs its address in the header: @powers search-box https://…{query}');
+        const host = D.createElement('div');
+        created.add(host);
+        trifBoxes.add(host);
+        const root = host.attachShadow({ mode: 'closed' });
+        const input = D.createElement('input');
+        input.type = 'search';
+        input.setAttribute('autocomplete', 'off');
+        input.setAttribute('aria-label', 'Search');
+        const ph = o && typeof o === 'object' && typeof o.placeholder === 'string' ? o.placeholder.slice(0, 100) : '';
+        if (ph) input.placeholder = ph;
+        input.style.cssText = 'all: unset; box-sizing: border-box; width: 100%; font: inherit; color: inherit; padding: 0.4em 0.6em; border: 1px solid currentColor; border-radius: 0.4em;';
+        trifBoxes.add(input);
+        input.addEventListener('keydown', (e) => {
+          if (e.key !== 'Enter' || !e.isTrusted || !input.value.trim()) return;
+          e.preventDefault();
+          location.assign(tmpl.replace('{query}', encodeURIComponent(input.value.trim())));
+        });
+        root.append(input);
+        return wrap(host);
+      },
       hide: (sel) => css(`${selectorOk(sel)} { display: none !important; }`),
       log: logTo(modId, 'log'), warn: logTo(modId, 'warn'), error: logTo(modId, 'error'),
     };
@@ -749,6 +847,19 @@ export function sandboxRuntime(mode, pageModId, pageFn, pagePowers) {
       const n = nodeOf(this);
       if (!created.has(n) || !/^(input|select)$/.test(n.localName)) fail('setValue is for the mod\'s own controls (changing what the user typed is the write-drafts power, not in this version)');
       n.value = str(String(v), 'a value', 10000);
+    },
+    // page-data: the page's own data behind this element (React props and fiber), by a path, as a plain copy
+    pageData(path) {
+      const n = nodeOf(this);
+      if (!cur().powers.has('page-data')) fail('the page\'s data needs the page-data power (// @powers page-data)');
+      const pth = str(path === undefined ? '' : path, 'a path', 500);
+      if (!/^[\w$.]*$/.test(pth)) fail('a path is names with dots between them (props.post.text)');
+      pageDataAnswer = null;
+      n.dispatchEvent(new CustomEvent('trif:page-data', { detail: pth }));
+      const a = pageDataAnswer;
+      pageDataAnswer = null;
+      if (a === null) return null;
+      try { return JSON.parse(a); } catch { return null; }
     },
     get checked() { const n = nodeOf(this); return n.localName === 'input' ? !!n.checked : false; },
     setChecked(on) { const n = nodeOf(this); if (!created.has(n) || n.localName !== 'input') fail('setChecked is for the mod\'s own checkboxes'); n.checked = !!on; },

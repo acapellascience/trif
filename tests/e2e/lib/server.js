@@ -60,6 +60,13 @@ document.addEventListener('DOMContentLoaded', () => {
 <canvas id="pcv" width="10" height="10"></canvas>
 <dialog id="dlg"><p>Are you sure?</p><button id="dlg-ok">Yes</button></dialog>
 <details id="det"><summary>more</summary>details</details>
+<div id="rx">a React-like element</div>
+<script>
+// (page-data: what React keeps on an element: its props, and its fiber with the parents' props)
+const rx = document.getElementById('rx');
+rx.__reactProps$e2e = { post: { text: 'from react', likes: 3, onClick() {}, node: document.body }, children: 'x' };
+rx.__reactFiber$e2e = { memoizedProps: rx.__reactProps$e2e, return: { memoizedProps: { user: { name: 'tim', handlers: { f() {} } } } } };
+</script>
 <div id="shost" style="display:inline-block"></div>
 <script>document.getElementById('shost').attachShadow({ mode: 'closed' }).innerHTML = '<input id="si" type="password" style="width:160px">';</script>
 <div id="editor" contenteditable="true"><p id="ed-p">secret draft</p><a id="ed-a" href="/two.html?draft">a link in the draft</a></div>
@@ -316,6 +323,12 @@ async function startServers(dir) {
     if (u.pathname === '/favicon.ico') return send(204, 'image/x-icon', '');
     if (u.pathname === '/promos.html') return send(200, 'text/html; charset=utf-8', PROMOS_PAGE());
     if (u.pathname === '/sandbox.html') return send(200, 'text/html; charset=utf-8', SANDBOX_PAGE());
+    // (powers, site-data: small JSON the page fetches, which boxed mods filter; search-box: where it goes)
+    if (u.pathname.startsWith('/e2e-api/')) return send(200, 'application/json', JSON.stringify({
+      items: [{ id: '1', text: 'keep me', url: '/two.html' }, { id: '2', text: 'Promoted: buy', url: '/two.html' }, { id: '3', text: 'keep me too', url: '/two.html' }],
+      cursor: 'c-next', count: 3, more: true,
+    }));
+    if (u.pathname === '/e2e-search') return send(200, 'text/html; charset=utf-8', PAGE('search', `<p id="q">${String(u.searchParams.get('q') || '').replace(/[<&]/g, '')}</p>`));
     // (audit AU-7: a page whose speculation rules prefetch its same-site links at once, with no click)
     if (u.pathname === '/specrules.html') return send(200, 'text/html; charset=utf-8', PAGE('TRIF e2e speculation rules', `<script type="speculationrules">{"prefetch":[{"source":"document","where":{"href_matches":"/e2e-spec-*"},"eagerness":"immediate"}]}</script>
 <h1 id="title">Speculation rules</h1><p><a id="known" href="/two.html">a link the page has</a></p>`));

@@ -21,7 +21,7 @@ test('@powers: from the menu, in the menu\'s order, boxed mods only; not on the 
   assert.deepEqual(build(head('keys', '// @powers controls\n')).mod.powers, ['keys', 'controls']);
   assert.equal(build(head('')).mod.powers, undefined);
   assert.throws(() => build(head('fetch')), /"fetch" isn't a power/);
-  assert.throws(() => build(head('site-data')), /isn't in this version of TRIF yet/);
+  assert.throws(() => build(head('media')), /isn't in this version of TRIF yet/);
   assert.throws(() => buildMod({ site: 'x.com', file: '/w/a.js', code: '// ==WebMod==\n// @name A\n// @powers sound\n// ==/WebMod==\n' }), /powers \(@powers\) are for boxed mods/);
   // (the scanner reports it, not sent)
   const home = tempDir('trif-pw-');
@@ -120,7 +120,22 @@ test('trif mods: a boxed mod with powers says so', async () => {
 test('registration: a boxed mod\'s powers go with its code, from the header the helper read', async () => {
   const lib = await import('../extension/lib.js');
   const s = lib.modToUserScript({ id: 'x.com/beeper', matches: ['*://x.com/*'], sandboxed: true, powers: ['sound'], code: '// @powers keys\ntrif.audio();' });
-  assert.match(s.js[0].code, /__trifSandbox\.run\("x\.com\/beeper", ".*", \["sound"\]\)/);
+  assert.match(s.js[0].code, /__trifSandbox\.run\("x\.com\/beeper", ".*", \{"powers":\["sound"\],"args":\{\}\}\)/);
   const p = lib.modToUserScript({ id: 'x.com/beeper', matches: ['*://x.com/*'], sandboxed: true, unsandboxed: true, powers: ['sound'], code: 'x' });
-  assert.match(p.js[0].code, /\('page', "x\.com\/beeper", __trifMod, \["sound"\]\); \}\)\(\);/);
+  assert.match(p.js[0].code, /\('page', "x\.com\/beeper", __trifMod, \{"powers":\["sound"\],"args":\{\}\}\); \}\)\(\);/);
+});
+
+test('search-box: takes the site\'s search address, with {query}, on the mod\'s own site; it\'s in the key, so a new address asks again', () => {
+  const m = build(head('search-box https://www.x.com/search?q={query}, site-data, page-data')).mod;
+  assert.deepEqual(m.powers, ['site-data', 'page-data', 'search-box']);
+  assert.deepEqual(m.powerArgs, { 'search-box': ['https://www.x.com/search?q={query}'] });
+  assert.deepEqual(bp.powerNeeds(m).map((n) => [n.key, n.fact]), [
+    ['power:site-data', 'can see and filter what x.com sends this page (posts, profiles), but can\'t send anything'],
+    ['power:page-data', 'can read the data x.com keeps behind what\'s on the page'],
+    ['power:search-box:https://www.x.com/search?q={query}', 'adds a search box that searches www.x.com'],
+  ]);
+  assert.throws(() => build(head('search-box')), /search-box takes the site's search address/);
+  assert.throws(() => build(head('search-box https://evil.example/s?q={query}')), /evil\.example isn't this mod's site/);
+  assert.throws(() => build(head('search-box https://x.com/search')), /needs to be an http\(s\) address with \{query\}/);
+  assert.throws(() => build(head('sound loud')), /the sound power takes nothing after its name/);
 });

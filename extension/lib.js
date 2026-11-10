@@ -78,7 +78,7 @@ export function modToUserScript(mod) {
   // own; or, in a browser without that world and once the user allowed it (sandboxFallback), in the page's
   // world with the same API around it.
   // (a boxed mod's powers, as the helper read them from its header: docs/POWERS.md)
-  const powers = Array.isArray(mod.powers) ? mod.powers : [];
+  const powers = { powers: Array.isArray(mod.powers) ? mod.powers : [], args: mod.powerArgs && typeof mod.powerArgs === 'object' ? mod.powerArgs : {} };
   if (inSandboxWorld(mod)) return { ...base, js: [{ code: sandboxModCode(mod.id, String(mod.code ?? ''), powers) }], world: 'USER_SCRIPT', worldId: SANDBOX_WORLD };
   if (mod.sandboxed) return { ...base, js: [{ code: sandboxPageCode(mod.id, String(mod.code ?? ''), powers) }], world: 'MAIN' };
   return { ...base, js: [{ code: wrapModCode(mod.id, String(mod.code ?? '')) }], world: 'MAIN' };

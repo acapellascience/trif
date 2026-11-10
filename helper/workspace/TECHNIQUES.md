@@ -147,8 +147,19 @@ sends anything, so ask only for what the mod needs; a mod that needs the network
 - `read-drafts`: what the user types: `.value` of the page's text fields, textareas and selects, `.text` of
   editors, `data` on `input` events, and keys in fields. Password and card fields stay hidden, always.
 
-The rest of the menu (`site-data`, `page-data`, `search-box`, `media`, `go-to`, `click`, `write-drafts`,
-`mods`) isn't in this version yet: `trif check` says so.
+- `site-data`: `trif.filterResponse(urlGlob, (data, {url, method, status}) => data)`: the site's JSON
+  responses (fetch and XHR) whose address matches (`*` for anything), as a plain copy, before the page
+  sees them. Change it in place or return it. **Remove or reorder only**: every string, number and boolean
+  in what you return, and every object key, has to be in what the site sent (a string or number no more
+  times than it was there), or TRIF keeps the original and `trif errors` says why. Synchronous: no `await`.
+- `page-data`: `el.pageData(path)`: the page's data behind an element, as a plain copy (no functions, no
+  elements): `props.…` (its React props) or `fiber.…` (its React fiber: `fiber.return.memoizedProps.user`).
+- `search-box`: `trif.searchBox({placeholder})` gives you a search box TRIF draws; place and style it like
+  any element; you can't fill or read it. When the user presses Enter, it goes to the address in the header
+  with their words: `// @powers search-box https://www.example.com/search?q={query}` (on the mod's own site).
+
+The rest of the menu (`media`, `go-to`, `click`, `write-drafts`, `mods`) isn't in this version yet: `trif
+check` says so.
 
 ## Writing mods TRIF can read
 

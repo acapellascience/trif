@@ -217,7 +217,7 @@ class FirefoxDriver {
 
   /** A trusted press of `key` ('Escape') in the page `ctx`. */
   async key(ctx, key) {
-    const value = { Escape: '\uE00C' }[key] || key;
+    const value = { Escape: '\uE00C', Enter: '\uE007' }[key] || key;
     await this.bidi.send('input.performActions', {
       context: ctx, actions: [{ type: 'key', id: 'keyboard', actions: [{ type: 'keyDown', value }, { type: 'keyUp', value }] }],
     });

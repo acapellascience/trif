@@ -12,9 +12,9 @@ panel shows "It <fact>." and `trif status` "it <fact>".
 | keys | can see the keys you press (not in text fields), so it can have shortcuts |
 | sound | can play sounds |
 | controls (listed, never holds alone) | can add its own controls (sliders, pickers) |
-| site-data *(phase 2)* | can see and filter what {site} sends this page (posts, profiles), but can't send anything |
-| page-data *(phase 2)* | can read the data {site} keeps behind what's on the page |
-| search-box *(phase 2)* | adds a search box that searches {site} |
+| site-data | can see and filter what {site} sends this page (posts, profiles), but can't send anything |
+| page-data | can read the data {site} keeps behind what's on the page |
+| search-box | adds a search box that searches {host} ({host}: the search address's, from the header) |
 | media *(phase 3)* | can play and pause video and audio on this page |
 | go-to *(phase 3)* | can take you to these pages on {site} |
 | click *(phase 3)* | can click these for you |
@@ -64,3 +64,19 @@ panel shows "It <fact>." and `trif status` "it <fact>".
 - sound: **sounds come from data:audio/…;base64 addresses only** · **connect takes another of this mod's
   sound nodes, or 'out'** · **only sources start** / **only sources stop** · **no {name} here** · **{what}
   must be a number** · **this browser has no Web Audio**
+
+## Phase 2 errors
+
+- NOT SENT / trif check: **search-box takes the site's search address, with {query} where the words go:
+  @powers search-box https://www.example.com/search?q={query}** · **search-box: "{value}" isn't an address** ·
+  **search-box: "{value}" needs to be an http(s) address with {query} in it** · **search-box: {host} isn't
+  this mod's site: a search box searches the site it's on** · **the {name} power takes nothing after its name**
+- A mod (trif errors): **a filter may only remove or reorder, and {why}: TRIF kept what the site sent**, where
+  {why} is **the text "{text}" isn't in what the site sent** / **the text "{text}" more times than what the
+  site sent** / **the value {value} isn't in what the site sent** / **the key "{key}" isn't in what the site
+  sent** / **it was too deep to check**; **a filter returns the data itself, not a promise: TRIF kept what the
+  site sent**; **a filter returns plain data: TRIF kept what the site sent**
+- A mod (thrown): **filterResponse takes a function** · **the page's data needs the page-data power
+  (// @powers page-data)** · **a path is names with dots between them (props.post.text)** · **the search-box
+  power needs its address in the header: @powers search-box https://…{query}**
+- The search box's own label (read by screen readers): **Search**

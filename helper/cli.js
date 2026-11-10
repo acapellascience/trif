@@ -452,13 +452,15 @@ const handlers = {
       // (its powers, from the menu: lib/boxpowers.js)
       const bp = require('./lib/boxpowers');
       let asked;
-      try { asked = bp.parsePowers(header.powers); } catch (e) {
+      const rel0 = path.relative(ctx.ws.modsDir, path.resolve(file)).split(path.sep);
+      let askedArgs = {};
+      try { const pa = bp.parsePowersWithArgs(header.powers, { site: rel0.length === 2 ? rel0[0] : '', matches: header.matches }); asked = pa.names; askedArgs = pa.args; } catch (e) {
         if (ctx.json) printJson({ ok: false, error: e.message }); else out(`${path.resolve(file)}: ${e.message}`);
         process.exitCode = 1;
         return;
       }
       const rel = path.relative(ctx.ws.modsDir, path.resolve(file)).split(path.sep);
-      const needs = bp.powerNeeds({ site: rel.length === 2 ? rel[0] : '', powers: asked });
+      const needs = bp.powerNeeds({ site: rel.length === 2 ? rel[0] : '', powers: asked, powerArgs: askedArgs });
       const lint = require('./lib/sandboxlint').sandboxLint(code, { powers: asked });
       if (ctx.json) return printJson({ ok: true, file: path.resolve(file), sandboxed: true, powers: needs.map((n) => ({ key: n.key, power: n.power, fact: n.fact, holds: !n.soft })), lint });
       out(`ok: ${path.resolve(file)} is a boxed mod and parses`);

@@ -68,9 +68,12 @@ const s = '<!-- x';
   assert.match(lint.find((l) => l.what === '.innerHTML').why, /setText/);
   assert.match(lint.find((l) => l.what === '.click').why, /can't click/);
   // names a mod gives: TRIF's own
-  assert.deepEqual(sandboxLint(`el.setAttr('data-hx-post', '/x'); el.setAttr('data-trif-ok', '1'); el.setAttr('id', 'config'); el.setAttr('id', 'trif-a');
-el.classes.add('js-x'); el.classes.add('trif-y'); el.classes.remove('done'); el.removeAttr('data-ahr');`).map((l) => l.what),
+  assert.deepEqual(sandboxLint(`el.setAttr('data-hx-post', '/x'); el.setAttr('data-trif-box-ok', '1'); el.setAttr('id', 'config'); el.setAttr('id', 'trif-box-a');
+el.classes.add('js-x'); el.classes.add('trif-box-y'); el.classes.remove('done'); el.removeAttr('data-ahr');`).map((l) => l.what),
   ["setAttr('data-hx-post')", "setAttr('id', 'config')", "classes.add('js-x')", "classes.remove('done')", "removeAttr('data-ahr')"]);
+  // (a plain trif- name is a free mod's: a boxed mod's are trif-box-; and selectors that read fields)
+  assert.deepEqual(sandboxLint(`el.setAttr('id', 'trif-a'); el.setAttr('data-trif-x', '1'); page.find('input[value^="a"]'); page.find('a\\\\:b'); el.matches(':autofill');`).map((l) => l.what),
+    ["setAttr('id', 'trif-a')", "setAttr('data-trif-x')", "find('input[value^=\"a\"]')", "find('a\\:b')", "matches(':autofill')"]);
   // the API, and the language: nothing
   assert.deepEqual(sandboxLint(`trif.css('a { color: red }'); trif.observe('article', (a) => { if (a.text.includes('Ad')) a.hide(); });
 const prefs = await trif.settings('prefs', { on: true }); setTimeout(() => console.log(Math.random(), Date.now()), 5);

@@ -214,6 +214,8 @@ on and which are `off`.
   those mods don't run there, whatever their own switch says. Only the user can switch a group back on, in
   the panel; if a free mod you wrote is on a site where free mods are off, say so, or offer a style or
   boxed mod instead.
+- In a free mod, never act on `trif-box-` names (ids, classes, `data-trif-box-*`): those are boxed mods'
+  own, and anything can make them. Give a free mod's own elements plain `trif-` names.
 - The user can set new mods of a group to start off in a browser (Settings in the side panel; `trif
   status` shows `NEW MODS`). Then a new mod of that group arrives there switched off, `off (new)` in
   `trif status`, unless it was made in that browser's own side panel: one you write in a terminal, one

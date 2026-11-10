@@ -108,13 +108,45 @@ From tests/e2e/scenario.js `sandboxedCheck` (sandbox-<browser>.json in the run's
 | a mod's first run (compartment + its top level) | 0.2-3 ms | 0-6 ms |
 | restyle 1000 elements through stand-ins (`style()`) | 3 ms | 2 ms |
 | the same in a page mod (`el.style.setProperty`) | 0.4 ms | 0-1 ms |
-| DVD port, per frame (TRIF's callback + the mod's step) | 0.11 ms | 0.15-0.18 ms |
+| DVD port, per frame (TRIF's callback + the mod's step) | 0.11-0.13 ms | 0.11-0.18 ms |
 | names on the compartment's global | 70 (page's world: ~1,240) | 68 |
 
 So: about 8-10 ms once per page for the sandbox to start (at document_start, before any mod), then mods
 cost about what they do; stand-ins are 5-8x a direct DOM call on a hot loop (still ~3 µs an element). A
 world per mod would pay the 8-10 ms per mod per page, hence one shared world. Not measured on a real site
 (no network tonight); X's timeline with the feed mods is the next thing to time.
+
+## Hostile e2e: results
+
+Final runs (Chrome 156: 56 of 56 checks passed; Firefox 159: 61 of 61): 123 escapes tried by
+tests/e2e/fixtures/sandbox-hostile.js, every one refused (TRIF or the language said no) or absent (the thing
+isn't there), in both browsers; the test server saw none of the `e2e-sbx-leak` addresses; the page's own
+listeners saw no click, key, submit, focus or message and no inline code ran; its prototypes were untouched
+(and not frozen: lockdown stays in TRIF's world); its form, empty script, style element, link, image, button
+handler and frame were as they were; the tab stayed on the page and no tab opened. By category:
+- network: fetch, XMLHttpRequest, WebSocket, EventSource, WebTransport, RTCPeerConnection, Worker,
+  SharedWorker, navigator (so sendBeacon), Image, Request, importScripts: absent; images at another site,
+  at this site with a query, at a new address on this site, the page's own image pointed elsewhere: refused;
+  CSS `url()` (trif.css, style values), `image-set()`, `@import`, an escaped `u\72l(`, `@font-face`, a
+  selector closing trif.hide's rule: refused; `<link>`, `<script>`, `<iframe>`, `<frame>`, `<object>`,
+  `<embed>`, `<form>`, `<input>`, `<meta>`, `<base>`, `<style>`, `<svg>`, `<video>`, `<audio>`, `<source>`,
+  `<template>`, `<portal>`: refused; a link to another site or to this site with a query: refused.
+- code from strings: eval, Function, Compartment, lockdown, harden: absent; the Function, async function and
+  generator constructors reached through functions: refused (SES); a string timer: refused.
+- inline code: onclick on the page's button, onerror on a new image, a `javascript:` link, `srcdoc`:
+  refused; `innerHTML` (frozen stand-in), `insertAdjacentHTML` (not there): refused; text into an empty
+  script the page made (setText, append), CSS into the page's style element: refused; trif.text over it:
+  skipped (nothing written).
+- other windows, frames, the page: window, document, self, top, parent, frames, opener, location, history,
+  storage, caches, cookieStore, chrome, browser, postMessage, open, alert, the page's own globals, event
+  constructors, MutationObserver, getComputedStyle, DOMParser, customElements, trustedTypes: absent; no
+  browser names on the global; a frame's window/document, into a frame, a frame by index: absent; the
+  language's prototypes, a stand-in and its prototype: refused (frozen); a stand-in method on something TRIF
+  didn't make: refused; a DOMException through a selector, classes or a canvas: arrives as a plain TypeError.
+- synthetic input: click(): refused (not there); dispatchEvent, focus, submit, requestSubmit: absent; a form
+  field's value, a textarea's or option's text: refused; execCommand: refused (no document).
+- navigation: location, window.open, a `target` attribute, a target=_blank link's click: refused.
+- clipboard, cookies, localStorage, postMessage: refused (none of them there).
 
 ## Open questions
 
@@ -134,3 +166,42 @@ world per mod would pay the 8-10 ms per mod per page, hence one shared world. No
   without 'unsafe-inline'): not tested. In Chrome the world's own CSP may cover it.
 - **API gaps found while porting**: CSS masks with the site's images, `getBBox`, drawing images on a canvas
   (`drawImage`), focus/scrollIntoView. Each is a deliberate addition.
+- **Where SES loads**: the sandbox runtime goes wherever any sandboxed mod *matches*, ignoring excludes and
+  per-site switches (those only stop the mods). A sandboxed mod for every site costs ~8-10 ms on every page
+  load. Could carry the excludes common to all sandboxed mods.
+- **Settings of a deleted mod** stay in `sandboxSettings` (capped per mod); not cleaned up yet.
+- **`trif approve`** doesn't reach the extension's sandbox hold (Safari): Allow is in the panel only, like
+  the group switches.
+- **Safari not run** tonight (no Safari e2e); its path is the page-script form (tested in Chrome and
+  Firefox) plus the hold (unit tests).
+
+## New UI text (for Tim's review)
+
+Side panel:
+- Group heading **Sandboxed**, with the line *Run in TRIF's sandbox: they can't send, click or load anything.*
+- Settings → New mods start: a **Sandboxed** row (On / Off, default On).
+- Tag tooltip on a new sandboxed mod that started off: *New sandboxed mods start off (Settings): switch it on
+  once you've looked at it.* (the existing sentence with the new group name).
+- A sandboxed mod on hold in a browser without the sandbox: head *Waiting for your OK.*; facts *Safari can't
+  run sandboxed mods, so here it would run as a page script, with everything the page has* (then any of
+  *as a page script, it <TRIF's usual fact>*); note *Allow runs this version as a page script, in this browser
+  only.* Buttons: Allow (on the row), Show code.
+- Errors via the existing "Couldn't switch …" note: *Couldn't switch Sandboxed on/off: …*
+
+CLI and agents (trif status / mods / check / new, help): `registered (sandboxed)`, `registered (sandboxed mod,
+run as a page script: the user allowed it, as this browser has no sandbox)`, `WAITING: <reason>; only the
+user can allow that, in the side panel`, `NO SANDBOX    <browser> can't run sandboxed mods: each waits for
+the user's OK (in the side panel) to run as a page script instead`, `kind: rules (…)` / `kind: sandboxed
+(…)` in trif mods, `sandboxed mods` in GROUPS OFF / NEW MODS, trif check's sandboxed output and lint lines,
+`trif new --sandboxed`, the template's comments, and the mods' own error messages (`TRIF sandbox: …`).
+
+## Packaging
+
+- extension/vendor: SES 2.3.0's `dist/ses.umd.min.js` byte for byte from npm (sha256 in README.txt), its
+  Apache-2.0 LICENSE and the four licenses it ships for code it includes (aura, caja, core-js, v8). TRIF's
+  own LICENSE (MIT) doesn't mention them yet.
+- `web-ext lint` on the Firefox build: two new warnings, both `DANGEROUS_EVAL` in vendor/ses.umd.min.js (SES
+  makes its evaluator with the realm's Function); no new errors. AMO may ask where the minified file comes
+  from: the npm package, unchanged.
+- The Chrome build: the world needs no new permission (userScripts already), nor web_accessible_resources
+  (the browser injects vendor/ses.umd.min.js as a user script file).

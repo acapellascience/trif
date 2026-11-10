@@ -77,6 +77,10 @@ t('the language\'s prototypes (Object.prototype)', () => { Object.prototype.__tr
 t('a stand-in\'s prototype', () => { Object.getPrototypeOf(page.root).sneaky = 1; return 'set'; });
 t('a stand-in itself', () => { page.root.sneaky = 1; return 'set'; });
 t('a stand-in method on something TRIF didn\'t make', () => { Object.getPrototypeOf(page.root).append.call({}, 'x'); return 'called'; });
+const plainError = (fn) => () => { try { fn(); } catch (e) { return Object.getPrototypeOf(e) === TypeError.prototype ? undefined : 'another kind: ' + Object.prototype.toString.call(e) + ' ' + (e && e.constructor && e.constructor.name); } return 'no error'; };
+t('a DOMException through classes', plainError(() => page.body.classes.add('two words')));
+t('a DOMException through a canvas', plainError(() => { const c = page.create('canvas').canvas(); c.arc(0, 0, -1, 0, 1); }));
+t('a DOMException through a selector', plainError(() => page.body.closest('[[[')));
 t('a browser error object (a DOMException) reaching the mod', () => {
   try { page.find('[[['); } catch (e) { return Object.getPrototypeOf(e) === TypeError.prototype ? undefined : 'another kind: ' + Object.prototype.toString.call(e) + ' ' + (e && e.constructor && e.constructor.name); }
   return 'no error';

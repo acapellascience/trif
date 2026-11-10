@@ -191,7 +191,7 @@ callbacks, after an await) and kept in the world for `trif errors` / `trif logs`
   silently unsandboxed. The same applies to any browser whose `configureWorld` fails.
 
 **The hostile e2e** (tests/e2e/scenario.js `sandboxedCheck`, fixture tests/e2e/fixtures/sandbox-hostile.js):
-about 125 escapes tried; each must be refused or absent, the test server must see none of the `e2e-sbx-leak`
+123 escapes tried (all refused or absent in Chrome 156 and Firefox 159); each must be refused or absent, the test server must see none of the `e2e-sbx-leak`
 addresses, the page must notice nothing (its own listeners for clicks, keys, submits, messages and inline
 code), its prototypes, form, script, style, link and image must be as they were, and the tab must stay where
 it was with no new tab. Plus a good mod (restyle, hide, add, text now and later, observe, canvas, timers,
@@ -242,8 +242,13 @@ can today from the patched `fetch`).
 variables): it changes what the site receives. A later `trif.rewriteRequest(urlPattern, {params})` could
 take a declared, checked list of changes; until then that part is a reviewed power.
 
-**To find out in a spike** (not done tonight): whether a USER_SCRIPT world's listener does run during a
-page-world dispatch in both browsers (Chrome's isolated worlds do for content scripts; Firefox's Xrays
-should); the cost of the JSON round trip on X's timeline responses (a few hundred KB: parse + stringify on
-each side, likely a few ms); and streamed responses (NDJSON, server-sent events), which a text read would
+**Spike (Nov 10, a one-off probe in the e2e, then taken out).** In Chrome 156 and Firefox 159, a
+`CustomEvent` dispatched on `document` in the page's world reached a listener in a USER_SCRIPT world of
+TRIF's *during the dispatch*, and that listener's answering event reached the page world's listener before
+`dispatchEvent` returned: a synchronous round trip. A string `detail` crossed both ways, and so did a plain
+object (cloned in Chrome; in Firefox it would arrive as an Xray wrapper of a page object, one more reason to
+pass JSON text and parse it on TRIF's side, so the compartment only ever gets plain data). A 340 KB JSON
+response (3,000 items) took 1.3 ms (Chrome) and about 1 ms (Firefox, 1 ms timer) for the whole round trip,
+parse and stringify included. Not tried: the wrapping itself (fetch's `Response`, XHR's getters, as Detox
+Timeline does), X's real responses, and streamed ones (NDJSON, server-sent events), which a text read would
 hold open: those would be left alone.

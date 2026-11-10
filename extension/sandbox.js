@@ -411,22 +411,29 @@ export function sandboxRuntime(mode, pageModId, pageFn) {
   // (code after an await runs outside both: then the mod is the one in the call stack, by its sourceURL)
   const modFromStack = () => { const m = /trif-sandbox:\/\/([^\s/]+\/[^\s/:)]+?)\.js/.exec(String(new Error().stack || '')); return m ? m[1] : null; };
   const cur = () => current || apiFor(modFromStack() || '(a sandboxed mod)');
+  // (each method guarded: a browser error reaches the mod as plain text)
+  const guardShared = (fn) => function (...args) {
+    try { return fn.apply(this, args); } catch (e) {
+      if (e instanceof TypeError && /^TRIF sandbox: /.test(e.message)) throw e;
+      throw new TypeError(`TRIF sandbox: ${String(e && e.message ? e.message : e).slice(0, 500)}`);
+    }
+  };
   const ctxOf = (canvas) => {
     const c = canvas.getContext('2d');
     if (!c) fail('no 2D drawing on this canvas');
     const ops = {};
     for (const k of ['fillRect', 'strokeRect', 'clearRect', 'fillText', 'strokeText', 'beginPath', 'closePath', 'moveTo', 'lineTo', 'arc', 'arcTo', 'rect',
       'quadraticCurveTo', 'bezierCurveTo', 'ellipse', 'fill', 'stroke', 'save', 'restore', 'translate', 'rotate', 'scale', 'setTransform', 'resetTransform', 'clip', 'roundRect']) {
-      ops[k] = (...a) => { for (const x of a) if (typeof x !== 'number' && typeof x !== 'string' && x !== undefined) fail(`${k} takes numbers and text`); c[k](...a); };
+      ops[k] = guardShared((...a) => { for (const x of a) if (typeof x !== 'number' && typeof x !== 'string' && x !== undefined) fail(`${k} takes numbers and text`); c[k](...a); });
     }
-    ops.measureText = (t) => harden({ width: c.measureText(str(t, 'text', 10000)).width });
-    ops.set = (props) => {
+    ops.measureText = guardShared((t) => harden({ width: c.measureText(str(t, 'text', 10000)).width }));
+    ops.set = guardShared((props) => {
       for (const [k, v] of Object.entries(props || {})) {
         if (!['fillStyle', 'strokeStyle', 'lineWidth', 'font', 'globalAlpha', 'textAlign', 'textBaseline', 'lineCap', 'lineJoin', 'shadowBlur', 'shadowColor', 'shadowOffsetX', 'shadowOffsetY', 'globalCompositeOperation', 'lineDashOffset'].includes(k)) fail(`${k} can't be set here`);
         if (typeof v !== 'string' && typeof v !== 'number') fail(`${k} takes text or a number`);
         c[k] = v;
       }
-    };
+    });
     return harden(ops);
   };
   const classesOf = new WeakMap();
@@ -458,10 +465,10 @@ export function sandboxRuntime(mode, pageModId, pageFn) {
       if (!c) {
         const cls = (x) => str(x, 'a class', 200);
         c = harden({
-          add: (...x) => node.classList.add(...x.map(cls)),
-          remove: (...x) => node.classList.remove(...x.map(cls)),
-          toggle: (x, on) => node.classList.toggle(cls(x), on === undefined ? undefined : !!on),
-          has: (x) => node.classList.contains(cls(x)),
+          add: guardShared((...x) => node.classList.add(...x.map(cls))),
+          remove: guardShared((...x) => node.classList.remove(...x.map(cls))),
+          toggle: guardShared((x, on) => node.classList.toggle(cls(x), on === undefined ? undefined : !!on)),
+          has: guardShared((x) => node.classList.contains(cls(x))),
         });
         classesOf.set(node, c);
       }
@@ -500,13 +507,6 @@ export function sandboxRuntime(mode, pageModId, pageFn) {
     rect() { const r = nodeOf(this).getBoundingClientRect(); return harden({ x: r.x, y: r.y, width: r.width, height: r.height, top: r.top, left: r.left, right: r.right, bottom: r.bottom }); },
     on(type, fn, opts) { const n = nodeOf(this); return cur().listen(n, type, fn, opts); },
     canvas() { const n = nodeOf(this); if (n.localName !== 'canvas') fail('canvas() is for <canvas> elements'); return ctxOf(n); },
-  };
-  // (each method guarded: a browser error reaches the mod as plain text)
-  const guardShared = (fn) => function (...args) {
-    try { return fn.apply(this, args); } catch (e) {
-      if (e instanceof TypeError && /^TRIF sandbox: /.test(e.message)) throw e;
-      throw new TypeError(`TRIF sandbox: ${String(e && e.message ? e.message : e).slice(0, 500)}`);
-    }
   };
   const protoOut = {};
   for (const [k, d] of Object.entries(Object.getOwnPropertyDescriptors(protoDef))) {

@@ -2224,6 +2224,9 @@
       else if (s >= END.roll2 && s < END.roll2 + L) { const e = prog(END.roll2, L); dx = -D / 2 + D * e; g.roll = 2 * Math.PI * e; }
       else if (s >= END.roll2 + L && s < END.roll2 + L + back2) dx = D / 2 - (D / 2) * prog(END.roll2 + L, back2);
       x += dx;
+      // (the hull's flame cones stay off from the first roll to the end (the burst): sliding sideways, the
+      // exhaust trails swing out while the cones point straight back, too visible a second pair; see noFlames)
+      g.noFlames = s >= END.roll1;
       const r1 = (s - END.roll1) / L, r2 = (s - END.roll2) / L; // (for the swooshes below)
       if (r1 > 0 && !g.swooshed1) { g.swooshed1 = true; sfx.swoosh(-1); }
       if (r2 > 0 && !g.swooshed2) { g.swooshed2 = true; sfx.swoosh(1); }
@@ -2686,7 +2689,7 @@
   };
   // Where the posts are, measured once a frame (one layout for all of them), so every note is tested with
   // plain arithmetic: [{ article, left, top, right, bottom }] for the posts on screen not yet sung to.
-  // (only posts wholly in view, as for the lasers' words (see wholePostShown): below the sticky top bar and
+  // (only posts wholly in view: below the sticky top bar and
   // above the window's bottom edge, or filling that whole view when taller than it)
   // (but the timeline speeds up through the flight, and by the last quarter posts went by too fast to be
   // wholly in view for long: through the last quarter of the flight the edge they come in at slowly moves
@@ -3383,31 +3386,13 @@
   // checks three points a frame, and measuring every word for each of them was most of a frame's time.
   // (Nothing a hit does in a frame moves a word: blasted things are only hidden.)
   let wordBoxes = null;
-  // X: a post's words can't be shot until the whole post is in view: below the sticky top bar (and inside
-  // Timeline mode's band) and above the window's bottom edge. A post taller than that view counts once it
-  // fills it. Only words: media and boxes are fair game as soon as they show. (Per post, once a frame: cleared
-  // with wordBoxes.)
-  let postInView = new Map();
-  const wholePostShown = (w) => {
-    const a = w.closest('article');
-    if (!a) return true; // (not in a post: the sidebar, the panel...)
-    let v = postInView.get(a);
-    if (v === undefined) {
-      const r = a.getBoundingClientRect();
-      const top = Math.max(0, topCover() ? coverBox.bottom : 0, tl ? tlBand.top : 0);
-      const bottom = Math.min(H, tl ? tlBand.bottom : H);
-      v = (r.top >= top - 1 && r.bottom <= bottom + 1) || (r.top <= top && r.bottom >= bottom);
-      postInView.set(a, v);
-    }
-    return v;
-  };
+  // (Words in a post used to wait until the whole post was in view; that was taken out again, 2026-11-09:
+  // lasers hit any word they reach, as before. Bird mode's notes keep the rule: see postBoxes.)
   const liveWordBoxes = () => {
     if (!wordBoxes) {
       wordBoxes = [];
-      postInView = new Map();
       for (const w of document.querySelectorAll('.tss-w:not([data-tss-dead])')) {
         if (shielded(w)) continue;
-        if (!wholePostShown(w)) continue;
         const r = w.getBoundingClientRect();
         if (!r.width && !r.height) continue;
         if (coveredBox(r, w)) continue; // X: behind the sticky top bar (see topCover)
@@ -3425,7 +3410,7 @@
     if (!n) return null;
     if (n === 1) return only.clipped ? null : only.w; // (the one word there: what both ways below would find)
     for (const el of document.elementsFromPoint(x, y)) {
-      if (el.classList?.contains('tss-w') && !el.hasAttribute('data-tss-dead') && !shielded(el) && !coveredAt(x, y, el) && wholePostShown(el)) return el;
+      if (el.classList?.contains('tss-w') && !el.hasAttribute('data-tss-dead') && !shielded(el) && !coveredAt(x, y, el)) return el;
     }
     // elementsFromPoint skips pointer-events:none text: fall back to rects
     for (const b of boxes) {
@@ -3901,9 +3886,10 @@
     // from below.
     const xf = SHIP_STYLE === 'xflyer';
     rollNow = xf ? (endgame?.roll || 0) : 0;
+    noFlames = !!endgame?.noFlames;
     const belly = xf && Math.cos(rollNow) < 0;
     shadowed(ship.x, ship.y - 40, 110, () => { ctx.save(); shipFrame(!xf); if (belly) drawXFlyerBelly(now, bank, thrust, rave); else drawHull(now, bank, thrust, rave); ctx.restore(); });
-    rollNow = 0; // (the lives' tiny ships never roll)
+    rollNow = 0; noFlames = false; // (the lives' tiny ships never roll)
 
     // muzzle flashes
     if (muzzle > 0) { ctx.save(); shipFrame(); drawMuzzle(); ctx.restore(); }
@@ -3949,6 +3935,7 @@
   // (spine, canopy, nacelles) slide toward the way it's rolling and go over the edge, while the belly's come
   // up from the other side: that's what shows which way it turns. rollNow: the roll being drawn (0: none).
   let rollNow = 0;
+  let noFlames = false; // (the ship being drawn has its flame cones off: the end's barrel-roll sequence, see endgameStep)
   const rollPart = (z, fn) => {
     if (!rollNow) { fn(); return; }
     ctx.save();
@@ -3970,7 +3957,7 @@
     // engine flames (the first ship's)
     // (not during the end's barrel rolls: the dodge is fast enough that the exhaust ribbons (drawShip) swing far
     // out behind while these cones point straight back, which read as a second pair of exhausts)
-    if (part !== 'body' && !rollNow) rollPart(0, () => {
+    if (part !== 'body' && !rollNow && !noFlames) rollPart(0, () => {
     ctx.save();
     ctx.globalCompositeOperation = 'lighter';
     for (const ex of ENGINES) {

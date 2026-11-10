@@ -29,12 +29,17 @@ namespace_id = "1001"
   limit = 5
   period = 60
 
-# The home page's demo shows the real side panel: the Worker serves the files it needs (src/demo.js
-# EXTENSION_FILES, nothing else) from the extension's own folder through this binding. run_worker_first:
-# every request goes to the Worker, so no other file there is served; html_handling none: sidepanel.html
-# is fetched by that name (no redirect to /sidepanel).
+# What the Worker serves from files (the ASSETS binding): the extension's side panel files the home page's
+# demo shows (src/demo.js EXTENSION_FILES, nothing else, under ext/) and the notes' pictures and videos
+# (site/public/notes/). build-demo.js stages them into .assets/ (stage-assets.js; not in git), and [build] runs
+# it before every deploy (and wrangler dev). run_worker_first: every request goes to the Worker, so no file
+# there is served unless index.js asks for it; html_handling none: sidepanel.html is fetched by that name (no
+# redirect to /sidepanel).
+[build]
+command = "node build-demo.js --stage"
+
 [assets]
-directory = "../extension"
-binding = "EXTENSION"
+directory = ".assets"
+binding = "ASSETS"
 run_worker_first = true
 html_handling = "none"

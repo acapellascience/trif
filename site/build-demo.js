@@ -6,8 +6,8 @@
 // shim.js, which stands in for the extension's background under the real side panel; and panel.css), the
 // recorded chats (chats/*.json, from the promo video's sessions) and the mods it can switch on (mods/*.js,
 // the home page's own: TRIF doesn't ship them, so the real TRIF has none for this site), listed in
-// DEMO_ORDER. The side panel itself isn't here: the Worker serves the extension's own files (wrangler.toml
-// [assets]).
+// DEMO_ORDER. The side panel itself isn't here: the Worker serves the extension's own files (ext/ in its ASSETS
+// binding: wrangler.toml [assets], stage-assets.js).
 
 import fs from 'node:fs';
 import path from 'node:path';
@@ -95,6 +95,12 @@ export function writeDemoModule() {
   return old !== text;
 }
 
+// node site/build-demo.js [--stage]: --stage (what wrangler.toml [build] runs before a deploy) also stages the
+// Worker's files (stage-assets.js: the side panel's files and the notes' pictures and videos) into site/.assets/.
 if (process.argv[1] && import.meta.url === pathToFileURL(path.resolve(process.argv[1])).href) {
   console.log(writeDemoModule() ? `wrote ${path.relative(process.cwd(), OUT)}` : 'up to date');
+  if (process.argv.includes('--stage')) {
+    const { stageAssets, STAGE } = await import('./stage-assets.js');
+    console.log(`staged ${stageAssets()} files into ${path.relative(process.cwd(), STAGE)}`);
+  }
 }

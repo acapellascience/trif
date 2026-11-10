@@ -3,8 +3,10 @@
 // Windows waitlist: /windows, whose POST emails each signup the same way (the maintainer's inbox is the list).
 //
 // And the home page's demo (demo.js): the home page with the mods it switched on (/?mods=a,b), the
-// extension's side panel files (/demo/ext/…, from the EXTENSION assets binding: wrangler.toml), the demo's
-// scripts and its mods. The side panel may be framed by this site only; everything else by nothing.
+// extension's side panel files (/demo/ext/…, from the ASSETS binding's ext/: wrangler.toml, stage-assets.js),
+// the demo's scripts and its mods. And the notes (notes.js): /notes/<slug>, Tim's posts from X, with their
+// pictures and videos (/notes/<slug>/<file>, from the ASSETS binding). The side panel may be framed by this
+// site only; everything else by nothing.
 //
 // It also answers for webmods.dev, TRIF's address before 0.2.0 (when it was called WebMods), sending
 // everything there to the same path on timsrobot.com: older installs open webmods.dev/report#r=… (a
@@ -14,6 +16,7 @@ import { FAVICON_SVG, REPORT, REPORT_JS, WINDOWS, WINDOWS_JS, windowsPage } from
 import { LIMITS, ReportError, parseReport, parseSignup, reportEmail, signupEmail } from './report.js';
 import { DEMO_FILES, EXTENSION_FILES, homeWith, modScript, pageWith, panelHtml, typeFor } from './demo.js';
 import { IMAGES } from './images.js';
+import { noteHasFile, notePage } from './notes.js';
 
 const CSP = {
   'default-src': "'none'", 'script-src': "'self'", 'style-src': "'unsafe-inline'", 'connect-src': "'self'", 'img-src': "'self'",
@@ -45,13 +48,44 @@ const script = (body) => respond(body, 'text/javascript; charset=utf-8', 200, CA
 const bodyType = (request) => (request.headers.get('Content-Type') || '').split(';')[0].trim().toLowerCase();
 const notFound = () => respond('Not found', 'text/plain', 404);
 
-/** A side panel file from the extension's folder (the EXTENSION assets binding), if the panel uses it. */
+/** A side panel file from the extension's folder (ext/ in the ASSETS binding), if the panel uses it. */
 async function extensionFile(request, env, file) {
-  if (!EXTENSION_FILES.has(file) || !env.EXTENSION) return notFound();
-  const res = await env.EXTENSION.fetch(new Request(new URL(`/${file}`, request.url)));
+  if (!EXTENSION_FILES.has(file) || !env.ASSETS) return notFound();
+  const res = await env.ASSETS.fetch(new Request(new URL(`/ext/${file}`, request.url)));
   if (!res.ok) return notFound();
   if (file === 'sidepanel.html') return html(panelHtml(await res.text()), 200, undefined, PANEL);
   return respond(res.body, typeFor(file), 200, CACHE);
+}
+
+// A note's page: its videos and pictures are this site's own files.
+const NOTE_PAGE = { 'Content-Security-Policy': csp({ 'media-src': "'self'" }) };
+const MEDIA_TYPES = { jpg: 'image/jpeg', jpeg: 'image/jpeg', png: 'image/png', gif: 'image/gif', webp: 'image/webp', mp4: 'video/mp4' };
+
+/**
+ * A note's picture or video (notes/<slug>/<file> in the ASSETS binding), whole or the byte range asked for
+ * (a video player asks for ranges to start and to seek; if the binding sends the whole file, the range is cut
+ * from it here).
+ */
+async function noteFile(request, env, slug, file) {
+  const type = MEDIA_TYPES[file.split('.').pop().toLowerCase()];
+  if (!type || !noteHasFile(slug, file) || !env.ASSETS) return notFound();
+  const asked = request.headers.get('Range');
+  const res = await env.ASSETS.fetch(new Request(new URL(`/notes/${slug}/${file}`, request.url), { headers: asked ? { Range: asked } : {} }));
+  if (res.status === 416) return respond(null, type, 416, { 'Content-Range': res.headers.get('Content-Range') || '' });
+  if (!res.ok) return notFound();
+  const headers = { 'Cache-Control': 'public, max-age=86400', 'Accept-Ranges': 'bytes' };
+  if (res.status === 206) {
+    return respond(res.body, type, 206, { ...headers, 'Content-Range': res.headers.get('Content-Range'), ...(res.headers.get('Content-Length') ? { 'Content-Length': res.headers.get('Content-Length') } : {}) });
+  }
+  const range = asked && /^bytes=(\d*)-(\d*)$/.exec(asked);
+  if (range && (range[1] || range[2])) {
+    const body = new Uint8Array(await res.arrayBuffer());
+    const start = range[1] ? Number(range[1]) : Math.max(0, body.length - Number(range[2]));
+    const end = range[1] && range[2] ? Math.min(Number(range[2]), body.length - 1) : body.length - 1;
+    if (start >= body.length || start > end) return respond(null, type, 416, { 'Content-Range': `bytes */${body.length}` });
+    return respond(body.subarray(start, end + 1), type, 206, { ...headers, 'Content-Range': `bytes ${start}-${end}/${body.length}`, 'Content-Length': String(end - start + 1) });
+  }
+  return respond(res.body, type, 200, { ...headers, ...(res.headers.get('Content-Length') ? { 'Content-Length': res.headers.get('Content-Length') } : {}) });
 }
 
 /**
@@ -210,6 +244,13 @@ export default {
       return code ? respond(code, 'text/javascript; charset=utf-8', 200, CACHE) : notFound();
     }
     if (pathname.startsWith('/demo/ext/')) return extensionFile(request, env, pathname.slice('/demo/ext/'.length));
+    const note = /^\/notes\/([a-z0-9-]+)\/?$/.exec(pathname);
+    if (note) {
+      const page = notePage(note[1]);
+      return page ? html(page, 200, undefined, NOTE_PAGE) : notFound();
+    }
+    const noteMedia = /^\/notes\/([a-z0-9-]+)\/([\w.-]+)$/.exec(pathname);
+    if (noteMedia) return noteFile(request, env, noteMedia[1], noteMedia[2]);
     return notFound();
   },
 };

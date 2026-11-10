@@ -319,12 +319,12 @@ test('TL-4: the site\'s other tabs are locked with it (and new ones), until the 
   assert.equal(chrome.icons.get(5), 'icons/robot-16.png');
 });
 
-test('TL-3: what the code leaves in the site\'s storage, compared on the new page before unlocking', async () => {
+test('TL-3: what was left in the site\'s storage, compared on the new page before unlocking', async () => {
   const { createTabLocks } = await load();
-  // nothing changed: the new page unlocks (the existing tests); caches or service workers changed: cleared,
-  // reloaded past the cache, then unlocked
+  // caches or service workers changed: cleared, reloaded past the cache, then unlocked
   let chrome = fakeChrome();
-  let locks = createTabLocks({ chrome });
+  let notes = [];
+  let locks = createTabLocks({ chrome, noted: (...a) => notes.push(a) });
   await locks.lock(1, 'x.com');
   chrome.data.caches = 'poisoned';
   chrome.data.serviceWorkers = 'poisoned';
@@ -333,36 +333,33 @@ test('TL-3: what the code leaves in the site\'s storage, compared on the new pag
   assert.ok(locks.isLocked(1), 'still locked while it clears');
   assert.deepEqual(chrome.cleared, ['caches', 'serviceWorkers']);
   assert.deepEqual(chrome.reloads, [[1, { bypassCache: true }]]);
-  await locks.check(1); // (the reloaded page: the cleared parts aren't asked about again)
+  await locks.check(1); // (the reloaded page: the cleared parts aren't counted again)
   assert.ok(!locks.isLocked(1));
-  // localStorage changed: still locked, asking; Reset clears everything and reloads, which unlocks
+  assert.deepEqual(notes, []);
+  // localStorage (or IndexedDB, cookies) changed: a note, and it unlocks as usual, nothing cleared
   chrome = fakeChrome();
-  locks = createTabLocks({ chrome });
+  notes = [];
+  locks = createTabLocks({ chrome, noted: (...a) => notes.push(a) });
   await locks.lock(1, 'x.com');
-  chrome.data.localStorage = 'poisoned';
+  chrome.data.localStorage = 'changed';
+  chrome.data.cookies = 'changed';
   chrome.newDocument(1);
   await locks.check(1);
-  assert.deepEqual(locks.list()[0].stored, ['localStorage']);
-  await locks.check(1); // (the same page: still asking)
-  assert.ok(locks.isLocked(1));
-  await locks.reset(1);
-  assert.deepEqual(chrome.cleared, ['caches', 'serviceWorkers', 'localStorage', 'sessionStorage', 'indexedDB', 'cookies']);
-  await locks.check(1);
   assert.ok(!locks.isLocked(1));
-  // Keep it: nothing cleared, a fresh page, unlocked
+  assert.deepEqual(notes, [[1, 'x.com', ['localStorage', 'cookies']]]);
+  assert.deepEqual(chrome.cleared, []);
+  // both: cleared and reloaded, and the note once
   chrome = fakeChrome();
-  locks = createTabLocks({ chrome });
+  notes = [];
+  locks = createTabLocks({ chrome, noted: (...a) => notes.push(a) });
   await locks.lock(1, 'x.com');
-  chrome.data.cookies = 'changed';
+  chrome.data.caches = 'poisoned';
   chrome.data.indexedDB = 'changed';
   chrome.newDocument(1);
   await locks.check(1);
-  assert.deepEqual(locks.list()[0].stored, ['indexedDB', 'cookies']);
-  await assert.rejects(locks.keep(9), /nothing to settle/);
-  await locks.keep(1);
-  assert.deepEqual(chrome.cleared, []);
   await locks.check(1);
   assert.ok(!locks.isLocked(1));
+  assert.deepEqual(notes, [[1, 'x.com', ['indexedDB']]]);
   // a part it couldn't read (null) isn't counted as a change
   chrome = fakeChrome();
   locks = createTabLocks({ chrome });
@@ -372,6 +369,40 @@ test('TL-3: what the code leaves in the site\'s storage, compared on the new pag
   chrome.newDocument(1);
   await locks.check(1);
   assert.ok(!locks.isLocked(1));
+});
+
+test('TL-3: the page\'s save guard refuses saves with the agent\'s code on the stack; the site\'s own pass', async () => {
+  const vm = require('vm');
+  const { leakGuard, SAVE_REFUSED } = await load();
+  const { buildRunCode } = await import('../extension/lib.js');
+  // a page with just enough: Storage, a localStorage on the window, and the realm's own Error and Proxy
+  const ctx = vm.createContext({ DOMException });
+  vm.runInContext(`
+    class Storage { constructor() { Object.defineProperty(this, '_m', { value: {} }); }
+      setItem(k, v) { this._m[k] = String(v); } getItem(k) { return k in this._m ? this._m[k] : null; }
+      removeItem(k) { delete this._m[k]; } clear() { for (const k of Object.keys(this._m)) delete this._m[k]; } }
+    const store = new Storage();
+    Object.defineProperty(globalThis, 'localStorage', { get() { return store; }, configurable: true, enumerable: true });
+    globalThis.Storage = Storage;
+    globalThis.siteSaves = (k) => localStorage.setItem(k, 'site');
+    globalThis.window = globalThis;
+  `, ctx);
+  vm.runInContext(`(${leakGuard})()`, ctx);
+  // the site's own code: saved
+  vm.runInContext('siteSaves("a"); localStorage.b = "named"', ctx);
+  assert.equal(vm.runInContext('localStorage.getItem("a")', ctx), 'site');
+  // the agent's run code (tagged): refused, directly, through the site's function, by a named property,
+  // and after an await
+  const agent = async (code) => JSON.parse(await vm.runInContext(buildRunCode(code, false, 'run-1', null, { tag: true }), ctx));
+  for (const code of ['localStorage.setItem("x", 1)', 'siteSaves("y")', 'localStorage.z = 1', 'await 0; localStorage.removeItem("a")', 'Error.stackTraceLimit = 0; localStorage.setItem("w", 1)']) {
+    const out = await agent(code);
+    assert.ok(!out.ok && out.error.includes(SAVE_REFUSED), `${code}: ${JSON.stringify(out)}`);
+  }
+  assert.equal(vm.runInContext('localStorage.getItem("a") + "," + localStorage.getItem("x") + "," + localStorage.getItem("y")', ctx), 'site,null,null');
+  // untagged (a terminal's trif run, or the page's): not refused
+  assert.deepEqual(JSON.parse(await vm.runInContext(buildRunCode('localStorage.setItem("t", 1)', false, 'run-2'), ctx)).ok, true);
+  assert.doesNotMatch(buildRunCode('1', true, 'r'), /sourceURL/);
+  assert.match(buildRunCode('1', true, 'r-1', null, { tag: true }), /\n\/\/# sourceURL=trif-run-r-1\.js$/);
 });
 
 test('a saved lock from before site locks (the old shape) still loads', async () => {

@@ -51,17 +51,28 @@ document: a reload or a real navigation.
   The other tabs unlock when the last tab the agent ran code in unlocks. Several tabs with agent code:
   each unlocks on its own new page, and the site stays locked until all of them have. Cost: while the
   lock lasts, the user can't post from the site's other tabs either.
-- **What the code leaves in the site's storage** (TL-3): when the lock starts, TRIF takes a fingerprint
-  of the site's stored state from the isolated world (Cache Storage names and keys, service worker
-  registrations, localStorage and sessionStorage, IndexedDB names and versions, the cookies the page can
-  see) and compares it on the new page, before unlocking (the lock's rules still apply to that page).
-  Nothing changed: it unlocks. Cache Storage or service workers changed: TRIF clears just those, for the
-  site's origin, from the isolated world (no `browsingData` permission: TRIF doesn't have it, and Firefox
-  would ask for it in an update), reloads past the cache, then unlocks. localStorage, sessionStorage,
-  IndexedDB or cookies changed: the tab stays locked and the panel asks to reset the site's saved data
-  (which may sign the user out of it) or keep it. Limits: IndexedDB's contents aren't compared, only its
-  databases' names and versions; HttpOnly cookies aren't seen (page code can't set them either); and a
-  site that rewrites its own storage all the time will ask more often.
+- **What the code leaves in the site's storage** (TL-3):
+  - The agent's code can't save: before it runs, TRIF wraps the page's storage writers (localStorage and
+    sessionStorage, their methods and named properties; IndexedDB open, delete and object-store and
+    cursor writes; `document.cookie` and `cookieStore`; Cache Storage; service worker registration) to
+    refuse a call while the agent's code is on the call stack, told by the `sourceURL` its run code gets
+    (`trif-run-<runId>.js`). The error says "TRIF: your agent's code can't save data on this site", and
+    reaches the agent. The site's own calls pass untouched. A speed bump, not a wall: a wrapped function
+    the code hands to the browser to call later (bound, through a microtask, or as a native callback)
+    runs with no agent code on the stack; a realm the guard misses (a frame reached some other way, a
+    window the code opens) has the originals. Same-origin frames the page reaches through `contentWindow`
+    or `contentDocument` get the guard too.
+  - When the lock starts, TRIF takes a fingerprint of the site's stored state from the isolated world
+    (Cache Storage names and keys, service worker registrations, localStorage and sessionStorage,
+    IndexedDB names and versions, the cookies the page can see) and compares it on the new page, before
+    unlocking (the lock's rules still apply to that page). Cache Storage or service workers changed:
+    TRIF clears just those, for the site's origin, from the isolated world (no `browsingData`
+    permission: TRIF doesn't have it, and Firefox would ask for it in an update), reloads past the cache,
+    then unlocks. localStorage, sessionStorage, IndexedDB or cookies changed (big sites write their own
+    all the time): it unlocks as usual and adds one quiet line to the site's chat ("<site> saved new data
+    while your agent's code ran. If something on <site> acts strangely, clear its site data in the
+    browser's settings."). Not compared: IndexedDB's contents; HttpOnly cookies (page code can't set them
+    either).
 - **Leak channels that aren't requests** (TL-6): before the agent's code, TRIF puts WebRTC's
   constructors out of reach in the page (they throw), drops `<link>`s that prefetch, preconnect,
   prerender or modulepreload, and turns speculation rules into a script type that does nothing, also in

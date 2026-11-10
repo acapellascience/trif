@@ -45,8 +45,8 @@ summary is too long.
   - When your agent runs code in a tab, TRIF has the browser block anything from that tab that posts,
     sends or saves as you, or takes what's on the page to another site, until the page reloads. Reading,
     clicks and testing mods work as before. TRIF's icon there shows a paused robot; the panel, Reload.
-  - It also covers the site's other tabs, workers, popups and images from new sites, and asks before
-    keeping data the code changed.
+  - It also covers the site's other tabs, workers, popups and images from new sites, and the code can't
+    save data there.
   - TRIF now reads what each mod's code can do (send requests, click or type for you, go to other
     pages or sites, or code it can't check) instead of trusting what the mod says about itself. A mod
     your agent writes that can do any of that waits for your OK, with what TRIF found shown apart from

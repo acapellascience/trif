@@ -542,9 +542,8 @@ function renderPausedAll() {
  * One short line and a Reload button, so the rest of the panel stays in view; the details in the line's
  * tooltip. Meanwhile the panel's state colour is white (body.tab-locked, sidepanel.css --paused) and the
  * robot in the bar shows a pause sign for eyes, as the toolbar icon does.
- * Two other kinds (TABLOCK-AUDIT TL-3, TL-4): another tab of a site the agent ran code in (locked with
- * it, until that tab reloads: a button to show it), and a tab that reloaded but whose site's saved data
- * changed while the code ran (still locked: reset the site's data, or keep it).
+ * Another kind (TABLOCK-AUDIT TL-4): another tab of a site the agent ran code in, locked with it until
+ * that tab reloads, with a button to show that tab.
  */
 function renderTabLock() {
   const n = ui.tabLock;
@@ -552,7 +551,7 @@ function renderTabLock() {
   n.hidden = !lock;
   document.body.classList.toggle('tab-locked', !!lock);
   if (!lock) { n.replaceChildren(); delete n.dataset.kind; return; }
-  const kind = lock.stored ? 'stored' : lock.kind === 'site' ? 'site' : 'code';
+  const kind = lock.kind === 'site' ? 'site' : 'code';
   if (n.childElementCount && n.dataset.kind === kind) return;
   n.dataset.kind = kind;
   const line = (text, why) => {
@@ -561,17 +560,6 @@ function renderTabLock() {
     p.setAttribute('aria-description', why);
     return p;
   };
-  if (kind === 'stored') {
-    const answer = (type) => async () => {
-      try { await request({ type, tab: lock.tabId }); } catch (e) {
-        request({ type: 'chat.note', site: view.site, text: `Couldn't ${type === 'tabLock.reset' ? 'reset' : 'keep'} ${lock.site}'s saved data: ${e?.message ?? e}` }).catch(() => {});
-      }
-    };
-    const why = `TRIF can't tell whether your agent's code left something in what ${lock.site} saved in this browser (its storage, databases or cookies) that would act for you or bring the code back. Reset clears ${lock.site}'s saved data, which may sign you out of it; Keep it trusts the data and lifts the pause.`;
-    n.replaceChildren(line('Posting is still paused: this site saved new data while your agent\'s code ran.', why),
-      button('Reset site data', null, answer('tabLock.reset')), button('Keep it', null, answer('tabLock.keep')));
-    return;
-  }
   if (kind === 'site') {
     const show = button('Show that tab', null, async () => {
       if (lock.from == null) return;

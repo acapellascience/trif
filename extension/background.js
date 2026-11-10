@@ -86,7 +86,13 @@ const errMsg = (e) => String(e?.message ?? e);
 // new one, and the site's own requests from its other tabs and from no tab while it is (tablock.js,
 // docs/SECURITY.md). The panel shows it, with a Reload button, and the tab's toolbar icon is the paused
 // robot meanwhile (tablock.js sets it).
-const tabLocks = createTabLocks({ chrome, log: (m) => console.log(`[TRIF] ${m}`), changed: () => notifyPanels(), inScope: hostInScope });
+const tabLocks = createTabLocks({
+  chrome, log: (m) => console.log(`[TRIF] ${m}`), changed: () => notifyPanels(), inScope: hostInScope,
+  // (the site's saved data changed while the agent's code ran: one quiet line in its chat)
+  noted: (tabId, site) => updateChat(normalizeSite(site), (chat) => {
+    chat.messages.push({ role: 'tool', text: `${site} saved new data while your agent's code ran. If something on ${site} acts strangely, clear its site data in the browser's settings.`, time: Date.now() });
+  }).catch(() => {}),
+});
 chrome.tabs.onUpdated?.addListener((tabId, info, tab) => {
   if (info.status === 'complete' || info.url) tabLocks.check(tabId).catch(() => {});
   if (info.url && tab) tabLocks.seen(tab).catch(() => {}); // (a tab of a locked site is locked too)
@@ -805,11 +811,12 @@ const commands = {
     const execute = async (code) => firstInjectionResult(await chrome.userScripts.execute({
       target: { tabId: tab.id }, world: 'MAIN', injectImmediately: true, js: [{ code }],
     }));
-    // And the page's leak channels that aren't requests (WebRTC, preconnect and the like), in the page
-    // itself, before the agent's code: a speed bump (tablock.js leakGuard).
+    // And the page's leak channels that aren't requests (WebRTC, preconnect and the like), and saves made
+    // by the agent's code (its code is tagged: buildRunCode's sourceURL), in the page itself, before the
+    // agent's code: a speed bump (tablock.js leakGuard).
     if (args.scope) await execute(`(${leakGuard})(); 0`);
     const work = (async () => {
-      let out = await execute(buildRunCode(args.code, !!args.expression, runId, { scope: args.scope || null, sitesOn: onSites() }));
+      let out = await execute(buildRunCode(args.code, !!args.expression, runId, { scope: args.scope || null, sitesOn: onSites() }, { tag: !!args.scope }));
       // Fallback in case execute didn't wait for the promise: poll the stored envelope.
       while (out === null && !timedOut) {
         await sleep(100);
@@ -1522,9 +1529,6 @@ async function onPanelMessage(msg) {
     case 'site.set': return setSiteOn(msg);
     case 'site.disconnect': return disconnectSite(msg);
     case 'site.block': return setBlocked(msg);
-    // The site's saved data changed while the agent's code ran (tablock.js): reset it, or keep it
-    case 'tabLock.reset': return tabLocks.reset(Number(msg.tab));
-    case 'tabLock.keep': return tabLocks.keep(Number(msg.tab));
     case 'site.mode': return setSiteMode(msg);
     case 'chat.note': {
       // A line from the panel itself (a slash command's answer), shown like a tool line.

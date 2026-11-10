@@ -32,18 +32,18 @@
 // locks the tab again and reloads the page. Tabs a locked tab opens are locked too, and stay locked while
 // it is (the code could reach into them).
 //
-// What the code leaves in the site's storage outlives the page (TL-3). So at lock time TRIF takes a
-// fingerprint of S's stored state (from the isolated world: Cache Storage names and keys, service worker
-// registrations, localStorage and sessionStorage, IndexedDB names and versions, cookies the page can
-// see), and compares it when the tab is on a new page, before unlocking (the lock's rules still apply
-// to that page):
-// - nothing changed: unlock;
+// What the code leaves in the site's storage outlives the page (TL-3). First, the agent's code can't save:
+// leakGuard (below) refuses saves while its code is on the call stack (a speed bump). Then at lock time
+// TRIF takes a fingerprint of S's stored state (from the isolated world: Cache Storage names and keys,
+// service worker registrations, localStorage and sessionStorage, IndexedDB names and versions, cookies
+// the page can see), and compares it when the tab is on a new page, before unlocking (the lock's rules
+// still apply to that page):
 // - Cache Storage or service workers changed: TRIF clears just those for S's origin (from the isolated
 //   world, so no browsingData permission) and reloads past the cache; then unlocks;
-// - localStorage, sessionStorage, IndexedDB or cookies changed: the tab stays locked, and the panel asks
-//   the user to reset S's saved data or keep it (reset() or keep(), then a reload, which unlocks).
+// - localStorage, sessionStorage, IndexedDB or cookies changed (big sites write their own all the time):
+//   it unlocks as usual, and says so in a quiet line in the chat (`noted`).
 // Limits: IndexedDB's contents aren't compared (names and versions only), cookies only as the page sees
-// them (not HttpOnly ones), and a site that writes its own storage all the time will ask more often.
+// them (not HttpOnly ones).
 //
 // Before the agent's code, the page's own leak channels that aren't requests are put out of reach too
 // (leakGuard, in the page's world): WebRTC's constructors, link prefetch/preconnect/prerender/
@@ -73,9 +73,9 @@ export const CROSS_SITE_TYPES = ['main_frame', 'sub_frame', 'xmlhttprequest', 'o
 export const SUBRESOURCE_TYPES = ['image', 'script', 'stylesheet', 'font', 'media'];
 
 // The parts of a site's stored state the fingerprint covers (TL-3): those TRIF clears by itself, and
-// those it asks about.
+// those it only mentions.
 export const CLEARED_PARTS = ['caches', 'serviceWorkers'];
-export const ASKED_PARTS = ['localStorage', 'sessionStorage', 'indexedDB', 'cookies'];
+export const NOTED_PARTS = ['localStorage', 'sessionStorage', 'indexedDB', 'cookies'];
 
 /**
  * The rules for a locked tab. No list of request kinds for writes: browsers name them differently
@@ -196,10 +196,18 @@ async function clearData(parts) {
 
 // ---- in the page's own world, before the agent's code (TL-6) --------------------------------------------
 
+export const SAVE_REFUSED = "TRIF: your agent's code can't save data on this site";
+
 /**
  * Puts the page's leak channels that aren't requests out of easy reach: WebRTC's constructors, links that
- * prefetch, preconnect, prerender or modulepreload, and speculation rules; in frames of the page's own
- * origin too, as the page reaches them. A speed bump, not a wall: a realm it misses has the originals.
+ * prefetch, preconnect, prerender or modulepreload, and speculation rules. And refuses saves made by the
+ * agent's code (TL-3): localStorage and sessionStorage (methods and named properties), IndexedDB (open,
+ * delete, object store and cursor writes), cookies (document.cookie, cookieStore), Cache Storage and
+ * service worker registration, when the agent's code is on the call stack (its sourceURL, trif-run-*.js:
+ * lib.js buildRunCode); the site's own calls pass untouched. In frames of the page's own origin too, as
+ * the page reaches them. A speed bump, not a wall: a realm it misses has the originals, and a wrapped
+ * function the agent's code hands to the browser to call later (a bound one, through a microtask or a
+ * timer's native callback) runs with no agent code on the stack.
  * (For chrome.userScripts.execute: it runs in the page, so it uses nothing from this module.)
  */
 export function leakGuard() {
@@ -208,6 +216,8 @@ export function leakGuard() {
   try { Object.defineProperty(top, '__trifLeakGuard', { value: true }); } catch { return; }
   const BAD_REL = /(^|\s)(dns-prefetch|preconnect|prefetch|prerender|modulepreload)(\s|$)/i;
   const BAD_TYPE = /^\s*speculationrules\s*$/i;
+  const SAVE_REFUSED = "TRIF: your agent's code can't save data on this site";
+  const AGENT = /trif-run-[\w-]+\.js/;
   const patched = new WeakSet();
   const bad = (n) => n && n.nodeType === 1 && ((n.localName === 'link' && BAD_REL.test(n.getAttribute('rel') || ''))
     || (n.localName === 'script' && BAD_TYPE.test(n.getAttribute('type') || '')));
@@ -234,6 +244,66 @@ export function leakGuard() {
       if (!d || !d.set) return;
       Object.defineProperty(proto, prop, { ...d, set(v) { if (!isBad(String(v))) d.set.call(this, v); else if (instead) d.set.call(this, instead); } });
     };
+    // Saves by the agent's code: is its code on the stack? (V8's stack can be cut short or reshaped from page
+    // code, so with the limit and formatter set aside for the look; if they can't be, it counts as the
+    // agent's.)
+    const E = w.Error;
+    const fromAgent = () => {
+      const limit = E.stackTraceLimit, prepare = E.prepareStackTrace;
+      let stack;
+      try {
+        if ('stackTraceLimit' in E) E.stackTraceLimit = 200;
+        if (prepare !== undefined) E.prepareStackTrace = undefined;
+        stack = new E().stack;
+      } catch { return true; } finally {
+        try { if ('stackTraceLimit' in E) E.stackTraceLimit = limit; if (prepare !== undefined) E.prepareStackTrace = prepare; } catch { /* as it was */ }
+      }
+      return typeof stack !== 'string' || AGENT.test(stack);
+    };
+    const refusal = () => new w.DOMException(SAVE_REFUSED, 'NotAllowedError');
+    const refuseSave = (proto, name, promise = false) => {
+      const d = proto && Object.getOwnPropertyDescriptor(proto, name);
+      if (!d || typeof d.value !== 'function') return;
+      const f = d.value;
+      const g = { [name](...a) { if (fromAgent()) { if (promise) return w.Promise.reject(refusal()); throw refusal(); } return f.apply(this, a); } }[name];
+      Object.defineProperty(proto, name, { ...d, value: g });
+    };
+    const refuseSetter = (proto, name) => {
+      const d = proto && Object.getOwnPropertyDescriptor(proto, name);
+      if (!d || !d.set) return;
+      Object.defineProperty(proto, name, { ...d, set(v) { if (fromAgent()) throw refusal(); d.set.call(this, v); } });
+    };
+    try {
+      for (const n of ['setItem', 'removeItem', 'clear']) refuseSave(w.Storage && w.Storage.prototype, n);
+      // (named properties, localStorage.x = 1, go through no method: the page gets a stand-in that checks)
+      for (const n of ['localStorage', 'sessionStorage']) {
+        const d = Object.getOwnPropertyDescriptor(w, n);
+        if (!d || !d.get || !d.configurable) continue;
+        let real = null, stand = null;
+        Object.defineProperty(w, n, { ...d, get() {
+          const s = d.get.call(this);
+          if (s !== real) {
+            real = s;
+            stand = new w.Proxy(s, {
+              get: (t, k) => { const v = Reflect.get(t, k, t); return typeof v === 'function' ? v.bind(t) : v; },
+              set: (t, k, v) => { if (typeof k === 'string' && fromAgent()) throw refusal(); return Reflect.set(t, k, v, t); },
+              deleteProperty: (t, k) => { if (typeof k === 'string' && fromAgent()) throw refusal(); return Reflect.deleteProperty(t, k); },
+              defineProperty: (t, k, desc) => { if (fromAgent()) throw refusal(); return Reflect.defineProperty(t, k, desc); },
+            });
+          }
+          return stand;
+        } });
+      }
+      for (const n of ['open', 'deleteDatabase']) refuseSave(w.IDBFactory && w.IDBFactory.prototype, n);
+      for (const n of ['put', 'add', 'delete', 'clear', 'createIndex', 'deleteIndex']) refuseSave(w.IDBObjectStore && w.IDBObjectStore.prototype, n);
+      for (const n of ['update', 'delete']) refuseSave(w.IDBCursor && w.IDBCursor.prototype, n);
+      if (w.Document) refuseSetter(w.Document.prototype, 'cookie');
+      if (w.HTMLDocument) refuseSetter(w.HTMLDocument.prototype, 'cookie');
+      for (const n of ['set', 'delete']) refuseSave(w.CookieStore && w.CookieStore.prototype, n, true);
+      for (const n of ['open', 'delete']) refuseSave(w.CacheStorage && w.CacheStorage.prototype, n, true);
+      for (const n of ['put', 'add', 'addAll', 'delete']) refuseSave(w.Cache && w.Cache.prototype, n, true);
+      refuseSave(w.ServiceWorkerContainer && w.ServiceWorkerContainer.prototype, 'register', true);
+    } catch { /* a frame going away */ }
     try {
       guard(w.HTMLLinkElement.prototype, 'rel', (v) => BAD_REL.test(v));
       guard(w.HTMLScriptElement.prototype, 'type', (v) => BAD_TYPE.test(v), INERT);
@@ -271,8 +341,8 @@ const hostOf = (url) => { try { return new URL(url).hostname; } catch { return '
 const defaultInScope = (host, site) => !!host && !!site && (host === site || host.endsWith(`.${site}`));
 const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
 
-export function createTabLocks({ chrome, log = () => {}, changed = () => {}, key = 'tabLocks', inScope = defaultInScope }) {
-  // tabId -> {token, ids, site, url, since, parent, kind, domains, fp, cleared, stored, resolved}
+export function createTabLocks({ chrome, log = () => {}, changed = () => {}, noted = () => {}, key = 'tabLocks', inScope = defaultInScope }) {
+  // tabId -> {token, ids, site, url, since, parent, kind, domains, fp, cleared, noted}
   // kind: 'code' (the agent's code ran there), 'opened' (a locked tab opened it), 'site' (another tab of a
   // locked site: the site's rules cover it, no rules of its own)
   const locks = new Map();
@@ -423,30 +493,26 @@ export function createTabLocks({ chrome, log = () => {}, changed = () => {}, key
   }
 
   /**
-   * A new page in a tab the agent's code ran in (TL-3): what the code may have left in the site's storage.
-   * True if the tab stays locked (cleared and reloading, or asking the user).
+   * A new page in a tab the agent's code ran in (TL-3): what may have been left in the site's storage.
+   * Cache Storage or service workers changed: cleared, and a reload past the cache (true: still locked
+   * meanwhile). Other saved data changed: a note (once), and the tab unlocks.
    */
   async function settleStorage(tabId, l) {
     const after = await inIsolated(tabId, fingerprint).catch(() => null);
     if (!after) return false;
     const changedParts = Object.keys(l.fp).filter((p) => l.fp[p] != null && after[p] != null && l.fp[p] !== after[p] && !(l.cleared || []).includes(p));
     const clear = changedParts.filter((p) => CLEARED_PARTS.includes(p));
-    const ask = changedParts.filter((p) => ASKED_PARTS.includes(p));
-    if (!clear.length && !ask.length) return false;
-    await mark(tabId, l.token).catch(() => {}); // (this page is the lock's too, until it's settled)
-    if (clear.length) {
-      const done = await inIsolated(tabId, clearData, [clear]).catch(() => []);
-      l.cleared = [...new Set([...(l.cleared || []), ...clear])];
-      log(`tab ${tabId}: the agent's code changed ${clear.join(' and ')}; cleared ${(done || []).join(' and ') || 'nothing'}`);
+    const note = changedParts.filter((p) => NOTED_PARTS.includes(p));
+    if (note.length && !l.noted) {
+      l.noted = true;
+      log(`tab ${tabId}: ${l.site}'s ${note.join(', ')} changed while the agent's code ran`);
+      try { noted(tabId, l.site, note); } catch { /* a note only */ }
     }
-    if (ask.length) {
-      l.stored = ask;
-      log(`tab ${tabId}: the agent's code changed ${ask.join(', ')}; asking`);
-      await save();
-      await showIcon(tabId, true);
-      changed(tabId);
-      return true;
-    }
+    if (!clear.length) return false;
+    await mark(tabId, l.token).catch(() => {}); // (this page is the lock's too, until it's cleared)
+    const done = await inIsolated(tabId, clearData, [clear]).catch(() => []);
+    l.cleared = [...new Set([...(l.cleared || []), ...clear])];
+    log(`tab ${tabId}: ${clear.join(' and ')} changed; cleared ${(done || []).join(' and ') || 'nothing'}`);
     await save();
     await chrome.tabs.reload(tabId, { bypassCache: true }).catch(() => {});
     return true;
@@ -468,21 +534,9 @@ export function createTabLocks({ chrome, log = () => {}, changed = () => {}, key
     let marked;
     try { marked = await inIsolated(tabId, hasMarker, [l.token]) === true; } catch { marked = null; } // (a page the extension can't script: nothing of the agent's there; stay locked until a page it can check)
     if (marked === false) {
-      if (l.kind === 'code' && l.fp && !l.resolved && await settleStorage(tabId, l)) return;
-      await unlock(tabId, l.resolved ? `a new page (the site's data ${l.resolved})` : 'a new page');
+      if (l.kind === 'code' && l.fp && await settleStorage(tabId, l)) return;
+      await unlock(tabId, 'a new page');
     } else await showIcon(tabId, true); // (still locked: the icon again, in case a new page in the tab reset it)
-  }
-
-  /** The user's answer about the site's saved data (TL-3): reset it or keep it; either way, a fresh page. */
-  async function settle(tabId, answer) {
-    await ready;
-    const l = locks.get(tabId);
-    if (!l || !l.stored) throw new Error('nothing to settle on that tab');
-    if (answer === 'reset') await inIsolated(tabId, clearData, [[...CLEARED_PARTS, ...ASKED_PARTS]]);
-    l.resolved = answer === 'reset' ? 'reset' : 'kept';
-    log(`tab ${tabId}: the site's data ${l.resolved}`);
-    await save();
-    await chrome.tabs.reload(tabId, { bypassCache: true });
   }
 
   return {
@@ -493,10 +547,7 @@ export function createTabLocks({ chrome, log = () => {}, changed = () => {}, key
     list: () => [...locks.entries()].map(([tabId, l]) => ({
       tabId, site: l.site, url: l.url || '', since: l.since, kind: l.kind,
       ...(l.kind === 'site' ? { from: [...locks.entries()].find(([, c]) => c.kind === 'code' && c.site === l.site)?.[0] ?? null } : {}),
-      ...(l.stored && !l.resolved ? { stored: l.stored } : {}),
     })),
-    reset: (tabId) => settle(tabId, 'reset'),
-    keep: (tabId) => settle(tabId, 'keep'),
     /** A document back from the back/forward cache with its marker: lock its tab again. */
     async restored(tabId, token, site, url) {
       await ready;

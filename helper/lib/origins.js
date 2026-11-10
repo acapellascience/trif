@@ -3,7 +3,10 @@
 // helper sends each mod's origin, and an extension switches off a mod made by another browser the first
 // time it sees it (after that, its switch is the user's; see applyStartOff in extension/lib.js).
 //
-// <home>/origins.json = {"<mod id>": {by: <extension install id>, browser: "Firefox", at}}.
+// <home>/origins.json = {"<mod id>": {by: <extension install id>, browser: "Firefox", at, live?}}. `live`: the
+// mod's file was written while that run was in progress (not one of the late files counted for it in the
+// moments after it ended, ENDED_GRACE_MS, which may be anyone's): only those count as the run's own where
+// it matters that the user asked for them (a group whose new mods start off, extension/lib.js applyNewMods).
 // Every helper attributes a mod id the moment its scan first sees it: to its own agent run if it has one
 // going, else to another browser's run in progress (<home>/active-runs/<runId>.json, written when a run
 // starts), else to nobody (a terminal agent or the user wrote it: on everywhere). Helpers agree because
@@ -30,7 +33,7 @@ function loadOrigins(home) {
     const v = JSON.parse(fs.readFileSync(path.join(home, ORIGINS), 'utf8'));
     const out = {};
     for (const [id, o] of Object.entries(v && typeof v === 'object' ? v : {})) {
-      if (o && typeof o.by === 'string' && o.by) out[id] = { by: o.by, browser: typeof o.browser === 'string' ? o.browser : '', at: Number(o.at) || 0 };
+      if (o && typeof o.by === 'string' && o.by) out[id] = { by: o.by, browser: typeof o.browser === 'string' ? o.browser : '', at: Number(o.at) || 0, ...(o.live === true ? { live: true } : {}) };
     }
     return out;
   } catch {
@@ -79,10 +82,11 @@ const bare = (site) => String(site || '').toLowerCase().replace(/^www\./, '');
 /**
  * Attribute newly seen mod ids. runs: [{by, browser, site, own}] in progress; the helper's own runs
  * first. A run on the mod's site wins; else the helper's own run; else any other. No run: the id has no
- * origin (any old entry, e.g. from a deleted mod of the same name, is dropped). Returns true if
- * origins.json changed.
+ * origin (any old entry, e.g. from a deleted mod of the same name, is dropped). `writtenAt` (id -> the
+ * file's mtime, ms): `live` when it was written between the run's start and its end (or it hasn't ended).
+ * Returns true if origins.json changed.
  */
-function recordOrigins(home, newIds, runs, now = Date.now()) {
+function recordOrigins(home, newIds, runs, now = Date.now(), writtenAt = {}) {
   if (!newIds.length) return false;
   const origins = loadOrigins(home);
   let changed = false;
@@ -91,8 +95,10 @@ function recordOrigins(home, newIds, runs, now = Date.now()) {
     const run = runs.find((r) => bare(r.site) === site || site.endsWith(`.${bare(r.site)}`) || bare(r.site).endsWith(`.${site}`))
       || runs.find((r) => r.own) || runs[0];
     if (run) {
-      if (origins[id] && origins[id].by === run.by) continue;
-      origins[id] = { by: run.by, browser: run.browser || '', at: now };
+      const t = Number(writtenAt[id]);
+      const live = Number.isFinite(t) && t >= (Number(run.startedAt) || 0) && (typeof run.endedAt !== 'number' || t <= run.endedAt);
+      if (origins[id] && origins[id].by === run.by && !!origins[id].live === live) continue;
+      origins[id] = { by: run.by, browser: run.browser || '', at: now, ...(live ? { live: true } : {}) };
       changed = true;
     } else if (origins[id]) {
       delete origins[id];

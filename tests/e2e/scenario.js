@@ -1963,11 +1963,9 @@ process.exitCode = 1;
     try {
       const shown = await setPage('off');
       if (shown.page !== 'off' || shown.rules !== 'on' || shown.note !== 'Mods your chat here makes still start on.') throw new Error(`Settings shows ${JSON.stringify(shown)}`);
-      // (A mod that appears up to 15 s after a side-panel run ends counts as that run's (helper/lib/origins.js
-      // ENDED_GRACE_MS: its last files can reach the scan late), and so as made here: the stand-in runs
-      // before this one are let go by first.)
-      await sleep(require('../../helper/lib/origins').ENDED_GRACE_MS + 1000);
-      // A page script and a rules mod appear, written outside the panel (a terminal agent, or by hand).
+      // A page script and a rules mod appear, written outside the panel (a terminal agent, or by hand). (Seconds
+      // after the stand-in runs before this one ended: counted for their run, helper/lib/origins.js, but not as
+      // written while it was going, so they still start off.)
       fs.writeFileSync(pageFile, '// ==WebMod==\n// @name New page script\n// @match *://127.0.0.1/*\n// ==/WebMod==\ndocument.documentElement.dataset.e2eNewPage = \'ran\';\n');
       fs.writeFileSync(rulesFile, '// ==WebMod==\n// @name New rules\n// @match *://127.0.0.1/*\n// @rules\n// ==/WebMod==\n{ "css": "#title { color: rgb(7, 8, 9) }" }\n');
       const st = await waitFor('the page script off as new, the rules mod registered', async () => {

@@ -145,7 +145,7 @@ logs it and exits (the extension reconnects to a fresh one) instead of misreadin
 | `{type:"updated", from, to, notes}` | An update was installed. The extension keeps it in storage (`updated`) so the panel can say so after the reload. |
 | `{type:"reload", reason}` | The extension should `chrome.runtime.reload()`: <home>/app now holds a newer version (installed by this helper, another browser's, or `trif setup`). Chrome reloads the unpacked extension from the new files; either browser starts the new helper on reconnect. |
 
-`Mod = { id, site, file, name, description, matches:[…], excludes:[…], runAt:"document_start"|"document_end"|"document_idle", risk:{tier, why}|null, source, version, code, hash, held?, startOff?, origin?:{by, browser}, update?:{version, from, modified}, absorbs?:[id…], readded?, autoUpdated? }`
+`Mod = { id, site, file, name, description, matches:[…], excludes:[…], runAt:"document_start"|"document_end"|"document_idle", risk:{tier, why}|null, source, version, code, hash, held?, startOff?, origin?:{by, browser, live?}, update?:{version, from, modified}, absorbs?:[id…], readded?, autoUpdated? }`
 (`file` is the absolute path; `hash` is a sha1 of code+metadata so the extension can skip unchanged mods;
 `update`: a newer version of this shipped mod is waiting, see "Updates to shipped mods"; `autoUpdated`: a stamp
 when TRIF itself replaced the user's unchanged copy of a shipped mod with a new version, kept while the copy is
@@ -420,7 +420,9 @@ switches. It counts from then on: mods already there keep their switches. On eac
 mods as seen), when its `readded` stamp is new, or when its `autoUpdated` stamp isn't the one in
 **`autoUpdated`** (id → stamp). An arriving mod of a group set to start off is switched off (`disabled`) and
 recorded in **`newOff`** = `{"<id>": "new"|"update"}`, unless it was made in this browser's own side panel
-(`origin.by` is this install: the user asked for it, and the agent checks it running) or is held (it waits
+(`origin.by` is this install and `origin.live`: its file was written while that run was going, between the
+run's start and its end; a file that only appeared in the moments after, which origins.js also counts for the
+run, could be anyone's: the user asked for the run's, and the agent checks it running) or is held (it waits
 for the user's OK anyway, and allowing it is looking at it). A renamed file keeps both. Switching the mod on
 clears its `newOff`; from an agent run, `mod.enable` refuses to switch one on. `status` reports `startsOff`
 when non-empty and `newOff` on such a mod while it's off (`trif status`: `NEW MODS`, `off (new)`).

@@ -490,8 +490,8 @@ export function applyReadded(mods, disabled = {}, readded = {}) {
 // browser has never seen (`seenMods`: a terminal agent's, one dropped in by hand, Tim's mods added, one
 // made from another browser), and a new version of a shipped mod TRIF put in place by itself (the helper
 // sends its stamp as `autoUpdated`; `autoUpdated` here remembers the stamps seen). Not: one this browser's
-// own side-panel chat made (its origin is this install: the user asked for it, and the agent checks it
-// running), one waiting for the user's OK anyway (held: allowing it is looking at it), or one the user
+// own side-panel chat made while its run was going (its origin is this install, `live`: the user asked for it,
+// and the agent checks it running; a file that appeared just after the run ended doesn't count), one waiting for the user's OK anyway (held: allowing it is looking at it), or one the user
 // asked for by name (a new version they chose, one restored from the trash: ids already seen). Tim's mods
 // the user got back (`readded`) count as arriving. `newOff` (id -> 'new' | 'update') remembers why a mod
 // was switched off, for the panel and `trif status`, until the user switches it on.
@@ -532,7 +532,9 @@ export function applyNewMods(mods, { disabled = {}, seen = null, autoUpdated = n
     if (!seen) for (const m of list) out.seen[m.id] = true;
     if (!autoUpdated) for (const m of list) if (typeof m.autoUpdated === 'string') out.autoUpdated[m.id] = m.autoUpdated;
   }
-  const off = (m) => startsOff.includes(modGroup(m)) && !m.held && !(installId && m.origin?.by === installId);
+  // (this browser's own chat: written while its run here was going, origin.live; not a file that appeared in the
+  // moments after it ended, which helper/lib/origins.js also counts for it but could be anyone's)
+  const off = (m) => startsOff.includes(modGroup(m)) && !m.held && !(installId && m.origin?.by === installId && m.origin.live === true);
   for (const m of list) {
     const fresh = !out.seen[m.id] || (typeof m.readded === 'string' && readded[m.id] !== m.readded);
     const updated = typeof m.autoUpdated === 'string' && out.autoUpdated[m.id] !== m.autoUpdated;

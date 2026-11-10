@@ -1957,7 +1957,8 @@ test('applyNewMods: with a group set to start off, its new mods arrive off, by s
     page('x.com/old'), rules('x.com/oldrules'),
     page('x.com/terminal'), // a terminal agent's, or a file dropped in: no origin
     page('x.com/other', { origin: { by: 'B', browser: 'Firefox' } }), // another browser's panel
-    page('x.com/mine', { origin: { by: 'A', browser: 'Chrome' } }), // this browser's own panel chat
+    page('x.com/mine', { origin: { by: 'A', browser: 'Chrome', live: true } }), // this browser's own panel chat, written while its run was going
+    page('x.com/late', { origin: { by: 'A', browser: 'Chrome' } }), // counted for that run, but appeared after it ended: a terminal's, say
     page('x.com/held', { held: { facts: ['can send requests'] } }), // waits for the user's OK anyway
     rules('x.com/style'),
     page('x.com/tims', { startOff: true }), // Tim's, shipped off: off already
@@ -1965,8 +1966,8 @@ test('applyNewMods: with a group set to start off, its new mods arrive off, by s
   const go = (startsOff, extra = {}) => lib.applyNewMods(mods, { disabled: { 'x.com/tims': true }, seen: here, autoUpdated: {}, newOff: {}, startsOff, installId: 'A', ...extra });
   // Page scripts start off: the new page scripts from anywhere but here, not held ones, not rules.
   let r = go(['page']);
-  assert.deepStrictEqual(r.disabled, { 'x.com/tims': true, 'x.com/terminal': true, 'x.com/other': true });
-  assert.deepStrictEqual(r.newOff, { 'x.com/terminal': 'new', 'x.com/other': 'new' });
+  assert.deepStrictEqual(r.disabled, { 'x.com/tims': true, 'x.com/terminal': true, 'x.com/other': true, 'x.com/late': true });
+  assert.deepStrictEqual(r.newOff, { 'x.com/terminal': 'new', 'x.com/other': 'new', 'x.com/late': 'new' });
   assert.deepStrictEqual(Object.keys(r.seen).sort(), mods.map((m) => m.id).sort());
   // Once: seen now, so the user's switch after that is theirs.
   const again = lib.applyNewMods(mods, { disabled: {}, seen: r.seen, autoUpdated: r.autoUpdated, newOff: r.newOff, startsOff: ['page'], installId: 'A' });
@@ -1974,7 +1975,7 @@ test('applyNewMods: with a group set to start off, its new mods arrive off, by s
   // Rules start off: only the new rules mod.
   assert.deepStrictEqual(go(['rules']).newOff, { 'x.com/style': 'new' });
   // Both: everything new that isn't this browser's own or held.
-  assert.deepStrictEqual(Object.keys(go(['rules', 'page']).newOff).sort(), ['x.com/other', 'x.com/style', 'x.com/terminal']);
+  assert.deepStrictEqual(Object.keys(go(['rules', 'page']).newOff).sort(), ['x.com/late', 'x.com/other', 'x.com/style', 'x.com/terminal']);
   // Neither (the default): seen, nothing switched.
   r = go([]);
   assert.deepStrictEqual([r.disabled, r.newOff], [{ 'x.com/tims': true }, {}]);
@@ -2019,7 +2020,7 @@ test('background: new mods start on or off by group (Settings); an agent run can
     assert.deepStrictEqual(bg.store.startsOff, ['page']);
     assert.match((await panel.ask({ type: 'mods.startsOff', group: 'nope', off: true })).error, /unknown group/);
     // A terminal agent's page script and a rules mod arrive; and one this browser's panel chat made.
-    bg.native.emit({ type: 'mods', mods: [mod('x.com/old'), mod('x.com/new'), mod('x.com/style', { rules: true }), mod('x.com/chat', { origin: { by: 'A', browser: 'Chrome' } })] });
+    bg.native.emit({ type: 'mods', mods: [mod('x.com/old'), mod('x.com/new'), mod('x.com/style', { rules: true }), mod('x.com/chat', { origin: { by: 'A', browser: 'Chrome', live: true } })] });
     await settle(30);
     assert.deepStrictEqual(bg.store.disabled, { 'x.com/new': true });
     assert.deepStrictEqual(bg.store.newOff, { 'x.com/new': 'new' });
@@ -2045,7 +2046,7 @@ test('background: new mods start on or off by group (Settings); an agent run can
     assert.strictEqual((await panel.ask({ type: 'status' })).result.mods.find((m) => m.id === 'x.com/new').newOff, null);
     // Back to on: new page scripts start on again; mods already here keep their switches.
     await panel.ask({ type: 'mods.startsOff', group: 'page', off: false });
-    bg.native.emit({ type: 'mods', mods: [mod('x.com/old'), mod('x.com/new'), mod('x.com/style', { rules: true }), mod('x.com/chat', { origin: { by: 'A' } }), mod('x.com/later')] });
+    bg.native.emit({ type: 'mods', mods: [mod('x.com/old'), mod('x.com/new'), mod('x.com/style', { rules: true }), mod('x.com/chat', { origin: { by: 'A', live: true } }), mod('x.com/later')] });
     await settle(30);
     assert.deepStrictEqual(bg.store.disabled, { 'x.com/new': true });
     assert.ok(scriptIds(bg).includes('x.com/later'));

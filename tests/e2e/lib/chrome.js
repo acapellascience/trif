@@ -51,14 +51,15 @@ chrome.sidePanel.open = (o) => (off ? Promise.resolve() : open(o));
 const ICONS = `// e2e only (tests/e2e/lib/chrome.js): the icons the background set for tabs, as Chrome accepted them.
 const icons = {};
 const setIcon = chrome.action.setIcon.bind(chrome.action);
-chrome.action.setIcon = async (d) => {
-  const r = await setIcon(d);
-  if (d && d.tabId != null) {
+chrome.action.setIcon = (d, done) => new Promise((res) => setIcon(d, () => {
+  const failed = chrome.runtime.lastError; // (read here: a tab closed meanwhile)
+  if (!failed && d && d.tabId != null) {
     icons[d.tabId] = (d.path && (d.path[16] || d.path)) || 'imageData';
-    await chrome.storage.session.set({ e2eIcons: { ...icons } });
+    chrome.storage.session.set({ e2eIcons: { ...icons } });
   }
-  return r;
-};
+  if (done) done();
+  res();
+}));
 `;
 
 /** A copy of the extension in `to` with the test manifest described above. Returns `to`. */

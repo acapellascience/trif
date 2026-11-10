@@ -542,14 +542,45 @@ function renderPausedAll() {
  * One short line and a Reload button, so the rest of the panel stays in view; the details in the line's
  * tooltip. Meanwhile the panel's state colour is white (body.tab-locked, sidepanel.css --paused) and the
  * robot in the bar shows a pause sign for eyes, as the toolbar icon does.
+ * Two other kinds (TABLOCK-AUDIT TL-3, TL-4): another tab of a site the agent ran code in (locked with
+ * it, until that tab reloads: a button to show it), and a tab that reloaded but whose site's saved data
+ * changed while the code ran (still locked: reset the site's data, or keep it).
  */
 function renderTabLock() {
   const n = ui.tabLock;
   const lock = view.tab && (view.status?.lockedTabs || []).find((l) => l.tabId === view.tab.id);
   n.hidden = !lock;
   document.body.classList.toggle('tab-locked', !!lock);
-  if (!lock) { n.replaceChildren(); return; }
-  if (n.childElementCount) return;
+  if (!lock) { n.replaceChildren(); delete n.dataset.kind; return; }
+  const kind = lock.stored ? 'stored' : lock.kind === 'site' ? 'site' : 'code';
+  if (n.childElementCount && n.dataset.kind === kind) return;
+  n.dataset.kind = kind;
+  const line = (text, why) => {
+    const p = el('p', 'title', text);
+    p.title = why;
+    p.setAttribute('aria-description', why);
+    return p;
+  };
+  if (kind === 'stored') {
+    const answer = (type) => async () => {
+      try { await request({ type, tab: lock.tabId }); } catch (e) {
+        request({ type: 'chat.note', site: view.site, text: `Couldn't ${type === 'tabLock.reset' ? 'reset' : 'keep'} ${lock.site}'s saved data: ${e?.message ?? e}` }).catch(() => {});
+      }
+    };
+    const why = `TRIF can't tell whether your agent's code left something in what ${lock.site} saved in this browser (its storage, databases or cookies) that would act for you or bring the code back. Reset clears ${lock.site}'s saved data, which may sign you out of it; Keep it trusts the data and lifts the pause.`;
+    n.replaceChildren(line('Posting is still paused: this site saved new data while your agent\'s code ran.', why),
+      button('Reset site data', null, answer('tabLock.reset')), button('Keep it', null, answer('tabLock.keep')));
+    return;
+  }
+  if (kind === 'site') {
+    const show = button('Show that tab', null, async () => {
+      if (lock.from == null) return;
+      try { const t = await chrome.tabs.update(lock.from, { active: true }); if (t?.windowId != null) await chrome.windows.update(t.windowId, { focused: true }); } catch { /* gone */ }
+    });
+    const why = `Your agent ran code in another ${lock.site} tab, so TRIF blocks ${lock.site}'s pages from posting, sending or saving as you until that tab reloads. Reading, scrolling, clicks and mods work as usual.`;
+    n.replaceChildren(line('Posting is paused on this site: your agent ran code in another tab.', why), show);
+    return;
+  }
   // Back to the page it was locked on if the tab is somewhere else now (a blocked page: reloading that
   // would only ask for the blocked address again), else a reload. Either way a new page: unlocked.
   const reload = button('Reload', null, () => {
@@ -559,11 +590,7 @@ function renderTabLock() {
     try { away = !hostInScope(new URL(t.url || '').hostname, lock.site); } catch { /* no URL: away */ }
     (away && /^https?:/.test(lock.url) ? chrome.tabs.update(t.id, { url: lock.url }) : chrome.tabs.reload(t.id)).catch(() => {});
   });
-  const why = 'Your agent ran code in this page, so TRIF has blocked anything here from posting, sending or saving as you, or opening other sites, until the page reloads. Reading, scrolling, clicks and mods work as usual.';
-  const line = el('p', 'title', 'Posting is paused: your agent ran code here.');
-  line.title = why;
-  line.setAttribute('aria-description', why);
-  n.replaceChildren(line, reload);
+  n.replaceChildren(line('Posting is paused: your agent ran code here.', 'Your agent ran code in this page, so TRIF has blocked anything here from posting, sending or saving as you, or opening other sites, until the page reloads. Reading, scrolling, clicks and mods work as usual.'), reload);
 }
 
 /** User scripts off: "Mods are paused", in a notice of its own above the rest (a login notice too). */

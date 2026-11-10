@@ -636,3 +636,15 @@ h3.mod-name { margin: 0; font-size: inherit; line-height: inherit; }
 .tag.on-hold { background: none; color: var(--warn); border-color: color-mix(in srgb, var(--warn) 50%, var(--line)); cursor: pointer; }
 .tag.on-hold:hover { border-color: var(--warn); }
 .mod-row > .tag.on-hold { flex: none; align-self: center; }
+
+/* ---- "Agent on this site": the header's control, the line under the bar, Settings' lists ------------- */
+.agent-level { flex: none; max-width: 112px; min-width: 0; height: 24px; padding: 0 4px; border: 1px solid var(--line); border-radius: 7px; background: var(--raised); color: var(--muted); font-size: 11px; margin-right: 2px; }
+.agent-level[data-level="run"] { color: var(--text); }
+.agent-level[data-level="off"] { color: var(--bad); border-color: color-mix(in srgb, var(--bad) 40%, var(--line)); }
+.agent-note { flex: none; margin: 0; padding: 6px 14px; border-bottom: 1px solid var(--line); color: var(--muted); font-size: 12px; }
+.agent-sites-list select { margin-left: auto; font-size: 12px; }
+.agent-sites-list .agent-site { overflow-wrap: anywhere; }
+.sensitive-sites { width: 100%; font: 11px/1.45 var(--mono); padding: 6px; border: 1px solid var(--line); border-radius: 7px; background: var(--surface); resize: vertical; }
+.sensitive-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-top: 6px; }
+.agent-ask .ap-who { margin-top: 8px; }
+@media (max-width: 420px) { .agent-level { max-width: 76px; } }

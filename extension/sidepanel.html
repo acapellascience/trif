@@ -22,6 +22,13 @@
   <button id="waiting-badge" class="waiting-badge" type="button" hidden></button>
   <!-- Right-aligned as a group, whether or not the power button shows. -->
   <div class="bar-actions">
+    <!-- "Agent on this site": what an agent may do on this site's tabs (agentsites.js; sidepanel.js renderAgentLevel) -->
+    <select id="agent-level" class="agent-level" aria-label="Agent on this site" title="Agent on this site: what an agent may do on this site's tabs" hidden>
+      <option value="ask">Agent: Ask</option>
+      <option value="off">Agent: Off</option>
+      <option value="look">Agent: Look</option>
+      <option value="run">Agent: Run code</option>
+    </select>
     <button id="site-switch" class="icon-btn power" type="button" role="switch" aria-checked="false" hidden>
       <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M5.2 4.3a5 5 0 1 0 5.6 0"/><path d="M8 2.2v5"/></svg>
     </button>
@@ -33,6 +40,8 @@
     </button>
   </div>
 </header>
+<!-- Why the agent is off on this site, when TRIF's sensitive list put it there (sidepanel.js renderAgentLevel). -->
+<p id="agent-note" class="agent-note" hidden></p>
 
 <section id="settings" class="settings" aria-labelledby="settings-title" hidden>
   <h2 id="settings-title" class="visually-hidden">Settings</h2>
@@ -109,6 +118,18 @@
     <p class="sites-title">Blocked sites</p>
     <ul id="blocked-list" class="blocked-list"></ul>
     <p id="blocked-empty" class="note">None.</p>
+    <!-- "Agent on this site", for every site the user chose for, and the sensitive list (sidepanel.js renderAgentSites). -->
+    <p class="sites-title">Agent on sites</p>
+    <ul id="agent-sites-list" class="blocked-list agent-sites-list"></ul>
+    <p id="agent-sites-empty" class="note">None chosen yet: an agent can read any site, and asks before it first runs code on one.</p>
+    <p class="sites-title">Sensitive sites</p>
+    <p class="note">Agents are off on these until you choose otherwise for a site. One per line: a site (and its subdomains), or a pattern like *bank*, then what it is after a colon.</p>
+    <textarea id="sensitive-sites" class="sensitive-sites" rows="6" spellcheck="false" aria-label="Sensitive sites"></textarea>
+    <div class="sensitive-actions">
+      <button id="sensitive-save" class="btn" type="button">Save</button>
+      <button id="sensitive-reset" class="btn" type="button">Use TRIF's list</button>
+      <span id="sensitive-note" class="note" role="status"></span>
+    </div>
   </div>
   <p class="note"><a href="#" id="report-link">Report a problem</a> · <a href="#" id="setup-link">Setup and status</a></p>
 </section>

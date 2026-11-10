@@ -568,6 +568,7 @@ class Runs {
       ws,
       url: typeof args.url === 'string' ? args.url : '',
       tabId: args.tabId === undefined || args.tabId === null || args.tabId === '' ? null : args.tabId,
+      agentLevel: ['off', 'look', 'run', 'ask'].includes(args.agentLevel) ? args.agentLevel : null, // ("Agent on this site", from the panel)
       sessionId: typeof args.sessionId === 'string' && args.sessionId ? checkWord(args.sessionId, 'session id') : null,
       model: typeof args.model === 'string' && args.model.trim() ? checkWord(args.model.trim(), 'model name') : null,
       // codex-oss: this run's provider choice over config.json's (agents/codex-oss.js resolve).
@@ -730,7 +731,7 @@ class Runs {
   _spawn(run, found, env, options) {
     const { ws, adapter } = run;
 
-    const ctx = { url: run.url, tabId: run.tabId, scope: run.scope, browser: ws.browser || '' };
+    const ctx = { url: run.url, tabId: run.tabId, scope: run.scope, browser: ws.browser || '', agentLevel: run.agentLevel };
     let prompt = run.prompt;
     let context = null;
     const extra = adapter.readsInstructions ? '' : instructionsContext(readInstructions(ws.home));

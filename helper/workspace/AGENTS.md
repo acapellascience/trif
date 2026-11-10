@@ -187,6 +187,23 @@ site where it's off, nothing from TRIF runs or reads it: no mods (all-sites mods
   turns the site on. Say so when you finish.
 - A mod for all sites runs only on sites TRIF is on for.
 
+## Agent on this site
+
+On a site TRIF is on for, the user also chooses how far you may reach into its tabs ("Agent on this site",
+in the side panel's header and Settings). It applies to you in a terminal too.
+- **Run code**: everything, as described here (`trif run` locks the tab in a side-panel run).
+- **Look**: `trif text`, `trif screenshot`, `trif sweep`, `trif requests` and the rest that read, but not
+  `trif run`.
+- **Off**: nothing on its tabs (`trif tabs` lists them without their address or title). TRIF starts email,
+  banking and payments, password managers, Discord, WhatsApp Web and AI chat sites at Off.
+- **Ask** (no choice yet): reading works; the first `trif run` there opens a question in the side panel
+  (Just this once / Always on this site / Not here) and waits up to 25 seconds for the answer. With no side
+  panel open, it fails at once, saying so.
+A refused command says the level and what still works. Don't retry it or look for a way round: work from
+what the level allows (read the page, or write the mod and let the user check it), and tell the user, e.g.
+"Agent on this site is Look for bank.com, so I couldn't test it there; raise it to Run code in the side
+panel if you want me to." You can always write mods for the site: they wait for the user's OK as usual.
+
 ## Switching mods off and on
 
 The user can switch each mod off and on with its switch in the side panel (and on the setup page),

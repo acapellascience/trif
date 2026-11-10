@@ -69,6 +69,9 @@ document.documentElement.dataset.trifE2eUser = 'ran';
 // The gate's top bar: the status dot, the robot (asleep) and settings.
 const GATE_BAR = ['#dot', '#bar-robot', '#settings-btn'];
 
+// "Agent on this site" for the test sites (the harness drives them with trif run): Run code.
+const AGENT_SITES = { '127.0.0.1': 'run', 'x.com': 'run', 'google.com': 'run', 'example.com': 'run' };
+
 class Scenario {
   /**
    * opts: { browser: 'firefox'|'chrome', kind: 'fresh'|'upgrade', work, newTgz, oldTgz, results, servers,
@@ -785,6 +788,9 @@ class Scenario {
     });
 
     if (!connected) return;
+    // "Agent on this site" (extension/agentsites.js): the harness drives its test sites with trif run, as an
+    // agent would, so they're set to Run code, as the user would; agentSitesCheck tests the levels and Ask.
+    await this.ext(`async (sites) => { await chrome.storage.local.set({ agentSites: sites }); }`, [AGENT_SITES]);
     await r.check('trif doctor', async () => {
       const doc = await this.cli(['doctor'], { json: true, timeoutMs: 60000 });
       if (!doc.json) throw new Error(`no JSON: ${doc.stdout} ${doc.stderr}`);
@@ -1195,6 +1201,7 @@ class Scenario {
       await r.check('boxed mods: a hostile one fails at every escape (network, code from strings, inline code, other windows and the page\'s globals, synthetic input, navigation, clipboard, cookies and storage, messages), with nothing reaching the server or the page; a good one restyles, hides, adds, rewrites text, draws, uses timers and settings, and watches; errors and logs reported; the two sample ports work; timing', () => this.sandboxedCheck(win));
       await r.check('a boxed mod as a free mod (how a browser without the sandbox runs one the user allowed): the same API works in the page\'s world', () => this.sandboxPageFormCheck(win));
       await r.check('powers (docs/POWERS.md): a boxed mod with powers waits for the user\'s OK for its set (panel and trif status say what it asks for); allowed, sound, controls, read-drafts and keys work and stay narrow; undeclared, each is refused; a new version with the same powers runs, one with a new power waits for that one', () => this.powersCheck(win));
+      await r.check('"Agent on this site": Ask asks in the panel (Just this once runs the code), Look refuses code, Off refuses reading too, a sensitive site is off with its line, Settings lists them', () => this.agentSitesCheck(win));
       await r.check('powers, phase 3: media plays and pauses the page\'s own video; click clicks only what the header names, never a submit, reset or a link to another site; go-to goes only to the header\'s pages; mods talk over TRIF\'s channel in plain data; write-drafts changes the user\'s drafts but never a password, card or hidden field; with a read, the combination is in the hold, and while another boxed mod on the page has a read it didn\'t ask for, write-drafts is off; undeclared, each is refused', () => this.powers3Check(win));
       await r.check('powers, phase 2: site-data filters the site\'s JSON (fetch and XHR) by removing and reordering only (an invented string, number, key, a duplicate or a cut string: TRIF keeps the original); page-data reads plain copies of React props; search-box is TRIF\'s own box the mod can\'t read, which searches the site from the user\'s Enter; undeclared, each is refused', () => this.powers2Check(win));
       await r.check('speculation rules (audit AU-7): a page that prefetches its same-site links at once; a link a free mod adds is fetched without a click (Chrome), a boxed mod can\'t make one', () => this.specRulesCheck(win));
@@ -2468,6 +2475,73 @@ process.exitCode = 1;
     } finally {
       for (const id of [...Object.keys(files), 'e2e-pw3k']) { try { fs.unlinkSync(path.join(dir, `${id}.js`)); } catch { /* gone */ } }
       await this.ext(`async (id, url) => { await chrome.tabs.update(id, { url }); }`, [win.tabId, `${base}/?e2e=after-powers3`]).catch(() => {});
+    }
+  }
+
+  // "Agent on this site": the Ask dialog (Just this once runs the code), the header's control at Look and
+  // Off (trif run, then trif text, refused with the level), a site on the sensitive list (off, with its line),
+  // and Settings' list. Screenshots in both themes (Chrome).
+  async agentSitesCheck(win) {
+    const site = '127.0.0.1';
+    const base = `http://${site}:${this.o.servers.port}`;
+    const setStore = (v) => this.ext(`async (v) => { await chrome.storage.local.set(v); }`, [v]);
+    const panelState = () => this.panel(`async () => ({ level: document.getElementById('agent-level').value, shown: !document.getElementById('agent-level').hidden,
+      note: document.getElementById('agent-note').hidden ? '' : document.getElementById('agent-note').textContent,
+      ask: document.getElementById('agent-ask')?.open ? document.getElementById('agent-ask-title').textContent : null })`);
+    const themes = async (name) => { for (const scheme of ['dark', 'light']) if (await this.d.colorScheme(this.panelCtx, scheme)) { await sleep(150); await this.shot(this.panelCtx, `${name}-${scheme}`); } await this.d.colorScheme(this.panelCtx, ''); };
+    const problems = [];
+    try {
+      await this.ext(`async (id, url) => { await chrome.tabs.update(id, { url, active: true }); }`, [win.tabId, `${base}/`]);
+      await this.dismissApproval();
+      // Ask: no choice for the site yet
+      const { [site]: _, ...rest } = AGENT_SITES;
+      await setStore({ agentSites: rest });
+      await waitFor('the header at Ask', async () => { const p = await panelState(); return p.shown && p.level === 'ask' ? p : null; }, { timeoutMs: 10000 });
+      const running = this.cli(['run', '--tab', String(win.tabId), '6 * 7'], { timeoutMs: 60000 });
+      const asked = await waitFor('the Ask dialog', async () => { const p = await panelState(); return p.ask ? p : null; }, { timeoutMs: 15000 });
+      if (asked.ask !== `Your agent wants to run code on ${site}.`) problems.push(`the Ask dialog: ${asked.ask}`);
+      await themes('agent-ask');
+      await this.d.click(this.panelCtx, '#agent-ask .agent-once');
+      const ran = await running;
+      if (ran.status !== 0 || !/42/.test(ran.stdout)) problems.push(`Just this once: the code didn't run: ${ran.stdout} ${ran.stderr}`);
+      // (once: the site is still Ask afterwards)
+      if ((await panelState()).level !== 'ask') problems.push('Just this once changed the site\'s level');
+      // Look, from the header's control: trif run refused with the level; trif text works
+      await this.panel(`async () => { const s = document.getElementById('agent-level'); s.value = 'look'; s.dispatchEvent(new Event('change')); return true; }`);
+      await waitFor('Look saved', async () => (await this.ext(`async () => (await chrome.storage.local.get('agentSites')).agentSites`))?.[site] === 'look' || null, { timeoutMs: 8000 });
+      await themes('agent-header-look');
+      const look = await this.cli(['run', '--tab', String(win.tabId), '1']);
+      if (look.status === 0 || !/"Agent on this site" to Look for 127\.0\.0\.1/.test(look.stderr + look.stdout)) problems.push(`trif run at Look: ${look.status} ${look.stderr}`);
+      const read = await this.cli(['text', '--tab', String(win.tabId)]);
+      if (read.status !== 0) problems.push(`trif text at Look: ${read.stderr}`);
+      // Off: trif text refused too
+      await this.panel(`async () => { const s = document.getElementById('agent-level'); s.value = 'off'; s.dispatchEvent(new Event('change')); return true; }`);
+      await waitFor('Off saved', async () => (await this.ext(`async () => (await chrome.storage.local.get('agentSites')).agentSites`))?.[site] === 'off' || null, { timeoutMs: 8000 });
+      const off = await this.cli(['text', '--tab', String(win.tabId)]);
+      if (off.status === 0 || !/"Agent on this site" is Off for 127\.0\.0\.1/.test(off.stderr + off.stdout)) problems.push(`trif text at Off: ${off.status} ${off.stderr}`);
+      // the sensitive list: off by default, with its line under the bar
+      await setStore({ agentSites: rest, sensitiveSites: [{ pattern: site, why: 'a test site' }] });
+      const sens = await waitFor('the line for a sensitive site', async () => { const p = await panelState(); return p.note ? p : null; }, { timeoutMs: 8000 });
+      if (sens.level !== 'off' || sens.note !== `Your agent is off on ${site}: it's a test site. Choose “Agent” above to let it look or run code here.`) problems.push(`a sensitive site: ${JSON.stringify(sens)}`);
+      await themes('agent-header-sensitive');
+      // Settings: the sites chosen, and the sensitive list
+      await setStore({ agentSites: { ...rest, [site]: 'look' }, sensitiveSites: null });
+      await this.panelClick('#settings-btn');
+      const settings = await waitFor('Settings\' list', () => this.panel(`async () => {
+        const li = document.querySelector('#agent-sites-list li[data-site="${site}"]');
+        if (!li) return null;
+        li.scrollIntoView({ block: 'center' });
+        return { level: li.querySelector('select').value, sensitive: document.getElementById('sensitive-sites').value.split(String.fromCharCode(10)).length };
+      }`), { timeoutMs: 8000 });
+      if (settings.level !== 'look' || settings.sensitive < 30) problems.push(`Settings: ${JSON.stringify(settings)}`);
+      await themes('agent-settings');
+      if (problems.length) throw new Error(problems.join('\n'));
+      return `Ask: the dialog ("${asked.ask}"), Just this once ran the code (42) and left the site at Ask; Look from the header refused trif run and allowed trif text; Off refused trif text; a sensitive site off with its line; Settings listed the choice and ${settings.sensitive} sensitive patterns`;
+    } finally {
+      await setStore({ agentSites: AGENT_SITES, sensitiveSites: null }).catch(() => {});
+      await this.d.colorScheme(this.panelCtx, '').catch(() => {});
+      // (Settings closed again, if this opened it)
+      if (await this.panel(`async () => !document.getElementById('settings').hidden`).catch(() => false)) await this.panelClick('#settings-btn').catch(() => {});
     }
   }
 

@@ -668,7 +668,8 @@ const handlers = {
       args.timeout = t;
     }
     const callArgs = args.timeout ? args : { ...args, timeout: 10000 };
-    const r = await ctx.call('run', callArgs);
+    // (plus the time the user may take to answer "Agent on this site" in the panel: background.js)
+    const r = await ctx.call('run', callArgs, callArgs.timeout + 8000 + 30000);
     if (ctx.json) return printJson(r);
     out(formatValue(r && typeof r === 'object' && 'value' in r ? r.value : r));
   },

@@ -182,6 +182,9 @@ function onExtensionMessage(msg) {
       syncMods('hello', true);
       sendUpdate();
       break;
+    case 'requestWaiting':
+      onRequestWaiting(msg);
+      break;
     case 'response':
       onExtensionResponse(msg);
       break;
@@ -1095,6 +1098,7 @@ function onClientLine(sock, line) {
             : `"${cmd}" isn't available inside an agent run` });
     }
     args.scope = run.scope;
+    args.agentRun = run.id; // ("Agent on this site": Just this once is for this run)
   }
 
   if (cmd === 'ping') return reply(sock, { id, ok: true, result: helperInfo() });
@@ -1138,12 +1142,23 @@ function onClientLine(sock, line) {
   } catch (e) {
     return reply(sock, { id, ok: false, error: `could not send "${cmd}" to the extension: ${e.message}` });
   }
-  const timer = setTimeout(() => {
+  const expire = (ms) => setTimeout(() => {
     pending.delete(extId);
-    logger.warn(`request ${extId} (${cmd}) timed out after ${timeoutMs}ms`);
-    reply(sock, { id, ok: false, error: `timed out after ${timeoutMs}ms waiting for the extension to answer "${cmd}"` });
-  }, timeoutMs);
-  pending.set(extId, { sock, clientId: id, timer, cmd, runId: run ? run.id : null });
+    logger.warn(`request ${extId} (${cmd}) timed out after ${ms}ms`);
+    reply(sock, { id, ok: false, error: `timed out after ${ms}ms waiting for the extension to answer "${cmd}"` });
+  }, ms);
+  const timer = expire(timeoutMs);
+  pending.set(extId, { sock, clientId: id, timer, cmd, runId: run ? run.id : null, expire, timeoutMs });
+}
+
+// The extension is waiting for the user (the panel asking whether an agent may run code on a site:
+// background.js askToRun): the request gets that much longer before it times out here.
+function onRequestWaiting(msg) {
+  const p = pending.get(msg.id);
+  if (!p || !p.expire) return;
+  const ms = Math.min(Math.max(Number(msg.ms) || 0, 0), 60000) + p.timeoutMs;
+  clearTimeout(p.timer);
+  p.timer = p.expire(ms);
 }
 
 function onExtensionResponse(msg) {

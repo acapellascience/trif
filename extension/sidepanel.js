@@ -9,6 +9,7 @@ import { siteForUrl, modAppliesTo, modSites, isMultiSite, offOnSite, normalizeOf
   normalizeSettings, normalizePicks, siteSettings, withoutModel } from './lib.js';
 import { setMarkdown, unwrapMarkdown } from './markdown.js';
 import { createLogin } from './login.js';
+import { agentLevel, agentSiteOf, sensitiveList } from './agentsites.js';
 import { modSwitch, syncSwitches, shownEnabled, switchError, enabledIn, onSwitchChange } from './modswitch.js';
 import { mountOpenModel, renderOpenModel, openModelKeyMissing, watchOpenModel } from './openmodel.js';
 
@@ -17,6 +18,10 @@ const chatKey = (site) => `chat:${site}`;
 const emptyChat = () => ({ sessionId: null, agent: null, messages: [], run: null, last: null });
 
 const ui = {
+  agentLevel: document.getElementById('agent-level'), agentNote: document.getElementById('agent-note'),
+  agentSitesList: document.getElementById('agent-sites-list'), agentSitesEmpty: document.getElementById('agent-sites-empty'),
+  sensitiveSites: document.getElementById('sensitive-sites'), sensitiveSave: document.getElementById('sensitive-save'),
+  sensitiveReset: document.getElementById('sensitive-reset'), sensitiveNote: document.getElementById('sensitive-note'),
   waitingBadge: document.getElementById('waiting-badge'),
   dot: $('#dot'), site: $('#site'), barRobot: $('#bar-robot'), siteSwitch: $('#site-switch'), newChat: $('#new-chat'), settingsBtn: $('#settings-btn'),
   gate: $('#gate'), gateTitle: $('#gate-title'), gateWhy: $('#gate-why'), gateBtn: $('#gate-btn'), gateErr: $('#gate-err'), gateNote: $('#gate-note'),
@@ -126,6 +131,10 @@ function onPortMessage(msg) {
     }
   } else if (msg?.type === 'statusChanged') {
     refreshStatusSoon();
+  } else if (msg?.type === 'agentAsk') {
+    showAgentAsk(msg.id, msg.site);
+  } else if (msg?.type === 'agentAskDone') {
+    if (agentAsk.id === msg.id) closeAgentAsk();
   }
 }
 
@@ -356,6 +365,9 @@ function render() {
   const anyAgent = agentList.some((a) => a.available);
 
   renderSites();
+  renderAgentLevel();
+  renderAgentSites();
+  for (const a of view.status?.agentAsks || []) if (!agentAsk.answered.has(a.id)) showAgentAsk(a.id, a.site);
   ui.site.textContent = site || 'Tim\'s Robot Internet Fixer';
   ui.site.title = view.tab?.url || '';
   document.title = site ? `TRIF · ${site}` : 'Tim\'s Robot Internet Fixer';
@@ -1215,6 +1227,121 @@ function factsBox(m, info, kind) {
   } else box.append(actions(showCode));
   box.append(shown);
   return box;
+}
+
+// ---- "Agent on this site" (agentsites.js; background.js agentGate) -------------------------------------
+// The header's control: Ask (the default), Off, Look or Run code for the tab's site; a line under the bar
+// when TRIF's sensitive list keeps the agent off. Settings: the sites chosen, and the sensitive list.
+const agentSettingsNow = () => ({ sites: view.status?.agentSites || {}, sensitive: view.status?.sensitiveSites ?? null });
+
+function renderAgentLevel() {
+  const site = agentSiteOf(view.tab?.url || '');
+  const show = !!site && !!view.status?.helper?.connected;
+  ui.agentLevel.hidden = !show;
+  ui.agentNote.hidden = true;
+  if (!show) return;
+  const lv = agentLevel(site, agentSettingsNow());
+  // (a narrow panel: the levels without "Agent: ", so the control stays clear of the robot in the middle)
+  const narrow = matchMedia('(max-width: 420px)').matches;
+  for (const o of ui.agentLevel.options) o.textContent = `${narrow ? '' : 'Agent: '}${{ ask: 'Ask', off: 'Off', look: 'Look', run: 'Run code' }[o.value]}`;
+  if (document.activeElement !== ui.agentLevel) ui.agentLevel.value = lv.level;
+  ui.agentLevel.dataset.level = lv.level;
+  ui.agentLevel.title = `Agent on ${site}: ${{ ask: 'it can read, and asks before it first runs code', off: 'it can\'t read, take screenshots or run code here', look: 'it can read and take screenshots, but not run code', run: 'it can read and run code (the tab locks while it does)' }[lv.level]}`;
+  if (lv.by === 'sensitive') {
+    ui.agentNote.textContent = `Your agent is off on ${site}: it's ${lv.why || 'on your list of sensitive sites'}. Choose “Agent” above to let it look or run code here.`;
+    ui.agentNote.hidden = false;
+  }
+}
+matchMedia('(max-width: 420px)').addEventListener?.('change', () => renderAgentLevel());
+ui.agentLevel?.addEventListener('change', async () => {
+  const site = agentSiteOf(view.tab?.url || '');
+  if (!site) return;
+  const v = ui.agentLevel.value;
+  try { await request({ type: 'agentSite.set', site, level: v === 'ask' ? null : v }); } catch (e) { ui.agentLevel.title = String(e?.message ?? e); }
+  refreshStatus();
+});
+
+function renderAgentSites() {
+  const sites = view.status?.agentSites || {};
+  const key = JSON.stringify(sites);
+  if (ui.agentSitesList.dataset.key !== key) {
+    ui.agentSitesList.dataset.key = key;
+    ui.agentSitesList.replaceChildren(...Object.keys(sites).sort().map((site) => {
+      const li = el('li');
+      li.dataset.site = site;
+      const sel = el('select');
+      sel.setAttribute('aria-label', `Agent on ${site}`);
+      for (const [v, t] of [['off', 'Off'], ['look', 'Look'], ['run', 'Run code']]) sel.append(new Option(t, v));
+      sel.value = sites[site];
+      sel.addEventListener('change', () => request({ type: 'agentSite.set', site, level: sel.value }).then(refreshStatus, () => {}));
+      const forget = button('Ask again', '', () => request({ type: 'agentSite.set', site, level: null }).then(refreshStatus, () => {}));
+      forget.title = 'Forget this choice: the site goes back to asking (or off, if it\'s on the sensitive list)';
+      li.append(el('span', 'agent-site', site), sel, forget);
+      return li;
+    }));
+  }
+  ui.agentSitesEmpty.hidden = Object.keys(sites).length > 0;
+  // (the sensitive list, as text: not while the user is editing it)
+  const text = sensitiveList(view.status?.sensitiveSites ?? null).map((x) => (x.why ? `${x.pattern}: ${x.why}` : x.pattern)).join('\n');
+  if (document.activeElement !== ui.sensitiveSites && ui.sensitiveSites.dataset.shown !== text) { ui.sensitiveSites.value = text; ui.sensitiveSites.dataset.shown = text; }
+}
+ui.sensitiveSave?.addEventListener('click', async () => {
+  const list = ui.sensitiveSites.value.split('\n').map((l) => l.trim()).filter(Boolean).map((l) => { const i = l.indexOf(':'); return i > 0 ? { pattern: l.slice(0, i).trim(), why: l.slice(i + 1).trim() } : { pattern: l, why: '' }; });
+  try { await request({ type: 'agentSensitive.set', list }); ui.sensitiveNote.textContent = 'Saved.'; } catch (e) { ui.sensitiveNote.textContent = String(e?.message ?? e); }
+  ui.sensitiveSites.dataset.shown = '';
+  refreshStatus();
+});
+ui.sensitiveReset?.addEventListener('click', async () => {
+  try { await request({ type: 'agentSensitive.set', list: null }); ui.sensitiveNote.textContent = 'TRIF\'s list again.'; } catch (e) { ui.sensitiveNote.textContent = String(e?.message ?? e); }
+  ui.sensitiveSites.dataset.shown = '';
+  refreshStatus();
+});
+
+// The Ask dialog: an agent wants to run code on a site set to Ask (background.js askToRun waits 25 s for
+// this). Just this once (this run) / Always on this site (Run code) / Not here (Look). Esc or × closes it
+// without an answer: the agent's command then fails, saying the user didn't answer.
+const agentAsk = { id: null, dialog: null, answered: new Set() };
+function showAgentAsk(id, site) {
+  if (!id || agentAsk.answered.has(id)) return;
+  if (!agentAsk.dialog) {
+    const d = el('dialog', 'approval agent-ask');
+    d.id = 'agent-ask';
+    d.setAttribute('aria-labelledby', 'agent-ask-title');
+    const top = el('div', 'ap-top');
+    const x = el('button', 'ap-x', '×');
+    x.type = 'button';
+    x.setAttribute('aria-label', 'Close');
+    top.append(el('span', 'ap-count', 'Your agent is asking'), x);
+    const who = el('div', 'ap-who');
+    const robot = el('span', 'ap-robot');
+    const svg = document.querySelector('#bar-robot svg');
+    if (svg) robot.append(svg.cloneNode(true));
+    const title = el('h2', 'ap-name');
+    title.id = 'agent-ask-title';
+    who.append(robot, title);
+    const text = el('p', 'ap-lead agent-ask-text', 'It can read everything you can see here.');
+    const err = el('p', 'ap-err');
+    err.hidden = true;
+    const answer = (choice) => async () => {
+      err.hidden = true;
+      try { await request({ type: 'agentAsk.answer', id: agentAsk.id, choice }); agentAsk.answered.add(agentAsk.id); closeAgentAsk(); refreshStatus(); } catch (e) { err.textContent = String(e?.message ?? e); err.hidden = false; }
+    };
+    const acts = el('div', 'ap-actions');
+    acts.append(button('Just this once', 'go agent-once', answer('once')), button('Always on this site', 'agent-always', answer('always')), button('Not here', 'text agent-no', answer('no')));
+    x.addEventListener('click', () => { agentAsk.answered.add(agentAsk.id); closeAgentAsk(); });
+    d.addEventListener('cancel', (e) => { e.preventDefault(); agentAsk.answered.add(agentAsk.id); closeAgentAsk(); });
+    d.append(top, who, text, err, acts);
+    document.body.append(d);
+    agentAsk.dialog = d;
+  }
+  agentAsk.id = id;
+  agentAsk.dialog.dataset.site = site;
+  agentAsk.dialog.querySelector('#agent-ask-title').textContent = `Your agent wants to run code on ${site}.`;
+  if (!agentAsk.dialog.open) agentAsk.dialog.showModal();
+}
+function closeAgentAsk() {
+  if (agentAsk.dialog?.open) agentAsk.dialog.close();
+  agentAsk.id = null;
 }
 
 // ---- The approval dialog ---------------------------------------------------------------------------

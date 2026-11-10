@@ -1,14 +1,19 @@
 # Examples
 
-Ready-made mods. `trif setup` adds all of them to a new workspace once, **switched off**: turn one on
-with its switch in the side panel (`--no-examples` skips them). Or copy one in yourself with
-`trif install-example <site>/<mod>`, then reload the site.
+Ready-made mods: Tim's mods. Nothing of them is on your computer until you choose, site by site: the
+setup page in your browser has a checklist of sites (X, Google, Amazon and Instagram ticked to start),
+and you can
+add any site's later in Settings in the side panel, with the "Add Tim's mods for <site>" link on that
+site's panel, or with `trif setup --examples` (every site) or `trif setup --examples x.com,google.com`
+(`--no-examples`: none). Adding a site's copies its mods in, each on or off as `PREINSTALLED` in
+`helper/lib/preinstalled.js` says (switch them in the side panel), and turns TRIF on for the site. Or copy
+one in yourself with `trif install-example <site>/<mod>`, then reload the site.
 
 | Mod | What it does |
 |---|---|
 | `x.com/detox-timeline` | **Detox Timeline.** Home is just the people you follow, sorted Recent, filtered before X sees the data: no ads, no who-to-follow, and every kind of post off to start (the plainest timeline: original text posts from people who follow you back), with a "Filters" menu to turn each back on (reposts, quotes, replies, conversations, long posts, links, videos, images, non-mutuals). Also hides the trends column, widens the timeline, cleans ads and "Discover more" from post pages and profiles, tucks replies from people you don't follow into a collapsed section, turns Explore into a plain search field, and plays YouTube cards in place. |
-| `x.com/follow-status` | **Follow status.** Marks the people who follow you back. |
-| `x.com/space-shooter` | **X-Flyer.** Shift+S (or the rocket button) flies a fighter over X: blast the words. |
+| `x.com/follow-status` | **Follow Status.** Marks the people who follow you back. |
+| `x.com/space-shooter` | **X-Flyer.** Shift+S (or the rocket button) flies a fighter over X: blast the words, to its own soundtrack. |
 | `www.instagram.com/three-column-feed` | **Three-Column Feed.** The home feed three posts wide, still scrolling. |
 | `www.instagram.com/following-only-feed` | Home feed shows only people you follow: suggested posts, suggested accounts and ads are removed from the feed data. |
 | `www.instagram.com/hide-reposts` | Removes reposts (posts shown because someone you follow reposted them), unless you follow the author too. |

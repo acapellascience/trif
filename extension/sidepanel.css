@@ -256,6 +256,24 @@ body[data-problem="helper"] .mod-list, body.needs-login .mod-list { --switch-on:
 .note { margin: 0; color: var(--muted); font-size: 12px; }
 .note.error { color: var(--bad); }
 
+/* Settings, Tim's mods: a row per site, added or with its Add button. */
+.starter { display: grid; gap: 6px; padding-top: 8px; border-top: 1px solid var(--line); }
+.starter[hidden] { display: none; }
+.starter-title { margin: 0; font-weight: 600; }
+.starter-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; }
+.starter-list li { display: grid; grid-template-columns: 1fr auto; gap: 0 10px; align-items: center; }
+.starter-site { font-weight: 500; }
+.starter-mods { grid-column: 1; color: var(--muted); font-size: 12px; }
+.starter-state { grid-column: 2; grid-row: 1 / span 2; color: var(--muted); font-size: 12px; }
+.starter-list .btn { grid-column: 2; grid-row: 1 / span 2; }
+/* A site's panel: "Add Tim's mods for <site>", small. */
+.site-starter { flex: none; margin: 8px 12px 0; font-size: 12px; text-align: center; }
+.site-starter[hidden] { display: none; }
+.gate .site-starter { margin: 0; }
+.site-starter .mod-err { display: block; margin-top: 4px; }
+.site-starter .mod-err[hidden] { display: none; }
+body.no-site .site-starter { display: none; }
+
 .notice p { margin: 0; }
 .notice p + p, .notice p + .actions { margin-top: 6px; }
 .notice .title { font-weight: 600; }

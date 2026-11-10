@@ -83,10 +83,11 @@
   <label class="check"><input id="pause-all" type="checkbox"> Pause all mods in this browser</label>
   <label class="check"><input id="auto-update" type="checkbox"> Install updates automatically</label>
   <p id="update-note" class="note"></p>
-  <!-- Tim's starter mods, when the user hasn't added them (the setup page asked). -->
-  <div id="starter-block" class="sites-block" hidden>
-    <p class="actions"><button id="starter-add" class="btn" type="button">Add Tim's starter mods</button>
-      <a href="https://github.com/acapellascience/trif/tree/main/examples/sites" id="starter-source" class="note" target="_blank" rel="noopener">See what’s in them</a></p>
+  <!-- Tim's mods, site by site: added, or an Add button (sidepanel.js renderStarter). -->
+  <div id="starter" class="starter" hidden>
+    <p class="starter-title">Tim’s mods</p>
+    <ul id="starter-list" class="starter-list"></ul>
+    <p class="note">Plain JavaScript you can read: <a href="https://github.com/acapellascience/trif/tree/main/examples/sites" id="starter-source" target="_blank" rel="noopener">see the code</a>.</p>
     <p id="starter-err" class="note error" hidden></p>
   </div>
   <!-- Site permissions: permissive or restrictive (not in Safari), and the sites blocked in TRIF. -->
@@ -123,6 +124,9 @@
     <p id="mode-dialog-err" class="mod-err" hidden></p>
     <button id="mode-dialog-switch" class="btn go" type="button">Switch to restrictive mode</button>
   </dialog>
+  <!-- "Add Tim's mods for <site>", when this site has some the user hasn't added (sidepanel.js renderSiteStarter);
+       moved under the mods list while TRIF is on for the site. -->
+  <p id="site-starter" class="site-starter" hidden><a href="#" id="site-starter-link"></a><span id="site-starter-err" class="mod-err" hidden></span></p>
   <!-- What's in the way, in one line (sidepanel.js problemLine): red, or yellow for a login. -->
   <div id="gate-note" class="problem-line" hidden></div>
 </section>

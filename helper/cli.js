@@ -28,6 +28,8 @@ const VALUE_FLAGS = new Set(['--tab', '--url', '-o', '--out', '--output', '--fil
   '--provider', '--base-url', '--key-env', '--selector', '--color', '--text', '--tolerance']);
 const BOOL_FLAGS = new Set(['--json', '--hard', '--help', '-h', '--force', '--page', '--rules', '--no-link', '--examples', '--no-examples', '--copy', '--link', '--install', '--open',
   '--use-new', '--keep', '--merged', '--set-key', '--remove-key', '--scroll', '--full', '--verbose', '-v', '--no-wait']);
+// Flags with a value that may be left out (`--examples` alone, or `--examples x.com,google.com`).
+const OPTIONAL_VALUE_FLAGS = new Set(['--examples']);
 const ALIASES = { '--out': '-o', '--output': '-o', '--file': '-f', '-h': '--help', '-v': '--verbose' };
 
 class UsageError extends Error {}
@@ -51,6 +53,9 @@ function parseArgs(argv) {
         value = argv[++i];
       }
       opts[name] = value;
+    } else if (OPTIONAL_VALUE_FLAGS.has(name)) {
+      if (value === undefined && i + 1 < argv.length && !argv[i + 1].startsWith('-')) value = argv[++i];
+      opts[name] = value === undefined ? true : value;
     } else if (BOOL_FLAGS.has(name)) {
       opts[name] = true;
     } else {
@@ -225,14 +230,20 @@ const handlers = {
   async setup(ctx) {
     const { setup } = require('./lib/setup');
     if (ctx.opts['--copy'] && ctx.opts['--link']) throw new UsageError('use --copy or --link, not both');
-    if (ctx.opts['--examples'] && ctx.opts['--no-examples']) throw new UsageError('use --examples or --no-examples, not both');
+    if (ctx.opts['--examples'] !== undefined && ctx.opts['--no-examples']) throw new UsageError('use --examples or --no-examples, not both');
+    // --examples: Tim's mods for every site; --examples x.com,google.com: for those.
+    let examples = ctx.opts['--examples'] === undefined ? false : ctx.opts['--examples'];
+    if (typeof examples === 'string') {
+      try { examples = require('./lib/preinstalled').resolveSites(examples); } catch (e) { throw new UsageError(e.message); }
+      if (!examples.length) throw new UsageError('--examples needs sites, like --examples x.com,google.com (or nothing, for every site)');
+    }
     const r = setup({
       home: ctx.opts['--home'],
       browser: ctx.opts['--browser'],
       nativeDir: ctx.opts['--native-dir'],
       binDir: ctx.opts['--bin-dir'],
       noLink: !!ctx.opts['--no-link'],
-      examples: !!ctx.opts['--examples'],
+      examples,
       noExamples: !!ctx.opts['--no-examples'],
       verbose: !!ctx.opts['--verbose'],
       mode: ctx.opts['--copy'] ? 'copy' : ctx.opts['--link'] ? 'link' : undefined,

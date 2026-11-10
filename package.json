@@ -1,6 +1,6 @@
 {
   "name": "timsrobot",
-  "version": "0.2.4",
+  "version": "0.2.5",
   "description": "Tim's Robot Internet Fixer (TRIF): customize any website with mods written by your coding agent. A browser extension, a native messaging helper and the `trif` CLI.",
   "license": "MIT",
   "repository": {

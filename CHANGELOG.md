@@ -7,11 +7,6 @@ needs a section here for the version it releases.
 ## Unreleased
 
 - A site's mods now come in two groups, Rules and Page scripts, each with a switch for that site only.
-
-- **Tim's starter mods are your choice.** Setting TRIF up no longer puts any of the mods TRIF ships on
-  your computer. The setup page asks: **Add them** (small mods for Google, X, Amazon and Instagram, plain
-  JavaScript you can read first) or **Start with none**. Settings in the side panel can add them later.
-  Already have them? Nothing changes: they stay, and keep getting updates.
 - **You choose what TRIF can reach: permissive or restrictive.** Installing TRIF used to give it "all your
   data on all websites". Now it asks for nothing until the setup page's new step, Site permissions:
   **Permissive** gives TRIF access to every site by default (your browser asks once); **Restrictive**
@@ -40,9 +35,9 @@ needs a section here for the version it releases.
     something new.
   - Your existing mods keep running. Ones that can do more than change how a page looks show what
     TRIF found once, with "Looks right".
-  - The page's address reaches your agent without the part after `?` or `#`, which anyone can fill.
-- When your coding agent's login runs out, the side panel asks you to log in again (and keeps your
-  message to send again) instead of showing the agent's error twice.
+
+## 0.2.5
+
 - **Bigger mods.** A mod can now be up to 4 MB, and all your mods together up to 16 MB. Until now they
   had to fit in 1 MB in all, and past that the biggest ones were left out: a game, or a mod with
   its sounds or pictures in it, could use that up alone. If a mod is ever too big, `trif status` and
@@ -50,6 +45,27 @@ needs a section here for the version it releases.
   which keeps Firefox's memory in check with big mods. (The helper and the browser extension both need
   this version; with an older extension, mods still stop at 1 MB in all, and `trif doctor` says to update
   it.)
+- **X-Flyer has music**, in the mod itself: Blast the Evil Eye while you fly and Big Boss once @elonmusk
+  is full size (both by Tim), then the end of Stravinsky's Firebird (Stokowski, 1940) when he explodes.
+  That makes it about 2 MB, so it needs this version.
+  It's also smoother: the boss fight and heavy firing stay at 60 frames a second with your other X mods
+  on. Its Gravity mode is gone (the X key's bombs stay).
+- **You choose which of Tim's mods to add.** A new setup puts none of them on your computer until you
+  tick their sites on the setup page. Each mod has its own switch in the side panel; add other sites'
+  later in Settings there, or from the link on that site's panel. One you deleted can be brought back in
+  Settings too. If you already have Tim's mods, nothing changes.
+- **New for X, off until you switch them on: people's own colours.** Style Encoder stamps a style you
+  pick into the corner of the next profile picture you upload (X's round crop hides it). Profile Styler
+  then shows each styled profile in its owner's colours, and Post Styler their posts and people cards.
+  To find the styles they load people's profile pictures again from X's image server.
+- Detox Timeline keeps the margins beside the timeline equal when X-Flyer is installed and no game is on.
+  Rainbow Rave's and Follow Status's rainbows no longer jump at their edges.
+- Amazon's Simple Home shows Amazon's own logo, sharper. Punk Fonts for X is no longer one of Tim's mods:
+  if you have it, it stays as it is, without updates.
+- When your coding agent's login runs out, the side panel asks you to log in again (and keeps your
+  message to send again) instead of showing the agent's error twice.
+- Each tab keeps its own draft in the side panel's message box.
+- The page's address reaches your agent without the part after `?` or `#`, which anyone can fill.
 
 ## 0.2.4
 

@@ -2400,6 +2400,70 @@ test('background: the helper\'s start sites are turned on once, and mods for the
   } finally { bg.restore(); }
 });
 
+test('normalizeStarter: Tim\'s mods by site, cleaned up; siteNames', () => {
+  assert.strictEqual(lib.normalizeStarter(null), null);
+  assert.strictEqual(lib.normalizeStarter({ sites: 3 }), null);
+  const r = lib.normalizeStarter({ chosen: false, sites: [
+    { site: 'www.google.com', name: 'Google', choice: 'added', suggested: true, mods: [{ id: 'www.google.com/a', name: 'A', description: 'does a', on: 1, choice: 'skipped' }] },
+    { site: 'google.com', name: 'Again', mods: [{ id: 'www.google.com/b' }] }, // (the same site twice: the first)
+    { site: 'x.com', choice: 'maybe', mods: [] }, // (no mods: left out)
+    { site: 'timsrobot.com', note: 'for TRIF’s own demo', mods: [{ id: 'timsrobot.com/r', name: '', description: 7 }], choice: 'none' },
+    'junk',
+  ] });
+  assert.deepStrictEqual(r, { chosen: true, sites: [
+    { site: 'google.com', name: 'Google', note: '', choice: 'added', suggested: true, mods: [{ id: 'www.google.com/a', name: 'A', description: 'does a', on: true, choice: 'skipped' }] },
+    { site: 'timsrobot.com', name: 'timsrobot.com', note: 'for TRIF’s own demo', choice: 'none', suggested: false, mods: [{ id: 'timsrobot.com/r', name: 'timsrobot.com/r', description: '', on: false, choice: null }] },
+  ] });
+  assert.deepStrictEqual(['', 'X', 'X and Google', 'X, Google and Amazon'], [[], ['X'], ['X', 'Google'], ['X', 'Google', 'Amazon']].map(lib.siteNames));
+});
+
+test('applyReadded: one of Tim\'s mods deleted and added again is switched as listed, once per stamp', () => {
+  const mods = [mod('x.com/a', { readded: 's1', startOff: true }), mod('x.com/b', { readded: 's1' }), mod('x.com/c')];
+  let r = lib.applyReadded(mods, { 'x.com/b': true }, {});
+  assert.deepStrictEqual(r, { disabled: { 'x.com/a': true }, readded: { 'x.com/a': 's1', 'x.com/b': 's1' }, changed: true });
+  // After that the switch is the user's: the same stamp changes nothing; a new one switches it again.
+  const again = lib.applyReadded(mods, {}, r.readded);
+  assert.strictEqual(again.changed, false);
+  r = lib.applyReadded([mod('x.com/a', { readded: 's2', startOff: true })], {}, r.readded);
+  assert.deepStrictEqual(r.disabled, { 'x.com/a': true });
+  assert.deepStrictEqual(lib.normalizeReadded({ a: 's', b: 3, c: null }), { a: 's' });
+});
+
+test('background: Tim\'s mods by site come with the mods; the panel\'s choice goes to the helper, and a site\'s tab reloads when one now runs there', async () => {
+  const tabs = [{ id: 5, windowId: 1, active: true, url: 'https://x.com/home' }];
+  const bg = await loadBackground({ storage: { sitesOn: [] }, tabs });
+  try {
+    const panel = bg.connectPanel();
+    const starter = (choice) => ({ chosen: !!choice, sites: [{ site: 'x.com', name: 'X', note: '', choice, suggested: true, mods: [{ id: 'x.com/a', name: 'A', description: '', on: true, choice: choice === 'added' ? 'added' : null }] }] });
+    assert.strictEqual((await panel.ask({ type: 'status' })).result.starter, null, 'not connected yet: unknown');
+    bg.native.emit({ type: 'mods', mods: [], sitesOn: [], starter: starter(null) });
+    await settle(20);
+    assert.deepStrictEqual((await panel.ask({ type: 'status' })).result.starter, starter(null));
+    assert.ok(panel.sent.some((m) => m.type === 'statusChanged'));
+    // "Add Tim's mods for X" on x.com's panel: the helper sends the mods (with the site to turn on), then answers.
+    const asked = panel.ask({ type: 'shipped.install', sites: ['www.x.com', 'x.com'], tab: 5, others: 'nope' });
+    let req;
+    for (let i = 0; i < 200 && !(req = bg.native.sent.find((m) => m.type === 'request' && m.cmd === 'shipped.install')); i++) await tick();
+    assert.deepStrictEqual(req.args, { sites: ['x.com'] }, 'scopes, once; `others` only as "none"');
+    bg.native.emit({ type: 'mods', mods: [mod('x.com/a', { matches: ['https://x.com/*'] })], sitesOn: ['x.com'], starter: starter('added') });
+    await answerNative(bg.native, 'shipped.install', { added: ['x.com/a'], sitesOn: ['x.com'], starter: starter('added') });
+    const r = await asked;
+    assert.strictEqual(r.ok, true, r.error);
+    assert.deepStrictEqual(bg.store.sitesOn, ['x.com']);
+    assert.deepStrictEqual(bg.reloaded, [5], 'the tab, where the mod runs now');
+    assert.strictEqual((await panel.ask({ type: 'status' })).result.starter.sites[0].choice, 'added');
+    // The setup page's "Add these": the ticked mods (ids only; the rest none), and "Start with none": no tab, nothing reloads.
+    const these = panel.ask({ type: 'shipped.install', ids: ['amazon.com/simple-home', 'amazon.com/simple-home', '../etc', 7], sites: ['x.com'], others: 'none' });
+    const req2 = await answerNative(bg.native, 'shipped.install', { added: [], sitesOn: [] });
+    assert.deepStrictEqual(req2.args, { ids: ['amazon.com/simple-home'], others: 'none' }, 'mod ids, once; nothing that isn\'t one');
+    assert.strictEqual((await these).ok, true);
+    const none = panel.ask({ type: 'shipped.none' });
+    await answerNative(bg.native, 'shipped.none', { starter: starter('none') });
+    assert.strictEqual((await none).ok, true);
+    assert.deepStrictEqual(bg.reloaded, [5]);
+  } finally { bg.restore(); }
+});
+
 test('agent and model per site chat: each site its own pick; the default is the last pick; a panel holds what it first saw', () => {
   // The old single setting carries over as the default (and the even older `model` as Claude Code's).
   assert.deepEqual(lib.normalizeSettings({ agent: 'codex', model: 'opus' }), { agent: 'codex', models: { claude: 'opus' } });

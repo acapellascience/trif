@@ -28,7 +28,8 @@ const { Logins } = require('./lib/logins');
 const agents = require('./lib/agents');
 const { updateHeld, approveHeld, rejectHeld, lastRun, heldFile, reviewItems, reviewMod } = require('./lib/held');
 const history = require('./lib/history');
-const { DEFAULT_ORDER, startOffIds, startSitesOn, starterChoice, chooseNoStarter, installStarter, starterOffer, pendingUpdates, useNewVersion, keepMine, mergeRequest, mergeSettled, restoreMod, absorbedIds } = require('./lib/preinstalled');
+const { DEFAULT_ORDER, startOffIds, startSitesOn, pendingUpdates, useNewVersion, keepMine, mergeRequest, mergeSettled, restoreMod, absorbedIds,
+  starterOffer, installStarter, chooseNoStarter, resolveSites, resolveIds, readdedIds } = require('./lib/preinstalled');
 const { readInstructions, writeInstructions, instructionsFile, MAX_LENGTH } = require('./lib/instructions');
 const { ownSock, removeStaleSockets, codeStamp } = require('./lib/helpers');
 const { loadOrigins, recordOrigins, renameOrigins, activeRuns } = require('./lib/origins');
@@ -271,6 +272,10 @@ function syncMods(reason, force) {
   // switches over, once (preinstalled.js retireShippedMods).
   let absorbed = {};
   try { absorbed = absorbedIds(ws.home); } catch (e) { logger.warn(`retired mods: ${e.message}`); }
+  // Tim's mods the user deleted and got back (Settings' "Add the rest"): each browser switches each one as
+  // listed once per stamp, as for a new one (preinstalled.js readded).
+  let readded = {};
+  try { readded = readdedIds(ws.home); } catch (e) { logger.warn(`Tim's mods: ${e.message}`); }
   const sent = plan.mods.map((m) => {
     // (facts: TRIF's own reading of the code; claim: what the agent says it does, shown apart as the agent's)
     const h = state.held[m.id], r = state.review && state.review[m.id];
@@ -282,15 +287,18 @@ function syncMods(reason, force) {
     const withOrigin = o ? { ...out, origin: { by: o.by, browser: o.browser } } : out;
     const withUpdate = updates[m.id] ? { ...withOrigin, update: updates[m.id] } : withOrigin;
     const withAbsorbs = absorbed[m.id] ? { ...withUpdate, absorbs: absorbed[m.id] } : withUpdate;
-    return startOff.has(m.id) ? { ...withAbsorbs, startOff: true } : withAbsorbs;
+    const withReadded = readded[m.id] ? { ...withAbsorbs, readded: readded[m.id] } : withAbsorbs;
+    return startOff.has(m.id) ? { ...withReadded, startOff: true } : withReadded;
   });
   // Sites TRIF starts on for (preinstalled.json): each browser turns each one on the first time it sees it.
   const sitesOn = startSitesOn(ws.home);
-  // Tim's starter mods: the user's choice ('added', 'none', or null: the setup page asks), and what they are.
-  const starter = { choice: starterChoice(ws.home), ...starterOffer() };
+  // Tim's mods, site by site: which the user added (or chose none for), and what each site's are, for the
+  // setup page's checklist, Settings and a site's "Add Tim's mods" link.
+  let starter = null;
+  try { starter = starterOffer(ws.home, examplesDir(), undefined, undefined, { modsDir: ws.modsDir }); } catch (e) { logger.warn(`Tim's mods: ${e.message}`); }
   // (everything the panel shows about a mod, so a change to any of it goes out: a review done, say)
-  const signature = sent.map((m) => `${m.id}:${m.hash}${m.held ? ':held' : ''}${m.pending ? `:pending ${m.pending.hash}` : ''}${m.review ? `:review ${m.review.facts.join('|')}` : ''}${m.startOff ? ':off' : ''}${m.origin ? `:${m.origin.by}` : ''}${m.update ? `:update ${JSON.stringify(m.update)}` : ''}${m.absorbs ? `:absorbs ${m.absorbs.join(',')}` : ''}`).join('|') +
-    `|sites:${sitesOn.join(',')}|starter:${starter.choice}`;
+  const signature = sent.map((m) => `${m.id}:${m.hash}${m.held ? ':held' : ''}${m.pending ? `:pending ${m.pending.hash}` : ''}${m.review ? `:review ${m.review.facts.join('|')}` : ''}${m.startOff ? ':off' : ''}${m.origin ? `:${m.origin.by}` : ''}${m.update ? `:update ${JSON.stringify(m.update)}` : ''}${m.absorbs ? `:absorbs ${m.absorbs.join(',')}` : ''}${m.readded ? `:readded ${m.readded}` : ''}`).join('|') +
+    `|sites:${sitesOn.join(',')}|starter:${JSON.stringify(starter)}`;
   const errors = [...problems, ...plan.errors];
   const errorsChanged = JSON.stringify(errors) !== JSON.stringify(state.modErrors) || JSON.stringify(warnings) !== JSON.stringify(state.modWarnings);
   state.pending = [...pendingIds];
@@ -306,7 +314,7 @@ function syncMods(reason, force) {
   try {
     // (defaultOrder: the side panel's order for a site's shipped mods until the user drags them; preinstalled.js.)
     const t0 = Date.now();
-    const r = sendMods({ type: 'mods', mods: sent, sitesOn, defaultOrder: DEFAULT_ORDER, starter });
+    const r = sendMods({ type: 'mods', mods: sent, sitesOn, defaultOrder: DEFAULT_ORDER, ...(starter ? { starter } : {}) });
     const nHeld = sent.filter((m) => m.held).length;
     const kb = `${Math.ceil(r.bytes / 1024)} KB`;
     if (r.how === 'waiting') {
@@ -650,18 +658,23 @@ function agentCommand(cmd, args) {
       syncMods('delete', false);
       return { id: r.id, deleted: true };
     }
-    // Tim's starter mods, the user's choice (the setup page, the panel's settings; never an agent run).
+    // Tim's mods, the user's choice (the setup page, Settings, a site's panel; never a run): `ids`, the mods
+    // ticked on the setup page (a site's others are left out), or `sites` to add every mod of not added yet
+    // (all of them without either); `others: 'none'` records none for every site not chosen yet.
     case 'shipped.install': {
-      const r = installStarter(ws.home, ws.modsDir, examplesDir());
-      logger.info(`starter mods added: ${r.added.length} mod(s)${r.sites.length ? `; TRIF starts on for ${r.sites.join(', ')}` : ''}`);
-      syncMods('starter mods', false);
-      return { choice: 'added', added: r.added, sites: r.sites };
+      const ids = args.ids === undefined ? null : resolveIds(args.ids);
+      const sites = ids ? [] : args.sites === undefined ? 'all' : resolveSites(Array.isArray(args.sites) ? args.sites : []);
+      if (ids ? !ids.length : sites !== 'all' && !sites.length) throw new Error('nothing to add: no sites or mods of Tim\'s named');
+      const r = installStarter(ws.home, ws.modsDir, examplesDir(), sites, { ids, othersNone: args.others === 'none' });
+      logger.info(`Tim's mods added (${ids ? ids.join(', ') : sites === 'all' ? 'every site' : sites.join(', ')}): ${r.added.length} mod(s)${r.sites.length ? `; TRIF starts on for ${r.sites.join(', ')}` : ''}`);
+      syncMods('Tim\'s mods', false);
+      return { added: r.added, sitesOn: r.sites, starter: starterOffer(ws.home, examplesDir(), undefined, undefined, { modsDir: ws.modsDir }) };
     }
     case 'shipped.none': {
-      const choice = chooseNoStarter(ws.home);
-      logger.info(choice === 'none' ? 'starter mods: none' : `starter mods: already ${choice}`);
-      syncMods('starter mods', false);
-      return { choice };
+      chooseNoStarter(ws.home);
+      logger.info('Tim\'s mods: none for the sites not chosen yet');
+      syncMods('Tim\'s mods', false);
+      return { starter: starterOffer(ws.home, examplesDir(), undefined, undefined, { modsDir: ws.modsDir }) };
     }
     case 'mod.update': {
       // The user's choice for a new version of a shipped mod they changed: 'new' (theirs goes to the
@@ -1050,7 +1063,7 @@ function onClientLine(sock, line) {
         : cmd === 'mod.update'
           ? 'only the user can choose what happens with a new version of a TRIF mod (in the side panel, or `trif mod-update` in their terminal)'
           : cmd.startsWith('shipped.')
-            ? 'only the user decides whether Tim\'s starter mods are added (on the setup page or in the side panel\'s settings)'
+            ? 'only the user adds Tim\'s mods (on the setup page, or in Settings in the side panel)'
             : `"${cmd}" isn't available inside an agent run` });
     }
     args.scope = run.scope;

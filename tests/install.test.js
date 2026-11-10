@@ -11,7 +11,7 @@ const { runCli, tempDir, testEnv, REPO, privDir } = require('./fake-extension');
 const P = require('../helper/lib/paths');
 const { installApp, chooseMode, cleanPath, loadSafariAgent } = require('../helper/lib/setup');
 const L = require('../helper/lib/lock');
-const { preinstallMods, loadPreinstalled, PREINSTALLED, SITES_ON, starterChoice, chooseNoStarter, installStarter, starterOffer } = require('../helper/lib/preinstalled');
+const { preinstallMods, loadPreinstalled, PREINSTALLED, SITES_ON, starterSites, starterChoices, chooseNoStarter, installStarter, starterOffer, resolveSites, updateShippedMods: updateShipped } = require('../helper/lib/preinstalled');
 const { checkWrapperScript } = require('../helper/lib/doctor');
 const { browserTable } = require('../helper/lib/browsers');
 
@@ -530,15 +530,19 @@ test('preinstalled mods: each once, switched on or off as listed; the start site
   const plainx = path.join(sites, 'x.com', 'detox-timeline.js');
   const ids = PREINSTALLED.map((p) => p.id);
   const off = PREINSTALLED.filter((p) => !p.on).map((p) => p.id);
-  assert.deepStrictEqual(off, ['x.com/punk-fonts', 'x.com/rainbow-rave', 'www.instagram.com/desaturate', 'www.google.com/dvd-logo', 'x.com/follow-status', 'x.com/space-shooter', 'www.instagram.com/three-column-feed', 'timsrobot.com/skip-to-sandbox', 'timsrobot.com/random-mods']);
+  assert.deepStrictEqual(off, ['x.com/rainbow-rave', 'www.instagram.com/desaturate', 'www.google.com/dvd-logo', 'x.com/follow-status', 'x.com/space-shooter', 'www.instagram.com/three-column-feed', 'timsrobot.com/skip-to-sandbox', 'timsrobot.com/random-mods', 'x.com/profile-styler', 'x.com/post-styler', 'x.com/style-encoder']);
   assert.deepStrictEqual(SITES_ON, ['google.com', 'x.com', 'amazon.com', 'instagram.com']);
   for (const id of ids) assert.ok(fs.existsSync(path.join(examples, `${id}.js`)), `examples has ${id}`);
-  let r = preinstallMods(home, sites, examples);
+  assert.deepStrictEqual(preinstallMods(home, sites, examples), { added: [], on: [], sites: [] }, 'no site added: nothing');
+  assert.strictEqual(fs.existsSync(sites), false);
+  let r = preinstallMods(home, sites, examples, undefined, undefined, { add: 'all' });
   assert.deepStrictEqual(r, { added: ids, on: ids.filter((id) => !off.includes(id)), sites: SITES_ON });
   for (const id of ids) assert.ok(fs.existsSync(path.join(sites, `${id}.js`)), id);
   assert.strictEqual(fs.readFileSync(plainx, 'utf8'), fs.readFileSync(path.join(examples, 'x.com', 'detox-timeline.js'), 'utf8'));
   const { shipped, ...rest } = loadPreinstalled(home);
-  assert.deepStrictEqual(rest, { starter: 'added', offered: ids, startOff: off, sitesOn: SITES_ON });
+  const all = Object.fromEntries(starterSites().map((x) => [x, 'added']));
+  assert.deepStrictEqual(rest, { starter: all, skipped: [], readded: {}, offered: ids, startOff: off, sitesOn: SITES_ON });
+  assert.deepStrictEqual(JSON.parse(fs.readFileSync(path.join(home, 'preinstalled.json'), 'utf8')).starter, all, 'the choice is in the file');
   assert.deepStrictEqual(shipped, {}, 'recorded by updateShippedMods, not here');
   fs.unlinkSync(plainx);
   assert.deepStrictEqual(preinstallMods(home, sites, examples), { added: [], on: [], sites: [] }, 'deleted: not brought back');
@@ -548,66 +552,205 @@ test('preinstalled mods: each once, switched on or off as listed; the start site
   const own = path.join(home2, 'sites', 'x.com', 'rainbow-rave.js');
   fs.mkdirSync(path.dirname(own), { recursive: true });
   fs.writeFileSync(own, '// mine');
-  r = preinstallMods(home2, path.join(home2, 'sites'), examples);
+  r = preinstallMods(home2, path.join(home2, 'sites'), examples, undefined, undefined, { add: 'all' });
   assert.deepStrictEqual(r.added, ids.filter((id) => id !== 'x.com/rainbow-rave'));
   assert.strictEqual(fs.readFileSync(own, 'utf8'), '// mine');
-  assert.deepStrictEqual(loadPreinstalled(home2).startOff, ['x.com/punk-fonts', 'www.instagram.com/desaturate', 'www.google.com/dvd-logo', 'x.com/follow-status', 'x.com/space-shooter', 'www.instagram.com/three-column-feed', 'timsrobot.com/skip-to-sandbox', 'timsrobot.com/random-mods'], 'the user\'s own file isn\'t switched off');
+  assert.deepStrictEqual(loadPreinstalled(home2).startOff, ['www.instagram.com/desaturate', 'www.google.com/dvd-logo', 'x.com/follow-status', 'x.com/space-shooter', 'www.instagram.com/three-column-feed', 'timsrobot.com/skip-to-sandbox', 'timsrobot.com/random-mods', 'x.com/profile-styler', 'x.com/post-styler', 'x.com/style-encoder'], 'the user\'s own file isn\'t switched off');
   assert.deepStrictEqual(loadPreinstalled(home2).shipped, { 'x.com/rainbow-rave': { own: true } }, 'nor ever updated');
 
   // Through setup: a new workspace gets none until the user chooses (the setup page), unless --examples.
   const home5 = tempDir();
   let res = await runCli(['setup', '--verbose', '--native-dir', path.join(home5, 'native'), '--no-link'], { home: home5 });
   assert.strictEqual(res.code, 0, res.stderr);
-  assert.match(res.stdout, /^mods {10}Tim's starter mods: added only if you choose them, on the setup page in your browser \(or with trif setup --examples\)$/m);
+  assert.match(res.stdout, /^mods {10}Tim's mods: none until you choose them, site by site, on the setup page in your browser \(or trif setup --examples\)$/m);
   assert.strictEqual(fs.existsSync(path.join(home5, 'sites', 'x.com')), false, 'nothing of Tim\'s on disk');
-  assert.deepStrictEqual(loadPreinstalled(home5), { starter: null, offered: [], startOff: [], sitesOn: [], shipped: {} });
-  assert.strictEqual(starterChoice(home5), null);
+  assert.deepStrictEqual(loadPreinstalled(home5), { starter: {}, skipped: [], readded: {}, offered: [], startOff: [], sitesOn: [], shipped: {} });
   const home3 = tempDir();
   res = await runCli(['setup', '--verbose', '--native-dir', path.join(home3, 'native'), '--no-link', '--examples'], { home: home3 });
   assert.strictEqual(res.code, 0, res.stderr);
-  assert.strictEqual(starterChoice(home3), 'added');
+  assert.deepStrictEqual(starterChoices(home3), all);
   assert.match(res.stdout, /preinstalled, on: www\.google\.com\/hide-ai-in-results, /);
-  assert.match(res.stdout, /preinstalled, off until you switch them on in the side panel: x\.com\/punk-fonts, x\.com\/rainbow-rave, www\.instagram\.com\/desaturate, www\.google\.com\/dvd-logo/);
+  assert.match(res.stdout, /preinstalled, off until you switch them on in the side panel: x\.com\/rainbow-rave, www\.instagram\.com\/desaturate, www\.google\.com\/dvd-logo/);
   assert.match(res.stdout, /TRIF starts on for google\.com, x\.com, amazon\.com, instagram\.com/);
   assert.ok(fs.existsSync(path.join(home3, 'sites', 'x.com', 'detox-timeline.js')));
   // A new workspace gets the merged Google mods, never the ones folded into them (preinstalled.js RETIRED).
   assert.deepStrictEqual(fs.readdirSync(path.join(home3, 'sites', 'www.google.com')).sort(), ['dvd-logo.js', 'hide-ai-in-results.js', 'hide-extra-sections.js']);
   assert.ok(!loadPreinstalled(home3).offered.some((id) => /hide-ai-mode|hide-sponsored/.test(id)));
   assert.doesNotMatch(res.stdout, /is now part of/);
-  // A later setup (an update) keeps them coming, without --examples.
+  // A later setup (an update) keeps them coming, without --examples, and says nothing about choosing.
   res = await runCli(['setup', '--verbose', '--native-dir', path.join(home3, 'native'), '--no-link'], { home: home3 });
-  assert.doesNotMatch(res.stdout, /starter mods: added only if/);
-  // --no-examples: none, remembered; a later setup doesn't add them, and says how to.
+  assert.doesNotMatch(res.stdout, /Tim's mods: none until|Tim's mods not added/);
+  // --no-examples: none, remembered; a later setup doesn't add them, and says where to.
   const home4 = tempDir();
   res = await runCli(['setup', '--verbose', '--native-dir', path.join(home4, 'native'), '--no-link', '--no-examples'], { home: home4 });
   assert.strictEqual(res.code, 0, res.stderr);
   assert.strictEqual(fs.existsSync(path.join(home4, 'sites', 'x.com')), false);
-  assert.strictEqual(starterChoice(home4), 'none');
+  assert.deepStrictEqual(starterChoices(home4), Object.fromEntries(starterSites().map((x) => [x, 'none'])));
   res = await runCli(['setup', '--verbose', '--native-dir', path.join(home4, 'native'), '--no-link'], { home: home4 });
-  assert.match(res.stdout, /^mods {10}no starter mods \(you chose none; trif setup --examples adds them\)$/m);
+  assert.match(res.stdout, /^mods {10}Tim's mods not added for Google, X, Amazon, Instagram and timsrobot\.com: Settings in the side panel adds them \(or trif setup --examples google\.com,x\.com,amazon\.com,instagram\.com,timsrobot\.com\)$/m);
   assert.strictEqual(fs.existsSync(path.join(home4, 'sites', 'x.com')), false);
+  // --examples with sites: those sites' (by scope, folder or name), nothing else; TRIF on for them.
+  res = await runCli(['setup', '--verbose', '--native-dir', path.join(home4, 'native'), '--no-link', '--examples', 'X,www.google.com'], { home: home4 });
+  assert.strictEqual(res.code, 0, res.stderr);
+  assert.match(res.stdout, /TRIF starts on for google\.com, x\.com \(/);
+  assert.deepStrictEqual(fs.readdirSync(path.join(home4, 'sites')).sort(), ['www.google.com', 'x.com']);
+  assert.deepStrictEqual(loadPreinstalled(home4).sitesOn, ['google.com', 'x.com']);
+  assert.deepStrictEqual(starterChoices(home4), { 'google.com': 'added', 'x.com': 'added', 'amazon.com': 'none', 'instagram.com': 'none', 'timsrobot.com': 'none' });
   res = await runCli(['setup', '--native-dir', path.join(home4, 'native'), '--no-link', '--examples', '--no-examples'], { home: home4 });
+  assert.notStrictEqual(res.code, 0);
+  assert.match(res.stderr, /use --examples or --no-examples, not both/);
+  res = await runCli(['setup', '--native-dir', path.join(home4, 'native'), '--no-link', '--examples', 'facebook.com'], { home: home4 });
+  assert.notStrictEqual(res.code, 0);
+  assert.match(res.stderr, /Tim has no mods for facebook\.com: the sites are google\.com, x\.com, amazon\.com, instagram\.com, timsrobot\.com/);
+  res = await runCli(['setup', '--native-dir', path.join(home4, 'native'), '--no-link', '--examples='], { home: home4 });
   assert.notStrictEqual(res.code, 0);
 });
 
-test('starter mods: "Start with none" is remembered; "Add them" afterwards works; a workspace from before the choice counts as added', () => {
+test('Tim\'s mods by id (shipped.install {ids}): those of a site are added (off ones still off); the rest left out, never brought in by updates, offered until added', () => {
   const examples = path.join(REPO, 'examples', 'sites');
   const home = tempDir();
   const sites = path.join(home, 'sites');
-  assert.strictEqual(chooseNoStarter(home), 'none');
-  assert.strictEqual(starterChoice(home), 'none');
-  assert.deepStrictEqual(starterOffer(), { count: PREINSTALLED.length, sites: SITES_ON });
-  const r = installStarter(home, sites, examples);
-  assert.deepStrictEqual(r.sites, SITES_ON);
-  assert.strictEqual(starterChoice(home), 'added');
-  assert.ok(fs.existsSync(path.join(sites, 'x.com', 'detox-timeline.js')));
-  assert.ok(loadPreinstalled(home).shipped['x.com/detox-timeline']?.hash, 'recorded for updates');
-  assert.strictEqual(chooseNoStarter(home), 'added', 'once added, "none" changes nothing');
-  // Before the choice existed, setup copied them: `offered` says so.
+  const of = (site) => PREINSTALLED.map((p) => p.id).filter((id) => id.split('/')[0].replace(/^www\./, '') === site);
+  // X without Rainbow Rave, all of Google's; the rest none.
+  const ticked = [...of('x.com').filter((id) => id !== 'x.com/rainbow-rave'), ...of('google.com')];
+  assert.throws(() => installStarter(home, sites, examples, [], { ids: [...ticked, 'x.com/evil'] }), /x\.com\/evil isn't one of Tim's mods/);
+  assert.ok(!fs.existsSync(sites), 'nothing added when one id is wrong');
+  const r = installStarter(home, sites, examples, [], { ids: ticked, othersNone: true });
+  assert.deepStrictEqual(r.added.sort(), [...ticked].sort());
+  assert.deepStrictEqual(r.sites, ['google.com', 'x.com']);
+  assert.ok(!fs.existsSync(path.join(sites, 'x.com', 'rainbow-rave.js')), 'left out: not on disk');
+  assert.ok(fs.existsSync(path.join(sites, 'x.com', 'space-shooter.js')));
+  const st = loadPreinstalled(home);
+  assert.ok(st.startOff.includes('x.com/space-shooter') && st.startOff.includes('x.com/follow-status'), 'ticked mods that start off still start off');
+  assert.deepStrictEqual(st.skipped, ['x.com/rainbow-rave']);
+  assert.deepStrictEqual(JSON.parse(fs.readFileSync(path.join(home, 'preinstalled.json'), 'utf8')).skipped, ['x.com/rainbow-rave'], 'recorded in the file');
+  assert.deepStrictEqual(starterChoices(home), { 'x.com': 'added', 'google.com': 'added', 'amazon.com': 'none', 'instagram.com': 'none', 'timsrobot.com': 'none' });
+  // Settings offers it: the site is added, that mod isn't.
+  let x = starterOffer(home, examples).sites.find((s) => s.site === 'x.com');
+  assert.deepStrictEqual(x.mods.map((m) => [m.id, m.choice]), [['x.com/detox-timeline', 'added'], ['x.com/follow-status', 'added'], ['x.com/profile-styler', 'added'], ['x.com/post-styler', 'added'], ['x.com/style-encoder', 'added'], ['x.com/space-shooter', 'added'], ['x.com/rainbow-rave', 'skipped']]);
+  // Later setups and updates never bring it in; a new mod for X still comes (off).
+  assert.deepStrictEqual(preinstallMods(home, sites, examples), { added: [], on: [], sites: [] });
+  updateShipped(home, sites, examples);
+  assert.ok(!fs.existsSync(path.join(sites, 'x.com', 'rainbow-rave.js')));
+  const ex2 = tempDir();
+  fs.cpSync(examples, ex2, { recursive: true });
+  fs.writeFileSync(path.join(ex2, 'x.com', 'new-one.js'), '// ==WebMod==\n// @name New\n// @source trif\n// @version 1\n// ==/WebMod==\n');
+  assert.deepStrictEqual(preinstallMods(home, sites, ex2, [...PREINSTALLED, { id: 'x.com/new-one', on: false }]).added, ['x.com/new-one']);
+  // Adding X again (Settings' "Add the rest", or x.com's link) brings the one left out, switched off as listed.
+  const again = installStarter(home, sites, examples, ['x.com']);
+  assert.deepStrictEqual(again.added, ['x.com/rainbow-rave']);
+  assert.ok(loadPreinstalled(home).startOff.includes('x.com/rainbow-rave'));
+  assert.deepStrictEqual(loadPreinstalled(home).skipped, []);
+  x = starterOffer(home, examples).sites.find((s) => s.site === 'x.com');
+  assert.ok(x.mods.every((m) => m.choice === 'added'));
+  // Per mod, later: one of a site not added yet adds that site with just that mod.
+  const r2 = installStarter(home, sites, examples, [], { ids: ['amazon.com/simple-home'] });
+  assert.deepStrictEqual([r2.added, r2.sites], [['amazon.com/simple-home'], ['amazon.com']]);
+  assert.deepStrictEqual(loadPreinstalled(home).skipped, ['amazon.com/simple-shopping']);
+});
+
+test('Tim\'s mods: one the user deleted stays gone (updates too), Settings offers it, and adding the site brings it back fresh, switched as listed', () => {
+  const examples = path.join(REPO, 'examples', 'sites');
+  const home = tempDir();
+  const sites = path.join(home, 'sites');
+  installStarter(home, sites, examples, ['x.com'], { othersNone: true });
+  const rr = path.join(sites, 'x.com', 'rainbow-rave.js');
+  fs.writeFileSync(rr, fs.readFileSync(rr, 'utf8') + '// the user changed it\n');
+  updateShipped(home, sites, examples);
+  fs.unlinkSync(rr); // deleted in the panel
+  const choice = (h = home) => Object.fromEntries(starterOffer(h, examples, undefined, undefined, { modsDir: path.join(h, 'sites') }).sites.find((s) => s.site === 'x.com').mods.map((m) => [m.id, m.choice]));
+  assert.strictEqual(choice()['x.com/rainbow-rave'], 'deleted');
+  assert.strictEqual(choice()['x.com/detox-timeline'], 'added');
+  assert.deepStrictEqual(preinstallMods(home, sites, examples).added, [], 'setup doesn\'t bring it back');
+  updateShipped(home, sites, examples);
+  assert.ok(!fs.existsSync(rr));
+  // "Add the rest" (or the site's link): a fresh copy, off as listed, recorded for updates; the browsers switch it once per stamp.
+  const r = installStarter(home, sites, examples, ['x.com']);
+  assert.deepStrictEqual([r.added, r.on], [['x.com/rainbow-rave'], []]);
+  assert.strictEqual(fs.readFileSync(rr, 'utf8'), fs.readFileSync(path.join(examples, 'x.com', 'rainbow-rave.js'), 'utf8'));
+  const st = loadPreinstalled(home);
+  assert.ok(st.startOff.includes('x.com/rainbow-rave'));
+  assert.match(st.readded['x.com/rainbow-rave'], /^\d{4}-/);
+  assert.strictEqual(st.shipped['x.com/rainbow-rave'].hash, require('crypto').createHash('sha1').update(fs.readFileSync(rr)).digest('hex'));
+  assert.strictEqual(choice()['x.com/rainbow-rave'], 'added');
+  // A mod that starts on comes back on (no startOff).
+  fs.unlinkSync(path.join(sites, 'x.com', 'detox-timeline.js'));
+  assert.deepStrictEqual(installStarter(home, sites, examples, ['x.com']).on, ['x.com/detox-timeline']);
+  assert.ok(!loadPreinstalled(home).startOff.includes('x.com/detox-timeline'));
+
+  // From before 0.2.5: deleted on purpose then. Setup leaves it gone; Settings just offers it.
   const old = tempDir();
-  fs.writeFileSync(path.join(old, 'preinstalled.json'), JSON.stringify({ offered: ['x.com/detox-timeline'], startOff: [], sitesOn: SITES_ON }));
-  assert.strictEqual(starterChoice(old), 'added');
-  assert.strictEqual(chooseNoStarter(old), 'added');
+  installStarter(old, path.join(old, 'sites'), examples, 'all');
+  const pre = JSON.parse(fs.readFileSync(path.join(old, 'preinstalled.json'), 'utf8'));
+  delete pre.starter;
+  fs.writeFileSync(path.join(old, 'preinstalled.json'), JSON.stringify(pre));
+  fs.unlinkSync(path.join(old, 'sites', 'x.com', 'follow-status.js'));
+  assert.deepStrictEqual(preinstallMods(old, path.join(old, 'sites'), examples).added, []);
+  assert.strictEqual(choice(old)['x.com/follow-status'], 'deleted');
+  assert.ok(!fs.existsSync(path.join(old, 'sites', 'x.com', 'follow-status.js')));
+});
+
+test('Tim\'s mods, site by site: added ones get their mods, new ones and updates; the others nothing; a workspace from before the choice counts as added', () => {
+  const examples = path.join(REPO, 'examples', 'sites');
+  const home = tempDir();
+  const sites = path.join(home, 'sites');
+  assert.deepStrictEqual(resolveSites('x.com, www.google.com,Instagram,x'), ['x.com', 'google.com', 'instagram.com']);
+  assert.throws(() => resolveSites('example.com'), /Tim has no mods for example\.com/);
+  // What the setup page shows: every site, ticked to start where TRIF starts on, each with its mods.
+  let offer = starterOffer(home, examples);
+  assert.strictEqual(offer.chosen, false);
+  assert.deepStrictEqual(offer.sites.map((x) => [x.site, x.name, x.suggested, x.choice]), [
+    ['google.com', 'Google', true, null], ['x.com', 'X', true, null], ['amazon.com', 'Amazon', true, null],
+    ['instagram.com', 'Instagram', true, null], ['timsrobot.com', 'timsrobot.com', false, null]]);
+  assert.deepStrictEqual(offer.sites.flatMap((x) => x.mods.map((m) => m.id)).sort(), PREINSTALLED.map((p) => p.id).sort(), 'every mod, from PREINSTALLED');
+  assert.deepStrictEqual(offer.sites.find((x) => x.site === 'x.com').mods.map((m) => [m.name, m.on]),
+    [['Detox Timeline', true], ['Follow Status', false], ['Profile Styler', false], ['Post Styler', false], ['Style Encoder', false], ['X-Flyer', false], ['Rainbow Rave', false]], 'X\'s in the panel\'s order');
+  assert.ok(offer.sites.every((x) => x.mods.every((m) => m.name && typeof m.description === 'string')));
+  assert.match(offer.sites.find((x) => x.site === 'timsrobot.com').note, /demo/);
+
+  // "Add these" with X and Google ticked: theirs, TRIF on for them, none recorded for the rest.
+  const r = installStarter(home, sites, examples, ['x.com', 'google.com'], { othersNone: true });
+  const of = (site) => PREINSTALLED.map((p) => p.id).filter((id) => id.split('/')[0].replace(/^www\./, '') === site);
+  assert.deepStrictEqual(r.added.sort(), [...of('x.com'), ...of('google.com')].sort());
+  assert.deepStrictEqual(r.sites, ['google.com', 'x.com']);
+  assert.deepStrictEqual(fs.readdirSync(sites).sort(), ['www.google.com', 'x.com']);
+  assert.deepStrictEqual(starterChoices(home), { 'x.com': 'added', 'google.com': 'added', 'amazon.com': 'none', 'instagram.com': 'none', 'timsrobot.com': 'none' });
+  assert.ok(loadPreinstalled(home).shipped['x.com/detox-timeline']?.hash, 'recorded for updates');
+  offer = starterOffer(home, examples);
+  assert.strictEqual(offer.chosen, true);
+  assert.deepStrictEqual(offer.sites.filter((x) => x.choice === 'added').map((x) => x.site), ['google.com', 'x.com']);
+  // A later setup (preinstallMods without `add`): nothing for the sites not added.
+  assert.deepStrictEqual(preinstallMods(home, sites, examples), { added: [], on: [], sites: [] });
+  // A new shipped mod for an added site comes (as listed: off); one for a site not added doesn't.
+  const later = [...PREINSTALLED, { id: 'x.com/new-one', on: false }, { id: 'amazon.com/new-one', on: false }];
+  const ex2 = tempDir();
+  fs.cpSync(examples, ex2, { recursive: true });
+  for (const id of ['x.com/new-one', 'amazon.com/new-one']) fs.writeFileSync(path.join(ex2, `${id}.js`), '// ==WebMod==\n// @name New\n// @source trif\n// @version 1\n// ==/WebMod==\n');
+  assert.deepStrictEqual(preinstallMods(home, sites, ex2, later), { added: ['x.com/new-one'], on: [], sites: [] });
+  assert.ok(loadPreinstalled(home).startOff.includes('x.com/new-one'));
+  // Settings' Add, later: that site's mods and TRIF on for it; "none" never undoes it.
+  const r2 = installStarter(home, sites, examples, ['amazon.com']);
+  assert.deepStrictEqual([r2.added, r2.sites], [of('amazon.com'), ['amazon.com']]);
+  assert.strictEqual(chooseNoStarter(home)['amazon.com'], 'added');
+  // timsrobot.com isn't in SITES_ON: its mods come, TRIF isn't turned on for it.
+  const r3 = installStarter(home, sites, examples, ['timsrobot.com']);
+  assert.deepStrictEqual([r3.added, r3.sites], [of('timsrobot.com'), []]);
+
+  // A workspace from before the choice (0.2.4: setup copied every site's): every site it has counts as
+  // added, and keeps getting updates and new mods; a site that's new since (timsrobot.com) isn't added.
+  const old = tempDir();
+  const oldIds = PREINSTALLED.map((p) => p.id).filter((id) => !id.startsWith('timsrobot.com/'));
+  fs.writeFileSync(path.join(old, 'preinstalled.json'), JSON.stringify({ offered: oldIds, startOff: [], sitesOn: SITES_ON }));
+  assert.deepStrictEqual(starterChoices(old), { 'google.com': 'added', 'x.com': 'added', 'amazon.com': 'added', 'instagram.com': 'added' });
+  assert.strictEqual(starterOffer(old, examples).chosen, true, 'the setup page doesn\'t ask again');
+  assert.deepStrictEqual(starterOffer(old, examples).sites.filter((x) => x.choice !== 'added').map((x) => x.site), ['timsrobot.com'], 'offered in Settings');
+  assert.deepStrictEqual(preinstallMods(old, path.join(old, 'sites'), ex2, later).added, ['x.com/new-one', 'amazon.com/new-one']);
+  assert.ok(!fs.existsSync(path.join(old, 'sites', 'timsrobot.com')));
+  assert.strictEqual(chooseNoStarter(old)['x.com'], 'added');
+  // Written back with the record (and still read the same).
+  assert.deepStrictEqual(JSON.parse(fs.readFileSync(path.join(old, 'preinstalled.json'), 'utf8')).starter,
+    { 'google.com': 'added', 'x.com': 'added', 'amazon.com': 'added', 'instagram.com': 'added', 'timsrobot.com': 'none' });
+  updateShipped(old, path.join(old, 'sites'), examples);
 });
 
 // ------------------------------------------------------------------ Firefox
@@ -682,7 +825,7 @@ test('setup prints a short summary by default, every detail with --verbose (-v);
   assert.equal(r.code, 0, r.stderr);
   const top = r.stdout.slice(0, r.stdout.indexOf('Next steps:'));
   assert.match(top, new RegExp(`^✓ TRIF ${esc(P.VERSION)} (installed|linked to .*) in .*\n`, 'm'));
-  assert.doesNotMatch(top, /Added the mods TRIF comes with/, 'not without the user\'s choice');
+  assert.doesNotMatch(top, /Added Tim's mods/, 'not without the user\'s choice');
   assert.match(top, /^✓ Set up for Google Chrome and Firefox$/m);
   // No agent on this test's PATH: a problem, so it shows.
   assert.match(top, /No coding agent found: install Claude Code/);
@@ -693,6 +836,8 @@ test('setup prints a short summary by default, every detail with --verbose (-v);
   assert.doesNotMatch(v.stdout, /^✓ /m);
   assert.match(v.stdout, /No coding agent found/);
   assert.match(v.stdout, /Next steps:/);
+  const x = await runCli([...args, '--examples', 'x.com'], { home: ws });
+  assert.match(x.stdout, /^✓ Added Tim's mods for X \(TRIF starts on for x\.com\)$/m);
 });
 
 test('setup calls the panel what the browser does: the sidebar in Firefox', async () => {
@@ -817,4 +962,12 @@ test('setup at a terminal shows the extension folder and opens chrome://extensio
     assert.doesNotMatch(calls, /chrome:\/\/extensions/);
   }
   assert.doesNotMatch(r.stdout, /Waiting for/);
+});
+
+test('Tim\'s mods: a single choice from a development build before 0.2.5 ("added" or "none") reads as that choice for every site', () => {
+  for (const c of ['added', 'none']) {
+    const home = tempDir();
+    fs.writeFileSync(path.join(home, 'preinstalled.json'), JSON.stringify({ starter: c, offered: [], startOff: [], sitesOn: [] }));
+    assert.deepStrictEqual(starterChoices(home), Object.fromEntries(starterSites().map((x) => [x, c])));
+  }
 });

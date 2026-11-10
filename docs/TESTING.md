@@ -38,19 +38,19 @@ Per browser, a **fresh** scenario, and an **upgrade** scenario per `--upgrade-fr
    --browser <b>` with `HOME` set to a scratch folder, so `~/.trif`, `~/.webmods` and the browsers'
    `NativeMessagingHosts` folders are all inside it.
    Upgrade: first the old release's setup (making `~/.webmods`), then a mod of the user's
-   (`sites/127.0.0.1/e2e-user.js`) and an edit to a shipped one (`x.com/punk-fonts`), then the new
+   (`sites/127.0.0.1/e2e-user.js`) and an edit to a shipped one (`x.com/rainbow-rave`), then the new
    setup run the way a 0.1.x updater runs it (`--home ~/.webmods`). Checks the move to `~/.trif`, the
    link left behind, the user's mod, and that the edited shipped mod is kept with its new version
-   waiting. If the old and new packages ship the same `punk-fonts`, the harness gives the new package's
+   waiting. If the old and new packages ship the same `rainbow-rave`, the harness gives the new package's
    copy the next `@version` (as the next release would) and says so in a note. When the old release
    shipped the mods 0.2.0 folded into others (`RETIRED`: `hide-ai-mode`, `hide-sponsored`), checks their
    unchanged copies went to the trash, and (step 2) that the browser carried their switches over
    (chrome.storage.local `absorbed`).
 2. Start a throwaway browser profile with the extension, connected to the scratch helper only (see
    "Isolation"), check the setup page's checklist (the helper and the browser ticked, user scripts
-   next), allow user scripts (it ticks that step itself; Tim's starter mods are next, none on disk yet: Firefox
-   clicks "Add them", Chrome "Start with none" and adds them later from the panel's Settings; upgrading,
-   the step is ticked "added"), and check: `trif status` (the extension's hello, its browser),
+   next), allow user scripts (it ticks that step itself; Tim's mods are next, a checklist by site with none
+   on disk yet: it leaves X and Google ticked and clicks "Add these", and checks only theirs arrive and only
+   those sites are on; upgrading, the step is ticked with every site it had), and check: `trif status` (the extension's hello, its browser),
    `trif doctor`, the shipped mods (`trif mods`, which start on and off, the sites TRIF starts on for).
    Then Site permissions (see "Site access" below): Firefox clicks Permissive and says no to its prompt
    (answered from the browser's side), so TRIF is restrictive and the step says so; Chrome clicks

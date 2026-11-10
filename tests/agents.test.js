@@ -1722,11 +1722,13 @@ test('instructions: saved and read through the helper, never from a run; claude 
     const k = await sockRequest(ext.sock, { id: 'k', cmd, args: { key: 'evil-key-0123456789', provider: 'custom' }, token: call.env.TRIF_RUN_TOKEN });
     assert.match(k.error, /isn't available inside an agent run/, cmd);
   }
-  // Nor Tim's starter mods: only the user decides whether they're added.
+  // Nor Tim's mods: only the user adds them (or chooses none), and nothing lands on disk.
   for (const cmd of ['shipped.install', 'shipped.none']) {
-    const k = await sockRequest(ext.sock, { id: 's', cmd, args: {}, token: call.env.TRIF_RUN_TOKEN });
-    assert.match(k.error, /only the user decides whether Tim's starter mods are added/, cmd);
+    const k = await sockRequest(ext.sock, { id: 's', cmd, args: { sites: ['x.com'] }, token: call.env.TRIF_RUN_TOKEN });
+    assert.match(k.error, /only the user adds Tim's mods \(on the setup page, or in Settings in the side panel\)/, cmd);
   }
+  assert.ok(!fs.existsSync(path.join(home, 'sites', 'x.com')));
+  assert.deepStrictEqual(require('../helper/lib/preinstalled').starterChoices(home), {});
   await extRequest(ext, 'agent.stop', { runId: r.result.runId });
   await waitDone(ext, r.result.runId);
 

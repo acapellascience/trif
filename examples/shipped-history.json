@@ -6,7 +6,9 @@
   "amazon.com/simple-home": [
     "f8f6cf6969b6e9e3aa20ca55f4963be54d69774d",
     "6c536dfec92e237be07676a898ec164587e25711",
-    "1f86f68e570a782f0578a2688d6f911d4d9fb375"
+    "1f86f68e570a782f0578a2688d6f911d4d9fb375",
+    "2c1b0091dc097de07eb640a6bd6da8ff63f5a0f8",
+    "1331c8716ade7dda3d893763bb4e7decccdc9808"
   ],
   "amazon.com/simple-shopping": [
     "abe0bc7f4451b53f2a078d2a2e3c0276ee290aaf",
@@ -186,10 +188,13 @@
   "x.com/detox-timeline": [
     "a7bc83145c08170a0a50db626b73cbefb9c1a44a",
     "bfbad3756bd3050a1e12024189c17c1fceeb91d2",
-    "19bad7d6c3785da6042ca2e011f1a046b7e5a2f6"
+    "19bad7d6c3785da6042ca2e011f1a046b7e5a2f6",
+    "d769bc581c8c2c0c148cd348aa91c13b040d0efc"
   ],
   "x.com/follow-status": [
-    "ff41bd36d6f1e1aef7b131fffd63490809d7918f"
+    "ff41bd36d6f1e1aef7b131fffd63490809d7918f",
+    "5336270225637d4a9dedc35b42a91494961333bf",
+    "1ae63c9a15ae6fe2da747ba2da852be211ddb56e"
   ],
   "x.com/plain-x": [
     "b1acf27f42fd30d34c2102e1c9657a878b1f26cb",
@@ -205,6 +210,18 @@
     "a34818dcfeff240823cfabda5a3822cffcc36db4",
     "9f16957f2e1eeef0d600b2a5747eb768b8d45f68"
   ],
+  "x.com/post-styler": [
+    "103eace565e33b2b8d7a43b7d50c3ff188b6a3f5",
+    "608a883e3c78b9a826f52f05c2266fa33d96c6a7",
+    "4eb98245bd1c37d7179f17540b4f544ac0bc5c5f",
+    "8e7ac5f7fe175f0b8984a713142bdaf78ee31501"
+  ],
+  "x.com/profile-styler": [
+    "fd77a07b99aae4c0c89c8ddcf3aaef4ea2d85000",
+    "1f76bb623430dade2fded8b82fd656b202f2f703",
+    "704c0b39f2c3b1fffc912f81280857ad796e5c54",
+    "cbd585ed083b11f9e0ce4d51ac486f5a3dfae20c"
+  ],
   "x.com/punk-fonts": [
     "6b07d068f0f3632933133a3b8fb8d6657778160b",
     "edf90fb6a8c9fac514577be140aadee029201609",
@@ -216,11 +233,19 @@
     "94c30538c799f42ac4a4da2f698718e4b13ea2dd",
     "87160c99ace91a8cd278d3dadda9e0cba552b8e6",
     "1f9ed2b603c2ca801cd4e47382f35b4926fe3c45",
-    "b9a49fe56dff2ee3f55fe5f6b6eb9aa674297767"
+    "b9a49fe56dff2ee3f55fe5f6b6eb9aa674297767",
+    "8c293ea5735bd464650182602b167bafe07a9303"
   ],
   "x.com/space-shooter": [
     "5c3b015549b83bed66db4867571de8901b7f7e08",
     "c26ac04ca694b0e20815ce0a49f125c130fbc1e5",
-    "8fdea9c7d40a09a00477cae92223354984b2ba63"
+    "8fdea9c7d40a09a00477cae92223354984b2ba63",
+    "6dd5850f21eafcc3dcd4e5214ac42cae231c8726",
+    "869262f396971e2a25cb46daff2682b0b1e5f8cf",
+    "6a6a95d3efe2603f88863fcca2c17692a0febe04",
+    "6d33d08d5afa168fb9f13d9a8211ab3fdfb30a1d"
+  ],
+  "x.com/style-encoder": [
+    "8018433dae970b77e838dc0abffb71a5437cc7f8"
   ]
 }

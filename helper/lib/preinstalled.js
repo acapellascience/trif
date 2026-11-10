@@ -1,11 +1,20 @@
 'use strict';
-// Tim's starter mods: the mods TRIF ships, copied from the examples into a workspace only when the user
-// says so (the setup page's "Add them", the panel's Settings, or `trif setup --examples`: nothing of Tim's
-// code is on disk before that), each switched on or off as listed, and the sites TRIF starts on for; and
-// keeping those mods up to date. $TRIF_HOME/preinstalled.json = {starter, offered: [ids], startOff: [ids],
-// sitesOn: [sites], shipped: {id: record}}:
-//  - starter: the user's choice, 'added' or 'none' (absent: not chosen yet). A workspace whose `offered`
-//    isn't empty got them before there was a choice (setup copied them): 'added', updates as before;
+// Tim's mods: the mods TRIF ships, copied from the examples into a workspace site by site, only for the
+// sites the user chose (the setup page's checklist, Settings in the panel, the "Add Tim's mods for <site>"
+// link on a site's panel, or `trif setup --examples [sites]`: nothing of Tim's is on disk before that),
+// each switched on or off as listed, and turning TRIF on for the sites in SITES_ON among them; and keeping
+// those mods up to date. $TRIF_HOME/preinstalled.json = {starter: {site: choice}, skipped: [ids],
+// offered: [ids], startOff: [ids], sitesOn: [sites], shipped: {id: record}}:
+//  - starter: the user's choice for each site Tim has mods for (its scope: google.com for the folder
+//    www.google.com), 'added' or 'none' (absent: not chosen, like a site a later TRIF version brings mods
+//    for, which Settings offers). An added site gets its mods, and every new one and every update a later
+//    version brings for it; any other site gets nothing. A site with ids in `offered` counts as added: a
+//    workspace set up before the choice existed (setup copied them all) keeps getting them as before;
+//  - skipped: mods of an added site the user chose not to add (shipped.install with `ids`; the setup page
+//    adds whole sites): never copied (no setup or update brings them), offered in Settings until added;
+//  - readded: {id: stamp}, mods the user deleted and then got back from Settings ("Add the rest") or the
+//    site's link: a fresh copy, which each browser switches on or off as listed once per stamp (a deleted
+//    mod stays gone otherwise: no setup or update brings it back);
 //  - offered: ids already offered, so one the user deleted doesn't come back with the next setup (and an
 //    existing file, the user's own version, is never overwritten);
 //  - startOff: ids setup copied that start off. The helper sends those mods with `startOff: true`, and
@@ -48,13 +57,13 @@ const path = require('path');
 const { parseHeader, sha1, isShippedSource } = require('./mods');
 const trash = require('./trash');
 const { envVar } = require('./env');
+const { scopeFor } = require('./scope');
 
 // on: switched on from the start; the rest wait for the user to switch them on.
 const PREINSTALLED = [
   { id: 'www.google.com/hide-ai-in-results', on: true }, // AI Banisher
   { id: 'www.google.com/hide-extra-sections', on: true }, // Just Results
   { id: 'x.com/detox-timeline', on: true }, // (x.com/plain-x until 0.2.3: RETIRED, below)
-  { id: 'x.com/punk-fonts', on: false },
   { id: 'x.com/rainbow-rave', on: false },
   { id: 'amazon.com/simple-home', on: true },
   { id: 'amazon.com/simple-shopping', on: true },
@@ -74,6 +83,11 @@ const PREINSTALLED = [
   // switches a random set on). Off, and TRIF starts off on timsrobot.com (not in SITES_ON).
   { id: 'timsrobot.com/skip-to-sandbox', on: false },
   { id: 'timsrobot.com/random-mods', on: false }, // R for Random
+  // Added in 0.2.5 (off): people's own colours, read from codes in their profile pictures (Profile Styler on
+  // profiles, Post Styler on posts and people cards), and Style Encoder to stamp yours into your picture.
+  { id: 'x.com/profile-styler', on: false },
+  { id: 'x.com/post-styler', on: false },
+  { id: 'x.com/style-encoder', on: false },
   // (Rainbow Rave for Google, Amazon and Instagram waits for a later release: unreleased/sites/.)
 ];
 
@@ -82,7 +96,7 @@ const PREINSTALLED = [
 // with every mods message (`defaultOrder`), and extension/lib.js orderMods puts mods it doesn't list after.
 // (0.2.3: X's, in Tim's order. The other sites' few shipped mods list in the order they always did.)
 const DEFAULT_ORDER = {
-  'x.com': ['x.com/detox-timeline', 'x.com/follow-status', 'x.com/punk-fonts', 'x.com/space-shooter', 'x.com/rainbow-rave'],
+  'x.com': ['x.com/detox-timeline', 'x.com/follow-status', 'x.com/profile-styler', 'x.com/post-styler', 'x.com/style-encoder', 'x.com/space-shooter', 'x.com/rainbow-rave'],
 };
 
 // Shipped mods folded into another one (`into`, from its @version `since`), so no longer shipped
@@ -100,6 +114,11 @@ const RETIRED = [
 // mods above are for.
 const SITES_ON = ['google.com', 'x.com', 'amazon.com', 'instagram.com'];
 
+// What the setup page and Settings call each site Tim has mods for (any other: the site itself).
+const SITE_NAMES = { 'google.com': 'Google', 'x.com': 'X', 'amazon.com': 'Amazon', 'instagram.com': 'Instagram' };
+// A few words after a site's name there, when the name alone doesn't say what its mods are for.
+const SITE_NOTES = { 'timsrobot.com': 'for TRIF’s own demo' };
+
 const SHIPPED_DIR = '.shipped';
 
 function file(home) { return path.join(home, 'preinstalled.json'); }
@@ -113,13 +132,28 @@ function load(home) {
   if (s && typeof s === 'object' && !Array.isArray(s)) {
     for (const [id, r] of Object.entries(s)) if (r && typeof r === 'object' && !Array.isArray(r)) shipped[id] = r;
   }
-  const starter = v && (v.starter === 'added' || v.starter === 'none') ? v.starter : null;
-  return { starter, offered: list(v && v.offered), startOff: list(v && v.startOff), sitesOn: list(v && v.sitesOn), shipped };
+  const offered = list(v && v.offered);
+  // The user's choice by site; a site with mods offered was added (by a setup before there was a choice, too).
+  const starter = {};
+  const c = v && v.starter;
+  if (c && typeof c === 'object' && !Array.isArray(c)) {
+    for (const [site, choice] of Object.entries(c)) if (choice === 'added' || choice === 'none') starter[site] = choice;
+  } else if (c === 'added' || c === 'none') {
+    // (one choice for every site: what development builds between 0.2.4 and 0.2.5 recorded)
+    for (const site of starterSites()) starter[site] = c;
+  }
+  for (const id of offered) { const site = siteOf(id); if (site) starter[site] = 'added'; }
+  const skipped = list(v && v.skipped).filter((id) => !offered.includes(id));
+  const readded = {};
+  if (v && v.readded && typeof v.readded === 'object' && !Array.isArray(v.readded)) {
+    for (const [id, stamp] of Object.entries(v.readded)) if (typeof stamp === 'string') readded[id] = stamp;
+  }
+  return { starter, skipped, readded, offered, startOff: list(v && v.startOff), sitesOn: list(v && v.sitesOn), shipped };
 }
 
 // Written whole and renamed into place: setup and the helpers (another browser's too) all write it.
 function save(home, state) {
-  const out = { ...(state.starter ? { starter: state.starter } : {}), offered: state.offered, startOff: state.startOff, sitesOn: state.sitesOn };
+  const out = { ...(Object.keys(state.starter || {}).length ? { starter: state.starter } : {}), ...(state.skipped && state.skipped.length ? { skipped: state.skipped } : {}), ...(Object.keys(state.readded || {}).length ? { readded: state.readded } : {}), offered: state.offered, startOff: state.startOff, sitesOn: state.sitesOn };
   if (Object.keys(state.shipped || {}).length) out.shipped = state.shipped;
   const tmp = `${file(home)}.${process.pid}.tmp`;
   fs.writeFileSync(tmp, JSON.stringify(out, null, 2) + '\n');
@@ -130,6 +164,8 @@ function save(home, state) {
 
 const split = (id) => { const i = id.indexOf('/'); return [id.slice(0, i), id.slice(i + 1)]; };
 const modFile = (modsDir, id) => { const [site, mod] = split(id); return path.join(modsDir, site, `${mod}.js`); };
+/** The site a shipped mod is for, as the user chooses it: its folder's scope (www.google.com/x -> google.com). */
+const siteOf = (id) => scopeFor(split(String(id))[0]);
 /** What was shipped before: the version the user's copy is based on (the merge base). */
 const baseFile = (home, id) => { const [site, mod] = split(id); return path.join(home, SHIPPED_DIR, site, `${mod}.js`); };
 /** The new version waiting for the user's choice. */
@@ -177,18 +213,38 @@ const shippedBefore = (history, id, hash) => Array.isArray(history[id]) && histo
 // ---------------------------------------------------------------- setup
 
 /**
- * Copy the PREINSTALLED mods not offered before into modsDir, and offer SITES_ON. Returns
- * {added: [ids copied], on: [those switched on], sites: [sites newly offered]}.
+ * Copy the PREINSTALLED mods not offered before into modsDir, for the sites the user added (`add`: sites
+ * to add now, or 'all'; see starterSites), and offer the SITES_ON among those sites. `restore`: sites whose
+ * offered mods the user deleted come back too, fresh (readded). Returns {added: [ids copied], on: [those
+ * switched on], sites: [sites newly offered]}.
  */
-function preinstallMods(home, modsDir, examplesDir, list = PREINSTALLED, sitesOn = SITES_ON) {
+function preinstallMods(home, modsDir, examplesDir, list = PREINSTALLED, sitesOn = SITES_ON, { add = null, restore = [] } = {}) {
   const state = load(home);
   const history = loadHistory(examplesDir);
   const added = [];
   const on = [];
-  let changed = state.starter !== 'added';
-  state.starter = 'added';
+  let changed = false;
+  for (const site of add === 'all' ? starterSites(list, sitesOn) : add || []) {
+    if (state.starter[site] !== 'added') { state.starter[site] = 'added'; changed = true; }
+  }
   for (const { id, on: startOn } of list) {
-    if (state.offered.includes(id)) continue;
+    if (state.starter[siteOf(id)] !== 'added' || state.skipped.includes(id)) continue;
+    if (state.offered.includes(id)) {
+      // Deleted, and the user asked for it back: a fresh copy, switched as listed (each browser, once).
+      const dest = modFile(modsDir, id);
+      if (!restore.includes(siteOf(id)) || fs.existsSync(dest) || !fs.existsSync(modFile(examplesDir, id))) continue;
+      fs.mkdirSync(path.dirname(dest), { recursive: true });
+      // (its base first: the helper judges a new shipped mod against it, held.js)
+      writeAtomic(baseFile(home, id), fs.readFileSync(modFile(examplesDir, id)));
+      fs.copyFileSync(modFile(examplesDir, id), dest);
+      added.push(id);
+      if (startOn) on.push(id); else if (!state.startOff.includes(id)) state.startOff.push(id);
+      const rec = state.shipped[id];
+      if (rec && !rec.retired) delete state.shipped[id]; // (updateShippedMods records it afresh; never `own` now)
+      state.readded[id] = new Date().toISOString();
+      changed = true;
+      continue;
+    }
     const src = modFile(examplesDir, id);
     if (!fs.existsSync(src)) continue;
     const dest = modFile(modsDir, id);
@@ -207,7 +263,7 @@ function preinstallMods(home, modsDir, examplesDir, list = PREINSTALLED, sitesOn
     state.offered.push(id);
     changed = true;
   }
-  const sites = sitesOn.filter((s) => !state.sitesOn.includes(s));
+  const sites = sitesOn.filter((s) => state.starter[s] === 'added' && !state.sitesOn.includes(s));
   if (sites.length) { state.sitesOn.push(...sites); changed = true; }
   if (changed) save(home, state);
   return { added, on, sites };
@@ -531,41 +587,147 @@ function restoreMod(ws, id, opts = {}) {
   return r;
 }
 
-/** The user's choice about the starter mods: 'added', 'none', or null (not chosen yet). See the top. */
-function starterChoice(home) {
-  const state = load(home);
-  return state.starter || (state.offered.length ? 'added' : null);
+// ---------------------------------------------------------------- Tim's mods, site by site
+
+/** The sites Tim has mods for: the ones TRIF starts on for first (SITES_ON's order), then the rest as listed. */
+function starterSites(list = PREINSTALLED, sitesOn = SITES_ON) {
+  const all = [...new Set(list.map((m) => siteOf(m.id)).filter(Boolean))];
+  return [...sitesOn.filter((s) => all.includes(s)), ...all.filter((s) => !sitesOn.includes(s))];
 }
 
-/** "Start with none" (or `setup --no-examples`): recorded, so nothing adds them later. A no-op once added. */
-function chooseNoStarter(home) {
-  const state = load(home);
-  if (state.starter || state.offered.length) return starterChoice(home);
-  state.starter = 'none';
-  save(home, state);
-  return 'none';
+const siteName = (site) => SITE_NAMES[site] || site;
+
+/**
+ * The sites named on the command line (`trif setup --examples x.com,google.com`): each as its scope, its
+ * folder or its name ("x.com", "www.google.com", "Instagram"). Throws for one Tim has no mods for.
+ */
+function resolveSites(names, list = PREINSTALLED, sitesOn = SITES_ON) {
+  const known = starterSites(list, sitesOn);
+  const out = [];
+  for (const raw of (Array.isArray(names) ? names : String(names || '').split(',')).map((x) => String(x).trim().toLowerCase()).filter(Boolean)) {
+    const site = known.find((s) => s === scopeFor(raw) || siteName(s).toLowerCase() === raw);
+    if (!site) throw new Error(`Tim has no mods for ${raw}: the sites are ${known.join(', ')}`);
+    if (!out.includes(site)) out.push(site);
+  }
+  return out;
 }
 
-/** "Add them": what setup did before there was a choice (the mods, their updates, the sites they're for). */
-function installStarter(home, modsDir, examplesDir) {
-  const r = preinstallMods(home, modsDir, examplesDir);
-  updateShippedMods(home, modsDir, examplesDir);
+/** The user's choice by site, {site: 'added'|'none'}: only sites they chose (or have mods for). */
+function starterChoices(home) { return load(home).starter; }
+
+/**
+ * "Start with none" (the setup page), the sites left unticked there (`only`), or `setup --no-examples`:
+ * recorded as 'none' for each site not chosen yet, so nothing adds them later (the user still can).
+ * Never undoes 'added'. Returns the choices.
+ */
+function chooseNoStarter(home, { only = null, list = PREINSTALLED, sitesOn = SITES_ON } = {}) {
+  const state = load(home);
+  let changed = false;
+  for (const site of only || starterSites(list, sitesOn)) {
+    if (!state.starter[site]) { state.starter[site] = 'none'; changed = true; }
+  }
+  if (changed) save(home, state);
+  return state.starter;
+}
+
+/** The shipped mods named (ids, as PREINSTALLED lists them). Throws for one that isn't. */
+function resolveIds(ids, list = PREINSTALLED) {
+  const known = list.map((m) => m.id);
+  const out = [];
+  for (const id of (Array.isArray(ids) ? ids : []).map((x) => String(x).trim())) {
+    if (!known.includes(id)) throw new Error(`${id || '""'} isn't one of Tim's mods`);
+    if (!out.includes(id)) out.push(id);
+  }
+  return out;
+}
+
+/**
+ * Add Tim's mods: what setup did for every site before there was a choice (the mods, their update records,
+ * TRIF on for the site if it's in SITES_ON). `sites` (or 'all'): every mod of those sites not on disk, the
+ * ones left out or deleted before too (the setup page, Settings' "Add the rest", a site's link). `ids`: just these mods (the setup page's ticked
+ * ones); for a site not chosen before, its other mods are left out (`skipped`: never copied, offered in
+ * Settings). `othersNone`: every site not chosen yet and not added now is recorded as 'none' (the setup
+ * page's "Add these"). Returns preinstallMods' result.
+ */
+function installStarter(home, modsDir, examplesDir, sites = 'all', { ids = null, othersNone = false, list = PREINSTALLED, sitesOn = SITES_ON } = {}) {
+  const mods = ids ? resolveIds(ids, list) : [];
+  const whole = ids ? [] : sites === 'all' ? starterSites(list, sitesOn) : resolveSites(sites, list, sitesOn);
+  const add = [...new Set([...whole, ...mods.map(siteOf)])];
+  const state = load(home);
+  const before = { ...state.starter };
+  const skipped = new Set(state.skipped);
+  for (const site of whole) for (const { id } of list) if (siteOf(id) === site) skipped.delete(id);
+  for (const id of mods) skipped.delete(id);
+  // A site chosen now for the first time, by its mods: the ones not ticked are left out.
+  for (const site of add) {
+    if (before[site] === 'added' || whole.includes(site)) continue;
+    for (const { id } of list) if (siteOf(id) === site && !mods.includes(id) && !state.offered.includes(id)) skipped.add(id);
+  }
+  if ([...skipped].join() !== state.skipped.join()) { state.skipped = [...skipped]; save(home, state); }
+  const r = preinstallMods(home, modsDir, examplesDir, list, sitesOn, { add, restore: whole });
+  if (othersNone) chooseNoStarter(home, { only: starterSites(list, sitesOn).filter((s) => !add.includes(s)) });
+  updateShippedMods(home, modsDir, examplesDir, list);
   return r;
 }
 
-/** What the setup page says about them: how many mods, for which sites. */
-function starterOffer(list = PREINSTALLED, sites = SITES_ON) {
-  return { count: list.length, sites: sites.slice() };
+// A shipped mod's @name and @description, from the start of its file (X-Flyer is megabytes), by the file's
+// size and time: the helper asks for them with every mods message.
+const headerCache = new Map();
+function exampleHeader(file) {
+  let st;
+  try { st = fs.statSync(file); } catch { return null; }
+  const key = `${st.size}:${st.mtimeMs}`;
+  const hit = headerCache.get(file);
+  if (hit && hit.key === key) return hit.header;
+  let text = '';
+  try {
+    const fd = fs.openSync(file, 'r');
+    try { const buf = Buffer.alloc(Math.min(st.size, 16384)); text = buf.subarray(0, fs.readSync(fd, buf, 0, buf.length, 0)).toString('utf8'); } finally { fs.closeSync(fd); }
+  } catch { return null; }
+  const h = parseHeader(text);
+  const header = { name: h.name || null, description: h.description || '' };
+  headerCache.set(file, { key, header });
+  return header;
+}
+
+/**
+ * What the setup page and Settings show: {chosen (the user chose for some site, or has Tim's mods: the
+ * setup page's step is done), sites: [{site, name, note, choice ('added'|'none'|null), suggested (in SITES_ON:
+ * ticked on the setup page, and TRIF turns on for it), mods: [{id, name, description, on, choice ('added':
+ * on disk, 'deleted': added once and deleted since, 'skipped': left out, null)}]}]}, sites in
+ * starterSites' order, each one's mods in DEFAULT_ORDER's (else as listed). Only mods whose example is there.
+ */
+function starterOffer(home, examplesDir, list = PREINSTALLED, sitesOn = SITES_ON, { modsDir = path.join(home, 'sites') } = {}) {
+  const state = load(home);
+  const choices = state.starter;
+  const sites = [];
+  for (const site of starterSites(list, sitesOn)) {
+    const order = DEFAULT_ORDER[site] || [];
+    const ids = list.map((m) => m.id).filter((id) => siteOf(id) === site)
+      .sort((a, b) => (order.includes(a) ? order.indexOf(a) : order.length) - (order.includes(b) ? order.indexOf(b) : order.length));
+    const mods = [];
+    for (const id of ids) {
+      const h = exampleHeader(modFile(examplesDir, id));
+      // added: on disk; deleted: offered once, gone since (Settings offers it back); skipped: left out.
+      const choice = state.offered.includes(id) ? (fs.existsSync(modFile(modsDir, id)) ? 'added' : 'deleted') : state.skipped.includes(id) ? 'skipped' : null;
+      if (h) mods.push({ id, name: h.name || id.split('/')[1], description: h.description, on: !!list.find((m) => m.id === id).on, choice });
+    }
+    if (mods.length) sites.push({ site, name: siteName(site), note: SITE_NOTES[site] || '', choice: choices[site] || null, suggested: sitesOn.includes(site), mods });
+  }
+  return { chosen: sites.some((s) => s.choice), sites };
 }
 
 /** The ids the extension should switch off when it first sees them. */
 function startOffIds(home) { return new Set(load(home).startOff); }
 
+/** The mods added again after being deleted: {id: stamp}; each browser switches each as listed once per stamp. */
+function readdedIds(home) { return load(home).readded; }
+
 /** The sites each browser should turn TRIF on for when it first sees them. */
 function startSitesOn(home) { return load(home).sitesOn; }
 
 module.exports = {
-  PREINSTALLED, RETIRED, SITES_ON, DEFAULT_ORDER, SHIPPED_DIR, preinstallMods, updateShippedMods, retireShippedMods, absorbedIds,
-  starterChoice, chooseNoStarter, installStarter, starterOffer,
+  PREINSTALLED, RETIRED, SITES_ON, SITE_NAMES, DEFAULT_ORDER, SHIPPED_DIR, preinstallMods, updateShippedMods, retireShippedMods, absorbedIds,
+  starterSites, siteOf, siteName, resolveSites, resolveIds, readdedIds, starterChoices, chooseNoStarter, installStarter, starterOffer, examplesDir,
   startOffIds, startSitesOn, loadPreinstalled: load, pendingUpdates, useNewVersion, keepMine, mergeRequest, mergeSettled, resolveMerge, restoreMod, baseFile, newFile, loadHistory,
 };

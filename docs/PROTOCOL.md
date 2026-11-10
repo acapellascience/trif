@@ -138,7 +138,7 @@ logs it and exits (the extension reconnects to a fresh one) instead of misreadin
 
 | message | meaning |
 |---|---|
-| `{type:"mods", mods:[Mod…], sitesOn:[site…], defaultOrder, starter:{choice, count, sites}}` | The full set of mods, the sites the starter mods start TRIF on for (`preinstalled.json`; each browser turns each on once, see "Sites TRIF is on for"), and whether the user added Tim's starter mods (see "Native host installation"). Sent on connect and after every change in the mods folder (debounced 150 ms). The extension makes `chrome.userScripts` match it exactly (register new, update changed, unregister missing). To an extension whose hello lists `modsSame`, a mod with the same id and hash as in the last set sent to it goes without `code`, marked `same: true`; the extension takes the code from the copy it has (`fillSameMods` in lib.js), or, if it hasn't one with that hash, applies nothing and sends `modsResend`. Every mod goes whole in the first set after each hello and after a `modsResend`. Over 1 MB it goes in parts, or (before the hello says the extension can take them) waits for the hello. |
+| `{type:"mods", mods:[Mod…], sitesOn:[site…], defaultOrder, starter}` | The full set of mods, and the sites setup said to start on (`preinstalled.json`; each browser turns each on once, see "Sites TRIF is on for"), and Tim's mods by site (`starter`, see "Preinstalled mods"). Sent on connect and after every change in the mods folder (debounced 150 ms). The extension makes `chrome.userScripts` match it exactly (register new, update changed, unregister missing). To an extension whose hello lists `modsSame`, a mod with the same id and hash as in the last set sent to it goes without `code`, marked `same: true`; the extension takes the code from the copy it has (`fillSameMods` in lib.js), or, if it hasn't one with that hash, applies nothing and sends `modsResend`. Every mod goes whole in the first set after each hello and after a `modsResend`. Over 1 MB it goes in parts, or (before the hello says the extension can take them) waits for the hello. |
 | `{type:"modsPart", set, i, n, data}` | Part `i` of `n` (0-based, in order) of a `mods` message too big for one native message: `data` is a slice of its JSON text, each part under 1 MB as sent. `set` (`"<pid>-<k>"`) names the set. The extension joins the parts and applies the set only when the last is in, all at once, as if it had come whole (`ModsParts` in lib.js). A new set's first part, or a whole `mods` message, drops an unfinished one. A part missing, out of order or malformed, or joined text that doesn't parse, drops that set (the rest of its parts are ignored), logs an error and sends `modsResend`; the last whole set stays applied. |
 | `{type:"request", id, cmd, args}` | A page command from the CLI (table below). The extension answers with a `response`. |
 | `{type:"update", update:Summary}` | What the helper knows about updates (see "Updates"), after the extension's hello, after each check and while installing. The panel shows it. |
@@ -575,24 +575,33 @@ Re-running setup is safe; run it again to update.
   - `link` (default in a git checkout, for developing TRIF): the wrappers run the checkout's files.
   - `--copy` / `--link` force either mode.
   AGENTS.md, CLAUDE.md, the mod template and the examples always come from the files the wrappers run.
-- Tim's starter mods (the examples listed in `PREINSTALLED`, helper/lib/preinstalled.js: Google, X, Amazon
-  and Instagram mods, each marked on or off), only when the user chooses them: setup copies nothing into
-  a new workspace and turns no site on. The setup page's step "Tim's starter mods" ("Add them" or "Start
-  with none"), or the panel's Settings ("Add Tim's starter mods"), send the extension-only requests
-  `shipped.install` (copies them into `sites/`, offers `SITES_ON`: google.com, x.com, amazon.com,
-  instagram.com, and records their versions for updates) or `shipped.none`; both are refused from an
-  agent run. `trif setup --examples` adds them too, `--no-examples` declines. `preinstalled.json`
-  `starter` = `"added"` | `"none"` (absent: not chosen; a workspace whose `offered` isn't empty got them
-  from a setup before the choice existed, and counts as added). The mods message carries `starter`:
-  `{choice, count, sites}`. Once added, everything below is as before. `~/.trif/preinstalled.json` =
-  `{starter, offered, startOff, sitesOn}`: `offered` keeps a later setup from bringing back one the user deleted
+- Preinstalled mods (Tim's mods): the examples listed in `PREINSTALLED` (helper/lib/preinstalled.js:
+  Google, X, Amazon, Instagram and timsrobot.com mods, each marked on or off), copied into `sites/` only
+  for the sites the user chooses, site by site (a site is its scope: google.com for www.google.com): the
+  setup page's "Tim's mods" step (a checklist, the sites in `SITES_ON` ticked; "Add these" or "Start with
+  none"), Settings in the panel, a site's own panel ("Add Tim's mods for <site>"), or `trif setup
+  --examples [sites]` (`--no-examples`: none). The extension sends the panel's `shipped.install {sites,
+  others?: 'none', tab?}` / `shipped.none` to the helper, which only the user can ask for (refused from an
+  agent run, like `mod.approve`). Adding a site copies its mods and offers it if it's in `SITES_ON`
+  (google.com, x.com, amazon.com, instagram.com). `~/.trif/preinstalled.json` =
+  `{starter, skipped, offered, startOff, sitesOn}`: `starter` = `{"<site>": "added"|"none"}`, the user's
+  choice (no entry: not chosen, like a site a later version brings mods for, which Settings offers); a
+  site with ids in `offered` counts as added (a workspace from before 0.2.5, whose setup added every site); a single `"added"` or `"none"`, from development builds before 0.2.5, counts as that choice for every site).
+  `skipped` = the ids of an added site's mods the user chose not to add (`shipped.install` with `ids`; the
+  setup page adds whole sites): never copied, by any setup or update, until the user adds them. A mod the
+  user deleted stays gone too (it's in `offered`); Settings shows both as not added ("Add the rest"), and
+  adding the site brings them back fresh: `readded` = `{"<id>": stamp}`, sent on the mod as `readded`, and
+  each browser switches it as `PREINSTALLED` lists it once per stamp (`applyReadded`; chrome.storage.local
+  `readded`). Only added sites get new mods (off, as `PREINSTALLED` lists them) and updates. The mods message carries `starter`
+  (`starterOffer`: `{chosen, sites: [{site, name, note, choice, suggested, mods: [{id, name, description,
+  on, choice: "added"|"deleted"|"skipped"|null}]}]}`) for the setup page and the panel. `offered` keeps a later setup from bringing back one the user deleted
   (an existing file is never overwritten); `startOff` lists the copied ones that start off. The helper
   sends those mods with `startOff: true`; the extension switches each off (`disabled`) the first time it
   sees it and remembers that in chrome.storage.local `startedOff`, so afterwards the switch is the user's.
   Later setups update the copies (see "Updates to shipped mods"); `preinstalled.json` also holds `shipped`.
   `sitesOn` goes with every mods message; the extension turns each site on the first time it sees it
-  and remembers that in `sitesOffered` (`applyStartSites`). `--no-examples` skips all this (and records none
-  if nothing was chosen yet).
+  and remembers that in `sitesOffered` (`applyStartSites`). `--no-examples` records none for the sites not
+  chosen yet, and skips updates that time.
 - Wrapper: `~/.trif/bin/trif-host` (and the same as `bin/webmods-host`, its name before 0.2.0, which
   manifests written then may name; likewise `bin/webmods` beside `bin/trif`) = `#!/bin/sh\nexec "<absolute node path>" "<app>/helper/host.js" "$@"`
   where `<app>` is `~/.trif/app` (copy) or the checkout (link)
@@ -871,7 +880,7 @@ Nothing is hosted; the agent uses the user's own login/subscription.
   `{type: "agent.openModel.setKey", key}`, `{type: "agent.openModel.removeKey"}`,
   `{type: "agent.list"}`, `{type: "agent.login", agent}`, `{type: "agent.loginCode", loginId, code}`,
   `{type: "agent.loginCancel", loginId}`, `{type: "status"}`, `{type: "mod.enable", id, enabled, tab}`,
-  `{type: "mod.approve", id, tab}`, `{type: "mod.update", id, choice, site, tab}`, `{type: "mod.delete", id, site, tab}`, `{type: "mod.restore", id, site, tab}` (the tab is reloaded if the mod runs there; with `site`, the chat gets a `{role: "mod", text: "x.js was deleted.", undo: id}` line, marked `undone: true` once restored, and a "was restored (off, as before)" line), `{type: "instructions.get"}`, `{type: "instructions.set", text}`, `{type: "chat.clear", site}`, `{type: "chat.note", site, text}`. Background forwards agent commands to the
+  `{type: "mod.approve", id, tab}`, `{type: "mod.update", id, choice, site, tab}`, `{type: "mod.delete", id, site, tab}`, `{type: "mod.restore", id, site, tab}` (the tab is reloaded if the mod runs there; with `site`, the chat gets a `{role: "mod", text: "x.js was deleted.", undo: id}` line, marked `undone: true` once restored, and a "was restored (off, as before)" line), `{type: "shipped.install", ids or sites, others?, tab?}` and `{type: "shipped.none"}` (Tim's mods: the setup page, Settings, a site's panel; with `tab`, it reloads if one of the added mods runs there), `{type: "instructions.get"}`, `{type: "instructions.set", text}`, `{type: "chat.clear", site}`, `{type: "chat.note", site, text}`. Background forwards agent commands to the
   helper as native `request`s with the same cmd and relays every native `{type: "agentEvent", runId,
   event}` to all panel ports (panels ignore runs and logins they didn't start, by id).
   If the helper disconnects mid-run (or mid-login), the background sends the panel `{kind: "error"}` then
@@ -896,6 +905,8 @@ New native request commands (answered with a normal `response`):
 | `mod.delete` | `id` | `{id, deleted: true}`: moves `sites/<site>/<mod>.js` to `trash/<site>/<mod>@<UTC stamp>.js` (entries older than 30 days are removed), then re-sends the mods; also on the socket, and from a run for mods inside its scope |
 | `mod.restore` | `id` | `{id, restored: true, file}`: moves the newest trashed copy back (fails if the mod exists again, except to undo `mod.update` `new`); same rules as `mod.delete`. The extension keeps a deleted mod's switch state, so it comes back as it was |
 | `mod.update` | `id, choice: "new"\|"mine"` | a shipped mod's new version: use it or keep the user's copy (see "Updates to shipped mods"); also on the socket, not from a run |
+| `shipped.install` | `ids?` or `sites?`, `others?: "none"` | Tim's mods: `ids`, just these (ids from `PREINSTALLED`, anything else refused; a site chosen for the first time this way gets its other mods `skipped`), or every mod not on disk of these sites (left out or deleted before: added fresh) (scopes: x.com, google.com; all of them without either): copied in, TRIF offered on for the sites in `SITES_ON`; `others: "none"` records none for every site not chosen yet. `{added: [ids], sitesOn: [sites newly offered], starter}` (see "Preinstalled mods"); also on the socket, not from a run |
+| `shipped.none` | – | none for every site not chosen yet ("Start with none"): `{starter}`; also on the socket, not from a run |
 | `instructions.get` | | `{text, file, max}`: the user's standing instructions (`~/.trif/instructions.md`, `''` if none) |
 | `instructions.set` | `text` | same; trimmed, at most 4000 characters, empty removes the file. Not from a run |
 | `agent.openModel` | | `{openModel, configured, effective, providers, hasKey, key?}`: the open model's stored defaults (see "Open models"); for a hosted provider `key: {account, stored, keyring, error}` and `hasKey` (whether its API key is in the system keyring; never the key). Not from a run |
@@ -997,7 +1008,7 @@ Suffix List). `helper/lib/scope.js` computes it; `extension/lib.js` mirrors the 
   the run time limit (left by helpers that died).
 - **Token.** `agent.start` makes a random token per run and gives the agent `TRIF_RUN_TOKEN`; the
   CLI sends it with every request. The helper answers a request with an unknown token (the run ended)
-  with an error, refuses `agent.*`, `mod.approve`, `mod.update` and `instructions.*` from a run, and sets `args.scope` on everything
+  with an error, refuses `agent.*`, `mod.approve`, `mod.update`, `shipped.*` and `instructions.*` from a run, and sets `args.scope` on everything
   else it forwards (overriding any `scope` the client sent; `args` must be a plain object). Requests on
   the socket without a token (the user's terminal, the user's own agent outside the panel) are not
   scoped: runs can't reach the socket. The helper answers `mod.delete` and `mod.restore` from a run

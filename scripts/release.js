@@ -190,7 +190,11 @@ function preflight(version, { dryRun }) {
     if (!keyOk) problems.push(`the keychain's ${KEY_SERVICE} doesn't match helper/lib/release-key.js`);
   }
   if (sh('git', ['status', '--porcelain'])) problems.push('the working tree has uncommitted changes');
-  if (sh('git', ['rev-parse', '--abbrev-ref', 'HEAD']) !== 'main') problems.push('not on the main branch');
+  // main, or release-<version>: a release cut from an earlier commit than main (0.2.5: 0.2.4 plus a few
+  // changes, while main moved on). Installs read the feeds from main, so on a release branch they go live
+  // when the branch is merged into main, after this script.
+  const branch = sh('git', ['rev-parse', '--abbrev-ref', 'HEAD']);
+  if (branch !== 'main' && branch !== `release-${version}`) problems.push(`not on the main branch (or release-${version})`);
   if (spawnSync('gh', ['auth', 'status'], { encoding: 'utf8' }).status !== 0) problems.push("gh isn't logged in (gh auth login)");
   for (const s of [AMO_ISSUER, AMO_SECRET]) if (!keychain(s)) problems.push(`the keychain has no ${s} (or ${LEGACY_SERVICES[s]})`);
   if (problems.length && !dryRun) fail(`not ready:\n  - ${problems.join('\n  - ')}`);
@@ -372,14 +376,19 @@ async function release(version, { dryRun, skipTests }) {
   sh('git', ['add', 'package.json', 'extension/manifest.json', 'package-lock.json', SHIPPED_HISTORY]);
   sh('git', ['commit', '-m', `Release ${version}`]);
   sh('git', ['tag', '-a', `v${version}`, '-m', `TRIF ${version}`]);
-  sh('git', ['push', 'origin', 'main', `v${version}`], { stdio: 'inherit' });
+  const branch = sh('git', ['rev-parse', '--abbrev-ref', 'HEAD']);
+  sh('git', ['push', 'origin', branch, `v${version}`], { stdio: 'inherit' });
   const notesFile = path.join(out, 'notes.md');
   fs.writeFileSync(notesFile, notes + '\n');
   execFileSync('gh', ['release', 'create', `v${version}`, ...assets, '--repo', repo, '--title', `TRIF ${version}`, '--notes-file', notesFile], { cwd: ROOT, stdio: 'inherit' });
   // The feeds go live last: by now the files they point at exist.
   sh('git', ['add', 'updates']);
   sh('git', ['commit', '-m', `Update feeds for ${version}`]);
-  sh('git', ['push', 'origin', 'main'], { stdio: 'inherit' });
+  sh('git', ['push', 'origin', branch], { stdio: 'inherit' });
+  if (branch !== 'main') {
+    console.log(`\nReleased TRIF ${version} from ${branch}. The feeds are committed there: installs see the update once ${branch} is merged into main and main is pushed.`);
+    return;
+  }
   console.log(`\nPublished TRIF ${version}. Installs pick it up within a day (the panel offers it; Firefox updates the add-on itself).`);
   console.log(`Beta zips for new testers: ${zips.map((z) => path.relative(ROOT, z)).join(', ')}`);
 }

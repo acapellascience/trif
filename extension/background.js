@@ -9,7 +9,7 @@ import {
   normalizeDisabled, modAppliesTo, urlInScope, modInScope, applyStartOff, applyAbsorbed, findRenames, carryRenames, renameInOrder, normalizeModOrder, modSites,
   normalizeOffSites, offSiteName, offOnSite, hostInScope, withOffSites, normalizeGroupsOff, switchGroup, offSitesFor, GROUPS, scopeFor, normalizeSitesOn, siteOnFor, sitesInUse, limitToSites, applyStartSites, switchSite, fromOtherBrowser, timedUserScripts, capChat,
   ALL_ACCESS, readAccess, activeSites, hasSiteAccess, siteOrigins, siteState, siteRefusal, siteModeOf,
-  FEATURES, ModsParts, fillSameMods, storedMods, modsStorageState, modsStoragePlan,
+  FEATURES, ModsParts, fillSameMods, storedMods, modsStorageState, modsStoragePlan, normalizeStarter, applyReadded, normalizeReadded,
 } from './lib.js';
 import { runtimeCode } from './runtime.js';
 import { sweepPage } from './sweep.js';
@@ -49,12 +49,13 @@ const state = {
   access: ALL_ACCESS,    // what the browser gives TRIF (readAccess): a site in sitesOn counts only with it
   siteMode: null,        // 'permissive' (<all_urls>) or 'restrictive' (per site), as last chosen or seen (persisted)
   blockedSites: [],      // sites the user blocked in TRIF: nothing from TRIF touches them (persisted)
-  starter: null,         // Tim's starter mods, from the helper: {choice: 'added'|'none'|null, count, sites}
   panelWindows: new Map(), // side panel port -> the window it's in (Chrome), so the toolbar button can close it
   paused: false,         // every mod paused in this browser, each mod's own switch left as it is (persisted)
   startedOff: {},        // mod id → true for mods already switched off once: preinstalled, or from another browser (persisted)
   absorbed: {},          // mod id → true for retired shipped mods whose switch was carried over (persisted)
+  readded: {},           // mod id → stamp: Tim's mods deleted and added again, switched as listed once per stamp (persisted)
   defaultOrder: {},      // site → mod ids: the panel's order for its shipped mods until the user drags them (from the helper; persisted)
+  starter: null,         // Tim's mods, site by site, from the helper (helper/lib/preinstalled.js starterOffer): {chosen, sites: [{site, name, choice, suggested, mods}]}
   installId: null,       // random id of this install (persisted): the helper records it as the origin of mods made here
   applied: {},           // script id → hash last registered (persisted)
   known: null,           // the script ids the last sync left registered (syncUserScripts `known`); null: ask the browser
@@ -135,6 +136,7 @@ const ready = chrome.storage.local.get(null).then(async (s) => {
   state.groupsOff = normalizeGroupsOff(s.groupsOff);
   state.startedOff = normalizeDisabled(s.startedOff);
   state.absorbed = normalizeDisabled(s.absorbed);
+  state.readded = normalizeReadded(s.readded);
   state.defaultOrder = normalizeModOrder(s.defaultOrder);
   state.sitesOffered = normalizeSitesOn(s.sitesOffered);
   state.siteMode = s.siteMode === 'permissive' || s.siteMode === 'restrictive' ? s.siteMode : null;
@@ -465,6 +467,13 @@ async function onModsMessage(msg) {
     state.startedOff = off.startedOff;
     await save({ disabled: state.disabled, startedOff: state.startedOff }).catch((e) => log('warn', errMsg(e)));
   }
+  // One of Tim's mods the user deleted and got back: switched as Tim set it, once (not as it was).
+  const re = applyReadded(state.mods, state.disabled, state.readded);
+  if (re.changed) {
+    state.disabled = re.disabled;
+    state.readded = re.readded;
+    await save({ disabled: state.disabled, readded: state.readded }).catch((e) => log('warn', errMsg(e)));
+  }
   // Sites setup starts TRIF on for (the preinstalled mods' sites), each turned on once.
   const sites = applyStartSites(state.sitesOn, state.sitesOffered, msg.sitesOn);
   if (sites.changed) {
@@ -473,11 +482,11 @@ async function onModsMessage(msg) {
     await save({ sitesOn: state.sitesOn, sitesOffered: state.sitesOffered }).catch((e) => log('warn', errMsg(e)));
     notifyPanels();
   }
-  // Tim's starter mods: whether the user added them, chose none, or hasn't chosen (the setup page asks).
-  if (msg.starter && typeof msg.starter === 'object') {
-    const changed = JSON.stringify(msg.starter) !== JSON.stringify(state.starter);
-    state.starter = msg.starter;
-    if (changed) notifyPanels();
+  // Tim's mods, site by site: which the user added, and what each site's are (the setup page, Settings).
+  const starter = normalizeStarter(msg.starter);
+  if (JSON.stringify(starter) !== JSON.stringify(state.starter)) {
+    state.starter = starter;
+    notifyPanels();
   }
   // The order the side panel starts a site's shipped mods in (the panel reads it from storage).
   const defaultOrder = normalizeModOrder(msg.defaultOrder);
@@ -1169,9 +1178,6 @@ async function onPanelMessage(msg) {
     case 'site.disconnect': return disconnectSite(msg);
     case 'site.block': return setBlocked(msg);
     case 'site.mode': return setSiteMode(msg);
-    // Tim's starter mods, the user's choice: the helper adds them (or records none) and sends the mods again.
-    case 'shipped.install': return helperRequest('shipped.install', {}, 30000);
-    case 'shipped.none': return helperRequest('shipped.none', {}, 10000);
     case 'chat.note': {
       // A line from the panel itself (a slash command's answer), shown like a tool line.
       const site = normalizeSite(msg.site);
@@ -1271,6 +1277,30 @@ async function onPanelMessage(msg) {
         const mod = state.mods.find((m) => m.id === r.id);
         if (mod) await reloadIfApplies(mod, { tab: msg.tab }, { onlyIfRunning: true });
       }
+      return r;
+    }
+    // Tim's mods, the user's choice (the setup page, Settings, a site's panel): the helper copies them in
+    // (or records none) and sends the mods again, with the sites to turn on. From a site's panel (`tab`),
+    // the tab reloads if one of them runs there now.
+    case 'shipped.install': {
+      // The setup page's ticked mods (`ids`), or the sites to add every mod of (Settings, a site's link).
+      const ids = Array.isArray(msg.ids) ? [...new Set(msg.ids.map(String).filter((x) => /^\w[\w.-]*\/\w[\w.-]*$/.test(x)))].slice(0, 200) : null;
+      const sites = [...new Set((Array.isArray(msg.sites) ? msg.sites : []).map((x) => scopeFor(String(x))).filter(Boolean))].slice(0, 50);
+      const r = await helperRequest('shipped.install', { ...(ids ? { ids } : { sites }), ...(msg.others === 'none' ? { others: 'none' } : {}) }, 60000);
+      await modsApplied;
+      if (msg.tab !== undefined) {
+        const tab = await chrome.tabs.get(msg.tab).catch(() => null);
+        const url = tab ? tab.url || tab.pendingUrl || '' : '';
+        const added = new Set(r?.added || []);
+        const runs = (m) => added.has(m.id) && isEnabled(m.id) && !m.held && modAppliesTo(withOffSites(m, state.offSites[m.id]), url);
+        if (url && siteOnFor(url, state.sitesOn) && state.mods.some(runs)) await chrome.tabs.reload(tab.id).catch(() => {});
+      }
+      notifyPanels();
+      return r;
+    }
+    case 'shipped.none': {
+      const r = await helperRequest('shipped.none', {}, 10000);
+      await modsApplied;
       return r;
     }
     case 'update.check': return helperRequest('update.check', { force: true }, 60000);

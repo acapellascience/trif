@@ -23,12 +23,13 @@ const ui = {
   modeDialog: $('#mode-dialog'), modeDialogClose: $('#mode-dialog-close'), modeDialogSwitch: $('#mode-dialog-switch'), modeDialogErr: $('#mode-dialog-err'),
   modeChoice: $('#mode-choice'), modePermissive: $('#mode-permissive'), modeRestrictive: $('#mode-restrictive'), modeNote: $('#mode-note'),
   blockedList: $('#blocked-list'), blockedEmpty: $('#blocked-empty'),
-  starterBlock: $('#starter-block'), starterAdd: $('#starter-add'), starterErr: $('#starter-err'),
   landing: $('#landing'), landingIcon: $('#landing-icon'), landingVersion: $('#landing-version'), landingNote: $('#landing-note'),
   settings: $('#settings'), agent: $('#agent'), agentNote: $('#agent-note'), model: $('#model'),
   using: $('#using'), modelCustomRow: $('#model-custom-row'), modelCustom: $('#model-custom'), modelNote: $('#model-note'),
   instructions: $('#instructions'), instructionsNote: $('#instructions-note'),
   autoUpdate: $('#auto-update'), pauseAll: $('#pause-all'), pausedAll: $('#paused-all'), updateNote: $('#update-note'), update: $('#update'),
+  starter: $('#starter'), starterList: $('#starter-list'), starterErr: $('#starter-err'),
+  siteStarter: $('#site-starter'), siteStarterLink: $('#site-starter-link'), siteStarterErr: $('#site-starter-err'),
   notice: $('#notice'), paused: $('#paused'), tabLock: $('#tab-lock'), mods: $('#mods'), modsCount: $('#mods-count'), modList: $('#mod-list'), modsReviewNote: $('#mods-review-note'), modsLive: $('#mods-live'),
   chat: $('#chat'), empty: $('#empty'), messages: $('#messages'), working: $('#working'),
 
@@ -176,6 +177,9 @@ function currentAgent() {
 // ---- tab following ------------------------------------------------------------------------------
 
 async function init() {
+  // Settings' "see the code" for Tim's mods: the code as this version shipped it (the release's tag).
+  const src = document.getElementById('starter-source');
+  if (src) src.href = `https://github.com/acapellascience/trif/tree/v${chrome.runtime.getManifest().version}/examples/sites`;
   connectPort();
   // In Safari the panel is a window of its own, opened with ?window=<the window whose tabs it follows>.
   view.windowId = OPENED_FOR || (await chrome.windows.getCurrent()).id;
@@ -350,7 +354,6 @@ function render() {
   const anyAgent = agentList.some((a) => a.available);
 
   renderSites();
-  renderStarter();
   ui.site.textContent = site || 'Tim\'s Robot Internet Fixer';
   ui.site.title = view.tab?.url || '';
   document.title = site ? `TRIF · ${site}` : 'Tim\'s Robot Internet Fixer';
@@ -402,6 +405,8 @@ function render() {
   renderNotice({ helperOk, agentInfo, anyAgent });
   renderUpdate();
   renderMods();
+  renderStarter();
+  renderSiteStarter();
   renderMessages();
 
   ui.empty.hidden = !site || chat.messages.length > 0;
@@ -755,6 +760,90 @@ function renderMods() {
   }
 }
 
+// ---- Tim's mods, site by site (helper/lib/preinstalled.js) -----------------------------------------
+// Settings lists each site Tim has mods for, added or with an Add button; a site's own panel has a small
+// "Add Tim's mods for <site>" link while that site's aren't added. Both go to the helper (shipped.install),
+// which only the user can ask for: never an agent run. Nothing removes them in bulk: the user deletes mods
+// one by one.
+
+let starterBusy = null; // the site being added
+let starterError = null; // {site, message}
+
+function renderStarter() {
+  const st = view.status?.helper?.connected ? view.status.starter : null;
+  ui.starter.hidden = !st?.sites?.length;
+  if (ui.starter.hidden) return;
+  const key = JSON.stringify([st.sites, starterBusy, starterError]);
+  if (ui.starterList.dataset.key === key) return;
+  ui.starterList.dataset.key = key;
+  ui.starterList.replaceChildren(...st.sites.map((x) => {
+    const li = el('li');
+    li.dataset.site = x.site;
+    const name = el('span', 'starter-site', x.name);
+    // A site added with some of its mods not on the computer (deleted, or left out): which are, which aren't.
+    // "Add the rest" brings them back, fresh, switched as Tim set them.
+    const out = x.choice === 'added' ? x.mods.filter((m) => m.choice !== 'added') : [];
+    const names = (list) => list.map((m) => m.name).join(', ');
+    const mods = el('span', 'starter-mods', out.length
+      ? `Added: ${names(x.mods.filter((m) => m.choice === 'added'))}. Not added: ${names(out)}.`
+      : names(x.mods));
+    if (x.choice === 'added' && !out.length) li.append(name, el('span', 'starter-state', 'Added'), mods);
+    else {
+      const label = out.length ? 'Add the rest' : 'Add';
+      const add = button(starterBusy === x.site ? 'Adding…' : label, null, () => addStarter(x.site));
+      add.disabled = !!starterBusy;
+      add.setAttribute('aria-label', out.length ? `Add Tim’s other mods for ${x.name}: ${names(out)}` : `Add Tim’s mods for ${x.name}`);
+      li.append(name, add, mods);
+    }
+    return li;
+  }));
+  const err = starterError && !starterError.fromSite ? starterError.message : '';
+  ui.starterErr.textContent = err;
+  ui.starterErr.hidden = !err;
+}
+
+/**
+ * The site this panel is on, when Tim has mods for it that the user hasn't added (all, or some left out).
+ * Not just for a mod the user deleted: that may be on purpose, so only Settings offers it back.
+ */
+function siteStarterOffer() {
+  const st = view.status?.helper?.connected ? view.status.starter : null;
+  const scope = siteScope();
+  return (scope && st?.sites?.find((x) => x.site === scope && (x.choice !== 'added' || x.mods.some((m) => m.choice === 'skipped')))) || null;
+}
+
+function renderSiteStarter() {
+  const x = siteStarterOffer();
+  const n = ui.siteStarter;
+  n.hidden = !x;
+  if (!x) return;
+  // In the gate under its button while TRIF is off for the site; under the mods list while it's on.
+  const home = ui.gate.hidden ? ui.chat : null;
+  if (home && n.nextElementSibling !== home) home.before(n);
+  else if (!home && n.previousElementSibling !== ui.gateErr) ui.gateErr.after(n);
+  ui.siteStarterLink.textContent = starterBusy === x.site ? `Adding Tim’s mods for ${x.name}…` : `Add Tim’s mods for ${x.name}`;
+  ui.siteStarterLink.title = x.mods.filter((m) => m.choice !== 'added').map((m) => m.name).join(', ');
+  ui.siteStarterLink.setAttribute('aria-disabled', String(!!starterBusy));
+  const err = starterError?.fromSite && starterError.site === x.site ? starterError.message : '';
+  ui.siteStarterErr.textContent = err;
+  ui.siteStarterErr.hidden = !err;
+}
+
+async function addStarter(site, { fromSite = false } = {}) {
+  if (starterBusy) return;
+  starterBusy = site;
+  starterError = null;
+  render();
+  try {
+    await request({ type: 'shipped.install', sites: [site], tab: view.tab?.id });
+  } catch (e) {
+    starterError = { site, fromSite, message: `Couldn’t add them: ${e?.message ?? e}` };
+  }
+  starterBusy = null;
+  await refreshStatus();
+  render();
+}
+
 // TRIF is off on a site until the user turns it on here (see "sites TRIF is on for" in lib.js):
 // until then the panel shows only "The robot is off." and the button (and, in the top bar, the robot,
 // grey and dim, and settings), and nothing runs or reads the site. Once on, the header's switch turns it
@@ -905,21 +994,6 @@ async function siteAction(msg, site = view.site) {
 
 function setBlocked(blocked, site = siteScope()) {
   return siteAction({ type: 'site.block', blocked }, site);
-}
-
-// Settings: "Add Tim's starter mods", while they aren't added (the setup page asked; none, or not chosen).
-// Nothing to remove them in bulk: the user deletes mods one by one.
-function renderStarter() {
-  const st = view.status;
-  ui.starterBlock.hidden = !st?.starter || st.starter.choice === 'added';
-}
-
-async function addStarter() {
-  ui.starterAdd.disabled = true;
-  ui.starterErr.hidden = true;
-  try { await request({ type: 'shipped.install' }); } catch (e) { ui.starterErr.textContent = `Couldn’t add them: ${e?.message ?? e}`; ui.starterErr.hidden = false; }
-  ui.starterAdd.disabled = false;
-  refreshStatus();
 }
 
 // Settings, "Site permissions": the mode (not in Safari, which asks per site itself), and the blocked sites.
@@ -1663,8 +1737,8 @@ ui.gateDisconnect.addEventListener('click', disconnectClick);
 ui.modeDialogClose.addEventListener('click', () => ui.modeDialog.close());
 ui.modeDialogSwitch.addEventListener('click', switchToRestrictive);
 ui.modePermissive.addEventListener('click', choosePermissive);
-ui.starterAdd.addEventListener('click', addStarter);
 ui.modeRestrictive.addEventListener('click', chooseRestrictive);
+ui.siteStarterLink.addEventListener('click', (e) => { e.preventDefault(); const x = siteStarterOffer(); if (x) addStarter(x.site, { fromSite: true }); });
 ui.siteSwitch.addEventListener('click', () => setSiteOn(!siteIsOn()));
 ui.barRobot.addEventListener('click', () => setSiteOn(!siteIsOn())); // off: the Fix button; on: the power button
 for (const chip of document.querySelectorAll('.chip')) {

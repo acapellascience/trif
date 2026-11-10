@@ -5,7 +5,7 @@
 // @run-at      document-start
 // @risk        1 drops ads, so their impressions never report; patches fetch and XMLHttpRequest
 // @source      webmods
-// @version     1
+// @version     2
 // ==/WebMod==
 
 /*
@@ -465,6 +465,20 @@
     /* (not with X-Flyer installed, html[data-tss-ready], nor on profile pages, html[data-dm-profile]: X's
        own layout there, the timeline where X puts it; the right-hand panel stays hidden) */
     html:not([data-tss-ready], [data-dm-profile]) header[role=banner] { flex-grow: 0 !important; }
+    /* With X-Flyer installed and no game on: X's wide wrapper (920px, room for the hidden side panel) pinned
+       the timeline to the left. Instead the timeline's own 600px, and the spare room shared equally between
+       the menu's side and the far side (both grow alike), so the margins match. (In a game, X-Flyer's layout.) */
+    html[data-tss-ready]:not([data-tss-on], [data-dm-profile], [data-dm-tl-wide]) :is(header[role=banner], main[role=main]) { flex-grow: 1 !important; }
+    html[data-tss-ready]:not([data-tss-on], [data-dm-profile], [data-dm-tl-wide]) :is(main[role=main] > div, main[role=main] > div > div):has([data-testid=primaryColumn]) {
+      width: 600px !important; min-width: 0 !important; }
+    /* ...and in a window wide enough (html[data-dm-tl-wide], see sizeProfile), the column fills it, with
+       margins of TL_MARGIN on both sides: the menu's header is the margin plus the menu (--dm-tg), the
+       column --dm-tw */
+    html[data-dm-tl-wide]:not([data-tss-on]) header[role=banner] { flex: 0 0 var(--dm-tg) !important; width: var(--dm-tg) !important; }
+    html[data-dm-tl-wide]:not([data-tss-on]) main[role=main] { flex: 1 1 auto !important; }
+    html[data-dm-tl-wide]:not([data-tss-on]) :is(main[role=main] > div, main[role=main] > div > div, main[role=main] > div > div > div):has([data-testid=primaryColumn]),
+    html[data-dm-tl-wide]:not([data-tss-on]) [data-testid=primaryColumn] { width: var(--dm-tw) !important; max-width: var(--dm-tw) !important; }
+    html[data-dm-tl-wide]:not([data-tss-on]) [data-dm-wide] { max-width: none !important; }
     [data-dm-hide] { display: none !important; }
     /* Detox Timeline's logo, a plain lowercase x, in place of X's. The loading screen (#placeholder, in X's HTML)
        is styled before it's parsed; its theme isn't known yet, so the x inverts whatever is behind it. */
@@ -803,12 +817,30 @@
     const col = Math.floor(Math.min(PROFILE_MAX, vw - 2 * (menu + 24)));
     const wide = root.hasAttribute('data-dm-profile') && menu > 0 && col > 620;
     root.toggleAttribute('data-dm-profile-wide', wide);
+    const set = (p, v) => { if (root.style.getPropertyValue(p) !== v) root.style.setProperty(p, v); };
     if (wide) {
-      const set = (p, v) => { if (root.style.getPropertyValue(p) !== v) root.style.setProperty(p, v); };
       set('--dm-pw', `${col}px`);
       set('--dm-pg', `${Math.floor((vw - col) / 2)}px`);
     }
+    // With X-Flyer installed and no game on, every other page's column widens to fill the window, leaving
+    // TL_MARGIN on each side: left of the menu (X right-aligns it in its header) and right of the column.
+    // Too narrow for a 600px column with those margins: the evenly shared 600px layout (see the CSS).
+    // (the left margin runs to the menu's icons: X's menu box has some padding before them)
+    const navBox = nav?.getBoundingClientRect(), icons = [...document.querySelectorAll('header[role=banner] nav a')];
+    const inset = navBox && icons.length ? Math.max(0, Math.min(...icons.map((a) => a.getBoundingClientRect().left)) - navBox.left) : 0;
+    const tcol = Math.floor(vw - 2 * TL_MARGIN - menu + inset);
+    const tlWide = root.hasAttribute('data-tss-ready') && !root.hasAttribute('data-tss-on') && !root.hasAttribute('data-dm-profile')
+      && menu > 0 && tcol >= 600;
+    root.toggleAttribute('data-dm-tl-wide', tlWide);
+    if (tlWide) {
+      set('--dm-tw', `${tcol}px`);
+      set('--dm-tg', `${Math.ceil(TL_MARGIN + menu - inset)}px`);
+    }
   };
+  const TL_MARGIN = 180; // (about the most the narrow timeline's margins get)
+  // (again when X-Flyer starts or stops a game, or loads: its layout takes over while playing)
+  new MutationObserver(() => { try { sizeProfile(); } catch {} })
+    .observe(document.documentElement, { attributes: true, attributeFilter: ['data-tss-on', 'data-tss-ready'] });
   flagProfile();
   const showSearch = () => {
     flagProfile();

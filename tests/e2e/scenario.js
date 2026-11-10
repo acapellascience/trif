@@ -17,7 +17,15 @@ const { makeFakeKeychain } = require('../fake-keychain');
 
 const REAL_HOME = os.userInfo().homedir;
 const SHIPPED_IDS = require('../../helper/lib/preinstalled').PREINSTALLED.map((p) => p.id || p);
-const { RETIRED } = require('../../helper/lib/preinstalled');
+const { RETIRED, siteOf, starterSites, SITES_ON } = require('../../helper/lib/preinstalled');
+// Tim's mods for a site (a scope: x.com, google.com).
+const shippedFor = (site) => SHIPPED_IDS.filter((id) => siteOf(id) === site);
+// The fresh scenario picks these on the setup page, adds this one from Settings and this one with the link on
+// its own panel; an upgrade (every site it had counts as added) has the link on the site that's new since.
+const FRESH_PICKS = ['x.com', 'google.com'];
+const DELETED = 'x.com/rainbow-rave'; // switched on, deleted in the panel, then back from Settings' "Add the rest": fresh, and off as listed
+const SETTINGS_ADD = 'amazon.com';
+const LINK_SITE = { fresh: { site: 'instagram.com', host: 'www.instagram.com', name: 'Instagram' }, upgrade: { site: 'timsrobot.com', host: 'timsrobot.com', name: 'timsrobot.com' } };
 
 // Files of the real setup the suite must never change: checked before and after (read only).
 const REAL_FILES = [
@@ -314,6 +322,209 @@ class Scenario {
     return `saved ("${saved.status.slice(0, 60)}…"), replace and cancel, removed; agent and provider (${provider}) put back`;
   }
 
+  // ---- Tim's mods, site by site (helper/lib/preinstalled.js)
+
+  /** The sites preinstalled.json says were added. */
+  addedSites() {
+    const pre = I.readJson(path.join(this.trif, 'preinstalled.json')) || {};
+    const offered = new Set((pre.offered || []).map(siteOf));
+    return starterSites().filter((s) => (pre.starter || {})[s] === 'added' || offered.has(s));
+  }
+
+  /** What the setup page's "Tim's mods" step shows: a row per site, its box, its words. */
+  async starterStepState() {
+    return this.ext(`async () => {
+      const step = document.querySelector('#step-starter');
+      return { state: step.querySelector('.state').textContent, now: step.classList.contains('now'), done: step.classList.contains('done'),
+        text: step.querySelector('.body').innerText,
+        rows: [...step.querySelectorAll('li.pick')].map((li) => ({ site: li.dataset.site, ticked: li.querySelector('input').checked, boxes: li.querySelectorAll('input').length,
+          name: li.querySelector('.pick-name')?.firstChild?.textContent || '', mods: li.querySelector('.pick-mods')?.textContent || '' })),
+        source: step.querySelector('#starter-source')?.href || '',
+        buttons: [...step.querySelectorAll('.body button')].map((b) => [b.id, b.textContent, b.disabled]) };
+    }`);
+  }
+
+  /**
+   * The setup page, after user scripts: "Tim's mods". Fresh: nothing of Tim's on disk; a row per site,
+   * X, Google, Amazon and Instagram ticked, timsrobot.com not; the user leaves only X and Google ticked
+   * and adds them: their mods are there and TRIF is on for them, nothing for the rest. An upgrade: already
+   * ticked, every site it had added.
+   */
+  async starterSetupCheck() {
+    const r = this.r;
+    await r.check('setup page: Tim\'s mods, site by site (X and Google picked; nothing else on disk or on)', async () => {
+      if (this.o.kind === 'upgrade') {
+        const x = await this.waitSetup('Tim\'s mods ticked', (st) => st.steps[3] === 'done');
+        const st = await this.starterStepState();
+        const added = this.addedSites();
+        if (added.join() !== SITES_ON.join()) throw new Error(`added: ${added.join(', ')}`);
+        if (st.state !== 'Google, X, Amazon and Instagram') throw new Error(`the step says: ${st.state}`);
+        return `ticked already: ${st.state} (${x.steps.join(',')})`;
+      }
+      await this.waitSetup('Tim\'s mods open', (st) => st.steps[3] === 'now');
+      let st = await waitFor('the checklist', async () => { const v = await this.starterStepState(); return v.rows.length ? v : null; }, { timeoutMs: 10000 });
+      const sites = starterSites();
+      if (st.rows.map((x) => x.site).join() !== sites.join()) throw new Error(`rows: ${st.rows.map((x) => x.site).join(', ')}`);
+      const ticked = st.rows.filter((x) => x.ticked).map((x) => x.site);
+      if (ticked.join() !== SITES_ON.join()) throw new Error(`ticked to start: ${ticked.join(', ')}`);
+      // One box per site, its mods' names as plain text.
+      for (const row of st.rows) {
+        if (row.boxes !== 1 || row.mods.split(', ').length !== shippedFor(row.site).length || /\(/.test(row.mods)) throw new Error(`${row.site}'s row: ${JSON.stringify(row)}`);
+      }
+      for (const want of [/None of them is on your computer until you choose/, /plain JavaScript you can read first/,
+        /Each mod has its own switch in the TRIF (side panel|sidebar): you can turn any of them off individually, any time\. You can add the others later, in the panel’s Settings\./]) {
+        if (!want.test(st.text)) throw new Error(`the step doesn't say ${want}: ${st.text}`);
+      }
+      if (!/github\.com\/acapellascience\/trif\/.*examples\/sites/.test(st.source)) throw new Error(`see the code: ${st.source}`);
+      if (st.buttons.map((b) => b[1]).join() !== 'Add these,Start with none') throw new Error(`buttons: ${JSON.stringify(st.buttons)}`);
+      const x = st.rows.find((row) => row.site === 'x.com');
+      if (x.name !== 'X' || !/^Detox Timeline, Follow Status, Profile Styler, Post Styler, Style Encoder, X-Flyer, Rainbow Rave$/.test(x.mods)) throw new Error(`X's row: ${JSON.stringify(x)}`);
+      if (fs.existsSync(path.join(this.trif, 'sites', 'x.com')) || fs.existsSync(path.join(this.trif, 'sites', 'www.google.com'))) throw new Error('Tim\'s mods on disk before the choice');
+      await this.ext(`async () => document.querySelector('#starter-add').scrollIntoView({ block: 'end' })`);
+      await sleep(200);
+      await this.shot(this.control, 'starter-setup-before');
+      for (const row of st.rows) {
+        if (row.ticked !== FRESH_PICKS.includes(row.site)) await this.d.click(this.control, `#step-starter li[data-site="${row.site}"] input`);
+      }
+      st = await this.starterStepState();
+      const now = st.rows.filter((row) => row.ticked).map((row) => row.site);
+      if (now.sort().join() !== [...FRESH_PICKS].sort().join()) throw new Error(`ticked: ${now.join(', ')}`);
+      await this.d.click(this.control, '#starter-add');
+      const done = await this.waitSetup('Tim\'s mods ticked', (v) => v.steps[3] === 'done');
+      st = await this.starterStepState();
+      if (st.state !== 'Google and X') throw new Error(`the ticked step says: ${st.state}`);
+      await this.shot(this.control, 'starter-setup-after');
+      // On disk: theirs, and the choice per site; TRIF on for them only.
+      const pre = I.readJson(path.join(this.trif, 'preinstalled.json')) || {};
+      const choice = Object.fromEntries(sites.map((s) => [s, FRESH_PICKS.includes(s) ? 'added' : 'none']));
+      if (JSON.stringify(pre.starter) !== JSON.stringify({ ...pre.starter, ...choice }) || Object.keys(pre.starter).length !== sites.length) throw new Error(`preinstalled.json starter: ${JSON.stringify(pre.starter)}`);
+      if (pre.skipped) throw new Error(`setup left mods out: ${JSON.stringify(pre.skipped)}`);
+      const missing = FRESH_PICKS.flatMap(shippedFor).filter((id) => !fs.existsSync(path.join(this.trif, 'sites', `${id}.js`)));
+      if (missing.length) throw new Error(`not on disk: ${missing.join(', ')}`);
+      const folders = fs.readdirSync(path.join(this.trif, 'sites')).filter((f) => !['127.0.0.1', 'localhost'].includes(f)).sort();
+      if (folders.join() !== 'www.google.com,x.com') throw new Error(`sites/: ${folders.join(', ')}`);
+      const status = await waitFor('TRIF on for X and Google', async () => {
+        const e = (await this.cli(['status'], { json: true })).json?.extension;
+        return e && FRESH_PICKS.every((s) => e.sitesOn.includes(s)) ? e : null;
+      }, { timeoutMs: 15000 });
+      const stray = status.sitesOn.filter((s) => sites.includes(s) && !FRESH_PICKS.includes(s));
+      if (stray.length) throw new Error(`TRIF on for ${stray.join(', ')} too`);
+      return `"${st.state}" (${done.steps.join(',')}); sites/: ${folders.join(', ')}; on for ${status.sitesOn.join(', ')}`;
+    });
+  }
+
+  /** The panel's Settings, "Tim's mods": each site added or with Add. Fresh: Add for Amazon adds its mods and turns TRIF on there. */
+  async starterSettingsCheck() {
+    const r = this.r;
+    await r.check(`Settings: Tim's mods by site${this.o.kind === 'fresh' ? `, and Add for ${SETTINGS_ADD}` : ''}`, async () => {
+      const rows = () => this.panel(`async () => {
+        const e = document.querySelector('#starter');
+        return { shown: !!e && e.getClientRects().length > 0, text: e?.innerText || '',
+          rows: [...document.querySelectorAll('#starter-list li')].map((li) => ({ site: li.dataset.site, added: !!li.querySelector('.starter-state'), button: li.querySelector('button')?.textContent || null, text: li.innerText, mods: li.querySelector('.starter-mods')?.textContent || '' })) };
+      }`);
+      const status = async () => (await this.cli(['status'], { json: true })).json?.extension;
+      const deleted = path.join(this.trif, 'sites', `${DELETED}.js`);
+      if (this.o.kind === 'fresh') {
+        // One of Tim's mods, switched on, then deleted in the panel (its trash icon): it stays gone.
+        await this.cli(['enable', DELETED]);
+        await waitFor(`${DELETED} on`, async () => (await status())?.mods.find((m) => m.id === DELETED)?.enabled === true, { timeoutMs: 10000 });
+        await this.d.click(this.panelCtx, `#mod-list > li[data-mod="${DELETED}"] .mod-delete`);
+        await waitFor(`${DELETED} deleted`, async () => !fs.existsSync(deleted) && !(await status())?.mods.some((m) => m.id === DELETED), { timeoutMs: 10000 });
+      }
+      await this.d.click(this.panelCtx, '#settings-btn');
+      let last = null;
+      const until = (what, ok) => waitFor(what, async () => { last = await rows(); return ok(last) ? last : null; }, { timeoutMs: 15000 })
+        .catch((e) => { throw new Error(`${e.message}: ${JSON.stringify(last)}`); });
+      try {
+        let st = await until('Tim\'s mods in Settings', (x) => x.shown && x.rows.length === starterSites().length && (this.o.kind !== 'fresh' || x.rows.find((y) => y.site === 'x.com')?.button));
+        const added = this.addedSites();
+        const pre = I.readJson(path.join(this.trif, 'preinstalled.json')) || {};
+        const left = [...(pre.skipped || []), ...(pre.offered || []).filter((id) => added.includes(siteOf(id)) && SHIPPED_IDS.includes(id) && !fs.existsSync(path.join(this.trif, 'sites', `${id}.js`)))];
+        // Added: "Added"; added with a mod not on disk (deleted, or left out): "Add the rest", saying which; not added: "Add".
+        const partly = (site) => left.some((id) => siteOf(id) === site);
+        const expect = (site) => (!added.includes(site) ? 'Add' : partly(site) ? 'Add the rest' : null);
+        const wrong = st.rows.filter((x) => x.added !== (expect(x.site) === null) || (expect(x.site) && x.button !== expect(x.site)));
+        if (this.o.kind === 'fresh') {
+          const xr = st.rows.find((x) => x.site === 'x.com');
+          if (!/^Added: Detox Timeline, Follow Status, Profile Styler, Post Styler, Style Encoder, X-Flyer\. Not added: Rainbow Rave\.$/.test(xr.mods) || /Rainbow Rave.*Not added/.test(xr.mods)) throw new Error(`X in Settings: ${JSON.stringify(xr)}`);
+        }
+        if (wrong.length) throw new Error(`rows: ${JSON.stringify(st.rows)} (added: ${added.join(', ')})`);
+        if (!/^Tim’s mods/.test(st.text) || !/see the code/.test(st.text)) throw new Error(`the section says: ${st.text}`);
+        await this.panel(`async () => document.querySelector('#starter').scrollIntoView({ block: 'center' })`);
+        await sleep(300);
+        await this.shot(this.panelCtx, 'starter-settings');
+        if (this.o.kind !== 'fresh') return st.rows.map((x) => `${x.site} ${x.button || 'added'}`).join(', ');
+        // "Add the rest": the deleted one comes back, a fresh copy, off as Tim set it (it was on when deleted).
+        const offeredText = st.rows.find((y) => y.site === 'x.com').mods;
+        await this.d.click(this.panelCtx, '#starter-list li[data-site="x.com"] button');
+        st = await until('X all added again', (x) => x.rows.find((y) => y.site === 'x.com')?.added);
+        if (!fs.existsSync(deleted) || fs.readFileSync(deleted, 'utf8') !== fs.readFileSync(path.join(this.trif, 'app', 'examples', 'sites', `${DELETED}.js`), 'utf8')) throw new Error(`${DELETED} isn't back as shipped`);
+        const back = await waitFor(`${DELETED} back, off`, async () => { const m = (await status())?.mods.find((y) => y.id === DELETED); return m && m.enabled === false ? m : null; }, { timeoutMs: 10000 })
+          .catch(async (e) => { throw new Error(`${e.message}: ${JSON.stringify((await status())?.mods.find((y) => y.id === DELETED))}`); });
+        await sleep(300);
+        await this.shot(this.panelCtx, 'starter-settings-restored');
+        const restored = `${DELETED} deleted, offered ("${offeredText}"), back with "Add the rest" (${back.enabled ? 'on' : 'off'})`;
+        await this.d.click(this.panelCtx, `#starter-list li[data-site="${SETTINGS_ADD}"] button`);
+        st = await until(`${SETTINGS_ADD} added`, (x) => x.rows.find((y) => y.site === SETTINGS_ADD)?.added);
+        const want = shippedFor(SETTINGS_ADD);
+        const missing = want.filter((id) => !fs.existsSync(path.join(this.trif, 'sites', `${id}.js`)));
+        if (missing.length) throw new Error(`not on disk: ${missing.join(', ')}`);
+        const e = await waitFor(`TRIF on for ${SETTINGS_ADD}`, async () => {
+          const x = (await this.cli(['status'], { json: true })).json?.extension;
+          return x && x.sitesOn.includes(SETTINGS_ADD) && want.every((id) => x.mods.some((m) => m.id === id)) ? x : null;
+        }, { timeoutMs: 15000 });
+        await sleep(300);
+        await this.shot(this.panelCtx, 'starter-settings-added');
+        return `${restored}; ${st.rows.map((x) => `${x.site} ${x.button || 'added'}`).join(', ')}; ${want.length} mods for ${SETTINGS_ADD}, TRIF on for ${e.sitesOn.join(', ')}`;
+      } finally {
+        await this.d.click(this.panelCtx, '#settings-btn').catch(() => {});
+        await waitFor('settings to close', async () => this.panel(`async () => document.querySelector('#settings').hidden`), { timeoutMs: 5000 }).catch(() => {});
+      }
+    });
+  }
+
+  /**
+   * A site Tim has mods for that the user hasn't added: its panel has "Add Tim's mods for <site>" (in the
+   * gate, TRIF being off there). The link adds them; for a site in SITES_ON TRIF comes on there too.
+   */
+  async starterLinkCheck(win) {
+    const r = this.r;
+    const L = LINK_SITE[this.o.kind];
+    await r.check(`a site's panel: "Add Tim's mods for ${L.name}" adds them`, async () => {
+      const url = `https://${L.host}:${this.o.servers.tlsPort}/`;
+      const tab = await this.ext(`async (url, windowId) => (await chrome.tabs.create({ windowId, url, active: true })).id`, [url, win.windowId]);
+      const link = () => this.panel(`async () => {
+        const p = document.querySelector('#site-starter');
+        return { site: document.querySelector('#site').textContent, gate: !document.querySelector('#gate').hidden, shown: !!p && p.getClientRects().length > 0,
+          inGate: !!p?.closest('#gate'), text: document.querySelector('#site-starter-link').textContent, err: document.querySelector('#site-starter-err').textContent,
+          mods: [...document.querySelectorAll('#mod-list > li')].map((li) => li.dataset.mod) };
+      }`);
+      let last = null;
+      const until = (what, ok) => waitFor(what, async () => { last = await link(); return ok(last) ? last : null; }, { timeoutMs: 15000 })
+        .catch((e) => { throw new Error(`${e.message}: ${JSON.stringify(last)}`); });
+      try {
+        const st = await until('the link on the site\'s panel', (x) => x.site === L.host.replace(/^www\./, '') && x.shown); // (the panel names it without www.)
+        if (st.text !== `Add Tim’s mods for ${L.name}` || !st.gate || !st.inGate) throw new Error(JSON.stringify(st));
+        await sleep(300);
+        await this.shot(this.panelCtx, 'starter-site-link');
+        await this.d.click(this.panelCtx, '#site-starter-link');
+        const want = shippedFor(L.site);
+        const on = SITES_ON.includes(L.site);
+        const after = await until('the mods added', (x) => !x.shown && !x.err && want.every((id) => fs.existsSync(path.join(this.trif, 'sites', `${id}.js`)))
+          && (on ? !x.gate && want.every((id) => x.mods.includes(id)) : x.gate));
+        const e = (await this.cli(['status'], { json: true })).json.extension;
+        if (e.sitesOn.includes(L.site) !== on) throw new Error(`TRIF ${on ? 'not ' : ''}on for ${L.site}: ${e.sitesOn}`);
+        if (!this.addedSites().includes(L.site)) throw new Error(`${L.site} not recorded as added`);
+        await sleep(300);
+        await this.shot(this.panelCtx, 'starter-site-added');
+        return `${want.length} mods for ${L.site}${on ? `, TRIF on there, listed: ${after.mods.length}` : ', TRIF still off there (not in SITES_ON)'}`;
+      } finally {
+        await this.ext(`async (id) => { await chrome.tabs.remove(id); }`, [tab]).catch(() => {});
+        await this.ext(`async (id) => { await chrome.tabs.update(id, { active: true }); }`, [win.tabId]).catch(() => {});
+      }
+    });
+  }
+
   // ---- the scenario
 
   async run() {
@@ -364,9 +575,9 @@ class Scenario {
       // The user's own mod, and an edit to a shipped one, before upgrading.
       fs.mkdirSync(path.join(legacy, 'sites', '127.0.0.1'), { recursive: true });
       fs.writeFileSync(path.join(legacy, 'sites', '127.0.0.1', 'e2e-user.js'), USER_MOD);
-      const shipped = path.join(legacy, 'sites', 'x.com', 'punk-fonts.js');
+      const shipped = path.join(legacy, 'sites', 'x.com', 'rainbow-rave.js');
       fs.appendFileSync(shipped, '\n// e2e: the user changed this shipped mod\n');
-      this.r.note(I.ensureShippedUpdate(oldPkg, pkg, 'x.com/punk-fonts'));
+      this.r.note(I.ensureShippedUpdate(oldPkg, pkg, 'x.com/rainbow-rave'));
       // The way a 0.1.x helper's updater runs the new version's setup (--home ~/.webmods).
       const s = I.runSetup(pkg, this.home, ['--home', legacy, '--browser', browserArg]);
       this.r.log(s.out);
@@ -387,10 +598,10 @@ class Scenario {
         if (!fs.existsSync(path.join(this.trif, 'sites', '127.0.0.1', 'e2e-user.js'))) throw new Error('sites/127.0.0.1/e2e-user.js is gone');
       });
       await this.r.check('upgrade: the edited shipped mod kept, new version waiting', () => {
-        const text = fs.readFileSync(path.join(this.trif, 'sites', 'x.com', 'punk-fonts.js'), 'utf8');
+        const text = fs.readFileSync(path.join(this.trif, 'sites', 'x.com', 'rainbow-rave.js'), 'utf8');
         if (!text.includes('the user changed this shipped mod')) throw new Error('the user\'s edit is gone');
         const pre = I.readJson(path.join(this.trif, 'preinstalled.json')) || {};
-        const rec = (pre.shipped || {})['x.com/punk-fonts'];
+        const rec = (pre.shipped || {})['x.com/rainbow-rave'];
         if (!rec || !rec.pending) throw new Error(`no pending update recorded: ${JSON.stringify(rec)}`);
         if (!/new version waiting/.test(s.out)) throw new Error('setup didn\'t say a new version is waiting');
         return `pending version ${rec.pending.version}`;
@@ -456,6 +667,8 @@ class Scenario {
       this.d = new ChromeDriver({
         userDataDir: path.join(this.home, 'Library/Application Support/Google/Chrome'), home: env.HOME, env,
         extensionDir: path.join(this.trif, 'app', 'extension'), headless: o.headless, siteAccess: this.allSites ? 'all' : undefined,
+        // (The sites whose panel offers "Add Tim's mods": never the real ones. Firefox resolves every host here.)
+        hosts: [...new Set(Object.values(LINK_SITE).map((x) => x.host))],
       });
     }
     await this.d.start();
@@ -493,10 +706,10 @@ class Scenario {
     // The setup page: our handle on the extension's chrome.* APIs, and the user scripts permission.
     this.control = await d.openTab(`${origin}/onboarding.html`);
     await r.check('setup page: a checklist, the helper and the browser ticked, user scripts next', async () => {
-      // (Upgrading, the starter mods are there already and TRIF has every site: those steps are ticked.)
+      // (Upgrading, Tim's mods are there already and TRIF has every site: those steps are ticked.)
       const later = this.o.kind === 'upgrade' ? 'done,done' : 'later,later';
       const x = await this.waitSetup('step 3 open', (st) => st.steps.join() === `done,done,now,${later},later,later`);
-      if (x.docTitle !== 'TRIF setup' || x.title !== 'Set up TRIF' || x.states.join() !== (this.o.kind === 'upgrade' ? 'connected,done,added,permissive' : 'connected,done')) throw new Error(JSON.stringify(x));
+      if (x.docTitle !== 'TRIF setup' || x.title !== 'Set up TRIF' || x.states.join() !== (this.o.kind === 'upgrade' ? 'connected,done,Google, X, Amazon and Instagram,permissive' : 'connected,done')) throw new Error(JSON.stringify(x));
       const want = d.name === 'Firefox' ? /Firefox asks before an add-on runs them\.[\s\S]*Allow user scripts/ : /One switch:[\s\S]*flip this[\s\S]*Open TRIF’s Chrome settings/;
       if (!want.test(x.now)) throw new Error(`step 3 says: ${x.now}`);
       await this.shot(this.control, 'setup-page-scripts-off');
@@ -507,41 +720,7 @@ class Scenario {
       await waitFor('status.userScripts', async () => (await this.cli(['status'], { json: true })).json?.extension?.userScripts, { timeoutMs: 20000 });
       return how;
     });
-    // Tim's starter mods, step 4: nothing of his on disk until the user chooses. Upgrading, the old setup
-    // copied them: ticked "added". Fresh Firefox: "Add them". Fresh Chrome: "Start with none" (they're added
-    // later from the panel's Settings, the way back).
-    this.starterNone = this.o.kind !== 'upgrade' && this.o.browser !== 'firefox';
-    if (allowed) {
-      await r.check(this.o.kind === 'upgrade' ? 'setup page: Tim\'s starter mods ticked "added" (copied by the setup before there was a choice)'
-        : this.starterNone ? 'setup page: Tim\'s starter mods next, nothing on disk; "Start with none": ticked "none", no mods, no start sites'
-          : 'setup page: Tim\'s starter mods next, nothing on disk; "Add them": ticked "added", the mods there', async () => {
-        if (this.o.kind === 'upgrade') {
-          const x = await this.waitSetup('step 4 ticked', (st) => st.steps[3] === 'done');
-          if (x.states[3] !== 'added') throw new Error(`step 4 ticked as ${x.states[3]}`);
-          return 'added';
-        }
-        const x = await this.waitSetup('step 4 open', (st) => st.steps.join() === 'done,done,done,now,later,later,later');
-        const offer = require('../../helper/lib/preinstalled').PREINSTALLED.length;
-        const words = ['Tim\'s starter mods', `${offer} small mods for Google, X, Amazon and Instagram: no ads or AI clutter, calmer feeds. They’re plain JavaScript you can read before they run.`];
-        if (!words.every((w) => x.now.includes(w)) || x.buttons.join() !== 'Add them,Start with none'
-          || JSON.stringify(x.links) !== JSON.stringify(['See what’s in them https://github.com/acapellascience/trif/tree/main/examples/sites'])) throw new Error(`step 4: ${JSON.stringify(x)}`);
-        if (fs.existsSync(path.join(this.trif, 'sites', 'x.com'))) throw new Error('Tim\'s mods are on disk before the user chose them');
-        await this.shot(this.control, 'setup-page-starter-mods');
-        await d.click(this.control, this.starterNone ? '#starter-none' : '#starter-add');
-        const want = this.starterNone ? 'none' : 'added';
-        const y = await this.waitSetup('step 4 ticked', (st) => st.steps[3] === 'done', 15000);
-        if (y.states[3] !== want) throw new Error(`step 4 ticked as ${y.states[3]}`);
-        const there = fs.existsSync(path.join(this.trif, 'sites', 'x.com', 'detox-timeline.js'));
-        if (there === this.starterNone) throw new Error(`x.com/detox-timeline.js ${there ? 'is' : 'isn\'t'} on disk`);
-        const pre = I.readJson(path.join(this.trif, 'preinstalled.json')) || {};
-        if (pre.starter !== want) throw new Error(`preinstalled.json: ${JSON.stringify(pre.starter)}`);
-        if (this.starterNone) {
-          const st = (await this.cli(['status'], { json: true })).json.extension;
-          if (SITES_START.some((site) => (st.sitesOn || []).includes(site))) throw new Error(`start sites on: ${st.sitesOn}`);
-        }
-        return `${want}: "${words[1].slice(0, 60)}…"`;
-      });
-    }
+    if (allowed) await this.starterSetupCheck();
     // Site permissions, the setup page's step 5: permissive or restrictive. Upgrading, TRIF has <all_urls>
     // already (lib/chrome.js, or asked for and the add-on restarted in Firefox): permissive, ticked. Fresh,
     // it's open; it's chosen after the shipped mods are checked.
@@ -585,7 +764,45 @@ class Scenario {
       return warns.length ? { status: 'warn', detail: `warnings: ${warns.map((c) => c.title).join('; ')}` } : `${doc.json.checks.length} checks ok`;
     });
 
-    if (!this.starterNone) await this.shippedChecks();
+    await r.check('shipped mods present and recognised (trif mods, trif status): the sites added, and only those', async () => {
+      const mods = (await this.cli(['mods'], { json: true })).json;
+      const list = Array.isArray(mods) ? mods : (mods && (mods.mods || [])) || [];
+      const shipped = list.filter((m) => m.source === 'webmods' || m.source === 'trif');
+      // Every mod TRIF ships for the sites added is there (fresh: the ones picked on the setup page; an
+      // upgrade: every site it had); each is marked as shipped (@source), except a copy the user edited
+      // before 0.1.2, when the shipped mods had no @source line yet. None for the other sites.
+      const added = this.addedSites();
+      const left = (I.readJson(path.join(this.trif, 'preinstalled.json')) || {}).skipped || [];
+      const want = SHIPPED_IDS.filter((id) => added.includes(siteOf(id)) && !left.includes(id));
+      const ids = new Set(list.map((m) => m.id));
+      const missing = want.filter((id) => !ids.has(id));
+      if (missing.length) throw new Error(`missing: ${missing.join(', ')}`);
+      const extra = SHIPPED_IDS.filter((id) => (!added.includes(siteOf(id)) || left.includes(id)) && ids.has(id));
+      if (extra.length) throw new Error(`there, for sites not added: ${extra.join(', ')}`);
+      const unmarked = want.filter((id) => !shipped.some((m) => m.id === id) && !(this.o.kind === 'upgrade' && id === 'x.com/rainbow-rave'));
+      if (unmarked.length) throw new Error(`not recognised as shipped: ${unmarked.join(', ')}`);
+      const st = (await this.cli(['status'], { json: true })).json.extension;
+      const byId = new Map(st.mods.map((m) => [m.id, m]));
+      const px = byId.get('x.com/detox-timeline');
+      if (!px || px.enabled === false) throw new Error(`x.com/detox-timeline not on: ${JSON.stringify(px)}`);
+      // A mod that starts off arrives off (ticked means on the computer, not switched on).
+      const offId = this.o.kind === 'fresh' ? 'x.com/space-shooter' : 'x.com/rainbow-rave';
+      const pf = byId.get(offId);
+      if (!pf || pf.enabled !== false) throw new Error(`${offId} should start off: ${JSON.stringify(pf)}`);
+      for (const s of SITES_ON) {
+        if (added.includes(s) !== (st.sitesOn || []).includes(s)) throw new Error(`TRIF is ${added.includes(s) ? 'not ' : ''}on for ${s}: ${st.sitesOn}`);
+      }
+      if (this.o.kind === 'upgrade') {
+        const u = list.find((m) => m.id === 'x.com/rainbow-rave');
+        if (!u || !u.update) throw new Error(`trif mods shows no update for x.com/rainbow-rave: ${JSON.stringify(u)}`);
+        // The retired mods' switches were handed to the mods they went into (once; both on here).
+        const gone = RETIRED.filter((x) => !ids.has(x.id) && ((I.readJson(path.join(this.trif, 'preinstalled.json')) || {}).shipped || {})[x.id]?.retired?.trashed);
+        const { absorbed = {} } = await this.ext(`async () => chrome.storage.local.get('absorbed')`);
+        const missed = gone.filter((x) => absorbed[x.id] !== true || byId.get(x.into)?.enabled === false);
+        if (missed.length) throw new Error(`switches not carried over for ${missed.map((x) => x.id).join(', ')}: absorbed ${JSON.stringify(absorbed)}`);
+      }
+      return `${shipped.length} shipped (${shipped.filter((m) => byId.get(m.id)?.enabled !== false).length} on) for ${added.join(', ')}; sites on: ${st.sitesOn.join(', ')}`;
+    });
 
     // Fresh: Firefox clicks Permissive and says no to Firefox's prompt (answered from the browser's side),
     // so TRIF is restrictive, said under the ticked step; Chrome (its prompt can't be answered here) clicks
@@ -610,7 +827,8 @@ class Scenario {
         if (asksMode && ff && note !== 'Firefox didn’t get your OK, so TRIF is restrictive. You can switch to permissive later in the sidebar’s Settings.') throw new Error(`the note: ${JSON.stringify(note)}`);
         if (!(asksMode && ff) && note) throw new Error(`a note: ${note}`);
         const st = (await this.cli(['status'], { json: true })).json.extension;
-        const disconnected = asksMode && !this.starterNone ? (ff ? SITES_START : ['amazon.com', 'instagram.com']) : [];
+        // (only the sites added on the setup page are on; Chrome's test build has access to x.com and google.com)
+        const disconnected = asksMode && ff ? SITES_START.filter((x) => FRESH_PICKS.includes(x)) : [];
         if (st.siteMode !== want || JSON.stringify(st.disconnected) !== JSON.stringify(disconnected)) throw new Error(`status: ${JSON.stringify([st.siteMode, st.disconnected])}`);
         const text = await this.cli(['status']);
         if (!new RegExp(`^site mode {5}${want}`, 'm').test(text.stdout)) throw new Error(`trif status: ${text.stdout}`);
@@ -629,24 +847,6 @@ class Scenario {
     await this.waitPage('the test page', (s) => s.ready === 'complete');
     await this.ext(`async (url, win) => { await chrome.windows.create({ url, width: 420, height: 900 }); }`, [`${origin}/sidepanel.html?window=${win.windowId}`, win.windowId]);
     this.panelCtx = await d.findPage('sidepanel.html');
-
-    // Fresh Chrome started with none: Settings in the panel adds them later (the way back), then the same
-    // checks as where they were added at setup.
-    if (this.starterNone) {
-      await r.check('Settings → "Add Tim\'s starter mods" (after "Start with none"): the mods arrive, their sites on, and the button goes', async () => {
-        await this.waitPanel('the panel to load', (x) => x.site === '127.0.0.1');
-        await d.click(this.panelCtx, '#settings-btn');
-        const shown = await waitFor('the button', () => this.panel(`async () => !document.querySelector('#settings').hidden && !document.querySelector('#starter-block').hidden && document.querySelector('#starter-block').innerText`), { timeoutMs: 8000 });
-        await this.shot(this.panelCtx, 'settings-starter-mods');
-        await d.click(this.panelCtx, '#starter-add');
-        await waitFor('the starter mods', () => fs.existsSync(path.join(this.trif, 'sites', 'x.com', 'detox-timeline.js')), { timeoutMs: 15000 });
-        await waitFor('the button to go', () => this.panel(`async () => document.querySelector('#starter-block').hidden`), { timeoutMs: 10000 });
-        await waitFor('the start sites on', async () => (((await this.cli(['status'], { json: true })).json.extension || {}).sitesOn || []).includes('x.com'), { timeoutMs: 10000 });
-        await d.click(this.panelCtx, '#settings-btn');
-        return shown.replace(/\n+/g, ' / ');
-      });
-      await this.shippedChecks();
-    }
 
     // Fresh Firefox is restrictive with no site connected: 127.0.0.1 is disconnected (the panel all grey).
     // Chrome's fresh test build has 127.0.0.1 (restrictive, connected), and upgrading TRIF has every site
@@ -930,14 +1130,16 @@ class Scenario {
       if (!px || !px.on || !px.running) throw new Error(`detox-timeline: ${JSON.stringify(px)}`);
       if (!px.source || !/^Tim's mod, v\d+$/.test(px.source)) throw new Error(`detox-timeline isn't marked as Tim's mod: ${px.source}`);
       if (this.o.kind === 'upgrade') {
-        const pf = p.mods.find((m) => m.id === 'x.com/punk-fonts');
-        if (!pf || !pf.update) throw new Error(`no update notice on punk-fonts: ${JSON.stringify(pf)}`);
+        const pf = p.mods.find((m) => m.id === 'x.com/rainbow-rave');
+        if (!pf || !pf.update) throw new Error(`no update notice on rainbow-rave: ${JSON.stringify(pf)}`);
         await this.shot(this.panelCtx, 'panel-x-update');
-        return `punk-fonts: "${pf.update.split('\n')[0]}"`;
+        return `rainbow-rave: "${pf.update.split('\n')[0]}"`;
       }
       await this.shot(this.panelCtx, 'panel-x');
       return p.mods.map((m) => `${m.id.split('/')[1]} ${m.on ? 'on' : 'off'}`).join(', ');
     });
+    await this.starterSettingsCheck();
+    await this.starterLinkCheck(win);
     await this.narrowShots();
     await this.colourChecks().catch((e) => r.check('colour checks', () => { throw e; }));
     if (!this.o.oss) await r.check('open model key: saved, then Replace (and Cancel) and Remove', () => this.openModelKey());
@@ -965,40 +1167,6 @@ class Scenario {
 
   // ---- the shipped Google mods against the stand-ins (tests/e2e/lib/server.js): every data-e2e="hide…"
   // element hidden, every "keep…" one still showing, in a background tab.
-  /** Tim's starter mods, once added: every one there, recognised, on or off as shipped, their sites on. */
-  async shippedChecks() {
-    const r = this.r;
-    await r.check('shipped mods present and recognised (trif mods, trif status)', async () => {
-      const mods = (await this.cli(['mods'], { json: true })).json;
-      const list = Array.isArray(mods) ? mods : (mods && (mods.mods || [])) || [];
-      const shipped = list.filter((m) => m.source === 'webmods' || m.source === 'trif');
-      // Every mod TRIF ships is there; each is marked as shipped (@source), except a copy the user edited
-      // before 0.1.2, when the shipped mods had no @source line yet.
-      const ids = new Set(list.map((m) => m.id));
-      const missing = SHIPPED_IDS.filter((id) => !ids.has(id));
-      if (missing.length) throw new Error(`missing: ${missing.join(', ')}`);
-      const unmarked = SHIPPED_IDS.filter((id) => !shipped.some((m) => m.id === id) && !(this.o.kind === 'upgrade' && id === 'x.com/punk-fonts'));
-      if (unmarked.length) throw new Error(`not recognised as shipped: ${unmarked.join(', ')}`);
-      const st = (await this.cli(['status'], { json: true })).json.extension;
-      const byId = new Map(st.mods.map((m) => [m.id, m]));
-      const px = byId.get('x.com/detox-timeline');
-      if (!px || px.enabled === false) throw new Error(`x.com/detox-timeline not on: ${JSON.stringify(px)}`);
-      const pf = byId.get('x.com/punk-fonts');
-      if (!pf || pf.enabled !== false) throw new Error(`x.com/punk-fonts should start off: ${JSON.stringify(pf)}`);
-      for (const s of ['google.com', 'x.com', 'amazon.com', 'instagram.com']) if (!(st.sitesOn || []).includes(s)) throw new Error(`TRIF isn't on for ${s}: ${st.sitesOn}`);
-      if (this.o.kind === 'upgrade') {
-        const u = list.find((m) => m.id === 'x.com/punk-fonts');
-        if (!u || !u.update) throw new Error(`trif mods shows no update for x.com/punk-fonts: ${JSON.stringify(u)}`);
-        // The retired mods' switches were handed to the mods they went into (once; both on here).
-        const gone = RETIRED.filter((x) => !ids.has(x.id) && ((I.readJson(path.join(this.trif, 'preinstalled.json')) || {}).shipped || {})[x.id]?.retired?.trashed);
-        const { absorbed = {} } = await this.ext(`async () => chrome.storage.local.get('absorbed')`);
-        const missed = gone.filter((x) => absorbed[x.id] !== true || byId.get(x.into)?.enabled === false);
-        if (missed.length) throw new Error(`switches not carried over for ${missed.map((x) => x.id).join(', ')}: absorbed ${JSON.stringify(absorbed)}`);
-      }
-      return `${shipped.length} shipped (${shipped.filter((m) => byId.get(m.id)?.enabled !== false).length} on), sites on: ${st.sitesOn.join(', ')}`;
-    });
-  }
-
   /**
    * Firefox, permissive: "Switch to restrictive mode" in the card Disconnect opens gives every site's access
    * back, no prompt: 127.0.0.1 goes grey, as every other site; Connect brings it back (the prompt is off).
@@ -1540,8 +1708,8 @@ class Scenario {
     const d = this.d;
     const chatKey = 'chat:x.com';
     const chat = () => this.ext(`async (k) => (await chrome.storage.local.get(k))[k] || null`, [chatKey]);
-    const file = path.join(this.trif, 'sites', 'x.com', 'punk-fonts.js');
-    const pending = () => (JSON.parse(fs.readFileSync(path.join(this.trif, 'preinstalled.json'), 'utf8')).shipped || {})['x.com/punk-fonts'] || {};
+    const file = path.join(this.trif, 'sites', 'x.com', 'rainbow-rave.js');
+    const pending = () => (JSON.parse(fs.readFileSync(path.join(this.trif, 'preinstalled.json'), 'utf8')).shipped || {})['x.com/rainbow-rave'] || {};
     const before = fs.readFileSync(file, 'utf8');
     const model = this.o.claudeModel || 'haiku';
     if (this.o.agent) {
@@ -1552,7 +1720,7 @@ class Scenario {
       // Without your login the agent can't run, so the button waits for one (F14) and says why.
       await r.check('Merge with my agent: waits for a login, and says so', async () => {
         const b = await waitFor('the merge button', () => this.panel(`async () => {
-          const m = document.querySelector('li[data-mod="x.com/punk-fonts"] .mod-update .merge');
+          const m = document.querySelector('li[data-mod="x.com/rainbow-rave"] .mod-update .merge');
           return m ? { disabled: m.disabled, title: m.title } : null;
         }`), { timeoutMs: 10000 });
         if (!b.disabled || !/^Log in to .+ first/.test(b.title)) throw new Error(JSON.stringify(b));
@@ -1564,7 +1732,7 @@ class Scenario {
     await r.check('Merge with my agent: one click starts it, while the panel keeps refreshing', async () => {
       // Busy the panel the way real use does (status refreshes, storage changes) right before the click.
       await this.panel(`async () => { for (let i = 0; i < 5; i++) { await chrome.storage.local.set({ e2eTick: i }); document.dispatchEvent(new Event('visibilitychange')); } }`);
-      await d.click(this.panelCtx, 'li[data-mod="x.com/punk-fonts"] .mod-update .merge');
+      await d.click(this.panelCtx, 'li[data-mod="x.com/rainbow-rave"] .mod-update .merge');
       const c = await waitFor('the merge request in the chat', async () => {
         const x = await chat();
         return x && x.messages.some((m) => m.role === 'user' && /suggest how to merge/.test(m.text)) ? x : null;
@@ -1581,7 +1749,7 @@ class Scenario {
       await this.shot(this.panelCtx, 'panel-merge-proposal');
       r.log(`merge proposal chat: ${JSON.stringify(c.messages, null, 2)}`);
       const said = c.messages.filter((m) => m.role === 'assistant').map((m) => m.text).join('\n');
-      if (fs.readFileSync(file, 'utf8') !== before) throw new Error(`punk-fonts.js changed before the user said go ahead:\n${said.slice(-600)}`);
+      if (fs.readFileSync(file, 'utf8') !== before) throw new Error(`rainbow-rave.js changed before the user said go ahead:\n${said.slice(-600)}`);
       if (!pending().pending) throw new Error('the update was settled by the proposal');
       if (!said.trim()) throw new Error(`no proposal in the chat: ${JSON.stringify(c.messages.slice(-3))}`);
       return said.replace(/\s+/g, ' ').slice(0, 300);
@@ -1594,11 +1762,11 @@ class Scenario {
       await this.shot(this.panelCtx, 'panel-merge-done');
       r.log(`merge go-ahead chat: ${JSON.stringify(c.messages.slice(n0), null, 2)}`);
       const now = fs.readFileSync(file, 'utf8');
-      if (now === before) throw new Error('punk-fonts.js is unchanged');
+      if (now === before) throw new Error('rainbow-rave.js is unchanged');
       const v = /@version\s+(\S+)/.exec(now);
       const rec = await waitFor('the update to settle', async () => (pending().pending ? null : pending()), { timeoutMs: 10000 }).catch(() => null);
       if (!rec) throw new Error(`the update is still waiting (the copy says @version ${v && v[1]})`);
-      const p = await this.waitPanel('the offer to go', (x) => x.mods.some((m) => m.id === 'x.com/punk-fonts' && !m.update), 15000);
+      const p = await this.waitPanel('the offer to go', (x) => x.mods.some((m) => m.id === 'x.com/rainbow-rave' && !m.update), 15000);
       return `@version ${v && v[1]}; ${p ? 'the panel no longer offers it' : ''}`;
     });
   }

@@ -98,7 +98,7 @@ you to from their terminal (side-panel runs can't).
 
 ### Mods TRIF ships
 
-The mods setup put in the workspace (Detox Timeline, the Google, Amazon and Instagram ones) say `// @source webmods` (or `trif`) and `// @version <n>` in their header. You may change them
+Tim's mods (the ones the user chose to add, site by site, at setup or later in Settings: Detox Timeline, X-Flyer, the Google, Amazon and Instagram ones…) say `// @source webmods` (or `trif`) and `// @version <n>` in their header. You may change them
 like any other mod when the user asks. While a copy is exactly as shipped, TRIF replaces it with each new
 version silently; once it's changed, it never does: when a new version comes, the user gets an offer in
 the side panel to use it (their copy goes to the trash), keep theirs, or merge the two with their agent.

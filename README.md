@@ -55,13 +55,15 @@ switches stay as they were; in Safari, install the new TRIF.app (see Safari belo
    press ⌘⇧G and paste: setup put the folder's path, `~/.trif/app/extension`, on your clipboard.)
 
 3. **Allow it to run mods.** On the **TRIF setup** tab that opens, click **Open TRIF’s Chrome
-   settings** and turn on **Allow User Scripts**. Then choose whether to add **Tim's starter mods** (a
-   few small mods for Google, X, Amazon and Instagram; nothing of them is on your computer until you
-   click **Add them**, and **Start with none** is fine too), and **Permissive** (TRIF can reach every
-   site; Chrome asks you once) or **Restrictive** (you connect TRIF one site at a time). You can change
-   both later, in the side panel's settings.
+   settings** and turn on **Allow User Scripts**.
 
-4. **Open the side panel.** Click the TRIF icon in the toolbar (pin it from the puzzle-piece menu). If
+4. **Pick Tim's mods, if you want them.** The same tab lists the mods Tim made for a few sites (X,
+   Google, Amazon, Instagram): tick the sites you want and click **Add these**, or **Start with none**.
+   Nothing of his is on your computer until you do, and you can add any site's later in **Settings** in
+   the side panel. Then choose **Permissive** (TRIF can reach every site; Chrome asks you once) or
+   **Restrictive** (you connect TRIF one site at a time); you can change that later in Settings too.
+
+5. **Open the side panel.** Click the TRIF icon in the toolbar (pin it from the puzzle-piece menu). If
    it asks you to log in to Claude, click **Log in** and follow the steps.
 
 ### Firefox
@@ -133,10 +135,10 @@ Settings → Extensions and delete the old WebMods app.
 
 ### Tim's starter mods
 
-Optional: the setup page asks before adding them (or `trif setup --examples`; Settings in the side panel
-can add them later). They're plain JavaScript in `~/.trif/sites`, which you can read first
-([examples/sites](examples/sites)). Added, TRIF starts on for Google, X, Amazon and Instagram, with these
-mods. Each has a switch in the side panel on its site; the ones marked *(off)* wait for you to switch
+Optional: the setup page asks, site by site, before adding them (or `trif setup --examples [sites]`;
+Settings in the side panel can add any site's later). They're plain JavaScript in `~/.trif/sites`, which
+you can read first ([examples/sites](examples/sites)). TRIF starts on for each of Google, X, Amazon and
+Instagram you add, with these mods. Each has a switch in the side panel on its site; the ones marked *(off)* wait for you to switch
 them on.
 
 - **Google:** AI Banisher (no AI Overview, AI Mode or Gemini promo), Just Results (no sponsored results
@@ -145,8 +147,8 @@ them on.
 - **X:** **Detox Timeline**: Home is just the people you follow, newest first, with no ads or suggestions. It
   starts as plain as it gets (only original text posts from people who follow you back); the **Filters**
   menu turns each kind back on (reposts, quotes, replies, links, videos, images, non-mutuals…). It also hides the
-  trends column, tidies post pages, and turns Explore into a plain search field. Punk Fonts *(off)* and
-  Rainbow Rave *(off)*, for fun.
+  trends column, tidies post pages, and turns Explore into a plain search field. Rainbow Rave *(off)*,
+  for fun.
 - **Amazon:** Simple Home (just a search box) and Simple Shopping (results show only picture, price and
   stars; no sponsored items, ads or recommendations).
 - **Instagram:** Only Following (no suggested posts or ads), Hide Reposts, Hide AI, and

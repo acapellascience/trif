@@ -142,8 +142,14 @@
   const LINKS = '[data-testid=tweetText] a, [data-testid=tweet-text-show-more-link]';
   // (never on text you can edit, :read-write: emojis there can't be wrapped, so they'd turn into rainbow blobs
   // as you type; each part of the list gets it, before any pseudo-element)
+  // (pinned rainbows: Profile Styler's seamless small rainbow (3 hue cycles in 102 px: 34 px a cycle across
+  // and down), its window-sized image rounded up to whole cycles, PINNED, so where the image repeats it meets
+  // itself stripe to stripe; sized to the window exactly, the rolling slid a seam across what was near it)
+  const RB_P = 102 / (3 * Math.SQRT2);
+  const RAVE_TILE = `repeating-linear-gradient(45deg, ${Array.from({ length: 13 }, (_, i) => `hsl(${i * 30} 100% 60%) ${(i * RB_P / 12).toFixed(4)}px`).join(', ')})`;
+  const PINNED = 'background-size: round(up, 100vw, 34px) round(up, 100vh, 34px) !important;';
   const rainbowText = (sel) => `${sel.split(/,(?![^(]*\))/).map((s) => s.trim().replace(/(::[\w-]+)?$/, ':not(:read-write)$1')).join(', ')} { text-shadow: none !important; color: transparent !important; -webkit-text-fill-color: transparent !important;
-      background-image: ${RAVE_SMALL} !important; background-size: auto !important; background-repeat: repeat !important;
+      background-image: ${RAVE_TILE} !important; ${PINNED} background-repeat: repeat !important;
       background-attachment: fixed !important; background-clip: text !important; -webkit-background-clip: text !important;
       animation: ps-text-roll .8s steps(12) infinite !important; }`;
   const bigRainbow = `background-color: transparent !important; background-image: ${RAVE_BG} !important; background-size: calc(100vw + 140vmax) 100vh !important;
@@ -199,13 +205,13 @@
   `;
   // (each ps-line-hue animation pinned to the page's time origin: every line steps through the hues together)
   addEventListener('animationstart', (e) => {
-    if (e.animationName !== 'ps-line-hue') return;
+    if (!e.animationName.startsWith('ps-')) return;
     try { for (const a of e.target.getAnimations()) if (a.animationName === e.animationName && a.startTime !== 0) a.startTime = 0; } catch {}
   }, true);
   const css = document.createElement('style');
   css.id = 'ps-css';
   css.textContent = `
-    @keyframes ps-text-roll { from { background-position: 0 0; } to { background-position: 33.941px 0; } }
+    @keyframes ps-text-roll { from { background-position: 0 0; } to { background-position: 34px 0; } }
     @keyframes ps-box-roll { from { background-position: calc(-30vmax / 0.9063) 0; } to { background-position: calc(-90vmax / 0.9063) 0; } }
     @property --ps-lh { syntax: '<angle>'; inherits: false; initial-value: 0deg; }
     @keyframes ps-line-hue { from { --ps-lh: 0deg; } to { --ps-lh: 360deg; } }
@@ -218,7 +224,7 @@
        read on it); rainbow: the small rainbow */
     ${C}[data-ps~=buttons] :is(${FOLLOW}) { background-color: var(--ps-buttons) !important; border-color: var(--ps-buttons) !important; }
     ${C}[data-ps~=buttons] :is(${FOLLOW}) *:not(#ps-b):not(#ps-c) { color: var(--ps-on-buttons) !important; -webkit-text-fill-color: var(--ps-on-buttons) !important; background-image: none !important; }
-    ${C}[data-ps-r~=buttons] :is(${FOLLOW}) { background-image: ${RAVE_SMALL} !important; background-attachment: fixed !important; border-color: rgb(255 255 255 / .9) !important;
+    ${C}[data-ps-r~=buttons] :is(${FOLLOW}) { background-image: ${RAVE_TILE} !important; ${PINNED} background-repeat: repeat !important; background-attachment: fixed !important; border-color: rgb(255 255 255 / .9) !important;
       animation: ps-text-roll .8s linear infinite !important; }
     ${C}[data-ps-r~=buttons] :is(${FOLLOW}) *:not(#ps-b):not(#ps-c) { color: #fff !important; -webkit-text-fill-color: #fff !important; text-shadow: 0 1px 2px rgb(0 0 0 / .6); }
     /* emojis stay emojis in rainbow text (wrapped by wrapEmoji) */
@@ -365,13 +371,25 @@
     const h = /^UserAvatar-Container-(\w{1,15})$/.exec(box?.dataset.testid || '')?.[1];
     const av = cell.querySelector('img[src*="/profile_images/"]');
     if (!h || !av) return {};
-    for (const a of cell.querySelectorAll('a[href]')) {
-      if (a.getAttribute('href').toLowerCase() !== `/${h.toLowerCase()}`) continue;
-      for (const s of a.querySelectorAll('span')) {
-        if (s.closest('[data-ps-emoji], [data-ps-txt]')) continue;
+    // (the name: a span with text that isn't the @handle, holding nothing but text and emoji wrappers; first
+    // in the link to them, else (the search box's drop-down, whose entries have no link to the person) the
+    // first such span in the card outside its buttons)
+    // (a button in the card, Follow or the ✕ by a recent search, isn't the name; but a drop-down entry is a
+    // button itself, picture and all, and its name is inside it)
+    const nameIn = (scope) => {
+      for (const s of scope.querySelectorAll('span')) {
+        if (s.closest('[data-ps-emoji], [data-ps-txt], [data-pst-emoji]')) continue;
+        const btn = s.closest('button, [role=button]');
+        if (btn && !btn.contains(box)) continue;
         const t = (s.textContent || '').trim();
-        if (t && !t.startsWith('@') && !s.querySelector('span:not([data-ps-emoji]):not([data-ps-txt])')) { if (!s.hasAttribute('data-ps-name')) s.setAttribute('data-ps-name', ''); break; }
+        if (t && !t.startsWith('@') && !s.querySelector('span:not([data-ps-emoji]):not([data-ps-txt]):not([data-pst-emoji])')) return s;
       }
+      return null;
+    };
+    if (!cell.querySelector('[data-ps-name]')) {
+      const link = [...cell.querySelectorAll('a[href]')].find((a) => a.getAttribute('href').toLowerCase() === `/${h.toLowerCase()}` && !a.querySelector('img'));
+      const s = (link && nameIn(link)) || nameIn(cell);
+      if (s) s.setAttribute('data-ps-name', '');
     }
     for (const s of cell.querySelectorAll('span:not([data-ps-handle])')) if (!s.children.length && isHandle(s)) s.setAttribute('data-ps-handle', '');
     for (const svg of cell.querySelectorAll('svg[data-testid=icon-verified]:not([data-ps-badge])')) svg.setAttribute('data-ps-badge', '');

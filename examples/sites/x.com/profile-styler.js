@@ -181,20 +181,27 @@
   // (and no drop shadow: a text shadow paints over a background clipped to the letters, muddying the
   // rainbow; :not(#pst-never) lifts these rules above the shadow ones, see SHADOW)
   // (and never on text you can edit, :read-write: emojis there can't be wrapped, see wrapEmoji)
+  // (PINNED: the window-sized image of a pinned rainbow, rounded up to a whole number of hue cycles each way
+  // (RAVE_TILE's: 34 px across, 34 down): sized to the window exactly, its edge met the next copy mid-stripe,
+  // and the rolling slid that seam across whatever was near it, the Post button on the left say)
+  const PINNED = 'background-size: round(up, 100vw, 34px) round(up, 100vh, 34px) !important;';
   const rainbowText = (sel) => `${sel.split(/,(?![^(]*\))/).map((s) => s.trim().replace(/(::[\w-]+)?$/, ':not(#pst-never):not(:read-write)$1')).join(', ')} { text-shadow: none !important; color: transparent !important; -webkit-text-fill-color: transparent !important;
-      background-image: ${RAVE_SMALL} !important; background-size: auto !important; background-repeat: repeat !important;
+      background-image: ${RAVE_TILE} !important; ${PINNED} background-repeat: repeat !important;
       background-attachment: fixed !important; background-clip: text !important; -webkit-background-clip: text !important;
       animation: pst-text-roll .8s steps(12) infinite !important; }`;
-  // (each pst-line-hue animation pinned to the page's time origin: every line steps through the hues together)
+  // (every pst- animation pinned to the page's time origin: the lines step through the hues together, and the
+  // rainbows rolling on top of one another (a button's fill and what's inside it, Rainbow Rave's, which it pins
+  // the same way) stay in step instead of showing a seam)
   addEventListener('animationstart', (e) => {
-    if (e.animationName !== 'pst-line-hue') return;
+    if (!e.animationName.startsWith('pst-')) return;
     try { for (const a of e.target.getAnimations()) if (a.animationName === e.animationName && a.startTime !== 0) a.startTime = 0; } catch {}
   }, true);
   const css = document.createElement('style');
   css.textContent = `
     /* (one hue cycle of RAVE_TILE: an exact 17 px across and up) */
     @keyframes pst-small-roll { from { background-position: -40px -20px; } to { background-position: -23px -37px; } }
-    @keyframes pst-text-roll { from { background-position: 0 0; } to { background-position: 33.941px 0; } }
+    /* (one hue cycle of RAVE_TILE across: an exact 34 px) */
+    @keyframes pst-text-roll { from { background-position: 0 0; } to { background-position: 34px 0; } }
     @property --pst-lh { syntax: '<angle>'; inherits: false; initial-value: 0deg; }
     @keyframes pst-line-hue { from { --pst-lh: 0deg; } to { --pst-lh: 360deg; } }
     @keyframes pst-box-roll { from { background-position: 0 0; } to { background-position: calc(-60vmax / 0.9063) 0; } }
@@ -313,7 +320,7 @@
     html[data-pst-on][data-pst-has-buttons] #react-root ${BUTTONS} *, html[data-pst-on][data-pst-has-buttons] ${BUTTONS} { color: var(--pst-on-buttons) !important; -webkit-text-fill-color: var(--pst-on-buttons) !important; background-image: none !important; }
     html[data-pst-on][data-pst-r-buttons] #react-root ${BUTTONS}, html[data-pst-on][data-pst-r-buttons] ${BUTTONS} {
       /* (pinned to the window like the rainbow text: a 96px tile left a seam rolling across wider buttons) */
-      background-image: ${RAVE_SMALL} !important; background-size: auto !important; background-repeat: repeat !important;
+      background-image: ${RAVE_TILE} !important; ${PINNED} background-repeat: repeat !important;
       background-attachment: fixed !important; border-color: rgb(255 255 255 / .9) !important;
       animation: pst-text-roll .8s linear infinite !important; }
     html[data-pst-on][data-pst-r-buttons] #react-root ${BUTTONS} *, html[data-pst-on][data-pst-r-buttons] ${BUTTONS} { color: #fff !important; -webkit-text-fill-color: #fff !important; text-shadow: 0 1px 2px rgb(0 0 0 / .6); }
@@ -486,8 +493,12 @@
     }
     const un = document.querySelector('[data-testid=primaryColumn] [data-testid=UserName]');
     if (un) {
+      // (the name's span, even once its emoji are wrapped (wrapEmoji): an emoji wrapper isn't the name, and the
+      // span holding "Tim " beside its wrappers is; a mark left on a wrapper by the old way is taken off)
+      const EMO = '[data-pst-emoji], [data-ps-emoji]';
+      for (const wrong of un.querySelectorAll(':is([data-pst-emoji], [data-ps-emoji])[data-pst-name]')) wrong.removeAttribute('data-pst-name');
       for (const span of un.querySelectorAll('span')) {
-        if (span.children.length) continue;
+        if (span.matches(EMO) || [...span.children].some((c) => !c.matches(EMO))) continue;
         const t = (span.textContent || '').trim();
         if (!t) continue;
         if (t.startsWith('@')) { if (!span.hasAttribute('data-pst-handle')) span.setAttribute('data-pst-handle', ''); }

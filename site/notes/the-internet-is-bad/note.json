@@ -3,9 +3,11 @@
   "date": "2026-11-09",
   "posts": {
     "1470799330005209097": {
-      "caption": "it was a simpler time"
+      "caption": "it was a simpler time",
+      "own": true
     },
     "2115627963903254641": {
+      "own": true,
       "noQuote": true
     }
   }

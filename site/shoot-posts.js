@@ -98,7 +98,10 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
   fs.mkdirSync(out, { recursive: true });
   const meta = fs.existsSync(path.join(dir, 'note.json')) ? JSON.parse(fs.readFileSync(path.join(dir, 'note.json'), 'utf8')) : {};
   const noQuote = Object.entries(meta.posts || {}).filter(([, o]) => o.noQuote).map(([pid]) => pid);
-  const shots = await shootPosts(ids, { noQuote });
+  // (posts.<id>.own: Tim's own screenshot, post-<id>.png put there by hand: never shot over)
+  const own = (pid) => meta.posts?.[pid]?.own;
+  for (const pid of ids.filter(own)) console.log(`post-${pid}.png: Tim's own screenshot, left as it is`);
+  const shots = await shootPosts(ids.filter((pid) => !own(pid)), { noQuote });
   for (const [id, s] of Object.entries(shots)) {
     fs.writeFileSync(path.join(out, `post-${id}.png`), s.png);
     console.log(`post-${id}.png ${s.width}x${s.height}`);

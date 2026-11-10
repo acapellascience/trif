@@ -17,6 +17,7 @@
 // article.json; it only fetches what isn't there yet.
 
 import { execFileSync } from 'node:child_process';
+import { createHash } from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
@@ -178,7 +179,10 @@ export async function buildNote(slug, { fetchMedia = true } = {}) {
   const image = blocks.find((x) => x.t === 'img' && x.src === meta.image)
     || blocks.find((x) => x.t === 'img' && x.w >= 600 && x.w / x.h >= 1.3 && x.w / x.h <= 2.4) || blocks.find((x) => x.t === 'img');
   if (!meta.x || /PLACEHOLDER/.test(meta.x)) note('note.json has no address on X yet ("x"): the page says it\'s coming');
-  return { slug, title: article.title, description, x: meta.x && !/PLACEHOLDER/.test(meta.x) ? meta.x : '', date: meta.date || '', image: image ? { src: image.src, w: image.w, h: image.h } : null, files, blocks };
+  // (each file's version, from its content: the page asks for <file>?v=<it>, so a picture or video made again
+  // reaches readers at once instead of after their browser's cached copy runs out)
+  const versions = Object.fromEntries(files.map((f) => [f, createHash('sha1').update(fs.readFileSync(path.join(media, f))).digest('hex').slice(0, 8)]));
+  return { slug, title: article.title, description, x: meta.x && !/PLACEHOLDER/.test(meta.x) ? meta.x : '', date: meta.date || '', image: image ? { src: image.src, w: image.w, h: image.h } : null, files, versions, blocks };
 }
 
 /** An embedded post's alt text: who, when, what it says, and what it quotes (from the card's text). */

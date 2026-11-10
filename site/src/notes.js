@@ -39,8 +39,8 @@ figcaption { color: var(--muted); font-size: 15px; line-height: 1.45; margin: 10
   figure:not(.post-fig) { margin: 22px -16px 26px; } figure:not(.post-fig) :is(img, video) { border-radius: 0; } figcaption { margin: 8px 16px 0; } }
 `;
 
-function block(b, slug) {
-  const file = (f) => `/notes/${slug}/${f}`;
+function block(b, slug, versions = {}) {
+  const file = (f) => `/notes/${slug}/${f}${versions[f] ? `?v=${versions[f]}` : ''}`;
   switch (b.t) {
     case 'h2': return `<h2>${b.html}</h2>`;
     case 'quote': return `<blockquote><p>${b.html}</p></blockquote>`;
@@ -64,7 +64,7 @@ export function notePage(slug) {
       for (; i < n.blocks.length && n.blocks[i].t === 'li'; i++) items.push(`<li>${n.blocks[i].html}</li>`);
       i--;
       parts.push(`<ul>\n${items.join('\n')}\n</ul>`);
-    } else parts.push(block(n.blocks[i], slug));
+    } else parts.push(block(n.blocks[i], slug, n.versions));
   }
   const url = `${SITE}/notes/${slug}`;
   const image = n.image ? `${SITE}/notes/${slug}/${n.image.src}` : `${SITE}/og.png`;

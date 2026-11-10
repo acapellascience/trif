@@ -559,7 +559,7 @@ function renderTabLock() {
     (away && /^https?:/.test(lock.url) ? chrome.tabs.update(t.id, { url: lock.url }) : chrome.tabs.reload(t.id)).catch(() => {});
   });
   const why = 'Your agent ran code in this page, so TRIF has blocked anything here from posting, sending or saving as you, or opening other sites, until the page reloads. Reading, scrolling, clicks and mods work as usual.';
-  const line = el('p', 'title', 'Paused: your agent ran code here.');
+  const line = el('p', 'title', 'Posting is paused: your agent ran code here.');
   line.title = why;
   line.setAttribute('aria-description', why);
   n.replaceChildren(line, reload);

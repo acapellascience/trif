@@ -2543,7 +2543,7 @@ say({ type: 'result', subtype: 'success', is_error: false, result: text, session
         const eyes = getComputedStyle(document.querySelector('#bar-robot .eye')).display !== 'none';
         return { text: n.innerText.trim(), tip: n.querySelector('.title')?.title || '', button: n.querySelector('button')?.textContent || '', height: n.getBoundingClientRect().height, pause, eyes };
       }`), { timeoutMs: 10000 });
-      if (!/^Paused: your agent ran code here\.\s*Reload$/.test(lock.text) || lock.button !== 'Reload') throw new Error(`the lock notice: ${JSON.stringify(lock)}`);
+      if (!/^Posting is paused: your agent ran code here\.\s*Reload$/.test(lock.text) || lock.button !== 'Reload') throw new Error(`the lock notice: ${JSON.stringify(lock)}`);
       if (!/blocked anything here from posting, sending or saving as you/.test(lock.tip)) throw new Error(`the lock notice's tooltip: ${lock.tip}`);
       if (lock.height > 48) throw new Error(`the lock notice is ${lock.height} px tall: one line expected`);
       if (!lock.pause || lock.eyes) throw new Error(`the robot in the bar: ${JSON.stringify(lock)}`);

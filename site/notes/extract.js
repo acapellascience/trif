@@ -35,7 +35,9 @@ function inline(node) {
   return html; // (each piece on its own: build-notes.js joins them)
 }
 const out = [];
-const top = [...comp.querySelectorAll('[data-block], section')].filter((b) => !b.parentElement.closest('section, [data-block]'));
+// (the article's own blocks: not ones inside another block of it; on the published page the whole article sits
+// inside the conversation's <section>, which doesn't count)
+const top = [...comp.querySelectorAll('[data-block], section')].filter((b) => { const up = b.parentElement.closest('section, [data-block]'); return !up || !comp.contains(up); });
 for (const b of top) {
   if (b.tagName === 'SECTION') {
     const tweet = b.querySelector('[data-testid=simpleTweet], [data-testid=tweet]');
@@ -57,5 +59,6 @@ for (const b of top) {
     out.push({ type: 'text', kind, tag: b.tagName.toLowerCase(), html: inline(b) });
   }
 }
-const byline = document.querySelector('[data-testid=twitterArticleReadView] [data-testid=User-Name]')?.innerText;
+// (the author: the article's own name line, not an embedded post's)
+const byline = [...document.querySelectorAll('[data-testid=User-Name]')].find((e) => !comp.contains(e))?.innerText;
 return JSON.stringify({ title, byline, url: location.href, at: new Date().toISOString(), n: out.length, blocks: out });

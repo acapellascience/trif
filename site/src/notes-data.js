@@ -4,7 +4,7 @@ export const NOTES = {
   "slug": "the-internet-is-bad",
   "title": "the internet is bad but now we can fix it",
   "description": "I made an open-source internet-fixer. It's called TRIF. It's a browser extension that lets you and your coding agent (claude, codex) easily change anything about any website. It's free and Mac users can try the beta now at timsrobot.com",
-  "x": "",
+  "x": "https://x.com/MasterTimBlais/status/2119997660656468278",
   "date": "2026-11-09",
   "image": {
    "src": "HWdxpOBXYAALVF6.jpg",
@@ -84,7 +84,7 @@ export const NOTES = {
    },
    {
     "t": "p",
-    "html": "I've been trying to stop my device addiction for a long time. It's like being half-awake.<i> i should really be doing things. kinda feel shitty tho. open twitter. scroll scroll scroll. reposted tiktok. AI ad. oh look, my friend! onlyfans girl. someone saying \"jeet\". angry quote of a screenshot of a reddit post.</i>"
+    "html": "I've been trying to stop my device addiction for a long time. It's like being half-awake.<i> i should really be doing things. kinda feel shitty tho. open twitter. scroll scroll scroll. reposted tiktok. AI ad. oh look, my friend! onlyfans girl. someone saying &quot;jeet&quot;. angry quote of a screenshot of a reddit post.</i>"
    },
    {
     "t": "img",
@@ -95,7 +95,7 @@ export const NOTES = {
    },
    {
     "t": "p",
-    "html": "<i>\"Oh look, my friend!\" </i>is what gets you. i'm here because you're here because we're here. i met most of my current friends through twitter, in the great beautiful simcluster happenings of 2019-2022. my mutuals and i stay at each others' places when we travel. Two are funding my art. <br><br>i have to dive into the muck to swim with the people i love, and none of us love it. i don't think it's controversial to say that the site used to be better."
+    "html": "<i>&quot;Oh look, my friend!&quot; </i>is what gets you. i'm here because you're here because we're here. i met most of my current friends through twitter, in the great beautiful simcluster happenings of 2019-2022. my mutuals and i stay at each others' places when we travel. Two are funding my art. <br><br>i have to dive into the muck to swim with the people i love, and none of us love it. i don't think it's controversial to say that the site used to be better."
    },
    {
     "t": "post",
@@ -198,7 +198,7 @@ export const NOTES = {
    },
    {
     "t": "p",
-    "html": "And then I start thinking, this problem is a bit more general than X dot com. Am I going to have 50 custom apps? turn my Mac into a glorified iPhone? Obviously what you really want is to just be on a website, see a thing that sucks, and have somewhere to instantly go \"hey, fix it.\""
+    "html": "And then I start thinking, this problem is a bit more general than X dot com. Am I going to have 50 custom apps? turn my Mac into a glorified iPhone? Obviously what you really want is to just be on a website, see a thing that sucks, and have somewhere to instantly go &quot;hey, fix it.&quot;"
    },
    {
     "t": "p",
@@ -267,7 +267,7 @@ export const NOTES = {
    },
    {
     "t": "p",
-    "html": "So it's TRIF now. <b>T</b>im's <b>R</b>obot <b>I</b>nternet <b>F</b>ixer. You put your robot in it, and it fixes the internet. I like that it's almost a word. like, \"i hate that feature too but just trif it\". On .npm it's timsrobot because they said trif was confusingly similar to something else."
+    "html": "So it's TRIF now. <b>T</b>im's <b>R</b>obot <b>I</b>nternet <b>F</b>ixer. You put your robot in it, and it fixes the internet. I like that it's almost a word. like, &quot;i hate that feature too but just trif it&quot;. On .npm it's timsrobot because they said trif was confusingly similar to something else."
    },
    {
     "t": "p",
@@ -383,7 +383,7 @@ export const NOTES = {
    },
    {
     "t": "p",
-    "html": "Right now TRIF asks for global permissions to access websites. That's probably bad and i'm going to add a site-by-site permissions option. But right now it <i>is</i> sandboxed from the other end. A panel agent can only write mods for the website you're on, and can only open tabs for other pages on that site. If it says \"the robot is off\", nothing is running on your page."
+    "html": "Right now TRIF asks for global permissions to access websites. That's probably bad and i'm going to add a site-by-site permissions option. But right now it <i>is</i> sandboxed from the other end. A panel agent can only write mods for the website you're on, and can only open tabs for other pages on that site. If it says &quot;the robot is off&quot;, nothing is running on your page."
    },
    {
     "t": "p",
@@ -437,7 +437,7 @@ export const NOTES = {
    },
    {
     "t": "p",
-    "html": "I was kind of stuck in the \"just filter and style annoying websites\" frame until i wanted to build a demo for people. So i pointed Claude at the simple webpage we'd thrown together and said \"hey make an escalating series of mods to show people what this thing can do. Really go ham.\" i left it running overnight. We workshopped what it came up with for an annoyingly long time, and it became the current <a href=\"https://timsrobot.com/\">timsrobot.com</a>"
+    "html": "I was kind of stuck in the &quot;just filter and style annoying websites&quot; frame until i wanted to build a demo for people. So i pointed Claude at the simple webpage we'd thrown together and said &quot;hey make an escalating series of mods to show people what this thing can do. Really go ham.&quot; i left it running overnight. We workshopped what it came up with for an annoyingly long time, and it became the current <a href=\"https://timsrobot.com/\">timsrobot.com</a>"
    },
    {
     "t": "p",
@@ -529,7 +529,7 @@ export const NOTES = {
    },
    {
     "t": "p",
-    "html": "It's nice that when the mods break it's just another thing to point TRIF at and say \"fix that.\" And if TRIF breaks you yourself can point Claude at it. The code is right there. Tell me if you do, you're probably better at this than me."
+    "html": "It's nice that when the mods break it's just another thing to point TRIF at and say &quot;fix that.&quot; And if TRIF breaks you yourself can point Claude at it. The code is right there. Tell me if you do, you're probably better at this than me."
    },
    {
     "t": "p",
@@ -537,7 +537,7 @@ export const NOTES = {
    },
    {
     "t": "p",
-    "html": "Or message me and say \"hey this seems really cool and i wanna help build it\" and we can talk."
+    "html": "Or message me and say &quot;hey this seems really cool and i wanna help build it&quot; and we can talk."
    },
    {
     "t": "p",

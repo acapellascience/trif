@@ -8,7 +8,7 @@
 // @run-at      document-start
 // @risk        0 render-only
 // @source      webmods
-// @version     3
+// @version     4
 // ==/WebMod==
 
 (() => {
@@ -28,11 +28,14 @@
     promo-middle-slot,
     [jsslot]:has(> div > promo-middle-slot) { display: none !important; }
     /* AI Overview at the top of results, including its sticky "Ask anything" follow-up box: both live
-       in #m-x-content. Google serves two layouts: the overview in its own block in #rcnt, next to
-       #center_col, or as the first block inside #rso with the results. Never hide #center_col or #rso. */
-    #rcnt > :not(#center_col):has(#m-x-content),
+       in #m-x-content. Google serves several layouts: the overview in its own block in #rcnt next to
+       #center_col; both of those inside a [role=main] wrapper (display: contents) in #rcnt (Nov 2026);
+       or as the first block inside #rso with the results. Never hide #center_col, #rso, or anything
+       that contains them. */
+    #rcnt > :not(#center_col):has(#m-x-content):not(:has(#center_col)),
+    #rcnt > [role=main] > :not(#center_col):has(#m-x-content):not(:has(#center_col)),
     #rso > :has(#m-x-content):not(:has(a h3)),
-    [data-lhcontainer]:has(#m-x-content),
+    [data-lhcontainer]:has(#m-x-content):not(:has(#center_col)),
     #m-x-content { display: none !important; }
   `;
   (document.head || document.documentElement).append(style);

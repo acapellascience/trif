@@ -4,6 +4,11 @@ What's new in each TRIF release (called WebMods before 0.2.0). The text under a 
 panel shows under "What's new", so it's written for people using TRIF. `node scripts/release.js <version>`
 needs a section here for the version it releases.
 
+## Unreleased
+
+- **Google search works again.** Google changed its results page, and AI Banisher started hiding the
+  results along with the AI Overview. It's fixed.
+
 ## 0.2.5
 
 - **Bigger mods.** A mod can now be up to 4 MB, and all your mods together up to 16 MB. Until now they

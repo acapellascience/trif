@@ -99,7 +99,20 @@ class Scenario {
     return this._keychain;
   }
 
-  env(extra) { return I.scratchEnv(this.home, { ...(this.o.oss ? {} : { TRIF_KEYCHAIN_BIN: this.keychain().bin }), ...extra }); }
+  env(extra) { return I.scratchEnv(this.home, { ...(this.o.oss ? {} : { TRIF_KEYCHAIN_BIN: this.keychain().bin }), TRIF_REVEAL_CMD: this.revealStub().bin, ...extra }); }
+
+  /** A stand-in for open/xdg-open (helper/lib/reveal.js TRIF_REVEAL_CMD): appends its arguments to a log. */
+  revealStub() {
+    if (!this._reveal) {
+      const dir = path.join(this.work, 'reveal');
+      fs.mkdirSync(dir, { recursive: true });
+      const log = path.join(dir, 'revealed.log');
+      const bin = path.join(dir, 'fake-open.sh');
+      fs.writeFileSync(bin, `#!/bin/sh\nprintf '%s\\n' "$*" >> '${log}'\n`, { mode: 0o755 });
+      this._reveal = { bin, log };
+    }
+    return this._reveal;
+  }
 
   /** Runs the installed `trif` (the scratch home's wrapper). */
   async cli(args, { json = false, timeoutMs = 60000, env = undefined } = {}) {
@@ -691,6 +704,9 @@ class Scenario {
     // The real Keychain only for --oss (the OpenRouter key the user saved); otherwise the fake one, so the
     // helper never looks up API keys for Claude Code or Codex in the real one.
     if (!o.oss) env.TRIF_KEYCHAIN_BIN = this.keychain().bin;
+    // Show in Finder and Open in editor run a stand-in that writes what it was asked to a log, never open
+    // (no Finder window on anyone's screen); codeViewCheck checks the helper says so before it clicks.
+    env.TRIF_REVEAL_CMD = this.revealStub().bin;
     this.helperHome = env.HOME;
     // Upgrading: TRIF with access to every site, as for someone who installed it when <all_urls> was
     // required (Chrome and Firefox keep it on the update). Fresh: only the sites the user allows.
@@ -1202,6 +1218,7 @@ class Scenario {
       await r.check('a boxed mod as a free mod (how a browser without the sandbox runs one the user allowed): the same API works in the page\'s world', () => this.sandboxPageFormCheck(win));
       await r.check('powers (docs/POWERS.md): a boxed mod with powers waits for the user\'s OK for its set (panel and trif status say what it asks for); allowed, sound, controls, read-drafts and keys work and stay narrow; undeclared, each is refused; a new version with the same powers runs, one with a new power waits for that one', () => this.powersCheck(win));
       await r.check('"Agent on this site": Ask asks in the panel (Just this once runs the code), Look refuses code, Off refuses reading too, a sensitive site is off with its line, Settings lists them', () => this.agentSitesCheck(win));
+      await r.check('the code card: a mod\'s </> and its file name open its code (a style mod: its rules), with line numbers; Copy copies it; Show in Finder and Open in editor ask the helper, which reveals the mod\'s own file (a stand-in for open here); Esc closes it', () => this.codeViewCheck(win));
       await r.check('powers, phase 3: media plays and pauses the page\'s own video; click clicks only what the header names, never a submit, reset or a link to another site; go-to goes only to the header\'s pages; mods talk over TRIF\'s channel in plain data; write-drafts changes the user\'s drafts but never a password, card or hidden field; with a read, the combination is in the hold, and while another boxed mod on the page has a read it didn\'t ask for, write-drafts is off; undeclared, each is refused', () => this.powers3Check(win));
       await r.check('powers, phase 2: site-data filters the site\'s JSON (fetch and XHR) by removing and reordering only (an invented string, number, key, a duplicate or a cut string: TRIF keeps the original); page-data reads plain copies of React props; search-box is TRIF\'s own box the mod can\'t read, which searches the site from the user\'s Enter; undeclared, each is refused', () => this.powers2Check(win));
       await r.check('speculation rules (audit AU-7): a page that prefetches its same-site links at once; a link a free mod adds is fetched without a click (Chrome), a boxed mod can\'t make one', () => this.specRulesCheck(win));
@@ -2255,6 +2272,12 @@ process.exitCode = 1;
       // the screenshots, in both themes (Chrome; Firefox's driver can't set the colour scheme)
       for (const scheme of ['dark', 'light']) if (await this.d.colorScheme(this.panelCtx, scheme)) { await sleep(150); await this.shot(this.panelCtx, `approval-powers-${scheme}`); }
       await this.d.colorScheme(this.panelCtx, '');
+      // the file name in the card opens the code card over it; Esc closes that one only
+      await this.d.click(this.panelCtx, '#approval .ap-where .file-link');
+      const over = await waitFor('the code card over the approval', () => this.panel(`async () => { const c = document.getElementById('code-view'); return c && c.open ? { mod: c.dataset.mod, approval: document.getElementById('approval').open } : null; }`), { timeoutMs: 8000 }).catch(() => null);
+      if (!over || over.mod !== '127.0.0.1/e2e-pw-all' || !over.approval) problems.push(`the file name in the approval card: ${JSON.stringify(over)}`);
+      await this.d.key(this.panelCtx, 'Escape');
+      if (!(await this.approvalState())) problems.push('Esc on the code card closed the approval dialog too');
       // Show code opens the code in the card
       await this.d.click(this.panelCtx, '#approval .ap-show');
       const code = await waitFor('the code in the card', () => this.panel(`async () => { const c = document.querySelector('#approval .ap-code'); return c && !c.hidden && c.textContent.includes('E2E Boxed mod with powers') ? true : null; }`), { timeoutMs: 8000 }).catch(() => null);
@@ -2542,6 +2565,71 @@ process.exitCode = 1;
       await this.d.colorScheme(this.panelCtx, '').catch(() => {});
       // (Settings closed again, if this opened it)
       if (await this.panel(`async () => !document.getElementById('settings').hidden`).catch(() => false)) await this.panelClick('#settings-btn').catch(() => {});
+    }
+  }
+
+  async codeViewCheck(win) {
+    const site = '127.0.0.1';
+    const base = `http://${site}:${this.o.servers.port}`;
+    const dir = path.join(this.trif, 'sites', site);
+    const styleFile = path.join(dir, 'e2e-cv-style.js');
+    const styleText = '// ==WebMod==\n// @name E2E code card rules\n// @match *://127.0.0.1/*\n// @style\n// ==/WebMod==\n{ "css": "#title { letter-spacing: 0.01em }" }\n';
+    const themes = async (name) => { for (const scheme of ['dark', 'light']) if (await this.d.colorScheme(this.panelCtx, scheme)) { await sleep(150); await this.shot(this.panelCtx, `${name}-${scheme}`); } await this.d.colorScheme(this.panelCtx, ''); };
+    const card = () => this.panel(`async () => {
+      const d = document.getElementById('code-view');
+      if (!d || !d.open) return null;
+      const lines = [...d.querySelectorAll('.cv-code .l')];
+      return { mod: d.dataset.mod, name: d.querySelector('.ap-name').textContent, chip: d.querySelector('.ap-chip').textContent, where: d.querySelector('.ap-where').textContent,
+        code: lines.map((l) => l.textContent).join(String.fromCharCode(10)), lines: lines.length, coloured: d.querySelectorAll('.cv-code .tk, .cv-code .ts, .cv-code .tc').length,
+        copied: d.querySelector('.cv-copy').dataset.copied || '', reveal: d.querySelector('.cv-reveal').textContent, err: d.querySelector('.ap-err').hidden ? '' : d.querySelector('.ap-err').textContent };
+    }`);
+    const problems = [];
+    const revealed = () => { try { return fs.readFileSync(this.revealStub().log, 'utf8').trim().split('\n').filter(Boolean); } catch { return []; } };
+    try {
+      fs.writeFileSync(styleFile, styleText);
+      await waitFor('the style mod registered', async () => /e2e-cv-style\s+registered/.test((await this.cli(['status'], { timeoutMs: 20000 })).stdout) || null, { timeoutMs: 20000, intervalMs: 500 });
+      await this.ext(`async (id, url) => { await chrome.tabs.update(id, { url, active: true }); }`, [win.tabId, `${base}/`]);
+      await this.dismissApproval();
+      await waitFor('the rows', () => this.panel(`async () => !!document.querySelector('li[data-mod="${site}/e2e-banner"] .mod-code') && !!document.querySelector('li[data-mod="${site}/e2e-cv-style"] .mod-code') || null`), { timeoutMs: 15000 });
+      await themes('code-row');
+      // a free mod, from its </>
+      await this.panelClick(`li[data-mod="${site}/e2e-banner"] .mod-code`);
+      const free = await waitFor('the code card', async () => { const c = await card(); return c && c.lines ? c : null; }, { timeoutMs: 8000 });
+      const want = fs.readFileSync(path.join(dir, 'e2e-banner.js'), 'utf8');
+      if (free.mod !== `${site}/e2e-banner` || free.chip !== 'Free mod' || free.where !== `${site} · e2e-banner.js` || free.code !== want || free.lines !== want.split('\n').length) problems.push(`the free mod's card: ${JSON.stringify({ ...free, code: free.code.slice(0, 200) })}`);
+      if (!free.coloured) problems.push('no colouring in the code');
+      await themes('code-card');
+      // Copy
+      await this.d.click(this.panelCtx, '#code-view .cv-copy');
+      const copied = await waitFor('Copy', async () => { const c = await card(); return c && c.copied ? c.copied : null; }, { timeoutMs: 5000 }).catch(() => 'no answer');
+      if (copied !== 'true') problems.push(`Copy: ${copied}`);
+      // Show in Finder, the file name in the card (the same), Open in editor: only with the stand-in for open in place
+      const helperLog = fs.readFileSync(path.join(this.priv, 'helper.log'), 'utf8');
+      if (!/reveal: TRIF_REVEAL_CMD stands in for open/.test(helperLog)) problems.push('the helper doesn\'t say open is stood in for: Show in Finder not clicked');
+      else {
+        await this.d.click(this.panelCtx, '#code-view .cv-reveal');
+        await this.d.click(this.panelCtx, '#code-view .cv-file');
+        await this.d.click(this.panelCtx, '#code-view .cv-editor');
+        const got = await waitFor('the helper to reveal it', () => (revealed().length >= 3 ? revealed() : null), { timeoutMs: 8000 }).catch(() => revealed());
+        const file = path.join('sites', site, 'e2e-banner.js');
+        const mac = process.platform === 'darwin';
+        const ok = got.length === 3 && got.every((l) => l.endsWith(mac ? file : path.dirname(file)) || l.endsWith(file))
+          && (mac ? /^open -R /.test(got[0]) && /^open -R /.test(got[1]) && /^open \//.test(got[2]) : got.every((l) => /^xdg-open /.test(l)));
+        if (!ok) problems.push(`what the helper ran: ${JSON.stringify(got)}`);
+        if (free.reveal !== (mac ? 'Show in Finder' : 'Show in folder')) problems.push(`the button: ${free.reveal}`);
+      }
+      await this.d.key(this.panelCtx, 'Escape');
+      if (await card()) problems.push('Esc didn\'t close the code card');
+      // a style mod, from its file name on the row: its rules, as in the file
+      await this.panelClick(`li[data-mod="${site}/e2e-cv-style"] button.mod-file`);
+      const style = await waitFor('the style mod\'s card', async () => { const c = await card(); return c && c.lines ? c : null; }, { timeoutMs: 8000 });
+      if (style.chip !== 'Style mod' || style.code !== styleText) problems.push(`the style mod's card: ${JSON.stringify(style)}`);
+      await this.d.key(this.panelCtx, 'Escape');
+      if (problems.length) throw new Error(problems.join('\n'));
+      return `the free mod's code (${free.lines} lines, coloured) from its </>, Copy copied, Show in Finder / the file name / Open in editor ran ${revealed().join(' | ')}; the style mod's rules from its file name; Esc closed it`;
+    } finally {
+      try { fs.unlinkSync(styleFile); } catch { /* gone */ }
+      await this.panel(`async () => { const d = document.getElementById('code-view'); if (d && d.open) d.close(); return true; }`).catch(() => {});
     }
   }
 

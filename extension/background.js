@@ -1499,8 +1499,22 @@ async function onPanelMessage(msg) {
       return { ok: true };
     }
     case 'mod.code': {
-      // "Show code" on a held mod or one to review: the file as the helper has it (capped)
-      return helperRequest('mod.code', { id: String(msg.id ?? '') }, 10000);
+      // The code viewer and "Show code": the file as the helper has it (capped); `version: 'ran'`, a mod
+      // with a change waiting, the version running meanwhile
+      return helperRequest('mod.code', { id: String(msg.id ?? ''), ...(msg.version === 'ran' ? { version: 'ran' } : {}) }, 10000);
+    }
+    case 'mod.localCode': {
+      // (the code viewer with the helper away: the code this extension registers, which for a free or boxed
+      // mod is its file; a style mod's is TRIF's code made from its rules, so not offered)
+      const m = state.mods.find((x) => x.id === String(msg.id ?? ''));
+      if (!m) throw new Error(`no mod ${msg.id}`);
+      if (m.rules) throw new Error('TRIF\'s helper isn\'t connected, so a style mod\'s rules can\'t be shown');
+      const code = String(m.code ?? '');
+      return { id: m.id, code: code.slice(0, 200000), truncated: code.length > 200000, local: true };
+    }
+    case 'mod.reveal': {
+      // The code viewer's "Show in Finder" / "Open in editor": the helper finds the file by the mod's id
+      return helperRequest('mod.reveal', { id: String(msg.id ?? ''), how: msg.how === 'editor' ? 'editor' : 'folder' }, 10000);
     }
     case 'mod.review': {
       // "Looks right" on a mod TRIF found can do more than restyle (the helper allows what it found)

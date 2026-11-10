@@ -18,7 +18,7 @@ const trash = require('./lib/trash');
 const shipped = require('./lib/preinstalled');
 
 // Inside a side-panel agent run (the helper set TRIF_RUN_TOKEN) these are the user's alone.
-const NOT_IN_RUNS = new Set(['setup', 'agent', 'approve', 'reject', 'mod-update', 'undo']);
+const NOT_IN_RUNS = new Set(['setup', 'agent', 'approve', 'reject', 'mod-update', 'undo', 'reveal']);
 
 // Output piped into something that stops reading early (`trif tabs | head -1`) isn't an error.
 process.stdout.on('error', (e) => { if (e.code === 'EPIPE') process.exit(0); throw e; });
@@ -27,7 +27,7 @@ const VALUE_FLAGS = new Set(['--tab', '--url', '-o', '--out', '--output', '--fil
   '--browser', '--home', '--native-dir', '--bin-dir', '--timeout', '--agent', '--session', '--model', '--site', '--auto',
   '--provider', '--base-url', '--key-env', '--selector', '--color', '--text', '--tolerance']);
 const BOOL_FLAGS = new Set(['--json', '--hard', '--help', '-h', '--force', '--page', '--rules', '--sandboxed', '--style', '--boxed', '--no-link', '--examples', '--no-examples', '--copy', '--link', '--install', '--open',
-  '--use-new', '--keep', '--merged', '--set-key', '--remove-key', '--scroll', '--full', '--verbose', '-v', '--no-wait']);
+  '--use-new', '--keep', '--merged', '--set-key', '--remove-key', '--scroll', '--full', '--verbose', '-v', '--no-wait', '--editor']);
 // Flags with a value that may be left out (`--examples` alone, or `--examples x.com,google.com`).
 const OPTIONAL_VALUE_FLAGS = new Set(['--examples']);
 const ALIASES = { '--out': '-o', '--output': '-o', '--file': '-f', '-h': '--help', '-v': '--verbose' };
@@ -702,6 +702,17 @@ const handlers = {
     if (!r.entries.length) return out(`(no changes kept for ${r.id}: only side-panel runs' changes are, for 30 days)`);
     out(`${r.id}: what side-panel runs changed, newest first (trif undo ${r.id} puts back the newest)`);
     for (const e of r.entries) out(`  ${new Date(e.at).toLocaleString()}  ${e.kind === 'created' ? 'created by a run' : 'changed by a run (the version before is kept)'}`);
+  },
+
+  // The mod's file in Finder (a folder elsewhere), or with --editor in the system's app for .js: the same as
+  // the panel's code card, found by its id in the sites folder (lib/reveal.js). Works without the browser.
+  async reveal(ctx, pos) {
+    if (!pos[0]) throw new UsageError('usage: trif reveal <site>/<mod> [--editor]');
+    const id = modId(pos[0]);
+    const { scanMods } = require('./lib/mods');
+    const r = require('./lib/reveal').reveal(ctx.ws.modsDir, scanMods(ctx.ws.modsDir).mods, id, ctx.opts['--editor'] ? 'editor' : 'folder');
+    if (ctx.json) return printJson(r);
+    out(`${r.how === 'editor' ? 'opened' : 'showed'} ${r.file}${r.how === 'editor' ? '' : ` in ${process.platform === 'darwin' ? 'Finder' : 'its folder'}`}`);
   },
 
   async undo(ctx, pos) {

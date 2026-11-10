@@ -121,6 +121,11 @@ The result is printed as pretty JSON, or as-is if it's a string. DOM nodes come 
     summary: "what side-panel runs changed in a mod (kept 30 days), newest first",
     examples: ['trif history x.com/hide-reposts'],
   },
+  reveal: {
+    usage: 'trif reveal <site>/<mod> [--editor]',
+    summary: "show a mod's file in Finder (its folder elsewhere), or with --editor open it in the system's app for .js; refused inside a run",
+    examples: ['trif reveal x.com/hide-reposts', 'trif reveal x.com/hide-reposts --editor'],
+  },
   undo: {
     usage: 'trif undo <site>/<mod>',
     summary: "put back the version before a side-panel run's last change (a mod it created goes to the trash); refused inside a run",
@@ -396,7 +401,7 @@ sent by a proxy the helper runs for each chat: the agent never has it.`,
 
 const GROUPS = [
   ['Setup and diagnosis', ['setup', 'status', 'doctor', 'update', 'report']],
-  ['Mod files (work without Chrome)', ['mods', 'new', 'check', 'delete', 'restore', 'history', 'undo', 'install-example', 'mod-update']],
+  ['Mod files (work without Chrome)', ['mods', 'new', 'check', 'delete', 'restore', 'history', 'undo', 'reveal', 'install-example', 'mod-update']],
   ['Switching mods off and on (need Chrome running with the extension)', ['disable', 'enable', 'approve', 'reject']],
   ['Pages (need Chrome running with the extension)', ['tabs', 'run', 'reload', 'open', 'close', 'navigate', 'text', 'sweep', 'screenshot', 'record', 'requests', 'request', 'errors', 'logs']],
   ['Agent runs (what the side panel does)', ['agent']],

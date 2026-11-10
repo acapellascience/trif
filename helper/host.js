@@ -92,6 +92,8 @@ const state = {
 
 logger.info(`host ${VERSION} starting (node ${process.version}, home ${ws.home}, mods ${ws.modsDir}, args ${JSON.stringify(process.argv.slice(2))})`);
 for (const n of privateMigration.notes) logger.info(n);
+// (tests: Show in Finder runs this instead of open/xdg-open, lib/reveal.js; said, so a test can check before it clicks)
+if (envVar('REVEAL_CMD')) logger.info(`reveal: TRIF_REVEAL_CMD stands in for open (${envVar('REVEAL_CMD')})`);
 // API keys left in config.json (before 0.2.0) move to the keyring (lib/agentkeys.js), in the background.
 require('./lib/agentkeys').migrateKeys(ws.home).then((k) => {
   for (const n of k.notes) logger.info(n);
@@ -485,7 +487,7 @@ function onRunRequest(run, line, respond) {
 }
 const logins = new Logins({ getWorkspace: () => workspace(ws.home), logger, onEvent: onAgentEvent });
 const runSubscribers = new Map(); // runId or loginId -> Set of CLI sockets that started it (see onClientLine)
-const AGENT_COMMANDS = new Set(['agent.list', 'agent.start', 'agent.stop', 'agent.running', 'agent.login', 'agent.loginCode', 'agent.loginCancel', 'mod.approve', 'mod.reject', 'mod.review', 'mod.undo', 'mod.history',
+const AGENT_COMMANDS = new Set(['mod.reveal', 'agent.list', 'agent.start', 'agent.stop', 'agent.running', 'agent.login', 'agent.loginCode', 'agent.loginCancel', 'mod.approve', 'mod.reject', 'mod.review', 'mod.undo', 'mod.history',
   'mod.update', 'instructions.get', 'instructions.set', 'agent.models', 'agent.openModel', 'agent.openModel.set', 'agent.openModel.setKey', 'agent.openModel.removeKey', 'update.check', 'update.install', 'update.setAuto', 'report.build',
   'shipped.install', 'shipped.none']);
 // Helper-local too, but a run may use them (on mods inside its scope; see lib/trash.js).
@@ -664,13 +666,25 @@ function agentCommand(cmd, args) {
       return { id: String(args.id ?? ''), entries: history.listHistory(workspace(ws.home), String(args.id ?? '')).map((e) => ({ at: e.at, kind: e.kind })) };
     }
     case 'mod.code': {
-      // The panel's "Show code" (a held mod, or one to review): the code TRIF read, capped for the panel
+      // The panel's code viewer and "Show code": the mod's file as TRIF read it, capped for the panel. A style
+      // mod: its rules (the file), not the code TRIF makes of them. `version: 'ran'`: a mod with a change
+      // waiting, the version that's running meanwhile (held.js lastRun).
       const id = typeof args.id === 'string' ? args.id.trim() : '';
       const m = state.mods.find((x) => x.id === id);
       if (!m) throw new Error(`no mod ${id || '(no id)'}`);
       const CAP = 200000;
-      const text = m.text ?? m.code; // (a rules mod: its rules, not TRIF's code)
-      return { id, code: text.slice(0, CAP), truncated: text.length > CAP };
+      let text = m.text ?? m.code;
+      if (args.version === 'ran') {
+        const before = lastRun(ws.home, id);
+        if (before === null) throw new Error(`${id} has no earlier version that ran`);
+        text = before;
+      }
+      return { id, code: text.slice(0, CAP), truncated: text.length > CAP, file: path.basename(String(m.file || `${id.split('/')[1]}.js`)) };
+    }
+    case 'mod.reveal': {
+      // The code viewer's "Show in Finder" / "Open in editor", `trif reveal`: the mod's own file, found by
+      // its id (never a path from the message), opened by the system (lib/reveal.js). Not from a run.
+      return require('./lib/reveal').reveal(ws.modsDir, state.mods, typeof args.id === 'string' ? args.id : '', args.how === 'editor' ? 'editor' : 'folder');
     }
     case 'mod.review': {
       // "Looks right" on a mod's review: what TRIF found in it is allowed for that mod (held.js).

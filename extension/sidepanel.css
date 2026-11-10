@@ -648,3 +648,24 @@ h3.mod-name { margin: 0; font-size: inherit; line-height: inherit; }
 .sensitive-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-top: 6px; }
 .agent-ask .ap-who { margin-top: 8px; }
 @media (max-width: 420px) { .agent-level { max-width: 76px; } }
+
+/* ---- the code viewer (sidepanel.js "The code viewer"): the approval card's look, with the code ---------- */
+.mod-code { width: 24px; height: 24px; color: var(--faint); }
+.mod-code svg { width: 14px; height: 14px; }
+.mod-code:hover:not(:disabled) { color: var(--text); }
+.code-view { width: auto; }
+.code-view .cv-versions { display: flex; gap: 6px; margin-top: 10px; }
+.code-view .cv-versions .btn[aria-pressed="true"] { border-color: var(--switch-on); box-shadow: inset 0 0 0 1px var(--switch-on); }
+.code-view .cv-code { counter-reset: line; max-height: min(52vh, 420px); overflow: auto; margin: 12px 0 0; padding: 8px 0; background: var(--code); border: 1px solid var(--line); border-radius: 9px; font: 11px/1.5 var(--mono); white-space: pre; tab-size: 2; }
+.code-view .cv-code .l { display: block; padding: 0 10px 0 0; min-height: 1.5em; }
+.code-view .cv-code .l::before { counter-increment: line; content: counter(line); display: inline-block; width: 3.2em; margin-right: 10px; padding-right: 6px; text-align: right; color: var(--faint); border-right: 1px solid var(--line); user-select: none; }
+.code-view .cv-code .tc { color: var(--muted); font-style: italic; }
+.code-view .cv-code .ts { color: light-dark(#a3431f, #e6a77a); }
+.code-view .cv-code .tk { color: light-dark(#7a3fb0, #c6a0f6); }
+.code-view .cv-code .tn { color: light-dark(#1f6f8b, #7fc8e0); }
+.code-view .cv-note { margin-top: 6px; }
+/* file names as quiet links: the row's, and the cards' source line */
+.file-link { padding: 0; border: 0; background: none; color: inherit; font: inherit; cursor: pointer; text-align: left; overflow-wrap: anywhere; }
+.file-link:hover { text-decoration: underline; text-underline-offset: 2px; color: var(--text); }
+.file-link:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; border-radius: 3px; }
+button.mod-file { font: 11px/1.4 var(--mono); font-weight: 400; color: var(--muted); }

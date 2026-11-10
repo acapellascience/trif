@@ -1089,7 +1089,8 @@ function modItem(m) {
   const tag = el('span', 'tag');
   tag.hidden = true;
   // The file name right after the name, and the mods TRIF ships say so (their header's @source and @version).
-  const file = el('span', 'mod-file', (m.file || m.id).split('/').pop());
+  // (a link to its code, like the </> beside the switch)
+  const file = fileLink((m.file || m.id).split('/').pop(), 'Show the code', () => openCodeView(m.id), 'mod-file');
   const source = m.source === 'webmods' || m.source === 'trif' ? el('span', 'mod-source', `Tim's mod${m.version ? `, v${m.version}` : ''}`) : null;
   // Spaces between the name and the rest, so each can wrap to the next line on its own.
   name.append(label, ' ', file, ...(source ? [' ', source] : []), ' ', tag);
@@ -1122,13 +1123,13 @@ function modItem(m) {
     // its code, or matches outside the site): not running until the user allows it, in the approval dialog
     // (below); the row says so, and its tag opens the dialog at this mod.
     li.classList.add('held');
-    row.append(gripButton(labelId), main, holdTag(m, 'on hold', labelId), deleteButton(m, labelId, li));
+    row.append(gripButton(labelId), main, holdTag(m, 'on hold', labelId), codeButton(m, labelId), deleteButton(m, labelId, li));
   } else {
     const site = switchSite(m);
     row.append(gripButton(labelId), main, modSwitch(document, {
       id: m.id, site, enabled: isOn(m.id, site), labelId,
       apply: (id, enabled, s) => request({ type: 'mod.enable', id, enabled, tab: view.tab?.id, ...(s ? { site: s } : {}) }),
-    }), deleteButton(m, labelId, li));
+    }), codeButton(m, labelId), deleteButton(m, labelId, li));
   }
   const err = el('div', 'mod-err');
   err.hidden = true;
@@ -1496,7 +1497,7 @@ function renderApproval() {
   P.chip.className = `ap-chip ${k[0]}`;
   P.chip.textContent = k[1];
   const file = String(m.file || '').split(/[\\/]/).pop() || `${m.id.split('/').pop()}.js`;
-  P.where.textContent = `${info.site || m.id.split('/')[0]} · ${file}`;
+  P.where.replaceChildren(`${info.site || m.id.split('/')[0]} · `, fileLink(file, 'Show the code', () => openCodeView(m.id)));
   P.lead.textContent = info.asks ? 'It asks for these powers. TRIF holds it to them:'
     : kind === 'pending' ? 'A change to it is waiting. TRIF found that the new version:'
       : kind === 'sandbox' ? 'This browser can\'t run it in TRIF\'s sandbox:'
@@ -1647,6 +1648,187 @@ function clearRowError(id) {
 
 // Deleting moves the mod to the helper's trash (`trif restore`), so it's one click, with an Undo on
 // the chat line it leaves, rather than a confirmation.
+// ---- The code viewer: any mod's code, from the </> on its row --------------------------------------------
+// The same card as the approval dialog: name, kind, site and file, then the code (a style mod: its rules,
+// the file) with line numbers and light colouring; Copy, Show in Finder (the helper reveals the mod's own
+// file, found by its id: helper/lib/reveal.js), Open in editor; × or Esc closes. A mod with a change
+// waiting: the version running now, or the one waiting.
+// A file name as a quiet link (a button): the code card, or in the code card, the file in its folder
+function fileLink(text, title, onClick, cls = '') {
+  const b = el('button', `file-link ${cls}`.trim(), text);
+  b.type = 'button';
+  b.title = title;
+  b.addEventListener('click', (e) => { e.stopPropagation(); onClick(); });
+  return b;
+}
+
+function codeButton(m, labelId) {
+  const b = el('button', 'icon-btn mod-code');
+  b.type = 'button';
+  b.title = 'Show code';
+  b.setAttribute('aria-label', 'Show code');
+  b.setAttribute('aria-describedby', labelId);
+  b.innerHTML = '<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M5.25 4.5 1.75 8l3.5 3.5M10.75 4.5 14.25 8l-3.5 3.5M9.25 2.75l-2.5 10.5"/></svg>';
+  b.addEventListener('click', () => openCodeView(m.id));
+  return b;
+}
+
+const codeView = { dialog: null, parts: null, id: null, version: 'file', text: '' };
+const IS_MAC = /Mac/i.test(navigator.userAgentData?.platform || navigator.platform || '');
+
+function codeViewDialog() {
+  if (codeView.dialog) return codeView.parts;
+  const d = el('dialog', 'approval code-view');
+  d.id = 'code-view';
+  d.setAttribute('aria-labelledby', 'code-view-name');
+  const top = el('div', 'ap-top');
+  const x = el('button', 'ap-x', '×');
+  x.type = 'button';
+  x.title = 'Close';
+  x.setAttribute('aria-label', 'Close');
+  top.append(el('span', 'ap-count', 'Code'), x);
+  const who = el('div', 'ap-who');
+  const robot = el('span', 'ap-robot');
+  const svg = document.querySelector('#bar-robot svg');
+  if (svg) robot.append(svg.cloneNode(true));
+  const nameBox = el('div');
+  const name = el('h2', 'ap-name');
+  name.id = 'code-view-name';
+  const meta = el('div', 'ap-meta');
+  const chip = el('span', 'ap-chip');
+  const where = el('span', 'ap-where');
+  meta.append(chip, where);
+  nameBox.append(name, meta);
+  who.append(robot, nameBox);
+  // (a change waiting: which version)
+  const versions = el('div', 'cv-versions');
+  versions.setAttribute('role', 'group');
+  versions.setAttribute('aria-label', 'Version');
+  const vRan = button('Running now', 'cv-ran', () => loadCodeView('ran'));
+  const vNew = button('Waiting for your OK', 'cv-new', () => loadCodeView('file'));
+  versions.append(vRan, vNew);
+  const codeBox = el('pre', 'cv-code');
+  codeBox.tabIndex = 0;
+  codeBox.setAttribute('aria-label', 'The mod\'s code');
+  const note = el('p', 'ap-note cv-note');
+  const err = el('p', 'ap-err');
+  err.setAttribute('role', 'alert');
+  const copy = button('Copy', 'cv-copy', () => copyCode());
+  const reveal = button(IS_MAC ? 'Show in Finder' : 'Show in folder', 'cv-reveal', () => revealMod('folder'));
+  const editor = button('Open in editor', 'cv-editor', () => revealMod('editor'));
+  const close = button('Close', 'text cv-close', () => d.close());
+  x.addEventListener('click', () => d.close());
+  const acts = el('div', 'ap-actions');
+  acts.append(copy, reveal, editor, close);
+  d.append(top, who, versions, codeBox, note, err, acts);
+  document.body.append(d);
+  codeView.dialog = d;
+  codeView.parts = { name, chip, where, versions, vRan, vNew, codeBox, note, err, copy, reveal, editor };
+  return codeView.parts;
+}
+
+function openCodeView(id) {
+  const m = (view.status?.mods || []).find((x) => x.id === id);
+  if (!m) return;
+  const P = codeViewDialog();
+  codeView.id = id;
+  codeView.dialog.dataset.mod = id;
+  P.name.textContent = m.name || m.id;
+  const k = m.rules ? ['style', 'Style mod'] : m.sandboxed ? ['boxed', 'Boxed mod'] : ['free', 'Free mod'];
+  P.chip.className = `ap-chip ${k[0]}`;
+  P.chip.textContent = k[1];
+  P.where.replaceChildren(`${m.id.split('/')[0]} · `, fileLink(String(m.file || '').split(/[\\/]/).pop() || `${m.id.split('/').pop()}.js`,
+    IS_MAC ? 'Show in Finder' : 'Show in folder', () => revealMod('folder'), 'cv-file'));
+  P.versions.hidden = !m.pending;
+  P.copy.textContent = 'Copy';
+  delete P.copy.dataset.copied;
+  // (Show in Finder and Open in editor: the helper does them)
+  const connected = !!view.status?.helper?.connected;
+  for (const b of [P.reveal, P.editor]) {
+    b.disabled = !connected;
+    b.title = connected ? '' : 'TRIF\'s helper isn\'t connected, so it can\'t open the file';
+  }
+  const fl = P.where.querySelector('.cv-file');
+  if (fl && !connected) fl.title = 'TRIF\'s helper isn\'t connected, so it can\'t open the file';
+  if (!codeView.dialog.open) codeView.dialog.showModal();
+  loadCodeView('file');
+}
+
+async function loadCodeView(version) {
+  const P = codeView.parts;
+  const id = codeView.id;
+  codeView.version = version;
+  P.vRan.setAttribute('aria-pressed', String(version === 'ran'));
+  P.vNew.setAttribute('aria-pressed', String(version !== 'ran'));
+  P.err.hidden = true;
+  P.note.hidden = true;
+  P.codeBox.replaceChildren();
+  let r;
+  try {
+    r = await request({ type: 'mod.code', id, ...(version === 'ran' ? { version: 'ran' } : {}) });
+  } catch (e) {
+    // (the helper away: what this extension has, for a free or boxed mod)
+    try { r = version === 'ran' ? null : await request({ type: 'mod.localCode', id }); } catch { r = null; }
+    if (!r) { P.err.textContent = String(e?.message ?? e); P.err.hidden = false; return; }
+  }
+  if (codeView.id !== id || codeView.version !== version) return;
+  codeView.text = String(r.code ?? '');
+  renderCode(P.codeBox, codeView.text);
+  if (r.truncated || r.local) {
+    P.note.textContent = r.truncated ? 'Showing the first 200,000 characters.' : 'From the browser: TRIF\'s helper isn\'t connected.';
+    P.note.hidden = false;
+  }
+}
+
+// Light colouring, no library: comments, strings, keywords and numbers, by one pattern (a long file: plain).
+const CODE_TOKENS = /(\/\/[^\n]*|\/\*[\s\S]*?\*\/)|('(?:\\.|[^'\\\n])*'|"(?:\\.|[^"\\\n])*"|`(?:\\[\s\S]|[^`\\])*`)|\b(const|let|var|function|return|if|else|for|while|do|of|in|new|class|extends|async|await|try|catch|finally|throw|true|false|null|undefined|this|typeof|instanceof|switch|case|break|continue|default|delete|void|yield)\b|\b(\d+(?:\.\d+)?)\b/g;
+function renderCode(box, text) {
+  const pieces = [];
+  if (text.length <= 300000) {
+    let at = 0;
+    for (const t of text.matchAll(CODE_TOKENS)) {
+      if (t.index > at) pieces.push([text.slice(at, t.index), null]);
+      pieces.push([t[0], t[1] ? 'c' : t[2] ? 's' : t[3] ? 'k' : 'n']);
+      at = t.index + t[0].length;
+    }
+    if (at < text.length) pieces.push([text.slice(at), null]);
+  } else pieces.push([text, null]);
+  // one element per line (CSS numbers them), each piece split at its line breaks
+  let line = el('span', 'l');
+  const lines = [line];
+  for (const [t, cls] of pieces) {
+    const parts = t.split('\n');
+    parts.forEach((part, i) => {
+      if (i > 0) { line = el('span', 'l'); lines.push(line); }
+      if (part) line.append(cls ? el('span', `t${cls}`, part) : document.createTextNode(part));
+    });
+  }
+  box.replaceChildren(...lines);
+}
+
+async function copyCode() {
+  const P = codeView.parts;
+  let ok = false;
+  try { await navigator.clipboard.writeText(codeView.text); ok = true; } catch {
+    // (no clipboard API here: the old way, from a selection)
+    const ta = el('textarea');
+    ta.value = codeView.text;
+    codeView.dialog.append(ta);
+    ta.select();
+    try { ok = document.execCommand('copy'); } catch { ok = false; }
+    ta.remove();
+  }
+  P.copy.textContent = ok ? 'Copied' : 'Couldn\'t copy';
+  P.copy.dataset.copied = String(ok);
+  setTimeout(() => { if (codeView.parts) codeView.parts.copy.textContent = 'Copy'; }, 1500);
+}
+
+async function revealMod(how) {
+  const P = codeView.parts;
+  P.err.hidden = true;
+  try { await request({ type: 'mod.reveal', id: codeView.id, how }); } catch (e) { P.err.textContent = String(e?.message ?? e); P.err.hidden = false; }
+}
+
 function deleteButton(m, labelId, li) {
   const b = el('button', 'icon-btn mod-delete');
   b.type = 'button';

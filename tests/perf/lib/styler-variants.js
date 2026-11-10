@@ -45,6 +45,8 @@ const ABLATIONS = {
   // (diagnostic: the rainbows not pinned to the window: background-attachment: fixed taken out)
   'no-fixed': { [PS]: [rx(/background-attachment: fixed !important;/g, '')], [POST]: [rx(/background-attachment: fixed !important;/g, '')] },
   'no-emoji': { [PS]: [patch("if (root.hasAttribute('data-pst-on') && anyRainbowText()) {", 'if (false) {')], [POST]: [patch('  const wrapEmoji = (scope) => {', '  const wrapEmoji = (scope) => { return;')] },
+  // (diagnostic, Rainbow Rave: its icons' and counts' rolling rainbow, .8s linear, taken out)
+  'no-rave-icons': { 'rainbow-rave.js': [rx(/animation: trif-rave-icons-roll[^;]*;/g, 'animation: none;')] },
   // the timers stopped after the page is styled (both stylers): what polling costs while idle
   'no-ticks': {
     [PS]: [patch('  setInterval(tick, 700);', '  { const t0 = Date.now(), id = setInterval(() => { if (Date.now() - t0 > 4000) clearInterval(id); else tick(); }, 700); }')],

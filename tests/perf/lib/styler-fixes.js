@@ -45,6 +45,8 @@ const FIXES = {
   // 15 times a second, which cost more than the span animations: main thread 609 vs 387 ms/s idle)
   // 5. linehue: the lines' hue animated on what it colours, not inherited from <html> (lib/styler-fix-linehue.js)
   linehue: require('./styler-fix-linehue'),
+  // 6. offscreen: the animations in timeline rows well out of the window paused (lib/styler-fix-offscreen.js)
+  offscreen: require('./styler-fix-offscreen'),
   // (tried and dropped: "clock", lib/styler-fix-clock.js, the text roll and the hue stepped by a timer setting a
   // step number on <html>, one CSS rule per step: the GPU's work fell (781 → 462 ms/s idle) but every step
   // re-matched those long selectors against the page, main thread 412 → 800 ms/s)
@@ -55,6 +57,10 @@ const FIXES = {
       P("  const placeToggle = () => {", "  let copiedFor; // (the style on show when Edit profile's colours were last copied)\n  const placeToggle = () => {")],
   },
 };
+
+// (the fixes `fixed` and the command line apply by default; the others only by name)
+const OPTIONAL = ['pin', 'smil']; // (smil: no gain measured, 1265 → 1204 ms/s with the animation gone altogether)
+const DEFAULT_FIXES = () => Object.keys(FIXES).filter((n) => !OPTIONAL.includes(n));
 
 function applyFixes(base, code, names) {
   for (const name of names) {
@@ -82,7 +88,4 @@ if (require.main === module) {
     console.log(`${base}: ${names.filter((n) => FIXES[n][base]).join(', ')} → ${path.join(out, base)}`);
   }
 }
-// (the fixes `fixed` and the command line apply by default; the others only by name)
-const OPTIONAL = ['pin', 'smil']; // (smil: no gain measured, 1265 → 1204 ms/s with the animation gone altogether)
-const DEFAULT_FIXES = () => Object.keys(FIXES).filter((n) => !OPTIONAL.includes(n));
 module.exports = { FIXES, DEFAULT_FIXES, applyFixes, P };

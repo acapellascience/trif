@@ -142,17 +142,20 @@ export function sandboxRuntime(mode, pageModId, pageFn, pagePowers) {
   const ATTRS = new Set(['id', 'class', 'title', 'role', 'hidden', 'alt', 'width', 'height', 'lang', 'dir', 'tabindex', 'colspan', 'rowspan', 'open', 'value', 'max', 'href', 'src']);
   // The page's own code reads attributes as instructions: htmx's data-hx-post, Turbo's data-turbo-method,
   // Stimulus's data-controller, classes a selector-observer acts on, ids it finds elements (or window globals)
-  // by. So the names a mod gives are TRIF's: data attributes only data-trif-*, and ids and classes only
-  // trif-* (aria-* stay: they describe, they don't instruct). (`name` isn't offered at all.)
-  const DATA_OK = /^data-trif-[a-z0-9-]+$/;
+  // by. So the names a mod gives are its own: data attributes only data-trif-box-*, and ids and classes only
+  // trif-box-* (aria-* stay: they describe, they don't instruct). (`name` isn't offered at all.) Not plain
+  // trif-: free mods use those, and act on them (an id they look up), so a boxed mod mustn't make them;
+  // AGENTS.md tells free mods never to act on trif-box- names. (audit AU-3)
+  const DATA_OK = /^data-trif-box-[a-z0-9-]+$/;
   const ARIA_OK = /^aria-[a-z]+$/;
-  const OWN_NAME = /^trif-[A-Za-z0-9_-]*$/;
+  const OWN_NAME = /^trif-box-[A-Za-z0-9_-]*$/;
   const nameOk = (n) => ATTRS.has(n) || DATA_OK.test(n) || ARIA_OK.test(n);
-  const nameRefused = (n) => (/^data-/.test(n) ? `only data-trif-* data attributes are offered (the page's own code could act on ${n})` : `the ${n} attribute isn't offered`);
+  const nameRefused = (n) => (/^data-/.test(n) ? `only data-trif-box-* data attributes are offered (the page's own code, or a free mod, could act on ${n})` : `the ${n} attribute isn't offered`);
   const ownTokens = (v) => String(v).trim().split(/\s+/).filter(Boolean).every((t) => OWN_NAME.test(t));
   // (an address only where it can't run or send anything by itself: a link's href, an image's src; `value`
   // only on a progress bar or list item, never on a form field, whose value the site would receive)
-  const ATTR_TAGS = { href: new Set(['a']), src: new Set(['img']), value: new Set(['progress', 'li']), max: new Set(['progress']) };
+  // (`open` only on <details>: on the page's <dialog> it would show the page's own confirm box: audit AU-8)
+  const ATTR_TAGS = { href: new Set(['a']), src: new Set(['img']), value: new Set(['progress', 'li']), max: new Set(['progress']), open: new Set(['details']) };
   const SVG_TAGS = new Set(['svg', 'g', 'path', 'circle', 'rect', 'ellipse', 'line', 'polyline', 'polygon', 'text', 'tspan', 'defs', 'lineargradient', 'radialgradient', 'stop', 'title', 'desc']);
   const SVG_ATTRS = /^(viewbox|d|cx|cy|r|rx|ry|x|y|x1|y1|x2|y2|points|fill|stroke|stroke-width|stroke-linecap|stroke-linejoin|opacity|fill-opacity|stroke-opacity|fill-rule|clip-rule|transform|offset|stop-color|stop-opacity|gradientunits|gradienttransform|xmlns|preserveaspectratio|focusable|font-size|font-family|text-anchor|dominant-baseline|width|height)$/;
   // Text inside these is code or CSS the browser would carry out: never written by a mod.
@@ -172,7 +175,7 @@ export function sandboxRuntime(mode, pageModId, pageFn, pagePowers) {
     }
     if (t === 'option') return n === 'value' || n === 'selected';
     if (t === 'select') return n === 'disabled';
-    if (t === 'label' && n === 'for') { if (!OWN_NAME.test(v)) fail('a label is for one of the mod\'s own controls (a trif- id)'); return true; }
+    if (t === 'label' && n === 'for') { if (!OWN_NAME.test(v)) fail('a label is for one of the mod\'s own controls (a trif-box- id)'); return true; }
     return false;
   };
   const ORIGIN = location.origin;
@@ -183,6 +186,7 @@ export function sandboxRuntime(mode, pageModId, pageFn, pagePowers) {
   // site: a GET there can do things too). A link: this site's own pages without a query (a query to the site
   // could go on to another one through a redirect), or #somewhere; it goes nowhere until the user clicks it.
   const shownImage = (abs) => { for (const im of D.images) if (im.src === abs || im.currentSrc === abs) return true; return false; };
+  const shownLink = (abs) => { for (const a of D.links) if (!created.has(a) && a.href === abs) return true; return false; };
   const urlOk = (v, attr) => {
     const s = String(v).trim();
     if (attr === 'src') {
@@ -190,7 +194,10 @@ export function sandboxRuntime(mode, pageModId, pageFn, pagePowers) {
       try { return shownImage(new URL(s, location.href).href); } catch { return false; }
     }
     if (/^#/.test(s)) return true;
-    try { const u = new URL(s, location.href); return u.origin === ORIGIN && /^https?:$/.test(u.protocol) && !u.search; } catch { return false; }
+    // A link: #somewhere, or an address a link on the page already has. Not a new address, not even a path on
+    // this site: a path can carry data, and the page's speculation rules or a prefetching script can fetch it
+    // without a click (audit AU-7).
+    try { const abs = new URL(s, location.href).href; return /^https?:/.test(abs) && shownLink(abs); } catch { return false; }
   };
   // CSS that loads nothing (as rules mods: helper/lib/rules.js checkCss): url() only data:, no @import,
   // image-set() and the like, no escapes outside strings.
@@ -215,14 +222,24 @@ export function sandboxRuntime(mode, pageModId, pageFn, pagePowers) {
     return true;
   };
   // A selector, for a rule TRIF writes: one that parses and can't close the rule it's put in.
+  // A selector a mod gives, anywhere: no escapes (so the checks below can't be spelled around: audit AU-9),
+  // and nothing that reads what's typed in a field: the value attribute (React keeps it in step with what's
+  // typed, passwords too) and :autofill (audit AU-2).
+  const READS_FIELDS = /\[\s*(?:[\w*-]*\|)?value\b|:(?:-webkit-)?autofill\b/i;
+  const selCheck = (sel, what = 'a selector') => {
+    str(sel, what, 2000);
+    if (sel.includes('\\')) fail(`"${sel.slice(0, 80)}": selectors can't have \\ escapes`);
+    if (READS_FIELDS.test(sel)) fail(`"${sel.slice(0, 80)}": selectors can't name the value attribute or :autofill (they'd read what's typed in a field)`);
+    return sel;
+  };
   const selectorOk = (sel) => {
-    str(sel, 'a selector', 2000);
+    selCheck(sel);
     if (/[{}<;@\\]|\/\*/.test(sel)) fail(`"${sel.slice(0, 80)}" isn't a selector TRIF writes into a style sheet`);
     try { D.createDocumentFragment().querySelector(sel); } catch { fail(`"${sel.slice(0, 80)}" isn't a valid selector`); }
     return sel;
   };
-  const qs = (root, sel) => { try { return root.querySelector(sel); } catch { fail(`"${String(sel).slice(0, 80)}" isn't a valid selector`); } };
-  const qsa = (root, sel) => { try { return root.querySelectorAll(sel); } catch { fail(`"${String(sel).slice(0, 80)}" isn't a valid selector`); } };
+  const qs = (root, sel) => { selCheck(sel); try { return root.querySelector(sel); } catch { fail(`"${String(sel).slice(0, 80)}" isn't a valid selector`); } };
+  const qsa = (root, sel) => { selCheck(sel); try { return root.querySelectorAll(sel); } catch { fail(`"${String(sel).slice(0, 80)}" isn't a valid selector`); } };
   const LISTEN = /^(click|dblclick|contextmenu|mouse(down|up|move|over|out|enter|leave)|pointer(down|up|move|over|out|enter|leave|cancel)|touch(start|move|end|cancel)|key(down|up)|wheel|scroll|resize|input|change|focus|blur|focusin|focusout|visibilitychange|transitionend|animationend)$/;
   const isRaw = (n) => !!n && n.nodeType === 1 && (RAW_TEXT.has(n.localName) || (FORM_TEXT.has(n.localName) && !created.has(n)));
 
@@ -236,14 +253,28 @@ export function sandboxRuntime(mode, pageModId, pageFn, pagePowers) {
   // What a form sends is the page's: the page's own fields stay in the form they're in (moving one into, out
   // of or between forms changes what's submitted), and a mod's button never goes inside a form.
   const FORM_FIELDS = 'button, input, select, textarea, fieldset, output, object';
+  // (and the options of a select, which say what it sends: audit AU-4; and custom elements, which can be form
+  // fields through ElementInternals, out of sight from here: audit AU-5)
+  const OPTIONS = 'option, optgroup';
+  const fieldsIn = (k) => [...(k.matches(FORM_FIELDS) ? [k] : []), ...k.querySelectorAll(FORM_FIELDS)];
+  const customIn = (k) => [...(k.localName.includes('-') ? [k] : []), ...[...k.querySelectorAll('*')].filter((e) => e.localName.includes('-'))];
+  const optionsIn = (k) => [...(k.matches(OPTIONS) ? [k] : []), ...k.querySelectorAll(OPTIONS)];
   const formsOk = (parent, kids) => {
     const dest = parent && parent.nodeType === 1 ? parent.closest('form') : null;
+    const destSelect = parent && parent.nodeType === 1 ? parent.closest('select') : null;
     for (const k of kids) {
       if (typeof k === 'string' || k.nodeType !== 1) continue;
-      for (const f of [...(k.matches(FORM_FIELDS) ? [k] : []), ...k.querySelectorAll(FORM_FIELDS)]) {
+      for (const f of fieldsIn(k)) {
         if (created.has(f)) { if (dest) fail(`a ${f.localName === 'button' ? 'button' : 'control'} a mod makes can't go inside a form`); continue; }
         if (f.hasAttribute('form')) continue; // (it names its form: where it is doesn't change that)
         if ((f.form || null) !== dest) fail(`the page's own <${f.localName}> can't be moved into, out of or between forms`);
+      }
+      for (const c of customIn(k)) if (!created.has(c) && c.closest('form') !== dest) fail(`the page's own <${c.localName}> can't be moved into, out of or between forms (it may be a form field)`);
+      for (const o of optionsIn(k)) {
+        if (created.has(o)) continue;
+        const now = o.closest('select');
+        const after = now && k.contains(now) ? now : destSelect; // (its select moves with it, or it goes where it's put)
+        if (after !== now) fail(`the page's own <${o.localName}> can't be moved out of its select or into another`);
       }
     }
   };
@@ -261,13 +292,25 @@ export function sandboxRuntime(mode, pageModId, pageFn, pagePowers) {
   };
   // Taking a page field out of its form (removing it, or what holds it, or writing over what holds it)
   // changes what the form sends, as moving it does.
-  const fieldsOwned = (n) => [...(n.matches(FORM_FIELDS) ? [n] : []), ...n.querySelectorAll(FORM_FIELDS)].filter((f) => !created.has(f) && f.form);
+  const fieldsOwned = (n) => fieldsIn(n).filter((f) => !created.has(f) && f.form);
   const detachOk = (n, keepsItself) => {
     for (const f of fieldsOwned(n)) {
       if (!keepsItself && n.contains(f.form)) continue; // (its form goes with it: nothing else submits differently)
       fail(`the page's own <${f.localName}> can't be taken out of its form`);
     }
+    for (const c of customIn(n)) {
+      const form = c.closest('form');
+      if (created.has(c) || !form || (!keepsItself && n.contains(form))) continue;
+      fail(`the page's own <${c.localName}> can't be taken out of its form (it may be a form field)`);
+    }
+    for (const o of optionsIn(n)) {
+      const sel = o.closest('select');
+      if (created.has(o) || !sel || !sel.form || (!keepsItself && n.contains(sel))) continue;
+      fail(`the page's own <${o.localName}> can't be taken out of its select`);
+    }
   };
+  // Writing into an editor is changing what the user typed: refused (audit AU-1); restyling, hiding it: fine.
+  const notInEditor = (n, what) => { if (inEditor(n)) fail(`${what} isn't offered inside an editor (what the user is typing)`); };
   const textInto = (parent, kids) => {
     formsOk(parent, kids);
     for (const k of kids) if (typeof k !== 'string' && insideEditor(k)) fail('a piece of an editor can\'t be moved out of it');
@@ -470,6 +513,7 @@ export function sandboxRuntime(mode, pageModId, pageFn, pagePowers) {
     const css = (text) => {
       const t = str(text, 'CSS', 500000);
       if (!cssOk(t)) fail('that CSS loads from an address (only data: is allowed), or has escapes outside strings');
+      if (READS_FIELDS.test(t)) fail('CSS can\'t select by the value attribute or :autofill (it would read what\'s typed in a field)');
       const st = styleSheet(t);
       return harden({ remove: () => st.remove() });
     };
@@ -683,10 +727,13 @@ export function sandboxRuntime(mode, pageModId, pageFn, pagePowers) {
     setText(t) {
       const n = nodeOf(this);
       if (isRaw(n)) fail(`text can't be written into <${n.localName}>`);
+      notInEditor(n, 'writing text');
       detachOk(n, true);
       n.textContent = str(t, 'text');
     },
-    attr(name) { const n = nodeOf(this); str(name, 'an attribute name', 100); return insideEditor(n) && !cur().powers.has('read-drafts') ? null : n.getAttribute(name); },
+    // (a field's value attribute: null, as React keeps it in step with what's typed: audit AU-2; read-drafts
+    // reads fields through .value, and attributes inside editors)
+    attr(name) { const n = nodeOf(this); str(name, 'an attribute name', 100); return (insideEditor(n) && !cur().powers.has('read-drafts')) || (/^value$/i.test(name) && /^(input|textarea|select|option)$/.test(n.localName)) ? null : n.getAttribute(name); },
     // A field's value: the mod's own controls (`controls`), or what the user typed in the page's fields and
     // editors (`read-drafts`; never a password or card field, nor a hidden one: that's the site's, not typed)
     get value() {
@@ -708,21 +755,23 @@ export function sandboxRuntime(mode, pageModId, pageFn, pagePowers) {
     setAttr(name, value) {
       const node = nodeOf(this);
       const n = str(name, 'an attribute name', 100).toLowerCase(), v = str(String(value), 'a value', 200000);
+      notInEditor(node, 'changing attributes');
       // (the mod's own controls: their few attributes; autocomplete and name never)
       if (created.has(node) && CONTROL_TAGS.has(node.localName) && controlAttrOk(node, n, v)) { node.setAttribute(n, v); return; }
       if (!nameOk(n)) fail(nameRefused(n));
       if (ATTR_TAGS[n] && (!ATTR_TAGS[n].has(node.localName) || node.namespaceURI !== HTML_NS)) fail(`${n} isn't offered on <${node.localName}>`);
       if (n === 'id' || n === 'class') {
-        if (!ownTokens(v) || (n === 'id' && /\s/.test(v.trim()))) fail(`${n === 'id' ? 'an id' : 'classes'} must start with trif- (the page's own code finds elements by ${n})`);
+        if (!ownTokens(v) || (n === 'id' && /\s/.test(v.trim()))) fail(`${n === 'id' ? 'an id' : 'classes'} must start with trif-box- (the page's own code, or a free mod, finds elements by ${n})`);
         // (the page's own id or classes stay theirs: a mod adds its classes with classes.add)
-        if (!created.has(node) && node.hasAttribute(n) && !ownTokens(node.getAttribute(n))) fail(`the page's own ${n} isn't a mod's to replace${n === 'class' ? ' (classes.add adds a trif- class)' : ''}`);
+        if (!created.has(node) && node.hasAttribute(n) && !ownTokens(node.getAttribute(n))) fail(`the page's own ${n} isn't a mod's to replace${n === 'class' ? ' (classes.add adds a trif-box- class)' : ''}`);
       }
-      if ((n === 'href' || n === 'src') && !urlOk(v, n)) fail(`${n} only takes this site's own addresses without a query${n === 'src' ? ', or data:/blob: images' : ''}`);
+      if ((n === 'href' || n === 'src') && !urlOk(v, n)) fail(n === 'src' ? 'src only takes data:/blob: images, or the address of an image the page already shows' : 'href only takes #somewhere, or an address a link on the page already has');
       node.setAttribute(n, v);
     },
     removeAttr(name) {
       const n = str(name, 'an attribute name', 100).toLowerCase();
       const node = nodeOf(this);
+      notInEditor(node, 'changing attributes');
       if (!nameOk(n)) fail(nameRefused(n));
       if ((n === 'id' || n === 'class') && !created.has(node) && node.hasAttribute(n) && !ownTokens(node.getAttribute(n))) fail(`the page's own ${n} isn't a mod's to remove`);
       // (as for setting: an attribute only where it's offered, so not a form field's value)
@@ -733,8 +782,8 @@ export function sandboxRuntime(mode, pageModId, pageFn, pagePowers) {
       const node = nodeOf(this);
       let c = classesOf.get(node);
       if (!c) {
-        // (a mod adds, removes and toggles only its own trif- classes; it can read any)
-        const cls = (x) => { str(x, 'a class', 200); if (!OWN_NAME.test(x)) fail(`classes a mod sets must start with trif- (the page's own code acts on classes like "${x.slice(0, 60)}")`); return x; };
+        // (a mod adds, removes and toggles only its own trif-box- classes; it can read any)
+        const cls = (x) => { str(x, 'a class', 200); notInEditor(node, 'changing classes'); if (!OWN_NAME.test(x)) fail(`classes a boxed mod sets must start with trif-box- (the page's own code, or a free mod, acts on classes like "${x.slice(0, 60)}")`); return x; };
         c = harden({
           add: guardShared((...x) => node.classList.add(...x.map(cls))),
           remove: guardShared((...x) => node.classList.remove(...x.map(cls))),
@@ -760,24 +809,25 @@ export function sandboxRuntime(mode, pageModId, pageFn, pagePowers) {
     show() { nodeOf(this).style.removeProperty('display'); },
     find(sel) { return wrap(qs(nodeOf(this), str(sel, 'a selector', 2000))); },
     findAll(sel) { return list(qsa(nodeOf(this), str(sel, 'a selector', 2000))); },
-    closest(sel) { const n = nodeOf(this); str(sel, 'a selector', 2000); try { return wrap(n.closest(sel)); } catch { return fail(`"${sel.slice(0, 80)}" isn't a valid selector`); } },
-    matches(sel) { const n = nodeOf(this); str(sel, 'a selector', 2000); try { return n.matches(sel); } catch { return fail(`"${sel.slice(0, 80)}" isn't a valid selector`); } },
+    closest(sel) { const n = nodeOf(this); selCheck(sel); try { return wrap(n.closest(sel)); } catch { return fail(`"${sel.slice(0, 80)}" isn't a valid selector`); } },
+    matches(sel) { const n = nodeOf(this); selCheck(sel); try { return n.matches(sel); } catch { return fail(`"${sel.slice(0, 80)}" isn't a valid selector`); } },
     get parent() { return wrap(nodeOf(this).parentElement); },
     get children() { return list(nodeOf(this).children); },
     get next() { return wrap(nodeOf(this).nextElementSibling); },
     get previous() { return wrap(nodeOf(this).previousElementSibling); },
     get created() { return created.has(nodeOf(this)); },
-    append(...kids) { const n = nodeOf(this); const k = kids.map(kidOf); textInto(n, k); n.append(...k); },
-    prepend(...kids) { const n = nodeOf(this); const k = kids.map(kidOf); textInto(n, k); n.prepend(...k); },
-    before(...kids) { const n = nodeOf(this); const k = kids.map(kidOf); if (n.parentNode) textInto(n.parentNode, k); n.before(...k); },
-    after(...kids) { const n = nodeOf(this); const k = kids.map(kidOf); if (n.parentNode) textInto(n.parentNode, k); n.after(...k); },
-    remove() { const n = nodeOf(this); detachOk(n, false); n.remove(); },
+    append(...kids) { const n = nodeOf(this); notInEditor(n, 'adding'); const k = kids.map(kidOf); textInto(n, k); n.append(...k); },
+    prepend(...kids) { const n = nodeOf(this); notInEditor(n, 'adding'); const k = kids.map(kidOf); textInto(n, k); n.prepend(...k); },
+    before(...kids) { const n = nodeOf(this); notInEditor(n.parentElement, 'adding'); const k = kids.map(kidOf); if (n.parentNode) textInto(n.parentNode, k); n.before(...k); },
+    after(...kids) { const n = nodeOf(this); notInEditor(n.parentElement, 'adding'); const k = kids.map(kidOf); if (n.parentNode) textInto(n.parentNode, k); n.after(...k); },
+    remove() { const n = nodeOf(this); notInEditor(n, 'removing'); detachOk(n, false); n.remove(); },
     // a copy of this element and what's inside it, keeping only allowed elements and attributes (an element
     // of another kind is left out, with what's inside it; other attributes are dropped)
     clone() { return wrap(safeCopy(nodeOf(this))); },
     rect() { const r = nodeOf(this).getBoundingClientRect(); return harden({ x: r.x, y: r.y, width: r.width, height: r.height, top: r.top, left: r.left, right: r.right, bottom: r.bottom }); },
     on(type, fn, opts) { const n = nodeOf(this); return cur().listen(n, type, fn, opts); },
-    canvas() { const n = nodeOf(this); if (n.localName !== 'canvas') fail('canvas() is for <canvas> elements'); return ctxOf(n); },
+    // (only the mod's own: a page's canvas may be a signature pad or a drawing the page uploads: audit AU-6)
+    canvas() { const n = nodeOf(this); if (n.localName !== 'canvas') fail('canvas() is for <canvas> elements'); if (!created.has(n)) fail('canvas() is for canvases the mod made'); return ctxOf(n); },
   };
   const protoOut = {};
   for (const [k, d] of Object.entries(Object.getOwnPropertyDescriptors(protoDef))) {

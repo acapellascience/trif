@@ -15,4 +15,4 @@ t('controls: a select', () => { page.create('select'); return 'made'; });
 t('read-drafts: a field\'s value', () => page.find('#fi').value);
 t('read-drafts: an editor\'s text', () => page.find('#editor').text);
 t('read-drafts: an editor\'s value', () => page.find('#editor').value);
-page.root.setAttr('data-trif-pw-none', JSON.stringify(R));
+page.root.setAttr('data-trif-box-pw-none', JSON.stringify(R));

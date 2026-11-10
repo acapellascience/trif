@@ -50,9 +50,9 @@ t('Turbo\'s data-turbo-method on a link', () => { page.create('a').setAttr('data
 t('a class the page acts on', () => { const c = page.create('div'); c.classes.add('js-auto-post'); page.body.append(c); return 'added'; });
 t('a class the page acts on, through setAttr', () => { const c = page.create('div'); c.setAttr('class', 'js-auto-post'); page.body.append(c); return 'set'; });
 t('an id the page reads (DOM clobbering)', () => { const c = page.create('div'); c.setAttr('id', 'sbxConfig'); page.body.append(c); return 'set'; });
-t('the page\'s own id replaced', () => { page.find('#txt').setAttr('id', 'trif-x'); return 'set'; });
+t('the page\'s own id replaced', () => { page.find('#txt').setAttr('id', 'trif-box-x'); return 'set'; });
 t('the page\'s own class taken off (what its code acts on)', () => { page.find('#gadget-src').classes.remove('done'); return 'removed'; });
-t('the page\'s own classes replaced', () => { page.find('#gadget-src').setAttr('class', 'trif-x'); return 'set'; });
+t('the page\'s own classes replaced', () => { page.find('#gadget-src').setAttr('class', 'trif-box-x'); return 'set'; });
 t('the page\'s own class attribute removed', () => { page.find('#gadget-src').removeAttr('class'); return 'removed'; });
 t('a copy of a page element, keeping what its code acts on', () => {
   const c = page.find('#gadget-src').clone(); page.body.append(c);
@@ -85,6 +85,44 @@ t('what holds the page\'s field removed', () => { page.find('#fwrap').remove(); 
 t('the page\'s form written over', () => { page.find('#f').setText('x'); return 'written'; });
 t('what holds the page\'s field written over', () => { page.find('#fwrap').setText('x'); return 'written'; });
 t('the page\'s field\'s value taken off', () => { page.find('#fi').removeAttr('value'); return 'removed'; });
+
+// ---- the audit (docs/AUDIT-REPORT.md on sandbox-audit), AU-1: writing into the user's drafts
+t('text written into an editor', () => { page.find('#ed-p').setText('changed'); return 'set'; });
+t('something added into an editor', () => { page.find('#editor').append('added'); return 'added'; });
+t('something added before a piece of an editor', () => { page.find('#ed-a').before(page.create('span')); return 'added'; });
+t('a piece of an editor removed', () => { page.find('#ed-a').remove(); return 'removed'; });
+t('an editor removed', () => { page.find('#editor').remove(); return 'removed'; });
+t('an attribute set inside an editor', () => { page.find('#ed-p').setAttr('title', 'x'); return 'set'; });
+t('an attribute taken off inside an editor', () => { page.find('#ed-a').removeAttr('href'); return 'removed'; });
+t('a class on an editor', () => { page.find('#editor').classes.add('trif-box-x'); return 'added'; });
+// AU-2 and AU-9: reading a field through its value attribute, and selectors spelled around the checks
+t('a field\'s value attribute', () => page.find('#rv').attr('value'));
+t('a selector by value', () => page.find('input[value^="t"]'));
+t('a selector by VALUE, spaced', () => page.find('input[ VALUE ^= "t"]'));
+t('matches by value', () => page.find('#rv').matches('[value^="t"]'));
+t('closest by value', () => page.find('#rv').closest('[value]'));
+t('findAll by value', () => page.findAll('[value$="t"]').length);
+t('observe by value', () => { trif.observe('input[value*="secret"]', () => {}); return 'watching'; });
+t('trif.text by value', () => { trif.text('[value]', (x) => x); return 'watching'; });
+t('trif.hide by value', () => { trif.hide('input[value^="t"]'); return 'added'; });
+t('trif.css by value', () => { trif.css('input[value^="t"] + * { color: rgb(1, 1, 1) }'); return 'added'; });
+t(':autofill', () => page.find('input:autofill'));
+t('a selector with an escape', () => page.find('input[\\76 alue^="t"]'));
+// AU-3: a free mod's names
+t('a free mod\'s id (trif-)', () => { const d = page.create('div'); d.setAttr('id', 'trif-rave-robot'); page.body.append(d); return 'set'; });
+t('a free mod\'s data attribute (data-trif-)', () => { page.create('div').setAttr('data-trif-rave', '1'); return 'set'; });
+t('a free mod\'s class (trif-)', () => { page.create('div').classes.add('trif-rave'); return 'added'; });
+// AU-4 and AU-5: a select's options, and custom elements that may be form fields
+t('an option moved into another select', () => { page.find('#sel2').append(page.find('#opt')); return 'moved'; });
+t('an option moved out of its select', () => { page.body.append(page.find('#opt2')); return 'moved'; });
+t('an option removed', () => { page.find('#opt').remove(); return 'removed'; });
+t('a custom element moved out of its form', () => { page.body.append(page.find('#xf')); return 'moved'; });
+t('a custom element moved into another form', () => { page.find('#f2').append(page.find('#xf')); return 'moved'; });
+t('a custom element removed from its form', () => { page.find('#xf').remove(); return 'removed'; });
+// AU-6, AU-7, AU-8
+t('drawing on the page\'s canvas', () => { page.find('#pcv').canvas().fillRect(0, 0, 10, 10); return 'drew'; });
+t('a link to a new address on this site', () => { const a = page.create('a'); a.setAttr('href', '/e2e-sbx-leak-path/carried'); page.body.append(a); return 'set'; });
+t('the page\'s dialog opened', () => { page.find('#dlg').setAttr('open', ''); return 'opened'; });
 
 // ---- code from strings
 for (const n of ['eval', 'Function', 'Compartment', 'lockdown', 'harden']) absent(n);
@@ -154,4 +192,4 @@ t('cookies', () => document.cookie);
 t('localStorage', () => localStorage.getItem('x'));
 t('postMessage to the page', () => postMessage('x', '*'));
 
-page.root.setAttr('data-trif-sbx-hostile', JSON.stringify(R));
+page.root.setAttr('data-trif-box-sbx-hostile', JSON.stringify(R));

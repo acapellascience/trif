@@ -58,7 +58,7 @@ panel shows "It <fact>." and `trif status` "it <fact>".
   **password and card fields stay hidden, whatever the mod's powers** · **a {type} input isn't something the
   user typed** · **<{tag}> has no value**
 - controls: **a mod's input can be range, color, checkbox, number, text (not {type})** · **{attr} takes a
-  number** · **a label is for one of the mod's own controls (a trif- id)** · **a control a mod makes can't go
+  number** · **a label is for one of the mod's own controls (a trif-box- id)** · **a control a mod makes can't go
   inside a form** · **setValue is for the mod's own controls (changing what the user typed is the
   write-drafts power, not in this version)** · **setChecked is for the mod's own checkboxes**
 - sound: **sounds come from data:audio/…;base64 addresses only** · **connect takes another of this mod's

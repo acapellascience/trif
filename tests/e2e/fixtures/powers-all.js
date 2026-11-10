@@ -10,7 +10,7 @@
 // Positive outcomes start "ok", refused ones "refused"; the scenario checks which is which.
 const R = {};
 const t = (name, fn) => { try { const v = fn(); R[name] = v && typeof v.then === 'function' ? 'pending' : 'ok: ' + String(v).slice(0, 80); if (v && typeof v.then === 'function') v.then((x) => { R[name] = 'ok: ' + String(x).slice(0, 80); out(); }, (e) => { R[name] = 'refused: ' + String(e && e.message).slice(0, 140); out(); }); } catch (e) { R[name] = 'refused: ' + String(e && e.message).slice(0, 140); } };
-const out = () => page.root.setAttr('data-trif-pw-all', JSON.stringify(R));
+const out = () => page.root.setAttr('data-trif-box-pw-all', JSON.stringify(R));
 const WAV = '__WAV__';
 
 // sound
@@ -25,7 +25,7 @@ t('sound: the microphone (refused)', () => navigator.mediaDevices.getUserMedia({
 
 // controls
 const box = page.create('div');
-box.setAttr('id', 'trif-pw-box');
+box.setAttr('id', 'trif-box-pw-box');
 const range = page.create('input');
 t('controls: a slider', () => { range.setAttr('type', 'range'); range.setAttr('min', '0'); range.setAttr('max', '10'); range.setValue('7'); return range.value; });
 t('controls: its type', () => page.create('input').attr('type') + '/' + page.create('input').attr('autocomplete'));
@@ -46,7 +46,7 @@ t('read-drafts: a password (refused)', () => page.find('#pw').value);
 t('read-drafts: a hidden field (refused)', () => page.find('#fh').value);
 t('read-drafts: changing a field (refused)', () => page.find('#fi').setValue('x'));
 const keys = [];
-page.on('keydown', (e) => { keys.push(`${e.key}@${e.target ? (e.target.attr('id') || e.target.tag) : '-'}`); page.root.setAttr('data-trif-pw-keys', keys.join(',')); });
+page.on('keydown', (e) => { keys.push(`${e.key}@${e.target ? (e.target.attr('id') || e.target.tag) : '-'}`); page.root.setAttr('data-trif-box-pw-keys', keys.join(',')); });
 const typed = [];
-page.on('input', (e) => { typed.push(`${e.data}@${e.target ? e.target.attr('id') : '-'}`); page.root.setAttr('data-trif-pw-typed', typed.join(',')); });
+page.on('input', (e) => { typed.push(`${e.data}@${e.target ? e.target.attr('id') : '-'}`); page.root.setAttr('data-trif-box-pw-typed', typed.join(',')); });
 out();

@@ -54,9 +54,12 @@ document.addEventListener('DOMContentLoaded', () => {
 <p id="txt">Grok says hi</p>
 <div id="box"></div>
 <p id="target-click">click target</p>
-<form id="f" action="/e2e-sbx-leak-submit"><span id="fwrap"><input id="fh" type="hidden" name="h" value="keep"></span><input id="fi" name="q" value="v"><textarea id="ta">t</textarea><select id="sel"><option id="opt">o</option></select><button id="fb">Go</button></form>
+<form id="f" action="/e2e-sbx-leak-submit"><span id="fwrap"><input id="fh" type="hidden" name="h" value="keep"></span><input id="fi" name="q" value="v"><textarea id="ta">t</textarea><select id="sel"><option id="opt">o</option></select><select id="sel2" name="s2"><option id="opt2" value="p">p</option></select><x-field id="xf">a custom field</x-field><button id="fb">Go</button></form>
 <form id="f2" action="/e2e-sbx-leak-submit2"><p>another form</p></form>
-<p><input id="pw" type="password" placeholder="password"></p>
+<p><input id="pw" type="password" placeholder="password"> <input id="rv" value="typed-secret"></p>
+<canvas id="pcv" width="10" height="10"></canvas>
+<dialog id="dlg"><p>Are you sure?</p><button id="dlg-ok">Yes</button></dialog>
+<details id="det"><summary>more</summary>details</details>
 <div id="shost" style="display:inline-block"></div>
 <script>document.getElementById('shost').attachShadow({ mode: 'closed' }).innerHTML = '<input id="si" type="password" style="width:160px">';</script>
 <div id="editor" contenteditable="true"><p id="ed-p">secret draft</p><a id="ed-a" href="/two.html?draft">a link in the draft</a></div>
@@ -313,6 +316,10 @@ async function startServers(dir) {
     if (u.pathname === '/favicon.ico') return send(204, 'image/x-icon', '');
     if (u.pathname === '/promos.html') return send(200, 'text/html; charset=utf-8', PROMOS_PAGE());
     if (u.pathname === '/sandbox.html') return send(200, 'text/html; charset=utf-8', SANDBOX_PAGE());
+    // (audit AU-7: a page whose speculation rules prefetch its same-site links at once, with no click)
+    if (u.pathname === '/specrules.html') return send(200, 'text/html; charset=utf-8', PAGE('TRIF e2e speculation rules', `<script type="speculationrules">{"prefetch":[{"source":"document","where":{"href_matches":"/e2e-spec-*"},"eagerness":"immediate"}]}</script>
+<h1 id="title">Speculation rules</h1><p><a id="known" href="/two.html">a link the page has</a></p>`));
+    if (u.pathname.startsWith('/e2e-spec-')) return send(200, 'text/html; charset=utf-8', PAGE('spec', '<p>prefetched</p>'));
     if (u.pathname === '/sweep.html') return send(200, 'text/html; charset=utf-8', SWEEP_PAGE());
     if (u.pathname === '/sweep-frame.html') return send(200, 'text/html; charset=utf-8', SWEEP_FRAME());
     return send(200, 'text/html; charset=utf-8', testPage(host, u.pathname));

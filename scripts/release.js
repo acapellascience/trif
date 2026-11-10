@@ -95,6 +95,48 @@ function unreleasedSection(text) {
   return changelogSection(text, 'Unreleased');
 }
 
+// What the side panel shows under "What's new" is a version's short summary: the part of its section before
+// the first "### " heading (the full notes, "### More", go on the GitHub release). The panel has little room,
+// and an update's notes are drawn by the version people already have, so they're kept short: at most
+// SUMMARY_ITEMS points and SUMMARY_BYTES, with a link to the full notes.
+const SUMMARY_ITEMS = 5;
+const SUMMARY_BYTES = 700;
+
+/** A section's summary: its text before the first "### " heading, trimmed. */
+function changelogSummary(section) {
+  const lines = String(section || '').split('\n');
+  const end = lines.findIndex((l) => /^### /.test(l));
+  return (end === -1 ? lines : lines.slice(0, end)).join('\n').trim();
+}
+
+/**
+ * Markdown with the file's line wrapping taken out: a line that goes on a paragraph or list item joins the
+ * one before it (the panel keeps line breaks, so wrapped lines would stop halfway across it).
+ */
+function unwrapMarkdown(md) {
+  const out = [];
+  for (const line of String(md).split('\n')) {
+    const starts = /^\s*$/.test(line) || /^\s*([-*+]|\d+\.)\s/.test(line) || /^#/.test(line) || /^\s*>/.test(line);
+    if (!starts && out.length && !/^\s*$/.test(out[out.length - 1])) out[out.length - 1] += ' ' + line.trim();
+    else out.push(line);
+  }
+  return out.join('\n');
+}
+
+/** Why a summary is too long for the panel, or null. */
+function summaryProblem(summary, version) {
+  if (!summary) return `the "## ${version}" section has no summary: start it with a few short points (what the side panel shows), then the rest under "### More"`;
+  const items = summary.split('\n').filter((l) => /^\s*([-*+]|\d+\.)\s/.test(l)).length;
+  const bytes = Buffer.byteLength(unwrapMarkdown(summary));
+  if (items > SUMMARY_ITEMS || bytes > SUMMARY_BYTES) return `the "## ${version}" summary (before "### More") has ${items} points and ${bytes} bytes: keep it to ${SUMMARY_ITEMS} short points and ${SUMMARY_BYTES} bytes (the side panel shows it; the details go under "### More")`;
+  return null;
+}
+
+/** What the side panel shows: the summary, unwrapped, then a link to the full notes. */
+function panelNotes(section, { repo, version }) {
+  return `${unwrapMarkdown(changelogSummary(section))}\n\n[All of what's new in ${version}](https://github.com/${repo}/releases/tag/v${version})`;
+}
+
 /** "owner/name" of a GitHub remote URL (https or ssh), or null. */
 function remoteRepo(url) {
   const m = /^(?:(?:git\+)?https:\/\/github\.com\/|git@github\.com:|ssh:\/\/git@github\.com\/)([\w.-]+)\/([\w.-]+?)(?:\.git)?\/?$/.exec(String(url || '').trim());
@@ -172,6 +214,8 @@ function preflight(version, { dryRun }) {
   // What a real release needs; a dry run only warns about them.
   const problems = [];
   if (unreleasedSection(changelog)) problems.push(`CHANGELOG.md still has a "## Unreleased" section: move what's in it into "## ${version}" (the panel shows that one) and delete it`);
+  const tooLong = summaryProblem(changelogSummary(notes), version);
+  if (tooLong) problems.push(tooLong);
   if (Buffer.byteLength(notes) > 3900) problems.push(`the "## ${version}" notes are ${Buffer.byteLength(notes)} bytes: keep them under 3900 (updaters before 0.2.0 cut them at 4000)`);
   if (!repo) problems.push('package.json has no GitHub "repository"');
   else {
@@ -342,7 +386,7 @@ async function release(version, { dryRun, skipTests }) {
   // Feeds, pointing at the release's files on GitHub.
   const base = `https://github.com/${repo || 'OWNER/trif'}/releases/download/v${version}`;
   const published = new Date().toISOString().slice(0, 10);
-  const feed = latestFeed({ version, published, notes, url: `${base}/${tgzName}`, sha256: sha256(tgz), size: fs.statSync(tgz).size });
+  const feed = latestFeed({ version, published, notes: panelNotes(notes, { repo, version }), url: `${base}/${tgzName}`, sha256: sha256(tgz), size: fs.statSync(tgz).size });
   const feedsDir = dryRun ? path.join(out, 'updates') : path.join(ROOT, 'updates');
   fs.mkdirSync(feedsDir, { recursive: true });
   const latestPath = path.join(feedsDir, 'latest.json');
@@ -362,7 +406,7 @@ async function release(version, { dryRun, skipTests }) {
   const assets = releaseAssets(out, { tgz, chromeZip: path.join(out, `trif-chrome-${version}.zip`), xpi, zips });
   console.log(`\nReady in ${path.relative(ROOT, out)}:`);
   for (const a of assets) console.log(`  ${path.basename(a)}`);
-  console.log(`\nWhat's new in ${version}:\n${notes}\n`);
+  console.log(`\nWhat's new in ${version} (the side panel's summary):\n${panelNotes(notes, { repo, version })}\n`);
   if (dryRun) {
     // The copy it built from holds the tests too; left there, `node --test` would find them.
     fs.rmSync(src, { recursive: true, force: true });
@@ -410,4 +454,4 @@ if (require.main === module) {
   else release(cmd, { dryRun: flags.has('--dry-run'), skipTests: flags.has('--skip-tests') }).catch((e) => fail(e.stack || e.message));
 }
 
-module.exports = { changelogSection, unreleasedSection, remoteRepo, repoMismatch, latestFeed, signBytes, firefoxFeed, bump, xpiMatches, releaseAssets };
+module.exports = { changelogSection, unreleasedSection, changelogSummary, unwrapMarkdown, summaryProblem, panelNotes, remoteRepo, repoMismatch, latestFeed, signBytes, firefoxFeed, bump, xpiMatches, releaseAssets };

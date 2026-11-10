@@ -2848,3 +2848,11 @@ test('groups: switched off per site, page scripts and rules apart; registration 
   assert.deepStrictEqual(byId['all-sites/dark'].excludeMatches.sort(), ['*://*.x.com/*', '*://*.y.com/*', '*://x.com/*', '*://y.com/*']);
   assert.deepStrictEqual(byId['x.com/calm'].excludeMatches, []);
 });
+
+test('unwrapMarkdown: an update\'s notes flow to the panel\'s width (the file\'s line wrapping taken out)', async () => {
+  const { unwrapMarkdown, renderMarkdown } = await import('../extension/markdown.js');
+  assert.equal(unwrapMarkdown('- **Bigger mods.** A mod can now\n  be 4 MB.\n- Two\n\nA para\nthat goes on.\n\n[All](https://x)'),
+    '- **Bigger mods.** A mod can now be 4 MB.\n- Two\n\nA para that goes on.\n\n[All](https://x)');
+  assert.doesNotMatch(renderMarkdown(unwrapMarkdown('- one\n  two')), /<br/);
+  assert.equal(unwrapMarkdown(''), '');
+});

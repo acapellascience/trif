@@ -1,10 +1,21 @@
 # Changelog
 
-What's new in each TRIF release (called WebMods before 0.2.0). The text under a version is what the side
-panel shows under "What's new", so it's written for people using TRIF. `node scripts/release.js <version>`
-needs a section here for the version it releases.
+What's new in each TRIF release (called WebMods before 0.2.0). From 0.2.6 on, each version starts with a
+short summary, at most 5 points: that's what the side panel shows under "What's new", with a link to the
+rest, which goes under "### More" (and on the GitHub release). It's written for people using TRIF.
+`node scripts/release.js <version>` needs a section here for the version it releases, and stops when its
+summary is too long.
 
 ## Unreleased
+
+- **Safer agents.** A mod that can post, click or send for you waits for your OK, and a tab your agent ran
+  code in can't post as you until it reloads.
+- **Choose what TRIF can reach:** every site (Permissive), or site by site with Connect (Restrictive).
+  Already using TRIF? You stay Permissive.
+- **Block a site** to keep TRIF away from it; the power button is now a quick pause.
+- A site's mods come in two groups, Rules and Page scripts, each with its own switch.
+
+### More
 
 - A site's mods now come in two groups, Rules and Page scripts, each with a switch for that site only.
 - **You choose what TRIF can reach: permissive or restrictive.** Installing TRIF used to give it "all your

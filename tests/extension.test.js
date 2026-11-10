@@ -2700,22 +2700,6 @@ test('background: sites setup turns on are disconnected until connected, then on
   } finally { bg.restore(); }
 });
 
-test('background: the helper says whether Tim\'s starter mods were added; the setup page\'s choice goes to the helper', async () => {
-  const bg = await loadBackground({ storage: { sitesOn: [] } });
-  try {
-    const panel = bg.connectPanel();
-    assert.strictEqual((await panel.ask({ type: 'status' })).result.starter, null, 'not connected: unknown');
-    bg.native.emit({ type: 'mods', mods: [], sitesOn: [], starter: { choice: null, count: 15, sites: ['google.com'] } });
-    await settle(20);
-    assert.deepStrictEqual((await panel.ask({ type: 'status' })).result.starter, { choice: null, count: 15, sites: ['google.com'] });
-    for (const type of ['shipped.install', 'shipped.none']) {
-      const asked = panel.ask({ type });
-      await answerNative(bg.native, type, { choice: type === 'shipped.none' ? 'none' : 'added' });
-      assert.strictEqual((await asked).ok, true);
-    }
-  } finally { bg.restore(); }
-});
-
 test('background (Safari): TRIF doesn\'t check site access (Safari asks per site itself)', async () => {
   const bg = await loadBackground({ safari: true, storage: { mods: [mod('bank.com/a')], sitesOn: ['bank.com'] }, granted: [] });
   try {

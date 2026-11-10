@@ -199,3 +199,51 @@ frames, a copy of a page image, listening, settings across a reload), errors and
 (examples/sandboxed), and the panel's group switch. Results: docs/SANDBOX-TIER-NOTES.md "Measurements".
 
 **Not built**: `trif.filterResponse` (the data filters stay page scripts), themes.
+
+## Design (not built): `trif.filterResponse` for sandboxed mods
+
+The data filters (Detox Timeline and the Instagram and Facebook feed filters) patch the page's `fetch` and
+`XMLHttpRequest` and rewrite what comes back. That needs the page's world, so they're page scripts today. A
+sandboxed mod could do the same job if TRIF did the patching and only handed it the data:
+
+```js
+// a sandboxed mod
+trif.filterResponse('https://x.com/i/api/graphql/*/HomeTimeline*', (data, { url }) => {
+  for (const ins of data.data?.home?.home_timeline_urt?.instructions ?? []) {
+    if (ins.entries) ins.entries = ins.entries.filter((e) => !e.entryId.startsWith('promoted-'));
+  }
+  return data;
+});
+```
+
+**How it would work.**
+- TRIF's page runtime (runtime.js, in the page's world, TRIF's own code) wraps `fetch` and
+  `XMLHttpRequest` once, the way the recorder already does, on pages where a sandboxed mod has asked to
+  filter (the registration carries the mods' URL patterns, so nothing is wrapped elsewhere).
+- A response whose URL matches is read as text (JSON only; capped, like the recorder's 2 MB), and handed to
+  TRIF's sandbox world **synchronously**, through a DOM event on a node only TRIF's two runtimes know about:
+  the page runtime dispatches `CustomEvent(name, {detail: <JSON text>})`; the sandbox runtime's listener runs
+  during the dispatch, parses the text, calls each matching mod's function on a copy (in its compartment),
+  and answers with a second event carrying the JSON text back; the page runtime substitutes it (a new
+  `Response` for fetch; the `responseText`/`response` getters for XHR, as Detox Timeline does now). Event
+  dispatch is synchronous across worlds, and strings cross them (objects don't), which is why JSON text. A
+  mod that throws or returns nothing leaves the response as it was.
+- What the mod gets: plain data (parsed JSON) and `{url, method, status}`. It never sees the page's
+  `fetch`, a request, or the response object, so it still can't send anything: it can only change what comes
+  back to the page that asked for it.
+
+**Why it's still safe.** The page can see and forge the events: it can feed the mod's function data of its
+choosing (which only goes back to the page), and answer TRIF's runtime itself (its own data, to itself). The
+mod can't use the channel to reach anything: the reply goes to the page that already had the data. The
+event name, random per registration, is visible to the page once used (it can tell TRIF filters it, as it
+can today from the patched `fetch`).
+
+**What stays a page script.** Rewriting requests (Detox Timeline's "Recent" sort changes the request's
+variables): it changes what the site receives. A later `trif.rewriteRequest(urlPattern, {params})` could
+take a declared, checked list of changes; until then that part is a reviewed power.
+
+**To find out in a spike** (not done tonight): whether a USER_SCRIPT world's listener does run during a
+page-world dispatch in both browsers (Chrome's isolated worlds do for content scripts; Firefox's Xrays
+should); the cost of the JSON round trip on X's timeline responses (a few hundred KB: parse + stringify on
+each side, likely a few ms); and streamed responses (NDJSON, server-sent events), which a text read would
+hold open: those would be left alone.

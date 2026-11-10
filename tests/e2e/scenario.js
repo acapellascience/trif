@@ -2010,6 +2010,9 @@ process.exitCode = 1;
       const again = await waitFor('the second visit', async () => { const o = await readPage(); return o.visits ? o : null; }, { timeoutMs: 15000, intervalMs: 400 });
       if (again.visits !== '1') missing.push(`settings on the second visit: ${again.visits}`);
       if (again.storage.length) missing.push(`the page's localStorage has ${again.storage.join(', ')}`);
+      // (kept by the extension, by mod and by the site the browser said the page was on)
+      const kept = await this.ext(`async () => (await chrome.storage.local.get('sandboxSettings')).sandboxSettings || null`);
+      if (JSON.stringify(kept) !== JSON.stringify({ '127.0.0.1/e2e-sbx-good': { '127.0.0.1': { prefs: '{"visits":2}' } } })) missing.push(`the extension's sandboxSettings: ${JSON.stringify(kept)}`);
       // errors and logs, as for page mods
       const errs = (await this.cli(['errors', '--tab', String(win.tabId)], { json: true, timeoutMs: 20000 })).json;
       const errList = Array.isArray(errs) ? errs : (errs && (errs.errors || errs.result)) || [];

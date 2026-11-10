@@ -289,6 +289,16 @@ function selfSignedCert(dir) {
   return { key: fs.readFileSync(key), cert: fs.readFileSync(cert) };
 }
 
+const SW_SCRIPT = `self.addEventListener('install', () => self.skipWaiting());
+self.addEventListener('activate', (e) => e.waitUntil(self.clients.claim()));
+self.addEventListener('message', (e) => {
+  const { url, method } = e.data || {};
+  fetch(url, { method, body: method === 'POST' ? 'from the service worker' : undefined })
+    .then((r) => 'sent ' + r.status, (x) => 'blocked: ' + x.message)
+    .then((t) => e.ports[0].postMessage(t));
+});
+`;
+
 /** Starts both servers. Returns {port, tlsPort, requests, timeline, close()}. */
 async function startServers(dir) {
   const requests = []; // {host, url, method, time}
@@ -311,6 +321,9 @@ async function startServers(dir) {
       return send(404, 'text/plain', 'not found');
     }
     if (u.pathname === '/favicon.ico') return send(204, 'image/x-icon', '');
+    // A service worker for the tab-lock checks (scenario.js tabLockHardeningCheck): it takes the page at
+    // once, passes fetches through, and fetches what a message asks for (a request no tab owns: tabId -1).
+    if (u.pathname === '/e2e-sw.js') return send(200, 'text/javascript', SW_SCRIPT);
     if (u.pathname === '/promos.html') return send(200, 'text/html; charset=utf-8', PROMOS_PAGE());
     if (u.pathname === '/sandbox.html') return send(200, 'text/html; charset=utf-8', SANDBOX_PAGE());
     if (u.pathname === '/sweep.html') return send(200, 'text/html; charset=utf-8', SWEEP_PAGE());

@@ -56,7 +56,7 @@ summary is too long.
   which keeps Firefox's memory in check with big mods. (The helper and the browser extension both need
   this version; with an older extension, mods still stop at 1 MB in all, and `trif doctor` says to update
   it.)
-- **X-Flyer has music**, in the mod itself: Blast the Evil Eye while you fly and Big Boss once @elonmusk
+- **X-Flyer has music**, in the mod itself: Blast the Evil Eye while you fly and Big Boss once `@elonmusk`
   is full size (both by Tim), then the end of Stravinsky's Firebird (Stokowski, 1940) when he explodes.
   That makes it about 2 MB, so it needs this version.
   It's also smoother: the boss fight and heavy firing stay at 60 frames a second with your other X mods

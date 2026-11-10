@@ -2535,14 +2535,27 @@ say({ type: 'result', subtype: 'success', is_error: false, result: text, session
       if (leaked().length) throw new Error(`another site received ${JSON.stringify(leaked())}`);
       if (this.o.servers.requests.some((q) => q.url.startsWith('/e2e-socket'))) throw new Error('the WebSocket reached the test site');
       // The panel says so, with a Reload button
-      // (one line and a small Reload button, the details in the line's tooltip; the robot in the bar paused)
+      // (one line and a small Reload button, the details in the line's tooltip; the robot in the bar paused,
+      // the panel's state colour the paused one unless red or yellow applies)
       const lock = await waitFor('the lock notice', () => this.panel(`async () => {
         const n = document.getElementById('tab-lock');
         if (!n || n.hidden) return null;
         const pause = getComputedStyle(document.querySelector('#bar-robot .pause')).display !== 'none';
         const eyes = getComputedStyle(document.querySelector('#bar-robot .eye')).display !== 'none';
-        return { text: n.innerText.trim(), tip: n.querySelector('.title')?.title || '', button: n.querySelector('button')?.textContent || '', height: n.getBoundingClientRect().height, pause, eyes };
+        // The state colour: red or yellow if one applies (they win), else the paused white (dark grey on
+        // light); and with those taken away for a moment, the paused colour, the bars white
+        const b = document.body.classList;
+        const colour = (v) => { const s = document.createElement('span'); s.style.color = v; document.body.append(s); const c = getComputedStyle(s).color; s.remove(); return c; };
+        const fills = () => ({ rim: getComputedStyle(document.querySelector('#bar-robot .rim')).fill, bars: getComputedStyle(document.querySelector('#bar-robot .pause')).fill });
+        const state = { ...fills(), want: colour(b.contains('blocked') ? 'var(--bad)' : b.contains('needs-login') ? 'var(--warn)' : 'var(--paused)') };
+        const had = ['blocked', 'needs-login'].filter((c) => b.contains(c));
+        b.remove(...had);
+        const paused = { ...fills(), want: colour('var(--paused)'), white: colour('#fff') };
+        b.add(...had);
+        return { text: n.innerText.trim(), tip: n.querySelector('.title')?.title || '', button: n.querySelector('button')?.textContent || '', height: n.getBoundingClientRect().height, pause, eyes, state, paused, had };
       }`), { timeoutMs: 10000 });
+      if (lock.state.rim !== lock.state.want) throw new Error(`the robot's rim on the paused tab (${lock.had.join(', ') || 'nothing else'} in the way): ${JSON.stringify(lock.state)}`);
+      if (lock.paused.rim !== lock.paused.want || lock.paused.bars !== lock.paused.white) throw new Error(`the paused colours: ${JSON.stringify(lock.paused)}`);
       if (!/^Posting is paused: your agent ran code here\.\s*Reload$/.test(lock.text) || lock.button !== 'Reload') throw new Error(`the lock notice: ${JSON.stringify(lock)}`);
       if (!/blocked anything here from posting, sending or saving as you/.test(lock.tip)) throw new Error(`the lock notice's tooltip: ${lock.tip}`);
       if (lock.height > 48) throw new Error(`the lock notice is ${lock.height} px tall: one line expected`);

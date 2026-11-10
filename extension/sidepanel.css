@@ -12,6 +12,7 @@
   --on-accent: light-dark(#ffffff, #10131c);
   --ok: light-dark(#1f8a4c, #4cc27f);
   --warn: light-dark(#b7791f, #e8b04a);
+  --paused: light-dark(#3a3a3e, #ffffff); /* a paused tab's state colour (tablock.js): white, dark grey on light */
   --bad: light-dark(#c4372d, #ff7b70);
   --bad-bg: light-dark(#fdf1f0, #3a2220);
   --code: light-dark(#f0f0ed, #2a2a2e);
@@ -196,8 +197,8 @@ body.needs-login .problem-line { color: var(--warn); }
 .bar-robot .rim { fill: var(--switch-on); }
 .bar-robot .face { fill: #18181a; }
 .bar-robot .eye { fill: #59dbab; }
-/* A tab TRIF has paused (tablock.js): a pause sign for eyes, as the toolbar icon shows. */
-.bar-robot .pause { display: none; fill: #59dbab; }
+/* A tab TRIF has paused (tablock.js): a pause sign for eyes, white, as the toolbar icon shows. */
+.bar-robot .pause { display: none; fill: #ffffff; }
 body.tab-locked .bar-robot .eye { display: none; }
 body.tab-locked .bar-robot .pause { display: inline; }
 .bar-robot[aria-busy="true"] { cursor: progress; opacity: 0.6; }
@@ -217,16 +218,21 @@ body.site-off .bar-robot:hover:not([aria-busy="true"]) svg { filter: grayscale(0
 
 /* Something in the way, the same conditions as the dot (sidepanel.js render): every green turns red when
    TRIF is missing a part (the helper isn't connected, or user scripts are off), or yellow when the agent
-   needs a login (or the open model a key) first. Nearly all of it is --switch-on (switch.css): the robots,
-   the power button, the Fix button, and (when user scripts are off) the mod switches and their lights. */
+   needs a login (or the open model a key) first, or white (dark grey on the light theme) on a tab TRIF has
+   paused (body.tab-locked: the agent ran code there); red and yellow win. Nearly all of it is --switch-on
+   (switch.css): the robots, the power button, the Fix button, and (when user scripts are off) the mod
+   switches and their lights. */
 body.blocked { --switch-on: var(--bad); }
 body.needs-login { --switch-on: var(--warn); }
+body.tab-locked:not(.blocked, .needs-login) { --switch-on: var(--paused); }
+body.tab-locked:not(.blocked, .needs-login) .dot { background: var(--paused); }
+body.tab-locked:not(.blocked, .needs-login) .btn.go { color: light-dark(#ffffff, #1d1d1f); }
 body.blocked .bar-robot :is(.eye, .pause) { fill: #ffc2bc; }
 body.needs-login .bar-robot :is(.eye, .pause) { fill: #fbe3a6; }
 body.needs-login .btn.go { color: #2e1f02; }
-/* Except the mods while only the helper is away, or only a login is missing: they still run (the extension
-   keeps its copy), so their switches and lights stay green. */
-body[data-problem="helper"] .mod-list, body.needs-login .mod-list { --switch-on: var(--trif-green); }
+/* Except the mods while only the helper is away, only a login is missing, or the tab is paused: they still
+   run (the extension keeps its copy), so their switches and lights stay green. */
+body[data-problem="helper"] .mod-list, body:is(.needs-login, .tab-locked) .mod-list { --switch-on: var(--trif-green); }
 
 .field { display: grid; grid-template-columns: 52px 1fr; align-items: center; gap: 8px; }
 .field > span { color: var(--muted); }

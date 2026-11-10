@@ -193,7 +193,7 @@ test('a locked tab\'s toolbar icon is the paused robot, for that tab only, until
   await createTabLocks({ chrome: bare }).lock(1, 'x.com');
 });
 
-test('the paused icons are scripts/render-icon.js\'s: two mint bars for eyes, sharp at 16 px', () => {
+test('the paused icons are scripts/render-icon.js\'s: two white bars for eyes, sharp at 16 px', () => {
   const fs = require('fs');
   const path = require('path');
   const zlib = require('zlib');
@@ -207,10 +207,10 @@ test('the paused icons are scripts/render-icon.js\'s: two mint bars for eyes, sh
   const at = png.indexOf('IDAT');
   const raw = zlib.inflateSync(png.subarray(at + 4, at + 4 + png.readUInt32BE(at - 4)));
   const px = (x, y) => [...raw.subarray(y * 65 + 1 + x * 4, y * 65 + 1 + x * 4 + 4)];
-  const mint = [0x59, 0xdb, 0xab, 255], face = [0x18, 0x18, 0x1a, 255];
-  assert.deepEqual([4, 5, 6, 7, 8, 9, 10, 11].map((x) => px(x, 8)), [face, mint, mint, face, face, mint, mint, face]);
+  const bar = [0xff, 0xff, 0xff, 255], face = [0x18, 0x18, 0x1a, 255];
+  assert.deepEqual([4, 5, 6, 7, 8, 9, 10, 11].map((x) => px(x, 8)), [face, bar, bar, face, face, bar, bar, face]);
   // 6 px tall (rows 5 to 10; their corners a little rounded), face above and below
-  for (const y of [6, 7, 8, 9]) assert.deepEqual(px(5, y), mint, `row ${y}`);
-  for (const y of [5, 10]) assert.ok(px(5, y)[1] > 200, `row ${y}`);
+  for (const y of [6, 7, 8, 9]) assert.deepEqual(px(5, y), bar, `row ${y}`);
+  for (const y of [5, 10]) assert.ok(px(5, y)[1] > 200 && px(5, y)[0] > 200, `row ${y}`);
   for (const y of [4, 11]) assert.deepEqual(px(5, y), face, `row ${y}`);
 });

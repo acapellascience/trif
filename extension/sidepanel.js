@@ -540,7 +540,8 @@ function renderPausedAll() {
  * This tab is locked (background's tabLocks, tablock.js): the agent ran code in it, so the browser blocks
  * every request from it that changes something (posting, sending, saving) until the page is reloaded.
  * One short line and a Reload button, so the rest of the panel stays in view; the details in the line's
- * tooltip. The robot in the bar shows a pause sign for eyes meanwhile, as the toolbar icon does.
+ * tooltip. Meanwhile the panel's state colour is white (body.tab-locked, sidepanel.css --paused) and the
+ * robot in the bar shows a pause sign for eyes, as the toolbar icon does.
  */
 function renderTabLock() {
   const n = ui.tabLock;

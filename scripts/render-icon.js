@@ -2,7 +2,7 @@
 'use strict';
 // Draws the TRIF icon (the robot's head: a dark squircle in a switch-green rim, with two mint eyes) into
 // extension/icons/robot-<size>.png, antialiased with 8x8 supersampling, the same robot with a pause sign for
-// eyes (two mint bars) into robot-paused-<size>.png (the toolbar icon of a tab TRIF has paused posting in,
+// eyes (two white bars) into robot-paused-<size>.png (the toolbar icon of a tab TRIF has paused posting in,
 // background.js and tablock.js), and writes the same shapes to
 // store/icon.svg and the side panel's big shaded robot to extension/icons/robot-shaded.svg (and in red,
 // robot-shaded-red.svg, for when TRIF can't run mods). No dependencies: shapes are superellipses, PNGs are
@@ -26,10 +26,10 @@ const SHADED_RED_FILE = path.join(__dirname, '..', 'extension', 'icons', 'robot-
 // eyes n 2.3 (rounder, a touch taller than wide).
 const HEAD = { cx: 64, cy: 64, outer: 56, inner: 46, n: 3, rim: [0x34, 0xd3, 0x99], face: [0x18, 0x18, 0x1a] };
 const EYES = { cy: 63, xs: [45, 83], a: 12.35, b: 13.3, n: 2.3, color: [0x59, 0xdb, 0xab] };
-// The pause sign: two bars in the eyes' mint, centred on the face, a bar's width apart. Their edges fall on
+// The pause sign: two white bars (the side panel's paused colour), centred on the face, a bar's width apart. Their edges fall on
 // whole pixels at 16, 32 and 48 px (a toolbar pixel is 7 units at 16 px), so they stay sharp: at 16 px each
 // is 2 px wide and 6 px tall, with 2 px between. Corners rounded a little (r), like the eyes.
-const PAUSE = { xs: [[43, 57], [71, 85]], y: [43, 85], r: 3.5, color: EYES.color };
+const PAUSE = { xs: [[43, 57], [71, 85]], y: [43, 85], r: 3.5, color: [0xff, 0xff, 0xff] };
 // The toolbar sizes drop the 8-unit margin (the head fills the square, like other toolbar icons); the
 // 128 px icon keeps it for the Web Store and chrome://extensions.
 const FULL_BLEED_MAX = 48;

@@ -28,6 +28,8 @@ Plain and humble. Short. No marketing voice, no taglines.
 ## The robot icon
 
 A dark squircle head in a green rim, with two mint eyes (`scripts/render-icon.js`). Without eyes, it means
-off: the turn-on screen shows it small, eyes off, above "The robot is off." With a pause sign (two mint
+off: the turn-on screen shows it small, eyes off, above "The robot is off." With a pause sign (two white
 bars) for eyes, it means paused on that tab: the agent ran code there, so posting is blocked until the
-page reloads (the toolbar icon for that tab, and the robot in the panel's bar).
+page reloads (the toolbar icon for that tab, and the robot in the panel's bar). The panel's state colour
+goes white then (dark grey, #3a3a3e, on the light theme), as it goes yellow for a missing login and red
+when TRIF is broken; those two win.

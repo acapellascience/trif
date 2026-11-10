@@ -10,6 +10,7 @@ import {
   normalizeOffSites, offSiteName, offOnSite, hostInScope, withOffSites, normalizeGroupsOff, switchGroup, offSitesFor, GROUPS, scopeFor, normalizeSitesOn, siteOnFor, sitesInUse, limitToSites, applyStartSites, switchSite, fromOtherBrowser, timedUserScripts, capChat,
   ALL_ACCESS, readAccess, activeSites, hasSiteAccess, siteOrigins, siteState, siteRefusal, siteModeOf,
   FEATURES, ModsParts, fillSameMods, storedMods, modsStorageState, modsStoragePlan, normalizeStarter, applyReadded, normalizeReadded,
+  applyNewMods, normalizeStartsOff, normalizeNewOff, MOD_GROUPS, modGroup,
 } from './lib.js';
 import { runtimeCode } from './runtime.js';
 import { sweepPage } from './sweep.js';
@@ -54,6 +55,10 @@ const state = {
   startedOff: {},        // mod id → true for mods already switched off once: preinstalled, or from another browser (persisted)
   absorbed: {},          // mod id → true for retired shipped mods whose switch was carried over (persisted)
   readded: {},           // mod id → stamp: Tim's mods deleted and added again, switched as listed once per stamp (persisted)
+  startsOff: [],         // groups ('rules', 'page') whose new mods start off: Settings' "New mods start" (persisted; lib.js applyNewMods)
+  seenMods: null,        // mod id → true for every mod this browser has seen; null: not stored yet (persisted)
+  autoUpdated: null,     // mod id → stamp of the last new version of a shipped mod TRIF put in place by itself, once seen (persisted)
+  newOff: {},            // mod id → 'new' | 'update': switched off because new mods of its group start off, until switched on (persisted)
   defaultOrder: {},      // site → mod ids: the panel's order for its shipped mods until the user drags them (from the helper; persisted)
   starter: null,         // Tim's mods, site by site, from the helper (helper/lib/preinstalled.js starterOffer): {chosen, sites: [{site, name, choice, suggested, mods}]}
   installId: null,       // random id of this install (persisted): the helper records it as the origin of mods made here
@@ -137,6 +142,10 @@ const ready = chrome.storage.local.get(null).then(async (s) => {
   state.startedOff = normalizeDisabled(s.startedOff);
   state.absorbed = normalizeDisabled(s.absorbed);
   state.readded = normalizeReadded(s.readded);
+  state.startsOff = normalizeStartsOff(s.startsOff);
+  state.seenMods = s.seenMods && typeof s.seenMods === 'object' ? normalizeDisabled(s.seenMods) : null;
+  state.autoUpdated = s.autoUpdated && typeof s.autoUpdated === 'object' ? normalizeReadded(s.autoUpdated) : null;
+  state.newOff = normalizeNewOff(s.newOff);
   state.defaultOrder = normalizeModOrder(s.defaultOrder);
   state.sitesOffered = normalizeSitesOn(s.sitesOffered);
   state.siteMode = s.siteMode === 'permissive' || s.siteMode === 'restrictive' ? s.siteMode : null;
@@ -451,8 +460,12 @@ async function onModsMessage(msg) {
     state.disabled = moved.disabled;
     state.offSites = moved.offSites;
     state.startedOff = moved.startedOff;
+    if (state.seenMods) state.seenMods = { ...state.seenMods, ...Object.fromEntries(renames.map((r) => [r.to, true])) };
+    const newOff = { ...state.newOff };
+    for (const { from, to } of renames) if (newOff[from]) { newOff[to] = newOff[from]; delete newOff[from]; }
+    state.newOff = newOff;
     const order = await chrome.storage.local.get('modOrder').then((s) => renameInOrder(s.modOrder, renames), () => ({ changed: false }));
-    await save({ disabled: state.disabled, offSites: state.offSites, startedOff: state.startedOff, ...(order.changed ? { modOrder: order.modOrder } : {}) })
+    await save({ disabled: state.disabled, offSites: state.offSites, startedOff: state.startedOff, newOff: state.newOff, ...(state.seenMods ? { seenMods: state.seenMods } : {}), ...(order.changed ? { modOrder: order.modOrder } : {}) })
       .catch((e) => log('warn', errMsg(e)));
     log('info', `renamed: ${renames.map((r) => `${r.from} -> ${r.to}`).join(', ')} (switches kept)`);
   }
@@ -468,11 +481,25 @@ async function onModsMessage(msg) {
     await save({ disabled: state.disabled, startedOff: state.startedOff }).catch((e) => log('warn', errMsg(e)));
   }
   // One of Tim's mods the user deleted and got back: switched as Tim set it, once (not as it was).
+  const readdedBefore = state.readded;
   const re = applyReadded(state.mods, state.disabled, state.readded);
   if (re.changed) {
     state.disabled = re.disabled;
     state.readded = re.readded;
     await save({ disabled: state.disabled, readded: state.readded }).catch((e) => log('warn', errMsg(e)));
+  }
+  // New mods (and new versions of shipped mods TRIF put in place itself) of a group set to start off
+  // arrive switched off, before they're ever registered (Settings' "New mods start"; lib.js applyNewMods).
+  const nw = applyNewMods(state.mods, { disabled: state.disabled, seen: state.seenMods, autoUpdated: state.autoUpdated, newOff: state.newOff,
+    startsOff: state.startsOff, installId: state.installId, readded: readdedBefore });
+  if (nw.changed) {
+    const switched = Object.keys(nw.newOff).filter((id) => !state.newOff[id]);
+    state.disabled = nw.disabled;
+    state.seenMods = nw.seen;
+    state.autoUpdated = nw.autoUpdated;
+    state.newOff = nw.newOff;
+    await save({ disabled: state.disabled, seenMods: state.seenMods, autoUpdated: state.autoUpdated, newOff: state.newOff }).catch((e) => log('warn', errMsg(e)));
+    if (switched.length) log('info', `new, so off until switched on: ${switched.join(', ')}`);
   }
   // Sites setup starts TRIF on for (the preinstalled mods' sites), each turned on once.
   const sites = applyStartSites(state.sitesOn, state.sitesOffered, msg.sitesOn);
@@ -621,11 +648,13 @@ const commands = {
         if (state.offSites[m.id]) o.offSites = state.offSites[m.id];
         if (!limitToSites(m, onSites())) o.sitesOff = true; // every site it's for is off (or without access)
         if (m.held) o.held = m.held;
+        if (state.newOff[m.id] && !isEnabled(m.id)) o.newOff = state.newOff[m.id];
         if (errors.has(m.id) && errors.get(m.id) !== USER_SCRIPTS_OFF) o.error = errors.get(m.id);
         return o;
       }),
       recording: state.recording, sitesOn: state.sitesOn, ...siteLists(), ...(state.paused ? { paused: true } : {}),
       ...(Object.keys(state.groupsOff).length ? { groupsOff: state.groupsOff } : {}),
+      ...(state.startsOff.length ? { startsOff: state.startsOff } : {}),
       ...(args && (args.tab !== undefined || args.url !== undefined) ? { page: await modsOnPage(args) } : {}),
     };
   },
@@ -845,6 +874,11 @@ const commands = {
     if (args.scope && args.enabled && !isEnabled(id) && !modInScope(mod, args.scope) && modSites(mod).everywhere) {
       throw new Error(`${id} runs on every site, and it's switched off; only the user can switch it on (in the side panel), because this agent run is limited to ${args.scope}`);
     }
+    // A mod switched off because new mods of its group start off (lib.js applyNewMods) waits for the user to
+    // look at it: an agent run can't switch it on.
+    if (args.scope && args.enabled && state.newOff[id]) {
+      throw new Error(`${id} is new and switched off until the user looks at it (their setting: new ${modGroup(mod) === 'rules' ? 'rules' : 'page scripts'} start off); only the user can switch it on, in the side panel or with trif enable in their terminal`);
+    }
     const enabled = args.enabled;
     const res = await serial(async () => {
       const before = { disabled: !isEnabled(id), offSites: state.offSites[id] || [] };
@@ -860,6 +894,13 @@ const commands = {
     });
     reportApplied(state.lastApply);
     if (res.failure) throw new Error(`couldn't turn ${id} ${enabled ? 'on' : 'off'}${site ? ` on ${site}` : ''}: ${res.failure.error}`);
+    // Switched on: no longer off for being new.
+    if (enabled && state.newOff[id]) {
+      const { [id]: _, ...rest } = state.newOff;
+      state.newOff = rest;
+      await save({ newOff: state.newOff }).catch((e) => log('warn', errMsg(e)));
+      notifyPanels();
+    }
     const siteInfo = site ? { site, offSites: res.after.offSites, modEnabled: !res.after.disabled } : {};
     return { id, enabled, ...siteInfo, reloaded: await reloadIfApplies(mod, args) };
   },
@@ -1066,6 +1107,19 @@ async function onPageMessage(msg) {
       notifyPanels();
       return { groupsOff: state.groupsOff };
     }
+    case 'mods.startsOff': {
+      // Settings' "New mods start": a group's new mods on (as always) or off (lib.js applyNewMods). From
+      // here on only: mods already here keep their switches. Panel only: an agent run can't change it.
+      const group = String(msg.group ?? '');
+      if (!MOD_GROUPS.includes(group)) throw new Error(`unknown group ${group}`);
+      const off = new Set(state.startsOff);
+      if (msg.off === true) off.add(group); else off.delete(group);
+      const startsOff = normalizeStartsOff([...off]);
+      await save({ startsOff });
+      state.startsOff = startsOff;
+      notifyPanels();
+      return { startsOff };
+    }
     case 'mods.pause': {
       // Settings' "Pause all mods": nothing runs in this browser until it's off again
       state.paused = msg.paused === true;
@@ -1104,7 +1158,9 @@ async function uiStatus() {
       held: m.held || null, pending: m.pending || null, review: m.held || m.pending ? null : m.review || null, risk: m.risk || null,
       from: fromOtherBrowser(m, state.installId) ? (m.origin.browser || 'another browser') : null,
       source: m.source || null, version: m.version || null, update: m.update || null, rules: !!m.rules,
+      newOff: state.newOff[m.id] && !(live.get(m.id)?.enabled ?? isEnabled(m.id)) ? state.newOff[m.id] : null,
     })),
+    startsOff: state.startsOff,
     runs: [...state.runs.values()].map((r) => ({ runId: r.runId, site: r.site })),
     lockedTabs: tabLocks.list(),
     groupsOff: state.groupsOff,

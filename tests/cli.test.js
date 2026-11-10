@@ -626,6 +626,30 @@ test('status: lists the sites TRIF is on for and marks mods waiting for theirs',
   assert.match(r.stdout, /^blocked {7}bank\.com: blocked in TRIF; nothing from TRIF touches them \(only the user unblocks them/m);
 });
 
+test('status and mods: a mod off because new mods of its group start off says so, and who switches it on', async () => {
+  const home = tempDir();
+  writeMod(home, 'x.com', 'a.js', '// ==WebMod==\n// @name A\n// ==/WebMod==\n');
+  writeMod(home, 'x.com', 'b.js', '// ==WebMod==\n// @name B\n// ==/WebMod==\n');
+  const ext = new FakeExtension({ home });
+  cleanups.push(() => ext.close());
+  ext.hello();
+  ext.handlers.status = () => ({ userScripts: true, chrome: '140', version: '0.1.0', recording: [], sitesOn: ['x.com'], startsOff: ['page'],
+    mods: [{ id: 'x.com/a', registered: false, enabled: false, newOff: 'new' }, { id: 'x.com/b', registered: false, enabled: false, newOff: 'update' }] });
+  await ext.waitForSocket();
+  await ext.nextMods((mods) => mods.length === 2);
+  let r = await runCli(['status'], { home });
+  assert.match(r.stdout, /^NEW MODS {6}new page scripts start off in this browser \(the user's setting, in the side panel's Settings\), except ones made in its side panel$/m);
+  assert.match(r.stdout, /x\.com\/a\s+off \(new: waiting for the user to look at it\)\n/);
+  assert.match(r.stdout, /x\.com\/b\s+off \(updated by TRIF: waiting for the user to look at it\)\n/);
+  assert.match(r.stdout, /off \(new\) = new mods of its kind start off in this browser \(the user's setting\); only the user switches it on/);
+  assert.doesNotMatch(r.stdout, /off = switched off by the user/);
+  r = await runCli(['mods'], { home });
+  assert.match(r.stdout, /^ {2}off: new, and new mods of its kind start off in this browser \(the user's setting\); not running until the user switches it on after looking at it \(side panel, or trif enable x\.com\/a in their terminal\)$/m);
+  assert.match(r.stdout, /^ {2}off: TRIF updated it, and new mods/m);
+  r = await runCli(['mods', '--json'], { home });
+  assert.equal(JSON.parse(r.stdout).mods.find((m) => m.id === 'x.com/a').newOff, 'new');
+});
+
 test('inside a side-panel run, -f/-o/check paths are compared as the file system does: case, links, ..', async () => {
   const home = tempDir();
   const box = path.join(home, 'boxes', 'r1');

@@ -18,6 +18,12 @@ summary is too long.
 ### More
 
 - A site's mods now come in two groups, Rules and Page scripts, each with a switch for that site only.
+- **New mods can start off, by group.** Settings in the side panel has "New mods start": Rules and Page
+  scripts, each On (as before) or Off. Set Page scripts to Off and a new page script waits, switched off
+  and marked "new", until you've looked at it and switched it on, while new rules still apply at once.
+  It covers mods from a terminal agent, files you add, mods made in another browser, Tim's mods you add,
+  and new versions of Tim's mods TRIF puts in place by itself; not the ones your side-panel chat makes
+  for you. An agent run can't switch one on.
 - **You choose what TRIF can reach: permissive or restrictive.** Installing TRIF used to give it "all your
   data on all websites". Now it asks for nothing until the setup page's new step, Site permissions:
   **Permissive** gives TRIF access to every site by default (your browser asks once); **Restrictive**

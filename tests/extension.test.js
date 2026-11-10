@@ -1949,6 +1949,112 @@ test('applyStartOff: a mod made in another browser is switched off once; own and
   assert.strictEqual(lib.applyStartOff(mods, {}, {}).changed, false, 'old 3-argument call: no foreign switching');
 });
 
+test('applyNewMods: with a group set to start off, its new mods arrive off, by source; the other group, and mods already here, untouched', () => {
+  const page = (id, extra) => ({ id, ...extra });
+  const rules = (id, extra) => ({ id, rules: true, ...extra });
+  const here = { 'x.com/old': true, 'x.com/oldrules': true };
+  const mods = [
+    page('x.com/old'), rules('x.com/oldrules'),
+    page('x.com/terminal'), // a terminal agent's, or a file dropped in: no origin
+    page('x.com/other', { origin: { by: 'B', browser: 'Firefox' } }), // another browser's panel
+    page('x.com/mine', { origin: { by: 'A', browser: 'Chrome', live: true } }), // this browser's own panel chat, written while its run was going
+    page('x.com/late', { origin: { by: 'A', browser: 'Chrome' } }), // counted for that run, but appeared after it ended: a terminal's, say
+    page('x.com/held', { held: { facts: ['can send requests'] } }), // waits for the user's OK anyway
+    rules('x.com/style'),
+    page('x.com/tims', { startOff: true }), // Tim's, shipped off: off already
+  ];
+  const go = (startsOff, extra = {}) => lib.applyNewMods(mods, { disabled: { 'x.com/tims': true }, seen: here, autoUpdated: {}, newOff: {}, startsOff, installId: 'A', ...extra });
+  // Page scripts start off: the new page scripts from anywhere but here, not held ones, not rules.
+  let r = go(['page']);
+  assert.deepStrictEqual(r.disabled, { 'x.com/tims': true, 'x.com/terminal': true, 'x.com/other': true, 'x.com/late': true });
+  assert.deepStrictEqual(r.newOff, { 'x.com/terminal': 'new', 'x.com/other': 'new', 'x.com/late': 'new' });
+  assert.deepStrictEqual(Object.keys(r.seen).sort(), mods.map((m) => m.id).sort());
+  // Once: seen now, so the user's switch after that is theirs.
+  const again = lib.applyNewMods(mods, { disabled: {}, seen: r.seen, autoUpdated: r.autoUpdated, newOff: r.newOff, startsOff: ['page'], installId: 'A' });
+  assert.strictEqual(again.changed, false);
+  // Rules start off: only the new rules mod.
+  assert.deepStrictEqual(go(['rules']).newOff, { 'x.com/style': 'new' });
+  // Both: everything new that isn't this browser's own or held.
+  assert.deepStrictEqual(Object.keys(go(['rules', 'page']).newOff).sort(), ['x.com/late', 'x.com/other', 'x.com/style', 'x.com/terminal']);
+  // Neither (the default): seen, nothing switched.
+  r = go([]);
+  assert.deepStrictEqual([r.disabled, r.newOff], [{ 'x.com/tims': true }, {}]);
+  // Without an install id, nothing counts as this browser's own.
+  assert.ok('x.com/mine' in lib.applyNewMods(mods, { seen: here, autoUpdated: {}, startsOff: ['page'] }).newOff);
+});
+
+test('applyNewMods: a browser that never stored what it saw takes its mods as seen; updates TRIF made itself and Tim\'s mods got back arrive again', () => {
+  // From before this existed: nothing switched, everything remembered (stamps too).
+  let r = lib.applyNewMods([{ id: 'x.com/a', autoUpdated: 's1' }, { id: 'x.com/b' }], { seen: null, autoUpdated: null, startsOff: ['page'] });
+  assert.deepStrictEqual(r, { disabled: {}, seen: { 'x.com/a': true, 'x.com/b': true }, autoUpdated: { 'x.com/a': 's1' }, newOff: {}, changed: true });
+  // A new version TRIF put in place by itself: off, as an update, once per stamp.
+  r = lib.applyNewMods([{ id: 'x.com/a', autoUpdated: 's2' }, { id: 'x.com/b' }], { seen: r.seen, autoUpdated: r.autoUpdated, startsOff: ['page'] });
+  assert.deepStrictEqual([r.disabled, r.newOff, r.autoUpdated], [{ 'x.com/a': true }, { 'x.com/a': 'update' }, { 'x.com/a': 's2' }]);
+  // With page scripts starting on, the stamp is only remembered.
+  const on = lib.applyNewMods([{ id: 'x.com/a', autoUpdated: 's3' }], { seen: r.seen, autoUpdated: r.autoUpdated, startsOff: [] });
+  assert.deepStrictEqual([on.disabled, on.autoUpdated['x.com/a']], [{}, 's3']);
+  // One of Tim's mods the user deleted and got back (a new `readded` stamp) arrives again.
+  const back = lib.applyNewMods([{ id: 'x.com/b', readded: 'r1' }], { seen: { 'x.com/b': true }, autoUpdated: {}, startsOff: ['page'], readded: {} });
+  assert.deepStrictEqual(back.newOff, { 'x.com/b': 'new' });
+  assert.strictEqual(lib.applyNewMods([{ id: 'x.com/b', readded: 'r1' }], { seen: { 'x.com/b': true }, autoUpdated: {}, startsOff: ['page'], readded: { 'x.com/b': 'r1' } }).changed, false);
+  // A mod that's gone takes its reason with it.
+  const gone = lib.applyNewMods([], { seen: { 'x.com/b': true }, autoUpdated: {}, newOff: { 'x.com/b': 'new' }, startsOff: ['page'] });
+  assert.deepStrictEqual(gone.newOff, {});
+  assert.deepStrictEqual(lib.normalizeStartsOff(['page', 'page', 'nope', 'rules']), ['rules', 'page']);
+  assert.deepStrictEqual(lib.normalizeStartsOff('page'), []);
+  assert.deepStrictEqual(lib.normalizeNewOff({ a: 'new', b: 'update', c: true }), { a: 'new', b: 'update' });
+});
+
+test('background: new mods start on or off by group (Settings); an agent run can\'t switch one on, the user can, and that clears why it was off', async () => {
+  const tabs = [{ id: 5, windowId: 1, active: true, url: 'https://x.com/home' }];
+  const bg = await loadBackground({ storage: { sitesOn: ['x.com'], installId: 'A', mods: [mod('x.com/old')], modIds: ['x.com/old'] }, tabs });
+  try {
+    const panel = bg.connectPanel();
+    bg.native.emit({ type: 'mods', mods: [mod('x.com/old')] });
+    await settle(20);
+    assert.deepStrictEqual(bg.store.seenMods, { 'x.com/old': true }, 'what was there is seen, nothing switched');
+    assert.deepStrictEqual((await panel.ask({ type: 'status' })).result.startsOff, []);
+    // The user sets page scripts to start off.
+    const set = await panel.ask({ type: 'mods.startsOff', group: 'page', off: true });
+    assert.deepStrictEqual(set.result, { startsOff: ['page'] });
+    assert.deepStrictEqual(bg.store.startsOff, ['page']);
+    assert.match((await panel.ask({ type: 'mods.startsOff', group: 'nope', off: true })).error, /unknown group/);
+    // A terminal agent's page script and a rules mod arrive; and one this browser's panel chat made.
+    bg.native.emit({ type: 'mods', mods: [mod('x.com/old'), mod('x.com/new'), mod('x.com/style', { rules: true }), mod('x.com/chat', { origin: { by: 'A', browser: 'Chrome', live: true } })] });
+    await settle(30);
+    assert.deepStrictEqual(bg.store.disabled, { 'x.com/new': true });
+    assert.deepStrictEqual(bg.store.newOff, { 'x.com/new': 'new' });
+    assert.ok(!scriptIds(bg).includes('x.com/new'), 'never registered');
+    assert.ok(scriptIds(bg).includes('x.com/style') && scriptIds(bg).includes('x.com/chat') && scriptIds(bg).includes('x.com/old'));
+    const st = (await panel.ask({ type: 'status' })).result;
+    assert.strictEqual(st.mods.find((m) => m.id === 'x.com/new').newOff, 'new');
+    assert.strictEqual(st.mods.find((m) => m.id === 'x.com/style').newOff, null);
+    const cli = (await bg.native.call('status')).result;
+    assert.deepStrictEqual(cli.startsOff, ['page']);
+    assert.strictEqual(cli.mods.find((m) => m.id === 'x.com/new').newOff, 'new');
+    // A side-panel run (scoped) can't switch it on; the user can.
+    const refused = await bg.native.call('mod.enable', { id: 'x.com/new', enabled: true, scope: 'x.com' });
+    assert.strictEqual(refused.ok, false);
+    assert.match(refused.error, /new and switched off until the user looks at it[\s\S]*only the user can switch it on/);
+    assert.ok(!scriptIds(bg).includes('x.com/new'));
+    const on = await panel.ask({ type: 'mod.enable', id: 'x.com/new', enabled: true });
+    assert.ok(on.ok, on.error);
+    assert.ok(scriptIds(bg).includes('x.com/new'));
+    assert.deepStrictEqual(bg.store.newOff, {});
+    // Off again later: the user's own switch, not "new".
+    await panel.ask({ type: 'mod.enable', id: 'x.com/new', enabled: false });
+    assert.strictEqual((await panel.ask({ type: 'status' })).result.mods.find((m) => m.id === 'x.com/new').newOff, null);
+    // Back to on: new page scripts start on again; mods already here keep their switches.
+    await panel.ask({ type: 'mods.startsOff', group: 'page', off: false });
+    bg.native.emit({ type: 'mods', mods: [mod('x.com/old'), mod('x.com/new'), mod('x.com/style', { rules: true }), mod('x.com/chat', { origin: { by: 'A', live: true } }), mod('x.com/later')] });
+    await settle(30);
+    assert.deepStrictEqual(bg.store.disabled, { 'x.com/new': true });
+    assert.ok(scriptIds(bg).includes('x.com/later'));
+  } finally {
+    bg.restore();
+  }
+});
+
 test('applyAbsorbed: a retired shipped mod hands its switch to the mod it went into, once: on if either was on', () => {
   const INTO = 'www.google.com/hide-ai-in-results';
   const OLD = 'www.google.com/hide-ai-mode';

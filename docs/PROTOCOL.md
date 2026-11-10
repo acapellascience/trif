@@ -145,9 +145,11 @@ logs it and exits (the extension reconnects to a fresh one) instead of misreadin
 | `{type:"updated", from, to, notes}` | An update was installed. The extension keeps it in storage (`updated`) so the panel can say so after the reload. |
 | `{type:"reload", reason}` | The extension should `chrome.runtime.reload()`: <home>/app now holds a newer version (installed by this helper, another browser's, or `trif setup`). Chrome reloads the unpacked extension from the new files; either browser starts the new helper on reconnect. |
 
-`Mod = { id, site, file, name, description, matches:[…], excludes:[…], runAt:"document_start"|"document_end"|"document_idle", risk:{tier, why}|null, source, version, code, hash, held?, startOff?, origin?:{by, browser}, update?:{version, from, modified}, absorbs?:[id…] }`
+`Mod = { id, site, file, name, description, matches:[…], excludes:[…], runAt:"document_start"|"document_end"|"document_idle", risk:{tier, why}|null, source, version, code, hash, held?, startOff?, origin?:{by, browser, live?}, update?:{version, from, modified}, absorbs?:[id…], readded?, autoUpdated? }`
 (`file` is the absolute path; `hash` is a sha1 of code+metadata so the extension can skip unchanged mods;
-`update`: a newer version of this shipped mod is waiting, see "Updates to shipped mods".)
+`update`: a newer version of this shipped mod is waiting, see "Updates to shipped mods"; `autoUpdated`: a stamp
+when TRIF itself replaced the user's unchanged copy of a shipped mod with a new version, kept while the copy is
+that version (`preinstalled.json` `shipped.<id>.auto`, `autoUpdatedIds`), see "New mods start on or off".)
 
 The extension keeps the mods it last had in `chrome.storage.local`, one per key: **`mod:<id>`** = the Mod,
 and **`modIds`** = their ids in order, so it can apply them before the helper connects. Only the mods that
@@ -408,6 +410,22 @@ is switched on again. The panel sends `{type: "mods.group", site, group, enabled
 reloads the tab and greys the group's rows; `status` reports `groupsOff` when non-empty (`trif status`:
 `GROUPS OFF`). Panel only: there's no CLI or agent command for it, so an agent run can't switch page
 scripts back on for a site the user turned them off on.
+
+**New mods start on or off.** For each group, the user chooses in Settings whether its new mods start on (the
+default, as before) or off: `chrome.storage.local` **`startsOff`** = the groups set to start off (`["page"]`;
+`normalizeStartsOff`). The panel sends `{type: "mods.startsOff", group, off}`; panel only, like the groups'
+switches. It counts from then on: mods already there keep their switches. On each `mods` message
+(`applyNewMods` in lib.js, after `applyStartOff` and `applyReadded`), a mod arrives when its id isn't in
+**`seenMods`** (id → true, every mod this browser has seen; a browser without it, from before, takes all its
+mods as seen), when its `readded` stamp is new, or when its `autoUpdated` stamp isn't the one in
+**`autoUpdated`** (id → stamp). An arriving mod of a group set to start off is switched off (`disabled`) and
+recorded in **`newOff`** = `{"<id>": "new"|"update"}`, unless it was made in this browser's own side panel
+(`origin.by` is this install and `origin.live`: its file was written while that run was going, between the
+run's start and its end; a file that only appeared in the moments after, which origins.js also counts for the
+run, could be anyone's: the user asked for the run's, and the agent checks it running) or is held (it waits
+for the user's OK anyway, and allowing it is looking at it). A renamed file keeps both. Switching the mod on
+clears its `newOff`; from an agent run, `mod.enable` refuses to switch one on. `status` reports `startsOff`
+when non-empty and `newOff` on such a mod while it's off (`trif status`: `NEW MODS`, `off (new)`).
 
 **Renamed mod files.** A mod's id is its site folder and file name, so a file renamed on disk arrives as a
 new id with the old one gone. When the new mod has the same code as a vanished one in the same site folder

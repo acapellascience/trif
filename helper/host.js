@@ -29,7 +29,7 @@ const agents = require('./lib/agents');
 const { updateHeld, approveHeld, rejectHeld, lastRun, heldFile, reviewItems, reviewMod } = require('./lib/held');
 const history = require('./lib/history');
 const { DEFAULT_ORDER, startOffIds, startSitesOn, pendingUpdates, useNewVersion, keepMine, mergeRequest, mergeSettled, restoreMod, absorbedIds,
-  starterOffer, installStarter, chooseNoStarter, resolveSites, resolveIds, readdedIds } = require('./lib/preinstalled');
+  starterOffer, installStarter, chooseNoStarter, resolveSites, resolveIds, readdedIds, autoUpdatedIds } = require('./lib/preinstalled');
 const { readInstructions, writeInstructions, instructionsFile, MAX_LENGTH } = require('./lib/instructions');
 const { ownSock, removeStaleSockets, codeStamp } = require('./lib/helpers');
 const { loadOrigins, recordOrigins, renameOrigins, activeRuns } = require('./lib/origins');
@@ -276,6 +276,10 @@ function syncMods(reason, force) {
   // listed once per stamp, as for a new one (preinstalled.js readded).
   let readded = {};
   try { readded = readdedIds(ws.home); } catch (e) { logger.warn(`Tim's mods: ${e.message}`); }
+  // Shipped mods TRIF updated by itself: stamped, so a browser where that group's new mods start off
+  // switches them off once (preinstalled.js autoUpdatedIds).
+  let autoUpdated = {};
+  try { autoUpdated = autoUpdatedIds(ws.home); } catch (e) { logger.warn(`Tim's mods: ${e.message}`); }
   const sent = plan.mods.map((m) => {
     // (facts: TRIF's own reading of the code; claim: what the agent says it does, shown apart as the agent's)
     const h = state.held[m.id], r = state.review && state.review[m.id];
@@ -284,10 +288,11 @@ function syncMods(reason, force) {
       : h ? { ...m, held: info }
       : r ? { ...m, review: { facts: r.facts, claim: r.claim } } : m;
     const o = origins[m.id];
-    const withOrigin = o ? { ...out, origin: { by: o.by, browser: o.browser } } : out;
+    const withOrigin = o ? { ...out, origin: { by: o.by, browser: o.browser, ...(o.live ? { live: true } : {}) } } : out;
     const withUpdate = updates[m.id] ? { ...withOrigin, update: updates[m.id] } : withOrigin;
     const withAbsorbs = absorbed[m.id] ? { ...withUpdate, absorbs: absorbed[m.id] } : withUpdate;
-    const withReadded = readded[m.id] ? { ...withAbsorbs, readded: readded[m.id] } : withAbsorbs;
+    const withReadded0 = readded[m.id] ? { ...withAbsorbs, readded: readded[m.id] } : withAbsorbs;
+    const withReadded = autoUpdated[m.id] ? { ...withReadded0, autoUpdated: autoUpdated[m.id] } : withReadded0;
     return startOff.has(m.id) ? { ...withReadded, startOff: true } : withReadded;
   });
   // Sites TRIF starts on for (preinstalled.json): each browser turns each one on the first time it sees it.
@@ -297,7 +302,7 @@ function syncMods(reason, force) {
   let starter = null;
   try { starter = starterOffer(ws.home, examplesDir(), undefined, undefined, { modsDir: ws.modsDir }); } catch (e) { logger.warn(`Tim's mods: ${e.message}`); }
   // (everything the panel shows about a mod, so a change to any of it goes out: a review done, say)
-  const signature = sent.map((m) => `${m.id}:${m.hash}${m.held ? ':held' : ''}${m.pending ? `:pending ${m.pending.hash}` : ''}${m.review ? `:review ${m.review.facts.join('|')}` : ''}${m.startOff ? ':off' : ''}${m.origin ? `:${m.origin.by}` : ''}${m.update ? `:update ${JSON.stringify(m.update)}` : ''}${m.absorbs ? `:absorbs ${m.absorbs.join(',')}` : ''}${m.readded ? `:readded ${m.readded}` : ''}`).join('|') +
+  const signature = sent.map((m) => `${m.id}:${m.hash}${m.held ? ':held' : ''}${m.pending ? `:pending ${m.pending.hash}` : ''}${m.review ? `:review ${m.review.facts.join('|')}` : ''}${m.startOff ? ':off' : ''}${m.origin ? `:${m.origin.by}${m.origin.live ? '+live' : ''}` : ''}${m.update ? `:update ${JSON.stringify(m.update)}` : ''}${m.absorbs ? `:absorbs ${m.absorbs.join(',')}` : ''}${m.readded ? `:readded ${m.readded}` : ''}${m.autoUpdated ? `:auto ${m.autoUpdated}` : ''}`).join('|') +
     `|sites:${sitesOn.join(',')}|starter:${JSON.stringify(starter)}`;
   const errors = [...problems, ...plan.errors];
   const errorsChanged = JSON.stringify(errors) !== JSON.stringify(state.modErrors) || JSON.stringify(warnings) !== JSON.stringify(state.modWarnings);
@@ -349,8 +354,12 @@ function trackOrigins(mods) {
       let active = [];
       try { active = activeRuns(ws.home).map((r) => ({ ...r, own: !!me && r.by === me })); } catch (e) { logger.warn(`active runs: ${e.message}`); }
       active.sort((a, b) => Number(b.own) - Number(a.own));
+      // (when each file was written: only one written while its run was going counts as that run's own, lib/origins.js live)
+      const byId = new Map(mods.map((m) => [m.id, m]));
+      const writtenAt = {};
+      for (const id of fresh) { try { writtenAt[id] = fs.statSync(byId.get(id).file).mtimeMs; } catch { /* gone again */ } }
       try {
-        if (recordOrigins(ws.home, fresh, active)) logger.info(`recorded where ${fresh.join(', ')} came from`);
+        if (recordOrigins(ws.home, fresh, active, Date.now(), writtenAt)) logger.info(`recorded where ${fresh.join(', ')} came from`);
       } catch (e) { logger.error(`origins: ${e.message}`); }
     }
   }

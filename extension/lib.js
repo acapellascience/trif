@@ -482,6 +482,77 @@ export function applyReadded(mods, disabled = {}, readded = {}) {
   return { disabled: d, readded: r, changed: true };
 }
 
+// ---- new mods start on or off ----------------------------------------------------------------------
+// Settings' "New mods start": for each group of mods (modGroup: 'rules', 'page'), whether a mod of it that
+// this browser hasn't seen before arrives switched on (as always) or off, so a page script can't run before
+// the user has looked at it while styles still apply at once. chrome.storage.local `startsOff` = the groups
+// set to start off (none: every group starts on, the default). What counts as arriving: a mod id this
+// browser has never seen (`seenMods`: a terminal agent's, one dropped in by hand, Tim's mods added, one
+// made from another browser), and a new version of a shipped mod TRIF put in place by itself (the helper
+// sends its stamp as `autoUpdated`; `autoUpdated` here remembers the stamps seen). Not: one this browser's
+// own side-panel chat made while its run was going (its origin is this install, `live`: the user asked for it,
+// and the agent checks it running; a file that appeared just after the run ended doesn't count), one waiting for the user's OK anyway (held: allowing it is looking at it), or one the user
+// asked for by name (a new version they chose, one restored from the trash: ids already seen). Tim's mods
+// the user got back (`readded`) count as arriving. `newOff` (id -> 'new' | 'update') remembers why a mod
+// was switched off, for the panel and `trif status`, until the user switches it on.
+
+/** The groups a mod can be in, for `startsOff`. */
+export const MOD_GROUPS = ['rules', 'page'];
+
+/** chrome.storage.local `startsOff`, cleaned up: known groups, once each. */
+export function normalizeStartsOff(value) {
+  return Array.isArray(value) ? MOD_GROUPS.filter((g) => value.includes(g)) : [];
+}
+
+/** chrome.storage.local `newOff`, cleaned up: mod id -> 'new' | 'update'. */
+export function normalizeNewOff(value) {
+  const out = {};
+  if (value && typeof value === 'object' && !Array.isArray(value)) for (const [id, v] of Object.entries(value)) if (v === 'new' || v === 'update') out[id] = v;
+  return out;
+}
+
+/**
+ * The first time this browser sees each mod (and each stamp of a shipped mod TRIF updated by itself):
+ * remembered in `seen` (id -> true) and `autoUpdated` (id -> stamp); one in a group set to start off is
+ * switched off, with why in `newOff`. `seen` null (never stored: a browser that had its mods before this
+ * existed) takes every mod there now as seen, switching nothing off; `autoUpdated` null likewise.
+ * `readded`: the stamps the browser had seen before this message (a mod with a new one arrives again).
+ * Pure: returns {disabled, seen, autoUpdated, newOff, changed} with new objects when something changed.
+ */
+export function applyNewMods(mods, { disabled = {}, seen = null, autoUpdated = null, newOff = {}, startsOff = [], installId = null, readded = {} } = {}) {
+  const list = (mods || []).filter((m) => typeof m?.id === 'string');
+  const out = { disabled, seen: seen || {}, autoUpdated: autoUpdated || {}, newOff, changed: false };
+  const copy = () => {
+    if (out.changed) return;
+    out.disabled = { ...disabled }; out.seen = { ...(seen || {}) }; out.autoUpdated = { ...(autoUpdated || {}) }; out.newOff = { ...newOff };
+    out.changed = true;
+  };
+  if (!seen || !autoUpdated) {
+    copy();
+    if (!seen) for (const m of list) out.seen[m.id] = true;
+    if (!autoUpdated) for (const m of list) if (typeof m.autoUpdated === 'string') out.autoUpdated[m.id] = m.autoUpdated;
+  }
+  // (this browser's own chat: written while its run here was going, origin.live; not a file that appeared in the
+  // moments after it ended, which helper/lib/origins.js also counts for it but could be anyone's)
+  const off = (m) => startsOff.includes(modGroup(m)) && !m.held && !(installId && m.origin?.by === installId && m.origin.live === true);
+  for (const m of list) {
+    const fresh = !out.seen[m.id] || (typeof m.readded === 'string' && readded[m.id] !== m.readded);
+    const updated = typeof m.autoUpdated === 'string' && out.autoUpdated[m.id] !== m.autoUpdated;
+    if (!fresh && !updated) continue;
+    copy();
+    out.seen[m.id] = true;
+    if (typeof m.autoUpdated === 'string') out.autoUpdated[m.id] = m.autoUpdated;
+    if (off(m) && out.disabled[m.id] !== true) {
+      out.disabled[m.id] = true;
+      out.newOff[m.id] = fresh ? 'new' : 'update';
+    }
+  }
+  // (why a mod that's gone was off: nothing to show any more)
+  const present = new Set(list.map((m) => m.id));
+  for (const id of Object.keys(out.newOff)) if (!present.has(id)) { copy(); delete out.newOff[id]; }
+  return out;
+}
+
 /** chrome.storage.local `readded`, cleaned up: mod id -> stamp. */
 export function normalizeReadded(value) {
   const out = {};

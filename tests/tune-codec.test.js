@@ -22,7 +22,7 @@ const block = (name) => {
   return SRC.slice(a, b);
 };
 // (the codec and the synth need nothing from the page: they load on their own)
-const { TuneCodec: C, TuneSynth: S, TUNE_DEMO } = new Function(`${block('tune-codec')}\n${block('tune-synth')}\n${block('tune-demo')}\nreturn { TuneCodec, TuneSynth, TUNE_DEMO };`)();
+const { TuneCodec: C, TuneSynth: S, TUNE_DEMO, TUNE_ROOM: ROOM } = new Function(`${block('tune-codec')}\n${block('tune-synth')}\n${block('tune-room')}\n${block('tune-demo')}\nreturn { TuneCodec, TuneSynth, TUNE_ROOM, TUNE_DEMO };`)();
 
 const plain = (x) => JSON.parse(JSON.stringify(x));
 const size = (song, format = 3) => C.encode(song, { format }).length;
@@ -61,8 +61,10 @@ test('tune-composer: its header, not preinstalled, and nothing TRIF would hold i
   for (const word of ['fetch(', 'XMLHttpRequest', 'WebSocket', 'sendBeacon', 'http://', 'Math.random', 'Date.now']) assert.ok(!block('tune-codec').includes(word), word);
 });
 
-test('the budget: three corners, lossless about 3.8 KB, JPEG-safe about 950 B; the limits: 64 patterns, 256 bars', () => {
-  assert.deepStrictEqual(plain(C.BUDGET), { lossless: 3780, jpeg: 945 });
+test('the room: three song corners of 440 bytes, 1,320 in all; the codec knows nothing of corners; the limits: 64 patterns, 256 bars', () => {
+  assert.deepStrictEqual([ROOM.CORNER_BYTES, ROOM.CORNERS, ROOM.BYTES], [440, 3, 1320]);
+  for (const word of ['corner', 'BUDGET', 'jpeg', 'lossless']) assert.ok(!block('tune-codec').toLowerCase().includes(word.toLowerCase()), word);
+  assert.ok(!/JPEG|lossless/.test(SRC), 'no JPEG-safe or lossless room left anywhere in the mod');
   assert.strictEqual(C.MAX_PATTERNS, 64);
   assert.strictEqual(C.MAX_ORDER, 256);
   assert.strictEqual(C.VERSION, 3);
@@ -147,7 +149,7 @@ test('the demo and the test songs: round trips, and their sizes (format 3, about
   // (the first format, git 8e21091: demo 215, Kite 233, Pinball 229, Lantern 222)
   const limits = { demo: 125, 'Kite (melody)': 120, 'Pinball (drums)': 110, 'Lantern (chords)': 95 };
   assert.ok(size(demo) <= limits.demo, `demo: ${size(demo)} bytes`);
-  assert.ok(C.measure(demo).fitsJpeg);
+  assert.strictEqual(ROOM.corners(size(demo)), 1);
   assert.strictEqual(demo.patterns[5].p1.find((n) => n.vol).vol, 13, 'one accented note (a settings change)');
   for (const spec of SONGS) {
     const s = C.fromText(spec);
@@ -166,9 +168,7 @@ test('random songs: 450 come back exactly in both formats (up to 64 patterns, 25
   for (let i = 0; i < 450; i++) {
     const song = randomSong(r);
     roundTrips(song, `song ${i}`);
-    const m = C.measure(song);
-    assert.strictEqual(m.bytes, size(song));
-    assert.strictEqual(m.fitsJpeg, m.bytes <= 945);
+
   }
 });
 
@@ -176,8 +176,9 @@ test('the biggest songs: 64 patterns of 1-row notes everywhere, each with a volu
   const r = rng(5), pick = (n) => Math.floor(r() * n);
   const full = () => Array.from({ length: 16 }, (_, row) => ({ row, len: 1, pitch: pick(62), vol: pick(16) }));
   const song = { tempo: 200, rpb: 4, patterns: Array.from({ length: 64 }, () => ({ p1: full(), p2: full(), tri: full(), noise: Array.from({ length: 16 }, (_, row) => ({ row, len: 1, drum: pick(8) })) })), order: Array.from({ length: 256 }, () => pick(64)) };
-  const m = C.measure(song);
-  assert.ok(!m.fitsLossless && m.bytes < 8191, `${m.bytes} bytes: past what a picture holds, still written`);
+  const n = size(song);
+  assert.ok(n > ROOM.BYTES && n < 8191, `${n} bytes: past what a picture holds, still written`);
+  assert.throws(() => ROOM.split(C.encode(song)), /more than 1320/);
   roundTrips(song, 'biggest');
 });
 
@@ -238,6 +239,26 @@ test('damaged data is refused: flipped bits, the end, versions, crafted streams;
   assert.throws(() => C.decode(framed([...SETTINGS, EMPTY, EMPTY, [0, 1], [0b1111, 4]])), /no settings to change/);
   assert.throws(() => C.decode(framed([...SETTINGS, [0, 1], [0b101, 3], [0, 3], [0, 3], [0, 1]])), /reaches back too far/);
   assert.throws(() => C.decode(framed([...SETTINGS.slice(0, 2), [13, 4], ...SETTINGS.slice(3), EMPTY, EMPTY, EMPTY, EMPTY])), /damaged/);
+});
+
+test('a tune across corners: cut into pieces of at most 440 bytes, joined in corner order, it reads back', () => {
+  const r = rng(11);
+  let multi = 0, tried = 0;
+  for (let i = 0; i < 400 && tried < 80; i++) {
+    const song = randomSong(r, { maxPatterns: 30, maxOrder: 64 }), bytes = C.encode(song);
+    if (bytes.length > ROOM.BYTES || (bytes.length <= 440 && i % 4)) continue; // (mostly ones that need 2 or 3 corners)
+    tried++;
+    const pieces = ROOM.split(bytes);
+    assert.strictEqual(pieces.length, ROOM.corners(bytes.length));
+    assert.ok(pieces.every((p) => p.length >= 1 && p.length <= 440) && pieces.length <= 3);
+    if (pieces.length > 1) multi++;
+    assert.deepStrictEqual(plain(C.decode(ROOM.join(pieces))), plain(C.normalize(song)), `song ${i}`);
+    // (a picture layer that pads its last corner: the padding is ignored)
+    assert.deepStrictEqual(plain(C.decode(ROOM.join([...pieces, new Uint8Array(17)]))), plain(C.normalize(song)));
+  }
+  assert.ok(multi >= 10, `${multi} songs took more than one corner`);
+  assert.deepStrictEqual(ROOM.split(C.encode(C.fromText(TUNE_DEMO))).map((p) => p.length), [117]);
+  assert.deepStrictEqual([0, 1, 440, 441, 880, 881, 1320].map(ROOM.corners), [0, 1, 1, 2, 2, 3, 3]);
 });
 
 test('the synth loads on its own and has the chip’s tables', () => {

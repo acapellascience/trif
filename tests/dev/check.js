@@ -124,7 +124,7 @@ async function main() {
       tabs: document.querySelectorAll('#tcp-panel .tcp-tab').length, order: document.querySelectorAll('#tcp-panel .tcp-o').length, meter: document.querySelector('#tcp-panel .tcp-mtext').textContent, status: document.querySelector('#tcp-panel .tcp-status').textContent })`);
     check('the demo tune is loaded (6 patterns, 8 bars, notes in pattern A)', demo.tabs === 6 && demo.order === 8 && demo.p1 === 7 && demo.tri === 6 && demo.noise === 9, demo);
     const demoBytes = +/(\d+) bytes/.exec(demo.meter)[1];
-    check('the meter shows the demo’s size, inside JPEG-safe', demoBytes > 100 && demoBytes < 945 && /fits JPEG-safe/.test(demo.meter), demo.meter);
+    check('the meter shows the demo’s size: one corner of three', demoBytes > 100 && demoBytes <= 440 && /uses 1 of 3 corners · [\d,]+ to spare/.test(demo.meter), demo.meter);
     const fit = await js(`(() => { const p = document.getElementById('tcp-panel'); const r = p.getBoundingClientRect(); return { w: r.width, h: r.height, overflowX: p.scrollWidth > p.clientWidth, top: r.top, right: innerWidth - r.right, bottom: innerHeight - r.bottom, lanesFit: [...p.querySelectorAll('.tcp-lane')].every((l) => l.scrollWidth <= l.clientWidth + 1) }; })()`);
     check('the panel fits in the window: no sideways scrolling, lanes inside it', !fit.overflowX && fit.lanesFit && fit.right >= 0 && fit.bottom >= 0, fit);
     const shots = [await shot('1-composer-on-x.png'), await shot('2-composer-panel.png', await panelBox())];

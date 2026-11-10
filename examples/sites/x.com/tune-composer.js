@@ -20,8 +20,8 @@
 //   its length, click it again or right-click to remove it, Alt-click a pulse note to change its volume.
 //   One note at a time per channel, as on the chip.
 // - Patterns (A–Z, then AA…, up to 64), arranged into a song in the order strip (drag to move, right-click to remove).
-// - The space meter shows the tune's size in bytes, against what three picture corners hold: about 3.8 KB
-//   when X keeps the picture lossless (PNG), about 950 B if X re-saves it as a JPEG (see BUDGET).
+// - The space meter shows the tune's size in bytes against the room in a picture's three song corners,
+//   440 bytes each, 1,320 in all (TUNE_ROOM), and how many corners it takes.
 // - Save keeps the encoded bytes in this browser (localStorage), so what the meter shows is what's saved.
 // - Keys, while the panel is open and you're not typing in a text field: A W S E D F T G Y H U J K O L P ;
 //   play and enter notes at the cursor (A S D F G H J K on the Noise lane: the 8 drums), Z/X octave,
@@ -87,12 +87,6 @@
     const DRUM_NAMES = ['Kick', 'Snare', 'Hat', 'Open hat', 'Low tom', 'High tom', 'Clap', 'Crash'];
     const DRUM_KEYS = 'KSHOLTCX'; // (for lanes written as text: Kick Snare Hat Open hat Low tom Tom high Clap X crash)
     const KIT = [[10, 0], [7, 0], [1, 0], [1, 0], [7, 1], [5, 1], [5, 0], [3, 0]]; // the standard kit: [period, mode]
-    // Room: three corners of a 400×400 picture, 4×4-pixel cells outside X's round crop with a 4 px margin,
-    // 429 cells each, 9 of them kept for markers (settled when this goes into pictures). A cell carries 24 bits
-    // when the picture stays lossless, 6 when X makes it a JPEG (each channel to 4 levels).
-    const CORNER_CELLS = 429, RESERVED_CELLS = 9, CORNERS = 3;
-    const DATA_CELLS = (CORNER_CELLS - RESERVED_CELLS) * CORNERS;
-    const BUDGET = { lossless: DATA_CELLS * 3, jpeg: Math.floor((DATA_CELLS * 6) / 8) }; // 3780 B, 945 B
 
     const fail = (msg) => { throw new RangeError(`tune: ${msg}`); };
     const int = (v, lo, hi, what) => (Number.isInteger(v) && v >= lo && v <= hi ? v : fail(`${what} must be a whole number from ${lo} to ${hi}, not ${v}`));
@@ -586,7 +580,7 @@
       const all = [(format << 5) | (body.length >> 8), body.length & 0xff, ...body];
       return Uint8Array.from([...all, crc8(all, all.length)]);
     }
-    // (bytes after the checksum are ignored: a picture's corners may hold more)
+    // (bytes after the checksum are ignored: whatever carries the bytes may pad them)
     function decode(input) {
       const bytes = input instanceof Uint8Array ? input : Uint8Array.from(input || []);
       if (bytes.length < 3) fail('the data ends too soon');
@@ -598,10 +592,6 @@
       return normalize(readSong(format === STATIC ? staticIn(body) : acIn(body)));
     }
 
-    const measure = (song) => {
-      const bytes = encode(song).length;
-      return { bytes, jpeg: BUDGET.jpeg, lossless: BUDGET.lossless, fitsJpeg: bytes <= BUDGET.jpeg, fitsLossless: bytes <= BUDGET.lossless };
-    };
     // (base64 by hand: TRIF reads String.fromCharCode as maybe making names it can't follow)
     const B64 = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';
     const toBase64 = (bytes) => {
@@ -653,8 +643,8 @@
     });
 
     return {
-      VERSION, STATIC, ROWS, PITCHES, CHANNELS, BASE, KIT, DRUM_NAMES, DRUM_KEYS, RPB, TEMPO_MIN, TEMPO_MAX, MAX_PATTERNS, MAX_ORDER, MAX_DRUM_LEN, BUDGET, MODELS,
-      normalize, encode, decode, measure, toBase64, fromBase64, blank, fromText, laneFromText, laneOf,
+      VERSION, STATIC, ROWS, PITCHES, CHANNELS, BASE, KIT, DRUM_NAMES, DRUM_KEYS, RPB, TEMPO_MIN, TEMPO_MAX, MAX_PATTERNS, MAX_ORDER, MAX_DRUM_LEN, MODELS,
+      normalize, encode, decode, toBase64, fromBase64, blank, fromText, laneFromText, laneOf,
     };
   })();
   /* tune-codec:end */
@@ -858,6 +848,25 @@
     return { CPU, NOISE_PERIODS, DUTY, TRI, create, player, render };
   })(TuneCodec);
   /* tune-synth:end */
+
+  /* tune-room:begin */
+  // Where a tune goes: the three song corners of a profile picture (picture code v2: 2×2 gray cells, each corner
+  // its own stream with markers, kind, version, length and CRC-16). The tune's bytes are cut into corner-sized
+  // pieces in corner order and joined back the same way; TuneCodec never sees corners (it ignores anything after
+  // its own checksum, so a joined stream may carry padding). 440 bytes a corner until PicCode.capacity() says.
+  const TUNE_ROOM = (() => {
+    const CORNER_BYTES = 440, CORNERS = 3, BYTES = CORNER_BYTES * CORNERS; // 1,320
+    const split = (bytes) => {
+      if (bytes.length > BYTES) throw new RangeError(`tune: ${bytes.length} bytes is more than ${BYTES} (${CORNERS} corners)`);
+      const out = [];
+      for (let i = 0; i < bytes.length; i += CORNER_BYTES) out.push(bytes.slice(i, i + CORNER_BYTES));
+      return out;
+    };
+    const join = (pieces) => Uint8Array.from(pieces.flatMap((b) => [...b]));
+    const corners = (n) => Math.ceil(n / CORNER_BYTES);
+    return { CORNER_BYTES, CORNERS, BYTES, split, join, corners };
+  })();
+  /* tune-room:end */
 
   /* tune-demo:begin */
   // The demo tune (an original): eight bars of C – Am – F – G, C – Am – F G – C, from six patterns.
@@ -1123,7 +1132,7 @@
     #tcp-panel .tcp-mbar { position: relative; height: 12px; border-radius: 2px; background: #eff3f4; }
     #tcp-panel .tcp-mfill { position: absolute; left: 0; top: 0; bottom: 0; border-radius: 2px; background-color: var(--m, #2f9e44);
       background-image: repeating-linear-gradient(90deg, transparent 0 6px, rgb(255 255 255 / .85) 6px 8px); min-width: 2px; }
-    #tcp-panel .tcp-mmark { position: absolute; top: -3px; bottom: -3px; width: 2px; margin-left: -1px; background: #0f1419; }
+    #tcp-panel .tcp-mmark { position: absolute; top: -2px; bottom: -2px; width: 2px; margin-left: -1px; background: #8b98a5; }
     #tcp-panel .tcp-mscale { position: relative; height: 14px; margin-top: 3px; font: 600 10px/14px ui-monospace, Menlo, monospace; color: #536471; }
     #tcp-panel .tcp-mscale span { position: absolute; top: 0; white-space: nowrap; }
     #tcp-panel .tcp-foot { display: flex; align-items: center; gap: 6px; margin-top: 8px; }
@@ -1346,14 +1355,13 @@
     // the space meter
     const meter = el('div', 'tcp-meter'), mhead = el('div', 'tcp-mhead'), mbar = el('div', 'tcp-mbar'), scale = el('div', 'tcp-mscale');
     R.mtext = el('span', 'tcp-mtext'); R.mfill = el('div', 'tcp-mfill');
-    const mark = el('div', 'tcp-mmark'), jpegAt = `${(100 * C.BUDGET.jpeg) / C.BUDGET.lossless}%`;
-    mark.style.left = jpegAt;
-    mark.title = `JPEG-safe: up to ${C.BUDGET.jpeg} bytes still read back if X re-saves the picture as a JPEG`;
-    mbar.title = `The tune’s size, against three picture corners: ${C.BUDGET.lossless} bytes when X keeps the picture lossless, ${C.BUDGET.jpeg} if it re-saves it as a JPEG`;
-    mbar.append(R.mfill, mark);
-    const s0 = el('span', '', '0'), s1 = el('span', '', `▲ JPEG-safe ${C.BUDGET.jpeg} B`), s2 = el('span', '', `lossless ${(C.BUDGET.lossless / 1000).toFixed(2)} KB`);
-    s0.style.left = '0'; s1.style.left = `calc(${jpegAt} - 4px)`; s2.style.right = '0';
-    scale.append(s0, s1, s2);
+    // (a tick where each corner fills)
+    const ticks = [1, 2].map((k) => { const t = el('div', 'tcp-mmark'); t.style.left = `${(100 * k) / TUNE_ROOM.CORNERS}%`; return t; });
+    mbar.title = `The tune’s size, against what a picture’s ${TUNE_ROOM.CORNERS} song corners hold: ${TUNE_ROOM.CORNER_BYTES} bytes each, ${TUNE_ROOM.BYTES} in all`;
+    mbar.append(R.mfill, ...ticks);
+    const s0 = el('span', '', '0'), s2 = el('span', '', `${TUNE_ROOM.BYTES.toLocaleString('en')} B · ${TUNE_ROOM.CORNERS} corners`);
+    s0.style.left = '0'; s2.style.right = '0';
+    scale.append(s0, s2);
     mhead.append(el('span', 'tcp-label', 'Space'), R.mtext);
     meter.append(mhead, mbar, scale);
     // save, undo, clear
@@ -1455,15 +1463,14 @@
         ref.drumLabels.forEach((l, d) => l.toggleAttribute('data-sel', d === ui.drum));
       }
     }
-    // the meter: bytes, against the lossless room (the bar) and the JPEG-safe room (the mark)
+    // the meter: bytes, against the room in the picture's song corners (a tick where each one fills)
     let bytes = null;
     try { bytes = C.encode(song); } catch (e) { ui.status = e.message; }
-    const n = bytes ? bytes.length : 0, B = C.BUDGET;
-    R.mfill.style.width = `${Math.min(100, (100 * n) / B.lossless)}%`;
-    R.mfill.style.setProperty('--m', n <= B.jpeg ? '#2f9e44' : n <= B.lossless ? '#e8930f' : '#e0453a');
+    const n = bytes ? bytes.length : 0, room = TUNE_ROOM.BYTES, k = TUNE_ROOM.corners(n);
+    R.mfill.style.width = `${Math.min(100, (100 * n) / room)}%`;
+    R.mfill.style.setProperty('--m', n <= room ? '#2f9e44' : '#e0453a');
     R.mtext.textContent = '';
-    R.mtext.append(el('b', '', `${n} bytes`), n <= B.jpeg ? ` · fits JPEG-safe, ${B.jpeg - n} to spare`
-      : n <= B.lossless ? ` · ${n - B.jpeg} past JPEG-safe: only if X keeps the picture lossless` : ` · ${n - B.lossless} too many for a picture`);
+    R.mtext.append(el('b', '', `${n} bytes`), n <= room ? ` · uses ${k} of ${TUNE_ROOM.CORNERS} corners · ${(room - n).toLocaleString('en')} to spare` : ` · ${(n - room).toLocaleString('en')} too many for a picture`);
     // footer
     const now = bytes && C.toBase64(bytes);
     R.undo.disabled = !undo.length;

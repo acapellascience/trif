@@ -18,7 +18,7 @@ const chatKey = (site) => `chat:${site}`;
 const emptyChat = () => ({ sessionId: null, agent: null, messages: [], run: null, last: null });
 
 const ui = {
-  agentLevel: document.getElementById('agent-level'), agentNote: document.getElementById('agent-note'),
+  agentLevel: document.getElementById('agent-level'), agentSiteNote: document.getElementById('agent-site-note'),
   agentSitesList: document.getElementById('agent-sites-list'), agentSitesEmpty: document.getElementById('agent-sites-empty'),
   sensitiveSites: document.getElementById('sensitive-sites'), sensitiveSave: document.getElementById('sensitive-save'),
   sensitiveReset: document.getElementById('sensitive-reset'), sensitiveNote: document.getElementById('sensitive-note'),
@@ -728,7 +728,7 @@ ui.waitingBadge?.addEventListener('click', () => openApproval(null));
 
 // ---- Groups: "Rules" and "Page scripts", each with a switch for this site (background's mods.group)
 const GROUP_TEXT = {
-  // (the lines for style and boxed mods: drafts awaiting Tim's OK, docs/TIER-NAMES-STRINGS.md)
+  // (the lines for style and boxed mods: approved by Tim, 2026-11-10, docs/TIER-NAMES-STRINGS.md)
   rules: [GROUP_NAMES.rules, 'Run by TRIF from data: they change how the page looks, and can\'t send, load or click anything themselves.'],
   sandboxed: [GROUP_NAMES.sandboxed, 'Run in TRIF\'s sandbox: they change what the page shows, and do only what you\'ve allowed.'],
   page: [GROUP_NAMES.page, 'Run in the page with everything it has.'],
@@ -1292,7 +1292,7 @@ function renderAgentLevel() {
   const site = agentSiteOf(view.tab?.url || '');
   const show = !!site && !!view.status?.helper?.connected;
   ui.agentLevel.hidden = !show;
-  ui.agentNote.hidden = true;
+  ui.agentSiteNote.hidden = true;
   if (!show) return;
   const lv = agentLevel(site, agentSettingsNow());
   // (a narrow panel: the levels without "Agent: ", so the control stays clear of the robot in the middle)
@@ -1302,8 +1302,8 @@ function renderAgentLevel() {
   ui.agentLevel.dataset.level = lv.level;
   ui.agentLevel.title = `Agent on ${site}: ${{ ask: 'it can read, and asks before it first runs code', off: 'it can\'t read, take screenshots or run code here', look: 'it can read and take screenshots, but not run code', run: 'it can read and run code (the tab locks while it does)' }[lv.level]}`;
   if (lv.by === 'sensitive') {
-    ui.agentNote.textContent = `Your agent is off on ${site}: it's ${lv.why || 'on your list of sensitive sites'}. Choose “Agent” above to let it look or run code here.`;
-    ui.agentNote.hidden = false;
+    ui.agentSiteNote.textContent = `Your agent is off on ${site}: it's ${lv.why || 'on your list of sensitive sites'}. Choose “Agent” above to let it look or run code here.`;
+    ui.agentSiteNote.hidden = false;
   }
 }
 matchMedia('(max-width: 420px)').addEventListener?.('change', () => renderAgentLevel());

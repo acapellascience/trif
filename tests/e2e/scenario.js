@@ -2671,7 +2671,7 @@ process.exitCode = 1;
     const base = `http://${site}:${this.o.servers.port}`;
     const setStore = (v) => this.ext(`async (v) => { await chrome.storage.local.set(v); }`, [v]);
     const panelState = () => this.panel(`async () => ({ level: document.getElementById('agent-level').value, shown: !document.getElementById('agent-level').hidden,
-      note: document.getElementById('agent-note').hidden ? '' : document.getElementById('agent-note').textContent,
+      note: document.getElementById('agent-site-note').hidden ? '' : document.getElementById('agent-site-note').textContent,
       ask: document.getElementById('agent-ask')?.open ? document.getElementById('agent-ask-title').textContent : null })`);
     const themes = async (name) => { for (const scheme of ['dark', 'light']) if (await this.d.colorScheme(this.panelCtx, scheme)) { await sleep(150); await this.shot(this.panelCtx, `${name}-${scheme}`); } await this.d.colorScheme(this.panelCtx, ''); };
     const problems = [];

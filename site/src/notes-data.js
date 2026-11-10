@@ -8,12 +8,12 @@ export const NOTES = {
   "date": "2026-11-09",
   "image": {
    "src": "HWjU1c4WEAAUvts.jpg",
-   "w": 1823,
+   "w": 1815,
    "h": 729
   },
   "cover": {
    "src": "HWjU1c4WEAAUvts.jpg",
-   "w": 1823,
+   "w": 1815,
    "h": 729
   },
   "files": [
@@ -50,7 +50,7 @@ export const NOTES = {
    "HWe1zlfWAAAKlKg.jpg"
   ],
   "versions": {
-   "HWjU1c4WEAAUvts.jpg": "6a4c9c75",
+   "HWjU1c4WEAAUvts.jpg": "234025bd",
    "HWt_FOYXsAAN9gf.jpg": "5acf6289",
    "HWdxpOBXYAALVF6.jpg": "aaa44fe0",
    "HWdxzHWWMAAyfL6.jpg": "78de3be1",

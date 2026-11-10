@@ -3,7 +3,7 @@
 // pictures of embedded posts are this site's own files (/notes/<slug>/<file>: site/public/, served by the
 // Worker from its assets binding).
 import { NOTES } from './notes-data.js';
-import { SITE, TOKENS, ROBOT_SVG } from './pages.js';
+import { SITE, TOKENS } from './pages.js';
 
 export { NOTES };
 
@@ -13,9 +13,6 @@ const STYLE = `${TOKENS}
 html { background: #000; }
 body { margin: 0; background: #000; color: var(--fg); font: 18px/1.6 -apple-system, system-ui, "Segoe UI", sans-serif; }
 main { max-width: 680px; margin: 0 auto; padding: 32px 16px 80px; }
-.top { display: flex; align-items: center; gap: 10px; margin: 0 0 40px; font-size: 15px; }
-.top a { color: var(--fg); text-decoration: none; font-weight: 600; display: inline-flex; align-items: center; gap: 8px; }
-.top .robot { width: 32px; height: 32px; }
 h1 { font-size: clamp(30px, 6vw, 42px); line-height: 1.15; margin: 0 0 12px; letter-spacing: -0.02em; }
 .byline { color: var(--muted); font-size: 18px; font-style: italic; margin: 0 0 4px; }
 .date { color: var(--muted); font-size: 15px; margin: 0 0 36px; }
@@ -26,7 +23,9 @@ li { margin: 0 0 6px; }
 a { color: var(--accent); }
 figure { margin: 28px 0 32px; }
 figure img, figure video { display: block; width: 100%; height: auto; border-radius: 10px; background: var(--card); }
-.cover { margin: 0 0 28px; }
+/* the header picture: the whole width, from the very top */
+figure.cover:not(.post-fig) { margin: 0; }
+.cover img { display: block; width: 100%; height: auto; border-radius: 0; background: none; }
 figcaption { color: var(--muted); font-size: 15px; line-height: 1.45; margin: 10px 2px 0; text-align: center; }
 /* embedded posts: a picture of the post, in TRIF's green frame, linking to it on X */
 .post { display: block; width: fit-content; max-width: 100%; margin: 0 auto; padding: 3.5px; border-radius: 15.5px;
@@ -93,10 +92,9 @@ export function notePage(slug) {
 <style>${STYLE}</style>
 </head>
 <body>
-<main>
-<div class="top"><a href="/">${ROBOT_SVG.replace('class="robot"', 'class="robot" width="32" height="32"').replace(/ width="128" height="128"/, '')}Tim's Robot Internet Fixer</a></div>
-<article>
 ${n.cover ? `<figure class="cover"><img src="/notes/${slug}/${n.cover.src}${n.versions?.[n.cover.src] ? `?v=${n.versions[n.cover.src]}` : ''}" width="${n.cover.w}" height="${n.cover.h}" alt="" decoding="async" fetchpriority="high"></figure>` : ''}
+<main>
+<article>
 <h1>${esc(n.title)}</h1>
 <p class="byline">Tim Blais</p>
 ${date ? `<p class="date"><time datetime="${esc(n.date)}">${date}</time></p>` : ''}

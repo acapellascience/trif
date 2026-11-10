@@ -253,10 +253,11 @@ keys you saved from the Keychain first, while the command is still there: `~/.tr
   (on Linux, `~/.local/state/trif`);
 - `~/Library/Caches/TRIF` (chats' mailboxes; on Linux `~/.cache/trif`);
 - the file that lets each browser start TRIF's helper, `com.webmods.helper.json`: in
-  `~/Library/Application Support/Google/Chrome/NativeMessagingHosts` and, for Firefox,
-  `~/Library/Application Support/Mozilla/NativeMessagingHosts` (for Chromium, Brave, Edge or Arc, in
-  `NativeMessagingHosts` in that browser's folder in `~/Library/Application Support`; on Linux, in
-  `~/.config/<browser>/NativeMessagingHosts` and `~/.mozilla/native-messaging-hosts`);
+  `~/Library/Application Support/Google/Chrome/NativeMessagingHosts` (Chrome's, which Arc reads too) and,
+  for Firefox, `~/Library/Application Support/Mozilla/NativeMessagingHosts` (for Chromium, Brave, Edge or
+  Arc, also in `NativeMessagingHosts` in that browser's folder in `~/Library/Application Support`, Arc's
+  in `Arc/User Data`; on Linux, in `~/.config/<browser>/NativeMessagingHosts` and
+  `~/.mozilla/native-messaging-hosts`);
 - `/usr/local/bin/trif`, if setup linked it there;
 - if you used Safari, its bridge: `launchctl bootout gui/$(id -u)/com.timsrobot.trif.safari-bridge`, then
   delete `~/Library/LaunchAgents/com.timsrobot.trif.safari-bridge.plist`.

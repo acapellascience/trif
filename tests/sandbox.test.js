@@ -123,6 +123,6 @@ test('the sandboxed examples (ports of Tim\'s Simple Shopping and DVD Logo) are 
     const text = fs.readFileSync(path.join(dir, f), 'utf8');
     assert.equal(parseHeader(text).sandboxed, true, f);
     assert.deepEqual(sandboxLint(text), [], f);
-    new vm.Script(`(function () {\n${text}\n})`); // parses
+    new vm.Script(`(async function () {\n${text}\n})`); // parses
   }
 });

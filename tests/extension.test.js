@@ -3070,7 +3070,7 @@ test('sandboxFallback: without the sandbox a sandboxed mod waits for the user\'s
   assert.strictEqual(s.world, 'MAIN');
   assert.ok(!s.worldId);
   assert.ok(!us2.scripts.some((x) => x.id === sbx.SANDBOX_RUNTIME_ID));
-  assert.ok(s.js[0].code.includes('(\'page\', "y.com/boxed", function (page, trif, console, setTimeout, clearTimeout, setInterval, clearInterval, requestAnimationFrame, cancelAnimationFrame) { "use strict";\n/* y.com/boxed */\n});'));
+  assert.ok(s.js[0].code.includes('(\'page\', "y.com/boxed", async function (page, trif, console, setTimeout, clearTimeout, setInterval, clearInterval, requestAnimationFrame, cancelAnimationFrame) { "use strict";\n/* y.com/boxed */\n});'));
   new Function(s.js[0].code);
   assert.strictEqual(r.applied['y.com/boxed'], 'H:page', 'registered differently from the sandboxed form');
   // a new version waits again

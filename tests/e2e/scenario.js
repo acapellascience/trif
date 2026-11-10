@@ -1947,7 +1947,7 @@ process.exitCode = 1;
           shown: Object.fromEntries(['r1', 'r-ad', 'r-carousel', 'r2'].map((id) => [id, document.getElementById(id).getClientRects().length > 0])),
           carouselMarked: q('#r-carousel').hasAttribute('data-ahr-hide'), dvd: q('[data-trif-dvd]')?.style.transform || null,
           logoHidden: getComputedStyle(q('#logo')).visibility === 'hidden',
-          hits: window.__hits.slice(), secret: window.__pageSecret, arrayEscape: Array.prototype.__trifEscape, objectEscape: ({}).__trifEscape,
+          hits: window.__hits.slice(), secret: window.__pageSecret, protosClean: Array.prototype.__trifEscape === undefined && ({}).__trifEscape === undefined, pageFrozen: Object.isFrozen(Array.prototype),
           form: [q('#fi').value, q('#fi').getAttribute('value'), q('#ta').value, q('#opt').textContent],
           gadget: q('#gadget')?.textContent ?? null, pstyle: q('#pstyle').textContent, plink: [q('#plink').getAttribute('href'), q('#plink').getAttribute('target')],
           pimg: q('#pimg').getAttribute('src'), btnClick: q('#pbtn').getAttribute('onclick'), frmSrcdoc: q('#frm').getAttribute('srcdoc'), bodyBg: getComputedStyle(document.body).backgroundImage,
@@ -1971,7 +1971,7 @@ process.exitCode = 1;
       const pageNoticed = later.hits.filter((h) => h !== 'click:target-click');
       const pageSide = {
         'the page noticed nothing (clicks, keys, submits, messages, inline code)': pageNoticed.length === 0 ? 'nothing' : pageNoticed,
-        'the page\'s prototypes untouched': later.arrayEscape === undefined && later.objectEscape === undefined,
+        'the page\'s prototypes untouched (and not frozen: lockdown stayed in TRIF\'s world)': later.protosClean && !later.pageFrozen,
         'the form as it was': JSON.stringify(later.form) === JSON.stringify(['v', 'v', 't', 'o']),
         'the page\'s empty script still empty': later.gadget === '',
         'the page\'s style element as it was': later.pstyle === '#title { letter-spacing: 0 }',
@@ -1988,7 +1988,10 @@ process.exitCode = 1;
       const bare = new Set(Object.getOwnPropertyNames(require('vm').runInNewContext('globalThis')));
       const beyond = good.names.filter((n) => !bare.has(n));
       const browserOnly = new Set(first.windowNames.filter((n) => !bare.has(n)));
-      const reachable = good.names.filter((n) => browserOnly.has(n));
+      // (beyond the language: TRIF's API, named like the browser's timers, and what SES passes through as plain
+      // data tools: Temporal, TextEncoder, TextDecoder)
+      const API = new Set(['eval', 'Function', 'Compartment', 'lockdown', 'harden', 'assert', 'page', 'trif', 'console', 'setTimeout', 'clearTimeout', 'setInterval', 'clearInterval', 'requestAnimationFrame', 'cancelAnimationFrame', 'Math', 'Date', 'Temporal', 'TextEncoder', 'TextDecoder']);
+      const reachable = good.names.filter((n) => browserOnly.has(n) && !API.has(n));
       const want = {
         'restyle (trif.css)': first.titleColor === 'rgb(1, 2, 3)', 'hide (trif.hide)': !first.hiddenShown, 'add an element': first.made === 'made in the sandbox',
         'text (trif.text), also later': first.txt === 'the robot says hi' && first.later[0] === 'later: the robot again', 'observe (trif.observe), later': first.later[1] === 'yes',
@@ -2093,7 +2096,7 @@ process.exitCode = 1;
         const sb = document.querySelector('li.mod-group[data-group="sandboxed"]');
         const row = document.querySelector('li[data-mod="127.0.0.1/e2e-sbx-panel"]');
         return sb && row ? { heads, name: sb.querySelector('.mod-group-name').textContent, note: sb.querySelector('.mod-group-note').textContent, rowGroup: row.dataset.group,
-          order: [...document.querySelectorAll('#mod-list > li')].map((li) => li.dataset.group || li.dataset.mod),
+          order: [...document.querySelectorAll('#mod-list > li')].map((li) => li.dataset.mod || li.dataset.group),
           starts: [...document.querySelectorAll('.starts-row')].map((l) => l.querySelector('span').textContent + '=' + l.querySelector('select').value) } : null;
       }`), { timeoutMs: 15000 });
       const order = layout.heads.join(',');
@@ -2510,7 +2513,8 @@ say({ type: 'result', subtype: 'success', is_error: false, result: text, session
       // the hijacked agent's requests, which the tab lock blocked on purpose (hijackedAgentCheck)
       // (Firefox doesn't say which page: after that check, a failed fetch or socket is one of those)
       // (the sandboxed mods' test page: its hostile mod's refusals and the errors the good one throws on purpose)
-      || (this.sandboxPage && /\/sandbox\.html/.test(String(p.source || '')))
+      // (Chrome names the page the tab had when its console was first attached, so by the text)
+      || (this.sandboxPage && (/^\[TRIF\] 127\.0\.0\.1\/e2e-sbx-/.test(String(p.text)) || /willReadFrequently/.test(String(p.text)) || /\/sandbox\.html/.test(String(p.source || ''))))
       || (this.hijacked && /ERR_BLOCKED_BY_CLIENT|NetworkError when attempting to fetch|Failed to fetch|establish a connection to the server at ws:\/\/[^ ]+\/e2e-socket|WebSocket connection to '[^']+\/e2e-socket|e2e-leak|e2e-nav|blocked by|CORS/i.test(String(p.text) + String(p.source || '')));
     const problems = (await this.d.consoleProblems()).filter((p) => !expected(p));
     // The agent-made mod and the stand-in pages aren't ours to judge; everything else counts.

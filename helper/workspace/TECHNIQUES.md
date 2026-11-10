@@ -41,6 +41,65 @@ on a page can turn it against them. Reach for JavaScript only when rules can't d
 Selectors can't contain `{`, `}`, `;` or `@`. `trif check <site>/<mod>` checks the rules and says what's
 wrong. Rules re-apply as the page changes, so single-page apps need nothing extra.
 
+## Sandboxed mods: when rules aren't enough
+
+When a mod needs logic, new elements, animation or drawing, but not the page itself, write a **sandboxed
+mod**: JavaScript that TRIF runs in its own sandbox, not in the page. It has the language and TRIF's API,
+nothing else: no `window`, `document`, `fetch`, storage, frames or events to fire. So it can't send, click,
+navigate or load anything, it never waits for the user's OK, and the page can't reach it. Write a page
+script only for what needs the page: filtering the data the site loads, the app's state, its code.
+
+`trif new <site> <mod> --sandboxed` makes one (`// @sandboxed` in the header):
+
+```js
+// ==WebMod==
+// @name        Calm feed
+// @description Hides promoted posts and marks long threads
+// @match       https://x.com/*
+// @sandboxed
+// @risk        1 hides promoted posts, so their ad impressions never report
+// ==/WebMod==
+trif.css('[data-testid=sidebarColumn] { display: none !important }');
+trif.observe('article', (post) => {
+  if (post.text.includes('Promoted')) return post.hide();
+  if (post.findAll('[data-testid=tweetText]').length > 3) post.classes.add('calm-long');
+});
+const prefs = await trif.settings('prefs', { color: 'rgb(255, 230, 150)' });
+trif.css(`.calm-long { outline: 2px solid ${prefs.value.color} }`);
+```
+
+What it has (everything else is simply not there, and `trif check` lists what you used that isn't):
+
+- **`trif`**: `css(text)` (CSS that loads nothing: `url()` only with `data:`; returns `{remove}`),
+  `hide(selector)`, `observe(selector, fn)` (each matching element, now and as they appear; one observer
+  shared by all of TRIF's mods; returns a stop function), `text(selector, fn)` (each text inside what
+  matches, now and later, replaced by what `fn(text)` returns), `settings(key, defaults)` (a promise of
+  `{value, save(obj)}`: the mod's own, per site, kept by TRIF, not in the site's storage; JSON, up to 64
+  KB), `log`, `warn`, `error` (`trif logs`; `console.log` and friends do the same).
+- **`page`**: `find(sel)`, `findAll(sel)`, `create(tag)` (harmless tags only: `div`, `span`, `p`, `a`,
+  `button`, `img`, lists, headings, tables, `canvas`, ...), `on(type, fn)` (input events on the window,
+  read as plain data), `url`, `title`, `width`, `height`, `scrollX`, `scrollY`, `root`, `body`,
+  `prefersReducedMotion`, `prefersDark`.
+- **Elements, as TRIF's stand-ins** (not the real nodes): `tag`, `text`, `setText(t)`, `attr(name)`,
+  `setAttr(name, value)` (`id`, `class`, `title`, `role`, `hidden`, `alt`, sizes, `data-*`, `aria-*`; a
+  link's `href` only to this site's pages without a query; an image's `src` only `data:`/`blob:` or an
+  image the page already shows), `removeAttr`, `classes.add/remove/toggle/has`, `style(prop, value)`
+  (read with one argument; values that load nothing), `hide()`, `show()`, `find`, `findAll`, `closest`,
+  `matches`, `parent`, `children`, `next`, `previous`, `append`/`prepend`/`before`/`after` (stand-ins or
+  text), `remove()`, `clone()` (a copy with only allowed elements and attributes), `rect()`,
+  `on(type, fn)`, and `canvas()` on a `<canvas>`: 2D drawing with numbers and text (`fillRect`, `arc`,
+  `fillText`, `set({fillStyle, font, ...})`, ...).
+- `setTimeout`, `setInterval`, `requestAnimationFrame` and their clears (functions only), `Math`, `Date`,
+  and the JavaScript language (frozen: mods can't change `Array.prototype` and the like).
+
+Good to know:
+- The code runs inside a function, so a top-level `return` ends it and `await` works at the top.
+- Errors are caught and shown by `trif errors`, as for page scripts.
+- The sandbox refuses source with `import(` or an HTML comment marker in it, even inside a string or a
+  comment; `trif check` points them out.
+- Where it isn't enough (an API it doesn't offer), say so and write a page script; don't contort the
+  mod. Examples: examples/sandboxed in TRIF's folder (Simple Shopping, DVD Logo).
+
 ## Writing mods TRIF can read
 
 TRIF reads every mod's code before it runs, and a mod that can do certain things waits for the user's OK

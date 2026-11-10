@@ -48,7 +48,7 @@ export function sandboxModCode(id, source) {
  * same API, built in the page's world, around the mod's code, which has everything the page has.
  */
 export function sandboxPageCode(id, source) {
-  return `(${sandboxRuntime.toString()})('page', ${J(id)}, function (${SANDBOX_GLOBALS.filter((n) => n !== 'Math' && n !== 'Date').join(', ')}) { "use strict";\n${source}\n});\n//# sourceURL=trif://${id}.js`;
+  return `(${sandboxRuntime.toString()})('page', ${J(id)}, async function (${SANDBOX_GLOBALS.filter((n) => n !== 'Math' && n !== 'Date').join(', ')}) { "use strict";\n${source}\n});\n//# sourceURL=trif://${id}.js`;
 }
 
 /**
@@ -441,7 +441,7 @@ export function sandboxRuntime(mode, pageModId, pageFn) {
     attr(name) { return nodeOf(this).getAttribute(str(name, 'an attribute name', 100)); },
     setAttr(name, value) {
       const node = nodeOf(this);
-      const n = str(name, 'an attribute name', 100).toLowerCase(), v = str(String(value), 'a value', 10000);
+      const n = str(name, 'an attribute name', 100).toLowerCase(), v = str(String(value), 'a value', 200000);
       if (!(ATTRS.has(n) || /^(data|aria)-[a-z0-9-]+$/.test(n))) fail(`the ${n} attribute isn't offered`);
       if (ATTR_TAGS[n] && (!ATTR_TAGS[n].has(node.localName) || node.namespaceURI !== HTML_NS)) fail(`${n} isn't offered on <${node.localName}>`);
       if ((n === 'href' || n === 'src') && !urlOk(v, n)) fail(`${n} only takes this site's own addresses without a query${n === 'src' ? ', or data:/blob: images' : ''}`);
@@ -526,12 +526,17 @@ export function sandboxRuntime(mode, pageModId, pageFn) {
         const c = new G.Compartment({ __options__: true, globals: { ...api.endowments, Math, Date } });
         // (no code from strings inside the compartment either, and none of SES's own tools)
         for (const n of ['eval', 'Function', 'Compartment', 'lockdown', 'harden', 'assert']) {
+          // (set to undefined, not deleted: SES's evaluator needs the property there)
           try { Object.defineProperty(c.globalThis, n, { value: undefined, writable: false, enumerable: false, configurable: false }); } catch { /* not there */ }
         }
-        c.evaluate(`(function () { "use strict";\n${source}\n})();\n//# sourceURL=trif-sandbox://${id}.js`);
+        // (an async function: a top-level return ends the mod, and await works at the top; what it throws
+        // after an await is caught too)
+        const p = c.evaluate(`(async function () { "use strict";\n${source}\n})();\n//# sourceURL=trif-sandbox://${id}.js`);
+        if (p && typeof p.catch === 'function') p.catch((err) => report(id, err));
       } else {
         const e = api.endowments;
-        source.call(undefined, ...SANDBOX_GLOBALS_PAGE.map((n) => e[n]));
+        const p = source.call(undefined, ...SANDBOX_GLOBALS_PAGE.map((n) => e[n]));
+        if (p && typeof p.catch === 'function') p.catch((err) => report(id, err));
       }
     } catch (err) {
       report(id, err);

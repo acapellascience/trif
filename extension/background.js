@@ -308,6 +308,7 @@ function checkUserScripts() {
     log(now ? 'info' : 'warn', now ? 'user scripts were turned on' : 'user scripts were turned off');
     // A fresh hello keeps the helper's view of the switch (shown by `trif doctor`) current.
     post({ type: 'hello', version: VERSION, userScripts: now, chrome: CHROME, browser: BROWSER, installId: state.installId, features: FEATURES });
+    if (now && !SAFARI) state.canSandbox = null; // (TRIF's world configured again: sandboxWorld)
     if (now) serial(applyMods).then(reportApplied, () => {});
     notifyPanels();
   }
@@ -362,12 +363,15 @@ function sandboxWorld() {
   if (state.canSandbox !== null) return Promise.resolve(state.canSandbox);
   if (sandboxSetup) return sandboxSetup;
   sandboxSetup = (async () => {
-    if (SAFARI || typeof chrome.userScripts?.configureWorld !== 'function') { state.canSandbox = false; return false; }
-    if (!checkUserScripts()) return null; // (user scripts off: asked again once they're on)
+    if (SAFARI) { state.canSandbox = false; return false; }
+    // (user scripts off: chrome.userScripts isn't usable then, so nothing is known yet; asked again once they're on)
+    if (!checkUserScripts()) return null;
+    if (typeof chrome.userScripts?.configureWorld !== 'function') { state.canSandbox = false; return false; }
     try {
       await chrome.userScripts.configureWorld({ worldId: SANDBOX_WORLD, csp: SANDBOX_CSP, messaging: true });
       state.canSandbox = true;
     } catch (e) {
+      if (!checkUserScripts()) return null; // (switched off meanwhile)
       log('warn', `TRIF's sandbox world: ${errMsg(e)} (sandboxed mods wait for your OK to run as page scripts)`);
       state.canSandbox = false;
     }

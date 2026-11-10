@@ -437,8 +437,8 @@ const handlers = {
       return out('TRIF runs it with its own code: it can\'t send, click, load from elsewhere or run code, so it never waits for the user\'s OK.');
     }
     // Compiles without running anything (side-panel agents may not run code; this replaces node --check).
-    // (a sandboxed mod's code is evaluated inside a function: a top-level return is fine there)
-    try { new vm.Script(header.sandboxed ? `(function () {\n${code}\n})` : code, { filename: path.resolve(file), lineOffset: header.sandboxed ? -1 : 0 }); } catch (e) {
+    // (a sandboxed mod's code is evaluated inside an async function: a top-level return or await is fine there)
+    try { new vm.Script(header.sandboxed ? `(async function () {\n${code}\n})` : code, { filename: path.resolve(file), lineOffset: header.sandboxed ? -1 : 0 }); } catch (e) {
       const where = String(e.stack || '').split('\n').slice(0, 3).join('\n');
       if (ctx.json) printJson({ ok: false, error: e.message, where }); else out(`${where}`);
       process.exitCode = 1;

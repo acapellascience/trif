@@ -185,12 +185,17 @@
       background-image: ${RAVE_SMALL} !important; background-size: auto !important; background-repeat: repeat !important;
       background-attachment: fixed !important; background-clip: text !important; -webkit-background-clip: text !important;
       animation: pst-text-roll .8s steps(12) infinite !important; }`;
+  // (each pst-line-hue animation pinned to the page's time origin: every line steps through the hues together)
+  addEventListener('animationstart', (e) => {
+    if (e.animationName !== 'pst-line-hue') return;
+    try { for (const a of e.target.getAnimations()) if (a.animationName === e.animationName && a.startTime !== 0) a.startTime = 0; } catch {}
+  }, true);
   const css = document.createElement('style');
   css.textContent = `
     /* (one hue cycle of RAVE_TILE: an exact 17 px across and up) */
     @keyframes pst-small-roll { from { background-position: -40px -20px; } to { background-position: -23px -37px; } }
     @keyframes pst-text-roll { from { background-position: 0 0; } to { background-position: 33.941px 0; } }
-    @property --pst-lh { syntax: '<angle>'; inherits: true; initial-value: 0deg; }
+    @property --pst-lh { syntax: '<angle>'; inherits: false; initial-value: 0deg; }
     @keyframes pst-line-hue { from { --pst-lh: 0deg; } to { --pst-lh: 360deg; } }
     @keyframes pst-box-roll { from { background-position: 0 0; } to { background-position: calc(-60vmax / 0.9063) 0; } }
     @keyframes pst-panel-roll { from { background-position: calc(-30vmax / 0.9063) 0; } to { background-position: calc(-90vmax / 0.9063) 0; } }
@@ -216,7 +221,6 @@
     html[data-pst-on][data-pst-has-text] #react-root [data-testid=SearchBox_Search_Input],
     html[data-pst-on][data-pst-has-text] #react-root [data-testid=SearchBox_Search_Input]::placeholder { color: var(--pst-text) !important; -webkit-text-fill-color: var(--pst-text) !important; opacity: 1 !important; }
     html[data-pst-on][data-pst-has-text] #react-root form[role=search] svg { color: var(--pst-text) !important; fill: var(--pst-text) !important; }
-    html[data-pst-on][data-pst-r-text] { animation: pst-line-hue 3s steps(18) infinite; }
     html[data-pst-on][data-pst-r-text] #react-root [data-testid=SearchBox_Search_Input],
     html[data-pst-on][data-pst-r-text] #react-root [data-testid=SearchBox_Search_Input]::placeholder { color: hsl(var(--pst-lh) 100% 60%) !important; -webkit-text-fill-color: hsl(var(--pst-lh) 100% 60%) !important; }
     html[data-pst-on][data-pst-r-text] #react-root form[role=search] svg { color: hsl(var(--pst-lh) 100% 60%) !important; fill: hsl(var(--pst-lh) 100% 60%) !important; }
@@ -242,7 +246,6 @@
     html[data-pst-on][data-pst-r-icons] #react-root :is(${ICONS}) path { fill: url(#pst-rb) !important; }
     html[data-pst-on][data-pst-has-icons] #react-root ${ICON_BUTTONS} { border-color: var(--pst-icons) !important; }
     html[data-pst-on][data-pst-r-icons] #react-root ${ICON_BUTTONS} { border-color: hsl(var(--pst-lh) 100% 60%) !important; }
-    html[data-pst-on][data-pst-r-icons] { animation: pst-line-hue 3s steps(18) infinite; }
     html[data-pst-on][data-pst-has-logo] #react-root header[role=banner] h1 a[href="/home"] svg:not(.tss-logo-bird),
     html[data-pst-on][data-pst-has-logo] #react-root header[role=banner] h1 a[href="/home"] svg:not(.tss-logo-bird) *,
     html[data-pst-on][data-pst-has-logo] #react-root header[role=banner] h1 a[href="/home"] > div { color: var(--pst-logo) !important; fill: var(--pst-logo) !important; }
@@ -265,7 +268,6 @@
        rings round the icons) */
     html[data-pst-on][data-pst-has-lines] #react-root :is(${LINES}) { border-color: var(--pst-lines) !important; }
     html[data-pst-on][data-pst-has-lines] #react-root [role=separator] { background-color: var(--pst-lines) !important; }
-    html[data-pst-on][data-pst-r-lines] { animation: pst-line-hue 3s steps(18) infinite; }
     html[data-pst-on][data-pst-r-lines] #react-root :is(${LINES}) { border-color: hsl(var(--pst-lh) 100% 60%) !important; }
     html[data-pst-on][data-pst-r-lines] #react-root [role=separator] { background-color: hsl(var(--pst-lh) 100% 60%) !important; }
     /* the bar along the top of the column (X's sticky, see-through one behind the name): solid, in the
@@ -346,6 +348,17 @@
     #pst-panel .pst-reset:disabled { opacity: .4; cursor: default; }
     #pst-panel p { margin: 10px 0 0; color: #536471; font-size: 12px; line-height: 1.35; }
     #pst-panel .pst-reset { margin-top: 8px; font: inherit; font-weight: 700; padding: 5px 10px; border-radius: 9999px; border: 1px solid #cfd9de; background: #fff; cursor: pointer; }
+    /* the hue (pst-line-hue): animated on each thing it colours (the variable isn't inherited), pinned in step */
+    html[data-pst-on][data-pst-r-text] #react-root :is([data-testid=SearchBox_Search_Input], form[role=search] svg),
+    html[data-pst-on][data-pst-r-icons] #react-root ${ICON_BUTTONS},
+    html[data-pst-on][data-pst-r-lines] #react-root :is(${LINES}, [role=separator]) { animation: pst-line-hue 3s steps(18) infinite; }
+    /* (those that also roll a rainbow: both) */
+    html[data-pst-on][data-pst-r-lines][data-pst-r-panel] #react-root [data-pst-card]:not(#pst-l),
+    html[data-pst-on][data-pst-r-lines][data-pst-r-cards] #react-root :is(${CARDS}):is(${LINES}):not(#pst-l),
+    html[data-pst-on][data-pst-r-lines][data-pst-r-quotes] #react-root :is(${QUOTES}):not(#pst-l) { animation: pst-panel-roll 5s steps(75) infinite, pst-line-hue 3s steps(18) infinite !important; }
+    html[data-pst-on][data-pst-r-lines][data-pst-r-bg] #react-root [data-pst-solid]:not(#pst-l) { animation: pst-box-roll 5s steps(75) infinite, pst-line-hue 3s steps(18) infinite !important; }
+    /* (the search field's placeholder: the field's own colour) */
+    html[data-pst-on][data-pst-r-text]:not(#pst-l) #react-root [data-testid=SearchBox_Search_Input]::placeholder { color: inherit !important; -webkit-text-fill-color: inherit !important; }
   `;
   root.append(css);
   // The small rainbow as an SVG gradient, for icons (an SVG shape can't take a CSS background): one hue cycle
@@ -586,10 +599,13 @@
       : 'Edited: your style isn’t in your picture yet. Upload a new picture (Edit profile) with Style Encoder on to publish it';
   };
   // right before X's "Edit profile" (when it's there: X redraws the header as you move about), matching it
+  let copiedFor; // (the style on show when Edit profile's colours were last copied)
   const placeToggle = () => {
     const edit = document.querySelector('[data-testid=primaryColumn] [data-testid=editProfileButton]');
     if (!edit) { toggle.remove(); return false; }
     if (edit.previousElementSibling !== toggle) edit.before(toggle);
+    else if (copiedFor === applied) return true;
+    copiedFor = applied;
     const cs = getComputedStyle(edit), label = edit.querySelector('span') || edit;
     toggle.style.setProperty('--pst-btn-border', cs.borderTopColor);
     toggle.style.setProperty('--pst-btn-color', getComputedStyle(label).color);
@@ -602,8 +618,8 @@
   const placePanel = () => {
     const r = toggle.getBoundingClientRect();
     if (!r.width) return;
-    root.style.setProperty('--pst-panel-top', `${Math.round(r.bottom + 8)}px`);
-    root.style.setProperty('--pst-panel-right', `${Math.max(8, Math.round(innerWidth - (document.querySelector('[data-testid=editProfileButton]')?.getBoundingClientRect().right || r.right)))}px`);
+    panel.style.setProperty('--pst-panel-top', `${Math.round(r.bottom + 8)}px`);
+    panel.style.setProperty('--pst-panel-right', `${Math.max(8, Math.round(innerWidth - (document.querySelector('[data-testid=editProfileButton]')?.getBoundingClientRect().right || r.right)))}px`);
   };
   const panel = document.createElement('div');
   panel.id = 'pst-panel';

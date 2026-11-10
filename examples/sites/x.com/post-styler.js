@@ -191,15 +191,23 @@
     ${X}[data-ps-r~=quotes] [data-ps-quote] { ${bigRainbow} }
     ${X}[data-ps-r~=quotes] [data-ps-quote] :is(span, time) { text-shadow: 0 1px 3px rgb(0 0 0 / .75), 0 0 1px rgb(0 0 0 / .6) !important; }
     ${X}[data-ps~=lines] :is([data-testid="card.wrapper"], [data-ps-quote]) { border-color: var(--ps-lines) !important; }
-    ${X}[data-ps-r~=lines] { animation: ps-line-hue 3s steps(18) infinite; }
+    ${X}[data-ps-r~=lines] :is([data-testid="card.wrapper"], [data-ps-quote]) { animation: ps-line-hue 3s steps(18) infinite; }
+    ${X}[data-ps-r~=lines][data-ps-r~=cards] [data-testid="card.wrapper"]:not(#ps-l),
+    ${X}[data-ps-r~=lines][data-ps-r~=quotes] [data-ps-quote]:not(#ps-l),
+    ${X}[data-ps-r~=lines] [data-ps-quote][data-ps-r~=bg]:not(#ps-l):not(#ps-q):not(#ps-m) { animation: ps-box-roll 5s steps(75) infinite, ps-line-hue 3s steps(18) infinite !important; }
     ${X}[data-ps-r~=lines] :is([data-testid="card.wrapper"], [data-ps-quote]) { border-color: hsl(var(--ps-lh) 100% 60%) !important; }
   `;
+  // (each ps-line-hue animation pinned to the page's time origin: every line steps through the hues together)
+  addEventListener('animationstart', (e) => {
+    if (e.animationName !== 'ps-line-hue') return;
+    try { for (const a of e.target.getAnimations()) if (a.animationName === e.animationName && a.startTime !== 0) a.startTime = 0; } catch {}
+  }, true);
   const css = document.createElement('style');
   css.id = 'ps-css';
   css.textContent = `
     @keyframes ps-text-roll { from { background-position: 0 0; } to { background-position: 33.941px 0; } }
     @keyframes ps-box-roll { from { background-position: calc(-30vmax / 0.9063) 0; } to { background-position: calc(-90vmax / 0.9063) 0; } }
-    @property --ps-lh { syntax: '<angle>'; inherits: true; initial-value: 0deg; }
+    @property --ps-lh { syntax: '<angle>'; inherits: false; initial-value: 0deg; }
     @keyframes ps-line-hue { from { --ps-lh: 0deg; } to { --ps-lh: 360deg; } }
     ${itemRules(P, OUT)}
     ${itemRules(Q, '')}

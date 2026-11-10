@@ -196,6 +196,10 @@ body.needs-login .problem-line { color: var(--warn); }
 .bar-robot .rim { fill: var(--switch-on); }
 .bar-robot .face { fill: #18181a; }
 .bar-robot .eye { fill: #59dbab; }
+/* A tab TRIF has paused (tablock.js): a pause sign for eyes, as the toolbar icon shows. */
+.bar-robot .pause { display: none; fill: #59dbab; }
+body.tab-locked .bar-robot .eye { display: none; }
+body.tab-locked .bar-robot .pause { display: inline; }
 .bar-robot[aria-busy="true"] { cursor: progress; opacity: 0.6; }
 /* Asleep: still him, eyes and all, but grey and dim; pointing at him brightens him a little toward awake. */
 body.site-off .bar-robot svg { filter: grayscale(1); opacity: 0.45; }
@@ -217,8 +221,8 @@ body.site-off .bar-robot:hover:not([aria-busy="true"]) svg { filter: grayscale(0
    the power button, the Fix button, and (when user scripts are off) the mod switches and their lights. */
 body.blocked { --switch-on: var(--bad); }
 body.needs-login { --switch-on: var(--warn); }
-body.blocked .bar-robot .eye { fill: #ffc2bc; }
-body.needs-login .bar-robot .eye { fill: #fbe3a6; }
+body.blocked .bar-robot :is(.eye, .pause) { fill: #ffc2bc; }
+body.needs-login .bar-robot :is(.eye, .pause) { fill: #fbe3a6; }
 body.needs-login .btn.go { color: #2e1f02; }
 /* Except the mods while only the helper is away, or only a login is missing: they still run (the extension
    keeps its copy), so their switches and lights stay green. */
@@ -558,8 +562,13 @@ h3.mod-name { margin: 0; font-size: inherit; line-height: inherit; }
 .mod-facts .actions { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; }
 .mod-facts .facts-code { max-height: 220px; overflow: auto; margin: 6px 0 0; padding: 6px; background: var(--field, rgba(127,127,127,.08)); border-radius: 5px; font-size: 11px; white-space: pre-wrap; word-break: break-word; }
 
-/* A tab the agent ran code in (tablock.js) */
-.notice.tab-lock .title { font-weight: 600; }
+/* A tab the agent ran code in (tablock.js): one line and a small Reload button, so the rest of the panel
+   stays in view; the details are in the line's tooltip. */
+.notice.tab-lock { display: flex; align-items: center; gap: 8px; padding: 5px 6px 5px 12px; }
+.notice.tab-lock[hidden] { display: none; }
+.notice.tab-lock > * + * { margin-top: 0; }
+.notice.tab-lock .title { flex: 1; min-width: 0; font-size: 12px; cursor: help; }
+.notice.tab-lock .btn { flex: none; padding: 2px 10px; }
 
 /* A waiting change, against the version that ran */
 .mod-facts .facts-diff { max-height: 260px; overflow: auto; margin: 6px 0 0; padding: 6px; background: var(--field, rgba(127,127,127,.08)); border-radius: 5px; font-size: 11px; white-space: pre-wrap; word-break: break-word; }

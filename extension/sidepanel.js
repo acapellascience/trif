@@ -539,24 +539,30 @@ function renderPausedAll() {
 /**
  * This tab is locked (background's tabLocks, tablock.js): the agent ran code in it, so the browser blocks
  * every request from it that changes something (posting, sending, saving) until the page is reloaded.
+ * One short line and a Reload button, so the rest of the panel stays in view; the details in the line's
+ * tooltip. The robot in the bar shows a pause sign for eyes meanwhile, as the toolbar icon does.
  */
 function renderTabLock() {
   const n = ui.tabLock;
   const lock = view.tab && (view.status?.lockedTabs || []).find((l) => l.tabId === view.tab.id);
   n.hidden = !lock;
+  document.body.classList.toggle('tab-locked', !!lock);
   if (!lock) { n.replaceChildren(); return; }
   if (n.childElementCount) return;
   // Back to the page it was locked on if the tab is somewhere else now (a blocked page: reloading that
   // would only ask for the blocked address again), else a reload. Either way a new page: unlocked.
-  const reload = button('Reload the page', 'primary', () => {
+  const reload = button('Reload', null, () => {
     const t = view.tab;
     if (!t) return;
     let away = true;
     try { away = !hostInScope(new URL(t.url || '').hostname, lock.site); } catch { /* no URL: away */ }
     (away && /^https?:/.test(lock.url) ? chrome.tabs.update(t.id, { url: lock.url }) : chrome.tabs.reload(t.id)).catch(() => {});
   });
-  const p = el('p', null, 'Your agent ran code in this page, so TRIF has blocked anything here from posting, sending or saving as you, or opening other sites, until the page reloads. Reading, scrolling, clicks and mods work as usual.');
-  n.replaceChildren(el('p', 'title', 'Posting is paused on this tab'), p, actions(reload));
+  const why = 'Your agent ran code in this page, so TRIF has blocked anything here from posting, sending or saving as you, or opening other sites, until the page reloads. Reading, scrolling, clicks and mods work as usual.';
+  const line = el('p', 'title', 'Paused: your agent ran code here.');
+  line.title = why;
+  line.setAttribute('aria-description', why);
+  n.replaceChildren(line, reload);
 }
 
 /** User scripts off: "Mods are paused", in a notice of its own above the rest (a login notice too). */

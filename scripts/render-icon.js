@@ -1,7 +1,9 @@
 #!/usr/bin/env node
 'use strict';
 // Draws the TRIF icon (the robot's head: a dark squircle in a switch-green rim, with two mint eyes) into
-// extension/icons/robot-<size>.png, antialiased with 8x8 supersampling, and writes the same shapes to
+// extension/icons/robot-<size>.png, antialiased with 8x8 supersampling, the same robot with a pause sign for
+// eyes (two mint bars) into robot-paused-<size>.png (the toolbar icon of a tab TRIF has paused posting in,
+// background.js and tablock.js), and writes the same shapes to
 // store/icon.svg and the side panel's big shaded robot to extension/icons/robot-shaded.svg (and in red,
 // robot-shaded-red.svg, for when TRIF can't run mods). No dependencies: shapes are superellipses, PNGs are
 // written by hand.
@@ -24,6 +26,10 @@ const SHADED_RED_FILE = path.join(__dirname, '..', 'extension', 'icons', 'robot-
 // eyes n 2.3 (rounder, a touch taller than wide).
 const HEAD = { cx: 64, cy: 64, outer: 56, inner: 46, n: 3, rim: [0x34, 0xd3, 0x99], face: [0x18, 0x18, 0x1a] };
 const EYES = { cy: 63, xs: [45, 83], a: 12.35, b: 13.3, n: 2.3, color: [0x59, 0xdb, 0xab] };
+// The pause sign: two bars in the eyes' mint, centred on the face, a bar's width apart. Their edges fall on
+// whole pixels at 16, 32 and 48 px (a toolbar pixel is 7 units at 16 px), so they stay sharp: at 16 px each
+// is 2 px wide and 6 px tall, with 2 px between. Corners rounded a little (r), like the eyes.
+const PAUSE = { xs: [[43, 57], [71, 85]], y: [43, 85], r: 3.5, color: EYES.color };
 // The toolbar sizes drop the 8-unit margin (the head fills the square, like other toolbar icons); the
 // 128 px icon keeps it for the Web Store and chrome://extensions.
 const FULL_BLEED_MAX = 48;
@@ -43,6 +49,20 @@ function sample(x, y) {
   if (!inside(x, y, cx, cy, outer, outer, n)) return null;
   if (!inside(x, y, cx, cy, inner, inner, n)) return HEAD.rim;
   return EYES.xs.some((ex) => inside(x, y, ex, EYES.cy, EYES.a, EYES.b, EYES.n)) ? EYES.color : HEAD.face;
+}
+
+/** A rounded rectangle from x0,y0 to x1,y1 with corners of radius r. */
+function inRoundRect(x, y, x0, y0, x1, y1, r) {
+  if (x < x0 || x > x1 || y < y0 || y > y1) return false;
+  const dx = Math.max(0, x0 + r - x, x - (x1 - r)), dy = Math.max(0, y0 + r - y, y - (y1 - r));
+  return dx * dx + dy * dy <= r * r;
+}
+
+/** The paused robot's colour at one point: the head as usual, the pause sign in place of the eyes. */
+function samplePaused(x, y) {
+  const c = sample(x, y);
+  if (c !== EYES.color && c !== HEAD.face) return c; // (outside, or the rim)
+  return PAUSE.xs.some(([x0, x1]) => inRoundRect(x, y, x0, PAUSE.y[0], x1, PAUSE.y[1], PAUSE.r)) ? PAUSE.color : HEAD.face;
 }
 
 /** The same shapes as SVG polygons. */
@@ -166,6 +186,9 @@ function sampleMac(x, y) {
   return EYES.xs.some((cx) => inside(ex, ey, cx, EYES.cy, EYES.a, EYES.b, EYES.n)) ? EYES.color : HEAD.face;
 }
 
+/** The paused robot at `size` px, as PNG bytes (the toolbar icon's framing). */
+function renderPaused(size) { return render(size, undefined, samplePaused); }
+
 /** The Mac app icon at `size` px, as PNG bytes (opaque, full bleed). */
 function renderMac(size) { return render(size, 1, sampleMac); }
 
@@ -175,6 +198,9 @@ if (require.main === module) {
     const file = path.join(outDir, `robot-${size}.png`);
     fs.writeFileSync(file, render(size));
     console.log(file);
+    const paused = path.join(outDir, `robot-paused-${size}.png`);
+    fs.writeFileSync(paused, renderPaused(size));
+    console.log(paused);
   }
   if (!process.argv[2]) {
     fs.writeFileSync(SVG_FILE, svg()); console.log(SVG_FILE);
@@ -183,4 +209,4 @@ if (require.main === module) {
   }
 }
 
-module.exports = { render, renderMac };
+module.exports = { render, renderPaused, renderMac, PAUSE };

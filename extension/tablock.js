@@ -18,6 +18,16 @@
 //
 // If the lock can't be set up (no declarativeNetRequest, a browser that ignores the per-tab condition),
 // the agent's code doesn't run: lock() throws, and `trif run` fails with why.
+//
+// While a tab is locked, TRIF's toolbar icon for that tab is the robot with a pause sign for eyes
+// (icons/robot-paused-*.png, scripts/render-icon.js), and the normal robot again once it unlocks; other
+// tabs keep theirs. (chrome.action.setIcon with the tab's id, in Firefox too. Firefox drops a tab's own
+// icon when the tab goes to a new page, as a blocked one does while the lock stays: check() sets it again.)
+
+export const ICONS = {
+  normal: { 16: 'icons/robot-16.png', 32: 'icons/robot-32.png' }, // (manifest.json's action.default_icon)
+  paused: { 16: 'icons/robot-paused-16.png', 32: 'icons/robot-paused-32.png' },
+};
 
 export const WRITE_METHODS = ['post', 'put', 'patch', 'delete', 'connect'];
 
@@ -78,6 +88,11 @@ export function createTabLocks({ chrome, log = () => {}, changed = () => {}, key
     } catch (e) { log(`tab locks: ${e?.message ?? e}`); }
   })();
   const save = () => chrome.storage.session.set({ [key]: Object.fromEntries(locks) }).catch(() => {});
+  // The tab's toolbar icon: paused while locked. (A tab that's gone, or a browser without per-tab icons:
+  // nothing to show it on.)
+  const showIcon = async (tabId, paused) => {
+    try { await chrome.action?.setIcon?.({ tabId, path: paused ? ICONS.paused : ICONS.normal }); } catch { /* the tab is gone */ }
+  };
 
   async function addRules(tabId, site) {
     if (!site) throw new Error('no site to lock the tab to');
@@ -117,7 +132,8 @@ export function createTabLocks({ chrome, log = () => {}, changed = () => {}, key
       // (a tab a locked tab opened may not be scriptable yet: it stays locked while its opener is)
     }
     await save();
-    changed();
+    await showIcon(tabId, true);
+    changed(tabId);
     return l;
   }
 
@@ -128,7 +144,8 @@ export function createTabLocks({ chrome, log = () => {}, changed = () => {}, key
     try { await chrome.declarativeNetRequest.updateSessionRules({ removeRuleIds: l.ids }); } catch (e) { log(`unlocking tab ${tabId}: ${e?.message ?? e}`); }
     log(`unlocked tab ${tabId}: ${why}`);
     await save();
-    changed();
+    if (why !== 'closed' && why !== 'replaced') await showIcon(tabId, false); // (gone: no icon to put back)
+    changed(tabId);
     // tabs it opened can go too, once their own page is a new one
     for (const [id, c] of locks) if (c.parent === tabId) check(id).catch(() => {});
   }
@@ -138,13 +155,14 @@ export function createTabLocks({ chrome, log = () => {}, changed = () => {}, key
     await ready;
     const l = locks.get(tabId);
     if (!l) return;
-    if (l.parent != null && locks.has(l.parent)) { await mark(tabId, l.token).catch(() => {}); return; } // (still within reach of locked code)
+    if (l.parent != null && locks.has(l.parent)) { await mark(tabId, l.token).catch(() => {}); await showIcon(tabId, true); return; } // (still within reach of locked code)
     let same;
     try {
       const [r] = await chrome.scripting.executeScript({ target: { tabId, frameIds: [0] }, world: 'ISOLATED', func: hasMarker, args: [l.token], injectImmediately: true });
       same = r ? r.result === true : null;
     } catch { same = null; } // (a page the extension can't script: nothing of the agent's there; stay locked until a page it can check)
     if (same === false) await unlock(tabId, 'a new page');
+    else await showIcon(tabId, true); // (still locked: the icon again, in case a new page in the tab reset it)
   }
 
   return {
@@ -160,7 +178,8 @@ export function createTabLocks({ chrome, log = () => {}, changed = () => {}, key
       const ids = await addRules(tabId, site);
       locks.set(tabId, { token, ids, site, url: String(url || ''), since: Date.now(), parent: null });
       await save();
-      changed();
+      await showIcon(tabId, true);
+      changed(tabId);
       log(`locked tab ${tabId} again: a locked page came back from the back/forward cache`);
     },
     async opened(tab) {

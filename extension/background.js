@@ -83,7 +83,8 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const errMsg = (e) => String(e?.message ?? e);
 
 // Tabs a side-panel agent ran code in: requests that change things are blocked there until the page is a
-// new one (tablock.js, docs/SECURITY.md). The panel shows it, with a Reload button.
+// new one (tablock.js, docs/SECURITY.md). The panel shows it, with a Reload button, and the tab's toolbar
+// icon is the paused robot meanwhile (tablock.js sets it).
 const tabLocks = createTabLocks({ chrome, log: (m) => console.log(`[TRIF] ${m}`), changed: () => notifyPanels() });
 chrome.tabs.onUpdated?.addListener((tabId, info) => { if (info.status === 'complete' || info.url) tabLocks.check(tabId).catch(() => {}); });
 chrome.tabs.onRemoved?.addListener((tabId) => { tabLocks.unlock(tabId, 'closed').catch(() => {}); });

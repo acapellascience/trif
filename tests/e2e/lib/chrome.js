@@ -45,6 +45,22 @@ const open = chrome.sidePanel.open.bind(chrome.sidePanel);
 chrome.sidePanel.open = (o) => (off ? Promise.resolve() : open(o));
 `;
 
+// Chrome can't be asked which icon a tab's toolbar button shows (Firefox can: firefox.js actionIcon), so
+// the test build records each chrome.action.setIcon for a tab that the browser accepted (its 16 px path)
+// in chrome.storage.session `e2eIcons`, for the scenario to read. Also before background.js.
+const ICONS = `// e2e only (tests/e2e/lib/chrome.js): the icons the background set for tabs, as Chrome accepted them.
+const icons = {};
+const setIcon = chrome.action.setIcon.bind(chrome.action);
+chrome.action.setIcon = async (d) => {
+  const r = await setIcon(d);
+  if (d && d.tabId != null) {
+    icons[d.tabId] = (d.path && (d.path[16] || d.path)) || 'imageData';
+    await chrome.storage.session.set({ e2eIcons: { ...icons } });
+  }
+  return r;
+};
+`;
+
 /** A copy of the extension in `to` with the test manifest described above. Returns `to`. */
 function testExtension(from, to, siteAccess = SITE_ACCESS_HOSTS) {
   fs.rmSync(to, { recursive: true, force: true });
@@ -54,7 +70,8 @@ function testExtension(from, to, siteAccess = SITE_ACCESS_HOSTS) {
   // (as the extension asks for a site: lib.js siteOrigins, one pattern, just the address for an IP)
   m.host_permissions = siteAccess === 'all' ? ['<all_urls>'] : siteAccess.map((h) => (/^\d{1,3}(\.\d{1,3}){3}$/.test(h) ? `*://${h}/*` : `*://*.${h}/*`));
   fs.writeFileSync(path.join(to, 'e2e-no-side-panel.js'), NO_SIDE_PANEL);
-  fs.writeFileSync(path.join(to, 'e2e-background.js'), `import './e2e-no-side-panel.js';\nimport './${m.background.service_worker}';\n`);
+  fs.writeFileSync(path.join(to, 'e2e-icons.js'), ICONS);
+  fs.writeFileSync(path.join(to, 'e2e-background.js'), `import './e2e-no-side-panel.js';\nimport './e2e-icons.js';\nimport './${m.background.service_worker}';\n`);
   m.background = { ...m.background, service_worker: 'e2e-background.js' };
   fs.writeFileSync(file, JSON.stringify(m, null, 2));
   return to;

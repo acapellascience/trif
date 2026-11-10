@@ -164,6 +164,17 @@ class Scenario {
   ext(fn, args = []) { return this.d.eval(this.control, fn, args); }
 
   page(fn, args = []) { return this.d.eval(this.pageCtx, fn, args); }
+
+  /**
+   * The icon TRIF's toolbar button shows for a tab, by file name ('robot-16.png', 'robot-paused-16.png'):
+   * Firefox's own record of it; in Chrome, which can't be asked, the last chrome.action.setIcon for the tab
+   * that Chrome accepted (the test build's e2e-icons.js, chrome.js), else the manifest's.
+   */
+  async toolbarIcon(tabId) {
+    const icon = this.o.browser === 'firefox' ? await this.d.actionIcon(tabId)
+      : await this.ext(`async (id) => ((await chrome.storage.session.get('e2eIcons')).e2eIcons || {})[id] || null`, [tabId]);
+    return icon ? path.basename(String(icon)) : 'robot-16.png';
+  }
   panel(fn, args = []) { return this.d.eval(this.panelCtx, fn, args); }
 
   async pageState() {
@@ -2524,8 +2535,23 @@ say({ type: 'result', subtype: 'success', is_error: false, result: text, session
       if (leaked().length) throw new Error(`another site received ${JSON.stringify(leaked())}`);
       if (this.o.servers.requests.some((q) => q.url.startsWith('/e2e-socket'))) throw new Error('the WebSocket reached the test site');
       // The panel says so, with a Reload button
-      const lock = await waitFor('the lock notice', () => this.panel(`async () => { const n = document.getElementById('tab-lock'); return n && !n.hidden ? n.innerText : null; }`), { timeoutMs: 10000 });
-      if (!/Posting is paused on this tab/.test(lock)) throw new Error(`the lock notice: ${lock}`);
+      // (one line and a small Reload button, the details in the line's tooltip; the robot in the bar paused)
+      const lock = await waitFor('the lock notice', () => this.panel(`async () => {
+        const n = document.getElementById('tab-lock');
+        if (!n || n.hidden) return null;
+        const pause = getComputedStyle(document.querySelector('#bar-robot .pause')).display !== 'none';
+        const eyes = getComputedStyle(document.querySelector('#bar-robot .eye')).display !== 'none';
+        return { text: n.innerText.trim(), tip: n.querySelector('.title')?.title || '', button: n.querySelector('button')?.textContent || '', height: n.getBoundingClientRect().height, pause, eyes };
+      }`), { timeoutMs: 10000 });
+      if (!/^Paused: your agent ran code here\.\s*Reload$/.test(lock.text) || lock.button !== 'Reload') throw new Error(`the lock notice: ${JSON.stringify(lock)}`);
+      if (!/blocked anything here from posting, sending or saving as you/.test(lock.tip)) throw new Error(`the lock notice's tooltip: ${lock.tip}`);
+      if (lock.height > 48) throw new Error(`the lock notice is ${lock.height} px tall: one line expected`);
+      if (!lock.pause || lock.eyes) throw new Error(`the robot in the bar: ${JSON.stringify(lock)}`);
+      // TRIF's toolbar icon for that tab: the paused robot; other tabs keep the normal one
+      await waitFor('the paused toolbar icon', async () => (await this.toolbarIcon(win.tabId)) === 'robot-paused-16.png' || null, { timeoutMs: 10000 })
+        .catch(async (e) => { throw new Error(`${e.message}: ${await this.toolbarIcon(win.tabId)}`); });
+      const otherTab = await this.ext(`async (id) => (await chrome.tabs.query({})).map((t) => t.id).find((t) => t !== id) ?? null`, [win.tabId]);
+      if (otherTab != null && (await this.toolbarIcon(otherTab)) !== 'robot-16.png') throw new Error(`tab ${otherTab}'s toolbar icon: ${await this.toolbarIcon(otherTab)}`);
       // The mod: held for what its code does, its header's claim shown apart
       const held = await waitFor('the mod held', () => this.panel(`async () => {
         const li = document.querySelector('#mod-list li[data-mod="${site}/e2e-poster"]');
@@ -2543,12 +2569,18 @@ say({ type: 'result', subtype: 'success', is_error: false, result: text, session
       await sleep(2500);
       if (leaked().length) throw new Error(`another site received ${JSON.stringify(leaked())}`);
       await waitFor('the lock notice still up', () => this.panel(`async () => { const n = document.getElementById('tab-lock'); return n && !n.hidden || null; }`), { timeoutMs: 10000 });
+      // (still paused on the blocked page: Firefox drops a tab's own icon on a new page, and TRIF sets it again)
+      await waitFor('the toolbar icon still paused', async () => (await this.toolbarIcon(win.tabId)) === 'robot-paused-16.png' || null, { timeoutMs: 10000 })
+        .catch(async (e) => { throw new Error(`${e.message}: ${await this.toolbarIcon(win.tabId)}`); });
       await this.panel(`async () => { document.querySelector('#tab-lock button').click(); return true; }`);
       await waitFor('the tab back on the test site', async () => {
         const t = await this.ext(`async (id) => (await chrome.tabs.get(id)).url`, [win.tabId]);
         return t && t.startsWith(base) ? t : null;
       }, { timeoutMs: 15000 });
       await waitFor('the tab unlocked', () => this.panel(`async () => document.getElementById('tab-lock').hidden || null`), { timeoutMs: 15000 });
+      await waitFor('the normal toolbar icon back', async () => (await this.toolbarIcon(win.tabId)) === 'robot-16.png' || null, { timeoutMs: 10000 })
+        .catch(async (e) => { throw new Error(`${e.message}: ${await this.toolbarIcon(win.tabId)}`); });
+      if (!(await this.panel(`async () => !document.body.classList.contains('tab-locked')`))) throw new Error('the robot in the bar is still paused');
       const t = await this.cli(['run', '--tab', String(win.tabId), 'fetch("/e2e-after", { method: "POST", body: "x" }).then((r) => r.status)'], { timeoutMs: 30000 });
       if (t.status !== 0) throw new Error(`trif run from a terminal: ${t.stderr}`);
       await waitFor('the terminal POST to arrive', () => posted('/e2e-after').length || null, { timeoutMs: 5000 });

@@ -39,8 +39,9 @@ as the page does. The lock lasts until the tab shows a new document: a reload or
 - Reading the page, clicks, key presses and the mod's own test events work as before: in 50 real runs,
   every input an agent sent was to drive its own mod, none needed to send a request.
 - The page's own requests in that document are blocked too (X's "Something went wrong"), and links to
-  other sites don't open from it. The panel says the tab is locked, with a button that reloads it (or,
-  when the tab was sent to a blocked page, takes it back to the page it was locked on).
+  other sites don't open from it. The panel says the tab is locked, in one line with a button that
+  reloads it (or, when the tab was sent to a blocked page, takes it back to the page it was locked on),
+  and TRIF's toolbar icon for that tab shows the robot with a pause sign for eyes until it unlocks.
 
 Not covered: an image, script, style, font or media load whose address carries data to another site
 (many sites' content security policies, X's among them, limit where those can come from; others don't),

@@ -6,10 +6,19 @@ const assert = require('node:assert');
 
 function fakeChrome({ dropTabIds = false, failScripting = false } = {}) {
   const rules = new Map();
+  const icons = new Map(); // tabId -> the 16 px icon set for that tab (chrome.action.setIcon)
+  const iconCalls = [];
   const docs = new Map(); // tabId -> {marker} (the isolated world of the tab's current document)
   const store = {};
   const chrome = {
-    rules, docs,
+    rules, docs, icons, iconCalls,
+    action: {
+      async setIcon({ tabId, path }) {
+        iconCalls.push(tabId);
+        if (tabId === 404) throw new Error('No tab with id: 404');
+        icons.set(tabId, path[16]);
+      },
+    },
     declarativeNetRequest: {
       async updateSessionRules({ addRules = [], removeRuleIds = [] }) {
         for (const id of removeRuleIds) rules.delete(id);
@@ -138,4 +147,70 @@ test('a page back from the back/forward cache locks its tab again', async () => 
   assert.ok(locks.isLocked(5));
   assert.equal(chrome.rules.size, 4);
   assert.equal(locks.list()[0].url, 'https://x.com/home');
+});
+
+test('a locked tab\'s toolbar icon is the paused robot, for that tab only, until it unlocks', async () => {
+  const { createTabLocks, ICONS } = await load();
+  const fs = require('fs');
+  const path = require('path');
+  for (const p of [...Object.values(ICONS.normal), ...Object.values(ICONS.paused)]) assert.ok(fs.existsSync(path.join(__dirname, '..', 'extension', p)), p);
+  const manifest = JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'extension', 'manifest.json'), 'utf8'));
+  assert.deepEqual(manifest.action.default_icon, ICONS.normal, 'unlocking puts back the default icon');
+  const chrome = fakeChrome();
+  const changed = [];
+  const locks = createTabLocks({ chrome, changed: (tabId) => changed.push(tabId) });
+  await locks.lock(3, 'x.com');
+  assert.equal(chrome.icons.get(3), 'icons/robot-paused-16.png');
+  assert.deepEqual(changed, [3]);
+  await locks.check(8); // (another tab, never locked: its icon is left alone)
+  assert.ok(!chrome.icons.has(8));
+  // a new page in the tab while the lock stays (Firefox drops a tab's own icon then): paused again
+  chrome.icons.delete(3);
+  chrome.scripting.executeScript = async () => { throw new Error('Cannot access contents of the page'); };
+  await locks.check(3);
+  assert.equal(chrome.icons.get(3), 'icons/robot-paused-16.png');
+  // a reload: unlocked, the normal robot
+  const script = fakeChrome().scripting.executeScript;
+  chrome.scripting.executeScript = script;
+  chrome.newDocument(3);
+  await locks.check(3);
+  assert.ok(!locks.isLocked(3));
+  assert.equal(chrome.icons.get(3), 'icons/robot-16.png');
+  assert.deepEqual(changed, [3, 3]);
+  // the tabs a locked tab opens show it too; a closed tab gets no call; a gone tab's error is swallowed
+  await locks.lock(10, 'x.com');
+  await locks.opened({ id: 11, openerTabId: 10 });
+  assert.equal(chrome.icons.get(11), 'icons/robot-paused-16.png');
+  const calls10 = () => chrome.iconCalls.filter((id) => id === 10).length;
+  const before = calls10();
+  await locks.unlock(10, 'closed');
+  assert.equal(calls10(), before);
+  await locks.restored(404, 'tok', 'x.com', 'https://x.com/');
+  assert.ok(locks.isLocked(404));
+  // a browser without per-tab icons: locking still works
+  const bare = fakeChrome();
+  delete bare.action;
+  await createTabLocks({ chrome: bare }).lock(1, 'x.com');
+});
+
+test('the paused icons are scripts/render-icon.js\'s: two mint bars for eyes, sharp at 16 px', () => {
+  const fs = require('fs');
+  const path = require('path');
+  const zlib = require('zlib');
+  const { renderPaused } = require('../scripts/render-icon.js');
+  for (const size of [16, 32, 48, 128]) {
+    const file = path.join(__dirname, '..', 'extension', 'icons', `robot-paused-${size}.png`);
+    assert.ok(fs.readFileSync(file).equals(renderPaused(size)), `run node scripts/render-icon.js (robot-paused-${size}.png)`);
+  }
+  // the 16 px icon's middle row (render-icon writes one IDAT, filter 0 rows of RGBA): bar, gap, bar
+  const png = renderPaused(16);
+  const at = png.indexOf('IDAT');
+  const raw = zlib.inflateSync(png.subarray(at + 4, at + 4 + png.readUInt32BE(at - 4)));
+  const px = (x, y) => [...raw.subarray(y * 65 + 1 + x * 4, y * 65 + 1 + x * 4 + 4)];
+  const mint = [0x59, 0xdb, 0xab, 255], face = [0x18, 0x18, 0x1a, 255];
+  assert.deepEqual([4, 5, 6, 7, 8, 9, 10, 11].map((x) => px(x, 8)), [face, mint, mint, face, face, mint, mint, face]);
+  // 6 px tall (rows 5 to 10; their corners a little rounded), face above and below
+  for (const y of [6, 7, 8, 9]) assert.deepEqual(px(5, y), mint, `row ${y}`);
+  for (const y of [5, 10]) assert.ok(px(5, y)[1] > 200, `row ${y}`);
+  for (const y of [4, 11]) assert.deepEqual(px(5, y), face, `row ${y}`);
 });

@@ -511,13 +511,15 @@ class Scenario {
         const want = shippedFor(L.site);
         const on = SITES_ON.includes(L.site);
         const after = await until('the mods added', (x) => !x.shown && !x.err && want.every((id) => fs.existsSync(path.join(this.trif, 'sites', `${id}.js`)))
-          && (on ? !x.gate && want.every((id) => x.mods.includes(id)) : x.gate));
+          // (restrictive, as Chrome is here: on, but the site isn't connected yet, so the panel stays grey)
+          && (on ? want.every((id) => x.mods.includes(id)) && x.gate === !!this.restrictive : x.gate));
         const e = (await this.cli(['status'], { json: true })).json.extension;
         if (e.sitesOn.includes(L.site) !== on) throw new Error(`TRIF ${on ? 'not ' : ''}on for ${L.site}: ${e.sitesOn}`);
+        if (on && this.restrictive && !(e.disconnected || []).includes(L.site)) throw new Error(`restrictive, but ${L.site} isn't listed as disconnected: ${e.disconnected}`);
         if (!this.addedSites().includes(L.site)) throw new Error(`${L.site} not recorded as added`);
         await sleep(300);
         await this.shot(this.panelCtx, 'starter-site-added');
-        return `${want.length} mods for ${L.site}${on ? `, TRIF on there, listed: ${after.mods.length}` : ', TRIF still off there (not in SITES_ON)'}`;
+        return `${want.length} mods for ${L.site}${on ? `, TRIF on there${this.restrictive ? ' (not connected yet: restrictive)' : ''}, listed: ${after.mods.length}` : ', TRIF still off there (not in SITES_ON)'}`;
       } finally {
         await this.ext(`async (id) => { await chrome.tabs.remove(id); }`, [tab]).catch(() => {});
         await this.ext(`async (id) => { await chrome.tabs.update(id, { active: true }); }`, [win.tabId]).catch(() => {});

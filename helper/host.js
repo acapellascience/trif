@@ -297,12 +297,12 @@ function syncMods(reason, force) {
   const sent = plan.mods.map((m) => {
     // (facts: TRIF's own reading of the code; claim: what the agent says it does, shown apart as the agent's)
     const h = state.held[m.id], r = state.review && state.review[m.id];
-    const info = h ? { site: h.site, reason: h.reason, facts: h.facts || [h.reason], claim: h.claim || '', by: h.by || 'agent', hash: h.hash,
+    const info = h ? { site: h.site, reason: h.reason, facts: h.facts || [h.reason], claim: h.claim || '', by: h.by || 'agent', hash: h.hash, needs: Array.isArray(h.needs) ? h.needs : [],
       // (a boxed mod asking for powers: what it asks for, which TRIF enforces, not what TRIF read in its code)
       ...(Array.isArray(h.needs) && h.needs.length && h.needs.every((k) => /^power:/.test(k)) ? { asks: true } : {}) } : null;
     const out = h && pendingIds.has(m.id) ? { ...m, pending: info }
       : h ? { ...m, held: info }
-      : r ? { ...m, review: { facts: r.facts, claim: r.claim } } : m;
+      : r ? { ...m, review: { facts: r.facts, needs: r.needs || [], claim: r.claim } } : m;
     const o = origins[m.id];
     const withOrigin = o ? { ...out, origin: { by: o.by, browser: o.browser, ...(o.live ? { live: true } : {}) } } : out;
     const withUpdate = updates[m.id] ? { ...withOrigin, update: updates[m.id] } : withOrigin;

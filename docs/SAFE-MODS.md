@@ -350,25 +350,81 @@ page already has"):
   setter and an `input` event, so the page's code sees the change), and the editor writes AU-1 refused
   (`setText`, adding, removing, attributes inside an editor). Never a password or card field (the same
   test as read-drafts), a hidden, file or other non-text input, or a select. It's the one power that writes
-  into what's the user's: its whole point. Two things it allows that the rest don't: text the mod wrote
-  (any text, addresses too) going into a post, and the page's own visible text going from one place into
+  into what's the user's: its whole point. **No made-up addresses**, the rule itself: a site can fetch an
+  address in a draft before anything is posted (X's link cards, say), so the text a mod writes into a
+  field or an editor may only have the addresses already in what the user typed there, or in a link on
+  the page (not the mod's own). Anything that looks like one counts: `scheme://…`, `www.…`, a dotted name
+  ending in letters (`evil.example`, `node.js`), an IPv4 address, with the full stops CJK text uses too;
+  the check is on the whole text after the write (an editor's text around it too), so text joined across
+  writes, or by a removal, is caught; compared without case. Two things it allows that the rest don't:
+  plain text the mod wrote going into a post, and the page's own visible text going from one place into
   a post (a DM's text into a reply, say), both in what the user is about to post themselves. The hold
   says "can change what you type and paste on this site before you post it". Pasted or dropped files
   aren't touched.
-- The combination: write-drafts with a read (`read-drafts`, `keys`, `site-data`, `page-data`) could carry
-  what the mod read, not just what the page shows, into a post. The hold lists it as its own item
-  ("could put what it reads into something you post, with these powers together", key
-  `power:together:write-drafts+<reads>`), so a mod allowed write-drafts and keys one at a time still asks
-  for the pair. Boxed mods on a page can see each other's elements (one `created` set; a mod's own
-  elements are readable like the page's), so the per-mod item alone would leave a two-mod route (one with
-  keys writes what it saw into its element, one with write-drafts reads it and posts it). So the sandbox
-  also keeps the read powers of every boxed mod that has run on the page, and while one of them isn't in
-  a write-drafts mod's own set, that mod's writes are refused (draftsOk in sandbox.js). The cost: a
-  write-drafts mod stops changing drafts on a page where another boxed mod has a read it didn't ask for;
-  the error says which, and asking for that read too (which puts the combination in its hold) lifts it.
+- The combinations: below, "Combinations".
 - `mods` (built): `trif.channel(name)` with `send(data)`/`on(fn)` between this page's boxed mods with
   the power, through TRIF (never the DOM), in plain data only (no functions, stand-ins or other objects
   JSON would drop silently), delivered later (a timer), with the sender's id. It names nothing; with the
-  combination rule above it carries no read to a writer that didn't ask for it. Fits.
+  page-wide rules below it carries no read to an act that didn't ask for it. Fits.
   (In a browser without the sandbox, where a boxed mod runs as a free mod the user allowed, the channels
   live on the page's window, where the page could reach them: the free tier's terms.)
+
+
+## Combinations (branch powers)
+
+The table: `helper/lib/combinations.js`, written out in docs/POWER-COMBINATIONS.md. Every pair (66) and
+triple (220) of the twelve powers, each with the warning a hold shows or a one-line reason it adds nothing;
+tests/combinations.test.js checks it covers all of them, that its reasoning holds (below), that the doc is
+the table, and that the sandbox's page-wide rules follow it.
+
+**How the table is reasoned.** No power sends anything a mod makes up, and the addresses a mod can reach
+(links, images, go-to, click, search-box) are the page's own or the header's. So what a boxed mod reads can
+leave the site only through what's posted, what's clicked (both public on most sites), how the page's media
+plays (a video's host sees the requests a seek or play makes, and may be another site), and sound in the
+room. Everything else stays on the site it came from, which already has it. Reads (`read-drafts`, `keys`,
+`site-data`, `page-data`) are what the mod sees beyond the page; the rest see only what the page shows.
+- A read with a way out warns: with `write-drafts` ("could put what it reads into something you post"),
+  `click` ("could let what it reads decide what it clicks for you"), `media` ("could pass what it reads to
+  the site a video or sound comes from, by how it plays it") and `sound` ("could turn what it reads into
+  sounds that a device nearby could pick up"). The last two are narrow channels (timing, and a listening
+  device near the user), listed because they exist.
+- Acts that combine warn: `write-drafts` + `click` ("could write a post and send it for you": a draft no
+  longer waits for the user's own send), `go-to` + `click` ("could take you to a page and click things there
+  for you": click alone acts where the user is; with go-to, where the mod takes them).
+- Triples: a read with `write-drafts` and `click` ("could put what it reads into a post and send it for
+  you"), and `go-to` + `write-drafts` + `click` ("could go to a page, write a post there and send it for
+  you") are worse than their pairs; every other triple is "no more than its pairs" (their warnings show),
+  or adds nothing (it reads nothing beyond the page and its acts don't combine; or it reads but nothing in
+  it carries what it reads off the page).
+- No added risk, with the reason in the table: reads together; a read with `go-to` (only this site's pages,
+  which can already see it), `search-box` (only what the user types, which the mod can't read), `controls`
+  (the mod's own inputs: only what the user gives it on purpose) or `mods`; `mods` with anything (a channel
+  between its own boxed mods, which the page-wide rules treat as one); acts that don't combine (media,
+  sound, go-to with each other or with write-drafts alone).
+- Counts: 18 of 66 pairs warn; 5 of 220 triples have their own warning; 118 more show their pairs'.
+
+**The hold.** Each warned combination a mod has is a need of its own, keyed by its powers
+(`power:together:keys+click+write-drafts`), so approving a pair doesn't cover a triple; the panel's
+approval dialog lists them in the red box, the strongest first, one line each ("Together, it …"; the same
+sentence once), `trif status` as "together, it …". A mod with more than three powers gets, instead, Tim's
+general warning (key `power:together:many:<its powers>`, so the exact set): "Mods with many powers can act
+in unspecific or powerful ways. Treat this with caution." Its combinations are still needs (without lines),
+so a later version with fewer powers doesn't ask again for what the user allowed.
+
+**Across mods: the page-wide rules** (extension/sandbox.js `ACT_PARTNERS`, `clickOk`). Boxed mods on a page
+see each other's elements (one `created` set), and with `mods` talk; so a combination split between two
+mods, each without the warning, would slip past the hold. The sandbox keeps the powers of every boxed mod
+that has run on the page, and refuses an act while another mod's power makes a warned pair with it that
+the acting mod didn't ask for itself (and so its hold didn't show):
+- `write-drafts` (writing into a draft) beside a read: refused unless the writer has that read.
+- `click` beside a read: refused unless the clicker has that read; and after another mod changed a draft,
+  refused unless the clicker has write-drafts (the draft could be sent).
+- `media` (play, pause, mute, volume, seek) beside a read: refused unless the media mod has that read.
+- `go-to` beside `click`: refused unless the mod going has click (the other could click where it lands).
+- Not enforced: `sound` beside a read. The channel needs a listening device near the user and carries
+  little; enforcing it would stop every sound mod beside any hotkey mod. The single-mod warning stands;
+  this is Tim's call.
+Each refusal says which power and how to lift it (ask for it too, which puts the warning in the mod's
+hold). The cost: two boxed mods that are fine alone can stop each other's acts on a page; the errors show in
+`trif errors` and the mod's own catch. In a browser without the sandbox (boxed mods run as free mods the
+user allowed), these rules don't apply: the free tier's terms.

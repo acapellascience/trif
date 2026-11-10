@@ -47,8 +47,8 @@ test('the hold: a boxed mod with powers waits once for its set; the same powers 
   // sound and read-drafts: held, with the two sentences
   fs.writeFileSync(file, head('sound, read-drafts') + 'trif.audio().tone({});\n');
   let held = updateHeld(ws, scan(), []);
-  assert.deepEqual(held['x.com/beeper'].needs, ['power:read-drafts', 'power:sound']);
-  assert.deepEqual(held['x.com/beeper'].facts, ['can read what you type on this site, but can\'t send it anywhere', 'can play sounds']);
+  assert.deepEqual(held['x.com/beeper'].needs, ['power:read-drafts', 'power:sound', 'power:together:read-drafts+sound']);
+  assert.deepEqual(held['x.com/beeper'].facts, ['can read what you type on this site, but can\'t send it anywhere', 'can play sounds', 'could turn what it reads into sounds that a device nearby could pick up']);
   approveHeld(home, 'x.com/beeper');
   assert.deepEqual(updateHeld(ws, scan(), []), {});
   // a new version of its code, the same powers: runs
@@ -57,7 +57,7 @@ test('the hold: a boxed mod with powers waits once for its set; the same powers 
   // a new power: held for that one only
   fs.writeFileSync(file, head('read-drafts, sound, keys') + 'trif.audio().tone({});\n');
   held = updateHeld(ws, scan(), []);
-  assert.deepEqual(held['x.com/beeper'].needs, ['power:keys']);
+  assert.deepEqual(held['x.com/beeper'].needs, ['power:keys', 'power:together:keys+sound']);
   approveHeld(home, 'x.com/beeper');
   assert.deepEqual(updateHeld(ws, scan(), []), {});
 });
@@ -149,6 +149,7 @@ test('go-to takes literal pages of the site (no query, # or *); click takes `@cl
     ['power:media', 'can play and pause video and audio on this page'],
     ['power:go-to:/home | /i/bookmarks', 'can take you to these pages on x.com: /home, /i/bookmarks, or to a link the page shows'],
     ['power:click:the next page: a.next | the play button: button.play', 'can click these for you: the play button (button.play), the next page (a.next)'],
+    ['power:together:go-to+click', 'could take you to a page and click things there for you'],
   ]);
   // (no pages: links the page shows only)
   assert.equal(bp.powerNeeds(build(head('go-to')).mod)[0].fact, 'can take you to a link a page on x.com shows');
@@ -166,11 +167,25 @@ test('go-to takes literal pages of the site (no query, # or *); click takes `@cl
   assert.notEqual(k('button.play'), k('button'));
 });
 
-test('write-drafts with a read power: the combination is a need of its own, so it holds even when each was approved alone', () => {
-  assert.deepEqual(bp.powerNeeds(build(head('write-drafts')).mod).map((n) => n.key), ['power:write-drafts']);
-  const both = bp.powerNeeds(build(head('write-drafts, read-drafts, page-data, sound')).mod);
-  assert.deepEqual(both.map((n) => n.key), ['power:read-drafts', 'power:page-data', 'power:sound', 'power:write-drafts', 'power:together:write-drafts+read-drafts+page-data']);
-  assert.equal(both[4].fact, bp.TOGETHER);
+test('combinations: each warned one a mod has is a need of its own, the strongest first; approving a pair doesn\'t cover a triple; more than three powers: one general warning', () => {
+  const keys = (p) => bp.powerNeeds(build(head(p, p.includes('click') ? '// @click the send button: button.send\n' : '')).mod).filter((n) => n.power === 'together').map((n) => [n.key, n.fact]);
+  assert.deepEqual(keys('write-drafts'), []);
+  assert.deepEqual(keys('write-drafts, keys'), [['power:together:keys+write-drafts', 'could put what it reads into something you post']]);
+  assert.deepEqual(keys('read-drafts, click, write-drafts'), [
+    ['power:together:read-drafts+click+write-drafts', 'could put what it reads into a post and send it for you'],
+    ['power:together:click+write-drafts', 'could write a post and send it for you'],
+    ['power:together:read-drafts+write-drafts', 'could put what it reads into something you post'],
+    ['power:together:read-drafts+click', 'could let what it reads decide what it clicks for you'],
+  ]);
+  // (two reads and write-drafts: two needs, one line on the hold)
+  const two = bp.powerNeeds(build(head('keys, read-drafts, write-drafts')).mod);
+  assert.deepEqual(bp.factLines(two.map((n) => n.key), two.map((n) => n.fact)).filter((l) => /^together/.test(l)), ['together, it could put what it reads into something you post']);
+  // (four powers: the general warning, keyed by the set; the combinations still needs, without lines)
+  const many = bp.powerNeeds(build(head('read-drafts, sound, media, write-drafts')).mod).filter((n) => n.power === 'together');
+  assert.deepEqual(many[0], { key: 'power:together:many:read-drafts+sound+media+write-drafts', fact: 'Mods with many powers can act in unspecific or powerful ways. Treat this with caution.', power: 'together', soft: false, lines: [] });
+  assert.deepEqual(many.slice(1).map((n) => [n.key, n.fact]), [['power:together:read-drafts+write-drafts', ''], ['power:together:read-drafts+media', ''], ['power:together:read-drafts+sound', '']]);
+  assert.equal(bp.factLine(many[0].key, many[0].fact), 'Mods with many powers can act in unspecific or powerful ways. Treat this with caution.');
+  // the hold: write-drafts and keys each allowed alone, then the pair asks; the pair allowed, adding click asks for the triple
   const home = tempDir('trif-pw-');
   const ws = { home, modsDir: path.join(home, 'sites') };
   const dir = path.join(ws.modsDir, 'x.com');
@@ -178,19 +193,16 @@ test('write-drafts with a read power: the combination is a need of its own, so i
   updateHeld(ws, [], []);
   const file = path.join(dir, 'fixer.js');
   const scan = () => scanMods(ws.modsDir).mods;
-  fs.writeFileSync(file, head('') + 'page.find("textarea");\n');
-  assert.deepEqual(updateHeld(ws, scan(), []), {});
-  fs.writeFileSync(file, head('write-drafts') + 'page.find("textarea");\n');
-  updateHeld(ws, scan(), []);
+  const step = (p, extra = '') => { fs.writeFileSync(file, head(p, extra) + 'page.find("textarea");\n'); return updateHeld(ws, scan(), [])['x.com/fixer']; };
+  assert.equal(step(''), undefined);
+  step('write-drafts'); approveHeld(home, 'x.com/fixer');
+  step('keys'); approveHeld(home, 'x.com/fixer');
+  let held = step('keys, write-drafts');
+  assert.deepEqual(held.needs, ['power:together:keys+write-drafts']);
+  assert.deepEqual(held.facts, ['could put what it reads into something you post']);
   approveHeld(home, 'x.com/fixer');
-  fs.writeFileSync(file, head('keys') + 'page.find("textarea");\n');
-  updateHeld(ws, scan(), []);
-  approveHeld(home, 'x.com/fixer');
-  // (write-drafts and keys, each allowed before: the pair still asks)
-  fs.writeFileSync(file, head('keys, write-drafts') + 'page.find("textarea");\n');
-  const held = updateHeld(ws, scan(), []);
-  assert.deepEqual(held['x.com/fixer'].needs, ['power:together:write-drafts+keys']);
-  assert.deepEqual(held['x.com/fixer'].facts, [bp.TOGETHER]);
+  held = step('keys, write-drafts, click', '// @click the send button: button.send\n');
+  assert.deepEqual(held.needs, ['power:click:the send button: button.send', 'power:together:keys+click+write-drafts', 'power:together:click+write-drafts', 'power:together:keys+click']);
 });
 
 test('mods alone doesn\'t hold (like controls); the lint knows .click(), .play() and trif.goTo need their powers', () => {

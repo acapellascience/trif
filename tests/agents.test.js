@@ -1576,7 +1576,7 @@ test('held mods: a run\'s mod that matches other sites is held (not registered) 
   const lastMods = () => [...ext.messages].reverse().find((m) => m.type === 'mods').mods;
   const byId = (id) => lastMods().find((m) => m.id === id);
   const { hash, ...heldInfo } = byId('example.com/evil').held;
-  assert.deepEqual(heldInfo, { site: 'example.com', reason: 'runs on <all_urls>, outside example.com', facts: ['runs on <all_urls>, outside example.com'], claim: '', by: 'agent' });
+  assert.deepEqual(heldInfo, { site: 'example.com', reason: 'runs on <all_urls>, outside example.com', facts: ['runs on <all_urls>, outside example.com'], claim: '', by: 'agent', needs: ['match:<all_urls>'] });
   assert.equal(hash, byId('example.com/evil').hash, 'the hold names the version it\'s for');
   assert.equal(byId('example.com/good').held, undefined);
   const stored = JSON.parse(fs.readFileSync(path.join(home, 'held.json'), 'utf8'));

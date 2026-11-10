@@ -17,6 +17,7 @@ const chatKey = (site) => `chat:${site}`;
 const emptyChat = () => ({ sessionId: null, agent: null, messages: [], run: null, last: null });
 
 const ui = {
+  waitingBadge: document.getElementById('waiting-badge'),
   dot: $('#dot'), site: $('#site'), barRobot: $('#bar-robot'), siteSwitch: $('#site-switch'), newChat: $('#new-chat'), settingsBtn: $('#settings-btn'),
   gate: $('#gate'), gateTitle: $('#gate-title'), gateWhy: $('#gate-why'), gateBtn: $('#gate-btn'), gateErr: $('#gate-err'), gateNote: $('#gate-note'),
   gateLinks: $('#gate-links'), gateBlock: $('#gate-block'), gateDisconnect: $('#gate-disconnect'),
@@ -658,6 +659,7 @@ function actions(...children) {
 
 let modLabelSeq = 0;
 onSwitchChange(() => renderMods());
+ui.waitingBadge?.addEventListener('click', () => openApproval(null));
 
 // ---- Groups: "Rules" and "Page scripts", each with a switch for this site (background's mods.group)
 const GROUP_TEXT = {
@@ -720,6 +722,7 @@ function renderMods() {
   const ordered = orderMods(listed, view.modOrder[scope]);
   const mods = GROUPS.flatMap((g) => ordered.filter((m) => modGroup(m) === g));
   ui.mods.hidden = mods.length === 0;
+  updateApprovals(mods);
   if (!mods.length) { view.modRows.clear(); ui.modList.replaceChildren(); ui.modsReviewNote.hidden = true; return; }
   ui.modsCount.textContent = `(${mods.length})`;
   // Mods TRIF found can do more than change the page's look, which the user hasn't looked at yet (helper
@@ -1104,20 +1107,10 @@ function modItem(m) {
   const row = el('div', 'mod-row');
   if (m.held) {
     // Written by an agent run here, and it can do something the user hasn't allowed (what TRIF read in
-    // its code, or matches outside the site): not running until the user allows it.
+    // its code, or matches outside the site): not running until the user allows it, in the approval dialog
+    // (below); the row says so, and its tag opens the dialog at this mod.
     li.classList.add('held');
-    const allow = el('button', 'btn allow', 'Allow');
-    allow.type = 'button';
-    allow.setAttribute('aria-describedby', labelId);
-    allow.addEventListener('click', async () => {
-      allow.disabled = true;
-      clearRowError(m.id);
-      try { await request({ type: 'mod.approve', id: m.id, hash: m.held.hash, tab: view.tab?.id }); } catch (e) {
-        allow.disabled = false;
-        rowError(m.id, String(e?.message ?? e));
-      }
-    });
-    row.append(gripButton(labelId), main, allow, deleteButton(m, labelId, li));
+    row.append(gripButton(labelId), main, holdTag(m, 'on hold', labelId), deleteButton(m, labelId, li));
   } else {
     const site = switchSite(m);
     row.append(gripButton(labelId), main, modSwitch(document, {
@@ -1128,9 +1121,9 @@ function modItem(m) {
   const err = el('div', 'mod-err');
   err.hidden = true;
   li.append(row, err);
-  if (m.held) li.append(factsBox(m, m.held, 'held'));
-  else if (m.pending) li.append(factsBox(m, m.pending, 'pending'));
-  else if (m.review) li.append(factsBox(m, m.review, 'review'));
+  // (held, or a change waiting: the approval dialog; a change waiting also tags the row, which keeps its switch)
+  if (m.pending && !m.held) name.append(' ', holdTag(m, 'change on hold', labelId));
+  if (!m.held && !m.pending && m.review) li.append(factsBox(m, m.review, 'review'));
   if (m.update && !m.held) li.append(updateNotice(m, err));
   return li;
 }
@@ -1222,6 +1215,253 @@ function factsBox(m, info, kind) {
   } else box.append(actions(showCode));
   box.append(shown);
   return box;
+}
+
+// ---- The approval dialog ---------------------------------------------------------------------------
+// Every hold (a boxed mod's powers, a free mod TRIF found can do more, an agent's change waiting, and a boxed
+// mod this browser can't sandbox) is one card centred over the dimmed panel: the mod, its kind, site and
+// file, what it asks for or what TRIF found, the combination warnings in red, one note line; Allow, Show code,
+// Not now (and × and Esc). Several waiting: "1 of N", one after another. It opens when a hold first appears,
+// or when the panel opens with something waiting; after Not now, only a new hold opens it again: the rows say
+// "on hold" and the badge at the top ("N waiting") reopens it.
+const approval = { queue: [], at: 0, seen: new Set(), done: new Set(), dialog: null, parts: null, shownKey: null };
+const holdKey = (m) => `${m.id}@${(m.held || m.pending)?.hash || ''}`;
+const holdOf = (m) => m.held || m.pending;
+
+function holdTag(m, text, labelId) {
+  const b = el('button', 'tag on-hold', text);
+  b.type = 'button';
+  b.title = 'Waiting for your OK: open it';
+  b.setAttribute('aria-describedby', labelId);
+  b.addEventListener('click', () => openApproval(m.id));
+  return b;
+}
+
+// (the icon beside each line: by what it is)
+const FACT_ICONS = {
+  'read-drafts': '✎', keys: '⌨', 'site-data': '⇣', 'page-data': '◫', sound: '♪', controls: '◐', mods: '⇆', media: '▶',
+  'search-box': '⌕', 'go-to': '↪', click: '◉', 'write-drafts': '⇄',
+  sends: '↗', loads: '↗', site: '↗', acts: '◉', navigates: '↪', hidden: '?', match: '◎', risk2: '⚠',
+};
+const iconOf = (key) => {
+  const k = String(key || '');
+  const p = /^power:([\w-]+)/.exec(k);
+  return FACT_ICONS[p ? p[1] : k.split(':')[0]] || '•';
+};
+
+function approvalDialog() {
+  if (approval.dialog) return approval.parts;
+  const d = el('dialog', 'approval');
+  d.id = 'approval';
+  d.setAttribute('aria-labelledby', 'approval-name');
+  const top = el('div', 'ap-top');
+  const count = el('span', 'ap-count');
+  const x = el('button', 'ap-x', '×');
+  x.type = 'button';
+  x.title = 'Not now';
+  x.setAttribute('aria-label', 'Not now');
+  top.append(count, x);
+  const who = el('div', 'ap-who');
+  const robot = el('span', 'ap-robot');
+  const svg = document.querySelector('#bar-robot svg');
+  if (svg) robot.append(svg.cloneNode(true));
+  const nameBox = el('div');
+  const name = el('h2', 'ap-name');
+  name.id = 'approval-name';
+  const meta = el('div', 'ap-meta');
+  const chip = el('span', 'ap-chip');
+  const where = el('span', 'ap-where');
+  meta.append(chip, where);
+  nameBox.append(name, meta);
+  who.append(robot, nameBox);
+  const lead = el('p', 'ap-lead');
+  const facts = el('ul', 'ap-facts');
+  const together = el('div', 'ap-together');
+  const note = el('p', 'ap-note');
+  const claim = el('p', 'ap-claim');
+  const err = el('p', 'ap-err');
+  err.setAttribute('role', 'alert');
+  const codeBox = el('pre', 'ap-code');
+  const allow = button('Allow', 'go ap-allow', () => decideApproval('mod.approve'));
+  const show = button('Show code', 'ap-show', () => toggleApprovalCode());
+  const reject = button('Don\'t allow', 'ap-reject', () => decideApproval('mod.reject'));
+  reject.title = 'The version before stays; the change is kept in its history (trif history).';
+  const later = button('Not now', 'text ap-later', () => notNow());
+  x.addEventListener('click', () => notNow());
+  const acts = el('div', 'ap-actions');
+  acts.append(allow, show, reject, later);
+  d.append(top, who, lead, facts, together, note, claim, err, codeBox, acts);
+  // Esc is Not now; Tab stays in the card (showModal makes the panel inert, and this keeps the focus from
+  // leaving for the browser's own controls too)
+  d.addEventListener('cancel', (e) => { e.preventDefault(); notNow(); });
+  d.addEventListener('keydown', (e) => {
+    if (e.key !== 'Tab') return;
+    const f = [...d.querySelectorAll('button, [href], [tabindex]:not([tabindex="-1"])')].filter((n) => !n.disabled && !n.closest('[hidden]') && n.getClientRects().length);
+    if (!f.length) return;
+    const first = f[0], last = f[f.length - 1];
+    if (e.shiftKey && document.activeElement === first) { e.preventDefault(); last.focus(); }
+    else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus(); }
+  });
+  document.body.append(d);
+  approval.dialog = d;
+  approval.parts = { count, name, chip, where, lead, facts, together, note, claim, err, codeBox, allow, show, reject, later };
+  return approval.parts;
+}
+
+// From renderMods: what's waiting here. Opens the dialog for a hold not seen before; keeps an open one in step.
+function updateApprovals(mods) {
+  approval.queue = mods.filter((m) => holdOf(m) && !approval.done.has(holdKey(m)));
+  const fresh = approval.queue.filter((m) => !approval.seen.has(holdKey(m)));
+  const open = !!approval.dialog?.open;
+  if (open) {
+    const cur = approval.queue.findIndex((m) => holdKey(m) === approval.shownKey);
+    if (cur >= 0) approval.at = cur;
+    else approval.at = Math.min(approval.at, approval.queue.length - 1);
+    if (!approval.queue.length) closeApproval();
+    else renderApproval();
+  } else if (fresh.length) {
+    approval.at = approval.queue.indexOf(fresh[0]);
+    showApproval();
+  }
+  renderWaitingBadge();
+}
+
+function openApproval(id) {
+  const i = approval.queue.findIndex((m) => m.id === id);
+  approval.at = i >= 0 ? i : 0;
+  if (approval.queue.length) showApproval();
+}
+
+function showApproval() {
+  approvalDialog();
+  for (const m of approval.queue) approval.seen.add(holdKey(m));
+  renderApproval();
+  if (!approval.dialog.open) approval.dialog.showModal();
+  renderWaitingBadge();
+}
+
+function closeApproval() {
+  if (approval.dialog?.open) approval.dialog.close();
+  approval.shownKey = null;
+  renderWaitingBadge();
+}
+
+// Not now: the next one waiting, or close (the rows and the badge keep it findable)
+function notNow() {
+  if (approval.at + 1 < approval.queue.length) { approval.at++; renderApproval(); return; }
+  closeApproval();
+}
+
+function renderApproval() {
+  const P = approvalDialog();
+  const m = approval.queue[approval.at];
+  if (!m) { closeApproval(); return; }
+  const info = holdOf(m);
+  const key = holdKey(m);
+  const kind = m.held ? (info.by === 'sandbox' ? 'sandbox' : 'held') : 'pending';
+  const n = approval.queue.length;
+  P.count.textContent = n > 1 ? `${approval.at + 1} of ${n} waiting for your OK` : 'Waiting for your OK';
+  if (approval.shownKey === key) return; // (the same hold: leave the code open, the buttons as they are)
+  approval.shownKey = key;
+  approval.dialog.dataset.mod = m.id;
+  P.name.textContent = m.name || m.id;
+  const k = m.rules ? ['style', 'Style mod'] : m.sandboxed ? ['boxed', 'Boxed mod'] : ['free', 'Free mod'];
+  P.chip.className = `ap-chip ${k[0]}`;
+  P.chip.textContent = k[1];
+  const file = String(m.file || '').split(/[\\/]/).pop() || `${m.id.split('/').pop()}.js`;
+  P.where.textContent = `${info.site || m.id.split('/')[0]} · ${file}`;
+  P.lead.textContent = info.asks ? 'It asks for these powers. TRIF holds it to them:'
+    : kind === 'pending' ? 'A change to it is waiting. TRIF found that the new version:'
+      : kind === 'sandbox' ? 'This browser can\'t run it in TRIF\'s sandbox:'
+        : 'TRIF found that this mod:';
+  // the lines: each power or finding with its icon; the combinations (power:together:…) in the red box,
+  // the strongest first as the helper sent them, a sentence once
+  const needs = Array.isArray(info.needs) ? info.needs : [];
+  const all = (Array.isArray(info.facts) ? info.facts : [String(info.reason || '')]).map((f, i) => ({ f, key: needs[i] || '' }));
+  const plain = all.filter((x) => x.f && !/^power:together:/.test(x.key));
+  const warns = [];
+  for (const x of all) if (x.f && /^power:together:/.test(x.key) && !warns.some((w) => w.f === x.f)) warns.push(x);
+  P.facts.replaceChildren(...plain.map((x) => {
+    const li = el('li');
+    li.append(el('span', 'ap-ic', iconOf(x.key)), el('span', null, info.asks ? `It ${x.f}.` : x.f));
+    li.firstChild.setAttribute('aria-hidden', 'true');
+    return li;
+  }));
+  P.together.replaceChildren(...warns.map((x) => {
+    const line = el('p');
+    if (/^power:together:many:/.test(x.key)) line.textContent = x.f;
+    else line.append(el('b', null, 'Together,'), ` it ${x.f}.`);
+    return line;
+  }));
+  P.together.hidden = !warns.length;
+  const fromAgent = kind !== 'sandbox' && info.by !== 'outside';
+  const who = fromAgent ? `An agent ${kind === 'pending' ? 'changed' : 'wrote'} it in your chat on ${info.site || view.site}.` : 'It\'s new or changed since TRIF last let it run.';
+  P.note.textContent = kind === 'sandbox' ? 'Allow runs this version as a free mod, in this browser only.'
+    : kind === 'pending' ? `${who} The version before keeps running until you decide.`
+      : info.asks ? `${who} Updates that ask for the same powers won't ask again.`
+        : !m.rules && !m.sandboxed ? `${who} A free mod can do anything the page can, so look at the code if you're not sure.`
+          : who;
+  P.claim.replaceChildren();
+  P.claim.hidden = !info.claim;
+  if (info.claim) P.claim.append(el('span', 'ap-claim-who', fromAgent ? 'The agent says: ' : 'The mod says: '), document.createTextNode(`“${info.claim}”`));
+  P.err.hidden = true;
+  P.err.textContent = '';
+  P.codeBox.hidden = true;
+  P.codeBox.replaceChildren();
+  P.show.textContent = kind === 'pending' ? 'Show what changed' : 'Show code';
+  P.reject.hidden = kind !== 'pending';
+  for (const b of [P.allow, P.show, P.reject]) b.disabled = false;
+}
+
+async function toggleApprovalCode() {
+  const P = approval.parts;
+  const m = approval.queue[approval.at];
+  if (!m) return;
+  const pending = !m.held && !!m.pending;
+  if (!P.codeBox.hidden) { P.codeBox.hidden = true; P.show.textContent = pending ? 'Show what changed' : 'Show code'; return; }
+  P.show.disabled = true;
+  try {
+    if (pending) {
+      const r = await request({ type: 'mod.diff', id: m.id });
+      P.codeBox.replaceChildren(...r.lines.map((l) => el('span', l.t === '+' ? 'add' : l.t === '-' ? 'del' : l.t === '…' ? 'gap' : 'ctx', `${l.t === '…' ? '…' : l.t} ${l.s}\n`)));
+    } else {
+      const r = await request({ type: 'mod.code', id: m.id });
+      P.codeBox.textContent = r.code + (r.truncated ? '\n…' : '');
+    }
+    P.codeBox.hidden = false;
+    P.show.textContent = pending ? 'Hide what changed' : 'Hide code';
+  } catch (e) { P.err.textContent = String(e?.message ?? e); P.err.hidden = false; } finally { P.show.disabled = false; }
+}
+
+async function decideApproval(type) {
+  const P = approval.parts;
+  const m = approval.queue[approval.at];
+  if (!m) return;
+  const info = holdOf(m);
+  P.allow.disabled = P.reject.disabled = true;
+  P.err.hidden = true;
+  try {
+    await request({ type, id: m.id, hash: info.hash, tab: view.tab?.id });
+    // (done here; the next status drops it too) on to the next one, or close
+    approval.done.add(holdKey(m));
+    approval.queue.splice(approval.at, 1);
+    approval.shownKey = null;
+    if (!approval.queue.length) closeApproval();
+    else { approval.at = Math.min(approval.at, approval.queue.length - 1); renderApproval(); }
+  } catch (e) {
+    P.allow.disabled = P.reject.disabled = false;
+    P.err.textContent = String(e?.message ?? e);
+    P.err.hidden = false;
+  }
+  renderWaitingBadge();
+}
+
+function renderWaitingBadge() {
+  if (!ui.waitingBadge) return;
+  const n = approval.queue.length;
+  ui.waitingBadge.hidden = !n || !!approval.dialog?.open;
+  ui.waitingBadge.textContent = `${n} waiting`;
+  ui.waitingBadge.setAttribute('aria-label', `${n} ${n === 1 ? 'mod' : 'mods'} waiting for your OK: open`);
 }
 
 // A newer version of a mod TRIF ships, which didn't replace this copy because the user changed it

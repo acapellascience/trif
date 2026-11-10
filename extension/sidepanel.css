@@ -576,3 +576,63 @@ h3.mod-name { margin: 0; font-size: inherit; line-height: inherit; }
 .mod-list li.group-off { opacity: .45; }
 .mod-list li.mod-group.off .mod-group-name { text-decoration: line-through; }
 .mod-powers { font-size: 11px; color: var(--muted); }
+
+/* ---- the approval dialog (sidepanel.js "The approval dialog"): one card over the dimmed panel ---------- */
+.approval {
+  /* (TRIF's green, whatever the panel's state colours its switches: yellow waiting for a login, red blocked) */
+  --switch-on: var(--trif-green);
+  width: auto; max-width: none; max-height: calc(100% - 32px); margin: auto 16px; padding: 16px 16px 14px;
+  overflow: auto; color: var(--text); background: var(--surface); border: 1px solid var(--line); border-radius: 14px;
+  box-shadow: 0 18px 50px rgb(0 0 0 / 0.55);
+}
+.approval::backdrop { background: rgb(0 0 0 / 0.55); backdrop-filter: blur(2px); }
+@media (prefers-color-scheme: light) {
+  .approval { box-shadow: 0 18px 50px rgb(0 0 0 / 0.22); }
+  .approval::backdrop { background: rgb(20 20 24 / 0.38); }
+}
+.approval .ap-top { display: flex; align-items: center; gap: 8px; color: var(--muted); font-size: 12px; }
+.approval .ap-count { margin-right: auto; }
+.approval .ap-x { background: none; border: 0; color: var(--muted); font-size: 18px; line-height: 1; padding: 2px 4px; border-radius: 6px; }
+.approval .ap-x:hover { color: var(--text); }
+.approval .ap-who { display: flex; align-items: center; gap: 10px; margin-top: 10px; }
+.approval .ap-robot svg { display: block; width: 34px; height: 34px; }
+.approval .ap-robot .rim { fill: var(--switch-on); }
+.approval .ap-robot .face { fill: #18181a; }
+.approval .ap-robot .eye { fill: #59dbab; }
+.approval .ap-name { margin: 0; font-size: 15px; line-height: 1.25; overflow-wrap: anywhere; }
+.approval .ap-meta { color: var(--muted); font-size: 12px; overflow-wrap: anywhere; }
+.approval .ap-chip { display: inline-block; margin-right: 6px; padding: 1px 7px; border: 1px solid var(--line); border-radius: 999px; color: var(--text); font-size: 11px; }
+.approval .ap-chip.boxed { border-color: color-mix(in srgb, var(--switch-on) 45%, var(--line)); color: var(--switch-on); }
+.approval .ap-chip.free { border-color: color-mix(in srgb, var(--warn) 45%, var(--line)); color: var(--warn); }
+.approval .ap-chip.style { border-color: color-mix(in srgb, var(--accent) 45%, var(--line)); color: var(--accent); }
+.approval .ap-lead { margin: 12px 0 6px; font-weight: 600; }
+.approval .ap-facts { margin: 0; padding: 0; list-style: none; }
+.approval .ap-facts li { display: flex; gap: 8px; margin-top: 6px; padding: 7px 10px; border: 1px solid var(--line); border-radius: 9px; background: var(--raised); }
+.approval .ap-ic { flex: none; width: 16px; text-align: center; opacity: 0.85; }
+.approval .ap-together { margin-top: 10px; padding: 9px 11px; border-radius: 9px; background: var(--bad-bg); border: 1px solid color-mix(in srgb, var(--bad) 35%, var(--line)); }
+.approval .ap-together p { margin: 0; }
+.approval .ap-together p + p { margin-top: 4px; }
+.approval .ap-together b { color: var(--bad); }
+.approval .ap-note { margin: 10px 0 0; color: var(--muted); font-size: 12px; }
+.approval .ap-claim { margin: 4px 0 0; color: var(--muted); font-size: 12px; font-style: italic; }
+.approval .ap-claim-who { font-style: normal; }
+.approval .ap-err { margin: 8px 0 0; color: var(--bad); font-size: 12px; }
+.approval .ap-code { max-height: 240px; overflow: auto; margin: 10px 0 0; padding: 8px; background: var(--code); border-radius: 8px; font: 11px/1.45 var(--mono); white-space: pre-wrap; word-break: break-word; }
+.approval .ap-code .add { color: var(--ok); }
+.approval .ap-code .del { color: var(--bad); }
+.approval .ap-code .gap, .approval .ap-code .ctx { color: var(--muted); }
+.approval .ap-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 14px; align-items: center; }
+.approval .ap-actions .btn { padding: 7px 14px; border-radius: 9px; font-size: 13px; font-weight: 500; }
+.approval .ap-actions .btn.go { font-weight: 650; color: #04291c; }
+.approval .ap-actions .btn.text { margin-left: auto; background: none; border-color: transparent; color: var(--muted); }
+.approval .ap-actions .btn.text:hover { color: var(--text); }
+/* "N waiting": after Not now, at the top of the panel, beside the robot; reopens the dialog */
+.waiting-badge {
+  position: absolute; left: 50%; top: 50%; transform: translate(18px, -50%); z-index: 1;
+  padding: 2px 8px; border: 0; border-radius: 999px; background: var(--warn); color: #1a1300;
+  font-size: 11px; font-weight: 700; box-shadow: 0 2px 8px rgb(0 0 0 / 0.3);
+}
+/* a held row's tag, in place of its switch (a change waiting: beside the name), which reopens the dialog */
+.tag.on-hold { background: none; color: var(--warn); border-color: color-mix(in srgb, var(--warn) 50%, var(--line)); cursor: pointer; }
+.tag.on-hold:hover { border-color: var(--warn); }
+.mod-row > .tag.on-hold { flex: none; align-self: center; }

@@ -20,7 +20,7 @@ panel shows "It <fact>." and `trif status` "it <fact>".
 | click *(phase 3)* | can click these for you: {words} ({selector}), {words} ({selector}) (from the `@click` lines) |
 | write-drafts *(phase 3)* | can change what you type and paste on this site before you post it |
 | mods *(phase 3; listed, never holds alone)* | can talk to your other boxed mods on this page |
-| write-drafts with read-drafts, keys, site-data or page-data *(phase 3: the combination, its own item)* | could put what it reads into something you post, with these powers together |
+| *(combinations: see "Combination warnings" below; this phase-3 line is replaced)* | ~~could put what it reads into something you post, with these powers together~~ |
 
 {site} is the mod's site folder (x.com), or "the sites it runs on" for a mod in all-sites.
 
@@ -110,3 +110,58 @@ panel shows "It <fact>." and `trif status` "it <fact>".
     the user types** / **a select isn't a text the user types** · **changing what the user types is off on
     this page while another boxed mod here has the {read} power: with both, what one reads could end up in
     what the user posts (a mod that asks for write-drafts and {read} together shows the user that)**
+
+## Combination warnings (the hold's red box; helper/lib/combinations.js)
+
+Shown in the approval dialog as **Together, it {warning}.**, strongest first, one line each; in `trif status`
+and `trif check` as **together, it {warning}**. Which combinations carry which: docs/POWER-COMBINATIONS.md.
+
+1. **could put what it reads into a post and send it for you** (a read + click + write-drafts)
+2. **could go to a page, write a post there and send it for you** (go-to + click + write-drafts)
+3. **could write a post and send it for you** (click + write-drafts)
+4. **could put what it reads into something you post** (a read + write-drafts)
+5. **could take you to a page and click things there for you** (go-to + click)
+6. **could let what it reads decide what it clicks for you** (a read + click)
+7. **could pass what it reads to the site a video or sound comes from, by how it plays it** (a read + media)
+8. **could turn what it reads into sounds that a device nearby could pick up** (a read + sound)
+
+More than three powers, in place of the lines (Tim's words): **Mods with many powers can act in unspecific
+or powerful ways. Treat this with caution.**
+
+The reasons for "no added risk" are in the table and docs/POWER-COMBINATIONS.md (developer-facing, not shown
+in the panel).
+
+## The approval dialog (side panel)
+
+- Top line: **Waiting for your OK** · **{i} of {n} waiting for your OK**; the × is labelled **Not now**
+- Kind chip: **Boxed mod** · **Free mod** · **Style mod**; then **{site} · {file}**
+- Lead: **It asks for these powers. TRIF holds it to them:** (powers) · **TRIF found that this mod:** (held
+  by the classifier; the panel's existing words) · **A change to it is waiting. TRIF found that the new
+  version:** · **This browser can't run it in TRIF's sandbox:** (the Safari fallback)
+- Lines: **It {fact}.** for powers; the classifier's facts as they are
+- Note: **An agent wrote it in your chat on {site}.** / **An agent changed it in your chat on {site}.** /
+  **It's new or changed since TRIF last let it run.**, then one of: **Updates that ask for the same powers
+  won't ask again.** (powers) · **A free mod can do anything the page can, so look at the code if you're
+  not sure.** (a free mod) · **The version before keeps running until you decide.** (a change); the Safari
+  fallback: **Allow runs this version as a free mod, in this browser only.**
+- The claim, if any (as before): **The agent says: "…"** / **The mod says: "…"**
+- Buttons: **Allow** · **Show code** / **Hide code** (a change: **Show what changed** / **Hide what changed**)
+  · **Don't allow** (a change only, as before, with its title) · **Not now**
+- On the row: **on hold** (in place of the switch), **change on hold** (a change, beside the name); its
+  title: **Waiting for your OK: open it**
+- The badge at the top: **{n} waiting**; its label: **{n} mod(s) waiting for your OK: open**
+
+## Page-wide rules and addresses (errors a mod sees: TRIF sandbox: …)
+
+- **{doing} is off on this page while another boxed mod here has the {power} power: with both, {why} (a mod
+  that asks for {act} and {power} together shows the user that)**, where {doing}/{why} is:
+  - **changing what the user types** / **what one reads could end up in what the user posts**
+  - **clicking for the user** / **what one reads could decide what the other clicks**
+  - **playing the page's video and audio** / **what one reads could reach a video's host through how it
+    plays**
+  - **taking the user to a page** / **one could take the user to a page where the other clicks**
+- **clicking for the user is off on this page since another boxed mod here changed a draft: with both, a
+  draft could be sent without the user (a mod that asks for click and write-drafts together shows the user
+  that)**
+- **"{text}" looks like an address that isn't in what the user typed here or in a link on the page: a boxed
+  mod doesn't add addresses to a draft (a site can fetch one for a preview before anything is posted)**

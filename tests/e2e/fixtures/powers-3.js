@@ -59,8 +59,14 @@ ask();
 // write-drafts (a moment later, once every boxed mod on the page has started: see draftsOk in sandbox.js)
 setTimeout(() => {
   t('write-drafts: a field', () => { page.find('#wd').setValue('rewritten'); return page.find('#wd').value; });
-  t('write-drafts: a textarea', () => { page.find('#wta').setValue('rewritten two'); return page.find('#wta').value; });
+  t('write-drafts: a textarea', () => { page.find('#wta').setValue('rewritten two, see example.org/a'); return page.find('#wta').value; });
   t('write-drafts: an editor', () => { page.find('#ed2').setText('rewritten draft'); return page.find('#ed2').text; });
+  // (addresses: only one the user typed there, or a link on the page shows; none the mod made up)
+  t('write-drafts: an address the user didn\'t type (refused)', () => page.find('#wd').setValue('see https://evil.example/?d=1'));
+  t('write-drafts: an address the user typed, with more on it (refused)', () => page.find('#wta').setValue('see example.org/a?d=1'));
+  t('write-drafts: an address into an editor (refused)', () => page.find('#ed2').setText('rewritten draft, evil.example'));
+  t('write-drafts: a word and a dot that make an address (refused)', () => { page.find('#wd').setValue('evil.'); return page.find('#wd').setValue('evil.example'); });
+  t('write-drafts: back to plain words', () => { page.find('#wd').setValue('rewritten'); return page.find('#wd').value; });
   t('write-drafts: a password (refused)', () => page.find('#pw3').setValue('x'));
   t('write-drafts: a card field (refused)', () => page.find('#cc3').setValue('x'));
   t('write-drafts: a hidden field (refused)', () => page.find('#fh3').setValue('x'));

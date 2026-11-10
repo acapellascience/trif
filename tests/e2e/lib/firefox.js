@@ -216,8 +216,11 @@ class FirefoxDriver {
   }
 
   /** A trusted press of `key` ('Escape') in the page `ctx`. */
+  /** The page's prefers-color-scheme: not offered over BiDi here (the screenshots in both themes are Chrome's). */
+  async colorScheme() { return false; }
+
   async key(ctx, key) {
-    const value = { Escape: '\uE00C', Enter: '\uE007' }[key] || key;
+    const value = { Escape: '\uE00C', Enter: '\uE007', Tab: '\uE004' }[key] || key;
     await this.bidi.send('input.performActions', {
       context: ctx, actions: [{ type: 'key', id: 'keyboard', actions: [{ type: 'keyDown', value }, { type: 'keyUp', value }] }],
     });

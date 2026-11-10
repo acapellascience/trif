@@ -350,7 +350,7 @@ const handlers = {
     for (const id of ids) {
       let s;
       if (helperErrors.has(id)) s = `NOT SENT: ${helperErrors.get(id)}`;
-      else if (held[id]) s = `${(info.pending || []).includes(id) ? 'CHANGE WAITING (the version before runs meanwhile)' : 'HELD'}: it ${(held[id].facts || [held[id].reason]).join('; it ')} (trif approve ${id}, or trif reject ${id})`;
+      else if (held[id]) s = `${(info.pending || []).includes(id) ? 'CHANGE WAITING (the version before runs meanwhile)' : 'HELD'}: ${require('./lib/boxpowers').factLines(held[id].needs, held[id].facts || [held[id].reason]).join('; ')} (trif approve ${id}, or trif reject ${id})`;
       else if (sandboxHeld.has(id)) s = `WAITING: ${sandboxHeld.get(id).facts[0]}; only the user can allow that, in the side panel`;
       else if (off.has(id)) s = newOff.has(id) ? `off (${newOff.get(id) === 'update' ? 'updated by TRIF' : 'new'}: waiting for the user to look at it)` : shipsOff.has(id) ? 'off (as TRIF ships it)' : 'off';
       else if (sitesOff.has(id)) s = 'waiting: TRIF is off on its site';
@@ -361,7 +361,7 @@ const handlers = {
       if (sandboxedAs.has(id) && !sandboxHeld.has(id)) s += sandboxedAs.get(id) === 'page' ? ' (boxed mod, run as a free mod: the user allowed it, as this browser has no sandbox)' : boxPowers.get(id) ? ` (boxed, powers: ${boxPowers.get(id).join(', ')})` : ' (boxed)';
       if (offSites.has(id) && !off.has(id)) s += ` (off on ${offSites.get(id).join(', ')})`;
       if (updates[id]) s += `; ${updateText(updates[id])}`;
-      if (review[id]) s += `; TO REVIEW: it ${review[id].facts.join('; it ')} (trif approve ${id} when that's fine)`;
+      if (review[id]) s += `; TO REVIEW: ${require('./lib/boxpowers').factLines(review[id].needs, review[id].facts).join('; ')} (trif approve ${id} when that's fine)`;
       lines.push(`  ${pad(id, 40)} ${s}`);
     }
     for (const [id, err] of helperErrors) if (!ids.includes(id)) lines.push(`  ${pad(id, 40)} NOT SENT: ${err}`);
@@ -475,7 +475,7 @@ const handlers = {
         out(`It runs in TRIF's sandbox with these powers, and only these (TRIF enforces them): ${asked.join(', ')}.`);
         const hard = needs.filter((n) => !n.soft);
         out(hard.length ? 'It waits for the user\'s OK once for this set of powers (not for each change to its code: only a new power asks again). The hold will say it:' : 'Those don\'t make it wait for the user\'s OK on their own. A hold would list it:');
-        for (const n of needs) out(`- it ${n.fact}`);
+        for (const l of bp.factLines(needs.map((n) => n.key), needs.map((n) => n.fact))) out(`- ${l}`);
       }
       if (!lint.length) return out('TRIF finds nothing in it that the sandbox would refuse.');
       const lines = code.split('\n');
@@ -882,7 +882,7 @@ const handlers = {
       else if (enabled.get(m.id) === false && shipsOff.has(m.id)) out(`  off, as TRIF ships it (not running; trif enable ${m.id} turns it on)`);
       else if (enabled.get(m.id) === false) out(`  switched off by the user (not running; trif enable ${m.id} turns it on)`);
       else if (offSites.has(m.id)) out(`  switched off by the user on ${offSites.get(m.id).join(', ')} (trif enable ${m.id} --site <site> turns it back on there)`);
-      if (isHeld(m)) out(`  HELD: ${held[m.id].by === 'outside' ? 'new or changed since TRIF last let it run' : `a side-panel agent wrote it while working on ${held[m.id].site}`}, and TRIF found that it ${(held[m.id].facts || [held[m.id].reason]).join('; it ')}. Not running until the user approves it (trif approve ${m.id}).`);
+      if (isHeld(m)) out(`  HELD: ${held[m.id].by === 'outside' ? 'new or changed since TRIF last let it run' : `a side-panel agent wrote it while working on ${held[m.id].site}`}, and TRIF found that ${require('./lib/boxpowers').factLines(held[m.id].needs, held[m.id].facts || [held[m.id].reason]).join('; ')}. Not running until the user approves it (trif approve ${m.id}).`);
       if (updates[m.id]) out(`  ${updateText(updates[m.id])}: trif mod-update ${m.id}`);
       if (m.description) out(`  ${m.description}`);
       if (m.rules) out('  kind: style mod (data TRIF runs; never waits for the user\'s OK)');

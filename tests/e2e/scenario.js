@@ -107,6 +107,40 @@ class Scenario {
     return r;
   }
 
+  /** A real click in the panel; an approval dialog that's open (sidepanel.js) is put off first (Not now), as
+   *  the user would, unless the click is in it. */
+  async panelClick(sel) {
+    if (!/^#approval\b/.test(sel)) await this.dismissApproval();
+    return this.d.click(this.panelCtx, sel);
+  }
+
+  /** Not now on every card of the approval dialog, if it's open (they stay on hold, the badge says so). */
+  async dismissApproval() {
+    return this.panel(`async () => { const d = document.getElementById('approval'); let n = 0; while (d && d.open && n++ < 50) d.querySelector('.ap-x').click(); return n; }`).catch(() => 0);
+  }
+
+  /** What the approval dialog shows, or null when it's closed. */
+  async approvalState() {
+    return this.panel(`async () => {
+      const d = document.getElementById('approval');
+      if (!d || !d.open) return null;
+      const q = (s) => d.querySelector(s);
+      return { mod: d.dataset.mod, count: q('.ap-count').textContent, name: q('.ap-name').textContent, chip: q('.ap-chip').textContent, where: q('.ap-where').textContent,
+        lead: q('.ap-lead').textContent, items: [...d.querySelectorAll('.ap-facts li')].map((x) => x.lastChild.textContent),
+        together: q('.ap-together').hidden ? [] : [...d.querySelectorAll('.ap-together p')].map((x) => x.textContent),
+        note: q('.ap-note').textContent, claim: q('.ap-claim').hidden ? '' : q('.ap-claim').textContent, show: q('.ap-show').textContent,
+        focusIn: d.contains(document.activeElement), badge: !document.getElementById('waiting-badge').hidden };
+    }`);
+  }
+
+  /** The approval dialog for one mod: put off whatever's open, then its row's "on hold" tag (a real click). */
+  async approvalFor(id) {
+    await waitFor(`${id} on hold in the panel`, () => this.panel(`async () => !!document.querySelector('li[data-mod="${id}"] .tag.on-hold') || null`), { timeoutMs: 15000 });
+    await this.dismissApproval();
+    await this.d.click(this.panelCtx, `li[data-mod="${id}"] .tag.on-hold`);
+    return waitFor(`the approval dialog for ${id}`, async () => { const a = await this.approvalState(); return a && a.mod === id ? a : null; }, { timeoutMs: 10000 });
+  }
+
   async shot(ctx, name) {
     const file = this.r.file(`${this.label}-${String(++this.shots).padStart(2, '0')}-${name}.png`);
     try { await this.d.screenshot(ctx, file); } catch (e) { this.r.note(`screenshot ${name} failed: ${e.message}`); }
@@ -258,7 +292,7 @@ class Scenario {
 
   /** Settings open from the bar (wherever it is: the gate, the landing page), work, and close again. */
   async settingsOpen(name) {
-    await this.d.click(this.panelCtx, '#settings-btn');
+    await this.panelClick('#settings-btn');
     let last = null;
     const s = await waitFor('settings to open, with the agents and instructions from the helper', async () => {
       last = await this.panel(`async () => {
@@ -271,7 +305,7 @@ class Scenario {
     }, { timeoutMs: 10000 }).catch((e) => { throw new Error(`${e.message}: ${JSON.stringify(last)}`); });
     await sleep(300);
     await this.shot(this.panelCtx, name);
-    await this.d.click(this.panelCtx, '#settings-btn');
+    await this.panelClick('#settings-btn');
     await waitFor('settings to close', async () => this.panel(`async () => document.querySelector('#settings').hidden`), { timeoutMs: 5000 });
     return `${s.agents - 1} agents listed, instructions loaded; "${s.update}"`;
   }
@@ -284,10 +318,10 @@ class Scenario {
   async openModelKey() {
     const kc = this.keychain();
     const KEY = 'sk-or-v1-e2e-not-a-real-key-0000';
-    await this.d.click(this.panelCtx, '#settings-btn');
+    await this.panelClick('#settings-btn');
     await waitFor('settings to open', async () => this.panel(`async () => !document.querySelector('#settings').hidden && document.querySelectorAll('#agent option').length > 1`), { timeoutMs: 10000 });
     const before = await this.panel(`async () => ({ agent: document.querySelector('#agent').value, oss: !!document.querySelector('#agent option[value="codex-oss"]') })`);
-    if (!before.oss) { await this.d.click(this.panelCtx, '#settings-btn'); return 'skipped: no open model agent listed (Codex not installed?)'; }
+    if (!before.oss) { await this.panelClick('#settings-btn'); return 'skipped: no open model agent listed (Codex not installed?)'; }
     const pick = (sel, value) => this.panel(`async (sel, value) => { const e = document.querySelector(sel); e.value = value; e.dispatchEvent(new Event('change', { bubbles: true })); return e.value; }`, [sel, value]);
     const row = () => this.panel(`async () => {
       const shown = (sel) => { const e = document.querySelector(sel); return !!e && e.getClientRects().length > 0; };
@@ -304,21 +338,21 @@ class Scenario {
     await pick('#om-provider', 'openrouter');
     await until('the key field (no key yet)', (x) => x.provider === 'openrouter' && x.row && x.edit && !x.saved && !x.cancel);
     await this.panel(`async (k) => { const e = document.querySelector('#om-key'); e.value = k; e.dispatchEvent(new Event('input', { bubbles: true })); }`, [KEY]);
-    await this.d.click(this.panelCtx, '#om-key-save');
+    await this.panelClick('#om-key-save');
     const saved = await until('"✓ Saved" with Replace and Remove', (x) => x.saved && !x.edit && x.field === '');
     if (!Object.values(kc.items()).includes(KEY)) throw new Error(`the key isn't in the keychain: ${JSON.stringify(Object.keys(kc.items()))}`);
-    await this.d.click(this.panelCtx, '#om-key-replace');
+    await this.panelClick('#om-key-replace');
     await until('the field again, with Cancel, focused', (x) => x.edit && x.cancel && !x.saved && x.focused === 'om-key');
     await this.shot(this.panelCtx, 'panel-open-model-key-replace');
-    await this.d.click(this.panelCtx, '#om-key-cancel');
+    await this.panelClick('#om-key-cancel');
     await until('back to "✓ Saved"', (x) => x.saved && !x.edit);
     await this.shot(this.panelCtx, 'panel-open-model-key-saved');
-    await this.d.click(this.panelCtx, '#om-key-remove');
+    await this.panelClick('#om-key-remove');
     await until('the field (key removed)', (x) => x.edit && !x.saved && !x.cancel);
     if (Object.values(kc.items()).includes(KEY)) throw new Error('Remove left the key in the keychain');
     await pick('#om-provider', provider);
     await pick('#agent', before.agent);
-    await this.d.click(this.panelCtx, '#settings-btn');
+    await this.panelClick('#settings-btn');
     return `saved ("${saved.status.slice(0, 60)}…"), replace and cancel, removed; agent and provider (${provider}) put back`;
   }
 
@@ -428,10 +462,10 @@ class Scenario {
         // One of Tim's mods, switched on, then deleted in the panel (its trash icon): it stays gone.
         await this.cli(['enable', DELETED]);
         await waitFor(`${DELETED} on`, async () => (await status())?.mods.find((m) => m.id === DELETED)?.enabled === true, { timeoutMs: 10000 });
-        await this.d.click(this.panelCtx, `#mod-list > li[data-mod="${DELETED}"] .mod-delete`);
+        await this.panelClick(`#mod-list > li[data-mod="${DELETED}"] .mod-delete`);
         await waitFor(`${DELETED} deleted`, async () => !fs.existsSync(deleted) && !(await status())?.mods.some((m) => m.id === DELETED), { timeoutMs: 10000 });
       }
-      await this.d.click(this.panelCtx, '#settings-btn');
+      await this.panelClick('#settings-btn');
       let last = null;
       const until = (what, ok) => waitFor(what, async () => { last = await rows(); return ok(last) ? last : null; }, { timeoutMs: 15000 })
         .catch((e) => { throw new Error(`${e.message}: ${JSON.stringify(last)}`); });
@@ -456,7 +490,7 @@ class Scenario {
         if (this.o.kind !== 'fresh') return st.rows.map((x) => `${x.site} ${x.button || 'added'}`).join(', ');
         // "Add the rest": the deleted one comes back, a fresh copy, off as Tim set it (it was on when deleted).
         const offeredText = st.rows.find((y) => y.site === 'x.com').mods;
-        await this.d.click(this.panelCtx, '#starter-list li[data-site="x.com"] button');
+        await this.panelClick('#starter-list li[data-site="x.com"] button');
         st = await until('X all added again', (x) => x.rows.find((y) => y.site === 'x.com')?.added);
         if (!fs.existsSync(deleted) || fs.readFileSync(deleted, 'utf8') !== fs.readFileSync(path.join(this.trif, 'app', 'examples', 'sites', `${DELETED}.js`), 'utf8')) throw new Error(`${DELETED} isn't back as shipped`);
         const back = await waitFor(`${DELETED} back, off`, async () => { const m = (await status())?.mods.find((y) => y.id === DELETED); return m && m.enabled === false ? m : null; }, { timeoutMs: 10000 })
@@ -464,7 +498,7 @@ class Scenario {
         await sleep(300);
         await this.shot(this.panelCtx, 'starter-settings-restored');
         const restored = `${DELETED} deleted, offered ("${offeredText}"), back with "Add the rest" (${back.enabled ? 'on' : 'off'})`;
-        await this.d.click(this.panelCtx, `#starter-list li[data-site="${SETTINGS_ADD}"] button`);
+        await this.panelClick(`#starter-list li[data-site="${SETTINGS_ADD}"] button`);
         st = await until(`${SETTINGS_ADD} added`, (x) => x.rows.find((y) => y.site === SETTINGS_ADD)?.added);
         const want = shippedFor(SETTINGS_ADD);
         const missing = want.filter((id) => !fs.existsSync(path.join(this.trif, 'sites', `${id}.js`)));
@@ -477,7 +511,7 @@ class Scenario {
         await this.shot(this.panelCtx, 'starter-settings-added');
         return `${restored}; ${st.rows.map((x) => `${x.site} ${x.button || 'added'}`).join(', ')}; ${want.length} mods for ${SETTINGS_ADD}, TRIF on for ${e.sitesOn.join(', ')}`;
       } finally {
-        await this.d.click(this.panelCtx, '#settings-btn').catch(() => {});
+        await this.panelClick('#settings-btn').catch(() => {});
         await waitFor('settings to close', async () => this.panel(`async () => document.querySelector('#settings').hidden`), { timeoutMs: 5000 }).catch(() => {});
       }
     });
@@ -507,7 +541,7 @@ class Scenario {
         if (st.text !== `Add Tim’s mods for ${L.name}` || !st.gate || !st.inGate) throw new Error(JSON.stringify(st));
         await sleep(300);
         await this.shot(this.panelCtx, 'starter-site-link');
-        await this.d.click(this.panelCtx, '#site-starter-link');
+        await this.panelClick('#site-starter-link');
         const want = shippedFor(L.site);
         const on = SITES_ON.includes(L.site);
         const after = await until('the mods added', (x) => !x.shown && !x.err && want.every((id) => fs.existsSync(path.join(this.trif, 'sites', `${id}.js`)))
@@ -1692,7 +1726,7 @@ class Scenario {
       await r.check('helper back (Try again): the colours back to normal', async () => {
         await this.goColour('site');
         await this.waitLooks('the helper notice', (l) => l.notices.includes('The TRIF helper isn’t connected'));
-        await this.d.click(this.panelCtx, '#notice .actions button');
+        await this.panelClick('#notice .actions button');
         const st = await waitFor('the helper to answer `trif status`', async () => {
           const s = await this.cli(['status'], { json: true, timeoutMs: 15000 });
           return s.json && s.json.extension ? s.json : null;
@@ -1824,7 +1858,7 @@ process.exitCode = 1;
       await this.waitLooks('Claude Code ready (the stand-in)', (l) => l.dotLabel === 'Ready · Claude Code' && !l.send.disabled, 30000);
       const message = 'hide the banner please';
       await this.panel(`async (text) => { const i = document.getElementById('input'); i.value = text; i.dispatchEvent(new Event('input', { bubbles: true })); }`, [message]);
-      await this.d.click(this.panelCtx, '#send');
+      await this.panelClick('#send');
       const c = await waitFor('the run to finish', async () => { const x = await chat(); return x && !x.run && x.messages.length >= 2 ? x : null; }, { timeoutMs: 30000, intervalMs: 300 });
       const roles = c.messages.map((m) => [m.role, m.text]);
       if (JSON.stringify(roles) !== JSON.stringify([['user', message], ['login', 'Claude Code needs you to log in again.']])) throw new Error(`the chat: ${JSON.stringify(roles)}`);
@@ -2113,11 +2147,13 @@ process.exitCode = 1;
     if (!before.main) throw new Error('the page mod didn\'t run');
     const row = await waitFor('the panel to show the good one on hold', () => this.panel(`async () => {
       const li = document.querySelector('li[data-mod="127.0.0.1/e2e-sbx-good"]');
-      return li && li.classList.contains('held') ? { group: li.dataset.group, facts: li.querySelector('.mod-facts')?.innerText || '' } : null;
+      return li && li.classList.contains('held') ? { group: li.dataset.group } : null;
     }`), { timeoutMs: 15000 });
-    if (row.group !== 'page' || !/can't run boxed mods, so here it would run as a free mod/.test(row.facts)) throw new Error(`the panel row: ${JSON.stringify(row)}`);
+    const card = await this.approvalFor('127.0.0.1/e2e-sbx-good');
+    if (row.group !== 'page' || !card.items.some((f) => /can't run boxed mods, so here it would run as a free mod/.test(f)) || card.chip !== 'Boxed mod'
+      || card.note !== 'Allow runs this version as a free mod, in this browser only.') throw new Error(`the panel: ${JSON.stringify({ row, card })}`);
     await this.shot(this.panelCtx, 'panel-sandbox-fallback-held');
-    await this.d.click(this.panelCtx, 'li[data-mod="127.0.0.1/e2e-sbx-good"] button.allow');
+    await this.d.click(this.panelCtx, '#approval .ap-allow');
     const after = await waitFor('the allowed one running as a page script', async () => { const o = await ran(); return o.good ? o : null; }, { timeoutMs: 20000, intervalMs: 500 });
     const st = (await this.cli(['status'], { timeoutMs: 20000 })).stdout;
     if (!/e2e-sbx-good\s+registered \(boxed mod, run as a free mod/.test(st)) throw new Error(`trif status after Allow: ${st.split('\n').find((l) => l.includes('e2e-sbx-good'))}`);
@@ -2192,16 +2228,46 @@ process.exitCode = 1;
       const heldLine = line(held, 'e2e-pw-all');
       if (!heldLine.includes('HELD: it can read what you type on this site, but can\'t send it anywhere; it can play sounds; it can add its own controls (sliders, pickers)')) problems.push(`trif status: ${heldLine}`);
       await this.ext(`async (id, url) => { await chrome.tabs.update(id, { url, active: true }); }`, [win.tabId, `${base}/sandbox.html`]);
-      const row = await waitFor('the panel\'s hold', () => this.panel(`async () => {
+      // the approval dialog: opened by itself for the new hold (the one waiting, or one of them)
+      const rowInfo = await waitFor('the panel\'s hold', () => this.panel(`async () => {
         const li = document.querySelector('li[data-mod="127.0.0.1/e2e-pw-all"]');
-        return li && li.classList.contains('held') ? { head: li.querySelector('.facts-head')?.textContent, items: [...li.querySelectorAll('.facts li')].map((x) => x.textContent),
-          powers: li.querySelector('.mod-powers')?.textContent, note: li.querySelector('.facts-note')?.textContent, group: li.dataset.group } : null;
+        return li && li.classList.contains('held') ? { tag: li.querySelector('.tag.on-hold')?.textContent, powers: li.querySelector('.mod-powers')?.textContent, group: li.dataset.group } : null;
       }`), { timeoutMs: 15000 });
-      if (row.head !== 'Waiting for your OK. This boxed mod asks for these powers, and TRIF holds it to them:'
-        || JSON.stringify(row.items) !== JSON.stringify(['It can read what you type on this site, but can\'t send it anywhere.', 'It can play sounds.', 'It can add its own controls (sliders, pickers).'])
-        || row.powers !== 'Powers: read-drafts, sound, controls' || !/Allow is for these powers: a new version that asks for nothing more runs without asking again\./.test(row.note || '') || row.group !== 'sandboxed') problems.push(`the panel's hold: ${JSON.stringify(row)}`);
-      await this.shot(this.panelCtx, 'panel-powers-held');
-      await this.d.click(this.panelCtx, 'li[data-mod="127.0.0.1/e2e-pw-all"] button.allow');
+      const opened = await waitFor('the approval dialog, by itself', () => this.approvalState(), { timeoutMs: 10000 }).catch(() => null);
+      if (!opened) problems.push('the approval dialog didn\'t open by itself for a new hold');
+      else if (!opened.focusIn) problems.push(`the focus isn't in the approval dialog: ${JSON.stringify(opened)}`);
+      const row = await this.approvalFor('127.0.0.1/e2e-pw-all');
+      const want = {
+        name: 'E2E Boxed mod with powers', chip: 'Boxed mod', where: '127.0.0.1 · e2e-pw-all.js', lead: 'It asks for these powers. TRIF holds it to them:',
+        items: ['It can read what you type on this site, but can\'t send it anywhere.', 'It can play sounds.', 'It can add its own controls (sliders, pickers).'],
+        together: ['Together, it could turn what it reads into sounds that a device nearby could pick up.'],
+        note: 'It\'s new or changed since TRIF last let it run. Updates that ask for the same powers won\'t ask again.', show: 'Show code',
+      };
+      for (const [k, v] of Object.entries(want)) if (JSON.stringify(row[k]) !== JSON.stringify(v)) problems.push(`the approval dialog's ${k}: ${JSON.stringify(row[k])}`);
+      if (rowInfo.tag !== 'on hold' || rowInfo.powers !== 'Powers: read-drafts, sound, controls' || rowInfo.group !== 'sandboxed') problems.push(`the held row: ${JSON.stringify(rowInfo)}`);
+      // the screenshots, in both themes (Chrome; Firefox's driver can't set the colour scheme)
+      for (const scheme of ['dark', 'light']) if (await this.d.colorScheme(this.panelCtx, scheme)) { await sleep(150); await this.shot(this.panelCtx, `approval-powers-${scheme}`); }
+      await this.d.colorScheme(this.panelCtx, '');
+      // Show code opens the code in the card
+      await this.d.click(this.panelCtx, '#approval .ap-show');
+      const code = await waitFor('the code in the card', () => this.panel(`async () => { const c = document.querySelector('#approval .ap-code'); return c && !c.hidden && c.textContent.includes('E2E Boxed mod with powers') ? true : null; }`), { timeoutMs: 8000 }).catch(() => null);
+      if (!code) problems.push('Show code didn\'t show the code in the card');
+      // the keyboard: Tab stays in the card; Esc is Not now: closed, the row still on hold, the badge up
+      for (let i = 0; i < 6; i++) await this.d.key(this.panelCtx, 'Tab');
+      const tabbed = await this.approvalState();
+      if (!tabbed || !tabbed.focusIn) problems.push(`Tab left the approval dialog: ${JSON.stringify(tabbed)}`);
+      for (let i = 0; i < 5 && await this.approvalState(); i++) await this.d.key(this.panelCtx, 'Escape');
+      const after = await this.panel(`async () => ({ open: !!document.getElementById('approval')?.open, badge: document.getElementById('waiting-badge').hidden ? '' : document.getElementById('waiting-badge').textContent,
+        tag: document.querySelector('li[data-mod="127.0.0.1/e2e-pw-all"] .tag.on-hold')?.textContent })`);
+      if (after.open || !/^\d+ waiting$/.test(after.badge) || after.tag !== 'on hold') problems.push(`after Esc: ${JSON.stringify(after)}`);
+      // (not again by itself: a status refresh later, still closed)
+      await sleep(2500);
+      if (await this.approvalState()) problems.push('the approval dialog opened again by itself after Not now');
+      // the badge reopens it; Allow
+      await this.d.click(this.panelCtx, '#waiting-badge');
+      if (!await waitFor('the dialog again', () => this.approvalState(), { timeoutMs: 8000 }).catch(() => null)) problems.push('the badge didn\'t reopen the approval dialog');
+      await this.approvalFor('127.0.0.1/e2e-pw-all');
+      await this.d.click(this.panelCtx, '#approval .ap-allow');
       await waitFor('allowed, registered with its powers', async () => /e2e-pw-all\s+registered \(boxed, powers: read-drafts, sound, controls\)/.test(await status()) || null, { timeoutMs: 20000, intervalMs: 500 });
       await this.cli(['reload', '--tab', String(win.tabId)], { timeoutMs: 30000 });
       let last = null;
@@ -2227,7 +2293,7 @@ process.exitCode = 1;
       // a new power (keys): waits for that one only
       fs.writeFileSync(allFile, all.replace('// @powers      sound, controls, read-drafts', '// @powers      sound, controls, read-drafts, keys'));
       const held2 = await waitFor('held for the new power', async () => { const st = await status(); return /e2e-pw-all\s+CHANGE WAITING/.test(st) ? st : null; }, { timeoutMs: 20000, intervalMs: 500 });
-      if (!/CHANGE WAITING \(the version before runs meanwhile\): it can see the keys you press \(not in text fields\), so it can have shortcuts \(trif approve/.test(line(held2, 'e2e-pw-all'))) problems.push(`trif status for the new power: ${line(held2, 'e2e-pw-all')}`);
+      if (!/CHANGE WAITING \(the version before runs meanwhile\): it can see the keys you press \(not in text fields\), so it can have shortcuts; Mods with many powers can act in unspecific or powerful ways\. Treat this with caution\. \(trif approve/.test(line(held2, 'e2e-pw-all'))) problems.push(`trif status for the new power: ${line(held2, 'e2e-pw-all')}`);
       await this.cli(['approve', '127.0.0.1/e2e-pw-all'], { timeoutMs: 20000 });
       await waitFor('keys allowed', async () => /e2e-pw-all\s+registered \(boxed, powers: read-drafts, keys, sound, controls\)/.test(await status()) || null, { timeoutMs: 20000, intervalMs: 500 });
       await this.cli(['reload', '--tab', String(win.tabId)], { timeoutMs: 30000 });
@@ -2240,7 +2306,7 @@ process.exitCode = 1;
       if (leaks.length) problems.push(`the server saw: ${leaks.join(', ')}`);
       fs.writeFileSync(this.r.file(`powers-${this.o.browser}.json`), JSON.stringify({ declared: A, undeclared: N, keys: [k1, k2], typed: got.typed, problems }, null, 2));
       if (problems.length) throw new Error(problems.join('\n'));
-      return `held for "${row.items.join(' ')}"; allowed in the panel; ${Object.keys(A).length} declared outcomes as expected (sound, controls, read-drafts), ${Object.keys(N).length} undeclared refused; keys ${k1} then, with keys, ${k2}; same powers ran, a new one waited`;
+      return `held for "${row.items.join(' ')}" and "${row.together.join(' ')}"; the approval dialog opened by itself, kept the focus, closed on Esc and stayed closed, the badge reopened it; allowed there; ${Object.keys(A).length} declared outcomes as expected (sound, controls, read-drafts), ${Object.keys(N).length} undeclared refused; keys ${k1} then, with keys, ${k2}; same powers ran, a new one waited`;
     } finally {
       for (const f of [allFile, noneFile]) { try { fs.unlinkSync(f); } catch { /* gone */ } }
     }
@@ -2324,14 +2390,14 @@ process.exitCode = 1;
     const status = async () => (await this.cli(['status'], { timeoutMs: 20000 })).stdout;
     const line = (st, id) => st.split('\n').find((l) => new RegExp(`${id}\\s`).test(l)) || '';
     const read = async () => JSON.parse((await this.cli(['run', '--tab', String(win.tabId), `(() => { const d = document.documentElement; return {
-      r: d.getAttribute('data-trif-box-pw3'), b: d.getAttribute('data-trif-box-pw3b'), none: d.getAttribute('data-trif-box-pw3none'),
+      r: d.getAttribute('data-trif-box-pw3'), b: d.getAttribute('data-trif-box-pw3b'), bClick: d.getAttribute('data-trif-box-pw3b-click'), none: d.getAttribute('data-trif-box-pw3none'),
       seen: document.getElementById('seen') && document.getElementById('seen').textContent, hash: location.hash, wd: document.getElementById('wd') && document.getElementById('wd').value,
       pw: document.getElementById('pw3') && document.getElementById('pw3').value, ed: document.getElementById('ed2') && document.getElementById('ed2').textContent,
       f3i: document.getElementById('f3i') && document.getElementById('f3i').value, path: location.pathname }; })()`], { timeoutMs: 20000 })).stdout);
     const open = async () => {
       await this.ext(`async (id, url) => { await chrome.tabs.update(id, { url, active: true }); }`, [win.tabId, `${base}/powers3.html`]);
       let last = null;
-      return waitFor('the mods\' results', async () => { const o = last = await read(); return o.r && /"done"/.test(o.r) && o.none && /mods: an answer/.test(o.r) ? o : null; }, { timeoutMs: 20000, intervalMs: 400 })
+      return waitFor('the mods\' results', async () => { const o = last = await read(); return o.r && /"done"/.test(o.r) && o.none && o.bClick && /mods: an answer/.test(o.r) ? o : null; }, { timeoutMs: 20000, intervalMs: 400 })
         .catch((e) => { throw new Error(`${e.message}: ${JSON.stringify(last)}`); });
     };
     const problems = [];
@@ -2339,23 +2405,24 @@ process.exitCode = 1;
     try {
       for (const [id, text] of Object.entries(files)) fs.writeFileSync(path.join(dir, `${id}.js`), text);
       // held, for its powers and the combination; mods alone (e2e-pw3b) doesn't hold
-      const held = await waitFor('held for its powers', async () => { const st = await status(); return /e2e-pw3\s+HELD/.test(st) && /e2e-pw3b\s+registered \(boxed, powers: mods\)/.test(st) && /e2e-pw3none\s+registered \(boxed\)/.test(st) ? st : null; }, { timeoutMs: 25000, intervalMs: 500 });
+      const held = await waitFor('held for its powers', async () => { const st = await status(); return /e2e-pw3\s+HELD/.test(st) && /e2e-pw3b\s+HELD: it can talk to your other boxed mods on this page; it can click these for you: the counter \(#pclick\) \(trif approve/.test(st) && /e2e-pw3none\s+registered \(boxed\)/.test(st) ? st : null; }, { timeoutMs: 25000, intervalMs: 500 });
       const hl = line(held, 'e2e-pw3');
       for (const want of ['it can read what you type on this site, but can\'t send it anywhere', 'it can talk to your other boxed mods on this page', 'it can play and pause video and audio on this page',
         `it can take you to these pages on ${site}: /e2e-goto-ok, or to a link the page shows`,
         'it can click these for you: the counter (#pclick), a link on this page (#plink), the form\'s buttons (#fb3, #fr3, #lb3), a link to another site (#ext3)',
-        'it can change what you type and paste on this site before you post it', 'it could put what it reads into something you post, with these powers together']) {
+        'it can change what you type and paste on this site before you post it', 'Mods with many powers can act in unspecific or powerful ways. Treat this with caution.']) {
         if (!hl.includes(want)) problems.push(`trif status doesn't say "${want}": ${hl}`);
       }
       await this.cli(['approve', `${site}/e2e-pw3`], { timeoutMs: 20000 });
-      await waitFor('registered', async () => /e2e-pw3\s+registered \(boxed, powers: read-drafts, mods, media, go-to, click, write-drafts\)/.test(await status()) || null, { timeoutMs: 20000, intervalMs: 500 });
+      await this.cli(['approve', `${site}/e2e-pw3b`], { timeoutMs: 20000 });
+      await waitFor('registered', async () => { const st = await status(); return /e2e-pw3\s+registered \(boxed, powers: read-drafts, mods, media, go-to, click, write-drafts\)/.test(st) && /e2e-pw3b\s+registered \(boxed, powers: mods, click\)/.test(st) || null; }, { timeoutMs: 20000, intervalMs: 500 });
       const got = await open();
       const R = JSON.parse(got.r), N = JSON.parse(got.none);
       for (const [k, v] of Object.entries(N)) if (!/^(refused|absent)/.test(v)) problems.push(`UNDECLARED ${k}: ${v}`);
       for (const [k, v] of Object.entries(R)) if (!(/\(refused\)$/.test(k) ? /^refused/ : /^ok/).test(v)) problems.push(`DECLARED ${k}: ${v}`);
       const exact = {
         'media: mute': 'ok: true', 'media: volume': 'ok: 0.5', 'media: seek': 'ok: 0', 'media: pause': 'ok: true', 'media: play': 'ok: object',
-        'click: the counter': 'ok: 1', 'write-drafts: a field': 'ok: rewritten', 'write-drafts: a textarea': 'ok: rewritten two', 'write-drafts: an editor': 'ok: rewritten draft',
+        'click: the counter': 'ok: 1', 'write-drafts: a field': 'ok: rewritten', 'write-drafts: a textarea': 'ok: rewritten two, see example.org/a', 'write-drafts: back to plain words': 'ok: rewritten', 'write-drafts: an editor': 'ok: rewritten draft',
         'mods: an answer': `ok: {"echo":{"hello":"from a","n":1},"by":"b"} from ${site}/e2e-pw3b`,
       };
       for (const [k, v] of Object.entries(exact)) if (R[k] !== v) problems.push(`${k}: ${R[k]}`);
@@ -2365,9 +2432,14 @@ process.exitCode = 1;
         'go-to: a page the header doesn\'t name (refused)': /isn't one of the header's pages/, 'go-to: a link to another site the page shows (refused)': /isn't one of the header's pages/,
         'write-drafts: a password (refused)': /password and card fields stay the user's/, 'write-drafts: a card field (refused)': /password and card fields stay the user's/,
         'mods: a function in a message (refused)': /plain data/, 'mods: an element in a message (refused)': /plain data/,
+        'write-drafts: an address the user didn\'t type (refused)': /"https:\/\/evil\.example\/\?d=1" looks like an address that isn't in what the user typed here or in a link on the page/,
+        'write-drafts: an address the user typed, with more on it (refused)': /"example\.org\/a\?d=1" looks like an address/,
+        'write-drafts: an address into an editor (refused)': /"evil\.example" looks like an address/,
+        'write-drafts: a word and a dot that make an address (refused)': /"evil\.example" looks like an address/,
       };
       for (const [k, re] of Object.entries(why)) if (!re.test(R[k] || '')) problems.push(`${k}: ${R[k]}`);
       if (got.b !== `{"hello":"from a","n":1} from ${site}/e2e-pw3`) problems.push(`the other end of the channel: ${got.b}`);
+      if (!/^refused: .*clicking for the user is off on this page while another boxed mod here has the read-drafts power/.test(got.bClick || '')) problems.push(`the other mod's click, beside a read it didn't ask for: ${got.bClick}`);
       if (got.hash !== '#plink-target') problems.push(`the link on the page wasn't clicked: ${got.hash}`);
       if (!/^wd,wta/.test(got.seen || '')) problems.push(`the page didn't see the changed drafts as input: ${got.seen}`);
       if (got.pw !== 'hunter2' || got.f3i !== 'typed') problems.push(`a field changed that shouldn't: ${JSON.stringify(got)}`);
@@ -2440,7 +2512,7 @@ page.root.setAttr('data-trif-box-spec', r);\n`,
     const look = async () => (await this.cli(['run', '--tab', String(win.tabId), `document.documentElement.getAttribute('data-trif-box-sbx-panel')`], { timeoutMs: 20000 })).stdout.trim();
     const clickGroup = async () => {
       await waitFor('the Sandboxed heading', () => this.panel(`async () => !!document.querySelector('li.mod-group[data-group="sandboxed"] .group-switch') || null`), { timeoutMs: 10000 });
-      await this.d.click(this.panelCtx, 'li.mod-group[data-group="sandboxed"] .group-switch');
+      await this.panelClick('li.mod-group[data-group="sandboxed"] .group-switch');
     };
     try {
       fs.writeFileSync(file, '// ==WebMod==\n// @name E2E Sandboxed in the panel\n// @match *://127.0.0.1/*\n// @sandboxed\n// ==/WebMod==\npage.root.setAttr(\'data-trif-box-sbx-panel\', \'ran\');\n');
@@ -2470,7 +2542,7 @@ page.root.setAttr('data-trif-box-spec', r);\n`,
     } finally {
       try { fs.unlinkSync(file); } catch { /* gone */ }
       const stillOff = await this.panel(`async () => !!document.querySelector('li.mod-group[data-group="sandboxed"].off')`).catch(() => false);
-      if (stillOff) await this.d.click(this.panelCtx, 'li.mod-group[data-group="sandboxed"] .group-switch').catch(() => {});
+      if (stillOff) await this.panelClick('li.mod-group[data-group="sandboxed"] .group-switch').catch(() => {});
     }
   }
 
@@ -2484,7 +2556,7 @@ page.root.setAttr('data-trif-box-spec', r);\n`,
     const scripts = () => this.ext(`async () => (await chrome.userScripts.getScripts()).map((s) => ({ id: s.id, ex: s.excludeMatches || [] }))`);
     const clickGroup = async () => {
       await waitFor('the Page scripts heading', () => this.panel(`async () => !!document.querySelector('li.mod-group[data-group="page"] .group-switch') || null`), { timeoutMs: 10000 });
-      await this.d.click(this.panelCtx, 'li.mod-group[data-group="page"] .group-switch');
+      await this.panelClick('li.mod-group[data-group="page"] .group-switch');
     };
     try {
       fs.writeFileSync(rulesFile, '// ==WebMod==\n// @name Group rules\n// @match *://127.0.0.1/*\n// @rules\n// ==/WebMod==\n{ "css": "#title { color: rgb(4, 5, 6) }" }\n');
@@ -2518,7 +2590,7 @@ page.root.setAttr('data-trif-box-spec', r);\n`,
       try { fs.unlinkSync(rulesFile); } catch { /* gone */ }
       // (left off by a failure: switch it on again the way the user would)
       const stillOff = await this.panel(`async () => !!document.querySelector('li.mod-group[data-group="page"].off')`).catch(() => false);
-      if (stillOff) await this.d.click(this.panelCtx, 'li.mod-group[data-group="page"] .group-switch').catch(() => {});
+      if (stillOff) await this.panelClick('li.mod-group[data-group="page"] .group-switch').catch(() => {});
     }
   }
 
@@ -2531,7 +2603,7 @@ page.root.setAttr('data-trif-box-spec', r);\n`,
     const rulesFile = path.join(this.trif, 'sites', site, 'e2e-new-rules.js');
     const look = async () => JSON.parse((await this.cli(['run', '--tab', String(win.tabId), `({ ran: document.documentElement.dataset.e2eNewPage || null, color: getComputedStyle(document.getElementById('title')).color })`], { timeoutMs: 20000 })).stdout);
     const setPage = async (value) => {
-      await this.d.click(this.panelCtx, '#settings-btn');
+      await this.panelClick('#settings-btn');
       await waitFor('Settings', () => this.panel(`async () => !document.querySelector('#settings').hidden || null`), { timeoutMs: 5000 });
       // (as the user picking it in the menu: the select's value, then its change event)
       await this.panel(`async (v) => { const s = document.querySelector('#starts-page'); s.value = v; s.dispatchEvent(new Event('change', { bubbles: true })); }`, [value]);
@@ -2539,7 +2611,7 @@ page.root.setAttr('data-trif-box-spec', r);\n`,
       await waitFor(`page scripts start ${value}`, async () => JSON.stringify((await this.cli(['status'], { json: true, timeoutMs: 20000 })).json.extension.startsOff || []) === want || null, { timeoutMs: 10000, intervalMs: 300 });
       const shown = await this.panel(`async () => ({ rules: document.querySelector('#starts-rules').value, page: document.querySelector('#starts-page').value, note: document.querySelector('#starts-note').hidden ? '' : document.querySelector('#starts-note').textContent })`);
       if (value === 'off') await this.shot(this.panelCtx, 'settings-new-mods-start');
-      await this.d.click(this.panelCtx, '#settings-btn');
+      await this.panelClick('#settings-btn');
       return shown;
     };
     try {
@@ -2562,7 +2634,7 @@ page.root.setAttr('data-trif-box-spec', r);\n`,
       if (!row.off || row.title !== 'New free mods start off (Settings): switch it on once you\'ve looked at it.') throw new Error(`the row: ${JSON.stringify(row)}`);
       await this.shot(this.panelCtx, 'panel-new-mod-off');
       // The user switches it on in the panel: it runs, and it's no longer "new".
-      await this.d.click(this.panelCtx, 'li[data-mod="127.0.0.1/e2e-new-page"] button.switch');
+      await this.panelClick('li[data-mod="127.0.0.1/e2e-new-page"] button.switch');
       await waitFor('the page script running', async () => (await look()).ran === 'ran' || null, { timeoutMs: 15000, intervalMs: 400 });
       const after = (await this.cli(['status'], { json: true, timeoutMs: 20000 })).json.extension.mods.find((m) => m.id === '127.0.0.1/e2e-new-page');
       if (after.enabled === false || after.newOff) throw new Error(`after switching on: ${JSON.stringify(after)}`);
@@ -2642,7 +2714,7 @@ say({ type: 'result', subtype: 'success', is_error: false, result: text, session
       // (After the expired-login check the panel may still say Claude Code needs a login; Send works anyway.)
       await this.waitLooks('Send on (the stand-in Claude Code)', (l) => /Claude Code/.test(l.dotLabel) && !l.send.disabled, 30000);
       await this.panel(`async (text) => { const i = document.getElementById('input'); i.value = text; i.dispatchEvent(new Event('input', { bubbles: true })); }`, ['make the page prettier']);
-      await this.d.click(this.panelCtx, '#send');
+      await this.panelClick('#send');
       const c = await waitFor('the run to finish', async () => { const x = await chat(); return x && !x.run && x.messages.length >= 2 ? x : null; }, { timeoutMs: 60000, intervalMs: 300 });
       const answer = c.messages.find((m) => m.role === 'assistant');
       if (!answer) throw new Error(`the run: ${JSON.stringify(c.messages.map((m) => [m.role, String(m.text).slice(0, 400)]))}`);
@@ -2663,11 +2735,11 @@ say({ type: 'result', subtype: 'success', is_error: false, result: text, session
       const lock = await waitFor('the lock notice', () => this.panel(`async () => { const n = document.getElementById('tab-lock'); return n && !n.hidden ? n.innerText : null; }`), { timeoutMs: 10000 });
       if (!/Posting is paused on this tab/.test(lock)) throw new Error(`the lock notice: ${lock}`);
       // The mod: held for what its code does, its header's claim shown apart
-      const held = await waitFor('the mod held', () => this.panel(`async () => {
-        const li = document.querySelector('#mod-list li[data-mod="${site}/e2e-poster"]');
-        const box = li && li.querySelector('.mod-facts.held');
-        return box ? { facts: [...box.querySelectorAll('ul.facts li')].map((x) => x.textContent), claim: box.querySelector('.facts-claim')?.textContent || '' } : null;
-      }`), { timeoutMs: 15000 });
+      const card = await this.approvalFor(`${site}/e2e-poster`);
+      const held = { facts: card.items, claim: card.claim };
+      if (card.chip !== 'Free mod' || card.lead !== 'TRIF found that this mod:' || !/A free mod can do anything the page can, so look at the code if you're not sure\.$/.test(card.note)) throw new Error(`the approval dialog: ${JSON.stringify(card)}`);
+      for (const scheme of ['dark', 'light']) if (await this.d.colorScheme(this.panelCtx, scheme)) { await sleep(150); await this.shot(this.panelCtx, `approval-free-${scheme}`); }
+      await this.d.colorScheme(this.panelCtx, '');
       if (!held.facts.some((f) => /send requests or messages from the page as you \(it uses fetch\)/.test(f))) throw new Error(`the held facts: ${JSON.stringify(held)}`);
       if (!/The agent says: .render-only/.test(held.claim)) throw new Error(`the claim: ${held.claim}`);
       await this.shot(this.panelCtx, 'panel-hijack-held-and-locked');

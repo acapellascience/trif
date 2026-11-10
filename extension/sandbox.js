@@ -316,7 +316,7 @@ export function sandboxRuntime(mode, pageModId, pageFn, pagePowers) {
     }
   };
   // Writing into an editor is changing what the user typed: refused (audit AU-1); restyling, hiding it: fine.
-  const mediaOf = (s) => { const n = nodeOf(s); if (!/^(video|audio)$/.test(n.localName)) fail('that\'s for the page\'s <video> and <audio>'); if (!cur().powers.has('media')) fail('playing the page\'s video and audio needs the media power (// @powers media)'); return n; };
+  const mediaOf = (s) => { const n = nodeOf(s); if (!/^(video|audio)$/.test(n.localName)) fail('that\'s for the page\'s <video> and <audio>'); if (!cur().powers.has('media')) fail('playing the page\'s video and audio needs the media power (// @powers media)'); partnersOk(cur(), 'media'); return n; };
   // (would a click on it submit a form: a submit button or input, a button with no type in a form, or
   // something inside one of those)
   // (or reset one: what the user typed, wiped; a label clicks its control, so a label for one of those too)
@@ -332,12 +332,67 @@ export function sandboxRuntime(mode, pageModId, pageFn, pagePowers) {
   // (docs/POWERS.md "Combinations"). Boxed mods on a page can see each other's elements, so what one mod
   // reads could reach another through the page: while any boxed mod here has a read power, a mod changes
   // what the user types only if it asked for that read too (and so the user saw the combination).
+  // The page-wide rules (docs/SAFE-MODS.md "Combinations"): boxed mods on a page see each other's elements
+  // (and with `mods`, talk), so a combination the hold warns about (helper/lib/combinations.js) could be split
+  // between two mods, each without the warning. So an act is refused while another boxed mod that has run on
+  // this page has a power that makes a warned pair with it, unless the acting mod asked for that power too
+  // (and so its hold showed the warning). ACT_PARTNERS: the act, and the powers it's refused beside
+  // (tests/combinations.test.js keeps it in step with the table). Not here: sound beside a read (SAFE-MODS says
+  // why); click beside a draft another mod wrote (clickOk); click beside go-to (on go-to's side).
+  const ACT_PARTNERS = {
+    'write-drafts': ['read-drafts', 'keys', 'site-data', 'page-data'],
+    click: ['read-drafts', 'keys', 'site-data', 'page-data'],
+    media: ['read-drafts', 'keys', 'site-data', 'page-data'],
+    'go-to': ['click'],
+  };
+  const PARTNER_WHY = {
+    'write-drafts': ['changing what the user types', 'what one reads could end up in what the user posts'],
+    click: ['clicking for the user', 'what one reads could decide what the other clicks'],
+    media: ['playing the page\'s video and audio', 'what one reads could reach a video\'s host through how it plays'],
+    'go-to': ['taking the user to a page', 'one could take the user to a page where the other clicks'],
+  };
+  const inPlay = new Set(); // (the powers of the boxed mods that have run on this page)
+  const partnersOk = (api, act) => {
+    for (const p of ACT_PARTNERS[act]) if (inPlay.has(p) && !api.powers.has(p)) fail(`${PARTNER_WHY[act][0]} is off on this page while another boxed mod here has the ${p} power: with both, ${PARTNER_WHY[act][1]} (a mod that asks for ${act} and ${p} together shows the user that)`);
+  };
   const draftsOk = (api) => {
     if (!api.powers.has('write-drafts')) return false;
-    for (const r of readsHere) if (!api.powers.has(r)) fail(`changing what the user types is off on this page while another boxed mod here has the ${r} power: with both, what one reads could end up in what the user posts (a mod that asks for write-drafts and ${r} together shows the user that)`);
+    partnersOk(api, 'write-drafts');
     return true;
   };
+  // (click: also not after another mod changed a draft, unless the clicking mod has write-drafts: a click could
+  // send it)
+  const clickOk = (api) => {
+    partnersOk(api, 'click');
+    for (const w of draftWriters) if (w !== api.mod && !api.powers.has('write-drafts')) fail('clicking for the user is off on this page since another boxed mod here changed a draft: with both, a draft could be sent without the user (a mod that asks for click and write-drafts together shows the user that)');
+  };
+  // write-drafts and addresses: the rule (docs/SAFE-MODS.md) holds in drafts too. A site can fetch an address
+  // in a draft before anything is posted (a link preview), so the text a mod writes may only have the
+  // addresses already in what the user typed there, or in a link on the page: no address it made up.
+  const ADDRESS = /(?:[a-z][a-z0-9+.-]*:\/\/|www[.\u3002\uff0e\uff61])[^\s<>"'`]+|(?:[\p{L}\p{N}][\p{L}\p{N}-]{0,62}[.\u3002\uff0e\uff61])+(?:[a-z]{2,63}|xn--[a-z0-9-]{1,59})(?![\p{L}\p{N}-])(?:[/?#:][^\s<>"'`]*)?|\b\d{1,3}(?:\.\d{1,3}){3}\b/giu;
+  const linkHas = (t) => { for (const a of D.links) if (!created.has(a) && String(a.href).toLowerCase().includes(t)) return true; return false; };
+  const noNewAddress = (before, after) => {
+    const was = String(before).toLowerCase();
+    for (const m of String(after).matchAll(ADDRESS)) {
+      const t = m[0].toLowerCase();
+      if (!was.includes(t) && !linkHas(t)) fail(`"${m[0].slice(0, 80)}" looks like an address that isn't in what the user typed here or in a link on the page: a boxed mod doesn't add addresses to a draft (a site can fetch one for a preview before anything is posted)`);
+    }
+  };
+  // (an editor's text after a write: the text before where it goes, what it adds, the rest; `removed`
+  // characters replaced)
+  const editorRoot = (n) => { let r = n; while (r.parentElement && r.parentElement.isContentEditable) r = r.parentElement; return r; };
+  const editorWrite = (n, setEnd, removed, added) => {
+    const root = editorRoot(n);
+    const before = root.textContent;
+    const rg = D.createRange();
+    rg.setStart(root, 0);
+    setEnd(rg);
+    const at = rg.toString().length;
+    noNewAddress(before, before.slice(0, at) + added + before.slice(at + removed));
+  };
+  const draftWriters = new Set(); // (boxed mods that changed a draft on this page: see clickOk)
   const notInEditor = (n, what) => { if (inEditor(n) && !draftsOk(cur())) fail(`${what} isn't offered inside an editor (what the user is typing)`); };
+  const wrote = (n) => { if (inEditor(n)) draftWriters.add(cur().mod); };
   const textInto = (parent, kids) => {
     formsOk(parent, kids);
     for (const k of kids) if (typeof k !== 'string' && insideEditor(k)) fail('a piece of an editor can\'t be moved out of it');
@@ -555,9 +610,6 @@ export function sandboxRuntime(mode, pageModId, pageFn, pagePowers) {
   };
   // ---- page-data: the page's side answers during the event (runtime.js pageBridge)
   let pageDataAnswer = null;
-  // (the read powers of the boxed mods that have run on this page: see draftsOk)
-  const READS = ['read-drafts', 'keys', 'site-data', 'page-data'];
-  const readsHere = new Set();
   // (mods: channels between this page's boxed mods; in a page script, shared with the page's other ones)
   const channels = SANDBOX ? new Map() : (G.__trifChannels || (Object.defineProperty(G, '__trifChannels', { value: new Map() }), G.__trifChannels));
   D.addEventListener('trif:page-data-answer', (e) => { pageDataAnswer = typeof e.detail === 'string' ? e.detail : null; }, true);
@@ -566,11 +618,11 @@ export function sandboxRuntime(mode, pageModId, pageFn, pagePowers) {
     if (apis.has(modId)) return apis.get(modId);
     // (its powers: docs/POWERS.md; what's not in this set it doesn't get, and a mod TRIF can't name gets none)
     const grant = Array.isArray(powers) ? { powers, args: {} } : powers && typeof powers === 'object' ? powers : { powers: [], args: {} };
-    const self = { powers: new Set((Array.isArray(grant.powers) ? grant.powers : []).map(String)), args: grant.args && typeof grant.args === 'object' ? grant.args : {} };
+    const self = { mod: modId, powers: new Set((Array.isArray(grant.powers) ? grant.powers : []).map(String)), args: grant.args && typeof grant.args === 'object' ? grant.args : {} };
     const has = (p) => self.powers.has(p);
     const needs = (p) => { if (!has(p)) fail(`that needs the ${p} power (// @powers ${p} in the mod's header, which the user approves)`); };
     apis.set(modId, self);
-    for (const r of READS) if (self.powers.has(r)) readsHere.add(r);
+    for (const p of self.powers) inPlay.add(p);
     // (a callback of the mod's: errors reported as its own, and stand-ins' listeners are its own)
     const call = (fn, ...args) => { const prev = current, t = now(); current = self; try { return fn(...args); } catch (e) { report(modId, e); return undefined; } finally { current = prev; stats.callbacks++; stats.callbackMs += now() - t; } };
     // TRIF's functions as the mod sees them: an error from the browser (a DOMException, say) is passed on
@@ -760,6 +812,7 @@ export function sandboxRuntime(mode, pageModId, pageFn, pagePowers) {
       // go-to: one of the header's pages, or a link the page shows
       goTo: (where) => {
         needs('go-to');
+        partnersOk(self, 'go-to');
         const p = str(where, 'a page', 2000);
         const paths = self.args['go-to'] || [];
         let abs = null;
@@ -893,7 +946,10 @@ export function sandboxRuntime(mode, pageModId, pageFn, pagePowers) {
       if (isRaw(n)) fail(`text can't be written into <${n.localName}>`);
       notInEditor(n, 'writing text');
       detachOk(n, true);
-      n.textContent = str(t, 'text');
+      str(t, 'text');
+      if (inEditor(n)) editorWrite(n, (rg) => rg.setEnd(n, 0), n.textContent.length, t);
+      n.textContent = t;
+      wrote(n);
     },
     // (a field's value attribute: null, as React keeps it in step with what's typed: audit AU-2; read-drafts
     // reads fields through .value, and attributes inside editors)
@@ -919,6 +975,9 @@ export function sandboxRuntime(mode, pageModId, pageFn, pagePowers) {
       if (!draftsOk(cur())) fail('changing what the user typed needs the write-drafts power (// @powers write-drafts)');
       if (secretField(n)) fail('password and card fields stay the user\'s, whatever the mod\'s powers');
       if (n.localName === 'select' || (n.localName === 'input' && !/^(text|search|email|url|tel|)$/i.test(String(n.type)))) fail(`a ${n.localName === 'select' ? 'select' : `${n.type} input`} isn't a text the user types`);
+      if (n.isContentEditable) editorWrite(n, (rg) => rg.setEnd(n, 0), n.textContent.length, val);
+      else noNewAddress(n.value, val);
+      draftWriters.add(cur().mod);
       if (n.isContentEditable) { n.textContent = val; } else {
         // (through the element's own value setter, and an input event, so the page's code sees the change)
         const proto = n.localName === 'textarea' ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype;
@@ -1005,11 +1064,11 @@ export function sandboxRuntime(mode, pageModId, pageFn, pagePowers) {
     get next() { return wrap(nodeOf(this).nextElementSibling); },
     get previous() { return wrap(nodeOf(this).previousElementSibling); },
     get created() { return created.has(nodeOf(this)); },
-    append(...kids) { const n = nodeOf(this); notInEditor(n, 'adding'); const k = kids.map(kidOf); textInto(n, k); n.append(...k); },
-    prepend(...kids) { const n = nodeOf(this); notInEditor(n, 'adding'); const k = kids.map(kidOf); textInto(n, k); n.prepend(...k); },
-    before(...kids) { const n = nodeOf(this); notInEditor(n.parentElement, 'adding'); const k = kids.map(kidOf); if (n.parentNode) textInto(n.parentNode, k); n.before(...k); },
-    after(...kids) { const n = nodeOf(this); notInEditor(n.parentElement, 'adding'); const k = kids.map(kidOf); if (n.parentNode) textInto(n.parentNode, k); n.after(...k); },
-    remove() { const n = nodeOf(this); notInEditor(n, 'removing'); detachOk(n, false); n.remove(); },
+    append(...kids) { const n = nodeOf(this); notInEditor(n, 'adding'); const k = kids.map(kidOf); textInto(n, k); if (inEditor(n)) editorWrite(n, (rg) => rg.setEnd(n, n.childNodes.length), 0, k.map((x) => x.textContent).join('')); n.append(...k); wrote(n); },
+    prepend(...kids) { const n = nodeOf(this); notInEditor(n, 'adding'); const k = kids.map(kidOf); textInto(n, k); if (inEditor(n)) editorWrite(n, (rg) => rg.setEnd(n, 0), 0, k.map((x) => x.textContent).join('')); n.prepend(...k); wrote(n); },
+    before(...kids) { const n = nodeOf(this); notInEditor(n.parentElement, 'adding'); const k = kids.map(kidOf); if (n.parentNode) textInto(n.parentNode, k); if (inEditor(n.parentElement)) editorWrite(n.parentElement, (rg) => rg.setEndBefore(n), 0, k.map((x) => x.textContent).join('')); n.before(...k); wrote(n.parentElement); },
+    after(...kids) { const n = nodeOf(this); notInEditor(n.parentElement, 'adding'); const k = kids.map(kidOf); if (n.parentNode) textInto(n.parentNode, k); if (inEditor(n.parentElement)) editorWrite(n.parentElement, (rg) => rg.setEndAfter(n), 0, k.map((x) => x.textContent).join('')); n.after(...k); wrote(n.parentElement); },
+    remove() { const n = nodeOf(this); notInEditor(n, 'removing'); detachOk(n, false); if (inEditor(n.parentElement)) editorWrite(n.parentElement, (rg) => rg.setEndBefore(n), n.textContent.length, ''); n.remove(); wrote(n.parentElement || n); },
     // a copy of this element and what's inside it, keeping only allowed elements and attributes (an element
     // of another kind is left out, with what's inside it; other attributes are dropped)
     clone() { return wrap(safeCopy(nodeOf(this))); },
@@ -1032,6 +1091,7 @@ export function sandboxRuntime(mode, pageModId, pageFn, pagePowers) {
       let ok = false;
       for (const sel of named) { try { if (n.matches(sel)) { ok = true; break; } } catch { /* not a selector */ } }
       if (!ok) fail('that isn\'t one of the things the header says this mod may click');
+      clickOk(api);
       if (submits(n)) fail('a click that would submit or reset a form isn\'t offered, whatever the header says');
       const a = n.closest('a[href], area[href]');
       if (a) { let u = null; try { u = new URL(a.href); } catch { /* none */ } if (!u || u.origin !== ORIGIN) fail('a click on a link to another site isn\'t offered'); }

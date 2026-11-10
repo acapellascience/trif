@@ -89,7 +89,7 @@ function shippedBaseline(home, mod) {
 
 // The text a hold or review shows: TRIF's own words, one fact per line.
 function reasonOf(needs) {
-  return needs.map((n) => n.fact).join('; ');
+  return needs.map((n) => n.fact).filter(Boolean).join('; ');
 }
 
 // What the agent says the mod does: shown as the agent's claim, apart from TRIF's facts.

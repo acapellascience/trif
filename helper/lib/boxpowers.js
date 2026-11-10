@@ -91,9 +91,38 @@ function parseClicks(values) {
   });
 }
 
-// The reads that, with write-drafts, could put what they read into something the user posts.
-const READS = ['read-drafts', 'keys', 'site-data', 'page-data'];
-const TOGETHER = 'could put what it reads into something you post, with these powers together';
+// The combinations: helper/lib/combinations.js, every pair and triple, with the warnings a hold shows.
+const combos = require('./combinations');
+const READS = combos.READS;
+function togetherNeeds(list) {
+  const warns = combos.warningsFor(list);
+  const need = (key, fact) => ({ key, fact, power: 'together', soft: false, lines: [] });
+  // (more than three powers: one general warning, for that exact set; its combinations are still needs, so
+  // a version with fewer powers that the user allowed in this one doesn't ask again)
+  if (list.length > combos.MANY_OVER) return [need(`power:together:many:${combos.keyOf(list)}`, combos.MANY), ...warns.map((w) => need(w.key, ''))];
+  return warns.map((w) => need(w.key, w.fact));
+}
+/**
+ * A hold's lines, from its needs' keys and facts (aligned): "it <fact>", "together, it <fact>", or the
+ * many-powers sentence; none for a need without a fact, and a sentence once (two reads with write-drafts
+ * are two needs with one warning).
+ */
+function factLines(needs, facts) {
+  const seen = new Set();
+  const out = [];
+  (facts || []).forEach((f, i) => {
+    const l = factLine((needs || [])[i] || '', f);
+    if (l && !seen.has(l)) { seen.add(l); out.push(l); }
+  });
+  return out;
+}
+
+/** A need's words after the mod's name: "it <fact>", or for a combination "together, it <fact>"; '' for none. */
+function factLine(key, fact) {
+  if (!fact) return '';
+  if (/^power:together:many:/.test(String(key))) return fact;
+  return /^power:together:/.test(String(key)) ? `together, it ${fact}` : `it ${fact}`;
+}
 function parsePowers(values, mod) { return parsePowersWithArgs(values, mod).names; }
 
 // The site a hold names: the mod's folder (x.com), or its sites in general.
@@ -113,10 +142,8 @@ function powerNeeds(mod) {
   const out = list.filter((n) => MENU[n]).map((n) => ({
     key: `power:${n}${args[n] && args[n].length ? `:${[...args[n]].sort().join(' | ')}` : ''}`, fact: MENU[n].hold(site, args[n]), power: n, soft: !!MENU[n].soft, lines: [],
   }));
-  // write-drafts with any read: the combination is a need of its own (docs/POWERS.md "Combinations")
-  const reads = READS.filter((r) => list.includes(r));
-  if (list.includes('write-drafts') && reads.length) out.push({ key: `power:together:write-drafts+${reads.join('+')}`, fact: TOGETHER, power: 'together', soft: false, lines: [] });
-  return out;
+  // the combinations: needs of their own (docs/POWERS.md "Combinations", docs/SAFE-MODS.md)
+  return out.concat(togetherNeeds(list));
 }
 
 /** Whether a need is a power that doesn't hold on its own (controls, mods). */
@@ -125,4 +152,4 @@ function isSoft(key) {
   return !!(m && MENU[m[1]] && MENU[m[1]].soft);
 }
 
-module.exports = { MENU, NAMES, PowersError, parsePowers, parsePowersWithArgs, parseClicks, powerNeeds, isSoft, siteOf, sameSite, TOGETHER };
+module.exports = { MENU, NAMES, PowersError, parsePowers, parsePowersWithArgs, parseClicks, powerNeeds, isSoft, siteOf, sameSite, READS, factLine, factLines };

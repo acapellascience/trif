@@ -315,7 +315,7 @@ class ChromeDriver {
   /** A trusted press of `key` ('Escape') in the page `ctx`. */
   async key(ctx, key) {
     const sid = await this._attach(ctx);
-    const codes = { Escape: 27, Enter: 13 };
+    const codes = { Escape: 27, Enter: 13, Tab: 9 };
     // (a character also types itself, as a real key press does)
     const char = key.length === 1;
     for (const type of [char ? 'keyDown' : 'rawKeyDown', 'keyUp']) {
@@ -328,6 +328,13 @@ class ChromeDriver {
     const sid = await this._attach(ctx);
     const h = await this.eval(ctx, 'async () => innerHeight');
     await this.cdp.send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: 1, y: h - 1 }, sid);
+  }
+
+  /** The page's prefers-color-scheme: 'light', 'dark', or '' for the system's. */
+  async colorScheme(ctx, value) {
+    const sid = await this._attach(ctx);
+    await this.cdp.send('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-color-scheme', value: value || '' }] }, sid);
+    return true;
   }
 
   async screenshot(ctx, file) {

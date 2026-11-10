@@ -30,7 +30,7 @@ const POWERS3_PAGE = () => PAGE('TRIF e2e powers 3', `<h1 id="title">Powers, pha
 <p><button type="button" id="pclick">0</button> <button type="button" id="pbtn">not named</button>
 <a id="plink" href="#plink-target">a link on this page</a> <a id="ext3" href="http://localhost:1/e2e-pw-leak-ext">another site</a> <a id="shown3" href="/e2e-goto-shown">a page link</a></p>
 <form id="f3" action="/e2e-pw-leak-submit" method="get"><input id="f3i" name="q" value="typed"><button id="fb3">Send</button><input type="reset" id="fr3" value="Reset"><label id="lb3" for="fs3">send it</label><input type="submit" id="fs3" value="Go"></form>
-<p><input id="wd" value="the user's draft"> <textarea id="wta">draft two</textarea></p>
+<p><input id="wd" value="the user's draft"> <textarea id="wta">draft two, see example.org/a</textarea></p>
 <div id="ed2" contenteditable="true">the user's editor draft</div>
 <p><input id="pw3" type="password" value="hunter2"> <input id="cc3" autocomplete="cc-number" value="4111"> <input id="fh3" type="hidden" value="h"> <select id="sel3"><option>a</option><option>b</option></select></p>
 <p id="seen"></p>

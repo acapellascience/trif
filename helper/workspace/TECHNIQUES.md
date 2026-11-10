@@ -172,10 +172,16 @@ only for what the mod needs; a mod that needs the network is a free mod.
 - `write-drafts`: change what the user is about to post: `setValue(text)` on the page's text fields and
   textareas (TRIF sends the page an `input` event, so React and the like see it), and `setText`, adding
   and removing inside editors. Never a password or card field, a hidden input or a select. To change what
-  they typed you need to read it too (`read-drafts`): the hold then also says the pair "could put what it
-  reads into something you post". While another boxed mod on the page has a read power (`keys`,
-  `read-drafts`, `site-data`, `page-data`) that yours didn't ask for, your writes are refused, with an
-  error that says which.
+  they typed you need to read it too (`read-drafts`). No addresses you make up: what you write may only
+  have the addresses already in that field or editor, or in a link on the page (a site can fetch one for a
+  preview before anything is posted); anything that looks like one counts (`example.com`, `node.js`).
+
+**Combinations.** Some powers together warn the user in the hold ("Together, it could put what it reads into
+something you post"; the list: docs/POWER-COMBINATIONS.md in TRIF's repository, or `trif check`), and more
+than three powers get one general warning. Ask for the fewest that do the job. On a page, an act of yours
+(writing a draft, clicking, playing media, go-to) is refused while another boxed mod there has a power that
+would make a warned pair with it that yours didn't ask for (the error says which); a mod that needs both
+asks for both.
 - `mods`: `trif.channel(name)` gives `send(data)` and `on((data, {from}) => …)` between your boxed mods on
   this page that have the power: plain data only (text, numbers, true/false, null, arrays, plain objects),
   delivered a moment later. Doesn't make the mod wait on its own.

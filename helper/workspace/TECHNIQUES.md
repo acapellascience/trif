@@ -229,7 +229,12 @@ is flagged as code TRIF can't check, which is a worse question to put to the use
   tagged with your mod. Use `window.trif?.log(...)` and log events, not every mutation. (`window.webmods`
   is the same object, its name before 0.2.0: leave it as it is in existing mods.)
 - TRIF catches errors thrown while your mod first runs, and errors from its timers and handlers whose
-  stack points at your file; `trif errors` shows both.
+  stack points at your file; `trif errors` shows both. A new error marks the mod's row and offers the user a
+  fix (in the side panel's chat), so a mod that throws on every item is noticed: catch what you expect.
+- `window.trif?.expect(selector)`: say what your mod looks for (the feed's items, the button it adds next
+  to). If none of it is on a page where it was before, three loads in a row, TRIF flags the mod as maybe
+  broken (the site changed) and offers a fix. It only notes the selector; call it once, at the start.
+  Style mods and boxed mods don't need it: TRIF knows their selectors (rules, `trif.observe`, `trif.hide`).
 - Your code isn't subject to the page's Content Security Policy, but what it creates may be: an iframe or
   image from another origin, an inline `<script>`, sometimes a `<style>` element. Sites with **Trusted
   Types** (many Google sites) throw on `el.innerHTML = '...'`: build DOM with `createElement` and

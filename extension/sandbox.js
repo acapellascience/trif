@@ -123,6 +123,10 @@ export function sandboxRuntime(mode, pageModId, pageFn, pagePowers) {
   // sandboxLists), or, as a page script, the page runtime's (runtime.js).
   const store = SANDBOX ? { errors: [], logs: [] } : (G.__webmods && Array.isArray(G.__webmods.errors) ? G.__webmods : { errors: [], logs: [] });
   const push = (arr, item, max) => { arr.push(item); if (arr.length > max) arr.splice(0, arr.length - max); };
+  // (what each mod looks for, from trif.observe and trif.hide: background.js checks whether any of it is on
+  // the page, to flag a mod that may be broken; extension/modhealth.js)
+  if (!store.watched || typeof store.watched !== 'object') store.watched = {};
+  const watch = (modId, sel) => { try { const l = store.watched[modId] || (store.watched[modId] = []); if (l.length < 40 && !l.includes(sel)) l.push(sel); } catch { /* never throw into a mod */ } };
   const textOf = (a) => { if (typeof a === 'string') return a; try { const s = JSON.stringify(a); return s === undefined ? String(a) : s.slice(0, 10000); } catch { try { return String(a); } catch { return '[unprintable]'; } } };
   const report = (modId, err) => {
     try {
@@ -663,6 +667,7 @@ export function sandboxRuntime(mode, pageModId, pageFn, pagePowers) {
       qsa(D.createDocumentFragment(), sel);
       if (typeof fn !== 'function') fail('observe takes a function');
       const w = { sel, seen: new WeakSet(), call: (s) => call(fn, s), mod: modId };
+      watch(modId, sel);
       watchers.add(w);
       ensureObserver();
       if (D.documentElement) runWatcher(w, D.documentElement);
@@ -873,7 +878,7 @@ export function sandboxRuntime(mode, pageModId, pageFn, pagePowers) {
         root.append(input);
         return wrap(host);
       },
-      hide: (sel) => css(`${selectorOk(sel)} { display: none !important; }`),
+      hide: (sel) => { const r = css(`${selectorOk(sel)} { display: none !important; }`); watch(modId, sel); return r; },
       log: logTo(modId, 'log'), warn: logTo(modId, 'warn'), error: logTo(modId, 'error'),
     };
     const consoleApi = { log: logTo(modId, 'log'), info: logTo(modId, 'log'), debug: logTo(modId, 'log'), warn: logTo(modId, 'warn'), error: logTo(modId, 'error') };
@@ -1148,7 +1153,7 @@ export function sandboxRuntime(mode, pageModId, pageFn, pagePowers) {
       if (m) report(m[1], r);
     });
   } catch { /* none */ }
-  Object.defineProperty(G, '__trifSandbox', { value: Object.freeze({ run, errors: store.errors, logs: store.logs, stats }), configurable: false, writable: false });
+  Object.defineProperty(G, '__trifSandbox', { value: Object.freeze({ run, errors: store.errors, logs: store.logs, watched: store.watched, stats }), configurable: false, writable: false });
   // (mods that came before the runtime)
   const queued = G.__trifSandboxQueue;
   if (Array.isArray(queued)) { G.__trifSandboxQueue = null; for (const [id, source, powers] of queued) run(id, source, powers); }

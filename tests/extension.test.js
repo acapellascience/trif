@@ -3144,3 +3144,59 @@ test('background: "Agent on this site" gates every agent command by the tab\'s s
     assert.strictEqual(bg.store.sensitiveSites, null);
   } finally { bg.restore(); }
 });
+
+test('background: mods that break: a new error gets a card in the site\'s chat once, Ignore hides it; selectors that stop matching flag the mod; Fix it\'s prompt; Just flag it adds no card', async () => {
+  globalThis.__trifHealthDelays = [5, 15];
+  const tabs = [{ id: 5, windowId: 1, index: 0, active: true, url: 'https://example.com/feed' }];
+  const page = { errors: [], logs: [], matched: {} };
+  const executeScript = async ({ func }) => {
+    if (func.name === 'healthOfPage') { const p = structuredClone(page); page.errors = []; page.logs = []; return [{ result: p }]; }
+    return [{ result: null }];
+  };
+  const mods = [mod('example.com/hider', { name: 'Hider', matches: ['*://example.com/*'], hash: 'h1' }), mod('example.com/styler', { name: 'Styler', matches: ['*://example.com/*'], rules: true, selectors: ['#feed'], hash: 's1' })];
+  const bg = await loadBackground({ storage: { sitesOn: ['example.com'], mods }, tabs, scripting: { executeScript } });
+  const load = async () => { bg.chrome.tabs.onUpdated.emit(5, { status: 'complete' }); await new Promise((r) => setTimeout(r, 40)); await settle(20); };
+  const cards = () => (bg.store['chat:example.com']?.messages || []).filter((m) => m.kind === 'modError');
+  const boom = (n) => ({ mod: 'example.com/hider', message: `Cannot read properties of null (reading 'x') on item ${n}`, stack: 'TypeError\n    at trif://example.com/hider.js:4:2', time: Date.now() + n });
+  try {
+    bg.native.emit({ type: 'mods', mods });
+    await settle(20);
+    page.errors = [boom(1)];
+    page.matched = { 'example.com/styler': true };
+    page.logs = [{ mod: 'example.com/hider', level: 'log', args: ['looking for posts'], time: Date.now() }];
+    await load();
+    assert.deepStrictEqual(cards().map((c) => [c.mod, c.text, c.line]), [['example.com/hider', 'Hider has a new error on example.com. Want me to fix it?', 3]]);
+    const panel = bg.connectPanel();
+    let st = (await panel.ask({ type: 'status' })).result;
+    assert.deepStrictEqual(st.mods.find((m) => m.id === 'example.com/hider').broken.map((b) => [b.message, b.line, b.count]), [["Cannot read properties of null (reading 'x') on item 1", 3, 1]]);
+    // (the same error again, on another item: no second card)
+    page.errors = [boom(2)];
+    await load();
+    assert.strictEqual(cards().length, 1);
+    // Fix it: the prompt carries the file, the error and the logs
+    const fix = await panel.ask({ type: 'modError.fix', id: 'example.com/hider', fp: cards()[0].fp, site: 'example.com', url: 'https://example.com/feed' });
+    assert.match(fix.result.prompt, /sites\/example\.com\/hider\.js[\s\S]*Cannot read properties of null[\s\S]*- log: looking for posts/);
+    // Ignore
+    assert.strictEqual((await panel.ask({ type: 'modError.dismiss', id: 'example.com/hider', fp: cards()[0].fp })).ok, true);
+    st = (await panel.ask({ type: 'status' })).result;
+    assert.deepStrictEqual(st.mods.find((m) => m.id === 'example.com/hider').broken, []);
+    assert.strictEqual(cards()[0].done, 'ignored');
+    page.errors = [boom(3)];
+    await load();
+    assert.strictEqual(cards().length, 1);
+    // the style mod's selectors stop matching: three loads, then the card
+    page.matched = { 'example.com/styler': false };
+    await load(); await load();
+    assert.strictEqual(cards().length, 1);
+    await load();
+    assert.deepStrictEqual(cards().map((c) => c.text)[1], 'Styler may be broken on example.com: nothing it looks for is on the page any more. Want me to fix it?');
+    // Just flag it: the row's badge, no card
+    await panel.ask({ type: 'modError.onBreak', value: 'flag' });
+    page.errors = [{ ...boom(4), message: 'another failure' }];
+    await load();
+    assert.strictEqual(cards().length, 2);
+    st = (await panel.ask({ type: 'status' })).result;
+    assert.strictEqual(st.onBreak, 'flag');
+    assert.ok(st.mods.find((m) => m.id === 'example.com/hider').broken.some((b) => b.message === 'another failure'));
+  } finally { delete globalThis.__trifHealthDelays; bg.restore(); }
+});

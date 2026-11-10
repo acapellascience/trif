@@ -115,6 +115,10 @@
     <label class="field starts-row"><span>Boxed mods</span><select id="starts-sandboxed"><option value="on">On</option><option value="off">Off</option></select></label>
     <label class="field starts-row"><span>Free mods</span><select id="starts-page"><option value="on">On</option><option value="off">Off</option></select></label>
     <p id="starts-note" class="note" hidden>Mods your chat here makes still start on.</p>
+    <!-- When a mod breaks (a new error, or nothing it looks for on the page): sidepanel.js, background.js announceBreak -->
+    <p class="sites-title">When a mod breaks</p>
+    <label class="field break-row"><span>Then</span><select id="on-break"><option value="ask">Ask me</option><option value="auto">Fix it automatically</option><option value="flag">Just flag it</option></select></label>
+    <p id="on-break-note" class="note">Ask me: a message in the chat offers to fix it. Fix it automatically: your agent tries to fix it (on sites where it can run code), and tells you in the chat. Just flag it: the mod's row says so, nothing more.</p>
     <p class="sites-title">Blocked sites</p>
     <ul id="blocked-list" class="blocked-list"></ul>
     <p id="blocked-empty" class="note">None.</p>

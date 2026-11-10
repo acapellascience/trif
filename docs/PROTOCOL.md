@@ -272,7 +272,7 @@ Without one, the target is the active tab of the last-focused normal window.
 
 | cmd | args | result |
 |---|---|---|
-| `status` | optional tab selector | `{userScripts, chrome, version, mods:[{id, registered, enabled}], recording:[sites]}` (`enabled: false` = switched off, see below); with a tab selector also `page: {tab, url, mods:[{id, name, runAt}]}`, the mods that run on that tab's page |
+| `status` | optional tab selector | `{userScripts, chrome, version, mods:[{id, registered, enabled}], recording:[sites]}` (`enabled: false` = switched off, see below); with a tab selector also `page: {tab, url, mods:[{id, name, runAt}]}`, the mods that run on that tab's page. A mod with new errors (extension/modhealth.js) has `broken: [{message, line, count, quiet?}]` (`quiet`: "may be broken", nothing it looks for is on the page any more); `trif status` and `trif mods` say so |
 | `tabs` | – | `[{id, windowId, active, url, title}]` (normal windows only) |
 | `run` | `code`, `expression: bool`, `timeout` (ms, default 10000) + tab selector | `{value}`: the code's result, made JSON-safe in the page (see below), or an error `{ok:false, error:"<message + stack>"}` |
 | `reload` | `hard: bool` + tab selector | `{url}` after the tab's `status` is `complete` (timeout 30 s) |

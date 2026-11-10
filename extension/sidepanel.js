@@ -29,6 +29,7 @@ const ui = {
   modeDialog: $('#mode-dialog'), modeDialogClose: $('#mode-dialog-close'), modeDialogSwitch: $('#mode-dialog-switch'), modeDialogErr: $('#mode-dialog-err'),
   modeChoice: $('#mode-choice'), modePermissive: $('#mode-permissive'), modeRestrictive: $('#mode-restrictive'), modeNote: $('#mode-note'),
   blockedList: $('#blocked-list'), blockedEmpty: $('#blocked-empty'),
+  onBreak: $('#on-break'),
   startsRules: $('#starts-rules'), startsSandboxed: $('#starts-sandboxed'), startsPage: $('#starts-page'), startsNote: $('#starts-note'),
   landing: $('#landing'), landingIcon: $('#landing-icon'), landingVersion: $('#landing-version'), landingNote: $('#landing-note'),
   settings: $('#settings'), agent: $('#agent'), agentNote: $('#agent-note'), model: $('#model'),
@@ -320,6 +321,45 @@ function code(text) {
 }
 
 
+const cardKey = (m) => `${m.done || ''}|${m.undoneFix ? 1 : 0}|${m.fixRun || ''}`;
+function breakCard(li, m) {
+  li.classList.add('break-card');
+  li.dataset.cardKey = cardKey(m);
+  const state = m.undoneFix ? 'Fix undone.' : m.done === 'fixed' ? 'Fixed.' : m.done === 'fixing' ? 'Fixing…' : m.done === 'ignored' ? 'Ignored.' : '';
+  if (state) li.append(' ', el('span', 'break-state', state));
+  const acts = el('div', 'break-actions');
+  const fail = (b, e) => { b.disabled = false; request({ type: 'chat.note', site: view.site, text: `Couldn't do that: ${e?.message ?? e}` }).catch(() => {}); };
+  const undo = button('Undo fix', '', (e) => undoFix(m.mod, e.currentTarget));
+  const fix = button(m.afterFix ? 'Try again' : 'Fix it', m.afterFix ? '' : 'go', async (e) => {
+    const b = e.currentTarget;
+    b.disabled = true;
+    try {
+      const { prompt } = await request({ type: 'modError.fix', id: m.mod, fp: m.fp, site: view.site, url: view.tab?.url });
+      await startRun(prompt, { fix: { mod: m.mod, fp: m.fp } });
+    } catch (x) { fail(b, x); }
+  });
+  const show = button('Show error', '', () => {
+    const mod = (view.status?.mods || []).find((x) => x.id === m.mod);
+    const err = mod?.broken?.find((x) => x.fp === m.fp) || { message: m.quiet ? 'nothing it looks for is on the page any more' : '', line: m.line || 0, quiet: m.quiet };
+    openCodeView(m.mod, { error: err });
+  });
+  const ignore = button('Ignore', 'text', async (e) => { const b = e.currentTarget; b.disabled = true; try { await request({ type: 'modError.dismiss', id: m.mod, fp: m.fp }); } catch (x) { fail(b, x); } });
+  ignore.title = 'Don\'t flag this again for this version of the mod';
+  if (m.undoneFix || m.done === 'ignored' || m.done === 'fixing') return;
+  if (m.done === 'fixed') acts.append(undo);
+  else if (m.afterFix) acts.append(undo, fix, show, ignore);
+  else acts.append(fix, show, ignore);
+  li.append(acts);
+}
+
+async function undoFix(id, b) {
+  if (b) b.disabled = true;
+  try { await request({ type: 'mod.undo', ids: [id], site: view.site, tab: view.tab?.id }); } catch (e) {
+    if (b) b.disabled = false;
+    request({ type: 'chat.note', site: view.site, text: `Couldn't undo the fix: ${e?.message ?? e}` }).catch(() => {});
+  }
+}
+
 function messageNode(m) {
   const li = el('li', `msg ${m.role}`);
   // (Role 'login': the agent needs logging in, a plain line; the notice above has the Log in button.)
@@ -340,6 +380,9 @@ function messageNode(m) {
     });
     li.append(' ', undo);
   }
+  // A mod that broke (background.js announceBreak): Fix it / Show error / Ignore; a fix's own new error: Undo
+  // fix first; once fixed: Undo fix
+  if (m.kind === 'modError') breakCard(li, m);
   // "Changed x.js." after a run: put back what the mods were before it (the helper keeps them: history/)
   if (Array.isArray(m.undoChange) && m.undoChange.length && !m.undone) {
     const undo = button('Undo these changes', '', async () => {
@@ -750,7 +793,7 @@ function renderMods() {
   const rows = new Map();
   for (const m of mods) {
     const key = JSON.stringify([site, m.name, m.description || '', m.file, m.held ?? null, m.pending ?? null, m.review ?? null, m.risk?.tier ?? null, m.risk?.why ?? null, m.matches,
-      m.source ?? null, m.version ?? null, m.update ?? null, m.powers ?? null]);
+      m.source ?? null, m.version ?? null, m.update ?? null, m.powers ?? null, m.broken ?? null, m.fixUndo ?? null]);
     const old = view.modRows.get(m.id);
     rows.set(m.id, old && old.key === key ? old : { key, li: modItem(m) });
   }
@@ -1039,6 +1082,7 @@ function renderSites() {
   ui.startsSandboxed.value = startsOff.includes('sandboxed') ? 'off' : 'on';
   ui.startsPage.value = startsOff.includes('page') ? 'off' : 'on';
   ui.startsNote.hidden = !startsOff.length;
+  if (ui.onBreak && document.activeElement !== ui.onBreak) ui.onBreak.value = st?.onBreak || 'ask';
 }
 
 function setStartsOff(group, off) {
@@ -1102,6 +1146,23 @@ function modItem(m) {
       : 'Risk 1: the site\'s own scripts could notice this mod (for example, ads it hides never report being seen).') +
       (m.risk.why ? `\n${m.risk.why}` : '');
     name.append(' ', badge);
+  }
+  // A new error (or "may be broken"): a small red badge that shows it; a mod a fix run changed: Undo fix
+  if (Array.isArray(m.broken) && m.broken.length) {
+    const errs = m.broken.filter((b) => !b.quiet);
+    const first = errs[0] || m.broken[0];
+    const badge = el('button', 'tag err-badge', errs.length ? (errs.length > 1 ? `${errs.length} errors` : 'error') : 'may be broken');
+    badge.type = 'button';
+    badge.title = first.quiet ? 'May be broken: nothing it looks for is on the page any more.' : `New error${first.line ? ` at line ${first.line}` : ''}: ${first.message}`;
+    badge.addEventListener('click', (e) => { e.stopPropagation(); openCodeView(m.id, { error: first }); });
+    name.append(' ', badge);
+  }
+  if (m.fixUndo) {
+    const undo = el('button', 'tag fix-undo', 'Undo fix');
+    undo.type = 'button';
+    undo.title = 'Put back the version from before your agent fixed it';
+    undo.addEventListener('click', (e) => { e.stopPropagation(); undoFix(m.id, undo); });
+    name.append(' ', undo);
   }
   // Mods that also run on other sites say so: their switch here is for this site only.
   const { everywhere, sites } = modSites(m);
@@ -1707,6 +1768,8 @@ function codeViewDialog() {
   const vRan = button('Running now', 'cv-ran', () => loadCodeView('ran'));
   const vNew = button('Waiting for your OK', 'cv-new', () => loadCodeView('file'));
   versions.append(vRan, vNew);
+  const errorBox = el('div', 'ap-together cv-error');
+  errorBox.hidden = true;
   const codeBox = el('pre', 'cv-code');
   codeBox.tabIndex = 0;
   codeBox.setAttribute('aria-label', 'The mod\'s code');
@@ -1720,14 +1783,14 @@ function codeViewDialog() {
   x.addEventListener('click', () => d.close());
   const acts = el('div', 'ap-actions');
   acts.append(copy, reveal, editor, close);
-  d.append(top, who, versions, codeBox, note, err, acts);
+  d.append(top, who, versions, errorBox, codeBox, note, err, acts);
   document.body.append(d);
   codeView.dialog = d;
-  codeView.parts = { name, chip, where, versions, vRan, vNew, codeBox, note, err, copy, reveal, editor };
+  codeView.parts = { name, chip, where, versions, vRan, vNew, errorBox, codeBox, note, err, copy, reveal, editor };
   return codeView.parts;
 }
 
-function openCodeView(id) {
+function openCodeView(id, { error = null } = {}) {
   const m = (view.status?.mods || []).find((x) => x.id === id);
   if (!m) return;
   const P = codeViewDialog();
@@ -1750,6 +1813,11 @@ function openCodeView(id) {
   }
   const fl = P.where.querySelector('.cv-file');
   if (fl && !connected) fl.title = 'TRIF\'s helper isn\'t connected, so it can\'t open the file';
+  // (Show error: the error above the code, its line marked and in view)
+  codeView.error = error;
+  P.errorBox.hidden = !error;
+  P.errorBox.replaceChildren();
+  if (error) P.errorBox.append(el('b', null, error.quiet ? 'May be broken: ' : `New error${error.line ? ` at line ${error.line}` : ''}: `), error.quiet ? 'nothing it looks for is on the page any more.' : String(error.message || ''));
   if (!codeView.dialog.open) codeView.dialog.showModal();
   loadCodeView('file');
 }
@@ -1774,6 +1842,8 @@ async function loadCodeView(version) {
   if (codeView.id !== id || codeView.version !== version) return;
   codeView.text = String(r.code ?? '');
   renderCode(P.codeBox, codeView.text);
+  const line = codeView.error?.line && version !== 'ran' ? P.codeBox.children[codeView.error.line - 1] : null;
+  if (line) { line.classList.add('hl'); line.scrollIntoView({ block: 'center' }); }
   if (r.truncated || r.local) {
     P.note.textContent = r.truncated ? 'Showing the first 200,000 characters.' : 'From the browser: TRIF\'s helper isn\'t connected.';
     P.note.hidden = false;
@@ -2076,8 +2146,14 @@ function renderMessages() {
   const sameThread = r.site === view.site && msgs.length >= r.count && (r.count === 0 || msgs[0]?.time === r.first);
   if (!sameThread) {
     ui.messages.replaceChildren(...msgs.map(messageNode));
-  } else if (msgs.length > r.count) {
-    ui.messages.append(...msgs.slice(r.count).map(messageNode));
+  } else {
+    if (msgs.length > r.count) ui.messages.append(...msgs.slice(r.count).map(messageNode));
+    // (a mod-broke card the background changed since: Fixing…, Fixed., Ignored., Fix undone.: drawn again)
+    msgs.forEach((m, i) => {
+      if (m.kind !== 'modError' || i >= r.count) return;
+      const node = ui.messages.children[i];
+      if (node && node.dataset.cardKey !== cardKey(m)) node.replaceWith(messageNode(m));
+    });
   }
   const changed = !sameThread || msgs.length !== r.count;
   view.rendered = { site: view.site, count: msgs.length, first: msgs[0]?.time ?? null };
@@ -2501,6 +2577,7 @@ ui.pauseAll.addEventListener('change', () => setPaused(ui.pauseAll.checked));
 ui.startsRules.addEventListener('change', () => setStartsOff('rules', ui.startsRules.value === 'off'));
 ui.startsSandboxed.addEventListener('change', () => setStartsOff('sandboxed', ui.startsSandboxed.value === 'off'));
 ui.startsPage.addEventListener('change', () => setStartsOff('page', ui.startsPage.value === 'off'));
+ui.onBreak?.addEventListener('change', () => request({ type: 'modError.onBreak', value: ui.onBreak.value }).then(refreshStatus, () => {}));
 
 ui.autoUpdate.addEventListener('change', async () => {
   const on = ui.autoUpdate.checked;

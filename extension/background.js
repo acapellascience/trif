@@ -10,8 +10,9 @@ import {
   normalizeOffSites, offSiteName, offOnSite, hostInScope, withOffSites, normalizeGroupsOff, switchGroup, offSitesFor, GROUPS, scopeFor, normalizeSitesOn, siteOnFor, sitesInUse, limitToSites, applyStartSites, switchSite, fromOtherBrowser, timedUserScripts, capChat,
   ALL_ACCESS, readAccess, activeSites, hasSiteAccess, siteOrigins, siteState, siteRefusal, siteModeOf,
   FEATURES, ModsParts, fillSameMods, storedMods, modsStorageState, modsStoragePlan, normalizeStarter, applyReadded, normalizeReadded,
-  applyNewMods, normalizeStartsOff, normalizeNewOff, MOD_GROUPS, modGroup, groupWord, sandboxFallback, inSandboxWorld, SAFARI,
+  applyNewMods, normalizeStartsOff, normalizeNewOff, MOD_GROUPS, modGroup, groupWord, sandboxFallback, inSandboxWorld, SAFARI, siteForUrl,
 } from './lib.js';
+import { recordErrors, recordMatches, openErrors, dismiss as dismissError, keepLogs, fixPrompt } from './modhealth.js';
 import { SANDBOX_WORLD, SANDBOX_CSP, SETTINGS_MAX } from './sandbox.js';
 import { runtimeCode } from './runtime.js';
 import { sweepPage } from './sweep.js';
@@ -34,6 +35,10 @@ const LOAD_TIMEOUT = 30000;
 const NOT_CONNECTED = `The TRIF helper isn't connected. Run \`${SETUP_COMMAND}\` in a terminal (needs Node 18+), then restart ${BROWSER}.`;
 
 const state = {
+  health: {},            // mods that break (modhealth.js): errors seen and dismissed, selectors that stopped matching
+  fixes: {},             // mods a fix run changed: id -> {prevHash, fixedHash, site, fp, runId, at, loads} (Undo fix)
+  fixRuns: new Map(),    // runId -> {mod, fp, site, prevHash}: runs started by Fix it (or by themselves)
+  onBreak: 'ask',        // Settings' "When a mod breaks": 'ask' (the chat's card), 'auto' (a fix run), 'flag' (the badge only)
   agentSites: {},        // "Agent on this site": site -> 'off' | 'look' | 'run' (the user's; agentsites.js)
   sensitiveSites: null,  // the user's sensitive list from Settings ([{pattern, why}]), or null for TRIF's
   agentAsks: new Map(),  // id -> {site, resolve}: the panel asking whether an agent may run code on a site
@@ -152,6 +157,9 @@ const ready = chrome.storage.local.get(null).then(async (s) => {
   state.readded = normalizeReadded(s.readded);
   state.startsOff = normalizeStartsOff(s.startsOff);
   state.agentSites = normalizeAgentSites(s.agentSites);
+  state.health = s.modHealth && typeof s.modHealth === 'object' ? s.modHealth : {};
+  state.onBreak = ['ask', 'auto', 'flag'].includes(s.onBreak) ? s.onBreak : 'ask';
+  state.fixes = s.modFixes && typeof s.modFixes === 'object' ? s.modFixes : {};
   state.sensitiveSites = Array.isArray(s.sensitiveSites) ? s.sensitiveSites : null;
   state.seenMods = s.seenMods && typeof s.seenMods === 'object' ? normalizeDisabled(s.seenMods) : null;
   state.autoUpdated = s.autoUpdated && typeof s.autoUpdated === 'object' ? normalizeReadded(s.autoUpdated) : null;
@@ -204,6 +212,9 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   ready.then(() => onPageMessage(msg)).then(sendResponse, (e) => sendResponse({ error: errMsg(e) }));
   return true;
 });
+// Mods that break: a loaded page is read for its mods' errors and whether their selectors match (checkTab)
+chrome.tabs.onUpdated?.addListener((tabId, info) => { if (info.status === 'complete') ready.then(() => scheduleHealth(tabId)).catch(() => {}); });
+chrome.tabs.onRemoved?.addListener((tabId) => { tabLoads.delete(tabId); });
 // ("Agent on this site": written here, or by another of TRIF's pages; the state follows storage)
 chrome.storage.onChanged?.addListener((changes, area) => {
   if (area !== 'local') return;
@@ -580,6 +591,13 @@ async function onModsMessage(msg) {
     return;
   }
   state.mods = sandboxFallback(filled.mods, { canSandbox: (await sandboxWorld()) !== false, allowed: state.unsandboxedOk });
+  // (a fix run's new version, once it arrives: Undo fix is offered while the mod is that version)
+  let fixed = false;
+  for (const [id, f] of Object.entries(state.fixes)) {
+    const m = state.mods.find((x) => x.id === id);
+    if (!m || (f.fixedHash && f.fixedHash !== m.hash) || Date.now() - (f.at || 0) > 7 * 86400000) { delete state.fixes[id]; fixed = true; } else if (!f.fixedHash && m.hash !== f.prevHash) { f.fixedHash = m.hash; fixed = true; }
+  }
+  if (fixed) save({ modFixes: state.fixes }).catch(() => {});
   // A mod's id is its file name: a file renamed on disk comes back as a new mod. Same code in the same
   // site folder: the same mod, which keeps its switches and its place in the panel (before the first-time
   // switch-offs below, which would otherwise take it for a new one).
@@ -780,6 +798,8 @@ const commands = {
         if (m.sandboxed) o.sandboxed = inSandboxWorld(m) ? true : 'page'; // ('page': this browser runs it as a page script)
         if (Array.isArray(m.powers) && m.powers.length) o.powers = m.powers;
         if (state.newOff[m.id] && !isEnabled(m.id)) o.newOff = state.newOff[m.id];
+        const broken = openErrors(state.health, m);
+        if (broken.length) o.broken = broken.map(({ message, line, count, quiet }) => ({ message: String(message).slice(0, 300), line, count, ...(quiet ? { quiet: true } : {}) })).slice(0, 5);
         if (errors.has(m.id) && errors.get(m.id) !== USER_SCRIPTS_OFF) o.error = errors.get(m.id);
         return o;
       }),
@@ -1137,6 +1157,135 @@ async function runCommand(cmd, args, reqId = null) {
   return fn(args);
 }
 
+// ---- Mods that break (modhealth.js) -------------------------------------------------------------------
+// After a page of a site TRIF is on for loads (3 s and 9 s on), and every 10 s while a panel is open on it,
+// TRIF reads its mods' errors (page scripts' and the sandbox's, as `trif errors` does), their logs, and
+// whether what each mod looks for is on the page (a style mod's selectors, a boxed mod's trif.observe and
+// trif.hide, a free mod's trif.expect). A new error, or a mod whose selectors stopped matching on a page
+// where they matched, gets a badge on its row and the toolbar, and (Settings' "When a mod breaks") a card in
+// the site's chat, "Want me to fix it?", or a fix run of its own.
+const tabLoads = new Map(); // tabId -> { since, matched: Map(modId -> bool), counted, url }
+let healthSave = null;
+
+// (when after a load: tests set shorter ones)
+const HEALTH_DELAYS = Array.isArray(globalThis.__trifHealthDelays) ? globalThis.__trifHealthDelays : [3000, 9000];
+function scheduleHealth(tabId) {
+  tabLoads.set(tabId, { since: 0, matched: new Map(), counted: false, url: '' });
+  setTimeout(() => checkTab(tabId, false).catch((e) => log('warn', `mod errors: ${errMsg(e)}`)), HEALTH_DELAYS[0]);
+  setTimeout(() => checkTab(tabId, true).catch((e) => log('warn', `mod errors: ${errMsg(e)}`)), HEALTH_DELAYS[1]);
+}
+
+// (in the page, MAIN or TRIF's sandbox world: the mods' errors and logs since `since`, and for each mod with
+// selectors, whether any is on the page now. Self-contained: the browser sends it to the page as text.)
+function healthOfPage(since, styleSel, sandbox) {
+  const w = sandbox ? globalThis.__trifSandbox : window.__webmods;
+  if (!w) return null;
+  const any = (l) => (Array.isArray(l) ? l : []).some((sel) => { try { return !!document.querySelector(sel); } catch { return false; } });
+  const matched = {};
+  for (const id of Object.keys(styleSel || {})) matched[id] = any(styleSel[id]);
+  const watched = w.watched || {};
+  for (const id of Object.keys(watched)) matched[id] = !!matched[id] || any(watched[id]);
+  const after = (l) => (Array.isArray(l) ? l : []).filter((e) => (e.time || 0) > since).slice(-50);
+  return { errors: after(w.errors), logs: after(w.logs), matched };
+}
+
+const runningOn = (url) => state.mods.filter((m) => isEnabled(m.id) && !m.held && modAppliesTo(withOffSites(m, offSitesFor(m, state.offSites, state.groupsOff)), url));
+
+async function checkTab(tabId, final = false) {
+  if (!checkUserScripts()) return;
+  const tab = await chrome.tabs.get(tabId).catch(() => null);
+  const url = tab?.url || '';
+  if (!/^https?:/.test(url) || !siteOnFor(url, onSites())) return;
+  const running = runningOn(url);
+  if (!running.length) return;
+  // (a load from scheduleHealth counts for "may be broken"; one the panel's look finds, or a page that changed
+  // its address by itself, only for errors)
+  const here = url.split('#')[0];
+  let load = tabLoads.get(tabId);
+  if (!load) { load = { since: 0, matched: new Map(), counted: true, url: here }; tabLoads.set(tabId, load); }
+  if (!load.url) load.url = here;
+  else if (load.url !== here) { load = { since: load.since, matched: new Map(), counted: true, url: here }; tabLoads.set(tabId, load); }
+  const style = Object.fromEntries(running.filter((m) => m.rules && Array.isArray(m.selectors) && m.selectors.length).map((m) => [m.id, m.selectors]));
+  const got = [];
+  try { got.push(await rawPageCall(tabId, 'MAIN', healthOfPage, [load.since, style, false])); } catch { /* not readable now */ }
+  if (state.canSandbox === true && running.some(inSandboxWorld) && typeof chrome.userScripts?.execute === 'function') {
+    try {
+      const out = firstInjectionResult(await chrome.userScripts.execute({
+        target: { tabId }, world: 'USER_SCRIPT', worldId: SANDBOX_WORLD, injectImmediately: true,
+        js: [{ code: `JSON.stringify((${healthOfPage.toString()})(${Number(load.since) || 0}, {}, true))` }],
+      }));
+      got.push(typeof out === 'string' ? JSON.parse(out) : null);
+    } catch { /* the sandbox isn't there */ }
+  }
+  const errors = got.flatMap((g) => g?.errors || []);
+  const logs = got.flatMap((g) => g?.logs || []);
+  const mods = new Map(running.map((m) => [m.id, m]));
+  const fresh = recordErrors(state.health, mods, errors);
+  for (const m of running) keepLogs(state.health, m, logs.filter((l) => l.mod === m.id).slice(-10));
+  load.since = Math.max(load.since, ...errors.map((e) => e.time || 0), ...logs.map((e) => e.time || 0));
+  for (const g of got) for (const [id, ok] of Object.entries(g?.matched || {})) if (mods.has(id)) load.matched.set(id, !!load.matched.get(id) || ok);
+  // (one load counts once, on the later look: a page that builds itself slowly gets the time it needs)
+  if (final && !load.counted) {
+    load.counted = true;
+    for (const m of running) { const f = state.fixes[m.id]; if (f && f.fixedHash === m.hash) { f.loads = (f.loads || 0) + 1; save({ modFixes: state.fixes }).catch(() => {}); } }
+    const page = url.split(/[?#]/)[0];
+    for (const [id, ok] of load.matched) { if (!mods.has(id)) continue; const f = recordMatches(state.health, mods.get(id), page, ok); if (f) fresh.push(f); }
+  }
+  if (errors.length || logs.length || final) saveHealthSoon();
+  await badgeFor(tab);
+  for (const f of fresh) await announceBreak(f, tab).catch((e) => log('warn', `mod errors: ${errMsg(e)}`));
+  if (fresh.length) notifyPanels();
+}
+
+function saveHealthSoon() {
+  clearTimeout(healthSave);
+  healthSave = setTimeout(() => save({ modHealth: state.health }).catch((e) => log('warn', errMsg(e))), 500);
+}
+
+/** The toolbar's mark for a tab: "!" while a mod running there has a new error (or may be broken). */
+async function badgeFor(tab) {
+  if (!tab || !chrome.action?.setBadgeText) return;
+  const n = runningOn(tab.url || '').reduce((k, m) => k + openErrors(state.health, m).length, 0);
+  try {
+    await chrome.action.setBadgeText({ tabId: tab.id, text: n ? '!' : '' });
+    if (n) await chrome.action.setBadgeBackgroundColor?.({ tabId: tab.id, color: '#d93025' });
+    await chrome.action.setTitle?.({ tabId: tab.id, title: n ? `TRIF: ${n === 1 ? 'a mod here has a new error' : `${n} new mod errors here`}` : 'TRIF' });
+  } catch { /* the tab went */ }
+}
+
+const breakText = (name, site, quiet) => (quiet ? `${name} may be broken on ${site}: nothing it looks for is on the page any more. Want me to fix it?` : `${name} has a new error on ${site}. Want me to fix it?`);
+
+/** A new error or flag: the chat's card (once per fingerprint), or with "Fix it automatically", a fix run. */
+async function announceBreak(f, tab) {
+  const mod = state.mods.find((m) => m.id === f.mod);
+  const e = mod && state.health[mod.id];
+  if (!e || e.carded?.[f.fp] || e.dismissed?.[f.fp]) return;
+  e.carded[f.fp] = true;
+  saveHealthSoon();
+  if (state.onBreak === 'flag') return;
+  const site = siteForUrl(tab.url || '');
+  if (!site) return;
+  const name = mod.name || mod.id;
+  if (state.onBreak === 'auto' && !e.fixed?.[f.fp]) {
+    const level = agentLevelOf(tab.url || '');
+    if (level === 'run' || level === 'ask') {
+      e.fixed[f.fp] = true;
+      try {
+        await updateChat(site, (chat) => { chat.messages.push({ role: 'mod', text: `${name} ${f.quiet ? 'may be broken' : 'has a new error'} on ${site}: TRIF asked your agent to fix it (Settings: When a mod breaks, Fix it automatically).`, time: Date.now() }); });
+        await startAgent({ site, url: tab.url, tabId: tab.id, fix: { mod: mod.id, fp: f.fp }, prompt: fixPrompt({ mod: mod.id, name, site, url: tab.url, error: { ...f, ...(e.errors[f.fp] || {}) }, logs: e.logs }) });
+        return;
+      } catch (err) { log('info', `fixing ${mod.id} by itself didn't start: ${errMsg(err)}`); }
+    }
+  }
+  // (the version a fix run made, failing in its first few loads: the card offers Undo fix first)
+  const fx = state.fixes[mod.id];
+  const afterFix = !!(fx && fx.fixedHash === mod.hash && (fx.loads || 0) <= 3);
+  await updateChat(site, (chat) => {
+    chat.messages.push({ role: 'trif', kind: 'modError', mod: mod.id, name, fp: f.fp, site, ...(f.quiet ? { quiet: true } : {}), ...(afterFix ? { afterFix: true } : {}), line: f.line || 0,
+      text: afterFix ? `${name}'s fix ${f.quiet ? 'may not work' : 'has a new error'} on ${site}. Undo the fix, or want me to try again?` : breakText(name, site, f.quiet), time: Date.now() });
+  });
+}
+
 // ---- "Agent on this site" (agentsites.js) -----------------------------------------------------------
 // Every command from the helper is an agent's (the side panel's, scoped to its site, or one in a terminal:
 // the same levels apply to both, as TRIF can't tell a terminal agent from the user typing `trif`). Before a
@@ -1196,6 +1345,19 @@ async function askToRun(site, args, reqId = null) {
   if (answer === 'always') return;
   if (answer === 'no') throw new Error(`the user chose Not here: "Agent on this site" is now Look for ${site}, so you can read the page and take screenshots there, but not run code. Work from what you can read`);
   throw new Error(`the user didn't answer TRIF's question (in the side panel) about running code on ${site} in time; try again once they have, or work from reading the page (trif text, trif screenshot)`);
+}
+
+// (a card done with: its buttons go; `how` says why, for the line it leaves)
+async function markCards(modId, fps, how) {
+  const sites = new Set();
+  for (const t of await chrome.tabs.query({}).catch(() => [])) { const s = siteForUrl(t.url || ''); if (s) sites.add(s); }
+  for (const site of sites) {
+    await updateChat(site, (chat) => {
+      let changed = false;
+      for (const m of chat.messages) if (m.kind === 'modError' && m.mod === modId && fps.includes(m.fp) && !m.done) { m.done = how; changed = true; }
+      return changed ? undefined : false;
+    });
+  }
 }
 
 async function setAgentSite(site, level) {
@@ -1338,6 +1500,36 @@ async function onPageMessage(msg) {
       notifyPanels();
       return { groupsOff: state.groupsOff };
     }
+    case 'modError.dismiss': {
+      // Ignore on the card (or the row's badge): that error, for this version of the mod
+      const m = state.mods.find((x) => x.id === String(msg.id ?? ''));
+      if (!m) throw new Error(`no mod ${msg.id}`);
+      const fps = msg.fp ? [String(msg.fp)] : openErrors(state.health, m).map((x) => x.fp);
+      for (const fp of fps) dismissError(state.health, m, fp);
+      await save({ modHealth: state.health });
+      await markCards(m.id, fps, 'ignored');
+      for (const t of await chrome.tabs.query({}).catch(() => [])) if (runningOn(t.url || '').some((x) => x.id === m.id)) await badgeFor(t);
+      notifyPanels();
+      return { id: m.id, dismissed: fps };
+    }
+    case 'modError.fix': {
+      // Fix it: what the side panel's run is asked (the panel starts it, as a message of the user's)
+      const m = state.mods.find((x) => x.id === String(msg.id ?? ''));
+      if (!m) throw new Error(`no mod ${msg.id}`);
+      const e = state.health[m.id];
+      const err = e?.errors?.[String(msg.fp ?? '')] || openErrors(state.health, m)[0];
+      if (!err) throw new Error(`${m.name || m.id} has no error waiting`);
+      const site = String(msg.site ?? '') || siteForUrl(msg.url || '') || '';
+      return { prompt: fixPrompt({ mod: m.id, name: m.name || m.id, site, url: String(msg.url ?? ''), error: err, logs: e?.logs || [] }) };
+    }
+    case 'modError.onBreak': {
+      // Settings' "When a mod breaks"
+      if (!['ask', 'auto', 'flag'].includes(msg.value)) throw new Error('unknown choice');
+      state.onBreak = msg.value;
+      await save({ onBreak: state.onBreak });
+      notifyPanels();
+      return { onBreak: state.onBreak };
+    }
     case 'agentSite.set': {
       // "Agent on this site" (the panel's header, or Settings). Panel only: an agent run can't raise it.
       const level = msg.level === null || msg.level === 'ask' ? null : String(msg.level);
@@ -1397,8 +1589,14 @@ async function onPageMessage(msg) {
 }
 
 /** Status for the onboarding page and the side panel. */
+let lastPanelCheck = 0;
 async function uiStatus() {
   if (!state.port && !state.retryTimer) connect();
+  // (a panel looking: the tab in front read again for new mod errors, at most every 10 s)
+  if (Date.now() - lastPanelCheck > 10000) {
+    lastPanelCheck = Date.now();
+    lastFocusedNormalWindow(chrome).then((w) => (w ? chrome.tabs.query({ active: true, windowId: w.id }) : [])).then(([t]) => t && checkTab(t.id, false)).catch(() => {});
+  }
   const s = await commands.status();
   const errors = new Map(state.lastApply.errors.map((e) => [e.id, e.error]));
   const live = new Map(s.mods.map((m) => [m.id, m])); // (by id: never another mod's state)
@@ -1415,7 +1613,10 @@ async function uiStatus() {
       from: fromOtherBrowser(m, state.installId) ? (m.origin.browser || 'another browser') : null,
       source: m.source || null, version: m.version || null, update: m.update || null, rules: !!m.rules, sandboxed: !!m.sandboxed, unsandboxed: !!m.unsandboxed, powers: Array.isArray(m.powers) ? m.powers : [],
       newOff: state.newOff[m.id] && !(live.get(m.id)?.enabled ?? isEnabled(m.id)) ? state.newOff[m.id] : null,
+      fixUndo: !!(state.fixes[m.id]?.fixedHash && state.fixes[m.id].fixedHash === m.hash),
+      broken: openErrors(state.health, m).map(({ fp, message, line, count, quiet }) => ({ fp, message: String(message).slice(0, 300), line, count, ...(quiet ? { quiet: true } : {}) })).slice(0, 10),
     })),
+    onBreak: state.onBreak,
     startsOff: state.startsOff, canSandbox: state.canSandbox !== false,
     agentSites: state.agentSites, sensitiveSites: state.sensitiveSites,
     agentAsks: [...state.agentAsks.entries()].map(([id, a]) => ({ id, site: a.site })),
@@ -1571,6 +1772,17 @@ async function onPanelMessage(msg) {
       const ids = (Array.isArray(msg.ids) ? msg.ids : []).map(String).slice(0, 20);
       const done = [];
       for (const id of ids) done.push(await helperRequest('mod.undo', { id }, 10000));
+      // (an Undo fix, or any undo of a fixed mod: the fix is over, and its cards say so)
+      const unfixed = ids.filter((id) => state.fixes[id]);
+      for (const id of unfixed) delete state.fixes[id];
+      if (unfixed.length) {
+        await save({ modFixes: state.fixes }).catch(() => {});
+        for (const id of unfixed) {
+          const sites = new Set((await chrome.tabs.query({}).catch(() => [])).map((t) => siteForUrl(t.url || '')).filter(Boolean));
+          if (msg.site) sites.add(normalizeSite(msg.site));
+          for (const site of sites) await updateChat(site, (chat) => { let c = false; for (const m of chat.messages) if (m.kind === 'modError' && m.mod === id && (m.done === 'fixed' || m.afterFix) && !m.undoneFix) { m.undoneFix = true; c = true; } return c ? undefined : false; });
+        }
+      }
       if (msg.site) {
         await updateChat(normalizeSite(msg.site), (chat) => {
           const line = chat.messages.findLast((m) => Array.isArray(m.undoChange) && !m.undone && m.undoChange.join() === ids.join());
@@ -1695,6 +1907,14 @@ async function startAgent(msg) {
   }
   // Registered synchronously after the response, before the next native message is handled.
   state.runs.set(runId, { runId, site, agent, tabId, stopping: false, errored: false, texts: 0 });
+  // (a run Fix it started: if it changes the mod, its card and row offer Undo fix)
+  if (msg.fix && typeof msg.fix === 'object' && typeof msg.fix.mod === 'string') {
+    const m = state.mods.find((x) => x.id === msg.fix.mod);
+    if (m) {
+      state.fixRuns.set(runId, { mod: m.id, fp: String(msg.fix.fp ?? ''), site, prevHash: m.hash });
+      if (msg.fix.fp) markCards(m.id, [String(msg.fix.fp)], 'fixing').catch(() => {});
+    }
+  }
   const early = state.early.get(runId) || [];
   state.early.delete(runId);
   if (--state.starting === 0) state.early.clear();
@@ -1888,6 +2108,18 @@ async function onAgentEvent(runId, event, relay = true) {
         const undoable = Array.isArray(event.undoable) ? event.undoable.filter((id) => typeof id === 'string').slice(0, 20) : [];
         if (undoable.length) {
           chat.messages.push({ role: 'mod', text: `Changed ${undoable.map(modFileName).join(', ')}.`, undoChange: undoable, time });
+        }
+        // (a fix run that changed its mod: the card says so, with Undo fix; so does the mod's row)
+        const fx = state.fixRuns.get(runId);
+        if (fx) {
+          state.fixRuns.delete(runId);
+          if (undoable.includes(fx.mod)) {
+            // (the new version may have arrived already: the helper syncs a run's files as it writes them)
+            const now = state.mods.find((x) => x.id === fx.mod);
+            state.fixes[fx.mod] = { prevHash: fx.prevHash, fixedHash: now && now.hash !== fx.prevHash ? now.hash : null, site: fx.site, fp: fx.fp, runId, at: time, loads: 0 };
+            save({ modFixes: state.fixes }).catch(() => {});
+            for (const m of chat.messages) if (m.kind === 'modError' && m.mod === fx.mod && (!fx.fp || m.fp === fx.fp || m.done === 'fixing')) { m.done = 'fixed'; m.fixRun = runId; }
+          } else for (const m of chat.messages) if (m.kind === 'modError' && m.mod === fx.mod && m.done === 'fixing') delete m.done;
         }
         for (const h of Array.isArray(event.held) ? event.held : []) {
           push('error', `${h.id} is on hold: TRIF found that it ${(Array.isArray(h.facts) && h.facts.length ? h.facts : [h.reason]).join('; it ')}. It won't run until you allow it (in Mods above).`);

@@ -106,7 +106,7 @@ export function formatError(e) {
 /** The body of `__webmods_runtime`. Runs once per page at document_start, before any mod. */
 export function runtimeMain(RECORDING, safeStringify) {
   if (window.__webmods && window.__webmods.errors) return; // already installed
-  const W = window.__webmods = { errors: [], pageErrors: [], logs: [], requests: [], recording: false, current: null };
+  const W = window.__webmods = { errors: [], pageErrors: [], logs: [], requests: [], recording: false, current: null, watched: {} };
   const nativeConsole = { log: console.log, warn: console.warn, error: console.error };
   const MAX_ERRORS = 200, MAX_PAGE_ERRORS = 100, MAX_LOGS = 500, MAX_REQUESTS = 300, MAX_BODY = 2 * 1024 * 1024;
   const MAX_KEPT = 32 * 1024 * 1024; // characters of bodies kept across all recorded requests
@@ -128,7 +128,17 @@ export function runtimeMain(RECORDING, safeStringify) {
       nativeConsole[level].call(console, '[TRIF]', mod || '', ...args);
     } catch (e) { /* never throw into a mod */ }
   };
-  window.webmods = window.trif = { log: logger('log'), warn: logger('warn'), error: logger('error') };
+  // trif.expect(selector): a free mod says what it looks for, so TRIF can tell when none of it is on the page
+  // any more (the mod may be broken: extension/modhealth.js). It only notes it; nothing else happens.
+  const expect = function (selector) {
+    try {
+      const mod = modFromStack(new Error().stack) || W.current || null;
+      if (!mod || typeof selector !== 'string' || !selector || selector.length > 500) return;
+      const l = W.watched[mod] || (W.watched[mod] = []);
+      if (l.length < 40 && l.indexOf(selector) < 0) l.push(selector);
+    } catch (e) { /* never throw into a mod */ }
+  };
+  window.webmods = window.trif = { log: logger('log'), warn: logger('warn'), error: logger('error'), expect };
 
   // Errors from mods' event handlers and timers (the per-mod wrapper only catches top-level throws); the
   // rest are the page's own (`trif errors --page`), kept apart and fewer.

@@ -342,6 +342,8 @@ async function startServers(dir) {
     if (u.pathname === '/promos.html') return send(200, 'text/html; charset=utf-8', PROMOS_PAGE());
     if (u.pathname === '/sandbox.html') return send(200, 'text/html; charset=utf-8', SANDBOX_PAGE());
     if (u.pathname === '/powers3.html') return send(200, 'text/html; charset=utf-8', POWERS3_PAGE());
+    // (mods that break, scenario.js modHealthCheck: the element a style mod looks for, there with ?has=1)
+    if (u.pathname === '/health.html') return send(200, 'text/html; charset=utf-8', PAGE('TRIF e2e health', `<h1 id="title">Health</h1>${u.searchParams.get('has') ? '<div id="e2e-quiet-target">here</div>' : '<p>gone</p>'}`));
     if (u.pathname.startsWith('/e2e-goto-')) return send(200, 'text/html; charset=utf-8', PAGE('go-to', `<p id="where">${u.pathname}</p>`));
     // (powers, site-data: small JSON the page fetches, which boxed mods filter; search-box: where it goes)
     if (u.pathname.startsWith('/e2e-api/')) return send(200, 'application/json', JSON.stringify({

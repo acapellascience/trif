@@ -669,3 +669,16 @@ h3.mod-name { margin: 0; font-size: inherit; line-height: inherit; }
 .file-link:hover { text-decoration: underline; text-underline-offset: 2px; color: var(--text); }
 .file-link:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; border-radius: 3px; }
 button.mod-file { font: 11px/1.4 var(--mono); font-weight: 400; color: var(--muted); }
+
+/* ---- mods that break: the row's badge and Undo fix, the chat's card, the code card's error ---------------- */
+.tag.err-badge { background: var(--bad-bg); color: var(--bad); border-color: color-mix(in srgb, var(--bad) 45%, var(--line)); cursor: pointer; font-weight: 600; }
+.tag.fix-undo { background: none; cursor: pointer; }
+.tag.fix-undo:hover, .tag.err-badge:hover { border-color: currentColor; }
+.msg.trif { border: 1px solid color-mix(in srgb, var(--bad) 35%, var(--line)); background: var(--bad-bg); border-radius: 10px; padding: 8px 10px; }
+.msg.trif .break-state { color: var(--muted); }
+.msg.trif .break-actions { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; align-items: center; }
+.msg.trif .break-actions .btn.text { background: none; border-color: transparent; color: var(--muted); }
+.code-view .cv-error { margin-top: 10px; }
+.code-view .cv-code .l.hl { background: color-mix(in srgb, var(--bad) 18%, transparent); }
+.break-row { grid-template-columns: 1fr auto; }
+.msg.trif .break-actions .btn.go { background: var(--trif-green); color: #04291c; border-color: transparent; }

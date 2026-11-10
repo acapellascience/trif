@@ -183,7 +183,8 @@ function buildMod({ site, file, code }) {
   if (header.rules) {
     // (what runs is TRIF's code with the checked rules; throws a RulesError for the scanner to report)
     const rules = require('./rules');
-    return { mod: { ...meta, rules: true, text: code, code: rules.rulesCode(rules.parseRules(code), meta.id), hash }, warnings: header.warnings };
+    const parsed = rules.parseRules(code);
+    return { mod: { ...meta, rules: true, text: code, code: rules.rulesCode(parsed, meta.id), selectors: rules.selectorsOf(parsed), hash }, warnings: header.warnings };
   }
   return { mod: { ...meta, code, hash }, warnings: header.warnings };
 }

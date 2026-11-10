@@ -343,6 +343,7 @@ const handlers = {
     if (st && st.sandbox === false) lines.push(`NO SANDBOX    ${st.browser || 'this browser'} can't run boxed mods: each waits for the user's OK (in the side panel) to run as a free mod instead`);
     // Sandboxed mods as the extension runs them: in TRIF's sandbox, or ('page') as page scripts
     const sandboxedAs = new Map(((st && st.mods) || []).filter((m) => m.sandboxed).map((m) => [m.id, m.sandboxed]));
+    const brokenMods = new Map(((st && st.mods) || []).filter((m) => Array.isArray(m.broken) && m.broken.length).map((m) => [m.id, m.broken]));
     const boxPowers = new Map(((st && st.mods) || []).filter((m) => Array.isArray(m.powers) && m.powers.length).map((m) => [m.id, m.powers]));
     const sandboxHeld = new Map(((st && st.mods) || []).filter((m) => m.held && m.held.by === 'sandbox').map((m) => [m.id, m.held]));
     if (st && st.paused) lines.push('PAUSED        every mod is paused in this browser (the user\'s choice, in the side panel\'s Settings): nothing runs until they resume');
@@ -361,6 +362,7 @@ const handlers = {
       if (sandboxedAs.has(id) && !sandboxHeld.has(id)) s += sandboxedAs.get(id) === 'page' ? ' (boxed mod, run as a free mod: the user allowed it, as this browser has no sandbox)' : boxPowers.get(id) ? ` (boxed, powers: ${boxPowers.get(id).join(', ')})` : ' (boxed)';
       if (offSites.has(id) && !off.has(id)) s += ` (off on ${offSites.get(id).join(', ')})`;
       if (updates[id]) s += `; ${updateText(updates[id])}`;
+      if (brokenMods.has(id)) s += `; ${brokenText(brokenMods.get(id))}`;
       if (review[id]) s += `; TO REVIEW: ${require('./lib/boxpowers').factLines(review[id].needs, review[id].facts).join('; ')} (trif approve ${id} when that's fine)`;
       lines.push(`  ${pad(id, 40)} ${s}`);
     }
@@ -865,7 +867,7 @@ const handlers = {
     const { mods, problems, warnings } = scanMods(ctx.ws.modsDir);
     const plan = planMods(mods);
     const errors = [...problems, ...plan.errors];
-    const { enabled, offSites, newOff } = await knownSwitches(ctx);
+    const { enabled, offSites, newOff, broken } = await knownSwitches(ctx);
     const held = loadHeld(ctx.ws.home);
     const isHeld = (m) => held[m.id] && held[m.id].hash === m.hash;
     const updates = shipped.pendingUpdates(ctx.ws.home, mods);
@@ -875,7 +877,7 @@ const handlers = {
         modsDir: ctx.ws.modsDir,
         mods: mods.map(({ code, ...m }) => ({
           ...m, ...(enabled.has(m.id) ? { enabled: enabled.get(m.id) } : {}), ...(offSites.has(m.id) ? { offSites: offSites.get(m.id) } : {}),
-          ...(newOff.has(m.id) ? { newOff: newOff.get(m.id) } : {}),
+          ...(newOff.has(m.id) ? { newOff: newOff.get(m.id) } : {}), ...(broken.has(m.id) ? { broken: broken.get(m.id) } : {}),
           ...(isHeld(m) ? { held: held[m.id] } : {}), ...(updates[m.id] ? { update: updates[m.id] } : {}),
         })),
         errors,
@@ -896,6 +898,7 @@ const handlers = {
       else if (offSites.has(m.id)) out(`  switched off by the user on ${offSites.get(m.id).join(', ')} (trif enable ${m.id} --site <site> turns it back on there)`);
       if (isHeld(m)) out(`  HELD: ${held[m.id].by === 'outside' ? 'new or changed since TRIF last let it run' : `a side-panel agent wrote it while working on ${held[m.id].site}`}, and TRIF found that ${require('./lib/boxpowers').factLines(held[m.id].needs, held[m.id].facts || [held[m.id].reason]).join('; ')}. Not running until the user approves it (trif approve ${m.id}).`);
       if (updates[m.id]) out(`  ${updateText(updates[m.id])}: trif mod-update ${m.id}`);
+      if (broken.has(m.id)) out(`  ${brokenText(broken.get(m.id))}`);
       if (m.description) out(`  ${m.description}`);
       if (m.rules) out('  kind: style mod (data TRIF runs; never waits for the user\'s OK)');
       else if (m.sandboxed) out(m.powers && m.powers.length ? `  kind: boxed mod with powers: ${m.powers.join(', ')} (runs in TRIF's sandbox, with only TRIF's API and those powers; waits for the user's OK once for that set)`
@@ -1045,6 +1048,17 @@ async function switchMod(ctx, pos, enabled) {
 
 // When the extension can be asked: {enabled: Map(mod id → enabled), offSites: Map(mod id → sites it's
 // off on)}. Otherwise (no helper, no answer) both empty.
+// A mod's new errors (extension/modhealth.js), in a line: "NEW ERROR at line 12: x is not a function", or
+// "MAY BE BROKEN: nothing it looks for is on the page any more"; `trif errors --tab` has them in full.
+function brokenText(list) {
+  const quiet = list.filter((b) => b.quiet);
+  const errs = list.filter((b) => !b.quiet);
+  const parts = [];
+  if (errs.length) parts.push(`NEW ERROR${errs.length > 1 ? `S (${errs.length})` : ''}${errs[0].line ? ` at line ${errs[0].line}` : ''}: ${String(errs[0].message).slice(0, 160)}`);
+  if (quiet.length) parts.push('MAY BE BROKEN: nothing it looks for is on the page any more');
+  return `${parts.join('; ')} (trif errors --tab <id> for the details; the user can ignore it in the side panel)`;
+}
+
 async function knownSwitches(ctx) {
   try {
     const st = await ctx.call('status', { timeout: 2000 }, 3000);
@@ -1053,9 +1067,10 @@ async function knownSwitches(ctx) {
       enabled: new Map(mods.map((m) => [m.id, m.enabled !== false])),
       offSites: new Map(mods.filter((m) => Array.isArray(m.offSites) && m.offSites.length).map((m) => [m.id, m.offSites])),
       newOff: new Map(mods.filter((m) => m.newOff).map((m) => [m.id, m.newOff])),
+      broken: new Map(mods.filter((m) => Array.isArray(m.broken) && m.broken.length).map((m) => [m.id, m.broken])),
     };
   } catch {
-    return { enabled: new Map(), offSites: new Map(), newOff: new Map() };
+    return { enabled: new Map(), offSites: new Map(), newOff: new Map(), broken: new Map() };
   }
 }
 

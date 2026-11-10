@@ -1224,6 +1224,7 @@ class Scenario {
       await r.check('speculation rules (audit AU-7): a page that prefetches its same-site links at once; a link a free mod adds is fetched without a click (Chrome), a boxed mod can\'t make one', () => this.specRulesCheck(win));
       await r.check('boxed mods in the panel: their own group between Style mods and Free mods, with its switch (off on the site: they stop there; on: back), and "New mods start" has a Boxed mods row', () => this.sandboxedPanelCheck(win));
       await r.check('Settings → New mods start → Free mods Off: a new free mod arrives off, marked "new", and doesn\'t run; a new style mod runs; switched on in the panel, it runs; Free mods On again', () => this.startsOffCheck(win));
+      await r.check('mods that break: a mod that throws gets a badge and a card in the chat; Show error opens its code at the line; Ignore hides it; a new version that throws again: Fix it starts a run (a stand-in Claude Code) that fixes it, and Undo fix puts it back; a style mod whose selectors stop matching is flagged; Settings has When a mod breaks', () => this.modHealthCheck(win));
       await r.check('a hijacked agent (a stand-in Claude Code): the tab it ran code in sends nothing that changes anything until it reloads, even later; its mod that posts is held by its code, whatever its header says', () => this.hijackedAgentCheck(win));
     }
 
@@ -2807,6 +2808,123 @@ page.root.setAttr('data-trif-box-spec', r);\n`,
     }
   }
 
+  // ---- mods that break (extension/modhealth.js, background.js checkTab and announceBreak), with a stand-in
+  // Claude Code that "fixes" the mod it's asked to
+  async modHealthCheck(win) {
+    const site = '127.0.0.1';
+    const base = `http://${site}:${this.o.servers.port}`;
+    const dir = path.join(this.trif, 'sites', site);
+    const brokeFile = path.join(dir, 'e2e-broke.js'), quietFile = path.join(dir, 'e2e-quiet.js');
+    const head = (name, extra = '') => `// ==WebMod==\n// @name ${name}\n// @match *://127.0.0.1/health.html*\n${extra}// @run-at document-idle\n// ==/WebMod==\n`;
+    const broke = (v) => `${head('E2E Broke')}document.documentElement.dataset.e2eBroke = 'ran ${v}';\nconst gone = document.querySelector('#e2e-not-there');\ngone.textContent = 'x'; // throws: the element isn't on the page\n`;
+    const standin = path.join(this.work, 'standin-fix');
+    const promptFile = path.join(standin, 'prompt.txt');
+    fs.mkdirSync(standin, { recursive: true });
+    fs.writeFileSync(path.join(standin, 'claude'), `#!${process.execPath}
+const fs = require('fs');
+const a = process.argv.slice(2);
+if (a[0] === '--version') { console.log('2.1.319 (Claude Code)'); process.exit(0); }
+if (a[0] === 'auth') { console.log('{"loggedIn": true, "authMethod": "claude.ai"}'); process.exit(0); }
+const say = (o) => process.stdout.write(JSON.stringify(o) + '\\n');
+say({ type: 'system', subtype: 'init', session_id: 'e2e-fix' });
+let input = '';
+try { input = fs.readFileSync(0, 'utf8'); } catch { /* none */ }
+fs.writeFileSync(${JSON.stringify(promptFile)}, a.join('\\n') + '\\n---\\n' + input);
+fs.writeFileSync('sites/127.0.0.1/e2e-broke.js', ${JSON.stringify(head('E2E Broke'))} + "document.documentElement.dataset.e2eBroke = 'fixed';\\n");
+const text = 'Fixed it: the element it wanted is gone, so it checks first now.';
+say({ type: 'assistant', message: { model: 'claude-e2e', content: [{ type: 'text', text }] } });
+say({ type: 'result', subtype: 'success', is_error: false, result: text, session_id: 'e2e-fix' });
+`, { mode: 0o755 });
+    const cfgFile = path.join(this.priv, 'config.json');
+    const saved = fs.readFileSync(cfgFile, 'utf8');
+    const cfg = JSON.parse(saved);
+    cfg.env = { ...(cfg.env || {}), PATH: [standin, cfg.env?.PATH].filter(Boolean).join(':') };
+    fs.writeFileSync(cfgFile, JSON.stringify(cfg, null, 2) + '\n');
+    const chat = async () => (await this.ext(`async (k) => (await chrome.storage.local.get(k))[k] || null`, [`chat:${site}`])) || { messages: [] };
+    const cards = async () => (await chat()).messages.filter((m) => m.kind === 'modError');
+    const go = (q = '?has=1') => this.ext(`async (id, url) => { await chrome.tabs.update(id, { url, active: true }); }`, [win.tabId, `${base}/health.html${q}`]);
+    const row = (id) => this.panel(`async () => { const li = document.querySelector('li[data-mod="${site}/${id}"]'); if (!li) return null; const b = li.querySelector('.err-badge'); const u = li.querySelector('.fix-undo');
+      return { badge: b ? b.textContent : '', title: b ? b.title : '', undo: !!u }; }`);
+    const themes = async (name) => { for (const scheme of ['dark', 'light']) if (await this.d.colorScheme(this.panelCtx, scheme)) { await sleep(150); await this.shot(this.panelCtx, `${name}-${scheme}`); } await this.d.colorScheme(this.panelCtx, ''); };
+    const problems = [];
+    this.sandboxPage = true; // (the throwing mod's console error is expected)
+    try {
+      await this.ext(`async (k) => { await chrome.storage.local.remove(k); }`, [`chat:${site}`]);
+      fs.writeFileSync(brokeFile, broke(1));
+      fs.writeFileSync(quietFile, `${head('E2E Quiet', '// @style\n')}{ "css": "#e2e-quiet-target { outline: 2px solid rgb(1, 2, 3) }" }\n`);
+      await waitFor('both registered', async () => { const st = (await this.cli(['status'], { timeoutMs: 20000 })).stdout; return /e2e-broke\s+registered/.test(st) && /e2e-quiet\s+registered/.test(st) || null; }, { timeoutMs: 20000, intervalMs: 500 });
+      await go();
+      await this.dismissApproval();
+      // the card, once; the badge; trif status
+      const card = await waitFor('the card', async () => (await cards()).find((c) => c.mod === `${site}/e2e-broke`) || null, { timeoutMs: 25000, intervalMs: 500 });
+      if (card.text !== 'E2E Broke has a new error on 127.0.0.1. Want me to fix it?' || card.line !== 8) problems.push(`the card: ${JSON.stringify(card)}`);
+      const r1 = await waitFor('the badge', async () => { const x = await row('e2e-broke'); return x && x.badge ? x : null; }, { timeoutMs: 10000 });
+      if (r1.badge !== 'error' || !/^New error at line 8: /.test(r1.title)) problems.push(`the badge: ${JSON.stringify(r1)}`);
+      const st = (await this.cli(['status'], { timeoutMs: 20000 })).stdout.split('\n').find((l) => l.includes('e2e-broke')) || '';
+      if (!/NEW ERROR at line 8: /.test(st)) problems.push(`trif status: ${st}`);
+      await this.panel(`async () => { const l = [...document.querySelectorAll('#messages li.break-card')].pop(); if (l) l.scrollIntoView({ block: 'center' }); return true; }`);
+      await themes('health-badge-card');
+      // Show error: the code card at the line, with the error above
+      await this.panelClick('#messages li.break-card:last-of-type .break-actions .btn:nth-child(2)');
+      const shown = await waitFor('the code card at the error', () => this.panel(`async () => { const d = document.getElementById('code-view'); if (!d || !d.open) return null; const hl = d.querySelector('.cv-code .l.hl'); return hl ? { line: [...d.querySelectorAll('.cv-code .l')].indexOf(hl) + 1, error: d.querySelector('.cv-error').textContent } : null; }`), { timeoutMs: 8000 }).catch(() => null);
+      if (!shown || shown.line !== 8 || !/^New error at line 8: /.test(shown.error)) problems.push(`Show error: ${JSON.stringify(shown)}`);
+      await themes('health-show-error');
+      await this.d.key(this.panelCtx, 'Escape');
+      // Ignore: gone, and not again on the next load
+      await this.panelClick('#messages li.break-card:last-of-type .break-actions .btn.text');
+      await waitFor('ignored', async () => { const x = await row('e2e-broke'); return x && !x.badge ? x : null; }, { timeoutMs: 8000 }).catch(() => problems.push('Ignore left the badge'));
+      await go('?has=1&again=1');
+      await sleep(10500);
+      if ((await cards()).filter((c) => c.mod === `${site}/e2e-broke`).length !== 1) problems.push('an ignored error got another card');
+      // a new version that throws again: a fresh card; Fix it starts the stand-in, which fixes it; Undo fix
+      fs.writeFileSync(brokeFile, broke(2));
+      await waitFor('the new version', async () => /e2e-broke\s+registered/.test((await this.cli(['status'], { timeoutMs: 20000 })).stdout) || null, { timeoutMs: 20000, intervalMs: 500 });
+      await sleep(1500);
+      await go('?has=1&v=2');
+      await waitFor('a card for the new version', async () => ((await cards()).filter((c) => c.mod === `${site}/e2e-broke`).length === 2) || null, { timeoutMs: 25000, intervalMs: 500 });
+      // (the panel again, so it finds the stand-in Claude Code, logged in)
+      await this.panel(`async () => { setTimeout(() => location.reload(), 20); return true; }`).catch(() => {});
+      await sleep(800);
+      this.panelCtx = await this.d.findPage('sidepanel.html');
+      await this.waitPanel(`the panel on ${site}`, (x) => x.site === site && !x.gate, 15000);
+      await this.dismissApproval();
+      await this.waitLooks('Send on (the stand-in Claude Code)', (l) => /Claude Code/.test(l.dotLabel) && !l.send.disabled, 30000).catch(() => problems.push('Send never came on with the stand-in'));
+      await this.panelClick('#messages li.break-card:last-of-type .break-actions .btn.go');
+      const fixed = await waitFor('the fix run', async () => { const c = await chat(); return !c.run && c.messages.some((m) => m.kind === 'modError' && m.done === 'fixed') ? c : null; }, { timeoutMs: 60000, intervalMs: 500 }).catch(async () => { problems.push(`the fix run: ${JSON.stringify((await chat()).messages.slice(-4))}`); return null; });
+      const prompt = fs.existsSync(promptFile) ? fs.readFileSync(promptFile, 'utf8') : '';
+      if (!/sites\/127\.0\.0\.1\/e2e-broke\.js/.test(prompt) || !/at line 8/.test(prompt)) problems.push(`the stand-in wasn't asked about the error: ${prompt.slice(0, 300)}`);
+      if (!/dataset\.e2eBroke = 'fixed'/.test(fs.readFileSync(brokeFile, 'utf8'))) problems.push('the stand-in\'s fix isn\'t in the file');
+      if (fixed) {
+        const r2 = await waitFor('Undo fix on the row', async () => { const x = await row('e2e-broke'); return x && x.undo ? x : null; }, { timeoutMs: 15000 }).catch(() => null);
+        if (!r2) problems.push('no Undo fix on the row');
+        await this.panel(`async () => { const c = [...document.querySelectorAll('#messages li.break-card')].pop(); if (c) c.scrollIntoView({ block: 'center' }); return true; }`);
+        await themes('health-fixed');
+        await this.panelClick('#messages li.break-card .break-actions .btn');
+        await waitFor('the version from before the fix', () => (/'ran 2'/.test(fs.readFileSync(brokeFile, 'utf8')) || null), { timeoutMs: 15000, intervalMs: 300 }).catch(() => problems.push(`Undo fix: ${fs.readFileSync(brokeFile, 'utf8').slice(-120)}`));
+      }
+      // a style mod whose selector stops matching: on ?has=1 it matched; three loads without, then flagged
+      for (let i = 0; i < 3; i++) { await go(`?n=${i}`); await sleep(10500); }
+      const quiet = await waitFor('the may-be-broken card', async () => (await cards()).find((c) => c.mod === `${site}/e2e-quiet`) || null, { timeoutMs: 8000, intervalMs: 500 }).catch(() => null);
+      if (!quiet || quiet.text !== 'E2E Quiet may be broken on 127.0.0.1: nothing it looks for is on the page any more. Want me to fix it?') problems.push(`the may-be-broken card: ${JSON.stringify(quiet)}`);
+      const r3 = await row('e2e-quiet');
+      if (!r3 || r3.badge !== 'may be broken') problems.push(`the quiet mod's badge: ${JSON.stringify(r3)}`);
+      // Settings: When a mod breaks
+      await this.panelClick('#settings-btn');
+      await this.panel(`async () => { document.getElementById('on-break').scrollIntoView({ block: 'center' }); return true; }`);
+      const setting = await this.panel(`async () => document.getElementById('on-break').value`);
+      if (setting !== 'ask') problems.push(`When a mod breaks: ${setting}`);
+      await themes('health-setting');
+      await this.panelClick('#settings-btn');
+      if (problems.length) throw new Error(problems.join('\n'));
+      return `a card ("${card.text}") and the badge (${r1.title}); Show error at line ${shown.line}; Ignore hid it, no second card; a new version: Fix it ran the stand-in, which fixed it, and Undo fix put it back; the style mod flagged after three loads without its selector; Settings at Ask me`;
+    } finally {
+      fs.writeFileSync(cfgFile, saved);
+      for (const f of [brokeFile, quietFile]) { try { fs.unlinkSync(f); } catch { /* gone */ } }
+      await this.ext(`async (k) => { await chrome.storage.local.remove(k); }`, [`chat:${site}`]).catch(() => {});
+      await this.panel(`async () => { const d = document.getElementById('code-view'); if (d && d.open) d.close(); if (!document.getElementById('settings').hidden) document.getElementById('settings-btn').click(); return true; }`).catch(() => {});
+    }
+  }
+
   // ---- a hijacked agent, with a stand-in Claude Code (extension/tablock.js, helper/lib/powers.js and held.js)
 
   /**
@@ -3104,7 +3222,7 @@ say({ type: 'result', subtype: 'success', is_error: false, result: text, session
       // (Firefox doesn't say which page: after that check, a failed fetch or socket is one of those)
       // (the sandboxed mods' test page: its hostile mod's refusals and the errors the good one throws on purpose)
       // (Chrome names the page the tab had when its console was first attached, so by the text)
-      || (this.sandboxPage && (/^\[TRIF\] 127\.0\.0\.1\/e2e-(sbx|pw)/.test(String(p.text)) || /willReadFrequently/.test(String(p.text)) || /AudioContext was not allowed to start/.test(String(p.text)) || /\/sandbox\.html/.test(String(p.source || ''))))
+      || (this.sandboxPage && (/^\[TRIF\] 127\.0\.0\.1\/e2e-(sbx|pw|broke)/.test(String(p.text)) || /willReadFrequently/.test(String(p.text)) || /AudioContext was not allowed to start/.test(String(p.text)) || /\/sandbox\.html/.test(String(p.source || ''))))
       || (this.hijacked && /ERR_BLOCKED_BY_CLIENT|NetworkError when attempting to fetch|Failed to fetch|establish a connection to the server at ws:\/\/[^ ]+\/e2e-socket|WebSocket connection to '[^']+\/e2e-socket|e2e-leak|e2e-nav|blocked by|CORS/i.test(String(p.text) + String(p.source || '')));
     const problems = (await this.d.consoleProblems()).filter((p) => !expected(p));
     // The agent-made mod and the stand-in pages aren't ours to judge; everything else counts.

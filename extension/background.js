@@ -1773,7 +1773,9 @@ async function onPanelMessage(msg) {
       const done = [];
       for (const id of ids) done.push(await helperRequest('mod.undo', { id }, 10000));
       // (an Undo fix, or any undo of a fixed mod: the fix is over, and its cards say so)
-      const unfixed = ids.filter((id) => state.fixes[id]);
+      // (every undone mod: its fix record may be gone already, the helper's sync of the undone file can come
+      // first; a card with nothing to mark is left as it is)
+      const unfixed = ids.filter((id) => done.some((r) => r.id === id));
       for (const id of unfixed) delete state.fixes[id];
       if (unfixed.length) {
         await save({ modFixes: state.fixes }).catch(() => {});
@@ -2118,7 +2120,8 @@ async function onAgentEvent(runId, event, relay = true) {
             const now = state.mods.find((x) => x.id === fx.mod);
             state.fixes[fx.mod] = { prevHash: fx.prevHash, fixedHash: now && now.hash !== fx.prevHash ? now.hash : null, site: fx.site, fp: fx.fp, runId, at: time, loads: 0 };
             save({ modFixes: state.fixes }).catch(() => {});
-            for (const m of chat.messages) if (m.kind === 'modError' && m.mod === fx.mod && (!fx.fp || m.fp === fx.fp || m.done === 'fixing')) { m.done = 'fixed'; m.fixRun = runId; }
+            // (the card being fixed, or one still open for that error; not one the user ignored or one done before)
+            for (const m of chat.messages) if (m.kind === 'modError' && m.mod === fx.mod && (m.done === 'fixing' || (!m.done && (!fx.fp || m.fp === fx.fp)))) { m.done = 'fixed'; m.fixRun = runId; }
           } else for (const m of chat.messages) if (m.kind === 'modError' && m.mod === fx.mod && m.done === 'fixing') delete m.done;
         }
         for (const h of Array.isArray(event.held) ? event.held : []) {

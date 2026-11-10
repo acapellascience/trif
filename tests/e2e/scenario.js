@@ -2901,6 +2901,11 @@ say({ type: 'result', subtype: 'success', is_error: false, result: text, session
         await themes('health-fixed');
         await this.panelClick('#messages li.break-card .break-actions .btn');
         await waitFor('the version from before the fix', () => (/'ran 2'/.test(fs.readFileSync(brokeFile, 'utf8')) || null), { timeoutMs: 15000, intervalMs: 300 }).catch(() => problems.push(`Undo fix: ${fs.readFileSync(brokeFile, 'utf8').slice(-120)}`));
+        // (the ignored card stays ignored; the fixed one says the fix is undone)
+        const want = JSON.stringify([['ignored', false], ['fixed', true]]);
+        const states = await waitFor('the cards after Undo fix', async () => { const x = JSON.stringify((await cards()).filter((c) => c.mod === `${site}/e2e-broke`).map((c) => [c.done || '', !!c.undoneFix])); return x === want ? x : null; }, { timeoutMs: 8000, intervalMs: 300 })
+          .catch(async () => JSON.stringify((await cards()).filter((c) => c.mod === `${site}/e2e-broke`).map((c) => [c.done || '', !!c.undoneFix])));
+        if (states !== want) problems.push(`the cards after Undo fix: ${states}`);
       }
       // a style mod whose selector stops matching: on ?has=1 it matched; three loads without, then flagged
       for (let i = 0; i < 3; i++) { await go(`?n=${i}`); await sleep(10500); }

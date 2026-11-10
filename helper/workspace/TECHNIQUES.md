@@ -62,10 +62,10 @@ script only for what needs the page: filtering the data the site loads, the app'
 trif.css('[data-testid=sidebarColumn] { display: none !important }');
 trif.observe('article', (post) => {
   if (post.text.includes('Promoted')) return post.hide();
-  if (post.findAll('[data-testid=tweetText]').length > 3) post.classes.add('trif-calm-long');
+  if (post.findAll('[data-testid=tweetText]').length > 3) post.classes.add('trif-box-calm-long');
 });
 const prefs = await trif.settings('prefs', { color: 'rgb(255, 230, 150)' });
-trif.css(`.trif-calm-long { outline: 2px solid ${prefs.value.color} }`);
+trif.css(`.trif-box-calm-long { outline: 2px solid ${prefs.value.color} }`);
 ```
 
 What it has (everything else is simply not there, and `trif check` lists what you used that isn't):
@@ -81,24 +81,29 @@ What it has (everything else is simply not there, and `trif check` lists what yo
   read as plain data), `url`, `title`, `width`, `height`, `scrollX`, `scrollY`, `root`, `body`,
   `prefersReducedMotion`, `prefersDark`.
 - **Elements, as TRIF's stand-ins** (not the real nodes): `tag`, `text`, `setText(t)`, `attr(name)`,
-  `setAttr(name, value)` (`title`, `role`, `hidden`, `alt`, sizes, `aria-*`, `data-trif-*`, and an `id` or
-  `class` starting with `trif-`; a link's `href` only to this site's pages without a query; an image's `src`
-  only `data:`/`blob:` or an image the page already shows), `removeAttr`, `classes.add/remove/toggle`
-  (`trif-` classes) and `has` (any), `style(prop, value)`
+  `setAttr(name, value)` (`title`, `role`, `hidden`, `alt`, sizes, `aria-*`, `data-trif-box-*`, an `id` or
+  `class` starting with `trif-box-`, `open` on a `<details>`; a link's `href` only `#…` or an address a link
+  on the page already has; an image's `src` only `data:`/`blob:` or an image the page already shows),
+  `removeAttr`, `classes.add/remove/toggle` (`trif-box-` classes) and `has` (any), `style(prop, value)`
   (read with one argument; values that load nothing), `hide()`, `show()`, `find`, `findAll`, `closest`,
   `matches`, `parent`, `children`, `next`, `previous`, `append`/`prepend`/`before`/`after` (stand-ins or
   text), `remove()`, `clone()` (a copy with only allowed elements and attributes), `rect()`,
-  `on(type, fn)`, and `canvas()` on a `<canvas>`: 2D drawing with numbers and text (`fillRect`, `arc`,
+  `on(type, fn)`, and `canvas()` on a `<canvas>` the mod made: 2D drawing with numbers and text (`fillRect`, `arc`,
   `fillText`, `set({fillStyle, font, ...})`, ...).
 - `setTimeout`, `setInterval`, `requestAnimationFrame` and their clears (functions only), `Math`, `Date`,
   and the JavaScript language (frozen: mods can't change `Array.prototype` and the like).
 
 Good to know:
-- **Names you give are TRIF's**: data attributes `data-trif-*`, ids and classes `trif-*`. The page's own
-  code acts on its attributes (htmx's `data-hx-post`, Turbo, Stimulus, classes and ids it looks for), so a
-  mod never sets those, nor changes or removes the page's own ids and classes: mark elements with
-  `data-trif-…` or a `trif-` class and style them with `trif.css`. Copies (`clone()`) keep none of the
-  page's ids, classes or data attributes.
+- **A sandboxed mod names only its own things, or copies addresses the page already has.** Names you give
+  start `trif-box-`: data attributes `data-trif-box-*`, ids and classes `trif-box-*`. The page's own code
+  acts on its attributes (htmx's `data-hx-post`, Turbo, Stimulus, classes and ids it looks for), and free
+  mods act on their `trif-` names, so a sandboxed mod never sets those, nor changes or removes the page's
+  own ids and classes: mark elements with `data-trif-box-…` or a `trif-box-` class and style them with
+  `trif.css`. Copies (`clone()`) keep none of the page's ids, classes or data attributes. Links point at
+  `#…` or at an address one of the page's links already has (a new address could carry data, and some
+  pages fetch their links before anyone clicks).
+- **Selectors** have no `\` escapes and don't name the `value` attribute or `:autofill` (React keeps a
+  field's `value` attribute in step with what's typed); `attr('value')` on a field is null.
 - **Forms are the page's**: a button you make is always `type="button"` and can't go inside a form, and
   the page's own fields can't be moved into, out of or between forms, removed, or written over (hide them
   with `hide()` instead).
@@ -106,7 +111,8 @@ Good to know:
   typed into a field or editor: with the focus on the page, a link, a button or a list item, yes; on a
   field, an editor, or an element that could hold one (a `div`, `span`, `article`, a custom element), null.
 - **Editors are the user's**: what's typed into a contenteditable isn't in `.text` or `trif.text`, copies
-  or attributes inside it.
+  or attributes inside it, and a sandboxed mod can't write into one (text, elements, attributes, classes,
+  removing): it can restyle or hide it.
 - The code runs inside a function, so a top-level `return` ends it and `await` works at the top.
 - Errors are caught and shown by `trif errors`, as for page scripts.
 - The sandbox refuses source with `import(` or an HTML comment marker in it, even inside a string or a

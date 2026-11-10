@@ -50,7 +50,7 @@ trif.css(`
 
     /* --- Recommendations in search results --- */
     /* Carousels inside the results list, marked below by their heading */
-    .s-main-slot > [data-trif-hide] { display: none !important; }
+    .s-main-slot > [data-trif-box-hide] { display: none !important; }
 
     /* --- Price and stars only ---
        Product tiles are [data-component-type=s-search-result] inside .s-main-slot; their parts carry
@@ -104,5 +104,5 @@ trif.css(`
 const HEADING = /^customers (also|frequently) (viewed|bought)|inspired by your browsing history/i;
 trif.observe('.s-main-slot > *', (row) => {
   const h = row.find('h2, h3');
-  if (h && HEADING.test(h.text.trim())) row.setAttr('data-trif-hide', '');
+  if (h && HEADING.test(h.text.trim())) row.setAttr('data-trif-box-hide', '');
 });

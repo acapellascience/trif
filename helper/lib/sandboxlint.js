@@ -88,7 +88,7 @@ function sandboxLint(code) {
     }
     if (t.t === 'id' && t.v === 'catch' && ts[k + 1] && ts[k + 1].v === '(' && ts[k + 2] && ts[k + 2].t === 'id') declared.add(ts[k + 2].v);
   }
-  const own = (v) => String(v).trim().split(/\s+/).filter(Boolean).every((x) => /^trif-/.test(x));
+  const own = (v) => String(v).trim().split(/\s+/).filter(Boolean).every((x) => /^trif-box-/.test(x));
   for (let k = 0; k < ts.length; k++) {
     const t = ts[k];
     if (t.t !== 'id') continue;
@@ -98,11 +98,14 @@ function sandboxLint(code) {
     const arg = (i) => ts[k + 2 + i * 2];
     if (member && next && next.v === '(' && (t.v === 'setAttr' || t.v === 'removeAttr') && arg(0) && arg(0).t === 'str') {
       const n = arg(0).v.toLowerCase();
-      if (/^data-/.test(n) && !/^data-trif-/.test(n)) add(`${t.v}('${n}')`, 'only data-trif-* data attributes are offered (the page\'s own code could act on others): name it data-trif-…', t.line);
-      if (t.v === 'setAttr' && (n === 'id' || n === 'class') && arg(1) && arg(1).t === 'str' && !own(arg(1).v)) add(`setAttr('${n}', '${arg(1).v.slice(0, 40)}')`, `${n === 'id' ? 'an id' : 'classes'} a mod gives must start with trif-`, t.line);
+      if (/^data-/.test(n) && !/^data-trif-box-/.test(n)) add(`${t.v}('${n}')`, 'only data-trif-box-* data attributes are offered (the page\'s own code, or a free mod, could act on others): name it data-trif-box-…', t.line);
+      if (t.v === 'setAttr' && (n === 'id' || n === 'class') && arg(1) && arg(1).t === 'str' && !own(arg(1).v)) add(`setAttr('${n}', '${arg(1).v.slice(0, 40)}')`, `${n === 'id' ? 'an id' : 'classes'} a boxed mod gives must start with trif-box-`, t.line);
+    }
+    if (member && next && next.v === '(' && /^(find|findAll|closest|matches|observe|text|hide)$/.test(t.v) && arg(0) && arg(0).t === 'str' && (/\\/.test(arg(0).v) || /\[\s*(?:[\w*-]*\|)?value\b|:(?:-webkit-)?autofill\b/i.test(arg(0).v))) {
+      add(`${t.v}('${arg(0).v.slice(0, 40)}')`, 'selectors can\'t have \\ escapes, or name the value attribute or :autofill (they\'d read what\'s typed in a field)', t.line);
     }
     if (member && next && next.v === '(' && /^(add|remove|toggle)$/.test(t.v) && ts[k - 2] && ts[k - 2].v === 'classes' && arg(0) && arg(0).t === 'str' && !own(arg(0).v)) {
-      add(`classes.${t.v}('${arg(0).v.slice(0, 40)}')`, 'classes a mod adds, removes or toggles must start with trif- (the page\'s own code acts on its classes)', t.line);
+      add(`classes.${t.v}('${arg(0).v.slice(0, 40)}')`, 'classes a boxed mod adds, removes or toggles must start with trif-box- (the page\'s own code, or a free mod, acts on classes)', t.line);
     }
     if (member) {
       // (`.style.x`: a real element's style object; a stand-in's style is a function)

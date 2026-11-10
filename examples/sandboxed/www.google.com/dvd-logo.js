@@ -23,7 +23,7 @@ function start(logo) {
   const w = r.width, h = r.height;
   const dvd = page.create('div');
   dvd.setAttr('aria-hidden', 'true');
-  dvd.setAttr('data-trif-dvd', '');
+  dvd.setAttr('data-trif-box-dvd', '');
   const copy = logo.clone();
   if (copy) { copy.removeAttr('id'); copy.style('width', '100%'); copy.style('height', '100%'); copy.style('margin', '0'); dvd.append(copy); }
   for (const [k, v] of [['position', 'fixed'], ['left', '0'], ['top', '0'], ['width', `${w}px`], ['height', `${h}px`], ['z-index', '0'], ['pointer-events', 'none'], ['will-change', 'transform']]) dvd.style(k, v);

@@ -138,6 +138,17 @@ What the hand-rolled patterns become, so mods don't need the page's powers for t
 5. **Themes / shared styling** on top of rules (closed-world tokens, as discussed: no free text, no
    code).
 
+## The rule behind the guards
+
+**A sandboxed mod may only name things that are its own, or copy addresses the page already has.** Its ids,
+classes and data attributes are `trif-box-` ones; the page's own names, and other mods', aren't its to set or
+change; an address it puts on an image or a link is one the page already shows; what it writes goes into its
+own elements, never into the page's forms or editors. Each fix since the red team is this rule applied to
+one more place the page's own code (or a free mod) reads. Every new piece of API, and every power
+(docs/POWERS.md), is checked against it: a power that lets a mod name something of the page's, or an
+address the page doesn't have, is a hole unless it's the power's whole point and narrowed (click names
+declared selectors; go-to declared paths).
+
 ## Sandboxed: what's built (branch sandbox-tier)
 
 Built on the stand-in design proved on the `sandbox-standin` branch (its notes there: "Stand-in design"):
@@ -179,9 +190,16 @@ callbacks, after an await) and kept in the world for `trif errors` / `trif logs`
 - synthetic input: stand-ins have no click/dispatchEvent/focus/submit; no event constructors;
 - navigation: no location/open/history; no `target` attribute; no clicks;
 - clipboard, cookies, storage, postMessage: none of navigator, document, localStorage, postMessage;
-- the page's own code as the messenger (red team, RT-1): names a mod gives are TRIF's (`data-trif-*`, `trif-`
-  ids and classes; the page's own ids and classes aren't a mod's to change), so htmx, Turbo, Stimulus and the
-  like find nothing to act on; copies keep none of the page's;
+- the page's own code as the messenger (red team, RT-1; audit AU-3): names a mod gives are its own
+  (`data-trif-box-*`, `trif-box-` ids and classes; not plain `trif-`, which free mods use and act on; the
+  page's own ids and classes aren't a mod's to change), so htmx, Turbo, Stimulus, the like and free mods
+  find nothing to act on; copies keep none of the page's;
+- the audit (AU-1 to AU-9, branch sandbox-fixes-3): no writing into editors (text, elements, attributes,
+  classes, removing; restyling stays); `attr('value')` null on fields, and no selector (anywhere, `trif.css`
+  included) naming the `value` attribute or `:autofill`, or with a `\` escape; a select's options and
+  custom elements (possible form fields) stay where they are in forms; `canvas()` only on the mod's own;
+  a link only to `#…` or an address a link on the page already has (speculation rules and prefetchers fetch
+  links with no click: tests/e2e/scenario.js specRulesCheck); `open` only on `<details>`;
 - forms (RT-2): a mod's buttons are `type="button"` and never inside a form; the page's fields stay in the
   form they're in;
 - forms, round 2 (RT-10): nor can a mod remove a page field, or what holds it, or write over it, or take off

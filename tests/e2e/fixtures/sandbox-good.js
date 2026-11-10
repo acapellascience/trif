@@ -13,48 +13,56 @@ const out = { names: Object.getOwnPropertyNames(globalThis).sort() };
 trif.css('#title { color: rgb(1, 2, 3) }');
 trif.hide('.sbx-hide');
 const made = page.create('div');
-made.setAttr('id', 'trif-sbx-made');
+made.setAttr('id', 'trif-box-sbx-made');
 made.setText('made in the sandbox');
 page.body.append(made);
 trif.text('#txt, #box', (text) => text.replace(/Grok/g, 'the robot'));
-trif.observe('.later', (el) => el.setAttr('data-trif-seen', 'yes'));
+trif.observe('.later', (el) => el.setAttr('data-trif-box-seen', 'yes'));
 const cv = page.create('canvas');
-cv.setAttr('id', 'trif-sbx-canvas'); cv.setAttr('width', '10'); cv.setAttr('height', '10');
+cv.setAttr('id', 'trif-box-sbx-canvas'); cv.setAttr('width', '10'); cv.setAttr('height', '10');
 const g = cv.canvas();
 g.set({ fillStyle: 'rgb(7, 8, 9)' });
 g.fillRect(0, 0, 10, 10);
 page.body.append(cv);
-setTimeout(() => page.root.setAttr('data-trif-sbx-timer', 'ran'), 30);
+setTimeout(() => page.root.setAttr('data-trif-box-sbx-timer', 'ran'), 30);
 let n = 0;
-const iv = setInterval(() => { if (++n === 3) { clearInterval(iv); page.root.setAttr('data-trif-sbx-interval', String(n)); } }, 10);
-requestAnimationFrame((ts) => page.root.setAttr('data-trif-sbx-frame', typeof ts));
+const iv = setInterval(() => { if (++n === 3) { clearInterval(iv); page.root.setAttr('data-trif-box-sbx-interval', String(n)); } }, 10);
+requestAnimationFrame((ts) => page.root.setAttr('data-trif-box-sbx-frame', typeof ts));
 const copy = page.find('#pimg').clone();
-copy.setAttr('id', 'trif-sbx-copy');
+copy.setAttr('id', 'trif-box-sbx-copy');
 page.body.append(copy);
 page.find('#target-click').on('click', (e) => {
-  page.root.setAttr('data-trif-sbx-clicked', `${e.type}:${e.target ? e.target.attr('id') : 'none'}:${Object.getPrototypeOf(e.target) === Object.getPrototypeOf(page.root) ? 'stand-in' : 'other'}`);
+  page.root.setAttr('data-trif-box-sbx-clicked', `${e.type}:${e.target ? e.target.attr('id') : 'none'}:${Object.getPrototypeOf(e.target) === Object.getPrototypeOf(page.root) ? 'stand-in' : 'other'}`);
 });
 // keys: which key reaches the mod only when it wasn't typed into a field (red-team RT-4)
 const keys = [];
-page.on('keydown', (e) => { keys.push(`${e.key}@${e.target ? e.target.tag : '-'}`); page.root.setAttr('data-trif-sbx-keys', keys.join(',')); });
+page.on('keydown', (e) => { keys.push(`${e.key}@${e.target ? e.target.tag : '-'}`); page.root.setAttr('data-trif-box-sbx-keys', keys.join(',')); });
 // a mod's own button in a page area that isn't a form, and its own classes and data, all fine
 const own = page.create('button');
 own.setText('a mod button');
-own.setAttr('id', 'trif-sbx-own');
-own.classes.add('trif-own');
-own.setAttr('data-trif-kind', 'own');
+own.setAttr('id', 'trif-box-sbx-own');
+own.classes.add('trif-box-own');
+own.setAttr('data-trif-box-kind', 'own');
 page.find('#box').after(own);
+// a copy of a link the page has; the page's <details> opened; its editor restyled (all fine: audit AU-7, AU-8, AU-1)
+const link = page.create('a');
+link.setAttr('href', '/two.html');
+link.setAttr('id', 'trif-box-sbx-link');
+link.setText('a copy of the page\'s link');
+page.find('#box').after(link);
+page.find('#det').setAttr('open', '');
+page.find('#editor').style('outline', '2px solid rgb(1, 2, 3)');
 trif.log('hello from the sandbox', { n: 1 });
 console.warn('a warning from the sandbox');
 (async () => {
   const s = await trif.settings('prefs', { visits: 0 });
-  try { await s.save({ visits: s.value.visits + 1 }); } catch (e) { page.root.setAttr('data-trif-sbx-visits', `not saved: ${e.message}`); return; }
-  page.root.setAttr('data-trif-sbx-visits', String(s.value.visits));
+  try { await s.save({ visits: s.value.visits + 1 }); } catch (e) { page.root.setAttr('data-trif-box-sbx-visits', `not saved: ${e.message}`); return; }
+  page.root.setAttr('data-trif-box-sbx-visits', String(s.value.visits));
 })();
 const cells = page.findAll('.cell');
 const t0 = Date.now();
 for (const c of cells) c.style('color', 'rgb(1, 2, 3)');
 out.ms = Date.now() - t0;
 out.cells = cells.length;
-page.root.setAttr('data-trif-sbx-good', JSON.stringify(out));
+page.root.setAttr('data-trif-box-sbx-good', JSON.stringify(out));
 setTimeout(() => { throw new Error('thrown later by the sandboxed mod'); }, 50);

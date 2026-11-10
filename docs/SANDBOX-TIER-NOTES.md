@@ -307,3 +307,32 @@ arrange the page so the user's own click does something else. Drafts:
 - The `### More` bullet already on the branch (*"…it can't send, click or load anything, so it never waits
   for your OK"*): *"…it changes what the page shows but can't send, load or click anything itself, so it
   never waits for your OK"*.
+
+## Audit fixes (docs/AUDIT-REPORT.md on sandbox-audit; branch sandbox-fixes-3)
+
+The rule behind them, now in SAFE-MODS.md: **a sandboxed mod may only name things that are its own, or copy
+addresses the page already has.**
+
+- **AU-1, writing into drafts.** `setText`, `append`/`prepend` into, `before`/`after` beside, `remove()`,
+  `setAttr`, `removeAttr` and `classes` are refused on an editor or anything in one; `style()`, `hide()` and
+  `show()` stay. *Cost*: a sandboxed mod can't add a badge or button inside an editor (next to it is fine).
+- **AU-2 and AU-9, reading fields through `value`.** `attr('value')` is null on input, textarea, select and
+  option; no selector anywhere (`find`, `findAll`, `closest`, `matches`, `observe`, `text`, `hide`, and the
+  rules in `trif.css`) may name the `value` attribute or `:autofill`, or contain a `\` escape. *Cost*: CSS
+  or selectors by a field's value (rare); escaped selectors (`.a\:b`) must be written another way.
+- **AU-3, names shared with free mods.** A sandboxed mod's names are `trif-box-` (ids, classes,
+  `data-trif-box-*`); plain `trif-` is a free mod's, and refused. AGENTS.md tells free mods never to act on
+  `trif-box-` names. *Cost*: the prefix is longer; the two examples changed (`data-trif-box-hide`,
+  `data-trif-box-dvd`).
+- **AU-4 and AU-5.** A select's `option`/`optgroup` can't move to another select, out of one, or be removed
+  from one in a form; a custom element (a name with `-`) in a form counts as a field (moving in, out,
+  between, removing). *Cost*: rearranging custom elements in or out of forms is refused.
+- **AU-6.** `canvas()` only on canvases the mod made. *Cost*: no drawing on the page's own canvases.
+- **AU-7, links.** A link's `href` is `#…` or an address a link on the page already has. *Cost*: no new
+  same-site links (a copy of one of the page's works). **Observed before the fix** (Chrome 156, headless,
+  tests/e2e/scenario.js specRulesCheck run on main 4eebd9b): on a page with document speculation rules
+  (`prefetch`, `eagerness: immediate`, `href_matches: /e2e-spec-*`), a link a sandboxed mod added to
+  `/e2e-spec-boxed/carried-data` **was fetched with no click**, as was a free mod's. After the fix the
+  sandboxed mod's link is refused and nothing is fetched; a copy of the page's own link works. Firefox has
+  no speculation rules (its run shows nothing fetched either way).
+- **AU-8.** `open` only on `<details>`. *Cost*: none known.

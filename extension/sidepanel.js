@@ -3,12 +3,13 @@
 // chrome.storage.local `chat:<site>`; this page renders that record and reacts to storage changes.
 // See docs/PROTOCOL.md, "Side panel and agent runs".
 
-import { siteForUrl, modAppliesTo, modSites, isMultiSite, offOnSite, normalizeOffSites, scopeFor, hostInScope, limitToSites, withOffSites, modGroup, GROUPS, groupOffOn, offSitesFor, normalizeGroupsOff, FIREFOX, BROWSER, SETUP_COMMAND,
+import { siteForUrl, modAppliesTo, modSites, isMultiSite, offOnSite, normalizeOffSites, scopeFor, hostInScope, limitToSites, withOffSites, modGroup, GROUPS, GROUP_NAMES, groupWord, groupOffOn, offSitesFor, normalizeGroupsOff, FIREFOX, BROWSER, SETUP_COMMAND,
   SITE_ACCESS, siteOrigins, siteState, hasSiteAccess, requestEverySite,
   normalizeModOrder, orderMods, moveId, setModOrder,
   normalizeSettings, normalizePicks, siteSettings, withoutModel, panelQuery, panelWindowBounds, rememberScreen } from './lib.js';
 import { setMarkdown, unwrapMarkdown } from './markdown.js';
 import { createLogin } from './login.js';
+import { agentLevel, agentSiteOf, sensitiveList } from './agentsites.js';
 import { modSwitch, syncSwitches, shownEnabled, switchError, enabledIn, onSwitchChange } from './modswitch.js';
 import { mountOpenModel, renderOpenModel, openModelKeyMissing, watchOpenModel } from './openmodel.js';
 
@@ -17,6 +18,11 @@ const chatKey = (site) => `chat:${site}`;
 const emptyChat = () => ({ sessionId: null, agent: null, messages: [], run: null, last: null });
 
 const ui = {
+  agentLevel: document.getElementById('agent-level'), agentNote: document.getElementById('agent-note'),
+  agentSitesList: document.getElementById('agent-sites-list'), agentSitesEmpty: document.getElementById('agent-sites-empty'),
+  sensitiveSites: document.getElementById('sensitive-sites'), sensitiveSave: document.getElementById('sensitive-save'),
+  sensitiveReset: document.getElementById('sensitive-reset'), sensitiveNote: document.getElementById('sensitive-note'),
+  waitingBadge: document.getElementById('waiting-badge'),
   dot: $('#dot'), site: $('#site'), barRobot: $('#bar-robot'), siteSwitch: $('#site-switch'), newChat: $('#new-chat'), settingsBtn: $('#settings-btn'),
   gate: $('#gate'), gateTitle: $('#gate-title'), gateWhy: $('#gate-why'), gateBtn: $('#gate-btn'), gateErr: $('#gate-err'), gateNote: $('#gate-note'),
   gateLinks: $('#gate-links'), gateBlock: $('#gate-block'), gateDisconnect: $('#gate-disconnect'),
@@ -156,6 +162,10 @@ function onPortMessage(msg) {
     }
   } else if (msg?.type === 'statusChanged') {
     refreshStatusSoon();
+  } else if (msg?.type === 'agentAsk') {
+    showAgentAsk(msg.id, msg.site);
+  } else if (msg?.type === 'agentAskDone') {
+    if (agentAsk.id === msg.id) closeAgentAsk();
   }
 }
 
@@ -386,6 +396,9 @@ function render() {
   const anyAgent = agentList.some((a) => a.available);
 
   renderSites();
+  renderAgentLevel();
+  renderAgentSites();
+  for (const a of view.status?.agentAsks || []) if (!agentAsk.answered.has(a.id)) showAgentAsk(a.id, a.site);
   ui.site.textContent = site || 'Tim\'s Robot Internet Fixer';
   ui.site.title = view.tab?.url || '';
   document.title = site ? `TRIF · ${site}` : 'Tim\'s Robot Internet Fixer';
@@ -689,12 +702,14 @@ function actions(...children) {
 
 let modLabelSeq = 0;
 onSwitchChange(() => renderMods());
+ui.waitingBadge?.addEventListener('click', () => openApproval(null));
 
 // ---- Groups: "Rules" and "Page scripts", each with a switch for this site (background's mods.group)
 const GROUP_TEXT = {
-  rules: ['Rules', 'Run by TRIF from data: they can\'t send, click or load anything.'],
-  sandboxed: ['Sandboxed', 'Run in TRIF\'s sandbox: they can\'t send, click or load anything.'],
-  page: ['Page scripts', 'Run in the page with everything it has.'],
+  // (the lines for style and boxed mods: drafts awaiting Tim's OK, docs/TIER-NAMES-STRINGS.md)
+  rules: [GROUP_NAMES.rules, 'Run by TRIF from data: they change how the page looks, and can\'t send, load or click anything themselves.'],
+  sandboxed: [GROUP_NAMES.sandboxed, 'Run in TRIF\'s sandbox: they change what the page shows, and can\'t send, load or click anything themselves.'],
+  page: [GROUP_NAMES.page, 'Run in the page with everything it has.'],
 };
 const groupOff = (g) => !!view.site && groupOffOn(normalizeGroupsOff(view.status?.groupsOff), g, view.site);
 const groupHeadings = new Map();
@@ -750,6 +765,7 @@ function renderMods() {
   const ordered = orderMods(listed, view.modOrder[scope]);
   const mods = GROUPS.flatMap((g) => ordered.filter((m) => modGroup(m) === g));
   ui.mods.hidden = mods.length === 0;
+  updateApprovals(mods);
   if (!mods.length) { view.modRows.clear(); ui.modList.replaceChildren(); ui.modsReviewNote.hidden = true; return; }
   ui.modsCount.textContent = `(${mods.length})`;
   // Mods TRIF found can do more than change the page's look, which the user hasn't looked at yet (helper
@@ -765,7 +781,7 @@ function renderMods() {
   const rows = new Map();
   for (const m of mods) {
     const key = JSON.stringify([site, m.name, m.description || '', m.file, m.held ?? null, m.pending ?? null, m.review ?? null, m.risk?.tier ?? null, m.risk?.why ?? null, m.matches,
-      m.source ?? null, m.version ?? null, m.update ?? null]);
+      m.source ?? null, m.version ?? null, m.update ?? null, m.powers ?? null]);
     const old = view.modRows.get(m.id);
     rows.set(m.id, old && old.key === key ? old : { key, li: modItem(m) });
   }
@@ -1104,7 +1120,8 @@ function modItem(m) {
   const tag = el('span', 'tag');
   tag.hidden = true;
   // The file name right after the name, and the mods TRIF ships say so (their header's @source and @version).
-  const file = el('span', 'mod-file', (m.file || m.id).split('/').pop());
+  // (a link to its code, like the </> beside the switch)
+  const file = fileLink((m.file || m.id).split('/').pop(), 'Show the code', () => openCodeView(m.id), 'mod-file');
   const source = m.source === 'webmods' || m.source === 'trif' ? el('span', 'mod-source', `Tim's mod${m.version ? `, v${m.version}` : ''}`) : null;
   // Spaces between the name and the rest, so each can wrap to the next line on its own.
   name.append(label, ' ', file, ...(source ? [' ', source] : []), ' ', tag);
@@ -1128,37 +1145,29 @@ function modItem(m) {
   const main = el('div', 'mod-main');
   // What the mod does, from its header's @description, under the name.
   const desc = m.description ? el('div', 'mod-desc', m.description) : null;
-  main.append(light, name, ...(desc ? [desc] : []));
+  // A boxed mod's powers (docs/POWERS.md), on its row
+  const powers = Array.isArray(m.powers) && m.powers.length ? el('div', 'mod-powers', `Powers: ${m.powers.join(', ')}`) : null;
+  main.append(light, name, ...(desc ? [desc] : []), ...(powers ? [powers] : []));
   const row = el('div', 'mod-row');
   if (m.held) {
     // Written by an agent run here, and it can do something the user hasn't allowed (what TRIF read in
-    // its code, or matches outside the site): not running until the user allows it.
+    // its code, or matches outside the site): not running until the user allows it, in the approval dialog
+    // (below); the row says so, and its tag opens the dialog at this mod.
     li.classList.add('held');
-    const allow = el('button', 'btn allow', 'Allow');
-    allow.type = 'button';
-    allow.setAttribute('aria-describedby', labelId);
-    allow.addEventListener('click', async () => {
-      allow.disabled = true;
-      clearRowError(m.id);
-      try { await request({ type: 'mod.approve', id: m.id, hash: m.held.hash, tab: view.tab?.id }); } catch (e) {
-        allow.disabled = false;
-        rowError(m.id, String(e?.message ?? e));
-      }
-    });
-    row.append(gripButton(labelId), main, allow, deleteButton(m, labelId, li));
+    row.append(gripButton(labelId), main, holdTag(m, 'on hold', labelId), codeButton(m, labelId), deleteButton(m, labelId, li));
   } else {
     const site = switchSite(m);
     row.append(gripButton(labelId), main, modSwitch(document, {
       id: m.id, site, enabled: isOn(m.id, site), labelId,
       apply: (id, enabled, s) => request({ type: 'mod.enable', id, enabled, tab: view.tab?.id, ...(s ? { site: s } : {}) }),
-    }), deleteButton(m, labelId, li));
+    }), codeButton(m, labelId), deleteButton(m, labelId, li));
   }
   const err = el('div', 'mod-err');
   err.hidden = true;
   li.append(row, err);
-  if (m.held) li.append(factsBox(m, m.held, 'held'));
-  else if (m.pending) li.append(factsBox(m, m.pending, 'pending'));
-  else if (m.review) li.append(factsBox(m, m.review, 'review'));
+  // (held, or a change waiting: the approval dialog; a change waiting also tags the row, which keeps its switch)
+  if (m.pending && !m.held) name.append(' ', holdTag(m, 'change on hold', labelId));
+  if (!m.held && !m.pending && m.review) li.append(factsBox(m, m.review, 'review'));
   if (m.update && !m.held) li.append(updateNotice(m, err));
   return li;
 }
@@ -1169,20 +1178,21 @@ function modItem(m) {
 // Review (a mod the user has, still running): "Looks right" allows what was found; or switch it off.
 function factsBox(m, info, kind) {
   const box = el('div', `mod-facts ${kind}`);
-  box.append(el('p', 'facts-head', kind === 'held' && info.by === 'sandbox' ? 'Waiting for your OK.'
+  box.append(el('p', 'facts-head', kind === 'held' && info.asks ? 'Waiting for your OK. This boxed mod asks for these powers, and TRIF holds it to them:'
+    : kind === 'held' && info.by === 'sandbox' ? 'Waiting for your OK.'
     : kind === 'held' ? 'Waiting for your OK. TRIF found that this mod:'
     : kind === 'pending' ? 'A change to this mod is waiting for your OK. TRIF found that the new version:'
       : 'TRIF found that this mod:'));
   const list = el('ul', 'facts');
-  for (const f of (Array.isArray(info.facts) ? info.facts : [String(info.reason || '')]).filter(Boolean)) list.append(el('li', null, f));
+  for (const f of (Array.isArray(info.facts) ? info.facts : [String(info.reason || '')]).filter(Boolean)) list.append(el('li', null, info.asks ? `It ${f}.` : f));
   box.append(list);
   const where = m.matches && m.matches.length ? ` It runs by itself on every page it's for (${m.matches.slice(0, 3).join(', ')}${m.matches.length > 3 ? '…' : ''}).` : '';
   const fromAgent = kind !== 'review' && info.by !== 'outside' && info.by !== 'sandbox';
   // (by 'sandbox': this browser can't sandbox it, so allowing it runs it as a page script: lib.js sandboxFallback)
-  const who = info.by === 'sandbox' ? 'Allow runs this version as a page script, in this browser only.'
+  const who = info.by === 'sandbox' ? 'Allow runs this version as a free mod, in this browser only.'
     : fromAgent ? `An agent ${kind === 'pending' ? 'changed' : 'wrote'} it in your chat on ${info.site || view.site}.` : 'It\'s new or changed since TRIF last let it run.';
   box.append(el('p', 'facts-note', `${kind === 'review' ? 'It keeps running until you switch it off.'
-    : kind === 'pending' ? `${who} The version before keeps running until you decide.` : who}${where}`));
+    : kind === 'pending' ? `${who} The version before keeps running until you decide.` : who}${where}${info.asks ? ' Allow is for these powers: a new version that asks for nothing more runs without asking again.' : ''}`));
   if (info.claim) {
     const claim = el('p', 'facts-claim');
     claim.append(el('span', 'facts-who', fromAgent ? 'The agent says: ' : 'The mod says: '), document.createTextNode(`“${info.claim}”`));
@@ -1251,6 +1261,368 @@ function factsBox(m, info, kind) {
   return box;
 }
 
+// ---- "Agent on this site" (agentsites.js; background.js agentGate) -------------------------------------
+// The header's control: Ask (the default), Off, Look or Run code for the tab's site; a line under the bar
+// when TRIF's sensitive list keeps the agent off. Settings: the sites chosen, and the sensitive list.
+const agentSettingsNow = () => ({ sites: view.status?.agentSites || {}, sensitive: view.status?.sensitiveSites ?? null });
+
+function renderAgentLevel() {
+  const site = agentSiteOf(view.tab?.url || '');
+  const show = !!site && !!view.status?.helper?.connected;
+  ui.agentLevel.hidden = !show;
+  ui.agentNote.hidden = true;
+  if (!show) return;
+  const lv = agentLevel(site, agentSettingsNow());
+  // (a narrow panel: the levels without "Agent: ", so the control stays clear of the robot in the middle)
+  const narrow = matchMedia('(max-width: 420px)').matches;
+  for (const o of ui.agentLevel.options) o.textContent = `${narrow ? '' : 'Agent: '}${{ ask: 'Ask', off: 'Off', look: 'Look', run: 'Run code' }[o.value]}`;
+  if (document.activeElement !== ui.agentLevel) ui.agentLevel.value = lv.level;
+  ui.agentLevel.dataset.level = lv.level;
+  ui.agentLevel.title = `Agent on ${site}: ${{ ask: 'it can read, and asks before it first runs code', off: 'it can\'t read, take screenshots or run code here', look: 'it can read and take screenshots, but not run code', run: 'it can read and run code (the tab locks while it does)' }[lv.level]}`;
+  if (lv.by === 'sensitive') {
+    ui.agentNote.textContent = `Your agent is off on ${site}: it's ${lv.why || 'on your list of sensitive sites'}. Choose “Agent” above to let it look or run code here.`;
+    ui.agentNote.hidden = false;
+  }
+}
+matchMedia('(max-width: 420px)').addEventListener?.('change', () => renderAgentLevel());
+ui.agentLevel?.addEventListener('change', async () => {
+  const site = agentSiteOf(view.tab?.url || '');
+  if (!site) return;
+  const v = ui.agentLevel.value;
+  try { await request({ type: 'agentSite.set', site, level: v === 'ask' ? null : v }); } catch (e) { ui.agentLevel.title = String(e?.message ?? e); }
+  refreshStatus();
+});
+
+function renderAgentSites() {
+  const sites = view.status?.agentSites || {};
+  const key = JSON.stringify(sites);
+  if (ui.agentSitesList.dataset.key !== key) {
+    ui.agentSitesList.dataset.key = key;
+    ui.agentSitesList.replaceChildren(...Object.keys(sites).sort().map((site) => {
+      const li = el('li');
+      li.dataset.site = site;
+      const sel = el('select');
+      sel.setAttribute('aria-label', `Agent on ${site}`);
+      for (const [v, t] of [['off', 'Off'], ['look', 'Look'], ['run', 'Run code']]) sel.append(new Option(t, v));
+      sel.value = sites[site];
+      sel.addEventListener('change', () => request({ type: 'agentSite.set', site, level: sel.value }).then(refreshStatus, () => {}));
+      const forget = button('Ask again', '', () => request({ type: 'agentSite.set', site, level: null }).then(refreshStatus, () => {}));
+      forget.title = 'Forget this choice: the site goes back to asking (or off, if it\'s on the sensitive list)';
+      li.append(el('span', 'agent-site', site), sel, forget);
+      return li;
+    }));
+  }
+  ui.agentSitesEmpty.hidden = Object.keys(sites).length > 0;
+  // (the sensitive list, as text: not while the user is editing it)
+  const text = sensitiveList(view.status?.sensitiveSites ?? null).map((x) => (x.why ? `${x.pattern}: ${x.why}` : x.pattern)).join('\n');
+  if (document.activeElement !== ui.sensitiveSites && ui.sensitiveSites.dataset.shown !== text) { ui.sensitiveSites.value = text; ui.sensitiveSites.dataset.shown = text; }
+}
+ui.sensitiveSave?.addEventListener('click', async () => {
+  const list = ui.sensitiveSites.value.split('\n').map((l) => l.trim()).filter(Boolean).map((l) => { const i = l.indexOf(':'); return i > 0 ? { pattern: l.slice(0, i).trim(), why: l.slice(i + 1).trim() } : { pattern: l, why: '' }; });
+  try { await request({ type: 'agentSensitive.set', list }); ui.sensitiveNote.textContent = 'Saved.'; } catch (e) { ui.sensitiveNote.textContent = String(e?.message ?? e); }
+  ui.sensitiveSites.dataset.shown = '';
+  refreshStatus();
+});
+ui.sensitiveReset?.addEventListener('click', async () => {
+  try { await request({ type: 'agentSensitive.set', list: null }); ui.sensitiveNote.textContent = 'TRIF\'s list again.'; } catch (e) { ui.sensitiveNote.textContent = String(e?.message ?? e); }
+  ui.sensitiveSites.dataset.shown = '';
+  refreshStatus();
+});
+
+// The Ask dialog: an agent wants to run code on a site set to Ask (background.js askToRun waits 25 s for
+// this). Just this once (this run) / Always on this site (Run code) / Not here (Look). Esc or × closes it
+// without an answer: the agent's command then fails, saying the user didn't answer.
+const agentAsk = { id: null, dialog: null, answered: new Set() };
+function showAgentAsk(id, site) {
+  if (!id || agentAsk.answered.has(id)) return;
+  if (!agentAsk.dialog) {
+    const d = el('dialog', 'approval agent-ask');
+    d.id = 'agent-ask';
+    d.setAttribute('aria-labelledby', 'agent-ask-title');
+    const top = el('div', 'ap-top');
+    const x = el('button', 'ap-x', '×');
+    x.type = 'button';
+    x.setAttribute('aria-label', 'Close');
+    top.append(el('span', 'ap-count', 'Your agent is asking'), x);
+    const who = el('div', 'ap-who');
+    const robot = el('span', 'ap-robot');
+    const svg = document.querySelector('#bar-robot svg');
+    if (svg) robot.append(svg.cloneNode(true));
+    const title = el('h2', 'ap-name');
+    title.id = 'agent-ask-title';
+    who.append(robot, title);
+    const text = el('p', 'ap-lead agent-ask-text', 'It can read everything you can see here.');
+    const err = el('p', 'ap-err');
+    err.hidden = true;
+    const answer = (choice) => async () => {
+      err.hidden = true;
+      try { await request({ type: 'agentAsk.answer', id: agentAsk.id, choice }); agentAsk.answered.add(agentAsk.id); closeAgentAsk(); refreshStatus(); } catch (e) { err.textContent = String(e?.message ?? e); err.hidden = false; }
+    };
+    const acts = el('div', 'ap-actions');
+    acts.append(button('Just this once', 'go agent-once', answer('once')), button('Always on this site', 'agent-always', answer('always')), button('Not here', 'text agent-no', answer('no')));
+    x.addEventListener('click', () => { agentAsk.answered.add(agentAsk.id); closeAgentAsk(); });
+    d.addEventListener('cancel', (e) => { e.preventDefault(); agentAsk.answered.add(agentAsk.id); closeAgentAsk(); });
+    d.append(top, who, text, err, acts);
+    document.body.append(d);
+    agentAsk.dialog = d;
+  }
+  agentAsk.id = id;
+  agentAsk.dialog.dataset.site = site;
+  agentAsk.dialog.querySelector('#agent-ask-title').textContent = `Your agent wants to run code on ${site}.`;
+  if (!agentAsk.dialog.open) agentAsk.dialog.showModal();
+}
+function closeAgentAsk() {
+  if (agentAsk.dialog?.open) agentAsk.dialog.close();
+  agentAsk.id = null;
+}
+
+// ---- The approval dialog ---------------------------------------------------------------------------
+// Every hold (a boxed mod's powers, a free mod TRIF found can do more, an agent's change waiting, and a boxed
+// mod this browser can't sandbox) is one card centred over the dimmed panel: the mod, its kind, site and
+// file, what it asks for or what TRIF found, the combination warnings in red, one note line; Allow, Show code,
+// Not now (and × and Esc). Several waiting: "1 of N", one after another. It opens when a hold first appears,
+// or when the panel opens with something waiting; after Not now, only a new hold opens it again: the rows say
+// "on hold" and the badge at the top ("N waiting") reopens it.
+const approval = { queue: [], at: 0, seen: new Set(), done: new Set(), dialog: null, parts: null, shownKey: null };
+const holdKey = (m) => `${m.id}@${(m.held || m.pending)?.hash || ''}`;
+const holdOf = (m) => m.held || m.pending;
+
+function holdTag(m, text, labelId) {
+  const b = el('button', 'tag on-hold', text);
+  b.type = 'button';
+  b.title = 'Waiting for your OK: open it';
+  b.setAttribute('aria-describedby', labelId);
+  b.addEventListener('click', () => openApproval(m.id));
+  return b;
+}
+
+// (the icon beside each line: by what it is)
+const FACT_ICONS = {
+  'read-drafts': '✎', keys: '⌨', 'site-data': '⇣', 'page-data': '◫', sound: '♪', controls: '◐', mods: '⇆', media: '▶',
+  'search-box': '⌕', 'go-to': '↪', click: '◉', 'write-drafts': '⇄',
+  sends: '↗', loads: '↗', site: '↗', acts: '◉', navigates: '↪', hidden: '?', match: '◎', risk2: '⚠',
+};
+const iconOf = (key) => {
+  const k = String(key || '');
+  const p = /^power:([\w-]+)/.exec(k);
+  return FACT_ICONS[p ? p[1] : k.split(':')[0]] || '•';
+};
+
+function approvalDialog() {
+  if (approval.dialog) return approval.parts;
+  const d = el('dialog', 'approval');
+  d.id = 'approval';
+  d.setAttribute('aria-labelledby', 'approval-name');
+  const top = el('div', 'ap-top');
+  const count = el('span', 'ap-count');
+  const x = el('button', 'ap-x', '×');
+  x.type = 'button';
+  x.title = 'Not now';
+  x.setAttribute('aria-label', 'Not now');
+  top.append(count, x);
+  const who = el('div', 'ap-who');
+  const robot = el('span', 'ap-robot');
+  const svg = document.querySelector('#bar-robot svg');
+  if (svg) robot.append(svg.cloneNode(true));
+  const nameBox = el('div');
+  const name = el('h2', 'ap-name');
+  name.id = 'approval-name';
+  const meta = el('div', 'ap-meta');
+  const chip = el('span', 'ap-chip');
+  const where = el('span', 'ap-where');
+  meta.append(chip, where);
+  nameBox.append(name, meta);
+  who.append(robot, nameBox);
+  const lead = el('p', 'ap-lead');
+  const facts = el('ul', 'ap-facts');
+  const together = el('div', 'ap-together');
+  const note = el('p', 'ap-note');
+  const claim = el('p', 'ap-claim');
+  const err = el('p', 'ap-err');
+  err.setAttribute('role', 'alert');
+  const codeBox = el('pre', 'ap-code');
+  const allow = button('Allow', 'go ap-allow', () => decideApproval('mod.approve'));
+  const show = button('Show code', 'ap-show', () => toggleApprovalCode());
+  const reject = button('Don\'t allow', 'ap-reject', () => decideApproval('mod.reject'));
+  reject.title = 'The version before stays; the change is kept in its history (trif history).';
+  const later = button('Not now', 'text ap-later', () => notNow());
+  x.addEventListener('click', () => notNow());
+  const acts = el('div', 'ap-actions');
+  acts.append(allow, show, reject, later);
+  d.append(top, who, lead, facts, together, note, claim, err, codeBox, acts);
+  // Esc is Not now; Tab stays in the card (showModal makes the panel inert, and this keeps the focus from
+  // leaving for the browser's own controls too)
+  d.addEventListener('cancel', (e) => { e.preventDefault(); notNow(); });
+  d.addEventListener('keydown', (e) => {
+    if (e.key !== 'Tab') return;
+    const f = [...d.querySelectorAll('button, [href], [tabindex]:not([tabindex="-1"])')].filter((n) => !n.disabled && !n.closest('[hidden]') && n.getClientRects().length);
+    if (!f.length) return;
+    const first = f[0], last = f[f.length - 1];
+    if (e.shiftKey && document.activeElement === first) { e.preventDefault(); last.focus(); }
+    else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus(); }
+  });
+  document.body.append(d);
+  approval.dialog = d;
+  approval.parts = { count, name, chip, where, lead, facts, together, note, claim, err, codeBox, allow, show, reject, later };
+  return approval.parts;
+}
+
+// From renderMods: what's waiting here. Opens the dialog for a hold not seen before; keeps an open one in step.
+function updateApprovals(mods) {
+  approval.queue = mods.filter((m) => holdOf(m) && !approval.done.has(holdKey(m)));
+  const fresh = approval.queue.filter((m) => !approval.seen.has(holdKey(m)));
+  const open = !!approval.dialog?.open;
+  if (open) {
+    const cur = approval.queue.findIndex((m) => holdKey(m) === approval.shownKey);
+    if (cur >= 0) approval.at = cur;
+    else approval.at = Math.min(approval.at, approval.queue.length - 1);
+    if (!approval.queue.length) closeApproval();
+    else renderApproval();
+  } else if (fresh.length) {
+    approval.at = approval.queue.indexOf(fresh[0]);
+    showApproval();
+  }
+  renderWaitingBadge();
+}
+
+function openApproval(id) {
+  const i = approval.queue.findIndex((m) => m.id === id);
+  approval.at = i >= 0 ? i : 0;
+  if (approval.queue.length) showApproval();
+}
+
+function showApproval() {
+  approvalDialog();
+  for (const m of approval.queue) approval.seen.add(holdKey(m));
+  renderApproval();
+  if (!approval.dialog.open) approval.dialog.showModal();
+  renderWaitingBadge();
+}
+
+function closeApproval() {
+  if (approval.dialog?.open) approval.dialog.close();
+  approval.shownKey = null;
+  renderWaitingBadge();
+}
+
+// Not now: the next one waiting, or close (the rows and the badge keep it findable)
+function notNow() {
+  if (approval.at + 1 < approval.queue.length) { approval.at++; renderApproval(); return; }
+  closeApproval();
+}
+
+function renderApproval() {
+  const P = approvalDialog();
+  const m = approval.queue[approval.at];
+  if (!m) { closeApproval(); return; }
+  const info = holdOf(m);
+  const key = holdKey(m);
+  const kind = m.held ? (info.by === 'sandbox' ? 'sandbox' : 'held') : 'pending';
+  const n = approval.queue.length;
+  P.count.textContent = n > 1 ? `${approval.at + 1} of ${n} waiting for your OK` : 'Waiting for your OK';
+  if (approval.shownKey === key) return; // (the same hold: leave the code open, the buttons as they are)
+  approval.shownKey = key;
+  approval.dialog.dataset.mod = m.id;
+  P.name.textContent = m.name || m.id;
+  const k = m.rules ? ['style', 'Style mod'] : m.sandboxed ? ['boxed', 'Boxed mod'] : ['free', 'Free mod'];
+  P.chip.className = `ap-chip ${k[0]}`;
+  P.chip.textContent = k[1];
+  const file = String(m.file || '').split(/[\\/]/).pop() || `${m.id.split('/').pop()}.js`;
+  P.where.replaceChildren(`${info.site || m.id.split('/')[0]} · `, fileLink(file, 'Show the code', () => openCodeView(m.id)));
+  P.lead.textContent = info.asks ? 'It asks for these powers. TRIF holds it to them:'
+    : kind === 'pending' ? 'A change to it is waiting. TRIF found that the new version:'
+      : kind === 'sandbox' ? 'This browser can\'t run it in TRIF\'s sandbox:'
+        : 'TRIF found that this mod:';
+  // the lines: each power or finding with its icon; the combinations (power:together:…) in the red box,
+  // the strongest first as the helper sent them, a sentence once
+  const needs = Array.isArray(info.needs) ? info.needs : [];
+  const all = (Array.isArray(info.facts) ? info.facts : [String(info.reason || '')]).map((f, i) => ({ f, key: needs[i] || '' }));
+  const plain = all.filter((x) => x.f && !/^power:together:/.test(x.key));
+  const warns = [];
+  for (const x of all) if (x.f && /^power:together:/.test(x.key) && !warns.some((w) => w.f === x.f)) warns.push(x);
+  P.facts.replaceChildren(...plain.map((x) => {
+    const li = el('li');
+    li.append(el('span', 'ap-ic', iconOf(x.key)), el('span', null, info.asks ? `It ${x.f}.` : x.f));
+    li.firstChild.setAttribute('aria-hidden', 'true');
+    return li;
+  }));
+  P.together.replaceChildren(...warns.map((x) => {
+    const line = el('p');
+    if (/^power:together:many:/.test(x.key)) line.textContent = x.f;
+    else line.append(el('b', null, 'Together,'), ` it ${x.f}.`);
+    return line;
+  }));
+  P.together.hidden = !warns.length;
+  const fromAgent = kind !== 'sandbox' && info.by !== 'outside';
+  const who = fromAgent ? `An agent ${kind === 'pending' ? 'changed' : 'wrote'} it in your chat on ${info.site || view.site}.` : 'It\'s new or changed since TRIF last let it run.';
+  P.note.textContent = kind === 'sandbox' ? 'Allow runs this version as a free mod, in this browser only.'
+    : kind === 'pending' ? `${who} The version before keeps running until you decide.`
+      : info.asks ? `${who} Updates that ask for the same powers won't ask again.`
+        : !m.rules && !m.sandboxed ? `${who} A free mod can do anything the page can, so look at the code if you're not sure.`
+          : who;
+  P.claim.replaceChildren();
+  P.claim.hidden = !info.claim;
+  if (info.claim) P.claim.append(el('span', 'ap-claim-who', fromAgent ? 'The agent says: ' : 'The mod says: '), document.createTextNode(`“${info.claim}”`));
+  P.err.hidden = true;
+  P.err.textContent = '';
+  P.codeBox.hidden = true;
+  P.codeBox.replaceChildren();
+  P.show.textContent = kind === 'pending' ? 'Show what changed' : 'Show code';
+  P.reject.hidden = kind !== 'pending';
+  for (const b of [P.allow, P.show, P.reject]) b.disabled = false;
+}
+
+async function toggleApprovalCode() {
+  const P = approval.parts;
+  const m = approval.queue[approval.at];
+  if (!m) return;
+  const pending = !m.held && !!m.pending;
+  if (!P.codeBox.hidden) { P.codeBox.hidden = true; P.show.textContent = pending ? 'Show what changed' : 'Show code'; return; }
+  P.show.disabled = true;
+  try {
+    if (pending) {
+      const r = await request({ type: 'mod.diff', id: m.id });
+      P.codeBox.replaceChildren(...r.lines.map((l) => el('span', l.t === '+' ? 'add' : l.t === '-' ? 'del' : l.t === '…' ? 'gap' : 'ctx', `${l.t === '…' ? '…' : l.t} ${l.s}\n`)));
+    } else {
+      const r = await request({ type: 'mod.code', id: m.id });
+      P.codeBox.textContent = r.code + (r.truncated ? '\n…' : '');
+    }
+    P.codeBox.hidden = false;
+    P.show.textContent = pending ? 'Hide what changed' : 'Hide code';
+  } catch (e) { P.err.textContent = String(e?.message ?? e); P.err.hidden = false; } finally { P.show.disabled = false; }
+}
+
+async function decideApproval(type) {
+  const P = approval.parts;
+  const m = approval.queue[approval.at];
+  if (!m) return;
+  const info = holdOf(m);
+  P.allow.disabled = P.reject.disabled = true;
+  P.err.hidden = true;
+  try {
+    await request({ type, id: m.id, hash: info.hash, tab: view.tab?.id });
+    // (done here; the next status drops it too) on to the next one, or close
+    approval.done.add(holdKey(m));
+    approval.queue.splice(approval.at, 1);
+    approval.shownKey = null;
+    if (!approval.queue.length) closeApproval();
+    else { approval.at = Math.min(approval.at, approval.queue.length - 1); renderApproval(); }
+  } catch (e) {
+    P.allow.disabled = P.reject.disabled = false;
+    P.err.textContent = String(e?.message ?? e);
+    P.err.hidden = false;
+  }
+  renderWaitingBadge();
+}
+
+function renderWaitingBadge() {
+  if (!ui.waitingBadge) return;
+  const n = approval.queue.length;
+  ui.waitingBadge.hidden = !n || !!approval.dialog?.open;
+  ui.waitingBadge.textContent = `${n} waiting`;
+  ui.waitingBadge.setAttribute('aria-label', `${n} ${n === 1 ? 'mod' : 'mods'} waiting for your OK: open`);
+}
+
 // A newer version of a mod TRIF ships, which didn't replace this copy because the user changed it
 // (helper/lib/preinstalled.js): use it (theirs goes to the trash, with an Undo in the chat), keep theirs
 // (this version isn't offered again), or have their agent merge the two in a chat run here.
@@ -1307,6 +1679,187 @@ function clearRowError(id) {
 
 // Deleting moves the mod to the helper's trash (`trif restore`), so it's one click, with an Undo on
 // the chat line it leaves, rather than a confirmation.
+// ---- The code viewer: any mod's code, from the </> on its row --------------------------------------------
+// The same card as the approval dialog: name, kind, site and file, then the code (a style mod: its rules,
+// the file) with line numbers and light colouring; Copy, Show in Finder (the helper reveals the mod's own
+// file, found by its id: helper/lib/reveal.js), Open in editor; × or Esc closes. A mod with a change
+// waiting: the version running now, or the one waiting.
+// A file name as a quiet link (a button): the code card, or in the code card, the file in its folder
+function fileLink(text, title, onClick, cls = '') {
+  const b = el('button', `file-link ${cls}`.trim(), text);
+  b.type = 'button';
+  b.title = title;
+  b.addEventListener('click', (e) => { e.stopPropagation(); onClick(); });
+  return b;
+}
+
+function codeButton(m, labelId) {
+  const b = el('button', 'icon-btn mod-code');
+  b.type = 'button';
+  b.title = 'Show code';
+  b.setAttribute('aria-label', 'Show code');
+  b.setAttribute('aria-describedby', labelId);
+  b.innerHTML = '<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M5.25 4.5 1.75 8l3.5 3.5M10.75 4.5 14.25 8l-3.5 3.5M9.25 2.75l-2.5 10.5"/></svg>';
+  b.addEventListener('click', () => openCodeView(m.id));
+  return b;
+}
+
+const codeView = { dialog: null, parts: null, id: null, version: 'file', text: '' };
+const IS_MAC = /Mac/i.test(navigator.userAgentData?.platform || navigator.platform || '');
+
+function codeViewDialog() {
+  if (codeView.dialog) return codeView.parts;
+  const d = el('dialog', 'approval code-view');
+  d.id = 'code-view';
+  d.setAttribute('aria-labelledby', 'code-view-name');
+  const top = el('div', 'ap-top');
+  const x = el('button', 'ap-x', '×');
+  x.type = 'button';
+  x.title = 'Close';
+  x.setAttribute('aria-label', 'Close');
+  top.append(el('span', 'ap-count', 'Code'), x);
+  const who = el('div', 'ap-who');
+  const robot = el('span', 'ap-robot');
+  const svg = document.querySelector('#bar-robot svg');
+  if (svg) robot.append(svg.cloneNode(true));
+  const nameBox = el('div');
+  const name = el('h2', 'ap-name');
+  name.id = 'code-view-name';
+  const meta = el('div', 'ap-meta');
+  const chip = el('span', 'ap-chip');
+  const where = el('span', 'ap-where');
+  meta.append(chip, where);
+  nameBox.append(name, meta);
+  who.append(robot, nameBox);
+  // (a change waiting: which version)
+  const versions = el('div', 'cv-versions');
+  versions.setAttribute('role', 'group');
+  versions.setAttribute('aria-label', 'Version');
+  const vRan = button('Running now', 'cv-ran', () => loadCodeView('ran'));
+  const vNew = button('Waiting for your OK', 'cv-new', () => loadCodeView('file'));
+  versions.append(vRan, vNew);
+  const codeBox = el('pre', 'cv-code');
+  codeBox.tabIndex = 0;
+  codeBox.setAttribute('aria-label', 'The mod\'s code');
+  const note = el('p', 'ap-note cv-note');
+  const err = el('p', 'ap-err');
+  err.setAttribute('role', 'alert');
+  const copy = button('Copy', 'cv-copy', () => copyCode());
+  const reveal = button(IS_MAC ? 'Show in Finder' : 'Show in folder', 'cv-reveal', () => revealMod('folder'));
+  const editor = button('Open in editor', 'cv-editor', () => revealMod('editor'));
+  const close = button('Close', 'text cv-close', () => d.close());
+  x.addEventListener('click', () => d.close());
+  const acts = el('div', 'ap-actions');
+  acts.append(copy, reveal, editor, close);
+  d.append(top, who, versions, codeBox, note, err, acts);
+  document.body.append(d);
+  codeView.dialog = d;
+  codeView.parts = { name, chip, where, versions, vRan, vNew, codeBox, note, err, copy, reveal, editor };
+  return codeView.parts;
+}
+
+function openCodeView(id) {
+  const m = (view.status?.mods || []).find((x) => x.id === id);
+  if (!m) return;
+  const P = codeViewDialog();
+  codeView.id = id;
+  codeView.dialog.dataset.mod = id;
+  P.name.textContent = m.name || m.id;
+  const k = m.rules ? ['style', 'Style mod'] : m.sandboxed ? ['boxed', 'Boxed mod'] : ['free', 'Free mod'];
+  P.chip.className = `ap-chip ${k[0]}`;
+  P.chip.textContent = k[1];
+  P.where.replaceChildren(`${m.id.split('/')[0]} · `, fileLink(String(m.file || '').split(/[\\/]/).pop() || `${m.id.split('/').pop()}.js`,
+    IS_MAC ? 'Show in Finder' : 'Show in folder', () => revealMod('folder'), 'cv-file'));
+  P.versions.hidden = !m.pending;
+  P.copy.textContent = 'Copy';
+  delete P.copy.dataset.copied;
+  // (Show in Finder and Open in editor: the helper does them)
+  const connected = !!view.status?.helper?.connected;
+  for (const b of [P.reveal, P.editor]) {
+    b.disabled = !connected;
+    b.title = connected ? '' : 'TRIF\'s helper isn\'t connected, so it can\'t open the file';
+  }
+  const fl = P.where.querySelector('.cv-file');
+  if (fl && !connected) fl.title = 'TRIF\'s helper isn\'t connected, so it can\'t open the file';
+  if (!codeView.dialog.open) codeView.dialog.showModal();
+  loadCodeView('file');
+}
+
+async function loadCodeView(version) {
+  const P = codeView.parts;
+  const id = codeView.id;
+  codeView.version = version;
+  P.vRan.setAttribute('aria-pressed', String(version === 'ran'));
+  P.vNew.setAttribute('aria-pressed', String(version !== 'ran'));
+  P.err.hidden = true;
+  P.note.hidden = true;
+  P.codeBox.replaceChildren();
+  let r;
+  try {
+    r = await request({ type: 'mod.code', id, ...(version === 'ran' ? { version: 'ran' } : {}) });
+  } catch (e) {
+    // (the helper away: what this extension has, for a free or boxed mod)
+    try { r = version === 'ran' ? null : await request({ type: 'mod.localCode', id }); } catch { r = null; }
+    if (!r) { P.err.textContent = String(e?.message ?? e); P.err.hidden = false; return; }
+  }
+  if (codeView.id !== id || codeView.version !== version) return;
+  codeView.text = String(r.code ?? '');
+  renderCode(P.codeBox, codeView.text);
+  if (r.truncated || r.local) {
+    P.note.textContent = r.truncated ? 'Showing the first 200,000 characters.' : 'From the browser: TRIF\'s helper isn\'t connected.';
+    P.note.hidden = false;
+  }
+}
+
+// Light colouring, no library: comments, strings, keywords and numbers, by one pattern (a long file: plain).
+const CODE_TOKENS = /(\/\/[^\n]*|\/\*[\s\S]*?\*\/)|('(?:\\.|[^'\\\n])*'|"(?:\\.|[^"\\\n])*"|`(?:\\[\s\S]|[^`\\])*`)|\b(const|let|var|function|return|if|else|for|while|do|of|in|new|class|extends|async|await|try|catch|finally|throw|true|false|null|undefined|this|typeof|instanceof|switch|case|break|continue|default|delete|void|yield)\b|\b(\d+(?:\.\d+)?)\b/g;
+function renderCode(box, text) {
+  const pieces = [];
+  if (text.length <= 300000) {
+    let at = 0;
+    for (const t of text.matchAll(CODE_TOKENS)) {
+      if (t.index > at) pieces.push([text.slice(at, t.index), null]);
+      pieces.push([t[0], t[1] ? 'c' : t[2] ? 's' : t[3] ? 'k' : 'n']);
+      at = t.index + t[0].length;
+    }
+    if (at < text.length) pieces.push([text.slice(at), null]);
+  } else pieces.push([text, null]);
+  // one element per line (CSS numbers them), each piece split at its line breaks
+  let line = el('span', 'l');
+  const lines = [line];
+  for (const [t, cls] of pieces) {
+    const parts = t.split('\n');
+    parts.forEach((part, i) => {
+      if (i > 0) { line = el('span', 'l'); lines.push(line); }
+      if (part) line.append(cls ? el('span', `t${cls}`, part) : document.createTextNode(part));
+    });
+  }
+  box.replaceChildren(...lines);
+}
+
+async function copyCode() {
+  const P = codeView.parts;
+  let ok = false;
+  try { await navigator.clipboard.writeText(codeView.text); ok = true; } catch {
+    // (no clipboard API here: the old way, from a selection)
+    const ta = el('textarea');
+    ta.value = codeView.text;
+    codeView.dialog.append(ta);
+    ta.select();
+    try { ok = document.execCommand('copy'); } catch { ok = false; }
+    ta.remove();
+  }
+  P.copy.textContent = ok ? 'Copied' : 'Couldn\'t copy';
+  P.copy.dataset.copied = String(ok);
+  setTimeout(() => { if (codeView.parts) codeView.parts.copy.textContent = 'Copy'; }, 1500);
+}
+
+async function revealMod(how) {
+  const P = codeView.parts;
+  P.err.hidden = true;
+  try { await request({ type: 'mod.reveal', id: codeView.id, how }); } catch (e) { P.err.textContent = String(e?.message ?? e); P.err.hidden = false; }
+}
+
 function deleteButton(m, labelId, li) {
   const b = el('button', 'icon-btn mod-delete');
   b.type = 'button';
@@ -1540,7 +2093,7 @@ function updateModItem(li, m) {
   tag.textContent = on && m.enabled !== false && !m.registered ? (view.status.userScripts ? 'not active' : 'paused')
     : !on && m.from ? `from ${m.from}` : !on && m.newOff ? (m.newOff === 'update' ? 'updated' : 'new') : '';
   tag.title = !on && m.from ? `Made from ${m.from}. Mods made in another browser start off here; switch it on to use it.`
-    : !on && m.newOff ? `${m.newOff === 'update' ? 'TRIF updated it. ' : ''}New ${{ rules: 'rules', sandboxed: 'sandboxed mods' }[modGroup(m)] || 'page scripts'} start off (Settings): switch it on once you've looked at it.` : '';
+    : !on && m.newOff ? `${m.newOff === 'update' ? 'TRIF updated it. ' : ''}New ${groupWord(modGroup(m))} start off (Settings): switch it on once you've looked at it.` : '';
   tag.hidden = !tag.textContent;
   const err = li.querySelector('.mod-err');
   err.textContent = rowErr || switchError(m.id, site) || (on && m.error) || '';

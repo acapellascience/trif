@@ -10,7 +10,7 @@ import {
   normalizeOffSites, offSiteName, offOnSite, hostInScope, withOffSites, normalizeGroupsOff, switchGroup, offSitesFor, GROUPS, scopeFor, normalizeSitesOn, siteOnFor, sitesInUse, limitToSites, applyStartSites, switchSite, fromOtherBrowser, timedUserScripts, capChat,
   ALL_ACCESS, readAccess, activeSites, hasSiteAccess, siteOrigins, siteState, siteRefusal, siteModeOf,
   FEATURES, ModsParts, fillSameMods, storedMods, modsStorageState, modsStoragePlan, normalizeStarter, applyReadded, normalizeReadded,
-  applyNewMods, normalizeStartsOff, normalizeNewOff, MOD_GROUPS, modGroup, sandboxFallback, inSandboxWorld, SAFARI,
+  applyNewMods, normalizeStartsOff, normalizeNewOff, MOD_GROUPS, modGroup, groupWord, sandboxFallback, inSandboxWorld, SAFARI,
   PANEL_OPEN_WAIT_MS, PANEL_LATE_MS, panelWindowUrl, panelWindowTarget, panelWindowBounds, panelWindowClick,
 } from './lib.js';
 import { SANDBOX_WORLD, SANDBOX_CSP, SETTINGS_MAX } from './sandbox.js';
@@ -18,6 +18,7 @@ import { runtimeCode } from './runtime.js';
 import { sweepPage } from './sweep.js';
 import { captureScreenshot, stitchShots, isCopyWindow } from './screenshot.js';
 import { createTabLocks } from './tablock.js';
+import { agentCheck, agentSiteOf, normalizeAgentSites, agentLevel, COMMAND_NEEDS } from './agentsites.js';
 
 const HOST = 'com.webmods.helper';
 const VERSION = chrome.runtime.getManifest().version;
@@ -34,6 +35,10 @@ const LOAD_TIMEOUT = 30000;
 const NOT_CONNECTED = `The TRIF helper isn't connected. Run \`${SETUP_COMMAND}\` in a terminal (needs Node 18+), then restart ${BROWSER}.`;
 
 const state = {
+  agentSites: {},        // "Agent on this site": site -> 'off' | 'look' | 'run' (the user's; agentsites.js)
+  sensitiveSites: null,  // the user's sensitive list from Settings ([{pattern, why}]), or null for TRIF's
+  agentAsks: new Map(),  // id -> {site, resolve}: the panel asking whether an agent may run code on a site
+  agentOnce: new Set(),  // "site|runId": Just this once, for that side-panel run
   port: null,
   connected: false,      // true once the helper has sent us something on the current port
   connectedAt: 0,
@@ -148,6 +153,8 @@ const ready = chrome.storage.local.get(null).then(async (s) => {
   state.absorbed = normalizeDisabled(s.absorbed);
   state.readded = normalizeReadded(s.readded);
   state.startsOff = normalizeStartsOff(s.startsOff);
+  state.agentSites = normalizeAgentSites(s.agentSites);
+  state.sensitiveSites = Array.isArray(s.sensitiveSites) ? s.sensitiveSites : null;
   state.seenMods = s.seenMods && typeof s.seenMods === 'object' ? normalizeDisabled(s.seenMods) : null;
   state.autoUpdated = s.autoUpdated && typeof s.autoUpdated === 'object' ? normalizeReadded(s.autoUpdated) : null;
   state.newOff = normalizeNewOff(s.newOff);
@@ -199,6 +206,13 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   }
   ready.then(() => onPageMessage(msg)).then(sendResponse, (e) => sendResponse({ error: errMsg(e) }));
   return true;
+});
+// ("Agent on this site": written here, or by another of TRIF's pages; the state follows storage)
+chrome.storage.onChanged?.addListener((changes, area) => {
+  if (area !== 'local') return;
+  if (changes.agentSites) state.agentSites = normalizeAgentSites(changes.agentSites.newValue);
+  if (changes.sensitiveSites) state.sensitiveSites = Array.isArray(changes.sensitiveSites.newValue) ? changes.sensitiveSites.newValue : null;
+  if (changes.agentSites || changes.sensitiveSites) notifyPanels();
 });
 chrome.runtime.onConnect.addListener((port) => {
   if (port.name !== 'panel' || port.sender?.id !== chrome.runtime.id) return;
@@ -384,7 +398,7 @@ function sandboxWorld() {
       state.canSandbox = true;
     } catch (e) {
       if (!checkUserScripts()) return null; // (switched off meanwhile)
-      log('warn', `TRIF's sandbox world: ${errMsg(e)} (sandboxed mods wait for your OK to run as page scripts)`);
+      log('warn', `TRIF's sandbox world: ${errMsg(e)} (boxed mods wait for your OK to run as free mods)`);
       state.canSandbox = false;
     }
     return state.canSandbox;
@@ -408,7 +422,7 @@ function listenToSandbox(afterGrant = false) {
   if (sandboxEvent && !(afterGrant && FIREFOX)) return;
   const ev = !FIREFOX ? chrome.runtime.onUserScriptMessage
     : chrome.runtime.onUserScriptMessage || afterGrant ? globalThis.browser?.runtime?.onUserScriptMessage : null;
-  if (!ev) { if (afterGrant) log('warn', 'TRIF\'s sandbox: no runtime.onUserScriptMessage here, so sandboxed mods\' settings can\'t be kept until the browser starts again'); return; }
+  if (!ev) { if (afterGrant) log('warn', 'TRIF\'s sandbox: no runtime.onUserScriptMessage here, so boxed mods\' settings can\'t be kept until the browser starts again'); return; }
   if (sandboxEvent) { try { sandboxEvent.removeListener(onSandboxMessage); } catch { /* gone with the permission */ } }
   sandboxEvent = ev;
   if (!ev.hasListener?.(onSandboxMessage)) ev.addListener(onSandboxMessage);
@@ -427,7 +441,7 @@ function onSandboxMessage(msg, sender, sendResponse) {
     try { host = new URL(sender?.url || sender?.origin || '').hostname; } catch { /* none */ }
     const site = scopeFor(host);
     const mod = String(msg.mod ?? ''), key = String(msg.key ?? '');
-    if (!site || !mod || !key || key.length > 100 || !state.mods.some((m) => m.id === mod && m.sandboxed)) return { ok: false, error: 'not a sandboxed mod here' };
+    if (!site || !mod || !key || key.length > 100 || !state.mods.some((m) => m.id === mod && m.sandboxed)) return { ok: false, error: 'not a boxed mod here' };
     const all = (await chrome.storage.local.get('sandboxSettings')).sandboxSettings;
     const store = all && typeof all === 'object' && !Array.isArray(all) ? all : {};
     if (msg.trifSandbox === 'settings.get') {
@@ -544,7 +558,7 @@ async function onHelperMessage(msg) {
   if (msg.type === 'request') {
     if (LOADS_PAGE.has(msg.cmd)) await modsApplied;
     try {
-      const result = await runCommand(msg.cmd, msg.args || {});
+      const result = await runCommand(msg.cmd, msg.args || {}, msg.id);
       post({ type: 'response', id: msg.id, ok: true, result: result === undefined ? null : result });
     } catch (e) {
       post({ type: 'response', id: msg.id, ok: false, error: errMsg(e) });
@@ -762,6 +776,7 @@ const commands = {
         if (!limitToSites(m, onSites())) o.sitesOff = true; // every site it's for is off (or without access)
         if (m.held) o.held = m.held;
         if (m.sandboxed) o.sandboxed = inSandboxWorld(m) ? true : 'page'; // ('page': this browser runs it as a page script)
+        if (Array.isArray(m.powers) && m.powers.length) o.powers = m.powers;
         if (state.newOff[m.id] && !isEnabled(m.id)) o.newOff = state.newOff[m.id];
         if (errors.has(m.id) && errors.get(m.id) !== USER_SCRIPTS_OFF) o.error = errors.get(m.id);
         return o;
@@ -780,7 +795,14 @@ const commands = {
     return tabs.filter((t) => {
       const url = t.url || t.pendingUrl || '';
       return (!args.scope || urlInScope(url, args.scope)) && siteOnFor(url, onSites());
-    }).map(tabInfo);
+    }).map((t) => {
+      // (a site the agent is Off for: its tab is there, but not what's in it, title or address past the site)
+      const info = tabInfo(t);
+      let host = '';
+      try { host = new URL(t.url || t.pendingUrl || '').hostname; } catch { /* none */ }
+      if (agentCheck('text', host, agentSettings()) === 'ok') return info;
+      return { ...info, url: host ? `https://${host}/` : '', title: '', agent: 'off' };
+    });
   },
 
   async run(args) {
@@ -992,7 +1014,7 @@ const commands = {
     // A mod switched off because new mods of its group start off (lib.js applyNewMods) waits for the user to
     // look at it: an agent run can't switch it on.
     if (args.scope && args.enabled && state.newOff[id]) {
-      throw new Error(`${id} is new and switched off until the user looks at it (their setting: new ${{ rules: 'rules', sandboxed: 'sandboxed mods' }[modGroup(mod)] || 'page scripts'} start off); only the user can switch it on, in the side panel or with trif enable in their terminal`);
+      throw new Error(`${id} is new and switched off until the user looks at it (their setting: new ${groupWord(modGroup(mod))} start off); only the user can switch it on, in the side panel or with trif enable in their terminal`);
     }
     const enabled = args.enabled;
     const res = await serial(async () => {
@@ -1105,11 +1127,84 @@ async function reloadIfApplies(mod, args, { onlyIfRunning = false } = {}) {
   }
 }
 
-async function runCommand(cmd, args) {
+async function runCommand(cmd, args, reqId = null) {
   await ready;
   const fn = Object.hasOwn(commands, cmd) ? commands[cmd] : null;
   if (!fn) throw new Error(`unknown command: ${cmd}`);
+  await agentGate(cmd, args, reqId);
   return fn(args);
+}
+
+// ---- "Agent on this site" (agentsites.js) -----------------------------------------------------------
+// Every command from the helper is an agent's (the side panel's, scoped to its site, or one in a terminal:
+// the same levels apply to both, as TRIF can't tell a terminal agent from the user typing `trif`). Before a
+// command touches a tab, the tab's site (and for navigate and open, where it's going) must allow it: Off
+// nothing, Look reading and screenshots, Run code everything; Ask (no choice yet) reads, and asks the user
+// in the panel before the first code.
+const agentSettings = () => ({ sites: state.agentSites, sensitive: state.sensitiveSites });
+const ASK_WAIT_MS = 25000;
+const agentLevelOf = (where) => { let h = String(where || ''); try { if (/^[a-z]+:/i.test(h)) h = new URL(h).hostname; } catch { /* a host */ } return agentLevel(h, agentSettings()).level; };
+
+async function agentGate(cmd, args, reqId = null) {
+  if (!COMMAND_NEEDS[cmd]) return;
+  if (cmd === 'status' && args.tab === undefined && args.url === undefined) return;
+  if (cmd === 'record' && (args.on === false || args.on === 'off')) return; // (recording less is always fine)
+  const urls = [];
+  if (cmd === 'open') urls.push(String(args.to || ''));
+  else if (cmd === 'record') urls.push(`https://${String(args.site || '')}/`);
+  else {
+    const tab = await scopedTab(args);
+    urls.push(tab.url || tab.pendingUrl || '');
+    if (cmd === 'navigate') urls.push(String(args.to || ''));
+  }
+  for (const u0 of urls) {
+    let u = u0;
+    if (u && !/^[a-z][a-z0-9+.-]*:/i.test(u)) u = `https://${u}`;
+    let host = '';
+    try { host = new URL(u).hostname; } catch { continue; } // (no address: the command says what's wrong)
+    if (!siteOnFor(u, onSites())) continue; // (TRIF off there: the command says so, which comes first)
+    const r = agentCheck(cmd, host, agentSettings());
+    if (r === 'ok') continue;
+    if (r === 'ask') { await askToRun(agentSiteOf(host), args, reqId); continue; }
+    throw new Error(r);
+  }
+}
+
+// Ask (the first code on a site): the panel's dialog, Just this once / Always on this site / Not here. One
+// question per site at a time; no panel open to ask: a clear error, saying where the user can allow it.
+const askingFor = new Map(); // site -> promise of the answer
+async function askToRun(site, args, reqId = null) {
+  if (args.agentRun && state.agentOnce.has(`${site}|${args.agentRun}`)) return;
+  if (!state.panels.size) {
+    throw new Error(`running code on ${site} needs the user's OK first ("Agent on this site" is Ask there), and TRIF's side panel isn't open to ask them. Ask the user to open TRIF's side panel and set "Agent on this site" to Run code for ${site}, then try again; meanwhile you can read the page (trif text, trif screenshot)`);
+  }
+  if (!askingFor.has(site)) {
+    const id = crypto.randomUUID();
+    const p = new Promise((resolve) => {
+      state.agentAsks.set(id, { site, resolve, at: Date.now() });
+      broadcast({ type: 'agentAsk', id, site });
+      setTimeout(() => resolve('timeout'), ASK_WAIT_MS);
+    }).finally(() => { state.agentAsks.delete(id); askingFor.delete(site); broadcast({ type: 'agentAskDone', id }); });
+    askingFor.set(site, p);
+  }
+  // (the helper's timer for this request: longer by the wait, helper/host.js onRequestWaiting)
+  if (reqId) { try { post({ type: 'requestWaiting', id: reqId, ms: ASK_WAIT_MS + 2000 }); } catch { /* the reply says */ } }
+  const answer = await askingFor.get(site);
+  if (answer === 'once') { if (args.agentRun) state.agentOnce.add(`${site}|${args.agentRun}`); return; }
+  if (answer === 'always') return;
+  if (answer === 'no') throw new Error(`the user chose Not here: "Agent on this site" is now Look for ${site}, so you can read the page and take screenshots there, but not run code. Work from what you can read`);
+  throw new Error(`the user didn't answer TRIF's question (in the side panel) about running code on ${site} in time; try again once they have, or work from reading the page (trif text, trif screenshot)`);
+}
+
+async function setAgentSite(site, level) {
+  const s = agentSiteOf(site);
+  if (!s) throw new Error(`"${site}" isn't a site`);
+  const next = { ...state.agentSites };
+  if (level === null || level === 'ask' || level === 'default') delete next[s]; else next[s] = level;
+  state.agentSites = normalizeAgentSites(next);
+  await save({ agentSites: state.agentSites });
+  notifyPanels();
+  return { agentSites: state.agentSites };
 }
 
 async function runtimeList(args, key) {
@@ -1142,7 +1237,7 @@ async function sandboxList(tab, key) {
     }));
     const list = typeof out === 'string' ? JSON.parse(out) : null;
     return Array.isArray(list) ? list : [];
-  } catch (e) { log('warn', `sandboxed mods' ${key}: ${errMsg(e)}`); return []; }
+  } catch (e) { log('warn', `boxed mods' ${key}: ${errMsg(e)}`); return []; }
 }
 
 function noRuntime() {
@@ -1241,6 +1336,31 @@ async function onPageMessage(msg) {
       notifyPanels();
       return { groupsOff: state.groupsOff };
     }
+    case 'agentSite.set': {
+      // "Agent on this site" (the panel's header, or Settings). Panel only: an agent run can't raise it.
+      const level = msg.level === null || msg.level === 'ask' ? null : String(msg.level);
+      if (level !== null && !['off', 'look', 'run'].includes(level)) throw new Error(`unknown level ${level}`);
+      return setAgentSite(String(msg.site ?? ''), level);
+    }
+    case 'agentSensitive.set': {
+      // Settings' sensitive list: the user's own ([{pattern, why}]), or null for TRIF's again
+      const list = Array.isArray(msg.list) ? msg.list.map((x) => ({ pattern: String(x?.pattern ?? x ?? '').trim().toLowerCase(), why: String(x?.why ?? '').slice(0, 80) })).filter((x) => x.pattern && /^[a-z0-9.*-]+$/.test(x.pattern)).slice(0, 500) : null;
+      state.sensitiveSites = list;
+      await save({ sensitiveSites: list });
+      notifyPanels();
+      return { sensitiveSites: list };
+    }
+    case 'agentAsk.answer': {
+      // The panel's answer: Just this once / Always on this site (Run code) / Not here (Look)
+      const a = state.agentAsks.get(String(msg.id ?? ''));
+      const choice = ['once', 'always', 'no'].includes(msg.choice) ? msg.choice : null;
+      if (!choice) throw new Error('unknown answer');
+      if (!a) return { late: true };
+      if (choice === 'always') await setAgentSite(a.site, 'run');
+      if (choice === 'no') await setAgentSite(a.site, 'look');
+      a.resolve(choice);
+      return { site: a.site, choice };
+    }
     case 'mods.startsOff': {
       // Settings' "New mods start": a group's new mods on (as always) or off (lib.js applyNewMods). From
       // here on only: mods already here keep their switches. Panel only: an agent run can't change it.
@@ -1291,10 +1411,12 @@ async function uiStatus() {
       error: errors.get(m.id) === USER_SCRIPTS_OFF ? null : errors.get(m.id) || null,
       held: m.held || null, pending: m.pending || null, review: m.held || m.pending ? null : m.review || null, risk: m.risk || null,
       from: fromOtherBrowser(m, state.installId) ? (m.origin.browser || 'another browser') : null,
-      source: m.source || null, version: m.version || null, update: m.update || null, rules: !!m.rules, sandboxed: !!m.sandboxed, unsandboxed: !!m.unsandboxed,
+      source: m.source || null, version: m.version || null, update: m.update || null, rules: !!m.rules, sandboxed: !!m.sandboxed, unsandboxed: !!m.unsandboxed, powers: Array.isArray(m.powers) ? m.powers : [],
       newOff: state.newOff[m.id] && !(live.get(m.id)?.enabled ?? isEnabled(m.id)) ? state.newOff[m.id] : null,
     })),
     startsOff: state.startsOff, canSandbox: state.canSandbox !== false,
+    agentSites: state.agentSites, sensitiveSites: state.sensitiveSites,
+    agentAsks: [...state.agentAsks.entries()].map(([id, a]) => ({ id, site: a.site })),
     runs: [...state.runs.values()].map((r) => ({ runId: r.runId, site: r.site })),
     lockedTabs: tabLocks.list(),
     groupsOff: state.groupsOff,
@@ -1522,8 +1644,22 @@ async function onPanelMessage(msg) {
       return { ok: true };
     }
     case 'mod.code': {
-      // "Show code" on a held mod or one to review: the file as the helper has it (capped)
-      return helperRequest('mod.code', { id: String(msg.id ?? '') }, 10000);
+      // The code viewer and "Show code": the file as the helper has it (capped); `version: 'ran'`, a mod
+      // with a change waiting, the version running meanwhile
+      return helperRequest('mod.code', { id: String(msg.id ?? ''), ...(msg.version === 'ran' ? { version: 'ran' } : {}) }, 10000);
+    }
+    case 'mod.localCode': {
+      // (the code viewer with the helper away: the code this extension registers, which for a free or boxed
+      // mod is its file; a style mod's is TRIF's code made from its rules, so not offered)
+      const m = state.mods.find((x) => x.id === String(msg.id ?? ''));
+      if (!m) throw new Error(`no mod ${msg.id}`);
+      if (m.rules) throw new Error('TRIF\'s helper isn\'t connected, so a style mod\'s rules can\'t be shown');
+      const code = String(m.code ?? '');
+      return { id: m.id, code: code.slice(0, 200000), truncated: code.length > 200000, local: true };
+    }
+    case 'mod.reveal': {
+      // The code viewer's "Show in Finder" / "Open in editor": the helper finds the file by the mod's id
+      return helperRequest('mod.reveal', { id: String(msg.id ?? ''), how: msg.how === 'editor' ? 'editor' : 'folder' }, 10000);
     }
     case 'mod.review': {
       // "Looks right" on a mod TRIF found can do more than restyle (the helper allows what it found)
@@ -1684,7 +1820,7 @@ async function startAgent(msg) {
     chat.run = { runId: null, startedAt };
     chat.last = null;
   });
-  const args = { site, url: String(msg.url ?? ''), tabId, prompt, agent };
+  const args = { site, url: String(msg.url ?? ''), tabId, prompt, agent, agentLevel: agentLevelOf(String(msg.url ?? '') || site) };
   if (msg.sessionId) args.sessionId = String(msg.sessionId);
   if (msg.model) args.model = String(msg.model);
   if (msg.openModel && typeof msg.openModel === 'object') args.openModel = pick(msg.openModel, ['provider', 'model', 'baseUrl']); // a chat's own open-model choice

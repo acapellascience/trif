@@ -178,7 +178,14 @@ function promptUrl(url) {
 }
 
 // Full context: appended system prompt (claude, every run) or prepended to a session's first message.
-function contextText({ url, tabId, scope, browser }) {
+// ("Agent on this site": what the user lets an agent do on the site's tabs; background.js enforces it)
+const LEVEL_TEXT = {
+  off: ' "Agent on this site" is Off here (the user\'s setting): you can\'t read, screenshot or run code on its tabs, but you can still write mods for it, which wait for the user\'s OK as usual. Don\'t try trif text, trif screenshot or trif run here.',
+  look: ' "Agent on this site" is Look here (the user\'s setting): you can read the page and take screenshots (trif text, trif screenshot, trif sweep), but not run code in it (trif run is refused).',
+  ask: ' "Agent on this site" is Ask here: you can read the page; the first time you run code (trif run), the user is asked in the panel, and the command waits for their answer.',
+  run: '',
+};
+function contextText({ url, tabId, scope, browser, agentLevel }) {
   const shown = url ? promptUrl(url) : null;
   const where = shown
     ? `They're looking at ${shown}${tabId != null ? ` (tab ${Number(tabId)}): pass \`--tab ${Number(tabId)}\` to trif commands` : ''}.`
@@ -187,7 +194,7 @@ function contextText({ url, tabId, scope, browser }) {
     ? ` This run is limited to ${scope}: trif commands only work on its tabs; a tab you run code in can't send requests that change anything until it reloads; and a mod you write is held until the user approves it if its code can send requests, click or type, navigate or load from addresses it works out, or if it matches other sites (see "Side-panel runs" in AGENTS.md). You can only change files in ${scope}'s folders under sites/ (start a mod with \`trif new ${scope} <name>\`); writes anywhere else are refused, so if one is, check the folder rather than giving up.`
     : '';
   // The browser whose panel started the run (its hello names it); "browser" when unknown, e.g. from a terminal.
-  return `You're running inside the TRIF side panel in the user's ${browser || 'browser'}. ` + where + limit +
+  return `You're running inside the TRIF side panel in the user's ${browser || 'browser'}. ` + where + limit + (LEVEL_TEXT[agentLevel] || '') +
     ' Follow AGENTS.md. Mods can be switched off and on with `trif disable/enable <site>/<mod>`; `trif status` shows which are on.' +
     ' Reply briefly in plain language; your replies appear in a narrow chat panel.' +
     " You can't ask follow-up questions mid-task: if something's unclear, make a sensible choice or end your turn with a question.";

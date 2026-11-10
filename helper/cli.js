@@ -18,7 +18,7 @@ const trash = require('./lib/trash');
 const shipped = require('./lib/preinstalled');
 
 // Inside a side-panel agent run (the helper set TRIF_RUN_TOKEN) these are the user's alone.
-const NOT_IN_RUNS = new Set(['setup', 'agent', 'approve', 'reject', 'mod-update', 'undo']);
+const NOT_IN_RUNS = new Set(['setup', 'agent', 'approve', 'reject', 'mod-update', 'undo', 'reveal']);
 
 // Output piped into something that stops reading early (`trif tabs | head -1`) isn't an error.
 process.stdout.on('error', (e) => { if (e.code === 'EPIPE') process.exit(0); throw e; });
@@ -26,8 +26,8 @@ process.stdout.on('error', (e) => { if (e.code === 'EPIPE') process.exit(0); thr
 const VALUE_FLAGS = new Set(['--tab', '--url', '-o', '--out', '--output', '--filter', '--limit', '-f', '--file',
   '--browser', '--home', '--native-dir', '--bin-dir', '--timeout', '--agent', '--session', '--model', '--site', '--auto',
   '--provider', '--base-url', '--key-env', '--selector', '--color', '--text', '--tolerance']);
-const BOOL_FLAGS = new Set(['--json', '--hard', '--help', '-h', '--force', '--page', '--rules', '--sandboxed', '--no-link', '--examples', '--no-examples', '--copy', '--link', '--install', '--open',
-  '--use-new', '--keep', '--merged', '--set-key', '--remove-key', '--scroll', '--full', '--verbose', '-v', '--no-wait']);
+const BOOL_FLAGS = new Set(['--json', '--hard', '--help', '-h', '--force', '--page', '--rules', '--sandboxed', '--style', '--boxed', '--no-link', '--examples', '--no-examples', '--copy', '--link', '--install', '--open',
+  '--use-new', '--keep', '--merged', '--set-key', '--remove-key', '--scroll', '--full', '--verbose', '-v', '--no-wait', '--editor']);
 // Flags with a value that may be left out (`--examples` alone, or `--examples x.com,google.com`).
 const OPTIONAL_VALUE_FLAGS = new Set(['--examples']);
 const ALIASES = { '--out': '-o', '--output': '-o', '--file': '-f', '-h': '--help', '-v': '--verbose' };
@@ -217,7 +217,8 @@ function makeCtx(opts) {
 function printJson(v) { out(JSON.stringify(v === undefined ? null : v, null, 2)); }
 
 // What the side panel calls each group of mods (extension/lib.js modGroup), in a sentence.
-const GROUP_NAMES = { rules: 'rules', sandboxed: 'sandboxed mods', page: 'page scripts' };
+// (the groups' stored names are rules, sandboxed and page; people know them as style, boxed and free mods)
+const GROUP_NAMES = { rules: 'style mods', sandboxed: 'boxed mods', page: 'free mods' };
 
 const handlers = {
   async help(ctx, pos) {
@@ -339,16 +340,17 @@ const handlers = {
       const name = GROUP_NAMES;
       lines.push(`NEW MODS      new ${st.startsOff.map((g) => name[g] || g).join(' and ')} start off in this browser (the user's setting, in the side panel's Settings), except ones made in its side panel`);
     }
-    if (st && st.sandbox === false) lines.push(`NO SANDBOX    ${st.browser || 'this browser'} can't run sandboxed mods: each waits for the user's OK (in the side panel) to run as a page script instead`);
+    if (st && st.sandbox === false) lines.push(`NO SANDBOX    ${st.browser || 'this browser'} can't run boxed mods: each waits for the user's OK (in the side panel) to run as a free mod instead`);
     // Sandboxed mods as the extension runs them: in TRIF's sandbox, or ('page') as page scripts
     const sandboxedAs = new Map(((st && st.mods) || []).filter((m) => m.sandboxed).map((m) => [m.id, m.sandboxed]));
+    const boxPowers = new Map(((st && st.mods) || []).filter((m) => Array.isArray(m.powers) && m.powers.length).map((m) => [m.id, m.powers]));
     const sandboxHeld = new Map(((st && st.mods) || []).filter((m) => m.held && m.held.by === 'sandbox').map((m) => [m.id, m.held]));
     if (st && st.paused) lines.push('PAUSED        every mod is paused in this browser (the user\'s choice, in the side panel\'s Settings): nothing runs until they resume');
     lines.push(`mods          ${ids.length} in ${info.modsDir}`);
     for (const id of ids) {
       let s;
       if (helperErrors.has(id)) s = `NOT SENT: ${helperErrors.get(id)}`;
-      else if (held[id]) s = `${(info.pending || []).includes(id) ? 'CHANGE WAITING (the version before runs meanwhile)' : 'HELD'}: it ${(held[id].facts || [held[id].reason]).join('; it ')} (trif approve ${id}, or trif reject ${id})`;
+      else if (held[id]) s = `${(info.pending || []).includes(id) ? 'CHANGE WAITING (the version before runs meanwhile)' : 'HELD'}: ${require('./lib/boxpowers').factLines(held[id].needs, held[id].facts || [held[id].reason]).join('; ')} (trif approve ${id}, or trif reject ${id})`;
       else if (sandboxHeld.has(id)) s = `WAITING: ${sandboxHeld.get(id).facts[0]}; only the user can allow that, in the side panel`;
       else if (off.has(id)) s = newOff.has(id) ? `off (${newOff.get(id) === 'update' ? 'updated by TRIF' : 'new'}: waiting for the user to look at it)` : shipsOff.has(id) ? 'off (as TRIF ships it)' : 'off';
       else if (sitesOff.has(id)) s = 'waiting: TRIF is off on its site';
@@ -356,10 +358,10 @@ const handlers = {
       else if (!st) s = '?';
       else if (!registered.has(id)) s = 'not known to the extension yet';
       else s = registered.get(id) ? 'registered' : 'NOT REGISTERED';
-      if (sandboxedAs.has(id) && !sandboxHeld.has(id)) s += sandboxedAs.get(id) === 'page' ? ' (sandboxed mod, run as a page script: the user allowed it, as this browser has no sandbox)' : ' (sandboxed)';
+      if (sandboxedAs.has(id) && !sandboxHeld.has(id)) s += sandboxedAs.get(id) === 'page' ? ' (boxed mod, run as a free mod: the user allowed it, as this browser has no sandbox)' : boxPowers.get(id) ? ` (boxed, powers: ${boxPowers.get(id).join(', ')})` : ' (boxed)';
       if (offSites.has(id) && !off.has(id)) s += ` (off on ${offSites.get(id).join(', ')})`;
       if (updates[id]) s += `; ${updateText(updates[id])}`;
-      if (review[id]) s += `; TO REVIEW: it ${review[id].facts.join('; it ')} (trif approve ${id} when that's fine)`;
+      if (review[id]) s += `; TO REVIEW: ${require('./lib/boxpowers').factLines(review[id].needs, review[id].facts).join('; ')} (trif approve ${id} when that's fine)`;
       lines.push(`  ${pad(id, 40)} ${s}`);
     }
     for (const [id, err] of helperErrors) if (!ids.includes(id)) lines.push(`  ${pad(id, 40)} NOT SENT: ${err}`);
@@ -420,7 +422,7 @@ const handlers = {
     const code = fs.readFileSync(file, 'utf8');
     const header = require('./lib/mods').parseHeader(code);
     if (header.rules && header.sandboxed) {
-      const error = 'a mod is either @rules (data) or @sandboxed (JavaScript in TRIF\'s sandbox), not both';
+      const error = 'a mod is either a style mod (@style) or a boxed mod (@boxed), not both';
       if (ctx.json) printJson({ ok: false, error }); else out(`${path.resolve(file)}: ${error}`);
       process.exitCode = 1;
       return;
@@ -433,7 +435,7 @@ const handlers = {
         return;
       }
       if (ctx.json) return printJson({ ok: true, file: path.resolve(file), rules: true, powers: [] });
-      out(`ok: ${path.resolve(file)} is a rules mod and its rules check out`);
+      out(`ok: ${path.resolve(file)} is a style mod and its rules check out`);
       return out('TRIF runs it with its own code: it can\'t send, click, load from elsewhere or run code, so it never waits for the user\'s OK.');
     }
     // Compiles without running anything (side-panel agents may not run code; this replaces node --check).
@@ -447,13 +449,37 @@ const handlers = {
     // A sandboxed mod (extension/sandbox.js): it never waits for the user's OK, as it can't act; what it uses
     // that the sandbox doesn't give it is listed (lib/sandboxlint.js), as it would fail there when it runs.
     if (header.sandboxed) {
-      const lint = require('./lib/sandboxlint').sandboxLint(code);
-      if (ctx.json) return printJson({ ok: true, file: path.resolve(file), sandboxed: true, powers: [], lint });
-      out(`ok: ${path.resolve(file)} is a sandboxed mod and parses`);
-      out('It runs in TRIF\'s sandbox, with only TRIF\'s API: it can\'t send, click, navigate or load anything, so it never waits for the user\'s OK.');
+      // (its powers, from the menu: lib/boxpowers.js)
+      const bp = require('./lib/boxpowers');
+      let asked;
+      const rel0 = path.relative(ctx.ws.modsDir, path.resolve(file)).split(path.sep);
+      let askedArgs = {};
+      try {
+        const pa = bp.parsePowersWithArgs(header.powers, { site: rel0.length === 2 ? rel0[0] : '', matches: header.matches }); asked = pa.names; askedArgs = pa.args;
+        const clicks = bp.parseClicks(header.clicks);
+        if (clicks.length && !asked.includes('click')) throw new bp.PowersError('@click lines are for a mod with the click power (@powers click)');
+        if (asked.includes('click') && !clicks.length) throw new bp.PowersError('the click power needs what it may click: // @click the play button: button.play');
+        if (clicks.length) askedArgs.click = clicks;
+      } catch (e) {
+        if (ctx.json) printJson({ ok: false, error: e.message }); else out(`${path.resolve(file)}: ${e.message}`);
+        process.exitCode = 1;
+        return;
+      }
+      const rel = path.relative(ctx.ws.modsDir, path.resolve(file)).split(path.sep);
+      const needs = bp.powerNeeds({ site: rel.length === 2 ? rel[0] : '', powers: asked, powerArgs: askedArgs });
+      const lint = require('./lib/sandboxlint').sandboxLint(code, { powers: asked });
+      if (ctx.json) return printJson({ ok: true, file: path.resolve(file), sandboxed: true, powers: needs.map((n) => ({ key: n.key, power: n.power, fact: n.fact, holds: !n.soft })), lint });
+      out(`ok: ${path.resolve(file)} is a boxed mod and parses`);
+      if (!asked.length) out('It runs in TRIF\'s sandbox, with only TRIF\'s API: it can\'t send, click, navigate or load anything, so it never waits for the user\'s OK.');
+      else {
+        out(`It runs in TRIF's sandbox with these powers, and only these (TRIF enforces them): ${asked.join(', ')}.`);
+        const hard = needs.filter((n) => !n.soft);
+        out(hard.length ? 'It waits for the user\'s OK once for this set of powers (not for each change to its code: only a new power asks again). The hold will say it:' : 'Those don\'t make it wait for the user\'s OK on their own. A hold would list it:');
+        for (const l of bp.factLines(needs.map((n) => n.key), needs.map((n) => n.fact))) out(`- ${l}`);
+      }
       if (!lint.length) return out('TRIF finds nothing in it that the sandbox would refuse.');
       const lines = code.split('\n');
-      out('\nThe sandbox doesn\'t give it these, so they\'d fail when it runs (not a hold: rewrite them with the API, see "Sandboxed mods" in TECHNIQUES.md, or make it a page script if it really needs them):');
+      out('\nThe sandbox doesn\'t give it these, so they\'d fail when it runs (not a hold: rewrite them with the API, see "Boxed mods" in TECHNIQUES.md, or make it a free mod if it really needs them):');
       for (const l of lint) {
         out(`- ${l.what}: ${l.why}`);
         for (const n of l.lines.slice(0, 3)) out(`    line ${n}: ${lines[n - 1].trim().slice(0, 140)}`);
@@ -642,7 +668,8 @@ const handlers = {
       args.timeout = t;
     }
     const callArgs = args.timeout ? args : { ...args, timeout: 10000 };
-    const r = await ctx.call('run', callArgs);
+    // (plus the time the user may take to answer "Agent on this site" in the panel: background.js)
+    const r = await ctx.call('run', callArgs, callArgs.timeout + 8000 + 30000);
     if (ctx.json) return printJson(r);
     out(formatValue(r && typeof r === 'object' && 'value' in r ? r.value : r));
   },
@@ -675,6 +702,17 @@ const handlers = {
     if (!r.entries.length) return out(`(no changes kept for ${r.id}: only side-panel runs' changes are, for 30 days)`);
     out(`${r.id}: what side-panel runs changed, newest first (trif undo ${r.id} puts back the newest)`);
     for (const e of r.entries) out(`  ${new Date(e.at).toLocaleString()}  ${e.kind === 'created' ? 'created by a run' : 'changed by a run (the version before is kept)'}`);
+  },
+
+  // The mod's file in Finder (a folder elsewhere), or with --editor in the system's app for .js: the same as
+  // the panel's code card, found by its id in the sites folder (lib/reveal.js). Works without the browser.
+  async reveal(ctx, pos) {
+    if (!pos[0]) throw new UsageError('usage: trif reveal <site>/<mod> [--editor]');
+    const id = modId(pos[0]);
+    const { scanMods } = require('./lib/mods');
+    const r = require('./lib/reveal').reveal(ctx.ws.modsDir, scanMods(ctx.ws.modsDir).mods, id, ctx.opts['--editor'] ? 'editor' : 'folder');
+    if (ctx.json) return printJson(r);
+    out(`${r.how === 'editor' ? 'opened' : 'showed'} ${r.file}${r.how === 'editor' ? '' : ` in ${process.platform === 'darwin' ? 'Finder' : 'its folder'}`}`);
   },
 
   async undo(ctx, pos) {
@@ -856,11 +894,12 @@ const handlers = {
       else if (enabled.get(m.id) === false && shipsOff.has(m.id)) out(`  off, as TRIF ships it (not running; trif enable ${m.id} turns it on)`);
       else if (enabled.get(m.id) === false) out(`  switched off by the user (not running; trif enable ${m.id} turns it on)`);
       else if (offSites.has(m.id)) out(`  switched off by the user on ${offSites.get(m.id).join(', ')} (trif enable ${m.id} --site <site> turns it back on there)`);
-      if (isHeld(m)) out(`  HELD: ${held[m.id].by === 'outside' ? 'new or changed since TRIF last let it run' : `a side-panel agent wrote it while working on ${held[m.id].site}`}, and TRIF found that it ${(held[m.id].facts || [held[m.id].reason]).join('; it ')}. Not running until the user approves it (trif approve ${m.id}).`);
+      if (isHeld(m)) out(`  HELD: ${held[m.id].by === 'outside' ? 'new or changed since TRIF last let it run' : `a side-panel agent wrote it while working on ${held[m.id].site}`}, and TRIF found that ${require('./lib/boxpowers').factLines(held[m.id].needs, held[m.id].facts || [held[m.id].reason]).join('; ')}. Not running until the user approves it (trif approve ${m.id}).`);
       if (updates[m.id]) out(`  ${updateText(updates[m.id])}: trif mod-update ${m.id}`);
       if (m.description) out(`  ${m.description}`);
-      if (m.rules) out('  kind: rules (data TRIF runs; never waits for the user\'s OK)');
-      else if (m.sandboxed) out('  kind: sandboxed (runs in TRIF\'s sandbox with only TRIF\'s API; never waits for the user\'s OK, except in a browser without the sandbox)');
+      if (m.rules) out('  kind: style mod (data TRIF runs; never waits for the user\'s OK)');
+      else if (m.sandboxed) out(m.powers && m.powers.length ? `  kind: boxed mod with powers: ${m.powers.join(', ')} (runs in TRIF's sandbox, with only TRIF's API and those powers; waits for the user's OK once for that set)`
+        : '  kind: boxed mod (runs in TRIF\'s sandbox with only TRIF\'s API; never waits for the user\'s OK, except in a browser without the sandbox)');
       if (isShippedSource(m.source)) out(`  from TRIF${m.version ? `, version ${m.version}` : ''}`);
       out(`  matches: ${m.matches.join(' ')}`);
       if (m.risk) out(`  risk: ${m.risk.tier}${m.risk.why ? ` (${m.risk.why})` : ''}`);
@@ -882,8 +921,10 @@ const handlers = {
     }
     const file = path.join(ctx.ws.modsDir, site, `${mod}.js`);
     if (fs.existsSync(file)) throw new HelperError(`${file} already exists`, 'command');
-    if (ctx.opts['--rules'] && ctx.opts['--sandboxed']) throw new UsageError('--rules or --sandboxed, not both');
-    const tpl = fs.readFileSync(path.join(P.HELPER_DIR, 'templates', ctx.opts['--rules'] ? 'rules.js' : ctx.opts['--sandboxed'] ? 'sandboxed.js' : 'mod.js'), 'utf8');
+    // (--style and --boxed; --rules and --sandboxed, their names before, still work)
+    const style = !!(ctx.opts['--style'] || ctx.opts['--rules']), boxed = !!(ctx.opts['--boxed'] || ctx.opts['--sandboxed']);
+    if (style && boxed) throw new UsageError('--style or --boxed, not both');
+    const tpl = fs.readFileSync(path.join(P.HELPER_DIR, 'templates', style ? 'rules.js' : boxed ? 'sandboxed.js' : 'mod.js'), 'utf8');
     let text = tpl;
     // all-sites mods run everywhere until the agent narrows the @match lines.
     if (site === ALL_SITES) text = text.replace(/^\/\/ @match .*\n(\/\/ @match .*\n)*/m, '// @match       *://*/*\n');

@@ -1,12 +1,12 @@
 // ==WebMod==
-// @name        Simple Shopping (sandboxed)
+// @name        Simple Shopping (boxed)
 // @description Amazon: just results, price and stars
 // @match       https://www.amazon.com/*
-// @sandboxed
+// @boxed
 // @risk        1 hides sponsored results, so their ad impressions never report
 // ==/WebMod==
 
-// examples/sites/amazon.com/simple-shopping.js (Tim's), ported to a sandboxed mod (TECHNIQUES.md "Sandboxed
+// examples/sites/amazon.com/simple-shopping.js (Tim's), ported to a boxed mod (TECHNIQUES.md "Boxed
 // mods"): the same CSS through trif.css (it loads nothing, so it passes), and the carousel marker through
 // trif.observe instead of a MutationObserver of its own. An example, not one TRIF ships.
 const R = '.s-main-slot [data-component-type="s-search-result"]';
@@ -50,7 +50,7 @@ trif.css(`
 
     /* --- Recommendations in search results --- */
     /* Carousels inside the results list, marked below by their heading */
-    .s-main-slot > [data-trif-hide] { display: none !important; }
+    .s-main-slot > [data-trif-box-hide] { display: none !important; }
 
     /* --- Price and stars only ---
        Product tiles are [data-component-type=s-search-result] inside .s-main-slot; their parts carry
@@ -104,5 +104,5 @@ trif.css(`
 const HEADING = /^customers (also|frequently) (viewed|bought)|inspired by your browsing history/i;
 trif.observe('.s-main-slot > *', (row) => {
   const h = row.find('h2, h3');
-  if (h && HEADING.test(h.text.trim())) row.setAttr('data-trif-hide', '');
+  if (h && HEADING.test(h.text.trim())) row.setAttr('data-trif-box-hide', '');
 });

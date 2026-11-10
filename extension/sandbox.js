@@ -41,25 +41,36 @@ export function sandboxRuntimeCode() {
   return `(${sandboxRuntime.toString()})('sandbox');\n//# sourceURL=trif-sandbox://runtime.js`;
 }
 
-/** One sandboxed mod, in TRIF's world: its source, handed to the runtime as text (SES evaluates it). */
-export function sandboxModCode(id, source) {
-  return `(globalThis.__trifSandbox ? globalThis.__trifSandbox.run(${J(id)}, ${J(source)}) : (globalThis.__trifSandboxQueue = globalThis.__trifSandboxQueue || []).push([${J(id)}, ${J(source)}]));\n//# sourceURL=trif-sandbox://${id}.js`;
+/**
+ * One sandboxed mod, in TRIF's world: its source, handed to the runtime as text (SES evaluates it), with its
+ * powers (docs/POWERS.md), which come from its header as the helper read it, not from its code.
+ */
+// (a mod's powers, from its header as the helper read it: a list of names, or {powers, args})
+const grantOf = (g) => {
+  const names = Array.isArray(g) ? g : g && Array.isArray(g.powers) ? g.powers : [];
+  const args = g && !Array.isArray(g) && g.args && typeof g.args === 'object' ? g.args : {};
+  return JSON.stringify({ powers: names.map(String), args: Object.fromEntries(Object.entries(args).map(([k, v]) => [String(k), (Array.isArray(v) ? v : []).map(String)])) });
+};
+export function sandboxModCode(id, source, powers = []) {
+  const P = grantOf(powers);
+  return `(globalThis.__trifSandbox ? globalThis.__trifSandbox.run(${J(id)}, ${J(source)}, ${P}) : (globalThis.__trifSandboxQueue = globalThis.__trifSandboxQueue || []).push([${J(id)}, ${J(source)}, ${P}]));\n//# sourceURL=trif-sandbox://${id}.js`;
 }
 
 /**
  * A sandboxed mod run as a page script (a browser without TRIF's world, once the user allowed it): the
  * same API, built in the page's world, around the mod's code, which has everything the page has.
  */
-export function sandboxPageCode(id, source) {
+export function sandboxPageCode(id, source, powers = []) {
   // (the mod's first line is the script's first line, so `trif errors` gives its own line numbers)
-  return `(() => { const __trifMod = async function (${SANDBOX_GLOBALS.filter((n) => n !== 'Math' && n !== 'Date').join(', ')}) { "use strict"; ${source}\n};\n(${sandboxRuntime.toString()})('page', ${J(id)}, __trifMod); })();\n//# sourceURL=trif://${id}.js`;
+  const P = grantOf(powers);
+  return `(() => { const __trifMod = async function (${SANDBOX_GLOBALS.filter((n) => n !== 'Math' && n !== 'Date').join(', ')}) { "use strict"; ${source}\n};\n(${sandboxRuntime.toString()})('page', ${J(id)}, __trifMod, ${P}); })();\n//# sourceURL=trif://${id}.js`;
 }
 
 /**
  * The runtime. mode 'sandbox': in TRIF's world, with SES loaded; installs globalThis.__trifSandbox. mode
  * 'page': in the page's world (no SES, nothing confined), runs `fn` with the API as its arguments.
  */
-export function sandboxRuntime(mode, pageModId, pageFn) {
+export function sandboxRuntime(mode, pageModId, pageFn, pagePowers) {
   const G = globalThis;
   const SANDBOX = mode === 'sandbox';
   if (SANDBOX && G.__trifSandbox) return;
@@ -137,23 +148,42 @@ export function sandboxRuntime(mode, pageModId, pageFn) {
   const ATTRS = new Set(['id', 'class', 'title', 'role', 'hidden', 'alt', 'width', 'height', 'lang', 'dir', 'tabindex', 'colspan', 'rowspan', 'open', 'value', 'max', 'href', 'src']);
   // The page's own code reads attributes as instructions: htmx's data-hx-post, Turbo's data-turbo-method,
   // Stimulus's data-controller, classes a selector-observer acts on, ids it finds elements (or window globals)
-  // by. So the names a mod gives are TRIF's: data attributes only data-trif-*, and ids and classes only
-  // trif-* (aria-* stay: they describe, they don't instruct). (`name` isn't offered at all.)
-  const DATA_OK = /^data-trif-[a-z0-9-]+$/;
+  // by. So the names a mod gives are its own: data attributes only data-trif-box-*, and ids and classes only
+  // trif-box-* (aria-* stay: they describe, they don't instruct). (`name` isn't offered at all.) Not plain
+  // trif-: free mods use those, and act on them (an id they look up), so a boxed mod mustn't make them;
+  // AGENTS.md tells free mods never to act on trif-box- names. (audit AU-3)
+  const DATA_OK = /^data-trif-box-[a-z0-9-]+$/;
   const ARIA_OK = /^aria-[a-z]+$/;
-  const OWN_NAME = /^trif-[A-Za-z0-9_-]*$/;
+  const OWN_NAME = /^trif-box-[A-Za-z0-9_-]*$/;
   const nameOk = (n) => ATTRS.has(n) || DATA_OK.test(n) || ARIA_OK.test(n);
-  const nameRefused = (n) => (/^data-/.test(n) ? `only data-trif-* data attributes are offered (the page's own code could act on ${n})` : `the ${n} attribute isn't offered`);
+  const nameRefused = (n) => (/^data-/.test(n) ? `only data-trif-box-* data attributes are offered (the page's own code, or a free mod, could act on ${n})` : `the ${n} attribute isn't offered`);
   const ownTokens = (v) => String(v).trim().split(/\s+/).filter(Boolean).every((t) => OWN_NAME.test(t));
   // (an address only where it can't run or send anything by itself: a link's href, an image's src; `value`
   // only on a progress bar or list item, never on a form field, whose value the site would receive)
-  const ATTR_TAGS = { href: new Set(['a']), src: new Set(['img']), value: new Set(['progress', 'li']), max: new Set(['progress']) };
+  // (`open` only on <details>: on the page's <dialog> it would show the page's own confirm box: audit AU-8)
+  const ATTR_TAGS = { href: new Set(['a']), src: new Set(['img']), value: new Set(['progress', 'li']), max: new Set(['progress']), open: new Set(['details']) };
   const SVG_TAGS = new Set(['svg', 'g', 'path', 'circle', 'rect', 'ellipse', 'line', 'polyline', 'polygon', 'text', 'tspan', 'defs', 'lineargradient', 'radialgradient', 'stop', 'title', 'desc']);
   const SVG_ATTRS = /^(viewbox|d|cx|cy|r|rx|ry|x|y|x1|y1|x2|y2|points|fill|stroke|stroke-width|stroke-linecap|stroke-linejoin|opacity|fill-opacity|stroke-opacity|fill-rule|clip-rule|transform|offset|stop-color|stop-opacity|gradientunits|gradienttransform|xmlns|preserveaspectratio|focusable|font-size|font-family|text-anchor|dominant-baseline|width|height)$/;
   // Text inside these is code or CSS the browser would carry out: never written by a mod.
   const RAW_TEXT = new Set(['script', 'style']);
-  // Text inside these is what a form sends: not rewritten by a mod either.
+  // Text inside these is what a form sends: not rewritten by a mod either (its own controls aside).
   const FORM_TEXT = new Set(['textarea', 'option', 'select']);
+  // The `controls` power: a mod's own sliders, pickers, checkboxes, number and text boxes, and selects. TRIF
+  // sets autocomplete off (the browser fills nothing into them) and keeps the type to these; never password.
+  const CONTROL_TAGS = new Set(['input', 'select', 'option', 'label']);
+  const CONTROL_TYPES = new Set(['range', 'color', 'checkbox', 'number', 'text']);
+  const controlAttrOk = (node, n, v) => {
+    const t = node.localName;
+    if (t === 'input') {
+      if (n === 'type') { if (!CONTROL_TYPES.has(v.toLowerCase())) fail(`a mod's input can be ${[...CONTROL_TYPES].join(', ')} (not ${v})`); return true; }
+      if (/^(min|max|step)$/.test(n)) { if (!/^-?[0-9.e+-]*$|^any$/i.test(v)) fail(`${n} takes a number`); return true; }
+      return n === 'value' || n === 'checked' || n === 'placeholder' || n === 'disabled';
+    }
+    if (t === 'option') return n === 'value' || n === 'selected';
+    if (t === 'select') return n === 'disabled';
+    if (t === 'label' && n === 'for') { if (!OWN_NAME.test(v)) fail('a label is for one of the mod\'s own controls (a trif-box- id)'); return true; }
+    return false;
+  };
   const ORIGIN = location.origin;
   const fail = (why) => { throw new TypeError(`TRIF sandbox: ${why}`); };
   const str = (v, what, max = 100000) => { if (typeof v !== 'string') fail(`${what} must be text`); if (v.length > max) fail(`${what} is too long`); return v; };
@@ -162,6 +192,7 @@ export function sandboxRuntime(mode, pageModId, pageFn) {
   // site: a GET there can do things too). A link: this site's own pages without a query (a query to the site
   // could go on to another one through a redirect), or #somewhere; it goes nowhere until the user clicks it.
   const shownImage = (abs) => { for (const im of D.images) if (im.src === abs || im.currentSrc === abs) return true; return false; };
+  const shownLink = (abs) => { for (const a of D.links) if (!created.has(a) && a.href === abs) return true; return false; };
   const urlOk = (v, attr) => {
     const s = String(v).trim();
     if (attr === 'src') {
@@ -169,7 +200,10 @@ export function sandboxRuntime(mode, pageModId, pageFn) {
       try { return shownImage(new URL(s, location.href).href); } catch { return false; }
     }
     if (/^#/.test(s)) return true;
-    try { const u = new URL(s, location.href); return u.origin === ORIGIN && /^https?:$/.test(u.protocol) && !u.search; } catch { return false; }
+    // A link: #somewhere, or an address a link on the page already has. Not a new address, not even a path on
+    // this site: a path can carry data, and the page's speculation rules or a prefetching script can fetch it
+    // without a click (audit AU-7).
+    try { const abs = new URL(s, location.href).href; return /^https?:/.test(abs) && shownLink(abs); } catch { return false; }
   };
   // CSS that loads nothing (as rules mods: helper/lib/rules.js checkCss): url() only data:, no @import,
   // image-set() and the like, no escapes outside strings.
@@ -194,16 +228,26 @@ export function sandboxRuntime(mode, pageModId, pageFn) {
     return true;
   };
   // A selector, for a rule TRIF writes: one that parses and can't close the rule it's put in.
+  // A selector a mod gives, anywhere: no escapes (so the checks below can't be spelled around: audit AU-9),
+  // and nothing that reads what's typed in a field: the value attribute (React keeps it in step with what's
+  // typed, passwords too) and :autofill (audit AU-2).
+  const READS_FIELDS = /\[\s*(?:[\w*-]*\|)?value\b|:(?:-webkit-)?autofill\b/i;
+  const selCheck = (sel, what = 'a selector') => {
+    str(sel, what, 2000);
+    if (sel.includes('\\')) fail(`"${sel.slice(0, 80)}": selectors can't have \\ escapes`);
+    if (READS_FIELDS.test(sel)) fail(`"${sel.slice(0, 80)}": selectors can't name the value attribute or :autofill (they'd read what's typed in a field)`);
+    return sel;
+  };
   const selectorOk = (sel) => {
-    str(sel, 'a selector', 2000);
+    selCheck(sel);
     if (/[{}<;@\\]|\/\*/.test(sel)) fail(`"${sel.slice(0, 80)}" isn't a selector TRIF writes into a style sheet`);
     try { D.createDocumentFragment().querySelector(sel); } catch { fail(`"${sel.slice(0, 80)}" isn't a valid selector`); }
     return sel;
   };
-  const qs = (root, sel) => { try { return root.querySelector(sel); } catch { fail(`"${String(sel).slice(0, 80)}" isn't a valid selector`); } };
-  const qsa = (root, sel) => { try { return root.querySelectorAll(sel); } catch { fail(`"${String(sel).slice(0, 80)}" isn't a valid selector`); } };
+  const qs = (root, sel) => { selCheck(sel); try { return root.querySelector(sel); } catch { fail(`"${String(sel).slice(0, 80)}" isn't a valid selector`); } };
+  const qsa = (root, sel) => { selCheck(sel); try { return root.querySelectorAll(sel); } catch { fail(`"${String(sel).slice(0, 80)}" isn't a valid selector`); } };
   const LISTEN = /^(click|dblclick|contextmenu|mouse(down|up|move|over|out|enter|leave)|pointer(down|up|move|over|out|enter|leave|cancel)|touch(start|move|end|cancel)|key(down|up)|wheel|scroll|resize|input|change|focus|blur|focusin|focusout|visibilitychange|transitionend|animationend)$/;
-  const isRaw = (n) => !!n && n.nodeType === 1 && (RAW_TEXT.has(n.localName) || FORM_TEXT.has(n.localName));
+  const isRaw = (n) => !!n && n.nodeType === 1 && (RAW_TEXT.has(n.localName) || (FORM_TEXT.has(n.localName) && !created.has(n)));
 
   // ---- the stand-ins: one per node (identity kept), frozen, sharing one frozen prototype whose methods
   // find their node in a WeakMap (an object TRIF didn't make has none)
@@ -215,14 +259,28 @@ export function sandboxRuntime(mode, pageModId, pageFn) {
   // What a form sends is the page's: the page's own fields stay in the form they're in (moving one into, out
   // of or between forms changes what's submitted), and a mod's button never goes inside a form.
   const FORM_FIELDS = 'button, input, select, textarea, fieldset, output, object';
+  // (and the options of a select, which say what it sends: audit AU-4; and custom elements, which can be form
+  // fields through ElementInternals, out of sight from here: audit AU-5)
+  const OPTIONS = 'option, optgroup';
+  const fieldsIn = (k) => [...(k.matches(FORM_FIELDS) ? [k] : []), ...k.querySelectorAll(FORM_FIELDS)];
+  const customIn = (k) => [...(k.localName.includes('-') ? [k] : []), ...[...k.querySelectorAll('*')].filter((e) => e.localName.includes('-'))];
+  const optionsIn = (k) => [...(k.matches(OPTIONS) ? [k] : []), ...k.querySelectorAll(OPTIONS)];
   const formsOk = (parent, kids) => {
     const dest = parent && parent.nodeType === 1 ? parent.closest('form') : null;
+    const destSelect = parent && parent.nodeType === 1 ? parent.closest('select') : null;
     for (const k of kids) {
       if (typeof k === 'string' || k.nodeType !== 1) continue;
-      for (const f of [...(k.matches(FORM_FIELDS) ? [k] : []), ...k.querySelectorAll(FORM_FIELDS)]) {
-        if (created.has(f)) { if (dest && f.localName === 'button') fail('a button a mod makes can\'t go inside a form'); continue; }
+      for (const f of fieldsIn(k)) {
+        if (created.has(f)) { if (dest) fail(`a ${f.localName === 'button' ? 'button' : 'control'} a mod makes can't go inside a form`); continue; }
         if (f.hasAttribute('form')) continue; // (it names its form: where it is doesn't change that)
         if ((f.form || null) !== dest) fail(`the page's own <${f.localName}> can't be moved into, out of or between forms`);
+      }
+      for (const c of customIn(k)) if (!created.has(c) && c.closest('form') !== dest) fail(`the page's own <${c.localName}> can't be moved into, out of or between forms (it may be a form field)`);
+      for (const o of optionsIn(k)) {
+        if (created.has(o)) continue;
+        const now = o.closest('select');
+        const after = now && k.contains(now) ? now : destSelect; // (its select moves with it, or it goes where it's put)
+        if (after !== now) fail(`the page's own <${o.localName}> can't be moved out of its select or into another`);
       }
     }
   };
@@ -240,13 +298,101 @@ export function sandboxRuntime(mode, pageModId, pageFn) {
   };
   // Taking a page field out of its form (removing it, or what holds it, or writing over what holds it)
   // changes what the form sends, as moving it does.
-  const fieldsOwned = (n) => [...(n.matches(FORM_FIELDS) ? [n] : []), ...n.querySelectorAll(FORM_FIELDS)].filter((f) => !created.has(f) && f.form);
+  const fieldsOwned = (n) => fieldsIn(n).filter((f) => !created.has(f) && f.form);
   const detachOk = (n, keepsItself) => {
     for (const f of fieldsOwned(n)) {
       if (!keepsItself && n.contains(f.form)) continue; // (its form goes with it: nothing else submits differently)
       fail(`the page's own <${f.localName}> can't be taken out of its form`);
     }
+    for (const c of customIn(n)) {
+      const form = c.closest('form');
+      if (created.has(c) || !form || (!keepsItself && n.contains(form))) continue;
+      fail(`the page's own <${c.localName}> can't be taken out of its form (it may be a form field)`);
+    }
+    for (const o of optionsIn(n)) {
+      const sel = o.closest('select');
+      if (created.has(o) || !sel || !sel.form || (!keepsItself && n.contains(sel))) continue;
+      fail(`the page's own <${o.localName}> can't be taken out of its select`);
+    }
   };
+  // Writing into an editor is changing what the user typed: refused (audit AU-1); restyling, hiding it: fine.
+  const mediaOf = (s) => { const n = nodeOf(s); if (!/^(video|audio)$/.test(n.localName)) fail('that\'s for the page\'s <video> and <audio>'); if (!cur().powers.has('media')) fail('playing the page\'s video and audio needs the media power (// @powers media)'); partnersOk(cur(), 'media'); return n; };
+  // (would a click on it submit a form: a submit button or input, a button with no type in a form, or
+  // something inside one of those)
+  // (or reset one: what the user typed, wiped; a label clicks its control, so a label for one of those too)
+  const submits = (n) => {
+    const lb = n.closest('label');
+    const b = n.closest('button, input') || (lb && lb.control);
+    if (!b) return false;
+    const t = String(b.getAttribute('type') || '').toLowerCase();
+    if (b.localName === 'input') return t === 'submit' || t === 'image' || t === 'reset';
+    return b.localName === 'button' && (t === '' || t === 'submit' || t === 'reset') && !!b.form;
+  };
+  // write-drafts and the reads: a mod with write-drafts and a read power has the combination in its hold
+  // (docs/POWERS.md "Combinations"). Boxed mods on a page can see each other's elements, so what one mod
+  // reads could reach another through the page: while any boxed mod here has a read power, a mod changes
+  // what the user types only if it asked for that read too (and so the user saw the combination).
+  // The page-wide rules (docs/SAFE-MODS.md "Combinations"): boxed mods on a page see each other's elements
+  // (and with `mods`, talk), so a combination the hold warns about (helper/lib/combinations.js) could be split
+  // between two mods, each without the warning. So an act is refused while another boxed mod that has run on
+  // this page has a power that makes a warned pair with it, unless the acting mod asked for that power too
+  // (and so its hold showed the warning). ACT_PARTNERS: the act, and the powers it's refused beside
+  // (tests/combinations.test.js keeps it in step with the table). Not here: sound beside a read (SAFE-MODS says
+  // why); click beside a draft another mod wrote (clickOk); click beside go-to (on go-to's side).
+  const ACT_PARTNERS = {
+    'write-drafts': ['read-drafts', 'keys', 'site-data', 'page-data'],
+    click: ['read-drafts', 'keys', 'site-data', 'page-data'],
+    media: ['read-drafts', 'keys', 'site-data', 'page-data'],
+    'go-to': ['click'],
+  };
+  const PARTNER_WHY = {
+    'write-drafts': ['changing what the user types', 'what one reads could end up in what the user posts'],
+    click: ['clicking for the user', 'what one reads could decide what the other clicks'],
+    media: ['playing the page\'s video and audio', 'what one reads could reach a video\'s host through how it plays'],
+    'go-to': ['taking the user to a page', 'one could take the user to a page where the other clicks'],
+  };
+  const inPlay = new Set(); // (the powers of the boxed mods that have run on this page)
+  const partnersOk = (api, act) => {
+    for (const p of ACT_PARTNERS[act]) if (inPlay.has(p) && !api.powers.has(p)) fail(`${PARTNER_WHY[act][0]} is off on this page while another boxed mod here has the ${p} power: with both, ${PARTNER_WHY[act][1]} (a mod that asks for ${act} and ${p} together shows the user that)`);
+  };
+  const draftsOk = (api) => {
+    if (!api.powers.has('write-drafts')) return false;
+    partnersOk(api, 'write-drafts');
+    return true;
+  };
+  // (click: also not after another mod changed a draft, unless the clicking mod has write-drafts: a click could
+  // send it)
+  const clickOk = (api) => {
+    partnersOk(api, 'click');
+    for (const w of draftWriters) if (w !== api.mod && !api.powers.has('write-drafts')) fail('clicking for the user is off on this page since another boxed mod here changed a draft: with both, a draft could be sent without the user (a mod that asks for click and write-drafts together shows the user that)');
+  };
+  // write-drafts and addresses: the rule (docs/SAFE-MODS.md) holds in drafts too. A site can fetch an address
+  // in a draft before anything is posted (a link preview), so the text a mod writes may only have the
+  // addresses already in what the user typed there, or in a link on the page: no address it made up.
+  const ADDRESS = /(?:[a-z][a-z0-9+.-]*:\/\/|www[.\u3002\uff0e\uff61])[^\s<>"'`]+|(?:[\p{L}\p{N}][\p{L}\p{N}-]{0,62}[.\u3002\uff0e\uff61])+(?:[a-z]{2,63}|xn--[a-z0-9-]{1,59})(?![\p{L}\p{N}-])(?:[/?#:][^\s<>"'`]*)?|\b\d{1,3}(?:\.\d{1,3}){3}\b/giu;
+  const linkHas = (t) => { for (const a of D.links) if (!created.has(a) && String(a.href).toLowerCase().includes(t)) return true; return false; };
+  const noNewAddress = (before, after) => {
+    const was = String(before).toLowerCase();
+    for (const m of String(after).matchAll(ADDRESS)) {
+      const t = m[0].toLowerCase();
+      if (!was.includes(t) && !linkHas(t)) fail(`"${m[0].slice(0, 80)}" looks like an address that isn't in what the user typed here or in a link on the page: a boxed mod doesn't add addresses to a draft (a site can fetch one for a preview before anything is posted)`);
+    }
+  };
+  // (an editor's text after a write: the text before where it goes, what it adds, the rest; `removed`
+  // characters replaced)
+  const editorRoot = (n) => { let r = n; while (r.parentElement && r.parentElement.isContentEditable) r = r.parentElement; return r; };
+  const editorWrite = (n, setEnd, removed, added) => {
+    const root = editorRoot(n);
+    const before = root.textContent;
+    const rg = D.createRange();
+    rg.setStart(root, 0);
+    setEnd(rg);
+    const at = rg.toString().length;
+    noNewAddress(before, before.slice(0, at) + added + before.slice(at + removed));
+  };
+  const draftWriters = new Set(); // (boxed mods that changed a draft on this page: see clickOk)
+  const notInEditor = (n, what) => { if (inEditor(n) && !draftsOk(cur())) fail(`${what} isn't offered inside an editor (what the user is typing)`); };
+  const wrote = (n) => { if (inEditor(n)) draftWriters.add(cur().mod); };
   const textInto = (parent, kids) => {
     formsOk(parent, kids);
     for (const k of kids) if (typeof k !== 'string' && insideEditor(k)) fail('a piece of an editor can\'t be moved out of it');
@@ -316,8 +462,27 @@ export function sandboxRuntime(mode, pageModId, pageFn) {
     if (root !== null) return root || t.localName.includes('-');
     return t.localName.includes('-') || SHADOW_HOSTS.has(t.localName);
   };
-  const eventOf = (e) => harden({
-    type: String(e.type), ...(typedInto(e) ? { key: null, code: null } : { key: typeof e.key === 'string' ? e.key : null, code: typeof e.code === 'string' ? e.code : null }),
+  // A field whose content stays hidden whatever the mod's powers: passwords and card details.
+  const secretField = (t) => !!t && t.nodeType === 1 && t.localName === 'input' && (String(t.type).toLowerCase() === 'password'
+    || /(^|\s)(cc-[a-z-]+|current-password|new-password|one-time-code)(\s|$)/i.test(String(t.getAttribute('autocomplete') || '')));
+  const isField = (t) => !!t && t.nodeType === 1 && (/^(input|textarea|select)$/.test(t.localName) || t.isContentEditable);
+  // Whether a key event's key is hidden from a mod with these powers: `keys` shows keys outside fields and
+  // editors (accepting that a field in a closed shadow root can't be seen); `read-drafts` shows them in
+  // fields and editors too; a password or card field's never.
+  const trifBoxes = new WeakSet(); // search boxes TRIF drew for a mod (search-box)
+  const keyHidden = (e, powers) => {
+    const p = typeof e.composedPath === 'function' ? e.composedPath() : [];
+    const t = p[0] || e.target;
+    if (secretField(t) || trifBoxes.has(t) || trifBoxes.has(e.target)) return true; // (TRIF's own search boxes: never a mod's to read)
+    if (powers && powers.has('read-drafts') && (isField(t) || (p.length && p[0] !== e.target && isField(p[0])))) return false;
+    if (isField(t)) return true;
+    if (powers && powers.has('keys')) return p.length > 0 && p[0] !== e.target && isField(p[0]);
+    return typedInto(e);
+  };
+  const eventOf = (e, powers) => harden({
+    type: String(e.type), ...(keyHidden(e, powers) ? { key: null, code: null } : { key: typeof e.key === 'string' ? e.key : null, code: typeof e.code === 'string' ? e.code : null }),
+    // (what an input event typed: read-drafts only, never in a password or card field)
+    ...(powers && powers.has('read-drafts') && typeof e.data === 'string' && !secretField(e.target) ? { data: e.data } : {}),
     shift: !!e.shiftKey, alt: !!e.altKey, ctrl: !!e.ctrlKey, meta: !!e.metaKey,
     x: typeof e.clientX === 'number' ? e.clientX : null, y: typeof e.clientY === 'number' ? e.clientY : null,
     deltaX: typeof e.deltaX === 'number' ? e.deltaX : null, deltaY: typeof e.deltaY === 'number' ? e.deltaY : null, repeat: !!e.repeat,
@@ -393,10 +558,71 @@ export function sandboxRuntime(mode, pageModId, pageFn) {
   let current = null; // the api of the mod whose code TRIF is running (its top level, or a callback)
   /** Everything one mod gets (its own error reporting, timers, settings, watchers). */
   const apis = new Map(); // mod id -> its api
-  const apiFor = (modId) => {
+  // ---- site-data (docs/POWERS.md, SAFE-MODS.md "trif.filterResponse"): the page's side (runtime.js
+  // pageBridge) hands JSON responses over as text, during an event; the mods' filters run on copies; what
+  // they return may only remove or reorder: every string, number and boolean in it, and every object key, has
+  // to be in what the site sent, a string or number no more times than it was, or TRIF keeps the original.
+  const filters = []; // {re, glob, call, mod}
+  const tally = (v, strs, nums, keys, depth = 0) => {
+    if (depth > 100) throw new TypeError('too deep');
+    if (typeof v === 'string') strs.set(v, (strs.get(v) || 0) + 1);
+    else if (typeof v === 'number' || typeof v === 'boolean') nums.set(`${typeof v}:${v}`, (nums.get(`${typeof v}:${v}`) || 0) + 1);
+    else if (Array.isArray(v)) for (const x of v) tally(x, strs, nums, keys, depth + 1);
+    else if (v && typeof v === 'object') for (const k of Object.keys(v)) { keys.add(k); tally(v[k], strs, nums, keys, depth + 1); }
+  };
+  const invented = (input, output) => {
+    const si = new Map(), ni = new Map(), ki = new Set(), so = new Map(), no = new Map(), ko = new Set();
+    tally(input, si, ni, ki); tally(output, so, no, ko);
+    for (const k of ko) if (!ki.has(k)) return `the key "${k.slice(0, 60)}" isn't in what the site sent`;
+    for (const [v, c] of so) if ((si.get(v) || 0) < c) return `the text "${v.slice(0, 60)}" ${si.has(v) ? 'more times than' : 'isn\'t in'} what the site sent`;
+    for (const [v, c] of no) if ((ni.get(v) || 0) < c) return `the value ${v.replace(/^\w+:/, '')} ${ni.has(v) ? 'more times than' : 'isn\'t in'} what the site sent`;
+    return null;
+  };
+  let filterListening = false;
+  const announceFilters = () => { D.dispatchEvent(new CustomEvent('trif:filter-patterns', { detail: JSON.stringify(filters.map((f) => f.glob)) })); };
+  const listenForFilters = () => {
+    if (filterListening) return;
+    filterListening = true;
+    D.addEventListener('trif:bridge-ready', announceFilters, true);
+    D.addEventListener('trif:filter-request', (e) => {
+      let req;
+      try { req = JSON.parse(String(e.detail)); } catch { return; }
+      if (!req || typeof req.url !== 'string' || typeof req.text !== 'string') return;
+      const mine = filters.filter((f) => f.re.test(req.url));
+      if (!mine.length) return;
+      let original;
+      try { original = JSON.parse(req.text); } catch { return; }
+      let current = original, changed = false;
+      for (const f of mine) {
+        let copy;
+        try { copy = JSON.parse(JSON.stringify(current)); } catch { return; }
+        const r = f.call(copy, harden({ url: req.url, method: String(req.method || 'GET'), status: Number(req.status) || 0 }));
+        if (r && typeof r.then === 'function') { report(f.mod, new TypeError('TRIF sandbox: a filter returns the data itself, not a promise: TRIF kept what the site sent')); continue; }
+        let out;
+        try { out = JSON.parse(JSON.stringify(r === undefined ? copy : r)); } catch { report(f.mod, new TypeError('TRIF sandbox: a filter returns plain data: TRIF kept what the site sent')); continue; }
+        let why;
+        try { why = invented(original, out); } catch { why = 'it was too deep to check'; }
+        if (why) { report(f.mod, new TypeError(`TRIF sandbox: a filter may only remove or reorder, and ${why}: TRIF kept what the site sent`)); continue; }
+        current = out; changed = true;
+      }
+      if (changed) D.dispatchEvent(new CustomEvent('trif:filter-response', { detail: JSON.stringify(current) }));
+    }, true);
+  };
+  // ---- page-data: the page's side answers during the event (runtime.js pageBridge)
+  let pageDataAnswer = null;
+  // (mods: channels between this page's boxed mods; in a page script, shared with the page's other ones)
+  const channels = SANDBOX ? new Map() : (G.__trifChannels || (Object.defineProperty(G, '__trifChannels', { value: new Map() }), G.__trifChannels));
+  D.addEventListener('trif:page-data-answer', (e) => { pageDataAnswer = typeof e.detail === 'string' ? e.detail : null; }, true);
+
+  const apiFor = (modId, powers) => {
     if (apis.has(modId)) return apis.get(modId);
-    const self = {};
+    // (its powers: docs/POWERS.md; what's not in this set it doesn't get, and a mod TRIF can't name gets none)
+    const grant = Array.isArray(powers) ? { powers, args: {} } : powers && typeof powers === 'object' ? powers : { powers: [], args: {} };
+    const self = { mod: modId, powers: new Set((Array.isArray(grant.powers) ? grant.powers : []).map(String)), args: grant.args && typeof grant.args === 'object' ? grant.args : {} };
+    const has = (p) => self.powers.has(p);
+    const needs = (p) => { if (!has(p)) fail(`that needs the ${p} power (// @powers ${p} in the mod's header, which the user approves)`); };
     apis.set(modId, self);
+    for (const p of self.powers) inPlay.add(p);
     // (a callback of the mod's: errors reported as its own, and stand-ins' listeners are its own)
     const call = (fn, ...args) => { const prev = current, t = now(); current = self; try { return fn(...args); } catch (e) { report(modId, e); return undefined; } finally { current = prev; stats.callbacks++; stats.callbackMs += now() - t; } };
     // TRIF's functions as the mod sees them: an error from the browser (a DOMException, say) is passed on
@@ -412,7 +638,7 @@ export function sandboxRuntime(mode, pageModId, pageFn) {
       if (!LISTEN.test(type)) fail(`listening for "${type}" isn't offered`);
       if (typeof fn !== 'function') fail('a listener must be a function');
       const capture = !!(opts && opts.capture);
-      const h = (e) => call(fn, eventOf(e));
+      const h = (e) => call(fn, eventOf(e, self.powers));
       target.addEventListener(type, h, { passive: !(opts && opts.preventDefault), capture });
       return harden(() => target.removeEventListener(type, h, { capture }));
     };
@@ -428,6 +654,7 @@ export function sandboxRuntime(mode, pageModId, pageFn) {
     const css = (text) => {
       const t = str(text, 'CSS', 500000);
       if (!cssOk(t)) fail('that CSS loads from an address (only data: is allowed), or has escapes outside strings');
+      if (READS_FIELDS.test(t)) fail('CSS can\'t select by the value attribute or :autofill (it would read what\'s typed in a field)');
       const st = styleSheet(t);
       return harden({ remove: () => st.remove() });
     };
@@ -478,8 +705,174 @@ export function sandboxRuntime(mode, pageModId, pageFn) {
       };
       return harden({ value: harden(value), save: guard(save) });
     };
+    // The `sound` power: Web Audio through TRIF's own small set of nodes (oscillators, gains, filters, delays,
+    // panners, noise and sounds from data: URLs), so no address, no microphone, no worklet, no page media.
+    let audio = null;
+    const audioApi = () => {
+      needs('sound');
+      if (audio) return audio;
+      const AC = G.AudioContext || G.webkitAudioContext;
+      if (!AC) fail('this browser has no Web Audio');
+      const ctx = new AC();
+      // (the browser starts it only after the user does something on the page: TRIF resumes it then)
+      const wake = () => { if (ctx.state === 'suspended') ctx.resume().catch(() => {}); };
+      for (const t of ['pointerdown', 'keydown']) G.addEventListener(t, wake, { capture: true, passive: true });
+      const nodeOfFacade = new WeakMap();
+      // (every function here guarded: a browser error, thrown or rejected, reaches the mod as plain text)
+      const clean = (e) => (e instanceof TypeError && /^TRIF sandbox: /.test(e.message) ? e : new TypeError(`TRIF sandbox: ${String(e && e.message ? e.message : e).slice(0, 500)}`));
+      const hardenAll = (o) => { for (const k of Object.keys(o)) { const d = Object.getOwnPropertyDescriptor(o, k); if (typeof d.value === 'function') { const fn = d.value; o[k] = function (...a) { let r; try { r = fn.apply(this, a); } catch (e) { throw clean(e); } return r && typeof r.then === 'function' ? r.then((x) => x, (e) => { throw clean(e); }) : r; }; } } return harden(o); };
+      const num = (v, what) => { if (typeof v !== 'number' || !Number.isFinite(v)) fail(`${what} must be a number`); return v; };
+      const when = (at) => (at === undefined ? ctx.currentTime : num(at, 'a time'));
+      const paramOf = (ap) => hardenAll({
+        get value() { return ap.value; },
+        set: (v, at) => { ap.setValueAtTime(num(v, 'a value'), when(at)); },
+        ramp: (v, at) => { ap.linearRampToValueAtTime(num(v, 'a value'), num(at, 'a time')); },
+        expRamp: (v, at) => { ap.exponentialRampToValueAtTime(num(v, 'a value'), num(at, 'a time')); },
+        target: (v, at, tc) => { ap.setTargetAtTime(num(v, 'a value'), when(at), num(tc, 'a time constant')); },
+        cancel: (at) => { ap.cancelScheduledValues(when(at)); },
+      });
+      const PARAMS = ['frequency', 'detune', 'gain', 'Q', 'delayTime', 'pan', 'playbackRate'];
+      const facade = (node) => {
+        const f = hardenAll({
+          connect: (to) => { node.connect(to === 'out' ? ctx.destination : (nodeOfFacade.get(to) || fail('connect takes another of this mod\'s sound nodes, or \'out\''))); return to; },
+          disconnect: () => { node.disconnect(); },
+          start: (at) => { if (typeof node.start !== 'function') fail('only sources start'); node.start(when(at)); },
+          stop: (at) => { if (typeof node.stop !== 'function') fail('only sources stop'); node.stop(when(at)); },
+          param: (name) => { str(name, 'a parameter', 40); if (!PARAMS.includes(name) || !node[name]) fail(`no ${name} here`); return paramOf(node[name]); },
+        });
+        nodeOfFacade.set(f, node);
+        return f;
+      };
+      const opt = (o) => (o && typeof o === 'object' ? o : {});
+      const buffers = new Map(); // data: URL -> decoded buffer
+      const decode = async (url) => {
+        const u = str(url, 'a sound', 20 * 1024 * 1024);
+        const m = /^data:audio\/[a-z0-9.+-]+(?:;[a-z-]+=[^;,]*)*;base64,([A-Za-z0-9+/=\s]+)$/i.exec(u);
+        if (!m) fail('sounds come from data:audio/…;base64 addresses only');
+        if (!buffers.has(u)) {
+          const bin = atob(m[1].replace(/\s+/g, ''));
+          const bytes = new Uint8Array(bin.length);
+          for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+          buffers.set(u, await ctx.decodeAudioData(bytes.buffer));
+        }
+        return buffers.get(u);
+      };
+      audio = hardenAll({
+        get now() { return ctx.currentTime; },
+        get state() { return ctx.state; },
+        resume: () => ctx.resume().then(() => ctx.state, () => ctx.state),
+        out: 'out',
+        oscillator: (o) => { const n = ctx.createOscillator(); o = opt(o); if (o.type !== undefined) n.type = str(o.type, 'a wave type', 20); if (o.frequency !== undefined) n.frequency.value = num(o.frequency, 'a frequency'); return facade(n); },
+        gain: (v) => { const n = ctx.createGain(); if (v !== undefined) n.gain.value = num(v, 'a gain'); return facade(n); },
+        filter: (o) => { const n = ctx.createBiquadFilter(); o = opt(o); if (o.type !== undefined) n.type = str(o.type, 'a filter type', 20); for (const k of ['frequency', 'Q', 'gain']) if (o[k] !== undefined) n[k].value = num(o[k], k); return facade(n); },
+        delay: (sec) => { const n = ctx.createDelay(5); if (sec !== undefined) n.delayTime.value = num(sec, 'a delay'); return facade(n); },
+        panner: (pan) => { const n = ctx.createStereoPanner(); if (pan !== undefined) n.pan.value = num(pan, 'a pan'); return facade(n); },
+        noise: (sec) => {
+          const len = Math.max(1, Math.min(ctx.sampleRate * 10, Math.round(ctx.sampleRate * num(sec === undefined ? 1 : sec, 'a length'))));
+          const b = ctx.createBuffer(1, len, ctx.sampleRate);
+          const d = b.getChannelData(0);
+          for (let i = 0; i < len; i++) d[i] = Math.random() * 2 - 1;
+          const n = ctx.createBufferSource(); n.buffer = b; return facade(n);
+        },
+        sound: async (url, o) => { const b = await decode(url); const n = ctx.createBufferSource(); n.buffer = b; o = opt(o); if (o.loop) n.loop = true; if (o.rate !== undefined) n.playbackRate.value = num(o.rate, 'a rate'); return facade(n); },
+        // the simple ones: a beep, and a sound played once
+        tone: (o) => {
+          o = opt(o);
+          const t0 = when(o.at), dur = num(o.duration === undefined ? 0.15 : o.duration, 'a duration'), vol = num(o.volume === undefined ? 0.2 : o.volume, 'a volume');
+          const osc = ctx.createOscillator(), g = ctx.createGain();
+          if (o.type !== undefined) osc.type = str(o.type, 'a wave type', 20);
+          osc.frequency.value = num(o.frequency === undefined ? 440 : o.frequency, 'a frequency');
+          g.gain.setValueAtTime(0, t0); g.gain.linearRampToValueAtTime(vol, t0 + 0.005); g.gain.linearRampToValueAtTime(0, t0 + dur);
+          osc.connect(g).connect(ctx.destination); osc.start(t0); osc.stop(t0 + dur + 0.02);
+        },
+        play: async (url, o) => {
+          const b = await decode(url); o = opt(o);
+          const n = ctx.createBufferSource(), g = ctx.createGain();
+          n.buffer = b; g.gain.value = num(o.volume === undefined ? 1 : o.volume, 'a volume');
+          n.connect(g).connect(ctx.destination); n.start(when(o.at));
+          return hardenAll({ stop: () => { try { n.stop(); } catch { /* done */ } }, duration: b.duration });
+        },
+      });
+      return audio;
+    };
     const trifApi = {
-      css, observe, text, settings,
+      css, observe, text, settings, audio: audioApi,
+      // site-data: filter the site's JSON responses whose address matches `glob` (* for anything)
+      filterResponse: (glob, fn) => {
+        needs('site-data');
+        str(glob, 'an address pattern', 500);
+        if (typeof fn !== 'function') fail('filterResponse takes a function');
+        const re = new RegExp('^' + glob.replace(/[.+?^${}()|[\]\\]/g, '\\$&').replace(/\*/g, '.*') + '$');
+        filters.push({ re, glob, call: (data, info) => call(fn, data, info), mod: modId });
+        listenForFilters();
+        announceFilters();
+      },
+      // search-box: TRIF's own box (the mod can place and style it, but not fill or read it); Enter, by the
+      // user, goes to the address in the header with what they typed
+      // go-to: one of the header's pages, or a link the page shows
+      goTo: (where) => {
+        needs('go-to');
+        partnersOk(self, 'go-to');
+        const p = str(where, 'a page', 2000);
+        const paths = self.args['go-to'] || [];
+        let abs = null;
+        if (paths.includes(p)) abs = new URL(p, location.href).href;
+        else { try { const u = new URL(p, location.href); if (u.origin === ORIGIN && shownLink(u.href)) abs = u.href; } catch { /* not an address */ } }
+        if (!abs) fail(`"${p.slice(0, 80)}" isn't one of the header's pages (${paths.join(', ') || 'none'}), or a link to this site that the page shows`);
+        location.assign(abs);
+      },
+      // mods: a channel between this page's boxed mods, through TRIF only (never the page's DOM)
+      channel: (name) => {
+        needs('mods');
+        const nm = str(name, 'a channel name', 100);
+        const ch = channels.get(nm) || new Set();
+        channels.set(nm, ch);
+        const me = { mod: modId, call, fns: new Set() };
+        ch.add(me);
+        return harden({
+          send: (data) => {
+            // (plain data only: text, numbers, true/false, null, and arrays and plain objects of those; no
+            // functions or stand-ins, which JSON would drop or turn into {} without a word)
+            const plain = (v, depth) => {
+              if (depth > 50) fail('a message is nested too deep');
+              if (v === null || typeof v === 'string' || typeof v === 'boolean' || (typeof v === 'number' && Number.isFinite(v))) return;
+              if (Array.isArray(v)) { for (const x of v) plain(x, depth + 1); return; }
+              const pr = typeof v === 'object' ? Object.getPrototypeOf(v) : undefined;
+              if (pr !== Object.prototype && pr !== null) fail('a message is plain data: text, numbers, true/false, null, arrays and plain objects (no functions or elements)');
+              for (const k of Object.keys(v)) plain(v[k], depth + 1);
+            };
+            plain(data, 0);
+            const text = JSON.stringify(data);
+            if (text.length > 256 * 1024) fail('a message is up to 256 KB');
+            for (const other of ch) if (other !== me) for (const f of other.fns) setTimeout(() => other.call(f, JSON.parse(text), harden({ from: modId })), 0);
+          },
+          on: (fn) => { if (typeof fn !== 'function') fail('on takes a function'); me.fns.add(fn); return harden(() => { me.fns.delete(fn); }); },
+        });
+      },
+      searchBox: (o) => {
+        needs('search-box');
+        const tmpl = (self.args['search-box'] || [])[0];
+        if (!tmpl) fail('the search-box power needs its address in the header: @powers search-box https://…{query}');
+        const host = D.createElement('div');
+        created.add(host);
+        trifBoxes.add(host);
+        const root = host.attachShadow({ mode: 'closed' });
+        const input = D.createElement('input');
+        input.type = 'search';
+        input.setAttribute('autocomplete', 'off');
+        input.setAttribute('aria-label', 'Search');
+        const ph = o && typeof o === 'object' && typeof o.placeholder === 'string' ? o.placeholder.slice(0, 100) : '';
+        if (ph) input.placeholder = ph;
+        input.style.cssText = 'all: unset; box-sizing: border-box; width: 100%; font: inherit; color: inherit; padding: 0.4em 0.6em; border: 1px solid currentColor; border-radius: 0.4em;';
+        trifBoxes.add(input);
+        input.addEventListener('keydown', (e) => {
+          if (e.key !== 'Enter' || !e.isTrusted || !input.value.trim()) return;
+          e.preventDefault();
+          location.assign(tmpl.replace('{query}', encodeURIComponent(input.value.trim())));
+        });
+        root.append(input);
+        return wrap(host);
+      },
       hide: (sel) => css(`${selectorOk(sel)} { display: none !important; }`),
       log: logTo(modId, 'log'), warn: logTo(modId, 'warn'), error: logTo(modId, 'error'),
     };
@@ -499,8 +892,10 @@ export function sandboxRuntime(mode, pageModId, pageFn) {
       findAll: (sel) => list(qsa(D, str(sel, 'a selector', 2000))),
       create(tag) {
         const t = str(tag, 'a tag', 40).toLowerCase();
-        if (!TAGS.has(t)) fail(`<${t}> elements aren't offered`);
+        if (CONTROL_TAGS.has(t) && t !== 'label') needs('controls');
+        if (!TAGS.has(t) && !CONTROL_TAGS.has(t)) fail(`<${t}> elements aren't offered`);
         const n = D.createElement(t);
+        if (t === 'input') { n.setAttribute('type', 'text'); n.setAttribute('autocomplete', 'off'); }
         // (a button that never submits a form, whatever it's in: its type isn't offered to change)
         if (t === 'button') n.setAttribute('type', 'button');
         created.add(n);
@@ -516,7 +911,7 @@ export function sandboxRuntime(mode, pageModId, pageFn) {
   // the same object for every mod, so which mod listens is the one whose code is running (`current`).
   // (code after an await runs outside both: then the mod is the one in the call stack, by its sourceURL)
   const modFromStack = () => { const m = /trif-sandbox:\/\/([^\s/]+\/[^\s/:)]+?)\.js/.exec(String(stackOf(new Error()) || '')); return m ? m[1] : null; };
-  const cur = () => current || apiFor(modFromStack() || '(a sandboxed mod)');
+  const cur = () => current || apiFor(modFromStack() || '(a boxed mod)');
   // (each method guarded: a browser error reaches the mod as plain text)
   const guardShared = (fn) => function (...args) {
     try { return fn.apply(this, args); } catch (e) {
@@ -545,30 +940,86 @@ export function sandboxRuntime(mode, pageModId, pageFn) {
   const classesOf = new WeakMap();
   const protoDef = {
     get tag() { return nodeOf(this).localName; },
-    get text() { return visibleText(nodeOf(this)); },
+    get text() { const n = nodeOf(this); return cur().powers.has('read-drafts') ? n.textContent : visibleText(n); },
     setText(t) {
       const n = nodeOf(this);
       if (isRaw(n)) fail(`text can't be written into <${n.localName}>`);
+      notInEditor(n, 'writing text');
       detachOk(n, true);
-      n.textContent = str(t, 'text');
+      str(t, 'text');
+      if (inEditor(n)) editorWrite(n, (rg) => rg.setEnd(n, 0), n.textContent.length, t);
+      n.textContent = t;
+      wrote(n);
     },
-    attr(name) { const n = nodeOf(this); str(name, 'an attribute name', 100); return insideEditor(n) ? null : n.getAttribute(name); },
+    // (a field's value attribute: null, as React keeps it in step with what's typed: audit AU-2; read-drafts
+    // reads fields through .value, and attributes inside editors)
+    attr(name) { const n = nodeOf(this); str(name, 'an attribute name', 100); return (insideEditor(n) && !cur().powers.has('read-drafts')) || (/^value$/i.test(name) && /^(input|textarea|select|option)$/.test(n.localName)) ? null : n.getAttribute(name); },
+    // A field's value: the mod's own controls (`controls`), or what the user typed in the page's fields and
+    // editors (`read-drafts`; never a password or card field, nor a hidden one: that's the site's, not typed)
+    get value() {
+      const n = nodeOf(this);
+      if (created.has(n) && /^(input|select|option)$/.test(n.localName)) return String(n.value);
+      if (!isField(n)) fail(`<${n.localName}> has no value`);
+      if (!cur().powers.has('read-drafts')) fail('reading what\'s typed in the page needs the read-drafts power (// @powers read-drafts)');
+      if (secretField(n)) fail('password and card fields stay hidden, whatever the mod\'s powers');
+      if (n.localName === 'input' && /^(hidden|file|submit|button|reset|image)$/i.test(String(n.type))) fail(`a ${n.type} input isn't something the user typed`);
+      return n.isContentEditable ? n.textContent : String(n.value);
+    },
+    setValue(v) {
+      const n = nodeOf(this);
+      const val = str(String(v), 'a value', 100000);
+      if (created.has(n) && /^(input|select)$/.test(n.localName)) { n.value = val; return; }
+      // write-drafts: what the user typed in the page's text fields and editors, changed before they post it;
+      // never a password or card field, nor one the user doesn't type in
+      if (!isField(n)) fail(`<${n.localName}> has no value`);
+      if (!draftsOk(cur())) fail('changing what the user typed needs the write-drafts power (// @powers write-drafts)');
+      if (secretField(n)) fail('password and card fields stay the user\'s, whatever the mod\'s powers');
+      if (n.localName === 'select' || (n.localName === 'input' && !/^(text|search|email|url|tel|)$/i.test(String(n.type)))) fail(`a ${n.localName === 'select' ? 'select' : `${n.type} input`} isn't a text the user types`);
+      if (n.isContentEditable) editorWrite(n, (rg) => rg.setEnd(n, 0), n.textContent.length, val);
+      else noNewAddress(n.value, val);
+      draftWriters.add(cur().mod);
+      if (n.isContentEditable) { n.textContent = val; } else {
+        // (through the element's own value setter, and an input event, so the page's code sees the change)
+        const proto = n.localName === 'textarea' ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype;
+        Object.getOwnPropertyDescriptor(proto, 'value').set.call(n, val);
+      }
+      n.dispatchEvent(new Event('input', { bubbles: true }));
+    },
+    // page-data: the page's own data behind this element (React props and fiber), by a path, as a plain copy
+    pageData(path) {
+      const n = nodeOf(this);
+      if (!cur().powers.has('page-data')) fail('the page\'s data needs the page-data power (// @powers page-data)');
+      const pth = str(path === undefined ? '' : path, 'a path', 500);
+      if (!/^[\w$.]*$/.test(pth)) fail('a path is names with dots between them (props.post.text)');
+      pageDataAnswer = null;
+      n.dispatchEvent(new CustomEvent('trif:page-data', { detail: pth }));
+      const a = pageDataAnswer;
+      pageDataAnswer = null;
+      if (a === null) return null;
+      try { return JSON.parse(a); } catch { return null; }
+    },
+    get checked() { const n = nodeOf(this); return n.localName === 'input' ? !!n.checked : false; },
+    setChecked(on) { const n = nodeOf(this); if (!created.has(n) || n.localName !== 'input') fail('setChecked is for the mod\'s own checkboxes'); n.checked = !!on; },
     setAttr(name, value) {
       const node = nodeOf(this);
       const n = str(name, 'an attribute name', 100).toLowerCase(), v = str(String(value), 'a value', 200000);
+      notInEditor(node, 'changing attributes');
+      // (the mod's own controls: their few attributes; autocomplete and name never)
+      if (created.has(node) && CONTROL_TAGS.has(node.localName) && controlAttrOk(node, n, v)) { node.setAttribute(n, v); return; }
       if (!nameOk(n)) fail(nameRefused(n));
       if (ATTR_TAGS[n] && (!ATTR_TAGS[n].has(node.localName) || node.namespaceURI !== HTML_NS)) fail(`${n} isn't offered on <${node.localName}>`);
       if (n === 'id' || n === 'class') {
-        if (!ownTokens(v) || (n === 'id' && /\s/.test(v.trim()))) fail(`${n === 'id' ? 'an id' : 'classes'} must start with trif- (the page's own code finds elements by ${n})`);
+        if (!ownTokens(v) || (n === 'id' && /\s/.test(v.trim()))) fail(`${n === 'id' ? 'an id' : 'classes'} must start with trif-box- (the page's own code, or a free mod, finds elements by ${n})`);
         // (the page's own id or classes stay theirs: a mod adds its classes with classes.add)
-        if (!created.has(node) && node.hasAttribute(n) && !ownTokens(node.getAttribute(n))) fail(`the page's own ${n} isn't a mod's to replace${n === 'class' ? ' (classes.add adds a trif- class)' : ''}`);
+        if (!created.has(node) && node.hasAttribute(n) && !ownTokens(node.getAttribute(n))) fail(`the page's own ${n} isn't a mod's to replace${n === 'class' ? ' (classes.add adds a trif-box- class)' : ''}`);
       }
-      if ((n === 'href' || n === 'src') && !urlOk(v, n)) fail(`${n} only takes this site's own addresses without a query${n === 'src' ? ', or data:/blob: images' : ''}`);
+      if ((n === 'href' || n === 'src') && !urlOk(v, n)) fail(n === 'src' ? 'src only takes data:/blob: images, or the address of an image the page already shows' : 'href only takes #somewhere, or an address a link on the page already has');
       node.setAttribute(n, v);
     },
     removeAttr(name) {
       const n = str(name, 'an attribute name', 100).toLowerCase();
       const node = nodeOf(this);
+      notInEditor(node, 'changing attributes');
       if (!nameOk(n)) fail(nameRefused(n));
       if ((n === 'id' || n === 'class') && !created.has(node) && node.hasAttribute(n) && !ownTokens(node.getAttribute(n))) fail(`the page's own ${n} isn't a mod's to remove`);
       // (as for setting: an attribute only where it's offered, so not a form field's value)
@@ -579,8 +1030,8 @@ export function sandboxRuntime(mode, pageModId, pageFn) {
       const node = nodeOf(this);
       let c = classesOf.get(node);
       if (!c) {
-        // (a mod adds, removes and toggles only its own trif- classes; it can read any)
-        const cls = (x) => { str(x, 'a class', 200); if (!OWN_NAME.test(x)) fail(`classes a mod sets must start with trif- (the page's own code acts on classes like "${x.slice(0, 60)}")`); return x; };
+        // (a mod adds, removes and toggles only its own trif-box- classes; it can read any)
+        const cls = (x) => { str(x, 'a class', 200); notInEditor(node, 'changing classes'); if (!OWN_NAME.test(x)) fail(`classes a boxed mod sets must start with trif-box- (the page's own code, or a free mod, acts on classes like "${x.slice(0, 60)}")`); return x; };
         c = harden({
           add: guardShared((...x) => node.classList.add(...x.map(cls))),
           remove: guardShared((...x) => node.classList.remove(...x.map(cls))),
@@ -606,24 +1057,47 @@ export function sandboxRuntime(mode, pageModId, pageFn) {
     show() { nodeOf(this).style.removeProperty('display'); },
     find(sel) { return wrap(qs(nodeOf(this), str(sel, 'a selector', 2000))); },
     findAll(sel) { return list(qsa(nodeOf(this), str(sel, 'a selector', 2000))); },
-    closest(sel) { const n = nodeOf(this); str(sel, 'a selector', 2000); try { return wrap(n.closest(sel)); } catch { return fail(`"${sel.slice(0, 80)}" isn't a valid selector`); } },
-    matches(sel) { const n = nodeOf(this); str(sel, 'a selector', 2000); try { return n.matches(sel); } catch { return fail(`"${sel.slice(0, 80)}" isn't a valid selector`); } },
+    closest(sel) { const n = nodeOf(this); selCheck(sel); try { return wrap(n.closest(sel)); } catch { return fail(`"${sel.slice(0, 80)}" isn't a valid selector`); } },
+    matches(sel) { const n = nodeOf(this); selCheck(sel); try { return n.matches(sel); } catch { return fail(`"${sel.slice(0, 80)}" isn't a valid selector`); } },
     get parent() { return wrap(nodeOf(this).parentElement); },
     get children() { return list(nodeOf(this).children); },
     get next() { return wrap(nodeOf(this).nextElementSibling); },
     get previous() { return wrap(nodeOf(this).previousElementSibling); },
     get created() { return created.has(nodeOf(this)); },
-    append(...kids) { const n = nodeOf(this); const k = kids.map(kidOf); textInto(n, k); n.append(...k); },
-    prepend(...kids) { const n = nodeOf(this); const k = kids.map(kidOf); textInto(n, k); n.prepend(...k); },
-    before(...kids) { const n = nodeOf(this); const k = kids.map(kidOf); if (n.parentNode) textInto(n.parentNode, k); n.before(...k); },
-    after(...kids) { const n = nodeOf(this); const k = kids.map(kidOf); if (n.parentNode) textInto(n.parentNode, k); n.after(...k); },
-    remove() { const n = nodeOf(this); detachOk(n, false); n.remove(); },
+    append(...kids) { const n = nodeOf(this); notInEditor(n, 'adding'); const k = kids.map(kidOf); textInto(n, k); if (inEditor(n)) editorWrite(n, (rg) => rg.setEnd(n, n.childNodes.length), 0, k.map((x) => x.textContent).join('')); n.append(...k); wrote(n); },
+    prepend(...kids) { const n = nodeOf(this); notInEditor(n, 'adding'); const k = kids.map(kidOf); textInto(n, k); if (inEditor(n)) editorWrite(n, (rg) => rg.setEnd(n, 0), 0, k.map((x) => x.textContent).join('')); n.prepend(...k); wrote(n); },
+    before(...kids) { const n = nodeOf(this); notInEditor(n.parentElement, 'adding'); const k = kids.map(kidOf); if (n.parentNode) textInto(n.parentNode, k); if (inEditor(n.parentElement)) editorWrite(n.parentElement, (rg) => rg.setEndBefore(n), 0, k.map((x) => x.textContent).join('')); n.before(...k); wrote(n.parentElement); },
+    after(...kids) { const n = nodeOf(this); notInEditor(n.parentElement, 'adding'); const k = kids.map(kidOf); if (n.parentNode) textInto(n.parentNode, k); if (inEditor(n.parentElement)) editorWrite(n.parentElement, (rg) => rg.setEndAfter(n), 0, k.map((x) => x.textContent).join('')); n.after(...k); wrote(n.parentElement); },
+    remove() { const n = nodeOf(this); notInEditor(n, 'removing'); detachOk(n, false); if (inEditor(n.parentElement)) editorWrite(n.parentElement, (rg) => rg.setEndBefore(n), n.textContent.length, ''); n.remove(); wrote(n.parentElement || n); },
     // a copy of this element and what's inside it, keeping only allowed elements and attributes (an element
     // of another kind is left out, with what's inside it; other attributes are dropped)
     clone() { return wrap(safeCopy(nodeOf(this))); },
     rect() { const r = nodeOf(this).getBoundingClientRect(); return harden({ x: r.x, y: r.y, width: r.width, height: r.height, top: r.top, left: r.left, right: r.right, bottom: r.bottom }); },
     on(type, fn, opts) { const n = nodeOf(this); return cur().listen(n, type, fn, opts); },
-    canvas() { const n = nodeOf(this); if (n.localName !== 'canvas') fail('canvas() is for <canvas> elements'); return ctxOf(n); },
+    // (only the mod's own: a page's canvas may be a signature pad or a drawing the page uploads: audit AU-6)
+    // media: the page's own audio and video
+    play() { const n = mediaOf(this); const p = n.play(); return p && typeof p.then === 'function' ? p.then(() => true, () => false) : true; },
+    pause() { mediaOf(this).pause(); },
+    setMuted(on) { mediaOf(this).muted = !!on; },
+    setVolume(v) { if (typeof v !== 'number' || !(v >= 0 && v <= 1)) fail('a volume is from 0 to 1'); mediaOf(this).volume = v; },
+    seek(t) { if (typeof t !== 'number' || !Number.isFinite(t) || t < 0) fail('seek takes a time in seconds'); mediaOf(this).currentTime = t; },
+    get media() { const n = nodeOf(this); return /^(video|audio)$/.test(n.localName) && cur().powers.has('media') ? harden({ paused: n.paused, muted: n.muted, volume: n.volume, currentTime: n.currentTime, duration: Number.isFinite(n.duration) ? n.duration : null }) : null; },
+    // click: only what the header names, never something that submits or a link to another site
+    click() {
+      const n = nodeOf(this);
+      const api = cur();
+      if (!api.powers.has('click')) fail('clicking for the user needs the click power, with what it may click named in the header (// @click words: selector)');
+      const named = (api.args.click || []).map((c) => String(c).replace(/^[^:]*:\s*/, '')).filter(Boolean);
+      let ok = false;
+      for (const sel of named) { try { if (n.matches(sel)) { ok = true; break; } } catch { /* not a selector */ } }
+      if (!ok) fail('that isn\'t one of the things the header says this mod may click');
+      clickOk(api);
+      if (submits(n)) fail('a click that would submit or reset a form isn\'t offered, whatever the header says');
+      const a = n.closest('a[href], area[href]');
+      if (a) { let u = null; try { u = new URL(a.href); } catch { /* none */ } if (!u || u.origin !== ORIGIN) fail('a click on a link to another site isn\'t offered'); }
+      n.click();
+    },
+    canvas() { const n = nodeOf(this); if (n.localName !== 'canvas') fail('canvas() is for <canvas> elements'); if (!created.has(n)) fail('canvas() is for canvases the mod made'); return ctxOf(n); },
   };
   const protoOut = {};
   for (const [k, d] of Object.entries(Object.getOwnPropertyDescriptors(protoDef))) {
@@ -633,9 +1107,9 @@ export function sandboxRuntime(mode, pageModId, pageFn) {
 
   // ---- running a mod
   const SANDBOX_GLOBALS_PAGE = ['page', 'trif', 'console', 'setTimeout', 'clearTimeout', 'setInterval', 'clearInterval', 'requestAnimationFrame', 'cancelAnimationFrame'];
-  const run = (modId, source) => {
+  const run = (modId, source, powers) => {
     const id = String(modId);
-    const api = apiFor(id);
+    const api = apiFor(id, powers);
     const prev = current, t = now();
     current = api;
     try {
@@ -663,7 +1137,7 @@ export function sandboxRuntime(mode, pageModId, pageFn) {
       stats.mods[id] = { at: t, runMs: now() - t };
     }
   };
-  if (!SANDBOX) { run(pageModId, pageFn); return; }
+  if (!SANDBOX) { run(pageModId, pageFn, pagePowers); return; }
   // (a promise a mod left rejected: reported as that mod's, by the stack)
   try {
     G.addEventListener('unhandledrejection', (ev) => {
@@ -677,5 +1151,5 @@ export function sandboxRuntime(mode, pageModId, pageFn) {
   Object.defineProperty(G, '__trifSandbox', { value: Object.freeze({ run, errors: store.errors, logs: store.logs, stats }), configurable: false, writable: false });
   // (mods that came before the runtime)
   const queued = G.__trifSandboxQueue;
-  if (Array.isArray(queued)) { G.__trifSandboxQueue = null; for (const [id, source] of queued) run(id, source); }
+  if (Array.isArray(queued)) { G.__trifSandboxQueue = null; for (const [id, source, powers] of queued) run(id, source, powers); }
 }

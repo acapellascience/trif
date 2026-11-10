@@ -1,5 +1,9 @@
 # Design note: mods that can't act (a safe tier)
 
+Names (Nov 10): people see the tiers as **style mods** (this note's "rules"), **boxed mods** ("sandboxed")
+and **free mods** ("page"); headers `@style` and `@boxed` (the old `@rules` and `@sandboxed` still work).
+The code, storage and protocol keep rules / sandboxed / page.
+
 Status: **rules: built** (main). **Sandboxed: built on the `sandbox-tier` branch** (Chrome and Firefox;
 see "Sandboxed: what's built" below; spikes on `sandbox-spike` and `sandbox-standin`). `trif.filterResponse`
 and themes: not built. Follows docs/SECURITY.md (0.3), which reads each mod's code (powers.js) and
@@ -61,7 +65,7 @@ executed by TRIF's runtime:
 - CSS gets the same treatment as themes would: no `url()` to other sites (or only to the mod's own
   site), no `@import`, so a rule can't send what the page shows anywhere (attribute selectors plus
   `background: url()` can leak values otherwise).
-- The runtime re-applies rules as the page changes (one shared observer for all rules mods), which is
+- The runtime re-applies rules as the page changes (one shared observer for all style mods), which is
   what most hiding mods hand-roll today.
 
 ## Sandboxed: the world (the design; what's built is below)
@@ -92,7 +96,7 @@ That world shares the page's DOM but has its own JavaScript globals, so TRIF con
 - **What it keeps:** the DOM (read and change), CSS, MutationObserver, canvas, Web Audio, timers and
   requestAnimationFrame, `localStorage` (the page's, shared: fine for settings), and the TRIF API.
 
-The world's guards are TRIF's code, tested like tablock.js: an e2e "hostile sandboxed mod" that tries
+The world's guards are TRIF's code, tested like tablock.js: an e2e "hostile boxed mod" that tries
 every escape above and must fail at each.
 
 ## The TRIF API (for both tiers)
@@ -113,7 +117,7 @@ What the hand-rolled patterns become, so mods don't need the page's powers for t
 
 - **Browsers:** `worldId` and `configureWorld` are Chrome 133+; Firefox's userScripts has worlds and
   `configureWorld` but per-mod worlds and CSP support need checking; Safari's userScripts is TRIF's own
-  adapter (safari.js) and would need its own sandbox. A browser that can't sandbox runs sandboxed mods
+  adapter (safari.js) and would need its own sandbox. A browser that can't sandbox runs boxed mods
   as page mods behind review (never silently unsandboxed).
 - **Performance:** a wrapped DOM in the world costs something; measure on X's timeline with the feed
   mods.
@@ -138,6 +142,17 @@ What the hand-rolled patterns become, so mods don't need the page's powers for t
 5. **Themes / shared styling** on top of rules (closed-world tokens, as discussed: no free text, no
    code).
 
+## The rule behind the guards
+
+**A boxed mod may only name things that are its own, or copy addresses the page already has.** Its ids,
+classes and data attributes are `trif-box-` ones; the page's own names, and other mods', aren't its to set or
+change; an address it puts on an image or a link is one the page already shows; what it writes goes into its
+own elements, never into the page's forms or editors (write-drafts, the one exception, below). Each fix since the red team is this rule applied to
+one more place the page's own code (or a free mod) reads. Every new piece of API, and every power
+(docs/POWERS.md), is checked against it: a power that lets a mod name something of the page's, or an
+address the page doesn't have, is a hole unless it's the power's whole point and narrowed (click names
+declared selectors; go-to declared paths).
+
 ## Sandboxed: what's built (branch sandbox-tier)
 
 Built on the stand-in design proved on the `sandbox-standin` branch (its notes there: "Stand-in design"):
@@ -145,15 +160,15 @@ not a full browser world with the dangerous parts removed, but an empty one with
 notes, decisions and open questions: docs/SANDBOX-TIER-NOTES.md.
 
 **Format.** `// @sandboxed` in the header (helper/lib/mods.js; `sandboxed: true` on the Mod). Never held
-for its code (held.js), like a rules mod. `trif check` lists what the sandbox wouldn't give it, as a lint
+for its code (held.js), like a style mod. `trif check` lists what the sandbox wouldn't give it, as a lint
 (helper/lib/sandboxlint.js); `trif new --sandboxed`; `trif mods`/`status` say so.
 
 **The world** (extension/sandbox.js). TRIF's userScripts world `trif-sandbox`, configured once per
 background start with its own CSP (`connect-src 'none'`, loads only from data:/blob: and, for images, the
 page's site; 'unsafe-eval' only for SES's evaluator) and messaging for TRIF's own code (settings). Where any
-sandboxed mod runs, `trif-sandbox-runtime` loads SES (ses 2.3.0, Apache-2.0, extension/vendor, the npm
+boxed mod runs, `trif-sandbox-runtime` loads SES (ses 2.3.0, Apache-2.0, extension/vendor, the npm
 file byte for byte) and runs `lockdown()` once per page; each mod is evaluated in a Compartment of its own,
-inside an async function. One world for all sandboxed mods, a compartment each (a world per mod would load
+inside an async function. One world for all boxed mods, a compartment each (a world per mod would load
 SES and lock down again per mod per page).
 
 **What a mod has**: the language (frozen) and `page`, `trif`, `console`, the timers, `Math`, `Date`; no
@@ -163,12 +178,12 @@ a WeakMap), with allowlisted operations. The TRIF API: `trif.css`, `trif.hide`, 
 `trif.text` (one MutationObserver for every mod in the world), `trif.settings(key, defaults)` (per mod and
 per site, in the extension's storage, not the site's), `trif.log/warn/error`. Errors are caught (top level,
 callbacks, after an await) and kept in the world for `trif errors` / `trif logs`, which read them with
-`userScripts.execute`. The API in full: TECHNIQUES.md "Sandboxed mods".
+`userScripts.execute`. The API in full: TECHNIQUES.md "Boxed mods".
 
 **The guards, as built** (each tried by the hostile e2e, below):
 - network: no fetch/XHR/WebSocket/EventSource/beacon/Worker in the compartment; the world's CSP; images only
   data:/blob: or an address an image on the page already shows; links only this site's pages without a
-  query; CSS only if it loads nothing (rules mods' check); no `<link>`, `<script>`, `<iframe>`, `<object>`,
+  query; CSS only if it loads nothing (style mods' check); no `<link>`, `<script>`, `<iframe>`, `<object>`,
   `<embed>`, `<form>`, `<input>`, `<style>`, `<svg>`, media...;
 - code from strings: none in the compartment; timers take functions; no `on*` attributes, `javascript:`,
   `srcdoc`, `innerHTML`; no text written into `<script>`/`<style>` (an empty script the page made would run
@@ -179,9 +194,16 @@ callbacks, after an await) and kept in the world for `trif errors` / `trif logs`
 - synthetic input: stand-ins have no click/dispatchEvent/focus/submit; no event constructors;
 - navigation: no location/open/history; no `target` attribute; no clicks;
 - clipboard, cookies, storage, postMessage: none of navigator, document, localStorage, postMessage;
-- the page's own code as the messenger (red team, RT-1): names a mod gives are TRIF's (`data-trif-*`, `trif-`
-  ids and classes; the page's own ids and classes aren't a mod's to change), so htmx, Turbo, Stimulus and the
-  like find nothing to act on; copies keep none of the page's;
+- the page's own code as the messenger (red team, RT-1; audit AU-3): names a mod gives are its own
+  (`data-trif-box-*`, `trif-box-` ids and classes; not plain `trif-`, which free mods use and act on; the
+  page's own ids and classes aren't a mod's to change), so htmx, Turbo, Stimulus, the like and free mods
+  find nothing to act on; copies keep none of the page's;
+- the audit (AU-1 to AU-9, branch sandbox-fixes-3): no writing into editors (text, elements, attributes,
+  classes, removing; restyling stays); `attr('value')` null on fields, and no selector (anywhere, `trif.css`
+  included) naming the `value` attribute or `:autofill`, or with a `\` escape; a select's options and
+  custom elements (possible form fields) stay where they are in forms; `canvas()` only on the mod's own;
+  a link only to `#…` or an address a link on the page already has (speculation rules and prefetchers fetch
+  links with no click: tests/e2e/scenario.js specRulesCheck); `open` only on `<details>`;
 - forms (RT-2): a mod's buttons are `type="button"` and never inside a form; the page's fields stay in the
   form they're in;
 - forms, round 2 (RT-10): nor can a mod remove a page field, or what holds it, or write over it, or take off
@@ -199,9 +221,9 @@ something else (clickjacking, RT-3). Wording and a mitigation are proposed in do
 - Firefox (153+; tested on 159): the same sandbox, and the hostile e2e passes as in Chrome (SES locks down
   in Firefox's user script sandbox; its world CSP governs eval). Two quirks of its messaging, handled:
   docs/SANDBOX-TIER-NOTES.md "Browsers".
-- Safari: no such world (TRIF's own adapter, extension/safari.js). Each sandboxed mod waits for the user's
+- Safari: no such world (TRIF's own adapter, extension/safari.js). Each boxed mod waits for the user's
   OK, in the extension (`sandboxFallback` in lib.js: held by 'sandbox', with the reason), and once allowed
-  runs as a page script with the same API (sandbox.js `sandboxPageCode`), in the Page scripts group. Never
+  runs as a free mod with the same API (sandbox.js `sandboxPageCode`), in the Free mods group. Never
   silently unsandboxed. The same applies to any browser whose `configureWorld` fails.
 
 **The hostile e2e** (tests/e2e/scenario.js `sandboxedCheck`, fixture tests/e2e/fixtures/sandbox-hostile.js):
@@ -210,15 +232,15 @@ addresses, the page must notice nothing (its own listeners for clicks, keys, sub
 code), its prototypes, form, script, style, link and image must be as they were, and the tab must stay where
 it was with no new tab. Plus a good mod (restyle, hide, add, text now and later, observe, canvas, timers,
 frames, a copy of a page image, listening, settings across a reload), errors and logs, the two sample ports
-(examples/sandboxed), and the panel's group switch. Results: docs/SANDBOX-TIER-NOTES.md "Measurements".
+(examples/boxed), and the panel's group switch. Results: docs/SANDBOX-TIER-NOTES.md "Measurements".
 
-**Not built**: `trif.filterResponse` (the data filters stay page scripts), themes.
+**Not built**: `trif.filterResponse` (the data filters stay free mods), themes.
 
-## Design (not built): `trif.filterResponse` for sandboxed mods
+## Design (not built): `trif.filterResponse` for boxed mods
 
 The data filters (Detox Timeline and the Instagram and Facebook feed filters) patch the page's `fetch` and
-`XMLHttpRequest` and rewrite what comes back. That needs the page's world, so they're page scripts today. A
-sandboxed mod could do the same job if TRIF did the patching and only handed it the data:
+`XMLHttpRequest` and rewrite what comes back. That needs the page's world, so they're free mods today. A
+boxed mod could do the same job if TRIF did the patching and only handed it the data:
 
 ```js
 // a sandboxed mod
@@ -232,7 +254,7 @@ trif.filterResponse('https://x.com/i/api/graphql/*/HomeTimeline*', (data, { url 
 
 **How it would work.**
 - TRIF's page runtime (runtime.js, in the page's world, TRIF's own code) wraps `fetch` and
-  `XMLHttpRequest` once, the way the recorder already does, on pages where a sandboxed mod has asked to
+  `XMLHttpRequest` once, the way the recorder already does, on pages where a boxed mod has asked to
   filter (the registration carries the mods' URL patterns, so nothing is wrapped elsewhere).
 - A response whose URL matches is read as text (JSON only; capped, like the recorder's 2 MB), and handed to
   TRIF's sandbox world **synchronously**, through a DOM event on a node only TRIF's two runtimes know about:
@@ -252,7 +274,7 @@ mod can't use the channel to reach anything: the reply goes to the page that alr
 event name, random per registration, is visible to the page once used (it can tell TRIF filters it, as it
 can today from the patched `fetch`).
 
-**What stays a page script.** Rewriting requests (Detox Timeline's "Recent" sort changes the request's
+**What stays a free mod.** Rewriting requests (Detox Timeline's "Recent" sort changes the request's
 variables): it changes what the site receives. A later `trif.rewriteRequest(urlPattern, {params})` could
 take a declared, checked list of changes; until then that part is a reviewed power.
 
@@ -266,3 +288,143 @@ response (3,000 items) took 1.3 ms (Chrome) and about 1 ms (Firefox, 1 ms timer)
 parse and stringify included. Not tried: the wrapping itself (fetch's `Response`, XHR's getters, as Detox
 Timeline does), X's real responses, and streamed ones (NDJSON, server-sent events), which a text read would
 hold open: those would be left alone.
+
+## Powers (branch powers): named exceptions for boxed mods
+
+Design: docs/POWERS.md. A boxed mod may ask for powers from a fixed menu (`// @powers sound, read-drafts`);
+none of them sends anything. The helper reads them from the header (helper/lib/boxpowers.js), holds the mod
+until the user approves that *set* (held.js keys `power:<name>`: an update with the same powers runs, a new
+power waits for itself; `controls` and `mods` are listed but never hold alone), and passes the set to the
+extension with the mod; the sandbox (extension/sandbox.js) gives each mod what its set grants and refuses
+the rest. All twelve are built (phases 1 to 3); phase 1's, with what each gives:
+- `sound`: `trif.audio()`, TRIF's facade over Web Audio (oscillators, gains, filters, delays, panners,
+  noise, sounds decoded from `data:audio/…;base64`): no address, no microphone, no worklet, no page media;
+  browser errors reach the mod as plain TypeErrors.
+- `controls`: the mod's own `input` (range, color, checkbox, number, text; autocomplete off, set by TRIF),
+  `select`, `option`, `label`; no type=password, `autocomplete` or `name`; never inside one of the page's
+  forms; `.value`/`setValue`, `.checked`/`setChecked` on its own only.
+- `keys`: key and code wherever the focus is, except in fields and editors (accepting that a field in a
+  closed shadow root can't be told apart).
+- `read-drafts`: `.value` of the page's text fields, textareas and selects (not hidden, file or button
+  inputs), `.text` of editors and attributes inside them, `data` on input events, keys in fields; password
+  and card fields (`type=password`, `autocomplete` cc-*, current-password, new-password, one-time-code)
+  never.
+Each is tested both ways in the e2e (tests/e2e/scenario.js powersCheck, powers2Check, powers3Check): it
+works when declared, and is refused (or empty) when not.
+
+**The powers against the rule** ("a boxed mod may only name things that are its own, or copy addresses the
+page already has"):
+- `sound`: names nothing of the page's; sounds only from `data:` the mod carries. Fits.
+- `controls`: the mod's own inputs, with its own `trif-box-` names (a label's `for` only a `trif-box-` id),
+  never `name` or `autocomplete`, never inside the page's forms. Fits.
+- `keys`, `read-drafts`: reads only; they name nothing and write nothing (`setValue` only on the mod's own
+  controls; `attr('value')` stays null on the page's fields, `.value` is the read). Fits.
+- `site-data` (built): the mod names nothing of the page's and sets no address; what it returns can only be
+  what the site sent, removed or reordered. "In what the site sent", exactly: every string *value* in the
+  output equals a string value in the input (no substrings, no joins: a cut URL is a new URL), and occurs no
+  more times than in the input (no duplicating an address the page would fetch twice); the same for numbers
+  and booleans (by type and value: `1` and `true` are different, so a count can't be bumped or a flag
+  invented where the input had none); every object *key* in the output is a key somewhere in the input (a mod
+  can't put an existing string under a new key the page would act on, like `media_url`); `null` is free
+  (it's removing). Each filter is checked against the original response, so filters in a row can't build
+  on each other's inventions. Removal and reordering do let a mod choose what the page sees, and so what it
+  reports back to its own site (impressions); that's the site's own data going to the site. Fits.
+- `page-data` (built): reads; plain copies with no functions or nodes, through events on the element. Fits.
+- `search-box` (built): TRIF's own box, which the mod can't fill or read, going to the address in the
+  header (the mod's own site, checked by the helper) with only what the user typed, on their Enter. The mod
+  names nothing of the page's. Fits.
+- `media` (built): `play`/`pause`/`setMuted`/`setVolume`/`seek` and a `.media` state (paused, muted,
+  volume, time, duration) on the page's own `<video>` and `<audio>`; never their `src`. Names nothing; sets
+  no address. Fits.
+- `go-to` (built): `trif.goTo(where)` goes to a path the header lists, exactly (literal paths of the site:
+  no query, `#` or `*`, checked by the helper, so a path the mod built can't carry data), or to an address a
+  link on the page already shows, on the page's own origin (a copy; the hold names the site). Fits.
+- `click` (built): `el.click()` only on an element matching an `@click words: selector` line (the words
+  are what the hold shows; the selectors are under the same limits as everywhere in the box), and never one
+  that would submit or reset a form (a submit or reset button or input, a button with no type in a form, a
+  label for one of those), or a link (`a`, `area`) to another origin. The page's own element is named, but
+  by the header the user approved, not the mod: the exception the power names, narrowed. A click on a
+  `type=button` that the page's own code turns into a post can't be told apart: the hold lists what it
+  may click, in words and selectors, so the user can say no. Fits as narrowed.
+- `write-drafts` (built): `setValue` on the page's text fields and textareas (through the field's own
+  setter and an `input` event, so the page's code sees the change), and the editor writes AU-1 refused
+  (`setText`, adding, removing, attributes inside an editor). Never a password or card field (the same
+  test as read-drafts), a hidden, file or other non-text input, or a select. It's the one power that writes
+  into what's the user's: its whole point. **No made-up addresses**, the rule itself: a site can fetch an
+  address in a draft before anything is posted (X's link cards, say), so the text a mod writes into a
+  field or an editor may only have the addresses already in what the user typed there, or in a link on
+  the page (not the mod's own). Anything that looks like one counts: `scheme://…`, `www.…`, a dotted name
+  ending in letters (`evil.example`, `node.js`), an IPv4 address, with the full stops CJK text uses too;
+  the check is on the whole text after the write (an editor's text around it too), so text joined across
+  writes, or by a removal, is caught; compared without case. Two things it allows that the rest don't:
+  plain text the mod wrote going into a post, and the page's own visible text going from one place into
+  a post (a DM's text into a reply, say), both in what the user is about to post themselves. The hold
+  says "can change what you type and paste on this site before you post it". Pasted or dropped files
+  aren't touched.
+- The combinations: below, "Combinations".
+- `mods` (built): `trif.channel(name)` with `send(data)`/`on(fn)` between this page's boxed mods with
+  the power, through TRIF (never the DOM), in plain data only (no functions, stand-ins or other objects
+  JSON would drop silently), delivered later (a timer), with the sender's id. It names nothing; with the
+  page-wide rules below it carries no read to an act that didn't ask for it. Fits.
+  (In a browser without the sandbox, where a boxed mod runs as a free mod the user allowed, the channels
+  live on the page's window, where the page could reach them: the free tier's terms.)
+
+
+## Combinations (branch powers)
+
+The table: `helper/lib/combinations.js`, written out in docs/POWER-COMBINATIONS.md. Every pair (66) and
+triple (220) of the twelve powers, each with the warning a hold shows or a one-line reason it adds nothing;
+tests/combinations.test.js checks it covers all of them, that its reasoning holds (below), that the doc is
+the table, and that the sandbox's page-wide rules follow it.
+
+**How the table is reasoned.** No power sends anything a mod makes up, and the addresses a mod can reach
+(links, images, go-to, click, search-box) are the page's own or the header's. So what a boxed mod reads can
+leave the site only through what's posted, what's clicked (both public on most sites), how the page's media
+plays (a video's host sees the requests a seek or play makes, and may be another site), and sound in the
+room. Everything else stays on the site it came from, which already has it. Reads (`read-drafts`, `keys`,
+`site-data`, `page-data`) are what the mod sees beyond the page; the rest see only what the page shows.
+- A read with a way out warns: with `write-drafts` ("could put what it reads into something you post"),
+  `click` ("could let what it reads decide what it clicks for you"), `media` ("could pass what it reads to
+  the site a video or sound comes from, by how it plays it") and `sound` ("could turn what it reads into
+  sounds that a device nearby could pick up"). The last two are narrow channels (timing, and a listening
+  device near the user), listed because they exist.
+- Acts that combine warn: `write-drafts` + `click` ("could write a post and send it for you": a draft no
+  longer waits for the user's own send), `go-to` + `click` ("could take you to a page and click things there
+  for you": click alone acts where the user is; with go-to, where the mod takes them).
+- Triples: a read with `write-drafts` and `click` ("could put what it reads into a post and send it for
+  you"), and `go-to` + `write-drafts` + `click` ("could go to a page, write a post there and send it for
+  you") are worse than their pairs; every other triple is "no more than its pairs" (their warnings show),
+  or adds nothing (it reads nothing beyond the page and its acts don't combine; or it reads but nothing in
+  it carries what it reads off the page).
+- No added risk, with the reason in the table: reads together; a read with `go-to` (only this site's pages,
+  which can already see it), `search-box` (only what the user types, which the mod can't read), `controls`
+  (the mod's own inputs: only what the user gives it on purpose) or `mods`; `mods` with anything (a channel
+  between its own boxed mods, which the page-wide rules treat as one); acts that don't combine (media,
+  sound, go-to with each other or with write-drafts alone).
+- Counts: 18 of 66 pairs warn; 5 of 220 triples have their own warning; 118 more show their pairs'.
+
+**The hold.** Each warned combination a mod has is a need of its own, keyed by its powers
+(`power:together:keys+click+write-drafts`), so approving a pair doesn't cover a triple; the panel's
+approval dialog lists them in the red box, the strongest first, one line each ("Together, it …"; the same
+sentence once), `trif status` as "together, it …". A mod with more than three powers gets, instead, Tim's
+general warning (key `power:together:many:<its powers>`, so the exact set): "Mods with many powers can act
+in unspecific or powerful ways. Treat this with caution." Its combinations are still needs (without lines),
+so a later version with fewer powers doesn't ask again for what the user allowed.
+
+**Across mods: the page-wide rules** (extension/sandbox.js `ACT_PARTNERS`, `clickOk`). Boxed mods on a page
+see each other's elements (one `created` set), and with `mods` talk; so a combination split between two
+mods, each without the warning, would slip past the hold. The sandbox keeps the powers of every boxed mod
+that has run on the page, and refuses an act while another mod's power makes a warned pair with it that
+the acting mod didn't ask for itself (and so its hold didn't show):
+- `write-drafts` (writing into a draft) beside a read: refused unless the writer has that read.
+- `click` beside a read: refused unless the clicker has that read; and after another mod changed a draft,
+  refused unless the clicker has write-drafts (the draft could be sent).
+- `media` (play, pause, mute, volume, seek) beside a read: refused unless the media mod has that read.
+- `go-to` beside `click`: refused unless the mod going has click (the other could click where it lands).
+- Not enforced: `sound` beside a read. The channel needs a listening device near the user and carries
+  little; enforcing it would stop every sound mod beside any hotkey mod. The single-mod warning stands;
+  this is Tim's call.
+Each refusal says which power and how to lift it (ask for it too, which puts the warning in the mod's
+hold). The cost: two boxed mods that are fine alone can stop each other's acts on a page; the errors show in
+`trif errors` and the mod's own catch. In a browser without the sandbox (boxed mods run as free mods the
+user allowed), these rules don't apply: the free tier's terms.

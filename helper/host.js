@@ -92,6 +92,8 @@ const state = {
 
 logger.info(`host ${VERSION} starting (node ${process.version}, home ${ws.home}, mods ${ws.modsDir}, args ${JSON.stringify(process.argv.slice(2))})`);
 for (const n of privateMigration.notes) logger.info(n);
+// (tests: Show in Finder runs this instead of open/xdg-open, lib/reveal.js; said, so a test can check before it clicks)
+if (envVar('REVEAL_CMD')) logger.info(`reveal: TRIF_REVEAL_CMD stands in for open (${envVar('REVEAL_CMD')})`);
 // API keys left in config.json (before 0.2.0) move to the keyring (lib/agentkeys.js), in the background.
 require('./lib/agentkeys').migrateKeys(ws.home).then((k) => {
   for (const n of k.notes) logger.info(n);
@@ -181,6 +183,9 @@ function onExtensionMessage(msg) {
       logger.info(`hello from extension ${msg.version} on ${state.hello.browser} ${msg.chrome}; userScripts=${!!msg.userScripts}`);
       syncMods('hello', true);
       sendUpdate();
+      break;
+    case 'requestWaiting':
+      onRequestWaiting(msg);
       break;
     case 'response':
       onExtensionResponse(msg);
@@ -297,10 +302,12 @@ function syncMods(reason, force) {
   const sent = plan.mods.map((m) => {
     // (facts: TRIF's own reading of the code; claim: what the agent says it does, shown apart as the agent's)
     const h = state.held[m.id], r = state.review && state.review[m.id];
-    const info = h ? { site: h.site, reason: h.reason, facts: h.facts || [h.reason], claim: h.claim || '', by: h.by || 'agent', hash: h.hash } : null;
+    const info = h ? { site: h.site, reason: h.reason, facts: h.facts || [h.reason], claim: h.claim || '', by: h.by || 'agent', hash: h.hash, needs: Array.isArray(h.needs) ? h.needs : [],
+      // (a boxed mod asking for powers: what it asks for, which TRIF enforces, not what TRIF read in its code)
+      ...(Array.isArray(h.needs) && h.needs.length && h.needs.every((k) => /^power:/.test(k)) ? { asks: true } : {}) } : null;
     const out = h && pendingIds.has(m.id) ? { ...m, pending: info }
       : h ? { ...m, held: info }
-      : r ? { ...m, review: { facts: r.facts, claim: r.claim } } : m;
+      : r ? { ...m, review: { facts: r.facts, needs: r.needs || [], claim: r.claim } } : m;
     const o = origins[m.id];
     const withOrigin = o ? { ...out, origin: { by: o.by, browser: o.browser, ...(o.live ? { live: true } : {}) } } : out;
     const withUpdate = updates[m.id] ? { ...withOrigin, update: updates[m.id] } : withOrigin;
@@ -480,7 +487,7 @@ function onRunRequest(run, line, respond) {
 }
 const logins = new Logins({ getWorkspace: () => workspace(ws.home), logger, onEvent: onAgentEvent });
 const runSubscribers = new Map(); // runId or loginId -> Set of CLI sockets that started it (see onClientLine)
-const AGENT_COMMANDS = new Set(['agent.list', 'agent.start', 'agent.stop', 'agent.running', 'agent.login', 'agent.loginCode', 'agent.loginCancel', 'mod.approve', 'mod.reject', 'mod.review', 'mod.undo', 'mod.history',
+const AGENT_COMMANDS = new Set(['mod.reveal', 'agent.list', 'agent.start', 'agent.stop', 'agent.running', 'agent.login', 'agent.loginCode', 'agent.loginCancel', 'mod.approve', 'mod.reject', 'mod.review', 'mod.undo', 'mod.history',
   'mod.update', 'instructions.get', 'instructions.set', 'agent.models', 'agent.openModel', 'agent.openModel.set', 'agent.openModel.setKey', 'agent.openModel.removeKey', 'update.check', 'update.install', 'update.setAuto', 'report.build',
   'shipped.install', 'shipped.none']);
 // Helper-local too, but a run may use them (on mods inside its scope; see lib/trash.js).
@@ -659,13 +666,25 @@ function agentCommand(cmd, args) {
       return { id: String(args.id ?? ''), entries: history.listHistory(workspace(ws.home), String(args.id ?? '')).map((e) => ({ at: e.at, kind: e.kind })) };
     }
     case 'mod.code': {
-      // The panel's "Show code" (a held mod, or one to review): the code TRIF read, capped for the panel
+      // The panel's code viewer and "Show code": the mod's file as TRIF read it, capped for the panel. A style
+      // mod: its rules (the file), not the code TRIF makes of them. `version: 'ran'`: a mod with a change
+      // waiting, the version that's running meanwhile (held.js lastRun).
       const id = typeof args.id === 'string' ? args.id.trim() : '';
       const m = state.mods.find((x) => x.id === id);
       if (!m) throw new Error(`no mod ${id || '(no id)'}`);
       const CAP = 200000;
-      const text = m.text ?? m.code; // (a rules mod: its rules, not TRIF's code)
-      return { id, code: text.slice(0, CAP), truncated: text.length > CAP };
+      let text = m.text ?? m.code;
+      if (args.version === 'ran') {
+        const before = lastRun(ws.home, id);
+        if (before === null) throw new Error(`${id} has no earlier version that ran`);
+        text = before;
+      }
+      return { id, code: text.slice(0, CAP), truncated: text.length > CAP, file: path.basename(String(m.file || `${id.split('/')[1]}.js`)) };
+    }
+    case 'mod.reveal': {
+      // The code viewer's "Show in Finder" / "Open in editor", `trif reveal`: the mod's own file, found by
+      // its id (never a path from the message), opened by the system (lib/reveal.js). Not from a run.
+      return require('./lib/reveal').reveal(ws.modsDir, state.mods, typeof args.id === 'string' ? args.id : '', args.how === 'editor' ? 'editor' : 'folder');
     }
     case 'mod.review': {
       // "Looks right" on a mod's review: what TRIF found in it is allowed for that mod (held.js).
@@ -1093,6 +1112,7 @@ function onClientLine(sock, line) {
             : `"${cmd}" isn't available inside an agent run` });
     }
     args.scope = run.scope;
+    args.agentRun = run.id; // ("Agent on this site": Just this once is for this run)
   }
 
   if (cmd === 'ping') return reply(sock, { id, ok: true, result: helperInfo() });
@@ -1136,12 +1156,23 @@ function onClientLine(sock, line) {
   } catch (e) {
     return reply(sock, { id, ok: false, error: `could not send "${cmd}" to the extension: ${e.message}` });
   }
-  const timer = setTimeout(() => {
+  const expire = (ms) => setTimeout(() => {
     pending.delete(extId);
-    logger.warn(`request ${extId} (${cmd}) timed out after ${timeoutMs}ms`);
-    reply(sock, { id, ok: false, error: `timed out after ${timeoutMs}ms waiting for the extension to answer "${cmd}"` });
-  }, timeoutMs);
-  pending.set(extId, { sock, clientId: id, timer, cmd, runId: run ? run.id : null });
+    logger.warn(`request ${extId} (${cmd}) timed out after ${ms}ms`);
+    reply(sock, { id, ok: false, error: `timed out after ${ms}ms waiting for the extension to answer "${cmd}"` });
+  }, ms);
+  const timer = expire(timeoutMs);
+  pending.set(extId, { sock, clientId: id, timer, cmd, runId: run ? run.id : null, expire, timeoutMs });
+}
+
+// The extension is waiting for the user (the panel asking whether an agent may run code on a site:
+// background.js askToRun): the request gets that much longer before it times out here.
+function onRequestWaiting(msg) {
+  const p = pending.get(msg.id);
+  if (!p || !p.expire) return;
+  const ms = Math.min(Math.max(Number(msg.ms) || 0, 0), 60000) + p.timeoutMs;
+  clearTimeout(p.timer);
+  p.timer = p.expire(ms);
 }
 
 function onExtensionResponse(msg) {

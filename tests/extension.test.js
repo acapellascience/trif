@@ -1332,7 +1332,7 @@ test('background: agent.start becomes a native request; agentEvents reach panels
     const other = bg.connectPanel();
     const replyP = panel.ask({ type: 'agent.start', site: 'x.com', tabId: 12, url: 'https://x.com/home', prompt: 'hide reposts', agent: 'claude', model: 'opus' });
     const req = await answerNative(bg.native, 'agent.start', { runId: 'r1' });
-    assert.deepStrictEqual(req.args, { site: 'x.com', url: 'https://x.com/home', tabId: 12, prompt: 'hide reposts', agent: 'claude', model: 'opus' });
+    assert.deepStrictEqual(req.args, { site: 'x.com', url: 'https://x.com/home', tabId: 12, prompt: 'hide reposts', agent: 'claude', agentLevel: 'ask', model: 'opus' });
     assert.match(req.id, /^ext-/);
     const reply = await replyP;
     assert.deepStrictEqual([reply.ok, reply.result], [true, { runId: 'r1' }]);
@@ -1841,21 +1841,21 @@ test('background: a mod sent without its code (same) takes it from the set befor
 });
 
 test('background: record says whether it changed anything; switching off works on a site that\'s off', async () => {
-  const bg = await loadBackground({ storage: { sitesOn: ['x.com', 'bank.com'] } });
+  const bg = await loadBackground({ storage: { sitesOn: ['x.com', 'shop.com'] } });
   try {
-    let r = await bg.native.call('record', { site: 'bank.com', on: true });
-    assert.deepStrictEqual(r.result, { recording: ['bank.com'], site: 'bank.com', changed: true });
-    r = await bg.native.call('record', { site: 'bank.com', on: true });
+    let r = await bg.native.call('record', { site: 'shop.com', on: true });
+    assert.deepStrictEqual(r.result, { recording: ['shop.com'], site: 'shop.com', changed: true });
+    r = await bg.native.call('record', { site: 'shop.com', on: true });
     assert.strictEqual(r.result.changed, false);
     const panel = bg.connectPanel();
-    await panel.ask({ type: 'site.set', site: 'bank.com', on: false });
-    r = await bg.native.call('record', { site: 'bank.com', on: true });
-    assert.match(r.error, /TRIF is off on bank\.com/);
-    r = await bg.native.call('record', { site: 'bank.com', on: false });
-    assert.deepStrictEqual(r.result, { recording: [], site: 'bank.com', changed: true });
+    await panel.ask({ type: 'site.set', site: 'shop.com', on: false });
+    r = await bg.native.call('record', { site: 'shop.com', on: true });
+    assert.match(r.error, /TRIF is off on shop\.com/);
+    r = await bg.native.call('record', { site: 'shop.com', on: false });
+    assert.deepStrictEqual(r.result, { recording: [], site: 'shop.com', changed: true });
     assert.deepStrictEqual(bg.store.recording, []);
     // A run still can't switch off another site's recording.
-    r = await bg.native.call('record', { site: 'bank.com', on: false, scope: 'x.com' });
+    r = await bg.native.call('record', { site: 'shop.com', on: false, scope: 'x.com' });
     assert.match(r.error, /limited to x\.com/);
   } finally { bg.restore(); }
 });
@@ -3167,7 +3167,7 @@ test('sandboxed mods: TRIF\'s own world, their code as text for SES; the sandbox
   }
   // (the mod's code is a string inside TRIF's code, evaluated by SES: it can't close the string)
   const code = byId['y.com/boxed'].js[0].code;
-  assert.match(code, /__trifSandbox\.run\("y\.com\/boxed", "trif\.css\(\\"a \{ color: red \}\\"\);"\)/);
+  assert.match(code, /__trifSandbox\.run\("y\.com\/boxed", "trif\.css\(\\"a \{ color: red \}\\"\);", \{"powers":\[\],"args":\{\}\}\)/);
   new Function(code); // parses
   const tricky = sbx.sandboxModCode('a/b', '"); fetch("x"); ("');
   assert.ok(tricky.includes(JSON.stringify('"); fetch("x"); ("')));
@@ -3237,8 +3237,8 @@ test('sandboxFallback: without the sandbox a sandboxed mod waits for the user\'s
   const [held, same] = lib.sandboxFallback([boxed, page], { canSandbox: false, browser: 'Safari' });
   assert.strictEqual(same, page);
   assert.strictEqual(held.unsandboxed, true);
-  assert.deepStrictEqual(held.held, { by: 'sandbox', site: 'y.com', reason: 'Safari can\'t run sandboxed mods, so here it would run as a page script, with everything the page has; as a page script, it can send requests',
-    facts: ['Safari can\'t run sandboxed mods, so here it would run as a page script, with everything the page has', 'as a page script, it can send requests'], claim: 'Bounces the logo', hash: 'H' });
+  assert.deepStrictEqual(held.held, { by: 'sandbox', site: 'y.com', reason: 'Safari can\'t run boxed mods, so here it would run as a free mod, with everything the page has; as a free mod, it can send requests',
+    facts: ['Safari can\'t run boxed mods, so here it would run as a free mod, with everything the page has', 'as a free mod, it can send requests'], claim: 'Bounces the logo', hash: 'H' });
   // a held mod isn't registered
   const us = mockUserScripts();
   await lib.syncUserScripts(us, { mods: [held, page], runtimeCode: 'RT' });
@@ -3257,7 +3257,7 @@ test('sandboxFallback: without the sandbox a sandboxed mod waits for the user\'s
   assert.ok(!us2.scripts.some((x) => x.id === sbx.SANDBOX_RUNTIME_ID));
   // (the mod's code first on the script's first line, so its errors keep their line numbers; then TRIF's API)
   assert.ok(s.js[0].code.startsWith('(() => { const __trifMod = async function (page, trif, console, setTimeout, clearTimeout, setInterval, clearInterval, requestAnimationFrame, cancelAnimationFrame) { "use strict"; /* y.com/boxed */\n};'));
-  assert.ok(s.js[0].code.includes("('page', \"y.com/boxed\", __trifMod); })();"));
+  assert.ok(s.js[0].code.includes("('page', \"y.com/boxed\", __trifMod, {\"powers\":[],\"args\":{}}); })();"));
   new Function(s.js[0].code);
   assert.strictEqual(r.applied['y.com/boxed'], 'H:page', 'registered differently from the sandboxed form');
   // a new version waits again
@@ -3269,4 +3269,63 @@ test('sandboxFallback: without the sandbox a sandboxed mod waits for the user\'s
   // held by the helper anyway: its hold stays, marked as a page script here
   const helperHeld = { ...boxed, held: { by: 'agent', reason: 'x', hash: 'H' } };
   assert.deepStrictEqual(lib.sandboxFallback([helperHeld], { canSandbox: false })[0], { ...helperHeld, unsandboxed: true });
+});
+
+test('background: "Agent on this site" gates every agent command by the tab\'s site: Off nothing, Look no code; Ask asks in the panel, or says to open it', async () => {
+  const tabs = [
+    { id: 5, windowId: 1, index: 0, active: true, url: 'https://example.com/a', title: 'Example' },
+    { id: 6, windowId: 1, index: 1, active: false, url: 'https://shop.com/cart?id=7', title: 'My cart' },
+  ];
+  const executeScript = async ({ func }) => {
+    if (func.name === 'pageGuard') return [{ result: null }];
+    if (/__trifPageGuard === t/.test(String(func))) return [{ result: true }];
+    return [{ result: { url: 'https://example.com/a', text: 'page text' } }];
+  };
+  const bg = await loadBackground({ storage: { sitesOn: ['example.com', 'shop.com'], agentSites: { 'shop.com': 'off' } }, tabs, scripting: { executeScript } });
+  try {
+    // Off: nothing on its tabs; the tab is listed without its address past the site, or its title
+    let r = await bg.native.call('text', { tab: 6 });
+    assert.match(r.error, /"Agent on this site" is Off for shop\.com/);
+    r = await bg.native.call('tabs', {});
+    assert.deepStrictEqual(r.result.map((t) => [t.id, t.url, t.title, t.agent || null]), [[5, 'https://example.com/a', 'Example', null], [6, 'https://shop.com/', '', 'off']]);
+    // Ask (example.com: no choice): reading works; code asks, and with no panel open says where to allow it
+    r = await bg.native.call('text', { tab: 5 });
+    assert.strictEqual(r.ok, true, r.error);
+    r = await bg.native.call('run', { tab: 5, code: '1' });
+    assert.match(r.error, /running code on example\.com needs the user's OK first \("Agent on this site" is Ask there\), and TRIF's side panel isn't open/);
+    // with a panel: it asks; the helper's timer is told; Not here sets Look, and the command says so
+    const panel = bg.connectPanel();
+    const asked = bg.native.call('run', { tab: 5, code: '1' });
+    let ask = null;
+    for (let i = 0; i < 200 && !ask; i++) { ask = panel.sent.find((m) => m.type === 'agentAsk'); await tick(); }
+    assert.ok(ask, 'the panel was asked');
+    assert.strictEqual(ask.site, 'example.com');
+    assert.ok(bg.native.sent.some((m) => m.type === 'requestWaiting' && m.ms > 20000), 'the helper was told to wait');
+    const status = (await panel.ask({ type: 'status' })).result;
+    assert.deepStrictEqual(status.agentAsks, [{ id: ask.id, site: 'example.com' }]);
+    assert.strictEqual((await panel.ask({ type: 'agentAsk.answer', id: ask.id, choice: 'no' })).ok, true);
+    r = await asked;
+    assert.match(r.error, /the user chose Not here: "Agent on this site" is now Look for example\.com/);
+    assert.deepStrictEqual(bg.store.agentSites, { 'example.com': 'look', 'shop.com': 'off' });
+    r = await bg.native.call('run', { tab: 5, code: '1' });
+    assert.match(r.error, /Look for example\.com/);
+    // the panel sets levels (an agent run can't: there's no such command for it)
+    assert.strictEqual((await panel.ask({ type: 'agentSite.set', site: 'example.com', level: null })).ok, true);
+    assert.deepStrictEqual(bg.store.agentSites, { 'shop.com': 'off' });
+    r = await bg.native.call('agentSite.set', { site: 'shop.com', level: 'run' });
+    assert.match(r.error, /unknown command/);
+    // Always on this site: Run code from then on (the command itself goes on to run)
+    const again = bg.native.call('run', { tab: 5, code: '1', timeout: 50 });
+    ask = null;
+    for (let i = 0; i < 200 && !ask; i++) { ask = panel.sent.filter((m) => m.type === 'agentAsk').pop(); if (ask && ask.id !== undefined && panel.sent.filter((m) => m.type === 'agentAsk').length < 2) ask = null; await tick(); }
+    assert.strictEqual((await panel.ask({ type: 'agentAsk.answer', id: ask.id, choice: 'always' })).ok, true);
+    r = await again;
+    assert.doesNotMatch(String(r.error || ''), /Agent on this site|Not here|needs the user's OK/);
+    assert.deepStrictEqual(bg.store.agentSites, { 'example.com': 'run', 'shop.com': 'off' });
+    // the sensitive list: the user's own, or TRIF's again
+    assert.strictEqual((await panel.ask({ type: 'agentSensitive.set', list: [{ pattern: 'Example.com', why: 'mine' }, { pattern: 'bad pattern!' }] })).ok, true);
+    assert.deepStrictEqual(bg.store.sensitiveSites, [{ pattern: 'example.com', why: 'mine' }]);
+    await panel.ask({ type: 'agentSensitive.set', list: null });
+    assert.strictEqual(bg.store.sensitiveSites, null);
+  } finally { bg.restore(); }
 });

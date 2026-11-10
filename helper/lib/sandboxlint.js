@@ -35,13 +35,14 @@ const ELEMENT_MEMBERS = {
   setAttribute: 'use setAttr', getAttribute: 'use attr', removeAttribute: 'use removeAttr', classList: 'use classes.add / remove / toggle / has',
   textContent: 'use text / setText', innerText: 'use text / setText', parentElement: 'use parent', parentNode: 'use parent',
   nextElementSibling: 'use next', previousElementSibling: 'use previous', cloneNode: 'use clone()', getBoundingClientRect: 'use rect()',
-  getContext: 'use canvas()', click: 'a sandboxed mod can\'t click for the user', dispatchEvent: 'a sandboxed mod can\'t act for the user',
-  submit: 'a sandboxed mod can\'t submit', requestSubmit: 'a sandboxed mod can\'t submit', focus: 'not offered in a sandboxed mod',
-  contentWindow: 'other frames are out of reach', contentDocument: 'other frames are out of reach', shadowRoot: 'not offered in a sandboxed mod',
+  getContext: 'use canvas()', click: 'a boxed mod can\'t click for the user', dispatchEvent: 'a boxed mod can\'t act for the user',
+  submit: 'a boxed mod can\'t submit', requestSubmit: 'a boxed mod can\'t submit', focus: 'not offered in a boxed mod',
+  contentWindow: 'other frames are out of reach', contentDocument: 'other frames are out of reach', shadowRoot: 'not offered in a boxed mod',
 };
 const DECLARE = new Set(['const', 'let', 'var', 'function', 'class']);
 
-function sandboxLint(code) {
+function sandboxLint(code, { powers = [] } = {}) {
+  const has = new Set(powers);
   const text = String(code || '');
   const found = new Map(); // what -> {what, why, lines:Set}
   const add = (what, why, line) => {
@@ -88,7 +89,9 @@ function sandboxLint(code) {
     }
     if (t.t === 'id' && t.v === 'catch' && ts[k + 1] && ts[k + 1].v === '(' && ts[k + 2] && ts[k + 2].t === 'id') declared.add(ts[k + 2].v);
   }
-  const own = (v) => String(v).trim().split(/\s+/).filter(Boolean).every((x) => /^trif-/.test(x));
+  const own = (v) => String(v).trim().split(/\s+/).filter(Boolean).every((x) => /^trif-box-/.test(x));
+  // (what a power gives, used without declaring it: docs/POWERS.md)
+  const powerUse = (what, power, line) => { if (!has.has(power)) add(what, `needs the ${power} power: add \`// @powers ${power}\` to the header (the user approves it once)`, line); };
   for (let k = 0; k < ts.length; k++) {
     const t = ts[k];
     if (t.t !== 'id') continue;
@@ -98,11 +101,23 @@ function sandboxLint(code) {
     const arg = (i) => ts[k + 2 + i * 2];
     if (member && next && next.v === '(' && (t.v === 'setAttr' || t.v === 'removeAttr') && arg(0) && arg(0).t === 'str') {
       const n = arg(0).v.toLowerCase();
-      if (/^data-/.test(n) && !/^data-trif-/.test(n)) add(`${t.v}('${n}')`, 'only data-trif-* data attributes are offered (the page\'s own code could act on others): name it data-trif-…', t.line);
-      if (t.v === 'setAttr' && (n === 'id' || n === 'class') && arg(1) && arg(1).t === 'str' && !own(arg(1).v)) add(`setAttr('${n}', '${arg(1).v.slice(0, 40)}')`, `${n === 'id' ? 'an id' : 'classes'} a mod gives must start with trif-`, t.line);
+      if (/^data-/.test(n) && !/^data-trif-box-/.test(n)) add(`${t.v}('${n}')`, 'only data-trif-box-* data attributes are offered (the page\'s own code, or a free mod, could act on others): name it data-trif-box-…', t.line);
+      if (t.v === 'setAttr' && (n === 'id' || n === 'class') && arg(1) && arg(1).t === 'str' && !own(arg(1).v)) add(`setAttr('${n}', '${arg(1).v.slice(0, 40)}')`, `${n === 'id' ? 'an id' : 'classes'} a boxed mod gives must start with trif-box-`, t.line);
     }
+    if (member && next && next.v === '(' && /^(find|findAll|closest|matches|observe|text|hide)$/.test(t.v) && arg(0) && arg(0).t === 'str' && (/\\/.test(arg(0).v) || /\[\s*(?:[\w*-]*\|)?value\b|:(?:-webkit-)?autofill\b/i.test(arg(0).v))) {
+      add(`${t.v}('${arg(0).v.slice(0, 40)}')`, 'selectors can\'t have \\ escapes, or name the value attribute or :autofill (they\'d read what\'s typed in a field)', t.line);
+    }
+    if (member && t.v === 'audio' && prev && ts[k - 2] && ts[k - 2].v === 'trif') powerUse('trif.audio', 'sound', t.line);
+    if (member && t.v === 'create' && next && next.v === '(' && arg(0) && arg(0).t === 'str' && /^(input|select|option)$/i.test(arg(0).v)) powerUse(`create('${arg(0).v}')`, 'controls', t.line);
     if (member && next && next.v === '(' && /^(add|remove|toggle)$/.test(t.v) && ts[k - 2] && ts[k - 2].v === 'classes' && arg(0) && arg(0).t === 'str' && !own(arg(0).v)) {
-      add(`classes.${t.v}('${arg(0).v.slice(0, 40)}')`, 'classes a mod adds, removes or toggles must start with trif- (the page\'s own code acts on its classes)', t.line);
+      add(`classes.${t.v}('${arg(0).v.slice(0, 40)}')`, 'classes a boxed mod adds, removes or toggles must start with trif-box- (the page\'s own code, or a free mod, acts on classes)', t.line);
+    }
+    // (phase 3: the page's media, clicking what the header names, going to a page, a channel, changing drafts)
+    if (member && next && next.v === '(') {
+      if (t.v === 'click') { powerUse('.click()', 'click', t.line); continue; }
+      if (/^(play|pause|setMuted|setVolume|seek)$/.test(t.v)) powerUse(`.${t.v}()`, 'media', t.line);
+      if (t.v === 'setValue' && !has.has('controls')) powerUse('.setValue()', 'write-drafts', t.line);
+      if ((t.v === 'goTo' || t.v === 'channel') && ts[k - 2] && ts[k - 2].v === 'trif') powerUse(`trif.${t.v}`, t.v === 'goTo' ? 'go-to' : 'mods', t.line);
     }
     if (member) {
       // (`.style.x`: a real element's style object; a stand-in's style is a function)
@@ -115,7 +130,7 @@ function sandboxLint(code) {
     }
     const key = next && next.t === 'p' && next.v === ':' && prev && prev.t === 'p' && (prev.v === '{' || prev.v === ',');
     if (key || declared.has(t.v)) continue;
-    if (PAGE_GLOBALS.has(t.v)) add(t.v, 'not there in a sandboxed mod: it has page, trif, console, the timers, Math, Date and the language', t.line);
+    if (PAGE_GLOBALS.has(t.v)) add(t.v, 'not there in a boxed mod: it has page, trif, console, the timers, Math, Date and the language', t.line);
     if ((t.v === 'setTimeout' || t.v === 'setInterval') && next && next.v === '(' && ts[k + 2] && (ts[k + 2].t === 'str' || ts[k + 2].t === 'tpl')) add(`${t.v}("…")`, 'timers take a function, not code in a string', t.line);
   }
   return finish(found);

@@ -1,12 +1,12 @@
 // ==WebMod==
-// @name        DVD Logo (sandboxed)
+// @name        DVD Logo (boxed)
 // @description The Google logo bounces like a DVD screensaver
 // @match       https://www.google.com/*
-// @sandboxed
+// @boxed
 // @risk        0 render-only
 // ==/WebMod==
 
-// examples/sites/www.google.com/dvd-logo.js (Tim's), ported to a sandboxed mod (TECHNIQUES.md "Sandboxed
+// examples/sites/www.google.com/dvd-logo.js (Tim's), ported to a boxed mod (TECHNIQUES.md "Boxed
 // mods"). An example, not one TRIF ships. What changed: the bouncing copy is clone() (TRIF's copy keeps
 // only allowed elements and attributes); colours come from hue-rotate only (the original tints a same-site
 // image with a CSS mask, and a mask's url() to the site isn't offered); it bounces on the copy's box (no
@@ -23,7 +23,7 @@ function start(logo) {
   const w = r.width, h = r.height;
   const dvd = page.create('div');
   dvd.setAttr('aria-hidden', 'true');
-  dvd.setAttr('data-trif-dvd', '');
+  dvd.setAttr('data-trif-box-dvd', '');
   const copy = logo.clone();
   if (copy) { copy.removeAttr('id'); copy.style('width', '100%'); copy.style('height', '100%'); copy.style('margin', '0'); dvd.append(copy); }
   for (const [k, v] of [['position', 'fixed'], ['left', '0'], ['top', '0'], ['width', `${w}px`], ['height', `${h}px`], ['z-index', '0'], ['pointer-events', 'none'], ['will-change', 'transform']]) dvd.style(k, v);

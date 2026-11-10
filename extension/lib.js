@@ -77,8 +77,10 @@ export function modToUserScript(mod) {
   // A sandboxed mod (sandbox.js): in TRIF's own world, its code evaluated by SES in a compartment of its
   // own; or, in a browser without that world and once the user allowed it (sandboxFallback), in the page's
   // world with the same API around it.
-  if (inSandboxWorld(mod)) return { ...base, js: [{ code: sandboxModCode(mod.id, String(mod.code ?? '')) }], world: 'USER_SCRIPT', worldId: SANDBOX_WORLD };
-  if (mod.sandboxed) return { ...base, js: [{ code: sandboxPageCode(mod.id, String(mod.code ?? '')) }], world: 'MAIN' };
+  // (a boxed mod's powers, as the helper read them from its header: docs/POWERS.md)
+  const powers = { powers: Array.isArray(mod.powers) ? mod.powers : [], args: mod.powerArgs && typeof mod.powerArgs === 'object' ? mod.powerArgs : {} };
+  if (inSandboxWorld(mod)) return { ...base, js: [{ code: sandboxModCode(mod.id, String(mod.code ?? ''), powers) }], world: 'USER_SCRIPT', worldId: SANDBOX_WORLD };
+  if (mod.sandboxed) return { ...base, js: [{ code: sandboxPageCode(mod.id, String(mod.code ?? ''), powers) }], world: 'MAIN' };
   return { ...base, js: [{ code: wrapModCode(mod.id, String(mod.code ?? '')) }], world: 'MAIN' };
 }
 
@@ -101,7 +103,7 @@ export function sandboxRuntimeScript(matches) {
 
 /** The text a sandboxed mod's hold shows in a browser without the sandbox. */
 export function sandboxHoldReason(browser = BROWSER) {
-  return `${browser} can't run sandboxed mods, so here it would run as a page script, with everything the page has`;
+  return `${browser} can't run boxed mods, so here it would run as a free mod, with everything the page has`;
 }
 
 /**
@@ -122,7 +124,7 @@ export function sandboxFallback(mods, { canSandbox = true, allowed = {}, browser
     // (held by the helper anyway: its own Allow first)
     if (m.held) return { ...m, unsandboxed: true };
     if (allowed[m.id] && allowed[m.id] === m.hash) return { ...m, unsandboxed: true };
-    const facts = [sandboxHoldReason(browser), ...(Array.isArray(m.pageFacts) ? m.pageFacts.map((f) => `as a page script, it ${f}`) : [])];
+    const facts = [sandboxHoldReason(browser), ...(Array.isArray(m.pageFacts) ? m.pageFacts.map((f) => `as a free mod, it ${f}`) : [])];
     return { ...m, unsandboxed: true, held: { by: 'sandbox', site: modSiteName(m), reason: facts.join('; '), facts, claim: String(m.risk?.why || m.description || '').slice(0, 300), hash: m.hash } };
   });
 }
@@ -1478,6 +1480,11 @@ export function siteExcludes(site) {
 // the groups switched off there: their mods don't run on it (or its subdomains), each mod's own
 // switch left as it is.
 export const GROUPS = ['rules', 'sandboxed', 'page'];
+// What people call each group (the values above are stored, in groupsOff and startsOff, so they stay): a
+// rules mod is a style mod, a sandboxed one a boxed mod, a page script a free mod.
+export const GROUP_NAMES = { rules: 'Style mods', sandboxed: 'Boxed mods', page: 'Free mods' };
+/** A group's name in a sentence: "style mods", "boxed mods", "free mods". */
+export function groupWord(group) { return (GROUP_NAMES[group] || GROUP_NAMES.page).toLowerCase(); }
 export function modGroup(mod) { return mod && mod.rules ? 'rules' : inSandboxWorld(mod) ? 'sandboxed' : 'page'; }
 
 /** `groupsOff` from storage, cleaned up: valid sites, known groups, no duplicates, no empty lists. */

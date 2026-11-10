@@ -39,6 +39,7 @@ const { modSnapshot, diffSnapshots } = require('./runs');
 const { outOfScope } = require('./scope');
 const { within, ignoresCase } = require('./pathcheck');
 const { powersOf, modSites } = require('./powers');
+const { isSoft } = require('./boxpowers');
 
 // powersOf reads every mod's code on each sync; a big mod takes a few hundred ms, so by hash.
 const cache = new Map();
@@ -46,7 +47,9 @@ function powersFor(mod) {
   if (mod.rules) return []; // (a rules mod runs TRIF's own code, its rules only data: lib/rules.js)
   // (a sandboxed mod's code runs where it can't act: TRIF's world, with only TRIF's API (extension/sandbox.js).
   // A browser without that world holds it there, in the extension, until the user allows it as a page script.)
-  if (mod.sandboxed) return [];
+  // A boxed mod with powers (lib/boxpowers.js): what it asks for, which TRIF enforces; by name only, so an
+  // update with the same powers doesn't ask again.
+  if (mod.sandboxed) return require('./boxpowers').powerNeeds(mod);
   const key = `${mod.hash}:${mod.id}`;
   if (!cache.has(key)) {
     if (cache.size > 500) cache.clear();
@@ -86,7 +89,7 @@ function shippedBaseline(home, mod) {
 
 // The text a hold or review shows: TRIF's own words, one fact per line.
 function reasonOf(needs) {
-  return needs.map((n) => n.fact).join('; ');
+  return needs.map((n) => n.fact).filter(Boolean).join('; ');
 }
 
 // What the agent says the mod does: shown as the agent's claim, apart from TRIF's facts.
@@ -253,9 +256,11 @@ function updateHeld(ws, mods, scopes) {
       continue;
     }
     const ok = allowedFor(ws.home, m, allowed, typeof seen[m.id] === 'object' ? seen[m.id] : null);
-    const needs = needsOf(m, run ? run.scope : null)
+    let needs = needsOf(m, run ? run.scope : null)
       .filter((n) => (run || n.key !== 'risk2') && !isAllowed(n, ok, true))
       .map((n) => described(n, ok));
+    // (a boxed mod's `controls` and `mods` are listed on a hold, but don't make one on their own)
+    if (needs.length && needs.every((n) => isSoft(n.key))) needs = [];
     if (needs.length && same) continue;
     if (needs.length) {
       held[m.id] = {
@@ -335,7 +340,7 @@ function reviewItems(home, mods, held = {}) {
     if (held[m.id]) continue;
     const ok = allowedFor(home, m, allowed);
     const needs = needsOf(m, null).filter((n) => !isAllowed(n, ok, false) && n.key !== 'risk2');
-    if (needs.length) out[m.id] = { facts: needs.map((n) => n.fact), needs: needs.map((n) => n.key), claim: claimOf(m) };
+    if (needs.length && !needs.every((n) => isSoft(n.key))) out[m.id] = { facts: needs.map((n) => n.fact), needs: needs.map((n) => n.key), claim: claimOf(m) };
   }
   return out;
 }

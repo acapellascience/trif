@@ -317,11 +317,139 @@ export function runtimeMain(RECORDING, safeStringify) {
 }
 
 /** Source of the `__webmods_runtime` user script with the recording set embedded. */
+/**
+ * The page's side of two boxed-mod powers (docs/POWERS.md), TRIF's code in the page's world. Talks to TRIF's
+ * sandbox world only through events on the shared DOM, with JSON text: the boxed mod never touches the page's
+ * own fetch, objects or functions.
+ * - site-data: once a boxed mod asks to filter responses (`trif:filter-patterns`, a JSON list of URL globs),
+ *   fetch and XMLHttpRequest are wrapped; a JSON response whose URL matches goes to the sandbox world as text
+ *   (`trif:filter-request`, answered during the dispatch with `trif:filter-response`), and what comes back
+ *   (checked there: nothing invented) replaces it.
+ * - page-data: an element's React props and fiber, read by a path (`trif:page-data` on the element), answered
+ *   with a plain JSON copy (`trif:page-data-answer`): no functions, no DOM nodes, capped.
+ * The page can see and send these events too: it learns or changes only its own data.
+ */
+export function pageBridge() {
+  if (window.__trifBridge) return;
+  Object.defineProperty(window, '__trifBridge', { value: true });
+  const MAX = 5 * 1024 * 1024;
+  let globs = [];
+  let answer = null;
+  const ask = (type, detail, target) => {
+    answer = null;
+    (target || document).dispatchEvent(new CustomEvent(type, { detail, bubbles: true, composed: true }));
+    const a = answer; answer = null; return a;
+  };
+  document.addEventListener('trif:filter-response', (e) => { if (typeof e.detail === 'string') answer = e.detail; }, true);
+  document.addEventListener('trif:page-data-answer', (e) => { if (typeof e.detail === 'string') answer = e.detail; }, true);
+  const matches = (url) => globs.some((re) => re.test(url));
+  const filterText = (url, method, status, text) => {
+    if (typeof text !== 'string' || text.length > MAX || !/^\s*[[{]/.test(text)) return text;
+    const out = ask('trif:filter-request', JSON.stringify({ url, method, status, text }));
+    return typeof out === 'string' ? out : text;
+  };
+  let wrapped = false;
+  const wrap = () => {
+    if (wrapped) return;
+    wrapped = true;
+    const f0 = window.fetch;
+    if (typeof f0 === 'function') {
+      window.fetch = async function fetch(input, init) {
+        const res = await f0.apply(this, arguments);
+        try {
+          const url = res.url || (typeof input === 'string' ? new URL(input, location.href).href : input && input.url) || '';
+          if (!matches(url)) return res;
+          const text = await res.clone().text();
+          const out = filterText(url, (init && init.method) || (input && input.method) || 'GET', res.status, text);
+          if (out === text) return res;
+          const r2 = new Response(out, { status: res.status, statusText: res.statusText, headers: res.headers });
+          try { Object.defineProperty(r2, 'url', { value: res.url }); } catch (e) { /* kept */ }
+          return r2;
+        } catch (e) { return res; }
+      };
+    }
+    const X = window.XMLHttpRequest && window.XMLHttpRequest.prototype;
+    if (X) {
+      const urls = new WeakMap(), done = new WeakMap();
+      const open = X.open;
+      X.open = function (method, url) { try { urls.set(this, { method: String(method), url: new URL(String(url), location.href).href }); } catch (e) { /* not ours */ } return open.apply(this, arguments); };
+      const textGet = Object.getOwnPropertyDescriptor(X, 'responseText').get;
+      const respGet = Object.getOwnPropertyDescriptor(X, 'response').get;
+      const filtered = (xhr) => {
+        if (done.has(xhr)) return done.get(xhr);
+        const u = urls.get(xhr);
+        if (!u || xhr.readyState !== 4 || !matches(u.url)) return null;
+        const t = textGet.call(xhr);
+        const out = filterText(u.url, u.method, xhr.status, t);
+        done.set(xhr, out);
+        return out;
+      };
+      Object.defineProperty(X, 'responseText', { configurable: true, get() { if (this.responseType && this.responseType !== 'text') return textGet.call(this); const f = filtered(this); return f === null ? textGet.call(this) : f; } });
+      Object.defineProperty(X, 'response', { configurable: true, get() {
+        const rt = this.responseType;
+        if (rt === '' || rt === 'text') { const f = filtered(this); return f === null ? respGet.call(this) : f; }
+        if (rt === 'json' && this.readyState === 4 && urls.has(this) && matches(urls.get(this).url)) {
+          // (a json response: filtered as text, from the original's JSON)
+          if (!done.has(this)) { const orig = respGet.call(this); const t = orig === null ? null : JSON.stringify(orig); done.set(this, t === null ? null : filterText(urls.get(this).url, urls.get(this).method, this.status, t)); }
+          const f = done.get(this); try { return f === null ? respGet.call(this) : JSON.parse(f); } catch (e) { return respGet.call(this); }
+        }
+        return respGet.call(this);
+      } });
+    }
+  };
+  const glob = (g) => new RegExp('^' + String(g).replace(/[.+?^${}()|[\]\\]/g, '\\$&').replace(/\*/g, '.*') + '$');
+  document.addEventListener('trif:filter-patterns', (e) => {
+    try { const list = JSON.parse(String(e.detail)); if (Array.isArray(list) && list.length) { globs = list.slice(0, 50).map(glob); wrap(); } } catch (err) { /* ignore */ }
+  }, true);
+  // (a boxed mod that asked before this was here: it asks again when it sees this)
+  document.dispatchEvent(new CustomEvent('trif:bridge-ready'));
+
+  // page-data
+  const plain = (v, depth, seen, budget) => {
+    if (v === null || typeof v === 'boolean' || typeof v === 'string') return v;
+    if (typeof v === 'number') return Number.isFinite(v) ? v : null;
+    if (typeof v !== 'object' || depth > 8 || budget.n-- <= 0) return undefined;
+    if (seen.has(v)) return undefined;
+    if (typeof v.nodeType === 'number' || v === window || (typeof v.$$typeof === 'symbol' && v.$$typeof.toString() !== 'Symbol(react.element)')) return undefined;
+    seen.add(v);
+    try {
+      if (Array.isArray(v)) return v.slice(0, 500).map((x) => { const y = plain(x, depth + 1, seen, budget); return y === undefined ? null : y; });
+      const out = {};
+      for (const k of Object.keys(v).slice(0, 300)) {
+        if (k === '_owner' || k === 'stateNode' || k === '_store') continue;
+        let x; try { x = v[k]; } catch (e) { continue; }
+        if (typeof x === 'function' || typeof x === 'symbol') continue;
+        const y = plain(x, depth + 1, seen, budget);
+        if (y !== undefined) out[k] = y;
+      }
+      return out;
+    } finally { seen.delete(v); }
+  };
+  document.addEventListener('trif:page-data', (e) => {
+    try {
+      const el = e.composedPath ? e.composedPath()[0] : e.target;
+      if (!el || el.nodeType !== 1) return;
+      const key = (pre) => Object.keys(el).find((k) => k.startsWith(pre));
+      const fk = key('__reactFiber$') || key('__reactInternalInstance$');
+      const pk = key('__reactProps$');
+      let v = { props: pk ? el[pk] : null, fiber: fk ? el[fk] : null };
+      for (const seg of String(e.detail || '').split('.').filter(Boolean).slice(0, 40)) {
+        if (v === null || v === undefined || typeof v !== 'object') { v = null; break; }
+        v = v[seg];
+      }
+      const json = JSON.stringify(plain(v === undefined ? null : v, 0, new Set(), { n: 5000 }));
+      document.dispatchEvent(new CustomEvent('trif:page-data-answer', { detail: json && json.length <= 1024 * 1024 ? json : 'null' }));
+    } catch (err) { /* no answer: null */ }
+  }, true);
+}
+
 export function runtimeCode(recordingSites) {
   return `(() => {
 const RECORDING = ${JSON.stringify((recordingSites || []).map((s) => String(s).toLowerCase()))};
 try { (${runtimeMain.toString()})(RECORDING, ${safeStringify.toString()}); }
 catch (e) { console.error('[TRIF] runtime failed', e); }
+try { (${pageBridge.toString()})(); }
+catch (e) { console.error('[TRIF] bridge failed', e); }
 })();
 //# sourceURL=trif-runtime.js`;
 }

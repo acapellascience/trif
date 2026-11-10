@@ -4,21 +4,22 @@ The how-to half of the guide, read when you need it: before you write a mod, bef
 when you test. AGENTS.md (next to this file) is the rest: the workspace, the CLI, the workflow and the
 safety rules, which always apply.
 
-## Rules mods: start here
+## Style mods: start here
 
 Most customizations are "make it look like this", "hide these", "rename that", "drop the items that say
-X". Write those as a **rules mod**: data instead of code, run by TRIF's own code. A rules mod can't send,
-click, load from anywhere or run code, whoever wrote it, so it never waits for the user's OK and nothing
-on a page can turn it against them. Reach for JavaScript only when rules can't do the job.
+X". Write those as a **style mod**: rules as data instead of code, run by TRIF's own code. A style mod
+can't send, load from anywhere or run code, whoever wrote it, so it never waits for the user's OK and
+nothing on a page can turn it against them. Reach for JavaScript only when a style mod can't do the job.
 
-`trif new <site> <mod> --rules` makes one. After the header (with `// @rules` in it), one JSON object:
+`trif new <site> <mod> --style` makes one. After the header (with `// @style` in it), one JSON object (a
+style mod's old name, `@rules`, still works):
 
 ```js
 // ==WebMod==
 // @name        Calmer timeline
 // @description Hides promoted posts and the trends box
 // @match       https://x.com/*
-// @rules
+// @style
 // @risk        1 hides promoted posts, so their ad impressions never report
 // ==/WebMod==
 {
@@ -41,31 +42,33 @@ on a page can turn it against them. Reach for JavaScript only when rules can't d
 Selectors can't contain `{`, `}`, `;` or `@`. `trif check <site>/<mod>` checks the rules and says what's
 wrong. Rules re-apply as the page changes, so single-page apps need nothing extra.
 
-## Sandboxed mods: when rules aren't enough
+## Boxed mods: when a style mod isn't enough
 
-When a mod needs logic, new elements, animation or drawing, but not the page itself, write a **sandboxed
+When a mod needs logic, new elements, animation or drawing, but not the page itself, write a **boxed
 mod**: JavaScript that TRIF runs in its own sandbox, not in the page. It has the language and TRIF's API,
-nothing else: no `window`, `document`, `fetch`, storage, frames or events to fire. So it can't send, click,
-navigate or load anything, it never waits for the user's OK, and the page can't reach it. Write a page
-script only for what needs the page: filtering the data the site loads, the app's state, its code.
+nothing else: no `window`, `document`, `fetch`, storage, frames or events to fire. So it can't send,
+navigate, load or click anything itself, it never waits for the user's OK, and the page can't reach it.
+Write a free mod (JavaScript in the page) only for what needs the page: filtering the data the site loads,
+the app's state, its code.
 
-`trif new <site> <mod> --sandboxed` makes one (`// @sandboxed` in the header):
+`trif new <site> <mod> --boxed` makes one (`// @boxed` in the header; its old name, `@sandboxed`, still
+works):
 
 ```js
 // ==WebMod==
 // @name        Calm feed
 // @description Hides promoted posts and marks long threads
 // @match       https://x.com/*
-// @sandboxed
+// @boxed
 // @risk        1 hides promoted posts, so their ad impressions never report
 // ==/WebMod==
 trif.css('[data-testid=sidebarColumn] { display: none !important }');
 trif.observe('article', (post) => {
   if (post.text.includes('Promoted')) return post.hide();
-  if (post.findAll('[data-testid=tweetText]').length > 3) post.classes.add('trif-calm-long');
+  if (post.findAll('[data-testid=tweetText]').length > 3) post.classes.add('trif-box-calm-long');
 });
 const prefs = await trif.settings('prefs', { color: 'rgb(255, 230, 150)' });
-trif.css(`.trif-calm-long { outline: 2px solid ${prefs.value.color} }`);
+trif.css(`.trif-box-calm-long { outline: 2px solid ${prefs.value.color} }`);
 ```
 
 What it has (everything else is simply not there, and `trif check` lists what you used that isn't):
@@ -81,24 +84,29 @@ What it has (everything else is simply not there, and `trif check` lists what yo
   read as plain data), `url`, `title`, `width`, `height`, `scrollX`, `scrollY`, `root`, `body`,
   `prefersReducedMotion`, `prefersDark`.
 - **Elements, as TRIF's stand-ins** (not the real nodes): `tag`, `text`, `setText(t)`, `attr(name)`,
-  `setAttr(name, value)` (`title`, `role`, `hidden`, `alt`, sizes, `aria-*`, `data-trif-*`, and an `id` or
-  `class` starting with `trif-`; a link's `href` only to this site's pages without a query; an image's `src`
-  only `data:`/`blob:` or an image the page already shows), `removeAttr`, `classes.add/remove/toggle`
-  (`trif-` classes) and `has` (any), `style(prop, value)`
+  `setAttr(name, value)` (`title`, `role`, `hidden`, `alt`, sizes, `aria-*`, `data-trif-box-*`, an `id` or
+  `class` starting with `trif-box-`, `open` on a `<details>`; a link's `href` only `#…` or an address a link
+  on the page already has; an image's `src` only `data:`/`blob:` or an image the page already shows),
+  `removeAttr`, `classes.add/remove/toggle` (`trif-box-` classes) and `has` (any), `style(prop, value)`
   (read with one argument; values that load nothing), `hide()`, `show()`, `find`, `findAll`, `closest`,
   `matches`, `parent`, `children`, `next`, `previous`, `append`/`prepend`/`before`/`after` (stand-ins or
   text), `remove()`, `clone()` (a copy with only allowed elements and attributes), `rect()`,
-  `on(type, fn)`, and `canvas()` on a `<canvas>`: 2D drawing with numbers and text (`fillRect`, `arc`,
+  `on(type, fn)`, and `canvas()` on a `<canvas>` the mod made: 2D drawing with numbers and text (`fillRect`, `arc`,
   `fillText`, `set({fillStyle, font, ...})`, ...).
 - `setTimeout`, `setInterval`, `requestAnimationFrame` and their clears (functions only), `Math`, `Date`,
   and the JavaScript language (frozen: mods can't change `Array.prototype` and the like).
 
 Good to know:
-- **Names you give are TRIF's**: data attributes `data-trif-*`, ids and classes `trif-*`. The page's own
-  code acts on its attributes (htmx's `data-hx-post`, Turbo, Stimulus, classes and ids it looks for), so a
-  mod never sets those, nor changes or removes the page's own ids and classes: mark elements with
-  `data-trif-…` or a `trif-` class and style them with `trif.css`. Copies (`clone()`) keep none of the
-  page's ids, classes or data attributes.
+- **A boxed mod names only its own things, or copies addresses the page already has.** Names you give
+  start `trif-box-`: data attributes `data-trif-box-*`, ids and classes `trif-box-*`. The page's own code
+  acts on its attributes (htmx's `data-hx-post`, Turbo, Stimulus, classes and ids it looks for), and free
+  mods act on their `trif-` names, so a boxed mod never sets those, nor changes or removes the page's
+  own ids and classes: mark elements with `data-trif-box-…` or a `trif-box-` class and style them with
+  `trif.css`. Copies (`clone()`) keep none of the page's ids, classes or data attributes. Links point at
+  `#…` or at an address one of the page's links already has (a new address could carry data, and some
+  pages fetch their links before anyone clicks).
+- **Selectors** have no `\` escapes and don't name the `value` attribute or `:autofill` (React keeps a
+  field's `value` attribute in step with what's typed); `attr('value')` on a field is null.
 - **Forms are the page's**: a button you make is always `type="button"` and can't go inside a form, and
   the page's own fields can't be moved into, out of or between forms, removed, or written over (hide them
   with `hide()` instead).
@@ -106,13 +114,77 @@ Good to know:
   typed into a field or editor: with the focus on the page, a link, a button or a list item, yes; on a
   field, an editor, or an element that could hold one (a `div`, `span`, `article`, a custom element), null.
 - **Editors are the user's**: what's typed into a contenteditable isn't in `.text` or `trif.text`, copies
-  or attributes inside it.
+  or attributes inside it, and a boxed mod can't write into one (text, elements, attributes, classes,
+  removing): it can restyle or hide it.
 - The code runs inside a function, so a top-level `return` ends it and `await` works at the top.
-- Errors are caught and shown by `trif errors`, as for page scripts.
+- Errors are caught and shown by `trif errors`, as for free mods.
 - The sandbox refuses source with `import(` or an HTML comment marker in it, even inside a string or a
   comment; `trif check` points them out.
-- Where it isn't enough (an API it doesn't offer), say so and write a page script; don't contort the
-  mod. Examples: examples/sandboxed in TRIF's folder (Simple Shopping, DVD Logo).
+- Where it isn't enough, see if a power covers it (below); if none does, say so and write a free mod; don't
+  contort the mod.
+  Examples: examples/boxed in TRIF's folder (Simple Shopping, DVD Logo).
+
+### Powers: what a boxed mod can ask for
+
+A boxed mod that needs one exception asks for it in its header, `// @powers sound, read-drafts`, from this
+menu. TRIF holds the mod until the user approves that set of powers, once (an update that asks for nothing
+new doesn't ask again; one that adds a power waits for it), and gives it those and nothing more. No power
+sends anything the mod makes up (go-to and click go only where the header or the page's links say), so ask
+only for what the mod needs; a mod that needs the network is a free mod.
+
+- `sound`: `trif.audio()`: `tone({frequency, duration, volume, type, at})`, `play(dataUrl, {volume})`,
+  and nodes for your own graph: `oscillator({type, frequency})`, `gain(v)`, `filter({type, frequency, Q})`,
+  `delay(s)`, `panner(p)`, `noise(s)`, `sound(dataUrl)`; each has `connect(node | 'out')`, `start(at)`,
+  `stop(at)`, `param(name).set/ramp/expRamp/target`; `now`, `state`, `resume()`. Sounds only from
+  `data:audio/…;base64` (embed them); no addresses, no microphone. The browser starts sound after the user
+  clicks or types on the page; TRIF resumes it then.
+- `controls`: your own `page.create('input' | 'select' | 'option')` (and `label`): inputs of type `range`,
+  `color`, `checkbox`, `number` or `text`, with `min`/`max`/`step`/`value`/`placeholder`; read them with
+  `.value` / `.checked`, set with `setValue` / `setChecked`, listen with `on('input')`. Never a password box,
+  never `autocomplete` or `name`, never inside one of the page's forms. Doesn't make the mod wait on its
+  own.
+- `keys`: `key` and `code` on key events wherever the focus is, except in fields and editors (hotkeys on a
+  focused post).
+- `read-drafts`: what the user types: `.value` of the page's text fields, textareas and selects, `.text` of
+  editors, `data` on `input` events, and keys in fields. Password and card fields stay hidden, always.
+
+- `site-data`: `trif.filterResponse(urlGlob, (data, {url, method, status}) => data)`: the site's JSON
+  responses (fetch and XHR) whose address matches (`*` for anything), as a plain copy, before the page
+  sees them. Change it in place or return it. **Remove or reorder only**: every string, number and boolean
+  in what you return, and every object key, has to be in what the site sent (a string or number no more
+  times than it was there), or TRIF keeps the original and `trif errors` says why. Synchronous: no `await`.
+- `page-data`: `el.pageData(path)`: the page's data behind an element, as a plain copy (no functions, no
+  elements): `props.…` (its React props) or `fiber.…` (its React fiber: `fiber.return.memoizedProps.user`).
+- `search-box`: `trif.searchBox({placeholder})` gives you a search box TRIF draws; place and style it like
+  any element; you can't fill or read it. When the user presses Enter, it goes to the address in the header
+  with their words: `// @powers search-box https://www.example.com/search?q={query}` (on the mod's own site).
+
+- `media`: on the page's own `<video>` and `<audio>`: `play()` (a promise of true, or false if the browser
+  wouldn't), `pause()`, `setMuted(bool)`, `setVolume(0..1)`, `seek(seconds)`, and `.media` (`{paused, muted,
+  volume, currentTime, duration}`). Never their source.
+- `go-to`: `trif.goTo(where)`: to a page the header lists (`// @powers go-to /home /i/bookmarks`: literal
+  paths of the site, no query, `#` or `*`), or to an address a link on the page already shows, on the
+  same site. Nothing you build: no query you add.
+- `click`: `el.click()` on what the header names, each on a line of its own with words the user reads:
+  `// @click the play button: button.play` (the hold says "can click these for you: the play button
+  (button.play)"). Never something that submits or resets a form (submit or reset buttons, a button with
+  no type in a form, a label for those), and never a link to another site, whatever the header says.
+- `write-drafts`: change what the user is about to post: `setValue(text)` on the page's text fields and
+  textareas (TRIF sends the page an `input` event, so React and the like see it), and `setText`, adding
+  and removing inside editors. Never a password or card field, a hidden input or a select. To change what
+  they typed you need to read it too (`read-drafts`). No addresses you make up: what you write may only
+  have the addresses already in that field or editor, or in a link on the page (a site can fetch one for a
+  preview before anything is posted); anything that looks like one counts (`example.com`, `node.js`).
+
+**Combinations.** Some powers together warn the user in the hold ("Together, it could put what it reads into
+something you post"; the list: docs/POWER-COMBINATIONS.md in TRIF's repository, or `trif check`), and more
+than three powers get one general warning. Ask for the fewest that do the job. On a page, an act of yours
+(writing a draft, clicking, playing media, go-to) is refused while another boxed mod there has a power that
+would make a warned pair with it that yours didn't ask for (the error says which); a mod that needs both
+asks for both.
+- `mods`: `trif.channel(name)` gives `send(data)` and `on((data, {from}) => …)` between your boxed mods on
+  this page that have the power: plain data only (text, numbers, true/false, null, arrays, plain objects),
+  delivered a moment later. Doesn't make the mod wait on its own.
 
 ## Writing mods TRIF can read
 

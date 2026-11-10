@@ -22,6 +22,9 @@
 export const SANDBOX_WORLD = 'trif-sandbox';
 export const SANDBOX_RUNTIME_ID = 'trif-sandbox-runtime';
 export const SES_FILE = 'vendor/ses.umd.min.js';
+// What that file must be: ses 2.3.0's dist/ses.umd.min.js from npm, unchanged (scripts/build-extension.js and
+// tests/sandbox.test.js check it; extension/vendor/README.txt).
+export const SES_SHA256 = '2ac48b2cda4e2e466a49a4acc7aab0288567e0c10ce96c0970ef1cadd0cec566';
 // The world's own Content Security Policy. SES evaluates the mod's code with eval inside its compartment, so
 // 'unsafe-eval' (the compartment itself has no eval or Function); nothing may connect anywhere; loads only
 // from data:/blob: (and images from the page's own site, which TRIF's address check narrows further).
@@ -48,7 +51,8 @@ export function sandboxModCode(id, source) {
  * same API, built in the page's world, around the mod's code, which has everything the page has.
  */
 export function sandboxPageCode(id, source) {
-  return `(${sandboxRuntime.toString()})('page', ${J(id)}, async function (${SANDBOX_GLOBALS.filter((n) => n !== 'Math' && n !== 'Date').join(', ')}) { "use strict";\n${source}\n});\n//# sourceURL=trif://${id}.js`;
+  // (the mod's first line is the script's first line, so `trif errors` gives its own line numbers)
+  return `(() => { const __trifMod = async function (${SANDBOX_GLOBALS.filter((n) => n !== 'Math' && n !== 'Date').join(', ')}) { "use strict"; ${source}\n};\n(${sandboxRuntime.toString()})('page', ${J(id)}, __trifMod); })();\n//# sourceURL=trif://${id}.js`;
 }
 
 /**
@@ -62,6 +66,7 @@ export function sandboxRuntime(mode, pageModId, pageFn) {
   // What it costs, for `trif`'s e2e and anyone measuring (__trifSandbox.stats): SES's own load (from the stamp
   // put before it: sandboxRuntimeScript), lockdown, each mod's first run, and the mods' callbacks.
   const now = () => performance.now();
+  let nativeStack = null; // (Firefox: Error.prototype's own stack getter, kept before lockdown)
   const stats = { sesMs: typeof G.__trifT0 === 'number' ? now() - G.__trifT0 : null, lockdownMs: null, startedAt: now(), mods: {}, callbacks: 0, callbackMs: 0 };
   // (TRIF's world: messaging to TRIF's background is for TRIF's code only, captured before any mod runs;
   // mods never get `chrome`: their global is the compartment's)
@@ -73,10 +78,23 @@ export function sandboxRuntime(mode, pageModId, pageFn) {
     try { delete G.browser; } catch { /* as above */ }
     // The language locked down once per world (every sandboxed mod in this page shares it). Built-ins newer
     // than SES knows are removed (reporting 'none': it would otherwise list them in the console each time).
+    // (errorTaming 'safe': a mod can't read any error's stack, which names TRIF's files; TRIF's own code reads
+    // them with SES's getStackString, which only this world's start compartment has, for `trif errors`)
+    // (Firefox keeps an error's stack behind an accessor on Error.prototype, which safe taming replaces for
+    // everyone: TRIF keeps the original first, for its own reading)
+    const sd = Object.getOwnPropertyDescriptor(Error.prototype, 'stack');
+    if (sd && typeof sd.get === 'function') nativeStack = sd.get;
     const tl = now();
-    G.lockdown({ errorTaming: 'unsafe', consoleTaming: 'unsafe', overrideTaming: 'severe', stackFiltering: 'concise', reporting: 'none' });
+    G.lockdown({ errorTaming: 'safe', consoleTaming: 'unsafe', overrideTaming: 'severe', stackFiltering: 'concise', reporting: 'none' });
     stats.lockdownMs = now() - tl;
   }
+  const gss = SANDBOX && typeof G.getStackString === 'function' ? G.getStackString : null;
+  const stackOf = (e) => {
+    let st = '';
+    try { st = gss ? String(gss(e) || '') : String((e && e.stack) || ''); } catch { st = ''; }
+    if (!st && nativeStack) { try { st = String(nativeStack.call(e) || ''); } catch { st = ''; } }
+    return st;
+  };
   const harden = SANDBOX ? G.harden : (o) => Object.freeze(o);
   const D = document;
   const nativeConsole = { log: console.log, warn: console.warn, error: console.error };
@@ -89,7 +107,8 @@ export function sandboxRuntime(mode, pageModId, pageFn) {
   const report = (modId, err) => {
     try {
       const message = err && typeof err === 'object' && 'message' in err ? String(err.message) : String(err);
-      const stack = err && typeof err === 'object' ? String(err.stack || '') : '';
+      let stack = '';
+      try { stack = err && typeof err === 'object' ? String(stackOf(err) || '') : ''; } catch { /* none */ }
       push(store.errors, { mod: modId, message: message.slice(0, 4000), stack: stack.slice(0, 8000), time: Date.now(), ...(SANDBOX ? { sandboxed: true } : {}) }, MAX_ERRORS);
       nativeConsole.error.call(console, '[TRIF]', modId, message);
     } catch { /* never throw into a mod */ }
@@ -107,6 +126,16 @@ export function sandboxRuntime(mode, pageModId, pageFn) {
     'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'strong', 'em', 'b', 'i', 'u', 's', 'small', 'sup', 'sub', 'mark', 'code', 'pre', 'blockquote', 'label',
     'br', 'hr', 'figure', 'figcaption', 'table', 'thead', 'tbody', 'tr', 'td', 'th', 'caption', 'canvas', 'details', 'summary', 'progress']);
   const ATTRS = new Set(['id', 'class', 'title', 'role', 'hidden', 'alt', 'width', 'height', 'lang', 'dir', 'tabindex', 'colspan', 'rowspan', 'open', 'value', 'max', 'href', 'src']);
+  // The page's own code reads attributes as instructions: htmx's data-hx-post, Turbo's data-turbo-method,
+  // Stimulus's data-controller, classes a selector-observer acts on, ids it finds elements (or window globals)
+  // by. So the names a mod gives are TRIF's: data attributes only data-trif-*, and ids and classes only
+  // trif-* (aria-* stay: they describe, they don't instruct). (`name` isn't offered at all.)
+  const DATA_OK = /^data-trif-[a-z0-9-]+$/;
+  const ARIA_OK = /^aria-[a-z]+$/;
+  const OWN_NAME = /^trif-[A-Za-z0-9_-]*$/;
+  const nameOk = (n) => ATTRS.has(n) || DATA_OK.test(n) || ARIA_OK.test(n);
+  const nameRefused = (n) => (/^data-/.test(n) ? `only data-trif-* data attributes are offered (the page's own code could act on ${n})` : `the ${n} attribute isn't offered`);
+  const ownTokens = (v) => String(v).trim().split(/\s+/).filter(Boolean).every((t) => OWN_NAME.test(t));
   // (an address only where it can't run or send anything by itself: a link's href, an image's src; `value`
   // only on a progress bar or list item, never on a form field, whose value the site would receive)
   const ATTR_TAGS = { href: new Set(['a']), src: new Set(['img']), value: new Set(['progress', 'li']), max: new Set(['progress']) };
@@ -174,7 +203,22 @@ export function sandboxRuntime(mode, pageModId, pageFn) {
   const created = new WeakSet(); // nodes a mod made (page.create, clone)
   const nodeOf = (s) => { const n = s && typeof s === 'object' ? nodes.get(s) : undefined; if (!n) fail('that isn\'t an element TRIF gave you'); return n; };
   const kidOf = (k) => (typeof k === 'string' ? k : nodeOf(k));
+  // What a form sends is the page's: the page's own fields stay in the form they're in (moving one into, out
+  // of or between forms changes what's submitted), and a mod's button never goes inside a form.
+  const FORM_FIELDS = 'button, input, select, textarea, fieldset, output, object';
+  const formsOk = (parent, kids) => {
+    const dest = parent && parent.nodeType === 1 ? parent.closest('form') : null;
+    for (const k of kids) {
+      if (typeof k === 'string' || k.nodeType !== 1) continue;
+      for (const f of [...(k.matches(FORM_FIELDS) ? [k] : []), ...k.querySelectorAll(FORM_FIELDS)]) {
+        if (created.has(f)) { if (dest && f.localName === 'button') fail('a button a mod makes can\'t go inside a form'); continue; }
+        if (f.hasAttribute('form')) continue; // (it names its form: where it is doesn't change that)
+        if ((f.form || null) !== dest) fail(`the page's own <${f.localName}> can't be moved into, out of or between forms`);
+      }
+    }
+  };
   const textInto = (parent, kids) => {
+    formsOk(parent, kids);
     if (kids.some((k) => typeof k === 'string') && isRaw(parent)) fail(`text can't be written into <${parent.localName}>`);
   };
 
@@ -191,17 +235,21 @@ export function sandboxRuntime(mode, pageModId, pageFn) {
   };
   const list = (nl) => harden(Array.prototype.map.call(nl, wrap));
 
-  const SVG_COPY_ATTR = (n) => SVG_ATTRS.test(n) || n === 'class' || n === 'id' || n === 'role' || /^(data|aria)-[a-z0-9-]+$/.test(n);
+  // (a copy keeps no page-given id, class or data attribute: the page's code would act on the copy too)
+  const SVG_COPY_ATTR = (n) => SVG_ATTRS.test(n) || n === 'class' || n === 'id' || n === 'role' || DATA_OK.test(n) || ARIA_OK.test(n);
   const safeCopy = (from) => {
     const tag = from.localName.toLowerCase();
     const svg = from.namespaceURI === SVG_NS;
     if (svg ? !SVG_TAGS.has(tag) : from.namespaceURI !== HTML_NS || !TAGS.has(tag)) return null;
     const to = svg ? D.createElementNS(SVG_NS, from.localName) : D.createElement(tag);
+    if (tag === 'button' && !svg) to.setAttribute('type', 'button');
     for (const a of from.attributes) {
       const n = a.name.toLowerCase();
       if (/^on/.test(n) || n === 'style') continue;
       if (svg) { if (!SVG_COPY_ATTR(n) || (/url\s*\(/i.test(a.value) && !/^\s*url\(\s*["']?#/.test(a.value))) continue; }
-      else if (!(ATTRS.has(n) || /^(data|aria)-[a-z0-9-]+$/.test(n)) || (ATTR_TAGS[n] && !ATTR_TAGS[n].has(tag)) || ((n === 'href' || n === 'src') && !urlOk(a.value, n))) continue;
+      else if (!nameOk(n) || (ATTR_TAGS[n] && !ATTR_TAGS[n].has(tag)) || ((n === 'href' || n === 'src') && !urlOk(a.value, n))) continue;
+      if ((n === 'id' || n === 'class') && !ownTokens(a.value)) continue;
+      if (n === 'type') continue;
       to.setAttribute(a.name, a.value);
     }
     for (const c of from.childNodes) {
@@ -212,8 +260,16 @@ export function sandboxRuntime(mode, pageModId, pageFn) {
     return to;
   };
 
+  // Which key was pressed reaches a mod only when it wasn't typed into something editable (a field, an editor,
+  // or an element that may hold one in its shadow root): hotkeys work, passwords stay unseen.
+  const typedInto = (e) => {
+    const p = typeof e.composedPath === 'function' ? e.composedPath() : [];
+    const t = p[0] || e.target;
+    if (!t || t.nodeType !== 1 || t === D.body || t === D.documentElement) return false;
+    return /^(input|textarea|select)$/.test(t.localName) || t.isContentEditable || t.localName.includes('-') || !!t.shadowRoot;
+  };
   const eventOf = (e) => harden({
-    type: String(e.type), key: typeof e.key === 'string' ? e.key : null, code: typeof e.code === 'string' ? e.code : null,
+    type: String(e.type), ...(typedInto(e) ? { key: null, code: null } : { key: typeof e.key === 'string' ? e.key : null, code: typeof e.code === 'string' ? e.code : null }),
     shift: !!e.shiftKey, alt: !!e.altKey, ctrl: !!e.ctrlKey, meta: !!e.metaKey,
     x: typeof e.clientX === 'number' ? e.clientX : null, y: typeof e.clientY === 'number' ? e.clientY : null,
     deltaX: typeof e.deltaX === 'number' ? e.deltaX : null, deltaY: typeof e.deltaY === 'number' ? e.deltaY : null, repeat: !!e.repeat,
@@ -397,6 +453,8 @@ export function sandboxRuntime(mode, pageModId, pageFn) {
         const t = str(tag, 'a tag', 40).toLowerCase();
         if (!TAGS.has(t)) fail(`<${t}> elements aren't offered`);
         const n = D.createElement(t);
+        // (a button that never submits a form, whatever it's in: its type isn't offered to change)
+        if (t === 'button') n.setAttribute('type', 'button');
         created.add(n);
         return wrap(n);
       },
@@ -409,7 +467,7 @@ export function sandboxRuntime(mode, pageModId, pageFn) {
   // ---- the element stand-ins' methods (shared). `listen` and errors are the calling mod's: a stand-in is
   // the same object for every mod, so which mod listens is the one whose code is running (`current`).
   // (code after an await runs outside both: then the mod is the one in the call stack, by its sourceURL)
-  const modFromStack = () => { const m = /trif-sandbox:\/\/([^\s/]+\/[^\s/:)]+?)\.js/.exec(String(new Error().stack || '')); return m ? m[1] : null; };
+  const modFromStack = () => { const m = /trif-sandbox:\/\/([^\s/]+\/[^\s/:)]+?)\.js/.exec(String(stackOf(new Error()) || '')); return m ? m[1] : null; };
   const cur = () => current || apiFor(modFromStack() || '(a sandboxed mod)');
   // (each method guarded: a browser error reaches the mod as plain text)
   const guardShared = (fn) => function (...args) {
@@ -449,26 +507,34 @@ export function sandboxRuntime(mode, pageModId, pageFn) {
     setAttr(name, value) {
       const node = nodeOf(this);
       const n = str(name, 'an attribute name', 100).toLowerCase(), v = str(String(value), 'a value', 200000);
-      if (!(ATTRS.has(n) || /^(data|aria)-[a-z0-9-]+$/.test(n))) fail(`the ${n} attribute isn't offered`);
+      if (!nameOk(n)) fail(nameRefused(n));
       if (ATTR_TAGS[n] && (!ATTR_TAGS[n].has(node.localName) || node.namespaceURI !== HTML_NS)) fail(`${n} isn't offered on <${node.localName}>`);
+      if (n === 'id' || n === 'class') {
+        if (!ownTokens(v) || (n === 'id' && /\s/.test(v.trim()))) fail(`${n === 'id' ? 'an id' : 'classes'} must start with trif- (the page's own code finds elements by ${n})`);
+        // (the page's own id or classes stay theirs: a mod adds its classes with classes.add)
+        if (!created.has(node) && node.hasAttribute(n) && !ownTokens(node.getAttribute(n))) fail(`the page's own ${n} isn't a mod's to replace${n === 'class' ? ' (classes.add adds a trif- class)' : ''}`);
+      }
       if ((n === 'href' || n === 'src') && !urlOk(v, n)) fail(`${n} only takes this site's own addresses without a query${n === 'src' ? ', or data:/blob: images' : ''}`);
       node.setAttribute(n, v);
     },
     removeAttr(name) {
       const n = str(name, 'an attribute name', 100).toLowerCase();
-      if (!(ATTRS.has(n) || /^(data|aria)-[a-z0-9-]+$/.test(n))) fail(`the ${n} attribute isn't offered`);
-      nodeOf(this).removeAttribute(n);
+      const node = nodeOf(this);
+      if (!nameOk(n)) fail(nameRefused(n));
+      if ((n === 'id' || n === 'class') && !created.has(node) && node.hasAttribute(n) && !ownTokens(node.getAttribute(n))) fail(`the page's own ${n} isn't a mod's to remove`);
+      node.removeAttribute(n);
     },
     get classes() {
       const node = nodeOf(this);
       let c = classesOf.get(node);
       if (!c) {
-        const cls = (x) => str(x, 'a class', 200);
+        // (a mod adds, removes and toggles only its own trif- classes; it can read any)
+        const cls = (x) => { str(x, 'a class', 200); if (!OWN_NAME.test(x)) fail(`classes a mod sets must start with trif- (the page's own code acts on classes like "${x.slice(0, 60)}")`); return x; };
         c = harden({
           add: guardShared((...x) => node.classList.add(...x.map(cls))),
           remove: guardShared((...x) => node.classList.remove(...x.map(cls))),
           toggle: guardShared((x, on) => node.classList.toggle(cls(x), on === undefined ? undefined : !!on)),
-          has: guardShared((x) => node.classList.contains(cls(x))),
+          has: guardShared((x) => node.classList.contains(str(x, 'a class', 200))),
         });
         classesOf.set(node, c);
       }
@@ -531,7 +597,8 @@ export function sandboxRuntime(mode, pageModId, pageFn) {
         }
         // (an async function: a top-level return ends the mod, and await works at the top; what it throws
         // after an await is caught too)
-        const p = c.evaluate(`(async function () { "use strict";\n${source}\n})();\n//# sourceURL=trif-sandbox://${id}.js`);
+        // (the mod's first line on the first line, so `trif errors` gives the file's own line numbers)
+        const p = c.evaluate(`(async function () { "use strict"; ${source}\n})();\n//# sourceURL=trif-sandbox://${id}.js`);
         if (p && typeof p.catch === 'function') p.catch((err) => report(id, err));
       } else {
         const e = api.endowments;
@@ -550,7 +617,9 @@ export function sandboxRuntime(mode, pageModId, pageFn) {
   try {
     G.addEventListener('unhandledrejection', (ev) => {
       const r = ev.reason;
-      const m = /trif-sandbox:\/\/([^\s/]+\/[^\s/:)]+?)\.js/.exec(String((r && r.stack) || ''));
+      let st = '';
+      try { st = r && typeof r === 'object' ? String(stackOf(r) || '') : ''; } catch { /* none */ }
+      const m = /trif-sandbox:\/\/([^\s/]+\/[^\s/:)]+?)\.js/.exec(st);
       if (m) report(m[1], r);
     });
   } catch { /* none */ }

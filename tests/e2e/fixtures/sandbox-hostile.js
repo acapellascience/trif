@@ -41,6 +41,34 @@ for (const tag of ['link', 'script', 'iframe', 'frame', 'object', 'embed', 'form
 t('a link to another site', () => { page.find('#plink').setAttr('href', other + '/e2e-sbx-leak-href'); return 'set'; });
 t('a link to this site with a query', () => { page.find('#plink').setAttr('href', '/two.html?leak=1'); return 'set'; });
 
+// ---- the page's own code as the messenger (red-team RT-1: script gadgets; the test page runs an htmx-like
+// observer that turns such attributes into requests)
+t('htmx\'s data-hx-post on a new element', () => { const c = page.create('div'); c.setAttr('data-hx-post', '/e2e-sbx-leak-hx'); page.body.append(c); return 'set'; });
+t('the page\'s gadget attribute (data-auto-post) on a new element', () => { const c = page.create('div'); c.setAttr('data-auto-post', '/e2e-sbx-leak-gadget'); page.body.append(c); return 'set'; });
+t('Stimulus\'s data-controller', () => { const c = page.create('div'); c.setAttr('data-controller', 'x'); page.body.append(c); return 'set'; });
+t('Turbo\'s data-turbo-method on a link', () => { page.create('a').setAttr('data-turbo-method', 'post'); return 'set'; });
+t('a class the page acts on', () => { const c = page.create('div'); c.classes.add('js-auto-post'); page.body.append(c); return 'added'; });
+t('a class the page acts on, through setAttr', () => { const c = page.create('div'); c.setAttr('class', 'js-auto-post'); page.body.append(c); return 'set'; });
+t('an id the page reads (DOM clobbering)', () => { const c = page.create('div'); c.setAttr('id', 'sbxConfig'); page.body.append(c); return 'set'; });
+t('the page\'s own id replaced', () => { page.find('#txt').setAttr('id', 'trif-x'); return 'set'; });
+t('the page\'s own class taken off (what its code acts on)', () => { page.find('#gadget-src').classes.remove('done'); return 'removed'; });
+t('the page\'s own classes replaced', () => { page.find('#gadget-src').setAttr('class', 'trif-x'); return 'set'; });
+t('the page\'s own class attribute removed', () => { page.find('#gadget-src').removeAttr('class'); return 'removed'; });
+t('a copy of a page element, keeping what its code acts on', () => {
+  const c = page.find('#gadget-src').clone(); page.body.append(c);
+  return [c.attr('data-auto-post'), c.attr('class'), c.attr('id')].filter((x) => x !== null).join(' ') || undefined;
+});
+
+// ---- forms (red-team RT-2: what the page's form sends)
+t('a button the mod made, put in the page\'s form', () => { page.find('#f').append(page.create('button')); return 'put'; });
+t('a button the mod made, put next to a field in the page\'s form', () => { page.find('#fi').after(page.create('button')); return 'put'; });
+t('a button the mod made is a submit button', () => { const b = page.create('button'); return b.attr('type') === 'button' ? undefined : `type ${b.attr('type')}`; });
+t('a button the mod made turned into a submit button', () => { page.create('button').setAttr('type', 'submit'); return 'set'; });
+t('the page\'s field moved out of its form', () => { page.body.append(page.find('#fi')); return 'moved'; });
+t('the page\'s field moved into another form', () => { page.find('#f2').append(page.find('#fi')); return 'moved'; });
+t('the page\'s button moved into another form', () => { page.find('#f2').prepend(page.find('#fb')); return 'moved'; });
+t('the page\'s password field moved into a form', () => { page.find('#f2').append(page.find('#pw')); return 'moved'; });
+
 // ---- code from strings
 for (const n of ['eval', 'Function', 'Compartment', 'lockdown', 'harden']) absent(n);
 t('the Function constructor, through a function', () => (function () {}).constructor('return 1')());
@@ -109,4 +137,4 @@ t('cookies', () => document.cookie);
 t('localStorage', () => localStorage.getItem('x'));
 t('postMessage to the page', () => postMessage('x', '*'));
 
-page.root.setAttr('data-sbx-hostile', JSON.stringify(R));
+page.root.setAttr('data-trif-sbx-hostile', JSON.stringify(R));

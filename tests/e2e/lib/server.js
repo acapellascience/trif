@@ -26,7 +26,22 @@ const PAGE = (title, body) => `<!doctype html>
 // keys, submits, messages, inline code that ran), an empty script element the page made (text written into it
 // would run), a style element, a form, links, an image, a frame; a row added later; Amazon-like results and a
 // logo for the two sample ports; and 1000 cells for the timing.
-const SANDBOX_PAGE = () => PAGE('TRIF e2e sandbox', `<script>
+const SANDBOX_PAGE = () => PAGE('TRIF e2e sandbox', `<div id="gadget-src" class="js-src done" data-auto-post="/e2e-sbx-leak-clone">gadget source</div>
+<script>
+// (a stand-in for the page's own attribute-directed code, htmx-like: it turns attributes on elements added to
+// the page into requests, and acts when a "done" class is taken off; e2e sandboxedCheck, red-team RT-1)
+new MutationObserver((recs) => {
+  for (const r of recs) {
+    if (r.type === 'attributes' && r.target.id === 'gadget-src' && !r.target.classList.contains('done')) fetch('/e2e-sbx-leak-class-removed', { method: 'POST', body: 'g' });
+    for (const n of r.addedNodes || []) if (n.nodeType === 1) for (const el of [n, ...n.querySelectorAll('*')]) {
+      const u = el.getAttribute('data-auto-post') || el.getAttribute('data-hx-post') || (el.classList.contains('js-auto-post') ? '/e2e-sbx-leak-class' : null)
+        || (el.id === 'sbxConfig' ? '/e2e-sbx-leak-id' : null) || (el.hasAttribute('data-controller') ? '/e2e-sbx-leak-stimulus' : null);
+      if (u) fetch(u, { method: 'POST', body: 'gadget' });
+    }
+  }
+}).observe(document.documentElement, { childList: true, subtree: true, attributes: true, attributeFilter: ['class'] });
+</script>
+<script>
 window.__pageSecret = 'from the page';
 window.__hits = [];
 for (const t of ['click', 'keydown', 'submit', 'input', 'message', 'focus']) window.addEventListener(t, (e) => __hits.push(t + ':' + ((e.target && e.target.id) || '')), true);
@@ -40,6 +55,8 @@ document.addEventListener('DOMContentLoaded', () => {
 <div id="box"></div>
 <p id="target-click">click target</p>
 <form id="f" action="/e2e-sbx-leak-submit"><input id="fi" name="q" value="v"><textarea id="ta">t</textarea><select id="sel"><option id="opt">o</option></select><button id="fb">Go</button></form>
+<form id="f2" action="/e2e-sbx-leak-submit2"><p>another form</p></form>
+<p><input id="pw" type="password" placeholder="password"></p>
 <p><a id="blank" href="/two.html" target="_blank">blank</a> <a id="plink" href="/two.html">page link</a></p>
 <img id="pimg" src="/favicon.ico" alt="" width="1" height="1">
 <style id="pstyle">#title { letter-spacing: 0 }</style>

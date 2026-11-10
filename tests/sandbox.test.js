@@ -67,6 +67,10 @@ const s = '<!-- x';
   assert.deepEqual(lint.find((l) => l.what === 'document').lines, [2]);
   assert.match(lint.find((l) => l.what === '.innerHTML').why, /setText/);
   assert.match(lint.find((l) => l.what === '.click').why, /can't click/);
+  // names a mod gives: TRIF's own
+  assert.deepEqual(sandboxLint(`el.setAttr('data-hx-post', '/x'); el.setAttr('data-trif-ok', '1'); el.setAttr('id', 'config'); el.setAttr('id', 'trif-a');
+el.classes.add('js-x'); el.classes.add('trif-y'); el.classes.remove('done'); el.removeAttr('data-ahr');`).map((l) => l.what),
+  ["setAttr('data-hx-post')", "setAttr('id', 'config')", "classes.add('js-x')", "classes.remove('done')", "removeAttr('data-ahr')"]);
   // the API, and the language: nothing
   assert.deepEqual(sandboxLint(`trif.css('a { color: red }'); trif.observe('article', (a) => { if (a.text.includes('Ad')) a.hide(); });
 const prefs = await trif.settings('prefs', { on: true }); setTimeout(() => console.log(Math.random(), Date.now()), 5);
@@ -125,4 +129,13 @@ test('the sandboxed examples (ports of Tim\'s Simple Shopping and DVD Logo) are 
     assert.deepEqual(sandboxLint(text), [], f);
     new vm.Script(`(async function () {\n${text}\n})`); // parses
   }
+});
+
+test('the sandbox\'s SES is ses 2.3.0\'s npm file, unchanged (its sha256), and the build checks it too', async () => {
+  const crypto = require('crypto');
+  const { SES_SHA256 } = await import('../extension/sandbox.js');
+  const file = fs.readFileSync(path.join(REPO, 'extension', 'vendor', 'ses.umd.min.js'));
+  assert.equal(crypto.createHash('sha256').update(file).digest('hex'), SES_SHA256);
+  assert.match(fs.readFileSync(path.join(REPO, 'extension', 'vendor', 'README.txt'), 'utf8'), new RegExp(SES_SHA256));
+  assert.match(fs.readFileSync(path.join(REPO, 'scripts', 'build-extension.js'), 'utf8'), /SES_SHA256/);
 });

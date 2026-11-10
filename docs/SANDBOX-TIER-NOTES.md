@@ -118,7 +118,8 @@ world per mod would pay the 8-10 ms per mod per page, hence one shared world. No
 
 ## Hostile e2e: results
 
-Final runs (Chrome 156: 56 of 56 checks passed; Firefox 159: 61 of 61): 123 escapes tried by
+Final runs (Chrome 156: 56 of 56 checks passed; Firefox 159: 61 of 61): 143 escapes tried (123 before the
+red team, 20 from its findings: see "Red-team fixes") by
 tests/e2e/fixtures/sandbox-hostile.js, every one refused (TRIF or the language said no) or absent (the thing
 isn't there), in both browsers; the test server saw none of the `e2e-sbx-leak` addresses; the page's own
 listeners saw no click, key, submit, focus or message and no inline code ran; its prototypes were untouched
@@ -150,18 +151,20 @@ handler and frame were as they were; the tab stayed on the page and no tab opene
 
 ## Open questions
 
-- **Script gadgets**: the page's own code reacts to the DOM. A sandboxed mod can set `class`, `id` and
-  `data-*` on elements; a framework that runs code from attributes it finds (Alpine's `x-*` isn't offered,
-  but knockout's `data-bind`, htmx's `data-hx-*`, Turbo's `data-turbo-method`) or a page that reads
-  `window.<id>` (DOM clobbering) could be driven that way. Not closed. Options: only `data-trif-*` on
-  elements the page made, or no `id`/`data-*` on page elements at all.
-- **Forms**: values aren't writable, but a mod can move a page's fields between forms (what's submitted
-  changes) or add a `<button>` inside a form (the user's click submits it). Deception, needing the user's
-  click; not closed.
+- **Script gadgets** (red-team RT-1, closed for names): a mod's data attributes, ids and classes are
+  `trif-` only (see "Red-team fixes"). What's left that the page's code might act on: `aria-*`, `role`,
+  `title`, `hidden`, `tabindex`, `open` (a `<details>` the page lazy-loads on its `toggle`), and moving or
+  removing the page's own elements (an observer could react to that). And links: a same-site `href`
+  without a query that a framework prefetches on hover (Turbo 8 does) is a GET to the site without a
+  click. Low; not closed.
+- **Forms** (red-team RT-2, closed for buttons and moves): what's left is removing a page field
+  (`remove()`), which changes what's submitted, and a mod's `<label>` around a page checkbox. Deception that
+  needs the user's click.
 - **Deceiving the user by what's shown** (any mod can, rules mods too).
 - **Denial of service**: a mod looping forever hangs the page (one thread); SES doesn't contain it.
-- **Keystrokes**: `page.on('keydown')` lets a mod see what's typed on the page; it can't send it anywhere,
-  and settings are per site, but it can show it.
+- **Keystrokes** (red-team RT-4, closed for fields): which key is pressed in a field reaches no mod; a
+  field in a closed shadow root on a plain element isn't detectable. And the text of a contenteditable
+  editor is page text like any other: a mod can read it (it can't send it).
 - **Page CSP**: a `<style>` element from the world on a page whose CSP forbids inline styles (style-src
   without 'unsafe-inline'): not tested. In Chrome the world's own CSP may cover it.
 - **API gaps found while porting**: CSS masks with the site's images, `getBBox`, drawing images on a canvas
@@ -205,3 +208,70 @@ the user's OK (in the side panel) to run as a page script instead`, `kind: rules
   from: the npm package, unchanged.
 - The Chrome build: the world needs no new permission (userScripts already), nor web_accessible_resources
   (the browser injects vendor/ses.umd.min.js as a user script file).
+
+## Red-team fixes (report: branch sandbox-redteam, docs/RED-TEAM-REPORT.md)
+
+The red team found no compartment escape and no direct exfiltration; it found the shared DOM was enough to
+make the page (or the user) act. What changed, and what each costs mods:
+
+- **RT-1, script gadgets (high).** Names a mod gives are TRIF's: data attributes only `data-trif-*`; `id` and
+  `class` only `trif-*`, and only on elements the mod made or that have no page-given value (the page's own
+  ids and classes can't be replaced or removed); `classes.add/remove/toggle` only `trif-` classes (`has`
+  reads any); `clone()` keeps no page-given id, class or data attribute. `aria-*` stays. `name` was never
+  offered. `trif check` lints literal names that would be refused.
+  *Cost*: a mod marks elements with `data-trif-…` or `trif-` classes (the Simple Shopping port changed
+  `data-ahr-hide` to `data-trif-hide`); it can't take a page class off to un-collapse something (override it
+  with `trif.css` instead), can't give a page element an id, and copies lose the page's classes, so page CSS
+  that targets them doesn't style the copy.
+- **RT-2, forms (medium).** A button a mod makes is created `type="button"` (`type` isn't offered, so it
+  can't change), and a mod's button can't be put inside a form at all. The page's own form-associated
+  elements (button, input, select, textarea, fieldset, output, object) can't be moved into, out of or between
+  forms (unless they name their form with `form=`, which moving doesn't change). Moving them within their
+  form, and moving anything else, still works. *Cost*: rearranging a page's form into another form or out
+  of it is refused; a mod can't add its own buttons inside a form (put them next to it).
+- **RT-3, clickjacking (medium, tier-wide).** Not changed in code (rules mods can do it with CSS alone).
+  Proposal, not built: on the page's own interactive elements (`a`, `button`, `input`, `select`,
+  `textarea`, `label`, `summary`, `[role=button]`, `[onclick]`), `style()` refuses `opacity` below ~0.3,
+  `visibility: hidden`, `clip-path`, `filter` and `transform`, and refuses `position`, `top/left/right/
+  bottom` and `z-index` together with them; `hide()` (display none) stays. That stops "float the real control,
+  invisible, over a decoy" through stand-ins, cheaply; `trif.css` and rules mods can still do it with a
+  selector, so the honest fix is the wording (below), plus perhaps a later check of the CSS text for
+  `opacity: 0`-like values on interactive selectors.
+- **RT-4, keystrokes (low).** `key` and `code` reach a mod only when the key wasn't pressed in something
+  editable: input, textarea, select, contenteditable, or an element that may hold a field in its shadow root
+  (a custom element, or one with an open shadow root). The mod still gets the type, modifiers and target.
+  (`input` events never carried the typed data.) *Cost*: none for hotkeys on the page; a mod can't react to
+  which key is pressed inside a field. Residual: a field inside a *closed* shadow root on a plain element
+  (`div`, `span`, …) isn't detectable from TRIF's world.
+- **RT-5, the settings channel's world check (low).** Now `sender.userScriptWorldId === "trif-sandbox"` or
+  no answer. Both supported browsers send it (Chrome 133+, Firefox 136+; Firefox's seen in the e2e probe,
+  Chrome's by the settings e2e passing with the strict check).
+- **RT-6, SES integrity (design).** The SES file's sha256 is a constant (`SES_SHA256` in sandbox.js) checked
+  by `scripts/build-extension.js` (the build fails) and by tests/sandbox.test.js. `lockdown` now uses
+  `errorTaming: 'safe'`: a mod can't read any error's `stack` (which named TRIF's and SES's files); TRIF's
+  runtime reads stacks with SES's `getStackString`, which only its start compartment has, so `trif errors`
+  keeps stacks, and line numbers are now the file's own (the mod's source starts on the wrapper's first line,
+  in the sandbox and as a page script; before, they were one line off).
+- **Regression checks**: the red team's PoCs, adapted to run as real sandboxed mods through the extension, are
+  in the hostile e2e (tests/e2e/fixtures/sandbox-hostile.js "the page's own code as the messenger" and
+  "forms"; the test page runs an htmx-like observer that turns `data-auto-post`, `data-hx-post`,
+  `data-controller`, a `js-auto-post` class, an `sbxConfig` id, and a page class being taken off into
+  requests), plus real keys in the e2e (two typed into a password field: unseen; one on the page: seen) and
+  the mod's own button, class and data attribute working.
+
+### Wording awaiting Tim's OK (not changed in the UI)
+
+The red team is right that "can't … click" overstates it: a mod (sandboxed or rules) can't click, but it can
+arrange the page so the user's own click does something else. Drafts:
+- Sandboxed group line, now *"Run in TRIF's sandbox: they can't send, click or load anything."*:
+  - A: *"Run in TRIF's sandbox: they change what the page shows, and can't send, load or click anything themselves."*
+  - B (shorter): *"Run in TRIF's sandbox: they can rearrange the page, but can't send or click anything themselves."*
+- Rules group line (same issue, RT-3 is tier-wide), now *"Run by TRIF from data: they can't send, click or
+  load anything."*: *"Run by TRIF from data: they change how the page looks, and can't send, load or click
+  anything themselves."*
+- Proposed CHANGELOG summary bullet (replacing the earlier proposal): *"- **Sandboxed mods:** JavaScript that
+  changes what pages show but can't send or click anything itself, so it never waits for you. Rules,
+  Sandboxed and Page scripts each have a switch per site."*
+- The `### More` bullet already on the branch (*"…it can't send, click or load anything, so it never waits
+  for your OK"*): *"…it changes what the page shows but can't send, load or click anything itself, so it
+  never waits for your OK"*.

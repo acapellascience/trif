@@ -88,11 +88,22 @@ function sandboxLint(code) {
     }
     if (t.t === 'id' && t.v === 'catch' && ts[k + 1] && ts[k + 1].v === '(' && ts[k + 2] && ts[k + 2].t === 'id') declared.add(ts[k + 2].v);
   }
+  const own = (v) => String(v).trim().split(/\s+/).filter(Boolean).every((x) => /^trif-/.test(x));
   for (let k = 0; k < ts.length; k++) {
     const t = ts[k];
     if (t.t !== 'id') continue;
     const prev = ts[k - 1], next = ts[k + 1];
     const member = prev && prev.t === 'p' && (prev.v === '.' || prev.v === '?.');
+    // Names a mod gives must be TRIF's (extension/sandbox.js: the page's own code acts on data-*, ids, classes)
+    const arg = (i) => ts[k + 2 + i * 2];
+    if (member && next && next.v === '(' && (t.v === 'setAttr' || t.v === 'removeAttr') && arg(0) && arg(0).t === 'str') {
+      const n = arg(0).v.toLowerCase();
+      if (/^data-/.test(n) && !/^data-trif-/.test(n)) add(`${t.v}('${n}')`, 'only data-trif-* data attributes are offered (the page\'s own code could act on others): name it data-trif-…', t.line);
+      if (t.v === 'setAttr' && (n === 'id' || n === 'class') && arg(1) && arg(1).t === 'str' && !own(arg(1).v)) add(`setAttr('${n}', '${arg(1).v.slice(0, 40)}')`, `${n === 'id' ? 'an id' : 'classes'} a mod gives must start with trif-`, t.line);
+    }
+    if (member && next && next.v === '(' && /^(add|remove|toggle)$/.test(t.v) && ts[k - 2] && ts[k - 2].v === 'classes' && arg(0) && arg(0).t === 'str' && !own(arg(0).v)) {
+      add(`classes.${t.v}('${arg(0).v.slice(0, 40)}')`, 'classes a mod adds, removes or toggles must start with trif- (the page\'s own code acts on its classes)', t.line);
+    }
     if (member) {
       // (`.style.x`: a real element's style object; a stand-in's style is a function)
       if (t.v === 'style' && next && next.t === 'p' && next.v === '.') add('.style.…', 'a stand-in\'s style is style(property, value)', t.line);

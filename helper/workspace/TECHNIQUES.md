@@ -62,10 +62,10 @@ script only for what needs the page: filtering the data the site loads, the app'
 trif.css('[data-testid=sidebarColumn] { display: none !important }');
 trif.observe('article', (post) => {
   if (post.text.includes('Promoted')) return post.hide();
-  if (post.findAll('[data-testid=tweetText]').length > 3) post.classes.add('calm-long');
+  if (post.findAll('[data-testid=tweetText]').length > 3) post.classes.add('trif-calm-long');
 });
 const prefs = await trif.settings('prefs', { color: 'rgb(255, 230, 150)' });
-trif.css(`.calm-long { outline: 2px solid ${prefs.value.color} }`);
+trif.css(`.trif-calm-long { outline: 2px solid ${prefs.value.color} }`);
 ```
 
 What it has (everything else is simply not there, and `trif check` lists what you used that isn't):
@@ -81,9 +81,10 @@ What it has (everything else is simply not there, and `trif check` lists what yo
   read as plain data), `url`, `title`, `width`, `height`, `scrollX`, `scrollY`, `root`, `body`,
   `prefersReducedMotion`, `prefersDark`.
 - **Elements, as TRIF's stand-ins** (not the real nodes): `tag`, `text`, `setText(t)`, `attr(name)`,
-  `setAttr(name, value)` (`id`, `class`, `title`, `role`, `hidden`, `alt`, sizes, `data-*`, `aria-*`; a
-  link's `href` only to this site's pages without a query; an image's `src` only `data:`/`blob:` or an
-  image the page already shows), `removeAttr`, `classes.add/remove/toggle/has`, `style(prop, value)`
+  `setAttr(name, value)` (`title`, `role`, `hidden`, `alt`, sizes, `aria-*`, `data-trif-*`, and an `id` or
+  `class` starting with `trif-`; a link's `href` only to this site's pages without a query; an image's `src`
+  only `data:`/`blob:` or an image the page already shows), `removeAttr`, `classes.add/remove/toggle`
+  (`trif-` classes) and `has` (any), `style(prop, value)`
   (read with one argument; values that load nothing), `hide()`, `show()`, `find`, `findAll`, `closest`,
   `matches`, `parent`, `children`, `next`, `previous`, `append`/`prepend`/`before`/`after` (stand-ins or
   text), `remove()`, `clone()` (a copy with only allowed elements and attributes), `rect()`,
@@ -93,6 +94,15 @@ What it has (everything else is simply not there, and `trif check` lists what yo
   and the JavaScript language (frozen: mods can't change `Array.prototype` and the like).
 
 Good to know:
+- **Names you give are TRIF's**: data attributes `data-trif-*`, ids and classes `trif-*`. The page's own
+  code acts on its attributes (htmx's `data-hx-post`, Turbo, Stimulus, classes and ids it looks for), so a
+  mod never sets those, nor changes or removes the page's own ids and classes: mark elements with
+  `data-trif-…` or a `trif-` class and style them with `trif.css`. Copies (`clone()`) keep none of the
+  page's ids, classes or data attributes.
+- **Forms are the page's**: a button you make is always `type="button"` and can't go inside a form, and
+  the page's own fields can't be moved into, out of or between forms.
+- **Keys**: `on('keydown')` and the like say which key only when it wasn't typed into a field or editor
+  (`key` and `code` are null then): hotkeys work, what the user types stays theirs.
 - The code runs inside a function, so a top-level `return` ends it and `await` works at the top.
 - Errors are caught and shown by `trif errors`, as for page scripts.
 - The sandbox refuses source with `import(` or an HTML comment marker in it, even inside a string or a

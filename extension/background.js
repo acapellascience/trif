@@ -359,6 +359,18 @@ async function applyModsNow() {
 // adapter, safari.js); a browser whose userScripts has no configureWorld neither: there, sandboxed mods wait
 // for the user's OK to run as page scripts (lib.js sandboxFallback).
 let sandboxSetup = null;
+// Whether TRIF's world is the only user script world that can message (see onSandboxMessage).
+let onlyOurWorld = false;
+async function onlyOurWorldMessages() {
+  try {
+    if (typeof chrome.userScripts.getWorldConfigurations !== 'function') return false;
+    const others = (await chrome.userScripts.getWorldConfigurations()).filter((w) => (w.worldId || '') !== SANDBOX_WORLD);
+    // (TRIF configures no other world; one with messaging on, from an older build, is reset to the default: off)
+    for (const w of others) if (w.messaging) await chrome.userScripts.resetWorldConfiguration(w.worldId || undefined);
+    const left = (await chrome.userScripts.getWorldConfigurations()).filter((w) => (w.worldId || '') !== SANDBOX_WORLD && w.messaging);
+    return left.length === 0;
+  } catch (e) { log('warn', `TRIF's sandbox: couldn't check the other worlds' messaging: ${errMsg(e)}`); return false; }
+}
 function sandboxWorld() {
   if (state.canSandbox !== null) return Promise.resolve(state.canSandbox);
   if (sandboxSetup) return sandboxSetup;
@@ -369,6 +381,7 @@ function sandboxWorld() {
     if (typeof chrome.userScripts?.configureWorld !== 'function') { state.canSandbox = false; return false; }
     try {
       await chrome.userScripts.configureWorld({ worldId: SANDBOX_WORLD, csp: SANDBOX_CSP, messaging: true });
+      onlyOurWorld = await onlyOurWorldMessages();
       listenToSandbox(true);
       state.canSandbox = true;
     } catch (e) {
@@ -405,7 +418,11 @@ function listenToSandbox(afterGrant = false) {
 listenToSandbox();
 function onSandboxMessage(msg, sender, sendResponse) {
   if (!msg || typeof msg.trifSandbox !== 'string') return false;
-  if (sender && sender.userScriptWorldId !== undefined && sender.userScriptWorldId !== SANDBOX_WORLD) return false;
+  // Only TRIF's world. Firefox says which world a user script's message came from (`userScriptWorldId`).
+  // Chrome doesn't (its MessageSender has no such field); there, only a USER_SCRIPT world whose configuration
+  // has messaging on can send at all, and sandboxWorld checked that TRIF's is the only one (`onlyOurWorld`).
+  if (!sender) return false;
+  if (sender.userScriptWorldId !== undefined ? sender.userScriptWorldId !== SANDBOX_WORLD : !onlyOurWorld) return false;
   const answer = (async () => {
     await ready;
     let host = '';

@@ -203,6 +203,12 @@ function main() {
     }
   } catch { /* no root package.json: nothing to compare */ }
 
+  // The sandbox's SES must be the npm file, unchanged (extension/sandbox.js SES_SHA256; vendor/README.txt).
+  const ses = fs.readFileSync(path.join(SRC, 'vendor', 'ses.umd.min.js'));
+  const sesHash = require('crypto').createHash('sha256').update(ses).digest('hex');
+  const wantHash = (/SES_SHA256 = '([0-9a-f]{64})'/.exec(fs.readFileSync(path.join(SRC, 'sandbox.js'), 'utf8')) || [])[1];
+  if (!wantHash || sesHash !== wantHash) fail(`extension/vendor/ses.umd.min.js isn't ses 2.3.0's file (sha256 ${sesHash}, want ${wantHash})`);
+
   fs.rmSync(OUT, { recursive: true, force: true });
   const skipped = [];
   copyDir(SRC, OUT, skipped);

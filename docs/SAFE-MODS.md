@@ -178,7 +178,16 @@ callbacks, after an await) and kept in the world for `trif errors` / `trif logs`
   reaches the mod as a fresh TypeError (no DOMException object);
 - synthetic input: stand-ins have no click/dispatchEvent/focus/submit; no event constructors;
 - navigation: no location/open/history; no `target` attribute; no clicks;
-- clipboard, cookies, storage, postMessage: none of navigator, document, localStorage, postMessage.
+- clipboard, cookies, storage, postMessage: none of navigator, document, localStorage, postMessage;
+- the page's own code as the messenger (red team, RT-1): names a mod gives are TRIF's (`data-trif-*`, `trif-`
+  ids and classes; the page's own ids and classes aren't a mod's to change), so htmx, Turbo, Stimulus and the
+  like find nothing to act on; copies keep none of the page's;
+- forms (RT-2): a mod's buttons are `type="button"` and never inside a form; the page's fields stay in the
+  form they're in;
+- keys (RT-4): which key was pressed in a field or editor doesn't reach a mod.
+
+Not closed, for any tier that restyles (rules too): arranging the page so the user's own click lands on
+something else (clickjacking, RT-3). Wording and a mitigation are proposed in docs/SANDBOX-TIER-NOTES.md.
 
 **Browsers.**
 - Chrome (138+; tested on 156): the sandbox as above.
@@ -191,7 +200,7 @@ callbacks, after an await) and kept in the world for `trif errors` / `trif logs`
   silently unsandboxed. The same applies to any browser whose `configureWorld` fails.
 
 **The hostile e2e** (tests/e2e/scenario.js `sandboxedCheck`, fixture tests/e2e/fixtures/sandbox-hostile.js):
-123 escapes tried (all refused or absent in Chrome 156 and Firefox 159); each must be refused or absent, the test server must see none of the `e2e-sbx-leak`
+143 escapes tried (all refused or absent in Chrome 156 and Firefox 159); each must be refused or absent, the test server must see none of the `e2e-sbx-leak`
 addresses, the page must notice nothing (its own listeners for clicks, keys, submits, messages and inline
 code), its prototypes, form, script, style, link and image must be as they were, and the tab must stay where
 it was with no new tab. Plus a good mod (restyle, hide, add, text now and later, observe, canvas, timers,

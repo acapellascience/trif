@@ -1904,7 +1904,7 @@ process.exitCode = 1;
     const main = `// ==WebMod==\n// @name E2E sandbox timing, page world\n// @match *://127.0.0.1/sandbox.html*\n// @run-at document-idle\n// ==/WebMod==\n(() => {
   const cells = document.querySelectorAll('.cell');
   const t0 = performance.now(); for (const c of cells) c.style.setProperty('background-color', 'rgb(9, 9, 9)', 'important');
-  document.documentElement.setAttribute('data-sbx-main-ms', String(performance.now() - t0));
+  document.documentElement.setAttribute('data-trif-sbx-main-ms', String(performance.now() - t0));
 })();\n`;
     return {
       'e2e-sbx-hostile': fx('sandbox-hostile.js'), 'e2e-sbx-good': fx('sandbox-good.js'), 'e2e-sbx-throws': fx('sandbox-throws.js'), 'e2e-sbx-main': main,
@@ -1936,23 +1936,25 @@ process.exitCode = 1;
       await this.ext(`async (id, url) => { await chrome.tabs.update(id, { url, active: true }); }`, [win.tabId, `${base}/sandbox.html`]);
       const readPage = async () => JSON.parse((await this.cli(['run', '--tab', String(win.tabId), `(() => {
         const d = document.documentElement, q = (s) => document.querySelector(s);
-        const px = (() => { try { const c = q('#sbx-canvas'); return c ? [...c.getContext('2d').getImageData(1, 1, 1, 1).data].join(',') : null; } catch (e) { return 'unreadable: ' + e.message; } })();
+        const px = (() => { try { const c = q('#trif-sbx-canvas'); return c ? [...c.getContext('2d').getImageData(1, 1, 1, 1).data].join(',') : null; } catch (e) { return 'unreadable: ' + e.message; } })();
         return {
           url: location.href,
-          hostile: d.getAttribute('data-sbx-hostile'), good: d.getAttribute('data-sbx-good'),
-          timer: d.getAttribute('data-sbx-timer'), interval: d.getAttribute('data-sbx-interval'), frame: d.getAttribute('data-sbx-frame'),
-          visits: d.getAttribute('data-sbx-visits'), clicked: d.getAttribute('data-sbx-clicked'), mainMs: d.getAttribute('data-sbx-main-ms'),
+          hostile: d.getAttribute('data-trif-sbx-hostile'), good: d.getAttribute('data-trif-sbx-good'),
+          timer: d.getAttribute('data-trif-sbx-timer'), interval: d.getAttribute('data-trif-sbx-interval'), frame: d.getAttribute('data-trif-sbx-frame'),
+          visits: d.getAttribute('data-trif-sbx-visits'), clicked: d.getAttribute('data-trif-sbx-clicked'), mainMs: d.getAttribute('data-trif-sbx-main-ms'),
           titleColor: getComputedStyle(q('#title')).color, hiddenShown: q('.sbx-hide').getClientRects().length > 0,
-          made: q('#sbx-made')?.textContent || null, txt: q('#txt').textContent, later: q('.later') ? [q('.later').textContent, q('.later').getAttribute('data-seen')] : null,
-          canvas: px, copy: q('#sbx-copy') ? q('#sbx-copy').getAttribute('src') : null, cellColor: getComputedStyle(q('.cell')).color,
+          made: q('#trif-sbx-made')?.textContent || null, txt: q('#txt').textContent, later: q('.later') ? [q('.later').textContent, q('.later').getAttribute('data-trif-seen')] : null,
+          canvas: px, copy: q('#trif-sbx-copy') ? q('#trif-sbx-copy').getAttribute('src') : null, cellColor: getComputedStyle(q('.cell')).color,
           shown: Object.fromEntries(['r1', 'r-ad', 'r-carousel', 'r2'].map((id) => [id, document.getElementById(id).getClientRects().length > 0])),
-          carouselMarked: q('#r-carousel').hasAttribute('data-ahr-hide'), dvd: q('[data-trif-dvd]')?.style.transform || null,
+          carouselMarked: q('#r-carousel').hasAttribute('data-trif-hide'), dvd: q('[data-trif-dvd]')?.style.transform || null,
           logoHidden: getComputedStyle(q('#logo')).visibility === 'hidden',
           hits: window.__hits.slice(), secret: window.__pageSecret, protosClean: Array.prototype.__trifEscape === undefined && ({}).__trifEscape === undefined, pageFrozen: Object.isFrozen(Array.prototype),
           form: [q('#fi').value, q('#fi').getAttribute('value'), q('#ta').value, q('#opt').textContent],
           gadget: q('#gadget')?.textContent ?? null, pstyle: q('#pstyle').textContent, plink: [q('#plink').getAttribute('href'), q('#plink').getAttribute('target')],
           pimg: q('#pimg').getAttribute('src'), btnClick: q('#pbtn').getAttribute('onclick'), frmSrcdoc: q('#frm').getAttribute('srcdoc'), bodyBg: getComputedStyle(document.body).backgroundImage,
           storage: Object.keys(localStorage), windowNames: Object.getOwnPropertyNames(window),
+          keys: d.getAttribute('data-trif-sbx-keys'), own: q('#trif-sbx-own') ? [q('#trif-sbx-own').type, q('#trif-sbx-own').className, q('#trif-sbx-own').dataset.trifKind, !!q('#trif-sbx-own').form] : null,
+          gadgetSrc: [q('#gadget-src').className, q('#gadget-src').getAttribute('data-auto-post')], pw: [q('#pw').form ? q('#pw').form.id : null, q('#fi').form ? q('#fi').form.id : null, q('#fb').form ? q('#fb').form.id : null],
         };
       })()`], { timeoutMs: 20000 })).stdout);
       let last = null;
@@ -1965,14 +1967,25 @@ process.exitCode = 1;
       });
       // a click the page gets (from the page's own world): the mod's listener hears it, as a stand-in
       await this.cli(['run', '--tab', String(win.tabId), `document.getElementById('target-click').click()`], { timeoutMs: 20000 });
+      // real keys (the browser's input, not script): two into the password field, one on the page itself
+      const sbxCtx = await this.d.findPage((u) => u.includes('/sandbox.html'), { timeoutMs: 5000 });
+      await this.d.click(sbxCtx, '#pw');
+      for (const k of ['h', 'i']) await this.d.key(sbxCtx, k);
+      await this.d.click(sbxCtx, '#title');
+      await this.d.key(sbxCtx, 'q');
       await sleep(1500); // (anything late: loads, timers)
       const later = await readPage();
       const tabsAfter = await this.ext(`async () => (await chrome.tabs.query({})).length`);
       const leaks = this.o.servers.requests.filter((q) => q.url.includes('e2e-sbx-leak')).map((q) => `${q.host}${q.url}`);
+      // (the page's htmx-like code does send when the page itself plants its attribute: so "nothing" above means
+      // the mods couldn't, not that the gadget is broken)
+      await this.cli(['run', '--tab', String(win.tabId), `(() => { const d = document.createElement('div'); d.setAttribute('data-auto-post', '/e2e-sbx-gadget-control'); document.body.append(d); return 1; })()`], { timeoutMs: 20000 });
+      const gadgetWorks = await waitFor('the page\'s own gadget to send', async () => this.o.servers.requests.some((q) => q.url.startsWith('/e2e-sbx-gadget-control')) || null, { timeoutMs: 5000, intervalMs: 200 }).catch(() => false);
       // ---- the hostile mod: escape by escape
       const hostile = JSON.parse(first.hostile);
       const escaped = Object.entries(hostile).filter(([, v]) => !/^(refused|absent)/.test(v));
-      const pageNoticed = later.hits.filter((h) => h !== 'click:target-click');
+      // (the test's own input: the click from the page's world, and the real clicks and keys above)
+      const pageNoticed = later.hits.filter((h) => !/^(click|focus|keydown|input):(pw|title|target-click|)$/.test(h));
       const pageSide = {
         'the page noticed nothing (clicks, keys, submits, messages, inline code)': pageNoticed.length === 0 ? 'nothing' : pageNoticed,
         'the page\'s prototypes untouched (and not frozen: lockdown stayed in TRIF\'s world)': later.protosClean && !later.pageFrozen,
@@ -1985,6 +1998,10 @@ process.exitCode = 1;
         'the tab stayed on the page, no new tab': later.url === `${base}/sandbox.html` && tabsAfter === tabsBefore,
         'the test server saw nothing': leaks.length === 0 ? 'nothing' : leaks,
         'the page\'s own global unchanged': later.secret === 'from the page',
+        'the page\'s htmx-like code works (it sent what the page itself planted)': gadgetWorks === true,
+        'the page\'s gadget element as it was': JSON.stringify(later.gadgetSrc) === JSON.stringify(['js-src done', '/e2e-sbx-leak-clone']),
+        'the page\'s fields in the forms they were in': JSON.stringify(later.pw) === JSON.stringify([null, 'f', 'f']),
+        'keys typed into the password field unseen by the mod': /^null@input,null@input,q@/.test(later.keys || '') ? true : later.keys,
       };
       const pageFailed = Object.entries(pageSide).filter(([, v]) => v !== true && v !== 'nothing');
       // ---- the good one
@@ -2003,6 +2020,8 @@ process.exitCode = 1;
         'a copy of an image the page shows': first.copy === '/favicon.ico', 'style() on 1000 cells': first.cellColor === 'rgb(1, 2, 3)' && good.cells === 1000,
         'listening (a stand-in as the target)': later.clicked === 'click:target-click:stand-in', 'settings, first visit': first.visits === '0',
         'no browser names on its global': reachable.length === 0,
+        'its own button (type button, not in a form), trif- class and data': JSON.stringify(later.own) === JSON.stringify(['button', 'trif-own', 'own', false]),
+        'a hotkey on the page reaches it': /q@(body|html|h1)$/.test(later.keys || ''),
       };
       const missing = Object.entries(want).filter(([, v]) => !v).map(([k]) => k);
       // settings kept by TRIF, not the site: the next load sees the saved value, the page's storage has nothing
@@ -2019,6 +2038,8 @@ process.exitCode = 1;
       const errText = JSON.stringify(errList);
       if (!/127\.0\.0\.1\/e2e-sbx-throws/.test(errText) || !/thrown at the top of a sandboxed mod/.test(errText)) missing.push(`trif errors: the top-level throw (${errText.slice(0, 300)})`);
       if (!/thrown later by the sandboxed mod/.test(errText)) missing.push('trif errors: the throw from a timer');
+      // (with SES's safe error taming, the stack is TRIF's to read, and its line numbers are the file's)
+      if (!/e2e-sbx-throws\.js:6\b/.test(errText)) missing.push(`trif errors: the line of the throw (e2e-sbx-throws.js:6) in ${errText.slice(0, 400)}`);
       const logs = (await this.cli(['logs', '--tab', String(win.tabId)], { timeoutMs: 20000 })).stdout;
       if (!/hello from the sandbox/.test(logs) || !/a warning from the sandbox/.test(logs)) missing.push(`trif logs: ${logs.slice(0, 300)}`);
       // trif check: the lint for the hostile one (not a failure)
@@ -2071,7 +2092,7 @@ process.exitCode = 1;
     for (const id of boxed) if (!new RegExp(`${id}\\s+WAITING: ${this.d.name} can't run sandboxed mods`).test(status)) throw new Error(`trif status: ${status.split('\n').find((l) => l.includes(id))}`);
     await this.ext(`async (id, url) => { await chrome.tabs.update(id, { url, active: true }); }`, [win.tabId, `${base}/sandbox.html`]);
     await sleep(1500);
-    const ran = async () => JSON.parse((await this.cli(['run', '--tab', String(win.tabId), `({ good: document.documentElement.getAttribute('data-sbx-good'), hostile: document.documentElement.getAttribute('data-sbx-hostile'), main: document.documentElement.getAttribute('data-sbx-main-ms') })`], { timeoutMs: 20000 })).stdout);
+    const ran = async () => JSON.parse((await this.cli(['run', '--tab', String(win.tabId), `({ good: document.documentElement.getAttribute('data-trif-sbx-good'), hostile: document.documentElement.getAttribute('data-trif-sbx-hostile'), main: document.documentElement.getAttribute('data-trif-sbx-main-ms') })`], { timeoutMs: 20000 })).stdout);
     const before = await ran();
     if (before.good || before.hostile) throw new Error(`a sandboxed mod ran unsandboxed without the user's OK: ${JSON.stringify(before)}`);
     if (!before.main) throw new Error('the page mod didn\'t run');
@@ -2102,9 +2123,9 @@ process.exitCode = 1;
       await chrome.userScripts.execute({ target: { tabId }, world: 'MAIN', injectImmediately: true, js: [{ code: m.sandboxPageCode('127.0.0.1/e2e-sbx-page-form', source) }] });
     }`, [win.tabId, source]);
     const read = async () => JSON.parse((await this.cli(['run', '--tab', String(win.tabId), `(() => { const d = document.documentElement, q = (s) => document.querySelector(s); return {
-      good: !!d.getAttribute('data-sbx-good'), timer: d.getAttribute('data-sbx-timer'), interval: d.getAttribute('data-sbx-interval'), frame: d.getAttribute('data-sbx-frame'),
-      visits: d.getAttribute('data-sbx-visits'), titleColor: getComputedStyle(q('#title')).color, hidden: q('.sbx-hide').getClientRects().length === 0,
-      made: q('#sbx-made')?.textContent || null, txt: q('#txt').textContent, seen: q('.later')?.getAttribute('data-seen') || null, copy: q('#sbx-copy')?.getAttribute('src') || null,
+      good: !!d.getAttribute('data-trif-sbx-good'), timer: d.getAttribute('data-trif-sbx-timer'), interval: d.getAttribute('data-trif-sbx-interval'), frame: d.getAttribute('data-trif-sbx-frame'),
+      visits: d.getAttribute('data-trif-sbx-visits'), titleColor: getComputedStyle(q('#title')).color, hidden: q('.sbx-hide').getClientRects().length === 0,
+      made: q('#trif-sbx-made')?.textContent || null, txt: q('#txt').textContent, seen: q('.later')?.getAttribute('data-trif-seen') || null, copy: q('#trif-sbx-copy')?.getAttribute('src') || null,
       storage: Object.keys(localStorage) }; })()`], { timeoutMs: 20000 })).stdout);
     let last = null;
     const o = await waitFor('the page-script form\'s results', async () => { const x = last = await read(); return x.good && x.timer && x.interval && x.frame && x.visits && x.seen ? x : null; }, { timeoutMs: 15000, intervalMs: 400 })
@@ -2125,13 +2146,13 @@ process.exitCode = 1;
     const file = path.join(dir, 'e2e-sbx-panel.js');
     const ext = (await this.cli(['status'], { json: true, timeoutMs: 20000 })).json.extension;
     if (ext.sandbox === false) return { status: 'skip', detail: `${this.d.name} has no sandbox: its sandboxed mods are page scripts there (sandboxFallbackCheck)` };
-    const look = async () => (await this.cli(['run', '--tab', String(win.tabId), `document.documentElement.getAttribute('data-sbx-panel')`], { timeoutMs: 20000 })).stdout.trim();
+    const look = async () => (await this.cli(['run', '--tab', String(win.tabId), `document.documentElement.getAttribute('data-trif-sbx-panel')`], { timeoutMs: 20000 })).stdout.trim();
     const clickGroup = async () => {
       await waitFor('the Sandboxed heading', () => this.panel(`async () => !!document.querySelector('li.mod-group[data-group="sandboxed"] .group-switch') || null`), { timeoutMs: 10000 });
       await this.d.click(this.panelCtx, 'li.mod-group[data-group="sandboxed"] .group-switch');
     };
     try {
-      fs.writeFileSync(file, '// ==WebMod==\n// @name E2E Sandboxed in the panel\n// @match *://127.0.0.1/*\n// @sandboxed\n// ==/WebMod==\npage.root.setAttr(\'data-sbx-panel\', \'ran\');\n');
+      fs.writeFileSync(file, '// ==WebMod==\n// @name E2E Sandboxed in the panel\n// @match *://127.0.0.1/*\n// @sandboxed\n// ==/WebMod==\npage.root.setAttr(\'data-trif-sbx-panel\', \'ran\');\n');
       await waitFor('it registered', async () => /e2e-sbx-panel\s+registered \(sandboxed\)/.test((await this.cli(['status'], { timeoutMs: 20000 })).stdout) || null, { timeoutMs: 20000, intervalMs: 500 });
       await this.ext(`async (id, url) => { await chrome.tabs.update(id, { url, active: true }); }`, [win.tabId, `${base}/?e2e=sandboxed-panel`]);
       await waitFor('the sandboxed mod running', async () => (/ran/.test(await look()) ? true : null), { timeoutMs: 15000, intervalMs: 400 });

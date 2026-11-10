@@ -182,7 +182,9 @@ callbacks, after an await) and kept in the world for `trif errors` / `trif logs`
 
 **Browsers.**
 - Chrome (138+; tested on 156): the sandbox as above.
-- Firefox (153+; tested on 159): see docs/SANDBOX-TIER-NOTES.md "Browsers".
+- Firefox (153+; tested on 159): the same sandbox, and the hostile e2e passes as in Chrome (SES locks down
+  in Firefox's user script sandbox; its world CSP governs eval). Two quirks of its messaging, handled:
+  docs/SANDBOX-TIER-NOTES.md "Browsers".
 - Safari: no such world (TRIF's own adapter, extension/safari.js). Each sandboxed mod waits for the user's
   OK, in the extension (`sandboxFallback` in lib.js: held by 'sandbox', with the reason), and once allowed
   runs as a page script with the same API (sandbox.js `sandboxPageCode`), in the Page scripts group. Never

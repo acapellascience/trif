@@ -2136,7 +2136,7 @@ process.exitCode = 1;
         const heads = [...document.querySelectorAll('#mod-list > li.mod-group')].map((li) => li.dataset.group);
         const sb = document.querySelector('li.mod-group[data-group="sandboxed"]');
         const row = document.querySelector('li[data-mod="127.0.0.1/e2e-sbx-panel"]');
-        return sb && row ? { heads, name: sb.querySelector('.mod-group-name').textContent, note: sb.querySelector('.mod-group-note').textContent, rowGroup: row.dataset.group,
+        return sb && row && row.querySelector('.light.on') ? { heads, name: sb.querySelector('.mod-group-name').textContent, note: sb.querySelector('.mod-group-note').textContent, rowGroup: row.dataset.group,
           order: [...document.querySelectorAll('#mod-list > li')].map((li) => li.dataset.mod || li.dataset.group),
           starts: [...document.querySelectorAll('.starts-row')].map((l) => l.querySelector('span').textContent + '=' + l.querySelector('select').value) } : null;
       }`), { timeoutMs: 15000 });

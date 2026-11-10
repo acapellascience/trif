@@ -72,11 +72,49 @@ browser findings, open questions for Tim. Newest findings are folded into the se
 
 ## Browsers
 
-(see "Measurements" and the e2e results below)
+- **Chrome** (138+, the extension's minimum; tested: Chrome for Testing 156, headless): everything above.
+  `configureWorld` with `worldId`, a CSP and messaging (133+), `userScripts.execute` with a `worldId` for
+  reading the world's errors and logs (135+), `runtime.onUserScriptMessage` (120+).
+- **Firefox** (153+, the add-on's minimum; tested: Firefox 159, headless): **hosts the sandbox too**, and the
+  hostile e2e passes there exactly as in Chrome. MDN's compat data: `userScripts.configureWorld` and
+  `worldId` since 136, `execute` since 153; Firefox's own test (test_ext_userScripts_mv3_csp.js) checks that
+  a world's CSP governs `eval`, which is all SES needs from it here (TRIF doesn't rely on the CSP for the
+  network: the compartment has no network API, and stand-ins refuse addresses; the e2e's server log shows
+  nothing reached it in either browser). SES's `lockdown()` works in Firefox's user script sandbox (Xray
+  wrappers and all). Two Firefox quirks, both handled in background.js `listenToSandbox`:
+  - `runtime.onUserScriptMessage` exists only once the optional userScripts permission is granted, and a
+    listener on `chrome.runtime`'s event (the namespace TRIF had touched before the grant) never heard a
+    user script's message, while one on `browser.runtime`'s did (seen with a probe in the e2e);
+  - taking the permission away and giving it back drops the listener: it's added again on each grant.
+  In Firefox, `TextEncoder`/`TextDecoder` aren't on the compartment's global (68 names vs Chrome's
+  70); `performance.now()` is 1 ms coarse there, so its timings below are rounded.
+- **Safari**: no world of TRIF's own (its userScripts is TRIF's adapter, extension/safari.js, which runs
+  page scripts). Every sandboxed mod waits for the user's OK there, held by the extension with the reason
+  "Safari can't run sandboxed mods, so here it would run as a page script, with everything the page has",
+  under Page scripts; Allow runs it as a page script with the same API (sandbox.js `sandboxPageCode`).
+  Not run in Safari tonight (no Safari e2e); the page-script form is tested in Chrome and Firefox (e2e
+  `sandboxPageFormCheck`: the API works in the page's world) and the hold in unit tests
+  (tests/extension.test.js `sandboxFallback`). Any browser whose `configureWorld` fails gets the same.
 
 ## Measurements
 
-(filled in from the e2e: tests/e2e/scenario.js sandboxedCheck writes sandbox-<browser>.json)
+From tests/e2e/scenario.js `sandboxedCheck` (sandbox-<browser>.json in the run's output), test page with
+1000 cells and five sandboxed mods (hostile, good, throws, the two samples) plus one page mod:
+
+| | Chrome 156 | Firefox 159 |
+|---|---|---|
+| SES loaded in the world (per page where a sandboxed mod runs) | 2.3-2.8 ms | 3 ms |
+| `lockdown()` (once per page) | 5.8-6.9 ms | 4-5 ms |
+| a mod's first run (compartment + its top level) | 0.2-3 ms | 0-6 ms |
+| restyle 1000 elements through stand-ins (`style()`) | 3 ms | 2 ms |
+| the same in a page mod (`el.style.setProperty`) | 0.4 ms | 0-1 ms |
+| DVD port, per frame (TRIF's callback + the mod's step) | 0.11 ms | 0.15-0.18 ms |
+| names on the compartment's global | 70 (page's world: ~1,240) | 68 |
+
+So: about 8-10 ms once per page for the sandbox to start (at document_start, before any mod), then mods
+cost about what they do; stand-ins are 5-8x a direct DOM call on a hot loop (still ~3 µs an element). A
+world per mod would pay the 8-10 ms per mod per page, hence one shared world. Not measured on a real site
+(no network tonight); X's timeline with the feed mods is the next thing to time.
 
 ## Open questions
 

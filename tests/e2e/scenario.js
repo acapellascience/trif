@@ -3433,12 +3433,24 @@ setTimeout(() => {
       if (folded.mods.includes('x.com/e2e-sens-elsewhere')) problems.push('the mod for another page is listed above the fold');
       if (folded.overflowX !== 'hidden') problems.push(`the box scrolls sideways: ${folded.overflowX}`);
       const px = parseFloat(folded.maxH);
-      if (folded.chatEmpty ? Math.abs(px - (0.7 * folded.vh - 40)) > 2 : Math.abs(px - (0.4 * folded.vh - 40)) > 2) problems.push(`the box's height: ${folded.maxH} (chat empty: ${folded.chatEmpty}, ${folded.vh}px)`);
+      const want = (empty, v) => (empty ? 0.7 : 0.4) * v.vh - 40;
+      if (Math.abs(px - want(folded.chatEmpty, folded)) > 2) problems.push(`the box's height: ${folded.maxH} (chat empty: ${folded.chatEmpty}, ${folded.vh}px)`);
+      // (a chat with messages: today's height; a new chat: the box grows to show its rows, up to about 70%)
+      const heights = [`${folded.maxH} with the chat ${folded.chatEmpty ? 'empty' : 'in use'}`];
+      if (!folded.chatEmpty) {
+        await this.panelClick('#new-chat');
+        const fresh = await waitFor('the empty chat', async () => { const v = await view(); return v.chatEmpty ? v : null; }, { timeoutMs: 8000 });
+        if (Math.abs(parseFloat(fresh.maxH) - want(true, fresh)) > 2) problems.push(`the box's height, chat empty: ${fresh.maxH} (${fresh.vh}px)`);
+        heights.push(`${fresh.maxH} once empty`);
+      }
+      const toBottom = () => this.panel(`async () => { const l = document.getElementById('mod-list'); l.scrollTop = l.scrollHeight; return true; }`);
+      await toBottom();
       await themes('mods-fold');
       await this.panelClick('#mod-list > li.mods-fold .mods-fold-btn');
       const opened = await waitFor('unfolded', async () => { const v = await view(); return v.foldOpen && v.mods.includes('x.com/e2e-sens-elsewhere') ? v : null; }, { timeoutMs: 8000 });
+      await toBottom();
       await themes('mods-fold-open');
-      done.push(`"${folded.fold}" (${folded.mods.length} above it), opened: ${opened.mods.length}; the box ${folded.maxH} with the chat ${folded.chatEmpty ? 'empty' : 'in use'}`);
+      done.push(`"${folded.fold}" (${folded.mods.length} above it), opened: ${opened.mods.length}; the box ${heights.join(', ')}`);
       if (problems.length) throw new Error(problems.join('\n'));
       return done.join('; ');
     } finally {

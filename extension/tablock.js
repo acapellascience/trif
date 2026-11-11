@@ -60,7 +60,7 @@
 
 export const ICONS = {
   normal: { 16: 'icons/robot-16.png', 32: 'icons/robot-32.png' }, // (manifest.json's action.default_icon)
-  paused: { 16: 'icons/robot-paused-white-16.png', 32: 'icons/robot-paused-white-32.png' },
+  paused: { 16: 'icons/robot-16.png', 32: 'icons/robot-32.png' }, // (the toolbar stays the usual robot: Tim, 2026-11-11; the panel shows the pause)
 };
 
 export const WRITE_METHODS = ['post', 'put', 'patch', 'delete', 'connect'];

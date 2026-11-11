@@ -641,6 +641,9 @@ class Scenario {
     // The real Keychain only for --oss (the OpenRouter key the user saved); otherwise the fake one, so the
     // helper never looks up API keys for Claude Code or Codex in the real one.
     if (!o.oss) env.TRIF_KEYCHAIN_BIN = this.keychain().bin;
+    // Never the computer's own Claude Code managed settings (helper/lib/agents/claude-managed.js): a folder
+    // with none.
+    env.TRIF_CLAUDE_MANAGED_DIR = path.join(this.work, 'no-claude-managed');
     this.helperHome = env.HOME;
     if (o.browser === 'firefox') {
       this.d = new FirefoxDriver({
@@ -959,6 +962,7 @@ class Scenario {
     // (A stand-in Claude Code: only when the helper has the scratch HOME, never your real agent.)
     if (!this.o.agent && !this.o.codex && !this.o.oss && !this.o.guidance) {
       await r.check('an expired login (a stand-in Claude Code): the login notice and one plain line, not the raw error; the message back in the box', () => this.expiredLoginCheck(win));
+      await r.check('an organization\'s Codex settings replace TRIF\'s sandbox (a stand-in Codex): the card; Stop stores nothing; Use Codex anyway sends it again, the chip, Settings\' line and Stop allowing', () => this.orgSettingsCheck(win));
     }
 
     if (this.o.agent) await this.agentChecks('claude');
@@ -1561,6 +1565,123 @@ process.exitCode = 1;
     }
   }
 
+  // ---- an organization's Codex settings replace TRIF's sandbox, with a stand-in Codex (runs.js
+  // _checkSandbox, helper/lib/withoutsandbox.js, the panel's card, chip and Settings line)
+
+  /**
+   * A stand-in `codex` first on the helper's PATH that says what Codex says when an organization's
+   * requirements refuse TRIF's permission profile, then, if it's still running a moment later, answers. It
+   * reaches nothing. Put back after, with the agent choice.
+   */
+  async orgSettingsCheck(win) {
+    this.orgChecked = true;
+    const said = 'Configured value for permission_profile is disallowed by requirements; falling back from trif-run to required value CodexStandard';
+    const dir = path.join(this.work, 'standin-codex');
+    fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(path.join(dir, 'codex'), `#!${process.execPath}
+const a = process.argv.slice(2);
+if (a[0] === '--version') { console.log('codex-cli 0.166.0'); process.exit(0); }
+if (a[0] === 'login') { console.log('Logged in using ChatGPT'); process.exit(0); }
+if (a[0] === 'debug') { console.log(JSON.stringify({ models: [] })); process.exit(0); }
+try { require('fs').readFileSync(0, 'utf8'); } catch {}
+const say = (o) => process.stdout.write(JSON.stringify(o) + '\\n');
+process.stderr.write(${JSON.stringify(said)} + '\\n');
+setTimeout(() => {
+  say({ type: 'thread.started', thread_id: 'e2e-org' });
+  say({ type: 'item.completed', item: { id: 'm1', type: 'agent_message', text: 'Done (the stand-in Codex).' } });
+  say({ type: 'turn.completed', usage: {} });
+}, 1500);
+`, { mode: 0o755 });
+    const cfgFile = path.join(this.priv, 'config.json');
+    const saved = fs.readFileSync(cfgFile, 'utf8');
+    const cfg = JSON.parse(saved);
+    cfg.env = { ...(cfg.env || {}), PATH: [dir, cfg.env?.PATH].filter(Boolean).join(':') };
+    fs.writeFileSync(cfgFile, JSON.stringify(cfg, null, 2) + '\n');
+    const consent = () => JSON.parse(fs.readFileSync(cfgFile, 'utf8')).withoutSandbox || null;
+    const site = '127.0.0.1';
+    const chat = () => this.ext(`async (k) => (await chrome.storage.local.get(k))[k] || null`, [`chat:${site}`]);
+    const reopen = async () => {
+      await this.panel(`async () => { setTimeout(() => location.reload(), 20); return true; }`).catch(() => {});
+      await sleep(800);
+      this.panelCtx = await this.d.findPage('sidepanel.html');
+    };
+    const pick = (sel, value) => this.panel(`async (sel, value) => { const e = document.querySelector(sel); e.value = value; e.dispatchEvent(new Event('change', { bubbles: true })); return e.value; }`, [sel, value]);
+    const state = () => this.panel(`async () => {
+      const shown = (s) => { const e = document.querySelector(s); return !!e && e.getClientRects().length > 0; };
+      const cards = [...document.querySelectorAll('#messages > li.sandbox')].map((li) => ({
+        title: li.querySelector('.sandbox-title')?.textContent || '', text: li.querySelector('.sandbox-text')?.textContent || '',
+        buttons: [...li.querySelectorAll('.sandbox-actions .btn')].map((b) => b.textContent), answer: li.querySelector('.sandbox-answer')?.textContent || '' }));
+      const chip = document.querySelector('#no-sandbox');
+      return { cards, chip: shown('#no-sandbox') ? { text: chip.textContent, title: chip.title } : null,
+        settings: [...document.querySelectorAll('#without-sandbox .note')].filter((p) => p.getClientRects().length).map((p) => p.textContent),
+        msgs: [...document.querySelectorAll('#messages > li')].map((li) => [li.className, li.innerText.trim().slice(0, 80)]) };
+    }`);
+    let last = null;
+    const until = (what, ok, timeoutMs = 30000) => waitFor(what, async () => { last = await state(); return ok(last) ? last : null; }, { timeoutMs, intervalMs: 300 })
+      .catch((e) => { throw new Error(`${e.message}: ${JSON.stringify(last)}`); });
+    const sendText = async (text) => {
+      await this.panel(`async (text) => { const i = document.getElementById('input'); i.value = text; i.dispatchEvent(new Event('input', { bubbles: true })); }`, [text]);
+      await this.d.click(this.panelCtx, '#send');
+    };
+    let before = '';
+    try {
+      await this.ext(`async (k) => { await chrome.storage.local.remove(k); }`, [`chat:${site}`]);
+      await this.ext(`async (id, url) => { await chrome.tabs.update(id, { url, active: true }); }`, [win.tabId, `http://${site}:${this.o.servers.port}/?e2e=org-settings`]);
+      await reopen();
+      await this.waitPanel(`the panel on ${site}`, (x) => x.site === site && !x.gate, 15000);
+      await this.d.click(this.panelCtx, '#settings-btn');
+      await waitFor('Codex (the stand-in) in Settings', async () => this.panel(`async () => { const o = document.querySelector('#agent option[value="codex"]'); return !!o && !o.disabled; }`), { timeoutMs: 20000 });
+      before = await this.panel(`async () => document.querySelector('#agent').value`);
+      await pick('#agent', 'codex');
+      await this.d.click(this.panelCtx, '#settings-btn');
+      await this.waitLooks('Codex ready (the stand-in)', (l) => l.dotLabel === 'Ready · Codex' && !l.send.disabled, 30000);
+
+      // No consent: the card. Stop: nothing stored, the card answered.
+      const message = 'hide the banner please';
+      await sendText(message);
+      await until('the card', (x) => x.cards.length === 1 && x.cards[0].buttons.length === 2);
+      const c1 = await chat();
+      if (c1.run || c1.messages.map((m) => m.role).join() !== 'user,sandbox') throw new Error(`the chat: ${JSON.stringify(c1.messages.map((m) => [m.role, m.text]))}`);
+      const card = last.cards[0];
+      if (card.title !== 'Your organization’s Codex settings replace TRIF’s sandbox.' || card.buttons.join(' · ') !== 'Stop · Use Codex anyway'
+        || !card.text.startsWith('Codex would run under your company’s settings instead of TRIF’s sandbox.')) throw new Error(`the card: ${JSON.stringify(card)}`);
+      if (last.msgs.some(([cls]) => /error/.test(cls))) throw new Error(`an error line besides: ${JSON.stringify(last.msgs)}`);
+      await this.shot(this.panelCtx, 'panel-org-card');
+      await this.d.click(this.panelCtx, '#messages > li.sandbox .sandbox-actions .btn:not(.primary)');
+      await until('the card answered "Stopped"', (x) => x.cards[0].answer === 'Stopped. Nothing was changed.' && !x.cards[0].buttons.length);
+      if (consent()) throw new Error(`Stop stored ${JSON.stringify(consent())}`);
+      if ((await chat()).messages.at(-1).answered !== 'stop') throw new Error('the card isn\'t marked answered in the chat');
+
+      // Again, and Use Codex anyway: stored in the private folder, the same message sent again, it goes on; the chip.
+      await sendText(message);
+      await until('a second card', (x) => x.cards.length === 2 && x.cards[1].buttons.length === 2);
+      await this.d.click(this.panelCtx, '#messages > li.sandbox .sandbox-actions .btn.primary');
+      const done = await until('the message sent again, answered, with the chip', (x) => x.chip && x.msgs.some(([cls, t]) => cls === 'msg assistant' && t === 'Done (the stand-in Codex).'));
+      const c2 = await chat();
+      const roles = c2.messages.map((m) => m.role).join();
+      if (roles !== 'user,sandbox,user,sandbox,user,assistant' || c2.messages[4].text !== message) throw new Error(`the chat: ${JSON.stringify(c2.messages.map((m) => [m.role, m.text]))}`);
+      if (!consent()?.codex?.at || fs.existsSync(path.join(this.trif, 'config.json'))) throw new Error(`the consent: ${JSON.stringify(consent())}`);
+      if (done.chip.text !== 'no TRIF sandbox' || done.chip.title !== 'Your organization’s Codex settings apply instead of TRIF’s sandbox. Settings → Agents to change this.') throw new Error(`the chip: ${JSON.stringify(done.chip)}`);
+      if (done.cards[1].answer !== 'Allowed: TRIF sent your message again.') throw new Error(`the second card: ${JSON.stringify(done.cards[1])}`);
+      await this.shot(this.panelCtx, 'panel-org-chip');
+
+      // Settings: the line, and Stop allowing.
+      await this.d.click(this.panelCtx, '#settings-btn');
+      await until('Settings\' line', (x) => x.settings.join() === 'Codex without TRIF’s sandbox: allowedStop allowing');
+      await this.shot(this.panelCtx, 'panel-org-settings');
+      await this.d.click(this.panelCtx, '#without-sandbox .btn');
+      await until('the line gone', (x) => !x.settings.length, 15000);
+      if (consent()) throw new Error(`Stop allowing left ${JSON.stringify(consent())}`);
+      await pick('#agent', before);
+      await this.d.click(this.panelCtx, '#settings-btn');
+      return `card "${card.title}" (${card.buttons.join(' · ')}); Stop: nothing stored; Use Codex anyway: stored, sent again, chip "${done.chip.text}"; Settings line, Stop allowing: removed`;
+    } finally {
+      fs.writeFileSync(cfgFile, saved);
+      await this.panel(`async () => { document.getElementById('input').value = ''; }`).catch(() => {});
+      await this.ext(`async (k) => { await chrome.storage.local.remove(k); }`, [`chat:${site}`]).catch(() => {});
+    }
+  }
+
   // ---- agent runs (real ones: they use your Claude Code / Codex login and cost a little)
 
   async agentChecks(agent) {
@@ -1803,7 +1924,9 @@ process.exitCode = 1;
     // Before the harness allows user scripts, every sync logs that each mod couldn't register: expected.
     const expected = (l) => /User scripts aren't allowed for TRIF|User scripts are off for TRIF/.test(l) // Firefox's wording, Chrome's
       || (this.scriptsRevoked && /user scripts were turned off/.test(l)) // colourChecks turned them off
-      || /mod 127\.0\.0\.1\/e2e-huge: mod is [\d.]+ MB; a mod can be up to 4 MB/.test(l); // bigModsCheck's, over the cap on purpose
+      || /mod 127\.0\.0\.1\/e2e-huge: mod is [\d.]+ MB; a mod can be up to 4 MB/.test(l) // bigModsCheck's, over the cap on purpose
+      // orgSettingsCheck's: runs stopped for an organization's settings, the consent, a run going on without the sandbox
+      || (this.orgChecked && /Codex's organization settings replace TRIF's sandbox: stopped|codex may now run under an organization's settings|Codex runs under the organization's settings, not TRIF's sandbox/.test(l));
     const skipped = lines.filter(expected).length;
     const bad = lines.filter((l) => !expected(l) && /\b(WARN|ERROR|warn|error)\b/.test(l.slice(0, 60)));
     const errors = bad.filter((l) => /\bERROR\b|\berror\b/.test(l.slice(0, 60)));

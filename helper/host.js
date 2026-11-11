@@ -829,9 +829,8 @@ function panelCommand(cmd, args) {
   const agent = typeof args.agent === 'string' ? args.agent : '';
   if (typeof args.allow !== 'boolean') throw new Error('allow must be true or false');
   const now = withoutSandbox.setAllowed(ws.home, agent, args.allow);
-  logger.warn(args.allow
-    ? `${agent} may now run under an organization's settings instead of TRIF's sandbox (chosen in the side panel)`
-    : `${agent} no longer runs without TRIF's sandbox (Settings in the side panel)`);
+  if (args.allow) logger.warn(`${agent} may now run under an organization's settings instead of TRIF's sandbox (chosen in the side panel)`);
+  else logger.info(`${agent} no longer runs without TRIF's sandbox (Settings in the side panel)`);
   return { agents: Object.keys(now) };
 }
 

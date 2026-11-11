@@ -471,7 +471,7 @@ class Scenario {
         if (row.boxes !== 1 || row.mods.split(', ').length !== shippedFor(row.site).length || /\(/.test(row.mods)) throw new Error(`${row.site}'s row: ${JSON.stringify(row)}`);
       }
       for (const want of [/None of them is on your computer until you choose/, /plain JavaScript you can read first/,
-        /Each mod has its own switch in the TRIF (side panel|sidebar): you can turn any of them off individually, any time\. You can add the others later, in the panel’s Settings\./]) {
+        /Tim’s mods are added switched off: turn on the ones you want in the TRIF (side panel|sidebar), each with its own switch\. You can add the other sites’ later, in the panel’s Settings\./]) {
         if (!want.test(st.text)) throw new Error(`the step doesn't say ${want}: ${st.text}`);
       }
       if (!/github\.com\/acapellascience\/trif\/.*examples\/sites/.test(st.source)) throw new Error(`see the code: ${st.source}`);
@@ -882,7 +882,8 @@ class Scenario {
       if (this.o.kind === 'fresh') {
         const on = want.filter((id) => byId.get(id)?.enabled !== false);
         if (on.length) throw new Error(`should start off: ${on.join(', ')}`);
-        await this.cli(['enable', 'x.com/detox-timeline']); // (the user turns one on, for the checks below)
+        // (the user turns some on, for the checks below)
+        for (const id of ['x.com/detox-timeline', 'www.google.com/hide-ai-in-results', 'www.google.com/hide-extra-sections']) await this.cli(['enable', id]);
       } else if (!px || px.enabled === false) throw new Error(`x.com/detox-timeline not on: ${JSON.stringify(px)}`);
       const offId = this.o.kind === 'fresh' ? 'x.com/space-shooter' : 'x.com/rainbow-rave';
       const pf = byId.get(offId);
@@ -4123,6 +4124,8 @@ say({ type: 'result', subtype: 'success', is_error: false, result: text, session
     const files = ['e2e-big.js', 'e2e-code.js', 'e2e-huge.js'].map((f) => path.join(dir, f));
     try {
       const first = await delivered('the big set', () => { fs.writeFileSync(files[0], bigMod('v1')); fs.writeFileSync(files[1], codeMod('v1')); }, (m) => m.parts > 1);
+      // (from outside the chat, they arrive off: the suite's stand-in user switches them on)
+      await waitFor('the big mods on', async () => { const ms = (await this.cli(['status'], { json: true, timeoutMs: 20000 })).json?.extension?.mods || []; return ['127.0.0.1/e2e-big', '127.0.0.1/e2e-code'].every((id) => { const m = ms.find((x) => x.id === id); return m && m.enabled !== false && m.registered; }) || null; }, { timeoutMs: 20000, intervalMs: 300 });
       const p1 = await reload((s) => s.big === `v1:${BIG}` && s.code === `v1:${want}` && s.banner === 'ran');
       // A change to the small one: the big one goes without its code, and still runs.
       const change = await delivered('the changed set', () => fs.writeFileSync(files[1], codeMod('v2')), (m) => m.same >= 1);

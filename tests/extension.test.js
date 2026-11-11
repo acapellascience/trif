@@ -3051,7 +3051,7 @@ test('background: the block list keeps TRIF off a site whatever its access: mods
       let r = await panel.ask({ type: 'site.block', site: 'www.bank.com', blocked: true, tab: 6 });
       assert.strictEqual(r.ok, true, r.error);
       assert.deepStrictEqual([bg.store.blockedSites, bg.store.sitesOn], [['bank.com'], ['x.com']]);
-      assert.deepStrictEqual(bg.perms.removed, [PER_SITE('bank.com')], 'its own access (a no-op under <all_urls>)');
+      assert.deepStrictEqual(bg.perms.removed, [], 'the browser\'s access is kept: the block list is what stops TRIF');
       assert.ok(!scriptIds(bg).includes('bank.com/a'));
       assert.deepStrictEqual(bg.chrome.userScripts.scripts.find((s) => s.id === 'all-sites/dark').matches, ['*://*.x.com/*', '*://x.com/*']);
       for (const cmd of ['text', 'screenshot']) assert.strictEqual((await bg.native.call(cmd, { tab: 6 })).error, lib.siteRefusal('bank.com', 'blocked'));
@@ -3061,11 +3061,10 @@ test('background: the block list keeps TRIF off a site whatever its access: mods
       assert.deepStrictEqual([r.ok, r.error], [false, 'bank.com is blocked in TRIF: unblock it first.']);
       const st = (await bg.native.call('status')).result;
       assert.deepStrictEqual([st.blockedSites, st.disconnected], [['bank.com'], []]);
-      // Unblocked: off (permissive) or disconnected (restrictive, its access went), as any site.
+      // Unblocked: off, as it had access when blocked (never disconnected by the block)
       await panel.ask({ type: 'site.block', site: 'bank.com', blocked: false });
       assert.deepStrictEqual(bg.store.blockedSites, []);
-      const want = granted.includes('<all_urls>') ? 'TRIF is off on bank.com' : 'TRIF is disconnected on bank.com';
-      assert.ok((await bg.native.call('text', { tab: 6 })).error.startsWith(want));
+      assert.ok((await bg.native.call('text', { tab: 6 })).error.startsWith('TRIF is off on bank.com'));
     } finally { bg.restore(); }
   }
 });

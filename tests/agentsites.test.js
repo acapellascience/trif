@@ -49,12 +49,12 @@ test('the panel: "Agent on this site" on the line over the message box, a menu o
   assert.match(line, /<button id="using"[^>]*>[\s\S]*<button id="agent-level"[^>]*aria-haspopup="menu"[^>]*aria-controls="agent-level-menu"/);
   const items = [...line.matchAll(/role="menuitemradio"[^>]*data-level="(\w+)"[^>]*>.*?<b>([^<]+)<\/b><span>([^<]+)<\/span>/g)].map((m) => [m[1], m[2], m[3]]);
   assert.deepEqual(items, [
-    ['off', 'Nothing', 'it can’t see or touch this site.'],
+    ['off', 'Off', 'it can’t see or touch this site.'],
     ['look', 'Look', 'it can read the page and take screenshots.'],
     ['ask', 'Ask first', 'it can look, and asks you before running code here.'],
-    ['run', 'Run code', 'it can change the page live; posting is paused while it does.'],
+    ['run', 'Run code', 'it can change the page live; posting is paused until the page reloads.'],
   ]);
-  assert.match(line, /Mods for this site always wait for your OK, whatever you pick\./);
+  assert.match(line, /Whatever you pick, a mod that can do more than change this page waits for your OK\./);
   const chat = html.slice(html.indexOf('<main id="chat"'), html.indexOf('</main>'));
   assert.ok(chat.indexOf('id="agent-site-note"') > 0 && chat.indexOf('id="agent-site-note"') < chat.indexOf('id="messages"'), 'the note: the chat\'s first line');
   const js = fs.readFileSync(path.join(__dirname, '..', 'extension', 'sidepanel.js'), 'utf8');

@@ -196,7 +196,7 @@ function contextText({ url, tabId, scope, browser, agentLevel }) {
   // The browser whose panel started the run (its hello names it); "browser" when unknown, e.g. from a terminal.
   return `You're running inside the TRIF side panel in the user's ${browser || 'browser'}. ` + where + limit + (LEVEL_TEXT[agentLevel] || '') +
     ' Follow AGENTS.md. Mods can be switched off and on with `trif disable/enable <site>/<mod>`; `trif status` shows which are on.' +
-    ' Reply briefly in plain language; your replies appear in a narrow chat panel.' +
+    ' Reply briefly in plain language; your replies appear in a narrow chat panel: don\'t narrate your steps as you go, and end with a sentence or two on what changed (AGENTS.md "5. Report"), more only if the user asks.' +
     " You can't ask follow-up questions mid-task: if something's unclear, make a sensible choice or end your turn with a question.";
 }
 

@@ -2766,6 +2766,96 @@ function updateModItem(li, m) {
   err.hidden = !err.textContent;
 }
 
+// The agent's replies are short by default (AGENTS.md "5. Report"); Explain, on its last reply, asks it for
+// the full account: what changed, what it checked and couldn't, how to undo. Not while it's working, and not
+// on the answer to an Explain.
+const EXPLAIN_PROMPT = 'Explain what you did.';
+function renderExplain(msgs) {
+  const want = explainTarget(msgs);
+  // (kept, not rebuilt, while it stays on the same reply: a status refresh never swaps it under the pointer)
+  for (const old of ui.messages.querySelectorAll('.explain-btn')) {
+    if (old.parentNode === want) { old.disabled = !ui.composer.dataset.canSend; return; }
+    old.remove();
+  }
+  if (!want) return;
+  const b = button('Explain', 'explain-btn', async () => {
+    b.disabled = true;
+    try { await startRun(EXPLAIN_PROMPT); } catch (e) { b.disabled = false; console.warn('[TRIF] explain failed', e); }
+  });
+  b.title = 'Ask your agent what it changed, what it checked, and how to undo it';
+  b.disabled = !ui.composer.dataset.canSend;
+  want.append(b);
+}
+function explainTarget(msgs) {
+  if (!view.site || view.chat.run) return null;
+  let last = -1;
+  for (let i = msgs.length - 1; i >= 0; i--) {
+    if (msgs[i].role === 'user') break;
+    if (msgs[i].role === 'assistant') { last = i; break; }
+  }
+  if (last < 0) return null;
+  const asked = msgs.slice(0, last).reverse().find((m) => m.role === 'user');
+  if (asked?.text === EXPLAIN_PROMPT) return null;
+  return ui.messages.children[last] || null;
+}
+
+// The agent's tool lines, a run of them in a row, fold into one line ("Ran 2 commands, read 1 file ›") that
+// opens to show them, as in Claude. Each line keeps its own node (the chat's indexes stay put); the first of a
+// run carries the summary. Notes (stopped, a site's new data) aren't tools and stand on their own.
+const TOOL_KINDS = [['ran', 'command', 'commands'], ['edited', 'file', 'files'], ['wrote', 'file', 'files'], ['read', 'file', 'files'], ['searched', 'time', 'times']];
+const toolKind = (text) => {
+  const t = String(text || '');
+  const k = TOOL_KINDS.find(([verb]) => t === verb || t.startsWith(`${verb} `));
+  if (k) return k[0] === 'wrote' ? 'edited' : k[0];
+  return /^(mcp__\w+|[A-Z][A-Za-z]*)( |$)/.test(t) ? 'used' : null;
+};
+const toolsOpen = new Set(); // (the runs the user opened, by their first line's time)
+function toolSummary(lines) {
+  const n = new Map();
+  for (const m of lines) { const k = toolKind(m.text); n.set(k, (n.get(k) || 0) + 1); }
+  const parts = [];
+  for (const [verb, one, many] of [...TOOL_KINDS.filter(([v]) => v !== 'wrote'), ['used', 'tool', 'tools']]) {
+    const c = n.get(verb);
+    if (c) parts.push(`${verb} ${c} ${c === 1 ? one : many}`);
+  }
+  const s = parts.join(', ');
+  return s.charAt(0).toUpperCase() + s.slice(1);
+}
+function groupTools(msgs) {
+  const nodes = ui.messages.children;
+  for (let i = 0; i < msgs.length;) {
+    if (msgs[i].role !== 'tool' || !toolKind(msgs[i].text) || !nodes[i]) { i++; continue; }
+    let j = i;
+    while (j + 1 < msgs.length && msgs[j + 1].role === 'tool' && toolKind(msgs[j + 1].text) && nodes[j + 1]) j++;
+    const key = String(msgs[i].time);
+    const open = toolsOpen.has(key);
+    const first = nodes[i];
+    let sum = first.querySelector(':scope > .tool-sum');
+    if (!sum) {
+      const text = el('span', 'tool-text', first.textContent);
+      sum = el('button', 'tool-sum');
+      sum.type = 'button';
+      sum.addEventListener('click', () => {
+        if (toolsOpen.has(sum.dataset.key)) toolsOpen.delete(sum.dataset.key); else toolsOpen.add(sum.dataset.key);
+        groupTools(view.site ? view.chat.messages : []);
+      });
+      text.title = first.title;
+      first.removeAttribute('title');
+      first.replaceChildren(sum, text);
+    }
+    sum.dataset.key = key;
+    sum.textContent = toolSummary(msgs.slice(i, j + 1));
+    sum.setAttribute('aria-expanded', String(open));
+    first.classList.add('tool-head');
+    first.classList.toggle('open', open);
+    for (let k = i; k <= j; k++) {
+      nodes[k].classList.toggle('tool-member', k > i);
+      nodes[k].hidden = k > i && !open;
+    }
+    i = j + 1;
+  }
+}
+
 function renderMessages() {
   const msgs = view.site ? view.chat.messages : [];
   const r = view.rendered;
@@ -2784,6 +2874,8 @@ function renderMessages() {
   }
   const changed = !sameThread || msgs.length !== r.count;
   view.rendered = { site: view.site, count: msgs.length, first: msgs[0]?.time ?? null };
+  renderExplain(msgs);
+  groupTools(msgs);
   if (changed && (nearBottom || !sameThread)) ui.chat.scrollTop = ui.chat.scrollHeight;
 }
 

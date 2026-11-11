@@ -222,3 +222,17 @@ test('trif explain: the terms by group; one by id or label, any case; two that s
   const help = await runCli(['help'], { home });
   assert.match(help.stdout, /explain \[TERM\] +what a word the side panel shows means/);
 });
+
+test('"more" only adds: no five-word run of a term\'s line comes back after the explanation\'s first sentence', () => {
+  const words = (x) => String(x).toLowerCase().replace(/\{[^}]*\}/g, ' ').match(/[a-z0-9']+/g) || [];
+  const runs = (w) => new Set(w.slice(0, Math.max(0, w.length - 4)).map((_, i) => w.slice(i, i + 5).join(' ')));
+  const bad = [];
+  for (const e of require('../extension/explain.json').terms) {
+    const line = words(e.line);
+    const rest = words(String(e.explanation).slice(String(e.line).trim().length));
+    const lr = runs(line);
+    const hit = [...runs(rest)].find((r) => lr.has(r));
+    if (hit) bad.push(`${e.group}/${e.id}: "${hit}"`);
+  }
+  assert.deepStrictEqual(bad, []);
+});

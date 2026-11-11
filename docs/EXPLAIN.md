@@ -16,8 +16,8 @@ shown in the panel as such.
 `tiers/style-mods`, approved 2026-11-11 (Claude, delegated by Tim)
 
 - **Label**: Style mods
-- **Line**: Run by TRIF from data: they change how the page looks, and can't send, load or click anything themselves.
-- **Explanation**: Run by TRIF from data: they change how the page looks, and can't send, load or click anything themselves. There's no code in them, only rules TRIF follows: what to restyle, hide or reword. One thing to watch: by restyling, a mod could hide a real button under something else, so your own click lands on it.
+- **Line**: Only change how the page looks.
+- **Explanation**: Only change how the page looks. TRIF runs them from data: there's no code in them, only rules about what to restyle, hide or reword, so they can't send, load or click anything themselves. One thing to watch: by restyling, a mod could hide a real button under something else, so your own click lands on it.
 - **For agents**:
   - First choice for any mod: `// @style` in the header (old name `@rules` still works); `trif new <site> <mod> --style`. After the header, one JSON object: `css`, `hide`, `replace` ({in?, find, with, regex?, caseless?}), `filter` ({items, hideIfText | hideIfRegex | hideIfHas}).
   - Refused by `trif check` and NOT SENT: CSS that loads anything (`url()` other than `data:` or `#fragment`, `@import`, `image-set()`, backslash escapes outside strings), selectors naming the `value` attribute or `:autofill`, selectors containing `{`, `}`, `;` or `@`.
@@ -30,8 +30,8 @@ shown in the panel as such.
 `tiers/boxed-mods`, approved 2026-11-11 (Claude, delegated by Tim)
 
 - **Label**: Boxed mods
-- **Line**: Run in TRIF's sandbox: they change what the page shows, and do only what you've allowed.
-- **Explanation**: Run in TRIF's sandbox: they change what the page shows, and do only what you've allowed. On their own they can't send, load, click or read what you type. One that needs more asks for named powers, waits for your OK once, and gets only those. In Safari, which has no sandbox, a boxed mod runs as a free mod after your OK.
+- **Line**: Do only what you've allowed.
+- **Explanation**: Do only what you've allowed. They run in TRIF's sandbox and change what the page shows; on their own they can't send, load, click or read what you type. One that needs more asks for named powers and gets only those. In Safari, which has no sandbox, a boxed mod runs as a free mod after your OK.
 - **For agents**:
   - `// @boxed` (old `@sandboxed`); `trif new <site> <mod> --boxed`. JavaScript in an SES compartment in TRIF's user-script world; elements are frozen stand-ins; the API is TECHNIQUES.md "Boxed mods".
   - Not there: `window`, `document`, `fetch`/XHR/WebSocket, storage, `postMessage`, `eval`/`Function`, event constructors. `trif check` lints each ("not there in a boxed mod…", with tips). Source containing `import(` or an HTML comment marker is refused, even inside a string or comment.
@@ -261,7 +261,7 @@ shown in the panel as such.
 
 - **Label**: rewrite-requests
 - **Line**: It changes what {site} receives from this page: {name} set to {value} (in {operation} requests).
-- **Explanation**: It changes what {site} receives from this page: {name} set to {value} (in {operation} requests). Only the settings and values its header names, made by TRIF in the site's own requests; the mod's code has no part in it. The site sees the change, so its row says changes requests: rate limits or an account flag are possible.
+- **Explanation**: It changes what {site} receives from this page: {name} set to {value} (in {operation} requests). Only the settings and values its header names, made by TRIF in the site's own requests; the mod's code has no part in it. If the site doesn't expect the change, rate limits or an account flag are possible.
 - **For agents**:
   - Header only, no API: `// @powers rewrite-requests HomeTimeline variables.enableRanking=false`: the request's name (the address's last part or its `operationName`), then `path=value` (dotted names); values `true`, `false`, `null`, numbers or plain words; applied by TRIF's page side to same-origin requests (a query parameter, its JSON, or a JSON body).
   - Header errors: "rewrite-requests takes the request's name and what to set in it: …", `rewrite-requests: "{x}" isn't name.path=value`, `rewrite-requests: "{v}" isn't true, false, null, a number or a plain word (an address or long text could carry data)`.
@@ -368,7 +368,7 @@ shown in the panel as such.
 
 - **Label**: noticeable
 - **Line**: Noticeable: {site} could tell something's different.
-- **Explanation**: Noticeable: {site} could tell something's different. Its own scripts could spot the mod: ads that never report being seen, say, or clicks the mod makes for you. That's usually harmless, but on an account you care about, it's worth knowing.
+- **Explanation**: Noticeable: {site} could tell something's different. Usually that's harmless, but a site that notices may treat you like someone using an ad blocker or an extension. On an account you care about, it's worth knowing.
 - **For agents**:
   - Level 1 (extension/modlevel.js). A boxed mod's comes from its powers: block-events, site-data, click, write-drafts, media, page-events, site-storage, edit-uploads, image-variants, local-fonts. A free or style mod's from `@risk 1`, or raised to 1 when TRIF's reading finds it sends or acts.
   - For free and style mods, `// @risk 1 <why>`: the why is shown after the level words. A boxed mod's @risk isn't used for its level.
@@ -566,7 +566,7 @@ shown in the panel as such.
 
 - **Label** (drafted): Goes and clicks
 - **Line**: Together, it could take you to a page and click things there for you.
-- **Explanation**: Together, it could take you to a page and click things there for you. It only goes to pages its header lists or links on the page, and only clicks what its header names, never a form's send button or a link to another site. Alone, it clicks where you already are; together, it can click on a page you didn't choose.
+- **Explanation**: Together, it could take you to a page and click things there for you. It only goes to pages its header lists or links on the page, and only clicks what its header names, never a form's send button or a link to another site.
 - **For agents**:
   - go-to + click.
   - Page-wide: go-to is refused while another boxed mod has click and this one doesn't.

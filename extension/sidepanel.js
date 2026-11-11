@@ -974,8 +974,8 @@ ui.waitingBadge?.addEventListener('click', () => openApproval(null));
 // ---- Groups: "Rules" and "Page scripts", each with a switch for this site (background's mods.group)
 const GROUP_TEXT = {
   // (the lines for style and boxed mods: approved by Tim, 2026-11-10, docs/TIER-NAMES-STRINGS.md)
-  rules: [GROUP_NAMES.rules, 'Run by TRIF from data: they change how the page looks, and can\'t send, load or click anything themselves.'],
-  sandboxed: [GROUP_NAMES.sandboxed, 'Run in TRIF\'s sandbox: they change what the page shows, and do only what you\'ve allowed.'],
+  rules: [GROUP_NAMES.rules, 'Only change how the page looks.'],
+  sandboxed: [GROUP_NAMES.sandboxed, 'Do only what you\'ve allowed.'],
   page: [GROUP_NAMES.page, 'Run in the page with everything it has.'],
 };
 const TIER_TERMS = { rules: 'style-mods', sandboxed: 'boxed-mods', page: 'free-mods' }; // (explain.json)

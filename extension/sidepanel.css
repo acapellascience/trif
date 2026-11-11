@@ -132,6 +132,11 @@ svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width:
 .gate { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 14px; padding: 24px 16px 64px; }
 .gate[hidden] { display: none; }
 .gate .mod-err { margin: 0; text-align: center; }
+/* The robot, its line and the button are centred; the lines under the button (Block / Disconnect, an error,
+   Tim's mods, the problem line) hang below them without moving them, so the robot sits at one height. */
+.gate-main { position: relative; display: flex; flex-direction: column; align-items: center; gap: 14px; }
+.gate-foot { position: absolute; top: calc(100% + 14px); left: 50%; transform: translateX(-50%); width: min(320px, calc(100vw - 32px)); display: flex; flex-direction: column; align-items: center; gap: 14px; }
+.gate-foot:not(:has(> :not([hidden]))) { display: none; }
 .gate-title { margin: 0; font-size: 15px; font-weight: 600; }
 .gate-why { margin: -6px 0 0; color: var(--muted); text-align: center; }
 /* Quiet links under Fix: block the site in TRIF, or disconnect it (the browser's permission). */
@@ -681,7 +686,8 @@ h3.mod-name { margin: 0; font-size: inherit; line-height: inherit; }
 .approval {
   /* (TRIF's green, whatever the panel's state colours its switches (red blocked), except yellow for a login) */
   --switch-on: var(--trif-green);
-  width: auto; max-width: none; max-height: calc(100% - 32px); margin: auto 16px; padding: 16px 16px 14px;
+  /* (pinned to the top, so a card that grows, History opening, grows downward instead of jumping) */
+  width: auto; max-width: none; max-height: calc(100% - 32px); margin: 16px 16px auto; padding: 16px 16px 14px;
   overflow-y: auto; overflow-x: hidden; color: var(--text); background: var(--surface); border: 1px solid var(--line); border-radius: 14px;
   box-shadow: 0 18px 50px rgb(0 0 0 / 0.55);
 }

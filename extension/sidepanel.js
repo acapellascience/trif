@@ -29,7 +29,7 @@ const ui = {
   sensitiveReset: document.getElementById('sensitive-reset'), sensitiveNote: document.getElementById('sensitive-note'),
   waitingBadge: document.getElementById('waiting-badge'),
   dot: $('#dot'), site: $('#site'), barRobot: $('#bar-robot'), siteSwitch: $('#site-switch'), newChat: $('#new-chat'), settingsBtn: $('#settings-btn'),
-  gate: $('#gate'), gateTitle: $('#gate-title'), gateWhy: $('#gate-why'), gateBtn: $('#gate-btn'), gateErr: $('#gate-err'), gateNote: $('#gate-note'),
+  gate: $('#gate'), gateFoot: $('#gate-foot'), gateTitle: $('#gate-title'), gateWhy: $('#gate-why'), gateBtn: $('#gate-btn'), gateErr: $('#gate-err'), gateNote: $('#gate-note'),
   gateLinks: $('#gate-links'), gateBlock: $('#gate-block'), gateDisconnect: $('#gate-disconnect'),
   modeNote: $('#mode-note'), accessNote: $('#access-note'), accessNoteOk: $('#access-note-ok'),
   blockedList: $('#blocked-list'), blockedEmpty: $('#blocked-empty'),
@@ -821,7 +821,7 @@ function renderNotice({ helperOk, agentInfo, anyAgent }) {
   renderPaused(helperOk);
   // A login started from the gate's line goes on in the gate (renderGate leaves the line out meanwhile).
   const inGate = !ui.gate.hidden && !!login.current && !document.body.classList.contains('blocked');
-  if (inGate && n.parentElement !== ui.gate) ui.gate.append(n);
+  if (inGate && n.parentElement !== ui.gateFoot) ui.gateFoot.append(n);
   else if (!inGate && n.nextElementSibling !== ui.update) ui.update.before(n);
   if (helperOk && (login.current || needsLogin(agentInfo))) {
     // Built once per state, so the status refresh doesn't wipe the code being typed.
@@ -2705,11 +2705,17 @@ function followPointer(d) {
   const { li } = d;
   const r = list.getBoundingClientRect();
   const h = li.offsetHeight;
-  const top = Math.max(0, Math.min(list.scrollHeight - h, d.y - r.top - list.clientTop + list.scrollTop - d.grabDy));
-  const mid = top + h / 2;
+  // (the row stays inside its own group: it stops at the group's first and last rows, never past them)
+  const group = [...list.children].filter((x) => x.dataset.mod && x.dataset.group === li.dataset.group);
+  const minTop = Math.min(...group.map((x) => x.offsetTop));
+  const maxTop = Math.max(...group.map((x) => x.offsetTop + x.offsetHeight)) - h;
+  const top = Math.max(minTop, Math.min(maxTop, d.y - r.top - list.clientTop + list.scrollTop - d.grabDy));
   // (positions among the mod rows: the group headings aren't rows, and a row stays in its group: placeRow)
+  // The leading edge decides: a row above is passed once the dragged row's top crosses its middle, a row below
+  // once its bottom does, so the end rows make way at both ends of the group (equal heights tie otherwise).
   const others = [...list.children].filter((x) => x !== li && x.dataset.mod);
-  let to = others.findIndex((x) => x.offsetTop + x.offsetHeight / 2 > mid);
+  const passed = (x) => (x.offsetTop < li.offsetTop ? top >= x.offsetTop + x.offsetHeight / 2 : top + h > x.offsetTop + x.offsetHeight / 2);
+  let to = others.findIndex((x) => !passed(x));
   if (to === -1) to = others.length;
   if (to !== rowIds().indexOf(li.dataset.mod)) {
     // The rows that make way slide there (unless reduced motion turns that off, in CSS).

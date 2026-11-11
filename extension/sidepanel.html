@@ -134,11 +134,15 @@
 <section id="gate" class="gate" hidden>
   <!-- The robot, shaded, with the face of the state (sidepanel.js renderGate): blank when off, a cross when
        blocked. -->
+  <!-- (the robot, its line and the button are what's centred; the lines under the button hang below them,
+       so every state's robot sits at the same height: sidepanel.css .gate-main / .gate-foot) -->
+  <div class="gate-main">
   <img id="gate-icon" class="gate-icon" src="icons/robot-shaded-off.svg" alt="">
   <!-- "The robot is off.", disconnected, or blocked (sidepanel.js renderGate). -->
   <p id="gate-title" class="gate-title">The robot is off.</p>
   <p id="gate-why" class="gate-why" hidden></p>
   <button id="gate-btn" class="btn go" type="button"></button>
+  <div id="gate-foot" class="gate-foot">
   <p id="gate-err" class="mod-err" hidden></p>
   <p id="gate-links" class="gate-links" hidden>
     <a href="#" id="gate-block" title="Add to TRIF's block list" aria-description="Add to TRIF's block list"></a>
@@ -149,6 +153,8 @@
   <p id="site-starter" class="site-starter" hidden><a href="#" id="site-starter-link"></a><span id="site-starter-err" class="mod-err" hidden></span></p>
   <!-- What's in the way, in one line (sidepanel.js problemLine): red, or yellow for a login. -->
   <div id="gate-note" class="problem-line" hidden></div>
+  </div>
+  </div>
 </section>
 
 <!-- No website in this tab: the robot, the version (filled in from the manifest) and where to start. -->

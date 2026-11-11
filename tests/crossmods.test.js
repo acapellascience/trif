@@ -35,10 +35,10 @@ function runtimePage(a, b) {
   const src = fs.readFileSync(path.join(__dirname, '..', 'extension', 'sandbox.js'), 'utf8');
   const from = src.indexOf('  const ACT_PARTNERS = pageWide.actPartners;'), to = src.indexOf('  // write-drafts and addresses');
   assert.ok(from > 0 && to > from, 'the page-wide rules in sandbox.js');
-  const ctx = vm.runInNewContext(`const pageWide = ${JSON.stringify(cross.PAGE_WIDE)}; const fail = (why) => { throw new TypeError('TRIF sandbox: ' + why); };
+  const ctx = vm.runInNewContext(`const pageWide = ${JSON.stringify(cross.PAGE_WIDE)}; const fail = (why) => { throw new TypeError('TRIF sandbox: ' + why); }; const reported = []; const report = (mod, e) => reported.push([mod, e.message]);
 const channels = new Map(), apis = new Map(), draftWriters = new Set(); const SANDBOX = false, send = null, G = {}, location = { href: '' };
 ${src.slice(from, to)}
-({ partnersOk, soundOk, clickOk, signalOk, inPlay, uploadReaders, uploadEditors, channels, apis, draftWriters, setArrived: (m) => { arrivedBy = m; } })`);
+({ reported, partnersOk, soundOk, clickOk, signalOk, inPlay, uploadReaders, uploadEditors, channels, apis, draftWriters, setArrived: (m) => { arrivedBy = m; } })`);
   const api = (id, m, with_ = []) => ({ mod: id, powers: new Set(m.powers), combo: new Set(cross.comboOf({ sandboxed: true, ...m })), cross: new Set(with_) });
   const B = api('b', b);
   ctx.apis.set('b', B);
@@ -57,6 +57,7 @@ ${src.slice(from, to)}
     if (act === 'sound') return ctx.soundOk(A);
     return ctx.partnersOk(A, act);
   };
+  checkAct.reported = ctx.reported;
   return checkAct;
 }
 const ACTS = Object.keys(cross.PAGE_WIDE.actPartners);
@@ -105,6 +106,24 @@ test('the conversion run\'s case: a mod with both halves of a pair beside one wi
   assert.doesNotThrow(() => runtimePage(skip, r)('site-storage', ['go-to+site-storage b']));
   // (the needs, on whichever mod's hold: both pairs, keyed by the other mod)
   assert.deepEqual(cross.crossNeeds(skip, [skip, r]).map((n) => n.key).sort(), ['power:with:x.com/r:go-to+page-events', 'power:with:x.com/r:site-storage+go-to']);
+  // (Post Styler's picture reads beside Profile Styler's local-fonts: offered, and approved, allowed)
+  const post = { id: 'x.com/post', sandboxed: true, powers: ['image-variants', 'page-data'] }, prof = { id: 'x.com/prof', sandboxed: true, powers: ['local-fonts', 'page-data'] };
+  assert.deepEqual(cross.crossPairs(post, prof).map((w) => w.combo), ['local-fonts+image-variants']);
+  assert.throws(() => runtimePage(post, prof)('image-variants', []), /local-fonts power/);
+  assert.doesNotThrow(() => runtimePage(post, prof)('image-variants', ['image-variants+local-fonts b']));
+  // (sound beside a read: only offered where they share a channel, both with mods, as only then it's refused)
+  assert.deepEqual(cross.crossPairs({ sandboxed: true, powers: ['sound'] }, { sandboxed: true, powers: ['keys'] }), []);
+  assert.doesNotThrow(() => runtimePage({ powers: ['sound'] }, { powers: ['keys'] })('sound', []));
+  assert.deepEqual(cross.crossPairs({ sandboxed: true, powers: ['sound', 'mods'] }, { sandboxed: true, powers: ['keys', 'mods'] }).map((w) => w.combo), ['keys+sound']);
+  assert.throws(() => runtimePage({ powers: ['sound', 'mods'] }, { powers: ['keys', 'mods'] })('sound', []), /shares a channel/);
+  // (a pair of mods says each sentence once: two pairs with one warning are one line)
+  const n2 = cross.crossNeeds(skip, [skip, r]);
+  assert.deepEqual(bp.factLines(n2.map((n) => n.key), n2.map((n) => n.fact), cross.namesFor(n2)), ['together with R for Random, it could take you to a page and set off that page\'s own actions there']);
+  // (a refusal is in the mod's errors once per act, whatever it catches)
+  const once = runtimePage(skip, r);
+  for (let i = 0; i < 3; i++) assert.throws(() => once('site-storage', []));
+  assert.equal(once.reported.length, 1);
+  assert.match(once.reported[0][1], /^TRIF sandbox: changing what the site keeps is off/);
   // (a mod beside one that has every half itself: nothing refused, nothing offered)
   assert.deepEqual(cross.crossPairs({ sandboxed: true, powers: ['sound'] }, { sandboxed: true, powers: ['controls'] }), []);
   assert.deepEqual(cross.crossPairs({ sandboxed: true, powers: ['keys'] }, { sandboxed: true, powers: ['click'] }).map((w) => w.combo), ['keys+click']);

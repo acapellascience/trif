@@ -4845,7 +4845,7 @@ say({ type: 'result', subtype: 'success', is_error: false, result: text, session
       // (Firefox doesn't say which page: after that check, a failed fetch or socket is one of those)
       // (the sandboxed mods' test page: its hostile mod's refusals and the errors the good one throws on purpose)
       // (Chrome names the page the tab had when its console was first attached, so by the text)
-      || (this.sandboxPage && (/^\[TRIF\] 127\.0\.0\.1\/e2e-(sbx|pw|broke)/.test(String(p.text)) || /willReadFrequently/.test(String(p.text)) || /AudioContext was not allowed to start/.test(String(p.text)) || /\/(sandbox|wide|wideb|fixes)\.html/.test(String(p.source || ''))
+      || (this.sandboxPage && (/^\[TRIF\] 127\.0\.0\.1\/e2e-(sbx|pw|broke|cm|combo|fixes)/.test(String(p.text)) || /willReadFrequently/.test(String(p.text)) || /AudioContext was not allowed to start/.test(String(p.text)) || /\/(sandbox|wide|wideb|fixes)\.html/.test(String(p.source || ''))
         // (sandboxFixesCheck: the variant asked for with its pixels, from a host without CORS, which refuses it on purpose)
         || /e2e-wide\.png\?size=big|CORS|Cross-Origin Request Blocked/.test(String(p.text) + String(p.source || ''))))
       // (the tab-lock edges: the probes the lock refuses, tabLockHardeningCheck)

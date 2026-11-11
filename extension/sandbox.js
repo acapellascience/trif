@@ -529,16 +529,25 @@ export function sandboxRuntime(mode, pageModId, pageFn, pagePowers, pageWide) {
   // (whether the user approved the pair `a`+`b` across the acting mod and mod `other`: its `with` list)
   const crossOk = (api, other, a, b) => !!other && api.cross.has(`${[a, b].sort().join('+')} ${other}`);
   // (how a refusal ends: what lifts it)
+  // (a page-wide refusal goes in the mod's errors too, once per act on a page, whatever the mod catches: the
+  // user, and `trif errors`, see why it didn't act)
+  const refusedOnce = new Set();
+  const refuse = (api, act, why) => {
+    const err = new TypeError(`TRIF sandbox: ${why}`);
+    const k = `${api.mod}\n${act}`;
+    if (!refusedOnce.has(k)) { refusedOnce.add(k); report(api.mod, err); }
+    throw err;
+  };
   const LIFT = () => '(the user\'s OK for the two mods together lifts it: TRIF asks for that when either is new, changed or switched on)';
   const partnersOk = (api, act) => {
     for (const p of ACT_PARTNERS[act]) {
       if (api.combo.has(p)) continue;
       if (p === 'edit-uploads') {
-        for (const id of uploadReaders) if (id !== api.mod && !crossOk(api, id, act, p)) fail(`${PARTNER_WHY[act][0]} is off on this page since another boxed mod here was handed a picture the user attached (edit-uploads): with both, ${PARTNER_WHY[act][1]} ${LIFT(act, p)}`);
+        for (const id of uploadReaders) if (id !== api.mod && !crossOk(api, id, act, p)) refuse(api, act, `${PARTNER_WHY[act][0]} is off on this page since another boxed mod here was handed a picture the user attached (edit-uploads): with both, ${PARTNER_WHY[act][1]} ${LIFT(act, p)}`);
         continue;
       }
       if (!inPlay.has(p)) continue;
-      for (const o of apis.values()) if (o.mod !== api.mod && o.combo.has(p) && !crossOk(api, o.mod, act, p)) fail(`${PARTNER_WHY[act][0]} is off on this page while another boxed mod here has the ${p} power: with both, ${PARTNER_WHY[act][1]} ${LIFT(act, p)}`);
+      for (const o of apis.values()) if (o.mod !== api.mod && o.combo.has(p) && !crossOk(api, o.mod, act, p)) refuse(api, act, `${PARTNER_WHY[act][0]} is off on this page while another boxed mod here has the ${p} power: with both, ${PARTNER_WHY[act][1]} ${LIFT(act, p)}`);
     }
   };
   // (sound: not beside every read on the page (that would stop every sound mod beside any hotkey mod:
@@ -555,7 +564,7 @@ export function sandboxRuntime(mode, pageModId, pageFn, pagePowers, pageWide) {
       if (api.combo.has(p)) continue;
       for (const id of peers) {
         const o = apis.get(id);
-        if ((p === 'edit-uploads' ? uploadReaders.has(id) : !!(o && o.combo.has(p))) && !crossOk(api, id, 'sound', p)) fail(`${PARTNER_WHY.sound[0]} is off on this page while it shares a channel (mods) with another boxed mod here that has the ${p} power: with both, ${PARTNER_WHY.sound[1]} ${LIFT('sound', p)}`);
+        if ((p === 'edit-uploads' ? uploadReaders.has(id) : !!(o && o.combo.has(p))) && !crossOk(api, id, 'sound', p)) refuse(api, 'sound', `${PARTNER_WHY.sound[0]} is off on this page while it shares a channel (mods) with another boxed mod here that has the ${p} power: with both, ${PARTNER_WHY.sound[1]} ${LIFT('sound', p)}`);
       }
     }
   };
@@ -581,7 +590,7 @@ export function sandboxRuntime(mode, pageModId, pageFn, pagePowers, pageWide) {
     for (const ty of ['pointerdown', 'mousedown', 'touchstart', 'keydown']) G.addEventListener(ty, (e) => { if (e.isTrusted) { userActed = true; arrivedBy = null; } }, { capture: true, passive: true });
   }
   const arrivedOk = (api, act, what, does) => {
-    if (arrivedBy && !api.powers.has('go-to') && !crossOk(api, arrivedBy, act, 'go-to')) fail(`${what} is off on this page until the user clicks or presses a key here: another boxed mod's go-to brought the user here, and with both, one could take the user to a page where the other ${does} ${LIFT(act, 'go-to')}`);
+    if (arrivedBy && !api.powers.has('go-to') && !crossOk(api, arrivedBy, act, 'go-to')) refuse(api, act, `${what} is off on this page until the user clicks or presses a key here: another boxed mod's go-to brought the user here, and with both, one could take the user to a page where the other ${does} ${LIFT(act, 'go-to')}`);
   };
   const draftsOk = (api) => {
     if (!api.powers.has('write-drafts')) return false;
@@ -593,15 +602,15 @@ export function sandboxRuntime(mode, pageModId, pageFn, pagePowers, pageWide) {
   const clickOk = (api) => {
     partnersOk(api, 'click');
     arrivedOk(api, 'click', 'clicking for the user', 'clicks');
-    for (const w of draftWriters) if (w !== api.mod && !api.powers.has('write-drafts') && !crossOk(api, w, 'click', 'write-drafts')) fail(`clicking for the user is off on this page since another boxed mod here changed a draft: with both, a draft could be sent without the user ${LIFT('click', 'write-drafts')}`);
-    for (const w of uploadEditors) if (w !== api.mod && !api.powers.has('edit-uploads') && !crossOk(api, w, 'click', 'edit-uploads')) fail(`clicking for the user is off on this page since another boxed mod here changed a picture the user attached: with both, it could be posted without the user ${LIFT('click', 'edit-uploads')}`);
+    for (const w of draftWriters) if (w !== api.mod && !api.powers.has('write-drafts') && !crossOk(api, w, 'click', 'write-drafts')) refuse(api, 'click', `clicking for the user is off on this page since another boxed mod here changed a draft: with both, a draft could be sent without the user ${LIFT('click', 'write-drafts')}`);
+    for (const w of uploadEditors) if (w !== api.mod && !api.powers.has('edit-uploads') && !crossOk(api, w, 'click', 'edit-uploads')) refuse(api, 'click', `clicking for the user is off on this page since another boxed mod here changed a picture the user attached: with both, it could be posted without the user ${LIFT('click', 'edit-uploads')}`);
   };
   // (page-events, as click: not after another mod changed a draft or an attached picture: a signal could send it)
   const signalOk = (api) => {
     partnersOk(api, 'page-events');
     arrivedOk(api, 'page-events', 'signalling the page\'s code', 'sets off the page\'s own actions');
-    for (const w of draftWriters) if (w !== api.mod && !api.powers.has('write-drafts') && !crossOk(api, w, 'page-events', 'write-drafts')) fail(`signalling the page's code is off on this page since another boxed mod here changed a draft: with both, a draft could be sent without the user ${LIFT('page-events', 'write-drafts')}`);
-    for (const w of uploadEditors) if (w !== api.mod && !api.powers.has('edit-uploads') && !crossOk(api, w, 'page-events', 'edit-uploads')) fail(`signalling the page's code is off on this page since another boxed mod here changed a picture the user attached ${LIFT('page-events', 'edit-uploads')}`);
+    for (const w of draftWriters) if (w !== api.mod && !api.powers.has('write-drafts') && !crossOk(api, w, 'page-events', 'write-drafts')) refuse(api, 'page-events', `signalling the page's code is off on this page since another boxed mod here changed a draft: with both, a draft could be sent without the user ${LIFT('page-events', 'write-drafts')}`);
+    for (const w of uploadEditors) if (w !== api.mod && !api.powers.has('edit-uploads') && !crossOk(api, w, 'page-events', 'edit-uploads')) refuse(api, 'page-events', `signalling the page's code is off on this page since another boxed mod here changed a picture the user attached ${LIFT('page-events', 'edit-uploads')}`);
   };
   const uploadEditors = new Set(); // (boxed mods that changed an attached picture on this page)
   // write-drafts and addresses: the rule (docs/SAFE-MODS.md) holds in drafts too. A site can fetch an address
@@ -809,7 +818,7 @@ export function sandboxRuntime(mode, pageModId, pageFn, pagePowers, pageWide) {
       // page-wide rules turn it off, said once; a block with no function decides nothing)
       let r = true;
       if (b.fn) {
-        try { partnersOk(b.api, 'block-events'); } catch (err) { if (!b.refused) { b.refused = true; report(b.api.mod, err); } continue; }
+        try { partnersOk(b.api, 'block-events'); } catch { continue; } // (said once, in its errors: refuse)
         r = b.api.call(b.fn, eventOf(e, b.api.powers));
       }
       if (r === true) { e.stopImmediatePropagation(); return; }
@@ -845,7 +854,7 @@ export function sandboxRuntime(mode, pageModId, pageFn, pagePowers, pageWide) {
     // did, only looked or did nothing, the file goes on as it was: the very file, not a copy encoded again)
     let changed = false;
     for (const u of uploadFns) {
-      try { partnersOk(u.api, 'edit-uploads'); } catch (err) { report(u.api.mod, err); continue; }
+      try { partnersOk(u.api, 'edit-uploads'); } catch { continue; } // (said once, in its errors: refuse)
       uploadReaders.add(u.api.mod); // (it sees the picture: a read, for the page-wide rules)
       const w0 = cv.width, h0 = cv.height;
       drawnOn.delete(cv); // (what this mod draws, not an earlier one)

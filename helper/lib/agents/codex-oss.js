@@ -531,9 +531,9 @@ adapter.setKey = async function setKey(ws, key, { env = process.env } = {}) {
 // stopped, or gone on with the user's consent for this agent (its own: `codex-oss`), as codex.js.
 adapter.settingsName = codex.settingsName;
 adapter.sandboxOverridden = codex.sandboxOverridden;
-adapter.sandboxOverriddenMessage = codex.sandboxOverriddenMessage;
 adapter.orgBlocked = codex.orgBlocked;
-adapter.orgBlockedMessage = codex.orgBlockedMessage;
+// (No "personal Codex login" in its messages: open models don't use one.)
+Object.assign(adapter, codex.orgMessages({ personal: false }));
 
 /**
  * agent.openModel.removeKey / `--remove-key`: forget the stored provider's key. Resolves {account, removed}.

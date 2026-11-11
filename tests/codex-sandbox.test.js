@@ -32,6 +32,12 @@ test("codex: an organization's override of TRIF's profile is recognised, ordinar
   // The open-model agent is the same Codex: the same check.
   assert.equal(codexOss.sandboxOverridden(SAID), true);
   assert.equal(codexOss.settingsName, 'Codex');
+  // No other agent by name, in any of them; the open model has no "personal Codex login".
+  const all = [codex.sandboxOverriddenMessage(SAID), codex.orgBlockedMessage(), codexOss.sandboxOverriddenMessage(SAID), codexOss.orgBlockedMessage()];
+  for (const t of all) assert.doesNotMatch(t, /Claude/, t);
+  assert.match(m, /A personal Codex login, or another agent, works with TRIF's sandbox\./);
+  assert.match(codexOss.sandboxOverriddenMessage(SAID), /Another agent works with TRIF's sandbox\./);
+  assert.equal(codexOss.orgBlockedMessage(), "Your company's Codex settings don't let Codex write mods or reach TRIF from the side panel, so chats can't work with them. Try another agent, or work with Codex in a terminal in ~/.trif.");
 });
 
 // A Runs with stand-ins for what _checkSandbox uses; `allowed`: the agents with consent.
@@ -101,7 +107,7 @@ test('runs: a run allowed without the sandbox whose organization blocks its work
   const errors = emitted.filter((e) => e.kind === 'error');
   assert.equal(errors.length, 1, 'once per run');
   assert.equal(errors[0].reason, 'orgBlocked');
-  assert.equal(errors[0].message, "Your company's Codex settings don't let Codex write mods or reach TRIF from the side panel, so chats can't work with this login. Use Claude Code or a personal Codex login in TRIF, or work with Codex in a terminal in ~/.trif.");
+  assert.equal(errors[0].message, "Your company's Codex settings don't let Codex write mods or reach TRIF from the side panel, so chats can't work with this login. Use a personal Codex login, try another agent, or work with Codex in a terminal in ~/.trif.");
   assert.equal(r.killed, 1);
   assert.equal(run.agentDone.ok, false, "a turn.completed after it doesn't make it a success");
   // A run under TRIF's own sandbox isn't judged this way (its refusals are TRIF's own limits).

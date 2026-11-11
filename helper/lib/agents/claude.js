@@ -337,10 +337,10 @@ const both = (list) => (list.length > 1 ? `${list.slice(0, -1).join(', ')} and $
 adapter.withoutSandboxMessage = (pre) =>
   `Your organization's Claude Code settings ${both(pre.loosens)}, which replaces TRIF's sandbox, so TRIF stopped the run before Claude Code started. ` +
   'To let Claude Code work under your company\'s settings instead, choose “Use Claude Code anyway” in TRIF\'s side panel. ' +
-  'Codex, or Claude Code without those settings, works with TRIF\'s sandbox.';
+  'A personal Claude Code login, or another agent, works with TRIF\'s sandbox.';
 adapter.brokenMessage = (pre) =>
   `Your organization's Claude Code settings ${both(pre.breaks)}, so chats with Claude Code can't work in TRIF's side panel. ` +
-  'Use Codex in TRIF, or work with Claude Code in a terminal in ~/.trif.';
+  'Try another agent, or work with Claude Code in a terminal in ~/.trif.';
 // Under the organization's settings: a command's or a tool's error (a tool_result) that says `trif`
 // can't reach the helper, or a write to sites/ was refused (withoutsandbox.js blockedText).
 adapter.orgBlocked = (line) => {
@@ -358,7 +358,7 @@ adapter.orgBlocked = (line) => {
 };
 adapter.orgBlockedMessage = () =>
   "Your company's Claude Code settings don't let Claude Code write mods or reach TRIF from the side panel, so chats can't " +
-  'work with them. Use Codex, or Claude Code without those settings, in TRIF, or work with Claude Code in a terminal in ~/.trif.';
+  'work with them. Use a personal Claude Code login, try another agent, or work with Claude Code in a terminal in ~/.trif.';
 
 module.exports = adapter;
 module.exports.toolSummary = toolSummary;

@@ -119,7 +119,11 @@ test('claude-managed: managed-settings.d drop-ins merge in order over the file; 
 test('claude: the messages say what the organization\'s settings do', () => {
   const pre = { loosens: ['turn Claude Code’s sandbox off', 'let commands reach github.com on the network'], breaks: ['keep Claude Code in plan mode, where it can’t write mods'] };
   assert.equal(claude.withoutSandboxMessage(pre).split(', which')[0], "Your organization's Claude Code settings turn Claude Code’s sandbox off and let commands reach github.com on the network");
-  assert.match(claude.brokenMessage(pre), /plan mode, where it can’t write mods, so chats with Claude Code can't work in TRIF's side panel/);
+  assert.match(claude.brokenMessage(pre), /plan mode, where it can’t write mods, so chats with Claude Code can't work in TRIF's side panel\. Try another agent, or work with Claude Code in a terminal in ~\/\.trif\.$/);
+  assert.match(claude.withoutSandboxMessage(pre), /A personal Claude Code login, or another agent, works with TRIF's sandbox\.$/);
+  assert.equal(claude.orgBlockedMessage(), "Your company's Claude Code settings don't let Claude Code write mods or reach TRIF from the side panel, so chats can't work with them. Use a personal Claude Code login, try another agent, or work with Claude Code in a terminal in ~/.trif.");
+  // No other agent by name.
+  for (const t of [claude.withoutSandboxMessage(pre), claude.brokenMessage(pre), claude.orgBlockedMessage()]) assert.doesNotMatch(t, /Codex/, t);
   // Under the organization's settings, a tool result saying `trif` can't reach the helper.
   const line = JSON.stringify({ type: 'user', message: { content: [{ type: 'tool_result', is_error: true, content: "error: can't reach the helper through /b/r1: EACCES (has the agent run ended?)" }] } });
   assert.equal(claude.orgBlocked(line), 'helper');

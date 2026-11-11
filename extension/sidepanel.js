@@ -305,7 +305,8 @@ const both = (list) => (list.length > 1 ? `${list.slice(0, -1).join(', ')} and $
 /** The card's words for an agent: settingsName is "Codex" or "Claude Code". */
 function sandboxCardText(m) {
   const who = m.settingsName || m.name || 'Your agent';
-  const other = who === 'Claude Code' ? 'Codex, or Claude Code without those settings, works' : `Claude Code, or a personal ${who} login, works`;
+  // Never another agent by name (the list keeps growing). No personal login for the open model (codex-oss).
+  const other = m.agent === 'codex-oss' ? 'Another agent works' : `A personal ${who} login, or another agent, works`;
   return {
     title: `Your organization’s ${who} settings replace TRIF’s sandbox.`,
     text: `${who} would run under your company’s settings instead of TRIF’s sandbox. Those settings may let it do more than TRIF allows, or less (some companies’ settings stop it writing mods or reaching TRIF, and then chats can’t work). ${other} with TRIF’s sandbox.`,

@@ -256,11 +256,22 @@ adapter.prepare = async function prepare({ ws, logger }) {
 const OVERRIDDEN = /disallowed by requirements|falling back from\s+\S*trif-run\S*\s+to required value/i;
 adapter.settingsName = 'Codex'; // "Your organization's <settingsName> settings" (docs/CODEX-ORG-STRINGS.md)
 adapter.sandboxOverridden = (text) => OVERRIDDEN.test(String(text || ''));
-adapter.sandboxOverriddenMessage = (text) =>
-  "Your organization's Codex settings replace TRIF's sandbox, so TRIF stopped the run before Codex did anything. " +
-  'To let Codex work under your company\'s settings instead, choose “Use Codex anyway” in TRIF\'s side panel. ' +
-  'Claude Code, or a personal Codex login, works with TRIF\'s sandbox. ' +
-  `(Codex said: ${oneLine(String(text || '')).slice(0, 300)})`;
+// The messages never name another agent (the list keeps growing): "another agent". `personal`: whether a
+// personal Codex login would get TRIF's sandbox back (not for the open-model agent, codex-oss.js).
+function orgMessages({ personal }) {
+  return {
+    sandboxOverriddenMessage: (text) =>
+      "Your organization's Codex settings replace TRIF's sandbox, so TRIF stopped the run before Codex did anything. " +
+      'To let Codex work under your company\'s settings instead, choose “Use Codex anyway” in TRIF\'s side panel. ' +
+      `${personal ? 'A personal Codex login, or another agent, works' : 'Another agent works'} with TRIF's sandbox. ` +
+      `(Codex said: ${oneLine(String(text || '')).slice(0, 300)})`,
+    orgBlockedMessage: () =>
+      "Your company's Codex settings don't let Codex write mods or reach TRIF from the side panel, so chats can't work with " +
+      (personal ? 'this login. Use a personal Codex login, try another agent, or work with Codex in a terminal in ~/.trif.'
+        : 'them. Try another agent, or work with Codex in a terminal in ~/.trif.'),
+  };
+}
+Object.assign(adapter, orgMessages({ personal: true }));
 
 // Under the organization's profile: what the run's commands, edits and errors say, for withoutsandbox.js
 // blockedText (`trif` can't reach the helper, a write to sites/ refused).
@@ -276,11 +287,9 @@ adapter.orgBlocked = (line) => {
   if (msg.type === 'error' || msg.type === 'turn.failed') return blockedText(msg.message || (msg.error && msg.error.message) || '');
   return null;
 };
-adapter.orgBlockedMessage = () =>
-  "Your company's Codex settings don't let Codex write mods or reach TRIF from the side panel, so chats can't work with this " +
-  'login. Use Claude Code or a personal Codex login in TRIF, or work with Codex in a terminal in ~/.trif.';
 
 module.exports = adapter;
 adapter.permissionsToml = permissionsToml;
 adapter.EXCLUDED_VARS = EXCLUDED_VARS;
 adapter.tooOld = tooOld;
+adapter.orgMessages = orgMessages;

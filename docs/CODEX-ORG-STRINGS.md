@@ -6,6 +6,9 @@ When an organization's managed settings replace TRIF's sandbox (Codex's requirem
 permission profile, or Claude Code's managed settings loosen its limits), TRIF stops the run and asks.
 `{Agent}` is "Codex" (the Codex and the open-model agents) or "Claude Code".
 
+No message names another agent (Tim, 0.2.6: the list keeps growing): they say "another agent". The open-model
+agent (Codex with an open model) gets no "personal Codex login" part: open models don't use one.
+
 ## The choice card (in the chat)
 
 Where: `extension/sidepanel.js` `sandboxCardText`.
@@ -13,7 +16,8 @@ Where: `extension/sidepanel.js` `sandboxCardText`.
 | | Codex | Claude Code |
 |---|---|---|
 | Title | Your organization’s Codex settings replace TRIF’s sandbox. | Your organization’s Claude Code settings replace TRIF’s sandbox. |
-| Text | Codex would run under your company’s settings instead of TRIF’s sandbox. Those settings may let it do more than TRIF allows, or less (some companies’ settings stop it writing mods or reaching TRIF, and then chats can’t work). Claude Code, or a personal Codex login, works with TRIF’s sandbox. | Claude Code would run under your company’s settings instead of TRIF’s sandbox. Those settings may let it do more than TRIF allows, or less (some companies’ settings stop it writing mods or reaching TRIF, and then chats can’t work). Codex, or Claude Code without those settings, works with TRIF’s sandbox. |
+| Text | Codex would run under your company’s settings instead of TRIF’s sandbox. Those settings may let it do more than TRIF allows, or less (some companies’ settings stop it writing mods or reaching TRIF, and then chats can’t work). A personal Codex login, or another agent, works with TRIF’s sandbox. | Claude Code would run under your company’s settings instead of TRIF’s sandbox. Those settings may let it do more than TRIF allows, or less (some companies’ settings stop it writing mods or reaching TRIF, and then chats can’t work). A personal Claude Code login, or another agent, works with TRIF’s sandbox. |
+| Text, open model (via Codex) | Codex would run under your company’s settings instead of TRIF’s sandbox. Those settings may let it do more than TRIF allows, or less (some companies’ settings stop it writing mods or reaching TRIF, and then chats can’t work). Another agent works with TRIF’s sandbox. | – |
 | What they change (Claude Code only, from the list below) | – | Your company’s settings {phrase}, {phrase} and {phrase}. |
 | Buttons | **Stop** · **Use Codex anyway** | **Stop** · **Use Claude Code anyway** |
 | After Stop | Stopped. Nothing was changed. | same |
@@ -44,24 +48,28 @@ Shown in the chat (as an error) and by `trif agent run` in a terminal.
 **Stopped, no consent yet** (`trif agent run`, and panels older than 0.2.6, which show it instead of the card):
 - Codex (`codex.js sandboxOverriddenMessage`): Your organization's Codex settings replace TRIF's sandbox, so
   TRIF stopped the run before Codex did anything. To let Codex work under your company's settings instead,
-  choose “Use Codex anyway” in TRIF's side panel. Claude Code, or a personal Codex login, works with TRIF's
+  choose “Use Codex anyway” in TRIF's side panel. A personal Codex login, or another agent, works with TRIF's
   sandbox. (Codex said: {Codex's line})
+- Open model (via Codex): the same, ending "… in TRIF's side panel. Another agent works with TRIF's sandbox.
+  (Codex said: {Codex's line})"
 - Claude Code (`claude.js withoutSandboxMessage`): Your organization's Claude Code settings {phrases}, which
   replaces TRIF's sandbox, so TRIF stopped the run before Claude Code started. To let Claude Code work under
-  your company's settings instead, choose “Use Claude Code anyway” in TRIF's side panel. Codex, or Claude Code
-  without those settings, works with TRIF's sandbox.
+  your company's settings instead, choose “Use Claude Code anyway” in TRIF's side panel. A personal Claude Code
+  login, or another agent, works with TRIF's sandbox.
 
 **Allowed, but the organization's settings stop the run's work** (once per run; `orgBlockedMessage`):
 - Codex: Your company's Codex settings don't let Codex write mods or reach TRIF from the side panel, so chats
-  can't work with this login. Use Claude Code or a personal Codex login in TRIF, or work with Codex in a
-  terminal in ~/.trif.
+  can't work with this login. Use a personal Codex login, try another agent, or work with Codex in a terminal
+  in ~/.trif.
+- Open model (via Codex): Your company's Codex settings don't let Codex write mods or reach TRIF from the side
+  panel, so chats can't work with them. Try another agent, or work with Codex in a terminal in ~/.trif.
 - Claude Code: Your company's Claude Code settings don't let Claude Code write mods or reach TRIF from the
-  side panel, so chats can't work with them. Use Codex, or Claude Code without those settings, in TRIF, or
-  work with Claude Code in a terminal in ~/.trif.
+  side panel, so chats can't work with them. Use a personal Claude Code login, try another agent, or work with
+  Claude Code in a terminal in ~/.trif.
 
 **Claude Code settings that only break runs** (no card, no consent; `claude.js brokenMessage`):
 - Your organization's Claude Code settings {breaking phrase}, so chats with Claude Code can't work in TRIF's
-  side panel. Use Codex in TRIF, or work with Claude Code in a terminal in ~/.trif.
+  side panel. Try another agent, or work with Claude Code in a terminal in ~/.trif.
 
 **Refusals** (not normally seen):
 - From anywhere but the panel (the helper's socket, a run): only a click in TRIF's side panel can change

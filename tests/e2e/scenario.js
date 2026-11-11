@@ -1644,7 +1644,7 @@ setTimeout(() => {
       if (c1.run || c1.messages.map((m) => m.role).join() !== 'user,sandbox') throw new Error(`the chat: ${JSON.stringify(c1.messages.map((m) => [m.role, m.text]))}`);
       const card = last.cards[0];
       if (card.title !== 'Your organization’s Codex settings replace TRIF’s sandbox.' || card.buttons.join(' · ') !== 'Stop · Use Codex anyway'
-        || !card.text.startsWith('Codex would run under your company’s settings instead of TRIF’s sandbox.')) throw new Error(`the card: ${JSON.stringify(card)}`);
+        || card.text !== 'Codex would run under your company’s settings instead of TRIF’s sandbox. Those settings may let it do more than TRIF allows, or less (some companies’ settings stop it writing mods or reaching TRIF, and then chats can’t work). A personal Codex login, or another agent, works with TRIF’s sandbox.') throw new Error(`the card: ${JSON.stringify(card)}`);
       if (last.msgs.some(([cls]) => /error/.test(cls))) throw new Error(`an error line besides: ${JSON.stringify(last.msgs)}`);
       await this.shot(this.panelCtx, 'panel-org-card');
       await this.d.click(this.panelCtx, '#messages > li.sandbox .sandbox-actions .btn:not(.primary)');

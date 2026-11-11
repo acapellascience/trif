@@ -319,7 +319,7 @@ function syncMods(reason, force) {
     // (facts: TRIF's own reading of the code; claim: what the agent says it does, shown apart as the agent's)
     const h = state.held[m.id], r = state.review && state.review[m.id];
     const info = h ? { site: h.site, reason: h.reason, facts: h.facts || [h.reason], claim: h.claim || '', by: h.by || 'agent', hash: h.hash, needs: Array.isArray(h.needs) ? h.needs : [],
-      ...(h.reach ? { reach: h.reach } : {}),
+      ...(h.reach ? { reach: h.reach } : {}), ...(h.runId ? { runId: h.runId } : {}),
       // (a boxed mod asking for powers: what it asks for, which TRIF enforces, not what TRIF read in its code)
       ...(Array.isArray(h.needs) && h.needs.length && h.needs.every((k) => /^(power|site):/.test(k)) ? { asks: true } : {}) } : null;
     const out = h && pendingIds.has(m.id) ? { ...m, pending: info }

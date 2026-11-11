@@ -1766,8 +1766,23 @@ function closeAgentAsk() {
 // or when the panel opens with something waiting; after Not now, only a new hold opens it again: the rows say
 // "on hold" and the badge at the top ("N waiting") reopens it.
 const approval = { queue: [], at: 0, seen: new Set(), done: new Set(), dialog: null, parts: null, shownKey: null };
-const holdKey = (m) => `${m.id}@${(m.held || m.pending)?.hash || ''}`;
-const holdOf = (m) => m.held || m.pending;
+// (a group: several mods one side-panel run made or changed, waiting together: one card, groupHolds)
+const holdKey = (m) => (m.group ? m.group.map(holdKey).join('|') : `${m.id}@${(m.held || m.pending)?.hash || ''}`);
+const holdOf = (m) => (m.group ? holdOf(m.group[0]) : m.held || m.pending);
+// What waits for the user, as cards: the mods one side-panel run made or changed together (held for that run:
+// by 'agent', its runId) as one card; every other mod on its own.
+function groupHolds(list) {
+  const out = [];
+  const byRun = new Map();
+  for (const m of list) {
+    const h = holdOf(m);
+    const run = h && h.by === 'agent' && h.runId ? h.runId : null;
+    if (!run) { out.push(m); continue; }
+    if (!byRun.has(run)) { const g = { id: m.id, name: m.name, group: [], runId: run }; byRun.set(run, g); out.push(g); }
+    byRun.get(run).group.push(m);
+  }
+  return out.map((x) => (x.group && x.group.length === 1 ? x.group[0] : x));
+}
 
 function holdTag(m, text, labelId) {
   const b = el('button', 'tag on-hold', text);
@@ -1818,6 +1833,7 @@ function approvalDialog() {
   const lead = el('p', 'ap-lead');
   const facts = el('ul', 'ap-facts');
   const together = el('div', 'ap-together');
+  const group = el('div', 'ap-group'); // (a request's several mods: renderGroup)
   const siteBox = el('div', 'ap-sites');
   const note = el('p', 'ap-note');
   const claim = el('p', 'ap-claim');
@@ -1832,7 +1848,7 @@ function approvalDialog() {
   x.addEventListener('click', () => notNow());
   const acts = el('div', 'ap-actions');
   acts.append(allow, show, reject, later);
-  d.append(top, who, lead, facts, together, siteBox, note, claim, err, codeBox, acts);
+  d.append(top, who, lead, facts, together, group, siteBox, note, claim, err, codeBox, acts);
   // Esc is Not now; Tab stays in the card (showModal makes the panel inert, and this keeps the focus from
   // leaving for the browser's own controls too)
   d.addEventListener('cancel', (e) => { e.preventDefault(); notNow(); });
@@ -1846,13 +1862,13 @@ function approvalDialog() {
   });
   document.body.append(d);
   approval.dialog = d;
-  approval.parts = { count, name, chip, where, lead, facts, together, siteBox, note, claim, err, codeBox, allow, show, reject, later };
+  approval.parts = { count, name, chip, where, lead, facts, together, group, siteBox, note, claim, err, codeBox, allow, show, reject, later };
   return approval.parts;
 }
 
 // From renderMods: what's waiting here. Opens the dialog for a hold not seen before; keeps an open one in step.
 function updateApprovals(mods) {
-  approval.queue = mods.filter((m) => holdOf(m) && !approval.done.has(holdKey(m)));
+  approval.queue = groupHolds(mods.filter((m) => holdOf(m) && !approval.done.has(holdKey(m))));
   const fresh = approval.queue.filter((m) => !approval.seen.has(holdKey(m)));
   const open = !!approval.dialog?.open;
   if (open) {
@@ -1870,7 +1886,7 @@ function updateApprovals(mods) {
 }
 
 function openApproval(id) {
-  const i = approval.queue.findIndex((m) => m.id === id);
+  const i = approval.queue.findIndex((m) => m.id === id || (m.group && m.group.some((x) => x.id === id)));
   approval.at = i >= 0 ? i : 0;
   if (approval.queue.length) showApproval();
 }
@@ -1906,11 +1922,14 @@ function renderApproval() {
   P.count.textContent = n > 1 ? `${approval.at + 1} of ${n} waiting for your OK` : 'Waiting for your OK';
   // (the same hold: leave the code open, the buttons as they are; unless what it waits for changed, as when a
   // combination with another mod was approved on that one's card)
-  const needsNow = JSON.stringify(info.needs || []);
+  const needsNow = JSON.stringify(m.group ? m.group.map((x) => holdOf(x).needs || []) : info.needs || []);
   if (approval.shownKey === key && approval.shownNeeds === needsNow) return;
   approval.shownKey = key;
   approval.shownNeeds = needsNow;
   approval.dialog.dataset.mod = m.id;
+  P.group.hidden = !m.group;
+  P.facts.hidden = P.chip.hidden = !!m.group;
+  if (m.group) { renderGroup(P, m); return; }
   P.name.textContent = m.name || m.id;
   const k = m.rules ? ['style', 'Style mod'] : m.sandboxed ? ['boxed', 'Boxed mod'] : ['free', 'Free mod'];
   P.chip.className = `ap-chip ${k[0]}`;
@@ -1965,7 +1984,62 @@ function renderApproval() {
   P.codeBox.hidden = true;
   P.codeBox.replaceChildren();
   P.show.textContent = kind === 'pending' ? 'Show what changed' : 'Show code';
+  P.show.hidden = false;
   P.reject.hidden = kind !== 'pending';
+  for (const b of [P.allow, P.show, P.reject]) b.disabled = false;
+}
+
+// One card for the mods one side-panel run made or changed: each mod's lines under its name, with Show code (the
+// code card, over this one), then the site's box once; Allow is for all of them, Not now leaves them all waiting.
+function renderGroup(P, g) {
+  const ms = g.group;
+  const infos = ms.map(holdOf);
+  const site = infos[0].site || ms[0].id.split('/')[0];
+  P.name.textContent = `${ms.length} mods from one request`;
+  P.where.replaceChildren(site);
+  P.lead.textContent = infos.every((i) => i.asks) ? 'They ask for these powers. TRIF holds them to them:' : 'TRIF found that these mods:';
+  P.together.replaceChildren();
+  P.together.hidden = true;
+  P.group.replaceChildren(...ms.map((m, n) => {
+    const info = infos[n];
+    const sec = el('section', 'ap-mod');
+    const head = el('div', 'ap-mod-head');
+    const kind = m.rules ? ['style', 'Style mod'] : m.sandboxed ? ['boxed', 'Boxed mod'] : ['free', 'Free mod'];
+    head.append(el('b', 'ap-mod-name', m.name || m.id), el('span', `ap-chip ${kind[0]}`, kind[1]), fileLink('Show code', `Show the code of ${m.name || m.id}`, () => openCodeView(m.id), 'ap-mod-code'));
+    if (m.pending && !m.held) head.append(el('span', 'ap-mod-change', 'changed'));
+    const needs = Array.isArray(info.needs) ? info.needs : [];
+    const all = (Array.isArray(info.facts) ? info.facts : [String(info.reason || '')]).map((f, i) => ({ f, key: needs[i] || '' }));
+    const ul = el('ul', 'ap-facts');
+    for (const x of all.filter((y) => y.f && !/^power:together:/.test(y.key) && !siteOf(y.key))) {
+      const li = el('li');
+      li.append(el('span', 'ap-ic', iconOf(x.key)), el('span', 'ap-line', info.asks ? `It ${x.f}.` : x.f));
+      li.firstChild.setAttribute('aria-hidden', 'true');
+      ul.append(li);
+    }
+    sec.append(head, ul);
+    const warns = [...new Set(all.filter((y) => y.f && /^power:together:/.test(y.key)).map((y) => (/^power:together:many:/.test(y.key) ? y.f : `\u0000${y.f}`)))];
+    if (warns.length) {
+      const box = el('div', 'ap-together');
+      for (const w of warns) { const p = el('p'); if (w[0] === '\u0000') p.append(el('b', null, 'Together,'), ` it ${w.slice(1)}.`); else p.textContent = w; box.append(p); }
+      sec.append(box);
+    }
+    return sec;
+  }));
+  // (the site's box once: the widest reach of each site among them)
+  const bySite = new Map();
+  for (const r of infos.flatMap((i) => i.reach || [])) { const was = bySite.get(r.site); const size = (x) => x.see.length + x.act.length + x.go.length; if (!was || size(r) > size(was)) bySite.set(r.site, r); }
+  P.siteBox.replaceChildren(...siteBoxes([...bySite.values()]));
+  P.siteBox.hidden = !bySite.size;
+  const agentWrote = infos.some((i) => i.by === 'agent');
+  P.note.textContent = `${agentWrote ? `An agent made or changed them in your chat on ${site}.` : ''} Allow is for all of them; Not now leaves them all waiting.`.trim();
+  P.claim.replaceChildren();
+  P.claim.hidden = true;
+  P.err.hidden = true;
+  P.err.textContent = '';
+  P.codeBox.hidden = true;
+  P.codeBox.replaceChildren();
+  P.show.hidden = true;
+  P.reject.hidden = true;
   for (const b of [P.allow, P.show, P.reject]) b.disabled = false;
 }
 
@@ -1997,7 +2071,9 @@ async function decideApproval(type) {
   P.allow.disabled = P.reject.disabled = true;
   P.err.hidden = true;
   try {
-    await request({ type, id: m.id, hash: info.hash, tab: view.tab?.id });
+    // (a request's mods: Allow is for all of them, one after another)
+    if (m.group) { for (const x of m.group) { await request({ type, id: x.id, hash: holdOf(x).hash, tab: view.tab?.id }); approval.done.add(holdKey(x)); } }
+    else await request({ type, id: m.id, hash: info.hash, tab: view.tab?.id });
     // (done here; the next status drops it too) on to the next one, or close
     approval.done.add(holdKey(m));
     approval.queue.splice(approval.at, 1);

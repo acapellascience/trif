@@ -375,6 +375,12 @@ the site (`trif tabs`; `trif open <url>` if none) and look:
 3. **A free mod** (`trif new <site> <mod>`): only when it needs the page itself: changing what the
    site loads (not just leaving things out), patching its code, or acting for the user.
 
+**Tiers and powers, in your reply.** Pick the safest tier that does what was asked, with the fewest
+powers. Never ask the user whether moving up a tier, or adding a power, is OK: TRIF's approval card is that
+question. When a change moves a mod up a tier or adds a power, say so in half a sentence in your reply ("it's
+a boxed mod with the keys power now"). When a power is no longer needed, drop it. Ask only when there's a real
+trade-off, a safer way that does less against a riskier way that does all of it, in one line.
+
 Style and boxed mods can't act for the user themselves, so they never wait for their OK (in a browser
 without the sandbox, Safari, a boxed mod waits, to run as a free mod). (Their old names, `@rules` and
 `@sandboxed`, `--rules` and `--sandboxed`, still work.) **Read TECHNIQUES.md first** (next to this file;

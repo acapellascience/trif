@@ -174,7 +174,9 @@ Good to know:
 
 A boxed mod that needs one exception asks for it in its header, `// @powers sound, read-drafts`, from this
 menu. TRIF holds the mod until the user approves that set of powers, once (an update that asks for nothing
-new doesn't ask again; one that adds a power waits for it), and gives it those and nothing more. No power
+new doesn't ask again; one that adds a power waits for it), and gives it those and nothing more. The quiet
+powers (`sound`, `controls`, `mods`, `preload`, `embeds`, `media`) don't make it wait on their own; a warned
+combination one of them makes does. No power
 sends anything the mod makes up (go-to and click go only where the header or the page's links say), so ask
 only for what the mod needs; a mod that needs the network is a free mod.
 
@@ -265,7 +267,7 @@ only for what the mod needs; a mod that needs the network is a free mod.
   also `www.youtube-nocookie.com/embed`, `player.vimeo.com/video`): the video's id only, no referrer.
 - `local-fonts`: `await trif.localFonts()`: `[{family, fullName, style, postscriptName}]`, after the
   browser's own prompt (call it from the user's click).
-- `preload` (doesn't make the mod wait on its own): `el.loadSooner()` on the page's own lazy `<img>`.
+- `preload` (quiet: doesn't make the mod wait on its own): `el.loadSooner()` on the page's own lazy `<img>`.
 - And more of some: `site-data` also has `trif.filterEmbedded(selector, fn)` (the page's `<script
   type="application/json">`, before its code reads them; run the mod at `document-start`) and
   `trif.filterGlobal(name, fn)` for data globals the header names (`// @powers site-data ytInitialData`);

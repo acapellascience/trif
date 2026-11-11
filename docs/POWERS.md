@@ -148,6 +148,13 @@ your click lands somewhere else) is possible for every tier, rules included, and
 - It's held until you approve its powers. **The approval is for the set of powers, not the code.** Since TRIF
   enforces the list, an update with the same powers runs without asking again. An update that asks for a new
   power is held for that power.
+- **Quiet powers** (2026-11-11, Tim): `sound`, `controls`, `mods`, `preload`, `embeds` and `media` read nothing
+  beyond the page and act as nobody, so on their own they don't hold: they show on the row and in the code card,
+  with no card. Every read beyond the page (`read-drafts`, `keys`, `site-data`, `page-data`, `site-storage` and
+  `@migrate`, `local-fonts`, `edit-uploads`, `image-variants` as a read) and every act as the user (`click`,
+  `write-drafts`, `page-events`, `go-to`, `rewrite-requests`, `block-events`) asks, and `search-box` as before. A
+  quiet power still counts in combinations: a warned one it makes, in the mod or among its site's boxed mods
+  (docs/SAFE-MODS.md "Site approval"), asks.
 - A boxed mod from outside the chat starts off, as any mod does.
 - In Safari, where there's no sandbox, it's held like any boxed mod there and runs as a free mod if
   allowed.

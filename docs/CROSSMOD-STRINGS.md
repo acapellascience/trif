@@ -38,6 +38,30 @@ The box on a mod's card (and its review row), after the mod's own powers and war
   combination split between mods from slipping past the hold**, unless the user approved what the site's boxed mods
   can do together ("Your … mods together": one approval per site)**: docs/SAFE-MODS.md, "Combinations"."
 
+## Quiet powers and one card per request (2026-11-11)
+
+- Quiet powers (sound, controls, mods, preload, embeds, media) don't hold on their own: no new sentence on the card
+  (they're listed as before when something else holds). The explain table's agent notes for sound, media and
+  embeds: **"Quiet: doesn't make the mod wait for the user's OK on its own (like controls and mods); a warned
+  combination it makes, in the mod or among its site's boxed mods, does."**
+- The approval card for several mods one request made or changed:
+  - name: **"{n} mods from one request"**
+  - lead: **"They ask for these powers. TRIF holds them to them:"** (or **"TRIF found that these mods:"** when one of
+    them is a free or style mod)
+  - each mod: its name, its kind's chip (as on a single card), **"Show code"** (opens its code card), and
+    **"changed"** for a change to a mod that was running; its lines and its own red box as on a single card
+  - the site's box once
+  - note: **"An agent made or changed them in your chat on {site}. Allow is for all of them; Not now leaves them all
+    waiting."**
+- AGENTS.md, after the three tiers: **"Tiers and powers, in your reply.** Pick the safest tier that does what was
+  asked, with the fewest powers. Never ask the user whether moving up a tier, or adding a power, is OK: TRIF's
+  approval card is that question. When a change moves a mod up a tier or adds a power, say so in half a sentence in
+  your reply ("it's a boxed mod with the keys power now"). When a power is no longer needed, drop it. Ask only when
+  there's a real trade-off, a safer way that does less against a riskier way that does all of it, in one line."
+- Docs for agents: TECHNIQUES.md **"The quiet powers (`sound`, `controls`, `mods`, `preload`, `embeds`, `media`)
+  don't make it wait on their own; a warned combination one of them makes does."**; `preload` **"(quiet: doesn't
+  make the mod wait on its own)"**.
+
 ## Agents (helper/workspace/AGENTS.md, TECHNIQUES.md)
 
 - AGENTS.md, "Write the mod", after "the user approves the set once.": **"A mod asks only for the powers it

@@ -294,7 +294,8 @@ hold open: those would be left alone.
 Design: docs/POWERS.md. A boxed mod may ask for powers from a fixed menu (`// @powers sound, read-drafts`);
 none of them sends anything. The helper reads them from the header (helper/lib/boxpowers.js), holds the mod
 until the user approves that *set* (held.js keys `power:<name>`: an update with the same powers runs, a new
-power waits for itself; `controls` and `mods` are listed but never hold alone), and passes the set to the
+power waits for itself; the quiet ones, `sound`, `controls`, `mods`, `preload`, `embeds` and `media`, are listed but
+never hold alone, while a warned combination one makes does: docs/POWERS.md "How approval works"), and passes the set to the
 extension with the mod; the sandbox (extension/sandbox.js) gives each mod what its set grants and refuses
 the rest. All twelve of 0.2 are built (phases 1 to 3), and the nine of 0.3 (below); phase 1's, with what each gives:
 - `sound`: `trif.audio()`, TRIF's facade over Web Audio (oscillators, gains, filters, delays, panners,
@@ -514,8 +515,9 @@ once per site:
 - The site's approved union: allowed.json keys `site:<site>:<a>+<b>+…`, the whole union, under the mod whose
   hold carried it; the site's is every such key's powers, whichever mod's entry, so switching a mod off or
   deleting it never takes any away, and adding it again doesn't ask again.
-- A mod whose powers add a holding power to the site's approved union, on a site with other boxed mods (not
-  `controls` or `mods`, which never hold alone, nor `preload` unless the site's mods can read), asks: its card
+- A mod whose powers add a holding power to the site's approved union, on a site with other boxed mods (a quiet
+  one, `sound`, `controls`, `mods`, `preload`, `embeds` or `media`, only when it completes a warned combination in
+  the site's union), asks: its card
   has its own powers and own combinations as before, then a box "Your {site} mods together" with three lists
   made from the union's powers (what they can see beyond the page; what they can do as you; where what they see
   could go), the items it adds marked new, and a flag line when the first and third aren't empty ("So something

@@ -62,7 +62,7 @@ test('the hold: a boxed mod with powers waits once for its set; the same powers 
   assert.deepEqual(updateHeld(ws, scan(), []), {});
 });
 
-test('controls don\'t hold on their own, but are listed when something else holds', () => {
+test('quiet powers (sound, controls, mods, preload, embeds, media) don\'t hold on their own, but are listed when something else holds, and a warned combination one makes holds', () => {
   const home = tempDir('trif-pw-');
   const ws = { home, modsDir: path.join(home, 'sites') };
   const dir = path.join(ws.modsDir, 'x.com');
@@ -71,9 +71,20 @@ test('controls don\'t hold on their own, but are listed when something else hold
   const file = path.join(dir, 'tuner.js');
   fs.writeFileSync(file, head('controls') + 'page.create("input");\n');
   assert.deepEqual(updateHeld(ws, scanMods(ws.modsDir).mods, []), {});
-  fs.writeFileSync(file, head('controls, sound') + 'page.create("input");\n');
-  const held = updateHeld(ws, scanMods(ws.modsDir).mods, []);
-  assert.deepEqual(held['x.com/tuner'].facts, ['can play sounds', 'can add its own controls (sliders, pickers)']);
+  // (quiet powers together: nothing to ask; more than three still get the many-powers warning, which holds)
+  fs.writeFileSync(file, head('sound, media, embeds www.youtube.com/embed') + 'page.create("input");\n');
+  assert.deepEqual(updateHeld(ws, scanMods(ws.modsDir).mods, []), {});
+  fs.writeFileSync(file, head('controls, mods, preload') + 'page.create("input");\n');
+  assert.deepEqual(updateHeld(ws, scanMods(ws.modsDir).mods, []), {});
+  // (a quiet power beside one that asks: listed; beside a read, its warned combination asks too)
+  fs.writeFileSync(file, head('controls, sound, click').replace('// ==/WebMod==', '// @click the button: #go\n// ==/WebMod==') + 'page.create("input");\n');
+  let held = updateHeld(ws, scanMods(ws.modsDir).mods, []);
+  assert.deepEqual(held['x.com/tuner'].facts, ['can play sounds', 'can add its own controls (sliders, pickers)', 'can click these for you: the button (#go)']);
+  fs.writeFileSync(file, head('sound, keys') + 'page.create("input");\n');
+  held = updateHeld(ws, scanMods(ws.modsDir).mods, []);
+  assert.deepEqual(held['x.com/tuner'].needs, ['power:keys', 'power:sound', 'power:together:keys+sound']);
+  fs.writeFileSync(file, head('sound, media') + 'page.create("input");\n');
+  assert.deepEqual(updateHeld(ws, scanMods(ws.modsDir).mods, []), {});
   // (a mod the user had before: listed to review, unless it's controls alone)
   const mods = [build(head('controls')).mod, { ...build(head('keys')).mod, id: 'x.com/keys' }];
   const review = reviewItems(home, mods, {});
@@ -82,21 +93,25 @@ test('controls don\'t hold on their own, but are listed when something else hold
 
 test('the hold sentences name the site; the menu has 21 powers (twelve, and nine in 0.3)', () => {
   assert.equal(bp.NAMES.length, 21);
-  assert.deepEqual(bp.powerNeeds({ site: 'x.com', powers: ['sound'] }), [{ key: 'power:sound', fact: 'can play sounds', power: 'sound', soft: false, lines: [] }]);
+  assert.deepEqual(bp.powerNeeds({ site: 'x.com', powers: ['sound'] }), [{ key: 'power:sound', fact: 'can play sounds', power: 'sound', soft: true, lines: [] }]);
+  // (quiet: sound, controls, mods, preload, embeds, media; every read and every act as you asks)
+  assert.deepEqual(bp.NAMES.filter((n) => bp.MENU[n].soft), ['sound', 'controls', 'mods', 'preload', 'media', 'embeds']);
   assert.match(bp.MENU['site-data'].hold('x.com'), /what x\.com sends this page/);
   assert.match(bp.MENU['search-box'].hold(bp.siteOf({ site: 'all-sites' })), /the sites it runs on/);
 });
 
 test('trif check: a boxed mod\'s powers and what its hold says; an unknown one is an error; the lint knows what powers give', async () => {
   const home = tempDir();
-  const f = writeMod(home, 'x.com', 'beeper.js', head('sound') + 'trif.audio().tone({});\n');
+  const f = writeMod(home, 'x.com', 'beeper.js', head('sound, keys') + 'trif.audio().tone({});\n');
   let r = await runCli(['check', f], { home });
   assert.equal(r.code, 0, r.stderr);
-  assert.match(r.stdout, /with these powers, and only these \(TRIF enforces them\): sound\./);
+  assert.match(r.stdout, /with these powers, and only these \(TRIF enforces them\): keys, sound\./);
   assert.match(r.stdout, /waits for the user's OK once for this set of powers/);
   assert.match(r.stdout, /^- it can play sounds$/m);
   r = await runCli(['check', f, '--json'], { home });
-  assert.deepEqual(JSON.parse(r.stdout).powers, [{ key: 'power:sound', power: 'sound', fact: 'can play sounds', holds: true }]);
+  assert.deepEqual(JSON.parse(r.stdout).powers.find((p) => p.power === 'sound'), { key: 'power:sound', power: 'sound', fact: 'can play sounds', holds: false });
+  const quiet = writeMod(home, 'x.com', 'chime.js', head('sound') + 'trif.audio().tone({});\n');
+  assert.match((await runCli(['check', quiet], { home })).stdout, /don't make it wait for the user's OK on their own/);
   const c = writeMod(home, 'x.com', 'tuner.js', head('controls') + 'page.create("input");\n');
   r = await runCli(['check', c], { home });
   assert.match(r.stdout, /don't make it wait for the user's OK on their own/);

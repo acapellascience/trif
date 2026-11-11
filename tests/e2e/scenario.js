@@ -1300,6 +1300,7 @@ class Scenario {
       await r.check('mods from outside the chat start off: a new free mod and a new style mod arrive off, marked "new", and don\'t run; switched on in the panel, they run', () => this.startsOffCheck(win));
       await r.check('Settings → Mods your chat makes → Wait for me: what the chat makes waits, with Show code and Turn on in its card; what it changes waits while the version before runs; Start on again', () => this.chatWaitCheck(win));
       await r.check('mods that break: a mod that throws gets a badge and a card in the chat; Show error opens its code at the line; Ignore hides it; a new version that throws again: Fix it starts a run (a stand-in Claude Code) that fixes it, and Undo fix puts it back; a style mod whose selectors stop matching is flagged; Settings has When a mod breaks', () => this.modHealthCheck(win));
+      await r.check('one card per request (a stand-in Claude Code that writes two boxed mods): the approval card shows both, each mod\'s lines under its name with Show code, the site\'s box once; Not now leaves both waiting; one Allow runs both', () => this.requestCardCheck(win));
       await r.check('a hijacked agent (a stand-in Claude Code): the tab it ran code in sends nothing that changes anything until it reloads, even later; its mod that posts is held by its code, whatever its header says', () => this.hijackedAgentCheck(win));
       await r.check('the tab lock\'s harder edges (TL-1 to TL-6): cross-site images, workers no tab owns, the site\'s other tabs, popups, WebRTC and preconnect from the locked page, and what the code leaves in the site\'s storage', () => this.tabLockHardeningCheck(win));
       await r.check('an organization\'s Codex settings replace TRIF\'s sandbox (a stand-in Codex): the card; Stop stores nothing; Use Codex anyway sends it again, the chip, Settings\' line and Stop allowing', () => this.orgSettingsCheck(win));
@@ -2729,9 +2730,8 @@ setTimeout(() => {
     this.sandboxPage = true;
     try {
       fs.writeFileSync(file, fx);
-      await waitFor('the widened mod held for sound', async () => new RegExp(`${id}\\s+HELD`).test(await status()) || null, { timeoutMs: 25000, intervalMs: 500 });
-      await this.cli(['approve', `${site}/${id}`], { timeoutMs: 20000 });
-      await waitFor('registered', async () => new RegExp(`${id}\\s+registered \\(boxed, powers: sound\\)`).test(await status()) || null, { timeoutMs: 20000, intervalMs: 500 });
+      // (sound is a quiet power: alone, it doesn't wait for the user's OK)
+      await waitFor('registered, without waiting', async () => new RegExp(`${id}\\s+registered \\(boxed, powers: sound\\)`).test(await status()) || null, { timeoutMs: 20000, intervalMs: 500 });
       await this.ext(`async (id, url) => { await chrome.tabs.update(id, { url, active: true }); }`, [win.tabId, `${base}/wide.html`]);
       let last = null;
       const R = await waitFor('the widened mod\'s results', async () => {
@@ -3085,6 +3085,7 @@ setTimeout(() => {
     const all = JSON.parse(fs.readFileSync(file, 'utf8'));
     for (const v of Object.values(all)) if (v && Array.isArray(v.powers)) v.powers = v.powers.filter((k) => !k.startsWith(`site:${site}:`));
     fs.writeFileSync(file, JSON.stringify(all, null, 2) + '\n');
+    if (!id) return null;
     const f = path.join(this.trif, 'sites', ...id.split('/')).replace(/$/, '.js');
     fs.appendFileSync(f, `\n// changed (${Date.now()})\n`);
     const short = id.split('/').pop();
@@ -3119,6 +3120,8 @@ setTimeout(() => {
     const problems = [];
     this.sandboxPage = true;
     try {
+      // (what earlier checks' mods approved for 127.0.0.1 stays, as it would for the user: taken out, to start clean)
+      await this.forgetSite(site);
       // the signal mod, alone on the site: only its own power; approved, then off
       fs.writeFileSync(files[T], fx('cross-click.js').replace('E2E Cross click', 'E2E Cross signal').replace('// @powers      click', '// @powers      page-events cm-ping').replace(/\/\/ @click .*\n/, '').replace("t('click', () => page.find('#cc').click());", '').replace('data-trif-box-cm', 'data-trif-box-cs'));
       let st = await held(T);
@@ -4227,6 +4230,94 @@ say({ type: 'result', subtype: 'success', is_error: false, result: text, session
    * must be held for what its code does; a reload unlocks the tab, and a terminal's `trif run` (the
    * user's own) doesn't lock it.
    */
+  // One card per request: a side-panel run (a stand-in Claude Code) writes two boxed mods that need the user's OK;
+  // the approval dialog shows them as one card, each mod's lines under its name with its own Show code, the site's
+  // box once, one Allow for both.
+  async requestCardCheck(win) {
+    const dir = path.join(this.work, 'standin-request');
+    fs.mkdirSync(dir, { recursive: true });
+    const head = (name, powers, extra = '') => `// ==WebMod==\n// @name ${name}\n// @match *://127.0.0.1/cross.html*\n// @boxed\n// @powers ${powers}\n${extra}// ==/WebMod==\n`;
+    fs.writeFileSync(path.join(dir, 'claude'), `#!${process.execPath}
+const fs = require('fs');
+const a = process.argv.slice(2);
+if (a[0] === '--version') { console.log('2.1.319 (Claude Code)'); process.exit(0); }
+if (a[0] === 'auth') { console.log('{"loggedIn": true, "authMethod": "claude.ai"}'); process.exit(0); }
+const say = (o) => process.stdout.write(JSON.stringify(o) + '\\n');
+say({ type: 'system', subtype: 'init', session_id: 'e2e-request' });
+fs.writeFileSync('sites/127.0.0.1/e2e-req-keys.js', ${JSON.stringify(head('E2E Request keys', 'keys') + "page.on('keydown', () => {});\n")});
+fs.writeFileSync('sites/127.0.0.1/e2e-req-click.js', ${JSON.stringify(head('E2E Request click', 'click', '// @click the counter: #cc\n') + "trif.hide('.nothing');\n")});
+setTimeout(() => {
+  const text = 'Two mods: one hears keys, one clicks the counter (boxed mods with the keys and click powers).';
+  say({ type: 'assistant', message: { model: 'claude-e2e', content: [{ type: 'text', text }] } });
+  say({ type: 'result', subtype: 'success', is_error: false, result: text, session_id: 'e2e-request' });
+}, 1500);
+`, { mode: 0o755 });
+    const cfgFile = path.join(this.priv, 'config.json');
+    const saved = fs.readFileSync(cfgFile, 'utf8');
+    const cfg = JSON.parse(saved);
+    cfg.env = { ...(cfg.env || {}), PATH: [dir, cfg.env?.PATH].filter(Boolean).join(':') };
+    fs.writeFileSync(cfgFile, JSON.stringify(cfg, null, 2) + '\n');
+    const site = '127.0.0.1';
+    const base = `http://${site}:${this.o.servers.port}`;
+    const ids = ['e2e-req-keys', 'e2e-req-click'];
+    const status = async () => (await this.cli(['status'], { timeoutMs: 20000 })).stdout;
+    const chat = () => this.ext(`async (k) => (await chrome.storage.local.get(k))[k] || null`, [`chat:${site}`]);
+    const reopen = async () => {
+      await this.panel(`async () => { setTimeout(() => location.reload(), 20); return true; }`).catch(() => {});
+      await sleep(800);
+      this.panelCtx = await this.d.findPage('sidepanel.html');
+    };
+    this.sandboxPage = true;
+    try {
+      await this.forgetSite(site);
+      await this.ext(`async (k) => { await chrome.storage.local.remove(k); }`, [`chat:${site}`]);
+      await this.ext(`async (id, url) => { await chrome.tabs.update(id, { url, active: true }); }`, [win.tabId, `${base}/cross.html?request`]);
+      await reopen();
+      await this.waitPanel(`the panel on ${site}`, (x) => x.site === site && !x.gate, 15000);
+      await this.waitLooks('Send on (the stand-in Claude Code)', (l) => /Claude Code/.test(l.dotLabel) && !l.send.disabled, 30000);
+      await this.panel(`async (text) => { const i = document.getElementById('input'); i.value = text; i.dispatchEvent(new Event('input', { bubbles: true })); }`, ['hotkeys and a counter clicker']);
+      await this.panelClick('#send');
+      await waitFor('the run to finish', async () => { const x = await chat(); return x && !x.run && x.messages.length >= 2 ? x : null; }, { timeoutMs: 60000, intervalMs: 300 });
+      await waitFor('both held', async () => { const st = await status(); return ids.every((id) => new RegExp(`${id}\\s+HELD`).test(st)) || null; }, { timeoutMs: 25000, intervalMs: 500 });
+      // the card, by itself or from a row's tag: one for both
+      await waitFor('the hold in the panel', () => this.panel(`async () => !!document.querySelector('li[data-mod="${site}/e2e-req-keys"] .tag.on-hold') || null`), { timeoutMs: 15000 });
+      await this.dismissApproval();
+      await this.d.click(this.panelCtx, `li[data-mod="${site}/e2e-req-click"] .tag.on-hold`);
+      const card = await waitFor('the request\'s card', () => this.panel(`async () => {
+        const d = document.getElementById('approval');
+        if (!d || !d.open || d.querySelector('.ap-group').hidden) return null;
+        return { count: d.querySelector('.ap-count').textContent, name: d.querySelector('.ap-name').textContent, lead: d.querySelector('.ap-lead').textContent,
+          mods: [...d.querySelectorAll('.ap-mod')].map((s) => ({ name: s.querySelector('.ap-mod-name').textContent, code: s.querySelector('.ap-mod-code').textContent, lines: [...s.querySelectorAll('.ap-line')].map((x) => x.textContent) })),
+          sites: [...d.querySelectorAll('.ap-sites .ap-site-title')].map((x) => x.textContent), allow: [...d.querySelectorAll('.ap-allow')].length, note: d.querySelector('.ap-note').textContent };
+      }`), { timeoutMs: 10000 });
+      const problems = [];
+      const want = { count: 'Waiting for your OK', name: '2 mods from one request', lead: 'They ask for these powers. TRIF holds them to them:', sites: ['Your 127.0.0.1 mods together'], allow: 1 };
+      for (const [k, v] of Object.entries(want)) if (JSON.stringify(card[k]) !== JSON.stringify(v)) problems.push(`the card's ${k}: ${JSON.stringify(card[k])}`);
+      const names = card.mods.map((m) => m.name).sort();
+      if (JSON.stringify(names) !== JSON.stringify(['E2E Request click', 'E2E Request keys']) || card.mods.some((m) => m.code !== 'Show code')) problems.push(`the card's mods: ${JSON.stringify(card.mods)}`);
+      if (!/Allow is for all of them; Not now leaves them all waiting\.$/.test(card.note)) problems.push(`the card's note: ${card.note}`);
+      const shots = path.join(os.homedir(), 'WebMods-worktrees', 'crossmod-runs', 'shots');
+      for (const scheme of ['light', 'dark']) {
+        if (await this.d.colorScheme(this.panelCtx, scheme)) { await sleep(200); const f = await this.shot(this.panelCtx, `approval-request-${scheme}`); try { fs.mkdirSync(shots, { recursive: true }); fs.copyFileSync(f, path.join(shots, `approval-request-${this.o.browser}-${scheme}.png`)); } catch { /* only a copy */ } }
+      }
+      if (!(await this.d.colorScheme(this.panelCtx, 'light'))) { const f = await this.shot(this.panelCtx, 'approval-request'); try { fs.mkdirSync(shots, { recursive: true }); fs.copyFileSync(f, path.join(shots, `approval-request-${this.o.browser}.png`)); } catch { /* only a copy */ } }
+      await this.d.colorScheme(this.panelCtx, '');
+      // Not now: both still waiting; Allow (one): both run
+      await this.d.key(this.panelCtx, 'Escape');
+      const after = await status();
+      if (!ids.every((id) => new RegExp(`${id}\\s+HELD`).test(after))) problems.push('Not now let one of them go');
+      await this.d.click(this.panelCtx, `li[data-mod="${site}/e2e-req-keys"] .tag.on-hold`);
+      await waitFor('the request\'s card again', () => this.panel(`async () => { const d = document.getElementById('approval'); return d && d.open && !d.querySelector('.ap-group').hidden || null; }`), { timeoutMs: 10000 });
+      await this.d.click(this.panelCtx, '#approval .ap-allow');
+      await waitFor('both registered', async () => { const st = await status(); return ids.every((id) => new RegExp(`${id}\\s+registered \\(boxed, powers:`).test(st)) || null; }, { timeoutMs: 20000, intervalMs: 500 });
+      if (problems.length) throw new Error(problems.join('\n'));
+      return `one card, "${card.name}": ${card.mods.map((m) => `${m.name} (${m.lines.join(' ')})`).join('; ')}; the site's box once; Not now left both waiting; one Allow ran both`;
+    } finally {
+      fs.writeFileSync(cfgFile, saved);
+      for (const id of ids) { try { fs.unlinkSync(path.join(this.trif, 'sites', site, `${id}.js`)); } catch { /* gone */ } }
+    }
+  }
+
   async hijackedAgentCheck(win) {
     const dir = path.join(this.work, 'standin-hijack');
     fs.mkdirSync(dir, { recursive: true });

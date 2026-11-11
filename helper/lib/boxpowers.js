@@ -7,8 +7,9 @@
 //
 // The approval is for the set, not the code: each power is allowed for the mod by its key (`power:<name>`,
 // held.js allowed.json), so an update with the same powers runs without asking again, and one that adds a
-// power waits for that one. `controls` and `mods` give nothing that reaches past the mod: they're listed on a
-// hold, but don't make one on their own.
+// power waits for that one. The quiet powers (`soft`: sound, controls, mods, preload, embeds, media) read nothing
+// beyond the page and act as nobody: they're listed on a hold, but don't make one on their own; a warned
+// combination one of them makes still does (its own need), in the mod or in its site's mods together.
 
 // The menu, in the order a hold lists them. `hold`: the fact a hold shows (after "it", like the classifier's
 // facts: held.js, the panel, trif status); `site` in it is the mod's site. `built`: in this version.
@@ -21,14 +22,14 @@ const MENU = {
   'site-storage': { hold: (site, args) => `can read and change what this site keeps under: ${storageWords(args)}`, built: true },
   'local-fonts': { hold: () => 'can see which fonts are installed on this computer (and this site could see that too)', built: true },
   'image-variants': { hold: (site, args) => `can load other sizes of pictures this page shows (from ${[...new Set((args || []).map((a) => a.split(' ')[0]))].join(', ')})`, built: true },
-  sound: { hold: () => 'can play sounds', built: true },
+  sound: { hold: () => 'can play sounds', built: true, soft: true },
   controls: { hold: () => 'can add its own controls (sliders, pickers)', built: true, soft: true },
   mods: { hold: () => 'can talk to your other boxed mods on this page', built: true, soft: true },
   preload: { hold: () => 'can make this page load its pictures sooner', built: true, soft: true },
-  media: { hold: () => 'can play and pause video and audio on this page', built: true },
+  media: { hold: () => 'can play and pause video and audio on this page', built: true, soft: true },
   'search-box': { hold: (site, args) => `adds a search box that searches ${args && args[0] ? hostOf(args[0].replace('{link}', 'l')) : site}${args && args[0] && args[0].includes('{link}') ? ' (in the place a link on the page names)' : ''}`, built: true, args: 'one' },
   'go-to': { hold: (site, args) => goToWords(site, args), built: true },
-  embeds: { hold: (site, args) => `can play videos this page links to, inside the page (from ${(args || []).map((a) => a.split('/')[0].replace(/^www\./, '')).join(', ')})`, built: true },
+  embeds: { hold: (site, args) => `can play videos this page links to, inside the page (from ${(args || []).map((a) => a.split('/')[0].replace(/^www\./, '')).join(', ')})`, built: true, soft: true },
   'rewrite-requests': { hold: (site, args) => `changes what ${site} receives from this page: ${(args || []).map(rewriteWords).join('; ')}`, built: true },
   'block-events': { hold: (site, args) => `can keep this site from seeing some of what you do here (${blockWords(args)}), so the site doesn't react to it`, built: true },
   'page-events': { hold: (site, args) => `can send this page's own code these signals: ${(args || []).join(', ')}`, built: true },
@@ -333,7 +334,7 @@ function powerInfo(mod) {
 
 /** Whether a need is a power that doesn't hold on its own (controls, mods). */
 function isSoft(key) {
-  const m = /^power:([^:]+)$/.exec(String(key));
+  const m = /^power:([\w-]+)(?::|$)/.exec(String(key)); // (with or without its header values: embeds' players)
   return !!(m && MENU[m[1]] && MENU[m[1]].soft);
 }
 

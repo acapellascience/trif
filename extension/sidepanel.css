@@ -722,6 +722,11 @@ body.needs-login .approval .ap-robot .code { stroke: var(--warn); }
 .approval .ap-together p { margin: 0; }
 .approval .ap-together p + p { margin-top: 4px; }
 .approval .ap-together b { color: var(--bad); }
+.approval .ap-group .ap-mod { margin-top: 10px; }
+.approval .ap-group .ap-mod-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px 8px; }
+.approval .ap-group .ap-mod-name { font-size: 14px; }
+.approval .ap-group .ap-mod-change { font-size: 12px; color: var(--muted); }
+.approval .ap-group .ap-mod-code { margin-left: auto; }
 .ap-site { margin-top: 10px; padding: 9px 11px; border-radius: 9px; background: var(--bad-bg); border: 1px solid color-mix(in srgb, var(--bad) 35%, var(--line)); }
 .ap-site p { margin: 0; }
 .ap-site .ap-site-title { font-weight: 600; color: var(--bad); }

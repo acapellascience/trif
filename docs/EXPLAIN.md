@@ -164,6 +164,7 @@ shown in the panel as such.
   - Lint: "trif.audio: needs the sound power: add `// @powers sound` to the header (the user approves it once)".
   - The browser starts audio only after the user clicks or types on the page; TRIF resumes it then.
   - Not enforced across mods: a sound mod beside another mod's read isn't refused; only the single-mod warning exists.
+  - Quiet: doesn't make the mod wait for the user's OK on its own (like controls and mods); a warned combination it makes, in the mod or among its site's boxed mods, does.
 
 ### controls
 
@@ -215,6 +216,7 @@ shown in the panel as such.
   - Errors: "playing the page's video and audio needs the media power (// @powers media)", "hearing the page's video and audio needs the media power (// @powers media)", "that's for the page's <video> and <audio>", "a volume is from 0 to 1", "seek takes a time in seconds".
   - Never their `src`. Page-wide: refused while another boxed mod has a read this one doesn't. Panel level 1 (noticeable).
   - The mod's own sounds are `sound`, not this.
+  - Quiet: doesn't make the mod wait for the user's OK on its own (like controls and mods); a warned combination it makes, in the mod or among its site's boxed mods, does.
 
 ### search-box
 
@@ -254,6 +256,7 @@ shown in the panel as such.
   - Errors: `embeds: "{a}" isn't a player TRIF makes embeds for (…)`, "the embeds power needs where its videos come from: @powers embeds www.youtube.com/embed"; runtime "embed takes a link the page shows", "that link isn't a video from {players}", "that link has no address".
   - Recognises YouTube watch/shorts/embed/live and youtu.be links, and numeric Vimeo ones.
   - No added risk with any other power (combination table); a mod that wants a player from anywhere else is a free mod, and say what loads from where.
+  - Quiet: doesn't make the mod wait for the user's OK on its own (like controls and mods); a warned combination it makes, in the mod or among its site's boxed mods, does.
 
 ### rewrite-requests
 

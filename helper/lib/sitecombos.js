@@ -11,8 +11,9 @@
 // - The site's approved union: allowed.json keys `site:<site>:<a>+<b>+…` (the whole union approved, under the mod
 //   whose hold carried it; the site's is every such key's powers, whichever mod's entry, so switching a mod off or
 //   deleting it never takes any away, and adding it again doesn't ask again).
-// - A mod whose powers add a holding power to the site's approved union (not `controls` or `mods`, which never hold
-//   alone, nor `preload` unless the site's mods can read), on a site with other boxed mods, asks: its hold shows the site's lists, the items it adds
+// - A mod whose powers add a holding power to the site's approved union (a quiet one, sound, controls, mods,
+//   preload, embeds or media, only when it completes a warned combination there), on a site with other boxed mods,
+//   asks: its hold shows the site's lists, the items it adds
 //   marked new; approving it approves the site's new union. Switched on, such a mod waits like a new one (held.js,
 //   by 'switch'); switched off or deleted, nothing is asked.
 // - Mods the user has, unchanged and not just switched on, whose site's union isn't approved (from before site
@@ -147,11 +148,14 @@ function approvedUnion(allowed, site) {
   return combos.POWERS.filter((p) => out.has(p));
 }
 
-// Powers that never make a site ask on their own: controls and mods; preload unless the site's mods can read
-const SOFT = new Set(['controls', 'mods']);
+// The quiet powers (boxpowers.js MENU soft: sound, controls, mods, preload, embeds, media) never make a site ask on
+// their own: one does when it completes a warned combination in the site's union (one it's in, which the site's
+// approved union, without it, can't have)
+const QUIET = new Set(Object.entries(require('./boxpowers').MENU).filter(([, v]) => v.soft).map(([k]) => k));
 /** The powers in `adding` that make a site with `union` (after) ask. */
 function holding(adding, union) {
-  return adding.filter((p) => !SOFT.has(p) && (p !== 'preload' || union.some((x) => combos.READS.includes(x))));
+  const warned = combos.warningsFor(union).map((w) => w.combo.split('+'));
+  return adding.filter((p) => !QUIET.has(p) || warned.some((c) => c.includes(p)));
 }
 
 // ---- the site's lists: what its boxed mods can do together, by the powers in the union (words from the

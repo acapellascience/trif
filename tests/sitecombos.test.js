@@ -69,6 +69,18 @@ test('a mod that adds a holding power to its site asks, with the site\'s lists (
   assert.deepEqual(sites.siteOkFor(mods.find((m) => m.id === 'x.com/clicker'), mods, loadAllowed(ws.home)), ['x.com keys+controls+mods+preload+click+write-drafts']);
 });
 
+test('a quiet power added to a site asks only when it completes a warned combination there', () => {
+  const m = (id, powers) => ({ id, site: 'x.com', matches: ['*://x.com/*'], sandboxed: true, powers });
+  // (sound beside a reader: read-into-sound, asks; beside a clicker: nothing warned, doesn't)
+  assert.equal(sites.siteNeeds(m('x.com/s', ['sound']), [m('x.com/r', ['keys']), m('x.com/s', ['sound'])]).length, 1);
+  assert.deepEqual(sites.siteNeeds(m('x.com/s', ['sound']), [m('x.com/c', ['click']), m('x.com/s', ['sound'])]), []);
+  for (const q of ['controls', 'mods', 'embeds', 'media', 'preload']) assert.deepEqual(sites.siteNeeds(m('x.com/q', [q]), [m('x.com/c', ['click']), m('x.com/q', [q])]), [], q);
+  // (preload, media, embeds beside a read: their warned combinations ask)
+  for (const q of ['preload', 'media', 'embeds']) assert.equal(sites.siteNeeds(m('x.com/q', [q]), [m('x.com/r', ['site-data']), m('x.com/q', [q])]).length, 1, q);
+  // (a power that asks, beside anything: asks)
+  assert.equal(sites.siteNeeds(m('x.com/k', ['keys']), [m('x.com/c', ['controls']), m('x.com/k', ['keys'])]).length, 1);
+});
+
 test('switched on, a mod that adds a holding power to the site waits; off or deleted, nothing is asked or taken away; added again, nothing is asked', () => {
   const ws = home();
   write(ws, 'clicker.js', boxed('Clicker', 'click', CLICK));

@@ -178,8 +178,8 @@ class Scenario {
       if (!d || !d.open) return null;
       const q = (s) => d.querySelector(s);
       return { mod: d.dataset.mod, count: q('.ap-count').textContent, name: q('.ap-name').textContent, chip: q('.ap-chip').textContent, where: q('.ap-where').textContent,
-        lead: q('.ap-lead').textContent, items: [...d.querySelectorAll('.ap-facts li')].map((x) => x.lastChild.textContent),
-        together: q('.ap-together').hidden ? [] : [...d.querySelectorAll('.ap-together p')].map((x) => x.textContent),
+        lead: q('.ap-lead').textContent, items: [...d.querySelectorAll('.ap-facts li')].map((x) => (x.querySelector('.ap-line') || x.lastChild).textContent),
+        together: q('.ap-together').hidden ? [] : [...d.querySelectorAll('.ap-together p')].map((x) => (x.querySelector('.ap-line') || x).textContent),
         note: q('.ap-note').textContent, claim: q('.ap-claim').hidden ? '' : q('.ap-claim').textContent, show: q('.ap-show').textContent,
         focusIn: d.contains(document.activeElement), badge: !document.getElementById('waiting-badge').hidden };
     }`);
@@ -2611,6 +2611,34 @@ setTimeout(() => {
       // the screenshots, in both themes (Chrome; Firefox's driver can't set the colour scheme)
       for (const scheme of ['dark', 'light']) if (await this.d.colorScheme(this.panelCtx, scheme)) { await sleep(150); await this.shot(this.panelCtx, `approval-powers-${scheme}`); }
       await this.d.colorScheme(this.panelCtx, '');
+      // "more" (explain.json): a power's line and the warning's each reveal their explanation in place, the
+      // card scrolling only up and down; "less" folds it again
+      const table = JSON.parse(fs.readFileSync(path.join(I.REPO, 'extension', 'explain.json'), 'utf8')).terms;
+      const explanation = (g, id) => (table.find((t) => t.group === g && t.id === id) || {}).explanation || '';
+      const moreState = () => this.panel(`async () => [...document.querySelectorAll('#approval .more-btn')].map((b) => {
+        const box = document.getElementById(b.getAttribute('aria-controls'));
+        const d = document.getElementById('approval');
+        return { btn: b.textContent, expanded: b.getAttribute('aria-expanded'), shown: !!box && !box.hidden && box.getClientRects().length > 0, text: box ? box.textContent : '',
+          inWarnings: !!b.closest('.ap-together'), wide: d.scrollWidth > d.clientWidth + 1, overflowX: getComputedStyle(d).overflowX };
+      })`);
+      const before = await moreState();
+      if (before.length !== 4 || before.some((x) => x.btn !== 'more' || x.shown || x.expanded !== 'false')) problems.push(`"more" before a click: ${JSON.stringify(before)}`);
+      await this.d.click(this.panelCtx, '#approval .ap-facts li:first-child .more-btn');
+      await this.d.click(this.panelCtx, '#approval .ap-together .more-btn');
+      const opened2 = await waitFor('"more" open', async () => { const s = await moreState(); return s.filter((x) => x.shown).length === 2 ? s : null; }, { timeoutMs: 5000 }).catch(() => null);
+      if (!opened2) problems.push(`"more" didn't reveal the explanations: ${JSON.stringify(await moreState())}`);
+      else {
+        const power = opened2[0], warn = opened2.find((x) => x.inWarnings) || {};
+        if (!power.shown || power.btn !== 'less' || power.expanded !== 'true' || !power.text || !explanation('powers', 'read-drafts').endsWith(power.text)) problems.push(`read-drafts' "more": ${JSON.stringify(power)}`);
+        if (!warn.shown || warn.btn !== 'less' || !warn.text || !explanation('warnings', 'read-into-sound').endsWith(warn.text)) problems.push(`the warning's "more": ${JSON.stringify(warn)}`);
+        if (opened2.some((x) => x.wide || x.overflowX !== 'hidden')) problems.push(`the card scrolls sideways with "more" open: ${JSON.stringify(opened2[0])}`);
+        if ((await this.approvalState()).items[0] !== want.items[0]) problems.push('the line changed when its "more" opened');
+      }
+      for (const scheme of ['dark', 'light']) if (await this.d.colorScheme(this.panelCtx, scheme)) { await sleep(150); await this.shot(this.panelCtx, `approval-more-${scheme}`); }
+      await this.d.colorScheme(this.panelCtx, '');
+      await this.d.click(this.panelCtx, '#approval .ap-facts li:first-child .more-btn');
+      const folded = await moreState();
+      if (folded[0].shown || folded[0].btn !== 'more') problems.push(`"less" didn't fold it: ${JSON.stringify(folded[0])}`);
       // the file name in the card opens the code card over it; Esc closes that one only
       await this.d.click(this.panelCtx, '#approval .ap-where .file-link');
       const over = await waitFor('the code card over the approval', () => this.panel(`async () => { const c = document.getElementById('code-view'); return c && c.open ? { mod: c.dataset.mod, approval: document.getElementById('approval').open } : null; }`), { timeoutMs: 8000 }).catch(() => null);
@@ -2675,7 +2703,7 @@ setTimeout(() => {
       if (leaks.length) problems.push(`the server saw: ${leaks.join(', ')}`);
       fs.writeFileSync(this.r.file(`powers-${this.o.browser}.json`), JSON.stringify({ declared: A, undeclared: N, keys: [k1, k2], typed: got.typed, problems }, null, 2));
       if (problems.length) throw new Error(problems.join('\n'));
-      return `held for "${row.items.join(' ')}" and "${row.together.join(' ')}"; the approval dialog opened by itself, kept the focus, closed on Esc and stayed closed, the badge reopened it; allowed there; ${Object.keys(A).length} declared outcomes as expected (sound, controls, read-drafts), ${Object.keys(N).length} undeclared refused; keys ${k1} then, with keys, ${k2}; same powers ran, a new one waited`;
+      return `held for "${row.items.join(' ')}" and "${row.together.join(' ')}"; the approval dialog opened by itself, its "more" showed the explanations, kept the focus, closed on Esc and stayed closed, the badge reopened it; allowed there; ${Object.keys(A).length} declared outcomes as expected (sound, controls, read-drafts), ${Object.keys(N).length} undeclared refused; keys ${k1} then, with keys, ${k2}; same powers ran, a new one waited`;
     } finally {
       for (const f of [allFile, noneFile]) { try { fs.unlinkSync(f); } catch { /* gone */ } }
     }
@@ -3472,8 +3500,8 @@ setTimeout(() => {
       // a click on the chip: the code card, with what the row left out
       await this.dismissApproval();
       await this.panel(`async () => { document.querySelector('li[data-mod="${site}/e2e-row-power"] .mod-chip').click(); return true; }`);
-      const about = await waitFor('the card', () => this.panel(`async () => { const d = document.getElementById('code-view'); return d?.open ? { mod: d.dataset.mod, about: d.querySelector('.cv-about').textContent, file: d.querySelector('.cv-file')?.textContent } : null; }`), { timeoutMs: 8000 });
-      if (about.mod !== `${site}/e2e-row-power` || !/Noticeable/.test(about.about) || !/Power: site-data/.test(about.about) || about.file !== 'e2e-row-power.js') problems.push(`the card: ${JSON.stringify(about)}`);
+      const about = await waitFor('the card', () => this.panel(`async () => { const d = document.getElementById('code-view'); return d?.open ? { mod: d.dataset.mod, about: d.querySelector('.cv-about').textContent, more: d.querySelectorAll('.cv-about .more-btn').length, file: d.querySelector('.cv-file')?.textContent } : null; }`), { timeoutMs: 8000 });
+      if (about.mod !== `${site}/e2e-row-power` || !/Noticeable/.test(about.about) || !/Power: site-data/.test(about.about) || about.more < 2 || about.file !== 'e2e-row-power.js') problems.push(`the card: ${JSON.stringify(about)}`);
       await themes('mod-rows-card');
       if (problems.length) throw new Error(problems.join('\n'));
       return `chips: ${Object.values(rows).map((x) => x.chip || '(none)').join(' | ')}; controls ${rows['e2e-row-plain'].gapSwitch}px then ${rows['e2e-row-plain'].gapBin}px; the chip opens the card`;
@@ -3582,7 +3610,7 @@ page.root.setAttr('data-trif-box-spec', r);\n`,
         const heads = [...document.querySelectorAll('#mod-list > li.mod-group')].map((li) => li.dataset.group);
         const sb = document.querySelector('li.mod-group[data-group="sandboxed"]');
         const row = document.querySelector('li[data-mod="127.0.0.1/e2e-sbx-panel"]');
-        return sb && row && row.querySelector('.light.on') ? { heads, name: sb.querySelector('.group-name-text').textContent, count: sb.querySelector('.group-count').textContent, note: sb.querySelector('.mod-group-note').textContent, rowGroup: row.dataset.group,
+        return sb && row && row.querySelector('.light.on') ? { heads, name: sb.querySelector('.group-name-text').textContent, count: sb.querySelector('.group-count').textContent, note: sb.querySelector('.mod-group-note').firstChild.textContent, rowGroup: row.dataset.group,
           order: [...document.querySelectorAll('#mod-list > li')].map((li) => li.dataset.mod || li.dataset.group),
         } : null;
       }`), { timeoutMs: 15000 });

@@ -110,5 +110,5 @@ export function agentCheck(cmd, hostOrUrl, settings) {
   if (lv.level === 'look') return need === 'look' ? 'ok' : `the user has set "Agent on this site" to Look for ${lv.site}: you can read the page and take screenshots there, but not run code (trif run). Work from what you can read, or ask the user to set it to Run code in TRIF's side panel`;
   if (lv.level === 'ask') return need === 'look' ? 'ok' : 'ask';
   const why = lv.by === 'sensitive' ? ` (it's ${lv.why || 'on TRIF\'s list of sensitive sites'}, so it's off unless the user raises it)` : '';
-  return `"Agent on this site" is Off for ${lv.site}${why}: you can't read, screenshot or run code on its tabs. You can still write mods for it (they wait for the user's OK as usual); the user can change the setting in TRIF's side panel`;
+  return `"Agent on this site" is Off for ${lv.site}${why}: you can't read, screenshot or run code on its tabs. You can still write mods for it (any that can do more than change the page wait for the user's OK, as usual); the user can change the setting in TRIF's side panel`;
 }

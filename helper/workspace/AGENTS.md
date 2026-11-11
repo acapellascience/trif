@@ -23,8 +23,8 @@ techniques, repairs, testing) is in TECHNIQUES.md, next to this file: read it be
    `trif request <i>`.
 3. `trif new <site> <mod>` and write the mod (CSS first; data filtering for feeds; DOM tweaks last).
 4. Save, `trif reload`, then verify: `trif errors`, `trif logs`, the same sweeps (nothing left), screenshot.
-5. Iterate until it's done. Then tell the user, in plain words, what changed, what you checked, and how
-   to undo it.
+5. Iterate until it's done. Then tell the user what changed in a sentence or two (see "5. Report": short
+   by default).
 
 ## Workspace
 
@@ -401,10 +401,15 @@ testing. Then `trif new <site> <mod>`, and edit. Pick the least invasive techniq
 
 ### 5. Report
 
-Tell the user in plain words what changed, where, and anything you couldn't do or that might break. List
-what you checked (pages, states, counts before and after) and what you couldn't check, instead of
-inviting the user to find the next one. Say how to undo it: switch the mod off in the side panel (or ask
-you to), or delete it there (or ask you to).
+Short by default: the user sees the change on the page, and the side panel shows the mod with its switch
+and its code. One to three sentences, in plain words, no headings or lists:
+- what changed, as the user would describe it ("Promoted posts are gone from your timeline.");
+- only when it's so: what you couldn't do or check, or what might break, in a few words;
+- only when you chose between two readings of the request: which one.
+Leave out what you checked and the numbers, selectors, file names, the mod's tier, and how to undo it
+(the switch is right there), unless the user asks. Do the checking anyway (below); it just isn't the
+reply. If the user asks for detail ("what did you check?", "explain"), give it then, in full. If the user
+has said they want detailed reports, write them that way from then on.
 
 ## Finish the job
 
@@ -459,8 +464,8 @@ missed these" costs the user a round trip; finding them is your job.
 **Verify with evidence.**
 
 - Re-run the same sweeps after a reload, on every page type and state you listed, with `--scroll`.
-  Report numbers: "0 of 37 blue surfaces left; 4 kept on purpose (video player, our button)". The first
-  match, or only the page in front of you, isn't verification.
+  Count: "0 of 37 blue surfaces left; 4 kept on purpose (video player, our button)" (for you, and for the
+  user if they ask). The first match, or only the page in front of you, isn't verification.
 - Measure what the user claimed: "fill the space" is the column's width before and after; "never shows
   up" is the first paint after a reload, not a minute later.
 - After broad changes, smoke-test: search still returns results, the main dialog (compose, add to cart)

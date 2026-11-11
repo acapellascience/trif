@@ -527,6 +527,40 @@ class Scenario {
   }
 
   /** The panel's Settings, "Tim's mods": each site added or with Add. Fresh: Add for Amazon adds its mods and turns TRIF on there. */
+  async toolFoldCheck() {
+    const key = 'chat:x.com';
+    const saved = await this.ext(`async (k) => (await chrome.storage.local.get(k))[k] || null`, [key]);
+    const t = Date.now() - 60000;
+    const messages = [
+      { role: 'user', text: 'Make the title pink', time: t },
+      { role: 'tool', text: 'ran trif reload --tab 1', time: t + 1 },
+      { role: 'tool', text: 'read sites/x.com/pink.js', time: t + 2 },
+      { role: 'tool', text: 'ran trif errors', time: t + 3 },
+      { role: 'assistant', text: 'The title is pink now.', time: t + 4 },
+    ];
+    try {
+      await this.ext(`async (k, messages) => { await chrome.storage.local.set({ [k]: { messages } }); }`, [key, messages]);
+      const look = () => this.panel(`async () => {
+        const lis = [...document.querySelectorAll('#messages > li')];
+        const tools = lis.filter((li) => li.classList.contains('tool'));
+        const sum = document.querySelector('#messages .tool-sum');
+        return { sum: sum?.textContent || null, expanded: sum?.getAttribute('aria-expanded') || null,
+          shown: tools.filter((li) => li.getClientRects().length > 0 && !li.hidden).length, tools: tools.length,
+          headText: document.querySelector('#messages .tool-head .tool-text')?.getClientRects().length > 0,
+          explain: lis.at(-1)?.querySelector('.explain-btn')?.textContent || null };
+      }`);
+      const folded = await waitFor('the folded tool lines', async () => { const x = await look(); return x.sum ? x : null; }, { timeoutMs: 8000 });
+      if (folded.sum !== 'Ran 2 commands, read 1 file' || folded.expanded !== 'false' || folded.tools !== 3 || folded.shown !== 1 || folded.headText || folded.explain !== 'Explain') throw new Error(`folded: ${JSON.stringify(folded)}`);
+      await this.panel(`async () => { document.querySelector('#messages .tool-sum').click(); return true; }`);
+      const open = await waitFor('the tool lines opened', async () => { const x = await look(); return x.expanded === 'true' ? x : null; }, { timeoutMs: 5000 });
+      if (open.shown !== 3 || !open.headText) throw new Error(`opened: ${JSON.stringify(open)}`);
+      await this.shot(this.panelCtx, 'panel-tool-fold');
+      return `"${folded.sum}", opens to ${open.shown} lines; Explain under the reply`;
+    } finally {
+      await this.ext(`async (k, v) => { if (v) await chrome.storage.local.set({ [k]: v }); else await chrome.storage.local.remove(k); }`, [key, saved]).catch(() => {});
+    }
+  }
+
   async starterSettingsCheck() {
     const r = this.r;
     await r.check(`Settings: Tim's mods by site${this.o.kind === 'fresh' ? `, and Add for ${SETTINGS_ADD}` : ''}`, async () => {
@@ -1120,9 +1154,9 @@ class Scenario {
       if (this.o.browser !== 'firefox' || this.allSites) await this.shot(this.panelCtx, 'settings-site-permissions');
       await d.click(this.panelCtx, '#settings-btn');
       await d.click(this.panelCtx, '#gate-btn');
-      // Unblocked: off (TRIF has the site), or grey (restrictive Firefox gave its access back when blocking).
+      // Unblocked: off (blocking kept the browser's access), never disconnected.
       const after = await this.waitPanel('the gate after', (x) => x.gate && !x.red);
-      if (!['The robot is off.', 'TRIF is disconnected on 127.0.0.1'].includes(after.gateTitle)) throw new Error(`after: ${JSON.stringify(after)}`);
+      if (after.gateTitle !== 'The robot is off.') throw new Error(`after: ${JSON.stringify(after)}`);
       await d.click(this.panelCtx, '#gate-btn');
       await this.waitPage('the mod again', (x) => x.banner === 'ran');
       await this.waitFace('the faces once it\'s on again', this.win.tabId, { toolbar: /^robot(-login)?-16\.png$/, bar: /^(normal|login)$/ });
@@ -1226,6 +1260,7 @@ class Scenario {
       await this.shot(this.panelCtx, 'panel-x');
       return p.mods.map((m) => `${m.id.split('/')[1]} ${m.on ? 'on' : 'off'}`).join(', ');
     });
+    await r.check('the chat folds a run of tool lines into one ("Ran 2 commands, read 1 file"), opens on a click, and offers Explain under the last reply', () => this.toolFoldCheck());
     await this.starterSettingsCheck();
     await this.starterLinkCheck(win);
     await this.narrowShots();
@@ -1754,7 +1789,7 @@ class Scenario {
 
   // ---- what's in the way, in colour (sidepanel.js problemNow): every green in the panel turns red while
   // TRIF is missing a part (user scripts off: the mod switches too; the helper not connected: not them,
-  // since mods still run), or yellow while the agent isn't logged in (not on the landing page). The gate
+  // since mods still run), or yellow while the agent isn't logged in (the mods' too; not on the landing page). The gate
   // and the landing page say what in one line; the site's page has the notices, "Mods are paused" first.
 
   /** How the panel looks: its problem, colours (as computed rgb) and the words it shows. */
@@ -1818,12 +1853,12 @@ class Scenario {
       const first = await this.waitLooks('the panel\'s status', (x) => !!x.dot && !/Checking/.test(x.dotLabel));
       const loggedOut = /isn’t logged in/.test(first.dotLabel);
       if (loggedOut) {
-        await r.check('agent not logged in, on the site\'s page: the robot and power button turn yellow (mods stay green), the login notice shows', async () => {
+        await r.check('agent not logged in, on the site\'s page: every green turns yellow, the robot\'s colour (mods\' switches and lights too), the login notice shows', async () => {
           const x = await this.waitLooks('yellow', (l) => l.classes.join() === 'needs-login' && l.dot === 'dot warn');
-          // Mods still run without a login, so their switches and lights stay green.
-          const want = { rim: x.warn, power: x.warn, modSwitch: x.green };
+          // One colour while logged out: the mods' switches and lights are yellow too (Tim, 2026-11-11).
+          const want = { rim: x.warn, power: x.warn, modSwitch: x.warn };
           for (const [k, v] of Object.entries(want)) if (!Scenario.same(x[k], v)) throw new Error(`${k} is ${x[k]}, not ${v}: ${JSON.stringify(x)}`);
-          if (x.light && !Scenario.same(x.light, x.green)) throw new Error(`the running light is ${x.light}`);
+          if (x.light && !Scenario.same(x.light, x.warn)) throw new Error(`the running light is ${x.light}`);
           if (!x.notices.some((t) => /isn’t logged in/.test(t))) throw new Error(`no login notice: ${x.notices}`);
           // F14: no sending into a run that can only fail with that; the button says why.
           if (!x.send.disabled || !/^Log in to .+ first$/.test(x.send.title)) throw new Error(`Send: ${JSON.stringify(x.send)}`);
@@ -2145,7 +2180,7 @@ setTimeout(() => {
       const chip = document.querySelector('#no-sandbox');
       return { cards, chip: shown('#no-sandbox') ? { text: chip.textContent, title: chip.title } : null,
         settings: [...document.querySelectorAll('#without-sandbox .note')].filter((p) => p.getClientRects().length).map((p) => p.textContent),
-        msgs: [...document.querySelectorAll('#messages > li')].map((li) => [li.className, li.innerText.trim().slice(0, 80)]) };
+        msgs: [...document.querySelectorAll('#messages > li')].map((li) => { const b = li.querySelector('.explain-btn'); const t = b ? li.innerText.slice(0, li.innerText.lastIndexOf(b.innerText)) : li.innerText; return [li.className, t.trim().slice(0, 80)]; }) }; // (the reply's text, without its Explain button)
     }`);
     let last = null;
     const until = (what, ok, timeoutMs = 30000) => waitFor(what, async () => { last = await state(); return ok(last) ? last : null; }, { timeoutMs, intervalMs: 300 })
@@ -3041,7 +3076,7 @@ setTimeout(() => {
           items: [...m.querySelectorAll('[role="menuitemradio"]')].map((x) => x.innerText.replace(/\s+/g, ' ').trim()), foot: m.querySelector('.agent-level-foot').textContent };
       }`);
       if (!menu.open || menu.expanded !== 'true' || menu.focused !== 'ask' || JSON.stringify(menu.checked) !== '["ask"]' || menu.head !== `What your agent can do on ${site}` || menu.items.length !== 4
-        || !/^Mods for this site always wait for your OK/.test(menu.foot)) problems.push(`the menu: ${JSON.stringify(menu)}`);
+        || !/^Whatever you pick, a mod that can do more than change this page waits for your OK/.test(menu.foot)) problems.push(`the menu: ${JSON.stringify(menu)}`);
       await themes('agent-menu');
       const shut = await this.panel(`async () => { document.activeElement.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })); return { open: !document.getElementById('agent-level-menu').hidden, focus: document.activeElement?.id }; }`);
       if (shut.open || shut.focus !== 'agent-level') problems.push(`Esc on the menu: ${JSON.stringify(shut)}`);

@@ -2378,19 +2378,21 @@ async function disconnectSite(msg) {
 }
 
 // The site off (out of sitesOn), its runs stopped, and its own access given back (not <all_urls>).
-async function giveBack(site, tabId) {
+async function giveBack(site, tabId, { keepAccess = false } = {}) {
   if (state.sitesOn.includes(site)) {
     const sitesOn = state.sitesOn.filter((s) => s !== site);
     await save({ sitesOn }, { switches: true });
     state.sitesOn = sitesOn;
   }
   stopRunsOn(site);
-  if (SITE_ACCESS) await Promise.resolve().then(() => chrome.permissions.remove({ origins: siteOrigins(site) })).catch(() => {});
+  if (SITE_ACCESS && !keepAccess) await Promise.resolve().then(() => chrome.permissions.remove({ origins: siteOrigins(site) })).catch(() => {});
   await afterSiteChange(tabId);
 }
 
 // TRIF's block list (chrome.storage.local `blockedSites`): only from the panel, i.e. the user. Blocking a site
-// turns it off and gives its own access back; unblocking leaves it off (or disconnected, without access).
+// turns it off and keeps the browser's access (the block list is what stops TRIF there: nothing runs or reads),
+// so unblocking leaves it off; disconnected only if the user had disconnected it before (Tim, 2026-11-11: Chrome
+// hands back a removed permission without asking, so "disconnected" after a block wasn't true anyway).
 async function setBlocked(msg) {
   const site = scopeFor(normalizeSite(msg.site));
   if (!site) throw new Error('missing site');
@@ -2398,7 +2400,7 @@ async function setBlocked(msg) {
   const list = normalizeSitesOn(blocked ? [...state.blockedSites, site] : state.blockedSites.filter((s) => s !== site));
   await save({ blockedSites: list }, { switches: true });
   state.blockedSites = list;
-  if (blocked) await giveBack(site, msg.tab);
+  if (blocked) await giveBack(site, msg.tab, { keepAccess: true });
   await refreshAccess();
   if (!blocked) await afterSiteChange(undefined);
   notifyPanels();

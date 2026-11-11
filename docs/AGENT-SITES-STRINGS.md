@@ -66,11 +66,11 @@ its words as the tooltip.
 
 The menu (new):
 - Heading: **What your agent can do on {site}**
-- **Nothing:** it can’t see or touch this site.
+- **Off:** it can’t see or touch this site. (Was "Nothing"; renamed 2026-11-11 to match Settings.)
 - **Look:** it can read the page and take screenshots.
 - **Ask first:** it can look, and asks you before running code here.
-- **Run code:** it can change the page live; posting is paused while it does.
-- Footer (muted): **Mods for this site always wait for your OK, whatever you pick.**
+- **Run code:** it can change the page live; posting is paused until the page reloads.
+- Footer (muted): **Whatever you pick, a mod that can do more than change this page waits for your OK.**
 
 The sensitive-site note left the header too: it's the first line in that site's chat, as TRIF's own note.
 - Old (under the bar): **Your agent is off on {site}: it's {what}. Choose “Agent” above to let it look or run

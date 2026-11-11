@@ -236,9 +236,10 @@ body:is(.blocked, .needs-login) .bar-robot :is(.eye, .pause) { fill: var(--switc
 /* (logged out: hollow eyes, their outline in the yellow) */
 body .bar-robot[data-face="login"] .eye { fill: none; stroke: var(--switch-on); stroke-width: 9; }
 body.needs-login .btn.go { color: #2e1f02; }
-/* Except the mods while only the helper is away, only a login is missing, or the tab is paused: they still
-   run (the extension keeps its copy), so their switches and lights stay green. */
-body[data-problem="helper"] .mod-list, body:is(.needs-login, .tab-locked) .mod-list { --switch-on: var(--trif-green); }
+/* Except the mods while only the helper is away or the tab is paused: they still run (the extension keeps its
+   copy), so their switches and lights stay green. Logged out, everything green turns yellow, the robot's
+   colour (Tim, 2026-11-11). */
+body[data-problem="helper"] .mod-list, body.tab-locked:not(.needs-login) .mod-list { --switch-on: var(--trif-green); }
 
 .field { display: grid; grid-template-columns: 52px 1fr; align-items: center; gap: 8px; }
 .field > span { color: var(--muted); }
@@ -475,6 +476,17 @@ h3.mod-name { margin: 0; font-size: inherit; line-height: inherit; }
   text-overflow: ellipsis;
 }
 .msg.tool + .msg.tool { margin-top: -6px; }
+/* A run of tool lines, folded (sidepanel.js groupTools): "Ran 2 commands ›"; open, the lines under it */
+.msg.tool.tool-head .tool-sum { display: inline-flex; align-items: center; gap: 4px; padding: 0; border: 0; background: none; color: var(--muted); font: 12px/1.5 system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; cursor: pointer; }
+.msg.tool.tool-head .tool-sum::after { content: "›"; display: inline-block; transition: transform .15s ease; }
+.msg.tool.tool-head.open .tool-sum::after { transform: rotate(90deg); }
+.msg.tool.tool-head .tool-sum:hover { color: var(--text); }
+.msg.tool.tool-head .tool-sum:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 3px; }
+.msg.tool.tool-head .tool-text { display: none; }
+.msg.tool.tool-head.open .tool-text { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.msg.tool.tool-head.open { white-space: normal; }
+.msg.tool.tool-member { padding-left: 2px; }
+@media (prefers-reduced-motion: reduce) { .msg.tool.tool-head .tool-sum::after { transition: none; } }
 .msg.mod { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 0 2px; color: var(--muted); font-size: 12px; }
 .msg.mod .btn { padding: 2px 10px; }
 
@@ -658,7 +670,7 @@ h3.mod-name { margin: 0; font-size: inherit; line-height: inherit; }
 
 /* ---- the approval dialog (sidepanel.js "The approval dialog"): one card over the dimmed panel ---------- */
 .approval {
-  /* (TRIF's green, whatever the panel's state colours its switches: yellow waiting for a login, red blocked) */
+  /* (TRIF's green, whatever the panel's state colours its switches (red blocked), except yellow for a login) */
   --switch-on: var(--trif-green);
   width: auto; max-width: none; max-height: calc(100% - 32px); margin: auto 16px; padding: 16px 16px 14px;
   overflow: auto; color: var(--text); background: var(--surface); border: 1px solid var(--line); border-radius: 14px;
@@ -679,7 +691,10 @@ h3.mod-name { margin: 0; font-size: inherit; line-height: inherit; }
 .approval .ap-robot svg { display: block; width: 34px; height: 34px; }
 /* (the cards' robot: always the usual green one, eyes or the code card's </>; sidepanel.js cardRobot) */
 .approval .ap-robot svg { stroke: none; }
-.approval .ap-robot .rim { fill: var(--trif-green); }
+.approval .ap-robot .rim { fill: var(--switch-on); }
+body.needs-login .approval { --switch-on: var(--warn); }
+body.needs-login .approval .ap-robot .eye { fill: var(--warn); }
+body.needs-login .approval .ap-robot .code { stroke: var(--warn); }
 .approval .ap-robot .face { fill: #18181a; }
 .approval .ap-robot .eye { fill: #59dbab; }
 .approval .ap-robot .code { fill: none; stroke: #59dbab; stroke-width: 5.5; stroke-linecap: butt; stroke-linejoin: miter; }
@@ -803,7 +818,10 @@ button.mod-file { font: 11px/1.4 var(--mono); font-weight: 400; color: var(--mut
 .code-view .cv-error { margin-top: 10px; }
 .code-view .cv-code .l.hl { background: color-mix(in srgb, var(--bad) 18%, transparent); }
 .break-row { grid-template-columns: 1fr auto; }
-.msg.trif .break-actions .btn.go { background: var(--trif-green); color: #04291c; border-color: transparent; }
+/* Explain, under the agent's last reply (sidepanel.js renderExplain) */
+.msg .explain-btn { display: block; margin-top: 6px; padding: 2px 9px; font-size: 11.5px; }
+.msg.trif .break-actions .btn.go { background: var(--switch-on); color: #04291c; border-color: transparent; }
+body.needs-login .msg.trif .break-actions .btn.go { color: #2e1f02; }
 
 /* ---- history, sharing, a site's files, dropping files ------------------------------------------------ */
 .code-view .cv-history-list { list-style: none; margin: 12px 0 0; padding: 0; max-height: min(52vh, 420px); overflow: auto; }

@@ -348,11 +348,11 @@ class ChromeDriver {
   /** A trusted press of `key` ('Escape') in the page `ctx`. */
   async key(ctx, key) {
     const sid = await this._attach(ctx);
-    const codes = { Escape: 27, Enter: 13, Tab: 9 };
+    const codes = { Escape: 27, Enter: 13, Tab: 9, ' ': 32, ArrowDown: 40, ArrowUp: 38 };
     // (a character also types itself, as a real key press does)
     const char = key.length === 1;
     for (const type of [char ? 'keyDown' : 'rawKeyDown', 'keyUp']) {
-      await this.cdp.send('Input.dispatchKeyEvent', { type, key, code: char ? `Key${key.toUpperCase()}` : key, windowsVirtualKeyCode: codes[key] || (char ? key.toUpperCase().charCodeAt(0) : 0), ...(char && type === 'keyDown' ? { text: key } : {}) }, sid);
+      await this.cdp.send('Input.dispatchKeyEvent', { type, key, code: key === ' ' ? 'Space' : char ? `Key${key.toUpperCase()}` : key, windowsVirtualKeyCode: codes[key] || (char ? key.toUpperCase().charCodeAt(0) : 0), ...(char && type === 'keyDown' ? { text: key } : {}) }, sid);
     }
   }
 

@@ -363,7 +363,8 @@ export function sandboxRuntime(mode, pageModId, pageFn, pagePowers) {
     }
     if (q) return false;
     const t = flat.toLowerCase();
-    if (/@import\b|@namespace\b|expression\s*\(|-moz-binding|behavior\s*:/.test(t)) return false;
+    // (behavior: the whole property's name, not the end of overscroll-behavior or scroll-behavior)
+    if (/@import\b|@namespace\b|expression\s*\(|-moz-binding|(?<![\w-])(?:-ms-)?behavior\s*:/.test(t)) return false;
     if (/(?:^|[^a-z-])(?:-webkit-)?(image-set|image|cross-fade|element|src)\s*\(/.test(t)) return false;
     const re = /url\s*\(/gi;
     let m;
@@ -608,10 +609,17 @@ export function sandboxRuntime(mode, pageModId, pageFn, pagePowers) {
   // addresses already in what the user typed there, or in a link on the page: no address it made up.
   const ADDRESS = /(?:[a-z][a-z0-9+.-]*:\/\/|www[.\u3002\uff0e\uff61])[^\s<>"'`]+|(?:[\p{L}\p{N}][\p{L}\p{N}-]{0,62}[.\u3002\uff0e\uff61])+(?:[a-z]{2,63}|xn--[a-z0-9-]{1,59})(?![\p{L}\p{N}-])(?:[/?#:][^\s<>"'`]*)?|\b\d{1,3}(?:\.\d{1,3}){3}\b/giu;
   const linkHas = (t) => { for (const a of D.links) if (!created.has(a) && String(a.href).toLowerCase().includes(t)) return true; return false; };
-  const noNewAddress = (before, after) => {
+  // (site-storage: a name on the page's own site (timsrobot.com/robot on timsrobot.com) isn't a new address to the
+  // site, which keeps and reads its own; another site's is: the site's own code could fetch or send it on)
+  const onOwnSite = (t) => {
+    const h = t.replace(/^[a-z][a-z0-9+.-]*:\/\//, '').split(/[/?#:\s]/)[0].replace(/[.\u3002\uff0e\uff61]+$/, '').replace(/^www[.\u3002\uff0e\uff61]/, '');
+    return !!SITE_BASE && (h === SITE_BASE || h.endsWith(`.${SITE_BASE}`));
+  };
+  const noNewAddress = (before, after, { ownSite = false } = {}) => {
     const was = String(before).toLowerCase();
     for (const m of String(after).matchAll(ADDRESS)) {
       const t = m[0].toLowerCase();
+      if (ownSite && !/@/.test(t.split(/[/?#]/)[0]) && onOwnSite(t)) continue;
       if (!was.includes(t) && !linkHas(t)) fail(`"${m[0].slice(0, 80)}" looks like an address that isn't in what the user typed here or in a link on the page: a boxed mod doesn't add addresses to a draft (a site can fetch one for a preview before anything is posted)`);
     }
   };
@@ -807,7 +815,11 @@ export function sandboxRuntime(mode, pageModId, pageFn, pagePowers) {
       if (r === true) { e.stopImmediatePropagation(); return; }
     }
   };
-  for (const ty of BLOCK_TYPES) G.addEventListener(ty, blocking, { capture: true, passive: true });
+  // (not passive, so a block's function can keep a blocked key's default from happening, the page scrolling on
+  // Space or an arrow, with preventDefault(): it couldn't in a passive listener. Except wheel and touch, whose
+  // listeners on the window the browsers keep passive, so that scrolling never waits for one)
+  const SCROLLING = new Set(['wheel', 'touchstart', 'touchmove']);
+  for (const ty of BLOCK_TYPES) G.addEventListener(ty, blocking, { capture: true, passive: SCROLLING.has(ty) });
   // ---- rewrite-requests (0.3): the header's literal changes, handed to the page's side (runtime.js
   // pageBridge), which makes them in the site's own same-origin requests; the mod's code has no part in it
   const rewriteRules = []; // {mod, op, sets: [[path, value]]}
@@ -829,13 +841,23 @@ export function sandboxRuntime(mode, pageModId, pageFn, pagePowers) {
     cv.width = bm.width; cv.height = bm.height;
     cv.getContext('2d').drawImage(bm, 0, 0);
     created.add(cv);
+    // (changed: a mod drew on the canvas it was given, resized it, or gave back another of its own; when no mod
+    // did, only looked or did nothing, the file goes on as it was: the very file, not a copy encoded again)
     let changed = false;
     for (const u of uploadFns) {
       try { partnersOk(u.api, 'edit-uploads'); } catch (err) { report(u.api.mod, err); continue; }
       uploadReaders.add(u.api.mod); // (it sees the picture: a read, for the page-wide rules)
+      const w0 = cv.width, h0 = cv.height;
+      drawnOn.delete(cv); // (what this mod draws, not an earlier one)
       const back = u.api.call(u.fn, wrap(cv), harden({ width: cv.width, height: cv.height, type: file.type }));
       const out = back && typeof back.then === 'function' ? await back.catch((err) => { report(u.api.mod, err); return undefined; }) : back;
-      if (out !== undefined && out !== null) { const n = nodes.get(out); if (!n || n.localName !== 'canvas' || !created.has(n)) { report(u.api.mod, new TypeError('TRIF sandbox: onUpload returns a canvas of the mod\'s own (or nothing: the one it was given)')); continue; } cv = n; }
+      let mine = drawnOn.has(cv) || cv.width !== w0 || cv.height !== h0;
+      if (out !== undefined && out !== null) {
+        const n = nodes.get(out);
+        if (!n || n.localName !== 'canvas' || !created.has(n)) { report(u.api.mod, new TypeError('TRIF sandbox: onUpload returns a canvas of the mod\'s own (or nothing: the one it was given)')); continue; }
+        if (n !== cv) { cv = n; mine = true; }
+      }
+      if (!mine) continue;
       changed = true;
       uploadEditors.add(u.api.mod);
     }
@@ -921,12 +943,21 @@ export function sandboxRuntime(mode, pageModId, pageFn, pagePowers) {
     ch.timer = setTimeout(() => { ch.timer = null; const got = [...ch.pending].filter((n) => n.isConnected); ch.pending.clear(); if (got.length) ch.call(list(got)); }, 50);
   };
   // trif.wrap: a page's text split into the mod's own pieces, outside editors, fields, raw text and what a
-  // form sends; the page's own text node stays where it was (empty), the pieces after it
-  const wrapMade = new WeakSet(); // (text the pieces brought, never wrapped again)
+  // form sends; the page's own text node stays where it was (empty), the pieces after it. A wrapper never wraps
+  // what it brought itself (its pieces' text, text inside its mod's own elements), but another mod's wrapper can
+  // (pieces carry the marks of every wrapper they came through, so two can't hand text back and forth). When
+  // the page writes into a node a wrapper emptied (React keeps its text node and sets its text), or takes it
+  // out, its pieces go, and the new text is wrapped afresh: never the old pieces beside the new text.
+  const wrapMade = new WeakMap(); // (a piece's text node -> the wrappers it came through)
+  const NO_MARKS = new Set();
+  const marksOf = (n) => wrapMade.get(n) || NO_MARKS;
+  const emptied = new WeakMap(); // (a page's text node a wrapper emptied -> the pieces it put after it)
+  const madeBy = new WeakMap(); // (an element a mod made -> that mod: trif.wrap leaves its own mod's alone)
   const wrapText = (wr, t) => {
     const p = t.parentElement;
-    if (!p || wrapMade.has(t) || isRaw(p) || FORM_TEXT.has(p.localName) || p.localName === 'title' || inEditor(p) || t.data.length > 20000) return;
-    for (let a = p; a; a = a.parentElement) if (created.has(a)) return; // (the mod's own elements: its own business)
+    if (!p || marksOf(t).has(wr) || emptied.has(t) || isRaw(p) || FORM_TEXT.has(p.localName) || p.localName === 'title' || inEditor(p) || t.data.length > 20000) return;
+    // (the mod's own elements, and TRIF's: their own business; another mod's elements are page to it)
+    for (let a = p; a; a = a.parentElement) if (created.has(a) && (!madeBy.has(a) || madeBy.get(a) === wr.mod)) return;
     const text = t.data;
     wr.re.lastIndex = 0;
     const found = [];
@@ -945,9 +976,29 @@ export function sandboxRuntime(mode, pageModId, pageFn, pagePowers) {
     }
     if (at < text.length) pieces.push(text.slice(at));
     try { formsOk(p, pieces); } catch { return; }
-    const made = pieces.map((x) => { if (typeof x !== 'string') return x; const tn = D.createTextNode(x); wrapMade.add(tn); return tn; });
+    const marks = new Set([...marksOf(t), wr]);
+    const made = pieces.map((x) => { if (typeof x !== 'string') return x; const tn = D.createTextNode(x); wrapMade.set(tn, marks); return tn; });
+    emptied.set(t, made);
     t.data = '';
     t.after(...made);
+  };
+  // (a wrapped node's pieces taken out, and theirs if another wrapper split them in turn)
+  const unwrap = (t, depth = 0) => {
+    const made = emptied.get(t);
+    if (!made) return;
+    emptied.delete(t);
+    for (const n of made) { if (depth < 20 && n.nodeType === 3) unwrap(n, depth + 1); if (n.parentNode) n.remove(); }
+  };
+  // (from the observer: the page wrote into a node a wrapper emptied (it was '' before: TRIF's own emptying has
+  // the text it had), or took one out)
+  const rewrapAfter = (recs) => {
+    if (!wrappers.size) return;
+    const again = [];
+    for (const r of recs) {
+      if (r.type === 'characterData') { if (emptied.has(r.target) && r.oldValue === '') { unwrap(r.target); again.push(r.target); } }
+      else for (const n of r.removedNodes) { if (n.nodeType === 3) { if (emptied.has(n) && !n.isConnected) unwrap(n); } else if (n.nodeType === 1 && !n.isConnected) { const tw = D.createTreeWalker(n, 4); for (let x = tw.nextNode(), i = 0; x && i < 5000; x = tw.nextNode(), i++) if (emptied.has(x)) unwrap(x); } }
+    }
+    for (const t of again) if (t.isConnected && t.data) for (const wr of wrappers) { try { if (t.parentElement && t.parentElement.closest(wr.sel)) wrapText(wr, t); } catch { /* not a selector */ } }
   };
   const wrapUnder = (wr, root) => {
     if (root.nodeType === 3) { if (root.parentElement && root.parentElement.closest(wr.sel)) wrapText(wr, root); return; }
@@ -970,7 +1021,7 @@ export function sandboxRuntime(mode, pageModId, pageFn, pagePowers) {
   const ensureObserver = () => {
     const root = D.documentElement;
     if (!root) return;
-    const wantText = texters.size > 0 || changers.size > 0;
+    const wantText = texters.size > 0 || changers.size > 0 || wrappers.size > 0;
     if (mo && moText === wantText) return;
     if (!mo) {
       mo = new MutationObserver((recs) => {
@@ -985,7 +1036,8 @@ export function sandboxRuntime(mode, pageModId, pageFn, pagePowers) {
           for (const n of added) if (n.isConnected) textUnder(tx, n);
           for (const t of texts) if (t.isConnected && t.parentElement && t.parentElement.closest(tx.sel)) fixText(t, tx);
         }
-        for (const wr of wrappers) for (const n of added) if (n.isConnected && !wrapMade.has(n)) wrapUnder(wr, n);
+        rewrapAfter(recs);
+        for (const wr of wrappers) for (const n of added) if (n.isConnected && !marksOf(n).has(wr)) wrapUnder(wr, n);
         if (embeddedFilters.length) { for (const n of added) if (n.nodeType === 1) filterScripts(n); for (const r of recs) if (r.target && r.target.localName === 'script') filterScripts(r.target); }
         if (changers.size) {
           for (const r of recs.slice(0, 5000)) {
@@ -1000,7 +1052,8 @@ export function sandboxRuntime(mode, pageModId, pageFn, pagePowers) {
       });
     }
     moText = wantText;
-    mo.observe(root, { childList: true, subtree: true, characterData: wantText });
+    // (with what the text was, for trif.wrap: rewrapAfter)
+    mo.observe(root, { childList: true, subtree: true, characterData: wantText, characterDataOldValue: wantText });
   };
   // (at document_start there may be no <html> yet: watch for it)
   if (!D.documentElement) { const early = new MutationObserver(() => { if (D.documentElement) { early.disconnect(); if (watchers.size || texters.size || changers.size || wrappers.size || embeddedFilters.length) { ensureObserver(); for (const w of watchers) runWatcher(w, D.documentElement); for (const tx of texters) textUnder(tx, D.documentElement); for (const wr of wrappers) wrapUnder(wr, D.documentElement); } } }); early.observe(D, { childList: true }); }
@@ -1047,29 +1100,44 @@ export function sandboxRuntime(mode, pageModId, pageFn, pagePowers) {
   // exactly as the site sent it.)
   const SITE_BASE = String(location.hostname || '').toLowerCase().replace(/^www\./, '');
   const ownSite = (u) => { const h = String(u.hostname || '').toLowerCase(); return /^https?:$/.test(u.protocol) && !!SITE_BASE && (h === SITE_BASE || h.endsWith(`.${SITE_BASE}`)); };
-  const lessParams = (s, from) => {
-    if (typeof s !== 'string' || !s.includes('/') || s.length > 4000) return false;
-    let a;
+  // (whether s is u with whole query parameters taken out: B6, above)
+  const shortenedFrom = (s, u) => {
+    if (typeof s !== 'string' || !s.includes('/') || s.length > 4000 || u.length <= s.length || !u.includes('?')) return false;
+    let a, b;
     try { a = new URL(s, location.href); } catch { return false; }
     if (!ownSite(a)) return false;
-    const head = s.split('?')[0].split('#')[0];
-    for (const u of from) {
-      if (u.length < s.length || !u.includes('?') || !u.startsWith(head)) continue;
-      let b;
-      try { b = new URL(u, location.href); } catch { continue; }
-      if (a.origin !== b.origin || a.pathname !== b.pathname || a.hash !== b.hash) continue;
-      const kept = [...a.searchParams], all = [...b.searchParams];
-      let i = 0;
-      for (const [k, v] of all) if (i < kept.length && kept[i][0] === k && kept[i][1] === v) i++;
-      if (i === kept.length && kept.length < all.length) return true;
-    }
-    return false;
+    if (!u.startsWith(s.split('?')[0].split('#')[0])) return false;
+    try { b = new URL(u, location.href); } catch { return false; }
+    if (a.origin !== b.origin || a.pathname !== b.pathname || a.hash !== b.hash) return false;
+    const kept = [...a.searchParams], all = [...b.searchParams];
+    let i = 0;
+    for (const [k, v] of all) if (i < kept.length && kept[i][0] === k && kept[i][1] === v) i++;
+    return i === kept.length && kept.length < all.length;
   };
+  // Every string in the output is one the site sent, used no more times than it was sent; or a shortened copy of
+  // one (B6) that the site sent and that isn't used up itself: each string the site sent goes once, as it is or
+  // shortened (so a text that's also the shortened form of a longer one counts against both supplies).
   const invented = (input, output) => {
     const si = new Map(), ni = new Map(), ki = new Set(), so = new Map(), no = new Map(), ko = new Set();
     tally(input, si, ni, ki); tally(output, so, no, ko);
     for (const k of ko) if (!ki.has(k)) return `the key "${k.slice(0, 60)}" isn't in what the site sent`;
-    for (const [v, c] of so) if ((si.get(v) || 0) < c && !(!si.has(v) && lessParams(v, si.keys()))) return `the text "${v.slice(0, 60)}" ${si.has(v) ? 'more times than' : 'isn\'t in'} what the site sent`;
+    const left = new Map(si); // (what's left of each string the site sent, once the output's own copies are taken)
+    const short = [];
+    for (const [v, c] of so) {
+      const have = left.get(v) || 0;
+      left.set(v, Math.max(0, have - c));
+      if (have < c) short.push([v, c - have]);
+    }
+    for (const [v, n] of short) {
+      let need = n;
+      if (typeof v === 'string' && v.includes('/') && v.length <= 4000) {
+        for (const [u, c] of left) {
+          if (!need) break;
+          if (c > 0 && shortenedFrom(v, u)) { const take = Math.min(c, need); left.set(u, c - take); need -= take; }
+        }
+      }
+      if (need) return `the text "${v.slice(0, 60)}" ${si.has(v) ? 'more times than' : 'isn\'t in'} what the site sent`;
+    }
     for (const [v, c] of no) if ((ni.get(v) || 0) < c) return `the value ${v.replace(/^\w+:/, '')} ${ni.has(v) ? 'more times than' : 'isn\'t in'} what the site sent`;
     return null;
   };
@@ -1138,25 +1206,31 @@ export function sandboxRuntime(mode, pageModId, pageFn, pagePowers) {
         let why;
         try { why = invented(original, out); } catch { why = 'it was too deep to check'; }
         if (why) { report(f.mod, new TypeError(`TRIF sandbox: a filter may only remove or reorder, and ${why}: TRIF kept what the site sent`)); continue; }
+        // (a filter that changed nothing leaves the response as the site sent it, its very text, not
+        // re-serialized: as if the filter weren't there)
+        let same = false;
+        try { same = JSON.stringify(out) === JSON.stringify(current); } catch { same = false; }
+        if (same) continue;
         current = out; changed = true;
       }
       return changed ? current : null;
   };
   // (B5: <script type="application/json"> the page embeds, filtered as they arrive, before the page's code
   // reads them; never a JavaScript script)
-  const embeddedFilters = []; // {sel, call, mod}
-  const embeddedDone = new WeakSet();
+  const embeddedFilters = []; // {sel, call, mod, done: WeakSet of the scripts it has filtered}
   const JSON_SCRIPT = /^application\/(ld\+)?json$/i;
   const filterScripts = (root) => {
     if (!embeddedFilters.length || !root || root.nodeType !== 1) return;
     const list = root.localName === 'script' ? [root] : root.querySelectorAll('script');
     for (const sc of list) {
-      if (embeddedDone.has(sc) || !JSON_SCRIPT.test(String(sc.type || ''))) continue;
-      const mine = embeddedFilters.filter((f) => { try { return sc.matches(f.sel); } catch { return false; } });
+      if (!JSON_SCRIPT.test(String(sc.type || ''))) continue;
+      // (each mod's filter once per script: a mod that starts later still filters what's there; done per filter,
+      // not for the page)
+      const mine = embeddedFilters.filter((f) => { if (!f.done || f.done.has(sc)) return false; try { return sc.matches(f.sel); } catch { return false; } });
       if (!mine.length) continue;
       let value;
       try { value = JSON.parse(sc.textContent); } catch { continue; } // (still arriving: next time)
-      embeddedDone.add(sc);
+      for (const f of mine) f.done.add(sc);
       const out = filterOne(mine, value, { url: `embedded:${location.href}`, method: 'EMBEDDED', status: 0 });
       if (out !== null) sc.textContent = JSON.stringify(out);
     }
@@ -1606,7 +1680,7 @@ export function sandboxRuntime(mode, pageModId, pageFn, pagePowers) {
           keyOk(k);
           partnersOk(self, 'site-storage');
           const val = str(String(v), 'a value', 1024 * 1024);
-          noNewAddress(st.getItem(k) || '', val);
+          noNewAddress(st.getItem(k) || '', val, { ownSite: true });
           st.setItem(k, val);
         },
         remove: (k) => { if (a === 'cookie') fail('cookies are only read'); keyOk(k); partnersOk(self, 'site-storage'); st.removeItem(k); },
@@ -1643,8 +1717,12 @@ export function sandboxRuntime(mode, pageModId, pageFn, pagePowers) {
     }
     // image-variants: another size of a picture the page shows, by the header's literal change, from its host;
     // a new <img> of the mod's own (pixels readable where the host allows it: CORS)
-    const imageVariant = (img) => {
+    // (`{pixels: true}`: fetched with CORS, so drawing it into a canvas reads its pixels back where the host allows
+    // that; without, a plain picture, which shows from any host, CORS or not)
+    const imageVariant = (img, o) => {
       needs('image-variants');
+      if (o !== undefined && (!o || typeof o !== 'object')) fail('imageVariant\'s options are { pixels: true }');
+      const pixels = !!(o && o.pixels === true);
       partnersOk(self, 'image-variants');
       const n = nodeOf(img);
       if (n.localName !== 'img' || n.namespaceURI !== HTML_NS || created.has(n)) fail('imageVariant takes one of the page\'s own pictures (<img>)');
@@ -1659,6 +1737,7 @@ export function sandboxRuntime(mode, pageModId, pageFn, pagePowers) {
       const v = D.createElement('img');
       created.add(v);
       variantImgs.add(v);
+      if (pixels) v.setAttribute('crossorigin', 'anonymous');
       // (its address set by the page's side, under the page's own rules for pictures)
       D.documentElement.append(v);
       v.dispatchEvent(new CustomEvent('trif:image-src', { detail: abs }));
@@ -1790,7 +1869,7 @@ export function sandboxRuntime(mode, pageModId, pageFn, pagePowers) {
         needs('site-data');
         selCheck(sel);
         if (typeof fn !== 'function') fail('filterEmbedded takes a function');
-        embeddedFilters.push({ sel, call: (data, info) => call(fn, data, info), mod: modId });
+        embeddedFilters.push({ sel, call: (data, info) => call(fn, data, info), mod: modId, done: new WeakSet() });
         ensureObserver();
         if (D.readyState === 'loading') D.addEventListener('DOMContentLoaded', () => filterScripts(D.documentElement), { once: true });
         if (D.documentElement) filterScripts(D.documentElement);
@@ -1951,6 +2030,7 @@ export function sandboxRuntime(mode, pageModId, pageFn, pagePowers) {
         if (!SVG_TAGS.has(t)) fail(`<${t}> isn't one of the SVG elements offered`);
         const n = D.createElementNS(SVG_NS, SVG_TAG_CASE[t] || t);
         created.add(n);
+        madeBy.set(n, modId);
         return wrap(n);
       },
       find: (sel) => wrap(qs(D, str(sel, 'a selector', 2000))),
@@ -1964,6 +2044,7 @@ export function sandboxRuntime(mode, pageModId, pageFn, pagePowers) {
         // (a button that never submits a form, whatever it's in: its type isn't offered to change)
         if (t === 'button') n.setAttribute('type', 'button');
         created.add(n);
+        madeBy.set(n, modId);
         return wrap(n);
       },
       on: (type, fn, opts) => listen(G, type, fn, opts),
@@ -2001,6 +2082,9 @@ export function sandboxRuntime(mode, pageModId, pageFn, pagePowers) {
   const METRICS = ['width', 'actualBoundingBoxLeft', 'actualBoundingBoxRight', 'actualBoundingBoxAscent', 'actualBoundingBoxDescent', 'fontBoundingBoxAscent', 'fontBoundingBoxDescent',
     'emHeightAscent', 'emHeightDescent', 'hangingBaseline', 'alphabeticBaseline', 'ideographicBaseline'];
   const DATA_URL_MAX = 8 * 1024 * 1024;
+  // (the canvases a mod has drawn on: edit-uploads passes a picture through untouched when no mod drew on it)
+  const PAINTS = new Set(['fillRect', 'strokeRect', 'clearRect', 'fillText', 'strokeText', 'fill', 'stroke']);
+  const drawnOn = new WeakSet();
   const ctxOf = (canvas) => {
     const c = canvas.getContext('2d');
     if (!c) fail('no 2D drawing on this canvas');
@@ -2009,7 +2093,13 @@ export function sandboxRuntime(mode, pageModId, pageFn, pagePowers) {
     const numbers = (k, a) => { for (const x of a) if (typeof x !== 'number' && x !== undefined) fail(`${k} takes numbers`); };
     for (const k of ['fillRect', 'strokeRect', 'clearRect', 'fillText', 'strokeText', 'beginPath', 'closePath', 'moveTo', 'lineTo', 'arc', 'arcTo', 'rect',
       'quadraticCurveTo', 'bezierCurveTo', 'ellipse', 'fill', 'stroke', 'save', 'restore', 'translate', 'rotate', 'scale', 'setTransform', 'resetTransform', 'clip', 'roundRect', 'transform']) {
-      ops[k] = guardShared((...a) => { for (const x of a) if (typeof x !== 'number' && typeof x !== 'string' && x !== undefined) fail(`${k} takes numbers and text`); c[k](...a); });
+      // (arc's and ellipse's last argument, anticlockwise, is true or false)
+      const flag = k === 'arc' ? 5 : k === 'ellipse' ? 7 : -1;
+      ops[k] = guardShared((...a) => {
+        a.forEach((x, i) => { if (typeof x !== 'number' && typeof x !== 'string' && x !== undefined && !(i === flag && typeof x === 'boolean')) fail(`${k} takes numbers and text${flag >= 0 ? ' (and true or false for anticlockwise)' : ''}`); });
+        if (PAINTS.has(k)) drawnOn.add(canvas);
+        c[k](...a);
+      });
     }
     // (all of a text's measurements: numbers)
     ops.measureText = guardShared((t) => { const m = c.measureText(str(t, 'text', 10000)); const o = {}; for (const k of METRICS) if (typeof m[k] === 'number') o[k] = m[k]; return harden(o); });
@@ -2033,12 +2123,15 @@ export function sandboxRuntime(mode, pageModId, pageFn, pagePowers) {
     ops.setLineDash = guardShared((list) => { c.setLineDash(Array.from(numsCopy(list, 'a dash pattern', 100))); });
     ops.isPointInPath = guardShared((x, y) => { numbers('isPointInPath', [x, y]); return c.isPointInPath(x, y); });
     ops.isPointInStroke = guardShared((x, y) => { numbers('isPointInStroke', [x, y]); return c.isPointInStroke(x, y); });
-    ops.drawImage = guardShared((src, ...a) => { numbers('drawImage', a); c.drawImage(imageSource(src), ...a); });
+    ops.drawImage = guardShared((src, ...a) => { numbers('drawImage', a); const from = imageSource(src); drawnOn.add(canvas); c.drawImage(from, ...a); });
     // (pixels: of what's drawn here; the browser refuses where a picture from another site tainted the canvas)
     ops.getImageData = guardShared((x, y, w, h) => {
       numbers('getImageData', [x, y, w, h]);
       if (!(w > 0 && h > 0) || w * h > 16 * 1024 * 1024) fail('getImageData takes a width and height, up to 16 million pixels');
-      const d = c.getImageData(x, y, w, h);
+      let d;
+      // (a picture from another site drawn here without CORS (the page's own, or an image variant without
+      // { pixels: true }) taints the canvas: the browser refuses its pixels)
+      try { d = c.getImageData(x, y, w, h); } catch (e) { if (!e || e.name !== 'SecurityError') throw e; fail(`its pixels can't be read: a picture from another site drawn on it was loaded without CORS (an image variant needs trif.imageVariant(img, { pixels: true }))`); }
       return harden({ width: d.width, height: d.height, data: new Uint8ClampedArray(d.data) });
     });
     ops.putImageData = guardShared((img, x, y) => {
@@ -2051,6 +2144,7 @@ export function sandboxRuntime(mode, pageModId, pageFn, pagePowers) {
       // (through the canvas's own ImageData: Firefox won't take one built from this world's array)
       const out = c.createImageData(w, h);
       for (let i = 0, d = out.data; i < px.length; i++) d[i] = px[i]; // (element by element: Firefox won't take this world's array whole)
+      drawnOn.add(canvas);
       c.putImageData(out, x, y);
     });
     ops.toDataURL = guardShared((type, q) => {
@@ -2256,7 +2350,7 @@ export function sandboxRuntime(mode, pageModId, pageFn, pagePowers) {
         if (!created.has(node) && node.hasAttribute(n) && !ownTokens(node.getAttribute(n))) fail(`the page's own ${n} isn't a mod's to replace${n === 'class' ? ' (classes.add adds a trif-box- class)' : ''}`);
       }
       // (site-data, B6: also a link the page shows with whole query parameters taken out)
-      const fewer = () => { try { return lessParams(new URL(v, location.href).href, [...D.links].filter((a) => !created.has(a)).map((a) => a.href)); } catch { return false; } };
+      const fewer = () => { try { const abs = new URL(v, location.href).href; return [...D.links].some((a) => !created.has(a) && shortenedFrom(abs, a.href)); } catch { return false; } };
       if ((n === 'href' || n === 'src') && !urlOk(v, n) && !(n === 'href' && node.localName === 'a' && cur().powers.has('site-data') && fewer())) fail(n === 'src' ? 'src only takes data:/blob: images, or the address of an image the page already shows' : 'href only takes #somewhere, or an address a link on the page already has');
       node.setAttribute(n, v);
     },
@@ -2404,7 +2498,9 @@ export function sandboxRuntime(mode, pageModId, pageFn, pagePowers) {
         const pre = `trif-box-c${++copyN}-`;
         for (const el of [from, ...from.querySelectorAll('[id]')]) if (el.id && !ids.has(el.id)) ids.set(el.id, pre + el.id.replace(/[^A-Za-z0-9_-]/g, '_'));
       }
-      return wrap(safeCopy(from, ids));
+      const copy = safeCopy(from, ids);
+      if (copy) { const m = cur().mod; for (const el of [copy, ...copy.querySelectorAll('*')]) madeBy.set(el, m); } // (trif.wrap: the copying mod's own)
+      return wrap(copy);
     },
     rect() { const r = nodeOf(this).getBoundingClientRect(); return harden({ x: r.x, y: r.y, width: r.width, height: r.height, top: r.top, left: r.left, right: r.right, bottom: r.bottom }); },
     on(type, fn, opts) { const n = nodeOf(this); return cur().listen(n, type, fn, opts); },

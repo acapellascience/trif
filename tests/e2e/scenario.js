@@ -1292,6 +1292,7 @@ class Scenario {
       await r.check('powers, phase 2: site-data filters the site\'s JSON (fetch and XHR) by removing and reordering only (an invented string, number, key, a duplicate or a cut string: TRIF keeps the original); page-data reads plain copies of React props; search-box is TRIF\'s own box the mod can\'t read, which searches the site from the user\'s Enter; undeclared, each is refused', () => this.powers2Check(win));
       await r.check('the widened box (WIDEN.md class A): sound (compressors, a node into a parameter, waves, buffers from numbers, offline renders, its own clock), typed arrays and the browser\'s pure tools, page facts read only, drawing, animations, observers, events and focus on its own elements, SVG of its own and faithful copies, CSS from shown pictures and into shadow roots, text split into its own pieces, the page\'s own events, placeholders, bigger settings, more tags; each row\'s hostile test refused, nothing reaching the server or the page', () => this.wideCheck(win));
       await r.check('the widened box\'s powers (WIDEN.md class B): block-events, page-events, site-storage with @migrate, rewrite-requests, image-variants, edit-uploads, embeds, local-fonts, preload, and the widened site-data, go-to and media: held with each sentence and the many-powers warning; each works as its narrowing says; undeclared, each is refused', () => this.wideBCheck(win));
+      await r.check('the sandbox\'s fixes from the conversion run: arc\'s anticlockwise, overscroll-behavior, a blocked key\'s default, a picture no mod changed passed on as it was, trif.wrap under a page\'s rewrite and over another mod\'s pieces, site-data\'s shortened copies, unchanged filters and a later mod\'s embedded filter, an image variant from a host without CORS, the site\'s own names in its storage, CSS into a nested shadow root', () => this.sandboxFixesCheck(win));
       await r.check('go-to and click split between two boxed mods across a navigation (review F3): neither hold warns; on the page one mod\'s go-to took the user to, the other\'s clicks and signals wait for the user\'s own click; reached by the user, they work', () => this.comboFixesCheck(win));
       await r.check('speculation rules (audit AU-7): a page that prefetches its same-site links at once; a link a free mod adds is fetched without a click (Chrome), a boxed mod can\'t make one', () => this.specRulesCheck(win));
       await r.check('boxed mods in the panel: their own group between Style mods and Free mods, with its switch (off on the site: they stop there; on: back)', () => this.sandboxedPanelCheck(win));
@@ -2971,6 +2972,77 @@ setTimeout(() => {
     }
   }
 
+  // The sandbox's fixes from converting the user's mods (job 1 of branch crossmod), each by its number: arc's and
+  // ellipse's anticlockwise (2), overscroll-behavior (3), a blocked key's default prevented (4), a picture no
+  // mod changed passed on as it was (5), trif.wrap when the page rewrites a node it wrapped, and over another
+  // mod's pieces (6), site-data's shortened copies, filters that change nothing and a later mod's embedded
+  // filter (7), an image variant from a host without CORS (8), the site's own names in its storage (9), CSS
+  // into a shadow root inside another (10). Two boxed mods (fixtures/sandbox-fixes.js, sandbox-fixes-b.js).
+  async sandboxFixesCheck(win) {
+    const site = '127.0.0.1';
+    const base = `http://${site}:${this.o.servers.port}`;
+    const dir = path.join(this.trif, 'sites', site);
+    const fx = (f) => fs.readFileSync(path.join(I.REPO, 'tests', 'e2e', 'fixtures', f), 'utf8');
+    const mods = { 'e2e-fixes': 'sandbox-fixes.js', 'e2e-fixes-b': 'sandbox-fixes-b.js' };
+    const ids = Object.keys(mods);
+    const status = async () => (await this.cli(['status'], { timeoutMs: 20000 })).stdout;
+    // (read from the extension, not as the agent: agent code in the tab would lock it against the page's own
+    // requests, which site-data filters)
+    const ext = async (fn) => this.ext(`async (tabId) => { const r = await chrome.scripting.executeScript({ target: { tabId }, world: 'MAIN', func: ${fn} }); return r[0].result; }`, [win.tabId]);
+    const attr = async (name) => { const o = await ext(`() => document.documentElement.getAttribute(${JSON.stringify(name)})`); return typeof o === 'string' ? JSON.parse(o) : o; };
+    const problems = [];
+    this.sandboxPage = true;
+    try {
+      for (const [id, f] of Object.entries(mods)) fs.writeFileSync(path.join(dir, `${id}.js`), fx(f));
+      await waitFor('both held', async () => { const st = await status(); return ids.every((id) => new RegExp(`${id}\\s+HELD`).test(st)) || null; }, { timeoutMs: 25000, intervalMs: 500 });
+      for (const id of ids) await this.cli(['approve', `${site}/${id}`], { timeoutMs: 20000 });
+      await waitFor('both registered', async () => { const st = await status(); return ids.every((id) => new RegExp(`${id}\\s+registered \\(boxed, powers:`).test(st)) || null; }, { timeoutMs: 20000, intervalMs: 500 });
+      await this.ext(`async (id, url) => { await chrome.tabs.update(id, { url, active: true }); }`, [win.tabId, `${base}/fixes.html`]);
+      let last = null;
+      const R = await waitFor('the first mod\'s results', async () => {
+        const r = last = await attr('data-trif-box-fx').catch(() => null);
+        return r && r['10 CSS into a shadow root inside another'] && !Object.values(r).includes('pending') ? r : null;
+      }, { timeoutMs: 25000, intervalMs: 500 }).catch((e) => { throw new Error(`${e.message}: ${JSON.stringify(last).slice(0, 2500)}`); });
+      const RB = await attr('data-trif-box-fxb');
+      // the user's keys: Space (blocked by the mod, which keeps the page from scrolling), then an arrow (not blocked: it scrolls)
+      const ctx = await this.d.findPage((u) => u.includes('/fixes.html'), { timeoutMs: 5000 });
+      await this.d.click(ctx, '#title');
+      const y0 = await ext('() => window.scrollY');
+      await this.d.key(ctx, ' ');
+      await sleep(700);
+      const ySpace = await ext('() => window.scrollY');
+      await this.d.key(ctx, 'ArrowDown');
+      await sleep(700);
+      const yArrow = await ext('() => window.scrollY');
+      const keys = await ext('() => window.__keys.slice()');
+      await ext('() => window.scrollTo(0, 0)');
+      // the page's own actions, from a real click (a picture attached, its requests, its rewrite)
+      await this.d.click(ctx, '#go');
+      const pg = await waitFor('the page\'s own actions', async () => attr('data-e2e-results').catch(() => null), { timeoutMs: 15000, intervalMs: 500 });
+      if (pg.error) throw new Error(`the page's actions: ${pg.error}`);
+      const L = (await attr('data-trif-box-fx-late')) || {};
+      for (const [k, v] of Object.entries({ ...R, ...(RB || {}) })) { const want = /\(refused\)$/.test(k) ? /^refused/ : /^ok/; if (!want.test(v)) problems.push(`${k}: ${v}`); }
+      const want = {
+        '4 Space blocked: the page didn\'t scroll, nor see it': y0 === 0 && ySpace === 0 && L.space === 'blocked' && !keys.includes(' '),
+        '4 an arrow, not blocked: the page scrolled and saw it': yArrow > 0 && keys.includes('ArrowDown'),
+        '5 the picture no mod changed: the very file the page attached': !!pg.file && pg.file.same === true && pg.file.name === 'pic.png' && L.upload === '4x4',
+        '6 the page\'s rewrite of a wrapped node: wrapped afresh, no old pieces': pg.w === 'gamma ALPHA' && pg.wIs === 1,
+        '6 the other mod\'s wrap over this one\'s pieces': pg.w2 === 'ONE M two' && pg.w2Bs === 1,
+        '7a the shortened address, though the site sent it too': pg.urls.long === 'https://127.0.0.1/watch?v=1' && pg.urls.short === 'https://127.0.0.1/watch?v=1',
+        '7b a filter that changed nothing: the text as the site sent it': pg.raw === '{ "a" : [ 1, 2 ] ,"b":"kept as sent" }',
+        '7c the embedded JSON, filtered by both mods': pg.emb === '{"a":["z"]}',
+        '9 the site\'s own name kept': pg.key === 'see 127.0.0.1/robot',
+        '10 the CSS in the inner shadow root': pg.inner === 'rgb(1, 2, 3)',
+      };
+      for (const [k, v] of Object.entries(want)) if (v !== true) problems.push(`${k}: ${JSON.stringify({ pg, L, y: [y0, ySpace, yArrow], keys }).slice(0, 1500)}`);
+      fs.writeFileSync(this.r.file(`sandbox-fixes-${this.o.browser}.json`), JSON.stringify({ R, RB, L, page: pg, y: [y0, ySpace, yArrow], keys, problems }, null, 2));
+      if (problems.length) throw new Error(problems.join('\n'));
+      return `${Object.keys(R).length + Object.keys(RB || {}).length} outcomes as each fix says (${Object.keys(R).filter((k) => /\(refused\)$/.test(k)).length} refused); ${Object.keys(want).length} effects seen from the page`;
+    } finally {
+      for (const id of ids) { try { fs.unlinkSync(path.join(dir, `${id}.js`)); } catch { /* gone */ } }
+    }
+  }
+
   async powers2Check(win) {
     const site = '127.0.0.1';
     const base = `http://${site}:${this.o.servers.port}`;
@@ -4591,7 +4663,9 @@ say({ type: 'result', subtype: 'success', is_error: false, result: text, session
       // (Firefox doesn't say which page: after that check, a failed fetch or socket is one of those)
       // (the sandboxed mods' test page: its hostile mod's refusals and the errors the good one throws on purpose)
       // (Chrome names the page the tab had when its console was first attached, so by the text)
-      || (this.sandboxPage && (/^\[TRIF\] 127\.0\.0\.1\/e2e-(sbx|pw|broke)/.test(String(p.text)) || /willReadFrequently/.test(String(p.text)) || /AudioContext was not allowed to start/.test(String(p.text)) || /\/(sandbox|wide|wideb)\.html/.test(String(p.source || ''))))
+      || (this.sandboxPage && (/^\[TRIF\] 127\.0\.0\.1\/e2e-(sbx|pw|broke)/.test(String(p.text)) || /willReadFrequently/.test(String(p.text)) || /AudioContext was not allowed to start/.test(String(p.text)) || /\/(sandbox|wide|wideb|fixes)\.html/.test(String(p.source || ''))
+        // (sandboxFixesCheck: the variant asked for with its pixels, from a host without CORS, which refuses it on purpose)
+        || /e2e-wide\.png\?size=big|CORS|Cross-Origin Request Blocked/.test(String(p.text) + String(p.source || ''))))
       // (the tab-lock edges: the probes the lock refuses, tabLockHardeningCheck)
       || (this.hardened && /e2e-(img-leak|shw-|sw-|popup-|spec|cdn|sib-post)|e2e-sw\.js|RTCPeerConnection|TRIF paused|SharedWorker|ServiceWorker|speculation/i.test(String(p.text) + String(p.source || '')))
       || (this.hijacked && /ERR_BLOCKED_BY_CLIENT|NetworkError when attempting to fetch|Failed to fetch|establish a connection to the server at ws:\/\/[^ ]+\/e2e-socket|WebSocket connection to '[^']+\/e2e-socket|e2e-leak|e2e-nav|blocked by|CORS/i.test(String(p.text) + String(p.source || '')));

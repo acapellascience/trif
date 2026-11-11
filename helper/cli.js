@@ -479,9 +479,11 @@ const handlers = {
       const lint = require('./lib/sandboxlint').sandboxLint(code, { powers: asked });
       if (ctx.json) return printJson({ ok: true, file: path.resolve(file), sandboxed: true, powers: needs.map((n) => ({ key: n.key, power: n.power, fact: n.fact, holds: !n.soft })), lint });
       out(`ok: ${path.resolve(file)} is a boxed mod and parses`);
-      if (!asked.length) out('It runs in TRIF\'s sandbox, with only TRIF\'s API: it can\'t send, click, navigate or load anything, so it never waits for the user\'s OK.');
+      // (no powers but @migrate: it still waits once, for bringing its old settings over: held.js holds it)
+      if (!needs.length) out('It runs in TRIF\'s sandbox, with only TRIF\'s API: it can\'t send, click, navigate or load anything, so it never waits for the user\'s OK.');
       else {
-        out(`It runs in TRIF's sandbox with these powers, and only these (TRIF enforces them): ${asked.join(', ')}.`);
+        out(asked.length ? `It runs in TRIF's sandbox with these powers, and only these (TRIF enforces them): ${asked.join(', ')}.`
+          : 'It runs in TRIF\'s sandbox, with only TRIF\'s API, and brings over its old settings from the site\'s storage once (@migrate).');
         const hard = needs.filter((n) => !n.soft);
         out(hard.length ? 'It waits for the user\'s OK once for this set of powers (not for each change to its code: only a new power asks again). The hold will say it:' : 'Those don\'t make it wait for the user\'s OK on their own. A hold would list it:');
         for (const l of bp.factLines(needs.map((n) => n.key), needs.map((n) => n.fact))) out(`- ${l}`);

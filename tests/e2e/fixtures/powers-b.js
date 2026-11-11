@@ -68,7 +68,7 @@ t('B6 another site\'s address with a parameter taken out: TRIF keeps what the si
   t('B2 a signal with an address in it (refused)', () => trif.signal('e2e-wide-reset', { url: 'https://evil.example/e2e-pw-leak' }));
   // ---- B10 image-variants
   t('B10 another size of the page\'s picture, pixels read', () => new Promise((resolve, reject) => {
-    const v = trif.imageVariant(page.find('#pimg'));
+    const v = trif.imageVariant(page.find('#pimg'), { pixels: true });
     v.on('load', () => { try { const c = page.create('canvas'); c.setAttr('width', '2'); c.setAttr('height', '2'); const g = c.canvas(); g.drawImage(v, 0, 0, 2, 2); resolve(`${typeof g.getImageData(0, 0, 1, 1).data[3]}`); } catch (e) { reject(e); } });
     v.on('error', () => reject(new Error('the variant didn\'t load')));
   }));

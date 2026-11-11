@@ -112,6 +112,9 @@ class Results {
 
   /** Runs `fn` as a check: passes when it returns (a string return is the detail), fails when it throws. */
   async check(name, fn) {
+    // (TRIF_E2E_SKIP, a regular expression: checks whose names match are skipped, to try one change faster;
+    // never for a run that counts)
+    if (process.env.TRIF_E2E_SKIP && new RegExp(process.env.TRIF_E2E_SKIP).test(name)) return this.record(name, 'skip', 'TRIF_E2E_SKIP');
     const t = Date.now();
     try {
       const r = await fn();

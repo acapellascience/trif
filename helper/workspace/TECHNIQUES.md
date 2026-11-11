@@ -76,7 +76,7 @@ What it has (everything else is simply not there, and `trif check` lists what yo
 - **`trif`**: `css(text)` (CSS that loads nothing new: `url()` only with `data:`, `#somewhere`, or an
   address an image on the page shows or one of the page's style sheets uses; returns `{remove}`),
   `css(text, {shadow: 'host-selector'})` (the same CSS into the shadow roots, open or closed, of the hosts
-  that match, now and as they're made), `hide(selector)`, `observe(selector, fn, {attributes: ['class',
+  that match, roots inside roots too, now and as they're made), `hide(selector)`, `observe(selector, fn, {attributes: ['class',
   'hidden']})` (each matching element, now and as they appear, and with `attributes` again as one of those
   changes: `fn(el, {attribute})`; never `value`, nothing inside editors; one observer shared by all of
   TRIF's mods; returns a stop function), `changes(selector, fn)` (what changed under the elements that
@@ -230,7 +230,8 @@ only for what the mod needs; a mod that needs the network is a free mod.
   preview before anything is posted); anything that looks like one counts (`example.com`, `node.js`).
 
 - `block-events`: `trif.block(type, fn?)` keeps this site from seeing an event (when `fn(e)` returns true,
-  or always without `fn`); a blocked event reaches only `fn`. The types are in the header: `// @powers
+  or always without `fn`); a blocked event reaches only `fn`, where `e.preventDefault()` also stops what the
+  browser would do (the page scrolling on Space or an arrow key; not for wheel and touch). The types are in the header: `// @powers
   block-events mouseover keydown click(button.cancel)` (mouse, pointer, key, wheel, scroll, touch and drag
   events; clicks only on a selector, in brackets, no spaces). Never what the user types into a field or
   editor, never TRIF's search box, never submit, focus, input or leaving the page.
@@ -241,7 +242,8 @@ only for what the mod needs; a mod that needs the network is a free mod.
 - `site-storage`: `trif.storage('local' | 'session' | 'cookie')` gives `get(key)`, `set(key, text)`,
   `remove(key)`, `keys()` for the header's keys only: `// @powers site-storage session:trif-demo-state
   local:myPrefix:*` (a prefix ends with `*`; never a key named like a login: token, session, auth…). Cookies
-  are only read. What you write has no address that wasn't there or in a link on the page. **`// @migrate
+  are only read. What you write has no other site's address that wasn't there or in a link on the page (this
+  site's own, `example.com/page` on example.com, is fine). **`// @migrate
   localStorage old-key other-key`** brings what the mod's free version kept there into its settings once per
   site: `trif.settings('old-key', defaults)` then has it (listed on the hold).
 - `rewrite-requests`: changes the site's own same-origin requests, as the header says and only so: `//
@@ -250,11 +252,13 @@ only for what the mod needs; a mod that needs the network is a free mod.
   words; in a query parameter, its JSON, or a JSON body). TRIF makes the change; your code has no part in it.
 - `image-variants`: `trif.imageVariant(img)` gives a new `<img>` of yours with another size of a picture
   the page shows, by the header's literal change on its host: `// @powers image-variants pbs.twimg.com
-  _normal.→_400x400.` (`->` works too). Draw it on your canvas; its pixels read back where its host allows
-  (CORS). `on('load')`/`on('error')` on your own pictures say when.
+  _normal.→_400x400.` (`->` works too). It shows from any host. To read its pixels, ask for them:
+  `trif.imageVariant(img, {pixels: true})` loads it with CORS, so drawn on your canvas its pixels read back
+  where its host allows (a host without CORS then doesn't show it). `on('load')`/`on('error')` on your own pictures say when.
 - `edit-uploads`: `trif.onUpload((canvas, {width, height, type}) => canvas)`: each PNG, JPEG or WebP
   picture the user attaches (a file input, a paste, a drop), as a canvas of yours; return it (or another of
-  your canvases) and TRIF makes the file, same name and type, where the original was. You never get the file,
+  your canvases) and TRIF makes the file, same name and type, where the original was. If no mod draws on
+  it or gives back another, the original file goes on untouched. You never get the file,
   its path or its metadata; other files pass untouched.
 - `embeds`: `trif.embed(link, {label})` gives TRIF's button for a video a link on the page names; the
   user's click plays it inside the page from the header's player (`// @powers embeds www.youtube.com/embed`;

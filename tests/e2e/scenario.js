@@ -2227,7 +2227,9 @@ setTimeout(() => {
       const message = 'hide the banner please';
       await sendText(message);
       await until('the card', (x) => x.cards.length === 1 && x.cards[0].buttons.length === 2);
-      const c1 = await chat();
+      // (the card shows as the helper stops the run; the run ends once the stopped process exits, which can
+      // take a moment more under load)
+      const c1 = await waitFor('the stopped run to end', async () => { const c = await chat(); return c && !c.run ? c : null; }, { timeoutMs: 10000, intervalMs: 200 }).catch(() => chat());
       if (c1.run || c1.messages.map((m) => m.role).join() !== 'user,sandbox') throw new Error(`the chat: ${JSON.stringify(c1.messages.map((m) => [m.role, m.text]))}`);
       const card = last.cards[0];
       if (card.title !== 'Your organization’s Codex settings replace TRIF’s sandbox.' || card.buttons.join(' · ') !== 'Stop · Use Codex anyway'
@@ -2309,8 +2311,10 @@ process.exitCode = 1;
       await sleep(800);
       this.panelCtx = await this.d.findPage('sidepanel.html');
     };
-    // This site's agent (and the default) Claude Code, as Settings would write them.
-    const useClaude = () => this.ext(`async (site) => { const { sitePicks = {} } = await chrome.storage.local.get('sitePicks'); sitePicks[site] = { agent: 'claude', models: {} }; await chrome.storage.local.set({ sitePicks, settings: { agent: 'claude', models: {} } }); }`, [site]);
+    // This site's agent (and the default) Claude Code, as Settings would write them; the gate's site
+    // (localhost) too, so what an earlier check left there (its pick, or this panel's snapshot of the default
+    // from before) can't decide its agent.
+    const useClaude = () => this.ext(`async (sites) => { const { sitePicks = {} } = await chrome.storage.local.get('sitePicks'); for (const s of sites) sitePicks[s] = { agent: 'claude', models: {} }; await chrome.storage.local.set({ sitePicks, settings: { agent: 'claude', models: {} } }); }`, [[site, 'localhost']]);
     const notice = () => this.panel(`async () => {
       const n = document.getElementById('notice');
       const shown = (s) => { const e = document.querySelector(s); return !!e && e.getClientRects().length > 0; };
@@ -2346,7 +2350,12 @@ process.exitCode = 1;
 
       // The gate's one line offers them too.
       await this.ext(`async (id, url) => { await chrome.tabs.update(id, { url, active: true }); }`, [win.tabId, `http://localhost:${this.o.servers.port}/?e2e=robotless`]);
-      const g = await this.waitLooks('the gate\'s yellow line', (l) => l.classes.join() === 'needs-login' && /Use robotless/.test(l.gateNote), 20000);
+      const g = await this.waitLooks('the gate\'s yellow line', (l) => l.classes.join() === 'needs-login' && /Use robotless/.test(l.gateNote), 20000)
+        .catch(async (e) => {
+          const where = await this.panel(`async () => ({ title: document.title, search: location.search, agent: document.getElementById('agent').value })`).catch((x) => x.message);
+          const pages = this.d.contexts ? (await this.d.contexts()).map((c) => c.url).filter((u) => /sidepanel/.test(u)) : [];
+          throw new Error(`${e.message}; panel ${JSON.stringify(where)}; panels ${JSON.stringify(pages)}; stored ${JSON.stringify(await stored())}`);
+        });
       if (!/^Claude Code isn’t logged in\. Log in · Switch to Codex( · Switch to [^·]+)* · Use robotless$/.test(g.gateNote)) throw new Error(`the gate's line: "${g.gateNote}"`);
       await this.d.pointerAway(this.panelCtx);
       await themes('robotless-yellow-gate');

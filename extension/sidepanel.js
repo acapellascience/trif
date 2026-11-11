@@ -1298,6 +1298,8 @@ function renderGate(problem, agentInfo) {
   // (a site of its own inside another, mail.google.com, whose access comes from its parent's: nothing of its
   // own to give back, so no Disconnect; its parent's stays)
   ui.gateDisconnect.hidden = !SITE_ACCESS || (scope !== scopeFor(scope) && hasSiteAccess(view.status?.access, scopeFor(scope)));
+  // (blocked with nothing to disconnect: no links at all)
+  if (state === 'blocked' && ui.gateDisconnect.hidden) ui.gateLinks.hidden = true;
 }
 
 // The gate's main button: Fix (off), Connect (disconnected), or Unblock.

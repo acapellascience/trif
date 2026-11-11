@@ -1475,7 +1475,8 @@ function healthOfPage(since, styleSel, sandbox) {
   return { errors: after(w.errors), logs: after(w.logs), matched };
 }
 
-const runningOn = (url) => state.mods.filter((m) => isEnabled(m.id) && !m.held && modAppliesTo(withOffSites(m, offSitesFor(m, state.offSites, state.groupsOff)), url));
+// (as registered: a parent's mod doesn't run on a sensitive site of its own, lib.js limitToSites)
+const runningOn = (url) => state.mods.filter((m) => { if (!isEnabled(m.id) || m.held) return false; const lm = limitToSites(m, onSites(), sens()); return !!lm && modAppliesTo(withOffSites(lm, offSitesFor(m, state.offSites, state.groupsOff)), url); });
 
 async function checkTab(tabId, final = false) {
   if (!checkUserScripts()) return;

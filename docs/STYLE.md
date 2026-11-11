@@ -27,9 +27,16 @@ Plain and humble. Short. No marketing voice, no taglines.
 
 ## The robot icon
 
-A dark squircle head in a green rim, with two mint eyes (`scripts/render-icon.js`). Without eyes, it means
-off: the turn-on screen shows it small, eyes off, above "The robot is off." With a pause sign (two white
-bars) for eyes, it means paused on that tab: the agent ran code there, so posting is blocked until the
-page reloads (the toolbar icon for that tab, and the robot in the panel's bar). The panel's state colour
-goes white then (dark grey, #3a3a3e, on the light theme), as it goes yellow for a missing login and red
-when TRIF is broken; those two win.
+A dark squircle head in a green rim, with two mint eyes (`scripts/render-icon.js`). His face says the
+state, one at a time (extension/faces.js), in the toolbar icon for the tab, the robot in the panel's bar,
+and the gate's robot:
+- **paused** (the agent ran code in the tab): two white bars for eyes, posting blocked until the page
+  reloads. The panel's state colour goes white then (dark grey, #3a3a3e, on the light theme);
+- **blocked** (the user blocked the site in TRIF): red, with a red cross for eyes;
+- **off** (TRIF is off on the site, "The robot is off."): a blank face, no eyes;
+- **logged out** (the agent needs a login or a key: every tab): yellow, the eyes hollow;
+- otherwise his eyes. Disconnected keeps them (the panel goes grey), and so does TRIF missing a part (the
+  panel's red).
+Paused wins over the rest (it's what the page can do right now), then blocked, off, logged out. On the
+gate, the face is off's or blocked's, in the panel's colour (yellow or red when that's what's wrong).
+At 16 px the bars, the cross and the hollow eyes sit on whole pixels.

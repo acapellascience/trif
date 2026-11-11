@@ -341,7 +341,9 @@ const hostOf = (url) => { try { return new URL(url).hostname; } catch { return '
 const defaultInScope = (host, site) => !!host && !!site && (host === site || host.endsWith(`.${site}`));
 const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
 
-export function createTabLocks({ chrome, log = () => {}, changed = () => {}, noted = () => {}, key = 'tabLocks', inScope = defaultInScope }) {
+// icon(tabId, paused): sets the tab's toolbar icon (background.js: the paused face, or the tab's own face
+// when it unlocks, faces.js); without it, the paused robot or the normal one.
+export function createTabLocks({ chrome, log = () => {}, changed = () => {}, noted = () => {}, key = 'tabLocks', inScope = defaultInScope, icon = null }) {
   // tabId -> {token, ids, site, url, since, parent, kind, domains, fp, cleared, noted}
   // kind: 'code' (the agent's code ran there), 'opened' (a locked tab opened it), 'site' (another tab of a
   // locked site: the site's rules cover it, no rules of its own)
@@ -371,10 +373,10 @@ export function createTabLocks({ chrome, log = () => {}, changed = () => {}, not
   // The tab's toolbar icon: paused while locked. (A tab that's gone, or a browser without per-tab icons:
   // nothing to show it on.)
   // (The callback form: Chrome reports a tab closed meanwhile as an unchecked lastError otherwise.)
-  const showIcon = (tabId, paused) => new Promise((res) => {
+  const showIcon = (tabId, paused) => (icon ? Promise.resolve().then(() => icon(tabId, paused)).catch(() => {}) : new Promise((res) => {
     if (!chrome.action?.setIcon) { res(); return; }
     try { chrome.action.setIcon({ tabId, path: paused ? ICONS.paused : ICONS.normal }, () => { void chrome.runtime?.lastError; res(); }); } catch { res(); /* the tab is gone */ }
-  });
+  }));
   const inIsolated = async (tabId, func, args = []) => {
     const [r] = await chrome.scripting.executeScript({ target: { tabId, frameIds: [0] }, world: 'ISOLATED', func, args, injectImmediately: true });
     return r ? r.result : undefined;

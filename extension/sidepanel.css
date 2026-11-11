@@ -143,9 +143,8 @@ body.site-blocked .btn.go { color: #fff; }
 .blocked-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 4px; font-size: 12px; }
 .blocked-list li { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
 .blocked-list:empty { display: none; }
-.gate-icon { stroke: none; }
-.gate-icon .rim { fill: var(--switch-on); }
-.gate-icon .face { fill: #18181a; }
+/* The gate's robot: the shaded one, with the state's face (renderGate). */
+.gate-icon { width: 64px; height: 64px; }
 .btn.go { padding: 8px 16px; border-color: transparent; background: var(--switch-on); color: #04291c; font-size: 13px; font-weight: 600; }
 .btn.go:hover { background: color-mix(in srgb, var(--switch-on) 85%, #000); }
 /* There the top bar keeps only the dot, the robot (grey and dim, below) and settings; with no website, only
@@ -185,18 +184,21 @@ body.needs-login .problem-line { color: var(--warn); }
 .bar-robot .rim { fill: var(--switch-on); }
 .bar-robot .face { fill: #18181a; }
 .bar-robot .eye { fill: #59dbab; }
-/* A tab TRIF has paused (tablock.js): a pause sign for eyes, white, as the toolbar icon shows. */
+/* His faces (data-face, sidepanel.js renderFaces; the toolbar icon's, faces.js): paused, a white pause
+   sign (tablock.js); blocked, a red cross; off, no eyes; logged out, hollow eyes in the yellow. */
 .bar-robot .pause { display: none; fill: #ffffff; }
-body.tab-locked .bar-robot .eye { display: none; }
-body.tab-locked .bar-robot .pause { display: inline; }
+.bar-robot .cross { display: none; stroke: #ff7b70; stroke-width: 14; stroke-linecap: round; }
+.bar-robot:is([data-face="paused"], [data-face="blocked"], [data-face="off"]) .eye { display: none; }
+.bar-robot[data-face="paused"] .pause { display: inline; }
+.bar-robot[data-face="blocked"] .cross { display: inline; }
 .bar-robot[aria-busy="true"] { cursor: progress; opacity: 0.6; }
 /* Asleep: still him, eyes and all, but grey and dim; pointing at him brightens him a little toward awake. */
-body.site-off .bar-robot svg { filter: grayscale(1); opacity: 0.45; }
-body.site-off .bar-robot:hover:not([aria-busy="true"]) svg { filter: grayscale(0.6); opacity: 0.7; }
+body.site-off:not(.site-blocked) .bar-robot svg { filter: grayscale(1); opacity: 0.45; }
+body.site-off:not(.site-blocked) .bar-robot:hover:not([aria-busy="true"]) svg { filter: grayscale(0.6); opacity: 0.7; }
 /* On the light background the same opacity washes him out to a pale chip: less faded there. */
 @media (prefers-color-scheme: light) {
-  body.site-off .bar-robot svg { opacity: 0.6; }
-  body.site-off .bar-robot:hover:not([aria-busy="true"]) svg { opacity: 0.85; }
+  body.site-off:not(.site-blocked) .bar-robot svg { opacity: 0.6; }
+  body.site-off:not(.site-blocked) .bar-robot:hover:not([aria-busy="true"]) svg { opacity: 0.85; }
 }
 /* The power button that turns TRIF off (and on) for the site. */
 .power { color: var(--muted); }
@@ -217,6 +219,8 @@ body.tab-locked:not(.blocked, .needs-login) .dot { background: var(--paused); }
 body.tab-locked:not(.blocked, .needs-login) .btn.go { color: light-dark(#ffffff, #1d1d1f); }
 body.blocked .bar-robot :is(.eye, .pause) { fill: #ffc2bc; }
 body.needs-login .bar-robot :is(.eye, .pause) { fill: #fbe3a6; }
+/* (logged out: hollow eyes, their outline in the yellow) */
+body .bar-robot[data-face="login"] .eye { fill: none; stroke: #fbe3a6; stroke-width: 9; }
 body.needs-login .btn.go { color: #2e1f02; }
 /* Except the mods while only the helper is away, only a login is missing, or the tab is paused: they still
    run (the extension keeps its copy), so their switches and lights stay green. */

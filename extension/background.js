@@ -19,6 +19,7 @@ import { runtimeCode } from './runtime.js';
 import { sweepPage } from './sweep.js';
 import { captureScreenshot, stitchShots, isCopyWindow } from './screenshot.js';
 import { createTabLocks, leakGuard } from './tablock.js';
+import { facePaths, toolbarFace } from './faces.js';
 import { agentCheck, agentSiteOf, normalizeAgentSites, agentLevel, COMMAND_NEEDS } from './agentsites.js';
 
 const HOST = 'com.webmods.helper';
@@ -102,11 +103,75 @@ const tabLocks = createTabLocks({
   noted: (tabId, site) => updateChat(normalizeSite(site), (chat) => {
     chat.messages.push({ role: 'tool', text: `${site} saved new data while your agent's code ran. If something on ${site} acts strangely, clear its site data in the browser's settings.`, time: Date.now() });
   }).catch(() => {}),
+  icon: (tabId, paused) => (paused ? setFace(tabId, 'paused', true) : showFace(tabId, undefined, true)),
 });
 chrome.tabs.onUpdated?.addListener((tabId, info, tab) => {
   if (info.status === 'complete' || info.url) tabLocks.check(tabId).catch(() => {});
   if (info.url && tab) tabLocks.seen(tab).catch(() => {}); // (a tab of a locked site is locked too)
+  // its face again on a new page (Firefox drops a tab's own icon then) or another site
+  if (tab && (info.status === 'loading' || info.url)) ready.then(() => showFace(tabId, tab.url || tab.pendingUrl || '', info.status === 'loading' || facesHost.get(tabId) !== hostOf(tab.url || ''))).catch(() => {});
 });
+chrome.tabs.onRemoved?.addListener((tabId) => { faces.delete(tabId); facesHost.delete(tabId); });
+
+// ---- the robot's face in the toolbar, per tab (faces.js) ---------------------------------------------------
+// paused > blocked > off > logged out > normal. Off and blocked are per site, so per tab; logged out is
+// every tab's, so it's also the default icon (tabs TRIF has set nothing for). `faces` remembers what each
+// tab was given (in session storage, across service worker restarts), so only changes reach the browser.
+const faces = new Map(); // tabId -> the face TRIF set for it
+const facesHost = new Map(); // tabId -> the host it was set for
+let defaultFace = 'normal';
+const facesStore = chrome.storage?.session; // (sessionStore, below, isn't defined yet here)
+const facesReady = (facesStore ? facesStore.get('faces').catch(() => ({})) : Promise.resolve({})).then((s) => {
+  for (const [id, f] of Object.entries(s?.faces?.tabs || {})) faces.set(Number(id), f);
+  if (s?.faces?.loggedOut) state.loggedOut = true;
+  defaultFace = s?.faces?.default || 'normal';
+});
+let facesSaving = null;
+function saveFaces() {
+  if (!facesStore || facesSaving) return;
+  facesSaving = setTimeout(() => {
+    facesSaving = null;
+    facesStore.set({ faces: { tabs: Object.fromEntries(faces), loggedOut: !!state.loggedOut, default: defaultFace } }).catch(() => {});
+  }, 200);
+}
+function setFace(tabId, face, force = false) {
+  return new Promise((res) => {
+    if (!chrome.action?.setIcon || !Number.isInteger(tabId) || tabId < 0) { res(); return; }
+    if (!force && (faces.has(tabId) ? faces.get(tabId) : defaultFace) === face) { res(); return; }
+    faces.set(tabId, face);
+    saveFaces();
+    // (the callback form: a tab closed meanwhile is an error the callback reads, not an unchecked one)
+    try { chrome.action.setIcon({ tabId, path: facePaths(face) }, () => { if (chrome.runtime.lastError) faces.delete(tabId); res(); }); } catch { faces.delete(tabId); res(); }
+  });
+}
+/** The state of the site a tab's page is on: 'on' | 'off' | 'disconnected' | 'blocked', or null (no site). */
+function tabSiteState(url) {
+  const host = /^https?:/.test(url || '') ? hostOf(url) : '';
+  if (!host) return null;
+  const site = siteOnFor(url, [...state.blockedSites, ...state.sitesOn]) || scopeFor(host);
+  return site ? stateOf(site) : null;
+}
+async function showFace(tabId, url, force = false) {
+  await facesReady;
+  if (url === undefined) url = (await chrome.tabs.get(tabId).catch(() => null))?.url || '';
+  facesHost.set(tabId, hostOf(url));
+  await setFace(tabId, toolbarFace({ locked: tabLocks.isLocked(tabId), state: tabSiteState(url), loggedOut: !!state.loggedOut }), force);
+}
+let facesTimer = null;
+/** Every tab's face, and the default one (after a switch, a block, access, or the login changed). */
+function showFaces() {
+  clearTimeout(facesTimer);
+  facesTimer = setTimeout(() => ready.then(async () => {
+    await facesReady;
+    const d = state.loggedOut ? 'login' : 'normal';
+    if (d !== defaultFace && chrome.action?.setIcon) {
+      defaultFace = d;
+      saveFaces();
+      try { chrome.action.setIcon({ path: facePaths(d) }, () => void chrome.runtime.lastError); } catch { /* no toolbar icon */ }
+    }
+    for (const t of await chrome.tabs.query({}).catch(() => [])) await showFace(t.id, t.url || t.pendingUrl || '');
+  }).catch(() => {}), 150);
+}
 chrome.tabs.onRemoved?.addListener((tabId) => { tabLocks.unlock(tabId, 'closed').catch(() => {}); });
 chrome.tabs.onReplaced?.addListener((added, removed) => { tabLocks.unlock(removed, 'replaced').catch(() => {}); tabLocks.check(added).catch(() => {}); });
 chrome.tabs.onCreated?.addListener((tab) => { tabLocks.opened(tab).catch(() => {}); });
@@ -204,6 +269,7 @@ const ready = chrome.storage.local.get(null).then(async (s) => {
   await dropEverySite(s);
   await cleanStaleRuns(s);
 }).catch((e) => console.error('[TRIF] failed to read storage', e));
+ready.then(() => showFaces()); // (the toolbar's faces, for the tabs open now: faces.js)
 
 // Listeners must be registered synchronously at the top level of a service worker.
 chrome.runtime.onStartup.addListener(() => {
@@ -1835,6 +1901,7 @@ function broadcast(msg) {
 
 function notifyPanels() {
   broadcast({ type: 'statusChanged' });
+  showFaces(); // (a site switched, blocked or connected, or a lock: the toolbar's faces follow)
 }
 
 // The listed string fields of a panel message (open model settings), nothing else.
@@ -1865,6 +1932,12 @@ async function onPanelMessage(msg) {
     case 'site.set': return setSiteOn(msg);
     case 'site.disconnect': return disconnectSite(msg);
     case 'site.block': return setBlocked(msg);
+    // The panel says whether the agent needs a login (or a key): the toolbar's yellow face, every tab
+    case 'faces.login': {
+      const out = msg.loggedOut === true;
+      if (out !== !!state.loggedOut) { state.loggedOut = out; saveFaces(); showFaces(); }
+      return { ok: true };
+    }
     case 'siteAccess.noteSeen': {
       // The one-time note after an update gave up every site's access: seen
       state.accessNote = false;

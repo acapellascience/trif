@@ -53,8 +53,8 @@ const icons = {};
 const setIcon = chrome.action.setIcon.bind(chrome.action);
 chrome.action.setIcon = (d, done) => new Promise((res) => setIcon(d, () => {
   const failed = chrome.runtime.lastError; // (read here: a tab closed meanwhile)
-  if (!failed && d && d.tabId != null) {
-    icons[d.tabId] = (d.path && (d.path[16] || d.path)) || 'imageData';
+  if (!failed && d) {
+    icons[d.tabId != null ? d.tabId : 'default'] = (d.path && (d.path[16] || d.path)) || 'imageData'; // (no tab: the default icon)
     chrome.storage.session.set({ e2eIcons: { ...icons } });
   }
   if (done) done();

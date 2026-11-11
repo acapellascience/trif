@@ -227,8 +227,22 @@ class Scenario {
    */
   async toolbarIcon(tabId) {
     const icon = this.o.browser === 'firefox' ? await this.d.actionIcon(tabId)
-      : await this.ext(`async (id) => ((await chrome.storage.session.get('e2eIcons')).e2eIcons || {})[id] || null`, [tabId]);
+      : await this.ext(`async (id) => { const m = (await chrome.storage.session.get('e2eIcons')).e2eIcons || {}; return m[id] || m.default || null; }`, [tabId]);
     return icon ? path.basename(String(icon)) : 'robot-16.png';
+  }
+
+  /** The robot's face for a tab (faces.js): the toolbar icon, the bar robot's data-face, the gate's robot. */
+  async faceNow(tabId) {
+    const panel = await this.panel(`async () => ({ bar: document.getElementById('bar-robot')?.dataset.face || '', gate: (document.getElementById('gate-icon')?.getAttribute('src') || '').split('/').pop() })`);
+    return { toolbar: await this.toolbarIcon(tabId), ...panel };
+  }
+
+  /** Waits for a tab's faces to be `want` (each a string or a RegExp; toolbar, bar, gate). */
+  async waitFace(what, tabId, want) {
+    const ok = (v, w) => (w instanceof RegExp ? w.test(v) : v === w);
+    let last;
+    return waitFor(what, async () => { last = await this.faceNow(tabId); return Object.entries(want).every(([k, w]) => ok(last[k], w)) ? last : null; }, { timeoutMs: 10000 })
+      .catch((e) => { throw new Error(`${e.message}: ${JSON.stringify(last)}`); });
   }
   panel(fn, args = []) { return this.d.eval(this.panelCtx, fn, args); }
 
@@ -906,11 +920,15 @@ class Scenario {
       const p = await this.waitPanel('the panel to show the gate', (x) => x.site === '127.0.0.1' && x.gate);
       if (firstDisconnected) {
         if (p.gateTitle !== 'TRIF is disconnected on 127.0.0.1' || p.gateText !== 'Connect' || !p.grey || p.links.length) throw new Error(`the gate: ${JSON.stringify(p)}`);
+        // (disconnected: his faces as before, the panel grey)
+        await this.waitFace('the faces when disconnected', this.win.tabId, { toolbar: /^robot(-login)?-16\.png$/, bar: /^(normal|login)$/ });
         await this.shot(this.panelCtx, 'panel-disconnected');
       } else {
         // (with every site given in the browser's settings, one site can't be disconnected: no Disconnect then)
         const links = ['Block on 127.0.0.1 (Add to TRIF\'s block list)', ...(this.allSites ? [] : ['Disconnect from 127.0.0.1 (Disable browser permissions)'])];
         if (p.gateTitle !== 'The robot is off.' || p.gateText !== 'Fix 127.0.0.1' || p.grey || JSON.stringify(p.links) !== JSON.stringify(links)) throw new Error(`the gate: ${JSON.stringify(p)}`);
+        // off: a blank face, in the toolbar for this tab, in the bar and on the gate
+        await this.waitFace('the off faces', this.win.tabId, { toolbar: 'robot-off-16.png', bar: 'off', gate: /^robot-shaded-off(-yellow|-red)?\.svg$/ });
         await this.shot(this.panelCtx, 'panel-off-links');
         await this.shot(this.panelCtx, this.allSites ? 'panel-off-every-site' : 'panel-off-per-site');
       }
@@ -1044,6 +1062,8 @@ class Scenario {
       if (p.gateText !== 'Unblock' || !p.red || p.grey || p.links.length) throw new Error(`the gate: ${JSON.stringify(p)}`);
       // (blocked: no power button in the bar; Unblock is the way back)
       await this.waitBar('the blocked gate\'s bar', GATE_BAR_SHUT);
+      // blocked: red with a red cross, in the toolbar for this tab, in the bar and on the gate
+      const faces = await this.waitFace('the blocked faces', this.win.tabId, { toolbar: 'robot-blocked-16.png', bar: 'blocked', gate: 'robot-shaded-blocked.svg' });
       await this.shot(this.panelCtx, 'panel-blocked');
       for (const args of [['text', '--url', '127.0.0.1'], ['screenshot', '--url', '127.0.0.1', '-o', path.join(this.work, 'blocked.png')], ['run', '--url', '127.0.0.1', '1']]) {
         const x = await this.cli(args);
@@ -1063,7 +1083,8 @@ class Scenario {
       if (!['The robot is off.', 'TRIF is disconnected on 127.0.0.1'].includes(after.gateTitle)) throw new Error(`after: ${JSON.stringify(after)}`);
       await d.click(this.panelCtx, '#gate-btn');
       await this.waitPage('the mod again', (x) => x.banner === 'ran');
-      return `listed: ${listed.join(', ')}; after: "${after.gateTitle}"`;
+      await this.waitFace('the faces once it\'s on again', this.win.tabId, { toolbar: /^robot(-login)?-16\.png$/, bar: /^(normal|login)$/ });
+      return `listed: ${listed.join(', ')}; after: "${after.gateTitle}"; faces when blocked: ${JSON.stringify(faces)}`;
     });
 
     await r.check('the robot in the top bar: on a site TRIF is on for, it puts it to sleep like the power button; on the gate, it wakes it like Fix', async () => {
@@ -1697,7 +1718,7 @@ class Scenario {
         problem: document.body.dataset.problem || '',
         dot: q('#dot').className, dotShown: shown('#dot'), dotLabel: q('#dot').getAttribute('aria-label'),
         green: colour('var(--trif-green)'), bad: colour('var(--bad)'), warn: colour('var(--warn)'),
-        rim: style('#bar-robot .rim', 'fill'), gateRim: style('.gate-icon .rim', 'fill'), power: style('#site-switch', 'color'),
+        rim: style('#bar-robot .rim', 'fill'), gateIcon: (document.getElementById('gate-icon')?.getAttribute('src') || '').split('/').pop(), barFace: document.getElementById('bar-robot')?.dataset.face || '', power: style('#site-switch', 'color'),
         modSwitch: style('#mod-list button.switch[aria-checked="true"]', 'backgroundColor'), light: style('#mod-list .light.on', 'backgroundColor'),
         send: { disabled: q('#send').disabled, title: q('#send').title },
         fix: shown('#gate-btn'), gateNote: shown('#gate-note') ? q('#gate-note').innerText.trim() : '',
@@ -1759,7 +1780,7 @@ class Scenario {
         await r.check('agent not logged in, on the gate: the small robot yellow, a line saying so, Fix still there', async () => {
           await this.goColour('gate');
           const x = await this.waitLooks('yellow gate', (l) => l.classes.join() === 'needs-login' && !!l.gateNote);
-          if (!Scenario.same(x.gateRim, x.warn) || !x.fix || !x.dotShown || x.dot !== 'dot warn' || !/isn’t logged in/.test(x.gateNote)) throw new Error(JSON.stringify(x));
+          if (x.gateIcon !== 'robot-shaded-off-yellow.svg' || !x.fix || !x.dotShown || x.dot !== 'dot warn' || !/isn’t logged in/.test(x.gateNote)) throw new Error(JSON.stringify(x));
           await this.waitBar('the gate\'s bar', GATE_BAR, Scenario.dim);
           await this.shot(this.panelCtx, 'panel-yellow-gate');
           return `"${x.gateNote}"`;
@@ -1800,7 +1821,7 @@ class Scenario {
         await r.check('user scripts off, on the gate: red robot, the line, no Fix button', async () => {
           await this.goColour('gate');
           const x = await this.waitLooks('red gate', (l) => l.problem === 'scripts' && !!l.gateNote);
-          if (!Scenario.same(x.gateRim, x.bad) || x.fix || x.dot !== 'dot bad' || !x.dotShown || !/^Mods are paused/.test(x.gateNote)) throw new Error(JSON.stringify(x));
+          if (x.gateIcon !== 'robot-shaded-off-red.svg' || x.fix || x.dot !== 'dot bad' || !x.dotShown || !/^Mods are paused/.test(x.gateNote)) throw new Error(JSON.stringify(x));
           await this.waitBar('the gate\'s bar', GATE_BAR, Scenario.dim);
           await this.shot(this.panelCtx, 'panel-scripts-off-gate');
           return `"${x.gateNote}"`;
@@ -1839,7 +1860,7 @@ class Scenario {
         await r.check('helper not connected, on the gate: red robot, the line, no Fix button', async () => {
           await this.goColour('gate');
           const x = await this.waitLooks('red gate, helper', (l) => l.problem === 'helper' && !!l.gateNote);
-          if (!Scenario.same(x.gateRim, x.bad) || x.fix || !x.dotShown || !/^The TRIF helper isn’t connected\. Run npx timsrobot setup in a terminal, then restart \w+\. Setup page$/.test(x.gateNote)) throw new Error(JSON.stringify(x));
+          if (x.gateIcon !== 'robot-shaded-off-red.svg' || x.fix || !x.dotShown || !/^The TRIF helper isn’t connected\. Run npx timsrobot setup in a terminal, then restart \w+\. Setup page$/.test(x.gateNote)) throw new Error(JSON.stringify(x));
           await this.waitBar('the gate\'s bar', GATE_BAR, Scenario.dim);
           await this.shot(this.panelCtx, 'panel-helper-gate');
           return `"${x.gateNote}"`;
@@ -2005,6 +2026,8 @@ process.exitCode = 1;
       if (!shown.msgs.some(([cls, text]) => cls === 'msg login' && text === 'Claude Code needs you to log in again.')) throw new Error(`no login line: ${JSON.stringify(shown.msgs)}`);
       // Its own check still says logged in, so after logging in from a terminal, sending is how to tell.
       if (x.send.disabled) throw new Error(`Send is off: ${JSON.stringify(x.send)}`);
+      // logged out: hollow yellow eyes, in the bar and (every tab's) in the toolbar
+      await this.waitFace('the logged-out faces', win.tabId, { toolbar: 'robot-login-16.png', bar: 'login' });
       await this.shot(this.panelCtx, 'panel-login-expired');
       // From a terminal: the plain message, and how to log in.
       const t = await this.cli(['agent', 'run', '--url', `http://${site}:${this.o.servers.port}/`, 'hi from a terminal'], { timeoutMs: 60000 });
@@ -3265,7 +3288,7 @@ say({ type: 'result', subtype: 'success', is_error: false, result: text, session
       await waitFor('the paused toolbar icon', async () => (await this.toolbarIcon(win.tabId)) === 'robot-paused-16.png' || null, { timeoutMs: 10000 })
         .catch(async (e) => { throw new Error(`${e.message}: ${await this.toolbarIcon(win.tabId)}`); });
       const otherTab = await this.ext(`async (id) => (await chrome.tabs.query({})).map((t) => t.id).find((t) => t !== id) ?? null`, [win.tabId]);
-      if (otherTab != null && (await this.toolbarIcon(otherTab)) !== 'robot-16.png') throw new Error(`tab ${otherTab}'s toolbar icon: ${await this.toolbarIcon(otherTab)}`);
+      if (otherTab != null && !/^robot(-login)?-16\.png$/.test(await this.toolbarIcon(otherTab))) throw new Error(`tab ${otherTab}'s toolbar icon: ${await this.toolbarIcon(otherTab)}`);
       // The mod: held for what its code does, its header's claim shown apart
       const card = await this.approvalFor(`${site}/e2e-poster`);
       const held = { facts: card.items, claim: card.claim };
@@ -3292,7 +3315,7 @@ say({ type: 'result', subtype: 'success', is_error: false, result: text, session
         return t && t.startsWith(base) ? t : null;
       }, { timeoutMs: 15000 });
       await waitFor('the tab unlocked', () => this.panel(`async () => document.getElementById('tab-lock').hidden || null`), { timeoutMs: 15000 });
-      await waitFor('the normal toolbar icon back', async () => (await this.toolbarIcon(win.tabId)) === 'robot-16.png' || null, { timeoutMs: 10000 })
+      await waitFor('the normal toolbar icon back', async () => /^robot(-login)?-16\.png$/.test(await this.toolbarIcon(win.tabId)) || null, { timeoutMs: 10000 })
         .catch(async (e) => { throw new Error(`${e.message}: ${await this.toolbarIcon(win.tabId)}`); });
       if (!(await this.panel(`async () => !document.body.classList.contains('tab-locked')`))) throw new Error('the robot in the bar is still paused');
       const t = await this.cli(['run', '--tab', String(win.tabId), 'fetch("/e2e-after", { method: "POST", body: "x" }).then((r) => r.status)'], { timeoutMs: 30000 });
@@ -3566,7 +3589,7 @@ say({ type: 'result', subtype: 'success', is_error: false, result: text, session
       const sibAfter = await this.toolbarIcon(sib);
       const sibPost2 = await run(sib, 'fetch("/e2e-sib-post2", { method: "POST", body: "x" }).then((r) => "sent " + r.status, (e) => "blocked: " + e.message)');
       extra.push(`other tab after: icon ${sibAfter}, POST ${sibPost2}`);
-      if (sibAfter !== 'robot-16.png' || !/^sent/.test(sibPost2)) open('TL-4', `the other tab stayed locked after the first one unlocked: ${sibAfter}, ${sibPost2}`);
+      if (!/^robot(-login)?-16\.png$/.test(sibAfter) || !/^sent/.test(sibPost2)) open('TL-4', `the other tab stayed locked after the first one unlocked: ${sibAfter}, ${sibPost2}`);
       // the page's own localStorage change: unlocked as usual, with a quiet line in the chat
       const note = await waitFor('the note in the chat', async () => (await chat())?.messages.find((m) => /saved new data while your agent's code ran/.test(m.text)) || null, { timeoutMs: 10000 }).catch(() => null);
       if (!note) open('TL-3', 'no note in the chat about the saved data');

@@ -33,7 +33,7 @@ const ui = {
   blockedList: $('#blocked-list'), blockedEmpty: $('#blocked-empty'),
   onBreak: $('#on-break'),
   startsRules: $('#starts-rules'), startsSandboxed: $('#starts-sandboxed'), startsPage: $('#starts-page'), startsNote: $('#starts-note'),
-  landing: $('#landing'), landingIcon: $('#landing-icon'), landingVersion: $('#landing-version'), landingNote: $('#landing-note'),
+  landing: $('#landing'), landingIcon: $('#landing-icon'), gateIcon: $('#gate-icon'), landingVersion: $('#landing-version'), landingNote: $('#landing-note'),
   settings: $('#settings'), agent: $('#agent'), agentNote: $('#agent-note'), model: $('#model'),
   using: $('#using'), modelCustomRow: $('#model-custom-row'), modelCustom: $('#model-custom'), modelNote: $('#model-note'),
   instructions: $('#instructions'), instructionsNote: $('#instructions-note'),
@@ -492,6 +492,7 @@ function render() {
 
   renderGate(problem, agentInfo);
   renderTabLock();
+  renderFaces(problem, agentInfo);
   renderPausedAll();
   renderNotice({ helperOk, agentInfo, anyAgent });
   renderUpdate();
@@ -982,6 +983,24 @@ const currentState = () => {
 const siteIsOn = () => currentState() === 'on';
 let siteSwitching = false;
 
+/**
+ * The robot's face (faces.js, scripts/render-icon.js), one at a time: paused (the agent ran code in this
+ * tab), blocked (a red cross), off (blank), logged out (hollow yellow eyes), else his eyes. On the bar's
+ * robot (data-face, sidepanel.css), and the background is told whether the agent needs a login, for the
+ * toolbar's yellow face in every tab.
+ */
+function renderFaces(problem, agentInfo) {
+  const state = siteScope() && view.status ? currentState() : null;
+  const loggedOut = problem === 'login' || problem === 'key';
+  ui.barRobot.dataset.face = document.body.classList.contains('tab-locked') ? 'paused'
+    : state === 'blocked' ? 'blocked' : state === 'off' ? 'off' : loggedOut ? 'login' : 'normal';
+  // (only once the agent is known, and not while the helper or user scripts are what's wrong: no answer then)
+  if (agentInfo && problem !== 'helper' && problem !== 'scripts' && loggedOut !== view.toldLoggedOut) {
+    view.toldLoggedOut = loggedOut;
+    request({ type: 'faces.login', loggedOut }).catch(() => { view.toldLoggedOut = null; });
+  }
+}
+
 function renderGate(problem, agentInfo) {
   const red = RED.has(problem);
   // No website in this tab: the landing page, only the robot and settings (body.no-site hides the rest),
@@ -1016,6 +1035,11 @@ function renderGate(problem, agentInfo) {
   // notice shows there instead, renderNotice). Red: no Fix button, which couldn't work.
   renderProblemLine(ui.gateNote, gated && !(login.current && !red) ? problem : null, agentInfo);
   if (!gated) return;
+  // The gate's robot: a red cross when blocked, else a blank face in the state's colour (red when TRIF is
+  // missing a part, yellow when the agent needs a login; grey when disconnected, by the gate's filter).
+  const loggedOut = problem === 'login' || problem === 'key';
+  const gateIcon = `icons/robot-shaded-${state === 'blocked' ? 'blocked' : `off${red ? '-red' : loggedOut ? '-yellow' : ''}`}.svg`;
+  if (ui.gateIcon.getAttribute('src') !== gateIcon) ui.gateIcon.setAttribute('src', gateIcon);
   ui.gateTitle.textContent = state === 'disconnected' ? `TRIF is disconnected on ${scope}`
     : state === 'blocked' ? `The robot is blocked on ${scope}` : 'The robot is off.';
   ui.gateWhy.hidden = true;

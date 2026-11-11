@@ -103,6 +103,86 @@ rx.__reactFiber$e2e = { memoizedProps: rx.__reactProps$e2e, return: { memoizedPr
 </div>
 <div id="cells">${Array.from({ length: 1000 }, (_, i) => `<span class="cell">${i}</span>`).join(' ')}</div>`);
 
+// The widened box (tests/e2e/scenario.js wideCheck, fixtures/sandbox-wide.js): what the page itself would
+// notice (__hits in the capture phase, __bubbled on the document), a page animation, an open and a closed
+// shadow root (and one made later), SVG with ids and references, a style sheet that uses an image, a field
+// with a placeholder, an editor with SVG in it, a picture the page shows, a canvas and a frame.
+const WIDE_PNG = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8DwHwAFBQIAX8jx0gAAAABJRU5ErkJggg==';
+const WIDE_PAGE = () => PAGE('TRIF e2e wide', `<style id="wstyle">#sprite { background: url(/e2e-wide.png?sprite=1) no-repeat } #sprite2 { --tint: rgb(9, 8, 7) }</style>
+<script>
+window.__hits = []; window.__bubbled = [];
+for (const t of ['click', 'pointerdown', 'keydown', 'input', 'focus', 'dragstart', 'drop', 'message', 'submit']) window.addEventListener(t, (e) => __hits.push(t + ':' + ((e.target && e.target.id) || '')), true);
+document.addEventListener('click', (e) => __bubbled.push((e.target && e.target.id) || ''));
+</script>
+<h1 id="title">Wide</h1>
+<p id="words">alpha beta gamma</p>
+<div id="feed"><p class="item" id="item1">one</p></div>
+<div id="editor" contenteditable="true"><p id="ed-p">secret draft</p><svg id="ed-svg" width="10" height="10"><rect id="ed-rect" width="10" height="10"></rect></svg></div>
+<form id="f" action="/e2e-wide-leak-submit"><input id="fi" name="q" value="v" placeholder="old"><textarea id="ta" placeholder="old t"></textarea><input id="pw" type="password"><button id="fb" type="button">b</button></form>
+<p><button id="pb" type="button">page button</button></p>
+<img id="pimg" src="/e2e-wide.png" width="16" height="16" alt="">
+<div id="sprite" style="width: 4px; height: 4px"></div>
+<svg id="psvg" width="100" height="50"><defs><linearGradient id="pg"><stop offset="0" stop-color="red"></stop></linearGradient></defs><rect id="prect" x="10" y="10" width="30" height="20" fill="url(#pg)"></rect><path id="ppath" d="M0 0 L30 40" stroke="black"></path></svg>
+<div id="anim" style="width: 10px; height: 10px; background: blue"></div>
+<div id="ohost"></div><div id="chost"></div>
+<canvas id="pcv" width="10" height="10"></canvas>
+<iframe id="frm" src="/two.html" width="120" height="40"></iframe>
+<script>
+window.__pageAnim = document.getElementById('anim').animate([{ opacity: 1 }, { opacity: 0.5 }], { duration: 100000 });
+document.getElementById('ohost').attachShadow({ mode: 'open' }).innerHTML = '<p id="op">open root</p>';
+window.__closedRoot = document.getElementById('chost').attachShadow({ mode: 'closed' });
+window.__closedRoot.innerHTML = '<p id="cp">closed root</p>';
+document.getElementById('pcv').getContext('2d').fillRect(0, 0, 10, 10);
+window.__laterHost = () => { const h = document.createElement('div'); h.id = 'lhost'; h.className = 'host'; document.body.append(h); window.__laterRoot = h.attachShadow({ mode: 'closed' }); window.__laterRoot.innerHTML = '<p id="lp">later root</p>'; };
+</script>`);
+
+// The widened box's powers (scenario.js wideBCheck, fixtures/powers-b.js): the wide page, and what the new
+// powers act on: the site's storage, an embedded JSON script and a data global, the page's own signal, a lazy
+// picture, a video link, a link with a query, a file input, a video, and requests to rewrite.
+const WIDE_B_PAGE = () => WIDE_PAGE().replace('</body>', `<script>
+localStorage.setItem('e2e-wide-key', 'v1'); localStorage.setItem('e2e-old-setting', '{"zoom":3}'); localStorage.setItem('e2e-other', 'not its');
+sessionStorage.setItem('e2e-wide-s', 's1'); document.cookie = 'e2e_c=c1; path=/'; document.cookie = 'e2e_other=c2; path=/';
+window.__signals = [];
+document.addEventListener('e2e-wide-reset', (e) => __signals.push(JSON.stringify(e.detail)));
+document.addEventListener('e2e-wide-undeclared', () => __signals.push('undeclared'));
+</script>
+<script type="application/json" id="emb">{"posts":[{"t":"keep"},{"t":"drop"}]}</script>
+<script>window.__embSeen = document.getElementById('emb').textContent; window.e2eData = { items: ['keep', 'drop'] }; window.__dataSeen = JSON.stringify(window.e2eData);</script>
+<p><a id="yt" href="https://www.youtube.com/watch?v=dQw4w9WgXcQ&t=5">a video</a> <a id="shown-q" href="/wideb.html?a=1&b=2">a link with a query</a></p>
+<input id="file" type="file" accept="image/*"> <video id="vid" muted width="10" height="10"></video>
+<div style="height: 4000px"></div><img id="lazy" src="/e2e-wide.png?lazy=1" loading="lazy" width="4" height="4" alt="">
+<script>
+window.__api = async () => (await fetch('/e2e-rw/E2eOp?variables=' + encodeURIComponent(JSON.stringify({ flag: true, other: 1 })), { method: 'POST', body: JSON.stringify({ operationName: 'E2eOp', variables: { flag: true } }) })).text();
+window.__xhr = () => new Promise((res) => { const x = new XMLHttpRequest(); x.open('POST', '/e2e-rw/E2eOp'); x.onload = () => res(x.responseText); x.send(JSON.stringify({ variables: { flag: true } })); });
+window.__other = async () => (await fetch('/e2e-rw/OtherOp?variables=' + encodeURIComponent('{"flag":true}'))).text();
+window.__multi = async () => (await fetch('/e2e-multi')).text();
+window.__urls = async () => (await fetch('/e2e-urls')).text();
+document.getElementById('file').addEventListener('change', async (e) => {
+  const f = e.target.files[0];
+  if (!f) return;
+  const bm = await createImageBitmap(f); const c = document.createElement('canvas'); c.width = bm.width; c.height = bm.height; const g = c.getContext('2d'); g.drawImage(bm, 0, 0);
+  window.__fileSeen = f.name + ' ' + f.type + ' ' + [...g.getImageData(1, 1, 1, 1).data].join(',');
+});
+// (the page's own actions, from a real click on #go: no agent code runs in this tab before them)
+window.__runAll = async () => {
+  await window.__attach();
+  const api = JSON.parse(await window.__api()), xhr = JSON.parse(await window.__xhr()), other = JSON.parse(await window.__other());
+  const multi = await window.__multi(), urls = JSON.parse(await window.__urls());
+  document.getElementById('trif-box-pb-embed').click(); // (not the user's: no frame)
+  document.getElementById('vid').volume = 0.5;
+  await new Promise((r) => setTimeout(r, 800));
+  document.documentElement.setAttribute('data-e2e-results', JSON.stringify({ api, xhr, other, multi, urls, hits: window.__hits.slice(), signals: window.__signals.slice(), emb: window.__embSeen, data: window.__dataSeen,
+    file: window.__fileSeen || null, key: localStorage.getItem('e2e-wide-key'), frames: document.querySelectorAll('iframe[src*="youtube"]').length, button: !!document.getElementById('trif-box-pb-embed'),
+    lazy: document.getElementById('lazy').loading, url: location.href }));
+};
+document.addEventListener('DOMContentLoaded', () => { const b = document.createElement('button'); b.id = 'go'; b.type = 'button'; b.textContent = 'go'; b.addEventListener('click', () => { window.__runAll().catch((e) => document.documentElement.setAttribute('data-e2e-results', JSON.stringify({ error: String(e && e.message) }))); }); document.body.prepend(b); });
+window.__attach = async () => {
+  const c = document.createElement('canvas'); c.width = 4; c.height = 4; const g = c.getContext('2d'); g.fillStyle = 'rgb(0, 0, 255)'; g.fillRect(0, 0, 4, 4);
+  const b = await new Promise((r) => c.toBlob(r, 'image/png')); const dt = new DataTransfer(); dt.items.add(new File([b], 'pic.png', { type: 'image/png' }));
+  const f = document.getElementById('file'); f.files = dt.files; f.dispatchEvent(new Event('change', { bubbles: true }));
+};
+</script></body>`);
+
 function testPage(host, pathName) {
   return PAGE(`TRIF e2e ${host}${pathName}`, `
 <h1 id="title">TRIF e2e test page</h1>
@@ -354,6 +434,13 @@ async function startServers(dir) {
     if (u.pathname === '/e2e-sw.js') return send(200, 'text/javascript', SW_SCRIPT);
     if (u.pathname === '/promos.html') return send(200, 'text/html; charset=utf-8', PROMOS_PAGE());
     if (u.pathname === '/sandbox.html') return send(200, 'text/html; charset=utf-8', SANDBOX_PAGE());
+    if (u.pathname === '/wide.html') return send(200, 'text/html; charset=utf-8', WIDE_PAGE());
+    if (u.pathname === '/wideb.html') return send(200, 'text/html; charset=utf-8', WIDE_B_PAGE());
+    // (rewrite-requests: what the request carried, as the server got it)
+    if (u.pathname.startsWith('/e2e-rw/')) { let body = ''; req.on('data', (c) => { body += c; }); req.on('end', () => send(200, 'application/json', JSON.stringify({ url: req.url, body }))); return undefined; }
+    if (u.pathname === '/e2e-multi') return send(200, 'application/json', 'for (;;);{"a":["keep","drop"]}\n{"b":["drop"],"c":1}');
+    if (u.pathname === '/e2e-urls') return send(200, 'application/json', JSON.stringify({ u: 'https://127.0.0.1/watch?v=1&list=2&start_radio=1', w: 'https://127.0.0.1/watch?v=2' }));
+    if (u.pathname === '/e2e-wide.png') return send(200, 'image/png', Buffer.from(WIDE_PNG, 'base64'));
     if (u.pathname === '/powers3.html') return send(200, 'text/html; charset=utf-8', POWERS3_PAGE());
     // (mods that break, scenario.js modHealthCheck: the element a style mod looks for, there with ?has=1)
     if (u.pathname === '/health.html') return send(200, 'text/html; charset=utf-8', PAGE('TRIF e2e health', `<h1 id="title">Health</h1>${u.searchParams.get('has') ? '<div id="e2e-quiet-target">here</div>' : '<p>gone</p>'}`));

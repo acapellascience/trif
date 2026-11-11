@@ -336,10 +336,7 @@ const handlers = {
       const name = GROUP_NAMES;
       lines.push(`GROUPS OFF    ${Object.entries(st.groupsOff).map(([site, gs]) => `${gs.map((g) => name[g] || g).join(' and ')} off on ${site}`).join('; ')} (the user's choice, in the side panel: those mods don't run there)`);
     }
-    if (st && Array.isArray(st.startsOff) && st.startsOff.length) {
-      const name = GROUP_NAMES;
-      lines.push(`NEW MODS      new ${st.startsOff.map((g) => name[g] || g).join(' and ')} start off in this browser (the user's setting, in the side panel's Settings), except ones made in its side panel`);
-    }
+    if (st && st.chatWait) lines.push('CHAT MODS     wait for the user: what the side panel\'s chat makes or changes runs only once they turn it on');
     if (st && st.sandbox === false) lines.push(`NO SANDBOX    ${st.browser || 'this browser'} can't run boxed mods: each waits for the user's OK (in the side panel) to run as a free mod instead`);
     // Sandboxed mods as the extension runs them: in TRIF's sandbox, or ('page') as page scripts
     const sandboxedAs = new Map(((st && st.mods) || []).filter((m) => m.sandboxed).map((m) => [m.id, m.sandboxed]));
@@ -353,7 +350,7 @@ const handlers = {
       if (helperErrors.has(id)) s = `NOT SENT: ${helperErrors.get(id)}`;
       else if (held[id]) s = `${(info.pending || []).includes(id) ? 'CHANGE WAITING (the version before runs meanwhile)' : 'HELD'}: ${require('./lib/boxpowers').factLines(held[id].needs, held[id].facts || [held[id].reason]).join('; ')} (trif approve ${id}, or trif reject ${id})`;
       else if (sandboxHeld.has(id)) s = `WAITING: ${sandboxHeld.get(id).facts[0]}; only the user can allow that, in the side panel`;
-      else if (off.has(id)) s = newOff.has(id) ? `off (${newOff.get(id) === 'update' ? 'updated by TRIF' : 'new'}: waiting for the user to look at it)` : shipsOff.has(id) ? 'off (as TRIF ships it)' : 'off';
+      else if (off.has(id)) s = newOff.has(id) ? `off (${newOff.get(id) === 'update' ? 'updated by TRIF' : newOff.get(id) === 'chat' ? 'made by the chat' : 'new'}: waiting for the user to look at it)` : shipsOff.has(id) ? 'off (as TRIF ships it)' : 'off';
       else if (sitesOff.has(id)) s = 'waiting: TRIF is off on its site';
       else if (applyErrors.has(id)) s = `NOT REGISTERED: ${applyErrors.get(id)}`;
       else if (!st) s = '?';
@@ -368,7 +365,7 @@ const handlers = {
     }
     for (const [id, err] of helperErrors) if (!ids.includes(id)) lines.push(`  ${pad(id, 40)} NOT SENT: ${err}`);
     if ([...off].some((id) => !shipsOff.has(id) && !newOff.has(id))) lines.push('              off = switched off by the user (trif enable <id> turns one back on)');
-    if (newOff.size) lines.push('              off (new) = new mods of its kind start off in this browser (the user\'s setting); only the user switches it on, in the side panel or trif enable <id> in their terminal');
+    if (newOff.size) lines.push('              off (new) = it came from outside the chat, so it started off; only the user switches it on, in the side panel or trif enable <id> in their terminal');
     if ([...off].some((id) => shipsOff.has(id))) lines.push('              off (as TRIF ships it) = a mod TRIF comes with, off until switched on (trif enable <id>)');
     if (Object.keys(held).length) lines.push('              HELD = new or changed, and it can do things the user hasn\'t allowed (TRIF read them from its code); not running until the user approves it');
     if (Object.keys(review).length) lines.push('              TO REVIEW = can do things the user hasn\'t seen yet (TRIF read them from its code); it runs meanwhile');
@@ -457,6 +454,10 @@ const handlers = {
         if (clicks.length && !asked.includes('click')) throw new bp.PowersError('@click lines are for a mod with the click power (@powers click)');
         if (asked.includes('click') && !clicks.length) throw new bp.PowersError('the click power needs what it may click: // @click the play button: button.play');
         if (clicks.length) askedArgs.click = clicks;
+        const events = bp.parseEvents(header.events);
+        if (events.length) askedArgs.events = events;
+        const migrate = bp.parseMigrate(header.migrate);
+        if (migrate.length) askedArgs.migrate = migrate;
       } catch (e) {
         if (ctx.json) printJson({ ok: false, error: e.message }); else out(`${path.resolve(file)}: ${e.message}`);
         process.exitCode = 1;
@@ -927,7 +928,7 @@ const handlers = {
     const errById = new Map(errors.map((e) => [e.id, e.error]));
     for (const m of mods) {
       out(m.id + (m.name !== path.basename(m.file, '.js') ? `  (${m.name})` : '') + (enabled.get(m.id) === false ? '  [off]' : ''));
-      if (enabled.get(m.id) === false && newOff.has(m.id)) out(`  off: ${newOff.get(m.id) === 'update' ? 'TRIF updated it, and' : 'new, and'} new mods of its kind start off in this browser (the user's setting); not running until the user switches it on after looking at it (side panel, or trif enable ${m.id} in their terminal)`);
+      if (enabled.get(m.id) === false && newOff.has(m.id)) out(`  off: it came from outside the chat (or TRIF updated it), so it started off; not running until the user switches it on after looking at it (side panel, or trif enable ${m.id} in their terminal)`);
       else if (enabled.get(m.id) === false && shipsOff.has(m.id)) out(`  off, as TRIF ships it (not running; trif enable ${m.id} turns it on)`);
       else if (enabled.get(m.id) === false) out(`  switched off by the user (not running; trif enable ${m.id} turns it on)`);
       else if (offSites.has(m.id)) out(`  switched off by the user on ${offSites.get(m.id).join(', ')} (trif enable ${m.id} --site <site> turns it back on there)`);

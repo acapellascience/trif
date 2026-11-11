@@ -13,19 +13,17 @@ summary is too long.
 - **TRIF asks for each site's permission** when you turn it on there. Had every site? Allow each again once.
 - **Block a site** to keep TRIF away from it; the power button is now a quick pause.
 - A site's mods come in three groups, Style, Boxed and Free mods, each with its own switch.
-- **New mods can wait for you:** set Free mods to start off (Settings), and a new one stays off
-  until you've looked at it.
+- **Mods from outside your chat start off**, Tim's too, until you've looked at them.
 
 ### More
 
 - A site's mods come in three groups, each with a switch there: Style mods, **Boxed mods** (JavaScript in
   TRIF's sandbox that changes what the page shows but can't send, load or click anything itself) and Free
   mods.
-- **New mods can start off, by group.** Settings in the side panel has "New mods start": Style, Boxed and
-  Free mods, each On (as before) or Off. Set Free mods to Off and a new free mod waits, switched off and
-  marked "new", until you've looked at it and switched it on, while new style mods apply at once.
-  It covers mods from anywhere but your side-panel chat, new versions of Tim's mods included. An agent
-  run can't switch one on.
+- **Mods from outside your chat start off**, marked "new" or "updated", until you switch them on: a terminal
+  agent's, a file's, another browser's, TRIF's updates, Tim's mods too. What your chat makes starts on, or
+  waits: Settings, "Mods your chat makes".
+- **Boxed mods can do much more**: fuller sound, animations, SVG, drawing, observers, and nine new powers.
 - **TRIF asks for each site's permission.** Installing TRIF used to give it "all your data on all
   websites". Now it asks for nothing until you turn it on for a site; then your browser asks for that site
   only, and it stays disconnected (the panel all grey) until you click Connect there. If TRIF had every

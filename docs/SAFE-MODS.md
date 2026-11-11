@@ -368,6 +368,42 @@ page already has"):
   page-wide rules below it carries no read to an act that didn't ask for it. Fits.
   (In a browser without the sandbox, where a boxed mod runs as a free mod the user allowed, the channels
   live on the page's window, where the page could reach them: the free tier's terms.)
+- **0.3's powers (WIDEN.md class B), against the rule.** Fits, as narrowed, unless it says *exception*:
+  - `block-events`: names nothing but event types (the header's) and, for clicks, the header's selectors;
+    sets no address. Fits. (What it does to the user: keeping the page from seeing a click on Cancel can
+    stop the page acting; that's why clicks need a selector the hold shows.)
+  - `page-events`: *exception*: it names the page's own event names, which aren't its own. Narrowed: only
+    the names in the header (shown in the hold), never a browser event's, TRIF's (`trif:`) or a framework's
+    (`htmx:`, `turbo:`, …); on the document only; the detail plain JSON with no address the page's links
+    don't have (the write-drafts check).
+  - `site-storage`: *exception*: it names the site's storage keys. Narrowed: literal keys from the header
+    (a prefix at most), never one named like a login; cookies read only; what it writes has no new address.
+    `@migrate`, the one-time import into the mod's own settings, names the keys its free version used, the
+    same way, and is a need of its own on the hold.
+  - `rewrite-requests`: *exception*: it names the site's request fields and changes what the site
+    receives. Narrowed: literal values only (true, false, null, numbers, plain words: no address, no long
+    text), fixed in the header and applied by TRIF's page side to same-origin requests; the mod's code has no
+    part in it, so nothing it reads can ride on it. The hold says it changes what the site receives.
+  - `image-variants`: *exception*: it makes a new address. Narrowed: TRIF makes it, from a picture the page
+    shows, by the header's literal change on the header's host (the same host as the picture); the mod only
+    picks which of the page's pictures. That choice reaches the host, which is why a read beside it warns.
+  - `edit-uploads`: names nothing; the file TRIF makes carries only the mod's pixels, under the original's
+    name and type. Fits. (What it reads can end up in the pixels: the read + edit-uploads warning.)
+  - `embeds`: *exception*: the player's address is new. Narrowed: TRIF makes it from a link the page shows
+    (the video's id kept, nothing else), only for the header's player, only after the user's own click on
+    TRIF's button; no referrer, no top navigation, no credentials where the browser allows.
+  - `local-fonts`: names nothing; a read the page couldn't make itself (the hold says the site could see it).
+  - `preload`: names nothing; the page's own lazy pictures, at their own addresses. Fits.
+  - `site-data`, widened: guards and several documents (nothing new: each document checked on its own);
+    the page's embedded JSON and data globals: *exception*, the globals' names are the page's, from the
+    header, never a browser name; an address the site sent may come back with whole query parameters taken
+    out (a copy of an address the page already has, made shorter, never longer: same scheme, host, path and
+    `#`, the rest of its parameters in order), and so may a link's `href`.
+  - `search-box`, widened: `{link}` copies the path of a link the page shows (on the same site); the
+    current host only when it's a host of the same site. Fits.
+  - `go-to`, widened: `reload` (the same address), in-app moves only to pages go-to allows, and a query
+    from a list in the header (*exception*: values from the header, plain words, never an address).
+  - `media`, widened: the page's media events, with nothing about their source. Fits.
 
 
 ## Combinations (branch powers)

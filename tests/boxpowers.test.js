@@ -80,8 +80,8 @@ test('controls don\'t hold on their own, but are listed when something else hold
   assert.deepEqual(Object.keys(review), ['x.com/keys']);
 });
 
-test('the hold sentences name the site; the menu has twelve powers', () => {
-  assert.equal(bp.NAMES.length, 12);
+test('the hold sentences name the site; the menu has 21 powers (twelve, and nine in 0.3)', () => {
+  assert.equal(bp.NAMES.length, 21);
   assert.deepEqual(bp.powerNeeds({ site: 'x.com', powers: ['sound'] }), [{ key: 'power:sound', fact: 'can play sounds', power: 'sound', soft: false, lines: [] }]);
   assert.match(bp.MENU['site-data'].hold('x.com'), /what x\.com sends this page/);
   assert.match(bp.MENU['search-box'].hold(bp.siteOf({ site: 'all-sites' })), /the sites it runs on/);
@@ -231,4 +231,40 @@ test('a free mod whose header says risk 2 doesn\'t break the hold (its risk2 nee
   fs.writeFileSync(path.join(dir, 'reorder.js'), '// ==WebMod==\n// @name Reorder\n// @match *://x.com/*\n// @risk 2 changes the sort order\n// ==/WebMod==\ndocument.title = "x";\n');
   const mods = scanMods(ws.modsDir).mods;
   assert.doesNotThrow(() => updateHeld(ws, mods, []));
+});
+
+test('0.3\'s powers (WIDEN.md class B): their header values, checked; their hold sentences; @migrate a need of its own', () => {
+  const facts = (p, extra) => bp.powerNeeds(build(head(p, extra)).mod).filter((n) => !/^power:together/.test(n.key)).map((n) => n.fact);
+  assert.deepEqual(facts('block-events mouseover keydown click(button.cancel)'), ['can keep this site from seeing some of what you do here (the mouse moving over things, keys, clicks on button.cancel), so the site doesn\'t react to it']);
+  assert.throws(() => build(head('block-events submit')), /isn't an event it may keep/);
+  assert.throws(() => build(head('block-events focus')), /isn't an event it may keep/);
+  assert.throws(() => build(head('block-events click')), /click only on what it names/);
+  assert.throws(() => build(head('block-events')), /needs the events it keeps/);
+  assert.deepEqual(facts('page-events trif-demo-reset'), ['can send this page\'s own code these signals: trif-demo-reset']);
+  for (const bad of ['click', 'htmx:trigger', 'turbo:visit', 'trif:filter-request']) assert.throws(() => build(head(`page-events ${bad}`)), /page-events/);
+  assert.deepEqual(facts('site-storage session:trif-demo-state local:trifProfileStyler.mine:* cookie:twid'), ['can read and change what this site keeps under: trif-demo-state, trifProfileStyler.mine:*, twid (a cookie: only read)']);
+  for (const bad of ['local:*', 'local:auth_token', 'session:sessionid', 'cookie:csrftoken', 'other:x', 'local:ab*']) assert.throws(() => build(head(`site-storage ${bad}`)), /site-storage/);
+  assert.deepEqual(facts('rewrite-requests HomeTimeline variables.enableRanking=false'), ['changes what x.com receives from this page: enableRanking set to false (in HomeTimeline requests)']);
+  for (const bad of ['HomeTimeline', 'HomeTimeline variables.url=https://evil.example/', 'HomeTimeline variables.x="a b"', 'Home/Timeline variables.x=1']) assert.throws(() => build(head(`rewrite-requests ${bad}`)), /rewrite-requests/);
+  assert.deepEqual(facts('image-variants pbs.twimg.com _normal.→_400x400.'), ['can load other sizes of pictures this page shows (from pbs.twimg.com)']);
+  assert.deepEqual(build(head('image-variants pbs.twimg.com _normal.->_400x400.')).mod.powerArgs, { 'image-variants': ['pbs.twimg.com _normal.→_400x400.'] });
+  assert.throws(() => build(head('image-variants pbs.twimg.com a→//evil.example/')), /image-variants/);
+  assert.deepEqual(facts('embeds www.youtube.com/embed'), ['can play videos this page links to, inside the page (from youtube.com)']);
+  assert.throws(() => build(head('embeds evil.example/embed')), /isn't a player/);
+  assert.deepEqual(facts('local-fonts'), ['can see which fonts are installed on this computer (and this site could see that too)']);
+  assert.deepEqual(facts('edit-uploads'), ['can change pictures you attach on this site before you post them']);
+  // (preload: soft, as controls)
+  assert.deepEqual(bp.powerNeeds(build(head('preload')).mod).map((n) => [n.fact, n.soft]), [['can make this page load its pictures sooner', true]]);
+  // (the widened ones)
+  assert.deepEqual(facts('go-to reload /?mods=[red|blue]'), ['can reload this page; it can take you to these pages on x.com: /?mods=one of red, blue, or to a link the page shows']);
+  assert.throws(() => build(head('go-to /?mods=[red|evil.example]')), /isn't a plain word/);
+  assert.deepEqual(build(head('site-data ytInitialData')).mod.powerArgs, { 'site-data': ['ytInitialData'] });
+  for (const bad of ['fetch', 'location', 'onload']) assert.throws(() => build(head(`site-data ${bad}`)), /isn't a data global/);
+  assert.match(facts('search-box https://www.x.com/{link}/{query}')[0], /searches www\.x\.com \(in the place a link on the page names\)$/);
+  // @migrate: listed on the hold, a need of its own; whole names, never a login's
+  const m = build(head('sound', '// @migrate localStorage rrRave.zoom rrRave.on\n')).mod;
+  assert.deepEqual(m.powerArgs, { migrate: ['local:rrRave.zoom', 'local:rrRave.on'] });
+  assert.deepEqual(bp.powerNeeds(m).map((n) => [n.key, n.fact]).pop(), ['power:migrate:local:rrRave.on | local:rrRave.zoom', 'brings over its old settings from what this site keeps under: rrRave.zoom, rrRave.on (once)']);
+  assert.throws(() => build(head('sound', '// @migrate localStorage auth.token\n')), /named like a login/);
+  assert.throws(() => build(head('sound', '// @migrate cookies x\n')), /@migrate/);
 });

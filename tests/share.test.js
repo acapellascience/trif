@@ -63,7 +63,7 @@ test('import: the site from @match, or asked; never over a mod without a choice;
   assert.deepStrictEqual(scanMods(ws.modsDir).mods.map((m) => m.id).sort(), ['b.com/both', 'x.com/x-com-hide-reposts', 'x.com/x-com-hide-reposts-2']);
 });
 
-test('a site\'s files: bytes and a cleaned name, never over another, at most 50 MB; listed, removed to the trash; never scanned as mods', () => {
+test('a site\'s files: bytes and a cleaned name, never over another; listed, removed to the trash; never scanned as mods', () => {
   const home = tempDir('trif-share-');
   const ws = wsOf(home);
   writeMod(home, 'x.com', 'hide.js', `${head('Hide')}x();\n`);
@@ -73,7 +73,6 @@ test('a site\'s files: bytes and a cleaned name, never over another, at most 50 
   // (a path in the name: only its last part; control characters and leading dots go)
   assert.strictEqual(share.addFile(ws, { site: 'x.com', name: '../../../.ssh/authorized_keys', bytes: Buffer.from('k') }).name, 'authorized_keys');
   assert.strictEqual(share.addFile(ws, { site: 'x.com', name: '..\\..\\evil.js', bytes: Buffer.from('alert(1)') }).name, 'evil.js');
-  assert.throws(() => share.addFile(ws, { site: 'x.com', name: 'big.wav', bytes: Buffer.alloc(share.MAX_FILE + 1) }), /up to 50 MB each/);
   assert.throws(() => share.addFile(ws, { site: '../x', name: 'a', bytes: Buffer.from('a') }), /isn't a site/);
   assert.deepStrictEqual(share.listFiles(ws, 'x.com').map((f) => f.name).sort(), ['authorized_keys', 'ding 2.opus', 'ding.opus', 'evil.js']);
   // a .js in files/ isn't a mod
@@ -127,4 +126,33 @@ test('trif export, import, add and files work without the browser; Finder stubbe
   assert.strictEqual(r.code, 0, r.stderr);
   r = await runCli(['files', 'x.com'], { home, env });
   assert.match(r.stdout, /sites\/x\.com\/files\/note\.txt {2}5 bytes/);
+});
+
+test('a site\'s files in slices: appended in order to a hidden temp file, renamed into place; no size cap but the disk', () => {
+  const home = tempDir('trif-share-');
+  const ws = wsOf(home);
+  const dir = path.join(home, 'sites', 'x.com', 'files');
+  const { id } = share.fileBegin(ws, { site: 'x.com', name: '../song.wav', size: 6 });
+  assert.deepStrictEqual(share.listFiles(ws, 'x.com'), [], 'a file on its way isn\'t listed');
+  assert.deepStrictEqual(share.fileSlice(ws, { id, offset: 0, bytes: Buffer.from('abc') }), { written: 3 });
+  assert.throws(() => share.fileSlice(ws, { id, offset: 0, bytes: Buffer.from('abc') }), /out of order/);
+  assert.throws(() => share.fileSlice(ws, { id, offset: 3, bytes: Buffer.from('abcd') }), /bigger than it said/);
+  share.fileSlice(ws, { id, offset: 3, bytes: Buffer.from('def') });
+  assert.deepStrictEqual(share.fileEnd(ws, { id }), { site: 'x.com', name: 'song.wav', rel: 'sites/x.com/files/song.wav', size: 6 });
+  assert.strictEqual(fs.readFileSync(path.join(dir, 'song.wav'), 'utf8'), 'abcdef');
+  assert.throws(() => share.fileEnd(ws, { id }), /has ended/);
+  // never over another; a file that came only in part is taken away; so is one given up
+  const b = share.fileBegin(ws, { site: 'x.com', name: 'song.wav', size: 1 });
+  share.fileSlice(ws, { id: b.id, offset: 0, bytes: Buffer.from('z') });
+  assert.strictEqual(share.fileEnd(ws, { id: b.id }).name, 'song 2.wav');
+  const c = share.fileBegin(ws, { site: 'x.com', name: 'part.wav', size: 5 });
+  share.fileSlice(ws, { id: c.id, offset: 0, bytes: Buffer.from('z') });
+  assert.throws(() => share.fileEnd(ws, { id: c.id }), /came only in part/);
+  const d = share.fileBegin(ws, { site: 'x.com', name: 'gone.wav', size: 5 });
+  assert.deepStrictEqual(share.fileAbort(ws, { id: d.id }), { aborted: true });
+  assert.deepStrictEqual(fs.readdirSync(dir).filter((n) => n.startsWith('.')), [], 'no temp files left');
+  // no room: refused, with both sizes
+  const statfs = () => ({ bavail: 1024, bsize: 1024 }); // 1 MB free
+  assert.throws(() => share.fileBegin(ws, { site: 'x.com', name: 'huge.wav', size: 5 * 1024 ** 3 }, { statfs }), /huge\.wav is 5\.0 GB, and there's only 1\.0 MB free on this disk/);
+  assert.throws(() => share.fileBegin(ws, { site: '../x', name: 'a', size: 1 }), /isn't a site/);
 });

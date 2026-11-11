@@ -12,18 +12,30 @@
 const { tokenize } = require('./powers');
 
 // Names a page script has that a sandboxed mod doesn't (it has page, trif, console, the timers, Math,
-// Date and the language).
+// Date, the language, and the pure tools sandbox.js SANDBOX_EXTRA_GLOBALS lists: Float32Array, Float64Array,
+// URL, URLSearchParams, Intl, TextEncoder, TextDecoder, structuredClone, atob, btoa, performance.now).
 const PAGE_GLOBALS = new Set([
   'window', 'document', 'self', 'top', 'parent', 'frames', 'opener', 'globalThis.document', 'location', 'history', 'navigator',
   'localStorage', 'sessionStorage', 'indexedDB', 'caches', 'cookieStore', 'fetch', 'XMLHttpRequest', 'WebSocket', 'EventSource',
   'WebTransport', 'RTCPeerConnection', 'Worker', 'SharedWorker', 'BroadcastChannel', 'MessageChannel', 'postMessage', 'open', 'close',
   'alert', 'confirm', 'prompt', 'print', 'Image', 'Audio', 'Option', 'MutationObserver', 'IntersectionObserver', 'ResizeObserver',
-  'getComputedStyle', 'matchMedia', 'CSS', 'URL', 'URLSearchParams', 'Blob', 'File', 'FileReader', 'crypto', 'performance',
+  'getComputedStyle', 'matchMedia', 'CSS', 'Blob', 'File', 'FileReader', 'crypto',
   'chrome', 'browser', 'unsafeWindow', 'eval', 'Function', 'Event', 'CustomEvent', 'MouseEvent', 'KeyboardEvent', 'PointerEvent',
   'InputEvent', 'HTMLElement', 'Element', 'Node', 'NodeFilter', 'DOMParser', 'AudioContext', 'OfflineAudioContext', 'Notification',
-  'customElements', 'requestIdleCallback', 'cancelIdleCallback', 'queueMicrotask', 'structuredClone', 'atob', 'btoa', 'TextEncoder',
-  'TextDecoder', 'Intl', 'scrollTo', 'scrollBy', 'innerWidth', 'innerHeight', 'devicePixelRatio', 'screen', 'visualViewport',
+  'customElements', 'requestIdleCallback', 'cancelIdleCallback', 'queueMicrotask', 'scrollTo', 'scrollBy', 'innerWidth', 'innerHeight',
+  'devicePixelRatio', 'screen', 'visualViewport', 'DOMPoint', 'ImageData', 'Path2D', 'OffscreenCanvas', 'createImageBitmap',
 ]);
+// The language's names SES leaves out of every compartment (and TRIF doesn't add)
+const LANGUAGE_MISSING = new Set(['SharedArrayBuffer', 'Atomics', 'WeakRef', 'FinalizationRegistry', 'WebAssembly', 'Float16Array']);
+// Where the API has what a page global did
+const GLOBAL_TIPS = {
+  MutationObserver: 'use trif.observe(selector, fn, { attributes }) or trif.changes(selector, fn)',
+  ResizeObserver: 'use el.onResize(fn)', IntersectionObserver: 'use el.onVisible(fn, { threshold, rootMargin })',
+  matchMedia: 'use page.matchMedia(query)', devicePixelRatio: 'use page.devicePixelRatio', getComputedStyle: 'use el.style(property)',
+  innerWidth: 'use page.width', innerHeight: 'use page.height', location: 'use page.url (and trif.onUrl)', document: 'use page (page.find, page.body, page.create)',
+  AudioContext: 'use trif.audio() (the sound power)', OfflineAudioContext: 'use trif.audio().render(seconds, build)', DOMPoint: 'el.isPointInFill(x, y) takes numbers',
+  ImageData: 'getImageData and putImageData take and give { width, height, data }',
+};
 // What a page script does with real elements that TRIF's stand-ins do another way.
 const ELEMENT_MEMBERS = {
   innerHTML: 'use setText, or build it with page.create and append', outerHTML: 'use setText, or build it with page.create and append',
@@ -33,10 +45,13 @@ const ELEMENT_MEMBERS = {
   getElementsByClassName: 'use findAll(".name")', getElementsByTagName: 'use findAll("tag")',
   appendChild: 'use append', insertBefore: 'use before', removeChild: 'use remove()', replaceChildren: 'use remove() and append',
   setAttribute: 'use setAttr', getAttribute: 'use attr', removeAttribute: 'use removeAttr', classList: 'use classes.add / remove / toggle / has',
-  textContent: 'use text / setText', innerText: 'use text / setText', parentElement: 'use parent', parentNode: 'use parent',
+  textContent: 'use text / setText', parentElement: 'use parent', parentNode: 'use parent',
   nextElementSibling: 'use next', previousElementSibling: 'use previous', cloneNode: 'use clone()', getBoundingClientRect: 'use rect()',
   getContext: 'use canvas()', click: 'a boxed mod can\'t click for the user', dispatchEvent: 'a boxed mod can\'t act for the user',
-  submit: 'a boxed mod can\'t submit', requestSubmit: 'a boxed mod can\'t submit', focus: 'not offered in a boxed mod',
+  submit: 'a boxed mod can\'t submit', requestSubmit: 'a boxed mod can\'t submit',
+  setPointerCapture: 'use capturePointer(e.pointerId), on the mod\'s own elements', releasePointerCapture: 'use releasePointer(e.pointerId)',
+  getAnimations: 'use animations()', getBBox: 'use bbox()', getTotalLength: 'use totalLength()', getPointAtLength: 'use pointAtLength(length)',
+  createElementNS: 'use page.createSvg(tag)', splitText: 'use trif.wrap(selector, /pattern/, fn)', toBlob: 'use toDataURL()',
   contentWindow: 'other frames are out of reach', contentDocument: 'other frames are out of reach', shadowRoot: 'not offered in a boxed mod',
 };
 const DECLARE = new Set(['const', 'let', 'var', 'function', 'class']);
@@ -115,13 +130,24 @@ function sandboxLint(code, { powers = [] } = {}) {
     // (phase 3: the page's media, clicking what the header names, going to a page, a channel, changing drafts)
     if (member && next && next.v === '(') {
       if (t.v === 'click') { powerUse('.click()', 'click', t.line); continue; }
-      if (/^(play|pause|setMuted|setVolume|seek)$/.test(t.v)) powerUse(`.${t.v}()`, 'media', t.line);
+      // (the page's media: play() and pause() take nothing; trif.audio()'s play(sound, options) is the sound power's)
+      const noArgs = ts[k + 2] && ts[k + 2].t === 'p' && ts[k + 2].v === ')';
+      // (and on what reads as the page's media: a name like video or player, or a find('video…') just before;
+      // an animation's play() and pause() are the mod's own)
+      const recv = ts[k - 2];
+      const mediaLike = (recv && recv.t === 'id' && /video|audio|media|player|clip|song|track/i.test(recv.v)) || ts.slice(Math.max(0, k - 8), k).some((x) => x.t === 'str' && /\b(video|audio)\b/i.test(x.v));
+      if ((/^(play|pause)$/.test(t.v) && noArgs && mediaLike) || /^(setMuted|setVolume|seek)$/.test(t.v)) powerUse(`.${t.v}()`, 'media', t.line);
       if (t.v === 'setValue' && !has.has('controls')) powerUse('.setValue()', 'write-drafts', t.line);
       if ((t.v === 'goTo' || t.v === 'channel') && ts[k - 2] && ts[k - 2].v === 'trif') powerUse(`trif.${t.v}`, t.v === 'goTo' ? 'go-to' : 'mods', t.line);
     }
     if (member) {
+      const base = ts[k - 2];
+      const assigned = next && next.t === 'p' && next.v === '=';
       // (`.style.x`: a real element's style object; a stand-in's style is a function)
-      if (t.v === 'style' && next && next.t === 'p' && next.v === '.') add('.style.…', 'a stand-in\'s style is style(property, value)', t.line);
+      if (t.v === 'style' && next && next.t === 'p' && next.v === '.') add('.style.…', 'a stand-in\'s style is style(property, value) (and inlineStyle(property) reads its style attribute)', t.line);
+      else if (base && base.v === 'performance' && t.v !== 'now') add(`performance.${t.v}`, 'a boxed mod has performance.now() only (the rest lists what the page loaded)', t.line);
+      else if (base && base.v === 'URL' && /^(createObjectURL|revokeObjectURL)$/.test(t.v)) add(`URL.${t.v}`, 'not there in a boxed mod: it would make a blob: address (a canvas\'s toDataURL() makes a data: one)', t.line);
+      else if (assigned && /^(innerText|scrollTop|scrollLeft|offsetWidth|offsetHeight|clientWidth|clientHeight|scrollWidth|scrollHeight)$/.test(t.v)) add(`.${t.v} =`, t.v === 'innerText' ? 'use setText' : `a stand-in's ${t.v} is read only (scrolling the page's elements would make it load more)`, t.line);
       else if (Object.prototype.hasOwnProperty.call(ELEMENT_MEMBERS, t.v)) {
         const tip = ELEMENT_MEMBERS[t.v];
         add(`.${t.v}`, tip.startsWith('use ') ? `elements are TRIF's stand-ins here: ${tip}` : tip, t.line);
@@ -130,7 +156,8 @@ function sandboxLint(code, { powers = [] } = {}) {
     }
     const key = next && next.t === 'p' && next.v === ':' && prev && prev.t === 'p' && (prev.v === '{' || prev.v === ',');
     if (key || declared.has(t.v)) continue;
-    if (PAGE_GLOBALS.has(t.v)) add(t.v, 'not there in a boxed mod: it has page, trif, console, the timers, Math, Date and the language', t.line);
+    if (PAGE_GLOBALS.has(t.v)) add(t.v, `not there in a boxed mod: it has page, trif, console, the timers, Math, Date, the language and its pure tools (URL, Intl, typed arrays…)${GLOBAL_TIPS[t.v] ? `: ${GLOBAL_TIPS[t.v]}` : ''}`, t.line);
+    if (LANGUAGE_MISSING.has(t.v)) add(t.v, 'not there in a boxed mod: the sandbox (SES) leaves it out of every mod', t.line);
     if ((t.v === 'setTimeout' || t.v === 'setInterval') && next && next.v === '(' && ts[k + 2] && (ts[k + 2].t === 'str' || ts[k + 2].t === 'tpl')) add(`${t.v}("…")`, 'timers take a function, not code in a string', t.line);
   }
   return finish(found);
@@ -140,4 +167,4 @@ function finish(found) {
   return [...found.values()].map((f) => ({ what: f.what, why: f.why, lines: [...f.lines].sort((a, b) => a - b) })).sort((a, b) => a.lines[0] - b.lines[0]);
 }
 
-module.exports = { sandboxLint, PAGE_GLOBALS };
+module.exports = { sandboxLint, PAGE_GLOBALS, LANGUAGE_MISSING };

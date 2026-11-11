@@ -140,7 +140,7 @@ changes that.
 - It's held until you approve its powers. **The approval is for the set of powers, not the code.** Since TRIF
   enforces the list, an update with the same powers runs without asking again. An update that asks for a new
   power is held for that power.
-- "New mods start" (Settings) applies as for any boxed mod.
+- A boxed mod from outside the chat starts off, as any mod does.
 - In Safari, where there's no sandbox, it's held like any boxed mod there and runs as a free mod if
   allowed.
 

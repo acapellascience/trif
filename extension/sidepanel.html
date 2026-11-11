@@ -95,19 +95,17 @@
   <div id="starter" class="starter" hidden>
     <p class="starter-title">Tim’s mods</p>
     <ul id="starter-list" class="starter-list"></ul>
-    <p class="note">Plain JavaScript you can read: <a href="https://github.com/acapellascience/trif/tree/main/examples/sites" id="starter-source" target="_blank" rel="noopener">see the code</a>.</p>
+    <p class="note">They’re added switched off: turn on the ones you want. Plain JavaScript you can read: <a href="https://github.com/acapellascience/trif/tree/main/examples/sites" id="starter-source" target="_blank" rel="noopener">see the code</a>.</p>
     <p id="starter-err" class="note error" hidden></p>
   </div>
-  <!-- New mods start, the sites blocked in TRIF, agents on sites. (TRIF asks for each site's permission when
+  <!-- The chat's own mods, the sites blocked in TRIF, agents on sites. (TRIF asks for each site's permission when
        it's turned on there: no site-permission mode to choose.) -->
   <div class="sites-block">
     <p id="mode-note" class="note" hidden></p>
-    <!-- New mods start on or off, by group (sidepanel.js renderSites; lib.js applyNewMods). -->
-    <p class="sites-title">New mods start</p>
-    <label class="field starts-row"><span>Style mods</span><select id="starts-rules"><option value="on">On</option><option value="off">Off</option></select></label>
-    <label class="field starts-row"><span>Boxed mods</span><select id="starts-sandboxed"><option value="on">On</option><option value="off">Off</option></select></label>
-    <label class="field starts-row"><span>Free mods</span><select id="starts-page"><option value="on">On</option><option value="off">Off</option></select></label>
-    <p id="starts-note" class="note" hidden>Mods your chat here makes still start on.</p>
+    <!-- Mods from outside the chat always start off; the chat's own: this (sidepanel.js renderSites; lib.js applyNewMods). -->
+    <p class="sites-title">Mods your chat makes</p>
+    <label class="field starts-row"><span>Then</span><select id="chat-mods"><option value="on">Start on</option><option value="wait">Wait for me</option></select></label>
+    <p class="note">Start on: what the chat makes or changes runs at once, so you see it working. Wait for me: it's saved, but runs only when you turn it on (a change waits too, and the version before keeps running).</p>
     <!-- When a mod breaks (a new error, or nothing it looks for on the page): sidepanel.js, background.js announceBreak -->
     <p class="sites-title">When a mod breaks</p>
     <label class="field break-row"><span>Then</span><select id="on-break"><option value="ask">Ask me</option><option value="auto">Fix it automatically</option><option value="flag">Just flag it</option></select></label>

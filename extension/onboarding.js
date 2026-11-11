@@ -299,7 +299,7 @@ function starterStep(s, connected) {
     row.append(add, none);
     return [
       intro, list, row,
-      el('p', 'note', `Each mod has its own switch in the TRIF ${PANEL}: you can turn any of them off individually, any time. You can add the others later, in the panel’s Settings.`),
+      el('p', 'note', `Tim’s mods are added switched off: turn on the ones you want in the TRIF ${PANEL}, each with its own switch. You can add the other sites’ later, in the panel’s Settings.`),
       starterError ? el('p', 'problem', starterError) : null,
     ];
   });

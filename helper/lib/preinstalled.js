@@ -59,18 +59,19 @@ const trash = require('./trash');
 const { envVar } = require('./env');
 const { scopeFor } = require('./scope');
 
-// on: switched on from the start; the rest wait for the user to switch them on.
+// on: switched on from the start; since 0.3 none is: every one waits for the user to switch it on (a copy already
+// on someone's computer keeps its switch).
 const PREINSTALLED = [
-  { id: 'www.google.com/hide-ai-in-results', on: true }, // AI Banisher
-  { id: 'www.google.com/hide-extra-sections', on: true }, // Just Results
-  { id: 'x.com/detox-timeline', on: true }, // (x.com/plain-x until 0.2.3: RETIRED, below)
+  { id: 'www.google.com/hide-ai-in-results', on: false }, // AI Banisher
+  { id: 'www.google.com/hide-extra-sections', on: false }, // Just Results
+  { id: 'x.com/detox-timeline', on: false }, // (x.com/plain-x until 0.2.3: RETIRED, below)
   { id: 'x.com/rainbow-rave', on: false },
-  { id: 'amazon.com/simple-home', on: true },
-  { id: 'amazon.com/simple-shopping', on: true },
+  { id: 'amazon.com/simple-home', on: false },
+  { id: 'amazon.com/simple-shopping', on: false },
   { id: 'www.instagram.com/desaturate', on: false },
-  { id: 'www.instagram.com/following-only-feed', on: true },
-  { id: 'www.instagram.com/hide-ai-content', on: true },
-  { id: 'www.instagram.com/hide-reposts', on: true },
+  { id: 'www.instagram.com/following-only-feed', on: false },
+  { id: 'www.instagram.com/hide-ai-content', on: false },
+  { id: 'www.instagram.com/hide-reposts', on: false },
   // Added in 0.2.0: existing workspaces get it (off) with the setup that installs the update, since it
   // isn't in their `offered` list yet.
   { id: 'www.google.com/dvd-logo', on: false },
@@ -308,7 +309,7 @@ function updateShippedMods(home, modsDir, examplesDir, list = PREINSTALLED) {
       writeAtomic(baseFile(home, id), shipped.code);
       writeAtomic(modFile(modsDir, id), shipped.code);
       removeFile(newFile(home, id));
-      // (stamped: a browser where new mods of its group start off switches it off, once; autoUpdatedIds)
+      // (stamped: each browser switches it off, once; autoUpdatedIds)
       next = { ...current, auto: new Date().toISOString() };
       updated.push({ id, version: shipped.version, from: rec ? rec.version || null : null });
     } else {
@@ -728,9 +729,9 @@ function readdedIds(home) { return load(home).readded; }
 
 /**
  * Shipped mods TRIF replaced with a new version by itself (the user hadn't changed theirs): id -> stamp,
- * while the copy is still that version. Sent with the mods as `autoUpdated`: a browser whose user set new
- * mods of that group to start off switches it off once (extension/lib.js applyNewMods). Not one the user
- * chose ("Use the new version"): they asked for that one.
+ * while the copy is still that version. Sent with the mods as `autoUpdated`: each browser switches it off
+ * once, as it came from outside the chat (extension/lib.js applyNewMods). Not one the user chose ("Use the
+ * new version"): they asked for that one.
  */
 function autoUpdatedIds(home) {
   const out = {};

@@ -7,7 +7,13 @@
 // or style mod's comes from its @risk, and TRIF's reading of its code can raise it, never lower it.
 // A power or finding not listed here (a newer helper's) counts for nothing, and still counts as a power.
 
-export const POWER_LEVEL = { 'rewrite-requests': 2, 'block-events': 1, 'site-data': 1, click: 1, 'write-drafts': 1, media: 1 };
+// (0.3's powers too: keeping events or signalling the page's own code, its storage, uploads you post, other
+// sizes of its pictures, the fonts on this computer: each something the site's scripts could tell)
+export const POWER_LEVEL = {
+  'rewrite-requests': 2,
+  'block-events': 1, 'site-data': 1, click: 1, 'write-drafts': 1, media: 1,
+  'page-events': 1, 'site-storage': 1, 'edit-uploads': 1, 'image-variants': 1, 'local-fonts': 1,
+};
 export const FOUND_LEVEL = { sends: 1, acts: 1 };
 
 const levelOf = (table, name) => (Object.prototype.hasOwnProperty.call(table, name) ? table[name] : 0);

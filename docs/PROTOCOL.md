@@ -163,7 +163,7 @@ logs it and exits (the extension reconnects to a fresh one) instead of misreadin
 mod: what its code could do as a free mod (helper/lib/powers.js facts), for a browser without the sandbox;
 `update`: a newer version of this shipped mod is waiting, see "Updates to shipped mods"; `autoUpdated`: a stamp
 when TRIF itself replaced the user's unchanged copy of a shipped mod with a new version, kept while the copy is
-that version (`preinstalled.json` `shipped.<id>.auto`, `autoUpdatedIds`), see "New mods start on or off".)
+that version (`preinstalled.json` `shipped.<id>.auto`, `autoUpdatedIds`), see "Mods from outside the chat start off".)
 
 The extension keeps the mods it last had in `chrome.storage.local`, one per key: **`mod:<id>`** = the Mod,
 and **`modIds`** = their ids in order, so it can apply them before the helper connects. Only the mods that
@@ -332,9 +332,10 @@ TRIF asks for each site's permission when it's turned on there (Fix, Connect), a
   - **blocked**: in TRIF's block list (below): the panel red, "The robot is blocked on <site>" and "Unblock".
 - **The off screen's links**, under Fix: "Block on <site>" (title and accessible description "Add to TRIF's
   block list": `site.block`, below) and "Disconnect from <site>" ("Disable browser permissions"; not in
-  Safari, and not when the browser gives TRIF every site in its own settings, when one site can't be given
-  back): `{type: "site.disconnect", site, tab}`: out of `sitesOn`, runs stopped, `permissions.remove` of its
-  origin, so disconnected (grey). `site.disconnect` refuses when the browser gives every site.
+  Safari): `{type: "site.disconnect", site, tab}`: out of `sitesOn`, runs stopped, `permissions.remove` of
+  its origin, so disconnected (grey). When the browser gives TRIF every site (in its own settings), the
+  every-site grant goes too (as the update's step does): every other site keeps its switch and asks again,
+  `accessNote` shows the same one-time note, and the result has `droppedEverySite: true`.
 - **The power button** in the bar (and the robot, the same switch) shows on "The robot is off." too, to turn
   it on from there; it's hidden when the site is disconnected (Connect) or blocked (Unblock).
 - **The block list**, chrome.storage.local **`blockedSites`** (registrable domains, like `sitesOn`): TRIF's
@@ -419,21 +420,23 @@ reloads the tab and greys the group's rows; `status` reports `groupsOff` when no
 `GROUPS OFF`). Panel only: there's no CLI or agent command for it, so an agent run can't switch page
 scripts back on for a site the user turned them off on.
 
-**New mods start on or off.** For each group, the user chooses in Settings whether its new mods start on (the
-default, as before; Boxed mods too) or off: `chrome.storage.local` **`startsOff`** = the groups set to start off (`["page"]`;
-`normalizeStartsOff`). The panel sends `{type: "mods.startsOff", group, off}`; panel only, like the groups'
-switches. It counts from then on: mods already there keep their switches. On each `mods` message
+**Mods from outside the chat start off.** There's no setting for it. On each `mods` message
 (`applyNewMods` in lib.js, after `applyStartOff` and `applyReadded`), a mod arrives when its id isn't in
 **`seenMods`** (id → true, every mod this browser has seen; a browser without it, from before, takes all its
 mods as seen), when its `readded` stamp is new, or when its `autoUpdated` stamp isn't the one in
-**`autoUpdated`** (id → stamp). An arriving mod of a group set to start off is switched off (`disabled`) and
-recorded in **`newOff`** = `{"<id>": "new"|"update"}`, unless it was made in this browser's own side panel
-(`origin.by` is this install and `origin.live`: its file was written while that run was going, between the
-run's start and its end; a file that only appeared in the moments after, which origins.js also counts for the
-run, could be anyone's: the user asked for the run's, and the agent checks it running) or is held (it waits
-for the user's OK anyway, and allowing it is looking at it). A renamed file keeps both. Switching the mod on
-clears its `newOff`; from an agent run, `mod.enable` refuses to switch one on. `status` reports `startsOff`
-when non-empty and `newOff` on such a mod while it's off (`trif status`: `NEW MODS`, `off (new)`).
+**`autoUpdated`** (id → stamp). An arriving mod is switched off (`disabled`) and recorded in **`newOff`** =
+`{"<id>": "new"|"update"|"chat"}`, unless it was made in this browser's own side panel (`origin.by` is this
+install and `origin.live`: its file was written while that run was going, between the run's start and its
+end; a file that only appeared in the moments after, which origins.js also counts for the run, could be
+anyone's) or is held (it waits for the user's OK anyway, and allowing it is looking at it). A renamed file
+keeps both. Switching the mod on clears its `newOff`; from an agent run, `mod.enable` refuses to switch one
+on. A stored `startsOff`, from the setting there used to be, is removed.
+
+**Mods your chat makes.** `chrome.storage.local` **`chatWait`** (true: Settings' "Wait for me"; the panel sends
+`{type: "mods.chatWait", wait}`; panel only). With it, a mod the chat makes arrives off too (`newOff` `"chat"`),
+and a change the chat makes to a mod that's running waits: **`chatWaiting`** = `{"<id>": {old: <the Mod as it
+was>}}` (`applyChatWaiting`), the version before stays registered until the user turns this one on
+(`mod.enable`, which clears it). `status` reports `chatWait`, and `chatWaiting` on the mod.
 
 **Boxed mods.** A Mod with `sandboxed: true` (header `@sandboxed`) never waits for the user's OK for
 its code: the helper's holds (held.js) find nothing in it, as for a style mod (a side-panel run's is still
@@ -456,7 +459,7 @@ held for an `@match` outside the run's site, or `@risk 2`). The extension:
   `{"<mod id>": {"<site>": {"<key>": "<JSON>"}}}`: the world's runtime asks with
   `runtime.sendMessage({trifSandbox: "settings.get"|"settings.save", mod, key, json?})`
   (`onUserScriptMessage`); the site is the one the browser says the sender's page is on (`scopeFor`), at
-  most 64 KB per mod per site and 200 sites per mod. Mods never have `chrome`: the runtime takes
+  most 1 MB per mod per site (all its keys), 8 MB for all the boxed mods on a site, and 200 sites per mod. Mods never have `chrome`: the runtime takes
   `sendMessage` and deletes `chrome`/`browser` from the world before any mod runs.
 
 A browser that can't host the world (Safari: its userScripts is TRIF's adapter, safari.js; or a
@@ -995,7 +998,11 @@ New native request commands (answered with a normal `response`):
 | `mod.export` | `id` | `{id, file, dir}`: the mod's file copied to the downloads folder as `<site>-<mod>.js` (a number added if taken) and shown in Finder; found by its id, as `mod.reveal` does (helper/lib/share.js; `TRIF_DOWNLOADS` for tests). Not from a run |
 | `mod.exportSite` | `site` | `{site, dir, ids}`: all of a site's mods into a folder `<site> mods` there, shown. Not from a run |
 | `mod.import` | `text, name, site?, choice?` | a mod's text (from a file the user chose or dropped): `{needsSite: [sites]}` when its @match doesn't name one site, `{exists, site, name}` when a mod of that name is there (`choice`: `copy` or `replace`, which keeps the old one in history), else `{id, file, replaced?}`. The header must parse; `@source`/`@version` are taken out; recorded in `imported.json` (the mod is sent with `imported: true`), and held like any mod from outside. Not from a run |
-| `files.add` | `site, name, data` | `{site, name, rel, size}`: `data` (base64) saved as `sites/<site>/files/<name>`: the name's last part, cleaned; never over another file; at most 50 MB. Nothing in `files/` is scanned as a mod. Not from a run |
+| `files.add` | `site, name, data` | `{site, name, rel, size}`: `data` (base64) saved as `sites/<site>/files/<name>`: the name's last part, cleaned; never over another file. Nothing in `files/` is scanned as a mod. Not from a run |
+| `files.begin` | `site, name, size` | `{id}`: starts a file of any size, in slices; refused if the disk hasn't room for it. Not from a run |
+| `files.slice` | `id, offset, data` | `{written}`: appends `data` (base64, up to 8 MB), which must start at `offset` |
+| `files.end` | `id` | `{site, name, rel, size}`: renames it into place, under a free name |
+| `files.abort` | `id` | `{aborted}`: takes the unfinished file away |
 | `files.list` / `files.remove` / `files.reveal` | `site` (and `name`) | a site's files `{site, files: [{name, size, at}]}`; one moved to `trash/<site>/files/`; the folder shown in Finder |
 | `mod.delete` | `id` | `{id, deleted: true}`: moves `sites/<site>/<mod>.js` to `trash/<site>/<mod>@<UTC stamp>.js` (entries older than 30 days are removed), then re-sends the mods; also on the socket, and from a run for mods inside its scope |
 | `mod.restore` | `id` | `{id, restored: true, file}`: moves the newest trashed copy back (fails if the mod exists again, except to undo `mod.update` `new`); same rules as `mod.delete`. The extension keeps a deleted mod's switch state, so it comes back as it was |

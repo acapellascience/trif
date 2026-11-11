@@ -3082,7 +3082,8 @@ setTimeout(() => {
    */
   async forgetSite(site, id) {
     const file = path.join(this.trif, 'allowed.json');
-    const all = JSON.parse(fs.readFileSync(file, 'utf8'));
+    let all = {};
+    try { all = JSON.parse(fs.readFileSync(file, 'utf8')); } catch { /* nothing approved yet */ }
     for (const v of Object.values(all)) if (v && Array.isArray(v.powers)) v.powers = v.powers.filter((k) => !k.startsWith(`site:${site}:`));
     fs.writeFileSync(file, JSON.stringify(all, null, 2) + '\n');
     if (!id) return null;

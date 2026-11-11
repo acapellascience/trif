@@ -1293,7 +1293,7 @@ class Scenario {
       await r.check('the widened box (WIDEN.md class A): sound (compressors, a node into a parameter, waves, buffers from numbers, offline renders, its own clock), typed arrays and the browser\'s pure tools, page facts read only, drawing, animations, observers, events and focus on its own elements, SVG of its own and faithful copies, CSS from shown pictures and into shadow roots, text split into its own pieces, the page\'s own events, placeholders, bigger settings, more tags; each row\'s hostile test refused, nothing reaching the server or the page', () => this.wideCheck(win));
       await r.check('the widened box\'s powers (WIDEN.md class B): block-events, page-events, site-storage with @migrate, rewrite-requests, image-variants, edit-uploads, embeds, local-fonts, preload, and the widened site-data, go-to and media: held with each sentence and the many-powers warning; each works as its narrowing says; undeclared, each is refused', () => this.wideBCheck(win));
       await r.check('the sandbox\'s fixes from the conversion run: arc\'s anticlockwise, overscroll-behavior, a blocked key\'s default, a picture no mod changed passed on as it was, trif.wrap under a page\'s rewrite and over another mod\'s pieces, site-data\'s shortened copies, unchanged filters and a later mod\'s embedded filter, an image variant from a host without CORS, the site\'s own names in its storage, CSS into a nested shadow root', () => this.sandboxFixesCheck(win));
-      await r.check('site approval: two boxed mods whose powers make a warned pair together; the second\'s card shows "Your 127.0.0.1 mods together" with what it adds marked new; approved, the click works; without the site\'s approval, refused and logged; a third mod switched on that adds a power waits', () => this.siteApprovalCheck(win));
+      await r.check('site approval: two boxed mods whose powers make a warned pair together; the second\'s card shows "Your 127.0.0.1 mods can:" and the site\'s lists with what it adds marked new; approved, the click works; without the site\'s approval, refused and logged; a third mod switched on that adds a power waits', () => this.siteApprovalCheck(win));
       await r.check('go-to and click split between two boxed mods across a navigation (review F3): neither hold warns; on the page one mod\'s go-to took the user to, the other\'s clicks and signals wait for the user\'s own click; reached by the user, they work; with the site\'s mods approved together, they work there too', () => this.comboFixesCheck(win));
       await r.check('speculation rules (audit AU-7): a page that prefetches its same-site links at once; a link a free mod adds is fetched without a click (Chrome), a boxed mod can\'t make one', () => this.specRulesCheck(win));
       await r.check('boxed mods in the panel: their own group between Style mods and Free mods, with its switch (off on the site: they stop there; on: back)', () => this.sandboxedPanelCheck(win));
@@ -3094,7 +3094,7 @@ setTimeout(() => {
 
   // Site approval (helper/lib/sitecombos.js, docs/SAFE-MODS.md "Across mods: one approval per site"): boxed mods on
   // 127.0.0.1 whose powers make a warned pair together (e2e-cm-read: keys; e2e-cm-click: click, never keys). The
-  // click mod's card shows "Your 127.0.0.1 mods together", what it adds marked new; approved, it clicks. With the
+  // click mod's card shows "Your 127.0.0.1 mods can:" and the site's lists, what it adds marked new; approved, it clicks. With the
   // site's approval taken back, its click is refused (logged); approved again, it clicks. A third mod (page-events),
   // approved alone and switched off, switched on again adds a power the site hasn't approved: it waits.
   async siteApprovalCheck(win) {
@@ -3125,7 +3125,7 @@ setTimeout(() => {
       // the signal mod, alone on the site: only its own power; approved, then off
       fs.writeFileSync(files[T], fx('cross-click.js').replace('E2E Cross click', 'E2E Cross signal').replace('// @powers      click', '// @powers      page-events cm-ping').replace(/\/\/ @click .*\n/, '').replace("t('click', () => page.find('#cc').click());", '').replace('data-trif-box-cm', 'data-trif-box-cs'));
       let st = await held(T);
-      if (/mods together/.test(line(st, T) + after(st, T).join(' '))) problems.push(`alone, the signal mod's hold speaks for the site: ${line(st, T)}`);
+      if (/mods can:|can do together/.test(line(st, T) + after(st, T).join(' '))) problems.push(`alone, the signal mod's hold speaks for the site: ${line(st, T)}`);
       await this.cli(['approve', T], { timeoutMs: 20000 });
       await registered(T);
       await this.boxedSwitch(T, false);
@@ -3139,12 +3139,11 @@ setTimeout(() => {
       await this.ext(`async (id, url) => { await chrome.tabs.update(id, { url, active: true }); }`, [win.tabId, `${base}/cross.html?first`]);
       fs.writeFileSync(files[C], fx('cross-click.js'));
       st = await held(C);
-      const wantLines = ['127.0.0.1 mods together, what they can see beyond the page: the keys you press (new)', '127.0.0.1 mods together, what they can do as you: click the counter (new)',
-        '127.0.0.1 mods together, where what they see could go: clicks the site sees (new)', '127.0.0.1 mods together: So something they read could end up sent from your account. (new)'];
+      const wantLines = ['127.0.0.1 mods can: click the counter (new)', 'they can see: the keys you press (new)', 'it could end up in: clicks the site sees (new)', 'So something they read could be sent from your account. (new)'];
       if (JSON.stringify(after(st, C)) !== JSON.stringify(wantLines)) problems.push(`trif status, the click mod's site lines: ${JSON.stringify(after(st, C))}`);
       const card = await this.approvalFor(C);
-      const box = await this.panel(`async () => { const b = document.querySelector('#approval .ap-sites'); return b && !b.hidden ? [...b.querySelectorAll('.ap-site-title, .ap-site-head, .ap-site-list li, .ap-site-flag')].map((x) => x.textContent) : null; }`);
-      const wantBox = ['Your 127.0.0.1 mods together', 'What they can see beyond the page', 'the keys you press new', 'What they can do as you', 'click the counter new', 'Where what they see could go', 'clicks the site sees new', 'So something they read could end up sent from your account. new'];
+      const box = await this.panel(`async () => { const b = document.querySelector('#approval .ap-sites'); return b && !b.hidden ? [...b.querySelectorAll('.ap-site-head, .ap-site-items, .ap-site-flag')].map((x) => x.textContent) : null; }`);
+      const wantBox = ['Your 127.0.0.1 mods can:', 'click the counter new', 'They can see:', 'the keys you press new', 'It could end up in:', 'clicks the site sees new', 'So something they read could be sent from your account. new'];
       if (JSON.stringify(card.items) !== JSON.stringify(['It can click these for you: the counter (#cc).'])) problems.push(`the card's own lines: ${JSON.stringify(card.items)}`);
       if (JSON.stringify(box) !== JSON.stringify(wantBox)) problems.push(`the card's site box: ${JSON.stringify(box)}`);
       const shots = path.join(os.homedir(), 'WebMods-worktrees', 'crossmod-runs', 'shots');
@@ -3163,7 +3162,7 @@ setTimeout(() => {
       const approved = await visit('approved');
       // the site's approval taken back: the click refused, and in its errors; approved again (its waiting change), it clicks
       st = await this.forgetSite(site, C);
-      if (!after(st, C).includes('127.0.0.1 mods together, what they can do as you: click the counter (new)')) problems.push(`the change waiting, its site lines: ${JSON.stringify(after(st, C))}`);
+      if (!after(st, C).includes('127.0.0.1 mods can: click the counter (new)')) problems.push(`the change waiting, its site lines: ${JSON.stringify(after(st, C))}`);
       await sleep(1500);
       const before = await visit('before');
       const errs = JSON.stringify((await this.cli(['errors', '--tab', String(win.tabId)], { json: true, timeoutMs: 20000 }).catch(() => ({ json: null }))).json);
@@ -3175,7 +3174,7 @@ setTimeout(() => {
       await this.cli(['enable', T], { timeoutMs: 20000 });
       st = await held(T);
       const tl = after(st, T);
-      if (!tl.includes('127.0.0.1 mods together, what they can do as you: click the counter, signal the page\'s code (new)')) problems.push(`switched on, the signal mod's site lines: ${JSON.stringify(tl)}`);
+      if (!tl.includes('127.0.0.1 mods can: click the counter · signal the page\'s code (new)')) problems.push(`switched on, the signal mod's site lines: ${JSON.stringify(tl)}`);
       await this.cli(['approve', T], { timeoutMs: 20000 });
       await registered(T);
       await sleep(1500);
@@ -4288,10 +4287,10 @@ setTimeout(() => {
         if (!d || !d.open || d.querySelector('.ap-group').hidden) return null;
         return { count: d.querySelector('.ap-count').textContent, name: d.querySelector('.ap-name').textContent, lead: d.querySelector('.ap-lead').textContent,
           mods: [...d.querySelectorAll('.ap-mod')].map((s) => ({ name: s.querySelector('.ap-mod-name').textContent, code: s.querySelector('.ap-mod-code').textContent, lines: [...s.querySelectorAll('.ap-line')].map((x) => x.textContent) })),
-          sites: [...d.querySelectorAll('.ap-sites .ap-site-title')].map((x) => x.textContent), allow: [...d.querySelectorAll('.ap-allow')].length, note: d.querySelector('.ap-note').textContent };
+          sites: [...d.querySelectorAll('.ap-sites .ap-site-first')].map((x) => x.textContent), allow: [...d.querySelectorAll('.ap-allow')].length, note: d.querySelector('.ap-note').textContent };
       }`), { timeoutMs: 10000 });
       const problems = [];
-      const want = { count: 'Waiting for your OK', name: '2 mods from one request', lead: 'They ask for these powers. TRIF holds them to them:', sites: ['Your 127.0.0.1 mods together'], allow: 1 };
+      const want = { count: 'Waiting for your OK', name: '2 mods from one request', lead: 'They ask for these powers. TRIF holds them to them:', sites: ['Your 127.0.0.1 mods can:'], allow: 1 };
       for (const [k, v] of Object.entries(want)) if (JSON.stringify(card[k]) !== JSON.stringify(v)) problems.push(`the card's ${k}: ${JSON.stringify(card[k])}`);
       const names = card.mods.map((m) => m.name).sort();
       if (JSON.stringify(names) !== JSON.stringify(['E2E Request click', 'E2E Request keys']) || card.mods.some((m) => m.code !== 'Show code')) problems.push(`the card's mods: ${JSON.stringify(card.mods)}`);

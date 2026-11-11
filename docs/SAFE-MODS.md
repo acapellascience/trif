@@ -518,11 +518,11 @@ once per site:
 - A mod whose powers add a holding power to the site's approved union, on a site with other boxed mods (a quiet
   one, `sound`, `controls`, `mods`, `preload`, `embeds` or `media`, only when it completes a warned combination in
   the site's union), asks: its card
-  has its own powers and own combinations as before, then a box "Your {site} mods together" with three lists
-  made from the union's powers (what they can see beyond the page; what they can do as you; where what they see
-  could go), the items it adds marked new, and a flag line when the first and third aren't empty ("So something
-  they read could end up sent from your account.") and when they can click or signal and write drafts ("So they
-  could post for you."). `trif status` prints the lists under the mod, one line each. Approving the mod approves
+  has its own powers and own combinations as before, then a box with three lists made from the union's powers,
+  each list's items on one line: "Your {site} mods can:" (what they can do as you), "They can see:", "It could end
+  up in:", the items it adds marked new, and a flag line when what they see and where it could end up aren't empty
+  ("So something they read could be sent from your account.") and when they can click or signal and write drafts
+  ("So they could post for you."). Wording and layout approved by Tim (2026-11-11). `trif status` prints the lists under the mod, one line each. Approving the mod approves
   the site's new union. A mod alone on its site asks nothing for it: the next one asks for both.
 - Switched on, a mod that adds a holding power the site hasn't approved waits like a new one (held by
   'switch'; its row keeps its switch). Mods the user already has whose site's union isn't approved (from before

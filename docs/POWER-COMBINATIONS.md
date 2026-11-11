@@ -18,7 +18,7 @@ reads rides on it, but beside an act (`click`, `page-events`) it changes what th
 boxed mod reaches otherwise stays on the site it came from, which already has it. Across mods on one page
 (they see each other's elements, and `mods` gives them a channel), the sandbox's page-wide rules stop a
 combination split between mods from slipping past the hold, unless the user approved what the site's boxed
-mods can do together ("Your … mods together": one approval per site): docs/SAFE-MODS.md, "Combinations".
+mods can do together ("Your … mods can:": one approval per site): docs/SAFE-MODS.md, "Combinations".
 
 Counts: 91 of 210 pairs carry a warning; 32 of 1330 triples carry one of their own, and
 952 more show their pairs' warnings.

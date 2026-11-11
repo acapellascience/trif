@@ -285,7 +285,7 @@ than three powers get one general warning. Ask for the fewest that do the job. O
 (writing a draft, clicking, playing media, go-to) is refused while another boxed mod there has a power that
 would make a warned pair with it that yours didn't ask for (the error says which), until the user approves
 what the site's boxed mods can do together: TRIF asks on the hold of the mod that adds a power ("Your <site>
-mods together", what it adds marked new), once per site. **Never ask for a power your mod doesn't use** just to
+mods can:", what it adds marked new), once per site. **Never ask for a power your mod doesn't use** just to
 act beside another mod: that puts warnings on its hold for things it can't do. A mod that uses both asks for both.
 - `mods`: `trif.channel(name)` gives `send(data)` and `on((data, {from}) => …)` between your boxed mods on
   this page that have the power: plain data only (text, numbers, true/false, null, arrays, plain objects),

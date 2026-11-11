@@ -1465,18 +1465,23 @@ function siteOf(key) {
   const w = /^site:(.+):[a-z+-]+$/.exec(String(key || ''));
   return w ? w[1] : null;
 }
-// The site's lists (helper/lib/sitecombos.js reach): "Your {site} mods together", what they can see beyond the
-// page, do as you, and where what they see could go, the items this mod adds marked new; then the flag lines.
+// The site's lists (helper/lib/sitecombos.js reach): what the site's boxed mods can do as you ("Your {site} mods
+// can:"), see, and where it could end up, each list's items on one line (" · "), those this mod adds marked new;
+// then the flag lines.
 function siteBoxes(reach) {
   return (Array.isArray(reach) ? reach : []).map((r) => {
     const box = el('div', 'ap-site');
-    box.append(el('p', 'ap-site-title', r.title));
-    for (const k of ['see', 'act', 'go']) {
+    for (const k of r.order || ['act', 'see', 'go']) {
       if (!r[k] || !r[k].length) continue;
-      box.append(el('p', 'ap-site-head', r.heads[k]));
-      const ul = el('ul', 'ap-site-list');
-      for (const x of r[k]) { const li = el('li', null, x.t); if (x.new) li.append(' ', el('span', 'ap-new', 'new')); ul.append(li); }
-      box.append(ul);
+      box.append(el('p', k === (r.order || ['act'])[0] ? 'ap-site-head ap-site-first' : 'ap-site-head', r.heads[k]));
+      const line = el('p', 'ap-site-items');
+      r[k].forEach((x, i) => {
+        if (i) line.append(' · ');
+        const item = el('span', 'ap-site-item', x.t);
+        if (x.new) item.append(' ', el('span', 'ap-new', 'new'));
+        line.append(item);
+      });
+      box.append(line);
     }
     for (const f of r.flags || []) { const p = el('p', 'ap-site-flag', f.t); if (f.new) p.append(' ', el('span', 'ap-new', 'new')); box.append(p); }
     return box;

@@ -284,11 +284,15 @@ function factLine(key, fact) {
   if (/^site:/.test(k)) return `it ${fact}`;
   return /^power:together:/.test(k) ? `together, it ${fact}` : `it ${fact}`;
 }
-/** A site's lists (sitecombos.js reach) for trif status, one line each: ["<site> mods together, what they can see beyond the page: …", …]. */
+/**
+ * A site's lists (sitecombos.js reach) for trif status, one line each, as the card has them: ["<site> mods can: …",
+ * "they can see: …", "it could end up in: …", then the flag lines].
+ */
 function siteLines(r) {
-  const items = (l) => l.map((x) => `${x.t}${x.new ? ' (new)' : ''}`).join(', ');
-  return [['see', 'see'], ['act', 'act'], ['go', 'go']].filter(([k]) => r[k].length).map(([k]) => `${r.site} mods together, ${r.heads[k].replace(/^W/, 'w')}: ${items(r[k])}`)
-    .concat(r.flags.map((f) => `${r.site} mods together: ${f.t}${f.new ? ' (new)' : ''}`));
+  const items = (l) => l.map((x) => `${x.t}${x.new ? ' (new)' : ''}`).join(' · ');
+  const label = { act: `${r.site} mods can:`, see: 'they can see:', go: 'it could end up in:' };
+  return (r.order || ['act', 'see', 'go']).filter((k) => r[k].length).map((k) => `${label[k]} ${items(r[k])}`)
+    .concat(r.flags.map((f) => `${f.t}${f.new ? ' (new)' : ''}`));
 }
 function parsePowers(values, mod) { return parsePowersWithArgs(values, mod).names; }
 

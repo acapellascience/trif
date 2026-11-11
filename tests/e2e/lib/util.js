@@ -115,6 +115,8 @@ class Results {
     // (TRIF_E2E_SKIP, a regular expression: checks whose names match are skipped, to try one change faster;
     // never for a run that counts)
     if (process.env.TRIF_E2E_SKIP && new RegExp(process.env.TRIF_E2E_SKIP).test(name)) return this.record(name, 'skip', 'TRIF_E2E_SKIP');
+    // (TRIF_E2E_ONLY, likewise: only the checks whose names match run, the setup they need included by the caller)
+    if (process.env.TRIF_E2E_ONLY && !new RegExp(process.env.TRIF_E2E_ONLY).test(name)) return this.record(name, 'skip', 'TRIF_E2E_ONLY');
     const t = Date.now();
     try {
       const r = await fn();

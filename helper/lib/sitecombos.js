@@ -6,8 +6,8 @@
 //
 // - A site's boxed mods: those that run on it (its folder, a host their @match names, or everywhere) and are on in
 //   some browser (switches.json, below). Their powers together (the union; @migrate as site-storage) are what the
-//   site's mods can do together, shown as three lists (reach(): what they can see beyond the page, what they can
-//   do as you, where what they see could go) and a flag line or two.
+//   site's mods can do together, shown as three lists (reach(): what they can do as you, what they can see, where
+//   it could end up) and a flag line or two.
 // - The site's approved union: allowed.json keys `site:<site>:<a>+<b>+…` (the whole union approved, under the mod
 //   whose hold carried it; the site's is every such key's powers, whichever mod's entry, so switching a mod off or
 //   deleting it never takes any away, and adding it again doesn't ask again).
@@ -164,11 +164,11 @@ const SEE = [['read-drafts', 'what you type'], ['keys', 'the keys you press'], [
   ['site-storage', (s) => `what ${s} keeps`], ['local-fonts', 'the fonts on this computer'], ['edit-uploads', 'pictures you attach']];
 const ACT = [['click', null], ['write-drafts', 'write into your drafts'], ['page-events', 'signal the page\'s code'], ['go-to', 'take you to pages'],
   ['rewrite-requests', (s) => `change what ${s} receives`], ['block-events', 'keep some of what you do from the site']];
-const GO = [['write-drafts', 'into posts and drafts'], ['edit-uploads', 'pictures you post'], ['site-storage', (s) => `${s}'s storage`], ['click', 'clicks the site sees'],
+const GO = [['write-drafts', 'your posts and drafts'], ['edit-uploads', 'pictures you post'], ['site-storage', (s) => `${s}'s storage`], ['click', 'clicks the site sees'],
   ['page-events', 'the page\'s own code'], ['block-events', 'clicks the site sees'], ['image-variants', 'which pictures load'], ['preload', 'which pictures load'], ['embeds', 'which videos load'],
   ['media', 'how media plays'], ['sound', 'sound']];
-const FLAGS = { sent: 'So something they read could end up sent from your account.', post: 'So they could post for you.' };
-const HEADS = { see: 'What they can see beyond the page', act: 'What they can do as you', go: 'Where what they see could go', title: (s) => `Your ${s} mods together` };
+const FLAGS = { sent: 'So something they read could be sent from your account.', post: 'So they could post for you.' };
+const HEADS = { act: (s) => `Your ${s} mods can:`, see: () => 'They can see:', go: () => 'It could end up in:' };
 function listsFor(site, union, clickWords) {
   const words = (table) => [...new Set(table.filter(([p]) => union.includes(p)).map(([p, w]) => (w === null ? `click ${clickWords.length ? clickWords.join(', ') : 'what their headers name'}` : typeof w === 'function' ? w(site) : w)))];
   const see = words(SEE), act = words(ACT), go = words(GO);
@@ -178,13 +178,15 @@ function listsFor(site, union, clickWords) {
   return { see, act, go, flags };
 }
 /**
- * The site's lists for a hold: {site, title, heads, see, act, go, flags}, each item {t, new}: new when the site's
- * approved union (`before`) didn't have it.
+ * The site's lists for a hold, in the order they're shown (what they can do as you, see, and where it could end
+ * up): {site, heads, order, act, see, go, flags}, each item {t, new}: new when the site's approved union (`before`)
+ * didn't have it.
  */
+const ORDER = ['act', 'see', 'go'];
 function reach(site, before, after, clickWords = []) {
   const b = listsFor(site, before, clickWords), a = listsFor(site, after, clickWords);
   const mark = (k) => a[k].map((t) => ({ t, new: !b[k].includes(t) }));
-  return { site, title: HEADS.title(site), heads: { see: HEADS.see, act: HEADS.act, go: HEADS.go }, see: mark('see'), act: mark('act'), go: mark('go'), flags: mark('flags') };
+  return { site, heads: { act: HEADS.act(site), see: HEADS.see(site), go: HEADS.go(site) }, order: ORDER, act: mark('act'), see: mark('see'), go: mark('go'), flags: mark('flags') };
 }
 const clickWordsOf = (list) => [...new Set(list.flatMap((m) => ((m.powerArgs && m.powerArgs.click) || []).map((c) => String(c).split(':')[0].trim())))];
 

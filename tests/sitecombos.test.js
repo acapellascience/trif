@@ -45,10 +45,9 @@ test('a mod that adds a holding power to its site asks, with the site\'s lists (
   assert.deepEqual(h.needs, ['power:click:the button: #go', 'site:x.com:keys+click']);
   assert.deepEqual(lines(h), ['it can click these for you: the button (#go)', 'it adds to what your x.com mods can do together']);
   const r = h.reach[0];
-  assert.equal(r.title, 'Your x.com mods together');
-  assert.deepEqual([items(r, 'see'), items(r, 'act'), items(r, 'go'), items(r, 'flags')], [['the keys you press (new)'], ['click the button (new)'], ['clicks the site sees (new)'], ['So something they read could end up sent from your account. (new)']]);
-  assert.deepEqual(bp.siteLines(r), ['x.com mods together, what they can see beyond the page: the keys you press (new)', 'x.com mods together, what they can do as you: click the button (new)',
-    'x.com mods together, where what they see could go: clicks the site sees (new)', 'x.com mods together: So something they read could end up sent from your account. (new)']);
+  assert.deepEqual([r.order, r.heads], [['act', 'see', 'go'], { act: 'Your x.com mods can:', see: 'They can see:', go: 'It could end up in:' }]);
+  assert.deepEqual([items(r, 'act'), items(r, 'see'), items(r, 'go'), items(r, 'flags')], [['click the button (new)'], ['the keys you press (new)'], ['clicks the site sees (new)'], ['So something they read could be sent from your account. (new)']]);
+  assert.deepEqual(bp.siteLines(r), ['x.com mods can: click the button (new)', 'they can see: the keys you press (new)', 'it could end up in: clicks the site sees (new)', 'So something they read could be sent from your account. (new)']);
   assert.equal(held['x.com/reader'], undefined);
   approveHeld(ws.home, 'x.com/clicker');
   assert.deepEqual(sites.approvedUnion(loadAllowed(ws.home), 'x.com'), ['keys', 'click']);
@@ -63,7 +62,8 @@ test('a mod that adds a holding power to its site asks, with the site\'s lists (
   approveHeld(ws.home, 'x.com/clicker2'); approveHeld(ws.home, 'x.com/pre');
   write(ws, 'writer.js', boxed('Writer', 'write-drafts'));
   ({ held } = sync(ws));
-  assert.deepEqual(items(held['x.com/writer'].reach[0], 'flags'), ['So something they read could end up sent from your account.', 'So they could post for you. (new)']);
+  assert.deepEqual(items(held['x.com/writer'].reach[0], 'flags'), ['So something they read could be sent from your account.', 'So they could post for you. (new)']);
+  assert.deepEqual(items(held['x.com/writer'].reach[0], 'go'), ['your posts and drafts (new)', 'clicks the site sees', 'which pictures load']);
   approveHeld(ws.home, 'x.com/writer');
   const { mods } = sync(ws);
   assert.deepEqual(sites.siteOkFor(mods.find((m) => m.id === 'x.com/clicker'), mods, loadAllowed(ws.home)), ['x.com keys+controls+mods+preload+click+write-drafts']);

@@ -160,6 +160,7 @@ to that one. In a side-panel run you're already on the browser the user is chatt
 | `trif mods` | Mods in the workspace (id, matches, file; `[off]` = switched off, `HELD` = waiting for the user's OK). |
 | `trif check <file\|site/mod>` | Check that a mod parses, without running it (use instead of `node --check`). |
 | `trif install-example <site>/<mod>` | Copy a ready-made example mod into the workspace. |
+| `trif explain [term]` | What a word the side panel shows means (a tier, power, chip, tag, warning, agent level): its line, what the user reads behind "more", and notes for you (when to use it, what's refused, narrower ways). No term: the list. Powers: `read-drafts`, `keys`, `site-data`, `page-data`, `site-storage`, `local-fonts`, `image-variants`, `sound`, `controls`, `mods`, `preload`, `media`, `search-box`, `go-to`, `embeds`, `rewrite-requests`, `block-events`, `page-events`, `click`, `write-drafts`, `edit-uploads` (and `@migrate`). |
 
 Exit code 2 means the helper isn't running: ask the user to open Chrome, and if it's open, run
 `trif doctor` and follow what it says. `--json` prints any result raw.

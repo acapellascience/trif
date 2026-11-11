@@ -11,6 +11,7 @@ import { setMarkdown, unwrapMarkdown } from './markdown.js';
 import { createLogin } from './login.js';
 import { agentLevel, agentSiteOf, sensitiveList } from './agentsites.js';
 import { modChip, levelWords, modLevel, powerLines } from './modlevel.js';
+import { loadExplain, term, warningByLine, moreText } from './explain.js';
 import { modSwitch, syncSwitches, shownEnabled, switchError, enabledIn, onSwitchChange } from './modswitch.js';
 import { mountOpenModel, renderOpenModel, openModelKeyMissing, watchOpenModel } from './openmodel.js';
 
@@ -227,6 +228,7 @@ async function init() {
   // Settings' "see the code" for Tim's mods: the code as this version shipped it (the release's tag).
   const src = document.getElementById('starter-source');
   if (src) src.href = `https://github.com/acapellascience/trif/tree/v${chrome.runtime.getManifest().version}/examples/sites`;
+  await loadExplain(); // (the explanations behind "more": before anything renders)
   connectPort();
   view.windowId = OPENED_FOR || (await chrome.windows.getCurrent()).id;
   if (FALLBACK) await setUpPanelWindow();
@@ -377,6 +379,33 @@ function el(tag, className, text) {
   if (text !== undefined) e.textContent = text;
   return e;
 }
+
+// "more": a line's explanation (explain.js), shown in place under it; "less" folds it again. Nothing for a
+// term the table doesn't have (its line alone).
+let moreSeq = 0;
+function addMore(host, t) {
+  const text = moreText(t);
+  if (!text) return host;
+  const box = el('span', 'more-text', text);
+  box.id = `more-${++moreSeq}`;
+  box.hidden = true;
+  const btn = el('button', 'more-btn', 'more');
+  btn.type = 'button';
+  btn.setAttribute('aria-expanded', 'false');
+  btn.setAttribute('aria-controls', box.id);
+  btn.addEventListener('click', (e) => {
+    e.stopPropagation();
+    box.hidden = !box.hidden;
+    btn.textContent = box.hidden ? 'more' : 'less';
+    btn.setAttribute('aria-expanded', String(!box.hidden));
+  });
+  host.append(' ', btn, box);
+  return host;
+}
+// (the term behind a hold's line: a power by its need's key, power:<name>[:its values])
+const powerTerm = (key) => { const p = /^power:([\w-]+)/.exec(String(key || '')); return p && p[1] !== 'together' ? term('powers', p[1]) : null; };
+// (a combination warning by its sentence: the hold's "together, it …", or the many-powers one)
+const warningTerm = (s) => { const t = String(s || '').trim(); const u = t.charAt(0).toUpperCase() + t.slice(1); return warningByLine(u) || warningByLine(`${u}.`); };
 
 function code(text) {
   return el('code', null, text);
@@ -910,6 +939,7 @@ const GROUP_TEXT = {
   sandboxed: [GROUP_NAMES.sandboxed, 'Run in TRIF\'s sandbox: they change what the page shows, and do only what you\'ve allowed.'],
   page: [GROUP_NAMES.page, 'Run in the page with everything it has.'],
 };
+const TIER_TERMS = { rules: 'style-mods', sandboxed: 'boxed-mods', page: 'free-mods' }; // (explain.json)
 const groupOff = (g) => !!view.site && groupOffOn(normalizeGroupsOff(view.status?.groupsOff), g, view.site);
 const groupHeadings = new Map();
 // Collapsed tiers (this browser's): their heading stays, with its On and Off; the note and the mods hide.
@@ -962,7 +992,7 @@ function groupHeading(g) {
     }
     const row = el('div', 'mod-group-row');
     row.append(name, sw);
-    li.append(row, el('p', 'mod-group-note', GROUP_TEXT[g][1]));
+    li.append(row, addMore(el('p', 'mod-group-note', GROUP_TEXT[g][1]), term('tiers', TIER_TERMS[g])));
     groupHeadings.set(g, li);
     applyCollapsed();
   }
@@ -1886,18 +1916,24 @@ function renderApproval() {
   for (const x of all) if (x.f && /^power:together:/.test(x.key) && !warns.some((w) => w.f === x.f)) warns.push(x);
   // (then the combinations across it and another boxed mod, each naming the other: helper/lib/crossmods.js)
   for (const x of all) { const w = crossOf(x.key, info); if (x.f && w && !warns.some((y) => y.f === x.f && y.who === w)) warns.push({ ...x, who: w }); }
+  // (each line with its "more": a power's explanation, or a warning's)
   P.facts.replaceChildren(...plain.map((x) => {
     const li = el('li');
-    li.append(el('span', 'ap-ic', iconOf(x.key)), el('span', null, info.asks ? `It ${x.f}.` : x.f));
+    const text = el('span', 'ap-text');
+    text.append(el('span', 'ap-line', info.asks ? `It ${x.f}.` : x.f));
+    li.append(el('span', 'ap-ic', iconOf(x.key)), addMore(text, info.asks ? powerTerm(x.key) : null));
     li.firstChild.setAttribute('aria-hidden', 'true');
     return li;
   }));
   P.together.replaceChildren(...warns.map((x) => {
     const line = el('p');
-    if (/^power:together:many:/.test(x.key)) line.textContent = x.f;
-    else if (x.who) line.append(el('b', null, `Together with ${x.who},`), ` it ${x.f}.`);
-    else line.append(el('b', null, 'Together,'), ` it ${x.f}.`);
-    return line;
+    const many = /^power:together:many:/.test(x.key);
+    const words = el('span', 'ap-line');
+    if (many) words.textContent = x.f;
+    // (across two mods: the same warning's explanation, the other mod named)
+    else words.append(el('b', null, x.who ? `Together with ${x.who},` : 'Together,'), ` it ${x.f}.`);
+    line.append(words);
+    return addMore(line, many ? warningByLine(x.f) : warningTerm(`together, it ${x.f}`));
   }));
   P.together.hidden = !warns.length;
   const fromAgent = kind !== 'sandbox' && info.by !== 'outside';
@@ -2163,15 +2199,18 @@ function openCodeView(id, { error = null } = {}) {
     ...(m.source === 'webmods' || m.source === 'trif' ? [' · ', el('span', 'cv-source', `Tim's mod${m.version ? `, v${m.version}` : ''}`)] : []));
   const { everywhere, sites } = modSites(m);
   const site = m.id.split('/')[0];
+  // (the level, powers and warnings with their "more": explain.json)
+  const level = modLevel(m);
+  const pl = powerLines(m);
   const lines = [
-    ...(modLevel(m) ? [levelWords(m, view.site || site)] : []),
-    ...powerLines(m).map((l) => `Power: ${l}`),
-    ...(m.powerInfo?.warnings || []).map((w) => w.charAt(0).toUpperCase() + w.slice(1)),
+    ...(level ? [[levelWords(m, view.site || site), term('chips', level >= 2 ? 'changes-requests' : 'noticeable')]] : []),
+    ...pl.map((l, i) => [`Power: ${l}`, term('powers', m.powers[i])]),
+    ...(m.powerInfo?.warnings || []).map((w) => [w.charAt(0).toUpperCase() + w.slice(1), warningTerm(w)]),
     ...(everywhere ? ['Runs on every site.'] : sites.length > 1 ? [`Runs on ${sites.join(', ')}.`] : []),
     ...(m.from ? [`Made from ${m.from}.`] : []),
     ...(m.enabled !== false && !m.registered && !m.held ? [view.status?.userScripts ? 'Not active right now.' : 'Paused: user scripts are off.'] : []),
   ];
-  P.about.replaceChildren(...lines.map((l) => el('p', null, l)));
+  P.about.replaceChildren(...lines.map((l) => (Array.isArray(l) ? addMore(el('p', null, l[0]), l[1]) : el('p', null, l))));
   P.about.hidden = !lines.length;
   P.versions.hidden = !m.pending;
   P.copy.textContent = 'Copy';

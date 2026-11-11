@@ -231,6 +231,17 @@ const handlers = {
     }
   },
 
+  // The four layers of a term the panel shows (extension/explain.json): no helper needed.
+  async explain(ctx, pos) {
+    const X = require('./lib/explain');
+    const word = pos.join(' ').trim();
+    if (!word) { if (ctx.json) printJson(X.TERMS); else out(X.listText()); return; }
+    const found = X.find(word);
+    if (!found.length) throw new UsageError(`no term "${word}" (trif explain lists them)`);
+    if (ctx.json) printJson(found);
+    else out(found.map(X.termText).join('\n\n'));
+  },
+
   async setup(ctx) {
     const { setup } = require('./lib/setup');
     if (ctx.opts['--copy'] && ctx.opts['--link']) throw new UsageError('use --copy or --link, not both');

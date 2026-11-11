@@ -412,6 +412,16 @@ sent by a proxy the helper runs for each chat: the agent never has it.`,
       'trif agent open-model --provider openrouter --model qwen/qwen3-coder', 'trif agent open-model --provider openrouter --set-key',
       'trif agent key --agent codex --set-key'],
   },
+  explain: {
+    usage: 'trif explain [TERM]',
+    summary: 'what a word the side panel shows means: a tier, power, chip, tag, warning or agent level',
+    details: `With no TERM, every term, by group. With one (its id or its label, case aside: read-drafts, Ask first,
+@migrate, changes requests), its line (the sentence the panel, the approval card and trif status show),
+its explanation (what the panel's "more" shows the user) and notes for you: when to use it, what's
+refused, the narrower ways round. Two terms with one name (Off: an agent level and a face) both show;
+agent-levels/off picks one. Works without the browser, and in side-panel runs.`,
+    examples: ['trif explain', 'trif explain read-drafts', 'trif explain "Ask first"', 'trif explain agent-levels/off', 'trif explain sound --json'],
+  },
   help: {
     usage: 'trif help [command]',
     summary: 'this help, or details and examples for one command',
@@ -425,7 +435,7 @@ const GROUPS = [
   ['Switching mods off and on (need Chrome running with the extension)', ['disable', 'enable', 'approve', 'reject']],
   ['Pages (need Chrome running with the extension)', ['tabs', 'run', 'reload', 'open', 'close', 'navigate', 'text', 'sweep', 'screenshot', 'record', 'requests', 'request', 'errors', 'logs']],
   ['Agent runs (what the side panel does)', ['agent']],
-  ['', ['help']],
+  ['', ['explain', 'help']],
 ];
 
 function pad(s, n) { return s.length >= n - 1 ? s + '\n' + ' '.repeat(n + 2) : s + ' '.repeat(n - s.length); }

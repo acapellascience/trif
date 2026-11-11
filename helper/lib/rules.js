@@ -115,7 +115,8 @@ function checkCss(css) {
   const text = flat.map(([c]) => c).join('').toLowerCase();
   if (/@import\b/.test(text)) return '@import loads from an address; put the CSS here instead';
   if (/(?:^|[^a-z-])(?:-webkit-)?(image-set|image|cross-fade|element)\s*\(/.test(text)) return 'image-set(), image(), cross-fade() and element() can load from an address';
-  if (/expression\s*\(|-moz-binding|behavior\s*:/.test(text)) return 'that property runs code';
+  // (behavior: the whole property's name, not the end of overscroll-behavior or scroll-behavior)
+  if (/expression\s*\(|-moz-binding|(?<![\w-])(?:-ms-)?behavior\s*:/.test(text)) return 'that property runs code';
   // url(…): only data: (the argument read from the original text, quotes and all)
   const re = /url\s*\(/gi;
   let m;

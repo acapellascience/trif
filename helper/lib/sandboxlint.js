@@ -73,18 +73,35 @@ function sandboxLint(code, { powers = [] } = {}) {
   try { ts = tokenize(text); } catch { return finish(found); }
   // Names the mod declares itself (const/let/var/function/class, and simple parameters)
   const declared = new Set();
+  // (one declarator's name at ts[i]: a name, or a destructuring: const { a, b } = …, const [a, b] = …)
+  const declareAt = (i) => {
+    const n = ts[i];
+    if (n && n.t === 'id') declared.add(n.v);
+    if (n && n.t === 'p' && (n.v === '{' || n.v === '[')) {
+      const close = n.v === '{' ? '}' : ']';
+      for (let j = i + 1, depth = 1; j < ts.length && depth; j++) {
+        if (ts[j].t === 'p' && ts[j].v === n.v) depth++;
+        else if (ts[j].t === 'p' && ts[j].v === close) depth--;
+        else if (ts[j].t === 'id' && !(ts[j + 1] && ts[j + 1].t === 'p' && ts[j + 1].v === ':')) declared.add(ts[j].v);
+      }
+    }
+  };
+  const OPEN = { '(': ')', '[': ']', '{': '}' };
   for (let k = 0; k < ts.length; k++) {
     const t = ts[k];
     if (t.t === 'id' && DECLARE.has(t.v)) {
-      const n = ts[k + 1];
-      if (n && n.t === 'id') declared.add(n.v);
-      // (destructuring: const { a, b } = …, const [a, b] = …)
-      if (n && n.t === 'p' && (n.v === '{' || n.v === '[')) {
-        const close = n.v === '{' ? '}' : ']';
-        for (let j = k + 2, depth = 1; j < ts.length && depth; j++) {
-          if (ts[j].t === 'p' && ts[j].v === n.v) depth++;
-          else if (ts[j].t === 'p' && ts[j].v === close) depth--;
-          else if (ts[j].t === 'id' && !(ts[j + 1] && ts[j + 1].t === 'p' && ts[j + 1].v === ':')) declared.add(ts[j].v);
+      declareAt(k + 1);
+      // (and the names after it: const a = 1, b = 2: each comma outside brackets until the statement ends)
+      if (t.v === 'const' || t.v === 'let' || t.v === 'var') {
+        const stack = [];
+        for (let j = k + 2; j < ts.length && j < k + 20000; j++) {
+          const x = ts[j];
+          if (x.t !== 'p') continue;
+          if (OPEN[x.v]) { stack.push(OPEN[x.v]); continue; }
+          if (x.v === ')' || x.v === ']' || x.v === '}') { if (stack.pop() !== x.v) break; continue; }
+          if (stack.length) continue;
+          if (x.v === ';') break;
+          if (x.v === ',') declareAt(j + 1);
         }
       }
       if (t.v === 'function') { // its parameters

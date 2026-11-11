@@ -236,7 +236,7 @@ class FirefoxDriver {
   }
 
   async key(ctx, key) {
-    const value = { Escape: '\uE00C', Enter: '\uE007', Tab: '\uE004' }[key] || key;
+    const value = { Escape: '\uE00C', Enter: '\uE007', Tab: '\uE004', ArrowDown: '\uE015', ArrowUp: '\uE013' }[key] || key;
     await this.bidi.send('input.performActions', {
       context: ctx, actions: [{ type: 'key', id: 'keyboard', actions: [{ type: 'keyDown', value }, { type: 'keyUp', value }] }],
     });

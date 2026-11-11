@@ -183,6 +183,37 @@ window.__attach = async () => {
 };
 </script></body>`);
 
+// The sandbox's fixes from the conversion run (scenario.js sandboxFixesCheck): text a mod wraps and the page then
+// rewrites (as React does), text for two mods' wraps, a shadow root inside a shadow root, a picture from another
+// host without CORS, a file input, embedded JSON two mods filter, and a tall page for the keys' defaults.
+const FIXES_PAGE = (tlsPort) => PAGE('TRIF e2e fixes', `<h1 id="title">Fixes</h1>
+<div id="w">alpha beta</div> <div id="w2">one two</div> <x-outer id="xo"></x-outer>
+<img id="ximg" src="https://x.com:${tlsPort}/e2e-wide.png" width="4" height="4" alt=""> <input id="file" type="file" accept="image/*">
+<script type="application/json" id="emb2">{"a":["x","y","z"]}</script>
+<script>
+window.__wText = document.getElementById('w').firstChild;
+const xo = document.getElementById('xo').attachShadow({ mode: 'open' });
+const inner = document.createElement('x-inner'); xo.append(inner);
+const ir = inner.attachShadow({ mode: 'closed' }); ir.innerHTML = '<p id="ip">inner</p>'; window.__innerP = ir.getElementById('ip');
+window.__keys = []; window.addEventListener('keydown', (e) => window.__keys.push(e.key));
+document.getElementById('file').addEventListener('change', (e) => { const f = e.target.files[0]; window.__file = f ? { same: f === window.__orig, name: f.name, type: f.type } : null; });
+window.__runAll = async () => {
+  const c = document.createElement('canvas'); c.width = 4; c.height = 4; c.getContext('2d').fillRect(0, 0, 4, 4);
+  const b = await new Promise((r) => c.toBlob(r, 'image/png')); window.__orig = new File([b], 'pic.png', { type: 'image/png' });
+  const dt = new DataTransfer(); dt.items.add(window.__orig); const f = document.getElementById('file'); f.files = dt.files; f.dispatchEvent(new Event('change', { bubbles: true }));
+  const urls = JSON.parse(await (await fetch('/e2e-fix-urls')).text());
+  const raw = await (await fetch('/e2e-fix-raw')).text();
+  window.__wText.data = 'gamma alpha';
+  await new Promise((r) => setTimeout(r, 1000));
+  const w = document.getElementById('w');
+  document.documentElement.setAttribute('data-e2e-results', JSON.stringify({ urls, raw, file: window.__file || null, w: w.textContent, wIs: w.querySelectorAll('.trif-box-al').length,
+    w2: document.getElementById('w2').textContent, w2Bs: document.getElementById('w2').querySelectorAll('b.trif-box-mk').length, emb: document.getElementById('emb2').textContent,
+    inner: getComputedStyle(window.__innerP).color, key: localStorage.getItem('e2e-fix-key') }));
+};
+document.addEventListener('DOMContentLoaded', () => { const b = document.createElement('button'); b.id = 'go'; b.type = 'button'; b.textContent = 'go'; b.addEventListener('click', () => { window.__runAll().catch((e) => document.documentElement.setAttribute('data-e2e-results', JSON.stringify({ error: String(e && e.message) }))); }); document.body.prepend(b); });
+</script>
+<div style="height: 4000px"></div>`);
+
 function testPage(host, pathName) {
   return PAGE(`TRIF e2e ${host}${pathName}`, `
 <h1 id="title">TRIF e2e test page</h1>
@@ -420,6 +451,8 @@ async function startServers(dir) {
       if (u.pathname.startsWith('/i/api/graphql/')) return send(200, 'application/json', JSON.stringify(tl.body));
       if (u.pathname === '/home' || u.pathname === '/') return send(200, 'text/html; charset=utf-8', X_PAGE());
       if (u.pathname === '/favicon.ico') return send(204, 'image/x-icon', '');
+      // (another host's picture, with no CORS headers: sandboxFixesCheck's image variant)
+      if (u.pathname === '/e2e-wide.png') return send(200, 'image/png', Buffer.from(WIDE_PNG, 'base64'));
       return send(404, 'text/plain', 'not found');
     }
     if (host === 'www.google.com') {
@@ -452,6 +485,10 @@ document.getElementById('cc').addEventListener('click', () => d.setAttribute('da
 document.addEventListener('combo-ping', (e) => d.setAttribute('data-pings', JSON.stringify([...JSON.parse(d.getAttribute('data-pings')), e.detail])));
 </script>`));
     if (u.pathname === '/e2e-wide.png') return send(200, 'image/png', Buffer.from(WIDE_PNG, 'base64'));
+    if (u.pathname === '/fixes.html') return send(200, 'text/html; charset=utf-8', FIXES_PAGE(tls.address().port));
+    // (site-data: an address and the same address with a parameter out; JSON spaced as no serializer writes it)
+    if (u.pathname === '/e2e-fix-urls') return send(200, 'application/json', JSON.stringify({ long: 'https://127.0.0.1/watch?v=1&si=e2e', short: 'https://127.0.0.1/watch?v=1' }));
+    if (u.pathname === '/e2e-fix-raw') return send(200, 'application/json', '{ "a" : [ 1, 2 ] ,"b":"kept as sent" }');
     if (u.pathname === '/powers3.html') return send(200, 'text/html; charset=utf-8', POWERS3_PAGE());
     // (mods that break, scenario.js modHealthCheck: the element a style mod looks for, there with ?has=1)
     if (u.pathname === '/health.html') return send(200, 'text/html; charset=utf-8', PAGE('TRIF e2e health', `<h1 id="title">Health</h1>${u.searchParams.get('has') ? '<div id="e2e-quiet-target">here</div>' : '<p>gone</p>'}`));

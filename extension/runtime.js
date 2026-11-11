@@ -426,18 +426,30 @@ export function pageBridge() {
   // trif.css with { shadow }: the roots the page makes (closed ones too), kept as they're made, so a boxed mod's
   // sheet (checked in TRIF's sandbox world, sent as text: trif:shadow-css) goes into those under hosts that
   // match, now and later; adopted, so the page writing its root's content keeps it. The roots never leave here.
+  // (and inside other roots, at any depth: each root found is watched too, for hosts that come into it later)
   const roots = new WeakMap(); // host -> its root
   const shadowSheets = new Map(); // id -> { sel, sheet }
+  const watchedRoots = new WeakSet();
+  let shadowMo = null;
+  const rootOf = (h) => roots.get(h) || h.shadowRoot;
+  // every host with a root under `top` (a document or a root), roots inside roots too: fn(host, root)
+  const eachRoot = (top, fn, depth = 0) => {
+    if (depth > 30) return;
+    let all;
+    try { all = top.querySelectorAll('*'); } catch (e) { return; }
+    for (const h of all) { const r = rootOf(h); if (r) { fn(h, r); eachRoot(r, fn, depth + 1); } }
+  };
+  const watchRoot = (root) => { if (shadowMo && !watchedRoots.has(root)) { watchedRoots.add(root); try { shadowMo.observe(root, { childList: true, subtree: true }); } catch (e) { /* none */ } } };
   const adopt = (host) => {
-    const root = roots.get(host) || host.shadowRoot;
+    const root = rootOf(host);
     if (!root || !('adoptedStyleSheets' in root)) return;
+    watchRoot(root);
     for (const sh of shadowSheets.values()) {
       let m = false;
       try { m = host.matches(sh.sel); } catch (e) { m = false; }
       if (m && !root.adoptedStyleSheets.includes(sh.sheet)) root.adoptedStyleSheets = [...root.adoptedStyleSheets, sh.sheet];
     }
   };
-  let shadowMo = null;
   try {
     const as = Element.prototype.attachShadow;
     if (typeof as === 'function') {
@@ -455,18 +467,18 @@ export function pageBridge() {
     if (o.remove) {
       const sh = shadowSheets.get(o.id);
       shadowSheets.delete(o.id);
-      if (sh) for (const h of document.querySelectorAll('*')) { const r = roots.get(h) || h.shadowRoot; if (r && r.adoptedStyleSheets.includes(sh.sheet)) r.adoptedStyleSheets = r.adoptedStyleSheets.filter((x) => x !== sh.sheet); }
+      if (sh) eachRoot(document, (h, r) => { if (r.adoptedStyleSheets && r.adoptedStyleSheets.includes(sh.sheet)) r.adoptedStyleSheets = r.adoptedStyleSheets.filter((x) => x !== sh.sheet); });
       return;
     }
     if (typeof o.sel !== 'string' || typeof o.text !== 'string' || shadowSheets.has(o.id)) return;
     let sheet;
     try { sheet = new CSSStyleSheet(); sheet.replaceSync(o.text); } catch (err) { return; }
     shadowSheets.set(o.id, { sel: o.sel, sheet });
-    try { for (const h of document.querySelectorAll(o.sel)) adopt(h); } catch (err) { /* not a selector */ }
     if (!shadowMo && document.documentElement) {
-      shadowMo = new MutationObserver((recs) => { for (const r of recs) for (const n of r.addedNodes) if (n.nodeType === 1) { adopt(n); for (const h of n.querySelectorAll('*')) if (roots.has(h) || h.shadowRoot) adopt(h); } });
+      shadowMo = new MutationObserver((recs) => { for (const r of recs) for (const n of r.addedNodes) if (n.nodeType === 1) { adopt(n); eachRoot(n, (h) => adopt(h)); } });
       shadowMo.observe(document.documentElement, { childList: true, subtree: true });
     }
+    eachRoot(document, (h) => adopt(h));
   }, true);
 
   // page-data
@@ -535,12 +547,12 @@ export function pageBridge() {
     } catch (err) { /* not one */ }
   }, true);
   // image-variants (trif.imageVariant): the address TRIF worked out, on the picture it made, set here under
-  // the page's own rules for pictures, fetched without credentials (so its pixels read back where its host
-  // allows that)
+  // the page's own rules for pictures; with CORS and without credentials only when the mod asked for its pixels
+  // (TRIF's world put crossorigin="anonymous" on it), so a host without CORS still shows the picture
   document.addEventListener('trif:image-src', (e) => {
     const img = e.target;
     if (!img || img.localName !== 'img' || typeof e.detail !== 'string' || !/^https?:\/\//.test(e.detail)) return;
-    img.crossOrigin = 'anonymous';
+    if (img.getAttribute('crossorigin') !== null) img.crossOrigin = 'anonymous';
     img.src = e.detail;
   }, true);
   // preload (el.loadSooner): the page's own lazy picture, loaded now

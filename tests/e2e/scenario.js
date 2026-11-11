@@ -1246,6 +1246,7 @@ class Scenario {
       await r.check('"Agent on this site": Ask asks in the panel (Just this once runs the code), Look refuses code, Off refuses reading too, a sensitive site is off with its line, Settings lists them', () => this.agentSitesCheck(win));
       await r.check('sharing: a .js dropped on the panel is imported (its site from @match, its shipped markers gone) and held like any mod from outside, "imported from a file"; dropped again, Add as a copy; Replace keeps the old one, which History shows, views, diffs and restores; Export copies it to Downloads and shows it; another file dropped goes to the site\'s files with a note, listed, never a mod', () => this.shareCheck(win));
       await r.check('the code card: a mod\'s </> and its file name open its code (a style mod: its rules), with line numbers; Copy copies it; Show in Finder and Open in editor ask the helper, which reveals the mod\'s own file (a stand-in for open here); Esc closes it', () => this.codeViewCheck(win));
+      await r.check('a short panel (400px): Settings, the code card and History, the approval card and the agent\'s menu each scroll to their last item', () => this.shortPanelCheck(win));
       await r.check('mod rows: the light, the name, one chip by its level (hover says what, a click opens the code card), one line of description, the controls', () => this.modRowsCheck(win));
       await r.check('views belong to their site: the code card on one site is gone on a tab of another; an approval waiting there hides, and shows again back on its site', () => this.siteViewsCheck(win));
       await r.check('powers, phase 3: media plays and pauses the page\'s own video; click clicks only what the header names, never a submit, reset or a link to another site; go-to goes only to the header\'s pages; mods talk over TRIF\'s channel in plain data; write-drafts changes the user\'s drafts but never a password, card or hidden field; with a read, the combination is in the hold, and while another boxed mod on the page has a read it didn\'t ask for, write-drafts is off; undeclared, each is refused', () => this.powers3Check(win));
@@ -3205,6 +3206,71 @@ process.exitCode = 1;
       try { fs.unlinkSync(styleFile); } catch { /* gone */ }
       try { fs.unlinkSync(longFile); } catch { /* gone */ }
       await this.panel(`async () => { const d = document.getElementById('code-view'); if (d && d.open) d.close(); return true; }`).catch(() => {});
+    }
+  }
+
+  /**
+   * A short panel (400px): Settings, the code card and its History, the approval card and the agent's menu
+   * each scroll to their last item, inside their own space, with the bar (or the card's top line) fixed.
+   */
+  async shortPanelCheck(win) {
+    const site = '127.0.0.1';
+    const base = `http://${site}:${this.o.servers.port}`;
+    const dir = path.join(this.trif, 'sites', site);
+    const longFile = path.join(dir, 'e2e-short-long.js');
+    const heldFile = path.join(dir, 'e2e-short-held.js');
+    const themes = async (name) => { for (const scheme of ['dark', 'light']) if (await this.d.colorScheme(this.panelCtx, scheme)) { await sleep(150); await this.shot(this.panelCtx, `${name}-${scheme}`); } await this.d.colorScheme(this.panelCtx, ''); };
+    // (scrolled to its end: is the last item inside the scroller, and the scroller inside the window?)
+    const atEnd = (scroller, last) => `(() => {
+      const s = document.querySelector(${JSON.stringify(scroller)}); if (!s) return { missing: true };
+      s.scrollTop = s.scrollHeight;
+      const l = s.querySelector(${JSON.stringify(last)}) || s.lastElementChild; const r = s.getBoundingClientRect(), lr = l.getBoundingClientRect();
+      return { scrolls: s.scrollHeight > s.clientHeight + 1, lastShows: lr.bottom <= r.bottom + 1 && lr.top >= r.top - 1, inWindow: r.top >= -1 && r.bottom <= innerHeight + 1, height: innerHeight };
+    })()`;
+    const ok = (x) => x.scrolls && x.lastShows && x.inWindow;
+    const problems = [];
+    const done = [];
+    if (!(await this.d.viewport(this.panelCtx, { width: 500, height: 400 }))) return { status: 'skip', detail: `this driver can't set the panel's size (${this.o.browser}${this.d.viewportError ? `: ${this.d.viewportError}` : ''})` };
+    try {
+      await this.ext(`async (id, url) => { await chrome.tabs.update(id, { url, active: true }); }`, [win.tabId, `${base}/`]);
+      await this.dismissApproval();
+      // Settings
+      await this.panelClick('#settings-btn');
+      const settings = await waitFor('Settings', () => this.panel(`async () => document.getElementById('settings').hidden ? null : ${atEnd('#settings', ':scope > :last-child')}`), { timeoutMs: 8000 });
+      const bar = await this.panel(`async () => { const b = document.querySelector('header.bar').getBoundingClientRect(); return b.top >= 0 && b.bottom <= 60; }`);
+      if (!ok(settings) || !bar) problems.push(`Settings: ${JSON.stringify({ ...settings, bar })}`); else done.push('Settings');
+      await themes('settings-short-bottom');
+      await this.panelClick('#settings-btn');
+      // the code card, a long mod, and its History
+      fs.writeFileSync(longFile, `// ==WebMod==\n// @name E2E short panel\n// @match *://127.0.0.1/*\n// ==/WebMod==\n${Array.from({ length: 600 }, (_, i) => `document.documentElement.dataset.e2eShort${i % 5} = ${i};`).join('\n')}\n`);
+      await waitFor('the long mod', () => this.panel(`async () => !!document.querySelector('li[data-mod="${site}/e2e-short-long"] .mod-code') || null`), { timeoutMs: 20000 });
+      await this.panelClick(`li[data-mod="${site}/e2e-short-long"] .mod-code`);
+      const code = await waitFor('its code', () => this.panel(`async () => { const d = document.getElementById('code-view'); return d?.open && d.querySelectorAll('.cv-code .l').length > 600 ? (() => { const x = ${atEnd('#code-view .cv-code', ':scope > .l:last-child')}; const r = d.getBoundingClientRect(); x.cardFits = r.top >= 0 && r.bottom <= innerHeight; x.closeShows = d.querySelector('.ap-x').getBoundingClientRect().top >= r.top; return x; })() : null; }`), { timeoutMs: 10000 });
+      if (!ok(code) || !code.cardFits || !code.closeShows) problems.push(`the code card: ${JSON.stringify(code)}`); else done.push('the code card');
+      await this.d.click(this.panelCtx, '#code-view .cv-tab-history');
+      const hist = await this.panel(`async () => { const l = document.querySelector('#code-view .cv-history-list'); for (let i = 0; i < 60; i++) { const li = document.createElement('li'); li.textContent = 'a kept version ' + i; l.append(li); } return ${atEnd('#code-view .cv-history-list', ':scope > li:last-child')}; }`);
+      if (!ok(hist)) problems.push(`History: ${JSON.stringify(hist)}`); else done.push('History');
+      await this.d.key(this.panelCtx, 'Escape');
+      // the approval card, with its code shown: the card scrolls, its top line (and ×) stays
+      fs.writeFileSync(heldFile, '// ==WebMod==\n// @name E2E short held\n// @match *://127.0.0.1/*\n// ==/WebMod==\n(() => { fetch("/e2e-short-held", { method: "POST" }); })();\n');
+      await waitFor('the approval', () => this.panel(`async () => document.getElementById('approval')?.open && document.getElementById('approval').dataset.mod === '${site}/e2e-short-held' || null`), { timeoutMs: 20000 });
+      await this.panel(`async () => { document.querySelector('#approval .ap-show').click(); return true; }`).catch(() => {}); // (Show code)
+      await sleep(400);
+      const card = await this.panel(`async () => { const x = ${atEnd('#approval', ':scope > .ap-actions')}; const d = document.getElementById('approval'); x.topShows = d.querySelector('.ap-x').getBoundingClientRect().top >= d.getBoundingClientRect().top - 1; return x; }`);
+      if (!card.lastShows || !card.inWindow || !card.topShows) problems.push(`the approval card: ${JSON.stringify(card)}`); else done.push(`the approval card${card.scrolls ? ' (scrolled)' : ''}`);
+      await themes('approval-short-bottom');
+      await this.dismissApproval();
+      // the agent's menu: inside the window
+      await this.panel(`async () => { document.getElementById('agent-level')?.click(); return true; }`);
+      const menu = await this.panel(`async () => { const m = document.getElementById('agent-level-menu'); if (m.hidden) return { hidden: true }; const r = m.getBoundingClientRect(); const x = { top: Math.round(r.top), bottom: Math.round(r.bottom), fits: r.top >= 0 && r.bottom <= innerHeight }; document.getElementById('agent-level').click(); return x; }`);
+      if (!menu.hidden && !menu.fits) problems.push(`the agent's menu: ${JSON.stringify(menu)}`); else if (!menu.hidden) done.push('the agent\'s menu');
+      if (problems.length) throw new Error(problems.join('\n'));
+      return `at ${settings.height}px tall, each scrolled to its last item: ${done.join(', ')}`;
+    } finally {
+      for (const f of [longFile, heldFile]) { try { fs.unlinkSync(f); } catch { /* gone */ } }
+      await this.dismissApproval();
+      await this.panel(`async () => { const d = document.getElementById('code-view'); if (d && d.open) d.close(); if (!document.getElementById('settings').hidden) document.getElementById('settings-btn').click(); return true; }`).catch(() => {});
+      await this.d.viewport(this.panelCtx, null);
     }
   }
 

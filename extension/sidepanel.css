@@ -120,6 +120,12 @@ svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width:
 }
 
 .settings { display: grid; gap: 8px; }
+/* Every part of the panel scrolls when its content outgrows its space: Settings gives way (the bar above it
+   stays) and scrolls inside; the cards scroll inside their max-height with their top line (and ×) fixed. */
+.settings { flex: 0 0 auto; max-height: max(55vh, 220px); overflow-y: auto; overscroll-behavior: contain; align-content: start; }
+/* (the notices give way too in a short panel, each keeping a line, and scroll inside; the mods box scrolls
+   its list inside its own max-height, and keeps its ⋯ menu unclipped) */
+.notice:not(.tab-lock) { flex-shrink: 1; min-height: 44px; overflow-y: auto; overscroll-behavior: contain; }
 .open-model { display: grid; gap: 8px; } /* openmodel.js */
 
 /* A site TRIF is off for: only "The robot is off." and the button. */
@@ -607,6 +613,8 @@ h3.mod-name { margin: 0; font-size: inherit; line-height: inherit; }
   box-shadow: 0 18px 50px rgb(0 0 0 / 0.55);
 }
 .approval::backdrop { background: rgb(0 0 0 / 0.55); backdrop-filter: blur(2px); }
+.approval > .ap-top { position: sticky; top: -16px; z-index: 2; margin: -16px -16px 0; padding: 16px 16px 6px; background: var(--surface); }
+.code-view[open] > .ap-top { position: static; margin: 0; padding: 0 0 6px; } /* (a column: its top never scrolls away) */
 @media (prefers-color-scheme: light) {
   .approval { box-shadow: 0 18px 50px rgb(0 0 0 / 0.22); }
   .approval::backdrop { background: rgb(20 20 24 / 0.38); }
@@ -674,7 +682,7 @@ h3.mod-name { margin: 0; font-size: inherit; line-height: inherit; }
 .agent-level .agent-level-caret { width: 10px; height: 10px; stroke-width: 1.8; }
 /* (narrow: only the icon; the words are its tooltip and label) */
 @media (max-width: 420px) { .agent-level .agent-level-text { display: none; } }
-.agent-level-menu { position: absolute; right: 0; bottom: calc(100% + 6px); z-index: 20; width: min(300px, calc(100vw - 24px)); padding: 6px; border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface); box-shadow: 0 6px 24px rgba(0, 0, 0, 0.25); color: var(--text); font-size: 12px; text-align: left; }
+.agent-level-menu { position: absolute; right: 0; bottom: calc(100% + 6px); z-index: 20; width: min(300px, calc(100vw - 24px)); max-height: calc(100vh - 110px); overflow-y: auto; padding: 6px; border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface); box-shadow: 0 6px 24px rgba(0, 0, 0, 0.25); color: var(--text); font-size: 12px; text-align: left; }
 .agent-level-menu[hidden] { display: none; }
 .agent-level-head { margin: 2px 6px 6px; font-weight: 600; }
 .agent-level-menu [role="menuitemradio"] { display: flex; align-items: flex-start; gap: 8px; width: 100%; padding: 6px; border: 0; border-radius: 7px; background: none; color: inherit; font: inherit; text-align: left; cursor: pointer; }

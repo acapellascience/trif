@@ -229,6 +229,11 @@ class FirefoxDriver {
   /** The page's prefers-color-scheme: not offered over BiDi here (the screenshots in both themes are Chrome's). */
   async colorScheme() { return false; }
 
+  /** The page's viewport (CSS px), as a shorter side panel would be; null puts it back. False if it can't. */
+  async viewport(ctx, size) {
+    try { await this.bidi.send('browsingContext.setViewport', { context: ctx, viewport: size ? { width: size.width, height: size.height } : null }); return true; } catch (e) { this.viewportError = String(e?.message ?? e).slice(0, 200); return false; }
+  }
+
   async key(ctx, key) {
     const value = { Escape: '\uE00C', Enter: '\uE007', Tab: '\uE004' }[key] || key;
     await this.bidi.send('input.performActions', {

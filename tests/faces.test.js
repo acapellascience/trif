@@ -21,25 +21,13 @@ function pixels(png) {
 
 test('the face by precedence: paused, blocked, disconnected, off, logged out, normal', async () => {
   const { toolbarFace } = await load();
-  assert.equal(toolbarFace({}), 'normal');
-  assert.equal(toolbarFace({ state: 'on' }), 'normal');
-  assert.equal(toolbarFace({ state: 'disconnected', loggedOut: true }), 'disconnected');
-  assert.equal(toolbarFace({ loggedOut: true }), 'login');
-  assert.equal(toolbarFace({ state: 'off', loggedOut: true }), 'off');
-  assert.equal(toolbarFace({ state: 'blocked', loggedOut: true }), 'blocked');
-  assert.equal(toolbarFace({ state: 'off', locked: true, loggedOut: true }), 'paused');
-  assert.equal(toolbarFace({ locked: true, light: true }), 'paused-light');
-  assert.equal(toolbarFace({ state: 'off', light: true }), 'off', 'only paused is flipped');
+  // The toolbar stays the usual green robot whatever the state (Tim, 2026-11-11): the faces are the panel's.
+  for (const args of [{}, { state: 'on' }, { state: 'disconnected', loggedOut: true }, { loggedOut: true }, { state: 'off', loggedOut: true }, { state: 'blocked' }, { locked: true }, { locked: true, light: true }]) assert.equal(toolbarFace(args), 'normal', JSON.stringify(args));
 });
 
-test('robotless: off\'s blank face in green, every tab, over logged out (never yellow then); a site\'s state still wins', async () => {
+test('robotless: off\'s blank face in green (the panel\'s), never yellow; the toolbar stays the usual robot', async () => {
   const { toolbarFace, facePaths, FACE_FILES } = await load();
-  assert.equal(toolbarFace({ robotless: true }), 'robotless');
-  assert.equal(toolbarFace({ robotless: true, loggedOut: true }), 'robotless');
-  assert.equal(toolbarFace({ state: 'on', robotless: true, loggedOut: true }), 'robotless');
-  assert.equal(toolbarFace({ state: 'blocked', robotless: true }), 'blocked');
-  assert.equal(toolbarFace({ state: 'off', robotless: true }), 'off');
-  assert.equal(toolbarFace({ locked: true, robotless: true }), 'paused');
+  for (const args of [{ robotless: true }, { robotless: true, loggedOut: true }, { state: 'blocked', robotless: true }]) assert.equal(toolbarFace(args), 'normal');
   // off's icon, which is already the usual green with no eyes
   assert.deepEqual(facePaths('robotless'), facePaths('off'));
   assert.equal(FACE_FILES.robotless, 'robot-off');

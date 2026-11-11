@@ -817,7 +817,7 @@ shown in the panel as such.
 
 - **Label** (drafted): Disconnected
 - **Line**: TRIF is disconnected on {site}
-- **Explanation**: TRIF is disconnected on {site}. Your browser hasn't given TRIF permission for this site, so no mods run here and your agent can't reach it. Connect asks your browser for this site only, then turns TRIF on here.
+- **Explanation**: TRIF is disconnected on {site}. Your browser hasn't given TRIF permission for this site, so no mods run here and your agent can't reach it. Connect asks your browser for this site only; then the robot is off here until you turn it on.
 - **For agents**:
   - Face: grey frame, a grey broken link for eyes. Agents get: "TRIF is disconnected on {site}: nothing from TRIF runs there or reads it until the user connects it (the side panel on that site has the button)".
 

@@ -22,13 +22,9 @@ export function facePaths(face) {
   return { 16: `icons/${name}-16.png`, 32: `icons/${name}-32.png` };
 }
 
-/** The face for a tab: locked, its site's state ('on' | 'off' | 'disconnected' | 'blocked' | null), robotless, logged out; light: a light toolbar. */
-export function toolbarFace({ locked = false, state = null, robotless = false, loggedOut = false, light = false } = {}) {
-  if (locked) return light ? 'paused-light' : 'paused'; // (white on a dark toolbar; flipped on a light one)
-  if (state === 'blocked') return 'blocked';
-  if (state === 'disconnected') return 'disconnected';
-  if (state === 'off') return 'off';
-  if (robotless) return 'robotless';
-  if (loggedOut) return 'login';
+/** The toolbar's face for a tab: always the usual robot (the panel shows the state, robotless included). */
+export function toolbarFace() {
+  // The toolbar icon stays the usual green robot, beside the browser's other extensions (Tim, 2026-11-11): the
+  // faces are the side panel's (its bar and gate), not the toolbar's.
   return 'normal';
 }

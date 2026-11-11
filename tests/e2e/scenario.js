@@ -996,13 +996,13 @@ class Scenario {
       if (firstDisconnected) {
         if (p.gateTitle !== 'TRIF is disconnected on 127.0.0.1' || p.gateText !== 'Connect' || !p.grey || p.links.length) throw new Error(`the gate: ${JSON.stringify(p)}`);
         // disconnected: a broken link, in the toolbar for this tab, in the bar and on the gate (the panel grey)
-        await this.waitFace('the faces when disconnected', this.win.tabId, { toolbar: 'robot-disconnected-16.png', bar: 'disconnected', gate: 'robot-shaded-disconnected.svg' });
+        await this.waitFace('the faces when disconnected', this.win.tabId, { toolbar: 'robot-16.png', bar: 'disconnected', gate: 'robot-shaded-disconnected.svg' });
         await this.shot(this.panelCtx, 'panel-disconnected');
       } else {
         const links = ['Block on 127.0.0.1 (Add to TRIF\'s block list)', 'Disconnect from 127.0.0.1 (Disable browser permissions)'];
         if (p.gateTitle !== 'The robot is off.' || p.gateText !== 'Fix 127.0.0.1' || p.grey || JSON.stringify(p.links) !== JSON.stringify(links)) throw new Error(`the gate: ${JSON.stringify(p)}`);
         // off: a blank face, in the toolbar for this tab, in the bar and on the gate
-        await this.waitFace('the off faces', this.win.tabId, { toolbar: 'robot-off-16.png', bar: 'off', gate: /^robot-shaded-off(-yellow|-red)?\.svg$/ });
+        await this.waitFace('the off faces', this.win.tabId, { toolbar: 'robot-16.png', bar: 'off', gate: /^robot-shaded-off(-yellow|-red)?\.svg$/ });
         // (and no "Agent on this site" there: it's on the chat's line, and there's no chat on the gate)
         if (!(await this.panel(`async () => document.getElementById('agent-level-wrap').hidden && !document.querySelector('header #agent-level')`))) throw new Error('"Agent on this site" shows on the gate');
         await this.shot(this.panelCtx, 'panel-off-links');
@@ -1018,8 +1018,12 @@ class Scenario {
     });
     await this.shot(this.panelCtx, 'panel-gate');
 
-    await r.check('enable TRIF on the site from the panel: the mod runs', async () => {
+    await r.check('enable TRIF on the site from the panel: the mod runs (from disconnected: Connect, the robot off, then Fix)', async () => {
       await d.click(this.panelCtx, '#gate-btn');
+      if (firstDisconnected) {
+        await this.waitPanel('off after Connect', (x) => x.gate && x.gateTitle === 'The robot is off.');
+        await d.click(this.panelCtx, '#gate-btn');
+      }
       const s = await this.waitPage('the mod to run after enabling', (x) => x.banner === 'ran' && /Changed by the E2E Banner/.test(x.target));
       if (s.off) throw new Error('the localhost mod ran on 127.0.0.1');
       await this.waitPanel('the panel to list the mod as on and running', (x) => !x.gate && x.siteOn && x.mods.some((m) => m.id === '127.0.0.1/e2e-banner' && m.on && m.running));
@@ -1081,7 +1085,7 @@ class Scenario {
     });
 
     // Restrictive, Firefox (prompts off in this profile, so the asking is real): Disconnect gives the access
-    // back and the panel goes grey, agents are told; Connect asks and turns it on in one click; the same
+    // back and the panel goes grey, agents are told; Connect asks, then the robot is off and Fix turns it on; the same
     // after the access is taken away as the browser's settings would. (Chrome's test build has 127.0.0.1 as
     // a required host, which can't be given back: the unit tests cover it there.)
     if (this.o.browser === 'firefox' && !this.allSites) {
@@ -1094,10 +1098,13 @@ class Scenario {
       };
       const connect = async (how) => {
         await d.click(this.panelCtx, '#gate-btn');
+        // (Connect only gets the access: the robot is off, and Fix turns it on)
+        await this.waitPanel(`off after Connect (${how})`, (x) => x.gate && x.gateTitle === 'The robot is off.');
+        await d.click(this.panelCtx, '#gate-btn');
         await this.waitPage(`the mod again (${how})`, (x) => x.banner === 'ran');
         if (!(await hasSite())) throw new Error(`${how}: connected, but the browser has no access recorded`);
       };
-      await r.check('restrictive: "Disconnect from 127.0.0.1" gives the access back, the panel goes grey, agents are told; Connect asks and turns it on in one click', async () => {
+      await r.check('restrictive: "Disconnect from 127.0.0.1" gives the access back, the panel goes grey, agents are told; Connect asks, then the robot is off and Fix turns it on', async () => {
         await offAgain();
         await d.click(this.panelCtx, '#gate-disconnect');
         const said = await disconnected('disconnected');
@@ -1135,11 +1142,12 @@ class Scenario {
       await offAgain();
       await d.click(this.panelCtx, '#gate-block');
       const p = await this.waitPanel('the red panel', (x) => x.gate && x.gateTitle === 'The robot is blocked on 127.0.0.1');
-      if (p.gateText !== 'Unblock' || !p.red || p.grey || p.links.length) throw new Error(`the gate: ${JSON.stringify(p)}`);
+      const wantLinks = ['Disconnect from 127.0.0.1 (Disable browser permissions)']; // (blocked keeps Disconnect, not Block)
+      if (p.gateText !== 'Unblock' || !p.red || p.grey || JSON.stringify(p.links) !== JSON.stringify(wantLinks)) throw new Error(`the gate: ${JSON.stringify(p)}`);
       // (blocked: no power button in the bar; Unblock is the way back)
       await this.waitBar('the blocked gate\'s bar', GATE_BAR_SHUT);
       // blocked: red with a red cross, in the toolbar for this tab, in the bar and on the gate
-      const faces = await this.waitFace('the blocked faces', this.win.tabId, { toolbar: 'robot-blocked-16.png', bar: 'blocked', gate: 'robot-shaded-blocked.svg' });
+      const faces = await this.waitFace('the blocked faces', this.win.tabId, { toolbar: 'robot-16.png', bar: 'blocked', gate: 'robot-shaded-blocked.svg' });
       await this.shot(this.panelCtx, 'panel-blocked');
       for (const args of [['text', '--url', '127.0.0.1'], ['screenshot', '--url', '127.0.0.1', '-o', path.join(this.work, 'blocked.png')], ['run', '--url', '127.0.0.1', '1']]) {
         const x = await this.cli(args);
@@ -1153,14 +1161,24 @@ class Scenario {
       const listed = await waitFor('the blocked sites', () => this.panel(`async () => { const li = [...document.querySelectorAll('#blocked-list li')]; return !document.querySelector('#settings').hidden && li.length ? li.map((x) => x.textContent) : null; }`), { timeoutMs: 5000 });
       if (this.o.browser !== 'firefox' || this.allSites) await this.shot(this.panelCtx, 'settings-site-permissions');
       await d.click(this.panelCtx, '#settings-btn');
+      // Disconnect a blocked site: disconnected (grey, Connect); Connect brings it back to blocked. (Firefox per
+      // site only: Chrome's test build has 127.0.0.1 as a required host, which can't be given back.)
+      let reblocked = '';
+      if (this.o.browser === 'firefox' && !this.allSites) {
+        await d.click(this.panelCtx, '#gate-disconnect');
+        await this.waitPanel('a blocked site disconnected', (x) => x.gate && x.gateTitle === 'TRIF is disconnected on 127.0.0.1' && x.gateText === 'Connect');
+        await d.click(this.panelCtx, '#gate-btn');
+        const back = await this.waitPanel('connected again: blocked', (x) => x.gate && x.red && x.gateTitle === 'The robot is blocked on 127.0.0.1');
+        reblocked = `; disconnected and connected again: "${back.gateTitle}"`;
+      }
       await d.click(this.panelCtx, '#gate-btn');
       // Unblocked: off (blocking kept the browser's access), never disconnected.
       const after = await this.waitPanel('the gate after', (x) => x.gate && !x.red);
       if (after.gateTitle !== 'The robot is off.') throw new Error(`after: ${JSON.stringify(after)}`);
       await d.click(this.panelCtx, '#gate-btn');
       await this.waitPage('the mod again', (x) => x.banner === 'ran');
-      await this.waitFace('the faces once it\'s on again', this.win.tabId, { toolbar: /^robot(-login)?-16\.png$/, bar: /^(normal|login)$/ });
-      return `listed: ${listed.join(', ')}; after: "${after.gateTitle}"; faces when blocked: ${JSON.stringify(faces)}`;
+      await this.waitFace('the faces once it\'s on again', this.win.tabId, { toolbar: 'robot-16.png', bar: /^(normal|login)$/ });
+      return `listed: ${listed.join(', ')}; after: "${after.gateTitle}"${reblocked}; faces when blocked: ${JSON.stringify(faces)}`;
     });
 
     await r.check('the robot in the top bar: on a site TRIF is on for, it puts it to sleep like the power button; on the gate, it wakes it like Fix', async () => {
@@ -2119,7 +2137,7 @@ process.exitCode = 1;
       // Its own check still says logged in, so after logging in from a terminal, sending is how to tell.
       if (x.send.disabled) throw new Error(`Send is off: ${JSON.stringify(x.send)}`);
       // logged out: hollow yellow eyes, in the bar and (every tab's) in the toolbar
-      await this.waitFace('the logged-out faces', win.tabId, { toolbar: 'robot-login-16.png', bar: 'login' });
+      await this.waitFace('the logged-out faces', win.tabId, { toolbar: 'robot-16.png', bar: 'login' });
       await this.shot(this.panelCtx, 'panel-login-expired');
       // From a terminal: the plain message, and how to log in.
       const t = await this.cli(['agent', 'run', '--url', `http://${site}:${this.o.servers.port}/`, 'hi from a terminal'], { timeoutMs: 60000 });
@@ -2359,7 +2377,7 @@ process.exitCode = 1;
       if (r1.line !== 'Robotless: your mods run, no agent. Pick one in Settings to chat.' || r1.composer || r1.using || r1.empty || r1.shown) throw new Error(`robotless: ${JSON.stringify(r1)}`);
       const eyes = await this.panel(`async () => [...document.querySelectorAll('#bar-robot .eye')].map((e) => getComputedStyle(e).display)`);
       if (eyes.some((d) => d !== 'none')) throw new Error(`the bar robot's eyes show: ${eyes}`);
-      await this.waitFace('robotless: off\'s icon (green) in the toolbar', win.tabId, { toolbar: 'robot-off-16.png', bar: 'robotless' });
+      await this.waitFace('robotless: the off face (green) in the bar; the toolbar the usual robot', win.tabId, { toolbar: 'robot-16.png', bar: 'robotless' });
       await this.d.pointerAway(this.panelCtx);
       await themes('robotless-mode');
       out.push(`robotless: green, bar face robotless, toolbar robot-off, "${r1.line}"`);
@@ -4315,16 +4333,9 @@ say({ type: 'result', subtype: 'success', is_error: false, result: text, session
       if (!/blocked anything here from posting, sending or saving as you/.test(lock.tip)) throw new Error(`the lock notice's tooltip: ${lock.tip}`);
       if (lock.height > 48) throw new Error(`the lock notice is ${lock.height} px tall: one line expected`);
       if (!lock.pause || lock.eyes) throw new Error(`the robot in the bar: ${JSON.stringify(lock)}`);
-      // TRIF's toolbar icon for that tab: the paused robot; other tabs keep the normal one
-      await waitFor('the paused toolbar icon', async () => /^robot-paused-(white|light)-16\.png$/.test(await this.toolbarIcon(win.tabId)) || null, { timeoutMs: 10000 })
+      // TRIF's toolbar icon stays the usual robot, paused or not (Tim, 2026-11-11: the pause shows in the panel)
+      await waitFor('the toolbar icon, the usual robot', async () => /^robot-16\.png$/.test(await this.toolbarIcon(win.tabId)) || null, { timeoutMs: 10000 })
         .catch(async (e) => { throw new Error(`${e.message}: ${await this.toolbarIcon(win.tabId)}`); });
-      // (flipped on a light toolbar, told by the panel's colour scheme; Firefox's driver can't emulate it)
-      for (const [scheme, file] of [['light', 'robot-paused-light-16.png'], ['dark', 'robot-paused-white-16.png']]) {
-        if (await this.d.colorScheme(this.panelCtx, scheme)) await waitFor(`the paused icon on a ${scheme} toolbar`, async () => (await this.toolbarIcon(win.tabId)) === file || null, { timeoutMs: 8000 });
-      }
-      await this.d.colorScheme(this.panelCtx, '');
-      const otherTab = await this.ext(`async (id) => (await chrome.tabs.query({})).map((t) => t.id).find((t) => t !== id) ?? null`, [win.tabId]);
-      if (otherTab != null && !/^robot(-login)?-16\.png$/.test(await this.toolbarIcon(otherTab))) throw new Error(`tab ${otherTab}'s toolbar icon: ${await this.toolbarIcon(otherTab)}`);
       // The mod: held for what its code does, its header's claim shown apart
       const card = await this.approvalFor(`${site}/e2e-poster`);
       const held = { facts: card.items, claim: card.claim };
@@ -4342,9 +4353,6 @@ say({ type: 'result', subtype: 'success', is_error: false, result: text, session
       await sleep(2500);
       if (leaked().length) throw new Error(`another site received ${JSON.stringify(leaked())}`);
       await waitFor('the lock notice still up', () => this.panel(`async () => { const n = document.getElementById('tab-lock'); return n && !n.hidden || null; }`), { timeoutMs: 10000 });
-      // (still paused on the blocked page: Firefox drops a tab's own icon on a new page, and TRIF sets it again)
-      await waitFor('the toolbar icon still paused', async () => /^robot-paused-(white|light)-16\.png$/.test(await this.toolbarIcon(win.tabId)) || null, { timeoutMs: 10000 })
-        .catch(async (e) => { throw new Error(`${e.message}: ${await this.toolbarIcon(win.tabId)}`); });
       await this.panel(`async () => { document.querySelector('#tab-lock button').click(); return true; }`);
       await waitFor('the tab back on the test site', async () => {
         const t = await this.ext(`async (id) => (await chrome.tabs.get(id)).url`, [win.tabId]);
@@ -4543,11 +4551,13 @@ say({ type: 'result', subtype: 'success', is_error: false, result: text, session
       const cached = await run(win.tabId, `(async () => { const c = await caches.open("e2e-poison"); await c.put("/e2e-cached", new Response("planted")); return "planted"; })()`);
       // TL-4: the other tab of the site posts
       const sibPost = await run(sib, 'fetch("/e2e-sib-post", { method: "POST", body: "x" }).then((r) => "sent " + r.status, (e) => "blocked: " + e.message)');
-      const sibIcon = await this.toolbarIcon(sib);
+      // (the toolbar icon stays the usual robot now: the site's lock record says its tabs are paused)
+      const siteLocked = async () => Object.keys((await this.ext(`async () => (await chrome.storage.session.get('tabLocks')).tabLocks || {}`)).sites || {});
+      const sibIcon = (await siteLocked()).join(',');
       // and a tab of the site opened now
       const third = await this.ext(`async (url) => (await chrome.tabs.create({ url, active: false })).id`, [`${base}/three.html?e2e=third`]);
       await sleep(1500);
-      const thirdIcon = await this.toolbarIcon(third);
+      const thirdIcon = (await siteLocked()).join(',');
       // its panel: the other tab's notice
       await this.ext(`async (id) => { await chrome.tabs.update(id, { active: true }); }`, [sib]);
       await sleep(1200);
@@ -4592,8 +4602,8 @@ say({ type: 'result', subtype: 'success', is_error: false, result: text, session
       if (reqs(site, '/e2e-sw-post').some((q) => q.method === 'POST')) open('TL-2', 'the service worker posted');
       if (reqs('localhost', '/e2e-sw-leak').length) open('TL-2', 'the service worker reached another site');
       if (reqs(site, '/e2e-sib-post').some((q) => q.method === 'POST')) open('TL-4', 'another tab of the site posted');
-      if (!/^robot-paused-(white|light)-16\.png$/.test(sibIcon)) open('TL-4', `the other tab's icon: ${sibIcon}`);
-      if (!/^robot-paused-(white|light)-16\.png$/.test(thirdIcon)) open('TL-4', `a tab of the site opened during the lock: icon ${thirdIcon}`);
+      if (!sibIcon.split(',').includes(site)) open('TL-4', `the site isn't locked for the other tab: ${sibIcon}`);
+      if (!thirdIcon.split(',').includes(site)) open('TL-4', `the site isn't locked for a tab opened during the lock: ${thirdIcon}`);
       if (!sibNotice) open('TL-4', "the other tab's panel: no notice");
       if (reqs('localhost', '/e2e-popup-noopener').length) open('TL-5', 'a noopener popup reached another site');
       if (reqs('localhost', '/e2e-popup-opener').length) open('TL-5', 'a popup (with opener) reached another site');

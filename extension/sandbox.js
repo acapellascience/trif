@@ -1937,7 +1937,7 @@ export function sandboxRuntime(mode, pageModId, pageFn, pagePowers) {
       if (px.length !== w * h * 4) fail('the pixels are width × height × 4 numbers');
       // (through the canvas's own ImageData: Firefox won't take one built from this world's array)
       const out = c.createImageData(w, h);
-      out.data.set(px);
+      for (let i = 0, d = out.data; i < px.length; i++) d[i] = px[i]; // (element by element: Firefox won't take this world's array whole)
       c.putImageData(out, x, y);
     });
     ops.toDataURL = guardShared((type, q) => {

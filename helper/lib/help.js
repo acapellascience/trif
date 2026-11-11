@@ -21,7 +21,7 @@ when TRIF was called WebMods, is moved there first and left as a link to it) wit
 private folder (settings, logs, screenshots; ~/Library/Application Support/TRIF on a Mac, moved out of the
 workspace if an older TRIF kept them there), installs the TRIF files the wrappers run,
 refreshes AGENTS.md and CLAUDE.md there from those files. Tim's mods (the mods TRIF ships, for
-${STARTER_SITES}; some on, some off) are added only for the sites you choose: on the
+${STARTER_SITES}; each starts off) are added only for the sites you choose: on the
 setup page in your browser (a checklist, site by site, or "Start with none"), later in Settings in the
 panel or with the "Add Tim's mods" link on a site's panel, or here: --examples adds every site's,
 --examples x.com,google.com those sites', --no-examples none. Adding a site's turns TRIF on for it${STARTER_OFF.length ? ` (not

@@ -490,7 +490,7 @@ function onRunRequest(run, line, respond) {
 const logins = new Logins({ getWorkspace: () => workspace(ws.home), logger, onEvent: onAgentEvent });
 const runSubscribers = new Map(); // runId or loginId -> Set of CLI sockets that started it (see onClientLine)
 const AGENT_COMMANDS = new Set(['mod.historyCode', 'mod.historyDiff', 'mod.historyRestore', 'mod.export', 'mod.exportSite', 'mod.import',
-  'files.add', 'files.list', 'files.remove', 'files.reveal', 'mod.reveal', 'agent.list', 'agent.start', 'agent.stop', 'agent.running', 'agent.login', 'agent.loginCode', 'agent.loginCancel', 'mod.approve', 'mod.reject', 'mod.review', 'mod.undo', 'mod.history',
+  'files.add', 'files.begin', 'files.slice', 'files.end', 'files.abort', 'files.list', 'files.remove', 'files.reveal', 'mod.reveal', 'agent.list', 'agent.start', 'agent.stop', 'agent.running', 'agent.login', 'agent.loginCode', 'agent.loginCancel', 'mod.approve', 'mod.reject', 'mod.review', 'mod.undo', 'mod.history',
   'mod.update', 'instructions.get', 'instructions.set', 'agent.models', 'agent.openModel', 'agent.openModel.set', 'agent.openModel.setKey', 'agent.openModel.removeKey', 'update.check', 'update.install', 'update.setAuto', 'report.build',
   'shipped.install', 'shipped.none']);
 // Helper-local too, but a run may use them (on mods inside its scope; see lib/trash.js).
@@ -716,6 +716,11 @@ function agentCommand(cmd, args) {
       logger.info(`added ${r.rel} (${r.size} bytes)`);
       return r;
     }
+    // (a file of any size, in slices: lib/share.js fileBegin)
+    case 'files.begin': return require('./lib/share').fileBegin(ws, { site: String(args.site ?? ''), name: String(args.name ?? ''), size: args.size });
+    case 'files.slice': return require('./lib/share').fileSlice(ws, { id: args.id, offset: args.offset, bytes: Buffer.from(String(args.data ?? ''), 'base64') });
+    case 'files.end': { const r = require('./lib/share').fileEnd(ws, { id: args.id }); logger.info(`added ${r.rel} (${r.size} bytes)`); return r; }
+    case 'files.abort': return require('./lib/share').fileAbort(ws, { id: args.id });
     case 'files.list': return { site: String(args.site ?? ''), files: require('./lib/share').listFiles(ws, String(args.site ?? '')) };
     case 'files.remove': return require('./lib/share').removeFile(ws, String(args.site ?? ''), String(args.name ?? ''));
     case 'files.reveal': return require('./lib/share').revealFiles(ws, String(args.site ?? '')) && { site: String(args.site ?? ''), shown: true };

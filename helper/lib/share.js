@@ -13,6 +13,7 @@
 // over another; the mod scanner reads sites/<site>/*.js only, so nothing in files/ is ever a mod.
 
 const fs = require('fs');
+const crypto = require('crypto');
 const os = require('os');
 const path = require('path');
 const { envVar } = require('./env');
@@ -21,7 +22,9 @@ const history = require('./history');
 const mods = require('./mods');
 
 class ShareError extends Error {}
-const MAX_FILE = 50 * 1024 * 1024;
+// (a site's files have no size limit of their own: they come in slices, checked against the free disk space)
+const SLICE_MAX = 8 * 1024 * 1024;
+const DISK_MARGIN = 64 * 1024 * 1024; // (what stays free after a file)
 const IMPORTED = 'imported.json';
 // (a host name, a single label too: localhost is a site TRIF can be on)
 const SITE_RE = /^(?:all-sites|[a-z0-9](?:[a-z0-9-]*[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]*[a-z0-9])?)*)$/;
@@ -159,13 +162,69 @@ const filesDir = (ws, site) => path.join(ws.modsDir, checkSite(site), 'files');
 /** Saves bytes as sites/<site>/files/<name> (a number added if taken): {site, name, rel, size}. */
 function addFile(ws, { site, name, bytes }) {
   const buf = Buffer.isBuffer(bytes) ? bytes : Buffer.from(bytes || []);
-  if (buf.length > MAX_FILE) throw new ShareError(`${cleanFileName(name)} is ${(buf.length / 1024 / 1024).toFixed(1)} MB: a site's files can be up to ${MAX_FILE / 1024 / 1024} MB each`);
   const dir = filesDir(ws, site);
   fs.mkdirSync(dir, { recursive: true });
   const n = freeName(dir, cleanFileName(name));
   fs.writeFileSync(path.join(dir, n), buf, { flag: 'wx' });
   const s = checkSite(site);
   return { site: s, name: n, rel: `sites/${s}/files/${n}`, size: buf.length };
+}
+
+// A big file comes in slices: fileBegin checks there's room and opens a temp file in the site's files folder
+// (a dot name: not listed, and the mod scanner reads only sites/<site>/*.js); fileSlice appends one, at the offset
+// it says; fileEnd renames it into place, under a free name; fileAbort takes it away.
+const uploads = new Map(); // id -> {site, name, size, tmp, written, at}
+const UPLOAD_IDLE_MS = 10 * 60 * 1000;
+const sizeWords = (n) => (n >= 1024 ** 3 ? `${(n / 1024 ** 3).toFixed(1)} GB` : `${(n / 1024 / 1024).toFixed(1)} MB`);
+function freeSpace(dir, statfs = fs.statfsSync) {
+  if (typeof statfs !== 'function') return Infinity;
+  try { const s = statfs(dir); return Number(s.bavail) * Number(s.bsize); } catch { return Infinity; }
+}
+function dropIdleUploads(now = Date.now()) {
+  for (const [id, u] of uploads) if (now - u.at > UPLOAD_IDLE_MS) { try { fs.unlinkSync(u.tmp); } catch { /* gone */ } uploads.delete(id); }
+}
+function fileBegin(ws, { site, name, size }, { statfs } = {}) {
+  dropIdleUploads();
+  const total = Number(size);
+  if (!Number.isSafeInteger(total) || total < 0) throw new ShareError('that file has no size');
+  const dir = filesDir(ws, site);
+  fs.mkdirSync(dir, { recursive: true });
+  const clean = cleanFileName(name);
+  const free = freeSpace(dir, statfs === undefined ? fs.statfsSync : statfs);
+  if (total + DISK_MARGIN > free) throw new ShareError(`${clean} is ${sizeWords(total)}, and there's only ${sizeWords(Math.max(0, free))} free on this disk`);
+  const id = crypto.randomBytes(8).toString('hex');
+  const tmp = path.join(dir, `.upload-${id}.tmp`);
+  fs.writeFileSync(tmp, '', { flag: 'wx' });
+  uploads.set(id, { site, name: clean, size: total, tmp, written: 0, at: Date.now() });
+  return { id };
+}
+function fileSlice(ws, { id, offset, bytes }) {
+  const u = uploads.get(String(id));
+  if (!u) throw new ShareError('that upload has ended');
+  const buf = Buffer.isBuffer(bytes) ? bytes : Buffer.from(bytes || []);
+  if (buf.length > SLICE_MAX) throw new ShareError('a slice is too big');
+  if (Number(offset) !== u.written) throw new ShareError('a slice came out of order');
+  if (u.written + buf.length > u.size) throw new ShareError('that file is bigger than it said');
+  fs.appendFileSync(u.tmp, buf);
+  u.written += buf.length;
+  u.at = Date.now();
+  return { written: u.written };
+}
+function fileEnd(ws, { id }) {
+  const u = uploads.get(String(id));
+  if (!u) throw new ShareError('that upload has ended');
+  uploads.delete(String(id));
+  if (u.written !== u.size) { try { fs.unlinkSync(u.tmp); } catch { /* gone */ } throw new ShareError(`${u.name} came only in part`); }
+  const dir = path.dirname(u.tmp);
+  const n = freeName(dir, u.name);
+  fs.renameSync(u.tmp, path.join(dir, n));
+  const s = checkSite(u.site);
+  return { site: s, name: n, rel: `sites/${s}/files/${n}`, size: u.size };
+}
+function fileAbort(ws, { id }) {
+  const u = uploads.get(String(id));
+  if (u) { uploads.delete(String(id)); try { fs.unlinkSync(u.tmp); } catch { /* gone */ } }
+  return { aborted: !!u };
 }
 
 /** A site's files: [{name, size, at}], newest first. */
@@ -196,4 +255,4 @@ function revealFiles(ws, site) {
   return revealPath(dir, 'folder', { open: true });
 }
 
-module.exports = { ShareError, MAX_FILE, downloadsDir, exportMod, exportSite, sitesOf, stripShipped, importMod, loadImported, addFile, listFiles, removeFile, revealFiles, cleanFileName };
+module.exports = { ShareError, SLICE_MAX, DISK_MARGIN, fileBegin, fileSlice, fileEnd, fileAbort, downloadsDir, exportMod, exportSite, sitesOf, stripShipped, importMod, loadImported, addFile, listFiles, removeFile, revealFiles, cleanFileName };

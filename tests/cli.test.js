@@ -633,19 +633,18 @@ test('status and mods: a mod off because new mods of its group start off says so
   const ext = new FakeExtension({ home });
   cleanups.push(() => ext.close());
   ext.hello();
-  ext.handlers.status = () => ({ userScripts: true, chrome: '140', version: '0.1.0', recording: [], sitesOn: ['x.com'], startsOff: ['page'],
+  ext.handlers.status = () => ({ userScripts: true, chrome: '140', version: '0.1.0', recording: [], sitesOn: ['x.com'], chatWait: true,
     mods: [{ id: 'x.com/a', registered: false, enabled: false, newOff: 'new' }, { id: 'x.com/b', registered: false, enabled: false, newOff: 'update' }] });
   await ext.waitForSocket();
   await ext.nextMods((mods) => mods.length === 2);
   let r = await runCli(['status'], { home });
-  assert.match(r.stdout, /^NEW MODS {6}new free mods start off in this browser \(the user's setting, in the side panel's Settings\), except ones made in its side panel$/m);
+  assert.match(r.stdout, /^CHAT MODS {5}wait for the user: what the side panel's chat makes or changes runs only once they turn it on$/m);
   assert.match(r.stdout, /x\.com\/a\s+off \(new: waiting for the user to look at it\)\n/);
   assert.match(r.stdout, /x\.com\/b\s+off \(updated by TRIF: waiting for the user to look at it\)\n/);
-  assert.match(r.stdout, /off \(new\) = new mods of its kind start off in this browser \(the user's setting\); only the user switches it on/);
+  assert.match(r.stdout, /off \(new\) = it came from outside the chat, so it started off; only the user switches it on/);
   assert.doesNotMatch(r.stdout, /off = switched off by the user/);
   r = await runCli(['mods'], { home });
-  assert.match(r.stdout, /^ {2}off: new, and new mods of its kind start off in this browser \(the user's setting\); not running until the user switches it on after looking at it \(side panel, or trif enable x\.com\/a in their terminal\)$/m);
-  assert.match(r.stdout, /^ {2}off: TRIF updated it, and new mods/m);
+  assert.match(r.stdout, /^ {2}off: it came from outside the chat \(or TRIF updated it\), so it started off; not running until the user switches it on after looking at it \(side panel, or trif enable x\.com\/a in their terminal\)$/m);
   r = await runCli(['mods', '--json'], { home });
   assert.equal(JSON.parse(r.stdout).mods.find((m) => m.id === 'x.com/a').newOff, 'new');
 });

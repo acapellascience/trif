@@ -16,6 +16,16 @@ const { SWEEP_EXPECT } = require('./lib/server');
 const { makeFakeKeychain } = require('../fake-keychain');
 
 const REAL_HOME = os.userInfo().homedir;
+// A mod from outside the chat starts off until the user has looked at it (extension/lib.js applyNewMods). The
+// suite's own mods, written into a site's folder, are switched on as soon as they arrive, as a user would
+// (trif enable), unless a check is about that (keepOff).
+let lookingUser = null;
+const realWriteFileSync = fs.writeFileSync;
+fs.writeFileSync = function writeFileSync(file, ...rest) {
+  const r = realWriteFileSync.call(fs, file, ...rest);
+  if (lookingUser && typeof file === 'string') lookingUser(file);
+  return r;
+};
 const SHIPPED_IDS = require('../../helper/lib/preinstalled').PREINSTALLED.map((p) => p.id || p);
 const { RETIRED, siteOf, starterSites, SITES_ON } = require('../../helper/lib/preinstalled');
 // Tim's mods for a site (a scope: x.com, google.com).
@@ -120,6 +130,27 @@ class Scenario {
   }
 
   /** Runs the installed `trif` (the scratch home's wrapper). */
+  // (see lookingUser, above: a mod the suite wrote, switched on once it's there and marked as off for being new)
+  lookAtMods() {
+    const sites = path.join(this.trif, 'sites') + path.sep;
+    lookingUser = (file) => {
+      if (!file.startsWith(sites) || !file.endsWith('.js')) return;
+      const rel = file.slice(sites.length).split(path.sep);
+      if (rel.length !== 2) return;
+      const id = `${rel[0]}/${rel[1].slice(0, -3)}`;
+      if (this.keepOff) return;
+      (async () => {
+        for (let i = 0; i < 40; i++) {
+          await sleep(250);
+          const m = ((await this.cli(['status'], { json: true, timeoutMs: 20000 }).catch(() => ({ json: null }))).json?.extension?.mods || []).find((x) => x.id === id);
+          if (!m) continue;
+          if (m.newOff) await this.cli(['enable', id], { timeoutMs: 20000 }).catch(() => {});
+          return;
+        }
+      })();
+    };
+  }
+
   async cli(args, { json = false, timeoutMs = 60000, env = undefined } = {}) {
     const r = await runAsync(path.join(this.trif, 'bin', 'trif'), [...args, ...(json ? ['--json'] : [])], { env: this.env(env), cwd: this.home, timeoutMs });
     if (json) {
@@ -702,6 +733,7 @@ class Scenario {
     // The harness's own mods, and config: no update checks (hermetic), and a canary the agent must not read.
     fs.mkdirSync(path.join(this.trif, 'sites', '127.0.0.1'), { recursive: true });
     fs.mkdirSync(path.join(this.trif, 'sites', 'localhost'), { recursive: true });
+    this.lookAtMods();
     fs.writeFileSync(path.join(this.trif, 'sites', '127.0.0.1', 'e2e-banner.js'), BANNER_MOD);
     fs.writeFileSync(path.join(this.trif, 'sites', 'localhost', 'e2e-off.js'), OFF_SITE_MOD);
     const cfgFile = path.join(this.priv, 'config.json');
@@ -845,8 +877,13 @@ class Scenario {
       const st = (await this.cli(['status'], { json: true })).json.extension;
       const byId = new Map(st.mods.map((m) => [m.id, m]));
       const px = byId.get('x.com/detox-timeline');
-      if (!px || px.enabled === false) throw new Error(`x.com/detox-timeline not on: ${JSON.stringify(px)}`);
-      // A mod that starts off arrives off (ticked means on the computer, not switched on).
+      // Every one of Tim's mods arrives off on a new install (ticked means on the computer, not switched on);
+      // an existing install keeps its switches.
+      if (this.o.kind === 'fresh') {
+        const on = want.filter((id) => byId.get(id)?.enabled !== false);
+        if (on.length) throw new Error(`should start off: ${on.join(', ')}`);
+        await this.cli(['enable', 'x.com/detox-timeline']); // (the user turns one on, for the checks below)
+      } else if (!px || px.enabled === false) throw new Error(`x.com/detox-timeline not on: ${JSON.stringify(px)}`);
       const offId = this.o.kind === 'fresh' ? 'x.com/space-shooter' : 'x.com/rainbow-rave';
       const pf = byId.get(offId);
       if (!pf || pf.enabled !== false) throw new Error(`${offId} should start off: ${JSON.stringify(pf)}`);
@@ -1187,8 +1224,9 @@ class Scenario {
       await r.check('the widened box (WIDEN.md class A): sound (compressors, a node into a parameter, waves, buffers from numbers, offline renders, its own clock), typed arrays and the browser\'s pure tools, page facts read only, drawing, animations, observers, events and focus on its own elements, SVG of its own and faithful copies, CSS from shown pictures and into shadow roots, text split into its own pieces, the page\'s own events, placeholders, bigger settings, more tags; each row\'s hostile test refused, nothing reaching the server or the page', () => this.wideCheck(win));
       await r.check('the widened box\'s powers (WIDEN.md class B): block-events, page-events, site-storage with @migrate, rewrite-requests, image-variants, edit-uploads, embeds, local-fonts, preload, and the widened site-data, go-to and media: held with each sentence and the many-powers warning; each works as its narrowing says; undeclared, each is refused', () => this.wideBCheck(win));
       await r.check('speculation rules (audit AU-7): a page that prefetches its same-site links at once; a link a free mod adds is fetched without a click (Chrome), a boxed mod can\'t make one', () => this.specRulesCheck(win));
-      await r.check('boxed mods in the panel: their own group between Style mods and Free mods, with its switch (off on the site: they stop there; on: back), and "New mods start" has a Boxed mods row', () => this.sandboxedPanelCheck(win));
-      await r.check('Settings → New mods start → Free mods Off: a new free mod arrives off, marked "new", and doesn\'t run; a new style mod runs; switched on in the panel, it runs; Free mods On again', () => this.startsOffCheck(win));
+      await r.check('boxed mods in the panel: their own group between Style mods and Free mods, with its switch (off on the site: they stop there; on: back)', () => this.sandboxedPanelCheck(win));
+      await r.check('mods from outside the chat start off: a new free mod and a new style mod arrive off, marked "new", and don\'t run; switched on in the panel, they run', () => this.startsOffCheck(win));
+      await r.check('Settings → Mods your chat makes → Wait for me: what the chat makes waits, with Show code and Turn on in its card; what it changes waits while the version before runs; Start on again', () => this.chatWaitCheck(win));
       await r.check('mods that break: a mod that throws gets a badge and a card in the chat; Show error opens its code at the line; Ignore hides it; a new version that throws again: Fix it starts a run (a stand-in Claude Code) that fixes it, and Undo fix puts it back; a style mod whose selectors stop matching is flagged; Settings has When a mod breaks', () => this.modHealthCheck(win));
       await r.check('a hijacked agent (a stand-in Claude Code): the tab it ran code in sends nothing that changes anything until it reloads, even later; its mod that posts is held by its code, whatever its header says', () => this.hijackedAgentCheck(win));
       await r.check('the tab lock\'s harder edges (TL-1 to TL-6): cross-site images, workers no tab owns, the site\'s other tabs, popups, WebRTC and preconnect from the locked page, and what the code leaves in the site\'s storage', () => this.tabLockHardeningCheck(win));
@@ -2970,6 +3008,14 @@ process.exitCode = 1;
         twice: [...document.querySelectorAll('#mod-list li.held')].filter((li) => [...li.querySelectorAll('.tag')].filter((t) => !t.hidden && t.textContent === 'on hold').length > 1).length })`);
       if (tidy.menu[0] !== 'Import mod…' || tidy.files !== 'Files (1)' || tidy.twice) problems.push(`the mods box: ${JSON.stringify(tidy)}`);
       await themes('share-files');
+      // a file bigger than a slice (a few MB: the panel sends 4 MB at a time, the helper appends them)
+      await this.panel(`async () => { const dt = new DataTransfer(); dt.items.add(new File([new Uint8Array(5 * 1024 * 1024).fill(97)], 'e2e-big.bin', { type: 'application/octet-stream' })); document.body.dispatchEvent(new DragEvent('drop', { dataTransfer: dt, bubbles: true })); return true; }`);
+      const bigFile = path.join(dir, 'files', 'e2e-big.bin');
+      made.push(bigFile);
+      const bigSize = await waitFor('the big file saved', () => (fs.existsSync(bigFile) ? fs.statSync(bigFile).size : null), { timeoutMs: 20000, intervalMs: 200 }).catch(() => 0);
+      if (bigSize !== 5 * 1024 * 1024) problems.push(`the file in slices: ${bigSize} bytes`);
+      const stray = fs.readdirSync(path.join(dir, 'files')).filter((n) => n.startsWith('.upload-'));
+      if (stray.length) problems.push(`temp files left: ${stray.join(', ')}`);
       // the overlay itself, while dragging
       await this.panel(`async () => { const dt = new DataTransfer(); dt.items.add(new File(['x'], 'a.js', { type: 'text/javascript' })); document.body.dispatchEvent(new DragEvent('dragenter', { dataTransfer: dt, bubbles: true })); return true; }`);
       await themes('share-drop-overlay');
@@ -3106,12 +3152,11 @@ page.root.setAttr('data-trif-box-spec', r);\n`,
         const row = document.querySelector('li[data-mod="127.0.0.1/e2e-sbx-panel"]');
         return sb && row && row.querySelector('.light.on') ? { heads, name: sb.querySelector('.mod-group-name').textContent, note: sb.querySelector('.mod-group-note').textContent, rowGroup: row.dataset.group,
           order: [...document.querySelectorAll('#mod-list > li')].map((li) => li.dataset.mod || li.dataset.group),
-          starts: [...document.querySelectorAll('.starts-row')].map((l) => l.querySelector('span').textContent + '=' + l.querySelector('select').value) } : null;
+        } : null;
       }`), { timeoutMs: 15000 });
       const order = layout.heads.join(',');
       if (!/^(rules,)?sandboxed(,page)?$/.test(order) || layout.name !== 'Boxed mods' || layout.note !== 'Run in TRIF\'s sandbox: they change what the page shows, and do only what you\'ve allowed.' || layout.rowGroup !== 'sandboxed') throw new Error(`the panel: ${JSON.stringify(layout)}`);
       if (layout.order.indexOf('127.0.0.1/e2e-sbx-panel') < layout.order.indexOf('sandboxed') || (layout.order.includes('page') && layout.order.indexOf('127.0.0.1/e2e-sbx-panel') > layout.order.indexOf('page'))) throw new Error(`not under its heading: ${JSON.stringify(layout.order)}`);
-      if (JSON.stringify(layout.starts) !== JSON.stringify(['Style mods=on', 'Boxed mods=on', 'Free mods=on'])) throw new Error(`New mods start: ${JSON.stringify(layout.starts)}`);
       await this.shot(this.panelCtx, 'panel-sandboxed-group');
       await clickGroup();
       await waitFor('the sandboxed mod gone from the site', async () => (!/ran/.test(await look()) ? true : null), { timeoutMs: 15000, intervalMs: 400 });
@@ -3119,7 +3164,7 @@ page.root.setAttr('data-trif-box-spec', r);\n`,
       if (!/GROUPS OFF\s+boxed mods off on 127\.0\.0\.1/.test(st)) throw new Error(`trif status: ${st.split('\n').find((l) => /GROUPS/.test(l)) || '(no GROUPS OFF line)'}`);
       await clickGroup();
       await waitFor('the sandboxed mod back', async () => (/ran/.test(await look()) ? true : null), { timeoutMs: 15000, intervalMs: 400 });
-      return `groups ${order}; "${layout.name}: ${layout.note}"; switched off on 127.0.0.1: it stopped (GROUPS OFF says so); on: back; New mods start: ${layout.starts.join(', ')}`;
+      return `groups ${order}; "${layout.name}: ${layout.note}"; switched off on 127.0.0.1: it stopped (GROUPS OFF says so); on: back`;
     } finally {
       try { fs.unlinkSync(file); } catch { /* gone */ }
       const stillOff = await this.panel(`async () => !!document.querySelector('li.mod-group[data-group="sandboxed"].off')`).catch(() => false);
@@ -3183,46 +3228,118 @@ page.root.setAttr('data-trif-box-spec', r);\n`,
     const pageFile = path.join(this.trif, 'sites', site, 'e2e-new-page.js');
     const rulesFile = path.join(this.trif, 'sites', site, 'e2e-new-rules.js');
     const look = async () => JSON.parse((await this.cli(['run', '--tab', String(win.tabId), `({ ran: document.documentElement.dataset.e2eNewPage || null, color: getComputedStyle(document.getElementById('title')).color })`], { timeoutMs: 20000 })).stdout);
-    const setPage = async (value) => {
-      await this.panelClick('#settings-btn');
-      await waitFor('Settings', () => this.panel(`async () => !document.querySelector('#settings').hidden || null`), { timeoutMs: 5000 });
-      // (as the user picking it in the menu: the select's value, then its change event)
-      await this.panel(`async (v) => { const s = document.querySelector('#starts-page'); s.value = v; s.dispatchEvent(new Event('change', { bubbles: true })); }`, [value]);
-      const want = value === 'off' ? '["page"]' : '[]';
-      await waitFor(`page scripts start ${value}`, async () => JSON.stringify((await this.cli(['status'], { json: true, timeoutMs: 20000 })).json.extension.startsOff || []) === want || null, { timeoutMs: 10000, intervalMs: 300 });
-      const shown = await this.panel(`async () => ({ rules: document.querySelector('#starts-rules').value, page: document.querySelector('#starts-page').value, note: document.querySelector('#starts-note').hidden ? '' : document.querySelector('#starts-note').textContent })`);
-      if (value === 'off') await this.shot(this.panelCtx, 'settings-new-mods-start');
-      await this.panelClick('#settings-btn');
-      return shown;
-    };
+    this.keepOff = true;
     try {
-      const shown = await setPage('off');
-      if (shown.page !== 'off' || shown.rules !== 'on' || shown.note !== 'Mods your chat here makes still start on.') throw new Error(`Settings shows ${JSON.stringify(shown)}`);
-      // A page script and a rules mod appear, written outside the panel (a terminal agent, or by hand). (Seconds
-      // after the stand-in runs before this one ended: counted for their run, helper/lib/origins.js, but not as
-      // written while it was going, so they still start off.)
+      // A page script and a style mod appear, written outside the panel (a terminal agent, or by hand).
       fs.writeFileSync(pageFile, '// ==WebMod==\n// @name New page script\n// @match *://127.0.0.1/*\n// ==/WebMod==\ndocument.documentElement.dataset.e2eNewPage = \'ran\';\n');
       fs.writeFileSync(rulesFile, '// ==WebMod==\n// @name New rules\n// @match *://127.0.0.1/*\n// @rules\n// ==/WebMod==\n{ "css": "#title { color: rgb(7, 8, 9) }" }\n');
-      const st = await waitFor('the page script off as new, the rules mod registered', async () => {
+      await waitFor('both off as new', async () => {
         const out = (await this.cli(['status'], { timeoutMs: 20000 })).stdout;
-        return /e2e-new-page\s+off \(new: waiting for the user to look at it\)/.test(out) && /e2e-new-rules\s+registered/.test(out) ? out : null;
+        return /e2e-new-page\s+off \(new: waiting for the user to look at it\)/.test(out) && /e2e-new-rules\s+off \(new: waiting for the user to look at it\)/.test(out) ? out : null;
       }, { timeoutMs: 20000, intervalMs: 500 });
-      if (!/^NEW MODS {6}new free mods start off in this browser/m.test(st)) throw new Error(`trif status: ${st.split('\n').find((l) => /NEW MODS/.test(l)) || '(no NEW MODS line)'}`);
       await this.ext(`async (id, url) => { await chrome.tabs.update(id, { url, active: true }); }`, [win.tabId, `${base}/?e2e=starts-off`]);
-      const off = await waitFor('the rules mod running, not the page script', async () => { const x = await look(); return x.color === 'rgb(7, 8, 9)' ? x : null; }, { timeoutMs: 15000, intervalMs: 400 });
-      if (off.ran) throw new Error('the new page script ran');
-      const row = await waitFor('its row marked new', () => this.panel(`async () => { const li = document.querySelector('li[data-mod="127.0.0.1/e2e-new-page"]'); const t = li && li.querySelector('.tag'); return t && !t.hidden && t.textContent === 'new' ? { tag: t.textContent, title: t.title, off: li.classList.contains('off') } : null; }`), { timeoutMs: 10000 });
-      if (!row.off || row.title !== 'New free mods start off (Settings): switch it on once you\'ve looked at it.') throw new Error(`the row: ${JSON.stringify(row)}`);
+      await sleep(1200);
+      const off = await look();
+      if (off.ran || off.color === 'rgb(7, 8, 9)') throw new Error(`a new mod ran: ${JSON.stringify(off)}`);
+      const row = await waitFor('its row marked new', () => this.panel(`async () => { const li = document.querySelector('li[data-mod="127.0.0.1/e2e-new-page"]'); const t = li && li.querySelector('.tag'); return t && !t.hidden && t.textContent === 'new' ? { tag: t.textContent, title: t.title, off: li.classList.contains('off') } : null; }`), { timeoutMs: 15000 });
+      if (!row.off || row.title !== 'TRIF switched it off because it came from outside your chat: switch it on once you\'ve looked at it.') throw new Error(`the row: ${JSON.stringify(row)}`);
       await this.shot(this.panelCtx, 'panel-new-mod-off');
-      // The user switches it on in the panel: it runs, and it's no longer "new".
-      await this.panelClick('li[data-mod="127.0.0.1/e2e-new-page"] button.switch');
-      await waitFor('the page script running', async () => (await look()).ran === 'ran' || null, { timeoutMs: 15000, intervalMs: 400 });
+      // The user switches them on in the panel: they run, and they're no longer "new".
+      for (const id of ['e2e-new-page', 'e2e-new-rules']) await this.panelClick(`li[data-mod="127.0.0.1/${id}"] button.switch`);
+      await waitFor('both running', async () => { const x = await look(); return x.ran === 'ran' && x.color === 'rgb(7, 8, 9)' || null; }, { timeoutMs: 15000, intervalMs: 400 });
       const after = (await this.cli(['status'], { json: true, timeoutMs: 20000 })).json.extension.mods.find((m) => m.id === '127.0.0.1/e2e-new-page');
       if (after.enabled === false || after.newOff) throw new Error(`after switching on: ${JSON.stringify(after)}`);
-      return `Settings: ${JSON.stringify(shown)}; the page script off ("${row.tag}"), the rules mod running (${off.color}); switched on: it runs`;
+      return `both off ("${row.tag}"); switched on: they run`;
     } finally {
+      this.keepOff = false;
       for (const f of [pageFile, rulesFile]) { try { fs.unlinkSync(f); } catch { /* gone */ } }
-      await setPage('on').catch(() => {});
+    }
+  }
+
+  // "Mods your chat makes: Wait for me", with a stand-in Claude Code that writes a mod, then changes it
+  async chatWaitCheck(win) {
+    const site = '127.0.0.1';
+    const base = `http://${site}:${this.o.servers.port}`;
+    const dir = path.join(this.work, 'standin-chatwait');
+    fs.mkdirSync(dir, { recursive: true });
+    const id = 'e2e-chatwait';
+    fs.writeFileSync(path.join(dir, 'claude'), `#!${process.execPath}
+const fs = require('fs');
+const a = process.argv.slice(2);
+if (a[0] === '--version') { console.log('2.1.319 (Claude Code)'); process.exit(0); }
+if (a[0] === 'auth') { console.log('{"loggedIn": true, "authMethod": "claude.ai"}'); process.exit(0); }
+const say = (o) => process.stdout.write(JSON.stringify(o) + '\\n');
+say({ type: 'system', subtype: 'init', session_id: 'e2e-chatwait' });
+const f = 'sites/${site}/${id}.js';
+const v = fs.existsSync(f) ? 'two' : 'one';
+fs.writeFileSync(f, '// ==WebMod==\\n// @name Chat wait\\n// @match *://${site}/*\\n// @risk 0 render-only\\n// ==/WebMod==\\ndocument.documentElement.dataset.e2eChatWait = "' + v + '";\\n');
+setTimeout(() => {
+  say({ type: 'assistant', message: { model: 'claude-e2e', content: [{ type: 'text', text: 'wrote ' + v }] } });
+  say({ type: 'result', subtype: 'success', is_error: false, result: 'wrote ' + v, session_id: 'e2e-chatwait' });
+}, 1200);
+`, { mode: 0o755 });
+    const cfgFile = path.join(this.priv, 'config.json');
+    const saved = fs.readFileSync(cfgFile, 'utf8');
+    const cfg = JSON.parse(saved);
+    cfg.env = { ...(cfg.env || {}), PATH: [dir, cfg.env?.PATH].filter(Boolean).join(':') };
+    fs.writeFileSync(cfgFile, JSON.stringify(cfg, null, 2) + '\n');
+    const file = path.join(this.trif, 'sites', site, `${id}.js`);
+    const chat = () => this.ext(`async (k) => (await chrome.storage.local.get(k))[k] || null`, [`chat:${site}`]);
+    const ran = async () => this.ext(`async (tabId) => { const r = await chrome.scripting.executeScript({ target: { tabId }, func: () => document.documentElement.dataset.e2eChatWait || null }); return r[0].result; }`, [win.tabId]);
+    const setWait = async (value) => {
+      await this.panelClick('#settings-btn');
+      await waitFor('Settings', () => this.panel(`async () => !document.querySelector('#settings').hidden || null`), { timeoutMs: 5000 });
+      await this.panel(`async (v) => { const s = document.querySelector('#chat-mods'); s.value = v; s.dispatchEvent(new Event('change', { bubbles: true })); }`, [value]);
+      await waitFor(`chat mods ${value}`, async () => !!(await this.cli(['status'], { json: true, timeoutMs: 20000 })).json.extension.chatWait === (value === 'wait') || null, { timeoutMs: 10000, intervalMs: 300 });
+      if (value === 'wait') await this.shot(this.panelCtx, 'settings-chat-mods');
+      await this.panelClick('#settings-btn');
+    };
+    const reopen = async () => { await this.panel(`async () => { setTimeout(() => location.reload(), 20); return true; }`).catch(() => {}); await sleep(800); this.panelCtx = await this.d.findPage('sidepanel.html'); };
+    const say = async (text) => {
+      const before = ((await chat()) || { messages: [] }).messages.length;
+      await this.waitLooks('Send on (the stand-in Claude Code)', (l) => /Claude Code/.test(l.dotLabel) && !l.send.disabled, 30000);
+      await this.panel(`async (t) => { const i = document.getElementById('input'); i.value = t; i.dispatchEvent(new Event('input', { bubbles: true })); }`, [text]);
+      await this.panelClick('#send');
+      return waitFor('the run to finish', async () => { const x = await chat(); return x && !x.run && x.messages.length > before + 1 ? x : null; }, { timeoutMs: 60000, intervalMs: 300 });
+    };
+    const load = async () => { await this.ext(`async (id, url) => { await chrome.tabs.update(id, { url, active: true }); }`, [win.tabId, `${base}/?e2e=chat-wait-${Date.now()}`]); await sleep(1500); };
+    const card = () => waitFor('the card', () => this.panel(`async () => { const all = [...document.querySelectorAll('#messages li')].filter((l) => /waits for you/.test(l.textContent)); const l = all[all.length - 1]; const b = l ? [...l.querySelectorAll('button')].map((x) => x.textContent) : []; return b.includes('Turn on') ? { text: l.textContent, buttons: b } : null; }`), { timeoutMs: 15000 });
+    const turnOn = () => this.panel(`async () => { const all = [...document.querySelectorAll('#messages li')].filter((l) => /waits for you/.test(l.textContent)); [...all[all.length - 1].querySelectorAll('button')].find((x) => x.textContent === 'Turn on').click(); return true; }`);
+    const tag = () => waitFor('the row\'s tag', () => this.panel(`async () => { const t = document.querySelector('li[data-mod="${site}/${id}"] .tag'); return t && !t.hidden && t.textContent ? { tag: t.textContent, title: t.title } : null; }`), { timeoutMs: 15000 });
+    const problems = [];
+    this.sandboxPage = true;
+    try {
+      await this.ext(`async (k) => { await chrome.storage.local.remove(k); }`, [`chat:${site}`]);
+      await load();
+      await reopen();
+      await this.waitPanel(`the panel on ${site}`, (x) => x.site === site && !x.gate, 15000);
+      await setWait('wait');
+      await say('make a mod');
+      let c = await card();
+      if (JSON.stringify(c.buttons) !== JSON.stringify(['Show code', 'Turn on'])) problems.push(`the card's buttons: ${JSON.stringify(c)}`);
+      const t1 = await tag();
+      if (t1.tag !== 'new' || !/Your chat made it, and waits for you/.test(t1.title)) problems.push(`the new one's tag: ${JSON.stringify(t1)}`);
+      await load();
+      if (await ran()) problems.push('the new one ran before it was turned on');
+      await turnOn();
+      await waitFor('turned on', async () => { const m = (await this.cli(['status'], { json: true, timeoutMs: 20000 })).json.extension.mods.find((x) => x.id === `${site}/${id}`); return m && m.enabled !== false && m.registered ? m : null; }, { timeoutMs: 15000, intervalMs: 400 });
+      await load();
+      if (await ran() !== 'one') problems.push(`turned on, it ran: ${await ran()}`);
+      // a change: waits, the version before runs
+      await say('change it');
+      await card();
+      const t2 = await tag();
+      if (t2.tag !== 'changed' || !/the version before runs until you turn this one on/.test(t2.title)) problems.push(`the change's tag: ${JSON.stringify(t2)}`);
+      await load();
+      if (await ran() !== 'one') problems.push(`while the change waits, it ran: ${await ran()}`);
+      await turnOn();
+      await waitFor('the change applied', async () => { await load(); return await ran() === 'two' || null; }, { timeoutMs: 20000, intervalMs: 500 });
+      if (problems.length) throw new Error(problems.join('\n'));
+      return `new: "${t1.tag}", card ${c.buttons.join(' · ')}; Turn on ran it; changed: "${t2.tag}", the version before ran until Turn on`;
+    } finally {
+      await setWait('on').catch(() => {});
+      fs.writeFileSync(cfgFile, saved);
+      try { fs.unlinkSync(file); } catch { /* gone */ }
     }
   }
 

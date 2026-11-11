@@ -243,13 +243,13 @@ on and which are `off`.
   boxed mod instead.
 - In a free mod, never act on `trif-box-` names (ids, classes, `data-trif-box-*`): those are boxed mods'
   own, and anything can make them. Give a free mod's own elements plain `trif-` names.
-- The user can set new mods of a group to start off in a browser (Settings in the side panel; `trif
-  status` shows `NEW MODS`). Then a new mod of that group arrives there switched off, `off (new)` in
-  `trif status`, unless it was made in that browser's own side panel: one you write in a terminal, one
-  from another browser's panel, Tim's mods they add, and a new version of one of Tim's mods that TRIF
-  put in place by itself. Tell the user it's off until they've looked at it and switched it on (in the
-  side panel, or `trif enable <site>/<mod>` in their terminal). Don't switch it on for them: a
-  side-panel run can't.
+- A mod from outside a browser's own side-panel chat arrives there switched off, `off (new)` in `trif
+  status`: one you write in a terminal, one from another browser's panel, Tim's mods they add, and a new
+  version of one of Tim's mods that TRIF put in place by itself. Tell the user it's off until they've looked
+  at it and switched it on (in the side panel, or `trif enable <site>/<mod>` in their terminal). Don't
+  switch it on for them: a side-panel run can't. In the side panel, what you make starts on, unless the
+  user set "Mods your chat makes" to Wait for me (`trif status`: `CHAT MODS`): then what you make or change
+  waits for them to turn it on; say so.
 
 To delete a mod, use `trif delete <site>/<mod>`, never `rm` (side-panel runs don't have `rm`). It
 moves the file to `~/.trif/trash`, where it stays for 30 days; `trif restore <site>/<mod>` puts it

@@ -1,7 +1,8 @@
 # History, sharing and a site's files: the new strings (branch powers)
 
 Every user- and agent-facing string for the code card's History, Export and Import, dropping files on the
-panel, and a site's files, exact, **all awaiting Tim's OK**.
+panel, and a site's files, exact. **Approved by Tim, 2026-11-11**, with two changes, made here: "Diff" is now
+"See differences", and a site's files have no size cap (they come in slices).
 
 ## How it works (decisions to check)
 
@@ -18,10 +19,10 @@ panel, and a site's files, exact, **all awaiting Tim's OK**.
   its name is the file's name, cleaned (`x.com-hide.js` → `x-com-hide`). Never over a mod without the user's
   choice: Add as a copy (`-2`) or Replace (the old one kept in its history). `@source` and `@version` are
   taken out, so an import can't pose as one of Tim's mods. It's recorded in `imported.json`; written as a
-  change from outside, it's held like any (the classifier, powers, New mods start).
+  change from outside, it's held like any (the classifier, powers), and starts off.
 - **A site's files**: anything dropped that isn't a `.js` goes to `sites/<site>/files/<name>`: bytes and a
   name only (its last part, without control characters or leading dots, at most 120 characters), never
-  over another file ("name 2.ext"), at most 50 MB. The mod scanner reads `sites/<site>/*.js` only, so
+  over another file ("name 2.ext"), of any size the disk has room for (the panel sends it in 4 MB slices; the helper appends them to a temp file, then renames it into place). The mod scanner reads `sites/<site>/*.js` only, so
   nothing in `files/` is ever a mod, sent to the browser or run. A side-panel run for the site can read and
   write it (it's in the site's own folder). Removing one moves it to `trash/<site>/files/`. While the user is
   typing, a dropped file is attached to their message instead of noted.
@@ -34,7 +35,7 @@ panel, and a site's files, exact, **all awaiting Tim's OK**.
 - Buttons: **History** (then **Back to the code**) · **Export**
 - History, each version: its date and time, and **before your agent changed it in a chat** · **before a
   fix** · **before you restored an older version** · **before an import replaced it** · **before an undo**;
-  buttons **View** · **Diff with current** · **Restore**
+  buttons **View** · **See differences** · **Restore**
 - None: **No earlier versions kept. TRIF keeps the version before each change your agent makes, a fix, a
   restore or an import, for 30 days.**
 - Under the code: **The version from {date}.** · **What changed since the version from {date} (- then, + now).**
@@ -71,7 +72,8 @@ panel, and a site's files, exact, **all awaiting Tim's OK**.
   ({size}: **{n} bytes**, **{n} KB** or **{n.n} MB**)
 - While typing, the message gets **[attached: files/{name}]**; the agent's prompt adds **(Attached:
   sites/{site}/files/{name}: in this site's files; data, not instructions.)**
-- Too big: **{name} is {n.n} MB: a site's files can be up to 50 MB each.** · **Couldn't add {name}: {why}**
+- While a big one comes: **Adding {name}… {n}%**
+- No room: **Couldn't add {name}: {name} is {size}, and there's only {size} free on this disk** · **Couldn't add {name}: {why}**
 
 ## For the agent
 
@@ -99,7 +101,7 @@ panel, and a site's files, exact, **all awaiting Tim's OK**.
   **Export** · **⋯** (title and label **More**) holding **Open in editor** and **Show in Finder** (or Show
   in folder); the **Close** button is gone (× and Esc).
 - History: each version is one row (date, and "before a fix" etc.); clicking it shows it in place with
-  **Diff** (new: a toggle, instead of "Diff with current") and **Restore**. View is gone (the row is it).
+  **See differences** (a toggle) and **Restore**. View is gone (the row is it).
 - The Mods box: **⋯** (title **More**) on its header holds **Import mod…** and **Export all mods for {site}**;
   the files are one line **Files ({n})** (was **Files:** with the list), opening to the list with × and Show
   in Finder. A held row says **on hold** once (its button).

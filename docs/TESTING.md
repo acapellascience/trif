@@ -51,7 +51,7 @@ Per browser, a **fresh** scenario, and an **upgrade** scenario per `--upgrade-fr
    next), allow user scripts (it ticks that step itself; Tim's mods are next, a checklist by site with none
    on disk yet: it leaves X and Google ticked and clicks "Add these", and checks only theirs arrive and only
    those sites are on; upgrading, the step is ticked with every site it had), and check: `trif status` (the extension's hello, its browser),
-   `trif doctor`, the shipped mods (`trif mods`, which start on and off, the sites TRIF starts on for).
+   `trif doctor`, the shipped mods (`trif mods`, each starting off, the sites TRIF starts on for).
    There's no Site permissions step (TRIF asks for each site's permission when it's turned on there): the
    agent's login is next, and the sites setup turned on wait to be connected (fresh Firefox: all of them;
    Chrome's test build has its test hosts).

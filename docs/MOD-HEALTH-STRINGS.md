@@ -1,7 +1,7 @@
 # Mods that break: the new strings (branch powers)
 
 Every user- and agent-facing string for error flags, "Want me to fix it?", quiet breakage, automatic
-fixes and Undo fix, exact, **all awaiting Tim's OK**.
+fixes and Undo fix, exact. **Approved by Tim, 2026-11-11.**
 
 ## How it works (decisions to check)
 

@@ -1,6 +1,6 @@
 # One way to reach sites, and the power button on the gate: strings (branch powers)
 
-Every string added, changed or removed, exact, **all awaiting Tim's OK**.
+Every string added, changed or removed, exact. **Approved by Tim, 2026-11-11.**
 
 ## How it works (decisions to check)
 

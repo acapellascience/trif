@@ -32,7 +32,7 @@ const ui = {
   modeNote: $('#mode-note'), accessNote: $('#access-note'), accessNoteOk: $('#access-note-ok'),
   blockedList: $('#blocked-list'), blockedEmpty: $('#blocked-empty'),
   onBreak: $('#on-break'),
-  startsRules: $('#starts-rules'), startsSandboxed: $('#starts-sandboxed'), startsPage: $('#starts-page'), startsNote: $('#starts-note'),
+  chatMods: $('#chat-mods'),
   landing: $('#landing'), landingIcon: $('#landing-icon'), landingVersion: $('#landing-version'), landingNote: $('#landing-note'),
   settings: $('#settings'), agent: $('#agent'), agentNote: $('#agent-note'), model: $('#model'),
   using: $('#using'), modelCustomRow: $('#model-custom-row'), modelCustom: $('#model-custom'), modelNote: $('#model-note'),
@@ -416,6 +416,20 @@ function messageNode(m) {
   // A mod that broke (background.js announceBreak): Fix it / Show error / Ignore; a fix's own new error: Undo
   // fix first; once fixed: Undo fix
   if (m.kind === 'modError') breakCard(li, m);
+  // "x.js waits for you." with "Mods your chat makes: Wait for me": Show code, Turn on
+  if (m.waitMod) {
+    const mod = view.status?.mods?.find?.((x) => x.id === m.waitMod);
+    const waiting = !mod || mod.chatWaiting || (mod.newOff === 'chat' && mod.enabled === false);
+    if (waiting) {
+      const show = button('Show code', '', () => openCodeView(m.waitMod));
+      const on = button('Turn on', '', async () => {
+        on.disabled = true;
+        try { await request({ type: 'mod.enable', id: m.waitMod, enabled: true, tab: view.tab?.id }); show.remove(); on.replaceWith('It\'s on.'); refreshStatus(); }
+        catch (e) { on.disabled = false; request({ type: 'chat.note', site: view.site, text: `Couldn't turn it on: ${e?.message ?? e}` }).catch(() => {}); }
+      });
+      li.append(' ', show, ' ', on);
+    }
+  }
   // "Changed x.js." after a run: put back what the mods were before it (the helper keeps them: history/)
   if (Array.isArray(m.undoChange) && m.undoChange.length && !m.undone) {
     const undo = button('Undo these changes', '', async () => {
@@ -1113,17 +1127,13 @@ function renderSites() {
     }));
   }
   ui.blockedEmpty.hidden = blocked.length > 0;
-  // New mods start on or off, by group
-  const startsOff = st?.startsOff || [];
-  ui.startsRules.value = startsOff.includes('rules') ? 'off' : 'on';
-  ui.startsSandboxed.value = startsOff.includes('sandboxed') ? 'off' : 'on';
-  ui.startsPage.value = startsOff.includes('page') ? 'off' : 'on';
-  ui.startsNote.hidden = !startsOff.length;
+  // What the chat makes: starts on, or waits
+  ui.chatMods.value = st?.chatWait ? 'wait' : 'on';
   if (ui.onBreak && document.activeElement !== ui.onBreak) ui.onBreak.value = st?.onBreak || 'ask';
 }
 
-function setStartsOff(group, off) {
-  return request({ type: 'mods.startsOff', group, off }).then(refreshStatus, (e) => { modeNote(String(e?.message ?? e)); refreshStatus(); });
+function setChatWait(wait) {
+  return request({ type: 'mods.chatWait', wait }).then(refreshStatus, (e) => { modeNote(String(e?.message ?? e)); refreshStatus(); });
 }
 
 function modeNote(text) {
@@ -1804,7 +1814,7 @@ function codeViewDialog() {
   // (a kept version shown in place: Diff with the current one, Restore)
   const hTools = el('div', 'cv-h-tools');
   hTools.hidden = true;
-  const hDiff = button('Diff', 'cv-h-diff', () => showVersion(codeView.version_, !codeView.diff));
+  const hDiff = button('See differences', 'cv-h-diff', () => showVersion(codeView.version_, !codeView.diff));
   hDiff.setAttribute('aria-pressed', 'false');
   const hRestore = button('Restore', 'cv-h-restore', (ev) => restoreVersion(ev.currentTarget));
   hTools.append(hDiff, hRestore);
@@ -2154,18 +2164,34 @@ document.addEventListener('drop', async (e) => {
 async function addSiteFile(f) {
   const site = view.site;
   const note = (text) => request({ type: 'chat.note', site, text }).catch(() => {});
-  if (f.size > 50 * 1024 * 1024) return note(`${f.name} is ${(f.size / 1024 / 1024).toFixed(1)} MB: a site's files can be up to 50 MB each.`);
-  const bytes = new Uint8Array(await f.arrayBuffer());
-  let bin = '';
-  for (let i = 0; i < bytes.length; i += 0x8000) bin += String.fromCharCode.apply(null, bytes.subarray(i, i + 0x8000));
   const typing = !!ui.input.value.trim();
+  // (a slice at a time, so a big file is never all in memory: the helper appends them, then renames it into place)
+  let id = null;
+  const progress = el('p', 'note file-progress');
+  const big = f.size > 2 * FILE_SLICE;
   try {
-    const r = await request({ type: 'files.add', site, name: f.name, data: btoa(bin), attach: typing });
+    id = (await request({ type: 'files.begin', site, name: f.name, size: f.size })).id;
+    if (big) { progress.textContent = `Adding ${f.name}… 0%`; ui.messages.after(progress); }
+    for (let at = 0; at < f.size; at += FILE_SLICE) {
+      const bytes = new Uint8Array(await f.slice(at, at + FILE_SLICE).arrayBuffer());
+      let bin = '';
+      for (let i = 0; i < bytes.length; i += 0x8000) bin += String.fromCharCode.apply(null, bytes.subarray(i, i + 0x8000));
+      await request({ type: 'files.slice', id, offset: at, data: btoa(bin) });
+      if (big) progress.textContent = `Adding ${f.name}… ${Math.floor(Math.min(1, (at + FILE_SLICE) / f.size) * 100)}%`;
+    }
+    const r = await request({ type: 'files.end', id, attach: typing });
+    id = null;
     if (typing) ui.input.value = `${ui.input.value.replace(/\s+$/, '')} [attached: files/${r.name}]`;
-  } catch (e) { return note(`Couldn't add ${f.name}: ${e?.message ?? e}`); }
+  } catch (e) {
+    if (id) request({ type: 'files.abort', id }).catch(() => {});
+    progress.remove();
+    return note(`Couldn't add ${f.name}: ${e?.message ?? e}`);
+  }
+  progress.remove();
   view.filesFor = null;
   renderSiteTools();
 }
+const FILE_SLICE = 4 * 1024 * 1024;
 
 async function copyCode() {
   const P = codeView.parts;
@@ -2420,10 +2446,13 @@ function updateModItem(li, m) {
   updateLight(li, m, on);
   // "not active"/"paused" only once the status agrees the mod is on (not mid-switch).
   const tag = li.querySelector('.tag');
-  tag.textContent = on && m.enabled !== false && !m.registered ? (view.status.userScripts ? 'not active' : 'paused')
+  tag.textContent = m.chatWaiting ? 'changed' : on && m.enabled !== false && !m.registered ? (view.status.userScripts ? 'not active' : 'paused')
     : !on && m.from ? `from ${m.from}` : !on && m.newOff ? (m.newOff === 'update' ? 'updated' : 'new') : '';
-  tag.title = !on && m.from ? `Made from ${m.from}. Mods made in another browser start off here; switch it on to use it.`
-    : !on && m.newOff ? `${m.newOff === 'update' ? 'TRIF updated it. ' : ''}New ${groupWord(modGroup(m))} start off (Settings): switch it on once you've looked at it.` : '';
+  tag.title = m.chatWaiting ? 'Your chat changed it, and waits for you (Settings): the version before runs until you turn this one on.'
+    : !on && m.from ? `Made from ${m.from}. Mods made in another browser start off here; switch it on to use it.`
+    : !on && m.newOff === 'chat' ? 'Your chat made it, and waits for you (Settings): switch it on once you\'ve looked at it.'
+    : !on && m.newOff === 'update' ? 'TRIF updated it and switched it off: switch it on once you\'ve looked at it.'
+    : !on && m.newOff ? 'TRIF switched it off because it came from outside your chat: switch it on once you\'ve looked at it.' : '';
   tag.hidden = !tag.textContent;
   const err = li.querySelector('.mod-err');
   err.textContent = rowErr || switchError(m.id, site) || (on && m.error) || '';
@@ -2862,9 +2891,7 @@ async function installUpdate() {
 }
 
 ui.pauseAll.addEventListener('change', () => setPaused(ui.pauseAll.checked));
-ui.startsRules.addEventListener('change', () => setStartsOff('rules', ui.startsRules.value === 'off'));
-ui.startsSandboxed.addEventListener('change', () => setStartsOff('sandboxed', ui.startsSandboxed.value === 'off'));
-ui.startsPage.addEventListener('change', () => setStartsOff('page', ui.startsPage.value === 'off'));
+ui.chatMods.addEventListener('change', () => setChatWait(ui.chatMods.value === 'wait'));
 ui.onBreak?.addEventListener('change', () => request({ type: 'modError.onBreak', value: ui.onBreak.value }).then(refreshStatus, () => {}));
 
 ui.autoUpdate.addEventListener('change', async () => {

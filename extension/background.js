@@ -10,7 +10,7 @@ import {
   normalizeOffSites, offSiteName, offOnSite, hostInScope, withOffSites, normalizeGroupsOff, switchGroup, offSitesFor, GROUPS, scopeFor, normalizeSitesOn, siteOnFor, sitesInUse, limitToSites, applyStartSites, switchSite, fromOtherBrowser, timedUserScripts, capChat,
   ALL_ACCESS, readAccess, activeSites, hasSiteAccess, siteOrigins, siteState, siteRefusal, everySiteOrigins,
   FEATURES, ModsParts, fillSameMods, storedMods, modsStorageState, modsStoragePlan, normalizeStarter, applyReadded, normalizeReadded,
-  applyNewMods, normalizeStartsOff, normalizeNewOff, MOD_GROUPS, modGroup, groupWord, sandboxFallback, inSandboxWorld, SAFARI, siteForUrl,
+  applyNewMods, applyChatWaiting, normalizeNewOff, MOD_GROUPS, modGroup, groupWord, sandboxFallback, inSandboxWorld, SAFARI, siteForUrl,
   PANEL_OPEN_WAIT_MS, PANEL_LATE_MS, panelWindowUrl, panelWindowTarget, panelWindowBounds, panelWindowClick,
 } from './lib.js';
 import { recordErrors, recordMatches, openErrors, dismiss as dismissError, keepLogs, fixPrompt } from './modhealth.js';
@@ -68,7 +68,8 @@ const state = {
   startedOff: {},        // mod id → true for mods already switched off once: preinstalled, or from another browser (persisted)
   absorbed: {},          // mod id → true for retired shipped mods whose switch was carried over (persisted)
   readded: {},           // mod id → stamp: Tim's mods deleted and added again, switched as listed once per stamp (persisted)
-  startsOff: [],         // groups ('rules', 'sandboxed', 'page') whose new mods start off: Settings' "New mods start" (persisted; lib.js applyNewMods)
+  chatWait: false,       // Settings' "Mods your chat makes": Wait for me (persisted; lib.js applyNewMods, applyChatWaiting)
+  chatWaiting: {},       // mod id → {old: the mod as it was}: a change the chat made, waiting; the version before runs (persisted)
   canSandbox: null,      // whether this browser hosts TRIF's sandbox world (sandboxWorld); null until known
   unsandboxedOk: {},     // mod id → hash: sandboxed mods the user allowed to run as page scripts, in a browser without the sandbox (persisted; lib.js sandboxFallback)
   seenMods: null,        // mod id → true for every mod this browser has seen; null: not stored yet (persisted)
@@ -168,7 +169,10 @@ const ready = chrome.storage.local.get(null).then(async (s) => {
   state.startedOff = normalizeDisabled(s.startedOff);
   state.absorbed = normalizeDisabled(s.absorbed);
   state.readded = normalizeReadded(s.readded);
-  state.startsOff = normalizeStartsOff(s.startsOff);
+  state.chatWait = s.chatWait === true;
+  state.chatWaiting = s.chatWaiting && typeof s.chatWaiting === 'object' && !Array.isArray(s.chatWaiting) ? s.chatWaiting : {};
+  // (the "New mods start" setting is gone: a mod from outside the chat always starts off)
+  if (s.startsOff !== undefined) chrome.storage.local.remove('startsOff').catch(() => {});
   state.agentSites = normalizeAgentSites(s.agentSites);
   state.health = s.modHealth && typeof s.modHealth === 'object' ? s.modHealth : {};
   state.onBreak = ['ask', 'auto', 'flag'].includes(s.onBreak) ? s.onBreak : 'ask';
@@ -380,7 +384,8 @@ async function applyModsNow() {
   try {
     const res = await syncUserScripts(timedUserScripts(chrome.userScripts), {
       // (paused: as if TRIF were on for no site, so nothing registers; each switch stays as it is)
-      mods: state.mods, runtimeCode: runtimeCode(state.recording), applied: state.applied, disabled: state.disabled,
+      // (a change the chat made that waits for the user: the version before runs)
+      mods: state.mods.map((m) => state.chatWaiting[m.id]?.old || m), runtimeCode: runtimeCode(state.recording), applied: state.applied, disabled: state.disabled,
       offSites: state.offSites, groupsOff: state.groupsOff, recording: state.recording, sitesOn: state.paused ? [] : onSites(), known: state.known,
     });
     state.applied = res.applied;
@@ -671,10 +676,16 @@ async function onModsMessage(msg) {
     state.readded = re.readded;
     await save({ disabled: state.disabled, readded: state.readded }).catch((e) => log('warn', errMsg(e)));
   }
-  // New mods (and new versions of shipped mods TRIF put in place itself) of a group set to start off
-  // arrive switched off, before they're ever registered (Settings' "New mods start"; lib.js applyNewMods).
+  // Mods from outside this browser's chat (and new versions of shipped mods TRIF put in place itself) arrive
+  // switched off, before they're ever registered (lib.js applyNewMods). And with "Mods your chat makes: Wait
+  // for me", what the chat changes waits, while the version before runs (applyChatWaiting).
+  const cw = applyChatWaiting(before, state.mods, { waiting: state.chatWaiting, chatWait: state.chatWait, installId: state.installId, isOn: isEnabled });
+  if (cw.changed) {
+    state.chatWaiting = cw.waiting;
+    await save({ chatWaiting: state.chatWaiting }).catch((e) => log('warn', errMsg(e)));
+  }
   const nw = applyNewMods(state.mods, { disabled: state.disabled, seen: state.seenMods, autoUpdated: state.autoUpdated, newOff: state.newOff,
-    startsOff: state.startsOff, installId: state.installId, readded: readdedBefore });
+    chatWait: state.chatWait, installId: state.installId, readded: readdedBefore });
   if (nw.changed) {
     const switched = Object.keys(nw.newOff).filter((id) => !state.newOff[id]);
     state.disabled = nw.disabled;
@@ -834,6 +845,7 @@ const commands = {
         if (m.sandboxed) o.sandboxed = inSandboxWorld(m) ? true : 'page'; // ('page': this browser runs it as a page script)
         if (Array.isArray(m.powers) && m.powers.length) o.powers = m.powers;
         if (state.newOff[m.id] && !isEnabled(m.id)) o.newOff = state.newOff[m.id];
+        if (state.chatWaiting[m.id]) o.chatWaiting = true;
         const broken = openErrors(state.health, m);
         if (broken.length) o.broken = broken.map(({ message, line, count, quiet }) => ({ message: String(message).slice(0, 300), line, count, ...(quiet ? { quiet: true } : {}) })).slice(0, 5);
         if (errors.has(m.id) && errors.get(m.id) !== USER_SCRIPTS_OFF) o.error = errors.get(m.id);
@@ -841,7 +853,7 @@ const commands = {
       }),
       recording: state.recording, sitesOn: state.sitesOn, ...siteLists(), ...(state.paused ? { paused: true } : {}),
       ...(Object.keys(state.groupsOff).length ? { groupsOff: state.groupsOff } : {}),
-      ...(state.startsOff.length ? { startsOff: state.startsOff } : {}),
+      ...(state.chatWait ? { chatWait: true } : {}),
       ...(state.canSandbox === false ? { sandbox: false } : {}),
       ...(args && (args.tab !== undefined || args.url !== undefined) ? { page: await modsOnPage(args) } : {}),
     };
@@ -1073,13 +1085,19 @@ const commands = {
     if (args.scope && args.enabled && !isEnabled(id) && !modInScope(mod, args.scope) && modSites(mod).everywhere) {
       throw new Error(`${id} runs on every site, and it's switched off; only the user can switch it on (in the side panel), because this agent run is limited to ${args.scope}`);
     }
-    // A mod switched off because new mods of its group start off (lib.js applyNewMods) waits for the user to
-    // look at it: an agent run can't switch it on.
-    if (args.scope && args.enabled && state.newOff[id]) {
-      throw new Error(`${id} is new and switched off until the user looks at it (their setting: new ${groupWord(modGroup(mod))} start off); only the user can switch it on, in the side panel or with trif enable in their terminal`);
+    // A mod switched off because it came from outside the chat (lib.js applyNewMods), or a change of the
+    // chat's waiting, waits for the user to look at it: an agent run can't switch it on.
+    if (args.scope && args.enabled && (state.newOff[id] || state.chatWaiting[id])) {
+      throw new Error(`${id} is switched off until the user looks at it; only the user can switch it on, in the side panel or with trif enable in their terminal`);
     }
     const enabled = args.enabled;
     const res = await serial(async () => {
+      // (turned on: a change the chat made that waited runs now)
+      if (enabled && state.chatWaiting[id]) {
+        const { [id]: _w, ...rest } = state.chatWaiting;
+        state.chatWaiting = rest;
+        await save({ chatWaiting: state.chatWaiting }).catch((e) => log('warn', errMsg(e)));
+      }
       const before = { disabled: !isEnabled(id), offSites: state.offSites[id] || [] };
       const after = site ? switchSite(mod, before, site, enabled) : { disabled: !enabled, offSites: before.offSites };
       await setSwitchState(id, after);
@@ -1594,18 +1612,13 @@ async function onPageMessage(msg) {
       a.resolve(choice);
       return { site: a.site, choice };
     }
-    case 'mods.startsOff': {
-      // Settings' "New mods start": a group's new mods on (as always) or off (lib.js applyNewMods). From
-      // here on only: mods already here keep their switches. Panel only: an agent run can't change it.
-      const group = String(msg.group ?? '');
-      if (!MOD_GROUPS.includes(group)) throw new Error(`unknown group ${group}`);
-      const off = new Set(state.startsOff);
-      if (msg.off === true) off.add(group); else off.delete(group);
-      const startsOff = normalizeStartsOff([...off]);
-      await save({ startsOff });
-      state.startsOff = startsOff;
+    case 'mods.chatWait': {
+      // Settings' "Mods your chat makes": Start on or Wait for me. From here on only. Panel only: an agent run
+      // can't change it.
+      state.chatWait = msg.wait === true;
+      await save({ chatWait: state.chatWait });
       notifyPanels();
-      return { startsOff };
+      return { chatWait: state.chatWait };
     }
     case 'mods.pause': {
       // Settings' "Pause all mods": nothing runs in this browser until it's off again
@@ -1652,12 +1665,13 @@ async function uiStatus() {
       from: fromOtherBrowser(m, state.installId) ? (m.origin.browser || 'another browser') : null,
       source: m.source || null, version: m.version || null, update: m.update || null, rules: !!m.rules, sandboxed: !!m.sandboxed, unsandboxed: !!m.unsandboxed, powers: Array.isArray(m.powers) ? m.powers : [],
       newOff: state.newOff[m.id] && !(live.get(m.id)?.enabled ?? isEnabled(m.id)) ? state.newOff[m.id] : null,
+      chatWaiting: !!state.chatWaiting[m.id],
       imported: !!m.imported,
       fixUndo: !!(state.fixes[m.id]?.fixedHash && state.fixes[m.id].fixedHash === m.hash),
       broken: openErrors(state.health, m).map(({ fp, message, line, count, quiet }) => ({ fp, message: String(message).slice(0, 300), line, count, ...(quiet ? { quiet: true } : {}) })).slice(0, 10),
     })),
     onBreak: state.onBreak,
-    startsOff: state.startsOff, canSandbox: state.canSandbox !== false,
+    chatWait: state.chatWait, canSandbox: state.canSandbox !== false,
     agentSites: state.agentSites, sensitiveSites: state.sensitiveSites,
     agentAsks: [...state.agentAsks.entries()].map(([id, a]) => ({ id, site: a.site })),
     runs: [...state.runs.values()].map((r) => ({ runId: r.runId, site: r.site })),
@@ -1932,6 +1946,18 @@ async function onPanelMessage(msg) {
       const r = await helperRequest('files.add', { site: String(msg.site ?? ''), name: String(msg.name ?? '').slice(0, 300), data: String(msg.data ?? '') }, 60000);
       if (r?.rel && !msg.attach) {
         const mb = r.size >= 1024 * 1024 ? `${(r.size / 1024 / 1024).toFixed(1)} MB` : r.size >= 1024 ? `${Math.round(r.size / 1024)} KB` : `${r.size} bytes`;
+        await updateChat(normalizeSite(r.site), (chat) => { chat.messages.push({ role: 'mod', text: `${r.name} (${mb}) is in ${r.site}'s files: ${r.rel}. Your agent can use it.`, time: Date.now() }); });
+      }
+      return r;
+    }
+    // (a file of any size, a slice at a time: the panel reads it in slices, the helper appends them)
+    case 'files.begin': return helperRequest('files.begin', { site: String(msg.site ?? ''), name: String(msg.name ?? '').slice(0, 300), size: msg.size }, 30000);
+    case 'files.slice': return helperRequest('files.slice', { id: String(msg.id ?? ''), offset: msg.offset, data: String(msg.data ?? '') }, 60000);
+    case 'files.abort': return helperRequest('files.abort', { id: String(msg.id ?? '') }, 10000);
+    case 'files.end': {
+      const r = await helperRequest('files.end', { id: String(msg.id ?? '') }, 60000);
+      if (r?.rel && !msg.attach) {
+        const mb = r.size >= 1024 ** 3 ? `${(r.size / 1024 ** 3).toFixed(1)} GB` : r.size >= 1024 * 1024 ? `${(r.size / 1024 / 1024).toFixed(1)} MB` : r.size >= 1024 ? `${Math.round(r.size / 1024)} KB` : `${r.size} bytes`;
         await updateChat(normalizeSite(r.site), (chat) => { chat.messages.push({ role: 'mod', text: `${r.name} (${mb}) is in ${r.site}'s files: ${r.rel}. Your agent can use it.`, time: Date.now() }); });
       }
       return r;
@@ -2322,6 +2348,8 @@ async function onAgentEvent(runId, event, relay = true) {
         const undoable = Array.isArray(event.undoable) ? event.undoable.filter((id) => typeof id === 'string').slice(0, 20) : [];
         if (undoable.length) {
           chat.messages.push({ role: 'mod', text: `Changed ${undoable.map(modFileName).join(', ')}.`, undoChange: undoable, time });
+          // ("Mods your chat makes: Wait for me": what it made or changed waits; Show code and Turn on, each)
+          if (state.chatWait) for (const id of undoable) chat.messages.push({ role: 'mod', text: `${modFileName(id)} waits for you.`, waitMod: id, time });
         }
         // (a fix run that changed its mod: the card says so, with Undo fix; so does the mod's row)
         const fx = state.fixRuns.get(runId);

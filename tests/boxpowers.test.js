@@ -221,3 +221,14 @@ test('mods alone doesn\'t hold (like controls); the lint knows .click(), .play()
   assert.match(msgs('page.find("textarea").setValue("x");', []), /write-drafts power/);
   assert.doesNotMatch(msgs('trif.goTo("/home"); trif.channel("x");', ['go-to', 'mods']), /power/);
 });
+
+test('a free mod whose header says risk 2 doesn\'t break the hold (its risk2 need has no lines)', () => {
+  const home = tempDir('trif-pw-');
+  const ws = { home, modsDir: path.join(home, 'sites') };
+  const dir = path.join(ws.modsDir, 'x.com');
+  fs.mkdirSync(dir, { recursive: true });
+  updateHeld(ws, [], []);
+  fs.writeFileSync(path.join(dir, 'reorder.js'), '// ==WebMod==\n// @name Reorder\n// @match *://x.com/*\n// @risk 2 changes the sort order\n// ==/WebMod==\ndocument.title = "x";\n');
+  const mods = scanMods(ws.modsDir).mods;
+  assert.doesNotThrow(() => updateHeld(ws, mods, []));
+});

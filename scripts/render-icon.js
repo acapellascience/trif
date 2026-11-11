@@ -268,6 +268,16 @@ function sampleMac(x, y) {
 /** The paused robot at `size` px, as PNG bytes (the toolbar icon's framing). */
 function renderPaused(size) { return render(size, undefined, samplePaused); }
 
+// On a light toolbar: the same robot flipped, dark-grey frame and bars on a light face, so it reads there.
+// (The robot's own marks are one colour; the face can differ for contrast.)
+const PAUSED_LIGHT = { mark: [0x3a, 0x3a, 0x3e], face: [0xf4, 0xf4, 0xf5] };
+function samplePausedLight(x, y) {
+  const c = samplePaused(x, y);
+  return c === null ? null : c === HEAD.face ? PAUSED_LIGHT.face : PAUSED_LIGHT.mark;
+}
+/** The paused robot for a light toolbar at `size` px, as PNG bytes. */
+function renderPausedLight(size) { return render(size, undefined, samplePausedLight); }
+
 /** On the broken link's strokes (LINK), either half (the right one the left mirrored). */
 function inLink(x0, y) {
   const { cx, r, end, stub, w, cy } = LINK;
@@ -303,6 +313,9 @@ if (require.main === module) {
     const paused = path.join(outDir, `robot-paused-white-${size}.png`);
     fs.writeFileSync(paused, renderPaused(size));
     console.log(paused);
+    const pausedLight = path.join(outDir, `robot-paused-light-${size}.png`);
+    fs.writeFileSync(pausedLight, renderPausedLight(size));
+    console.log(pausedLight);
     for (const face of Object.keys(FACES)) {
       const file2 = path.join(outDir, `robot-${face}-${size}.png`);
       fs.writeFileSync(file2, renderFace(face, size));
@@ -323,4 +336,4 @@ if (require.main === module) {
 /** The plug idea for disconnected (not shipped: for the icon sheet), at `size` px. */
 function renderPlug(size) { return render(size, undefined, faceSampler('plug', size)); }
 
-module.exports = { render, renderPaused, renderFace, renderPlug, renderMac, shadedSvg, PAUSE, FACES, CROSS16, LINK16, PLUG16, GATE_SHADED, SHADED };
+module.exports = { render, renderPaused, renderPausedLight, PAUSED_LIGHT, renderFace, renderPlug, renderMac, shadedSvg, PAUSE, FACES, CROSS16, LINK16, PLUG16, GATE_SHADED, SHADED };

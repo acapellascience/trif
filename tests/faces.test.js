@@ -28,6 +28,8 @@ test('the face by precedence: paused, blocked, disconnected, off, logged out, no
   assert.equal(toolbarFace({ state: 'off', loggedOut: true }), 'off');
   assert.equal(toolbarFace({ state: 'blocked', loggedOut: true }), 'blocked');
   assert.equal(toolbarFace({ state: 'off', locked: true, loggedOut: true }), 'paused');
+  assert.equal(toolbarFace({ locked: true, light: true }), 'paused-light');
+  assert.equal(toolbarFace({ state: 'off', light: true }), 'off', 'only paused is flipped');
 });
 
 test('every face\'s files exist, are render-icon.js\'s, and the normal one is the manifest\'s', async () => {
@@ -55,11 +57,19 @@ test('one colour per face: the frame and the features alike (STYLE.md)', () => {
   const px = pixels(R.renderPaused(16));
   assert.deepEqual(px(0, 8), [255, 255, 255, 255], 'the frame');
   assert.deepEqual(px(5, 8), [255, 255, 255, 255], 'a bar');
+  // on a light toolbar: dark-grey frame and bars on a light face
+  const lp = pixels(R.renderPausedLight(16));
+  const mark = [...R.PAUSED_LIGHT.mark, 255], lightFace = [...R.PAUSED_LIGHT.face, 255];
+  assert.deepEqual(lp(0, 8), mark, 'the frame');
+  assert.deepEqual(lp(5, 8), mark, 'a bar');
+  assert.deepEqual(lp(7, 8), lightFace, 'the face between the bars');
+  for (const size of [16, 32, 48, 128]) assert.ok(fs.readFileSync(path.join(ICONS, `robot-paused-light-${size}.png`)).equals(R.renderPausedLight(size)), `run node scripts/render-icon.js (robot-paused-light-${size}.png)`);
   // the gate's blocked robot: its cross drawn in the frame's own gradient
   assert.match(R.shadedSvg(R.SHADED.red, 'cross'), /<g filter="url\(#h\)" stroke="url\(#r\)"/);
   // the panel: what's on the bar robot's face takes the frame's colour in every state but the usual one
   const css = fs.readFileSync(path.join(__dirname, '..', 'extension', 'sidepanel.css'), 'utf8');
   assert.match(css, /\.bar-robot \.pause \{ display: none; fill: var\(--switch-on\); \}/);
+  assert.match(css, /\.bar-robot\[data-face="paused"\] \.face \{ fill: light-dark\(#f4f4f5, #18181a\); \}/);
   assert.match(css, /\.bar-robot \.cross \{ display: none; stroke: var\(--switch-on\);/);
   assert.match(css, /body:is\(\.blocked, \.needs-login\) \.bar-robot :is\(\.eye, \.pause\) \{ fill: var\(--switch-on\); \}/);
   assert.match(css, /\[data-face="login"\] \.eye \{ fill: none; stroke: var\(--switch-on\);/);

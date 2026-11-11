@@ -280,8 +280,7 @@ class Scenario {
           id: li.dataset.mod,
           on: li.querySelector('button.switch')?.getAttribute('aria-checked') === 'true',
           running: !!li.querySelector('.light.on'),
-          update: li.querySelector('.mod-update')?.innerText || null,
-          source: li.querySelector('.mod-source')?.textContent || null,
+          update: li.querySelector('.mod-update')?.textContent || null, // (its notice opens from the row's tag)
         })),
       };
     }`);
@@ -1172,7 +1171,11 @@ class Scenario {
       const p = await this.waitPanel('the panel on x.com', (x) => x.site === 'x.com' && x.mods.length >= 3);
       const px = p.mods.find((m) => m.id === 'x.com/detox-timeline');
       if (!px || !px.on || !px.running) throw new Error(`detox-timeline: ${JSON.stringify(px)}`);
-      if (!px.source || !/^Tim's mod, v\d+$/.test(px.source)) throw new Error(`detox-timeline isn't marked as Tim's mod: ${px.source}`);
+      // (whose mod it is: in its code card now, not on the row)
+      await this.panelClick('li[data-mod="x.com/detox-timeline"] .mod-code');
+      const whose = await waitFor('its code card', () => this.panel(`async () => { const d = document.getElementById('code-view'); return d?.open && d.dataset.mod === 'x.com/detox-timeline' ? d.querySelector('.cv-source')?.textContent || '' : null; }`), { timeoutMs: 8000 });
+      await this.panel(`async () => { document.getElementById('code-view').close(); return true; }`);
+      if (!/^Tim's mod, v\d+$/.test(whose)) throw new Error(`detox-timeline isn't marked as Tim's mod: ${whose}`);
       if (this.o.kind === 'upgrade') {
         const pf = p.mods.find((m) => m.id === 'x.com/rainbow-rave');
         if (!pf || !pf.update) throw new Error(`no update notice on rainbow-rave: ${JSON.stringify(pf)}`);
@@ -1206,6 +1209,7 @@ class Scenario {
       await r.check('"Agent on this site": Ask asks in the panel (Just this once runs the code), Look refuses code, Off refuses reading too, a sensitive site is off with its line, Settings lists them', () => this.agentSitesCheck(win));
       await r.check('sharing: a .js dropped on the panel is imported (its site from @match, its shipped markers gone) and held like any mod from outside, "imported from a file"; dropped again, Add as a copy; Replace keeps the old one, which History shows, views, diffs and restores; Export copies it to Downloads and shows it; another file dropped goes to the site\'s files with a note, listed, never a mod', () => this.shareCheck(win));
       await r.check('the code card: a mod\'s </> and its file name open its code (a style mod: its rules), with line numbers; Copy copies it; Show in Finder and Open in editor ask the helper, which reveals the mod\'s own file (a stand-in for open here); Esc closes it', () => this.codeViewCheck(win));
+      await r.check('mod rows: the light, the name, one chip by its level (hover says what, a click opens the code card), one line of description, the controls', () => this.modRowsCheck(win));
       await r.check('views belong to their site: the code card on one site is gone on a tab of another; an approval waiting there hides, and shows again back on its site', () => this.siteViewsCheck(win));
       await r.check('powers, phase 3: media plays and pauses the page\'s own video; click clicks only what the header names, never a submit, reset or a link to another site; go-to goes only to the header\'s pages; mods talk over TRIF\'s channel in plain data; write-drafts changes the user\'s drafts but never a password, card or hidden field; with a read, the combination is in the hold, and while another boxed mod on the page has a read it didn\'t ask for, write-drafts is off; undeclared, each is refused', () => this.powers3Check(win));
       await r.check('powers, phase 2: site-data filters the site\'s JSON (fetch and XHR) by removing and reordering only (an invented string, number, key, a duplicate or a cut string: TRIF keeps the original); page-data reads plain copies of React props; search-box is TRIF\'s own box the mod can\'t read, which searches the site from the user\'s Enter; undeclared, each is refused', () => this.powers2Check(win));
@@ -1919,6 +1923,7 @@ class Scenario {
     if (!this.o.agent) {
       // Without your login the agent can't run, so the button waits for one (F14) and says why.
       await r.check('Merge with my agent: waits for a login, and says so', async () => {
+        await this.panel(`async () => { const t = document.querySelector('li[data-mod="x.com/rainbow-rave"] .mod-update-tag'); if (t && t.getAttribute('aria-expanded') !== 'true') t.click(); return true; }`); // (the notice opens from the tag)
         const b = await waitFor('the merge button', () => this.panel(`async () => {
           const m = document.querySelector('li[data-mod="x.com/rainbow-rave"] .mod-update .merge');
           return m ? { disabled: m.disabled, title: m.title } : null;
@@ -2389,7 +2394,7 @@ process.exitCode = 1;
       // the approval dialog: opened by itself for the new hold (the one waiting, or one of them)
       const rowInfo = await waitFor('the panel\'s hold', () => this.panel(`async () => {
         const li = document.querySelector('li[data-mod="127.0.0.1/e2e-pw-all"]');
-        return li && li.classList.contains('held') ? { tag: li.querySelector('.tag.on-hold')?.textContent, powers: li.querySelector('.mod-powers')?.textContent, group: li.dataset.group } : null;
+        return li && li.classList.contains('held') ? { tag: li.querySelector('.tag.on-hold')?.textContent, powers: li.querySelector('.mod-chip')?.textContent, hover: li.querySelector('.mod-chip')?.title, group: li.dataset.group } : null;
       }`), { timeoutMs: 15000 });
       const opened = await waitFor('the approval dialog, by itself', () => this.approvalState(), { timeoutMs: 10000 }).catch(() => null);
       if (!opened) problems.push('the approval dialog didn\'t open by itself for a new hold');
@@ -2402,7 +2407,7 @@ process.exitCode = 1;
         note: 'It\'s new or changed since TRIF last let it run. Updates that ask for the same powers won\'t ask again.', show: 'Show code',
       };
       for (const [k, v] of Object.entries(want)) if (JSON.stringify(row[k]) !== JSON.stringify(v)) problems.push(`the approval dialog's ${k}: ${JSON.stringify(row[k])}`);
-      if (rowInfo.tag !== 'on hold' || rowInfo.powers !== 'Powers: read-drafts, sound, controls' || rowInfo.group !== 'sandboxed') problems.push(`the held row: ${JSON.stringify(rowInfo)}`);
+      if (rowInfo.tag !== 'on hold' || rowInfo.powers !== '3 powers' || !/read-drafts can read what you type/.test(rowInfo.hover) || rowInfo.group !== 'sandboxed') problems.push(`the held row: ${JSON.stringify(rowInfo)}`);
       // the screenshots, in both themes (Chrome; Firefox's driver can't set the colour scheme)
       for (const scheme of ['dark', 'light']) if (await this.d.colorScheme(this.panelCtx, scheme)) { await sleep(150); await this.shot(this.panelCtx, `approval-powers-${scheme}`); }
       await this.d.colorScheme(this.panelCtx, '');
@@ -2848,6 +2853,7 @@ process.exitCode = 1;
     const base = `http://${site}:${this.o.servers.port}`;
     const dir = path.join(this.trif, 'sites', site);
     const styleFile = path.join(dir, 'e2e-cv-style.js');
+    const longFile = path.join(dir, 'e2e-cv-long.js');
     // (one long line, as a style mod's CSS often is: the card wraps it)
     const styleText = '// ==WebMod==\n// @name E2E code card rules\n// @match *://127.0.0.1/*\n// @style\n// ==/WebMod==\n{ "css": "#title, #path, #host, header nav a.promo, main article .card > .label, footer .links a:not(.keep) { letter-spacing: 0.01em; text-decoration-thickness: 0.06em; text-underline-offset: 0.18em }" }\n';
     const themes = async (name) => { for (const scheme of ['dark', 'light']) if (await this.d.colorScheme(this.panelCtx, scheme)) { await sleep(150); await this.shot(this.panelCtx, `${name}-${scheme}`); } await this.d.colorScheme(this.panelCtx, ''); };
@@ -2906,7 +2912,7 @@ process.exitCode = 1;
       await this.d.key(this.panelCtx, 'Escape');
       if (await card()) problems.push('Esc didn\'t close the code card');
       // a style mod, from its file name on the row: its rules, as in the file
-      await this.panelClick(`li[data-mod="${site}/e2e-cv-style"] button.mod-file`);
+      await this.panelClick(`li[data-mod="${site}/e2e-cv-style"] .mod-code`);
       const style = await waitFor('the style mod\'s card', async () => { const c = await card(); return c && c.lines ? c : null; }, { timeoutMs: 8000 });
       if (style.chip !== 'Style mod' || style.code !== styleText) problems.push(`the style mod's card: ${JSON.stringify(style)}`);
       // its long line wrapped (on by default): one numbered line, several rows tall, continuations indented
@@ -2921,11 +2927,90 @@ process.exitCode = 1;
       if (!wrapped.wrap || wrapped.rows < 2 || wrapped.scrolls || wrapped.lines !== styleText.split('\n').length || wrapped.item !== 'true') problems.push(`the long line: ${JSON.stringify(wrapped)}`);
       await themes('code-card-wrapped');
       await this.d.key(this.panelCtx, 'Escape');
+      // a long mod (2,000 lines): the code scrolls inside the card, and the card stays on screen, buttons showing
+      fs.writeFileSync(longFile, `// ==WebMod==\n// @name E2E long mod\n// @match *://127.0.0.1/*\n// ==/WebMod==\n${Array.from({ length: 2000 }, (_, i) => `document.documentElement.dataset.e2eLong${i % 7} = ${i};`).join('\n')}\n`);
+      await waitFor('the long mod', () => this.panel(`async () => !!document.querySelector('li[data-mod="${site}/e2e-cv-long"] .mod-code') || null`), { timeoutMs: 20000 });
+      await this.panelClick(`li[data-mod="${site}/e2e-cv-long"] .mod-code`);
+      await waitFor('its code', async () => { const c = await card(); return c && c.mod === `${site}/e2e-cv-long` && c.lines > 2000 ? c : null; }, { timeoutMs: 10000 });
+      const fits = (box) => `(() => {
+        const d = document.getElementById('code-view'), b = d.querySelector('${box}'), r = d.getBoundingClientRect(), c = d.querySelector('.cv-copy').getBoundingClientRect();
+        const before = b.scrollTop; b.scrollTop = before > 300 ? 0 : 600; const moved = b.scrollTop !== before; // (from wherever an earlier look left it)
+        return { scrolls: b.scrollHeight > b.clientHeight + 20 && moved, height: Math.round(b.clientHeight), onScreen: r.top >= 0 && r.bottom <= innerHeight, cardScrolls: d.scrollHeight > d.clientHeight + 1, buttons: c.top >= r.top && c.bottom <= r.bottom };
+      })()`;
+      const okFit = (f) => f.scrolls && f.onScreen && f.buttons && !f.cardScrolls;
+      const codeFit = await this.panel(`async () => ${fits('.cv-code')}`);
+      if (!okFit(codeFit)) problems.push(`a long mod's code: ${JSON.stringify(codeFit)}`);
+      await themes('code-card-long');
+      // a short panel (the card's max-height is all that differs): the code gives way, the buttons still show
+      const shortFit = await this.panel(`async () => { const d = document.getElementById('code-view'); d.style.maxHeight = '340px'; const f = ${fits('.cv-code')}; const r = d.getBoundingClientRect(); f.card = Math.round(r.height); d.style.maxHeight = ''; return f; }`);
+      if (!shortFit.scrolls || !shortFit.buttons || shortFit.cardScrolls || shortFit.card > 340) problems.push(`a long mod in a short panel: ${JSON.stringify(shortFit)}`);
+      // History: a long list (rows added here: a mod's real history is short) scrolls the same way
+      await this.d.click(this.panelCtx, '#code-view .cv-tab-history');
+      const histFit = await this.panel(`async () => {
+        const l = document.querySelector('#code-view .cv-history-list');
+        for (let i = 0; i < 200; i++) { const li = document.createElement('li'); li.textContent = 'a kept version ' + i; l.append(li); }
+        return ${fits('.cv-history-list')};
+      }`);
+      if (!okFit(histFit)) problems.push(`a long History: ${JSON.stringify(histFit)}`);
+      await this.d.key(this.panelCtx, 'Escape');
       if (problems.length) throw new Error(problems.join('\n'));
-      return `the free mod's code (${free.lines} lines, coloured) from its </>, its robot's </> face; Copy copied, Show in Finder / the file name / Open in editor ran ${revealed().join(' | ')}; the style mod's rules from its file name, its long line wrapped (${wrapped.rows} rows, one number); Esc closed it`;
+      return `a 2,000-line mod scrolls inside the card (${codeFit.height}px of code; in a 340px card too), and a long History; the free mod's code (${free.lines} lines, coloured) from its </>, its robot's </> face; Copy copied, Show in Finder / the file name / Open in editor ran ${revealed().join(' | ')}; the style mod's rules from its file name, its long line wrapped (${wrapped.rows} rows, one number); Esc closed it`;
     } finally {
       try { fs.unlinkSync(styleFile); } catch { /* gone */ }
+      try { fs.unlinkSync(longFile); } catch { /* gone */ }
       await this.panel(`async () => { const d = document.getElementById('code-view'); if (d && d.open) d.close(); return true; }`).catch(() => {});
+    }
+  }
+
+  /** The mod rows: the light, the name, one chip, one line of description, the controls (modlevel.js). */
+  async modRowsCheck(win) {
+    const site = '127.0.0.1';
+    const base = `http://${site}:${this.o.servers.port}`;
+    const dir = path.join(this.trif, 'sites', site);
+    const head = (name, extra) => `// ==WebMod==\n// @name ${name}\n// @description A description long enough that it can't fit on one line of the side panel however wide the panel is, so it ends in an ellipsis\n// @match *://127.0.0.1/rows.html*\n${extra}// ==/WebMod==\n`;
+    const files = {
+      'e2e-row-plain': head('Row plain', ''),
+      'e2e-row-noticeable': head('Row noticeable', '// @risk 1 hides things\n'),
+      'e2e-row-requests': head('Row requests', '// @risk 2 changes the sort order\n'),
+      'e2e-row-power': head('Row power', '// @boxed\n// @powers site-data\n'),
+      'e2e-row-together': head('Row together', '// @boxed\n// @powers read-drafts, sound\n'),
+    };
+    const themes = async (name) => { for (const scheme of ['dark', 'light']) if (await this.d.colorScheme(this.panelCtx, scheme)) { await sleep(150); await this.shot(this.panelCtx, `${name}-${scheme}`); } await this.d.colorScheme(this.panelCtx, ''); };
+    const problems = [];
+    try {
+      for (const [id, text] of Object.entries(files)) fs.writeFileSync(path.join(dir, `${id}.js`), text);
+      await this.ext(`async (id, url) => { await chrome.tabs.update(id, { url, active: true }); }`, [win.tabId, `${base}/rows.html`]);
+      const rowsOf = () => this.panel(`async () => Object.fromEntries([...document.querySelectorAll('#mod-list li[data-mod*="e2e-row-"]')].map((li) => {
+        const chip = li.querySelector('.mod-chip'), desc = li.querySelector('.mod-desc'), sw = li.querySelector('button.switch, .tag.on-hold'), code = li.querySelector('.mod-code'), bin = li.querySelector('.mod-delete');
+        const r = (e) => e.getBoundingClientRect();
+        return [li.dataset.mod.split('/')[1], { chip: chip?.textContent || null, tone: chip ? [...chip.classList].filter((c) => c !== 'mod-chip').join() : null, hover: chip?.title || '',
+          old: li.querySelectorAll('.mod-file, .mod-source, .tag.risk, .mod-powers').length, oneLine: desc ? desc.scrollWidth > desc.clientWidth && r(desc).height < 24 : false,
+          gapSwitch: Math.round(r(code).left - r(sw).right), gapBin: Math.round(r(bin).left - r(code).right) }];
+      }))`);
+      const rows = await waitFor('the rows', async () => { const x = await rowsOf(); return Object.keys(x).length === 5 && x['e2e-row-together'].chip ? x : null; }, { timeoutMs: 20000, intervalMs: 500 });
+      await this.dismissApproval();
+      const want = { 'e2e-row-plain': [null, null], 'e2e-row-noticeable': ['noticeable', 'muted'], 'e2e-row-requests': ['changes requests', 'amber'], 'e2e-row-power': ['1 power · noticeable', 'green'], 'e2e-row-together': ['2 powers', 'amber'] };
+      for (const [id, [chip, tone]] of Object.entries(want)) {
+        const x = rows[id];
+        if (x.chip !== chip || x.tone !== tone) problems.push(`${id}'s chip: ${JSON.stringify(x)}`);
+        if (x.old) problems.push(`${id} still shows ${x.old} of the old row's parts`);
+        if (!x.oneLine) problems.push(`${id}'s description isn't one line with an ellipsis: ${JSON.stringify(x)}`);
+        if (Math.abs(x.gapSwitch - 10) > 1 || Math.abs(x.gapBin - 2) > 1) problems.push(`${id}'s controls: ${x.gapSwitch}px, then ${x.gapBin}px`);
+      }
+      if (!/site-data can see and filter/.test(rows['e2e-row-power'].hover) || !/Noticeable: 127\.0\.0\.1 could tell/.test(rows['e2e-row-power'].hover)) problems.push(`the chip's hover: ${rows['e2e-row-power'].hover}`);
+      await themes('mod-rows');
+      // a click on the chip: the code card, with what the row left out
+      await this.dismissApproval();
+      await this.panel(`async () => { document.querySelector('li[data-mod="${site}/e2e-row-power"] .mod-chip').click(); return true; }`);
+      const about = await waitFor('the card', () => this.panel(`async () => { const d = document.getElementById('code-view'); return d?.open ? { mod: d.dataset.mod, about: d.querySelector('.cv-about').textContent, file: d.querySelector('.cv-file')?.textContent } : null; }`), { timeoutMs: 8000 });
+      if (about.mod !== `${site}/e2e-row-power` || !/Noticeable/.test(about.about) || !/Power: site-data/.test(about.about) || about.file !== 'e2e-row-power.js') problems.push(`the card: ${JSON.stringify(about)}`);
+      await themes('mod-rows-card');
+      if (problems.length) throw new Error(problems.join('\n'));
+      return `chips: ${Object.values(rows).map((x) => x.chip || '(none)').join(' | ')}; controls ${rows['e2e-row-plain'].gapSwitch}px then ${rows['e2e-row-plain'].gapBin}px; the chip opens the card`;
+    } finally {
+      for (const id of Object.keys(files)) { try { fs.unlinkSync(path.join(dir, `${id}.js`)); } catch { /* gone */ } }
+      await this.panel(`async () => { const d = document.getElementById('code-view'); if (d && d.open) d.close(); return true; }`).catch(() => {});
+      await this.dismissApproval();
     }
   }
 
@@ -3384,8 +3469,13 @@ say({ type: 'result', subtype: 'success', is_error: false, result: text, session
       if (lock.height > 48) throw new Error(`the lock notice is ${lock.height} px tall: one line expected`);
       if (!lock.pause || lock.eyes) throw new Error(`the robot in the bar: ${JSON.stringify(lock)}`);
       // TRIF's toolbar icon for that tab: the paused robot; other tabs keep the normal one
-      await waitFor('the paused toolbar icon', async () => (await this.toolbarIcon(win.tabId)) === 'robot-paused-white-16.png' || null, { timeoutMs: 10000 })
+      await waitFor('the paused toolbar icon', async () => /^robot-paused-(white|light)-16\.png$/.test(await this.toolbarIcon(win.tabId)) || null, { timeoutMs: 10000 })
         .catch(async (e) => { throw new Error(`${e.message}: ${await this.toolbarIcon(win.tabId)}`); });
+      // (flipped on a light toolbar, told by the panel's colour scheme; Firefox's driver can't emulate it)
+      for (const [scheme, file] of [['light', 'robot-paused-light-16.png'], ['dark', 'robot-paused-white-16.png']]) {
+        if (await this.d.colorScheme(this.panelCtx, scheme)) await waitFor(`the paused icon on a ${scheme} toolbar`, async () => (await this.toolbarIcon(win.tabId)) === file || null, { timeoutMs: 8000 });
+      }
+      await this.d.colorScheme(this.panelCtx, '');
       const otherTab = await this.ext(`async (id) => (await chrome.tabs.query({})).map((t) => t.id).find((t) => t !== id) ?? null`, [win.tabId]);
       if (otherTab != null && !/^robot(-login)?-16\.png$/.test(await this.toolbarIcon(otherTab))) throw new Error(`tab ${otherTab}'s toolbar icon: ${await this.toolbarIcon(otherTab)}`);
       // The mod: held for what its code does, its header's claim shown apart
@@ -3406,7 +3496,7 @@ say({ type: 'result', subtype: 'success', is_error: false, result: text, session
       if (leaked().length) throw new Error(`another site received ${JSON.stringify(leaked())}`);
       await waitFor('the lock notice still up', () => this.panel(`async () => { const n = document.getElementById('tab-lock'); return n && !n.hidden || null; }`), { timeoutMs: 10000 });
       // (still paused on the blocked page: Firefox drops a tab's own icon on a new page, and TRIF sets it again)
-      await waitFor('the toolbar icon still paused', async () => (await this.toolbarIcon(win.tabId)) === 'robot-paused-white-16.png' || null, { timeoutMs: 10000 })
+      await waitFor('the toolbar icon still paused', async () => /^robot-paused-(white|light)-16\.png$/.test(await this.toolbarIcon(win.tabId)) || null, { timeoutMs: 10000 })
         .catch(async (e) => { throw new Error(`${e.message}: ${await this.toolbarIcon(win.tabId)}`); });
       await this.panel(`async () => { document.querySelector('#tab-lock button').click(); return true; }`);
       await waitFor('the tab back on the test site', async () => {
@@ -3655,8 +3745,8 @@ say({ type: 'result', subtype: 'success', is_error: false, result: text, session
       if (reqs(site, '/e2e-sw-post').some((q) => q.method === 'POST')) open('TL-2', 'the service worker posted');
       if (reqs('localhost', '/e2e-sw-leak').length) open('TL-2', 'the service worker reached another site');
       if (reqs(site, '/e2e-sib-post').some((q) => q.method === 'POST')) open('TL-4', 'another tab of the site posted');
-      if (sibIcon !== 'robot-paused-white-16.png') open('TL-4', `the other tab's icon: ${sibIcon}`);
-      if (thirdIcon !== 'robot-paused-white-16.png') open('TL-4', `a tab of the site opened during the lock: icon ${thirdIcon}`);
+      if (!/^robot-paused-(white|light)-16\.png$/.test(sibIcon)) open('TL-4', `the other tab's icon: ${sibIcon}`);
+      if (!/^robot-paused-(white|light)-16\.png$/.test(thirdIcon)) open('TL-4', `a tab of the site opened during the lock: icon ${thirdIcon}`);
       if (!sibNotice) open('TL-4', "the other tab's panel: no notice");
       if (reqs('localhost', '/e2e-popup-noopener').length) open('TL-5', 'a noopener popup reached another site');
       if (reqs('localhost', '/e2e-popup-opener').length) open('TL-5', 'a popup (with opener) reached another site');

@@ -221,7 +221,7 @@ function updateHeld(ws, mods, scopes) {
   const record = (m) => {
     const was = seen && typeof seen[m.id] === 'object' && seen[m.id] && seen[m.id].lines ? seen[m.id].lines : {};
     const lines = { ...was };
-    for (const n of needsOf(m, null)) if (n.lines.length) lines[n.key] = [...new Set([...(lines[n.key] || []), ...n.lines])].slice(-2000);
+    for (const n of needsOf(m, null)) if (n.lines && n.lines.length) lines[n.key] = [...new Set([...(lines[n.key] || []), ...n.lines])].slice(-2000);
     return { hash: m.hash, lines };
   };
   const seenHash = (v) => (typeof v === 'string' ? v : v && v.hash);

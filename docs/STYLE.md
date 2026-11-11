@@ -29,11 +29,11 @@ Plain and humble. Short. No marketing voice, no taglines.
 
 A dark squircle head in a green rim, with two mint eyes (`scripts/render-icon.js`). The robot is always one
 colour: its frame and its features share the state's colour (the usual robot's rim and mint eyes are
-both TRIF green). His face says the state, one at a time (extension/faces.js), in the toolbar icon for the
+both TRIF green). That's for his marks: the face behind them can differ where contrast needs it. His face says the state, one at a time (extension/faces.js), in the toolbar icon for the
 tab, the robot in the panel's bar, and the gate's robot:
-- **paused** (the agent ran code in the tab): a white frame and two white bars for eyes, posting blocked
-  until the page reloads. The panel's state colour goes white then (dark grey, #3a3a3e, frame and bars,
-  on the light theme);
+- **paused** (the agent ran code in the tab): a white frame and two white bars for eyes on the dark face,
+  posting blocked until the page reloads; on a light theme or toolbar, flipped: dark-grey (#3a3a3e) frame
+  and bars on a light face. The panel's state colour goes white then (dark grey on the light theme);
 - **blocked** (the user blocked the site in TRIF): a red frame, a red cross for eyes;
 - **disconnected** (TRIF can't reach the site): a grey frame, a grey broken link for eyes (two chain-link
   halves apart; not a slashed link, which would read as blocked);

@@ -10,6 +10,7 @@ import { siteForUrl, modAppliesTo, modSites, isMultiSite, offOnSite, normalizeOf
 import { setMarkdown, unwrapMarkdown } from './markdown.js';
 import { createLogin } from './login.js';
 import { agentLevel, agentSiteOf, sensitiveList } from './agentsites.js';
+import { modChip, levelWords, modLevel, powerLines } from './modlevel.js';
 import { modSwitch, syncSwitches, shownEnabled, switchError, enabledIn, onSwitchChange } from './modswitch.js';
 import { mountOpenModel, renderOpenModel, openModelKeyMissing, watchOpenModel } from './openmodel.js';
 
@@ -881,7 +882,7 @@ function renderMods() {
   const rows = new Map();
   for (const m of mods) {
     const key = JSON.stringify([site, m.name, m.description || '', m.file, m.held ?? null, m.pending ?? null, m.review ?? null, m.risk?.tier ?? null, m.risk?.why ?? null, m.matches,
-      m.source ?? null, m.version ?? null, m.update ?? null, m.powers ?? null, m.broken ?? null, m.fixUndo ?? null]);
+      m.source ?? null, m.version ?? null, m.update ?? null, m.powers ?? null, m.powerInfo ?? null, m.found ?? null, m.sandboxed ?? null, m.broken ?? null, m.fixUndo ?? null]);
     const old = view.modRows.get(m.id);
     rows.set(m.id, old && old.key === key ? old : { key, li: modItem(m) });
   }
@@ -1014,6 +1015,11 @@ const currentState = () => {
 const siteIsOn = () => currentState() === 'on';
 let siteSwitching = false;
 
+// (the toolbar's paused face is flipped on a light toolbar: the background can't see the scheme, so it's told)
+const schemeQuery = matchMedia('(prefers-color-scheme: light)');
+const tellScheme = () => request({ type: 'faces.scheme', light: schemeQuery.matches }).catch(() => {});
+schemeQuery.addEventListener?.('change', tellScheme);
+
 /**
  * The robot's face (faces.js, scripts/render-icon.js), one at a time: paused (the agent ran code in this
  * tab), blocked (a red cross), disconnected (a broken link), off (blank), logged out (hollow yellow eyes),
@@ -1027,6 +1033,7 @@ function renderFaces(problem, agentInfo) {
   ui.barRobot.dataset.face = document.body.classList.contains('tab-locked') ? 'paused'
     : state === 'blocked' ? 'blocked' : state === 'disconnected' ? 'disconnected' : state === 'off' ? 'off' : loggedOut ? 'login' : 'normal';
   // (only once the agent is known, and not while the helper or user scripts are what's wrong: no answer then)
+  if (!view.toldScheme && view.status) { view.toldScheme = true; tellScheme(); }
   if (agentInfo && problem !== 'helper' && problem !== 'scripts' && loggedOut !== view.toldLoggedOut) {
     view.toldLoggedOut = loggedOut;
     request({ type: 'faces.login', loggedOut }).catch(() => { view.toldLoggedOut = null; });
@@ -1196,61 +1203,59 @@ const isOn = (id, site) => enabledIn(view.disabled, id) && !(site && offOnSite(v
 function modItem(m) {
   const li = el('li');
   li.dataset.mod = m.id;
-  li.title = m.file || m.id;
   const labelId = `mod-name-${++modLabelSeq}`;
+  // A row is the light, the name, one chip when there's something to say, one line of description, one tag
+  // at most, and the controls. Everything else about the mod is in its code card.
   // (a heading, so a screen reader's heading navigation goes mod to mod)
   const name = el('h3', 'mod-name');
   const light = el('span', 'light');
   const label = el('span', null, m.name);
   label.id = labelId;
-  const tag = el('span', 'tag');
+  name.append(label);
+  // The chip (modlevel.js): its powers and how noticeable it is. Hover says what; a click opens the code card.
+  const info = modChip(m, view.site);
+  if (info) {
+    const chip = el('button', `mod-chip ${info.tone}`, info.text);
+    chip.type = 'button';
+    chip.title = info.title;
+    chip.setAttribute('aria-describedby', labelId);
+    chip.addEventListener('click', (e) => { e.stopPropagation(); openCodeView(m.id); });
+    name.append(chip);
+  }
+  // The tags: at most one shows, the most urgent (updateModItem: showOneTag; data-rank, lowest first)
+  const tag = el('span', 'tag row-tag');
+  tag.dataset.rank = '3';
   tag.hidden = true;
-  // The file name right after the name, and the mods TRIF ships say so (their header's @source and @version).
-  // (a link to its code, like the </> beside the switch)
-  const file = fileLink((m.file || m.id).split('/').pop(), 'Show the code', () => openCodeView(m.id), 'mod-file');
-  const source = m.source === 'webmods' || m.source === 'trif' ? el('span', 'mod-source', `Tim's mod${m.version ? `, v${m.version}` : ''}`) : null;
-  // Spaces between the name and the rest, so each can wrap to the next line on its own.
-  name.append(label, ' ', file, ...(source ? [' ', source] : []), ' ', tag);
-  // Risk tier from the mod's header (AGENTS.md "Account safety"): nothing for 0, a badge for 1 and 2.
-  if (m.risk?.tier >= 1) {
-    const badge = el('span', `tag risk risk-${m.risk.tier}`, m.risk.tier >= 2 ? 'changes requests' : 'detectable');
-    badge.title = (m.risk.tier >= 2
-      ? 'Risk 2: this mod changes what the site receives, which the site could notice (rate limits or an account flag are possible).'
-      : 'Risk 1: the site\'s own scripts could notice this mod (for example, ads it hides never report being seen).') +
-      (m.risk.why ? `\n${m.risk.why}` : '');
-    name.append(' ', badge);
+  name.append(tag);
+  if (m.pending && !m.held) {
+    const t = holdTag(m, 'change on hold', labelId);
+    t.classList.add('row-tag');
+    t.dataset.rank = '1';
+    name.append(t);
   }
   // A new error (or "may be broken"): a small red badge that shows it; a mod a fix run changed: Undo fix
   if (Array.isArray(m.broken) && m.broken.length) {
     const errs = m.broken.filter((b) => !b.quiet);
     const first = errs[0] || m.broken[0];
-    const badge = el('button', 'tag err-badge', errs.length ? (errs.length > 1 ? `${errs.length} errors` : 'error') : 'may be broken');
+    const badge = el('button', 'tag err-badge row-tag', errs.length ? (errs.length > 1 ? `${errs.length} errors` : 'error') : 'may be broken');
+    badge.dataset.rank = '2';
     badge.type = 'button';
     badge.title = first.quiet ? 'May be broken: nothing it looks for is on the page any more.' : `New error${first.line ? ` at line ${first.line}` : ''}: ${first.message}`;
     badge.addEventListener('click', (e) => { e.stopPropagation(); openCodeView(m.id, { error: first }); });
-    name.append(' ', badge);
+    name.append(badge);
   }
   if (m.fixUndo) {
     const undo = el('button', 'tag fix-undo', 'Undo fix');
     undo.type = 'button';
     undo.title = 'Put back the version from before your agent fixed it';
     undo.addEventListener('click', (e) => { e.stopPropagation(); undoFix(m.id, undo); });
-    name.append(' ', undo);
-  }
-  // Mods that also run on other sites say so: their switch here is for this site only.
-  const { everywhere, sites } = modSites(m);
-  if (everywhere || sites.length > 1) {
-    const badge = el('span', 'tag', everywhere ? 'all sites' : `${sites.length} sites`);
-    badge.title = (everywhere ? 'Runs on every site.' : `Runs on ${sites.join(', ')}.`) +
-      ` This switch is for ${view.site} only; switch it on other sites, or everywhere, from Setup.`;
-    name.append(' ', badge);
+    name.append(undo);
   }
   const main = el('div', 'mod-main');
-  // What the mod does, from its header's @description, under the name.
+  // What the mod does, from its header's @description, on one line (all of it in the tooltip).
   const desc = m.description ? el('div', 'mod-desc', m.description) : null;
-  // A boxed mod's powers (docs/POWERS.md), on its row
-  const powers = Array.isArray(m.powers) && m.powers.length ? el('div', 'mod-powers', `Powers: ${m.powers.join(', ')}`) : null;
-  main.append(light, name, ...(desc ? [desc] : []), ...(powers ? [powers] : []));
+  if (desc) desc.title = m.description;
+  main.append(light, name, ...(desc ? [desc] : []));
   const row = el('div', 'mod-row');
   if (m.held) {
     // Written by an agent run here, and it can do something the user hasn't allowed (what TRIF read in
@@ -1268,11 +1273,27 @@ function modItem(m) {
   const err = el('div', 'mod-err');
   err.hidden = true;
   li.append(row, err);
-  // (held, or a change waiting: the approval dialog; a change waiting also tags the row, which keeps its switch)
-  if (m.pending && !m.held) name.append(' ', holdTag(m, 'change on hold', labelId));
   if (!m.held && !m.pending && m.review) li.append(factsBox(m, m.review, 'review'));
-  if (m.update && !m.held) li.append(updateNotice(m, err));
+  // A new version of a shipped mod: a tag; its notice, with what the user can do, opens from it.
+  if (m.update && !m.held) {
+    const notice = updateNotice(m, err);
+    notice.hidden = true;
+    const t = el('button', 'tag row-tag mod-update-tag', 'update available');
+    t.type = 'button';
+    t.dataset.rank = '4';
+    t.title = m.update.version ? `Version ${m.update.version}: see what you can do` : 'See what you can do';
+    t.setAttribute('aria-expanded', 'false');
+    t.addEventListener('click', (e) => { e.stopPropagation(); notice.hidden = !notice.hidden; t.setAttribute('aria-expanded', String(!notice.hidden)); });
+    name.append(t);
+    li.append(notice);
+  }
   return li;
+}
+
+/** One tag on a row at most: the most urgent with something to say. A held row's switch-place tag outranks all. */
+function showOneTag(li, held) {
+  const tags = [...li.querySelectorAll('.mod-name .row-tag')].filter((t) => t.textContent).sort((a, b) => a.dataset.rank - b.dataset.rank);
+  tags.forEach((t, i) => { t.hidden = held || i > 0; });
 }
 
 // What a mod can do, in two clearly separate parts: TRIF's own facts, read from the code (the helper's
@@ -1381,7 +1402,7 @@ function cardRobot(face = 'eyes') {
   if (face === 'code') {
     const code = document.createElementNS(NS, 'path');
     code.setAttribute('class', 'code');
-    code.setAttribute('d', 'M49 49 L35 64 L49 79 M79 49 L93 64 L79 79 M70 44 L58 84');
+    code.setAttribute('d', 'M48 47 L31 64 L48 81 M80 47 L97 64 L80 81 M71 40 L57 88');
     svg.append(code);
   }
   return svg;
@@ -1396,11 +1417,13 @@ const agentSettingsNow = () => ({ sites: view.status?.agentSites || {}, sensitiv
 const LEVEL_WORDS = { off: 'Agent can’t see this site', look: 'Agent can look', ask: 'Agent asks before running code', run: 'Agent can run code' };
 // (the icons: an eye crossed out, an eye, an eye with a question mark, code; drawn in currentColor)
 const EYE = '<path d="M1.5 8s2.4-4.5 6.5-4.5S14.5 8 14.5 8 12.1 12.5 8 12.5 1.5 8 1.5 8z"/>';
+// (</>: thin strokes, sharp chevrons, a clear slash, the gaps open; .code-glyph in sidepanel.css)
+const CODE_ICON = '<svg class="code-glyph" viewBox="0 0 16 16" aria-hidden="true"><path d="M4.7 4 .9 8l3.8 4M11.3 4l3.8 4-3.8 4M9.3 2.3 6.7 13.7"/></svg>';
 const LEVEL_ICONS = {
   off: `<svg viewBox="0 0 16 16">${EYE}<circle cx="8" cy="8" r="2"/><path d="M2.5 13.5l11-11"/></svg>`,
   look: `<svg viewBox="0 0 16 16">${EYE}<circle cx="8" cy="8" r="2"/></svg>`,
   ask: `<svg viewBox="0 0 16 16">${EYE}<path d="M6.7 6.7a1.4 1.4 0 1 1 1.9 1.3c-.4.2-.6.5-.6.9v.2"/><path d="M8 10.6v.1"/></svg>`,
-  run: '<svg viewBox="0 0 16 16"><path d="M5.5 4.5 2 8l3.5 3.5M10.5 4.5 14 8l-3.5 3.5M9.2 3.2 6.8 12.8"/></svg>',
+  run: CODE_ICON,
 };
 const levelMenu = $('#agent-level-menu');
 const levelItems = () => [...levelMenu.querySelectorAll('[role="menuitemradio"]')];
@@ -1872,7 +1895,7 @@ function codeButton(m, labelId) {
   b.title = 'Show code';
   b.setAttribute('aria-label', 'Show code');
   b.setAttribute('aria-describedby', labelId);
-  b.innerHTML = '<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M5.25 4.5 1.75 8l3.5 3.5M10.75 4.5 14.25 8l-3.5 3.5M9.25 2.75l-2.5 10.5"/></svg>';
+  b.innerHTML = CODE_ICON;
   b.addEventListener('click', () => openCodeView(m.id));
   return b;
 }
@@ -1903,6 +1926,8 @@ function codeViewDialog() {
   meta.append(chip, where);
   nameBox.append(name, meta);
   who.append(robot, nameBox);
+  // (what the row leaves out: how noticeable it is, its powers, where it runs)
+  const about = el('div', 'cv-about');
   // (a change waiting: which version)
   const versions = el('div', 'cv-versions');
   versions.setAttribute('role', 'group');
@@ -1964,11 +1989,11 @@ function codeViewDialog() {
   acts.append(copy, exportBtn, moreWrap);
   const historyBox = el('ul', 'cv-history-list');
   historyBox.hidden = true;
-  d.append(top, who, tabs, versions, errorBox, hTools, codeBox, historyBox, note, err, acts);
+  d.append(top, who, about, tabs, versions, errorBox, hTools, codeBox, historyBox, note, err, acts);
   d.addEventListener('close', () => setTimeout(() => renderMods(), 0)); // (a hold that came meanwhile: its card now)
   document.body.append(d);
   codeView.dialog = d;
-  codeView.parts = { name, chip, where, versions, vRan, vNew, errorBox, codeBox, historyBox, historyBtn, codeTab, hTools, hDiff, hRestore, exportBtn, more, menu, note, err, copy, reveal, editor };
+  codeView.parts = { name, chip, where, about, versions, vRan, vNew, errorBox, codeBox, historyBox, historyBtn, codeTab, hTools, hDiff, hRestore, exportBtn, more, menu, note, err, copy, reveal, editor };
   return codeView.parts;
 }
 
@@ -1983,7 +2008,20 @@ function openCodeView(id, { error = null } = {}) {
   P.chip.className = `ap-chip ${k[0]}`;
   P.chip.textContent = k[1];
   P.where.replaceChildren(`${m.id.split('/')[0]} · `, fileLink(String(m.file || '').split(/[\\/]/).pop() || `${m.id.split('/').pop()}.js`,
-    IS_MAC ? 'Show in Finder' : 'Show in folder', () => revealMod('folder'), 'cv-file'));
+    IS_MAC ? 'Show in Finder' : 'Show in folder', () => revealMod('folder'), 'cv-file'),
+    ...(m.source === 'webmods' || m.source === 'trif' ? [' · ', el('span', 'cv-source', `Tim's mod${m.version ? `, v${m.version}` : ''}`)] : []));
+  const { everywhere, sites } = modSites(m);
+  const site = m.id.split('/')[0];
+  const lines = [
+    ...(modLevel(m) ? [levelWords(m, view.site || site)] : []),
+    ...powerLines(m).map((l) => `Power: ${l}`),
+    ...(m.powerInfo?.warnings || []).map((w) => w.charAt(0).toUpperCase() + w.slice(1)),
+    ...(everywhere ? ['Runs on every site.'] : sites.length > 1 ? [`Runs on ${sites.join(', ')}.`] : []),
+    ...(m.from ? [`Made from ${m.from}.`] : []),
+    ...(m.enabled !== false && !m.registered && !m.held ? [view.status?.userScripts ? 'Not active right now.' : 'Paused: user scripts are off.'] : []),
+  ];
+  P.about.replaceChildren(...lines.map((l) => el('p', null, l)));
+  P.about.hidden = !lines.length;
   P.versions.hidden = !m.pending;
   P.copy.textContent = 'Copy';
   delete P.copy.dataset.copied;
@@ -2561,7 +2599,7 @@ function updateModItem(li, m) {
     updateLight(li, m, false);
     const tag = li.querySelector('.tag');
     tag.textContent = '';
-    tag.hidden = true; // (the "on hold" button in the switch's place says it)
+    showOneTag(li, true); // (the "on hold" button in the switch's place says it)
     const err = li.querySelector('.mod-err');
     if (rowErr) { err.textContent = rowErr; err.hidden = false; } else { err.textContent = ''; err.hidden = true; } // (the facts box says why)
     return;
@@ -2570,13 +2608,10 @@ function updateModItem(li, m) {
   const on = shownEnabled(m.id, isOn(m.id, site), site);
   li.classList.toggle('off', !on);
   updateLight(li, m, on);
-  // "not active"/"paused" only once the status agrees the mod is on (not mid-switch).
   const tag = li.querySelector('.tag');
-  tag.textContent = on && m.enabled !== false && !m.registered ? (view.status.userScripts ? 'not active' : 'paused')
-    : !on && m.from ? `from ${m.from}` : !on && m.newOff ? (m.newOff === 'update' ? 'updated' : 'new') : '';
-  tag.title = !on && m.from ? `Made from ${m.from}. Mods made in another browser start off here; switch it on to use it.`
-    : !on && m.newOff ? `${m.newOff === 'update' ? 'TRIF updated it. ' : ''}New ${groupWord(modGroup(m))} start off (Settings): switch it on once you've looked at it.` : '';
-  tag.hidden = !tag.textContent;
+  tag.textContent = !on && m.newOff ? (m.newOff === 'update' ? 'updated' : 'new') : '';
+  tag.title = !on && m.newOff ? `${m.newOff === 'update' ? 'TRIF updated it. ' : ''}New ${groupWord(modGroup(m))} start off (Settings): switch it on once you've looked at it.` : '';
+  showOneTag(li, false);
   const err = li.querySelector('.mod-err');
   err.textContent = rowErr || switchError(m.id, site) || (on && m.error) || '';
   err.hidden = !err.textContent;

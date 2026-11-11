@@ -146,10 +146,23 @@ function powerNeeds(mod) {
   return out.concat(togetherNeeds(list));
 }
 
+/**
+ * A boxed mod's powers for the panel's row and code card: each power's words, and the combination warnings
+ * as sentences (extension/modlevel.js). A power this version has no entry for has no words here.
+ */
+function powerInfo(mod) {
+  const needs = powerNeeds(mod);
+  const together = needs.filter((n) => n.power === 'together');
+  return {
+    facts: needs.filter((n) => n.power !== 'together').map((n) => ({ power: n.power, fact: n.fact })),
+    warnings: factLines(together.map((n) => n.key), together.map((n) => n.fact)),
+  };
+}
+
 /** Whether a need is a power that doesn't hold on its own (controls, mods). */
 function isSoft(key) {
   const m = /^power:(.+)$/.exec(String(key));
   return !!(m && MENU[m[1]] && MENU[m[1]].soft);
 }
 
-module.exports = { MENU, NAMES, PowersError, parsePowers, parsePowersWithArgs, parseClicks, powerNeeds, isSoft, siteOf, sameSite, READS, factLine, factLines };
+module.exports = { MENU, NAMES, PowersError, parsePowers, parsePowersWithArgs, parseClicks, powerNeeds, powerInfo, isSoft, siteOf, sameSite, READS, factLine, factLines };

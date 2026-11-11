@@ -103,7 +103,7 @@ const tabLocks = createTabLocks({
   noted: (tabId, site) => updateChat(normalizeSite(site), (chat) => {
     chat.messages.push({ role: 'tool', text: `${site} saved new data while your agent's code ran. If something on ${site} acts strangely, clear its site data in the browser's settings.`, time: Date.now() });
   }).catch(() => {}),
-  icon: (tabId, paused) => (paused ? setFace(tabId, 'paused', true) : showFace(tabId, undefined, true)),
+  icon: (tabId, paused) => (paused ? setFace(tabId, toolbarFace({ locked: true, light: !!state.lightToolbar }), true) : showFace(tabId, undefined, true)),
 });
 chrome.tabs.onUpdated?.addListener((tabId, info, tab) => {
   if (info.status === 'complete' || info.url) tabLocks.check(tabId).catch(() => {});
@@ -124,6 +124,7 @@ const facesStore = chrome.storage?.session; // (sessionStore, below, isn't defin
 const facesReady = (facesStore ? facesStore.get('faces').catch(() => ({})) : Promise.resolve({})).then((s) => {
   for (const [id, f] of Object.entries(s?.faces?.tabs || {})) faces.set(Number(id), f);
   if (s?.faces?.loggedOut) state.loggedOut = true;
+  if (s?.faces?.light) state.lightToolbar = true;
   defaultFace = s?.faces?.default || 'normal';
 });
 let facesSaving = null;
@@ -131,7 +132,7 @@ function saveFaces() {
   if (!facesStore || facesSaving) return;
   facesSaving = setTimeout(() => {
     facesSaving = null;
-    facesStore.set({ faces: { tabs: Object.fromEntries(faces), loggedOut: !!state.loggedOut, default: defaultFace } }).catch(() => {});
+    facesStore.set({ faces: { tabs: Object.fromEntries(faces), loggedOut: !!state.loggedOut, light: !!state.lightToolbar, default: defaultFace } }).catch(() => {});
   }, 200);
 }
 function setFace(tabId, face, force = false) {
@@ -155,7 +156,7 @@ async function showFace(tabId, url, force = false) {
   await facesReady;
   if (url === undefined) url = (await chrome.tabs.get(tabId).catch(() => null))?.url || '';
   facesHost.set(tabId, hostOf(url));
-  await setFace(tabId, toolbarFace({ locked: tabLocks.isLocked(tabId), state: tabSiteState(url), loggedOut: !!state.loggedOut }), force);
+  await setFace(tabId, toolbarFace({ locked: tabLocks.isLocked(tabId), state: tabSiteState(url), loggedOut: !!state.loggedOut, light: !!state.lightToolbar }), force);
 }
 let facesTimer = null;
 /** Every tab's face, and the default one (after a switch, a block, access, or the login changed). */
@@ -1702,7 +1703,7 @@ async function uiStatus() {
       error: errors.get(m.id) === USER_SCRIPTS_OFF ? null : errors.get(m.id) || null,
       held: m.held || null, pending: m.pending || null, review: m.held || m.pending ? null : m.review || null, risk: m.risk || null,
       from: fromOtherBrowser(m, state.installId) ? (m.origin.browser || 'another browser') : null,
-      source: m.source || null, version: m.version || null, update: m.update || null, rules: !!m.rules, sandboxed: !!m.sandboxed, unsandboxed: !!m.unsandboxed, powers: Array.isArray(m.powers) ? m.powers : [],
+      source: m.source || null, version: m.version || null, update: m.update || null, rules: !!m.rules, sandboxed: !!m.sandboxed, unsandboxed: !!m.unsandboxed, powers: Array.isArray(m.powers) ? m.powers : [], powerInfo: m.powerInfo || null, found: Array.isArray(m.found) ? m.found : [],
       newOff: state.newOff[m.id] && !(live.get(m.id)?.enabled ?? isEnabled(m.id)) ? state.newOff[m.id] : null,
       imported: !!m.imported,
       fixUndo: !!(state.fixes[m.id]?.fixedHash && state.fixes[m.id].fixedHash === m.hash),
@@ -1936,6 +1937,12 @@ async function onPanelMessage(msg) {
     case 'faces.login': {
       const out = msg.loggedOut === true;
       if (out !== !!state.loggedOut) { state.loggedOut = out; saveFaces(); showFaces(); }
+      return { ok: true };
+    }
+    // The panel's colour scheme, for the paused face: the service worker can't see it (faces.js)
+    case 'faces.scheme': {
+      const light = msg.light === true;
+      if (light !== !!state.lightToolbar) { state.lightToolbar = light; saveFaces(); showFaces(); }
       return { ok: true };
     }
     case 'siteAccess.noteSeen': {

@@ -26,7 +26,8 @@ const { scanMods, buildMod, planMods, planModsMessage, modsParts, withSame, fold
 const { Runs } = require('./lib/runs');
 const { Logins } = require('./lib/logins');
 const agents = require('./lib/agents');
-const { updateHeld, approveHeld, rejectHeld, lastRun, heldFile, reviewItems, reviewMod } = require('./lib/held');
+const { updateHeld, approveHeld, rejectHeld, lastRun, heldFile, reviewItems, reviewMod, powersFor } = require('./lib/held');
+const { powerInfo } = require('./lib/boxpowers');
 const history = require('./lib/history');
 const { DEFAULT_ORDER, startOffIds, startSitesOn, pendingUpdates, useNewVersion, keepMine, mergeRequest, mergeSettled, restoreMod, absorbedIds,
   starterOffer, installStarter, chooseNoStarter, resolveSites, resolveIds, readdedIds, autoUpdatedIds } = require('./lib/preinstalled');
@@ -318,7 +319,9 @@ function syncMods(reason, force) {
     const withReadded = autoUpdated[m.id] ? { ...withReadded0, autoUpdated: autoUpdated[m.id] } : withReadded0;
     // A sandboxed mod: what its code could do as a page script, for a browser without TRIF's sandbox, which
     // holds it until the user allows that (extension/lib.js sandboxFallback)
-    const withFacts = m.sandboxed ? { ...withReadded, pageFacts: pageFactsOf(m) } : withReadded;
+    // (and for the row and code card: a boxed mod's powers in words; what TRIF read in a free mod's code)
+    const withFacts = m.sandboxed ? { ...withReadded, pageFacts: pageFactsOf(m), powerInfo: powerInfo(m) }
+      : m.rules ? withReadded : { ...withReadded, found: [...new Set(powersFor(m).map((p) => String(p.key).split(':')[0]))] };
     return startOff.has(m.id) ? { ...withFacts, startOff: true } : withFacts;
   });
   // Sites TRIF starts on for (preinstalled.json): each browser turns each one on the first time it sees it.

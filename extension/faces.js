@@ -12,7 +12,7 @@
 // every tab's. TRIF missing a part (the helper, user scripts: the panel's red) keeps the usual face, as
 // the toolbar never showed it.
 
-export const FACE_FILES = { normal: 'robot', paused: 'robot-paused-white', blocked: 'robot-blocked', disconnected: 'robot-disconnected', off: 'robot-off', login: 'robot-login' };
+export const FACE_FILES = { normal: 'robot', paused: 'robot-paused-white', 'paused-light': 'robot-paused-light', blocked: 'robot-blocked', disconnected: 'robot-disconnected', off: 'robot-off', login: 'robot-login' };
 
 /** The toolbar's icon paths for a face (the sizes manifest.json's action.default_icon has). */
 export function facePaths(face) {
@@ -20,9 +20,9 @@ export function facePaths(face) {
   return { 16: `icons/${name}-16.png`, 32: `icons/${name}-32.png` };
 }
 
-/** The face for a tab: locked, its site's state ('on' | 'off' | 'disconnected' | 'blocked' | null), logged out. */
-export function toolbarFace({ locked = false, state = null, loggedOut = false } = {}) {
-  if (locked) return 'paused';
+/** The face for a tab: locked, its site's state ('on' | 'off' | 'disconnected' | 'blocked' | null), logged out; light: a light toolbar. */
+export function toolbarFace({ locked = false, state = null, loggedOut = false, light = false } = {}) {
+  if (locked) return light ? 'paused-light' : 'paused'; // (white on a dark toolbar; flipped on a light one)
   if (state === 'blocked') return 'blocked';
   if (state === 'disconnected') return 'disconnected';
   if (state === 'off') return 'off';

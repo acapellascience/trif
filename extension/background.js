@@ -2141,6 +2141,15 @@ async function onPanelMessage(msg, { fromPanel = false } = {}) {
     case 'site.disconnect': return disconnectSite(msg);
     case 'site.block': return setBlocked(msg);
     case 'sensitive.answer': return answerSensitive(msg);
+    case 'sensitive.copy': {
+      // "Copy to {host}" in the code card: a parent's mod into a sensitive site of its own (it starts off there)
+      const id = String(msg.id ?? '');
+      const host = String(msg.host ?? '').trim().toLowerCase();
+      const folder = id.split('/')[0];
+      if (!state.mods.some((m) => m.id === id)) throw new Error(`no mod ${id}`);
+      if (!sens().splits.includes(host) || scopeFor(host) !== scopeFor(folder) || sens().isSensitive(sens().scopeOf(folder))) throw new Error(`${host} isn't a site of its own under ${folder}`);
+      return helperRequest('sensitive.split', { host, ids: [id] }, 30000);
+    }
     // The panel says whether the agent needs a login (or a key): the toolbar's yellow face, every tab
     case 'faces.login': {
       const out = msg.loggedOut === true;

@@ -2237,7 +2237,9 @@ function codeViewDialog() {
   });
   wrap.setAttribute('role', 'menuitemcheckbox');
   wrap.setAttribute('aria-checked', String(codeWrap));
-  menu.append(editor, reveal, wrap);
+  // ("Copy to {host}": one per sensitive site of its own under the mod's site, filled in by openCodeView)
+  const copyTo = el('span', 'cv-copy-to');
+  menu.append(editor, reveal, wrap, copyTo);
   more.addEventListener('click', () => { menu.hidden = !menu.hidden; more.setAttribute('aria-expanded', String(!menu.hidden)); });
   x.addEventListener('click', () => d.close());
   const moreWrap = el('span', 'cv-more-wrap');
@@ -2250,7 +2252,7 @@ function codeViewDialog() {
   d.addEventListener('close', () => setTimeout(() => renderMods(), 0)); // (a hold that came meanwhile: its card now)
   document.body.append(d);
   codeView.dialog = d;
-  codeView.parts = { name, chip, where, about, versions, vRan, vNew, errorBox, codeBox, historyBox, historyBtn, codeTab, hTools, hDiff, hRestore, exportBtn, more, menu, note, err, copy, reveal, editor };
+  codeView.parts = { name, chip, where, about, versions, vRan, vNew, errorBox, codeBox, historyBox, historyBtn, codeTab, hTools, hDiff, hRestore, exportBtn, more, menu, note, err, copy, reveal, editor, copyTo, item };
   return codeView.parts;
 }
 
@@ -2293,6 +2295,15 @@ function openCodeView(id, { error = null } = {}) {
     b.disabled = !connected;
     b.title = connected ? '' : 'TRIF\'s helper isn\'t connected, so it can\'t open the file';
   }
+  // "Copy to {host}" for each sensitive site of its own under this mod's site (mail.google.com for a
+  // google.com mod): the parent's mods never run there, so the user brings one over (it starts off there)
+  const home = sensNow().scopeOf(site);
+  const hosts = site === 'all-sites' || sensNow().isSensitive(home) ? [] : sensNow().splits.filter((x) => scopeFor(x) === scopeFor(site) && x !== home);
+  P.copyTo.replaceChildren(...hosts.map((host) => {
+    const b = P.item(`Copy to ${host}`, 'cv-copy-host', () => copyModTo(id, host));
+    b.disabled = !connected;
+    return b;
+  }));
   const fl = P.where.querySelector('.cv-file');
   if (fl && !connected) fl.title = 'TRIF\'s helper isn\'t connected, so it can\'t open the file';
   // (Show error: the error above the code, its line marked and in view)
@@ -2302,6 +2313,24 @@ function openCodeView(id, { error = null } = {}) {
   if (error) P.errorBox.append(el('b', null, error.quiet ? 'May be broken: ' : `New error${error.line ? ` at line ${error.line}` : ''}: `), error.quiet ? 'nothing it looks for is on the page any more.' : String(error.message || ''));
   if (!codeView.dialog.open) codeView.dialog.showModal();
   loadCodeView('file');
+}
+
+// "Copy to {host}" (the code card's menu): the mod copied into the host's own folder by the helper
+// (helper/lib/split.js), a mod of its own there that starts off, like any mod from outside the chat.
+async function copyModTo(id, host) {
+  const P = codeView.parts;
+  P.err.hidden = true;
+  P.note.hidden = true;
+  try {
+    const r = await request({ type: 'sensitive.copy', id, host });
+    const to = r?.copies?.[0]?.to;
+    if (!to) throw new Error('nothing was copied');
+    P.note.textContent = `Copied to ${to}: it’s off there until you switch it on.`;
+    P.note.hidden = false;
+  } catch (e) {
+    P.err.textContent = `Couldn’t copy it: ${e?.message ?? e}`;
+    P.err.hidden = false;
+  }
 }
 
 async function loadCodeView(version) {

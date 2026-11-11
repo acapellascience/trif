@@ -31,8 +31,9 @@ approved are marked **approved**; every other one is **awaiting Tim's OK**.
 - On a site whose "Agent on this site" is Off, a side-panel run may only make style and boxed mods: a free
   mod it writes there is held, with the reason below (the agent sees it in `trif status`). The user can
   Allow it, change the level, or add the mod themselves.
-- Not done: a "Copy to {host}" action for one mod on the parent's panel. Dragging the mod's .js file into
-  the chat on the host already brings it over (as an import: it starts off).
+- **Copy to {host}**: the code card's ⋯ menu on a parent's mod has one item per sensitive site of its own
+  under that site; it copies the file into `sites/<host>/` (a name already there keeps both), where it's a
+  mod of its own that starts off, like any mod from outside the chat.
 
 ## The panel
 
@@ -46,6 +47,9 @@ approved are marked **approved**; every other one is **awaiting Tim's OK**.
 | The upgrade's notice, one row per host | `{host} is {why}: TRIF now keeps it apart from {parent}, as its own site.` | **approved** |
 | Its buttons | `Keep TRIF on there` · `Block it` | **approved** |
 | Its buttons while working | `Keeping…` · `Blocking…` | awaiting Tim's OK |
+| The code card's ⋯ menu, a parent's mod | `Copy to {host}` | awaiting Tim's OK |
+| The code card after it | `Copied to {host}/{name}: it’s off there until you switch it on.` | awaiting Tim's OK |
+| The code card, if it fails | `Couldn’t copy it: {error}` | awaiting Tim's OK |
 | Under a row, when all-sites mods reached the host | `Mods for all sites don’t run there any more.` | awaiting Tim's OK |
 | The notice, a host with no `why` on the list | `{host} is on your list of sensitive sites: TRIF now keeps it apart from {parent}, as its own site.` | awaiting Tim's OK |
 

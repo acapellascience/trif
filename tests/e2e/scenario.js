@@ -3451,6 +3451,18 @@ setTimeout(() => {
       await toBottom();
       await themes('mods-fold-open');
       done.push(`"${folded.fold}" (${folded.mods.length} above it), opened: ${opened.mods.length}; the box ${heights.join(', ')}`);
+      // 5. Copy to {host}: the code card's menu brings a parent's mod over to a sensitive site of its own (off there)
+      await this.panelClick('li[data-mod="x.com/e2e-sens-elsewhere"] .mod-code');
+      const items = await waitFor('the code card\'s menu', () => this.panel(`async () => { const d = document.getElementById('code-view'); if (!d?.open) return null; return [...d.querySelectorAll('.cv-copy-host')].map((b) => b.textContent); }`), { timeoutMs: 8000 });
+      if (!items.includes('Copy to inbox.x.com')) problems.push(`the menu's copy items: ${items}`);
+      await this.panel(`async () => { const d = document.getElementById('code-view'); d.querySelector('.cv-more').click(); [...d.querySelectorAll('.cv-copy-host')].find((b) => b.textContent === 'Copy to inbox.x.com').click(); return true; }`);
+      const copiedNote = await waitFor('the copy\'s note', () => this.panel(`async () => { const n = document.querySelector('#code-view .cv-note'); return n && !n.hidden && n.textContent ? n.textContent : null; }`).catch(() => null), { timeoutMs: 10000 }).catch(() => null);
+      const brought = await waitFor('the copy there', async () => (await status()).mods.find((m) => m.id === 'inbox.x.com/e2e-sens-elsewhere') || null, { timeoutMs: 15000, intervalMs: 500 });
+      if (brought.enabled !== false) problems.push(`the copy isn't off: ${JSON.stringify(brought)}`);
+      if (copiedNote !== 'Copied to inbox.x.com/e2e-sens-elsewhere: it’s off there until you switch it on.') problems.push(`the note: ${copiedNote}`);
+      await this.shot(this.panelCtx, 'sensitive-copy-to');
+      await this.panel(`async () => { const d = document.getElementById('code-view'); if (d && d.open) d.close(); return true; }`);
+      done.push(`Copy to inbox.x.com: ${brought.id}, off`);
       if (problems.length) throw new Error(problems.join('\n'));
       return done.join('; ');
     } finally {

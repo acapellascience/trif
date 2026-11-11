@@ -914,3 +914,4 @@ body.chat-empty .mod-list { max-height: calc(70vh - 40px); }
 .sensitive-note .sensitive-actions { margin-top: 0; }
 .sensitive-note .mod-err { display: block; margin-top: 4px; }
 .sensitive-note .sensitive-also { color: var(--muted); }
+.cv-menu .cv-copy-to { display: contents; }

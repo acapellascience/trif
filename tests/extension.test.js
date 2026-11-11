@@ -3144,6 +3144,7 @@ test('background: on upgrade a sensitive host the user\'s mods reach is asked ab
     let req;
     for (let i = 0; i < 200 && !(req = bg.native.sent.find((m) => m.type === 'request' && m.cmd === 'sensitive.split')); i++) await tick();
     assert.deepStrictEqual(req.args, { host: 'mail.google.com', ids: ['google.com/dark', 'google.com/quiet'] });
+    req.answered = true;
     // (as the helper does: its scan sends the copies, then it answers)
     bg.native.emit({ type: 'mods', mods: [...mods, mod('mail.google.com/dark', { matches: ['*://*.google.com/*'] }), mod('mail.google.com/quiet', { matches: ['*://mail.google.com/*'] })] });
     bg.native.emit({ type: 'response', id: req.id, ok: true, result: { host: 'mail.google.com', copies: [{ from: 'google.com/dark', to: 'mail.google.com/dark' }, { from: 'google.com/quiet', to: 'mail.google.com/quiet' }] } });
@@ -3168,6 +3169,13 @@ test('background: on upgrade a sensitive host the user\'s mods reach is asked ab
     assert.deepStrictEqual(t.result.map((x) => x.id), [5], 'a google.com run doesn\'t list mail.google.com\'s tab');
     const e = await bg.native.call('reload', { tab: 7, scope: 'google.com' });
     assert.match(e.error, /this agent run is limited to google\.com/);
+    // Copy to {host} (the code card's menu): one mod of the parent's into the host's folder, by the helper
+    const copyP = panel.ask({ type: 'sensitive.copy', id: 'google.com/maps', host: 'mail.google.com' });
+    const creq = await answerNative(bg.native, 'sensitive.split', { host: 'mail.google.com', copies: [{ from: 'google.com/maps', to: 'mail.google.com/maps' }] });
+    assert.deepStrictEqual(creq.args, { host: 'mail.google.com', ids: ['google.com/maps'] });
+    assert.strictEqual((await copyP).ok, true);
+    const bad = await panel.ask({ type: 'sensitive.copy', id: 'google.com/maps', host: 'maps.google.com' });
+    assert.match(bad.error, /isn't a site of its own under google\.com/);
   } finally { bg.restore(); }
 });
 

@@ -38,6 +38,9 @@
     <select id="agent"><option value="">Default</option></select>
   </label>
   <p id="agent-note" class="note" hidden></p>
+  <!-- Agents the user allowed to run under an organization's settings instead of TRIF's sandbox (sidepanel.js
+       renderWithoutSandbox), each with Stop allowing. -->
+  <div id="without-sandbox" class="without-sandbox" hidden></div>
   <div id="open-model" class="open-model" hidden>
     <label class="field">
       <span>From</span>
@@ -138,8 +141,12 @@
   <div id="working" class="working" hidden role="status"><span class="pulse" aria-hidden="true"></span>Working…</div>
 </main>
 
-<!-- which agent and model this chat uses (sidepanel.js renderUsing); a click opens settings at the model -->
-<button id="using" class="using" type="button" hidden></button>
+<!-- which agent and model this chat uses (sidepanel.js renderUsing); a click opens settings at the model.
+     Beside it, "no TRIF sandbox" when this chat's agent ran under an organization's settings instead. -->
+<div class="using-row">
+  <span id="no-sandbox" class="no-sandbox" hidden>no TRIF sandbox</span>
+  <button id="using" class="using" type="button" hidden></button>
+</div>
 <form id="composer" class="composer">
   <label for="input" class="visually-hidden">Message</label>
   <textarea id="input" rows="1" placeholder="What should I fix?"></textarea>

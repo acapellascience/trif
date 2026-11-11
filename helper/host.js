@@ -37,6 +37,7 @@ const { scopeFor } = require('./lib/scope');
 const update = require('./lib/update');
 const { buildReport, reportEmail, reportUrl } = require('./lib/report');
 const { migratePrivate } = require('./lib/migrate');
+const withoutSandbox = require('./lib/withoutsandbox');
 
 // The helper's private files (settings, logs, run logs, screenshots) leave the workspace for the private
 // folder, once (lib/migrate.js migratePrivate): side-panel runs may read the workspace, never that.
@@ -412,6 +413,13 @@ function poll() {
 const runs = new Runs({
   getWorkspace: () => ({ ...workspace(ws.home), installId: state.hello?.installId || null, browser: state.hello?.browser || '' }),
   logger, onEvent: onAgentEvent, onRequest: onRunRequest,
+  // The user's consent to run an agent under an organization's settings instead of TRIF's sandbox, read
+  // fresh each time (another browser's helper may have changed it). Only agent.withoutSandbox sets it.
+  withoutSandbox: {
+    allowed: (agent) => withoutSandbox.allowed(ws.home, agent),
+    consents: () => withoutSandbox.consents(ws.home),
+    guard: (before) => withoutSandbox.guard(ws.home, before, { logger }),
+  },
 });
 
 /**
@@ -431,6 +439,11 @@ const runSubscribers = new Map(); // runId or loginId -> Set of CLI sockets that
 const AGENT_COMMANDS = new Set(['agent.list', 'agent.start', 'agent.stop', 'agent.running', 'agent.login', 'agent.loginCode', 'agent.loginCancel', 'mod.approve',
   'mod.update', 'instructions.get', 'instructions.set', 'agent.models', 'agent.openModel', 'agent.openModel.set', 'agent.openModel.setKey', 'agent.openModel.removeKey', 'update.check', 'update.install', 'update.setAuto', 'report.build',
   'shipped.install', 'shipped.none']);
+// Only from the side panel, by a click there: never from the socket (the user's terminal, or `trif` in
+// a run, which also has its mailbox), only from the extension's own connection (onExtensionRequest),
+// whose background takes it from the panel page alone. Runs can't reach that connection: their
+// sandboxes have no network and can't write the private folder, where the consent is kept.
+const PANEL_COMMANDS = new Set(['agent.withoutSandbox']);
 // Helper-local too, but a run may use them (on mods inside its scope; see lib/trash.js).
 const MOD_FILE_COMMANDS = new Set(['mod.delete', 'mod.restore']);
 
@@ -516,7 +529,12 @@ function stopRunRecording(runId) {
 // agent.list returns a promise (it checks login status).
 function agentCommand(cmd, args) {
   switch (cmd) {
-    case 'agent.list': return agents.listAgentsWithLogin(workspace(ws.home));
+    // (With the agents the user allowed to run without TRIF's sandbox: Settings shows them.)
+    case 'agent.list': return agents.listAgentsWithLogin(workspace(ws.home)).then((r) => {
+      const allowed = withoutSandbox.consents(ws.home);
+      for (const a of r.agents) if (allowed[a.id]) a.withoutSandbox = true;
+      return r;
+    });
     case 'agent.models': return agents.agentModels(workspace(ws.home), String(args.agent || ''), { fresh: !!args.fresh, openModel: args.openModel || null });
     // Open models (agents/codex-oss.js): the defaults in config.json, which runs can't read or change.
     case 'agent.openModel': return agents.getAdapter('codex-oss').settings(workspace(ws.home));
@@ -786,6 +804,12 @@ function onExtensionRequest(msg) {
   const respond = (body) => {
     try { sendToExtension({ type: 'response', id, ...body }); } catch (e) { logger.warn(`could not answer extension request ${id}: ${e.message}`); }
   };
+  if (PANEL_COMMANDS.has(msg.cmd)) {
+    try { return respond({ ok: true, result: panelCommand(msg.cmd, args) }); } catch (e) {
+      logger.warn(`${msg.cmd} failed: ${e.message}`);
+      return respond({ ok: false, error: e.message });
+    }
+  }
   if (!AGENT_COMMANDS.has(msg.cmd) && !MOD_FILE_COMMANDS.has(msg.cmd)) return respond({ ok: false, error: `unknown command "${msg.cmd}"` });
   runAgentCommand(msg.cmd, args, (e, result) => {
     if (e) {
@@ -794,6 +818,21 @@ function onExtensionRequest(msg) {
     }
     respond({ ok: true, result: result === undefined ? null : result });
   });
+}
+
+/**
+ * agent.withoutSandbox {agent, allow}: "Use <agent> anyway" (allow: true) or Settings' "Stop allowing"
+ * (false). Returns {agents: [ids allowed]}. (PANEL_COMMANDS: the extension's connection only.)
+ */
+function panelCommand(cmd, args) {
+  if (cmd !== 'agent.withoutSandbox') throw new Error(`unknown command "${cmd}"`);
+  const agent = typeof args.agent === 'string' ? args.agent : '';
+  if (typeof args.allow !== 'boolean') throw new Error('allow must be true or false');
+  const now = withoutSandbox.setAllowed(ws.home, agent, args.allow);
+  logger.warn(args.allow
+    ? `${agent} may now run under an organization's settings instead of TRIF's sandbox (chosen in the side panel)`
+    : `${agent} no longer runs without TRIF's sandbox (Settings in the side panel)`);
+  return { agents: Object.keys(now) };
 }
 
 // ---------------------------------------------------------------- unix socket for the CLI
@@ -953,6 +992,8 @@ function onClientLine(sock, line) {
   const args = req && req.args && typeof req.args === 'object' && !Array.isArray(req.args) ? req.args : {};
   if (typeof cmd !== 'string' || !cmd) return reply(sock, { id, ok: false, error: 'missing cmd' });
 
+  // The side panel's alone, whoever asks here (PANEL_COMMANDS).
+  if (PANEL_COMMANDS.has(cmd)) return reply(sock, { id, ok: false, error: 'only a click in TRIF\'s side panel can change this (Settings, under the agent)' });
   // From inside an agent run (`trif` sends the run's token): only page commands, limited to its site.
   let run = null;
   if (req.token !== undefined) {

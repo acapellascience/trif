@@ -748,7 +748,7 @@ Nothing is hosted; the agent uses the user's own login/subscription.
   - **Mods on this site:** the mods whose matches cover the current tab (name, file name, on/off switch;
     see "Mod switches"), collapsed by default when there's a chat.
   - **Chat:** one conversation per site, persisted in `chrome.storage.local` under `chat:<site>` =
-    `{sessionId, agent, messages: [{role: "user"|"assistant"|"tool"|"error"|"login"|"mod", text, time}]}`, at most 500
+    `{sessionId, agent, messages: [{role: "user"|"assistant"|"tool"|"error"|"login"|"mod"|"sandbox", text, time}], withoutSandbox?}`, at most 500
     messages, each message's text cut at 20 000 characters and the chat at about 1 MB (oldest messages
     dropped first; `capChat` in lib.js). The manifest asks for `unlimitedStorage`, so Chrome's 10 MB quota
     doesn't apply. A text box
@@ -791,7 +791,7 @@ Nothing is hosted; the agent uses the user's own login/subscription.
   `{type: "agent.openModel"}`, `{type: "agent.openModel.set", provider, model, baseUrl}`,
   `{type: "agent.openModel.setKey", key}`, `{type: "agent.openModel.removeKey"}`,
   `{type: "agent.list"}`, `{type: "agent.login", agent}`, `{type: "agent.loginCode", loginId, code}`,
-  `{type: "agent.loginCancel", loginId}`, `{type: "status"}`, `{type: "mod.enable", id, enabled, tab}`,
+  `{type: "agent.loginCancel", loginId}`, `{type: "agent.withoutSandbox", agent, allow, site?, card?}` and `{type: "chat.sandboxCard", site, card}` (from the panel page only; see "Organization settings"), `{type: "status"}`, `{type: "mod.enable", id, enabled, tab}`,
   `{type: "mod.approve", id, tab}`, `{type: "mod.update", id, choice, site, tab}`, `{type: "mod.delete", id, site, tab}`, `{type: "mod.restore", id, site, tab}` (the tab is reloaded if the mod runs there; with `site`, the chat gets a `{role: "mod", text: "x.js was deleted.", undo: id}` line, marked `undone: true` once restored, and a "was restored (off, as before)" line), `{type: "shipped.install", ids or sites, others?, tab?}` and `{type: "shipped.none"}` (Tim's mods: the setup page, Settings, a site's panel; with `tab`, it reloads if one of the added mods runs there), `{type: "instructions.get"}`, `{type: "instructions.set", text}`, `{type: "chat.clear", site}`, `{type: "chat.note", site, text}`. Background forwards agent commands to the
   helper as native `request`s with the same cmd and relays every native `{type: "agentEvent", runId,
   event}` to all panel ports (panels ignore runs and logins they didn't start, by id).
@@ -823,6 +823,28 @@ New native request commands (answered with a normal `response`):
 | `agent.openModel.set` | `provider?, model?, baseUrl?` | stores them in config.json `openModel` (merged; `''` clears a field; a new provider drops the old one's model and URL); same result. Not from a run |
 | `agent.openModel.setKey` | `key` | saves the stored provider's API key in the system keyring (see "The key"); never echoed back, logged or stored anywhere else; errors don't contain it; same result as `agent.openModel`. Not from a run |
 | `agent.openModel.removeKey` | | removes it from the keyring; same result. Not from a run |
+| `agent.withoutSandbox` | `agent, allow` | `{agents}`: stores (`allow: true`) or removes the user's consent to run that agent under an organization's settings instead of TRIF's sandbox (see "Organization settings"). From the extension's connection only: refused on the socket, with or without a run's token, and from a run's mailbox |
+
+#### Organization settings
+
+An organization's managed settings can replace the limits TRIF gives a run: Codex's requirements refuse
+TRIF's permission profile ("… disallowed by requirements; falling back from trif-run to required value …",
+codex.js `sandboxOverridden`, said as Codex starts), and Claude Code's managed settings outrank TRIF's
+(`agents/claude-managed.js`, read before each Claude Code run: `managed-settings.json` and
+`managed-settings.d/*.json`, the MDM profile, the server-managed cache; `$TRIF_CLAUDE_MANAGED_DIR` replaces
+them in tests). Settings that only break runs (Claude Code's `allowManagedPermissionRulesOnly`, plan mode,
+`allowManagedReadPathsOnly`) stop the run with what they do. Settings that loosen TRIF's limits stop it
+with an `error` event `reason: "sandbox"` (and `done.error.kind: "sandbox"`) unless the user allowed that
+agent: the panel shows a card ("Your organization's Codex settings replace TRIF's sandbox.", **Stop** ·
+**Use Codex anyway**). "Use … anyway" sends `{type: "agent.withoutSandbox", agent, allow: true, site, card}`
+(background.js takes it from the panel page alone, `isPanelPage`), the helper keeps the consent in
+config.json `withoutSandbox` in the private folder (`helper/lib/withoutsandbox.js`), and the panel sends
+the same message again. Such a run goes on with a `sandbox` event (the chat's `withoutSandbox`: the "no
+TRIF sandbox" chip), logged in helper.log and the run's log; when it ends, any consent added meanwhile that
+the helper didn't write is removed. If the organization's settings turn out stricter than TRIF's (`trif`
+can't reach the helper, writes to `sites/` refused: the adapters' `orgBlocked`), the run is ended once with
+`reason: "orgBlocked"`. Settings lists the allowed agents (`agent.list` `withoutSandbox: true`) with
+**Stop allowing** (`allow: false`). Wording: docs/CODEX-ORG-STRINGS.md.
 
 `loggedIn` is `true` / `false`, or `null` when unknown or the agent isn't available (from the adapter's
 `loginStatus`, which spends no tokens; cached 30 s per agent, forgotten when a login finishes). After a
@@ -841,6 +863,9 @@ New helper → extension message: `{type: "agentEvent", runId, event}` where `ev
 {kind: "tool", name, summary}                      a tool call, e.g. {name:"Bash", summary:"trif reload --tab 12"}
 {kind: "error", message}                           something went wrong (agent missing, crashed…)
 {kind: "error", reason: "login", agent, message}   the agent's login is gone, expired or refused: "<Agent> needs you to log in again."
+{kind: "error", reason: "sandbox", agent, name, settingsName, why, message}   an organization's settings replace TRIF's sandbox: the run stopped (see "Organization settings")
+{kind: "sandbox", trif: false, agent, name, settingsName}   the run goes on under an organization's settings, as the user allowed
+{kind: "error", reason: "orgBlocked", agent, message}   such a run can't reach TRIF or write mods: ended
 {kind: "done", ok, result, costUsd, changedFiles, sessionId, error?}   always the last event of a run
 {kind: "login", url}                               (logins) the sign-in page to open
 {kind: "done", ok, login: true, cancelled?}        (logins) always the last event of a login

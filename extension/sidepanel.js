@@ -19,7 +19,7 @@ const ui = {
   dot: $('#dot'), site: $('#site'), barRobot: $('#bar-robot'), siteSwitch: $('#site-switch'), newChat: $('#new-chat'), settingsBtn: $('#settings-btn'),
   gate: $('#gate'), gateBtn: $('#gate-btn'), gateErr: $('#gate-err'), gateNote: $('#gate-note'),
   landing: $('#landing'), landingIcon: $('#landing-icon'), landingVersion: $('#landing-version'), landingNote: $('#landing-note'),
-  settings: $('#settings'), agent: $('#agent'), agentNote: $('#agent-note'), model: $('#model'),
+  settings: $('#settings'), agent: $('#agent'), agentNote: $('#agent-note'), withoutSandbox: $('#without-sandbox'), model: $('#model'),
   using: $('#using'), modelCustomRow: $('#model-custom-row'), modelCustom: $('#model-custom'), modelNote: $('#model-note'),
   instructions: $('#instructions'), instructionsNote: $('#instructions-note'),
   autoUpdate: $('#auto-update'), updateNote: $('#update-note'), update: $('#update'),
@@ -28,6 +28,7 @@ const ui = {
   notice: $('#notice'), paused: $('#paused'), mods: $('#mods'), modsCount: $('#mods-count'), modList: $('#mod-list'), modsLive: $('#mods-live'),
   chat: $('#chat'), empty: $('#empty'), messages: $('#messages'), working: $('#working'),
 
+  noSandbox: $('#no-sandbox'),
   composer: $('#composer'), input: $('#input'), send: $('#send'), stop: $('#stop'),
 };
 
@@ -296,8 +297,89 @@ function code(text) {
 }
 
 
+// ---- an organization's settings instead of TRIF's sandbox (helper/lib/withoutsandbox.js) -------------
+// Wording: docs/CODEX-ORG-STRINGS.md.
+
+const both = (list) => (list.length > 1 ? `${list.slice(0, -1).join(', ')} and ${list[list.length - 1]}` : list[0] || '');
+
+/** The card's words for an agent: settingsName is "Codex" or "Claude Code". */
+function sandboxCardText(m) {
+  const who = m.settingsName || m.name || 'Your agent';
+  const other = who === 'Claude Code' ? 'Codex, or Claude Code without those settings, works' : `Claude Code, or a personal ${who} login, works`;
+  return {
+    title: `Your organization’s ${who} settings replace TRIF’s sandbox.`,
+    text: `${who} would run under your company’s settings instead of TRIF’s sandbox. Those settings may let it do more than TRIF allows, or less (some companies’ settings stop it writing mods or reaching TRIF, and then chats can’t work). ${other} with TRIF’s sandbox.`,
+    why: Array.isArray(m.why) && m.why.length ? `Your company’s settings ${both(m.why)}.` : '',
+    go: `Use ${who} anyway`,
+  };
+}
+
+function sandboxAnswer(choice) {
+  return el('p', 'sandbox-answer', choice === 'allowed' ? 'Allowed: TRIF sent your message again.' : 'Stopped. Nothing was changed.');
+}
+
+/** The choice card: Stop (the run stays stopped, nothing stored) or Use <agent> anyway (consent, then resend). */
+function sandboxCard(li, m) {
+  const t = sandboxCardText(m);
+  li.append(el('p', 'sandbox-title', t.title), el('p', 'sandbox-text', t.text));
+  if (t.why) li.append(el('p', 'sandbox-why', t.why));
+  if (m.answered) { li.append(sandboxAnswer(m.answered)); return; }
+  const actions = el('div', 'sandbox-actions');
+  const error = el('p', 'note error');
+  error.hidden = true;
+  const done = (choice) => { actions.replaceWith(sandboxAnswer(choice)); error.hidden = true; };
+  const fail = (e) => { stopBtn.disabled = goBtn.disabled = false; error.textContent = String(e?.message ?? e); error.hidden = false; };
+  const site = view.site;
+  const stopBtn = button('Stop', '', async () => {
+    stopBtn.disabled = goBtn.disabled = true;
+    try { await request({ type: 'chat.sandboxCard', site, card: m.time }); done('stop'); } catch (e) { fail(e); }
+  });
+  const goBtn = button(t.go, 'primary', async () => {
+    if (view.chat.run) { fail(new Error('Wait for the chat to finish, then try again.')); return; }
+    stopBtn.disabled = goBtn.disabled = true;
+    try {
+      await request({ type: 'agent.withoutSandbox', agent: m.agent, allow: true, site, card: m.time });
+      loadAgents(); // (Settings' line)
+      done('allowed');
+      const tabId = view.tab?.id;
+      const runId = await startRun(m.prompt, { agent: m.agent, model: chosenModel(m.agent) || undefined, ...(m.merge ? { merge: m.merge } : {}) });
+      view.myRuns.set(runId, { prompt: m.prompt, tabId });
+    } catch (e) { fail(e); }
+  });
+  actions.append(stopBtn, goBtn);
+  li.append(actions, error);
+}
+
+/** Settings, under the agent: each agent allowed to run without TRIF's sandbox, with Stop allowing. */
+function renderWithoutSandbox() {
+  const allowed = (view.agents?.agents || []).filter((a) => a.withoutSandbox);
+  ui.withoutSandbox.replaceChildren(...allowed.map((a) => {
+    const line = el('p', 'note', `${a.name} without TRIF’s sandbox: allowed`);
+    const stopBtn = button('Stop allowing', '', async () => {
+      stopBtn.disabled = true;
+      try { await request({ type: 'agent.withoutSandbox', agent: a.id, allow: false }); } catch (e) {
+        stopBtn.disabled = false;
+        line.title = String(e?.message ?? e);
+        return;
+      }
+      loadAgents();
+    });
+    line.append(stopBtn);
+    return line;
+  }));
+  ui.withoutSandbox.hidden = !allowed.length;
+}
+
+/** The chat's quiet "no TRIF sandbox" chip, once a run here went on under an organization's settings. */
+function renderNoSandbox() {
+  const w = view.site ? view.chat.withoutSandbox : null;
+  ui.noSandbox.hidden = !w;
+  if (w) ui.noSandbox.title = `Your organization’s ${w.settingsName || w.name || 'agent'} settings apply instead of TRIF’s sandbox. Settings → Agents to change this.`;
+}
+
 function messageNode(m) {
   const li = el('li', `msg ${m.role}`);
+  if (m.role === 'sandbox') { sandboxCard(li, m); return li; }
   // (Role 'login': the agent needs logging in, a plain line; the notice above has the Log in button.)
   if (m.role === 'assistant' || m.role === 'error') setMarkdown(li, m.text);
   else li.textContent = m.text;
@@ -378,6 +460,7 @@ function render() {
   renderStarter();
   renderSiteStarter();
   renderMessages();
+  renderNoSandbox();
 
   ui.empty.hidden = !site || chat.messages.length > 0;
   ui.working.hidden = !running;
@@ -1183,6 +1266,7 @@ function renderSettings() {
   const note = chosen?.note || (view.agentsError && !view.agents ? 'Agents are listed once the helper is connected.' : '');
   ui.agentNote.textContent = note;
   ui.agentNote.hidden = !note;
+  renderWithoutSandbox();
   renderModels();
 }
 

@@ -134,7 +134,7 @@ svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width:
 /* There the top bar keeps only the dot, the robot (grey and dim, below) and settings; with no website, only
    settings, and the dot when something red is wrong. Settings are for every site, so they open from both.
    (A notice moved into the gate, the login in progress, shows: only the body's own notices hide.) */
-body:is(.site-off, .no-site) :is(.site, #site-switch, #new-chat, .mods, .chat, .composer, .using),
+body:is(.site-off, .no-site) :is(.site, #site-switch, #new-chat, .mods, .chat, .composer, .using, .no-sandbox),
 body:is(.site-off, .no-site) > .notice { display: none; }
 body.no-site .bar-robot, body.no-site:not(.blocked) .dot { display: none; }
 /* No website in this tab (a new tab, the browser's own pages): only the shaded robot, where the gate's sits. */
@@ -422,6 +422,20 @@ body.no-site .site-starter { display: none; }
 .msg.mod { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 0 2px; color: var(--muted); font-size: 12px; }
 .msg.mod .btn { padding: 2px 10px; }
 
+/* An organization's settings replace TRIF's sandbox: the choice (Stop, or Use <agent> anyway). */
+.msg.sandbox { padding: 9px 11px; border: 1px solid color-mix(in srgb, var(--warn) 45%, var(--line)); border-radius: 8px;
+  background: var(--surface); font-size: 12.5px; }
+.msg.sandbox p { margin: 0 0 6px; }
+.msg.sandbox .sandbox-title { font-weight: 600; font-size: 13px; }
+.msg.sandbox .sandbox-text, .msg.sandbox .sandbox-why { color: var(--muted); }
+.sandbox-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; margin-top: 8px; }
+.sandbox-actions .btn { padding: 4px 12px; }
+.sandbox-answer { margin: 6px 0 0; color: var(--faint); font-size: 12px; }
+.without-sandbox { display: grid; gap: 4px; }
+.without-sandbox[hidden] { display: none; }
+.without-sandbox .note { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.without-sandbox .btn { padding: 2px 10px; font-size: 12px; }
+
 /* The agent needs logging in (the notice above says how): a plain line, not an error. */
 .msg.login { padding: 0 2px 0 8px; border-left: 2px solid var(--warn); color: var(--muted); font-size: 12px; }
 
@@ -454,8 +468,12 @@ body.no-site .site-starter { display: none; }
 
 /* ---- composer -------------------------------------------------------------------------------- */
 
-/* which agent and model this chat uses, small, over the message box */
-.using { display: block; margin: 0 12px 2px auto; padding: 0 2px; border: 0; background: none; color: var(--faint);
+/* which agent and model this chat uses, small, over the message box (and "no TRIF sandbox" before it) */
+.using-row { display: flex; align-items: center; justify-content: flex-end; gap: 6px; margin: 0 12px 2px; min-width: 0; }
+.no-sandbox { flex: none; padding: 0 6px; border: 1px solid var(--line); border-radius: 999px; color: var(--muted);
+  font: 10.5px/1.5 inherit; white-space: nowrap; cursor: default; }
+.no-sandbox[hidden] { display: none; }
+.using { display: block; margin: 0; padding: 0 2px; border: 0; background: none; color: var(--faint);
   font: 11px/1.4 inherit; text-align: right; cursor: pointer; max-width: calc(100% - 24px); overflow: hidden;
   text-overflow: ellipsis; white-space: nowrap; }
 .using:hover { color: var(--muted); text-decoration: underline; }

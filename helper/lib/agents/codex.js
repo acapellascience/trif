@@ -248,15 +248,37 @@ adapter.prepare = async function prepare({ ws, logger }) {
 // An organization's managed Codex settings ("requirements") can refuse TRIF's permission profile; Codex then
 // says so and carries on under the profile the organization requires (e.g. "Configured value for
 // permission_profile is disallowed by requirements; falling back from trif-run to required value
-// CodexStandard"). That profile isn't TRIF's: the run would have none of TRIF's limits (network, folders),
-// so the run is stopped (runs.js sandboxOverridden), never carried on.
+// CodexStandard"). That profile isn't TRIF's: it may allow more than TRIF's limits (network, folders), or
+// less (one company's stopped `trif` reaching the helper and writes to sites/). runs.js _checkSandbox
+// stops the run at once, unless the user chose "Use Codex anyway" in the side panel (withoutsandbox.js);
+// then the run goes on, and if the organization's profile turns out to stop the run's work (orgBlocked),
+// it's ended with orgBlockedMessage.
 const OVERRIDDEN = /disallowed by requirements|falling back from\s+\S*trif-run\S*\s+to required value/i;
+adapter.settingsName = 'Codex'; // "Your organization's <settingsName> settings" (docs/CODEX-ORG-STRINGS.md)
 adapter.sandboxOverridden = (text) => OVERRIDDEN.test(String(text || ''));
 adapter.sandboxOverriddenMessage = (text) =>
-  "Your organization's Codex settings don't let TRIF use its sandbox for agent runs, so TRIF stopped the run " +
-  "instead of letting Codex work without TRIF's limits (no network, only this site's mods). Use Claude Code or a " +
-  "personal Codex login with TRIF, or ask your Codex admin whether TRIF's permission profile can be allowed. " +
+  "Your organization's Codex settings replace TRIF's sandbox, so TRIF stopped the run before Codex did anything. " +
+  'To let Codex work under your company\'s settings instead, choose “Use Codex anyway” in TRIF\'s side panel. ' +
+  'Claude Code, or a personal Codex login, works with TRIF\'s sandbox. ' +
   `(Codex said: ${oneLine(String(text || '')).slice(0, 300)})`;
+
+// Under the organization's profile: what the run's commands, edits and errors say, for withoutsandbox.js
+// blockedText (`trif` can't reach the helper, a write to sites/ refused).
+adapter.orgBlocked = (line) => {
+  const { blockedText } = require('../withoutsandbox');
+  const msg = parseJsonLine(line);
+  if (!msg) return null;
+  const item = msg.item && typeof msg.item === 'object' ? msg.item : null;
+  if (msg.type === 'item.completed' && item) {
+    if (item.type === 'file_change' && item.status === 'failed') return 'write';
+    return blockedText([item.aggregated_output, item.message, item.text].filter((x) => typeof x === 'string').join('\n'));
+  }
+  if (msg.type === 'error' || msg.type === 'turn.failed') return blockedText(msg.message || (msg.error && msg.error.message) || '');
+  return null;
+};
+adapter.orgBlockedMessage = () =>
+  "Your company's Codex settings don't let Codex write mods or reach TRIF from the side panel, so chats can't work with this " +
+  'login. Use Claude Code or a personal Codex login in TRIF, or work with Codex in a terminal in ~/.trif.';
 
 module.exports = adapter;
 adapter.permissionsToml = permissionsToml;

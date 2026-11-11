@@ -9,6 +9,10 @@ const path = require('path');
 const { encode, Decoder } = require('../helper/lib/framing');
 
 const REPO = path.resolve(__dirname, '..');
+
+// Tests that run agents in this process read Claude Code's managed settings from a folder with none,
+// never the system's (agents/claude-managed.js).
+if (!process.env.TRIF_CLAUDE_MANAGED_DIR) process.env.TRIF_CLAUDE_MANAGED_DIR = path.join(os.tmpdir(), 'trif-tests-no-claude-managed');
 const HOST_JS = path.join(REPO, 'helper', 'host.js');
 const CLI_JS = path.join(REPO, 'helper', 'cli.js');
 
@@ -50,6 +54,9 @@ function testEnv(home, extra = {}) {
     TRIF_BOX_ROOT: path.join(home, 'boxes'), // agent runs' mailboxes (runs.js boxRoot)
     // Never the real Keychain (lib/keyring.js): a tool that isn't there, unless a test brings a fake one.
     TRIF_KEYCHAIN_BIN: path.join(home, 'no-keychain', 'security'),
+    // Never the real Claude Code managed settings (agents/claude-managed.js): a folder with none, unless a
+    // test brings some.
+    TRIF_CLAUDE_MANAGED_DIR: path.join(home, 'no-claude-managed'),
     ...extra,
   };
 }

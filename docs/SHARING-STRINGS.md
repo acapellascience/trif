@@ -92,3 +92,14 @@ panel, and a site's files, exact, **all awaiting Tim's OK**.
 - `trif add <file> --site <site>`: **added {rel} ({n} bytes): data for {site}'s mods and its side-panel runs,
   never run as a mod**
 - Help lines: as in helper/lib/help.js (export, import, files, add).
+
+## After Tim's review (the quieter card and mods box): what moved, and three labels
+
+- The code card: tabs **Code** · **History** replace History / Back to the code; the bottom row is **Copy** ·
+  **Export** · **⋯** (title and label **More**) holding **Open in editor** and **Show in Finder** (or Show
+  in folder); the **Close** button is gone (× and Esc).
+- History: each version is one row (date, and "before a fix" etc.); clicking it shows it in place with
+  **Diff** (new: a toggle, instead of "Diff with current") and **Restore**. View is gone (the row is it).
+- The Mods box: **⋯** (title **More**) on its header holds **Import mod…** and **Export all mods for {site}**;
+  the files are one line **Files ({n})** (was **Files:** with the list), opening to the list with × and Show
+  in Finder. A held row says **on hold** once (its button).

@@ -628,7 +628,7 @@ h3.mod-name { margin: 0; font-size: inherit; line-height: inherit; }
 .approval .ap-actions .btn.text:hover { color: var(--text); }
 /* "N waiting": after Not now, at the top of the panel, beside the robot; reopens the dialog */
 .waiting-badge {
-  position: absolute; left: 50%; top: 50%; transform: translate(18px, -50%); z-index: 1;
+  position: absolute; left: 50%; top: 100%; transform: translate(-50%, -50%); z-index: 2; /* (under the robot, on the bar's edge: clear of the site's name and the controls) */
   padding: 2px 8px; border: 0; border-radius: 999px; background: var(--warn); color: #1a1300;
   font-size: 11px; font-weight: 700; box-shadow: 0 2px 8px rgb(0 0 0 / 0.3);
 }
@@ -682,3 +682,25 @@ button.mod-file { font: 11px/1.4 var(--mono); font-weight: 400; color: var(--mut
 .code-view .cv-code .l.hl { background: color-mix(in srgb, var(--bad) 18%, transparent); }
 .break-row { grid-template-columns: 1fr auto; }
 .msg.trif .break-actions .btn.go { background: var(--trif-green); color: #04291c; border-color: transparent; }
+
+/* ---- history, sharing, a site's files, dropping files ------------------------------------------------ */
+.code-view .cv-history-list { list-style: none; margin: 12px 0 0; padding: 0; max-height: min(52vh, 420px); overflow: auto; }
+.code-view .cv-history-list li { display: grid; grid-template-columns: 1fr auto; gap: 2px 8px; padding: 8px 10px; border: 1px solid var(--line); border-radius: 9px; background: var(--raised); margin-top: 6px; }
+.code-view .cv-h-when { font-weight: 600; }
+.code-view .cv-h-from { grid-column: 1; color: var(--muted); font-size: 12px; }
+.code-view .cv-h-actions { grid-column: 2; grid-row: 1 / span 2; display: flex; gap: 6px; align-items: center; flex-wrap: wrap; justify-content: flex-end; }
+.code-view .cv-h-actions .btn { padding: 4px 9px; font-size: 12px; }
+.code-view .cv-history-empty { display: block !important; color: var(--muted); }
+.code-view .cv-code .l.add { color: var(--ok); }
+.code-view .cv-code .l.del { color: var(--bad); }
+.code-view .cv-code .l.add::before, .code-view .cv-code .l.del::before, .code-view .cv-code .l.ctx::before { content: ''; counter-increment: none; width: 0; margin: 0; padding: 0; border: 0; }
+.code-view .cv-code .l.add, .code-view .cv-code .l.del, .code-view .cv-code .l.ctx { padding-left: 10px; }
+.site-tools { flex: none; display: flex; flex-wrap: wrap; align-items: center; gap: 4px 12px; margin: 0 12px 6px; font-size: 12px; color: var(--muted); }
+.link-btn { padding: 0; border: 0; background: none; color: var(--accent); font-size: 12px; cursor: pointer; }
+.link-btn:hover { text-decoration: underline; }
+.site-files { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; }
+.site-file { display: inline-flex; align-items: center; gap: 2px; font: 11px/1.4 var(--mono); color: var(--text); }
+.file-x { border: 0; background: none; color: var(--faint); cursor: pointer; padding: 0 2px; font-size: 13px; line-height: 1; }
+.file-x:hover { color: var(--bad); }
+.drop-overlay { position: fixed; inset: 8px; z-index: 50; display: grid; place-items: center; border: 2px dashed var(--accent); border-radius: 14px; background: color-mix(in srgb, var(--bg) 82%, transparent); backdrop-filter: blur(2px); pointer-events: none; }
+.drop-overlay p { margin: 0; padding: 10px 16px; border-radius: 10px; background: var(--surface); border: 1px solid var(--line); font-weight: 600; font-size: 14px; }

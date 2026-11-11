@@ -18,6 +18,8 @@ const chatKey = (site) => `chat:${site}`;
 const emptyChat = () => ({ sessionId: null, agent: null, messages: [], run: null, last: null });
 
 const ui = {
+  siteTools: document.getElementById('site-tools'), importMod: document.getElementById('import-mod'), exportSite: document.getElementById('export-site'),
+  importFile: document.getElementById('import-file'), siteFiles: document.getElementById('site-files'), dropOverlay: document.getElementById('drop-overlay'), dropText: document.getElementById('drop-text'),
   agentLevel: document.getElementById('agent-level'), agentNote: document.getElementById('agent-note'),
   agentSitesList: document.getElementById('agent-sites-list'), agentSitesEmpty: document.getElementById('agent-sites-empty'),
   sensitiveSites: document.getElementById('sensitive-sites'), sensitiveSave: document.getElementById('sensitive-save'),
@@ -410,6 +412,7 @@ function render() {
   renderSites();
   renderAgentLevel();
   renderAgentSites();
+  renderSiteTools();
   for (const a of view.status?.agentAsks || []) if (!agentAsk.answered.has(a.id)) showAgentAsk(a.id, a.site);
   ui.site.textContent = site || 'Tim\'s Robot Internet Fixer';
   ui.site.title = view.tab?.url || '';
@@ -1508,7 +1511,8 @@ function updateApprovals(mods) {
     else approval.at = Math.min(approval.at, approval.queue.length - 1);
     if (!approval.queue.length) closeApproval();
     else renderApproval();
-  } else if (fresh.length) {
+  } else if (fresh.length && !document.querySelector('dialog[open]:not(#approval)')) {
+    // (not over another of TRIF's cards, an import's question say: it opens when that one's done)
     approval.at = approval.queue.indexOf(fresh[0]);
     showApproval();
   }
@@ -1584,7 +1588,7 @@ function renderApproval() {
   }));
   P.together.hidden = !warns.length;
   const fromAgent = kind !== 'sandbox' && info.by !== 'outside';
-  const who = fromAgent ? `An agent ${kind === 'pending' ? 'changed' : 'wrote'} it in your chat on ${info.site || view.site}.` : 'It\'s new or changed since TRIF last let it run.';
+  const who = m.imported && !fromAgent ? 'You imported it from a file.' : fromAgent ? `An agent ${kind === 'pending' ? 'changed' : 'wrote'} it in your chat on ${info.site || view.site}.` : 'It\'s new or changed since TRIF last let it run.';
   P.note.textContent = kind === 'sandbox' ? 'Allow runs this version as a free mod, in this browser only.'
     : kind === 'pending' ? `${who} The version before keeps running until you decide.`
       : info.asks ? `${who} Updates that ask for the same powers won't ask again.`
@@ -1781,12 +1785,17 @@ function codeViewDialog() {
   const editor = button('Open in editor', 'cv-editor', () => revealMod('editor'));
   const close = button('Close', 'text cv-close', () => d.close());
   x.addEventListener('click', () => d.close());
+  const historyBtn = button('History', 'cv-history', () => toggleHistory());
+  const exportBtn = button('Export', 'cv-export', () => exportMod());
   const acts = el('div', 'ap-actions');
-  acts.append(copy, reveal, editor, close);
-  d.append(top, who, versions, errorBox, codeBox, note, err, acts);
+  acts.append(copy, reveal, editor, historyBtn, exportBtn, close);
+  const historyBox = el('ul', 'cv-history-list');
+  historyBox.hidden = true;
+  d.append(top, who, versions, errorBox, codeBox, historyBox, note, err, acts);
+  d.addEventListener('close', () => setTimeout(() => renderMods(), 0)); // (a hold that came meanwhile: its card now)
   document.body.append(d);
   codeView.dialog = d;
-  codeView.parts = { name, chip, where, versions, vRan, vNew, errorBox, codeBox, note, err, copy, reveal, editor };
+  codeView.parts = { name, chip, where, versions, vRan, vNew, errorBox, codeBox, historyBox, historyBtn, exportBtn, note, err, copy, reveal, editor };
   return codeView.parts;
 }
 
@@ -1807,7 +1816,10 @@ function openCodeView(id, { error = null } = {}) {
   delete P.copy.dataset.copied;
   // (Show in Finder and Open in editor: the helper does them)
   const connected = !!view.status?.helper?.connected;
-  for (const b of [P.reveal, P.editor]) {
+  P.historyBox.hidden = true;
+  P.codeBox.hidden = false;
+  P.historyBtn.textContent = 'History';
+  for (const b of [P.reveal, P.editor, P.historyBtn, P.exportBtn]) {
     b.disabled = !connected;
     b.title = connected ? '' : 'TRIF\'s helper isn\'t connected, so it can\'t open the file';
   }
@@ -1874,6 +1886,211 @@ function renderCode(box, text) {
     });
   }
   box.replaceChildren(...lines);
+}
+
+// History (helper lib/history.js): the versions TRIF kept of this mod, with View, Diff with current and
+// Restore; the code again from the same button.
+const HISTORY_SOURCE = {
+  chat: 'before your agent changed it in a chat', fix: 'before a fix', restore: 'before you restored an older version',
+  import: 'before an import replaced it', undo: 'before an undo',
+};
+async function toggleHistory() {
+  const P = codeView.parts;
+  if (!P.historyBox.hidden) { P.historyBox.hidden = true; P.codeBox.hidden = false; P.historyBtn.textContent = 'History'; loadCodeView('file'); return; }
+  P.err.hidden = true;
+  let r;
+  try { r = await request({ type: 'mod.history', id: codeView.id }); } catch (e) { P.err.textContent = String(e?.message ?? e); P.err.hidden = false; return; }
+  const entries = (r.entries || []).filter((e) => e.kind === 'version');
+  P.historyBtn.textContent = 'Back to the code';
+  P.codeBox.hidden = true;
+  P.historyBox.hidden = false;
+  if (!entries.length) { P.historyBox.replaceChildren(el('li', 'cv-history-empty', 'No earlier versions kept. TRIF keeps the version before each change your agent makes, a fix, a restore or an import, for 30 days.')); return; }
+  P.historyBox.replaceChildren(...entries.map((e) => {
+    const li = el('li');
+    li.dataset.stamp = e.stamp;
+    const when = new Date(e.at).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' });
+    li.append(el('span', 'cv-h-when', when), el('span', 'cv-h-from', e.source ? HISTORY_SOURCE[e.source] || '' : ''));
+    const acts = el('span', 'cv-h-actions');
+    acts.append(
+      button('View', 'cv-h-view', () => showHistoryText(e, when, false)),
+      button('Diff with current', 'cv-h-diff', () => showHistoryText(e, when, true)),
+      button('Restore', 'cv-h-restore', async (ev) => {
+        const b = ev.currentTarget;
+        b.disabled = true;
+        try {
+          await request({ type: 'mod.historyRestore', id: codeView.id, stamp: e.stamp });
+          P.note.textContent = `Restored the version from ${when}. The one before is in History.`;
+          P.note.hidden = false;
+          P.historyBox.hidden = true; P.codeBox.hidden = false; P.historyBtn.textContent = 'History';
+          setTimeout(() => loadCodeView('file').then(() => { P.note.textContent = `Restored the version from ${when}. The one before is in History.`; P.note.hidden = false; }), 800);
+        } catch (x) { b.disabled = false; P.err.textContent = String(x?.message ?? x); P.err.hidden = false; }
+      }));
+    li.append(acts);
+    return li;
+  }));
+}
+
+async function showHistoryText(e, when, diff) {
+  const P = codeView.parts;
+  P.err.hidden = true;
+  try {
+    const r = await request({ type: diff ? 'mod.historyDiff' : 'mod.historyCode', id: codeView.id, stamp: e.stamp });
+    if (diff) P.codeBox.replaceChildren(...r.lines.map((l) => el('span', `l ${l.t === '+' ? 'add' : l.t === '-' ? 'del' : 'ctx'}`, `${l.t === '…' ? '…' : l.t} ${l.s}`)));
+    else renderCode(P.codeBox, String(r.code ?? ''));
+    P.historyBox.hidden = true;
+    P.codeBox.hidden = false;
+    P.note.textContent = diff ? `What changed since the version from ${when} (- then, + now).` : `The version from ${when}.`;
+    P.note.hidden = false;
+    P.historyBtn.textContent = 'History';
+  } catch (x) { P.err.textContent = String(x?.message ?? x); P.err.hidden = false; }
+}
+
+async function exportMod() {
+  const P = codeView.parts;
+  P.err.hidden = true;
+  try {
+    const r = await request({ type: 'mod.export', id: codeView.id });
+    P.note.textContent = `Exported to ${IS_MAC ? 'Downloads' : 'your downloads folder'} as ${r.file}: send it to a friend, who imports it with Import mod… (or drops it on TRIF's panel).`;
+    P.note.hidden = false;
+  } catch (e) { P.err.textContent = String(e?.message ?? e); P.err.hidden = false; }
+}
+
+// ---- Import, export, a site's files, and dropping files on the panel (helper lib/share.js) -------------
+function renderSiteTools() {
+  const site = view.site;
+  const ok = !!site && !!view.status?.helper?.connected;
+  ui.siteTools.hidden = !ok;
+  if (!ok) return;
+  const mine = (view.status?.mods || []).filter((m) => m.id.startsWith(`${site}/`));
+  ui.exportSite.hidden = !mine.length;
+  ui.exportSite.textContent = `Export all mods for ${site}`;
+  if (view.filesFor !== site) { view.filesFor = site; loadSiteFiles(); }
+}
+
+async function loadSiteFiles() {
+  const site = view.site;
+  let files = [];
+  try { files = (await request({ type: 'files.list', site })).files || []; } catch { files = []; }
+  if (site !== view.site) return;
+  ui.siteFiles.hidden = !files.length;
+  if (!files.length) { ui.siteFiles.replaceChildren(); return; }
+  const show = el('button', 'link-btn', IS_MAC ? 'Show in Finder' : 'Show in folder');
+  show.type = 'button';
+  show.addEventListener('click', () => request({ type: 'files.reveal', site }).catch(() => {}));
+  ui.siteFiles.replaceChildren(el('span', 'files-label', 'Files:'), ...files.slice(0, 12).flatMap((f) => {
+    const x = el('button', 'file-x', '×');
+    x.type = 'button';
+    x.title = `Remove ${f.name} (to TRIF's trash)`;
+    x.setAttribute('aria-label', `Remove ${f.name}`);
+    x.addEventListener('click', async () => { x.disabled = true; try { await request({ type: 'files.remove', site, name: f.name }); } catch { x.disabled = false; } view.filesFor = null; renderSiteTools(); });
+    const item = el('span', 'site-file');
+    item.dataset.name = f.name;
+    item.append(el('span', null, f.name), x);
+    return [item];
+  }), ...(files.length > 12 ? [el('span', 'files-more', `and ${files.length - 12} more`)] : []), show);
+}
+
+ui.importMod?.addEventListener('click', () => ui.importFile.click());
+ui.importFile?.addEventListener('change', async () => {
+  const f = ui.importFile.files?.[0];
+  ui.importFile.value = '';
+  if (f) await importModFile(f);
+});
+ui.exportSite?.addEventListener('click', async () => {
+  try {
+    const r = await request({ type: 'mod.exportSite', site: view.site });
+    request({ type: 'chat.note', site: view.site, text: `Exported ${r.ids.length} mod${r.ids.length === 1 ? '' : 's'} for ${r.site} to the folder "${r.dir}" in ${IS_MAC ? 'Downloads' : 'your downloads folder'}.` }).catch(() => {});
+  } catch (e) { request({ type: 'chat.note', site: view.site, text: `Couldn't export: ${e?.message ?? e}` }).catch(() => {}); }
+});
+
+// A small card for the import's questions (which site; a copy or Replace): resolves the choice, or null
+function askCard(title, text, choices) {
+  return new Promise((resolve) => {
+    resolve = ((r) => (v) => { r(v); setTimeout(() => renderMods(), 0); })(resolve);
+    const d = el('dialog', 'approval import-ask');
+    d.id = 'import-ask';
+    const top = el('div', 'ap-top');
+    const x = el('button', 'ap-x', '×');
+    x.type = 'button';
+    x.setAttribute('aria-label', 'Cancel');
+    top.append(el('span', 'ap-count', 'Import mod'), x);
+    const acts = el('div', 'ap-actions');
+    const done = (v) => { d.close(); d.remove(); resolve(v); };
+    for (const [label, value, cls] of choices) acts.append(button(label, cls || '', () => done(value)));
+    acts.append(button('Cancel', 'text', () => done(null)));
+    x.addEventListener('click', () => done(null));
+    d.addEventListener('cancel', (e) => { e.preventDefault(); done(null); });
+    d.append(top, el('h2', 'ap-name', title), el('p', 'ap-lead', text), acts);
+    document.body.append(d);
+    d.showModal();
+  });
+}
+
+async function importModFile(file) {
+  const note = (text) => request({ type: 'chat.note', site: view.site, text }).catch(() => {});
+  if (file.size > 4 * 1024 * 1024) return note(`Couldn't import ${file.name}: it's bigger than a mod can be (4 MB).`);
+  const text = await file.text();
+  let site = '';
+  let choice = '';
+  for (let i = 0; i < 4; i++) {
+    let r;
+    try { r = await request({ type: 'mod.import', text, name: file.name, site, choice, chatSite: view.site }); } catch (e) { return note(`Couldn't import ${file.name}: ${e?.message ?? e}`); }
+    if (r.needsSite) {
+      const sites = [...new Set([...(r.needsSite || []), view.site].filter(Boolean))].slice(0, 5);
+      site = await askCard('Which site is this mod for?', `${file.name} doesn't say which site it's for${r.needsSite.length ? ` (its @match lines name ${r.needsSite.join(', ')})` : ''}.`, sites.map((s, k) => [s, s, k === 0 ? 'go' : '']));
+      if (!site) return;
+      continue;
+    }
+    if (r.exists) {
+      choice = await askCard(`${r.exists} is here already`, `Add ${file.name} beside it as a copy, or replace it? (The one there is kept in its history.)`, [['Add as a copy', 'copy', 'go'], ['Replace', 'replace', '']]);
+      if (!choice) return;
+      continue;
+    }
+    return;
+  }
+}
+
+// Dropping files on the panel, the chat included: a .js is imported; anything else goes in the site's files
+// (data for its mods and runs), or, while the user is typing, attached to their next message.
+let dragDepth = 0;
+const isMod = (name, type) => /\.js$/i.test(name || '') || /javascript/i.test(type || '');
+document.addEventListener('dragenter', (e) => {
+  if (!e.dataTransfer || ![...(e.dataTransfer.types || [])].includes('Files')) return;
+  e.preventDefault();
+  dragDepth++;
+  const items = [...(e.dataTransfer.items || [])];
+  const js = items.length && items.every((it) => it.kind === 'file' && isMod('', it.type));
+  ui.dropText.textContent = !view.site ? 'Open a site\'s tab to add files to it' : js ? 'Drop to import this mod' : `Add to ${view.site}'s files`;
+  ui.dropOverlay.hidden = false;
+});
+document.addEventListener('dragover', (e) => { if (e.dataTransfer && [...(e.dataTransfer.types || [])].includes('Files')) e.preventDefault(); });
+document.addEventListener('dragleave', () => { dragDepth = Math.max(0, dragDepth - 1); if (!dragDepth) ui.dropOverlay.hidden = true; });
+document.addEventListener('drop', async (e) => {
+  if (!e.dataTransfer?.files?.length) return;
+  e.preventDefault();
+  dragDepth = 0;
+  ui.dropOverlay.hidden = true;
+  if (!view.site || !view.status?.helper?.connected) return;
+  for (const f of [...e.dataTransfer.files].slice(0, 10)) {
+    if (isMod(f.name, f.type)) { await importModFile(f); continue; }
+    await addSiteFile(f);
+  }
+});
+
+async function addSiteFile(f) {
+  const site = view.site;
+  const note = (text) => request({ type: 'chat.note', site, text }).catch(() => {});
+  if (f.size > 50 * 1024 * 1024) return note(`${f.name} is ${(f.size / 1024 / 1024).toFixed(1)} MB: a site's files can be up to 50 MB each.`);
+  const bytes = new Uint8Array(await f.arrayBuffer());
+  let bin = '';
+  for (let i = 0; i < bytes.length; i += 0x8000) bin += String.fromCharCode.apply(null, bytes.subarray(i, i + 0x8000));
+  const typing = !!ui.input.value.trim();
+  try {
+    const r = await request({ type: 'files.add', site, name: f.name, data: btoa(bin), attach: typing });
+    if (typing) ui.input.value = `${ui.input.value.replace(/\s+$/, '')} [attached: files/${r.name}]`;
+  } catch (e) { return note(`Couldn't add ${f.name}: ${e?.message ?? e}`); }
+  view.filesFor = null;
+  renderSiteTools();
 }
 
 async function copyCode() {

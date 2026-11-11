@@ -707,6 +707,8 @@ class Scenario {
     // Show in Finder and Open in editor run a stand-in that writes what it was asked to a log, never open
     // (no Finder window on anyone's screen); codeViewCheck checks the helper says so before it clicks.
     env.TRIF_REVEAL_CMD = this.revealStub().bin;
+    // (exports go to a folder of the run's, never anyone's real Downloads: agent runs have the real HOME)
+    env.TRIF_DOWNLOADS = path.join(this.work, 'downloads');
     this.helperHome = env.HOME;
     // Upgrading: TRIF with access to every site, as for someone who installed it when <all_urls> was
     // required (Chrome and Firefox keep it on the update). Fresh: only the sites the user allows.
@@ -1218,6 +1220,7 @@ class Scenario {
       await r.check('a boxed mod as a free mod (how a browser without the sandbox runs one the user allowed): the same API works in the page\'s world', () => this.sandboxPageFormCheck(win));
       await r.check('powers (docs/POWERS.md): a boxed mod with powers waits for the user\'s OK for its set (panel and trif status say what it asks for); allowed, sound, controls, read-drafts and keys work and stay narrow; undeclared, each is refused; a new version with the same powers runs, one with a new power waits for that one', () => this.powersCheck(win));
       await r.check('"Agent on this site": Ask asks in the panel (Just this once runs the code), Look refuses code, Off refuses reading too, a sensitive site is off with its line, Settings lists them', () => this.agentSitesCheck(win));
+      await r.check('sharing: a .js dropped on the panel is imported (its site from @match, its shipped markers gone) and held like any mod from outside, "imported from a file"; dropped again, Add as a copy; Replace keeps the old one, which History shows, views, diffs and restores; Export copies it to Downloads and shows it; another file dropped goes to the site\'s files with a note, listed, never a mod', () => this.shareCheck(win));
       await r.check('the code card: a mod\'s </> and its file name open its code (a style mod: its rules), with line numbers; Copy copies it; Show in Finder and Open in editor ask the helper, which reveals the mod\'s own file (a stand-in for open here); Esc closes it', () => this.codeViewCheck(win));
       await r.check('powers, phase 3: media plays and pauses the page\'s own video; click clicks only what the header names, never a submit, reset or a link to another site; go-to goes only to the header\'s pages; mods talk over TRIF\'s channel in plain data; write-drafts changes the user\'s drafts but never a password, card or hidden field; with a read, the combination is in the hold, and while another boxed mod on the page has a read it didn\'t ask for, write-drafts is off; undeclared, each is refused', () => this.powers3Check(win));
       await r.check('powers, phase 2: site-data filters the site\'s JSON (fetch and XHR) by removing and reordering only (an invented string, number, key, a duplicate or a cut string: TRIF keeps the original); page-data reads plain copies of React props; search-box is TRIF\'s own box the mod can\'t read, which searches the site from the user\'s Enter; undeclared, each is refused', () => this.powers2Check(win));
@@ -2569,6 +2572,106 @@ process.exitCode = 1;
     }
   }
 
+  // ---- sharing (helper/lib/share.js, history.js; sidepanel.js "Dropping files", the code card's History and Export)
+  async shareCheck(win) {
+    const site = '127.0.0.1';
+    const base = `http://${site}:${this.o.servers.port}`;
+    const dir = path.join(this.trif, 'sites', site);
+    const dl = path.join(this.work, 'downloads');
+    const modText = (v) => `// ==WebMod==\n// @name E2E Shared\n// @match *://127.0.0.1/*\n// @source trif\n// @version 9.9\n// ==/WebMod==\nfetch('/e2e-shared-${v}', { method: 'POST' });\n`;
+    const drop = (name, type, text) => this.panel(`async (name, type, text) => {
+      const dt = new DataTransfer();
+      dt.items.add(new File([text], name, { type }));
+      document.body.dispatchEvent(new DragEvent('dragenter', { dataTransfer: dt, bubbles: true }));
+      const overlay = document.getElementById('drop-overlay').hidden ? '' : document.getElementById('drop-text').textContent;
+      document.body.dispatchEvent(new DragEvent('drop', { dataTransfer: dt, bubbles: true }));
+      return overlay;
+    }`, [name, type, text]);
+    const askCard = () => this.panel(`async () => { const d = document.getElementById('import-ask'); return d && d.open ? { title: d.querySelector('.ap-name').textContent, buttons: [...d.querySelectorAll('.ap-actions .btn')].map((b) => b.textContent) } : null; }`);
+    const themes = async (name) => { for (const scheme of ['dark', 'light']) if (await this.d.colorScheme(this.panelCtx, scheme)) { await sleep(150); await this.shot(this.panelCtx, `${name}-${scheme}`); } await this.d.colorScheme(this.panelCtx, ''); };
+    const problems = [];
+    const made = [];
+    try {
+      await this.ext(`async (id, url) => { await chrome.tabs.update(id, { url, active: true }); }`, [win.tabId, `${base}/`]);
+      await this.dismissApproval();
+      await waitFor('the import button', () => this.panel(`async () => !document.getElementById('site-tools').hidden || null`), { timeoutMs: 10000 });
+      // a .js dropped: imported, held (its code posts), "imported from a file", no shipped markers
+      const overlay = await drop('e2e-shared.js', 'text/javascript', modText(1));
+      if (overlay !== 'Drop to import this mod') problems.push(`the overlay for a .js: ${overlay}`);
+      const file = path.join(dir, 'e2e-shared.js');
+      made.push(file, path.join(dir, 'e2e-shared-2.js'));
+      await waitFor('the imported file', () => (fs.existsSync(file) || null), { timeoutMs: 10000, intervalMs: 200 });
+      if (/@source|@version/.test(fs.readFileSync(file, 'utf8'))) problems.push('the shipped markers are still in the import');
+      const card = await this.approvalFor(`${site}/e2e-shared`).catch((e) => { problems.push(`not held: ${e.message}`); return null; });
+      if (card && !/^You imported it from a file\./.test(card.note)) problems.push(`the approval card's note: ${card.note}`);
+      if (card) await themes('share-import-held');
+      await this.dismissApproval();
+      // dropped again: Add as a copy / Replace
+      await drop('e2e-shared.js', 'text/javascript', modText(2));
+      const ask = await waitFor('the copy-or-replace card', () => askCard(), { timeoutMs: 8000 }).catch(() => null);
+      if (!ask || ask.title !== `${site}/e2e-shared is here already` || JSON.stringify(ask.buttons) !== JSON.stringify(['Add as a copy', 'Replace', 'Cancel'])) problems.push(`the card: ${JSON.stringify(ask)}`);
+      await themes('share-import-exists');
+      await this.d.click(this.panelCtx, '#import-ask .ap-actions .btn:nth-child(1)');
+      await waitFor('the copy', () => (fs.existsSync(path.join(dir, 'e2e-shared-2.js')) || null), { timeoutMs: 10000, intervalMs: 200 }).catch(() => problems.push('Add as a copy wrote nothing'));
+      // Replace: the old one kept in history
+      await drop('e2e-shared.js', 'text/javascript', modText(3));
+      await waitFor('the card again', () => askCard(), { timeoutMs: 8000 });
+      await this.d.click(this.panelCtx, '#import-ask .ap-actions .btn:nth-child(2)');
+      await waitFor('replaced', () => (/e2e-shared-3/.test(fs.readFileSync(file, 'utf8')) || null), { timeoutMs: 10000, intervalMs: 200 }).catch(() => problems.push('Replace didn\'t replace'));
+      await waitFor('the import registered', async () => /e2e-shared\s/.test((await this.cli(['status'], { timeoutMs: 20000 })).stdout) || null, { timeoutMs: 15000, intervalMs: 500 });
+      // History: the version before the Replace; View, Diff with current, Restore
+      // (the imports' holds can open the approval dialog again a moment later: put off, then the </>, until it opens)
+      for (let i = 0; i < 4; i++) {
+        await sleep(800);
+        await this.dismissApproval();
+        await this.panelClick(`li[data-mod="${site}/e2e-shared"] .mod-code`);
+        if (await waitFor('the code card', () => this.panel(`async () => document.getElementById('code-view')?.open || null`), { timeoutMs: 3000 }).catch(() => null)) break;
+      }
+      await this.d.click(this.panelCtx, '#code-view .cv-history');
+      const hist = await waitFor('History', () => this.panel(`async () => { const l = [...document.querySelectorAll('#code-view .cv-history-list li[data-stamp]')]; return l.length ? l.map((x) => x.querySelector('.cv-h-from').textContent) : null; }`), { timeoutMs: 8000 }).catch(() => null);
+      if (!hist || hist[0] !== 'before an import replaced it') problems.push(`History: ${JSON.stringify(hist)}`);
+      await themes('share-history');
+      await this.d.click(this.panelCtx, '#code-view .cv-history-list li[data-stamp] .cv-h-diff');
+      const diff = await waitFor('the diff', () => this.panel(`async () => { const t = [...document.querySelectorAll('#code-view .cv-code .l')].map((l) => l.textContent); return t.some((x) => /^- .*e2e-shared-1/.test(x)) && t.some((x) => /^\\+ .*e2e-shared-3/.test(x)) ? t.length : null; }`), { timeoutMs: 8000 }).catch(() => null);
+      if (!diff) problems.push('Diff with current didn\'t show the change');
+      await this.d.click(this.panelCtx, '#code-view .cv-history');
+      await waitFor('History again', () => this.panel(`async () => document.querySelector('#code-view .cv-history-list li[data-stamp] .cv-h-restore') ? true : null`), { timeoutMs: 8000 });
+      await this.d.click(this.panelCtx, '#code-view .cv-history-list li[data-stamp] .cv-h-restore');
+      await waitFor('restored', () => (/e2e-shared-1/.test(fs.readFileSync(file, 'utf8')) || null), { timeoutMs: 10000, intervalMs: 200 }).catch(() => problems.push('Restore didn\'t put the version back'));
+      // Export: to Downloads (the run's), shown in Finder (the stand-in)
+      const logText = () => (fs.existsSync(this.revealStub().log) ? fs.readFileSync(this.revealStub().log, 'utf8') : '');
+      const before = logText().length;
+      await this.d.click(this.panelCtx, '#code-view .cv-export');
+      const exported = path.join(dl, `${site}-e2e-shared.js`);
+      await waitFor('the export', () => (fs.existsSync(exported) || null), { timeoutMs: 10000, intervalMs: 200 }).catch(() => problems.push('Export wrote nothing'));
+      const shown = await waitFor('shown', () => { const t = logText().slice(before); return t.includes(exported) ? t.trim() : null; }, { timeoutMs: 8000, intervalMs: 200 }).catch(() => '');
+      if (!shown) problems.push('Export didn\'t show the file');
+      await this.d.key(this.panelCtx, 'Escape');
+      // another file: the site's files, a note, listed; never a mod
+      const overlay2 = await drop('e2e-notes.txt', 'text/plain', 'hello from a friend');
+      if (overlay2 !== `Add to ${site}'s files`) problems.push(`the overlay for a file: ${overlay2}`);
+      const saved = path.join(dir, 'files', 'e2e-notes.txt');
+      made.push(saved);
+      await waitFor('the file saved', () => (fs.existsSync(saved) || null), { timeoutMs: 10000, intervalMs: 200 }).catch(() => problems.push('the file wasn\'t saved'));
+      const noted = await waitFor('the note', async () => { const c = await this.ext(`async (k) => (await chrome.storage.local.get(k))[k] || null`, [`chat:${site}`]); return (c?.messages || []).find((m) => /e2e-notes\.txt \(19 bytes\) is in 127\.0\.0\.1's files: sites\/127\.0\.0\.1\/files\/e2e-notes\.txt\. Your agent can use it\./.test(m.text)) || null; }, { timeoutMs: 8000 }).catch(() => null);
+      if (!noted) problems.push('no note in the chat');
+      const listed = await waitFor('the Files line', () => this.panel(`async () => document.querySelector('#site-files .site-file[data-name="e2e-notes.txt"]') ? true : null`), { timeoutMs: 8000 }).catch(() => null);
+      if (!listed) problems.push('the Files line doesn\'t list it');
+      if (/e2e-notes/.test((await this.cli(['mods'], { timeoutMs: 20000 })).stdout)) problems.push('trif mods lists the file as a mod');
+      await this.panel(`async () => { document.getElementById('site-tools').scrollIntoView({ block: 'center' }); return true; }`);
+      await themes('share-files');
+      // the overlay itself, while dragging
+      await this.panel(`async () => { const dt = new DataTransfer(); dt.items.add(new File(['x'], 'a.js', { type: 'text/javascript' })); document.body.dispatchEvent(new DragEvent('dragenter', { dataTransfer: dt, bubbles: true })); return true; }`);
+      await themes('share-drop-overlay');
+      await this.panel(`async () => { document.body.dispatchEvent(new DragEvent('dragleave', { bubbles: true })); return true; }`);
+      if (problems.length) throw new Error(problems.join('\n'));
+      return `a dropped .js imported (no shipped markers) and held, "imported from a file"; Add as a copy and Replace; History "${hist[0]}", its diff, Restore; Export to the run's Downloads, shown; a dropped .txt in the site's files, noted, listed, not a mod`;
+    } finally {
+      for (const f of made) { try { fs.unlinkSync(f); } catch { /* gone */ } }
+      await this.panel(`async () => { for (const id of ['code-view', 'import-ask']) { const d = document.getElementById(id); if (d && d.open) d.close(); } document.getElementById('drop-overlay').hidden = true; return true; }`).catch(() => {});
+    }
+  }
+
   async codeViewCheck(win) {
     const site = '127.0.0.1';
     const base = `http://${site}:${this.o.servers.port}`;
@@ -2585,7 +2688,10 @@ process.exitCode = 1;
         copied: d.querySelector('.cv-copy').dataset.copied || '', reveal: d.querySelector('.cv-reveal').textContent, err: d.querySelector('.ap-err').hidden ? '' : d.querySelector('.ap-err').textContent };
     }`);
     const problems = [];
-    const revealed = () => { try { return fs.readFileSync(this.revealStub().log, 'utf8').trim().split('\n').filter(Boolean); } catch { return []; } };
+    // (what the stand-in for open was asked from here on: other checks use it too)
+    const logNow = () => { try { return fs.readFileSync(this.revealStub().log, 'utf8'); } catch { return ''; } };
+    const from = logNow().length;
+    const revealed = () => logNow().slice(from).trim().split('\n').filter(Boolean);
     try {
       fs.writeFileSync(styleFile, styleText);
       await waitFor('the style mod registered', async () => /e2e-cv-style\s+registered/.test((await this.cli(['status'], { timeoutMs: 20000 })).stdout) || null, { timeoutMs: 20000, intervalMs: 500 });

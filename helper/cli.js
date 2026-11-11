@@ -18,16 +18,16 @@ const trash = require('./lib/trash');
 const shipped = require('./lib/preinstalled');
 
 // Inside a side-panel agent run (the helper set TRIF_RUN_TOKEN) these are the user's alone.
-const NOT_IN_RUNS = new Set(['setup', 'agent', 'approve', 'reject', 'mod-update', 'undo', 'reveal']);
+const NOT_IN_RUNS = new Set(['setup', 'agent', 'approve', 'reject', 'mod-update', 'undo', 'reveal', 'export', 'import', 'add']);
 
 // Output piped into something that stops reading early (`trif tabs | head -1`) isn't an error.
 process.stdout.on('error', (e) => { if (e.code === 'EPIPE') process.exit(0); throw e; });
 
 const VALUE_FLAGS = new Set(['--tab', '--url', '-o', '--out', '--output', '--filter', '--limit', '-f', '--file',
   '--browser', '--home', '--native-dir', '--bin-dir', '--timeout', '--agent', '--session', '--model', '--site', '--auto',
-  '--provider', '--base-url', '--key-env', '--selector', '--color', '--text', '--tolerance']);
+  '--provider', '--base-url', '--key-env', '--selector', '--color', '--text', '--tolerance', '--to']);
 const BOOL_FLAGS = new Set(['--json', '--hard', '--help', '-h', '--force', '--page', '--rules', '--sandboxed', '--style', '--boxed', '--no-link', '--examples', '--no-examples', '--copy', '--link', '--install', '--open',
-  '--use-new', '--keep', '--merged', '--set-key', '--remove-key', '--scroll', '--full', '--verbose', '-v', '--no-wait', '--editor']);
+  '--use-new', '--keep', '--merged', '--set-key', '--remove-key', '--scroll', '--full', '--verbose', '-v', '--no-wait', '--editor', '--replace', '--as-copy']);
 // Flags with a value that may be left out (`--examples` alone, or `--examples x.com,google.com`).
 const OPTIONAL_VALUE_FLAGS = new Set(['--examples']);
 const ALIASES = { '--out': '-o', '--output': '-o', '--file': '-f', '-h': '--help', '-v': '--verbose' };
@@ -715,6 +715,46 @@ const handlers = {
     const r = require('./lib/reveal').reveal(ctx.ws.modsDir, scanMods(ctx.ws.modsDir).mods, id, ctx.opts['--editor'] ? 'editor' : 'folder');
     if (ctx.json) return printJson(r);
     out(`${r.how === 'editor' ? 'opened' : 'showed'} ${r.file}${r.how === 'editor' ? '' : ` in ${process.platform === 'darwin' ? 'Finder' : 'its folder'}`}`);
+  },
+
+  // Sharing (lib/share.js), all without the browser: a mod's file to the downloads folder (or --to), a mod
+  // from a file into the sites folder (held like any from outside), a site's files.
+  async export(ctx, pos) {
+    if (!pos[0]) throw new UsageError('usage: trif export <site>/<mod> [--to <dir>]');
+    const share = require('./lib/share');
+    const { scanMods } = require('./lib/mods');
+    const r = share.exportMod(ctx.ws, scanMods(ctx.ws.modsDir).mods, modId(pos[0]), { to: ctx.opts['--to'] || null });
+    if (ctx.json) return printJson(r);
+    out(`exported ${r.id} to ${r.file}`);
+  },
+
+  async import(ctx, pos) {
+    if (!pos[0]) throw new UsageError('usage: trif import <file> [--site <site>] [--replace | --as-copy]');
+    const file = path.resolve(pos[0]);
+    let text;
+    try { text = fs.readFileSync(file, 'utf8'); } catch (e) { throw new UsageError(`can't read ${pos[0]}: ${e.message}`); }
+    const r = require('./lib/share').importMod(ctx.ws, { text, name: path.basename(file), site: ctx.opts['--site'] || '', choice: ctx.opts['--replace'] ? 'replace' : ctx.opts['--as-copy'] ? 'copy' : '' });
+    if (ctx.json) return printJson(r);
+    if (r.needsSite) throw new UsageError(`which site is it for? Its @match lines ${r.needsSite.length ? `name ${r.needsSite.join(', ')}` : 'don\'t say'}: add --site <site>`);
+    if (r.exists) throw new UsageError(`${r.exists} is there already: add --as-copy to add it beside it, or --replace (the one there is kept in its history)`);
+    out(`imported ${r.id}${r.replaced ? ' (the one before is in its history: trif history)' : ''}; like any mod from outside, it waits for the user's OK if its code can do more than change the page`);
+  },
+
+  async files(ctx, pos) {
+    if (!pos[0]) throw new UsageError('usage: trif files <site>');
+    const list = require('./lib/share').listFiles(ctx.ws, pos[0]);
+    if (ctx.json) return printJson(list);
+    if (!list.length) return out(`(no files for ${pos[0]}: the user adds them by dropping them on the side panel, or trif add <file> --site ${pos[0]})`);
+    for (const f of list) out(`sites/${pos[0]}/files/${f.name}  ${f.size} bytes`);
+  },
+
+  async add(ctx, pos) {
+    if (!pos[0] || !ctx.opts['--site']) throw new UsageError('usage: trif add <file> --site <site>');
+    let bytes;
+    try { bytes = fs.readFileSync(path.resolve(pos[0])); } catch (e) { throw new UsageError(`can't read ${pos[0]}: ${e.message}`); }
+    const r = require('./lib/share').addFile(ctx.ws, { site: ctx.opts['--site'], name: path.basename(pos[0]), bytes });
+    if (ctx.json) return printJson(r);
+    out(`added ${r.rel} (${r.size} bytes): data for ${r.site}'s mods and its side-panel runs, never run as a mod`);
   },
 
   async undo(ctx, pos) {

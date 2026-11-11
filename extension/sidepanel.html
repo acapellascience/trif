@@ -188,6 +188,15 @@
   <ul id="mod-list" class="mod-list"></ul>
   <p id="mods-live" class="visually-hidden" aria-live="polite"></p>
 </details>
+<!-- Import a mod, export the site's, and the site's files (sidepanel.js renderSiteTools; helper lib/share.js). -->
+<div id="site-tools" class="site-tools" hidden>
+  <button id="import-mod" class="link-btn" type="button">Import mod…</button>
+  <button id="export-site" class="link-btn" type="button" hidden></button>
+  <input id="import-file" type="file" accept=".js,text/javascript" hidden>
+  <span id="site-files" class="site-files" hidden></span>
+</div>
+<!-- While files are dragged over the panel (sidepanel.js "Dropping files"). -->
+<div id="drop-overlay" class="drop-overlay" hidden><p id="drop-text"></p></div>
 
 <main id="chat" class="chat">
   <div id="empty" class="empty" hidden>

@@ -14,6 +14,7 @@ const cross = require('../helper/lib/crossmods');
 const bp = require('../helper/lib/boxpowers');
 const { tempDir } = require('./fake-extension');
 const { sandboxPage } = require('./sandbox-harness');
+const vm = require('vm');
 
 const boxed = (name, powers, extra = '') => `// ==WebMod==\n// @name ${name}\n// @match https://x.com/*\n// @boxed\n${powers ? `// @powers ${powers}\n` : ''}${extra}// ==/WebMod==\ntrif.hide('.ad');\n`;
 function home() {
@@ -26,21 +27,93 @@ function home() {
 const write = (ws, file, code, at) => { const f = path.join(ws.modsDir, 'x.com', file); fs.writeFileSync(f, code); if (at) fs.utimesSync(f, at, at); };
 const sync = (ws) => { const { mods } = scanMods(ws.modsDir); return { mods, held: updateHeld(ws, mods, []) }; };
 
-test('the combinations across two mods: of their powers together, those neither has alone', () => {
-  assert.deepEqual(cross.crossWarnings(['keys'], ['click']).map((w) => w.combo), ['keys+click']);
-  // (a pair within one mod is that mod's own hold's; a triple across both is the pair's and the triple's)
-  assert.deepEqual(cross.crossWarnings(['keys', 'click'], ['click']).map((w) => w.combo), []);
-  assert.deepEqual(cross.crossWarnings(['keys', 'write-drafts'], ['click']).map((w) => w.combo).sort(), ['click+write-drafts', 'keys+click', 'keys+click+write-drafts'].sort());
-  assert.deepEqual(cross.crossWarnings(['sound'], ['controls']), []);
-  // (@migrate is site-storage, as everywhere)
-  assert.deepEqual(cross.comboOf({ sandboxed: true, powers: ['go-to'], powerArgs: { migrate: ['local:a'] } }), ['site-storage', 'go-to']);
-  assert.equal(cross.keyFor('x.com/a', 'keys+click'), 'power:with:x.com/a:keys+click');
-  assert.deepEqual(cross.parseKey('power:with:localhost:3000/a:keys+click'), { with: 'localhost:3000/a', combo: 'keys+click' });
-  // (mods on different sites aren't peers; one that runs everywhere is everyone's)
+// The sandbox's page-wide rules, run here (extension/sandbox.js, from ACT_PARTNERS to signalOk), as a page with two
+// boxed mods: a (acting) and b. b has done what its powers let it do to be refused beside: it was handed a picture
+// (edit-uploads), changed a draft and a picture, its go-to brought the user here, and the two share a channel when
+// both have mods. checkAct throws as the sandbox would for a's act.
+function runtimePage(a, b) {
+  const src = fs.readFileSync(path.join(__dirname, '..', 'extension', 'sandbox.js'), 'utf8');
+  const from = src.indexOf('  const ACT_PARTNERS = pageWide.actPartners;'), to = src.indexOf('  // write-drafts and addresses');
+  assert.ok(from > 0 && to > from, 'the page-wide rules in sandbox.js');
+  const ctx = vm.runInNewContext(`const pageWide = ${JSON.stringify(cross.PAGE_WIDE)}; const fail = (why) => { throw new TypeError('TRIF sandbox: ' + why); };
+const channels = new Map(), apis = new Map(), draftWriters = new Set(); const SANDBOX = false, send = null, G = {}, location = { href: '' };
+${src.slice(from, to)}
+({ partnersOk, soundOk, clickOk, signalOk, inPlay, uploadReaders, uploadEditors, channels, apis, draftWriters, setArrived: (m) => { arrivedBy = m; } })`);
+  const api = (id, m, with_ = []) => ({ mod: id, powers: new Set(m.powers), combo: new Set(cross.comboOf({ sandboxed: true, ...m })), cross: new Set(with_) });
+  const B = api('b', b);
+  ctx.apis.set('b', B);
+  for (const p of B.combo) ctx.inPlay.add(p);
+  if (B.powers.has('edit-uploads')) { ctx.uploadReaders.add('b'); ctx.uploadEditors.add('b'); }
+  if (B.powers.has('write-drafts')) ctx.draftWriters.add('b');
+  if (B.powers.has('go-to')) ctx.setArrived('b');
+  const checkAct = (act, with_) => {
+    const A = api('a', a, with_);
+    ctx.apis.set('a', A);
+    for (const p of A.combo) ctx.inPlay.add(p);
+    ctx.channels.clear();
+    if (A.powers.has('mods') && B.powers.has('mods')) ctx.channels.set('c', new Set([{ mod: 'a' }, { mod: 'b' }]));
+    if (act === 'click') return ctx.clickOk(A);
+    if (act === 'page-events') return ctx.signalOk(A);
+    if (act === 'sound') return ctx.soundOk(A);
+    return ctx.partnersOk(A, act);
+  };
+  return checkAct;
+}
+const ACTS = Object.keys(cross.PAGE_WIDE.actPartners);
+
+test('what cross-mod approval offers is exactly what the sandbox refuses: for random pairs of mods, each act refused has its pair offered, approving it lifts the refusal, and nothing else is offered', () => {
+  const C = require('../helper/lib/combinations');
+  let seed = 7;
+  const rnd = (n) => { seed = (seed * 1103515245 + 12345) % 2147483648; return seed % n; };
+  const pick = () => { const n = 1 + rnd(4); const out = new Set(); while (out.size < n) out.add(C.POWERS[rnd(C.POWERS.length)]); return [...out]; };
+  let refusals = 0;
+  for (let i = 0; i < 400; i++) {
+    const a = { id: 'x.com/a', sandboxed: true, powers: pick(), ...(rnd(5) === 0 ? { powerArgs: { migrate: ['local:k'] } } : {}) };
+    const b = { id: 'x.com/b', sandboxed: true, powers: pick(), ...(rnd(5) === 0 ? { powerArgs: { migrate: ['local:k'] } } : {}) };
+    const offered = cross.crossPairs(a, b).map((w) => w.combo);
+    const withAll = offered.map((k) => `${k.split('+').sort().join('+')} b`); // (the page's ids here: a and b)
+    const used = new Set();
+    for (const act of a.powers.filter((p) => ACTS.includes(p))) {
+      const check = runtimePage(a, b);
+      let refused = false;
+      try { check(act, []); } catch (e) { refused = true; assert.match(e.message, /lifts it/); }
+      const mine = cross.refusedPairs({ powers: a.powers, combo: cross.comboOf(a) }, { powers: b.powers, combo: cross.comboOf(b) }).filter(([x]) => x === act).map(([x, y]) => C.keyOf([x, y]));
+      assert.equal(refused, mine.length > 0, `${act}: ${a.powers} beside ${b.powers}`);
+      if (!refused) continue;
+      refusals++;
+      for (const k of mine) { assert.ok(offered.includes(k), `${k} refused but not offered`); assert.equal(typeof C.COMBINATIONS[k], 'object', `${k} refused but not a warned pair`); used.add(k); }
+      // approved (everything offered for the two): it goes through; any one of its pairs left out: refused again
+      assert.doesNotThrow(() => runtimePage(a, b)(act, withAll), `${act} with the pairs approved`);
+      for (const k of mine) assert.throws(() => runtimePage(a, b)(act, withAll.filter((w) => w !== `${k.split('+').sort().join('+')} b`)), /lifts it/, `${act} without ${k}`);
+    }
+    // (and the other way round: b's acts beside a)
+    for (const act of b.powers.filter((p) => ACTS.includes(p))) {
+      for (const [x, y] of cross.refusedPairs({ powers: b.powers, combo: cross.comboOf(b) }, { powers: a.powers, combo: cross.comboOf(a) })) if (x === act) used.add(C.keyOf([x, y]));
+    }
+    // nothing offered that isn't refused one way or the other
+    for (const k of offered) assert.ok(used.has(k), `${k} offered for ${a.powers} / ${b.powers} but nothing refuses it`);
+  }
+  assert.ok(refusals > 50, `only ${refusals} refusals tried`);
+});
+
+test('the conversion run\'s case: a mod with both halves of a pair beside one with one half (Skip to Sandbox and R for Random)', () => {
+  const skip = { id: 'x.com/skip', name: 'Skip to Sandbox', sandboxed: true, powers: ['site-storage', 'page-events'], powerArgs: { 'site-storage': ['local:a'], 'page-events': ['x-y'] } };
+  const r = { id: 'x.com/r', name: 'R for Random', sandboxed: true, powers: ['site-storage', 'go-to'], powerArgs: { 'site-storage': ['local:b'] } };
+  // go-to+site-storage is R's own, but Skip's site-storage writes are refused beside R's go-to: offered
+  assert.deepEqual(cross.crossPairs(skip, r).map((w) => w.combo).sort(), ['go-to+page-events', 'site-storage+go-to'].sort());
+  assert.throws(() => runtimePage(skip, r)('site-storage', []), /changing what the site keeps is off on this page while another boxed mod here has the go-to power/);
+  assert.doesNotThrow(() => runtimePage(skip, r)('site-storage', ['go-to+site-storage b']));
+  // (the needs, on whichever mod's hold: both pairs, keyed by the other mod)
+  assert.deepEqual(cross.crossNeeds(skip, [skip, r]).map((n) => n.key).sort(), ['power:with:x.com/r:go-to+page-events', 'power:with:x.com/r:site-storage+go-to']);
+  // (a mod beside one that has every half itself: nothing refused, nothing offered)
+  assert.deepEqual(cross.crossPairs({ sandboxed: true, powers: ['sound'] }, { sandboxed: true, powers: ['controls'] }), []);
+  assert.deepEqual(cross.crossPairs({ sandboxed: true, powers: ['keys'] }, { sandboxed: true, powers: ['click'] }).map((w) => w.combo), ['keys+click']);
   const m = (id, matches) => ({ id, matches, sandboxed: true, powers: ['keys'] });
   assert.equal(cross.sharesSite(m('x.com/a', ['*://x.com/*']), m('y.com/b', ['*://y.com/*'])), false);
   assert.equal(cross.sharesSite(m('x.com/a', ['*://x.com/*']), m('x.com/b', ['*://*.x.com/*'])), true);
   assert.equal(cross.sharesSite(m('x.com/a', ['*://x.com/*']), m('all-sites/b', ['*://*/*'])), true);
+  assert.deepEqual(cross.comboOf({ sandboxed: true, powers: ['go-to'], powerArgs: { migrate: ['local:a'] } }), ['site-storage', 'go-to']);
+  assert.deepEqual(cross.parseKey('power:with:localhost:3000/a:keys+click'), { with: 'localhost:3000/a', combo: 'keys+click' });
 });
 
 test('a new mod\'s hold carries its combinations with the boxed mod already there, in words that name it; approving records the pair for both', () => {

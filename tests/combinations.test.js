@@ -117,9 +117,9 @@ test('docs/POWER-COMBINATIONS.md is the table written out', () => {
 
 test('the sandbox\'s page-wide rules (ACT_PARTNERS) follow the table: an act is refused beside another mod\'s power that makes a warned pair with it', () => {
   const src = fs.readFileSync(path.join(__dirname, '..', 'extension', 'sandbox.js'), 'utf8');
-  const m = /const ACT_PARTNERS = (\{[^;]+\});/.exec(src);
-  assert.ok(m, 'ACT_PARTNERS in sandbox.js');
-  const partners = JSON.parse(m[1].replace(/'/g, '"').replace(/([{,]\s*)([\w-]+):/g, '$1"$2":').replace(/,\s*([}\]])/g, '$1'));
+  // (the data, one definition for the sandbox and the helper's cross-mod approval: extension/pagewide.js)
+  assert.match(src, /const ACT_PARTNERS = pageWide\.actPartners;/);
+  const partners = require('../helper/lib/crossmods').PAGE_WIDE.actPartners;
   // the acts whose warned partners the sandbox can see on the page, and those enforced elsewhere (sound: not
   // enforced across mods, docs/SAFE-MODS.md says why; write-drafts as click's partner: once a draft was
   // written, clickOk; click with go-to: on go-to's side, and on the page go-to lands on, arrivedOk;
@@ -164,10 +164,10 @@ test('docs/SAFE-MODS.md\'s counts are the table\'s (F12)', () => {
 
 test('the page-wide rules at work (sandbox.js partnersOk, run here): each new rule refuses beside the other mod\'s power, and lets an act through when the acting mod asked for that power too or nothing in play makes the pair', () => {
   const src = fs.readFileSync(path.join(__dirname, '..', 'extension', 'sandbox.js'), 'utf8');
-  const from = src.indexOf('  const ACT_PARTNERS = {'), to = src.indexOf('  // go-to across a page load');
+  const from = src.indexOf('  const ACT_PARTNERS = pageWide.actPartners;'), to = src.indexOf('  // go-to across a page load');
   assert.ok(from > 0 && to > from, 'ACT_PARTNERS to partnersOk in sandbox.js');
   const vm = require('vm');
-  const page = () => vm.runInNewContext(`const fail = (why) => { throw new TypeError('TRIF sandbox: ' + why); }; const channels = new Map(), apis = new Map();\n${src.slice(from, to)}\n({ partnersOk, soundOk, inPlay, uploadReaders, channels, apis })`);
+  const page = () => vm.runInNewContext(`const pageWide = ${JSON.stringify(require('../helper/lib/crossmods').PAGE_WIDE)}; const fail = (why) => { throw new TypeError('TRIF sandbox: ' + why); }; const channels = new Map(), apis = new Map();\n${src.slice(from, to)}\n({ partnersOk, soundOk, inPlay, uploadReaders, channels, apis })`);
   // (`cross`: the pairs the user approved across it and another mod, as the helper sends them: crossmods.js)
   const api = (mod, powers, migrate, cross = []) => ({ mod, powers: new Set(powers), combo: new Set([...powers, ...(migrate ? ['site-storage'] : [])]), cross: new Set(cross) });
   // (act, the acting mod's powers, another mod's power in play, refused?)

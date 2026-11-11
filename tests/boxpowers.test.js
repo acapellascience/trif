@@ -123,7 +123,8 @@ test('registration: a boxed mod\'s powers go with its code, from the header the 
   const s = lib.modToUserScript({ id: 'x.com/beeper', matches: ['*://x.com/*'], sandboxed: true, powers: ['sound'], code: '// @powers keys\ntrif.audio();' });
   assert.match(s.js[0].code, /__trifSandbox\.run\("x\.com\/beeper", ".*", \{"powers":\["sound"\],"args":\{\}\}\)/);
   const p = lib.modToUserScript({ id: 'x.com/beeper', matches: ['*://x.com/*'], sandboxed: true, unsandboxed: true, powers: ['sound'], code: 'x' });
-  assert.match(p.js[0].code, /\('page', "x\.com\/beeper", __trifMod, \{"powers":\["sound"\],"args":\{\}\}\); \}\)\(\);/);
+  // (and the page-wide rules, as data: extension/pagewide.js)
+  assert.match(p.js[0].code, /\('page', "x\.com\/beeper", __trifMod, \{"powers":\["sound"\],"args":\{\}\}, \{"actPartners":\{.*\}\); \}\)\(\);/s);
 });
 
 test('search-box: takes the site\'s search address, with {query}, on the mod\'s own site; it\'s in the key, so a new address asks again', () => {

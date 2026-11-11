@@ -6,8 +6,9 @@
 // can't do), the user can approve the combination across the two mods:
 //
 // - Two boxed mods are peers when they share a site and both are on in a browser (switches.json, below). The
-//   combinations across them are the warned ones (helper/lib/combinations.js) among their powers together that
-//   neither has alone (@migrate counting as site-storage, as everywhere).
+//   combinations across them are exactly the pairs the sandbox would refuse between them (extension/pagewide.js,
+//   the one definition both read): one mod's act beside a power the other has and it doesn't, either way round,
+//   shown with the table's warning (helper/lib/combinations.js). Not triples: the sandbox refuses pairs.
 // - Each is a need keyed by the other mod and the powers, `power:with:<other id>:<a>+<b>[+<c>]`: a later version
 //   of either that adds a power asks again only for the combinations that power makes; switching either off
 //   needs nothing (the approval stays, for when it's on again).
@@ -40,10 +41,47 @@ function sharesSite(a, b) {
   return sa.some((x) => sb.some((y) => x === y || x.endsWith(`.${y}`) || y.endsWith(`.${x}`)));
 }
 
-/** The warned combinations across two mods' powers: of theirs together, those neither has alone. */
-function crossWarnings(a, b) {
-  const both = combos.POWERS.filter((p) => a.includes(p) || b.includes(p));
-  return combos.warningsFor(both).filter((w) => { const ps = w.combo.split('+'); return !ps.every((p) => a.includes(p)) && !ps.every((p) => b.includes(p)); });
+// The sandbox's page-wide rules, as data: extension/pagewide.js, the one definition the sandbox refuses by
+// (the JSON between its markers). What cross-mod approval offers is exactly what those rules refuse.
+const PAGE_WIDE = (() => {
+  const src = fs.readFileSync(path.join(__dirname, '..', '..', 'extension', 'pagewide.js'), 'utf8');
+  const m = /\/\* page-wide rules: JSON from here \*\/\s*export const PAGE_WIDE = (\{[\s\S]*?\});\s*\/\* page-wide rules: JSON to here \*\//.exec(src);
+  if (!m) throw new Error('extension/pagewide.js: no page-wide rules between its markers');
+  return JSON.parse(m[1]);
+})();
+
+/**
+ * The pairs the sandbox refuses mod a's acts on beside mod b: [[act, b's power]]. `a` and `b`: {powers (what
+ * each asked for: its acts), combo (as the combinations count it: @migrate as site-storage)}. An act a has, beside
+ * a power in its actPartners that b has and a doesn't; or in alsoRefused (a draft or a picture b changed, b's
+ * go-to bringing the user here), a power b has and a didn't ask for; a channelOnly act only when both can talk
+ * over `mods`.
+ */
+function refusedPairs(a, b) {
+  const out = [];
+  for (const act of a.powers) {
+    if (PAGE_WIDE.channelOnly.includes(act) && !(a.powers.includes('mods') && b.powers.includes('mods'))) continue;
+    for (const p of PAGE_WIDE.actPartners[act] || []) if (!a.combo.includes(p) && b.combo.includes(p)) out.push([act, p]);
+    for (const p of PAGE_WIDE.alsoRefused[act] || []) if (!a.powers.includes(p) && b.powers.includes(p)) out.push([act, p]);
+  }
+  return out;
+}
+const shape = (m) => ({ powers: combos.POWERS.filter((p) => (Array.isArray(m.powers) ? m.powers : []).includes(p)), combo: comboOf(m) });
+
+/**
+ * What the user is asked to approve across two mods: each pair the sandbox would refuse, either way round, once,
+ * with its warning (the table's: every refused pair is a warned one, tests/combinations.test.js): [{combo, warn,
+ * rank, fact}], the strongest first.
+ */
+function crossPairs(a, b) {
+  const seen = new Map();
+  for (const [x, y] of [...refusedPairs(shape(a), shape(b)), ...refusedPairs(shape(b), shape(a))]) {
+    const combo = combos.keyOf([x, y]);
+    const e = combos.COMBINATIONS[combo];
+    if (seen.has(combo) || !e || typeof e !== 'object') continue;
+    seen.set(combo, { combo, warn: e.warn, ...combos.WARNINGS[e.warn] });
+  }
+  return [...seen.values()].sort((p, q) => p.rank - q.rank || combos.POWERS.indexOf(p.combo.split('+')[0]) - combos.POWERS.indexOf(q.combo.split('+')[0]));
 }
 
 const keyFor = (other, combo) => `power:with:${other}:${combo}`;
@@ -101,10 +139,9 @@ function peersOf(mod, mods, isOff = () => false) {
  * them all again, harmlessly).
  */
 function crossNeeds(mod, mods, { allowed = {}, isOff = () => false, approvedToo = false } = {}) {
-  const mine = comboOf(mod);
   const out = [];
   for (const o of peersOf(mod, mods, isOff)) {
-    for (const w of crossWarnings(mine, comboOf(o))) {
+    for (const w of crossPairs(mod, o)) {
       if (!approvedToo && approved(allowed, mod.id, o.id, w.combo)) continue;
       out.push({ key: keyFor(o.id, w.combo), fact: w.fact, power: 'with', with: o.id, withName: o.name || o.id, combo: w.combo, rank: w.rank, soft: false, lines: [] });
     }
@@ -129,4 +166,4 @@ function namesFor(needs) {
   return out;
 }
 
-module.exports = { comboOf, sharesSite, crossWarnings, keyFor, parseKey, approved, peersOf, crossNeeds, approvedWith, namesFor, loadSwitches, saveSwitches, offFn, switchesFile };
+module.exports = { PAGE_WIDE, comboOf, sharesSite, refusedPairs, crossPairs, keyFor, parseKey, approved, peersOf, crossNeeds, approvedWith, namesFor, loadSwitches, saveSwitches, offFn, switchesFile };

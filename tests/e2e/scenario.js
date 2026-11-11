@@ -1294,6 +1294,7 @@ class Scenario {
       await r.check('the widened box\'s powers (WIDEN.md class B): block-events, page-events, site-storage with @migrate, rewrite-requests, image-variants, edit-uploads, embeds, local-fonts, preload, and the widened site-data, go-to and media: held with each sentence and the many-powers warning; each works as its narrowing says; undeclared, each is refused', () => this.wideBCheck(win));
       await r.check('the sandbox\'s fixes from the conversion run: arc\'s anticlockwise, overscroll-behavior, a blocked key\'s default, a picture no mod changed passed on as it was, trif.wrap under a page\'s rewrite and over another mod\'s pieces, site-data\'s shortened copies, unchanged filters and a later mod\'s embedded filter, an image variant from a host without CORS, the site\'s own names in its storage, CSS into a nested shadow root', () => this.sandboxFixesCheck(win));
       await r.check('cross-mod approval: two boxed mods whose powers make a warned pair across them; the click refused before the user\'s OK for the two together (asked on the newer mod\'s review), allowed after it; a new power asks again only for what it makes, on an approval card that says "Together with …"', () => this.crossModCheck(win));
+      await r.check('cross-mod approval when the other mod has both halves (Skip to Sandbox beside R for Random): the site-storage write refused beside the other\'s go-to, that very pair offered on the review, allowed once approved', () => this.crossBothHalvesCheck(win));
       await r.check('go-to and click split between two boxed mods across a navigation (review F3): neither hold warns; on the page one mod\'s go-to took the user to, the other\'s clicks and signals wait for the user\'s own click; reached by the user, they work; with the two approved together, they work there too', () => this.comboFixesCheck(win));
       await r.check('speculation rules (audit AU-7): a page that prefetches its same-site links at once; a link a free mod adds is fetched without a click (Chrome), a boxed mod can\'t make one', () => this.specRulesCheck(win));
       await r.check('boxed mods in the panel: their own group between Style mods and Free mods, with its switch (off on the site: they stop there; on: back)', () => this.sandboxedPanelCheck(win));
@@ -3163,6 +3164,60 @@ setTimeout(() => {
       return `written with the other off: nothing across; on again: the click refused (${before.click.slice(9, 110)}…), the newer mod's review "${ACROSS}"; approved: it clicks; a new power asked again only for its own pair, the card "${card.together[0]}"`;
     } finally {
       for (const f of [readFile, clickFile]) { try { fs.unlinkSync(f); } catch { /* gone */ } }
+    }
+  }
+
+  // Cross-mod approval when the other mod has both halves of a pair (the conversion run's Skip to Sandbox beside R
+  // for Random): go-to and site-storage are R's own combination, yet Skip's site-storage writes are refused beside
+  // R's go-to. Written with R off (nothing across), R on again: the write is refused and Skip's review offers that
+  // very pair; approved, it writes.
+  async crossBothHalvesCheck(win) {
+    const site = '127.0.0.1';
+    const base = `http://${site}:${this.o.servers.port}`;
+    const dir = path.join(this.trif, 'sites', site);
+    const head = (name, powers) => `// ==WebMod==\n// @name ${name}\n// @match *://127.0.0.1/cross.html*\n// @boxed\n// @powers ${powers}\n// @run-at document-idle\n// ==/WebMod==\n`;
+    const files = {
+      'e2e-cm-r': head('E2E Cross R', 'site-storage local:cm-r, go-to /cross.html') + '// (go-to and site-storage: both halves; it only has to be on the page)\n',
+      'e2e-cm-skip': head('E2E Cross skip', 'site-storage local:cm-skip, page-events cm-ping')
+        + `setTimeout(() => { let r; try { trif.storage('local').set('cm-skip', 'kept'); r = 'ok'; } catch (e) { r = 'refused: ' + String(e && e.message).slice(0, 400); } page.root.setAttr('data-trif-box-bh', r); }, 600);\n`,
+    };
+    const R = `${site}/e2e-cm-r`, S = `${site}/e2e-cm-skip`;
+    const status = async () => (await this.cli(['status'], { timeoutMs: 20000 })).stdout;
+    const line = (st, id) => st.split('\n').find((l) => new RegExp(`${id}\\s`).test(l)) || '';
+    const tabUrl = async () => String(await this.ext(`async (id) => (await chrome.tabs.get(id)).url`, [win.tabId]).catch(() => ''));
+    const visit = async (what) => {
+      await this.ext(`async (id, url) => { await chrome.tabs.update(id, { url, active: true }); }`, [win.tabId, `${base}/cross.html?${what}`]);
+      return waitFor(`the skip mod's write (${what})`, async () => {
+        if (!(await tabUrl()).endsWith(`?${what}`)) return null;
+        return this.ext(`async (tabId) => { const r = await chrome.scripting.executeScript({ target: { tabId }, func: () => document.documentElement.getAttribute('data-trif-box-bh') }); return r[0].result; }`, [win.tabId]).catch(() => null);
+      }, { timeoutMs: 20000, intervalMs: 400 });
+    };
+    const problems = [];
+    this.sandboxPage = true;
+    try {
+      for (const [id, code] of Object.entries(files)) {
+        fs.writeFileSync(path.join(dir, `${id}.js`), code);
+        const held = line(await waitFor(`${id} held`, async () => { const st = await status(); return new RegExp(`${id}\\s+HELD`).test(st) ? st : null; }, { timeoutMs: 25000, intervalMs: 500 }), id);
+        if (/together with/i.test(held)) problems.push(`${id}'s hold, the other off or not there: ${held}`);
+        await this.cli(['approve', `${site}/${id}`], { timeoutMs: 20000 });
+        await waitFor(`${id} registered`, async () => new RegExp(`${id}\\s+registered \\(boxed, powers:`).test(await status()) || null, { timeoutMs: 20000, intervalMs: 500 });
+        if (id === 'e2e-cm-r') await this.boxedSwitch(R, false);
+      }
+      await this.boxedSwitch(R, true);
+      const st = await waitFor('the skip mod\'s review', async () => { const x = await status(); return line(x, 'e2e-cm-skip').includes('TO REVIEW') ? x : null; }, { timeoutMs: 20000, intervalMs: 500 });
+      const review = line(st, 'e2e-cm-skip');
+      if (!review.includes('TO REVIEW: together with E2E Cross R, it could take you to a page and set off that page\'s own actions there')) problems.push(`the skip mod's review: ${review}`);
+      const before = await visit('bh1');
+      if (!/^refused: .*changing what the site keeps is off on this page while another boxed mod here has the go-to power.*lifts it/.test(before || '')) problems.push(`before the approval, the write: ${before}`);
+      await this.cli(['approve', S], { timeoutMs: 20000 });
+      await waitFor('reviewed', async () => !/TO REVIEW/.test(line(await status(), 'e2e-cm-skip')) || null, { timeoutMs: 20000, intervalMs: 500 });
+      await sleep(1500);
+      const after = await visit('bh2');
+      if (after !== 'ok') problems.push(`after the approval, the write: ${after}`);
+      if (problems.length) throw new Error(problems.join('\n'));
+      return `R off: nothing across; on: the write refused (${String(before).slice(9, 120)}…), the review "${review.split('TO REVIEW: ')[1].split(' (trif approve')[0]}"; approved: it writes`;
+    } finally {
+      for (const id of Object.keys(files)) { try { fs.unlinkSync(path.join(dir, `${id}.js`)); } catch { /* gone */ } }
     }
   }
 

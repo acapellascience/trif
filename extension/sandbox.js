@@ -19,6 +19,8 @@
 //
 // Everything below runs in the page (serialized with Function.prototype.toString), so it's self-contained.
 
+import { PAGE_WIDE } from './pagewide.js';
+
 export const SANDBOX_WORLD = 'trif-sandbox';
 export const SANDBOX_RUNTIME_ID = 'trif-sandbox-runtime';
 export const SES_FILE = 'vendor/ses.umd.min.js';
@@ -42,7 +44,8 @@ const J = (v) => JSON.stringify(String(v));
 
 /** The world's runtime: lockdown once, then __trifSandbox.run(id, source) per mod. */
 export function sandboxRuntimeCode() {
-  return `(${sandboxRuntime.toString()})('sandbox');\n//# sourceURL=trif-sandbox://runtime.js`;
+  // (the page-wide rules handed in as data: extension/pagewide.js, which the helper reads too)
+  return `(${sandboxRuntime.toString()})('sandbox', null, null, null, ${JSON.stringify(PAGE_WIDE)});\n//# sourceURL=trif-sandbox://runtime.js`;
 }
 
 /**
@@ -67,14 +70,14 @@ export function sandboxModCode(id, source, powers = []) {
 export function sandboxPageCode(id, source, powers = []) {
   // (the mod's first line is the script's first line, so `trif errors` gives its own line numbers)
   const P = grantOf(powers);
-  return `(() => { const __trifMod = async function (${SANDBOX_GLOBALS.filter((n) => n !== 'Math' && n !== 'Date').join(', ')}) { "use strict"; ${source}\n};\n(${sandboxRuntime.toString()})('page', ${J(id)}, __trifMod, ${P}); })();\n//# sourceURL=trif://${id}.js`;
+  return `(() => { const __trifMod = async function (${SANDBOX_GLOBALS.filter((n) => n !== 'Math' && n !== 'Date').join(', ')}) { "use strict"; ${source}\n};\n(${sandboxRuntime.toString()})('page', ${J(id)}, __trifMod, ${P}, ${JSON.stringify(PAGE_WIDE)}); })();\n//# sourceURL=trif://${id}.js`;
 }
 
 /**
  * The runtime. mode 'sandbox': in TRIF's world, with SES loaded; installs globalThis.__trifSandbox. mode
  * 'page': in the page's world (no SES, nothing confined), runs `fn` with the API as its arguments.
  */
-export function sandboxRuntime(mode, pageModId, pageFn, pagePowers) {
+export function sandboxRuntime(mode, pageModId, pageFn, pagePowers, pageWide) {
   const G = globalThis;
   const SANDBOX = mode === 'sandbox';
   if (SANDBOX && G.__trifSandbox) return;
@@ -505,20 +508,8 @@ export function sandboxRuntime(mode, pageModId, pageFn, pagePowers) {
   // beside go-to (on go-to's side, and on the page go-to lands on: arrivedOk). edit-uploads as a read: the mods that were handed a picture the user
   // attached (uploadReaders), not every mod with the power, which would stop every media mod beside an upload
   // editor. site-storage: also a mod with @migrate (it reads the site's storage once: `combo`).
-  const ACT_PARTNERS = {
-    'write-drafts': ['read-drafts', 'keys', 'site-data', 'page-data', 'site-storage', 'local-fonts', 'image-variants', 'edit-uploads'],
-    click: ['read-drafts', 'keys', 'site-data', 'page-data', 'site-storage', 'local-fonts', 'image-variants', 'edit-uploads', 'rewrite-requests', 'block-events'],
-    media: ['read-drafts', 'keys', 'site-data', 'page-data', 'site-storage', 'local-fonts', 'image-variants', 'edit-uploads'],
-    'go-to': ['site-storage', 'block-events', 'page-events', 'click'],
-    'page-events': ['read-drafts', 'keys', 'site-data', 'page-data', 'site-storage', 'local-fonts', 'image-variants', 'edit-uploads', 'rewrite-requests', 'block-events'],
-    'edit-uploads': ['read-drafts', 'keys', 'site-data', 'page-data', 'site-storage', 'local-fonts', 'image-variants'],
-    'image-variants': ['read-drafts', 'keys', 'site-data', 'page-data', 'site-storage', 'local-fonts', 'edit-uploads'],
-    preload: ['read-drafts', 'keys', 'site-data', 'page-data', 'site-storage', 'local-fonts', 'edit-uploads'],
-    'site-storage': ['read-drafts', 'keys', 'site-data', 'page-data', 'local-fonts', 'image-variants', 'edit-uploads', 'go-to'],
-    'block-events': ['read-drafts', 'keys', 'site-data', 'page-data', 'site-storage', 'local-fonts', 'image-variants', 'edit-uploads'],
-    embeds: ['read-drafts', 'keys', 'site-data', 'page-data', 'site-storage', 'local-fonts', 'image-variants', 'edit-uploads'],
-    sound: ['read-drafts', 'keys', 'site-data', 'page-data', 'site-storage', 'local-fonts', 'image-variants', 'edit-uploads'],
-  };
+  // (the data: extension/pagewide.js, one definition with the helper's cross-mod approval)
+  const ACT_PARTNERS = pageWide.actPartners;
   const PARTNER_WHY = {
     'write-drafts': ['changing what the user types', 'what one reads could end up in what the user posts'],
     click: ['clicking for the user', 'what one reads could decide what the other clicks (or one could keep the user\'s clicks from the page while the other clicks, or change what the site receives from those clicks)'],

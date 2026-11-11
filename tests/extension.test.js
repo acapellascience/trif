@@ -3357,7 +3357,7 @@ test('sandboxFallback: without the sandbox a sandboxed mod waits for the user\'s
   assert.ok(!us2.scripts.some((x) => x.id === sbx.SANDBOX_RUNTIME_ID));
   // (the mod's code first on the script's first line, so its errors keep their line numbers; then TRIF's API)
   assert.ok(s.js[0].code.startsWith('(() => { const __trifMod = async function (page, trif, console, setTimeout, clearTimeout, setInterval, clearInterval, requestAnimationFrame, cancelAnimationFrame) { "use strict"; /* y.com/boxed */\n};'));
-  assert.ok(s.js[0].code.includes("('page', \"y.com/boxed\", __trifMod, {\"powers\":[],\"args\":{}}); })();"));
+  assert.ok(s.js[0].code.includes("('page', \"y.com/boxed\", __trifMod, {\"powers\":[],\"args\":{}}, {\"actPartners\":{"));
   new Function(s.js[0].code);
   assert.strictEqual(r.applied['y.com/boxed'], 'H:page', 'registered differently from the sandboxed form');
   // a new version waits again

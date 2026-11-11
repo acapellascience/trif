@@ -508,10 +508,15 @@ Status). Now a mod asks only for what it uses, and the user approves the combina
 - Two boxed mods are peers when they share a site (a site both name, one under the other, or one runs
   everywhere) and both are on in a browser (each browser's helper records which boxed mods it runs, from
   what the extension registered: `$TRIF_HOME/switches.json`; a mod is off when every browser that knows it
-  has it off: switched off, its group or TRIF off on its site, paused). The combinations across them are the
-  warned ones (the same table and sentences) among their powers together that neither has alone, `@migrate`
-  as site-storage.
-- Each is a need keyed by the other mod and the powers: `power:with:<other id>:keys+click` (and triples).
+  has it off: switched off, its group or TRIF off on its site, paused). What's asked across them is exactly what
+  the sandbox would refuse between them, from one definition both read (extension/pagewide.js: each act's
+  partner powers, the acts refused beside a draft, a picture or a go-to of another mod's, and sound only over a
+  `mods` channel): one mod's act X beside a power Y the other has and it doesn't (`@migrate` as site-storage),
+  either way round, shown with the table's warning for X+Y. That includes a pair the other mod has both halves
+  of (R for Random's go-to and site-storage beside Skip to Sandbox's site-storage writes). Pairs only: the
+  sandbox refuses no triple across mods. tests/crossmods.test.js checks, for random pairs of mods, that every
+  refusal has its pair offered, approving it lifts the refusal, and nothing else is offered.
+- Each is a need keyed by the other mod and the pair: `power:with:<other id>:keys+click`.
   Approved, it's kept in allowed.json under the mod whose hold carried it, and counts for both mods. A later
   version of either that adds a power asks again only for the combinations that power makes; switching
   either off needs nothing (the approval stays). Approving is for the two mods' powers together: which of the

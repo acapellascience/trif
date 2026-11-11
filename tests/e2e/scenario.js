@@ -3594,11 +3594,29 @@ process.exitCode = 1;
         heights.push(`${fresh.maxH} once empty`);
       }
       const toBottom = () => this.panel(`async () => { const l = document.getElementById('mod-list'); l.scrollTop = l.scrollHeight; return true; }`);
-      await toBottom();
+      // (nothing at the rows' right edge under the scrollbar: each row's last button and the tiers' OFF inside
+      // the list's visible box, scrolled to the top and to the bottom)
+      const clipped = () => this.panel(`async () => {
+        const l = document.getElementById('mod-list');
+        const edge = l.getBoundingClientRect().left + l.clientLeft + l.clientWidth;
+        const shown = (b) => b.getClientRects().length > 0;
+        const lasts = [...l.querySelectorAll(':scope > li[data-mod]')].map((li) => [...li.querySelectorAll('button')].filter(shown).pop()).filter(Boolean);
+        const offs = [...l.querySelectorAll('.gs-btn[data-on="false"]')].filter(shown);
+        const out = [...lasts, ...offs].filter((b) => b.getBoundingClientRect().right > edge + 0.5).map((b) => (b.closest('li')?.dataset.mod || b.closest('li')?.dataset.group || '?') + ':' + (b.textContent.trim() || b.className));
+        return { scrolls: l.scrollHeight > l.clientHeight, checked: lasts.length + offs.length, out };
+      }`);
+      for (const where of ['top', 'bottom']) {
+        if (where === 'bottom') await toBottom();
+        const c = await clipped();
+        if (c.out.length || !c.checked) problems.push(`clipped at the right edge (${where}, scrolls: ${c.scrolls}): ${c.out.join(', ') || 'nothing checked'}`);
+        if (where === 'top') heights.push(`${c.checked} buttons inside the visible box${c.scrolls ? ' while it scrolls' : ''}`);
+      }
       await themes('mods-fold');
       await this.panelClick('#mod-list > li.mods-fold .mods-fold-btn');
       const opened = await waitFor('unfolded', async () => { const v = await view(); return v.foldOpen && v.mods.includes('x.com/e2e-sens-elsewhere') ? v : null; }, { timeoutMs: 8000 });
       await toBottom();
+      const c2 = await clipped();
+      if (c2.out.length) problems.push(`clipped at the right edge (opened): ${c2.out.join(', ')}`);
       await themes('mods-fold-open');
       done.push(`"${folded.fold}" (${folded.mods.length} above it), opened: ${opened.mods.length}; the box ${heights.join(', ')}`);
       // 5. Copy to {host}: the code card's menu brings a parent's mod over to a sensitive site of its own (off there)

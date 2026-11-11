@@ -345,6 +345,7 @@ body.no-site .site-starter { display: none; }
   list-style: none; margin: 4px -3px 0; padding: 2px 3px; /* room for focus rings inside the scroller */
   max-height: calc(40vh - 40px);
   overflow-y: auto; overflow-x: hidden;
+  scrollbar-gutter: stable; /* (the scrollbar's room kept, so it never covers the rows' right edge: the bins, OFF) */
   overscroll-behavior: contain;
   scrollbar-width: thin;
 }

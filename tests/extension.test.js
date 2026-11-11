@@ -949,9 +949,10 @@ async function loadBackground({ storage = {}, tabs = [], migrate = false, safari
   await settle(20);
   const native = natives[0];
   native.emit = (m) => native.onMessage.emit(m);
-  const connectPanel = () => {
+  // (`sender`: another of the extension's pages or a content script, connecting with the panel's name.)
+  const connectPanel = (sender = { id: lib.EXTENSION_ID, url: `chrome-extension://${lib.EXTENSION_ID}/sidepanel.html` }) => {
     const p = mockPort('panel');
-    p.sender = { id: lib.EXTENSION_ID, url: `chrome-extension://${lib.EXTENSION_ID}/sidepanel.html` };
+    p.sender = sender;
     chromeMock.runtime.onConnect.emit(p);
     p.ask = async (msg) => {
       const reqId = Math.random();
@@ -1413,6 +1414,68 @@ test('background: a run that needs a login leaves one plain line in the chat, no
     await settle(30);
     chat = bg.store['chat:x.com'];
     assert.deepStrictEqual(chat.messages.slice(2).map((m) => [m.role, m.text]), [['user', 'again'], ['login', message]]);
+  } finally { bg.restore(); }
+});
+
+test('background: an organization\'s settings instead of TRIF\'s sandbox: the choice card, the chip, and consent only from the panel page', async () => {
+  const bg = await loadBackground();
+  try {
+    const panel = bg.connectPanel();
+    const startP = panel.ask({ type: 'agent.start', site: 'x.com', tabId: 12, url: 'https://x.com/home', prompt: 'hide reposts', agent: 'codex' });
+    await answerNative(bg.native, 'agent.start', { runId: 'r1' });
+    await startP;
+    await settle(10);
+    const message = "Your organization's Codex settings replace TRIF's sandbox, so TRIF stopped the run before Codex did anything.";
+    for (const event of [
+      { kind: 'error', reason: 'sandbox', agent: 'codex', name: 'Codex', settingsName: 'Codex', why: [], message },
+      { kind: 'done', ok: false, result: message, costUsd: null, changedFiles: [], sessionId: null, error: { kind: 'sandbox', agent: 'codex' } },
+    ]) bg.native.emit({ type: 'agentEvent', runId: 'r1', event });
+    await settle(30);
+    let chat = bg.store['chat:x.com'];
+    assert.deepStrictEqual(chat.messages.map((m) => m.role), ['user', 'sandbox'], 'the card, and no error line besides');
+    const card = chat.messages[1];
+    assert.deepStrictEqual([card.agent, card.settingsName, card.prompt, card.answered], ['codex', 'Codex', 'hide reposts', undefined]);
+    assert.strictEqual(chat.run, null);
+
+    // Not from a content script, nor another extension page, using the panel's port name: nothing reaches the helper.
+    const before = bg.native.sent.filter((m) => m.cmd === 'agent.withoutSandbox').length;
+    for (const sender of [{ id: lib.EXTENSION_ID, url: 'https://x.com/home', tab: { id: 12 } }, { id: lib.EXTENSION_ID, url: `chrome-extension://${lib.EXTENSION_ID}/onboarding.html` }, { id: lib.EXTENSION_ID, url: 'https://evil.example/sidepanel.html' }]) {
+      const sneaky = bg.connectPanel(sender);
+      for (const msg of [{ type: 'agent.withoutSandbox', agent: 'codex', allow: true, site: 'x.com', card: card.time }, { type: 'chat.sandboxCard', site: 'x.com', card: card.time }]) {
+        const r = await sneaky.ask(msg);
+        assert.deepStrictEqual([r.ok, r.error], [false, 'only the side panel can change this'], JSON.stringify(sender));
+      }
+    }
+    assert.strictEqual(bg.native.sent.filter((m) => m.cmd === 'agent.withoutSandbox').length, before);
+    assert.strictEqual(bg.store['chat:x.com'].messages[1].answered, undefined);
+
+    // From the panel: "Use Codex anyway" goes to the helper, and the card says it was answered.
+    const allowP = panel.ask({ type: 'agent.withoutSandbox', agent: 'codex', allow: true, site: 'x.com', card: card.time });
+    const req = await answerNative(bg.native, 'agent.withoutSandbox', { agents: ['codex'] });
+    assert.deepStrictEqual(req.args, { agent: 'codex', allow: true });
+    assert.deepStrictEqual((await allowP).result, { agents: ['codex'] });
+    assert.strictEqual(bg.store['chat:x.com'].messages[1].answered, 'allowed');
+
+    // The run sent again goes on under the organization's settings: the chat's chip.
+    const againP = panel.ask({ type: 'agent.start', site: 'x.com', tabId: 12, url: 'https://x.com/home', prompt: 'hide reposts', agent: 'codex' });
+    await answerNative(bg.native, 'agent.start', { runId: 'r2' });
+    await againP;
+    for (const event of [
+      { kind: 'sandbox', trif: false, agent: 'codex', name: 'Codex', settingsName: 'Codex' },
+      { kind: 'text', text: 'done' },
+      { kind: 'done', ok: true, result: 'done', costUsd: null, changedFiles: [], sessionId: 't1', withoutSandbox: true },
+    ]) bg.native.emit({ type: 'agentEvent', runId: 'r2', event });
+    await settle(30);
+    chat = bg.store['chat:x.com'];
+    assert.deepStrictEqual(chat.withoutSandbox, { agent: 'codex', name: 'Codex', settingsName: 'Codex' });
+    assert.deepStrictEqual(chat.messages.slice(2).map((m) => m.role), ['user', 'assistant']);
+
+    // "Stop" on another card: answered, and nothing goes to the helper.
+    bg.store['chat:x.com'] = { ...chat, messages: [...chat.messages, { role: 'sandbox', time: 77, agent: 'codex', prompt: 'p' }] };
+    const n = bg.native.sent.length;
+    assert.strictEqual((await panel.ask({ type: 'chat.sandboxCard', site: 'x.com', card: 77 })).ok, true);
+    assert.strictEqual(bg.store['chat:x.com'].messages.at(-1).answered, 'stop');
+    assert.strictEqual(bg.native.sent.length, n);
   } finally { bg.restore(); }
 });
 

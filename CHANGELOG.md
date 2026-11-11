@@ -54,6 +54,13 @@ summary is too long.
 - In Arc, TRIF's panel opens in a window of its own, and its helper connects without setting up Chrome
   too.
 
+## 0.2.6
+
+- **Google search works again.** Google changed its results page, and AI Banisher started hiding the
+  results along with the AI Overview. It's fixed.
+- **At work:** if your company's Codex or Claude Code settings won't let TRIF use its sandbox, TRIF asks
+  before going on without it.
+
 ## 0.2.5
 
 - **Bigger mods.** A mod can now be up to 4 MB, and all your mods together up to 16 MB. Until now they

@@ -527,6 +527,14 @@ adapter.setKey = async function setKey(ws, key, { env = process.env } = {}) {
   return { account: om.keyAccount, keyring: b ? b.name : null };
 };
 
+// The same Codex, so an organization's Codex requirements can replace TRIF's permission profile here too:
+// stopped, or gone on with the user's consent for this agent (its own: `codex-oss`), as codex.js.
+adapter.settingsName = codex.settingsName;
+adapter.sandboxOverridden = codex.sandboxOverridden;
+adapter.orgBlocked = codex.orgBlocked;
+// (No "personal Codex login" in its messages: open models don't use one.)
+Object.assign(adapter, codex.orgMessages({ personal: false }));
+
 /**
  * agent.openModel.removeKey / `--remove-key`: forget the stored provider's key. Resolves {account, removed}.
  * A provider without keys (a local server) has none to forget: {account: null, removed: false}, not an

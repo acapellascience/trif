@@ -511,8 +511,13 @@ class Runs {
    * onRequest(run, line, respond): a request from the run's mailbox (one JSON line, as on the socket);
    * respond(text) answers it. The host handles it as the run's, whatever the line says.
    */
-  constructor({ getWorkspace, logger, onEvent, onRequest }) {
+  /**
+   * withoutSandbox: the user's consent to run an agent without TRIF's sandbox (withoutsandbox.js):
+   * {allowed(agentId), consents(), guard(before)}. Without it, no agent may.
+   */
+  constructor({ getWorkspace, logger, onEvent, onRequest, withoutSandbox }) {
     this.getWorkspace = getWorkspace;
+    this.withoutSandbox = withoutSandbox || { allowed: () => false, consents: () => ({}), guard: () => [] };
     this.logger = logger || { info() {}, warn() {}, error() {}, debug() {} };
     this.onEvent = onEvent || (() => {});
     this.onRequest = onRequest || ((run, line, respond) => respond(JSON.stringify({ id: null, ok: false, error: 'no helper commands here' })));
@@ -672,6 +677,9 @@ class Runs {
     this._log(run, { webmods: 'start', runId: run.id, agent: run.agent, site: run.site, url: run.url, tabId: run.tabId, sessionId: run.sessionId, model: run.model, prompt: run.prompt, time: run.startedAt });
 
     if (run.stopped) return this._finish(run, { code: null, signal: null }); // stopped before it started
+    // The consents to run without TRIF's sandbox as the run starts (a run without it may be able to write
+    // them: _finish takes out any it added).
+    try { run.consentsBefore = this.withoutSandbox.consents(); } catch { run.consentsBefore = {}; }
     // The run's mailbox, its only way to the helper (its sandbox has no network), and its screenshots
     // folder (it may not see other sites' screenshots).
     run.box = path.join(boxRoot(), run.id);
@@ -703,6 +711,23 @@ class Runs {
     if (!found.available) {
       this._emit(run, { kind: 'error', message: adapter.missing });
       return this._finish(run, { code: null, signal: null });
+    }
+    // An organization's settings that replace TRIF's limits, known before the agent starts (claude.js
+    // preflight: Claude Code's managed settings): stopped here, or with the user's consent, gone on.
+    if (adapter.preflight) {
+      let pre = null;
+      try { pre = adapter.preflight({}); } catch (e) { this.logger.warn(`agent run ${run.id}: couldn't check ${adapter.name}'s managed settings: ${e.message}`); }
+      for (const err of (pre && pre.errors) || []) this.logger.warn(`agent run ${run.id}: ${err}`);
+      if (pre && pre.breaks.length) {
+        const message = adapter.brokenMessage(pre);
+        this.logger.warn(`agent run ${run.id}: ${adapter.name}'s managed settings (${pre.sources.join(', ')}) ${pre.breaks.join('; ')}: stopped`);
+        this._emit(run, { kind: 'error', message });
+        run.agentDone = { ok: false, result: message };
+        return this._finish(run, { code: null, signal: null });
+      }
+      if (pre && pre.loosens.length && !this._withoutSandbox(run, { why: pre.loosens, message: adapter.withoutSandboxMessage(pre), from: pre.sources.join(', ') })) {
+        return this._finish(run, { code: null, signal: null });
+      }
     }
     // Adapters with something to settle first (codex-oss: the provider, its key, a local server; claude
     // and codex: a saved API key's proxy, agentkeys.js).
@@ -854,14 +879,56 @@ class Runs {
     run.timers.push(setInterval(take, 200));
   }
 
-  // The agent says it isn't using TRIF's sandbox (an organization's settings overrode it, codex.js
-  // sandboxOverridden): stop the run at once, with why. Never carry on without TRIF's limits.
-  _checkSandbox(run, text) {
-    if (run.sandboxRefused || !run.adapter.sandboxOverridden || !run.adapter.sandboxOverridden(text)) return false;
+  /**
+   * An organization's settings replace TRIF's sandbox for this run (`why`: what they do, as phrases;
+   * `message`: why it stopped, for the chat and `trif agent run`). With the user's consent for this agent
+   * (withoutsandbox.js, from the side panel only): go on, logged, with a `sandbox` event (the panel marks
+   * the chat "no TRIF sandbox"), and return true. Without: stop the run (an `error` with reason
+   * "sandbox": the panel's choice card) and return false.
+   */
+  _withoutSandbox(run, { why = [], message, from = '' }) {
+    let ok = false;
+    try { ok = !!this.withoutSandbox.allowed(run.agent); } catch (e) { this.logger.warn(`agent run ${run.id}: couldn't read the consent to run without TRIF's sandbox: ${e.message}`); }
+    const settingsName = run.adapter.settingsName || run.adapter.name;
+    if (ok) {
+      run.withoutSandbox = true;
+      this.logger.warn(`agent run ${run.id}: ${run.adapter.name} runs under the organization's settings${from ? ` (${from})` : ''}, not TRIF's sandbox: the user allowed it in the side panel`);
+      this._log(run, { webmods: 'withoutSandbox', why, from, time: Date.now() });
+      this._emit(run, { kind: 'sandbox', trif: false, agent: run.agent, name: run.adapter.name, settingsName });
+      return true;
+    }
     run.sandboxRefused = true;
+    this.logger.warn(`agent run ${run.id}: ${run.adapter.name}'s organization settings replace TRIF's sandbox${from ? ` (${from})` : ''}: stopped`);
+    this._emit(run, { kind: 'error', reason: 'sandbox', agent: run.agent, name: run.adapter.name, settingsName, why, message });
+    run.agentDone = { ok: false, result: message };
+    this._kill(run, 500);
+    return false;
+  }
+
+  // The agent says it isn't using TRIF's sandbox (an organization's settings overrode it, codex.js
+  // sandboxOverridden): stop the run at once, with why, unless the user allowed this agent without it
+  // (_withoutSandbox). True for every line that says so (it's said in the run's log, not the chat), but
+  // not after the run was stopped for it.
+  _checkSandbox(run, text) {
+    if (!run.adapter.sandboxOverridden || !run.adapter.sandboxOverridden(text)) return false;
+    if (run.withoutSandbox) return true;
+    if (run.sandboxRefused) return false;
     const message = run.adapter.sandboxOverriddenMessage ? run.adapter.sandboxOverriddenMessage(text) : `${run.adapter.name} isn't using TRIF's sandbox, so TRIF stopped the run`;
-    this.logger.warn(`agent run ${run.id}: ${run.adapter.name} replaced TRIF's sandbox: stopped`);
-    this._emit(run, { kind: 'error', message });
+    this._withoutSandbox(run, { message });
+    return true;
+  }
+
+  // A run without TRIF's sandbox whose organization's settings turn out to stop its work (`trif` can't
+  // reach the helper, writes to sites/ refused: the adapter's orgBlocked): ended, with why, once.
+  _checkBlocked(run, line) {
+    if (!run.withoutSandbox || run.orgBlocked || !run.adapter.orgBlocked) return false;
+    let why = null;
+    try { why = run.adapter.orgBlocked(line); } catch { why = null; }
+    if (!why) return false;
+    run.orgBlocked = why;
+    const message = run.adapter.orgBlockedMessage();
+    this.logger.warn(`agent run ${run.id}: under the organization's settings ${why === 'helper' ? "`trif` can't reach the helper" : 'writes to the mods folder are refused'}: stopped`);
+    this._emit(run, { kind: 'error', reason: 'orgBlocked', agent: run.agent, message });
     run.agentDone = { ok: false, result: message };
     this._kill(run, 500);
     return true;
@@ -869,8 +936,11 @@ class Runs {
 
   _onLine(run, line) {
     if (!line.trim() || run.doneSent) return;
-    if (this._checkSandbox(run, line)) return;
+    if (this._checkSandbox(run, line)) { this._log(run, line); return; }
     this._log(run, line);
+    // (Stopped for its settings: nothing more of it in the chat, nor a `done` of its own.)
+    if (run.orgBlocked || run.sandboxRefused) return;
+    if (this._checkBlocked(run, line)) return;
     try {
       run.adapter.parse(line, (ev) => {
         if (!ev || typeof ev !== 'object') return;
@@ -947,6 +1017,13 @@ class Runs {
     }
     if (undoable.length) done.undoable = undoable;
     if (run.stopped && !run.shuttingDown) done.stopped = true;
+    // Stopped because an organization's settings replace TRIF's sandbox: the panel's choice card is the
+    // error event's; `done` says so too.
+    if (run.sandboxRefused && !done.ok) done.error = { kind: 'sandbox', agent: run.agent };
+    if (run.withoutSandbox) {
+      done.withoutSandbox = true;
+      try { this.withoutSandbox.guard(run.consentsBefore || {}); } catch (e) { this.logger.warn(`after agent run ${run.id}: couldn't check the consents to run without TRIF's sandbox: ${e.message}`); }
+    }
     // Failed for want of a login: say so in `done` (the panel shows its login notice instead of an error),
     // and agent.list says logged out from now on, whatever the agent's own status check says (Claude
     // Code's still says logged in with an expired login it can't refresh), until a login or a run works.

@@ -1899,6 +1899,7 @@ function watchFocus() {
 function onPanelConnect(port) {
   state.panels.add(port);
   port.onDisconnect.addListener(() => { state.panels.delete(port); state.panelWindows.delete(port); });
+  const fromPanel = isPanelPage(port.sender);
   port.onMessage.addListener((msg) => {
     // A panel says which window it follows (and, in a window of its own, which that is): the toolbar
     // button's next click there closes it, and a side panel saying so is how a click knows it opened.
@@ -1910,7 +1911,7 @@ function onPanelConnect(port) {
       else watchFocus();
       return;
     }
-    ready.then(() => onPanelMessage(msg)).then(
+    ready.then(() => onPanelMessage(msg, { fromPanel })).then(
       (result) => reply(port, msg, { ok: true, result: result === undefined ? null : result }),
       (e) => reply(port, msg, { ok: false, error: errMsg(e) }),
     );
@@ -1933,6 +1934,19 @@ function notifyPanels() {
   showFaces(); // (a site switched, blocked or connected, or a lock: the toolbar's faces follow)
 }
 
+/**
+ * Whether a port comes from the side panel page itself (sidepanel.html of this extension), not another of
+ * its pages or a content script (whose sender.url is the web page's). For what only a click in the panel
+ * may do (agent.withoutSandbox).
+ */
+function isPanelPage(sender) {
+  if (!sender || sender.id !== chrome.runtime.id || typeof sender.url !== 'string') return false;
+  try {
+    const u = new URL(sender.url);
+    return u.origin === new URL(chrome.runtime.getURL('/')).origin && u.pathname === '/sidepanel.html';
+  } catch { return false; }
+}
+
 // The listed string fields of a panel message (open model settings), nothing else.
 function pick(obj, keys) {
   const out = {};
@@ -1940,7 +1954,7 @@ function pick(obj, keys) {
   return out;
 }
 
-async function onPanelMessage(msg) {
+async function onPanelMessage(msg, { fromPanel = false } = {}) {
   switch (msg?.type) {
     case 'status': return uiStatus();
     case 'agent.list': return helperRequest('agent.list', {}, 20000);
@@ -1979,6 +1993,22 @@ async function onPanelMessage(msg) {
       await save({ accessNote: false });
       notifyPanels();
       return { accessNote: false };
+    }
+    // "Use <agent> anyway" on the card an organization's settings brought up (allow: true), or Settings'
+    // "Stop allowing" (false): the user's consent to run that agent under the organization's settings
+    // instead of TRIF's sandbox, kept by the helper (helper/lib/withoutsandbox.js). Only from the panel.
+    case 'agent.withoutSandbox': {
+      if (!fromPanel) throw new Error('only the side panel can change this');
+      if (typeof msg.allow !== 'boolean') throw new Error('allow must be true or false');
+      const r = await helperRequest('agent.withoutSandbox', { agent: String(msg.agent ?? ''), allow: msg.allow }, 10000);
+      if (msg.site && msg.card !== undefined) await answerCard(normalizeSite(msg.site), msg.card, msg.allow ? 'allowed' : 'stop');
+      return r;
+    }
+    // "Stop" on that card: the run stays stopped and nothing is stored; the card says it was answered.
+    case 'chat.sandboxCard': {
+      if (!fromPanel) throw new Error('only the side panel can change this');
+      await answerCard(normalizeSite(msg.site), msg.card, 'stop');
+      return { ok: true };
     }
     case 'chat.note': {
       // A line from the panel itself (a slash command's answer), shown like a tool line.
@@ -2199,6 +2229,15 @@ async function onPanelMessage(msg) {
   }
 }
 
+/** Marks the choice card sent at `time` in the site's chat as answered (`choice`: 'stop' | 'allowed'). */
+function answerCard(site, time, choice) {
+  return updateChat(site, (chat) => {
+    const card = chat.messages.find((m) => m.role === 'sandbox' && m.time === time);
+    if (!card || card.answered) return false;
+    card.answered = choice;
+  });
+}
+
 async function startAgent(msg) {
   const site = normalizeSite(msg.site);
   const prompt = String(msg.prompt ?? '').trim();
@@ -2238,7 +2277,7 @@ async function startAgent(msg) {
     throw e;
   }
   // Registered synchronously after the response, before the next native message is handled.
-  state.runs.set(runId, { runId, site, agent, tabId, stopping: false, errored: false, texts: 0 });
+  state.runs.set(runId, { runId, site, agent, tabId, stopping: false, errored: false, texts: 0, prompt, merge: args.merge });
   // (a run Fix it started: if it changes the mod, its card and row offer Undo fix)
   if (msg.fix && typeof msg.fix === 'object' && typeof msg.fix.mod === 'string') {
     const m = state.mods.find((x) => x.id === msg.fix.mod);
@@ -2413,7 +2452,21 @@ async function onAgentEvent(runId, event, relay = true) {
         // notice for it), and at most one per run.
         if (event.reason === 'login') {
           if (!run.loginSaid) { run.loginSaid = true; push('login', event.message || 'Your agent needs you to log in again.'); }
+        } else if (event.reason === 'sandbox') {
+          // An organization's settings replace TRIF's sandbox, so the run stopped before anything ran: the
+          // panel's choice card (Stop, or Use <agent> anyway, which sends the same message again).
+          chat.messages.push({
+            role: 'sandbox', time, text: String(event.message ?? ''), agent: String(event.agent ?? run.agent ?? ''),
+            name: String(event.name ?? ''), settingsName: String(event.settingsName ?? event.name ?? ''),
+            why: Array.isArray(event.why) ? event.why.map(String).slice(0, 12) : [],
+            prompt: run.prompt ?? '', ...(run.merge ? { merge: run.merge } : {}),
+          });
         } else push('error', event.message || 'Something went wrong.');
+        break;
+      case 'sandbox':
+        // This run goes on under an organization's settings, as the user allowed: the chat's quiet chip.
+        if (event.trif === false) chat.withoutSandbox = { agent: String(event.agent ?? run.agent ?? ''), name: String(event.name ?? ''), settingsName: String(event.settingsName ?? event.name ?? '') };
+        else return false;
         break;
       case 'done': {
         if (event.sessionId) { chat.sessionId = String(event.sessionId); chat.agent = run.agent ?? chat.agent ?? null; }

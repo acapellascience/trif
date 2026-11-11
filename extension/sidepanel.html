@@ -47,6 +47,9 @@
     <select id="agent"><option value="">Default</option></select>
   </label>
   <p id="agent-note" class="note" hidden></p>
+  <!-- Agents the user allowed to run under an organization's settings instead of TRIF's sandbox (sidepanel.js
+       renderWithoutSandbox), each with Stop allowing. -->
+  <div id="without-sandbox" class="without-sandbox" hidden></div>
   <div id="open-model" class="open-model" hidden>
     <label class="field">
       <span>From</span>
@@ -200,8 +203,10 @@
 
 <!-- Over the message box: which agent and model this chat uses (sidepanel.js renderUsing; a click opens
      settings at the model), then what the agent can do on this site (renderAgentLevel: a button and a menu,
-     agentsites.js). The level shows only where there's a chat to have: the site connected and the robot on. -->
+     agentsites.js). The level shows only where there's a chat to have: the site connected and the robot on.
+     Before them, "no TRIF sandbox" when this chat's agent ran under an organization's settings instead. -->
 <div id="using-line" class="using-line">
+  <span id="no-sandbox" class="no-sandbox" hidden>no TRIF sandbox</span>
   <button id="using" class="using" type="button" hidden></button>
   <span id="agent-level-wrap" class="agent-level-wrap" hidden>
     <span class="using-sep" aria-hidden="true">·</span>

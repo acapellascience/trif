@@ -326,6 +326,40 @@ function toolSummary(name, input, workspace) {
   }
 }
 
+// An organization's managed settings outrank TRIF's (claude-managed.js): before each run, runs.js asks
+// preflight what they do. `breaks`: the run couldn't do its work, so it's stopped with brokenMessage.
+// `loosens`: it would get more than TRIF's limits, so it's stopped unless the user chose "Use Claude Code
+// anyway" in the side panel (withoutsandbox.js); then it goes on, ended only if the organization's
+// settings turn out to stop its work after all (orgBlocked).
+adapter.settingsName = 'Claude Code'; // "Your organization's <settingsName> settings" (docs/CODEX-ORG-STRINGS.md)
+adapter.preflight = (opts) => require('./claude-managed').check(opts);
+const both = (list) => (list.length > 1 ? `${list.slice(0, -1).join(', ')} and ${list[list.length - 1]}` : list[0] || '');
+adapter.withoutSandboxMessage = (pre) =>
+  `Your organization's Claude Code settings ${both(pre.loosens)}, which replaces TRIF's sandbox, so TRIF stopped the run before Claude Code started. ` +
+  'To let Claude Code work under your company\'s settings instead, choose “Use Claude Code anyway” in TRIF\'s side panel. ' +
+  'A personal Claude Code login, or another agent, works with TRIF\'s sandbox.';
+adapter.brokenMessage = (pre) =>
+  `Your organization's Claude Code settings ${both(pre.breaks)}, so chats with Claude Code can't work in TRIF's side panel. ` +
+  'Try another agent, or work with Claude Code in a terminal in ~/.trif.';
+// Under the organization's settings: a command's or a tool's error (a tool_result) that says `trif`
+// can't reach the helper, or a write to sites/ was refused (withoutsandbox.js blockedText).
+adapter.orgBlocked = (line) => {
+  const { blockedText } = require('../withoutsandbox');
+  const msg = parseJsonLine(line);
+  if (!msg || msg.type !== 'user' || !msg.message || !Array.isArray(msg.message.content)) return null;
+  for (const c of msg.message.content) {
+    if (!c || c.type !== 'tool_result') continue;
+    const text = typeof c.content === 'string' ? c.content
+      : Array.isArray(c.content) ? c.content.map((x) => (x && typeof x.text === 'string' ? x.text : '')).join('\n') : '';
+    const why = blockedText(text);
+    if (why) return why;
+  }
+  return null;
+};
+adapter.orgBlockedMessage = () =>
+  "Your company's Claude Code settings don't let Claude Code write mods or reach TRIF from the side panel, so chats can't " +
+  'work with them. Use a personal Claude Code login, try another agent, or work with Claude Code in a terminal in ~/.trif.';
+
 module.exports = adapter;
 module.exports.toolSummary = toolSummary;
 module.exports.parseLoginLine = parseLoginLine;

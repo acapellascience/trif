@@ -719,3 +719,30 @@ button.mod-file { font: 11px/1.4 var(--mono); font-weight: 400; color: var(--mut
 .file-x:hover { color: var(--bad); }
 .drop-overlay { position: fixed; inset: 8px; z-index: 50; display: grid; place-items: center; border: 2px dashed var(--accent); border-radius: 14px; background: color-mix(in srgb, var(--bg) 82%, transparent); backdrop-filter: blur(2px); pointer-events: none; }
 .drop-overlay p { margin: 0; padding: 10px 16px; border-radius: 10px; background: var(--surface); border: 1px solid var(--line); font-weight: 600; font-size: 14px; }
+
+/* ---- the simpler code card and mods box: tabs, ⋯ menus, Files as one line --------------------------- */
+.code-view .cv-tabs { display: flex; gap: 2px; margin-top: 12px; border-bottom: 1px solid var(--line); }
+.code-view .cv-tab { border: 0; border-bottom: 2px solid transparent; border-radius: 0; background: none; padding: 5px 10px; color: var(--muted); font-size: 13px; }
+.code-view .cv-tab[aria-selected="true"] { color: var(--text); border-bottom-color: var(--accent); font-weight: 600; }
+.code-view .cv-tab:hover { color: var(--text); }
+.code-view .cv-h-tools { display: flex; gap: 6px; margin-top: 10px; align-items: center; }
+.code-view .cv-h-tools .btn { padding: 3px 10px; font-size: 12px; }
+.code-view .cv-h-tools .cv-h-diff[aria-pressed="true"] { border-color: var(--accent); box-shadow: inset 0 0 0 1px var(--accent); }
+.code-view .cv-history-list li { display: block; padding: 0; background: none; border: 0; }
+.code-view .cv-h-row { display: grid; width: 100%; text-align: left; gap: 1px; padding: 8px 10px; border: 1px solid var(--line); border-radius: 9px; background: var(--raised); cursor: pointer; }
+.code-view .cv-h-row:hover { border-color: var(--faint); }
+.cv-more-wrap, .mods-more-wrap { position: relative; display: inline-flex; }
+.code-view .ap-actions .cv-more { min-width: 36px; padding: 7px 10px; }
+.pop-menu { position: absolute; z-index: 5; display: flex; flex-direction: column; min-width: 170px; padding: 4px; background: var(--surface); border: 1px solid var(--line); border-radius: 9px; box-shadow: 0 8px 24px rgb(0 0 0 / 0.25); }
+.pop-menu[hidden] { display: none; }
+.cv-menu { bottom: calc(100% + 4px); left: 0; }
+.mods-menu { top: calc(100% + 4px); right: 0; }
+.pop-menu .menu-item { border: 0; background: none; text-align: left; padding: 6px 10px; border-radius: 6px; font-size: 13px; white-space: nowrap; }
+.pop-menu .menu-item:hover { background: var(--raised); }
+.mods > summary { position: relative; padding-right: 28px; }
+.mods > summary .mods-more-wrap { position: absolute; right: 0; top: 50%; transform: translateY(-50%); }
+.mods-more { border: 0; background: none; color: var(--muted); font-size: 16px; line-height: 1; padding: 0 6px; border-radius: 6px; cursor: pointer; }
+.mods-more:hover { color: var(--text); background: var(--raised); }
+.site-files-box { margin: 6px 0 2px; font-size: 12px; color: var(--muted); }
+.site-files-box > summary { cursor: pointer; }
+.site-files-box .site-files { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 10px; padding: 6px 0 2px 14px; }

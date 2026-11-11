@@ -186,18 +186,18 @@
 <section id="update" class="notice" hidden></section>
 
 <details id="mods" class="mods" hidden>
-  <summary>Mods on this site <span id="mods-count" class="count"></span></summary>
+  <summary>Mods on this site <span id="mods-count" class="count"></span>
+    <!-- Import, and export the site's mods (sidepanel.js renderSiteTools; helper lib/share.js) -->
+    <span class="mods-more-wrap"><button id="mods-more" class="mods-more" type="button" title="More" aria-label="More" aria-haspopup="menu" aria-expanded="false" hidden>⋯</button>
+    <span id="mods-menu" class="pop-menu mods-menu" role="menu" hidden><button id="import-mod" class="btn menu-item" type="button" role="menuitem">Import mod…</button><button id="export-site" class="btn menu-item" type="button" role="menuitem" hidden></button></span></span>
+  </summary>
   <p id="mods-review-note" class="mods-review-note" hidden></p>
   <ul id="mod-list" class="mod-list"></ul>
+  <!-- The site's files (dropped on the panel): one line, the list when opened (sidepanel.js loadSiteFiles) -->
+  <details id="site-files-box" class="site-files-box" hidden><summary id="site-files-summary"></summary><div id="site-files" class="site-files"></div></details>
   <p id="mods-live" class="visually-hidden" aria-live="polite"></p>
 </details>
-<!-- Import a mod, export the site's, and the site's files (sidepanel.js renderSiteTools; helper lib/share.js). -->
-<div id="site-tools" class="site-tools" hidden>
-  <button id="import-mod" class="link-btn" type="button">Import mod…</button>
-  <button id="export-site" class="link-btn" type="button" hidden></button>
-  <input id="import-file" type="file" accept=".js,text/javascript" hidden>
-  <span id="site-files" class="site-files" hidden></span>
-</div>
+<input id="import-file" type="file" accept=".js,text/javascript" hidden>
 <!-- While files are dragged over the panel (sidepanel.js "Dropping files"). -->
 <div id="drop-overlay" class="drop-overlay" hidden><p id="drop-text"></p></div>
 

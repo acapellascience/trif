@@ -18,7 +18,8 @@ const chatKey = (site) => `chat:${site}`;
 const emptyChat = () => ({ sessionId: null, agent: null, messages: [], run: null, last: null });
 
 const ui = {
-  siteTools: document.getElementById('site-tools'), importMod: document.getElementById('import-mod'), exportSite: document.getElementById('export-site'),
+  modsMore: document.getElementById('mods-more'), modsMenu: document.getElementById('mods-menu'), importMod: document.getElementById('import-mod'), exportSite: document.getElementById('export-site'),
+  siteFilesBox: document.getElementById('site-files-box'), siteFilesSummary: document.getElementById('site-files-summary'),
   importFile: document.getElementById('import-file'), siteFiles: document.getElementById('site-files'), dropOverlay: document.getElementById('drop-overlay'), dropText: document.getElementById('drop-text'),
   agentLevel: document.getElementById('agent-level'), agentSiteNote: document.getElementById('agent-site-note'),
   agentSitesList: document.getElementById('agent-sites-list'), agentSitesEmpty: document.getElementById('agent-sites-empty'),
@@ -832,7 +833,7 @@ function renderMods() {
   // each in its own order.
   const ordered = orderMods(listed, view.modOrder[scope]);
   const mods = GROUPS.flatMap((g) => ordered.filter((m) => modGroup(m) === g));
-  ui.mods.hidden = mods.length === 0;
+  ui.mods.hidden = mods.length === 0 && !view.siteFileCount;
   updateApprovals(mods);
   if (!mods.length) { view.modRows.clear(); ui.modList.replaceChildren(); ui.modsReviewNote.hidden = true; return; }
   ui.modsCount.textContent = `(${mods.length})`;
@@ -1833,22 +1834,49 @@ function codeViewDialog() {
   const note = el('p', 'ap-note cv-note');
   const err = el('p', 'ap-err');
   err.setAttribute('role', 'alert');
+  // (two tabs under the header: the code, and the versions TRIF kept)
+  const tabs = el('div', 'cv-tabs');
+  tabs.setAttribute('role', 'tablist');
+  const tab = (label, cls, fn) => { const b = button(label, `cv-tab ${cls}`, fn); b.setAttribute('role', 'tab'); return b; };
+  const codeTab = tab('Code', 'cv-tab-code', () => showCodeTab());
+  const historyBtn = tab('History', 'cv-tab-history', () => showHistoryTab());
+  tabs.append(codeTab, historyBtn);
+  // (a kept version shown in place: Diff with the current one, Restore)
+  const hTools = el('div', 'cv-h-tools');
+  hTools.hidden = true;
+  const hDiff = button('Diff', 'cv-h-diff', () => showVersion(codeView.version_, !codeView.diff));
+  hDiff.setAttribute('aria-pressed', 'false');
+  const hRestore = button('Restore', 'cv-h-restore', (ev) => restoreVersion(ev.currentTarget));
+  hTools.append(hDiff, hRestore);
   const copy = button('Copy', 'cv-copy', () => copyCode());
-  const reveal = button(IS_MAC ? 'Show in Finder' : 'Show in folder', 'cv-reveal', () => revealMod('folder'));
-  const editor = button('Open in editor', 'cv-editor', () => revealMod('editor'));
-  const close = button('Close', 'text cv-close', () => d.close());
-  x.addEventListener('click', () => d.close());
-  const historyBtn = button('History', 'cv-history', () => toggleHistory());
   const exportBtn = button('Export', 'cv-export', () => exportMod());
+  // (the rest in a small menu: Open in editor, Show in Finder)
+  const more = el('button', 'btn cv-more', '⋯');
+  more.type = 'button';
+  more.title = 'More';
+  more.setAttribute('aria-label', 'More');
+  more.setAttribute('aria-haspopup', 'menu');
+  more.setAttribute('aria-expanded', 'false');
+  const menu = el('div', 'pop-menu cv-menu');
+  menu.setAttribute('role', 'menu');
+  menu.hidden = true;
+  const item = (label, cls, fn) => { const b = button(label, `menu-item ${cls}`, () => { menu.hidden = true; more.setAttribute('aria-expanded', 'false'); fn(); }); b.setAttribute('role', 'menuitem'); return b; };
+  const editor = item('Open in editor', 'cv-editor', () => revealMod('editor'));
+  const reveal = item(IS_MAC ? 'Show in Finder' : 'Show in folder', 'cv-reveal', () => revealMod('folder'));
+  menu.append(editor, reveal);
+  more.addEventListener('click', () => { menu.hidden = !menu.hidden; more.setAttribute('aria-expanded', String(!menu.hidden)); });
+  x.addEventListener('click', () => d.close());
+  const moreWrap = el('span', 'cv-more-wrap');
+  moreWrap.append(more, menu);
   const acts = el('div', 'ap-actions');
-  acts.append(copy, reveal, editor, historyBtn, exportBtn, close);
+  acts.append(copy, exportBtn, moreWrap);
   const historyBox = el('ul', 'cv-history-list');
   historyBox.hidden = true;
-  d.append(top, who, versions, errorBox, codeBox, historyBox, note, err, acts);
+  d.append(top, who, tabs, versions, errorBox, hTools, codeBox, historyBox, note, err, acts);
   d.addEventListener('close', () => setTimeout(() => renderMods(), 0)); // (a hold that came meanwhile: its card now)
   document.body.append(d);
   codeView.dialog = d;
-  codeView.parts = { name, chip, where, versions, vRan, vNew, errorBox, codeBox, historyBox, historyBtn, exportBtn, note, err, copy, reveal, editor };
+  codeView.parts = { name, chip, where, versions, vRan, vNew, errorBox, codeBox, historyBox, historyBtn, codeTab, hTools, hDiff, hRestore, exportBtn, more, menu, note, err, copy, reveal, editor };
   return codeView.parts;
 }
 
@@ -1869,9 +1897,8 @@ function openCodeView(id, { error = null } = {}) {
   delete P.copy.dataset.copied;
   // (Show in Finder and Open in editor: the helper does them)
   const connected = !!view.status?.helper?.connected;
-  P.historyBox.hidden = true;
-  P.codeBox.hidden = false;
-  P.historyBtn.textContent = 'History';
+  setCodeTab('code');
+  P.menu.hidden = true;
   for (const b of [P.reveal, P.editor, P.historyBtn, P.exportBtn]) {
     b.disabled = !connected;
     b.title = connected ? '' : 'TRIF\'s helper isn\'t connected, so it can\'t open the file';
@@ -1947,55 +1974,77 @@ const HISTORY_SOURCE = {
   chat: 'before your agent changed it in a chat', fix: 'before a fix', restore: 'before you restored an older version',
   import: 'before an import replaced it', undo: 'before an undo',
 };
-async function toggleHistory() {
+// The tabs: the code, or History (the versions kept; one clicked is shown in place, with Diff and Restore)
+function setCodeTab(which) {
   const P = codeView.parts;
-  if (!P.historyBox.hidden) { P.historyBox.hidden = true; P.codeBox.hidden = false; P.historyBtn.textContent = 'History'; loadCodeView('file'); return; }
+  P.codeTab.setAttribute('aria-selected', String(which === 'code'));
+  P.historyBtn.setAttribute('aria-selected', String(which !== 'code'));
+  P.historyBox.hidden = which !== 'history';
+  P.codeBox.hidden = which === 'history';
+  P.hTools.hidden = which !== 'version';
+  if (which !== 'code') P.versions.hidden = true;
+  codeView.tab = which;
+}
+function showCodeTab() {
+  const P = codeView.parts;
+  P.note.hidden = true;
+  setCodeTab('code');
+  const m = (view.status?.mods || []).find((x) => x.id === codeView.id);
+  P.versions.hidden = !m?.pending;
+  loadCodeView('file');
+}
+async function showHistoryTab() {
+  const P = codeView.parts;
   P.err.hidden = true;
+  P.note.hidden = true;
+  setCodeTab('history');
   let r;
   try { r = await request({ type: 'mod.history', id: codeView.id }); } catch (e) { P.err.textContent = String(e?.message ?? e); P.err.hidden = false; return; }
   const entries = (r.entries || []).filter((e) => e.kind === 'version');
-  P.historyBtn.textContent = 'Back to the code';
-  P.codeBox.hidden = true;
-  P.historyBox.hidden = false;
   if (!entries.length) { P.historyBox.replaceChildren(el('li', 'cv-history-empty', 'No earlier versions kept. TRIF keeps the version before each change your agent makes, a fix, a restore or an import, for 30 days.')); return; }
   P.historyBox.replaceChildren(...entries.map((e) => {
     const li = el('li');
     li.dataset.stamp = e.stamp;
     const when = new Date(e.at).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' });
-    li.append(el('span', 'cv-h-when', when), el('span', 'cv-h-from', e.source ? HISTORY_SOURCE[e.source] || '' : ''));
-    const acts = el('span', 'cv-h-actions');
-    acts.append(
-      button('View', 'cv-h-view', () => showHistoryText(e, when, false)),
-      button('Diff with current', 'cv-h-diff', () => showHistoryText(e, when, true)),
-      button('Restore', 'cv-h-restore', async (ev) => {
-        const b = ev.currentTarget;
-        b.disabled = true;
-        try {
-          await request({ type: 'mod.historyRestore', id: codeView.id, stamp: e.stamp });
-          P.note.textContent = `Restored the version from ${when}. The one before is in History.`;
-          P.note.hidden = false;
-          P.historyBox.hidden = true; P.codeBox.hidden = false; P.historyBtn.textContent = 'History';
-          setTimeout(() => loadCodeView('file').then(() => { P.note.textContent = `Restored the version from ${when}. The one before is in History.`; P.note.hidden = false; }), 800);
-        } catch (x) { b.disabled = false; P.err.textContent = String(x?.message ?? x); P.err.hidden = false; }
-      }));
-    li.append(acts);
+    const row = el('button', 'cv-h-row');
+    row.type = 'button';
+    row.append(el('span', 'cv-h-when', when), el('span', 'cv-h-from', e.source ? HISTORY_SOURCE[e.source] || '' : ''));
+    row.addEventListener('click', () => showVersion({ ...e, when }, false));
+    li.append(row);
     return li;
   }));
 }
 
-async function showHistoryText(e, when, diff) {
+// A kept version in place of the list: its text, or (Diff) what changed since, with Restore
+async function showVersion(e, diff) {
+  if (!e) return;
   const P = codeView.parts;
   P.err.hidden = true;
+  codeView.version_ = e;
+  codeView.diff = diff;
   try {
     const r = await request({ type: diff ? 'mod.historyDiff' : 'mod.historyCode', id: codeView.id, stamp: e.stamp });
     if (diff) P.codeBox.replaceChildren(...r.lines.map((l) => el('span', `l ${l.t === '+' ? 'add' : l.t === '-' ? 'del' : 'ctx'}`, `${l.t === '…' ? '…' : l.t} ${l.s}`)));
-    else renderCode(P.codeBox, String(r.code ?? ''));
-    P.historyBox.hidden = true;
-    P.codeBox.hidden = false;
-    P.note.textContent = diff ? `What changed since the version from ${when} (- then, + now).` : `The version from ${when}.`;
+    else { codeView.text = String(r.code ?? ''); renderCode(P.codeBox, codeView.text); }
+    setCodeTab('version');
+    P.hDiff.setAttribute('aria-pressed', String(!!diff));
+    P.hRestore.disabled = false;
+    P.note.textContent = diff ? `What changed since the version from ${e.when} (- then, + now).` : `The version from ${e.when}.`;
     P.note.hidden = false;
-    P.historyBtn.textContent = 'History';
   } catch (x) { P.err.textContent = String(x?.message ?? x); P.err.hidden = false; }
+}
+
+async function restoreVersion(b) {
+  const P = codeView.parts;
+  const e = codeView.version_;
+  if (!e) return;
+  b.disabled = true;
+  try {
+    await request({ type: 'mod.historyRestore', id: codeView.id, stamp: e.stamp });
+    const said = `Restored the version from ${e.when}. The one before is in History.`;
+    setCodeTab('code');
+    setTimeout(() => loadCodeView('file').then(() => { P.note.textContent = said; P.note.hidden = false; }), 800);
+  } catch (x) { b.disabled = false; P.err.textContent = String(x?.message ?? x); P.err.hidden = false; }
 }
 
 async function exportMod() {
@@ -2012,8 +2061,8 @@ async function exportMod() {
 function renderSiteTools() {
   const site = view.site;
   const ok = !!site && !!view.status?.helper?.connected;
-  ui.siteTools.hidden = !ok;
-  if (!ok) return;
+  ui.modsMore.hidden = !ok;
+  if (!ok) { ui.modsMenu.hidden = true; ui.siteFilesBox.hidden = true; return; }
   const mine = (view.status?.mods || []).filter((m) => m.id.startsWith(`${site}/`));
   ui.exportSite.hidden = !mine.length;
   ui.exportSite.textContent = `Export all mods for ${site}`;
@@ -2025,12 +2074,15 @@ async function loadSiteFiles() {
   let files = [];
   try { files = (await request({ type: 'files.list', site })).files || []; } catch { files = []; }
   if (site !== view.site) return;
-  ui.siteFiles.hidden = !files.length;
-  if (!files.length) { ui.siteFiles.replaceChildren(); return; }
+  view.siteFileCount = files.length;
+  ui.siteFilesBox.hidden = !files.length;
+  ui.siteFilesSummary.textContent = `Files (${files.length})`;
+  if (!files.length) { ui.siteFiles.replaceChildren(); renderMods(); return; }
   const show = el('button', 'link-btn', IS_MAC ? 'Show in Finder' : 'Show in folder');
   show.type = 'button';
   show.addEventListener('click', () => request({ type: 'files.reveal', site }).catch(() => {}));
-  ui.siteFiles.replaceChildren(el('span', 'files-label', 'Files:'), ...files.slice(0, 12).flatMap((f) => {
+  if (ui.mods.hidden) renderMods(); // (a site with files and no mods: the box shows, for them)
+  ui.siteFiles.replaceChildren(...files.slice(0, 12).flatMap((f) => {
     const x = el('button', 'file-x', '×');
     x.type = 'button';
     x.title = `Remove ${f.name} (to TRIF's trash)`;
@@ -2043,13 +2095,22 @@ async function loadSiteFiles() {
   }), ...(files.length > 12 ? [el('span', 'files-more', `and ${files.length - 12} more`)] : []), show);
 }
 
-ui.importMod?.addEventListener('click', () => ui.importFile.click());
+// (the ⋯ on the Mods header: inside its summary, so its clicks don't open or close the box)
+ui.modsMore?.addEventListener('click', (e) => { e.preventDefault(); e.stopPropagation(); ui.modsMenu.hidden = !ui.modsMenu.hidden; ui.modsMore.setAttribute('aria-expanded', String(!ui.modsMenu.hidden)); });
+ui.modsMenu?.addEventListener('click', (e) => { e.preventDefault(); e.stopPropagation(); });
+document.addEventListener('click', (e) => {
+  if (!e.target.closest?.('.mods-more-wrap') && ui.modsMenu && !ui.modsMenu.hidden) { ui.modsMenu.hidden = true; ui.modsMore.setAttribute('aria-expanded', 'false'); }
+  const cm = codeView.parts;
+  if (cm && !cm.menu.hidden && !e.target.closest?.('.cv-more-wrap')) { cm.menu.hidden = true; cm.more.setAttribute('aria-expanded', 'false'); }
+});
+ui.importMod?.addEventListener('click', () => { ui.modsMenu.hidden = true; ui.importFile.click(); });
 ui.importFile?.addEventListener('change', async () => {
   const f = ui.importFile.files?.[0];
   ui.importFile.value = '';
   if (f) await importModFile(f);
 });
 ui.exportSite?.addEventListener('click', async () => {
+  ui.modsMenu.hidden = true;
   try {
     const r = await request({ type: 'mod.exportSite', site: view.site });
     request({ type: 'chat.note', site: view.site, text: `Exported ${r.ids.length} mod${r.ids.length === 1 ? '' : 's'} for ${r.site} to the folder "${r.dir}" in ${IS_MAC ? 'Downloads' : 'your downloads folder'}.` }).catch(() => {});
@@ -2387,8 +2448,8 @@ function updateModItem(li, m) {
   if (m.held) {
     updateLight(li, m, false);
     const tag = li.querySelector('.tag');
-    tag.textContent = 'on hold';
-    tag.hidden = false;
+    tag.textContent = '';
+    tag.hidden = true; // (the "on hold" button in the switch's place says it)
     const err = li.querySelector('.mod-err');
     if (rowErr) { err.textContent = rowErr; err.hidden = false; } else { err.textContent = ''; err.hidden = true; } // (the facts box says why)
     return;

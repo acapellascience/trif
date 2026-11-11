@@ -2756,7 +2756,7 @@ process.exitCode = 1;
     try {
       await this.ext(`async (id, url) => { await chrome.tabs.update(id, { url, active: true }); }`, [win.tabId, `${base}/`]);
       await this.dismissApproval();
-      await waitFor('the import button', () => this.panel(`async () => !document.getElementById('site-tools').hidden || null`), { timeoutMs: 10000 });
+      await waitFor('the import button', () => this.panel(`async () => !document.getElementById('mods-more').hidden || null`), { timeoutMs: 10000 });
       // a .js dropped: imported, held (its code posts), "imported from a file", no shipped markers
       const overlay = await drop('e2e-shared.js', 'text/javascript', modText(1));
       if (overlay !== 'Drop to import this mod') problems.push(`the overlay for a .js: ${overlay}`);
@@ -2789,16 +2789,19 @@ process.exitCode = 1;
         await this.panelClick(`li[data-mod="${site}/e2e-shared"] .mod-code`);
         if (await waitFor('the code card', () => this.panel(`async () => document.getElementById('code-view')?.open || null`), { timeoutMs: 3000 }).catch(() => null)) break;
       }
-      await this.d.click(this.panelCtx, '#code-view .cv-history');
+      await themes('share-code-tab');
+      await this.d.click(this.panelCtx, '#code-view .cv-tab-history');
       const hist = await waitFor('History', () => this.panel(`async () => { const l = [...document.querySelectorAll('#code-view .cv-history-list li[data-stamp]')]; return l.length ? l.map((x) => x.querySelector('.cv-h-from').textContent) : null; }`), { timeoutMs: 8000 }).catch(() => null);
       if (!hist || hist[0] !== 'before an import replaced it') problems.push(`History: ${JSON.stringify(hist)}`);
       await themes('share-history');
-      await this.d.click(this.panelCtx, '#code-view .cv-history-list li[data-stamp] .cv-h-diff');
+      // a version, clicked: shown in place, with Diff and Restore
+      await this.d.click(this.panelCtx, '#code-view .cv-history-list li[data-stamp] .cv-h-row');
+      await waitFor('the version', () => this.panel(`async () => (!document.querySelector('#code-view .cv-h-tools').hidden && /e2e-shared-1/.test(document.querySelector('#code-view .cv-code').textContent)) || null`), { timeoutMs: 8000 }).catch(() => problems.push('a version clicked in History didn\'t show'));
+      await themes('share-history-version');
+      await this.d.click(this.panelCtx, '#code-view .cv-h-diff');
       const diff = await waitFor('the diff', () => this.panel(`async () => { const t = [...document.querySelectorAll('#code-view .cv-code .l')].map((l) => l.textContent); return t.some((x) => /^- .*e2e-shared-1/.test(x)) && t.some((x) => /^\\+ .*e2e-shared-3/.test(x)) ? t.length : null; }`), { timeoutMs: 8000 }).catch(() => null);
       if (!diff) problems.push('Diff with current didn\'t show the change');
-      await this.d.click(this.panelCtx, '#code-view .cv-history');
-      await waitFor('History again', () => this.panel(`async () => document.querySelector('#code-view .cv-history-list li[data-stamp] .cv-h-restore') ? true : null`), { timeoutMs: 8000 });
-      await this.d.click(this.panelCtx, '#code-view .cv-history-list li[data-stamp] .cv-h-restore');
+      await this.d.click(this.panelCtx, '#code-view .cv-h-restore');
       await waitFor('restored', () => (/e2e-shared-1/.test(fs.readFileSync(file, 'utf8')) || null), { timeoutMs: 10000, intervalMs: 200 }).catch(() => problems.push('Restore didn\'t put the version back'));
       // Export: to Downloads (the run's), shown in Finder (the stand-in)
       const logText = () => (fs.existsSync(this.revealStub().log) ? fs.readFileSync(this.revealStub().log, 'utf8') : '');
@@ -2820,7 +2823,11 @@ process.exitCode = 1;
       const listed = await waitFor('the Files line', () => this.panel(`async () => document.querySelector('#site-files .site-file[data-name="e2e-notes.txt"]') ? true : null`), { timeoutMs: 8000 }).catch(() => null);
       if (!listed) problems.push('the Files line doesn\'t list it');
       if (/e2e-notes/.test((await this.cli(['mods'], { timeoutMs: 20000 })).stdout)) problems.push('trif mods lists the file as a mod');
-      await this.panel(`async () => { document.getElementById('site-tools').scrollIntoView({ block: 'center' }); return true; }`);
+      await this.panel(`async () => { document.getElementById('mods').scrollIntoView({ block: 'center' }); return true; }`);
+      // (Import and Export all in the Mods header's ⋯; held rows say "on hold" once)
+      const tidy = await this.panel(`async () => ({ menu: [...document.querySelectorAll('#mods-menu .menu-item')].map((b) => b.textContent), files: document.getElementById('site-files-summary').textContent,
+        twice: [...document.querySelectorAll('#mod-list li.held')].filter((li) => [...li.querySelectorAll('.tag')].filter((t) => !t.hidden && t.textContent === 'on hold').length > 1).length })`);
+      if (tidy.menu[0] !== 'Import mod…' || tidy.files !== 'Files (1)' || tidy.twice) problems.push(`the mods box: ${JSON.stringify(tidy)}`);
       await themes('share-files');
       // the overlay itself, while dragging
       await this.panel(`async () => { const dt = new DataTransfer(); dt.items.add(new File(['x'], 'a.js', { type: 'text/javascript' })); document.body.dispatchEvent(new DragEvent('dragenter', { dataTransfer: dt, bubbles: true })); return true; }`);
@@ -2876,8 +2883,10 @@ process.exitCode = 1;
       const helperLog = fs.readFileSync(path.join(this.priv, 'helper.log'), 'utf8');
       if (!/reveal: TRIF_REVEAL_CMD stands in for open/.test(helperLog)) problems.push('the helper doesn\'t say open is stood in for: Show in Finder not clicked');
       else {
+        await this.d.click(this.panelCtx, '#code-view .cv-more');
         await this.d.click(this.panelCtx, '#code-view .cv-reveal');
         await this.d.click(this.panelCtx, '#code-view .cv-file');
+        await this.d.click(this.panelCtx, '#code-view .cv-more');
         await this.d.click(this.panelCtx, '#code-view .cv-editor');
         const got = await waitFor('the helper to reveal it', () => (revealed().length >= 3 ? revealed() : null), { timeoutMs: 8000 }).catch(() => revealed());
         const file = path.join('sites', site, 'e2e-banner.js');

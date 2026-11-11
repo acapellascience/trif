@@ -527,7 +527,7 @@ h3.mod-name { margin: 0; font-size: inherit; line-height: inherit; }
   text-align: right; cursor: pointer; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 /* "no TRIF sandbox": this chat's agent ran under an organization's settings instead (before the agent's name) */
 .no-sandbox { flex: none; padding: 0 6px; border: 1px solid var(--line); border-radius: 999px; color: var(--muted);
-  font: 10.5px/1.5 inherit; white-space: nowrap; cursor: default; }
+  font-size: 10.5px; line-height: 1.5; white-space: nowrap; cursor: default; }
 .no-sandbox[hidden] { display: none; }
 .using:hover { color: var(--muted); text-decoration: underline; }
 .using[hidden] { display: none; }

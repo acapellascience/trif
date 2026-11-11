@@ -81,3 +81,11 @@ which the red team showed overstated).
   itself"). Still under release.js's limits (summary passes; section 3887 of 3900 bytes).
 - examples/sandboxed → examples/boxed; the ports are "Simple Shopping (boxed)", "DVD Logo (boxed)".
 - docs: SAFE-MODS, PROTOCOL, SANDBOX-TIER-NOTES (prose renamed; a names note at the top of each design doc).
+
+
+## Tier lines, shortened (Tim, 2026-11-11)
+
+One line each in the mods box; the longer wording is behind "more" (extension/explain.json):
+- Style mods: **Only change how the page looks.**
+- Boxed mods: **Do only what you've allowed.**
+- Free mods: unchanged, **Run in the page with everything it has.**

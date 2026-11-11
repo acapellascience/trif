@@ -3752,7 +3752,7 @@ page.root.setAttr('data-trif-box-spec', r);\n`,
         } : null;
       }`), { timeoutMs: 15000 });
       const order = layout.heads.join(',');
-      if (!/^(rules,)?sandboxed(,page)?$/.test(order) || layout.name !== 'Boxed mods' || layout.note !== 'Run in TRIF\'s sandbox: they change what the page shows, and do only what you\'ve allowed.' || layout.rowGroup !== 'sandboxed') throw new Error(`the panel: ${JSON.stringify(layout)}`);
+      if (!/^(rules,)?sandboxed(,page)?$/.test(order) || layout.name !== 'Boxed mods' || layout.note !== 'Do only what you\'ve allowed.' || layout.rowGroup !== 'sandboxed') throw new Error(`the panel: ${JSON.stringify(layout)}`);
       if (layout.order.indexOf('127.0.0.1/e2e-sbx-panel') < layout.order.indexOf('sandboxed') || (layout.order.includes('page') && layout.order.indexOf('127.0.0.1/e2e-sbx-panel') > layout.order.indexOf('page'))) throw new Error(`not under its heading: ${JSON.stringify(layout.order)}`);
       await this.shot(this.panelCtx, 'panel-sandboxed-group');
       await clickGroup();

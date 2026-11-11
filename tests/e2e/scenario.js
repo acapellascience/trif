@@ -3314,7 +3314,7 @@ setTimeout(() => {
     try {
       for (const [id, text] of Object.entries(files)) fs.writeFileSync(path.join(dir, `${id}.js`), text);
       // held, for its powers and the combination; mods alone (e2e-pw3b) doesn't hold
-      const held = await waitFor('held for its powers', async () => { const st = await status(); return /e2e-pw3\s+HELD/.test(st) && /e2e-pw3b\s+HELD: it can talk to your other boxed mods on this page; it can click these for you: the counter \(#pclick\) \(trif approve/.test(st) && /e2e-pw3none\s+registered \(boxed\)/.test(st) ? st : null; }, { timeoutMs: 25000, intervalMs: 500 });
+      const held = await waitFor('held for its powers', async () => { const st = await status(); return /e2e-pw3\s+HELD/.test(st) && /e2e-pw3b\s+HELD: it can talk to your other boxed mods on this page; it can click these for you: the other button \(#pbtn\); together with E2E Boxed mod with phase-3 powers, it could .*let what it reads decide what it clicks for you/.test(st) && /e2e-pw3none\s+registered \(boxed\)/.test(st) ? st : null; }, { timeoutMs: 25000, intervalMs: 500 });
       const hl = line(held, 'e2e-pw3');
       for (const want of ['it can read what you type on this site, but can\'t send it anywhere', 'it can talk to your other boxed mods on this page', 'it can play and pause video and audio on this page',
         `it can take you to these pages on ${site}: /e2e-goto-ok, or to a link the page shows`,
@@ -3348,7 +3348,8 @@ setTimeout(() => {
       };
       for (const [k, re] of Object.entries(why)) if (!re.test(R[k] || '')) problems.push(`${k}: ${R[k]}`);
       if (got.b !== `{"hello":"from a","n":1} from ${site}/e2e-pw3`) problems.push(`the other end of the channel: ${got.b}`);
-      if (!/^refused: .*clicking for the user is off on this page while another boxed mod here has the read-drafts power/.test(got.bClick || '')) problems.push(`the other mod's click, beside a read it didn't ask for: ${got.bClick}`);
+      // (beside a read it didn't ask for, approved together on its hold: cross-mod approval)
+      if (got.bClick !== 'clicked') problems.push(`the other mod's click, beside a read it didn't ask for, the two approved together: ${got.bClick}`);
       if (got.hash !== '#plink-target') problems.push(`the link on the page wasn't clicked: ${got.hash}`);
       if (!/^wd,wta/.test(got.seen || '')) problems.push(`the page didn't see the changed drafts as input: ${got.seen}`);
       if (got.pw !== 'hunter2' || got.f3i !== 'typed') problems.push(`a field changed that shouldn't: ${JSON.stringify(got)}`);

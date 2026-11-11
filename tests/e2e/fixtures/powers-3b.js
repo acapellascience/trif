@@ -3,15 +3,16 @@
 // @match       *://127.0.0.1/powers3.html*
 // @boxed
 // @powers      mods, click
-// @click       the counter: #pclick
+// @click       the other button: #pbtn
 // @run-at      document-idle
 // ==/WebMod==
 
 // The other end of e2e-pw3's channel (tests/e2e/scenario.js powers3Check): answers what it hears. And a
-// click, refused: e2e-pw3 on the same page reads drafts, which this mod didn't ask for (the page-wide rule).
+// click beside e2e-pw3's read (read-drafts), which this mod didn't ask for: refused by the page-wide rule unless
+// the user approved the two together, which its hold asks (cross-mod approval), so it goes through here.
 setTimeout(() => {
   let r;
-  try { page.find('#pclick').click(); r = 'clicked'; } catch (e) { r = `refused: ${e.message}`; }
+  try { page.find('#pbtn').click(); r = 'clicked'; } catch (e) { r = `refused: ${e.message}`; }
   page.root.setAttr('data-trif-box-pw3b-click', r);
 }, 300);
 const ch = trif.channel('e2e');

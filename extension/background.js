@@ -9,6 +9,7 @@ import {
   normalizeDisabled, modAppliesTo, urlInScope, modInScope, applyStartOff, applyAbsorbed, findRenames, carryRenames, renameInOrder, normalizeModOrder, modSites,
   normalizeOffSites, offSiteName, offOnSite, hostInScope, withOffSites, normalizeGroupsOff, switchGroup, offSitesFor, GROUPS, scopeFor, normalizeSitesOn, siteOnFor, sitesInUse, limitToSites, applyStartSites, switchSite, fromOtherBrowser, timedUserScripts, capChat,
   ALL_ACCESS, readAccess, activeSites, hasSiteAccess, siteOrigins, siteState, siteRefusal, everySiteOrigins,
+  sensitiveSites, sensitiveHit, sensitiveListSites, sensitivePlan, normalizeSiteList, normalizePending,
   FEATURES, ModsParts, fillSameMods, storedMods, modsStorageState, modsStoragePlan, normalizeStarter, applyReadded, normalizeReadded,
   applyNewMods, applyChatWaiting, normalizeNewOff, MOD_GROUPS, modGroup, groupWord, sandboxFallback, inSandboxWorld, SAFARI, siteForUrl,
   PANEL_OPEN_WAIT_MS, PANEL_LATE_MS, panelWindowUrl, panelWindowTarget, panelWindowBounds, panelWindowClick,
@@ -63,6 +64,8 @@ const state = {
   access: ALL_ACCESS,    // what the browser gives TRIF (readAccess): a site in sitesOn counts only with it
   accessNote: false,     // after an update gave up every site's access: the panel's one-time note (persisted)
   blockedSites: [],      // sites the user blocked in TRIF: nothing from TRIF touches them (persisted)
+  sensitiveDone: null,   // sensitive sites TRIF has made sites of their own (blocked, asked about, or left), so it never does again; null: never yet (persisted)
+  sensitivePending: [],  // [{host, parent, why, mods, allSites}]: hosts the upgrade asks about (Keep TRIF on there / Block it); until then, part of their parent (persisted)
   panelWindows: new Map(), // panel port -> {windowId: the browser window it follows, own: its own window when it's a panel window, else null}
   panelInWindow: false,  // this browser shows no side panel (Arc): the toolbar button opens a panel window at once (persisted)
   paused: false,         // every mod paused in this browser, each mod's own switch left as it is (persisted)
@@ -150,7 +153,7 @@ function setFace(tabId, face, force = false) {
 function tabSiteState(url) {
   const host = /^https?:/.test(url || '') ? hostOf(url) : '';
   if (!host) return null;
-  const site = siteOnFor(url, [...state.blockedSites, ...state.sitesOn]) || scopeFor(host);
+  const site = sens().scopeOf(host);
   return site ? stateOf(site) : null;
 }
 async function showFace(tabId, url, force = false) {
@@ -251,10 +254,12 @@ const ready = chrome.storage.local.get(null).then(async (s) => {
   state.defaultOrder = normalizeModOrder(s.defaultOrder);
   state.sitesOffered = normalizeSitesOn(s.sitesOffered);
   state.accessNote = s.accessNote === true;
-  state.blockedSites = normalizeSitesOn(s.blockedSites);
+  state.blockedSites = normalizeSiteList(s.blockedSites);
+  state.sensitiveDone = Array.isArray(s.sensitiveDone) ? normalizeSiteList(s.sensitiveDone) : null;
+  state.sensitivePending = normalizePending(s.sensitivePending);
   state.paused = s.paused === true;
   state.panelInWindow = s.panelInWindow === true;
-  if (Array.isArray(s.sitesOn)) state.sitesOn = normalizeSitesOn(s.sitesOn);
+  if (Array.isArray(s.sitesOn)) state.sitesOn = normalizeSiteList(s.sitesOn);
   else {
     // First start since TRIF has to be turned on per site: keep it on where it's already in use.
     const chats = Object.fromEntries(Object.entries(s).filter(([k]) => k.startsWith('chat:')).map(([k, v]) => [k.slice(5), v]));
@@ -273,6 +278,7 @@ const ready = chrome.storage.local.get(null).then(async (s) => {
   await refreshAccess();
   await dropEverySite(s);
   await cleanStaleRuns(s);
+  await considerSensitive(sensitiveListSites(state.sensitiveSites), { tabs: true }).catch((e) => console.warn('[TRIF] sensitive sites:', errMsg(e)));
 }).catch((e) => console.error('[TRIF] failed to read storage', e));
 ready.then(() => showFaces()); // (the toolbar's faces, for the tabs open now: faces.js)
 
@@ -305,7 +311,11 @@ chrome.tabs.onRemoved?.addListener((tabId) => { tabLoads.delete(tabId); });
 chrome.storage.onChanged?.addListener((changes, area) => {
   if (area !== 'local') return;
   if (changes.agentSites) state.agentSites = normalizeAgentSites(changes.agentSites.newValue);
-  if (changes.sensitiveSites) state.sensitiveSites = Array.isArray(changes.sensitiveSites.newValue) ? changes.sensitiveSites.newValue : null;
+  if (changes.sensitiveSites) {
+    state.sensitiveSites = Array.isArray(changes.sensitiveSites.newValue) ? changes.sensitiveSites.newValue : null;
+    // (a host added to the list is a site of its own from now on: blocked, or asked about, once)
+    ready.then(() => considerSensitive(sensitiveListSites(state.sensitiveSites), { tabs: true })).catch((e) => log('warn', `sensitive sites: ${errMsg(e)}`));
+  }
   if (changes.agentSites || changes.sensitiveSites) notifyPanels();
 });
 chrome.runtime.onConnect.addListener((port) => {
@@ -346,7 +356,124 @@ function setPanelBehavior() {
 // it. Everything that touches a page goes by onSites(), never by sitesOn alone.
 
 const onSites = () => activeSites(state.sitesOn, state.access).filter((s) => !state.blockedSites.includes(s));
+
+// ---- sensitive sites, each a site of its own (lib.js "sensitive sites") --------------------------------
+// The model, worked out again when what it depends on changes (each of these is replaced, never changed).
+let sensMemo = null;
+function sens() {
+  const k = [state.sensitiveSites, state.sensitivePending, state.blockedSites, state.sitesOn, state.sensitiveDone, state.mods];
+  if (sensMemo && sensMemo.k.every((x, i) => x === k[i])) return sensMemo.model;
+  const hosts = [...state.blockedSites, ...state.sitesOn, ...(state.sensitiveDone || []), ...state.mods.map((m) => String(m.id || '').split('/')[0])];
+  const model = sensitiveSites({ list: state.sensitiveSites, pending: state.sensitivePending.map((p) => p.host), hosts });
+  sensMemo = { k, model };
+  return model;
+}
+/** The site a host (or URL) is in: its sensitive site of its own, else its registrable domain. */
+const siteOfHost = (h) => { let x = String(h || ''); if (/^[a-z]+:/i.test(x)) x = hostOf(x); return sens().scopeOf(x); };
+/** Whether `url` is in a run's scope: in it, and not in a site of its own inside it (mail.google.com for google.com). */
+const inRunScope = (url, scope) => urlInScope(url, scope) && siteOfHost(hostOf(url)) === scope;
+/** For code a run sends to a page (lib.js pageGuard): the sites of their own it may not meet. */
+const apartFrom = (scope) => sens().splits.filter((x) => x !== scope && !(scope && hostInScope(scope, x)) && (scope ? hostInScope(x, scope) : !onSites().includes(x)));
+
+// ---- sensitive sites on upgrade, and new ones -----------------------------------------------------------
+// Each sensitive site TRIF knows of is dealt with once (`sensitiveDone`): on the first start of this version
+// (TRIF's list), when the user adds one to the list in Settings, and the first time a tab is on a host a
+// pattern like `*bank*` makes one. One nothing of the user's reaches is put on the block list (it starts
+// blocked: Unblock lands on off; Fix turns it on). One the user's setup already reaches (TRIF on for its
+// parent and one of the parent's or an all-sites mod matching it, or mods in its own folder) is asked about
+// instead, in a one-time notice on every site's panel (Tim, 2026-11-11): Keep TRIF on there (the parent's
+// mods that reach it are copied into its folder and it's on) or Block it. Until then nothing changes there.
+// A sensitive registrable domain (paypal.com) the user already uses is left as it is.
+let considering = Promise.resolve();
+function considerSensitive(hosts, { tabs = false } = {}) {
+  considering = considering.then(async () => {
+    const extra = [];
+    if (tabs) for (const t of await chrome.tabs.query({}).catch(() => [])) { const h = sensitiveHit(hostOf(t.url || ''), state.sensitiveSites)?.scope; if (h) extra.push(h); }
+    const first = state.sensitiveDone === null;
+    const plan = sensitivePlan({
+      hosts: [...hosts, ...extra], done: state.sensitiveDone || [], pending: state.sensitivePending.map((p) => p.host), list: state.sensitiveSites,
+      mods: state.mods, disabled: state.disabled, sitesOn: state.sitesOn, blocked: state.blockedSites,
+    });
+    if (!plan.done.length && !first) return;
+    const blockedSites = normalizeSiteList([...state.blockedSites, ...plan.block]);
+    const sitesOn = state.sitesOn.filter((x) => !plan.block.includes(x));
+    const sensitivePending = [...state.sensitivePending, ...plan.ask];
+    const sensitiveDone = normalizeSiteList([...(state.sensitiveDone || []), ...plan.done]);
+    await save({ blockedSites, sitesOn, sensitivePending, sensitiveDone }, { switches: true });
+    Object.assign(state, { blockedSites, sitesOn, sensitivePending, sensitiveDone });
+    if (plan.block.length) log('info', `sensitive sites, each a site of its own, blocked until you unblock them: ${plan.block.join(', ')}`);
+    if (plan.ask.length) log('info', `sensitive sites your mods reach, waiting for your choice in the side panel: ${plan.ask.map((p) => p.host).join(', ')}`);
+    for (const site of plan.block) stopRunsOn(site);
+    if (plan.block.length || plan.ask.length) {
+      if (checkUserScripts()) reportApplied(await serial(applyMods));
+      showFaces();
+      notifyPanels();
+    }
+  });
+  return considering;
+}
+
+// Copies of mods (Keep TRIF on there) switched as their originals, not "new". Idempotent.
+async function carryCopies(copies) {
+  if (!copies.length) return;
+  const disabled = { ...state.disabled };
+  const newOff = { ...state.newOff };
+  const startedOff = { ...state.startedOff };
+  const seenMods = state.seenMods ? { ...state.seenMods } : null;
+  for (const { from, to } of copies) {
+    if (state.disabled[from] === true) disabled[to] = true; else delete disabled[to];
+    delete newOff[to];
+    startedOff[to] = true;
+    if (seenMods) seenMods[to] = true;
+  }
+  Object.assign(state, { disabled, newOff, startedOff, ...(seenMods ? { seenMods } : {}) });
+  await save({ disabled, newOff, startedOff, ...(seenMods ? { seenMods } : {}) }, { switches: true });
+}
+
+// The panel's answer for a pending host: Keep TRIF on there, or Block it.
+async function answerSensitive(msg) {
+  const host = String(msg.host ?? '').trim().toLowerCase();
+  const p = state.sensitivePending.find((x) => x.host === host);
+  if (!p) throw new Error(`TRIF isn't asking about ${host || 'that site'}`);
+  const rest = state.sensitivePending.filter((x) => x.host !== host);
+  if (msg.choice === 'block') {
+    const blockedSites = normalizeSiteList([...state.blockedSites, host]);
+    await save({ blockedSites, sensitivePending: rest }, { switches: true });
+    Object.assign(state, { blockedSites, sensitivePending: rest });
+    stopRunsOn(host);
+    await afterSiteChange(msg.tab);
+    showFaces();
+    return { host, blocked: true };
+  }
+  if (msg.choice !== 'keep') throw new Error('unknown choice');
+  // (the parent's mods that reach it now, and their switches, which the copies keep)
+  const now = sensitivePlan({ hosts: [host], done: [], pending: [], list: state.sensitiveSites, mods: state.mods, disabled: state.disabled, sitesOn: state.sitesOn, blocked: [], force: true }).ask[0];
+  const ids = now ? now.mods : [];
+  let copies = [];
+  if (ids.length) {
+    const r = await helperRequest('sensitive.split', { host, ids }, 30000);
+    copies = Array.isArray(r?.copies) ? r.copies : [];
+  }
+  // (the copies keep their originals' switches: done again once the helper's mods message, which comes with
+  // them, is applied, so its first-time switch-offs don't win)
+  await carryCopies(copies);
+  await modsApplied;
+  await carryCopies(copies);
+  const sitesOn = state.sitesOn.includes(host) ? state.sitesOn : [...state.sitesOn, host].sort();
+  await save({ sitesOn, sensitivePending: rest }, { switches: true });
+  Object.assign(state, { sitesOn, sensitivePending: rest });
+  log('info', `${host} is a site of its own, on, with its own copies of ${copies.length} mod(s)`);
+  await afterSiteChange(msg.tab);
+  showFaces();
+  return { host, kept: true, copies };
+}
 const stateOf = (site) => siteState(site, { sitesOn: state.sitesOn, access: state.access, blocked: state.blockedSites });
+// (a tab on a host a pattern makes a sensitive site of its own, seen for the first time)
+chrome.tabs.onUpdated?.addListener((tabId, info) => {
+  if (!info.url) return;
+  const h = sensitiveHit(hostOf(info.url), state.sensitiveSites)?.scope;
+  if (h && state.sensitiveDone && !state.sensitiveDone.includes(h)) ready.then(() => considerSensitive([h])).catch(() => {});
+});
 
 /** Read what the browser gives TRIF again. Returns whether the sites TRIF works on changed. */
 async function refreshAccess() {
@@ -383,7 +510,7 @@ async function onPermissionsChanged() {
   if (!(await refreshAccess())) { notifyPanels(); return; }
   // A site taken away stops like a site switched off: its mods, its runs, its page commands.
   for (const r of state.runs.values()) {
-    if (!siteOnFor(`https://${r.site}/`, onSites()) && !r.stopping) { r.stopping = true; helperRequest('agent.stop', { runId: r.runId }, 10000).catch(() => {}); }
+    if (!siteOnFor(`https://${r.site}/`, onSites(), sens()) && !r.stopping) { r.stopping = true; helperRequest('agent.stop', { runId: r.runId }, 10000).catch(() => {}); }
   }
   if (checkUserScripts()) reportApplied(await serial(applyMods));
   notifyPanels();
@@ -453,7 +580,7 @@ async function applyModsNow() {
       // (paused: as if TRIF were on for no site, so nothing registers; each switch stays as it is)
       // (a change the chat made that waits for the user: the version before runs)
       mods: state.mods.map((m) => state.chatWaiting[m.id]?.old || m), runtimeCode: runtimeCode(state.recording), applied: state.applied, disabled: state.disabled,
-      offSites: state.offSites, groupsOff: state.groupsOff, recording: state.recording, sitesOn: state.paused ? [] : onSites(), known: state.known,
+      offSites: state.offSites, groupsOff: state.groupsOff, recording: state.recording, sitesOn: state.paused ? [] : onSites(), known: state.known, sensitive: sens(),
     });
     state.applied = res.applied;
     state.known = res.known;
@@ -904,14 +1031,14 @@ function helperGone(reason) {
 // may only touch tabs and URLs on that site. See docs/PROTOCOL.md "Run scope". And no request, from a
 // run or a terminal, touches a site TRIF is off for (see "sites TRIF is on for" in lib.js).
 function checkScopeUrl(url, scope, what) {
-  if (scope && !urlInScope(url, scope)) {
+  if (scope && !inRunScope(url, scope)) {
     throw new Error(`${what} is on ${hostOf(url) || url || 'a page'}, and this agent run is limited to ${scope}` +
       ' (it was started from the side panel on that site; the user can start another chat on the other site)');
   }
-  if (!siteOnFor(url, onSites())) {
+  if (!siteOnFor(url, onSites(), sens())) {
     const host = hostOf(url);
     if (!host || !/^https?:/.test(url)) throw new Error(`${what} isn't a web page (${url || 'no URL'}); TRIF only works on http and https pages`);
-    const site = siteOnFor(url, [...state.blockedSites, ...state.sitesOn]) || scopeFor(host);
+    const site = siteOfHost(host);
     throw new Error(siteRefusal(site, stateOf(site)) || siteRefusal(site, 'off'));
   }
 }
@@ -940,7 +1067,7 @@ const commands = {
       mods: state.mods.map((m) => {
         const o = { id: m.id, registered: ids.has(m.id), enabled: isEnabled(m.id) };
         if (state.offSites[m.id]) o.offSites = state.offSites[m.id];
-        if (!limitToSites(m, onSites())) o.sitesOff = true; // every site it's for is off (or without access)
+        if (!limitToSites(m, onSites(), sens())) o.sitesOff = true; // every site it's for is off (or without access)
         if (m.held) o.held = m.held;
         if (m.sandboxed) o.sandboxed = inSandboxWorld(m) ? true : 'page'; // ('page': this browser runs it as a page script)
         if (Array.isArray(m.powers) && m.powers.length) o.powers = m.powers;
@@ -964,7 +1091,7 @@ const commands = {
     tabs.sort((a, b) => (a.windowId - b.windowId) || (a.index - b.index));
     return tabs.filter((t) => {
       const url = t.url || t.pendingUrl || '';
-      return (!args.scope || urlInScope(url, args.scope)) && siteOnFor(url, onSites());
+      return (!args.scope || inRunScope(url, args.scope)) && siteOnFor(url, onSites(), sens());
     }).map((t) => {
       // (a site the agent is Off for: its tab is there, but not what's in it, title or address past the site)
       const info = tabInfo(t);
@@ -997,7 +1124,7 @@ const commands = {
     // agent's code: a speed bump (tablock.js leakGuard).
     if (args.scope) await execute(`(${leakGuard})(); 0`);
     const work = (async () => {
-      let out = await execute(buildRunCode(args.code, !!args.expression, runId, { scope: args.scope || null, sitesOn: onSites() }, { tag: !!args.scope }));
+      let out = await execute(buildRunCode(args.code, !!args.expression, runId, { scope: args.scope || null, sitesOn: onSites(), apart: apartFrom(args.scope || null) }, { tag: !!args.scope }));
       // Fallback in case execute didn't wait for the promise: poll the stored envelope.
       while (out === null && !timedOut) {
         await sleep(100);
@@ -1234,6 +1361,8 @@ function siteLists() {
   return {
     disconnected: state.sitesOn.filter((s) => stateOf(s) === 'disconnected'), // on, but not connected (yet, or any more)
     blockedSites: state.blockedSites,
+    // (those TRIF started blocked as sensitive sites, lib.js "sensitive sites": `trif status` counts them)
+    sensitiveBlocked: state.blockedSites.filter((s) => (state.sensitiveDone || []).includes(s)),
     access: { all: state.access.all, allUrls: state.access.allUrls, origins: state.access.origins },
   };
 }
@@ -1241,7 +1370,7 @@ function siteLists() {
 async function modsOnPage(args) {
   const tab = await scopedTab(args);
   const url = tab.url || tab.pendingUrl || '';
-  const mods = state.mods.filter((m) => isEnabled(m.id) && !m.held && limitToSites(m, onSites()) && modAppliesTo(withOffSites(m, offSitesFor(m, state.offSites, state.groupsOff)), url));
+  const mods = state.mods.filter((m) => { if (!isEnabled(m.id) || m.held) return false; const lm = limitToSites(m, onSites(), sens()); return !!lm && modAppliesTo(withOffSites(lm, offSitesFor(m, state.offSites, state.groupsOff)), url); });
   return { tab: tab.id, url, mods: mods.map((m) => ({ id: m.id, name: m.name || m.id, runAt: m.runAt || 'document_start' })) };
 }
 
@@ -1352,7 +1481,7 @@ async function checkTab(tabId, final = false) {
   if (!checkUserScripts()) return;
   const tab = await chrome.tabs.get(tabId).catch(() => null);
   const url = tab?.url || '';
-  if (!/^https?:/.test(url) || !siteOnFor(url, onSites())) return;
+  if (!/^https?:/.test(url) || !siteOnFor(url, onSites(), sens())) return;
   const running = runningOn(url);
   if (!running.length) return;
   // (a load from scheduleHealth counts for "may be broken"; one the panel's look finds, or a page that changed
@@ -1470,7 +1599,7 @@ async function agentGate(cmd, args, reqId = null) {
     if (u && !/^[a-z][a-z0-9+.-]*:/i.test(u)) u = `https://${u}`;
     let host = '';
     try { host = new URL(u).hostname; } catch { continue; } // (no address: the command says what's wrong)
-    if (!siteOnFor(u, onSites())) continue; // (TRIF off there: the command says so, which comes first)
+    if (!siteOnFor(u, onSites(), sens())) continue; // (TRIF off there: the command says so, which comes first)
     const r = agentCheck(cmd, host, agentSettings());
     if (r === 'ok') continue;
     if (r === 'ask') { await askToRun(agentSiteOf(host), args, reqId); continue; }
@@ -1773,6 +1902,8 @@ async function uiStatus() {
     onBreak: state.onBreak,
     chatWait: state.chatWait, canSandbox: state.canSandbox !== false,
     agentSites: state.agentSites, sensitiveSites: state.sensitiveSites,
+    // (sensitive sites: the ones of their own TRIF knows of, and the hosts the upgrade asks about)
+    sensitive: { splits: sens().splits, pending: state.sensitivePending },
     agentAsks: [...state.agentAsks.entries()].map(([id, a]) => ({ id, site: a.site })),
     runs: [...state.runs.values()].map((r) => ({ runId: r.runId, site: r.site })),
     lockedTabs: tabLocks.list(),
@@ -2008,6 +2139,7 @@ async function onPanelMessage(msg, { fromPanel = false } = {}) {
     case 'site.set': return setSiteOn(msg);
     case 'site.disconnect': return disconnectSite(msg);
     case 'site.block': return setBlocked(msg);
+    case 'sensitive.answer': return answerSensitive(msg);
     // The panel says whether the agent needs a login (or a key): the toolbar's yellow face, every tab
     case 'faces.login': {
       const out = msg.loggedOut === true;
@@ -2238,7 +2370,7 @@ async function onPanelMessage(msg, { fromPanel = false } = {}) {
         const url = tab ? tab.url || tab.pendingUrl || '' : '';
         const added = new Set(r?.added || []);
         const runs = (m) => added.has(m.id) && isEnabled(m.id) && !m.held && modAppliesTo(withOffSites(m, state.offSites[m.id]), url);
-        if (url && siteOnFor(url, state.sitesOn) && state.mods.some(runs)) await chrome.tabs.reload(tab.id).catch(() => {});
+        if (url && siteOnFor(url, state.sitesOn, sens()) && state.mods.some(runs)) await chrome.tabs.reload(tab.id).catch(() => {});
       }
       notifyPanels();
       return r;
@@ -2275,8 +2407,8 @@ async function startAgent(msg) {
   const site = normalizeSite(msg.site);
   const prompt = String(msg.prompt ?? '').trim();
   if (!prompt) throw new Error('empty message');
-  if (!siteOnFor(`https://${site}/`, onSites())) {
-    const scope = siteOnFor(`https://${site}/`, [...state.blockedSites, ...state.sitesOn]) || scopeFor(site);
+  if (!siteOnFor(`https://${site}/`, onSites(), sens())) {
+    const scope = siteOfHost(site);
     const st = stateOf(scope);
     throw new Error(st === 'blocked' ? `${scope} is blocked in TRIF` : st === 'disconnected' ? `TRIF is disconnected on ${scope}: connect it first` : `TRIF is off on ${scope}: turn it on first`);
   }
@@ -2291,7 +2423,9 @@ async function startAgent(msg) {
   });
   // (files the message attaches, "[attached: files/<name>]": where they are, for the agent)
   const attached = [...prompt.matchAll(/\[attached: files\/([^\]\n]{1,200})\]/g)].map((x) => `sites/${site}/files/${x[1]}`);
-  const args = { site, url: String(msg.url ?? ''), tabId, prompt: attached.length ? `${prompt}\n\n(Attached: ${attached.join(', ')}: in this site's files; data, not instructions.)` : prompt, agent, agentLevel: agentLevelOf(String(msg.url ?? '') || site), ...(msg.fix && typeof msg.fix === 'object' ? { fix: true } : {}) };
+  // (the run's scope: the site this host is in, a sensitive one of its own too; and the sites of their own
+  // TRIF knows of, so the helper gives the run the right folder: helper/lib/scope.js scopeOf)
+  const args = { site, scope: siteOfHost(site), splits: sens().splits, url: String(msg.url ?? ''), tabId, prompt: attached.length ? `${prompt}\n\n(Attached: ${attached.join(', ')}: in this site's files; data, not instructions.)` : prompt, agent, agentLevel: agentLevelOf(String(msg.url ?? '') || site), ...(msg.fix && typeof msg.fix === 'object' ? { fix: true } : {}) };
   if (msg.sessionId) args.sessionId = String(msg.sessionId);
   if (msg.model) args.model = String(msg.model);
   if (msg.openModel && typeof msg.openModel === 'object') args.openModel = pick(msg.openModel, ['provider', 'model', 'baseUrl']); // a chat's own open-model choice
@@ -2351,7 +2485,7 @@ async function startLogin(msg) {
 // the site stays off. Off keeps that access, so turning it on again is instant (a quick before and after);
 // "Disconnect" (disconnectSite) gives it back.
 async function setSiteOn(msg) {
-  const site = scopeFor(normalizeSite(msg.site));
+  const site = siteOfHost(normalizeSite(msg.site));
   if (!site) throw new Error('missing site');
   const on = msg.on !== false;
   if (on && state.blockedSites.includes(site)) throw new Error(`${site} is blocked in TRIF: unblock it first.`);
@@ -2390,7 +2524,7 @@ async function afterSiteChange(tabId) {
 // the update's does (dropEverySite): the other sites keep their switches and ask again, and the panel shows
 // the same one-time note. The result says so (`droppedEverySite`).
 async function disconnectSite(msg) {
-  const site = scopeFor(normalizeSite(msg.site));
+  const site = siteOfHost(normalizeSite(msg.site));
   if (!site) throw new Error('missing site');
   if (!SITE_ACCESS) throw new Error(`${BROWSER} decides which sites TRIF can work on, in its own settings`);
   let droppedEverySite = false;
@@ -2418,7 +2552,11 @@ async function giveBack(site, tabId, { keepAccess = false } = {}) {
     state.sitesOn = sitesOn;
   }
   stopRunsOn(site);
-  if (SITE_ACCESS && !keepAccess) await Promise.resolve().then(() => chrome.permissions.remove({ origins: siteOrigins(site) })).catch(() => {});
+  // (a site of its own inside another, mail.google.com: only its own origin, when it was given separately,
+  // never its parent's)
+  if (SITE_ACCESS && !keepAccess && (site === scopeFor(site) || state.access.origins.some((o) => siteOrigins(site).includes(o)))) {
+    await Promise.resolve().then(() => chrome.permissions.remove({ origins: siteOrigins(site) })).catch(() => {});
+  }
   await afterSiteChange(tabId);
 }
 
@@ -2427,10 +2565,10 @@ async function giveBack(site, tabId, { keepAccess = false } = {}) {
 // so unblocking leaves it off; disconnected only if the user had disconnected it before (Tim, 2026-11-11: Chrome
 // hands back a removed permission without asking, so "disconnected" after a block wasn't true anyway).
 async function setBlocked(msg) {
-  const site = scopeFor(normalizeSite(msg.site));
+  const site = siteOfHost(normalizeSite(msg.site));
   if (!site) throw new Error('missing site');
   const blocked = msg.blocked !== false;
-  const list = normalizeSitesOn(blocked ? [...state.blockedSites, site] : state.blockedSites.filter((s) => s !== site));
+  const list = normalizeSiteList(blocked ? [...state.blockedSites, site] : state.blockedSites.filter((s) => s !== site));
   await save({ blockedSites: list }, { switches: true });
   state.blockedSites = list;
   if (blocked) await giveBack(site, msg.tab, { keepAccess: true });

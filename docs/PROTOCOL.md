@@ -352,6 +352,19 @@ TRIF asks for each site's permission when it's turned on there (Fix, Connect), a
   `disconnected` (the sites on without access), `blockedSites` and `access` (`{all, allUrls, origins}`); the
   panel's status `siteAccess` (false in Safari) and `accessNote` (below). `trif status` prints `disconnected`
   and `blocked`.
+- **Sensitive sites, each a site of its own** (extension/lib.js "sensitive sites", docs/SENSITIVE-STRINGS.md):
+  a host on the sensitive list under a registrable domain (mail.google.com) is a site of its own in
+  `sitesOn`, `blockedSites`, run scope and mod folders (`sites/mail.google.com/`); the parent's mods get it
+  in their `excludeMatches` (so does the runtime), all-sites mods skip every sensitive site, and a sensitive
+  site's own mods run only there. Each sensitive site is put on `blockedSites` once (`sensitiveDone`); one
+  the user's mods already reach is asked about instead (`sensitivePending`, the panel's status
+  `sensitive: {splits, pending}`; `{type: "sensitive.answer", host, choice: "keep"|"block", tab}` from the
+  panel; Keep sends `{cmd: "sensitive.split", args: {host, ids}}` to the helper, which copies those mods into
+  the host's folder and answers `{host, copies: [{from, to}]}`; refused from a run). `agent.start` carries
+  `scope` (the host's site) and `splits` (the sites of their own the extension knows of): the helper takes
+  `scope` when it's the site or a part of it under the same registrable domain (helper/lib/scope.js
+  runScope), and locks every other site's folder by `scopeOf`. `status` carries `sensitiveBlocked` (the
+  sensitive sites on the block list), which `trif status` counts instead of listing.
 - **Taken back** in the browser's settings: `permissions.onAdded`/`onRemoved` re-read the access, re-sync the mods and stop runs on sites that lost it. The site stays in `sitesOn`, so connecting
   it brings it back as it was.
 - **The browser's own blocked sites** (Chrome's "Don't allow extensions on these sites") don't show in

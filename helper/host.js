@@ -35,7 +35,7 @@ const { readInstructions, writeInstructions, instructionsFile, MAX_LENGTH } = re
 const { ownSock, removeStaleSockets, codeStamp } = require('./lib/helpers');
 const { loadOrigins, recordOrigins, renameOrigins, activeRuns } = require('./lib/origins');
 const { deleteMod, emptyTrash } = require('./lib/trash');
-const { scopeFor } = require('./lib/scope');
+const { runScope } = require('./lib/scope');
 const update = require('./lib/update');
 const { buildReport, reportEmail, reportUrl } = require('./lib/report');
 const { migratePrivate } = require('./lib/migrate');
@@ -503,7 +503,7 @@ const runSubscribers = new Map(); // runId or loginId -> Set of CLI sockets that
 const AGENT_COMMANDS = new Set(['mod.historyCode', 'mod.historyDiff', 'mod.historyRestore', 'mod.export', 'mod.exportSite', 'mod.import',
   'files.add', 'files.begin', 'files.slice', 'files.end', 'files.abort', 'files.list', 'files.remove', 'files.reveal', 'mod.reveal', 'agent.list', 'agent.start', 'agent.stop', 'agent.running', 'agent.login', 'agent.loginCode', 'agent.loginCancel', 'mod.approve', 'mod.reject', 'mod.review', 'mod.undo', 'mod.history',
   'mod.update', 'instructions.get', 'instructions.set', 'agent.models', 'agent.openModel', 'agent.openModel.set', 'agent.openModel.setKey', 'agent.openModel.removeKey', 'update.check', 'update.install', 'update.setAuto', 'report.build',
-  'shipped.install', 'shipped.none']);
+  'shipped.install', 'shipped.none', 'sensitive.split']);
 // Only from the side panel, by a click there: never from the socket (the user's terminal, or `trif` in
 // a run, which also has its mailbox), only from the extension's own connection (onExtensionRequest),
 // whose background takes it from the panel page alone. Runs can't reach that connection: their
@@ -777,8 +777,16 @@ function agentCommand(cmd, args) {
       syncMods('review', false);
       return { id, allowed };
     }
+    // "Keep TRIF on there" (the panel's question about a sensitive host after the update): the parent's mods
+    // that reached it, copied into its own folder (lib/split.js). Not from a run.
+    case 'sensitive.split': {
+      const r = require('./lib/split').splitSensitive(ws, String(args.host ?? ''), Array.isArray(args.ids) ? args.ids : []);
+      logger.info(`${r.host} is a site of its own: copied ${r.copies.map((c) => `${c.from} -> ${c.to}`).join(', ') || 'nothing'}`);
+      syncMods('split', false);
+      return r;
+    }
     case 'mod.delete': {
-      const r = deleteMod(ws, args.id, { scope: args.scope });
+      const r = deleteMod(ws, args.id, { scope: args.scope, splits: Array.isArray(args.scopeSplits) ? args.scopeSplits : [] });
       logger.info(`deleted mod ${r.id} (to ${r.trashed})`);
       syncMods('delete', false);
       return { id: r.id, deleted: true };
@@ -813,7 +821,7 @@ function agentCommand(cmd, args) {
       return args.choice === 'new' ? { id: r.id, choice: 'new', version: r.version, trashed: !!r.trashed } : { id: r.id, choice: 'mine', version: r.version };
     }
     case 'mod.restore': {
-      const r = restoreMod(ws, args.id, { scope: args.scope });
+      const r = restoreMod(ws, args.id, { scope: args.scope, splits: Array.isArray(args.scopeSplits) ? args.scopeSplits : [] });
       logger.info(`restored mod ${r.id}`);
       syncMods('restore', false);
       return { id: r.id, restored: true, file: r.file };
@@ -846,7 +854,7 @@ function agentCommand(cmd, args) {
  */
 function startRun(args) {
   const site = typeof args.site === 'string' && args.site.trim() ? args.site.trim() : agents.hostOf(args.url);
-  const scope = scopeFor(site);
+  const scope = runScope(site, args.scope);
   if (args.merge === undefined || args.merge === null || args.merge === '') {
     const r = runs.start(args);
     const ids = [...pendingMerges].filter(([, m]) => m.scope === scope).map(([id]) => id);
@@ -854,7 +862,7 @@ function startRun(args) {
     return r;
   }
   const id = String(args.merge).trim();
-  if (scopeFor(id.split('/')[0]) !== scope) throw new Error(`${id} isn't a mod for ${scope || 'this site'}: merge it from its own site`);
+  if (require('./lib/scope').scopeOf(id.split('/')[0], [...(Array.isArray(args.splits) ? args.splits : []), scope]) !== scope) throw new Error(`${id} isn't a mod for ${scope || 'this site'}: merge it from its own site`);
   const m = mergeRequest(workspace(ws.home), id);
   const prompt = typeof args.prompt === 'string' && args.prompt.trim() ? `${args.prompt.trim()}\n\n${m.prompt}` : m.prompt;
   const r = runs.start({ ...args, prompt });
@@ -1214,6 +1222,7 @@ function onClientLine(sock, line) {
             : `"${cmd}" isn't available inside an agent run` });
     }
     args.scope = run.scope;
+    args.scopeSplits = run.splits || []; // (the sites of their own the run's extension knew of: scope.js scopeOf)
     args.agentRun = run.id; // ("Agent on this site": Just this once is for this run)
   }
 

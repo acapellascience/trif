@@ -10,7 +10,7 @@ const { envVar } = require('./env');
 const crypto = require('crypto');
 const { spawn } = require('child_process');
 const agents = require('./agents');
-const { scopeFor } = require('./scope');
+const { scopeFor, scopeOf, runScope, cleanSplits } = require('./scope');
 const { readInstructions, instructionsContext } = require('./instructions');
 const { markRunActive, markRunEnded } = require('./origins');
 const { listModFiles, ALL_SITES: ALL_SITES_DIR } = require('./mods');
@@ -418,7 +418,7 @@ function deniedOutsideHome(home, readable, roots = SHARED_ROOTS) {
  * The only denies inside readable folders are the skill folders' secrets. No network at all: `trif`
  * reaches the helper through the mailbox. Real paths, as sandboxes compare.
  */
-function runLimits(ws, { scope, box, screenshotsReal, modsReal }) {
+function runLimits(ws, { scope, splits = [], box, screenshotsReal, modsReal }) {
   ws = withPrivatePaths(ws);
   const real = realOrResolved;
   const node = real(process.execPath);
@@ -437,7 +437,9 @@ function runLimits(ws, { scope, box, screenshotsReal, modsReal }) {
   // Every other site's folder is read-only to the run. Not all-sites/: a mod for every site may be
   // edited from any site's chat, and every such change waits for the user's OK (its @match is outside
   // the run's scope: held.js), with the version before running meanwhile.
-  const otherSites = names.filter((n) => scopeFor(n) !== scope && n !== ALL_SITES_DIR);
+  // (a sensitive host's own site, mail.google.com, is another site to a google.com run, and the other way
+  // round: scope.js scopeOf with the sites of their own the extension sent)
+  const otherSites = names.filter((n) => scopeOf(n, [...splits, ...(scope !== scopeFor(scope) ? [scope] : [])]) !== scope && n !== ALL_SITES_DIR);
   // Each such folder by its path in the workspace (`literal`, what Claude Code's file tools match rules
   // against: a site folder can be a link) and its real path (`real`, what sandboxes compare); `rel` names
   // it as modSnapshot names files.
@@ -539,7 +541,7 @@ class Runs {
   scopes() {
     const now = Date.now();
     this.recent = this.recent.filter((r) => r.until > now);
-    const live = [...this.runs.values()].map((r) => ({ runId: r.id, site: r.site, scope: r.scope, before: r.before || null, locked: r.locked || [], startedAt: r.startedAt }));
+    const live = [...this.runs.values()].map((r) => ({ runId: r.id, site: r.site, scope: r.scope, agentLevel: r.agentLevel, before: r.before || null, locked: r.locked || [], startedAt: r.startedAt }));
     return [...live, ...this.recent];
   }
 
@@ -565,7 +567,9 @@ class Runs {
     const run = {
       id: newRunId(),
       site,
-      scope: scopeFor(site),
+      // (a sensitive host under a registrable domain is its own site: the extension says so, scope.js runScope)
+      scope: runScope(site, args.scope),
+      splits: cleanSplits(args.splits),
       // Given to the agent as TRIF_RUN_TOKEN; `trif` sends it, and the helper scopes its requests.
       token: crypto.randomBytes(16).toString('hex'),
       agent: adapter.id,
@@ -1046,7 +1050,7 @@ class Runs {
         for (const n of [...m.notes, ...m.errors]) this.logger.warn(`after agent run ${run.id}: ${n}`);
       }
     } catch (e) { this.logger.warn(`after agent run ${run.id}: couldn't check for private files in the workspace: ${e.message}`); }
-    if (run.before) this.recent.push({ runId: run.id, site: run.site, scope: run.scope, before: run.before, locked: run.locked || [], startedAt: run.startedAt, until: Date.now() + RECENT_MS });
+    if (run.before) this.recent.push({ runId: run.id, site: run.site, scope: run.scope, agentLevel: run.agentLevel, before: run.before, locked: run.locked || [], startedAt: run.startedAt, until: Date.now() + RECENT_MS });
     this.runs.delete(run.id);
     if (this.bySite.get(run.site) === run.id) this.bySite.delete(run.site);
   }

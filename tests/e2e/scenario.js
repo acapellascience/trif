@@ -1146,7 +1146,9 @@ class Scenario {
         if (x.status === 0 || !/127\.0\.0\.1 is blocked in TRIF: nothing from TRIF runs there or reads it/.test(x.stderr)) throw new Error(`trif ${args[0]}: ${x.status} ${x.stderr}`);
       }
       const st = (await this.cli(['status'], { json: true })).json.extension;
-      if (JSON.stringify(st.blockedSites) !== '["127.0.0.1"]' || st.sitesOn.includes('127.0.0.1')) throw new Error(`status: ${JSON.stringify([st.blockedSites, st.sitesOn])}`);
+      // (the sensitive sites TRIF started blocked aside: sensitiveCheck)
+      const mine = st.blockedSites.filter((x) => !(st.sensitiveBlocked || []).includes(x));
+      if (JSON.stringify(mine) !== '["127.0.0.1"]' || st.sitesOn.includes('127.0.0.1')) throw new Error(`status: ${JSON.stringify([st.blockedSites, st.sitesOn])}`);
       const text = await this.cli(['status']);
       if (!/^blocked {7}127\.0\.0\.1: blocked in TRIF/m.test(text.stdout)) throw new Error(`trif status: ${text.stdout}`);
       await d.click(this.panelCtx, '#settings-btn');
@@ -1283,6 +1285,7 @@ class Scenario {
       await r.check('a boxed mod as a free mod (how a browser without the sandbox runs one the user allowed): the same API works in the page\'s world', () => this.sandboxPageFormCheck(win));
       await r.check('powers (docs/POWERS.md): a boxed mod with powers waits for the user\'s OK for its set (panel and trif status say what it asks for); allowed, sound, controls, read-drafts and keys work and stay narrow; undeclared, each is refused; a new version with the same powers runs, one with a new power waits for that one', () => this.powersCheck(win));
       await r.check('"Agent on this site": Ask asks in the panel (Just this once runs the code), Look refuses code, Off refuses reading too, a sensitive site is off with its line, Settings lists them', () => this.agentSitesCheck(win));
+      await r.check('sensitive sites (lib.js "sensitive sites"): a sensitive subdomain (mail.x.com, on the user\'s list) is a site of its own, blocked from the start (the red screen; agents refused); Unblock lands on off, Fix turns it on with none of x.com\'s mods, the Off note, no suggestions, "Agent: Off"; hosts x.com\'s mods reach are asked about once (Keep TRIF on there copies them into their own folder and turns it on; Block it blocks); the mods box folds the mods for other pages into "N more for other x.com pages" and grows while the chat is empty', () => this.sensitiveCheck(win));
       await r.check('sharing: a .js dropped on the panel is imported (its site from @match, its shipped markers gone) and held like any mod from outside, "imported from a file"; dropped again, Add as a copy; Replace keeps the old one, which History shows, views, diffs and restores; Export copies it to Downloads and shows it; another file dropped goes to the site\'s files with a note, listed, never a mod', () => this.shareCheck(win));
       await r.check('the code card: a mod\'s </> and its file name open its code (a style mod: its rules), with line numbers; Copy copies it; Show in Finder and Open in editor ask the helper, which reveals the mod\'s own file (a stand-in for open here); Esc closes it', () => this.codeViewCheck(win));
       await r.check('a short panel (400px): Settings, the code card and History, the approval card and the agent\'s menu each scroll to their last item', () => this.shortPanelCheck(win));
@@ -3220,7 +3223,8 @@ setTimeout(() => {
     const choose = async (level) => {
       await this.panel(`async (lv) => { document.getElementById('agent-level').click(); document.querySelector('#agent-level-menu [data-level="' + lv + '"]').click(); return true; }`, [level]);
     };
-    const WORDS = { off: 'Agent can’t see this site', look: 'Agent can look', ask: 'Agent asks before running code', run: 'Agent can run code' };
+    // (Off in words, however narrow: "Agent: Off", Tim 2026-11-11)
+    const WORDS = { off: 'Agent: Off', look: 'Agent can look', ask: 'Agent asks before running code', run: 'Agent can run code' };
     try {
       await this.ext(`async (id, url) => { await chrome.tabs.update(id, { url, active: true }); }`, [win.tabId, `${base}/`]);
       await this.dismissApproval();
@@ -3269,6 +3273,9 @@ setTimeout(() => {
       await waitFor('Off saved', async () => (await this.ext(`async () => (await chrome.storage.local.get('agentSites')).agentSites`))?.[site] === 'off' || null, { timeoutMs: 8000 });
       const atOff = await waitFor('the line at Off', async () => { const p = await panelState(); return p.level === 'off' ? p : null; }, { timeoutMs: 8000 });
       if (atOff.words !== WORDS.off) problems.push(`the line at Off: ${atOff.words}`);
+      // (what Off means, on any site at Off; no starter suggestions)
+      const offNote = `Your agent can’t see ${site} (you set it to Off): it can only write mods from what you describe. Change it below.`;
+      if (atOff.note !== offNote) problems.push(`the note at Off: ${atOff.note}`);
       await themes('agent-line-off');
       const off = await this.cli(['text', '--tab', String(win.tabId)]);
       if (off.status === 0 || !/"Agent on this site" is Off for 127\.0\.0\.1/.test(off.stderr + off.stdout)) problems.push(`trif text at Off: ${off.status} ${off.stderr}`);
@@ -3280,7 +3287,7 @@ setTimeout(() => {
       // the sensitive list: off by default, with the chat's first line saying why
       await setStore({ agentSites: rest, sensitiveSites: [{ pattern: site, why: 'a test site' }] });
       const sens = await waitFor('the note for a sensitive site', async () => { const p = await panelState(); return p.note ? p : null; }, { timeoutMs: 8000 });
-      if (sens.level !== 'off' || sens.note !== `Your agent can’t see ${site}: it’s a test site. Change it below.` || !sens.noteFirst) problems.push(`a sensitive site: ${JSON.stringify(sens)}`);
+      if (sens.level !== 'off' || sens.note !== `Your agent can’t see ${site} (it’s a test site): it can only write mods from what you describe. Change it below.` || !sens.noteFirst) problems.push(`a sensitive site: ${JSON.stringify(sens)}`);
       await themes('agent-sensitive-note');
       // Settings: the sites chosen, and the sensitive list
       await setStore({ agentSites: { ...rest, [site]: 'look' }, sensitiveSites: null });
@@ -3300,6 +3307,133 @@ setTimeout(() => {
       await this.d.colorScheme(this.panelCtx, '').catch(() => {});
       // (Settings closed again, if this opened it)
       if (await this.panel(`async () => !document.getElementById('settings').hidden`).catch(() => false)) await this.panelClick('#settings-btn').catch(() => {});
+    }
+  }
+
+  // ---- sensitive sites, each a site of its own (lib.js "sensitive sites", background.js considerSensitive), and
+  // the mods box's fold (sidepanel.js foldLine). mail.x.com, inbox.x.com and post.x.com resolve to the test
+  // server (*.x.com) and are covered by x.com's access, as mail.google.com is by google.com's.
+  async sensitiveCheck(win) {
+    const { tlsPort } = this.o.servers;
+    const at = (h, p = '/') => `https://${h}:${tlsPort}${p}`;
+    const go = (url) => this.ext(`async (id, url) => { await chrome.tabs.update(id, { url, active: true }); }`, [win.tabId, url]);
+    const status = async () => (await this.cli(['status'], { json: true })).json.extension;
+    const setList = (extra) => this.ext(`async (extra) => {
+      const { SENSITIVE_DEFAULT } = await import('./agentsites.js');
+      await chrome.storage.local.set({ sensitiveSites: [...SENSITIVE_DEFAULT.map(([pattern, why]) => ({ pattern, why })), ...extra] });
+    }`, [extra]);
+    const themes = async (name) => { for (const scheme of ['dark', 'light']) if (await this.d.colorScheme(this.panelCtx, scheme)) { await sleep(200); await this.shot(this.panelCtx, `${name}-${scheme}`); } await this.d.colorScheme(this.panelCtx, ''); };
+    const view = () => this.panel(`async () => {
+      const q = (s) => document.querySelector(s);
+      const list = q('#mod-list');
+      return { site: q('#site')?.textContent || '', gate: !q('#gate').hidden, gateTitle: q('#gate-title').textContent, gateBtn: q('#gate-btn').textContent,
+        red: document.body.classList.contains('site-blocked'), links: q('#gate-links').hidden ? [] : [...document.querySelectorAll('#gate-links a:not([hidden])')].map((a) => a.textContent),
+        note: q('#agent-site-note').hidden ? '' : q('#agent-site-note').textContent, level: q('#agent-level').dataset.level || '',
+        words: q('#agent-level .agent-level-text').textContent, wordsShown: getComputedStyle(q('#agent-level .agent-level-text')).display !== 'none',
+        chips: !q('#empty').hidden && getComputedStyle(q('#empty .chips')).display !== 'none', empty: !q('#empty').hidden,
+        mods: q('#mods').hidden ? null : [...document.querySelectorAll('#mod-list > li[data-mod]')].map((li) => li.dataset.mod),
+        fold: q('#mod-list > li.mods-fold')?.textContent || '', foldOpen: q('#mod-list > li.mods-fold .mods-fold-btn')?.getAttribute('aria-expanded') === 'true',
+        maxH: list ? getComputedStyle(list).maxHeight : '', overflowX: list ? getComputedStyle(list).overflowX : '', vh: innerHeight, chatEmpty: document.body.classList.contains('chat-empty'),
+        notice: q('#sensitive-note').hidden ? [] : [...document.querySelectorAll('#sensitive-list li')].map((li) => ({ host: li.dataset.host, text: li.querySelector('p').textContent, buttons: [...li.querySelectorAll('button')].map((b) => b.textContent) })) };
+    }`);
+    const wide = path.join(this.trif, 'sites', 'x.com', 'e2e-sens-wide.js');
+    const elsewhere = path.join(this.trif, 'sites', 'x.com', 'e2e-sens-elsewhere.js');
+    const problems = [];
+    const done = [];
+    try {
+      // 1. mail.x.com on the user's list: nothing of theirs reaches it, so it starts blocked
+      await setList([{ pattern: 'mail.x.com', why: 'email' }]);
+      // (an all-sites mod switched on by an earlier check would make it a question: then Block it, the same)
+      let st = await waitFor('mail.x.com dealt with', async () => {
+        const e = await status();
+        if (e.blockedSites.includes('mail.x.com')) return e;
+        if ((await view()).notice.some((x) => x.host === 'mail.x.com')) await this.panel(`async () => { document.querySelector('#sensitive-list li[data-host="mail.x.com"] .btn:not(.primary)')?.click(); return true; }`);
+        return null;
+      }, { timeoutMs: 15000, intervalMs: 500 });
+      if (!st.sensitiveBlocked.includes('mail.x.com') || !st.sensitiveBlocked.includes('paypal.com')) problems.push(`sensitiveBlocked: ${JSON.stringify(st.sensitiveBlocked)}`);
+      if (!st.sitesOn.includes('x.com')) problems.push(`x.com isn't on: ${st.sitesOn}`);
+      await go(at('mail.x.com', '/inbox'));
+      const blocked = await waitFor('the blocked screen', async () => { const v = await view(); return v.site === 'mail.x.com' && v.gate && v.red ? v : null; }, { timeoutMs: 15000 });
+      if (blocked.gateTitle !== 'The robot is blocked on mail.x.com' || blocked.gateBtn !== 'Unblock') problems.push(`the blocked screen: ${JSON.stringify(blocked)}`);
+      if (blocked.links.some((l) => /Disconnect/.test(l))) problems.push(`Disconnect offered, though its access is x.com's: ${blocked.links}`);
+      await themes('sensitive-blocked');
+      const refused = await this.cli(['text', '--url', 'mail.x.com']);
+      if (refused.status === 0 || !/mail\.x\.com is blocked in TRIF/.test(refused.stderr)) problems.push(`trif text on mail.x.com: ${refused.status} ${refused.stderr}`);
+      done.push('mail.x.com blocked from the start (agents refused)');
+      // 2. Unblock: off (x.com's access covers it); Fix: on, with none of x.com's mods; Off note, no suggestions, "Agent: Off"
+      await this.panelClick('#gate-btn');
+      const off = await waitFor('unblocked', async () => { const v = await view(); return v.gate && !v.red ? v : null; }, { timeoutMs: 10000 });
+      if (off.gateTitle !== 'The robot is off.' || off.gateBtn !== 'Fix mail.x.com') problems.push(`after Unblock: ${JSON.stringify(off)}`);
+      await themes('sensitive-unblocked');
+      await this.panelClick('#gate-btn');
+      const on = await waitFor('on', async () => { const v = await view(); return !v.gate && v.level ? v : null; }, { timeoutMs: 10000 });
+      const note = 'Your agent can’t see mail.x.com (it’s email): it can only write mods from what you describe. Change it below.';
+      if (on.level !== 'off' || on.note !== note || on.words !== 'Agent: Off' || !on.wordsShown) problems.push(`on: the line and note: ${JSON.stringify(on)}`);
+      if (on.empty && on.chips) problems.push('the starter suggestions show at Off');
+      if (on.mods && on.mods.some((id) => id.startsWith('x.com/'))) problems.push(`x.com's mods listed on mail.x.com: ${on.mods}`);
+      await this.narrow(true).catch(() => {});
+      await sleep(200);
+      const narrowWords = await view();
+      if (!narrowWords.wordsShown) problems.push('"Agent: Off" hidden in a narrow panel');
+      await themes('sensitive-off-note');
+      await this.narrow(false).catch(() => {});
+      done.push(`Unblock: "${off.gateTitle}"; Fix: on, ${on.mods ? on.mods.length : 0} mods, the Off note, "${on.words}"`);
+      // 3. hosts x.com's mods reach: asked about, once
+      fs.writeFileSync(wide, '// ==WebMod==\n// @name E2E sensitive wide\n// @match *://*.x.com/*\n// @style\n// ==/WebMod==\n{ "css": "body { outline: 0 }" }\n');
+      await waitFor('the wide mod', async () => (await status()).mods.some((m) => m.id === 'x.com/e2e-sens-wide') || null, { timeoutMs: 15000, intervalMs: 500 });
+      await this.cli(['enable', 'x.com/e2e-sens-wide']);
+      await waitFor('the wide mod on', async () => (await status()).mods.find((m) => m.id === 'x.com/e2e-sens-wide')?.enabled || null, { timeoutMs: 10000, intervalMs: 500 });
+      await setList([{ pattern: 'mail.x.com', why: 'email' }, { pattern: 'inbox.x.com', why: 'email' }, { pattern: 'post.x.com', why: 'your messages' }]);
+      await go(at('x.com', '/home'));
+      const asked = await waitFor('the notice', async () => { const v = await view(); return v.notice.length === 2 ? v : null; }, { timeoutMs: 15000 });
+      const rows = asked.notice.map((x) => x.text);
+      if (rows[0] !== 'inbox.x.com is email: TRIF now keeps it apart from x.com, as its own site.' || rows[1] !== 'post.x.com is your messages: TRIF now keeps it apart from x.com, as its own site.'
+        || asked.notice[0].buttons.join('|') !== 'Keep TRIF on there|Block it') problems.push(`the notice: ${JSON.stringify(asked.notice)}`);
+      st = await status();
+      if (st.blockedSites.includes('inbox.x.com') || st.blockedSites.includes('post.x.com')) problems.push('a host asked about was blocked meanwhile');
+      await themes('sensitive-notice');
+      await this.panel(`async () => { document.querySelector('#sensitive-list li[data-host="inbox.x.com"] .btn.primary').click(); return true; }`);
+      const copied = path.join(this.trif, 'sites', 'inbox.x.com', 'e2e-sens-wide.js');
+      await waitFor('the copy', () => fs.existsSync(copied) || null, { timeoutMs: 15000 });
+      st = await waitFor('inbox.x.com on', async () => { const e = await status(); return e.sitesOn.includes('inbox.x.com') && e.mods.some((m) => m.id === 'inbox.x.com/e2e-sens-wide') ? e : null; }, { timeoutMs: 15000, intervalMs: 500 });
+      const copy = st.mods.find((m) => m.id === 'inbox.x.com/e2e-sens-wide');
+      if (!copy.enabled) problems.push(`the copy isn't on: ${JSON.stringify(copy)}`);
+      if (fs.readFileSync(copied, 'utf8') !== fs.readFileSync(wide, 'utf8')) problems.push('the copy isn\'t the same file');
+      await this.panel(`async () => { document.querySelector('#sensitive-list li[data-host="post.x.com"] .btn:not(.primary)').click(); return true; }`);
+      st = await waitFor('post.x.com blocked', async () => { const e = await status(); return e.blockedSites.includes('post.x.com') ? e : null; }, { timeoutMs: 15000, intervalMs: 500 });
+      const gone = await waitFor('the notice gone', async () => { const v = await view(); return v.notice.length ? null : v; }, { timeoutMs: 10000 });
+      if (!gone) problems.push('the notice stayed');
+      // the parent's copy no longer runs on inbox.x.com; the host's own copy does
+      await go(at('inbox.x.com', '/'));
+      const inbox = await waitFor('inbox.x.com\'s panel', async () => { const v = await view(); return v.site === 'inbox.x.com' && !v.gate && v.mods ? v : null; }, { timeoutMs: 15000 });
+      if (JSON.stringify(inbox.mods) !== '["inbox.x.com/e2e-sens-wide"]') problems.push(`inbox.x.com's mods: ${inbox.mods}`);
+      done.push(`the notice (${rows.length} rows); Keep TRIF on there: ${copy.id} on; Block it: post.x.com blocked`);
+      // 4. the mods box: a mod for another x.com page folds into the line at the bottom; it grows while the chat is empty
+      fs.writeFileSync(elsewhere, '// ==WebMod==\n// @name E2E sensitive elsewhere\n// @match *://x.com/settings*\n// @style\n// ==/WebMod==\n{ "css": "body { outline: 0 }" }\n');
+      await go(at('x.com', '/home'));
+      const folded = await waitFor('the fold', async () => { const v = await view(); return v.site === 'x.com' && /^\d+ more for other x\.com pages$/.test(v.fold) && v.mods ? v : null; }, { timeoutMs: 20000 });
+      if (folded.mods.includes('x.com/e2e-sens-elsewhere')) problems.push('the mod for another page is listed above the fold');
+      if (folded.overflowX !== 'hidden') problems.push(`the box scrolls sideways: ${folded.overflowX}`);
+      const px = parseFloat(folded.maxH);
+      if (folded.chatEmpty ? Math.abs(px - (0.7 * folded.vh - 40)) > 2 : Math.abs(px - (0.4 * folded.vh - 40)) > 2) problems.push(`the box's height: ${folded.maxH} (chat empty: ${folded.chatEmpty}, ${folded.vh}px)`);
+      await themes('mods-fold');
+      await this.panelClick('#mod-list > li.mods-fold .mods-fold-btn');
+      const opened = await waitFor('unfolded', async () => { const v = await view(); return v.foldOpen && v.mods.includes('x.com/e2e-sens-elsewhere') ? v : null; }, { timeoutMs: 8000 });
+      await themes('mods-fold-open');
+      done.push(`"${folded.fold}" (${folded.mods.length} above it), opened: ${opened.mods.length}; the box ${folded.maxH} with the chat ${folded.chatEmpty ? 'empty' : 'in use'}`);
+      if (problems.length) throw new Error(problems.join('\n'));
+      return done.join('; ');
+    } finally {
+      for (const f of [wide, elsewhere]) { try { fs.unlinkSync(f); } catch { /* gone */ } }
+      fs.rmSync(path.join(this.trif, 'sites', 'inbox.x.com'), { recursive: true, force: true });
+      await this.d.colorScheme(this.panelCtx, '').catch(() => {});
+      await this.ext(`async () => { await chrome.storage.local.set({ sensitiveSites: null }); }`).catch(() => {});
+      // (the hosts it blocked, unblocked again from Settings, as the user would)
+      await this.panelClick('#settings-btn').catch(() => {});
+      await this.panel(`async () => { for (const li of [...document.querySelectorAll('#blocked-list li')]) if (/^(mail|post)\\.x\\.com/.test(li.textContent)) li.querySelector('button').click(); return true; }`).catch(() => {});
+      await sleep(500);
+      await this.panelClick('#settings-btn').catch(() => {});
+      await go(at('x.com', '/home')).catch(() => {});
     }
   }
 

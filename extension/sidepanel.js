@@ -4,7 +4,7 @@
 // See docs/PROTOCOL.md, "Side panel and agent runs".
 
 import { siteForUrl, modAppliesTo, modSites, isMultiSite, offOnSite, normalizeOffSites, scopeFor, hostInScope, limitToSites, withOffSites, modGroup, GROUPS, GROUP_NAMES, groupWord, groupOffOn, offSitesFor, normalizeGroupsOff, FIREFOX, BROWSER, SETUP_COMMAND,
-  SITE_ACCESS, siteOrigins, siteState, hasSiteAccess,
+  SITE_ACCESS, siteOrigins, siteState, hasSiteAccess, sensitiveSites, splitForPage,
   normalizeModOrder, orderMods, moveId, setModOrder,
   normalizeSettings, normalizePicks, siteSettings, withoutModel, panelQuery, panelWindowBounds, rememberScreen } from './lib.js';
 import { setMarkdown, unwrapMarkdown } from './markdown.js';
@@ -31,7 +31,7 @@ const ui = {
   dot: $('#dot'), site: $('#site'), barRobot: $('#bar-robot'), siteSwitch: $('#site-switch'), newChat: $('#new-chat'), settingsBtn: $('#settings-btn'),
   gate: $('#gate'), gateFoot: $('#gate-foot'), gateTitle: $('#gate-title'), gateWhy: $('#gate-why'), gateBtn: $('#gate-btn'), gateErr: $('#gate-err'), gateNote: $('#gate-note'),
   gateLinks: $('#gate-links'), gateBlock: $('#gate-block'), gateDisconnect: $('#gate-disconnect'),
-  modeNote: $('#mode-note'), accessNote: $('#access-note'), accessNoteOk: $('#access-note-ok'),
+  modeNote: $('#mode-note'), accessNote: $('#access-note'), accessNoteOk: $('#access-note-ok'), sensitiveNote: $('#sensitive-note'), sensitiveList: $('#sensitive-list'),
   blockedList: $('#blocked-list'), blockedEmpty: $('#blocked-empty'),
   onBreak: $('#on-break'),
   chatMods: $('#chat-mods'),
@@ -661,6 +661,8 @@ function render() {
   renderNoSandbox();
 
   ui.empty.hidden = !site || chat.messages.length > 0;
+  // (the mods box shows all its rows while the chat is empty: sidepanel.css)
+  document.body.classList.toggle('chat-empty', !chat.messages.length);
   ui.working.hidden = !running;
 
   ui.newChat.disabled = !site || (chat.messages.length === 0 && !running);
@@ -1004,6 +1006,24 @@ function groupHeading(g) {
   return li;
 }
 
+// The folded line at the bottom of the mods box: "N more for other <site> pages", a button that shows them.
+let foldLi = null;
+function foldLine(n, scope) {
+  if (!foldLi) {
+    foldLi = el('li', 'mods-fold');
+    const b = el('button', 'mods-fold-btn');
+    b.type = 'button';
+    b.append(el('span', 'mods-fold-text'));
+    b.insertAdjacentHTML('beforeend', '<svg class="chev" viewBox="0 0 16 16" aria-hidden="true"><path d="M6 3.5 10.5 8 6 12.5"/></svg>');
+    b.addEventListener('click', () => { view.foldOpen = !view.foldOpen; renderMods(); });
+    foldLi.append(b);
+  }
+  foldLi.querySelector('.mods-fold-text').textContent = `${n} more for other ${scope} pages`;
+  foldLi.querySelector('.mods-fold-btn').setAttribute('aria-expanded', String(!!view.foldOpen));
+  foldLi.classList.toggle('open', !!view.foldOpen);
+  return foldLi;
+}
+
 function renderMods() {
   // A row being dragged stays where the pointer has it: the list catches up when it's dropped.
   if (modDrag) { modDrag.dirty = true; return; }
@@ -1013,13 +1033,21 @@ function renderMods() {
   // light says which run on this page. Plus mods on hold from an agent run here, so they can be allowed.
   // In the order the user dragged them into on this site, if they did, else the site's shipped mods in
   // the order TRIF ships them in (display only: lib.js orderMods).
-  const scope = site ? scopeFor(site) : null;
-  const listed = orderMods(site && status ? status.mods.filter((m) => limitToSites(m, [scope]) || m.held?.site === site) : [], view.defaultOrder[scope]);
+  // (a sensitive site is one of its own: mail.google.com lists only its own mods, google.com none of them)
+  const scope = siteScope();
+  const listed = orderMods(site && status ? status.mods.filter((m) => limitToSites(m, [scope], sensNow()) || m.held?.site === site) : [], view.defaultOrder[scope]);
   view.modNatural = listed.map((m) => m.id);
   // Grouped by how TRIF runs them (lib.js "Groups"): rules first, then sandboxed mods, then page scripts,
   // each in its own order.
   const ordered = orderMods(listed, view.modOrder[scope]);
   const mods = GROUPS.flatMap((g) => ordered.filter((m) => modGroup(m) === g));
+  // The ones whose @match doesn't cover this page (grey light) fold into one line at the bottom, "N more for
+  // other <site> pages" (lib.js splitForPage); a click shows them in their groups again (Tim, 2026-11-11).
+  const { other } = splitForPage(mods, tab?.url || '');
+  const otherIds = new Set(other.map((m) => m.id));
+  if (view.foldFor !== scope) { view.foldFor = scope; view.foldOpen = false; }
+  const shown = view.foldOpen ? mods : mods.filter((m) => !otherIds.has(m.id));
+  view.foldedIds = view.foldOpen ? [] : other.map((m) => m.id);
   ui.mods.hidden = mods.length === 0 && !view.siteFileCount;
   updateApprovals(mods);
   if (!mods.length) { view.modRows.clear(); ui.modList.replaceChildren(); ui.modsReviewNote.hidden = true; return; }
@@ -1045,14 +1073,15 @@ function renderMods() {
   // A heading for each group with mods here (or switched off here), with its switch, before its rows
   const want = [];
   for (const g of GROUPS) {
-    const inGroup = mods.filter((m) => modGroup(m) === g);
-    if (!inGroup.length && !groupOff(g)) continue;
+    const inGroup = shown.filter((m) => modGroup(m) === g);
+    if (!inGroup.length && !groupOff(g) && !(mods.some((m) => modGroup(m) === g) && view.foldOpen)) continue;
     want.push(groupHeading(g), ...inGroup.map((m) => rows.get(m.id).li));
   }
+  if (other.length) want.push(foldLine(other.length, scope));
   want.forEach((li, i) => { if (ui.modList.children[i] !== li) ui.modList.insertBefore(li, ui.modList.children[i] || null); });
   while (ui.modList.children.length > want.length) ui.modList.lastElementChild.remove();
   const byId = new Map(mods.map((m) => [m.id, m]));
-  for (const li of ui.modList.children) updateModItem(li, byId.get(li.dataset.mod));
+  for (const li of ui.modList.children) if (li.dataset.mod) updateModItem(li, byId.get(li.dataset.mod));
   // Each tier's count: how many of its mods are switched on here, of how many ("(1/2)")
   for (const [g, li] of groupHeadings) {
     const inGroup = mods.filter((m) => modGroup(m) === g);
@@ -1167,7 +1196,18 @@ async function addStarter(site, { fromSite = false } = {}) {
 // and Connect asks the browser and turns it on); blocked (TRIF's block list: the panel red, and Unblock).
 // (Chrome's own list of sites extensions may not touch doesn't show in chrome.permissions: contains still
 // says yes there, checked in Chrome 156. Such a site looks on or off here; the browser refuses TRIF there.)
-const siteScope = () => (view.site ? scopeFor(view.site) : null);
+// The sensitive sites (lib.js "sensitive sites"), as the background knows them: a sensitive host under a
+// registrable domain (mail.google.com) is a site of its own, with its own switch, mods and chat scope.
+let sensMemo = null;
+function sensNow() {
+  const st = view.status;
+  const k = [st?.sensitiveSites, st?.sensitive, view.site];
+  if (sensMemo && sensMemo.k.every((x, i) => x === k[i])) return sensMemo.model;
+  const model = sensitiveSites({ list: st?.sensitiveSites ?? null, pending: (st?.sensitive?.pending || []).map((p) => p.host), hosts: [...(st?.sensitive?.splits || []), ...(view.site ? [view.site] : [])] });
+  sensMemo = { k, model };
+  return model;
+}
+const siteScope = () => (view.site ? sensNow().scopeOf(view.site) : null);
 const currentState = () => {
   const scope = siteScope();
   if (!scope || !view.status) return null;
@@ -1253,7 +1293,9 @@ function renderGate(problem, agentInfo) {
   ui.gateLinks.hidden = state !== 'off';
   ui.gateBlock.textContent = `Block on ${scope}`;
   ui.gateDisconnect.textContent = `Disconnect from ${scope}`;
-  ui.gateDisconnect.hidden = !SITE_ACCESS;
+  // (a site of its own inside another, mail.google.com, whose access comes from its parent's: nothing of its
+  // own to give back, so no Disconnect; its parent's stays)
+  ui.gateDisconnect.hidden = !SITE_ACCESS || (scope !== scopeFor(scope) && hasSiteAccess(view.status?.access, scopeFor(scope)));
 }
 
 // The gate's main button: Fix (off), Connect (disconnected), or Unblock.
@@ -1323,7 +1365,46 @@ function setBlocked(blocked, site = siteScope()) {
 }
 
 // Settings, "Site permissions": the mode (not in Safari, which asks per site itself), and the blocked sites.
+// The update's question about each sensitive host the user's mods reach (background.js "sensitive sites on
+// upgrade"), on every site's panel until answered: Keep TRIF on there, or Block it.
+const sensitiveBusy = new Map(); // host -> 'keep' | 'block' while it's being done, or an error's text
+function renderSensitiveNote() {
+  const pending = view.status?.sensitive?.pending || [];
+  ui.sensitiveNote.hidden = !pending.length;
+  const key = JSON.stringify([pending, [...sensitiveBusy]]);
+  if (ui.sensitiveList.dataset.key === key) return;
+  ui.sensitiveList.dataset.key = key;
+  ui.sensitiveList.replaceChildren(...pending.map((p) => {
+    const li = el('li');
+    li.dataset.host = p.host;
+    const words = `${p.host} is ${p.why || 'on your list of sensitive sites'}: TRIF now keeps it apart from ${p.parent}, as its own site.`;
+    li.append(el('p', null, words));
+    if (p.allSites?.length) li.append(el('p', 'sensitive-also', `Mods for all sites don’t run there any more.`));
+    const busy = sensitiveBusy.get(p.host);
+    const row = el('div', 'sensitive-actions');
+    const keep = button(busy === 'keep' ? 'Keeping…' : 'Keep TRIF on there', 'primary', () => answerSensitive(p.host, 'keep'));
+    const block = button(busy === 'block' ? 'Blocking…' : 'Block it', '', () => answerSensitive(p.host, 'block'));
+    keep.disabled = block.disabled = busy === 'keep' || busy === 'block';
+    row.append(keep, block);
+    li.append(row);
+    if (busy && busy !== 'keep' && busy !== 'block') li.append(el('span', 'mod-err', busy));
+    return li;
+  }));
+}
+async function answerSensitive(host, choice) {
+  if (sensitiveBusy.get(host) === 'keep' || sensitiveBusy.get(host) === 'block') return;
+  sensitiveBusy.set(host, choice);
+  renderSensitiveNote();
+  try {
+    await request({ type: 'sensitive.answer', host, choice, tab: view.tab?.id });
+    sensitiveBusy.delete(host);
+  } catch (e) { sensitiveBusy.set(host, String(e?.message ?? e)); }
+  await refreshStatus();
+  render();
+}
+
 function renderSites() {
+  renderSensitiveNote();
   // (the one-time note after an update gave up every site's access)
   ui.accessNote.hidden = !view.status?.accessNote;
   const st = view.status;
@@ -1572,6 +1653,8 @@ function cardRobot(face = 'eyes') {
 // agent off) says so in the chat's first line. Settings: the sites chosen, and the sensitive list.
 const agentSettingsNow = () => ({ sites: view.status?.agentSites || {}, sensitive: view.status?.sensitiveSites ?? null });
 const LEVEL_WORDS = { off: 'Agent can’t see this site', look: 'Agent can look', ask: 'Agent asks before running code', run: 'Agent can run code' };
+// (Off says so in words on the line, however narrow: Tim, 2026-11-11)
+const LEVEL_SHORT = { off: 'Agent: Off' };
 // (the icons: an eye crossed out, an eye, an eye with a question mark, code; drawn in currentColor)
 const EYE = '<path d="M1.5 8s2.4-4.5 6.5-4.5S14.5 8 14.5 8 12.1 12.5 8 12.5 1.5 8 1.5 8z"/>';
 // (</>: thin strokes, sharp chevrons, a clear slash, the gaps open; .code-glyph in sidepanel.css)
@@ -1592,21 +1675,26 @@ function renderAgentLevel() {
   const wrap = ui.agentLevel.parentElement;
   wrap.hidden = !show;
   ui.agentSiteNote.hidden = true;
+  document.body.classList.toggle('agent-off', false);
   if (!show) { closeLevelMenu(false); return; }
   const lv = agentLevel(site, agentSettingsNow());
   const words = LEVEL_WORDS[lv.level];
   if (ui.agentLevel.dataset.level !== lv.level) {
     ui.agentLevel.dataset.level = lv.level;
     ui.agentLevel.querySelector('.agent-level-icon').innerHTML = LEVEL_ICONS[lv.level];
-    ui.agentLevel.querySelector('.agent-level-text').textContent = words;
+    ui.agentLevel.querySelector('.agent-level-text').textContent = LEVEL_SHORT[lv.level] || words;
   }
+  // (Off: the words always show, and the starter suggestions go: the agent can't see the page to do them)
+  document.body.classList.toggle('agent-off', lv.level === 'off');
   // (narrow: only the icon, the words its tooltip and label)
   ui.agentLevel.title = words;
   ui.agentLevel.setAttribute('aria-label', words);
   $('#agent-level-head').textContent = `What your agent can do on ${site}`;
   for (const b of levelItems()) b.setAttribute('aria-checked', String(b.dataset.level === lv.level));
-  if (lv.by === 'sensitive') {
-    ui.agentSiteNote.textContent = `Your agent can’t see ${site}: it’s ${lv.why || 'on your list of sensitive sites'}. Change it below.`;
+  // What Off means, on any site set to Off (Tim, 2026-11-11)
+  if (lv.level === 'off') {
+    const why = lv.by === 'sensitive' ? `it’s ${lv.why || 'on your list of sensitive sites'}` : 'you set it to Off';
+    ui.agentSiteNote.textContent = `Your agent can’t see ${site} (${why}): it can only write mods from what you describe. Change it below.`;
     ui.agentSiteNote.hidden = false;
   }
 }
@@ -2608,7 +2696,9 @@ function saveModOrder(li) {
   const scope = siteScope();
   if (!scope) return;
   const ids = rowIds();
-  view.modOrder = setModOrder(view.modOrder, scope, ids, view.modNatural);
+  // (the folded ones, "N more for other pages", keep their places after the rest)
+  const all = [...ids, ...(view.foldedIds || []).filter((id) => !ids.includes(id))];
+  view.modOrder = setModOrder(view.modOrder, scope, all, view.modNatural);
   chrome.storage.local.set({ modOrder: view.modOrder }).catch((e) => console.warn('[TRIF] couldn\'t save the mod order', e));
   ui.modsLive.textContent = `${rowName(li)} moved to position ${ids.indexOf(li.dataset.mod) + 1} of ${ids.length}.`;
 }
@@ -3364,8 +3454,8 @@ function reportLink(url, text, site) {
 }
 
 async function openReport() {
-  const scope = view.site ? scopeFor(view.site) : null;
-  const mods = view.site && view.status ? view.status.mods.filter((m) => limitToSites(m, [scope])) : [];
+  const scope = siteScope();
+  const mods = view.site && view.status ? view.status.mods.filter((m) => limitToSites(m, [scope], sensNow())) : [];
   let url = REPORT_URL;
   let text;
   try {

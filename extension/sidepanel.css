@@ -890,3 +890,26 @@ body.needs-login .msg.trif .break-actions .btn.go { color: #2e1f02; }
 
 /* the one-time note after an update gave up every site's access */
 .access-note { flex: none; margin: 0; padding: 8px 14px; border-bottom: 1px solid var(--line); background: var(--raised); font-size: 12px; }
+
+/* ---- sensitive sites and Off (Tim, 2026-11-11) ------------------------------------------------------------ */
+/* Off: no starter suggestions (the agent can't see the page), and the level in words, however narrow. */
+body.agent-off #empty .chips { display: none; }
+@media (max-width: 420px) { .agent-level[data-level="off"] .agent-level-text { display: inline; } }
+/* The mods box: all its rows while the chat is empty (up to about 70% of the panel), today's height once it
+   has messages; vertical scrolling only. */
+body.chat-empty .mod-list { max-height: calc(70vh - 40px); }
+/* "N more for other <site> pages": a quiet line at the bottom of the box */
+.mod-list li.mods-fold { padding: 6px 0 2px; border-top: 1px solid var(--line); }
+.mods-fold-btn { display: inline-flex; align-items: center; gap: 4px; padding: 0 2px; border: 0; background: none; color: var(--muted); font: inherit; font-size: 12px; cursor: pointer; }
+.mods-fold-btn:hover { color: var(--text); background: none; }
+.mods-fold-btn .chev { width: 10px; height: 10px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; transition: transform 0.15s ease; }
+.mods-fold.open .mods-fold-btn .chev { transform: rotate(90deg); }
+@media (prefers-reduced-motion: reduce) { .mods-fold-btn .chev { transition: none; } }
+/* The update's question about sensitive hosts your mods reach (background.js "sensitive sites on upgrade") */
+.sensitive-note { flex: none; margin: 0; padding: 8px 14px; border-bottom: 1px solid var(--line); background: var(--raised); font-size: 12px; }
+.sensitive-note[hidden] { display: none; }
+.sensitive-note ul { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
+.sensitive-note li p { margin: 0 0 6px; }
+.sensitive-note .sensitive-actions { margin-top: 0; }
+.sensitive-note .mod-err { display: block; margin-top: 4px; }
+.sensitive-note .sensitive-also { color: var(--muted); }

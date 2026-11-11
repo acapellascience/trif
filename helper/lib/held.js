@@ -69,8 +69,16 @@ function hashLines(code, numbers) {
   return [...new Set(numbers.map((n) => lineHash(lines[n - 1] || '')))];
 }
 
-function needsOf(mod, scope = null) {
+// On a site whose "Agent on this site" is Off (the sensitive ones start there), a run may only make style and
+// boxed mods: its agent can't see the page, and those can't send anything the user didn't allow. A free mod it
+// writes there waits, with this as the reason (the agent sees it in `trif status`; AGENTS.md tells it to say
+// so and stop). Only the user can let it run (Allow), change the level, or add the mod themselves.
+const OFF_FREE = 'agent-off-free';
+const offFreeFact = (site) => `is a free mod, and "Agent on this site" is Off for ${site || 'this site'}: there your agent may only make style mods and boxed mods`;
+
+function needsOf(mod, scope = null, agentLevel = null) {
   const out = powersFor(mod).map((p) => ({ key: p.key, fact: p.fact, lines: hashLines(mod.code, p.lines || []) }));
+  if (agentLevel === 'off' && !mod.rules && !mod.sandboxed) out.unshift({ key: OFF_FREE, fact: offFreeFact(scope) });
   if (scope) for (const pattern of outOfScope(mod, scope)) out.push({ key: `match:${pattern}`, fact: `runs on ${pattern}, outside ${scope}` });
   if (mod.risk && mod.risk.tier >= 2) out.push({ key: 'risk2', fact: 'says it changes what the site receives (risk 2)' });
   return out;
@@ -210,7 +218,7 @@ function updateHeld(ws, mods, scopes) {
   for (const [id, h] of Object.entries(held)) {
     if (!h.approved) continue;
     const m = mods.find((x) => x.id === id);
-    if (m && m.hash === h.hash) allowPowers(ws.home, id, needsOf(m, h.scope));
+    if (m && m.hash === h.hash) allowPowers(ws.home, id, needsOf(m, h.scope, h.agentLevel || null));
     delete held[id];
     changed = true;
   }
@@ -248,7 +256,7 @@ function updateHeld(ws, mods, scopes) {
   }
   for (const m of mods) {
     const same = held[m.id] && held[m.id].hash === m.hash; // (held as it is: waiting for the user, unless it's allowed now)
-    const run = byRun.get(m.id) || (held[m.id] && live.find((s) => s.runId === held[m.id].runId)) || (same && held[m.id].scope ? { site: held[m.id].site, scope: held[m.id].scope, runId: held[m.id].runId } : null);
+    const run = byRun.get(m.id) || (held[m.id] && live.find((s) => s.runId === held[m.id].runId)) || (same && held[m.id].scope ? { site: held[m.id].site, scope: held[m.id].scope, runId: held[m.id].runId, agentLevel: held[m.id].agentLevel || null } : null);
     if (!run && seenHash(seen[m.id]) === m.hash) {
       if (typeof seen[m.id] === 'string') { seen[m.id] = record(m); seenChanged = true; saveRan(ws.home, m); } // (recorded before lines were)
       else if (!fs.existsSync(ranFile(ws.home, m.id))) saveRan(ws.home, m);
@@ -256,7 +264,7 @@ function updateHeld(ws, mods, scopes) {
       continue;
     }
     const ok = allowedFor(ws.home, m, allowed, typeof seen[m.id] === 'object' ? seen[m.id] : null);
-    let needs = needsOf(m, run ? run.scope : null)
+    let needs = needsOf(m, run ? run.scope : null, run ? run.agentLevel : null)
       .filter((n) => (run || n.key !== 'risk2') && !isAllowed(n, ok, true))
       .map((n) => described(n, ok));
     // (a boxed mod's `controls` and `mods` are listed on a hold, but don't make one on their own)
@@ -265,6 +273,7 @@ function updateHeld(ws, mods, scopes) {
     if (needs.length) {
       held[m.id] = {
         hash: m.hash, site: run ? run.site : m.site, scope: run ? run.scope : null, runId: run ? run.runId : null, by: run ? 'agent' : 'outside', at: Date.now(),
+        ...(run && run.agentLevel === 'off' ? { agentLevel: 'off' } : {}),
         reason: reasonOf(needs), facts: needs.map((n) => n.fact), needs: needs.map((n) => n.key),
         lines: Object.fromEntries(needs.filter((n) => n.lines && n.lines.length).map((n) => [n.key, n.lines])), claim: claimOf(m),
       };

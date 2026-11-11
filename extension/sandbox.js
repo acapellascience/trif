@@ -499,29 +499,88 @@ export function sandboxRuntime(mode, pageModId, pageFn, pagePowers) {
   // (and so its hold showed the warning). ACT_PARTNERS: the act, and the powers it's refused beside
   // (tests/combinations.test.js keeps it in step with the table). Not here: sound beside a read (SAFE-MODS says
   // why); click beside a draft another mod wrote (clickOk); click beside go-to (on go-to's side).
+  // why); click beside a draft another mod wrote (clickOk); click beside go-to (on go-to's side, and on the
+  // page go-to lands on: arrivedOk). edit-uploads as a read: the mods that were handed a picture the user
+  // attached (uploadReaders), not every mod with the power, which would stop every media mod beside an upload
+  // editor. site-storage: also a mod with @migrate (it reads the site's storage once: `combo`).
   const ACT_PARTNERS = {
-    'write-drafts': ['read-drafts', 'keys', 'site-data', 'page-data', 'site-storage', 'local-fonts', 'image-variants'],
-    click: ['read-drafts', 'keys', 'site-data', 'page-data', 'site-storage', 'local-fonts', 'image-variants', 'block-events'],
-    media: ['read-drafts', 'keys', 'site-data', 'page-data', 'site-storage', 'local-fonts', 'image-variants'],
-    'go-to': ['click', 'page-events'],
-    'page-events': ['read-drafts', 'keys', 'site-data', 'page-data', 'site-storage', 'local-fonts', 'image-variants'],
+    'write-drafts': ['read-drafts', 'keys', 'site-data', 'page-data', 'site-storage', 'local-fonts', 'image-variants', 'edit-uploads'],
+    click: ['read-drafts', 'keys', 'site-data', 'page-data', 'site-storage', 'local-fonts', 'image-variants', 'edit-uploads', 'rewrite-requests', 'block-events'],
+    media: ['read-drafts', 'keys', 'site-data', 'page-data', 'site-storage', 'local-fonts', 'image-variants', 'edit-uploads'],
+    'go-to': ['site-storage', 'block-events', 'page-events', 'click'],
+    'page-events': ['read-drafts', 'keys', 'site-data', 'page-data', 'site-storage', 'local-fonts', 'image-variants', 'edit-uploads', 'rewrite-requests', 'block-events'],
     'edit-uploads': ['read-drafts', 'keys', 'site-data', 'page-data', 'site-storage', 'local-fonts', 'image-variants'],
-    'image-variants': ['read-drafts', 'keys', 'site-data', 'page-data', 'site-storage', 'local-fonts'],
-    preload: ['read-drafts', 'keys', 'site-data', 'page-data', 'site-storage', 'local-fonts'],
+    'image-variants': ['read-drafts', 'keys', 'site-data', 'page-data', 'site-storage', 'local-fonts', 'edit-uploads'],
+    preload: ['read-drafts', 'keys', 'site-data', 'page-data', 'site-storage', 'local-fonts', 'edit-uploads'],
+    'site-storage': ['read-drafts', 'keys', 'site-data', 'page-data', 'local-fonts', 'image-variants', 'edit-uploads', 'go-to'],
+    'block-events': ['read-drafts', 'keys', 'site-data', 'page-data', 'site-storage', 'local-fonts', 'image-variants', 'edit-uploads'],
+    embeds: ['read-drafts', 'keys', 'site-data', 'page-data', 'site-storage', 'local-fonts', 'image-variants', 'edit-uploads'],
+    sound: ['read-drafts', 'keys', 'site-data', 'page-data', 'site-storage', 'local-fonts', 'image-variants', 'edit-uploads'],
   };
   const PARTNER_WHY = {
     'write-drafts': ['changing what the user types', 'what one reads could end up in what the user posts'],
-    click: ['clicking for the user', 'what one reads could decide what the other clicks (or one could keep the user\'s clicks from the page while the other clicks)'],
+    click: ['clicking for the user', 'what one reads could decide what the other clicks (or one could keep the user\'s clicks from the page while the other clicks, or change what the site receives from those clicks)'],
     media: ['playing the page\'s video and audio', 'what one reads could reach a video\'s host through how it plays'],
-    'go-to': ['taking the user to a page', 'one could take the user to a page where the other clicks or sets off the page\'s own actions'],
-    'page-events': ['signalling the page\'s own code', 'what one reads could reach the page\'s code, which may post or send it'],
+    'go-to': ['taking the user to a page', 'one could take the user to a page where the other clicks or sets off the page\'s own actions (or one could keep the user\'s clicks from the page, or leave something in the site\'s storage for a page\'s code to act on, while the other takes the user there)'],
+    'page-events': ['signalling the page\'s own code', 'what one reads could reach the page\'s code, which may post or send it (or one could keep the user\'s clicks from the page while the other sets off the page\'s own actions, or change what the site receives from them)'],
     'edit-uploads': ['changing the pictures the user attaches', 'what one reads could end up in a picture the user posts'],
     'image-variants': ['loading other sizes of the page\'s pictures', 'what one reads could reach the pictures\' host through which ones load'],
     preload: ['loading the page\'s pictures sooner', 'what one reads could reach the pictures\' host through which ones load'],
+    'site-storage': ['changing what the site keeps', 'what one reads could be kept where the page\'s own code, or a boxed mod on a later page, finds it (or one could leave something for a page\'s code to act on as it loads, and the other take the user there)'],
+    'block-events': ['choosing which of the user\'s actions the page sees', 'what one reads could decide which of the user\'s actions the page\'s code sees, and it may send that on'],
+    embeds: ['offering the page\'s videos', 'what one reads could reach a video\'s host through which video is offered'],
+    sound: ['playing sound', 'what one reads could become sounds a device nearby could pick up'],
   };
-  const inPlay = new Set(); // (the powers of the boxed mods that have run on this page)
+  const inPlay = new Set(); // (the powers of the boxed mods that have run on this page, @migrate as site-storage)
+  const uploadReaders = new Set(); // (boxed mods handed a picture the user attached on this page: edit-uploads reads it)
   const partnersOk = (api, act) => {
-    for (const p of ACT_PARTNERS[act]) if (inPlay.has(p) && !api.powers.has(p)) fail(`${PARTNER_WHY[act][0]} is off on this page while another boxed mod here has the ${p} power: with both, ${PARTNER_WHY[act][1]} (a mod that asks for ${act} and ${p} together shows the user that)`);
+    for (const p of ACT_PARTNERS[act]) {
+      if (api.combo.has(p)) continue;
+      if (p === 'edit-uploads') { if (uploadReaders.size) fail(`${PARTNER_WHY[act][0]} is off on this page since another boxed mod here was handed a picture the user attached (edit-uploads): with both, ${PARTNER_WHY[act][1]} (a mod that asks for ${act} and edit-uploads together shows the user that)`); continue; }
+      if (inPlay.has(p)) fail(`${PARTNER_WHY[act][0]} is off on this page while another boxed mod here has the ${p} power: with both, ${PARTNER_WHY[act][1]} (a mod that asks for ${act} and ${p} together shows the user that)`);
+    }
+  };
+  // (sound: not beside every read on the page (that would stop every sound mod beside any hotkey mod:
+  // docs/SAFE-MODS.md), only beside one it shares a `mods` channel with, which could hand it what it reads)
+  const channelPeers = (mod) => {
+    const out = new Set();
+    for (const ch of channels.values()) { let mine = false; for (const m of ch) if (m.mod === mod) mine = true; if (mine) for (const m of ch) if (m.mod !== mod) out.add(m.mod); }
+    return out;
+  };
+  const soundOk = (api) => {
+    const peers = channelPeers(api.mod);
+    if (!peers.size) return;
+    for (const p of ACT_PARTNERS.sound) {
+      if (api.combo.has(p)) continue;
+      for (const id of peers) {
+        const o = apis.get(id);
+        if (p === 'edit-uploads' ? uploadReaders.has(id) : !!(o && o.combo.has(p))) fail(`${PARTNER_WHY.sound[0]} is off on this page while it shares a channel (mods) with another boxed mod here that has the ${p} power: with both, ${PARTNER_WHY.sound[1]} (a mod that asks for sound and ${p} together shows the user that)`);
+      }
+    }
+  };
+  // go-to across a page load: the page a boxed mod's go-to (or reload, or in-app move) brought the user to.
+  // There, a boxed mod without go-to doesn't click or signal the page's code until the user's own click or
+  // key: otherwise a mod could take the user to a page where another, which runs only there (or starts after
+  // it), acts for them, with neither hold saying so. The mark: from the page that went, in this tab's session
+  // storage under a key no header can name, with the address it went to (read before any mod runs, then
+  // gone), and in TRIF's background (asked at the start; the answer comes a moment later), which holds it
+  // until the next page in the tab has loaded, 30 seconds at most.
+  const ARRIVAL_KEY = '__trif arrived by go-to', ARRIVAL_MS = 30000;
+  const noHash = (u) => String(u).split('#')[0];
+  let arrivedBy = null, userActed = false;
+  // (this page's boxed mods have all started: those queued before the runtime, and those injected with it)
+  let allStarted = !SANDBOX, startedDone = null;
+  const startedP = new Promise((r) => { startedDone = r; if (allStarted) r(); });
+  if (SANDBOX) {
+    try {
+      const h = G.sessionStorage.getItem(ARRIVAL_KEY);
+      if (h !== null) { G.sessionStorage.removeItem(ARRIVAL_KEY); const o = JSON.parse(h); if (o && typeof o.mod === 'string' && Date.now() - Number(o.at) < ARRIVAL_MS && noHash(o.to) === noHash(location.href)) arrivedBy = o.mod; }
+    } catch { /* no storage here */ }
+    if (send) Promise.resolve().then(() => send({ trifSandbox: 'arrival', mod: '', key: 'go-to' })).then((r) => { if (r && r.ok && typeof r.mod === 'string' && r.mod && !userActed) arrivedBy = r.mod; }, () => {});
+    for (const ty of ['pointerdown', 'mousedown', 'touchstart', 'keydown']) G.addEventListener(ty, (e) => { if (e.isTrusted) { userActed = true; arrivedBy = null; } }, { capture: true, passive: true });
+  }
+  const arrivedOk = (api, act, what, does) => {
+    if (arrivedBy && !api.powers.has('go-to')) fail(`${what} is off on this page until the user clicks or presses a key here: another boxed mod's go-to brought the user here, and with both, one could take the user to a page where the other ${does} (a mod that asks for ${act} and go-to together shows the user that)`);
   };
   const draftsOk = (api) => {
     if (!api.powers.has('write-drafts')) return false;
@@ -532,12 +591,14 @@ export function sandboxRuntime(mode, pageModId, pageFn, pagePowers) {
   // send it)
   const clickOk = (api) => {
     partnersOk(api, 'click');
+    arrivedOk(api, 'click', 'clicking for the user', 'clicks');
     for (const w of draftWriters) if (w !== api.mod && !api.powers.has('write-drafts')) fail('clicking for the user is off on this page since another boxed mod here changed a draft: with both, a draft could be sent without the user (a mod that asks for click and write-drafts together shows the user that)');
     for (const w of uploadEditors) if (w !== api.mod && !api.powers.has('edit-uploads')) fail('clicking for the user is off on this page since another boxed mod here changed a picture the user attached: with both, it could be posted without the user (a mod that asks for click and edit-uploads together shows the user that)');
   };
   // (page-events, as click: not after another mod changed a draft or an attached picture: a signal could send it)
   const signalOk = (api) => {
     partnersOk(api, 'page-events');
+    arrivedOk(api, 'page-events', 'signalling the page\'s code', 'sets off the page\'s own actions');
     for (const w of draftWriters) if (w !== api.mod && !api.powers.has('write-drafts')) fail('signalling the page\'s code is off on this page since another boxed mod here changed a draft: with both, a draft could be sent without the user (a mod that asks for page-events and write-drafts together shows the user that)');
     for (const w of uploadEditors) if (w !== api.mod && !api.powers.has('edit-uploads')) fail('signalling the page\'s code is off on this page since another boxed mod here changed a picture the user attached (a mod that asks for page-events and edit-uploads together shows the user that)');
   };
@@ -736,7 +797,13 @@ export function sandboxRuntime(mode, pageModId, pageFn, pagePowers) {
     for (const b of blocks) {
       if (b.type !== e.type) continue;
       if (b.sels) { let hit = false; for (const sel of b.sels) { try { if (t && t.nodeType === 1 && t.closest(sel)) { hit = true; break; } } catch { /* not a selector */ } } if (!hit) continue; }
-      const r = b.fn ? b.api.call(b.fn, eventOf(e, b.api.powers)) : true;
+      // (the function form decides from what the mod sees: beside another mod's read it didn't ask for, the
+      // page-wide rules turn it off, said once; a block with no function decides nothing)
+      let r = true;
+      if (b.fn) {
+        try { partnersOk(b.api, 'block-events'); } catch (err) { if (!b.refused) { b.refused = true; report(b.api.mod, err); } continue; }
+        r = b.api.call(b.fn, eventOf(e, b.api.powers));
+      }
       if (r === true) { e.stopImmediatePropagation(); return; }
     }
   };
@@ -765,6 +832,7 @@ export function sandboxRuntime(mode, pageModId, pageFn, pagePowers) {
     let changed = false;
     for (const u of uploadFns) {
       try { partnersOk(u.api, 'edit-uploads'); } catch (err) { report(u.api.mod, err); continue; }
+      uploadReaders.add(u.api.mod); // (it sees the picture: a read, for the page-wide rules)
       const back = u.api.call(u.fn, wrap(cv), harden({ width: cv.width, height: cv.height, type: file.type }));
       const out = back && typeof back.then === 'function' ? await back.catch((err) => { report(u.api.mod, err); return undefined; }) : back;
       if (out !== undefined && out !== null) { const n = nodes.get(out); if (!n || n.localName !== 'canvas' || !created.has(n)) { report(u.api.mod, new TypeError('TRIF sandbox: onUpload returns a canvas of the mod\'s own (or nothing: the one it was given)')); continue; } cv = n; }
@@ -973,11 +1041,17 @@ export function sandboxRuntime(mode, pageModId, pageFn, pagePowers) {
     else if (v && typeof v === 'object') for (const k of Object.keys(v)) { keys.add(k); tally(v[k], strs, nums, keys, depth + 1); }
   };
   // (B6: an address the site sent with whole query parameters taken out: the same scheme, host, path and #,
-  // the rest of its parameters as they were, in their order)
+  // the rest of its parameters as they were, in their order; only an address on this page's own site (its
+  // host, without www., or a host under it): which parameters a mod keeps is its choice, so it could carry
+  // what the mod reads to whatever host the page then fetches or links to. Another site's address comes back
+  // exactly as the site sent it.)
+  const SITE_BASE = String(location.hostname || '').toLowerCase().replace(/^www\./, '');
+  const ownSite = (u) => { const h = String(u.hostname || '').toLowerCase(); return /^https?:$/.test(u.protocol) && !!SITE_BASE && (h === SITE_BASE || h.endsWith(`.${SITE_BASE}`)); };
   const lessParams = (s, from) => {
     if (typeof s !== 'string' || !s.includes('/') || s.length > 4000) return false;
     let a;
     try { a = new URL(s, location.href); } catch { return false; }
+    if (!ownSite(a)) return false;
     const head = s.split('?')[0].split('#')[0];
     for (const u of from) {
       if (u.length < s.length || !u.includes('?') || !u.startsWith(head)) continue;
@@ -1098,10 +1172,13 @@ export function sandboxRuntime(mode, pageModId, pageFn, pagePowers) {
     // (its powers: docs/POWERS.md; what's not in this set it doesn't get, and a mod TRIF can't name gets none)
     const grant = Array.isArray(powers) ? { powers, args: {} } : powers && typeof powers === 'object' ? powers : { powers: [], args: {} };
     const self = { mod: modId, powers: new Set((Array.isArray(grant.powers) ? grant.powers : []).map(String)), args: grant.args && typeof grant.args === 'object' ? grant.args : {} };
+    // (its powers as the combinations count them: @migrate reads the site's storage, so it's site-storage
+    // there, for its own acts and beside other mods' (helper/lib/boxpowers.js powerNeeds counts it so too))
+    self.combo = new Set([...self.powers, ...(Array.isArray(self.args.migrate) && self.args.migrate.length ? ['site-storage'] : [])]);
     const has = (p) => self.powers.has(p);
     const needs = (p) => { if (!has(p)) fail(`that needs the ${p} power (// @powers ${p} in the mod's header, which the user approves)`); };
     apis.set(modId, self);
-    for (const p of self.powers) inPlay.add(p);
+    for (const p of self.combo) inPlay.add(p);
     // (a callback of the mod's: errors reported as its own, and stand-ins' listeners are its own)
     const call = (fn, ...args) => { const prev = current, t = now(); current = self; try { return fn(...args); } catch (e) { report(modId, e); return undefined; } finally { current = prev; stats.callbacks++; stats.callbackMs += now() - t; } };
     // TRIF's functions as the mod sees them: an error from the browser (a DOMException, say) is passed on
@@ -1301,13 +1378,16 @@ export function sandboxRuntime(mode, pageModId, pageFn, pagePowers) {
     const makeAudio = (ctx, offline) => {
       const nodeOfFacade = new WeakMap(), paramOfFacade = new WeakMap();
       const when = (at) => (at === undefined ? ctx.currentTime : num(at, 'a time'));
+      // (what's heard: the live context's sources starting, connecting, changing; not an offline render, whose
+      // numbers stay with the mod)
+      const live = () => { if (!offline) soundOk(self); };
       const paramOf = (ap) => {
         const f = hardenAll({
           get value() { return ap.value; },
-          set: (v, at) => { ap.setValueAtTime(num(v, 'a value'), when(at)); },
-          ramp: (v, at) => { ap.linearRampToValueAtTime(num(v, 'a value'), num(at, 'a time')); },
-          expRamp: (v, at) => { ap.exponentialRampToValueAtTime(num(v, 'a value'), num(at, 'a time')); },
-          target: (v, at, tc) => { ap.setTargetAtTime(num(v, 'a value'), when(at), num(tc, 'a time constant')); },
+          set: (v, at) => { live(); ap.setValueAtTime(num(v, 'a value'), when(at)); },
+          ramp: (v, at) => { live(); ap.linearRampToValueAtTime(num(v, 'a value'), num(at, 'a time')); },
+          expRamp: (v, at) => { live(); ap.exponentialRampToValueAtTime(num(v, 'a value'), num(at, 'a time')); },
+          target: (v, at, tc) => { live(); ap.setTargetAtTime(num(v, 'a value'), when(at), num(tc, 'a time constant')); },
           cancel: (at) => { ap.cancelScheduledValues(when(at)); },
         });
         paramOfFacade.set(f, ap);
@@ -1318,13 +1398,14 @@ export function sandboxRuntime(mode, pageModId, pageFn, pagePowers) {
         const o = {
           // (into another of this mod's nodes, into one of their parameters (FM, AM, an LFO), or 'out')
           connect: (to) => {
+            live();
             if (to === 'out') node.connect(ctx.destination);
             else if (to && typeof to === 'object' && paramOfFacade.has(to)) node.connect(paramOfFacade.get(to));
             else node.connect(nodeOfFacade.get(to) || fail('connect takes another of this mod\'s sound nodes, one of their parameters, or \'out\''));
             return to;
           },
           disconnect: () => { node.disconnect(); },
-          start: (at) => { if (typeof node.start !== 'function') fail('only sources start'); node.start(when(at)); },
+          start: (at) => { if (typeof node.start !== 'function') fail('only sources start'); live(); node.start(when(at)); },
           stop: (at) => { if (typeof node.stop !== 'function') fail('only sources stop'); node.stop(when(at)); },
           param: (name) => { str(name, 'a parameter', 40); if (!PARAMS.includes(name) || !node[name] || typeof node[name].setValueAtTime !== 'function') fail(`no ${name} here`); return paramOf(node[name]); },
         };
@@ -1339,7 +1420,7 @@ export function sandboxRuntime(mode, pageModId, pageFn, pagePowers) {
         if (re.length < 2 || re.length !== im.length) fail('a wave has as many real terms as imaginary ones, at least 2');
         return ctx.createPeriodicWave(re, im);
       };
-      const oscillatorFacade = (n) => facade(n, { setWave: (real, imag) => { n.setPeriodicWave(waveOf(real, imag)); } });
+      const oscillatorFacade = (n) => facade(n, { setWave: (real, imag) => { live(); n.setPeriodicWave(waveOf(real, imag)); } });
       const buffers = new Map(); // data: URL -> decoded buffer
       const decode = async (url) => {
         const u = str(url, 'a sound', 20 * 1024 * 1024);
@@ -1397,6 +1478,7 @@ export function sandboxRuntime(mode, pageModId, pageFn, pagePowers) {
         sound: async (url, o) => sourceOf(await decode(url), o),
         // the simple ones: a beep, and a sound played once
         tone: (o) => {
+          live();
           o = opt(o);
           const t0 = when(o.at), dur = num(o.duration === undefined ? 0.15 : o.duration, 'a duration'), vol = num(o.volume === undefined ? 0.2 : o.volume, 'a volume');
           const osc = ctx.createOscillator(), g = ctx.createGain();
@@ -1406,6 +1488,7 @@ export function sandboxRuntime(mode, pageModId, pageFn, pagePowers) {
           osc.connect(g).connect(ctx.destination); osc.start(t0); osc.stop(t0 + dur + 0.02);
         },
         play: async (url, o) => {
+          live();
           const b = await decode(url); o = opt(o);
           const n = ctx.createBufferSource(), g = ctx.createGain();
           n.buffer = b; g.gain.value = num(o.volume === undefined ? 1 : o.volume, 'a volume');
@@ -1417,7 +1500,7 @@ export function sandboxRuntime(mode, pageModId, pageFn, pagePowers) {
         Object.defineProperties(api, Object.getOwnPropertyDescriptors({
           // (the mod's own context's clock: paused, resumed, closed (the next trif.audio() makes a new one), and
           // how late its sound comes out, in seconds)
-          resume: () => { if (audio && audio.ctx === ctx) audio.paused = false; return ctx.resume().then(() => ctx.state, () => ctx.state); },
+          resume: () => { live(); if (audio && audio.ctx === ctx) audio.paused = false; return ctx.resume().then(() => ctx.state, () => ctx.state); },
           suspend: () => { if (audio && audio.ctx === ctx) audio.paused = true; return ctx.suspend().then(() => ctx.state, () => ctx.state); },
           close: () => { if (audio && audio.ctx === ctx) audio = null; return ctx.close().then(() => 'closed', () => ctx.state); },
           get latency() { return harden({ base: Number(ctx.baseLatency) || 0, output: Number(ctx.outputLatency) || 0 }); },
@@ -1515,14 +1598,18 @@ export function sandboxRuntime(mode, pageModId, pageFn, pagePowers) {
       return harden({
         get: (k) => { keyOk(k); return a === 'cookie' ? (cookies()[k] ?? null) : st.getItem(k); },
         keys: () => harden((a === 'cookie' ? Object.keys(cookies()) : Array.from({ length: st.length }, (_, i) => st.key(i))).filter((k) => k !== null && ok(k))),
+        // (a write is a way out: the site's own code reads its storage (and may sync or send it on), and a boxed
+        // mod on a later page can read it, where this page's mods aren't in play; so the page-wide rules apply.
+        // Not refused as the page goes (notLeaving): keeping something then is what storage is for, as settings.)
         set: (k, v) => {
           if (a === 'cookie') fail('cookies are only read');
           keyOk(k);
+          partnersOk(self, 'site-storage');
           const val = str(String(v), 'a value', 1024 * 1024);
           noNewAddress(st.getItem(k) || '', val);
           st.setItem(k, val);
         },
-        remove: (k) => { if (a === 'cookie') fail('cookies are only read'); keyOk(k); st.removeItem(k); },
+        remove: (k) => { if (a === 'cookie') fail('cookies are only read'); keyOk(k); partnersOk(self, 'site-storage'); st.removeItem(k); },
       });
     };
     // @migrate: its old settings, once per site: what its free version kept under those keys, as settings
@@ -1601,12 +1688,20 @@ export function sandboxRuntime(mode, pageModId, pageFn, pagePowers) {
       if (yt && /^[\w-]{11}$/.test(yt)) { const p = players.find((x) => /youtube/.test(x)); if (p) src = `https://${p}/${yt}`; }
       if (vm) { const p = players.find((x) => /vimeo/.test(x)); if (p) src = `https://${p}/${vm}`; }
       if (!src) fail(`that link isn't a video from ${players.join(', ')}`);
+      // (which video it offers reaches the player's host once the user clicks: beside another mod's read it
+      // didn't ask for, the page-wide rules turn it off, when it's made and when it's clicked)
+      partnersOk(self, 'embeds');
       const b = D.createElement('button');
       b.setAttribute('type', 'button');
       b.textContent = o && typeof o.label === 'string' ? o.label.slice(0, 100) : 'Play the video here';
       created.add(b);
       embedOf.set(b, src);
-      b.addEventListener('click', (e) => { if (!e.isTrusted || !b.isConnected) return; e.preventDefault(); b.dispatchEvent(new CustomEvent('trif:embed', { detail: src })); });
+      b.addEventListener('click', (e) => {
+        if (!e.isTrusted || !b.isConnected) return;
+        e.preventDefault();
+        try { partnersOk(self, 'embeds'); } catch (err) { report(modId, err); return; }
+        b.dispatchEvent(new CustomEvent('trif:embed', { detail: src }));
+      });
       return wrap(b);
     };
     // local-fonts: the fonts installed here, after the browser's own prompt (call it from the user's click)
@@ -1617,12 +1712,30 @@ export function sandboxRuntime(mode, pageModId, pageFn, pagePowers) {
       return harden(Array.from(list).slice(0, 5000).map((f) => harden({ family: String(f.family), fullName: String(f.fullName), style: String(f.style), postscriptName: String(f.postscriptName) })));
     };
     // go-to: reload (at most once in 10 seconds in a tab, TRIF's background counts), and in-app moves
+    // (go-to's moves wait until this page's boxed mods have all started, and check again then: a mod that
+    // starts after this one, with click or page-events, isn't in play before; then the page it lands on is
+    // marked (arrivedBy), here for a move in the app, and in the tab's session storage and TRIF's background
+    // (which the background's reload count does, for reload) for a page that loads)
+    const marked = (to) => { arrivedBy = modId; if (SANDBOX) { try { G.sessionStorage.setItem(ARRIVAL_KEY, JSON.stringify({ mod: modId, at: Date.now(), to })); } catch { /* no storage here */ } } };
+    const travel = (go, loads, to) => {
+      const move = () => {
+        partnersOk(self, 'go-to');
+        if (!loads) { arrivedBy = modId; go(); return true; }
+        marked(to);
+        const told = SANDBOX && send ? Promise.race([Promise.resolve().then(() => send({ trifSandbox: 'went', mod: modId, key: 'go-to' })).catch(() => null), new Promise((r) => setTimeout(r, 1000))]) : Promise.resolve();
+        return told.then(() => { go(); return true; });
+      };
+      if (allStarted) return harden(Promise.resolve(move()));
+      return harden(startedP.then(move).catch((err) => { report(modId, err); return false; }));
+    };
     const reload = async () => {
       needs('go-to');
       notLeaving();
       partnersOk(self, 'go-to');
       if (!argsOf('go-to').includes('reload')) fail('reloading needs `reload` in the header: @powers go-to reload');
+      if (!allStarted) { await startedP; partnersOk(self, 'go-to'); }
       if (SANDBOX) { const r = send ? await send({ trifSandbox: 'reload', mod: modId, key: 'reload' }) : null; if (!r || !r.ok) fail(r && r.error ? r.error : 'not reloaded'); }
+      marked(location.href);
       location.reload();
     };
 
@@ -1669,8 +1782,8 @@ export function sandboxRuntime(mode, pageModId, pageFn, pagePowers) {
         if (!abs) { try { const u = new URL(p, location.href); if (u.origin === ORIGIN && shownLink(u.href)) abs = u.href; } catch { /* not an address */ } }
         if (!abs) fail(`"${p.slice(0, 80)}" isn't one of the header's pages (${paths.join(', ') || 'none'}), or a link to this site that the page shows`);
         // (in the app: TRIF moves the address and tells the page's router, as its back button would)
-        if (inApp && typeof inApp === 'object' && inApp.inApp) { history.pushState(null, '', abs); G.dispatchEvent(new PopStateEvent('popstate', { state: null })); return; }
-        location.assign(abs);
+        if (inApp && typeof inApp === 'object' && inApp.inApp) return travel(() => { history.pushState(null, '', abs); G.dispatchEvent(new PopStateEvent('popstate', { state: null })); }, false);
+        return travel(() => location.assign(abs), true, abs);
       },
       // site-data, B5: the page's embedded JSON scripts, and its data globals named in the header
       filterEmbedded: (sel, fn) => {
@@ -2374,4 +2487,6 @@ export function sandboxRuntime(mode, pageModId, pageFn, pagePowers) {
   // (mods that came before the runtime)
   const queued = G.__trifSandboxQueue;
   if (Array.isArray(queued)) { G.__trifSandboxQueue = null; for (const [id, source, powers] of queued) run(id, source, powers); }
+  // (and the mods injected with this runtime, one after another: started once this task is done)
+  setTimeout(() => { allStarted = true; startedDone(); }, 0);
 }

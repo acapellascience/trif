@@ -519,6 +519,24 @@ function sandboxWorld() {
 // another through its settings; the mod is the one TRIF's code in the world says (mods can't send).
 const SETTINGS_SITES_MAX = 200; // sites kept per mod (the oldest written go first)
 const boxReloads = new Map(); // tab id -> when a boxed mod last reloaded it (go-to reload)
+// tab id -> {mod, at}: a boxed mod's go-to (or reload) sent this tab to a page; the page it lands on asks once
+// (sandbox.js arrivedBy: there, other boxed mods' clicks and signals wait for the user's own click or key)
+const boxArrivals = new Map();
+const ARRIVAL_MS = 30000;
+const markArrival = (tab, mod) => {
+  const t = Date.now();
+  for (const [k, v] of boxArrivals) if (t - v.at > ARRIVAL_MS) boxArrivals.delete(k);
+  boxArrivals.set(tab, { mod, at: t, loading: false });
+};
+// (the next page in the tab asks as it starts; once it has loaded, a mark it didn't take (a page with no
+// boxed mods) is gone, so it never lands on a later page)
+chrome.tabs.onUpdated?.addListener((tabId, info) => {
+  const m = boxArrivals.get(tabId);
+  if (!m) return;
+  if (info.status === 'loading') m.loading = true;
+  else if (info.status === 'complete' && m.loading) boxArrivals.delete(tabId);
+});
+chrome.tabs.onRemoved?.addListener((tabId) => { boxArrivals.delete(tabId); });
 // (Firefox has runtime.onUserScriptMessage only once its optional userScripts permission is granted, which can
 // be after this worker started: so it's listened for once user scripts are there, from sandboxWorld.)
 // (And there, a listener on `chrome.runtime`'s event, made before the grant, never heard a user script's
@@ -549,6 +567,14 @@ function onSandboxMessage(msg, sender, sendResponse) {
     try { host = new URL(sender?.url || sender?.origin || '').hostname; } catch { /* none */ }
     const site = scopeFor(host);
     const mod = String(msg.mod ?? ''), key = String(msg.key ?? '');
+    // (the page a boxed mod's go-to brought this tab to: asked by TRIF's runtime as the page starts, once)
+    if (msg.trifSandbox === 'arrival') {
+      const tab = sender.tab && sender.tab.id;
+      if (typeof tab !== 'number' || sender.frameId) return { ok: true, mod: null };
+      const m = boxArrivals.get(tab);
+      boxArrivals.delete(tab);
+      return { ok: true, mod: m && Date.now() - m.at < ARRIVAL_MS ? m.mod : null };
+    }
     if (!site || !mod || !key || key.length > 100 || !state.mods.some((m) => m.id === mod && m.sandboxed)) return { ok: false, error: 'not a boxed mod here' };
     // (go-to's reload: at most once in 10 seconds in a tab, whatever reloads in between)
     if (msg.trifSandbox === 'reload') {
@@ -557,6 +583,13 @@ function onSandboxMessage(msg, sender, sendResponse) {
       const t = Date.now(), last = boxReloads.get(tab) || 0;
       if (t - last < 10000) return { ok: false, error: 'a boxed mod reloads a page at most once in 10 seconds' };
       boxReloads.set(tab, t);
+      markArrival(tab, mod);
+      return { ok: true };
+    }
+    if (msg.trifSandbox === 'went') {
+      const tab = sender.tab && sender.tab.id;
+      if (typeof tab !== 'number') return { ok: false, error: 'not in a tab' };
+      markArrival(tab, mod);
       return { ok: true };
     }
     const all = (await chrome.storage.local.get('sandboxSettings')).sandboxSettings;

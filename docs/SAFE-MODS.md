@@ -296,7 +296,7 @@ none of them sends anything. The helper reads them from the header (helper/lib/b
 until the user approves that *set* (held.js keys `power:<name>`: an update with the same powers runs, a new
 power waits for itself; `controls` and `mods` are listed but never hold alone), and passes the set to the
 extension with the mod; the sandbox (extension/sandbox.js) gives each mod what its set grants and refuses
-the rest. All twelve are built (phases 1 to 3); phase 1's, with what each gives:
+the rest. All twelve of 0.2 are built (phases 1 to 3), and the nine of 0.3 (below); phase 1's, with what each gives:
 - `sound`: `trif.audio()`, TRIF's facade over Web Audio (oscillators, gains, filters, delays, panners,
   noise, sounds decoded from `data:audio/…;base64`): no address, no microphone, no worklet, no page media;
   browser errors reach the mod as plain TypeErrors.
@@ -398,7 +398,10 @@ page already has"):
     the page's embedded JSON and data globals: *exception*, the globals' names are the page's, from the
     header, never a browser name; an address the site sent may come back with whole query parameters taken
     out (a copy of an address the page already has, made shorter, never longer: same scheme, host, path and
-    `#`, the rest of its parameters in order), and so may a link's `href`.
+    `#`, the rest of its parameters in order), and so may a link's `href`; only an address on the page's own
+    site (its host without `www.`, or a host under it). Which parameters go is the mod's choice, so on an
+    address another site gets (a picture, a tracker, a link out) the choice could carry what it reads there:
+    another site's address comes back exactly as the site sent it, so the hold's "can't send anything" holds.
   - `search-box`, widened: `{link}` copies the path of a link the page shows (on the same site); the
     current host only when it's a host of the same site. Fits.
   - `go-to`, widened: `reload` (the same address), in-app moves only to pages go-to allows, and a query
@@ -408,36 +411,51 @@ page already has"):
 
 ## Combinations (branch powers)
 
-The table: `helper/lib/combinations.js`, written out in docs/POWER-COMBINATIONS.md. Every pair (66) and
-triple (220) of the twelve powers, each with the warning a hold shows or a one-line reason it adds nothing;
+The table: `helper/lib/combinations.js`, written out in docs/POWER-COMBINATIONS.md. Every pair (210) and
+triple (1330) of the 21 powers, each with the warning a hold shows or a one-line reason it adds nothing;
 tests/combinations.test.js checks it covers all of them, that its reasoning holds (below), that the doc is
-the table, and that the sandbox's page-wide rules follow it.
+the table, that the counts here are its counts, and that the sandbox's page-wide rules follow it. The
+twelve powers of 0.2 keep their literal table; the combinations with a power added in 0.3 follow rules,
+by what each power is (a read, a way out, an act).
 
 **How the table is reasoned.** No power sends anything a mod makes up, and the addresses a mod can reach
 (links, images, go-to, click, search-box) are the page's own or the header's. So what a boxed mod reads can
-leave the site only through what's posted, what's clicked (both public on most sites), how the page's media
-plays (a video's host sees the requests a seek or play makes, and may be another site), and sound in the
-room. Everything else stays on the site it came from, which already has it. Reads (`read-drafts`, `keys`,
-`site-data`, `page-data`) are what the mod sees beyond the page; the rest see only what the page shows.
-- A read with a way out warns: with `write-drafts` ("could put what it reads into something you post"),
-  `click` ("could let what it reads decide what it clicks for you"), `media` ("could pass what it reads to
-  the site a video or sound comes from, by how it plays it") and `sound` ("could turn what it reads into
-  sounds that a device nearby could pick up"). The last two are narrow channels (timing, and a listening
-  device near the user), listed because they exist.
-- Acts that combine warn: `write-drafts` + `click` ("could write a post and send it for you": a draft no
-  longer waits for the user's own send), `go-to` + `click` ("could take you to a page and click things there
-  for you": click alone acts where the user is; with go-to, where the mod takes them).
-- Triples: a read with `write-drafts` and `click` ("could put what it reads into a post and send it for
-  you"), and `go-to` + `write-drafts` + `click` ("could go to a page, write a post there and send it for
-  you") are worse than their pairs; every other triple is "no more than its pairs" (their warnings show),
-  or adds nothing (it reads nothing beyond the page and its acts don't combine; or it reads but nothing in
-  it carries what it reads off the page).
-- No added risk, with the reason in the table: reads together; a read with `go-to` (only this site's pages,
-  which can already see it), `search-box` (only what the user types, which the mod can't read), `controls`
-  (the mod's own inputs: only what the user gives it on purpose) or `mods`; `mods` with anything (a channel
-  between its own boxed mods, which the page-wide rules treat as one); acts that don't combine (media,
-  sound, go-to with each other or with write-drafts alone).
-- Counts: 18 of 66 pairs warn; 5 of 220 triples have their own warning; 118 more show their pairs'.
+leave the site only through a way out: what's posted, what's clicked (both public on most sites), what the
+page's own code is told or sees, what the site keeps, which of the page's pictures and videos load, how
+the page's media plays (another site's host sees those requests), and sound in the room. Everything else
+stays on the site it came from, which already has it. The reads are `read-drafts`, `keys`, `site-data`,
+`page-data`, `site-storage`, `local-fonts`, `image-variants` (the pixels of the pictures it loads) and
+`edit-uploads` (the pictures the user attaches, before anything is posted); the rest see only what the page
+shows.
+- A read with a way out warns: `write-drafts` ("could put what it reads into something you post"),
+  `edit-uploads` (into a picture you post), `click` ("could let what it reads decide what it clicks for
+  you"), `page-events` (handed to the page's own code, which may post or send it), `site-storage` (kept
+  where the site's own code, and boxed mods on later pages, find it), `block-events`'s function form (which
+  of the user's actions the page's code sees), `media` (by how it plays), `image-variants` and `preload`
+  (which pictures load), `embeds` (which video it offers) and `sound` (sounds a device nearby could pick
+  up). Several are narrow channels (timing, a choice among the page's own pictures or videos, a listening
+  device near the user), listed because they exist. `site-storage`, `image-variants` and `edit-uploads` are
+  reads and ways out both, so they warn with the other reads.
+- Acts that combine warn: `write-drafts` or `edit-uploads` with `click` or `page-events` ("could write a
+  post and send it for you": a draft no longer waits for the user's own send), `go-to` with `click` or
+  `page-events` (it acts where the mod takes the user), `go-to` with `site-storage` (it leaves something for
+  a page's code to act on as it loads, then takes the user there: warned as go-to with page-events is),
+  `block-events` with `click`, `page-events` or `go-to` (it keeps the user's clicks from the page and acts,
+  or moves them, in their place), and `rewrite-requests` with `click` or `page-events` (the act's own
+  request carries the header's change, with no one asking).
+- Triples: a read with something that sends (`click`, `page-events`) and something that writes the post
+  (`write-drafts`, `edit-uploads`, a read other than the picture it posts) ("could put what it reads into a
+  post and send it for you"), and `go-to` with a sender and `write-drafts` ("could go to a page, write a post
+  there and send it for you") are worse than their pairs; every other triple is "no more than its pairs"
+  (their warnings show), or adds nothing (it reads nothing beyond the page and its acts don't combine; or it
+  reads but nothing in it carries what it reads off the page).
+- No added risk, with the reason in the table: reads together (unless one is also a way out); a read with
+  `go-to` (only this site's pages, the header's, with the header's words in a query, or links the page
+  shows, and the site can already see it), `search-box` (only what the user types, which the mod can't
+  read), `controls` (the mod's own inputs: only what the user gives it on purpose), `rewrite-requests` (fixed
+  in the header, made by TRIF) or `mods`; `mods` with anything (a channel between its own boxed mods, which
+  the page-wide rules treat as one); acts that don't combine.
+- Counts: 91 of 210 pairs warn; 32 of 1330 triples have their own warning; 952 more show their pairs'.
 
 **The hold.** Each warned combination a mod has is a need of its own, keyed by its powers
 (`power:together:keys+click+write-drafts`), so approving a pair doesn't cover a triple; the panel's
@@ -447,19 +465,37 @@ general warning (key `power:together:many:<its powers>`, so the exact set): "Mod
 in unspecific or powerful ways. Treat this with caution." Its combinations are still needs (without lines),
 so a later version with fewer powers doesn't ask again for what the user allowed.
 
-**Across mods: the page-wide rules** (extension/sandbox.js `ACT_PARTNERS`, `clickOk`). Boxed mods on a page
-see each other's elements (one `created` set), and with `mods` talk; so a combination split between two
-mods, each without the warning, would slip past the hold. The sandbox keeps the powers of every boxed mod
-that has run on the page, and refuses an act while another mod's power makes a warned pair with it that
-the acting mod didn't ask for itself (and so its hold didn't show):
-- `write-drafts` (writing into a draft) beside a read: refused unless the writer has that read.
-- `click` beside a read: refused unless the clicker has that read; and after another mod changed a draft,
-  refused unless the clicker has write-drafts (the draft could be sent).
-- `media` (play, pause, mute, volume, seek) beside a read: refused unless the media mod has that read.
-- `go-to` beside `click`: refused unless the mod going has click (the other could click where it lands).
-- Not enforced: `sound` beside a read. The channel needs a listening device near the user and carries
-  little; enforcing it would stop every sound mod beside any hotkey mod. The single-mod warning stands;
-  this is Tim's call.
+**Across mods: the page-wide rules** (extension/sandbox.js `ACT_PARTNERS`, `clickOk`, `signalOk`). Boxed
+mods on a page see each other's elements (one `created` set), and with `mods` talk; so a combination split
+between two mods, each without the warning, would slip past the hold. The sandbox keeps the powers of every
+boxed mod that has run on the page, and refuses an act while another mod's power makes a warned pair with it
+that the acting mod didn't ask for itself (and so its hold didn't show):
+- `write-drafts` (writing into a draft), `media` (play, pause, mute, volume, seek), `edit-uploads`,
+  `image-variants`, `preload`, `embeds` (made, and clicked), `site-storage`'s writes (set, remove) and
+  `block-events`'s function form, each beside a read: refused unless the acting mod has that read. (A block
+  with no function decides nothing from what the mod reads, and isn't checked.)
+- `click` and `page-events` beside a read, `block-events` or `rewrite-requests`: refused unless the acting
+  mod has that power; and after another mod changed a draft or an attached picture, refused unless it has
+  write-drafts or edit-uploads (it could be sent).
+- `edit-uploads` as a read: counted for the mods that were handed a picture the user attached, not every mod
+  with the power (which would stop every media mod beside an upload editor).
+- `@migrate` reads the site's storage once, so it counts as `site-storage`, on the hold's combinations and
+  in these rules.
+- `go-to` beside `click`, `page-events`, `block-events` or `site-storage`: refused unless the mod going has
+  that power (the other could act where it lands, keep the user's click from the page while it goes, or
+  have left something for the page's code there); and `site-storage`'s writes beside `go-to`. go-to waits until the page's boxed mods have all started, and checks again then (a mod
+  that starts later isn't in play before). And the page it lands on is marked (TRIF's background, and the
+  tab's session storage, for 30 seconds): there, a boxed mod without go-to doesn't click or signal the
+  page's code until the user's own click or key, so a mod that runs only on the page go-to leads to can't act
+  there for the user. An in-app move marks the page it stays on.
+- `sound` beside a read: refused only when the sound mod shares a `mods` channel with the reading mod
+  (which could hand it what it reads), checked as the live sound starts, connects or changes. Beside a read
+  it has no channel with, not enforced: the channel needs a listening device near the user and carries
+  little, and enforcing it would stop every sound mod beside any hotkey mod (Tim's call). What a reading
+  mod puts in its own elements, which the sound mod could read off the page, is that unenforced case.
+- `site-storage` also reaches past the page: what a mod keeps there, a boxed mod on a later page (or in
+  another tab) can read, where this page's mods aren't in play. That's why a write beside a read is refused
+  here, and why a read with site-storage warns on its own.
 Each refusal says which power and how to lift it (ask for it too, which puts the warning in the mod's
 hold). The cost: two boxed mods that are fine alone can stop each other's acts on a page; the errors show in
 `trif errors` and the mod's own catch. In a browser without the sandbox (boxed mods run as free mods the

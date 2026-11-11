@@ -33,6 +33,9 @@ t('B5 the page\'s embedded JSON', () => { trif.filterEmbedded('#emb', (d) => ({ 
 t('B4 documents behind a guard', () => { trif.filterResponse('*/e2e-multi', (d) => { if (d.a) d.a = d.a.filter((x) => x !== 'drop'); if (d.b) d.b = []; return d; }); return 'filtering'; });
 t('B6 an address with parameters taken out', () => { trif.filterResponse('*/e2e-urls', (d) => { d.u = 'https://127.0.0.1/watch?v=1'; return d; }); return 'filtering'; });
 t('B6 an address with a parameter added: TRIF keeps what the site sent', () => { trif.filterResponse('*/e2e-urls', (d) => { d.w = 'https://127.0.0.1/watch?v=2&list=9'; return d; }); return 'filtering'; });
+// (review F2: which parameters go is the mod's choice, so only on the page's own site; another site's address
+// comes back exactly as the site sent it)
+t('B6 another site\'s address with a parameter taken out: TRIF keeps what the site sent', () => { trif.filterResponse('*/e2e-urls', (d) => { d.x = 'https://www.youtube.com/watch?v=3'; return d; }); return 'filtering'; });
 
 (async () => {
   await trif.ready;
@@ -88,6 +91,8 @@ t('B6 an address with a parameter added: TRIF keeps what the site sent', () => {
   // ---- B6 the link rule; B8 the search box's options
   t('B6 a link the page shows, with a parameter taken out', () => { const a = page.create('a'); a.setAttr('href', '/wideb.html?a=1'); return a.attr('href'); });
   t('B6 a link the page shows, with a parameter added (refused)', () => page.create('a').setAttr('href', '/wideb.html?a=1&b=2&c=3'));
+  t('B6 a link to another site the page shows, with a parameter taken out (refused)', () => page.create('a').setAttr('href', 'https://www.youtube.com/watch?v=dQw4w9WgXcQ'));
+  t('B6 the page\'s own link to another site, with a parameter taken out (refused)', () => page.find('#yt').setAttr('href', 'https://www.youtube.com/watch?v=dQw4w9WgXcQ'));
   // ---- B9 go-to: a query from the header's list, in the app; not other values
   t('B9 a value not in the list (refused)', () => trif.goTo('/wideb.html?mods=evil'));
   t('B9 a value twice (refused)', () => trif.goTo('/wideb.html?mods=red,red'));

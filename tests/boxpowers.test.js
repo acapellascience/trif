@@ -264,7 +264,9 @@ test('0.3\'s powers (WIDEN.md class B): their header values, checked; their hold
   // @migrate: listed on the hold, a need of its own; whole names, never a login's
   const m = build(head('sound', '// @migrate localStorage rrRave.zoom rrRave.on\n')).mod;
   assert.deepEqual(m.powerArgs, { migrate: ['local:rrRave.zoom', 'local:rrRave.on'] });
-  assert.deepEqual(bp.powerNeeds(m).map((n) => [n.key, n.fact]).pop(), ['power:migrate:local:rrRave.on | local:rrRave.zoom', 'brings over its old settings from what this site keeps under: rrRave.zoom, rrRave.on (once)']);
+  assert.deepEqual(bp.powerNeeds(m).map((n) => [n.key, n.fact]).find(([k]) => /^power:migrate:/.test(k)), ['power:migrate:local:rrRave.on | local:rrRave.zoom', 'brings over its old settings from what this site keeps under: rrRave.zoom, rrRave.on (once)']);
+  // (it reads the site's storage, so for the combinations it counts as site-storage: review F7)
+  assert.deepEqual(bp.powerNeeds(m).filter((n) => n.power === 'together').map((n) => n.key), ['power:together:site-storage+sound']);
   assert.throws(() => build(head('sound', '// @migrate localStorage auth.token\n')), /named like a login/);
   assert.throws(() => build(head('sound', '// @migrate cookies x\n')), /@migrate/);
 });

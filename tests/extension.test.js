@@ -2867,6 +2867,70 @@ test('agent and model per site chat: each site its own pick; the default is the 
   assert.deepEqual(lib.siteSettings({ picks, snapshots: panelA, global: global2, site: null }), lib.normalizeSettings(global2));
 });
 
+test('robotless: the default\'s agent "none", over every site\'s pick, which no site\'s pick or snapshot holds', () => {
+  assert.equal(lib.ROBOTLESS, 'none');
+  assert.equal(lib.isRobotless({ agent: 'none', models: {} }), true);
+  for (const s of [null, undefined, {}, { agent: '' }, { agent: 'claude' }, 'none', ['none']]) assert.equal(lib.isRobotless(s), false, JSON.stringify(s));
+  // kept through normalizing (it's an agent id like the others there)
+  assert.deepEqual(lib.normalizeSettings({ agent: 'none', models: { claude: 'opus' } }), { agent: 'none', models: { claude: 'opus' } });
+  const global = { agent: 'none', models: { claude: 'opus' } };
+  const picks = { 'x.com': { agent: 'codex', models: {} }, 'old.com': { agent: 'none', models: {} } };
+  const snaps = new Map();
+  // A site without a pick, seen while robotless: its snapshot is the default's agent (''), not robotless, so
+  // once robotless ends it doesn't stay on there.
+  assert.deepEqual(lib.siteSettings({ picks, snapshots: snaps, global, site: 'github.com' }), { agent: '', models: { claude: 'opus' } });
+  assert.equal(snaps.get('github.com').agent, '');
+  // A site's own pick stays as it was (robotless is the browser's: the panel checks the default first).
+  assert.deepEqual(lib.siteSettings({ picks, snapshots: snaps, global, site: 'x.com' }), { agent: 'codex', models: {} });
+  assert.equal(lib.siteSettings({ picks, snapshots: snaps, global, site: 'old.com' }).agent, '', 'a pick saying robotless reads as the default');
+  assert.equal(picks['old.com'].agent, 'none', 'and isn\'t changed in place');
+  // No site: the default itself, robotless.
+  assert.equal(lib.siteSettings({ picks, snapshots: snaps, global, site: null }).agent, 'none');
+});
+
+test('Switch to: only the other installed agents the helper knows are logged in, in its order', () => {
+  const list = [
+    { id: 'claude', name: 'Claude Code', available: true, loggedIn: false },
+    { id: 'codex', name: 'Codex', available: true, loggedIn: true },
+    { id: 'codex-oss', name: 'Open model', available: true, loggedIn: null }, // (unknown: not offered)
+    { id: 'gemini', name: 'Gemini CLI', available: false, loggedIn: true }, // (not installed: never)
+    { id: 'claude-managed', name: 'Claude (managed)', available: true, loggedIn: true },
+    { id: 'none', name: 'x', available: true, loggedIn: true },
+    null, { name: 'no id', available: true, loggedIn: true },
+  ];
+  assert.deepEqual(lib.switchableAgents(list, 'claude').map((a) => a.id), ['codex', 'claude-managed']);
+  assert.deepEqual(lib.switchableAgents(list, 'codex').map((a) => a.id), ['claude-managed'], 'never the chosen one');
+  assert.deepEqual(lib.switchableAgents(null, 'claude'), []);
+  assert.deepEqual(lib.switchableAgents([{ id: 'claude', available: true, loggedIn: 'yes' }], ''), [], 'only a login known OK');
+});
+
+test('the panel: Settings\' "None (robotless)", the robotless line, and the login notice\'s Switch to and Use robotless', () => {
+  const panel = fs.readFileSync(path.join(__dirname, '..', 'extension', 'sidepanel.js'), 'utf8');
+  const html = fs.readFileSync(path.join(__dirname, '..', 'extension', 'sidepanel.html'), 'utf8');
+  const css = fs.readFileSync(path.join(__dirname, '..', 'extension', 'sidepanel.css'), 'utf8');
+  assert.match(panel, /new Option\('None \(robotless\)', ROBOTLESS\)/);
+  assert.match(panel, /`Switch to \$\{a\.name\}`/);
+  assert.match(panel, /'Use robotless'/);
+  assert.match(html, /<p id="robotless-line" class="robotless-line">Robotless: your mods run, no agent\. Pick one in <a href="#" id="robotless-settings">Settings<\/a> to chat\.<\/p>/);
+  // robotless: the box and what asks the agent go; the line shows (not on the gate or the landing page)
+  assert.match(css, /body\.robotless \.robotless-line \{ display: block; \}/);
+  assert.match(css, /body\.robotless :is\(\.composer, \.using-line, \.empty, \.agent-site-note, \.explain-btn, \.mod-update \.merge, \.break-actions \.break-fix\) \{ display: none; \}/);
+  assert.match(css, /\[data-face="robotless"\]\) \.eye \{ display: none; \}/);
+});
+
+test('background: robotless (settings.agent "none") refuses agent.start, and nothing reaches the helper', async () => {
+  const bg = await loadBackground({ storage: { settings: { agent: 'none', models: {} } } });
+  try {
+    const panel = bg.connectPanel();
+    const r = await panel.ask({ type: 'agent.start', site: 'x.com', tabId: 12, url: 'https://x.com/home', prompt: 'hide reposts' });
+    assert.equal(r.ok, false);
+    assert.match(r.error, /^Robotless: no agent is chosen in this browser/);
+    await settle(10);
+    assert.ok(!bg.native.sent.some((m) => m.cmd === 'agent.start'), 'no run asked of the helper');
+    assert.ok(!(bg.store['chat:x.com']?.messages || []).length, 'nothing in the chat');
+  } finally { bg.restore(); }
+});
+
 // ---- site access: the browser's OK for each site TRIF is on for ---------------------------------
 
 test('site access: a site needs its domain and subdomains, http and https; <all_urls> or any host covers all', () => {

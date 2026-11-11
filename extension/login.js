@@ -145,9 +145,10 @@ export function createLogin({ request, changed = () => {}, succeeded = () => {} 
 
   /**
    * The login's contents: {nodes, tone: ''|'bad'|'ok'}. Not started: "<name> isn't logged in", with Log
-   * in (`intro` the line above it) or the agent's own way to log in.
+   * in (`intro` the line above it) or the agent's own way to log in, and after it `more` (the side panel's
+   * Switch to <agent> and Use robotless buttons).
    */
-  function nodes(agentInfo, { intro = `Log in with your account to use it from this ${PANEL}.` } = {}) {
+  function nodes(agentInfo, { intro = `Log in with your account to use it from this ${PANEL}.`, more = [] } = {}) {
     const name = L?.name || agentInfo?.name || 'The agent';
     const fix = L?.fix || agentInfo?.loginFix || '';
     const fallback = () => (fix ? markdownBlock('note', `Or ${fix}.`) : null);
@@ -196,10 +197,11 @@ export function createLogin({ request, changed = () => {}, succeeded = () => {} 
         out.push(el('p', 'title', `${name} isn’t logged in`));
         if (agentInfo?.canLogin) {
           out.push(el('p', null, intro));
-          out.push(actions(button('Log in', 'primary', () => start(agentInfo.id, name, fix))));
+          out.push(actions(button('Log in', 'primary', () => start(agentInfo.id, name, fix)), ...more));
           out.push(fallback());
-        } else if (fix) {
-          out.push(markdownBlock('', `To log in, ${fix}.`));
+        } else {
+          if (fix) out.push(markdownBlock('', `To log in, ${fix}.`));
+          if (more.length) out.push(actions(...more));
         }
     }
     return { nodes: out.filter(Boolean), tone };

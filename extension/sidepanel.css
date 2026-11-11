@@ -199,11 +199,11 @@ body.needs-login .problem-line { color: var(--warn); }
 .bar-robot .eye { fill: #59dbab; }
 /* His faces (data-face, sidepanel.js renderFaces; the toolbar icon's, faces.js), one colour each, the
    frame's (--switch-on): paused, a pause sign (tablock.js); blocked, a cross; disconnected, a broken link
-   (grey, by the bar's filter); off, no eyes; logged out, hollow eyes. */
+   (grey, by the bar's filter); off, no eyes (robotless too, in the usual green); logged out, hollow eyes. */
 .bar-robot .pause { display: none; fill: var(--switch-on); }
 .bar-robot .cross { display: none; stroke: var(--switch-on); stroke-width: 14; stroke-linecap: round; }
 .bar-robot .link { display: none; fill: none; stroke: var(--switch-on); stroke-width: 7; stroke-linecap: round; }
-.bar-robot:is([data-face="paused"], [data-face="blocked"], [data-face="disconnected"], [data-face="off"]) .eye { display: none; }
+.bar-robot:is([data-face="paused"], [data-face="blocked"], [data-face="disconnected"], [data-face="off"], [data-face="robotless"]) .eye { display: none; }
 .bar-robot[data-face="disconnected"] .link { display: inline; }
 .bar-robot[data-face="paused"] .pause { display: inline; }
 /* (his marks are one colour; the face can differ for contrast: dark-grey marks need a light face) */
@@ -577,6 +577,13 @@ h3.mod-name { margin: 0; font-size: inherit; line-height: inherit; }
 }
 .composer textarea::placeholder { color: var(--faint); }
 .composer textarea:disabled { cursor: not-allowed; }
+/* Robotless (body.robotless: no chat agent in this browser): one quiet line in the message box's place, and
+   nothing that asks the agent (the agent's line, the empty chat's starters, Explain, Merge with my agent,
+   a broken mod's Fix it). */
+.robotless-line { display: none; flex: none; margin: 6px 14px 12px; color: var(--faint); font-size: 12px; line-height: 1.4; }
+body.robotless .robotless-line { display: block; }
+body.robotless :is(.composer, .using-line, .empty, .agent-site-note, .explain-btn, .mod-update .merge, .break-actions .break-fix) { display: none; }
+body:is(.site-off, .no-site) .robotless-line { display: none; }
 
 .send {
   position: absolute;

@@ -1624,7 +1624,34 @@ export function withoutModel({ settings, picks, snapshots }, agentId) {
  */
 export function siteSettings({ picks, snapshots, global, site }) {
   if (!site) return normalizeSettings(global);
-  if (picks[site]) return picks[site];
-  if (!snapshots.has(site)) snapshots.set(site, normalizeSettings(JSON.parse(JSON.stringify(global || {}))));
+  if (picks[site]) return notRobotless(picks[site]);
+  if (!snapshots.has(site)) snapshots.set(site, notRobotless(normalizeSettings(JSON.parse(JSON.stringify(global || {})))));
   return snapshots.get(site);
+}
+
+// ---- robotless ---------------------------------------------------------------------------------------
+// No chat agent in this browser: `settings.agent` (the default's) is ROBOTLESS. It's the browser's, not a
+// site's: it wins over every site's pick (which it leaves as they are), and no site's pick or snapshot
+// holds it (a site's agent is then its default's). Picking any agent (or Default) in Settings ends it.
+// Mods, approvals and the rest work as usual; the panel is green, as when logged in (docs/ROBOTLESS-STRINGS.md).
+export const ROBOTLESS = 'none';
+
+/** Whether the default agent settings (`settings` in storage) say robotless. */
+export function isRobotless(settings) {
+  return !!settings && typeof settings === 'object' && settings.agent === ROBOTLESS;
+}
+
+/** A site's settings without robotless in them (the default's own agent then). */
+function notRobotless(s) {
+  return s.agent === ROBOTLESS ? { ...s, agent: '' } : s;
+}
+
+/**
+ * The agents a chat whose agent isn't logged in can switch to: the other installed ones the helper knows are
+ * logged in (agent.list's `loggedIn === true`), in its order. Never one that isn't installed, or whose login
+ * is unknown.
+ */
+export function switchableAgents(list, currentId) {
+  return (Array.isArray(list) ? list : []).filter((a) => a && typeof a.id === 'string' && a.id && a.id !== currentId && a.id !== ROBOTLESS
+    && a.available === true && a.loggedIn === true);
 }

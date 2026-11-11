@@ -32,6 +32,21 @@ test('the face by precedence: paused, blocked, disconnected, off, logged out, no
   assert.equal(toolbarFace({ state: 'off', light: true }), 'off', 'only paused is flipped');
 });
 
+test('robotless: off\'s blank face in green, every tab, over logged out (never yellow then); a site\'s state still wins', async () => {
+  const { toolbarFace, facePaths, FACE_FILES } = await load();
+  assert.equal(toolbarFace({ robotless: true }), 'robotless');
+  assert.equal(toolbarFace({ robotless: true, loggedOut: true }), 'robotless');
+  assert.equal(toolbarFace({ state: 'on', robotless: true, loggedOut: true }), 'robotless');
+  assert.equal(toolbarFace({ state: 'blocked', robotless: true }), 'blocked');
+  assert.equal(toolbarFace({ state: 'off', robotless: true }), 'off');
+  assert.equal(toolbarFace({ locked: true, robotless: true }), 'paused');
+  // off's icon, which is already the usual green with no eyes
+  assert.deepEqual(facePaths('robotless'), facePaths('off'));
+  assert.equal(FACE_FILES.robotless, 'robot-off');
+  assert.deepEqual(R.FACES.off.rim, [0x34, 0xd3, 0x99]);
+  assert.equal(R.FACES.off.eyes, 'none');
+});
+
 test('every face\'s files exist, are render-icon.js\'s, and the normal one is the manifest\'s', async () => {
   const { facePaths, FACE_FILES } = await load();
   const manifest = JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'extension', 'manifest.json'), 'utf8'));

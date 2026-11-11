@@ -2922,8 +2922,9 @@ test('siteState / siteRefusal / everySiteOrigins: on, off, disconnected, blocked
   const access = lib.normalizeAccess({ origins: PER_SITE('x.com', 'off.com') });
   const ctx = { sitesOn: ['x.com', 'gone.com'], access, blocked: ['shop.com'] };
   assert.deepStrictEqual(['x.com', 'off.com', 'gone.com', 'new.com', 'shop.com'].map((x) => lib.siteState(x, ctx)),
-    ['on', 'off', 'disconnected', 'disconnected', 'blocked']);
-  assert.strictEqual(lib.siteState('shop.com', { ...ctx, access: lib.ALL_ACCESS, sitesOn: ['shop.com'] }), 'blocked', 'whatever the access');
+    ['on', 'off', 'disconnected', 'disconnected', 'disconnected']);
+  assert.strictEqual(lib.siteState('shop.com', { ...ctx, access: lib.ALL_ACCESS, sitesOn: ['shop.com'] }), 'blocked', 'with access: blocked, whether it was on or not');
+  assert.strictEqual(lib.siteState('shop.com', { ...ctx, access: lib.normalizeAccess({ origins: PER_SITE('shop.com') }) }), 'blocked', 'connected again: back to blocked');
   assert.strictEqual(lib.siteState('anything.org', { access: lib.ALL_ACCESS }), 'off', 'every site given: never disconnected');
   assert.strictEqual(lib.siteRefusal('x.com', 'on'), null);
   assert.match(lib.siteRefusal('a.com', 'off'), /^TRIF is off on a\.com: .*turns it on/);

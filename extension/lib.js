@@ -1366,8 +1366,10 @@ export function everySiteOrigins(access) {
 
 /** The state of `site` (a registrable domain): 'on', 'off', 'disconnected' or 'blocked' (see above). */
 export function siteState(site, { sitesOn = [], access = null, blocked = [] } = {}) {
-  if ((blocked || []).includes(site)) return 'blocked';
+  // (no access shows first: a blocked site the user disconnected is disconnected, and Connect brings it back
+  // to blocked, which TRIF's block list keeps whatever the access: Tim, 2026-11-11)
   if (!hasSiteAccess(access, site)) return 'disconnected';
+  if ((blocked || []).includes(site)) return 'blocked';
   return (sitesOn || []).includes(site) ? 'on' : 'off';
 }
 

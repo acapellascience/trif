@@ -21,15 +21,8 @@ function pixels(png) {
 
 test('the face by precedence: paused, blocked, disconnected, off, logged out, normal', async () => {
   const { toolbarFace } = await load();
-  assert.equal(toolbarFace({}), 'normal');
-  assert.equal(toolbarFace({ state: 'on' }), 'normal');
-  assert.equal(toolbarFace({ state: 'disconnected', loggedOut: true }), 'disconnected');
-  assert.equal(toolbarFace({ loggedOut: true }), 'login');
-  assert.equal(toolbarFace({ state: 'off', loggedOut: true }), 'off');
-  assert.equal(toolbarFace({ state: 'blocked', loggedOut: true }), 'blocked');
-  assert.equal(toolbarFace({ state: 'off', locked: true, loggedOut: true }), 'paused');
-  assert.equal(toolbarFace({ locked: true, light: true }), 'paused-light');
-  assert.equal(toolbarFace({ state: 'off', light: true }), 'off', 'only paused is flipped');
+  // The toolbar stays the usual green robot whatever the state (Tim, 2026-11-11): the faces are the panel's.
+  for (const args of [{}, { state: 'on' }, { state: 'disconnected', loggedOut: true }, { loggedOut: true }, { state: 'off', loggedOut: true }, { state: 'blocked' }, { locked: true }, { locked: true, light: true }]) assert.equal(toolbarFace(args), 'normal', JSON.stringify(args));
 });
 
 test('every face\'s files exist, are render-icon.js\'s, and the normal one is the manifest\'s', async () => {

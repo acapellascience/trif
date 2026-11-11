@@ -180,6 +180,7 @@ body.no-site .bar-robot, body.no-site:not(.blocked) .dot { display: none; }
 /* What's in the way, under the gate's or the landing page's own words: one line in the colour it's in. */
 .problem-line { max-width: 300px; margin: 0; text-align: center; color: var(--bad); }
 body.needs-login .problem-line { color: var(--warn); }
+body.site-blocked .problem-line { color: var(--bad); } /* (one colour: blocked's red, whatever else is in the way) */
 .problem-line p { margin: 0; }
 .problem-line a { color: inherit; }
 .problem-line code { white-space: nowrap; }

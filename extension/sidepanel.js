@@ -1193,7 +1193,7 @@ async function addStarter(site, { fromSite = false } = {}) {
 // (Unknown until the first status: neither shows.)
 // The site's state (lib.js siteState): on; off (TRIF keeps the browser's access, so on again doesn't ask:
 // a quick before and after); disconnected (restrictive, no access: a first visit too; the panel all grey,
-// and Connect asks the browser and turns it on); blocked (TRIF's block list: the panel red, and Unblock).
+// and Connect asks the browser, then the robot is off: Fix turns it on, a step of its own); blocked (TRIF's block list: the panel red, and Unblock).
 // (Chrome's own list of sites extensions may not touch doesn't show in chrome.permissions: contains still
 // says yes there, checked in Chrome 156. Such a site looks on or off here; the browser refuses TRIF there.)
 // The sensitive sites (lib.js "sensitive sites"), as the background knows them: a sensitive host under a
@@ -1290,7 +1290,9 @@ function renderGate(problem, agentInfo) {
   // Quiet links under Fix: block the site in TRIF, and disconnect it (give the browser's permission back;
   // with every site allowed, that offers restrictive mode instead). Not Disconnect in Safari, which keeps
   // site access in its own settings.
-  ui.gateLinks.hidden = state !== 'off';
+  // Blocked keeps Disconnect (not Block); Connect on a blocked site brings it back to blocked.
+  ui.gateLinks.hidden = !(state === 'off' || (state === 'blocked' && SITE_ACCESS));
+  ui.gateBlock.hidden = state === 'blocked';
   ui.gateBlock.textContent = `Block on ${scope}`;
   ui.gateDisconnect.textContent = `Disconnect from ${scope}`;
   // (a site of its own inside another, mail.google.com, whose access comes from its parent's: nothing of its
@@ -1328,7 +1330,8 @@ async function setSiteOn(on) {
       ui.gateErr.hidden = false;
       return;
     }
-    await request({ type: 'site.set', site: view.site, on, tab: view.tab?.id });
+    // (Connect only gets the browser's access: the robot is off there until the user turns it on, Tim 2026-11-11)
+    await request({ type: 'site.set', site: view.site, on: asking ? false : on, tab: view.tab?.id });
     await refreshStatus();
   } catch (e) {
     // Under the button when turning on; on the header switch's tooltip when turning off.

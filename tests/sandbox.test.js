@@ -80,6 +80,37 @@ const prefs = await trif.settings('prefs', { on: true }); setTimeout(() => conso
 requestAnimationFrame((t) => page.find('#x').style('transform', 'translate(' + t + 'px)'));`), []);
 });
 
+test('sandboxLint, the widened box: the pure tools and the new API are there; what\'s still missing is listed', () => {
+  const what = (code, o) => sandboxLint(code, o).map((l) => l.what);
+  // (sound's play(sound) isn't the page's media; the page's video.play() is)
+  assert.deepEqual(what(`const a = trif.audio(); a.play('data:audio/wav;base64,AA', { volume: 0.2 }); page.find('video').play(); page.find('video').pause();
+const anim = page.find('p').animate([{ opacity: 0 }], 100); anim.pause(); anim.play();`, { powers: ['sound'] }), ['.play()', '.pause()']);
+  // (typed arrays and the browser's pure tools: there; what SES leaves out: listed)
+  assert.deepEqual(what(`const f = new Float32Array(4), d = new Float64Array(2); const u = new URL('/a', page.url); new URLSearchParams('a=1');
+new Intl.NumberFormat('en'); new TextEncoder(); structuredClone({}); atob(btoa('x')); performance.now();`), []);
+  assert.deepEqual(what(`new Float16Array(2); new SharedArrayBuffer(8); new WeakRef({});`), ['Float16Array', 'SharedArrayBuffer', 'WeakRef']);
+  assert.deepEqual(what(`URL.createObjectURL(x); performance.getEntries(); page.find('p').innerText = 'x'; page.root.scrollTop = 5; const t = page.find('p').innerText;`),
+    ['URL.createObjectURL', 'performance.getEntries', '.innerText =', '.scrollTop =']);
+  const tip = sandboxLint('new MutationObserver(() => {}); new ResizeObserver(() => {});');
+  assert.match(tip[0].why, /trif\.observe.*trif\.changes/);
+  assert.match(tip[1].why, /onResize/);
+  // (the new API itself: nothing)
+  assert.deepEqual(what(`trif.changes('#feed', (els) => els.length); trif.wrap('p', /x/, (m) => m); trif.onUrl((u) => u); await trif.ready;
+const el = page.find('p'); el.animate([{ opacity: 0 }], 100); el.focus(); el.onResize(() => {}); page.createSvg('svg'); page.elementFromPoint(1, 2);`), []);
+});
+
+test('@events: the page\'s own events a boxed mod listens for, in its powerArgs; never a browser event\'s name or TRIF\'s own', () => {
+  const bp = require('../helper/lib/boxpowers');
+  assert.deepEqual(bp.parseEvents(['trif-endscreen-switch, my-app:ready', 'trif-endscreen-switch']), ['trif-endscreen-switch', 'my-app:ready']);
+  assert.throws(() => bp.parseEvents(['keydown']), /has a - or a :/);
+  assert.throws(() => bp.parseEvents(['trif:filter-request']), /TRIF's own/);
+  const { buildMod } = require('../helper/lib/mods');
+  const code = `// ==WebMod==\n// @name W\n// @match https://x.com/*\n// @boxed\n// @events trif-endscreen-switch\n// ==/WebMod==\npage.on('trif-endscreen-switch', () => {});\n`;
+  const { mod } = buildMod({ site: 'x.com', file: '/tmp/w.js', code });
+  assert.deepEqual(mod.powerArgs, { events: ['trif-endscreen-switch'] });
+  assert.equal(mod.powers, undefined);
+});
+
 test('trif check: a sandboxed mod never waits; what the sandbox would refuse is listed, not a failure', async () => {
   const home = tempDir();
   const okFile = writeMod(home, 'x.com', 'calm.js', header() + 'trif.hide(".ad");\nreturn;\n');

@@ -106,7 +106,7 @@ export function formatError(e) {
 /** The body of `__webmods_runtime`. Runs once per page at document_start, before any mod. */
 export function runtimeMain(RECORDING, safeStringify) {
   if (window.__webmods && window.__webmods.errors) return; // already installed
-  const W = window.__webmods = { errors: [], pageErrors: [], logs: [], requests: [], recording: false, current: null };
+  const W = window.__webmods = { errors: [], pageErrors: [], logs: [], requests: [], recording: false, current: null, watched: {} };
   const nativeConsole = { log: console.log, warn: console.warn, error: console.error };
   const MAX_ERRORS = 200, MAX_PAGE_ERRORS = 100, MAX_LOGS = 500, MAX_REQUESTS = 300, MAX_BODY = 2 * 1024 * 1024;
   const MAX_KEPT = 32 * 1024 * 1024; // characters of bodies kept across all recorded requests
@@ -128,7 +128,17 @@ export function runtimeMain(RECORDING, safeStringify) {
       nativeConsole[level].call(console, '[TRIF]', mod || '', ...args);
     } catch (e) { /* never throw into a mod */ }
   };
-  window.webmods = window.trif = { log: logger('log'), warn: logger('warn'), error: logger('error') };
+  // trif.expect(selector): a free mod says what it looks for, so TRIF can tell when none of it is on the page
+  // any more (the mod may be broken: extension/modhealth.js). It only notes it; nothing else happens.
+  const expect = function (selector) {
+    try {
+      const mod = modFromStack(new Error().stack) || W.current || null;
+      if (!mod || typeof selector !== 'string' || !selector || selector.length > 500) return;
+      const l = W.watched[mod] || (W.watched[mod] = []);
+      if (l.length < 40 && l.indexOf(selector) < 0) l.push(selector);
+    } catch (e) { /* never throw into a mod */ }
+  };
+  window.webmods = window.trif = { log: logger('log'), warn: logger('warn'), error: logger('error'), expect };
 
   // Errors from mods' event handlers and timers (the per-mod wrapper only catches top-level throws); the
   // rest are the page's own (`trif errors --page`), kept apart and fewer.
@@ -327,6 +337,8 @@ export function runtimeMain(RECORDING, safeStringify) {
  *   (checked there: nothing invented) replaces it.
  * - page-data: an element's React props and fiber, read by a path (`trif:page-data` on the element), answered
  *   with a plain JSON copy (`trif:page-data-answer`): no functions, no DOM nodes, capped.
+ * - for every boxed mod: `trif:url` after the page's pushState and replaceState (trif.onUrl), with nothing in
+ *   it; `trif:shadow-css` (trif.css with { shadow }): a checked sheet, as text, for the roots of hosts that match.
  * The page can see and send these events too: it learns or changes only its own data.
  */
 export function pageBridge() {
@@ -344,7 +356,8 @@ export function pageBridge() {
   document.addEventListener('trif:page-data-answer', (e) => { if (typeof e.detail === 'string') answer = e.detail; }, true);
   const matches = (url) => globs.some((re) => re.test(url));
   const filterText = (url, method, status, text) => {
-    if (typeof text !== 'string' || text.length > MAX || !/^\s*[[{]/.test(text)) return text;
+    // (JSON, or JSON behind a guard (for (;;); and the like), or several documents one after another)
+    if (typeof text !== 'string' || text.length > MAX || !/^\s*([[{]|for\s*\(|while\s*\(|\)\]\}')/.test(text)) return text;
     const out = ask('trif:filter-request', JSON.stringify({ url, method, status, text }));
     return typeof out === 'string' ? out : text;
   };
@@ -401,8 +414,60 @@ export function pageBridge() {
   document.addEventListener('trif:filter-patterns', (e) => {
     try { const list = JSON.parse(String(e.detail)); if (Array.isArray(list) && list.length) { globs = list.slice(0, 50).map(glob); wrap(); } } catch (err) { /* ignore */ }
   }, true);
-  // (a boxed mod that asked before this was here: it asks again when it sees this)
-  document.dispatchEvent(new CustomEvent('trif:bridge-ready'));
+
+  // trif.onUrl: the page's own history moves, as a signal with nothing in it (the boxed mod reads page.url)
+  for (const k of ['pushState', 'replaceState']) {
+    try {
+      const f = history[k];
+      if (typeof f !== 'function') continue;
+      history[k] = function () { const r = f.apply(this, arguments); try { document.dispatchEvent(new CustomEvent('trif:url')); } catch (e) { /* none */ } return r; };
+    } catch (e) { /* kept as it was */ }
+  }
+  // trif.css with { shadow }: the roots the page makes (closed ones too), kept as they're made, so a boxed mod's
+  // sheet (checked in TRIF's sandbox world, sent as text: trif:shadow-css) goes into those under hosts that
+  // match, now and later; adopted, so the page writing its root's content keeps it. The roots never leave here.
+  const roots = new WeakMap(); // host -> its root
+  const shadowSheets = new Map(); // id -> { sel, sheet }
+  const adopt = (host) => {
+    const root = roots.get(host) || host.shadowRoot;
+    if (!root || !('adoptedStyleSheets' in root)) return;
+    for (const sh of shadowSheets.values()) {
+      let m = false;
+      try { m = host.matches(sh.sel); } catch (e) { m = false; }
+      if (m && !root.adoptedStyleSheets.includes(sh.sheet)) root.adoptedStyleSheets = [...root.adoptedStyleSheets, sh.sheet];
+    }
+  };
+  let shadowMo = null;
+  try {
+    const as = Element.prototype.attachShadow;
+    if (typeof as === 'function') {
+      Element.prototype.attachShadow = function attachShadow() {
+        const root = as.apply(this, arguments);
+        try { roots.set(this, root); if (shadowSheets.size) adopt(this); } catch (e) { /* none */ }
+        return root;
+      };
+    }
+  } catch (e) { /* kept as it was */ }
+  document.addEventListener('trif:shadow-css', (e) => {
+    let o;
+    try { o = JSON.parse(String(e.detail)); } catch (err) { return; }
+    if (!o || typeof o.id !== 'string') return;
+    if (o.remove) {
+      const sh = shadowSheets.get(o.id);
+      shadowSheets.delete(o.id);
+      if (sh) for (const h of document.querySelectorAll('*')) { const r = roots.get(h) || h.shadowRoot; if (r && r.adoptedStyleSheets.includes(sh.sheet)) r.adoptedStyleSheets = r.adoptedStyleSheets.filter((x) => x !== sh.sheet); }
+      return;
+    }
+    if (typeof o.sel !== 'string' || typeof o.text !== 'string' || shadowSheets.has(o.id)) return;
+    let sheet;
+    try { sheet = new CSSStyleSheet(); sheet.replaceSync(o.text); } catch (err) { return; }
+    shadowSheets.set(o.id, { sel: o.sel, sheet });
+    try { for (const h of document.querySelectorAll(o.sel)) adopt(h); } catch (err) { /* not a selector */ }
+    if (!shadowMo && document.documentElement) {
+      shadowMo = new MutationObserver((recs) => { for (const r of recs) for (const n of r.addedNodes) if (n.nodeType === 1) { adopt(n); for (const h of n.querySelectorAll('*')) if (roots.has(h) || h.shadowRoot) adopt(h); } });
+      shadowMo.observe(document.documentElement, { childList: true, subtree: true });
+    }
+  }, true);
 
   // page-data
   const plain = (v, depth, seen, budget) => {
@@ -441,6 +506,134 @@ export function pageBridge() {
       document.dispatchEvent(new CustomEvent('trif:page-data-answer', { detail: json && json.length <= 1024 * 1024 ? json : 'null' }));
     } catch (err) { /* no answer: null */ }
   }, true);
+  // site-data's data globals (trif.filterGlobal): each declared name, filtered as the page sets it, as JSON
+  // through the same check as a response (trif:filter-request, with the address global:<name>)
+  document.addEventListener('trif:filter-globals', (e) => {
+    let names;
+    try { names = JSON.parse(String(e.detail)); } catch (err) { return; }
+    for (const name of Array.isArray(names) ? names.slice(0, 20) : []) {
+      if (typeof name !== 'string' || !/^[A-Za-z_$][\w$]{0,60}$/.test(name) || Object.prototype.hasOwnProperty.call(window, name)) continue;
+      let v;
+      try {
+        Object.defineProperty(window, name, {
+          configurable: true, enumerable: true, get() { return v; },
+          set(x) {
+            v = x;
+            try { const text = JSON.stringify(x); if (typeof text !== 'string' || text.length > MAX) return; const out = ask('trif:filter-request', JSON.stringify({ url: `global:${name}`, method: 'GLOBAL', status: 0, text })); if (typeof out === 'string') v = JSON.parse(out); } catch (err) { v = x; }
+          },
+        });
+      } catch (err) { /* the page's own */ }
+    }
+  }, true);
+  // page-events (trif.signal): a declared signal, sent here as text, dispatched to the page's own code on the
+  // document (never one of TRIF's own)
+  document.addEventListener('trif:page-event', (e) => {
+    try {
+      const o = JSON.parse(String(e.detail));
+      if (!o || typeof o.name !== 'string' || !/^[a-z][\w.]*[-:][\w.:-]*$/i.test(o.name) || /^trif:/i.test(o.name)) return;
+      document.dispatchEvent(new CustomEvent(o.name, { detail: JSON.parse(o.detail), bubbles: true }));
+    } catch (err) { /* not one */ }
+  }, true);
+  // image-variants (trif.imageVariant): the address TRIF worked out, on the picture it made, set here under
+  // the page's own rules for pictures, fetched without credentials (so its pixels read back where its host
+  // allows that)
+  document.addEventListener('trif:image-src', (e) => {
+    const img = e.target;
+    if (!img || img.localName !== 'img' || typeof e.detail !== 'string' || !/^https?:\/\//.test(e.detail)) return;
+    img.crossOrigin = 'anonymous';
+    img.src = e.detail;
+  }, true);
+  // preload (el.loadSooner): the page's own lazy picture, loaded now
+  document.addEventListener('trif:load-sooner', (e) => {
+    const img = e.target;
+    if (img && img.localName === 'img' && String(img.getAttribute('loading') || '').toLowerCase() === 'lazy') img.loading = 'eager';
+  }, true);
+  // embeds (trif.embed): after the user's click on TRIF's button, the player's frame, made here: the
+  // address TRIF made from the page's link, no referrer, scripts but no top navigation, without credentials
+  document.addEventListener('trif:embed', (e) => {
+    const b = e.target;
+    if (!b || b.localName !== 'button' || typeof e.detail !== 'string' || !/^https:\/\/(www\.youtube\.com\/embed|www\.youtube-nocookie\.com\/embed|player\.vimeo\.com\/video)\/[\w-]{4,20}$/.test(e.detail)) return;
+    const f = document.createElement('iframe');
+    f.setAttribute('credentialless', '');
+    f.setAttribute('sandbox', 'allow-scripts allow-same-origin allow-presentation');
+    f.referrerPolicy = 'no-referrer';
+    f.allow = 'autoplay; encrypted-media; picture-in-picture; fullscreen';
+    f.width = '560'; f.height = '315';
+    f.style.cssText = 'border: 0; max-width: 100%;';
+    f.src = e.detail;
+    b.replaceWith(f);
+  }, true);
+  // rewrite-requests: the header's literal changes (true, false, null, a number, a plain word), made in the
+  // site's own same-origin requests whose operation has that name (the address's last part, or the body's or
+  // the query's operationName): in a query parameter, its JSON, or a JSON body
+  let rewrites = [];
+  const lit = (v) => (v === 'true' ? true : v === 'false' ? false : v === 'null' ? null : /^-?\d/.test(v) ? Number(v) : v);
+  const setPath = (obj, segs, v) => { let o = obj; for (const k of segs.slice(0, -1)) { if (!o[k] || typeof o[k] !== 'object') o[k] = {}; o = o[k]; } o[segs[segs.length - 1]] = v; };
+  const rulesFor = (u, bodyOp) => rewrites.filter((r) => r.op === u.pathname.split('/').pop() || r.op === u.searchParams.get('operationName') || (bodyOp && r.op === bodyOp));
+  const rewriteUrl = (url) => {
+    let u;
+    try { u = new URL(String(url), location.href); } catch (err) { return url; }
+    if (u.origin !== location.origin) return url;
+    let changed = false;
+    for (const r of rulesFor(u)) for (const [path, v] of r.sets) {
+      const [top, ...rest] = path.split('.');
+      if (!rest.length) { u.searchParams.set(top, String(lit(v))); changed = true; continue; }
+      if (!u.searchParams.has(top)) continue;
+      let o;
+      try { o = JSON.parse(u.searchParams.get(top)); } catch (err) { continue; }
+      if (!o || typeof o !== 'object') continue;
+      setPath(o, rest, lit(v)); u.searchParams.set(top, JSON.stringify(o)); changed = true;
+    }
+    return changed ? u.href : url;
+  };
+  const rewriteBody = (url, body) => {
+    if (typeof body !== 'string' || !/^\s*\{/.test(body)) return body;
+    let u, o;
+    try { u = new URL(String(url), location.href); o = JSON.parse(body); } catch (err) { return body; }
+    if (u.origin !== location.origin || !o || typeof o !== 'object') return body;
+    const rules = rulesFor(u, typeof o.operationName === 'string' ? o.operationName : null);
+    if (!rules.length) return body;
+    for (const r of rules) for (const [path, v] of r.sets) setPath(o, path.split('.'), lit(v));
+    return JSON.stringify(o);
+  };
+  let rewriting = false;
+  const startRewriting = () => {
+    if (rewriting) return;
+    rewriting = true;
+    const f0 = window.fetch;
+    if (typeof f0 === 'function') {
+      window.fetch = function fetch(input, init) {
+        try {
+          if (typeof input === 'string' || input instanceof URL) {
+            const u2 = rewriteUrl(String(input));
+            if (init && init.body !== undefined) { const b = rewriteBody(u2, init.body); if (b !== init.body) init = { ...init, body: b }; }
+            input = u2;
+          } else if (input instanceof Request) { const u2 = rewriteUrl(input.url); if (u2 !== input.url) input = new Request(u2, input); }
+        } catch (err) { /* as it was */ }
+        return init === undefined ? f0.call(this, input) : f0.call(this, input, init);
+      };
+    }
+    const X = window.XMLHttpRequest && window.XMLHttpRequest.prototype;
+    if (X) {
+      const urls = new WeakMap();
+      const open0 = X.open, send0 = X.send;
+      X.open = function (method, url) { const args = [...arguments]; try { args[1] = rewriteUrl(String(url)); urls.set(this, args[1]); } catch (err) { /* as it was */ } return open0.apply(this, args); };
+      X.send = function (body) { try { if (urls.has(this) && body !== undefined) body = rewriteBody(urls.get(this), body); } catch (err) { /* as it was */ } return send0.call(this, body); };
+    }
+  };
+  document.addEventListener('trif:rewrite-rules', (e) => {
+    let list;
+    try { list = JSON.parse(String(e.detail)); } catch (err) { return; }
+    if (!Array.isArray(list)) return;
+    const ok = list.filter((r) => r && typeof r.op === 'string' && /^[A-Za-z][\w]{0,60}$/.test(r.op) && Array.isArray(r.sets)
+      && r.sets.every((x) => Array.isArray(x) && /^[A-Za-z_$][\w$]*(\.[A-Za-z_$][\w$]*){0,7}$/.test(String(x[0])) && /^(true|false|null|-?\d{1,15}(\.\d{1,10})?|[A-Za-z][\w-]{0,40})$/.test(String(x[1]))));
+    if (!ok.length) return;
+    rewrites = ok.slice(0, 50);
+    startRewriting();
+  }, true);
+
+  // (a boxed mod that asked before this was here: it asks again when it sees this)
+  document.dispatchEvent(new CustomEvent('trif:bridge-ready'));
 }
 
 export function runtimeCode(recordingSites) {

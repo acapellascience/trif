@@ -51,28 +51,29 @@ Per browser, a **fresh** scenario, and an **upgrade** scenario per `--upgrade-fr
    next), allow user scripts (it ticks that step itself; Tim's mods are next, a checklist by site with none
    on disk yet: it leaves X and Google ticked and clicks "Add these", and checks only theirs arrive and only
    those sites are on; upgrading, the step is ticked with every site it had), and check: `trif status` (the extension's hello, its browser),
-   `trif doctor`, the shipped mods (`trif mods`, which start on and off, the sites TRIF starts on for).
-   Then Site permissions (see "Site access" below): Firefox clicks Permissive and says no to its prompt
-   (answered from the browser's side), so TRIF is restrictive and the step says so; Chrome clicks
-   Restrictive. Upgrading, TRIF has every site already: the step is ticked "permissive".
-   The agent's login is next.
+   `trif doctor`, the shipped mods (`trif mods`, each starting off, the sites TRIF starts on for).
+   There's no Site permissions step (TRIF asks for each site's permission when it's turned on there): the
+   agent's login is next, and the sites setup turned on wait to be connected (fresh Firefox: all of them;
+   Chrome's test build has its test hosts).
 3. Against a local test site (`http://127.0.0.1:<port>`, `http://localhost:<port>`) with a mod the
    harness writes, and the panel opened as a window following the test window (`sidepanel.html?window=<id>`):
-   - the site starts disconnected (fresh Firefox: restrictive, nothing connected: the panel all grey, "TRIF
+   - the site starts disconnected (fresh Firefox: nothing connected: the panel all grey, "TRIF
      is disconnected on 127.0.0.1" and Connect) or off ("The robot is off.", "Fix 127.0.0.1", and below it
-     "Block on 127.0.0.1" and "Disconnect from 127.0.0.1" with their tooltips); the mod doesn't run; the
-     top bar only the status dot, the robot, grey and dim, and settings; the button runs the mod;
+     "Block on 127.0.0.1" and "Disconnect from 127.0.0.1" with their tooltips; no Disconnect when the browser
+     gives every site); the mod doesn't run; the top bar only the status dot, the robot, grey and dim, the
+     power button (to turn it on from there) and settings (blocked or disconnected: no power button); the
+     button runs the mod;
    - the mod's switch in the panel off and on (page reloads, `trif status` agrees), `trif disable` /
      `trif enable` from the CLI (page and panel follow), the site switch off (nothing runs, page
      commands refused, the access kept) and on again; the same with the robot in the top bar (off like the
      power button, on from the gate like Fix, a little brighter under the mouse);
-   - restrictive, Firefox: Disconnect gives the access back (grey, `trif text` and `trif status` say
-     disconnected), Connect asks (granted: prompts are off) and turns it on in one click; the same after
-     the access is taken away as the browser's settings would (`permissions.remove`); then Settings →
-     Site permissions → Permissive (granted), for the rest of the suite;
-   - permissive: Disconnect opens the card ("All-site access is on"), which × and Escape close, changing
-     nothing; Firefox, at the end: its "Switch to restrictive mode" gives every site back (grey), and
-     Connect brings 127.0.0.1 back;
+   - Firefox: Disconnect gives the access back (grey, `trif text` and `trif status` say disconnected),
+     Connect asks (granted: prompts are off) and turns it on in one click; the same after the access is
+     taken away as the browser's settings would (`permissions.remove`); then the update from a permissive
+     0.2 (`siteMode` set, `<all_urls>` given, the add-on restarted): every site's access goes once, the
+     sites keep their switches (x.com disconnected, 127.0.0.1, granted on its own, still connected), the
+     panel's one-time note and its OK; then the suite's sites are given one by one, as Chrome's build has
+     them;
    - "Block on 127.0.0.1": the mod stops, `trif text`, `screenshot` and `run` are refused with the block
      wording, the panel is red ("The robot is blocked on 127.0.0.1", Unblock), Settings lists it; Unblock
      leaves it off or disconnected, and its button turns it on again;
@@ -94,8 +95,7 @@ Per browser, a **fresh** scenario, and an **upgrade** scenario per `--upgrade-fr
      --tab` lists the mods on that page. Screenshots, restrictive (fresh Chrome): of that tab while it's in
      the background, `--full` and `--copy` are refused with a hint and change nothing; the tab in front is
      refused until TRIF's toolbar button is clicked on it (`Extensions.triggerAction`, which gives
-     `activeTab`), then captured. Fresh Firefox, made permissive while running: a background capture says
-     to restart Firefox (its running background gets no `captureTab`).
+     `activeTab`), then captured. Fresh Firefox: the background capture is refused with the same hint.
      With access to every site from the start (upgrade scenarios): `trif screenshot` and `--full` of the
      background tab work (Firefox: the tab itself; Chrome: refused with a hint about `--copy`, then with
      `--copy`, a copy in a window of its own) and leave every window's active tab, the focused window and
@@ -191,8 +191,8 @@ timsrobot.com, each with its subdomains. To TRIF that's a user who allowed those
 for them says yes at once); localhost, amazon.com and instagram.com have no access. Upgrade scenarios give
 TRIF `<all_urls>` from the start, as for a user who installed it when it was required (Chrome and Firefox
 keep that grant when it moves to optional): Chrome's test build makes it required; Firefox asks for it from
-a click right after installing, then restarts the add-on. Firefox's prompt can be answered from the browser's own side, so the suite turns prompts on once to say no
-to Permissive at setup. Not covered by the suite: Chrome's prompt itself and saying no to it (unit tests
+a click right after installing (after TRIF's first start, so its one-time step that gives up every site
+has run: that's checked in the fresh Firefox run instead), then restarts the add-on. Not covered by the suite: Chrome's prompt itself and saying no to it (unit tests
 cover what TRIF does then), Firefox's `activeTab` screenshot after a toolbar click.
 
 The Chrome test build also has `e2e-background.js` as its service worker: it imports `e2e-no-side-panel.js`

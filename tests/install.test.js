@@ -530,7 +530,7 @@ test('preinstalled mods: each once, switched on or off as listed; the start site
   const plainx = path.join(sites, 'x.com', 'detox-timeline.js');
   const ids = PREINSTALLED.map((p) => p.id);
   const off = PREINSTALLED.filter((p) => !p.on).map((p) => p.id);
-  assert.deepStrictEqual(off, ['x.com/rainbow-rave', 'www.instagram.com/desaturate', 'www.google.com/dvd-logo', 'x.com/follow-status', 'x.com/space-shooter', 'www.instagram.com/three-column-feed', 'timsrobot.com/skip-to-sandbox', 'timsrobot.com/random-mods', 'x.com/profile-styler', 'x.com/post-styler', 'x.com/style-encoder']);
+  assert.deepStrictEqual(off, ids, 'every one of Tim\'s mods starts off');
   assert.deepStrictEqual(SITES_ON, ['google.com', 'x.com', 'amazon.com', 'instagram.com']);
   for (const id of ids) assert.ok(fs.existsSync(path.join(examples, `${id}.js`)), `examples has ${id}`);
   assert.deepStrictEqual(preinstallMods(home, sites, examples), { added: [], on: [], sites: [] }, 'no site added: nothing');
@@ -555,7 +555,7 @@ test('preinstalled mods: each once, switched on or off as listed; the start site
   r = preinstallMods(home2, path.join(home2, 'sites'), examples, undefined, undefined, { add: 'all' });
   assert.deepStrictEqual(r.added, ids.filter((id) => id !== 'x.com/rainbow-rave'));
   assert.strictEqual(fs.readFileSync(own, 'utf8'), '// mine');
-  assert.deepStrictEqual(loadPreinstalled(home2).startOff, ['www.instagram.com/desaturate', 'www.google.com/dvd-logo', 'x.com/follow-status', 'x.com/space-shooter', 'www.instagram.com/three-column-feed', 'timsrobot.com/skip-to-sandbox', 'timsrobot.com/random-mods', 'x.com/profile-styler', 'x.com/post-styler', 'x.com/style-encoder'], 'the user\'s own file isn\'t switched off');
+  assert.deepStrictEqual(loadPreinstalled(home2).startOff, ids.filter((id) => id !== 'x.com/rainbow-rave'), 'the user\'s own file isn\'t switched off');
   assert.deepStrictEqual(loadPreinstalled(home2).shipped, { 'x.com/rainbow-rave': { own: true } }, 'nor ever updated');
 
   // Through setup: a new workspace gets none until the user chooses (the setup page), unless --examples.
@@ -569,8 +569,8 @@ test('preinstalled mods: each once, switched on or off as listed; the start site
   res = await runCli(['setup', '--verbose', '--native-dir', path.join(home3, 'native'), '--no-link', '--examples'], { home: home3 });
   assert.strictEqual(res.code, 0, res.stderr);
   assert.deepStrictEqual(starterChoices(home3), all);
-  assert.match(res.stdout, /preinstalled, on: www\.google\.com\/hide-ai-in-results, /);
-  assert.match(res.stdout, /preinstalled, off until you switch them on in the side panel: x\.com\/rainbow-rave, www\.instagram\.com\/desaturate, www\.google\.com\/dvd-logo/);
+  assert.doesNotMatch(res.stdout, /preinstalled, on:/);
+  assert.match(res.stdout, /preinstalled, off until you switch them on in the side panel: www\.google\.com\/hide-ai-in-results, /);
   assert.match(res.stdout, /TRIF starts on for google\.com, x\.com, amazon\.com, instagram\.com/);
   assert.ok(fs.existsSync(path.join(home3, 'sites', 'x.com', 'detox-timeline.js')));
   // A new workspace gets the merged Google mods, never the ones folded into them (preinstalled.js RETIRED).
@@ -673,10 +673,10 @@ test('Tim\'s mods: one the user deleted stays gone (updates too), Settings offer
   assert.match(st.readded['x.com/rainbow-rave'], /^\d{4}-/);
   assert.strictEqual(st.shipped['x.com/rainbow-rave'].hash, require('crypto').createHash('sha1').update(fs.readFileSync(rr)).digest('hex'));
   assert.strictEqual(choice()['x.com/rainbow-rave'], 'added');
-  // A mod that starts on comes back on (no startOff).
+  // Every one of them comes back off.
   fs.unlinkSync(path.join(sites, 'x.com', 'detox-timeline.js'));
-  assert.deepStrictEqual(installStarter(home, sites, examples, ['x.com']).on, ['x.com/detox-timeline']);
-  assert.ok(!loadPreinstalled(home).startOff.includes('x.com/detox-timeline'));
+  assert.deepStrictEqual(installStarter(home, sites, examples, ['x.com']).on, []);
+  assert.ok(loadPreinstalled(home).startOff.includes('x.com/detox-timeline'));
 
   // From before 0.2.5: deleted on purpose then. Setup leaves it gone; Settings just offers it.
   const old = tempDir();
@@ -704,7 +704,7 @@ test('Tim\'s mods, site by site: added ones get their mods, new ones and updates
     ['instagram.com', 'Instagram', true, null], ['timsrobot.com', 'timsrobot.com', false, null]]);
   assert.deepStrictEqual(offer.sites.flatMap((x) => x.mods.map((m) => m.id)).sort(), PREINSTALLED.map((p) => p.id).sort(), 'every mod, from PREINSTALLED');
   assert.deepStrictEqual(offer.sites.find((x) => x.site === 'x.com').mods.map((m) => [m.name, m.on]),
-    [['Detox Timeline', true], ['Follow Status', false], ['Profile Styler', false], ['Post Styler', false], ['Style Encoder', false], ['X-Flyer', false], ['Rainbow Rave', false]], 'X\'s in the panel\'s order');
+    [['Detox Timeline', false], ['Follow Status', false], ['Profile Styler', false], ['Post Styler', false], ['Style Encoder', false], ['X-Flyer', false], ['Rainbow Rave', false]], 'X\'s in the panel\'s order');
   assert.ok(offer.sites.every((x) => x.mods.every((m) => m.name && typeof m.description === 'string')));
   assert.match(offer.sites.find((x) => x.site === 'timsrobot.com').note, /demo/);
 

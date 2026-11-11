@@ -225,4 +225,22 @@ function rulesCode(spec, id) {
     `(${rulesRuntime.toString()})(${JSON.stringify(spec)});\n`;
 }
 
-module.exports = { parseRules, checkRules, checkCss, checkSelector, checkRegex, rulesRuntime, rulesCode, RulesError };
+/**
+ * What a style mod looks for on the page (extension/modhealth.js: a mod whose selectors stop matching may be
+ * broken): its hide and filter selectors, replace's `in`, and the selectors of its CSS rules; not the ones
+ * every page has (html, body, :root, *). At most 40.
+ */
+function selectorsOf(rules) {
+  const out = new Set();
+  const add = (s) => { const t = String(s || '').trim(); if (t && t.length <= 300 && !/^(html|body|:root|\*)$/i.test(t)) out.add(t); };
+  for (const s of rules.hide || []) add(s);
+  for (const f of rules.filter || []) add(f.items);
+  for (const r of rules.replace || []) if (r.in && r.in !== 'body') add(r.in);
+  const css = String(rules.css || '').replace(/\/\*[\s\S]*?\*\//g, '');
+  for (const m of css.matchAll(/(?:^|[{};])\s*([^{}@;]+)\{/g)) {
+    for (const sel of m[1].split(',')) { const t = sel.trim(); if (t && !/^(from|to|\d+(\.\d+)?%)$/i.test(t)) add(t.replace(/::?(before|after|placeholder|selection|marker|first-line|first-letter|hover|focus|active|visited|focus-visible|focus-within)\b(\([^)]*\))?/gi, '') || t); }
+  }
+  return [...out].slice(0, 40);
+}
+
+module.exports = { selectorsOf, parseRules, checkRules, checkCss, checkSelector, checkRegex, rulesRuntime, rulesCode, RulesError };

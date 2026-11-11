@@ -10,31 +10,26 @@ summary is too long.
 
 - **Safer agents.** A mod that can post, click or send for you waits for your OK, and a tab your agent ran
   code in can't post as you until it reloads.
-- **Choose what TRIF can reach:** every site (Permissive), or site by site with Connect (Restrictive).
-  Already using TRIF? You stay Permissive.
+- **TRIF asks for each site's permission** when you turn it on there. Had every site? Allow each again once.
 - **Block a site** to keep TRIF away from it; the power button is now a quick pause.
 - A site's mods come in three groups, Style, Boxed and Free mods, each with its own switch.
-- **New mods can wait for you:** set Free mods to start off (Settings), and a new one stays off
-  until you've looked at it.
+- **Mods from outside your chat start off**, Tim's too, until you've looked at them.
 
 ### More
 
 - A site's mods come in three groups, each with a switch there: Style mods, **Boxed mods** (JavaScript in
   TRIF's sandbox that changes what the page shows but can't send, load or click anything itself) and Free
   mods.
-- **New mods can start off, by group.** Settings in the side panel has "New mods start": Style, Boxed and
-  Free mods, each On (as before) or Off. Set Free mods to Off and a new free mod waits, switched off and
-  marked "new", until you've looked at it and switched it on, while new style mods apply at once.
-  It covers mods from anywhere but your side-panel chat, new versions of Tim's mods included. An agent
-  run can't switch one on.
-- **You choose what TRIF can reach: permissive or restrictive.** Installing TRIF used to give it "all your
-  data on all websites". Now it asks for nothing until the setup page's new step, Site permissions:
-  **Permissive** gives TRIF access to every site by default (your browser asks once); **Restrictive**
-  connects TRIF site by site, so a site stays disconnected (the panel all grey) until you click Connect
-  there. You can change it in Settings.
+- **Mods from outside your chat start off**, marked "new" or "updated", until you switch them on: a terminal
+  agent's, a file's, another browser's, TRIF's updates, Tim's mods too. What your chat makes starts on, or
+  waits: Settings, "Mods your chat makes".
+- **Boxed mods can do much more**: fuller sound, animations, SVG, drawing, observers, and nine new powers.
+- **TRIF asks for each site's permission.** Installing TRIF used to give it "all your data on all
+  websites". Now it asks for nothing until you turn it on for a site; then your browser asks for that site
+  only, and it stays disconnected (the panel all grey) until you click Connect there. If TRIF had every
+  site, it gives that up once: your sites keep their settings; allow each one again when you next use it.
 - Turning the robot off on a site keeps it connected, so it comes back on at once. Under Fix, "Disconnect
-  from <site>" gives the site's access back (with every site allowed, it offers to switch to restrictive),
-  and "Block on <site>" keeps TRIF away from it whatever it can reach (the panel turns red there; Settings
+  from <site>" gives the site's access back, and "Block on <site>" keeps TRIF away from it whatever it can reach (the panel turns red there; Settings
   lists blocked sites, each with Unblock).
 - Without access to every site, your agent's screenshots are of the tab you're on, after you click the
   TRIF toolbar button there (Chrome and Firefox want that before an extension can capture a tab).

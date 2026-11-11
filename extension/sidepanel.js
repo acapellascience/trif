@@ -4,12 +4,13 @@
 // See docs/PROTOCOL.md, "Side panel and agent runs".
 
 import { siteForUrl, modAppliesTo, modSites, isMultiSite, offOnSite, normalizeOffSites, scopeFor, hostInScope, limitToSites, withOffSites, modGroup, GROUPS, GROUP_NAMES, groupWord, groupOffOn, offSitesFor, normalizeGroupsOff, FIREFOX, BROWSER, SETUP_COMMAND,
-  SITE_ACCESS, siteOrigins, siteState, hasSiteAccess, requestEverySite,
+  SITE_ACCESS, siteOrigins, siteState, hasSiteAccess,
   normalizeModOrder, orderMods, moveId, setModOrder,
   normalizeSettings, normalizePicks, siteSettings, withoutModel, panelQuery, panelWindowBounds, rememberScreen } from './lib.js';
 import { setMarkdown, unwrapMarkdown } from './markdown.js';
 import { createLogin } from './login.js';
 import { agentLevel, agentSiteOf, sensitiveList } from './agentsites.js';
+import { modChip, levelWords, modLevel, powerLines } from './modlevel.js';
 import { modSwitch, syncSwitches, shownEnabled, switchError, enabledIn, onSwitchChange } from './modswitch.js';
 import { mountOpenModel, renderOpenModel, openModelKeyMissing, watchOpenModel } from './openmodel.js';
 
@@ -18,6 +19,9 @@ const chatKey = (site) => `chat:${site}`;
 const emptyChat = () => ({ sessionId: null, agent: null, messages: [], run: null, last: null });
 
 const ui = {
+  modsMore: document.getElementById('mods-more'), modsMenu: document.getElementById('mods-menu'), importMod: document.getElementById('import-mod'), exportSite: document.getElementById('export-site'),
+  siteFilesBox: document.getElementById('site-files-box'), siteFilesSummary: document.getElementById('site-files-summary'),
+  importFile: document.getElementById('import-file'), siteFiles: document.getElementById('site-files'), dropOverlay: document.getElementById('drop-overlay'), dropText: document.getElementById('drop-text'),
   agentLevel: document.getElementById('agent-level'), agentSiteNote: document.getElementById('agent-site-note'),
   agentSitesList: document.getElementById('agent-sites-list'), agentSitesEmpty: document.getElementById('agent-sites-empty'),
   sensitiveSites: document.getElementById('sensitive-sites'), sensitiveSave: document.getElementById('sensitive-save'),
@@ -26,11 +30,11 @@ const ui = {
   dot: $('#dot'), site: $('#site'), barRobot: $('#bar-robot'), siteSwitch: $('#site-switch'), newChat: $('#new-chat'), settingsBtn: $('#settings-btn'),
   gate: $('#gate'), gateTitle: $('#gate-title'), gateWhy: $('#gate-why'), gateBtn: $('#gate-btn'), gateErr: $('#gate-err'), gateNote: $('#gate-note'),
   gateLinks: $('#gate-links'), gateBlock: $('#gate-block'), gateDisconnect: $('#gate-disconnect'),
-  modeDialog: $('#mode-dialog'), modeDialogClose: $('#mode-dialog-close'), modeDialogSwitch: $('#mode-dialog-switch'), modeDialogErr: $('#mode-dialog-err'),
-  modeChoice: $('#mode-choice'), modePermissive: $('#mode-permissive'), modeRestrictive: $('#mode-restrictive'), modeNote: $('#mode-note'),
+  modeNote: $('#mode-note'), accessNote: $('#access-note'), accessNoteOk: $('#access-note-ok'),
   blockedList: $('#blocked-list'), blockedEmpty: $('#blocked-empty'),
-  startsRules: $('#starts-rules'), startsSandboxed: $('#starts-sandboxed'), startsPage: $('#starts-page'), startsNote: $('#starts-note'),
-  landing: $('#landing'), landingIcon: $('#landing-icon'), landingVersion: $('#landing-version'), landingNote: $('#landing-note'),
+  onBreak: $('#on-break'),
+  chatMods: $('#chat-mods'),
+  landing: $('#landing'), landingIcon: $('#landing-icon'), gateIcon: $('#gate-icon'), landingVersion: $('#landing-version'), landingNote: $('#landing-note'),
   settings: $('#settings'), agent: $('#agent'), agentNote: $('#agent-note'), model: $('#model'),
   using: $('#using'), modelCustomRow: $('#model-custom-row'), modelCustom: $('#model-custom'), modelNote: $('#model-note'),
   instructions: $('#instructions'), instructionsNote: $('#instructions-note'),
@@ -314,6 +318,7 @@ async function setTab(tab) {
   view.tab = { id: tab.id, url };
   const site = siteForUrl(url);
   if (site !== view.site) {
+    leaveSite(view.site);
     view.site = site;
     view.chat = emptyChat();
     if (site) {
@@ -324,8 +329,34 @@ async function setTab(tab) {
     // Each site chat has its own agent and model.
     renderSettings();
     if (!ui.settings.hidden && view.status?.helper?.connected) loadModels(currentAgent().id);
+    render();
+    returnToSite(site);
+    return;
   }
   render();
+}
+
+// ---- views that belong to a site ----------------------------------------------------------------------
+// The code card (and its History), the approval dialog, the import's questions, the Ask card, the agent's
+// menu, the site's files and the mods menu all belong to the site they were opened on. On a tab of another
+// site they go: the code card, the import's questions and the menus close; the approval dialog and the Ask
+// card hide, and come back on that site's tab if they're still waiting (the Ask: render's loop, by site).
+// (Settings and the update notice aren't a site's: they stay.)
+const siteCards = new Set(); // the import's open questions: their cancel
+function leaveSite(prev) {
+  if (codeView.dialog?.open) codeView.dialog.close();
+  if (approval.dialog?.open) { closeApproval(); approval.reopenOn = prev; }
+  for (const cancel of [...siteCards]) cancel();
+  if (agentAsk.dialog?.open) closeAgentAsk();
+  closeLevelMenu(false);
+  if (ui.modsMenu && !ui.modsMenu.hidden) { ui.modsMenu.hidden = true; ui.modsMore?.setAttribute('aria-expanded', 'false'); }
+  if (ui.siteFilesBox) ui.siteFilesBox.open = false;
+  if (document.activeElement?.tagName === 'SELECT') document.activeElement.blur(); // (an open dropdown)
+}
+function returnToSite(site) {
+  if (!site || approval.reopenOn !== site) return;
+  approval.reopenOn = null;
+  if (approval.queue?.length && !document.querySelector('dialog[open]')) showApproval();
 }
 
 // The model is chosen per agent (an Opus choice means nothing to Codex), per site chat (lib.js).
@@ -351,6 +382,45 @@ function code(text) {
 }
 
 
+const cardKey = (m) => `${m.done || ''}|${m.undoneFix ? 1 : 0}|${m.fixRun || ''}`;
+function breakCard(li, m) {
+  li.classList.add('break-card');
+  li.dataset.cardKey = cardKey(m);
+  const state = m.undoneFix ? 'Fix undone.' : m.done === 'fixed' ? 'Fixed.' : m.done === 'fixing' ? 'Fixing…' : m.done === 'ignored' ? 'Ignored.' : '';
+  if (state) li.append(' ', el('span', 'break-state', state));
+  const acts = el('div', 'break-actions');
+  const fail = (b, e) => { b.disabled = false; request({ type: 'chat.note', site: view.site, text: `Couldn't do that: ${e?.message ?? e}` }).catch(() => {}); };
+  const undo = button('Undo fix', '', (e) => undoFix(m.mod, e.currentTarget));
+  const fix = button(m.afterFix ? 'Try again' : 'Fix it', m.afterFix ? '' : 'go', async (e) => {
+    const b = e.currentTarget;
+    b.disabled = true;
+    try {
+      const { prompt } = await request({ type: 'modError.fix', id: m.mod, fp: m.fp, site: view.site, url: view.tab?.url });
+      await startRun(prompt, { fix: { mod: m.mod, fp: m.fp } });
+    } catch (x) { fail(b, x); }
+  });
+  const show = button('Show error', '', () => {
+    const mod = (view.status?.mods || []).find((x) => x.id === m.mod);
+    const err = mod?.broken?.find((x) => x.fp === m.fp) || { message: m.quiet ? 'nothing it looks for is on the page any more' : '', line: m.line || 0, quiet: m.quiet };
+    openCodeView(m.mod, { error: err });
+  });
+  const ignore = button('Ignore', 'text', async (e) => { const b = e.currentTarget; b.disabled = true; try { await request({ type: 'modError.dismiss', id: m.mod, fp: m.fp }); } catch (x) { fail(b, x); } });
+  ignore.title = 'Don\'t flag this again for this version of the mod';
+  if (m.undoneFix || m.done === 'ignored' || m.done === 'fixing') return;
+  if (m.done === 'fixed') acts.append(undo);
+  else if (m.afterFix) acts.append(undo, fix, show, ignore);
+  else acts.append(fix, show, ignore);
+  li.append(acts);
+}
+
+async function undoFix(id, b) {
+  if (b) b.disabled = true;
+  try { await request({ type: 'mod.undo', ids: [id], site: view.site, tab: view.tab?.id }); } catch (e) {
+    if (b) b.disabled = false;
+    request({ type: 'chat.note', site: view.site, text: `Couldn't undo the fix: ${e?.message ?? e}` }).catch(() => {});
+  }
+}
+
 function messageNode(m) {
   const li = el('li', `msg ${m.role}`);
   // (Role 'login': the agent needs logging in, a plain line; the notice above has the Log in button.)
@@ -370,6 +440,23 @@ function messageNode(m) {
       }
     });
     li.append(' ', undo);
+  }
+  // A mod that broke (background.js announceBreak): Fix it / Show error / Ignore; a fix's own new error: Undo
+  // fix first; once fixed: Undo fix
+  if (m.kind === 'modError') breakCard(li, m);
+  // "x.js waits for you." with "Mods your chat makes: Wait for me": Show code, Turn on
+  if (m.waitMod) {
+    const mod = view.status?.mods?.find?.((x) => x.id === m.waitMod);
+    const waiting = !mod || mod.chatWaiting || (mod.newOff === 'chat' && mod.enabled === false);
+    if (waiting) {
+      const show = button('Show code', '', () => openCodeView(m.waitMod));
+      const on = button('Turn on', '', async () => {
+        on.disabled = true;
+        try { await request({ type: 'mod.enable', id: m.waitMod, enabled: true, tab: view.tab?.id }); show.remove(); on.replaceWith('It\'s on.'); refreshStatus(); }
+        catch (e) { on.disabled = false; request({ type: 'chat.note', site: view.site, text: `Couldn't turn it on: ${e?.message ?? e}` }).catch(() => {}); }
+      });
+      li.append(' ', show, ' ', on);
+    }
   }
   // "Changed x.js." after a run: put back what the mods were before it (the helper keeps them: history/)
   if (Array.isArray(m.undoChange) && m.undoChange.length && !m.undone) {
@@ -398,7 +485,12 @@ function render() {
   renderSites();
   renderAgentLevel();
   renderAgentSites();
-  for (const a of view.status?.agentAsks || []) if (!agentAsk.answered.has(a.id)) showAgentAsk(a.id, a.site);
+  renderSiteTools();
+  // (the Ask card: this tab's site's only; another site's waits for its own tab, leaveSite)
+  const askSite = agentSiteOf(view.tab?.url || '');
+  const ask = (view.status?.agentAsks || []).find((a) => !agentAsk.answered.has(a.id) && askSite && (a.site === askSite || hostInScope(askSite, a.site)));
+  if (ask) showAgentAsk(ask.id, ask.site);
+  else if (agentAsk.dialog?.open) closeAgentAsk();
   ui.site.textContent = site || 'Tim\'s Robot Internet Fixer';
   ui.site.title = view.tab?.url || '';
   document.title = site ? `TRIF · ${site}` : 'Tim\'s Robot Internet Fixer';
@@ -446,6 +538,7 @@ function render() {
 
   renderGate(problem, agentInfo);
   renderTabLock();
+  renderFaces(problem, agentInfo);
   renderPausedAll();
   renderNotice({ helperOk, agentInfo, anyAgent });
   renderUpdate();
@@ -786,7 +879,7 @@ function renderMods() {
   // each in its own order.
   const ordered = orderMods(listed, view.modOrder[scope]);
   const mods = GROUPS.flatMap((g) => ordered.filter((m) => modGroup(m) === g));
-  ui.mods.hidden = mods.length === 0;
+  ui.mods.hidden = mods.length === 0 && !view.siteFileCount;
   updateApprovals(mods);
   if (!mods.length) { view.modRows.clear(); ui.modList.replaceChildren(); ui.modsReviewNote.hidden = true; return; }
   ui.modsCount.textContent = `(${mods.length})`;
@@ -803,7 +896,7 @@ function renderMods() {
   const rows = new Map();
   for (const m of mods) {
     const key = JSON.stringify([site, m.name, m.description || '', m.file, m.held ?? null, m.pending ?? null, m.review ?? null, m.risk?.tier ?? null, m.risk?.why ?? null, m.matches,
-      m.source ?? null, m.version ?? null, m.update ?? null, m.powers ?? null]);
+      m.source ?? null, m.version ?? null, m.update ?? null, m.powers ?? null, m.powerInfo ?? null, m.found ?? null, m.sandboxed ?? null, m.broken ?? null, m.fixUndo ?? null]);
     const old = view.modRows.get(m.id);
     rows.set(m.id, old && old.key === key ? old : { key, li: modItem(m) });
   }
@@ -936,6 +1029,31 @@ const currentState = () => {
 const siteIsOn = () => currentState() === 'on';
 let siteSwitching = false;
 
+// (the toolbar's paused face is flipped on a light toolbar: the background can't see the scheme, so it's told)
+const schemeQuery = matchMedia('(prefers-color-scheme: light)');
+const tellScheme = () => request({ type: 'faces.scheme', light: schemeQuery.matches }).catch(() => {});
+schemeQuery.addEventListener?.('change', tellScheme);
+
+/**
+ * The robot's face (faces.js, scripts/render-icon.js), one at a time: paused (the agent ran code in this
+ * tab), blocked (a red cross), disconnected (a broken link), off (blank), logged out (hollow yellow eyes),
+ * else his eyes. One colour each, the frame's. On the bar's
+ * robot (data-face, sidepanel.css), and the background is told whether the agent needs a login, for the
+ * toolbar's yellow face in every tab.
+ */
+function renderFaces(problem, agentInfo) {
+  const state = siteScope() && view.status ? currentState() : null;
+  const loggedOut = problem === 'login' || problem === 'key';
+  ui.barRobot.dataset.face = document.body.classList.contains('tab-locked') ? 'paused'
+    : state === 'blocked' ? 'blocked' : state === 'disconnected' ? 'disconnected' : state === 'off' ? 'off' : loggedOut ? 'login' : 'normal';
+  // (only once the agent is known, and not while the helper or user scripts are what's wrong: no answer then)
+  if (!view.toldScheme && view.status) { view.toldScheme = true; tellScheme(); }
+  if (agentInfo && problem !== 'helper' && problem !== 'scripts' && loggedOut !== view.toldLoggedOut) {
+    view.toldLoggedOut = loggedOut;
+    request({ type: 'faces.login', loggedOut }).catch(() => { view.toldLoggedOut = null; });
+  }
+}
+
 function renderGate(problem, agentInfo) {
   const red = RED.has(problem);
   // No website in this tab: the landing page, only the robot and settings (body.no-site hides the rest),
@@ -970,6 +1088,11 @@ function renderGate(problem, agentInfo) {
   // notice shows there instead, renderNotice). Red: no Fix button, which couldn't work.
   renderProblemLine(ui.gateNote, gated && !(login.current && !red) ? problem : null, agentInfo);
   if (!gated) return;
+  // The gate's robot: a red cross when blocked, a grey broken link when disconnected, else a blank face in
+  // the state's colour (red when TRIF is missing a part, yellow when the agent needs a login).
+  const loggedOut = problem === 'login' || problem === 'key';
+  const gateIcon = `icons/robot-shaded-${state === 'blocked' ? 'blocked' : state === 'disconnected' ? 'disconnected' : `off${red ? '-red' : loggedOut ? '-yellow' : ''}`}.svg`;
+  if (ui.gateIcon.getAttribute('src') !== gateIcon) ui.gateIcon.setAttribute('src', gateIcon);
   ui.gateTitle.textContent = state === 'disconnected' ? `TRIF is disconnected on ${scope}`
     : state === 'blocked' ? `The robot is blocked on ${scope}` : 'The robot is off.';
   ui.gateWhy.hidden = true;
@@ -993,24 +1116,7 @@ function gateClick() {
 
 function disconnectClick(e) {
   e.preventDefault();
-  if (!view.status?.access?.all) { siteAction({ type: 'site.disconnect' }); return; }
-  // Every site allowed: one site can't lose its access, so the card offers restrictive mode.
-  ui.modeDialogErr.hidden = true;
-  ui.modeDialog.showModal();
-}
-
-async function switchToRestrictive() {
-  ui.modeDialogSwitch.disabled = true;
-  try {
-    await request({ type: 'site.mode', mode: 'restrictive' });
-    ui.modeDialog.close();
-    await refreshStatus();
-  } catch (e) {
-    ui.modeDialogErr.textContent = String(e?.message ?? e);
-    ui.modeDialogErr.hidden = false;
-  } finally {
-    ui.modeDialogSwitch.disabled = false;
-  }
+  siteAction({ type: 'site.disconnect' });
 }
 
 async function setSiteOn(on) {
@@ -1070,11 +1176,9 @@ function setBlocked(blocked, site = siteScope()) {
 
 // Settings, "Site permissions": the mode (not in Safari, which asks per site itself), and the blocked sites.
 function renderSites() {
+  // (the one-time note after an update gave up every site's access)
+  ui.accessNote.hidden = !view.status?.accessNote;
   const st = view.status;
-  const mode = st?.access?.all ? 'permissive' : st?.siteMode ? 'restrictive' : null; // (null: not chosen yet)
-  ui.modeChoice.hidden = !SITE_ACCESS || !st;
-  ui.modePermissive.setAttribute('aria-pressed', String(mode === 'permissive'));
-  ui.modeRestrictive.setAttribute('aria-pressed', String(mode === 'restrictive'));
   const blocked = st?.blockedSites || [];
   const key = JSON.stringify(blocked);
   if (ui.blockedList.dataset.key !== key) {
@@ -1086,42 +1190,18 @@ function renderSites() {
     }));
   }
   ui.blockedEmpty.hidden = blocked.length > 0;
-  // New mods start on or off, by group
-  const startsOff = st?.startsOff || [];
-  ui.startsRules.value = startsOff.includes('rules') ? 'off' : 'on';
-  ui.startsSandboxed.value = startsOff.includes('sandboxed') ? 'off' : 'on';
-  ui.startsPage.value = startsOff.includes('page') ? 'off' : 'on';
-  ui.startsNote.hidden = !startsOff.length;
+  // What the chat makes: starts on, or waits
+  ui.chatMods.value = st?.chatWait ? 'wait' : 'on';
+  if (ui.onBreak && document.activeElement !== ui.onBreak) ui.onBreak.value = st?.onBreak || 'ask';
 }
 
-function setStartsOff(group, off) {
-  return request({ type: 'mods.startsOff', group, off }).then(refreshStatus, (e) => { modeNote(String(e?.message ?? e)); refreshStatus(); });
+function setChatWait(wait) {
+  return request({ type: 'mods.chatWait', wait }).then(refreshStatus, (e) => { modeNote(String(e?.message ?? e)); refreshStatus(); });
 }
 
 function modeNote(text) {
   ui.modeNote.textContent = text || '';
   ui.modeNote.hidden = !text;
-}
-
-// Permissive: the browser's prompt for every site, from the click (nothing awaited before it); declined, TRIF
-// stays restrictive. Restrictive: every site's access goes (the background), no prompt.
-function choosePermissive() {
-  if (view.status?.access?.all) return;
-  const asked = requestEverySite(chrome);
-  modeNote('');
-  asked.then((ok) => { if (!ok) modeNote(`${BROWSER} didn’t get your OK, so TRIF stays restrictive.`); },
-    (e) => modeNote(String(e?.message ?? e))).finally(() => setTimeout(refreshStatus, 300));
-}
-
-async function chooseRestrictive() {
-  const all = !!view.status?.access?.all;
-  if (!all && view.status?.siteMode === 'restrictive') return;
-  modeNote('');
-  try {
-    await request({ type: 'site.mode', mode: 'restrictive' });
-    if (all) modeNote('Every site is disconnected now: connect each one when you visit it.');
-  } catch (e) { modeNote(String(e?.message ?? e)); }
-  refreshStatus();
 }
 
 // A mod on several sites gets a switch for this site only (the setup page has the whole-mod one);
@@ -1132,44 +1212,59 @@ const isOn = (id, site) => enabledIn(view.disabled, id) && !(site && offOnSite(v
 function modItem(m) {
   const li = el('li');
   li.dataset.mod = m.id;
-  li.title = m.file || m.id;
   const labelId = `mod-name-${++modLabelSeq}`;
+  // A row is the light, the name, one chip when there's something to say, one line of description, one tag
+  // at most, and the controls. Everything else about the mod is in its code card.
   // (a heading, so a screen reader's heading navigation goes mod to mod)
   const name = el('h3', 'mod-name');
   const light = el('span', 'light');
   const label = el('span', null, m.name);
   label.id = labelId;
-  const tag = el('span', 'tag');
-  tag.hidden = true;
-  // The file name right after the name, and the mods TRIF ships say so (their header's @source and @version).
-  // (a link to its code, like the </> beside the switch)
-  const file = fileLink((m.file || m.id).split('/').pop(), 'Show the code', () => openCodeView(m.id), 'mod-file');
-  const source = m.source === 'webmods' || m.source === 'trif' ? el('span', 'mod-source', `Tim's mod${m.version ? `, v${m.version}` : ''}`) : null;
-  // Spaces between the name and the rest, so each can wrap to the next line on its own.
-  name.append(label, ' ', file, ...(source ? [' ', source] : []), ' ', tag);
-  // Risk tier from the mod's header (AGENTS.md "Account safety"): nothing for 0, a badge for 1 and 2.
-  if (m.risk?.tier >= 1) {
-    const badge = el('span', `tag risk risk-${m.risk.tier}`, m.risk.tier >= 2 ? 'changes requests' : 'detectable');
-    badge.title = (m.risk.tier >= 2
-      ? 'Risk 2: this mod changes what the site receives, which the site could notice (rate limits or an account flag are possible).'
-      : 'Risk 1: the site\'s own scripts could notice this mod (for example, ads it hides never report being seen).') +
-      (m.risk.why ? `\n${m.risk.why}` : '');
-    name.append(' ', badge);
+  name.append(label);
+  // The chip (modlevel.js): its powers and how noticeable it is. Hover says what; a click opens the code card.
+  const info = modChip(m, view.site);
+  if (info) {
+    const chip = el('button', `mod-chip ${info.tone}`, info.text);
+    chip.type = 'button';
+    chip.title = info.title;
+    chip.setAttribute('aria-describedby', labelId);
+    chip.addEventListener('click', (e) => { e.stopPropagation(); openCodeView(m.id); });
+    name.append(chip);
   }
-  // Mods that also run on other sites say so: their switch here is for this site only.
-  const { everywhere, sites } = modSites(m);
-  if (everywhere || sites.length > 1) {
-    const badge = el('span', 'tag', everywhere ? 'all sites' : `${sites.length} sites`);
-    badge.title = (everywhere ? 'Runs on every site.' : `Runs on ${sites.join(', ')}.`) +
-      ` This switch is for ${view.site} only; switch it on other sites, or everywhere, from Setup.`;
-    name.append(' ', badge);
+  // The tags: at most one shows, the most urgent (updateModItem: showOneTag; data-rank, lowest first)
+  const tag = el('span', 'tag row-tag');
+  tag.dataset.rank = '3';
+  tag.hidden = true;
+  name.append(tag);
+  if (m.pending && !m.held) {
+    const t = holdTag(m, 'change on hold', labelId);
+    t.classList.add('row-tag');
+    t.dataset.rank = '1';
+    name.append(t);
+  }
+  // A new error (or "may be broken"): a small red badge that shows it; a mod a fix run changed: Undo fix
+  if (Array.isArray(m.broken) && m.broken.length) {
+    const errs = m.broken.filter((b) => !b.quiet);
+    const first = errs[0] || m.broken[0];
+    const badge = el('button', 'tag err-badge row-tag', errs.length ? (errs.length > 1 ? `${errs.length} errors` : 'error') : 'may be broken');
+    badge.dataset.rank = '2';
+    badge.type = 'button';
+    badge.title = first.quiet ? 'May be broken: nothing it looks for is on the page any more.' : `New error${first.line ? ` at line ${first.line}` : ''}: ${first.message}`;
+    badge.addEventListener('click', (e) => { e.stopPropagation(); openCodeView(m.id, { error: first }); });
+    name.append(badge);
+  }
+  if (m.fixUndo) {
+    const undo = el('button', 'tag fix-undo', 'Undo fix');
+    undo.type = 'button';
+    undo.title = 'Put back the version from before your agent fixed it';
+    undo.addEventListener('click', (e) => { e.stopPropagation(); undoFix(m.id, undo); });
+    name.append(undo);
   }
   const main = el('div', 'mod-main');
-  // What the mod does, from its header's @description, under the name.
+  // What the mod does, from its header's @description, on one line (all of it in the tooltip).
   const desc = m.description ? el('div', 'mod-desc', m.description) : null;
-  // A boxed mod's powers (docs/POWERS.md), on its row
-  const powers = Array.isArray(m.powers) && m.powers.length ? el('div', 'mod-powers', `Powers: ${m.powers.join(', ')}`) : null;
-  main.append(light, name, ...(desc ? [desc] : []), ...(powers ? [powers] : []));
+  if (desc) desc.title = m.description;
+  main.append(light, name, ...(desc ? [desc] : []));
   const row = el('div', 'mod-row');
   if (m.held) {
     // Written by an agent run here, and it can do something the user hasn't allowed (what TRIF read in
@@ -1187,11 +1282,27 @@ function modItem(m) {
   const err = el('div', 'mod-err');
   err.hidden = true;
   li.append(row, err);
-  // (held, or a change waiting: the approval dialog; a change waiting also tags the row, which keeps its switch)
-  if (m.pending && !m.held) name.append(' ', holdTag(m, 'change on hold', labelId));
   if (!m.held && !m.pending && m.review) li.append(factsBox(m, m.review, 'review'));
-  if (m.update && !m.held) li.append(updateNotice(m, err));
+  // A new version of a shipped mod: a tag; its notice, with what the user can do, opens from it.
+  if (m.update && !m.held) {
+    const notice = updateNotice(m, err);
+    notice.hidden = true;
+    const t = el('button', 'tag row-tag mod-update-tag', 'update available');
+    t.type = 'button';
+    t.dataset.rank = '4';
+    t.title = m.update.version ? `Version ${m.update.version}: see what you can do` : 'See what you can do';
+    t.setAttribute('aria-expanded', 'false');
+    t.addEventListener('click', (e) => { e.stopPropagation(); notice.hidden = !notice.hidden; t.setAttribute('aria-expanded', String(!notice.hidden)); });
+    name.append(t);
+    li.append(notice);
+  }
   return li;
+}
+
+/** One tag on a row at most: the most urgent with something to say. A held row's switch-place tag outranks all. */
+function showOneTag(li, held) {
+  const tags = [...li.querySelectorAll('.mod-name .row-tag')].filter((t) => t.textContent).sort((a, b) => a.dataset.rank - b.dataset.rank);
+  tags.forEach((t, i) => { t.hidden = held || i > 0; });
 }
 
 // What a mod can do, in two clearly separate parts: TRIF's own facts, read from the code (the helper's
@@ -1283,35 +1394,108 @@ function factsBox(m, info, kind) {
   return box;
 }
 
+// ---- the robot on TRIF's cards --------------------------------------------------------------------------
+/**
+ * The robot for a card's header (the approval, Ask, import and code cards), built afresh: his frame and
+ * either his eyes or the code card's face, </> in his green. (Not a copy of the bar's robot, which carries
+ * every face it can show: the pause bars, the cross, the broken link, hidden only there.)
+ */
+function cardRobot(face = 'eyes') {
+  const NS = 'http://www.w3.org/2000/svg';
+  const svg = document.createElementNS(NS, 'svg');
+  svg.setAttribute('viewBox', '0 0 128 128');
+  svg.setAttribute('aria-hidden', 'true');
+  for (const cls of ['rim', 'face', ...(face === 'eyes' ? ['eye'] : [])]) {
+    for (const p of document.querySelectorAll(`#bar-robot svg polygon.${cls}`)) svg.append(p.cloneNode(false));
+  }
+  if (face === 'code') {
+    const code = document.createElementNS(NS, 'path');
+    code.setAttribute('class', 'code');
+    code.setAttribute('d', 'M48 47 L31 64 L48 81 M80 47 L97 64 L80 81 M71 40 L57 88');
+    svg.append(code);
+  }
+  return svg;
+}
+
 // ---- "Agent on this site" (agentsites.js; background.js agentGate) -------------------------------------
-// The header's control: Ask (the default), Off, Look or Run code for the tab's site; a line under the bar
-// when TRIF's sensitive list keeps the agent off. Settings: the sites chosen, and the sensitive list.
+// On the line over the message box, after the agent and model: what the agent can do on the tab's site
+// (Ask, the default; Off, Look or Run code), with a small icon, as a button that opens a menu. Only where
+// there's a chat to have (the site connected and the robot on). A sensitive site (TRIF's list keeps the
+// agent off) says so in the chat's first line. Settings: the sites chosen, and the sensitive list.
 const agentSettingsNow = () => ({ sites: view.status?.agentSites || {}, sensitive: view.status?.sensitiveSites ?? null });
+const LEVEL_WORDS = { off: 'Agent can’t see this site', look: 'Agent can look', ask: 'Agent asks before running code', run: 'Agent can run code' };
+// (the icons: an eye crossed out, an eye, an eye with a question mark, code; drawn in currentColor)
+const EYE = '<path d="M1.5 8s2.4-4.5 6.5-4.5S14.5 8 14.5 8 12.1 12.5 8 12.5 1.5 8 1.5 8z"/>';
+// (</>: thin strokes, sharp chevrons, a clear slash, the gaps open; .code-glyph in sidepanel.css)
+const CODE_ICON = '<svg class="code-glyph" viewBox="0 0 16 16" aria-hidden="true"><path d="M4.7 4 .9 8l3.8 4M11.3 4l3.8 4-3.8 4M9.3 2.3 6.7 13.7"/></svg>';
+const LEVEL_ICONS = {
+  off: `<svg viewBox="0 0 16 16">${EYE}<circle cx="8" cy="8" r="2"/><path d="M2.5 13.5l11-11"/></svg>`,
+  look: `<svg viewBox="0 0 16 16">${EYE}<circle cx="8" cy="8" r="2"/></svg>`,
+  ask: `<svg viewBox="0 0 16 16">${EYE}<path d="M6.7 6.7a1.4 1.4 0 1 1 1.9 1.3c-.4.2-.6.5-.6.9v.2"/><path d="M8 10.6v.1"/></svg>`,
+  run: CODE_ICON,
+};
+const levelMenu = $('#agent-level-menu');
+const levelItems = () => [...levelMenu.querySelectorAll('[role="menuitemradio"]')];
+for (const b of levelItems()) b.querySelector('.agent-level-icon').innerHTML = LEVEL_ICONS[b.dataset.level];
 
 function renderAgentLevel() {
   const site = agentSiteOf(view.tab?.url || '');
-  const show = !!site && !!view.status?.helper?.connected;
-  ui.agentLevel.hidden = !show;
+  const show = !!site && !!view.status?.helper?.connected && !!siteScope() && currentState() === 'on';
+  const wrap = ui.agentLevel.parentElement;
+  wrap.hidden = !show;
   ui.agentSiteNote.hidden = true;
-  if (!show) return;
+  if (!show) { closeLevelMenu(false); return; }
   const lv = agentLevel(site, agentSettingsNow());
-  // (a narrow panel: the levels without "Agent: ", so the control stays clear of the robot in the middle)
-  const narrow = matchMedia('(max-width: 420px)').matches;
-  for (const o of ui.agentLevel.options) o.textContent = `${narrow ? '' : 'Agent: '}${{ ask: 'Ask', off: 'Off', look: 'Look', run: 'Run code' }[o.value]}`;
-  if (document.activeElement !== ui.agentLevel) ui.agentLevel.value = lv.level;
-  ui.agentLevel.dataset.level = lv.level;
-  ui.agentLevel.title = `Agent on ${site}: ${{ ask: 'it can read, and asks before it first runs code', off: 'it can\'t read, take screenshots or run code here', look: 'it can read and take screenshots, but not run code', run: 'it can read and run code (the tab locks while it does)' }[lv.level]}`;
+  const words = LEVEL_WORDS[lv.level];
+  if (ui.agentLevel.dataset.level !== lv.level) {
+    ui.agentLevel.dataset.level = lv.level;
+    ui.agentLevel.querySelector('.agent-level-icon').innerHTML = LEVEL_ICONS[lv.level];
+    ui.agentLevel.querySelector('.agent-level-text').textContent = words;
+  }
+  // (narrow: only the icon, the words its tooltip and label)
+  ui.agentLevel.title = words;
+  ui.agentLevel.setAttribute('aria-label', words);
+  $('#agent-level-head').textContent = `What your agent can do on ${site}`;
+  for (const b of levelItems()) b.setAttribute('aria-checked', String(b.dataset.level === lv.level));
   if (lv.by === 'sensitive') {
-    ui.agentSiteNote.textContent = `Your agent is off on ${site}: it's ${lv.why || 'on your list of sensitive sites'}. Choose “Agent” above to let it look or run code here.`;
+    ui.agentSiteNote.textContent = `Your agent can’t see ${site}: it’s ${lv.why || 'on your list of sensitive sites'}. Change it below.`;
     ui.agentSiteNote.hidden = false;
   }
 }
-matchMedia('(max-width: 420px)').addEventListener?.('change', () => renderAgentLevel());
-ui.agentLevel?.addEventListener('change', async () => {
+
+function openLevelMenu() {
+  levelMenu.hidden = false;
+  ui.agentLevel.setAttribute('aria-expanded', 'true');
+  (levelItems().find((b) => b.getAttribute('aria-checked') === 'true') || levelItems()[0]).focus();
+}
+function closeLevelMenu(focusButton = true) {
+  if (levelMenu.hidden) return;
+  levelMenu.hidden = true;
+  ui.agentLevel.setAttribute('aria-expanded', 'false');
+  if (focusButton) ui.agentLevel.focus();
+}
+ui.agentLevel.addEventListener('click', () => (levelMenu.hidden ? openLevelMenu() : closeLevelMenu()));
+ui.agentLevel.addEventListener('keydown', (e) => {
+  if ((e.key === 'ArrowUp' || e.key === 'ArrowDown') && levelMenu.hidden) { e.preventDefault(); openLevelMenu(); }
+});
+levelMenu.addEventListener('keydown', (e) => {
+  const items = levelItems();
+  const at = items.indexOf(document.activeElement);
+  const go = (i) => { e.preventDefault(); items[(i + items.length) % items.length].focus(); };
+  if (e.key === 'Escape') { e.preventDefault(); closeLevelMenu(); } else if (e.key === 'ArrowDown') go(at + 1);
+  else if (e.key === 'ArrowUp') go(at - 1);
+  else if (e.key === 'Home') go(0);
+  else if (e.key === 'End') go(items.length - 1);
+  else if (e.key === 'Tab') closeLevelMenu(false);
+});
+document.addEventListener('pointerdown', (e) => { if (!levelMenu.hidden && !ui.agentLevel.parentElement.contains(e.target)) closeLevelMenu(false); });
+levelMenu.addEventListener('click', async (e) => {
+  const b = e.target.closest('[role="menuitemradio"]');
   const site = agentSiteOf(view.tab?.url || '');
-  if (!site) return;
-  const v = ui.agentLevel.value;
-  try { await request({ type: 'agentSite.set', site, level: v === 'ask' ? null : v }); } catch (e) { ui.agentLevel.title = String(e?.message ?? e); }
+  if (!b || !site) return;
+  closeLevelMenu();
+  const v = b.dataset.level;
+  try { await request({ type: 'agentSite.set', site, level: v === 'ask' ? null : v }); } catch (e2) { ui.agentLevel.title = String(e2?.message ?? e2); }
   refreshStatus();
 });
 
@@ -1368,8 +1552,7 @@ function showAgentAsk(id, site) {
     top.append(el('span', 'ap-count', 'Your agent is asking'), x);
     const who = el('div', 'ap-who');
     const robot = el('span', 'ap-robot');
-    const svg = document.querySelector('#bar-robot svg');
-    if (svg) robot.append(svg.cloneNode(true));
+    robot.append(cardRobot());
     const title = el('h2', 'ap-name');
     title.id = 'agent-ask-title';
     who.append(robot, title);
@@ -1422,6 +1605,7 @@ function holdTag(m, text, labelId) {
 const FACT_ICONS = {
   'read-drafts': '✎', keys: '⌨', 'site-data': '⇣', 'page-data': '◫', sound: '♪', controls: '◐', mods: '⇆', media: '▶',
   'search-box': '⌕', 'go-to': '↪', click: '◉', 'write-drafts': '⇄',
+  'site-storage': '▤', 'local-fonts': 'Aa', 'image-variants': '▣', preload: '⇡', embeds: '▷', 'rewrite-requests': '⇌', 'block-events': '⊘', 'page-events': '↯', 'edit-uploads': '⧉', migrate: '⇢',
   sends: '↗', loads: '↗', site: '↗', acts: '◉', navigates: '↪', hidden: '?', match: '◎', risk2: '⚠',
 };
 const iconOf = (key) => {
@@ -1444,8 +1628,7 @@ function approvalDialog() {
   top.append(count, x);
   const who = el('div', 'ap-who');
   const robot = el('span', 'ap-robot');
-  const svg = document.querySelector('#bar-robot svg');
-  if (svg) robot.append(svg.cloneNode(true));
+  robot.append(cardRobot());
   const nameBox = el('div');
   const name = el('h2', 'ap-name');
   name.id = 'approval-name';
@@ -1500,7 +1683,8 @@ function updateApprovals(mods) {
     else approval.at = Math.min(approval.at, approval.queue.length - 1);
     if (!approval.queue.length) closeApproval();
     else renderApproval();
-  } else if (fresh.length) {
+  } else if (fresh.length && !document.querySelector('dialog[open]:not(#approval)')) {
+    // (not over another of TRIF's cards, an import's question say: it opens when that one's done)
     approval.at = approval.queue.indexOf(fresh[0]);
     showApproval();
   }
@@ -1576,7 +1760,7 @@ function renderApproval() {
   }));
   P.together.hidden = !warns.length;
   const fromAgent = kind !== 'sandbox' && info.by !== 'outside';
-  const who = fromAgent ? `An agent ${kind === 'pending' ? 'changed' : 'wrote'} it in your chat on ${info.site || view.site}.` : 'It\'s new or changed since TRIF last let it run.';
+  const who = m.imported && !fromAgent ? 'You imported it from a file.' : fromAgent ? `An agent ${kind === 'pending' ? 'changed' : 'wrote'} it in your chat on ${info.site || view.site}.` : 'It\'s new or changed since TRIF last let it run.';
   P.note.textContent = kind === 'sandbox' ? 'Allow runs this version as a free mod, in this browser only.'
     : kind === 'pending' ? `${who} The version before keeps running until you decide.`
       : info.asks ? `${who} Updates that ask for the same powers won't ask again.`
@@ -1721,7 +1905,7 @@ function codeButton(m, labelId) {
   b.title = 'Show code';
   b.setAttribute('aria-label', 'Show code');
   b.setAttribute('aria-describedby', labelId);
-  b.innerHTML = '<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M5.25 4.5 1.75 8l3.5 3.5M10.75 4.5 14.25 8l-3.5 3.5M9.25 2.75l-2.5 10.5"/></svg>';
+  b.innerHTML = CODE_ICON;
   b.addEventListener('click', () => openCodeView(m.id));
   return b;
 }
@@ -1742,8 +1926,7 @@ function codeViewDialog() {
   top.append(el('span', 'ap-count', 'Code'), x);
   const who = el('div', 'ap-who');
   const robot = el('span', 'ap-robot');
-  const svg = document.querySelector('#bar-robot svg');
-  if (svg) robot.append(svg.cloneNode(true));
+  robot.append(cardRobot('code')); // (the code card's own face: </> for eyes)
   const nameBox = el('div');
   const name = el('h2', 'ap-name');
   name.id = 'code-view-name';
@@ -1753,6 +1936,8 @@ function codeViewDialog() {
   meta.append(chip, where);
   nameBox.append(name, meta);
   who.append(robot, nameBox);
+  // (what the row leaves out: how noticeable it is, its powers, where it runs)
+  const about = el('div', 'cv-about');
   // (a change waiting: which version)
   const versions = el('div', 'cv-versions');
   versions.setAttribute('role', 'group');
@@ -1760,27 +1945,69 @@ function codeViewDialog() {
   const vRan = button('Running now', 'cv-ran', () => loadCodeView('ran'));
   const vNew = button('Waiting for your OK', 'cv-new', () => loadCodeView('file'));
   versions.append(vRan, vNew);
-  const codeBox = el('pre', 'cv-code');
+  const errorBox = el('div', 'ap-together cv-error');
+  errorBox.hidden = true;
+  const codeBox = el('pre', `cv-code${codeWrap ? ' wrap' : ''}`);
   codeBox.tabIndex = 0;
   codeBox.setAttribute('aria-label', 'The mod\'s code');
   const note = el('p', 'ap-note cv-note');
   const err = el('p', 'ap-err');
   err.setAttribute('role', 'alert');
+  // (two tabs under the header: the code, and the versions TRIF kept)
+  const tabs = el('div', 'cv-tabs');
+  tabs.setAttribute('role', 'tablist');
+  const tab = (label, cls, fn) => { const b = button(label, `cv-tab ${cls}`, fn); b.setAttribute('role', 'tab'); return b; };
+  const codeTab = tab('Code', 'cv-tab-code', () => showCodeTab());
+  const historyBtn = tab('History', 'cv-tab-history', () => showHistoryTab());
+  tabs.append(codeTab, historyBtn);
+  // (a kept version shown in place: Diff with the current one, Restore)
+  const hTools = el('div', 'cv-h-tools');
+  hTools.hidden = true;
+  const hDiff = button('See differences', 'cv-h-diff', () => showVersion(codeView.version_, !codeView.diff));
+  hDiff.setAttribute('aria-pressed', 'false');
+  const hRestore = button('Restore', 'cv-h-restore', (ev) => restoreVersion(ev.currentTarget));
+  hTools.append(hDiff, hRestore);
   const copy = button('Copy', 'cv-copy', () => copyCode());
-  const reveal = button(IS_MAC ? 'Show in Finder' : 'Show in folder', 'cv-reveal', () => revealMod('folder'));
-  const editor = button('Open in editor', 'cv-editor', () => revealMod('editor'));
-  const close = button('Close', 'text cv-close', () => d.close());
+  const exportBtn = button('Export', 'cv-export', () => exportMod());
+  // (the rest in a small menu: Open in editor, Show in Finder)
+  const more = el('button', 'btn cv-more', '⋯');
+  more.type = 'button';
+  more.title = 'More';
+  more.setAttribute('aria-label', 'More');
+  more.setAttribute('aria-haspopup', 'menu');
+  more.setAttribute('aria-expanded', 'false');
+  const menu = el('div', 'pop-menu cv-menu');
+  menu.setAttribute('role', 'menu');
+  menu.hidden = true;
+  const item = (label, cls, fn) => { const b = button(label, `menu-item ${cls}`, () => { menu.hidden = true; more.setAttribute('aria-expanded', 'false'); fn(); }); b.setAttribute('role', 'menuitem'); return b; };
+  const editor = item('Open in editor', 'cv-editor', () => revealMod('editor'));
+  const reveal = item(IS_MAC ? 'Show in Finder' : 'Show in folder', 'cv-reveal', () => revealMod('folder'));
+  const wrap = item('Wrap lines', 'cv-wrap', () => {
+    codeWrap = !codeWrap;
+    try { localStorage.setItem('codeWrap', codeWrap ? 'on' : 'off'); } catch { /* this time only */ }
+    codeBox.classList.toggle('wrap', codeWrap);
+    wrap.setAttribute('aria-checked', String(codeWrap));
+  });
+  wrap.setAttribute('role', 'menuitemcheckbox');
+  wrap.setAttribute('aria-checked', String(codeWrap));
+  menu.append(editor, reveal, wrap);
+  more.addEventListener('click', () => { menu.hidden = !menu.hidden; more.setAttribute('aria-expanded', String(!menu.hidden)); });
   x.addEventListener('click', () => d.close());
+  const moreWrap = el('span', 'cv-more-wrap');
+  moreWrap.append(more, menu);
   const acts = el('div', 'ap-actions');
-  acts.append(copy, reveal, editor, close);
-  d.append(top, who, versions, codeBox, note, err, acts);
+  acts.append(copy, exportBtn, moreWrap);
+  const historyBox = el('ul', 'cv-history-list');
+  historyBox.hidden = true;
+  d.append(top, who, about, tabs, versions, errorBox, hTools, codeBox, historyBox, note, err, acts);
+  d.addEventListener('close', () => setTimeout(() => renderMods(), 0)); // (a hold that came meanwhile: its card now)
   document.body.append(d);
   codeView.dialog = d;
-  codeView.parts = { name, chip, where, versions, vRan, vNew, codeBox, note, err, copy, reveal, editor };
+  codeView.parts = { name, chip, where, about, versions, vRan, vNew, errorBox, codeBox, historyBox, historyBtn, codeTab, hTools, hDiff, hRestore, exportBtn, more, menu, note, err, copy, reveal, editor };
   return codeView.parts;
 }
 
-function openCodeView(id) {
+function openCodeView(id, { error = null } = {}) {
   const m = (view.status?.mods || []).find((x) => x.id === id);
   if (!m) return;
   const P = codeViewDialog();
@@ -1791,18 +2018,38 @@ function openCodeView(id) {
   P.chip.className = `ap-chip ${k[0]}`;
   P.chip.textContent = k[1];
   P.where.replaceChildren(`${m.id.split('/')[0]} · `, fileLink(String(m.file || '').split(/[\\/]/).pop() || `${m.id.split('/').pop()}.js`,
-    IS_MAC ? 'Show in Finder' : 'Show in folder', () => revealMod('folder'), 'cv-file'));
+    IS_MAC ? 'Show in Finder' : 'Show in folder', () => revealMod('folder'), 'cv-file'),
+    ...(m.source === 'webmods' || m.source === 'trif' ? [' · ', el('span', 'cv-source', `Tim's mod${m.version ? `, v${m.version}` : ''}`)] : []));
+  const { everywhere, sites } = modSites(m);
+  const site = m.id.split('/')[0];
+  const lines = [
+    ...(modLevel(m) ? [levelWords(m, view.site || site)] : []),
+    ...powerLines(m).map((l) => `Power: ${l}`),
+    ...(m.powerInfo?.warnings || []).map((w) => w.charAt(0).toUpperCase() + w.slice(1)),
+    ...(everywhere ? ['Runs on every site.'] : sites.length > 1 ? [`Runs on ${sites.join(', ')}.`] : []),
+    ...(m.from ? [`Made from ${m.from}.`] : []),
+    ...(m.enabled !== false && !m.registered && !m.held ? [view.status?.userScripts ? 'Not active right now.' : 'Paused: user scripts are off.'] : []),
+  ];
+  P.about.replaceChildren(...lines.map((l) => el('p', null, l)));
+  P.about.hidden = !lines.length;
   P.versions.hidden = !m.pending;
   P.copy.textContent = 'Copy';
   delete P.copy.dataset.copied;
   // (Show in Finder and Open in editor: the helper does them)
   const connected = !!view.status?.helper?.connected;
-  for (const b of [P.reveal, P.editor]) {
+  setCodeTab('code');
+  P.menu.hidden = true;
+  for (const b of [P.reveal, P.editor, P.historyBtn, P.exportBtn]) {
     b.disabled = !connected;
     b.title = connected ? '' : 'TRIF\'s helper isn\'t connected, so it can\'t open the file';
   }
   const fl = P.where.querySelector('.cv-file');
   if (fl && !connected) fl.title = 'TRIF\'s helper isn\'t connected, so it can\'t open the file';
+  // (Show error: the error above the code, its line marked and in view)
+  codeView.error = error;
+  P.errorBox.hidden = !error;
+  P.errorBox.replaceChildren();
+  if (error) P.errorBox.append(el('b', null, error.quiet ? 'May be broken: ' : `New error${error.line ? ` at line ${error.line}` : ''}: `), error.quiet ? 'nothing it looks for is on the page any more.' : String(error.message || ''));
   if (!codeView.dialog.open) codeView.dialog.showModal();
   loadCodeView('file');
 }
@@ -1827,6 +2074,8 @@ async function loadCodeView(version) {
   if (codeView.id !== id || codeView.version !== version) return;
   codeView.text = String(r.code ?? '');
   renderCode(P.codeBox, codeView.text);
+  const line = codeView.error?.line && version !== 'ran' ? P.codeBox.children[codeView.error.line - 1] : null;
+  if (line) { line.classList.add('hl'); line.scrollIntoView({ block: 'center' }); }
   if (r.truncated || r.local) {
     P.note.textContent = r.truncated ? 'Showing the first 200,000 characters.' : 'From the browser: TRIF\'s helper isn\'t connected.';
     P.note.hidden = false;
@@ -1846,18 +2095,293 @@ function renderCode(box, text) {
     }
     if (at < text.length) pieces.push([text.slice(at), null]);
   } else pieces.push([text, null]);
-  // one element per line (CSS numbers them), each piece split at its line breaks
-  let line = el('span', 'l');
+  // one element per line (CSS numbers them), each piece split at its line breaks; the line's text in an
+  // inner span, so a wrapped line's continuations hang at its own indentation (codeLine)
+  const source = text.split('\n');
+  let line = codeLine('l', '', source[0]);
   const lines = [line];
   for (const [t, cls] of pieces) {
     const parts = t.split('\n');
     parts.forEach((part, i) => {
-      if (i > 0) { line = el('span', 'l'); lines.push(line); }
-      if (part) line.append(cls ? el('span', `t${cls}`, part) : document.createTextNode(part));
+      if (i > 0) { line = codeLine('l', '', source[lines.length]); lines.push(line); }
+      if (part) line.firstChild.append(cls ? el('span', `t${cls}`, part) : document.createTextNode(part));
     });
   }
   box.replaceChildren(...lines);
 }
+
+/**
+ * A line of code: span.l (numbered by CSS, once per source line) holding span.lc with `text`; --ind, the
+ * line's own indentation (tabs as 2), plus `extra` characters, is where its wrapped continuations start.
+ */
+function codeLine(cls, text, source = text, extra = 0) {
+  const line = el('span', cls);
+  const lead = /^[ \t]*/.exec(source || '')[0];
+  line.style.setProperty('--ind', `${[...lead].reduce((n, c) => n + (c === '\t' ? 2 : 1), 0) + extra}ch`);
+  line.append(el('span', 'lc', text));
+  return line;
+}
+
+// Long lines wrap in the code card (on by default; the ⋯ menu's Wrap lines, remembered in this browser)
+let codeWrap = true;
+try { codeWrap = localStorage.getItem('codeWrap') !== 'off'; } catch { /* no storage: on */ }
+
+// History (helper lib/history.js): the versions TRIF kept of this mod, with View, Diff with current and
+// Restore; the code again from the same button.
+const HISTORY_SOURCE = {
+  chat: 'before your agent changed it in a chat', fix: 'before a fix', restore: 'before you restored an older version',
+  import: 'before an import replaced it', undo: 'before an undo',
+};
+// The tabs: the code, or History (the versions kept; one clicked is shown in place, with Diff and Restore)
+function setCodeTab(which) {
+  const P = codeView.parts;
+  P.codeTab.setAttribute('aria-selected', String(which === 'code'));
+  P.historyBtn.setAttribute('aria-selected', String(which !== 'code'));
+  P.historyBox.hidden = which !== 'history';
+  P.codeBox.hidden = which === 'history';
+  P.hTools.hidden = which !== 'version';
+  if (which !== 'code') P.versions.hidden = true;
+  codeView.tab = which;
+}
+function showCodeTab() {
+  const P = codeView.parts;
+  P.note.hidden = true;
+  setCodeTab('code');
+  const m = (view.status?.mods || []).find((x) => x.id === codeView.id);
+  P.versions.hidden = !m?.pending;
+  loadCodeView('file');
+}
+async function showHistoryTab() {
+  const P = codeView.parts;
+  P.err.hidden = true;
+  P.note.hidden = true;
+  setCodeTab('history');
+  let r;
+  try { r = await request({ type: 'mod.history', id: codeView.id }); } catch (e) { P.err.textContent = String(e?.message ?? e); P.err.hidden = false; return; }
+  const entries = (r.entries || []).filter((e) => e.kind === 'version');
+  if (!entries.length) { P.historyBox.replaceChildren(el('li', 'cv-history-empty', 'No earlier versions kept. TRIF keeps the version before each change your agent makes, a fix, a restore or an import, for 30 days.')); return; }
+  P.historyBox.replaceChildren(...entries.map((e) => {
+    const li = el('li');
+    li.dataset.stamp = e.stamp;
+    const when = new Date(e.at).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' });
+    const row = el('button', 'cv-h-row');
+    row.type = 'button';
+    row.append(el('span', 'cv-h-when', when), el('span', 'cv-h-from', e.source ? HISTORY_SOURCE[e.source] || '' : ''));
+    row.addEventListener('click', () => showVersion({ ...e, when }, false));
+    li.append(row);
+    return li;
+  }));
+}
+
+// A kept version in place of the list: its text, or (Diff) what changed since, with Restore
+async function showVersion(e, diff) {
+  if (!e) return;
+  const P = codeView.parts;
+  P.err.hidden = true;
+  codeView.version_ = e;
+  codeView.diff = diff;
+  try {
+    const r = await request({ type: diff ? 'mod.historyDiff' : 'mod.historyCode', id: codeView.id, stamp: e.stamp });
+    if (diff) P.codeBox.replaceChildren(...r.lines.map((l) => codeLine(`l ${l.t === '+' ? 'add' : l.t === '-' ? 'del' : 'ctx'}`, `${l.t === '…' ? '…' : l.t} ${l.s}`, l.s, 2)));
+    else { codeView.text = String(r.code ?? ''); renderCode(P.codeBox, codeView.text); }
+    setCodeTab('version');
+    P.hDiff.setAttribute('aria-pressed', String(!!diff));
+    P.hRestore.disabled = false;
+    P.note.textContent = diff ? `What changed since the version from ${e.when} (- then, + now).` : `The version from ${e.when}.`;
+    P.note.hidden = false;
+  } catch (x) { P.err.textContent = String(x?.message ?? x); P.err.hidden = false; }
+}
+
+async function restoreVersion(b) {
+  const P = codeView.parts;
+  const e = codeView.version_;
+  if (!e) return;
+  b.disabled = true;
+  try {
+    await request({ type: 'mod.historyRestore', id: codeView.id, stamp: e.stamp });
+    const said = `Restored the version from ${e.when}. The one before is in History.`;
+    setCodeTab('code');
+    setTimeout(() => loadCodeView('file').then(() => { P.note.textContent = said; P.note.hidden = false; }), 800);
+  } catch (x) { b.disabled = false; P.err.textContent = String(x?.message ?? x); P.err.hidden = false; }
+}
+
+async function exportMod() {
+  const P = codeView.parts;
+  P.err.hidden = true;
+  try {
+    const r = await request({ type: 'mod.export', id: codeView.id });
+    P.note.textContent = `Exported to ${IS_MAC ? 'Downloads' : 'your downloads folder'} as ${r.file}: send it to a friend, who imports it with Import mod… (or drops it on TRIF's panel).`;
+    P.note.hidden = false;
+  } catch (e) { P.err.textContent = String(e?.message ?? e); P.err.hidden = false; }
+}
+
+// ---- Import, export, a site's files, and dropping files on the panel (helper lib/share.js) -------------
+function renderSiteTools() {
+  const site = view.site;
+  const ok = !!site && !!view.status?.helper?.connected;
+  ui.modsMore.hidden = !ok;
+  if (!ok) { ui.modsMenu.hidden = true; ui.siteFilesBox.hidden = true; return; }
+  const mine = (view.status?.mods || []).filter((m) => m.id.startsWith(`${site}/`));
+  ui.exportSite.hidden = !mine.length;
+  ui.exportSite.textContent = `Export all mods for ${site}`;
+  if (view.filesFor !== site) { view.filesFor = site; loadSiteFiles(); }
+}
+
+async function loadSiteFiles() {
+  const site = view.site;
+  let files = [];
+  try { files = (await request({ type: 'files.list', site })).files || []; } catch { files = []; }
+  if (site !== view.site) return;
+  view.siteFileCount = files.length;
+  ui.siteFilesBox.hidden = !files.length;
+  ui.siteFilesSummary.textContent = `Files (${files.length})`;
+  if (!files.length) { ui.siteFiles.replaceChildren(); renderMods(); return; }
+  const show = el('button', 'link-btn', IS_MAC ? 'Show in Finder' : 'Show in folder');
+  show.type = 'button';
+  show.addEventListener('click', () => request({ type: 'files.reveal', site }).catch(() => {}));
+  if (ui.mods.hidden) renderMods(); // (a site with files and no mods: the box shows, for them)
+  ui.siteFiles.replaceChildren(...files.slice(0, 12).flatMap((f) => {
+    const x = el('button', 'file-x', '×');
+    x.type = 'button';
+    x.title = `Remove ${f.name} (to TRIF's trash)`;
+    x.setAttribute('aria-label', `Remove ${f.name}`);
+    x.addEventListener('click', async () => { x.disabled = true; try { await request({ type: 'files.remove', site, name: f.name }); } catch { x.disabled = false; } view.filesFor = null; renderSiteTools(); });
+    const item = el('span', 'site-file');
+    item.dataset.name = f.name;
+    item.append(el('span', null, f.name), x);
+    return [item];
+  }), ...(files.length > 12 ? [el('span', 'files-more', `and ${files.length - 12} more`)] : []), show);
+}
+
+// (the ⋯ on the Mods header: inside its summary, so its clicks don't open or close the box)
+ui.modsMore?.addEventListener('click', (e) => { e.preventDefault(); e.stopPropagation(); ui.modsMenu.hidden = !ui.modsMenu.hidden; ui.modsMore.setAttribute('aria-expanded', String(!ui.modsMenu.hidden)); });
+ui.modsMenu?.addEventListener('click', (e) => { e.preventDefault(); e.stopPropagation(); });
+document.addEventListener('click', (e) => {
+  if (!e.target.closest?.('.mods-more-wrap') && ui.modsMenu && !ui.modsMenu.hidden) { ui.modsMenu.hidden = true; ui.modsMore.setAttribute('aria-expanded', 'false'); }
+  const cm = codeView.parts;
+  if (cm && !cm.menu.hidden && !e.target.closest?.('.cv-more-wrap')) { cm.menu.hidden = true; cm.more.setAttribute('aria-expanded', 'false'); }
+});
+ui.importMod?.addEventListener('click', () => { ui.modsMenu.hidden = true; ui.importFile.click(); });
+ui.importFile?.addEventListener('change', async () => {
+  const f = ui.importFile.files?.[0];
+  ui.importFile.value = '';
+  if (f) await importModFile(f);
+});
+ui.exportSite?.addEventListener('click', async () => {
+  ui.modsMenu.hidden = true;
+  try {
+    const r = await request({ type: 'mod.exportSite', site: view.site });
+    request({ type: 'chat.note', site: view.site, text: `Exported ${r.ids.length} mod${r.ids.length === 1 ? '' : 's'} for ${r.site} to the folder "${r.dir}" in ${IS_MAC ? 'Downloads' : 'your downloads folder'}.` }).catch(() => {});
+  } catch (e) { request({ type: 'chat.note', site: view.site, text: `Couldn't export: ${e?.message ?? e}` }).catch(() => {}); }
+});
+
+// A small card for the import's questions (which site; a copy or Replace): resolves the choice, or null
+function askCard(title, text, choices) {
+  return new Promise((resolve) => {
+    resolve = ((r) => (v) => { r(v); setTimeout(() => renderMods(), 0); })(resolve);
+    const d = el('dialog', 'approval import-ask');
+    d.id = 'import-ask';
+    const top = el('div', 'ap-top');
+    const x = el('button', 'ap-x', '×');
+    x.type = 'button';
+    x.setAttribute('aria-label', 'Cancel');
+    top.append(el('span', 'ap-count', 'Import mod'), x);
+    const acts = el('div', 'ap-actions');
+    const done = (v) => { siteCards.delete(cancel); d.close(); d.remove(); resolve(v); };
+    const cancel = () => done(null);
+    siteCards.add(cancel); // (another site's tab: cancelled, leaveSite)
+    for (const [label, value, cls] of choices) acts.append(button(label, cls || '', () => done(value)));
+    acts.append(button('Cancel', 'text', () => done(null)));
+    x.addEventListener('click', () => done(null));
+    d.addEventListener('cancel', (e) => { e.preventDefault(); done(null); });
+    d.append(top, el('h2', 'ap-name', title), el('p', 'ap-lead', text), acts);
+    document.body.append(d);
+    d.showModal();
+  });
+}
+
+async function importModFile(file) {
+  const note = (text) => request({ type: 'chat.note', site: view.site, text }).catch(() => {});
+  if (file.size > 4 * 1024 * 1024) return note(`Couldn't import ${file.name}: it's bigger than a mod can be (4 MB).`);
+  const text = await file.text();
+  let site = '';
+  let choice = '';
+  for (let i = 0; i < 4; i++) {
+    let r;
+    try { r = await request({ type: 'mod.import', text, name: file.name, site, choice, chatSite: view.site }); } catch (e) { return note(`Couldn't import ${file.name}: ${e?.message ?? e}`); }
+    if (r.needsSite) {
+      const sites = [...new Set([...(r.needsSite || []), view.site].filter(Boolean))].slice(0, 5);
+      site = await askCard('Which site is this mod for?', `${file.name} doesn't say which site it's for${r.needsSite.length ? ` (its @match lines name ${r.needsSite.join(', ')})` : ''}.`, sites.map((s, k) => [s, s, k === 0 ? 'go' : '']));
+      if (!site) return;
+      continue;
+    }
+    if (r.exists) {
+      choice = await askCard(`${r.exists} is here already`, `Add ${file.name} beside it as a copy, or replace it? (The one there is kept in its history.)`, [['Add as a copy', 'copy', 'go'], ['Replace', 'replace', '']]);
+      if (!choice) return;
+      continue;
+    }
+    return;
+  }
+}
+
+// Dropping files on the panel, the chat included: a .js is imported; anything else goes in the site's files
+// (data for its mods and runs), or, while the user is typing, attached to their next message.
+let dragDepth = 0;
+const isMod = (name, type) => /\.js$/i.test(name || '') || /javascript/i.test(type || '');
+document.addEventListener('dragenter', (e) => {
+  if (!e.dataTransfer || ![...(e.dataTransfer.types || [])].includes('Files')) return;
+  e.preventDefault();
+  dragDepth++;
+  const items = [...(e.dataTransfer.items || [])];
+  const js = items.length && items.every((it) => it.kind === 'file' && isMod('', it.type));
+  ui.dropText.textContent = !view.site ? 'Open a site\'s tab to add files to it' : js ? 'Drop to import this mod' : `Add to ${view.site}'s files`;
+  ui.dropOverlay.hidden = false;
+});
+document.addEventListener('dragover', (e) => { if (e.dataTransfer && [...(e.dataTransfer.types || [])].includes('Files')) e.preventDefault(); });
+document.addEventListener('dragleave', () => { dragDepth = Math.max(0, dragDepth - 1); if (!dragDepth) ui.dropOverlay.hidden = true; });
+document.addEventListener('drop', async (e) => {
+  if (!e.dataTransfer?.files?.length) return;
+  e.preventDefault();
+  dragDepth = 0;
+  ui.dropOverlay.hidden = true;
+  if (!view.site || !view.status?.helper?.connected) return;
+  for (const f of [...e.dataTransfer.files].slice(0, 10)) {
+    if (isMod(f.name, f.type)) { await importModFile(f); continue; }
+    await addSiteFile(f);
+  }
+});
+
+async function addSiteFile(f) {
+  const site = view.site;
+  const note = (text) => request({ type: 'chat.note', site, text }).catch(() => {});
+  const typing = !!ui.input.value.trim();
+  // (a slice at a time, so a big file is never all in memory: the helper appends them, then renames it into place)
+  let id = null;
+  const progress = el('p', 'note file-progress');
+  const big = f.size > 2 * FILE_SLICE;
+  try {
+    id = (await request({ type: 'files.begin', site, name: f.name, size: f.size })).id;
+    if (big) { progress.textContent = `Adding ${f.name}… 0%`; ui.messages.after(progress); }
+    for (let at = 0; at < f.size; at += FILE_SLICE) {
+      const bytes = new Uint8Array(await f.slice(at, at + FILE_SLICE).arrayBuffer());
+      let bin = '';
+      for (let i = 0; i < bytes.length; i += 0x8000) bin += String.fromCharCode.apply(null, bytes.subarray(i, i + 0x8000));
+      await request({ type: 'files.slice', id, offset: at, data: btoa(bin) });
+      if (big) progress.textContent = `Adding ${f.name}… ${Math.floor(Math.min(1, (at + FILE_SLICE) / f.size) * 100)}%`;
+    }
+    const r = await request({ type: 'files.end', id, attach: typing });
+    id = null;
+    if (typing) ui.input.value = `${ui.input.value.replace(/\s+$/, '')} [attached: files/${r.name}]`;
+  } catch (e) {
+    if (id) request({ type: 'files.abort', id }).catch(() => {});
+    progress.remove();
+    return note(`Couldn't add ${f.name}: ${e?.message ?? e}`);
+  }
+  progress.remove();
+  view.filesFor = null;
+  renderSiteTools();
+}
+const FILE_SLICE = 4 * 1024 * 1024;
 
 async function copyCode() {
   const P = codeView.parts;
@@ -2100,8 +2624,8 @@ function updateModItem(li, m) {
   if (m.held) {
     updateLight(li, m, false);
     const tag = li.querySelector('.tag');
-    tag.textContent = 'on hold';
-    tag.hidden = false;
+    tag.textContent = '';
+    showOneTag(li, true); // (the "on hold" button in the switch's place says it)
     const err = li.querySelector('.mod-err');
     if (rowErr) { err.textContent = rowErr; err.hidden = false; } else { err.textContent = ''; err.hidden = true; } // (the facts box says why)
     return;
@@ -2110,13 +2634,15 @@ function updateModItem(li, m) {
   const on = shownEnabled(m.id, isOn(m.id, site), site);
   li.classList.toggle('off', !on);
   updateLight(li, m, on);
-  // "not active"/"paused" only once the status agrees the mod is on (not mid-switch).
   const tag = li.querySelector('.tag');
-  tag.textContent = on && m.enabled !== false && !m.registered ? (view.status.userScripts ? 'not active' : 'paused')
-    : !on && m.from ? `from ${m.from}` : !on && m.newOff ? (m.newOff === 'update' ? 'updated' : 'new') : '';
-  tag.title = !on && m.from ? `Made from ${m.from}. Mods made in another browser start off here; switch it on to use it.`
-    : !on && m.newOff ? `${m.newOff === 'update' ? 'TRIF updated it. ' : ''}New ${groupWord(modGroup(m))} start off (Settings): switch it on once you've looked at it.` : '';
-  tag.hidden = !tag.textContent;
+  // (one tag at most, showOneTag: a change the chat made waiting comes first, then new or updated)
+  tag.textContent = m.chatWaiting ? 'changed' : !on && m.newOff ? (m.newOff === 'update' ? 'updated' : 'new') : '';
+  tag.title = m.chatWaiting ? 'Your chat changed it, and waits for you (Settings): the version before runs until you turn this one on.'
+    : !on && m.newOff === 'chat' ? 'Your chat made it, and waits for you (Settings): switch it on once you\'ve looked at it.'
+    : !on && m.newOff === 'update' ? 'TRIF updated it and switched it off: switch it on once you\'ve looked at it.'
+    : !on && m.newOff ? 'TRIF switched it off because it came from outside your chat: switch it on once you\'ve looked at it.' : '';
+  tag.dataset.rank = m.chatWaiting ? '1' : '3';
+  showOneTag(li, false);
   const err = li.querySelector('.mod-err');
   err.textContent = rowErr || switchError(m.id, site) || (on && m.error) || '';
   err.hidden = !err.textContent;
@@ -2129,8 +2655,14 @@ function renderMessages() {
   const sameThread = r.site === view.site && msgs.length >= r.count && (r.count === 0 || msgs[0]?.time === r.first);
   if (!sameThread) {
     ui.messages.replaceChildren(...msgs.map(messageNode));
-  } else if (msgs.length > r.count) {
-    ui.messages.append(...msgs.slice(r.count).map(messageNode));
+  } else {
+    if (msgs.length > r.count) ui.messages.append(...msgs.slice(r.count).map(messageNode));
+    // (a mod-broke card the background changed since: Fixing…, Fixed., Ignored., Fix undone.: drawn again)
+    msgs.forEach((m, i) => {
+      if (m.kind !== 'modError' || i >= r.count) return;
+      const node = ui.messages.children[i];
+      if (node && node.dataset.cardKey !== cardKey(m)) node.replaceWith(messageNode(m));
+    });
   }
   const changed = !sameThread || msgs.length !== r.count;
   view.rendered = { site: view.site, count: msgs.length, first: msgs[0]?.time ?? null };
@@ -2362,10 +2894,7 @@ ui.newChat.addEventListener('click', newChat);
 ui.gateBtn.addEventListener('click', gateClick);
 ui.gateBlock.addEventListener('click', (e) => { e.preventDefault(); setBlocked(true); });
 ui.gateDisconnect.addEventListener('click', disconnectClick);
-ui.modeDialogClose.addEventListener('click', () => ui.modeDialog.close());
-ui.modeDialogSwitch.addEventListener('click', switchToRestrictive);
-ui.modePermissive.addEventListener('click', choosePermissive);
-ui.modeRestrictive.addEventListener('click', chooseRestrictive);
+ui.accessNoteOk?.addEventListener('click', () => request({ type: 'siteAccess.noteSeen' }).then(refreshStatus, () => {}));
 ui.siteStarterLink.addEventListener('click', (e) => { e.preventDefault(); const x = siteStarterOffer(); if (x) addStarter(x.site, { fromSite: true }); });
 ui.siteSwitch.addEventListener('click', () => setSiteOn(!siteIsOn()));
 ui.barRobot.addEventListener('click', () => setSiteOn(!siteIsOn())); // off: the Fix button; on: the power button
@@ -2551,9 +3080,8 @@ async function installUpdate() {
 }
 
 ui.pauseAll.addEventListener('change', () => setPaused(ui.pauseAll.checked));
-ui.startsRules.addEventListener('change', () => setStartsOff('rules', ui.startsRules.value === 'off'));
-ui.startsSandboxed.addEventListener('change', () => setStartsOff('sandboxed', ui.startsSandboxed.value === 'off'));
-ui.startsPage.addEventListener('change', () => setStartsOff('page', ui.startsPage.value === 'off'));
+ui.chatMods.addEventListener('change', () => setChatWait(ui.chatMods.value === 'wait'));
+ui.onBreak?.addEventListener('change', () => request({ type: 'modError.onBreak', value: ui.onBreak.value }).then(refreshStatus, () => {}));
 
 ui.autoUpdate.addEventListener('change', async () => {
   const on = ui.autoUpdate.checked;

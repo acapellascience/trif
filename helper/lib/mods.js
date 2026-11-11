@@ -35,7 +35,7 @@ function isIgnoredName(name) {
 // Parse the `// ==WebMod==` block. Returns raw header values plus warnings; defaults are applied
 // by buildMod because they depend on the folder and file name.
 function parseHeader(code) {
-  const out = { hasHeader: false, name: null, description: null, matches: [], excludes: [], runAt: null, risk: null, source: null, version: null, rules: false, sandboxed: false, powers: [], clicks: [], warnings: [] };
+  const out = { hasHeader: false, name: null, description: null, matches: [], excludes: [], runAt: null, risk: null, source: null, version: null, rules: false, sandboxed: false, powers: [], clicks: [], events: [], migrate: [], warnings: [] };
   const lines = String(code).replace(/^﻿/, '').split(/\r?\n/);
   const start = lines.findIndex((l) => HEADER_START.test(l));
   if (start === -1) return out;
@@ -104,6 +104,15 @@ function parseHeader(code) {
       // `@click the play button: button.play`: what a boxed mod with the click power may click
       case 'click':
         if (value) out.clicks.push(value);
+        break;
+      // `@events trif-endscreen-switch`: the page's own custom events a boxed mod listens for
+      case 'events':
+        if (value) out.events.push(value);
+        break;
+      // `@migrate localStorage my-key`: what a boxed mod's free version kept in the site's storage, brought
+      // into its own settings once (listed on the hold)
+      case 'migrate':
+        if (value) out.migrate.push(value);
         break;
       case 'run-at': {
         const mapped = RUN_AT[value.toLowerCase()];
@@ -178,12 +187,17 @@ function buildMod({ site, file, code }) {
     if (clicks.length && !powers.includes('click')) throw new bp.PowersError('@click lines are for a mod with the click power (@powers click)');
     if (powers.includes('click') && !clicks.length) throw new bp.PowersError('the click power needs what it may click: // @click the play button: button.play');
     if (clicks.length) powerArgs.click = clicks;
+    const events = bp.parseEvents(header.events);
+    if (events.length) powerArgs.events = events;
+    const migrate = bp.parseMigrate(header.migrate);
+    if (migrate.length) powerArgs.migrate = migrate;
     return { mod: { ...meta, sandboxed: true, ...(powers.length ? { powers } : {}), ...(Object.keys(powerArgs).length ? { powerArgs } : {}), code, hash }, warnings: header.warnings };
   }
   if (header.rules) {
     // (what runs is TRIF's code with the checked rules; throws a RulesError for the scanner to report)
     const rules = require('./rules');
-    return { mod: { ...meta, rules: true, text: code, code: rules.rulesCode(rules.parseRules(code), meta.id), hash }, warnings: header.warnings };
+    const parsed = rules.parseRules(code);
+    return { mod: { ...meta, rules: true, text: code, code: rules.rulesCode(parsed, meta.id), selectors: rules.selectorsOf(parsed), hash }, warnings: header.warnings };
   }
   return { mod: { ...meta, code, hash }, warnings: header.warnings };
 }

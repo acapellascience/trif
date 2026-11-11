@@ -46,7 +46,10 @@ function modOf(ws, rel) {
   return { site: parts[1], mod: parts[2].slice(0, -3) };
 }
 
-function writeEntry(ws, site, mod, content, at = Date.now()) {
+// (each entry may have a <name>.source beside it: what replaced that version, `chat` (a side-panel run), `fix`
+// (a run Fix it started), `restore` (an older one put back), `import` (an import replaced it), `undo`)
+const SOURCES = new Set(['chat', 'fix', 'restore', 'import', 'undo']);
+function writeEntry(ws, site, mod, content, at = Date.now(), source = null) {
   const dir = path.join(historyDir(ws), site);
   fs.mkdirSync(dir, { recursive: true });
   // (two in the same millisecond: the later one a millisecond on)
@@ -54,6 +57,7 @@ function writeEntry(ws, site, mod, content, at = Date.now()) {
   const name = (ms) => path.join(dir, `${mod}@${stampOf(ms)}${content === null ? '.created' : '.js'}`);
   while (fs.existsSync(name(t)) || fs.existsSync(name(t).replace(/\.(js|created)$/, content === null ? '.js' : '.created'))) t++;
   fs.writeFileSync(name(t), content === null ? '' : content);
+  if (source && SOURCES.has(source)) fs.writeFileSync(name(t).replace(/\.(js|created)$/, '.source'), source);
   return name(t);
 }
 
@@ -61,7 +65,7 @@ function writeEntry(ws, site, mod, content, at = Date.now()) {
  * After a run: keep the previous text of each mod it changed (`changed`: paths relative to the workspace,
  * as runs.js diffSnapshots gives them). Returns the ids with a history entry now.
  */
-function recordChanges(ws, before, changed) {
+function recordChanges(ws, before, changed, source = 'chat') {
   const ids = [];
   for (const rel of changed) {
     const m = modOf(ws, rel);
@@ -69,14 +73,14 @@ function recordChanges(ws, before, changed) {
     const prev = before.has(rel) ? before.get(rel) : null;
     // (a mod that's gone now was deleted, and the trash has it already)
     if (!fs.existsSync(path.join(ws.home, rel))) continue;
-    writeEntry(ws, m.site, m.mod, prev);
+    writeEntry(ws, m.site, m.mod, prev, Date.now(), source);
     ids.push(`${m.site}/${m.mod}`);
   }
   prune(ws);
   return ids;
 }
 
-/** A mod's history, newest first: [{at, kind: 'version'|'created', file}]. */
+/** A mod's history, newest first: [{at, stamp, kind: 'version'|'created', source, file}]. */
 function listHistory(ws, id) {
   const { site, mod } = trash.parseId(id);
   let names = [];
@@ -85,7 +89,9 @@ function listHistory(ws, id) {
   for (const n of names) {
     const m = /^(.+)@(\d{8}T\d{9}Z)\.(js|created)$/.exec(n);
     if (!m || m[1] !== mod) continue;
-    out.push({ at: timeOf(m[2]), kind: m[3] === 'js' ? 'version' : 'created', file: path.join(historyDir(ws), site, n) });
+    let source = null;
+    try { source = fs.readFileSync(path.join(historyDir(ws), site, `${m[1]}@${m[2]}.source`), 'utf8').trim(); } catch { /* not said */ }
+    out.push({ at: timeOf(m[2]), stamp: m[2], kind: m[3] === 'js' ? 'version' : 'created', source: SOURCES.has(source) ? source : null, file: path.join(historyDir(ws), site, n) });
   }
   return out.sort((a, b) => b.at - a.at);
 }
@@ -111,8 +117,34 @@ function undoChange(ws, id) {
   fs.writeFileSync(tmp, text);
   fs.renameSync(tmp, file);
   fs.unlinkSync(last.file);
-  if (current) writeEntry(ws, site, mod, current); // (the undo, undoable)
+  try { fs.unlinkSync(last.file.replace(/\.js$/, '.source')); } catch { /* none */ }
+  if (current) writeEntry(ws, site, mod, current, Date.now(), 'undo'); // (the undo, undoable)
   return { id: `${site}/${mod}`, restored: 'previous', at: last.at };
+}
+
+/** One kept version's text, by its stamp (from listHistory). */
+function entryText(ws, id, stamp) {
+  const e = listHistory(ws, id).find((x) => x.stamp === String(stamp));
+  if (!e) throw new trash.TrashError(`${id} has no version from ${stamp}`);
+  if (e.kind !== 'version') throw new trash.TrashError(`${id} didn't exist before then (an agent created it)`);
+  return fs.readFileSync(e.file, 'utf8');
+}
+
+/**
+ * Put back a kept version: the current one is kept too (source `restore`), so this can be undone the same
+ * way; the version stays in the history. The helper's next sync judges it as any change from outside
+ * (held.js). Returns {id, restored: stamp, at}.
+ */
+function restoreEntry(ws, id, stamp) {
+  const { site, mod } = trash.parseId(id);
+  const text = entryText(ws, `${site}/${mod}`, stamp);
+  const file = path.join(ws.modsDir, site, `${mod}.js`);
+  if (fs.existsSync(file)) writeEntry(ws, site, mod, fs.readFileSync(file), Date.now(), 'restore');
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  const tmp = `${file}.${process.pid}.tmp`;
+  fs.writeFileSync(tmp, text);
+  fs.renameSync(tmp, file);
+  return { id: `${site}/${mod}`, restored: String(stamp), at: timeOf(String(stamp)) };
 }
 
 function prune(ws, now = Date.now()) {
@@ -122,10 +154,10 @@ function prune(ws, now = Date.now()) {
     let names = [];
     try { names = fs.readdirSync(path.join(historyDir(ws), site)); } catch { continue; }
     for (const n of names) {
-      const m = /@(\d{8}T\d{9}Z)\.(js|created)$/.exec(n);
+      const m = /@(\d{8}T\d{9}Z)\.(js|created|source)$/.exec(n);
       if (m && now - timeOf(m[1]) > HISTORY_DAYS * DAY_MS) { try { fs.unlinkSync(path.join(historyDir(ws), site, n)); } catch { /* gone */ } }
     }
   }
 }
 
-module.exports = { contentsSnapshot, recordChanges, listHistory, undoChange, writeEntry, historyDir, HISTORY_DAYS };
+module.exports = { contentsSnapshot, recordChanges, listHistory, undoChange, writeEntry, entryText, restoreEntry, historyDir, HISTORY_DAYS };

@@ -565,43 +565,37 @@ export function applyReadded(mods, disabled = {}, readded = {}) {
 }
 
 // ---- new mods start on or off ----------------------------------------------------------------------
-// Settings' "New mods start": for each group of mods (modGroup: 'rules', 'sandboxed', 'page'), whether a mod of it that
-// this browser hasn't seen before arrives switched on (as always) or off, so a page script can't run before
-// the user has looked at it while styles still apply at once. chrome.storage.local `startsOff` = the groups
-// set to start off (none: every group starts on, the default). What counts as arriving: a mod id this
+// A mod from outside this browser's own chat arrives switched off, until the user has looked at it. What
+// counts as arriving: a mod id this
 // browser has never seen (`seenMods`: a terminal agent's, one dropped in by hand, Tim's mods added, one
 // made from another browser), and a new version of a shipped mod TRIF put in place by itself (the helper
 // sends its stamp as `autoUpdated`; `autoUpdated` here remembers the stamps seen). Not: one this browser's
 // own side-panel chat made while its run was going (its origin is this install, `live`: the user asked for it,
-// and the agent checks it running; a file that appeared just after the run ended doesn't count), one waiting for the user's OK anyway (held: allowing it is looking at it), or one the user
+// and the agent checks it running; a file that appeared just after the run ended doesn't count; unless Settings'
+// "Mods your chat makes" is Wait for me: `chatWait`), one waiting for the user's OK anyway (held: allowing it is looking at it), or one the user
 // asked for by name (a new version they chose, one restored from the trash: ids already seen). Tim's mods
-// the user got back (`readded`) count as arriving. `newOff` (id -> 'new' | 'update') remembers why a mod
-// was switched off, for the panel and `trif status`, until the user switches it on.
+// the user got back (`readded`) count as arriving. `newOff` (id -> 'new' | 'update' | 'chat') remembers why a
+// mod was switched off, for the panel and `trif status`, until the user switches it on.
 
-/** The groups a mod can be in, for `startsOff`. */
+/** The groups a mod can be in. */
 export const MOD_GROUPS = ['rules', 'sandboxed', 'page'];
 
-/** chrome.storage.local `startsOff`, cleaned up: known groups, once each. */
-export function normalizeStartsOff(value) {
-  return Array.isArray(value) ? MOD_GROUPS.filter((g) => value.includes(g)) : [];
-}
-
-/** chrome.storage.local `newOff`, cleaned up: mod id -> 'new' | 'update'. */
+/** chrome.storage.local `newOff`, cleaned up: mod id -> 'new' | 'update' | 'chat'. */
 export function normalizeNewOff(value) {
   const out = {};
-  if (value && typeof value === 'object' && !Array.isArray(value)) for (const [id, v] of Object.entries(value)) if (v === 'new' || v === 'update') out[id] = v;
+  if (value && typeof value === 'object' && !Array.isArray(value)) for (const [id, v] of Object.entries(value)) if (v === 'new' || v === 'update' || v === 'chat') out[id] = v;
   return out;
 }
 
 /**
  * The first time this browser sees each mod (and each stamp of a shipped mod TRIF updated by itself):
- * remembered in `seen` (id -> true) and `autoUpdated` (id -> stamp); one in a group set to start off is
- * switched off, with why in `newOff`. `seen` null (never stored: a browser that had its mods before this
+ * remembered in `seen` (id -> true) and `autoUpdated` (id -> stamp); one from outside the chat is switched
+ * off, with why in `newOff`. `seen` null (never stored: a browser that had its mods before this
  * existed) takes every mod there now as seen, switching nothing off; `autoUpdated` null likewise.
  * `readded`: the stamps the browser had seen before this message (a mod with a new one arrives again).
  * Pure: returns {disabled, seen, autoUpdated, newOff, changed} with new objects when something changed.
  */
-export function applyNewMods(mods, { disabled = {}, seen = null, autoUpdated = null, newOff = {}, startsOff = [], installId = null, readded = {} } = {}) {
+export function applyNewMods(mods, { disabled = {}, seen = null, autoUpdated = null, newOff = {}, chatWait = false, installId = null, readded = {} } = {}) {
   const list = (mods || []).filter((m) => typeof m?.id === 'string');
   const out = { disabled, seen: seen || {}, autoUpdated: autoUpdated || {}, newOff, changed: false };
   const copy = () => {
@@ -616,7 +610,8 @@ export function applyNewMods(mods, { disabled = {}, seen = null, autoUpdated = n
   }
   // (this browser's own chat: written while its run here was going, origin.live; not a file that appeared in the
   // moments after it ended, which helper/lib/origins.js also counts for it but could be anyone's)
-  const off = (m) => startsOff.includes(modGroup(m)) && !m.held && !(installId && m.origin?.by === installId && m.origin.live === true);
+  const fromChat = (m) => !!installId && m.origin?.by === installId && m.origin.live === true;
+  const off = (m) => !m.held && (!fromChat(m) || chatWait);
   for (const m of list) {
     const fresh = !out.seen[m.id] || (typeof m.readded === 'string' && readded[m.id] !== m.readded);
     const updated = typeof m.autoUpdated === 'string' && out.autoUpdated[m.id] !== m.autoUpdated;
@@ -626,13 +621,38 @@ export function applyNewMods(mods, { disabled = {}, seen = null, autoUpdated = n
     if (typeof m.autoUpdated === 'string') out.autoUpdated[m.id] = m.autoUpdated;
     if (off(m) && out.disabled[m.id] !== true) {
       out.disabled[m.id] = true;
-      out.newOff[m.id] = fresh ? 'new' : 'update';
+      out.newOff[m.id] = fromChat(m) ? 'chat' : fresh ? 'new' : 'update';
     }
   }
   // (why a mod that's gone was off: nothing to show any more)
   const present = new Set(list.map((m) => m.id));
   for (const id of Object.keys(out.newOff)) if (!present.has(id)) { copy(); delete out.newOff[id]; }
   return out;
+}
+
+/**
+ * "Mods your chat makes: Wait for me": a change the chat made to a mod that's running waits, and the version
+ * before keeps running until the user turns this one on. `waiting` (id -> {old: the mod as it was}); given the
+ * mods before and after a sync. Pure: returns {waiting, changed}.
+ */
+export function applyChatWaiting(before, after, { waiting = {}, chatWait = false, installId = null, isOn = () => true } = {}) {
+  const was = new Map((before || []).map((m) => [m.id, m]));
+  const out = { ...waiting };
+  let changed = false;
+  for (const m of after || []) {
+    const held = out[m.id];
+    const old = was.get(m.id);
+    const fromChat = !!installId && m.origin?.by === installId && m.origin.live === true;
+    if (held) {
+      // (put back as it was, or changed from outside the chat: nothing to wait for)
+      if (held.old.hash === m.hash || (old && old.hash !== m.hash && !fromChat)) { delete out[m.id]; changed = true; }
+      continue;
+    }
+    if (chatWait && fromChat && old && old.hash !== m.hash && !m.held && isOn(m.id)) { out[m.id] = { old }; changed = true; }
+  }
+  const present = new Set((after || []).map((m) => m.id));
+  for (const id of Object.keys(out)) if (!present.has(id)) { delete out[id]; changed = true; }
+  return { waiting: out, changed };
 }
 
 /** chrome.storage.local `readded`, cleaned up: mod id -> stamp. */
@@ -1048,17 +1068,14 @@ export function limitToSites(mod, sitesOn) {
 }
 
 // ---- site access ----------------------------------------------------------------------------
-// TRIF asks for no sites at install (the manifest's host permissions are all optional). Each browser has a
-// site mode (chrome.storage.local `siteMode`), which follows what the browser gives TRIF:
-// - permissive: <all_urls>, every site by default. Chosen on the setup page or in Settings (the browser's
-//   prompt, from the click); whoever installed TRIF when <all_urls> was required keeps it after the update
-//   (Chrome and Firefox keep a granted permission that moves to optional), so they're permissive.
-// - restrictive: TRIF asks per site. A site without the browser's access is disconnected (a first visit
-//   too); "Connect" in the side panel asks for that site's origin (siteOrigins), from the click, and turns
-//   it on. Declining the permissive prompt makes TRIF restrictive.
+// TRIF asks for no sites at install (the manifest's host permissions are all optional), and asks for each
+// site's when it's turned on there: a site without the browser's access is disconnected (a first visit
+// too); "Connect" (or Fix) in the side panel asks for that site's origin (siteOrigins), from the click, and
+// turns it on. TRIF never asks for every site. (Until 0.3 a "permissive" mode had <all_urls>: an update
+// gives that up once, background.js dropEverySite, and the sites keep their switches and ask again.)
 // A site in `sitesOn` counts only with access (activeSites), and never when it's blocked in TRIF
 // (`blockedSites`, TRIF's own list, whatever access it has). Safari asks per site itself and its build
-// keeps <all_urls> (scripts/build-extension.js), so there TRIF has no mode and doesn't ask or check.
+// keeps <all_urls> (scripts/build-extension.js), so there TRIF doesn't ask or check.
 
 export const SITE_ACCESS = !SAFARI;
 
@@ -1132,21 +1149,16 @@ export function sitesWithoutAccess(sitesOn, access) {
   return (sitesOn || []).filter((s) => !hasSiteAccess(access, s));
 }
 
-/** Permissive: <all_urls>, asked for from a click (nothing awaited before it). Resolves whether it was granted. */
-export function requestEverySite(chromeApi) {
-  return chromeApi.permissions.request({ origins: ['<all_urls>'] });
-}
-
-/** The mode TRIF is in: what the browser gives it decides; null before the user chose (and not given every site). */
-export function siteModeOf(stored, access) {
-  if (access?.all) return 'permissive';
-  return stored === 'permissive' || stored === 'restrictive' ? 'restrictive' : null;
+/** The granted origins that give TRIF every site (what an update from a permissive TRIF gives up, once). */
+export function everySiteOrigins(access) {
+  const every = new Set(['<all_urls>', '*://*/*', 'http://*/*', 'https://*/*']);
+  return (access?.origins || []).filter((o) => every.has(o));
 }
 
 // ---- a site's state in the side panel, and in what agents are told ---------------------------------
 // - on: in `sitesOn`, with access: TRIF works there.
 // - off: with access, not in `sitesOn` (the power button's off): turning it on again doesn't ask.
-// - disconnected: without the browser's access (restrictive): a first visit, or a site disconnected,
+// - disconnected: without the browser's access: a first visit, or a site disconnected,
 //   or one setup turned on that isn't connected yet. "Connect" asks and turns it on, in one click.
 // - blocked: in TRIF's block list (`blockedSites`): nothing from TRIF touches it, whatever access TRIF
 //   has (with <all_urls> one site can't be taken away in Chrome's own settings), and it can't be turned on.

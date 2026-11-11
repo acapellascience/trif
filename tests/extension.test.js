@@ -875,7 +875,12 @@ const TEST_SITES_ON = ['example.com', 'x.com', 'y.com', 'z.com'];
 // `sidePanel`: overrides of the chrome.sidePanel mock (whose open() resolves and shows nothing, as in Arc:
 // a test says a side panel loaded by emitting its panel.window), or false for none.
 async function loadBackground({ storage = {}, tabs = [], migrate = false, safari = false, windows = {}, scripting = {}, granted = ['<all_urls>'], permissions = true, sidePanel = {} } = {}) {
-  const store = structuredClone(migrate || 'sitesOn' in storage ? storage : { sitesOn: TEST_SITES_ON, ...storage });
+  // (perSiteOnly: past 0.3's one-time step that gives up every site's access, background.js dropEverySite: the
+  // fake browser gives every site by default, as the user's own choice in its settings; the tests of that step
+  // leave it out)
+  const base = migrate || 'sitesOn' in storage ? storage : { sitesOn: TEST_SITES_ON, ...storage };
+  const store = structuredClone('perSiteOnly' in base || base.__migrateAccess ? base : { perSiteOnly: true, ...base });
+  delete store.__migrateAccess;
   const ctl = { full: false, io: false, writes: [] }; // full: every storage write fails, like a full quota; io: like Safari's "Disk I/O error"; writes: the keys of each write
   const natives = [];
   const panelBehavior = [];
@@ -2134,7 +2139,7 @@ test('applyStartOff: a mod made in another browser is switched off once; own and
   assert.strictEqual(lib.applyStartOff(mods, {}, {}).changed, false, 'old 3-argument call: no foreign switching');
 });
 
-test('applyNewMods: with a group set to start off, its new mods arrive off, by source; the other group, and mods already here, untouched', () => {
+test('applyNewMods: a mod from outside this browser\'s chat arrives off, whatever its kind; the chat\'s own start on, or wait; mods already here untouched', () => {
   const page = (id, extra) => ({ id, ...extra });
   const rules = (id, extra) => ({ id, rules: true, ...extra });
   const here = { 'x.com/old': true, 'x.com/oldrules': true };
@@ -2148,93 +2153,113 @@ test('applyNewMods: with a group set to start off, its new mods arrive off, by s
     rules('x.com/style'),
     page('x.com/tims', { startOff: true }), // Tim's, shipped off: off already
   ];
-  const go = (startsOff, extra = {}) => lib.applyNewMods(mods, { disabled: { 'x.com/tims': true }, seen: here, autoUpdated: {}, newOff: {}, startsOff, installId: 'A', ...extra });
-  // Page scripts start off: the new page scripts from anywhere but here, not held ones, not rules.
-  let r = go(['page']);
-  assert.deepStrictEqual(r.disabled, { 'x.com/tims': true, 'x.com/terminal': true, 'x.com/other': true, 'x.com/late': true });
-  assert.deepStrictEqual(r.newOff, { 'x.com/terminal': 'new', 'x.com/other': 'new', 'x.com/late': 'new' });
+  const go = (extra = {}) => lib.applyNewMods(mods, { disabled: { 'x.com/tims': true }, seen: here, autoUpdated: {}, newOff: {}, installId: 'A', ...extra });
+  let r = go();
+  assert.deepStrictEqual(r.disabled, { 'x.com/tims': true, 'x.com/terminal': true, 'x.com/other': true, 'x.com/late': true, 'x.com/style': true });
+  assert.deepStrictEqual(r.newOff, { 'x.com/terminal': 'new', 'x.com/other': 'new', 'x.com/late': 'new', 'x.com/style': 'new' });
   assert.deepStrictEqual(Object.keys(r.seen).sort(), mods.map((m) => m.id).sort());
   // Once: seen now, so the user's switch after that is theirs.
-  const again = lib.applyNewMods(mods, { disabled: {}, seen: r.seen, autoUpdated: r.autoUpdated, newOff: r.newOff, startsOff: ['page'], installId: 'A' });
+  const again = lib.applyNewMods(mods, { disabled: {}, seen: r.seen, autoUpdated: r.autoUpdated, newOff: r.newOff, installId: 'A' });
   assert.strictEqual(again.changed, false);
-  // Rules start off: only the new rules mod.
-  assert.deepStrictEqual(go(['rules']).newOff, { 'x.com/style': 'new' });
-  // Both: everything new that isn't this browser's own or held.
-  assert.deepStrictEqual(Object.keys(go(['rules', 'page']).newOff).sort(), ['x.com/late', 'x.com/other', 'x.com/style', 'x.com/terminal']);
-  // Neither (the default): seen, nothing switched.
-  r = go([]);
-  assert.deepStrictEqual([r.disabled, r.newOff], [{ 'x.com/tims': true }, {}]);
+  // "Mods your chat makes: Wait for me": the chat's own waits too, marked as the chat's.
+  r = go({ chatWait: true });
+  assert.strictEqual(r.newOff['x.com/mine'], 'chat');
+  assert.strictEqual(r.disabled['x.com/mine'], true);
   // Without an install id, nothing counts as this browser's own.
-  assert.ok('x.com/mine' in lib.applyNewMods(mods, { seen: here, autoUpdated: {}, startsOff: ['page'] }).newOff);
+  assert.ok('x.com/mine' in lib.applyNewMods(mods, { seen: here, autoUpdated: {} }).newOff);
+});
+
+test('applyChatWaiting: with Wait for me, a change the chat made to a running mod waits; put back, changed from outside, or gone: it doesn\'t', () => {
+  const chat = { by: 'A', live: true };
+  const v1 = { id: 'x.com/a', hash: 'h1', origin: chat }, v2 = { id: 'x.com/a', hash: 'h2', origin: chat };
+  const opts = { installId: 'A', chatWait: true };
+  let r = lib.applyChatWaiting([v1], [v2], opts);
+  assert.deepStrictEqual(r, { waiting: { 'x.com/a': { old: v1 } }, changed: true });
+  // a further change keeps the version that was running
+  const v3 = { id: 'x.com/a', hash: 'h3', origin: chat };
+  assert.deepStrictEqual(lib.applyChatWaiting([v2], [v3], { ...opts, waiting: r.waiting }).waiting, { 'x.com/a': { old: v1 } });
+  // put back as it was (Undo)
+  assert.deepStrictEqual(lib.applyChatWaiting([v2], [v1], { ...opts, waiting: r.waiting }), { waiting: {}, changed: true });
+  // changed from outside the chat
+  assert.deepStrictEqual(lib.applyChatWaiting([v2], [{ id: 'x.com/a', hash: 'h9' }], { ...opts, waiting: r.waiting }).waiting, {});
+  // gone
+  assert.deepStrictEqual(lib.applyChatWaiting([v2], [], { ...opts, waiting: r.waiting }).waiting, {});
+  // Start on, a mod that's off, one on hold, or not the chat's: nothing waits
+  assert.strictEqual(lib.applyChatWaiting([v1], [v2], { installId: 'A' }).changed, false);
+  assert.strictEqual(lib.applyChatWaiting([v1], [v2], { ...opts, isOn: () => false }).changed, false);
+  assert.strictEqual(lib.applyChatWaiting([v1], [{ ...v2, held: {} }], opts).changed, false);
+  assert.strictEqual(lib.applyChatWaiting([v1], [{ ...v2, origin: { by: 'B', live: true } }], opts).changed, false);
 });
 
 test('applyNewMods: a browser that never stored what it saw takes its mods as seen; updates TRIF made itself and Tim\'s mods got back arrive again', () => {
   // From before this existed: nothing switched, everything remembered (stamps too).
-  let r = lib.applyNewMods([{ id: 'x.com/a', autoUpdated: 's1' }, { id: 'x.com/b' }], { seen: null, autoUpdated: null, startsOff: ['page'] });
+  let r = lib.applyNewMods([{ id: 'x.com/a', autoUpdated: 's1' }, { id: 'x.com/b' }], { seen: null, autoUpdated: null });
   assert.deepStrictEqual(r, { disabled: {}, seen: { 'x.com/a': true, 'x.com/b': true }, autoUpdated: { 'x.com/a': 's1' }, newOff: {}, changed: true });
   // A new version TRIF put in place by itself: off, as an update, once per stamp.
-  r = lib.applyNewMods([{ id: 'x.com/a', autoUpdated: 's2' }, { id: 'x.com/b' }], { seen: r.seen, autoUpdated: r.autoUpdated, startsOff: ['page'] });
+  r = lib.applyNewMods([{ id: 'x.com/a', autoUpdated: 's2' }, { id: 'x.com/b' }], { seen: r.seen, autoUpdated: r.autoUpdated });
   assert.deepStrictEqual([r.disabled, r.newOff, r.autoUpdated], [{ 'x.com/a': true }, { 'x.com/a': 'update' }, { 'x.com/a': 's2' }]);
-  // With page scripts starting on, the stamp is only remembered.
-  const on = lib.applyNewMods([{ id: 'x.com/a', autoUpdated: 's3' }], { seen: r.seen, autoUpdated: r.autoUpdated, startsOff: [] });
-  assert.deepStrictEqual([on.disabled, on.autoUpdated['x.com/a']], [{}, 's3']);
   // One of Tim's mods the user deleted and got back (a new `readded` stamp) arrives again.
-  const back = lib.applyNewMods([{ id: 'x.com/b', readded: 'r1' }], { seen: { 'x.com/b': true }, autoUpdated: {}, startsOff: ['page'], readded: {} });
+  const back = lib.applyNewMods([{ id: 'x.com/b', readded: 'r1' }], { seen: { 'x.com/b': true }, autoUpdated: {}, readded: {} });
   assert.deepStrictEqual(back.newOff, { 'x.com/b': 'new' });
-  assert.strictEqual(lib.applyNewMods([{ id: 'x.com/b', readded: 'r1' }], { seen: { 'x.com/b': true }, autoUpdated: {}, startsOff: ['page'], readded: { 'x.com/b': 'r1' } }).changed, false);
+  assert.strictEqual(lib.applyNewMods([{ id: 'x.com/b', readded: 'r1' }], { seen: { 'x.com/b': true }, autoUpdated: {}, readded: { 'x.com/b': 'r1' } }).changed, false);
   // A mod that's gone takes its reason with it.
-  const gone = lib.applyNewMods([], { seen: { 'x.com/b': true }, autoUpdated: {}, newOff: { 'x.com/b': 'new' }, startsOff: ['page'] });
+  const gone = lib.applyNewMods([], { seen: { 'x.com/b': true }, autoUpdated: {}, newOff: { 'x.com/b': 'new' } });
   assert.deepStrictEqual(gone.newOff, {});
-  assert.deepStrictEqual(lib.normalizeStartsOff(['page', 'page', 'nope', 'rules']), ['rules', 'page']);
-  assert.deepStrictEqual(lib.normalizeStartsOff('page'), []);
   assert.deepStrictEqual(lib.normalizeNewOff({ a: 'new', b: 'update', c: true }), { a: 'new', b: 'update' });
 });
 
-test('background: new mods start on or off by group (Settings); an agent run can\'t switch one on, the user can, and that clears why it was off', async () => {
+test('background: a mod from outside the chat starts off; an agent run can\'t switch one on, the user can, and that clears why it was off; Wait for me keeps the chat\'s waiting', async () => {
   const tabs = [{ id: 5, windowId: 1, active: true, url: 'https://x.com/home' }];
-  const bg = await loadBackground({ storage: { sitesOn: ['x.com'], installId: 'A', mods: [mod('x.com/old')], modIds: ['x.com/old'] }, tabs });
+  const bg = await loadBackground({ storage: { sitesOn: ['x.com'], installId: 'A', mods: [mod('x.com/old')], modIds: ['x.com/old'], startsOff: ['page'] }, tabs });
   try {
     const panel = bg.connectPanel();
     bg.native.emit({ type: 'mods', mods: [mod('x.com/old')] });
     await settle(20);
     assert.deepStrictEqual(bg.store.seenMods, { 'x.com/old': true }, 'what was there is seen, nothing switched');
-    assert.deepStrictEqual((await panel.ask({ type: 'status' })).result.startsOff, []);
-    // The user sets page scripts to start off.
-    const set = await panel.ask({ type: 'mods.startsOff', group: 'page', off: true });
-    assert.deepStrictEqual(set.result, { startsOff: ['page'] });
-    assert.deepStrictEqual(bg.store.startsOff, ['page']);
-    assert.match((await panel.ask({ type: 'mods.startsOff', group: 'nope', off: true })).error, /unknown group/);
-    // A terminal agent's page script and a rules mod arrive; and one this browser's panel chat made.
+    assert.strictEqual(bg.store.startsOff, undefined, 'the old setting is gone');
+    assert.strictEqual((await panel.ask({ type: 'status' })).result.chatWait, false);
+    // A terminal agent's page script and a style mod arrive; and one this browser's panel chat made.
     bg.native.emit({ type: 'mods', mods: [mod('x.com/old'), mod('x.com/new'), mod('x.com/style', { rules: true }), mod('x.com/chat', { origin: { by: 'A', browser: 'Chrome', live: true } })] });
     await settle(30);
-    assert.deepStrictEqual(bg.store.disabled, { 'x.com/new': true });
-    assert.deepStrictEqual(bg.store.newOff, { 'x.com/new': 'new' });
+    assert.deepStrictEqual(bg.store.disabled, { 'x.com/new': true, 'x.com/style': true });
+    assert.deepStrictEqual(bg.store.newOff, { 'x.com/new': 'new', 'x.com/style': 'new' });
     assert.ok(!scriptIds(bg).includes('x.com/new'), 'never registered');
-    assert.ok(scriptIds(bg).includes('x.com/style') && scriptIds(bg).includes('x.com/chat') && scriptIds(bg).includes('x.com/old'));
+    assert.ok(scriptIds(bg).includes('x.com/chat') && scriptIds(bg).includes('x.com/old'));
     const st = (await panel.ask({ type: 'status' })).result;
     assert.strictEqual(st.mods.find((m) => m.id === 'x.com/new').newOff, 'new');
-    assert.strictEqual(st.mods.find((m) => m.id === 'x.com/style').newOff, null);
+    assert.strictEqual(st.mods.find((m) => m.id === 'x.com/chat').newOff, null);
     const cli = (await bg.native.call('status')).result;
-    assert.deepStrictEqual(cli.startsOff, ['page']);
     assert.strictEqual(cli.mods.find((m) => m.id === 'x.com/new').newOff, 'new');
     // A side-panel run (scoped) can't switch it on; the user can.
     const refused = await bg.native.call('mod.enable', { id: 'x.com/new', enabled: true, scope: 'x.com' });
     assert.strictEqual(refused.ok, false);
-    assert.match(refused.error, /new and switched off until the user looks at it[\s\S]*only the user can switch it on/);
+    assert.match(refused.error, /switched off until the user looks at it[\s\S]*only the user can switch it on/);
     assert.ok(!scriptIds(bg).includes('x.com/new'));
     const on = await panel.ask({ type: 'mod.enable', id: 'x.com/new', enabled: true });
     assert.ok(on.ok, on.error);
     assert.ok(scriptIds(bg).includes('x.com/new'));
-    assert.deepStrictEqual(bg.store.newOff, {});
+    assert.deepStrictEqual(bg.store.newOff, { 'x.com/style': 'new' });
     // Off again later: the user's own switch, not "new".
     await panel.ask({ type: 'mod.enable', id: 'x.com/new', enabled: false });
     assert.strictEqual((await panel.ask({ type: 'status' })).result.mods.find((m) => m.id === 'x.com/new').newOff, null);
-    // Back to on: new page scripts start on again; mods already here keep their switches.
-    await panel.ask({ type: 'mods.startsOff', group: 'page', off: false });
-    bg.native.emit({ type: 'mods', mods: [mod('x.com/old'), mod('x.com/new'), mod('x.com/style', { rules: true }), mod('x.com/chat', { origin: { by: 'A', live: true } }), mod('x.com/later')] });
+    // Wait for me: a new one of the chat's is off, marked; a change to one running waits, the version before registered
+    const set = await panel.ask({ type: 'mods.chatWait', wait: true });
+    assert.deepStrictEqual(set.result, { chatWait: true });
+    assert.strictEqual(bg.store.chatWait, true);
+    const live = { by: 'A', browser: 'Chrome', live: true };
+    const base = [mod('x.com/old'), mod('x.com/new'), mod('x.com/style', { rules: true })];
+    const v1 = mod('x.com/chat', { origin: live });
+    const v2 = { ...mod('x.com/chat', { origin: live }), code: 'document.title = "two";', hash: 'changed-hash' };
+    bg.native.emit({ type: 'mods', mods: [...base, v2, mod('x.com/chat2', { origin: live })] });
     await settle(30);
-    assert.deepStrictEqual(bg.store.disabled, { 'x.com/new': true });
-    assert.ok(scriptIds(bg).includes('x.com/later'));
+    assert.strictEqual(bg.store.newOff['x.com/chat2'], 'chat');
+    assert.ok(!scriptIds(bg).includes('x.com/chat2'));
+    assert.strictEqual(bg.store.chatWaiting['x.com/chat'].old.hash, v1.hash);
+    const w = (await panel.ask({ type: 'status' })).result.mods.find((m) => m.id === 'x.com/chat');
+    assert.strictEqual(w.chatWaiting, true);
+    // turned on: the change runs, nothing waits
+    assert.ok((await panel.ask({ type: 'mod.enable', id: 'x.com/chat', enabled: true })).ok);
+    assert.deepStrictEqual(bg.store.chatWaiting, {});
   } finally {
     bg.restore();
   }
@@ -2722,7 +2747,8 @@ test('applyReadded: one of Tim\'s mods deleted and added again is switched as li
 
 test('background: Tim\'s mods by site come with the mods; the panel\'s choice goes to the helper, and a site\'s tab reloads when one now runs there', async () => {
   const tabs = [{ id: 5, windowId: 1, active: true, url: 'https://x.com/home' }];
-  const bg = await loadBackground({ storage: { sitesOn: [] }, tabs });
+  // (one already seen, so it isn't off for being new: Tim's own arrive off, and then nothing runs to reload for)
+  const bg = await loadBackground({ storage: { sitesOn: [], seenMods: { 'x.com/a': true }, autoUpdated: {} }, tabs });
   try {
     const panel = bg.connectPanel();
     const starter = (choice) => ({ chosen: !!choice, sites: [{ site: 'x.com', name: 'X', note: '', choice, suggested: true, mods: [{ id: 'x.com/a', name: 'A', description: '', on: true, choice: choice === 'added' ? 'added' : null }] }] });
@@ -2819,21 +2845,19 @@ test('readAccess: chrome.permissions.getAll, or everything where TRIF doesn\'t c
 
 const PER_SITE = (...sites) => lib.originsFor(sites);
 
-test('siteState / siteRefusal / siteModeOf: on, off, disconnected, blocked, in the panel\'s words; the mode follows the grant', () => {
+test('siteState / siteRefusal / everySiteOrigins: on, off, disconnected, blocked, in the panel\'s words; what gives every site', () => {
   const access = lib.normalizeAccess({ origins: PER_SITE('x.com', 'off.com') });
   const ctx = { sitesOn: ['x.com', 'gone.com'], access, blocked: ['bank.com'] };
   assert.deepStrictEqual(['x.com', 'off.com', 'gone.com', 'new.com', 'bank.com'].map((x) => lib.siteState(x, ctx)),
     ['on', 'off', 'disconnected', 'disconnected', 'blocked']);
   assert.strictEqual(lib.siteState('bank.com', { ...ctx, access: lib.ALL_ACCESS, sitesOn: ['bank.com'] }), 'blocked', 'whatever the access');
-  assert.strictEqual(lib.siteState('anything.org', { access: lib.ALL_ACCESS }), 'off', 'permissive: never disconnected');
+  assert.strictEqual(lib.siteState('anything.org', { access: lib.ALL_ACCESS }), 'off', 'every site given: never disconnected');
   assert.strictEqual(lib.siteRefusal('x.com', 'on'), null);
   assert.match(lib.siteRefusal('a.com', 'off'), /^TRIF is off on a\.com: .*turns it on/);
   assert.match(lib.siteRefusal('a.com', 'disconnected'), /^TRIF is disconnected on a\.com: .*until the user connects it/);
   assert.match(lib.siteRefusal('a.com', 'blocked'), /^a\.com is blocked in TRIF: .*only the user can unblock it/);
-  assert.strictEqual(lib.siteModeOf(null, lib.ALL_ACCESS), 'permissive', 'an update that kept <all_urls>');
-  assert.strictEqual(lib.siteModeOf('permissive', access), 'restrictive', '<all_urls> taken back');
-  assert.strictEqual(lib.siteModeOf('restrictive', access), 'restrictive');
-  assert.strictEqual(lib.siteModeOf(null, access), null, 'not chosen yet');
+  assert.deepStrictEqual(lib.everySiteOrigins(lib.normalizeAccess({ origins: ['<all_urls>', '*://*/*', ...PER_SITE('x.com')] })), ['*://*/*', '<all_urls>']);
+  assert.deepStrictEqual(lib.everySiteOrigins(access), []);
 });
 
 test('background: restrictive: a site without the browser\'s access is disconnected (on or not): no mods, no page commands, no chats, said why', async () => {
@@ -2848,7 +2872,7 @@ test('background: restrictive: a site without the browser\'s access is disconnec
     r = await bg.native.call('text', { tab: 6 });
     assert.strictEqual(r.error, lib.siteRefusal('bank.com', 'disconnected'));
     r = await bg.native.call('status');
-    assert.deepStrictEqual([r.result.sitesOn, r.result.disconnected, r.result.blockedSites, r.result.access.all, r.result.siteMode], [['bank.com', 'x.com'], ['bank.com'], [], false, null]);
+    assert.deepStrictEqual([r.result.sitesOn, r.result.disconnected, r.result.blockedSites, r.result.access.all, 'siteMode' in r.result], [['bank.com', 'x.com'], ['bank.com'], [], false, false]);
     assert.strictEqual(r.result.mods.find((m) => m.id === 'bank.com/b').sitesOff, true);
     const panel = bg.connectPanel();
     const st = (await panel.ask({ type: 'status' })).result;
@@ -2908,34 +2932,50 @@ test('background: restrictive: Connect needs the browser\'s OK; off keeps it (on
   } finally { bg.restore(); }
 });
 
-test('background: the mode follows the grant: <all_urls> is permissive (an update too); restrictive from the panel gives every site back, no prompt', async () => {
-  const bg = await loadBackground({ storage: { mods: [mod('bank.com/a')], sitesOn: ['bank.com'] }, tabs: GATE_TABS, granted: ['<all_urls>', ...PER_SITE('x.com')] });
+test('background: an update from a TRIF with every site gives that up once: the sites keep their switches and ask again, the panel says so once; after that, every site in the browser\'s settings is left alone', async () => {
+  // a permissive 0.2 TRIF: siteMode kept, <all_urls> granted, plus one site granted on its own
+  const bg = await loadBackground({ storage: { mods: [mod('bank.com/a'), mod('x.com/b')], sitesOn: ['bank.com', 'x.com'], siteMode: 'permissive', __migrateAccess: true }, tabs: GATE_TABS, granted: ['<all_urls>', ...PER_SITE('x.com')] });
   try {
-    await settle(20);
-    assert.strictEqual(bg.store.siteMode, 'permissive', 'kept <all_urls> from an update: permissive');
-    assert.deepStrictEqual(scriptIds(bg), [lib.RUNTIME_ID, 'bank.com/a']);
-    const panel = bg.connectPanel();
-    // Permissive: a single site can't be disconnected (blocking is TRIF's way there).
-    let r = await panel.ask({ type: 'site.disconnect', site: 'bank.com' });
-    assert.deepStrictEqual([r.ok, r.error], [false, "TRIF is permissive (every site), so one site can't be disconnected: switch to restrictive mode first"]);
-    r = await panel.ask({ type: 'site.mode', mode: 'restrictive' });
-    assert.deepStrictEqual(r.result, { siteMode: 'restrictive' });
-    assert.deepStrictEqual([bg.perms.origins, bg.store.siteMode, scriptIds(bg)], [[], 'restrictive', []]);
-    const st = (await panel.ask({ type: 'status' })).result;
-    assert.deepStrictEqual([st.siteMode, st.disconnected, st.access.all], ['restrictive', ['bank.com'], false]);
-    // Permissive again: the page's prompt said yes; the mode follows.
-    bg.perms.grant(['<all_urls>']);
     await settle(30);
-    assert.deepStrictEqual([bg.store.siteMode, scriptIds(bg)], ['permissive', [lib.RUNTIME_ID, 'bank.com/a']]);
-    // Declined at setup: the page records restrictive (nothing to give back).
-    const bg2 = await loadBackground({ storage: { sitesOn: [] }, granted: [] });
-    try {
-      const p2 = bg2.connectPanel();
-      assert.strictEqual((await p2.ask({ type: 'status' })).result.siteMode, null);
-      await p2.ask({ type: 'site.mode', mode: 'restrictive' });
-      assert.deepStrictEqual([bg2.store.siteMode, bg2.perms.removed], ['restrictive', []]);
-    } finally { bg2.restore(); }
+    assert.deepStrictEqual(bg.perms.removed, [['<all_urls>']]);
+    assert.deepStrictEqual([bg.store.perSiteOnly, bg.store.accessNote, 'siteMode' in bg.store, bg.store.sitesOn], [true, true, false, ['bank.com', 'x.com']]);
+    // (x.com, granted on its own, still runs; bank.com is on but disconnected until it's connected again)
+    assert.deepStrictEqual(scriptIds(bg), [lib.RUNTIME_ID, 'x.com/b']);
+    const panel = bg.connectPanel();
+    let st = (await panel.ask({ type: 'status' })).result;
+    assert.deepStrictEqual([st.accessNote, st.disconnected, st.access.all], [true, ['bank.com'], false]);
+    await panel.ask({ type: 'siteAccess.noteSeen' });
+    st = (await panel.ask({ type: 'status' })).result;
+    assert.deepStrictEqual([st.accessNote, bg.store.accessNote], [false, false]);
+    // (the mode's message is gone)
+    const r = await panel.ask({ type: 'site.mode', mode: 'restrictive' });
+    assert.strictEqual(r.ok, false);
   } finally { bg.restore(); }
+  // <all_urls> from when it was required (no siteMode): the same, once
+  const bg2 = await loadBackground({ storage: { sitesOn: ['bank.com'], __migrateAccess: true }, granted: ['<all_urls>'] });
+  try {
+    await settle(30);
+    assert.deepStrictEqual([bg2.perms.removed, bg2.store.accessNote], [[['<all_urls>']], true]);
+  } finally { bg2.restore(); }
+  // after that (perSiteOnly): every site in the browser's own settings stays, until Disconnect on a site: then
+  // the every-site grant goes, that site is off, the others keep their switches and ask again, the same note
+  const bg3 = await loadBackground({ storage: { sitesOn: ['bank.com', 'x.com'] }, tabs: GATE_TABS, granted: ['<all_urls>'] });
+  try {
+    await settle(30);
+    assert.deepStrictEqual([bg3.perms.removed, bg3.store.accessNote], [[], undefined]);
+    const panel3 = bg3.connectPanel();
+    const r = await panel3.ask({ type: 'site.disconnect', site: 'bank.com' });
+    assert.deepStrictEqual(r.result, { site: 'bank.com', disconnected: true, droppedEverySite: true });
+    assert.deepStrictEqual([bg3.perms.origins, bg3.store.sitesOn, bg3.store.accessNote], [[], ['x.com'], true]);
+    const st = (await panel3.ask({ type: 'status' })).result;
+    assert.deepStrictEqual([st.accessNote, st.disconnected, st.access.all], [true, ['x.com'], false]);
+  } finally { bg3.restore(); }
+  // a fresh TRIF (nothing given): nothing to give up, no note
+  const bg4 = await loadBackground({ storage: { sitesOn: [], __migrateAccess: true }, granted: [] });
+  try {
+    await settle(30);
+    assert.deepStrictEqual([bg4.perms.removed, bg4.store.perSiteOnly, bg4.store.accessNote], [[], true, undefined]);
+  } finally { bg4.restore(); }
 });
 
 test('background: the block list keeps TRIF off a site whatever its access: mods, page commands, screenshots, runs, turning on', async () => {
@@ -3220,11 +3260,9 @@ test('sandboxed mods: their own group, between rules and page scripts; as page s
   assert.deepStrictEqual(g, { 'x.com': ['sandboxed'] });
   assert.deepStrictEqual(lib.offSitesFor(mod('a/b', { sandboxed: true }), {}, g), ['x.com']);
   assert.deepStrictEqual(lib.offSitesFor(mod('a/b'), {}, g), []);
-  assert.deepStrictEqual(lib.normalizeStartsOff(['sandboxed', 'bogus', 'page']), ['sandboxed', 'page']);
-  // new sandboxed mods start off when that's the setting, and only those
-  const m1 = mod('a/one', { sandboxed: true }), m2 = mod('a/two');
-  const nw = lib.applyNewMods([m1, m2], { seen: {}, autoUpdated: {}, startsOff: ['sandboxed'] });
-  assert.deepStrictEqual(nw.newOff, { 'a/one': 'new' });
+  // new boxed mods start off, as every mod from outside the chat
+  const m1 = mod('a/one', { sandboxed: true });
+  assert.deepStrictEqual(lib.applyNewMods([m1], { seen: {}, autoUpdated: {} }).newOff, { 'a/one': 'new' });
 });
 
 test('sandboxFallback: without the sandbox a sandboxed mod waits for the user\'s OK, then runs as a page script; never silently', async () => {
@@ -3328,4 +3366,60 @@ test('background: "Agent on this site" gates every agent command by the tab\'s s
     await panel.ask({ type: 'agentSensitive.set', list: null });
     assert.strictEqual(bg.store.sensitiveSites, null);
   } finally { bg.restore(); }
+});
+
+test('background: mods that break: a new error gets a card in the site\'s chat once, Ignore hides it; selectors that stop matching flag the mod; Fix it\'s prompt; Just flag it adds no card', async () => {
+  globalThis.__trifHealthDelays = [5, 15];
+  const tabs = [{ id: 5, windowId: 1, index: 0, active: true, url: 'https://example.com/feed' }];
+  const page = { errors: [], logs: [], matched: {} };
+  const executeScript = async ({ func }) => {
+    if (func.name === 'healthOfPage') { const p = structuredClone(page); page.errors = []; page.logs = []; return [{ result: p }]; }
+    return [{ result: null }];
+  };
+  const mods = [mod('example.com/hider', { name: 'Hider', matches: ['*://example.com/*'], hash: 'h1' }), mod('example.com/styler', { name: 'Styler', matches: ['*://example.com/*'], rules: true, selectors: ['#feed'], hash: 's1' })];
+  const bg = await loadBackground({ storage: { sitesOn: ['example.com'], mods }, tabs, scripting: { executeScript } });
+  const load = async () => { bg.chrome.tabs.onUpdated.emit(5, { status: 'complete' }); await new Promise((r) => setTimeout(r, 40)); await settle(20); };
+  const cards = () => (bg.store['chat:example.com']?.messages || []).filter((m) => m.kind === 'modError');
+  const boom = (n) => ({ mod: 'example.com/hider', message: `Cannot read properties of null (reading 'x') on item ${n}`, stack: 'TypeError\n    at trif://example.com/hider.js:4:2', time: Date.now() + n });
+  try {
+    bg.native.emit({ type: 'mods', mods });
+    await settle(20);
+    page.errors = [boom(1)];
+    page.matched = { 'example.com/styler': true };
+    page.logs = [{ mod: 'example.com/hider', level: 'log', args: ['looking for posts'], time: Date.now() }];
+    await load();
+    assert.deepStrictEqual(cards().map((c) => [c.mod, c.text, c.line]), [['example.com/hider', 'Hider has a new error on example.com. Want me to fix it?', 3]]);
+    const panel = bg.connectPanel();
+    let st = (await panel.ask({ type: 'status' })).result;
+    assert.deepStrictEqual(st.mods.find((m) => m.id === 'example.com/hider').broken.map((b) => [b.message, b.line, b.count]), [["Cannot read properties of null (reading 'x') on item 1", 3, 1]]);
+    // (the same error again, on another item: no second card)
+    page.errors = [boom(2)];
+    await load();
+    assert.strictEqual(cards().length, 1);
+    // Fix it: the prompt carries the file, the error and the logs
+    const fix = await panel.ask({ type: 'modError.fix', id: 'example.com/hider', fp: cards()[0].fp, site: 'example.com', url: 'https://example.com/feed' });
+    assert.match(fix.result.prompt, /sites\/example\.com\/hider\.js[\s\S]*Cannot read properties of null[\s\S]*- log: looking for posts/);
+    // Ignore
+    assert.strictEqual((await panel.ask({ type: 'modError.dismiss', id: 'example.com/hider', fp: cards()[0].fp })).ok, true);
+    st = (await panel.ask({ type: 'status' })).result;
+    assert.deepStrictEqual(st.mods.find((m) => m.id === 'example.com/hider').broken, []);
+    assert.strictEqual(cards()[0].done, 'ignored');
+    page.errors = [boom(3)];
+    await load();
+    assert.strictEqual(cards().length, 1);
+    // the style mod's selectors stop matching: three loads, then the card
+    page.matched = { 'example.com/styler': false };
+    await load(); await load();
+    assert.strictEqual(cards().length, 1);
+    await load();
+    assert.deepStrictEqual(cards().map((c) => c.text)[1], 'Styler may be broken on example.com: nothing it looks for is on the page any more. Want me to fix it?');
+    // Just flag it: the row's badge, no card
+    await panel.ask({ type: 'modError.onBreak', value: 'flag' });
+    page.errors = [{ ...boom(4), message: 'another failure' }];
+    await load();
+    assert.strictEqual(cards().length, 2);
+    st = (await panel.ask({ type: 'status' })).result;
+    assert.strictEqual(st.onBreak, 'flag');
+    assert.ok(st.mods.find((m) => m.id === 'example.com/hider').broken.some((b) => b.message === 'another failure'));
+  } finally { delete globalThis.__trifHealthDelays; bg.restore(); }
 });

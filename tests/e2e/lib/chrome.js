@@ -53,8 +53,8 @@ const icons = {};
 const setIcon = chrome.action.setIcon.bind(chrome.action);
 chrome.action.setIcon = (d, done) => new Promise((res) => setIcon(d, () => {
   const failed = chrome.runtime.lastError; // (read here: a tab closed meanwhile)
-  if (!failed && d && d.tabId != null) {
-    icons[d.tabId] = (d.path && (d.path[16] || d.path)) || 'imageData';
+  if (!failed && d) {
+    icons[d.tabId != null ? d.tabId : 'default'] = (d.path && (d.path[16] || d.path)) || 'imageData'; // (no tab: the default icon)
     chrome.storage.session.set({ e2eIcons: { ...icons } });
   }
   if (done) done();
@@ -364,6 +364,14 @@ class ChromeDriver {
   }
 
   /** The page's prefers-color-scheme: 'light', 'dark', or '' for the system's. */
+  /** The page's viewport (CSS px), as a shorter side panel would be; null puts it back. */
+  async viewport(ctx, size) {
+    const sid = await this._attach(ctx);
+    if (size) await this.cdp.send('Emulation.setDeviceMetricsOverride', { width: size.width, height: size.height, deviceScaleFactor: 0, mobile: false }, sid);
+    else await this.cdp.send('Emulation.clearDeviceMetricsOverride', {}, sid);
+    return true;
+  }
+
   async colorScheme(ctx, value) {
     const sid = await this._attach(ctx);
     await this.cdp.send('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-color-scheme', value: value || '' }] }, sid);

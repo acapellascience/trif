@@ -35,15 +35,31 @@ function revealCommand(file, how = 'folder', platform = process.platform) {
   throw new Error(`TRIF doesn't know how to open folders on ${platform}`);
 }
 
-/** Opens it (detached: the helper doesn't wait for Finder). Returns what ran. */
-function reveal(modsDir, mods, id, how = 'folder', { platform = process.platform, env = process.env } = {}) {
-  const file = modFile(modsDir, mods, id);
-  const [cmd, args] = revealCommand(file, how === 'editor' ? 'editor' : 'folder', platform);
+function launch(cmd, args, env) {
   const stub = envVar('REVEAL_CMD', env);
   const child = stub ? spawn(stub, [cmd, ...args], { detached: true, stdio: 'ignore' }) : spawn(cmd, args, { detached: true, stdio: 'ignore' });
   child.on('error', () => { /* (no xdg-open, say: nothing opens; the panel can't tell) */ });
   child.unref();
+}
+
+/** Opens it (detached: the helper doesn't wait for Finder). Returns what ran. */
+function reveal(modsDir, mods, id, how = 'folder', { platform = process.platform, env = process.env } = {}) {
+  const file = modFile(modsDir, mods, id);
+  const [cmd, args] = revealCommand(file, how === 'editor' ? 'editor' : 'folder', platform);
+  launch(cmd, args, env);
   return { id: String(id).trim(), how: how === 'editor' ? 'editor' : 'folder', file: path.relative(path.resolve(modsDir), file) };
 }
 
-module.exports = { modFile, revealCommand, reveal };
+/**
+ * The same for a path the helper made itself (an export in the downloads folder, a site's files folder),
+ * never one from a message: shown in its folder, or with `open`, a folder opened.
+ */
+function revealPath(p, how = 'folder', { open = false, platform = process.platform, env = process.env } = {}) {
+  let cmd, args;
+  if (open) [cmd, args] = platform === 'darwin' ? ['open', [p]] : platform === 'win32' ? ['explorer.exe', [p]] : ['xdg-open', [p]];
+  else [cmd, args] = revealCommand(p, how, platform);
+  launch(cmd, args, env);
+  return { shown: p };
+}
+
+module.exports = { modFile, revealCommand, reveal, revealPath };

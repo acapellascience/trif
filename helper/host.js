@@ -26,7 +26,8 @@ const { scanMods, buildMod, planMods, planModsMessage, modsParts, withSame, fold
 const { Runs } = require('./lib/runs');
 const { Logins } = require('./lib/logins');
 const agents = require('./lib/agents');
-const { updateHeld, approveHeld, rejectHeld, lastRun, heldFile, reviewItems, reviewMod } = require('./lib/held');
+const { updateHeld, approveHeld, rejectHeld, lastRun, heldFile, reviewItems, reviewMod, powersFor } = require('./lib/held');
+const { powerInfo } = require('./lib/boxpowers');
 const history = require('./lib/history');
 const { DEFAULT_ORDER, startOffIds, startSitesOn, pendingUpdates, useNewVersion, keepMine, mergeRequest, mergeSettled, restoreMod, absorbedIds,
   starterOffer, installStarter, chooseNoStarter, resolveSites, resolveIds, readdedIds, autoUpdatedIds } = require('./lib/preinstalled');
@@ -280,6 +281,7 @@ function syncMods(reason, force) {
   // What mods the user has can do that they haven't seen yet (held.js reviewItems): the panel asks once.
   try { state.review = reviewItems(ws.home, mods, state.held); } catch (e) { logger.error(`mods to review: ${e.message}`); state.review = {}; }
   const origins = trackOrigins(mods);
+  const importedIds = require('./lib/share').loadImported(ws.home);
   // Held mods still go to the extension (the panel lists them with an Allow button), marked so they aren't
   // registered. Preinstalled mods are marked startOff: the extension switches them off when it first sees them.
   const startOff = startOffIds(ws.home);
@@ -309,14 +311,17 @@ function syncMods(reason, force) {
       : h ? { ...m, held: info }
       : r ? { ...m, review: { facts: r.facts, needs: r.needs || [], claim: r.claim } } : m;
     const o = origins[m.id];
-    const withOrigin = o ? { ...out, origin: { by: o.by, browser: o.browser, ...(o.live ? { live: true } : {}) } } : out;
+    const withOrigin0 = o ? { ...out, origin: { by: o.by, browser: o.browser, ...(o.live ? { live: true } : {}) } } : out;
+    const withOrigin = importedIds[m.id] ? { ...withOrigin0, imported: true } : withOrigin0; // (lib/share.js importMod)
     const withUpdate = updates[m.id] ? { ...withOrigin, update: updates[m.id] } : withOrigin;
     const withAbsorbs = absorbed[m.id] ? { ...withUpdate, absorbs: absorbed[m.id] } : withUpdate;
     const withReadded0 = readded[m.id] ? { ...withAbsorbs, readded: readded[m.id] } : withAbsorbs;
     const withReadded = autoUpdated[m.id] ? { ...withReadded0, autoUpdated: autoUpdated[m.id] } : withReadded0;
     // A sandboxed mod: what its code could do as a page script, for a browser without TRIF's sandbox, which
     // holds it until the user allows that (extension/lib.js sandboxFallback)
-    const withFacts = m.sandboxed ? { ...withReadded, pageFacts: pageFactsOf(m) } : withReadded;
+    // (and for the row and code card: a boxed mod's powers in words; what TRIF read in a free mod's code)
+    const withFacts = m.sandboxed ? { ...withReadded, pageFacts: pageFactsOf(m), powerInfo: powerInfo(m) }
+      : m.rules ? withReadded : { ...withReadded, found: [...new Set(powersFor(m).map((p) => String(p.key).split(':')[0]))] };
     return startOff.has(m.id) ? { ...withFacts, startOff: true } : withFacts;
   });
   // Sites TRIF starts on for (preinstalled.json): each browser turns each one on the first time it sees it.
@@ -487,7 +492,8 @@ function onRunRequest(run, line, respond) {
 }
 const logins = new Logins({ getWorkspace: () => workspace(ws.home), logger, onEvent: onAgentEvent });
 const runSubscribers = new Map(); // runId or loginId -> Set of CLI sockets that started it (see onClientLine)
-const AGENT_COMMANDS = new Set(['mod.reveal', 'agent.list', 'agent.start', 'agent.stop', 'agent.running', 'agent.login', 'agent.loginCode', 'agent.loginCancel', 'mod.approve', 'mod.reject', 'mod.review', 'mod.undo', 'mod.history',
+const AGENT_COMMANDS = new Set(['mod.historyCode', 'mod.historyDiff', 'mod.historyRestore', 'mod.export', 'mod.exportSite', 'mod.import',
+  'files.add', 'files.begin', 'files.slice', 'files.end', 'files.abort', 'files.list', 'files.remove', 'files.reveal', 'mod.reveal', 'agent.list', 'agent.start', 'agent.stop', 'agent.running', 'agent.login', 'agent.loginCode', 'agent.loginCancel', 'mod.approve', 'mod.reject', 'mod.review', 'mod.undo', 'mod.history',
   'mod.update', 'instructions.get', 'instructions.set', 'agent.models', 'agent.openModel', 'agent.openModel.set', 'agent.openModel.setKey', 'agent.openModel.removeKey', 'update.check', 'update.install', 'update.setAuto', 'report.build',
   'shipped.install', 'shipped.none']);
 // Helper-local too, but a run may use them (on mods inside its scope; see lib/trash.js).
@@ -663,8 +669,64 @@ function agentCommand(cmd, args) {
       return r;
     }
     case 'mod.history': {
-      return { id: String(args.id ?? ''), entries: history.listHistory(workspace(ws.home), String(args.id ?? '')).map((e) => ({ at: e.at, kind: e.kind })) };
+      return { id: String(args.id ?? ''), entries: history.listHistory(workspace(ws.home), String(args.id ?? '')).map((e) => ({ at: e.at, stamp: e.stamp, kind: e.kind, source: e.source })) };
     }
+    // The code card's History (lib/history.js): a kept version's text, its diff with the current one, and
+    // putting it back (the current one kept too; the next sync judges it like any change from outside)
+    case 'mod.historyCode': {
+      const id = String(args.id ?? '').trim();
+      const code = history.entryText(workspace(ws.home), id, String(args.stamp ?? ''));
+      return { id, stamp: String(args.stamp ?? ''), code: code.slice(0, 200000), truncated: code.length > 200000 };
+    }
+    case 'mod.historyDiff': {
+      const id = String(args.id ?? '').trim();
+      const m = state.mods.find((x) => x.id === id);
+      if (!m) throw new Error(`no mod ${id || '(no id)'}`);
+      const { lineDiff } = require('./lib/diff');
+      return { id, lines: lineDiff(history.entryText(workspace(ws.home), id, String(args.stamp ?? '')), m.text ?? m.code) };
+    }
+    case 'mod.historyRestore': {
+      const r = history.restoreEntry(workspace(ws.home), String(args.id ?? ''), String(args.stamp ?? ''));
+      logger.info(`restored ${r.id} to its version from ${r.restored}`);
+      syncMods('restore', false);
+      return r;
+    }
+    // Export (lib/share.js): the mod's file, or a site's, copied to the downloads folder and shown there
+    case 'mod.export': {
+      const share = require('./lib/share');
+      const r = share.exportMod(ws, state.mods, String(args.id ?? ''));
+      require('./lib/reveal').revealPath(r.file, 'folder');
+      logger.info(`exported ${r.id} to ${r.file}`);
+      return { id: r.id, file: path.basename(r.file), dir: path.dirname(r.file) };
+    }
+    case 'mod.exportSite': {
+      const share = require('./lib/share');
+      const r = share.exportSite(ws, state.mods, String(args.site ?? ''));
+      require('./lib/reveal').revealPath(r.dir, 'folder');
+      logger.info(`exported ${r.ids.length} mod(s) of ${r.site} to ${r.dir}`);
+      return { site: r.site, dir: path.basename(r.dir), ids: r.ids };
+    }
+    // Import (lib/share.js): a mod's text from a file the user chose or dropped; written as from outside, so
+    // the next sync holds it like any (held.js), and marked imported
+    case 'mod.import': {
+      const r = require('./lib/share').importMod(ws, { text: String(args.text ?? ''), name: String(args.name ?? ''), site: String(args.site ?? ''), choice: String(args.choice ?? '') });
+      if (r.id) { logger.info(`imported ${r.id}${r.replaced ? ' (the one before is in its history)' : ''}`); syncMods('import', false); }
+      return r.file ? { ...r, file: path.relative(ws.home, r.file) } : r;
+    }
+    // A site's files (lib/share.js): bytes and a name, never a path; data for the site's mods and runs
+    case 'files.add': {
+      const r = require('./lib/share').addFile(ws, { site: String(args.site ?? ''), name: String(args.name ?? ''), bytes: Buffer.from(String(args.data ?? ''), 'base64') });
+      logger.info(`added ${r.rel} (${r.size} bytes)`);
+      return r;
+    }
+    // (a file of any size, in slices: lib/share.js fileBegin)
+    case 'files.begin': return require('./lib/share').fileBegin(ws, { site: String(args.site ?? ''), name: String(args.name ?? ''), size: args.size });
+    case 'files.slice': return require('./lib/share').fileSlice(ws, { id: args.id, offset: args.offset, bytes: Buffer.from(String(args.data ?? ''), 'base64') });
+    case 'files.end': { const r = require('./lib/share').fileEnd(ws, { id: args.id }); logger.info(`added ${r.rel} (${r.size} bytes)`); return r; }
+    case 'files.abort': return require('./lib/share').fileAbort(ws, { id: args.id });
+    case 'files.list': return { site: String(args.site ?? ''), files: require('./lib/share').listFiles(ws, String(args.site ?? '')) };
+    case 'files.remove': return require('./lib/share').removeFile(ws, String(args.site ?? ''), String(args.name ?? ''));
+    case 'files.reveal': return require('./lib/share').revealFiles(ws, String(args.site ?? '')) && { site: String(args.site ?? ''), shown: true };
     case 'mod.code': {
       // The panel's code viewer and "Show code": the mod's file as TRIF read it, capped for the panel. A style
       // mod: its rules (the file), not the code TRIF makes of them. `version: 'ran'`: a mod with a change

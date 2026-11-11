@@ -18,16 +18,16 @@ const trash = require('./lib/trash');
 const shipped = require('./lib/preinstalled');
 
 // Inside a side-panel agent run (the helper set TRIF_RUN_TOKEN) these are the user's alone.
-const NOT_IN_RUNS = new Set(['setup', 'agent', 'approve', 'reject', 'mod-update', 'undo', 'reveal']);
+const NOT_IN_RUNS = new Set(['setup', 'agent', 'approve', 'reject', 'mod-update', 'undo', 'reveal', 'export', 'import', 'add']);
 
 // Output piped into something that stops reading early (`trif tabs | head -1`) isn't an error.
 process.stdout.on('error', (e) => { if (e.code === 'EPIPE') process.exit(0); throw e; });
 
 const VALUE_FLAGS = new Set(['--tab', '--url', '-o', '--out', '--output', '--filter', '--limit', '-f', '--file',
   '--browser', '--home', '--native-dir', '--bin-dir', '--timeout', '--agent', '--session', '--model', '--site', '--auto',
-  '--provider', '--base-url', '--key-env', '--selector', '--color', '--text', '--tolerance']);
+  '--provider', '--base-url', '--key-env', '--selector', '--color', '--text', '--tolerance', '--to']);
 const BOOL_FLAGS = new Set(['--json', '--hard', '--help', '-h', '--force', '--page', '--rules', '--sandboxed', '--style', '--boxed', '--no-link', '--examples', '--no-examples', '--copy', '--link', '--install', '--open',
-  '--use-new', '--keep', '--merged', '--set-key', '--remove-key', '--scroll', '--full', '--verbose', '-v', '--no-wait', '--editor']);
+  '--use-new', '--keep', '--merged', '--set-key', '--remove-key', '--scroll', '--full', '--verbose', '-v', '--no-wait', '--editor', '--replace', '--as-copy']);
 // Flags with a value that may be left out (`--examples` alone, or `--examples x.com,google.com`).
 const OPTIONAL_VALUE_FLAGS = new Set(['--examples']);
 const ALIASES = { '--out': '-o', '--output': '-o', '--file': '-f', '-h': '--help', '-v': '--verbose' };
@@ -336,13 +336,11 @@ const handlers = {
       const name = GROUP_NAMES;
       lines.push(`GROUPS OFF    ${Object.entries(st.groupsOff).map(([site, gs]) => `${gs.map((g) => name[g] || g).join(' and ')} off on ${site}`).join('; ')} (the user's choice, in the side panel: those mods don't run there)`);
     }
-    if (st && Array.isArray(st.startsOff) && st.startsOff.length) {
-      const name = GROUP_NAMES;
-      lines.push(`NEW MODS      new ${st.startsOff.map((g) => name[g] || g).join(' and ')} start off in this browser (the user's setting, in the side panel's Settings), except ones made in its side panel`);
-    }
+    if (st && st.chatWait) lines.push('CHAT MODS     wait for the user: what the side panel\'s chat makes or changes runs only once they turn it on');
     if (st && st.sandbox === false) lines.push(`NO SANDBOX    ${st.browser || 'this browser'} can't run boxed mods: each waits for the user's OK (in the side panel) to run as a free mod instead`);
     // Sandboxed mods as the extension runs them: in TRIF's sandbox, or ('page') as page scripts
     const sandboxedAs = new Map(((st && st.mods) || []).filter((m) => m.sandboxed).map((m) => [m.id, m.sandboxed]));
+    const brokenMods = new Map(((st && st.mods) || []).filter((m) => Array.isArray(m.broken) && m.broken.length).map((m) => [m.id, m.broken]));
     const boxPowers = new Map(((st && st.mods) || []).filter((m) => Array.isArray(m.powers) && m.powers.length).map((m) => [m.id, m.powers]));
     const sandboxHeld = new Map(((st && st.mods) || []).filter((m) => m.held && m.held.by === 'sandbox').map((m) => [m.id, m.held]));
     if (st && st.paused) lines.push('PAUSED        every mod is paused in this browser (the user\'s choice, in the side panel\'s Settings): nothing runs until they resume');
@@ -352,7 +350,7 @@ const handlers = {
       if (helperErrors.has(id)) s = `NOT SENT: ${helperErrors.get(id)}`;
       else if (held[id]) s = `${(info.pending || []).includes(id) ? 'CHANGE WAITING (the version before runs meanwhile)' : 'HELD'}: ${require('./lib/boxpowers').factLines(held[id].needs, held[id].facts || [held[id].reason]).join('; ')} (trif approve ${id}, or trif reject ${id})`;
       else if (sandboxHeld.has(id)) s = `WAITING: ${sandboxHeld.get(id).facts[0]}; only the user can allow that, in the side panel`;
-      else if (off.has(id)) s = newOff.has(id) ? `off (${newOff.get(id) === 'update' ? 'updated by TRIF' : 'new'}: waiting for the user to look at it)` : shipsOff.has(id) ? 'off (as TRIF ships it)' : 'off';
+      else if (off.has(id)) s = newOff.has(id) ? `off (${newOff.get(id) === 'update' ? 'updated by TRIF' : newOff.get(id) === 'chat' ? 'made by the chat' : 'new'}: waiting for the user to look at it)` : shipsOff.has(id) ? 'off (as TRIF ships it)' : 'off';
       else if (sitesOff.has(id)) s = 'waiting: TRIF is off on its site';
       else if (applyErrors.has(id)) s = `NOT REGISTERED: ${applyErrors.get(id)}`;
       else if (!st) s = '?';
@@ -361,12 +359,13 @@ const handlers = {
       if (sandboxedAs.has(id) && !sandboxHeld.has(id)) s += sandboxedAs.get(id) === 'page' ? ' (boxed mod, run as a free mod: the user allowed it, as this browser has no sandbox)' : boxPowers.get(id) ? ` (boxed, powers: ${boxPowers.get(id).join(', ')})` : ' (boxed)';
       if (offSites.has(id) && !off.has(id)) s += ` (off on ${offSites.get(id).join(', ')})`;
       if (updates[id]) s += `; ${updateText(updates[id])}`;
+      if (brokenMods.has(id)) s += `; ${brokenText(brokenMods.get(id))}`;
       if (review[id]) s += `; TO REVIEW: ${require('./lib/boxpowers').factLines(review[id].needs, review[id].facts).join('; ')} (trif approve ${id} when that's fine)`;
       lines.push(`  ${pad(id, 40)} ${s}`);
     }
     for (const [id, err] of helperErrors) if (!ids.includes(id)) lines.push(`  ${pad(id, 40)} NOT SENT: ${err}`);
     if ([...off].some((id) => !shipsOff.has(id) && !newOff.has(id))) lines.push('              off = switched off by the user (trif enable <id> turns one back on)');
-    if (newOff.size) lines.push('              off (new) = new mods of its kind start off in this browser (the user\'s setting); only the user switches it on, in the side panel or trif enable <id> in their terminal');
+    if (newOff.size) lines.push('              off (new) = it came from outside the chat, so it started off; only the user switches it on, in the side panel or trif enable <id> in their terminal');
     if ([...off].some((id) => shipsOff.has(id))) lines.push('              off (as TRIF ships it) = a mod TRIF comes with, off until switched on (trif enable <id>)');
     if (Object.keys(held).length) lines.push('              HELD = new or changed, and it can do things the user hasn\'t allowed (TRIF read them from its code); not running until the user approves it');
     if (Object.keys(review).length) lines.push('              TO REVIEW = can do things the user hasn\'t seen yet (TRIF read them from its code); it runs meanwhile');
@@ -374,13 +373,8 @@ const handlers = {
     if (sitesOff.size) lines.push('              waiting = not running until the user turns TRIF on for the site, or connects it (side panel)');
     if (st && Array.isArray(st.sitesOn)) {
       lines.push(`sites on      ${st.sitesOn.length ? st.sitesOn.join(', ') : '(none)'}; TRIF is off everywhere else: no mods, no page commands`);
-      // Permissive (every site by default) or restrictive (the user connects TRIF site by site), and TRIF's own
-      // block list (extension/lib.js "site access"). Only the user changes either, in the side panel.
-      if (st.siteMode) {
-        lines.push(st.siteMode === 'permissive'
-          ? 'site mode     permissive: access to every site by default; each site still follows its switch'
-          : 'site mode     restrictive: TRIF is disconnected on every site the user hasn\'t connected (side panel on the site)');
-      }
+      // The sites the user hasn't connected (TRIF asks for each site's permission), and TRIF's own block list
+      // (extension/lib.js "site access"). Only the user changes either, in the side panel.
       if (Array.isArray(st.disconnected) && st.disconnected.length) {
         lines.push(`disconnected  ${st.disconnected.join(', ')}: on, but TRIF is disconnected there until the user connects it (side panel on the site)`);
       }
@@ -460,6 +454,10 @@ const handlers = {
         if (clicks.length && !asked.includes('click')) throw new bp.PowersError('@click lines are for a mod with the click power (@powers click)');
         if (asked.includes('click') && !clicks.length) throw new bp.PowersError('the click power needs what it may click: // @click the play button: button.play');
         if (clicks.length) askedArgs.click = clicks;
+        const events = bp.parseEvents(header.events);
+        if (events.length) askedArgs.events = events;
+        const migrate = bp.parseMigrate(header.migrate);
+        if (migrate.length) askedArgs.migrate = migrate;
       } catch (e) {
         if (ctx.json) printJson({ ok: false, error: e.message }); else out(`${path.resolve(file)}: ${e.message}`);
         process.exitCode = 1;
@@ -715,6 +713,46 @@ const handlers = {
     out(`${r.how === 'editor' ? 'opened' : 'showed'} ${r.file}${r.how === 'editor' ? '' : ` in ${process.platform === 'darwin' ? 'Finder' : 'its folder'}`}`);
   },
 
+  // Sharing (lib/share.js), all without the browser: a mod's file to the downloads folder (or --to), a mod
+  // from a file into the sites folder (held like any from outside), a site's files.
+  async export(ctx, pos) {
+    if (!pos[0]) throw new UsageError('usage: trif export <site>/<mod> [--to <dir>]');
+    const share = require('./lib/share');
+    const { scanMods } = require('./lib/mods');
+    const r = share.exportMod(ctx.ws, scanMods(ctx.ws.modsDir).mods, modId(pos[0]), { to: ctx.opts['--to'] || null });
+    if (ctx.json) return printJson(r);
+    out(`exported ${r.id} to ${r.file}`);
+  },
+
+  async import(ctx, pos) {
+    if (!pos[0]) throw new UsageError('usage: trif import <file> [--site <site>] [--replace | --as-copy]');
+    const file = path.resolve(pos[0]);
+    let text;
+    try { text = fs.readFileSync(file, 'utf8'); } catch (e) { throw new UsageError(`can't read ${pos[0]}: ${e.message}`); }
+    const r = require('./lib/share').importMod(ctx.ws, { text, name: path.basename(file), site: ctx.opts['--site'] || '', choice: ctx.opts['--replace'] ? 'replace' : ctx.opts['--as-copy'] ? 'copy' : '' });
+    if (ctx.json) return printJson(r);
+    if (r.needsSite) throw new UsageError(`which site is it for? Its @match lines ${r.needsSite.length ? `name ${r.needsSite.join(', ')}` : 'don\'t say'}: add --site <site>`);
+    if (r.exists) throw new UsageError(`${r.exists} is there already: add --as-copy to add it beside it, or --replace (the one there is kept in its history)`);
+    out(`imported ${r.id}${r.replaced ? ' (the one before is in its history: trif history)' : ''}; like any mod from outside, it waits for the user's OK if its code can do more than change the page`);
+  },
+
+  async files(ctx, pos) {
+    if (!pos[0]) throw new UsageError('usage: trif files <site>');
+    const list = require('./lib/share').listFiles(ctx.ws, pos[0]);
+    if (ctx.json) return printJson(list);
+    if (!list.length) return out(`(no files for ${pos[0]}: the user adds them by dropping them on the side panel, or trif add <file> --site ${pos[0]})`);
+    for (const f of list) out(`sites/${pos[0]}/files/${f.name}  ${f.size} bytes`);
+  },
+
+  async add(ctx, pos) {
+    if (!pos[0] || !ctx.opts['--site']) throw new UsageError('usage: trif add <file> --site <site>');
+    let bytes;
+    try { bytes = fs.readFileSync(path.resolve(pos[0])); } catch (e) { throw new UsageError(`can't read ${pos[0]}: ${e.message}`); }
+    const r = require('./lib/share').addFile(ctx.ws, { site: ctx.opts['--site'], name: path.basename(pos[0]), bytes });
+    if (ctx.json) return printJson(r);
+    out(`added ${r.rel} (${r.size} bytes): data for ${r.site}'s mods and its side-panel runs, never run as a mod`);
+  },
+
   async undo(ctx, pos) {
     if (!pos[0]) throw new UsageError('usage: trif undo <site>/<mod>');
     const r = require('./lib/history').undoChange(ctx.ws, modId(pos[0])); // (works without the browser; the helper picks the change up)
@@ -865,7 +903,7 @@ const handlers = {
     const { mods, problems, warnings } = scanMods(ctx.ws.modsDir);
     const plan = planMods(mods);
     const errors = [...problems, ...plan.errors];
-    const { enabled, offSites, newOff } = await knownSwitches(ctx);
+    const { enabled, offSites, newOff, broken } = await knownSwitches(ctx);
     const held = loadHeld(ctx.ws.home);
     const isHeld = (m) => held[m.id] && held[m.id].hash === m.hash;
     const updates = shipped.pendingUpdates(ctx.ws.home, mods);
@@ -875,7 +913,7 @@ const handlers = {
         modsDir: ctx.ws.modsDir,
         mods: mods.map(({ code, ...m }) => ({
           ...m, ...(enabled.has(m.id) ? { enabled: enabled.get(m.id) } : {}), ...(offSites.has(m.id) ? { offSites: offSites.get(m.id) } : {}),
-          ...(newOff.has(m.id) ? { newOff: newOff.get(m.id) } : {}),
+          ...(newOff.has(m.id) ? { newOff: newOff.get(m.id) } : {}), ...(broken.has(m.id) ? { broken: broken.get(m.id) } : {}),
           ...(isHeld(m) ? { held: held[m.id] } : {}), ...(updates[m.id] ? { update: updates[m.id] } : {}),
         })),
         errors,
@@ -890,12 +928,13 @@ const handlers = {
     const errById = new Map(errors.map((e) => [e.id, e.error]));
     for (const m of mods) {
       out(m.id + (m.name !== path.basename(m.file, '.js') ? `  (${m.name})` : '') + (enabled.get(m.id) === false ? '  [off]' : ''));
-      if (enabled.get(m.id) === false && newOff.has(m.id)) out(`  off: ${newOff.get(m.id) === 'update' ? 'TRIF updated it, and' : 'new, and'} new mods of its kind start off in this browser (the user's setting); not running until the user switches it on after looking at it (side panel, or trif enable ${m.id} in their terminal)`);
+      if (enabled.get(m.id) === false && newOff.has(m.id)) out(`  off: it came from outside the chat (or TRIF updated it), so it started off; not running until the user switches it on after looking at it (side panel, or trif enable ${m.id} in their terminal)`);
       else if (enabled.get(m.id) === false && shipsOff.has(m.id)) out(`  off, as TRIF ships it (not running; trif enable ${m.id} turns it on)`);
       else if (enabled.get(m.id) === false) out(`  switched off by the user (not running; trif enable ${m.id} turns it on)`);
       else if (offSites.has(m.id)) out(`  switched off by the user on ${offSites.get(m.id).join(', ')} (trif enable ${m.id} --site <site> turns it back on there)`);
       if (isHeld(m)) out(`  HELD: ${held[m.id].by === 'outside' ? 'new or changed since TRIF last let it run' : `a side-panel agent wrote it while working on ${held[m.id].site}`}, and TRIF found that ${require('./lib/boxpowers').factLines(held[m.id].needs, held[m.id].facts || [held[m.id].reason]).join('; ')}. Not running until the user approves it (trif approve ${m.id}).`);
       if (updates[m.id]) out(`  ${updateText(updates[m.id])}: trif mod-update ${m.id}`);
+      if (broken.has(m.id)) out(`  ${brokenText(broken.get(m.id))}`);
       if (m.description) out(`  ${m.description}`);
       if (m.rules) out('  kind: style mod (data TRIF runs; never waits for the user\'s OK)');
       else if (m.sandboxed) out(m.powers && m.powers.length ? `  kind: boxed mod with powers: ${m.powers.join(', ')} (runs in TRIF's sandbox, with only TRIF's API and those powers; waits for the user's OK once for that set)`
@@ -1045,6 +1084,17 @@ async function switchMod(ctx, pos, enabled) {
 
 // When the extension can be asked: {enabled: Map(mod id → enabled), offSites: Map(mod id → sites it's
 // off on)}. Otherwise (no helper, no answer) both empty.
+// A mod's new errors (extension/modhealth.js), in a line: "NEW ERROR at line 12: x is not a function", or
+// "MAY BE BROKEN: nothing it looks for is on the page any more"; `trif errors --tab` has them in full.
+function brokenText(list) {
+  const quiet = list.filter((b) => b.quiet);
+  const errs = list.filter((b) => !b.quiet);
+  const parts = [];
+  if (errs.length) parts.push(`NEW ERROR${errs.length > 1 ? `S (${errs.length})` : ''}${errs[0].line ? ` at line ${errs[0].line}` : ''}: ${String(errs[0].message).slice(0, 160)}`);
+  if (quiet.length) parts.push('MAY BE BROKEN: nothing it looks for is on the page any more');
+  return `${parts.join('; ')} (trif errors --tab <id> for the details; the user can ignore it in the side panel)`;
+}
+
 async function knownSwitches(ctx) {
   try {
     const st = await ctx.call('status', { timeout: 2000 }, 3000);
@@ -1053,9 +1103,10 @@ async function knownSwitches(ctx) {
       enabled: new Map(mods.map((m) => [m.id, m.enabled !== false])),
       offSites: new Map(mods.filter((m) => Array.isArray(m.offSites) && m.offSites.length).map((m) => [m.id, m.offSites])),
       newOff: new Map(mods.filter((m) => m.newOff).map((m) => [m.id, m.newOff])),
+      broken: new Map(mods.filter((m) => Array.isArray(m.broken) && m.broken.length).map((m) => [m.id, m.broken])),
     };
   } catch {
-    return { enabled: new Map(), offSites: new Map(), newOff: new Map() };
+    return { enabled: new Map(), offSites: new Map(), newOff: new Map(), broken: new Map() };
   }
 }
 

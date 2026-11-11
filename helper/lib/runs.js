@@ -569,6 +569,7 @@ class Runs {
       url: typeof args.url === 'string' ? args.url : '',
       tabId: args.tabId === undefined || args.tabId === null || args.tabId === '' ? null : args.tabId,
       agentLevel: ['off', 'look', 'run', 'ask'].includes(args.agentLevel) ? args.agentLevel : null, // ("Agent on this site", from the panel)
+      fix: args.fix === true, // (a run Fix it started: its changes are kept in history as a fix's)
       sessionId: typeof args.sessionId === 'string' && args.sessionId ? checkWord(args.sessionId, 'session id') : null,
       model: typeof args.model === 'string' && args.model.trim() ? checkWord(args.model.trim(), 'model name') : null,
       // codex-oss: this run's provider choice over config.json's (agents/codex-oss.js resolve).
@@ -927,7 +928,7 @@ class Runs {
     // What it changed, kept for undo (history/), named in `done` for the chat's Undo line
     let undoable = [];
     if (run.beforeContents && changedFiles.length) {
-      try { undoable = history.recordChanges(run.ws, run.beforeContents, changedFiles); } catch (e) { this.logger.warn(`couldn't keep run ${run.id}'s changes for undo: ${e.message}`); }
+      try { undoable = history.recordChanges(run.ws, run.beforeContents, changedFiles, run.fix ? 'fix' : 'chat'); } catch (e) { this.logger.warn(`couldn't keep run ${run.id}'s changes for undo: ${e.message}`); }
     }
     const d = run.agentDone;
     let done;

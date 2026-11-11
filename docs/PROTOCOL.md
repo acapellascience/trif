@@ -163,7 +163,7 @@ logs it and exits (the extension reconnects to a fresh one) instead of misreadin
 mod: what its code could do as a free mod (helper/lib/powers.js facts), for a browser without the sandbox;
 `update`: a newer version of this shipped mod is waiting, see "Updates to shipped mods"; `autoUpdated`: a stamp
 when TRIF itself replaced the user's unchanged copy of a shipped mod with a new version, kept while the copy is
-that version (`preinstalled.json` `shipped.<id>.auto`, `autoUpdatedIds`), see "New mods start on or off".)
+that version (`preinstalled.json` `shipped.<id>.auto`, `autoUpdatedIds`), see "Mods from outside the chat start off".)
 
 The extension keeps the mods it last had in `chrome.storage.local`, one per key: **`mod:<id>`** = the Mod,
 and **`modIds`** = their ids in order, so it can apply them before the helper connects. Only the mods that
@@ -272,7 +272,7 @@ Without one, the target is the active tab of the last-focused normal window.
 
 | cmd | args | result |
 |---|---|---|
-| `status` | optional tab selector | `{userScripts, chrome, version, mods:[{id, registered, enabled}], recording:[sites]}` (`enabled: false` = switched off, see below); with a tab selector also `page: {tab, url, mods:[{id, name, runAt}]}`, the mods that run on that tab's page |
+| `status` | optional tab selector | `{userScripts, chrome, version, mods:[{id, registered, enabled}], recording:[sites]}` (`enabled: false` = switched off, see below); with a tab selector also `page: {tab, url, mods:[{id, name, runAt}]}`, the mods that run on that tab's page. A mod with new errors (extension/modhealth.js) has `broken: [{message, line, count, quiet?}]` (`quiet`: "may be broken", nothing it looks for is on the page any more); `trif status` and `trif mods` say so |
 | `tabs` | – | `[{id, windowId, active, url, title}]` (normal windows only) |
 | `run` | `code`, `expression: bool`, `timeout` (ms, default 10000) + tab selector | `{value}`: the code's result, made JSON-safe in the page (see below), or an error `{ok:false, error:"<message + stack>"}` |
 | `reload` | `hard: bool` + tab selector | `{url}` after the tab's `status` is `complete` (timeout 30 s) |
@@ -310,27 +310,19 @@ is enforced, for everyone:
 - **Updating.** A profile without `sitesOn` (from before) starts with the sites of its switched-on mods
   (not all-sites ones) and the sites it has chats for (`sitesInUse`).
 
-### Site access: permissive or restrictive
+### Site access: per site
 
 The manifest asks for no sites at install: `"optional_host_permissions": ["<all_urls>"]`, no
 `host_permissions`. So the install prompt says nothing about websites ("site access" in `extension/lib.js`).
+TRIF asks for each site's permission when it's turned on there (Fix, Connect), and never for every site.
+(Until 0.3 there was a choice, chrome.storage.local `siteMode`: "permissive", `<all_urls>`, or
+"restrictive", per site. It's gone: see "Updating from a TRIF with every site" below.)
 
-- **The mode**, per browser, chrome.storage.local **`siteMode`**: `permissive` (TRIF has `<all_urls>`: every
-  site by default) or `restrictive` (TRIF asks per site); unset until chosen. It follows the grant
-  (`siteModeOf`, kept in step on every `permissions.onAdded`/`onRemoved`): `<all_urls>` is permissive (an
-  update from when it was required too), losing it is restrictive.
-- **Choosing it.** The setup page's step "Site permissions", and Settings → Site permissions in the panel:
-  "Permissive" ("access to every site by default") calls `permissions.request({origins: ["<all_urls>"]})`
-  from the click; granted, permissive. Declined: restrictive (the setup page records it with
-  `{type: "site.mode", mode: "restrictive"}` and says so under the ticked step; Settings says TRIF stays
-  restrictive). "Restrictive" ("connect TRIF on a site-to-site basis") sends `site.mode` restrictive: no
-  prompt; from permissive, every origin TRIF has is given back (`permissions.remove`), so every site is
-  disconnected until it's connected again. Not in Safari.
 - **A site's state** (`siteState`, the same words in the panel and in what agents are told, `siteRefusal`):
   - **on**: in `sitesOn`, with access. TRIF works there.
   - **off**: with access, not in `sitesOn` (the power button, the robot in the bar). Turning it on again
     doesn't ask the browser anything: a quick before and after. Agents get `TRIF is off on <site>: …`.
-  - **disconnected** (restrictive): no access to the site, a first visit included, and the sites setup turns
+  - **disconnected**: no access to the site, a first visit included, and the sites setup turns
     on (`sitesOn`) until they're connected. The panel is all grey: "TRIF is disconnected on <site>" and
     "Connect", which requests `*://*.<site>/*` (`siteOrigins`; just the address for an IP) from the click,
     before anything else (Chrome needs a user gesture; Firefox allows nothing awaited before it), then
@@ -338,18 +330,18 @@ The manifest asks for no sites at install: `"optional_host_permissions": ["<all_
     get `TRIF is disconnected on <site>: … until the user connects it …`; `agent.start`, `TRIF is
     disconnected on <site>: connect it first`. `site.set` on checks the access again and refuses without it.
   - **blocked**: in TRIF's block list (below): the panel red, "The robot is blocked on <site>" and "Unblock".
-- **The off screen's links**, under Fix, in both modes: "Block on <site>" (title and accessible description
-  "Add to TRIF's block list": `site.block`, below) and "Disconnect from <site>" ("Disable browser
-  permissions"; not in Safari). Restrictive: `{type: "site.disconnect", site, tab}`: out of `sitesOn`, runs
-  stopped, `permissions.remove` of its origin, so disconnected (grey). Permissive: one site can't be taken
-  out of `<all_urls>`, so a card opens in the panel (a `<dialog>`; × and Escape close it, doing nothing):
-  "All-site access is on", "You'll have to allow TRIF again on other sites." and "Switch to restrictive
-  mode", which sends `site.mode` restrictive: every site's access goes, and this site (and every other) is
-  disconnected. `site.disconnect` itself refuses under `<all_urls>`.
+- **The off screen's links**, under Fix: "Block on <site>" (title and accessible description "Add to TRIF's
+  block list": `site.block`, below) and "Disconnect from <site>" ("Disable browser permissions"; not in
+  Safari): `{type: "site.disconnect", site, tab}`: out of `sitesOn`, runs stopped, `permissions.remove` of
+  its origin, so disconnected (grey). When the browser gives TRIF every site (in its own settings), the
+  every-site grant goes too (as the update's step does): every other site keeps its switch and asks again,
+  `accessNote` shows the same one-time note, and the result has `droppedEverySite: true`.
+- **The power button** in the bar (and the robot, the same switch) shows on "The robot is off." too, to turn
+  it on from there; it's hidden when the site is disconnected (Connect) or blocked (Unblock).
 - **The block list**, chrome.storage.local **`blockedSites`** (registrable domains, like `sitesOn`): TRIF's
   own way to keep off a site whatever access it has. `{type: "site.block", site, blocked: bool, tab}` from
   the panel only ("Block on <site>" on the off screen, "Unblock" on the red screen, an "Unblock" per site in Settings →
-  Site permissions → Blocked sites). Blocking: out of `sitesOn`, runs stopped, the site's own origin given
+  Blocked sites). Blocking: out of `sitesOn`, runs stopped, the site's own origin given
   back (a no-op under `<all_urls>`), mods re-synced. Then nothing of TRIF's runs there or reads it:
   `<site> is blocked in TRIF: …` for page commands and screenshots, `<site> is blocked in TRIF` for
   `agent.start`, and `site.set` on is refused (`… unblock it first.`). Nothing in the CLI or the protocol
@@ -357,23 +349,25 @@ The manifest asks for no sites at install: `"optional_host_permissions": ["<all_
 - **Which sites count.** The sites TRIF works on are `sitesOn` ∩ access − `blockedSites` (`onSites()` in
   background.js), and everything (mods, the runtime, recording, page commands, `tabs`, the in-page guard,
   `agent.start`, `status`'s `sitesOff`) goes by them. `status` and the panel's status carry `sitesOn`,
-  `siteMode`, `disconnected` (the sites on without access), `blockedSites` and `access` (`{all, allUrls,
-  origins}`); the panel's status `siteAccess` (false in Safari). `trif status` prints `site mode`,
-  `disconnected` and `blocked`.
-- **Taken back** in the browser's settings: `permissions.onAdded`/`onRemoved` re-read the access (and the
-  mode), re-sync the mods and stop runs on sites that lost it. The site stays in `sitesOn`, so connecting
+  `disconnected` (the sites on without access), `blockedSites` and `access` (`{all, allUrls, origins}`); the
+  panel's status `siteAccess` (false in Safari) and `accessNote` (below). `trif status` prints `disconnected`
+  and `blocked`.
+- **Taken back** in the browser's settings: `permissions.onAdded`/`onRemoved` re-read the access, re-sync the mods and stop runs on sites that lost it. The site stays in `sitesOn`, so connecting
   it brings it back as it was.
 - **The browser's own blocked sites** (Chrome's "Don't allow extensions on these sites") don't show in
   `chrome.permissions`: `contains` still says yes there (checked in Chrome 156), so TRIF can't tell; the
   browser refuses TRIF's injections there.
-- **Updating from `<all_urls>` required.** Chrome and Firefox keep a granted permission when an update moves
-  it from required to optional (Chromium bounds the stored active permissions by required ∪ optional,
-  `PermissionsManager::GetBoundedExtensionDesiredPermissions`; Firefox migrates them, its
-  `test_ext_permissions_migrate.js`; checked in Chrome for Testing 156 by loading a build with
-  `host_permissions: ["<all_urls>"]`, then the same profile with it optional: `permissions.getAll()` still
-  has `<all_urls>`). So those users are permissive (Settings → Site permissions → Restrictive narrows it).
+- **Updating from a TRIF with every site** (0.2's permissive mode, or `<all_urls>` kept from when it was
+  required: Chrome and Firefox keep a granted permission an update moves to optional). On its first start
+  after the update, TRIF gives that up once (background.js `dropEverySite`: `permissions.remove` of
+  `<all_urls>`, `*://*/*`, `http://*/*`, `https://*/*`, whichever it has), deletes `siteMode`, and records
+  `perSiteOnly: true`. The sites keep their switches (`sitesOn`); one granted on its own stays connected, the
+  rest are disconnected until each is connected again (the panel's Connect). It sets `accessNote: true`, and
+  the panel shows a one-time line ("TRIF now asks for each site's permission. …" with OK:
+  `{type: "siteAccess.noteSeen"}`). After that, every site given in the browser's own settings is the user's
+  choice, and TRIF leaves it.
 - **Safari** keeps `host_permissions: ["<all_urls>"]` (it asks per site itself, whatever the manifest
-  says); TRIF has no mode there, doesn't ask or check, and no site is disconnected. The block list works there too
+  says); TRIF doesn't ask or check there, and no site is disconnected. The block list works there too
   (the off screen offers "Block on <site>").
 - **Screenshots.** A site's own access isn't enough for `captureVisibleTab` (Chrome wants `<all_urls>` or
   `activeTab`) or Firefox's `captureTab` (`<all_urls>`, and only in pages loaded while TRIF had it: given
@@ -426,21 +420,23 @@ reloads the tab and greys the group's rows; `status` reports `groupsOff` when no
 `GROUPS OFF`). Panel only: there's no CLI or agent command for it, so an agent run can't switch page
 scripts back on for a site the user turned them off on.
 
-**New mods start on or off.** For each group, the user chooses in Settings whether its new mods start on (the
-default, as before; Boxed mods too) or off: `chrome.storage.local` **`startsOff`** = the groups set to start off (`["page"]`;
-`normalizeStartsOff`). The panel sends `{type: "mods.startsOff", group, off}`; panel only, like the groups'
-switches. It counts from then on: mods already there keep their switches. On each `mods` message
+**Mods from outside the chat start off.** There's no setting for it. On each `mods` message
 (`applyNewMods` in lib.js, after `applyStartOff` and `applyReadded`), a mod arrives when its id isn't in
 **`seenMods`** (id → true, every mod this browser has seen; a browser without it, from before, takes all its
 mods as seen), when its `readded` stamp is new, or when its `autoUpdated` stamp isn't the one in
-**`autoUpdated`** (id → stamp). An arriving mod of a group set to start off is switched off (`disabled`) and
-recorded in **`newOff`** = `{"<id>": "new"|"update"}`, unless it was made in this browser's own side panel
-(`origin.by` is this install and `origin.live`: its file was written while that run was going, between the
-run's start and its end; a file that only appeared in the moments after, which origins.js also counts for the
-run, could be anyone's: the user asked for the run's, and the agent checks it running) or is held (it waits
-for the user's OK anyway, and allowing it is looking at it). A renamed file keeps both. Switching the mod on
-clears its `newOff`; from an agent run, `mod.enable` refuses to switch one on. `status` reports `startsOff`
-when non-empty and `newOff` on such a mod while it's off (`trif status`: `NEW MODS`, `off (new)`).
+**`autoUpdated`** (id → stamp). An arriving mod is switched off (`disabled`) and recorded in **`newOff`** =
+`{"<id>": "new"|"update"|"chat"}`, unless it was made in this browser's own side panel (`origin.by` is this
+install and `origin.live`: its file was written while that run was going, between the run's start and its
+end; a file that only appeared in the moments after, which origins.js also counts for the run, could be
+anyone's) or is held (it waits for the user's OK anyway, and allowing it is looking at it). A renamed file
+keeps both. Switching the mod on clears its `newOff`; from an agent run, `mod.enable` refuses to switch one
+on. A stored `startsOff`, from the setting there used to be, is removed.
+
+**Mods your chat makes.** `chrome.storage.local` **`chatWait`** (true: Settings' "Wait for me"; the panel sends
+`{type: "mods.chatWait", wait}`; panel only). With it, a mod the chat makes arrives off too (`newOff` `"chat"`),
+and a change the chat makes to a mod that's running waits: **`chatWaiting`** = `{"<id>": {old: <the Mod as it
+was>}}` (`applyChatWaiting`), the version before stays registered until the user turns this one on
+(`mod.enable`, which clears it). `status` reports `chatWait`, and `chatWaiting` on the mod.
 
 **Boxed mods.** A Mod with `sandboxed: true` (header `@sandboxed`) never waits for the user's OK for
 its code: the helper's holds (held.js) find nothing in it, as for a style mod (a side-panel run's is still
@@ -463,7 +459,7 @@ held for an `@match` outside the run's site, or `@risk 2`). The extension:
   `{"<mod id>": {"<site>": {"<key>": "<JSON>"}}}`: the world's runtime asks with
   `runtime.sendMessage({trifSandbox: "settings.get"|"settings.save", mod, key, json?})`
   (`onUserScriptMessage`); the site is the one the browser says the sender's page is on (`scopeFor`), at
-  most 64 KB per mod per site and 200 sites per mod. Mods never have `chrome`: the runtime takes
+  most 1 MB per mod per site (all its keys), 8 MB for all the boxed mods on a site, and 200 sites per mod. Mods never have `chrome`: the runtime takes
   `sendMessage` and deletes `chrome`/`browser` from the world before any mod runs.
 
 A browser that can't host the world (Safari: its userScripts is TRIF's adapter, safari.js; or a
@@ -996,6 +992,18 @@ New native request commands (answered with a normal `response`):
 | `mod.review` | `id` | `{id, allowed: [key]}`: "Looks right" on a mod to review: what TRIF found in it is allowed; not from a run |
 | `mod.code` | `id, version?` | `{id, code, truncated, file}`: the mod's file as the helper read it (the panel's code card and Show code; a style mod's rules, not the code TRIF makes of them), capped at 200 000 characters; `file` its file name. `version: "ran"`: a mod with a change waiting, the version running meanwhile (held.js `lastRun`) |
 | `mod.reveal` | `id, how?: "folder"\|"editor"` | `{id, how, file}`: shows the mod's file in Finder (`open -R`; Linux: `xdg-open` on its folder; Windows: Explorer), or with `editor` opens it in the system's app for it (`open` / `xdg-open`). The path is never taken from the message: it's the mod's own file from the helper's scan, by its id, and must be `sites/<site>/<mod>.js` in the sites folder, or it's refused (helper/lib/reveal.js). `file` is relative to the sites folder. Also on the socket (`trif reveal <site>/<mod> [--editor]`, which works without the browser), not from a run. In Safari the same: the helper (behind `helper/safari-bridge.js`) runs outside Safari's sandbox, as the user. `TRIF_REVEAL_CMD` (tests) runs a stand-in with what would have run as its arguments |
+| `mod.history` | `id` | `{id, entries: [{at, stamp, kind, source}]}`: the versions kept of a mod, newest first; `source`, what replaced it: `chat`, `fix`, `restore`, `import`, `undo` or null (helper/lib/history.js). Also on the socket (`trif history`) |
+| `mod.historyCode` / `mod.historyDiff` | `id, stamp` | a kept version's text `{id, stamp, code, truncated}`, or its line diff with the current one `{id, lines}` |
+| `mod.historyRestore` | `id, stamp` | `{id, restored, at}`: puts that version back, keeping the current one (source `restore`); the next sync judges it like any change from outside. Not from a run |
+| `mod.export` | `id` | `{id, file, dir}`: the mod's file copied to the downloads folder as `<site>-<mod>.js` (a number added if taken) and shown in Finder; found by its id, as `mod.reveal` does (helper/lib/share.js; `TRIF_DOWNLOADS` for tests). Not from a run |
+| `mod.exportSite` | `site` | `{site, dir, ids}`: all of a site's mods into a folder `<site> mods` there, shown. Not from a run |
+| `mod.import` | `text, name, site?, choice?` | a mod's text (from a file the user chose or dropped): `{needsSite: [sites]}` when its @match doesn't name one site, `{exists, site, name}` when a mod of that name is there (`choice`: `copy` or `replace`, which keeps the old one in history), else `{id, file, replaced?}`. The header must parse; `@source`/`@version` are taken out; recorded in `imported.json` (the mod is sent with `imported: true`), and held like any mod from outside. Not from a run |
+| `files.add` | `site, name, data` | `{site, name, rel, size}`: `data` (base64) saved as `sites/<site>/files/<name>`: the name's last part, cleaned; never over another file. Nothing in `files/` is scanned as a mod. Not from a run |
+| `files.begin` | `site, name, size` | `{id}`: starts a file of any size, in slices; refused if the disk hasn't room for it. Not from a run |
+| `files.slice` | `id, offset, data` | `{written}`: appends `data` (base64, up to 8 MB), which must start at `offset` |
+| `files.end` | `id` | `{site, name, rel, size}`: renames it into place, under a free name |
+| `files.abort` | `id` | `{aborted}`: takes the unfinished file away |
+| `files.list` / `files.remove` / `files.reveal` | `site` (and `name`) | a site's files `{site, files: [{name, size, at}]}`; one moved to `trash/<site>/files/`; the folder shown in Finder |
 | `mod.delete` | `id` | `{id, deleted: true}`: moves `sites/<site>/<mod>.js` to `trash/<site>/<mod>@<UTC stamp>.js` (entries older than 30 days are removed), then re-sends the mods; also on the socket, and from a run for mods inside its scope |
 | `mod.restore` | `id` | `{id, restored: true, file}`: moves the newest trashed copy back (fails if the mod exists again, except to undo `mod.update` `new`); same rules as `mod.delete`. The extension keeps a deleted mod's switch state, so it comes back as it was |
 | `mod.update` | `id, choice: "new"\|"mine"` | a shipped mod's new version: use it or keep the user's copy (see "Updates to shipped mods"); also on the socket, not from a run |

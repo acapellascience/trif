@@ -21,7 +21,7 @@ when TRIF was called WebMods, is moved there first and left as a link to it) wit
 private folder (settings, logs, screenshots; ~/Library/Application Support/TRIF on a Mac, moved out of the
 workspace if an older TRIF kept them there), installs the TRIF files the wrappers run,
 refreshes AGENTS.md and CLAUDE.md there from those files. Tim's mods (the mods TRIF ships, for
-${STARTER_SITES}; some on, some off) are added only for the sites you choose: on the
+${STARTER_SITES}; each starts off) are added only for the sites you choose: on the
 setup page in your browser (a checklist, site by site, or "Start with none"), later in Settings in the
 panel or with the "Add Tim's mods" link on a site's panel, or here: --examples adds every site's,
 --examples x.com,google.com those sites', --no-examples none. Adding a site's turns TRIF on for it${STARTER_OFF.length ? ` (not
@@ -120,6 +120,26 @@ The result is printed as pretty JSON, or as-is if it's a string. DOM nodes come 
     usage: 'trif history <site>/<mod>',
     summary: "what side-panel runs changed in a mod (kept 30 days), newest first",
     examples: ['trif history x.com/hide-reposts'],
+  },
+  export: {
+    usage: 'trif export <site>/<mod> [--to <dir>]',
+    summary: "copy a mod's file to ~/Downloads (or --to) as <site>-<mod>.js, to share it; refused inside a run",
+    examples: ['trif export x.com/hide-reposts'],
+  },
+  import: {
+    usage: 'trif import <file> [--site <site>] [--replace | --as-copy]',
+    summary: "add a mod from a file: its site from its @match (or --site); never over a mod without --replace (which keeps the old one in history) or --as-copy; held like any mod from outside; refused inside a run",
+    examples: ['trif import ~/Downloads/x.com-hide-reposts.js'],
+  },
+  files: {
+    usage: 'trif files <site>',
+    summary: "list the files the user added for a site (sites/<site>/files/): data for its mods, never run as one",
+    examples: ['trif files x.com'],
+  },
+  add: {
+    usage: 'trif add <file> --site <site>',
+    summary: "add a file to a site's files (sites/<site>/files/, up to 50 MB, never over another); refused inside a run",
+    examples: ['trif add ~/Music/ding.opus --site x.com'],
   },
   reveal: {
     usage: 'trif reveal <site>/<mod> [--editor]',
@@ -401,7 +421,7 @@ sent by a proxy the helper runs for each chat: the agent never has it.`,
 
 const GROUPS = [
   ['Setup and diagnosis', ['setup', 'status', 'doctor', 'update', 'report']],
-  ['Mod files (work without Chrome)', ['mods', 'new', 'check', 'delete', 'restore', 'history', 'undo', 'reveal', 'install-example', 'mod-update']],
+  ['Mod files (work without Chrome)', ['mods', 'new', 'check', 'delete', 'restore', 'history', 'undo', 'reveal', 'export', 'import', 'files', 'add', 'install-example', 'mod-update']],
   ['Switching mods off and on (need Chrome running with the extension)', ['disable', 'enable', 'approve', 'reject']],
   ['Pages (need Chrome running with the extension)', ['tabs', 'run', 'reload', 'open', 'close', 'navigate', 'text', 'sweep', 'screenshot', 'record', 'requests', 'request', 'errors', 'logs']],
   ['Agent runs (what the side panel does)', ['agent']],

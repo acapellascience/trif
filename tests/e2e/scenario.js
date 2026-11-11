@@ -1184,6 +1184,8 @@ class Scenario {
       await r.check('the code card: a mod\'s </> and its file name open its code (a style mod: its rules), with line numbers; Copy copies it; Show in Finder and Open in editor ask the helper, which reveals the mod\'s own file (a stand-in for open here); Esc closes it', () => this.codeViewCheck(win));
       await r.check('powers, phase 3: media plays and pauses the page\'s own video; click clicks only what the header names, never a submit, reset or a link to another site; go-to goes only to the header\'s pages; mods talk over TRIF\'s channel in plain data; write-drafts changes the user\'s drafts but never a password, card or hidden field; with a read, the combination is in the hold, and while another boxed mod on the page has a read it didn\'t ask for, write-drafts is off; undeclared, each is refused', () => this.powers3Check(win));
       await r.check('powers, phase 2: site-data filters the site\'s JSON (fetch and XHR) by removing and reordering only (an invented string, number, key, a duplicate or a cut string: TRIF keeps the original); page-data reads plain copies of React props; search-box is TRIF\'s own box the mod can\'t read, which searches the site from the user\'s Enter; undeclared, each is refused', () => this.powers2Check(win));
+      await r.check('the widened box (WIDEN.md class A): sound (compressors, a node into a parameter, waves, buffers from numbers, offline renders, its own clock), typed arrays and the browser\'s pure tools, page facts read only, drawing, animations, observers, events and focus on its own elements, SVG of its own and faithful copies, CSS from shown pictures and into shadow roots, text split into its own pieces, the page\'s own events, placeholders, bigger settings, more tags; each row\'s hostile test refused, nothing reaching the server or the page', () => this.wideCheck(win));
+      await r.check('the widened box\'s powers (WIDEN.md class B): block-events, page-events, site-storage with @migrate, rewrite-requests, image-variants, edit-uploads, embeds, local-fonts, preload, and the widened site-data, go-to and media: held with each sentence and the many-powers warning; each works as its narrowing says; undeclared, each is refused', () => this.wideBCheck(win));
       await r.check('speculation rules (audit AU-7): a page that prefetches its same-site links at once; a link a free mod adds is fetched without a click (Chrome), a boxed mod can\'t make one', () => this.specRulesCheck(win));
       await r.check('boxed mods in the panel: their own group between Style mods and Free mods, with its switch (off on the site: they stop there; on: back), and "New mods start" has a Boxed mods row', () => this.sandboxedPanelCheck(win));
       await r.check('Settings → New mods start → Free mods Off: a new free mod arrives off, marked "new", and doesn\'t run; a new style mod runs; switched on in the panel, it runs; Free mods On again', () => this.startsOffCheck(win));
@@ -2188,9 +2190,10 @@ process.exitCode = 1;
       const bare = new Set(Object.getOwnPropertyNames(require('vm').runInNewContext('globalThis')));
       const beyond = good.names.filter((n) => !bare.has(n));
       const browserOnly = new Set(first.windowNames.filter((n) => !bare.has(n)));
-      // (beyond the language: TRIF's API, named like the browser's timers, and what SES passes through as plain
-      // data tools: Temporal, TextEncoder, TextDecoder)
-      const API = new Set(['eval', 'Function', 'Compartment', 'lockdown', 'harden', 'assert', 'page', 'trif', 'console', 'setTimeout', 'clearTimeout', 'setInterval', 'clearInterval', 'requestAnimationFrame', 'cancelAnimationFrame', 'Math', 'Date', 'Temporal', 'TextEncoder', 'TextDecoder']);
+      // (beyond the language: TRIF's API, named like the browser's timers, what SES passes through as plain
+      // data tools (Temporal), and the pure tools TRIF adds, frozen: sandbox.js SANDBOX_EXTRA_GLOBALS)
+      const API = new Set(['eval', 'Function', 'Compartment', 'lockdown', 'harden', 'assert', 'page', 'trif', 'console', 'setTimeout', 'clearTimeout', 'setInterval', 'clearInterval', 'requestAnimationFrame', 'cancelAnimationFrame', 'Math', 'Date', 'Temporal',
+        'Float32Array', 'Float64Array', 'URL', 'URLSearchParams', 'Intl', 'TextEncoder', 'TextDecoder', 'structuredClone', 'atob', 'btoa', 'performance']);
       const reachable = good.names.filter((n) => browserOnly.has(n) && !API.has(n));
       const want = {
         'restyle (trif.css)': first.titleColor === 'rgb(1, 2, 3)', 'hide (trif.hide)': !first.hiddenShown, 'add an element': first.made === 'made in the sandbox',
@@ -2446,6 +2449,203 @@ process.exitCode = 1;
       return `held for "${row.items.join(' ')}" and "${row.together.join(' ')}"; the approval dialog opened by itself, kept the focus, closed on Esc and stayed closed, the badge reopened it; allowed there; ${Object.keys(A).length} declared outcomes as expected (sound, controls, read-drafts), ${Object.keys(N).length} undeclared refused; keys ${k1} then, with keys, ${k2}; same powers ran, a new one waited`;
     } finally {
       for (const f of [allFile, noneFile]) { try { fs.unlinkSync(f); } catch { /* gone */ } }
+    }
+  }
+
+  // The widened box (WIDEN.md class A): a boxed mod with the sound power and a page event in its header tries
+  // each row's new capability and its hostile test (fixtures/sandbox-wide.js), then the page acts (attributes,
+  // children, text in an editor, history moves, a shadow root made later, its own event, real clicks) and
+  // the mod's late records are read; from outside, nothing reached the server and the page noticed nothing.
+  async wideCheck(win) {
+    const site = '127.0.0.1';
+    const base = `http://${site}:${this.o.servers.port}`;
+    const dir = path.join(this.trif, 'sites', site);
+    const id = 'e2e-pw-wide';
+    const file = path.join(dir, `${id}.js`);
+    const fx = fs.readFileSync(path.join(I.REPO, 'tests', 'e2e', 'fixtures', 'sandbox-wide.js'), 'utf8');
+    const status = async () => (await this.cli(['status'], { timeoutMs: 20000 })).stdout;
+    const run = async (code) => JSON.parse((await this.cli(['run', '--tab', String(win.tabId), code], { timeoutMs: 20000 })).stdout || 'null');
+    const problems = [];
+    this.sandboxPage = true;
+    try {
+      fs.writeFileSync(file, fx);
+      await waitFor('the widened mod held for sound', async () => new RegExp(`${id}\\s+HELD`).test(await status()) || null, { timeoutMs: 25000, intervalMs: 500 });
+      await this.cli(['approve', `${site}/${id}`], { timeoutMs: 20000 });
+      await waitFor('registered', async () => new RegExp(`${id}\\s+registered \\(boxed, powers: sound\\)`).test(await status()) || null, { timeoutMs: 20000, intervalMs: 500 });
+      await this.ext(`async (id, url) => { await chrome.tabs.update(id, { url, active: true }); }`, [win.tabId, `${base}/wide.html`]);
+      let last = null;
+      const R = await waitFor('the widened mod\'s results', async () => {
+        const o = last = await run(`document.documentElement.getAttribute('data-trif-box-w')`);
+        if (!o) return null;
+        const r = typeof o === 'string' ? JSON.parse(o) : o;
+        return Object.values(r).some((v) => v === 'pending') ? null : r;
+      }, { timeoutMs: 25000, intervalMs: 500 }).catch((e) => { throw new Error(`${e.message}: ${String(last).slice(0, 2500)}`); });
+      // the page acts: real clicks (the mod's own button, the page's, its own capture box), then into a field
+      const ctx = await this.d.findPage((u) => u.includes('/wide.html'), { timeoutMs: 5000 });
+      // (the first click after the page loads can land before it settles: the mod's own button again if so)
+      for (const sel of ['#pb', '#trif-box-w-stop', '#trif-box-w-cap']) await this.d.click(ctx, sel);
+      const late0 = await run(`document.documentElement.getAttribute('data-trif-box-w-late')`);
+      if (!/"stopped":"stopped"/.test(String(typeof late0 === 'string' ? late0 : JSON.stringify(late0)))) await this.d.click(ctx, '#trif-box-w-stop');
+      await this.d.click(ctx, '#fi');
+      await run(`(() => {
+        document.getElementById('item1').className = 'item changed';
+        document.getElementById('ed-p').className = 'typed';
+        const p = document.createElement('p'); p.id = 'item2'; p.textContent = 'two'; document.getElementById('feed').append(p);
+        document.getElementById('ed-p').firstChild.data = 'secret draft';
+        history.pushState({}, '', '/wide.html?step=2');
+        location.hash = 'h';
+        window.__laterHost();
+        document.dispatchEvent(new CustomEvent('e2e-wide-signal', { detail: { n: 1 } }));
+        document.dispatchEvent(new CustomEvent('e2e-wide-other', { detail: { n: 2 } }));
+        return true;
+      })()`);
+      await sleep(1500);
+      const l0 = await run(`document.documentElement.getAttribute('data-trif-box-w-late')`);
+      const L = (typeof l0 === 'string' ? JSON.parse(l0) : l0) || {};
+      const pg = await run(`(() => {
+        const q = (s) => document.querySelector(s), col = (el) => (el ? getComputedStyle(el).color : null);
+        const copy = q('svg[id^="trif-box-c"]');
+        return {
+          url: location.href, hits: window.__hits.slice(), bubbled: window.__bubbled.slice(), anim: window.__pageAnim.playState,
+          placeholders: [q('#fi').placeholder, q('#ta').placeholder], field: [q('#fi').value, q('#fi').name, q('#fi').type, q('#fi').getAttribute('formaction')],
+          editor: q('#editor').textContent, title: document.title, words: q('#words').textContent,
+          shadow: [col(q('#ohost').shadowRoot.querySelector('#op')), col(window.__closedRoot.querySelector('#cp')), col(window.__laterRoot && window.__laterRoot.querySelector('#lp'))],
+          boxBg: getComputedStyle(q('#trif-box-w-box')).backgroundImage, own: q('#trif-box-w-svg path') ? q('#trif-box-w-svg path').getAttribute('fill') : null,
+          copy: copy ? [copy.id, copy.querySelector('rect').getAttribute('fill'), copy.querySelector('linearGradient').id] : null,
+          protos: Float32Array.prototype.__trifEscape === undefined, outputInForm: !!q('#f output'),
+        };
+      })()`);
+      // ---- each row: ok, or refused when it says so
+      for (const [k, v] of Object.entries(R)) {
+        const want = /\(refused\)$/.test(k) ? /^refused/ : /^ok/;
+        if (!want.test(v)) problems.push(`${k}: ${v}`);
+      }
+      const exact = {
+        'A1 a compressor, its reduction a number': 'ok: number', 'A4 an offline render of its own graph': 'ok: 2205 22050 true 2205 true',
+        'A6 Float32Array and Float64Array': 'ok: 1.5 3.14', 'A6 atob and btoa': 'ok: hi aGk=', 'A6 atob of something that isn\'t base64 (a plain error)': 'ok: TypeError',
+        'A7 URL and URLSearchParams': 'ok: /a 1 y', 'A7 Intl, TextEncoder, TextDecoder, structuredClone': 'ok: 1,234.5 3 hi 1', 'A8 performance.now': 'ok: number',
+        'A10 innerText': 'ok: Wide', 'A10 an editor\'s innerText reads empty': 'ok: ""', 'A10 an editor\'s piece\'s innerText reads empty': 'ok: ""', 'A11 layout, read': 'ok: 16 16 number',
+        'A12 SVG geometry': 'ok: 10,10,30,20 50 20 true true', 'A14 what\'s at a point: a stand-in': 'ok: pimg', 'A14 at a point in a shadow root: its host': 'ok: ohost',
+        'A14 at a point in a frame: the frame': 'ok: iframe', 'A15 an inline style': 'ok: 4px', 'A27 a gradient, a filter, dashes': 'ok: 10,20,30,255', 'A27 pixels back and forth': 'ok: 200',
+        'A27 a data: picture of its canvas': 'ok: data:image/png;base64,', 'A16 an animation of its own': 'ok: paused 25000 true', 'A16 the page\'s animation, read': 'ok: running number false',
+        'A21 ready and loaded': 'ok: true true', 'A31 the page\'s style sheets, as copies': 'ok: true', 'A32 the page\'s text split into its own pieces': 'ok: alpha BETA gamma',
+        'A26 an SVG of its own': 'ok: 0 0 10 10 url(#trif-box-w-g)', 'A35 bigger settings': 'ok: true',
+      };
+      for (const [k, v] of Object.entries(exact)) if (R[k] !== v) problems.push(`${k}: ${R[k]} (wanted ${v})`);
+      if (!/^ok: trif-box-c\d+-psvg url\(#trif-box-c\d+-pg\) trif-box-c\d+-pg$/.test(R['A26 a copy of the page\'s SVG keeps its ids, renamed'] || '')) problems.push(`the SVG copy: ${R['A26 a copy of the page\'s SVG keeps its ids, renamed']}`);
+      // ---- later: what the mod heard as the page acted
+      const lateWant = {
+        'A17 an attribute change heard': L.attr === 'item1:class', 'A17 none inside the editor': L.editorAttr === undefined,
+        'A19 the changed element handed over': /(^|,)feed(,|$)/.test(L.changed || ''), 'A19 none inside the editor': L.editorChanged === undefined,
+        'A20 the in-app address, then the #': JSON.stringify(L.urls) === JSON.stringify(['?step=2', '?step=2#h']),
+        'A24 its own button\'s click stopped': L.stopped === 'stopped', 'A24 the page\'s button\'s click not stoppable': L.pageStopped === 'refused',
+        'A23 its own capture box captured the pointer': /^captured 0 1 number$/.test(L.captured || ''),
+        'A33 the page\'s event heard, its detail a plain copy': L.signal === '{"n":1}' || L.signal === 'null',
+        'A25 no focus while the user is in a field': /^refused: .*the user is in one of the page's fields/.test(L.focusWhileTyping || ''),
+        'A18 its own size': L.resized === 20, 'A18 visibility': typeof L.visible === 'boolean',
+      };
+      for (const [k, v] of Object.entries(lateWant)) if (!v) problems.push(`LATE ${k}: ${JSON.stringify(L)}`);
+      // ---- the page: as it was, but for what the mod may do
+      const noticed = pg.hits.filter((h) => !/^(click|pointerdown|focus|input|keydown):(trif-box-w-stop|pb|trif-box-w-cap|fi|trif-box-[\w-]+|)$/.test(h));
+      const leaks = this.o.servers.requests.filter((q) => q.url.includes('e2e-wide-leak')).map((q) => `${q.host}${q.url}`);
+      const pageWant = {
+        'the page noticed nothing else': noticed.length === 0 || noticed,
+        'the page heard its own button, not the mod\'s': pg.bubbled.includes('pb') && !pg.bubbled.includes('trif-box-w-stop') || pg.bubbled,
+        'the page\'s animation still running': pg.anim === 'running', 'placeholders changed (A34)': JSON.stringify(pg.placeholders) === JSON.stringify(['new', 'new t']),
+        'the field as it was': JSON.stringify(pg.field) === JSON.stringify(['v', 'q', 'text', null]), 'the editor and the title as they were': pg.editor === 'secret draft' && pg.title === 'TRIF e2e wide',
+        'the words split (A32)': pg.words === 'alpha BETA gamma', 'CSS in the open, closed and later shadow roots (A30)': JSON.stringify(pg.shadow) === JSON.stringify(['rgb(4, 5, 6)', 'rgb(4, 5, 6)', 'rgb(4, 5, 6)']) || pg.shadow,
+        'a CSS url() of the page\'s picture (A29)': /e2e-wide\.png/.test(pg.boxBg) || pg.boxBg, 'its own SVG\'s reference (A26)': pg.own === 'url(#trif-box-w-g)',
+        'the SVG copy renamed (A26)': !!pg.copy && /^trif-box-c\d+-psvg$/.test(pg.copy[0]) && pg.copy[1] === `url(#${pg.copy[2]})`,
+        'no output in the page\'s form (A36)': !pg.outputInForm, 'the tab stayed': pg.url === `${base}/wide.html?step=2#h`,
+        'the test server saw nothing': leaks.length === 0 || leaks,
+      };
+      for (const [k, v] of Object.entries(pageWant)) if (v !== true) problems.push(`PAGE ${k}: ${JSON.stringify(v)}`);
+      // the lint knows the new API: nothing to say about the fixture's ok parts it couldn't tell apart
+      const check = await this.cli(['check', file], { timeoutMs: 20000 });
+      if (!/- URL\.createObjectURL/.test(check.stdout) || /trif\.audio|media power|Float32Array|- URL: |structuredClone|atob/.test(check.stdout)) problems.push(`trif check (${check.status}): ${check.stdout.slice(0, 600)}`);
+      fs.writeFileSync(this.r.file(`wide-${this.o.browser}.json`), JSON.stringify({ R, L, page: pg, problems }, null, 2));
+      if (problems.length) throw new Error(problems.join('\n'));
+      const rows = new Set(Object.keys(R).map((k) => k.split(' ')[0]));
+      return `${rows.size} rows, ${Object.keys(R).length} probes (${Object.keys(R).filter((k) => /\(refused\)$/.test(k)).length} hostile, all refused); ${Object.keys(lateWant).length} late outcomes as the page acted; the page as it was; the server saw nothing`;
+    } finally {
+      try { fs.unlinkSync(file); } catch { /* gone */ }
+      await this.ext(`async (id) => { const s = (await chrome.storage.local.get('sandboxSettings')).sandboxSettings || {}; delete s[id]; await chrome.storage.local.set({ sandboxSettings: s }); }`, [`${site}/${id}`]).catch(() => {});
+    }
+  }
+
+  // The widened box's powers (WIDEN.md class B): a boxed mod with all of them (fixtures/powers-b.js) is held
+  // with the many-powers warning, then each works as its narrowing says; one with none of them
+  // (powers-b-none.js) is refused each; the page and the server see only what the powers allow.
+  async wideBCheck(win) {
+    const site = '127.0.0.1';
+    const base = `http://${site}:${this.o.servers.port}`;
+    const dir = path.join(this.trif, 'sites', site);
+    const id = 'e2e-pw-b', noneId = 'e2e-pw-b-none';
+    const file = path.join(dir, `${id}.js`), noneFile = path.join(dir, `${noneId}.js`);
+    const fx = (f) => fs.readFileSync(path.join(I.REPO, 'tests', 'e2e', 'fixtures', f), 'utf8');
+    const status = async () => (await this.cli(['status'], { timeoutMs: 20000 })).stdout;
+    const line = (st, x) => st.split('\n').find((l) => l.includes(`${x} `) || l.endsWith(x)) || '';
+    // (read from the extension, not as the agent: agent code in the tab would lock it against the page's own
+    // requests until it reloads, and the page's requests are what rewrite-requests changes)
+    const attr = async (name) => { const o = await this.ext(`async (tabId, name) => { const r = await chrome.scripting.executeScript({ target: { tabId }, func: (n) => document.documentElement.getAttribute(n), args: [name] }); return r[0].result; }`, [win.tabId, name]); return typeof o === 'string' ? JSON.parse(o) : o; };
+    const problems = [];
+    this.sandboxPage = true;
+    try {
+      fs.writeFileSync(file, fx('powers-b.js'));
+      fs.writeFileSync(noneFile, fx('powers-b-none.js'));
+      const held = await waitFor('the widened powers held', async () => { const st = await status(); return new RegExp(`${id}\\s+HELD`).test(st) && new RegExp(`${noneId}\\s+registered \\(boxed\\)`).test(st) ? st : null; }, { timeoutMs: 25000, intervalMs: 500 });
+      const hl = line(held, id);
+      for (const want of ['can keep this site from seeing some of what you do here (keys, clicks on #pb)', 'can send this page\'s own code these signals: e2e-wide-reset',
+        'can read and change what this site keeps under: e2e-wide-key, e2e-wide-s, e2e_c (a cookie: only read)', `changes what ${site} receives from this page: flag set to false, mode set to quiet (in E2eOp requests)`,
+        'can load other sizes of pictures this page shows (from 127.0.0.1)', 'can play videos this page links to, inside the page (from youtube.com)', 'can see which fonts are installed on this computer',
+        'can change pictures you attach on this site before you post them', 'can reload this page', 'brings over its old settings from what this site keeps under: e2e-old-setting (once)',
+        'Mods with many powers can act in unspecific or powerful ways. Treat this with caution.']) if (!hl.includes(want)) problems.push(`the hold doesn't say "${want}": ${hl.slice(0, 1500)}`);
+      await this.cli(['approve', `${site}/${id}`], { timeoutMs: 20000 });
+      await waitFor('registered with its powers', async () => new RegExp(`${id}\\s+registered \\(boxed, powers:`).test(await status()) || null, { timeoutMs: 20000, intervalMs: 500 });
+      await this.ext(`async (id, url) => { await chrome.tabs.update(id, { url, active: true }); }`, [win.tabId, `${base}/wideb.html`]);
+      let last = null;
+      const R = await waitFor('the widened powers\' results (after the mod\'s reload)', async () => {
+        const r = last = await attr('data-trif-box-pb').catch(() => null);
+        return r && r['B9 reload'] && r['B9 in the app, values from the list'] && !Object.values(r).includes('pending') ? r : null;
+      }, { timeoutMs: 30000, intervalMs: 500 }).catch((e) => { throw new Error(`${e.message}: ${JSON.stringify(last).slice(0, 2500)}`); });
+      const N = await attr('data-trif-box-pb-none');
+      // the page acts: real clicks and keys, a picture attached, its requests, its video's volume
+      const ctx = await this.d.findPage((u) => u.includes('/wideb.html'), { timeoutMs: 5000 });
+      await this.d.click(ctx, '#pb');
+      await this.d.click(ctx, '#title'); await this.d.key(ctx, 'q');
+      await this.d.click(ctx, '#fi'); await this.d.key(ctx, 'k');
+      await this.d.click(ctx, '#go');
+      const pg = await waitFor('the page\'s own actions', async () => attr('data-e2e-results').catch(() => null), { timeoutMs: 15000, intervalMs: 500 });
+      if (pg.error) throw new Error(`the page's actions: ${pg.error}`);
+      const L = (await attr('data-trif-box-pb-late')) || {};
+      for (const [k, v] of Object.entries(R)) { const want = /\(refused\)$/.test(k) ? /^refused/ : /^ok/; if (!want.test(v)) problems.push(`${k}: ${v}`); }
+      for (const [k, v] of Object.entries(N || {})) if (!/^(refused|absent)/.test(v)) problems.push(`UNDECLARED ${k}: ${v}`);
+      if (!N || Object.keys(N).length < 14) problems.push(`the undeclared mod's results: ${JSON.stringify(N)}`);
+      const exact = { 'B3 the site\'s key, read and changed': 'ok: v1 v2 s1 c1', 'B3 the keys it may see': 'ok: e2e-wide-key', 'B3 its old settings, brought over once': 'ok: {"zoom":3}',
+        'B10 another size of the page\'s picture, pixels read': 'ok: number', 'B13 a video the page links to: TRIF\'s button': 'ok: Play here', 'B9 in the app, values from the list': 'ok: ?mods=red,blue',
+        'B6 a link the page shows, with a parameter taken out': 'ok: /wideb.html?a=1' };
+      for (const [k, v] of Object.entries(exact)) if (R[k] !== v) problems.push(`${k}: ${R[k]} (wanted ${v})`);
+      const reqs = this.o.servers.requests.map((q) => q.url);
+      const want = {
+        'B5 the data global as the page read it': pg.data === '{"items":["keep"]}', 'B5 the embedded JSON as the page read it': pg.emb === '{"posts":[{"t":"keep"}]}',
+        'B4 the documents, filtered, guard and separator kept': pg.multi === 'for (;;);{"a":["keep"]}\n{"b":[],"c":1}',
+        'B6 the address with a parameter out; the one with one added kept as sent': pg.urls.u === 'https://127.0.0.1/watch?v=1' && pg.urls.w === 'https://127.0.0.1/watch?v=2',
+        'B7 the fetch\'s query and body rewritten': /flag%22%3Afalse/.test(pg.api.url) && /mode=quiet/.test(pg.api.url) && JSON.parse(pg.api.body).variables.flag === false,
+        'B7 the XHR\'s body rewritten': JSON.parse(pg.xhr.body).variables.flag === false, 'B7 another operation untouched': /flag%22%3Atrue/.test(pg.other.url) && !/mode=quiet/.test(pg.other.url),
+        'B1 the page didn\'t see the click on #pb, nor the key on the page': !pg.hits.includes('click:pb') && !pg.hits.includes('keydown:') && L.blockedClick === 'blocked' && /q/.test(L.blockedKeys || ''),
+        'B1 the key typed into a field reached it': pg.hits.includes('keydown:fi') && !/k/.test(L.blockedKeys || ''),
+        'B2 the page\'s code got the signal, not the undeclared one': JSON.stringify(pg.signals) === JSON.stringify(['{"n":1}']),
+        'B3 the key changed on the site': pg.key === 'v2', 'B11 the attached picture changed, its name and type kept': pg.file === 'pic.png image/png 255,0,0,255' && L.edited === 'edited',
+        'B12 the video\'s volume heard': L.volume === 'heard', 'B13 no frame without the user\'s own click': pg.frames === 0 && pg.button,
+        'B15 the lazy picture loaded sooner': pg.lazy === 'eager' && reqs.some((u) => u === '/e2e-wide.png?lazy=1'), 'B10 the variant fetched': reqs.some((u) => u === '/e2e-wide.png?size=big'),
+        'B9 the address moved in the app': pg.url === `${base}/wideb.html?mods=red,blue`, 'the server saw no leak': !reqs.some((u) => /e2e-pw-leak/.test(u)),
+      };
+      for (const [k, v] of Object.entries(want)) if (v !== true) problems.push(`${k}: ${JSON.stringify({ pg: { ...pg, hits: pg.hits.slice(-12) }, L }).slice(0, 1500)}`);
+      fs.writeFileSync(this.r.file(`wideb-${this.o.browser}.json`), JSON.stringify({ R, N, L, page: pg, problems }, null, 2));
+      if (problems.length) throw new Error(problems.join('\n'));
+      return `held with each power's sentence and the many-powers warning; ${Object.keys(R).length} outcomes as the narrowing says (${Object.keys(R).filter((k) => /\(refused\)$/.test(k)).length} refused); ${Object.keys(N).length} undeclared, each refused; ${Object.keys(want).length} effects seen from the page and the server`;
+    } finally {
+      for (const f of [file, noneFile]) { try { fs.unlinkSync(f); } catch { /* gone */ } }
     }
   }
 
@@ -3744,7 +3944,7 @@ say({ type: 'result', subtype: 'success', is_error: false, result: text, session
       // (Firefox doesn't say which page: after that check, a failed fetch or socket is one of those)
       // (the sandboxed mods' test page: its hostile mod's refusals and the errors the good one throws on purpose)
       // (Chrome names the page the tab had when its console was first attached, so by the text)
-      || (this.sandboxPage && (/^\[TRIF\] 127\.0\.0\.1\/e2e-(sbx|pw|broke)/.test(String(p.text)) || /willReadFrequently/.test(String(p.text)) || /AudioContext was not allowed to start/.test(String(p.text)) || /\/sandbox\.html/.test(String(p.source || ''))))
+      || (this.sandboxPage && (/^\[TRIF\] 127\.0\.0\.1\/e2e-(sbx|pw|broke)/.test(String(p.text)) || /willReadFrequently/.test(String(p.text)) || /AudioContext was not allowed to start/.test(String(p.text)) || /\/(sandbox|wide|wideb)\.html/.test(String(p.source || ''))))
       // (the tab-lock edges: the probes the lock refuses, tabLockHardeningCheck)
       || (this.hardened && /e2e-(img-leak|shw-|sw-|popup-|spec|cdn|sib-post)|e2e-sw\.js|RTCPeerConnection|TRIF paused|SharedWorker|ServiceWorker|speculation/i.test(String(p.text) + String(p.source || '')))
       || (this.hijacked && /ERR_BLOCKED_BY_CLIENT|NetworkError when attempting to fetch|Failed to fetch|establish a connection to the server at ws:\/\/[^ ]+\/e2e-socket|WebSocket connection to '[^']+\/e2e-socket|e2e-leak|e2e-nav|blocked by|CORS/i.test(String(p.text) + String(p.source || '')));

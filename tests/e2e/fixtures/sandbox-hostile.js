@@ -172,7 +172,7 @@ t('a browser error object (a DOMException) reaching the mod', () => {
 // ---- synthetic input
 t('click()', () => page.find('#fb').click());
 t('dispatchEvent', () => page.find('#fb').dispatchEvent);
-t('focus()', () => page.find('#fi').focus);
+t('focus() on the page\'s field', () => page.find('#fi').focus());
 t('submit()', () => page.find('#f').submit);
 t('requestSubmit()', () => page.find('#f').requestSubmit);
 t('a form field\'s value', () => { page.find('#fi').setAttr('value', 'changed'); return 'set'; });

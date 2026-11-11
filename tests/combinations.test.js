@@ -10,7 +10,7 @@ const path = require('path');
 const C = require('../helper/lib/combinations');
 const bp = require('../helper/lib/boxpowers');
 
-test('the table covers every pair (66) and triple (220) of the twelve powers, once each, in the menu\'s order', () => {
+test('the table covers every pair (210) and triple (1330) of the 21 powers, once each, in the menu\'s order', () => {
   assert.deepEqual(C.POWERS, bp.NAMES);
   const want = [];
   const P = C.POWERS;
@@ -19,8 +19,8 @@ test('the table covers every pair (66) and triple (220) of the twelve powers, on
     for (let k = j + 1; k < P.length; k++) want.push(`${P[i]}+${P[j]}+${P[k]}`);
   }
   const keys = Object.keys(C.COMBINATIONS);
-  assert.equal(keys.filter((k) => k.split('+').length === 2).length, 66);
-  assert.equal(keys.filter((k) => k.split('+').length === 3).length, 220);
+  assert.equal(keys.filter((k) => k.split('+').length === 2).length, 210);
+  assert.equal(keys.filter((k) => k.split('+').length === 3).length, 1330);
   assert.deepEqual([...keys].sort(), [...want].sort());
   for (const [k, v] of Object.entries(C.COMBINATIONS)) {
     if (typeof v === 'object') assert.ok(C.WARNINGS[v.warn], `${k}: ${v.warn} isn't a warning`);
@@ -33,12 +33,28 @@ test('the table covers every pair (66) and triple (220) of the twelve powers, on
 
 test('the table\'s reasoning: a read with any way out warns; acts that combine warn; a triple says "no more than its pairs" only when a pair warns', () => {
   const warn = (k) => (typeof C.COMBINATIONS[k] === 'object' ? C.COMBINATIONS[k].warn : null);
+  const OUTS = ['write-drafts', 'click', 'media', 'sound', 'edit-uploads', 'page-events', 'image-variants', 'preload'];
   for (const r of C.READS) {
-    for (const out of ['write-drafts', 'click', 'media', 'sound']) assert.ok(warn(C.keyOf([r, out])), `${r}+${out} warns`);
-    for (const other of C.POWERS.filter((p) => !['write-drafts', 'click', 'media', 'sound'].includes(p) && p !== r)) assert.equal(warn(C.keyOf([r, other])), null, `${r}+${other}`);
+    for (const out of OUTS.filter((o) => o !== r && !(r === 'image-variants' && o === 'preload'))) assert.ok(warn(C.keyOf([r, out])), `${r}+${out} warns`);
+    // (image-variants is a way out for the other reads too: their pairs with it warn, above)
+    for (const other of C.POWERS.filter((p) => !OUTS.includes(p) && p !== r && !(r === 'image-variants' && C.READS.includes(p)))) assert.equal(warn(C.keyOf([r, other])), null, `${r}+${other}`);
   }
+  assert.equal(warn('image-variants+preload'), null);
   assert.equal(warn('click+write-drafts'), 'post-for-you');
   assert.equal(warn('go-to+click'), 'go-and-click');
+  // (0.3's acts: what posts or acts for you together)
+  assert.equal(warn('block-events+click'), 'block-and-click');
+  assert.equal(warn('page-events+write-drafts'), 'post-for-you');
+  assert.equal(warn('click+edit-uploads'), 'post-for-you');
+  assert.equal(warn('page-events+edit-uploads'), 'post-for-you');
+  assert.equal(warn('go-to+page-events'), 'go-and-signal');
+  assert.equal(warn('site-storage+page-events+write-drafts'), 'read-post-for-you');
+  assert.equal(warn('local-fonts+click+edit-uploads'), 'read-post-for-you');
+  assert.equal(warn('go-to+page-events+write-drafts'), 'go-post-for-you');
+  // (nothing rides on a rewrite, an embed, or keeping events from the page, with anything)
+  for (const p of ['rewrite-requests', 'embeds']) for (const o of C.POWERS.filter((x) => x !== p)) assert.equal(warn(C.keyOf([p, o])), null, `${p}+${o}`);
+  // (the twelve of 0.2 keep their table)
+  assert.equal(C.COMBINATIONS['read-drafts+sound'].warn, 'read-into-sound');
   for (const [k, v] of Object.entries(C.COMBINATIONS)) {
     const p = k.split('+');
     if (p.length !== 3 || typeof v === 'object') continue;
@@ -61,7 +77,14 @@ test('the sandbox\'s page-wide rules (ACT_PARTNERS) follow the table: an act is 
   // the acts whose warned partners the sandbox can see on the page (sound: not enforced across mods,
   // docs/SAFE-MODS.md says why; write-drafts as click's partner: once a draft was written, clickOk; click with
   // go-to: on go-to's side)
-  const enforced = { 'write-drafts': [], click: ['write-drafts', 'go-to'], media: [], 'go-to': [] };
+  // (0.3: page-events and edit-uploads beside a draft or a picture another mod changed, as click: signalOk,
+  // clickOk; image-variants as a read, on the side of the act it's with; go-to with page-events, on go-to's)
+  const AS_READ = ['write-drafts', 'click', 'media', 'sound', 'edit-uploads', 'page-events'];
+  const enforced = {
+    'write-drafts': ['page-events'], click: ['write-drafts', 'go-to', 'edit-uploads'], media: [], 'go-to': [],
+    'page-events': ['write-drafts', 'edit-uploads', 'go-to'], 'edit-uploads': ['click', 'page-events'], 'image-variants': AS_READ, preload: [],
+  };
+  assert.deepEqual(Object.keys(partners).sort(), Object.keys(enforced).sort());
   for (const [act, extra] of Object.entries(enforced)) {
     const fromTable = C.POWERS.filter((p) => p !== act && typeof C.COMBINATIONS[C.keyOf([act, p])] === 'object' && !extra.includes(p))
       .filter((p) => !(act === 'write-drafts' && p === 'click'));

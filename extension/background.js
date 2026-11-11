@@ -14,7 +14,7 @@ import {
   PANEL_OPEN_WAIT_MS, PANEL_LATE_MS, panelWindowUrl, panelWindowTarget, panelWindowBounds, panelWindowClick,
 } from './lib.js';
 import { recordErrors, recordMatches, openErrors, dismiss as dismissError, keepLogs, fixPrompt } from './modhealth.js';
-import { SANDBOX_WORLD, SANDBOX_CSP, SETTINGS_MAX } from './sandbox.js';
+import { SANDBOX_WORLD, SANDBOX_CSP, SETTINGS_MAX, SETTINGS_SITE_MAX } from './sandbox.js';
 import { runtimeCode } from './runtime.js';
 import { sweepPage } from './sweep.js';
 import { captureScreenshot, stitchShots, isCopyWindow } from './screenshot.js';
@@ -446,6 +446,7 @@ function sandboxWorld() {
 // is on (the browser says), not what the message says, so a mod can't carry what it read on one site to
 // another through its settings; the mod is the one TRIF's code in the world says (mods can't send).
 const SETTINGS_SITES_MAX = 200; // sites kept per mod (the oldest written go first)
+const boxReloads = new Map(); // tab id -> when a boxed mod last reloaded it (go-to reload)
 // (Firefox has runtime.onUserScriptMessage only once its optional userScripts permission is granted, which can
 // be after this worker started: so it's listened for once user scripts are there, from sandboxWorld.)
 // (And there, a listener on `chrome.runtime`'s event, made before the grant, never heard a user script's
@@ -477,6 +478,15 @@ function onSandboxMessage(msg, sender, sendResponse) {
     const site = scopeFor(host);
     const mod = String(msg.mod ?? ''), key = String(msg.key ?? '');
     if (!site || !mod || !key || key.length > 100 || !state.mods.some((m) => m.id === mod && m.sandboxed)) return { ok: false, error: 'not a boxed mod here' };
+    // (go-to's reload: at most once in 10 seconds in a tab, whatever reloads in between)
+    if (msg.trifSandbox === 'reload') {
+      const tab = sender.tab && sender.tab.id;
+      if (typeof tab !== 'number') return { ok: false, error: 'not in a tab' };
+      const t = Date.now(), last = boxReloads.get(tab) || 0;
+      if (t - last < 10000) return { ok: false, error: 'a boxed mod reloads a page at most once in 10 seconds' };
+      boxReloads.set(tab, t);
+      return { ok: true };
+    }
     const all = (await chrome.storage.local.get('sandboxSettings')).sandboxSettings;
     const store = all && typeof all === 'object' && !Array.isArray(all) ? all : {};
     if (msg.trifSandbox === 'settings.get') {
@@ -485,7 +495,7 @@ function onSandboxMessage(msg, sender, sendResponse) {
     }
     if (msg.trifSandbox === 'settings.save') {
       const json = String(msg.json ?? '');
-      if (json.length > SETTINGS_MAX) return { ok: false, error: `settings can take up to ${SETTINGS_MAX / 1024} KB` };
+      if (json.length > SETTINGS_MAX) return { ok: false, error: `settings can take up to ${SETTINGS_MAX / 1024 / 1024} MB` };
       try { JSON.parse(json); } catch { return { ok: false, error: 'not JSON' }; }
       const sites = { ...(store[mod] || {}) };
       const here = { ...(sites[site] || {}), [key]: json };
@@ -493,7 +503,11 @@ function onSandboxMessage(msg, sender, sendResponse) {
       sites[site] = here; // (last written last)
       const names = Object.keys(sites);
       for (const old of names.slice(0, Math.max(0, names.length - SETTINGS_SITES_MAX))) delete sites[old];
-      if (JSON.stringify(here).length > SETTINGS_MAX * 4) return { ok: false, error: 'too many settings on this site' };
+      // (up to 1 MB for a mod on a site, all its keys together, and 8 MB for all the boxed mods on a site)
+      if (JSON.stringify(here).length > SETTINGS_MAX + 1024) return { ok: false, error: `a mod's settings can take up to ${SETTINGS_MAX / 1024 / 1024} MB on a site` };
+      let siteTotal = JSON.stringify(here).length;
+      for (const [m, bySite] of Object.entries(store)) if (m !== mod && bySite && bySite[site]) siteTotal += JSON.stringify(bySite[site]).length;
+      if (siteTotal > SETTINGS_SITE_MAX) return { ok: false, error: `the boxed mods' settings on this site are at their ${SETTINGS_SITE_MAX / 1024 / 1024} MB` };
       await save({ sandboxSettings: { ...store, [mod]: sites } });
       return { ok: true };
     }

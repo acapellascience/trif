@@ -1446,6 +1446,7 @@ function holdTag(m, text, labelId) {
 const FACT_ICONS = {
   'read-drafts': '✎', keys: '⌨', 'site-data': '⇣', 'page-data': '◫', sound: '♪', controls: '◐', mods: '⇆', media: '▶',
   'search-box': '⌕', 'go-to': '↪', click: '◉', 'write-drafts': '⇄',
+  'site-storage': '▤', 'local-fonts': 'Aa', 'image-variants': '▣', preload: '⇡', embeds: '▷', 'rewrite-requests': '⇌', 'block-events': '⊘', 'page-events': '↯', 'edit-uploads': '⧉', migrate: '⇢',
   sends: '↗', loads: '↗', site: '↗', acts: '◉', navigates: '↪', hidden: '?', match: '◎', risk2: '⚠',
 };
 const iconOf = (key) => {

@@ -457,7 +457,7 @@ held for an `@match` outside the run's site, or `@risk 2`). The extension:
   `{"<mod id>": {"<site>": {"<key>": "<JSON>"}}}`: the world's runtime asks with
   `runtime.sendMessage({trifSandbox: "settings.get"|"settings.save", mod, key, json?})`
   (`onUserScriptMessage`); the site is the one the browser says the sender's page is on (`scopeFor`), at
-  most 64 KB per mod per site and 200 sites per mod. Mods never have `chrome`: the runtime takes
+  most 1 MB per mod per site (all its keys), 8 MB for all the boxed mods on a site, and 200 sites per mod. Mods never have `chrome`: the runtime takes
   `sendMessage` and deletes `chrome`/`browser` from the world before any mod runs.
 
 A browser that can't host the world (Safari: its userScripts is TRIF's adapter, safari.js; or a

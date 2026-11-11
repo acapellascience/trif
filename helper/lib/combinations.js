@@ -1,6 +1,6 @@
 'use strict';
 // Power combinations (docs/POWER-COMBINATIONS.md is this table, written out; docs/SAFE-MODS.md says why).
-// Every pair and every triple of the twelve powers, each with a warning the hold shows, or why it adds
+// Every pair and every triple of the powers, each with a warning the hold shows, or why it adds
 // nothing to what its powers do alone. "Adds" means: together they can carry what a mod reads off the page,
 // or act as you, in a way none of them (or, for a triple, none of its pairs) can. Within one mod, and across
 // the boxed mods on a page, which see each other's elements and can talk over `mods`: the sandbox's
@@ -13,8 +13,12 @@
 // MANY instead (its combinations are still needs, keyed, without lines of their own).
 
 // The order the table is written in (boxpowers.js NAMES; tests/combinations.test.js checks they match).
-const POWERS = ['read-drafts', 'keys', 'site-data', 'page-data', 'sound', 'controls', 'mods', 'media', 'search-box', 'go-to', 'click', 'write-drafts'];
-const READS = ['read-drafts', 'keys', 'site-data', 'page-data'];
+const POWERS = ['read-drafts', 'keys', 'site-data', 'page-data', 'site-storage', 'local-fonts', 'image-variants', 'sound', 'controls', 'mods', 'preload', 'media',
+  'search-box', 'go-to', 'embeds', 'rewrite-requests', 'block-events', 'page-events', 'click', 'write-drafts', 'edit-uploads'];
+// (the twelve of 0.2: their combinations are the literal table below; the rest, added in 0.3, follow RULES)
+const POWERS_02 = ['read-drafts', 'keys', 'site-data', 'page-data', 'sound', 'controls', 'mods', 'media', 'search-box', 'go-to', 'click', 'write-drafts'];
+// Reads: see more than the page shows (image-variants: the pixels of the pictures it loads)
+const READS = ['read-drafts', 'keys', 'site-data', 'page-data', 'site-storage', 'local-fonts', 'image-variants'];
 
 // The warnings, strongest first (rank). Each is a fact after "it", like the powers' own.
 const WARNINGS = {
@@ -22,16 +26,22 @@ const WARNINGS = {
   'go-post-for-you': { rank: 2, fact: 'could go to a page, write a post there and send it for you' },
   'post-for-you': { rank: 3, fact: 'could write a post and send it for you' },
   'read-into-post': { rank: 4, fact: 'could put what it reads into something you post' },
-  'go-and-click': { rank: 5, fact: 'could take you to a page and click things there for you' },
-  'read-decides-click': { rank: 6, fact: 'could let what it reads decide what it clicks for you' },
-  'read-through-media': { rank: 7, fact: 'could pass what it reads to the site a video or sound comes from, by how it plays it' },
-  'read-into-sound': { rank: 8, fact: 'could turn what it reads into sounds that a device nearby could pick up' },
+  'read-into-picture': { rank: 5, fact: 'could put what it reads into a picture you post' },
+  'read-into-page-code': { rank: 6, fact: 'could hand what it reads to this page\'s own code, which may post or send it' },
+  'go-and-click': { rank: 7, fact: 'could take you to a page and click things there for you' },
+  'go-and-signal': { rank: 8, fact: 'could take you to a page and set off that page\'s own actions there' },
+  'read-decides-click': { rank: 9, fact: 'could let what it reads decide what it clicks for you' },
+  'block-and-click': { rank: 10, fact: 'could keep your clicks from reaching the page and click in their place' },
+  'read-through-media': { rank: 11, fact: 'could pass what it reads to the site a video or sound comes from, by how it plays it' },
+  'read-through-pictures': { rank: 12, fact: 'could pass what it reads to the sites this page\'s pictures come from, by which ones it loads' },
+  'read-into-sound': { rank: 13, fact: 'could turn what it reads into sounds that a device nearby could pick up' },
 };
 // (Tim's words, for a mod with more than three powers, in place of the lines above)
 const MANY = 'Mods with many powers can act in unspecific or powerful ways. Treat this with caution.';
 const MANY_OVER = 3;
 
-// Every pair (66) and triple (220), in POWERS order: { warn: <WARNINGS key> }, or why it adds no risk.
+// Every pair (66) and triple (220) of the twelve of 0.2, in POWERS order: { warn: <WARNINGS key> }, or why it
+// adds no risk. (Those with a power added in 0.3: RULES, below, written into the same table.)
 const COMBINATIONS = {
   'read-drafts+keys': 'both only read: nothing they read can leave the page without something that acts',
   'read-drafts+site-data': 'both only read: nothing they read can leave the page without something that acts',
@@ -323,6 +333,77 @@ const COMBINATIONS = {
 
 const keyOf = (list) => POWERS.filter((p) => list.includes(p)).join('+');
 
+// RULES: the combinations with a power added in 0.3 (WIDEN.md class B), by what each power is. A read with a
+// way out warns by the way out; acts that together post or act for you warn; a triple warns on its own only
+// where a read, something that sends and something that writes the post meet (or go-to does with those two),
+// and otherwise shows its pairs' warnings, or says why it adds nothing.
+const WAY_OUT = {
+  'write-drafts': 'read-into-post', click: 'read-decides-click', media: 'read-through-media', sound: 'read-into-sound',
+  'edit-uploads': 'read-into-picture', 'page-events': 'read-into-page-code', 'image-variants': 'read-through-pictures', preload: 'read-through-pictures',
+};
+const ACT_PAIRS = {
+  'block-events+click': 'block-and-click', 'page-events+write-drafts': 'post-for-you', 'click+edit-uploads': 'post-for-you',
+  'page-events+edit-uploads': 'post-for-you', 'go-to+page-events': 'go-and-signal',
+};
+const SENDS = ['click', 'page-events'];
+const WRITES = ['write-drafts', 'edit-uploads'];
+const REASONS = {
+  reads: 'both only read: nothing they read can leave the page without something that acts',
+  controls: 'its own controls only take what you give the mod on purpose, and show nothing it couldn\'t show in its own elements',
+  mods: 'a channel only reaches its other boxed mods, and the page-wide rules treat the boxed mods on a page as one',
+  'search-box': 'the search box only takes what you type, and the mod can\'t fill or read it',
+  'rewrite-requests': 'its change to what the site receives is fixed in the header and made by TRIF, so nothing the mod reads or does rides on it',
+  embeds: 'it plays only a video a link on the page names, after you click, so nothing the mod reads rides on it',
+  'block-events': 'keeping some of what you do from the page only lets the page learn less, and your typing always reaches its fields',
+  preload: 'it only makes the page load its own pictures sooner, as it would when you scroll to them',
+  'go-to': 'it only goes to this site\'s own pages (fixed paths, or links the page shows), and that site can already see what it reads',
+  pictures: 'both only load the page\'s own pictures, from where the page gets them',
+  write: 'a post it changes still waits for you to send it, and the other power carries nothing into it or sends it',
+  acts: 'neither reads more than the page shows, and together they don\'t post, send or act for you beyond what each does alone',
+  readOnly: 'it can read, but nothing in it carries what it reads off the page or acts on it',
+  actsOnly: 'it reads nothing but the page, and its acts don\'t combine into posting or acting for you',
+  pairs: 'no more than its pairs: their warnings show',
+};
+const pairRule = (a, b) => {
+  const k = keyOf([a, b]);
+  if (ACT_PAIRS[k]) return { warn: ACT_PAIRS[k] };
+  if (k === 'image-variants+preload') return REASONS.pictures;
+  for (const [r, o] of [[a, b], [b, a]]) if (READS.includes(r) && WAY_OUT[o] && r !== o) return { warn: WAY_OUT[o] };
+  for (const p of ['controls', 'mods', 'search-box', 'rewrite-requests', 'embeds', 'block-events', 'preload']) if (a === p || b === p) return REASONS[p];
+  if (READS.includes(a) && READS.includes(b)) return REASONS.reads;
+  if (READS.includes(a) || READS.includes(b)) return REASONS['go-to'];
+  if (WRITES.includes(a) || WRITES.includes(b)) return REASONS.write;
+  return REASONS.acts;
+};
+const tripleRule = (t) => {
+  const reads = t.filter((p) => READS.includes(p));
+  const has = (list) => t.some((p) => list.includes(p));
+  if (reads.length && has(SENDS) && has(WRITES) && t.filter((p) => !SENDS.includes(p) && !WRITES.includes(p)).every((p) => READS.includes(p))) return { warn: 'read-post-for-you' };
+  if (t.includes('go-to') && has(SENDS) && t.includes('write-drafts')) return { warn: 'go-post-for-you' };
+  const pairs = [[t[0], t[1]], [t[0], t[2]], [t[1], t[2]]];
+  if (pairs.some((x) => typeof COMBINATIONS[keyOf(x)] === 'object')) return REASONS.pairs;
+  return reads.length ? REASONS.readOnly : REASONS.actsOnly;
+};
+for (let i = 0; i < POWERS.length; i++) for (let j = i + 1; j < POWERS.length; j++) {
+  const pair = [POWERS[i], POWERS[j]];
+  if (!pair.every((p) => POWERS_02.includes(p))) COMBINATIONS[keyOf(pair)] = pairRule(...pair);
+}
+for (let i = 0; i < POWERS.length; i++) for (let j = i + 1; j < POWERS.length; j++) for (let k = j + 1; k < POWERS.length; k++) {
+  const t = [POWERS[i], POWERS[j], POWERS[k]];
+  if (!t.every((p) => POWERS_02.includes(p))) COMBINATIONS[keyOf(t)] = tripleRule(t);
+}
+// (the table in POWERS order, pairs then triples, as the doc lists it)
+{
+  const sorted = Object.keys(COMBINATIONS).sort((x, y) => {
+    const a = x.split('+').map((p) => POWERS.indexOf(p)), b = y.split('+').map((p) => POWERS.indexOf(p));
+    return a.length - b.length || a[0] - b[0] || a[1] - b[1] || (a[2] || 0) - (b[2] || 0);
+  });
+  const copy = { ...COMBINATIONS };
+  for (const k of Object.keys(COMBINATIONS)) delete COMBINATIONS[k];
+  for (const k of sorted) COMBINATIONS[k] = copy[k];
+}
+const N = POWERS.length, PAIRS = (N * (N - 1)) / 2, TRIPLES = (N * (N - 1) * (N - 2)) / 6;
+
 /** The warned combinations among a set of powers: [{key, combo, warn, rank, fact}], the strongest first. */
 function warningsFor(powers) {
   const list = POWERS.filter((p) => (powers || []).includes(p));
@@ -352,16 +433,20 @@ function toMarkdown() {
   const L = [];
   L.push('# Power combinations', '');
   L.push('Written out from `helper/lib/combinations.js` (the table the hold reads); don\'t edit by hand. Every pair');
-  L.push('(66) and triple (220) of the twelve powers, with the warning a hold shows for it, or why it adds no risk.', '');
+  L.push(`(${PAIRS}) and triple (${TRIPLES}) of the ${N} powers, with the warning a hold shows for it, or why it adds no risk.`, '');
   L.push('"Adds risk" means: together, the powers can carry what a mod reads off the page, or act as you, in a way');
   L.push('none of them (for a triple: none of its pairs) can alone. Reads (`read-drafts`, `keys`, `site-data`,');
-  L.push('`page-data`) see more than the page shows; nothing else does. The ways out of the page are what you post');
-  L.push('(`write-drafts`, `click`), what the mod clicks (`click`, and `go-to` to get to a page), how the page\'s');
-  L.push('media plays (the host of a video sees its requests: `media`) and sound in the room (`sound`). Everything a');
+  L.push('`page-data`, `site-storage`, `local-fonts`, and `image-variants` for the pixels it reads) see more than the');
+  L.push('page shows; nothing else does. The ways out of the page are what you post (`write-drafts`, `click`, a');
+  L.push('picture you attach: `edit-uploads`), what the mod clicks (`click`, and `go-to` to get to a page), what the');
+  L.push('page\'s own code is told (`page-events`), how the page\'s media plays (the host of a video sees its requests:');
+  L.push('`media`), which of the page\'s pictures load (their hosts see that: `image-variants`, `preload`) and sound in');
+  L.push('the room (`sound`). `rewrite-requests` changes what the site receives, but only as its header says, by');
+  L.push('TRIF; `embeds` loads a video only from a link the page shows, after a click. Everything a');
   L.push('boxed mod reaches otherwise stays on the site it came from, which already has it. Across mods on one page');
   L.push('(they see each other\'s elements, and `mods` gives them a channel), the sandbox\'s page-wide rules stop a');
   L.push('combination split between mods from slipping past the hold: docs/SAFE-MODS.md, "Combinations".', '');
-  L.push(`Counts: ${warned(2).length} of 66 pairs carry a warning; ${warned(3).length} of 220 triples carry one of their own, and`);
+  L.push(`Counts: ${warned(2).length} of ${PAIRS} pairs carry a warning; ${warned(3).length} of ${TRIPLES} triples carry one of their own, and`);
   L.push(`${entries.filter(([k, v]) => k.split('+').length === 3 && /^no more than its pairs/.test(v)).length} more show their pairs' warnings.`, '');
   L.push('## The warnings, strongest first', '');
   L.push('A hold lists each warning its mod\'s powers make, one line each, in this order (the same sentence once).', '');
@@ -375,7 +460,7 @@ function toMarkdown() {
   L.push('', `A mod with more than ${MANY_OVER} powers gets, in place of these lines: **${MANY}** (keyed by its exact set of powers; its`);
   L.push('combinations are still needs of their own, so a later version with fewer of them doesn\'t ask again for what was allowed).', '');
   for (const n of [2, 3]) {
-    L.push(`## ${n === 2 ? 'Pairs (66)' : 'Triples (220)'}`, '');
+    L.push(`## ${n === 2 ? `Pairs (${PAIRS})` : `Triples (${TRIPLES})`}`, '');
     L.push(`Grouped by their first power, in the menu's order.`, '');
     for (const first of POWERS) {
       const rows = entries.filter(([k]) => k.split('+').length === n && k.split('+')[0] === first);
@@ -388,4 +473,4 @@ function toMarkdown() {
   return `${L.join('\n').replace(/\n+$/, '')}\n`;
 }
 
-module.exports = { POWERS, READS, WARNINGS, MANY, MANY_OVER, COMBINATIONS, warningsFor, keyOf, toMarkdown };
+module.exports = { POWERS, POWERS_02, READS, WARNINGS, MANY, MANY_OVER, COMBINATIONS, warningsFor, keyOf, toMarkdown, PAIRS, TRIPLES };

@@ -1,6 +1,6 @@
 # The combination fixes: new and changed strings (branch combo-fixes)
 
-**All awaiting review.** Every user-facing sentence the fixes to the power-combination checks add or change
+**All approved 2026-11-11 (Claude, wording delegated by Tim).** Every user-facing sentence the fixes to the power-combination checks add or change
 (the review's findings F1 to F12): combination warnings the hold shows, a reason in
 docs/POWER-COMBINATIONS.md, and the errors a boxed mod (and so the agent writing it) sees in `trif errors`.
 Errors read "TRIF sandbox: …". `{…}` is a value filled in.

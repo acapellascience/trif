@@ -8,6 +8,8 @@ needs a section here for the version it releases.
 
 - **Google search works again.** Google changed its results page, and AI Banisher started hiding the
   results along with the AI Overview. It's fixed.
+- **Codex at work:** if your organization's Codex settings won't let TRIF use its sandbox, TRIF now stops
+  the chat and says why, instead of letting Codex carry on without TRIF's limits.
 
 ## 0.2.5
 

@@ -791,6 +791,7 @@ class Runs {
     child.stderr.setEncoding('utf8');
     child.stderr.on('data', (chunk) => {
       run.stderr = redactSecrets(run.stderr + chunk, run.secrets).slice(-STDERR_KEEP);
+      this._checkSandbox(run, chunk);
     });
 
     let exitInfo = null;
@@ -845,8 +846,22 @@ class Runs {
     run.timers.push(setInterval(take, 200));
   }
 
+  // The agent says it isn't using TRIF's sandbox (an organization's settings overrode it, codex.js
+  // sandboxOverridden): stop the run at once, with why. Never carry on without TRIF's limits.
+  _checkSandbox(run, text) {
+    if (run.sandboxRefused || !run.adapter.sandboxOverridden || !run.adapter.sandboxOverridden(text)) return false;
+    run.sandboxRefused = true;
+    const message = run.adapter.sandboxOverriddenMessage ? run.adapter.sandboxOverriddenMessage(text) : `${run.adapter.name} isn't using TRIF's sandbox, so TRIF stopped the run`;
+    this.logger.warn(`agent run ${run.id}: ${run.adapter.name} replaced TRIF's sandbox: stopped`);
+    this._emit(run, { kind: 'error', message });
+    run.agentDone = { ok: false, result: message };
+    this._kill(run, 500);
+    return true;
+  }
+
   _onLine(run, line) {
     if (!line.trim() || run.doneSent) return;
+    if (this._checkSandbox(run, line)) return;
     this._log(run, line);
     try {
       run.adapter.parse(line, (ev) => {

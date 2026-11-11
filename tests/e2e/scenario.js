@@ -3166,7 +3166,7 @@ setTimeout(() => {
       if (!after(st, C).includes('127.0.0.1 mods together, what they can do as you: click the counter (new)')) problems.push(`the change waiting, its site lines: ${JSON.stringify(after(st, C))}`);
       await sleep(1500);
       const before = await visit('before');
-      const errs = (await this.cli(['errors', '--json'], { timeoutMs: 20000 }).catch(() => ({ stdout: '' }))).stdout;
+      const errs = JSON.stringify((await this.cli(['errors', '--tab', String(win.tabId)], { json: true, timeoutMs: 20000 }).catch(() => ({ json: null }))).json);
       await this.cli(['approve', C], { timeoutMs: 20000 });
       await registered(C);
       await sleep(1500);

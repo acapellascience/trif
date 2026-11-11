@@ -277,7 +277,8 @@ function syncMods(reason, force) {
   // running meanwhile (held.js lastRun), sent as the mod, marked `pending` (the panel shows the change).
   const pendingIds = new Set();
   mods = mods.map((m) => {
-    if (!state.held[m.id]) return m;
+    // (held for being switched on: the very version that ran, which waits, as a new one would)
+    if (!state.held[m.id] || state.held[m.id].by === 'switch') return m;
     const before = lastRun(ws.home, m.id);
     if (before === null) return m;
     try {

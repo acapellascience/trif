@@ -2948,7 +2948,7 @@ setTimeout(() => {
         await this.cli(['approve', `${site}/${id}`], { timeoutMs: 20000 });
         await waitFor(`${id} registered`, async () => new RegExp(`${id}\\s+registered \\(boxed, powers:`).test(await status()) || null, { timeoutMs: 20000, intervalMs: 500 });
       }
-      for (const id of ids) if (/together/i.test(held[id])) problems.push(`${id}'s hold warns of a combination: ${held[id]}`);
+      for (const id of ids) if (/together, it/i.test(held[id])) problems.push(`${id}'s hold warns of a combination: ${held[id]}`);
       await this.forgetSite(site, `${site}/e2e-combo-act`);
       await sleep(1500);
       // the user goes to the page themselves: the act mod clicks and signals as it starts

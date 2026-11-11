@@ -500,15 +500,15 @@ export function sandboxRuntime(mode, pageModId, pageFn, pagePowers, pageWide) {
   // (and with `mods`, talk), so a combination the hold warns about (helper/lib/combinations.js) could be split
   // between two mods, each without the warning. So an act is refused while another boxed mod that has run on
   // this page has a power that makes a warned pair with it, unless the acting mod asked for that power too
-  // (and so its hold showed the warning), or the user approved that pair across the two mods (cross-mod
-  // approval: helper/lib/crossmods.js; the helper sends each mod the pairs it's in, `with`, and `crossOk` lets
-  // the act through beside the power of a mod it was approved with, never beside another's). ACT_PARTNERS: the
+  // (and so its hold showed the warning), or the user approved both powers for the site's mods together (site
+  // approval: helper/lib/sitecombos.js; the helper sends each mod its sites' approved unions, `site`, and crossOk
+  // lets the act through when this page's site has approved both). ACT_PARTNERS: the
   // act, and the powers it's refused beside (tests/combinations.test.js keeps it in step with the table). Not
   // here: sound beside a read (SAFE-MODS says why); click beside a draft another mod wrote (clickOk); click
   // beside go-to (on go-to's side, and on the page go-to lands on: arrivedOk). edit-uploads as a read: the mods that were handed a picture the user
   // attached (uploadReaders), not every mod with the power, which would stop every media mod beside an upload
   // editor. site-storage: also a mod with @migrate (it reads the site's storage once: `combo`).
-  // (the data: extension/pagewide.js, one definition with the helper's cross-mod approval)
+  // (the data: extension/pagewide.js, one definition with the helper's site approval)
   const ACT_PARTNERS = pageWide.actPartners;
   const PARTNER_WHY = {
     'write-drafts': ['changing what the user types', 'what one reads could end up in what the user posts'],
@@ -527,7 +527,8 @@ export function sandboxRuntime(mode, pageModId, pageFn, pagePowers, pageWide) {
   const inPlay = new Set(); // (the powers of the boxed mods that have run on this page, @migrate as site-storage)
   const uploadReaders = new Set(); // (boxed mods handed a picture the user attached on this page: edit-uploads reads it)
   // (whether the user approved the pair `a`+`b` across the acting mod and mod `other`: its `with` list)
-  const crossOk = (api, other, a, b) => !!other && api.cross.has(`${[a, b].sort().join('+')} ${other}`);
+  // (whether this page's site approved both powers for its mods together, as the acting mod was sent: `site`)
+  const crossOk = (api, other, a, b) => api.site.has(a) && api.site.has(b);
   // (how a refusal ends: what lifts it)
   // (a page-wide refusal goes in the mod's errors too, once per act on a page, whatever the mod catches: the
   // user, and `trif errors`, see why it didn't act)
@@ -538,7 +539,7 @@ export function sandboxRuntime(mode, pageModId, pageFn, pagePowers, pageWide) {
     if (!refusedOnce.has(k)) { refusedOnce.add(k); report(api.mod, err); }
     throw err;
   };
-  const LIFT = () => '(the user\'s OK for the two mods together lifts it: TRIF asks for that when either is new, changed or switched on)';
+  const LIFT = () => '(the user\'s OK for this site\'s mods together lifts it: TRIF asks when a mod that adds it is new, changed or switched on)';
   const partnersOk = (api, act) => {
     for (const p of ACT_PARTNERS[act]) {
       if (api.combo.has(p)) continue;
@@ -1258,9 +1259,10 @@ export function sandboxRuntime(mode, pageModId, pageFn, pagePowers, pageWide) {
     // (its powers as the combinations count them: @migrate reads the site's storage, so it's site-storage
     // there, for its own acts and beside other mods' (helper/lib/boxpowers.js powerNeeds counts it so too))
     self.combo = new Set([...self.powers, ...(Array.isArray(self.args.migrate) && self.args.migrate.length ? ['site-storage'] : [])]);
-    // (the pairs across it and another boxed mod that the user approved, "<a>+<b> <other id>", the pair's powers
-    // in a fixed order here: crossOk)
-    self.cross = new Set((Array.isArray(self.args.with) ? self.args.with : []).map((x) => { const i = String(x).indexOf(' '); const ps = String(x).slice(0, i).split('+'); return ps.length === 2 && i > 0 ? `${ps.sort().join('+')} ${String(x).slice(i + 1)}` : ''; }).filter(Boolean));
+    // (the powers this page's site approved for its mods together, from "<site> <a>+<b>+…": a site is the page's
+    // host, or one it's under, without www.: crossOk)
+    const onSite = (site) => { const t = String(site).toLowerCase().replace(/^www\./, ''); return !!t && (SITE_BASE === t || SITE_BASE.endsWith(`.${t}`)); };
+    self.site = new Set((Array.isArray(self.args.site) ? self.args.site : []).flatMap((x) => { const i = String(x).indexOf(' '); return i > 0 && onSite(String(x).slice(0, i)) ? String(x).slice(i + 1).split('+') : []; }));
     const has = (p) => self.powers.has(p);
     const needs = (p) => { if (!has(p)) fail(`that needs the ${p} power (// @powers ${p} in the mod's header, which the user approves)`); };
     apis.set(modId, self);

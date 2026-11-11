@@ -1293,9 +1293,8 @@ class Scenario {
       await r.check('the widened box (WIDEN.md class A): sound (compressors, a node into a parameter, waves, buffers from numbers, offline renders, its own clock), typed arrays and the browser\'s pure tools, page facts read only, drawing, animations, observers, events and focus on its own elements, SVG of its own and faithful copies, CSS from shown pictures and into shadow roots, text split into its own pieces, the page\'s own events, placeholders, bigger settings, more tags; each row\'s hostile test refused, nothing reaching the server or the page', () => this.wideCheck(win));
       await r.check('the widened box\'s powers (WIDEN.md class B): block-events, page-events, site-storage with @migrate, rewrite-requests, image-variants, edit-uploads, embeds, local-fonts, preload, and the widened site-data, go-to and media: held with each sentence and the many-powers warning; each works as its narrowing says; undeclared, each is refused', () => this.wideBCheck(win));
       await r.check('the sandbox\'s fixes from the conversion run: arc\'s anticlockwise, overscroll-behavior, a blocked key\'s default, a picture no mod changed passed on as it was, trif.wrap under a page\'s rewrite and over another mod\'s pieces, site-data\'s shortened copies, unchanged filters and a later mod\'s embedded filter, an image variant from a host without CORS, the site\'s own names in its storage, CSS into a nested shadow root', () => this.sandboxFixesCheck(win));
-      await r.check('cross-mod approval: two boxed mods whose powers make a warned pair across them; the click refused before the user\'s OK for the two together (asked on the newer mod\'s review), allowed after it; a new power asks again only for what it makes, on an approval card that says "Together with …"', () => this.crossModCheck(win));
-      await r.check('cross-mod approval when the other mod has both halves (Skip to Sandbox beside R for Random): the site-storage write refused beside the other\'s go-to, that very pair offered on the review, allowed once approved', () => this.crossBothHalvesCheck(win));
-      await r.check('go-to and click split between two boxed mods across a navigation (review F3): neither hold warns; on the page one mod\'s go-to took the user to, the other\'s clicks and signals wait for the user\'s own click; reached by the user, they work; with the two approved together, they work there too', () => this.comboFixesCheck(win));
+      await r.check('site approval: two boxed mods whose powers make a warned pair together; the second\'s card shows "Your 127.0.0.1 mods together" with what it adds marked new; approved, the click works; without the site\'s approval, refused and logged; a third mod switched on that adds a power waits', () => this.siteApprovalCheck(win));
+      await r.check('go-to and click split between two boxed mods across a navigation (review F3): neither hold warns; on the page one mod\'s go-to took the user to, the other\'s clicks and signals wait for the user\'s own click; reached by the user, they work; with the site\'s mods approved together, they work there too', () => this.comboFixesCheck(win));
       await r.check('speculation rules (audit AU-7): a page that prefetches its same-site links at once; a link a free mod adds is fetched without a click (Chrome), a boxed mod can\'t make one', () => this.specRulesCheck(win));
       await r.check('boxed mods in the panel: their own group between Style mods and Free mods, with its switch (off on the site: they stop there; on: back)', () => this.sandboxedPanelCheck(win));
       await r.check('mods from outside the chat start off: a new free mod and a new style mod arrive off, marked "new", and don\'t run; switched on in the panel, they run', () => this.startsOffCheck(win));
@@ -2939,18 +2938,19 @@ setTimeout(() => {
     const problems = [];
     this.sandboxPage = true;
     try {
-      // (the go mod first, then off while the act mod is written and approved, so the two have no cross-mod
-      // approval: crossModCheck tries that; here, the rule without it, then with it)
+      // (both approved, which approves the site's mods together; then the site's approval taken back and the act
+      // mod changed, so the version before runs with nothing approved for the site: the rule without it, then,
+      // approved again, with it: siteApprovalCheck tries the approval itself)
       const held = {};
       for (const [id, f] of Object.entries(mods)) {
         fs.writeFileSync(path.join(dir, `${id}.js`), fx(f));
         held[id] = line(await waitFor(`${id} held`, async () => { const st = await status(); return new RegExp(`${id}\\s+HELD`).test(st) ? st : null; }, { timeoutMs: 25000, intervalMs: 500 }), id);
         await this.cli(['approve', `${site}/${id}`], { timeoutMs: 20000 });
         await waitFor(`${id} registered`, async () => new RegExp(`${id}\\s+registered \\(boxed, powers:`).test(await status()) || null, { timeoutMs: 20000, intervalMs: 500 });
-        if (id === 'e2e-combo-go') await this.boxedSwitch(`${site}/${id}`, false);
       }
       for (const id of ids) if (/together/i.test(held[id])) problems.push(`${id}'s hold warns of a combination: ${held[id]}`);
-      await this.boxedSwitch(`${site}/e2e-combo-go`, true);
+      await this.forgetSite(site, `${site}/e2e-combo-act`);
+      await sleep(1500);
       // the user goes to the page themselves: the act mod clicks and signals as it starts
       await this.ext(`async (id, url) => { await chrome.tabs.update(id, { url, active: true }); }`, [win.tabId, `${base}/combo-dest.html?direct=1`]);
       const direct = await results('as it starts: signal', /\/combo-dest\.html\?direct=1$/);
@@ -2964,11 +2964,9 @@ setTimeout(() => {
       await this.d.click(ctx, '#user');
       const after = await results('after the user\'s click: signal', /\/combo-dest\.html$/);
       const ccAfter = await attr('data-cc'), pingsAfter = await attr('data-pings');
-      // the user's OK for the two together (the act mod's review, the newer one): reached by the go-to, they work
-      const st = await status();
-      if (!/TO REVIEW: together with E2E Combo go, it could take you to a page and click things there for you/.test(line(st, 'e2e-combo-act'))) problems.push(`the act mod's review: ${line(st, 'e2e-combo-act')}`);
+      // the site approved again (the act mod's waiting change): reached by the go-to, they work
       await this.cli(['approve', `${site}/e2e-combo-act`], { timeoutMs: 20000 });
-      await waitFor('reviewed', async () => !/TO REVIEW/.test(line(await status(), 'e2e-combo-act')) || null, { timeoutMs: 20000, intervalMs: 500 });
+      await waitFor('approved', async () => /e2e-combo-act\s+registered/.test(await status()) || null, { timeoutMs: 20000, intervalMs: 500 });
       await sleep(1500);
       // (by another page first, so the results read are the new arrival's)
       await this.ext(`async (id, url) => { await chrome.tabs.update(id, { url, active: true }); }`, [win.tabId, `${base}/two.html`]);
@@ -2976,7 +2974,7 @@ setTimeout(() => {
       await this.ext(`async (id, url) => { await chrome.tabs.update(id, { url, active: true }); }`, [win.tabId, `${base}/combo-go.html?again=1`]);
       const approved = await results('as it starts: signal', /\/combo-dest\.html$/);
       const want = {
-        'reached by the go-to after the user approved the two together: its click and signal worked': approved['as it starts: click'] === 'ok' && approved['as it starts: signal'] === 'ok',
+        'reached by the go-to with the site\'s mods approved together: its click and signal worked': approved['as it starts: click'] === 'ok' && approved['as it starts: signal'] === 'ok',
         'reached by the user: its click worked': direct['as it starts: click'] === 'ok' && ccDirect === 1,
         'reached by the user: its signal reached the page': direct['as it starts: signal'] === 'ok' && JSON.stringify(pingsDirect) === '[{"n":1}]',
         'reached by the other mod\'s go-to: its click refused': ARRIVED.test(went['as it starts: click'] || '') && /clicking for the user is off/.test(went['as it starts: click'] || '') && ccWent === 0,
@@ -2987,7 +2985,7 @@ setTimeout(() => {
       for (const [k, v] of Object.entries(want)) if (v !== true) problems.push(`${k}: ${JSON.stringify({ direct, went, after, ccDirect, ccWent, ccAfter, pingsDirect, pingsWent, pingsAfter }).slice(0, 2000)}`);
       fs.writeFileSync(this.r.file(`combo-fixes-${this.o.browser}.json`), JSON.stringify({ direct, went, after, approved, problems }, null, 2));
       if (problems.length) throw new Error(problems.join('\n'));
-      return `neither hold warns alone; reached by the user, the act mod clicked and signalled; reached by the other mod's go-to, both refused (${went['as it starts: click'].slice(0, 120)}…); after the user's own click there, both worked; with the two approved together, reached by the go-to, both worked`;
+      return `neither hold warns alone; reached by the user, the act mod clicked and signalled; reached by the other mod's go-to, both refused (${went['as it starts: click'].slice(0, 120)}…); after the user's own click there, both worked; with the site approved again, reached by the go-to, both worked`;
     } finally {
       for (const id of ids) { try { fs.unlinkSync(path.join(dir, `${id}.js`)); } catch { /* gone */ } }
     }
@@ -3064,7 +3062,7 @@ setTimeout(() => {
     }
   }
 
-  /** A boxed mod switched off (or on) everywhere, and the helper told so (switches.json: helper/lib/crossmods.js). */
+  /** A boxed mod switched off (or on) everywhere, and the helper told so (switches.json: helper/lib/sitecombos.js). */
   async boxedSwitch(id, on) {
     const r = await this.cli([on ? 'enable' : 'disable', id], { timeoutMs: 20000 });
     if (r.status !== 0) throw new Error(`trif ${on ? 'enable' : 'disable'} ${id}: ${r.stdout}${r.stderr}`);
@@ -3077,147 +3075,121 @@ setTimeout(() => {
     }, { timeoutMs: 20000, intervalMs: 400 });
   }
 
-  // Cross-mod approval (helper/lib/crossmods.js, docs/SAFE-MODS.md "Across mods"): two boxed mods on one page
-  // whose powers make a warned pair split between them (e2e-cm-read: keys; e2e-cm-click: click, never keys).
-  // The click mod is written while the read mod is off: its hold has nothing across. The read mod switched on:
-  // the click is refused (as before cross-mod approval), and the click mod's review says "together with E2E
-  // Cross read"; approved, the click works. A new version that adds page-events asks again only for what that
-  // makes: its approval card says "Together with E2E Cross read, …" in the red box, after the mod's own.
-  async crossModCheck(win) {
+  /**
+   * The site's approvals taken out of allowed.json (as for mods approved before site approvals existed), and a mod
+   * of it changed (a comment), so the helper works it out again: its change waits, and the version before runs
+   * with nothing approved for the site (helper/lib/sitecombos.js).
+   */
+  async forgetSite(site, id) {
+    const file = path.join(this.trif, 'allowed.json');
+    const all = JSON.parse(fs.readFileSync(file, 'utf8'));
+    for (const v of Object.values(all)) if (v && Array.isArray(v.powers)) v.powers = v.powers.filter((k) => !k.startsWith(`site:${site}:`));
+    fs.writeFileSync(file, JSON.stringify(all, null, 2) + '\n');
+    const f = path.join(this.trif, 'sites', ...id.split('/')).replace(/$/, '.js');
+    fs.appendFileSync(f, `\n// changed (${Date.now()})\n`);
+    const short = id.split('/').pop();
+    return waitFor(`${id} waiting again`, async () => { const st = (await this.cli(['status'], { timeoutMs: 20000 })).stdout; return new RegExp(`${short}\\s+CHANGE WAITING`).test(st) ? st : null; }, { timeoutMs: 25000, intervalMs: 500 });
+  }
+
+  // Site approval (helper/lib/sitecombos.js, docs/SAFE-MODS.md "Across mods: one approval per site"): boxed mods on
+  // 127.0.0.1 whose powers make a warned pair together (e2e-cm-read: keys; e2e-cm-click: click, never keys). The
+  // click mod's card shows "Your 127.0.0.1 mods together", what it adds marked new; approved, it clicks. With the
+  // site's approval taken back, its click is refused (logged); approved again, it clicks. A third mod (page-events),
+  // approved alone and switched off, switched on again adds a power the site hasn't approved: it waits.
+  async siteApprovalCheck(win) {
     const site = '127.0.0.1';
     const base = `http://${site}:${this.o.servers.port}`;
     const dir = path.join(this.trif, 'sites', site);
     const fx = (f) => fs.readFileSync(path.join(I.REPO, 'tests', 'e2e', 'fixtures', f), 'utf8');
-    const R = `${site}/e2e-cm-read`, C = `${site}/e2e-cm-click`;
-    const readFile = path.join(dir, 'e2e-cm-read.js'), clickFile = path.join(dir, 'e2e-cm-click.js');
+    const R = `${site}/e2e-cm-read`, C = `${site}/e2e-cm-click`, T = `${site}/e2e-cm-sig`;
+    const files = { [R]: path.join(dir, 'e2e-cm-read.js'), [C]: path.join(dir, 'e2e-cm-click.js'), [T]: path.join(dir, 'e2e-cm-sig.js') };
     const status = async () => (await this.cli(['status'], { timeoutMs: 20000 })).stdout;
-    const line = (st, id) => st.split('\n').find((l) => new RegExp(`${id}\\s`).test(l)) || '';
+    const line = (st, id) => st.split('\n').find((l) => new RegExp(`${id.split('/').pop()}\\s`).test(l)) || '';
+    const after = (st, id) => { const ls = st.split('\n'); const i = ls.findIndex((l) => new RegExp(`${id.split('/').pop()}\\s`).test(l)); const out = []; for (let k = i + 1; k > 0 && k < ls.length && /^\s{40,}/.test(ls[k]); k++) out.push(ls[k].trim()); return out; };
     const attr = async (name) => { const o = await this.ext(`async (tabId, name) => { const r = await chrome.scripting.executeScript({ target: { tabId }, func: (n) => document.documentElement.getAttribute(n), args: [name] }); return r[0].result; }`, [win.tabId, name]); return typeof o === 'string' ? JSON.parse(o) : o; };
-    const visit = async (what) => {
+    const visit = async (what, key = 'click') => {
       await this.ext(`async (id, url) => { await chrome.tabs.update(id, { url, active: true }); }`, [win.tabId, `${base}/cross.html?${what}`]);
       let last = null;
-      const r = await waitFor(`the click mod's results (${what})`, async () => { const u = String(await this.ext(`async (id) => (await chrome.tabs.get(id)).url`, [win.tabId]).catch(() => '')); if (!u.endsWith(`?${what}`)) return null; const x = last = await attr('data-trif-box-cm').catch(() => null); return x && x.click ? x : null; }, { timeoutMs: 20000, intervalMs: 400 })
+      const r = await waitFor(`the mods' results (${what})`, async () => { const u = String(await this.ext(`async (id) => (await chrome.tabs.get(id)).url`, [win.tabId]).catch(() => '')); if (!u.endsWith(`?${what}`)) return null; const x = last = await attr(key === 'click' ? 'data-trif-box-cm' : 'data-trif-box-cs').catch(() => null); return x && x[key] ? x : null; }, { timeoutMs: 20000, intervalMs: 400 })
         .catch((e) => { throw new Error(`${e.message}: ${JSON.stringify(last)}`); });
       return { ...r, cc: await attr('data-cc'), pings: await attr('data-pings') };
     };
-    const ACROSS = 'together with E2E Cross read, it could let what it reads decide what it clicks for you';
+    const held = (id, kind = 'HELD') => waitFor(`${id} ${kind}`, async () => { const st = await status(); return new RegExp(`${id.split('/').pop()}\\s+${kind}`).test(st) ? st : null; }, { timeoutMs: 25000, intervalMs: 500 });
+    const registered = (id) => waitFor(`${id} registered`, async () => new RegExp(`${id.split('/').pop()}\\s+registered \\(boxed, powers:`).test(await status()) || null, { timeoutMs: 20000, intervalMs: 500 });
     const problems = [];
     this.sandboxPage = true;
     try {
-      // the read mod, alone: held for keys, approved; then off
-      fs.writeFileSync(readFile, fx('cross-read.js'));
-      await waitFor('the read mod held', async () => /e2e-cm-read\s+HELD/.test(await status()) || null, { timeoutMs: 25000, intervalMs: 500 });
+      // the signal mod, alone on the site: only its own power; approved, then off
+      fs.writeFileSync(files[T], fx('cross-click.js').replace('E2E Cross click', 'E2E Cross signal').replace('// @powers      click', '// @powers      page-events cm-ping').replace(/\/\/ @click .*\n/, '').replace("t('click', () => page.find('#cc').click());", '').replace('data-trif-box-cm', 'data-trif-box-cs'));
+      let st = await held(T);
+      if (/mods together/.test(line(st, T) + after(st, T).join(' '))) problems.push(`alone, the signal mod's hold speaks for the site: ${line(st, T)}`);
+      await this.cli(['approve', T], { timeoutMs: 20000 });
+      await registered(T);
+      await this.boxedSwitch(T, false);
+      // the read mod: alone (the other is off), its own power only
+      fs.writeFileSync(files[R], fx('cross-read.js'));
+      st = await held(R);
+      if (after(st, R).length) problems.push(`the read mod, alone, speaks for the site: ${after(st, R).join(' / ')}`);
       await this.cli(['approve', R], { timeoutMs: 20000 });
-      await waitFor('the read mod registered', async () => /e2e-cm-read\s+registered \(boxed, powers: keys\)/.test(await status()) || null, { timeoutMs: 20000, intervalMs: 500 });
-      await this.boxedSwitch(R, false);
-      // the click mod, written while the read mod is off: its own power only
-      fs.writeFileSync(clickFile, fx('cross-click.js'));
-      const held = await waitFor('the click mod held', async () => { const st = await status(); return /e2e-cm-click\s+HELD/.test(st) ? st : null; }, { timeoutMs: 25000, intervalMs: 500 });
-      if (/together/i.test(line(held, 'e2e-cm-click'))) problems.push(`with the read mod off, the click mod's hold warns: ${line(held, 'e2e-cm-click')}`);
-      await this.cli(['approve', C], { timeoutMs: 20000 });
-      await waitFor('the click mod registered', async () => /e2e-cm-click\s+registered \(boxed, powers: click\)/.test(await status()) || null, { timeoutMs: 20000, intervalMs: 500 });
-      // the read mod on again: the pair is in play, not approved: refused, and the newer mod's review asks
-      await this.boxedSwitch(R, true);
-      const review = await waitFor('the click mod\'s review', async () => { const st = await status(); return line(st, 'e2e-cm-click').includes('TO REVIEW') ? st : null; }, { timeoutMs: 20000, intervalMs: 500 });
-      if (!line(review, 'e2e-cm-click').includes(`TO REVIEW: ${ACROSS}`)) problems.push(`trif status, the click mod's review: ${line(review, 'e2e-cm-click')}`);
-      if (/TO REVIEW/.test(line(review, 'e2e-cm-read'))) problems.push(`the read mod is asked too: ${line(review, 'e2e-cm-read')}`);
-      const before = await visit('before');
-      // the panel's row says it too
-      const rowFacts = await waitFor('the review in the panel', () => this.panel(`async () => { const li = document.querySelector('li[data-mod="${C}"] .mod-facts.review'); return li ? [...li.querySelectorAll('.facts li')].map((x) => x.textContent) : null; }`), { timeoutMs: 15000 }).catch(() => null);
-      if (!rowFacts || !rowFacts.includes('Together with E2E Cross read, it could let what it reads decide what it clicks for you.')) problems.push(`the panel's review: ${JSON.stringify(rowFacts)}`);
-      // "Looks right" (trif approve on a review): the pair is approved for both; the click works
-      await this.cli(['approve', C], { timeoutMs: 20000 });
-      await waitFor('reviewed', async () => { const st = await status(); return !/TO REVIEW/.test(line(st, 'e2e-cm-click')) || null; }, { timeoutMs: 20000, intervalMs: 500 });
-      await sleep(1500); // (the new registration, with the approved pair)
-      const after = await visit('after');
-      // a new version with page-events: asks again for that, and only for what it makes with the read mod
-      fs.writeFileSync(clickFile, fx('cross-click.js').replace('// @powers      click', '// @powers      click, page-events cm-ping'));
-      const waiting = await waitFor('the change waiting', async () => { const st = await status(); return /e2e-cm-click\s+CHANGE WAITING/.test(st) ? st : null; }, { timeoutMs: 25000, intervalMs: 500 });
-      const wl = line(waiting, 'e2e-cm-click');
-      if (!wl.includes('it can send this page\'s own code these signals: cm-ping; together with E2E Cross read, it could hand what it reads to this page\'s own code, which may post or send it') || wl.includes(ACROSS)) problems.push(`trif status, the new version: ${wl}`);
+      await registered(R);
+      // the click mod: its card, the site's box with what it adds marked new
+      await this.ext(`async (id, url) => { await chrome.tabs.update(id, { url, active: true }); }`, [win.tabId, `${base}/cross.html?first`]);
+      fs.writeFileSync(files[C], fx('cross-click.js'));
+      st = await held(C);
+      const wantLines = ['127.0.0.1 mods together, what they can see beyond the page: the keys you press (new)', '127.0.0.1 mods together, what they can do as you: click the counter (new)',
+        '127.0.0.1 mods together, where what they see could go: clicks the site sees (new)', '127.0.0.1 mods together: So something they read could end up sent from your account. (new)'];
+      if (JSON.stringify(after(st, C)) !== JSON.stringify(wantLines)) problems.push(`trif status, the click mod's site lines: ${JSON.stringify(after(st, C))}`);
       const card = await this.approvalFor(C);
-      const wantCard = { lead: 'It asks for these powers. TRIF holds it to them:', items: ['It can send this page\'s own code these signals: cm-ping.'],
-        together: ['Together with E2E Cross read, it could hand what it reads to this page\'s own code, which may post or send it.'] };
-      for (const [k, v] of Object.entries(wantCard)) if (JSON.stringify(card[k]) !== JSON.stringify(v)) problems.push(`the approval card's ${k}: ${JSON.stringify(card[k])}`);
+      const box = await this.panel(`async () => { const b = document.querySelector('#approval .ap-sites'); return b && !b.hidden ? [...b.querySelectorAll('.ap-site-title, .ap-site-head, .ap-site-list li, .ap-site-flag')].map((x) => x.textContent) : null; }`);
+      const wantBox = ['Your 127.0.0.1 mods together', 'What they can see beyond the page', 'the keys you press new', 'What they can do as you', 'click the counter new', 'Where what they see could go', 'clicks the site sees new', 'So something they read could end up sent from your account. new'];
+      if (JSON.stringify(card.items) !== JSON.stringify(['It can click these for you: the counter (#cc).'])) problems.push(`the card's own lines: ${JSON.stringify(card.items)}`);
+      if (JSON.stringify(box) !== JSON.stringify(wantBox)) problems.push(`the card's site box: ${JSON.stringify(box)}`);
       const shots = path.join(os.homedir(), 'WebMods-worktrees', 'crossmod-runs', 'shots');
       for (const scheme of ['light', 'dark']) {
         if (await this.d.colorScheme(this.panelCtx, scheme)) {
           await sleep(200);
-          const f = await this.shot(this.panelCtx, `approval-cross-mod-${scheme}`);
-          try { fs.mkdirSync(shots, { recursive: true }); fs.copyFileSync(f, path.join(shots, `approval-cross-mod-${this.o.browser}-${scheme}.png`)); } catch { /* only a copy */ }
+          const f = await this.shot(this.panelCtx, `approval-site-${scheme}`);
+          try { fs.mkdirSync(shots, { recursive: true }); fs.copyFileSync(f, path.join(shots, `approval-site-${this.o.browser}-${scheme}.png`)); } catch { /* only a copy */ }
         }
       }
-      if (!(await this.d.colorScheme(this.panelCtx, 'light'))) { const f = await this.shot(this.panelCtx, 'approval-cross-mod'); try { fs.mkdirSync(shots, { recursive: true }); fs.copyFileSync(f, path.join(shots, `approval-cross-mod-${this.o.browser}.png`)); } catch { /* only a copy */ } }
+      if (!(await this.d.colorScheme(this.panelCtx, 'light'))) { const f = await this.shot(this.panelCtx, 'approval-site'); try { fs.mkdirSync(shots, { recursive: true }); fs.copyFileSync(f, path.join(shots, `approval-site-${this.o.browser}.png`)); } catch { /* only a copy */ } }
       await this.d.colorScheme(this.panelCtx, '');
       await this.d.click(this.panelCtx, '#approval .ap-allow');
-      await waitFor('the new version registered', async () => /e2e-cm-click\s+registered \(boxed, powers: (click, page-events|page-events, click)\)/.test(await status()) || null, { timeoutMs: 20000, intervalMs: 500 });
+      await registered(C);
       await sleep(1500);
-      const v2 = await visit('v2');
+      const approved = await visit('approved');
+      // the site's approval taken back: the click refused, and in its errors; approved again (its waiting change), it clicks
+      st = await this.forgetSite(site, C);
+      if (!after(st, C).includes('127.0.0.1 mods together, what they can do as you: click the counter (new)')) problems.push(`the change waiting, its site lines: ${JSON.stringify(after(st, C))}`);
+      await sleep(1500);
+      const before = await visit('before');
+      const errs = (await this.cli(['errors', '--json'], { timeoutMs: 20000 }).catch(() => ({ stdout: '' }))).stdout;
+      await this.cli(['approve', C], { timeoutMs: 20000 });
+      await registered(C);
+      await sleep(1500);
+      const again = await visit('again');
+      // the signal mod switched on: it adds page-events, which the site hasn't approved: it waits
+      await this.cli(['enable', T], { timeoutMs: 20000 });
+      st = await held(T);
+      const tl = after(st, T);
+      if (!tl.includes('127.0.0.1 mods together, what they can do as you: click the counter, signal the page\'s code (new)')) problems.push(`switched on, the signal mod's site lines: ${JSON.stringify(tl)}`);
+      await this.cli(['approve', T], { timeoutMs: 20000 });
+      await registered(T);
+      await sleep(1500);
+      const sig = await visit('sig', 'signal');
       const want = {
-        'before the approval: the click refused, the counter untouched': /^refused: .*clicking for the user is off on this page while another boxed mod here has the keys power.*the user's OK for the two mods together lifts it/.test(before.click) && before.cc === 0,
-        'after the cross approval: the click worked': after.click === 'ok' && after.cc === 1,
-        'the new version, its pair approved too: it clicks and signals': v2.click === 'ok' && v2.cc === 1 && v2.signal === 'ok' && JSON.stringify(v2.pings) === '[{"n":1}]',
+        'approved: the click worked': approved.click === 'ok' && approved.cc === 1,
+        'the site\'s approval taken back: the click refused': /^refused: .*clicking for the user is off on this page while another boxed mod here has the keys power.*this site's mods together lifts it/.test(before.click) && before.cc === 0,
+        'the refusal in trif errors, though the mod caught it': /clicking for the user is off/.test(errs),
+        'approved again: the click worked': again.click === 'ok' && again.cc === 1,
+        'the signal mod, switched on and approved: it signalled': sig.signal === 'ok' && JSON.stringify(sig.pings) === '[{"n":1}]',
       };
-      for (const [k, v] of Object.entries(want)) if (v !== true) problems.push(`${k}: ${JSON.stringify({ before, after, v2 }).slice(0, 1500)}`);
-      fs.writeFileSync(this.r.file(`cross-mod-${this.o.browser}.json`), JSON.stringify({ before, after, v2, card, problems }, null, 2));
+      for (const [k, v] of Object.entries(want)) if (v !== true) problems.push(`${k}: ${JSON.stringify({ approved, before, again, sig }).slice(0, 1500)}`);
+      fs.writeFileSync(this.r.file(`site-approval-${this.o.browser}.json`), JSON.stringify({ approved, before, again, sig, card, box, problems }, null, 2));
       if (problems.length) throw new Error(problems.join('\n'));
-      return `written with the other off: nothing across; on again: the click refused (${before.click.slice(9, 110)}…), the newer mod's review "${ACROSS}"; approved: it clicks; a new power asked again only for its own pair, the card "${card.together[0]}"`;
+      return `the click mod's card: "${box.join(' · ')}"; approved: it clicks; taken back: refused (${before.click.slice(9, 100)}…) and logged; approved again: it clicks; the signal mod switched on waited for "signal the page's code (new)", then signalled`;
     } finally {
-      for (const f of [readFile, clickFile]) { try { fs.unlinkSync(f); } catch { /* gone */ } }
-    }
-  }
-
-  // Cross-mod approval when the other mod has both halves of a pair (the conversion run's Skip to Sandbox beside R
-  // for Random): go-to and site-storage are R's own combination, yet Skip's site-storage writes are refused beside
-  // R's go-to. Written with R off (nothing across), R on again: the write is refused and Skip's review offers that
-  // very pair; approved, it writes.
-  async crossBothHalvesCheck(win) {
-    const site = '127.0.0.1';
-    const base = `http://${site}:${this.o.servers.port}`;
-    const dir = path.join(this.trif, 'sites', site);
-    const head = (name, powers) => `// ==WebMod==\n// @name ${name}\n// @match *://127.0.0.1/cross.html*\n// @boxed\n// @powers ${powers}\n// @run-at document-idle\n// ==/WebMod==\n`;
-    const files = {
-      'e2e-cm-r': head('E2E Cross R', 'site-storage local:cm-r, go-to /cross.html') + '// (go-to and site-storage: both halves; it only has to be on the page)\n',
-      'e2e-cm-skip': head('E2E Cross skip', 'site-storage local:cm-skip, page-events cm-ping')
-        + `setTimeout(() => { let r; try { trif.storage('local').set('cm-skip', 'kept'); r = 'ok'; } catch (e) { r = 'refused: ' + String(e && e.message).slice(0, 400); } page.root.setAttr('data-trif-box-bh', r); }, 600);\n`,
-    };
-    const R = `${site}/e2e-cm-r`, S = `${site}/e2e-cm-skip`;
-    const status = async () => (await this.cli(['status'], { timeoutMs: 20000 })).stdout;
-    const line = (st, id) => st.split('\n').find((l) => new RegExp(`${id}\\s`).test(l)) || '';
-    const tabUrl = async () => String(await this.ext(`async (id) => (await chrome.tabs.get(id)).url`, [win.tabId]).catch(() => ''));
-    const visit = async (what) => {
-      await this.ext(`async (id, url) => { await chrome.tabs.update(id, { url, active: true }); }`, [win.tabId, `${base}/cross.html?${what}`]);
-      return waitFor(`the skip mod's write (${what})`, async () => {
-        if (!(await tabUrl()).endsWith(`?${what}`)) return null;
-        return this.ext(`async (tabId) => { const r = await chrome.scripting.executeScript({ target: { tabId }, func: () => document.documentElement.getAttribute('data-trif-box-bh') }); return r[0].result; }`, [win.tabId]).catch(() => null);
-      }, { timeoutMs: 20000, intervalMs: 400 });
-    };
-    const problems = [];
-    this.sandboxPage = true;
-    try {
-      for (const [id, code] of Object.entries(files)) {
-        fs.writeFileSync(path.join(dir, `${id}.js`), code);
-        const held = line(await waitFor(`${id} held`, async () => { const st = await status(); return new RegExp(`${id}\\s+HELD`).test(st) ? st : null; }, { timeoutMs: 25000, intervalMs: 500 }), id);
-        if (/together with/i.test(held)) problems.push(`${id}'s hold, the other off or not there: ${held}`);
-        await this.cli(['approve', `${site}/${id}`], { timeoutMs: 20000 });
-        await waitFor(`${id} registered`, async () => new RegExp(`${id}\\s+registered \\(boxed, powers:`).test(await status()) || null, { timeoutMs: 20000, intervalMs: 500 });
-        if (id === 'e2e-cm-r') await this.boxedSwitch(R, false);
-      }
-      await this.boxedSwitch(R, true);
-      const st = await waitFor('the skip mod\'s review', async () => { const x = await status(); return line(x, 'e2e-cm-skip').includes('TO REVIEW') ? x : null; }, { timeoutMs: 20000, intervalMs: 500 });
-      const review = line(st, 'e2e-cm-skip');
-      if (!review.includes('TO REVIEW: together with E2E Cross R, it could take you to a page and set off that page\'s own actions there')) problems.push(`the skip mod's review: ${review}`);
-      const before = await visit('bh1');
-      if (!/^refused: .*changing what the site keeps is off on this page while another boxed mod here has the go-to power.*lifts it/.test(before || '')) problems.push(`before the approval, the write: ${before}`);
-      await this.cli(['approve', S], { timeoutMs: 20000 });
-      await waitFor('reviewed', async () => !/TO REVIEW/.test(line(await status(), 'e2e-cm-skip')) || null, { timeoutMs: 20000, intervalMs: 500 });
-      await sleep(1500);
-      const after = await visit('bh2');
-      if (after !== 'ok') problems.push(`after the approval, the write: ${after}`);
-      if (problems.length) throw new Error(problems.join('\n'));
-      return `R off: nothing across; on: the write refused (${String(before).slice(9, 120)}…), the review "${review.split('TO REVIEW: ')[1].split(' (trif approve')[0]}"; approved: it writes`;
-    } finally {
-      for (const id of Object.keys(files)) { try { fs.unlinkSync(path.join(dir, `${id}.js`)); } catch { /* gone */ } }
+      for (const f of Object.values(files)) { try { fs.unlinkSync(f); } catch { /* gone */ } }
     }
   }
 
@@ -3314,7 +3286,7 @@ setTimeout(() => {
     try {
       for (const [id, text] of Object.entries(files)) fs.writeFileSync(path.join(dir, `${id}.js`), text);
       // held, for its powers and the combination; mods alone (e2e-pw3b) doesn't hold
-      const held = await waitFor('held for its powers', async () => { const st = await status(); return /e2e-pw3\s+HELD/.test(st) && /e2e-pw3b\s+HELD: it can talk to your other boxed mods on this page; it can click these for you: the other button \(#pbtn\); together with E2E Boxed mod with phase-3 powers, it could .*let what it reads decide what it clicks for you/.test(st) && /e2e-pw3none\s+registered \(boxed\)/.test(st) ? st : null; }, { timeoutMs: 25000, intervalMs: 500 });
+      const held = await waitFor('held for its powers', async () => { const st = await status(); return /e2e-pw3\s+HELD/.test(st) && /e2e-pw3b\s+HELD: it can talk to your other boxed mods on this page; it can click these for you: the other button \(#pbtn\); it adds to what your 127\.0\.0\.1 mods can do together \(trif approve/.test(st) && /e2e-pw3none\s+registered \(boxed\)/.test(st) ? st : null; }, { timeoutMs: 25000, intervalMs: 500 });
       const hl = line(held, 'e2e-pw3');
       for (const want of ['it can read what you type on this site, but can\'t send it anywhere', 'it can talk to your other boxed mods on this page', 'it can play and pause video and audio on this page',
         `it can take you to these pages on ${site}: /e2e-goto-ok, or to a link the page shows`,
@@ -3348,8 +3320,8 @@ setTimeout(() => {
       };
       for (const [k, re] of Object.entries(why)) if (!re.test(R[k] || '')) problems.push(`${k}: ${R[k]}`);
       if (got.b !== `{"hello":"from a","n":1} from ${site}/e2e-pw3`) problems.push(`the other end of the channel: ${got.b}`);
-      // (beside a read it didn't ask for, approved together on its hold: cross-mod approval)
-      if (got.bClick !== 'clicked') problems.push(`the other mod's click, beside a read it didn't ask for, the two approved together: ${got.bClick}`);
+      // (beside a read it didn't ask for, approved for the site's mods together)
+      if (got.bClick !== 'clicked') problems.push(`the other mod's click, beside a read it didn't ask for, approved for the site: ${got.bClick}`);
       if (got.hash !== '#plink-target') problems.push(`the link on the page wasn't clicked: ${got.hash}`);
       if (!/^wd,wta/.test(got.seen || '')) problems.push(`the page didn't see the changed drafts as input: ${got.seen}`);
       if (got.pw !== 'hunter2' || got.f3i !== 'typed') problems.push(`a field changed that shouldn't: ${JSON.stringify(got)}`);
@@ -3358,14 +3330,15 @@ setTimeout(() => {
       await this.d.click(ctx, '#trif-box-pw3-go');
       await waitFor('the go-to page', async () => this.o.servers.requests.some((q) => q.url === '/e2e-goto-ok') || null, { timeoutMs: 10000, intervalMs: 300 })
         .catch(() => problems.push('go-to didn\'t go to /e2e-goto-ok'));
-      // another boxed mod with a read (keys) the writer didn't ask for: write-drafts is off on the page (written
-      // while the writer is off, so the two have no cross-mod approval: crossModCheck tries that)
-      await this.boxedSwitch(`${site}/e2e-pw3`, false);
+      // another boxed mod with a read (keys) the writer didn't ask for: write-drafts is off on the page without the
+      // site's approval (taken back, and the keys mod changed so the version before runs: siteApprovalCheck tries
+      // the approval itself)
       fs.writeFileSync(kFile, `// ==WebMod==\n// @name E2E keys\n// @match *://127.0.0.1/powers3.html*\n// @boxed\n// @powers keys\n// @run-at document-start\n// ==/WebMod==\npage.on('keydown', () => {});\n`);
       await waitFor('the keys mod held', async () => /e2e-pw3k\s+HELD/.test(await status()) || null, { timeoutMs: 20000, intervalMs: 500 });
       await this.cli(['approve', `${site}/e2e-pw3k`], { timeoutMs: 20000 });
       await waitFor('the keys mod registered', async () => /e2e-pw3k\s+registered \(boxed, powers: keys\)/.test(await status()) || null, { timeoutMs: 20000, intervalMs: 500 });
-      await this.boxedSwitch(`${site}/e2e-pw3`, true);
+      await this.forgetSite(site, `${site}/e2e-pw3k`);
+      await sleep(1500);
       const got2 = await open();
       const R2 = JSON.parse(got2.r);
       for (const k of ['write-drafts: a field', 'write-drafts: a textarea', 'write-drafts: an editor']) {

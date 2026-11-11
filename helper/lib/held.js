@@ -40,7 +40,7 @@ const { outOfScope } = require('./scope');
 const { within, ignoresCase } = require('./pathcheck');
 const { powersOf, modSites } = require('./powers');
 const { isSoft } = require('./boxpowers');
-const cross = require('./crossmods');
+const sites = require('./sitecombos');
 
 // powersOf reads every mod's code on each sync; a big mod takes a few hundred ms, so by hash.
 const cache = new Map();
@@ -216,7 +216,12 @@ function updateHeld(ws, mods, scopes) {
     changed = true;
   }
   const allowed = loadAllowed(ws.home);
-  const isOff = cross.offFn(ws.home); // (the boxed mods switched off in every browser: no combinations with them)
+  const isOff = sites.offFn(ws.home); // (the boxed mods switched off in every browser: not in their sites' union)
+  // (mods switched on since: worked out as if changed, so one that adds combinations its site hasn't approved
+  // waits; off again, or nothing to ask, and they're done)
+  const switched = sites.loadSwitched(ws.home);
+  let switchedChanged = false;
+  const doneSwitching = (id) => { if (switched[id]) { delete switched[id]; switchedChanged = true; } };
   let seen = loadSeen(ws.home);
   let seenChanged = false;
   // (the lines of every version that ran, kept together: an undo back to one of them isn't new)
@@ -251,7 +256,9 @@ function updateHeld(ws, mods, scopes) {
   for (const m of mods) {
     const same = held[m.id] && held[m.id].hash === m.hash; // (held as it is: waiting for the user, unless it's allowed now)
     const run = byRun.get(m.id) || (held[m.id] && live.find((s) => s.runId === held[m.id].runId)) || (same && held[m.id].scope ? { site: held[m.id].site, scope: held[m.id].scope, runId: held[m.id].runId } : null);
-    if (!run && seenHash(seen[m.id]) === m.hash) {
+    if (switched[m.id] && isOff(m.id)) { doneSwitching(m.id); if (held[m.id] && held[m.id].by === 'switch') { delete held[m.id]; changed = true; } }
+    const forced = !!switched[m.id];
+    if (!run && !forced && seenHash(seen[m.id]) === m.hash) {
       if (typeof seen[m.id] === 'string') { seen[m.id] = record(m); seenChanged = true; saveRan(ws.home, m); } // (recorded before lines were)
       else if (!fs.existsSync(ranFile(ws.home, m.id))) saveRan(ws.home, m);
       if (held[m.id]) { delete held[m.id]; changed = true; }
@@ -261,24 +268,26 @@ function updateHeld(ws, mods, scopes) {
     let needs = needsOf(m, run ? run.scope : null)
       .filter((n) => (run || n.key !== 'risk2') && !isAllowed(n, ok, true))
       .map((n) => described(n, ok));
-    // (and its combinations with the other boxed mods on its site that the user hasn't approved: crossmods.js;
-    // a new or changed mod's hold carries them, so the other mod isn't asked again)
-    needs = needs.concat(cross.crossNeeds(m, mods, { allowed, isOff }));
+    // (and, where its powers add a holding power to what its site's boxed mods together are approved for, the
+    // site's new union: sitecombos.js; approving it approves that for the site)
+    needs = needs.concat(sites.siteNeeds(m, mods, { allowed, isOff }));
     // (a boxed mod's `controls` and `mods` are listed on a hold, but don't make one on their own)
     if (needs.length && needs.every((n) => isSoft(n.key))) needs = [];
-    // (held as it is, for the same needs: as it was; a combination approved with the other mod since, or a
-    // peer switched on or off, changes what it waits for)
+    // (held as it is, for the same needs: as it was; a combination the site approved since, or another mod
+    // switched on or off, changes what it waits for)
     if (needs.length && same && JSON.stringify(held[m.id].needs || []) === JSON.stringify(needs.map((n) => n.key))) continue;
     if (needs.length) {
-      const names = cross.namesFor(needs);
+      // (by 'switch': the very version that ran, switched on, adding what its site hasn't approved)
+      const by = run ? 'agent' : forced && seenHash(seen[m.id]) === m.hash ? 'switch' : 'outside';
       held[m.id] = {
-        hash: m.hash, site: run ? run.site : m.site, scope: run ? run.scope : null, runId: run ? run.runId : null, by: run ? 'agent' : 'outside', at: same ? held[m.id].at : Date.now(),
+        hash: m.hash, site: run ? run.site : m.site, scope: run ? run.scope : null, runId: run ? run.runId : null, by, at: same ? held[m.id].at : Date.now(),
         reason: reasonOf(needs), facts: needs.map((n) => n.fact), needs: needs.map((n) => n.key),
         lines: Object.fromEntries(needs.filter((n) => n.lines && n.lines.length).map((n) => [n.key, n.lines])), claim: claimOf(m),
-        ...(Object.keys(names).length ? { withNames: names } : {}),
+        ...reachOf(needs),
       };
       changed = true;
     } else {
+      doneSwitching(m.id);
       if (held[m.id]) { delete held[m.id]; changed = true; }
       if (seenHash(seen[m.id]) !== m.hash) { seen[m.id] = record(m); seenChanged = true; saveRan(ws.home, m); }
     }
@@ -286,9 +295,17 @@ function updateHeld(ws, mods, scopes) {
   const ids = new Set(mods.map((m) => m.id));
   for (const id of Object.keys(held)) if (!ids.has(id)) { delete held[id]; changed = true; }
   for (const id of Object.keys(seen)) if (!ids.has(id)) { delete seen[id]; seenChanged = true; try { fs.unlinkSync(ranFile(ws.home, id)); } catch { /* none */ } }
+  for (const id of Object.keys(switched)) if (!ids.has(id)) doneSwitching(id);
   if (changed) saveHeld(ws.home, held);
   if (seenChanged) saveJson(seenFile(ws.home), seen);
+  if (switchedChanged) { try { sites.saveSwitchedOn(ws.home, switched); } catch { /* next time */ } }
   return held;
+}
+
+// (the site's lists, for the panel and trif status: sitecombos.js reach)
+function reachOf(needs) {
+  const r = needs.filter((n) => n.reach).map((n) => n.reach);
+  return r.length ? { reach: r } : {};
 }
 
 /**
@@ -344,38 +361,42 @@ function rejectHeld(ws, id, hash = null) {
  */
 function reviewItems(home, mods, held = {}) {
   const allowed = loadAllowed(home);
-  const isOff = cross.offFn(home);
+  const isOff = sites.offFn(home);
   const mtime = new Map();
   const when = (m) => { if (!mtime.has(m.id)) { let t = 0; try { t = fs.statSync(m.file).mtimeMs; } catch { /* gone */ } mtime.set(m.id, t); } return mtime.get(m.id); };
+  // (a site whose boxed mods' union has holding powers it hasn't approved, from before site approvals, and no
+  // hold asks for it: the newest of its mods (not held) with one of them asks, once)
+  const heldSites = new Set(Object.values(held).flatMap((h) => (h.needs || []).map((k) => (sites.parseKey(k) || {}).site).filter(Boolean)));
+  const carried = new Map(); // mod id -> [site needs]
+  const siteList = [...new Set(mods.filter((m) => m.sandboxed).flatMap((m) => sites.sitesOf(m, mods)))];
+  for (const site of siteList) {
+    if (heldSites.has(site)) continue;
+    const on = sites.siteMods(site, mods, isOff).filter((m) => !held[m.id]);
+    if (on.length < 2) continue;
+    const before = sites.approvedUnion(allowed, site);
+    const after = require('./combinations').POWERS.filter((p) => before.includes(p) || sites.unionOf(on).includes(p));
+    const missing = sites.holding(after.filter((p) => !before.includes(p)), after);
+    if (!missing.length) continue;
+    const who = on.filter((m) => sites.comboOf(m).some((p) => missing.includes(p))).sort((a, b) => when(b) - when(a) || (b.id > a.id ? 1 : -1))[0];
+    if (who) carried.set(who.id, [...(carried.get(who.id) || []), sites.siteNeed(site, before, after, sites.clickWordsOf(on))]);
+  }
   const out = {};
   for (const m of mods) {
     if (held[m.id]) continue;
     const ok = allowedFor(home, m, allowed);
-    let needs = needsOf(m, null).filter((n) => !isAllowed(n, ok, false) && n.key !== 'risk2');
-    // (its combinations with another boxed mod that the user hasn't approved, where neither is new or changed:
-    // one switched on, or both from before cross-mod approval; asked on the newer of the two only, and not
-    // where the other's hold carries it)
-    const byId = new Map(mods.map((x) => [x.id, x]));
-    needs = needs.concat(cross.crossNeeds(m, mods, { allowed, isOff }).filter((n) => {
-      if (held[n.with]) return false;
-      const o = byId.get(n.with);
-      return !o || when(m) > when(o) || (when(m) === when(o) && m.id > o.id);
-    }));
-    if (needs.length && !needs.every((n) => isSoft(n.key))) {
-      const names = cross.namesFor(needs);
-      out[m.id] = { facts: needs.map((n) => n.fact), needs: needs.map((n) => n.key), claim: claimOf(m), ...(Object.keys(names).length ? { withNames: names } : {}) };
-    }
+    const needs = needsOf(m, null).filter((n) => !isAllowed(n, ok, false) && n.key !== 'risk2').concat(carried.get(m.id) || []);
+    if (needs.length && !needs.every((n) => isSoft(n.key))) out[m.id] = { facts: needs.map((n) => n.fact), needs: needs.map((n) => n.key), claim: claimOf(m), ...reachOf(needs) };
   }
   return out;
 }
 
 /**
- * "Looks right": the user has seen what the mod can do; those powers are allowed for it, and (`mods`: the
- * mods now) its combinations with the other boxed mods on its site.
+ * "Looks right": the user has seen what the mod can do; those powers are allowed for it, and (`mods`: the mods
+ * now) its sites' unions as they are now.
  */
 function reviewMod(home, mod, mods = []) {
   const needs = needsOf(mod, null).filter((n) => n.key !== 'risk2')
-    .concat(cross.crossNeeds(mod, mods, { allowed: loadAllowed(home), isOff: cross.offFn(home) }));
+    .concat(sites.siteNeeds(mod, mods, { allowed: loadAllowed(home), isOff: sites.offFn(home), approvedToo: true }));
   allowPowers(home, mod.id, needs);
   return needs.map((n) => n.key);
 }

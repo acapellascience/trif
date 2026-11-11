@@ -260,29 +260,34 @@ function togetherNeeds(list, declared = list) {
  * many-powers sentence; none for a need without a fact, and a sentence once (two reads with write-drafts
  * are two needs with one warning).
  */
-// (`names`: {mod id: name} for combinations across mods, power:with:<id>:…, which come after the mod's own)
-function factLines(needs, facts, names = {}) {
+// (what a mod adds to its site's boxed mods together, site:<site>:…, comes after the mod's own)
+function factLines(needs, facts) {
   const seen = new Set();
-  const own = [], across = [];
+  const own = [], site = [];
   (facts || []).forEach((f, i) => {
     const k = (needs || [])[i] || '';
-    const l = factLine(k, f, names);
-    if (l && !seen.has(l)) { seen.add(l); (/^power:with:/.test(String(k)) ? across : own).push(l); }
+    const l = factLine(k, f);
+    if (l && !seen.has(l)) { seen.add(l); (/^site:/.test(String(k)) ? site : own).push(l); }
   });
-  return own.concat(across);
+  return own.concat(site);
 }
 
 /**
- * A need's words after the mod's name: "it <fact>", for a combination "together, it <fact>", for one across it
- * and another boxed mod "together with <its name>, it <fact>"; '' for none.
+ * A need's words after the mod's name: "it <fact>", for a combination "together, it <fact>" (a site's union:
+ * "it adds to what your <site> mods can do together", with the site's lists: siteLines); '' for none.
  */
-function factLine(key, fact, names = {}) {
+function factLine(key, fact) {
   if (!fact) return '';
   const k = String(key);
   if (/^power:together:many:/.test(k)) return fact;
-  const w = /^power:with:(.+):[a-z+-]+$/.exec(k);
-  if (w) return `together with ${(names && names[w[1]]) || w[1].split('/').pop()}, it ${fact}`;
+  if (/^site:/.test(k)) return `it ${fact}`;
   return /^power:together:/.test(k) ? `together, it ${fact}` : `it ${fact}`;
+}
+/** A site's lists (sitecombos.js reach) for trif status, one line each: ["<site> mods together, what they can see beyond the page: …", …]. */
+function siteLines(r) {
+  const items = (l) => l.map((x) => `${x.t}${x.new ? ' (new)' : ''}`).join(', ');
+  return [['see', 'see'], ['act', 'act'], ['go', 'go']].filter(([k]) => r[k].length).map(([k]) => `${r.site} mods together, ${r.heads[k].replace(/^W/, 'w')}: ${items(r[k])}`)
+    .concat(r.flags.map((f) => `${r.site} mods together: ${f.t}${f.new ? ' (new)' : ''}`));
 }
 function parsePowers(values, mod) { return parsePowersWithArgs(values, mod).names; }
 
@@ -332,4 +337,4 @@ function isSoft(key) {
   return !!(m && MENU[m[1]] && MENU[m[1]].soft);
 }
 
-module.exports = { MENU, NAMES, PowersError, parsePowers, parsePowersWithArgs, parseClicks, parseEvents, parseMigrate, EMBEDS, BLOCKABLE, powerNeeds, powerInfo, isSoft, siteOf, sameSite, READS, factLine, factLines };
+module.exports = { siteLines, MENU, NAMES, PowersError, parsePowers, parsePowersWithArgs, parseClicks, parseEvents, parseMigrate, EMBEDS, BLOCKABLE, powerNeeds, powerInfo, isSoft, siteOf, sameSite, READS, factLine, factLines };

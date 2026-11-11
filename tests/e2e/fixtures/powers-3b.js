@@ -9,7 +9,7 @@
 
 // The other end of e2e-pw3's channel (tests/e2e/scenario.js powers3Check): answers what it hears. And a
 // click beside e2e-pw3's read (read-drafts), which this mod didn't ask for: refused by the page-wide rule unless
-// the user approved the two together, which its hold asks (cross-mod approval), so it goes through here.
+// the user approved the site's mods together, which the holds ask (site approval), so it goes through here.
 setTimeout(() => {
   let r;
   try { page.find('#pbtn').click(); r = 'clicked'; } catch (e) { r = `refused: ${e.message}`; }

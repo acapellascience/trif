@@ -1,8 +1,9 @@
 // The sandbox's page-wide rules, as data (docs/SAFE-MODS.md "Across mods: the page-wide rules"): one definition
 // for the sandbox, which refuses by it (extension/sandbox.js partnersOk, clickOk, signalOk, arrivedOk, soundOk), and
-// the helper, which offers the user exactly those combinations to approve across two mods (helper/lib/crossmods.js
-// reads the JSON between the markers). tests/combinations.test.js keeps it in step with the table, and
-// tests/crossmods.test.js checks that what's offered is what's refused, for random pairs of mods.
+// the helper, which asks the user to approve, for a site, the combinations its boxed mods' powers make together
+// (helper/lib/sitecombos.js reads the JSON between the markers). tests/combinations.test.js keeps it in step with
+// the table, and tests/sitecombos.test.js checks, for random sets of a site's mods, that the sandbox refuses
+// exactly the pairs the site hasn't approved, and that approving what the holds asked lets every act through.
 //
 // - actPartners: an act (a power a mod uses), and the powers it's refused beside while another boxed mod on the
 //   page has one of them and the acting mod doesn't (@migrate counts as site-storage; edit-uploads as a read: a
@@ -10,7 +11,7 @@
 // - alsoRefused: refused beside another mod that changed a draft (write-drafts) or an attached picture
 //   (edit-uploads), or whose go-to brought the user to this page (go-to), unless the acting mod has that power.
 // - channelOnly: acts refused only beside a mod they share a `mods` channel with (both have the mods power).
-// Approving the pair across the two mods lifts each of these refusals, for those two mods only.
+// A site's approval of the pair (helper/lib/sitecombos.js) lifts each of these refusals on that site.
 
 /* page-wide rules: JSON from here */
 export const PAGE_WIDE = {

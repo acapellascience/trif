@@ -468,8 +468,8 @@ function toMarkdown() {
   L.push('reads rides on it, but beside an act (`click`, `page-events`) it changes what that act sends. Everything a');
   L.push('boxed mod reaches otherwise stays on the site it came from, which already has it. Across mods on one page');
   L.push('(they see each other\'s elements, and `mods` gives them a channel), the sandbox\'s page-wide rules stop a');
-  L.push('combination split between mods from slipping past the hold, unless the user approved the two mods together');
-  L.push('(the same warnings, "Together with …": cross-mod approval): docs/SAFE-MODS.md, "Combinations".', '');
+  L.push('combination split between mods from slipping past the hold, unless the user approved what the site\'s boxed');
+  L.push('mods can do together ("Your … mods together": one approval per site): docs/SAFE-MODS.md, "Combinations".', '');
   L.push(`Counts: ${warned(2).length} of ${PAIRS} pairs carry a warning; ${warned(3).length} of ${TRIPLES} triples carry one of their own, and`);
   L.push(`${entries.filter(([k, v]) => k.split('+').length === 3 && /^no more than its pairs/.test(v)).length} more show their pairs' warnings.`, '');
   L.push('## The warnings, strongest first', '');

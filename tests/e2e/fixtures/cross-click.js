@@ -7,7 +7,7 @@
 // @run-at      document-idle
 // ==/WebMod==
 
-// Cross-mod approval (tests/e2e/scenario.js crossModCheck): it asks only for what it uses (click), never keys to
+// Site approval (tests/e2e/scenario.js siteApprovalCheck): it asks only for what it uses (click), never keys to
 // be let act beside the other mod. A moment after it starts (the other mod is in play by then) it clicks the page's
 // counter, and signals when it has page-events.
 const R = {};

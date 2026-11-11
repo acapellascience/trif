@@ -1419,7 +1419,10 @@ function modItem(m) {
     // its code, or matches outside the site): not running until the user allows it, in the approval dialog
     // (below); the row says so, and its tag opens the dialog at this mod.
     li.classList.add('held');
-    row.append(gripButton(labelId), main, holdTag(m, 'on hold', labelId), codeButton(m, labelId), deleteButton(m, labelId, li));
+    // (held for being switched on, adding what its site hasn't approved: its switch stays, to turn it off again)
+    const sw = m.held.by === 'switch' ? [modSwitch(document, { id: m.id, site: switchSite(m), enabled: isOn(m.id, switchSite(m)), labelId,
+      apply: (id, enabled, s) => request({ type: 'mod.enable', id, enabled, tab: view.tab?.id, ...(s ? { site: s } : {}) }) })] : [];
+    row.append(gripButton(labelId), main, holdTag(m, 'on hold', labelId), ...sw, codeButton(m, labelId), deleteButton(m, labelId, li));
   } else {
     const site = switchSite(m);
     row.append(gripButton(labelId), main, modSwitch(document, {
@@ -1457,11 +1460,27 @@ function showOneTag(li, held) {
 // lib/powers.js and held.js), and what the mod says about itself (its header's @risk reason or
 // description: whoever wrote the mod wrote that too), labelled as such. Held: Allow is on the row.
 // Review (a mod the user has, still running): "Looks right" allows what was found; or switch it off.
-// A need across this mod and another boxed mod (power:with:<id>:<powers>): the other mod's name, else null.
-function crossOf(key, info) {
-  const w = /^power:with:(.+):[a-z+-]+$/.exec(String(key || ''));
-  if (!w) return null;
-  return (info && info.withNames && info.withNames[w[1]]) || w[1].split('/').pop();
+// What a mod adds to its site's boxed mods together (site:<site>:<powers>): the site, else null.
+function siteOf(key) {
+  const w = /^site:(.+):[a-z+-]+$/.exec(String(key || ''));
+  return w ? w[1] : null;
+}
+// The site's lists (helper/lib/sitecombos.js reach): "Your {site} mods together", what they can see beyond the
+// page, do as you, and where what they see could go, the items this mod adds marked new; then the flag lines.
+function siteBoxes(reach) {
+  return (Array.isArray(reach) ? reach : []).map((r) => {
+    const box = el('div', 'ap-site');
+    box.append(el('p', 'ap-site-title', r.title));
+    for (const k of ['see', 'act', 'go']) {
+      if (!r[k] || !r[k].length) continue;
+      box.append(el('p', 'ap-site-head', r.heads[k]));
+      const ul = el('ul', 'ap-site-list');
+      for (const x of r[k]) { const li = el('li', null, x.t); if (x.new) li.append(' ', el('span', 'ap-new', 'new')); ul.append(li); }
+      box.append(ul);
+    }
+    for (const f of r.flags || []) { const p = el('p', 'ap-site-flag', f.t); if (f.new) p.append(' ', el('span', 'ap-new', 'new')); box.append(p); }
+    return box;
+  });
 }
 
 function factsBox(m, info, kind) {
@@ -1472,19 +1491,13 @@ function factsBox(m, info, kind) {
     : kind === 'pending' ? 'A change to this mod is waiting for your OK. TRIF found that the new version:'
       : 'TRIF found that this mod:'));
   const list = el('ul', 'facts');
-  // (a combination across it and another boxed mod names the other: "Together with …, it …")
+  // (what it adds to its site's boxed mods together: the site's lists, after its own)
   const facts = Array.isArray(info.facts) ? info.facts : [String(info.reason || '')];
   const keys = Array.isArray(info.needs) ? info.needs : [];
-  const said = new Set();
-  facts.forEach((f, i) => {
-    if (!f) return;
-    const who = crossOf(keys[i], info);
-    const line = who ? `Together with ${who}, it ${f}.` : info.asks ? `It ${f}.` : f;
-    if (!who || !said.has(line)) { said.add(line); list.append(el('li', null, line)); }
-  });
-  box.append(list);
+  facts.forEach((f, i) => { if (f && !siteOf(keys[i])) list.append(el('li', null, info.asks ? `It ${f}.` : f)); });
+  box.append(list, ...siteBoxes(info.reach));
   const where = m.matches && m.matches.length ? ` It runs by itself on every page it's for (${m.matches.slice(0, 3).join(', ')}${m.matches.length > 3 ? '…' : ''}).` : '';
-  const fromAgent = kind !== 'review' && info.by !== 'outside' && info.by !== 'sandbox';
+  const fromAgent = kind !== 'review' && info.by !== 'outside' && info.by !== 'sandbox' && info.by !== 'switch';
   // (by 'sandbox': this browser can't sandbox it, so allowing it runs it as a page script: lib.js sandboxFallback)
   const who = info.by === 'sandbox' ? 'Allow runs this version as a free mod, in this browser only.'
     : fromAgent ? `An agent ${kind === 'pending' ? 'changed' : 'wrote'} it in your chat on ${info.site || view.site}.` : 'It\'s new or changed since TRIF last let it run.';
@@ -1805,6 +1818,7 @@ function approvalDialog() {
   const lead = el('p', 'ap-lead');
   const facts = el('ul', 'ap-facts');
   const together = el('div', 'ap-together');
+  const siteBox = el('div', 'ap-sites');
   const note = el('p', 'ap-note');
   const claim = el('p', 'ap-claim');
   const err = el('p', 'ap-err');
@@ -1818,7 +1832,7 @@ function approvalDialog() {
   x.addEventListener('click', () => notNow());
   const acts = el('div', 'ap-actions');
   acts.append(allow, show, reject, later);
-  d.append(top, who, lead, facts, together, note, claim, err, codeBox, acts);
+  d.append(top, who, lead, facts, together, siteBox, note, claim, err, codeBox, acts);
   // Esc is Not now; Tab stays in the card (showModal makes the panel inert, and this keeps the focus from
   // leaving for the browser's own controls too)
   d.addEventListener('cancel', (e) => { e.preventDefault(); notNow(); });
@@ -1832,7 +1846,7 @@ function approvalDialog() {
   });
   document.body.append(d);
   approval.dialog = d;
-  approval.parts = { count, name, chip, where, lead, facts, together, note, claim, err, codeBox, allow, show, reject, later };
+  approval.parts = { count, name, chip, where, lead, facts, together, siteBox, note, claim, err, codeBox, allow, show, reject, later };
   return approval.parts;
 }
 
@@ -1911,11 +1925,9 @@ function renderApproval() {
   // the strongest first as the helper sent them, a sentence once
   const needs = Array.isArray(info.needs) ? info.needs : [];
   const all = (Array.isArray(info.facts) ? info.facts : [String(info.reason || '')]).map((f, i) => ({ f, key: needs[i] || '' }));
-  const plain = all.filter((x) => x.f && !/^power:(together|with):/.test(x.key));
+  const plain = all.filter((x) => x.f && !/^power:together:/.test(x.key) && !siteOf(x.key));
   const warns = [];
   for (const x of all) if (x.f && /^power:together:/.test(x.key) && !warns.some((w) => w.f === x.f)) warns.push(x);
-  // (then the combinations across it and another boxed mod, each naming the other: helper/lib/crossmods.js)
-  for (const x of all) { const w = crossOf(x.key, info); if (x.f && w && !warns.some((y) => y.f === x.f && y.who === w)) warns.push({ ...x, who: w }); }
   // (each line with its "more": a power's explanation, or a warning's)
   P.facts.replaceChildren(...plain.map((x) => {
     const li = el('li');
@@ -1930,14 +1942,16 @@ function renderApproval() {
     const many = /^power:together:many:/.test(x.key);
     const words = el('span', 'ap-line');
     if (many) words.textContent = x.f;
-    // (across two mods: the same warning's explanation, the other mod named)
-    else words.append(el('b', null, x.who ? `Together with ${x.who},` : 'Together,'), ` it ${x.f}.`);
+    else words.append(el('b', null, 'Together,'), ` it ${x.f}.`);
     line.append(words);
     return addMore(line, many ? warningByLine(x.f) : warningTerm(`together, it ${x.f}`));
   }));
   P.together.hidden = !warns.length;
-  const fromAgent = kind !== 'sandbox' && info.by !== 'outside';
-  const who = m.imported && !fromAgent ? 'You imported it from a file.' : fromAgent ? `An agent ${kind === 'pending' ? 'changed' : 'wrote'} it in your chat on ${info.site || view.site}.` : 'It\'s new or changed since TRIF last let it run.';
+  // (then what it adds to its site's boxed mods together: helper/lib/sitecombos.js)
+  P.siteBox.replaceChildren(...siteBoxes(info.reach));
+  P.siteBox.hidden = !P.siteBox.childNodes.length;
+  const fromAgent = kind !== 'sandbox' && info.by !== 'outside' && info.by !== 'switch';
+  const who = info.by === 'switch' ? 'You switched it on, and it adds to what this site\'s boxed mods can do together.' : m.imported && !fromAgent ? 'You imported it from a file.' : fromAgent ? `An agent ${kind === 'pending' ? 'changed' : 'wrote'} it in your chat on ${info.site || view.site}.` : 'It\'s new or changed since TRIF last let it run.';
   P.note.textContent = kind === 'sandbox' ? 'Allow runs this version as a free mod, in this browser only.'
     : kind === 'pending' ? `${who} The version before keeps running until you decide.`
       : info.asks ? `${who} Updates that ask for the same powers won't ask again.`

@@ -27,7 +27,7 @@ const { Runs } = require('./lib/runs');
 const { Logins } = require('./lib/logins');
 const agents = require('./lib/agents');
 const { updateHeld, approveHeld, rejectHeld, lastRun, heldFile, reviewItems, reviewMod, powersFor, loadAllowed } = require('./lib/held');
-const { approvedWith } = require('./lib/crossmods');
+const { siteOkFor } = require('./lib/sitecombos');
 const { powerInfo } = require('./lib/boxpowers');
 const history = require('./lib/history');
 const { DEFAULT_ORDER, startOffIds, startSitesOn, pendingUpdates, useNewVersion, keepMine, mergeRequest, mergeSettled, restoreMod, absorbedIds,
@@ -216,13 +216,14 @@ function onExtensionMessage(msg) {
       logger.info(`extension registered ${state.modsApplied.registered.length} mod(s)`);
       for (const e of state.modsApplied.errors) logger.warn(`extension could not register ${e.id}: ${e.error}`);
       // (which boxed mods this browser runs: one not registered, and not held, is off here (switched off, its
-      // group or its site off, paused); held.js counts combinations across mods only with the ones on: crossmods.js)
+      // group or its site off, paused); a site's union of powers counts only the ones on, and one switched on is worked out again: sitecombos.js)
       try {
         const boxed = (state.mods || []).filter((m) => m.sandboxed).map((m) => m.id);
         const on = new Set(state.modsApplied.registered);
         const off = boxed.filter((id) => !on.has(id) && !(state.held && state.held[id]));
         const who = `${state.hello?.browser || 'browser'}:${state.hello?.installId || process.pid}`;
-        if (require('./lib/crossmods').saveSwitches(ws.home, who, boxed, off)) { logger.info(`boxed mods off in ${state.hello?.browser || 'this browser'}: ${off.join(', ') || 'none'}`); scheduleSync('switches'); }
+        const sw = require('./lib/sitecombos').saveSwitches(ws.home, who, boxed, off);
+        if (sw.changed) { logger.info(`boxed mods off in ${state.hello?.browser || 'this browser'}: ${off.join(', ') || 'none'}${sw.switchedOn.length ? `; switched on: ${sw.switchedOn.join(', ')}` : ''}`); scheduleSync('switches'); }
       } catch (e) { logger.warn(`switches: ${e.message}`); }
       break;
     case 'log': {
@@ -317,12 +318,12 @@ function syncMods(reason, force) {
     // (facts: TRIF's own reading of the code; claim: what the agent says it does, shown apart as the agent's)
     const h = state.held[m.id], r = state.review && state.review[m.id];
     const info = h ? { site: h.site, reason: h.reason, facts: h.facts || [h.reason], claim: h.claim || '', by: h.by || 'agent', hash: h.hash, needs: Array.isArray(h.needs) ? h.needs : [],
-      ...(h.withNames ? { withNames: h.withNames } : {}),
+      ...(h.reach ? { reach: h.reach } : {}),
       // (a boxed mod asking for powers: what it asks for, which TRIF enforces, not what TRIF read in its code)
-      ...(Array.isArray(h.needs) && h.needs.length && h.needs.every((k) => /^power:/.test(k)) ? { asks: true } : {}) } : null;
+      ...(Array.isArray(h.needs) && h.needs.length && h.needs.every((k) => /^(power|site):/.test(k)) ? { asks: true } : {}) } : null;
     const out = h && pendingIds.has(m.id) ? { ...m, pending: info }
       : h ? { ...m, held: info }
-      : r ? { ...m, review: { facts: r.facts, needs: r.needs || [], claim: r.claim, ...(r.withNames ? { withNames: r.withNames } : {}) } } : m;
+      : r ? { ...m, review: { facts: r.facts, needs: r.needs || [], claim: r.claim, ...(r.reach ? { reach: r.reach } : {}) } } : m;
     const o = origins[m.id];
     const withOrigin0 = o ? { ...out, origin: { by: o.by, browser: o.browser, ...(o.live ? { live: true } : {}) } } : out;
     const withOrigin = importedIds[m.id] ? { ...withOrigin0, imported: true } : withOrigin0; // (lib/share.js importMod)
@@ -333,9 +334,9 @@ function syncMods(reason, force) {
     // A sandboxed mod: what its code could do as a page script, for a browser without TRIF's sandbox, which
     // holds it until the user allows that (extension/lib.js sandboxFallback)
     // (and for the row and code card: a boxed mod's powers in words; what TRIF read in a free mod's code)
-    // (and the combinations across it and another boxed mod that the user approved: the sandbox lets those act)
-    const crossOk = m.sandboxed ? approvedWith(m, scanned.mods, allowedNow) : [];
-    const withFacts = m.sandboxed ? { ...withReadded, pageFacts: pageFactsOf(m), powerInfo: powerInfo(m), ...(crossOk.length ? { crossOk } : {}) }
+    // (and what its sites' mods together are approved for: the sandbox lets their acts through beside those powers)
+    const siteOk = m.sandboxed ? siteOkFor(m, scanned.mods, allowedNow) : [];
+    const withFacts = m.sandboxed ? { ...withReadded, pageFacts: pageFactsOf(m), powerInfo: powerInfo(m), ...(siteOk.length ? { siteOk } : {}) }
       : m.rules ? withReadded : { ...withReadded, found: [...new Set(powersFor(m).map((p) => String(p.key).split(':')[0]))] };
     return startOff.has(m.id) ? { ...withFacts, startOff: true } : withFacts;
   });
@@ -346,7 +347,7 @@ function syncMods(reason, force) {
   let starter = null;
   try { starter = starterOffer(ws.home, examplesDir(), undefined, undefined, { modsDir: ws.modsDir }); } catch (e) { logger.warn(`Tim's mods: ${e.message}`); }
   // (everything the panel shows about a mod, so a change to any of it goes out: a review done, say)
-  const signature = sent.map((m) => `${m.id}:${m.hash}${m.held ? `:held ${m.held.needs.join(',')}` : ''}${m.pending ? `:pending ${m.pending.hash} ${m.pending.needs.join(',')}` : ''}${m.crossOk ? `:with ${m.crossOk.join(',')}` : ''}${m.review ? `:review ${m.review.facts.join('|')}` : ''}${m.startOff ? ':off' : ''}${m.origin ? `:${m.origin.by}${m.origin.live ? '+live' : ''}` : ''}${m.update ? `:update ${JSON.stringify(m.update)}` : ''}${m.absorbs ? `:absorbs ${m.absorbs.join(',')}` : ''}${m.readded ? `:readded ${m.readded}` : ''}${m.autoUpdated ? `:auto ${m.autoUpdated}` : ''}`).join('|') +
+  const signature = sent.map((m) => `${m.id}:${m.hash}${m.held ? `:held ${m.held.needs.join(',')}` : ''}${m.pending ? `:pending ${m.pending.hash} ${m.pending.needs.join(',')}` : ''}${m.siteOk ? `:site ${m.siteOk.join(',')}` : ''}${m.review ? `:review ${m.review.facts.join('|')}` : ''}${m.startOff ? ':off' : ''}${m.origin ? `:${m.origin.by}${m.origin.live ? '+live' : ''}` : ''}${m.update ? `:update ${JSON.stringify(m.update)}` : ''}${m.absorbs ? `:absorbs ${m.absorbs.join(',')}` : ''}${m.readded ? `:readded ${m.readded}` : ''}${m.autoUpdated ? `:auto ${m.autoUpdated}` : ''}`).join('|') +
     `|sites:${sitesOn.join(',')}|starter:${JSON.stringify(starter)}`;
   const errors = [...problems, ...plan.errors];
   const errorsChanged = JSON.stringify(errors) !== JSON.stringify(state.modErrors) || JSON.stringify(warnings) !== JSON.stringify(state.modWarnings);
@@ -786,7 +787,7 @@ function agentCommand(cmd, args) {
       const m = state.mods.find((x) => x.id === id);
       if (!m) throw new Error(`no mod ${id || '(no id)'}`);
       if (state.held[id]) throw new Error(`${id} is on hold: allow it instead`);
-      const allowed = reviewMod(ws.home, m, state.mods); // (and its combinations with other boxed mods: crossmods.js)
+      const allowed = reviewMod(ws.home, m, state.mods); // (and the combinations it adds to its site: sitecombos.js)
       logger.info(`reviewed ${id}: ${allowed.join(', ') || 'nothing to allow'}`);
       syncMods('review', false);
       return { id, allowed };

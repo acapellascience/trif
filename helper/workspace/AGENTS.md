@@ -368,10 +368,10 @@ the site (`trif tabs`; `trif open <url>` if none) and look:
    that **power**
    (`// @powers sound`, see "Powers" in TECHNIQUES.md): the user approves the set once. **A mod asks only
    for the powers it uses.** Don't pad its powers so it can act beside another boxed mod on the site (a
-   click refused while another mod has `keys`, say): the user's cross-mod approval covers coexistence (TRIF
-   asks "Together with <the other mod>, it could …" on the mod's hold), and unused powers only put warnings
-   on the hold for things it can't do. If a converted mod's header asks for powers its code never uses,
-   take them out.
+   click refused while another mod has `keys`, say): the user approves what a site's boxed mods can do
+   together, once per site (TRIF asks on the hold of the mod that adds a power: "Your <site> mods
+   together"), which covers coexistence; unused powers only put warnings on the hold for things it can't
+   do. If a converted mod's header asks for powers its code never uses, take them out.
 3. **A free mod** (`trif new <site> <mod>`): only when it needs the page itself: changing what the
    site loads (not just leaving things out), patching its code, or acting for the user.
 

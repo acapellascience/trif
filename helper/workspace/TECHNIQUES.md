@@ -282,9 +282,9 @@ something you post"; the list: docs/POWER-COMBINATIONS.md in TRIF's repository, 
 than three powers get one general warning. Ask for the fewest that do the job. On a page, an act of yours
 (writing a draft, clicking, playing media, go-to) is refused while another boxed mod there has a power that
 would make a warned pair with it that yours didn't ask for (the error says which), until the user approves
-the two mods together: TRIF asks them on your mod's hold ("Together with <the other mod>, it could …") when
-it's new or changed, or on its review. **Never ask for a power your mod doesn't use** just to act beside
-another mod: that puts warnings on its hold for things it can't do. A mod that uses both asks for both.
+what the site's boxed mods can do together: TRIF asks on the hold of the mod that adds a power ("Your <site>
+mods together", what it adds marked new), once per site. **Never ask for a power your mod doesn't use** just to
+act beside another mod: that puts warnings on its hold for things it can't do. A mod that uses both asks for both.
 - `mods`: `trif.channel(name)` gives `send(data)` and `on((data, {from}) => …)` between your boxed mods on
   this page that have the power: plain data only (text, numbers, true/false, null, arrays, plain objects),
   delivered a moment later. Doesn't make the mod wait on its own.

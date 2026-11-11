@@ -489,7 +489,7 @@ document.addEventListener('combo-ping', (e) => d.setAttribute('data-pings', JSON
     // (site-data: an address and the same address with a parameter out; JSON spaced as no serializer writes it)
     if (u.pathname === '/e2e-fix-urls') return send(200, 'application/json', JSON.stringify({ long: 'https://127.0.0.1/watch?v=1&si=e2e', short: 'https://127.0.0.1/watch?v=1' }));
     if (u.pathname === '/e2e-fix-raw') return send(200, 'application/json', '{ "a" : [ 1, 2 ] ,"b":"kept as sent" }');
-    // (cross-mod approval, scenario.js crossModCheck: a counter a boxed mod clicks, and the page's own signal)
+    // (site approval, scenario.js siteApprovalCheck: a counter a boxed mod clicks, and the page's own signal)
     if (u.pathname === '/cross.html') return send(200, 'text/html; charset=utf-8', PAGE('TRIF e2e cross', `<h1 id="title">Two mods</h1><button type="button" id="cc">count</button>
 <script>
 const d = document.documentElement; d.setAttribute('data-cc', '0'); d.setAttribute('data-pings', '[]');

@@ -1,41 +1,55 @@
-# Cross-mod approval and the sandbox fixes: new and changed strings (branch crossmod)
+# Site approval and the sandbox fixes: new and changed strings (branch crossmod)
 
 **Awaiting Tim's OK.** Every user-facing sentence branch crossmod adds or changes: the approval card, the
 mod row's review, `trif status`, the errors a boxed mod (and so the agent writing it) sees in `trif errors`,
 `trif check`, and the agents' guidance. Errors read "TRIF sandbox: …". `{…}` is a value filled in. Bold is new.
 
-## Cross-mod approval
+## Site approval
 
-The warnings themselves are the combinations' own sentences (helper/lib/combinations.js, generated, not
-listed again here); what's new is the lead that names the other mod.
+The box on a mod's card (and its review row), after the mod's own powers and warnings, in the red box's colours:
 
-- Approval card, in the red box after the mod's own warnings: **"Together with {the other mod's name},** it
-  {warning}." (the lead in bold, as "Together," is)
-- The mod row's review box (a mod the user already has, one switched on, say): **"Together with {name}, it
-  {warning}."**
-- `trif status`, on a hold or a review: **"together with {name}, it {warning}"** (after the mod's own lines, as
-  "together, it …" is)
-- The refusals' ending, which said "(a mod that asks for {act} and {power} together shows the user that)"
-  (approved wording, in the eight page-wide refusals: COMBO-FIXES-STRINGS.md, WIDEN-STRINGS.md,
-  POWERS-STRINGS.md). Changed, since asking for an unused power is what this replaces: **"(the user's OK for
-  the two mods together lifts it: TRIF asks for that when either is new, changed or switched on)"**. If Tim
-  prefers the approved ending kept, it's one constant (extension/sandbox.js `LIFT`).
+- Title: **"Your {site} mods together"**
+- Headings: **"What they can see beyond the page"**, **"What they can do as you"**, **"Where what they see could go"**
+- Items, one per power in the site's union (words from the powers' own lines, extension/explain.json):
+  - see: **"what you type"** (read-drafts), **"the keys you press"** (keys), **"what {site} sends this page"**
+    (site-data), **"the data behind the page"** (page-data), **"what {site} keeps"** (site-storage, @migrate),
+    **"the fonts on this computer"** (local-fonts), **"pictures you attach"** (edit-uploads)
+  - do as you: **"click {the @click words, comma-separated}"** (click), **"write into your drafts"** (write-drafts),
+    **"signal the page's code"** (page-events), **"take you to pages"** (go-to), **"change what {site} receives"**
+    (rewrite-requests), **"keep some of what you do from the site"** (block-events)
+  - could go: **"into posts and drafts"** (write-drafts), **"pictures you post"** (edit-uploads), **"{site}'s
+    storage"** (site-storage), **"clicks the site sees"** (click, block-events), **"the page's own code"**
+    (page-events), **"which pictures load"** (image-variants, preload), **"which videos load"** (embeds), **"how media
+    plays"** (media), **"sound"** (sound)
+- Marker on an item this mod adds: **"new"**
+- Flags: **"So something they read could end up sent from your account."** (see and could-go lists both non-empty);
+  **"So they could post for you."** (write-drafts with click or page-events)
+- The card's note for a mod held because it was switched on: **"You switched it on, and it adds to what this site's
+  boxed mods can do together."** (then the existing "Updates that ask for the same powers won't ask again.")
+- `trif status`, on a hold or a review: **"it adds to what your {site} mods can do together"**, then one line each:
+  **"{site} mods together, what they can see beyond the page: {items}"**, **"{site} mods together, what they can do
+  as you: {items}"**, **"{site} mods together, where what they see could go: {items}"**, **"{site} mods together:
+  {flag}"**, each item followed by **" (new)"** when the mod adds it.
+- The ending of the eight page-wide refusals, which said "(a mod that asks for {act} and {power} together shows the
+  user that)" (approved wording: COMBO-FIXES-STRINGS.md, WIDEN-STRINGS.md, POWERS-STRINGS.md): **"(the user's OK for
+  this site's mods together lifts it: TRIF asks when a mod that adds it is new, changed or switched on)"**
+  (extension/sandbox.js `LIFT`). A refusal now also goes in the mod's errors (trif errors), once per act on a page.
 - The combinations doc's intro (docs/POWER-COMBINATIONS.md, generated): "… the sandbox's page-wide rules stop a
-  combination split between mods from slipping past the hold**, unless the user approved the two mods together
-  (the same warnings, "Together with …": cross-mod approval)**: docs/SAFE-MODS.md, "Combinations"."
+  combination split between mods from slipping past the hold**, unless the user approved what the site's boxed mods
+  can do together ("Your … mods together": one approval per site)**: docs/SAFE-MODS.md, "Combinations"."
 
 ## Agents (helper/workspace/AGENTS.md, TECHNIQUES.md)
 
 - AGENTS.md, "Write the mod", after "the user approves the set once.": **"A mod asks only for the powers it
-  uses.** Don't pad its powers so it can act beside another boxed mod on the site (a click refused while
-  another mod has `keys`, say): the user's cross-mod approval covers coexistence (TRIF asks "Together with
-  <the other mod>, it could …" on the mod's hold), and unused powers only put warnings on the hold for things
-  it can't do. If a converted mod's header asks for powers its code never uses, take them out."
-- TECHNIQUES.md, "Combinations", replacing "a mod that needs both asks for both.": "…(the error says which),
-  **until the user approves the two mods together: TRIF asks them on your mod's hold ("Together with <the
-  other mod>, it could …") when it's new or changed, or on its review. Never ask for a power your mod doesn't
-  use** just to act beside another mod: that puts warnings on its hold for things it can't do. A mod that uses
-  both asks for both."
+  uses.** Don't pad its powers so it can act beside another boxed mod on the site (a click refused while another
+  mod has `keys`, say): the user approves what a site's boxed mods can do together, once per site (TRIF asks on
+  the hold of the mod that adds a power: "Your <site> mods together"), which covers coexistence; unused powers
+  only put warnings on the hold for things it can't do. If a converted mod's header asks for powers its code never
+  uses, take them out."
+- TECHNIQUES.md, "Combinations": "…(the error says which), **until the user approves what the site's boxed mods
+  can do together: TRIF asks on the hold of the mod that adds a power ("Your <site> mods together", what it adds
+  marked new), once per site. Never ask for a power your mod doesn't use** just to act beside another mod: that
+  puts warnings on its hold for things it can't do. A mod that uses both asks for both."
 
 ## The sandbox fixes (job 1)
 

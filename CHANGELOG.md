@@ -4,7 +4,7 @@ What's new in each TRIF release (called WebMods before 0.2.0). The text under a 
 panel shows under "What's new", so it's written for people using TRIF. `node scripts/release.js <version>`
 needs a section here for the version it releases.
 
-## Unreleased
+## 0.2.6
 
 - **Google search works again.** Google changed its results page, and AI Banisher started hiding the
   results along with the AI Overview. It's fixed.

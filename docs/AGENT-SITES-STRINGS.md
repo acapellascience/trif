@@ -34,7 +34,7 @@ Every user- and agent-facing string the per-site agent setting adds, exact, **al
 - The agent sees its site's level in the side panel's context, in AGENTS.md ("Agent on this site"), and in
   every refused command.
 
-## Panel: the header
+## Panel: the header (before the move: see "Moved to the chat line")
 
 - The control (a select beside the power button; label **Agent on this site**): **Agent: Ask** ·
   **Agent: Off** · **Agent: Look** · **Agent: Run code** (a panel narrower than 420px: **Ask** · **Off** ·
@@ -46,6 +46,39 @@ Every user- and agent-facing string the per-site agent setting adds, exact, **al
   Choose “Agent” above to let it look or run code here.** ({what}: **email**, **email and your Apple
   account**, **payments**, **banking**, **a password manager**, **your messages**, **your chats with
   another AI**, or the user's own words; without one: **on your list of sensitive sites**)
+
+## Moved to the chat line (branch faces, 2026-11-11; **new strings awaiting Tim's OK**)
+
+The control left the header. It's now the third part of the line over the message box, after the agent and
+model ("Claude Code · Default model · Agent asks before running code ▾"), shown only where there's a chat
+to have (the site connected and the robot on: not on the off, blocked or disconnected gates, nor on pages
+with no site). A button opens a small menu (radio items; arrows, Home/End, Enter, Esc to close). Each level
+has a small monochrome icon in the muted text colour; on a panel narrower than 420px only the icon shows,
+its words as the tooltip.
+
+| | Old (header) | New (the chat's line) |
+|---|---|---|
+| Off | **Agent: Off** (narrow **Off**) | eye crossed out, **Agent can’t see this site** |
+| Look | **Agent: Look** (narrow **Look**) | eye, **Agent can look** |
+| Ask | **Agent: Ask** (narrow **Ask**) | eye with a ?, **Agent asks before running code** |
+| Run code | **Agent: Run code** (narrow **Run code**) | `</>`, **Agent can run code** |
+| Label / title | **Agent on this site**; titles **Agent on {site}: it can read, and asks before it first runs code** (and the three others above) | the level's words (as above) |
+
+The menu (new):
+- Heading: **What your agent can do on {site}**
+- **Nothing:** it can’t see or touch this site.
+- **Look:** it can read the page and take screenshots.
+- **Ask first:** it can look, and asks you before running code here.
+- **Run code:** it can change the page live; posting is paused while it does.
+- Footer (muted): **Mods for this site always wait for your OK, whatever you pick.**
+
+The sensitive-site note left the header too: it's the first line in that site's chat, as TRIF's own note.
+- Old (under the bar): **Your agent is off on {site}: it's {what}. Choose “Agent” above to let it look or run
+  code here.**
+- New (the chat's first line): **Your agent can’t see {site}: it’s {what}. Change it below.** ({what}: the
+  same phrases as before; without one, **on your list of sensitive sites**)
+
+Settings' **Agent on sites** list and the Ask card are unchanged.
 
 ## Panel: the Ask dialog
 

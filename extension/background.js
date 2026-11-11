@@ -1622,7 +1622,7 @@ async function onPageMessage(msg) {
       return { onBreak: state.onBreak };
     }
     case 'agentSite.set': {
-      // "Agent on this site" (the panel's header, or Settings). Panel only: an agent run can't raise it.
+      // "Agent on this site" (the panel's line over the message box, or Settings). Panel only: an agent run can't raise it.
       const level = msg.level === null || msg.level === 'ask' ? null : String(msg.level);
       if (level !== null && !['off', 'look', 'run'].includes(level)) throw new Error(`unknown level ${level}`);
       return setAgentSite(String(msg.site ?? ''), level);

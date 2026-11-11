@@ -26,13 +26,6 @@
   <button id="waiting-badge" class="waiting-badge" type="button" hidden></button>
   <!-- Right-aligned as a group, whether or not the power button shows. -->
   <div class="bar-actions">
-    <!-- "Agent on this site": what an agent may do on this site's tabs (agentsites.js; sidepanel.js renderAgentLevel) -->
-    <select id="agent-level" class="agent-level" aria-label="Agent on this site" title="Agent on this site: what an agent may do on this site's tabs" hidden>
-      <option value="ask">Agent: Ask</option>
-      <option value="off">Agent: Off</option>
-      <option value="look">Agent: Look</option>
-      <option value="run">Agent: Run code</option>
-    </select>
     <button id="site-switch" class="icon-btn power" type="button" role="switch" aria-checked="false" hidden>
       <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M5.2 4.3a5 5 0 1 0 5.6 0"/><path d="M8 2.2v5"/></svg>
     </button>
@@ -44,8 +37,6 @@
     </button>
   </div>
 </header>
-<!-- Why the agent is off on this site, when TRIF's sensitive list put it there (sidepanel.js renderAgentLevel). -->
-<p id="agent-site-note" class="agent-note" hidden></p>
 <!-- Once, after an update gave up every site's access (background.js dropEverySite) -->
 <p id="access-note" class="access-note" hidden><span>TRIF now asks for each site's permission. Your sites keep their settings: allow each one again the first time you use it there.</span> <button id="access-note-ok" class="link-btn" type="button">OK</button></p>
 
@@ -195,6 +186,8 @@
 <div id="drop-overlay" class="drop-overlay" hidden><p id="drop-text"></p></div>
 
 <main id="chat" class="chat">
+  <!-- The first line of a sensitive site's chat: why the agent can't see it (sidepanel.js renderAgentLevel). -->
+  <p id="agent-site-note" class="agent-site-note" hidden></p>
   <div id="empty" class="empty" hidden>
     <p class="empty-lead">Tell your coding agent what to fix. It writes a mod that runs every time this site loads.</p>
     <div class="chips">
@@ -207,8 +200,24 @@
   <div id="working" class="working" hidden role="status"><span class="pulse" aria-hidden="true"></span>Working…</div>
 </main>
 
-<!-- which agent and model this chat uses (sidepanel.js renderUsing); a click opens settings at the model -->
-<button id="using" class="using" type="button" hidden></button>
+<!-- Over the message box: which agent and model this chat uses (sidepanel.js renderUsing; a click opens
+     settings at the model), then what the agent can do on this site (renderAgentLevel: a button and a menu,
+     agentsites.js). The level shows only where there's a chat to have: the site connected and the robot on. -->
+<div id="using-line" class="using-line">
+  <button id="using" class="using" type="button" hidden></button>
+  <span id="agent-level-wrap" class="agent-level-wrap" hidden>
+    <span class="using-sep" aria-hidden="true">·</span>
+    <button id="agent-level" class="agent-level" type="button" aria-haspopup="menu" aria-expanded="false" aria-controls="agent-level-menu"><span class="agent-level-icon" aria-hidden="true"></span><span class="agent-level-text"></span><svg class="agent-level-caret" viewBox="0 0 16 16" aria-hidden="true"><path d="M4 6.5l4 4 4-4"/></svg></button>
+    <div id="agent-level-menu" class="agent-level-menu" role="menu" aria-labelledby="agent-level-head" hidden>
+      <p id="agent-level-head" class="agent-level-head"></p>
+      <button type="button" role="menuitemradio" aria-checked="false" data-level="off" tabindex="-1"><span class="agent-level-icon" aria-hidden="true"></span><span class="agent-level-item"><b>Nothing</b><span>it can’t see or touch this site.</span></span></button>
+      <button type="button" role="menuitemradio" aria-checked="false" data-level="look" tabindex="-1"><span class="agent-level-icon" aria-hidden="true"></span><span class="agent-level-item"><b>Look</b><span>it can read the page and take screenshots.</span></span></button>
+      <button type="button" role="menuitemradio" aria-checked="false" data-level="ask" tabindex="-1"><span class="agent-level-icon" aria-hidden="true"></span><span class="agent-level-item"><b>Ask first</b><span>it can look, and asks you before running code here.</span></span></button>
+      <button type="button" role="menuitemradio" aria-checked="false" data-level="run" tabindex="-1"><span class="agent-level-icon" aria-hidden="true"></span><span class="agent-level-item"><b>Run code</b><span>it can change the page live; posting is paused while it does.</span></span></button>
+      <p class="agent-level-foot">Mods for this site always wait for your OK, whatever you pick.</p>
+    </div>
+  </span>
+</div>
 <form id="composer" class="composer">
   <label for="input" class="visually-hidden">Message</label>
   <textarea id="input" rows="1" placeholder="What should I fix?"></textarea>

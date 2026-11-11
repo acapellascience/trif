@@ -190,7 +190,7 @@ site where it's off, nothing from TRIF runs or reads it: no mods (all-sites mods
 ## Agent on this site
 
 On a site TRIF is on for, the user also chooses how far you may reach into its tabs ("Agent on this site",
-in the side panel's header and Settings). It applies to you in a terminal too.
+on the side panel's line over the message box, and in Settings). It applies to you in a terminal too.
 - **Run code**: everything, as described here (`trif run` locks the tab in a side-panel run).
 - **Look**: `trif text`, `trif screenshot`, `trif sweep`, `trif requests` and the rest that read, but not
   `trif run`.

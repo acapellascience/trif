@@ -38,3 +38,28 @@ test('what each command needs: Off nothing, Look reading, Ask reading and a ques
   // (commands that touch no page work at every level)
   assert.equal(A.agentCheck('mod.enable', 'off.com', s), 'ok');
 });
+
+test('the panel: "Agent on this site" on the line over the message box, a menu of four, the note in the chat', () => {
+  const fs = require('fs');
+  const path = require('path');
+  const html = fs.readFileSync(path.join(__dirname, '..', 'extension', 'sidepanel.html'), 'utf8');
+  const header = html.slice(html.indexOf('<header'), html.indexOf('</header>'));
+  assert.ok(!header.includes('agent-level'), 'not in the header any more');
+  const line = html.slice(html.indexOf('<div id="using-line"'), html.indexOf('<form id="composer"'));
+  assert.match(line, /<button id="using"[^>]*>[\s\S]*<button id="agent-level"[^>]*aria-haspopup="menu"[^>]*aria-controls="agent-level-menu"/);
+  const items = [...line.matchAll(/role="menuitemradio"[^>]*data-level="(\w+)"[^>]*>.*?<b>([^<]+)<\/b><span>([^<]+)<\/span>/g)].map((m) => [m[1], m[2], m[3]]);
+  assert.deepEqual(items, [
+    ['off', 'Nothing', 'it can’t see or touch this site.'],
+    ['look', 'Look', 'it can read the page and take screenshots.'],
+    ['ask', 'Ask first', 'it can look, and asks you before running code here.'],
+    ['run', 'Run code', 'it can change the page live; posting is paused while it does.'],
+  ]);
+  assert.match(line, /Mods for this site always wait for your OK, whatever you pick\./);
+  const chat = html.slice(html.indexOf('<main id="chat"'), html.indexOf('</main>'));
+  assert.ok(chat.indexOf('id="agent-site-note"') > 0 && chat.indexOf('id="agent-site-note"') < chat.indexOf('id="messages"'), 'the note: the chat\'s first line');
+  const js = fs.readFileSync(path.join(__dirname, '..', 'extension', 'sidepanel.js'), 'utf8');
+  assert.match(js, /const LEVEL_WORDS = \{ off: 'Agent can’t see this site', look: 'Agent can look', ask: 'Agent asks before running code', run: 'Agent can run code' \};/);
+  assert.match(js, /`Your agent can’t see \$\{site\}: it’s \$\{lv\.why \|\| 'on your list of sensitive sites'\}\. Change it below\.`/);
+  // only where there's a chat: the site connected and the robot on
+  assert.match(js, /const show = !!site && !!view\.status\?\.helper\?\.connected && !!siteScope\(\) && currentState\(\) === 'on';/);
+});

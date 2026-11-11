@@ -929,6 +929,8 @@ class Scenario {
         if (p.gateTitle !== 'The robot is off.' || p.gateText !== 'Fix 127.0.0.1' || p.grey || JSON.stringify(p.links) !== JSON.stringify(links)) throw new Error(`the gate: ${JSON.stringify(p)}`);
         // off: a blank face, in the toolbar for this tab, in the bar and on the gate
         await this.waitFace('the off faces', this.win.tabId, { toolbar: 'robot-off-16.png', bar: 'off', gate: /^robot-shaded-off(-yellow|-red)?\.svg$/ });
+        // (and no "Agent on this site" there: it's on the chat's line, and there's no chat on the gate)
+        if (!(await this.panel(`async () => document.getElementById('agent-level-wrap').hidden && !document.querySelector('header #agent-level')`))) throw new Error('"Agent on this site" shows on the gate');
         await this.shot(this.panelCtx, 'panel-off-links');
         await this.shot(this.panelCtx, this.allSites ? 'panel-off-every-site' : 'panel-off-per-site');
       }
@@ -1204,6 +1206,7 @@ class Scenario {
       await r.check('"Agent on this site": Ask asks in the panel (Just this once runs the code), Look refuses code, Off refuses reading too, a sensitive site is off with its line, Settings lists them', () => this.agentSitesCheck(win));
       await r.check('sharing: a .js dropped on the panel is imported (its site from @match, its shipped markers gone) and held like any mod from outside, "imported from a file"; dropped again, Add as a copy; Replace keeps the old one, which History shows, views, diffs and restores; Export copies it to Downloads and shows it; another file dropped goes to the site\'s files with a note, listed, never a mod', () => this.shareCheck(win));
       await r.check('the code card: a mod\'s </> and its file name open its code (a style mod: its rules), with line numbers; Copy copies it; Show in Finder and Open in editor ask the helper, which reveals the mod\'s own file (a stand-in for open here); Esc closes it', () => this.codeViewCheck(win));
+      await r.check('views belong to their site: the code card on one site is gone on a tab of another; an approval waiting there hides, and shows again back on its site', () => this.siteViewsCheck(win));
       await r.check('powers, phase 3: media plays and pauses the page\'s own video; click clicks only what the header names, never a submit, reset or a link to another site; go-to goes only to the header\'s pages; mods talk over TRIF\'s channel in plain data; write-drafts changes the user\'s drafts but never a password, card or hidden field; with a read, the combination is in the hold, and while another boxed mod on the page has a read it didn\'t ask for, write-drafts is off; undeclared, each is refused', () => this.powers3Check(win));
       await r.check('powers, phase 2: site-data filters the site\'s JSON (fetch and XHR) by removing and reordering only (an invented string, number, key, a duplicate or a cut string: TRIF keeps the original); page-data reads plain copies of React props; search-box is TRIF\'s own box the mod can\'t read, which searches the site from the user\'s Enter; undeclared, each is refused', () => this.powers2Check(win));
       await r.check('speculation rules (audit AU-7): a page that prefetches its same-site links at once; a link a free mod adds is fetched without a click (Chrome), a boxed mod can\'t make one', () => this.specRulesCheck(win));
@@ -2639,18 +2642,42 @@ process.exitCode = 1;
     const site = '127.0.0.1';
     const base = `http://${site}:${this.o.servers.port}`;
     const setStore = (v) => this.ext(`async (v) => { await chrome.storage.local.set(v); }`, [v]);
-    const panelState = () => this.panel(`async () => ({ level: document.getElementById('agent-level').value, shown: !document.getElementById('agent-level').hidden,
+    // (the control: on the line over the message box, a button with the level's words and a menu)
+    const panelState = () => this.panel(`async () => ({ level: document.getElementById('agent-level').dataset.level, shown: !document.getElementById('agent-level-wrap').hidden,
+      words: document.querySelector('#agent-level .agent-level-text').textContent, inHeader: !!document.querySelector('header #agent-level'),
       note: document.getElementById('agent-site-note').hidden ? '' : document.getElementById('agent-site-note').textContent,
+      noteFirst: document.querySelector('#chat > :not([hidden])')?.id === 'agent-site-note',
       ask: document.getElementById('agent-ask')?.open ? document.getElementById('agent-ask-title').textContent : null })`);
     const themes = async (name) => { for (const scheme of ['dark', 'light']) if (await this.d.colorScheme(this.panelCtx, scheme)) { await sleep(150); await this.shot(this.panelCtx, `${name}-${scheme}`); } await this.d.colorScheme(this.panelCtx, ''); };
     const problems = [];
+    const choose = async (level) => {
+      await this.panel(`async (lv) => { document.getElementById('agent-level').click(); document.querySelector('#agent-level-menu [data-level="' + lv + '"]').click(); return true; }`, [level]);
+    };
+    const WORDS = { off: 'Agent can’t see this site', look: 'Agent can look', ask: 'Agent asks before running code', run: 'Agent can run code' };
     try {
       await this.ext(`async (id, url) => { await chrome.tabs.update(id, { url, active: true }); }`, [win.tabId, `${base}/`]);
       await this.dismissApproval();
       // Ask: no choice for the site yet
       const { [site]: _, ...rest } = AGENT_SITES;
       await setStore({ agentSites: rest });
-      await waitFor('the header at Ask', async () => { const p = await panelState(); return p.shown && p.level === 'ask' ? p : null; }, { timeoutMs: 10000 });
+      const atAsk = await waitFor('the line at Ask', async () => { const p = await panelState(); return p.shown && p.level === 'ask' ? p : null; }, { timeoutMs: 10000 });
+      if (atAsk.words !== WORDS.ask || atAsk.inHeader) problems.push(`the line at Ask: ${JSON.stringify(atAsk)}`);
+      await themes('agent-line-ask');
+      // the menu: opened from the keyboard (an arrow on the button), the chosen level focused; Esc closes it
+      const menu = await this.panel(`async () => {
+        const b = document.getElementById('agent-level');
+        b.focus();
+        b.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true }));
+        const m = document.getElementById('agent-level-menu');
+        return { open: !m.hidden, expanded: b.getAttribute('aria-expanded'), head: document.getElementById('agent-level-head').textContent,
+          focused: document.activeElement?.dataset.level || null, checked: [...m.querySelectorAll('[aria-checked="true"]')].map((x) => x.dataset.level),
+          items: [...m.querySelectorAll('[role="menuitemradio"]')].map((x) => x.innerText.replace(/\s+/g, ' ').trim()), foot: m.querySelector('.agent-level-foot').textContent };
+      }`);
+      if (!menu.open || menu.expanded !== 'true' || menu.focused !== 'ask' || JSON.stringify(menu.checked) !== '["ask"]' || menu.head !== `What your agent can do on ${site}` || menu.items.length !== 4
+        || !/^Mods for this site always wait for your OK/.test(menu.foot)) problems.push(`the menu: ${JSON.stringify(menu)}`);
+      await themes('agent-menu');
+      const shut = await this.panel(`async () => { document.activeElement.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })); return { open: !document.getElementById('agent-level-menu').hidden, focus: document.activeElement?.id }; }`);
+      if (shut.open || shut.focus !== 'agent-level') problems.push(`Esc on the menu: ${JSON.stringify(shut)}`);
       const running = this.cli(['run', '--tab', String(win.tabId), '6 * 7'], { timeoutMs: 60000 });
       const asked = await waitFor('the Ask dialog', async () => { const p = await panelState(); return p.ask ? p : null; }, { timeoutMs: 15000 });
       if (asked.ask !== `Your agent wants to run code on ${site}.`) problems.push(`the Ask dialog: ${asked.ask}`);
@@ -2660,24 +2687,34 @@ process.exitCode = 1;
       if (ran.status !== 0 || !/42/.test(ran.stdout)) problems.push(`Just this once: the code didn't run: ${ran.stdout} ${ran.stderr}`);
       // (once: the site is still Ask afterwards)
       if ((await panelState()).level !== 'ask') problems.push('Just this once changed the site\'s level');
-      // Look, from the header's control: trif run refused with the level; trif text works
-      await this.panel(`async () => { const s = document.getElementById('agent-level'); s.value = 'look'; s.dispatchEvent(new Event('change')); return true; }`);
+      // Look, from the menu: trif run refused with the level; trif text works
+      await choose('look');
       await waitFor('Look saved', async () => (await this.ext(`async () => (await chrome.storage.local.get('agentSites')).agentSites`))?.[site] === 'look' || null, { timeoutMs: 8000 });
-      await themes('agent-header-look');
+      const atLook = await waitFor('the line at Look', async () => { const p = await panelState(); return p.level === 'look' ? p : null; }, { timeoutMs: 8000 });
+      if (atLook.words !== WORDS.look) problems.push(`the line at Look: ${atLook.words}`);
+      await themes('agent-line-look');
       const look = await this.cli(['run', '--tab', String(win.tabId), '1']);
       if (look.status === 0 || !/"Agent on this site" to Look for 127\.0\.0\.1/.test(look.stderr + look.stdout)) problems.push(`trif run at Look: ${look.status} ${look.stderr}`);
       const read = await this.cli(['text', '--tab', String(win.tabId)]);
       if (read.status !== 0) problems.push(`trif text at Look: ${read.stderr}`);
       // Off: trif text refused too
-      await this.panel(`async () => { const s = document.getElementById('agent-level'); s.value = 'off'; s.dispatchEvent(new Event('change')); return true; }`);
+      await choose('off');
       await waitFor('Off saved', async () => (await this.ext(`async () => (await chrome.storage.local.get('agentSites')).agentSites`))?.[site] === 'off' || null, { timeoutMs: 8000 });
+      const atOff = await waitFor('the line at Off', async () => { const p = await panelState(); return p.level === 'off' ? p : null; }, { timeoutMs: 8000 });
+      if (atOff.words !== WORDS.off) problems.push(`the line at Off: ${atOff.words}`);
+      await themes('agent-line-off');
       const off = await this.cli(['text', '--tab', String(win.tabId)]);
       if (off.status === 0 || !/"Agent on this site" is Off for 127\.0\.0\.1/.test(off.stderr + off.stdout)) problems.push(`trif text at Off: ${off.status} ${off.stderr}`);
-      // the sensitive list: off by default, with its line under the bar
+      // Run code, from the menu
+      await choose('run');
+      const atRun = await waitFor('the line at Run code', async () => { const p = await panelState(); return p.level === 'run' ? p : null; }, { timeoutMs: 8000 });
+      if (atRun.words !== WORDS.run) problems.push(`the line at Run code: ${atRun.words}`);
+      await themes('agent-line-run');
+      // the sensitive list: off by default, with the chat's first line saying why
       await setStore({ agentSites: rest, sensitiveSites: [{ pattern: site, why: 'a test site' }] });
-      const sens = await waitFor('the line for a sensitive site', async () => { const p = await panelState(); return p.note ? p : null; }, { timeoutMs: 8000 });
-      if (sens.level !== 'off' || sens.note !== `Your agent is off on ${site}: it's a test site. Choose “Agent” above to let it look or run code here.`) problems.push(`a sensitive site: ${JSON.stringify(sens)}`);
-      await themes('agent-header-sensitive');
+      const sens = await waitFor('the note for a sensitive site', async () => { const p = await panelState(); return p.note ? p : null; }, { timeoutMs: 8000 });
+      if (sens.level !== 'off' || sens.note !== `Your agent can’t see ${site}: it’s a test site. Change it below.` || !sens.noteFirst) problems.push(`a sensitive site: ${JSON.stringify(sens)}`);
+      await themes('agent-sensitive-note');
       // Settings: the sites chosen, and the sensitive list
       await setStore({ agentSites: { ...rest, [site]: 'look' }, sensitiveSites: null });
       await this.panelClick('#settings-btn');
@@ -2690,7 +2727,7 @@ process.exitCode = 1;
       if (settings.level !== 'look' || settings.sensitive < 30) problems.push(`Settings: ${JSON.stringify(settings)}`);
       await themes('agent-settings');
       if (problems.length) throw new Error(problems.join('\n'));
-      return `Ask: the dialog ("${asked.ask}"), Just this once ran the code (42) and left the site at Ask; Look from the header refused trif run and allowed trif text; Off refused trif text; a sensitive site off with its line; Settings listed the choice and ${settings.sensitive} sensitive patterns`;
+      return `the line over the box ("${atAsk.words}"; the menu opened from the keyboard, Esc closed it); Ask: the dialog ("${asked.ask}"), Just this once ran the code (42) and left the site at Ask; Look from the menu refused trif run and allowed trif text; Off refused trif text; a sensitive site off with the chat's first line; Settings listed the choice and ${settings.sensitive} sensitive patterns`;
     } finally {
       await setStore({ agentSites: AGENT_SITES, sensitiveSites: null }).catch(() => {});
       await this.d.colorScheme(this.panelCtx, '').catch(() => {});
@@ -2811,7 +2848,8 @@ process.exitCode = 1;
     const base = `http://${site}:${this.o.servers.port}`;
     const dir = path.join(this.trif, 'sites', site);
     const styleFile = path.join(dir, 'e2e-cv-style.js');
-    const styleText = '// ==WebMod==\n// @name E2E code card rules\n// @match *://127.0.0.1/*\n// @style\n// ==/WebMod==\n{ "css": "#title { letter-spacing: 0.01em }" }\n';
+    // (one long line, as a style mod's CSS often is: the card wraps it)
+    const styleText = '// ==WebMod==\n// @name E2E code card rules\n// @match *://127.0.0.1/*\n// @style\n// ==/WebMod==\n{ "css": "#title, #path, #host, header nav a.promo, main article .card > .label, footer .links a:not(.keep) { letter-spacing: 0.01em; text-decoration-thickness: 0.06em; text-underline-offset: 0.18em }" }\n';
     const themes = async (name) => { for (const scheme of ['dark', 'light']) if (await this.d.colorScheme(this.panelCtx, scheme)) { await sleep(150); await this.shot(this.panelCtx, `${name}-${scheme}`); } await this.d.colorScheme(this.panelCtx, ''); };
     const card = () => this.panel(`async () => {
       const d = document.getElementById('code-view');
@@ -2839,6 +2877,10 @@ process.exitCode = 1;
       const want = fs.readFileSync(path.join(dir, 'e2e-banner.js'), 'utf8');
       if (free.mod !== `${site}/e2e-banner` || free.chip !== 'Free mod' || free.where !== `${site} · e2e-banner.js` || free.code !== want || free.lines !== want.split('\n').length) problems.push(`the free mod's card: ${JSON.stringify({ ...free, code: free.code.slice(0, 200) })}`);
       if (!free.coloured) problems.push('no colouring in the code');
+      // its robot: the code card's own face (</>), and nothing of the bar robot's other faces on any card's
+      const robots = await this.panel(`async () => ({ code: !!document.querySelector('#code-view .ap-robot svg .code'), eyes: document.querySelectorAll('#code-view .ap-robot .eye').length,
+        stray: document.querySelectorAll('.ap-robot :is(.pause, .cross, .link)').length })`);
+      if (!robots.code || robots.eyes || robots.stray) problems.push(`the card's robot: ${JSON.stringify(robots)}`);
       await themes('code-card');
       // Copy
       await this.d.click(this.panelCtx, '#code-view .cv-copy');
@@ -2867,12 +2909,69 @@ process.exitCode = 1;
       await this.panelClick(`li[data-mod="${site}/e2e-cv-style"] button.mod-file`);
       const style = await waitFor('the style mod\'s card', async () => { const c = await card(); return c && c.lines ? c : null; }, { timeoutMs: 8000 });
       if (style.chip !== 'Style mod' || style.code !== styleText) problems.push(`the style mod's card: ${JSON.stringify(style)}`);
+      // its long line wrapped (on by default): one numbered line, several rows tall, continuations indented
+      const wrapped = await this.panel(`async () => {
+        const box = document.querySelector('#code-view .cv-code');
+        const lines = [...box.querySelectorAll('.l')];
+        const long = lines.find((l) => l.textContent.length > 120);
+        const lh = parseFloat(getComputedStyle(box).lineHeight);
+        return { wrap: box.classList.contains('wrap'), lines: lines.length, rows: long ? Math.round(long.getBoundingClientRect().height / lh) : 0, scrolls: box.scrollWidth > box.clientWidth + 1,
+          item: document.querySelector('#code-view .cv-wrap')?.getAttribute('aria-checked') };
+      }`);
+      if (!wrapped.wrap || wrapped.rows < 2 || wrapped.scrolls || wrapped.lines !== styleText.split('\n').length || wrapped.item !== 'true') problems.push(`the long line: ${JSON.stringify(wrapped)}`);
+      await themes('code-card-wrapped');
       await this.d.key(this.panelCtx, 'Escape');
       if (problems.length) throw new Error(problems.join('\n'));
-      return `the free mod's code (${free.lines} lines, coloured) from its </>, Copy copied, Show in Finder / the file name / Open in editor ran ${revealed().join(' | ')}; the style mod's rules from its file name; Esc closed it`;
+      return `the free mod's code (${free.lines} lines, coloured) from its </>, its robot's </> face; Copy copied, Show in Finder / the file name / Open in editor ran ${revealed().join(' | ')}; the style mod's rules from its file name, its long line wrapped (${wrapped.rows} rows, one number); Esc closed it`;
     } finally {
       try { fs.unlinkSync(styleFile); } catch { /* gone */ }
       await this.panel(`async () => { const d = document.getElementById('code-view'); if (d && d.open) d.close(); return true; }`).catch(() => {});
+    }
+  }
+
+  /** The code card, the approval dialog and the agent's menu follow the tab's site (sidepanel.js leaveSite). */
+  async siteViewsCheck(win) {
+    const site = '127.0.0.1';
+    const { port } = this.o.servers;
+    const base = `http://${site}:${port}`;
+    const other = `http://localhost:${port}/?e2e=other-site`;
+    const file = path.join(this.trif, 'sites', site, 'e2e-site-held.js');
+    const go = (url) => this.ext(`async (id, url) => { await chrome.tabs.update(id, { url, active: true }); }`, [win.tabId, url]);
+    const open = () => this.panel(`async () => ({ code: !!document.getElementById('code-view')?.open, approval: document.getElementById('approval')?.open ? document.getElementById('approval').dataset.mod : null,
+      menu: !document.getElementById('agent-level-menu').hidden, site: document.getElementById('site').textContent })`);
+    const problems = [];
+    try {
+      await go(`${base}/`);
+      await this.dismissApproval();
+      await waitFor('the rows', () => this.panel(`async () => !!document.querySelector('li[data-mod="${site}/e2e-banner"] .mod-code') || null`), { timeoutMs: 15000 });
+      // the code card open on 127.0.0.1, then the tab goes to another site: gone
+      await this.panelClick(`li[data-mod="${site}/e2e-banner"] .mod-code`);
+      await waitFor('the code card', async () => (await open()).code || null, { timeoutMs: 8000 });
+      await go(other);
+      const there = await waitFor('the panel on the other site', async () => { const o = await open(); return o.site === 'localhost' ? o : null; }, { timeoutMs: 10000 });
+      if (there.code) problems.push('the code card stayed open on another site');
+      // an approval waiting on 127.0.0.1: hidden on the other site, shown again back on its own
+      await go(`${base}/`);
+      await waitFor('the panel back', async () => (await open()).site === site || null, { timeoutMs: 10000 });
+      fs.writeFileSync(file, '// ==WebMod==\n// @name E2E site-held\n// @match *://127.0.0.1/*\n// ==/WebMod==\n(() => { fetch("/e2e-site-held", { method: "POST" }); })();\n');
+      await waitFor('the approval', async () => (await open()).approval === `${site}/e2e-site-held` || null, { timeoutMs: 20000 });
+      // (and the agent's menu open too)
+      await this.panel(`async () => { document.getElementById('agent-level').click(); return true; }`).catch(() => {});
+      await go(other);
+      const away = await waitFor('the other site', async () => { const o = await open(); return o.site === 'localhost' ? o : null; }, { timeoutMs: 10000 });
+      if (away.approval) problems.push(`127.0.0.1's approval showed on another site: ${away.approval}`);
+      if (away.menu) problems.push('the agent\'s menu stayed open on another site');
+      await go(`${base}/`);
+      const back = await waitFor('the approval again', async () => { const o = await open(); return o.site === site && o.approval ? o : null; }, { timeoutMs: 10000 }).catch(() => null);
+      if (!back || back.approval !== `${site}/e2e-site-held`) problems.push(`back on 127.0.0.1, the approval: ${JSON.stringify(back)}`);
+      await this.shot(this.panelCtx, 'site-views-approval-back');
+      if (problems.length) throw new Error(problems.join('\n'));
+      return 'the code card closed on a tab of another site; the approval waiting on 127.0.0.1 hid there (and the agent\'s menu closed), and showed again back on 127.0.0.1';
+    } finally {
+      try { fs.unlinkSync(file); } catch { /* gone */ }
+      await this.dismissApproval();
+      await this.panel(`async () => { const d = document.getElementById('code-view'); if (d && d.open) d.close(); return true; }`).catch(() => {});
+      await go(`${base}/`).catch(() => {});
     }
   }
 

@@ -1,5 +1,5 @@
 // "Agent on this site": how far an agent (the side panel's, or one in a terminal using `trif`) may reach into
-// a site's tabs. The user's choice per site, in the panel's header and in Settings:
+// a site's tabs. The user's choice per site, on the panel's line over the message box and in Settings:
 //   off   the agent can't read, screenshot or run code on the site's tabs (it can still write mods for it,
 //         which go through the holds like any other)
 //   look  it can read the page and take screenshots, but not run code there

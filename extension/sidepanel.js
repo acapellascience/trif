@@ -317,6 +317,7 @@ async function setTab(tab) {
   view.tab = { id: tab.id, url };
   const site = siteForUrl(url);
   if (site !== view.site) {
+    leaveSite(view.site);
     view.site = site;
     view.chat = emptyChat();
     if (site) {
@@ -327,8 +328,34 @@ async function setTab(tab) {
     // Each site chat has its own agent and model.
     renderSettings();
     if (!ui.settings.hidden && view.status?.helper?.connected) loadModels(currentAgent().id);
+    render();
+    returnToSite(site);
+    return;
   }
   render();
+}
+
+// ---- views that belong to a site ----------------------------------------------------------------------
+// The code card (and its History), the approval dialog, the import's questions, the Ask card, the agent's
+// menu, the site's files and the mods menu all belong to the site they were opened on. On a tab of another
+// site they go: the code card, the import's questions and the menus close; the approval dialog and the Ask
+// card hide, and come back on that site's tab if they're still waiting (the Ask: render's loop, by site).
+// (Settings and the update notice aren't a site's: they stay.)
+const siteCards = new Set(); // the import's open questions: their cancel
+function leaveSite(prev) {
+  if (codeView.dialog?.open) codeView.dialog.close();
+  if (approval.dialog?.open) { closeApproval(); approval.reopenOn = prev; }
+  for (const cancel of [...siteCards]) cancel();
+  if (agentAsk.dialog?.open) closeAgentAsk();
+  closeLevelMenu(false);
+  if (ui.modsMenu && !ui.modsMenu.hidden) { ui.modsMenu.hidden = true; ui.modsMore?.setAttribute('aria-expanded', 'false'); }
+  if (ui.siteFilesBox) ui.siteFilesBox.open = false;
+  if (document.activeElement?.tagName === 'SELECT') document.activeElement.blur(); // (an open dropdown)
+}
+function returnToSite(site) {
+  if (!site || approval.reopenOn !== site) return;
+  approval.reopenOn = null;
+  if (approval.queue?.length && !document.querySelector('dialog[open]')) showApproval();
 }
 
 // The model is chosen per agent (an Opus choice means nothing to Codex), per site chat (lib.js).
@@ -444,7 +471,11 @@ function render() {
   renderAgentLevel();
   renderAgentSites();
   renderSiteTools();
-  for (const a of view.status?.agentAsks || []) if (!agentAsk.answered.has(a.id)) showAgentAsk(a.id, a.site);
+  // (the Ask card: this tab's site's only; another site's waits for its own tab, leaveSite)
+  const askSite = agentSiteOf(view.tab?.url || '');
+  const ask = (view.status?.agentAsks || []).find((a) => !agentAsk.answered.has(a.id) && askSite && (a.site === askSite || hostInScope(askSite, a.site)));
+  if (ask) showAgentAsk(ask.id, ask.site);
+  else if (agentAsk.dialog?.open) closeAgentAsk();
   ui.site.textContent = site || 'Tim\'s Robot Internet Fixer';
   ui.site.title = view.tab?.url || '';
   document.title = site ? `TRIF · ${site}` : 'Tim\'s Robot Internet Fixer';
@@ -1333,35 +1364,106 @@ function factsBox(m, info, kind) {
   return box;
 }
 
+// ---- the robot on TRIF's cards --------------------------------------------------------------------------
+/**
+ * The robot for a card's header (the approval, Ask, import and code cards), built afresh: his frame and
+ * either his eyes or the code card's face, </> in his green. (Not a copy of the bar's robot, which carries
+ * every face it can show: the pause bars, the cross, the broken link, hidden only there.)
+ */
+function cardRobot(face = 'eyes') {
+  const NS = 'http://www.w3.org/2000/svg';
+  const svg = document.createElementNS(NS, 'svg');
+  svg.setAttribute('viewBox', '0 0 128 128');
+  svg.setAttribute('aria-hidden', 'true');
+  for (const cls of ['rim', 'face', ...(face === 'eyes' ? ['eye'] : [])]) {
+    for (const p of document.querySelectorAll(`#bar-robot svg polygon.${cls}`)) svg.append(p.cloneNode(false));
+  }
+  if (face === 'code') {
+    const code = document.createElementNS(NS, 'path');
+    code.setAttribute('class', 'code');
+    code.setAttribute('d', 'M49 49 L35 64 L49 79 M79 49 L93 64 L79 79 M70 44 L58 84');
+    svg.append(code);
+  }
+  return svg;
+}
+
 // ---- "Agent on this site" (agentsites.js; background.js agentGate) -------------------------------------
-// The header's control: Ask (the default), Off, Look or Run code for the tab's site; a line under the bar
-// when TRIF's sensitive list keeps the agent off. Settings: the sites chosen, and the sensitive list.
+// On the line over the message box, after the agent and model: what the agent can do on the tab's site
+// (Ask, the default; Off, Look or Run code), with a small icon, as a button that opens a menu. Only where
+// there's a chat to have (the site connected and the robot on). A sensitive site (TRIF's list keeps the
+// agent off) says so in the chat's first line. Settings: the sites chosen, and the sensitive list.
 const agentSettingsNow = () => ({ sites: view.status?.agentSites || {}, sensitive: view.status?.sensitiveSites ?? null });
+const LEVEL_WORDS = { off: 'Agent can’t see this site', look: 'Agent can look', ask: 'Agent asks before running code', run: 'Agent can run code' };
+// (the icons: an eye crossed out, an eye, an eye with a question mark, code; drawn in currentColor)
+const EYE = '<path d="M1.5 8s2.4-4.5 6.5-4.5S14.5 8 14.5 8 12.1 12.5 8 12.5 1.5 8 1.5 8z"/>';
+const LEVEL_ICONS = {
+  off: `<svg viewBox="0 0 16 16">${EYE}<circle cx="8" cy="8" r="2"/><path d="M2.5 13.5l11-11"/></svg>`,
+  look: `<svg viewBox="0 0 16 16">${EYE}<circle cx="8" cy="8" r="2"/></svg>`,
+  ask: `<svg viewBox="0 0 16 16">${EYE}<path d="M6.7 6.7a1.4 1.4 0 1 1 1.9 1.3c-.4.2-.6.5-.6.9v.2"/><path d="M8 10.6v.1"/></svg>`,
+  run: '<svg viewBox="0 0 16 16"><path d="M5.5 4.5 2 8l3.5 3.5M10.5 4.5 14 8l-3.5 3.5M9.2 3.2 6.8 12.8"/></svg>',
+};
+const levelMenu = $('#agent-level-menu');
+const levelItems = () => [...levelMenu.querySelectorAll('[role="menuitemradio"]')];
+for (const b of levelItems()) b.querySelector('.agent-level-icon').innerHTML = LEVEL_ICONS[b.dataset.level];
 
 function renderAgentLevel() {
   const site = agentSiteOf(view.tab?.url || '');
-  const show = !!site && !!view.status?.helper?.connected;
-  ui.agentLevel.hidden = !show;
+  const show = !!site && !!view.status?.helper?.connected && !!siteScope() && currentState() === 'on';
+  const wrap = ui.agentLevel.parentElement;
+  wrap.hidden = !show;
   ui.agentSiteNote.hidden = true;
-  if (!show) return;
+  if (!show) { closeLevelMenu(false); return; }
   const lv = agentLevel(site, agentSettingsNow());
-  // (a narrow panel: the levels without "Agent: ", so the control stays clear of the robot in the middle)
-  const narrow = matchMedia('(max-width: 420px)').matches;
-  for (const o of ui.agentLevel.options) o.textContent = `${narrow ? '' : 'Agent: '}${{ ask: 'Ask', off: 'Off', look: 'Look', run: 'Run code' }[o.value]}`;
-  if (document.activeElement !== ui.agentLevel) ui.agentLevel.value = lv.level;
-  ui.agentLevel.dataset.level = lv.level;
-  ui.agentLevel.title = `Agent on ${site}: ${{ ask: 'it can read, and asks before it first runs code', off: 'it can\'t read, take screenshots or run code here', look: 'it can read and take screenshots, but not run code', run: 'it can read and run code (the tab locks while it does)' }[lv.level]}`;
+  const words = LEVEL_WORDS[lv.level];
+  if (ui.agentLevel.dataset.level !== lv.level) {
+    ui.agentLevel.dataset.level = lv.level;
+    ui.agentLevel.querySelector('.agent-level-icon').innerHTML = LEVEL_ICONS[lv.level];
+    ui.agentLevel.querySelector('.agent-level-text').textContent = words;
+  }
+  // (narrow: only the icon, the words its tooltip and label)
+  ui.agentLevel.title = words;
+  ui.agentLevel.setAttribute('aria-label', words);
+  $('#agent-level-head').textContent = `What your agent can do on ${site}`;
+  for (const b of levelItems()) b.setAttribute('aria-checked', String(b.dataset.level === lv.level));
   if (lv.by === 'sensitive') {
-    ui.agentSiteNote.textContent = `Your agent is off on ${site}: it's ${lv.why || 'on your list of sensitive sites'}. Choose “Agent” above to let it look or run code here.`;
+    ui.agentSiteNote.textContent = `Your agent can’t see ${site}: it’s ${lv.why || 'on your list of sensitive sites'}. Change it below.`;
     ui.agentSiteNote.hidden = false;
   }
 }
-matchMedia('(max-width: 420px)').addEventListener?.('change', () => renderAgentLevel());
-ui.agentLevel?.addEventListener('change', async () => {
+
+function openLevelMenu() {
+  levelMenu.hidden = false;
+  ui.agentLevel.setAttribute('aria-expanded', 'true');
+  (levelItems().find((b) => b.getAttribute('aria-checked') === 'true') || levelItems()[0]).focus();
+}
+function closeLevelMenu(focusButton = true) {
+  if (levelMenu.hidden) return;
+  levelMenu.hidden = true;
+  ui.agentLevel.setAttribute('aria-expanded', 'false');
+  if (focusButton) ui.agentLevel.focus();
+}
+ui.agentLevel.addEventListener('click', () => (levelMenu.hidden ? openLevelMenu() : closeLevelMenu()));
+ui.agentLevel.addEventListener('keydown', (e) => {
+  if ((e.key === 'ArrowUp' || e.key === 'ArrowDown') && levelMenu.hidden) { e.preventDefault(); openLevelMenu(); }
+});
+levelMenu.addEventListener('keydown', (e) => {
+  const items = levelItems();
+  const at = items.indexOf(document.activeElement);
+  const go = (i) => { e.preventDefault(); items[(i + items.length) % items.length].focus(); };
+  if (e.key === 'Escape') { e.preventDefault(); closeLevelMenu(); } else if (e.key === 'ArrowDown') go(at + 1);
+  else if (e.key === 'ArrowUp') go(at - 1);
+  else if (e.key === 'Home') go(0);
+  else if (e.key === 'End') go(items.length - 1);
+  else if (e.key === 'Tab') closeLevelMenu(false);
+});
+document.addEventListener('pointerdown', (e) => { if (!levelMenu.hidden && !ui.agentLevel.parentElement.contains(e.target)) closeLevelMenu(false); });
+levelMenu.addEventListener('click', async (e) => {
+  const b = e.target.closest('[role="menuitemradio"]');
   const site = agentSiteOf(view.tab?.url || '');
-  if (!site) return;
-  const v = ui.agentLevel.value;
-  try { await request({ type: 'agentSite.set', site, level: v === 'ask' ? null : v }); } catch (e) { ui.agentLevel.title = String(e?.message ?? e); }
+  if (!b || !site) return;
+  closeLevelMenu();
+  const v = b.dataset.level;
+  try { await request({ type: 'agentSite.set', site, level: v === 'ask' ? null : v }); } catch (e2) { ui.agentLevel.title = String(e2?.message ?? e2); }
   refreshStatus();
 });
 
@@ -1418,8 +1520,7 @@ function showAgentAsk(id, site) {
     top.append(el('span', 'ap-count', 'Your agent is asking'), x);
     const who = el('div', 'ap-who');
     const robot = el('span', 'ap-robot');
-    const svg = document.querySelector('#bar-robot svg');
-    if (svg) robot.append(svg.cloneNode(true));
+    robot.append(cardRobot());
     const title = el('h2', 'ap-name');
     title.id = 'agent-ask-title';
     who.append(robot, title);
@@ -1494,8 +1595,7 @@ function approvalDialog() {
   top.append(count, x);
   const who = el('div', 'ap-who');
   const robot = el('span', 'ap-robot');
-  const svg = document.querySelector('#bar-robot svg');
-  if (svg) robot.append(svg.cloneNode(true));
+  robot.append(cardRobot());
   const nameBox = el('div');
   const name = el('h2', 'ap-name');
   name.id = 'approval-name';
@@ -1793,8 +1893,7 @@ function codeViewDialog() {
   top.append(el('span', 'ap-count', 'Code'), x);
   const who = el('div', 'ap-who');
   const robot = el('span', 'ap-robot');
-  const svg = document.querySelector('#bar-robot svg');
-  if (svg) robot.append(svg.cloneNode(true));
+  robot.append(cardRobot('code')); // (the code card's own face: </> for eyes)
   const nameBox = el('div');
   const name = el('h2', 'ap-name');
   name.id = 'code-view-name';
@@ -1813,7 +1912,7 @@ function codeViewDialog() {
   versions.append(vRan, vNew);
   const errorBox = el('div', 'ap-together cv-error');
   errorBox.hidden = true;
-  const codeBox = el('pre', 'cv-code');
+  const codeBox = el('pre', `cv-code${codeWrap ? ' wrap' : ''}`);
   codeBox.tabIndex = 0;
   codeBox.setAttribute('aria-label', 'The mod\'s code');
   const note = el('p', 'ap-note cv-note');
@@ -1848,7 +1947,15 @@ function codeViewDialog() {
   const item = (label, cls, fn) => { const b = button(label, `menu-item ${cls}`, () => { menu.hidden = true; more.setAttribute('aria-expanded', 'false'); fn(); }); b.setAttribute('role', 'menuitem'); return b; };
   const editor = item('Open in editor', 'cv-editor', () => revealMod('editor'));
   const reveal = item(IS_MAC ? 'Show in Finder' : 'Show in folder', 'cv-reveal', () => revealMod('folder'));
-  menu.append(editor, reveal);
+  const wrap = item('Wrap lines', 'cv-wrap', () => {
+    codeWrap = !codeWrap;
+    try { localStorage.setItem('codeWrap', codeWrap ? 'on' : 'off'); } catch { /* this time only */ }
+    codeBox.classList.toggle('wrap', codeWrap);
+    wrap.setAttribute('aria-checked', String(codeWrap));
+  });
+  wrap.setAttribute('role', 'menuitemcheckbox');
+  wrap.setAttribute('aria-checked', String(codeWrap));
+  menu.append(editor, reveal, wrap);
   more.addEventListener('click', () => { menu.hidden = !menu.hidden; more.setAttribute('aria-expanded', String(!menu.hidden)); });
   x.addEventListener('click', () => d.close());
   const moreWrap = el('span', 'cv-more-wrap');
@@ -1940,18 +2047,36 @@ function renderCode(box, text) {
     }
     if (at < text.length) pieces.push([text.slice(at), null]);
   } else pieces.push([text, null]);
-  // one element per line (CSS numbers them), each piece split at its line breaks
-  let line = el('span', 'l');
+  // one element per line (CSS numbers them), each piece split at its line breaks; the line's text in an
+  // inner span, so a wrapped line's continuations hang at its own indentation (codeLine)
+  const source = text.split('\n');
+  let line = codeLine('l', '', source[0]);
   const lines = [line];
   for (const [t, cls] of pieces) {
     const parts = t.split('\n');
     parts.forEach((part, i) => {
-      if (i > 0) { line = el('span', 'l'); lines.push(line); }
-      if (part) line.append(cls ? el('span', `t${cls}`, part) : document.createTextNode(part));
+      if (i > 0) { line = codeLine('l', '', source[lines.length]); lines.push(line); }
+      if (part) line.firstChild.append(cls ? el('span', `t${cls}`, part) : document.createTextNode(part));
     });
   }
   box.replaceChildren(...lines);
 }
+
+/**
+ * A line of code: span.l (numbered by CSS, once per source line) holding span.lc with `text`; --ind, the
+ * line's own indentation (tabs as 2), plus `extra` characters, is where its wrapped continuations start.
+ */
+function codeLine(cls, text, source = text, extra = 0) {
+  const line = el('span', cls);
+  const lead = /^[ \t]*/.exec(source || '')[0];
+  line.style.setProperty('--ind', `${[...lead].reduce((n, c) => n + (c === '\t' ? 2 : 1), 0) + extra}ch`);
+  line.append(el('span', 'lc', text));
+  return line;
+}
+
+// Long lines wrap in the code card (on by default; the ⋯ menu's Wrap lines, remembered in this browser)
+let codeWrap = true;
+try { codeWrap = localStorage.getItem('codeWrap') !== 'off'; } catch { /* no storage: on */ }
 
 // History (helper lib/history.js): the versions TRIF kept of this mod, with View, Diff with current and
 // Restore; the code again from the same button.
@@ -2009,7 +2134,7 @@ async function showVersion(e, diff) {
   codeView.diff = diff;
   try {
     const r = await request({ type: diff ? 'mod.historyDiff' : 'mod.historyCode', id: codeView.id, stamp: e.stamp });
-    if (diff) P.codeBox.replaceChildren(...r.lines.map((l) => el('span', `l ${l.t === '+' ? 'add' : l.t === '-' ? 'del' : 'ctx'}`, `${l.t === '…' ? '…' : l.t} ${l.s}`)));
+    if (diff) P.codeBox.replaceChildren(...r.lines.map((l) => codeLine(`l ${l.t === '+' ? 'add' : l.t === '-' ? 'del' : 'ctx'}`, `${l.t === '…' ? '…' : l.t} ${l.s}`, l.s, 2)));
     else { codeView.text = String(r.code ?? ''); renderCode(P.codeBox, codeView.text); }
     setCodeTab('version');
     P.hDiff.setAttribute('aria-pressed', String(!!diff));
@@ -2114,7 +2239,9 @@ function askCard(title, text, choices) {
     x.setAttribute('aria-label', 'Cancel');
     top.append(el('span', 'ap-count', 'Import mod'), x);
     const acts = el('div', 'ap-actions');
-    const done = (v) => { d.close(); d.remove(); resolve(v); };
+    const done = (v) => { siteCards.delete(cancel); d.close(); d.remove(); resolve(v); };
+    const cancel = () => done(null);
+    siteCards.add(cancel); // (another site's tab: cancelled, leaveSite)
     for (const [label, value, cls] of choices) acts.append(button(label, cls || '', () => done(value)));
     acts.append(button('Cancel', 'text', () => done(null)));
     x.addEventListener('click', () => done(null));

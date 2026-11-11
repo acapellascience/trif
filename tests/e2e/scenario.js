@@ -1323,6 +1323,7 @@ class Scenario {
       await r.check('a hijacked agent (a stand-in Claude Code): the tab it ran code in sends nothing that changes anything until it reloads, even later; its mod that posts is held by its code, whatever its header says', () => this.hijackedAgentCheck(win));
       await r.check('the tab lock\'s harder edges (TL-1 to TL-6): cross-site images, workers no tab owns, the site\'s other tabs, popups, WebRTC and preconnect from the locked page, and what the code leaves in the site\'s storage', () => this.tabLockHardeningCheck(win));
       await r.check('an organization\'s Codex settings replace TRIF\'s sandbox (a stand-in Codex): the card; Stop stores nothing; Use Codex anyway sends it again, the chip, Settings\' line and Stop allowing', () => this.orgSettingsCheck(win));
+      await r.check('not logged in (a stand-in Claude Code logged out, a stand-in Codex logged in): the notice and the gate\'s line offer Switch to Codex and Use robotless; Switch to makes Codex this site\'s agent; robotless is green with the off face (bar and toolbar) and its line in the message box\'s place; Settings\' "None (robotless)" round-trips', () => this.robotlessCheck(win));
     }
 
     // (last in Firefox: it restarts the add-on)
@@ -2229,7 +2230,9 @@ setTimeout(() => {
       const message = 'hide the banner please';
       await sendText(message);
       await until('the card', (x) => x.cards.length === 1 && x.cards[0].buttons.length === 2);
-      const c1 = await chat();
+      // (the card shows as the helper stops the run; the run ends once the stopped process exits, which can
+      // take a moment more under load)
+      const c1 = await waitFor('the stopped run to end', async () => { const c = await chat(); return c && !c.run ? c : null; }, { timeoutMs: 10000, intervalMs: 200 }).catch(() => chat());
       if (c1.run || c1.messages.map((m) => m.role).join() !== 'user,sandbox') throw new Error(`the chat: ${JSON.stringify(c1.messages.map((m) => [m.role, m.text]))}`);
       const card = last.cards[0];
       if (card.title !== 'Your organization’s Codex settings replace TRIF’s sandbox.' || card.buttons.join(' · ') !== 'Stop · Use Codex anyway'
@@ -2268,6 +2271,153 @@ setTimeout(() => {
       fs.writeFileSync(cfgFile, saved);
       await this.panel(`async () => { document.getElementById('input').value = ''; }`).catch(() => {});
       await this.ext(`async (k) => { await chrome.storage.local.remove(k); }`, [`chat:${site}`]).catch(() => {});
+    }
+  }
+
+  // ---- the login notice's Switch to and Use robotless, and robotless mode (lib.js ROBOTLESS, sidepanel.js
+  // loginOthers, faces.js), with a stand-in Claude Code that's logged out and a stand-in Codex that's logged in
+
+  /**
+   * Stand-ins first on the helper's PATH: `claude` says it isn't logged in, `codex` that it is (both reach
+   * nothing). This site's agent is Claude Code: the yellow notice offers Switch to Codex (never the
+   * logged-out one) and Use robotless, the gate's line too. Switch to Codex: this site's pick, green. Back
+   * to Claude Code, Use robotless: green (no login needed), the off face in green up top and in the toolbar,
+   * the robotless line in the message box's place. Settings' "None (robotless)" round-trips. Put back after.
+   */
+  async robotlessCheck(win) {
+    const dir = path.join(this.work, 'standin-robotless');
+    fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(path.join(dir, 'claude'), `#!${process.execPath}
+const a = process.argv.slice(2);
+if (a[0] === '--version') { console.log('2.1.319 (Claude Code)'); process.exit(0); }
+if (a[0] === 'auth' && a[1] === 'status') { console.log('{"loggedIn": false}'); process.exit(1); }
+process.stderr.write('not logged in (the stand-in)\\n'); process.exitCode = 1;
+`, { mode: 0o755 });
+    fs.writeFileSync(path.join(dir, 'codex'), `#!${process.execPath}
+const a = process.argv.slice(2);
+if (a[0] === '--version') { console.log('codex-cli 0.166.0'); process.exit(0); }
+if (a[0] === 'login') { console.log('Logged in using ChatGPT'); process.exit(0); }
+if (a[0] === 'debug') { console.log(JSON.stringify({ models: [] })); process.exit(0); }
+process.exitCode = 1;
+`, { mode: 0o755 });
+    const cfgFile = path.join(this.priv, 'config.json');
+    const saved = fs.readFileSync(cfgFile, 'utf8');
+    const cfg = JSON.parse(saved);
+    cfg.env = { ...(cfg.env || {}), PATH: [dir, cfg.env?.PATH].filter(Boolean).join(':') };
+    fs.writeFileSync(cfgFile, JSON.stringify(cfg, null, 2) + '\n');
+    const site = '127.0.0.1';
+    const url = `http://${site}:${this.o.servers.port}/?e2e=robotless`;
+    const stored = () => this.ext(`async () => { const s = await chrome.storage.local.get(['settings', 'sitePicks']); return { settings: s.settings || null, sitePicks: s.sitePicks || null }; }`);
+    const before = await stored();
+    const reopen = async () => {
+      await this.panel(`async () => { setTimeout(() => location.reload(), 20); return true; }`).catch(() => {});
+      await sleep(800);
+      this.panelCtx = await this.d.findPage('sidepanel.html');
+    };
+    // This site's agent (and the default) Claude Code, as Settings would write them; the gate's site
+    // (localhost) too, so what an earlier check left there (its pick, or this panel's snapshot of the default
+    // from before) can't decide its agent.
+    const useClaude = () => this.ext(`async (sites) => { const { sitePicks = {} } = await chrome.storage.local.get('sitePicks'); for (const s of sites) sitePicks[s] = { agent: 'claude', models: {} }; await chrome.storage.local.set({ sitePicks, settings: { agent: 'claude', models: {} } }); }`, [[site, 'localhost']]);
+    const notice = () => this.panel(`async () => {
+      const n = document.getElementById('notice');
+      const shown = (s) => { const e = document.querySelector(s); return !!e && e.getClientRects().length > 0; };
+      return { shown: shown('#notice'), title: n.querySelector('.title')?.textContent || '', buttons: [...n.querySelectorAll('.actions button')].map((b) => b.textContent),
+        line: shown('#robotless-line') ? document.getElementById('robotless-line').innerText.trim() : null, composer: shown('#composer'), using: shown('#using-line'),
+        empty: shown('#empty'), select: document.getElementById('agent').value, options: [...document.querySelectorAll('#agent option')].map((o) => [o.value, o.textContent]) };
+    }`);
+    // A real click on the notice's button with these words.
+    const clickButton = async (words) => {
+      const ok = await this.panel(`async (w) => { const b = [...document.querySelectorAll('#notice .actions button')].find((x) => x.textContent === w); if (!b) return false; b.dataset.e2e = 'pick'; return true; }`, [words]);
+      if (!ok) throw new Error(`no "${words}" button: ${JSON.stringify(await notice())}`);
+      await this.d.click(this.panelCtx, '#notice .actions button[data-e2e="pick"]');
+    };
+    const pick = (value) => this.panel(`async (value) => { const e = document.querySelector('#agent'); e.value = value; e.dispatchEvent(new Event('change', { bubbles: true })); return e.value; }`, [value]);
+    const themes = async (name) => { for (const scheme of ['light', 'dark']) if (await this.d.colorScheme(this.panelCtx, scheme)) { await sleep(250); await this.shot(this.panelCtx, `${name}-${scheme}`); } await this.d.colorScheme(this.panelCtx, ''); };
+    const yellow = () => this.waitLooks('yellow: Claude Code (the stand-in) isn\'t logged in, Switch to Codex offered', (l) => l.classes.join() === 'needs-login' && l.dot === 'dot warn', 30000);
+    const out = [];
+    try {
+      await this.ext(`async (k) => { await chrome.storage.local.remove(k); }`, [`chat:${site}`]);
+      await useClaude();
+      await this.ext(`async (id, url) => { await chrome.tabs.update(id, { url, active: true }); }`, [win.tabId, url]);
+      await reopen();
+      await this.waitPanel(`the panel on ${site}`, (x) => x.site === site && !x.gate, 15000);
+      await yellow();
+      const n1 = await waitFor('the login notice with Switch to Codex', async () => { const n = await notice(); return n.buttons.includes('Switch to Codex') ? n : null; }, { timeoutMs: 30000 })
+        .catch(async (e) => { throw new Error(`${e.message}: ${JSON.stringify(await notice())}`); });
+      if (n1.title !== 'Claude Code isn’t logged in' || !n1.buttons.includes('Use robotless') || n1.buttons.some((b) => b === 'Switch to Claude Code')) throw new Error(JSON.stringify(n1));
+      if (n1.buttons.indexOf('Use robotless') !== n1.buttons.length - 1) throw new Error(`Use robotless isn't last: ${n1.buttons}`);
+      if (!n1.options.some(([v, t]) => v === 'none' && t === 'None (robotless)')) throw new Error(`Settings' options: ${JSON.stringify(n1.options)}`);
+      await this.d.pointerAway(this.panelCtx);
+      await themes('robotless-yellow-notice');
+      out.push(`notice "${n1.title}": ${n1.buttons.join(' · ')}`);
+
+      // The gate's one line offers them too.
+      await this.ext(`async (id, url) => { await chrome.tabs.update(id, { url, active: true }); }`, [win.tabId, `http://localhost:${this.o.servers.port}/?e2e=robotless`]);
+      const g = await this.waitLooks('the gate\'s yellow line', (l) => l.classes.join() === 'needs-login' && /Use robotless/.test(l.gateNote), 20000)
+        .catch(async (e) => {
+          const where = await this.panel(`async () => ({ title: document.title, search: location.search, agent: document.getElementById('agent').value })`).catch((x) => x.message);
+          const pages = this.d.contexts ? (await this.d.contexts()).map((c) => c.url).filter((u) => /sidepanel/.test(u)) : [];
+          throw new Error(`${e.message}; panel ${JSON.stringify(where)}; panels ${JSON.stringify(pages)}; stored ${JSON.stringify(await stored())}`);
+        });
+      if (!/^Claude Code isn’t logged in\. Log in · Switch to Codex( · Switch to [^·]+)* · Use robotless$/.test(g.gateNote)) throw new Error(`the gate's line: "${g.gateNote}"`);
+      await this.d.pointerAway(this.panelCtx);
+      await themes('robotless-yellow-gate');
+      out.push(`gate "${g.gateNote}"`);
+      await this.ext(`async (id, url) => { await chrome.tabs.update(id, { url, active: true }); }`, [win.tabId, url]);
+      await this.waitPanel(`the panel on ${site}`, (x) => x.site === site && !x.gate, 15000);
+
+      // Switch to Codex: this site's pick, the yellow gone.
+      await clickButton('Switch to Codex');
+      const sw = await this.waitLooks('Codex ready after Switch to', (l) => !l.classes.length && l.dotLabel === 'Ready · Codex', 20000);
+      const s1 = await stored();
+      if (s1.sitePicks?.[site]?.agent !== 'codex') throw new Error(`this site's pick: ${JSON.stringify(s1)}`);
+      if (!Scenario.same(sw.rim, sw.green)) throw new Error(`not green: ${JSON.stringify(sw)}`);
+      out.push('Switch to Codex: this site\'s pick, green');
+
+      // Back to Claude Code; Use robotless.
+      await useClaude();
+      await yellow();
+      await waitFor('Use robotless offered', async () => (await notice()).buttons.includes('Use robotless') || null, { timeoutMs: 15000 });
+      await clickButton('Use robotless');
+      const x = await this.waitLooks('robotless: green, the off face', (l) => !l.classes.length && l.dot === 'dot ok' && l.barFace === 'robotless', 20000);
+      const s2 = await stored();
+      if (s2.settings?.agent !== 'none' || s2.sitePicks?.[site]?.agent !== 'claude') throw new Error(`stored: ${JSON.stringify(s2)}`);
+      for (const k of ['rim', 'power', 'modSwitch']) if (x[k] && !Scenario.same(x[k], x.green)) throw new Error(`${k} is ${x[k]}, not green: ${JSON.stringify(x)}`);
+      if (x.light && !Scenario.same(x.light, x.green)) throw new Error(`the running light is ${x.light}`);
+      if (x.dotLabel !== 'Ready · robotless' || x.notices.length) throw new Error(JSON.stringify(x));
+      const r1 = await notice();
+      if (r1.line !== 'Robotless: your mods run, no agent. Pick one in Settings to chat.' || r1.composer || r1.using || r1.empty || r1.shown) throw new Error(`robotless: ${JSON.stringify(r1)}`);
+      const eyes = await this.panel(`async () => [...document.querySelectorAll('#bar-robot .eye')].map((e) => getComputedStyle(e).display)`);
+      if (eyes.some((d) => d !== 'none')) throw new Error(`the bar robot's eyes show: ${eyes}`);
+      await this.waitFace('robotless: the off face (green) in the bar; the toolbar the usual robot', win.tabId, { toolbar: 'robot-16.png', bar: 'robotless' });
+      await this.d.pointerAway(this.panelCtx);
+      await themes('robotless-mode');
+      out.push(`robotless: green, bar face robotless, toolbar robot-off, "${r1.line}"`);
+      // "Settings" in the line opens Settings, at the agent picker: "None (robotless)".
+      await this.d.click(this.panelCtx, '#robotless-settings');
+      const st = await waitFor('Settings open', () => this.panel(`async () => { const s = document.getElementById('settings'); return !s.hidden ? { value: document.getElementById('agent').value, text: document.getElementById('agent').selectedOptions[0]?.textContent, model: document.getElementById('model-row').getClientRects().length > 0 } : null; }`), { timeoutMs: 10000 });
+      if (st.value !== 'none' || st.text !== 'None (robotless)' || st.model) throw new Error(`Settings: ${JSON.stringify(st)}`);
+      await themes('robotless-settings');
+
+      // Settings round-trip: Claude Code (robotless ends: yellow again, as it's logged out), then None (robotless) again.
+      await pick('claude');
+      await yellow();
+      const s3 = await stored();
+      if (s3.settings?.agent !== 'claude' || s3.sitePicks?.[site]?.agent !== 'claude') throw new Error(`after picking Claude Code: ${JSON.stringify(s3)}`);
+      await pick('none');
+      await this.waitLooks('robotless again from Settings', (l) => !l.classes.length && l.barFace === 'robotless', 20000);
+      const s4 = await stored();
+      if (s4.settings?.agent !== 'none' || s4.sitePicks?.[site]?.agent !== 'claude') throw new Error(`after None (robotless): ${JSON.stringify(s4)}`);
+      if ((await notice()).select !== 'none') throw new Error('the picker doesn\'t say None (robotless)');
+      out.push('Settings: Claude Code (yellow again), None (robotless) (green again)');
+      await this.d.click(this.panelCtx, '#settings-btn');
+      return out.join('; ');
+    } finally {
+      fs.writeFileSync(cfgFile, saved);
+      await this.ext(`async (b) => { await chrome.storage.local.set({ settings: b.settings || { agent: '', models: {} }, sitePicks: b.sitePicks || {} }); }`, [before]).catch(() => {});
+      await this.d.colorScheme(this.panelCtx, '').catch(() => {});
+      await this.ext(`async (k) => { await chrome.storage.local.remove(k); }`, [`chat:${site}`]).catch(() => {});
+      await reopen().catch(() => {});
     }
   }
 

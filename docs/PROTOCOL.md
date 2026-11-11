@@ -1323,6 +1323,16 @@ there. New chat (+) keeps the site's pick. The setting from before 0.2.0 (one gl
 default, so every site starts with it. `trif agent run` doesn't read any of this: it takes `--agent` and
 `--model`, or uses the helper's default agent.
 
+**Robotless** (`lib.js` `ROBOTLESS`). `settings.agent` = `"none"`: no chat agent in this browser (Settings'
+"None (robotless)", or the login notice's "Use robotless"). It wins over every site's pick, which stays as
+it was; no site's pick holds it. Picking any agent (or Default) in Settings ends it. Meanwhile the panel
+starts no runs (the message box is one line saying so; Explain, Merge with my agent and a broken mod's Fix
+it are gone), the background refuses `agent.start` and "Fix it automatically" falls back to the card, the
+panel is green (nothing to log in to) and the robot's face is off's blank one in green, in the bar and in
+every tab's toolbar icon (`faces.js`). Mods, approvals and the rest work as usual. The login notice's
+"Switch to <agent>" offers each other installed agent `agent.list` says is logged in (`switchableAgents`),
+and makes it this site's pick, as Settings does.
+
 ### Agent adapters (`helper/lib/agents/<id>.js`)
 
 Each adapter: `detect(env) → {available, path, version, note}`, `command({prompt, sessionId, model,

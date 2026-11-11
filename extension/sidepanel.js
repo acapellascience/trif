@@ -6,7 +6,8 @@
 import { siteForUrl, modAppliesTo, modSites, isMultiSite, offOnSite, normalizeOffSites, scopeFor, hostInScope, limitToSites, withOffSites, modGroup, GROUPS, GROUP_NAMES, groupWord, groupOffOn, offSitesFor, normalizeGroupsOff, FIREFOX, BROWSER, SETUP_COMMAND,
   SITE_ACCESS, siteOrigins, siteState, hasSiteAccess, sensitiveSites, splitForPage,
   normalizeModOrder, orderMods, moveId, setModOrder,
-  normalizeSettings, normalizePicks, siteSettings, withoutModel, panelQuery, panelWindowBounds, rememberScreen } from './lib.js';
+  normalizeSettings, normalizePicks, siteSettings, withoutModel, panelQuery, panelWindowBounds, rememberScreen,
+  ROBOTLESS, isRobotless, switchableAgents } from './lib.js';
 import { setMarkdown, unwrapMarkdown } from './markdown.js';
 import { createLogin } from './login.js';
 import { agentLevel, agentSiteOf, sensitiveList } from './agentsites.js';
@@ -47,6 +48,7 @@ const ui = {
 
   noSandbox: $('#no-sandbox'),
   composer: $('#composer'), input: $('#input'), send: $('#send'), stop: $('#stop'),
+  robotlessLine: $('#robotless-line'), robotlessSettings: $('#robotless-settings'), modelRow: $('#model-row'),
 };
 
 const view = {
@@ -215,9 +217,13 @@ async function loadAgents() {
 /** This site chat's agent settings ({agent, models}): see "agent and model per site chat" in lib.js. */
 const chatSettings = () => siteSettings({ picks: view.picks, snapshots: view.snapshots, global: view.settings, site: view.site });
 
-/** The agent a new run here would use: this chat's choice, else the helper's default. */
+/** No chat agent in this browser (Settings' "None (robotless)", the login notice's "Use robotless"): lib.js ROBOTLESS. */
+const robotless = () => isRobotless(view.settings);
+
+/** The agent a new run here would use: this chat's choice, else the helper's default (robotless: none, id ''). */
 function currentAgent() {
   const list = view.agents?.agents || [];
+  if (robotless()) return { id: '', info: null, list };
   const id = chatSettings().agent || view.agents?.default || '';
   return { id, info: list.find((a) => a.id === id) || null, list };
 }
@@ -421,7 +427,7 @@ function breakCard(li, m) {
   const acts = el('div', 'break-actions');
   const fail = (b, e) => { b.disabled = false; request({ type: 'chat.note', site: view.site, text: `Couldn't do that: ${e?.message ?? e}` }).catch(() => {}); };
   const undo = button('Undo fix', '', (e) => undoFix(m.mod, e.currentTarget));
-  const fix = button(m.afterFix ? 'Try again' : 'Fix it', m.afterFix ? '' : 'go', async (e) => {
+  const fix = button(m.afterFix ? 'Try again' : 'Fix it', m.afterFix ? 'break-fix' : 'go break-fix', async (e) => {
     const b = e.currentTarget;
     b.disabled = true;
     try {
@@ -613,6 +619,10 @@ function render() {
   watchOpenModel(agentInfo?.id, helperOk);
   const problem = problemNow({ helperOk, agentInfo });
   const red = RED.has(problem);
+  // Robotless: no agent, so nothing to log in to; green as when logged in. The message box gives way to one
+  // line (#robotless-line), and what asks the agent (Explain, Merge with my agent, Fix it) goes (sidepanel.css).
+  const noRobot = robotless();
+  document.body.classList.toggle('robotless', noRobot);
   document.body.classList.toggle('blocked', red);
   document.body.classList.toggle('needs-login', !!problem && !red && !!site);
   document.body.dataset.problem = problem || '';
@@ -622,12 +632,13 @@ function render() {
   let dotLabel = 'Helper not connected';
   if (!status) { dot = ''; dotLabel = 'Checking…'; }
   else if (helperOk) {
-    const agentOk = !problem && (agentInfo ? agentInfo.available : anyAgent);
+    const agentOk = !problem && (noRobot || (agentInfo ? agentInfo.available : anyAgent));
     dot = red ? 'bad' : agentOk ? 'ok' : 'warn';
     dotLabel = problem === 'scripts' ? 'User scripts are off'
       : problem === 'login' ? `${agentInfo?.name || 'The agent'} isn’t logged in`
       : problem === 'key' ? `No ${openModelKeyMissing()} API key yet`
       : !agentOk ? 'Coding agent not available'
+      : noRobot ? 'Ready · robotless'
       : `Ready${agentInfo ? ` · ${agentInfo.name}` : ''}`;
   }
   ui.dot.className = `dot ${dot}`;
@@ -642,7 +653,7 @@ function render() {
   // (Except a login a run found gone, loginExpired: the agent's own check still says logged in then, so
   // after logging in from a terminal, sending again is the only way to tell. The notice still shows.)
   const waitsForLogin = (!!agentInfo?.available && agentInfo.loggedIn === false && !agentInfo.loginExpired) || !!keyMissing;
-  const canSend = !!site && helperOk && !waitsForLogin && (agentInfo ? agentInfo.available : (view.agents ? anyAgent : true));
+  const canSend = !!site && helperOk && !noRobot && !waitsForLogin && (agentInfo ? agentInfo.available : (view.agents ? anyAgent : true));
   ui.composer.dataset.canSend = canSend ? '1' : '';
   ui.send.title = !waitsForLogin ? 'Send'
     : keyMissing ? `Add your ${keyMissing} API key in Settings first`
@@ -712,8 +723,15 @@ function problemLine(problem, agentInfo) {
     case 'login': {
       const name = agentInfo?.name || 'The agent';
       const fix = agentInfo?.loginFix || '';
-      if (agentInfo?.canLogin) p.append(`${name} isn’t logged in. `, link('Log in', () => login.start(agentInfo.id, name, fix)));
-      else return markdownBlock('', `${name} isn’t logged in.${fix ? ` To log in, ${fix}.` : ''}`);
+      // Besides Log in: another agent that's logged in, or no agent (loginOthers).
+      const others = loginOthers(agentInfo).map(([text, go]) => link(text, go));
+      const more = others.flatMap((a) => [' · ', a]);
+      if (agentInfo?.canLogin) p.append(`${name} isn’t logged in. `, link('Log in', () => login.start(agentInfo.id, name, fix)), ...more);
+      else {
+        const block = markdownBlock('', `${name} isn’t logged in.${fix ? ` To log in, ${fix}.` : ''}`);
+        if (others.length) { const q = el('p'); q.append(...others.flatMap((a, i) => (i ? [' · ', a] : [a]))); block.append(q); }
+        return block;
+      }
       break;
     }
     case 'key':
@@ -727,7 +745,7 @@ function problemLine(problem, agentInfo) {
 
 /** Fill a one-line problem spot (rebuilt only when what it says changes, so a link isn't swapped mid-click). */
 function renderProblemLine(node, problem, agentInfo) {
-  const key = problem ? JSON.stringify([problem, BROWSER, agentInfo?.name, agentInfo?.canLogin, agentInfo?.loginFix, problem === 'key' && openModelKeyMissing()]) : '';
+  const key = problem ? JSON.stringify([problem, BROWSER, agentInfo?.name, agentInfo?.canLogin, agentInfo?.loginFix, problem === 'key' && openModelKeyMissing(), problem === 'login' && loginOthers(agentInfo).map(([t]) => t)]) : '';
   if (node.dataset.key === key) return;
   node.dataset.key = key;
   const line = problem ? problemLine(problem, agentInfo) : null;
@@ -828,10 +846,11 @@ function renderNotice({ helperOk, agentInfo, anyAgent }) {
   if (helperOk && (login.current || needsLogin(agentInfo))) {
     // Built once per state, so the status refresh doesn't wipe the code being typed.
     const L = login.current;
-    const key = JSON.stringify(['login', L?.phase, L?.error, L?.name || agentInfo?.name, agentInfo?.canLogin, agentInfo?.loginFix]);
+    const others = L ? [] : loginOthers(agentInfo);
+    const key = JSON.stringify(['login', L?.phase, L?.error, L?.name || agentInfo?.name, agentInfo?.canLogin, agentInfo?.loginFix, others.map(([t]) => t)]);
     if (n.dataset.key === key && !n.hidden) return;
     n.dataset.key = key;
-    const { nodes, tone } = login.nodes(agentInfo);
+    const { nodes, tone } = login.nodes(agentInfo, { more: others.map(([text, go]) => button(text, '', go)) });
     n.replaceChildren(...nodes);
     n.classList.toggle('bad', tone === 'bad');
     n.classList.toggle('ok', tone === 'ok');
@@ -866,7 +885,7 @@ function renderNotice({ helperOk, agentInfo, anyAgent }) {
     parts.push(actions);
   } else if (status && !status.userScripts) {
     // "Mods are paused" (renderPaused).
-  } else if (helperOk && view.agents && (agentInfo ? !agentInfo.available : !anyAgent)) {
+  } else if (helperOk && view.agents && !robotless() && (agentInfo ? !agentInfo.available : !anyAgent)) {
     bad = true;
     if (agentInfo) {
       parts.push(el('p', 'title', `${agentInfo.name} isn’t available`));
@@ -896,6 +915,26 @@ function needsLogin(agentInfo) {
   if (!agentInfo?.available || agentInfo.loggedIn === true) return false;
   if (agentInfo.loggedIn === false) return true;
   return loginLine(view.site ? view.chat.messages.at(-1) : null);
+}
+
+/**
+ * What the login notice (and the gate's line) offers besides Log in: [words, click]. "Switch to <name>" for
+ * each other installed agent the helper knows is logged in (lib.js switchableAgents: never one the user
+ * doesn't have), which becomes this site's agent, as in Settings; then "Use robotless", no agent at all.
+ */
+function loginOthers(agentInfo) {
+  const out = switchableAgents(view.agents?.agents, agentInfo?.id).map((a) => [`Switch to ${a.name}`, () => switchAgent(a.id)]);
+  out.push(['Use robotless', () => switchAgent(ROBOTLESS)]);
+  return out;
+}
+
+/** This site's agent becomes `id` (as Settings' agent picker does), or robotless; the login notice clears. */
+async function switchAgent(id) {
+  if (login.current) login.cancel();
+  await saveSettings({ agent: id });
+  renderSettings();
+  render();
+  if (id !== ROBOTLESS) loadModels(id);
 }
 
 // A run's "needs you to log in again" line (role 'login'), or an older helper's "isn't logged in" error.
@@ -1233,7 +1272,7 @@ function renderFaces(problem, agentInfo) {
   const state = siteScope() && view.status ? currentState() : null;
   const loggedOut = problem === 'login' || problem === 'key';
   ui.barRobot.dataset.face = document.body.classList.contains('tab-locked') ? 'paused'
-    : state === 'blocked' ? 'blocked' : state === 'disconnected' ? 'disconnected' : state === 'off' ? 'off' : loggedOut ? 'login' : 'normal';
+    : state === 'blocked' ? 'blocked' : state === 'disconnected' ? 'disconnected' : state === 'off' ? 'off' : robotless() ? 'robotless' : loggedOut ? 'login' : 'normal';
   // (only once the agent is known, and not while the helper or user scripts are what's wrong: no answer then)
   if (!view.toldScheme && view.status) { view.toldScheme = true; tellScheme(); }
   if (agentInfo && problem !== 'helper' && problem !== 'scripts' && loggedOut !== view.toldLoggedOut) {
@@ -3062,9 +3101,11 @@ function renderSettings() {
   if (mine.agent && !list.some((a) => a.id === mine.agent)) {
     opts.push(new Option(mine.agent, mine.agent));
   }
+  // No agent in this browser (lib.js ROBOTLESS): last, so it's there to pick, and to see while it's on.
+  opts.push(new Option('None (robotless)', ROBOTLESS));
   ui.agent.replaceChildren(...opts);
-  ui.agent.value = mine.agent || '';
-  const chosen = list.find((a) => a.id === (mine.agent || view.agents?.default));
+  ui.agent.value = robotless() ? ROBOTLESS : mine.agent || '';
+  const chosen = robotless() ? null : list.find((a) => a.id === (mine.agent || view.agents?.default));
   const note = chosen?.note || (view.agentsError && !view.agents ? 'Agents are listed once the helper is connected.' : '');
   ui.agentNote.textContent = note;
   ui.agentNote.hidden = !note;
@@ -3109,7 +3150,8 @@ function renderModels() {
     ui.model.value = value;
   }
   ui.model.disabled = !id;
-  ui.modelCustomRow.hidden = value !== OTHER;
+  ui.modelRow.hidden = robotless(); // (no agent, no model)
+  ui.modelCustomRow.hidden = value !== OTHER || robotless();
   if (value === OTHER && document.activeElement !== ui.modelCustom) ui.modelCustom.value = known ? '' : chosen;
 
   const selected = models.find((m) => m.id === (value === OTHER ? '' : value || list?.default));
@@ -3118,7 +3160,7 @@ function renderModels() {
     : !known && !allowsOther ? `${chosen} isn’t one of the models your account can use; pick another.`
       : value === OTHER || !selected?.description ? list?.note || '' : selected.description;
   ui.modelNote.textContent = note;
-  ui.modelNote.hidden = !note;
+  ui.modelNote.hidden = !note || robotless();
   ui.modelNote.classList.toggle('error', !!list?.error || (!known && !allowsOther));
   renderUsing(info, chosen, models, def);
 }
@@ -3149,11 +3191,18 @@ async function saveModel(agentId, model) {
  * sites without one. (No site: just the default, models too.)
  */
 async function saveSettings(patch) {
+  // Robotless is the browser's, not a site's: only the default says so, and every site keeps its pick.
+  if (patch.agent === ROBOTLESS) {
+    view.settings = normalizeSettings({ ...view.settings, agent: ROBOTLESS });
+    return chrome.storage.local.set({ settings: view.settings });
+  }
   const next = { ...chatSettings(), ...patch };
   // On a site, its models stay its own: they don't become every new chat's (0.2.1 copied them into the
   // default, so a model tried once on one site quietly became the model of every site chatted on later).
   // The agent still does. With no site open (settings on the landing page), this is the default itself.
+  const was = robotless();
   view.settings = normalizeSettings(view.site ? { ...next, models: view.settings.models } : next);
+  if (was && !('agent' in patch)) view.settings.agent = ROBOTLESS; // (a model saved meanwhile doesn't end it)
   if (!view.site) return chrome.storage.local.set({ settings: view.settings });
   view.picks = { ...view.picks, [view.site]: normalizeSettings(next) };
   await chrome.storage.local.set({ settings: view.settings, sitePicks: view.picks });
@@ -3293,6 +3342,7 @@ function toggleSettings(open = ui.settings.hidden) {
 }
 const openSettings = () => { if (ui.settings.hidden) toggleSettings(true); };
 ui.using.addEventListener('click', () => { openSettings(); try { ui.model.focus(); } catch { /* disabled */ } });
+ui.robotlessSettings.addEventListener('click', (e) => { e.preventDefault(); openSettings(); try { ui.agent.focus(); } catch { /* not shown */ } });
 
 // The user's standing instructions for every agent run: ~/.trif/instructions.md, read and written
 // through the helper (helper/lib/instructions.js). Loaded when settings open; saved as they type.

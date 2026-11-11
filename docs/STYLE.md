@@ -38,9 +38,11 @@ tab, the robot in the panel's bar, and the gate's robot:
 - **disconnected** (TRIF can't reach the site): a grey frame, a grey broken link for eyes (two chain-link
   halves apart; not a slashed link, which would read as blocked);
 - **off** (TRIF is off on the site, "The robot is off."): a blank frame in the state's colour;
+- **robotless** (no chat agent in this browser: every tab): off's blank face, in the usual green (the
+  toolbar uses off's icon); the panel stays green, as nothing needs logging in;
 - **logged out** (the agent needs a login or a key: every tab): a yellow frame, hollow yellow eyes;
 - otherwise his eyes, also when TRIF is missing a part (the panel's red).
 Paused wins over the rest (it's what the page can do right now), then blocked, disconnected, off (a
-site's states, one at a time), then logged out (every tab's). On the gate, the face is off's, blocked's or
+site's states, one at a time), then robotless, then logged out (every tab's; never while robotless). On the gate, the face is off's, blocked's or
 disconnected's, off's in the panel's colour (yellow or red when that's what's wrong). At 16 px the bars,
 the cross, the broken link and the hollow eyes sit on whole pixels.

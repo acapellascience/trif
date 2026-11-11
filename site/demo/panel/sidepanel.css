@@ -149,7 +149,6 @@ body.site-blocked .btn.go { color: #fff; }
 .sites-title { margin: 0; font-size: 12px; font-weight: 600; }
 .mode-choice { display: grid; gap: 6px; }
 .mode-choice[hidden] { display: none; }
-.starts-row { grid-template-columns: 1fr auto; }
 .mode { display: grid; gap: 1px; text-align: left; padding: 6px 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--raised); font-size: 12px; }
 .mode span { color: var(--muted); }
 .mode[aria-pressed="true"] { border-color: var(--switch-on); box-shadow: inset 0 0 0 1px var(--switch-on); }
@@ -256,24 +255,6 @@ body[data-problem="helper"] .mod-list, body.needs-login .mod-list { --switch-on:
 
 .note { margin: 0; color: var(--muted); font-size: 12px; }
 .note.error { color: var(--bad); }
-
-/* Settings, Tim's mods: a row per site, added or with its Add button. */
-.starter { display: grid; gap: 6px; padding-top: 8px; border-top: 1px solid var(--line); }
-.starter[hidden] { display: none; }
-.starter-title { margin: 0; font-weight: 600; }
-.starter-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; }
-.starter-list li { display: grid; grid-template-columns: 1fr auto; gap: 0 10px; align-items: center; }
-.starter-site { font-weight: 500; }
-.starter-mods { grid-column: 1; color: var(--muted); font-size: 12px; }
-.starter-state { grid-column: 2; grid-row: 1 / span 2; color: var(--muted); font-size: 12px; }
-.starter-list .btn { grid-column: 2; grid-row: 1 / span 2; }
-/* A site's panel: "Add Tim's mods for <site>", small. */
-.site-starter { flex: none; margin: 8px 12px 0; font-size: 12px; text-align: center; }
-.site-starter[hidden] { display: none; }
-.gate .site-starter { margin: 0; }
-.site-starter .mod-err { display: block; margin-top: 4px; }
-.site-starter .mod-err[hidden] { display: none; }
-body.no-site .site-starter { display: none; }
 
 .notice p { margin: 0; }
 .notice p + p, .notice p + .actions { margin-top: 6px; }
@@ -541,9 +522,7 @@ h3.mod-name { margin: 0; font-size: inherit; line-height: inherit; }
 .check { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--muted); }
 .check input { margin: 0; }
 
-#update .md { margin-top: 6px; font-size: 12px; color: var(--muted); max-height: min(50vh, 320px); overflow-y: auto; overscroll-behavior: contain; }
-#update .md :is(ul, ol) { margin: 0; padding-left: 16px; }
-#update .md li + li { margin-top: 4px; }
+#update .md { margin-top: 6px; font-size: 12px; color: var(--muted); }
 
 /* What a mod can do (held, or to review): TRIF's facts, read from its code, apart from what the mod says */
 .mods-review-note { margin: 4px 0 6px; font-size: 12px; color: var(--muted); }
@@ -566,12 +545,3 @@ h3.mod-name { margin: 0; font-size: inherit; line-height: inherit; }
 .mod-facts .facts-diff .add { color: var(--ok, #2f9e6e); }
 .mod-facts .facts-diff .del { color: var(--bad); }
 .mod-facts .facts-diff .gap, .mod-facts .facts-diff .ctx { color: var(--muted); }
-
-/* Groups: how TRIF runs the mods below each heading ("Rules", "Page scripts"), with a switch for this site */
-.mod-list li.mod-group { padding: 8px 0 2px; border-top: 0; }
-.mod-list li.mod-group + li { border-top: 0; }
-.mod-group-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
-.mod-group-name { margin: 0; font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); }
-.mod-group-note { margin: 0 0 2px; font-size: 11px; color: var(--muted); }
-.mod-list li.group-off { opacity: .45; }
-.mod-list li.mod-group.off .mod-group-name { text-decoration: line-through; }

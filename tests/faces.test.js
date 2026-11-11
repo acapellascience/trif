@@ -25,6 +25,16 @@ test('the face by precedence: paused, blocked, disconnected, off, logged out, no
   for (const args of [{}, { state: 'on' }, { state: 'disconnected', loggedOut: true }, { loggedOut: true }, { state: 'off', loggedOut: true }, { state: 'blocked' }, { locked: true }, { locked: true, light: true }]) assert.equal(toolbarFace(args), 'normal', JSON.stringify(args));
 });
 
+test('robotless: off\'s blank face in green (the panel\'s), never yellow; the toolbar stays the usual robot', async () => {
+  const { toolbarFace, facePaths, FACE_FILES } = await load();
+  for (const args of [{ robotless: true }, { robotless: true, loggedOut: true }, { state: 'blocked', robotless: true }]) assert.equal(toolbarFace(args), 'normal');
+  // off's icon, which is already the usual green with no eyes
+  assert.deepEqual(facePaths('robotless'), facePaths('off'));
+  assert.equal(FACE_FILES.robotless, 'robot-off');
+  assert.deepEqual(R.FACES.off.rim, [0x34, 0xd3, 0x99]);
+  assert.equal(R.FACES.off.eyes, 'none');
+});
+
 test('every face\'s files exist, are render-icon.js\'s, and the normal one is the manifest\'s', async () => {
   const { facePaths, FACE_FILES } = await load();
   const manifest = JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'extension', 'manifest.json'), 'utf8'));

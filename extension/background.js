@@ -12,7 +12,7 @@ import {
   sensitiveSites, sensitiveHit, sensitiveListSites, sensitivePlan, normalizeSiteList, normalizePending,
   FEATURES, ModsParts, fillSameMods, storedMods, modsStorageState, modsStoragePlan, normalizeStarter, applyReadded, normalizeReadded,
   applyNewMods, applyChatWaiting, normalizeNewOff, MOD_GROUPS, modGroup, groupWord, sandboxFallback, inSandboxWorld, SAFARI, siteForUrl,
-  PANEL_OPEN_WAIT_MS, PANEL_LATE_MS, panelWindowUrl, panelWindowTarget, panelWindowBounds, panelWindowClick,
+  PANEL_OPEN_WAIT_MS, PANEL_LATE_MS, panelWindowUrl, panelWindowTarget, panelWindowBounds, panelWindowClick, isRobotless,
 } from './lib.js';
 import { recordErrors, recordMatches, openErrors, dismiss as dismissError, keepLogs, fixPrompt } from './modhealth.js';
 import { SANDBOX_WORLD, SANDBOX_CSP, SETTINGS_MAX, SETTINGS_SITE_MAX } from './sandbox.js';
@@ -42,6 +42,7 @@ const state = {
   fixes: {},             // mods a fix run changed: id -> {prevHash, fixedHash, site, fp, runId, at, loads} (Undo fix)
   fixRuns: new Map(),    // runId -> {mod, fp, site, prevHash}: runs started by Fix it (or by themselves)
   onBreak: 'ask',        // Settings' "When a mod breaks": 'ask' (the chat's card), 'auto' (a fix run), 'flag' (the badge only)
+  robotless: false,      // no chat agent in this browser (the panel's Settings, `settings.agent`: lib.js ROBOTLESS)
   agentSites: {},        // "Agent on this site": site -> 'off' | 'look' | 'run' (the user's; agentsites.js)
   sensitiveSites: null,  // the user's sensitive list from Settings ([{pattern, why}]), or null for TRIF's
   agentAsks: new Map(),  // id -> {site, resolve}: the panel asking whether an agent may run code on a site
@@ -160,7 +161,7 @@ async function showFace(tabId, url, force = false) {
   await facesReady;
   if (url === undefined) url = (await chrome.tabs.get(tabId).catch(() => null))?.url || '';
   facesHost.set(tabId, hostOf(url));
-  await setFace(tabId, toolbarFace({ locked: tabLocks.isLocked(tabId), state: tabSiteState(url), loggedOut: !!state.loggedOut, light: !!state.lightToolbar }), force);
+  await setFace(tabId, toolbarFace({ locked: tabLocks.isLocked(tabId), state: tabSiteState(url), robotless: state.robotless, loggedOut: !!state.loggedOut, light: !!state.lightToolbar }), force);
 }
 let facesTimer = null;
 /** Every tab's face, and the default one (after a switch, a block, access, or the login changed). */
@@ -168,7 +169,7 @@ function showFaces() {
   clearTimeout(facesTimer);
   facesTimer = setTimeout(() => ready.then(async () => {
     await facesReady;
-    const d = state.loggedOut ? 'login' : 'normal';
+    const d = toolbarFace({ robotless: state.robotless, loggedOut: !!state.loggedOut });
     if (d !== defaultFace && chrome.action?.setIcon) {
       defaultFace = d;
       saveFaces();
@@ -245,6 +246,7 @@ const ready = chrome.storage.local.get(null).then(async (s) => {
   state.agentSites = normalizeAgentSites(s.agentSites);
   state.health = s.modHealth && typeof s.modHealth === 'object' ? s.modHealth : {};
   state.onBreak = ['ask', 'auto', 'flag'].includes(s.onBreak) ? s.onBreak : 'ask';
+  state.robotless = isRobotless(s.settings);
   state.fixes = s.modFixes && typeof s.modFixes === 'object' ? s.modFixes : {};
   state.sensitiveSites = Array.isArray(s.sensitiveSites) ? s.sensitiveSites : null;
   state.seenMods = s.seenMods && typeof s.seenMods === 'object' ? normalizeDisabled(s.seenMods) : null;
@@ -317,6 +319,8 @@ chrome.storage.onChanged?.addListener((changes, area) => {
     ready.then(() => considerSensitive(sensitiveListSites(state.sensitiveSites), { tabs: true })).catch((e) => log('warn', `sensitive sites: ${errMsg(e)}`));
   }
   if (changes.agentSites || changes.sensitiveSites) notifyPanels();
+  // Robotless on or off (the panel's Settings, or its "Use robotless"): every tab's face follows.
+  if (changes.settings) { const r = isRobotless(changes.settings.newValue); if (r !== state.robotless) { state.robotless = r; showFaces(); } }
 });
 chrome.runtime.onConnect.addListener((port) => {
   if (port.name !== 'panel' || port.sender?.id !== chrome.runtime.id) return;
@@ -1553,7 +1557,7 @@ async function announceBreak(f, tab) {
   const site = siteForUrl(tab.url || '');
   if (!site) return;
   const name = mod.name || mod.id;
-  if (state.onBreak === 'auto' && !e.fixed?.[f.fp]) {
+  if (state.onBreak === 'auto' && !state.robotless && !e.fixed?.[f.fp]) { // (robotless: no agent to ask, so the card)
     const level = agentLevelOf(tab.url || '');
     if (level === 'run' || level === 'ask') {
       e.fixed[f.fp] = true;
@@ -2417,6 +2421,7 @@ async function startAgent(msg) {
   const site = normalizeSite(msg.site);
   const prompt = String(msg.prompt ?? '').trim();
   if (!prompt) throw new Error('empty message');
+  if (state.robotless) throw new Error('Robotless: no agent is chosen in this browser. Pick one in Settings to chat.');
   if (!siteOnFor(`https://${site}/`, onSites(), sens())) {
     const scope = siteOfHost(site);
     const st = stateOf(scope);

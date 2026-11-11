@@ -912,36 +912,63 @@ const GROUP_TEXT = {
 };
 const groupOff = (g) => !!view.site && groupOffOn(normalizeGroupsOff(view.status?.groupsOff), g, view.site);
 const groupHeadings = new Map();
+// Collapsed tiers (this browser's): their heading stays, with its On and Off; the note and the mods hide.
+const collapsedGroups = new Set();
+try { for (const g of JSON.parse(localStorage.getItem('groupsCollapsed') || '[]')) collapsedGroups.add(g); } catch { /* none */ }
+function applyCollapsed() {
+  ui.modList.dataset.collapsed = [...collapsedGroups].join(' ');
+  for (const [g, li] of groupHeadings) {
+    li.classList.toggle('collapsed', collapsedGroups.has(g));
+    li.querySelector('.group-toggle')?.setAttribute('aria-expanded', String(!collapsedGroups.has(g)));
+  }
+}
 function groupHeading(g) {
   let li = groupHeadings.get(g);
   if (!li) {
     li = el('li', 'mod-group');
     li.dataset.group = g;
     const id = `mod-group-${g}`;
-    const name = el('h3', 'mod-group-name', GROUP_TEXT[g][0]);
+    const name = el('h3', 'mod-group-name');
     name.id = id;
-    const sw = el('button', 'switch group-switch');
-    sw.type = 'button';
-    sw.setAttribute('role', 'switch');
+    const toggle = el('button', 'group-toggle');
+    toggle.append(el('span', 'group-name-text', GROUP_TEXT[g][0]));
+    toggle.type = 'button';
+    toggle.setAttribute('aria-expanded', 'true');
+    toggle.append(el('span', 'group-count'));
+    toggle.insertAdjacentHTML('beforeend', '<svg class="chev" viewBox="0 0 16 16" aria-hidden="true"><path d="M6 3.5 10.5 8 6 12.5"/></svg>');
+    toggle.addEventListener('click', () => {
+      if (collapsedGroups.has(g)) collapsedGroups.delete(g); else collapsedGroups.add(g);
+      try { localStorage.setItem('groupsCollapsed', JSON.stringify([...collapsedGroups])); } catch { /* this time only */ }
+      applyCollapsed();
+    });
+    name.append(toggle);
+    // On and Off buttons (Tim: the mods' own switches below are the only switches, so the two layers don't look alike)
+    const sw = el('div', 'group-switch');
+    sw.setAttribute('role', 'group');
     sw.setAttribute('aria-labelledby', id);
-    const knob = el('span', 'knob');
-    knob.setAttribute('aria-hidden', 'true');
-    sw.append(knob);
-    sw.addEventListener('click', async () => {
-      const on = sw.getAttribute('aria-checked') !== 'true';
+    const setGroup = async (on) => {
+      if (sw.hasAttribute('aria-busy') || on === !groupOff(g)) return;
       sw.setAttribute('aria-busy', 'true');
       try { await request({ type: 'mods.group', site: view.site, group: g, enabled: on, tab: view.tab?.id }); await refreshStatus(); } catch (e) {
         request({ type: 'chat.note', site: view.site, text: `Couldn't switch ${GROUP_TEXT[g][0]} ${on ? 'on' : 'off'}: ${e?.message ?? e}` }).catch(() => {});
       } finally { sw.removeAttribute('aria-busy'); }
-    });
+    };
+    for (const on of [true, false]) {
+      const btn = el('button', 'gs-btn', on ? 'On' : 'Off');
+      btn.type = 'button';
+      btn.dataset.on = String(on);
+      btn.addEventListener('click', () => setGroup(on));
+      sw.append(btn);
+    }
     const row = el('div', 'mod-group-row');
     row.append(name, sw);
     li.append(row, el('p', 'mod-group-note', GROUP_TEXT[g][1]));
     groupHeadings.set(g, li);
+    applyCollapsed();
   }
   const off = groupOff(g);
   const sw = li.querySelector('.group-switch');
-  sw.setAttribute('aria-checked', String(!off));
+  for (const btn of sw.querySelectorAll('.gs-btn')) btn.setAttribute('aria-pressed', String((btn.dataset.on === 'true') === !off));
   sw.title = off ? `Off on ${view.site}: none of these run here. Click to switch them on here.` : `On on ${view.site}: click to stop all of these running here (each mod's own switch is kept).`;
   li.classList.toggle('off', off);
   return li;
@@ -996,6 +1023,13 @@ function renderMods() {
   while (ui.modList.children.length > want.length) ui.modList.lastElementChild.remove();
   const byId = new Map(mods.map((m) => [m.id, m]));
   for (const li of ui.modList.children) updateModItem(li, byId.get(li.dataset.mod));
+  // Each tier's count: how many of its mods are switched on here, of how many ("(1/2)")
+  for (const [g, li] of groupHeadings) {
+    const inGroup = mods.filter((m) => modGroup(m) === g);
+    const on = inGroup.filter((m) => !m.held && shownEnabled(m.id, isOn(m.id, switchSite(m)), switchSite(m))).length;
+    const count = li.querySelector('.group-count');
+    if (count) { count.replaceChildren(el('span', 'gc-on', String(on)), el('span', 'gc-all', `/${inGroup.length}`)); count.title = `${on} of ${inGroup.length} switched on`; }
+  }
   syncSwitches(ui.modList, isOn);
   // Open unless the user closed it (remembered across sites and sessions), so each switch is one click away.
   if (view.modsOpenFor === null) {

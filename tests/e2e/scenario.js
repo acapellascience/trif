@@ -334,7 +334,7 @@ class Scenario {
   /** The panel's top bar: what shows in it, and how the robot in the middle looks and is labelled. */
   async barState() {
     return this.panel(`async () => {
-      const shown = (sel) => { const e = document.querySelector(sel); return !!e && e.getClientRects().length > 0; };
+      const shown = (sel) => { const e = document.querySelector(sel); return !!e && e.getClientRects().length > 0 && getComputedStyle(e).visibility !== 'hidden'; };
       const robot = document.querySelector('#bar-robot');
       const look = robot ? getComputedStyle(robot.querySelector('svg')) : null;
       return {
@@ -361,12 +361,13 @@ class Scenario {
     } catch (e) { throw new Error(`${e.message}: ${JSON.stringify(last)}`); }
   }
 
-  // The robot asleep in the bar: grey and dim (the eyes still there); with the mouse on him, a little
-  // brighter, still asleep; awake: in colour.
+  // The robot in the bar: disconnected, grey and dim (dim; brighter under the mouse: stirring); otherwise in
+  // his colour (awake), off included (blank, the panel's robot's colour).
   static grey(b) { return Number((/grayscale\(([\d.]+)\)/.exec(b.filter) || [])[1] || 0); }
   static dim(b) { return !b.hovered && Scenario.grey(b) === 1 && b.opacity <= 0.6; } // 0.45 dark, 0.6 light
   static stirring(b) { return b.hovered && Scenario.grey(b) > 0 && Scenario.grey(b) < 1 && b.opacity > 0.5 && b.opacity < 1; }
   static awake(b) { return b.filter === 'none' && b.opacity === 1; }
+  static gate(b) { return b.shut ? Scenario.dim(b) : Scenario.awake(b); } // (the gate: grey only when disconnected)
 
   /** Settings open from the bar (wherever it is: the gate, the landing page), work, and close again. */
   async settingsOpen(name) {
@@ -975,8 +976,8 @@ class Scenario {
       }
       return `panel: "${p.gateTitle}" / "${p.gateText}"${p.links.length ? `; ${p.links.join(', ')}` : ''}`;
     });
-    await r.check('gate: the top bar keeps only the dot, the robot, grey and dim, the power button (to turn it on from here) and settings', async () => {
-      const b = await this.waitBar('the gate\'s bar', GATE_BAR, Scenario.dim);
+    await r.check('gate: the top bar keeps only the dot, the robot (blank, in his colour, as below), the power button (to turn it on from here) and settings', async () => {
+      const b = await this.waitBar('the gate\'s bar', GATE_BAR, Scenario.gate);
       if (!b.robotButton) throw new Error('the robot isn\'t a focusable button');
       if (b.robotLabel !== 'Turn the robot on for 127.0.0.1' || b.robotLabel !== b.switchLabel) throw new Error(`labelled "${b.robotLabel}" (the power button: "${b.switchLabel}")`);
       return `"${b.robotLabel}"; ${b.filter}, opacity ${b.opacity}`;
@@ -1135,10 +1136,10 @@ class Scenario {
       await d.click(this.panelCtx, '#bar-robot');
       await this.waitPanel('the gate', (x) => x.gate && !x.siteOn);
       await this.waitPage('the page without the mod', (x) => !x.banner);
-      // The mouse is still on him: grey, but brighter than at rest; moved away, dim.
-      const lit = await this.waitBar('the gate\'s bar, the robot under the mouse', GATE_BAR, Scenario.stirring);
+      // Off: blank, in his colour (not greyed), under the mouse or not.
+      const lit = await this.waitBar('the gate\'s bar, the robot under the mouse', GATE_BAR, Scenario.gate);
       await d.pointerAway(this.panelCtx);
-      const rest = await this.waitBar('the gate\'s bar, the mouse elsewhere', GATE_BAR, Scenario.dim);
+      const rest = await this.waitBar('the gate\'s bar, the mouse elsewhere', GATE_BAR, Scenario.gate);
       await d.click(this.panelCtx, '#bar-robot');
       await this.waitPage('the mod again', (x) => x.banner === 'ran');
       await this.waitPanel('the panel awake, the mod on and running', (x) => !x.gate && x.siteOn && x.mods.some((m) => m.id === '127.0.0.1/e2e-banner' && m.on && m.running));
@@ -1720,7 +1721,7 @@ class Scenario {
       await this.ext(`async (id, url) => { await chrome.tabs.update(id, { url }); }`, [this.xTab, `http://localhost:${this.o.servers.port}/?e2e=narrow`]);
       await this.waitPanel('the panel on localhost\'s gate', (x) => x.site === 'localhost' && x.gate, 10000);
       await this.d.pointerAway(this.panelCtx); // the robot at rest, not under the last click
-      await this.waitBar('the gate\'s bar', GATE_BAR, Scenario.dim);
+      await this.waitBar('the gate\'s bar', GATE_BAR, Scenario.gate);
       await sleep(300);
       await this.shot(this.panelCtx, 'panel-narrow-gate');
       await this.r.check('settings open from the gate', () => this.settingsOpen('panel-narrow-gate-settings'));
@@ -1833,7 +1834,7 @@ class Scenario {
           await this.goColour('gate');
           const x = await this.waitLooks('yellow gate', (l) => l.classes.join() === 'needs-login' && !!l.gateNote);
           if (!['robot-shaded-off-yellow.svg', 'robot-shaded-disconnected.svg'].includes(x.gateIcon) || !x.fix || !x.dotShown || x.dot !== 'dot warn' || !/isn’t logged in/.test(x.gateNote)) throw new Error(JSON.stringify(x));
-          await this.waitBar('the gate\'s bar', GATE_BAR, Scenario.dim);
+          await this.waitBar('the gate\'s bar', GATE_BAR, Scenario.gate);
           await this.shot(this.panelCtx, 'panel-yellow-gate');
           return `"${x.gateNote}"`;
         });
@@ -1874,7 +1875,7 @@ class Scenario {
           await this.goColour('gate');
           const x = await this.waitLooks('red gate', (l) => l.problem === 'scripts' && !!l.gateNote);
           if (!['robot-shaded-off-red.svg', 'robot-shaded-disconnected.svg'].includes(x.gateIcon) || x.fix || x.dot !== 'dot bad' || !x.dotShown || !/^Mods are paused/.test(x.gateNote)) throw new Error(JSON.stringify(x));
-          await this.waitBar('the gate\'s bar', GATE_BAR, Scenario.dim);
+          await this.waitBar('the gate\'s bar', GATE_BAR, Scenario.gate);
           await this.shot(this.panelCtx, 'panel-scripts-off-gate');
           return `"${x.gateNote}"`;
         });
@@ -1913,7 +1914,7 @@ class Scenario {
           await this.goColour('gate');
           const x = await this.waitLooks('red gate, helper', (l) => l.problem === 'helper' && !!l.gateNote);
           if (!['robot-shaded-off-red.svg', 'robot-shaded-disconnected.svg'].includes(x.gateIcon) || x.fix || !x.dotShown || !/^The TRIF helper isn’t connected\. Run npx timsrobot setup in a terminal, then restart \w+\. Setup page$/.test(x.gateNote)) throw new Error(JSON.stringify(x));
-          await this.waitBar('the gate\'s bar', GATE_BAR, Scenario.dim);
+          await this.waitBar('the gate\'s bar', GATE_BAR, Scenario.gate);
           await this.shot(this.panelCtx, 'panel-helper-gate');
           return `"${x.gateNote}"`;
         });
@@ -3535,7 +3536,7 @@ page.root.setAttr('data-trif-box-spec', r);\n`,
     const look = async () => (await this.cli(['run', '--tab', String(win.tabId), `document.documentElement.getAttribute('data-trif-box-sbx-panel')`], { timeoutMs: 20000 })).stdout.trim();
     const clickGroup = async () => {
       await waitFor('the Sandboxed heading', () => this.panel(`async () => !!document.querySelector('li.mod-group[data-group="sandboxed"] .group-switch') || null`), { timeoutMs: 10000 });
-      await this.panelClick('li.mod-group[data-group="sandboxed"] .group-switch');
+      await this.panelClick('li.mod-group[data-group="sandboxed"] .group-switch .gs-btn[aria-pressed="false"]');
     };
     try {
       fs.writeFileSync(file, '// ==WebMod==\n// @name E2E Sandboxed in the panel\n// @match *://127.0.0.1/*\n// @sandboxed\n// ==/WebMod==\npage.root.setAttr(\'data-trif-box-sbx-panel\', \'ran\');\n');
@@ -3546,7 +3547,7 @@ page.root.setAttr('data-trif-box-spec', r);\n`,
         const heads = [...document.querySelectorAll('#mod-list > li.mod-group')].map((li) => li.dataset.group);
         const sb = document.querySelector('li.mod-group[data-group="sandboxed"]');
         const row = document.querySelector('li[data-mod="127.0.0.1/e2e-sbx-panel"]');
-        return sb && row && row.querySelector('.light.on') ? { heads, name: sb.querySelector('.mod-group-name').textContent, note: sb.querySelector('.mod-group-note').textContent, rowGroup: row.dataset.group,
+        return sb && row && row.querySelector('.light.on') ? { heads, name: sb.querySelector('.group-name-text').textContent, count: sb.querySelector('.group-count').textContent, note: sb.querySelector('.mod-group-note').textContent, rowGroup: row.dataset.group,
           order: [...document.querySelectorAll('#mod-list > li')].map((li) => li.dataset.mod || li.dataset.group),
         } : null;
       }`), { timeoutMs: 15000 });
@@ -3564,7 +3565,7 @@ page.root.setAttr('data-trif-box-spec', r);\n`,
     } finally {
       try { fs.unlinkSync(file); } catch { /* gone */ }
       const stillOff = await this.panel(`async () => !!document.querySelector('li.mod-group[data-group="sandboxed"].off')`).catch(() => false);
-      if (stillOff) await this.panelClick('li.mod-group[data-group="sandboxed"] .group-switch').catch(() => {});
+      if (stillOff) await this.panelClick('li.mod-group[data-group="sandboxed"] .group-switch .gs-btn[aria-pressed="false"]').catch(() => {});
     }
   }
 
@@ -3578,7 +3579,7 @@ page.root.setAttr('data-trif-box-spec', r);\n`,
     const scripts = () => this.ext(`async () => (await chrome.userScripts.getScripts()).map((s) => ({ id: s.id, ex: s.excludeMatches || [] }))`);
     const clickGroup = async () => {
       await waitFor('the Page scripts heading', () => this.panel(`async () => !!document.querySelector('li.mod-group[data-group="page"] .group-switch') || null`), { timeoutMs: 10000 });
-      await this.panelClick('li.mod-group[data-group="page"] .group-switch');
+      await this.panelClick('li.mod-group[data-group="page"] .group-switch .gs-btn[aria-pressed="false"]');
     };
     try {
       fs.writeFileSync(rulesFile, '// ==WebMod==\n// @name Group rules\n// @match *://127.0.0.1/*\n// @rules\n// ==/WebMod==\n{ "css": "#title { color: rgb(4, 5, 6) }" }\n');
@@ -3612,7 +3613,7 @@ page.root.setAttr('data-trif-box-spec', r);\n`,
       try { fs.unlinkSync(rulesFile); } catch { /* gone */ }
       // (left off by a failure: switch it on again the way the user would)
       const stillOff = await this.panel(`async () => !!document.querySelector('li.mod-group[data-group="page"].off')`).catch(() => false);
-      if (stillOff) await this.panelClick('li.mod-group[data-group="page"] .group-switch').catch(() => {});
+      if (stillOff) await this.panelClick('li.mod-group[data-group="page"] .group-switch .gs-btn[aria-pressed="false"]').catch(() => {});
     }
   }
 

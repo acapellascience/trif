@@ -184,11 +184,14 @@ body.needs-login .problem-line { color: var(--warn); }
 .bar-robot .rim { fill: var(--switch-on); }
 .bar-robot .face { fill: #18181a; }
 .bar-robot .eye { fill: #59dbab; }
-/* His faces (data-face, sidepanel.js renderFaces; the toolbar icon's, faces.js): paused, a white pause
-   sign (tablock.js); blocked, a red cross; off, no eyes; logged out, hollow eyes in the yellow. */
-.bar-robot .pause { display: none; fill: #ffffff; }
-.bar-robot .cross { display: none; stroke: #ff7b70; stroke-width: 14; stroke-linecap: round; }
-.bar-robot:is([data-face="paused"], [data-face="blocked"], [data-face="off"]) .eye { display: none; }
+/* His faces (data-face, sidepanel.js renderFaces; the toolbar icon's, faces.js), one colour each, the
+   frame's (--switch-on): paused, a pause sign (tablock.js); blocked, a cross; disconnected, a broken link
+   (grey, by the bar's filter); off, no eyes; logged out, hollow eyes. */
+.bar-robot .pause { display: none; fill: var(--switch-on); }
+.bar-robot .cross { display: none; stroke: var(--switch-on); stroke-width: 14; stroke-linecap: round; }
+.bar-robot .link { display: none; fill: none; stroke: var(--switch-on); stroke-width: 7; stroke-linecap: round; }
+.bar-robot:is([data-face="paused"], [data-face="blocked"], [data-face="disconnected"], [data-face="off"]) .eye { display: none; }
+.bar-robot[data-face="disconnected"] .link { display: inline; }
 .bar-robot[data-face="paused"] .pause { display: inline; }
 .bar-robot[data-face="blocked"] .cross { display: inline; }
 .bar-robot[aria-busy="true"] { cursor: progress; opacity: 0.6; }
@@ -217,10 +220,10 @@ body.needs-login { --switch-on: var(--warn); }
 body.tab-locked:not(.blocked, .needs-login) { --switch-on: var(--paused); }
 body.tab-locked:not(.blocked, .needs-login) .dot { background: var(--paused); }
 body.tab-locked:not(.blocked, .needs-login) .btn.go { color: light-dark(#ffffff, #1d1d1f); }
-body.blocked .bar-robot :is(.eye, .pause) { fill: #ffc2bc; }
-body.needs-login .bar-robot :is(.eye, .pause) { fill: #fbe3a6; }
+/* (one colour: what's on his face is his frame's colour, red or yellow too) */
+body:is(.blocked, .needs-login) .bar-robot :is(.eye, .pause) { fill: var(--switch-on); }
 /* (logged out: hollow eyes, their outline in the yellow) */
-body .bar-robot[data-face="login"] .eye { fill: none; stroke: #fbe3a6; stroke-width: 9; }
+body .bar-robot[data-face="login"] .eye { fill: none; stroke: var(--switch-on); stroke-width: 9; }
 body.needs-login .btn.go { color: #2e1f02; }
 /* Except the mods while only the helper is away, only a login is missing, or the tab is paused: they still
    run (the extension keeps its copy), so their switches and lights stay green. */

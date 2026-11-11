@@ -54,13 +54,13 @@
 // conditions), the agent's code doesn't run: lock() throws, and `trif run` fails with why.
 //
 // While a tab is locked, TRIF's toolbar icon for that tab is the robot with a pause sign for eyes
-// (icons/robot-paused-*.png, scripts/render-icon.js), and the normal robot again once it unlocks; other
+// (icons/robot-paused-white-*.png, scripts/render-icon.js), and the normal robot again once it unlocks; other
 // tabs keep theirs. (chrome.action.setIcon with the tab's id, in Firefox too. Firefox drops a tab's own
 // icon when the tab goes to a new page, as a blocked one does while the lock stays: check() sets it again.)
 
 export const ICONS = {
   normal: { 16: 'icons/robot-16.png', 32: 'icons/robot-32.png' }, // (manifest.json's action.default_icon)
-  paused: { 16: 'icons/robot-paused-16.png', 32: 'icons/robot-paused-32.png' },
+  paused: { 16: 'icons/robot-paused-white-16.png', 32: 'icons/robot-paused-white-32.png' },
 };
 
 export const WRITE_METHODS = ['post', 'put', 'patch', 'delete', 'connect'];

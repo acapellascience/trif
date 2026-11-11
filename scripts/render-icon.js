@@ -2,12 +2,15 @@
 'use strict';
 // Draws the TRIF icon (the robot's head: a dark squircle in a switch-green rim, with two mint eyes) into
 // extension/icons/robot-<size>.png, antialiased with 8x8 supersampling, the same robot with a pause sign for
-// eyes (two white bars) into robot-paused-<size>.png (the toolbar icon of a tab TRIF has paused posting in,
-// background.js and tablock.js), the robot's other faces (FACES: off, a blank face; blocked, red with a red
-// cross; logged out, yellow with hollow eyes) into robot-<face>-<size>.png, and writes the same shapes to
+// eyes, all white (frame and bars) into robot-paused-white-<size>.png (the toolbar icon of a tab TRIF has
+// paused posting in, background.js and tablock.js), the robot's other faces (FACES: off, a blank face;
+// blocked, red with a red cross; logged out, yellow with hollow eyes) into robot-<face>-<size>.png, and
+// writes the same shapes to
 // store/icon.svg and the side panel's big shaded robot to extension/icons/robot-shaded.svg (and in red,
 // robot-shaded-red.svg, for when TRIF can't run mods), and the gate's shaded robots (robot-shaded-off*.svg,
 // robot-shaded-blocked.svg). No dependencies: shapes are superellipses, PNGs are written by hand.
+// The robot is always one colour: its frame and its features share the state's colour (docs/STYLE.md;
+// the usual robot's rim and mint eyes are both TRIF green).
 // A new design gets new file names (manifest.json, sidepanel.html, onboarding.html): Firefox keeps an
 // icon it has drawn in its image cache, keyed by URL, until it quits, so new pixels at an old path keep
 // showing the old icon after an update or reload (the W outlived the switch to the robot that way).
@@ -27,7 +30,7 @@ const SHADED_RED_FILE = path.join(__dirname, '..', 'extension', 'icons', 'robot-
 // eyes n 2.3 (rounder, a touch taller than wide).
 const HEAD = { cx: 64, cy: 64, outer: 56, inner: 46, n: 3, rim: [0x34, 0xd3, 0x99], face: [0x18, 0x18, 0x1a] };
 const EYES = { cy: 63, xs: [45, 83], a: 12.35, b: 13.3, n: 2.3, color: [0x59, 0xdb, 0xab] };
-// The pause sign: two white bars (the side panel's paused colour), centred on the face, a bar's width apart. Their edges fall on
+// The pause sign: two white bars in a white frame (the side panel's paused colour), centred on the face, a bar's width apart. Their edges fall on
 // whole pixels at 16, 32 and 48 px (a toolbar pixel is 7 units at 16 px), so they stay sharp: at 16 px each
 // is 2 px wide and 6 px tall, with 2 px between. Corners rounded a little (r), like the eyes.
 const PAUSE = { xs: [[43, 57], [71, 85]], y: [43, 85], r: 3.5, color: [0xff, 0xff, 0xff] };
@@ -40,12 +43,21 @@ const CROSS16 = ['#....#', '##..##', '.####.', '.####.', '##..##', '#....#'];
 // each eye a 3 x 4 px outline, its middle 1 x 2 px open, at the eyes' places).
 const RING = { 32: 7, 48: 5.25, 128: 6 };
 const RING16 = { cols: [4, 9], rows: 6, cells: ['###', '#.#', '#.#', '###'] };
-// The faces in the toolbar: the rim's colour, and what's in place of the eyes in which colour. Red and
-// yellow are the side panel's (--bad and --warn on dark), the cross and rings a step lighter on the face.
+// The faces in the toolbar: one colour each, frame and features alike. Red and yellow are the side panel's
+// (--bad and --warn on dark).
+const RED = [0xff, 0x7b, 0x70], YELLOW = [0xe8, 0xb0, 0x4a], GREY = [0xa1, 0xa1, 0xa8];
+// Disconnected: a broken link (two chain-link halves pulled apart, Material's link_off without its slash,
+// which would read as blocked). At 16 px a pattern on whole pixels (LINK16, 10 x 5 from column 3, row 6);
+// bigger, the same halves as smooth strokes (LINK: each half a C round a centre, its top and bottom running
+// to the gap, and a stub toward it). PLUG16: the other idea, a plug pulled out of its socket (the sheet only).
+const LINK16 = ['.###..###.', '#........#', '#.##..##.#', '#........#', '.###..###.'];
+const PLUG16 = ['##......##', '####....##', '##......##', '####....##', '##......##'];
+const LINK = { cx: 44, r: 11, end: 53, stub: [48, 53], w: 3.5, cy: 64 };
 const FACES = {
   off: { rim: HEAD.rim, eyes: 'none' },
-  blocked: { rim: [0xe5, 0x48, 0x4d], eyes: 'cross', color: [0xff, 0x7b, 0x70] },
-  login: { rim: [0xe8, 0xb0, 0x4a], eyes: 'ring', color: [0xf6, 0xcf, 0x6e] },
+  disconnected: { rim: GREY, eyes: 'link', color: GREY },
+  blocked: { rim: RED, eyes: 'cross', color: RED },
+  login: { rim: YELLOW, eyes: 'ring', color: YELLOW },
 };
 // The toolbar sizes drop the 8-unit margin (the head fills the square, like other toolbar icons); the
 // 128 px icon keeps it for the Web Store and chrome://extensions.
@@ -57,6 +69,7 @@ const SHADED = {
   green: { rim: ['#44e0a8', '#1e9a6c'], eye: ['#a7f3d0', '#2fc58d'], glow: [0.204, 0.827, 0.6] },
   red: { rim: ['#ff8a80', '#c4372d'], eye: ['#ffd0cb', '#e5484d'], glow: [1, 0.45, 0.42] },
   yellow: { rim: ['#f6cf6e', '#b7791f'], eye: ['#fde9b8', '#e8b04a'], glow: [0.91, 0.69, 0.29] },
+  grey: { rim: ['#c8c8ce', '#7c7c82'], eye: ['#e4e4e8', '#a1a1a8'], glow: [0.63, 0.63, 0.66] },
 };
 
 const inside = (x, y, cx, cy, a, b, n) => (Math.abs(x - cx) / a) ** n + (Math.abs(y - cy) / b) ** n <= 1;
@@ -76,10 +89,11 @@ function inRoundRect(x, y, x0, y0, x1, y1, r) {
   return dx * dx + dy * dy <= r * r;
 }
 
-/** The paused robot's colour at one point: the head as usual, the pause sign in place of the eyes. */
+/** The paused robot's colour at one point: the head in white, the pause sign in place of the eyes. */
 function samplePaused(x, y) {
   const c = sample(x, y);
-  if (c !== EYES.color && c !== HEAD.face) return c; // (outside, or the rim)
+  if (c === HEAD.rim) return PAUSE.color;
+  if (c !== EYES.color && c !== HEAD.face) return c; // (outside)
   return PAUSE.xs.some(([x0, x1]) => inRoundRect(x, y, x0, PAUSE.y[0], x1, PAUSE.y[1], PAUSE.r)) ? PAUSE.color : HEAD.face;
 }
 
@@ -92,7 +106,7 @@ function toSegment(x, y, x0, y0, x1, y1) {
 
 /** A face's colour at one point at `size` px (FACES), or null outside the head. */
 function faceSampler(face, size) {
-  const f = FACES[face];
+  const f = face === 'plug' ? { rim: GREY, eyes: 'plug', color: GREY } : FACES[face];
   const ring = RING[size] || 6; // (16 px: RING16)
   const { cx, cy, outer, inner, n } = HEAD;
   return (x, y) => {
@@ -105,6 +119,14 @@ function faceSampler(face, size) {
       }
       const { from, to, w } = CROSS;
       return Math.min(toSegment(x, y, from, from, to, to), toSegment(x, y, to, from, from, to)) <= w ? f.color : HEAD.face;
+    }
+    if (f.eyes === 'link' || f.eyes === 'plug') {
+      if (size === 16 || f.eyes === 'plug') { // (7-unit cells: a pixel at 16 px)
+        const pat = f.eyes === 'plug' ? PLUG16 : LINK16;
+        const c = Math.floor((x - 64) / 7) + 8 - 3, r = Math.floor((y - 64) / 7) + 8 - 6;
+        return c >= 0 && c < 10 && r >= 0 && r < 5 && pat[r][c] === '#' ? f.color : HEAD.face;
+      }
+      return inLink(x, y) ? f.color : HEAD.face;
     }
     if (f.eyes === 'ring' && size === 16) {
       const r = Math.floor((y - 64) / 7) + 8 - RING16.rows, px = Math.floor((x - 64) / 7) + 8;
@@ -166,13 +188,13 @@ function shadedSvg({ rim, eye, glow } = SHADED.green, face = 'eyes') {
     '  <defs>',
     `    <linearGradient id="r" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="${rim[0]}"/><stop offset="1" stop-color="${rim[1]}"/></linearGradient>`,
     `    <radialGradient id="e" cx="50%" cy="50%" r="55%"><stop offset="0" stop-color="${eye[0]}"/><stop offset="1" stop-color="${eye[1]}"/></radialGradient>`,
-    ...(face === 'cross' ? [`    <radialGradient id="x" gradientUnits="userSpaceOnUse" cx="64" cy="64" r="26"><stop offset="0" stop-color="${eye[0]}"/><stop offset="1" stop-color="${eye[1]}"/></radialGradient>`] : []),
     `    <filter id="h" x="-100%" y="-100%" width="300%" height="300%"><feGaussianBlur in="SourceGraphic" stdDeviation="1.5" result="b"/><feColorMatrix in="b" type="matrix" values="${glow.map((c) => `0 0 0 0 ${c}`).join('  ')}  0 0 0 0.5 0" result="g"/><feMerge><feMergeNode in="g"/><feMergeNode in="SourceGraphic"/></feMerge></filter>`,
     '  </defs>',
     `  <polygon points="${shape(cx, cy, mid, mid, n)}" fill="#18181a" stroke="url(#r)" stroke-width="${outer - inner}" stroke-linejoin="round"/>`,
-    // (the face: eyes as usual; none (off); or a cross (blocked), in the eyes' gradient and glow)
+    // (the face: eyes as usual; none (off); or a cross (blocked), in the rim's own gradient: one colour)
     face === 'eyes' ? `  <g filter="url(#h)">${EYES.xs.map((ex) => `<polygon points="${shape(ex, EYES.cy, EYES.a, EYES.b, EYES.n)}" fill="url(#e)"/>`).join('')}</g>`
-      : face === 'cross' ? `  <g filter="url(#h)" stroke="url(#x)" stroke-width="${CROSS.w * 2}" stroke-linecap="round"><line x1="${CROSS.from}" y1="${CROSS.from}" x2="${CROSS.to}" y2="${CROSS.to}"/><line x1="${CROSS.to}" y1="${CROSS.from}" x2="${CROSS.from}" y2="${CROSS.to}"/></g>`
+      : face === 'cross' ? `  <g filter="url(#h)" stroke="url(#r)" stroke-width="${CROSS.w * 2}" stroke-linecap="round"><line x1="${CROSS.from}" y1="${CROSS.from}" x2="${CROSS.to}" y2="${CROSS.to}"/><line x1="${CROSS.to}" y1="${CROSS.from}" x2="${CROSS.from}" y2="${CROSS.to}"/></g>`
+      : face === 'link' ? `  <g filter="url(#h)" stroke="url(#r)" stroke-width="${LINK.w * 2}" stroke-linecap="round" fill="none">${[1, -1].map((m) => { const X = (v) => (m > 0 ? v : 128 - v); return `<path d="M${X(LINK.end)} ${LINK.cy - LINK.r} H${X(LINK.cx)} A${LINK.r} ${LINK.r} 0 0 ${m > 0 ? 0 : 1} ${X(LINK.cx)} ${LINK.cy + LINK.r} H${X(LINK.end)}"/><line x1="${X(LINK.stub[0])}" y1="${LINK.cy}" x2="${X(LINK.stub[1])}" y2="${LINK.cy}"/>`; }).join('')}</g>`
       : null,
     '</svg>',
     '',
@@ -246,6 +268,17 @@ function sampleMac(x, y) {
 /** The paused robot at `size` px, as PNG bytes (the toolbar icon's framing). */
 function renderPaused(size) { return render(size, undefined, samplePaused); }
 
+/** On the broken link's strokes (LINK), either half (the right one the left mirrored). */
+function inLink(x0, y) {
+  const { cx, r, end, stub, w, cy } = LINK;
+  const x = x0 > 64 ? 128 - x0 : x0;
+  const d = Math.min(
+    x <= cx ? Math.abs(Math.hypot(x - cx, y - cy) - r) : Infinity, // the C's round end
+    toSegment(x, y, cx, cy - r, end, cy - r), toSegment(x, y, cx, cy + r, end, cy + r), // its top and bottom
+    toSegment(x, y, stub[0], cy, stub[1], cy)); // the stub toward the gap
+  return d <= w;
+}
+
 /** A face of FACES at `size` px, as PNG bytes (the toolbar icon's framing). */
 function renderFace(face, size) { return render(size, undefined, faceSampler(face, size)); }
 
@@ -255,6 +288,7 @@ const GATE_SHADED = {
   'robot-shaded-off-yellow.svg': [SHADED.yellow, 'none'],
   'robot-shaded-off-red.svg': [SHADED.red, 'none'],
   'robot-shaded-blocked.svg': [SHADED.red, 'cross'],
+  'robot-shaded-disconnected.svg': [SHADED.grey, 'link'],
 };
 
 /** The Mac app icon at `size` px, as PNG bytes (opaque, full bleed). */
@@ -266,7 +300,7 @@ if (require.main === module) {
     const file = path.join(outDir, `robot-${size}.png`);
     fs.writeFileSync(file, render(size));
     console.log(file);
-    const paused = path.join(outDir, `robot-paused-${size}.png`);
+    const paused = path.join(outDir, `robot-paused-white-${size}.png`);
     fs.writeFileSync(paused, renderPaused(size));
     console.log(paused);
     for (const face of Object.keys(FACES)) {
@@ -286,4 +320,7 @@ if (require.main === module) {
   }
 }
 
-module.exports = { render, renderPaused, renderFace, renderMac, shadedSvg, PAUSE, FACES, CROSS16, GATE_SHADED, SHADED };
+/** The plug idea for disconnected (not shipped: for the icon sheet), at `size` px. */
+function renderPlug(size) { return render(size, undefined, faceSampler('plug', size)); }
+
+module.exports = { render, renderPaused, renderFace, renderPlug, renderMac, shadedSvg, PAUSE, FACES, CROSS16, LINK16, PLUG16, GATE_SHADED, SHADED };

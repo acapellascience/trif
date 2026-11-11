@@ -221,7 +221,7 @@ class Scenario {
   page(fn, args = []) { return this.d.eval(this.pageCtx, fn, args); }
 
   /**
-   * The icon TRIF's toolbar button shows for a tab, by file name ('robot-16.png', 'robot-paused-16.png'):
+   * The icon TRIF's toolbar button shows for a tab, by file name ('robot-16.png', 'robot-paused-white-16.png'):
    * Firefox's own record of it; in Chrome, which can't be asked, the last chrome.action.setIcon for the tab
    * that Chrome accepted (the test build's e2e-icons.js, chrome.js), else the manifest's.
    */
@@ -920,8 +920,8 @@ class Scenario {
       const p = await this.waitPanel('the panel to show the gate', (x) => x.site === '127.0.0.1' && x.gate);
       if (firstDisconnected) {
         if (p.gateTitle !== 'TRIF is disconnected on 127.0.0.1' || p.gateText !== 'Connect' || !p.grey || p.links.length) throw new Error(`the gate: ${JSON.stringify(p)}`);
-        // (disconnected: his faces as before, the panel grey)
-        await this.waitFace('the faces when disconnected', this.win.tabId, { toolbar: /^robot(-login)?-16\.png$/, bar: /^(normal|login)$/ });
+        // disconnected: a broken link, in the toolbar for this tab, in the bar and on the gate (the panel grey)
+        await this.waitFace('the faces when disconnected', this.win.tabId, { toolbar: 'robot-disconnected-16.png', bar: 'disconnected', gate: 'robot-shaded-disconnected.svg' });
         await this.shot(this.panelCtx, 'panel-disconnected');
       } else {
         // (with every site given in the browser's settings, one site can't be disconnected: no Disconnect then)
@@ -1780,7 +1780,7 @@ class Scenario {
         await r.check('agent not logged in, on the gate: the small robot yellow, a line saying so, Fix still there', async () => {
           await this.goColour('gate');
           const x = await this.waitLooks('yellow gate', (l) => l.classes.join() === 'needs-login' && !!l.gateNote);
-          if (x.gateIcon !== 'robot-shaded-off-yellow.svg' || !x.fix || !x.dotShown || x.dot !== 'dot warn' || !/isn’t logged in/.test(x.gateNote)) throw new Error(JSON.stringify(x));
+          if (!['robot-shaded-off-yellow.svg', 'robot-shaded-disconnected.svg'].includes(x.gateIcon) || !x.fix || !x.dotShown || x.dot !== 'dot warn' || !/isn’t logged in/.test(x.gateNote)) throw new Error(JSON.stringify(x));
           await this.waitBar('the gate\'s bar', GATE_BAR, Scenario.dim);
           await this.shot(this.panelCtx, 'panel-yellow-gate');
           return `"${x.gateNote}"`;
@@ -1821,7 +1821,7 @@ class Scenario {
         await r.check('user scripts off, on the gate: red robot, the line, no Fix button', async () => {
           await this.goColour('gate');
           const x = await this.waitLooks('red gate', (l) => l.problem === 'scripts' && !!l.gateNote);
-          if (x.gateIcon !== 'robot-shaded-off-red.svg' || x.fix || x.dot !== 'dot bad' || !x.dotShown || !/^Mods are paused/.test(x.gateNote)) throw new Error(JSON.stringify(x));
+          if (!['robot-shaded-off-red.svg', 'robot-shaded-disconnected.svg'].includes(x.gateIcon) || x.fix || x.dot !== 'dot bad' || !x.dotShown || !/^Mods are paused/.test(x.gateNote)) throw new Error(JSON.stringify(x));
           await this.waitBar('the gate\'s bar', GATE_BAR, Scenario.dim);
           await this.shot(this.panelCtx, 'panel-scripts-off-gate');
           return `"${x.gateNote}"`;
@@ -1860,7 +1860,7 @@ class Scenario {
         await r.check('helper not connected, on the gate: red robot, the line, no Fix button', async () => {
           await this.goColour('gate');
           const x = await this.waitLooks('red gate, helper', (l) => l.problem === 'helper' && !!l.gateNote);
-          if (x.gateIcon !== 'robot-shaded-off-red.svg' || x.fix || !x.dotShown || !/^The TRIF helper isn’t connected\. Run npx timsrobot setup in a terminal, then restart \w+\. Setup page$/.test(x.gateNote)) throw new Error(JSON.stringify(x));
+          if (!['robot-shaded-off-red.svg', 'robot-shaded-disconnected.svg'].includes(x.gateIcon) || x.fix || !x.dotShown || !/^The TRIF helper isn’t connected\. Run npx timsrobot setup in a terminal, then restart \w+\. Setup page$/.test(x.gateNote)) throw new Error(JSON.stringify(x));
           await this.waitBar('the gate\'s bar', GATE_BAR, Scenario.dim);
           await this.shot(this.panelCtx, 'panel-helper-gate');
           return `"${x.gateNote}"`;
@@ -3285,7 +3285,7 @@ say({ type: 'result', subtype: 'success', is_error: false, result: text, session
       if (lock.height > 48) throw new Error(`the lock notice is ${lock.height} px tall: one line expected`);
       if (!lock.pause || lock.eyes) throw new Error(`the robot in the bar: ${JSON.stringify(lock)}`);
       // TRIF's toolbar icon for that tab: the paused robot; other tabs keep the normal one
-      await waitFor('the paused toolbar icon', async () => (await this.toolbarIcon(win.tabId)) === 'robot-paused-16.png' || null, { timeoutMs: 10000 })
+      await waitFor('the paused toolbar icon', async () => (await this.toolbarIcon(win.tabId)) === 'robot-paused-white-16.png' || null, { timeoutMs: 10000 })
         .catch(async (e) => { throw new Error(`${e.message}: ${await this.toolbarIcon(win.tabId)}`); });
       const otherTab = await this.ext(`async (id) => (await chrome.tabs.query({})).map((t) => t.id).find((t) => t !== id) ?? null`, [win.tabId]);
       if (otherTab != null && !/^robot(-login)?-16\.png$/.test(await this.toolbarIcon(otherTab))) throw new Error(`tab ${otherTab}'s toolbar icon: ${await this.toolbarIcon(otherTab)}`);
@@ -3307,7 +3307,7 @@ say({ type: 'result', subtype: 'success', is_error: false, result: text, session
       if (leaked().length) throw new Error(`another site received ${JSON.stringify(leaked())}`);
       await waitFor('the lock notice still up', () => this.panel(`async () => { const n = document.getElementById('tab-lock'); return n && !n.hidden || null; }`), { timeoutMs: 10000 });
       // (still paused on the blocked page: Firefox drops a tab's own icon on a new page, and TRIF sets it again)
-      await waitFor('the toolbar icon still paused', async () => (await this.toolbarIcon(win.tabId)) === 'robot-paused-16.png' || null, { timeoutMs: 10000 })
+      await waitFor('the toolbar icon still paused', async () => (await this.toolbarIcon(win.tabId)) === 'robot-paused-white-16.png' || null, { timeoutMs: 10000 })
         .catch(async (e) => { throw new Error(`${e.message}: ${await this.toolbarIcon(win.tabId)}`); });
       await this.panel(`async () => { document.querySelector('#tab-lock button').click(); return true; }`);
       await waitFor('the tab back on the test site', async () => {
@@ -3556,8 +3556,8 @@ say({ type: 'result', subtype: 'success', is_error: false, result: text, session
       if (reqs(site, '/e2e-sw-post').some((q) => q.method === 'POST')) open('TL-2', 'the service worker posted');
       if (reqs('localhost', '/e2e-sw-leak').length) open('TL-2', 'the service worker reached another site');
       if (reqs(site, '/e2e-sib-post').some((q) => q.method === 'POST')) open('TL-4', 'another tab of the site posted');
-      if (sibIcon !== 'robot-paused-16.png') open('TL-4', `the other tab's icon: ${sibIcon}`);
-      if (thirdIcon !== 'robot-paused-16.png') open('TL-4', `a tab of the site opened during the lock: icon ${thirdIcon}`);
+      if (sibIcon !== 'robot-paused-white-16.png') open('TL-4', `the other tab's icon: ${sibIcon}`);
+      if (thirdIcon !== 'robot-paused-white-16.png') open('TL-4', `a tab of the site opened during the lock: icon ${thirdIcon}`);
       if (!sibNotice) open('TL-4', "the other tab's panel: no notice");
       if (reqs('localhost', '/e2e-popup-noopener').length) open('TL-5', 'a noopener popup reached another site');
       if (reqs('localhost', '/e2e-popup-opener').length) open('TL-5', 'a popup (with opener) reached another site');

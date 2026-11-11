@@ -27,16 +27,20 @@ Plain and humble. Short. No marketing voice, no taglines.
 
 ## The robot icon
 
-A dark squircle head in a green rim, with two mint eyes (`scripts/render-icon.js`). His face says the
-state, one at a time (extension/faces.js), in the toolbar icon for the tab, the robot in the panel's bar,
-and the gate's robot:
-- **paused** (the agent ran code in the tab): two white bars for eyes, posting blocked until the page
-  reloads. The panel's state colour goes white then (dark grey, #3a3a3e, on the light theme);
-- **blocked** (the user blocked the site in TRIF): red, with a red cross for eyes;
-- **off** (TRIF is off on the site, "The robot is off."): a blank face, no eyes;
-- **logged out** (the agent needs a login or a key: every tab): yellow, the eyes hollow;
-- otherwise his eyes. Disconnected keeps them (the panel goes grey), and so does TRIF missing a part (the
-  panel's red).
-Paused wins over the rest (it's what the page can do right now), then blocked, off, logged out. On the
-gate, the face is off's or blocked's, in the panel's colour (yellow or red when that's what's wrong).
-At 16 px the bars, the cross and the hollow eyes sit on whole pixels.
+A dark squircle head in a green rim, with two mint eyes (`scripts/render-icon.js`). The robot is always one
+colour: its frame and its features share the state's colour (the usual robot's rim and mint eyes are
+both TRIF green). His face says the state, one at a time (extension/faces.js), in the toolbar icon for the
+tab, the robot in the panel's bar, and the gate's robot:
+- **paused** (the agent ran code in the tab): a white frame and two white bars for eyes, posting blocked
+  until the page reloads. The panel's state colour goes white then (dark grey, #3a3a3e, frame and bars,
+  on the light theme);
+- **blocked** (the user blocked the site in TRIF): a red frame, a red cross for eyes;
+- **disconnected** (TRIF can't reach the site): a grey frame, a grey broken link for eyes (two chain-link
+  halves apart; not a slashed link, which would read as blocked);
+- **off** (TRIF is off on the site, "The robot is off."): a blank frame in the state's colour;
+- **logged out** (the agent needs a login or a key: every tab): a yellow frame, hollow yellow eyes;
+- otherwise his eyes, also when TRIF is missing a part (the panel's red).
+Paused wins over the rest (it's what the page can do right now), then blocked, disconnected, off (a
+site's states, one at a time), then logged out (every tab's). On the gate, the face is off's, blocked's or
+disconnected's, off's in the panel's colour (yellow or red when that's what's wrong). At 16 px the bars,
+the cross, the broken link and the hollow eyes sit on whole pixels.

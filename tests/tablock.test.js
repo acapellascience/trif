@@ -181,7 +181,7 @@ test('a locked tab\'s toolbar icon is the paused robot, for that tab only, until
   const changed = [];
   const locks = createTabLocks({ chrome, changed: (tabId) => changed.push(tabId) });
   await locks.lock(3, 'x.com');
-  assert.equal(chrome.icons.get(3), 'icons/robot-paused-16.png');
+  assert.equal(chrome.icons.get(3), 'icons/robot-paused-white-16.png');
   assert.deepEqual(changed, [3]);
   await locks.check(8); // (another tab, never locked: its icon is left alone)
   assert.ok(!chrome.icons.has(8));
@@ -189,7 +189,7 @@ test('a locked tab\'s toolbar icon is the paused robot, for that tab only, until
   chrome.icons.delete(3);
   chrome.scripting.executeScript = async () => { throw new Error('Cannot access contents of the page'); };
   await locks.check(3);
-  assert.equal(chrome.icons.get(3), 'icons/robot-paused-16.png');
+  assert.equal(chrome.icons.get(3), 'icons/robot-paused-white-16.png');
   // a reload: unlocked, the normal robot
   const script = fakeChrome().scripting.executeScript;
   chrome.scripting.executeScript = script;
@@ -201,7 +201,7 @@ test('a locked tab\'s toolbar icon is the paused robot, for that tab only, until
   // the tabs a locked tab opens show it too; a closed tab gets no call; a gone tab's error is swallowed
   await locks.lock(10, 'x.com');
   await locks.opened({ id: 11, openerTabId: 10 });
-  assert.equal(chrome.icons.get(11), 'icons/robot-paused-16.png');
+  assert.equal(chrome.icons.get(11), 'icons/robot-paused-white-16.png');
   const calls10 = () => chrome.iconCalls.filter((id) => id === 10).length;
   const before = calls10();
   await locks.unlock(10, 'closed');
@@ -220,8 +220,8 @@ test('the paused icons are scripts/render-icon.js\'s: two white bars for eyes, s
   const zlib = require('zlib');
   const { renderPaused } = require('../scripts/render-icon.js');
   for (const size of [16, 32, 48, 128]) {
-    const file = path.join(__dirname, '..', 'extension', 'icons', `robot-paused-${size}.png`);
-    assert.ok(fs.readFileSync(file).equals(renderPaused(size)), `run node scripts/render-icon.js (robot-paused-${size}.png)`);
+    const file = path.join(__dirname, '..', 'extension', 'icons', `robot-paused-white-${size}.png`);
+    assert.ok(fs.readFileSync(file).equals(renderPaused(size)), `run node scripts/render-icon.js (robot-paused-white-${size}.png)`);
   }
   // the 16 px icon's middle row (render-icon writes one IDAT, filter 0 rows of RGBA): bar, gap, bar
   const png = renderPaused(16);
@@ -293,7 +293,7 @@ test('TL-4: the site\'s other tabs are locked with it (and new ones), until the 
   await locks.lock(1, 'x.com');
   assert.deepEqual(locks.list().map((l) => [l.tabId, l.kind]), [[1, 'code'], [2, 'site'], [3, 'site']]);
   assert.equal(locks.list()[1].from, 1, 'the panel can show the tab with the code');
-  for (const id of [2, 3]) assert.equal(chrome.icons.get(id), 'icons/robot-paused-16.png');
+  for (const id of [2, 3]) assert.equal(chrome.icons.get(id), 'icons/robot-paused-white-16.png');
   assert.ok(!chrome.icons.has(4));
   // a tab of the site opened now: locked; one that leaves the site: unlocked
   chrome.tabList.push({ id: 5, url: 'https://x.com/explore' });

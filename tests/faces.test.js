@@ -19,11 +19,11 @@ function pixels(png) {
   return (x, y) => [...raw.subarray(y * (size * 4 + 1) + 1 + x * 4, y * (size * 4 + 1) + 1 + x * 4 + 4)];
 }
 
-test('the face by precedence: paused, blocked, off, logged out, normal', async () => {
+test('the face by precedence: paused, blocked, disconnected, off, logged out, normal', async () => {
   const { toolbarFace } = await load();
   assert.equal(toolbarFace({}), 'normal');
   assert.equal(toolbarFace({ state: 'on' }), 'normal');
-  assert.equal(toolbarFace({ state: 'disconnected' }), 'normal', 'disconnected: as before');
+  assert.equal(toolbarFace({ state: 'disconnected', loggedOut: true }), 'disconnected');
   assert.equal(toolbarFace({ loggedOut: true }), 'login');
   assert.equal(toolbarFace({ state: 'off', loggedOut: true }), 'off');
   assert.equal(toolbarFace({ state: 'blocked', loggedOut: true }), 'blocked');
@@ -45,8 +45,25 @@ test('every face\'s files exist, are render-icon.js\'s, and the normal one is th
   }
   // the panel names the gate's files that exist
   const panel = fs.readFileSync(path.join(__dirname, '..', 'extension', 'sidepanel.js'), 'utf8');
-  assert.match(panel, /icons\/robot-shaded-\$\{state === 'blocked' \? 'blocked' : `off\$\{red \? '-red' : loggedOut \? '-yellow' : ''\}`\}\.svg/);
-  for (const n of ['robot-shaded-blocked.svg', 'robot-shaded-off.svg', 'robot-shaded-off-red.svg', 'robot-shaded-off-yellow.svg']) assert.ok(R.GATE_SHADED[n], n);
+  assert.match(panel, /icons\/robot-shaded-\$\{state === 'blocked' \? 'blocked' : state === 'disconnected' \? 'disconnected' : `off\$\{red \? '-red' : loggedOut \? '-yellow' : ''\}`\}\.svg/);
+  for (const n of ['robot-shaded-blocked.svg', 'robot-shaded-disconnected.svg', 'robot-shaded-off.svg', 'robot-shaded-off-red.svg', 'robot-shaded-off-yellow.svg']) assert.ok(R.GATE_SHADED[n], n);
+});
+
+test('one colour per face: the frame and the features alike (STYLE.md)', () => {
+  for (const [face, f] of Object.entries(R.FACES)) if (f.color) assert.deepEqual(f.color, f.rim, face);
+  // the paused robot: white frame, white bars
+  const px = pixels(R.renderPaused(16));
+  assert.deepEqual(px(0, 8), [255, 255, 255, 255], 'the frame');
+  assert.deepEqual(px(5, 8), [255, 255, 255, 255], 'a bar');
+  // the gate's blocked robot: its cross drawn in the frame's own gradient
+  assert.match(R.shadedSvg(R.SHADED.red, 'cross'), /<g filter="url\(#h\)" stroke="url\(#r\)"/);
+  // the panel: what's on the bar robot's face takes the frame's colour in every state but the usual one
+  const css = fs.readFileSync(path.join(__dirname, '..', 'extension', 'sidepanel.css'), 'utf8');
+  assert.match(css, /\.bar-robot \.pause \{ display: none; fill: var\(--switch-on\); \}/);
+  assert.match(css, /\.bar-robot \.cross \{ display: none; stroke: var\(--switch-on\);/);
+  assert.match(css, /body:is\(\.blocked, \.needs-login\) \.bar-robot :is\(\.eye, \.pause\) \{ fill: var\(--switch-on\); \}/);
+  assert.match(css, /\[data-face="login"\] \.eye \{ fill: none; stroke: var\(--switch-on\);/);
+  assert.doesNotMatch(css, /#ffc2bc|#fbe3a6/, 'no tinted features left');
 });
 
 test('16 px: the cross and the hollow eyes on whole pixels; off has no eyes', () => {
@@ -62,6 +79,11 @@ test('16 px: the cross and the hollow eyes on whole pixels; off has no eyes', ()
   for (const c0 of [4, 9]) {
     for (let r = 0; r < 4; r++) for (let c = 0; c < 3; c++) assert.deepEqual(lp(c0 + c, 6 + r), (c === 1 && (r === 1 || r === 2)) ? face : ring, `eye ${c0} ${c},${r}`);
   }
+  // disconnected: the broken link's pattern, 10 x 5 from (3, 6), in its grey, like its frame
+  const dp = pixels(R.renderFace('disconnected', 16));
+  const grey = [...R.FACES.disconnected.color, 255];
+  for (let r = 0; r < 5; r++) for (let c = 0; c < 10; c++) assert.deepEqual(dp(3 + c, 6 + r), R.LINK16[r][c] === '#' ? grey : face, `link ${c},${r}`);
+  assert.deepEqual(dp(0, 8), grey, 'the frame grey');
   // off: nothing on the face
   const op = pixels(R.renderFace('off', 16));
   for (let y = 4; y < 12; y++) for (let x = 4; x < 12; x++) assert.deepEqual(op(x, y), face, `${x},${y}`);

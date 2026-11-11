@@ -985,7 +985,8 @@ let siteSwitching = false;
 
 /**
  * The robot's face (faces.js, scripts/render-icon.js), one at a time: paused (the agent ran code in this
- * tab), blocked (a red cross), off (blank), logged out (hollow yellow eyes), else his eyes. On the bar's
+ * tab), blocked (a red cross), disconnected (a broken link), off (blank), logged out (hollow yellow eyes),
+ * else his eyes. One colour each, the frame's. On the bar's
  * robot (data-face, sidepanel.css), and the background is told whether the agent needs a login, for the
  * toolbar's yellow face in every tab.
  */
@@ -993,7 +994,7 @@ function renderFaces(problem, agentInfo) {
   const state = siteScope() && view.status ? currentState() : null;
   const loggedOut = problem === 'login' || problem === 'key';
   ui.barRobot.dataset.face = document.body.classList.contains('tab-locked') ? 'paused'
-    : state === 'blocked' ? 'blocked' : state === 'off' ? 'off' : loggedOut ? 'login' : 'normal';
+    : state === 'blocked' ? 'blocked' : state === 'disconnected' ? 'disconnected' : state === 'off' ? 'off' : loggedOut ? 'login' : 'normal';
   // (only once the agent is known, and not while the helper or user scripts are what's wrong: no answer then)
   if (agentInfo && problem !== 'helper' && problem !== 'scripts' && loggedOut !== view.toldLoggedOut) {
     view.toldLoggedOut = loggedOut;
@@ -1035,10 +1036,10 @@ function renderGate(problem, agentInfo) {
   // notice shows there instead, renderNotice). Red: no Fix button, which couldn't work.
   renderProblemLine(ui.gateNote, gated && !(login.current && !red) ? problem : null, agentInfo);
   if (!gated) return;
-  // The gate's robot: a red cross when blocked, else a blank face in the state's colour (red when TRIF is
-  // missing a part, yellow when the agent needs a login; grey when disconnected, by the gate's filter).
+  // The gate's robot: a red cross when blocked, a grey broken link when disconnected, else a blank face in
+  // the state's colour (red when TRIF is missing a part, yellow when the agent needs a login).
   const loggedOut = problem === 'login' || problem === 'key';
-  const gateIcon = `icons/robot-shaded-${state === 'blocked' ? 'blocked' : `off${red ? '-red' : loggedOut ? '-yellow' : ''}`}.svg`;
+  const gateIcon = `icons/robot-shaded-${state === 'blocked' ? 'blocked' : state === 'disconnected' ? 'disconnected' : `off${red ? '-red' : loggedOut ? '-yellow' : ''}`}.svg`;
   if (ui.gateIcon.getAttribute('src') !== gateIcon) ui.gateIcon.setAttribute('src', gateIcon);
   ui.gateTitle.textContent = state === 'disconnected' ? `TRIF is disconnected on ${scope}`
     : state === 'blocked' ? `The robot is blocked on ${scope}` : 'The robot is off.';

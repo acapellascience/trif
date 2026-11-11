@@ -1048,17 +1048,14 @@ export function limitToSites(mod, sitesOn) {
 }
 
 // ---- site access ----------------------------------------------------------------------------
-// TRIF asks for no sites at install (the manifest's host permissions are all optional). Each browser has a
-// site mode (chrome.storage.local `siteMode`), which follows what the browser gives TRIF:
-// - permissive: <all_urls>, every site by default. Chosen on the setup page or in Settings (the browser's
-//   prompt, from the click); whoever installed TRIF when <all_urls> was required keeps it after the update
-//   (Chrome and Firefox keep a granted permission that moves to optional), so they're permissive.
-// - restrictive: TRIF asks per site. A site without the browser's access is disconnected (a first visit
-//   too); "Connect" in the side panel asks for that site's origin (siteOrigins), from the click, and turns
-//   it on. Declining the permissive prompt makes TRIF restrictive.
+// TRIF asks for no sites at install (the manifest's host permissions are all optional), and asks for each
+// site's when it's turned on there: a site without the browser's access is disconnected (a first visit
+// too); "Connect" (or Fix) in the side panel asks for that site's origin (siteOrigins), from the click, and
+// turns it on. TRIF never asks for every site. (Until 0.3 a "permissive" mode had <all_urls>: an update
+// gives that up once, background.js dropEverySite, and the sites keep their switches and ask again.)
 // A site in `sitesOn` counts only with access (activeSites), and never when it's blocked in TRIF
 // (`blockedSites`, TRIF's own list, whatever access it has). Safari asks per site itself and its build
-// keeps <all_urls> (scripts/build-extension.js), so there TRIF has no mode and doesn't ask or check.
+// keeps <all_urls> (scripts/build-extension.js), so there TRIF doesn't ask or check.
 
 export const SITE_ACCESS = !SAFARI;
 
@@ -1132,21 +1129,16 @@ export function sitesWithoutAccess(sitesOn, access) {
   return (sitesOn || []).filter((s) => !hasSiteAccess(access, s));
 }
 
-/** Permissive: <all_urls>, asked for from a click (nothing awaited before it). Resolves whether it was granted. */
-export function requestEverySite(chromeApi) {
-  return chromeApi.permissions.request({ origins: ['<all_urls>'] });
-}
-
-/** The mode TRIF is in: what the browser gives it decides; null before the user chose (and not given every site). */
-export function siteModeOf(stored, access) {
-  if (access?.all) return 'permissive';
-  return stored === 'permissive' || stored === 'restrictive' ? 'restrictive' : null;
+/** The granted origins that give TRIF every site (what an update from a permissive TRIF gives up, once). */
+export function everySiteOrigins(access) {
+  const every = new Set(['<all_urls>', '*://*/*', 'http://*/*', 'https://*/*']);
+  return (access?.origins || []).filter((o) => every.has(o));
 }
 
 // ---- a site's state in the side panel, and in what agents are told ---------------------------------
 // - on: in `sitesOn`, with access: TRIF works there.
 // - off: with access, not in `sitesOn` (the power button's off): turning it on again doesn't ask.
-// - disconnected: without the browser's access (restrictive): a first visit, or a site disconnected,
+// - disconnected: without the browser's access: a first visit, or a site disconnected,
 //   or one setup turned on that isn't connected yet. "Connect" asks and turns it on, in one click.
 // - blocked: in TRIF's block list (`blockedSites`): nothing from TRIF touches it, whatever access TRIF
 //   has (with <all_urls> one site can't be taken away in Chrome's own settings), and it can't be turned on.

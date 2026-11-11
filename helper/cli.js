@@ -376,13 +376,8 @@ const handlers = {
     if (sitesOff.size) lines.push('              waiting = not running until the user turns TRIF on for the site, or connects it (side panel)');
     if (st && Array.isArray(st.sitesOn)) {
       lines.push(`sites on      ${st.sitesOn.length ? st.sitesOn.join(', ') : '(none)'}; TRIF is off everywhere else: no mods, no page commands`);
-      // Permissive (every site by default) or restrictive (the user connects TRIF site by site), and TRIF's own
-      // block list (extension/lib.js "site access"). Only the user changes either, in the side panel.
-      if (st.siteMode) {
-        lines.push(st.siteMode === 'permissive'
-          ? 'site mode     permissive: access to every site by default; each site still follows its switch'
-          : 'site mode     restrictive: TRIF is disconnected on every site the user hasn\'t connected (side panel on the site)');
-      }
+      // The sites the user hasn't connected (TRIF asks for each site's permission), and TRIF's own block list
+      // (extension/lib.js "site access"). Only the user changes either, in the side panel.
       if (Array.isArray(st.disconnected) && st.disconnected.length) {
         lines.push(`disconnected  ${st.disconnected.join(', ')}: on, but TRIF is disconnected there until the user connects it (side panel on the site)`);
       }

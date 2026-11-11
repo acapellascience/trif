@@ -621,7 +621,7 @@ test('status: lists the sites TRIF is on for and marks mods waiting for theirs',
   assert.match(r.stdout, /bank\.com\/a\s+waiting: TRIF is off on its site\n/);
   assert.match(r.stdout, /waiting = not running until the user turns TRIF on for the site, or connects it/);
   assert.match(r.stdout, /^sites on {6}x\.com; TRIF is off everywhere else/m);
-  assert.match(r.stdout, /^site mode {5}restrictive: TRIF is disconnected on every site the user hasn't connected/m);
+  assert.doesNotMatch(r.stdout, /site mode/);
   assert.match(r.stdout, /^disconnected  google\.com: on, but TRIF is disconnected there until the user connects it/m);
   assert.match(r.stdout, /^blocked {7}bank\.com: blocked in TRIF; nothing from TRIF touches them \(only the user unblocks them/m);
 });

@@ -8,7 +8,7 @@ import {
   firstInjectionResult, withTimeout, filterRequests, nextBackoff, chromeVersion, toolLine,
   normalizeDisabled, modAppliesTo, urlInScope, modInScope, applyStartOff, applyAbsorbed, findRenames, carryRenames, renameInOrder, normalizeModOrder, modSites,
   normalizeOffSites, offSiteName, offOnSite, hostInScope, withOffSites, normalizeGroupsOff, switchGroup, offSitesFor, GROUPS, scopeFor, normalizeSitesOn, siteOnFor, sitesInUse, limitToSites, applyStartSites, switchSite, fromOtherBrowser, timedUserScripts, capChat,
-  ALL_ACCESS, readAccess, activeSites, hasSiteAccess, siteOrigins, siteState, siteRefusal, siteModeOf,
+  ALL_ACCESS, readAccess, activeSites, hasSiteAccess, siteOrigins, siteState, siteRefusal, everySiteOrigins,
   FEATURES, ModsParts, fillSameMods, storedMods, modsStorageState, modsStoragePlan, normalizeStarter, applyReadded, normalizeReadded,
   applyNewMods, normalizeStartsOff, normalizeNewOff, MOD_GROUPS, modGroup, groupWord, sandboxFallback, inSandboxWorld, SAFARI, siteForUrl,
   PANEL_OPEN_WAIT_MS, PANEL_LATE_MS, panelWindowUrl, panelWindowTarget, panelWindowBounds, panelWindowClick,
@@ -60,7 +60,7 @@ const state = {
   sitesOn: [],           // registrable domains TRIF is on for; off everywhere else (persisted)
   sitesOffered: [],      // sites the helper said to start on that were turned on once already (persisted)
   access: ALL_ACCESS,    // what the browser gives TRIF (readAccess): a site in sitesOn counts only with it
-  siteMode: null,        // 'permissive' (<all_urls>) or 'restrictive' (per site), as last chosen or seen (persisted)
+  accessNote: false,     // after an update gave up every site's access: the panel's one-time note (persisted)
   blockedSites: [],      // sites the user blocked in TRIF: nothing from TRIF touches them (persisted)
   panelWindows: new Map(), // panel port -> {windowId: the browser window it follows, own: its own window when it's a panel window, else null}
   panelInWindow: false,  // this browser shows no side panel (Arc): the toolbar button opens a panel window at once (persisted)
@@ -180,7 +180,7 @@ const ready = chrome.storage.local.get(null).then(async (s) => {
   state.unsandboxedOk = normalizeReadded(s.unsandboxedOk);
   state.defaultOrder = normalizeModOrder(s.defaultOrder);
   state.sitesOffered = normalizeSitesOn(s.sitesOffered);
-  state.siteMode = s.siteMode === 'permissive' || s.siteMode === 'restrictive' ? s.siteMode : null;
+  state.accessNote = s.accessNote === true;
   state.blockedSites = normalizeSitesOn(s.blockedSites);
   state.paused = s.paused === true;
   state.panelInWindow = s.panelInWindow === true;
@@ -201,6 +201,7 @@ const ready = chrome.storage.local.get(null).then(async (s) => {
   // (Kept in local storage before 0.2.0.)
   if ('applied' in s) chrome.storage.local.remove('applied').catch(() => {});
   await refreshAccess();
+  await dropEverySite(s);
   await cleanStaleRuns(s);
 }).catch((e) => console.error('[TRIF] failed to read storage', e));
 
@@ -284,14 +285,26 @@ async function refreshAccess() {
     console.warn('[TRIF] couldn\'t read the site permissions:', errMsg(e));
     state.access = ALL_ACCESS;
   }
-  // The mode follows the grant: <all_urls> is permissive (an update from when it was required too); losing
-  // it (the user took it back in the browser's settings) is restrictive.
-  const mode = SITE_ACCESS ? siteModeOf(state.siteMode, state.access) : null;
-  if (mode && mode !== state.siteMode) {
-    state.siteMode = mode;
-    await save({ siteMode: mode }).catch((e) => console.warn('[TRIF]', errMsg(e)));
-  }
   return JSON.stringify(onSites()) !== before;
+}
+
+// TRIF asks for each site's permission, never every site's (lib.js "site access"). A TRIF that had every site
+// (0.2's permissive mode, kept as `siteMode`, or <all_urls> from when it was required) gives that up once,
+// on its first start after the update: the sites keep their switches, and each asks again (it's
+// disconnected until then: the panel's Connect, or Fix). The panel says so once (`accessNote`). After that,
+// every site is the user's own doing in the browser's settings, and TRIF leaves it.
+async function dropEverySite(s) {
+  if (!SITE_ACCESS || s.perSiteOnly === true) return;
+  const legacy = 'siteMode' in s;
+  const every = everySiteOrigins(state.access);
+  let dropped = false;
+  if (every.length) {
+    try { dropped = !!(await chrome.permissions.remove({ origins: every })); } catch (e) { log('warn', `couldn't give up every site's access: ${errMsg(e)}`); }
+    if (dropped) { await refreshAccess(); log('info', 'gave up every site\'s access (TRIF asks per site now); the sites keep their switches'); }
+  }
+  state.accessNote = state.accessNote || dropped;
+  await save({ perSiteOnly: true, ...(dropped ? { accessNote: true } : {}) }).catch((e) => log('warn', errMsg(e)));
+  if (legacy) await chrome.storage.local.remove('siteMode').catch(() => {});
 }
 
 async function onPermissionsChanged() {
@@ -1087,7 +1100,6 @@ const commands = {
 /** For status: the mode, the sites on but disconnected, the block list, and what the browser gives TRIF. */
 function siteLists() {
   return {
-    siteMode: SITE_ACCESS ? state.siteMode : null,
     disconnected: state.sitesOn.filter((s) => stateOf(s) === 'disconnected'), // on, but not connected (yet, or any more)
     blockedSites: state.blockedSites,
     access: { all: state.access.all, allUrls: state.access.allUrls, origins: state.access.origins },
@@ -1616,7 +1628,7 @@ async function uiStatus() {
   return {
     helper: { connected: state.connected, error: state.connected ? null : state.helperError },
     userScripts: s.userScripts, settingsUrl: SETTINGS_URL, version: VERSION, chrome: CHROME, browser: BROWSER,
-    recording: s.recording, sitesOn: state.sitesOn, siteMode: s.siteMode, disconnected: s.disconnected, blockedSites: s.blockedSites, access: s.access, siteAccess: SITE_ACCESS, paused: state.paused,
+    recording: s.recording, sitesOn: state.sitesOn, accessNote: state.accessNote, disconnected: s.disconnected, blockedSites: s.blockedSites, access: s.access, siteAccess: SITE_ACCESS, paused: state.paused,
     starter: state.connected ? state.starter : null, update: state.connected ? state.update : null,
     mods: state.mods.map((m) => ({
       id: m.id, name: m.name || m.id, description: m.description || '', site: m.site, file: m.file || '',
@@ -1853,7 +1865,13 @@ async function onPanelMessage(msg) {
     case 'site.set': return setSiteOn(msg);
     case 'site.disconnect': return disconnectSite(msg);
     case 'site.block': return setBlocked(msg);
-    case 'site.mode': return setSiteMode(msg);
+    case 'siteAccess.noteSeen': {
+      // The one-time note after an update gave up every site's access: seen
+      state.accessNote = false;
+      await save({ accessNote: false });
+      notifyPanels();
+      return { accessNote: false };
+    }
     case 'chat.note': {
       // A line from the panel itself (a slash command's answer), shown like a tool line.
       const site = normalizeSite(msg.site);
@@ -2175,14 +2193,14 @@ async function afterSiteChange(tabId) {
   notifyPanels();
 }
 
-// "Disconnect from <site>" (restrictive): off, and the site's access given back, so it's disconnected.
-// With <all_urls> (permissive) one site can't be given back (Chrome keeps the whole grant): the panel offers
-// restrictive mode instead (site.mode), and blocking is TRIF's own way to keep off one site.
+// "Disconnect from <site>": off, and the site's access given back, so it's disconnected. With every site
+// given in the browser's own settings, one site can't be given back (the panel doesn't offer it then), and
+// blocking is TRIF's own way to keep off one site.
 async function disconnectSite(msg) {
   const site = scopeFor(normalizeSite(msg.site));
   if (!site) throw new Error('missing site');
   if (!SITE_ACCESS) throw new Error(`${BROWSER} decides which sites TRIF can work on, in its own settings`);
-  if (state.access.all) throw new Error(`TRIF is permissive (every site), so one site can't be disconnected: switch to restrictive mode first`);
+  if (state.access.all) throw new Error(`${BROWSER} gives TRIF every site (in its own settings), so one site can't be disconnected here: block it in TRIF instead, or change that in ${BROWSER}'s settings`);
   await giveBack(site, msg.tab);
   await refreshAccess();
   if (hasSiteAccess(state.access, site)) throw new Error(`couldn't disconnect TRIF from ${site}: ${BROWSER} still gives it access`);
@@ -2216,28 +2234,6 @@ async function setBlocked(msg) {
   if (!blocked) await afterSiteChange(undefined);
   notifyPanels();
   return { site, blocked, blockedSites: state.blockedSites };
-}
-
-// The site mode, from the setup page or Settings. Permissive comes from the browser's grant (the page asks
-// for <all_urls> from the click; permissions.onAdded follows it), so this records restrictive: chosen, or
-// the permissive prompt declined. From permissive, every site's access goes (so every site is disconnected
-// until it's connected again), with no prompt.
-async function setSiteMode(msg) {
-  if (!SITE_ACCESS) throw new Error(`${BROWSER} decides which sites TRIF can work on, in its own settings`);
-  if (msg.mode === 'restrictive') {
-    if (state.access.all && state.access.origins.length) {
-      await Promise.resolve().then(() => chrome.permissions.remove({ origins: state.access.origins })).catch((e) => log('warn', `couldn't give the sites back: ${errMsg(e)}`));
-    }
-    await save({ siteMode: 'restrictive' });
-    state.siteMode = 'restrictive';
-  }
-  // (Runs on the sites that lost their access stop here or in onPermissionsChanged, whichever sees it first.)
-  if (await refreshAccess()) {
-    for (const r of state.runs.values()) if (!siteOnFor(`https://${r.site}/`, onSites())) stopRunsOn(r.site);
-    if (checkUserScripts()) reportApplied(await serial(applyMods));
-  }
-  notifyPanels();
-  return { siteMode: state.siteMode };
 }
 
 async function clearChat(site) {

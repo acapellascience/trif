@@ -310,27 +310,19 @@ is enforced, for everyone:
 - **Updating.** A profile without `sitesOn` (from before) starts with the sites of its switched-on mods
   (not all-sites ones) and the sites it has chats for (`sitesInUse`).
 
-### Site access: permissive or restrictive
+### Site access: per site
 
 The manifest asks for no sites at install: `"optional_host_permissions": ["<all_urls>"]`, no
 `host_permissions`. So the install prompt says nothing about websites ("site access" in `extension/lib.js`).
+TRIF asks for each site's permission when it's turned on there (Fix, Connect), and never for every site.
+(Until 0.3 there was a choice, chrome.storage.local `siteMode`: "permissive", `<all_urls>`, or
+"restrictive", per site. It's gone: see "Updating from a TRIF with every site" below.)
 
-- **The mode**, per browser, chrome.storage.local **`siteMode`**: `permissive` (TRIF has `<all_urls>`: every
-  site by default) or `restrictive` (TRIF asks per site); unset until chosen. It follows the grant
-  (`siteModeOf`, kept in step on every `permissions.onAdded`/`onRemoved`): `<all_urls>` is permissive (an
-  update from when it was required too), losing it is restrictive.
-- **Choosing it.** The setup page's step "Site permissions", and Settings → Site permissions in the panel:
-  "Permissive" ("access to every site by default") calls `permissions.request({origins: ["<all_urls>"]})`
-  from the click; granted, permissive. Declined: restrictive (the setup page records it with
-  `{type: "site.mode", mode: "restrictive"}` and says so under the ticked step; Settings says TRIF stays
-  restrictive). "Restrictive" ("connect TRIF on a site-to-site basis") sends `site.mode` restrictive: no
-  prompt; from permissive, every origin TRIF has is given back (`permissions.remove`), so every site is
-  disconnected until it's connected again. Not in Safari.
 - **A site's state** (`siteState`, the same words in the panel and in what agents are told, `siteRefusal`):
   - **on**: in `sitesOn`, with access. TRIF works there.
   - **off**: with access, not in `sitesOn` (the power button, the robot in the bar). Turning it on again
     doesn't ask the browser anything: a quick before and after. Agents get `TRIF is off on <site>: …`.
-  - **disconnected** (restrictive): no access to the site, a first visit included, and the sites setup turns
+  - **disconnected**: no access to the site, a first visit included, and the sites setup turns
     on (`sitesOn`) until they're connected. The panel is all grey: "TRIF is disconnected on <site>" and
     "Connect", which requests `*://*.<site>/*` (`siteOrigins`; just the address for an IP) from the click,
     before anything else (Chrome needs a user gesture; Firefox allows nothing awaited before it), then
@@ -338,18 +330,17 @@ The manifest asks for no sites at install: `"optional_host_permissions": ["<all_
     get `TRIF is disconnected on <site>: … until the user connects it …`; `agent.start`, `TRIF is
     disconnected on <site>: connect it first`. `site.set` on checks the access again and refuses without it.
   - **blocked**: in TRIF's block list (below): the panel red, "The robot is blocked on <site>" and "Unblock".
-- **The off screen's links**, under Fix, in both modes: "Block on <site>" (title and accessible description
-  "Add to TRIF's block list": `site.block`, below) and "Disconnect from <site>" ("Disable browser
-  permissions"; not in Safari). Restrictive: `{type: "site.disconnect", site, tab}`: out of `sitesOn`, runs
-  stopped, `permissions.remove` of its origin, so disconnected (grey). Permissive: one site can't be taken
-  out of `<all_urls>`, so a card opens in the panel (a `<dialog>`; × and Escape close it, doing nothing):
-  "All-site access is on", "You'll have to allow TRIF again on other sites." and "Switch to restrictive
-  mode", which sends `site.mode` restrictive: every site's access goes, and this site (and every other) is
-  disconnected. `site.disconnect` itself refuses under `<all_urls>`.
+- **The off screen's links**, under Fix: "Block on <site>" (title and accessible description "Add to TRIF's
+  block list": `site.block`, below) and "Disconnect from <site>" ("Disable browser permissions"; not in
+  Safari, and not when the browser gives TRIF every site in its own settings, when one site can't be given
+  back): `{type: "site.disconnect", site, tab}`: out of `sitesOn`, runs stopped, `permissions.remove` of its
+  origin, so disconnected (grey). `site.disconnect` refuses when the browser gives every site.
+- **The power button** in the bar (and the robot, the same switch) shows on "The robot is off." too, to turn
+  it on from there; it's hidden when the site is disconnected (Connect) or blocked (Unblock).
 - **The block list**, chrome.storage.local **`blockedSites`** (registrable domains, like `sitesOn`): TRIF's
   own way to keep off a site whatever access it has. `{type: "site.block", site, blocked: bool, tab}` from
   the panel only ("Block on <site>" on the off screen, "Unblock" on the red screen, an "Unblock" per site in Settings →
-  Site permissions → Blocked sites). Blocking: out of `sitesOn`, runs stopped, the site's own origin given
+  Blocked sites). Blocking: out of `sitesOn`, runs stopped, the site's own origin given
   back (a no-op under `<all_urls>`), mods re-synced. Then nothing of TRIF's runs there or reads it:
   `<site> is blocked in TRIF: …` for page commands and screenshots, `<site> is blocked in TRIF` for
   `agent.start`, and `site.set` on is refused (`… unblock it first.`). Nothing in the CLI or the protocol
@@ -357,23 +348,25 @@ The manifest asks for no sites at install: `"optional_host_permissions": ["<all_
 - **Which sites count.** The sites TRIF works on are `sitesOn` ∩ access − `blockedSites` (`onSites()` in
   background.js), and everything (mods, the runtime, recording, page commands, `tabs`, the in-page guard,
   `agent.start`, `status`'s `sitesOff`) goes by them. `status` and the panel's status carry `sitesOn`,
-  `siteMode`, `disconnected` (the sites on without access), `blockedSites` and `access` (`{all, allUrls,
-  origins}`); the panel's status `siteAccess` (false in Safari). `trif status` prints `site mode`,
-  `disconnected` and `blocked`.
-- **Taken back** in the browser's settings: `permissions.onAdded`/`onRemoved` re-read the access (and the
-  mode), re-sync the mods and stop runs on sites that lost it. The site stays in `sitesOn`, so connecting
+  `disconnected` (the sites on without access), `blockedSites` and `access` (`{all, allUrls, origins}`); the
+  panel's status `siteAccess` (false in Safari) and `accessNote` (below). `trif status` prints `disconnected`
+  and `blocked`.
+- **Taken back** in the browser's settings: `permissions.onAdded`/`onRemoved` re-read the access, re-sync the mods and stop runs on sites that lost it. The site stays in `sitesOn`, so connecting
   it brings it back as it was.
 - **The browser's own blocked sites** (Chrome's "Don't allow extensions on these sites") don't show in
   `chrome.permissions`: `contains` still says yes there (checked in Chrome 156), so TRIF can't tell; the
   browser refuses TRIF's injections there.
-- **Updating from `<all_urls>` required.** Chrome and Firefox keep a granted permission when an update moves
-  it from required to optional (Chromium bounds the stored active permissions by required ∪ optional,
-  `PermissionsManager::GetBoundedExtensionDesiredPermissions`; Firefox migrates them, its
-  `test_ext_permissions_migrate.js`; checked in Chrome for Testing 156 by loading a build with
-  `host_permissions: ["<all_urls>"]`, then the same profile with it optional: `permissions.getAll()` still
-  has `<all_urls>`). So those users are permissive (Settings → Site permissions → Restrictive narrows it).
+- **Updating from a TRIF with every site** (0.2's permissive mode, or `<all_urls>` kept from when it was
+  required: Chrome and Firefox keep a granted permission an update moves to optional). On its first start
+  after the update, TRIF gives that up once (background.js `dropEverySite`: `permissions.remove` of
+  `<all_urls>`, `*://*/*`, `http://*/*`, `https://*/*`, whichever it has), deletes `siteMode`, and records
+  `perSiteOnly: true`. The sites keep their switches (`sitesOn`); one granted on its own stays connected, the
+  rest are disconnected until each is connected again (the panel's Connect). It sets `accessNote: true`, and
+  the panel shows a one-time line ("TRIF now asks for each site's permission. …" with OK:
+  `{type: "siteAccess.noteSeen"}`). After that, every site given in the browser's own settings is the user's
+  choice, and TRIF leaves it.
 - **Safari** keeps `host_permissions: ["<all_urls>"]` (it asks per site itself, whatever the manifest
-  says); TRIF has no mode there, doesn't ask or check, and no site is disconnected. The block list works there too
+  says); TRIF doesn't ask or check there, and no site is disconnected. The block list works there too
   (the off screen offers "Block on <site>").
 - **Screenshots.** A site's own access isn't enough for `captureVisibleTab` (Chrome wants `<all_urls>` or
   `activeTab`) or Firefox's `captureTab` (`<all_urls>`, and only in pages loaded while TRIF had it: given

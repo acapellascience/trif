@@ -4,7 +4,7 @@
 // See docs/PROTOCOL.md, "Side panel and agent runs".
 
 import { siteForUrl, modAppliesTo, modSites, isMultiSite, offOnSite, normalizeOffSites, scopeFor, hostInScope, limitToSites, withOffSites, modGroup, GROUPS, GROUP_NAMES, groupWord, groupOffOn, offSitesFor, normalizeGroupsOff, FIREFOX, BROWSER, SETUP_COMMAND,
-  SITE_ACCESS, siteOrigins, siteState, hasSiteAccess, requestEverySite,
+  SITE_ACCESS, siteOrigins, siteState, hasSiteAccess,
   normalizeModOrder, orderMods, moveId, setModOrder,
   normalizeSettings, normalizePicks, siteSettings, withoutModel, panelQuery, panelWindowBounds, rememberScreen } from './lib.js';
 import { setMarkdown, unwrapMarkdown } from './markdown.js';
@@ -29,8 +29,7 @@ const ui = {
   dot: $('#dot'), site: $('#site'), barRobot: $('#bar-robot'), siteSwitch: $('#site-switch'), newChat: $('#new-chat'), settingsBtn: $('#settings-btn'),
   gate: $('#gate'), gateTitle: $('#gate-title'), gateWhy: $('#gate-why'), gateBtn: $('#gate-btn'), gateErr: $('#gate-err'), gateNote: $('#gate-note'),
   gateLinks: $('#gate-links'), gateBlock: $('#gate-block'), gateDisconnect: $('#gate-disconnect'),
-  modeDialog: $('#mode-dialog'), modeDialogClose: $('#mode-dialog-close'), modeDialogSwitch: $('#mode-dialog-switch'), modeDialogErr: $('#mode-dialog-err'),
-  modeChoice: $('#mode-choice'), modePermissive: $('#mode-permissive'), modeRestrictive: $('#mode-restrictive'), modeNote: $('#mode-note'),
+  modeNote: $('#mode-note'), accessNote: $('#access-note'), accessNoteOk: $('#access-note-ok'),
   blockedList: $('#blocked-list'), blockedEmpty: $('#blocked-empty'),
   onBreak: $('#on-break'),
   startsRules: $('#starts-rules'), startsSandboxed: $('#starts-sandboxed'), startsPage: $('#starts-page'), startsNote: $('#starts-note'),
@@ -1029,7 +1028,8 @@ function renderGate(problem, agentInfo) {
   ui.gateLinks.hidden = state !== 'off';
   ui.gateBlock.textContent = `Block on ${scope}`;
   ui.gateDisconnect.textContent = `Disconnect from ${scope}`;
-  ui.gateDisconnect.hidden = !SITE_ACCESS;
+  // (not when the browser gives TRIF every site, in its own settings: one site can't be given back then)
+  ui.gateDisconnect.hidden = !SITE_ACCESS || !!view.status?.access?.all;
 }
 
 // The gate's main button: Fix (off), Connect (disconnected), or Unblock.
@@ -1040,24 +1040,7 @@ function gateClick() {
 
 function disconnectClick(e) {
   e.preventDefault();
-  if (!view.status?.access?.all) { siteAction({ type: 'site.disconnect' }); return; }
-  // Every site allowed: one site can't lose its access, so the card offers restrictive mode.
-  ui.modeDialogErr.hidden = true;
-  ui.modeDialog.showModal();
-}
-
-async function switchToRestrictive() {
-  ui.modeDialogSwitch.disabled = true;
-  try {
-    await request({ type: 'site.mode', mode: 'restrictive' });
-    ui.modeDialog.close();
-    await refreshStatus();
-  } catch (e) {
-    ui.modeDialogErr.textContent = String(e?.message ?? e);
-    ui.modeDialogErr.hidden = false;
-  } finally {
-    ui.modeDialogSwitch.disabled = false;
-  }
+  siteAction({ type: 'site.disconnect' });
 }
 
 async function setSiteOn(on) {
@@ -1117,11 +1100,9 @@ function setBlocked(blocked, site = siteScope()) {
 
 // Settings, "Site permissions": the mode (not in Safari, which asks per site itself), and the blocked sites.
 function renderSites() {
+  // (the one-time note after an update gave up every site's access)
+  ui.accessNote.hidden = !view.status?.accessNote;
   const st = view.status;
-  const mode = st?.access?.all ? 'permissive' : st?.siteMode ? 'restrictive' : null; // (null: not chosen yet)
-  ui.modeChoice.hidden = !SITE_ACCESS || !st;
-  ui.modePermissive.setAttribute('aria-pressed', String(mode === 'permissive'));
-  ui.modeRestrictive.setAttribute('aria-pressed', String(mode === 'restrictive'));
   const blocked = st?.blockedSites || [];
   const key = JSON.stringify(blocked);
   if (ui.blockedList.dataset.key !== key) {
@@ -1149,27 +1130,6 @@ function setStartsOff(group, off) {
 function modeNote(text) {
   ui.modeNote.textContent = text || '';
   ui.modeNote.hidden = !text;
-}
-
-// Permissive: the browser's prompt for every site, from the click (nothing awaited before it); declined, TRIF
-// stays restrictive. Restrictive: every site's access goes (the background), no prompt.
-function choosePermissive() {
-  if (view.status?.access?.all) return;
-  const asked = requestEverySite(chrome);
-  modeNote('');
-  asked.then((ok) => { if (!ok) modeNote(`${BROWSER} didn’t get your OK, so TRIF stays restrictive.`); },
-    (e) => modeNote(String(e?.message ?? e))).finally(() => setTimeout(refreshStatus, 300));
-}
-
-async function chooseRestrictive() {
-  const all = !!view.status?.access?.all;
-  if (!all && view.status?.siteMode === 'restrictive') return;
-  modeNote('');
-  try {
-    await request({ type: 'site.mode', mode: 'restrictive' });
-    if (all) modeNote('Every site is disconnected now: connect each one when you visit it.');
-  } catch (e) { modeNote(String(e?.message ?? e)); }
-  refreshStatus();
 }
 
 // A mod on several sites gets a switch for this site only (the setup page has the whole-mod one);
@@ -2716,10 +2676,7 @@ ui.newChat.addEventListener('click', newChat);
 ui.gateBtn.addEventListener('click', gateClick);
 ui.gateBlock.addEventListener('click', (e) => { e.preventDefault(); setBlocked(true); });
 ui.gateDisconnect.addEventListener('click', disconnectClick);
-ui.modeDialogClose.addEventListener('click', () => ui.modeDialog.close());
-ui.modeDialogSwitch.addEventListener('click', switchToRestrictive);
-ui.modePermissive.addEventListener('click', choosePermissive);
-ui.modeRestrictive.addEventListener('click', chooseRestrictive);
+ui.accessNoteOk?.addEventListener('click', () => request({ type: 'siteAccess.noteSeen' }).then(refreshStatus, () => {}));
 ui.siteStarterLink.addEventListener('click', (e) => { e.preventDefault(); const x = siteStarterOffer(); if (x) addStarter(x.site, { fromSite: true }); });
 ui.siteSwitch.addEventListener('click', () => setSiteOn(!siteIsOn()));
 ui.barRobot.addEventListener('click', () => setSiteOn(!siteIsOn())); // off: the Fix button; on: the power button

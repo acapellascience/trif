@@ -131,29 +131,15 @@ svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width:
 /* Quiet links under Fix: block the site in TRIF, or disconnect it (the browser's permission). */
 .gate-links { margin: 0; display: flex; gap: 14px; font-size: 12px; }
 .gate-links a { color: var(--muted); }
-/* A card over the panel (Disconnect with every site allowed): × or Escape closes it. */
-.card-dialog { width: min(300px, calc(100% - 32px)); padding: 18px 18px 16px; border: 1px solid var(--line); border-radius: 12px;
-  background: var(--surface); color: var(--text); box-shadow: 0 10px 30px rgb(0 0 0 / 0.25); text-align: center; }
-.card-dialog::backdrop { background: rgb(0 0 0 / 0.3); }
-.card-dialog p { margin: 0 0 10px; }
-.card-title { font-weight: 600; font-size: 14px; }
-.card-text { color: var(--muted); }
-.card-close { position: absolute; top: 6px; right: 8px; border: 0; background: none; color: var(--muted); font-size: 18px; line-height: 1; padding: 2px 6px; }
-.card-close:hover { color: var(--text); }
-/* Disconnected (restrictive, no access): the whole panel grey. Blocked in TRIF: red. */
+/* Disconnected (no access yet, or given back): the whole panel grey. Blocked in TRIF: red. */
 body.site-disconnected :is(.bar, .gate) { filter: grayscale(1); }
 body.site-blocked, body.site-blocked.needs-login { --switch-on: var(--bad); } /* (red over a login's yellow) */
 body.site-blocked .gate-title { color: var(--bad); }
 body.site-blocked .btn.go { color: #fff; }
-/* Settings, "Site permissions": the two modes, the current one marked, and the blocked sites. */
+/* Settings: new mods start, the blocked sites, agents on sites. */
 .sites-block { display: grid; gap: 6px; border-top: 1px solid var(--line); padding-top: 8px; }
 .sites-title { margin: 0; font-size: 12px; font-weight: 600; }
-.mode-choice { display: grid; gap: 6px; }
-.mode-choice[hidden] { display: none; }
 .starts-row { grid-template-columns: 1fr auto; }
-.mode { display: grid; gap: 1px; text-align: left; padding: 6px 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--raised); font-size: 12px; }
-.mode span { color: var(--muted); }
-.mode[aria-pressed="true"] { border-color: var(--switch-on); box-shadow: inset 0 0 0 1px var(--switch-on); }
 .blocked-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 4px; font-size: 12px; }
 .blocked-list li { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
 .blocked-list:empty { display: none; }
@@ -165,7 +151,9 @@ body.site-blocked .btn.go { color: #fff; }
 /* There the top bar keeps only the dot, the robot (grey and dim, below) and settings; with no website, only
    settings, and the dot when something red is wrong. Settings are for every site, so they open from both.
    (A notice moved into the gate, the login in progress, shows: only the body's own notices hide.) */
-body:is(.site-off, .no-site) :is(.site, #site-switch, #new-chat, .mods, .chat, .composer, .using),
+/* (the power button stays on "The robot is off.", to turn it on from there; not when blocked or disconnected) */
+body:is(.no-site, .site-disconnected, .site-blocked) #site-switch { display: none; }
+body:is(.site-off, .no-site) :is(.site, #new-chat, .mods, .chat, .composer, .using),
 body:is(.site-off, .no-site) > .notice { display: none; }
 body.no-site .bar-robot, body.no-site:not(.blocked) .dot { display: none; }
 /* No website in this tab (a new tab, the browser's own pages): only the shaded robot, where the gate's sits. */
@@ -746,3 +734,6 @@ button.mod-file { font: 11px/1.4 var(--mono); font-weight: 400; color: var(--mut
 .site-files-box { margin: 6px 0 2px; font-size: 12px; color: var(--muted); }
 .site-files-box > summary { cursor: pointer; }
 .site-files-box .site-files { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 10px; padding: 6px 0 2px 14px; }
+
+/* the one-time note after an update gave up every site's access */
+.access-note { flex: none; margin: 0; padding: 8px 14px; border-bottom: 1px solid var(--line); background: var(--raised); font-size: 12px; }

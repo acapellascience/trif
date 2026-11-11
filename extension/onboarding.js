@@ -4,7 +4,7 @@
 // (which also re-checks the user scripts switch); the agent list and the login go over a `panel` port,
 // as in the side panel (login.js). Switches follow chrome.storage.local `disabled` live.
 
-import { modSites, offOnSite, normalizeOffSites, normalizeSettings, scopeFor, siteNames, hasSiteAccess, requestEverySite, SITE_ACCESS, FIREFOX, SAFARI, BROWSER, PANEL, SETUP_COMMAND } from './lib.js';
+import { modSites, offOnSite, normalizeOffSites, normalizeSettings, scopeFor, siteNames, hasSiteAccess, FIREFOX, SAFARI, BROWSER, PANEL, SETUP_COMMAND } from './lib.js';
 import { modSwitch, syncSwitches, shownEnabled, switchError, enabledIn, onSwitchChange } from './modswitch.js';
 import { createLogin } from './login.js';
 import { setMarkdown } from './markdown.js';
@@ -19,7 +19,6 @@ let offSites = {};      // chrome.storage.local `offSites`: mods switched off on
 let settings = normalizeSettings(); // chrome.storage.local `settings`: the default agent (as the panel's Settings)
 let agents = null;      // agent.list: {agents, default}, once the helper answers
 let openModel = null;   // agent.openModel, while the open model is the agent
-let modeDeclined = false; // the browser's prompt for every site was declined here: TRIF is restrictive
 
 function code(text) {
   const c = document.createElement('code');
@@ -160,15 +159,12 @@ function renderSteps() {
   // 4. Tim's mods: none until the user picks the sites.
   steps.push(starterStep(s, connected));
 
-  // 5. Site permissions: permissive or restrictive (Safari asks per site itself).
-  const sites = $('#step-sites');
-  sites.hidden = !SITE_ACCESS;
-  if (SITE_ACCESS) steps.push(sitesStep(s, connected));
+  // (No site-permission step: TRIF asks for each site's permission when it's turned on there.)
 
-  // 6. The coding agent, logged in.
+  // 5. The coding agent, logged in.
   steps.push(loginStep(connected));
 
-  // 7. Try it: never ticked; once the rest are, it's what's left.
+  // 6. Try it: never ticked; once the rest are, it's what's left.
   steps.push(tryStep(s));
 
   const now = steps.findIndex((x) => !x.done);
@@ -316,48 +312,6 @@ async function chooseStarter(msg) {
   renderSteps();
   try { await request(msg); } catch (e) { starterError = `Couldn’t do that: ${e?.message ?? e}`; }
   starterBusy = false;
-  refresh();
-}
-
-// Site permissions: permissive (every site by default: the browser's prompt for <all_urls>, from the click)
-// or restrictive (TRIF asks per site; no prompt now). Declining the prompt makes it restrictive, said under
-// the ticked step. The background keeps the mode in step with the grant (an update that kept <all_urls> is
-// permissive), so the step is done once there's a mode.
-function sitesStep(s, connected) {
-  const step = $('#step-sites');
-  const note = step.querySelector('.step-note');
-  note.textContent = `${BROWSER} didn’t get your OK, so TRIF is restrictive. You can switch to permissive later in the ${PANEL}’s Settings.`;
-  note.hidden = !(modeDeclined && s.siteMode === 'restrictive');
-  if (!connected) return { el: step, done: false };
-  if (s.siteMode) return { el: step, done: true, state: s.siteMode };
-  setBody(step, 'modes', () => {
-    const row = el('div', 'modes');
-    const permissive = modeButton('Permissive', 'access to every site by default', choosePermissive);
-    const restrictive = modeButton('Restrictive', 'connect TRIF on a site-to-site basis', () => chooseRestrictive());
-    [permissive.id, restrictive.id] = ['mode-permissive', 'mode-restrictive'];
-    row.append(permissive, restrictive);
-    return [row, el('p', 'note', 'You can change this later.')];
-  });
-  return { el: step, done: false };
-}
-
-function modeButton(name, what, onClick) {
-  const b = el('button', 'mode');
-  b.type = 'button';
-  b.append(el('b', null, name), el('span', null, what));
-  b.addEventListener('click', onClick);
-  return b;
-}
-
-function choosePermissive() {
-  // From the click itself: nothing awaited before it (Firefox's rule for permissions.request).
-  const asked = requestEverySite(chrome);
-  asked.then((ok) => { if (!ok) return chooseRestrictive(true); }, () => chooseRestrictive(true)).finally(() => setTimeout(refresh, 300));
-}
-
-async function chooseRestrictive(declined = false) {
-  modeDeclined = declined;
-  await request({ type: 'site.mode', mode: 'restrictive' }).catch(() => {});
   refresh();
 }
 

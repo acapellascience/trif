@@ -1,10 +1,10 @@
 {
-  "version": "0.2.4",
-  "published": "2026-11-06",
-  "notes": "- **TRIF installs with `npx timsrobot setup`.** npm wouldn't take the name \"trif\", so the package is\n  called timsrobot (after timsrobot.com). Once it's installed you still type `trif`, as before.",
+  "version": "0.2.6",
+  "published": "2026-11-11",
+  "notes": "- **Google search works again.** Google changed its results page, and AI Banisher started hiding the\n  results along with the AI Overview. It's fixed.\n- **At work:** if your company's Codex or Claude Code settings won't let TRIF use its sandbox, TRIF asks\n  before going on without it.",
   "package": {
-    "url": "https://github.com/acapellascience/trif/releases/download/v0.2.4/timsrobot-0.2.4.tgz",
-    "sha256": "de1ee771900af850c645d2922a858fe01ac104cfb10db6b87c5f18568bc53ec9",
-    "size": 478725
+    "url": "https://github.com/acapellascience/trif/releases/download/v0.2.6/timsrobot-0.2.6.tgz",
+    "sha256": "13db45c71a457e3687acd6194f69140cc243fe37194c1186193399d5b40bd639",
+    "size": 2038478
   }
 }

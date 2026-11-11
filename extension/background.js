@@ -2552,7 +2552,14 @@ async function onAgentEvent(runId, event, relay = true) {
         return false;
     }
   }, { batch: event.kind !== 'done' });
-  if (event.kind === 'done') notifyPanels();
+  if (event.kind === 'done') {
+    notifyPanels();
+    // A style mod the run made or changed shows at once: the run's tab reloads if one runs there (Tim,
+    // 2026-11-11). Once, whatever else the run changed; not while it waits for the user (Wait for me).
+    const ids = Array.isArray(event.undoable) ? event.undoable.filter((id) => typeof id === 'string') : [];
+    const style = !state.chatWait && Number.isInteger(run.tabId) ? state.mods.find((m) => ids.includes(m.id) && m.rules) : null;
+    if (style) reloadIfApplies(style, { tab: run.tabId }, { onlyIfRunning: true }).catch(() => {});
+  }
 }
 
 // ---- chat storage -------------------------------------------------------------------------------

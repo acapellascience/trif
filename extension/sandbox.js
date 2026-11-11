@@ -1690,7 +1690,7 @@ export function sandboxRuntime(mode, pageModId, pageFn, pagePowers) {
     // starts after this one, with click or page-events, isn't in play before; then the page it lands on is
     // marked (arrivedBy), here for a move in the app, and in the tab's session storage and TRIF's background
     // (which the background's reload count does, for reload) for a page that loads)
-    const marked = (to) => { arrivedBy = modId; try { G.sessionStorage.setItem(ARRIVAL_KEY, JSON.stringify({ mod: modId, at: Date.now(), to })); } catch { /* no storage here */ } };
+    const marked = (to) => { arrivedBy = modId; if (SANDBOX) { try { G.sessionStorage.setItem(ARRIVAL_KEY, JSON.stringify({ mod: modId, at: Date.now(), to })); } catch { /* no storage here */ } } };
     const travel = (go, loads, to) => {
       const move = () => {
         partnersOk(self, 'go-to');

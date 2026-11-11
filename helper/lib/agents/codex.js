@@ -245,6 +245,19 @@ adapter.prepare = async function prepare({ ws, logger }) {
   return (await require('../agentkeys').prepareAgentKey('codex', { ws, logger })) || {};
 };
 
+// An organization's managed Codex settings ("requirements") can refuse TRIF's permission profile; Codex then
+// says so and carries on under the profile the organization requires (e.g. "Configured value for
+// permission_profile is disallowed by requirements; falling back from trif-run to required value
+// CodexStandard"). That profile isn't TRIF's: the run would have none of TRIF's limits (network, folders),
+// so the run is stopped (runs.js sandboxOverridden), never carried on.
+const OVERRIDDEN = /disallowed by requirements|falling back from\s+\S*trif-run\S*\s+to required value/i;
+adapter.sandboxOverridden = (text) => OVERRIDDEN.test(String(text || ''));
+adapter.sandboxOverriddenMessage = (text) =>
+  "Your organization's Codex settings don't let TRIF use its sandbox for agent runs, so TRIF stopped the run " +
+  "instead of letting Codex work without TRIF's limits (no network, only this site's mods). Use Claude Code or a " +
+  "personal Codex login with TRIF, or ask your Codex admin whether TRIF's permission profile can be allowed. " +
+  `(Codex said: ${oneLine(String(text || '')).slice(0, 300)})`;
+
 module.exports = adapter;
 adapter.permissionsToml = permissionsToml;
 adapter.EXCLUDED_VARS = EXCLUDED_VARS;

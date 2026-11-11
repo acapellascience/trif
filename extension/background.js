@@ -2193,19 +2193,29 @@ async function afterSiteChange(tabId) {
   notifyPanels();
 }
 
-// "Disconnect from <site>": off, and the site's access given back, so it's disconnected. With every site
-// given in the browser's own settings, one site can't be given back (the panel doesn't offer it then), and
-// blocking is TRIF's own way to keep off one site.
+// "Disconnect from <site>": off, and the site's access given back, so it's disconnected. With every site given
+// (in the browser's own settings), one site can't be taken out of that grant, so the every-site grant goes, as
+// the update's does (dropEverySite): the other sites keep their switches and ask again, and the panel shows
+// the same one-time note. The result says so (`droppedEverySite`).
 async function disconnectSite(msg) {
   const site = scopeFor(normalizeSite(msg.site));
   if (!site) throw new Error('missing site');
   if (!SITE_ACCESS) throw new Error(`${BROWSER} decides which sites TRIF can work on, in its own settings`);
-  if (state.access.all) throw new Error(`${BROWSER} gives TRIF every site (in its own settings), so one site can't be disconnected here: block it in TRIF instead, or change that in ${BROWSER}'s settings`);
+  let droppedEverySite = false;
+  const every = everySiteOrigins(state.access);
+  if (every.length) {
+    droppedEverySite = !!(await Promise.resolve().then(() => chrome.permissions.remove({ origins: every })).catch((e) => { log('warn', `couldn't give up every site's access: ${errMsg(e)}`); return false; }));
+    if (droppedEverySite) {
+      state.accessNote = true;
+      await save({ accessNote: true }).catch((e) => log('warn', errMsg(e)));
+      log('info', `gave up every site's access to disconnect ${site} (the other sites keep their switches and ask again)`);
+    }
+  }
   await giveBack(site, msg.tab);
   await refreshAccess();
   if (hasSiteAccess(state.access, site)) throw new Error(`couldn't disconnect TRIF from ${site}: ${BROWSER} still gives it access`);
   notifyPanels();
-  return { site, disconnected: true };
+  return { site, disconnected: true, ...(droppedEverySite ? { droppedEverySite: true } : {}) };
 }
 
 // The site off (out of sitesOn), its runs stopped, and its own access given back (not <all_urls>).

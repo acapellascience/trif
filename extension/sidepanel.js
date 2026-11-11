@@ -1028,8 +1028,7 @@ function renderGate(problem, agentInfo) {
   ui.gateLinks.hidden = state !== 'off';
   ui.gateBlock.textContent = `Block on ${scope}`;
   ui.gateDisconnect.textContent = `Disconnect from ${scope}`;
-  // (not when the browser gives TRIF every site, in its own settings: one site can't be given back then)
-  ui.gateDisconnect.hidden = !SITE_ACCESS || !!view.status?.access?.all;
+  ui.gateDisconnect.hidden = !SITE_ACCESS;
 }
 
 // The gate's main button: Fix (off), Connect (disconnected), or Unblock.

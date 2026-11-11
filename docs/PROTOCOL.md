@@ -332,9 +332,10 @@ TRIF asks for each site's permission when it's turned on there (Fix, Connect), a
   - **blocked**: in TRIF's block list (below): the panel red, "The robot is blocked on <site>" and "Unblock".
 - **The off screen's links**, under Fix: "Block on <site>" (title and accessible description "Add to TRIF's
   block list": `site.block`, below) and "Disconnect from <site>" ("Disable browser permissions"; not in
-  Safari, and not when the browser gives TRIF every site in its own settings, when one site can't be given
-  back): `{type: "site.disconnect", site, tab}`: out of `sitesOn`, runs stopped, `permissions.remove` of its
-  origin, so disconnected (grey). `site.disconnect` refuses when the browser gives every site.
+  Safari): `{type: "site.disconnect", site, tab}`: out of `sitesOn`, runs stopped, `permissions.remove` of
+  its origin, so disconnected (grey). When the browser gives TRIF every site (in its own settings), the
+  every-site grant goes too (as the update's step does): every other site keeps its switch and asks again,
+  `accessNote` shows the same one-time note, and the result has `droppedEverySite: true`.
 - **The power button** in the bar (and the robot, the same switch) shows on "The robot is off." too, to turn
   it on from there; it's hidden when the site is disconnected (Connect) or blocked (Unblock).
 - **The block list**, chrome.storage.local **`blockedSites`** (registrable domains, like `sitesOn`): TRIF's

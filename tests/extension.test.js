@@ -2936,13 +2936,18 @@ test('background: an update from a TRIF with every site gives that up once: the 
     await settle(30);
     assert.deepStrictEqual([bg2.perms.removed, bg2.store.accessNote], [[['<all_urls>']], true]);
   } finally { bg2.restore(); }
-  // after that (perSiteOnly): every site in the browser's own settings stays, and Disconnect says why it can't
-  const bg3 = await loadBackground({ storage: { sitesOn: ['bank.com'] }, tabs: GATE_TABS, granted: ['<all_urls>'] });
+  // after that (perSiteOnly): every site in the browser's own settings stays, until Disconnect on a site: then
+  // the every-site grant goes, that site is off, the others keep their switches and ask again, the same note
+  const bg3 = await loadBackground({ storage: { sitesOn: ['bank.com', 'x.com'] }, tabs: GATE_TABS, granted: ['<all_urls>'] });
   try {
     await settle(30);
     assert.deepStrictEqual([bg3.perms.removed, bg3.store.accessNote], [[], undefined]);
-    const r = await bg3.connectPanel().ask({ type: 'site.disconnect', site: 'bank.com' });
-    assert.deepStrictEqual([r.ok, r.error], [false, "Chrome gives TRIF every site (in its own settings), so one site can't be disconnected here: block it in TRIF instead, or change that in Chrome's settings"]);
+    const panel3 = bg3.connectPanel();
+    const r = await panel3.ask({ type: 'site.disconnect', site: 'bank.com' });
+    assert.deepStrictEqual(r.result, { site: 'bank.com', disconnected: true, droppedEverySite: true });
+    assert.deepStrictEqual([bg3.perms.origins, bg3.store.sitesOn, bg3.store.accessNote], [[], ['x.com'], true]);
+    const st = (await panel3.ask({ type: 'status' })).result;
+    assert.deepStrictEqual([st.accessNote, st.disconnected, st.access.all], [true, ['x.com'], false]);
   } finally { bg3.restore(); }
   // a fresh TRIF (nothing given): nothing to give up, no note
   const bg4 = await loadBackground({ storage: { sitesOn: [], __migrateAccess: true }, granted: [] });

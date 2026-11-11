@@ -13,8 +13,10 @@ Every string added, changed or removed, exact, **all awaiting Tim's OK**.
   site's switch. Sites granted on their own stay connected; the rest show the usual grey "TRIF is
   disconnected on <site>" with Connect, so their mods don't fail silently. The panel shows the one-time note
   below. After that, if the user gives TRIF every site in the browser's own settings, TRIF leaves it.
-- With every site given in the browser's settings, "Disconnect from <site>" isn't offered (one site can't be
-  given back then); Block still is.
+- With every site given in the browser's settings, "Disconnect from <site>" gives up the every-site grant (as
+  the update does) and disconnects that site; every other site keeps its switch and asks again the first time
+  it's used, and the panel shows the same one-time note. (There's no CLI or agent command for Disconnect: the
+  panel's only; its result says `droppedEverySite`.)
 - **The power button** shows on "The robot is off." (to turn it on from there); it's hidden on the blocked
   (Unblock) and disconnected (Connect) screens, and on a page without a site, as before.
 - Safari is unchanged (it asks per site itself).
@@ -23,9 +25,6 @@ Every string added, changed or removed, exact, **all awaiting Tim's OK**.
 
 - The panel's one-time note, under the bar: **TRIF now asks for each site's permission. Your sites keep their
   settings: allow each one again the first time you use it there.** with **OK**
-- Disconnect when the browser gives every site (an agent or an old panel asking): **{Browser} gives TRIF
-  every site (in its own settings), so one site can't be disconnected here: block it in TRIF instead, or
-  change that in {Browser}'s settings**
 - CHANGELOG, the summary: **TRIF asks for each site's permission when you turn it on there. Had every site?
   Allow each again once.**; and under More: **TRIF asks for each site's permission.** Installing TRIF used to
   give it "all your data on all websites". Now it asks for nothing until you turn it on for a site; then your

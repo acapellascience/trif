@@ -908,8 +908,7 @@ class Scenario {
         if (p.gateTitle !== 'TRIF is disconnected on 127.0.0.1' || p.gateText !== 'Connect' || !p.grey || p.links.length) throw new Error(`the gate: ${JSON.stringify(p)}`);
         await this.shot(this.panelCtx, 'panel-disconnected');
       } else {
-        // (with every site given in the browser's settings, one site can't be disconnected: no Disconnect then)
-        const links = ['Block on 127.0.0.1 (Add to TRIF\'s block list)', ...(this.allSites ? [] : ['Disconnect from 127.0.0.1 (Disable browser permissions)'])];
+        const links = ['Block on 127.0.0.1 (Add to TRIF\'s block list)', 'Disconnect from 127.0.0.1 (Disable browser permissions)'];
         if (p.gateTitle !== 'The robot is off.' || p.gateText !== 'Fix 127.0.0.1' || p.grey || JSON.stringify(p.links) !== JSON.stringify(links)) throw new Error(`the gate: ${JSON.stringify(p)}`);
         await this.shot(this.panelCtx, 'panel-off-links');
         await this.shot(this.panelCtx, this.allSites ? 'panel-off-every-site' : 'panel-off-per-site');

@@ -1,6 +1,6 @@
 # Mods start off: the new strings (branch powers)
 
-**All awaiting Tim's OK.** Tim's three asks of 2026-11-11: his shipped mods start off for new users; the
+**All approved by Tim 2026-11-11.** Tim's three asks of 2026-11-11: his shipped mods start off for new users; the
 "New mods start" setting is gone (mods from outside the chat always start off); and one setting is left,
 for the mods the side panel's chat makes.
 

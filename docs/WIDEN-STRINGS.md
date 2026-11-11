@@ -1,6 +1,6 @@
 # The widened box: the new strings (branch powers)
 
-**All awaiting Tim's OK.** Every user-facing string the widening adds (WIDEN.md, class A and class B):
+**All approved by Tim 2026-11-11.** Every user-facing string the widening adds (WIDEN.md, class A and class B):
 the new powers' hold sentences, the new combination warnings, and the errors a boxed mod (and so the agent
 writing it) sees. Errors read "TRIF sandbox: …" in `trif errors`; header errors are `trif check`'s.
 `{…}` is a value filled in.

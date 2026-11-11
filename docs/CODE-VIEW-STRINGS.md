@@ -28,7 +28,7 @@ Every user-facing string the code viewer adds, exact, **all awaiting Tim's OK**.
 - A style mod's code with the helper away: **TRIF's helper isn't connected, so a style mod's rules can't be
   shown**
 
-## The mod row, reworked (branch faces, 2026-11-11; **new strings awaiting Tim's OK**)
+## The mod row, reworked (branch faces, 2026-11-11; **new strings approved by Tim 2026-11-11**)
 
 Each row: the light, the name, one chip when there's something to say, one line of description (ellipsis,
 all of it in the tooltip), at most one tag, and the switch, `</>` and bin. The mapping is
@@ -51,7 +51,7 @@ style mod's from `@risk`, raised to noticeable if TRIF read that its code sends 
   hover), **Power: {power} {what it can do}**, the combination warnings, **Runs on every site.** / **Runs on
   {sites}.**, **Made from {browser}.**, **Not active right now.** / **Paused: user scripts are off.**
 
-## Added on branch faces (2026-11-11; **awaiting Tim's OK**)
+## Added on branch faces (2026-11-11; **approved by Tim 2026-11-11**)
 
 - The code card's ⋯ menu: **Wrap lines** (a checkbox item, ticked by default, remembered in this browser).
   Long lines wrap, one line number per source line, continuations indented to the line's own indentation;

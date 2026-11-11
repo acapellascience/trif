@@ -3,11 +3,11 @@
 // chrome.storage.local `chat:<site>`; this page renders that record and reacts to storage changes.
 // See docs/PROTOCOL.md, "Side panel and agent runs".
 
-import { siteForUrl, modAppliesTo, modSites, isMultiSite, offOnSite, normalizeOffSites, scopeFor, hostInScope, limitToSites, withOffSites, modGroup, groupOffOn, offSitesFor, normalizeGroupsOff, FIREFOX, BROWSER, SETUP_COMMAND,
+import { siteForUrl, modAppliesTo, modSites, isMultiSite, offOnSite, normalizeOffSites, scopeFor, hostInScope, limitToSites, withOffSites, FIREFOX, BROWSER, SETUP_COMMAND,
   SITE_ACCESS, siteOrigins, siteState, hasSiteAccess, requestEverySite,
   normalizeModOrder, orderMods, moveId, setModOrder,
   normalizeSettings, normalizePicks, siteSettings, withoutModel } from './lib.js';
-import { setMarkdown, unwrapMarkdown } from './markdown.js';
+import { setMarkdown } from './markdown.js';
 import { createLogin } from './login.js';
 import { modSwitch, syncSwitches, shownEnabled, switchError, enabledIn, onSwitchChange } from './modswitch.js';
 import { mountOpenModel, renderOpenModel, openModelKeyMissing, watchOpenModel } from './openmodel.js';
@@ -23,14 +23,12 @@ const ui = {
   modeDialog: $('#mode-dialog'), modeDialogClose: $('#mode-dialog-close'), modeDialogSwitch: $('#mode-dialog-switch'), modeDialogErr: $('#mode-dialog-err'),
   modeChoice: $('#mode-choice'), modePermissive: $('#mode-permissive'), modeRestrictive: $('#mode-restrictive'), modeNote: $('#mode-note'),
   blockedList: $('#blocked-list'), blockedEmpty: $('#blocked-empty'),
-  startsRules: $('#starts-rules'), startsPage: $('#starts-page'), startsNote: $('#starts-note'),
+  starterBlock: $('#starter-block'), starterAdd: $('#starter-add'), starterErr: $('#starter-err'),
   landing: $('#landing'), landingIcon: $('#landing-icon'), landingVersion: $('#landing-version'), landingNote: $('#landing-note'),
   settings: $('#settings'), agent: $('#agent'), agentNote: $('#agent-note'), model: $('#model'),
   using: $('#using'), modelCustomRow: $('#model-custom-row'), modelCustom: $('#model-custom'), modelNote: $('#model-note'),
   instructions: $('#instructions'), instructionsNote: $('#instructions-note'),
   autoUpdate: $('#auto-update'), pauseAll: $('#pause-all'), pausedAll: $('#paused-all'), updateNote: $('#update-note'), update: $('#update'),
-  starter: $('#starter'), starterList: $('#starter-list'), starterErr: $('#starter-err'),
-  siteStarter: $('#site-starter'), siteStarterLink: $('#site-starter-link'), siteStarterErr: $('#site-starter-err'),
   notice: $('#notice'), paused: $('#paused'), tabLock: $('#tab-lock'), mods: $('#mods'), modsCount: $('#mods-count'), modList: $('#mod-list'), modsReviewNote: $('#mods-review-note'), modsLive: $('#mods-live'),
   chat: $('#chat'), empty: $('#empty'), messages: $('#messages'), working: $('#working'),
 
@@ -178,9 +176,6 @@ function currentAgent() {
 // ---- tab following ------------------------------------------------------------------------------
 
 async function init() {
-  // Settings' "see the code" for Tim's mods: the code as this version shipped it (the release's tag).
-  const src = document.getElementById('starter-source');
-  if (src) src.href = `https://github.com/acapellascience/trif/tree/v${chrome.runtime.getManifest().version}/examples/sites`;
   connectPort();
   // In Safari the panel is a window of its own, opened with ?window=<the window whose tabs it follows>.
   view.windowId = OPENED_FOR || (await chrome.windows.getCurrent()).id;
@@ -355,6 +350,7 @@ function render() {
   const anyAgent = agentList.some((a) => a.available);
 
   renderSites();
+  renderStarter();
   ui.site.textContent = site || 'Tim\'s Robot Internet Fixer';
   ui.site.title = view.tab?.url || '';
   document.title = site ? `TRIF · ${site}` : 'Tim\'s Robot Internet Fixer';
@@ -406,8 +402,6 @@ function render() {
   renderNotice({ helperOk, agentInfo, anyAgent });
   renderUpdate();
   renderMods();
-  renderStarter();
-  renderSiteStarter();
   renderMessages();
 
   ui.empty.hidden = !site || chat.messages.length > 0;
@@ -659,48 +653,6 @@ function actions(...children) {
 let modLabelSeq = 0;
 onSwitchChange(() => renderMods());
 
-// ---- Groups: "Rules" and "Page scripts", each with a switch for this site (background's mods.group)
-const GROUP_TEXT = {
-  rules: ['Rules', 'Run by TRIF from data: they can\'t send, click or load anything.'],
-  page: ['Page scripts', 'Run in the page with everything it has.'],
-};
-const groupOff = (g) => !!view.site && groupOffOn(normalizeGroupsOff(view.status?.groupsOff), g, view.site);
-const groupHeadings = new Map();
-function groupHeading(g) {
-  let li = groupHeadings.get(g);
-  if (!li) {
-    li = el('li', 'mod-group');
-    li.dataset.group = g;
-    const id = `mod-group-${g}`;
-    const name = el('h3', 'mod-group-name', GROUP_TEXT[g][0]);
-    name.id = id;
-    const sw = el('button', 'switch group-switch');
-    sw.type = 'button';
-    sw.setAttribute('role', 'switch');
-    sw.setAttribute('aria-labelledby', id);
-    const knob = el('span', 'knob');
-    knob.setAttribute('aria-hidden', 'true');
-    sw.append(knob);
-    sw.addEventListener('click', async () => {
-      const on = sw.getAttribute('aria-checked') !== 'true';
-      sw.setAttribute('aria-busy', 'true');
-      try { await request({ type: 'mods.group', site: view.site, group: g, enabled: on, tab: view.tab?.id }); await refreshStatus(); } catch (e) {
-        request({ type: 'chat.note', site: view.site, text: `Couldn't switch ${GROUP_TEXT[g][0]} ${on ? 'on' : 'off'}: ${e?.message ?? e}` }).catch(() => {});
-      } finally { sw.removeAttribute('aria-busy'); }
-    });
-    const row = el('div', 'mod-group-row');
-    row.append(name, sw);
-    li.append(row, el('p', 'mod-group-note', GROUP_TEXT[g][1]));
-    groupHeadings.set(g, li);
-  }
-  const off = groupOff(g);
-  const sw = li.querySelector('.group-switch');
-  sw.setAttribute('aria-checked', String(!off));
-  sw.title = off ? `Off on ${view.site}: none of these run here. Click to switch them on here.` : `On on ${view.site}: click to stop all of these running here (each mod's own switch is kept).`;
-  li.classList.toggle('off', off);
-  return li;
-}
-
 function renderMods() {
   // A row being dragged stays where the pointer has it: the list catches up when it's dropped.
   if (modDrag) { modDrag.dirty = true; return; }
@@ -713,9 +665,7 @@ function renderMods() {
   const scope = site ? scopeFor(site) : null;
   const listed = orderMods(site && status ? status.mods.filter((m) => limitToSites(m, [scope]) || m.held?.site === site) : [], view.defaultOrder[scope]);
   view.modNatural = listed.map((m) => m.id);
-  // Grouped by how TRIF runs them (lib.js "Groups"): rules first, then page scripts, each in its own order.
-  const ordered = orderMods(listed, view.modOrder[scope]);
-  const mods = [...ordered.filter((m) => modGroup(m) === 'rules'), ...ordered.filter((m) => modGroup(m) === 'page')];
+  const mods = orderMods(listed, view.modOrder[scope]);
   ui.mods.hidden = mods.length === 0;
   if (!mods.length) { view.modRows.clear(); ui.modList.replaceChildren(); ui.modsReviewNote.hidden = true; return; }
   ui.modsCount.textContent = `(${mods.length})`;
@@ -737,13 +687,7 @@ function renderMods() {
     rows.set(m.id, old && old.key === key ? old : { key, li: modItem(m) });
   }
   view.modRows = rows;
-  // A heading for each group with mods here (or switched off here), with its switch, before its rows
-  const want = [];
-  for (const g of ['rules', 'page']) {
-    const inGroup = mods.filter((m) => modGroup(m) === g);
-    if (!inGroup.length && !groupOff(g)) continue;
-    want.push(groupHeading(g), ...inGroup.map((m) => rows.get(m.id).li));
-  }
+  const want = [...rows.values()].map((r) => r.li);
   want.forEach((li, i) => { if (ui.modList.children[i] !== li) ui.modList.insertBefore(li, ui.modList.children[i] || null); });
   while (ui.modList.children.length > want.length) ui.modList.lastElementChild.remove();
   const byId = new Map(mods.map((m) => [m.id, m]));
@@ -759,90 +703,6 @@ function renderMods() {
     });
     view.modsOpenFor = site;
   }
-}
-
-// ---- Tim's mods, site by site (helper/lib/preinstalled.js) -----------------------------------------
-// Settings lists each site Tim has mods for, added or with an Add button; a site's own panel has a small
-// "Add Tim's mods for <site>" link while that site's aren't added. Both go to the helper (shipped.install),
-// which only the user can ask for: never an agent run. Nothing removes them in bulk: the user deletes mods
-// one by one.
-
-let starterBusy = null; // the site being added
-let starterError = null; // {site, message}
-
-function renderStarter() {
-  const st = view.status?.helper?.connected ? view.status.starter : null;
-  ui.starter.hidden = !st?.sites?.length;
-  if (ui.starter.hidden) return;
-  const key = JSON.stringify([st.sites, starterBusy, starterError]);
-  if (ui.starterList.dataset.key === key) return;
-  ui.starterList.dataset.key = key;
-  ui.starterList.replaceChildren(...st.sites.map((x) => {
-    const li = el('li');
-    li.dataset.site = x.site;
-    const name = el('span', 'starter-site', x.name);
-    // A site added with some of its mods not on the computer (deleted, or left out): which are, which aren't.
-    // "Add the rest" brings them back, fresh, switched as Tim set them.
-    const out = x.choice === 'added' ? x.mods.filter((m) => m.choice !== 'added') : [];
-    const names = (list) => list.map((m) => m.name).join(', ');
-    const mods = el('span', 'starter-mods', out.length
-      ? `Added: ${names(x.mods.filter((m) => m.choice === 'added'))}. Not added: ${names(out)}.`
-      : names(x.mods));
-    if (x.choice === 'added' && !out.length) li.append(name, el('span', 'starter-state', 'Added'), mods);
-    else {
-      const label = out.length ? 'Add the rest' : 'Add';
-      const add = button(starterBusy === x.site ? 'Adding…' : label, null, () => addStarter(x.site));
-      add.disabled = !!starterBusy;
-      add.setAttribute('aria-label', out.length ? `Add Tim’s other mods for ${x.name}: ${names(out)}` : `Add Tim’s mods for ${x.name}`);
-      li.append(name, add, mods);
-    }
-    return li;
-  }));
-  const err = starterError && !starterError.fromSite ? starterError.message : '';
-  ui.starterErr.textContent = err;
-  ui.starterErr.hidden = !err;
-}
-
-/**
- * The site this panel is on, when Tim has mods for it that the user hasn't added (all, or some left out).
- * Not just for a mod the user deleted: that may be on purpose, so only Settings offers it back.
- */
-function siteStarterOffer() {
-  const st = view.status?.helper?.connected ? view.status.starter : null;
-  const scope = siteScope();
-  return (scope && st?.sites?.find((x) => x.site === scope && (x.choice !== 'added' || x.mods.some((m) => m.choice === 'skipped')))) || null;
-}
-
-function renderSiteStarter() {
-  const x = siteStarterOffer();
-  const n = ui.siteStarter;
-  n.hidden = !x;
-  if (!x) return;
-  // In the gate under its button while TRIF is off for the site; under the mods list while it's on.
-  const home = ui.gate.hidden ? ui.chat : null;
-  if (home && n.nextElementSibling !== home) home.before(n);
-  else if (!home && n.previousElementSibling !== ui.gateErr) ui.gateErr.after(n);
-  ui.siteStarterLink.textContent = starterBusy === x.site ? `Adding Tim’s mods for ${x.name}…` : `Add Tim’s mods for ${x.name}`;
-  ui.siteStarterLink.title = x.mods.filter((m) => m.choice !== 'added').map((m) => m.name).join(', ');
-  ui.siteStarterLink.setAttribute('aria-disabled', String(!!starterBusy));
-  const err = starterError?.fromSite && starterError.site === x.site ? starterError.message : '';
-  ui.siteStarterErr.textContent = err;
-  ui.siteStarterErr.hidden = !err;
-}
-
-async function addStarter(site, { fromSite = false } = {}) {
-  if (starterBusy) return;
-  starterBusy = site;
-  starterError = null;
-  render();
-  try {
-    await request({ type: 'shipped.install', sites: [site], tab: view.tab?.id });
-  } catch (e) {
-    starterError = { site, fromSite, message: `Couldn’t add them: ${e?.message ?? e}` };
-  }
-  starterBusy = null;
-  await refreshStatus();
-  render();
 }
 
 // TRIF is off on a site until the user turns it on here (see "sites TRIF is on for" in lib.js):
@@ -997,6 +857,21 @@ function setBlocked(blocked, site = siteScope()) {
   return siteAction({ type: 'site.block', blocked }, site);
 }
 
+// Settings: "Add Tim's starter mods", while they aren't added (the setup page asked; none, or not chosen).
+// Nothing to remove them in bulk: the user deletes mods one by one.
+function renderStarter() {
+  const st = view.status;
+  ui.starterBlock.hidden = !st?.starter || st.starter.choice === 'added';
+}
+
+async function addStarter() {
+  ui.starterAdd.disabled = true;
+  ui.starterErr.hidden = true;
+  try { await request({ type: 'shipped.install' }); } catch (e) { ui.starterErr.textContent = `Couldn’t add them: ${e?.message ?? e}`; ui.starterErr.hidden = false; }
+  ui.starterAdd.disabled = false;
+  refreshStatus();
+}
+
 // Settings, "Site permissions": the mode (not in Safari, which asks per site itself), and the blocked sites.
 function renderSites() {
   const st = view.status;
@@ -1015,15 +890,6 @@ function renderSites() {
     }));
   }
   ui.blockedEmpty.hidden = blocked.length > 0;
-  // New mods start on or off, by group
-  const startsOff = st?.startsOff || [];
-  ui.startsRules.value = startsOff.includes('rules') ? 'off' : 'on';
-  ui.startsPage.value = startsOff.includes('page') ? 'off' : 'on';
-  ui.startsNote.hidden = !startsOff.length;
-}
-
-function setStartsOff(group, off) {
-  return request({ type: 'mods.startsOff', group, off }).then(refreshStatus, (e) => { modeNote(String(e?.message ?? e)); refreshStatus(); });
 }
 
 function modeNote(text) {
@@ -1302,7 +1168,7 @@ function gripButton(labelId) {
   return b;
 }
 
-const rowIds = () => [...ui.modList.children].filter((li) => li.dataset.mod).map((li) => li.dataset.mod);
+const rowIds = () => [...ui.modList.children].map((li) => li.dataset.mod);
 const rowName = (li) => li.querySelector('.mod-name > span:not(.light)')?.textContent || li.dataset.mod;
 
 /** Keep the list's current order as this site's (the rows are already where they belong). */
@@ -1315,22 +1181,19 @@ function saveModOrder(li) {
   ui.modsLive.textContent = `${rowName(li)} moved to position ${ids.indexOf(li.dataset.mod) + 1} of ${ids.length}.`;
 }
 
-/**
- * Put row `li` at position `to` among the mod rows by moving the rows around it (so a pointer captured by
- * `li` stays on it). Rows stay within their group: the group headings aren't crossed.
- */
+/** Put row `li` at position `to` by moving the rows around it (so a pointer captured by `li` stays on it). */
 function placeRow(li, to) {
-  const at = () => rowIds().indexOf(li.dataset.mod);
-  const same = (x) => x && x.dataset.mod && x.dataset.group === li.dataset.group;
-  while (at() < to && same(li.nextElementSibling)) li.before(li.nextElementSibling);
-  while (at() > to && same(li.previousElementSibling)) li.after(li.previousElementSibling);
+  const list = ui.modList;
+  const at = () => [...list.children].indexOf(li);
+  while (at() < to && li.nextElementSibling) li.before(li.nextElementSibling);
+  while (at() > to && li.previousElementSibling) li.after(li.previousElementSibling);
 }
 
 // The keyboard: Alt+↑/↓ anywhere in a row; on the grip, ↑/↓, Home and End too.
 ui.modList.addEventListener('keydown', (e) => {
   if (modDrag) return;
   const li = e.target.closest?.('#mod-list > li');
-  if (!li || !li.dataset.mod || e.ctrlKey || e.metaKey || e.shiftKey) return;
+  if (!li || e.ctrlKey || e.metaKey || e.shiftKey) return;
   const onGrip = !!e.target.closest('.mod-grip');
   const ids = rowIds();
   const from = ids.indexOf(li.dataset.mod);
@@ -1355,7 +1218,7 @@ ui.modList.addEventListener('keydown', (e) => {
 ui.modList.addEventListener('pointerdown', (e) => {
   if (modDrag || e.button !== 0 || !e.isPrimary) return;
   const li = e.target.closest('#mod-list > li');
-  if (!li || !li.dataset.mod || rowIds().length < 2) return;
+  if (!li || ui.modList.children.length < 2) return;
   const onGrip = !!e.target.closest('.mod-grip');
   // Buttons (the switch, delete, Allow…), the update offer and error text keep their clicks and text
   // selection; on a touch screen only the grip drags (elsewhere a finger scrolls the list).
@@ -1409,11 +1272,10 @@ function followPointer(d) {
   const h = li.offsetHeight;
   const top = Math.max(0, Math.min(list.scrollHeight - h, d.y - r.top - list.clientTop + list.scrollTop - d.grabDy));
   const mid = top + h / 2;
-  // (positions among the mod rows: the group headings aren't rows, and a row stays in its group: placeRow)
-  const others = [...list.children].filter((x) => x !== li && x.dataset.mod);
+  const others = [...list.children].filter((x) => x !== li);
   let to = others.findIndex((x) => x.offsetTop + x.offsetHeight / 2 > mid);
   if (to === -1) to = others.length;
-  if (to !== rowIds().indexOf(li.dataset.mod)) {
+  if (to !== [...list.children].indexOf(li)) {
     // The rows that make way slide there (unless reduced motion turns that off, in CSS).
     const before = new Map(others.map((x) => [x, x.offsetTop]));
     placeRow(li, to);
@@ -1449,7 +1311,6 @@ function endModDrag(keep) {
     ui.modList.classList.remove('dragging');
     if (!keep) {
       for (const id of d.ids) { const x = [...ui.modList.children].find((c) => c.dataset.mod === id); if (x) ui.modList.append(x); }
-      renderMods(); // (the group headings back in their places)
     } else if (rowIds().join('\n') !== d.ids.join('\n')) saveModOrder(d.li);
     // The click that ends a drag isn't one.
     const swallow = (c) => { c.stopPropagation(); c.preventDefault(); };
@@ -1462,15 +1323,13 @@ function endModDrag(keep) {
 // Green when the mod runs on the tab's page: switched on (here), matching this URL, not on hold.
 function updateLight(li, m, on) {
   const light = li.querySelector('.light');
-  const running = on && !m.held && modAppliesTo(withOffSites(m, offSitesFor(m, view.offSites, normalizeGroupsOff(view.status?.groupsOff))), view.tab?.url || '');
+  const running = on && !m.held && modAppliesTo(withOffSites(m, view.offSites[m.id]), view.tab?.url || '');
   light.classList.toggle('on', running);
   light.title = running ? 'Running on this page' : m.held ? 'On hold' : !on ? 'Switched off' : 'Not running on this page';
 }
 
 function updateModItem(li, m) {
   if (!m) return;
-  li.dataset.group = modGroup(m);
-  li.classList.toggle('group-off', groupOff(modGroup(m)));
   // One chat run at a time per site: merging waits for the one going.
   const merge = li.querySelector('.mod-update .merge');
   if (merge) {
@@ -1496,9 +1355,8 @@ function updateModItem(li, m) {
   // "not active"/"paused" only once the status agrees the mod is on (not mid-switch).
   const tag = li.querySelector('.tag');
   tag.textContent = on && m.enabled !== false && !m.registered ? (view.status.userScripts ? 'not active' : 'paused')
-    : !on && m.from ? `from ${m.from}` : !on && m.newOff ? (m.newOff === 'update' ? 'updated' : 'new') : '';
-  tag.title = !on && m.from ? `Made from ${m.from}. Mods made in another browser start off here; switch it on to use it.`
-    : !on && m.newOff ? `${m.newOff === 'update' ? 'TRIF updated it. ' : ''}New ${modGroup(m) === 'rules' ? 'rules' : 'page scripts'} start off (Settings): switch it on once you've looked at it.` : '';
+    : !on && m.from ? `from ${m.from}` : '';
+  tag.title = !on && m.from ? `Made from ${m.from}. Mods made in another browser start off here; switch it on to use it.` : '';
   tag.hidden = !tag.textContent;
   const err = li.querySelector('.mod-err');
   err.textContent = rowErr || switchError(m.id, site) || (on && m.error) || '';
@@ -1748,8 +1606,8 @@ ui.gateDisconnect.addEventListener('click', disconnectClick);
 ui.modeDialogClose.addEventListener('click', () => ui.modeDialog.close());
 ui.modeDialogSwitch.addEventListener('click', switchToRestrictive);
 ui.modePermissive.addEventListener('click', choosePermissive);
+ui.starterAdd.addEventListener('click', addStarter);
 ui.modeRestrictive.addEventListener('click', chooseRestrictive);
-ui.siteStarterLink.addEventListener('click', (e) => { e.preventDefault(); const x = siteStarterOffer(); if (x) addStarter(x.site, { fromSite: true }); });
 ui.siteSwitch.addEventListener('click', () => setSiteOn(!siteIsOn()));
 ui.barRobot.addEventListener('click', () => setSiteOn(!siteIsOn())); // off: the Fix button; on: the power button
 for (const chip of document.querySelectorAll('.chip')) {
@@ -1882,7 +1740,7 @@ function notesToggle(container, notes) {
     const shown = container.querySelector('.md');
     if (shown) { shown.remove(); e.target.textContent = 'What’s new'; return; }
     const md = el('div', 'md');
-    setMarkdown(md, unwrapMarkdown(notes));
+    setMarkdown(md, notes);
     container.append(md);
     e.target.textContent = 'Hide';
   });
@@ -1934,8 +1792,6 @@ async function installUpdate() {
 }
 
 ui.pauseAll.addEventListener('change', () => setPaused(ui.pauseAll.checked));
-ui.startsRules.addEventListener('change', () => setStartsOff('rules', ui.startsRules.value === 'off'));
-ui.startsPage.addEventListener('change', () => setStartsOff('page', ui.startsPage.value === 'off'));
 
 ui.autoUpdate.addEventListener('change', async () => {
   const on = ui.autoUpdate.checked;

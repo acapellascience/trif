@@ -129,7 +129,7 @@ export function normalizeDisabled(value) {
  * Returns {registered, errors, applied, reset, known} (`known` null when a register or update failed, as
  * then it's unclear what's registered).
  */
-export async function syncUserScripts(us, { mods, runtimeCode, applied = {}, disabled = {}, offSites = {}, groupsOff = {}, recording = [], sitesOn = null, known = null }) {
+export async function syncUserScripts(us, { mods, runtimeCode, applied = {}, disabled = {}, offSites = {}, recording = [], sitesOn = null, known = null }) {
   // sitesOn (null: no limit): mods and recording only on the sites TRIF is on for (limitToSites).
   if (sitesOn) recording = (recording || []).filter((site) => (sitesOn || []).some((s) => hostInScope(site, s)));
   const errors = [];
@@ -143,8 +143,7 @@ export async function syncUserScripts(us, { mods, runtimeCode, applied = {}, dis
     seen.add(mod.id);
     const limited = sitesOn ? limitToSites(mod, sitesOn) : mod;
     if (!limited) continue; // only on sites TRIF is off for
-    // (its own switched-off sites, and the sites where its group is off: groupsOff)
-    desired.push(withOffSites(limited, offSitesFor(mod, offSites, groupsOff)));
+    desired.push(withOffSites(limited, offSites[mod.id]));
   }
 
   // (Anything registered that isn't wanted goes: a home page marker left by a development build too.)
@@ -464,103 +463,6 @@ export function applyStartOff(mods, disabled = {}, startedOff = {}, installId = 
 }
 
 /**
- * Tim's mods the user deleted and got back (Settings' "Add the rest", a site's link): the helper sends each
- * with `readded` (a stamp). The first time this browser sees a stamp, the mod is switched as Tim set it,
- * like a new one (off when it comes with `startOff`, else on), not as it was before it was deleted;
- * `readded` (id -> stamp) remembers that, so after it the switch is the user's. Pure: returns {disabled,
- * readded, changed} with new objects when something changed.
- */
-export function applyReadded(mods, disabled = {}, readded = {}) {
-  const fresh = (mods || []).filter((m) => typeof m?.id === 'string' && typeof m.readded === 'string' && readded[m.id] !== m.readded);
-  if (!fresh.length) return { disabled, readded, changed: false };
-  const d = { ...disabled };
-  const r = { ...readded };
-  for (const m of fresh) {
-    if (m.startOff) d[m.id] = true; else delete d[m.id];
-    r[m.id] = m.readded;
-  }
-  return { disabled: d, readded: r, changed: true };
-}
-
-// ---- new mods start on or off ----------------------------------------------------------------------
-// Settings' "New mods start": for each group of mods (modGroup: 'rules', 'page'), whether a mod of it that
-// this browser hasn't seen before arrives switched on (as always) or off, so a page script can't run before
-// the user has looked at it while styles still apply at once. chrome.storage.local `startsOff` = the groups
-// set to start off (none: every group starts on, the default). What counts as arriving: a mod id this
-// browser has never seen (`seenMods`: a terminal agent's, one dropped in by hand, Tim's mods added, one
-// made from another browser), and a new version of a shipped mod TRIF put in place by itself (the helper
-// sends its stamp as `autoUpdated`; `autoUpdated` here remembers the stamps seen). Not: one this browser's
-// own side-panel chat made while its run was going (its origin is this install, `live`: the user asked for it,
-// and the agent checks it running; a file that appeared just after the run ended doesn't count), one waiting for the user's OK anyway (held: allowing it is looking at it), or one the user
-// asked for by name (a new version they chose, one restored from the trash: ids already seen). Tim's mods
-// the user got back (`readded`) count as arriving. `newOff` (id -> 'new' | 'update') remembers why a mod
-// was switched off, for the panel and `trif status`, until the user switches it on.
-
-/** The groups a mod can be in, for `startsOff`. */
-export const MOD_GROUPS = ['rules', 'page'];
-
-/** chrome.storage.local `startsOff`, cleaned up: known groups, once each. */
-export function normalizeStartsOff(value) {
-  return Array.isArray(value) ? MOD_GROUPS.filter((g) => value.includes(g)) : [];
-}
-
-/** chrome.storage.local `newOff`, cleaned up: mod id -> 'new' | 'update'. */
-export function normalizeNewOff(value) {
-  const out = {};
-  if (value && typeof value === 'object' && !Array.isArray(value)) for (const [id, v] of Object.entries(value)) if (v === 'new' || v === 'update') out[id] = v;
-  return out;
-}
-
-/**
- * The first time this browser sees each mod (and each stamp of a shipped mod TRIF updated by itself):
- * remembered in `seen` (id -> true) and `autoUpdated` (id -> stamp); one in a group set to start off is
- * switched off, with why in `newOff`. `seen` null (never stored: a browser that had its mods before this
- * existed) takes every mod there now as seen, switching nothing off; `autoUpdated` null likewise.
- * `readded`: the stamps the browser had seen before this message (a mod with a new one arrives again).
- * Pure: returns {disabled, seen, autoUpdated, newOff, changed} with new objects when something changed.
- */
-export function applyNewMods(mods, { disabled = {}, seen = null, autoUpdated = null, newOff = {}, startsOff = [], installId = null, readded = {} } = {}) {
-  const list = (mods || []).filter((m) => typeof m?.id === 'string');
-  const out = { disabled, seen: seen || {}, autoUpdated: autoUpdated || {}, newOff, changed: false };
-  const copy = () => {
-    if (out.changed) return;
-    out.disabled = { ...disabled }; out.seen = { ...(seen || {}) }; out.autoUpdated = { ...(autoUpdated || {}) }; out.newOff = { ...newOff };
-    out.changed = true;
-  };
-  if (!seen || !autoUpdated) {
-    copy();
-    if (!seen) for (const m of list) out.seen[m.id] = true;
-    if (!autoUpdated) for (const m of list) if (typeof m.autoUpdated === 'string') out.autoUpdated[m.id] = m.autoUpdated;
-  }
-  // (this browser's own chat: written while its run here was going, origin.live; not a file that appeared in the
-  // moments after it ended, which helper/lib/origins.js also counts for it but could be anyone's)
-  const off = (m) => startsOff.includes(modGroup(m)) && !m.held && !(installId && m.origin?.by === installId && m.origin.live === true);
-  for (const m of list) {
-    const fresh = !out.seen[m.id] || (typeof m.readded === 'string' && readded[m.id] !== m.readded);
-    const updated = typeof m.autoUpdated === 'string' && out.autoUpdated[m.id] !== m.autoUpdated;
-    if (!fresh && !updated) continue;
-    copy();
-    out.seen[m.id] = true;
-    if (typeof m.autoUpdated === 'string') out.autoUpdated[m.id] = m.autoUpdated;
-    if (off(m) && out.disabled[m.id] !== true) {
-      out.disabled[m.id] = true;
-      out.newOff[m.id] = fresh ? 'new' : 'update';
-    }
-  }
-  // (why a mod that's gone was off: nothing to show any more)
-  const present = new Set(list.map((m) => m.id));
-  for (const id of Object.keys(out.newOff)) if (!present.has(id)) { copy(); delete out.newOff[id]; }
-  return out;
-}
-
-/** chrome.storage.local `readded`, cleaned up: mod id -> stamp. */
-export function normalizeReadded(value) {
-  const out = {};
-  if (value && typeof value === 'object' && !Array.isArray(value)) for (const [id, v] of Object.entries(value)) if (typeof v === 'string') out[id] = v;
-  return out;
-}
-
-/**
  * Shipped mods folded into another one (helper/lib/preinstalled.js retireShippedMods): the helper sends
  * the ids whose old copy went to the trash as that mod's `absorbs`. The first time this browser sees each
  * one, the mod it went into takes over its switch: on if either was on (and on a site, on there if either
@@ -652,32 +554,6 @@ export function normalizeModOrder(value) {
     }
   }
   return out;
-}
-
-/**
- * Tim's mods, site by site, as the helper sends them (helper/lib/preinstalled.js starterOffer), cleaned up:
- * {chosen, sites: [{site, name, note, choice: 'added'|'none'|null, suggested, mods: [{id, name, description, on, choice: 'added'|'deleted'|'skipped'|null}]}]},
- * or null (an older helper, or nothing usable).
- */
-export function normalizeStarter(value) {
-  if (!value || typeof value !== 'object' || !Array.isArray(value.sites)) return null;
-  const str = (x, max = 200) => (typeof x === 'string' ? x.slice(0, max) : '');
-  const sites = [];
-  for (const s of value.sites.slice(0, 50)) {
-    const site = s && typeof s === 'object' ? scopeFor(str(s.site)) : '';
-    if (!site || sites.some((x) => x.site === site)) continue;
-    const mods = (Array.isArray(s.mods) ? s.mods : []).slice(0, 50).filter((m) => m && typeof m === 'object' && str(m.id))
-      .map((m) => ({ id: str(m.id), name: str(m.name) || str(m.id), description: str(m.description), on: !!m.on, choice: ['added', 'deleted', 'skipped'].includes(m.choice) ? m.choice : null }));
-    if (!mods.length) continue;
-    sites.push({ site, name: str(s.name, 60) || site, note: str(s.note, 80), choice: s.choice === 'added' || s.choice === 'none' ? s.choice : null, suggested: !!s.suggested, mods });
-  }
-  return { chosen: !!value.chosen || sites.some((s) => s.choice), sites };
-}
-
-/** The sites' names as words: "X", "X and Google", "X, Google and Amazon". */
-export function siteNames(names) {
-  const list = (names || []).filter(Boolean);
-  return list.length < 2 ? list.join('') : `${list.slice(0, -1).join(', ')} and ${list.at(-1)}`;
 }
 
 /** `mods` in the saved order `ids` (mod ids, or nothing): the listed ones first, then the rest as they came. */
@@ -1285,54 +1161,6 @@ export function offOnSite(offSites, id, site) {
 /** Exclude patterns for a switched-off site and its subdomains (IPs: just the address). */
 export function siteExcludes(site) {
   return /^(\d{1,3}(\.\d{1,3}){3}|\[.*\])$/.test(site) ? [`*://${site}/*`] : [`*://${site}/*`, `*://*.${site}/*`];
-}
-
-// ---- Groups: how TRIF runs a mod, switched on and off per site (docs/PROTOCOL.md "Groups").
-// "rules": a rules mod (its header says @rules: TRIF runs its data); "page": every other mod (a page
-// script, run in the page with everything it has). `groupsOff` (chrome.storage.local) maps a site to
-// the groups switched off there: their mods don't run on it (or its subdomains), each mod's own
-// switch left as it is.
-export const GROUPS = ['rules', 'page'];
-export function modGroup(mod) { return mod && mod.rules ? 'rules' : 'page'; }
-
-/** `groupsOff` from storage, cleaned up: valid sites, known groups, no duplicates, no empty lists. */
-export function normalizeGroupsOff(value) {
-  const out = {};
-  if (value && typeof value === 'object' && !Array.isArray(value)) {
-    for (const [site, list] of Object.entries(value)) {
-      const s = offSiteName(site);
-      if (!s || !Array.isArray(list)) continue;
-      const groups = [...new Set(list.filter((g) => GROUPS.includes(g)))];
-      if (groups.length) out[s] = [...new Set([...(out[s] || []), ...groups])];
-    }
-  }
-  return out;
-}
-
-/** Whether `group` is switched off on `site` (an entry for it or a parent domain). */
-export function groupOffOn(groupsOff, group, site) {
-  const s = offSiteName(site);
-  return !!s && Object.entries(groupsOff || {}).some(([o, list]) => list.includes(group) && hostInScope(s, o));
-}
-
-/** `groupsOff` after switching `group` on or off on `site` (a new object). */
-export function switchGroup(groupsOff, site, group, enabled) {
-  const s = offSiteName(site);
-  if (!s) throw new Error(`"${site}" isn't a site (use a hostname like twitter.com)`);
-  if (!GROUPS.includes(group)) throw new Error(`"${group}" isn't a group (${GROUPS.join(' or ')})`);
-  const out = normalizeGroupsOff(groupsOff);
-  const list = new Set(out[s] || []);
-  if (enabled) list.delete(group); else list.add(group);
-  if (list.size) out[s] = [...list]; else delete out[s];
-  return out;
-}
-
-/** The sites a mod is switched off on: its own (offSites) and its group's (groupsOff). */
-export function offSitesFor(mod, offSites, groupsOff) {
-  const own = (offSites && offSites[mod.id]) || [];
-  const g = modGroup(mod);
-  const group = Object.entries(groupsOff || {}).filter(([, list]) => list.includes(g)).map(([s]) => s);
-  return group.length ? [...new Set([...own, ...group])] : own;
 }
 
 /** The mod as registered: its switched-off sites added to its excludes (and to its hash, so it re-registers). */

@@ -135,12 +135,13 @@ svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width:
 /* The robot, its line and the button are centred; the lines under the button (Block / Disconnect, an error,
    Tim's mods, the problem line) hang below them without moving them, so the robot sits at one height. */
 .gate-main { position: relative; display: flex; flex-direction: column; align-items: center; gap: 14px; }
-.gate-foot { position: absolute; top: calc(100% + 14px); left: 50%; transform: translateX(-50%); width: min(320px, calc(100vw - 32px)); display: flex; flex-direction: column; align-items: center; gap: 14px; }
+.gate-foot { position: absolute; top: calc(100% + 14px); left: 50%; transform: translateX(-50%); width: max-content; max-width: calc(100vw - 32px); display: flex; flex-direction: column; align-items: center; gap: 14px; }
 .gate-foot:not(:has(> :not([hidden]))) { display: none; }
 .gate-title { margin: 0; font-size: 15px; font-weight: 600; }
 .gate-why { margin: -6px 0 0; color: var(--muted); text-align: center; }
 /* Quiet links under Fix: block the site in TRIF, or disconnect it (the browser's permission). */
-.gate-links { margin: 0; display: flex; gap: 14px; font-size: 12px; }
+.gate-links { margin: 0; display: flex; flex-direction: column; align-items: center; gap: 4px; font-size: 12px; }
+.gate-links a { white-space: nowrap; } /* (one above the other, each on one line) */
 .gate-links a { color: var(--muted); }
 /* Disconnected (no access yet, or given back): the whole panel grey. Blocked in TRIF: red. */
 body.site-disconnected :is(.bar, .gate) { filter: grayscale(1); }

@@ -7,7 +7,7 @@ Errors read "TRIF sandbox: …". `{…}` is a value filled in.
 
 ## Combination warnings, new (helper/lib/combinations.js)
 
-The red box's lines, "Together, it …". Their ranks among all nineteen (the thirteen before keep their words;
+The red box's lines, "Together, it …". Their ranks among all twenty (the thirteen before keep their words;
 their ranks moved to make room):
 
 1. could put what it reads into a post and send it for you *(as before)*
@@ -24,11 +24,15 @@ their ranks moved to make room):
 12. could let what it reads decide what it clicks for you *(as before)*
 13. could keep your clicks from reaching the page and click in their place *(as before)*
 14. **could keep your clicks from reaching the page and set off the page's own actions in their place** (block-events + page-events: F9)
-15. **could let what it reads decide which of your actions this page sees, and the page's code may send that on** (a read + block-events: F5)
-16. could pass what it reads to the site a video or sound comes from, by how it plays it *(as before)*
-17. could pass what it reads to the sites this page's pictures come from, by which ones it loads *(as before)*
-18. **could pass what it reads to the site a video comes from, by which video it offers you** (a read + embeds: F8)
-19. could turn what it reads into sounds that a device nearby could pick up *(as before)*
+15. **could keep your clicks from reaching the page and take you to another page in their place** (block-events + go-to: the conversion run's)
+16. **could let what it reads decide which of your actions this page sees, and the page's code may send that on** (a read + block-events: F5)
+17. could pass what it reads to the site a video or sound comes from, by how it plays it *(as before)*
+18. could pass what it reads to the sites this page's pictures come from, by which ones it loads *(as before)*
+19. **could pass what it reads to the site a video comes from, by which video it offers you** (a read + embeds: F8)
+20. could turn what it reads into sounds that a device nearby could pick up *(as before)*
+
+go-to + site-storage (the conversion run's) gets an existing sentence, rank 9's: "could take you to a page and
+set off that page's own actions there".
 
 No new sentence for F4: with `edit-uploads` counted as a read, the existing warnings now show for it (for
 example `media` + `edit-uploads`: "could pass what it reads to the site a video or sound comes from, by how it
@@ -54,6 +58,14 @@ Each reads "{act} is off on this page while another boxed mod here has the {powe
 | **offering the page's videos** (embeds, when made and when clicked: F8) | **what one reads could reach a video's host through which video is offered** |
 | clicking for the user *(changed: F6)* | what one reads could decide what the other clicks (or one could keep the user's clicks from the page while the other clicks**, or change what the site receives from those clicks**) |
 | signalling the page's own code *(changed: F6, F9)* | what one reads could reach the page's code, which may post or send it **(or one could keep the user's clicks from the page while the other sets off the page's own actions, or change what the site receives from them)** |
+| taking the user to a page *(changed: the conversion run's)* | one could take the user to a page where the other clicks or sets off the page's own actions **(or one could keep the user's clicks from the page, or leave something in the site's storage for a page's code to act on, while the other takes the user there)** |
+
+The site-storage row's why, above, gains (the conversion run's go-to + site-storage): **… finds it (or one
+could leave something for a page's code to act on as it loads, and the other take the user there)**.
+
+New, for sound beside a read across mods (the conversion run's), only when the two share a `mods` channel:
+
+- **playing sound is off on this page while it shares a channel (mods) with another boxed mod here that has the {power} power: with both, what one reads could become sounds a device nearby could pick up (a mod that asks for sound and {power} together shows the user that)**
 
 New, for edit-uploads as a read (F4): beside a mod that was handed a picture the user attached, the same acts
 read:

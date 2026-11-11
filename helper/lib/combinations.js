@@ -37,11 +37,12 @@ const WARNINGS = {
   'read-decides-click': { rank: 12, fact: 'could let what it reads decide what it clicks for you' },
   'block-and-click': { rank: 13, fact: 'could keep your clicks from reaching the page and click in their place' },
   'block-and-signal': { rank: 14, fact: 'could keep your clicks from reaching the page and set off the page\'s own actions in their place' },
-  'read-decides-blocks': { rank: 15, fact: 'could let what it reads decide which of your actions this page sees, and the page\'s code may send that on' },
-  'read-through-media': { rank: 16, fact: 'could pass what it reads to the site a video or sound comes from, by how it plays it' },
-  'read-through-pictures': { rank: 17, fact: 'could pass what it reads to the sites this page\'s pictures come from, by which ones it loads' },
-  'read-through-videos': { rank: 18, fact: 'could pass what it reads to the site a video comes from, by which video it offers you' },
-  'read-into-sound': { rank: 19, fact: 'could turn what it reads into sounds that a device nearby could pick up' },
+  'block-and-go': { rank: 15, fact: 'could keep your clicks from reaching the page and take you to another page in their place' },
+  'read-decides-blocks': { rank: 16, fact: 'could let what it reads decide which of your actions this page sees, and the page\'s code may send that on' },
+  'read-through-media': { rank: 17, fact: 'could pass what it reads to the site a video or sound comes from, by how it plays it' },
+  'read-through-pictures': { rank: 18, fact: 'could pass what it reads to the sites this page\'s pictures come from, by which ones it loads' },
+  'read-through-videos': { rank: 19, fact: 'could pass what it reads to the site a video comes from, by which video it offers you' },
+  'read-into-sound': { rank: 20, fact: 'could turn what it reads into sounds that a device nearby could pick up' },
 };
 // (Tim's words, for a mod with more than three powers, in place of the lines above)
 const MANY = 'Mods with many powers can act in unspecific or powerful ways. Treat this with caution.';
@@ -352,11 +353,14 @@ const WAY_OUT = {
   'edit-uploads': 'read-into-picture', 'page-events': 'read-into-page-code', 'image-variants': 'read-through-pictures', preload: 'read-through-pictures',
   'site-storage': 'read-into-storage', 'block-events': 'read-decides-blocks', embeds: 'read-through-videos',
 };
-// (rewrite-requests with an act: the act's own request carries the header's change, with no one asking)
+// (rewrite-requests with an act: the act's own request carries the header's change, with no one asking;
+// go-to with block-events: your click kept from the page, and a move of the mod's in its place; go-to with
+// site-storage: something left for a page's code to act on as it loads, then the user taken there)
 const ACT_PAIRS = {
   'block-events+click': 'block-and-click', 'page-events+write-drafts': 'post-for-you', 'click+edit-uploads': 'post-for-you',
   'page-events+edit-uploads': 'post-for-you', 'go-to+page-events': 'go-and-signal',
   'rewrite-requests+click': 'click-and-rewrite', 'rewrite-requests+page-events': 'signal-and-rewrite', 'block-events+page-events': 'block-and-signal',
+  'go-to+block-events': 'block-and-go', 'site-storage+go-to': 'go-and-signal',
 };
 const SENDS = ['click', 'page-events'];
 const WRITES = ['write-drafts', 'edit-uploads'];

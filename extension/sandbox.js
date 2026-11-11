@@ -507,27 +507,29 @@ export function sandboxRuntime(mode, pageModId, pageFn, pagePowers) {
     'write-drafts': ['read-drafts', 'keys', 'site-data', 'page-data', 'site-storage', 'local-fonts', 'image-variants', 'edit-uploads'],
     click: ['read-drafts', 'keys', 'site-data', 'page-data', 'site-storage', 'local-fonts', 'image-variants', 'edit-uploads', 'rewrite-requests', 'block-events'],
     media: ['read-drafts', 'keys', 'site-data', 'page-data', 'site-storage', 'local-fonts', 'image-variants', 'edit-uploads'],
-    'go-to': ['click', 'page-events'],
+    'go-to': ['site-storage', 'block-events', 'page-events', 'click'],
     'page-events': ['read-drafts', 'keys', 'site-data', 'page-data', 'site-storage', 'local-fonts', 'image-variants', 'edit-uploads', 'rewrite-requests', 'block-events'],
     'edit-uploads': ['read-drafts', 'keys', 'site-data', 'page-data', 'site-storage', 'local-fonts', 'image-variants'],
     'image-variants': ['read-drafts', 'keys', 'site-data', 'page-data', 'site-storage', 'local-fonts', 'edit-uploads'],
     preload: ['read-drafts', 'keys', 'site-data', 'page-data', 'site-storage', 'local-fonts', 'edit-uploads'],
-    'site-storage': ['read-drafts', 'keys', 'site-data', 'page-data', 'local-fonts', 'image-variants', 'edit-uploads'],
+    'site-storage': ['read-drafts', 'keys', 'site-data', 'page-data', 'local-fonts', 'image-variants', 'edit-uploads', 'go-to'],
     'block-events': ['read-drafts', 'keys', 'site-data', 'page-data', 'site-storage', 'local-fonts', 'image-variants', 'edit-uploads'],
     embeds: ['read-drafts', 'keys', 'site-data', 'page-data', 'site-storage', 'local-fonts', 'image-variants', 'edit-uploads'],
+    sound: ['read-drafts', 'keys', 'site-data', 'page-data', 'site-storage', 'local-fonts', 'image-variants', 'edit-uploads'],
   };
   const PARTNER_WHY = {
     'write-drafts': ['changing what the user types', 'what one reads could end up in what the user posts'],
     click: ['clicking for the user', 'what one reads could decide what the other clicks (or one could keep the user\'s clicks from the page while the other clicks, or change what the site receives from those clicks)'],
     media: ['playing the page\'s video and audio', 'what one reads could reach a video\'s host through how it plays'],
-    'go-to': ['taking the user to a page', 'one could take the user to a page where the other clicks or sets off the page\'s own actions'],
+    'go-to': ['taking the user to a page', 'one could take the user to a page where the other clicks or sets off the page\'s own actions (or one could keep the user\'s clicks from the page, or leave something in the site\'s storage for a page\'s code to act on, while the other takes the user there)'],
     'page-events': ['signalling the page\'s own code', 'what one reads could reach the page\'s code, which may post or send it (or one could keep the user\'s clicks from the page while the other sets off the page\'s own actions, or change what the site receives from them)'],
     'edit-uploads': ['changing the pictures the user attaches', 'what one reads could end up in a picture the user posts'],
     'image-variants': ['loading other sizes of the page\'s pictures', 'what one reads could reach the pictures\' host through which ones load'],
     preload: ['loading the page\'s pictures sooner', 'what one reads could reach the pictures\' host through which ones load'],
-    'site-storage': ['changing what the site keeps', 'what one reads could be kept where the page\'s own code, or a boxed mod on a later page, finds it'],
+    'site-storage': ['changing what the site keeps', 'what one reads could be kept where the page\'s own code, or a boxed mod on a later page, finds it (or one could leave something for a page\'s code to act on as it loads, and the other take the user there)'],
     'block-events': ['choosing which of the user\'s actions the page sees', 'what one reads could decide which of the user\'s actions the page\'s code sees, and it may send that on'],
     embeds: ['offering the page\'s videos', 'what one reads could reach a video\'s host through which video is offered'],
+    sound: ['playing sound', 'what one reads could become sounds a device nearby could pick up'],
   };
   const inPlay = new Set(); // (the powers of the boxed mods that have run on this page, @migrate as site-storage)
   const uploadReaders = new Set(); // (boxed mods handed a picture the user attached on this page: edit-uploads reads it)
@@ -536,6 +538,24 @@ export function sandboxRuntime(mode, pageModId, pageFn, pagePowers) {
       if (api.combo.has(p)) continue;
       if (p === 'edit-uploads') { if (uploadReaders.size) fail(`${PARTNER_WHY[act][0]} is off on this page since another boxed mod here was handed a picture the user attached (edit-uploads): with both, ${PARTNER_WHY[act][1]} (a mod that asks for ${act} and edit-uploads together shows the user that)`); continue; }
       if (inPlay.has(p)) fail(`${PARTNER_WHY[act][0]} is off on this page while another boxed mod here has the ${p} power: with both, ${PARTNER_WHY[act][1]} (a mod that asks for ${act} and ${p} together shows the user that)`);
+    }
+  };
+  // (sound: not beside every read on the page (that would stop every sound mod beside any hotkey mod:
+  // docs/SAFE-MODS.md), only beside one it shares a `mods` channel with, which could hand it what it reads)
+  const channelPeers = (mod) => {
+    const out = new Set();
+    for (const ch of channels.values()) { let mine = false; for (const m of ch) if (m.mod === mod) mine = true; if (mine) for (const m of ch) if (m.mod !== mod) out.add(m.mod); }
+    return out;
+  };
+  const soundOk = (api) => {
+    const peers = channelPeers(api.mod);
+    if (!peers.size) return;
+    for (const p of ACT_PARTNERS.sound) {
+      if (api.combo.has(p)) continue;
+      for (const id of peers) {
+        const o = apis.get(id);
+        if (p === 'edit-uploads' ? uploadReaders.has(id) : !!(o && o.combo.has(p))) fail(`${PARTNER_WHY.sound[0]} is off on this page while it shares a channel (mods) with another boxed mod here that has the ${p} power: with both, ${PARTNER_WHY.sound[1]} (a mod that asks for sound and ${p} together shows the user that)`);
+      }
     }
   };
   // go-to across a page load: the page a boxed mod's go-to (or reload, or in-app move) brought the user to.
@@ -1358,13 +1378,16 @@ export function sandboxRuntime(mode, pageModId, pageFn, pagePowers) {
     const makeAudio = (ctx, offline) => {
       const nodeOfFacade = new WeakMap(), paramOfFacade = new WeakMap();
       const when = (at) => (at === undefined ? ctx.currentTime : num(at, 'a time'));
+      // (what's heard: the live context's sources starting, connecting, changing; not an offline render, whose
+      // numbers stay with the mod)
+      const live = () => { if (!offline) soundOk(self); };
       const paramOf = (ap) => {
         const f = hardenAll({
           get value() { return ap.value; },
-          set: (v, at) => { ap.setValueAtTime(num(v, 'a value'), when(at)); },
-          ramp: (v, at) => { ap.linearRampToValueAtTime(num(v, 'a value'), num(at, 'a time')); },
-          expRamp: (v, at) => { ap.exponentialRampToValueAtTime(num(v, 'a value'), num(at, 'a time')); },
-          target: (v, at, tc) => { ap.setTargetAtTime(num(v, 'a value'), when(at), num(tc, 'a time constant')); },
+          set: (v, at) => { live(); ap.setValueAtTime(num(v, 'a value'), when(at)); },
+          ramp: (v, at) => { live(); ap.linearRampToValueAtTime(num(v, 'a value'), num(at, 'a time')); },
+          expRamp: (v, at) => { live(); ap.exponentialRampToValueAtTime(num(v, 'a value'), num(at, 'a time')); },
+          target: (v, at, tc) => { live(); ap.setTargetAtTime(num(v, 'a value'), when(at), num(tc, 'a time constant')); },
           cancel: (at) => { ap.cancelScheduledValues(when(at)); },
         });
         paramOfFacade.set(f, ap);
@@ -1375,13 +1398,14 @@ export function sandboxRuntime(mode, pageModId, pageFn, pagePowers) {
         const o = {
           // (into another of this mod's nodes, into one of their parameters (FM, AM, an LFO), or 'out')
           connect: (to) => {
+            live();
             if (to === 'out') node.connect(ctx.destination);
             else if (to && typeof to === 'object' && paramOfFacade.has(to)) node.connect(paramOfFacade.get(to));
             else node.connect(nodeOfFacade.get(to) || fail('connect takes another of this mod\'s sound nodes, one of their parameters, or \'out\''));
             return to;
           },
           disconnect: () => { node.disconnect(); },
-          start: (at) => { if (typeof node.start !== 'function') fail('only sources start'); node.start(when(at)); },
+          start: (at) => { if (typeof node.start !== 'function') fail('only sources start'); live(); node.start(when(at)); },
           stop: (at) => { if (typeof node.stop !== 'function') fail('only sources stop'); node.stop(when(at)); },
           param: (name) => { str(name, 'a parameter', 40); if (!PARAMS.includes(name) || !node[name] || typeof node[name].setValueAtTime !== 'function') fail(`no ${name} here`); return paramOf(node[name]); },
         };
@@ -1396,7 +1420,7 @@ export function sandboxRuntime(mode, pageModId, pageFn, pagePowers) {
         if (re.length < 2 || re.length !== im.length) fail('a wave has as many real terms as imaginary ones, at least 2');
         return ctx.createPeriodicWave(re, im);
       };
-      const oscillatorFacade = (n) => facade(n, { setWave: (real, imag) => { n.setPeriodicWave(waveOf(real, imag)); } });
+      const oscillatorFacade = (n) => facade(n, { setWave: (real, imag) => { live(); n.setPeriodicWave(waveOf(real, imag)); } });
       const buffers = new Map(); // data: URL -> decoded buffer
       const decode = async (url) => {
         const u = str(url, 'a sound', 20 * 1024 * 1024);
@@ -1454,6 +1478,7 @@ export function sandboxRuntime(mode, pageModId, pageFn, pagePowers) {
         sound: async (url, o) => sourceOf(await decode(url), o),
         // the simple ones: a beep, and a sound played once
         tone: (o) => {
+          live();
           o = opt(o);
           const t0 = when(o.at), dur = num(o.duration === undefined ? 0.15 : o.duration, 'a duration'), vol = num(o.volume === undefined ? 0.2 : o.volume, 'a volume');
           const osc = ctx.createOscillator(), g = ctx.createGain();
@@ -1463,6 +1488,7 @@ export function sandboxRuntime(mode, pageModId, pageFn, pagePowers) {
           osc.connect(g).connect(ctx.destination); osc.start(t0); osc.stop(t0 + dur + 0.02);
         },
         play: async (url, o) => {
+          live();
           const b = await decode(url); o = opt(o);
           const n = ctx.createBufferSource(), g = ctx.createGain();
           n.buffer = b; g.gain.value = num(o.volume === undefined ? 1 : o.volume, 'a volume');
@@ -1474,7 +1500,7 @@ export function sandboxRuntime(mode, pageModId, pageFn, pagePowers) {
         Object.defineProperties(api, Object.getOwnPropertyDescriptors({
           // (the mod's own context's clock: paused, resumed, closed (the next trif.audio() makes a new one), and
           // how late its sound comes out, in seconds)
-          resume: () => { if (audio && audio.ctx === ctx) audio.paused = false; return ctx.resume().then(() => ctx.state, () => ctx.state); },
+          resume: () => { live(); if (audio && audio.ctx === ctx) audio.paused = false; return ctx.resume().then(() => ctx.state, () => ctx.state); },
           suspend: () => { if (audio && audio.ctx === ctx) audio.paused = true; return ctx.suspend().then(() => ctx.state, () => ctx.state); },
           close: () => { if (audio && audio.ctx === ctx) audio = null; return ctx.close().then(() => 'closed', () => ctx.state); },
           get latency() { return harden({ base: Number(ctx.baseLatency) || 0, output: Number(ctx.outputLatency) || 0 }); },

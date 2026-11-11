@@ -19,8 +19,8 @@ boxed mod reaches otherwise stays on the site it came from, which already has it
 (they see each other's elements, and `mods` gives them a channel), the sandbox's page-wide rules stop a
 combination split between mods from slipping past the hold: docs/SAFE-MODS.md, "Combinations".
 
-Counts: 89 of 210 pairs carry a warning; 32 of 1330 triples carry one of their own, and
-939 more show their pairs' warnings.
+Counts: 91 of 210 pairs carry a warning; 32 of 1330 triples carry one of their own, and
+952 more show their pairs' warnings.
 
 ## The warnings, strongest first
 
@@ -36,17 +36,18 @@ A hold lists each warning its mod's powers make, one line each, in this order (t
 | 6 | Together, it could hand what it reads to this page's own code, which may post or send it. | a read + `page-events` (5); `site-storage` + `page-events`; `image-variants` + `page-events` |
 | 7 | Together, it could keep what it reads where this site's own code, and your other boxed mods, can find it later. | a read + `site-storage` (4); `site-storage` + a read |
 | 8 | Together, it could take you to a page and click things there for you. | `go-to` + `click` |
-| 9 | Together, it could take you to a page and set off that page's own actions there. | `go-to` + `page-events` |
+| 9 | Together, it could take you to a page and set off that page's own actions there. | `site-storage` + `go-to`; `go-to` + `page-events` |
 | 10 | Together, it could click things for you and change what the site receives from those clicks. | `rewrite-requests` + `click` |
 | 11 | Together, it could set off this page's own actions and change what the site receives from them. | `rewrite-requests` + `page-events` |
 | 12 | Together, it could let what it reads decide what it clicks for you. | a read + `click` (5); `site-storage` + `click`; `image-variants` + `click` |
 | 13 | Together, it could keep your clicks from reaching the page and click in their place. | `block-events` + `click` |
 | 14 | Together, it could keep your clicks from reaching the page and set off the page's own actions in their place. | `block-events` + `page-events` |
-| 15 | Together, it could let what it reads decide which of your actions this page sees, and the page's code may send that on. | a read + `block-events` (5); `site-storage` + `block-events`; `image-variants` + `block-events`; `block-events` + `edit-uploads` |
-| 16 | Together, it could pass what it reads to the site a video or sound comes from, by how it plays it. | a read + `media` (5); `site-storage` + `media`; `image-variants` + `media`; `media` + `edit-uploads` |
-| 17 | Together, it could pass what it reads to the sites this page's pictures come from, by which ones it loads. | a read + `image-variants` (5); a read + `preload` (5); `site-storage` + `image-variants`; `site-storage` + `preload`; `preload` + `edit-uploads` |
-| 18 | Together, it could pass what it reads to the site a video comes from, by which video it offers you. | a read + `embeds` (5); `site-storage` + `embeds`; `image-variants` + `embeds`; `embeds` + `edit-uploads` |
-| 19 | Together, it could turn what it reads into sounds that a device nearby could pick up. | a read + `sound` (5); `site-storage` + `sound`; `image-variants` + `sound`; `sound` + `edit-uploads` |
+| 15 | Together, it could keep your clicks from reaching the page and take you to another page in their place. | `go-to` + `block-events` |
+| 16 | Together, it could let what it reads decide which of your actions this page sees, and the page's code may send that on. | a read + `block-events` (5); `site-storage` + `block-events`; `image-variants` + `block-events`; `block-events` + `edit-uploads` |
+| 17 | Together, it could pass what it reads to the site a video or sound comes from, by how it plays it. | a read + `media` (5); `site-storage` + `media`; `image-variants` + `media`; `media` + `edit-uploads` |
+| 18 | Together, it could pass what it reads to the sites this page's pictures come from, by which ones it loads. | a read + `image-variants` (5); a read + `preload` (5); `site-storage` + `image-variants`; `site-storage` + `preload`; `preload` + `edit-uploads` |
+| 19 | Together, it could pass what it reads to the site a video comes from, by which video it offers you. | a read + `embeds` (5); `site-storage` + `embeds`; `image-variants` + `embeds`; `embeds` + `edit-uploads` |
+| 20 | Together, it could turn what it reads into sounds that a device nearby could pick up. | a read + `sound` (5); `site-storage` + `sound`; `image-variants` + `sound`; `sound` + `edit-uploads` |
 
 A mod with more than 3 powers gets, in place of these lines: **Mods with many powers can act in unspecific or powerful ways. Treat this with caution.** (keyed by its exact set of powers; its
 combinations are still needs of their own, so a later version with fewer of them doesn't ask again for what was allowed).
@@ -161,7 +162,7 @@ Grouped by their first power, in the menu's order.
 | `site-storage` + `preload` | **Together, it could pass what it reads to the sites this page's pictures come from, by which ones it loads.** |
 | `site-storage` + `media` | **Together, it could pass what it reads to the site a video or sound comes from, by how it plays it.** |
 | `site-storage` + `search-box` | No added risk: the search box only takes what you type, and the mod can't fill or read it. |
-| `site-storage` + `go-to` | No added risk: it only goes to this site's own pages (the header's, with the header's words in a query, or links the page shows), and that site can already see what it reads. |
+| `site-storage` + `go-to` | **Together, it could take you to a page and set off that page's own actions there.** |
 | `site-storage` + `embeds` | **Together, it could pass what it reads to the site a video comes from, by which video it offers you.** |
 | `site-storage` + `rewrite-requests` | No added risk: its change to what the site receives is fixed in the header and made by TRIF, so nothing the mod reads or does rides on it. |
 | `site-storage` + `block-events` | **Together, it could let what it reads decide which of your actions this page sees, and the page's code may send that on.** |
@@ -308,7 +309,7 @@ Grouped by their first power, in the menu's order.
 |---|---|
 | `go-to` + `embeds` | No added risk: it plays only a video a link on the page names, after you click, so nothing the mod reads rides on it. |
 | `go-to` + `rewrite-requests` | No added risk: its change to what the site receives is fixed in the header and made by TRIF, so nothing the mod reads or does rides on it. |
-| `go-to` + `block-events` | No added risk: keeping some of what you do from the page only lets the page learn less, and your typing always reaches its fields. |
+| `go-to` + `block-events` | **Together, it could keep your clicks from reaching the page and take you to another page in their place.** |
 | `go-to` + `page-events` | **Together, it could take you to a page and set off that page's own actions there.** |
 | `go-to` + `click` | **Together, it could take you to a page and click things there for you.** |
 | `go-to` + `write-drafts` | No added risk: a draft it changes still waits for you to post it, and the other power carries nothing into it or sends it. |
@@ -435,7 +436,7 @@ Grouped by their first power, in the menu's order.
 | `read-drafts` + `site-storage` + `preload` | No more than its pairs, whose warnings show: "could keep what it reads where this site's own code, and your other boxed mods, can find it later"; "could pass what it reads to the sites this page's pictures come from, by which ones it loads". |
 | `read-drafts` + `site-storage` + `media` | No more than its pairs, whose warnings show: "could keep what it reads where this site's own code, and your other boxed mods, can find it later"; "could pass what it reads to the site a video or sound comes from, by how it plays it". |
 | `read-drafts` + `site-storage` + `search-box` | No more than its pairs, whose warnings show: "could keep what it reads where this site's own code, and your other boxed mods, can find it later". |
-| `read-drafts` + `site-storage` + `go-to` | No more than its pairs, whose warnings show: "could keep what it reads where this site's own code, and your other boxed mods, can find it later". |
+| `read-drafts` + `site-storage` + `go-to` | No more than its pairs, whose warnings show: "could keep what it reads where this site's own code, and your other boxed mods, can find it later"; "could take you to a page and set off that page's own actions there". |
 | `read-drafts` + `site-storage` + `embeds` | No more than its pairs, whose warnings show: "could keep what it reads where this site's own code, and your other boxed mods, can find it later"; "could pass what it reads to the site a video comes from, by which video it offers you". |
 | `read-drafts` + `site-storage` + `rewrite-requests` | No more than its pairs, whose warnings show: "could keep what it reads where this site's own code, and your other boxed mods, can find it later". |
 | `read-drafts` + `site-storage` + `block-events` | No more than its pairs, whose warnings show: "could keep what it reads where this site's own code, and your other boxed mods, can find it later"; "could let what it reads decide which of your actions this page sees, and the page's code may send that on". |
@@ -537,7 +538,7 @@ Grouped by their first power, in the menu's order.
 | `read-drafts` + `search-box` + `edit-uploads` | No more than its pairs, whose warnings show: "could put what it reads into a picture you post". |
 | `read-drafts` + `go-to` + `embeds` | No more than its pairs, whose warnings show: "could pass what it reads to the site a video comes from, by which video it offers you". |
 | `read-drafts` + `go-to` + `rewrite-requests` | No added risk: it can read, but nothing in it carries what it reads off the page or acts on it. |
-| `read-drafts` + `go-to` + `block-events` | No more than its pairs, whose warnings show: "could let what it reads decide which of your actions this page sees, and the page's code may send that on". |
+| `read-drafts` + `go-to` + `block-events` | No more than its pairs, whose warnings show: "could keep your clicks from reaching the page and take you to another page in their place"; "could let what it reads decide which of your actions this page sees, and the page's code may send that on". |
 | `read-drafts` + `go-to` + `page-events` | No more than its pairs, whose warnings show: "could hand what it reads to this page's own code, which may post or send it"; "could take you to a page and set off that page's own actions there". |
 | `read-drafts` + `go-to` + `click` | No more than its pairs, whose warnings show: "could take you to a page and click things there for you"; "could let what it reads decide what it clicks for you". |
 | `read-drafts` + `go-to` + `write-drafts` | No more than its pairs, whose warnings show: "could put what it reads into something you post". |
@@ -611,7 +612,7 @@ Grouped by their first power, in the menu's order.
 | `keys` + `site-storage` + `preload` | No more than its pairs, whose warnings show: "could keep what it reads where this site's own code, and your other boxed mods, can find it later"; "could pass what it reads to the sites this page's pictures come from, by which ones it loads". |
 | `keys` + `site-storage` + `media` | No more than its pairs, whose warnings show: "could keep what it reads where this site's own code, and your other boxed mods, can find it later"; "could pass what it reads to the site a video or sound comes from, by how it plays it". |
 | `keys` + `site-storage` + `search-box` | No more than its pairs, whose warnings show: "could keep what it reads where this site's own code, and your other boxed mods, can find it later". |
-| `keys` + `site-storage` + `go-to` | No more than its pairs, whose warnings show: "could keep what it reads where this site's own code, and your other boxed mods, can find it later". |
+| `keys` + `site-storage` + `go-to` | No more than its pairs, whose warnings show: "could keep what it reads where this site's own code, and your other boxed mods, can find it later"; "could take you to a page and set off that page's own actions there". |
 | `keys` + `site-storage` + `embeds` | No more than its pairs, whose warnings show: "could keep what it reads where this site's own code, and your other boxed mods, can find it later"; "could pass what it reads to the site a video comes from, by which video it offers you". |
 | `keys` + `site-storage` + `rewrite-requests` | No more than its pairs, whose warnings show: "could keep what it reads where this site's own code, and your other boxed mods, can find it later". |
 | `keys` + `site-storage` + `block-events` | No more than its pairs, whose warnings show: "could keep what it reads where this site's own code, and your other boxed mods, can find it later"; "could let what it reads decide which of your actions this page sees, and the page's code may send that on". |
@@ -713,7 +714,7 @@ Grouped by their first power, in the menu's order.
 | `keys` + `search-box` + `edit-uploads` | No more than its pairs, whose warnings show: "could put what it reads into a picture you post". |
 | `keys` + `go-to` + `embeds` | No more than its pairs, whose warnings show: "could pass what it reads to the site a video comes from, by which video it offers you". |
 | `keys` + `go-to` + `rewrite-requests` | No added risk: it can read, but nothing in it carries what it reads off the page or acts on it. |
-| `keys` + `go-to` + `block-events` | No more than its pairs, whose warnings show: "could let what it reads decide which of your actions this page sees, and the page's code may send that on". |
+| `keys` + `go-to` + `block-events` | No more than its pairs, whose warnings show: "could keep your clicks from reaching the page and take you to another page in their place"; "could let what it reads decide which of your actions this page sees, and the page's code may send that on". |
 | `keys` + `go-to` + `page-events` | No more than its pairs, whose warnings show: "could hand what it reads to this page's own code, which may post or send it"; "could take you to a page and set off that page's own actions there". |
 | `keys` + `go-to` + `click` | No more than its pairs, whose warnings show: "could take you to a page and click things there for you"; "could let what it reads decide what it clicks for you". |
 | `keys` + `go-to` + `write-drafts` | No more than its pairs, whose warnings show: "could put what it reads into something you post". |
@@ -769,7 +770,7 @@ Grouped by their first power, in the menu's order.
 | `site-data` + `site-storage` + `preload` | No more than its pairs, whose warnings show: "could keep what it reads where this site's own code, and your other boxed mods, can find it later"; "could pass what it reads to the sites this page's pictures come from, by which ones it loads". |
 | `site-data` + `site-storage` + `media` | No more than its pairs, whose warnings show: "could keep what it reads where this site's own code, and your other boxed mods, can find it later"; "could pass what it reads to the site a video or sound comes from, by how it plays it". |
 | `site-data` + `site-storage` + `search-box` | No more than its pairs, whose warnings show: "could keep what it reads where this site's own code, and your other boxed mods, can find it later". |
-| `site-data` + `site-storage` + `go-to` | No more than its pairs, whose warnings show: "could keep what it reads where this site's own code, and your other boxed mods, can find it later". |
+| `site-data` + `site-storage` + `go-to` | No more than its pairs, whose warnings show: "could keep what it reads where this site's own code, and your other boxed mods, can find it later"; "could take you to a page and set off that page's own actions there". |
 | `site-data` + `site-storage` + `embeds` | No more than its pairs, whose warnings show: "could keep what it reads where this site's own code, and your other boxed mods, can find it later"; "could pass what it reads to the site a video comes from, by which video it offers you". |
 | `site-data` + `site-storage` + `rewrite-requests` | No more than its pairs, whose warnings show: "could keep what it reads where this site's own code, and your other boxed mods, can find it later". |
 | `site-data` + `site-storage` + `block-events` | No more than its pairs, whose warnings show: "could keep what it reads where this site's own code, and your other boxed mods, can find it later"; "could let what it reads decide which of your actions this page sees, and the page's code may send that on". |
@@ -871,7 +872,7 @@ Grouped by their first power, in the menu's order.
 | `site-data` + `search-box` + `edit-uploads` | No more than its pairs, whose warnings show: "could put what it reads into a picture you post". |
 | `site-data` + `go-to` + `embeds` | No more than its pairs, whose warnings show: "could pass what it reads to the site a video comes from, by which video it offers you". |
 | `site-data` + `go-to` + `rewrite-requests` | No added risk: it can read, but nothing in it carries what it reads off the page or acts on it. |
-| `site-data` + `go-to` + `block-events` | No more than its pairs, whose warnings show: "could let what it reads decide which of your actions this page sees, and the page's code may send that on". |
+| `site-data` + `go-to` + `block-events` | No more than its pairs, whose warnings show: "could keep your clicks from reaching the page and take you to another page in their place"; "could let what it reads decide which of your actions this page sees, and the page's code may send that on". |
 | `site-data` + `go-to` + `page-events` | No more than its pairs, whose warnings show: "could hand what it reads to this page's own code, which may post or send it"; "could take you to a page and set off that page's own actions there". |
 | `site-data` + `go-to` + `click` | No more than its pairs, whose warnings show: "could take you to a page and click things there for you"; "could let what it reads decide what it clicks for you". |
 | `site-data` + `go-to` + `write-drafts` | No more than its pairs, whose warnings show: "could put what it reads into something you post". |
@@ -910,7 +911,7 @@ Grouped by their first power, in the menu's order.
 | `page-data` + `site-storage` + `preload` | No more than its pairs, whose warnings show: "could keep what it reads where this site's own code, and your other boxed mods, can find it later"; "could pass what it reads to the sites this page's pictures come from, by which ones it loads". |
 | `page-data` + `site-storage` + `media` | No more than its pairs, whose warnings show: "could keep what it reads where this site's own code, and your other boxed mods, can find it later"; "could pass what it reads to the site a video or sound comes from, by how it plays it". |
 | `page-data` + `site-storage` + `search-box` | No more than its pairs, whose warnings show: "could keep what it reads where this site's own code, and your other boxed mods, can find it later". |
-| `page-data` + `site-storage` + `go-to` | No more than its pairs, whose warnings show: "could keep what it reads where this site's own code, and your other boxed mods, can find it later". |
+| `page-data` + `site-storage` + `go-to` | No more than its pairs, whose warnings show: "could keep what it reads where this site's own code, and your other boxed mods, can find it later"; "could take you to a page and set off that page's own actions there". |
 | `page-data` + `site-storage` + `embeds` | No more than its pairs, whose warnings show: "could keep what it reads where this site's own code, and your other boxed mods, can find it later"; "could pass what it reads to the site a video comes from, by which video it offers you". |
 | `page-data` + `site-storage` + `rewrite-requests` | No more than its pairs, whose warnings show: "could keep what it reads where this site's own code, and your other boxed mods, can find it later". |
 | `page-data` + `site-storage` + `block-events` | No more than its pairs, whose warnings show: "could keep what it reads where this site's own code, and your other boxed mods, can find it later"; "could let what it reads decide which of your actions this page sees, and the page's code may send that on". |
@@ -1012,7 +1013,7 @@ Grouped by their first power, in the menu's order.
 | `page-data` + `search-box` + `edit-uploads` | No more than its pairs, whose warnings show: "could put what it reads into a picture you post". |
 | `page-data` + `go-to` + `embeds` | No more than its pairs, whose warnings show: "could pass what it reads to the site a video comes from, by which video it offers you". |
 | `page-data` + `go-to` + `rewrite-requests` | No added risk: it can read, but nothing in it carries what it reads off the page or acts on it. |
-| `page-data` + `go-to` + `block-events` | No more than its pairs, whose warnings show: "could let what it reads decide which of your actions this page sees, and the page's code may send that on". |
+| `page-data` + `go-to` + `block-events` | No more than its pairs, whose warnings show: "could keep your clicks from reaching the page and take you to another page in their place"; "could let what it reads decide which of your actions this page sees, and the page's code may send that on". |
 | `page-data` + `go-to` + `page-events` | No more than its pairs, whose warnings show: "could hand what it reads to this page's own code, which may post or send it"; "could take you to a page and set off that page's own actions there". |
 | `page-data` + `go-to` + `click` | No more than its pairs, whose warnings show: "could take you to a page and click things there for you"; "could let what it reads decide what it clicks for you". |
 | `page-data` + `go-to` + `write-drafts` | No more than its pairs, whose warnings show: "could put what it reads into something you post". |
@@ -1050,7 +1051,7 @@ Grouped by their first power, in the menu's order.
 | `site-storage` + `local-fonts` + `preload` | No more than its pairs, whose warnings show: "could keep what it reads where this site's own code, and your other boxed mods, can find it later"; "could pass what it reads to the sites this page's pictures come from, by which ones it loads". |
 | `site-storage` + `local-fonts` + `media` | No more than its pairs, whose warnings show: "could keep what it reads where this site's own code, and your other boxed mods, can find it later"; "could pass what it reads to the site a video or sound comes from, by how it plays it". |
 | `site-storage` + `local-fonts` + `search-box` | No more than its pairs, whose warnings show: "could keep what it reads where this site's own code, and your other boxed mods, can find it later". |
-| `site-storage` + `local-fonts` + `go-to` | No more than its pairs, whose warnings show: "could keep what it reads where this site's own code, and your other boxed mods, can find it later". |
+| `site-storage` + `local-fonts` + `go-to` | No more than its pairs, whose warnings show: "could keep what it reads where this site's own code, and your other boxed mods, can find it later"; "could take you to a page and set off that page's own actions there". |
 | `site-storage` + `local-fonts` + `embeds` | No more than its pairs, whose warnings show: "could keep what it reads where this site's own code, and your other boxed mods, can find it later"; "could pass what it reads to the site a video comes from, by which video it offers you". |
 | `site-storage` + `local-fonts` + `rewrite-requests` | No more than its pairs, whose warnings show: "could keep what it reads where this site's own code, and your other boxed mods, can find it later". |
 | `site-storage` + `local-fonts` + `block-events` | No more than its pairs, whose warnings show: "could keep what it reads where this site's own code, and your other boxed mods, can find it later"; "could let what it reads decide which of your actions this page sees, and the page's code may send that on". |
@@ -1064,7 +1065,7 @@ Grouped by their first power, in the menu's order.
 | `site-storage` + `image-variants` + `preload` | No more than its pairs, whose warnings show: "could pass what it reads to the sites this page's pictures come from, by which ones it loads". |
 | `site-storage` + `image-variants` + `media` | No more than its pairs, whose warnings show: "could pass what it reads to the site a video or sound comes from, by how it plays it"; "could pass what it reads to the sites this page's pictures come from, by which ones it loads". |
 | `site-storage` + `image-variants` + `search-box` | No more than its pairs, whose warnings show: "could pass what it reads to the sites this page's pictures come from, by which ones it loads". |
-| `site-storage` + `image-variants` + `go-to` | No more than its pairs, whose warnings show: "could pass what it reads to the sites this page's pictures come from, by which ones it loads". |
+| `site-storage` + `image-variants` + `go-to` | No more than its pairs, whose warnings show: "could take you to a page and set off that page's own actions there"; "could pass what it reads to the sites this page's pictures come from, by which ones it loads". |
 | `site-storage` + `image-variants` + `embeds` | No more than its pairs, whose warnings show: "could pass what it reads to the sites this page's pictures come from, by which ones it loads"; "could pass what it reads to the site a video comes from, by which video it offers you". |
 | `site-storage` + `image-variants` + `rewrite-requests` | No more than its pairs, whose warnings show: "could pass what it reads to the sites this page's pictures come from, by which ones it loads". |
 | `site-storage` + `image-variants` + `block-events` | No more than its pairs, whose warnings show: "could let what it reads decide which of your actions this page sees, and the page's code may send that on"; "could pass what it reads to the sites this page's pictures come from, by which ones it loads". |
@@ -1077,7 +1078,7 @@ Grouped by their first power, in the menu's order.
 | `site-storage` + `sound` + `preload` | No more than its pairs, whose warnings show: "could pass what it reads to the sites this page's pictures come from, by which ones it loads"; "could turn what it reads into sounds that a device nearby could pick up". |
 | `site-storage` + `sound` + `media` | No more than its pairs, whose warnings show: "could pass what it reads to the site a video or sound comes from, by how it plays it"; "could turn what it reads into sounds that a device nearby could pick up". |
 | `site-storage` + `sound` + `search-box` | No more than its pairs, whose warnings show: "could turn what it reads into sounds that a device nearby could pick up". |
-| `site-storage` + `sound` + `go-to` | No more than its pairs, whose warnings show: "could turn what it reads into sounds that a device nearby could pick up". |
+| `site-storage` + `sound` + `go-to` | No more than its pairs, whose warnings show: "could take you to a page and set off that page's own actions there"; "could turn what it reads into sounds that a device nearby could pick up". |
 | `site-storage` + `sound` + `embeds` | No more than its pairs, whose warnings show: "could pass what it reads to the site a video comes from, by which video it offers you"; "could turn what it reads into sounds that a device nearby could pick up". |
 | `site-storage` + `sound` + `rewrite-requests` | No more than its pairs, whose warnings show: "could turn what it reads into sounds that a device nearby could pick up". |
 | `site-storage` + `sound` + `block-events` | No more than its pairs, whose warnings show: "could let what it reads decide which of your actions this page sees, and the page's code may send that on"; "could turn what it reads into sounds that a device nearby could pick up". |
@@ -1089,7 +1090,7 @@ Grouped by their first power, in the menu's order.
 | `site-storage` + `controls` + `preload` | No more than its pairs, whose warnings show: "could pass what it reads to the sites this page's pictures come from, by which ones it loads". |
 | `site-storage` + `controls` + `media` | No more than its pairs, whose warnings show: "could pass what it reads to the site a video or sound comes from, by how it plays it". |
 | `site-storage` + `controls` + `search-box` | No added risk: it can read, but nothing in it carries what it reads off the page or acts on it. |
-| `site-storage` + `controls` + `go-to` | No added risk: it can read, but nothing in it carries what it reads off the page or acts on it. |
+| `site-storage` + `controls` + `go-to` | No more than its pairs, whose warnings show: "could take you to a page and set off that page's own actions there". |
 | `site-storage` + `controls` + `embeds` | No more than its pairs, whose warnings show: "could pass what it reads to the site a video comes from, by which video it offers you". |
 | `site-storage` + `controls` + `rewrite-requests` | No added risk: it can read, but nothing in it carries what it reads off the page or acts on it. |
 | `site-storage` + `controls` + `block-events` | No more than its pairs, whose warnings show: "could let what it reads decide which of your actions this page sees, and the page's code may send that on". |
@@ -1100,7 +1101,7 @@ Grouped by their first power, in the menu's order.
 | `site-storage` + `mods` + `preload` | No more than its pairs, whose warnings show: "could pass what it reads to the sites this page's pictures come from, by which ones it loads". |
 | `site-storage` + `mods` + `media` | No more than its pairs, whose warnings show: "could pass what it reads to the site a video or sound comes from, by how it plays it". |
 | `site-storage` + `mods` + `search-box` | No added risk: it can read, but nothing in it carries what it reads off the page or acts on it. |
-| `site-storage` + `mods` + `go-to` | No added risk: it can read, but nothing in it carries what it reads off the page or acts on it. |
+| `site-storage` + `mods` + `go-to` | No more than its pairs, whose warnings show: "could take you to a page and set off that page's own actions there". |
 | `site-storage` + `mods` + `embeds` | No more than its pairs, whose warnings show: "could pass what it reads to the site a video comes from, by which video it offers you". |
 | `site-storage` + `mods` + `rewrite-requests` | No added risk: it can read, but nothing in it carries what it reads off the page or acts on it. |
 | `site-storage` + `mods` + `block-events` | No more than its pairs, whose warnings show: "could let what it reads decide which of your actions this page sees, and the page's code may send that on". |
@@ -1110,7 +1111,7 @@ Grouped by their first power, in the menu's order.
 | `site-storage` + `mods` + `edit-uploads` | No more than its pairs, whose warnings show: "could put what it reads into a picture you post". |
 | `site-storage` + `preload` + `media` | No more than its pairs, whose warnings show: "could pass what it reads to the site a video or sound comes from, by how it plays it"; "could pass what it reads to the sites this page's pictures come from, by which ones it loads". |
 | `site-storage` + `preload` + `search-box` | No more than its pairs, whose warnings show: "could pass what it reads to the sites this page's pictures come from, by which ones it loads". |
-| `site-storage` + `preload` + `go-to` | No more than its pairs, whose warnings show: "could pass what it reads to the sites this page's pictures come from, by which ones it loads". |
+| `site-storage` + `preload` + `go-to` | No more than its pairs, whose warnings show: "could take you to a page and set off that page's own actions there"; "could pass what it reads to the sites this page's pictures come from, by which ones it loads". |
 | `site-storage` + `preload` + `embeds` | No more than its pairs, whose warnings show: "could pass what it reads to the sites this page's pictures come from, by which ones it loads"; "could pass what it reads to the site a video comes from, by which video it offers you". |
 | `site-storage` + `preload` + `rewrite-requests` | No more than its pairs, whose warnings show: "could pass what it reads to the sites this page's pictures come from, by which ones it loads". |
 | `site-storage` + `preload` + `block-events` | No more than its pairs, whose warnings show: "could let what it reads decide which of your actions this page sees, and the page's code may send that on"; "could pass what it reads to the sites this page's pictures come from, by which ones it loads". |
@@ -1119,7 +1120,7 @@ Grouped by their first power, in the menu's order.
 | `site-storage` + `preload` + `write-drafts` | No more than its pairs, whose warnings show: "could put what it reads into something you post"; "could pass what it reads to the sites this page's pictures come from, by which ones it loads". |
 | `site-storage` + `preload` + `edit-uploads` | No more than its pairs, whose warnings show: "could put what it reads into a picture you post"; "could pass what it reads to the sites this page's pictures come from, by which ones it loads". |
 | `site-storage` + `media` + `search-box` | No more than its pairs, whose warnings show: "could pass what it reads to the site a video or sound comes from, by how it plays it". |
-| `site-storage` + `media` + `go-to` | No more than its pairs, whose warnings show: "could pass what it reads to the site a video or sound comes from, by how it plays it". |
+| `site-storage` + `media` + `go-to` | No more than its pairs, whose warnings show: "could take you to a page and set off that page's own actions there"; "could pass what it reads to the site a video or sound comes from, by how it plays it". |
 | `site-storage` + `media` + `embeds` | No more than its pairs, whose warnings show: "could pass what it reads to the site a video or sound comes from, by how it plays it"; "could pass what it reads to the site a video comes from, by which video it offers you". |
 | `site-storage` + `media` + `rewrite-requests` | No more than its pairs, whose warnings show: "could pass what it reads to the site a video or sound comes from, by how it plays it". |
 | `site-storage` + `media` + `block-events` | No more than its pairs, whose warnings show: "could let what it reads decide which of your actions this page sees, and the page's code may send that on"; "could pass what it reads to the site a video or sound comes from, by how it plays it". |
@@ -1127,7 +1128,7 @@ Grouped by their first power, in the menu's order.
 | `site-storage` + `media` + `click` | No more than its pairs, whose warnings show: "could let what it reads decide what it clicks for you"; "could pass what it reads to the site a video or sound comes from, by how it plays it". |
 | `site-storage` + `media` + `write-drafts` | No more than its pairs, whose warnings show: "could put what it reads into something you post"; "could pass what it reads to the site a video or sound comes from, by how it plays it". |
 | `site-storage` + `media` + `edit-uploads` | No more than its pairs, whose warnings show: "could put what it reads into a picture you post"; "could pass what it reads to the site a video or sound comes from, by how it plays it". |
-| `site-storage` + `search-box` + `go-to` | No added risk: it can read, but nothing in it carries what it reads off the page or acts on it. |
+| `site-storage` + `search-box` + `go-to` | No more than its pairs, whose warnings show: "could take you to a page and set off that page's own actions there". |
 | `site-storage` + `search-box` + `embeds` | No more than its pairs, whose warnings show: "could pass what it reads to the site a video comes from, by which video it offers you". |
 | `site-storage` + `search-box` + `rewrite-requests` | No added risk: it can read, but nothing in it carries what it reads off the page or acts on it. |
 | `site-storage` + `search-box` + `block-events` | No more than its pairs, whose warnings show: "could let what it reads decide which of your actions this page sees, and the page's code may send that on". |
@@ -1135,13 +1136,13 @@ Grouped by their first power, in the menu's order.
 | `site-storage` + `search-box` + `click` | No more than its pairs, whose warnings show: "could let what it reads decide what it clicks for you". |
 | `site-storage` + `search-box` + `write-drafts` | No more than its pairs, whose warnings show: "could put what it reads into something you post". |
 | `site-storage` + `search-box` + `edit-uploads` | No more than its pairs, whose warnings show: "could put what it reads into a picture you post". |
-| `site-storage` + `go-to` + `embeds` | No more than its pairs, whose warnings show: "could pass what it reads to the site a video comes from, by which video it offers you". |
-| `site-storage` + `go-to` + `rewrite-requests` | No added risk: it can read, but nothing in it carries what it reads off the page or acts on it. |
-| `site-storage` + `go-to` + `block-events` | No more than its pairs, whose warnings show: "could let what it reads decide which of your actions this page sees, and the page's code may send that on". |
+| `site-storage` + `go-to` + `embeds` | No more than its pairs, whose warnings show: "could take you to a page and set off that page's own actions there"; "could pass what it reads to the site a video comes from, by which video it offers you". |
+| `site-storage` + `go-to` + `rewrite-requests` | No more than its pairs, whose warnings show: "could take you to a page and set off that page's own actions there". |
+| `site-storage` + `go-to` + `block-events` | No more than its pairs, whose warnings show: "could take you to a page and set off that page's own actions there"; "could keep your clicks from reaching the page and take you to another page in their place"; "could let what it reads decide which of your actions this page sees, and the page's code may send that on". |
 | `site-storage` + `go-to` + `page-events` | No more than its pairs, whose warnings show: "could hand what it reads to this page's own code, which may post or send it"; "could take you to a page and set off that page's own actions there". |
-| `site-storage` + `go-to` + `click` | No more than its pairs, whose warnings show: "could take you to a page and click things there for you"; "could let what it reads decide what it clicks for you". |
-| `site-storage` + `go-to` + `write-drafts` | No more than its pairs, whose warnings show: "could put what it reads into something you post". |
-| `site-storage` + `go-to` + `edit-uploads` | No more than its pairs, whose warnings show: "could put what it reads into a picture you post". |
+| `site-storage` + `go-to` + `click` | No more than its pairs, whose warnings show: "could take you to a page and click things there for you"; "could take you to a page and set off that page's own actions there"; "could let what it reads decide what it clicks for you". |
+| `site-storage` + `go-to` + `write-drafts` | No more than its pairs, whose warnings show: "could put what it reads into something you post"; "could take you to a page and set off that page's own actions there". |
+| `site-storage` + `go-to` + `edit-uploads` | No more than its pairs, whose warnings show: "could put what it reads into a picture you post"; "could take you to a page and set off that page's own actions there". |
 | `site-storage` + `embeds` + `rewrite-requests` | No more than its pairs, whose warnings show: "could pass what it reads to the site a video comes from, by which video it offers you". |
 | `site-storage` + `embeds` + `block-events` | No more than its pairs, whose warnings show: "could let what it reads decide which of your actions this page sees, and the page's code may send that on"; "could pass what it reads to the site a video comes from, by which video it offers you". |
 | `site-storage` + `embeds` + `page-events` | No more than its pairs, whose warnings show: "could hand what it reads to this page's own code, which may post or send it"; "could pass what it reads to the site a video comes from, by which video it offers you". |
@@ -1247,7 +1248,7 @@ Grouped by their first power, in the menu's order.
 | `local-fonts` + `search-box` + `edit-uploads` | No more than its pairs, whose warnings show: "could put what it reads into a picture you post". |
 | `local-fonts` + `go-to` + `embeds` | No more than its pairs, whose warnings show: "could pass what it reads to the site a video comes from, by which video it offers you". |
 | `local-fonts` + `go-to` + `rewrite-requests` | No added risk: it can read, but nothing in it carries what it reads off the page or acts on it. |
-| `local-fonts` + `go-to` + `block-events` | No more than its pairs, whose warnings show: "could let what it reads decide which of your actions this page sees, and the page's code may send that on". |
+| `local-fonts` + `go-to` + `block-events` | No more than its pairs, whose warnings show: "could keep your clicks from reaching the page and take you to another page in their place"; "could let what it reads decide which of your actions this page sees, and the page's code may send that on". |
 | `local-fonts` + `go-to` + `page-events` | No more than its pairs, whose warnings show: "could hand what it reads to this page's own code, which may post or send it"; "could take you to a page and set off that page's own actions there". |
 | `local-fonts` + `go-to` + `click` | No more than its pairs, whose warnings show: "could take you to a page and click things there for you"; "could let what it reads decide what it clicks for you". |
 | `local-fonts` + `go-to` + `write-drafts` | No more than its pairs, whose warnings show: "could put what it reads into something you post". |
@@ -1343,7 +1344,7 @@ Grouped by their first power, in the menu's order.
 | `image-variants` + `search-box` + `edit-uploads` | No more than its pairs, whose warnings show: "could put what it reads into a picture you post". |
 | `image-variants` + `go-to` + `embeds` | No more than its pairs, whose warnings show: "could pass what it reads to the site a video comes from, by which video it offers you". |
 | `image-variants` + `go-to` + `rewrite-requests` | No added risk: it can read, but nothing in it carries what it reads off the page or acts on it. |
-| `image-variants` + `go-to` + `block-events` | No more than its pairs, whose warnings show: "could let what it reads decide which of your actions this page sees, and the page's code may send that on". |
+| `image-variants` + `go-to` + `block-events` | No more than its pairs, whose warnings show: "could keep your clicks from reaching the page and take you to another page in their place"; "could let what it reads decide which of your actions this page sees, and the page's code may send that on". |
 | `image-variants` + `go-to` + `page-events` | No more than its pairs, whose warnings show: "could hand what it reads to this page's own code, which may post or send it"; "could take you to a page and set off that page's own actions there". |
 | `image-variants` + `go-to` + `click` | No more than its pairs, whose warnings show: "could take you to a page and click things there for you"; "could let what it reads decide what it clicks for you". |
 | `image-variants` + `go-to` + `write-drafts` | No more than its pairs, whose warnings show: "could put what it reads into something you post". |
@@ -1426,7 +1427,7 @@ Grouped by their first power, in the menu's order.
 | `sound` + `search-box` + `edit-uploads` | No more than its pairs, whose warnings show: "could turn what it reads into sounds that a device nearby could pick up". |
 | `sound` + `go-to` + `embeds` | No added risk: it reads nothing but the page, and its acts don't combine into posting or acting for you. |
 | `sound` + `go-to` + `rewrite-requests` | No added risk: it reads nothing but the page, and its acts don't combine into posting or acting for you. |
-| `sound` + `go-to` + `block-events` | No added risk: it reads nothing but the page, and its acts don't combine into posting or acting for you. |
+| `sound` + `go-to` + `block-events` | No more than its pairs, whose warnings show: "could keep your clicks from reaching the page and take you to another page in their place". |
 | `sound` + `go-to` + `page-events` | No more than its pairs, whose warnings show: "could take you to a page and set off that page's own actions there". |
 | `sound` + `go-to` + `click` | No more than its pairs, whose warnings show: "could take you to a page and click things there for you". |
 | `sound` + `go-to` + `write-drafts` | No added risk: it reads nothing but the page, and its acts don't combine into posting or acting for you. |
@@ -1497,7 +1498,7 @@ Grouped by their first power, in the menu's order.
 | `controls` + `search-box` + `edit-uploads` | No added risk: it can read, but nothing in it carries what it reads off the page or acts on it. |
 | `controls` + `go-to` + `embeds` | No added risk: it reads nothing but the page, and its acts don't combine into posting or acting for you. |
 | `controls` + `go-to` + `rewrite-requests` | No added risk: it reads nothing but the page, and its acts don't combine into posting or acting for you. |
-| `controls` + `go-to` + `block-events` | No added risk: it reads nothing but the page, and its acts don't combine into posting or acting for you. |
+| `controls` + `go-to` + `block-events` | No more than its pairs, whose warnings show: "could keep your clicks from reaching the page and take you to another page in their place". |
 | `controls` + `go-to` + `page-events` | No more than its pairs, whose warnings show: "could take you to a page and set off that page's own actions there". |
 | `controls` + `go-to` + `click` | No more than its pairs, whose warnings show: "could take you to a page and click things there for you". |
 | `controls` + `go-to` + `write-drafts` | No added risk: it reads nothing but the page, and its acts don't combine into posting or acting for you. |
@@ -1557,7 +1558,7 @@ Grouped by their first power, in the menu's order.
 | `mods` + `search-box` + `edit-uploads` | No added risk: it can read, but nothing in it carries what it reads off the page or acts on it. |
 | `mods` + `go-to` + `embeds` | No added risk: it reads nothing but the page, and its acts don't combine into posting or acting for you. |
 | `mods` + `go-to` + `rewrite-requests` | No added risk: it reads nothing but the page, and its acts don't combine into posting or acting for you. |
-| `mods` + `go-to` + `block-events` | No added risk: it reads nothing but the page, and its acts don't combine into posting or acting for you. |
+| `mods` + `go-to` + `block-events` | No more than its pairs, whose warnings show: "could keep your clicks from reaching the page and take you to another page in their place". |
 | `mods` + `go-to` + `page-events` | No more than its pairs, whose warnings show: "could take you to a page and set off that page's own actions there". |
 | `mods` + `go-to` + `click` | No more than its pairs, whose warnings show: "could take you to a page and click things there for you". |
 | `mods` + `go-to` + `write-drafts` | No added risk: it reads nothing but the page, and its acts don't combine into posting or acting for you. |
@@ -1607,7 +1608,7 @@ Grouped by their first power, in the menu's order.
 | `preload` + `search-box` + `edit-uploads` | No more than its pairs, whose warnings show: "could pass what it reads to the sites this page's pictures come from, by which ones it loads". |
 | `preload` + `go-to` + `embeds` | No added risk: it reads nothing but the page, and its acts don't combine into posting or acting for you. |
 | `preload` + `go-to` + `rewrite-requests` | No added risk: it reads nothing but the page, and its acts don't combine into posting or acting for you. |
-| `preload` + `go-to` + `block-events` | No added risk: it reads nothing but the page, and its acts don't combine into posting or acting for you. |
+| `preload` + `go-to` + `block-events` | No more than its pairs, whose warnings show: "could keep your clicks from reaching the page and take you to another page in their place". |
 | `preload` + `go-to` + `page-events` | No more than its pairs, whose warnings show: "could take you to a page and set off that page's own actions there". |
 | `preload` + `go-to` + `click` | No more than its pairs, whose warnings show: "could take you to a page and click things there for you". |
 | `preload` + `go-to` + `write-drafts` | No added risk: it reads nothing but the page, and its acts don't combine into posting or acting for you. |
@@ -1648,7 +1649,7 @@ Grouped by their first power, in the menu's order.
 | `media` + `search-box` + `edit-uploads` | No more than its pairs, whose warnings show: "could pass what it reads to the site a video or sound comes from, by how it plays it". |
 | `media` + `go-to` + `embeds` | No added risk: it reads nothing but the page, and its acts don't combine into posting or acting for you. |
 | `media` + `go-to` + `rewrite-requests` | No added risk: it reads nothing but the page, and its acts don't combine into posting or acting for you. |
-| `media` + `go-to` + `block-events` | No added risk: it reads nothing but the page, and its acts don't combine into posting or acting for you. |
+| `media` + `go-to` + `block-events` | No more than its pairs, whose warnings show: "could keep your clicks from reaching the page and take you to another page in their place". |
 | `media` + `go-to` + `page-events` | No more than its pairs, whose warnings show: "could take you to a page and set off that page's own actions there". |
 | `media` + `go-to` + `click` | No more than its pairs, whose warnings show: "could take you to a page and click things there for you". |
 | `media` + `go-to` + `write-drafts` | No added risk: it reads nothing but the page, and its acts don't combine into posting or acting for you. |
@@ -1681,7 +1682,7 @@ Grouped by their first power, in the menu's order.
 |---|---|
 | `search-box` + `go-to` + `embeds` | No added risk: it reads nothing but the page, and its acts don't combine into posting or acting for you. |
 | `search-box` + `go-to` + `rewrite-requests` | No added risk: it reads nothing but the page, and its acts don't combine into posting or acting for you. |
-| `search-box` + `go-to` + `block-events` | No added risk: it reads nothing but the page, and its acts don't combine into posting or acting for you. |
+| `search-box` + `go-to` + `block-events` | No more than its pairs, whose warnings show: "could keep your clicks from reaching the page and take you to another page in their place". |
 | `search-box` + `go-to` + `page-events` | No more than its pairs, whose warnings show: "could take you to a page and set off that page's own actions there". |
 | `search-box` + `go-to` + `click` | No more than its pairs, whose warnings show: "could take you to a page and click things there for you". |
 | `search-box` + `go-to` + `write-drafts` | No added risk: it reads nothing but the page, and its acts don't combine into posting or acting for you. |
@@ -1713,20 +1714,20 @@ Grouped by their first power, in the menu's order.
 | combination | the hold |
 |---|---|
 | `go-to` + `embeds` + `rewrite-requests` | No added risk: it reads nothing but the page, and its acts don't combine into posting or acting for you. |
-| `go-to` + `embeds` + `block-events` | No added risk: it reads nothing but the page, and its acts don't combine into posting or acting for you. |
+| `go-to` + `embeds` + `block-events` | No more than its pairs, whose warnings show: "could keep your clicks from reaching the page and take you to another page in their place". |
 | `go-to` + `embeds` + `page-events` | No more than its pairs, whose warnings show: "could take you to a page and set off that page's own actions there". |
 | `go-to` + `embeds` + `click` | No more than its pairs, whose warnings show: "could take you to a page and click things there for you". |
 | `go-to` + `embeds` + `write-drafts` | No added risk: it reads nothing but the page, and its acts don't combine into posting or acting for you. |
 | `go-to` + `embeds` + `edit-uploads` | No more than its pairs, whose warnings show: "could pass what it reads to the site a video comes from, by which video it offers you". |
-| `go-to` + `rewrite-requests` + `block-events` | No added risk: it reads nothing but the page, and its acts don't combine into posting or acting for you. |
+| `go-to` + `rewrite-requests` + `block-events` | No more than its pairs, whose warnings show: "could keep your clicks from reaching the page and take you to another page in their place". |
 | `go-to` + `rewrite-requests` + `page-events` | No more than its pairs, whose warnings show: "could take you to a page and set off that page's own actions there"; "could set off this page's own actions and change what the site receives from them". |
 | `go-to` + `rewrite-requests` + `click` | No more than its pairs, whose warnings show: "could take you to a page and click things there for you"; "could click things for you and change what the site receives from those clicks". |
 | `go-to` + `rewrite-requests` + `write-drafts` | No added risk: it reads nothing but the page, and its acts don't combine into posting or acting for you. |
 | `go-to` + `rewrite-requests` + `edit-uploads` | No added risk: it can read, but nothing in it carries what it reads off the page or acts on it. |
-| `go-to` + `block-events` + `page-events` | No more than its pairs, whose warnings show: "could take you to a page and set off that page's own actions there"; "could keep your clicks from reaching the page and set off the page's own actions in their place". |
-| `go-to` + `block-events` + `click` | No more than its pairs, whose warnings show: "could take you to a page and click things there for you"; "could keep your clicks from reaching the page and click in their place". |
-| `go-to` + `block-events` + `write-drafts` | No added risk: it reads nothing but the page, and its acts don't combine into posting or acting for you. |
-| `go-to` + `block-events` + `edit-uploads` | No more than its pairs, whose warnings show: "could let what it reads decide which of your actions this page sees, and the page's code may send that on". |
+| `go-to` + `block-events` + `page-events` | No more than its pairs, whose warnings show: "could take you to a page and set off that page's own actions there"; "could keep your clicks from reaching the page and set off the page's own actions in their place"; "could keep your clicks from reaching the page and take you to another page in their place". |
+| `go-to` + `block-events` + `click` | No more than its pairs, whose warnings show: "could take you to a page and click things there for you"; "could keep your clicks from reaching the page and click in their place"; "could keep your clicks from reaching the page and take you to another page in their place". |
+| `go-to` + `block-events` + `write-drafts` | No more than its pairs, whose warnings show: "could keep your clicks from reaching the page and take you to another page in their place". |
+| `go-to` + `block-events` + `edit-uploads` | No more than its pairs, whose warnings show: "could keep your clicks from reaching the page and take you to another page in their place"; "could let what it reads decide which of your actions this page sees, and the page's code may send that on". |
 | `go-to` + `page-events` + `click` | No more than its pairs, whose warnings show: "could take you to a page and click things there for you"; "could take you to a page and set off that page's own actions there". |
 | `go-to` + `page-events` + `write-drafts` | **Together, it could go to a page, write a post there and send it for you.** |
 | `go-to` + `page-events` + `edit-uploads` | No more than its pairs, whose warnings show: "could write a post and send it for you"; "could take you to a page and set off that page's own actions there". |

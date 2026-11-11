@@ -438,9 +438,11 @@ shows.
   reads and ways out both, so they warn with the other reads.
 - Acts that combine warn: `write-drafts` or `edit-uploads` with `click` or `page-events` ("could write a
   post and send it for you": a draft no longer waits for the user's own send), `go-to` with `click` or
-  `page-events` (it acts where the mod takes the user), `block-events` with `click` or `page-events` (it keeps
-  the user's clicks from the page and acts in their place), and `rewrite-requests` with `click` or
-  `page-events` (the act's own request carries the header's change, with no one asking).
+  `page-events` (it acts where the mod takes the user), `go-to` with `site-storage` (it leaves something for
+  a page's code to act on as it loads, then takes the user there: warned as go-to with page-events is),
+  `block-events` with `click`, `page-events` or `go-to` (it keeps the user's clicks from the page and acts,
+  or moves them, in their place), and `rewrite-requests` with `click` or `page-events` (the act's own
+  request carries the header's change, with no one asking).
 - Triples: a read with something that sends (`click`, `page-events`) and something that writes the post
   (`write-drafts`, `edit-uploads`, a read other than the picture it posts) ("could put what it reads into a
   post and send it for you"), and `go-to` with a sender and `write-drafts` ("could go to a page, write a post
@@ -453,7 +455,7 @@ shows.
   read), `controls` (the mod's own inputs: only what the user gives it on purpose), `rewrite-requests` (fixed
   in the header, made by TRIF) or `mods`; `mods` with anything (a channel between its own boxed mods, which
   the page-wide rules treat as one); acts that don't combine.
-- Counts: 89 of 210 pairs warn; 32 of 1330 triples have their own warning; 939 more show their pairs'.
+- Counts: 91 of 210 pairs warn; 32 of 1330 triples have their own warning; 952 more show their pairs'.
 
 **The hold.** Each warned combination a mod has is a need of its own, keyed by its powers
 (`power:together:keys+click+write-drafts`), so approving a pair doesn't cover a triple; the panel's
@@ -479,15 +481,18 @@ that the acting mod didn't ask for itself (and so its hold didn't show):
   with the power (which would stop every media mod beside an upload editor).
 - `@migrate` reads the site's storage once, so it counts as `site-storage`, on the hold's combinations and
   in these rules.
-- `go-to` beside `click` or `page-events`: refused unless the mod going has that power (the other could act
-  where it lands). go-to waits until the page's boxed mods have all started, and checks again then (a mod
+- `go-to` beside `click`, `page-events`, `block-events` or `site-storage`: refused unless the mod going has
+  that power (the other could act where it lands, keep the user's click from the page while it goes, or
+  have left something for the page's code there); and `site-storage`'s writes beside `go-to`. go-to waits until the page's boxed mods have all started, and checks again then (a mod
   that starts later isn't in play before). And the page it lands on is marked (TRIF's background, and the
   tab's session storage, for 30 seconds): there, a boxed mod without go-to doesn't click or signal the
   page's code until the user's own click or key, so a mod that runs only on the page go-to leads to can't act
   there for the user. An in-app move marks the page it stays on.
-- Not enforced: `sound` beside a read. The channel needs a listening device near the user and carries
-  little; enforcing it would stop every sound mod beside any hotkey mod. The single-mod warning stands;
-  this is Tim's call.
+- `sound` beside a read: refused only when the sound mod shares a `mods` channel with the reading mod
+  (which could hand it what it reads), checked as the live sound starts, connects or changes. Beside a read
+  it has no channel with, not enforced: the channel needs a listening device near the user and carries
+  little, and enforcing it would stop every sound mod beside any hotkey mod (Tim's call). What a reading
+  mod puts in its own elements, which the sound mod could read off the page, is that unenforced case.
 - `site-storage` also reaches past the page: what a mod keeps there, a boxed mod on a later page (or in
   another tab) can read, where this page's mods aren't in play. That's why a write beside a read is refused
   here, and why a read with site-storage warns on its own.

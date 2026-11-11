@@ -38,7 +38,8 @@ test('the table\'s reasoning: a read with any way out warns; acts that combine w
   const OUTS = ['write-drafts', 'click', 'media', 'sound', 'edit-uploads', 'page-events', 'image-variants', 'preload', 'site-storage', 'block-events', 'embeds'];
   for (const r of C.READS) {
     for (const out of OUTS.filter((o) => o !== r && !(r === 'image-variants' && o === 'preload'))) assert.ok(warn(C.keyOf([r, out])), `${r}+${out} warns`);
-    for (const other of C.POWERS.filter((p) => !OUTS.includes(p) && p !== r && !(OUTS.includes(r) && C.READS.includes(p)))) assert.equal(warn(C.keyOf([r, other])), null, `${r}+${other}`);
+    // (site-storage with go-to is an act pair, below: something left for a page's code, then the user taken there)
+    for (const other of C.POWERS.filter((p) => !OUTS.includes(p) && p !== r && !(OUTS.includes(r) && C.READS.includes(p)) && !(r === 'site-storage' && p === 'go-to'))) assert.equal(warn(C.keyOf([r, other])), null, `${r}+${other}`);
   }
   assert.equal(warn('image-variants+preload'), null);
   assert.equal(warn('click+write-drafts'), 'post-for-you');
@@ -66,16 +67,21 @@ test('the table\'s reasoning: a read with any way out warns; acts that combine w
   assert.equal(warn('page-events+click+edit-uploads'), null);
   assert.match(C.COMBINATIONS['page-events+click+edit-uploads'], /^no more than its pairs/);
   assert.equal(warn('go-to+edit-uploads'), null);
-  assert.equal(warn('site-storage+go-to'), null);
+  // (the conversion run's four: block-events with go-to; block-events with page-events (F9, above); go-to with
+  // site-storage, warned as go-to with page-events is; sound across mods: the page-wide rules, below)
+  assert.equal(warn('go-to+block-events'), 'block-and-go');
+  assert.equal(warn('site-storage+go-to'), 'go-and-signal');
+  assert.equal(warn('block-events+page-events'), 'block-and-signal');
+  assert.deepEqual(C.POWERS.filter((o) => o !== 'go-to' && warn(C.keyOf(['go-to', o]))).sort(), ['block-events', 'click', 'page-events', 'site-storage']);
   // (what each 0.3 act warns with, and nothing else: a rewrite only with an act; an embed only with a read;
   // keeping events only with a read, click or page-events; site-storage with a read or a way out)
   const warnsWith = (p) => C.POWERS.filter((o) => o !== p && warn(C.keyOf([p, o]))).sort();
   assert.deepEqual(warnsWith('rewrite-requests'), ['click', 'page-events']);
   assert.deepEqual(warnsWith('embeds'), [...C.READS].sort());
-  assert.deepEqual(warnsWith('block-events'), [...C.READS, 'click', 'page-events'].sort());
-  assert.deepEqual(warnsWith('site-storage'), [...C.READS, ...OUTS].filter((p) => p !== 'site-storage').filter((p, i, a) => a.indexOf(p) === i).sort());
+  assert.deepEqual(warnsWith('block-events'), [...C.READS, 'click', 'page-events', 'go-to'].sort());
+  assert.deepEqual(warnsWith('site-storage'), [...C.READS, ...OUTS, 'go-to'].filter((p) => p !== 'site-storage').filter((p, i, a) => a.indexOf(p) === i).sort());
   // (F10: go-to's reason says what the widened power takes)
-  for (const r of ['read-drafts', 'keys', 'site-data', 'page-data', 'local-fonts']) assert.match(C.COMBINATIONS[C.keyOf([r, 'go-to'])], /the header's, with the header's words in a query, or links the page shows/);
+  for (const r of ['read-drafts', 'keys', 'site-data', 'page-data', 'local-fonts', 'edit-uploads']) assert.match(C.COMBINATIONS[C.keyOf([r, 'go-to'])], /the header's, with the header's words in a query, or links the page shows/);
   assert.ok(!Object.values(C.COMBINATIONS).some((v) => typeof v === 'string' && v.includes('fixed paths, or links')));
   // (the twelve of 0.2 keep their table)
   assert.equal(C.COMBINATIONS['read-drafts+sound'].warn, 'read-into-sound');
@@ -120,11 +126,13 @@ test('the sandbox\'s page-wide rules (ACT_PARTNERS) follow the table: an act is 
   // page-events beside a draft or a picture another mod changed, as click: signalOk, clickOk)
   // (a read that's also a way out (image-variants, site-storage, edit-uploads): as a read, on the side of the
   // act it's with)
+  // (sound: only beside a mod it shares a `mods` channel with, soundOk; block-events with go-to, on go-to's side,
+  // whichever form the block takes)
   const AS_READ = ['write-drafts', 'click', 'media', 'sound', 'page-events', 'preload', 'embeds', 'block-events'];
   const enforced = {
     'write-drafts': ['page-events'], click: ['write-drafts', 'go-to'], media: [], 'go-to': [],
     'page-events': ['write-drafts', 'go-to'], 'edit-uploads': AS_READ, 'image-variants': AS_READ.filter((p) => p !== 'preload'), preload: [],
-    'site-storage': AS_READ, 'block-events': ['click', 'page-events'], embeds: [],
+    'site-storage': AS_READ, 'block-events': ['click', 'page-events', 'go-to'], embeds: [], sound: [],
   };
   assert.deepEqual(Object.keys(partners).sort(), Object.keys(enforced).sort());
   for (const [act, extra] of Object.entries(enforced)) {
@@ -159,12 +167,12 @@ test('the page-wide rules at work (sandbox.js partnersOk, run here): each new ru
   const from = src.indexOf('  const ACT_PARTNERS = {'), to = src.indexOf('  // go-to across a page load');
   assert.ok(from > 0 && to > from, 'ACT_PARTNERS to partnersOk in sandbox.js');
   const vm = require('vm');
-  const page = () => vm.runInNewContext(`const fail = (why) => { throw new TypeError('TRIF sandbox: ' + why); };\n${src.slice(from, to)}\n({ partnersOk, inPlay, uploadReaders })`);
+  const page = () => vm.runInNewContext(`const fail = (why) => { throw new TypeError('TRIF sandbox: ' + why); }; const channels = new Map(), apis = new Map();\n${src.slice(from, to)}\n({ partnersOk, soundOk, inPlay, uploadReaders, channels, apis })`);
   const api = (mod, powers, migrate) => ({ mod, powers: new Set(powers), combo: new Set([...powers, ...(migrate ? ['site-storage'] : [])]) });
   // (act, the acting mod's powers, another mod's power in play, refused?)
   const cases = [
     // F1: site-storage's writes beside a read
-    ['site-storage', ['site-storage'], 'keys', true], ['site-storage', ['site-storage', 'keys'], 'keys', false], ['site-storage', ['site-storage'], 'sound', false], ['site-storage', ['site-storage'], 'go-to', false],
+    ['site-storage', ['site-storage'], 'keys', true], ['site-storage', ['site-storage', 'keys'], 'keys', false], ['site-storage', ['site-storage'], 'sound', false], ['site-storage', ['site-storage'], 'controls', false],
     ['site-storage', ['site-storage'], 'image-variants', true], ['click', ['click'], 'site-storage', true],
     // F5: block-events' function form beside a read
     ['block-events', ['block-events'], 'read-drafts', true], ['block-events', ['block-events', 'read-drafts'], 'read-drafts', false], ['block-events', ['block-events'], 'click', false],
@@ -175,6 +183,11 @@ test('the page-wide rules at work (sandbox.js partnersOk, run here): each new ru
     ['embeds', ['embeds'], 'page-data', true], ['embeds', ['embeds', 'page-data'], 'page-data', false], ['embeds', ['embeds'], 'click', false],
     // F9: a signal beside keeping the user's clicks
     ['page-events', ['page-events'], 'block-events', true], ['page-events', ['page-events', 'block-events'], 'block-events', false],
+    // (the conversion run's: go-to beside keeping the user's clicks, or beside something left in the site's
+    // storage; and site-storage's writes beside go-to)
+    ['go-to', ['go-to'], 'block-events', true], ['go-to', ['go-to', 'block-events'], 'block-events', false],
+    ['go-to', ['go-to'], 'site-storage', true], ['go-to', ['go-to', 'site-storage'], 'site-storage', false],
+    ['site-storage', ['site-storage'], 'go-to', true], ['site-storage', ['site-storage', 'go-to'], 'go-to', false],
     // (and as before)
     ['media', ['media'], 'keys', true], ['media', ['media'], 'click', false],
   ];
@@ -198,4 +211,22 @@ test('the page-wide rules at work (sandbox.js partnersOk, run here): each new ru
   { const p = page(); p.uploadReaders.add('editor'); assert.doesNotThrow(() => p.partnersOk(api('me', ['edit-uploads']), 'edit-uploads')); assert.doesNotThrow(() => p.partnersOk(api('me', ['go-to']), 'go-to')); }
   // F7: @migrate counts as site-storage, for its own acts and beside others'
   { const p = page(); p.inPlay.add('site-storage'); assert.throws(() => p.partnersOk(api('me', ['click']), 'click'), /site-storage power/); assert.doesNotThrow(() => p.partnersOk(api('me', ['click'], true), 'click')); }
+  // sound across mods: refused beside a reading mod it shares a `mods` channel with, not beside one it doesn't
+  {
+    const p = page();
+    const reg = (id, powers, migrate) => { const a = api(id, powers, migrate); p.apis.set(id, a); for (const x of a.combo) p.inPlay.add(x); return a; };
+    const snd = reg('snd', ['sound', 'mods']); reg('reader', ['keys', 'mods']); reg('quiet', ['read-drafts']);
+    assert.doesNotThrow(() => p.soundOk(snd), 'beside reads, no channel');
+    p.channels.set('c', new Set([{ mod: 'snd' }, { mod: 'quiet' }]));
+    assert.throws(() => p.soundOk(snd), /playing sound is off on this page while it shares a channel \(mods\) with another boxed mod here that has the read-drafts power/);
+    p.channels.set('c', new Set([{ mod: 'snd' }]));
+    p.channels.set('d', new Set([{ mod: 'reader' }]));
+    assert.doesNotThrow(() => p.soundOk(snd), 'each on a channel of its own');
+    p.channels.get('d').add({ mod: 'snd' });
+    assert.throws(() => p.soundOk(snd), /the keys power/);
+    assert.doesNotThrow(() => p.soundOk(reg('snd2', ['sound', 'mods', 'keys'])), 'a sound mod that has the read itself');
+    const m = page(); m.apis.set('snd', api('snd', ['sound'])); m.apis.set('old', api('old', ['mods'], true)); m.channels.set('c', new Set([{ mod: 'snd' }, { mod: 'old' }]));
+    assert.throws(() => m.soundOk(m.apis.get('snd')), /site-storage power/, '@migrate counts as site-storage');
+  }
+  assert.match(fs.readFileSync(path.join(__dirname, '..', 'extension', 'sandbox.js'), 'utf8'), /const live = \(\) => \{ if \(!offline\) soundOk\(self\); \};/);
 });

@@ -146,7 +146,7 @@ test('the sandbox\'s page-wide rules (ACT_PARTNERS) follow the table: an act is 
   assert.equal(count(/partnersOk\(self, 'site-storage'\)/g), 2);
   assert.equal(count(/partnersOk\(b\.api, 'block-events'\)/g), 1);
   assert.equal(count(/partnersOk\(self, 'embeds'\)/g), 2);
-  assert.match(src, /if \(p === 'edit-uploads'\) \{ if \(uploadReaders\.size\)/);
+  assert.match(src, /if \(p === 'edit-uploads'\) \{\n\s+for \(const id of uploadReaders\) if \(id !== api\.mod && !crossOk\(api, id, act, p\)\)/);
   assert.match(src, /uploadReaders\.add\(u\.api\.mod\)/);
   assert.match(src, /arrivedOk\(api, 'click'/);
   assert.match(src, /arrivedOk\(api, 'page-events'/);
@@ -168,7 +168,8 @@ test('the page-wide rules at work (sandbox.js partnersOk, run here): each new ru
   assert.ok(from > 0 && to > from, 'ACT_PARTNERS to partnersOk in sandbox.js');
   const vm = require('vm');
   const page = () => vm.runInNewContext(`const fail = (why) => { throw new TypeError('TRIF sandbox: ' + why); }; const channels = new Map(), apis = new Map();\n${src.slice(from, to)}\n({ partnersOk, soundOk, inPlay, uploadReaders, channels, apis })`);
-  const api = (mod, powers, migrate) => ({ mod, powers: new Set(powers), combo: new Set([...powers, ...(migrate ? ['site-storage'] : [])]) });
+  // (`cross`: the pairs the user approved across it and another mod, as the helper sends them: crossmods.js)
+  const api = (mod, powers, migrate, cross = []) => ({ mod, powers: new Set(powers), combo: new Set([...powers, ...(migrate ? ['site-storage'] : [])]), cross: new Set(cross) });
   // (act, the acting mod's powers, another mod's power in play, refused?)
   const cases = [
     // F1: site-storage's writes beside a read
@@ -193,11 +194,18 @@ test('the page-wide rules at work (sandbox.js partnersOk, run here): each new ru
   ];
   for (const [act, powers, other, refused] of cases) {
     const p = page();
+    p.apis.set('other', api('other', [other]));
     p.inPlay.add(other);
     for (const x of powers) p.inPlay.add(x);
     const run = () => p.partnersOk(api(`me`, powers), act);
     if (refused) assert.throws(run, new RegExp(`while another boxed mod here has the ${other} power`), `${act} with ${powers} beside ${other}`);
     else assert.doesNotThrow(run, `${act} with ${powers} beside ${other}`);
+    // (cross-mod approval: the pair approved with that mod lets it through; with another mod, it doesn't)
+    if (refused) {
+      const pair = [act, other].sort().join('+');
+      assert.doesNotThrow(() => p.partnersOk(api('me', powers, false, [`${pair} other`]), act), `${act} beside ${other}, approved with that mod`);
+      assert.throws(() => p.partnersOk(api('me', powers, false, [`${pair} someone-else`]), act), /while another boxed mod here/, `${act} beside ${other}, approved with another mod`);
+    }
   }
   // F4: edit-uploads as a read, by the mods handed a picture, not by every mod with the power
   for (const act of ['write-drafts', 'click', 'media', 'page-events', 'image-variants', 'preload', 'site-storage', 'block-events', 'embeds']) {
@@ -210,7 +218,7 @@ test('the page-wide rules at work (sandbox.js partnersOk, run here): each new ru
   }
   { const p = page(); p.uploadReaders.add('editor'); assert.doesNotThrow(() => p.partnersOk(api('me', ['edit-uploads']), 'edit-uploads')); assert.doesNotThrow(() => p.partnersOk(api('me', ['go-to']), 'go-to')); }
   // F7: @migrate counts as site-storage, for its own acts and beside others'
-  { const p = page(); p.inPlay.add('site-storage'); assert.throws(() => p.partnersOk(api('me', ['click']), 'click'), /site-storage power/); assert.doesNotThrow(() => p.partnersOk(api('me', ['click'], true), 'click')); }
+  { const p = page(); p.apis.set('old', api('old', ['go-to'], true)); p.inPlay.add('site-storage'); assert.throws(() => p.partnersOk(api('me', ['click']), 'click'), /site-storage power/); assert.doesNotThrow(() => p.partnersOk(api('me', ['click'], true), 'click')); }
   // sound across mods: refused beside a reading mod it shares a `mods` channel with, not beside one it doesn't
   {
     const p = page();

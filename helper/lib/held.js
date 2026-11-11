@@ -40,6 +40,7 @@ const { outOfScope } = require('./scope');
 const { within, ignoresCase } = require('./pathcheck');
 const { powersOf, modSites } = require('./powers');
 const { isSoft } = require('./boxpowers');
+const cross = require('./crossmods');
 
 // powersOf reads every mod's code on each sync; a big mod takes a few hundred ms, so by hash.
 const cache = new Map();
@@ -215,6 +216,7 @@ function updateHeld(ws, mods, scopes) {
     changed = true;
   }
   const allowed = loadAllowed(ws.home);
+  const isOff = cross.offFn(ws.home); // (the boxed mods switched off in every browser: no combinations with them)
   let seen = loadSeen(ws.home);
   let seenChanged = false;
   // (the lines of every version that ran, kept together: an undo back to one of them isn't new)
@@ -259,14 +261,21 @@ function updateHeld(ws, mods, scopes) {
     let needs = needsOf(m, run ? run.scope : null)
       .filter((n) => (run || n.key !== 'risk2') && !isAllowed(n, ok, true))
       .map((n) => described(n, ok));
+    // (and its combinations with the other boxed mods on its site that the user hasn't approved: crossmods.js;
+    // a new or changed mod's hold carries them, so the other mod isn't asked again)
+    needs = needs.concat(cross.crossNeeds(m, mods, { allowed, isOff }));
     // (a boxed mod's `controls` and `mods` are listed on a hold, but don't make one on their own)
     if (needs.length && needs.every((n) => isSoft(n.key))) needs = [];
-    if (needs.length && same) continue;
+    // (held as it is, for the same needs: as it was; a combination approved with the other mod since, or a
+    // peer switched on or off, changes what it waits for)
+    if (needs.length && same && JSON.stringify(held[m.id].needs || []) === JSON.stringify(needs.map((n) => n.key))) continue;
     if (needs.length) {
+      const names = cross.namesFor(needs);
       held[m.id] = {
-        hash: m.hash, site: run ? run.site : m.site, scope: run ? run.scope : null, runId: run ? run.runId : null, by: run ? 'agent' : 'outside', at: Date.now(),
+        hash: m.hash, site: run ? run.site : m.site, scope: run ? run.scope : null, runId: run ? run.runId : null, by: run ? 'agent' : 'outside', at: same ? held[m.id].at : Date.now(),
         reason: reasonOf(needs), facts: needs.map((n) => n.fact), needs: needs.map((n) => n.key),
         lines: Object.fromEntries(needs.filter((n) => n.lines && n.lines.length).map((n) => [n.key, n.lines])), claim: claimOf(m),
+        ...(Object.keys(names).length ? { withNames: names } : {}),
       };
       changed = true;
     } else {
@@ -335,19 +344,38 @@ function rejectHeld(ws, id, hash = null) {
  */
 function reviewItems(home, mods, held = {}) {
   const allowed = loadAllowed(home);
+  const isOff = cross.offFn(home);
+  const mtime = new Map();
+  const when = (m) => { if (!mtime.has(m.id)) { let t = 0; try { t = fs.statSync(m.file).mtimeMs; } catch { /* gone */ } mtime.set(m.id, t); } return mtime.get(m.id); };
   const out = {};
   for (const m of mods) {
     if (held[m.id]) continue;
     const ok = allowedFor(home, m, allowed);
-    const needs = needsOf(m, null).filter((n) => !isAllowed(n, ok, false) && n.key !== 'risk2');
-    if (needs.length && !needs.every((n) => isSoft(n.key))) out[m.id] = { facts: needs.map((n) => n.fact), needs: needs.map((n) => n.key), claim: claimOf(m) };
+    let needs = needsOf(m, null).filter((n) => !isAllowed(n, ok, false) && n.key !== 'risk2');
+    // (its combinations with another boxed mod that the user hasn't approved, where neither is new or changed:
+    // one switched on, or both from before cross-mod approval; asked on the newer of the two only, and not
+    // where the other's hold carries it)
+    const byId = new Map(mods.map((x) => [x.id, x]));
+    needs = needs.concat(cross.crossNeeds(m, mods, { allowed, isOff }).filter((n) => {
+      if (held[n.with]) return false;
+      const o = byId.get(n.with);
+      return !o || when(m) > when(o) || (when(m) === when(o) && m.id > o.id);
+    }));
+    if (needs.length && !needs.every((n) => isSoft(n.key))) {
+      const names = cross.namesFor(needs);
+      out[m.id] = { facts: needs.map((n) => n.fact), needs: needs.map((n) => n.key), claim: claimOf(m), ...(Object.keys(names).length ? { withNames: names } : {}) };
+    }
   }
   return out;
 }
 
-/** "Looks right": the user has seen what the mod can do; those powers are allowed for it. */
-function reviewMod(home, mod) {
-  const needs = needsOf(mod, null).filter((n) => n.key !== 'risk2');
+/**
+ * "Looks right": the user has seen what the mod can do; those powers are allowed for it, and (`mods`: the
+ * mods now) its combinations with the other boxed mods on its site.
+ */
+function reviewMod(home, mod, mods = []) {
+  const needs = needsOf(mod, null).filter((n) => n.key !== 'risk2')
+    .concat(cross.crossNeeds(mod, mods, { allowed: loadAllowed(home), isOff: cross.offFn(home) }));
   allowPowers(home, mod.id, needs);
   return needs.map((n) => n.key);
 }

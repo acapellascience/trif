@@ -1427,6 +1427,13 @@ function showOneTag(li, held) {
 // lib/powers.js and held.js), and what the mod says about itself (its header's @risk reason or
 // description: whoever wrote the mod wrote that too), labelled as such. Held: Allow is on the row.
 // Review (a mod the user has, still running): "Looks right" allows what was found; or switch it off.
+// A need across this mod and another boxed mod (power:with:<id>:<powers>): the other mod's name, else null.
+function crossOf(key, info) {
+  const w = /^power:with:(.+):[a-z+-]+$/.exec(String(key || ''));
+  if (!w) return null;
+  return (info && info.withNames && info.withNames[w[1]]) || w[1].split('/').pop();
+}
+
 function factsBox(m, info, kind) {
   const box = el('div', `mod-facts ${kind}`);
   box.append(el('p', 'facts-head', kind === 'held' && info.asks ? 'Waiting for your OK. This boxed mod asks for these powers, and TRIF holds it to them:'
@@ -1435,7 +1442,16 @@ function factsBox(m, info, kind) {
     : kind === 'pending' ? 'A change to this mod is waiting for your OK. TRIF found that the new version:'
       : 'TRIF found that this mod:'));
   const list = el('ul', 'facts');
-  for (const f of (Array.isArray(info.facts) ? info.facts : [String(info.reason || '')]).filter(Boolean)) list.append(el('li', null, info.asks ? `It ${f}.` : f));
+  // (a combination across it and another boxed mod names the other: "Together with …, it …")
+  const facts = Array.isArray(info.facts) ? info.facts : [String(info.reason || '')];
+  const keys = Array.isArray(info.needs) ? info.needs : [];
+  const said = new Set();
+  facts.forEach((f, i) => {
+    if (!f) return;
+    const who = crossOf(keys[i], info);
+    const line = who ? `Together with ${who}, it ${f}.` : info.asks ? `It ${f}.` : f;
+    if (!who || !said.has(line)) { said.add(line); list.append(el('li', null, line)); }
+  });
   box.append(list);
   const where = m.matches && m.matches.length ? ` It runs by itself on every page it's for (${m.matches.slice(0, 3).join(', ')}${m.matches.length > 3 ? '…' : ''}).` : '';
   const fromAgent = kind !== 'review' && info.by !== 'outside' && info.by !== 'sandbox';
@@ -1844,8 +1860,12 @@ function renderApproval() {
   const kind = m.held ? (info.by === 'sandbox' ? 'sandbox' : 'held') : 'pending';
   const n = approval.queue.length;
   P.count.textContent = n > 1 ? `${approval.at + 1} of ${n} waiting for your OK` : 'Waiting for your OK';
-  if (approval.shownKey === key) return; // (the same hold: leave the code open, the buttons as they are)
+  // (the same hold: leave the code open, the buttons as they are; unless what it waits for changed, as when a
+  // combination with another mod was approved on that one's card)
+  const needsNow = JSON.stringify(info.needs || []);
+  if (approval.shownKey === key && approval.shownNeeds === needsNow) return;
   approval.shownKey = key;
+  approval.shownNeeds = needsNow;
   approval.dialog.dataset.mod = m.id;
   P.name.textContent = m.name || m.id;
   const k = m.rules ? ['style', 'Style mod'] : m.sandboxed ? ['boxed', 'Boxed mod'] : ['free', 'Free mod'];
@@ -1861,9 +1881,11 @@ function renderApproval() {
   // the strongest first as the helper sent them, a sentence once
   const needs = Array.isArray(info.needs) ? info.needs : [];
   const all = (Array.isArray(info.facts) ? info.facts : [String(info.reason || '')]).map((f, i) => ({ f, key: needs[i] || '' }));
-  const plain = all.filter((x) => x.f && !/^power:together:/.test(x.key));
+  const plain = all.filter((x) => x.f && !/^power:(together|with):/.test(x.key));
   const warns = [];
   for (const x of all) if (x.f && /^power:together:/.test(x.key) && !warns.some((w) => w.f === x.f)) warns.push(x);
+  // (then the combinations across it and another boxed mod, each naming the other: helper/lib/crossmods.js)
+  for (const x of all) { const w = crossOf(x.key, info); if (x.f && w && !warns.some((y) => y.f === x.f && y.who === w)) warns.push({ ...x, who: w }); }
   P.facts.replaceChildren(...plain.map((x) => {
     const li = el('li');
     li.append(el('span', 'ap-ic', iconOf(x.key)), el('span', null, info.asks ? `It ${x.f}.` : x.f));
@@ -1873,6 +1895,7 @@ function renderApproval() {
   P.together.replaceChildren(...warns.map((x) => {
     const line = el('p');
     if (/^power:together:many:/.test(x.key)) line.textContent = x.f;
+    else if (x.who) line.append(el('b', null, `Together with ${x.who},`), ` it ${x.f}.`);
     else line.append(el('b', null, 'Together,'), ` it ${x.f}.`);
     return line;
   }));

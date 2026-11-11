@@ -78,7 +78,10 @@ export function modToUserScript(mod) {
   // own; or, in a browser without that world and once the user allowed it (sandboxFallback), in the page's
   // world with the same API around it.
   // (a boxed mod's powers, as the helper read them from its header: docs/POWERS.md)
-  const powers = { powers: Array.isArray(mod.powers) ? mod.powers : [], args: mod.powerArgs && typeof mod.powerArgs === 'object' ? mod.powerArgs : {} };
+  // (and `with`: the combinations across it and another boxed mod that the user approved, "<a>+<b> <other id>",
+  // as the helper sends them (helper/lib/crossmods.js): the sandbox's page-wide rules let those act)
+  const args = mod.powerArgs && typeof mod.powerArgs === 'object' ? mod.powerArgs : {};
+  const powers = { powers: Array.isArray(mod.powers) ? mod.powers : [], args: Array.isArray(mod.crossOk) && mod.crossOk.length ? { ...args, with: mod.crossOk } : args };
   if (inSandboxWorld(mod)) return { ...base, js: [{ code: sandboxModCode(mod.id, String(mod.code ?? ''), powers) }], world: 'USER_SCRIPT', worldId: SANDBOX_WORLD };
   if (mod.sandboxed) return { ...base, js: [{ code: sandboxPageCode(mod.id, String(mod.code ?? ''), powers) }], world: 'MAIN' };
   return { ...base, js: [{ code: wrapModCode(mod.id, String(mod.code ?? '')) }], world: 'MAIN' };
@@ -201,7 +204,9 @@ export async function syncUserScripts(us, { mods, runtimeCode, applied = {}, dis
     // (its own switched-off sites, and the sites where its group is off: groupsOff)
     const reg = withOffSites(limited, offSitesFor(mod, offSites, groupsOff));
     // (a sandboxed mod run as a page script registers differently: a hash of its own)
-    desired.push(reg.sandboxed && reg.unsandboxed ? { ...reg, hash: `${reg.hash ?? ''}:page` } : reg);
+    // (and one whose approved combinations with other boxed mods changed: they're in its registration)
+    const withHash = Array.isArray(reg.crossOk) && reg.crossOk.length ? `:with:${quickHash(reg.crossOk.join('|'))}` : '';
+    desired.push(reg.sandboxed && reg.unsandboxed ? { ...reg, hash: `${reg.hash ?? ''}:page${withHash}` } : withHash ? { ...reg, hash: `${reg.hash ?? ''}${withHash}` } : reg);
   }
 
   // (Anything registered that isn't wanted goes: a home page marker left by a development build too.)

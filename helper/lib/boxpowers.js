@@ -260,21 +260,29 @@ function togetherNeeds(list, declared = list) {
  * many-powers sentence; none for a need without a fact, and a sentence once (two reads with write-drafts
  * are two needs with one warning).
  */
-function factLines(needs, facts) {
+// (`names`: {mod id: name} for combinations across mods, power:with:<id>:…, which come after the mod's own)
+function factLines(needs, facts, names = {}) {
   const seen = new Set();
-  const out = [];
+  const own = [], across = [];
   (facts || []).forEach((f, i) => {
-    const l = factLine((needs || [])[i] || '', f);
-    if (l && !seen.has(l)) { seen.add(l); out.push(l); }
+    const k = (needs || [])[i] || '';
+    const l = factLine(k, f, names);
+    if (l && !seen.has(l)) { seen.add(l); (/^power:with:/.test(String(k)) ? across : own).push(l); }
   });
-  return out;
+  return own.concat(across);
 }
 
-/** A need's words after the mod's name: "it <fact>", or for a combination "together, it <fact>"; '' for none. */
-function factLine(key, fact) {
+/**
+ * A need's words after the mod's name: "it <fact>", for a combination "together, it <fact>", for one across it
+ * and another boxed mod "together with <its name>, it <fact>"; '' for none.
+ */
+function factLine(key, fact, names = {}) {
   if (!fact) return '';
-  if (/^power:together:many:/.test(String(key))) return fact;
-  return /^power:together:/.test(String(key)) ? `together, it ${fact}` : `it ${fact}`;
+  const k = String(key);
+  if (/^power:together:many:/.test(k)) return fact;
+  const w = /^power:with:(.+):[a-z+-]+$/.exec(k);
+  if (w) return `together with ${(names && names[w[1]]) || w[1].split('/').pop()}, it ${fact}`;
+  return /^power:together:/.test(k) ? `together, it ${fact}` : `it ${fact}`;
 }
 function parsePowers(values, mod) { return parsePowersWithArgs(values, mod).names; }
 
@@ -320,7 +328,7 @@ function powerInfo(mod) {
 
 /** Whether a need is a power that doesn't hold on its own (controls, mods). */
 function isSoft(key) {
-  const m = /^power:(.+)$/.exec(String(key));
+  const m = /^power:([^:]+)$/.exec(String(key));
   return !!(m && MENU[m[1]] && MENU[m[1]].soft);
 }
 

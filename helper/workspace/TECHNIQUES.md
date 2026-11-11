@@ -281,8 +281,10 @@ only for what the mod needs; a mod that needs the network is a free mod.
 something you post"; the list: docs/POWER-COMBINATIONS.md in TRIF's repository, or `trif check`), and more
 than three powers get one general warning. Ask for the fewest that do the job. On a page, an act of yours
 (writing a draft, clicking, playing media, go-to) is refused while another boxed mod there has a power that
-would make a warned pair with it that yours didn't ask for (the error says which); a mod that needs both
-asks for both.
+would make a warned pair with it that yours didn't ask for (the error says which), until the user approves
+the two mods together: TRIF asks them on your mod's hold ("Together with <the other mod>, it could …") when
+it's new or changed, or on its review. **Never ask for a power your mod doesn't use** just to act beside
+another mod: that puts warnings on its hold for things it can't do. A mod that uses both asks for both.
 - `mods`: `trif.channel(name)` gives `send(data)` and `on((data, {from}) => …)` between your boxed mods on
   this page that have the power: plain data only (text, numbers, true/false, null, arrays, plain objects),
   delivered a moment later. Doesn't make the mod wait on its own.

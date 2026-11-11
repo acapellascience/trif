@@ -123,16 +123,24 @@ keeps it narrow, and which of Tim's current mods would use it.
 
 ## Combinations
 
-Reads on their own can't leave the page. One combination can: **`write-drafts` with any read.** A mod that
-can read your data and also write into your post could slip your data into a post you then send. When a mod
-asks for both, the hold adds:
+Reads on their own can't leave the page; a read beside a way out can. A mod that can read your data and
+also write into your post could slip your data into a post you then send, so when a mod asks for both, the
+hold adds:
 
 > **"Together, it could put what it reads into something you post."**
 
-The other acts are narrowed so they carry no data: the search box only takes your typing, `go-to` only
-takes fixed paths, `click` only fixed selectors, and media controls carry nothing. Clickjacking (dressing up
-the page so your click lands somewhere else) is possible for every tier, rules included, and no power
-changes that.
+That was 0.2's one combination. With 0.3's powers there are more ways out (what the page's own code is
+told or sees, what the site keeps, which pictures and videos load) and more acts that combine (going to a
+page and acting there, keeping your clicks from the page and acting in their place, an act whose request a
+rewrite changes). Every pair and triple of the powers, with the warning a hold shows or why it adds
+nothing, is in docs/POWER-COMBINATIONS.md, written out from `helper/lib/combinations.js`; docs/SAFE-MODS.md
+("Combinations") says how the table is reasoned, and how the sandbox keeps a combination split between two
+boxed mods from slipping past the hold.
+
+The acts themselves are narrowed so they carry no data of the mod's making: the search box only takes your
+typing, `go-to` only the header's pages (with the header's words in a query) or links the page shows,
+`click` only the header's selectors, and media controls carry nothing. Clickjacking (dressing up the page so
+your click lands somewhere else) is possible for every tier, rules included, and no power changes that.
 
 ## How approval works
 

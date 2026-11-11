@@ -439,7 +439,18 @@ async function startServers(dir) {
     // (rewrite-requests: what the request carried, as the server got it)
     if (u.pathname.startsWith('/e2e-rw/')) { let body = ''; req.on('data', (c) => { body += c; }); req.on('end', () => send(200, 'application/json', JSON.stringify({ url: req.url, body }))); return undefined; }
     if (u.pathname === '/e2e-multi') return send(200, 'application/json', 'for (;;);{"a":["keep","drop"]}\n{"b":["drop"],"c":1}');
-    if (u.pathname === '/e2e-urls') return send(200, 'application/json', JSON.stringify({ u: 'https://127.0.0.1/watch?v=1&list=2&start_radio=1', w: 'https://127.0.0.1/watch?v=2' }));
+    // (x: another site's address, which a filter may not shorten: review F2)
+    if (u.pathname === '/e2e-urls') return send(200, 'application/json', JSON.stringify({ u: 'https://127.0.0.1/watch?v=1&list=2&start_radio=1', w: 'https://127.0.0.1/watch?v=2', x: 'https://www.youtube.com/watch?v=3&si=e2e' }));
+    // (go-to across a navigation, scenario.js comboFixesCheck: the page a boxed mod goes from, and the one it
+    // goes to, with a counter and the page's own signal, each counted where the suite can read it)
+    if (u.pathname === '/combo-go.html') return send(200, 'text/html; charset=utf-8', PAGE('TRIF e2e combo go', '<h1 id="title">Going</h1>'));
+    if (u.pathname === '/combo-dest.html') return send(200, 'text/html; charset=utf-8', PAGE('TRIF e2e combo dest', `<h1 id="title">Arrived</h1>
+<button type="button" id="cc">count</button> <button type="button" id="user">the user's button</button>
+<script>
+const d = document.documentElement; d.setAttribute('data-cc', '0'); d.setAttribute('data-pings', '[]');
+document.getElementById('cc').addEventListener('click', () => d.setAttribute('data-cc', String(Number(d.getAttribute('data-cc')) + 1)));
+document.addEventListener('combo-ping', (e) => d.setAttribute('data-pings', JSON.stringify([...JSON.parse(d.getAttribute('data-pings')), e.detail])));
+</script>`));
     if (u.pathname === '/e2e-wide.png') return send(200, 'image/png', Buffer.from(WIDE_PNG, 'base64'));
     if (u.pathname === '/powers3.html') return send(200, 'text/html; charset=utf-8', POWERS3_PAGE());
     // (mods that break, scenario.js modHealthCheck: the element a style mod looks for, there with ?has=1)

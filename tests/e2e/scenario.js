@@ -1257,6 +1257,7 @@ class Scenario {
       await r.check('powers, phase 2: site-data filters the site\'s JSON (fetch and XHR) by removing and reordering only (an invented string, number, key, a duplicate or a cut string: TRIF keeps the original); page-data reads plain copies of React props; search-box is TRIF\'s own box the mod can\'t read, which searches the site from the user\'s Enter; undeclared, each is refused', () => this.powers2Check(win));
       await r.check('the widened box (WIDEN.md class A): sound (compressors, a node into a parameter, waves, buffers from numbers, offline renders, its own clock), typed arrays and the browser\'s pure tools, page facts read only, drawing, animations, observers, events and focus on its own elements, SVG of its own and faithful copies, CSS from shown pictures and into shadow roots, text split into its own pieces, the page\'s own events, placeholders, bigger settings, more tags; each row\'s hostile test refused, nothing reaching the server or the page', () => this.wideCheck(win));
       await r.check('the widened box\'s powers (WIDEN.md class B): block-events, page-events, site-storage with @migrate, rewrite-requests, image-variants, edit-uploads, embeds, local-fonts, preload, and the widened site-data, go-to and media: held with each sentence and the many-powers warning; each works as its narrowing says; undeclared, each is refused', () => this.wideBCheck(win));
+      await r.check('go-to and click split between two boxed mods across a navigation (review F3): neither hold warns; on the page one mod\'s go-to took the user to, the other\'s clicks and signals wait for the user\'s own click; reached by the user, they work', () => this.comboFixesCheck(win));
       await r.check('speculation rules (audit AU-7): a page that prefetches its same-site links at once; a link a free mod adds is fetched without a click (Chrome), a boxed mod can\'t make one', () => this.specRulesCheck(win));
       await r.check('boxed mods in the panel: their own group between Style mods and Free mods, with its switch (off on the site: they stop there; on: back)', () => this.sandboxedPanelCheck(win));
       await r.check('mods from outside the chat start off: a new free mod and a new style mod arrive off, marked "new", and don\'t run; switched on in the panel, they run', () => this.startsOffCheck(win));
@@ -2833,6 +2834,7 @@ setTimeout(() => {
         'B12 the video\'s volume heard': L.volume === 'heard', 'B13 no frame without the user\'s own click': pg.frames === 0 && pg.button,
         'B15 the lazy picture loaded sooner': pg.lazy === 'eager' && reqs.some((u) => u === '/e2e-wide.png?lazy=1'), 'B10 the variant fetched': reqs.some((u) => u === '/e2e-wide.png?size=big'),
         'B9 the address moved in the app': pg.url === `${base}/wideb.html?mods=red,blue`, 'the server saw no leak': !reqs.some((u) => /e2e-pw-leak/.test(u)),
+        'B6 another site\'s address, shortened by a filter, came back as the site sent it (review F2)': pg.urls.x === 'https://www.youtube.com/watch?v=3&si=e2e',
       };
       for (const [k, v] of Object.entries(want)) if (v !== true) problems.push(`${k}: ${JSON.stringify({ pg: { ...pg, hits: pg.hits.slice(-12) }, L }).slice(0, 1500)}`);
       fs.writeFileSync(this.r.file(`wideb-${this.o.browser}.json`), JSON.stringify({ R, N, L, page: pg, problems }, null, 2));
@@ -2840,6 +2842,69 @@ setTimeout(() => {
       return `held with each power's sentence and the many-powers warning; ${Object.keys(R).length} outcomes as the narrowing says (${Object.keys(R).filter((k) => /\(refused\)$/.test(k)).length} refused); ${Object.keys(N).length} undeclared, each refused; ${Object.keys(want).length} effects seen from the page and the server`;
     } finally {
       for (const f of [file, noneFile]) { try { fs.unlinkSync(f); } catch { /* gone */ } }
+    }
+  }
+
+  // Review F3 (docs/SAFE-MODS.md "Combinations"): go-to and click (and page-events) split between two boxed
+  // mods across a navigation. e2e-combo-go has only go-to and goes at once to /combo-dest.html, where only
+  // e2e-combo-act runs (click, page-events, no go-to): neither hold warns, and there its click and signal are
+  // refused until the user's own click; on the same page reached by the user, they work.
+  async comboFixesCheck(win) {
+    const site = '127.0.0.1';
+    const base = `http://${site}:${this.o.servers.port}`;
+    const dir = path.join(this.trif, 'sites', site);
+    const fx = (f) => fs.readFileSync(path.join(I.REPO, 'tests', 'e2e', 'fixtures', f), 'utf8');
+    const mods = { 'e2e-combo-go': 'combo-go.js', 'e2e-combo-act': 'combo-act.js' };
+    const ids = Object.keys(mods);
+    const status = async () => (await this.cli(['status'], { timeoutMs: 20000 })).stdout;
+    const line = (st, x) => st.split('\n').find((l) => new RegExp(`${x}\\s`).test(l)) || '';
+    const attr = async (name) => { const o = await this.ext(`async (tabId, name) => { const r = await chrome.scripting.executeScript({ target: { tabId }, func: (n) => document.documentElement.getAttribute(n), args: [name] }); return r[0].result; }`, [win.tabId, name]); return typeof o === 'string' ? JSON.parse(o) : o; };
+    const tabUrl = async () => this.ext(`async (id) => (await chrome.tabs.get(id)).url`, [win.tabId]);
+    const results = async (key, at) => {
+      let last = null;
+      return waitFor(`the act mod's results (${key})`, async () => {
+        const u = String(await tabUrl().catch(() => ''));
+        if (!at.test(u)) return null;
+        const r = last = await attr('data-trif-box-ca').catch(() => null);
+        return r && r[key] ? r : null;
+      }, { timeoutMs: 20000, intervalMs: 400 }).catch((e) => { throw new Error(`${e.message}: ${JSON.stringify(last)}`); });
+    };
+    const ARRIVED = /until the user clicks or presses a key here: another boxed mod's go-to brought the user here/;
+    const problems = [];
+    this.sandboxPage = true;
+    try {
+      for (const [id, f] of Object.entries(mods)) fs.writeFileSync(path.join(dir, `${id}.js`), fx(f));
+      const held = await waitFor('both held', async () => { const st = await status(); return ids.every((id) => new RegExp(`${id}\\s+HELD`).test(st)) ? st : null; }, { timeoutMs: 25000, intervalMs: 500 });
+      for (const id of ids) if (/together, it/i.test(line(held, id))) problems.push(`${id}'s hold warns of a combination, alone: ${line(held, id)}`);
+      for (const id of ids) await this.cli(['approve', `${site}/${id}`], { timeoutMs: 20000 });
+      await waitFor('both registered', async () => { const st = await status(); return ids.every((id) => new RegExp(`${id}\\s+registered \\(boxed, powers:`).test(st)) || null; }, { timeoutMs: 20000, intervalMs: 500 });
+      // the user goes to the page themselves: the act mod clicks and signals as it starts
+      await this.ext(`async (id, url) => { await chrome.tabs.update(id, { url, active: true }); }`, [win.tabId, `${base}/combo-dest.html?direct=1`]);
+      const direct = await results('as it starts: signal', /\/combo-dest\.html\?direct=1$/);
+      const ccDirect = await attr('data-cc'), pingsDirect = await attr('data-pings');
+      // the go-to mod takes the user there
+      await this.ext(`async (id, url) => { await chrome.tabs.update(id, { url, active: true }); }`, [win.tabId, `${base}/combo-go.html`]);
+      const went = await results('as it starts: signal', /\/combo-dest\.html$/);
+      const ccWent = await attr('data-cc'), pingsWent = await attr('data-pings');
+      // the user's own click on the page: then the act mod's click and signal work
+      const ctx = await this.d.findPage((u) => /\/combo-dest\.html$/.test(u), { timeoutMs: 5000 });
+      await this.d.click(ctx, '#user');
+      const after = await results('after the user\'s click: signal', /\/combo-dest\.html$/);
+      const ccAfter = await attr('data-cc'), pingsAfter = await attr('data-pings');
+      const want = {
+        'reached by the user: its click worked': direct['as it starts: click'] === 'ok' && ccDirect === 1,
+        'reached by the user: its signal reached the page': direct['as it starts: signal'] === 'ok' && JSON.stringify(pingsDirect) === '[{"n":1}]',
+        'reached by the other mod\'s go-to: its click refused': ARRIVED.test(went['as it starts: click'] || '') && /clicking for the user is off/.test(went['as it starts: click'] || '') && ccWent === 0,
+        'reached by the other mod\'s go-to: its signal refused': ARRIVED.test(went['as it starts: signal'] || '') && /signalling the page's code is off/.test(went['as it starts: signal'] || '') && JSON.stringify(pingsWent) === '[]',
+        'after the user\'s own click there: its click worked': after['after the user\'s click: click'] === 'ok' && ccAfter === 1,
+        'after the user\'s own click there: its signal reached the page': after['after the user\'s click: signal'] === 'ok' && JSON.stringify(pingsAfter) === '[{"n":2}]',
+      };
+      for (const [k, v] of Object.entries(want)) if (v !== true) problems.push(`${k}: ${JSON.stringify({ direct, went, after, ccDirect, ccWent, ccAfter, pingsDirect, pingsWent, pingsAfter }).slice(0, 2000)}`);
+      fs.writeFileSync(this.r.file(`combo-fixes-${this.o.browser}.json`), JSON.stringify({ direct, went, after, problems }, null, 2));
+      if (problems.length) throw new Error(problems.join('\n'));
+      return `neither hold warns alone; reached by the user, the act mod clicked and signalled; reached by the other mod's go-to, both refused (${went['as it starts: click'].slice(0, 120)}…); after the user's own click there, both worked`;
+    } finally {
+      for (const id of ids) { try { fs.unlinkSync(path.join(dir, `${id}.js`)); } catch { /* gone */ } }
     }
   }
 

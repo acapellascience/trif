@@ -17,8 +17,9 @@ const POWERS = ['read-drafts', 'keys', 'site-data', 'page-data', 'site-storage',
   'search-box', 'go-to', 'embeds', 'rewrite-requests', 'block-events', 'page-events', 'click', 'write-drafts', 'edit-uploads'];
 // (the twelve of 0.2: their combinations are the literal table below; the rest, added in 0.3, follow RULES)
 const POWERS_02 = ['read-drafts', 'keys', 'site-data', 'page-data', 'sound', 'controls', 'mods', 'media', 'search-box', 'go-to', 'click', 'write-drafts'];
-// Reads: see more than the page shows (image-variants: the pixels of the pictures it loads)
-const READS = ['read-drafts', 'keys', 'site-data', 'page-data', 'site-storage', 'local-fonts', 'image-variants'];
+// Reads: see more than the page shows (image-variants: the pixels of the pictures it loads; edit-uploads: the
+// pictures you attach, before anything is posted)
+const READS = ['read-drafts', 'keys', 'site-data', 'page-data', 'site-storage', 'local-fonts', 'image-variants', 'edit-uploads'];
 
 // The warnings, strongest first (rank). Each is a fact after "it", like the powers' own.
 const WARNINGS = {
@@ -28,13 +29,19 @@ const WARNINGS = {
   'read-into-post': { rank: 4, fact: 'could put what it reads into something you post' },
   'read-into-picture': { rank: 5, fact: 'could put what it reads into a picture you post' },
   'read-into-page-code': { rank: 6, fact: 'could hand what it reads to this page\'s own code, which may post or send it' },
-  'go-and-click': { rank: 7, fact: 'could take you to a page and click things there for you' },
-  'go-and-signal': { rank: 8, fact: 'could take you to a page and set off that page\'s own actions there' },
-  'read-decides-click': { rank: 9, fact: 'could let what it reads decide what it clicks for you' },
-  'block-and-click': { rank: 10, fact: 'could keep your clicks from reaching the page and click in their place' },
-  'read-through-media': { rank: 11, fact: 'could pass what it reads to the site a video or sound comes from, by how it plays it' },
-  'read-through-pictures': { rank: 12, fact: 'could pass what it reads to the sites this page\'s pictures come from, by which ones it loads' },
-  'read-into-sound': { rank: 13, fact: 'could turn what it reads into sounds that a device nearby could pick up' },
+  'read-into-storage': { rank: 7, fact: 'could keep what it reads where this site\'s own code, and your other boxed mods, can find it later' },
+  'go-and-click': { rank: 8, fact: 'could take you to a page and click things there for you' },
+  'go-and-signal': { rank: 9, fact: 'could take you to a page and set off that page\'s own actions there' },
+  'click-and-rewrite': { rank: 10, fact: 'could click things for you and change what the site receives from those clicks' },
+  'signal-and-rewrite': { rank: 11, fact: 'could set off this page\'s own actions and change what the site receives from them' },
+  'read-decides-click': { rank: 12, fact: 'could let what it reads decide what it clicks for you' },
+  'block-and-click': { rank: 13, fact: 'could keep your clicks from reaching the page and click in their place' },
+  'block-and-signal': { rank: 14, fact: 'could keep your clicks from reaching the page and set off the page\'s own actions in their place' },
+  'read-decides-blocks': { rank: 15, fact: 'could let what it reads decide which of your actions this page sees, and the page\'s code may send that on' },
+  'read-through-media': { rank: 16, fact: 'could pass what it reads to the site a video or sound comes from, by how it plays it' },
+  'read-through-pictures': { rank: 17, fact: 'could pass what it reads to the sites this page\'s pictures come from, by which ones it loads' },
+  'read-through-videos': { rank: 18, fact: 'could pass what it reads to the site a video comes from, by which video it offers you' },
+  'read-into-sound': { rank: 19, fact: 'could turn what it reads into sounds that a device nearby could pick up' },
 };
 // (Tim's words, for a mod with more than three powers, in place of the lines above)
 const MANY = 'Mods with many powers can act in unspecific or powerful ways. Treat this with caution.';
@@ -51,7 +58,7 @@ const COMBINATIONS = {
   'read-drafts+mods': 'a channel only reaches its other boxed mods, and the page-wide rules treat the boxed mods on a page as one',
   'read-drafts+media': { warn: 'read-through-media' },
   'read-drafts+search-box': 'the search box only takes what you type, and the mod can\'t fill or read it',
-  'read-drafts+go-to': 'it only goes to this site\'s own pages (fixed paths, or links the page shows), and that site can already see what it reads',
+  'read-drafts+go-to': 'it only goes to this site\'s own pages (the header\'s, with the header\'s words in a query, or links the page shows), and that site can already see what it reads',
   'read-drafts+click': { warn: 'read-decides-click' },
   'read-drafts+write-drafts': { warn: 'read-into-post' },
   'keys+site-data': 'both only read: nothing they read can leave the page without something that acts',
@@ -61,7 +68,7 @@ const COMBINATIONS = {
   'keys+mods': 'a channel only reaches its other boxed mods, and the page-wide rules treat the boxed mods on a page as one',
   'keys+media': { warn: 'read-through-media' },
   'keys+search-box': 'the search box only takes what you type, and the mod can\'t fill or read it',
-  'keys+go-to': 'it only goes to this site\'s own pages (fixed paths, or links the page shows), and that site can already see what it reads',
+  'keys+go-to': 'it only goes to this site\'s own pages (the header\'s, with the header\'s words in a query, or links the page shows), and that site can already see what it reads',
   'keys+click': { warn: 'read-decides-click' },
   'keys+write-drafts': { warn: 'read-into-post' },
   'site-data+page-data': 'both only read: nothing they read can leave the page without something that acts',
@@ -70,7 +77,7 @@ const COMBINATIONS = {
   'site-data+mods': 'a channel only reaches its other boxed mods, and the page-wide rules treat the boxed mods on a page as one',
   'site-data+media': { warn: 'read-through-media' },
   'site-data+search-box': 'the search box only takes what you type, and the mod can\'t fill or read it',
-  'site-data+go-to': 'it only goes to this site\'s own pages (fixed paths, or links the page shows), and that site can already see what it reads',
+  'site-data+go-to': 'it only goes to this site\'s own pages (the header\'s, with the header\'s words in a query, or links the page shows), and that site can already see what it reads',
   'site-data+click': { warn: 'read-decides-click' },
   'site-data+write-drafts': { warn: 'read-into-post' },
   'page-data+sound': { warn: 'read-into-sound' },
@@ -78,7 +85,7 @@ const COMBINATIONS = {
   'page-data+mods': 'a channel only reaches its other boxed mods, and the page-wide rules treat the boxed mods on a page as one',
   'page-data+media': { warn: 'read-through-media' },
   'page-data+search-box': 'the search box only takes what you type, and the mod can\'t fill or read it',
-  'page-data+go-to': 'it only goes to this site\'s own pages (fixed paths, or links the page shows), and that site can already see what it reads',
+  'page-data+go-to': 'it only goes to this site\'s own pages (the header\'s, with the header\'s words in a query, or links the page shows), and that site can already see what it reads',
   'page-data+click': { warn: 'read-decides-click' },
   'page-data+write-drafts': { warn: 'read-into-post' },
   'sound+controls': 'its own controls only take what you give the mod on purpose, and show nothing it couldn\'t show in its own elements',
@@ -337,13 +344,19 @@ const keyOf = (list) => POWERS.filter((p) => list.includes(p)).join('+');
 // way out warns by the way out; acts that together post or act for you warn; a triple warns on its own only
 // where a read, something that sends and something that writes the post meet (or go-to does with those two),
 // and otherwise shows its pairs' warnings, or says why it adds nothing.
+// (site-storage: what it writes, the site's own code reads, and may sync or send on, and a later boxed mod
+// can read on another page; block-events: which of your actions the page's code sees, the mod's choice;
+// embeds: which video it offers, which the player's host sees once you click)
 const WAY_OUT = {
   'write-drafts': 'read-into-post', click: 'read-decides-click', media: 'read-through-media', sound: 'read-into-sound',
   'edit-uploads': 'read-into-picture', 'page-events': 'read-into-page-code', 'image-variants': 'read-through-pictures', preload: 'read-through-pictures',
+  'site-storage': 'read-into-storage', 'block-events': 'read-decides-blocks', embeds: 'read-through-videos',
 };
+// (rewrite-requests with an act: the act's own request carries the header's change, with no one asking)
 const ACT_PAIRS = {
   'block-events+click': 'block-and-click', 'page-events+write-drafts': 'post-for-you', 'click+edit-uploads': 'post-for-you',
   'page-events+edit-uploads': 'post-for-you', 'go-to+page-events': 'go-and-signal',
+  'rewrite-requests+click': 'click-and-rewrite', 'rewrite-requests+page-events': 'signal-and-rewrite', 'block-events+page-events': 'block-and-signal',
 };
 const SENDS = ['click', 'page-events'];
 const WRITES = ['write-drafts', 'edit-uploads'];
@@ -356,7 +369,7 @@ const REASONS = {
   embeds: 'it plays only a video a link on the page names, after you click, so nothing the mod reads rides on it',
   'block-events': 'keeping some of what you do from the page only lets the page learn less, and your typing always reaches its fields',
   preload: 'it only makes the page load its own pictures sooner, as it would when you scroll to them',
-  'go-to': 'it only goes to this site\'s own pages (fixed paths, or links the page shows), and that site can already see what it reads',
+  'go-to': 'it only goes to this site\'s own pages (the header\'s, with the header\'s words in a query, or links the page shows), and that site can already see what it reads',
   pictures: 'both only load the page\'s own pictures, from where the page gets them',
   write: 'a post it changes still waits for you to send it, and the other power carries nothing into it or sends it',
   acts: 'neither reads more than the page shows, and together they don\'t post, send or act for you beyond what each does alone',
@@ -378,7 +391,10 @@ const pairRule = (a, b) => {
 const tripleRule = (t) => {
   const reads = t.filter((p) => READS.includes(p));
   const has = (list) => t.some((p) => list.includes(p));
-  if (reads.length && has(SENDS) && has(WRITES) && t.filter((p) => !SENDS.includes(p) && !WRITES.includes(p)).every((p) => READS.includes(p))) return { warn: 'read-post-for-you' };
+  // (a read that isn't the very picture it posts: edit-uploads reads the picture it changes, and alone that's
+  // posting it for you, its pair's warning)
+  const readAndWrite = reads.some((r) => t.some((w) => WRITES.includes(w) && w !== r));
+  if (readAndWrite && has(SENDS) && t.filter((p) => !SENDS.includes(p) && !WRITES.includes(p)).every((p) => READS.includes(p))) return { warn: 'read-post-for-you' };
   if (t.includes('go-to') && has(SENDS) && t.includes('write-drafts')) return { warn: 'go-post-for-you' };
   const pairs = [[t[0], t[1]], [t[0], t[2]], [t[1], t[2]]];
   if (pairs.some((x) => typeof COMBINATIONS[keyOf(x)] === 'object')) return REASONS.pairs;
@@ -436,13 +452,16 @@ function toMarkdown() {
   L.push(`(${PAIRS}) and triple (${TRIPLES}) of the ${N} powers, with the warning a hold shows for it, or why it adds no risk.`, '');
   L.push('"Adds risk" means: together, the powers can carry what a mod reads off the page, or act as you, in a way');
   L.push('none of them (for a triple: none of its pairs) can alone. Reads (`read-drafts`, `keys`, `site-data`,');
-  L.push('`page-data`, `site-storage`, `local-fonts`, and `image-variants` for the pixels it reads) see more than the');
-  L.push('page shows; nothing else does. The ways out of the page are what you post (`write-drafts`, `click`, a');
-  L.push('picture you attach: `edit-uploads`), what the mod clicks (`click`, and `go-to` to get to a page), what the');
-  L.push('page\'s own code is told (`page-events`), how the page\'s media plays (the host of a video sees its requests:');
-  L.push('`media`), which of the page\'s pictures load (their hosts see that: `image-variants`, `preload`) and sound in');
-  L.push('the room (`sound`). `rewrite-requests` changes what the site receives, but only as its header says, by');
-  L.push('TRIF; `embeds` loads a video only from a link the page shows, after a click. Everything a');
+  L.push('`page-data`, `site-storage`, `local-fonts`, `image-variants` for the pixels it reads, and `edit-uploads` for');
+  L.push('the pictures you attach) see more than the page shows; nothing else does. The ways out of the page are what');
+  L.push('you post (`write-drafts`, `click`, a picture you attach: `edit-uploads`), what the mod clicks (`click`, and');
+  L.push('`go-to` to get to a page), what the page\'s own code is told or sees (`page-events`, and which of your actions');
+  L.push('`block-events` keeps from it), what the site keeps (`site-storage`: the site\'s own code reads it, and so can');
+  L.push('a boxed mod on a later page), how the page\'s media plays (the host of a video sees its requests: `media`),');
+  L.push('which of the page\'s pictures load (their hosts see that: `image-variants`, `preload`), which video it offers');
+  L.push('you (the player\'s host sees it once you click: `embeds`) and sound in the room (`sound`).');
+  L.push('`rewrite-requests` changes what the site receives, but only as its header says, by TRIF: nothing the mod');
+  L.push('reads rides on it, but beside an act (`click`, `page-events`) it changes what that act sends. Everything a');
   L.push('boxed mod reaches otherwise stays on the site it came from, which already has it. Across mods on one page');
   L.push('(they see each other\'s elements, and `mods` gives them a channel), the sandbox\'s page-wide rules stop a');
   L.push('combination split between mods from slipping past the hold: docs/SAFE-MODS.md, "Combinations".', '');
@@ -454,7 +473,8 @@ function toMarkdown() {
   for (const [id, w] of Object.entries(WARNINGS).sort((a, b) => a[1].rank - b[1].rank)) {
     const cs = entries.filter(([, v]) => typeof v === 'object' && v.warn === id).map(([k]) => k);
     const byShape = {};
-    for (const k of cs) { const shape = k.split('+').map((p) => (READS.includes(p) ? 'a read' : `\`${p}\``)).join(' + '); byShape[shape] = (byShape[shape] || 0) + 1; }
+    // ("a read": one that's only a read; site-storage, image-variants and edit-uploads, ways out too, by name)
+    for (const k of cs) { const shape = k.split('+').map((p) => (READS.includes(p) && !WAY_OUT[p] ? 'a read' : `\`${p}\``)).join(' + '); byShape[shape] = (byShape[shape] || 0) + 1; }
     L.push(`| ${w.rank} | Together, it ${w.fact}. | ${Object.entries(byShape).map(([sh, n]) => `${sh}${n > 1 ? ` (${n})` : ''}`).join('; ')} |`);
   }
   L.push('', `A mod with more than ${MANY_OVER} powers gets, in place of these lines: **${MANY}** (keyed by its exact set of powers; its`);

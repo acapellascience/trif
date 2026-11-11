@@ -246,12 +246,13 @@ function parseEvents(values) {
 // The combinations: helper/lib/combinations.js, every pair and triple, with the warnings a hold shows.
 const combos = require('./combinations');
 const READS = combos.READS;
-function togetherNeeds(list) {
+function togetherNeeds(list, declared = list) {
   const warns = combos.warningsFor(list);
   const need = (key, fact) => ({ key, fact, power: 'together', soft: false, lines: [] });
   // (more than three powers: one general warning, for that exact set; its combinations are still needs, so
-  // a version with fewer powers that the user allowed in this one doesn't ask again)
-  if (list.length > combos.MANY_OVER) return [need(`power:together:many:${combos.keyOf(list)}`, combos.MANY), ...warns.map((w) => need(w.key, ''))];
+  // a version with fewer powers that the user allowed in this one doesn't ask again; counted by the powers
+  // the header declares, @migrate not among them)
+  if (declared.length > combos.MANY_OVER) return [need(`power:together:many:${combos.keyOf(list)}`, combos.MANY), ...warns.map((w) => need(w.key, ''))];
   return warns.map((w) => need(w.key, w.fact));
 }
 /**
@@ -298,8 +299,10 @@ function powerNeeds(mod) {
   if (Array.isArray(args.migrate) && args.migrate.length) {
     out.push({ key: `power:migrate:${[...args.migrate].sort().join(' | ')}`, fact: `brings over its old settings from what this site keeps under: ${args.migrate.map((k) => k.replace(/^\w+:/, '')).join(', ')} (once)`, power: 'migrate', soft: false, lines: [] });
   }
-  // the combinations: needs of their own (docs/POWERS.md "Combinations", docs/SAFE-MODS.md)
-  return out.concat(togetherNeeds(list));
+  // the combinations: needs of their own (docs/POWERS.md "Combinations", docs/SAFE-MODS.md); @migrate reads
+  // the site's storage, so for them it counts as site-storage (as the sandbox's page-wide rules count it)
+  const together = Array.isArray(args.migrate) && args.migrate.length && !list.includes('site-storage') ? NAMES.filter((n) => list.includes(n) || n === 'site-storage') : list;
+  return out.concat(togetherNeeds(together, list));
 }
 
 /**

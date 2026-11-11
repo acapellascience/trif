@@ -12,7 +12,8 @@
 // everything there to the same path on timsrobot.com: older installs open webmods.dev/report#r=… (a
 // browser keeps the # part across the redirect).
 
-import { FAVICON_SVG, REPORT, REPORT_JS, WINDOWS, WINDOWS_JS, windowsPage } from './pages.js';
+import { REPORT, REPORT_JS, WINDOWS, WINDOWS_JS, windowsPage } from './pages.js';
+import { FAVICON_SVG } from './favicon.js';
 import { LIMITS, ReportError, parseReport, parseSignup, reportEmail, signupEmail } from './report.js';
 import { DEMO_FILES, EXTENSION_FILES, homeWith, modScript, pageWith, panelHtml, typeFor } from './demo.js';
 import { IMAGES } from './images.js';
@@ -49,12 +50,21 @@ const bodyType = (request) => (request.headers.get('Content-Type') || '').split(
 const notFound = () => respond('Not found', 'text/plain', 404);
 
 /** A side panel file from the extension's folder (ext/ in the ASSETS binding), if the panel uses it. */
+// (no-cache, with the asset's ETag: the browser asks again every time and gets a 304 when nothing changed.
+// The panel's files import each other, so a phone holding some of them from before a deploy (max-age) and
+// fetching the rest fresh got a mix: a new sidepanel.js importing what an old lib.js doesn't have, and the
+// demo's mods stopped applying until the browser was restarted.)
+const EXT_CACHE = 'no-cache';
 async function extensionFile(request, env, file) {
   if (!EXTENSION_FILES.has(file) || !env.ASSETS) return notFound();
-  const res = await env.ASSETS.fetch(new Request(new URL(`/ext/${file}`, request.url)));
+  const html_ = file === 'sidepanel.html';
+  const ask = !html_ && request.headers.get('If-None-Match') ? { 'If-None-Match': request.headers.get('If-None-Match') } : {};
+  const res = await env.ASSETS.fetch(new Request(new URL(`/ext/${file}`, request.url), { headers: ask }));
+  const etag = res.headers.get('ETag');
+  if (res.status === 304) return new Response(null, { status: 304, headers: { 'Cache-Control': EXT_CACHE, ...(etag ? { ETag: etag } : {}) } });
   if (!res.ok) return notFound();
-  if (file === 'sidepanel.html') return html(panelHtml(await res.text()), 200, undefined, PANEL);
-  return respond(res.body, typeFor(file), 200, CACHE);
+  if (html_) return html(panelHtml(await res.text()), 200, EXT_CACHE, PANEL);
+  return respond(res.body, typeFor(file), 200, { 'Cache-Control': EXT_CACHE, ...(etag ? { ETag: etag } : {}) });
 }
 
 // A note's page: its videos and pictures are this site's own files.
@@ -238,10 +248,10 @@ export default {
     if (pathname === '/favicon.svg') return respond(FAVICON_SVG, 'image/svg+xml', 200, CACHE);
     if (pathname === '/favicon.ico') return extensionFile(request, env, 'icons/robot-32.png');
     if (Object.hasOwn(IMAGES, pathname)) return respond(Uint8Array.from(atob(IMAGES[pathname]), (c) => c.charCodeAt(0)), 'image/png', 200, CACHE);
-    if (Object.hasOwn(DEMO_FILES, pathname)) return respond(DEMO_FILES[pathname].body, DEMO_FILES[pathname].type, 200, CACHE);
+    if (Object.hasOwn(DEMO_FILES, pathname)) return respond(DEMO_FILES[pathname].body, DEMO_FILES[pathname].type, 200, { 'Cache-Control': EXT_CACHE }); // (as the panel's files: one version)
     if (pathname.startsWith('/demo/mods/')) {
       const code = modScript(pathname.slice('/demo/mods/'.length));
-      return code ? respond(code, 'text/javascript; charset=utf-8', 200, CACHE) : notFound();
+      return code ? respond(code, 'text/javascript; charset=utf-8', 200, { 'Cache-Control': EXT_CACHE }) : notFound();
     }
     if (pathname.startsWith('/demo/ext/')) return extensionFile(request, env, pathname.slice('/demo/ext/'.length));
     const note = /^\/notes\/([a-z0-9-]+)\/?$/.exec(pathname);

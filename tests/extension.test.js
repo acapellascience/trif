@@ -5,6 +5,7 @@ const assert = require('node:assert');
 const vm = require('node:vm');
 const { test, before } = require('node:test');
 const { waitFor } = require('./fake-extension');
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 let lib, rt;
 before(async () => {
@@ -871,7 +872,9 @@ let bgCount = 0;
 const TEST_SITES_ON = ['example.com', 'x.com', 'y.com', 'z.com'];
 // `granted`: the origins the browser gives TRIF (chrome.permissions); <all_urls> unless a test says
 // otherwise, as for someone who installed TRIF when it was required. `permissions: false` leaves the API out.
-async function loadBackground({ storage = {}, tabs = [], migrate = false, safari = false, windows = {}, scripting = {}, granted = ['<all_urls>'], permissions = true } = {}) {
+// `sidePanel`: overrides of the chrome.sidePanel mock (whose open() resolves and shows nothing, as in Arc:
+// a test says a side panel loaded by emitting its panel.window), or false for none.
+async function loadBackground({ storage = {}, tabs = [], migrate = false, safari = false, windows = {}, scripting = {}, granted = ['<all_urls>'], permissions = true, sidePanel = {} } = {}) {
   const store = structuredClone(migrate || 'sitesOn' in storage ? storage : { sitesOn: TEST_SITES_ON, ...storage });
   const ctl = { full: false, io: false, writes: [] }; // full: every storage write fails, like a full quota; io: like Safari's "Disk I/O error"; writes: the keys of each write
   const natives = [];
@@ -921,11 +924,14 @@ async function loadBackground({ storage = {}, tabs = [], migrate = false, safari
       reload: async (id) => { reloaded.push(id); setImmediate(() => onUpdated.emit(id, { status: 'complete' })); },
     },
     windows: { update: async () => ({}), getLastFocused: async () => ({ id: 1 }), ...windows },
-    sidePanel: {
-      setPanelBehavior: async (o) => { panelBehavior.push(o); },
-      open: (o) => { panelCalls.push(['open', o]); return Promise.resolve(); },
-      close: (o) => { panelCalls.push(['close', o]); return Promise.resolve(); },
-    },
+    ...(sidePanel === false ? {} : {
+      sidePanel: {
+        setPanelBehavior: async (o) => { panelBehavior.push(o); },
+        open: (o) => { panelCalls.push(['open', o]); return Promise.resolve(); },
+        close: (o) => { panelCalls.push(['close', o]); return Promise.resolve(); },
+        ...sidePanel,
+      },
+    }),
     scripting,
     action: { onClicked: chromeEvent() },
     ...(permissions ? { permissions: perms } : {}),
@@ -1068,16 +1074,195 @@ test('background: install opens onboarding; the toolbar button opens the side pa
     // Opened from the click, synchronously (it must come from the user's gesture).
     bg.chrome.action.onClicked.emit({ id: 5, windowId: 2 });
     assert.deepStrictEqual(bg.panelCalls, [['open', { windowId: 2 }]]);
-    // A side panel in window 2 says so; the next click there closes it; another window's opens.
+    // A side panel in window 2 says so (as it loads); the next click there closes it; another window's opens.
     const panel = bg.connectPanel();
     panel.onMessage.emit({ type: 'panel.window', windowId: 2 });
     bg.chrome.action.onClicked.emit({ id: 5, windowId: 2 });
     bg.chrome.action.onClicked.emit({ id: 8, windowId: 3 });
     assert.deepStrictEqual(bg.panelCalls.slice(1), [['close', { windowId: 2 }], ['open', { windowId: 3 }]]);
+    const panel3 = bg.connectPanel();
+    panel3.onMessage.emit({ type: 'panel.window', windowId: 3 });
     panel.onDisconnect.emit();
     bg.chrome.action.onClicked.emit({ id: 5, windowId: 2 });
     assert.deepStrictEqual(bg.panelCalls.at(-1), ['open', { windowId: 2 }]);
+    bg.connectPanel().onMessage.emit({ type: 'panel.window', windowId: 2 });
+    // Each side panel said it was there in time: no panel window, nothing remembered.
+    await sleep(lib.PANEL_OPEN_WAIT_MS + 200);
+    assert.strictEqual(bg.created.length, 1);
+    assert.ok(!('panelInWindow' in bg.store));
   } finally { bg.restore(); }
+});
+
+/** chrome.windows with browser windows `list` ({id, type, left, top, width, height}), recording what's made and closed. */
+function fakeWindows(list) {
+  const wins = structuredClone(list);
+  const created = [];
+  const removed = [];
+  const updated = [];
+  let next = 100;
+  const api = {
+    get: async (id) => { const w = wins.find((x) => x.id === id); if (!w) throw new Error(`No window with id: ${id}.`); return structuredClone(w); },
+    getAll: async ({ windowTypes } = {}) => structuredClone(wins.filter((w) => !windowTypes || windowTypes.includes(w.type))),
+    create: async (o) => {
+      created.push(o);
+      const w = { id: next++, type: o.type || 'normal', state: 'normal', left: o.left, top: o.top, width: o.width, height: o.height, tabs: [{ url: o.url }] };
+      wins.push(w);
+      return structuredClone(w);
+    },
+    remove: async (id) => { removed.push(id); const i = wins.findIndex((w) => w.id === id); if (i < 0) throw new Error(`No window with id: ${id}.`); wins.splice(i, 1); },
+    update: async (id, o) => { updated.push([id, o]); return {}; },
+    getLastFocused: async () => ({ id: 1 }),
+    onFocusChanged: chromeEvent(),
+  };
+  return { api, wins, created, removed, updated };
+}
+
+const BROWSER_WINDOW = { id: 2, type: 'normal', state: 'normal', left: 0, top: 25, width: 1200, height: 800 };
+const PANEL_URL = (id) => `chrome-extension://${lib.EXTENSION_ID}/sidepanel.html?window=${id}&fallback=1`;
+
+test('background: no side panel within a second of the click (Arc): the panel opens in a window beside the browser window, remembered', async () => {
+  const w = fakeWindows([BROWSER_WINDOW]);
+  const bg = await loadBackground({ windows: w.api, storage: { panelScreens: [{ left: 0, top: 25, width: 1800, height: 1100 }] } });
+  try {
+    bg.chrome.action.onClicked.emit({ id: 5, windowId: 2 });
+    assert.deepStrictEqual(bg.panelCalls, [['open', { windowId: 2 }]]);
+    await sleep(lib.PANEL_OPEN_WAIT_MS / 2);
+    assert.strictEqual(w.created.length, 0, 'it waits for the side panel first');
+    await waitFor(() => w.created.length === 1, { message: 'the panel window' });
+    assert.deepStrictEqual(w.created[0], { url: PANEL_URL(2), focused: true, left: 1200, top: 25, width: 400, height: 800, type: 'popup' });
+    assert.strictEqual(bg.store.panelInWindow, true);
+    // The panel window says it's there; the next click closes it, without asking for the side panel.
+    const pw = bg.connectPanel();
+    pw.onMessage.emit({ type: 'panel.window', windowId: 2, own: 100 });
+    bg.chrome.action.onClicked.emit({ id: 5, windowId: 2 });
+    await waitFor(() => w.removed.includes(100), { message: 'the panel window to close' });
+    assert.strictEqual(bg.panelCalls.length, 1);
+    pw.onDisconnect.emit();
+    // Remembered: the next click opens it at once, and still asks for the side panel from the click.
+    const t0 = Date.now();
+    bg.chrome.action.onClicked.emit({ id: 5, windowId: 2 });
+    assert.deepStrictEqual(bg.panelCalls.at(-1), ['open', { windowId: 2 }]);
+    await waitFor(() => w.created.length === 2, { message: 'the panel window again' });
+    assert.ok(Date.now() - t0 < lib.PANEL_OPEN_WAIT_MS / 2, `took ${Date.now() - t0} ms`);
+    // Closed again from its own title bar; then a double click makes one, not two.
+    await w.api.remove(101);
+    bg.chrome.action.onClicked.emit({ id: 5, windowId: 2 });
+    bg.chrome.action.onClicked.emit({ id: 5, windowId: 2 });
+    await waitFor(() => w.created.length === 3, { message: 'the panel window again' });
+    await sleep(100);
+    assert.strictEqual(w.created.length, 3);
+  } finally { bg.restore(); }
+});
+
+test('background: a click while the panel window is minimized or behind the browser window brings it back; else closes it', async () => {
+  const w = fakeWindows([BROWSER_WINDOW, { id: 7, type: 'popup', state: 'normal', left: 800, top: 25, width: 400, height: 800, tabs: [{ url: PANEL_URL(2) }] }]);
+  const bg = await loadBackground({ windows: w.api, storage: { panelInWindow: true } });
+  try {
+    bg.connectPanel().onMessage.emit({ type: 'panel.window', windowId: 2, own: 7 });
+    // The browser window was focused after the panel window (a click in the page): the panel is behind it.
+    w.api.onFocusChanged.emit(7);
+    await sleep(5);
+    w.api.onFocusChanged.emit(2);
+    await sleep(lib.CLICK_FOCUS_MS + 50);
+    bg.chrome.action.onClicked.emit({ id: 5, windowId: 2 });
+    await waitFor(() => w.updated.length === 1, { message: 'the panel window focused' });
+    assert.deepStrictEqual(w.updated[0], [7, { focused: true }]);
+    assert.deepStrictEqual(bg.panelCalls, [], 'no side panel asked for while its panel window is open');
+    // Now in front: the next click closes it.
+    w.api.onFocusChanged.emit(7);
+    bg.chrome.action.onClicked.emit({ id: 5, windowId: 2 });
+    await waitFor(() => w.removed.includes(7), { message: 'the panel window closed' });
+    assert.strictEqual(w.created.length, 0);
+  } finally { bg.restore(); }
+});
+
+test('background: a side panel that shows up after the panel window opened closes it again, and the browser is forgotten', async () => {
+  const w = fakeWindows([BROWSER_WINDOW]);
+  const bg = await loadBackground({ windows: w.api, storage: { panelInWindow: true } });
+  try {
+    bg.chrome.action.onClicked.emit({ id: 5, windowId: 2 });
+    await waitFor(() => w.created.length === 1, { message: 'the panel window, at once' });
+    bg.connectPanel().onMessage.emit({ type: 'panel.window', windowId: 2 });
+    await waitFor(() => w.removed.includes(100), { message: 'the panel window closed' });
+    await waitFor(() => !('panelInWindow' in bg.store), { message: 'panelInWindow forgotten' });
+  } finally { bg.restore(); }
+});
+
+test('background: sidePanel.open failing, or no chrome.sidePanel, opens the panel window at once', async () => {
+  for (const sidePanel of [{ open: () => Promise.reject(new Error('No active side panel')) }, false]) {
+    const w = fakeWindows([BROWSER_WINDOW]);
+    const bg = await loadBackground({ windows: w.api, sidePanel });
+    try {
+      const t0 = Date.now();
+      bg.chrome.action.onClicked.emit({ id: 5, windowId: 2 });
+      await waitFor(() => w.created.length === 1, { message: 'the panel window' });
+      assert.ok(Date.now() - t0 < lib.PANEL_OPEN_WAIT_MS / 2, `took ${Date.now() - t0} ms`);
+      // No screen known yet: over the browser window's right edge.
+      assert.deepStrictEqual([w.created[0].left, w.created[0].width], [800, 400]);
+      // Remembered only where there's a side panel API that didn't show one.
+      await settle(10);
+      assert.strictEqual(bg.store.panelInWindow, sidePanel ? true : undefined);
+    } finally { bg.restore(); }
+  }
+});
+
+test('background: in Safari the toolbar button is the Safari app\'s (safari.js), not this', async () => {
+  const bg = await loadBackground({ safari: true, sidePanel: false });
+  try {
+    assert.strictEqual(bg.chrome.action.onClicked.fns.length, 0);
+  } finally { bg.restore(); }
+});
+
+test('panel window: its address, where it goes, and what a click does', () => {
+  const base = `chrome-extension://${lib.EXTENSION_ID}/`;
+  const url = lib.panelWindowUrl((p) => base + p, 12);
+  assert.strictEqual(url, `${base}sidepanel.html?window=12&fallback=1`);
+  assert.deepStrictEqual(lib.panelQuery('?window=12&fallback=1'), { openedFor: 12, fallback: true });
+  assert.deepStrictEqual(lib.panelQuery('?window=12'), { openedFor: 12, fallback: false }); // Safari's, or the e2e suite's
+  assert.deepStrictEqual(lib.panelQuery(''), { openedFor: null, fallback: false });          // a side panel
+  assert.deepStrictEqual(lib.panelQuery('?window=x&fallback=1'), { openedFor: null, fallback: false });
+  assert.strictEqual(lib.panelWindowTarget({ tabs: [{ url }] }, base), 12);
+  assert.strictEqual(lib.panelWindowTarget({ tabs: [{ url: `${base}sidepanel.html?window=12` }] }, base), null);
+  assert.strictEqual(lib.panelWindowTarget({ tabs: [{ url: 'https://example.com/sidepanel.html?window=12&fallback=1' }] }, base), null);
+  assert.strictEqual(lib.panelWindowTarget({ tabs: [{ url }, { url }] }, base), null);
+
+  const win = { left: 100, top: 30, width: 1200, height: 900 };
+  const wide = { left: 0, top: 25, width: 2560, height: 1415 };
+  const right = { left: 2560, top: 0, width: 1920, height: 1080 };
+  // Room beside it on its screen: beside, as tall as the window.
+  assert.deepStrictEqual(lib.panelWindowBounds(win, [right, wide]), { left: 1300, top: 30, width: 400, height: 900 });
+  // No room (a window filling its screen): over its right edge.
+  const full = { left: 0, top: 25, width: 1440, height: 875 };
+  assert.deepStrictEqual(lib.panelWindowBounds(full, [{ left: 0, top: 25, width: 1440, height: 875 }]), { left: 1040, top: 25, width: 400, height: 875 });
+  // A window hanging off its screen's right edge: pulled inside the screen.
+  assert.deepStrictEqual(lib.panelWindowBounds({ left: 1000, top: 25, width: 800, height: 600 }, [{ left: 0, top: 0, width: 1440, height: 900 }]), { left: 1040, top: 25, width: 400, height: 600 });
+  // No screen known: over the right edge. A narrow window: no wider than it.
+  assert.deepStrictEqual(lib.panelWindowBounds(win, []), { left: 900, top: 30, width: 400, height: 900 });
+  assert.deepStrictEqual(lib.panelWindowBounds({ left: 0, top: 0, width: 300, height: 500 }, null), { left: 0, top: 0, width: 300, height: 500 });
+  assert.deepStrictEqual(lib.panelWindowBounds(null, []), { width: 400, height: 800 });
+  // The screen a window is mostly on.
+  assert.strictEqual(lib.screenFor([wide, right], { left: 2400, top: 0, width: 1200, height: 800 }), right);
+  assert.strictEqual(lib.screenFor([wide], { left: 5000, top: 0, width: 100, height: 100 }), null);
+  // Screens remembered: latest first, once each, a few at most, nonsense left out.
+  let screens = [];
+  for (const s of [wide, right, wide, { left: 'x' }]) screens = lib.rememberScreen(screens, s);
+  assert.deepStrictEqual(screens, [wide, right]);
+  for (let i = 0; i < 10; i++) screens = lib.rememberScreen(screens, { left: i * 100, top: 0, width: 100, height: 100 });
+  assert.strictEqual(screens.length, 6);
+
+  // A click: close it, unless it's minimized, or behind the browser window it overlaps.
+  const panel = { id: 7, state: 'normal', left: 900, top: 30, width: 400, height: 900 };
+  const browser = { id: 2, ...win };
+  const now = 100000;
+  assert.strictEqual(lib.panelWindowClick({ panel, browser, focusedAt: { 7: now - 5000, 2: now - 9000 }, now }), 'close');
+  assert.strictEqual(lib.panelWindowClick({ panel, browser, focusedAt: { 7: now - 9000, 2: now - 5000 }, now }), 'focus');
+  // The browser window focused by this click itself (it was the panel's turn before): close.
+  assert.strictEqual(lib.panelWindowClick({ panel, browser, focusedAt: { 7: now - 9000, 2: now - 100 }, now }), 'close');
+  // Beside it, not covered: close.
+  assert.strictEqual(lib.panelWindowClick({ panel: { ...panel, left: 1300 }, browser, focusedAt: { 7: now - 9000, 2: now - 5000 }, now }), 'close');
+  assert.strictEqual(lib.panelWindowClick({ panel: { ...panel, state: 'minimized' }, browser, now }), 'focus');
+  // Nothing known (the service worker started again): close.
+  assert.strictEqual(lib.panelWindowClick({ panel, browser, now }), 'close');
 });
 
 test('background: panel status includes helper state and mods with match patterns', async () => {

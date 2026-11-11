@@ -22,7 +22,7 @@ const path = require('path');
 const crypto = require('crypto');
 const { execFile } = require('child_process');
 const P = require('./paths');
-const { browserTable } = require('./browsers');
+const { browserTable, browsersSetUp: setUpIn } = require('./browsers');
 const { acquireInstallLock, LockBusy, LOCK_ENV } = require('./lock');
 
 const CHECK_EVERY_MS = 20 * 60 * 60 * 1000; // a cached answer is good for this long
@@ -228,7 +228,7 @@ async function check(ws, { force = false, now = Date.now(), root = P.REPO_ROOT, 
 // Native host manifests (and the Safari bridge's agent) setup wrote before, so the update keeps the same
 // browsers set up.
 function browsersSetUp() {
-  return browserTable().filter((b) => (b.safari ? b.detected : fs.existsSync(path.join(b.nativeDir, `${P.HOST_NAME}.json`)))).map((b) => b.key);
+  return setUpIn(browserTable()).map((b) => b.key);
 }
 
 function run(file, args, opts) {

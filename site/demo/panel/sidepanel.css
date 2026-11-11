@@ -1,0 +1,577 @@
+:root {
+  color-scheme: light dark;
+  --bg: light-dark(#fbfbfa, #18181a);
+  --surface: light-dark(#ffffff, #212124);
+  --raised: light-dark(#f1f1ef, #2a2a2e);
+  --user: light-dark(#eef1f8, #262b38);
+  --text: light-dark(#1d1d1f, #ececee);
+  --muted: light-dark(#6e6e73, #9a9aa0);
+  --faint: light-dark(#9a9a9f, #6f6f75);
+  --line: light-dark(#e4e4e1, #323236);
+  --accent: light-dark(#2f5bd3, #8aa6ff);
+  --on-accent: light-dark(#ffffff, #10131c);
+  --ok: light-dark(#1f8a4c, #4cc27f);
+  --warn: light-dark(#b7791f, #e8b04a);
+  --bad: light-dark(#c4372d, #ff7b70);
+  --bad-bg: light-dark(#fdf1f0, #3a2220);
+  --code: light-dark(#f0f0ed, #2a2a2e);
+  --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  --radius: 10px;
+  accent-color: var(--accent);
+}
+
+* { box-sizing: border-box; }
+
+html, body { height: 100%; }
+
+body {
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  background: var(--bg);
+  color: var(--text);
+  font: 13px/1.5 system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  -webkit-font-smoothing: antialiased;
+  overflow: hidden;
+}
+
+button, input, select, textarea { font: inherit; color: inherit; }
+button { cursor: pointer; }
+button:disabled { cursor: default; }
+a { color: var(--accent); }
+[hidden] { display: none !important; }
+
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+
+.visually-hidden {
+  position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0; border: 0;
+  overflow: hidden; clip-path: inset(50%); white-space: nowrap;
+}
+
+code {
+  font: 0.92em/1.4 var(--mono);
+  background: var(--code);
+  border-radius: 4px;
+  padding: 0.05em 0.35em;
+}
+
+/* ---- header ---------------------------------------------------------------------------------- */
+
+.bar {
+  position: relative;
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 10px 10px 14px;
+  border-bottom: 1px solid var(--line);
+}
+
+.site {
+  flex: 1;
+  min-width: 0;
+  max-width: calc(50% - 44px); /* clear of the robot in the middle */
+  margin: 0;
+  font-size: 14px;
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.dot {
+  flex: none;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--faint);
+}
+.dot.ok { background: var(--ok); }
+.dot.warn { background: var(--warn); }
+.dot.bad { background: var(--bad); }
+
+.icon-btn {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--muted);
+}
+.icon-btn:hover:not(:disabled), .icon-btn[aria-expanded="true"] { background: var(--raised); color: var(--text); }
+.icon-btn:disabled { opacity: 0.4; }
+
+svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round; }
+
+/* ---- settings, notices, mods ----------------------------------------------------------------- */
+
+.settings, .notice, .mods {
+  flex: none;
+  margin: 10px 12px 0;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--surface);
+}
+
+.settings { display: grid; gap: 8px; }
+.open-model { display: grid; gap: 8px; } /* openmodel.js */
+
+/* A site TRIF is off for: only "The robot is off." and the button. */
+.gate { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 14px; padding: 24px 16px 64px; }
+.gate[hidden] { display: none; }
+.gate .mod-err { margin: 0; text-align: center; }
+.gate-title { margin: 0; font-size: 15px; font-weight: 600; }
+.gate-why { margin: -6px 0 0; color: var(--muted); text-align: center; }
+/* Quiet links under Fix: block the site in TRIF, or disconnect it (the browser's permission). */
+.gate-links { margin: 0; display: flex; gap: 14px; font-size: 12px; }
+.gate-links a { color: var(--muted); }
+/* A card over the panel (Disconnect with every site allowed): × or Escape closes it. */
+.card-dialog { width: min(300px, calc(100% - 32px)); padding: 18px 18px 16px; border: 1px solid var(--line); border-radius: 12px;
+  background: var(--surface); color: var(--text); box-shadow: 0 10px 30px rgb(0 0 0 / 0.25); text-align: center; }
+.card-dialog::backdrop { background: rgb(0 0 0 / 0.3); }
+.card-dialog p { margin: 0 0 10px; }
+.card-title { font-weight: 600; font-size: 14px; }
+.card-text { color: var(--muted); }
+.card-close { position: absolute; top: 6px; right: 8px; border: 0; background: none; color: var(--muted); font-size: 18px; line-height: 1; padding: 2px 6px; }
+.card-close:hover { color: var(--text); }
+/* Disconnected (restrictive, no access): the whole panel grey. Blocked in TRIF: red. */
+body.site-disconnected :is(.bar, .gate) { filter: grayscale(1); }
+body.site-blocked, body.site-blocked.needs-login { --switch-on: var(--bad); } /* (red over a login's yellow) */
+body.site-blocked .gate-title { color: var(--bad); }
+body.site-blocked .btn.go { color: #fff; }
+/* Settings, "Site permissions": the two modes, the current one marked, and the blocked sites. */
+.sites-block { display: grid; gap: 6px; border-top: 1px solid var(--line); padding-top: 8px; }
+.sites-title { margin: 0; font-size: 12px; font-weight: 600; }
+.mode-choice { display: grid; gap: 6px; }
+.mode-choice[hidden] { display: none; }
+.starts-row { grid-template-columns: 1fr auto; }
+.mode { display: grid; gap: 1px; text-align: left; padding: 6px 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--raised); font-size: 12px; }
+.mode span { color: var(--muted); }
+.mode[aria-pressed="true"] { border-color: var(--switch-on); box-shadow: inset 0 0 0 1px var(--switch-on); }
+.blocked-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 4px; font-size: 12px; }
+.blocked-list li { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.blocked-list:empty { display: none; }
+.gate-icon { stroke: none; }
+.gate-icon .rim { fill: var(--switch-on); }
+.gate-icon .face { fill: #18181a; }
+.btn.go { padding: 8px 16px; border-color: transparent; background: var(--switch-on); color: #04291c; font-size: 13px; font-weight: 600; }
+.btn.go:hover { background: color-mix(in srgb, var(--switch-on) 85%, #000); }
+/* There the top bar keeps only the dot, the robot (grey and dim, below) and settings; with no website, only
+   settings, and the dot when something red is wrong. Settings are for every site, so they open from both.
+   (A notice moved into the gate, the login in progress, shows: only the body's own notices hide.) */
+body:is(.site-off, .no-site) :is(.site, #site-switch, #new-chat, .mods, .chat, .composer, .using),
+body:is(.site-off, .no-site) > .notice { display: none; }
+body.no-site .bar-robot, body.no-site:not(.blocked) .dot { display: none; }
+/* No website in this tab (a new tab, the browser's own pages): only the shaded robot, where the gate's sits. */
+/* The robot, then the version in bold and the line under it, centred as a group; the extra 33px of top
+   padding moves the group 16.5px down, where the robot sat before it had words under it. */
+.landing { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 57px 16px 64px; text-align: center; }
+.landing[hidden] { display: none; }
+.landing-icon { flex: none; width: 145px; height: 145px; }
+.landing-words { margin-top: 48px; display: flex; flex-direction: column; align-items: center; gap: 6px; }
+.landing-version { margin: 0; font-size: 15px; font-weight: 600; }
+.landing-lead { margin: 0; color: var(--muted); }
+/* What's in the way, under the gate's or the landing page's own words: one line in the colour it's in. */
+.problem-line { max-width: 300px; margin: 0; text-align: center; color: var(--bad); }
+body.needs-login .problem-line { color: var(--warn); }
+.problem-line p { margin: 0; }
+.problem-line a { color: inherit; }
+.problem-line code { white-space: nowrap; }
+.landing .problem-line { margin-top: 18px; }
+/* The login started from the gate's line: its notice, in the gate in place of the line. */
+.gate .notice { width: min(100%, 320px); margin: 0; }
+/* Settings open above either one: in a short panel it scrolls instead of running off the bottom. */
+.gate, .landing { min-height: 0; overflow-y: auto; justify-content: safe center; }
+/* The power, + and settings buttons: close together, at the right edge (the power button can be hidden). */
+.bar-actions { flex: none; display: flex; align-items: center; gap: 2px; margin-left: auto; }
+/* The robot in the middle of the bar (the toolbar icon), a button like the power button beside settings:
+   clicking him puts the panel to sleep, or on "The robot is off." wakes it. */
+.bar-robot { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); }
+.bar-robot svg { width: 20px; height: 20px; stroke: none; transition: filter 0.15s ease, opacity 0.15s ease; }
+.bar-robot .rim { fill: var(--switch-on); }
+.bar-robot .face { fill: #18181a; }
+.bar-robot .eye { fill: #59dbab; }
+.bar-robot[aria-busy="true"] { cursor: progress; opacity: 0.6; }
+/* Asleep: still him, eyes and all, but grey and dim; pointing at him brightens him a little toward awake. */
+body.site-off .bar-robot svg { filter: grayscale(1); opacity: 0.45; }
+body.site-off .bar-robot:hover:not([aria-busy="true"]) svg { filter: grayscale(0.6); opacity: 0.7; }
+/* On the light background the same opacity washes him out to a pale chip: less faded there. */
+@media (prefers-color-scheme: light) {
+  body.site-off .bar-robot svg { opacity: 0.6; }
+  body.site-off .bar-robot:hover:not([aria-busy="true"]) svg { opacity: 0.85; }
+}
+/* The power button that turns TRIF off (and on) for the site. */
+.power { color: var(--muted); }
+.power svg { stroke-width: 1.8; }
+.power[aria-checked="true"], .power[aria-checked="true"]:hover:not(:disabled) { color: var(--switch-on); }
+.power[aria-busy="true"] { cursor: progress; opacity: 0.6; }
+
+/* Something in the way, the same conditions as the dot (sidepanel.js render): every green turns red when
+   TRIF is missing a part (the helper isn't connected, or user scripts are off), or yellow when the agent
+   needs a login (or the open model a key) first. Nearly all of it is --switch-on (switch.css): the robots,
+   the power button, the Fix button, and (when user scripts are off) the mod switches and their lights. */
+body.blocked { --switch-on: var(--bad); }
+body.needs-login { --switch-on: var(--warn); }
+body.blocked .bar-robot .eye { fill: #ffc2bc; }
+body.needs-login .bar-robot .eye { fill: #fbe3a6; }
+body.needs-login .btn.go { color: #2e1f02; }
+/* Except the mods while only the helper is away, or only a login is missing: they still run (the extension
+   keeps its copy), so their switches and lights stay green. */
+body[data-problem="helper"] .mod-list, body.needs-login .mod-list { --switch-on: var(--trif-green); }
+
+.field { display: grid; grid-template-columns: 52px 1fr; align-items: center; gap: 8px; }
+.field > span { color: var(--muted); }
+.field select, .field input {
+  width: 100%;
+  min-width: 0;
+  padding: 5px 8px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: var(--bg);
+}
+
+.field-stacked { grid-template-columns: 1fr; gap: 4px; }
+/* The open model's API key: a password field with Save / Remove beside it. */
+.om-key { display: flex; gap: 6px; min-width: 0; margin: 0; }
+.om-key input { flex: 1; }
+.om-key .btn { padding: 4px 10px; }
+.om-key-ok { flex: 1; align-self: center; color: var(--ok); font-weight: 600; }
+.field textarea {
+  width: 100%;
+  min-width: 0;
+  box-sizing: border-box;
+  padding: 5px 8px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: var(--bg);
+  resize: vertical;
+  font-size: 13px;
+}
+.field textarea::placeholder { color: var(--faint); }
+
+.note { margin: 0; color: var(--muted); font-size: 12px; }
+.note.error { color: var(--bad); }
+
+/* Settings, Tim's mods: a row per site, added or with its Add button. */
+.starter { display: grid; gap: 6px; padding-top: 8px; border-top: 1px solid var(--line); }
+.starter[hidden] { display: none; }
+.starter-title { margin: 0; font-weight: 600; }
+.starter-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; }
+.starter-list li { display: grid; grid-template-columns: 1fr auto; gap: 0 10px; align-items: center; }
+.starter-site { font-weight: 500; }
+.starter-mods { grid-column: 1; color: var(--muted); font-size: 12px; }
+.starter-state { grid-column: 2; grid-row: 1 / span 2; color: var(--muted); font-size: 12px; }
+.starter-list .btn { grid-column: 2; grid-row: 1 / span 2; }
+/* A site's panel: "Add Tim's mods for <site>", small. */
+.site-starter { flex: none; margin: 8px 12px 0; font-size: 12px; text-align: center; }
+.site-starter[hidden] { display: none; }
+.gate .site-starter { margin: 0; }
+.site-starter .mod-err { display: block; margin-top: 4px; }
+.site-starter .mod-err[hidden] { display: none; }
+body.no-site .site-starter { display: none; }
+
+.notice p { margin: 0; }
+.notice p + p, .notice p + .actions { margin-top: 6px; }
+.notice .title { font-weight: 600; }
+.notice.bad { border-color: color-mix(in srgb, var(--bad) 35%, var(--line)); }
+.notice .actions { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.notice > * + * { margin-top: 6px; }
+.notice.ok { border-color: color-mix(in srgb, var(--ok) 35%, var(--line)); }
+.notice .md p + p { margin-top: 4px; }
+.login-form { display: flex; gap: 6px; }
+/* What follows the code field (the note, or Cancel and "Open the sign-in page again"), a little apart. */
+.notice .login-form + p { margin-top: 8px; }
+.login-form input {
+  flex: 1;
+  min-width: 0;
+  padding: 4px 8px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: var(--bg);
+  font: 12px/1.4 var(--mono);
+}
+
+.btn {
+  padding: 4px 10px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: var(--raised);
+  font-size: 12px;
+}
+.btn:hover { border-color: var(--faint); }
+.btn.primary { background: var(--accent); border-color: transparent; color: var(--on-accent); }
+
+.mods summary {
+  cursor: pointer;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 500;
+  list-style-position: outside;
+}
+.mods summary::marker { color: var(--faint); }
+.count { color: var(--faint); }
+/* A section of its own above the chat: at most about 40% of the panel, scrolling inside, so the chat
+   below shrinks instead of being pushed out of sight. */
+.mod-list {
+  list-style: none; margin: 4px -3px 0; padding: 2px 3px; /* room for focus rings inside the scroller */
+  max-height: calc(40vh - 40px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-width: thin;
+}
+.mod-list li { padding: 5px 0; border-top: 1px solid var(--line); }
+.mod-list li:first-child { border-top: 0; }
+.mod-row { display: flex; align-items: center; gap: 10px; }
+/* Reordering (sidepanel.js): the grip at the start of each row, the row being dragged, the rows making way. */
+.mod-list { position: relative; } /* (the rows' offsetTop is within the list) */
+.mod-grip { flex: none; width: 16px; height: 24px; margin-right: -6px; color: var(--faint); cursor: grab; touch-action: none; opacity: 0.6; }
+.mod-grip svg { width: 14px; height: 14px; fill: currentColor; stroke: none; }
+.mod-list li:hover .mod-grip, .mod-grip:focus-visible { opacity: 1; }
+.mod-grip:hover:not(:disabled) { background: transparent; color: var(--text); }
+.mod-list.dragging, .mod-list.dragging * { cursor: grabbing; user-select: none; -webkit-user-select: none; }
+.mod-list.dragging > li:not(.drag) { transition: transform 0.15s ease; }
+.mod-list li.drag {
+  position: relative; z-index: 1;
+  background: var(--surface);
+  border-radius: 4px;
+  box-shadow: 0 0 0 4px var(--surface), 0 0 0 5px var(--line), 0 8px 20px 4px light-dark(rgb(0 0 0 / 0.12), rgb(0 0 0 / 0.5));
+}
+.mod-list li.drag, .mod-list li.drag + li { border-top-color: transparent; }
+@media (prefers-reduced-motion: reduce) { .mod-list.dragging > li:not(.drag) { transition: none; } }
+.mod-main { flex: 1; min-width: 0; }
+.mod-name { font-weight: 500; }
+h3.mod-name { margin: 0; font-size: inherit; line-height: inherit; }
+/* The light hangs left of the name and file, so wrapped lines line up with the name. */
+.mod-main { position: relative; padding-left: 14px; }
+.light { position: absolute; left: 0; top: 6px; width: 7px; height: 7px; border-radius: 50%;
+  background: color-mix(in srgb, var(--muted) 45%, transparent); }
+.light.on { background: var(--switch-on); }
+.mod-list li.off .mod-name { color: var(--muted); }
+.mod-desc { color: var(--muted); font-size: 12px; line-height: 1.35; overflow-wrap: anywhere; }
+/* Next to the name; when both don't fit on a line, the file name goes to the next one whole (it breaks only
+   when it's longer than a line). */
+.mod-file { display: inline-block; max-width: 100%; color: var(--muted); font: 11px/1.4 var(--mono); font-weight: 400; overflow-wrap: anywhere; }
+.mod-err { color: var(--bad); font-size: 12px; }
+.mod-source { font: 400 11px/1.4 system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; color: var(--faint); }
+.mod-source::before { content: "· "; }
+/* A new version of a shipped mod the user changed, with what they can do about it. */
+.mod-update { margin: 6px 0 2px 34px; padding: 6px 8px; border: 1px solid var(--line); border-radius: 7px; font-size: 12px; }
+.mod-update p { margin: 0; }
+.mod-update .actions { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; }
+/* A waiting button looks it (its tooltip says why), instead of silently ignoring clicks. */
+.mod-update .btn:disabled { opacity: 0.5; }
+.mod-update .btn:disabled:hover { border-color: var(--line); }
+.mod-list li.held .mod-name { color: var(--muted); }
+.allow { flex: none; }
+.mod-delete { width: 24px; height: 24px; color: var(--faint); }
+.mod-delete svg { width: 14px; height: 14px; }
+.mod-delete:hover:not(:disabled) { color: var(--bad); }
+.tag.risk-1 { color: var(--muted); }
+.tag.risk-2 { color: var(--bad); border-color: currentColor; }
+.tag {
+  white-space: nowrap;
+  padding: 0 5px;
+  border: 1px solid var(--line);
+  border-radius: 5px;
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 400;
+}
+
+/* ---- chat ------------------------------------------------------------------------------------ */
+
+.chat {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: 12px 12px 4px;
+  scrollbar-width: thin;
+}
+
+.empty { padding: 18px 2px 8px; }
+.empty-lead { margin: 0 0 12px; color: var(--muted); }
+.chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.chip {
+  padding: 5px 11px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--surface);
+  font-size: 12px;
+}
+.chip:hover { border-color: var(--faint); }
+
+.messages { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
+
+.msg { max-width: 100%; overflow-wrap: anywhere; }
+
+.msg.user {
+  align-self: flex-end;
+  max-width: 88%;
+  padding: 7px 11px;
+  border-radius: 12px 12px 4px 12px;
+  background: var(--user);
+  white-space: pre-wrap;
+}
+
+.msg.assistant { padding: 0 2px; }
+.msg.assistant > :first-child { margin-top: 0; }
+.msg.assistant > :last-child { margin-bottom: 0; }
+.msg.assistant p, .msg.assistant ul, .msg.assistant ol, .msg.assistant pre, .msg.assistant blockquote { margin: 0 0 8px; }
+.msg.assistant ul, .msg.assistant ol { padding-left: 18px; }
+.msg.assistant li + li { margin-top: 2px; }
+.msg.assistant h4 { margin: 10px 0 4px; font-size: 13px; }
+.msg.assistant hr { border: 0; border-top: 1px solid var(--line); margin: 10px 0; }
+.msg.assistant blockquote { padding-left: 10px; border-left: 2px solid var(--line); color: var(--muted); }
+.msg.assistant pre {
+  padding: 8px 10px;
+  border-radius: 8px;
+  background: var(--code);
+  overflow-x: auto;
+  white-space: pre;
+  font: 11.5px/1.45 var(--mono);
+}
+.msg.assistant pre code { padding: 0; background: none; font: inherit; }
+.msg.assistant table { display: block; max-width: 100%; overflow-x: auto; margin: 0 0 8px; border-collapse: collapse; font-size: 12px; }
+.msg.assistant th, .msg.assistant td { padding: 2px 8px 2px 0; border-bottom: 1px solid var(--line); text-align: left; vertical-align: top; }
+.msg.assistant th { color: var(--muted); font-weight: 500; }
+
+.msg.tool {
+  padding: 0 2px;
+  color: var(--faint);
+  font: 11px/1.5 var(--mono);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.msg.tool + .msg.tool { margin-top: -6px; }
+.msg.mod { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 0 2px; color: var(--muted); font-size: 12px; }
+.msg.mod .btn { padding: 2px 10px; }
+
+/* The agent needs logging in (the notice above says how): a plain line, not an error. */
+.msg.login { padding: 0 2px 0 8px; border-left: 2px solid var(--warn); color: var(--muted); font-size: 12px; }
+
+.msg.error {
+  padding: 7px 10px;
+  border-radius: 8px;
+  background: var(--bad-bg);
+  color: var(--bad);
+}
+.msg.error p { margin: 0; }
+.msg.error p + p { margin-top: 4px; }
+
+.working {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 2px 4px;
+  color: var(--muted);
+}
+.pulse {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--accent);
+  animation: pulse 1.2s ease-in-out infinite;
+}
+@keyframes pulse { 0%, 100% { opacity: 0.25; transform: scale(0.8); } 50% { opacity: 1; transform: scale(1); } }
+@media (prefers-reduced-motion: reduce) { .pulse { animation: none; } }
+
+
+/* ---- composer -------------------------------------------------------------------------------- */
+
+/* which agent and model this chat uses, small, over the message box */
+.using { display: block; margin: 0 12px 2px auto; padding: 0 2px; border: 0; background: none; color: var(--faint);
+  font: 11px/1.4 inherit; text-align: right; cursor: pointer; max-width: calc(100% - 24px); overflow: hidden;
+  text-overflow: ellipsis; white-space: nowrap; }
+.using:hover { color: var(--muted); text-decoration: underline; }
+.using[hidden] { display: none; }
+.composer {
+  flex: none;
+  position: relative;
+  margin: 6px 12px 12px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--surface);
+}
+.composer:focus-within { border-color: color-mix(in srgb, var(--accent) 55%, var(--line)); }
+
+.composer textarea {
+  display: block;
+  width: 100%;
+  field-sizing: content;
+  height: auto;
+  min-block-size: calc(1lh + 18px);
+  max-block-size: calc(10lh + 18px);
+  padding: 9px 42px 9px 12px;
+  border: 0;
+  border-radius: 12px;
+  background: transparent;
+  resize: none;
+  outline: none;
+}
+.composer textarea::placeholder { color: var(--faint); }
+.composer textarea:disabled { cursor: not-allowed; }
+
+.send {
+  position: absolute;
+  right: 6px;
+  bottom: 6px;
+  display: grid;
+  place-items: center;
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  border: 0;
+  border-radius: 8px;
+  background: var(--accent);
+  color: var(--on-accent);
+}
+.send:disabled { background: var(--raised); color: var(--faint); }
+.send svg { width: 14px; height: 14px; stroke-width: 2; }
+.stop { background: var(--text); color: var(--bg); }
+.stop svg { fill: currentColor; stroke: none; }
+
+/* Settings: automatic updates. */
+.check { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--muted); }
+.check input { margin: 0; }
+
+#update .md { margin-top: 6px; font-size: 12px; color: var(--muted); max-height: min(50vh, 320px); overflow-y: auto; overscroll-behavior: contain; }
+#update .md :is(ul, ol) { margin: 0; padding-left: 16px; }
+#update .md li + li { margin-top: 4px; }
+
+/* What a mod can do (held, or to review): TRIF's facts, read from its code, apart from what the mod says */
+.mods-review-note { margin: 4px 0 6px; font-size: 12px; color: var(--muted); }
+.mod-facts { margin: 6px 0 2px 34px; padding: 6px 8px; border: 1px solid var(--line); border-radius: 7px; font-size: 12px; }
+.mod-facts.held { border-color: var(--bad); }
+.mod-facts p { margin: 0; }
+.mod-facts .facts-head { font-weight: 600; }
+.mod-facts ul.facts { margin: 4px 0; padding-left: 18px; font-weight: 600; }
+.mod-facts .facts-note { color: var(--muted); }
+.mod-facts .facts-claim { margin-top: 4px; color: var(--muted); font-style: italic; }
+.mod-facts .facts-who { font-style: normal; }
+.mod-facts .actions { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; }
+.mod-facts .facts-code { max-height: 220px; overflow: auto; margin: 6px 0 0; padding: 6px; background: var(--field, rgba(127,127,127,.08)); border-radius: 5px; font-size: 11px; white-space: pre-wrap; word-break: break-word; }
+
+/* A tab the agent ran code in (tablock.js) */
+.notice.tab-lock .title { font-weight: 600; }
+
+/* A waiting change, against the version that ran */
+.mod-facts .facts-diff { max-height: 260px; overflow: auto; margin: 6px 0 0; padding: 6px; background: var(--field, rgba(127,127,127,.08)); border-radius: 5px; font-size: 11px; white-space: pre-wrap; word-break: break-word; }
+.mod-facts .facts-diff .add { color: var(--ok, #2f9e6e); }
+.mod-facts .facts-diff .del { color: var(--bad); }
+.mod-facts .facts-diff .gap, .mod-facts .facts-diff .ctx { color: var(--muted); }
+
+/* Groups: how TRIF runs the mods below each heading ("Rules", "Page scripts"), with a switch for this site */
+.mod-list li.mod-group { padding: 8px 0 2px; border-top: 0; }
+.mod-list li.mod-group + li { border-top: 0; }
+.mod-group-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.mod-group-name { margin: 0; font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); }
+.mod-group-note { margin: 0 0 2px; font-size: 11px; color: var(--muted); }
+.mod-list li.group-off { opacity: .45; }
+.mod-list li.mod-group.off .mod-group-name { text-decoration: line-through; }

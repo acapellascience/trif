@@ -716,6 +716,109 @@ export function carryRenames(renames, { disabled = {}, offSites = {}, startedOff
   return { disabled: d, offSites: o, startedOff: s, changed: true };
 }
 
+// ---- the panel in a window of its own ------------------------------------------------------------
+//
+// Some Chromium browsers have chrome.sidePanel but not Chrome's side panel itself: Arc replaced Chrome's
+// browser UI, which is where the side panel lives, so sidePanel.open() does nothing there (even in Chrome
+// it doesn't wait for the panel to show). So a side panel says which window it's in as it loads
+// ("panel.window"), and when none has said so within PANEL_OPEN_WAIT_MS of the toolbar click, the
+// background opens the same page in a popup window beside the browser window instead, following that
+// window's tabs (sidepanel.html?window=<id>&fallback=1). See docs/PROTOCOL.md, "The panel in a window".
+
+export const PANEL_WINDOW_WIDTH = 400;
+export const PANEL_OPEN_WAIT_MS = 1000;
+// A side panel that shows up later than that (a slow start in Chrome) still counts: the window opened
+// meanwhile is closed again, and the browser isn't remembered as needing one.
+export const PANEL_LATE_MS = 10000;
+// A toolbar click focuses the browser window it's in: a focus that recent is the click's own.
+export const CLICK_FOCUS_MS = 500;
+
+/** The panel page's address in a window of its own, following the tabs of browser window `windowId`. */
+export function panelWindowUrl(getURL, windowId) {
+  return getURL(`sidepanel.html?window=${windowId}&fallback=1`);
+}
+
+/**
+ * What the panel page's address (location.search) says: `openedFor`, the browser window whose tabs it
+ * follows when it's a window of its own (Safari's, or the fallback here), else null (a side panel, which
+ * follows its own window's); `fallback`, whether it's the fallback.
+ */
+export function panelQuery(search) {
+  const q = new URLSearchParams(search || '');
+  const id = Number(q.get('window'));
+  const openedFor = Number.isInteger(id) && id > 0 ? id : null;
+  return { openedFor, fallback: openedFor !== null && q.get('fallback') === '1' };
+}
+
+/**
+ * The browser window a panel window (from windows.getAll with tabs) follows, or null when `win` isn't one.
+ * `base` is the extension's own URL (runtime.getURL('')).
+ */
+export function panelWindowTarget(win, base) {
+  const tab = win?.tabs?.length === 1 ? win.tabs[0] : null;
+  const url = tab ? (tab.url || tab.pendingUrl || '') : '';
+  if (!base || !url.startsWith(`${base}sidepanel.html?`)) return null;
+  const { openedFor, fallback } = panelQuery(url.slice(url.indexOf('?')));
+  return fallback ? openedFor : null;
+}
+
+const finite = (n) => typeof n === 'number' && Number.isFinite(n);
+const isBox = (b) => !!b && finite(b.left) && finite(b.top) && finite(b.width) && finite(b.height) && b.width > 0 && b.height > 0;
+
+/** The screen (one of `screens`, {left, top, width, height}: its usable area) that window `win` is mostly on. */
+export function screenFor(screens, win) {
+  if (!isBox(win) || !Array.isArray(screens)) return null;
+  const area = (s) => Math.max(0, Math.min(s.left + s.width, win.left + win.width) - Math.max(s.left, win.left))
+    * Math.max(0, Math.min(s.top + s.height, win.top + win.height) - Math.max(s.top, win.top));
+  let best = null;
+  for (const s of screens.filter(isBox)) if (area(s) > 0 && (!best || area(s) > area(best))) best = s;
+  return best;
+}
+
+/** `screens` with `screen` added (the latest first, a few at most, none twice). */
+export function rememberScreen(screens, screen) {
+  const list = Array.isArray(screens) ? screens.filter(isBox) : [];
+  if (!isBox(screen)) return list;
+  const key = (s) => [s.left, s.top, s.width, s.height].join();
+  const s = { left: screen.left, top: screen.top, width: screen.width, height: screen.height };
+  return [s, ...list.filter((x) => key(x) !== key(s))].slice(0, 6);
+}
+
+/**
+ * Where the panel window goes for browser window `win`: beside its right edge, as tall as it, when the
+ * screen it's on (from `screens`) has room there; otherwise over the window's right edge, inside the
+ * screen. With no screen known, over the right edge (on screen whenever the window's right edge is).
+ */
+export function panelWindowBounds(win, screens, width = PANEL_WINDOW_WIDTH) {
+  if (!isBox(win)) return { width, height: 800 };
+  const w = Math.round(Math.min(width, win.width));
+  const right = Math.round(win.left + win.width);
+  const top = Math.round(win.top);
+  const height = Math.round(win.height);
+  const s = screenFor(screens, win);
+  if (s && right + w <= s.left + s.width) return { left: right, top, width: w, height };
+  let left = right - w;
+  if (s) left = Math.max(s.left, Math.min(left, s.left + s.width - w));
+  return { left: Math.round(left), top, width: w, height };
+}
+
+/**
+ * What a toolbar click in browser window `browser` does while its panel window `panel` is open
+ * (windows.get results; `focusedAt`: window id -> when it was last focused, as far as the background
+ * saw). 'focus' brings the panel back when it's minimized, or behind the browser window (it overlaps it,
+ * and the browser window was focused after it, not just now by the click itself); else 'close', like the
+ * side panel's second click.
+ */
+export function panelWindowClick({ panel, browser, focusedAt = {}, now = Date.now() }) {
+  if (panel?.state === 'minimized') return 'focus';
+  const overlap = isBox(panel) && isBox(browser)
+    && panel.left < browser.left + browser.width && browser.left < panel.left + panel.width
+    && panel.top < browser.top + browser.height && browser.top < panel.top + panel.height;
+  const p = focusedAt[panel?.id] || 0;
+  const b = focusedAt[browser?.id] || 0;
+  return overlap && b > p && now - b > CLICK_FOCUS_MS ? 'focus' : 'close';
+}
+
 // ---- mod order in the side panel --------------------------------------------------------------------
 // The user can drag the panel's mods into the order they like, per site: chrome.storage.local `modOrder` =
 // {"<site>": ["<mod id>", …]} (the site as scopeFor gives it). Display only: mods run in the order they
@@ -1212,7 +1315,9 @@ export function pageGuard(scope, sitesOn, token) {
   return why;
 }
 
-export function buildRunCode(code, expression, runId, guard = null) {
+// tag: give the code a sourceURL of its own (trif-run-<runId>.js), so the page's save guard (tablock.js
+// leakGuard) can tell the agent's code on the call stack from the site's.
+export function buildRunCode(code, expression, runId, guard = null, { tag = false } = {}) {
   const body = expression ? `return (${code}\n);` : `${code}\n`;
   // guard {scope, sitesOn}: checked against the document the code meets, before it runs.
   const check = guard
@@ -1237,7 +1342,7 @@ try {
   setTimeout(() => { try { delete runs[${JSON.stringify(runId)}]; } catch (x) {} }, 60000);
 } catch (x) {}
 return __wmOut;
-})()`;
+})()${tag ? `\n//# sourceURL=trif-run-${String(runId).replace(/[^\w-]/g, '')}.js` : ''}`;
 }
 
 /** Code that reads (and removes) a stored run envelope; evaluates to the string or null. */

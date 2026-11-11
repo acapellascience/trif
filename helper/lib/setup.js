@@ -12,7 +12,7 @@ const os = require('os');
 const path = require('path');
 const { envVar } = require('./env');
 const P = require('./paths');
-const { selectBrowsers, SAFARI_AGENT_LABEL, LEGACY_SAFARI_AGENT_LABEL, safariAgentPlist, legacySafariAgentPlist, legacySafariAgentLoaded } = require('./browsers');
+const { selectBrowsers, manifestFiles, SAFARI_AGENT_LABEL, LEGACY_SAFARI_AGENT_LABEL, safariAgentPlist, legacySafariAgentPlist, legacySafariAgentLoaded } = require('./browsers');
 const { migrateHome, describeMigration, migratePrivate } = require('./migrate');
 const { preinstallMods, updateShippedMods, retireShippedMods, starterSites, starterChoices, chooseNoStarter, siteOf, siteName } = require('./preinstalled');
 const { acquireInstallLock, pidAlive } = require('./lock');
@@ -589,7 +589,7 @@ function setup(opts = {}) {
   if (invalid.length) say(`              ignored config.json extensionIds entries that aren't extension IDs: ${invalid.map((x) => JSON.stringify(x)).join(', ')}`);
   let targets;
   if (opts.nativeDir) {
-    targets = [{ key: 'custom', label: 'custom', nativeDir: path.resolve(opts.nativeDir) }];
+    targets = [{ key: 'custom', label: 'custom', nativeDirs: [path.resolve(opts.nativeDir)] }];
   } else {
     targets = selectBrowsers(opts.browser);
     if (!targets.length) {
@@ -638,20 +638,23 @@ function setup(opts = {}) {
       }
       continue;
     }
-    const file = path.join(t.nativeDir, `${P.HOST_NAME}.json`);
+    // (Arc's go in two folders, the one it reads first: Chrome's. Browsers that share one, as Arc and Chrome
+    // do, write the same file.)
     const manifest = JSON.stringify(manifestFor(ws.hostWrapper, origins, { firefox: t.firefox }), null, 2) + '\n';
-    try {
-      fs.mkdirSync(t.nativeDir, { recursive: true });
-      const how = writeIfChanged(file, manifest);
-      manifests.push({ browser: t.key, file });
-      say(`native host   ${t.label}: ${file} (${how})`);
-    } catch (e) {
-      ok = false;
-      note(`native host   ${t.label}: FAILED to write ${file}: ${e.message}`);
+    for (const file of manifestFiles(t)) {
+      try {
+        fs.mkdirSync(path.dirname(file), { recursive: true });
+        const how = writeIfChanged(file, manifest);
+        manifests.push({ browser: t.key, file });
+        say(`native host   ${t.label}: ${file} (${how})`);
+      } catch (e) {
+        ok = false;
+        note(`native host   ${t.label}: FAILED to write ${file}: ${e.message}`);
+      }
     }
   }
 
-  const setUp = targets.filter((t) => manifests.some((m) => m.browser === t.key)).map((t) => (t.key === 'custom' ? t.nativeDir : t.label));
+  const setUp = targets.filter((t) => manifests.some((m) => m.browser === t.key)).map((t) => (t.key === 'custom' ? t.nativeDirs[0] : t.label));
   if (setUp.length) tell(`✓ Set up for ${setUp.join(' and ')}`);
 
   // 5. CLI link

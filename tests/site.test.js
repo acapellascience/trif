@@ -171,8 +171,8 @@ test('the demo: its routes, and the side panel from the extension\'s own files',
     assert.ok(res.headers.get('Content-Type').startsWith(type), p);
     assert.equal(res.headers.get('X-Content-Type-Options'), 'nosniff', p);
   }
-  // The extension's files, byte for byte (sidepanel.html: plus the demo's two lines).
-  const ext = (f) => fs.readFileSync(path.join(REPO_DIR, 'extension', f), 'utf8');
+  // The demo's frozen panel files (site/demo/panel/), byte for byte (sidepanel.html: plus the demo's two lines).
+  const ext = (f) => fs.readFileSync(path.join(REPO_DIR, 'site', 'demo', 'panel', f), 'utf8');
   assert.equal(await (await get(worker, e, '/demo/ext/sidepanel.js')).text(), ext('sidepanel.js'));
   const panel = await (await get(worker, e, '/demo/ext/sidepanel.html')).text();
   assert.equal(panel, ext('sidepanel.html').replace('</head>', '<link rel="stylesheet" href="/demo/panel.css">\n<script src="/demo/shim.js"></script>\n</head>'));
@@ -252,7 +252,7 @@ test('the home page works without script: everything is in the HTML; the demo ta
 
 test('the demo serves every extension file the side panel loads', async () => {
   const { EXTENSION_FILES } = await import('../site/src/demo.js');
-  const dir = path.join(REPO_DIR, 'extension');
+  const dir = path.join(REPO_DIR, 'site', 'demo', 'panel'); // (the demo's frozen copy of the panel)
   const need = new Set();
   const html = fs.readFileSync(path.join(dir, 'sidepanel.html'), 'utf8');
   for (const [, ref] of html.matchAll(/(?:src|href)="([^"#:]+)"/g)) need.add(ref);

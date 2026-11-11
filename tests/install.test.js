@@ -13,7 +13,7 @@ const { installApp, chooseMode, cleanPath, loadSafariAgent } = require('../helpe
 const L = require('../helper/lib/lock');
 const { preinstallMods, loadPreinstalled, PREINSTALLED, SITES_ON, starterSites, starterChoices, chooseNoStarter, installStarter, starterOffer, resolveSites, updateShippedMods: updateShipped } = require('../helper/lib/preinstalled');
 const { checkWrapperScript } = require('../helper/lib/doctor');
-const { browserTable } = require('../helper/lib/browsers');
+const { browserTable, manifestFiles, browsersSetUp } = require('../helper/lib/browsers');
 
 const DEV_ORIGIN = 'chrome-extension://iaablflfafmonebdomeikadolkgdbkhe/';
 const OTHER_ID = 'abcdefghijklmnopabcdefghijklmnop';
@@ -770,7 +770,7 @@ test('setup --browser firefox writes a manifest with allowed_extensions; doctor 
   assert.equal(fx.allowed_origins, undefined);
   assert.equal(fx.path, path.join(ws, 'bin', 'trif-host'));
   const chrome = browserTable(fakehome).find((b) => b.key === 'chrome');
-  assert.deepEqual(readManifest(chrome.nativeDir).allowed_origins, [DEV_ORIGIN]);
+  assert.deepEqual(readManifest(chrome.nativeDirs[0]).allowed_origins, [DEV_ORIGIN]);
   assert.match(r.stdout, /Firefox: if it was running before this setup, quit it completely and reopen it\. Then open this\n {5}link in Firefox to install the TRIF add-on:\n {7}https:\/\/github\.com\/[\w.-]+\/[\w.-]+\/releases\/latest\/download\/trif-firefox\.xpi\n/);
 
   let d = await runCli(['doctor'], { home: ws });
@@ -780,13 +780,143 @@ test('setup --browser firefox writes a manifest with allowed_extensions; doctor 
   assert.match(d.stdout, new RegExp(`FAIL {2}Firefox: .*allowed_extensions doesn't include ${esc(P.FIREFOX_EXTENSION_ID)}`));
 });
 
+test('doctor: a browser whose profile folder is there but that setup didn\'t do is a note, not a failure, while others are set up', async () => {
+  const root = tempDir();
+  const ws = path.join(root, 'ws');
+  fs.mkdirSync(ws, { recursive: true });
+  const fakehome = path.join(ws, 'fakehome');
+  const r = await runCli(['setup', '--verbose', '--browser', 'arc', '--no-link', '--no-examples'], { home: ws });
+  assert.equal(r.code, 0, r.stderr);
+  // Brave and Edge show up after setup (installed later; updates keep the browsers set up as they were).
+  const table = browserTable(fakehome);
+  for (const k of ['brave', 'edge']) fs.mkdirSync(table.find((b) => b.key === k).userData, { recursive: true });
+  let d = await runCli(['doctor'], { home: ws });
+  assert.match(d.stdout, /ok {4}Arc: native host manifest/);
+  assert.match(d.stdout, /- {5}Brave: not set up \(only needed if you use TRIF in Brave\)\n {6}fix: .*setup.* --browser brave/);
+  assert.match(d.stdout, /- {5}Microsoft Edge: not set up/);
+  assert.doesNotMatch(d.stdout, /FAIL.*native host manifest missing/);
+  // Nothing set up anywhere: then a missing manifest is the problem.
+  for (const f of manifestFiles(table.find((b) => b.key === 'arc'))) fs.rmSync(f);
+  d = await runCli(['doctor'], { home: ws });
+  assert.match(d.stdout, /FAIL {2}Brave: native host manifest missing/);
+});
+
 test('browserTable: Firefox has one native host folder for every profile', () => {
   const mac = browserTable('/H', 'darwin').find((b) => b.key === 'firefox');
-  assert.equal(mac.nativeDir, '/H/Library/Application Support/Mozilla/NativeMessagingHosts');
+  assert.deepEqual(mac.nativeDirs, ['/H/Library/Application Support/Mozilla/NativeMessagingHosts']);
   assert.equal(mac.firefox, true);
   const linux = browserTable('/H', 'linux').find((b) => b.key === 'firefox');
-  assert.equal(linux.nativeDir, '/H/.mozilla/native-messaging-hosts');
+  assert.deepEqual(linux.nativeDirs, ['/H/.mozilla/native-messaging-hosts']);
   assert.equal(browserTable('/H', 'darwin').find((b) => b.key === 'chrome').firefox, false);
+});
+
+test('browserTable: Arc\'s manifest goes in Chrome\'s folder (the one Arc reads, first) and its own; the others\' in their own', () => {
+  const t = (key, platform = 'darwin') => browserTable('/H', platform).find((b) => b.key === key);
+  const AS = '/H/Library/Application Support';
+  assert.deepEqual(t('arc').nativeDirs, [`${AS}/Google/Chrome/NativeMessagingHosts`, `${AS}/Arc/User Data/NativeMessagingHosts`]);
+  assert.deepEqual(manifestFiles(t('arc')), [`${AS}/Google/Chrome/NativeMessagingHosts/${P.HOST_NAME}.json`, `${AS}/Arc/User Data/NativeMessagingHosts/${P.HOST_NAME}.json`]);
+  assert.deepEqual(t('chrome').nativeDirs, [`${AS}/Google/Chrome/NativeMessagingHosts`]);
+  assert.deepEqual(t('brave').nativeDirs, [`${AS}/BraveSoftware/Brave-Browser/NativeMessagingHosts`]);
+  assert.deepEqual(t('edge').nativeDirs, [`${AS}/Microsoft Edge/NativeMessagingHosts`]);
+  assert.deepEqual(t('safari').nativeDirs, []);
+  assert.deepEqual(t('chrome', 'linux').nativeDirs, ['/H/.config/google-chrome/NativeMessagingHosts']);
+  assert.equal(t('arc', 'linux'), undefined);
+});
+
+test('browserTable: a Chromium folder holding only NativeMessagingHosts (Chrome\'s, after setup for Arc) isn\'t a browser detected', () => {
+  const home = tempDir();
+  const chrome = () => browserTable(home, 'darwin').find((b) => b.key === 'chrome');
+  assert.equal(chrome().detected, false);
+  fs.mkdirSync(chrome().userData, { recursive: true });
+  assert.equal(chrome().detected, true, 'an empty folder still counts, as before');
+  fs.mkdirSync(chrome().nativeDirs[0]);
+  fs.writeFileSync(path.join(chrome().userData, '.DS_Store'), '');
+  assert.equal(chrome().detected, false);
+  fs.mkdirSync(path.join(chrome().userData, 'Default'));
+  assert.equal(chrome().detected, true, 'a profile');
+  // Firefox's folders are apart: its profile folder is what counts.
+  const fx = () => browserTable(home, 'darwin').find((b) => b.key === 'firefox');
+  fs.mkdirSync(fx().nativeDirs[0], { recursive: true });
+  assert.equal(fx().detected, false);
+  fs.mkdirSync(fx().userData, { recursive: true });
+  assert.equal(fx().detected, true);
+});
+
+test('browsersSetUp: Chrome\'s manifest written for Arc is Arc\'s, unless Chrome is there too', () => {
+  const home = tempDir();
+  const table = () => browserTable(home, 'darwin');
+  const b = (key) => table().find((x) => x.key === key);
+  const keys = () => browsersSetUp(table()).map((x) => x.key);
+  const write = (file) => { fs.mkdirSync(path.dirname(file), { recursive: true }); fs.writeFileSync(file, '{}'); };
+  assert.deepEqual(keys(), []);
+  // An older setup for Arc: its own folder only.
+  fs.mkdirSync(path.join(b('arc').userData, 'Default'), { recursive: true });
+  write(manifestFiles(b('arc'))[1]);
+  assert.deepEqual(keys(), ['arc']);
+  // Setup for Arc now: Chrome's folder too, but Chrome isn't installed.
+  write(manifestFiles(b('arc'))[0]);
+  assert.deepEqual(keys(), ['arc']);
+  // Chrome installed (a profile): the same file is Chrome's too.
+  fs.mkdirSync(path.join(b('chrome').userData, 'Default'));
+  assert.deepEqual(keys(), ['chrome', 'arc']);
+  // Arc gone (its folder too): Chrome's manifest is Chrome's.
+  fs.rmSync(b('arc').userData, { recursive: true });
+  assert.deepEqual(keys(), ['chrome']);
+});
+
+test('setup for Arc writes the manifest to Chrome\'s folder and Arc\'s; doctor checks Chrome\'s, and leaves Chrome out', async () => {
+  const root = tempDir();
+  const ws = path.join(root, 'ws');
+  fs.mkdirSync(ws, { recursive: true });
+  const fakehome = path.join(ws, 'fakehome');
+  const arc = () => browserTable(fakehome).find((b) => b.key === 'arc');
+  fs.mkdirSync(path.join(arc().userData, 'Default'), { recursive: true }); // Arc, with a profile
+  const r = await runCli(['setup', '--verbose', '--no-link', '--no-examples'], { home: ws }); // (detected: Arc alone)
+  assert.equal(r.code, 0, r.stderr);
+  const [inChrome, own] = manifestFiles(arc());
+  assert.match(inChrome, /Google\/Chrome\/NativeMessagingHosts\//);
+  assert.deepEqual(readManifest(path.dirname(inChrome)).allowed_origins, [DEV_ORIGIN]);
+  assert.equal(fs.readFileSync(own, 'utf8'), fs.readFileSync(inChrome, 'utf8'));
+  assert.equal(readManifest(path.dirname(own)).path, path.join(ws, 'bin', 'trif-host'));
+  assert.match(r.stdout, new RegExp(`native host {3}Arc: ${esc(inChrome)} `));
+  assert.match(r.stdout, new RegExp(`native host {3}Arc: ${esc(own)} `));
+  assert.equal(browserTable(fakehome).find((b) => b.key === 'chrome').detected, false);
+
+  let d = await runCli(['doctor'], { home: ws });
+  assert.match(d.stdout, /ok {4}Arc: native host manifest/);
+  assert.doesNotMatch(d.stdout, /Google Chrome/, 'Chrome\'s folder is only Arc\'s here');
+  // Setup again (as an update does): still Arc alone, not Chrome too.
+  const again = await runCli(['setup', '--no-link', '--no-examples'], { home: ws });
+  assert.equal(again.code, 0, again.stderr);
+  assert.match(again.stdout, /^✓ Set up for Arc$/m);
+
+  // Arc's own folder doesn't matter to Arc 1.169: without it, Arc is still fine.
+  fs.rmSync(own);
+  d = await runCli(['doctor'], { home: ws });
+  assert.match(d.stdout, /ok {4}Arc: native host manifest/);
+  // Set up by an older setup, in Arc's own folder only: that's the "native messaging host not found".
+  fs.writeFileSync(own, fs.readFileSync(inChrome));
+  fs.rmSync(inChrome);
+  d = await runCli(['doctor'], { home: ws });
+  assert.match(d.stdout, new RegExp(`FAIL {2}Arc: native host manifest missing \\(${esc(inChrome)}\\), where Arc reads it\n {6}fix: .*setup.* --browser arc`));
+  // A wrong one in Chrome's folder fails Arc too.
+  fs.writeFileSync(inChrome, JSON.stringify({ ...JSON.parse(fs.readFileSync(own, 'utf8')), allowed_origins: [] }));
+  d = await runCli(['doctor'], { home: ws });
+  assert.match(d.stdout, /FAIL {2}Arc: native host manifest .*allowed_origins doesn't include/);
+});
+
+test('setup for Chrome and Arc: one manifest in Chrome\'s folder for both; doctor checks both', async () => {
+  const root = tempDir();
+  const ws = path.join(root, 'ws');
+  fs.mkdirSync(ws, { recursive: true });
+  const fakehome = path.join(ws, 'fakehome');
+  for (const k of ['chrome', 'arc']) fs.mkdirSync(path.join(browserTable(fakehome).find((b) => b.key === k).userData, 'Default'), { recursive: true });
+  const r = await runCli(['setup', '--no-link', '--no-examples'], { home: ws });
+  assert.equal(r.code, 0, r.stderr);
+  assert.match(r.stdout, /^✓ Set up for Google Chrome and Arc$/m);
+  const d = await runCli(['doctor'], { home: ws });
+  assert.match(d.stdout, /ok {4}Google Chrome: native host manifest/);
+  assert.match(d.stdout, /ok {4}Arc: native host manifest/);
 });
 
 test('build-extension firefox: sidebar, background scripts, optional userScripts, gecko id', async () => {

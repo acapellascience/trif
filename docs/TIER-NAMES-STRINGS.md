@@ -1,5 +1,7 @@
 # Tier names: the strings that changed (branch tier-names)
 
+**Approved by Tim, 2026-11-10** (the Boxed line ⚑ in the wording he chose: "Run in TRIF's sandbox: they change what the page shows, and do only what you've allowed.", in extension/sidepanel.js).
+
 Rules → **Style mods**, Sandboxed → **Boxed mods**, Page scripts → **Free mods**. Only what people (and
 agents) read changed: stored values, message types, identifiers and file formats keep rules / sandboxed /
 page, so nobody's switches move. Headers: `@style` and `@boxed` are new; `@rules` and `@sandboxed` work

@@ -1,0 +1,42 @@
+{
+  "manifest_version": 3,
+  "name": "Tim's Robot Internet Fixer",
+  "version": "0.2.5",
+  "description": "Customize any website with mods written by your coding agent.",
+  "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAvrM00irPxw843QWA7797u9U1QLvK2M9cHdfoblqrEGec2aA++jHrJMdStaXa19U5R+K+aI8atnfwq4FLGDNid11AcgBavxUgtOGU7cXIXDX8MVdbfBVdMl4oMcfOVH1QJW6z0X5CzavJ5+F4HQj2dOQ8gMEBqjrB0k8rGD7G+93Tj7ewODVcYclNqZJUEfnGbz+TIbHh98F6KkwIvbJF3ng3Uh/6Qq7lXgPa6sGvRTIHGTJ0tD7xeJ7sWteE/3f8jzs6pKyYJyBqxoPYciim2LtzgxF+BHFe7c8CBFRflRTG0ofwblJwcRNhqMFYIwsxZes7QVd1c/ul/xdk2uOu9wIDAQAB",
+  "minimum_chrome_version": "138",
+  "background": {
+    "service_worker": "background.js",
+    "type": "module"
+  },
+  "icons": {
+    "16": "icons/robot-16.png",
+    "32": "icons/robot-32.png",
+    "48": "icons/robot-48.png",
+    "128": "icons/robot-128.png"
+  },
+  "action": {
+    "default_title": "Tim's Robot Internet Fixer",
+    "default_icon": {
+      "16": "icons/robot-16.png",
+      "32": "icons/robot-32.png"
+    }
+  },
+  "side_panel": {
+    "default_path": "sidepanel.html"
+  },
+  "permissions": [
+    "userScripts",
+    "storage",
+    "unlimitedStorage",
+    "tabs",
+    "nativeMessaging",
+    "scripting",
+    "sidePanel",
+    "activeTab",
+    "declarativeNetRequest"
+  ],
+  "optional_host_permissions": [
+    "<all_urls>"
+  ]
+}

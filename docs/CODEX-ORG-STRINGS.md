@@ -1,6 +1,9 @@
 # Organization settings: new strings (0.2.6)
 
-**Status: AWAITING TIM'S OK.** Drafts as built on `release-0.2.6`. Nothing here is final until Tim says so.
+**Status: Approved by Tim, 2026-11-11**, with his two changes: no message names another agent ("another
+agent" instead), and no "in TRIF" in the suggestions ("Use a personal {Agent} login, try another agent, or
+work with {Agent} in a terminal in ~/.trif."). Also approved: the CHANGELOG line below (M5), and the
+open-model agent's own check and consent (M6).
 
 When an organization's managed settings replace TRIF's sandbox (Codex's requirements refuse TRIF's
 permission profile, or Claude Code's managed settings loosen its limits), TRIF stops the run and asks.
@@ -25,7 +28,7 @@ Where: `extension/sidepanel.js` `sandboxCardText`.
 | While a chat is running | Wait for the chat to finish, then try again. | same |
 
 The first draft's sentence "The tab lock and the holds on mods still protect you either way." was replaced
-by the text above (the coordinator's rewording after the CodexStandard report). Say if it should come back.
+by the text above (the rewording after the CodexStandard report).
 
 ## The chip (beside "agent · model", over the message box)
 
@@ -102,9 +105,5 @@ Only break runs (stop message):
 
 ## CHANGELOG (Unreleased)
 
-- **Codex at work:** if your organization's Codex settings won't let TRIF use its sandbox, TRIF asks before
-  going on without it.
-
-As drafted it names Codex only; Claude Code under managed settings now gets the same choice. A possible
-wider line: "**Codex and Claude Code at work:** if your organization's settings won't let TRIF use its
-sandbox, TRIF asks before going on without it."
+- **At work:** if your company's Codex or Claude Code settings won't let TRIF use its sandbox, TRIF asks
+  before going on without it.

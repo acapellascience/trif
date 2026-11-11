@@ -501,7 +501,7 @@ shown in the panel as such.
 - **Line**: Together, it could put what it reads into a post and send it for you.
 - **Explanation**: Together, it could put what it reads into a post and send it for you. It still only clicks, or signals, what its header names on this site. But what it read could go out from your account without you pressing send, so allow this only for a mod you'd trust to post for you.
 - **For agents**:
-  - Rank 1. A read + (click or page-events) + (write-drafts or edit-uploads): 28 triples. The hold also shows the pairs' warnings.
+  - A read + (click or page-events) + (write-drafts or edit-uploads): 28 triples. The hold also shows the pairs' warnings.
   - Almost never needed: split the job so the user does the send, or drop the read.
 
 ### Goes and posts
@@ -512,7 +512,7 @@ shown in the panel as such.
 - **Line**: Together, it could go to a page, write a post there and send it for you.
 - **Explanation**: Together, it could go to a page, write a post there and send it for you. It only goes to pages its header lists or links already on the page, and only clicks or signals what its header names. Still, a post could go out from your account without you, so check the pages and buttons the hold lists.
 - **For agents**:
-  - Rank 2. go-to + (click or page-events) + write-drafts.
+  - go-to + (click or page-events) + write-drafts.
   - Page-wide: go-to is refused while another boxed mod has click or page-events and this one doesn't.
 
 ### Posts for you
@@ -523,7 +523,7 @@ shown in the panel as such.
 - **Line**: Together, it could write a post and send it for you.
 - **Explanation**: Together, it could write a post and send it for you. It still only clicks, or signals, what its header names on this site. A post or picture it changed would no longer wait for you to send it, so a mistake in the mod could post from your account.
 - **For agents**:
-  - Rank 3. click + write-drafts, click + edit-uploads, page-events + write-drafts, page-events + edit-uploads.
+  - click + write-drafts, click + edit-uploads, page-events + write-drafts, page-events + edit-uploads.
   - Page-wide: after another boxed mod changed a draft (or attached picture), click and page-events are refused unless the acting mod has write-drafts (or edit-uploads) too: "clicking for the user is off on this page since another boxed mod here changed a draft…".
 
 ### Reads into posts
@@ -534,7 +534,7 @@ shown in the panel as such.
 - **Line**: Together, it could put what it reads into something you post.
 - **Explanation**: Together, it could put what it reads into something you post. It can't send the post for you, and it can't add a web address that wasn't already in your text or on the page. Read your post before you send it, since something it read elsewhere could be slipped in.
 - **For agents**:
-  - Rank 4. A read (read-drafts, keys, site-data, page-data, site-storage, local-fonts, image-variants) + write-drafts.
+  - A read (read-drafts, keys, site-data, page-data, site-storage, local-fonts, image-variants) + write-drafts.
   - Page-wide: writing a draft is refused while another boxed mod has a read this one doesn't.
   - A mod that changes the user's own text in place (a styler) needs read-drafts + write-drafts, and so this warning: say so to the user.
 
@@ -546,7 +546,7 @@ shown in the panel as such.
 - **Line**: Together, it could put what it reads into a picture you post.
 - **Explanation**: Together, it could put what it reads into a picture you post. It can't send the picture for you, and it only changes the picture's pixels. What it read could be hidden in the picture where you can't see it, so allow this only if the mod needs both.
 - **For agents**:
-  - Rank 5. A read + edit-uploads.
+  - A read + edit-uploads.
   - Page-wide: changing attached pictures is refused while another boxed mod has a read this one doesn't.
 
 ### Reads to page code
@@ -557,7 +557,7 @@ shown in the panel as such.
 - **Line**: Together, it could hand what it reads to this page's own code, which may post or send it.
 - **Explanation**: Together, it could hand what it reads to this page's own code, which may post or send it. It can only send the signals its header names, with plain data and no new web addresses. What the page's code does with them is up to the site, and TRIF can't see that.
 - **For agents**:
-  - Rank 6. A read + page-events.
+  - A read + page-events.
   - Page-wide: signalling is refused while another boxed mod has a read this one doesn't.
 
 ### Goes and clicks
@@ -568,7 +568,7 @@ shown in the panel as such.
 - **Line**: Together, it could take you to a page and click things there for you.
 - **Explanation**: Together, it could take you to a page and click things there for you. It only goes to pages its header lists or links on the page, and only clicks what its header names, never a form's send button or a link to another site. Alone, it clicks where you already are; together, it can click on a page you didn't choose.
 - **For agents**:
-  - Rank 7. go-to + click.
+  - go-to + click.
   - Page-wide: go-to is refused while another boxed mod has click and this one doesn't.
 
 ### Goes and signals
@@ -579,7 +579,7 @@ shown in the panel as such.
 - **Line**: Together, it could take you to a page and set off that page's own actions there.
 - **Explanation**: Together, it could take you to a page and set off that page's own actions there. It only goes to pages its header lists or links on the page, and only sends the signals its header names. A signal can do something different on another page, and what it does is up to the site.
 - **For agents**:
-  - Rank 8. go-to + page-events.
+  - go-to + page-events.
   - Page-wide: go-to is refused while another boxed mod has page-events and this one doesn't.
 
 ### Reads, then clicks
@@ -590,7 +590,7 @@ shown in the panel as such.
 - **Line**: Together, it could let what it reads decide what it clicks for you.
 - **Explanation**: Together, it could let what it reads decide what it clicks for you. It still only clicks the things its header names. But the site sees what you click, and others may too (a like or a follow is often public), so what it read could show in those clicks.
 - **For agents**:
-  - Rank 9. A read + click.
+  - A read + click.
   - Page-wide: click is refused while another boxed mod has a read this one doesn't.
 
 ### Blocks and clicks
@@ -601,7 +601,7 @@ shown in the panel as such.
 - **Line**: Together, it could keep your clicks from reaching the page and click in their place.
 - **Explanation**: Together, it could keep your clicks from reaching the page and click in their place. It can only keep back the clicks its header names, and only click what its header names. Watch for a button that seems not to do what you clicked it for.
 - **For agents**:
-  - Rank 10. block-events + click.
+  - block-events + click.
   - Page-wide: click is refused while another boxed mod has block-events and this one doesn't.
 
 ### Reads through video
@@ -612,7 +612,7 @@ shown in the panel as such.
 - **Line**: Together, it could pass what it reads to the site a video or sound comes from, by how it plays it.
 - **Explanation**: Together, it could pass what it reads to the site a video or sound comes from, by how it plays it. It can't change where a video comes from, only play, pause, mute, set the volume or jump to a time. The video's host sees the requests those make, so their timing could carry a little of what it read.
 - **For agents**:
-  - Rank 11. A read + media.
+  - A read + media.
   - Page-wide: media controls are refused while another boxed mod has a read this one doesn't.
 
 ### Reads through pictures
@@ -623,7 +623,7 @@ shown in the panel as such.
 - **Line**: Together, it could pass what it reads to the sites this page's pictures come from, by which ones it loads.
 - **Explanation**: Together, it could pass what it reads to the sites this page's pictures come from, by which ones it loads. It only loads the page's own pictures, or other sizes of them by its header's change, from where the page gets them. But their host sees which load and when, so a little of what it read could show there.
 - **For agents**:
-  - Rank 12. A read + image-variants, or a read + preload (image-variants + preload alone adds nothing).
+  - A read + image-variants, or a read + preload (image-variants + preload alone adds nothing).
   - Page-wide: image-variants and preload are refused while another boxed mod has a read this one doesn't.
 
 ### Reads into sound
@@ -634,7 +634,7 @@ shown in the panel as such.
 - **Line**: Together, it could turn what it reads into sounds that a device nearby could pick up.
 - **Explanation**: Together, it could turn what it reads into sounds that a device nearby could pick up. It can't listen or record, and plays only sounds it makes itself. A phone or speaker in the room would have to be listening, so it's a narrow way out, but it exists.
 - **For agents**:
-  - Rank 13. A read + sound.
+  - A read + sound.
   - Not enforced across mods: a sound mod beside another mod's read isn't refused (enforcing it would stop every sound mod beside any hotkey mod; Tim's call).
 
 ### Many powers
@@ -647,6 +647,83 @@ shown in the panel as such.
 - **For agents**:
   - More than 3 powers, soft ones (controls, mods, preload) included. Keyed by the exact set (`power:together:many:<powers>`); its combinations are still needs, so a later version with fewer powers doesn't ask again for what was allowed.
   - Split into smaller mods or drop powers to get under four; each mod then shows its own specific warnings.
+
+### Reads into storage
+
+`warnings/read-into-storage`, approved 2026-11-11 (Claude, delegated by Tim)
+
+- **Label** (drafted): Reads into storage
+- **Line**: Together, it could keep what it reads where this site's own code, and your other boxed mods, can find it later.
+- **Explanation**: Together, it could keep what it reads where this site's own code, and your other boxed mods, can find it later. It can only write under the names its header lists, never one that looks like a login, and with no new web addresses. But the site's own code reads what's kept there and may send it on, so allow this only if the mod needs both.
+- **For agents**:
+  - site-storage (or @migrate, which counts as site-storage) + a read.
+  - Page-wide: site-storage writes are refused while another boxed mod has a read this one doesn't.
+
+### Clicks with changes
+
+`warnings/click-and-rewrite`, approved 2026-11-11 (Claude, delegated by Tim)
+
+- **Label** (drafted): Clicks with changes
+- **Line**: Together, it could click things for you and change what the site receives from those clicks.
+- **Explanation**: Together, it could click things for you and change what the site receives from those clicks. It only clicks what its header names, and only changes the settings its header names. But those clicks act as you, carrying changes you didn't choose, without you pressing anything.
+- **For agents**:
+  - rewrite-requests + click.
+  - Page-wide: click is refused while another boxed mod has rewrite-requests and this one doesn't.
+
+### Signals with changes
+
+`warnings/signal-and-rewrite`, approved 2026-11-11 (Claude, delegated by Tim)
+
+- **Label** (drafted): Signals with changes
+- **Line**: Together, it could set off this page's own actions and change what the site receives from them.
+- **Explanation**: Together, it could set off this page's own actions and change what the site receives from them. It only sends the signals and changes the settings its header names. What the page's code does with a signal is up to the site, and the requests it sends then carry the mod's changes.
+- **For agents**:
+  - rewrite-requests + page-events.
+  - Page-wide: page-events signals are refused while another boxed mod has rewrite-requests and this one doesn't.
+
+### Blocks and signals
+
+`warnings/block-and-signal`, approved 2026-11-11 (Claude, delegated by Tim)
+
+- **Label** (drafted): Blocks and signals
+- **Line**: Together, it could keep your clicks from reaching the page and set off the page's own actions in their place.
+- **Explanation**: Together, it could keep your clicks from reaching the page and set off the page's own actions in their place. It can only keep back what its header names, and only send the signals its header names. Watch for a button that seems not to do what you clicked it for.
+- **For agents**:
+  - block-events + page-events.
+  - Page-wide: page-events signals are refused while another boxed mod has block-events and this one doesn't.
+
+### Blocks and goes
+
+`warnings/block-and-go`, approved 2026-11-11 (Claude, delegated by Tim)
+
+- **Label** (drafted): Blocks and goes
+- **Line**: Together, it could keep your clicks from reaching the page and take you to another page in their place.
+- **Explanation**: Together, it could keep your clicks from reaching the page and take you to another page in their place. It can only keep back what its header names, and only go to pages its header lists or links on this page. If a click takes you somewhere you didn't expect, this mod may be why.
+- **For agents**:
+  - block-events + go-to.
+  - Page-wide: go-to is refused while another boxed mod has block-events and this one doesn't.
+
+### Reads, then blocks
+
+`warnings/read-decides-blocks`, approved 2026-11-11 (Claude, delegated by Tim)
+
+- **Label** (drafted): Reads, then blocks
+- **Line**: Together, it could let what it reads decide which of your actions this page sees, and the page's code may send that on.
+- **Explanation**: Together, it could let what it reads decide which of your actions this page sees, and the page's code may send that on. Sites often record what you do on a page, so the pattern of what it keeps back could carry a little of what it read. It's a narrow way out, but it exists.
+- **For agents**:
+  - block-events (the function form) + a read.
+  - Page-wide: a block's function is refused while another boxed mod has a read this one doesn't; the list form isn't affected.
+
+### Reads through videos
+
+`warnings/read-through-videos`, approved 2026-11-11 (Claude, delegated by Tim)
+
+- **Label** (drafted): Reads through videos
+- **Line**: Together, it could pass what it reads to the site a video comes from, by which video it offers you.
+- **Explanation**: Together, it could pass what it reads to the site a video comes from, by which video it offers you. It only offers videos the page links to, and only plays one after you click TRIF's play button. The video's site learns which one you played, so the mod's choice could carry a little of what it read.
+- **For agents**:
+  - embeds + a read.
+  - Page-wide: embed() and its play are refused while another boxed mod has a read this one doesn't.
 
 ## Agent on this site
 

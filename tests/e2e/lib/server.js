@@ -315,6 +315,81 @@ addEventListener('scroll', () => {
 });
 </script>`);
 
+// A page like the one the Facebook birthdays chat was about (for `--study`, comparing guides with real agent
+// runs): a header, a left nav, a feed column that loads more posts with a POST as you scroll (so a tab locked by
+// `trif run` can't), and a right column with a Sponsored section, a Birthdays box and Contacts. Class names are
+// generated-looking, as on Facebook: roles and headings are what an agent (and the study's measure) can hold on to.
+const HEARTH_PAGE = () => PAGE('Hearth', `
+<style>
+  body { margin: 0; max-width: none; background: #f0f2f5; font: 15px/1.35 system-ui, sans-serif; color: #1c1e21; }
+  .x9f2k { position: sticky; top: 0; z-index: 3; height: 56px; background: #fff; box-shadow: 0 1px 2px #0002; display: flex; align-items: center; padding: 0 16px; gap: 12px; }
+  .x9f2k b { font-size: 22px; color: #0866ff; }
+  .x7q1z { display: flex; align-items: flex-start; }
+  .x1lnv { width: 280px; flex: 0 0 280px; padding: 16px 8px; box-sizing: border-box; }
+  .x1lnv a { display: block; padding: 8px; color: inherit; text-decoration: none; border-radius: 8px; }
+  .x5mid { flex: 1 1 auto; display: flex; justify-content: center; min-width: 0; }
+  .x5mid > [role=main] { width: 590px; flex: 0 0 auto; padding: 16px 32px; }
+  .x3pst { background: #fff; border-radius: 12px; box-shadow: 0 1px 2px #0002; margin-bottom: 16px; padding: 12px 16px; }
+  .x3pst .x0img { height: 260px; border-radius: 8px; background: linear-gradient(135deg, #c8d6f0, #e9d8c8); margin-top: 10px; }
+  .x3pst .x0sub { font-size: 13px; color: #65676b; }
+  .x8rgt { width: 300px; flex: 0 9999 300px; padding: 16px 16px 16px 0; box-sizing: border-box; position: sticky; top: 56px; }
+  .x8rgt h3 { font-size: 17px; color: #65676b; margin: 8px 8px 8px; font-weight: 600; }
+  .x8rgt section { padding-bottom: 12px; border-bottom: 1px solid #ced0d4; margin-bottom: 12px; }
+  .x2ad { display: flex; gap: 12px; padding: 8px; color: inherit; text-decoration: none; border-radius: 8px; }
+  .x2ad .x0img { width: 120px; height: 120px; flex: 0 0 120px; border-radius: 8px; background: #d8dadf; }
+  .x2ad .x0sub { font-size: 13px; color: #65676b; }
+  .x4bd { display: flex; align-items: center; gap: 12px; padding: 8px; color: inherit; text-decoration: none; }
+  .x4bd .x0gift { width: 36px; height: 36px; flex: 0 0 36px; font-size: 28px; line-height: 36px; text-align: center; }
+  .x6ct { display: flex; align-items: center; gap: 12px; padding: 8px; }
+  .x6ct i { width: 36px; height: 36px; border-radius: 50%; background: #c9ccd1; }
+  .x0err { background: #fff; border-radius: 12px; padding: 16px; color: #b00; }
+  @media (max-width: 1100px) { .x8rgt { display: none; } }
+</style>
+<div class="x9f2k" role="banner"><b>hearth</b><input placeholder="Search Hearth" style="border-radius:20px;border:0;background:#f0f2f5;padding:8px 12px"></div>
+<div class="x7q1z">
+  <div class="x1lnv" role="navigation">
+    <a href="#">Tim B</a><a href="#">Friends</a><a href="#">Groups</a><a href="#">Marketplace</a><a href="#">Memories</a><a href="#">Saved</a>
+  </div>
+  <div class="x5mid"><div role="main"><div role="feed" id="x0feed">
+    ${[1, 2, 3].map((n) => `<div class="x3pst"><b>Friend ${n}</b><div class="x0sub">${n}h</div><div>Post ${n}: something that happened today.</div><div class="x0img"></div></div>`).join('')}
+    <div class="x3pst"><b>Lamps Inc.</b><div class="x0sub">Sponsored</div><div>Big sale on lamps.</div><div class="x0img"></div></div>
+    ${[4, 5].map((n) => `<div class="x3pst"><b>Friend ${n}</b><div class="x0sub">${n}h</div><div>Post ${n}: something that happened today.</div><div class="x0img"></div></div>`).join('')}
+  </div><div id="x0more" style="height: 40px"></div></div></div>
+  <div class="x8rgt" role="complementary">
+    <section><h3>Sponsored</h3>
+      <a class="x2ad" href="#"><div class="x0img"></div><div><div>Try Acrobat free for 7 days</div><div class="x0sub">adobe.example</div></div></a>
+      <a class="x2ad" href="#"><div class="x0img"></div><div><div>Five compressors. Two plugins.</div><div class="x0sub">berryeffects.example</div></div></a>
+    </section>
+    <section><h3>Birthdays</h3>
+      <a class="x4bd" href="#"><div class="x0gift">🎁</div><span><b>Trinity B</b> and <b>Silvia Dos Santos</b> have birthdays today.</span></a>
+    </section>
+    <section style="border:0"><h3>Contacts</h3>
+      ${['Reuben W', 'Ana P', 'Joel K', 'Mira S', 'Dev R', 'Lou T'].map((n) => `<div class="x6ct"><i></i>${n}</div>`).join('')}
+    </section>
+  </div>
+</div>
+<script>
+let busy = false, page = 0;
+const feed = document.getElementById('x0feed');
+addEventListener('scroll', async () => {
+  if (busy || scrollY + innerHeight < document.documentElement.scrollHeight - 400) return;
+  busy = true;
+  try {
+    const r = await fetch('/api/hearth-more', { method: 'POST', body: JSON.stringify({ page: ++page }) });
+    const items = await r.json();
+    for (const it of items) {
+      const d = document.createElement('div');
+      d.className = 'x3pst';
+      d.innerHTML = '<b></b><div class="x0sub"></div><div></div><div class="x0img"></div>';
+      d.children[0].textContent = it.who; d.children[1].textContent = it.when; d.children[2].textContent = it.text;
+      feed.append(d);
+    }
+  } catch (e) {
+    if (!document.querySelector('.x0err')) { const d = document.createElement('div'); d.className = 'x0err'; d.textContent = 'Something went wrong. Try reloading.'; feed.append(d); }
+  } finally { busy = false; }
+});
+</script>`);
+
 // ---- the X stand-in
 
 // The authenticated user (document.cookie twid) and authors.
@@ -466,6 +541,12 @@ async function startServers(dir) {
     // once, passes fetches through, and fetches what a message asks for (a request no tab owns: tabId -1).
     if (u.pathname === '/e2e-sw.js') return send(200, 'text/javascript', SW_SCRIPT);
     if (u.pathname === '/promos.html') return send(200, 'text/html; charset=utf-8', PROMOS_PAGE());
+    if (u.pathname === '/hearth.html') return send(200, 'text/html; charset=utf-8', HEARTH_PAGE());
+    // (the Hearth feed's next posts: a POST, as Facebook's are, so a tab locked by trif run can't load them)
+    if (u.pathname === '/api/hearth-more' && req.method === 'POST') {
+      const n = requests.filter((x) => x.url === '/api/hearth-more').length;
+      return send(200, 'application/json', JSON.stringify([1, 2, 3].map((i) => ({ who: `Friend ${5 + 3 * (n - 1) + i}`, when: '1d', text: `Older post ${3 * (n - 1) + i}.` }))));
+    }
     if (u.pathname === '/sandbox.html') return send(200, 'text/html; charset=utf-8', SANDBOX_PAGE());
     if (u.pathname === '/wide.html') return send(200, 'text/html; charset=utf-8', WIDE_PAGE());
     if (u.pathname === '/wideb.html') return send(200, 'text/html; charset=utf-8', WIDE_B_PAGE());

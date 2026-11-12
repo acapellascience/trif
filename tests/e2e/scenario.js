@@ -367,7 +367,7 @@ class Scenario {
       if (!/github\.com\/acapellascience\/trif\/.*examples\/sites/.test(st.source)) throw new Error(`see the code: ${st.source}`);
       if (st.buttons.map((b) => b[1]).join() !== 'Add these,Start with none') throw new Error(`buttons: ${JSON.stringify(st.buttons)}`);
       const x = st.rows.find((row) => row.site === 'x.com');
-      if (x.name !== 'X' || !/^Detox Timeline, Follow Status, Profile Styler, Post Styler, Style Encoder, X-Flyer, Rainbow Rave$/.test(x.mods)) throw new Error(`X's row: ${JSON.stringify(x)}`);
+      if (x.name !== 'X' || !/^Detox Timeline, Follow Status, Profile Styler, Post Styler, Style Encoder, X-Flyer, Rainbow Rave, Tune Composer$/.test(x.mods)) throw new Error(`X's row: ${JSON.stringify(x)}`);
       if (fs.existsSync(path.join(this.trif, 'sites', 'x.com')) || fs.existsSync(path.join(this.trif, 'sites', 'www.google.com'))) throw new Error('Tim\'s mods on disk before the choice');
       await this.ext(`async () => document.querySelector('#starter-add').scrollIntoView({ block: 'end' })`);
       await sleep(200);
@@ -435,7 +435,7 @@ class Scenario {
         const wrong = st.rows.filter((x) => x.added !== (expect(x.site) === null) || (expect(x.site) && x.button !== expect(x.site)));
         if (this.o.kind === 'fresh') {
           const xr = st.rows.find((x) => x.site === 'x.com');
-          if (!/^Added: Detox Timeline, Follow Status, Profile Styler, Post Styler, Style Encoder, X-Flyer\. Not added: Rainbow Rave\.$/.test(xr.mods) || /Rainbow Rave.*Not added/.test(xr.mods)) throw new Error(`X in Settings: ${JSON.stringify(xr)}`);
+          if (!/^Added: Detox Timeline, Follow Status, Profile Styler, Post Styler, Style Encoder, X-Flyer, Tune Composer\. Not added: Rainbow Rave\.$/.test(xr.mods) || /Rainbow Rave.*Not added/.test(xr.mods)) throw new Error(`X in Settings: ${JSON.stringify(xr)}`);
         }
         if (wrong.length) throw new Error(`rows: ${JSON.stringify(st.rows)} (added: ${added.join(', ')})`);
         if (!/^Tim’s mods/.test(st.text) || !/see the code/.test(st.text)) throw new Error(`the section says: ${st.text}`);

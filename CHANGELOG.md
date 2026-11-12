@@ -4,6 +4,21 @@ What's new in each TRIF release (called WebMods before 0.2.0). The text under a 
 panel shows under "What's new", so it's written for people using TRIF. `node scripts/release.js <version>`
 needs a section here for the version it releases.
 
+## 0.2.7
+
+- **Songs in profile pictures.** Tune Composer (new, off to start) makes little NES-style tunes, in any
+  time signature. Style Encoder puts yours in your profile picture, and Profile Styler plays a profile's
+  song from a speaker button.
+- **Styles survive X's JPEGs**, and carry three fonts: for your name, your handle and all other text.
+- **Post Styler** shows posts in their authors' colours and fonts.
+- **Detox Timeline** also tidies profiles' Reposts and Subscriptions tabs.
+
+### More
+
+- Pictures styled before still read. Older Profile Stylers ignore the new code instead of misreading it.
+- A tune in 4/4 plays in older Profile Stylers too; other time signatures need this version.
+- The speaker never starts by itself, and stops when you leave the profile.
+
 ## 0.2.6
 
 - **Google search works again.** Google changed its results page, and AI Banisher started hiding the

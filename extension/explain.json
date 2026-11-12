@@ -199,7 +199,8 @@
         "Sounds only from `data:audio/…;base64` (\"sounds come from data:audio/…;base64 addresses only\"); no addresses, microphone, worklets or the page's own media (that's `media`).",
         "Lint: \"trif.audio: needs the sound power: add `// @powers sound` to the header (the user approves it once)\".",
         "The browser starts audio only after the user clicks or types on the page; TRIF resumes it then.",
-        "Not enforced across mods: a sound mod beside another mod's read isn't refused; only the single-mod warning exists."
+        "Not enforced across mods: a sound mod beside another mod's read isn't refused; only the single-mod warning exists.",
+        "Quiet: doesn't make the mod wait for the user's OK on its own (like controls and mods); a warned combination it makes, in the mod or among its site's boxed mods, does."
       ],
       "approved": "2026-11-11 (Claude, delegated by Tim)"
     },
@@ -254,7 +255,8 @@
         "On the page's own `<video>`/`<audio>`: `play()` (a promise of true, or false if the browser wouldn't), `pause()`, `setMuted(bool)`, `setVolume(0..1)`, `seek(seconds)`, `.media` ({paused, muted, volume, currentTime, duration}); `on('play' | 'pause' | 'ended' | 'timeupdate' | …)` to hear them.",
         "Errors: \"playing the page's video and audio needs the media power (// @powers media)\", \"hearing the page's video and audio needs the media power (// @powers media)\", \"that's for the page's <video> and <audio>\", \"a volume is from 0 to 1\", \"seek takes a time in seconds\".",
         "Never their `src`. Page-wide: refused while another boxed mod has a read this one doesn't. Panel level 1 (noticeable).",
-        "The mod's own sounds are `sound`, not this."
+        "The mod's own sounds are `sound`, not this.",
+        "Quiet: doesn't make the mod wait for the user's OK on its own (like controls and mods); a warned combination it makes, in the mod or among its site's boxed mods, does."
       ],
       "approved": "2026-11-11 (Claude, delegated by Tim)"
     },
@@ -296,7 +298,8 @@
         "`trif.embed(link, {label})` gives TRIF's button (default \"Play the video here\"); the user's own click plays it. Header: `// @powers embeds www.youtube.com/embed` (also `www.youtube-nocookie.com/embed`, `player.vimeo.com/video`).",
         "Errors: `embeds: \"{a}\" isn't a player TRIF makes embeds for (…)`, \"the embeds power needs where its videos come from: @powers embeds www.youtube.com/embed\"; runtime \"embed takes a link the page shows\", \"that link isn't a video from {players}\", \"that link has no address\".",
         "Recognises YouTube watch/shorts/embed/live and youtu.be links, and numeric Vimeo ones.",
-        "No added risk with any other power (combination table); a mod that wants a player from anywhere else is a free mod, and say what loads from where."
+        "No added risk with any other power (combination table); a mod that wants a player from anywhere else is a free mod, and say what loads from where.",
+        "Quiet: doesn't make the mod wait for the user's OK on its own (like controls and mods); a warned combination it makes, in the mod or among its site's boxed mods, does."
       ],
       "approved": "2026-11-11 (Claude, delegated by Tim)"
     },

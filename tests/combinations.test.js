@@ -117,9 +117,9 @@ test('docs/POWER-COMBINATIONS.md is the table written out', () => {
 
 test('the sandbox\'s page-wide rules (ACT_PARTNERS) follow the table: an act is refused beside another mod\'s power that makes a warned pair with it', () => {
   const src = fs.readFileSync(path.join(__dirname, '..', 'extension', 'sandbox.js'), 'utf8');
-  const m = /const ACT_PARTNERS = (\{[^;]+\});/.exec(src);
-  assert.ok(m, 'ACT_PARTNERS in sandbox.js');
-  const partners = JSON.parse(m[1].replace(/'/g, '"').replace(/([{,]\s*)([\w-]+):/g, '$1"$2":').replace(/,\s*([}\]])/g, '$1'));
+  // (the data, one definition for the sandbox and the helper's site approval: extension/pagewide.js)
+  assert.match(src, /const ACT_PARTNERS = pageWide\.actPartners;/);
+  const partners = require('../helper/lib/sitecombos').PAGE_WIDE.actPartners;
   // the acts whose warned partners the sandbox can see on the page, and those enforced elsewhere (sound: not
   // enforced across mods, docs/SAFE-MODS.md says why; write-drafts as click's partner: once a draft was
   // written, clickOk; click with go-to: on go-to's side, and on the page go-to lands on, arrivedOk;
@@ -146,7 +146,7 @@ test('the sandbox\'s page-wide rules (ACT_PARTNERS) follow the table: an act is 
   assert.equal(count(/partnersOk\(self, 'site-storage'\)/g), 2);
   assert.equal(count(/partnersOk\(b\.api, 'block-events'\)/g), 1);
   assert.equal(count(/partnersOk\(self, 'embeds'\)/g), 2);
-  assert.match(src, /if \(p === 'edit-uploads'\) \{ if \(uploadReaders\.size\)/);
+  assert.match(src, /if \(p === 'edit-uploads'\) \{\n\s+for \(const id of uploadReaders\) if \(id !== api\.mod && !crossOk\(api, id, act, p\)\)/);
   assert.match(src, /uploadReaders\.add\(u\.api\.mod\)/);
   assert.match(src, /arrivedOk\(api, 'click'/);
   assert.match(src, /arrivedOk\(api, 'page-events'/);
@@ -164,11 +164,12 @@ test('docs/SAFE-MODS.md\'s counts are the table\'s (F12)', () => {
 
 test('the page-wide rules at work (sandbox.js partnersOk, run here): each new rule refuses beside the other mod\'s power, and lets an act through when the acting mod asked for that power too or nothing in play makes the pair', () => {
   const src = fs.readFileSync(path.join(__dirname, '..', 'extension', 'sandbox.js'), 'utf8');
-  const from = src.indexOf('  const ACT_PARTNERS = {'), to = src.indexOf('  // go-to across a page load');
+  const from = src.indexOf('  const ACT_PARTNERS = pageWide.actPartners;'), to = src.indexOf('  // go-to across a page load');
   assert.ok(from > 0 && to > from, 'ACT_PARTNERS to partnersOk in sandbox.js');
   const vm = require('vm');
-  const page = () => vm.runInNewContext(`const fail = (why) => { throw new TypeError('TRIF sandbox: ' + why); }; const channels = new Map(), apis = new Map();\n${src.slice(from, to)}\n({ partnersOk, soundOk, inPlay, uploadReaders, channels, apis })`);
-  const api = (mod, powers, migrate) => ({ mod, powers: new Set(powers), combo: new Set([...powers, ...(migrate ? ['site-storage'] : [])]) });
+  const page = () => vm.runInNewContext(`const pageWide = ${JSON.stringify(require('../helper/lib/sitecombos').PAGE_WIDE)}; const fail = (why) => { throw new TypeError('TRIF sandbox: ' + why); }; const report = () => {}; const channels = new Map(), apis = new Map();\n${src.slice(from, to)}\n({ partnersOk, soundOk, inPlay, uploadReaders, channels, apis })`);
+  // (`site`: the powers this page's site approved for its mods together, as the runtime keeps them: sitecombos.js)
+  const api = (mod, powers, migrate, site = []) => ({ mod, powers: new Set(powers), combo: new Set([...powers, ...(migrate ? ['site-storage'] : [])]), site: new Set(site) });
   // (act, the acting mod's powers, another mod's power in play, refused?)
   const cases = [
     // F1: site-storage's writes beside a read
@@ -193,11 +194,17 @@ test('the page-wide rules at work (sandbox.js partnersOk, run here): each new ru
   ];
   for (const [act, powers, other, refused] of cases) {
     const p = page();
+    p.apis.set('other', api('other', [other]));
     p.inPlay.add(other);
     for (const x of powers) p.inPlay.add(x);
     const run = () => p.partnersOk(api(`me`, powers), act);
     if (refused) assert.throws(run, new RegExp(`while another boxed mod here has the ${other} power`), `${act} with ${powers} beside ${other}`);
     else assert.doesNotThrow(run, `${act} with ${powers} beside ${other}`);
+    // (site approval: both powers approved for the site's mods together let it through; one of them doesn't)
+    if (refused) {
+      assert.doesNotThrow(() => p.partnersOk(api('me', powers, false, [act, other]), act), `${act} beside ${other}, both approved for the site`);
+      assert.throws(() => p.partnersOk(api('me', powers, false, [act]), act), /while another boxed mod here/, `${act} beside ${other}, only ${act} approved`);
+    }
   }
   // F4: edit-uploads as a read, by the mods handed a picture, not by every mod with the power
   for (const act of ['write-drafts', 'click', 'media', 'page-events', 'image-variants', 'preload', 'site-storage', 'block-events', 'embeds']) {
@@ -210,7 +217,7 @@ test('the page-wide rules at work (sandbox.js partnersOk, run here): each new ru
   }
   { const p = page(); p.uploadReaders.add('editor'); assert.doesNotThrow(() => p.partnersOk(api('me', ['edit-uploads']), 'edit-uploads')); assert.doesNotThrow(() => p.partnersOk(api('me', ['go-to']), 'go-to')); }
   // F7: @migrate counts as site-storage, for its own acts and beside others'
-  { const p = page(); p.inPlay.add('site-storage'); assert.throws(() => p.partnersOk(api('me', ['click']), 'click'), /site-storage power/); assert.doesNotThrow(() => p.partnersOk(api('me', ['click'], true), 'click')); }
+  { const p = page(); p.apis.set('old', api('old', ['go-to'], true)); p.inPlay.add('site-storage'); assert.throws(() => p.partnersOk(api('me', ['click']), 'click'), /site-storage power/); assert.doesNotThrow(() => p.partnersOk(api('me', ['click'], true), 'click')); }
   // sound across mods: refused beside a reading mod it shares a `mods` channel with, not beside one it doesn't
   {
     const p = page();

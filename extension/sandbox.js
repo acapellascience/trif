@@ -19,6 +19,8 @@
 //
 // Everything below runs in the page (serialized with Function.prototype.toString), so it's self-contained.
 
+import { PAGE_WIDE } from './pagewide.js';
+
 export const SANDBOX_WORLD = 'trif-sandbox';
 export const SANDBOX_RUNTIME_ID = 'trif-sandbox-runtime';
 export const SES_FILE = 'vendor/ses.umd.min.js';
@@ -42,7 +44,8 @@ const J = (v) => JSON.stringify(String(v));
 
 /** The world's runtime: lockdown once, then __trifSandbox.run(id, source) per mod. */
 export function sandboxRuntimeCode() {
-  return `(${sandboxRuntime.toString()})('sandbox');\n//# sourceURL=trif-sandbox://runtime.js`;
+  // (the page-wide rules handed in as data: extension/pagewide.js, which the helper reads too)
+  return `(${sandboxRuntime.toString()})('sandbox', null, null, null, ${JSON.stringify(PAGE_WIDE)});\n//# sourceURL=trif-sandbox://runtime.js`;
 }
 
 /**
@@ -67,14 +70,14 @@ export function sandboxModCode(id, source, powers = []) {
 export function sandboxPageCode(id, source, powers = []) {
   // (the mod's first line is the script's first line, so `trif errors` gives its own line numbers)
   const P = grantOf(powers);
-  return `(() => { const __trifMod = async function (${SANDBOX_GLOBALS.filter((n) => n !== 'Math' && n !== 'Date').join(', ')}) { "use strict"; ${source}\n};\n(${sandboxRuntime.toString()})('page', ${J(id)}, __trifMod, ${P}); })();\n//# sourceURL=trif://${id}.js`;
+  return `(() => { const __trifMod = async function (${SANDBOX_GLOBALS.filter((n) => n !== 'Math' && n !== 'Date').join(', ')}) { "use strict"; ${source}\n};\n(${sandboxRuntime.toString()})('page', ${J(id)}, __trifMod, ${P}, ${JSON.stringify(PAGE_WIDE)}); })();\n//# sourceURL=trif://${id}.js`;
 }
 
 /**
  * The runtime. mode 'sandbox': in TRIF's world, with SES loaded; installs globalThis.__trifSandbox. mode
  * 'page': in the page's world (no SES, nothing confined), runs `fn` with the API as its arguments.
  */
-export function sandboxRuntime(mode, pageModId, pageFn, pagePowers) {
+export function sandboxRuntime(mode, pageModId, pageFn, pagePowers, pageWide) {
   const G = globalThis;
   const SANDBOX = mode === 'sandbox';
   if (SANDBOX && G.__trifSandbox) return;
@@ -497,27 +500,16 @@ export function sandboxRuntime(mode, pageModId, pageFn, pagePowers) {
   // (and with `mods`, talk), so a combination the hold warns about (helper/lib/combinations.js) could be split
   // between two mods, each without the warning. So an act is refused while another boxed mod that has run on
   // this page has a power that makes a warned pair with it, unless the acting mod asked for that power too
-  // (and so its hold showed the warning). ACT_PARTNERS: the act, and the powers it's refused beside
-  // (tests/combinations.test.js keeps it in step with the table). Not here: sound beside a read (SAFE-MODS says
-  // why); click beside a draft another mod wrote (clickOk); click beside go-to (on go-to's side).
-  // why); click beside a draft another mod wrote (clickOk); click beside go-to (on go-to's side, and on the
-  // page go-to lands on: arrivedOk). edit-uploads as a read: the mods that were handed a picture the user
+  // (and so its hold showed the warning), or the user approved both powers for the site's mods together (site
+  // approval: helper/lib/sitecombos.js; the helper sends each mod its sites' approved unions, `site`, and crossOk
+  // lets the act through when this page's site has approved both). ACT_PARTNERS: the
+  // act, and the powers it's refused beside (tests/combinations.test.js keeps it in step with the table). Not
+  // here: sound beside a read (SAFE-MODS says why); click beside a draft another mod wrote (clickOk); click
+  // beside go-to (on go-to's side, and on the page go-to lands on: arrivedOk). edit-uploads as a read: the mods that were handed a picture the user
   // attached (uploadReaders), not every mod with the power, which would stop every media mod beside an upload
   // editor. site-storage: also a mod with @migrate (it reads the site's storage once: `combo`).
-  const ACT_PARTNERS = {
-    'write-drafts': ['read-drafts', 'keys', 'site-data', 'page-data', 'site-storage', 'local-fonts', 'image-variants', 'edit-uploads'],
-    click: ['read-drafts', 'keys', 'site-data', 'page-data', 'site-storage', 'local-fonts', 'image-variants', 'edit-uploads', 'rewrite-requests', 'block-events'],
-    media: ['read-drafts', 'keys', 'site-data', 'page-data', 'site-storage', 'local-fonts', 'image-variants', 'edit-uploads'],
-    'go-to': ['site-storage', 'block-events', 'page-events', 'click'],
-    'page-events': ['read-drafts', 'keys', 'site-data', 'page-data', 'site-storage', 'local-fonts', 'image-variants', 'edit-uploads', 'rewrite-requests', 'block-events'],
-    'edit-uploads': ['read-drafts', 'keys', 'site-data', 'page-data', 'site-storage', 'local-fonts', 'image-variants'],
-    'image-variants': ['read-drafts', 'keys', 'site-data', 'page-data', 'site-storage', 'local-fonts', 'edit-uploads'],
-    preload: ['read-drafts', 'keys', 'site-data', 'page-data', 'site-storage', 'local-fonts', 'edit-uploads'],
-    'site-storage': ['read-drafts', 'keys', 'site-data', 'page-data', 'local-fonts', 'image-variants', 'edit-uploads', 'go-to'],
-    'block-events': ['read-drafts', 'keys', 'site-data', 'page-data', 'site-storage', 'local-fonts', 'image-variants', 'edit-uploads'],
-    embeds: ['read-drafts', 'keys', 'site-data', 'page-data', 'site-storage', 'local-fonts', 'image-variants', 'edit-uploads'],
-    sound: ['read-drafts', 'keys', 'site-data', 'page-data', 'site-storage', 'local-fonts', 'image-variants', 'edit-uploads'],
-  };
+  // (the data: extension/pagewide.js, one definition with the helper's site approval)
+  const ACT_PARTNERS = pageWide.actPartners;
   const PARTNER_WHY = {
     'write-drafts': ['changing what the user types', 'what one reads could end up in what the user posts'],
     click: ['clicking for the user', 'what one reads could decide what the other clicks (or one could keep the user\'s clicks from the page while the other clicks, or change what the site receives from those clicks)'],
@@ -534,11 +526,29 @@ export function sandboxRuntime(mode, pageModId, pageFn, pagePowers) {
   };
   const inPlay = new Set(); // (the powers of the boxed mods that have run on this page, @migrate as site-storage)
   const uploadReaders = new Set(); // (boxed mods handed a picture the user attached on this page: edit-uploads reads it)
+  // (whether the user approved the pair `a`+`b` across the acting mod and mod `other`: its `with` list)
+  // (whether this page's site approved both powers for its mods together, as the acting mod was sent: `site`)
+  const crossOk = (api, other, a, b) => api.site.has(a) && api.site.has(b);
+  // (how a refusal ends: what lifts it)
+  // (a page-wide refusal goes in the mod's errors too, once per act on a page, whatever the mod catches: the
+  // user, and `trif errors`, see why it didn't act)
+  const refusedOnce = new Set();
+  const refuse = (api, act, why) => {
+    const err = new TypeError(`TRIF sandbox: ${why}`);
+    const k = `${api.mod}\n${act}`;
+    if (!refusedOnce.has(k)) { refusedOnce.add(k); report(api.mod, err); }
+    throw err;
+  };
+  const LIFT = () => '(the user\'s OK for this site\'s mods together lifts it: TRIF asks when a mod that adds it is new, changed or switched on)';
   const partnersOk = (api, act) => {
     for (const p of ACT_PARTNERS[act]) {
       if (api.combo.has(p)) continue;
-      if (p === 'edit-uploads') { if (uploadReaders.size) fail(`${PARTNER_WHY[act][0]} is off on this page since another boxed mod here was handed a picture the user attached (edit-uploads): with both, ${PARTNER_WHY[act][1]} (a mod that asks for ${act} and edit-uploads together shows the user that)`); continue; }
-      if (inPlay.has(p)) fail(`${PARTNER_WHY[act][0]} is off on this page while another boxed mod here has the ${p} power: with both, ${PARTNER_WHY[act][1]} (a mod that asks for ${act} and ${p} together shows the user that)`);
+      if (p === 'edit-uploads') {
+        for (const id of uploadReaders) if (id !== api.mod && !crossOk(api, id, act, p)) refuse(api, act, `${PARTNER_WHY[act][0]} is off on this page since another boxed mod here was handed a picture the user attached (edit-uploads): with both, ${PARTNER_WHY[act][1]} ${LIFT(act, p)}`);
+        continue;
+      }
+      if (!inPlay.has(p)) continue;
+      for (const o of apis.values()) if (o.mod !== api.mod && o.combo.has(p) && !crossOk(api, o.mod, act, p)) refuse(api, act, `${PARTNER_WHY[act][0]} is off on this page while another boxed mod here has the ${p} power: with both, ${PARTNER_WHY[act][1]} ${LIFT(act, p)}`);
     }
   };
   // (sound: not beside every read on the page (that would stop every sound mod beside any hotkey mod:
@@ -555,7 +565,7 @@ export function sandboxRuntime(mode, pageModId, pageFn, pagePowers) {
       if (api.combo.has(p)) continue;
       for (const id of peers) {
         const o = apis.get(id);
-        if (p === 'edit-uploads' ? uploadReaders.has(id) : !!(o && o.combo.has(p))) fail(`${PARTNER_WHY.sound[0]} is off on this page while it shares a channel (mods) with another boxed mod here that has the ${p} power: with both, ${PARTNER_WHY.sound[1]} (a mod that asks for sound and ${p} together shows the user that)`);
+        if ((p === 'edit-uploads' ? uploadReaders.has(id) : !!(o && o.combo.has(p))) && !crossOk(api, id, 'sound', p)) refuse(api, 'sound', `${PARTNER_WHY.sound[0]} is off on this page while it shares a channel (mods) with another boxed mod here that has the ${p} power: with both, ${PARTNER_WHY.sound[1]} ${LIFT('sound', p)}`);
       }
     }
   };
@@ -581,7 +591,7 @@ export function sandboxRuntime(mode, pageModId, pageFn, pagePowers) {
     for (const ty of ['pointerdown', 'mousedown', 'touchstart', 'keydown']) G.addEventListener(ty, (e) => { if (e.isTrusted) { userActed = true; arrivedBy = null; } }, { capture: true, passive: true });
   }
   const arrivedOk = (api, act, what, does) => {
-    if (arrivedBy && !api.powers.has('go-to')) fail(`${what} is off on this page until the user clicks or presses a key here: another boxed mod's go-to brought the user here, and with both, one could take the user to a page where the other ${does} (a mod that asks for ${act} and go-to together shows the user that)`);
+    if (arrivedBy && !api.powers.has('go-to') && !crossOk(api, arrivedBy, act, 'go-to')) refuse(api, act, `${what} is off on this page until the user clicks or presses a key here: another boxed mod's go-to brought the user here, and with both, one could take the user to a page where the other ${does} ${LIFT(act, 'go-to')}`);
   };
   const draftsOk = (api) => {
     if (!api.powers.has('write-drafts')) return false;
@@ -593,15 +603,15 @@ export function sandboxRuntime(mode, pageModId, pageFn, pagePowers) {
   const clickOk = (api) => {
     partnersOk(api, 'click');
     arrivedOk(api, 'click', 'clicking for the user', 'clicks');
-    for (const w of draftWriters) if (w !== api.mod && !api.powers.has('write-drafts')) fail('clicking for the user is off on this page since another boxed mod here changed a draft: with both, a draft could be sent without the user (a mod that asks for click and write-drafts together shows the user that)');
-    for (const w of uploadEditors) if (w !== api.mod && !api.powers.has('edit-uploads')) fail('clicking for the user is off on this page since another boxed mod here changed a picture the user attached: with both, it could be posted without the user (a mod that asks for click and edit-uploads together shows the user that)');
+    for (const w of draftWriters) if (w !== api.mod && !api.powers.has('write-drafts') && !crossOk(api, w, 'click', 'write-drafts')) refuse(api, 'click', `clicking for the user is off on this page since another boxed mod here changed a draft: with both, a draft could be sent without the user ${LIFT('click', 'write-drafts')}`);
+    for (const w of uploadEditors) if (w !== api.mod && !api.powers.has('edit-uploads') && !crossOk(api, w, 'click', 'edit-uploads')) refuse(api, 'click', `clicking for the user is off on this page since another boxed mod here changed a picture the user attached: with both, it could be posted without the user ${LIFT('click', 'edit-uploads')}`);
   };
   // (page-events, as click: not after another mod changed a draft or an attached picture: a signal could send it)
   const signalOk = (api) => {
     partnersOk(api, 'page-events');
     arrivedOk(api, 'page-events', 'signalling the page\'s code', 'sets off the page\'s own actions');
-    for (const w of draftWriters) if (w !== api.mod && !api.powers.has('write-drafts')) fail('signalling the page\'s code is off on this page since another boxed mod here changed a draft: with both, a draft could be sent without the user (a mod that asks for page-events and write-drafts together shows the user that)');
-    for (const w of uploadEditors) if (w !== api.mod && !api.powers.has('edit-uploads')) fail('signalling the page\'s code is off on this page since another boxed mod here changed a picture the user attached (a mod that asks for page-events and edit-uploads together shows the user that)');
+    for (const w of draftWriters) if (w !== api.mod && !api.powers.has('write-drafts') && !crossOk(api, w, 'page-events', 'write-drafts')) refuse(api, 'page-events', `signalling the page's code is off on this page since another boxed mod here changed a draft: with both, a draft could be sent without the user ${LIFT('page-events', 'write-drafts')}`);
+    for (const w of uploadEditors) if (w !== api.mod && !api.powers.has('edit-uploads') && !crossOk(api, w, 'page-events', 'edit-uploads')) refuse(api, 'page-events', `signalling the page's code is off on this page since another boxed mod here changed a picture the user attached ${LIFT('page-events', 'edit-uploads')}`);
   };
   const uploadEditors = new Set(); // (boxed mods that changed an attached picture on this page)
   // write-drafts and addresses: the rule (docs/SAFE-MODS.md) holds in drafts too. A site can fetch an address
@@ -809,7 +819,7 @@ export function sandboxRuntime(mode, pageModId, pageFn, pagePowers) {
       // page-wide rules turn it off, said once; a block with no function decides nothing)
       let r = true;
       if (b.fn) {
-        try { partnersOk(b.api, 'block-events'); } catch (err) { if (!b.refused) { b.refused = true; report(b.api.mod, err); } continue; }
+        try { partnersOk(b.api, 'block-events'); } catch { continue; } // (said once, in its errors: refuse)
         r = b.api.call(b.fn, eventOf(e, b.api.powers));
       }
       if (r === true) { e.stopImmediatePropagation(); return; }
@@ -845,7 +855,7 @@ export function sandboxRuntime(mode, pageModId, pageFn, pagePowers) {
     // did, only looked or did nothing, the file goes on as it was: the very file, not a copy encoded again)
     let changed = false;
     for (const u of uploadFns) {
-      try { partnersOk(u.api, 'edit-uploads'); } catch (err) { report(u.api.mod, err); continue; }
+      try { partnersOk(u.api, 'edit-uploads'); } catch { continue; } // (said once, in its errors: refuse)
       uploadReaders.add(u.api.mod); // (it sees the picture: a read, for the page-wide rules)
       const w0 = cv.width, h0 = cv.height;
       drawnOn.delete(cv); // (what this mod draws, not an earlier one)
@@ -1249,6 +1259,10 @@ export function sandboxRuntime(mode, pageModId, pageFn, pagePowers) {
     // (its powers as the combinations count them: @migrate reads the site's storage, so it's site-storage
     // there, for its own acts and beside other mods' (helper/lib/boxpowers.js powerNeeds counts it so too))
     self.combo = new Set([...self.powers, ...(Array.isArray(self.args.migrate) && self.args.migrate.length ? ['site-storage'] : [])]);
+    // (the powers this page's site approved for its mods together, from "<site> <a>+<b>+…": a site is the page's
+    // host, or one it's under, without www.: crossOk)
+    const onSite = (site) => { const t = String(site).toLowerCase().replace(/^www\./, ''); return !!t && (SITE_BASE === t || SITE_BASE.endsWith(`.${t}`)); };
+    self.site = new Set((Array.isArray(self.args.site) ? self.args.site : []).flatMap((x) => { const i = String(x).indexOf(' '); return i > 0 && onSite(String(x).slice(0, i)) ? String(x).slice(i + 1).split('+') : []; }));
     const has = (p) => self.powers.has(p);
     const needs = (p) => { if (!has(p)) fail(`that needs the ${p} power (// @powers ${p} in the mod's header, which the user approves)`); };
     apis.set(modId, self);

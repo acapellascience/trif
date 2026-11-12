@@ -174,7 +174,9 @@ Good to know:
 
 A boxed mod that needs one exception asks for it in its header, `// @powers sound, read-drafts`, from this
 menu. TRIF holds the mod until the user approves that set of powers, once (an update that asks for nothing
-new doesn't ask again; one that adds a power waits for it), and gives it those and nothing more. No power
+new doesn't ask again; one that adds a power waits for it), and gives it those and nothing more. The quiet
+powers (`sound`, `controls`, `mods`, `preload`, `embeds`, `media`) don't make it wait on their own; a warned
+combination one of them makes does. No power
 sends anything the mod makes up (go-to and click go only where the header or the page's links say), so ask
 only for what the mod needs; a mod that needs the network is a free mod.
 
@@ -265,7 +267,7 @@ only for what the mod needs; a mod that needs the network is a free mod.
   also `www.youtube-nocookie.com/embed`, `player.vimeo.com/video`): the video's id only, no referrer.
 - `local-fonts`: `await trif.localFonts()`: `[{family, fullName, style, postscriptName}]`, after the
   browser's own prompt (call it from the user's click).
-- `preload` (doesn't make the mod wait on its own): `el.loadSooner()` on the page's own lazy `<img>`.
+- `preload` (quiet: doesn't make the mod wait on its own): `el.loadSooner()` on the page's own lazy `<img>`.
 - And more of some: `site-data` also has `trif.filterEmbedded(selector, fn)` (the page's `<script
   type="application/json">`, before its code reads them; run the mod at `document-start`) and
   `trif.filterGlobal(name, fn)` for data globals the header names (`// @powers site-data ytInitialData`);
@@ -281,8 +283,10 @@ only for what the mod needs; a mod that needs the network is a free mod.
 something you post"; the list: docs/POWER-COMBINATIONS.md in TRIF's repository, or `trif check`), and more
 than three powers get one general warning. Ask for the fewest that do the job. On a page, an act of yours
 (writing a draft, clicking, playing media, go-to) is refused while another boxed mod there has a power that
-would make a warned pair with it that yours didn't ask for (the error says which); a mod that needs both
-asks for both.
+would make a warned pair with it that yours didn't ask for (the error says which), until the user approves
+what the site's boxed mods can do together: TRIF asks on the hold of the mod that adds a power ("Your <site>
+mods can:", what it adds marked new), once per site. **Never ask for a power your mod doesn't use** just to
+act beside another mod: that puts warnings on its hold for things it can't do. A mod that uses both asks for both.
 - `mods`: `trif.channel(name)` gives `send(data)` and `on((data, {from}) => …)` between your boxed mods on
   this page that have the power: plain data only (text, numbers, true/false, null, arrays, plain objects),
   delivered a moment later. Doesn't make the mod wait on its own.

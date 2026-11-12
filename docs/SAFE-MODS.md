@@ -294,7 +294,8 @@ hold open: those would be left alone.
 Design: docs/POWERS.md. A boxed mod may ask for powers from a fixed menu (`// @powers sound, read-drafts`);
 none of them sends anything. The helper reads them from the header (helper/lib/boxpowers.js), holds the mod
 until the user approves that *set* (held.js keys `power:<name>`: an update with the same powers runs, a new
-power waits for itself; `controls` and `mods` are listed but never hold alone), and passes the set to the
+power waits for itself; the quiet ones, `sound`, `controls`, `mods`, `preload`, `embeds` and `media`, are listed but
+never hold alone, while a warned combination one makes does: docs/POWERS.md "How approval works"), and passes the set to the
 extension with the mod; the sandbox (extension/sandbox.js) gives each mod what its set grants and refuses
 the rest. All twelve of 0.2 are built (phases 1 to 3), and the nine of 0.3 (below); phase 1's, with what each gives:
 - `sound`: `trif.audio()`, TRIF's facade over Web Audio (oscillators, gains, filters, delays, panners,
@@ -469,7 +470,8 @@ so a later version with fewer powers doesn't ask again for what the user allowed
 mods on a page see each other's elements (one `created` set), and with `mods` talk; so a combination split
 between two mods, each without the warning, would slip past the hold. The sandbox keeps the powers of every
 boxed mod that has run on the page, and refuses an act while another mod's power makes a warned pair with it
-that the acting mod didn't ask for itself (and so its hold didn't show):
+that the acting mod didn't ask for itself (and so its hold didn't show), unless the user approved both powers
+for the site's boxed mods together (site approval, below):
 - `write-drafts` (writing into a draft), `media` (play, pause, mute, volume, seek), `edit-uploads`,
   `image-variants`, `preload`, `embeds` (made, and clicked), `site-storage`'s writes (set, remove) and
   `block-events`'s function form, each beside a read: refused unless the acting mod has that read. (A block
@@ -496,7 +498,43 @@ that the acting mod didn't ask for itself (and so its hold didn't show):
 - `site-storage` also reaches past the page: what a mod keeps there, a boxed mod on a later page (or in
   another tab) can read, where this page's mods aren't in play. That's why a write beside a read is refused
   here, and why a read with site-storage warns on its own.
-Each refusal says which power and how to lift it (ask for it too, which puts the warning in the mod's
-hold). The cost: two boxed mods that are fine alone can stop each other's acts on a page; the errors show in
-`trif errors` and the mod's own catch. In a browser without the sandbox (boxed mods run as free mods the
-user allowed), these rules don't apply: the free tier's terms.
+Each refusal says which power, and that the user's OK for the two mods together lifts it. In a browser
+without the sandbox (boxed mods run as free mods the user allowed), these rules don't apply: the free tier's
+terms.
+
+**Site approval** (branch crossmod; `helper/lib/sitecombos.js`). Before it, the only way for a mod to act
+beside another mod's power was to ask for that power too, unused ("padding"), so its hold warned of things it
+can't do (Style Encoder asked for page-data, image-variants and site-storage only to coexist with Follow
+Status). Now a mod asks only for what it uses, and the user approves what a site's boxed mods can do together,
+once per site:
+- A site's boxed mods: those that run on it (a site they name, one under the other, or everywhere) and are on in
+  some browser (each browser's helper records which boxed mods it runs, from what the extension registered:
+  `$TRIF_HOME/switches.json`; a mod is off when every browser that knows it has it off: switched off, its group
+  or TRIF off on its site, paused). Their powers together, the union (`@migrate` as site-storage), are what the
+  site's mods can do together.
+- The site's approved union: allowed.json keys `site:<site>:<a>+<b>+…`, the whole union, under the mod whose
+  hold carried it; the site's is every such key's powers, whichever mod's entry, so switching a mod off or
+  deleting it never takes any away, and adding it again doesn't ask again.
+- A mod whose powers add a holding power to the site's approved union, on a site with other boxed mods (a quiet
+  one, `sound`, `controls`, `mods`, `preload`, `embeds` or `media`, only when it completes a warned combination in
+  the site's union), asks: its card
+  has its own powers and own combinations as before, then a box with three lists made from the union's powers,
+  each list's items on one line: "Your {site} mods can:" (what they can do as you), "They can see:", "It could end
+  up in:", the items it adds marked new, and a flag line when what they see and where it could end up aren't empty
+  ("So something they read could be sent from your account.") and when they can click or signal and write drafts
+  ("So they could post for you."). Wording and layout approved by Tim (2026-11-11). `trif status` prints the lists under the mod, one line each. Approving the mod approves
+  the site's new union. A mod alone on its site asks nothing for it: the next one asks for both.
+- Switched on, a mod that adds a holding power the site hasn't approved waits like a new one (held by
+  'switch'; its row keeps its switch). Mods the user already has whose site's union isn't approved (from before
+  site approvals): the newest with a power it adds asks in its review, and keeps running meanwhile.
+- The helper sends each boxed mod its sites' approved unions (`siteOk`, `"<site> <a>+<b>+…"`, in its
+  registration). `partnersOk`, `clickOk`, `signalOk`, `soundOk` and `arrivedOk` let an act X through beside
+  another mod's power Y when both are in the approved union of the page's site (which act and partner make a
+  combination: extension/pagewide.js, the one definition the helper reads too); otherwise refused, and the
+  refusal goes in the mod's errors once per act on a page, whatever it catches. tests/sitecombos.test.js checks,
+  for random sets of a site's mods, that the sandbox refuses exactly the pairs not both approved, and that
+  approving what the holds asked lets every act through.
+- Against the rule: it names nothing and sets no address; it only lifts refusals for powers the user was shown
+  together, on that site. Fits.
+The cost: a refusal can still happen where the site's union isn't approved (from before site approvals, until
+the review's "Looks right"); the errors show in `trif errors`.

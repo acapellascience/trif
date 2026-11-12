@@ -7,8 +7,9 @@
 //
 // The approval is for the set, not the code: each power is allowed for the mod by its key (`power:<name>`,
 // held.js allowed.json), so an update with the same powers runs without asking again, and one that adds a
-// power waits for that one. `controls` and `mods` give nothing that reaches past the mod: they're listed on a
-// hold, but don't make one on their own.
+// power waits for that one. The quiet powers (`soft`: sound, controls, mods, preload, embeds, media) read nothing
+// beyond the page and act as nobody: they're listed on a hold, but don't make one on their own; a warned
+// combination one of them makes still does (its own need), in the mod or in its site's mods together.
 
 // The menu, in the order a hold lists them. `hold`: the fact a hold shows (after "it", like the classifier's
 // facts: held.js, the panel, trif status); `site` in it is the mod's site. `built`: in this version.
@@ -21,14 +22,14 @@ const MENU = {
   'site-storage': { hold: (site, args) => `can read and change what this site keeps under: ${storageWords(args)}`, built: true },
   'local-fonts': { hold: () => 'can see which fonts are installed on this computer (and this site could see that too)', built: true },
   'image-variants': { hold: (site, args) => `can load other sizes of pictures this page shows (from ${[...new Set((args || []).map((a) => a.split(' ')[0]))].join(', ')})`, built: true },
-  sound: { hold: () => 'can play sounds', built: true },
+  sound: { hold: () => 'can play sounds', built: true, soft: true },
   controls: { hold: () => 'can add its own controls (sliders, pickers)', built: true, soft: true },
   mods: { hold: () => 'can talk to your other boxed mods on this page', built: true, soft: true },
   preload: { hold: () => 'can make this page load its pictures sooner', built: true, soft: true },
-  media: { hold: () => 'can play and pause video and audio on this page', built: true },
+  media: { hold: () => 'can play and pause video and audio on this page', built: true, soft: true },
   'search-box': { hold: (site, args) => `adds a search box that searches ${args && args[0] ? hostOf(args[0].replace('{link}', 'l')) : site}${args && args[0] && args[0].includes('{link}') ? ' (in the place a link on the page names)' : ''}`, built: true, args: 'one' },
   'go-to': { hold: (site, args) => goToWords(site, args), built: true },
-  embeds: { hold: (site, args) => `can play videos this page links to, inside the page (from ${(args || []).map((a) => a.split('/')[0].replace(/^www\./, '')).join(', ')})`, built: true },
+  embeds: { hold: (site, args) => `can play videos this page links to, inside the page (from ${(args || []).map((a) => a.split('/')[0].replace(/^www\./, '')).join(', ')})`, built: true, soft: true },
   'rewrite-requests': { hold: (site, args) => `changes what ${site} receives from this page: ${(args || []).map(rewriteWords).join('; ')}`, built: true },
   'block-events': { hold: (site, args) => `can keep this site from seeing some of what you do here (${blockWords(args)}), so the site doesn't react to it`, built: true },
   'page-events': { hold: (site, args) => `can send this page's own code these signals: ${(args || []).join(', ')}`, built: true },
@@ -260,21 +261,38 @@ function togetherNeeds(list, declared = list) {
  * many-powers sentence; none for a need without a fact, and a sentence once (two reads with write-drafts
  * are two needs with one warning).
  */
+// (what a mod adds to its site's boxed mods together, site:<site>:…, comes after the mod's own)
 function factLines(needs, facts) {
   const seen = new Set();
-  const out = [];
+  const own = [], site = [];
   (facts || []).forEach((f, i) => {
-    const l = factLine((needs || [])[i] || '', f);
-    if (l && !seen.has(l)) { seen.add(l); out.push(l); }
+    const k = (needs || [])[i] || '';
+    const l = factLine(k, f);
+    if (l && !seen.has(l)) { seen.add(l); (/^site:/.test(String(k)) ? site : own).push(l); }
   });
-  return out;
+  return own.concat(site);
 }
 
-/** A need's words after the mod's name: "it <fact>", or for a combination "together, it <fact>"; '' for none. */
+/**
+ * A need's words after the mod's name: "it <fact>", for a combination "together, it <fact>" (a site's union:
+ * "it adds to what your <site> mods can do together", with the site's lists: siteLines); '' for none.
+ */
 function factLine(key, fact) {
   if (!fact) return '';
-  if (/^power:together:many:/.test(String(key))) return fact;
-  return /^power:together:/.test(String(key)) ? `together, it ${fact}` : `it ${fact}`;
+  const k = String(key);
+  if (/^power:together:many:/.test(k)) return fact;
+  if (/^site:/.test(k)) return `it ${fact}`;
+  return /^power:together:/.test(k) ? `together, it ${fact}` : `it ${fact}`;
+}
+/**
+ * A site's lists (sitecombos.js reach) for trif status, one line each, as the card has them: ["<site> mods can: …",
+ * "they can see: …", "it could end up in: …", then the flag lines].
+ */
+function siteLines(r) {
+  const items = (l) => l.map((x) => `${x.t}${x.new ? ' (new)' : ''}`).join(' · ');
+  const label = { act: `${r.site} mods can:`, see: 'they can see:', go: 'it could end up in:' };
+  return (r.order || ['act', 'see', 'go']).filter((k) => r[k].length).map((k) => `${label[k]} ${items(r[k])}`)
+    .concat(r.flags.map((f) => `${f.t}${f.new ? ' (new)' : ''}`));
 }
 function parsePowers(values, mod) { return parsePowersWithArgs(values, mod).names; }
 
@@ -320,8 +338,8 @@ function powerInfo(mod) {
 
 /** Whether a need is a power that doesn't hold on its own (controls, mods). */
 function isSoft(key) {
-  const m = /^power:(.+)$/.exec(String(key));
+  const m = /^power:([\w-]+)(?::|$)/.exec(String(key)); // (with or without its header values: embeds' players)
   return !!(m && MENU[m[1]] && MENU[m[1]].soft);
 }
 
-module.exports = { MENU, NAMES, PowersError, parsePowers, parsePowersWithArgs, parseClicks, parseEvents, parseMigrate, EMBEDS, BLOCKABLE, powerNeeds, powerInfo, isSoft, siteOf, sameSite, READS, factLine, factLines };
+module.exports = { siteLines, MENU, NAMES, PowersError, parsePowers, parsePowersWithArgs, parseClicks, parseEvents, parseMigrate, EMBEDS, BLOCKABLE, powerNeeds, powerInfo, isSoft, siteOf, sameSite, READS, factLine, factLines };

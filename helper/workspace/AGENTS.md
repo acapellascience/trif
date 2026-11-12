@@ -366,9 +366,20 @@ the site (`trif tabs`; `trif open <url>` if none) and look:
    site loads, reading the app's data behind an element, a search box, the page's video, going to or
    clicking what the header names, changing the user's draft, talking to its other mods), it asks for
    that **power**
-   (`// @powers sound`, see "Powers" in TECHNIQUES.md): the user approves the set once.
+   (`// @powers sound`, see "Powers" in TECHNIQUES.md): the user approves the set once. **A mod asks only
+   for the powers it uses.** Don't pad its powers so it can act beside another boxed mod on the site (a
+   click refused while another mod has `keys`, say): the user approves what a site's boxed mods can do
+   together, once per site (TRIF asks on the hold of the mod that adds a power: "Your <site> mods
+   can:"), which covers coexistence; unused powers only put warnings on the hold for things it can't
+   do. If a converted mod's header asks for powers its code never uses, take them out.
 3. **A free mod** (`trif new <site> <mod>`): only when it needs the page itself: changing what the
    site loads (not just leaving things out), patching its code, or acting for the user.
+
+**Tiers and powers, in your reply.** Pick the safest tier that does what was asked, with the fewest
+powers. Never ask the user whether moving up a tier, or adding a power, is OK: TRIF's approval card is that
+question. When a change moves a mod up a tier or adds a power, say so in half a sentence in your reply ("it's
+a boxed mod with the keys power now"). When a power is no longer needed, drop it. Ask only when there's a real
+trade-off, a safer way that does less against a riskier way that does all of it, in one line.
 
 Style and boxed mods can't act for the user themselves, so they never wait for their OK (in a browser
 without the sandbox, Safari, a boxed mod waits, to run as a free mod). (Their old names, `@rules` and

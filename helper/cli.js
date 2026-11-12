@@ -373,6 +373,9 @@ const handlers = {
       if (brokenMods.has(id)) s += `; ${brokenText(brokenMods.get(id))}`;
       if (review[id]) s += `; TO REVIEW: ${require('./lib/boxpowers').factLines(review[id].needs, review[id].facts).join('; ')} (trif approve ${id} when that's fine)`;
       lines.push(`  ${pad(id, 40)} ${s}`);
+      // (what it adds to its site's boxed mods together: the site's lists, one line each)
+      const reach = (held[id] && held[id].reach) || (review[id] && review[id].reach) || [];
+      for (const r of reach) for (const l of require('./lib/boxpowers').siteLines(r)) lines.push(`  ${pad('', 40)}   ${l}`);
     }
     for (const [id, err] of helperErrors) if (!ids.includes(id)) lines.push(`  ${pad(id, 40)} NOT SENT: ${err}`);
     if ([...off].some((id) => !shipsOff.has(id) && !newOff.has(id))) lines.push('              off = switched off by the user (trif enable <id> turns one back on)');

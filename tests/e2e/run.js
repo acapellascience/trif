@@ -7,6 +7,9 @@
 //                         [--oss-model qwen/qwen3-coder]
 // --guidance: the same two requests with main's AGENTS.md and this checkout's, a real Claude Code run each
 // (--guidance-repeats N); results in guidance.json. See docs/TESTING.md.
+// --study: harder requests with four guides (0.2's, before the 2026-11-12 trim, this checkout's, next to none),
+// a real Claude Code run each (opus unless --claude-model; --guidance-repeats N rounds; --study-tasks
+// promos,pink,hearth and --study-guides v02,pre,now,none to narrow); results in study.json.
 // --oss: open-model (codex-oss) runs through OpenRouter, with the key already saved in your Keychain (the
 // panel's API key field, or `trif agent open-model --provider openrouter --set-key`); skipped without one.
 // The key is never read from the environment, shown or logged.
@@ -35,6 +38,9 @@ function parseArgs(argv) {
     else if (a === '--codex') o.codex = true;
     else if (a === '--oss') o.oss = true;
     else if (a === '--guidance') o.guidance = true;
+    else if (a === '--study') o.study = true;
+    else if (a === '--study-tasks') o.studyTasks = val().split(',');
+    else if (a === '--study-guides') o.studyGuides = val().split(',');
     else if (a === '--guidance-repeats') o.guidanceRepeats = Number(val());
     else if (a === '--oss-model') o.ossModel = val();
     else if (a === '--upgrade-from') o.upgradeFrom.push(path.resolve(val()));
@@ -101,6 +107,7 @@ async function main() {
           work: path.join(work, `${browser === 'firefox' ? 'ff' : 'cr'}-${name}`.slice(0, 24)),
           agent: o.agent && !agentDone, codex: o.codex && !agentDone, oss: o.oss && !agentDone, claudeModel: o.claudeModel, codexModel: o.codexModel,
           ossModel: o.ossModel, guidance: o.guidance && !agentDone, guidanceRepeats: o.guidanceRepeats,
+          study: o.study && !agentDone, studyTasks: o.studyTasks, studyGuides: o.studyGuides,
           headless: o.headless, extensionDirFirefox: fxDir,
         });
         agentDone = true; // agent runs once per browser, in its first scenario

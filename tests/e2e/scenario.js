@@ -795,7 +795,7 @@ class Scenario {
     // The helper inherits the browser's environment. HOME=<scratch> keeps everything in the scratch home;
     // for agent runs, which need your real Claude Code / Codex login, the browser (and so the helper and
     // the agents it starts) gets your real HOME, and TRIF_HOME points the helper at the scratch workspace.
-    const env = o.agent || o.codex || o.oss || o.guidance ? { HOME: REAL_HOME, TRIF_HOME: this.trif, TRIF_PRIVATE: this.priv } : { HOME: this.home };
+    const env = o.agent || o.codex || o.oss || o.guidance || o.study ? { HOME: REAL_HOME, TRIF_HOME: this.trif, TRIF_PRIVATE: this.priv } : { HOME: this.home };
     // The real Keychain only for --oss (the OpenRouter key the user saved); otherwise the fake one, so the
     // helper never looks up API keys for Claude Code or Codex in the real one.
     if (!o.oss) env.TRIF_KEYCHAIN_BIN = this.keychain().bin;
@@ -1292,7 +1292,7 @@ class Scenario {
 
     await r.check('setup page: all ticked once the agent can run, then "TRIF is ready" and Try it', () => this.setupDoneCheck());
     // (A stand-in Claude Code: only when the helper has the scratch HOME, never your real agent.)
-    if (!this.o.agent && !this.o.codex && !this.o.oss && !this.o.guidance) {
+    if (!this.o.agent && !this.o.codex && !this.o.oss && !this.o.guidance && !this.o.study) {
       await r.check('an expired login (a stand-in Claude Code): the login notice and one plain line, not the raw error; the message back in the box', () => this.expiredLoginCheck(win));
       await r.check('a style mod: TRIF\'s own code applies its CSS, hides, replaces and filters (also what appears later); one that would load from an address is refused, not sent', () => this.rulesModCheck(win));
       await r.check('groups: "Free mods" off on a site from the panel stops its free mods there (style mods keep running, other sites\' free mods untouched); on again, back', () => this.groupsCheck(win));
@@ -1332,6 +1332,7 @@ class Scenario {
     if (this.o.codex) await this.agentChecks('codex');
     if (this.o.oss) await this.agentChecks('oss');
     if (this.o.guidance) await this.guidanceComparison(base);
+    if (this.o.study) await this.guidanceStudy(base);
   }
 
   // ---- the shipped Google mods against the stand-ins (tests/e2e/lib/server.js): every data-e2e="hide…"
@@ -1479,6 +1480,232 @@ class Scenario {
     r.log(`--guidance rows:\n${rows.map((x) => JSON.stringify(x)).join('\n')}`);
     fs.writeFileSync(this.r.file('guidance.json'), JSON.stringify({ baseline: base0, rows }, null, 2));
     fs.writeFileSync(agentsFile, guides.new);
+    await this.cli(['enable', '127.0.0.1/e2e-banner', '--url', '127.0.0.1']);
+  }
+
+  // ---- --study: the same requests with several guides (0.2's, the one before the 2026-11-12 trim, this
+  // checkout's, and next to none), a real Claude Code run each, in a shuffled order per round. No pass/fail:
+  // study.json and study-*.txt in the results have what each run left on the page (measured after a reload,
+  // with the harness's own eyes, not trif run), how it worked (from its run log) and what it said.
+
+  async guidanceStudy(base) {
+    const r = this.r;
+    const model = this.o.claudeModel || 'opus';
+    const repeats = this.o.guidanceRepeats || 1;
+    const sitesDir = path.join(this.trif, 'sites', '127.0.0.1');
+    const runsDir = path.join(this.priv, 'runs');
+    const DOCS = ['AGENTS.md', 'TECHNIQUES.md', 'BOXED.md'];
+    const show = (ref, f) => { const x = run('git', ['show', `${ref}:helper/workspace/${f}`], { cwd: I.REPO }); return x.status === 0 ? x.stdout : null; };
+    const here = (f) => (fs.existsSync(path.join(I.REPO, 'helper', 'workspace', f)) ? fs.readFileSync(path.join(I.REPO, 'helper', 'workspace', f), 'utf8') : null);
+    const allGuides = {
+      // 0.2 as released (2026-11-05): one AGENTS.md
+      v02: { 'AGENTS.md': show('v0.2.4', 'AGENTS.md') },
+      // main before the trim (038ae0f): AGENTS.md and TECHNIQUES.md, boxed mods and powers in it
+      pre: { 'AGENTS.md': show('038ae0f', 'AGENTS.md'), 'TECHNIQUES.md': show('038ae0f', 'TECHNIQUES.md') },
+      now: { 'AGENTS.md': here('AGENTS.md'), 'TECHNIQUES.md': here('TECHNIQUES.md'), 'BOXED.md': here('BOXED.md') },
+      // next to nothing: where mods go, and that trif --help exists
+      none: { 'AGENTS.md': '# TRIF workspace\n\nMods are files in `sites/<site>/<mod>.js`. `trif --help` lists the commands for looking at and testing the user\'s page.\n' },
+    };
+    const names = (this.o.studyGuides || Object.keys(allGuides)).filter((g) => allGuides[g]);
+    for (const g of names) if (!allGuides[g]['AGENTS.md']) { r.note(`--study: no AGENTS.md for ${g}`); return; }
+    const sizes = Object.fromEntries(names.map((g) => [g, Object.values(allGuides[g]).reduce((n, t) => n + (t ? t.length : 0), 0)]));
+    r.log(`--study guides (characters): ${JSON.stringify(sizes)}; model ${model}; ${repeats} round(s)`);
+    const saved = Object.fromEntries(DOCS.map((f) => [f, fs.existsSync(path.join(this.trif, f)) ? fs.readFileSync(path.join(this.trif, f), 'utf8') : null]));
+    const useGuide = (g) => {
+      for (const f of DOCS) {
+        const p = path.join(this.trif, f);
+        if (allGuides[g][f]) fs.writeFileSync(p, allGuides[g][f]); else fs.rmSync(p, { force: true });
+      }
+    };
+    await this.cli(['disable', '127.0.0.1/e2e-banner', '--url', '127.0.0.1']);
+
+    // ---- what a run left: measured in the page after a reload, by the harness (CDP), never trif run
+    const pageCtx = (file) => this.d.findPage((u) => u.includes(file));
+    const openPage = async (file) => {
+      await this.ext(`async (id, url) => { await chrome.tabs.update(id, { url, active: true }); }`, [this.win.tabId, `${base}/${file}`]);
+      await sleep(1500);
+    };
+    const sweep = async (...args) => (await this.cli(['sweep', '--url', 'promos.html', '--scroll', '--force', ...args], { json: true })).json;
+    const measurePromos = async () => {
+      await this.cli(['reload', '--url', 'promos.html']);
+      await sleep(1000);
+      const promos = await sweep('--text', '^Promoted');
+      const posts = await sweep('--text', '^Post \\d');
+      const blue = await sweep('--color', '#0a66c2');
+      const pink = await sweep('--color', '#ff69b4');
+      const left = (j) => (j ? j.matches.filter((x) => x.visible).map((x) => `${x.element}${x.root !== 'document' ? ' (shadow)' : ''}`) : null);
+      const shot = await this.shot(await pageCtx('promos.html'), 'study-promos').catch(() => null);
+      return { promos: promos ? promos.summary.visible : null, posts: posts ? posts.summary.visible : null, blue: blue ? blue.summary.visible : null,
+        pinkish: pink ? pink.summary.visible : null, promosLeft: left(promos), blueLeft: left(blue), shot: shot && path.basename(shot) };
+    };
+    const measureHearth = async (label) => {
+      await this.cli(['reload', '--url', 'hearth.html']);
+      await sleep(1500);
+      const ctx = await pageCtx('hearth.html');
+      const m = await this.d.eval(ctx, `async () => {
+        const vis = (e) => !!e && e.getClientRects().length > 0 && getComputedStyle(e).visibility !== 'hidden' && getComputedStyle(e).opacity !== '0';
+        const R = (e) => { const r = e.getBoundingClientRect(); return { x: Math.round(r.x), w: Math.round(r.width), h: Math.round(r.height), right: Math.round(r.right) }; };
+        const right = document.querySelector('[role=complementary]');
+        const secs = right ? [...right.querySelectorAll(':scope > section')] : [];
+        const items = [...document.querySelectorAll('[role=feed] > .x3pst')];
+        const isAd = (p) => /Sponsored/.test((p.querySelector('.x0sub') || {}).textContent || '');
+        const posts = items.filter((p) => !isAd(p));
+        const post = posts.find(vis);
+        const bday = secs[1] && secs[1].querySelector('span');
+        const gift = secs[1] && secs[1].querySelector('.x0gift');
+        const nav = document.querySelector('[role=navigation]'), hdr = document.querySelector('[role=banner]');
+        const rr = right && vis(right) ? R(right) : null, pr = post ? R(post) : null;
+        return {
+          vw: innerWidth,
+          ads: [...document.querySelectorAll('[role=complementary] a.x2ad')].filter(vis).length,
+          sponsoredHeading: secs[0] ? vis(secs[0].querySelector('h3')) : null,
+          feedAd: items.some((p) => isAd(p) && vis(p)),
+          bday: vis(bday), bdayH: secs[1] && vis(secs[1]) ? R(secs[1]).h : 0, bdayFont: bday ? parseFloat(getComputedStyle(bday).fontSize) : null,
+          bdayHeading: secs[1] ? vis(secs[1].querySelector('h3')) : null, gift: gift && vis(gift) ? R(gift).w : 0,
+          contacts: [...document.querySelectorAll('[role=complementary] .x6ct')].filter(vis).length,
+          right: rr, post: pr, gap: rr && pr ? rr.x - pr.right : null, leftMargin: pr ? pr.x - (nav && vis(nav) ? R(nav).right : 0) : null,
+          nav: nav && vis(nav) ? R(nav).w : 0, hdrH: hdr && vis(hdr) ? R(hdr).h : 0,
+          posts: posts.filter(vis).length,
+        };
+      }`);
+      const shot = await this.shot(ctx, `study-${label}`).catch(() => null);
+      // loading more (a POST): scroll to the bottom twice
+      await this.d.eval(ctx, `async () => { scrollTo(0, document.documentElement.scrollHeight); }`);
+      await sleep(1500);
+      await this.d.eval(ctx, `async () => { scrollTo(0, document.documentElement.scrollHeight); }`);
+      await sleep(1500);
+      const after = await this.d.eval(ctx, `async () => ({ posts: document.querySelectorAll('[role=feed] > .x3pst').length, error: !!document.querySelector('.x0err') })`);
+      return { ...m, loadsMore: after.posts > m.posts + 1 && !after.error, shot: shot && path.basename(shot) };
+    };
+
+    // ---- how a run worked, from its log in the scratch home (the newest one)
+    const runLog = (since) => {
+      const files = fs.existsSync(runsDir) ? fs.readdirSync(runsDir).filter((f) => f.endsWith('.jsonl')).map((f) => path.join(runsDir, f)).filter((f) => fs.statSync(f).mtimeMs >= since) : [];
+      files.sort((a, b) => fs.statSync(b).mtimeMs - fs.statSync(a).mtimeMs);
+      return files[0] || null;
+    };
+    const workStats = (file) => {
+      const st = { tools: 0, reloads: 0, runs: 0, injects: 0, sweeps: 0, screenshots: 0, guideReads: [], maxContext: 0, turns: null, cost: null, reply: '', blocked: 0 };
+      if (!file) return st;
+      const texts = [];
+      for (const line of fs.readFileSync(file, 'utf8').split('\n')) {
+        let o; try { o = JSON.parse(line); } catch { continue; }
+        if (o.type === 'assistant' && o.message) {
+          const u = o.message.usage || {};
+          st.maxContext = Math.max(st.maxContext, (u.input_tokens || 0) + (u.cache_read_input_tokens || 0) + (u.cache_creation_input_tokens || 0));
+          for (const c of o.message.content || []) {
+            if (c.type === 'text' && c.text.trim()) texts.push(c.text.trim());
+            if (c.type !== 'tool_use') continue;
+            st.tools++;
+            const cmd = String((c.input && (c.input.command || c.input.file_path || c.input.pattern)) || '');
+            for (const f of DOCS) if (cmd.includes(f) && !st.guideReads.includes(f)) st.guideReads.push(f);
+            if (c.name !== 'Bash') continue;
+            st.reloads += (cmd.match(/\btrif reload\b/g) || []).length;
+            st.sweeps += (cmd.match(/\btrif sweep\b/g) || []).length;
+            st.screenshots += (cmd.match(/\btrif screenshot\b/g) || []).length;
+            const runs = cmd.split(/\btrif run\b/).slice(1);
+            st.runs += runs.length;
+            // trying a change out in the tab instead of saving and reloading: CSS or styles put in by hand, or a file run in it
+            st.injects += runs.filter((x) => /^\s*(--tab \S+ )?-f\b|createElement\(\\?['"]style|\.style\.|insertRule|adoptedStyleSheets|\.remove\(\)|display\s*[:=]\s*\\?['"]?none/.test(x)).length;
+          }
+        }
+        if (o.type === 'user' && o.message && Array.isArray(o.message.content)) {
+          for (const c of o.message.content) if (c && c.type === 'tool_result' && c.is_error) st.blocked++;
+        }
+        if (o.type === 'result') { st.turns = o.num_turns ?? null; st.cost = o.total_cost_usd ?? null; }
+      }
+      st.reply = texts.length ? texts[texts.length - 1] : '';
+      st.replyAll = texts.join('\n\n');
+      return st;
+    };
+    const tierOf = (src) => (/^\/\/\s*@(style|rules)\b/m.test(src) ? 'style' : /^\/\/\s*@(boxed|sandboxed)\b/m.test(src) ? 'boxed' : 'free');
+    const theMods = () => fs.readdirSync(sitesDir).filter((f) => f.endsWith('.js') && !f.startsWith('_') && f !== 'e2e-banner.js');
+    // What the user would do with what the run made: switch on what arrived off, allow what's held.
+    const letRun = async () => {
+      const notes = [];
+      for (const f of theMods()) {
+        const id = `127.0.0.1/${f.slice(0, -3)}`;
+        const a = await this.cli(['approve', id]);
+        if (a.status === 0 && /approved:/.test(a.stdout)) notes.push(`${id} held, allowed`);
+        await this.cli(['enable', id, '--url', '127.0.0.1']);
+      }
+      await sleep(1000);
+      return notes;
+    };
+    const clearSite = async (tag) => {
+      const gone = [];
+      for (const f of fs.readdirSync(sitesDir)) {
+        if (f === 'e2e-banner.js') continue;
+        fs.renameSync(path.join(sitesDir, f), path.join(this.work, `study-${tag}-${f}`));
+        if (f.endsWith('.js') && !f.startsWith('_')) gone.push(`127.0.0.1/${f.slice(0, -3)}`);
+      }
+      // (the page in front: its registered mods, as guidanceComparison checks; then a moment for any other page's)
+      const page = ((await this.cli(['tabs'], { json: true })).json || []).find((t) => t.active) || {};
+      await waitFor('the last run\'s mods to go', async () => {
+        const st = (await this.cli(['status', '--url', String(page.url || '127.0.0.1')], { json: true })).json;
+        const on = (st && st.extension && st.extension.page && st.extension.page.mods || []).map((x) => x.id);
+        return gone.some((id) => on.includes(id)) ? null : true;
+      }, { timeoutMs: 20000 }).catch(() => r.note(`--study: ${tag}: mods still listed after clearing`));
+      await sleep(1500);
+    };
+    const agentRun = async (file, prompt, session) => {
+      const tab = ((await this.cli(['tabs'], { json: true })).json || []).find((t) => t.url.includes(file));
+      const t0 = Date.now();
+      const args = ['agent', 'run', '--agent', 'claude', '--model', model, '--tab', String(tab && tab.id), ...(session ? ['--session', session] : []), prompt];
+      const out = await this.cli(args, { timeoutMs: 15 * 60000 });
+      const stdout = `${out.stdout}\n${out.stderr}`;
+      return { secs: Math.round((Date.now() - t0) / 1000), stdout, session: (/^session: (\S+)/m.exec(out.stdout) || [])[1] || null, log: runLog(t0 - 1000) };
+    };
+
+    const tasks = [
+      { key: 'promos', file: 'promos.html', turns: ['hide the promos, like the "Promoted · Deal 1" one'], measure: measurePromos },
+      { key: 'pink', file: 'promos.html', turns: ['make the blue stuff pink'], measure: measurePromos },
+      { key: 'hearth', file: 'hearth.html', turns: [
+        'hide the sponsored stuff in the right column, and make the birthdays box really compact',
+        'make the right column much thinner and let the posts use the space it frees up',
+      ], measure: measureHearth },
+    ].filter((t) => !this.o.studyTasks || this.o.studyTasks.includes(t.key));
+
+    const baselines = {};
+    for (const file of ['promos.html', 'hearth.html']) {
+      if (!tasks.some((t) => t.file === file)) continue;
+      await openPage(file);
+      baselines[file] = file === 'hearth.html' ? await measureHearth('baseline') : await measurePromos();
+    }
+    r.log(`--study baselines: ${JSON.stringify(baselines)}`);
+    const rows = [];
+    const writeOut = () => fs.writeFileSync(this.r.file('study.json'), JSON.stringify({ model, sizes, baselines, rows }, null, 2));
+    let seed = 7;
+    const shuffle = (a) => { const x = [...a]; for (let i = x.length - 1; i > 0; i--) { seed = (seed * 16807) % 2147483647; const j = seed % (i + 1); [x[i], x[j]] = [x[j], x[i]]; } return x; };
+    for (let rep = 0; rep < repeats; rep++) {
+      for (const task of tasks) {
+        for (const g of shuffle(names)) {
+          const tag = `${task.key}-${g}-${rep}`;
+          useGuide(g);
+          await clearSite(tag);
+          await openPage(task.file);
+          let session = null;
+          for (let turn = 0; turn < task.turns.length; turn++) {
+            const res = await agentRun(task.file, task.turns[turn], session);
+            session = res.session || session;
+            const work = workStats(res.log);
+            const allowed = await letRun();
+            const m = await task.measure(`${tag}-${turn}`);
+            const mods = theMods().map((f) => ({ file: f, tier: tierOf(fs.readFileSync(path.join(sitesDir, f), 'utf8')), lines: fs.readFileSync(path.join(sitesDir, f), 'utf8').split('\n').length }));
+            fs.writeFileSync(this.r.file(`study-${tag}-${turn}.txt`), res.stdout);
+            if (res.log) fs.copyFileSync(res.log, this.r.file(`study-${tag}-${turn}.jsonl`));
+            for (const mod of mods) fs.copyFileSync(path.join(sitesDir, mod.file), this.r.file(`study-${tag}-${turn}-${mod.file}`));
+            const { replyAll, ...w } = work;
+            const row = { task: task.key, guide: g, rep, turn, secs: res.secs, ...w, replyChars: work.reply.length, mods, allowed, ...m };
+            rows.push(row);
+            writeOut();
+            r.record(`--study ${task.key} turn ${turn + 1} with ${g} (${model})`, 'pass', JSON.stringify({ secs: row.secs, cost: row.cost, tools: row.tools, reloads: row.reloads, injects: row.injects, mods: mods.map((x) => `${x.file}:${x.tier}`) }));
+          }
+        }
+      }
+    }
+    writeOut();
+    for (const f of DOCS) { const p = path.join(this.trif, f); if (saved[f] !== null) fs.writeFileSync(p, saved[f]); else fs.rmSync(p, { force: true }); }
     await this.cli(['enable', '127.0.0.1/e2e-banner', '--url', '127.0.0.1']);
   }
 

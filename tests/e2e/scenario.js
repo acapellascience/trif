@@ -1505,11 +1505,13 @@ class Scenario {
       v02: { 'AGENTS.md': show('v0.2.4', 'AGENTS.md') },
       // main before the trim (038ae0f): AGENTS.md and TECHNIQUES.md, boxed mods and powers in it
       pre: { 'AGENTS.md': show('038ae0f', 'AGENTS.md'), 'TECHNIQUES.md': show('038ae0f', 'TECHNIQUES.md') },
+      // main after the trim, before the fewer-steps changes (27581c9)
+      trim: { 'AGENTS.md': show('27581c9', 'AGENTS.md'), 'TECHNIQUES.md': show('27581c9', 'TECHNIQUES.md'), 'BOXED.md': show('27581c9', 'BOXED.md') },
       now: { 'AGENTS.md': here('AGENTS.md'), 'TECHNIQUES.md': here('TECHNIQUES.md'), 'BOXED.md': here('BOXED.md') },
       // next to nothing: where mods go, and that trif --help exists
       none: { 'AGENTS.md': '# TRIF workspace\n\nMods are files in `sites/<site>/<mod>.js`. `trif --help` lists the commands for looking at and testing the user\'s page.\n' },
     };
-    const names = (this.o.studyGuides || Object.keys(allGuides)).filter((g) => allGuides[g]);
+    const names = (this.o.studyGuides || ['v02', 'pre', 'now', 'none']).filter((g) => allGuides[g]);
     for (const g of names) if (!allGuides[g]['AGENTS.md']) { r.note(`--study: no AGENTS.md for ${g}`); return; }
     const sizes = Object.fromEntries(names.map((g) => [g, Object.values(allGuides[g]).reduce((n, t) => n + (t ? t.length : 0), 0)]));
     r.log(`--study guides (characters): ${JSON.stringify(sizes)}; model ${model}; ${repeats} round(s)`);
@@ -1588,11 +1590,17 @@ class Scenario {
       return files[0] || null;
     };
     const workStats = (file) => {
-      const st = { tools: 0, reloads: 0, runs: 0, injects: 0, sweeps: 0, screenshots: 0, guideReads: [], maxContext: 0, turns: null, cost: null, reply: '', blocked: 0 };
+      const st = { tools: 0, reloads: 0, runs: 0, injects: 0, sweeps: 0, screenshots: 0, verifies: 0, guideReads: [], maxContext: 0, turns: null, cost: null, reply: '', blocked: 0, firstWords: null, firstLine: '' };
+      let started = null;
       if (!file) return st;
       const texts = [];
       for (const line of fs.readFileSync(file, 'utf8').split('\n')) {
         let o; try { o = JSON.parse(line); } catch { continue; }
+        if (o.webmods === 'start') started = o.time;
+        if (o.type === 'assistant' && o.message && st.firstWords === null && started && o.timestamp) {
+          const t = (o.message.content || []).find((c) => c.type === 'text' && c.text.trim());
+          if (t) { st.firstWords = Math.round((Date.parse(o.timestamp) - started) / 100) / 10; st.firstLine = t.text.trim().split('\n')[0].slice(0, 160); }
+        }
         if (o.type === 'assistant' && o.message) {
           const u = o.message.usage || {};
           st.maxContext = Math.max(st.maxContext, (u.input_tokens || 0) + (u.cache_read_input_tokens || 0) + (u.cache_creation_input_tokens || 0));
@@ -1604,6 +1612,7 @@ class Scenario {
             for (const f of DOCS) if (cmd.includes(f) && !st.guideReads.includes(f)) st.guideReads.push(f);
             if (c.name !== 'Bash') continue;
             st.reloads += (cmd.match(/\btrif reload\b/g) || []).length;
+            st.verifies += (cmd.match(/\btrif verify\b/g) || []).length;
             st.sweeps += (cmd.match(/\btrif sweep\b/g) || []).length;
             st.screenshots += (cmd.match(/\btrif screenshot\b/g) || []).length;
             const runs = cmd.split(/\btrif run\b/).slice(1);

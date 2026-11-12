@@ -1054,7 +1054,13 @@ function markListScroll() {
   const scrolls = l.scrollHeight > l.clientHeight + 1;
   if (l.classList.contains('scrolls') !== scrolls) l.classList.toggle('scrolls', scrolls);
 }
-new ResizeObserver(() => markListScroll()).observe(ui.modList);
+// On the next frame: the class changes the list's padding, which resizes it, and doing that inside the
+// observer's own callback makes Chrome log "ResizeObserver loop completed with undelivered notifications".
+let listScrollFrame = 0;
+new ResizeObserver(() => {
+  if (listScrollFrame) return;
+  listScrollFrame = requestAnimationFrame(() => { listScrollFrame = 0; markListScroll(); });
+}).observe(ui.modList);
 
 // The folded line at the bottom of the mods box: "N more for other <site> pages", a button that shows them.
 let foldLi = null;

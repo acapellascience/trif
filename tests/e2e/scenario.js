@@ -540,22 +540,19 @@ class Scenario {
     ];
     try {
       await this.ext(`async (k, messages) => { await chrome.storage.local.set({ [k]: { messages } }); }`, [key, messages]);
+      // (each tool line stands on its own, as the agent works: "ran trif reload --tab 1", nothing folded)
       const look = () => this.panel(`async () => {
         const lis = [...document.querySelectorAll('#messages > li')];
         const tools = lis.filter((li) => li.classList.contains('tool'));
-        const sum = document.querySelector('#messages .tool-sum');
-        return { sum: sum?.textContent || null, expanded: sum?.getAttribute('aria-expanded') || null,
-          shown: tools.filter((li) => li.getClientRects().length > 0 && !li.hidden).length, tools: tools.length,
-          headText: document.querySelector('#messages .tool-head .tool-text')?.getClientRects().length > 0,
+        return { texts: tools.filter((li) => li.getClientRects().length > 0 && !li.hidden).map((li) => li.textContent.trim()),
+          folds: document.querySelectorAll('#messages .tool-sum').length,
           explain: lis.at(-1)?.querySelector('.explain-btn')?.textContent || null };
       }`);
-      const folded = await waitFor('the folded tool lines', async () => { const x = await look(); return x.sum ? x : null; }, { timeoutMs: 8000 });
-      if (folded.sum !== 'Ran 2 commands, read 1 file' || folded.expanded !== 'false' || folded.tools !== 3 || folded.shown !== 1 || folded.headText || folded.explain !== 'Explain') throw new Error(`folded: ${JSON.stringify(folded)}`);
-      await this.panel(`async () => { document.querySelector('#messages .tool-sum').click(); return true; }`);
-      const open = await waitFor('the tool lines opened', async () => { const x = await look(); return x.expanded === 'true' ? x : null; }, { timeoutMs: 5000 });
-      if (open.shown !== 3 || !open.headText) throw new Error(`opened: ${JSON.stringify(open)}`);
-      await this.shot(this.panelCtx, 'panel-tool-fold');
-      return `"${folded.sum}", opens to ${open.shown} lines; Explain under the reply`;
+      const x = await waitFor('the tool lines', async () => { const v = await look(); return v.texts.length ? v : null; }, { timeoutMs: 8000 });
+      const want = ['ran trif reload --tab 1', 'read sites/x.com/pink.js', 'ran trif errors'];
+      if (JSON.stringify(x.texts) !== JSON.stringify(want) || x.folds || x.explain !== 'Explain') throw new Error(`tool lines: ${JSON.stringify(x)}`);
+      await this.shot(this.panelCtx, 'panel-tool-lines');
+      return `${x.texts.length} tool lines, each shown; Explain under the reply`;
     } finally {
       await this.ext(`async (k, v) => { if (v) await chrome.storage.local.set({ [k]: v }); else await chrome.storage.local.remove(k); }`, [key, saved]).catch(() => {});
     }
@@ -1280,7 +1277,7 @@ class Scenario {
       await this.shot(this.panelCtx, 'panel-x');
       return p.mods.map((m) => `${m.id.split('/')[1]} ${m.on ? 'on' : 'off'}`).join(', ');
     });
-    await r.check('the chat folds a run of tool lines into one ("Ran 2 commands, read 1 file"), opens on a click, and offers Explain under the last reply', () => this.toolFoldCheck());
+    await r.check('the chat shows each tool line as it is ("ran trif reload --tab 1"), nothing folded, and offers Explain under the last reply', () => this.toolFoldCheck());
     await this.starterSettingsCheck();
     await this.starterLinkCheck(win);
     await this.narrowShots();
@@ -4623,7 +4620,7 @@ setTimeout(() => {
   const text = 'Two mods: one hears keys, one clicks the counter (boxed mods with the keys and click powers).';
   say({ type: 'assistant', message: { model: 'claude-e2e', content: [{ type: 'text', text }] } });
   say({ type: 'result', subtype: 'success', is_error: false, result: text, session_id: 'e2e-request' });
-}, 1500);
+}, 3000);
 `, { mode: 0o755 });
     const cfgFile = path.join(this.priv, 'config.json');
     const saved = fs.readFileSync(cfgFile, 'utf8');
@@ -4643,14 +4640,23 @@ setTimeout(() => {
     this.sandboxPage = true;
     try {
       await this.forgetSite(site);
-      await this.ext(`async (k) => { await chrome.storage.local.remove(k); }`, [`chat:${site}`]);
+      // (a chat long enough to scroll, so the run's start has to bring "Working…", below the messages, into view)
+      const t0 = Date.now() - 600000;
+      const earlier = Array.from({ length: 40 }, (_, i) => ({ role: i % 2 ? 'assistant' : 'user', text: i % 2 ? 'Done: the page is as you asked.' : 'Change something on this page', time: t0 + i }));
+      await this.ext(`async (k, messages) => { await chrome.storage.local.set({ [k]: { messages } }); }`, [`chat:${site}`, earlier]);
       await this.ext(`async (id, url) => { await chrome.tabs.update(id, { url, active: true }); }`, [win.tabId, `${base}/cross.html?request`]);
       await reopen();
       await this.waitPanel(`the panel on ${site}`, (x) => x.site === site && !x.gate, 15000);
       await this.waitLooks('Send on (the stand-in Claude Code)', (l) => /Claude Code/.test(l.dotLabel) && !l.send.disabled, 30000);
       await this.panel(`async (text) => { const i = document.getElementById('input'); i.value = text; i.dispatchEvent(new Event('input', { bubbles: true })); }`, ['hotkeys and a counter clicker']);
       await this.panelClick('#send');
-      await waitFor('the run to finish', async () => { const x = await chat(); return x && !x.run && x.messages.length >= 2 ? x : null; }, { timeoutMs: 60000, intervalMs: 300 });
+      await waitFor('"Working…" in view when the run starts', () => this.panel(`async () => {
+        const w = document.getElementById('working'), c = document.getElementById('chat');
+        if (w.hidden) return null;
+        const a = w.getBoundingClientRect(), b = c.getBoundingClientRect();
+        return (c.scrollHeight > c.clientHeight + 100 && a.top >= b.top && a.bottom <= b.bottom + 1) || null;
+      }`), { timeoutMs: 2500, intervalMs: 100 });
+      await waitFor('the run to finish', async () => { const x = await chat(); return x && !x.run && x.messages.length >= 42 ? x : null; }, { timeoutMs: 60000, intervalMs: 300 });
       await waitFor('both held', async () => { const st = await status(); return ids.every((id) => new RegExp(`${id}\\s+HELD`).test(st)) || null; }, { timeoutMs: 25000, intervalMs: 500 });
       // the card, by itself or from a row's tag: one for both
       await waitFor('the hold in the panel', () => this.panel(`async () => !!document.querySelector('li[data-mod="${site}/e2e-req-keys"] .tag.on-hold') || null`), { timeoutMs: 15000 });

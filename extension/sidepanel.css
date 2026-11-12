@@ -485,16 +485,6 @@ h3.mod-name { margin: 0; font-size: inherit; line-height: inherit; }
 }
 .msg.tool + .msg.tool { margin-top: -6px; }
 /* A run of tool lines, folded (sidepanel.js groupTools): "Ran 2 commands ›"; open, the lines under it */
-.msg.tool.tool-head .tool-sum { display: inline-flex; align-items: center; gap: 4px; padding: 0; border: 0; background: none; color: var(--muted); font: 12px/1.5 system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; cursor: pointer; }
-.msg.tool.tool-head .tool-sum::after { content: "›"; display: inline-block; transition: transform .15s ease; }
-.msg.tool.tool-head.open .tool-sum::after { transform: rotate(90deg); }
-.msg.tool.tool-head .tool-sum:hover { color: var(--text); }
-.msg.tool.tool-head .tool-sum:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 3px; }
-.msg.tool.tool-head .tool-text { display: none; }
-.msg.tool.tool-head.open .tool-text { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.msg.tool.tool-head.open { white-space: normal; }
-.msg.tool.tool-member { padding-left: 2px; }
-@media (prefers-reduced-motion: reduce) { .msg.tool.tool-head .tool-sum::after { transition: none; } }
 .msg.mod { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 0 2px; color: var(--muted); font-size: 12px; }
 .msg.mod .btn { padding: 2px 10px; }
 

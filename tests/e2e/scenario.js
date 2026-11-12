@@ -3598,7 +3598,9 @@ process.exitCode = 1;
       // the list's visible box, scrolled to the top and to the bottom)
       const clipped = () => this.panel(`async () => {
         const l = document.getElementById('mod-list');
-        const edge = l.getBoundingClientRect().left + l.clientLeft + l.clientWidth;
+        // (a classic scrollbar is outside clientWidth; an overlay one isn't, so while it scrolls the 12px it draws in come off too)
+        const scrolls0 = l.scrollHeight > l.clientHeight;
+        const edge = Math.min(l.getBoundingClientRect().left + l.clientLeft + l.clientWidth, l.getBoundingClientRect().right - (scrolls0 ? 12 : 0));
         const shown = (b) => b.getClientRects().length > 0;
         const lasts = [...l.querySelectorAll(':scope > li[data-mod]')].map((li) => [...li.querySelectorAll('button')].filter(shown).pop()).filter(Boolean);
         const offs = [...l.querySelectorAll('.gs-btn[data-on="false"]')].filter(shown);

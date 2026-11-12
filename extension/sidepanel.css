@@ -345,7 +345,7 @@ body.no-site .site-starter { display: none; }
   list-style: none; margin: 4px -4px 0 -3px; padding: 2px 4px 2px 3px; /* room for focus rings inside the scroller, and the bin's pull toward the edge (-4px) */
   max-height: calc(40vh - 40px);
   overflow-y: auto; overflow-x: hidden;
-  scrollbar-gutter: stable; /* (the scrollbar's room kept, so it never covers the rows' right edge: the bins, OFF) */
+  scrollbar-gutter: stable; /* (a classic scrollbar's room kept, so it never covers the rows' right edge: the bins, OFF) */
   overscroll-behavior: contain;
   scrollbar-width: thin;
 }
@@ -924,3 +924,4 @@ body.chat-empty .mod-list { max-height: calc(70vh - 40px); }
 .sensitive-note .mod-err { display: block; margin-top: 4px; }
 .sensitive-note .sensitive-also { color: var(--muted); }
 .cv-menu .cv-copy-to { display: contents; }
+.mod-list.scrolls { padding-right: 18px; } /* (and an overlay one's, which takes none: sidepanel.js markListScroll) */

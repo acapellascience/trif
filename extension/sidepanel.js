@@ -674,6 +674,7 @@ function render() {
   ui.empty.hidden = !site || chat.messages.length > 0;
   // (the mods box shows all its rows while the chat is empty: sidepanel.css)
   document.body.classList.toggle('chat-empty', !chat.messages.length);
+  markListScroll();
   ui.working.hidden = !running;
 
   ui.newChat.disabled = !site || (chat.messages.length === 0 && !running);
@@ -1045,6 +1046,16 @@ function groupHeading(g) {
   return li;
 }
 
+// While the mods list scrolls, it keeps its scrollbar's room on the right (sidepanel.css .mod-list.scrolls):
+// an overlay scrollbar (macOS) takes none of its own and would sit on the rows' bins and the tiers' OFF.
+function markListScroll() {
+  const l = ui.modList;
+  if (!l.isConnected) return;
+  const scrolls = l.scrollHeight > l.clientHeight + 1;
+  if (l.classList.contains('scrolls') !== scrolls) l.classList.toggle('scrolls', scrolls);
+}
+new ResizeObserver(() => markListScroll()).observe(ui.modList);
+
 // The folded line at the bottom of the mods box: "N more for other <site> pages", a button that shows them.
 let foldLi = null;
 function foldLine(n, scope) {
@@ -1129,6 +1140,7 @@ function renderMods() {
     if (count) { count.replaceChildren(el('span', 'gc-on', String(on)), el('span', 'gc-all', `/${inGroup.length}`)); count.title = `${on} of ${inGroup.length} switched on`; }
   }
   syncSwitches(ui.modList, isOn);
+  markListScroll();
   // Open unless the user closed it (remembered across sites and sessions), so each switch is one click away.
   if (view.modsOpenFor === null) {
     let open = true;

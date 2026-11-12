@@ -188,6 +188,15 @@ site where it's off, nothing from TRIF runs or reads it: no mods (all-sites mods
   turns the site on. Say so when you finish.
 - A mod for all sites runs only on sites TRIF is on for.
 
+### Sensitive sites
+
+A host on the sensitive list (email, banking, password managers, chats: the user can edit it) is a site of
+its own in TRIF, even under a bigger domain: mail.google.com isn't part of google.com. Its mods go in its
+own folder (`trif new mail.google.com <mod>`, `sites/mail.google.com/`); google.com's mods and mods for all
+sites don't run there, and its own mods run only there. TRIF starts each one blocked ("mail.google.com is
+blocked in TRIF"): only the user can unblock it, in the side panel there. A side-panel run on such a host
+is limited to it: its folder is the host's, and google.com's folder and tabs are another site's.
+
 ## Agent on this site
 
 On a site TRIF is on for, the user also chooses how far you may reach into its tabs ("Agent on this site",
@@ -196,7 +205,11 @@ on the side panel's line over the message box, and in Settings). It applies to y
 - **Look**: `trif text`, `trif screenshot`, `trif sweep`, `trif requests` and the rest that read, but not
   `trif run`.
 - **Off**: nothing on its tabs (`trif tabs` lists them without their address or title). TRIF starts email,
-  banking and payments, password managers, Discord, WhatsApp Web and AI chat sites at Off.
+  banking and payments, password managers, Discord, WhatsApp Web and AI chat sites at Off. At Off you may
+  only make **style mods** (`--style`) and **boxed mods** (`--boxed`) for the site, from what the user
+  describes: a free mod you write there is held, refused (`trif status` says why). If what they ask needs a
+  free mod, say so and stop: the user can change "Agent on this site" or add the mod themselves. Don't
+  write one anyway.
 - **Ask** (no choice yet): reading works; the first `trif run` there opens a question in the side panel
   (Just this once / Always on this site / Not here) and waits up to 25 seconds for the answer. With no side
   panel open, it fails at once, saying so.

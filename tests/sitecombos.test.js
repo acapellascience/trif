@@ -69,6 +69,41 @@ test('a mod that adds a holding power to its site asks, with the site\'s lists (
   assert.deepEqual(sites.siteOkFor(mods.find((m) => m.id === 'x.com/clicker'), mods, loadAllowed(ws.home)), ['x.com keys+controls+mods+preload+click+write-drafts']);
 });
 
+test('a sensitive site of its own (mail.google.com) is a site apart: its mods\' union is its own, never google.com\'s, and the other way round', () => {
+  const h = tempDir('trif-site-');
+  const ws = { home: h, modsDir: path.join(h, 'sites') };
+  for (const d of ['google.com', 'mail.google.com']) fs.mkdirSync(path.join(ws.modsDir, d), { recursive: true });
+  fs.writeFileSync(path.join(h, 'seen.json'), '{}\n');
+  const mod = (name, match, powers, extra = '') => `// ==WebMod==\n// @name ${name}\n// @match ${match}\n// @boxed\n// @powers ${powers}\n${extra}// ==/WebMod==\ntrif.hide('.ad');\n`;
+  fs.writeFileSync(path.join(ws.modsDir, 'google.com', 'reader.js'), mod('Reader', 'https://*.google.com/*', 'keys'));
+  fs.writeFileSync(path.join(ws.modsDir, 'mail.google.com', 'clicker.js'), mod('Clicker', 'https://mail.google.com/*', 'click', CLICK));
+  const { mods } = scanMods(ws.modsDir);
+  const clicker = mods.find((m) => m.id === 'mail.google.com/clicker'), reader = mods.find((m) => m.id === 'google.com/reader');
+  // (before the extension says mail.google.com is a site of its own: part of google.com, as before)
+  assert.deepEqual(sites.siteNeeds(clicker, mods).map((n) => n.site), ['google.com', 'mail.google.com']);
+  // (the browser says so with modsApplied: kept in switches.json)
+  sites.saveSwitches(ws.home, 'chrome:1', [clicker.id, reader.id], [], ['mail.google.com']);
+  assert.deepEqual(sites.splitsOf(ws.home), ['mail.google.com']);
+  const splits = sites.splitsOf(ws.home);
+  assert.deepEqual(sites.sitesOf(clicker, mods, splits), ['mail.google.com']);
+  assert.deepEqual(sites.sitesOf(reader, mods, splits), ['google.com']);
+  assert.deepEqual(sites.siteNeeds(clicker, mods, { splits }), []);
+  assert.deepEqual(sites.siteNeeds(reader, mods, { splits }), []);
+  // (held: the clicker asks for its own powers only; a second mail.google.com mod makes its site's union, named mail.google.com)
+  let held = updateHeld(ws, mods, []);
+  assert.deepEqual(held['mail.google.com/clicker'].needs, ['power:click:the button: #go']);
+  fs.writeFileSync(path.join(ws.modsDir, 'mail.google.com', 'typist.js'), mod('Typist', 'https://mail.google.com/*', 'read-drafts'));
+  const now = scanMods(ws.modsDir).mods;
+  held = updateHeld(ws, now, []);
+  const site = held['mail.google.com/typist'].needs.filter((k) => k.startsWith('site:'));
+  assert.deepEqual(site, ['site:mail.google.com:read-drafts+click']);
+  assert.equal(held['mail.google.com/typist'].reach[0].heads.act, 'Your mail.google.com mods can:');
+  // (a mod for every site doesn't run there either)
+  const all = { id: 'all-sites/k', sandboxed: true, powers: ['keys'], matches: ['*://*/*'] };
+  assert.equal(sites.sharesSite(all, clicker, splits), false);
+  assert.equal(sites.sharesSite(all, reader, splits), true);
+});
+
 test('a quiet power added to a site asks only when it completes a warned combination there', () => {
   const m = (id, powers) => ({ id, site: 'x.com', matches: ['*://x.com/*'], sandboxed: true, powers });
   // (sound beside a reader: read-into-sound, asks; beside a clicker: nothing warned, doesn't)

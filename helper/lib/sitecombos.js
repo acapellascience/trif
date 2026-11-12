@@ -20,11 +20,16 @@
 //   approvals): the newest asks in its review.
 // - The helper sends each boxed mod its sites' approved unions (`siteOk`: "<site> <a>+<b>+…"); the sandbox lets an
 //   act through beside another mod's power when both are in the site's approved union, and refuses it otherwise.
+// - A sensitive site of its own under a registrable domain (mail.google.com: extension/lib.js "sensitive sites",
+//   `splits`, which each browser sends with modsApplied, kept in switches.json) is a site apart: its mods (its
+//   folder's) run only there and no other site's do, so its mods are its own site's, never google.com's, and
+//   google.com's (or all-sites ones) aren't in its union.
 
 const fs = require('fs');
 const path = require('path');
 const combos = require('./combinations');
 const { modSites } = require('./powers');
+const { hostInScope, cleanSplits } = require('./scope');
 
 // The sandbox's page-wide rules, as data: extension/pagewide.js, the one definition the sandbox refuses by
 // (the JSON between its markers).
@@ -46,13 +51,25 @@ function comboOf(mod) {
 // (whether two mods can be on one site: a site they both name, one under the other, or one runs everywhere)
 const everywhere = (m) => (String(m.id || '').split('/')[0] === 'all-sites' && !(m.matches || []).some((p) => /^[^:]+:\/\/[^*/]/.test(String(p))))
   || (m.matches || []).some((p) => /^[^:]+:\/\/\*\//.test(String(p)) || String(p) === '<all_urls>');
-function sharesSite(a, b) {
+// (the sensitive site of its own a mod's folder is in, of `splits`, or null: the longest that covers it)
+function splitOf(m, splits) {
+  const f = String(m.site || String(m.id || '').split('/')[0] || '').toLowerCase().replace(/^www\./, '');
+  let best = null;
+  if (f && f !== 'all-sites') for (const s of splits || []) if (hostInScope(f, s) && (!best || s.length > best.length)) best = s;
+  return best;
+}
+function sharesSite(a, b, splits = []) {
+  // (a sensitive site of its own: only its own mods run there, and they run nowhere else)
+  const xa = splitOf(a, splits), xb = splitOf(b, splits);
+  if (xa || xb) return xa === xb;
   if (everywhere(a) || everywhere(b)) return true;
   const sa = modSites(a), sb = modSites(b);
   return sa.some((x) => sb.some((y) => x === y || x.endsWith(`.${y}`) || y.endsWith(`.${x}`)));
 }
 const siteMod = (site) => ({ id: `${site}/_`, matches: [`*://${site}/*`] });
 const folderOf = (m) => String(m.site || String(m.id || '').split('/')[0] || '');
+// (the site a mod's folder is: its sensitive site of its own (inbox.mail.google.com's is mail.google.com), else the folder)
+const siteNameOf = (m, splits = []) => splitOf(m, splits) || folderOf(m);
 
 /**
  * The pairs the sandbox refuses mod a's acts on beside mod b: [[act, b's power]]. `a` and `b`: {powers (its
@@ -74,6 +91,7 @@ const shapeOf = (m) => ({ powers: combos.POWERS.filter((p) => (Array.isArray(m.p
 // ---- which boxed mods are on: each browser's helper writes what's off there (modsApplied), in
 // $TRIF_HOME/switches.json: {"<browser>": {at, known: [ids], off: [ids]}}. A mod is off when every browser that
 // knows it has it off (switched off, its group or TRIF off on its site, paused); one no browser knows is on.
+// Each entry also keeps the sensitive sites of their own that browser knows of (`splits`, splitsOf below).
 const SWITCHES_DAYS = 14;
 const switchesFile = (home) => path.join(home, 'switches.json');
 function loadSwitches(home) {
@@ -97,18 +115,24 @@ function saveSwitchedOn(home, obj) {
   fs.writeFileSync(tmp, JSON.stringify(obj, null, 2) + '\n');
   fs.renameSync(tmp, f);
 }
+/** The sensitive sites of their own (mail.google.com) the browsers know of, together. */
+function splitsOf(home) {
+  return cleanSplits(Object.values(loadSwitches(home)).flatMap((v) => (v && Array.isArray(v.splits) ? v.splits : [])));
+}
 /**
- * Records what's off in one browser (by its key). Returns {changed, switchedOn: [ids that were off everywhere
- * and are on now]}, which it also adds to switched-on.json.
+ * Records what's off in one browser (by its key), and (`splits`) the sensitive sites of their own it knows of.
+ * Returns {changed, switchedOn: [ids that were off everywhere and are on now]}, which it also adds to
+ * switched-on.json.
  */
-function saveSwitches(home, browser, known, off) {
+function saveSwitches(home, browser, known, off, splits = null) {
   const wasOff = offFn(home);
   const all = loadSwitches(home);
   const now = Date.now();
   for (const [k, v] of Object.entries(all)) if (!v || now - Number(v.at) > SWITCHES_DAYS * 86400000) delete all[k];
-  const entry = { known: [...new Set(known)].sort(), off: [...new Set(off)].sort() };
   const was = all[browser];
-  const same = was && JSON.stringify(was.known) === JSON.stringify(entry.known) && JSON.stringify(was.off) === JSON.stringify(entry.off);
+  const entry = { known: [...new Set(known)].sort(), off: [...new Set(off)].sort(), ...(splits !== null || (was && was.splits) ? { splits: cleanSplits(splits !== null ? splits : was.splits) } : {}) };
+  const same = was && JSON.stringify(was.known) === JSON.stringify(entry.known) && JSON.stringify(was.off) === JSON.stringify(entry.off)
+    && JSON.stringify(was.splits || []) === JSON.stringify(entry.splits || []);
   all[browser] = { at: now, ...entry };
   try {
     const tmp = `${switchesFile(home)}.${process.pid}.tmp`;
@@ -121,17 +145,20 @@ function saveSwitches(home, browser, known, off) {
   return { changed: !same, switchedOn };
 }
 
-/** The sites a boxed mod is on, as folder names: its own, and those of the boxed mods it shares a site with. */
-function sitesOf(mod, mods) {
+/**
+ * The sites a boxed mod is on, as folder names: its own, and those of the boxed mods it shares a site with (a
+ * sensitive site of its own by its name, `splits`).
+ */
+function sitesOf(mod, mods, splits = []) {
   const out = new Set();
-  if (folderOf(mod) && folderOf(mod) !== 'all-sites') out.add(folderOf(mod));
-  for (const o of mods) if (o !== mod && o.sandboxed && folderOf(o) && folderOf(o) !== 'all-sites' && sharesSite(mod, o)) out.add(folderOf(o));
+  if (folderOf(mod) && folderOf(mod) !== 'all-sites') out.add(siteNameOf(mod, splits));
+  for (const o of mods) if (o !== mod && o.sandboxed && folderOf(o) && folderOf(o) !== 'all-sites' && sharesSite(mod, o, splits)) out.add(siteNameOf(o, splits));
   return [...out].sort();
 }
 /** A site's boxed mods with powers, on (not off everywhere), but `except`. */
-function siteMods(site, mods, isOff = () => false, except = null) {
+function siteMods(site, mods, isOff = () => false, except = null, splits = []) {
   const s = siteMod(site);
-  return mods.filter((o) => o !== except && o.id !== (except && except.id) && o.sandboxed && !o.rules && comboOf(o).length && !isOff(o.id) && (folderOf(o) === site || sharesSite(o, s)));
+  return mods.filter((o) => o !== except && o.id !== (except && except.id) && o.sandboxed && !o.rules && comboOf(o).length && !isOff(o.id) && (siteNameOf(o, splits) === site || sharesSite(o, s, splits)));
 }
 const unionOf = (list) => combos.POWERS.filter((p) => list.some((m) => comboOf(m).includes(p)));
 
@@ -195,12 +222,12 @@ const clickWordsOf = (list) => [...new Set(list.flatMap((m) => ((m.powerArgs && 
  * where its powers add a holding power to the site's approved union. `approvedToo`: one per site whatever it adds
  * (for "Looks right", which approves the site's union as it is).
  */
-function siteNeeds(mod, mods, { allowed = {}, isOff = () => false, approvedToo = false } = {}) {
+function siteNeeds(mod, mods, { allowed = {}, isOff = () => false, approvedToo = false, splits = [] } = {}) {
   const mine = comboOf(mod);
   if (!mine.length) return [];
   const out = [];
-  for (const site of sitesOf(mod, mods)) {
-    const others = siteMods(site, mods, isOff, mod);
+  for (const site of sitesOf(mod, mods, splits)) {
+    const others = siteMods(site, mods, isOff, mod, splits);
     if (!others.length) continue; // (alone on its site: nothing across mods to approve; the next one asks for both)
     const on = [...others, mod];
     const before = approvedUnion(allowed, site);
@@ -213,12 +240,12 @@ function siteNeeds(mod, mods, { allowed = {}, isOff = () => false, approvedToo =
 const siteNeed = (site, before, after, clickWords) => ({ key: keyFor(site, after), fact: `adds to what your ${site} mods can do together`, power: 'site', site, union: after, reach: reach(site, before, after, clickWords), soft: false, lines: [] });
 
 /** For the sandbox: the approved union of each site a mod is on, ["<site> <a>+<b>+…", …]. */
-function siteOkFor(mod, mods, allowed = {}) {
+function siteOkFor(mod, mods, allowed = {}, splits = []) {
   if (!comboOf(mod).length) return [];
-  return sitesOf(mod, mods).map((site) => [site, approvedUnion(allowed, site)]).filter(([, u]) => u.length).map(([site, u]) => `${site} ${u.join('+')}`);
+  return sitesOf(mod, mods, splits).map((site) => [site, approvedUnion(allowed, site)]).filter(([, u]) => u.length).map(([site, u]) => `${site} ${u.join('+')}`);
 }
 
 module.exports = {
   PAGE_WIDE, comboOf, sharesSite, refusedPairs, shapeOf, sitesOf, siteMods, unionOf, keyFor, parseKey, approvedUnion, holding, reach, listsFor, siteNeeds, siteNeed, siteOkFor, clickWordsOf, FLAGS, HEADS,
-  loadSwitches, saveSwitches, offFn, switchesFile, loadSwitched, saveSwitchedOn, switchedFile,
+  loadSwitches, saveSwitches, offFn, splitsOf, splitOf, switchesFile, loadSwitched, saveSwitchedOn, switchedFile,
 };

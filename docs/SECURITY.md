@@ -16,6 +16,24 @@ A side-panel run works for the site the panel was opened on. Its `trif` commands
 tabs, its shell runs in an OS sandbox with no network and no writes outside that site's mods folder, and
 it can't change TRIF's own files (PROTOCOL.md "Run scope", "Agent sandboxes").
 
+## Sensitive sites (0.3)
+
+Email, banking and payments, password managers, chats with people and with other AIs (the sensitive list,
+extension/agentsites.js, which the user can edit in Settings) get three more walls:
+
+- **The agent never sees the page.** "Agent on this site" starts at Off there: no reading, screenshots or
+  code on its tabs, from the panel or a terminal. The agent works only from what the user describes.
+- **What it builds there can't send anything you didn't allow.** At Off, a side-panel run may only make
+  style mods (TRIF's own code, the mod only data) and boxed mods (TRIF's sandbox, no network, only the powers
+  the user allowed); a free mod it writes there is held, with that reason, until the user allows it.
+- **The host is its own site, and starts blocked.** mail.google.com is a TRIF site of its own, not part of
+  google.com: its own switch, block list entry and mods folder (`sites/mail.google.com/`). google.com's
+  mods and all-sites mods never run on it (excluded when registered, and so are TRIF's runtimes), its own
+  mods run only there, and a run there is scoped to it, its sandbox writing only that folder; a google.com
+  run can't reach its tabs or write its folder. TRIF puts each sensitive site on its block list once, so
+  nothing from TRIF runs there or reads it until the user unblocks it. (An update asks first about a host
+  the user's mods already reach: keep TRIF on there, with its own copies of those mods, or block it.)
+
 ## Agent code in a tab: the tab is locked (0.3)
 
 `trif run` runs the agent's JavaScript in the page, logged in. Before a side-panel run's code runs in a

@@ -180,7 +180,7 @@ function promptUrl(url) {
 // Full context: appended system prompt (claude, every run) or prepended to a session's first message.
 // ("Agent on this site": what the user lets an agent do on the site's tabs; background.js enforces it)
 const LEVEL_TEXT = {
-  off: ' "Agent on this site" is Off here (the user\'s setting): you can\'t read, screenshot or run code on its tabs, but you can still write mods for it, which wait for the user\'s OK as usual. Don\'t try trif text, trif screenshot or trif run here.',
+  off: ' "Agent on this site" is Off here (the user\'s setting): you can\'t read, screenshot or run code on its tabs, and you may only write style mods (`trif new <site> <mod> --style`) and boxed mods (`--boxed`) for it, from what the user describes: a free mod you write here waits for the user, refused. If what they ask needs a free mod, say so and stop (they can change "Agent on this site" in the side panel, or add the mod themselves). Don\'t try trif text, trif screenshot or trif run here.',
   look: ' "Agent on this site" is Look here (the user\'s setting): you can read the page and take screenshots (trif text, trif screenshot, trif sweep), but not run code in it (trif run is refused).',
   ask: ' "Agent on this site" is Ask here: you can read the page; the first time you run code (trif run), the user is asked in the panel, and the command waits for their answer.',
   run: '',

@@ -70,8 +70,16 @@ function hashLines(code, numbers) {
   return [...new Set(numbers.map((n) => lineHash(lines[n - 1] || '')))];
 }
 
-function needsOf(mod, scope = null) {
+// On a site whose "Agent on this site" is Off (the sensitive ones start there), a run may only make style and
+// boxed mods: its agent can't see the page, and those can't send anything the user didn't allow. A free mod it
+// writes there waits, with this as the reason (the agent sees it in `trif status`; AGENTS.md tells it to say
+// so and stop). Only the user can let it run (Allow), change the level, or add the mod themselves.
+const OFF_FREE = 'agent-off-free';
+const offFreeFact = (site) => `is a free mod, and "Agent on this site" is Off for ${site || 'this site'}: there your agent may only make style mods and boxed mods`;
+
+function needsOf(mod, scope = null, agentLevel = null) {
   const out = powersFor(mod).map((p) => ({ key: p.key, fact: p.fact, lines: hashLines(mod.code, p.lines || []) }));
+  if (agentLevel === 'off' && !mod.rules && !mod.sandboxed) out.unshift({ key: OFF_FREE, fact: offFreeFact(scope) });
   if (scope) for (const pattern of outOfScope(mod, scope)) out.push({ key: `match:${pattern}`, fact: `runs on ${pattern}, outside ${scope}` });
   if (mod.risk && mod.risk.tier >= 2) out.push({ key: 'risk2', fact: 'says it changes what the site receives (risk 2)' });
   return out;
@@ -211,12 +219,13 @@ function updateHeld(ws, mods, scopes) {
   for (const [id, h] of Object.entries(held)) {
     if (!h.approved) continue;
     const m = mods.find((x) => x.id === id);
-    if (m && m.hash === h.hash) allowPowers(ws.home, id, needsOf(m, h.scope));
+    if (m && m.hash === h.hash) allowPowers(ws.home, id, needsOf(m, h.scope, h.agentLevel || null));
     delete held[id];
     changed = true;
   }
   const allowed = loadAllowed(ws.home);
   const isOff = sites.offFn(ws.home); // (the boxed mods switched off in every browser: not in their sites' union)
+  const splits = sites.splitsOf(ws.home); // (the sensitive sites of their own: each its own site's union)
   // (mods switched on since: worked out as if changed, so one that adds combinations its site hasn't approved
   // waits; off again, or nothing to ask, and they're done)
   const switched = sites.loadSwitched(ws.home);
@@ -255,7 +264,7 @@ function updateHeld(ws, mods, scopes) {
   }
   for (const m of mods) {
     const same = held[m.id] && held[m.id].hash === m.hash; // (held as it is: waiting for the user, unless it's allowed now)
-    const run = byRun.get(m.id) || (held[m.id] && live.find((s) => s.runId === held[m.id].runId)) || (same && held[m.id].scope ? { site: held[m.id].site, scope: held[m.id].scope, runId: held[m.id].runId } : null);
+    const run = byRun.get(m.id) || (held[m.id] && live.find((s) => s.runId === held[m.id].runId)) || (same && held[m.id].scope ? { site: held[m.id].site, scope: held[m.id].scope, runId: held[m.id].runId, agentLevel: held[m.id].agentLevel || null } : null);
     if (switched[m.id] && isOff(m.id)) { doneSwitching(m.id); if (held[m.id] && held[m.id].by === 'switch') { delete held[m.id]; changed = true; } }
     const forced = !!switched[m.id];
     if (!run && !forced && seenHash(seen[m.id]) === m.hash) {
@@ -265,12 +274,12 @@ function updateHeld(ws, mods, scopes) {
       continue;
     }
     const ok = allowedFor(ws.home, m, allowed, typeof seen[m.id] === 'object' ? seen[m.id] : null);
-    let needs = needsOf(m, run ? run.scope : null)
+    let needs = needsOf(m, run ? run.scope : null, run ? run.agentLevel : null)
       .filter((n) => (run || n.key !== 'risk2') && !isAllowed(n, ok, true))
       .map((n) => described(n, ok));
     // (and, where its powers add a holding power to what its site's boxed mods together are approved for, the
     // site's new union: sitecombos.js; approving it approves that for the site)
-    needs = needs.concat(sites.siteNeeds(m, mods, { allowed, isOff }));
+    needs = needs.concat(sites.siteNeeds(m, mods, { allowed, isOff, splits }));
     // (a boxed mod's `controls` and `mods` are listed on a hold, but don't make one on their own)
     if (needs.length && needs.every((n) => isSoft(n.key))) needs = [];
     // (held as it is, for the same needs: as it was; a combination the site approved since, or another mod
@@ -281,6 +290,7 @@ function updateHeld(ws, mods, scopes) {
       const by = run ? 'agent' : forced && seenHash(seen[m.id]) === m.hash ? 'switch' : 'outside';
       held[m.id] = {
         hash: m.hash, site: run ? run.site : m.site, scope: run ? run.scope : null, runId: run ? run.runId : null, by, at: same ? held[m.id].at : Date.now(),
+        ...(run && run.agentLevel === 'off' ? { agentLevel: 'off' } : {}),
         reason: reasonOf(needs), facts: needs.map((n) => n.fact), needs: needs.map((n) => n.key),
         lines: Object.fromEntries(needs.filter((n) => n.lines && n.lines.length).map((n) => [n.key, n.lines])), claim: claimOf(m),
         ...reachOf(needs),
@@ -362,16 +372,17 @@ function rejectHeld(ws, id, hash = null) {
 function reviewItems(home, mods, held = {}) {
   const allowed = loadAllowed(home);
   const isOff = sites.offFn(home);
+  const splits = sites.splitsOf(home);
   const mtime = new Map();
   const when = (m) => { if (!mtime.has(m.id)) { let t = 0; try { t = fs.statSync(m.file).mtimeMs; } catch { /* gone */ } mtime.set(m.id, t); } return mtime.get(m.id); };
   // (a site whose boxed mods' union has holding powers it hasn't approved, from before site approvals, and no
   // hold asks for it: the newest of its mods (not held) with one of them asks, once)
   const heldSites = new Set(Object.values(held).flatMap((h) => (h.needs || []).map((k) => (sites.parseKey(k) || {}).site).filter(Boolean)));
   const carried = new Map(); // mod id -> [site needs]
-  const siteList = [...new Set(mods.filter((m) => m.sandboxed).flatMap((m) => sites.sitesOf(m, mods)))];
+  const siteList = [...new Set(mods.filter((m) => m.sandboxed).flatMap((m) => sites.sitesOf(m, mods, splits)))];
   for (const site of siteList) {
     if (heldSites.has(site)) continue;
-    const on = sites.siteMods(site, mods, isOff).filter((m) => !held[m.id]);
+    const on = sites.siteMods(site, mods, isOff, null, splits).filter((m) => !held[m.id]);
     if (on.length < 2) continue;
     const before = sites.approvedUnion(allowed, site);
     const after = require('./combinations').POWERS.filter((p) => before.includes(p) || sites.unionOf(on).includes(p));
@@ -396,7 +407,7 @@ function reviewItems(home, mods, held = {}) {
  */
 function reviewMod(home, mod, mods = []) {
   const needs = needsOf(mod, null).filter((n) => n.key !== 'risk2')
-    .concat(sites.siteNeeds(mod, mods, { allowed: loadAllowed(home), isOff: sites.offFn(home), approvedToo: true }));
+    .concat(sites.siteNeeds(mod, mods, { allowed: loadAllowed(home), isOff: sites.offFn(home), approvedToo: true, splits: sites.splitsOf(home) }));
   allowPowers(home, mod.id, needs);
   return needs.map((n) => n.key);
 }

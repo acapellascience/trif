@@ -38,6 +38,9 @@
   </div>
 </header>
 <!-- Once, after an update gave up every site's access (background.js dropEverySite) -->
+<!-- Once, after the update that made sensitive hosts sites of their own: one row per host your mods reach
+     (background.js "sensitive sites on upgrade"), until answered -->
+<section id="sensitive-note" class="sensitive-note" hidden aria-live="polite"><ul id="sensitive-list"></ul></section>
 <p id="access-note" class="access-note" hidden><span>TRIF now asks for each site's permission. Your sites keep their settings: allow each one again the first time you use it there.</span> <button id="access-note-ok" class="link-btn" type="button">OK</button></p>
 
 <section id="settings" class="settings" aria-labelledby="settings-title" hidden>

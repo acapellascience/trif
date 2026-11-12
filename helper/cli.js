@@ -392,8 +392,14 @@ const handlers = {
       if (Array.isArray(st.disconnected) && st.disconnected.length) {
         lines.push(`disconnected  ${st.disconnected.join(', ')}: on, but TRIF is disconnected there until the user connects it (side panel on the site)`);
       }
-      if (Array.isArray(st.blockedSites) && st.blockedSites.length) {
-        lines.push(`blocked       ${st.blockedSites.join(', ')}: blocked in TRIF; nothing from TRIF touches them (only the user unblocks them, in the side panel)`);
+      // (the sensitive sites TRIF started blocked, extension/lib.js "sensitive sites": counted, not listed)
+      const sens = new Set(Array.isArray(st.sensitiveBlocked) ? st.sensitiveBlocked : []);
+      const mine = Array.isArray(st.blockedSites) ? st.blockedSites.filter((s) => !sens.has(s)) : [];
+      if (mine.length) {
+        lines.push(`blocked       ${mine.join(', ')}: blocked in TRIF; nothing from TRIF touches them (only the user unblocks them, in the side panel)`);
+      }
+      if (sens.size) {
+        lines.push(`sensitive     ${sens.size} sensitive site${sens.size === 1 ? '' : 's'} (email, banking, passwords, chats) blocked in TRIF until the user unblocks them, each a site of its own (\`trif status --json\`: sensitiveBlocked)`);
       }
     }
     if (st) lines.push(`recording     ${(st.recording || []).length ? st.recording.join(', ') : '(none)'}`);

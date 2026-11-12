@@ -27,7 +27,7 @@ const { Runs } = require('./lib/runs');
 const { Logins } = require('./lib/logins');
 const agents = require('./lib/agents');
 const { updateHeld, approveHeld, rejectHeld, lastRun, heldFile, reviewItems, reviewMod, powersFor, loadAllowed } = require('./lib/held');
-const { siteOkFor } = require('./lib/sitecombos');
+const { siteOkFor, splitsOf } = require('./lib/sitecombos');
 const { powerInfo } = require('./lib/boxpowers');
 const history = require('./lib/history');
 const { DEFAULT_ORDER, startOffIds, startSitesOn, pendingUpdates, useNewVersion, keepMine, mergeRequest, mergeSettled, restoreMod, absorbedIds,
@@ -36,7 +36,7 @@ const { readInstructions, writeInstructions, instructionsFile, MAX_LENGTH } = re
 const { ownSock, removeStaleSockets, codeStamp } = require('./lib/helpers');
 const { loadOrigins, recordOrigins, renameOrigins, activeRuns } = require('./lib/origins');
 const { deleteMod, emptyTrash } = require('./lib/trash');
-const { scopeFor } = require('./lib/scope');
+const { runScope } = require('./lib/scope');
 const update = require('./lib/update');
 const { buildReport, reportEmail, reportUrl } = require('./lib/report');
 const { migratePrivate } = require('./lib/migrate');
@@ -222,7 +222,8 @@ function onExtensionMessage(msg) {
         const on = new Set(state.modsApplied.registered);
         const off = boxed.filter((id) => !on.has(id) && !(state.held && state.held[id]));
         const who = `${state.hello?.browser || 'browser'}:${state.hello?.installId || process.pid}`;
-        const sw = require('./lib/sitecombos').saveSwitches(ws.home, who, boxed, off);
+        // (and the sensitive sites of their own it knows of: mail.google.com's mods are its own site's, not google.com's)
+        const sw = require('./lib/sitecombos').saveSwitches(ws.home, who, boxed, off, Array.isArray(msg.splits) ? msg.splits : null);
         if (sw.changed) { logger.info(`boxed mods off in ${state.hello?.browser || 'this browser'}: ${off.join(', ') || 'none'}${sw.switchedOn.length ? `; switched on: ${sw.switchedOn.join(', ')}` : ''}`); scheduleSync('switches'); }
       } catch (e) { logger.warn(`switches: ${e.message}`); }
       break;
@@ -315,6 +316,7 @@ function syncMods(reason, force) {
   let autoUpdated = {};
   try { autoUpdated = autoUpdatedIds(ws.home); } catch (e) { logger.warn(`Tim's mods: ${e.message}`); }
   const allowedNow = loadAllowed(ws.home);
+  const splitsNow = splitsOf(ws.home); // (the sensitive sites of their own: each its own site, sitecombos.js)
   const sent = plan.mods.map((m) => {
     // (facts: TRIF's own reading of the code; claim: what the agent says it does, shown apart as the agent's)
     const h = state.held[m.id], r = state.review && state.review[m.id];
@@ -336,7 +338,7 @@ function syncMods(reason, force) {
     // holds it until the user allows that (extension/lib.js sandboxFallback)
     // (and for the row and code card: a boxed mod's powers in words; what TRIF read in a free mod's code)
     // (and what its sites' mods together are approved for: the sandbox lets their acts through beside those powers)
-    const siteOk = m.sandboxed ? siteOkFor(m, scanned.mods, allowedNow) : [];
+    const siteOk = m.sandboxed ? siteOkFor(m, scanned.mods, allowedNow, splitsNow) : [];
     const withFacts = m.sandboxed ? { ...withReadded, pageFacts: pageFactsOf(m), powerInfo: powerInfo(m), ...(siteOk.length ? { siteOk } : {}) }
       : m.rules ? withReadded : { ...withReadded, found: [...new Set(powersFor(m).map((p) => String(p.key).split(':')[0]))] };
     return startOff.has(m.id) ? { ...withFacts, startOff: true } : withFacts;
@@ -519,7 +521,7 @@ const runSubscribers = new Map(); // runId or loginId -> Set of CLI sockets that
 const AGENT_COMMANDS = new Set(['mod.historyCode', 'mod.historyDiff', 'mod.historyRestore', 'mod.export', 'mod.exportSite', 'mod.import',
   'files.add', 'files.begin', 'files.slice', 'files.end', 'files.abort', 'files.list', 'files.remove', 'files.reveal', 'mod.reveal', 'agent.list', 'agent.start', 'agent.stop', 'agent.running', 'agent.login', 'agent.loginCode', 'agent.loginCancel', 'mod.approve', 'mod.reject', 'mod.review', 'mod.undo', 'mod.history',
   'mod.update', 'instructions.get', 'instructions.set', 'agent.models', 'agent.openModel', 'agent.openModel.set', 'agent.openModel.setKey', 'agent.openModel.removeKey', 'update.check', 'update.install', 'update.setAuto', 'report.build',
-  'shipped.install', 'shipped.none']);
+  'shipped.install', 'shipped.none', 'sensitive.split']);
 // Only from the side panel, by a click there: never from the socket (the user's terminal, or `trif` in
 // a run, which also has its mailbox), only from the extension's own connection (onExtensionRequest),
 // whose background takes it from the panel page alone. Runs can't reach that connection: their
@@ -793,8 +795,16 @@ function agentCommand(cmd, args) {
       syncMods('review', false);
       return { id, allowed };
     }
+    // "Keep TRIF on there" (the panel's question about a sensitive host after the update): the parent's mods
+    // that reached it, copied into its own folder (lib/split.js). Not from a run.
+    case 'sensitive.split': {
+      const r = require('./lib/split').splitSensitive(ws, String(args.host ?? ''), Array.isArray(args.ids) ? args.ids : []);
+      logger.info(`${r.host} is a site of its own: copied ${r.copies.map((c) => `${c.from} -> ${c.to}`).join(', ') || 'nothing'}`);
+      syncMods('split', false);
+      return r;
+    }
     case 'mod.delete': {
-      const r = deleteMod(ws, args.id, { scope: args.scope });
+      const r = deleteMod(ws, args.id, { scope: args.scope, splits: Array.isArray(args.scopeSplits) ? args.scopeSplits : [] });
       logger.info(`deleted mod ${r.id} (to ${r.trashed})`);
       syncMods('delete', false);
       return { id: r.id, deleted: true };
@@ -829,7 +839,7 @@ function agentCommand(cmd, args) {
       return args.choice === 'new' ? { id: r.id, choice: 'new', version: r.version, trashed: !!r.trashed } : { id: r.id, choice: 'mine', version: r.version };
     }
     case 'mod.restore': {
-      const r = restoreMod(ws, args.id, { scope: args.scope });
+      const r = restoreMod(ws, args.id, { scope: args.scope, splits: Array.isArray(args.scopeSplits) ? args.scopeSplits : [] });
       logger.info(`restored mod ${r.id}`);
       syncMods('restore', false);
       return { id: r.id, restored: true, file: r.file };
@@ -862,7 +872,7 @@ function agentCommand(cmd, args) {
  */
 function startRun(args) {
   const site = typeof args.site === 'string' && args.site.trim() ? args.site.trim() : agents.hostOf(args.url);
-  const scope = scopeFor(site);
+  const scope = runScope(site, args.scope);
   if (args.merge === undefined || args.merge === null || args.merge === '') {
     const r = runs.start(args);
     const ids = [...pendingMerges].filter(([, m]) => m.scope === scope).map(([id]) => id);
@@ -870,7 +880,7 @@ function startRun(args) {
     return r;
   }
   const id = String(args.merge).trim();
-  if (scopeFor(id.split('/')[0]) !== scope) throw new Error(`${id} isn't a mod for ${scope || 'this site'}: merge it from its own site`);
+  if (require('./lib/scope').scopeOf(id.split('/')[0], [...(Array.isArray(args.splits) ? args.splits : []), scope]) !== scope) throw new Error(`${id} isn't a mod for ${scope || 'this site'}: merge it from its own site`);
   const m = mergeRequest(workspace(ws.home), id);
   const prompt = typeof args.prompt === 'string' && args.prompt.trim() ? `${args.prompt.trim()}\n\n${m.prompt}` : m.prompt;
   const r = runs.start({ ...args, prompt });
@@ -1230,6 +1240,7 @@ function onClientLine(sock, line) {
             : `"${cmd}" isn't available inside an agent run` });
     }
     args.scope = run.scope;
+    args.scopeSplits = run.splits || []; // (the sites of their own the run's extension knew of: scope.js scopeOf)
     args.agentRun = run.id; // ("Agent on this site": Just this once is for this run)
   }
 

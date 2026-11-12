@@ -3,6 +3,7 @@
 
 import { safeStringify, formatError } from './runtime.js';
 import { SANDBOX_WORLD, SANDBOX_RUNTIME_ID, SES_FILE, sandboxRuntimeCode, sandboxModCode, sandboxPageCode } from './sandbox.js';
+import { sensitiveList, patternMatches } from './agentsites.js';
 
 // The running extension's own id: the Web Store build has a different one from the unpacked dev build
 // (whose manifest key fixes it to this fallback, also used under Node in the tests).
@@ -92,8 +93,8 @@ export function inSandboxWorld(mod) { return !!(mod && mod.sandboxed && !mod.uns
 
 /** The sandbox world's runtime (sandbox.js): SES, then TRIF's code; where any sandboxed mod runs. */
 const SES_STAMP = 'globalThis.__trifT0 = performance.now();'; // (so the runtime can say what loading SES took)
-export function sandboxRuntimeScript(matches) {
-  return { id: SANDBOX_RUNTIME_ID, matches, excludeMatches: [], js: [{ code: SES_STAMP }, { file: SES_FILE }, { code: sandboxRuntimeCode() }], runAt: 'document_start', world: 'USER_SCRIPT', worldId: SANDBOX_WORLD, allFrames: false };
+export function sandboxRuntimeScript(matches, excludes = []) {
+  return { id: SANDBOX_RUNTIME_ID, matches, excludeMatches: excludes, js: [{ code: SES_STAMP }, { file: SES_FILE }, { code: sandboxRuntimeCode() }], runAt: 'document_start', world: 'USER_SCRIPT', worldId: SANDBOX_WORLD, allFrames: false };
 }
 
 // ---- browsers without TRIF's sandbox world ------------------------------------------------------------
@@ -135,8 +136,20 @@ export function sandboxFallback(mods, { canSandbox = true, allowed = {}, browser
 // (the site folder a mod is in: its id's first part)
 function modSiteName(m) { return String(m.site || String(m.id || '').split('/')[0] || ''); }
 
-export function runtimeUserScript(code, matches = ['<all_urls>']) {
-  return { id: RUNTIME_ID, matches, excludeMatches: [], js: [{ code }], runAt: 'document_start', world: 'MAIN', allFrames: false };
+export function runtimeUserScript(code, matches = ['<all_urls>'], excludes = []) {
+  return { id: RUNTIME_ID, matches, excludeMatches: excludes, js: [{ code }], runAt: 'document_start', world: 'MAIN', allFrames: false };
+}
+
+/**
+ * The sensitive sites of their own no registered mod runs on (lib.js "sensitive sites"): the runtimes skip
+ * them too (their matches come from mods whose `*.google.com` would otherwise reach mail.google.com).
+ * `desired`: the mods as limitToSites made them (`usedSites`), `recording` the sites being recorded.
+ */
+export function runtimeExcludes(desired, recording, model) {
+  if (!model) return [];
+  const used = new Set((desired || []).flatMap((m) => m.usedSites || []));
+  for (const r of recording || []) used.add(r);
+  return model.splits.filter((x) => !used.has(x) && [...used].some((u) => hostInScope(x, u))).flatMap(siteExcludes).sort();
 }
 
 /**
@@ -187,9 +200,10 @@ export function normalizeDisabled(value) {
  * Returns {registered, errors, applied, reset, known} (`known` null when a register or update failed, as
  * then it's unclear what's registered).
  */
-export async function syncUserScripts(us, { mods, runtimeCode, applied = {}, disabled = {}, offSites = {}, groupsOff = {}, recording = [], sitesOn = null, known = null }) {
+export async function syncUserScripts(us, { mods, runtimeCode, applied = {}, disabled = {}, offSites = {}, groupsOff = {}, recording = [], sitesOn = null, known = null, sensitive = null }) {
   // sitesOn (null: no limit): mods and recording only on the sites TRIF is on for (limitToSites).
-  if (sitesOn) recording = (recording || []).filter((site) => (sitesOn || []).some((s) => hostInScope(site, s)));
+  // `sensitive`: the sensitive sites (sensitiveSites): each of its own, with only its own mods.
+  if (sitesOn) recording = (recording || []).filter((site) => (sensitive ? siteOnFor(`https://${site}/`, sitesOn, sensitive) : (sitesOn || []).some((s) => hostInScope(site, s))));
   const errors = [];
   const desired = [];
   const seen = new Set();
@@ -199,7 +213,7 @@ export async function syncUserScripts(us, { mods, runtimeCode, applied = {}, dis
     if (disabled[mod.id] === true) continue; // switched off: not desired, so unregistered below if registered
     if (mod.held) continue; // held for the user's approval (an agent wrote it for another site): same
     seen.add(mod.id);
-    const limited = sitesOn ? limitToSites(mod, sitesOn) : mod;
+    const limited = sitesOn ? limitToSites(mod, sitesOn, sensitive) : mod;
     if (!limited) continue; // only on sites TRIF is off for
     // (its own switched-off sites, and the sites where its group is off: groupsOff)
     const reg = withOffSites(limited, offSitesFor(mod, offSites, groupsOff));
@@ -214,6 +228,7 @@ export async function syncUserScripts(us, { mods, runtimeCode, applied = {}, dis
   const existing = Array.isArray(known) ? known.map((id) => ({ id })) : await us.getScripts();
   const existingIds = new Set(existing.map((s) => s.id));
   const matches = runtimeMatches(desired, recording);
+  const rtExcludes = runtimeExcludes(desired, recording, sensitive);
   if (!matches.length) {
     if (existing.length) await us.unregister();
     return { registered: [], errors, applied: {}, reset: existing.length > 0, known: [] };
@@ -222,16 +237,16 @@ export async function syncUserScripts(us, { mods, runtimeCode, applied = {}, dis
   // themselves until it's there, so unlike the page's runtime it needn't be registered before them.
   const sandboxMatches = runtimeMatches(desired.filter(inSandboxWorld), []);
   const sandboxCode = sandboxMatches.length ? sandboxRuntimeCode() : null;
-  const sandboxHash = sandboxMatches.length ? quickHash(sandboxCode + '\n' + JSON.stringify(sandboxMatches)) : null;
+  const sandboxHash = sandboxMatches.length ? quickHash(sandboxCode + '\n' + JSON.stringify(sandboxMatches) + (rtExcludes.length ? JSON.stringify(rtExcludes) : '')) : null;
   const sandboxNow = existing.find((s) => s.id === SANDBOX_RUNTIME_ID);
   let sandboxUp = false; // (the sandbox runtime registered after this sync)
   const syncSandboxRuntime = async (fresh) => {
     const there = !fresh && !!sandboxNow;
     if (!sandboxMatches.length) { if (there) await us.unregister({ ids: [SANDBOX_RUNTIME_ID] }); return; }
     const code = sandboxNow?.js?.[2]?.code;
-    const same = there && (code !== undefined ? code === sandboxCode && JSON.stringify([...(sandboxNow.matches || [])].sort()) === JSON.stringify(sandboxMatches) : applied[SANDBOX_RUNTIME_ID] === sandboxHash);
+    const same = there && (code !== undefined ? code === sandboxCode && JSON.stringify([...(sandboxNow.matches || [])].sort()) === JSON.stringify(sandboxMatches) && JSON.stringify([...(sandboxNow.excludeMatches || [])].sort()) === JSON.stringify(rtExcludes) : applied[SANDBOX_RUNTIME_ID] === sandboxHash);
     try {
-      if (!same) { if (there) await us.update([sandboxRuntimeScript(sandboxMatches)]); else await us.register([sandboxRuntimeScript(sandboxMatches)]); }
+      if (!same) { if (there) await us.update([sandboxRuntimeScript(sandboxMatches, rtExcludes)]); else await us.register([sandboxRuntimeScript(sandboxMatches, rtExcludes)]); }
       next[SANDBOX_RUNTIME_ID] = sandboxHash;
       sandboxUp = true;
     } catch (e) {
@@ -240,13 +255,13 @@ export async function syncUserScripts(us, { mods, runtimeCode, applied = {}, dis
       for (const m of desired.filter(inSandboxWorld)) errors.push({ id: m.id, error: `TRIF's sandbox couldn't be set up: ${errMsg(e)}` });
     }
   };
-  const runtimeHash = quickHash(runtimeCode + '\n' + JSON.stringify(matches));
+  const runtimeHash = quickHash(runtimeCode + '\n' + JSON.stringify(matches) + (rtExcludes.length ? JSON.stringify(rtExcludes) : ''));
   const current = existing.find((s) => s.id === RUNTIME_ID);
   const currentCode = current?.js?.[0]?.code;
   const sameMatches = (a) => Array.isArray(a) && JSON.stringify([...a].sort()) === JSON.stringify(matches);
   // (applied's hash also covers the fallback below, where the registered matches are <all_urls>.)
   const runtimeOk = !!current && (currentCode !== undefined
-    ? currentCode === runtimeCode && (sameMatches(current.matches) || applied[RUNTIME_ID] === runtimeHash)
+    ? currentCode === runtimeCode && ((sameMatches(current.matches) && JSON.stringify([...(current.excludeMatches || [])].sort()) === JSON.stringify(rtExcludes)) || applied[RUNTIME_ID] === runtimeHash)
     : applied[RUNTIME_ID] === runtimeHash);
 
   const next = {};
@@ -286,7 +301,7 @@ export async function syncUserScripts(us, { mods, runtimeCode, applied = {}, dis
     if (existing.length) await us.unregister();
     // A mod with an invalid pattern makes the union invalid too; then the runtime goes everywhere
     // (the mod itself fails to register and is reported).
-    try { await us.register([runtimeUserScript(runtimeCode, matches)]); } catch { await us.register([runtimeUserScript(runtimeCode)]); }
+    try { await us.register([runtimeUserScript(runtimeCode, matches, rtExcludes)]); } catch { await us.register([runtimeUserScript(runtimeCode, ['<all_urls>'], rtExcludes)]); }
     next[RUNTIME_ID] = runtimeHash;
     await syncSandboxRuntime(true);
     await registerMods(sandboxUp ? desired : desired.filter((m) => !inSandboxWorld(m)), false);
@@ -1002,12 +1017,177 @@ export function normalizeSitesOn(value) {
   return [...new Set((Array.isArray(value) ? value : []).filter((x) => typeof x === 'string').map(scopeFor).filter(Boolean))].sort();
 }
 
-/** The site in `sitesOn` that covers `url`'s host (http/https only), or null: TRIF is off there. */
-export function siteOnFor(url, sitesOn) {
+/**
+ * The site in `sitesOn` that covers `url`'s host (http/https only), or null: TRIF is off there. With the
+ * sensitive sites (`sensitive`, sensitiveSites below), the host's own site only: google.com on doesn't
+ * cover mail.google.com, which is a site of its own.
+ */
+export function siteOnFor(url, sitesOn, sensitive = null) {
   let u;
   try { u = new URL(String(url ?? '')); } catch { return null; }
   if (u.protocol !== 'http:' && u.protocol !== 'https:') return null;
+  if (sensitive) { const s = sensitive.scopeOf(u.hostname); return (sitesOn || []).includes(s) ? s : null; }
   return (sitesOn || []).find((s) => hostInScope(u.hostname, s)) || null;
+}
+
+// ---- sensitive sites, each a site of its own ---------------------------------------------------------
+// A host on the sensitive list (agentsites.js: TRIF's, or the user's from Settings) that is a subdomain of
+// a registrable domain (mail.google.com under google.com) is a site of its own in TRIF (Tim, 2026-11-11):
+// its mods are in sites/<host>/, its panel lists only those, a side-panel run there is scoped to it (and
+// its folder: helper/lib/scope.js scopeOf), it has its own switch, block and access, and no other site's
+// mods run on it: not the parent's (their `*.google.com` gets mail.google.com excluded), not all-sites
+// mods. A sensitive host that is itself a registrable domain (paypal.com) is already a site of its own;
+// all-sites mods skip it too. Either way a sensitive site's own mods run only there.
+// Wildcard patterns (`*bank*`) split at the label that matched: netbank.example.com is its own site.
+// `pending`: hosts the user hasn't answered the upgrade's question about yet (background.js
+// "sensitive sites on upgrade"): until then they stay part of their parent, as before.
+
+const cleanHostName = (h) => String(h || '').trim().toLowerCase().replace(/\.$/, '').replace(/:\d+$/, '').replace(/^www\./, '');
+
+/**
+ * The sensitive site `host` is in: {scope, why, pattern}, or null when it isn't sensitive. `scope` is the
+ * part of the host the matching pattern names (mail.google.com for inbox.mail.google.com), or its
+ * registrable domain when that's longer (paypal.com for www.paypal.com; example.bank for `*.bank`). The
+ * shortest when several match.
+ */
+export function sensitiveHit(host, list = null, pending = []) {
+  const h = cleanHostName(host);
+  if (!h || !h.includes('.') || isIp(h) || h.includes(':')) return null;
+  const reg = scopeFor(h);
+  let best = null;
+  for (const x of sensitiveList(list)) {
+    if (!patternMatches(x.pattern, h)) continue;
+    const p = cleanHostName(x.pattern);
+    let cand = p;
+    if (p.includes('*')) {
+      const labels = h.split('.');
+      const pl = p.split('.');
+      if (pl.length === 1) {
+        // (the matching label furthest right: `*bank*` on bank.mybank.example.com is mybank.example.com)
+        const re = new RegExp(`^${pl[0].split('*').map((t) => t.replace(/[.+?^${}()|[\]\\-]/g, '\\$&')).join('[a-z0-9-]*')}$`);
+        let i = labels.length - 1;
+        while (i >= 0 && !re.test(labels[i])) i--;
+        cand = labels.slice(Math.max(i, 0)).join('.');
+      } else cand = labels.slice(labels.length - pl.length).join('.');
+    }
+    if (!hostInScope(cand, reg)) cand = reg;
+    if (cand !== reg && pending.includes(cand)) continue; // (not answered yet: still part of its parent)
+    if (!best || cand.length < best.scope.length) best = { scope: cand, why: x.why, pattern: x.pattern };
+  }
+  return best;
+}
+
+/**
+ * The sensitive sites, for the functions that need them (siteOnFor, limitToSites, syncUserScripts):
+ *   scopeOf(host)     the site a host is in: its sensitive site, else its registrable domain
+ *   isSensitive(site) whether a site is a sensitive one
+ *   whyOf(site)       its `why` ("email")
+ *   splits            the sensitive sites of their own under a registrable domain that TRIF knows of: the
+ *                     list's hosts, and those among `hosts` (sites on, blocked, mod folders, tabs seen)
+ * `list`: the user's sensitive list or null for TRIF's; `pending` as above.
+ */
+export function sensitiveSites({ list = null, pending = [], hosts = [] } = {}) {
+  const memo = new Map();
+  const hit = (h) => { const k = cleanHostName(h); if (!memo.has(k)) memo.set(k, sensitiveHit(k, list, pending)); return memo.get(k); };
+  const scopeOf = (h) => hit(h)?.scope || scopeFor(h);
+  const splits = new Set();
+  const consider = (h) => { const x = hit(h); if (x && x.scope !== scopeFor(x.scope)) splits.add(x.scope); };
+  for (const x of sensitiveList(list)) if (!x.pattern.includes('*')) consider(x.pattern);
+  for (const h of hosts || []) consider(h);
+  return {
+    list, pending: [...pending],
+    scopeOf,
+    isSensitive: (site) => hit(site)?.scope === cleanHostName(site),
+    whyOf: (site) => hit(site)?.why || '',
+    splits: [...splits].sort(),
+  };
+}
+
+/** The sensitive sites named in the list itself (not wildcard patterns): what TRIF can block from the start. */
+export function sensitiveListSites(list = null) {
+  const out = new Set();
+  for (const x of sensitiveList(list)) {
+    if (x.pattern.includes('*')) continue;
+    const s = sensitiveHit(x.pattern, list)?.scope;
+    if (s) out.add(s);
+  }
+  return [...out].sort();
+}
+
+/** A stored list of sites (sitesOn, blockedSites): clean host names as they are (mail.google.com stays), sorted. */
+export function normalizeSiteList(value) {
+  return [...new Set((Array.isArray(value) ? value : []).filter((x) => typeof x === 'string').map(cleanHostName).filter((x) => /^(\[[0-9a-f:.]+\]|[a-z0-9_-]+(\.[a-z0-9_-]+)*)$/.test(x)))].sort();
+}
+
+/** The hosts the upgrade asks about, from storage: [{host, parent, why, mods: [ids], allSites: [ids]}]. */
+export function normalizePending(value) {
+  const out = [];
+  for (const p of Array.isArray(value) ? value : []) {
+    const host = cleanHostName(p?.host);
+    if (!host || out.some((x) => x.host === host)) continue;
+    const ids = (l) => (Array.isArray(l) ? l.filter((x) => typeof x === 'string') : []);
+    out.push({ host, parent: cleanHostName(p.parent) || scopeFor(host), why: String(p.why || ''), mods: ids(p.mods), allSites: ids(p.allSites) });
+  }
+  return out;
+}
+
+/**
+ * What to do with sensitive sites TRIF hasn't dealt with yet (background.js "sensitive sites on upgrade").
+ * `hosts`: sensitive sites (sensitiveHit's scopes) to look at; those in `done`, `pending` or `blocked` are
+ * skipped. Returns {block: [sites], ask: [{host, parent, why, mods, allSites}], done: [sites]}:
+ *   - a site of its own under a registrable domain (mail.google.com) that the user's setup reaches (TRIF on
+ *     for its parent and a switched-on mod of the parent's, or an all-sites one, matching it; or mods in its
+ *     own folder): asked about, with the parent's mods that match it (`mods`, switched on or off: the copies
+ *     keep that) and the all-sites ones that did (`allSites`: they skip it from now on);
+ *   - a sensitive registrable domain (paypal.com) that's on, or has mods of its own: left as it is;
+ *   - any other: blocked.
+ * `force`: work out the ask for a host whatever else (the panel's Keep, with the mods as they are now).
+ */
+export function sensitivePlan({ hosts = [], done = [], pending = [], blocked = [], list = null, mods = [], disabled = {}, sitesOn = [], force = false } = {}) {
+  const out = { block: [], ask: [], done: [] };
+  const seen = new Set();
+  for (const raw of hosts) {
+    const host = sensitiveHit(raw, list)?.scope;
+    if (!host || seen.has(host)) continue;
+    seen.add(host);
+    if (!force && (done.includes(host) || pending.includes(host) || blocked.includes(host))) continue;
+    const parent = scopeFor(host);
+    const folder = (m) => String(m?.id || '').split('/')[0];
+    const own = mods.filter((m) => hostInScope(folder(m), host));
+    const reaches = (m) => (Array.isArray(m.matches) ? m.matches : []).some((p) => patternReachesHost(p, host));
+    const on = (m) => disabled[m.id] !== true && !m.held;
+    if (parent === host) {
+      if (!force) { if (!(sitesOn.includes(host) || own.length)) out.block.push(host); out.done.push(host); }
+      continue;
+    }
+    const parentMods = mods.filter((m) => folder(m) !== 'all-sites' && scopeFor(folder(m)) === parent && !hostInScope(folder(m), host) && reaches(m));
+    const allSites = mods.filter((m) => folder(m) === 'all-sites' && reaches(m));
+    const reached = own.length > 0 || (sitesOn.includes(parent) && (parentMods.some(on) || allSites.some(on)));
+    if (reached || force) out.ask.push({ host, parent, why: sensitiveHit(host, list)?.why || '', mods: parentMods.map((m) => m.id), allSites: allSites.filter(on).map((m) => m.id) });
+    else out.block.push(host);
+    if (!force) out.done.push(host);
+  }
+  return out;
+}
+
+/** The site a mod's folder is: its id's first part, as a site (all-sites: null). */
+export function modHome(mod, sensitive = null) {
+  const folder = String(mod?.id || '').split('/')[0] || String(mod?.site || '');
+  if (!folder || folder === 'all-sites') return null;
+  return sensitive ? sensitive.scopeOf(folder) : scopeFor(folder);
+}
+
+/** Whether a match pattern's host part reaches `host` (any path): `*://*.google.com/x/*` reaches mail.google.com. */
+export function patternReachesHost(pattern, host) {
+  const p = String(pattern ?? '').trim();
+  if (p === '<all_urls>') return true;
+  const m = /^(\*|https?):\/\/([^/]*)\//i.exec(p);
+  if (!m) return false;
+  const ph = m[2].replace(/:(\*|\d+)$/, '').toLowerCase().replace(/\.$/, '');
+  const h = cleanHostName(host);
+  if (ph === '*') return true;
+  if (ph.startsWith('*.')) return hostInScope(h, ph.slice(2)) || hostInScope(`www.${h}`, ph.slice(2));
+  return ph === h || ph === `www.${h}`;
 }
 
 /**
@@ -1047,10 +1227,18 @@ export function applyStartSites(sitesOn, offered, start) {
  * The mod limited to the sites in `sitesOn`: each @match narrowed to those sites (any-host patterns and
  * <all_urls> become one pair per site; patterns for other sites go), or null when nothing is left. The
  * sites used go into its hash, so it re-registers when they change. file:// patterns go too.
+ * With the sensitive sites (`sensitive`, sensitiveSites): a sensitive site only gets its own mods (those
+ * in its folder), and those run only there; other mods' patterns covering one get it excluded (`*.google.com`
+ * runs on google.com but not on mail.google.com). `usedSites`: the sites it ends up on.
  */
-export function limitToSites(mod, sitesOn) {
+export function limitToSites(mod, sitesOn, sensitive = null) {
   const out = new Set();
   const used = new Set();
+  const on = sitesOn || [];
+  const home = sensitive ? modHome(mod, sensitive) : null;
+  const homeSensitive = !!home && sensitive.isSensitive(home);
+  // (may the mod run on site s at all)
+  const allowed = (s) => !sensitive || (homeSensitive ? s === home : s === home || !sensitive.isSensitive(s));
   for (const raw of Array.isArray(mod?.matches) ? mod.matches : []) {
     const p = String(raw).trim();
     const m = p === '<all_urls>' ? ['', '*', '*', '/*'] : /^(\*|https?|wss?|ftp):\/\/([^/]*)(\/.*)$/i.exec(p);
@@ -1059,17 +1247,30 @@ export function limitToSites(mod, sitesOn) {
     const port = /(:(\*|\d+))$/.exec(hostPart)?.[1] || '';
     const host = hostPart.slice(0, hostPart.length - port.length).toLowerCase();
     const add = (s) => { used.add(s); out.add(`${scheme}://${s}${port}${path}`); out.add(`${scheme}://*.${s}${port}${path}`); };
-    if (host === '*') { (sitesOn || []).forEach(add); continue; }
+    if (host === '*') { on.filter(allowed).forEach(add); continue; }
     const wild = host.startsWith('*.');
     const base = wild ? host.slice(2) : host;
-    const covering = (sitesOn || []).find((s) => hostInScope(base, s));
-    if (covering) { used.add(covering); out.add(p); continue; }
-    // "*.co.uk" with bbc.co.uk on: just bbc.co.uk. (An exact host never covers another site.)
-    if (wild) for (const s of sitesOn || []) if (hostInScope(s, base)) add(s);
+    const covering = sensitive ? (on.includes(sensitive.scopeOf(base)) ? sensitive.scopeOf(base) : null) : on.find((s) => hostInScope(base, s));
+    if (covering && allowed(covering)) { used.add(covering); out.add(p); continue; }
+    // "*.co.uk" with bbc.co.uk on: just bbc.co.uk. (An exact host never covers another site.) And a
+    // sensitive site's own mod with `*.google.com`: just mail.google.com.
+    if (wild) for (const s of on) if (s !== covering && hostInScope(s, base) && allowed(s)) add(s);
   }
   if (!out.size) return null;
+  // (the sensitive sites of their own under the sites it runs on, except its own: excluded)
+  const excl = new Set();
+  if (sensitive) {
+    for (const x of sensitive.splits) {
+      if (x === home) continue;
+      if ([...used].some((u) => u !== x && hostInScope(x, u))) siteExcludes(x).forEach((e) => excl.add(e));
+    }
+  }
   const tag = [...used].sort().join(',');
-  return { ...mod, matches: [...out].sort(), hash: mod.hash ? `${mod.hash}|sites:${tag}` : mod.hash };
+  const xs = [...excl].sort();
+  const limited = { ...mod, matches: [...out].sort(), hash: mod.hash ? `${mod.hash}|sites:${tag}${xs.length ? `|apart:${xs.join(',')}` : ''}` : mod.hash };
+  if (xs.length) limited.excludes = [...(Array.isArray(mod.excludes) ? mod.excludes : []), ...xs];
+  if (sensitive) limited.usedSites = [...used].sort();
+  return limited;
 }
 
 // ---- site access ----------------------------------------------------------------------------
@@ -1252,6 +1453,18 @@ export function globMatch(glob, s) {
   return s.length - pos >= last.length && s.endsWith(last);
 }
 
+/**
+ * The side panel's mods box (Tim, 2026-11-11): `here`, the mods whose @match covers `url` (and held ones,
+ * which wait to be allowed here), and `other`, those for other pages of the site (their light is grey), which
+ * fold into "N more for other <site> pages" at the bottom. Each keeps the order it had.
+ */
+export function splitForPage(mods, url) {
+  const here = [];
+  const other = [];
+  for (const m of mods || []) (m.held || modAppliesTo(m, url) ? here : other).push(m);
+  return { here, other };
+}
+
 /** True when a mod ({matches, excludes}) would run on `url`. */
 export function modAppliesTo(mod, url) {
   const matches = Array.isArray(mod?.matches) ? mod.matches : [];
@@ -1321,7 +1534,9 @@ export function isLoginUrl(url) {
  * injection), hence self-contained. With a `token` (isolated world), marks the document when it may, so the
  * extension can tell afterwards that the command ran in this same document (background.js pageCall).
  */
-export function pageGuard(scope, sitesOn, token) {
+// `apart`: sites of their own inside those (lib.js "sensitive sites") the code may not meet: mail.google.com
+// for a google.com run, or for any code while mail.google.com isn't on.
+export function pageGuard(scope, sitesOn, token, apart = []) {
   let u;
   try { u = new URL(String(location.href)); } catch (e) { return 'the tab is not on a web page any more'; }
   const host = u.hostname.toLowerCase().replace(/\.$/, '');
@@ -1330,6 +1545,7 @@ export function pageGuard(scope, sitesOn, token) {
   if (u.protocol !== 'http:' && u.protocol !== 'https:') why = 'the tab went to a page that isn\'t http or https before TRIF reached it';
   else if (scope && !inside(scope)) why = `the tab went to ${host} before TRIF reached it, and this agent run is limited to ${scope}`;
   else if (!(sitesOn || []).some(inside)) why = `the tab went to ${host} before TRIF reached it, and TRIF is off there`;
+  else if ((apart || []).some(inside)) why = `the tab went to ${host} before TRIF reached it, which is a site of its own${scope ? `, and this agent run is limited to ${scope}` : ', and TRIF is off there'}`;
   if (!why && token) window.__trifPageGuard = token;
   return why;
 }
@@ -1338,9 +1554,9 @@ export function pageGuard(scope, sitesOn, token) {
 // leakGuard) can tell the agent's code on the call stack from the site's.
 export function buildRunCode(code, expression, runId, guard = null, { tag = false } = {}) {
   const body = expression ? `return (${code}\n);` : `${code}\n`;
-  // guard {scope, sitesOn}: checked against the document the code meets, before it runs.
+  // guard {scope, sitesOn, apart}: checked against the document the code meets, before it runs.
   const check = guard
-    ? `{ const __wmWhy = (${pageGuard.toString()})(${JSON.stringify(guard.scope || null)}, ${JSON.stringify(guard.sitesOn || [])}, null); if (__wmWhy) return JSON.stringify({ ok: false, error: __wmWhy }); }\n`
+    ? `{ const __wmWhy = (${pageGuard.toString()})(${JSON.stringify(guard.scope || null)}, ${JSON.stringify(guard.sitesOn || [])}, null, ${JSON.stringify(guard.apart || [])}); if (__wmWhy) return JSON.stringify({ ok: false, error: __wmWhy }); }\n`
     : '';
   return `(async () => {
 ${check}const __wmStringify = (${safeStringify.toString()});

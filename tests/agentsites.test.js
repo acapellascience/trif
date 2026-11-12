@@ -59,7 +59,9 @@ test('the panel: "Agent on this site" on the line over the message box, a menu o
   assert.ok(chat.indexOf('id="agent-site-note"') > 0 && chat.indexOf('id="agent-site-note"') < chat.indexOf('id="messages"'), 'the note: the chat\'s first line');
   const js = fs.readFileSync(path.join(__dirname, '..', 'extension', 'sidepanel.js'), 'utf8');
   assert.match(js, /const LEVEL_WORDS = \{ off: 'Agent can’t see this site', look: 'Agent can look', ask: 'Agent asks before running code', run: 'Agent can run code' \};/);
-  assert.match(js, /`Your agent can’t see \$\{site\}: it’s \$\{lv\.why \|\| 'on your list of sensitive sites'\}\. Change it below\.`/);
+  // (what Off means, on any site at Off: Tim, 2026-11-11)
+  assert.match(js, /const why = lv\.by === 'sensitive' \? `it’s \$\{lv\.why \|\| 'on your list of sensitive sites'\}` : 'you set it to Off';/);
+  assert.match(js, /`Your agent can’t see \$\{site\} \(\$\{why\}\): it can only write mods from what you describe\. Change it below\.`/);
   // only where there's a chat: the site connected and the robot on
   assert.match(js, /const show = !!site && !!view\.status\?\.helper\?\.connected && !!siteScope\(\) && currentState\(\) === 'on';/);
 });

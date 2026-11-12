@@ -33,7 +33,7 @@ switches stay as they were; in Safari, install the new TRIF.app (see Safari belo
 
 ## Install
 
-These steps install the latest release, **0.2.6**, from npm. GitHub's `main` branch is where work in progress
+These steps install the latest release, **0.2.7**, from npm. GitHub's `main` branch is where work in progress
 lands: it can have features the release doesn't (and new bugs), so don't install from a checkout of it
 unless you're working on TRIF.
 
@@ -43,10 +43,10 @@ unless you're working on TRIF.
    npx timsrobot setup
    ```
 
-   If you were sent a file (`timsrobot-0.2.6.tgz`) instead, run this from the folder it's in:
+   If you were sent a file (`timsrobot-0.2.7.tgz`) instead, run this from the folder it's in:
 
    ```sh
-   npx --yes --package ./timsrobot-0.2.6.tgz trif setup
+   npx --yes --package ./timsrobot-0.2.7.tgz trif setup
    ```
 
    npx asks once whether to install the `trif` package: type `y`. This creates `~/.trif` (your mods

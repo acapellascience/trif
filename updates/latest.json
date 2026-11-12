@@ -1,10 +1,10 @@
 {
-  "version": "0.2.6",
-  "published": "2026-11-11",
-  "notes": "- **Google search works again.** Google changed its results page, and AI Banisher started hiding the\n  results along with the AI Overview. It's fixed.\n- **At work:** if your company's Codex or Claude Code settings won't let TRIF use its sandbox, TRIF asks\n  before going on without it.",
+  "version": "0.2.7",
+  "published": "2026-11-12",
+  "notes": "- **Songs in profile pictures.** Tune Composer (new, off to start) makes little NES-style tunes, in any\n  time signature. Style Encoder puts yours in your profile picture, and Profile Styler plays a profile's\n  song from a speaker button.\n- **Styles survive X's JPEGs**, and carry three fonts: for your name, your handle and all other text.\n- **Post Styler** shows posts in their authors' colours and fonts.\n- **Detox Timeline** also tidies profiles' Reposts and Subscriptions tabs.\n\n### More\n\n- Pictures styled before still read. Older Profile Stylers ignore the new code instead of misreading it.\n- A tune in 4/4 plays in older Profile Stylers too; other time signatures need this version.\n- The speaker never starts by itself, and stops when you leave the profile.",
   "package": {
-    "url": "https://github.com/acapellascience/trif/releases/download/v0.2.6/timsrobot-0.2.6.tgz",
-    "sha256": "13db45c71a457e3687acd6194f69140cc243fe37194c1186193399d5b40bd639",
-    "size": 2038478
+    "url": "https://github.com/acapellascience/trif/releases/download/v0.2.7/timsrobot-0.2.7.tgz",
+    "sha256": "8d0d30135788b5687a798ec9857e54fdb3ef8a7ce23257443f7eb6af60194854",
+    "size": 2124788
   }
 }

@@ -527,6 +527,54 @@ const handlers = {
     out('\nIf the mod really needs it, keep it and tell the user what it does and why it waits. See "Writing mods TRIF can read" in TECHNIQUES.md.');
   },
 
+  // check, reload and what happened, in one step (an agent's verify round, which was four or five tool
+  // calls): the mod's check; a wait until the browser has the version just saved; a reload of the tab;
+  // whether the mod runs there (or why not: held, off); its errors and logs after the reload.
+  async verify(ctx, pos) {
+    if (!pos[0]) throw new UsageError('missing mod: trif verify <site>/<mod> [TAB]');
+    const id = modId(pos[0]);
+    const file = path.join(ctx.ws.modsDir, `${id}.js`);
+    if (!fs.existsSync(file)) throw new UsageError(`no mod ${id} (${file})`);
+    if (ctx.json) throw new UsageError('trif verify has no --json: run the commands it combines (check, status, reload, errors, logs) for that');
+    out('== check');
+    await handlers.check(ctx, [id]);
+    if (process.exitCode) return out('\nFix that, save, and run trif verify again.');
+    // (the helper sends a saved mod to the browser a moment later: wait until the browser has said what it
+    // registered since the file was saved, at most 8 s)
+    const saved = fs.statSync(file).mtimeMs;
+    const until = Date.now() + 8000;
+    let info = await ctx.call('ping', {}, 5000);
+    while (!(info.modsApplied && info.modsApplied.at > saved) && Date.now() < until) {
+      await new Promise((r) => setTimeout(r, 250));
+      info = await ctx.call('ping', {}, 5000);
+    }
+    const held = (info.held || {})[id];
+    const waiting = held && (info.pending || []).includes(id);
+    out('\n== state');
+    if (held) {
+      out(`${waiting ? 'CHANGE WAITING: the version before runs until the user allows this one' : 'HELD: it doesn\'t run until the user allows it'}, as it ${require('./lib/boxpowers').factLines(held.needs, held.facts || [held.reason]).join('; it ')}.`);
+      if (!waiting) return out('Nothing to see on the page until then: tell the user what it can do and why it waits.');
+    }
+    const err = ((info.modsApplied && info.modsApplied.errors) || []).find((e) => e.id === id);
+    if (err) { process.exitCode = 1; return out(`NOT REGISTERED: ${err.error}`); }
+    const r = await ctx.call('reload', { ...tabArgs(ctx.opts) });
+    out(`reloaded ${r && r.url ? r.url : ''}`.trim());
+    await new Promise((res) => setTimeout(res, 1200));
+    let st = null;
+    try { st = await ctx.call('status', { timeout: 5000, ...tabArgs(ctx.opts) }); } catch (e) { if (e.kind === 'no-helper') throw e; }
+    const me = st && Array.isArray(st.mods) ? st.mods.find((m) => m.id === id) : null;
+    const here = st && st.page && Array.isArray(st.page.mods) ? st.page.mods.some((m) => m.id === id) : null;
+    if (me && me.enabled === false) out(me.newOff ? 'off: it came from outside the chat, so it waits for the user to switch it on' : 'off: switched off by the user (trif status)');
+    else if (st && st.groupsOff && Object.keys(st.groupsOff).length) out(`groups off: ${JSON.stringify(st.groupsOff)}`);
+    if (here === true) out(`running on this page${held ? ' (the version before)' : ''}`);
+    else if (here === false) out('NOT running on this page: check its @match lines against the page\'s address (trif status [TAB])');
+    out('\n== errors');
+    await handlers.errors(ctx);
+    out('\n== logs');
+    await handlers.logs(ctx);
+    out('\nNow look at the page: the counts, sizes or text you set out to change (trif sweep, trif run, trif screenshot).');
+  },
+
   async enable(ctx, pos) { return switchMod(ctx, pos, true); },
   async disable(ctx, pos) { return switchMod(ctx, pos, false); },
 

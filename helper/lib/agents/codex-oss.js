@@ -378,7 +378,7 @@ const adapter = {
   // ("I'm an OpenAI coding agent running inside Codex CLI"), from Codex's own instructions.
   command(opts) {
     const om = opts.openModel || resolve(null, null, opts.model);
-    return codex.command({ ...opts, prompt: `${modelNote(om)}\n\n${opts.prompt}`, model: om.model, config: providerArgs(om) });
+    return codex.command({ ...opts, effort: undefined, prompt: `${modelNote(om)}\n\n${opts.prompt}`, model: om.model, config: providerArgs(om) });
   },
 
   parse(line, emit, state = {}) {

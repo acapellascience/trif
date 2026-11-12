@@ -92,6 +92,7 @@ function tooOld(version) {
 }
 
 const adapter = {
+  efforts: ['low', 'medium', 'high', 'xhigh', 'max'], // (until its model list says each model's: listModels)
   id: 'codex',
   name: 'Codex',
   binary: 'codex',
@@ -119,13 +120,21 @@ const adapter = {
     if (!list) return { models: [], default: null, custom: true, error: `couldn't read Codex's model list${r.stderr ? `: ${oneLine(r.stderr).slice(0, 200)}` : ''}` };
     const models = list.filter((m) => m && typeof m.slug === 'string' && m.visibility === 'list')
       .sort((a, b) => (a.priority ?? 99) - (b.priority ?? 99))
-      .map((m) => ({ id: m.slug, name: typeof m.display_name === 'string' && m.display_name ? m.display_name : m.slug, description: typeof m.description === 'string' ? m.description : '' }));
+      .map((m) => ({
+        id: m.slug, name: typeof m.display_name === 'string' && m.display_name ? m.display_name : m.slug, description: typeof m.description === 'string' ? m.description : '',
+        // (its effort levels and default, for the panel's Effort setting; not "ultra", which hands work to
+        // sub-agents: a run is one agent in TRIF's sandbox)
+        efforts: (Array.isArray(m.supported_reasoning_levels) ? m.supported_reasoning_levels : [])
+          .map((x) => (x && typeof x === 'object' ? x : { effort: x })).filter((x) => typeof x.effort === 'string' && /^[a-z]+$/.test(x.effort) && x.effort !== 'ultra')
+          .map((x) => ({ id: x.effort, description: typeof x.description === 'string' ? x.description : '' })),
+        defaultEffort: typeof m.default_reasoning_level === 'string' ? m.default_reasoning_level : null,
+      }));
     return { models, default: models[0]?.id || null, custom: false, error: null };
   },
 
   // writable / readOnly / denied: absolute (real) paths; see permissionsToml. `config`: more -c pairs
   // (codex-oss: its provider; a plain run with an API key: the key proxy's provider, see keyProvider).
-  command({ bin, prompt, sessionId, model, readable = [], writable = [], readOnly = [], denied = [], lockedDirs = [], tmp = '', config = [] }) {
+  command({ bin, prompt, sessionId, model, effort, readable = [], writable = [], readOnly = [], denied = [], lockedDirs = [], tmp = '', config = [] }) {
     // Exec options go before the `resume` subcommand (verified with Codex 0.166).
     const args = ['exec', '--json', '--skip-git-repo-check', '--ignore-user-config', '--ignore-rules',
       '-c', 'approval_policy="never"', '-c', `default_permissions="${PROFILE}"`, '-c', `permissions=${permissionsToml({ readable, writable, readOnly, denied })}`, ...config,
@@ -133,6 +142,8 @@ const adapter = {
       ...(tmp ? ['-c', `shell_environment_policy.set={ TMPDIR = ${tomlKey(tmp)}, TMPPREFIX = ${tomlKey(`${tmp}/zsh`)} }`] : []),
       '-c', 'web_search="disabled"', ...FEATURES_OFF.flatMap((f) => ['-c', `features.${f}=false`])];
     if (model) args.push('-m', model);
+    // The user's effort setting (the panel's Settings, per agent); none: the model's default
+    if (effort && /^[a-z]+$/.test(effort) && effort !== 'ultra') args.push('-c', `model_reasoning_effort="${effort}"`);
     if (sessionId) args.push('resume', sessionId);
     // The message on stdin (`-`), not in argv, which any same-user process can read (`ps`, sysctl
     // KERN_PROCARGS2; the agent's sandboxed commands included).

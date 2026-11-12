@@ -1343,12 +1343,12 @@ test('background: agent.start becomes a native request; agentEvents reach panels
   try {
     const panel = bg.connectPanel();
     const other = bg.connectPanel();
-    const replyP = panel.ask({ type: 'agent.start', site: 'x.com', tabId: 12, url: 'https://x.com/home', prompt: 'hide reposts', agent: 'claude', model: 'opus' });
+    const replyP = panel.ask({ type: 'agent.start', site: 'x.com', tabId: 12, url: 'https://x.com/home', prompt: 'hide reposts', agent: 'claude', model: 'opus', effort: 'high' });
     const req = await answerNative(bg.native, 'agent.start', { runId: 'r1' });
     // (the run's scope, and the sites of their own TRIF knows of, for its folder: lib.js "sensitive sites")
     const { splits, ...rest } = req.args;
     assert.ok(splits.includes('mail.google.com'), 'the sensitive sites of their own go with it');
-    assert.deepStrictEqual(rest, { site: 'x.com', scope: 'x.com', url: 'https://x.com/home', tabId: 12, prompt: 'hide reposts', agent: 'claude', agentLevel: 'ask', model: 'opus' });
+    assert.deepStrictEqual(rest, { site: 'x.com', scope: 'x.com', url: 'https://x.com/home', tabId: 12, prompt: 'hide reposts', agent: 'claude', agentLevel: 'ask', model: 'opus', effort: 'high' });
     assert.match(req.id, /^ext-/);
     const reply = await replyP;
     assert.deepStrictEqual([reply.ok, reply.result], [true, { runId: 'r1' }]);

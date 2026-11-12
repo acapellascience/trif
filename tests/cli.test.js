@@ -209,6 +209,19 @@ test('run: page error gives exit 1 with the message; timeout gives exit 1', asyn
   assert.match(r.stderr, /timed out after 400ms/);
 });
 
+test('verify: check, reload, errors and logs in one step', async () => {
+  const { home } = await getShared();
+  const r = await runCli(['verify', 'example.com/banner', '--url', 'example.com'], { home });
+  assert.equal(r.code, 0, r.stderr);
+  assert.match(r.stdout, /== check\nok: .*banner\.js parses/);
+  assert.match(r.stdout, /reloaded https:\/\/example\.com\//);
+  assert.match(r.stdout, /== errors\n.*example\.com\/banner: boom/);
+  assert.match(r.stdout, /== logs\n.*example\.com\/banner hello 42/);
+  const bad = await runCli(['verify', 'example.com/nope'], { home });
+  assert.equal(bad.code, 1);
+  assert.match(bad.stderr, /no mod example\.com\/nope/);
+});
+
 test('screenshot writes a PNG to -o and to the default folder', async () => {
   const { home } = await getShared();
   const out = path.join(home, 'shots', 'a.png');

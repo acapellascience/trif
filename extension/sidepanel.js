@@ -48,7 +48,7 @@ const ui = {
 
   noSandbox: $('#no-sandbox'),
   composer: $('#composer'), input: $('#input'), send: $('#send'), stop: $('#stop'),
-  robotlessLine: $('#robotless-line'), robotlessSettings: $('#robotless-settings'), modelRow: $('#model-row'),
+  robotlessLine: $('#robotless-line'), robotlessSettings: $('#robotless-settings'), modelRow: $('#model-row'), effortRow: $('#effort-row'), effort: $('#effort'),
 };
 
 const view = {
@@ -64,6 +64,7 @@ const view = {
   snapshots: new Map(),      // site -> the default this panel first saw for it, until the site has a pick
   modelLists: {},            // agent id -> agent.models result (what that agent offers)
   modelOther: {},            // agent id -> true while "Other…" is picked but nothing typed yet
+  efforts: {},               // agent id -> the effort picked in Settings ('' or absent: the agent's default)
   rendered: { site: null, count: 0, first: null },
   modsOpenFor: null,         // set once the mods <details> open state has been restored
   modRows: new Map(),        // mod id -> {key, li}: each row is rebuilt only when its own mod changes
@@ -239,8 +240,9 @@ async function init() {
   view.windowId = OPENED_FOR || (await chrome.windows.getCurrent()).id;
   if (FALLBACK) await setUpPanelWindow();
   sayWindow();
-  const stored = await chrome.storage.local.get(['settings', 'sitePicks', 'disabled', 'offSites', 'updated', 'modOrder', 'defaultOrder', 'defaultModelsReset']);
+  const stored = await chrome.storage.local.get(['agentEffort', 'settings', 'sitePicks', 'disabled', 'offSites', 'updated', 'modOrder', 'defaultOrder', 'defaultModelsReset']);
   view.updated = stored.updated || null;
+  view.efforts = stored.agentEffort && typeof stored.agentEffort === 'object' ? stored.agentEffort : {};
   view.settings = normalizeSettings(stored.settings);
   // Once (0.2.3): the default's models, which models picked on sites used to be copied into (see
   // saveSettings), back to each agent's default. Each site's own picks stay.
@@ -275,6 +277,7 @@ async function init() {
       view.chat = normalizeChat(changes[chatKey(view.site)].newValue);
       render();
     }
+    if (changes.agentEffort) { view.efforts = changes.agentEffort.newValue || {}; renderModels(); }
     if (changes.settings || changes.sitePicks) { // another panel's pick, or this one's
       if (changes.settings) view.settings = normalizeSettings(changes.settings.newValue);
       if (changes.sitePicks) view.picks = normalizePicks(changes.sitePicks.newValue);
@@ -370,6 +373,8 @@ function returnToSite(site) {
 
 // The model is chosen per agent (an Opus choice means nothing to Codex), per site chat (lib.js).
 const chosenModel = (agentId) => (agentId && chatSettings().models[agentId]) || '';
+// The effort is the user's, per agent and browser-wide (Settings → Effort); '' = the agent's own default.
+const chosenEffort = (agentId) => (agentId && typeof view.efforts[agentId] === 'string' ? view.efforts[agentId] : '');
 
 function normalizeChat(c) {
   const chat = { ...emptyChat(), ...(c && typeof c === 'object' ? c : {}) };
@@ -503,7 +508,7 @@ function sandboxCard(li, m) {
       loadAgents(); // (Settings' line)
       done('allowed');
       const tabId = view.tab?.id;
-      const runId = await startRun(m.prompt, { agent: m.agent, model: chosenModel(m.agent) || undefined, ...(m.merge ? { merge: m.merge } : {}) });
+      const runId = await startRun(m.prompt, { agent: m.agent, model: chosenModel(m.agent) || undefined, effort: chosenEffort(m.agent) || undefined, ...(m.merge ? { merge: m.merge } : {}) });
       view.myRuns.set(runId, { prompt: m.prompt, tabId });
     } catch (e) { fail(e); }
   });
@@ -3246,7 +3251,24 @@ function renderModels() {
   ui.modelNote.textContent = note;
   ui.modelNote.hidden = !note || robotless();
   ui.modelNote.classList.toggle('error', !!list?.error || (!known && !allowsOther));
+  renderEffort(id, info, selected || def);
   renderUsing(info, chosen, models, def);
+}
+
+// Effort words as Settings shows them (the agents' own: Claude Code's --effort, Codex's reasoning levels)
+const EFFORT_NAMES = { minimal: 'Minimal', low: 'Low', medium: 'Medium', high: 'High', xhigh: 'Extra high', max: 'Max' };
+/** Settings → Effort: the levels the agent (Codex: the chosen model) offers; Default is the agent's own. */
+function renderEffort(id, info, model) {
+  const levels = (model && Array.isArray(model.efforts) && model.efforts.length ? model.efforts : (info?.efforts || []).map((e) => ({ id: e, description: '' })));
+  ui.effortRow.hidden = !levels.length || robotless();
+  if (!levels.length) return;
+  const chosen = chosenEffort(id);
+  const def = model?.defaultEffort ? EFFORT_NAMES[model.defaultEffort] || model.defaultEffort : null;
+  const opts = [new Option(def ? `Default (${def})` : 'Default', '')];
+  for (const l of levels) { const o = new Option(EFFORT_NAMES[l.id] || l.id, l.id); if (l.description) o.title = l.description; opts.push(o); }
+  if (chosen && !levels.some((l) => l.id === chosen)) opts.push(new Option(`${EFFORT_NAMES[chosen] || chosen} (not offered)`, chosen));
+  if (document.activeElement !== ui.effort) { ui.effort.replaceChildren(...opts); ui.effort.value = chosen; }
+  ui.effort.disabled = !id;
 }
 
 /**
@@ -3258,7 +3280,8 @@ function renderUsing(info, chosen, models, def) {
   if (!info) { ui.using.hidden = true; return; }
   const named = chosen && models.find((m) => m.id === chosen);
   const model = chosen ? (named ? named.name : chosen) : def ? `Default (${def.name})` : 'Default model';
-  ui.using.textContent = `${info.name} · ${model}`;
+  const effort = chosenEffort(info.id);
+  ui.using.textContent = `${info.name} · ${model}${effort ? ` · ${EFFORT_NAMES[effort] || effort} effort` : ''}`;
   ui.using.title = 'Change the agent or model';
   ui.using.hidden = false;
 }
@@ -3367,7 +3390,7 @@ async function startRun(text, extra = {}) {
   const sessionId = chat.sessionId && (!chat.agent || !agent || chat.agent === agent) ? chat.sessionId : undefined;
   const { runId } = await request({
     type: 'agent.start', site: view.site, tabId: view.tab.id, url: view.tab.url, prompt: text,
-    sessionId, agent: agent || undefined, model: chosenModel(agent) || undefined, ...extra,
+    sessionId, agent: agent || undefined, model: chosenModel(agent) || undefined, effort: chosenEffort(agent) || undefined, ...extra,
   });
   view.myRuns.set(runId, null);
   return runId;
@@ -3475,6 +3498,13 @@ ui.agent.addEventListener('change', async () => {
   await saveSettings({ agent: ui.agent.value });
   renderModels();
   loadModels(currentAgent().id);
+});
+ui.effort.addEventListener('change', () => {
+  const { id } = currentAgent();
+  if (!id) return;
+  view.efforts = { ...view.efforts, [id]: ui.effort.value };
+  chrome.storage.local.set({ agentEffort: view.efforts }).catch(() => {});
+  renderModels();
 });
 ui.model.addEventListener('change', () => {
   const { id } = currentAgent();

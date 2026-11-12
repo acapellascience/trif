@@ -275,6 +275,12 @@ yourself also releases it. Not available to agents inside a side-panel run.`,
     details: 'Prints the syntax error and where it is, or "ok", then each thing TRIF reads in the code that would make the mod wait for the user\'s OK (sending, clicking for the user, loading from addresses it builds, code it can\'t read), the lines, and how to avoid it where there\'s a way. Use it instead of node --check. A style mod: its rules checked. A boxed mod (@boxed): it never waits; instead it lists what the sandbox wouldn\'t give it (window, document, fetch, real elements\' methods, ...), which would fail when it runs.',
     examples: ['trif check sites/x.com/hide-reposts.js', 'trif check x.com/hide-reposts'],
   },
+  verify: {
+    usage: 'trif verify <site>/<mod> [TAB]',
+    summary: 'after saving a mod: check it, reload the tab, and say whether it runs there, with its errors and logs',
+    details: 'One step for what you do after every save: trif check, a wait until the browser has the version you saved, trif reload, whether the mod runs on that page (or why not: held for the user\'s OK, switched off, its @match), then trif errors and trif logs for the tab. Then look at the page yourself (trif sweep, trif run, trif screenshot) for what you set out to change.',
+    examples: ['trif verify x.com/hide-reposts --tab 12'],
+  },
   enable: {
     usage: 'trif enable <site>/<mod> [--site HOST] [TAB]',
     summary: 'switch a mod back on (like its switch in the side panel)',
@@ -433,7 +439,7 @@ const GROUPS = [
   ['Setup and diagnosis', ['setup', 'status', 'doctor', 'update', 'report']],
   ['Mod files (work without Chrome)', ['mods', 'new', 'check', 'delete', 'restore', 'history', 'undo', 'reveal', 'export', 'import', 'files', 'add', 'install-example', 'mod-update']],
   ['Switching mods off and on (need Chrome running with the extension)', ['disable', 'enable', 'approve', 'reject']],
-  ['Pages (need Chrome running with the extension)', ['tabs', 'run', 'reload', 'open', 'close', 'navigate', 'text', 'sweep', 'screenshot', 'record', 'requests', 'request', 'errors', 'logs']],
+  ['Pages (need Chrome running with the extension)', ['tabs', 'run', 'reload', 'verify', 'open', 'close', 'navigate', 'text', 'sweep', 'screenshot', 'record', 'requests', 'request', 'errors', 'logs']],
   ['Agent runs (what the side panel does)', ['agent']],
   ['', ['explain', 'help']],
 ];

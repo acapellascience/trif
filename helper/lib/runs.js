@@ -583,6 +583,7 @@ class Runs {
       fix: args.fix === true, // (a run Fix it started: its changes are kept in history as a fix's)
       sessionId: typeof args.sessionId === 'string' && args.sessionId ? checkWord(args.sessionId, 'session id') : null,
       model: typeof args.model === 'string' && args.model.trim() ? checkWord(args.model.trim(), 'model name') : null,
+      effort: typeof args.effort === 'string' && /^[a-z]{2,12}$/.test(args.effort) ? args.effort : null, // (the panel's Effort setting)
       // codex-oss: this run's provider choice over config.json's (agents/codex-oss.js resolve).
       openModel: args.openModel && typeof args.openModel === 'object' && !Array.isArray(args.openModel) ? { ...args.openModel } : null,
       secrets: [], // values (API keys) kept out of the run's log and events
@@ -680,7 +681,7 @@ class Runs {
   _launch(run) {
     const { ws, adapter } = run;
     this._prepareLogDir(run);
-    this._log(run, { webmods: 'start', runId: run.id, agent: run.agent, site: run.site, url: run.url, tabId: run.tabId, sessionId: run.sessionId, model: run.model, prompt: run.prompt, time: run.startedAt });
+    this._log(run, { webmods: 'start', runId: run.id, agent: run.agent, site: run.site, url: run.url, tabId: run.tabId, sessionId: run.sessionId, model: run.model, ...(run.effort ? { effort: run.effort } : {}), prompt: run.prompt, time: run.startedAt });
 
     if (run.stopped) return this._finish(run, { code: null, signal: null }); // stopped before it started
     // The consents to run without TRIF's sandbox as the run starts (a run without it may be able to write
@@ -781,7 +782,7 @@ class Runs {
     let cmd;
     try {
       fs.mkdirSync(run.agentDir, { mode: 0o700 });
-      cmd = adapter.command({ bin: found.path, prompt, sessionId: run.sessionId, model: run.model, context, workspace: ws.home, agentDir: run.agentDir, ...limits, ...options });
+      cmd = adapter.command({ bin: found.path, prompt, sessionId: run.sessionId, model: run.model, effort: run.effort, context, workspace: ws.home, agentDir: run.agentDir, ...limits, ...options });
       for (const f of cmd.files || []) fs.writeFileSync(f.path, f.content, { mode: 0o600, flag: 'wx' });
     } catch (e) {
       this._emit(run, { kind: 'error', message: `couldn't prepare ${adapter.name}'s run: ${e.message}` });

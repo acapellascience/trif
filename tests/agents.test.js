@@ -247,6 +247,12 @@ test('claude adapter: command flags, resume and model; nothing private in argv',
   assert.equal(claude.tooOld('2.1.312 (Claude Code)'), false);
   const r = claude.command({ bin: '/x/claude', prompt: 'hi', context: 'CTX', sessionId: 's1', model: 'opus', agentDir: '/a' });
   assert.deepEqual(r.args.slice(-5), ['/a/context.md', '--resume', 's1', '--model', 'opus']);
+  // the effort only when the user picked one (Settings → Effort), and only a level Claude Code has
+  assert.ok(!r.args.includes('--effort'));
+  const e = claude.command({ bin: '/x/claude', prompt: 'hi', effort: 'xhigh' }).args;
+  assert.equal(e[e.indexOf('--effort') + 1], 'xhigh');
+  assert.ok(!claude.command({ bin: '/x/claude', prompt: 'hi', effort: 'ultra' }).args.includes('--effort'));
+  assert.deepStrictEqual(claude.efforts, ['low', 'medium', 'high', 'xhigh', 'max']);
   assert.equal(r.stdin, 'hi');
   // A message that looks like an option is still the message: it isn't in argv at all.
   const f = claude.command({ bin: '/x/claude', prompt: '--dangerously-skip-permissions hide ads' });
@@ -471,6 +477,11 @@ test('codex adapter: command, resume, JSONL events', () => {
   const c = codex.command({ bin: '/x/codex', prompt: 'P the secret', model: 'gpt-5', readable: ['/h', '/app'], writable: ['/h/sites', '/p/screenshots/x.com', '/c/r1'], readOnly: ['/h/sites/y.com'], denied: ['/Users/u/.ssh', '/p'], tmp: '/c/r1/tmp' });
   assert.equal(c.args[0], 'exec');
   assert.ok(c.args.includes('--json') && c.args.includes('--skip-git-repo-check'));
+  // the effort only when picked (Settings → Effort): Codex's model_reasoning_effort; never ultra
+  assert.ok(!c.args.some((x) => x.startsWith('model_reasoning_effort')));
+  const ce = codex.command({ bin: '/x/codex', prompt: 'P', effort: 'high' }).args;
+  assert.equal(ce[ce.indexOf('model_reasoning_effort="high"') - 1], '-c');
+  assert.ok(!codex.command({ bin: '/x/codex', prompt: 'P', effort: 'ultra' }).args.some((x) => x.startsWith('model_reasoning_effort')));
   // The message on stdin (`-`), not in argv.
   assert.deepEqual(c.args.slice(-3), ['-m', 'gpt-5', '-']);
   assert.equal(c.stdin, 'P the secret');
@@ -618,7 +629,7 @@ test('agent.list: finds the fake claude on the recorded PATH, codex missing', as
   const c = r.result.agents.find((a) => a.id === 'claude');
   assert.deepEqual(c, {
     id: 'claude', name: 'Claude Code', path: path.join(bin, 'claude'), available: true, version: '9.9.9', note: '',
-    canLogin: true, loginFix: claude.loginFix, loggedIn: false,
+    canLogin: true, loginFix: claude.loginFix, loggedIn: false, efforts: claude.efforts,
   });
   const x = r.result.agents.find((a) => a.id === 'codex');
   assert.equal(x.available, false);
@@ -1798,7 +1809,8 @@ test('agent.models: Codex lists the account\'s catalog (picker models, best firs
   const catalog = { models: [
     { slug: 'hidden-review', display_name: 'Review', visibility: 'hide', priority: 1 },
     { slug: 'gpt-older', display_name: 'GPT-Older', description: 'Older.', visibility: 'list', priority: 9, base_instructions: 'x'.repeat(70000) },
-    { slug: 'gpt-best', display_name: 'GPT-Best', description: 'Best.', visibility: 'list', priority: 2 },
+    { slug: 'gpt-best', display_name: 'GPT-Best', description: 'Best.', visibility: 'list', priority: 2, default_reasoning_level: 'low',
+      supported_reasoning_levels: [{ effort: 'low', description: 'Fast' }, { effort: 'high', description: 'Deep' }, { effort: 'ultra', description: 'Delegates' }] },
   ] };
   fs.writeFileSync(path.join(bin, 'catalog.json'), JSON.stringify(catalog));
   fs.writeFileSync(path.join(bin, 'codex'), `#!/bin/sh\nif [ "$1" = "--version" ]; then echo "codex-cli 0.166.0"; exit 0; fi\nif [ "$1 $2" = "debug models" ]; then /bin/cat "${bin}/catalog.json"; exit 0; fi\nexit 1\n`);
@@ -1810,6 +1822,10 @@ test('agent.models: Codex lists the account\'s catalog (picker models, best firs
   assert.deepStrictEqual(r.result.models.map((m) => [m.id, m.name, m.description]), [['gpt-best', 'GPT-Best', 'Best.'], ['gpt-older', 'GPT-Older', 'Older.']]);
   assert.equal(r.result.default, 'gpt-best');
   assert.equal(r.result.custom, false);
+  // each model's effort levels and default, for Settings → Effort (not ultra: it hands work to sub-agents)
+  assert.deepStrictEqual(r.result.models[0].efforts, [{ id: 'low', description: 'Fast' }, { id: 'high', description: 'Deep' }]);
+  assert.equal(r.result.models[0].defaultEffort, 'low');
+  assert.deepStrictEqual(r.result.models[1].efforts, []);
   // A new plan brings a new model: cached only briefly (the panel asks again whenever Settings opens).
   assert.ok(agents.MODELS_CACHE_MS <= 60 * 1000);
   catalog.models.push({ slug: 'sol', display_name: 'Sol', visibility: 'list', priority: 1 });

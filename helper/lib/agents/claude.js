@@ -31,6 +31,8 @@ const TOOLS = ['Read', 'Edit', 'Write', 'Glob', 'Grep', 'Bash'];
 // (No Read denies for TRIF's secrets and logs: since 0.2.0 they're in the private folder, outside the
 // workspace, which a run's file tools can't read without approval and its sandbox denies.)
 const DENIED_TOOLS = ['WebFetch', 'WebSearch'];
+// Claude Code's effort levels (claude --help: --effort), offered in the panel's Settings.
+const EFFORTS = ['low', 'medium', 'high', 'xhigh', 'max'];
 // The workspace's files that steer TRIF (or the agents): never written by a run's commands. (.shipped
 // holds the versions of shipped mods a merge run reads: readable, never written.)
 const STATE_FILES = ['held.json', 'preinstalled.json', 'origins.json', 'active-runs', 'trash', 'update.json', 'instructions.md',
@@ -140,6 +142,7 @@ function workspaceSettings(ws, logger) {
 }
 
 const adapter = {
+  efforts: EFFORTS, // (the panel's Effort setting; agents/index.js detect)
   id: 'claude',
   tools: TOOLS,
   workspaceSettings,
@@ -177,7 +180,7 @@ const adapter = {
    * context (system prompt: the page the user is on) go in files in `agentDir`, the run's own folder that
    * only the helper and Claude Code itself read (runs.js writes `files`, 0600, and removes them after).
    */
-  command({ bin, prompt, sessionId, model, context, agentDir = '', ...limits }) {
+  command({ bin, prompt, sessionId, model, effort, context, agentDir = '', ...limits }) {
     const file = (name) => path.join(agentDir || '.', name);
     const files = [{ path: file('settings.json'), content: JSON.stringify(runSettings(limits)) }];
     const args = ['-p', '--output-format', 'stream-json', '--verbose',
@@ -191,6 +194,8 @@ const adapter = {
       args.push('--append-system-prompt-file', file('context.md'));
     }
     if (sessionId) args.push('--resume', sessionId);
+    // The user's effort setting (the panel's Settings, per agent); none: Claude Code's default
+    if (effort && EFFORTS.includes(effort)) args.push('--effort', effort);
     if (model) args.push('--model', model);
     // Every other site's folder got its Edit deny rules (runSettings) and its sandbox denyWrite.
     // Claude Code's own temporary folder (its commands' sandbox may always write there): the run's own

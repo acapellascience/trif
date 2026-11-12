@@ -11,9 +11,13 @@ install or update it. (TRIF, "Tim's Robot Internet Fixer", was called WebMods be
 `webmods` is the same command as `trif`, `~/.webmods` is a link to `~/.trif`, and mods may say
 `window.webmods` where new ones say `window.trif`. Use the new names.)
 
-**Read the safety rules at the end before you start. They are not optional.** How to write mods (the
-techniques, repairs, testing) is in TECHNIQUES.md, next to this file: read it before you write one.
-Boxed mods and their powers are in BOXED.md: read that only when you write, convert or repair a boxed mod.
+**Read the safety rules at the end before you start. They are not optional.** A style mod needs only this
+file ("Style mods: start here", below). Read TECHNIQUES.md (next to this file) before you write a free
+mod, filter a site's data or repair a mod; BOXED.md only when you write, convert or repair a boxed mod.
+
+**Say what you're about to do, then do it.** Before your first command, write one line saying what
+you're going to change, in the user's terms ("Narrowing the right column and widening the posts."), so
+they know at once that you understood them. Then work without narrating, and end with the report.
 
 ## The short version
 
@@ -22,8 +26,10 @@ Boxed mods and their powers are in BOXED.md: read that only when you write, conv
 2. Look at the live page: `trif tabs`, `trif run`, `trif text`, `trif sweep` (every instance, counted),
    `trif screenshot`, and for data, `trif record <site> on` → `trif reload` → `trif requests` →
    `trif request <i>`.
-3. `trif new <site> <mod>` and write the mod (CSS first; data filtering for feeds; DOM tweaks last).
-4. Save, `trif reload`, then verify: `trif errors`, `trif logs`, the same sweeps (nothing left), screenshot.
+3. Write the mod in `sites/<site>/<mod>.js`: a style mod first (below); data filtering for feeds; DOM
+   tweaks last.
+4. After each save, `trif verify <site>/<mod> --tab <id>` (check, reload, does it run, errors, logs: one
+   step), then look: the same sweeps (nothing left), your measurements, a screenshot.
 5. Iterate until it's done. Then tell the user what changed in a sentence or two (see "5. Report": short
    by default).
 
@@ -87,7 +93,9 @@ you to from their terminal (side-panel runs can't).
   include it; the side panel shows a badge for 1 and 2.
 - Wrap the body in an IIFE as above: early `return`s work, nothing leaks into the page's globals, and
   `trif check` can parse the file.
-- Start new mods with `trif new <site> <mod>` (`--style` or `--boxed` for those kinds); it creates the file from a template and prints its path.
+- Write a new mod's file directly, with the Write tool: the header, then the body. (`trif new <site>
+  <mod>`, with `--style` or `--boxed`, writes a template instead, if you'd rather start from one; it's an
+  extra step.)
 - **Keep mods small.** A mod can be up to **4 MB**, and all mods together up to **16 MB**; past that it
   isn't sent to the browser (`trif status` says NOT SENT and why, `trif doctor` says what to do). Every
   mod's code is held by the browser several times over and handed to each page it matches, and every
@@ -96,6 +104,44 @@ you to from their terminal (side-panel runs can't).
   something must be embedded, compress it (a short Opus or MP3 clip, a small WebP) and keep it to a few
   hundred KB. Something big the user wants (a long track, a video) is loaded from where it lives, with
   their OK (see "Mods never send data anywhere"). Don't paste in libraries the mod doesn't need.
+
+### Style mods: start here
+
+Most customizations are "make it look like this", "hide these", "rename that", "drop the items that say
+X". Write those as a **style mod**: rules as data instead of code, run by TRIF's own code. A style mod
+can't send, load from anywhere or run code, whoever wrote it, so it never waits for the user's OK and
+nothing on a page can turn it against them. Reach for JavaScript only when a style mod can't do the job.
+
+`trif new <site> <mod> --style` makes one. After the header (with `// @style` in it), one JSON object (a
+style mod's old name, `@rules`, still works):
+
+```js
+// ==WebMod==
+// @name        Calmer timeline
+// @description Hides promoted posts and the trends box
+// @match       https://x.com/*
+// @style
+// @risk        1 hides promoted posts, so their ad impressions never report
+// ==/WebMod==
+{
+  "css": "[data-testid=primaryColumn] { max-width: 700px }",
+  "hide": ["[data-testid=sidebarColumn] [aria-label=Trending]"],
+  "replace": [{ "in": "article", "find": "Grok", "with": "the robot" }],
+  "filter": [{ "items": "[data-testid=cellInnerDiv]", "hideIfText": "Promoted" }]
+}
+```
+
+- `css`: any CSS that changes how things look. Nothing that loads from an address: `url()` only with
+  `data:`, no `@import`, `image-set()` and the like, and no backslash escapes outside strings.
+- `hide`: selectors to hide (`display: none !important`, including elements that appear later).
+- `replace`: `{ in?, find, with, regex?, caseless? }`: text to replace inside the elements `in` matches
+  (default the whole page). `with` is plain text. Patterns are capped and can't nest repeats.
+- `filter`: `{ items, hideIfText | hideIfRegex | hideIfHas }`: hide each element matching `items` whose
+  text contains the words (case-insensitive), matches the pattern, or that has an element matching the
+  selector inside it.
+
+Selectors can't contain `{`, `}`, `;` or `@`. `trif check <site>/<mod>` checks the rules and says what's
+wrong. Rules re-apply as the page changes, so single-page apps need nothing extra.
 
 ### Mods TRIF ships
 
@@ -160,11 +206,17 @@ to that one. In a side-panel run you're already on the browser the user is chatt
 | `trif errors [TAB]` / `trif logs [TAB]` | Errors thrown by mods in that page / what mods logged. `--page`: the page's own errors (where a mod or recording is on). |
 | `trif mods` | Mods in the workspace (id, matches, file; `[off]` = switched off, `HELD` = waiting for the user's OK). |
 | `trif check <file\|site/mod>` | Check that a mod parses, without running it (use instead of `node --check`). |
+| `trif verify <site>/<mod> [TAB]` | After a save, in one step: `check`, a wait until the browser has what you saved, `reload`, whether the mod runs on the page (or why not: held, off, its `@match`), then `errors` and `logs`. |
 | `trif install-example <site>/<mod>` | Copy a ready-made example mod into the workspace. |
 | `trif explain [term]` | What a word the side panel shows means (a tier, power, chip, tag, warning, agent level): its line, what the user reads behind "more", and notes for you (when to use it, what's refused, narrower ways). No term: the list. Powers: `read-drafts`, `keys`, `site-data`, `page-data`, `site-storage`, `local-fonts`, `image-variants`, `sound`, `controls`, `mods`, `preload`, `media`, `search-box`, `go-to`, `embeds`, `rewrite-requests`, `block-events`, `page-events`, `click`, `write-drafts`, `edit-uploads` (and `@migrate`). |
 
 Exit code 2 means the helper isn't running: ask the user to open Chrome, and if it's open, run
 `trif doctor` and follow what it says. `--json` prints any result raw.
+
+**Fewer steps.** Every tool call is a round trip the user waits for. Chain `trif` commands that don't
+depend on each other's output with `&&` in one call (`trif text --tab 12 && trif sweep --tab 12 --text
+'^Sponsored$'`). You're already in the workspace: no `cd`. Write files with the Write tool, not with
+`cat >`, heredocs or shell variables: those commands can't be checked before they run, so they're refused.
 
 `trif run` is REPL-like: a single expression just works (`document.title`); otherwise write a
 function body with `return`. `await` works. Return small, shaped results, not whole elements:
@@ -404,27 +456,22 @@ trade-off, a safer way that does less against a riskier way that does all of it,
 
 Style and boxed mods can't act for the user themselves, so they never wait for their OK (in a browser
 without the sandbox, Safari, a boxed mod waits, to run as a free mod). (Their old names, `@rules` and
-`@sandboxed`, `--rules` and `--sandboxed`, still work.) **Read TECHNIQUES.md first** (next to this file;
-once per session is enough; "Style mods" is its first section):
-where mods run, the
-techniques most robust first (CSS; filtering data before the app sees it; DOM tweaks in single-page
-apps; React state; shadow DOM; adding UI), making mods resilient and repairing broken ones, and
-testing. Read BOXED.md too when the mod is boxed. Then `trif new <site> <mod>`, and edit. Pick the least invasive technique that does the job, and the lowest risk tier that gets the user what they want (see "Account safety"); set `@risk`. Saving the file updates the registered script automatically; it applies from the next load, so
+`@sandboxed`, `--rules` and `--sandboxed`, still work.) A style mod needs nothing more than "Style mods:
+start here" above. For a free mod, read TECHNIQUES.md first (next to this file; once per session is
+enough): where mods run, the techniques most robust first (CSS; filtering data before the app sees it;
+DOM tweaks in single-page apps; React state; shadow DOM; adding UI), making mods resilient and repairing
+broken ones, and testing. Read BOXED.md for a boxed mod. Then write the file. Pick the least invasive technique that does the job, and the lowest risk tier that gets the user what they want (see "Account safety"); set `@risk`. Saving the file updates the registered script automatically; it applies from the next load, so
 `trif reload --url <site>`.
 
 ### 4. Verify
 
-- Verify the saved mod after `trif reload`, not something you injected with `trif run` (see
-  "Side-panel runs").
+- `trif verify <site>/<mod> --tab <id>` after each save: it checks the mod (it parses; what TRIF reads
+  in it that would make it wait for the user's OK, with plain ways round; for a boxed mod, what the
+  sandbox wouldn't give it), reloads the tab once the browser has your version, says whether it runs
+  there (or that it's held, or off), and shows its errors and logs. That's the saved mod, not something
+  you injected with `trif run` (see "Side-panel runs").
 - Re-run the sweeps from "Finish the job" on each page type and state, and compare with the counts
   from before.
-- `trif check <site>/<mod>`: it parses, and what TRIF reads in it that would make it wait for the
-  user's OK (rewrite what has a plain way round; tell the user about what's left). For a boxed mod,
-  what the sandbox wouldn't give it (`window`, `document`, `.innerHTML`, ...): rewrite those with the
-  API, since they'd fail when it runs.
-- `trif status`: is the mod registered? (A syntax error or a bad header shows up here; `off` means
-  the user switched it off; HELD means it's waiting for the user's OK.)
-- `trif errors --url <site>` and `trif logs --url <site>`.
 - Check the effect with `trif run`: the hidden thing's count is 0, the thing that should stay is still
   there, your element exists, your hook is installed (`String(window.fetch).includes('...')`).
 - Exercise the page: scroll (`trif run 'scrollTo(0, document.body.scrollHeight)'`), navigate within
@@ -537,7 +584,7 @@ Before you report:
 
 ## Techniques, repairs and testing
 
-In TECHNIQUES.md: read it before writing or repairing a mod (see Workflow, step 3). Boxed mods and their
+In TECHNIQUES.md: read it before writing a free mod or repairing one (see Workflow, step 3). Boxed mods and their
 powers: BOXED.md, when the mod is boxed.
 
 ## Never break the site

@@ -241,10 +241,12 @@ function workspaceLinks(ws, realMods, deniedTarget) {
   return out;
 }
 
-// The TRIF code a run's `trif` needs (helper/, package.json for the version, and the terms' table that
-// `trif explain` reads, extension/explain.json) and the examples (`trif install-example`): not the whole
-// package folder, which in a git checkout holds .git, keys and build output.
-const CODE_ITEMS = ['helper', 'package.json', path.join('extension', 'explain.json'), 'examples'];
+// The TRIF code a run's `trif` needs (helper/, package.json for the version, and the two extension files the
+// helper reads: the terms' table that `trif explain` reads, extension/explain.json, and the page-wide rules
+// sitecombos.js loads at start, extension/pagewide.js) and the examples (`trif install-example`): not the
+// whole package folder, which in a git checkout holds .git, keys and build output. tests/runcode.test.js
+// fails when the helper reads another extension file that isn't here.
+const CODE_ITEMS = ['helper', 'package.json', path.join('extension', 'explain.json'), path.join('extension', 'pagewide.js'), 'examples'];
 function trifCode(root = path.join(__dirname, '..', '..')) {
   return CODE_ITEMS.map((n) => path.join(root, n)).filter((p) => fs.existsSync(p)).map(realOrResolved);
 }

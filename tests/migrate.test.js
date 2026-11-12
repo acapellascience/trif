@@ -362,10 +362,10 @@ test('run limits: the workspace is readable as a whole, the private folder (and 
     assert.ok(lim.denied.includes(path.join(h, 'Library')));
     assert.ok(lim.writable.includes(path.join(priv, 'screenshots', 'x.com')));
     assert.ok(!lim.writable.includes(path.join(priv, 'screenshots', 'y.com')) && !lim.readable.some((p) => p.startsWith(priv)));
-    // TRIF's code: helper/, package.json, the terms' table (trif explain), examples/; not the whole package
-    // folder (a checkout's .git, keys), nor the rest of extension/.
+    // TRIF's code: helper/, package.json, the terms' table (trif explain), the page-wide rules (sitecombos.js),
+    // examples/; not the whole package folder (a checkout's .git, keys), nor the rest of extension/.
     const code = trifCode();
-    assert.deepEqual(code.map((p) => path.relative(fs.realpathSync(REPO), p)).sort(), ['examples', path.join('extension', 'explain.json'), 'helper', 'package.json']);
+    assert.deepEqual(code.map((p) => path.relative(fs.realpathSync(REPO), p)).sort(), ['examples', path.join('extension', 'explain.json'), path.join('extension', 'pagewide.js'), 'helper', 'package.json']);
     for (const c of code) assert.ok(lim.readable.includes(c), c);
     assert.ok(!lim.readable.includes(fs.realpathSync(REPO)));
     // Codex's profile and Claude Code's sandbox say the same.

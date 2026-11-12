@@ -1,7 +1,7 @@
 # Sensitive sites, each a site of its own: the new strings (branch sensitive)
 
 Every user- and agent-facing string this branch adds, exact. Tim's own words (2026-11-11) and the ones he
-approved are marked **approved**; every other one is **awaiting Tim's OK**.
+approved are marked **approved**; he approved the rest on 2026-11-11, so every one is.
 
 ## How it works (decisions to check)
 
@@ -41,17 +41,17 @@ approved are marked **approved**; every other one is **awaiting Tim's OK**.
 |---|---|---|
 | The Off note (first line of the chat), sensitive site | `Your agent can’t see {host} (it’s {why}): it can only write mods from what you describe. Change it below.` | **approved** |
 | The Off note, a site with no `why` on the list | `Your agent can’t see {host} (it’s on your list of sensitive sites): it can only write mods from what you describe. Change it below.` | **approved** (the fallback `why` is today's) |
-| The Off note, a site the user set to Off | `Your agent can’t see {host} (you set it to Off): it can only write mods from what you describe. Change it below.` | awaiting Tim's OK |
+| The Off note, a site the user set to Off | `Your agent can’t see {host} (you set it to Off): it can only write mods from what you describe. Change it below.` | **approved** |
 | The agent level on the chat line, Off (always in words) | `Agent: Off` (then the ⌄) | **approved** |
 | The mods box's folded line | `{N} more for other {site} pages` | **approved** |
 | The upgrade's notice, one row per host | `{host} is {why}: TRIF now keeps it apart from {parent}, as its own site.` | **approved** |
 | Its buttons | `Keep TRIF on there` · `Block it` | **approved** |
-| Its buttons while working | `Keeping…` · `Blocking…` | awaiting Tim's OK |
-| The code card's ⋯ menu, a parent's mod | `Copy to {host}` | awaiting Tim's OK |
-| The code card after it | `Copied to {host}/{name}: it’s off there until you switch it on.` | awaiting Tim's OK |
-| The code card, if it fails | `Couldn’t copy it: {error}` | awaiting Tim's OK |
-| Under a row, when all-sites mods reached the host | `Mods for all sites don’t run there any more.` | awaiting Tim's OK |
-| The notice, a host with no `why` on the list | `{host} is on your list of sensitive sites: TRIF now keeps it apart from {parent}, as its own site.` | awaiting Tim's OK |
+| Its buttons while working | `Keeping…` · `Blocking…` | **approved** |
+| The code card's ⋯ menu, a parent's mod | `Copy to {host}` | **approved** |
+| The code card after it | `Copied to {host}/{name}: it’s off there until you switch it on.` | **approved** |
+| The code card, if it fails | `Couldn’t copy it: {error}` | **approved** |
+| Under a row, when all-sites mods reached the host | `Mods for all sites don’t run there any more.` | **approved** |
+| The notice, a host with no `why` on the list | `{host} is on your list of sensitive sites: TRIF now keeps it apart from {parent}, as its own site.` | **approved** |
 
 The blocked and disconnected screens, Unblock, Fix, Connect and Disconnect are today's strings, with the
 host in them (`The robot is blocked on mail.google.com`).
@@ -60,12 +60,12 @@ host in them (`The robot is blocked on mail.google.com`).
 
 | Where | String | |
 |---|---|---|
-| A free mod held on an Off site (`trif status`, the panel's hold) | `is a free mod, and "Agent on this site" is Off for {site}: there your agent may only make style mods and boxed mods` | awaiting Tim's OK |
-| A side-panel run's context, Off | ` "Agent on this site" is Off here (the user's setting): you can't read, screenshot or run code on its tabs, and you may only write style mods (`trif new <site> <mod> --style`) and boxed mods (`--boxed`) for it, from what the user describes: a free mod you write here waits for the user, refused. If what they ask needs a free mod, say so and stop (they can change "Agent on this site" in the side panel, or add the mod themselves). Don't try trif text, trif screenshot or trif run here.` | awaiting Tim's OK |
-| `trif delete`/`restore` from a run, a mod of another site's folder | `this chat can only {delete|restore} mods of {scope}; {id} is another site's. Ask the user to do it from the side panel there or their terminal.` | awaiting Tim's OK |
-| Code a run sends meeting a site of its own (lib.js pageGuard) | `the tab went to {host} before TRIF reached it, which is a site of its own, and this agent run is limited to {scope}` (from a terminal: `…which is a site of its own, and TRIF is off there`) | awaiting Tim's OK |
-| `trif status`, the sensitive sites TRIF blocked (counted, not listed) | `sensitive     {N} sensitive sites (email, banking, passwords, chats) blocked in TRIF until the user unblocks them, each a site of its own (`trif status --json`: sensitiveBlocked)` | awaiting Tim's OK |
-| AGENTS.md | "Sensitive sites" under "Sites TRIF is on for", and the Off line under "Agent on this site" | awaiting Tim's OK |
+| A free mod held on an Off site (`trif status`, the panel's hold) | `is a free mod, and "Agent on this site" is Off for {site}: there your agent may only make style mods and boxed mods` | **approved** |
+| A side-panel run's context, Off | ` "Agent on this site" is Off here (the user's setting): you can't read, screenshot or run code on its tabs, and you may only write style mods (`trif new <site> <mod> --style`) and boxed mods (`--boxed`) for it, from what the user describes: a free mod you write here waits for the user, refused. If what they ask needs a free mod, say so and stop (they can change "Agent on this site" in the side panel, or add the mod themselves). Don't try trif text, trif screenshot or trif run here.` | **approved** |
+| `trif delete`/`restore` from a run, a mod of another site's folder | `this chat can only {delete|restore} mods of {scope}; {id} is another site's. Ask the user to do it from the side panel there or their terminal.` | **approved** |
+| Code a run sends meeting a site of its own (lib.js pageGuard) | `the tab went to {host} before TRIF reached it, which is a site of its own, and this agent run is limited to {scope}` (from a terminal: `…which is a site of its own, and TRIF is off there`) | **approved** |
+| `trif status`, the sensitive sites TRIF blocked (counted, not listed) | `sensitive     {N} sensitive sites (email, banking, passwords, chats) blocked in TRIF until the user unblocks them, each a site of its own (`trif status --json`: sensitiveBlocked)` | **approved** |
+| AGENTS.md | "Sensitive sites" under "Sites TRIF is on for", and the Off line under "Agent on this site" | **approved** |
 
 ## Logs (the helper's and the extension's)
 

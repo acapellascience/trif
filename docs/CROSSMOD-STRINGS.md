@@ -1,6 +1,6 @@
 # Site approval and the sandbox fixes: new and changed strings (branch crossmod)
 
-**Awaiting Tim's OK, but for the site box (approved: "Site approval").** Every user-facing sentence branch crossmod adds or changes: the approval card, the
+**Approved by Tim, 2026-11-11: all of it (the site box first, "Site approval"; then the rest).** Every user-facing sentence branch crossmod adds or changes: the approval card, the
 mod row's review, `trif status`, the errors a boxed mod (and so the agent writing it) sees in `trif errors`,
 `trif check`, and the agents' guidance. Errors read "TRIF sandbox: …". `{…}` is a value filled in. Bold is new.
 
@@ -28,7 +28,7 @@ row), after the mod's own powers and warnings, in the red box's colours; each li
   see: {items}"**, **"it could end up in: {items}"**, then the flag lines; items separated by " · ", each followed by
   **" (new)"** when the mod adds it.
 
-Awaiting Tim's OK (the rest of this section):
+Approved by Tim, 2026-11-11 (the rest of this section):
 
 - The card's note for a mod held because it was switched on: **"You switched it on, and it adds to what this site's
   boxed mods can do together."** (then the existing "Updates that ask for the same powers won't ask again.")

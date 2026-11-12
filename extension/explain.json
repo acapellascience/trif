@@ -62,7 +62,7 @@
       "line": "Do only what you've allowed.",
       "explanation": "Do only what you've allowed. They run in TRIF's sandbox and change what the page shows; on their own they can't send, load, click or read what you type. One that needs more asks for named powers and gets only those. In Safari, which has no sandbox, a boxed mod runs as a free mod after your OK.",
       "agent_notes": [
-        "`// @boxed` (old `@sandboxed`); `trif new <site> <mod> --boxed`. JavaScript in an SES compartment in TRIF's user-script world; elements are frozen stand-ins; the API is TECHNIQUES.md \"Boxed mods\".",
+        "`// @boxed` (old `@sandboxed`); `trif new <site> <mod> --boxed`. JavaScript in an SES compartment in TRIF's user-script world; elements are frozen stand-ins; the API is in BOXED.md.",
         "Not there: `window`, `document`, `fetch`/XHR/WebSocket, storage, `postMessage`, `eval`/`Function`, event constructors. `trif check` lints each (\"not there in a boxed mod…\", with tips). Source containing `import(` or an HTML comment marker is refused, even inside a string or comment.",
         "Names it sets must be its own (`trif-box-` ids and classes, `data-trif-box-*`); links and images only take addresses the page already has; it can't write into the page's forms or editors (that's write-drafts).",
         "No powers: never waits for the user's OK. With `// @powers …`: held once for that set; an update with the same set runs, one that adds a power waits for it.",

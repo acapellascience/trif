@@ -35,6 +35,9 @@ const PERSISTENT_HOST = !!chrome.runtime.getURL?.('')?.startsWith('safari-web-ex
 // out here from this background's own URL, as above).
 const SITE_ACCESS = !chrome.runtime.getURL?.('')?.startsWith('safari-web-extension:');
 const LOAD_TIMEOUT = 30000;
+// When a chat's last step read this many tokens, the chat suggests a new one (see onAgentEvent 'done')
+const LONG_CHAT_TOKENS = Number.isFinite(globalThis.__trifLongChatTokens) ? globalThis.__trifLongChatTokens : 90000;
+const LONG_CHAT_TEXT = 'This chat is getting long, which makes the agent less sharp. A new chat starts fresh; your mods stay as they are.';
 const NOT_CONNECTED = `The TRIF helper isn't connected. Run \`${SETUP_COMMAND}\` in a terminal (needs Node 18+), then restart ${BROWSER}.`;
 
 const state = {
@@ -2691,6 +2694,12 @@ async function onAgentEvent(runId, event, relay = true) {
         }
         for (const h of Array.isArray(event.held) ? event.held : []) {
           push('error', `${h.id} is on hold: TRIF found that it ${(Array.isArray(h.facts) && h.facts.length ? h.facts : [h.reason]).join('; it ')}. It won't run until you allow it.`);
+        }
+        // A long chat dilutes the user's latest words (Tim, 2026-11-12: the agent seemed less sharp; its steps
+        // carried ~100k tokens by then): suggest a new chat, once per chat. Mods are files, so nothing is lost.
+        if (Number.isFinite(event.contextTokens) && event.contextTokens >= LONG_CHAT_TOKENS && !chat.longNoted) {
+          chat.longNoted = true;
+          chat.messages.push({ role: 'mod', text: LONG_CHAT_TEXT, newChatHint: true, time });
         }
         chat.last = {
           runId, ok: !!event.ok, time,

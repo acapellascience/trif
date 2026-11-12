@@ -1009,7 +1009,7 @@ class Runs {
     const d = run.agentDone;
     let done;
     if (d) {
-      done = { kind: 'done', ok: !!d.ok && !run.stopped && !run.timedOut, result: d.result ?? null, costUsd: d.costUsd ?? null, changedFiles, sessionId: (d.discardSession ? run.sessionId : d.sessionId || run.lastSessionId) || null };
+      done = { kind: 'done', ok: !!d.ok && !run.stopped && !run.timedOut, result: d.result ?? null, costUsd: d.costUsd ?? null, changedFiles, ...(Number.isFinite(d.contextTokens) ? { contextTokens: d.contextTokens } : {}), sessionId: (d.discardSession ? run.sessionId : d.sessionId || run.lastSessionId) || null };
     } else {
       if (!run.stopped && !run.timedOut && run.child) {
         const tail = run.stderr.trim().split('\n').slice(-12).join('\n').slice(-2000);

@@ -452,6 +452,9 @@ test('setup: workspace, wrappers, manifest, link; idempotent; leaves sites alone
   // the how-to half, beside it (read on demand, not pulled into every message by CLAUDE.md)
   assert.ok(fs.existsSync(path.join(ws, 'TECHNIQUES.md')));
   assert.doesNotMatch(fs.readFileSync(path.join(ws, 'CLAUDE.md'), 'utf8'), /TECHNIQUES/);
+  // boxed mods and their powers: their own file, read only when writing one
+  assert.ok(fs.existsSync(path.join(ws, 'BOXED.md')));
+  assert.doesNotMatch(fs.readFileSync(path.join(ws, 'CLAUDE.md'), 'utf8'), /BOXED/);
 
   const hostWrapper = path.join(ws, 'bin', 'trif-host');
   const host = fs.readFileSync(hostWrapper, 'utf8');

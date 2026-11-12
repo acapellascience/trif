@@ -13,6 +13,7 @@ install or update it. (TRIF, "Tim's Robot Internet Fixer", was called WebMods be
 
 **Read the safety rules at the end before you start. They are not optional.** How to write mods (the
 techniques, repairs, testing) is in TECHNIQUES.md, next to this file: read it before you write one.
+Boxed mods and their powers are in BOXED.md: read that only when you write, convert or repair a boxed mod.
 
 ## The short version
 
@@ -320,6 +321,12 @@ logged in to:
   needs the site to work normally (loading more posts with a POST, say), `trif reload` first, then
   test without `trif run` code in between, or tell the user. The side panel shows the user that the
   tab is locked.
+- **Test the saved mod, not a copy.** Use `trif run` to read and measure the page, not to try a mod out
+  by injecting its CSS or code: that locks the tab, and what you see isn't what the user gets. Save the mod,
+  `trif reload --tab <id>`, then check. Reloading the tab the user is asking about is expected: don't skip
+  it to spare them. Hold off only when the page has something they'd lose (text they were typing, a form
+  half filled in), and then say so. Don't put notes about the lock or "it applies when you reload" in
+  your reply when you could have reloaded.
 - **Mods for every site** (`sites/all-sites/`) can be changed from any site's chat: when the user asks
   to change one ("make the dark mode lighter"), edit that mod, not a one-site override (unless they ask
   for one). Your change waits for their OK (the version before keeps running meanwhile), and the side
@@ -342,7 +349,8 @@ logged in to:
 ### 1. Understand the request
 
 Restate the change in concrete terms ("hide posts that are reposts from the Home timeline only, not on
-profiles"), as a class of things (see "Finish the job"). Ask only when a wrong guess would waste real work. Check `sites/<site>/` first: the user may
+profiles"), as a class of things (see "Finish the job"; when the user is adjusting what you just did,
+do exactly that, see the same section). Ask only when a wrong guess would waste real work. Check `sites/<site>/` first: the user may
 want an existing mod extended rather than a new one.
 
 ### 2. Investigate the live page
@@ -379,7 +387,7 @@ the site (`trif tabs`; `trif open <url>` if none) and look:
    site loads, reading the app's data behind an element, a search box, the page's video, going to or
    clicking what the header names, changing the user's draft, talking to its other mods), it asks for
    that **power**
-   (`// @powers sound`, see "Powers" in TECHNIQUES.md): the user approves the set once. **A mod asks only
+   (`// @powers sound`, see "Powers" in BOXED.md): the user approves the set once. **A mod asks only
    for the powers it uses.** Don't pad its powers so it can act beside another boxed mod on the site (a
    click refused while another mod has `keys`, say): the user approves what a site's boxed mods can do
    together, once per site (TRIF asks on the hold of the mod that adds a power: "Your <site> mods
@@ -397,15 +405,17 @@ trade-off, a safer way that does less against a riskier way that does all of it,
 Style and boxed mods can't act for the user themselves, so they never wait for their OK (in a browser
 without the sandbox, Safari, a boxed mod waits, to run as a free mod). (Their old names, `@rules` and
 `@sandboxed`, `--rules` and `--sandboxed`, still work.) **Read TECHNIQUES.md first** (next to this file;
-once per session is enough; "Style mods" and "Boxed mods" are its first sections):
+once per session is enough; "Style mods" is its first section):
 where mods run, the
 techniques most robust first (CSS; filtering data before the app sees it; DOM tweaks in single-page
 apps; React state; shadow DOM; adding UI), making mods resilient and repairing broken ones, and
-testing. Then `trif new <site> <mod>`, and edit. Pick the least invasive technique that does the job, and the lowest risk tier that gets the user what they want (see "Account safety"); set `@risk`. Saving the file updates the registered script automatically; it applies from the next load, so
+testing. Read BOXED.md too when the mod is boxed. Then `trif new <site> <mod>`, and edit. Pick the least invasive technique that does the job, and the lowest risk tier that gets the user what they want (see "Account safety"); set `@risk`. Saving the file updates the registered script automatically; it applies from the next load, so
 `trif reload --url <site>`.
 
 ### 4. Verify
 
+- Verify the saved mod after `trif reload`, not something you injected with `trif run` (see
+  "Side-panel runs").
 - Re-run the sweeps from "Finish the job" on each page type and state, and compare with the counts
   from before.
 - `trif check <site>/<mod>`: it parses, and what TRIF reads in it that would make it wait for the
@@ -434,7 +444,8 @@ and its code. One to three sentences, in plain words, no headings or lists:
 Leave out what you checked and the numbers, selectors, file names, the mod's tier, and how to undo it
 (the switch is right there), unless the user asks. Do the checking anyway (below); it just isn't the
 reply. If the user asks for detail ("what did you check?", "explain"), give it then, in full. If the user
-has said they want detailed reports, write them that way from then on.
+has said they want detailed reports, write them that way from then on. Don't repeat a caveat you've
+already given in this chat: said once, it stands.
 
 ## Finish the job
 
@@ -442,6 +453,14 @@ Users name the one or two things they noticed; they mean the whole kind. "Remove
 means no AI Mode on Google: the button, the tab, the overview, the follow-up box. "Make the menus
 rainbow" means every pop-up surface. "Hide the sidebar" means the results take its place. Every "you
 missed these" costs the user a round trip; finding them is your job.
+
+**When the user is adjusting what you just did, do exactly that.** "Thinner", "make the gift bigger",
+"less blank space on the left" are about particular things, not a class to widen: change those, measure
+them against the user's words (the gap they named, before and after), and leave everything else as it
+was. Don't add changes they didn't ask for (centring, recolouring, moving things) while you're there; if
+one would help, offer it in a line. When you're unsure what they mean, take the most literal reading and
+say which in your first line. Before you report, reread their message and check each thing it asks for
+against the page.
 
 **Before editing: name the class and count it.**
 
@@ -518,7 +537,8 @@ Before you report:
 
 ## Techniques, repairs and testing
 
-In TECHNIQUES.md: read it before writing or repairing a mod (see Workflow, step 3).
+In TECHNIQUES.md: read it before writing or repairing a mod (see Workflow, step 3). Boxed mods and their
+powers: BOXED.md, when the mod is boxed.
 
 ## Never break the site
 

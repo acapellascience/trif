@@ -34,7 +34,7 @@ const DENIED_TOOLS = ['WebFetch', 'WebSearch'];
 // The workspace's files that steer TRIF (or the agents): never written by a run's commands. (.shipped
 // holds the versions of shipped mods a merge run reads: readable, never written.)
 const STATE_FILES = ['held.json', 'preinstalled.json', 'origins.json', 'active-runs', 'trash', 'update.json', 'instructions.md',
-  'AGENTS.md', 'TECHNIQUES.md', 'CLAUDE.md', '.claude', 'bin', 'app', '.shipped'];
+  'AGENTS.md', 'TECHNIQUES.md', 'BOXED.md', 'CLAUDE.md', '.claude', 'bin', 'app', '.shipped'];
 /** Rules like Read(./config.json) made absolute to the workspace (see runSettings `rel`). */
 function absoluteRules(rules, workspace) {
   if (!workspace) return rules;
@@ -227,6 +227,12 @@ const adapter = {
     } else if (state.replaying) {
       // (replayed messages: see compact_boundary)
     } else if (msg.type === 'assistant' && msg.message && Array.isArray(msg.message.content)) {
+      // How much the conversation weighs now: what this step read (the panel suggests a new chat when it's long)
+      const u = msg.message.usage;
+      if (u && typeof u === 'object') {
+        const n = [u.input_tokens, u.cache_read_input_tokens, u.cache_creation_input_tokens].reduce((a, b) => a + (Number.isFinite(b) ? b : 0), 0);
+        if (n > 0) state.contextTokens = n;
+      }
       for (const c of msg.message.content) {
         if (!c || typeof c !== 'object') continue;
         if (c.type === 'text' && typeof c.text === 'string' && c.text.trim()) {
@@ -256,6 +262,7 @@ const adapter = {
         ok,
         result: text || null,
         costUsd: typeof msg.total_cost_usd === 'number' ? msg.total_cost_usd : null,
+        ...(state.contextTokens ? { contextTokens: state.contextTokens } : {}),
         sessionId: msg.session_id || null,
         // A logged-out run's session holds nothing but the message and the error: keep resuming the
         // previous one (runs.js handles this), so the message sent again after logging in isn't there twice.

@@ -31,7 +31,7 @@ export const SES_SHA256 = '2ac48b2cda4e2e466a49a4acc7aab0288567e0c10ce96c0970ef1
 // 'unsafe-eval' (the compartment itself has no eval or Function); nothing may connect anywhere; loads only
 // from data:/blob: (and images from the page's own site, which TRIF's address check narrows further).
 export const SANDBOX_CSP = "default-src 'none'; script-src 'self' 'unsafe-eval'; connect-src 'none'; img-src 'self' data: blob:; style-src 'unsafe-inline'; font-src data:; media-src data: blob:; worker-src 'none'; frame-src 'none'; object-src 'none'; form-action 'none'; base-uri 'none'";
-// The names a sandboxed mod has besides the language (the API: docs/SAFE-MODS.md, TECHNIQUES.md).
+// The names a sandboxed mod has besides the language (the API: docs/SAFE-MODS.md, BOXED.md).
 export const SANDBOX_GLOBALS = ['page', 'trif', 'console', 'setTimeout', 'clearTimeout', 'setInterval', 'clearInterval', 'requestAnimationFrame', 'cancelAnimationFrame', 'Math', 'Date'];
 // And, in TRIF's world, the language's and the browser's pure tools (frozen): sandboxRuntime's EXTRA.
 export const SANDBOX_EXTRA_GLOBALS = ['Float32Array', 'Float64Array', 'URL', 'URLSearchParams', 'Intl', 'TextEncoder', 'TextDecoder', 'structuredClone', 'atob', 'btoa', 'performance'];

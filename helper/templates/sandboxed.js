@@ -12,7 +12,7 @@
 // the timers, Math, Date) and the JavaScript language: no window, document, fetch or storage. It changes
 // what the page shows, and can't send, load or click anything itself, so it never waits for the user's OK.
 // Elements are TRIF's stand-ins: find/findAll, text/setText, attr/setAttr, classes, style(prop, value),
-// hide/show, append/before/after/remove, on(type, fn), rect(), clone(). See "Boxed mods" in TECHNIQUES.md.
+// hide/show, append/before/after/remove, on(type, fn), rect(), clone(). See BOXED.md.
 // `trif check` lists anything in it the sandbox wouldn't give it; `trif errors` shows what it threw.
 
 // CSS that loads nothing (no url() other than data:)

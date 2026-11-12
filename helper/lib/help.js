@@ -368,7 +368,7 @@ the header plus helpers for injecting CSS and handling elements that appear late
 mod: CSS, things to hide, text to replace and items to filter, as data that TRIF's own code runs, so it
 never waits for the user's OK (see "Style mods" in TECHNIQUES.md). --boxed makes a boxed mod: JavaScript
 that runs in TRIF's sandbox with only TRIF's API (page, trif, element stand-ins, timers), so it never waits
-for the user's OK either (see "Boxed mods" in TECHNIQUES.md). Without either, a free mod: JavaScript in the
+for the user's OK either (see BOXED.md). Without either, a free mod: JavaScript in the
 page with everything it has. Write the lowest that does the job: style, then boxed, then free. (--rules
 and --sandboxed are the old names of --style and --boxed, and still work.)`,
     examples: ['trif new example.com hide-banner --style', 'trif new example.com bouncing-logo --boxed', 'trif new example.com hide-banner'],

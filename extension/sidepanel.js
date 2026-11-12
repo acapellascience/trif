@@ -559,6 +559,8 @@ function messageNode(m) {
     });
     li.append(' ', undo);
   }
+  // "This chat is getting long…" (background.js, once per chat): New chat, as the header's button does
+  if (m.newChatHint) li.append(' ', button('New chat', '', () => newChat()));
   // A mod that broke (background.js announceBreak): Fix it / Show error / Ignore; a fix's own new error: Undo
   // fix first; once fixed: Undo fix
   if (m.kind === 'modError') breakCard(li, m);

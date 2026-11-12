@@ -39,7 +39,7 @@ const { lockPath, readLock, pidAlive } = require('./lock');
 const { envVar } = require('./env');
 
 // Rewritten by every setup: not worth keeping a second copy of.
-const SETUP_OWNED = new Set(['AGENTS.md', 'TECHNIQUES.md', 'CLAUDE.md', '.claude', 'bin', 'app']);
+const SETUP_OWNED = new Set(['AGENTS.md', 'TECHNIQUES.md', 'BOXED.md', 'CLAUDE.md', '.claude', 'bin', 'app']);
 // A marker in T: this workspace came from ~/.webmods, so the link matters (doctor warns if it goes).
 const MARKER = '.moved-from-webmods';
 

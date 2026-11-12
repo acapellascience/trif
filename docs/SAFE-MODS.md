@@ -178,7 +178,7 @@ a WeakMap), with allowlisted operations. The TRIF API: `trif.css`, `trif.hide`, 
 `trif.text` (one MutationObserver for every mod in the world), `trif.settings(key, defaults)` (per mod and
 per site, in the extension's storage, not the site's), `trif.log/warn/error`. Errors are caught (top level,
 callbacks, after an await) and kept in the world for `trif errors` / `trif logs`, which read them with
-`userScripts.execute`. The API in full: TECHNIQUES.md "Boxed mods".
+`userScripts.execute`. The API in full: BOXED.md (helper/workspace).
 
 **The guards, as built** (each tried by the hostile e2e, below):
 - network: no fetch/XHR/WebSocket/EventSource/beacon/Worker in the compartment; the world's CSP; images only

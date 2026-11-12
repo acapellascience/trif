@@ -1378,6 +1378,7 @@ test('background: agent.start becomes a native request; agentEvents reach panels
     assert.strictEqual(chat.agent, 'claude');
     assert.strictEqual(chat.run, null);
     assert.deepStrictEqual([chat.last.ok, chat.last.changedFiles, chat.last.costUsd], [true, ['sites/x.com/hide-reposts.js'], 0.12]);
+    assert.ok(!chat.messages.some((m) => m.newChatHint), 'a short chat has no "getting long" line');
 
     // the next message resumes the session
     const second = panel.ask({ type: 'agent.start', site: 'x.com', tabId: 12, url: 'https://x.com/home', prompt: 'also likes', sessionId: 's-1', agent: 'claude' });
@@ -1392,6 +1393,18 @@ test('background: agent.start becomes a native request; agentEvents reach panels
     bg.native.emit({ type: 'agentEvent', runId: 'r2', event: { kind: 'done', ok: false, result: '', changedFiles: [] } });
     await settle(20);
     assert.deepStrictEqual(bg.store['chat:x.com'].messages.slice(-2).map((m) => [m.role, m.text]), [['user', 'also likes'], ['tool', 'stopped']]);
+
+    // a run whose last step read 90k tokens or more: the chat suggests a new one, once per chat
+    for (const [runId, contextTokens] of [['r3', 120000], ['r4', 130000]]) {
+      const p = panel.ask({ type: 'agent.start', site: 'x.com', tabId: 12, url: 'https://x.com/home', prompt: `more ${runId}`, sessionId: 's-1', agent: 'claude' });
+      await answerNative(bg.native, 'agent.start', { runId });
+      await p;
+      bg.native.emit({ type: 'agentEvent', runId, event: { kind: 'done', ok: true, result: 'ok', changedFiles: [], sessionId: 's-1', contextTokens } });
+      await settle(20);
+    }
+    const hints = bg.store['chat:x.com'].messages.filter((m) => m.newChatHint);
+    assert.strictEqual(hints.length, 1);
+    assert.match(hints[0].text, /getting long/);
   } finally { bg.restore(); }
 });
 

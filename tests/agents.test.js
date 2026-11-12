@@ -275,6 +275,12 @@ test('claude adapter: parses init, text, tools, result; maps "Not logged in"', (
     { kind: 'tool', name: 'Read', summary: '/elsewhere/x' },
     { kind: 'done', ok: true, result: 'ok!', costUsd: 0.5, sessionId: 'abc' },
   ]);
+  // the last step's size (what it read: new + cached), for the panel's "this chat is getting long"
+  ev.length = 0;
+  claude.parse(JSON.stringify({ type: 'assistant', message: { usage: { input_tokens: 10, cache_read_input_tokens: 90000, cache_creation_input_tokens: 500 }, content: [{ type: 'text', text: 'a' }] } }), emit, st);
+  claude.parse(JSON.stringify({ type: 'assistant', message: { usage: { input_tokens: 4, cache_read_input_tokens: 95000, cache_creation_input_tokens: 0 }, content: [{ type: 'text', text: 'b' }] } }), emit, st);
+  claude.parse(JSON.stringify({ type: 'result', is_error: false, subtype: 'success', result: 'b', session_id: 'abc' }), emit, st);
+  assert.deepEqual(ev.at(-1), { kind: 'done', ok: true, result: 'b', costUsd: null, contextTokens: 95004, sessionId: 'abc' });
   ev.length = 0;
   claude.parse(JSON.stringify({ type: 'result', is_error: true, result: 'Not logged in · Please run /login', session_id: 's' }), emit, st);
   assert.deepEqual(ev[0], { kind: 'error', reason: 'login', message: 'Claude Code needs you to log in again.' });

@@ -483,8 +483,11 @@ function setup(opts = {}) {
   tell(`✓ TRIF ${P.VERSION} ${mode === 'copy' ? 'installed' : `linked to ${root}`} in ${homeRelative(home)}`);
 
   // (TECHNIQUES.md beside it: the how-to half, read on demand, so every message doesn't carry it)
-  const techSrc = path.join(helperDir, 'workspace', 'TECHNIQUES.md');
-  if (fs.existsSync(techSrc)) fs.copyFileSync(techSrc, path.join(home, 'TECHNIQUES.md'));
+  // (and BOXED.md: boxed mods and their powers, read only when writing one)
+  for (const doc of ['TECHNIQUES.md', 'BOXED.md']) {
+    const src = path.join(helperDir, 'workspace', doc);
+    if (fs.existsSync(src)) fs.copyFileSync(src, path.join(home, doc));
+  }
   const agentsSrc = path.join(helperDir, 'workspace', 'AGENTS.md');
   if (fs.existsSync(agentsSrc)) {
     fs.copyFileSync(agentsSrc, path.join(home, 'AGENTS.md'));

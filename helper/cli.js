@@ -499,7 +499,7 @@ const handlers = {
       }
       if (!lint.length) return out('TRIF finds nothing in it that the sandbox would refuse.');
       const lines = code.split('\n');
-      out('\nThe sandbox doesn\'t give it these, so they\'d fail when it runs (not a hold: rewrite them with the API, see "Boxed mods" in TECHNIQUES.md, or make it a free mod if it really needs them):');
+      out('\nThe sandbox doesn\'t give it these, so they\'d fail when it runs (not a hold: rewrite them with the API, see BOXED.md, or make it a free mod if it really needs them):');
       for (const l of lint) {
         out(`- ${l.what}: ${l.why}`);
         for (const n of l.lines.slice(0, 3)) out(`    line ${n}: ${lines[n - 1].trim().slice(0, 140)}`);

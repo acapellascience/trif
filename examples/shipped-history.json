@@ -190,7 +190,8 @@
     "a7bc83145c08170a0a50db626b73cbefb9c1a44a",
     "bfbad3756bd3050a1e12024189c17c1fceeb91d2",
     "19bad7d6c3785da6042ca2e011f1a046b7e5a2f6",
-    "d769bc581c8c2c0c148cd348aa91c13b040d0efc"
+    "d769bc581c8c2c0c148cd348aa91c13b040d0efc",
+    "7ac1773cb26a55d41668552e7db512ae8027cea1"
   ],
   "x.com/follow-status": [
     "ff41bd36d6f1e1aef7b131fffd63490809d7918f",
@@ -215,13 +216,15 @@
     "103eace565e33b2b8d7a43b7d50c3ff188b6a3f5",
     "608a883e3c78b9a826f52f05c2266fa33d96c6a7",
     "4eb98245bd1c37d7179f17540b4f544ac0bc5c5f",
-    "8e7ac5f7fe175f0b8984a713142bdaf78ee31501"
+    "8e7ac5f7fe175f0b8984a713142bdaf78ee31501",
+    "7a9b1f14807ea46215c745b0d8c536d02c59357b"
   ],
   "x.com/profile-styler": [
     "fd77a07b99aae4c0c89c8ddcf3aaef4ea2d85000",
     "1f76bb623430dade2fded8b82fd656b202f2f703",
     "704c0b39f2c3b1fffc912f81280857ad796e5c54",
-    "cbd585ed083b11f9e0ce4d51ac486f5a3dfae20c"
+    "cbd585ed083b11f9e0ce4d51ac486f5a3dfae20c",
+    "ba47beab2219dba5b147e25657a24ba3be49e245"
   ],
   "x.com/punk-fonts": [
     "6b07d068f0f3632933133a3b8fb8d6657778160b",
@@ -247,6 +250,10 @@
     "6d33d08d5afa168fb9f13d9a8211ab3fdfb30a1d"
   ],
   "x.com/style-encoder": [
-    "8018433dae970b77e838dc0abffb71a5437cc7f8"
+    "8018433dae970b77e838dc0abffb71a5437cc7f8",
+    "1f761463e29fdeffe0acb9f8b825b1156a7b60fd"
+  ],
+  "x.com/tune-composer": [
+    "5aae8598372228900533598307cbcc139fcbebab"
   ]
 }

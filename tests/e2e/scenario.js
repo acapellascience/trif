@@ -1303,7 +1303,7 @@ class Scenario {
       await r.check('a boxed mod as a free mod (how a browser without the sandbox runs one the user allowed): the same API works in the page\'s world', () => this.sandboxPageFormCheck(win));
       await r.check('powers (docs/POWERS.md): a boxed mod with powers waits for the user\'s OK for its set (panel and trif status say what it asks for); allowed, sound, controls, read-drafts and keys work and stay narrow; undeclared, each is refused; a new version with the same powers runs, one with a new power waits for that one', () => this.powersCheck(win));
       await r.check('"Agent on this site": Ask asks in the panel (Just this once runs the code), Look refuses code, Off refuses reading too, a sensitive site is off with its line, Settings lists them', () => this.agentSitesCheck(win));
-      await r.check('sensitive sites (lib.js "sensitive sites"): a sensitive subdomain (mail.x.com, on the user\'s list) is a site of its own, blocked from the start (the red screen; agents refused); Unblock lands on off, Fix turns it on with none of x.com\'s mods, the Off note, no suggestions, "Agent: Off"; hosts x.com\'s mods reach are asked about once (Keep TRIF on there copies them into their own folder and turns it on; Block it blocks); the mods box folds the mods for other pages into "N more for other x.com pages" and grows while the chat is empty', () => this.sensitiveCheck(win));
+      await r.check('sensitive sites (lib.js "sensitive sites"): a sensitive subdomain (mail.x.com, on the user\'s list) is a site of its own, blocked from the start (the red screen; agents refused); Unblock lands on off, Fix turns it on with none of x.com\'s mods, the Off note, no suggestions, "Agent: Off"; hosts x.com\'s mods reach are asked about once (Keep TRIF on there copies them into their own folder and turns it on; Block it blocks); the mods box folds the mods for other pages into "N more for other x.com pages" and grows while the chat is empty; the boxed mods of a site of its own are approved as that site ("Your inbox.x.com mods can:" on its card), apart from x.com\'s', () => this.sensitiveCheck(win));
       await r.check('sharing: a .js dropped on the panel is imported (its site from @match, its shipped markers gone) and held like any mod from outside, "imported from a file"; dropped again, Add as a copy; Replace keeps the old one, which History shows, views, diffs and restores; Export copies it to Downloads and shows it; another file dropped goes to the site\'s files with a note, listed, never a mod', () => this.shareCheck(win));
       await r.check('the code card: a mod\'s </> and its file name open its code (a style mod: its rules), with line numbers; Copy copies it; Show in Finder and Open in editor ask the helper, which reveals the mod\'s own file (a stand-in for open here); Esc closes it', () => this.codeViewCheck(win));
       await r.check('a short panel (400px): Settings, the code card and History, the approval card and the agent\'s menu each scroll to their last item', () => this.shortPanelCheck(win));
@@ -3664,6 +3664,7 @@ process.exitCode = 1;
     }`);
     const wide = path.join(this.trif, 'sites', 'x.com', 'e2e-sens-wide.js');
     const elsewhere = path.join(this.trif, 'sites', 'x.com', 'e2e-sens-elsewhere.js');
+    const xKeys = path.join(this.trif, 'sites', 'x.com', 'e2e-sens-xkeys.js');
     const problems = [];
     const done = [];
     try {
@@ -3734,6 +3735,32 @@ process.exitCode = 1;
       const inbox = await waitFor('inbox.x.com\'s panel', async () => { const v = await view(); return v.site === 'inbox.x.com' && !v.gate && v.mods ? v : null; }, { timeoutMs: 15000 });
       if (JSON.stringify(inbox.mods) !== '["inbox.x.com/e2e-sens-wide"]') problems.push(`inbox.x.com's mods: ${inbox.mods}`);
       done.push(`the notice (${rows.length} rows); Keep TRIF on there: ${copy.id} on; Block it: post.x.com blocked`);
+      // 3b. site approval on a site of its own (helper/lib/sitecombos.js): inbox.x.com's boxed mods are its own
+      // site's, never x.com's. x.com's keys mod (approved) beside inbox.x.com's click mod makes no site question;
+      // inbox.x.com's own keys mod does, its card (on inbox.x.com's panel) saying "Your inbox.x.com mods can:"
+      const sStatus = async () => (await this.cli(['status'], { timeoutMs: 20000 })).stdout;
+      const sAfter = (st, id) => { const ls = st.split('\n'); const i = ls.findIndex((l) => new RegExp(`${id.split('/').pop()}\\s`).test(l)); const out = []; for (let k = i + 1; k > 0 && k < ls.length && /^\s{40,}/.test(ls[k]); k++) out.push(ls[k].trim()); return out; };
+      const sHeld = (id) => waitFor(`${id} HELD`, async () => { const st = await sStatus(); return new RegExp(`${id.split('/').pop()}\\s+HELD`).test(st) ? st : null; }, { timeoutMs: 25000, intervalMs: 500 });
+      const boxedMod = (name, match, powers, extra = '') => `// ==WebMod==\n// @name ${name}\n// @match ${match}\n// @boxed\n// @powers ${powers}\n${extra}// ==/WebMod==\npage.on('keydown', () => {});\n`;
+      const XK = 'x.com/e2e-sens-xkeys', IC = 'inbox.x.com/e2e-sens-click', IK = 'inbox.x.com/e2e-sens-ikeys';
+      fs.writeFileSync(xKeys, boxedMod('E2E sensitive x keys', '*://*.x.com/*', 'keys'));
+      await sHeld(XK);
+      await this.cli(['approve', XK], { timeoutMs: 20000 });
+      fs.writeFileSync(path.join(this.trif, 'sites', 'inbox.x.com', 'e2e-sens-click.js'), boxedMod('E2E sensitive click', '*://inbox.x.com/*', 'click', '// @click the counter: #cc\n'));
+      st = await sHeld(IC);
+      if (/mods can:/.test(sAfter(st, IC).join(' '))) problems.push(`inbox.x.com's click mod asks for x.com's keys mod too: ${sAfter(st, IC).join(' / ')}`);
+      await this.cli(['approve', IC], { timeoutMs: 20000 });
+      fs.writeFileSync(path.join(this.trif, 'sites', 'inbox.x.com', 'e2e-sens-ikeys.js'), boxedMod('E2E sensitive inbox keys', '*://inbox.x.com/*', 'keys'));
+      st = await sHeld(IK);
+      const ikLines = sAfter(st, IK);
+      if (!ikLines.some((l) => l.startsWith('inbox.x.com mods can: click the counter')) || ikLines.some((l) => /^x\.com mods can:/.test(l))) problems.push(`inbox.x.com's keys mod, its site lines: ${JSON.stringify(ikLines)}`);
+      const sCard = await this.approvalFor(IK);
+      const sBox = await this.panel(`async () => { const b = document.querySelector('#approval .ap-sites'); return b && !b.hidden ? [...b.querySelectorAll('.ap-site-head')].map((x) => x.textContent) : null; }`);
+      if (JSON.stringify(sBox) !== JSON.stringify(['Your inbox.x.com mods can:', 'They can see:', 'It could end up in:'])) problems.push(`the card's site box on inbox.x.com: ${JSON.stringify(sBox)} (${JSON.stringify(sCard.items)})`);
+      await themes('sensitive-site-box');
+      await this.d.click(this.panelCtx, '#approval .ap-allow');
+      await waitFor(`${IK} allowed`, async () => (!new RegExp(`${IK.split('/').pop()}\\s+HELD`).test(await sStatus())) || null, { timeoutMs: 20000, intervalMs: 500 });
+      done.push(`site approval on inbox.x.com: x.com's keys mod apart; the card's box "${sBox && sBox[0]}", allowed`);
       // 4. the mods box: a mod for another x.com page folds into the line at the bottom; it grows while the chat is empty
       fs.writeFileSync(elsewhere, '// ==WebMod==\n// @name E2E sensitive elsewhere\n// @match *://x.com/settings*\n// @style\n// ==/WebMod==\n{ "css": "body { outline: 0 }" }\n');
       await go(at('x.com', '/home'));
@@ -3794,7 +3821,7 @@ process.exitCode = 1;
       if (problems.length) throw new Error(problems.join('\n'));
       return done.join('; ');
     } finally {
-      for (const f of [wide, elsewhere]) { try { fs.unlinkSync(f); } catch { /* gone */ } }
+      for (const f of [wide, elsewhere, xKeys]) { try { fs.unlinkSync(f); } catch { /* gone */ } }
       fs.rmSync(path.join(this.trif, 'sites', 'inbox.x.com'), { recursive: true, force: true });
       await this.d.colorScheme(this.panelCtx, '').catch(() => {});
       await this.ext(`async () => { await chrome.storage.local.set({ sensitiveSites: null }); }`).catch(() => {});

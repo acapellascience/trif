@@ -511,7 +511,10 @@ once per site:
   some browser (each browser's helper records which boxed mods it runs, from what the extension registered:
   `$TRIF_HOME/switches.json`; a mod is off when every browser that knows it has it off: switched off, its group
   or TRIF off on its site, paused). Their powers together, the union (`@migrate` as site-storage), are what the
-  site's mods can do together.
+  site's mods can do together. A sensitive site of its own (mail.google.com, extension/lib.js "sensitive sites")
+  is a site apart, as the extension runs it: only its own folder's mods, which run nowhere else, so neither
+  google.com's mods nor all-sites ones are in its union, and its mods aren't in google.com's (each browser sends
+  the sites of their own it knows of with modsApplied, `splits`, kept in switches.json).
 - The site's approved union: allowed.json keys `site:<site>:<a>+<b>+…`, the whole union, under the mod whose
   hold carried it; the site's is every such key's powers, whichever mod's entry, so switching a mod off or
   deleting it never takes any away, and adding it again doesn't ask again.

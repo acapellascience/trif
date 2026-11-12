@@ -627,7 +627,7 @@ test('Tim\'s mods by id (shipped.install {ids}): those of a site are added (off 
   assert.deepStrictEqual(starterChoices(home), { 'x.com': 'added', 'google.com': 'added', 'amazon.com': 'none', 'instagram.com': 'none', 'timsrobot.com': 'none' });
   // Settings offers it: the site is added, that mod isn't.
   let x = starterOffer(home, examples).sites.find((s) => s.site === 'x.com');
-  assert.deepStrictEqual(x.mods.map((m) => [m.id, m.choice]), [['x.com/detox-timeline', 'added'], ['x.com/follow-status', 'added'], ['x.com/profile-styler', 'added'], ['x.com/post-styler', 'added'], ['x.com/style-encoder', 'added'], ['x.com/space-shooter', 'added'], ['x.com/rainbow-rave', 'skipped']]);
+  assert.deepStrictEqual(x.mods.map((m) => [m.id, m.choice]), [['x.com/detox-timeline', 'added'], ['x.com/follow-status', 'added'], ['x.com/profile-styler', 'added'], ['x.com/post-styler', 'added'], ['x.com/style-encoder', 'added'], ['x.com/space-shooter', 'added'], ['x.com/rainbow-rave', 'skipped'], ['x.com/tune-composer', 'added']]);
   // Later setups and updates never bring it in; a new mod for X still comes (off).
   assert.deepStrictEqual(preinstallMods(home, sites, examples), { added: [], on: [], sites: [] });
   updateShipped(home, sites, examples);
@@ -704,7 +704,7 @@ test('Tim\'s mods, site by site: added ones get their mods, new ones and updates
     ['instagram.com', 'Instagram', true, null], ['timsrobot.com', 'timsrobot.com', false, null]]);
   assert.deepStrictEqual(offer.sites.flatMap((x) => x.mods.map((m) => m.id)).sort(), PREINSTALLED.map((p) => p.id).sort(), 'every mod, from PREINSTALLED');
   assert.deepStrictEqual(offer.sites.find((x) => x.site === 'x.com').mods.map((m) => [m.name, m.on]),
-    [['Detox Timeline', false], ['Follow Status', false], ['Profile Styler', false], ['Post Styler', false], ['Style Encoder', false], ['X-Flyer', false], ['Rainbow Rave', false]], 'X\'s in the panel\'s order');
+    [['Detox Timeline', false], ['Follow Status', false], ['Profile Styler', false], ['Post Styler', false], ['Style Encoder', false], ['X-Flyer', false], ['Rainbow Rave', false], ['Tune Composer', false]], 'X\'s in the panel\'s order');
   assert.ok(offer.sites.every((x) => x.mods.every((m) => m.name && typeof m.description === 'string')));
   assert.match(offer.sites.find((x) => x.site === 'timsrobot.com').note, /demo/);
 

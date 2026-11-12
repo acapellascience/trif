@@ -87,6 +87,7 @@ const PREINSTALLED = [
   // Added in 0.2.5 (off): people's own colours, read from codes in their profile pictures (Profile Styler on
   // profiles, Post Styler on posts and people cards), and Style Encoder to stamp yours into your picture.
   { id: 'x.com/profile-styler', on: false },
+  { id: 'x.com/tune-composer', on: false },
   { id: 'x.com/post-styler', on: false },
   { id: 'x.com/style-encoder', on: false },
   // (Rainbow Rave for Google, Amazon and Instagram waits for a later release: unreleased/sites/.)

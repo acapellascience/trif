@@ -5,7 +5,7 @@
 // @run-at      document-start
 // @risk        1 drops ads, so their impressions never report; patches fetch and XMLHttpRequest
 // @source      webmods
-// @version     2
+// @version     3
 // ==/WebMod==
 
 /*
@@ -796,7 +796,7 @@
   const isExplore = (path) => /^\/explore(\/|$)/.test(path);
   // Profile pages (/name and its tabs) keep X's own layout (see the CSS): flagged here too, on every route
   // change, so the page has the right width from its first frame. (Over a dialog route, the page behind.)
-  const PROFILE = /^\/([A-Za-z0-9_]{1,15})(?:\/(?:with_replies|media|likes|highlights|articles|superfollows|affiliates|verified_followers|followers|following|followers_you_follow|creator-subscriptions))?\/?$/;
+  const PROFILE = /^\/([A-Za-z0-9_]{1,15})(?:\/(?:with_replies|media|likes|highlights|articles|reposts|subs|subscriptions|superfollows|affiliates|verified_followers|followers|following|followers_you_follow|creator-subscriptions))?\/?$/;
   const NOT_PROFILE = /^(home|explore|notifications|messages|i|settings|search|compose|bookmarks|lists|communities|jobs|premium|hashtag|login|logout|signup|tos|privacy|chat|grok|account|intent|share|download)$/i;
   const isProfile = (path) => { const m = PROFILE.exec(path); return !!m && !NOT_PROFILE.test(m[1]); };
   const flagProfile = () => {

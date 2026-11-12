@@ -5,7 +5,7 @@
 // @run-at      document-idle
 // @risk        1 reads post authors' profile pictures from X's image server again (at 400×400) to find style codes
 // @source      trif
-// @version     1
+// @version     2
 // ==/WebMod==
 
 // Tim's. The timeline's side of Profile Styler (profile-styler.js) and Style Encoder (style-encoder.js).
@@ -37,8 +37,196 @@
 (() => {
   if (window.top !== window) return;
   const STORE = 'trifProfileStyler.mine'; // (Profile Styler's: your saved style, per account)
-  const SEEN_KEY = 'trifPostStyler.seen', SEEN_MAX = 600;
+  // (.seen2: picture code v2 is read now, so pictures the older reader found nothing in are read again)
+  const SEEN_KEY = 'trifPostStyler.seen3', SEEN_MAX = 600; // (3: with the picture's fonts)
+  try { localStorage.removeItem('trifPostStyler.seen'); localStorage.removeItem('trifPostStyler.seen2'); } catch { /* none */ }
   // --- the code (as Profile Styler reads it; see profile-styler.js) --------------------------------
+  // PIC CODE begin (the same in profile-styler.js and style-encoder.js, character for character;
+  // tests/styler-fonts.test.js checks)
+  // Picture code v2: bytes in the four hidden corners of a 400×400 picture, as 2×2-pixel gray cells (red =
+  // green = blue, so all of it is in the brightness, which a JPEG keeps at full resolution, unlike colour):
+  // four grays, 0, 85, 170 and 255, two bits a cell. A cell reads as the mean of (r + g + b) / 3 over its four
+  // pixels, to the nearest gray.
+  // The cells: on the 2-pixel grid, those wholly outside X's round crop with a 4 px margin, 1,801 a corner;
+  // in each corner in one order, from the corner out (by i + j, then i; i counts cells from the picture's side
+  // edge, j from its top or bottom edge).
+  // Each corner is its own stream: the mark (8 cells: white black black white black white white black); then
+  // bytes, four cells each, highest bits first: kind (1 a style, 2 a song), version, part (its number × 16 +
+  // parts − 1: a payload spread over several corners), payload length (2 bytes), the payload, and a CRC-16
+  // (CCITT: polynomial 0x1021, start 0xffff) of everything from kind on. Mark, length or CRC wrong: nothing.
+  // Room: 441 bytes of payload a corner (capacity()). The bottom-left corner carries the style (StyleCode,
+  // below); the other three are kept for a song.
+  // (An old colour code reads 85 or 170 in the corner where the mark wants black and white, so it's never taken
+  // for one of these; and gray cells are never red, magenta or yellow, so an older Profile Styler finds no
+  // markers in a picture with this code.)
+  const PicCode = (() => {
+    const SIZE = 400, CELL = 2, LEVELS = [0, 85, 170, 255];
+    const MARK = [3, 0, 0, 3, 0, 3, 3, 0], HEAD = 5;
+    const KIND = { style: 1, song: 2 };
+    const CORNERS = ['bottom-left', 'bottom-right', 'top-left', 'top-right'];
+    const LOCAL = []; // [i, j], in stream order
+    for (let d = 0; d < 2 * SIZE / CELL; d++) {
+      for (let i = 0; i <= d; i++) {
+        const j = d - i, a = SIZE / 2 - CELL * (i + 1), b = SIZE / 2 - CELL * (j + 1);
+        if (a >= 0 && b >= 0 && a * a + b * b > (SIZE / 2 + 4) ** 2) LOCAL.push([i, j]);
+      }
+    }
+    // (how far from its corner a cell reaches, in pixels)
+    const REACH = CELL * (1 + LOCAL.reduce((m, [i, j]) => Math.max(m, i, j), 0));
+    // a corner's cells: [x, y] of each cell's top-left pixel (y down, as a canvas has it), in stream order
+    const placed = new Map(CORNERS.map((c) => [c, LOCAL.map(([i, j]) => [
+      c.endsWith('left') ? CELL * i : SIZE - CELL * (i + 1), c.startsWith('top') ? CELL * j : SIZE - CELL * (j + 1)])]));
+    const cells = (corner) => placed.get(corner) || [];
+    const capacity = () => Math.floor((LOCAL.length - MARK.length) / 4) - HEAD - 2;
+    const grey = (level) => '#' + LEVELS[level].toString(16).padStart(2, '0').repeat(3);
+    const crc16 = (bytes) => {
+      let c = 0xffff;
+      for (const b of bytes) { c ^= b << 8; for (let k = 0; k < 8; k++) c = c & 0x8000 ? ((c << 1) ^ 0x1021) & 0xffff : (c << 1) & 0xffff; }
+      return c;
+    };
+    // one corner's stream → [[x, y, level 0–3], …] to paint (each a CELL × CELL square of grey(level))
+    const encode = (corner, { kind, version = 1, part = 0, parts = 1, payload }) => {
+      const at = cells(corner), bytes = [...payload];
+      if (!at.length) throw new RangeError(`no corner ${corner}`);
+      if (!(kind >= 1 && kind <= 255 && version >= 0 && version <= 255 && parts >= 1 && parts <= 16 && part >= 0 && part < parts)) throw new RangeError('bad header');
+      if (bytes.length > capacity() || bytes.some((b) => !(Number.isInteger(b) && b >= 0 && b <= 255))) throw new RangeError(`a corner holds ${capacity()} bytes of 0–255`);
+      const body = [kind, version, part * 16 + parts - 1, bytes.length >> 8, bytes.length & 255, ...bytes];
+      const c = crc16(body);
+      const levels = [...MARK];
+      for (const b of [...body, c >> 8, c & 255]) levels.push(b >> 6, (b >> 4) & 3, (b >> 2) & 3, b & 3);
+      return levels.map((l, n) => [at[n][0], at[n][1], l]);
+    };
+    // greyAt(x, y): the mean brightness (0–255) of the cell whose top-left pixel is (x, y) in a 400 px picture
+    // → { kind, version, part, parts, payload: [bytes] }, or null. Reads only as far as it must (a picture
+    // without this code: the mark's first cells).
+    const decode = (corner, greyAt) => {
+      const at = cells(corner);
+      let n = 0;
+      const level = () => { if (n >= at.length) return -1; const v = greyAt(at[n][0], at[n][1]); n++; return Math.min(3, Math.max(0, Math.round(v / 85))); };
+      for (const m of MARK) if (level() !== m) return null;
+      const byte = () => { let b = 0; for (let k = 0; k < 4; k++) { const l = level(); if (l < 0) return -1; b = b * 4 + l; } return b; };
+      const head = [];
+      for (let k = 0; k < HEAD; k++) { const b = byte(); if (b < 0) return null; head.push(b); }
+      const len = head[3] * 256 + head[4], part = head[2] >> 4, parts = (head[2] & 15) + 1;
+      if (!head[0] || len > capacity() || part >= parts) return null;
+      const payload = [];
+      for (let k = 0; k < len; k++) { const b = byte(); if (b < 0) return null; payload.push(b); }
+      const hi = byte(), lo = byte();
+      if (hi < 0 || lo < 0 || crc16([...head, ...payload]) !== hi * 256 + lo) return null;
+      return { kind: head[0], version: head[1], part, parts, payload };
+    };
+    // a payload longer than a corner holds (a song), over several corners in the order given: their streams
+    const spread = (corners, { kind, version = 1, payload }) => {
+      const bytes = [...payload], cap = capacity(), parts = Math.max(1, Math.ceil(bytes.length / cap));
+      if (parts > corners.length) throw new RangeError(`${bytes.length} bytes need ${parts} corners`);
+      return corners.slice(0, parts).map((corner, part) => ({ corner, cells: encode(corner, { kind, version, part, parts, payload: bytes.slice(part * cap, (part + 1) * cap) }) }));
+    };
+    // and back: decoded streams (from any corners, any order) → { version, payload } of one kind, or null if a
+    // part's missing
+    const gather = (streams, kind) => {
+      const mine = streams.filter((s) => s && s.kind === kind).sort((a, b) => a.part - b.part);
+      if (!mine.length || mine.length !== mine[0].parts || mine.some((s, k) => s.part !== k || s.parts !== mine[0].parts || s.version !== mine[0].version)) return null;
+      return { version: mine[0].version, payload: mine.flatMap((s) => s.payload) };
+    };
+    return { SIZE, CELL, LEVELS, KIND, CORNERS, REACH, cells, capacity, grey, crc16, encode, decode, spread, gather };
+  })();
+  // The style, as the bottom-left corner's payload (kind 1, version 1): sections of tag, length, data, so a
+  // later version can add some that this one skips. 1: the colours, 3 bytes each (exact), in the order of
+  // KEYS (13: 39 bytes); 2: the rainbow flags, a bit each in that order, lowest first (2 bytes); 3: the fonts
+  // (only when there are some): which follow (1 name, 2 handle, 4 text), then each: type + 8 × weight (types
+  // sans serif mono rounded handwriting display; weights the page's own, 100 300 400 500 600 700 900), its
+  // name's length (0: the same name as the one before) and its name in ASCII: letters, digits, space and
+  // - . _ & + ! ( ) / only, 1 to 50 of them (fontName). Three fonts: about 75 bytes in all.
+  const StyleCode = (() => {
+    const VERSION = 1, COLOURS = 1, RAINBOW = 2, FONTS = 3;
+    const KEYS = ['bg', 'name', 'badge', 'handle', 'text', 'buttons', 'links', 'panel', 'icons', 'logo', 'cards', 'lines', 'quotes'];
+    const TYPES = ['sans', 'serif', 'mono', 'rounded', 'handwriting', 'display'];
+    const WEIGHTS = [null, 100, 300, 400, 500, 600, 700, 900];
+    // a font name as stored: single spaces, only those characters, 1 to 50, a letter or digit in it; else null
+    const fontName = (s) => {
+      const f = typeof s === 'string' ? s.replace(/\s+/g, ' ').trim() : '';
+      return f.length <= 50 && /[A-Za-z0-9]/.test(f) && /^[A-Za-z0-9 \-._&+!()/]+$/.test(f) ? f : null;
+    };
+    // (a byte back to its character: only those a name may hold; anything else spoils the name)
+    const NAME_CHARS = [...' !&()+-./0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ_abcdefghijklmnopqrstuvwxyz'];
+    const charOf = (b) => NAME_CHARS.find((c) => c.charCodeAt(0) === b) || '\u0000';
+    const weightOf = (w) => (Number.isFinite(Number(w)) && Number(w) > 0 ? WEIGHTS.slice(1).reduce((a, b) => (Math.abs(b - w) < Math.abs(a - w) ? b : a)) : null);
+    const font = (f) => { const family = fontName(f?.family); return family ? { family, type: TYPES.includes(f.type) ? f.type : 'sans', weight: weightOf(f.weight) } : null; };
+    // colours: 13 '#rrggbb' in KEYS order; rainbow: keys; fonts: { name, handle, text } → bytes
+    const pack = (colours, rainbow, fonts) => {
+      const out = [];
+      const section = (tag, data) => out.push(tag, data.length, ...data);
+      section(COLOURS, colours.flatMap((c) => {
+        const m = /^#([0-9a-f]{6})$/i.exec(c || '');
+        if (!m) throw new RangeError(`not a colour: ${c}`);
+        return [0, 2, 4].map((k) => parseInt(m[1].slice(k, k + 2), 16));
+      }));
+      const on = KEYS.map((k) => (rainbow || []).includes(k));
+      section(RAINBOW, [on.slice(0, 8).reduce((b, f, k) => b | (f ? 1 << k : 0), 0), on.slice(8).reduce((b, f, k) => b | (f ? 1 << k : 0), 0)]);
+      const list = [font(fonts?.name), font(fonts?.handle), font(fonts?.text)];
+      if (list.some(Boolean)) {
+        const data = [(list[0] ? 1 : 0) + (list[1] ? 2 : 0) + (list[2] ? 4 : 0)];
+        let prev = null;
+        for (const f of list) {
+          if (!f) continue;
+          data.push(TYPES.indexOf(f.type) + 8 * WEIGHTS.indexOf(f.weight));
+          if (prev && f.family.toLowerCase() === prev.toLowerCase()) data.push(0);
+          else data.push(f.family.length, ...[...f.family].map((ch) => ch.charCodeAt(0)));
+          prev = f.family;
+        }
+        section(FONTS, data);
+      }
+      return out;
+    };
+    const unpackFonts = (d) => {
+      const which = d[0];
+      if (!(which >= 1 && which <= 7)) return null;
+      const got = [];
+      let p = 1, prev = null;
+      for (const bit of [1, 2, 4]) {
+        if (!(which & bit)) { got.push(null); continue; }
+        const tw = d[p], len = d[p + 1];
+        if (tw === undefined || len === undefined || (tw & 7) >= TYPES.length || len > 50 || (!len && !prev) || d.length < p + 2 + len) return null;
+        const family = len ? d.slice(p + 2, p + 2 + len).map(charOf).join('') : prev;
+        if (fontName(family) !== family) return null;
+        got.push({ family, type: TYPES[tw & 7], weight: WEIGHTS[tw >> 3] });
+        p += 2 + len;
+        prev = family;
+      }
+      return { name: got[0], handle: got[1], text: got[2] };
+    };
+    // bytes → { colours: 13 '#rrggbb' or null, rainbow: keys, fonts or null }, or null
+    const unpack = (bytes) => {
+      let colours = null, rainbow = [], fonts = null, i = 0;
+      while (i < bytes.length) {
+        const tag = bytes[i], len = bytes[i + 1];
+        if (len === undefined || i + 2 + len > bytes.length) return null;
+        const d = bytes.slice(i + 2, i + 2 + len);
+        i += 2 + len;
+        if (tag === COLOURS) {
+          if (len % 3) return null;
+          colours = [];
+          for (let k = 0; k < len; k += 3) colours.push('#' + d.slice(k, k + 3).map((v) => v.toString(16).padStart(2, '0')).join(''));
+        } else if (tag === RAINBOW) rainbow = KEYS.filter((k, n) => ((d[n >> 3] || 0) >> (n & 7)) & 1);
+        else if (tag === FONTS) fonts = unpackFonts(d);
+        // (any other tag: from a later version, skipped)
+      }
+      return colours ? { colours: KEYS.map((k, n) => colours[n] || null), rainbow: rainbow.filter((k) => colours[KEYS.indexOf(k)]), fonts } : null;
+    };
+    return { VERSION, KEYS, TYPES, WEIGHTS, fontName, font, pack, unpack };
+  })();
+  // PIC CODE end
+
+  const greyReader = (g, W, H, corner) => {
+    const kx = W / PicCode.SIZE, ky = H / PicCode.SIZE;
+    const R = Math.min(W, H, Math.ceil(PicCode.REACH * Math.max(kx, ky)) + 2), left = corner.endsWith('left') ? 0 : W - R, top = corner.startsWith('top') ? 0 : H - R;
+    const d = g.getImageData(left, top, R, R).data;
+    const px = (x, y) => { const o = (Math.min(R - 1, Math.max(0, y - top)) * R + Math.min(R - 1, Math.max(0, x - left))) * 4; return (d[o] + d[o + 1] + d[o + 2]) / 3; };
+    return (x, y) => {
+      const cx = (x + PicCode.CELL / 2) * kx - 0.5, cy = (y + PicCode.CELL / 2) * ky - 0.5, ix = Math.floor(cx), iy = Math.floor(cy), fx = cx - ix, fy = cy - iy;
+      return px(ix, iy) * (1 - fx) * (1 - fy) + px(ix + 1, iy) * fx * (1 - fy) + px(ix, iy + 1) * (1 - fx) * fy + px(ix + 1, iy + 1) * fx * fy;
+    };
+  };
   const KEYS = ['bg', 'name', 'badge', 'handle', 'text', 'buttons', 'links', 'panel', 'icons', 'logo', 'cards', 'lines', 'quotes'];
   const MARKERS = [[0, 0, [255, 0, 0]], [1, 0, [255, 0, 255]], [2, 0, [255, 255, 0]], [0, 1, [0, 0, 255]], [1, 1, [0, 255, 255]], [0, 2, [0, 255, 0]]];
   const CELLS = [[0, 4], [1, 3], [2, 2], [3, 1], [4, 0], [0, 6], [1, 5], [2, 4], [3, 3], [4, 2], [5, 1], [6, 0], [3, 7]];
@@ -46,8 +234,13 @@
   const LEVELS = [0, 85, 170, 255];
   const snap = (v) => LEVELS.reduce((a, b) => (Math.abs(b - v) < Math.abs(a - v) ? b : a));
   const hex = (rgb) => '#' + rgb.map((v) => Math.round(v).toString(16).padStart(2, '0')).join('');
-  const fromList = (v, rainbow) => ({ bg: v[0], name: v[1], badge: v[2], handle: v[3], text: v[4], buttons: v[5], links: v[6], panel: v[7],
-    icons: v[8], logo: v[9], cards: v[10], lines: v[11], quotes: v[12], rainbow });
+  const fromList = (v, rainbow, fonts = null) => ({ bg: v[0], name: v[1], badge: v[2], handle: v[3], text: v[4], buttons: v[5], links: v[6], panel: v[7],
+    icons: v[8], logo: v[9], cards: v[10], lines: v[11], quotes: v[12], rainbow, fonts });
+  // a picture's font ({ family, type, weight }, StyleCode) → a CSS family list: its name, then its type's generic (as
+  // Profile Styler's fontStack, without its look-alikes: a computer without the font gets one of its kind)
+  const GENERIC = { sans: 'sans-serif', serif: 'serif', mono: 'monospace', rounded: '"Arial Rounded MT Bold", "Nunito", ui-rounded, sans-serif',
+    handwriting: '"Segoe Print", "Bradley Hand", cursive', display: 'Impact, "Haettenschweiler", fantasy' };
+  const fontStack = (f) => (f && /^[A-Za-z0-9 ._&+!()\/-]{1,50}$/.test(f.family) ? `"${f.family}", ${GENERIC[f.type] || 'sans-serif'}` : null);
   const isHex = (v) => /^#[0-9a-f]{6}$/i.test(v || '');
   // the text colour that reads on a colour (a button's label): black or white
   const onColour = (h) => { const c = [1, 3, 5].map((i) => parseInt(h.slice(i, i + 2), 16)); return (c[0] * 0.299 + c[1] * 0.587 + c[2] * 0.114) > 150 ? '#0f1419' : '#ffffff'; };
@@ -79,6 +272,10 @@
           c.width = W; c.height = H;
           const g = c.getContext('2d', { willReadFrequently: true });
           g.drawImage(img, 0, 0);
+          // picture code v2 first (Style Encoder stamps it now: profile-styler.js "PIC CODE"), then the colour cells
+          const v2 = PicCode.decode('bottom-left', greyReader(g, W, H, 'bottom-left'));
+          const st2 = v2 && v2.kind === PicCode.KIND.style && v2.version === StyleCode.VERSION ? StyleCode.unpack(v2.payload) : null;
+          if (st2) { resolve(fromList(st2.colours, st2.rainbow, st2.fonts)); return; }
           const cell = (x, y) => {
             const x0 = Math.floor((x + 0.25) * s), y0 = Math.floor(H - (y + 0.75) * s), n = Math.max(1, Math.round(s / 2));
             const d = g.getImageData(x0, y0, n, n).data, sum = [0, 0, 0];
@@ -127,9 +324,9 @@
   // (a post by a styled author: P; with colour k set: P[data-ps~=k]; rainbow: P[data-ps-r~=k]. #react-root
   // and the extra :not()s keep these above Profile Styler's page-wide rules and X-Flyer's recolouring)
   // A person, wherever X shows one with their picture: a people card (UserCell: the sidebar's lists, Who to
-  // follow, followers, search's People), a hover card (the pop-up over a name), an entry in the search box's
-  // drop-down (TypeaheadUser; also the @-mention suggestions while writing)
-  const CARDS = '[data-testid=UserCell], [data-testid=HoverCard], [data-testid=TypeaheadUser]';
+  // follow, followers, search's People), an entry in the search box's drop-down (TypeaheadUser; also the
+  // @-mention suggestions while writing). (Hover cards, the pop-up over a name, are Profile Styler's now.)
+  const CARDS = '[data-testid=UserCell], [data-testid=TypeaheadUser]';
   // (a post, or a person's card: P is either; C only the card)
   const P = `html #react-root :is(article, ${CARDS})[data-ps-u]:not(#ps-a)`;
   const C = `html #react-root :is(${CARDS})[data-ps-u]:not(#ps-a)`;
@@ -170,6 +367,13 @@
        only: the picture itself is a background image there, and stays) */
     ${X}:is([data-ps~=bg], [data-ps-r~=bg]) :is([data-testid^="UserAvatar-Container-"], [data-testid=tweetPhoto], [data-testid$=".media"])${out},
     ${X}:is([data-ps~=bg], [data-ps-r~=bg]) :is([data-testid^="UserAvatar-Container-"], [data-testid=tweetPhoto], [data-testid$=".media"])${out} * { background-color: transparent !important; }
+    /* fonts: the author's, from their picture (text, then name and handle over it) */
+    ${X}[data-ps~=ftext] :is(span, time, div[dir])${out}${NOBTN} { font-family: var(--ps-f-text) !important; }
+    ${X}[data-ps~=wtext] :is(span, time, div[dir])${out}${NOBTN} { font-weight: var(--ps-w-text) !important; }
+    ${X}[data-ps~=fname] [data-ps-name]${out}:not(#ps-b), ${X}[data-ps~=fname] [data-ps-name]${out} span:not(#ps-b) { font-family: var(--ps-f-name) !important; }
+    ${X}[data-ps~=wname] [data-ps-name]${out}:not(#ps-b), ${X}[data-ps~=wname] [data-ps-name]${out} span:not(#ps-b) { font-weight: var(--ps-w-name) !important; }
+    ${X}[data-ps~=fhandle] [data-ps-handle]${out}:not(#ps-b) { font-family: var(--ps-f-handle) !important; }
+    ${X}[data-ps~=whandle] [data-ps-handle]${out}:not(#ps-b) { font-weight: var(--ps-w-handle) !important; }
     /* text: the item's own */
     /* (not X's buttons in the post, like Boost or Follow, which have their own fill; the action bar's counts yes) */
     ${X}[data-ps~=text] :is(span, time, div[dir])${out}${NOBTN}, ${X}[data-ps~=text] [role=group] span { color: var(--ps-text) !important; -webkit-text-fill-color: var(--ps-text) !important; }
@@ -245,7 +449,14 @@
     const v = [['bg', st.bg], ['name', st.name], ['badge', st.badge], ['handle', st.handle], ['text', st.text], ['links', st.links],
       ['icons', st.icons], ['cards', st.cards], ['lines', st.lines], ['quotes', st.quotes], ['buttons', st.buttons],
       ['on-buttons', isHex(st.buttons) ? onColour(st.buttons) : null]].filter(([, c]) => isHex(c));
-    const rule = `html #react-root [data-ps-u="${h}"] { ${v.map(([k, c]) => `--ps-${k}: ${c};`).join(' ')} }`;
+    // (the fonts: a family list each, and a weight when one's chosen)
+    const f = [];
+    for (const k of ['name', 'handle', 'text']) {
+      const font = st.fonts?.[k], stack = fontStack(font);
+      if (stack) f.push([`f-${k}`, stack]);
+      if (stack && Number.isInteger(font.weight)) f.push([`w-${k}`, String(font.weight)]);
+    }
+    const rule = `html #react-root [data-ps-u="${h}"] { ${[...v, ...f].map(([k, c]) => `--ps-${k}: ${c};`).join(' ')} }`;
     if (authorRules.get(h) === rule) return;
     authorRules.set(h, rule);
     vars.textContent = [...authorRules.values()].join('\n');
@@ -293,6 +504,7 @@
     const has = ['bg', 'name', 'badge', 'handle', 'text', 'links', 'icons', 'cards', 'lines', 'quotes', 'buttons']
       .filter((k) => isHex(k === 'bg' ? st.bg : k === 'name' ? st.name : k === 'badge' ? st.badge : k === 'handle' ? st.handle : k === 'text' ? st.text
         : k === 'links' ? st.links : k === 'icons' ? st.icons : k === 'cards' ? st.cards : k === 'lines' ? st.lines : k === 'quotes' ? st.quotes : st.buttons));
+    for (const k of ['name', 'handle', 'text']) if (fontStack(st.fonts?.[k])) has.push(`f${k}`, ...(Number.isInteger(st.fonts[k].weight) ? [`w${k}`] : []));
     setHas(art, has);
     setRainbow(art, (st.rainbow || []).filter((k) => has.includes(k) || k === 'bg'));
   };

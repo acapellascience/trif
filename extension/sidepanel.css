@@ -342,7 +342,7 @@ body.no-site .site-starter { display: none; }
 /* A section of its own above the chat: at most about 40% of the panel, scrolling inside, so the chat
    below shrinks instead of being pushed out of sight. */
 .mod-list {
-  list-style: none; margin: 4px -3px 0; padding: 2px 3px; /* room for focus rings inside the scroller */
+  list-style: none; margin: 4px -4px 0 -3px; padding: 2px 4px 2px 3px; /* room for focus rings inside the scroller, and the bin's pull toward the edge (-4px) */
   max-height: calc(40vh - 40px);
   overflow-y: auto; overflow-x: hidden;
   scrollbar-gutter: stable; /* (the scrollbar's room kept, so it never covers the rows' right edge: the bins, OFF) */

@@ -2497,14 +2497,15 @@ process.exitCode = 1;
       linkShown: document.querySelector('a[href="/two.html"]').getClientRects().length > 0, body: document.body.className,
       mod: document.documentElement.dataset.e2eStyled ? JSON.parse(document.documentElement.dataset.e2eStyled) : null })`], { timeoutMs: 20000 })).stdout);
     const reload = async (q) => { await this.ext(`async (id, url) => { await chrome.tabs.update(id, { url, active: true }); }`, [win.tabId, `${base}/?e2e=style-${q}`]); await sleep(1500); };
-    const shows = (what, ok) => waitFor(what, async () => { const x = await look(); return ok(x) ? x : null; }, { timeoutMs: 12000, intervalMs: 400 });
+    // (reloaded each time: the browser may still have the version before when the first reload lands)
+    let n = 0;
+    const shows = (what, ok) => waitFor(what, async () => { await reload(`${++n}`); const x = await look(); return ok(x) ? x : null; }, { timeoutMs: 25000, intervalMs: 300 });
     try {
       fs.writeFileSync(free, freeFile(spec('#010203', true), '/e2e-styled-v1'));
       fs.writeFileSync(boxed, boxedFile(3));
       let st = await waitFor('the free mod held for sending, the boxed one registered', async () => { const x = await status(); return /e2e-styled\s+HELD: it can send/.test(x) && /e2e-styled-box\s+registered \(boxed/.test(x) ? x : null; }, { timeoutMs: 25000, intervalMs: 500 });
       const ok = await this.cli(['approve', `${site}/e2e-styled`], { timeoutMs: 20000 });
       if (ok.status !== 0) throw new Error(`trif approve: ${ok.stderr}`);
-      await reload('1');
       const one = await shows('both styles applied', (x) => x.colour === 'rgb(1, 2, 3)' && x.spacing === '3px' && x.mod && x.body.includes('trif-box-styled-grid-3'));
       if (one.linkShown) throw new Error(`the hide list: ${JSON.stringify(one)}`);
       if (one.mod.leak) throw new Error('the free mod found the section\'s text');
@@ -2515,14 +2516,12 @@ process.exitCode = 1;
       fs.writeFileSync(boxed, boxedFile(7));
       st = await waitFor('the style edits registered, not held', async () => { const x = await status(); return /e2e-styled\s+registered/.test(x) && /e2e-styled-box\s+registered/.test(x) ? x : null; }, { timeoutMs: 20000, intervalMs: 500 });
       if (/e2e-styled\s+(HELD|CHANGE WAITING)/.test(st)) throw new Error(`a style edit waits: ${line(st, 'e2e-styled ')}`);
-      await reload('2');
       const two = await shows('the new style', (x) => x.colour === 'rgb(4, 5, 6)' && x.spacing === '7px' && x.mod && x.mod.style.size === 2);
       if (!two.linkShown) throw new Error('the link is still hidden');
       // A change to the code (where it sends) and the style at once: the code waits; meanwhile the version that
       // ran runs, with the new style
       fs.writeFileSync(free, freeFile(spec('#070809', false), '/e2e-styled-v2'));
       st = await waitFor('the code change waiting', async () => { const x = await status(); return /e2e-styled\s+CHANGE WAITING \(the version before runs meanwhile\): it can send/.test(x) ? x : null; }, { timeoutMs: 20000, intervalMs: 500 });
-      await reload('3');
       const three = await shows('the old code in the new style', (x) => x.colour === 'rgb(7, 8, 9)' && x.mod && x.mod.code === '/e2e-styled-v1');
       if (posted('/e2e-styled-v2').length) throw new Error('the waiting code ran');
       if (JSON.stringify(three.mod.style) !== JSON.stringify({ accent: '#070809', size: 2, look: 'plain' })) throw new Error(`trif.style meanwhile: ${JSON.stringify(three.mod.style)}`);

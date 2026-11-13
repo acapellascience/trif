@@ -1,0 +1,27 @@
+# The unit suite on every push and pull request, on macOS (several tests cover macOS-only paths: the Safari
+# bridge, APFS case, the keychain stand-ins). Tests that need an installed agent (Claude Code, Codex) skip
+# themselves here. Playwright's Chromium is installed for the three real-browser tests (the sandbox runtime
+# under real SES, the CSS reader, the mobile probes). The e2e suite (tests/e2e) needs a desktop session and
+# isn't run here.
+name: tests
+on:
+  push:
+  pull_request:
+permissions:
+  contents: read
+jobs:
+  unit:
+    runs-on: macos-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # (shipped-history.json and the upgrade test read old versions and tags)
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: Playwright's Chromium, for the real-browser tests
+        run: npm install --no-save playwright@1.56.1 && npx playwright install chromium
+      - run: npm test

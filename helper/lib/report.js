@@ -39,6 +39,8 @@ function reportLink(url, text, site) {
 }
 
 function escapeRe(s) { return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'); }
+// Hosts whose paths stay in a report: TRIF's own, and this computer.
+const KEEP_PATHS = /^(([\w-]+\.)*(github\.com|githubusercontent\.com|timsrobot\.com|npmjs\.org|npmjs\.com|mozilla\.org)|localhost|127\.0\.0\.1|\[::1\])(:\d+)?$/i;
 
 /** Remove personal details from report text. */
 function scrub(text, { home = os.homedir(), user = os.userInfo().username } = {}) {
@@ -48,6 +50,9 @@ function scrub(text, { home = os.homedir(), user = os.userInfo().username } = {}
   t = t.replace(/\/(Users|home)\/[^/\s"']+/g, '/$1/<user>');
   if (user && user.length > 2) t = t.replace(new RegExp(`\\b${escapeRe(user)}\\b`, 'gi'), '<user>');
   t = t.replace(/(https?:\/\/[^\s?#"']+)[?#][^\s"']*/g, '$1?…');
+  // (a page's address down to its site: the path of a profile or a post names a person. TRIF's own addresses,
+  // where a path says which file failed, stay whole.)
+  t = t.replace(/(https?:\/\/([^\s/?#"']+))(\/[^\s"']*)/g, (all, origin, host, rest) => (KEEP_PATHS.test(host) || rest === '/' ? all : `${origin}/…`));
   t = t.replace(/\b[A-Za-z0-9_-]{32,}\b/g, (s) => (/^[a-p]{32}$/.test(s) ? s : '<redacted>')); // keep extension IDs
   return t;
 }
@@ -77,7 +82,8 @@ function logProblems(logFile, { max = MAX_LOG_LINES, now = Date.now() } = {}) {
     if (!m) continue;
     const t = Date.parse(m[1]);
     if (!(t > now - LOG_WINDOW_MS)) continue;
-    const message = `${m[2]} ${m[3]}`.slice(0, 300);
+    // (scrubbed before it's cut: a cut through an address or a key would leave a piece no pattern knows)
+    const message = scrub(`${m[2]} ${m[3]}`).slice(0, 300);
     const key = message.replace(MOD_ID, '<mod>').replace(/\b([a-z]*)\d+\b/gi, '$1N');
     const g = groups.get(key) || { message, count: 0, example: (message.match(MOD_ID) || [])[0] || null };
     g.count++;

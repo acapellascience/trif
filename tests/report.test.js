@@ -20,7 +20,7 @@ test('scrub removes the home folder, user name, emails, query strings and tokens
   assert.equal(t, [
     'log at ~/.trif/helper.log and /home/<user>/x',
     '<user> wrote <email>',
-    'opened https://x.com/i/flow?…',
+    'opened https://x.com/…',
     'session <redacted> and id iaablflfafmonebdomeikadolkgdbkhe',
   ].join('\n'));
 });

@@ -196,6 +196,36 @@ function screenshotsFolder(ws, scope) {
  * Throws unless the mods folder is a plain folder (made if missing) whose real path is the one `trif setup`
  * recorded for it, if it recorded one (config.json modsDirReal: {path, real}). Returns its real path.
  */
+// Files an agent reads as instructions for the folder they're in (Claude Code: CLAUDE.md, .claude/; Codex:
+// AGENTS.md, .codex/), anywhere under the mods folder. TRIF's own are in the workspace's root, which runs
+// can't write; the mods folder they can, so a run that read a hostile page could leave one there for every
+// later run, on any site: "can't change the agents' instructions" has to hold there too. Before a run
+// starts, any that are there are moved to the trash (<home>/trash/_instructions/, kept, never read as
+// instructions). Returns [{rel, to}].
+const INSTRUCTION_NAME = /^(CLAUDE(\.local)?\.md|AGENTS(\.override)?\.md|GEMINI\.md|\.claude|\.codex|\.cursorrules|\.cursor)$/i;
+function instructionFiles(ws) {
+  const moved = [];
+  const root = ws.modsDir;
+  let budget = 20000;
+  const walk = (dir, depth) => {
+    let names = [];
+    try { names = fs.readdirSync(dir, { withFileTypes: true }); } catch { return; }
+    for (const d of names) {
+      if (budget-- <= 0) return;
+      const p = path.join(dir, d.name);
+      if (INSTRUCTION_NAME.test(d.name)) {
+        const to = path.join(ws.home, 'trash', '_instructions', `${Date.now()}-${moved.length}-${path.relative(root, p).replace(/[^\w.-]+/g, '_').slice(-120)}`);
+        try { fs.mkdirSync(path.dirname(to), { recursive: true }); fs.renameSync(p, to); moved.push({ rel: path.relative(ws.home, p), to: path.relative(ws.home, to) }); }
+        catch { try { fs.rmSync(p, { recursive: true, force: true }); moved.push({ rel: path.relative(ws.home, p), to: 'nowhere (removed)' }); } catch { /* left: the agent's own rules still apply */ } }
+        continue;
+      }
+      if (d.isDirectory() && !d.isSymbolicLink() && depth < 6) walk(p, depth + 1);
+    }
+  };
+  walk(root, 0);
+  return moved;
+}
+
 function checkModsFolder(ws) {
   const dir = ws.modsDir;
   let st = lstatOrNull(dir);
@@ -445,7 +475,11 @@ function runLimits(ws, { scope, splits = [], box, screenshotsReal, modsReal }) {
   // Each such folder by its path in the workspace (`literal`, what Claude Code's file tools match rules
   // against: a site folder can be a link) and its real path (`real`, what sandboxes compare); `rel` names
   // it as modSnapshot names files.
-  const lockedDirs = otherSites.map((n) => ({ rel: path.relative(ws.home, path.join(ws.modsDir, n)), literal: path.join(mods, n), real: real(path.join(mods, n)) }));
+  // (`link`: the folder is a link. Still denied to the run by both its paths, but never counted as a folder
+  // the run couldn't write (`locked`, below): what a link names is wherever it leads, which can be a folder
+  // of the run's own site, or become one, and a mod reached through it would pass as someone else's.)
+  const isLink = (p) => { try { return fs.lstatSync(p).isSymbolicLink(); } catch { return true; } };
+  const lockedDirs = otherSites.map((n) => ({ rel: path.relative(ws.home, path.join(ws.modsDir, n)), literal: path.join(mods, n), real: real(path.join(mods, n)), link: isLink(path.join(mods, n)) }));
   // Read-only for the sandboxes: only those inside the mods folder. A site folder that is a link out of it
   // isn't a mod folder (mods.js ignores it), and making where it leads "read" would open it to the run
   // (in Codex's profile, a more specific path wins over the home folder's denies).
@@ -462,7 +496,7 @@ function runLimits(ws, { scope, splits = [], box, screenshotsReal, modsReal }) {
   // The same read-only folders relative to the workspace, as modSnapshot names files: a change under them
   // can't be the run's doing (held.js). Only once the agent's adapter has protected each one: its
   // command() returns `locked`, the ones it did (runs.js uses that, not this).
-  const locked = lockedDirs.map((d) => d.rel);
+  const locked = lockedDirs.filter((d) => !d.link).map((d) => d.rel);
   // Links in the mods folder and the trash that lead out of it (or where the run may not read).
   const wsLinks = workspaceLinks(ws, mods, (t) => !within(t, shots, { ci, orEqual: true }) && deniedTarget(t));
   // The run's temporary folder (its commands'; Codex's own stays where it is), in its box: runs.js makes it.
@@ -693,6 +727,7 @@ class Runs {
     try {
       // The mods folder first: a link there is a refusal the user should read as is.
       run.modsReal = checkModsFolder(ws);
+      for (const moved of instructionFiles(ws)) this.logger.warn(`agent run ${run.id}: ${moved.rel} in the mods folder is a file agents read as instructions, and nothing of TRIF's: moved to ${moved.to}`);
     } catch (e) {
       this._emit(run, { kind: 'error', message: e.message });
       return this._finish(run, { code: null, signal: null });
@@ -714,9 +749,11 @@ class Runs {
     }
     this._serveBox(run);
     const env = { ...agents.agentEnv(ws), TRIF_RUN_TOKEN: run.token, TRIF_RUN_BOX: run.box, TRIF_RUN_SCREENSHOTS: run.screenshots, TRIF_RUN_MODS_DIR: ws.modsDir };
-    const found = adapter.detect({ dirs: agents.searchDirs(ws), env, version: false });
+    // (with its version: an agent older than the one whose sandbox settings TRIF writes isn't started, as it
+    // may not understand them; asked once per binary, util.js versionOf)
+    const found = adapter.detect({ dirs: agents.searchDirs(ws), env: agents.agentEnv(ws), version: true });
     if (!found.available) {
-      this._emit(run, { kind: 'error', message: adapter.missing });
+      this._emit(run, { kind: 'error', message: found.path && found.note ? found.note : adapter.missing });
       return this._finish(run, { code: null, signal: null });
     }
     // An organization's settings that replace TRIF's limits, known before the agent starts (claude.js
@@ -1061,4 +1098,4 @@ class Runs {
 
 module.exports = {
   runLimits, Runs, snapshot, modSnapshot, diffSnapshots, normalizeSite, boxRoot, RUN_TIMEOUT_MS, PRIVATE_FILES, skillDirs, skillSecrets, deniedInHome, deniedOutsideHome, trifCode, withPrivatePaths,
-  pruneScreenshots, screenshotsFolder, checkModsFolder, SCREENSHOT_KEEP_MS };
+  pruneScreenshots, screenshotsFolder, checkModsFolder, instructionFiles, SCREENSHOT_KEEP_MS };

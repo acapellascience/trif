@@ -10,7 +10,7 @@ const fs = require('fs');
 const path = require('path');
 const { buildMod, isIgnoredName, readModFile } = require('./mods');
 const { outOfScope, scopeOf } = require('./scope');
-const { badName } = require('./pathcheck');
+const { badName, samePath } = require('./pathcheck');
 
 const TRASH = 'trash';
 const TRASH_DAYS = 30;
@@ -81,6 +81,21 @@ function emptyTrash(ws, { days = TRASH_DAYS, now = Date.now() } = {}) {
   return removed;
 }
 
+// A chat's delete and restore go through the helper, which no sandbox limits: so the site folder they name
+// must be that site's own, a plain folder in the mods folder. A link there (a run can make one in the mods
+// folder) would take the helper to another site's folder under a name the run's scope covers.
+function ownFolder(ws, site, scope) {
+  if (!scope) return; // (the user's own terminal: their links are theirs)
+  const dir = path.join(ws.modsDir, site);
+  let st = null;
+  try { st = fs.lstatSync(dir); } catch { return; } // (not there: restore makes it)
+  const real = (p) => { try { return fs.realpathSync.native(p); } catch { return null; } };
+  const root = real(ws.modsDir), at = real(dir);
+  if (st.isSymbolicLink() || !st.isDirectory() || !root || !at || !samePath(at, path.join(root, site))) {
+    throw new TrashError(`sites/${site} is a link, not ${site}'s own folder: ask the user to do it from their terminal`);
+  }
+}
+
 /** Moves <modsDir>/<site>/<mod>.js to the trash. Returns {id, file, trashed}. */
 function deleteMod(ws, id, { scope, splits = [], now = Date.now() } = {}) {
   const { site, mod } = parseId(id);
@@ -88,6 +103,7 @@ function deleteMod(ws, id, { scope, splits = [], now = Date.now() } = {}) {
   let st = null;
   try { st = fs.lstatSync(file); } catch { /* missing */ }
   if (!st || !st.isFile()) throw new TrashError(`there's no mod ${site}/${mod} (no file ${file})`);
+  ownFolder(ws, site, scope);
   checkScope(site, file, scope, 'delete', splits);
   const dir = path.join(trashDir(ws), site);
   fs.mkdirSync(dir, { recursive: true });
@@ -105,9 +121,12 @@ function restoreMod(ws, id, { scope, splits = [] } = {}) {
   if (!entry) throw new TrashError(`${site}/${mod} isn't in the trash (trif restore lists what is)`);
   const file = path.join(ws.modsDir, site, `${mod}.js`);
   if (fs.existsSync(file)) throw new TrashError(`${site}/${mod} exists again (${file}): rename or delete it first`);
+  ownFolder(ws, site, scope);
   checkScope(site, entry.file, scope, 'restore', splits);
   fs.mkdirSync(path.dirname(file), { recursive: true });
   fs.renameSync(entry.file, file);
+  // (the folder swapped for a link between the check and the move: back it goes)
+  try { ownFolder(ws, site, scope); } catch (e) { try { fs.renameSync(file, entry.file); } catch { /* left where it is */ } throw e; }
   return { id: `${site}/${mod}`, file };
 }
 

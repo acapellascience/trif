@@ -153,7 +153,7 @@ const adapter = {
     // (A site folder that is a link out of the mods folder isn't made read-only, runs.js runLimits: it
     // isn't writable either, since the sandbox checks where it leads.)
     const writableHere = (p) => writable.some((w) => p === w || p.startsWith(w.endsWith('/') ? w : `${w}/`));
-    return { file: bin || adapter.binary, args, stdin: prompt, locked: lockedDirs.filter((d) => readOnly.includes(d.real) || !writableHere(d.real)).map((d) => d.rel) };
+    return { file: bin || adapter.binary, args, stdin: prompt, locked: lockedDirs.filter((d) => !d.link && (readOnly.includes(d.real) || !writableHere(d.real))).map((d) => d.rel) };
   },
 
   parse(line, emit, state = {}) {

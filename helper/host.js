@@ -26,7 +26,7 @@ const { scanMods, buildMod, planMods, planModsMessage, modsParts, withSame, fold
 const { Runs } = require('./lib/runs');
 const { Logins } = require('./lib/logins');
 const agents = require('./lib/agents');
-const { updateHeld, approveHeld, rejectHeld, lastRun, heldFile, reviewItems, reviewMod, powersFor, loadAllowed } = require('./lib/held');
+const { updateHeld, heldOnError, approveHeld, rejectHeld, lastRun, heldFile, reviewItems, reviewMod, powersFor, loadAllowed } = require('./lib/held');
 const { siteOkFor, splitsOf } = require('./lib/sitecombos');
 const { powerInfo } = require('./lib/boxpowers');
 const history = require('./lib/history');
@@ -273,7 +273,8 @@ function syncMods(reason, force) {
   const scanned = scanMods(ws.modsDir);
   let { mods } = scanned;
   const { problems, warnings } = scanned;
-  try { state.held = updateHeld(ws, mods, runs.scopes()); } catch (e) { logger.error(`held mods: ${e.message}`); }
+  // (an error here mustn't let a new or changed mod through unchecked: those wait until a sync works)
+  try { state.held = updateHeld(ws, mods, runs.scopes()); } catch (e) { logger.error(`held mods: ${e.message}`); state.held = heldOnError(ws, mods, state.held, e); }
   // A change waiting for the user's OK to a mod that was running: the version that last ran keeps
   // running meanwhile (held.js lastRun), sent as the mod, marked `pending` (the panel shows the change).
   const pendingIds = new Set();

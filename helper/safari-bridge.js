@@ -218,13 +218,17 @@ function createBridge(opts = {}) {
     const ping = setInterval(() => send(wsFrame(0x9, Buffer.alloc(0))), PING_MS); // keeps idle connections open
   }
 
+  const refusals = new Map(); // origin -> when its refusal was last logged
   const server = http.createServer((req, res) => {
     // From the extension: its background's warnings and errors (/log), or why it failed to start.
     if (req.method === 'POST' && (req.url === '/log' || req.url === '/startup-error') && ALLOWED_ORIGIN.test(String(req.headers.origin || ''))) {
       let body = '';
       req.on('data', (c) => { if (body.length < 20000) body += c; });
       req.on('end', () => {
-        log.warn(req.url === '/log' ? `safari extension: ${body.slice(0, 20000)}` : `the Safari extension failed to start: ${body.slice(0, 20000)}`);
+        // (on one line: these two take no key, only an origin a local program can claim, and a line break in
+        // the text would be a log line of the sender's making, which a problem report would then quote)
+        const text = body.slice(0, 4000).replace(/[\u0000-\u001f\u007f\u2028\u2029]+/g, ' ');
+        log.warn(req.url === '/log' ? `safari extension: ${text}` : `the Safari extension failed to start: ${text}`);
         res.end();
       });
       return;
@@ -235,7 +239,12 @@ function createBridge(opts = {}) {
   server.on('upgrade', (req, socket) => {
     const key = token();
     if (!allowed(req, key)) {
-      log.warn(`safari bridge: refused a connection from ${req.headers.origin || 'no origin'}${key ? '' : ' (no key yet: run trif setup --browser safari)'}`);
+      // (said once a minute per origin: any web page can try this address over and over, and each line pushed
+      // real history out of the log)
+      const who = String(req.headers.origin || 'no origin').slice(0, 200).replace(/[\u0000-\u001f\u007f\u2028\u2029]+/g, ' ');
+      const t = Date.now();
+      if (refusals.size > 200) refusals.clear();
+      if (!(t - (refusals.get(who) || 0) < 60000)) { refusals.set(who, t); log.warn(`safari bridge: refused a connection from ${who}${key ? '' : ' (no key yet: run trif setup --browser safari)'}`); }
       socket.end('HTTP/1.1 403 Forbidden\r\nConnection: close\r\n\r\n');
       return;
     }

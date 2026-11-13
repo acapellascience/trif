@@ -235,8 +235,14 @@ test('claude adapter: command flags, resume and model; nothing private in argv',
   assert.ok(!JSON.stringify(settings).includes('Desktop'));
   assert.deepEqual(sb.filesystem.allowWrite, ['/c/boxes/r1', '/p/screenshots/x.com']);
   for (const p of ['/h/held.json', '/h/preinstalled.json', '/h/instructions.md', '/h/sites/y.com']) assert.ok(sb.filesystem.denyWrite.includes(p), p);
-  assert.ok(!sb.filesystem.denyWrite.some((p) => /config\.json|helper\.log|safari-token|\/runs$/.test(p)), 'not in the workspace any more');
-  assert.deepEqual(settings.permissions.deny, ['Edit(//h/sites/y.com/**)']);
+  assert.ok(!sb.filesystem.denyWrite.some((p) => /helper\.log|safari-token|\/runs$/.test(p)), 'not in the workspace any more');
+  // (what the user allowed and what TRIF let run: never a run's commands' to write; nor a config.json in the
+  // workspace, which the helper would read where the private one is missing)
+  for (const p of ['/h/allowed.json', '/h/seen.json', '/h/.ran', '/h/history', '/h/switches.json', '/h/config.json']) assert.ok(sb.filesystem.denyWrite.includes(p), p);
+  // Another site's folder, and no file an agent reads as instructions anywhere under the mods folder
+  assert.equal(settings.permissions.deny[0], 'Edit(//h/sites/y.com/**)');
+  for (const want of ['Edit(//h/sites/CLAUDE.md)', 'Edit(//h/sites/**/CLAUDE.md)', 'Edit(//h/sites/**/AGENTS.md)', 'Edit(//h/sites/**/.claude/**)']) assert.ok(settings.permissions.deny.includes(want), want);
+  assert.ok(settings.permissions.deny.slice(1).every((r) => /^Edit\(\/\/h\/sites\/(\*\*\/)?(CLAUDE(\.local)?\.md|AGENTS(\.override)?\.md|\.claude\/\*\*|\.codex\/\*\*)\)$/.test(r)), settings.permissions.deny.join(' '));
   assert.deepEqual(settings.permissions.allow, ['Read(//p/screenshots/x.com/**)']);
   // The user's skill folders: readable by its file tools (absolute-path rules), never writable.
   const sk = JSON.parse(claude.command({ bin: '/x/claude', prompt: 'hi', ...limits, readable: [...limits.readable, '/Users/u/.agents/skills/web'], skills: ['/Users/u/.agents/skills/web'] }).files[0].content);

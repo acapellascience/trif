@@ -94,6 +94,9 @@ function startKeyProxy({ target, key, style = 'bearer', headers = {}, logger = n
     if (!sameText(head, mount) || (url.length > mount.length && url[mount.length] !== '/')) return deny(404, 'not found');
     const rest = url.slice(mount.length) || '/';
     if (!how.paths.test(rest) || (req.method !== 'POST' && req.method !== 'GET')) return deny(404, 'not found');
+    // (the path as written is what's allowed: no dot segments, encoded or not, and no backslash, which a
+    // provider's edge may resolve to another path on its host, with the user's key on the request)
+    if (/(^|\/)\.{1,2}(\/|$)|%2e|%2f|%5c|\\|\/\//i.test(rest.split('?')[0])) return deny(404, 'not found');
 
     const out = {};
     for (const [k, v] of Object.entries(h)) if (!DROP_REQUEST.has(k) && k !== 'content-length') out[k] = v;

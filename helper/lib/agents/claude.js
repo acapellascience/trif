@@ -35,8 +35,16 @@ const DENIED_TOOLS = ['WebFetch', 'WebSearch'];
 const EFFORTS = ['low', 'medium', 'high', 'xhigh', 'max'];
 // The workspace's files that steer TRIF (or the agents): never written by a run's commands. (.shipped
 // holds the versions of shipped mods a merge run reads: readable, never written.)
-const STATE_FILES = ['held.json', 'preinstalled.json', 'origins.json', 'active-runs', 'trash', 'update.json', 'instructions.md',
+// (allowed.json and seen.json are what the user allowed and what TRIF let run: a run that could write them
+// would approve its own mods. Until 0.3 only the tools' allowlist kept a run's commands from them.)
+const STATE_FILES = ['held.json', 'allowed.json', 'seen.json', '.ran', 'history', 'switches.json', 'switched-on.json', 'imported.json', 'config.json',
+  'preinstalled.json', 'origins.json', 'active-runs', 'trash', 'update.json', 'instructions.md',
   'AGENTS.md', 'TECHNIQUES.md', 'BOXED.md', 'CLAUDE.md', '.claude', 'bin', 'app', '.shipped'];
+// Files an agent reads as instructions when it works in a folder (Claude Code loads a CLAUDE.md beside the
+// files it reads; Codex an AGENTS.md): never written under the mods folder, where a run that read a hostile
+// page could leave one for every later run, on any site. (runs.js instructionFiles moves any that are there
+// out of the way before a run starts; this keeps Claude Code's file tools from writing one.)
+const INSTRUCTION_FILES = ['CLAUDE.md', 'CLAUDE.local.md', 'AGENTS.md', 'AGENTS.override.md', '.claude/**', '.codex/**'];
 /** Rules like Read(./config.json) made absolute to the workspace (see runSettings `rel`). */
 function absoluteRules(rules, workspace) {
   if (!workspace) return rules;
@@ -57,7 +65,7 @@ function tooOld(version) {
  * The run's own rules (--settings): the sandbox for its shell commands, and per-run permission rules
  * (other sites' folders and screenshots). `limits` is runs.js runLimits.
  */
-function runSettings({ workspace = '', readOnly = [], lockedDirs = [], denied = [], home, readable = [], privateDir, box, screenshots, skills = [], skillSecrets = [], skillLinks = [], workspaceLinks = [], systemTemp = [] } = {}) {
+function runSettings({ workspace = '', readOnly = [], lockedDirs = [], denied = [], home, readable = [], writable = [], privateDir, box, screenshots, skills = [], skillSecrets = [], skillLinks = [], workspaceLinks = [], systemTemp = [] } = {}) {
   // Absolute ("//" + path): a "./" rule follows the agent's current folder, so after `cd sites/x.com` it
   // would point somewhere else.
   const rel = (p) => `/${p}`;
@@ -97,6 +105,8 @@ function runSettings({ workspace = '', readOnly = [], lockedDirs = [], denied = 
       // lead where the run may not read (Claude Code's Read tool isn't sandboxed and matches rules against
       // the path it's given).
       deny: [...new Set([...readOnly.filter(inWorkspace), ...lockedDirs.flatMap((d) => [d.literal, d.real])])].map((p) => `Edit(${rel(p)}/**)`).concat(
+        // (no instruction files under the mods folder, by its path in the workspace and its real path)
+        ...[...new Set([...(workspace ? [path.join(workspace, 'sites')] : []), ...(writable[0] ? [writable[0]] : [])])].flatMap((m) => INSTRUCTION_FILES.flatMap((f) => [`Edit(${rel(m)}/${f})`, `Edit(${rel(m)}/**/${f})`])),
         ...skillSecrets.flatMap((x) => (x.dir ? [`Read(/${x.path})`, `Read(/${x.path}/**)`] : [`Read(/${x.path})`])),
         ...skillLinks.flatMap((p) => [`Read(/${p})`, `Read(/${p}/**)`]),
         // Links in the mods folder and the trash (left by an earlier run's commands: Codex can make them)
@@ -202,7 +212,7 @@ const adapter = {
     // (runs.js runLimits agentTmp), not /tmp/claude-<uid>, which every Claude Code session on the computer
     // shares (their scratch files and task output: a run's commands could write into them, 2.1.316).
     const env = limits.agentTmp ? { CLAUDE_CODE_TMPDIR: limits.agentTmp, TMPDIR: limits.agentTmp } : {};
-    return { file: bin || adapter.binary, args, stdin: prompt, files, env, locked: (limits.lockedDirs || []).map((d) => d.rel) };
+    return { file: bin || adapter.binary, args, stdin: prompt, files, env, locked: (limits.lockedDirs || []).filter((d) => !d.link).map((d) => d.rel) };
   },
 
   // One stdout line -> zero or more normalized events. `state` is per run ({workspace}).

@@ -109,14 +109,43 @@ test('updateHeld: holds only changed out-of-scope mods; an edit outside the run 
   assert.deepEqual(loadAllowed(ws.home)['x.com/wide'].powers, ['match:<all_urls>']);
   assert.throws(() => approveHeld(ws.home, 'x.com/wide'), /isn't held/);
   assert.deepEqual(updateHeld(ws, scanMods(ws.modsDir).mods, scopes), {});
-  // Later edits that add nothing new run straight away...
+  // A free mod for every site was allowed as the version the user saw: a run's later edit waits again
+  // (a run works for one site, and this runs on all of them)...
   write(ws, 'x.com/wide.js', header('<all_urls>') + '// changed again');
+  held = updateHeld(ws, scanMods(ws.modsDir).mods, scopes);
+  assert.deepEqual(held['x.com/wide'].needs, ['match:<all_urls>']);
+  assert.equal(held['x.com/wide'].reason, 'runs on <all_urls>, outside x.com: your agent changed it since you allowed that');
+  approveHeld(ws.home, 'x.com/wide');
   assert.deepEqual(updateHeld(ws, scanMods(ws.modsDir).mods, scopes), {});
-  // ...one that adds a power is held for that power alone.
+  // ...the user's own edit, once the run is over, doesn't...
+  write(ws, 'x.com/wide.js', header('<all_urls>') + '// the user changed it');
+  assert.deepEqual(updateHeld(ws, scanMods(ws.modsDir).mods, []), {});
+  // ...and one that adds a power is held for that too.
   write(ws, 'x.com/wide.js', header('<all_urls>') + 'fetch("/x", { method: "POST" })');
   held = updateHeld(ws, scanMods(ws.modsDir).mods, scopes);
-  assert.deepEqual(held['x.com/wide'].needs, ['sends']);
+  assert.deepEqual(held['x.com/wide'].needs, ['sends', 'match:<all_urls>']);
   assert.match(held['x.com/wide'].facts[0], /send requests or messages from the page as you \(it uses fetch\)/);
+});
+
+test('updateHeld: only a free mod for every site waits again when a run changes it; another domain, a style mod and a boxed mod don\'t', () => {
+  const ws = makeWs();
+  const before = snapshot(ws.modsDir, ws.home);
+  const scopes = [{ runId: 'r1', site: 'x.com', scope: 'x.com', before }];
+  const files = {
+    'x.com/two-domains.js': (body) => header('https://x.com/*', 'https://twitter.com/*') + body,
+    'x.com/style-all.js': (body) => `// ==WebMod==\n// @match *://*/*\n// @style\n// ==/WebMod==\n{ "css": "body { margin: ${body.length}px }" }`,
+    'x.com/boxed-all.js': (body) => `// ==WebMod==\n// @match *://*/*\n// @boxed\n// ==/WebMod==\n${body}`,
+    'x.com/free-all.js': (body) => header('*://*/*') + body,
+  };
+  for (const [f, make] of Object.entries(files)) write(ws, f, make('// one'));
+  let held = updateHeld(ws, scanMods(ws.modsDir).mods, scopes);
+  assert.deepEqual(Object.keys(held).sort(), ['x.com/boxed-all', 'x.com/free-all', 'x.com/style-all', 'x.com/two-domains']);
+  for (const id of Object.keys(held)) approveHeld(ws.home, id);
+  assert.deepEqual(updateHeld(ws, scanMods(ws.modsDir).mods, scopes), {});
+  for (const [f, make] of Object.entries(files)) write(ws, f, make('// two, longer'));
+  held = updateHeld(ws, scanMods(ws.modsDir).mods, scopes);
+  assert.deepEqual(Object.keys(held), ['x.com/free-all']);
+  assert.match(held['x.com/free-all'].reason, /your agent changed it since you allowed that/);
 });
 
 test('updateHeld: what the code does decides, not what its header says', () => {
@@ -246,7 +275,10 @@ test('locked folders: a linked site folder gets Edit deny rules by its workspace
   const box = tempDir();
   const lim = runLimits(ws, { scope: 'x.com', box, screenshots: box });
   const realMods = fs.realpathSync(ws.modsDir);
-  assert.deepEqual(lim.locked.sort(), [path.join('sites', 'chatgpt.com'), path.join('sites', 'other.com')]);
+  // (the link is denied to the run, but isn't a folder "the run couldn't write": what it names is wherever it
+  // leads, so a mod reached through it is never passed off as someone else's)
+  assert.deepEqual(lim.locked.sort(), [path.join('sites', 'chatgpt.com')]);
+  assert.deepEqual(lim.lockedDirs.map((d) => [path.basename(d.rel), d.link]).sort(), [['chatgpt.com', false], ['other.com', true]]);
   const c = claude.command({ bin: '/x/claude', prompt: 'P', ...lim });
   const deny = JSON.parse(c.files[0].content).permissions.deny;
   for (const p of [path.join(realMods, 'other.com'), fs.realpathSync(elsewhere), path.join(realMods, 'chatgpt.com')]) {
@@ -258,7 +290,7 @@ test('locked folders: a linked site folder gets Edit deny rules by its workspace
   // but isn't writable either: still protected.
   assert.ok(!lim.readOnly.includes(fs.realpathSync(elsewhere)));
   // Without the read-only list, nothing else is protected: no other folder is exempt from holding.
-  assert.deepEqual(codex.command({ bin: '/x/codex', prompt: 'P', ...lim, readOnly: [] }).locked, [path.join('sites', 'other.com')]);
+  assert.deepEqual(codex.command({ bin: '/x/codex', prompt: 'P', ...lim, readOnly: [] }).locked, []);
 });
 
 test('held mods: a locked folder named in another case is the same folder (APFS)', { skip: !fs.existsSync(os.tmpdir().toUpperCase()) }, () => {

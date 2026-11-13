@@ -77,10 +77,25 @@ function hashLines(code, numbers) {
 const OFF_FREE = 'agent-off-free';
 const offFreeFact = (site) => `is a free mod, and "Agent on this site" is Off for ${site || 'this site'}: there your agent may only make style mods and boxed mods`;
 
+// A pattern that matches every site (<all_urls>, *://*/*, https://*/*).
+const everywhere = (pattern) => pattern === '<all_urls>' || /^(\*|https?):\/\/\*(\/|$)/.test(String(pattern));
+// A free mod that runs on every site, changed by a side-panel run: allowed for the version the user saw, not
+// for good. A run works for one site; a free mod has everything each page has, and TRIF's reading of its code
+// is a checkpoint, not a wall (docs/SECURITY.md), so "runs everywhere" allowed once would let any later run,
+// on any site, change what runs on all of them without a word. Style and boxed mods don't ask again: they
+// can't act, wherever they run. (As a "line" of the match: allowed.json keeps it with the key, isAllowed
+// compares it.)
+const versionLine = (mod) => `version:${String(mod.hash || '').slice(0, 24)}`;
+
 function needsOf(mod, scope = null, agentLevel = null) {
   const out = powersFor(mod).map((p) => ({ key: p.key, fact: p.fact, lines: hashLines(mod.code, p.lines || []) }));
   if (agentLevel === 'off' && !mod.rules && !mod.sandboxed) out.unshift({ key: OFF_FREE, fact: offFreeFact(scope) });
-  if (scope) for (const pattern of outOfScope(mod, scope)) out.push({ key: `match:${pattern}`, fact: `runs on ${pattern}, outside ${scope}` });
+  if (scope) {
+    const free = !mod.rules && !mod.sandboxed;
+    for (const pattern of outOfScope(mod, scope)) {
+      out.push({ key: `match:${pattern}`, fact: `runs on ${pattern}, outside ${scope}`, ...(free && everywhere(pattern) ? { lines: [versionLine(mod)], version: true } : {}) });
+    }
+  }
   if (mod.risk && mod.risk.tier >= 2) out.push({ key: 'risk2', fact: 'says it changes what the site receives (risk 2)' });
   return out;
 }
@@ -179,7 +194,10 @@ function isAllowed(need, ok, byLine) {
 }
 // For the panel: say what's new about a power that was allowed before (a line using it changed)
 function described(need, ok) {
-  return ok.keys.has(need.key) ? { ...need, fact: `${need.fact}: a line that does this is new or changed` } : need;
+  if (!ok.keys.has(need.key)) return need;
+  // (a free mod for every site that a run changed: needsOf's versionLine)
+  if (need.version) return { ...need, fact: `${need.fact}: your agent changed it since you allowed that` };
+  return { ...need, fact: `${need.fact}: a line that does this is new or changed` };
 }
 /** Kept for callers that only want the keys. */
 function allowedKeys(home, mod, allowed) { return allowedFor(home, mod, allowed).keys; }
@@ -249,7 +267,9 @@ function updateHeld(ws, mods, scopes) {
     const ci = ignoresCase(ws.home); // (APFS: sites/X.com is sites/x.com)
     for (const s of live) {
       const touched = new Set(diffSnapshots(s.before, now));
-      const locked = s.locked || [];
+      // (a folder the run couldn't write: only while it's still a plain folder, never a link, whose files
+      // are wherever it leads now)
+      const locked = (s.locked || []).filter((d) => { try { return fs.lstatSync(path.join(ws.home, d)).isDirectory(); } catch { return false; } });
       for (const m of mods) {
         const rel = path.relative(ws.home, m.file);
         if (touched.has(rel) && !locked.some((d) => within(rel, d, { ci, orEqual: true }))) byRun.set(m.id, s);
@@ -412,7 +432,27 @@ function reviewMod(home, mod, mods = []) {
   return needs.map((n) => n.key);
 }
 
+/**
+ * The holds to go by when updateHeld failed (a bug in TRIF, a state file it can't read): the ones there were,
+ * and every mod that isn't the version TRIF last let run, held with that as the reason. Nothing new runs on
+ * an error; what was running keeps running. In memory only: the next sync works it out again.
+ */
+function heldOnError(ws, mods, before, error) {
+  const held = { ...(before || {}) };
+  let seen = null;
+  try { seen = loadSeen(ws.home); } catch { seen = null; }
+  const hashOf = (v) => (typeof v === 'string' ? v : v && v.hash);
+  const fact = 'couldn\'t be checked (something went wrong in TRIF), so it waits';
+  for (const m of mods) {
+    if (held[m.id] && held[m.id].hash === m.hash) continue;
+    if (seen && hashOf(seen[m.id]) === m.hash) { delete held[m.id]; continue; }
+    held[m.id] = { hash: m.hash, site: m.site, scope: null, runId: null, by: 'outside', at: Date.now(), reason: `${fact}: ${String(error && error.message ? error.message : error).slice(0, 200)}`, facts: [fact], needs: ['unchecked'], lines: {}, claim: claimOf(m) };
+  }
+  return held;
+}
+
 module.exports = {
+  heldOnError, everywhere,
   loadHeld, saveHeld, updateHeld, approveHeld, rejectHeld, lastRun, heldFile, allowedFile, seenFile, holdReason,
   needsOf, reviewItems, reviewMod, allowPowers, loadAllowed, powersFor, allowedKeys,
 };

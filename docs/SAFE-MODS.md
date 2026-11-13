@@ -61,7 +61,7 @@ executed by TRIF's runtime:
 ```
 
 - No free-form code, so nothing to inject; strings are only ever used as selectors, regexes (with a
-  time limit) or text (set as textContent).
+  cap on what they read) or text (set as textContent).
 - CSS gets the same treatment as themes would: no `url()` to other sites (or only to the mod's own
   site), no `@import`, so a rule can't send what the page shows anywhere (attribute selectors plus
   `background: url()` can leak values otherwise).

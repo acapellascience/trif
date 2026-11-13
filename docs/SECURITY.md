@@ -173,6 +173,67 @@ from a new line). A terminal agent (which has the user's shell) could run `trif 
 allowed.json itself; AGENTS.md tells it never to, but only the side panel's sandbox enforces it. A dev
 mode that skips these checks, for people who'd rather not be asked, may come later, with a warning.
 
+## Review fixes (November 2026)
+
+A review of main (0.2.7 plus the 0.3 work) found places where a wall above didn't hold. What was closed, on
+branch `fable`; tests/hardening.test.js has one test per item, and tests/css-browser.test.js runs the CSS
+check's allowed cases in a real Chromium.
+
+- **Names as code.** A mod's id is its folder's and file's names, and it was written as it was into the
+  `//# sourceURL=` comment of the code TRIF generates. The scanner took any name: one with a line break
+  (U+2028 and U+2029 are line breaks to JavaScript) ended the comment, and the rest of the name ran, for a
+  boxed mod outside its compartment, in TRIF's world. Now the scanner skips such names (pathcheck.js
+  unsafeName) and the id goes into that comment only as plain characters (sandbox.js scriptName).
+- **CSS read the browser's way.** Both checks read a quoted string on to the next quote; CSS ends one at a
+  line break. And they took `/*` inside an unquoted `url()` for a comment; to a browser it's part of the
+  address. Either way, text the check took for a string's or a comment's was live CSS, unseen. Five such
+  cases loaded from another address in Chromium. The style tier and `trif.css` are the two tiers that never
+  wait, so this was a way out of both. One reading now, `cssScan`, in both places.
+- **Whose stand-in.** A boxed mod's element stand-ins were shared by every mod, and after an `await` the acting
+  mod was read off the call stack by its script's name. A stack holds function names, which a mod chooses. Now
+  a stand-in belongs to one mod and acts as it.
+- **An agent's navigation.** `trif navigate` and `trif open` checked the address they were given and nothing
+  after: a redirect on the run's own site could take the tab, and whatever the address carried, to another
+  site, with no lock (no code ran) and at the Look level. Now the tab's page loads are kept to the site
+  while it loads (PROTOCOL.md "Run scope", "Navigation").
+- **Links in the mods folder.** A site folder that was a link counted as another site's folder the run
+  couldn't write, so a mod reached through it wasn't held as the run's; and a chat's delete and restore, done
+  by the helper outside any sandbox, followed such a link into another site's folder.
+- **A free mod for every site.** Allowed once, its `match:` was allowed for good, so a later run on any site
+  could change what runs on all of them. Now a run's change to one waits again.
+- **Smaller.** Unnamed methods ("other") and WebTransport in a locked tab; a screenshot is of the tab that
+  was checked or there is none; `text`, `sweep` and the rest re-check for a sensitive site of its own;
+  `rewrite-requests` never reaches a prototype; style mods' text replacement skips editors by what the browser
+  says; new mods wait when working out the holds fails; an agent older than TRIF's minimum isn't started;
+  Claude Code runs can't write `allowed.json`, `seen.json` or an instructions file under the mods folder; the
+  key proxy refuses dot segments; report lines are scrubbed before they're cut; the Safari bridge's log lines
+  are one line each.
+- **Narrower powers.** `write-drafts` doesn't write while the user is pressing a button or Enter (a draft
+  swapped as it's sent, unseen). `@click` words in quotes are what the thing has to say, checked at each
+  click against the page's own text.
+
+Still open, known, and why:
+
+- **A shipped mod's lines are allowed for its edits.** A mod with `@source webmods` and a shipped id is judged
+  on what it adds to the shipped version (held.js shippedBaseline), so a run's rewrite that reuses the shipped
+  version's lines isn't held. Closing it would ask the user each time their agent customises one of Tim's mods,
+  which is what TRIF is for. This is the free tier's terms: adding Tim's mods is the first OK for what they
+  can do. The panel now says "changed" beside "Tim's mod" when the file isn't a version TRIF shipped.
+- **Writes after a run's window.** A mod written more than 10 seconds after its run ended is judged as an
+  outside change (no out-of-scope or risk-2 hold). The run's process group is killed; a process that left the
+  group would outlive it. Not seen to happen in either agent's sandbox, and not ruled out.
+- **Other tabs of a locked site** still load from other sites and follow links out (TL-4's cost was the
+  user's own posting; this one would be their own links). Agent code reaches such a tab only through a window
+  reference the page gave it.
+- **Same-site GETs.** A request with no body to the site itself passes the lock, so a site that changes
+  something on a GET is not covered. "Can't post or send as you" means the methods above.
+- **The update feed has no expiry**, and the release key is written to the keychain through an argument
+  (scripts/release.js keygen). Both are the releasing Mac's to change.
+- **Runs write the mods folder directly**, and who wrote what is worked out afterwards (snapshots, a time
+  window, the folders a run couldn't write). Several fixes above are that reckoning going wrong. Having runs
+  write to a folder of their own, which the helper copies from once it has decided, would make it a fact
+  instead; it changes how both agents are started and wasn't something to do without running them.
+
 ## The prompt
 
 The page's address reaches the agent's system prompt as its origin and path only, quoted and capped

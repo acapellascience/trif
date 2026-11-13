@@ -186,12 +186,20 @@ only for what the mod needs; a mod that needs the network is a free mod.
   `// @click the play button: button.play` (the hold says "can click these for you: the play button
   (button.play)"). Never something that submits or resets a form (submit or reset buttons, a button with
   no type in a form, a label for those), and never a link to another site, whatever the header says.
+  Put the words in quotes when they're what the thing says: `// @click "Show more": button.more`. Then TRIF
+  only lets you click what matches the selector *and* says those words (its own text, `aria-label` or
+  `title`, as the page wrote them: an element whose text or label a boxed mod changed doesn't count), and the
+  hold says so ("only what says "Show more""). Prefer that: the user knows a button by what it says, and
+  a selector can match more than you meant.
 - `write-drafts`: change what the user is about to post: `setValue(text)` on the page's text fields and
   textareas (TRIF sends the page an `input` event, so React and the like see it), and `setText`, adding
   and removing inside editors. Never a password or card field, a hidden input or a select. To change what
   they typed you need to read it too (`read-drafts`). No addresses you make up: what you write may only
   have the addresses already in that field or editor, or in a link on the page (a site can fetch one for a
   preview before anything is posted); anything that looks like one counts (`example.com`, `node.js`).
+  Write as the user types (an `input` listener), not as they send: from their press on anything that isn't a
+  field, an editor or your own element until a moment after the click, and for a moment after Enter, a write
+  is refused ("a draft isn't changed while the user is pressing a button or Enter").
 
 - `block-events`: `trif.block(type, fn?)` keeps this site from seeing an event (when `fn(e)` returns true,
   or always without `fn`); a blocked event reaches only `fn`, where `e.preventDefault()` also stops what the

@@ -212,6 +212,23 @@ function loadHistory(examplesDir) {
 
 const shippedBefore = (history, id, hash) => Array.isArray(history[id]) && history[id].includes(hash);
 
+/**
+ * The ids of mods that say they're TRIF's (`@source webmods`) but aren't a version TRIF shipped: someone's
+ * edit of one, or a mod that only says so. A header is the author's to write (an agent's, on a page's say-so),
+ * so the panel's "Tim's mod" goes by the file: {id: true}. `text`: a style mod's file.
+ */
+function changedShipped(examplesDir, mods) {
+  const history = loadHistory(examplesDir);
+  const out = {};
+  for (const m of mods || []) {
+    if (!m || !isShippedSource(m.source)) continue;
+    const now = sha1(Buffer.from(String(m.text ?? m.code ?? ''), 'utf8'));
+    const current = readShipped(examplesDir, m.id);
+    if (!(current && current.hash === now) && !shippedBefore(history, m.id, now)) out[m.id] = true;
+  }
+  return out;
+}
+
 // ---------------------------------------------------------------- setup
 
 /**
@@ -744,6 +761,7 @@ function autoUpdatedIds(home) {
 function startSitesOn(home) { return load(home).sitesOn; }
 
 module.exports = {
+  changedShipped,
   PREINSTALLED, RETIRED, SITES_ON, SITE_NAMES, DEFAULT_ORDER, SHIPPED_DIR, preinstallMods, updateShippedMods, retireShippedMods, absorbedIds,
   starterSites, siteOf, siteName, resolveSites, resolveIds, readdedIds, autoUpdatedIds, starterChoices, chooseNoStarter, installStarter, starterOffer, examplesDir,
   startOffIds, startSitesOn, loadPreinstalled: load, pendingUpdates, useNewVersion, keepMine, mergeRequest, mergeSettled, resolveMerge, restoreMod, baseFile, newFile, loadHistory,

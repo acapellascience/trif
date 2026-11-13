@@ -1947,7 +1947,7 @@ async function uiStatus() {
       error: errors.get(m.id) === USER_SCRIPTS_OFF ? null : errors.get(m.id) || null,
       held: m.held || null, pending: m.pending || null, review: m.held || m.pending ? null : m.review || null, risk: m.risk || null,
       from: fromOtherBrowser(m, state.installId) ? (m.origin.browser || 'another browser') : null,
-      source: m.source || null, version: m.version || null, update: m.update || null, rules: !!m.rules, sandboxed: !!m.sandboxed, unsandboxed: !!m.unsandboxed, powers: Array.isArray(m.powers) ? m.powers : [], powerInfo: m.powerInfo || null, found: Array.isArray(m.found) ? m.found : [],
+      source: m.source || null, sourceChanged: !!m.sourceChanged, version: m.version || null, update: m.update || null, rules: !!m.rules, sandboxed: !!m.sandboxed, unsandboxed: !!m.unsandboxed, powers: Array.isArray(m.powers) ? m.powers : [], powerInfo: m.powerInfo || null, found: Array.isArray(m.found) ? m.found : [],
       newOff: state.newOff[m.id] && !(live.get(m.id)?.enabled ?? isEnabled(m.id)) ? state.newOff[m.id] : null,
       chatWaiting: !!state.chatWaiting[m.id],
       imported: !!m.imported,

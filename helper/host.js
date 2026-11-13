@@ -31,7 +31,7 @@ const { siteOkFor, splitsOf } = require('./lib/sitecombos');
 const { powerInfo } = require('./lib/boxpowers');
 const history = require('./lib/history');
 const { DEFAULT_ORDER, startOffIds, startSitesOn, pendingUpdates, useNewVersion, keepMine, mergeRequest, mergeSettled, restoreMod, absorbedIds,
-  starterOffer, installStarter, chooseNoStarter, resolveSites, resolveIds, readdedIds, autoUpdatedIds } = require('./lib/preinstalled');
+  starterOffer, installStarter, chooseNoStarter, resolveSites, resolveIds, readdedIds, autoUpdatedIds, changedShipped } = require('./lib/preinstalled');
 const { readInstructions, writeInstructions, instructionsFile, MAX_LENGTH } = require('./lib/instructions');
 const { ownSock, removeStaleSockets, codeStamp } = require('./lib/helpers');
 const { loadOrigins, recordOrigins, renameOrigins, activeRuns } = require('./lib/origins');
@@ -316,6 +316,8 @@ function syncMods(reason, force) {
   // switches them off once (preinstalled.js autoUpdatedIds).
   let autoUpdated = {};
   try { autoUpdated = autoUpdatedIds(ws.home); } catch (e) { logger.warn(`Tim's mods: ${e.message}`); }
+  let notShipped = {};
+  try { notShipped = changedShipped(examplesDir(), mods); } catch (e) { logger.warn(`Tim's mods: ${e.message}`); }
   const allowedNow = loadAllowed(ws.home);
   const splitsNow = splitsOf(ws.home); // (the sensitive sites of their own: each its own site, sitecombos.js)
   const sent = plan.mods.map((m) => {
@@ -334,7 +336,9 @@ function syncMods(reason, force) {
     const withUpdate = updates[m.id] ? { ...withOrigin, update: updates[m.id] } : withOrigin;
     const withAbsorbs = absorbed[m.id] ? { ...withUpdate, absorbs: absorbed[m.id] } : withUpdate;
     const withReadded0 = readded[m.id] ? { ...withAbsorbs, readded: readded[m.id] } : withAbsorbs;
-    const withReadded = autoUpdated[m.id] ? { ...withReadded0, autoUpdated: autoUpdated[m.id] } : withReadded0;
+    const withReadded1 = autoUpdated[m.id] ? { ...withReadded0, autoUpdated: autoUpdated[m.id] } : withReadded0;
+    // (says it's Tim's, but isn't a version TRIF shipped: the panel says "changed" beside "Tim's mod")
+    const withReadded = notShipped[m.id] ? { ...withReadded1, sourceChanged: true } : withReadded1;
     // A sandboxed mod: what its code could do as a page script, for a browser without TRIF's sandbox, which
     // holds it until the user allows that (extension/lib.js sandboxFallback)
     // (and for the row and code card: a boxed mod's powers in words; what TRIF read in a free mod's code)

@@ -292,3 +292,70 @@ test('key proxy: a path with dot segments, encoded or not, isn\'t passed on', as
     assert.deepEqual(seen, ['/api/v1/models', '/api/v1/models?after=a/../b']);
   } finally { proxy.close(); upstream.close(); }
 });
+
+// ---- boxed mods: the acting powers' limits --------------------------------------------------------------------
+
+test('write-drafts: a draft is changed as the user types, never while they press a button or Enter', async () => {
+  const p = await sandboxPage({ body: [{ tag: 'input', attrs: { id: 'f' } }, { tag: 'button', attrs: { id: 'send' } }] });
+  const field = p.el('f');
+  field.type = 'text'; field.value = '';
+  p.G.HTMLInputElement = function HTMLInputElement() {};
+  Object.defineProperty(p.G.HTMLInputElement.prototype, 'value', { set(v) { this._v = v; }, get() { return this._v; } });
+  let clock = 1000;
+  p.G.performance.now = () => clock;
+  // (the mod's code, run again for each try: what it logs is how the write went)
+  const write = (t) => { p.run('x.com/writer', `try { page.find('#f').setValue(${JSON.stringify(t)}); trif.log('wrote'); } catch (e) { trif.log(String(e.message)); }`, { powers: ['write-drafts'] }); return [...p.G.__trifSandbox.logs].pop().args[0]; };
+  assert.equal(write('as they type'), 'wrote');
+  assert.equal(field._v, 'as they type');
+  // the user presses Send: from the press until a moment after the click, nothing is written
+  p.G.dispatchEvent({ type: 'pointerdown', isTrusted: true, target: p.el('send') });
+  assert.match(write('swapped at the last moment'), /isn't changed while the user is pressing a button or Enter/);
+  clock += 200;
+  p.G.dispatchEvent({ type: 'click', isTrusted: true, target: p.el('send') });
+  clock += 100;
+  assert.match(write('swapped'), /isn't changed while/);
+  assert.equal(field._v, 'as they type');
+  clock += 2000;
+  assert.equal(write('later'), 'wrote');
+  // Enter, the same; a press in the field itself, or a press the page made up, doesn't count
+  p.G.dispatchEvent({ type: 'keydown', isTrusted: true, key: 'Enter', target: field });
+  assert.match(write('x'), /isn't changed while/);
+  clock += 1000;
+  p.G.dispatchEvent({ type: 'pointerdown', isTrusted: true, target: field });
+  assert.equal(write('placing the cursor'), 'wrote');
+  p.G.dispatchEvent({ type: 'pointerdown', isTrusted: false, target: p.el('send') });
+  assert.equal(write('the page\'s own event'), 'wrote');
+});
+
+test('click: words in quotes are what the thing has to say, in the page\'s own text; what a boxed mod wrote doesn\'t count', async () => {
+  const p = await sandboxPage({ body: [{ tag: 'button', attrs: { id: 'more' } }, { tag: 'button', attrs: { id: 'del' } }, { tag: 'button', attrs: { id: 'del2', 'aria-label': 'Delete' } }] });
+  Object.defineProperty(p.el('more'), 'textContent', { value: '  Show   more replies ', writable: true });
+  Object.defineProperty(p.el('del'), 'textContent', { value: 'Delete', writable: true });
+  const grant = { powers: ['click'], args: { click: ['"Show more": button', 'the old way: #legacy'] } };
+  const tryClick = (id, src = '') => { p.run('x.com/c', `${src}; try { page.find('#${id}').click(); trif.log('clicked'); } catch (e) { trif.log(String(e.message)); }`, grant); return [...p.G.__trifSandbox.logs].pop().args[0]; };
+  assert.equal(tryClick('more'), 'clicked');
+  assert.equal(p.el('more').clicks, 1);
+  // the selector matches every button; the words don't
+  assert.match(tryClick('del'), /lets this mod click what says "Show more", and this says "delete"/);
+  assert.equal(p.el('del').clicks, 0);
+  // the mod can't make it say so: its own text, or its own label, doesn't count
+  assert.match(tryClick('del', `page.find('#del').setText('Show more')`), /a boxed mod changed what this says/);
+  assert.match(tryClick('del2', `page.find('#del2').setAttr('aria-label', 'Show more')`), /a boxed mod changed what this says/);
+  assert.equal(p.el('del').clicks + p.el('del2').clicks, 0);
+  // the hold says which lines are which
+  const mod = { id: 'x.com/c', site: 'x.com', matches: ['*://x.com/*'], sandboxed: true, powers: ['click'], powerArgs: { click: bp.parseClicks(['"Show more": button', 'the play button: button.play']) } };
+  const fact = bp.powerNeeds(mod).find((n) => n.power === 'click').fact;
+  assert.equal(fact, 'can click these for you: only what says "Show more" (button), the play button (button.play)');
+});
+
+test('Tim\'s mods: a mod that says it is one but isn\'t a version TRIF shipped is marked changed', () => {
+  const pre = require('../helper/lib/preinstalled');
+  const { examplesDir } = require('../helper/lib/paths');
+  const id = 'x.com/detox-timeline';
+  const shipped = fs.readFileSync(path.join(examplesDir(), 'x.com', 'detox-timeline.js'), 'utf8');
+  const asMod = (code, mid = id) => ({ id: mid, source: mods.parseHeader(code).source, code });
+  assert.deepEqual(pre.changedShipped(examplesDir(), [asMod(shipped)]), {});
+  assert.deepEqual(pre.changedShipped(examplesDir(), [asMod(shipped + '\n// one more line')]), { [id]: true });
+  assert.deepEqual(pre.changedShipped(examplesDir(), [asMod('// ==WebMod==\n// @source webmods\n// @version 9\n// ==/WebMod==\n1;', 'x.com/not-tims')]), { 'x.com/not-tims': true });
+  assert.deepEqual(pre.changedShipped(examplesDir(), [asMod('// a mod of the user\'s own\n1;', 'x.com/mine')]), {});
+});

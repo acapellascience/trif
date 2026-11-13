@@ -643,11 +643,36 @@ export function sandboxRuntime(mode, pageModId, pageFn, pagePowers, pageWide) {
   const arrivedOk = (api, act, what, does) => {
     if (arrivedBy && !api.powers.has('go-to') && !crossOk(api, arrivedBy, act, 'go-to')) refuse(api, act, `${what} is off on this page until the user clicks or presses a key here: another boxed mod's go-to brought the user here, and with both, one could take the user to a page where the other ${does} ${LIFT(act, 'go-to')}`);
   };
+  // write-drafts, when: as the user types, never as they send. A mod that waited for the user's press on Send
+  // (it can hear a pointerdown on the page) and rewrote the draft before the click reached the page would
+  // change what's posted with no moment for the user to see it. So from the user's own press on anything
+  // that isn't a field, an editor or a mod's own element, until a moment after the click, and for a moment
+  // after their Enter, drafts aren't written. What the hold says, "before you post it", stays true to the eye.
+  let sendingUntil = 0;
+  const pressOf = (e) => { const p = typeof e.composedPath === 'function' ? e.composedPath() : []; return p[0] || e.target; };
+  const quietPress = (t) => !!t && t.nodeType === 1 && (created.has(t) || isField(t) || inEditor(t));
+  const sending = (ms) => { sendingUntil = Math.max(sendingUntil, now() + ms); };
+  if (typeof G.addEventListener === 'function') {
+    for (const ty of ['pointerdown', 'mousedown', 'touchstart']) G.addEventListener(ty, (e) => { if (e.isTrusted && !quietPress(pressOf(e))) sending(1500); }, { capture: true, passive: true });
+    G.addEventListener('click', (e) => { if (e.isTrusted && !quietPress(pressOf(e))) sending(400); }, { capture: true, passive: true });
+    G.addEventListener('keydown', (e) => { if (e.isTrusted && e.key === 'Enter') sending(400); }, { capture: true, passive: true });
+  }
   const draftsOk = (api) => {
     if (!api.powers.has('write-drafts')) return false;
+    if (now() < sendingUntil) fail('a draft isn\'t changed while the user is pressing a button or Enter (it may be on its way out): change it as they type, or a moment later');
     partnersOk(api, 'write-drafts');
     return true;
   };
+  // click, by what a thing says: a header line `// @click "Show more": button.more` (the words in quotes) lets
+  // the mod click only what matches the selector *and* says those words, in the page's own text or label; the
+  // hold shows them as that, not as the mod's description. A selector can match more than the author showed;
+  // what a button says is what the user knows it by. What a boxed mod wrote doesn't count: an element whose
+  // text or label a boxed mod changed (or anything inside or around it) has no words TRIF can vouch for.
+  const relabelled = new WeakSet();
+  const relabel = (n) => { for (let a = n; a && a.nodeType === 1; a = a.parentElement) relabelled.add(a); };
+  const LABEL_ATTRS = /^(aria-label|aria-labelledby|aria-description|title|alt|value)$/;
+  const foldWords = (s) => String(s || '').toLowerCase().replace(/\s+/g, ' ').trim();
+  const saysOf = (n) => foldWords(`${n.getAttribute('aria-label') || ''} ${n.textContent || ''} ${n.getAttribute('title') || ''}`);
   // (click: also not after another mod changed a draft, unless the clicking mod has write-drafts: a click could
   // send it)
   const clickOk = (api) => {
@@ -982,6 +1007,7 @@ export function sandboxRuntime(mode, pageModId, pageFn, pagePowers, pageWide) {
     if (typeof out !== 'string' || out === t.data) { written.set(t, t.data); return; }
     written.set(t, out);
     t.data = out;
+    relabel(p);
   };
   const textUnder = (tx, root) => {
     if (root.nodeType === 3) { if (root.parentElement && root.parentElement.closest(tx.sel)) fixText(root, tx); return; }
@@ -1044,6 +1070,7 @@ export function sandboxRuntime(mode, pageModId, pageFn, pagePowers, pageWide) {
     emptied.set(t, made);
     t.data = '';
     t.after(...made);
+    relabel(p);
   };
   // (a wrapped node's pieces taken out, and theirs if another wrapper split them in turn)
   const unwrap = (t, depth = 0) => {
@@ -2350,6 +2377,7 @@ export function sandboxRuntime(mode, pageModId, pageFn, pagePowers, pageWide) {
       str(t, 'text');
       if (inEditor(n)) editorWrite(n, (rg) => rg.setEnd(n, 0), n.textContent.length, t);
       n.textContent = t;
+      relabel(n);
       wrote(n);
     },
     // (a field's value attribute: null, as React keeps it in step with what's typed: audit AU-2; read-drafts
@@ -2429,6 +2457,7 @@ export function sandboxRuntime(mode, pageModId, pageFn, pagePowers, pageWide) {
       const fewer = () => { try { const abs = new URL(v, location.href).href; return [...D.links].some((a) => !created.has(a) && shortenedFrom(abs, a.href)); } catch { return false; } };
       if ((n === 'href' || n === 'src') && !urlOk(v, n) && !(n === 'href' && node.localName === 'a' && cur().powers.has('site-data') && fewer())) fail(n === 'src' ? 'src only takes data:/blob: images, or the address of an image the page already shows' : 'href only takes #somewhere, or an address a link on the page already has');
       node.setAttribute(n, v);
+      if (LABEL_ATTRS.test(n)) relabel(node);
     },
     removeAttr(name) {
       const n = str(name, 'an attribute name', 100).toLowerCase();
@@ -2439,6 +2468,7 @@ export function sandboxRuntime(mode, pageModId, pageFn, pagePowers, pageWide) {
       // (as for setting: an attribute only where it's offered, so not a form field's value)
       if (ATTR_TAGS[n] && (!ATTR_TAGS[n].has(node.localName) || node.namespaceURI !== HTML_NS)) fail(`${n} isn't offered on <${node.localName}>`);
       node.removeAttribute(n);
+      if (LABEL_ATTRS.test(n)) relabel(node);
     },
     get classes() {
       const node = nodeOf(this);
@@ -2559,11 +2589,11 @@ export function sandboxRuntime(mode, pageModId, pageFn, pagePowers, pageWide) {
     get next() { return wrap(nodeOf(this).nextElementSibling); },
     get previous() { return wrap(nodeOf(this).previousElementSibling); },
     get created() { return created.has(nodeOf(this)); },
-    append(...kids) { const n = nodeOf(this); notInEditor(n, 'adding'); const k = kids.map(kidOf); textInto(n, k); if (inEditor(n)) editorWrite(n, (rg) => rg.setEnd(n, n.childNodes.length), 0, k.map((x) => x.textContent).join('')); n.append(...k); wrote(n); },
-    prepend(...kids) { const n = nodeOf(this); notInEditor(n, 'adding'); const k = kids.map(kidOf); textInto(n, k); if (inEditor(n)) editorWrite(n, (rg) => rg.setEnd(n, 0), 0, k.map((x) => x.textContent).join('')); n.prepend(...k); wrote(n); },
-    before(...kids) { const n = nodeOf(this); notInEditor(n.parentElement, 'adding'); const k = kids.map(kidOf); if (n.parentNode) textInto(n.parentNode, k); if (inEditor(n.parentElement)) editorWrite(n.parentElement, (rg) => rg.setEndBefore(n), 0, k.map((x) => x.textContent).join('')); n.before(...k); wrote(n.parentElement); },
-    after(...kids) { const n = nodeOf(this); notInEditor(n.parentElement, 'adding'); const k = kids.map(kidOf); if (n.parentNode) textInto(n.parentNode, k); if (inEditor(n.parentElement)) editorWrite(n.parentElement, (rg) => rg.setEndAfter(n), 0, k.map((x) => x.textContent).join('')); n.after(...k); wrote(n.parentElement); },
-    remove() { const n = nodeOf(this); notInEditor(n, 'removing'); detachOk(n, false); if (inEditor(n.parentElement)) editorWrite(n.parentElement, (rg) => rg.setEndBefore(n), n.textContent.length, ''); n.remove(); wrote(n.parentElement || n); },
+    append(...kids) { const n = nodeOf(this); notInEditor(n, 'adding'); const k = kids.map(kidOf); textInto(n, k); if (inEditor(n)) editorWrite(n, (rg) => rg.setEnd(n, n.childNodes.length), 0, k.map((x) => x.textContent).join('')); n.append(...k); relabel(n); wrote(n); },
+    prepend(...kids) { const n = nodeOf(this); notInEditor(n, 'adding'); const k = kids.map(kidOf); textInto(n, k); if (inEditor(n)) editorWrite(n, (rg) => rg.setEnd(n, 0), 0, k.map((x) => x.textContent).join('')); n.prepend(...k); relabel(n); wrote(n); },
+    before(...kids) { const n = nodeOf(this); notInEditor(n.parentElement, 'adding'); const k = kids.map(kidOf); if (n.parentNode) textInto(n.parentNode, k); if (inEditor(n.parentElement)) editorWrite(n.parentElement, (rg) => rg.setEndBefore(n), 0, k.map((x) => x.textContent).join('')); n.before(...k); relabel(n.parentElement); wrote(n.parentElement); },
+    after(...kids) { const n = nodeOf(this); notInEditor(n.parentElement, 'adding'); const k = kids.map(kidOf); if (n.parentNode) textInto(n.parentNode, k); if (inEditor(n.parentElement)) editorWrite(n.parentElement, (rg) => rg.setEndAfter(n), 0, k.map((x) => x.textContent).join('')); n.after(...k); relabel(n.parentElement); wrote(n.parentElement); },
+    remove() { const n = nodeOf(this); notInEditor(n, 'removing'); detachOk(n, false); if (inEditor(n.parentElement)) editorWrite(n.parentElement, (rg) => rg.setEndBefore(n), n.textContent.length, ''); relabel(n.parentElement); n.remove(); wrote(n.parentElement || n); },
     // a copy of this element and what's inside it, keeping only allowed elements and attributes (an element
     // of another kind is left out, with what's inside it; other attributes are dropped)
     clone() {
@@ -2595,9 +2625,19 @@ export function sandboxRuntime(mode, pageModId, pageFn, pagePowers, pageWide) {
       const api = cur();
       notLeaving();
       if (!api.powers.has('click')) fail('clicking for the user needs the click power, with what it may click named in the header (// @click words: selector)');
-      const named = (api.args.click || []).map((c) => String(c).replace(/^[^:]*:\s*/, '')).filter(Boolean);
-      let ok = false;
-      for (const sel of named) { try { if (n.matches(sel)) { ok = true; break; } } catch { /* not a selector */ } }
+      // (each line: its words, and its selector; words in quotes are what the thing has to say: above)
+      const named = (api.args.click || []).map((c) => { const t = String(c); const i = t.search(/:\s/); return i < 0 ? null : { words: t.slice(0, i).trim(), sel: t.slice(i + 1).trim() }; }).filter((x) => x && x.sel);
+      let ok = false, wanted = null;
+      for (const { words, sel } of named) {
+        let hit = false;
+        try { hit = n.matches(sel); } catch { hit = false; }
+        if (!hit) continue;
+        const q = /^["\u201c](.+)["\u201d]$/.exec(words);
+        if (!q) { ok = true; break; }
+        if (!relabelled.has(n) && saysOf(n).includes(foldWords(q[1]))) { ok = true; break; }
+        wanted = q[1];
+      }
+      if (!ok && wanted !== null) fail(relabelled.has(n) ? `the header lets this mod click what says "${wanted}", and a boxed mod changed what this says, so TRIF can't tell` : `the header lets this mod click what says "${wanted}", and this says "${saysOf(n).slice(0, 60)}"`);
       if (!ok) fail('that isn\'t one of the things the header says this mod may click');
       clickOk(api);
       if (submits(n)) fail('a click that would submit or reset a form isn\'t offered, whatever the header says');

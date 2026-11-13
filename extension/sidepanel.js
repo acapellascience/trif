@@ -2454,7 +2454,7 @@ function openCodeView(id, { error = null } = {}) {
   P.chip.textContent = k[1];
   P.where.replaceChildren(`${m.id.split('/')[0]} · `, fileLink(String(m.file || '').split(/[\\/]/).pop() || `${m.id.split('/').pop()}.js`,
     IS_MAC ? 'Show in Finder' : 'Show in folder', () => revealMod('folder'), 'cv-file'),
-    ...(m.source === 'webmods' || m.source === 'trif' ? [' · ', el('span', 'cv-source', `Tim's mod${m.version ? `, v${m.version}` : ''}`)] : []));
+    ...(m.source === 'webmods' || m.source === 'trif' ? [' · ', el('span', 'cv-source', `Tim's mod${m.version ? `, v${m.version}` : ''}${m.sourceChanged ? ', changed' : ''}`)] : []));
   const { everywhere, sites } = modSites(m);
   const site = m.id.split('/')[0];
   // (the level, powers and warnings with their "more": explain.json)

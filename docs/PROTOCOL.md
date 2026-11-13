@@ -276,8 +276,8 @@ Without one, the target is the active tab of the last-focused normal window.
 | `tabs` | – | `[{id, windowId, active, url, title}]` (normal windows only) |
 | `run` | `code`, `expression: bool`, `timeout` (ms, default 10000) + tab selector | `{value}`: the code's result, made JSON-safe in the page (see below), or an error `{ok:false, error:"<message + stack>"}` |
 | `reload` | `hard: bool` + tab selector | `{url}` after the tab's `status` is `complete` (timeout 30 s) |
-| `navigate` | `to` (URL) + tab selector | `{url}` after load completes |
-| `open` | `to` (URL) | `{id, url}`: opens a new background tab (never takes focus), waits for load |
+| `navigate` | `to` (URL) + tab selector | `{url}` after load completes. From a side-panel run: the tab's page loads are kept to the run's site while it loads (see "Run scope", "Navigation") |
+| `open` | `to` (URL) | `{id, url}`: opens a new background tab (never takes focus), waits for load. From a side-panel run: as `navigate`, from an empty tab |
 | `text` | tab selector | `{url, title, text}`: `document.body.innerText`, capped at 200 000 chars |
 | `sweep` | `selector`, `text` (regex; `/re/flags`, else case-insensitive), `color` (any CSS colour), `tolerance` (0-255 per channel, default 2), `limit` (matches returned, default 200), `budget` (ms, default 4000), `scroll` (bool) + tab selector | Every instance of a kind of thing on the page, from `extension/sweep.js` run in the isolated world: `{url, query, target, scanned:{elements, roots, shadowRoots, closedShadowRoots, frames, ms}, partial, skipped:{crossOriginFrames, unreadableSheets}, total, summary:{visible, hidden, inViewport, fixed, sticky, inShadowRoots, inFrames, regions, props}, groups:[{signature, count, visible, regions, example}], matches:[{element, text, region, position, visible, inViewport, root, props?}], rules}`. Searches the document, shadow roots (closed ones through `chrome.dom.openOrClosedShadowRoot` / Firefox's `openOrClosedShadowRoot`) and same-origin frames. With `color`, `rules` lists the stylesheet rules and custom properties using it, and the rules using those (`var()`). `partial` says why it stopped early (time budget, 100 000 elements). |
 | `screenshot` | `full: bool`, `copy: bool`, `timeout` (ms) + tab selector | `{dataUrl, how, note, full, cut?}` PNG (`extension/screenshot.js`). The extension never switches tabs or focuses windows, since agents may run while the user browses. `how`: `visible` (captureVisibleTab of a tab that's showing), `tab` (Firefox's `tabs.captureTab`: any tab in its exact state, `full` from its page rect, up to 12 000 px), `copy` (Chrome, a tab that isn't showing or `full`, only with `copy: true`, otherwise an error that names `trif screenshot --copy` and suggests sweep/text/run: a fresh copy of the tab's URL loaded, muted, in a new unfocused window the size of the tab's, against the right edge of the screen with 45% of it past the edge (Chrome doesn't draw covered windows, and refuses bounds less than half on screen; refused bounds fall back to the tab's window position), at the tab's scroll position, captured, and closed; `stale: true` when the copy's page was hidden anyway, so captures after a scroll may be old frames; `full` stitches up to 14 captures, hiding fixed and sticky elements after the first). `note` tells the agent what it got when that isn't simply the tab on screen. Safari: a tab that isn't showing is an error. Without `<all_urls>` (see "Site access"): only `visible`, of a tab the user clicked TRIF's toolbar button on (`activeTab`); anything else is an error saying so. Copy windows are listed in `chrome.storage.session` `probes` while open, and closed on the next start if the worker stopped mid-capture. The CLI writes the image to a file and the note to stderr. |
@@ -1180,10 +1180,18 @@ Suffix List). `helper/lib/scope.js` computes it; `extension/lib.js` mirrors the 
 - **Locked tabs.** Before a run's `run` command executes code in a tab, the extension locks the tab
   (extension/tablock.js; docs/SECURITY.md): declarativeNetRequest session rules (the plain permission: block
   rules need no host access, so they also cover sites TRIF has none for) block every POST, PUT,
-  PATCH, DELETE and WebSocket from it, and pages, frames, fetches and XHR to other sites, until it shows a
+  PATCH, DELETE, every method the browser has no name for ("other") and every WebSocket from it, and pages, frames, fetches and XHR to other sites, until it shows a
   new document (a marker in the extension's isolated
   world tells documents apart). If the lock can't be set up, `run` fails and the code doesn't run. The
   panel's status has `lockedTabs: [{tabId, site, url, since}]`.
+- **Navigation.** `navigate` and `open` only take addresses on the run's site, but a site can send a tab on
+  (its own redirect: `/url?q=…`, `?next=…`), and the address would carry whatever the agent put in it to
+  another site, with no code run and so no lock. So while the page loads, and five seconds after, one
+  session rule keeps that tab's page loads (`main_frame`) to the site (`tablock.js` guardNavigation): the hop
+  is blocked before any request goes to the other site. Where the tab ended up is then checked: outside the
+  site, the command fails saying so (`open` closes its tab; `navigate` sends the tab back). If the rule can't
+  be set, the tab isn't sent anywhere. `open` loads an empty tab first, so the rule is there before the first
+  request. A terminal's `navigate` and `open` (no scope) are as before.
 - **Held mods.** Whoever wrote a mod, it's held while it's new or changed since the helper last let
   it run (`~/.trif/seen.json`, mod id -> hash; the first time, every mod there is recorded as it is) and
   it can do something not allowed for it (`held: {…, by: "outside"}`, `runId: null`; `trif approve` or the
@@ -1242,11 +1250,22 @@ Suffix List). `helper/lib/scope.js` computes it; `extension/lib.js` mirrors the 
     `/media`, `/mnt` and `/run/media` on Linux, but the home folder, the way to what the run may read, and
     `/Volumes/Macintosh HD`, a link to `/`; Codex), the user's own folder beside `$TMPDIR` (its caches;
     Codex), and the system's temporary folders (below). The system's own folders stay readable.
-  - **Writes:** the mods folder, with every existing folder of another site (`all-sites/` included)
-    read-only inside it; the run's screenshots folder; its mailbox. Not `held.json`, `preinstalled.json`, `.shipped/`,
-    `origins.json`, `active-runs/`, `update.json`, `trash/`, `history/`, `.ran/`, `seen.json`, `allowed.json`, `instructions.md`, `AGENTS.md`, `TECHNIQUES.md`, `CLAUDE.md`,
-    `.claude/`, `bin/` or `app/`. A run's commands can still create a folder for another site; its mods are
-    held like any out-of-scope mod.
+  - **Writes:** the mods folder, with every existing folder of another site read-only inside it (not
+    `all-sites/`: a mod for every site may be edited from any site's chat, and waits for the user's OK, below);
+    the run's screenshots folder; its mailbox. Not `held.json`, `preinstalled.json`, `.shipped/`,
+    `origins.json`, `active-runs/`, `update.json`, `trash/`, `history/`, `.ran/`, `seen.json`, `allowed.json`,
+    the switches, a `config.json`, `instructions.md`, `AGENTS.md`, `TECHNIQUES.md`, `CLAUDE.md`,
+    `.claude/`, `bin/` or `app/` (Claude Code's sandbox `denyWrite` names each: `claude.js` STATE_FILES). A
+    run's commands can still create a folder for another site; its mods are held like any out-of-scope mod.
+    - A free mod that runs on every site (`<all_urls>`, `*://*/*`) is allowed as the version the user saw:
+      a run's later change to it waits again (`held.js` versionLine), since a run works for one site and
+      TRIF's reading of a free mod's code is a checkpoint, not a wall. Style and boxed mods don't ask again.
+    - A site folder that is a link is denied to the run by both its paths, but is never one "the run couldn't
+      write" (`locked`): a mod reached through it is the run's, held like any out-of-scope mod. A chat's
+      `mod.delete` and `mod.restore` refuse a site folder that is a link (`trash.js` ownFolder).
+    - No file an agent reads as instructions (`CLAUDE.md`, `AGENTS.md`, `.claude/`, `.codex/`) under the mods
+      folder: Claude Code's file tools are denied them, and any found there when a run starts is moved to
+      `trash/_instructions/` (`runs.js` instructionFiles), so a run can't leave one for the next.
   - **Temporary folders:** a run's own, never the system's (`/tmp` and `$TMPDIR` hold other programs'
     files, and `/tmp/claude-<uid>` every Claude Code session's scratch files and task output, some of which
     those sessions later run). Codex's `:workspace` profile makes both writable: the profile denies them

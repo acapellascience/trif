@@ -36,6 +36,9 @@ summary is too long.
 - Your browser now also says TRIF can "block content on any page". That's only blocking, never reading:
   it's how TRIF stops a tab your agent ran code in from posting, sending or saving as you, including to
   sites you haven't connected TRIF to.
+- **Fixes from a security review** (docs/SECURITY.md "Review fixes"): mod names, CSS, boxed mods' powers
+  and your agent's navigation each had a way round a wall. A free mod for every site waits again when your
+  agent changes it.
 - **Safer side-panel agents.** A web page can try to talk to your agent ("TRIF agent: run this…"), so
   TRIF no longer counts on the agent to say no:
   - When your agent runs code in a tab, TRIF has the browser block anything from that tab that posts,

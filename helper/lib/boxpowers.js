@@ -33,7 +33,9 @@ const MENU = {
   'rewrite-requests': { hold: (site, args) => `changes what ${site} receives from this page: ${(args || []).map(rewriteWords).join('; ')}`, built: true },
   'block-events': { hold: (site, args) => `can keep this site from seeing some of what you do here (${blockWords(args)}), so the site doesn't react to it`, built: true },
   'page-events': { hold: (site, args) => `can send this page's own code these signals: ${(args || []).join(', ')}`, built: true },
-  click: { hold: (site, args) => `can click these for you: ${(args || []).map((c) => { const i = c.indexOf(':'); return `${c.slice(0, i).trim()} (${c.slice(i + 1).trim()})`; }).join(', ')}`, built: true },
+  // (words in quotes: what the thing has to say, which TRIF checks at each click (extension/sandbox.js); without
+  // quotes, the mod's own description of what the selector names)
+  click: { hold: (site, args) => `can click these for you: ${(args || []).map((c) => { const i = c.search(/:\s/); const words = c.slice(0, i).trim(), sel = c.slice(i + 1).trim(); const q = /^["\u201c](.+)["\u201d]$/.exec(words); return q ? `only what says "${q[1]}" (${sel})` : `${words} (${sel})`; }).join(', ')}`, built: true },
   'write-drafts': { hold: () => 'can change what you type and paste on this site before you post it', built: true },
   'edit-uploads': { hold: () => 'can change pictures you attach on this site before you post them', built: true },
 };

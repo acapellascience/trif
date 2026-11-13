@@ -28,11 +28,17 @@ most mods never need that trust.
 ## 1. Style mods
 
 **What runs.** No mod code. TRIF's runtime applies the rules: selectors, text replacements (as
-textContent), regexes with a time limit, one shared MutationObserver.
+textContent, never inside an editor), regexes (checked for nested repeats, and run on at most 20,000
+characters of a text node; there is no time limit), one shared MutationObserver.
 
-**The guards.** The CSS may not load anything: no `url()` other than `data:` or `#fragment`, no
-`@import`, no escapes outside strings that could spell one, no selector on the `value` attribute or
-`:autofill` (attribute selectors plus a loading background would leak field values otherwise).
+**The guards.** The CSS may not load anything: no `url()` other than `data:` (boxed mods: also `#fragment`
+and an image the page shows), no `@import`, `image-set()`, `src()` and the like, no escapes outside strings
+that could spell one, no selector on the `value` attribute or `:autofill` (attribute selectors plus a
+loading background would leak field values otherwise). The check reads the text the way a browser parses it
+(`cssScan`, the same in helper/lib/rules.js and extension/sandbox.js): a quoted string ends at a line break,
+and an unquoted `url()` is one token. Before the November review it read a string on to the next quote and
+took `/*` inside a `url()` for a comment, so CSS could sit where the check saw a string or a comment and the
+browser saw rules; tests/css-browser.test.js runs every allowed case in a real browser.
 
 **Known gap: clickjacking (RT-3, open, tier-wide).** CSS can make a real control invisible and float it over
 a decoy, so the user's own click lands on it. Not closed in code; the panel's wording doesn't claim

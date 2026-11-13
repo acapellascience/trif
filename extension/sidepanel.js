@@ -11,7 +11,8 @@ import { siteForUrl, modAppliesTo, modSites, isMultiSite, offOnSite, normalizeOf
 import { setMarkdown, unwrapMarkdown } from './markdown.js';
 import { createLogin } from './login.js';
 import { agentLevel, agentSiteOf, sensitiveList } from './agentsites.js';
-import { modChip, levelWords, modLevel, powerLines } from './modlevel.js';
+import { modIcons, levelWords, modLevel, powerLines } from './modlevel.js';
+import { iconSvg } from './icons.js';
 import { loadExplain, term, warningByLine, moreText } from './explain.js';
 import { modSwitch, syncSwitches, shownEnabled, switchError, enabledIn, onSwitchChange } from './modswitch.js';
 import { mountOpenModel, renderOpenModel, openModelKeyMissing, watchOpenModel } from './openmodel.js';
@@ -1524,15 +1525,26 @@ function modItem(m) {
   const label = el('span', null, m.name);
   label.id = labelId;
   name.append(label);
-  // The chip (modlevel.js): its powers and how noticeable it is. Hover says what; a click opens the code card.
-  const info = modChip(m, view.site);
-  if (info) {
-    const chip = el('button', `mod-chip ${info.tone}`, info.text);
-    chip.type = 'button';
-    chip.title = info.title;
-    chip.setAttribute('aria-describedby', labelId);
-    chip.addEventListener('click', (e) => { e.stopPropagation(); openCodeView(m.id); });
-    name.append(chip);
+  // Its icons (modlevel.js modIcons, icons.js): one per power, then how noticeable it is. Each icon's hover
+  // says what it does for this mod; a click on any opens the code card. (One button: one stop for the keyboard,
+  // its label all the icons' words.)
+  const icons = modIcons(m, view.site);
+  if (icons.length) {
+    const box = el('button', 'mod-icons');
+    box.type = 'button';
+    box.setAttribute('aria-label', icons.map((i) => i.title).join('\n'));
+    box.setAttribute('aria-describedby', labelId);
+    icons.forEach((i, n) => {
+      if (n && i.level && !icons[n - 1].level) box.append(el('span', 'mod-ic-sep'));
+      const ic = el('span', `mod-ic ${i.tone}`);
+      ic.dataset.icon = i.key;
+      ic.title = i.title;
+      const svg = iconSvg(i.key);
+      if (svg) ic.append(svg); else ic.textContent = i.key; // (a power this panel has no icon for: its name)
+      box.append(ic);
+    });
+    box.addEventListener('click', (e) => { e.stopPropagation(); openCodeView(m.id); });
+    name.append(box);
   }
   // The tags: at most one shows, the most urgent (updateModItem: showOneTag; data-rank, lowest first)
   const tag = el('span', 'tag row-tag');

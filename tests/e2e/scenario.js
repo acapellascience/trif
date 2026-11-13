@@ -2830,7 +2830,7 @@ process.exitCode = 1;
       // the approval dialog: opened by itself for the new hold (the one waiting, or one of them)
       const rowInfo = await waitFor('the panel\'s hold', () => this.panel(`async () => {
         const li = document.querySelector('li[data-mod="127.0.0.1/e2e-pw-all"]');
-        return li && li.classList.contains('held') ? { tag: li.querySelector('.tag.on-hold')?.textContent, powers: li.querySelector('.mod-chip')?.textContent, hover: li.querySelector('.mod-chip')?.title, group: li.dataset.group } : null;
+        return li && li.classList.contains('held') ? { tag: li.querySelector('.tag.on-hold')?.textContent, powers: [...li.querySelectorAll('.mod-ic')].map((i) => i.dataset.icon).join(' '), hover: [...li.querySelectorAll('.mod-ic')].map((i) => i.title).join('\\n'), group: li.dataset.group } : null;
       }`), { timeoutMs: 15000 });
       const opened = await waitFor('the approval dialog, by itself', () => this.approvalState(), { timeoutMs: 10000 }).catch(() => null);
       if (!opened) problems.push('the approval dialog didn\'t open by itself for a new hold');
@@ -2843,7 +2843,7 @@ process.exitCode = 1;
         note: 'It\'s new or changed since TRIF last let it run. Updates that ask for the same powers won\'t ask again.', show: 'Show code',
       };
       for (const [k, v] of Object.entries(want)) if (JSON.stringify(row[k]) !== JSON.stringify(v)) problems.push(`the approval dialog's ${k}: ${JSON.stringify(row[k])}`);
-      if (rowInfo.tag !== 'on hold' || rowInfo.powers !== '3 powers' || !/read-drafts can read what you type/.test(rowInfo.hover) || rowInfo.group !== 'sandboxed') problems.push(`the held row: ${JSON.stringify(rowInfo)}`);
+      if (rowInfo.tag !== 'on hold' || rowInfo.powers !== 'read-drafts sound controls' || !/^It can read what you type/.test(rowInfo.hover) || rowInfo.group !== 'sandboxed') problems.push(`the held row: ${JSON.stringify(rowInfo)}`);
       // the screenshots, in both themes (Chrome; Firefox's driver can't set the colour scheme)
       for (const scheme of ['dark', 'light']) if (await this.d.colorScheme(this.panelCtx, scheme)) { await sleep(150); await this.shot(this.panelCtx, `approval-powers-${scheme}`); }
       await this.d.colorScheme(this.panelCtx, '');
@@ -4211,32 +4211,33 @@ process.exitCode = 1;
       for (const [id, text] of Object.entries(files)) fs.writeFileSync(path.join(dir, `${id}.js`), text);
       await this.ext(`async (id, url) => { await chrome.tabs.update(id, { url, active: true }); }`, [win.tabId, `${base}/rows.html`]);
       const rowsOf = () => this.panel(`async () => Object.fromEntries([...document.querySelectorAll('#mod-list li[data-mod*="e2e-row-"]')].map((li) => {
-        const chip = li.querySelector('.mod-chip'), desc = li.querySelector('.mod-desc'), sw = li.querySelector('button.switch, .tag.on-hold'), code = li.querySelector('.mod-code'), bin = li.querySelector('.mod-delete');
+        const icons = [...li.querySelectorAll('.mod-icons .mod-ic')], desc = li.querySelector('.mod-desc'), sw = li.querySelector('button.switch, .tag.on-hold'), code = li.querySelector('.mod-code'), bin = li.querySelector('.mod-delete');
         const r = (e) => e.getBoundingClientRect();
-        return [li.dataset.mod.split('/')[1], { chip: chip?.textContent || null, tone: chip ? [...chip.classList].filter((c) => c !== 'mod-chip').join() : null, hover: chip?.title || '',
+        return [li.dataset.mod.split('/')[1], { chip: icons.map((i) => i.dataset.icon).join(' ') || null, tone: icons.length ? [...new Set(icons.map((i) => [...i.classList].filter((c) => c !== 'mod-ic').join()))].join('/') : null, hover: icons.map((i) => i.title).join('\\n'), drawn: icons.every((i) => i.querySelector('svg path')),
           old: li.querySelectorAll('.mod-file, .mod-source, .tag.risk, .mod-powers').length, oneLine: desc ? desc.scrollWidth > desc.clientWidth && r(desc).height < 24 : false,
           gapSwitch: Math.round(r(code).left - r(sw).right), gapBin: Math.round(r(bin).left - r(code).right) }];
       }))`);
       const rows = await waitFor('the rows', async () => { const x = await rowsOf(); return Object.keys(x).length === 5 && x['e2e-row-together'].chip ? x : null; }, { timeoutMs: 20000, intervalMs: 500 });
       await this.dismissApproval();
-      const want = { 'e2e-row-plain': [null, null], 'e2e-row-noticeable': ['noticeable', 'muted'], 'e2e-row-requests': ['changes requests', 'amber'], 'e2e-row-power': ['1 power · noticeable', 'green'], 'e2e-row-together': ['2 powers', 'amber'] };
+      // (the icons, by name, and their tones: modlevel.js modIcons)
+      const want = { 'e2e-row-plain': [null, null], 'e2e-row-noticeable': ['noticeable', 'muted'], 'e2e-row-requests': ['changes-requests', 'amber'], 'e2e-row-power': ['site-data noticeable', 'muted'], 'e2e-row-together': ['read-drafts sound', 'amber'] };
       for (const [id, [chip, tone]] of Object.entries(want)) {
         const x = rows[id];
-        if (x.chip !== chip || x.tone !== tone) problems.push(`${id}'s chip: ${JSON.stringify(x)}`);
+        if (x.chip !== chip || x.tone !== tone || (chip && !x.drawn)) problems.push(`${id}'s icons: ${JSON.stringify(x)}`);
         if (x.old) problems.push(`${id} still shows ${x.old} of the old row's parts`);
         if (!x.oneLine) problems.push(`${id}'s description isn't one line with an ellipsis: ${JSON.stringify(x)}`);
         if (Math.abs(x.gapSwitch - 10) > 1 || Math.abs(x.gapBin - 2) > 1) problems.push(`${id}'s controls: ${x.gapSwitch}px, then ${x.gapBin}px`);
       }
-      if (!/site-data can see and filter/.test(rows['e2e-row-power'].hover) || !/Noticeable: 127\.0\.0\.1 could tell/.test(rows['e2e-row-power'].hover)) problems.push(`the chip's hover: ${rows['e2e-row-power'].hover}`);
+      if (!/^It can see and filter/.test(rows['e2e-row-power'].hover) || !/Noticeable: 127\.0\.0\.1 could tell/.test(rows['e2e-row-power'].hover)) problems.push(`the icons' hover: ${rows['e2e-row-power'].hover}`);
       await themes('mod-rows');
       // a click on the chip: the code card, with what the row left out
       await this.dismissApproval();
-      await this.panel(`async () => { document.querySelector('li[data-mod="${site}/e2e-row-power"] .mod-chip').click(); return true; }`);
+      await this.panel(`async () => { document.querySelector('li[data-mod="${site}/e2e-row-power"] .mod-icons').click(); return true; }`);
       const about = await waitFor('the card', () => this.panel(`async () => { const d = document.getElementById('code-view'); return d?.open ? { mod: d.dataset.mod, about: d.querySelector('.cv-about').textContent, more: d.querySelectorAll('.cv-about .more-btn').length, file: d.querySelector('.cv-file')?.textContent } : null; }`), { timeoutMs: 8000 });
       if (about.mod !== `${site}/e2e-row-power` || !/Noticeable/.test(about.about) || !/Power: site-data/.test(about.about) || about.more < 2 || about.file !== 'e2e-row-power.js') problems.push(`the card: ${JSON.stringify(about)}`);
       await themes('mod-rows-card');
       if (problems.length) throw new Error(problems.join('\n'));
-      return `chips: ${Object.values(rows).map((x) => x.chip || '(none)').join(' | ')}; controls ${rows['e2e-row-plain'].gapSwitch}px then ${rows['e2e-row-plain'].gapBin}px; the chip opens the card`;
+      return `icons: ${Object.values(rows).map((x) => x.chip || '(none)').join(' | ')}; controls ${rows['e2e-row-plain'].gapSwitch}px then ${rows['e2e-row-plain'].gapBin}px; the icons open the card`;
     } finally {
       for (const id of Object.keys(files)) { try { fs.unlinkSync(path.join(dir, `${id}.js`)); } catch { /* gone */ } }
       await this.panel(`async () => { const d = document.getElementById('code-view'); if (d && d.open) d.close(); return true; }`).catch(() => {});

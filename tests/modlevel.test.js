@@ -51,3 +51,26 @@ test('the helper gives the panel each power\'s words and the combination warning
   assert.ok(info.warnings.length >= 1 && /^together, it /.test(info.warnings[0]), JSON.stringify(info.warnings));
   assert.deepEqual(powerInfo({ site: 'x.com', powers: ['sound'] }).warnings, []);
 });
+
+test('the row icons: one per power with what it does for this mod, then how noticeable; warnings turn powers amber', async () => {
+  const { modIcons } = await load();
+  assert.deepEqual(modIcons({ name: 'x' }, 'x.com'), []);
+  assert.deepEqual(modIcons({ risk: { tier: 1 } }, 'x.com').map((i) => [i.key, i.tone]), [['noticeable', 'muted']]);
+  assert.deepEqual(modIcons({ risk: { tier: 2 } }, 'x.com').map((i) => [i.key, i.tone]), [['changes-requests', 'amber']]);
+  const one = modIcons({ sandboxed: true, powers: ['site-data'], powerInfo: { facts: [{ power: 'site-data', fact: 'can see and filter what x.com sends this page' }], warnings: [] } }, 'x.com');
+  assert.deepEqual(one.map((i) => [i.key, i.tone]), [['site-data', 'muted'], ['noticeable', 'muted']]);
+  assert.equal(one[0].title, 'It can see and filter what x.com sends this page.');
+  assert.match(one[1].title, /^Noticeable: x\.com could tell/);
+  const warned = modIcons({ sandboxed: true, powers: ['read-drafts', 'sound'], powerInfo: { facts: [], warnings: ['together, it can play what you type'] } }, 'x.com');
+  assert.deepEqual(warned.map((i) => [i.key, i.tone]), [['read-drafts', 'amber'], ['sound', 'amber']]);
+  assert.match(warned[0].title, /^read-drafts\nTogether, it can play what you type$/);
+  const migrate = modIcons({ sandboxed: true, powers: [], powerInfo: { facts: [{ power: 'migrate', fact: 'brings over its old settings from what this site keeps under: a (once)' }], warnings: [] } }, 'x.com');
+  assert.deepEqual(migrate.map((i) => i.key), ['@migrate']);
+});
+
+test('every power TRIF knows, @migrate and both levels have a row icon (extension/icons.js)', async () => {
+  const { ICONS } = await import('../extension/icons.js');
+  const { NAMES } = require('../helper/lib/boxpowers');
+  const names = Array.isArray(NAMES) ? NAMES : [...NAMES];
+  for (const p of [...names, '@migrate', 'noticeable', 'changes-requests']) assert.ok(Array.isArray(ICONS[p]) && ICONS[p].length, `no icon for ${p}`);
+});

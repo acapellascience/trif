@@ -54,3 +54,27 @@ export function modChip(m, site) {
   const title = [...powerLines(m), ...warnings.map(upper), ...(level ? [levelWords(m, site)] : [])].join('\n');
   return { text: parts.join(' · '), tone, title };
 }
+
+/**
+ * The row's icons (extension/icons.js), in place of the chip's words: one per power, with what it does for this
+ * mod on hover, then one for how noticeable it is. [] when there's nothing to say.
+ * Each: {key: an ICONS key, title, tone: 'muted'|'amber'}. Combination warnings (powerInfo.warnings) turn the
+ * powers amber, as they turned the chip, and are added to each power's hover.
+ */
+export function modIcons(m, site) {
+  const level = modLevel(m);
+  const out = [];
+  if (m?.sandboxed) {
+    const facts = new Map((m.powerInfo?.facts || []).map((f) => [f.power, f.fact]));
+    const warnings = (m.powerInfo?.warnings || []).map(upper);
+    const tone = warnings.length ? 'amber' : 'muted';
+    const say = (p) => (facts.get(p) ? `It ${facts.get(p)}.` : p);
+    for (const p of Array.isArray(m.powers) ? m.powers : []) {
+      out.push({ key: p, title: [say(p), ...warnings].join('\n'), tone, power: p });
+    }
+    if (facts.has('migrate')) out.push({ key: '@migrate', title: say('migrate'), tone: 'muted', power: 'migrate' });
+  }
+  if (level >= 2) out.push({ key: 'changes-requests', title: levelWords(m, site), tone: 'amber', level });
+  else if (level === 1) out.push({ key: 'noticeable', title: levelWords(m, site), tone: 'muted', level });
+  return out;
+}

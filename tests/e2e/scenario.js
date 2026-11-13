@@ -1590,7 +1590,7 @@ class Scenario {
       return files[0] || null;
     };
     const workStats = (file) => {
-      const st = { tools: 0, reloads: 0, runs: 0, injects: 0, sweeps: 0, screenshots: 0, verifies: 0, guideReads: [], maxContext: 0, turns: null, cost: null, reply: '', blocked: 0, firstWords: null, firstLine: '' };
+      const st = { tools: 0, reloads: 0, runs: 0, injects: 0, sweeps: 0, screenshots: 0, verifies: 0, pageRuns: 0, boxMisses: 0, guideReads: [], maxContext: 0, turns: null, cost: null, reply: '', blocked: 0, firstWords: null, firstLine: '' };
       let started = null;
       if (!file) return st;
       const texts = [];
@@ -1613,6 +1613,7 @@ class Scenario {
             if (c.name !== 'Bash') continue;
             st.reloads += (cmd.match(/\btrif reload\b/g) || []).length;
             st.verifies += (cmd.match(/\btrif verify\b/g) || []).length;
+            st.pageRuns += (cmd.match(/\btrif run\b[^|&;]*--page/g) || []).length;
             st.sweeps += (cmd.match(/\btrif sweep\b/g) || []).length;
             st.screenshots += (cmd.match(/\btrif screenshot\b/g) || []).length;
             const runs = cmd.split(/\btrif run\b/).slice(1);
@@ -1622,7 +1623,10 @@ class Scenario {
           }
         }
         if (o.type === 'user' && o.message && Array.isArray(o.message.content)) {
-          for (const c of o.message.content) if (c && c.type === 'tool_result' && c.is_error) st.blocked++;
+          for (const c of o.message.content) {
+            if (c && c.type === 'tool_result' && c.is_error) st.blocked++;
+            if (c && c.type === 'tool_result' && /ran in TRIF's box/.test(JSON.stringify(c.content || ''))) st.boxMisses++;
+          }
         }
         if (o.type === 'result') { st.turns = o.num_turns ?? null; st.cost = o.total_cost_usd ?? null; }
       }

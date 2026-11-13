@@ -111,7 +111,7 @@ What agents read:
 The guide (helper/workspace):
 
 - AGENTS.md: the new section **A style section in boxed and free mods**; in "Mods that wait for the user's
-  OK": **…; a change to a mod's style section alone (above) always does.**; in "Mods TRIF ships": **An edit
+  OK": **…; a change to a mod's style section alone (above) runs straight away too.**; in "Mods TRIF ships": **An edit
   of one that keeps using what the shipped version did runs straight away; one that adds a power, a line
   that uses one, or a site it runs on or talks to waits for the user's OK.**
 - TECHNIQUES.md: **A free or boxed mod's looks: its style section** (one paragraph), and one sentence in

@@ -380,7 +380,7 @@ click or type for the user, navigate, load from addresses it works out while run
 or run code TRIF can't read waits, not running, until the user allows it (in the side panel, or `trif
 approve <site>/<mod>` in their terminal). TRIF reads this from the code, not from your `@risk` header.
 Once allowed, later edits run straight away unless they add such a power or add or change a line that
-uses one; a change to a mod's style section alone (above) always does. `trif status` and `trif mods` show what's waiting (HELD) and what TRIF found, and `trif check
+uses one; a change to a mod's style section alone (above) runs straight away too. `trif status` and `trif mods` show what's waiting (HELD) and what TRIF found, and `trif check
 <site>/<mod>` shows what it reads in a mod before anything waits, line by line, with how to avoid each
 thing where there's a way. Write mods it can read ("Writing mods TRIF can read" in TECHNIQUES.md): a fake
 key press to reach your own code, `x[k] = v` in a mod that mentions `href`, or a tag name in a variable

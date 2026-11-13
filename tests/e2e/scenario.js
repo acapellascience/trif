@@ -2491,7 +2491,7 @@ process.exitCode = 1;
   document.documentElement.dataset.e2eStyled = JSON.stringify({ code: ${JSON.stringify(path0)}, style: trif.style, frozen: Object.isFrozen(trif.style), leak: found.some((f) => /Zmarkerq|"settings"|==Style==/.test(f)) });
   fetch(${JSON.stringify(path0)}, { method: 'POST' });
 })();\n`;
-    const boxedFile = (gap) => `// ==WebMod==\n// @name E2E styled box\n// @match *://127.0.0.1/*\n// @boxed\n// ==/WebMod==\n${section({ css: `#title { letter-spacing: var(--gap); }`, settings: { gap: { type: 'number', value: gap, min: 0, max: 20, unit: 'px' }, look: { type: 'choice', value: 'grid', options: ['grid', 'Zmarkerq'] } } })}page.body.classes.add('trif-box-styled-' + trif.style.look + '-' + trif.style.gap);\n`;
+    const boxedFile = (gap) => `// ==WebMod==\n// @name E2E styled box\n// @match *://127.0.0.1/*\n// @boxed\n// ==/WebMod==\n${section({ css: `#title { letter-spacing: var(--gap); }`, settings: { gap: { type: 'number', value: gap, min: 0, max: 20, unit: 'px' }, look: { type: 'choice', value: 'grid', options: ['grid', 'Zmarkerq'] } } })}await trif.ready;\npage.body.classes.add('trif-box-styled-' + trif.style.look + '-' + trif.style.gap);\n`;
     const look = async () => JSON.parse((await this.cli(['run', '--tab', String(win.tabId), `({
       colour: getComputedStyle(document.getElementById('title')).color, spacing: getComputedStyle(document.getElementById('title')).letterSpacing,
       linkShown: document.querySelector('a[href="/two.html"]').getClientRects().length > 0, body: document.body.className,

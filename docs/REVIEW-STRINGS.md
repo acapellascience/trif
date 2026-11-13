@@ -232,3 +232,10 @@ The helper's log (`trif report` can include it), when a run's change isn't copie
 - **run copy r…: couldn't bring sites/x.com/a.js into the run's copy: <why>**
 - **agent run r…: copied sites/x.com/a.js to the mods folder**
 - **agent run r…: couldn't sync its working folder: <error>**
+## "This could be a boxed mod" (trif check and trif verify, for agents)
+
+- After a free mod's "ok: … parses", when everything it uses has a box equivalent: **This free mod only does
+  what a boxed mod can, and a boxed mod is the safer tier (it can't send, click or load anything, and never
+  waits for the user's OK): rewrite it as one (`// @boxed`; BOXED.md), unless it needs the page's own world.**
+  Then up to six lines of swaps, each the sandbox lint's existing tip ("- document: use page (page.find,
+  page.body, page.create)"), and "- (N more: trif check after the rewrite lists what's left)".

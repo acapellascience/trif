@@ -286,6 +286,8 @@ class Scenario {
       user: document.documentElement.dataset.trifE2eUser || null,
       target: document.getElementById('target')?.textContent || null,
       text: document.documentElement.innerText.slice(0, 2000), // all of it: a mod may add to <html> itself
+      // (and text CSS puts in ::before / ::after, which innerText leaves out: a style mod's banner is often that)
+      cssText: [...document.querySelectorAll('html, body, body > *')].flatMap((e) => ['::before', '::after'].map((p) => getComputedStyle(e, p).content)).filter((c) => c && c !== 'none' && c !== 'normal').join(' ').slice(0, 2000),
     })`);
   }
 
@@ -5294,7 +5296,7 @@ say({ type: 'result', subtype: 'success', is_error: false, result: text, session
         const added = fs.readdirSync(sitesDir).filter((f) => !before.has(f) && f.endsWith('.js'));
         if (!added.length) throw new Error(`no new mod in sites/127.0.0.1 (chat: ${c.messages.slice(n0).map((m) => `${m.role}: ${String(m.text).slice(0, 200)}`).join(' | ')})`);
         await this.cli(['reload', '--url', 'agent-claude']);
-        await this.waitPage('the agent\'s banner on the page', (x) => /Hello from the agent/i.test(x.text), 30000);
+        await this.waitPage('the agent\'s banner on the page', (x) => /Hello from the agent/i.test(`${x.text} ${x.cssText}`), 30000);
         await this.shot(this.pageCtx, `page-${agent}-mod`);
         return `${added.join(', ')}${errors.length ? `; errors in chat: ${errors.map((e) => e.text).join(' | ')}` : ''}`;
       });

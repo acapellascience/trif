@@ -9,7 +9,7 @@ import {
   normalizeDisabled, modAppliesTo, urlInScope, modInScope, applyStartOff, applyAbsorbed, findRenames, carryRenames, renameInOrder, normalizeModOrder, modSites,
   normalizeOffSites, offSiteName, offOnSite, hostInScope, withOffSites, normalizeGroupsOff, switchGroup, offSitesFor, GROUPS, scopeFor, normalizeSitesOn, siteOnFor, sitesInUse, limitToSites, applyStartSites, switchSite, fromOtherBrowser, timedUserScripts, capChat,
   ALL_ACCESS, readAccess, activeSites, hasSiteAccess, siteOrigins, siteState, siteRefusal, everySiteOrigins,
-  sensitiveSites, sensitiveHit, sensitiveListSites, sensitivePlan, normalizeSiteList, normalizePending,
+  sensitiveSites, sensitiveHit, sensitiveListSites, sensitivePlan, normalizeSiteList, normalizePending, modHome,
   FEATURES, ModsParts, fillSameMods, storedMods, modsStorageState, modsStoragePlan, normalizeStarter, applyReadded, normalizeReadded,
   applyNewMods, applyChatWaiting, normalizeNewOff, MOD_GROUPS, modGroup, groupWord, sandboxFallback, inSandboxWorld, sandboxRuntimeScript, SAFARI, siteForUrl,
   PANEL_OPEN_WAIT_MS, PANEL_LATE_MS, panelWindowUrl, panelWindowTarget, panelWindowBounds, panelWindowClick, isRobotless,
@@ -101,9 +101,9 @@ const state = {
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const errMsg = (e) => String(e?.message ?? e);
 
-// Tabs a side-panel agent ran code in: requests that change things are blocked there until the page is a
-// new one, and the site's own requests from its other tabs and from no tab while it is (tablock.js,
-// docs/SECURITY.md). The panel shows it, with a Reload button, and the tab's toolbar icon is the paused
+// Tabs a side-panel agent ran code in (`trif run --page`): requests that change things, and anything to
+// another site, are blocked there until the page is a new one, and in every other tab of the site while it
+// is, with what the site starts in any tab or none (tablock.js, docs/SECURITY.md). The panel shows it, with a Reload button, and the tab's toolbar icon is the paused
 // robot meanwhile (tablock.js sets it).
 const tabLocks = createTabLocks({
   chrome, log: (m) => console.log(`[TRIF] ${m}`), changed: () => notifyPanels(), inScope: hostInScope,
@@ -375,6 +375,11 @@ function sens() {
   sensMemo = { k, model };
   return model;
 }
+/**
+ * A sensitive site's mod (its folder's site is one): there every mod starts off until the user switches it on,
+ * the chat's too, and the chat's changes wait, whatever "Mods your chat makes" says (lib.js applyNewMods).
+ */
+const waitsThere = (m) => { const model = sens(); const home = modHome(m, model); return !!home && model.isSensitive(home); };
 /** The site a host (or URL) is in: its sensitive site of its own, else its registrable domain. */
 const siteOfHost = (h) => { let x = String(h || ''); if (/^[a-z]+:/i.test(x)) x = hostOf(x); return sens().scopeOf(x); };
 /** Whether `url` is in a run's scope: in it, and not in a site of its own inside it (mail.google.com for google.com). */
@@ -917,13 +922,13 @@ async function onModsMessage(msg) {
   // Mods from outside this browser's chat (and new versions of shipped mods TRIF put in place itself) arrive
   // switched off, before they're ever registered (lib.js applyNewMods). And with "Mods your chat makes: Wait
   // for me", what the chat changes waits, while the version before runs (applyChatWaiting).
-  const cw = applyChatWaiting(before, state.mods, { waiting: state.chatWaiting, chatWait: state.chatWait, installId: state.installId, isOn: isEnabled });
+  const cw = applyChatWaiting(before, state.mods, { waiting: state.chatWaiting, chatWait: state.chatWait, installId: state.installId, isOn: isEnabled, waits: waitsThere });
   if (cw.changed) {
     state.chatWaiting = cw.waiting;
     await save({ chatWaiting: state.chatWaiting }).catch((e) => log('warn', errMsg(e)));
   }
   const nw = applyNewMods(state.mods, { disabled: state.disabled, seen: state.seenMods, autoUpdated: state.autoUpdated, newOff: state.newOff,
-    chatWait: state.chatWait, installId: state.installId, readded: readdedBefore });
+    chatWait: state.chatWait, installId: state.installId, readded: readdedBefore, waits: waitsThere });
   if (nw.changed) {
     const switched = Object.keys(nw.newOff).filter((id) => !state.newOff[id]);
     state.disabled = nw.disabled;
@@ -2005,6 +2010,7 @@ async function uiStatus() {
       source: m.source || null, sourceChanged: !!m.sourceChanged, version: m.version || null, update: m.update || null, rules: !!m.rules, sandboxed: !!m.sandboxed, unsandboxed: !!m.unsandboxed, powers: Array.isArray(m.powers) ? m.powers : [], powerInfo: m.powerInfo || null, found: Array.isArray(m.found) ? m.found : [],
       newOff: state.newOff[m.id] && !(live.get(m.id)?.enabled ?? isEnabled(m.id)) ? state.newOff[m.id] : null,
       chatWaiting: !!state.chatWaiting[m.id],
+      ...(waitsThere(m) ? { waitsThere: true } : {}),
       imported: !!m.imported,
       fixUndo: !!(state.fixes[m.id]?.fixedHash && state.fixes[m.id].fixedHash === m.hash),
       broken: openErrors(state.health, m).map(({ fp, message, line, count, quiet }) => ({ fp, message: String(message).slice(0, 300), line, count, ...(quiet ? { quiet: true } : {}) })).slice(0, 10),
@@ -2776,7 +2782,8 @@ async function onAgentEvent(runId, event, relay = true) {
         if (undoable.length) {
           chat.messages.push({ role: 'mod', text: `Changed ${undoable.map(modFileName).join(', ')}.`, undoChange: undoable, time });
           // ("Mods your chat makes: Wait for me": what it made or changed waits; Show code and Turn on, each)
-          if (state.chatWait) for (const id of undoable) chat.messages.push({ role: 'mod', text: `${modFileName(id)} waits for you.`, waitMod: id, time });
+          // (and on a sensitive site, whatever the setting: waitsThere)
+          for (const id of undoable) if (state.chatWait || waitsThere({ id })) chat.messages.push({ role: 'mod', text: `${modFileName(id)} waits for you.`, waitMod: id, time });
         }
         // (a fix run that changed its mod: the card says so, with Undo fix; so does the mod's row)
         const fx = state.fixRuns.get(runId);

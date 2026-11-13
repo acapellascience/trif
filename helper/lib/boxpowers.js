@@ -43,7 +43,12 @@ const MENU = {
 const storageWords = (args) => (args || []).map((a) => { const [area, ...k] = a.split(':'); const key = k.join(':'); return area === 'cookie' ? `${key} (a cookie: only read)` : key; }).join(', ');
 const rewriteWords = (rule) => {
   const [op, ...sets] = String(rule).split(' ');
-  return `${sets.map((x) => { const i = x.indexOf('='); return `${x.slice(0, i).split('.').pop()} set to ${x.slice(i + 1)}`; }).join(', ')} (in ${op} requests)`;
+  return `${sets.map((x) => {
+    const i = x.indexOf('=');
+    const v = x.slice(i + 1);
+    const j = v.indexOf('→');
+    return `${x.slice(0, i).split('.').pop()} set to ${j < 0 ? v : `${v.slice(j + 1)} in place of ${v.slice(0, j).split('|').join(' or ')}`}`;
+  }).join(', ')} (in ${op} requests)`;
 };
 const BLOCK_WORDS = [[/^(mouse|pointer)(over|out|enter|leave|move)$/, 'the mouse moving over things'], [/^key/, 'keys'], [/^(click|dblclick|auxclick|contextmenu|mousedown|mouseup|pointerdown|pointerup)$/, 'clicks'],
   [/^(wheel|scroll)$/, 'scrolling'], [/^touch/, 'touches'], [/^(drag|drop)/, 'dragging']];
@@ -97,18 +102,39 @@ function checkStorageKey(a) {
   if (TOKENISH.test(m[2])) throw new PowersError(`site-storage: "${m[2]}" is named like a login (token, session, auth…): a boxed mod doesn't get those`);
   return a;
 }
-// (a rewrite: the operation's name, then path=value, the values true, false, null, numbers or plain words)
+// (a rewrite: the operation's name, then path=value. What a rule may write is as narrow as what it may name:
+// the value is true, false, null or a number, which takes the place of one of its kind the request already
+// has, or a word that only ever swaps one the header names for another (Top→Recent; several the same way:
+// Top|Popular→Recent), so no text the mod's author chose rides in a field that holds the user's words. And
+// TRIF's page side never adds a field: the names in a rule carry nothing to the site either.)
+const REWRITE_WORD = /^[A-Za-z][\w-]{0,40}$/;
+const REWRITE_LITERAL = /^(true|false|null|-?\d{1,15}(\.\d{1,10})?)$/;
+/** A rewrite's value as TRIF keeps it ('Top|Popular→Recent' for a swap), or null when it isn't one. */
+function rewriteValue(v) {
+  if (REWRITE_LITERAL.test(v)) return v;
+  // (→, or ->: a word has no >, so the arrow is where the > is)
+  const i = v.includes('→') ? v.indexOf('→') : v.indexOf('>') > 0 && v[v.indexOf('>') - 1] === '-' ? v.indexOf('>') - 1 : -1;
+  if (i < 0) return null;
+  const from = v.slice(0, i).split('|');
+  const to = v.slice(i + (v[i] === '→' ? 1 : 2));
+  if (from.length > 8 || !from.every((w) => REWRITE_WORD.test(w)) || !REWRITE_WORD.test(to) || from.includes(to)) return null;
+  return `${from.join('|')}→${to}`;
+}
 function checkRewrite(rest) {
   const [op, ...sets] = rest;
   if (!op || !/^[A-Za-z][\w]{0,60}$/.test(op) || !sets.length) throw new PowersError('rewrite-requests takes the request\'s name and what to set in it: @powers rewrite-requests HomeTimeline variables.enableRanking=false');
+  const out = [];
   for (const x of sets) {
     const m = /^([A-Za-z_$][\w$]*(?:\.[A-Za-z_$][\w$]*){0,7})=(.+)$/.exec(x);
     if (!m) throw new PowersError(`rewrite-requests: "${x}" isn't name.path=value`);
     // (a path names the request's own fields: never the names every object has, which lead to its prototype)
     if (/(^|\.)(__proto__|prototype|constructor)(\.|$)/.test(m[1])) throw new PowersError(`rewrite-requests: "${m[1]}" names __proto__, prototype or constructor, which aren't a request's own fields`);
-    if (!/^(true|false|null|-?\d{1,15}(\.\d{1,10})?|[A-Za-z][\w-]{0,40})$/.test(m[2])) throw new PowersError(`rewrite-requests: "${m[2]}" isn't true, false, null, a number or a plain word (an address or long text could carry data)`);
+    const v = rewriteValue(m[2]);
+    if (v === null && REWRITE_WORD.test(m[2])) throw new PowersError(`rewrite-requests: "${m[2]}" is a word, so say which word it takes the place of: ${m[1]}=Top→${m[2]} (a rule only swaps a setting the request has for another, never writes new text)`);
+    if (v === null) throw new PowersError(`rewrite-requests: "${m[2]}" isn't true, false, null, a number or one word swapped for another (Top→Recent): an address or other text could carry data`);
+    out.push(`${m[1]}=${v}`);
   }
-  return [op, ...sets].join(' ');
+  return [op, ...out].join(' ');
 }
 // (other sizes of the page's pictures: the host, then each literal change, from→to (or from->to))
 function checkVariant(rest) {

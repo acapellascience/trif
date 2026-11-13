@@ -185,7 +185,58 @@ test('rewrite-requests: a path names the request\'s own fields, never __proto__,
   await g.window.fetch('https://x.com/i/api/Home', { method: 'POST', body: JSON.stringify({ variables: { a: 1 } }) });
   assert.equal(vm.runInContext('({}).polluted', g), undefined);
   assert.equal(({}).polluted, undefined);
-  assert.deepEqual(JSON.parse(sent[0].init.body), { variables: { a: 1, ok: true } });
+  assert.deepEqual(JSON.parse(sent[0].init.body), { variables: { a: 1 } }); // (and no field added: below)
+});
+
+// (the page's side of rewrite-requests, in a stand-in page: the rules as an event, then the site's own fetch)
+async function rewritingPage(rules) {
+  const { pageBridge } = await ext('runtime.js');
+  const listeners = {};
+  const sent = [];
+  const document = { addEventListener: (t, fn) => { listeners[t] = fn; }, dispatchEvent: () => true, documentElement: {} };
+  const window = { fetch: async (input, init) => { sent.push({ input: String(input), init }); return {}; }, XMLHttpRequest: null };
+  const g = { window, document, history: {}, location: { href: 'https://x.com/home', origin: 'https://x.com' }, Element: function () {}, CustomEvent: class { constructor(t, o) { this.type = t; this.detail = o && o.detail; } }, URL, Request: class {}, Response: class {}, Object, JSON, WeakMap, WeakSet, Map, Set, Array, Number, String, RegExp, MutationObserver: class { observe() {} } };
+  g.Element.prototype = {};
+  vm.createContext(g);
+  vm.runInContext(`(${pageBridge.toString()})()`, g);
+  listeners['trif:rewrite-rules']({ detail: JSON.stringify(rules) });
+  return { sent, fetch: (...a) => g.window.fetch(...a) };
+}
+
+test('rewrite-requests: what a rule may write, not only where: a value of the kind that\'s there, a word only for a word the header names, never a field added', async () => {
+  const meta = { id: 'x.com/m', site: 'x.com', matches: ['*://x.com/*'] };
+  const parse = (h) => bp.parsePowersWithArgs([`rewrite-requests ${h}`], meta).args['rewrite-requests'][0];
+  // the header: true, false, null, numbers; a word only as a swap (-> or →, several it replaces with |)
+  assert.equal(parse('HomeTimeline variables.enableRanking=false variables.count=40'), 'HomeTimeline variables.enableRanking=false variables.count=40');
+  assert.equal(parse('Home variables.sort=Top->Recent'), 'Home variables.sort=Top→Recent');
+  assert.equal(parse('Home variables.sort=Top|Popular→Recent'), 'Home variables.sort=Top|Popular→Recent');
+  assert.throws(() => parse('Home variables.sort=Recent'), /is a word, so say which word it takes the place of: variables\.sort=Top→Recent/);
+  for (const bad of ['variables.text=https://evil.example/', 'variables.text="a b"', 'variables.sort=Top→', 'variables.sort=→Recent', 'variables.sort=Top→Top', 'variables.sort=a|b|c|d|e|f|g|h|i→j', 'variables.sort=Top→Re cent']) {
+    assert.throws(() => parse(`Home ${bad}`), /rewrite-requests: /, bad);
+  }
+  // the hold says what it takes the place of
+  assert.deepEqual(bp.powerNeeds({ site: 'x.com', powers: ['rewrite-requests'], powerArgs: { 'rewrite-requests': ['Home variables.sort=Top|Popular→Recent variables.enableRanking=false'] } }).map((n) => n.fact),
+    ['changes what x.com receives from this page: sort set to Recent in place of Top or Popular, enableRanking set to false (in Home requests)']);
+  // the page's side: in place of a value of its kind, the field there already; a word only for one it names
+  const p = await rewritingPage([{ mod: 'x.com/m', op: 'Home', sets: [['variables.enableRanking', 'false'], ['variables.count', '40'], ['variables.sort', 'Top|Popular→Recent'],
+    ['variables.text', 'Top→Recent'], ['variables.added', 'true'], ['variables.deep.added', '1'], ['variables.flag', '7'], ['variables.cursor', 'null'], ['mode', 'loud→quiet'], ['page', '2'], ['n', 'true']] }]);
+  const body = { variables: { enableRanking: true, count: 20, sort: 'Popular', text: 'my own words', flag: true, cursor: 'abc' } };
+  await p.fetch('https://x.com/i/api/Home?mode=loud&page=1&n=hello&variables=' + encodeURIComponent(JSON.stringify({ sort: 'Top', text: 'Top secret' })), { method: 'POST', body: JSON.stringify(body) });
+  const got = p.sent[0];
+  assert.deepEqual(JSON.parse(got.init.body), { variables: { enableRanking: false, count: 40, sort: 'Recent', text: 'my own words', flag: true, cursor: null } });
+  const u = new URL(got.input);
+  assert.equal(u.searchParams.get('mode'), 'quiet');
+  assert.equal(u.searchParams.get('page'), '2');
+  assert.equal(u.searchParams.get('n'), 'hello', 'a boolean only in place of true or false');
+  assert.deepEqual(JSON.parse(u.searchParams.get('variables')), { sort: 'Recent', text: 'Top secret' });
+  // a request without those fields: sent as it was, nothing added
+  await p.fetch('https://x.com/i/api/Home', { method: 'POST', body: '{"variables":{"a":1}}' });
+  assert.equal(p.sent[1].init.body, '{"variables":{"a":1}}');
+  assert.equal(p.sent[1].input, 'https://x.com/i/api/Home');
+  // rules sent by anything else in the page: a word that isn't a swap is refused, the whole list with it
+  const q = await rewritingPage([{ mod: 'x', op: 'Home', sets: [['variables.text', 'Exfiltrated']] }]);
+  await q.fetch('https://x.com/i/api/Home', { method: 'POST', body: '{"variables":{"text":"Top"}}' });
+  assert.equal(q.sent[0].init.body, '{"variables":{"text":"Top"}}');
 });
 
 // ---- the helper: who wrote a mod, and where the helper writes ------------------------------------------------

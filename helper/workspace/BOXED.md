@@ -220,8 +220,10 @@ only for what the mod needs; a mod that needs the network is a free mod.
   site: `trif.settings('old-key', defaults)` then has it (listed on the hold).
 - `rewrite-requests`: changes the site's own same-origin requests, as the header says and only so: `//
   @powers rewrite-requests HomeTimeline variables.enableRanking=false` (the request's name, the address's
-  last part or its `operationName`; then `path=value`, values `true`, `false`, `null`, numbers or plain
-  words; in a query parameter, its JSON, or a JSON body). TRIF makes the change; your code has no part in it.
+  last part or its `operationName`; then `path=value`; in a query parameter, its JSON, or a JSON body). TRIF
+  makes the change; your code has no part in it. Only to a field the request already has (none is added), and
+  only in place of a value of its kind: `true`, `false` or a number for one, `null` for anything, and a word
+  only for the words the header names: `variables.sort=Top→Recent` (`->` works too; `Top|Popular→Recent`).
 - `image-variants`: `trif.imageVariant(img)` gives a new `<img>` of yours with another size of a picture
   the page shows, by the header's literal change on its host: `// @powers image-variants pbs.twimg.com
   _normal.→_400x400.` (`->` works too). It shows from any host. To read its pixels, ask for them:

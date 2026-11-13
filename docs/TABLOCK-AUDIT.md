@@ -63,6 +63,11 @@ cross-site URLs), so that channel wasn't confirmed; the guard covers it anyway.
   agent code unlocks; a tab that leaves the site unlocks. Costs: no posting from any tab of the site
   during the lock, and no live sockets there; a page of the site the user opens in a new tab can't
   follow links to other sites until the lock ends (typed addresses and bookmarks load).
+  - Since branch `site-lock` (Tim, 2026-11-13): the whole site, completely. Each of the site's tabs gets the
+    agent's tab's five rules (the sites any of its pages had loaded from when the lock started), and the
+    site's rules drop `tabIds: [-1]` and `excludedTabIds`: what the site starts can't reach another site in
+    any tab (a window found by name, a targeted link or form, a link out). Cost: the site's other tabs can't
+    follow links out or load a typed address of another site either; a new tab still can.
   - `webNavigation.onCreatedNavigationTarget` isn't used: it needs the `webNavigation` permission, which
     TRIF doesn't have (Chrome's warning for it is the one `tabs` already shows, but Firefox would ask
     for it in an update). It isn't needed for the gap: the popup's first request is blocked by the

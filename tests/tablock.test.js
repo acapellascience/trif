@@ -254,30 +254,31 @@ test('TL-1: images, scripts, styles, fonts and media only from the sites the pag
 });
 
 test('TL-2, TL-5: while a tab of the site is locked, what the site starts is blocked everywhere, workers and new tabs too', async () => {
-  const { createTabLocks, siteRules, WRITE_METHODS } = await load();
+  const { createTabLocks, siteRules, WRITE_METHODS, CROSS_SITE_TYPES, SUBRESOURCE_TYPES } = await load();
   const chrome = fakeChrome({ tabs: [{ id: 7, url: 'https://x.com/home' }, { id: 8, url: 'https://news.example/' }] });
   chrome.domains.set(7, ['x.com', 'abs.twimg.com']);
   const locks = createTabLocks({ chrome });
   await locks.lock(7, 'x.com');
   const site = [...chrome.rules.values()].filter((r) => r.condition.initiatorDomains);
   assert.equal(site.length, 5);
-  for (const r of site) { assert.deepEqual(r.condition.initiatorDomains, ['x.com']); assert.ok(!r.condition.tabIds || r.condition.tabIds[0] === -1); }
-  assert.deepEqual(site[0].condition.requestMethods, WRITE_METHODS); // writes, any tab or none
+  // (in any tab and in none: no tab condition at all)
+  for (const r of site) { assert.deepEqual(r.condition.initiatorDomains, ['x.com']); assert.equal(r.condition.tabIds, undefined); assert.equal(r.condition.excludedTabIds, undefined); }
+  assert.deepEqual(site[0].condition.requestMethods, WRITE_METHODS); // writes
   assert.deepEqual(site[1].condition.resourceTypes, ['main_frame']); // form posts
   assert.deepEqual(site[2].condition.resourceTypes, ['websocket']);
-  // no tab: only the site and what it already used
-  assert.deepEqual(site[3].condition.tabIds, [-1]);
-  assert.deepEqual(site[3].condition.excludedRequestDomains, ['x.com', 'abs.twimg.com']);
-  // a tab that wasn't open when the lock started, sent elsewhere by the site: blocked; the open ones not
-  assert.deepEqual(site[4].condition.resourceTypes, ['main_frame']);
-  assert.deepEqual(site[4].condition.excludedRequestDomains, ['x.com']);
-  assert.deepEqual(site[4].condition.excludedTabIds, [7, 8]);
-  assert.equal(siteRules([1, 2, 3, 4, 5], 'x.com')[4].condition.excludedTabIds, undefined, 'no tabs open: no empty list');
+  // another site, any tab or none: a page (a popup, a window found by name, a link out), a frame, fetch, XHR
+  assert.deepEqual(site[3].condition.resourceTypes, CROSS_SITE_TYPES);
+  assert.ok(site[3].condition.resourceTypes.includes('main_frame') && site[3].condition.resourceTypes.includes('sub_frame'));
+  assert.deepEqual(site[3].condition.excludedRequestDomains, ['x.com']);
+  // pictures and the rest: only from the site and what its pages already used
+  assert.deepEqual(site[4].condition.resourceTypes, SUBRESOURCE_TYPES);
+  assert.deepEqual(site[4].condition.excludedRequestDomains, ['x.com', 'abs.twimg.com']);
+  assert.deepEqual(siteRules([1, 2, 3, 4, 5], 'x.com')[4].condition.excludedRequestDomains, ['x.com']);
   // unlocked: the site's rules go too
   chrome.newDocument(7);
   await locks.check(7);
   assert.equal(chrome.rules.size, 0);
-  // a browser that drops the initiator condition would block every site's writes: no lock, no code
+  // a browser that drops the initiator condition would block every site's requests: no lock, no code
   const c2 = fakeChrome({ dropInitiator: true });
   const l2 = createTabLocks({ chrome: c2 });
   await assert.rejects(l2.lock(1, 'x.com'), /can't block requests a site starts/);
@@ -317,6 +318,82 @@ test('TL-4: the site\'s other tabs are locked with it (and new ones), until the 
   assert.deepEqual(locks.list(), []);
   assert.equal(chrome.rules.size, 0);
   assert.equal(chrome.icons.get(5), 'icons/robot-16.png');
+});
+
+test('the whole site, completely: its other tabs get the agent\'s tab\'s rules, new ones too, and a window of another site it reaches can only be sent to the site', async () => {
+  const { createTabLocks, lockRules } = await load();
+  const tabs = [
+    { id: 1, url: 'https://x.com/home' },        // the agent's code runs here
+    { id: 2, url: 'https://x.com/messages' },    // another tab of the site, open before
+    { id: 3, url: 'https://news.example/' },     // another site's tab (a window x.com's code may find by name)
+  ];
+  const chrome = fakeChrome({ tabs });
+  chrome.domains.set(1, ['x.com', 'abs.twimg.com']);
+  chrome.domains.set(2, ['x.com', 'video.twimg.com']);
+  const logged = [];
+  const locks = createTabLocks({ chrome, log: (m) => logged.push(m) });
+  await locks.lock(1, 'x.com');
+  const rulesOf = (id) => [...chrome.rules.values()].filter((r) => r.condition.tabIds?.[0] === id);
+  const shape = (rs) => rs.map((r) => ({ ...r.condition, tabIds: undefined }));
+  const siteDomains = ['x.com', 'abs.twimg.com', 'video.twimg.com'];
+  // tab 2: the same five rules as the agent's tab (the sites the site's pages used, both tabs')
+  assert.equal(rulesOf(2).length, 5);
+  assert.deepEqual(shape(rulesOf(2)), shape(lockRules(2, [1, 2, 3, 4, 5], 'x.com', siteDomains)));
+  assert.ok(rulesOf(2).some((r) => r.condition.resourceTypes?.includes('main_frame') && r.condition.excludedRequestDomains?.[0] === 'x.com'), 'no navigation to another site from it');
+  assert.ok(rulesOf(2).some((r) => r.condition.resourceTypes?.includes('xmlhttprequest')), 'no fetch to another site from it');
+  assert.ok(rulesOf(2).some((r) => r.condition.resourceTypes?.includes('image') && !r.condition.excludedRequestDomains.includes('evil.example')), 'no image beacon to another site from it');
+  // another site's tab: no rules of its own (the user's own), but the site's rules cover what x.com starts there
+  assert.equal(rulesOf(3).length, 0);
+  assert.ok(!locks.isLocked(3));
+  const toOther = [...chrome.rules.values()].find((r) => r.condition.initiatorDomains && r.condition.resourceTypes?.includes('main_frame') && r.condition.excludedRequestDomains);
+  assert.ok(toOther && !toOther.condition.tabIds && !toOther.condition.excludedTabIds, 'x.com can\'t send any tab to another site');
+  // a tab of the site opened during the lock: the site's list, not what its page has loaded by the time TRIF sees it
+  chrome.tabList.push({ id: 4, url: 'https://x.com/explore' });
+  chrome.domains.set(4, ['x.com', 'evil.example']);
+  await locks.opened({ id: 4, url: 'https://x.com/explore' });
+  assert.equal(rulesOf(4).length, 5);
+  assert.deepEqual(rulesOf(4).find((r) => r.condition.resourceTypes?.includes('image')).condition.excludedRequestDomains, siteDomains);
+  // a tab one of the site's other tabs opens: locked with the site, while blank too; let go once it's elsewhere
+  chrome.tabList.push({ id: 5, url: 'about:blank', openerTabId: 2 });
+  await locks.opened({ id: 5, url: '', openerTabId: 2 });
+  assert.equal(locks.list().find((l) => l.tabId === 5)?.kind, 'site');
+  assert.equal(rulesOf(5).length, 5);
+  await locks.check(5);
+  assert.ok(locks.isLocked(5), 'still blank: still locked');
+  chrome.tabList.find((t) => t.id === 5).url = 'https://news.example/x';
+  await locks.check(5);
+  assert.ok(!locks.isLocked(5));
+  assert.equal(rulesOf(5).length, 0);
+  // the other tab sent to another site (blocked: the browser's blocked page, which is that address): let go, its rules too
+  chrome.tabList.find((t) => t.id === 4).url = 'https://evil.example/?d=secret';
+  await locks.check(4);
+  assert.ok(!locks.isLocked(4));
+  assert.equal(rulesOf(4).length, 0);
+  // agent code in tab 2 now: a lock of its own, its earlier rules replaced, not doubled
+  await locks.lock(2, 'x.com');
+  assert.equal(locks.list().find((l) => l.tabId === 2).kind, 'code');
+  assert.equal(rulesOf(2).length, 5);
+  // the last tab with agent code unlocks: every rule goes
+  chrome.newDocument(1); await locks.check(1);
+  chrome.newDocument(2); await locks.check(2);
+  assert.deepEqual(locks.list(), []);
+  assert.equal(chrome.rules.size, 0);
+  // the site's rules saved and loaded again (a service worker restart) keep the other tabs' rules
+  const c2 = fakeChrome({ tabs: [{ id: 1, url: 'https://x.com/a' }, { id: 2, url: 'https://x.com/b' }] });
+  await createTabLocks({ chrome: c2 }).lock(1, 'x.com');
+  const again = createTabLocks({ chrome: c2 });
+  await again.ready;
+  assert.deepEqual(again.list().map((l) => [l.tabId, l.kind]), [[1, 'code'], [2, 'site']]);
+  assert.equal(c2.rules.size, 15);
+  c2.newDocument(1); await again.check(1);
+  assert.equal(c2.rules.size, 0);
+});
+
+test('a box run locks nothing: only a page-world run calls lock (background.js run)', () => {
+  const src = require('fs').readFileSync(require('path').join(__dirname, '..', 'extension', 'background.js'), 'utf8');
+  const run = src.slice(src.indexOf('  async run(args) {'), src.indexOf('  async reload(args) {'));
+  const box = run.indexOf("if (args.world === 'box')"), boxed = run.indexOf('return boxedRun('), locking = run.indexOf('tabLocks.lock(');
+  assert.ok(box > 0 && boxed > box && locking > boxed, 'the box run returns before the lock');
 });
 
 test('TL-3: what was left in the site\'s storage, compared on the new page before unlocking', async () => {

@@ -57,3 +57,27 @@ test('bug 11: the lint counts every name a const, let or var declares (const a =
   assert.deepEqual(what('const a = 1; f(a, document);'), ['document']);
   assert.deepEqual(what('for (const k of list) g(k, window);'), ['window']);
 });
+
+// Stand-ins are their mod's (78f9558): every way TRIF hands a mod an element knows which mod it's for, from
+// the mod's own api, not from whatever was running (the conversions' mods act in timers, intervals, frames,
+// observers and after awaits). The same in real SES: tests/sandbox-browser.test.js.
+test('boxed: a mod\'s elements and powers work in its timers, intervals, frames, observers and after awaits', async () => {
+  const { sandboxPage } = require('./sandbox-harness');
+  const p = await sandboxPage({ body: [{ tag: 'button', attrs: { id: 'b' } }, { tag: 'section', attrs: { id: 's' } }] });
+  p.run('x.com/later', `
+    const t = (what, fn) => { try { fn(); trif.log(what, 'ok'); } catch (e) { trif.log(what, String(e.message)); } };
+    await null;
+    t('after an await', () => page.find('#s').attr('id'));
+    Promise.resolve().then(() => t('in a then', () => page.find('#s').parent.tag));
+    setTimeout(() => t('in a timer', () => page.find('#b').click()), 0);
+    const h = setInterval(() => { clearInterval(h); t('in an interval', () => page.find('#b').click()); }, 1);
+    requestAnimationFrame(() => t('in a frame', () => page.body.find('#s').closest('body').tag));
+    trif.observe('section', (el) => t('in observe', () => el.parent.find('#b').attr('id')));
+    await new Promise((r) => setTimeout(r, 5));
+    t('after a timer await', () => page.find('#b').click());`, { powers: ['click'], args: { click: ['the button: #b'] } });
+  await new Promise((r) => setTimeout(r, 40));
+  const logs = p.G.__trifSandbox.logs.filter((l) => l.mod === 'x.com/later').map((l) => [...l.args].join(' '));
+  for (const what of ['after an await', 'in a then', 'in a timer', 'in an interval', 'in a frame', 'in observe', 'after a timer await']) assert.ok(logs.includes(`${what} ok`), `${what}: ${JSON.stringify(logs)} ${JSON.stringify(p.errors())}`);
+  assert.equal(p.el('b').clicks, 3);
+  assert.deepEqual(p.errors(), []);
+});

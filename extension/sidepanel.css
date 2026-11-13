@@ -384,9 +384,13 @@ h3.mod-name { margin: 0; font-size: inherit; line-height: inherit; }
 .mod-name { display: flex; flex-wrap: wrap; align-items: center; gap: 2px 6px; min-width: 0; }
 /* The one chip after the name (modlevel.js): muted for noticeable only, green for powers, amber for a
    combination warning or changed requests */
-.mod-chip { flex: none; padding: 0 7px; border: 1px solid var(--line); border-radius: 999px; background: none; color: var(--muted); font-size: 11px; font-weight: 500; line-height: 1.45; white-space: nowrap; cursor: pointer; }
-.mod-chip.green { color: var(--ok); border-color: color-mix(in srgb, var(--ok) 40%, var(--line)); }
-.mod-chip.amber { color: var(--warn); border-color: color-mix(in srgb, var(--warn) 45%, var(--line)); }
+.mod-icons { flex: none; display: inline-flex; align-items: center; gap: 4px; padding: 1px 3px; border: 0; border-radius: 5px; background: none; color: var(--muted); cursor: pointer; }
+.mod-icons:hover { background: color-mix(in srgb, var(--muted) 12%, transparent); }
+.mod-icons:focus-visible { outline: 2px solid var(--focus, var(--accent)); outline-offset: 1px; }
+.mod-ic { display: inline-flex; font-size: 10px; line-height: 1; }
+.mod-ic svg { width: 14px; height: 14px; display: block; }
+.mod-ic.amber { color: var(--warn); }
+.mod-ic-sep { width: 1px; height: 11px; margin: 0 1px; background: var(--line); }
 /* Next to the name; when both don't fit on a line, the file name goes to the next one whole (it breaks only
    when it's longer than a line). */
 .mod-file { display: inline-block; max-width: 100%; color: var(--muted); font: 11px/1.4 var(--mono); font-weight: 400; overflow-wrap: anywhere; }

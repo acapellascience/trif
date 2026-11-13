@@ -56,7 +56,7 @@ test('the powers: every one in boxpowers.js, in its order, plus @migrate; names 
   // (a hold's sentence for each, with some values for the powers that take them)
   const ARGS = {
     'site-storage': ['local:prefs'], 'image-variants': ['pbs.twimg.com name=orig'], 'search-box': ['https://x.com/search?q={q}'], 'go-to': ['/home'],
-    embeds: ['www.youtube.com/embed/'], 'rewrite-requests': ['HomeTimeline variables.sort=Recent'], 'block-events': ['keydown'], 'page-events': ['my:event'],
+    embeds: ['www.youtube.com/embed/'], 'rewrite-requests': ['HomeTimeline variables.sort=Top→Recent'], 'block-events': ['keydown'], 'page-events': ['my:event'],
     click: ['Like: button.like'],
   };
   for (const t of powers) {

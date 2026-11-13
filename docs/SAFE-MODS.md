@@ -382,9 +382,11 @@ page already has"):
     `@migrate`, the one-time import into the mod's own settings, names the keys its free version used, the
     same way, and is a need of its own on the hold.
   - `rewrite-requests`: *exception*: it names the site's request fields and changes what the site
-    receives. Narrowed: literal values only (true, false, null, numbers, plain words: no address, no long
-    text), fixed in the header and applied by TRIF's page side to same-origin requests; the mod's code has no
-    part in it, so nothing it reads can ride on it. The hold says it changes what the site receives.
+    receives. Narrowed: literal values only (true, false, null, numbers, and a word only as a swap for words
+    the header names, `Top→Recent`: no address, no text), fixed in the header and applied by TRIF's page side
+    to same-origin requests, only to a field the request already has and in place of a value of its kind (no
+    field added, so not even a name carries anything); the mod's code has no part in it, so nothing it reads
+    can ride on it. The hold says it changes what the site receives.
   - `image-variants`: *exception*: it makes a new address. Narrowed: TRIF makes it, from a picture the page
     shows, by the header's literal change on the header's host (the same host as the picture); the mod only
     picks which of the page's pictures. That choice reaches the host, which is why a read beside it warns.

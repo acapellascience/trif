@@ -2255,6 +2255,35 @@ test('applyNewMods: a mod from outside this browser\'s chat arrives off, whateve
   assert.ok('x.com/mine' in lib.applyNewMods(mods, { seen: here, autoUpdated: {} }).newOff);
 });
 
+test('sensitive sites: every mod starts off there, the chat\'s too, and the chat\'s changes wait; what the user already had on there stays on', () => {
+  const model = lib.sensitiveSites({ hosts: ['mail.google.com'] });
+  const waits = (m) => { const home = lib.modHome(m, model); return !!home && model.isSensitive(home); };
+  const chat = { by: 'A', browser: 'Chrome', live: true };
+  const mods = [
+    { id: 'mail.google.com/tidy', origin: chat },   // the chat made it, on a sensitive site of its own
+    { id: 'paypal.com/calm', origin: chat },         // a sensitive registrable domain
+    { id: 'google.com/theme', origin: chat },        // the parent: as everywhere, the chat's start on
+    { id: 'all-sites/dark', origin: chat },
+    { id: 'mail.google.com/pasted' },                // from outside the chat: off, as anywhere
+    { id: 'mail.google.com/mine' },                  // the user's, already here and on
+  ];
+  const r = lib.applyNewMods(mods, { disabled: {}, seen: { 'mail.google.com/mine': true }, autoUpdated: {}, newOff: {}, installId: 'A', waits });
+  assert.deepStrictEqual(r.newOff, { 'mail.google.com/tidy': 'sensitive', 'paypal.com/calm': 'sensitive', 'mail.google.com/pasted': 'new' });
+  assert.deepStrictEqual(r.disabled, { 'mail.google.com/tidy': true, 'paypal.com/calm': true, 'mail.google.com/pasted': true });
+  // with Wait for me it's the setting's word; held mods wait for the user's OK anyway
+  assert.strictEqual(lib.applyNewMods([mods[0]], { seen: {}, autoUpdated: {}, installId: 'A', chatWait: true, waits }).newOff['mail.google.com/tidy'], 'chat');
+  assert.deepStrictEqual(lib.applyNewMods([{ ...mods[0], held: { facts: ['x'] } }], { seen: {}, autoUpdated: {}, installId: 'A', waits }).newOff, {});
+  assert.deepStrictEqual(lib.normalizeNewOff({ a: 'sensitive', b: 'nope' }), { a: 'sensitive' });
+  // the chat changes one that's on there: it waits, the version before runs (and nowhere else, without the setting)
+  const v1 = { id: 'mail.google.com/mine', hash: 'h1' }, v2 = { id: 'mail.google.com/mine', hash: 'h2', origin: chat };
+  assert.deepStrictEqual(lib.applyChatWaiting([v1], [v2], { installId: 'A', waits }).waiting, { 'mail.google.com/mine': { old: v1 } });
+  const g1 = { id: 'google.com/theme', hash: 'h1' }, g2 = { id: 'google.com/theme', hash: 'h2', origin: chat };
+  assert.deepStrictEqual(lib.applyChatWaiting([g1], [g2], { installId: 'A', waits }).waiting, {});
+  // while the upgrade's question about it is unanswered it's part of its parent still: nothing changes there
+  const pending = lib.sensitiveSites({ hosts: ['mail.google.com'], pending: ['mail.google.com'] });
+  assert.ok(!pending.isSensitive(lib.modHome(mods[0], pending)));
+});
+
 test('applyChatWaiting: with Wait for me, a change the chat made to a running mod waits; put back, changed from outside, or gone: it doesn\'t', () => {
   const chat = { by: 'A', live: true };
   const v1 = { id: 'x.com/a', hash: 'h1', origin: chat }, v2 = { id: 'x.com/a', hash: 'h2', origin: chat };

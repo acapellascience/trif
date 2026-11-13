@@ -33,6 +33,13 @@ extension/agentsites.js, which the user can edit in Settings) get three more wal
   run can't reach its tabs or write its folder. TRIF puts each sensitive site on its block list once, so
   nothing from TRIF runs there or reads it until the user unblocks it. (An update asks first about a host
   the user's mods already reach: keep TRIF on there, with its own copies of those mods, or block it.)
+- **Every mod starts off there** (November 2026), not only the agent: a mod new to the browser in a sensitive
+  site's folder is off until the user switches it on there, the side panel's chat's too, whatever "Mods your
+  chat makes" says (lib.js applyNewMods, newOff `sensitive`), and a change the chat makes to one that's on
+  waits for the user while the version before runs (applyChatWaiting). An agent run can't switch them on.
+  The parent's and all-sites mods never run there at all (above). What the user already had on there stays
+  on: only mods TRIF sees for the first time start off, and "Keep TRIF on there" still copies the parent's
+  mods with their switches, as they were already running there.
 
 ## Agent code in a tab: in the box, or the tab is locked (0.3)
 
@@ -64,20 +71,26 @@ document: a reload or a real navigation.
 - A document restored from the back/forward cache brings its code back: its marker locks the tab again
   and reloads the page.
 - Tabs a locked tab opens are locked while it is.
-- **The whole site, while one of its tabs is locked** (TL-2, TL-4, TL-5): rules on what the site's pages
-  start (`initiatorDomains`), in every tab and in none:
-  - its writes and sockets are blocked everywhere: in requests no tab owns (tabId −1: a SharedWorker made
-    from a `blob:` URL, the site's own service worker passing a fetch through) and in the site's other
-    tabs, which show the paused icon and a one-line notice too ("your agent ran code in another tab",
-    with a button to show it), as does a tab of the site opened during the lock;
-  - its requests from no tab can't reach other sites (the tab's own rule);
-  - it can't send a tab that didn't exist when the lock started to another site: a popup, `noopener` or
-    not, is blocked at its first request, before TRIF has even seen the tab. The user's own new tabs
-    (typed addresses, bookmarks) have no initiator and load as usual, and the site's tabs that were
-    already open can still follow links out.
-  The other tabs unlock when the last tab the agent ran code in unlocks. Several tabs with agent code:
-  each unlocks on its own new page, and the site stays locked until all of them have. Cost: while the
-  lock lasts, the user can't post from the site's other tabs either.
+- **The whole site, completely, while one of its tabs is locked** (TL-2, TL-4, TL-5; Tim, 2026-11-13: the
+  lock is only for code that needs more than the box, so it can be the whole site):
+  - every other tab of the site gets the same rules as the tab the code ran in (no writes or sockets, nothing
+    to or from another site but the pictures, scripts and styles the site's pages already loaded, from any of
+    its tabs, when the lock started), and so does a tab of the site opened during the lock, a tab one of its
+    tabs opens, and a tab that comes to the site. They show the paused notice ("your agent ran code in
+    another tab", with a button to show it);
+  - and rules on what the site's pages start (`initiatorDomains`), in every tab and in none: no writes or
+    sockets, no request to another site and no navigation toward one (a popup, `noopener` or not, blocked at
+    its first request, before TRIF has even seen the tab; a window found by name, a targeted link or form; a
+    frame), no subresource from a site none of its pages used. Those cover requests no tab owns (tabId −1:
+    a SharedWorker made from a `blob:` URL, the site's own service worker passing a fetch through), the
+    moments before a new tab of the site has rules of its own, and a window of another site the code finds
+    by name: the site can only send it to the site.
+  The user's own new tabs (typed addresses, bookmarks) have no initiator and load as usual, wherever they
+  go. The other tabs unlock when the last tab the agent ran code in unlocks. Several tabs with agent code:
+  each unlocks on its own new page, and the site stays locked until all of them have. A tab of the site that
+  goes to another site is let go (a typed address in it is blocked, as in the agent's tab, and the browser's
+  blocked page has nothing of the site's: a reload then loads it). Cost: while the lock lasts, the user can't
+  post from the site's other tabs, follow links out of them, or type another site's address into one of them.
 - **What the code leaves in the site's storage** (TL-3):
   - The agent's code can't save: before it runs, TRIF wraps the page's storage writers (localStorage and
     sessionStorage, their methods and named properties; IndexedDB open, delete and object-store and
@@ -111,6 +124,16 @@ document: a reload or a real navigation.
 - No lock, no code: if the lock can't be set up (no declarativeNetRequest; a browser that drops the
   per-tab or initiator condition, checked by reading the rules back), `trif run` fails and the code
   doesn't run.
+- **A GET to the site itself passes.** The lock stops what sends: the methods that change something, sockets,
+  and anything to another site. A request with no body to the site's own address (a page load, a GET fetch,
+  an image from the site) passes, because the page has to load and to read: X's timeline, its pictures, the
+  next page of a feed are all GETs, and blocking them would break every site the agent works on. A site that
+  changes something on a GET (an old-style `/delete?id=1` link, a "mark as read" or a follow behind a GET, a
+  logout link) isn't covered: the agent's code could do that, as the user, on that site. That's accepted: it
+  stays on the user's own site (nothing reaches another one), the site already has to defend those addresses
+  against any page that links to them (they're cross-site-request-forgery holes for every other site on the
+  web too, so sites that care don't do it), and telling such a GET apart from a read isn't something a rule
+  can do. "Can't post or send as you" means the methods above.
 - Reading the page, clicks, key presses and the mod's own test events work as before: in 50 real runs,
   every input an agent sent was to drive its own mod, none needed to send a request.
 - The page's own requests in that document are blocked too (X's "Something went wrong"), and links to
@@ -122,10 +145,13 @@ document: a reload or a real navigation.
   `window.opener` when both are the site's, and run there. A tab the site's rules cover is let go when the
   site unlocks, without a new page, so code that moved there would carry on unlocked. So the opener, on the
   same site, is locked as a tab with agent code too: the tab's full rules, until it shows a new document
-  (and its own opener in turn). A window found by a name the site gave it isn't covered.
+  (and its own opener in turn). A window of the site's found by a name is a tab of the site, so it has the
+  full lock already.
 
-Not covered: a window of the site's that the code finds by name; a cross-site
-subresource that matches a site the page already used (its address can still carry data there); what
+Not covered: a message the code posts to a window of another site it can reach (its opener, a window found
+by name, a frame of another site in the page): `postMessage` isn't a request, and that window's page isn't
+locked; a cross-site subresource that matches a site the page already used (its address can still carry data
+there); what
 TL-6 above leaves open; the contents of IndexedDB. A page restored from the back/forward cache could run
 for a few milliseconds before it's locked again. The terminal's `trif run` (the user's own agent, which
 already has their shell) doesn't lock. docs/TABLOCK-AUDIT.md has each item and what the tests showed.
@@ -230,6 +256,22 @@ check's allowed cases in a real Chromium.
   swapped as it's sent, unseen). `@click` words in quotes are what the thing has to say, checked at each
   click against the page's own text.
 
+Then, on branch `site-lock` (tests/tablock.test.js, tests/hardening.test.js, tests/extension.test.js, and
+the e2e's tabLockHardeningCheck and wideBCheck):
+
+- **The whole site, completely.** While agent code from `trif run --page` is in one of a site's tabs, every
+  tab of the site has that tab's full lock, not only the write block (above): another tab's fetch, image
+  beacon or navigation to another site is blocked, and the site can't send any tab to another site, a window
+  found by name or reached by a targeted link or form among them. Box runs still lock nothing.
+- **Sensitive sites: every mod starts off there**, the chat's too, and the chat's changes wait (above).
+- **`rewrite-requests`: what a rule may write**, not only which field. A rule only changes a field the request
+  already has (it never adds one, so the names in its header carry nothing to the site), and only in place of
+  a value of its kind: `true` or `false` for a boolean, a number for a number, `null` for anything, and a word
+  only in place of the words its header names (`variables.sort=Top→Recent`, `Top|Popular→Recent`). A bare
+  word is refused, in the header (helper/lib/boxpowers.js) and on the page's side (runtime.js), so no text of
+  the mod's author's, and nothing the agent read, can take the place of the user's words in a post or a
+  profile field. No mod TRIF ships or converted uses the power; the e2e's fixture now says `mode=loud→quiet`.
+
 Still open, known, and why:
 
 - **A shipped mod's lines are allowed for its edits.** A mod with `@source webmods` and a shipped id is judged
@@ -240,11 +282,22 @@ Still open, known, and why:
 - **Writes after a run's window.** A mod written more than 10 seconds after its run ended is judged as an
   outside change (no out-of-scope or risk-2 hold). The run's process group is killed; a process that left the
   group would outlive it. Not seen to happen in either agent's sandbox, and not ruled out.
-- **Other tabs of a locked site** still load from other sites and follow links out (TL-4's cost was the
-  user's own posting; this one would be their own links). Agent code reaches such a tab only through a window
-  reference: the opener is now locked in full; a window found by name isn't.
-- **Same-site GETs.** A request with no body to the site itself passes the lock, so a site that changes
-  something on a GET is not covered. "Can't post or send as you" means the methods above.
+- **A message to a window of another site.** The locked page's code can `postMessage` to a window of
+  another site it can reach (its opener, when the user came from another site's page with one; a window found
+  by name; a frame of another site in the page). That isn't a request, so no rule sees it, and that window's
+  page isn't locked: it can send on what it gets. It takes a site that both opens the locked site with an
+  opener (or frames it) and is the attacker's. A speed bump would be to cut a cross-site `window.opener` in
+  the leak guard; it doesn't reach frames or named windows, and some sign-in popups need the opener.
+- **The first moments of a new tab of the site.** Its own rules go in when the browser reports the tab
+  (tabs.onCreated, onUpdated). Until then the site's rules cover it, which go by who started a request: a
+  request from a frame with an opaque origin (a sandboxed `srcdoc` frame) has no initiator they match. Agent
+  code would have to reach the new tab and build such a frame in those milliseconds.
+- **Same-site GETs** are accepted, and why ("A GET to the site itself passes", above).
+- **rewrite-requests numbers.** A number still takes the place of any number the request has in that field
+  (up to 15 digits): a field the site keeps to itself, as a rule, and the hold shows the value. A range in the
+  header would narrow it further if a mod ever needs one.
+- **A sensitive host the upgrade is still asking about** is part of its parent until the user answers, as
+  before: the parent's mods and all-sites mods that reach it run there meanwhile (what the user had).
 - **The update feed has no expiry**, and the release key is written to the keychain through an argument
   (scripts/release.js keygen). Both are the releasing Mac's to change.
 - **Runs write the mods folder directly**, and who wrote what is worked out afterwards (snapshots, a time

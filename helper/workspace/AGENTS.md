@@ -231,8 +231,8 @@ It runs in one of two places:
   There's no `document` or `window` there (they read as undefined). **Use this for looking around: almost
   everything you run is that.**
 - **The page's own world** (`--page`; what you get from a terminal without a flag): `document`, `window`,
-  the site's own code and state, its mods' hooks. In a side-panel chat this pauses the whole site's posting,
-  in every tab, until the tab reloads, and may ask the user first ("Side-panel runs", below): keep it for
+  the site's own code and state, its mods' hooks. In a side-panel chat this locks the whole site, in every
+  tab (no posting, no other sites), until the tab reloads, and may ask the user first ("Side-panel runs", below): keep it for
   what only the page's own code can tell you.
 
 ```sh
@@ -263,7 +263,10 @@ its own in TRIF, even under a bigger domain: mail.google.com isn't part of googl
 own folder (`trif new mail.google.com <mod>`, `sites/mail.google.com/`); google.com's mods and mods for all
 sites don't run there, and its own mods run only there. TRIF starts each one blocked ("mail.google.com is
 blocked in TRIF"): only the user can unblock it, in the side panel there. A side-panel run on such a host
-is limited to it: its folder is the host's, and google.com's folder and tabs are another site's.
+is limited to it: its folder is the host's, and google.com's folder and tabs are another site's. Every mod
+there starts off until the user switches it on, yours too, whatever "Mods your chat makes" says, and a change
+you make to one that's on waits for them (the version before keeps running): when you finish, tell them it's
+waiting and that they turn it on in the side panel.
 
 ## Agent on this site
 
@@ -384,7 +387,9 @@ logged in to:
   block every request from that tab that changes something (POST, PUT, PATCH, DELETE: `fetch`, XHR,
   beacons, form posts), every WebSocket, and going to or fetching from any other site (its images,
   scripts and styles still load), until the page is reloaded or replaced (`trif reload` or
-  `trif navigate`, or the user's reload); the site's other tabs can't post meanwhile either. Reading the
+  `trif navigate`, or the user's reload). The site's other tabs get the same lock meanwhile, new ones too: they
+  can't post, or fetch from or go to another site, either. Only requests with no body to the site itself
+  (GETs) pass: the lock stops sending, so don't count on it if a site changes something on a GET. Reading the
   page, clicking your mod's own buttons, key
   presses and test events all work. So `trif run --page` can never post, send or save anything, and anything
   the site's own scripts send in that page meanwhile fails too (blocked by the client): when a test

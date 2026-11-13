@@ -572,7 +572,7 @@ function messageNode(m) {
   // "x.js waits for you." with "Mods your chat makes: Wait for me": Show code, Turn on
   if (m.waitMod) {
     const mod = view.status?.mods?.find?.((x) => x.id === m.waitMod);
-    const waiting = !mod || mod.chatWaiting || (mod.newOff === 'chat' && mod.enabled === false);
+    const waiting = !mod || mod.chatWaiting || ((mod.newOff === 'chat' || mod.newOff === 'sensitive') && mod.enabled === false);
     if (waiting) {
       const show = button('Show code', '', () => openCodeView(m.waitMod));
       const on = button('Turn on', '', async () => {
@@ -793,8 +793,8 @@ function renderPausedAll() {
  * One short line and a Reload button, so the rest of the panel stays in view; the details in the line's
  * tooltip. Meanwhile the panel's state colour is white (body.tab-locked, sidepanel.css --paused) and the
  * robot in the bar shows a pause sign for eyes, as the toolbar icon does.
- * Another kind (TABLOCK-AUDIT TL-4): another tab of a site the agent ran code in, locked with it until
- * that tab reloads, with a button to show that tab.
+ * Another kind (TABLOCK-AUDIT TL-4): another tab of a site the agent ran code in, locked with it (the same
+ * rules: no posting, no other sites) until that tab reloads, with a button to show that tab.
  */
 function renderTabLock() {
   const n = ui.tabLock;
@@ -816,7 +816,7 @@ function renderTabLock() {
       if (lock.from == null) return;
       try { const t = await chrome.tabs.update(lock.from, { active: true }); if (t?.windowId != null) await chrome.windows.update(t.windowId, { focused: true }); } catch { /* gone */ }
     });
-    const why = `Your agent ran code in another ${lock.site} tab, so TRIF blocks ${lock.site}'s pages from posting, sending or saving as you until that tab reloads. Reading, scrolling, clicks and mods work as usual.`;
+    const why = `Your agent ran code in another ${lock.site} tab, so TRIF blocks ${lock.site}'s pages from posting, sending or saving as you, or opening other sites, until that tab reloads. Reading, scrolling, clicks and mods work as usual.`;
     n.replaceChildren(line('Posting is paused on this site: your agent ran code in another tab.', why), show);
     return;
   }
@@ -1453,6 +1453,7 @@ function renderSensitiveNote() {
     const words = `${p.host} is ${p.why || 'on your list of sensitive sites'}: TRIF now keeps it apart from ${p.parent}, as its own site.`;
     li.append(el('p', null, words));
     if (p.allSites?.length) li.append(el('p', 'sensitive-also', `Mods for all sites don’t run there any more.`));
+    li.append(el('p', 'sensitive-also', `New mods for it start off there, your chat’s too, until you switch them on.`));
     const busy = sensitiveBusy.get(p.host);
     const row = el('div', 'sensitive-actions');
     const keep = button(busy === 'keep' ? 'Keeping…' : 'Keep TRIF on there', 'primary', () => answerSensitive(p.host, 'keep'));
@@ -3110,7 +3111,10 @@ function updateModItem(li, m) {
   const tag = li.querySelector('.tag');
   // (one tag at most, showOneTag: a change the chat made waiting comes first, then new or updated)
   tag.textContent = m.chatWaiting ? 'changed' : !on && m.newOff ? (m.newOff === 'update' ? 'updated' : 'new') : '';
-  tag.title = m.chatWaiting ? 'Your chat changed it, and waits for you (Settings): the version before runs until you turn this one on.'
+  const there = String(m.id || '').split('/')[0];
+  tag.title = m.chatWaiting && m.waitsThere ? `${there} is a sensitive site, so your chat's change waits for you there: the version before runs until you turn this one on.`
+    : m.chatWaiting ? 'Your chat changed it, and waits for you (Settings): the version before runs until you turn this one on.'
+    : !on && m.newOff === 'sensitive' ? `${there} is a sensitive site, so every mod starts off there: switch it on once you've looked at it.`
     : !on && m.newOff === 'chat' ? 'Your chat made it, and waits for you (Settings): switch it on once you\'ve looked at it.'
     : !on && m.newOff === 'update' ? 'TRIF updated it and switched it off: switch it on once you\'ve looked at it.'
     : !on && m.newOff ? 'TRIF switched it off because it came from outside your chat: switch it on once you\'ve looked at it.' : '';

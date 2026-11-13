@@ -152,7 +152,7 @@ document.addEventListener('e2e-wide-undeclared', () => __signals.push('undeclare
 <input id="file" type="file" accept="image/*"> <video id="vid" muted width="10" height="10"></video>
 <div style="height: 4000px"></div><img id="lazy" src="/e2e-wide.png?lazy=1" loading="lazy" width="4" height="4" alt="">
 <script>
-window.__api = async () => (await fetch('/e2e-rw/E2eOp?variables=' + encodeURIComponent(JSON.stringify({ flag: true, other: 1 })), { method: 'POST', body: JSON.stringify({ operationName: 'E2eOp', variables: { flag: true } }) })).text();
+window.__api = async () => (await fetch('/e2e-rw/E2eOp?mode=loud&variables=' + encodeURIComponent(JSON.stringify({ flag: true, other: 1 })), { method: 'POST', body: JSON.stringify({ operationName: 'E2eOp', variables: { flag: true } }) })).text();
 window.__xhr = () => new Promise((res) => { const x = new XMLHttpRequest(); x.open('POST', '/e2e-rw/E2eOp'); x.onload = () => res(x.responseText); x.send(JSON.stringify({ variables: { flag: true } })); });
 window.__other = async () => (await fetch('/e2e-rw/OtherOp?variables=' + encodeURIComponent('{"flag":true}'))).text();
 window.__multi = async () => (await fetch('/e2e-multi')).text();

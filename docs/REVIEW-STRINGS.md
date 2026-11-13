@@ -60,3 +60,63 @@ New text a person or an agent can see. None of it has been approved; the drafts 
 - `trif help run`: the new text in helper/lib/help.js, and AGENTS.md's "It runs in one of two places".
 
 Nothing new in the panel: a boxed run shows no lock and asks no question.
+
+## Branch site-lock: the whole site locked, sensitive sites' mods start off, what rewrite-requests may write
+
+None approved yet.
+
+### The panel (extension/sidepanel.js)
+
+- The notice's tooltip on another tab of a locked site, was "…blocks {site}'s pages from posting, sending or
+  saving as you until that tab reloads…": **Your agent ran code in another {site} tab, so TRIF blocks
+  {site}'s pages from posting, sending or saving as you, or opening other sites, until that tab reloads.
+  Reading, scrolling, clicks and mods work as usual.** (The line itself is unchanged: "Posting is paused on
+  this site: your agent ran code in another tab.")
+- A mod's "new" tag, a sensitive site's mod the chat made (it starts off there): **{site} is a sensitive site,
+  so every mod starts off there: switch it on once you've looked at it.**
+- A mod's "changed" tag, a chat change waiting on a sensitive site: **{site} is a sensitive site, so your
+  chat's change waits for you there: the version before runs until you turn this one on.**
+- The upgrade's notice, under each host's row (beside "Mods for all sites don’t run there any more."): **New
+  mods for it start off there, your chat’s too, until you switch them on.**
+- The chat's result card on a sensitive site: "{file} waits for you." with Show code and Turn on (today's
+  "Wait for me" strings), whatever the setting.
+
+### What agents read
+
+- `trif status`, a mod's state: **off (a sensitive site's, where every mod starts off: waiting for the user to
+  look at it)** (helper/cli.js)
+- `trif mods` for one: **off: it's a sensitive site's, where every mod starts off, the chat's too; not running
+  until the user switches it on after looking at it (side panel, or trif enable {id} in their terminal)**;
+  for the site's mod in `trif status --site`: **off: it's a sensitive site's, where every mod starts off, the
+  chat's too, until the user switches it on**
+- AGENTS.md "Sensitive sites": **Every mod there starts off until the user switches it on, yours too, whatever
+  "Mods your chat makes" says, and a change you make to one that's on waits for them (the version before keeps
+  running): when you finish, tell them it's waiting and that they turn it on in the side panel.**
+- AGENTS.md, `trif run --page`: "pauses the whole site's posting, in every tab" is now **locks the whole site,
+  in every tab (no posting, no other sites)**; and in "Side-panel runs": **The site's other tabs get the same
+  lock meanwhile, new ones too: they can't post, or fetch from or go to another site, either. Only requests
+  with no body to the site itself (GETs) pass: the lock stops sending, so don't count on it if a site changes
+  something on a GET.**
+- rewrite-requests header errors (helper/lib/boxpowers.js), new: **rewrite-requests: "{v}" is a word, so say
+  which word it takes the place of: {path}=Top→{v} (a rule only swaps a setting the request has for another,
+  never writes new text)**; was "isn't true, false, null, a number or a plain word (an address or long text
+  could carry data)", now: **rewrite-requests: "{v}" isn't true, false, null, a number or one word swapped for
+  another (Top→Recent): an address or other text could carry data**
+- rewrite-requests hold, a swap (helper/lib/boxpowers.js rewriteWords): **changes what {site} receives from this
+  page: sort set to Recent in place of Top or Popular (in Home requests)** (a literal reads as before: "flag
+  set to false")
+- `trif explain rewrite-requests` (extension/explain.json, approved 2026-11-11, changed): the explanation's
+  "made by TRIF in the site's own requests;" becomes **made by TRIF in the site's own requests, and only a
+  setting the request already has;**; a new agent note: **What it may write: `true`, `false`, `null` or a
+  number, each only in place of a value of its kind the request already has (a boolean, a number; null for
+  anything), and a word only in place of words the header names: `variables.sort=Top→Recent` (or `->`;
+  several with `|`: `Top|Popular→Recent`). A field the request doesn't have is never added, and a word that
+  isn't a swap is refused: so no text of the mod's own reaches the site, not even in a field's name.**; the
+  header-errors note lists the two errors above.
+- BOXED.md rewrite-requests: **Only to a field the request already has (none is added), and only in place of
+  a value of its kind: `true`, `false` or a number for one, `null` for anything, and a word only for the words
+  the header names: `variables.sort=Top→Recent` (`->` works too; `Top|Popular→Recent`).**
+
+### Logs (the extension's)
+
+- `locked tab {id} too: a tab of {site} opened it`; `tab {id} has only {site}'s rules: {error}`

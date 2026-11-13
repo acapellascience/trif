@@ -575,20 +575,38 @@ export function pageBridge() {
     f.src = e.detail;
     b.replaceWith(f);
   }, true);
-  // rewrite-requests: the header's literal changes (true, false, null, a number, a plain word), made in the
-  // site's own same-origin requests whose operation has that name (the address's last part, or the body's or
-  // the query's operationName): in a query parameter, its JSON, or a JSON body
+  // rewrite-requests: the header's changes, made in the site's own same-origin requests whose operation has
+  // that name (the address's last part, or the body's or the query's operationName): in a query parameter, its
+  // JSON, or a JSON body. Only to a field the request already has (never one added: a rule's names carry
+  // nothing to the site), and only in place of a value of its kind: true or false for a boolean, a number for
+  // a number, null for anything, and a word only for one of the words the header names (Top|Popular→Recent),
+  // so no text of the mod's author's takes the place of the user's own (helper/lib/boxpowers.js checkRewrite).
   let rewrites = [];
   const lit = (v) => (v === 'true' ? true : v === 'false' ? false : v === 'null' ? null : /^-?\d/.test(v) ? Number(v) : v);
   // (only the request's own fields: a name every object has (__proto__, constructor) would lead to the
   // page's Object.prototype, and a value set there shows up on every object the page makes)
   const own = (o, k) => Object.prototype.hasOwnProperty.call(o, k);
   const UNSAFE_KEY = /^(__proto__|prototype|constructor)$/;
+  // (the value a field gets, or undefined when the rule doesn't apply to what's there: `json` false for a
+  // query parameter, which is text)
+  const swap = (old, v, json) => {
+    const i = v.indexOf('→');
+    if (i >= 0) return typeof old === 'string' && v.slice(0, i).split('|').includes(old) ? v.slice(i + 1) : undefined;
+    const x = lit(v);
+    if (!json) return (typeof x === 'boolean' && (old === 'true' || old === 'false')) || (typeof x === 'number' && /^-?\d{1,15}(\.\d{1,10})?$/.test(old)) ? String(x) : undefined;
+    if (x === null) return old === undefined ? undefined : null;
+    return typeof x === typeof old ? x : undefined;
+  };
   const setPath = (obj, segs, v) => {
-    if (segs.some((k) => UNSAFE_KEY.test(k))) return;
+    if (segs.some((k) => UNSAFE_KEY.test(k))) return false;
     let o = obj;
-    for (const k of segs.slice(0, -1)) { if (!own(o, k) || !o[k] || typeof o[k] !== 'object') o[k] = {}; o = o[k]; }
-    o[segs[segs.length - 1]] = v;
+    for (const k of segs.slice(0, -1)) { if (!own(o, k) || !o[k] || typeof o[k] !== 'object') return false; o = o[k]; }
+    const last = segs[segs.length - 1];
+    if (!own(o, last)) return false;
+    const n = swap(o[last], v, true);
+    if (n === undefined) return false;
+    o[last] = n;
+    return true;
   };
   const rulesFor = (u, bodyOp) => rewrites.filter((r) => r.op === u.pathname.split('/').pop() || r.op === u.searchParams.get('operationName') || (bodyOp && r.op === bodyOp));
   const rewriteUrl = (url) => {
@@ -599,12 +617,12 @@ export function pageBridge() {
     for (const r of rulesFor(u)) for (const [path, v] of r.sets) {
       const [top, ...rest] = path.split('.');
       if (path.split('.').some((k) => UNSAFE_KEY.test(k))) continue;
-      if (!rest.length) { u.searchParams.set(top, String(lit(v))); changed = true; continue; }
       if (!u.searchParams.has(top)) continue;
+      if (!rest.length) { const n = swap(u.searchParams.get(top), v, false); if (n !== undefined) { u.searchParams.set(top, n); changed = true; } continue; }
       let o;
       try { o = JSON.parse(u.searchParams.get(top)); } catch (err) { continue; }
       if (!o || typeof o !== 'object') continue;
-      setPath(o, rest, lit(v)); u.searchParams.set(top, JSON.stringify(o)); changed = true;
+      if (setPath(o, rest, v)) { u.searchParams.set(top, JSON.stringify(o)); changed = true; }
     }
     return changed ? u.href : url;
   };
@@ -614,9 +632,9 @@ export function pageBridge() {
     try { u = new URL(String(url), location.href); o = JSON.parse(body); } catch (err) { return body; }
     if (u.origin !== location.origin || !o || typeof o !== 'object') return body;
     const rules = rulesFor(u, typeof o.operationName === 'string' ? o.operationName : null);
-    if (!rules.length) return body;
-    for (const r of rules) for (const [path, v] of r.sets) setPath(o, path.split('.'), lit(v));
-    return JSON.stringify(o);
+    let changed = false;
+    for (const r of rules) for (const [path, v] of r.sets) if (setPath(o, path.split('.'), v)) changed = true;
+    return changed ? JSON.stringify(o) : body;
   };
   let rewriting = false;
   const startRewriting = () => {
@@ -648,7 +666,7 @@ export function pageBridge() {
     try { list = JSON.parse(String(e.detail)); } catch (err) { return; }
     if (!Array.isArray(list)) return;
     const ok = list.filter((r) => r && typeof r.op === 'string' && /^[A-Za-z][\w]{0,60}$/.test(r.op) && Array.isArray(r.sets)
-      && r.sets.every((x) => Array.isArray(x) && /^[A-Za-z_$][\w$]*(\.[A-Za-z_$][\w$]*){0,7}$/.test(String(x[0])) && /^(true|false|null|-?\d{1,15}(\.\d{1,10})?|[A-Za-z][\w-]{0,40})$/.test(String(x[1]))));
+      && r.sets.every((x) => Array.isArray(x) && /^[A-Za-z_$][\w$]*(\.[A-Za-z_$][\w$]*){0,7}$/.test(String(x[0])) && /^(true|false|null|-?\d{1,15}(\.\d{1,10})?|[A-Za-z][\w-]{0,40}(\|[A-Za-z][\w-]{0,40}){0,7}→[A-Za-z][\w-]{0,40})$/.test(String(x[1]))));
     if (!ok.length) return;
     rewrites = ok.slice(0, 50);
     startRewriting();

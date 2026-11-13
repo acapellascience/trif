@@ -361,7 +361,7 @@ const handlers = {
       if (helperErrors.has(id)) s = `NOT SENT: ${helperErrors.get(id)}`;
       else if (held[id]) s = `${(info.pending || []).includes(id) ? 'CHANGE WAITING (the version before runs meanwhile)' : 'HELD'}: ${require('./lib/boxpowers').factLines(held[id].needs, held[id].facts || [held[id].reason]).join('; ')} (trif approve ${id}, or trif reject ${id})`;
       else if (sandboxHeld.has(id)) s = `WAITING: ${sandboxHeld.get(id).facts[0]}; only the user can allow that, in the side panel`;
-      else if (off.has(id)) s = newOff.has(id) ? `off (${newOff.get(id) === 'update' ? 'updated by TRIF' : newOff.get(id) === 'chat' ? 'made by the chat' : 'new'}: waiting for the user to look at it)` : shipsOff.has(id) ? 'off (as TRIF ships it)' : 'off';
+      else if (off.has(id)) s = newOff.has(id) ? `off (${newOff.get(id) === 'update' ? 'updated by TRIF' : newOff.get(id) === 'chat' ? 'made by the chat' : newOff.get(id) === 'sensitive' ? 'a sensitive site\'s, where every mod starts off' : 'new'}: waiting for the user to look at it)` : shipsOff.has(id) ? 'off (as TRIF ships it)' : 'off';
       else if (sitesOff.has(id)) s = 'waiting: TRIF is off on its site';
       else if (applyErrors.has(id)) s = `NOT REGISTERED: ${applyErrors.get(id)}`;
       else if (!st) s = '?';
@@ -564,7 +564,7 @@ const handlers = {
     try { st = await ctx.call('status', { timeout: 5000, ...tabArgs(ctx.opts) }); } catch (e) { if (e.kind === 'no-helper') throw e; }
     const me = st && Array.isArray(st.mods) ? st.mods.find((m) => m.id === id) : null;
     const here = st && st.page && Array.isArray(st.page.mods) ? st.page.mods.some((m) => m.id === id) : null;
-    if (me && me.enabled === false) out(me.newOff ? 'off: it came from outside the chat, so it waits for the user to switch it on' : 'off: switched off by the user (trif status)');
+    if (me && me.enabled === false) out(me.newOff === 'sensitive' ? 'off: it\'s a sensitive site\'s, where every mod starts off, the chat\'s too, until the user switches it on' : me.newOff ? 'off: it came from outside the chat, so it waits for the user to switch it on' : 'off: switched off by the user (trif status)');
     else if (st && st.groupsOff && Object.keys(st.groupsOff).length) out(`groups off: ${JSON.stringify(st.groupsOff)}`);
     if (here === true) out(`running on this page${held ? ' (the version before)' : ''}`);
     else if (here === false) out('NOT running on this page: check its @match lines against the page\'s address (trif status [TAB])');
@@ -1004,7 +1004,8 @@ const handlers = {
     const errById = new Map(errors.map((e) => [e.id, e.error]));
     for (const m of mods) {
       out(m.id + (m.name !== path.basename(m.file, '.js') ? `  (${m.name})` : '') + (enabled.get(m.id) === false ? '  [off]' : ''));
-      if (enabled.get(m.id) === false && newOff.has(m.id)) out(`  off: it came from outside the chat (or TRIF updated it), so it started off; not running until the user switches it on after looking at it (side panel, or trif enable ${m.id} in their terminal)`);
+      if (enabled.get(m.id) === false && newOff.get(m.id) === 'sensitive') out(`  off: it's a sensitive site's, where every mod starts off, the chat's too; not running until the user switches it on after looking at it (side panel, or trif enable ${m.id} in their terminal)`);
+      else if (enabled.get(m.id) === false && newOff.has(m.id)) out(`  off: it came from outside the chat (or TRIF updated it), so it started off; not running until the user switches it on after looking at it (side panel, or trif enable ${m.id} in their terminal)`);
       else if (enabled.get(m.id) === false && shipsOff.has(m.id)) out(`  off, as TRIF ships it (not running; trif enable ${m.id} turns it on)`);
       else if (enabled.get(m.id) === false) out(`  switched off by the user (not running; trif enable ${m.id} turns it on)`);
       else if (offSites.has(m.id)) out(`  switched off by the user on ${offSites.get(m.id).join(', ')} (trif enable ${m.id} --site <site> turns it back on there)`);

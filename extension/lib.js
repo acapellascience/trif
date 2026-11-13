@@ -604,7 +604,7 @@ export const MOD_GROUPS = ['rules', 'sandboxed', 'page'];
 /** chrome.storage.local `newOff`, cleaned up: mod id -> 'new' | 'update' | 'chat'. */
 export function normalizeNewOff(value) {
   const out = {};
-  if (value && typeof value === 'object' && !Array.isArray(value)) for (const [id, v] of Object.entries(value)) if (v === 'new' || v === 'update' || v === 'chat') out[id] = v;
+  if (value && typeof value === 'object' && !Array.isArray(value)) for (const [id, v] of Object.entries(value)) if (v === 'new' || v === 'update' || v === 'chat' || v === 'sensitive') out[id] = v;
   return out;
 }
 
@@ -614,9 +614,12 @@ export function normalizeNewOff(value) {
  * off, with why in `newOff`. `seen` null (never stored: a browser that had its mods before this
  * existed) takes every mod there now as seen, switching nothing off; `autoUpdated` null likewise.
  * `readded`: the stamps the browser had seen before this message (a mod with a new one arrives again).
+ * `waits(mod)`: the mod is a sensitive site's (lib.js "sensitive sites"): there every mod starts off, the
+ * chat's too, whatever "Mods your chat makes" says (newOff 'sensitive'); a mod already here is untouched, so
+ * what the user had on there stays on.
  * Pure: returns {disabled, seen, autoUpdated, newOff, changed} with new objects when something changed.
  */
-export function applyNewMods(mods, { disabled = {}, seen = null, autoUpdated = null, newOff = {}, chatWait = false, installId = null, readded = {} } = {}) {
+export function applyNewMods(mods, { disabled = {}, seen = null, autoUpdated = null, newOff = {}, chatWait = false, installId = null, readded = {}, waits = () => false } = {}) {
   const list = (mods || []).filter((m) => typeof m?.id === 'string');
   const out = { disabled, seen: seen || {}, autoUpdated: autoUpdated || {}, newOff, changed: false };
   const copy = () => {
@@ -632,7 +635,7 @@ export function applyNewMods(mods, { disabled = {}, seen = null, autoUpdated = n
   // (this browser's own chat: written while its run here was going, origin.live; not a file that appeared in the
   // moments after it ended, which helper/lib/origins.js also counts for it but could be anyone's)
   const fromChat = (m) => !!installId && m.origin?.by === installId && m.origin.live === true;
-  const off = (m) => !m.held && (!fromChat(m) || chatWait);
+  const off = (m) => !m.held && (!fromChat(m) || chatWait || waits(m));
   for (const m of list) {
     const fresh = !out.seen[m.id] || (typeof m.readded === 'string' && readded[m.id] !== m.readded);
     const updated = typeof m.autoUpdated === 'string' && out.autoUpdated[m.id] !== m.autoUpdated;
@@ -642,7 +645,7 @@ export function applyNewMods(mods, { disabled = {}, seen = null, autoUpdated = n
     if (typeof m.autoUpdated === 'string') out.autoUpdated[m.id] = m.autoUpdated;
     if (off(m) && out.disabled[m.id] !== true) {
       out.disabled[m.id] = true;
-      out.newOff[m.id] = fromChat(m) ? 'chat' : fresh ? 'new' : 'update';
+      out.newOff[m.id] = fromChat(m) ? (chatWait ? 'chat' : 'sensitive') : fresh ? 'new' : 'update';
     }
   }
   // (why a mod that's gone was off: nothing to show any more)
@@ -654,9 +657,10 @@ export function applyNewMods(mods, { disabled = {}, seen = null, autoUpdated = n
 /**
  * "Mods your chat makes: Wait for me": a change the chat made to a mod that's running waits, and the version
  * before keeps running until the user turns this one on. `waiting` (id -> {old: the mod as it was}); given the
- * mods before and after a sync. Pure: returns {waiting, changed}.
+ * mods before and after a sync. `waits(mod)`: a sensitive site's mod, where the chat's changes wait whatever
+ * the setting (applyNewMods). Pure: returns {waiting, changed}.
  */
-export function applyChatWaiting(before, after, { waiting = {}, chatWait = false, installId = null, isOn = () => true } = {}) {
+export function applyChatWaiting(before, after, { waiting = {}, chatWait = false, installId = null, isOn = () => true, waits = () => false } = {}) {
   const was = new Map((before || []).map((m) => [m.id, m]));
   const out = { ...waiting };
   let changed = false;
@@ -669,7 +673,7 @@ export function applyChatWaiting(before, after, { waiting = {}, chatWait = false
       if (held.old.hash === m.hash || (old && old.hash !== m.hash && !fromChat)) { delete out[m.id]; changed = true; }
       continue;
     }
-    if (chatWait && fromChat && old && old.hash !== m.hash && !m.held && isOn(m.id)) { out[m.id] = { old }; changed = true; }
+    if ((chatWait || waits(m)) && fromChat && old && old.hash !== m.hash && !m.held && isOn(m.id)) { out[m.id] = { old }; changed = true; }
   }
   const present = new Set((after || []).map((m) => m.id));
   for (const id of Object.keys(out)) if (!present.has(id)) { delete out[id]; changed = true; }

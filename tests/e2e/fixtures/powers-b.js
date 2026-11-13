@@ -3,7 +3,7 @@
 // @match       *://127.0.0.1/wideb.html*
 // @boxed
 // @powers      block-events keydown click(#pb), page-events e2e-wide-reset, site-storage local:e2e-wide-key session:e2e-wide-s cookie:e2e_c
-// @powers      rewrite-requests E2eOp variables.flag=false mode=quiet, image-variants 127.0.0.1 e2e-wide.png→e2e-wide.png?size=big
+// @powers      rewrite-requests E2eOp variables.flag=false mode=loud→quiet variables.added=true, image-variants 127.0.0.1 e2e-wide.png→e2e-wide.png?size=big
 // @powers      embeds www.youtube.com/embed, local-fonts, preload, edit-uploads, site-data e2eData, media, go-to reload /wideb.html?mods=[red|blue]
 // @migrate     localStorage e2e-old-setting
 // @run-at      document-start

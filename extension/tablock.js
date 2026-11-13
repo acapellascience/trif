@@ -11,17 +11,23 @@
 // it leaves behind, timers or wrapped functions, only lives as long as the page does). Clicks, keys and
 // reading the page work as before.
 //
-// While any tab of a site S is locked that way, the whole site is (TL-2, TL-4, TL-5), with rules on what
-// S's pages start (initiatorDomains), in any tab:
-// - writes and sockets S starts are blocked everywhere, including requests no tab owns (tabId -1: a
-//   SharedWorker, S's service worker passing a fetch through) and S's other tabs: those show the paused
-//   icon and a notice too, and so does a tab of S opened during the lock;
-// - requests no tab owns that S starts can't reach another site (the same rule as the tab's own);
-// - S can't send a tab that didn't exist when the lock started to another site (a popup, noopener or
-//   not, before TRIF even sees the tab); the user's own new tabs (typed, bookmarks) have no initiator and
-//   load as usual, and S's existing tabs can still follow links out.
-// Those other tabs unlock when the last tab of S the agent ran code in unlocks. (Several tabs with agent
-// code: each unlocks on its own new page; S stays locked until all have.)
+// While any tab of a site S is locked that way, the whole site is, completely (TL-2, TL-4, TL-5; Tim,
+// 2026-11-13: "locking other tabs down completely now makes sense", the lock being only for code that needs
+// more than the box):
+// - every other tab of S gets the same rules as the tab the code ran in (lockRules, with the sites any of
+//   S's pages had loaded from when the lock started), and so does a tab of S opened during the lock, or
+//   one a locked tab of S opens, and a tab that comes to S. Those show the paused notice too;
+// - and rules on what S's pages start (initiatorDomains), in any tab and in none: no writes or sockets, no
+//   request to or navigation toward another site (a popup, noopener or not, before TRIF has even seen the
+//   tab; a window found by name, a targeted link or form; a frame), no picture, script, style, font or
+//   media from a site none of S's pages used. Those cover the moments before a new tab of S has rules of
+//   its own, requests no tab owns (tabId -1: a SharedWorker, S's service worker passing a fetch through),
+//   and a window of another site that S's code reaches by name: it can't be sent anywhere but S.
+// The user's own new tabs (typed, bookmarks) have no initiator: one to another site loads as usual. Those
+// other tabs unlock when the last tab of S the agent ran code in unlocks. (Several tabs with agent code:
+// each unlocks on its own new page; S stays locked until all have.) A tab of S that goes to another site
+// (the user's typed address is blocked there, as in the agent's tab: then it's on the browser's blocked
+// page, which has nothing of S's) is let go.
 //
 // The lock lasts as long as the document the code ran in: the next document in the tab (a reload, or a
 // real navigation) has none of the agent's code, and unlocks it. A marker in the extension's own
@@ -104,9 +110,11 @@ export function lockRules(tabId, ids, site, domains = [], methods = WRITE_METHOD
 
 /**
  * The rules for a site while a tab of it is locked: what the site's pages start (initiatorDomains), in
- * any tab and in none (TL-2, TL-4, TL-5). `openTabs`: the tabs open when the lock started.
+ * any tab and in none (TL-2, TL-4, TL-5): writes, form posts, sockets; anything to another site (going
+ * there in any tab, a frame, fetch, XHR or event stream); subresources from sites none of its pages used.
+ * `domains`: the sites its pages had loaded from when the lock started.
  */
-export function siteRules(ids, site, domains = [], openTabs = [], methods = WRITE_METHODS) {
+export function siteRules(ids, site, domains = [], methods = WRITE_METHODS) {
   const block = { type: 'block' };
   const from = [site];
   const keep = [...new Set([site, ...domains])];
@@ -114,10 +122,9 @@ export function siteRules(ids, site, domains = [], openTabs = [], methods = WRIT
     { id: ids[0], priority: 1000, action: block, condition: { initiatorDomains: from, requestMethods: methods } },
     { id: ids[1], priority: 1000, action: block, condition: { initiatorDomains: from, requestMethods: methods, resourceTypes: ['main_frame'] } },
     { id: ids[2], priority: 1000, action: block, condition: { initiatorDomains: from, resourceTypes: ['websocket'] } },
-    // no tab (workers, the service worker): nowhere but the site and what it already used
-    { id: ids[3], priority: 1000, action: block, condition: { tabIds: [-1], initiatorDomains: from, resourceTypes: ['xmlhttprequest', 'other', 'object', ...SUBRESOURCE_TYPES], excludedRequestDomains: keep } },
-    // a new tab sent to another site by the site (popups)
-    { id: ids[4], priority: 1000, action: block, condition: { initiatorDomains: from, resourceTypes: ['main_frame'], excludedRequestDomains: [site], ...(openTabs.length ? { excludedTabIds: openTabs } : {}) } },
+    // (another site: a page in any tab, a popup, a window found by name, a frame; fetch, XHR, event streams)
+    { id: ids[3], priority: 1000, action: block, condition: { initiatorDomains: from, resourceTypes: CROSS_SITE_TYPES, excludedRequestDomains: [site] } },
+    { id: ids[4], priority: 1000, action: block, condition: { initiatorDomains: from, resourceTypes: SUBRESOURCE_TYPES, excludedRequestDomains: keep } },
   ];
 }
 
@@ -352,9 +359,9 @@ const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
 export function createTabLocks({ chrome, log = () => {}, changed = () => {}, noted = () => {}, key = 'tabLocks', inScope = defaultInScope, icon = null }) {
   // tabId -> {token, ids, site, url, since, parent, kind, domains, fp, cleared, noted}
   // kind: 'code' (the agent's code ran there), 'opened' (a locked tab opened it), 'site' (another tab of a
-  // locked site: the site's rules cover it, no rules of its own)
+  // locked site: the same rules as the tab the code ran in, until the site unlocks)
   const locks = new Map();
-  const sites = new Map(); // site -> {ids, domains, openTabs, since}
+  const sites = new Map(); // site -> {ids, domains, since}
   let nextId = 1;
   const ready = (async () => {
     try {
@@ -454,34 +461,49 @@ export function createTabLocks({ chrome, log = () => {}, changed = () => {}, not
     return (lingerMs = 0) => { if (guards.get(tabId) !== g) return; clearTimeout(g.timer); if (lingerMs > 0) g.timer = setTimeout(() => { if (guards.get(tabId) === g) unguard(tabId); }, lingerMs); else return unguard(tabId); };
   }
 
-  /** The site's rules, and its other tabs locked, if they aren't already. */
+  /**
+   * The site's rules, and its other tabs locked, if they aren't already. (Before the agent's code runs: what
+   * the site's pages load from then is what they may go on loading from.)
+   */
   async function lockSite(site, domains) {
     if (sites.has(site)) return;
     const ids = [nextId++, nextId++, nextId++, nextId++, nextId++];
     const tabs = await chrome.tabs.query({}).catch(() => []);
-    const openTabs = tabs.map((t) => t.id).filter((id) => Number.isInteger(id) && id >= 0);
-    // A browser that dropped the initiator condition would block every site's writes: check.
+    const mine = tabs.filter((t) => Number.isInteger(t.id) && t.id >= 0 && inScope(hostOf(t.url || t.pendingUrl || ''), site));
+    const used = await Promise.all(mine.filter((t) => !locks.has(t.id)).map((t) => inIsolated(t.id, loadedDomains).catch(() => [])));
+    const all = [...new Set([...domains, ...used.flatMap((d) => (Array.isArray(d) ? d : []))])].slice(0, 600);
+    // A browser that dropped the initiator condition would block every site's requests: check.
     await withMethods((m) => {
-      const rules = siteRules(ids, site, domains, openTabs, m);
-      return addChecked(rules, (got) => ids.every((id) => same(got.get(id).initiatorDomains, [site]))
+      const rules = siteRules(ids, site, all, m);
+      return addChecked(rules, (got) => ids.every((id) => same(got.get(id).initiatorDomains, [site]) && !got.get(id).tabIds)
         && [ids[0], ids[1]].every((id) => same(got.get(id).requestMethods, m))
-        && same(got.get(ids[3]).tabIds, [-1]) && same(got.get(ids[3]).excludedRequestDomains, rules[3].condition.excludedRequestDomains)
-        && same(got.get(ids[4]).excludedRequestDomains, [site]) && same(got.get(ids[4]).excludedTabIds || [], openTabs),
+        && same(got.get(ids[3]).excludedRequestDomains, [site])
+        && same(got.get(ids[4]).excludedRequestDomains, rules[4].condition.excludedRequestDomains),
       "this browser can't block requests a site starts");
     });
-    sites.set(site, { ids, domains, openTabs, since: Date.now() });
+    sites.set(site, { ids, domains: all, since: Date.now() });
     log(`locked ${site} in every tab`);
-    for (const t of tabs) await adopt(t);
+    for (const t of mine) await adopt(t);
   }
 
-  /** Another tab of a locked site: locked with it (its rules cover the tab; this is the icon and notice). */
-  async function adopt(tab) {
+  /**
+   * Another tab of a locked site (or one a tab of it opened, `opener`): locked with it, with the same rules
+   * as the tab the code ran in, and the paused notice. Rules it can't have: the site's still cover it.
+   */
+  async function adopt(tab, opener = null) {
     if (!tab || !Number.isInteger(tab.id) || tab.id < 0 || locks.has(tab.id)) return;
     const host = hostOf(tab.url || tab.pendingUrl || '');
-    const site = [...sites.keys()].find((s) => inScope(host, s));
-    if (!site) return;
-    locks.set(tab.id, { token: null, ids: [], site, url: String(tab.url || ''), since: Date.now(), parent: null, kind: 'site' });
-    log(`locked tab ${tab.id} too: it's ${site}`);
+    const site = opener ? opener.site : [...sites.keys()].find((s) => inScope(host, s));
+    if (!site || !sites.has(site)) return;
+    const l = { token: null, ids: [], site, url: String(tab.url || ''), since: Date.now(), parent: null, kind: 'site' };
+    locks.set(tab.id, l);
+    try {
+      const ids = await addRules(tab.id, site, sites.get(site)?.domains || []);
+      if (locks.get(tab.id) === l) l.ids = ids;
+      else await chrome.declarativeNetRequest.updateSessionRules({ removeRuleIds: ids }).catch(() => {}); // (unlocked meanwhile)
+    } catch (e) { log(`tab ${tab.id} has only ${site}'s rules: ${e?.message ?? e}`); }
+    if (locks.get(tab.id) !== l) return;
+    log(`locked tab ${tab.id} too: ${opener ? `a tab of ${site} opened it` : `it's ${site}`}`);
     await save();
     await showIcon(tab.id, true);
     changed(tab.id);
@@ -499,6 +521,9 @@ export function createTabLocks({ chrome, log = () => {}, changed = () => {}, not
     await save();
   }
 
+  /** A tab the site's lock covered ('site') that has a lock of its own now: its old rules go (after the new ones are in). */
+  const dropRules = (l) => (l && l.ids.length ? chrome.declarativeNetRequest.updateSessionRules({ removeRuleIds: l.ids }).catch((e) => log(`old rules: ${e?.message ?? e}`)) : undefined);
+
   async function mark(tabId, token) {
     if ((await inIsolated(tabId, setMarker, [token])) !== true) throw new Error("couldn't mark the tab's page");
   }
@@ -507,15 +532,19 @@ export function createTabLocks({ chrome, log = () => {}, changed = () => {}, not
   async function lock(tabId, site, parent = null, url = '') {
     await ready;
     let l = locks.get(tabId);
-    if (l && l.kind === 'site') { locks.delete(tabId); l = null; } // (agent code there now: a lock of its own)
+    // (agent code there now, in a tab the site's lock covered: a lock of its own. What its page loads from is
+    // the site's list from when the lock started: the agent's code may have reached it since)
+    const old = l && l.kind === 'site' ? l : null;
+    if (old) l = null;
     const fresh = !l;
     if (!l) {
-      const found = parent != null ? (locks.get(parent)?.domains || []) : await inIsolated(tabId, loadedDomains).catch(() => []);
+      const found = parent != null ? (locks.get(parent)?.domains || []) : old ? (sites.get(old.site)?.domains || []) : await inIsolated(tabId, loadedDomains).catch(() => []);
       const domains = Array.isArray(found) ? found : [];
       const fp = parent == null ? await inIsolated(tabId, fingerprint).catch(() => null) : null;
       const ids = await addRules(tabId, site, domains);
       l = { token: crypto.randomUUID(), ids, site: site || '', url: String(url || ''), since: Date.now(), parent, kind: parent == null ? 'code' : 'opened', domains, fp: fp || null };
       locks.set(tabId, l);
+      await dropRules(old);
       log(`locked tab ${tabId}${site ? ` (${site})` : ''}${parent != null ? `, opened by locked tab ${parent}` : ''}`);
       try { await lockSite(site, domains); } catch (e) { await unlock(tabId, 'no site lock'); throw e; }
     }
@@ -595,9 +624,11 @@ export function createTabLocks({ chrome, log = () => {}, changed = () => {}, not
     const l = locks.get(tabId);
     if (!l) return;
     if (l.kind === 'site') {
-      // another tab of a locked site: locked while it's on the site
+      // another tab of a locked site: locked while it's on the site (or on no page yet: a tab one of the
+      // site's tabs opened, still blank)
       const t = await chrome.tabs.get(tabId).catch(() => null);
-      if (t && !inScope(hostOf(t.url || t.pendingUrl || ''), l.site)) await unlock(tabId, 'left the site');
+      const u = t ? String(t.url || t.pendingUrl || '') : '';
+      if (t && u && u !== 'about:blank' && !inScope(hostOf(u), l.site)) await unlock(tabId, 'left the site');
       else if (t) await showIcon(tabId, true);
       return;
     }
@@ -624,9 +655,10 @@ export function createTabLocks({ chrome, log = () => {}, changed = () => {}, not
       await ready;
       if (locks.has(tabId) && locks.get(tabId).kind !== 'site') return;
       if (typeof token !== 'string' || !token || !site) return; // (only the marker, in our isolated world, sends this)
-      locks.delete(tabId);
+      const old = locks.get(tabId) || null;
       const ids = await addRules(tabId, site, []);
       locks.set(tabId, { token, ids, site, url: String(url || ''), since: Date.now(), parent: null, kind: 'code', domains: [], fp: null });
+      await dropRules(old);
       try { await lockSite(site, []); } catch (e) { log(`couldn't lock ${site} in every tab: ${e?.message ?? e}`); }
       await save();
       await showIcon(tabId, true);
@@ -637,7 +669,7 @@ export function createTabLocks({ chrome, log = () => {}, changed = () => {}, not
       await ready;
       const p = tab.openerTabId != null && locks.get(tab.openerTabId);
       if (p && p.kind !== 'site') await lock(tab.id, p.site, tab.openerTabId, p.url).catch((e) => log(`couldn't lock tab ${tab.id}: ${e?.message ?? e}`));
-      else await adopt(tab);
+      else await adopt(tab, p || null); // (one the site's other tabs open: locked with the site, wherever it's going)
     },
     /** A tab's address changed: a tab of a locked site is locked too. */
     async seen(tab) { await ready; await adopt(tab); },

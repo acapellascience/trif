@@ -4992,6 +4992,8 @@ say({ type: 'result', subtype: 'success', is_error: false, result: text, session
       await this.d.eval(prePage, `async (o) => { window.open(o + "/two.html?e2e=named", "e2e-named"); return true; }`, [other], { userActivation: true });
       await sleep(1500);
       const named = (await this.ext('async (old) => (await chrome.tabs.query({})).filter((t) => !old.includes(t.id)).map((t) => t.id)', [namedBefore]))[0] ?? null;
+      await this.ext(`async (id) => { await chrome.tabs.update(id, { active: true }); }`, [win.tabId]); // (the named window came to the front: the panel follows the test tab)
+      await sleep(500);
       // ---- lock 1
       const said = await lockByAgent('tidy the page');
       const t0 = Date.now();
@@ -5060,6 +5062,7 @@ say({ type: 'result', subtype: 'success', is_error: false, result: text, session
         await this.d.eval(pg, `async (o) => { const a = document.createElement("a"); a.href = o + "/e2e-named-link?d=secret"; a.target = "e2e-named"; document.body.append(a); a.click(); a.remove(); return true; }`, [other], { userActivation: true });
         await this.d.eval(pg, `async (o) => { const f = document.createElement("form"); f.action = o + "/e2e-named-form"; f.method = "get"; f.target = "e2e-named"; const i = document.createElement("input"); i.name = "d"; i.value = "secret"; f.append(i); document.body.append(f); f.submit(); f.remove(); return true; }`, [other], { userActivation: true });
         await sleep(2000);
+        await this.ext(`async (id) => { await chrome.tabs.update(id, { active: true }); }`, [win.tabId]);
       }
       // TL-5: popups from the locked page to another site (with user activation, as a click would give)
       const page = await this.d.findPage((u) => u.includes('e2e=harden'), { timeoutMs: 5000 });

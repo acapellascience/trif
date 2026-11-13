@@ -37,6 +37,7 @@
 // exit_code, status}, file_change {changes:[{path, kind}]}, mcp_tool_call {server, tool},
 // web_search {query}, todo_list, error {message}.
 
+const path = require('path');
 const { findExecutable, versionOf, relToWorkspace, oneLine, parseJsonLine, captureSync, capture, isLoginFailure, loginError } = require('./util');
 
 const PROFILE = 'trif-run';
@@ -55,6 +56,22 @@ const FEATURES_OFF = ['apps', 'plugins', 'remote_plugin', 'plugin_sharing', 'bro
   'skill_mcp_dependency_install', 'hooks', 'tool_suggest'];
 
 const tomlKey = (s) => JSON.stringify(String(s)); // a JSON string is a valid TOML basic string here
+
+// A run whose model requests go through its key proxy (keyproxy.js, token mode: codex-oss with a key, or
+// a plain run with an OpenAI API key saved, agentkeys.js): the proxy wants a token, which isn't in Codex's
+// argv or environment (other same-user processes can read both: sysctl KERN_PROCARGS2). It's in a file in
+// the run's own folder (runs.js agentDir: 0700, beside the run's box, where the run's commands can't read;
+// the file 0600, written by runs.js from `files`, removed with the folder when the run ends), and the
+// provider's `auth` has Codex read it: Codex 0.166 runs that command itself, outside the sandbox, and sends
+// what it prints as `Authorization: Bearer …` (checked against a stand-in server). The `-c` value names
+// the file, never the token.
+const TOKEN_FILE = 'key-proxy-token';
+function tokenFile(agentDir) { return path.join(agentDir, TOKEN_FILE); }
+/** The provider field that has Codex send the run's key-proxy token (with the provider's other fields). */
+function proxyAuth(agentDir) {
+  if (!agentDir) throw new Error('no run folder for the key proxy\'s token');
+  return `auth = { command = "/bin/cat", args = [${tomlKey(tokenFile(agentDir))}] }`;
+}
 
 /**
  * The inline TOML table for -c permissions=…: `denied` unreadable, `readable` read-only, `writable`
@@ -133,11 +150,17 @@ const adapter = {
   },
 
   // writable / readOnly / denied: absolute (real) paths; see permissionsToml. `config`: more -c pairs
-  // (codex-oss: its provider; a plain run with an API key: the key proxy's provider, see keyProvider).
-  command({ bin, prompt, sessionId, model, effort, readable = [], writable = [], readOnly = [], denied = [], lockedDirs = [], tmp = '', config = [] }) {
+  // (codex-oss: its provider). `keyProxy` {url, token}: a plain run with an API key, whose requests go
+  // through the run's key proxy (agentkeys.js). `proxyToken`: the key proxy's token, for a provider in
+  // `config` that uses proxyAuth (codex-oss). Either way the token goes into a file in `agentDir` (the
+  // run's own folder, see proxyAuth), never into args.
+  command({ bin, prompt, sessionId, model, effort, readable = [], writable = [], readOnly = [], denied = [], lockedDirs = [], tmp = '', config = [], keyProxy = null, proxyToken = null, agentDir = '' }) {
+    const token = proxyToken || (keyProxy && keyProxy.token) || null;
+    const viaProxy = keyProxy ? require('../agentkeys').codexProviderArgs(keyProxy.url, proxyAuth(agentDir)) : [];
+    if (token && !agentDir) throw new Error('no run folder for the key proxy\'s token');
     // Exec options go before the `resume` subcommand (verified with Codex 0.166).
     const args = ['exec', '--json', '--skip-git-repo-check', '--ignore-user-config', '--ignore-rules',
-      '-c', 'approval_policy="never"', '-c', `default_permissions="${PROFILE}"`, '-c', `permissions=${permissionsToml({ readable, writable, readOnly, denied })}`, ...config,
+      '-c', 'approval_policy="never"', '-c', `default_permissions="${PROFILE}"`, '-c', `permissions=${permissionsToml({ readable, writable, readOnly, denied })}`, ...config, ...viaProxy,
       '-c', `shell_environment_policy.exclude=[${EXCLUDED_VARS.map(tomlKey).join(', ')}]`,
       ...(tmp ? ['-c', `shell_environment_policy.set={ TMPDIR = ${tomlKey(tmp)}, TMPPREFIX = ${tomlKey(`${tmp}/zsh`)} }`] : []),
       '-c', 'web_search="disabled"', ...FEATURES_OFF.flatMap((f) => ['-c', `features.${f}=false`])];
@@ -153,7 +176,8 @@ const adapter = {
     // (A site folder that is a link out of the mods folder isn't made read-only, runs.js runLimits: it
     // isn't writable either, since the sandbox checks where it leads.)
     const writableHere = (p) => writable.some((w) => p === w || p.startsWith(w.endsWith('/') ? w : `${w}/`));
-    return { file: bin || adapter.binary, args, stdin: prompt, locked: lockedDirs.filter((d) => !d.link && (readOnly.includes(d.real) || !writableHere(d.real))).map((d) => d.rel) };
+    return { file: bin || adapter.binary, args, stdin: prompt, locked: lockedDirs.filter((d) => !d.link && (readOnly.includes(d.real) || !writableHere(d.real))).map((d) => d.rel),
+      ...(token ? { files: [{ path: tokenFile(agentDir), content: token }] } : {}) };
   },
 
   parse(line, emit, state = {}) {
@@ -303,4 +327,6 @@ module.exports = adapter;
 adapter.permissionsToml = permissionsToml;
 adapter.EXCLUDED_VARS = EXCLUDED_VARS;
 adapter.tooOld = tooOld;
+adapter.proxyAuth = proxyAuth;
+adapter.tokenFile = tokenFile;
 adapter.orgMessages = orgMessages;

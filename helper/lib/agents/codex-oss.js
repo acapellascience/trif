@@ -23,8 +23,9 @@
 // Keychain, item "TRIF open model key" / account `openrouter` or `custom:<host>`), set from the panel
 // (agent.openModel.setKey) or `trif agent open-model --set-key`; never in config.json, an environment
 // variable or the extension. Before each run the helper reads it into its own memory: Codex never gets it.
-// Instead the helper starts a proxy for the run (keyproxy.js) on 127.0.0.1, at a random path, which adds
-// the key and forwards to the provider; Codex's base_url is that proxy. (Anything in a process's
+// Instead the helper starts a proxy for the run (keyproxy.js) on 127.0.0.1, which adds the key and
+// forwards to the provider; Codex's base_url is that proxy. The proxy wants a token of the run's, which
+// Codex reads from a file in the run's own folder (codex.js proxyAuth): not in its argv, unlike the address. (Anything in a process's
 // environment or arguments is readable by any same-user process, sysctl KERN_PROCARGS2, sandbox or not:
 // that's why the key is in neither Codex's nor, any more, the user's shell's.) The sandbox keeps the
 // commands away from the Keychain (in the home folder, denied), config.json and the network (the proxy
@@ -189,10 +190,14 @@ function localModel(om, names) {
 
 const tomlStr = (s) => JSON.stringify(String(s)); // a JSON string is a valid TOML basic string here
 
-/** The -c values that point Codex at the provider. */
-function providerArgs(om) {
+/**
+ * The -c values that point Codex at the provider. `auth`: with a key proxy, the field that sends its token
+ * (codex.js proxyAuth: the token is in a file of the run's, never in these values).
+ */
+function providerArgs(om, auth = null) {
   // No env_key: Codex never has the key (the run's key proxy adds it; see "The API key" above).
   const fields = [`name = ${tomlStr(`${om.name} (TRIF)`)}`, `base_url = ${tomlStr(om.proxyUrl || om.baseUrl)}`, 'wire_api = "responses"'];
+  if (auth) fields.push(auth);
   // HTTPS only: Codex otherwise tries a WebSocket first, and a server without one (OpenRouter, Ollama)
   // costs a round of retries ("Reconnecting... n/5") before it falls back, sometimes minutes.
   fields.push('supports_websockets = false');
@@ -221,6 +226,8 @@ function friendlyFor(om) {
   return (message) => {
     const m = String(message);
     if (/Model metadata for .* not found/i.test(m)) return null; // Codex's warning for every non-OpenAI model
+    // (the run's key proxy, not the provider: this Codex didn't send the run's token, keyproxy.js NO_TOKEN)
+    if (/key proxy: this request doesn.t carry the run.s token/.test(m)) return 'This Codex didn’t send the run’s key-proxy token, so TRIF’s key proxy refused its request: update Codex (brew upgrade codex, or npm install -g @openai/codex), then try again';
     if (/\b401\b|unauthori[sz]ed|invalid api key|no auth/i.test(m)) {
       if (om.keyed) return `${om.name} refused the API key (401): check it, or make a new one and save it in Settings (or \`trif agent open-model --set-key\`)`;
       return om.keyAccount ? `${om.name} wants an API key (401): ${keyHelp(om)}` : `${om.name} wants an API key (401)`;
@@ -361,10 +368,11 @@ const adapter = {
     if (key) {
       let said = false;
       const onStatus = (status) => { if (status === 401 && !said && logger) { said = true; logger.warn(`open model: ${om.name} refused the API key (401)`); } };
-      try { proxy = await startKeyProxy({ target: om.baseUrl, key, logger, onStatus }); } catch (e) { throw new Error(`couldn't start the key proxy for ${om.name}: ${e.message}`); }
+      try { proxy = await startKeyProxy({ target: om.baseUrl, key, logger, onStatus, token: true }); } catch (e) { throw new Error(`couldn't start the key proxy for ${om.name}: ${e.message}`); }
     }
     om.contextWindow = await contextWindow(om, { fetchImpl });
-    const forCodex = proxy ? { ...om, proxyUrl: proxy.url } : om;
+    if (proxy) secrets.push(proxy.token); // (redacted from logs too)
+    const forCodex = proxy ? { ...om, proxyUrl: proxy.url, proxyToken: proxy.token } : om;
     return {
       env: {}, unsetEnv: [...PASSED_KEYS], secrets,
       state: { friendly: friendlyFor(om), openModel: om, providerName: om.name },
@@ -378,7 +386,8 @@ const adapter = {
   // ("I'm an OpenAI coding agent running inside Codex CLI"), from Codex's own instructions.
   command(opts) {
     const om = opts.openModel || resolve(null, null, opts.model);
-    return codex.command({ ...opts, effort: undefined, prompt: `${modelNote(om)}\n\n${opts.prompt}`, model: om.model, config: providerArgs(om) });
+    const auth = om.proxyToken ? codex.proxyAuth(opts.agentDir) : null;
+    return codex.command({ ...opts, effort: undefined, prompt: `${modelNote(om)}\n\n${opts.prompt}`, model: om.model, config: providerArgs(om, auth), proxyToken: om.proxyToken || null });
   },
 
   parse(line, emit, state = {}) {

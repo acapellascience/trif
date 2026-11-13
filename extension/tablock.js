@@ -63,7 +63,12 @@ export const ICONS = {
   paused: { 16: 'icons/robot-16.png', 32: 'icons/robot-32.png' }, // (the toolbar stays the usual robot: Tim, 2026-11-11; the panel shows the pause)
 };
 
-export const WRITE_METHODS = ['post', 'put', 'patch', 'delete', 'connect'];
+// Methods that change something. 'other' is declarativeNetRequest's name for every method it has no name
+// for (PROPPATCH, MKCOL, a verb a site made up): a server may act on those as on a POST. GET, HEAD and
+// OPTIONS stay: the page has to load. (A browser that won't take 'other' gets the named ones:
+// NAMED_WRITE_METHODS, createTabLocks `methods`.)
+export const WRITE_METHODS = ['post', 'put', 'patch', 'delete', 'connect', 'other'];
+export const NAMED_WRITE_METHODS = WRITE_METHODS.filter((m) => m !== 'other');
 
 // Requests that could carry data out to another site, whatever their method: going there (a page or a
 // frame), or asking it (fetch and XHR, event streams, plugins).
@@ -84,12 +89,12 @@ export const NOTED_PARTS = ['localStorage', 'sessionStorage', 'indexedDB', 'cook
  * changing page loads (form posts), then sockets, whatever the method; then other sites; then
  * subresources from sites the page didn't already use.
  */
-export function lockRules(tabId, ids, site, domains = []) {
+export function lockRules(tabId, ids, site, domains = [], methods = WRITE_METHODS) {
   const block = { type: 'block' };
   const keep = [...new Set([site, ...domains])];
   return [
-    { id: ids[0], priority: 1000, action: block, condition: { tabIds: [tabId], requestMethods: WRITE_METHODS } },
-    { id: ids[1], priority: 1000, action: block, condition: { tabIds: [tabId], requestMethods: WRITE_METHODS, resourceTypes: ['main_frame'] } },
+    { id: ids[0], priority: 1000, action: block, condition: { tabIds: [tabId], requestMethods: methods } },
+    { id: ids[1], priority: 1000, action: block, condition: { tabIds: [tabId], requestMethods: methods, resourceTypes: ['main_frame'] } },
     { id: ids[2], priority: 1000, action: block, condition: { tabIds: [tabId], resourceTypes: ['websocket'] } },
     // (excludedRequestDomains: the site and its subdomains stay reachable, so the tab can reload)
     { id: ids[3], priority: 1000, action: block, condition: { tabIds: [tabId], resourceTypes: CROSS_SITE_TYPES, excludedRequestDomains: [site] } },
@@ -101,13 +106,13 @@ export function lockRules(tabId, ids, site, domains = []) {
  * The rules for a site while a tab of it is locked: what the site's pages start (initiatorDomains), in
  * any tab and in none (TL-2, TL-4, TL-5). `openTabs`: the tabs open when the lock started.
  */
-export function siteRules(ids, site, domains = [], openTabs = []) {
+export function siteRules(ids, site, domains = [], openTabs = [], methods = WRITE_METHODS) {
   const block = { type: 'block' };
   const from = [site];
   const keep = [...new Set([site, ...domains])];
   return [
-    { id: ids[0], priority: 1000, action: block, condition: { initiatorDomains: from, requestMethods: WRITE_METHODS } },
-    { id: ids[1], priority: 1000, action: block, condition: { initiatorDomains: from, requestMethods: WRITE_METHODS, resourceTypes: ['main_frame'] } },
+    { id: ids[0], priority: 1000, action: block, condition: { initiatorDomains: from, requestMethods: methods } },
+    { id: ids[1], priority: 1000, action: block, condition: { initiatorDomains: from, requestMethods: methods, resourceTypes: ['main_frame'] } },
     { id: ids[2], priority: 1000, action: block, condition: { initiatorDomains: from, resourceTypes: ['websocket'] } },
     // no tab (workers, the service worker): nowhere but the site and what it already used
     { id: ids[3], priority: 1000, action: block, condition: { tabIds: [-1], initiatorDomains: from, resourceTypes: ['xmlhttprequest', 'other', 'object', ...SUBRESOURCE_TYPES], excludedRequestDomains: keep } },
@@ -232,7 +237,8 @@ export function leakGuard() {
     try { void w.document; } catch { return; } // (another origin: not the page's to reach)
     patched.add(w);
     const refuse = function () { throw new w.DOMException('TRIF paused WebRTC on this tab while your agent ran code here', 'NotAllowedError'); };
-    for (const name of ['RTCPeerConnection', 'webkitRTCPeerConnection', 'mozRTCPeerConnection', 'RTCDataChannel', 'RTCIceCandidate', 'RTCSessionDescription']) {
+    // (and WebTransport: like WebRTC, a connection that isn't an HTTP request, so no rule above sees it)
+    for (const name of ['RTCPeerConnection', 'webkitRTCPeerConnection', 'mozRTCPeerConnection', 'RTCDataChannel', 'RTCIceCandidate', 'RTCSessionDescription', 'WebTransport']) {
       if (!(name in w)) continue;
       try { Object.defineProperty(w, name, { value: refuse, writable: false, configurable: false }); } catch { /* already fixed */ }
     }
@@ -393,19 +399,59 @@ export function createTabLocks({ chrome, log = () => {}, changed = () => {}, not
     }
   }
 
+  // The methods the rules name: with 'other' (WRITE_METHODS), or, in a browser that refuses that name or
+  // doesn't keep it, the named ones only, found out the first time rules go in.
+  let methods = WRITE_METHODS;
+  const withMethods = async (add) => {
+    try { return await add(methods); } catch (e) {
+      if (methods !== WRITE_METHODS) throw e;
+      methods = NAMED_WRITE_METHODS;
+      try { const r = await add(methods); log(`this browser's rules don't take the method "other": blocking ${methods.join(', ')} (${e?.message ?? e})`); return r; } catch { methods = WRITE_METHODS; throw e; }
+    }
+  };
+
   async function addRules(tabId, site, domains) {
     if (!site) throw new Error('no site to lock the tab to');
     const ids = [nextId++, nextId++, nextId++, nextId++, nextId++];
-    const rules = lockRules(tabId, ids, site, domains);
     // A browser that dropped the per-tab condition would block every tab's requests, and one that dropped
     // the methods would block everything: either way, not what was asked for. Check what it kept.
-    await addChecked(rules, (got) => ids.every((id) => same(got.get(id).tabIds, [tabId]))
-      && [ids[0], ids[1]].every((id) => same(got.get(id).requestMethods, WRITE_METHODS))
-      // (and the site left out of the cross-site rules: without that, the tab couldn't even reload)
-      && same(got.get(ids[3]).excludedRequestDomains, [site])
-      && same(got.get(ids[4]).excludedRequestDomains, rules[4].condition.excludedRequestDomains),
-    "this browser can't block requests for one tab");
+    await withMethods((m) => {
+      const rules = lockRules(tabId, ids, site, domains, m);
+      return addChecked(rules, (got) => ids.every((id) => same(got.get(id).tabIds, [tabId]))
+        && [ids[0], ids[1]].every((id) => same(got.get(id).requestMethods, m))
+        // (and the site left out of the cross-site rules: without that, the tab couldn't even reload)
+        && same(got.get(ids[3]).excludedRequestDomains, [site])
+        && same(got.get(ids[4]).excludedRequestDomains, rules[4].condition.excludedRequestDomains),
+      "this browser can't block requests for one tab");
+    });
     return ids;
+  }
+
+  // ---- an agent's navigation (trif navigate, trif open): the tab stays on the run's site while it loads.
+  // A run may only send a tab to its own site, but the address it gives can be one that sends the tab on (a
+  // site's own redirect: /url?q=…, ?next=…), with what the agent read in it; no code ran, so the tab isn't
+  // locked. So for as long as the page loads, and a moment after, a rule keeps the tab's own page loads to
+  // the site: the hop to another site is blocked before any request goes there. No rule, no navigation.
+  const guards = new Map(); // tab id -> {id, timer}
+  const unguard = async (tabId) => {
+    const g = guards.get(tabId);
+    if (!g) return;
+    guards.delete(tabId);
+    clearTimeout(g.timer);
+    try { await chrome.declarativeNetRequest.updateSessionRules({ removeRuleIds: [g.id] }); } catch (e) { log(`navigation guard on tab ${tabId}: ${e?.message ?? e}`); }
+  };
+  /** Keep `tabId`'s page loads on `site`. Returns release(lingerMs): the rule goes that long after. */
+  async function guardNavigation(tabId, site) {
+    await ready;
+    if (!site) throw new Error('no site to keep the tab on');
+    await unguard(tabId);
+    const id = nextId++;
+    const rule = { id, priority: 1000, action: { type: 'block' }, condition: { tabIds: [tabId], resourceTypes: ['main_frame'], excludedRequestDomains: [site] } };
+    await addChecked([rule], (got) => same(got.get(id).tabIds, [tabId]) && same(got.get(id).excludedRequestDomains, [site]) && same(got.get(id).resourceTypes, ['main_frame']),
+      "this browser can't keep one tab's page loads to a site");
+    const g = { id, timer: null };
+    guards.set(tabId, g);
+    return (lingerMs = 0) => { if (guards.get(tabId) !== g) return; clearTimeout(g.timer); if (lingerMs > 0) g.timer = setTimeout(() => { if (guards.get(tabId) === g) unguard(tabId); }, lingerMs); else return unguard(tabId); };
   }
 
   /** The site's rules, and its other tabs locked, if they aren't already. */
@@ -414,13 +460,15 @@ export function createTabLocks({ chrome, log = () => {}, changed = () => {}, not
     const ids = [nextId++, nextId++, nextId++, nextId++, nextId++];
     const tabs = await chrome.tabs.query({}).catch(() => []);
     const openTabs = tabs.map((t) => t.id).filter((id) => Number.isInteger(id) && id >= 0);
-    const rules = siteRules(ids, site, domains, openTabs);
     // A browser that dropped the initiator condition would block every site's writes: check.
-    await addChecked(rules, (got) => ids.every((id) => same(got.get(id).initiatorDomains, [site]))
-      && [ids[0], ids[1]].every((id) => same(got.get(id).requestMethods, WRITE_METHODS))
-      && same(got.get(ids[3]).tabIds, [-1]) && same(got.get(ids[3]).excludedRequestDomains, rules[3].condition.excludedRequestDomains)
-      && same(got.get(ids[4]).excludedRequestDomains, [site]) && same(got.get(ids[4]).excludedTabIds || [], openTabs),
-    "this browser can't block requests a site starts");
+    await withMethods((m) => {
+      const rules = siteRules(ids, site, domains, openTabs, m);
+      return addChecked(rules, (got) => ids.every((id) => same(got.get(id).initiatorDomains, [site]))
+        && [ids[0], ids[1]].every((id) => same(got.get(id).requestMethods, m))
+        && same(got.get(ids[3]).tabIds, [-1]) && same(got.get(ids[3]).excludedRequestDomains, rules[3].condition.excludedRequestDomains)
+        && same(got.get(ids[4]).excludedRequestDomains, [site]) && same(got.get(ids[4]).excludedTabIds || [], openTabs),
+      "this browser can't block requests a site starts");
+    });
     sites.set(site, { ids, domains, openTabs, since: Date.now() });
     log(`locked ${site} in every tab`);
     for (const t of tabs) await adopt(t);
@@ -572,5 +620,8 @@ export function createTabLocks({ chrome, log = () => {}, changed = () => {}, not
     },
     /** A tab's address changed: a tab of a locked site is locked too. */
     async seen(tab) { await ready; await adopt(tab); },
+    guardNavigation,
+    /** A tab closed: its navigation guard, if it had one, goes. */
+    async closed(tabId) { await ready; await unguard(tabId); },
   };
 }

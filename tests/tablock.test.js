@@ -414,3 +414,55 @@ test('a saved lock from before site locks (the old shape) still loads', async ()
   await locks.ready;
   assert.deepEqual(locks.list().map((l) => [l.tabId, l.kind]), [[3, 'code']]);
 });
+
+test('an agent\'s navigation: the tab\'s page loads are kept to its site while it loads; no rule, no navigation', async () => {
+  const { createTabLocks } = await load();
+  const chrome = fakeChrome();
+  const locks = createTabLocks({ chrome });
+  const release = await locks.guardNavigation(9, 'x.com');
+  const rules = [...chrome.rules.values()];
+  assert.equal(rules.length, 1);
+  assert.deepEqual(rules[0].condition, { tabIds: [9], resourceTypes: ['main_frame'], excludedRequestDomains: ['x.com'] });
+  assert.equal(rules[0].action.type, 'block');
+  assert.ok(!locks.isLocked(9), 'not a lock: the page can still post, as no agent code ran there');
+  // it stays a moment after the load, then goes
+  release(30);
+  assert.equal(chrome.rules.size, 1);
+  await new Promise((r) => setTimeout(r, 80));
+  assert.equal(chrome.rules.size, 0);
+  // again on the same tab: one rule, the old one gone; the tab closing takes it
+  await locks.guardNavigation(9, 'x.com');
+  const again = await locks.guardNavigation(9, 'x.com');
+  assert.equal(chrome.rules.size, 1);
+  await locks.closed(9);
+  assert.equal(chrome.rules.size, 0);
+  again(0); // (nothing left to release: harmless)
+  // released at once
+  const r2 = await locks.guardNavigation(4, 'google.com');
+  await r2(0);
+  assert.equal(chrome.rules.size, 0);
+  // a browser that drops the per-tab condition would keep every tab on the site: refused, nothing left behind
+  const broken = fakeChrome({ dropTabIds: true });
+  await assert.rejects(createTabLocks({ chrome: broken }).guardNavigation(9, 'x.com'), /can't keep one tab's page loads to a site/);
+  assert.equal(broken.rules.size, 0);
+});
+
+test('methods: unnamed ones ("other") are blocked too; a browser that won\'t take that name gets the named ones', async () => {
+  const { createTabLocks, WRITE_METHODS, NAMED_WRITE_METHODS } = await load();
+  assert.ok(WRITE_METHODS.includes('other') && !NAMED_WRITE_METHODS.includes('other'));
+  for (const m of ['get', 'head', 'options']) assert.ok(!WRITE_METHODS.includes(m), `${m}: the page has to load`);
+  const chrome = fakeChrome({ tabs: [{ id: 7, url: 'https://x.com/home' }] });
+  const add = chrome.declarativeNetRequest.updateSessionRules;
+  chrome.declarativeNetRequest.updateSessionRules = async (o) => {
+    if ((o.addRules || []).some((r) => (r.condition.requestMethods || []).includes('other'))) throw new Error("Value 'other' is not a request method");
+    return add(o);
+  };
+  const logged = [];
+  const locks = createTabLocks({ chrome, log: (m) => logged.push(m) });
+  await locks.lock(7, 'x.com');
+  assert.ok(locks.isLocked(7));
+  const withMethods = [...chrome.rules.values()].filter((r) => r.condition.requestMethods);
+  assert.equal(withMethods.length, 4, 'the tab\'s two and the site\'s two');
+  for (const r of withMethods) assert.deepEqual(r.condition.requestMethods, NAMED_WRITE_METHODS);
+  assert.ok(logged.some((m) => /don't take the method "other"/.test(m)));
+});

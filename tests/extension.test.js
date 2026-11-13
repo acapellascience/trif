@@ -3697,3 +3697,64 @@ test('background: mods that break: a new error gets a card in the site\'s chat o
     assert.ok(st.mods.find((m) => m.id === 'example.com/hider').broken.some((b) => b.message === 'another failure'));
   } finally { delete globalThis.__trifHealthDelays; bg.restore(); }
 });
+
+test('background: a side-panel run\'s navigate and open keep the tab\'s page loads on its site, and say when the site sent it on', async () => {
+  const tabs = [{ id: 5, windowId: 1, index: 0, active: true, url: 'https://x.com/home', title: 'X', status: 'complete' }];
+  const bg = await loadBackground({ storage: { sitesOn: ['x.com'] }, tabs });
+  try {
+    const rules = new Map();
+    chrome.declarativeNetRequest = {
+      updateSessionRules: async ({ addRules = [], removeRuleIds = [] }) => { for (const id of removeRuleIds) rules.delete(id); for (const r of addRules) rules.set(r.id, structuredClone(r)); },
+      getSessionRules: async () => [...rules.values()],
+    };
+    const during = []; // the rules in place as each load starts
+    let sendsOnTo = null; // where the site's address sends the tab (a redirect of its own)
+    const removed = [];
+    chrome.tabs.update = async (id, o) => {
+      during.push([...rules.values()].map((r) => r.condition));
+      const t = tabs.find((x) => x.id === id);
+      t.url = sendsOnTo || o.url;
+      setImmediate(() => chrome.tabs.onUpdated.emit(id, { status: 'complete' }));
+      return {};
+    };
+    chrome.tabs.create = async (o) => { const t = { id: 99, windowId: 1, index: 1, active: false, status: 'complete', ...o }; tabs.push(t); return t; };
+    chrome.tabs.remove = async (id) => { removed.push(id); const i = tabs.findIndex((t) => t.id === id); if (i >= 0) tabs.splice(i, 1); };
+
+    // navigate: the guard is on the tab before the load starts
+    let r = await bg.native.call('navigate', { tab: 5, to: 'https://x.com/explore', scope: 'x.com' });
+    assert.deepStrictEqual([r.ok, r.result.url], [true, 'https://x.com/explore']);
+    assert.deepStrictEqual(during.pop(), [{ tabIds: [5], resourceTypes: ['main_frame'], excludedRequestDomains: ['x.com'] }]);
+    assert.strictEqual(rules.size, 1, 'kept a moment after the load');
+    // the site sends the tab on to another site (the browser blocks the hop; the tab shows that address): said, not hidden
+    sendsOnTo = 'https://elsewhere.example/?carried=what-the-agent-read';
+    r = await bg.native.call('navigate', { tab: 5, to: 'https://x.com/redirect?to=elsewhere', scope: 'x.com' });
+    assert.strictEqual(r.ok, false);
+    assert.match(r.error, /x\.com sent the tab on to elsewhere\.example, which is outside x\.com: TRIF stopped it there/);
+    assert.strictEqual(during.pop().length, 1, 'one guard, not two');
+    tabs[0].url = 'https://x.com/home'; // (the user goes back)
+    // open: an empty tab first, guarded, then the address; a tab the site sent on is closed
+    sendsOnTo = null;
+    r = await bg.native.call('open', { to: 'https://x.com/settings', scope: 'x.com' });
+    assert.deepStrictEqual([r.ok, r.result], [true, { id: 99, url: 'https://x.com/settings' }]);
+    assert.deepStrictEqual(during.pop().find((c) => c.tabIds[0] === 99), { tabIds: [99], resourceTypes: ['main_frame'], excludedRequestDomains: ['x.com'] });
+    tabs.splice(tabs.findIndex((t) => t.id === 99), 1);
+    sendsOnTo = 'https://elsewhere.example/';
+    r = await bg.native.call('open', { to: 'https://x.com/redirect?to=elsewhere', scope: 'x.com' });
+    assert.strictEqual(r.ok, false);
+    assert.match(r.error, /sent the tab on to elsewhere\.example/);
+    assert.deepStrictEqual(removed, [99]);
+    assert.ok(![...rules.values()].some((x) => x.condition.tabIds[0] === 99), 'its guard went with it');
+    // without the rules (a browser that can't): no navigation for an agent
+    delete chrome.declarativeNetRequest;
+    const before = during.length;
+    sendsOnTo = null;
+    r = await bg.native.call('navigate', { tab: 5, to: 'https://x.com/explore', scope: 'x.com' });
+    assert.strictEqual(r.ok, false);
+    assert.match(r.error, /couldn't keep tab 5's page loads to x\.com/);
+    assert.strictEqual(during.length, before, 'the tab went nowhere');
+    // the user's own terminal (no scope): as before, no guard
+    tabs[0].url = 'https://x.com/home';
+    r = await bg.native.call('navigate', { tab: 5, to: 'https://x.com/explore' });
+    assert.strictEqual(r.ok, true);
+  } finally { bg.restore(); }
+});

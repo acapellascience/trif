@@ -181,7 +181,7 @@ function showFaces() {
     for (const t of await chrome.tabs.query({}).catch(() => [])) await showFace(t.id, t.url || t.pendingUrl || '');
   }).catch(() => {}), 150);
 }
-chrome.tabs.onRemoved?.addListener((tabId) => { tabLocks.unlock(tabId, 'closed').catch(() => {}); });
+chrome.tabs.onRemoved?.addListener((tabId) => { tabLocks.unlock(tabId, 'closed').catch(() => {}); tabLocks.closed(tabId).catch(() => {}); });
 chrome.tabs.onReplaced?.addListener((added, removed) => { tabLocks.unlock(removed, 'replaced').catch(() => {}); tabLocks.check(added).catch(() => {}); });
 chrome.tabs.onCreated?.addListener((tab) => { tabLocks.opened(tab).catch(() => {}); });
 
@@ -1058,6 +1058,20 @@ function hostOf(url) {
   try { return new URL(url).hostname; } catch { return ''; }
 }
 
+// How long a tab's page loads stay kept to the run's site after an agent's navigate or open has loaded: long
+// enough for a page that sends the tab on by itself (a script, a refresh), short enough that the user's own
+// next click in that tab is theirs.
+const NAV_LINGER_MS = 5000;
+async function guardedLoad(tabId, scope) {
+  try { return await tabLocks.guardNavigation(tabId, scope); } catch (e) {
+    throw new Error(`TRIF couldn't keep tab ${tabId}'s page loads to ${scope} (${errMsg(e)}), so it won't send the tab anywhere for an agent`);
+  }
+}
+function stayedOnSite(endedAt, scope, asked) {
+  if (inRunScope(endedAt, scope)) return;
+  throw new Error(`${hostOf(asked) || 'that address'} sent the tab on to ${hostOf(endedAt) || 'another page'}, which is outside ${scope}: TRIF stopped it there (an agent's navigation stays on its site, since an address can carry what the agent read)`);
+}
+
 async function scopedTab(args) {
   const tab = await resolveTab(chrome, args);
   checkScopeUrl(tab.url || tab.pendingUrl || '', args.scope, `tab ${tab.id}`);
@@ -1155,31 +1169,53 @@ const commands = {
     return loadAndReport(tab.id, () => chrome.tabs.reload(tab.id, { bypassCache: !!args.hard }));
   },
 
+  // A side-panel run's navigate and open: the address is on the run's site, but the site can send the tab on
+  // (its own redirect: /url?q=…, ?next=…), and the address would carry whatever the agent put in it to another
+  // site, with no code run and so no lock. The tab's page loads are kept to the site while it loads
+  // (tablock.js guardNavigation), and where it ended up is checked. No guard, no navigation.
   async navigate(args) {
     const url = normalizeUrl(args.to);
     checkScopeUrl(url, args.scope, 'that URL');
     const tab = await scopedTab(args);
-    return loadAndReport(tab.id, () => chrome.tabs.update(tab.id, { url }));
+    if (!args.scope) return loadAndReport(tab.id, () => chrome.tabs.update(tab.id, { url }));
+    const release = await guardedLoad(tab.id, args.scope);
+    try {
+      const r = await loadAndReport(tab.id, () => chrome.tabs.update(tab.id, { url }));
+      // (sent on, and stopped: the tab is left on the browser's "blocked" page, so back it goes, where it can)
+      try { stayedOnSite(r.url, args.scope, url); } catch (e) { try { await chrome.tabs.goBack?.(tab.id); } catch { /* nowhere to go back to */ } throw e; }
+      return r;
+    } finally { release(NAV_LINGER_MS); }
   },
 
   async open(args) {
     const url = normalizeUrl(args.to);
     checkScopeUrl(url, args.scope, 'that URL');
-    const waiter = loadWaiter();
+    const win = await lastFocusedNormalWindow(chrome);
+    // In the background: agents work while the user is looking at something else.
+    const make = (to) => (win ? chrome.tabs.create({ url: to, active: false, windowId: win.id }) : chrome.windows.create({ url: to, focused: false }).then((w) => w.tabs[0]));
+    if (!args.scope) {
+      const waiter = loadWaiter();
+      try {
+        const tab = await make(url);
+        await waiter.wait(tab.id);
+        const t = await chrome.tabs.get(tab.id);
+        return { id: t.id, url: t.url };
+      } finally { waiter.stop(); }
+    }
+    // (an empty tab first, so the guard is on it before its first request goes out)
+    const tab = await make('about:blank');
+    let release = null;
     try {
-      const win = await lastFocusedNormalWindow(chrome);
-      let tab;
-      if (win) {
-        // In the background: agents work while the user is looking at something else.
-        tab = await chrome.tabs.create({ url, active: false, windowId: win.id });
-      } else {
-        tab = (await chrome.windows.create({ url, focused: false })).tabs[0];
-      }
-      await waiter.wait(tab.id);
-      const t = await chrome.tabs.get(tab.id);
-      return { id: t.id, url: t.url };
-    } finally {
-      waiter.stop();
+      for (let i = 0; i < 100 && (await chrome.tabs.get(tab.id)).status !== 'complete'; i++) await sleep(20);
+      release = await guardedLoad(tab.id, args.scope);
+      const r = await loadAndReport(tab.id, () => chrome.tabs.update(tab.id, { url }));
+      stayedOnSite(r.url, args.scope, url);
+      release(NAV_LINGER_MS);
+      return { id: tab.id, url: r.url };
+    } catch (e) {
+      if (release) release(0);
+      await chrome.tabs.remove(tab.id).catch(() => {});
+      throw e;
     }
   },
 
@@ -1241,6 +1277,12 @@ const commands = {
       stitch: stitchShots,
       onProbe: rememberProbe,
       checkUrl: (url) => checkScopeUrl(url, args.scope, 'the copy'),
+      // (what's showing as the picture is taken: still this run's site, and one the agent may look at)
+      checkShown: (url) => {
+        checkScopeUrl(url, args.scope, 'the tab now showing');
+        const r = agentCheck('screenshot', hostOf(url), agentSettings());
+        if (r !== 'ok') throw new Error(r === 'ask' ? 'the tab now showing is on a site the agent may not look at yet' : r);
+      },
     });
   },
 
@@ -1720,7 +1762,8 @@ async function pageCall(tabId, world, func, args = [], guard = null) {
   // is checked again from inside (pageGuard: the run's scope, TRIF on there) and marked, the command runs,
   // and its result counts only if the mark is still there (the same document).
   const token = crypto.randomUUID();
-  const why = await rawPageCall(tabId, 'ISOLATED', pageGuard, [guard.scope || null, onSites(), token]);
+  // (and not a site of its own inside the scope: mail.google.com for a google.com run, as for `run`)
+  const why = await rawPageCall(tabId, 'ISOLATED', pageGuard, [guard.scope || null, onSites(), token, apartFrom(guard.scope || null)]);
   if (why) throw new Error(why);
   const result = await rawPageCall(tabId, world, func, args);
   const same = await rawPageCall(tabId, 'ISOLATED', (t) => window.__trifPageGuard === t, [token]).catch(() => false);

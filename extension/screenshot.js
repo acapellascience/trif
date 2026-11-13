@@ -163,12 +163,25 @@ export async function captureScreenshot(api, tab, { full = false, copy = false, 
   const plan = screenshotPlan({ showing, full, captureTab: typeof api.tabs.captureTab === 'function', browser: deps.browser, copy, allUrls });
   if (plan.error) throw new Error(plan.error);
   if (plan === 'visible') {
+    // captureVisibleTab takes a window, not a tab: the picture is of whatever tab shows there as it's taken.
+    // The tab was checked a moment ago (the run's site, the site's "Agent on this site"); if the user has
+    // switched tabs in that window since, the picture would be of the other one, on any site. So: what's
+    // showing is asked again right before and right after, and a picture of anything else is thrown away.
+    const showingNow = async () => {
+      if (typeof api.tabs.query !== 'function') return tab;
+      const now = (await api.tabs.query({ active: true, windowId: tab.windowId }).catch(() => []))[0];
+      if (!now || now.id !== tab.id) throw new Error(`tab ${tab.id} stopped being the one showing in its window while TRIF took the picture, so there's no picture: try again, or use \`trif sweep\` or \`trif text\``);
+      if (deps.checkShown) deps.checkShown(now.url || now.pendingUrl || '');
+      return now;
+    };
+    await showingNow();
     let dataUrl;
     try { dataUrl = await api.tabs.captureVisibleTab(tab.windowId, { format: 'png' }); } catch (e) {
       // ("Either the '<all_urls>' or 'activeTab' permission is required.")
       if (!allUrls && /activeTab|all_urls|permission/i.test(String(e?.message ?? e))) throw new Error(needsClick(deps.browser));
       throw e;
     }
+    dataUrl = (await showingNow()) && dataUrl;
     return { dataUrl, how: 'visible', note: null, full: false };
   }
   if (plan === 'tab') {

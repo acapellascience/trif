@@ -316,3 +316,27 @@ test('without access to every site: only the tab in front, after the toolbar cli
   await assert.rejects(S.captureScreenshot(ff, { id: 5, windowId: 1, active: false, url: 'https://example.com/' }, {}, { browser: 'Firefox', allUrls: false, pageCall: async () => null }), /access to every site/);
   assert.ok(!ff.calls.some((c) => c[0] === 'captureTab' || c[0] === 'windows.create'), 'nothing tried, no window opened');
 });
+
+test('a tab that is showing: the picture is of that tab or there is none (the user switching tabs meanwhile; a site the agent may not see)', async () => {
+  // the window's active tab, asked right before and right after the capture
+  const withQuery = (answers) => { const api = mockApi(); let n = 0; api.tabs.query = async (q) => { api.calls.push(['tabs.query', q]); const a = answers[Math.min(n++, answers.length - 1)]; return a ? [a] : []; }; return api; };
+  const tab = { id: 5, windowId: 1, active: true, url: 'https://example.com/page' };
+  const same = { id: 5, url: 'https://example.com/page' };
+  // still showing: the picture
+  let api = withQuery([same]);
+  const r = await S.captureScreenshot(api, tab, {}, { ...pages(), browser: 'Chrome' });
+  assert.equal(r.how, 'visible');
+  assert.deepStrictEqual(api.calls.filter((c) => c[0] === 'tabs.query').map((c) => c[1]), [{ active: true, windowId: 1 }, { active: true, windowId: 1 }]);
+  // another tab showing before the capture: nothing captured
+  api = withQuery([{ id: 6, url: 'https://bank.example/' }]);
+  await assert.rejects(S.captureScreenshot(api, tab, {}, { ...pages(), browser: 'Chrome' }), /stopped being the one showing/);
+  assert.ok(!api.calls.some((c) => c[0] === 'captureVisibleTab'));
+  // the user switched while it was taken: the picture is thrown away
+  api = withQuery([same, { id: 6, url: 'https://bank.example/' }]);
+  await assert.rejects(S.captureScreenshot(api, tab, {}, { ...pages(), browser: 'Chrome' }), /stopped being the one showing/);
+  // the same tab, gone to a page the run may not see: thrown away, with why
+  api = withQuery([same, { id: 5, url: 'https://mail.example.com/inbox' }]);
+  const seen = [];
+  await assert.rejects(S.captureScreenshot(api, tab, {}, { ...pages(), browser: 'Chrome', checkShown: (u) => { seen.push(u); if (/mail\./.test(u)) throw new Error('that site is a site of its own'); } }), /a site of its own/);
+  assert.deepStrictEqual(seen, ['https://example.com/page', 'https://mail.example.com/inbox']);
+});

@@ -1545,7 +1545,8 @@ test('tabs a run opened are closed when it ends; trif close names a tab, and the
   await waitDone(ext, r.result.runId);
   await waitFor(() => closed.includes(101), { message: 'the run\'s tab closed' });
   assert.ok(!closed.includes(100), 'the user\'s tab stays');
-  assert.match(helperLog(home), /closed tab 101: run r\w+ opened it and has ended/);
+  // (the helper writes the line once the extension has answered: a moment after the handler above ran)
+  await waitFor(() => /closed tab 101: run r\w+ opened it and has ended/.test(helperLog(home)), { message: 'the log to say the tab was closed' });
 });
 
 test('recording a run switched on goes off when that run ends; the user\'s own recording stays', async () => {

@@ -208,3 +208,27 @@ The guide (helper/workspace):
   out.**
 - BOXED.md: **Its looks in a style section.** (a paragraph, an example, a line on `trif.settings` and
   `trif.css`), and `style` in the list of what `trif` has.
+## Runs work in a folder of their own (branch staging, docs/STAGING.md)
+
+
+- The run's context (helper/lib/agents/index.js contextText), after "check the folder rather than giving up.":
+  **You work in this run's own copy of the workspace (your working folder): name files by their place in it
+  (sites/x.com/<mod>.js), not in ~/.trif; TRIF puts each change you save into the user's mods at once.**
+- AGENTS.md, "Workspace", after "Only create or edit files inside this workspace.": **In a side-panel chat your
+  working folder is the run's own copy of this workspace, with the same files in the same places: name files by
+  their place in it (`sites/x.com/hide-reposts.js`), not by `~/.trif/`. Each change you save under `sites/` is
+  copied to the user's mods at once, so the browser has it straight away.**
+- AGENTS.md, the recording example: `-o ~/.trif/sites/x.com/_home-timeline.json` is now
+  `-o sites/x.com/_home-timeline.json` (the old path still works: `trif` takes it as the same path in the copy).
+
+The helper's log (`trif report` can include it), when a run's change isn't copied to the mods folder:
+
+- **run copy r…: sites/x.com/AGENTS.md not copied to the mods folder: <why>**, where <why> is one of: **a file
+  directly in sites/**; **too deep**; **the name "…" isn't one TRIF takes**; **AGENTS.md is a file agents read as
+  instructions**; **y.com is another site's folder**; **a file with more than one name (a hard link)**;
+  **reached through a link**; **changed while it was read**; **not a file**; **not a file there**; **changed
+  again while it was copied (copied at the next sync)**; **x.com isn't a folder**; or trif delete's own refusal
+  ("this chat can only delete mods that stay on x.com; …").
+- **run copy r…: couldn't bring sites/x.com/a.js into the run's copy: <why>**
+- **agent run r…: copied sites/x.com/a.js to the mods folder**
+- **agent run r…: couldn't sync its working folder: <error>**

@@ -506,6 +506,8 @@ function poll() {
 const runs = new Runs({
   getWorkspace: () => ({ ...workspace(ws.home), installId: state.hello?.installId || null, browser: state.hello?.browser || '' }),
   logger, onEvent: onAgentEvent, onRequest: onRunRequest,
+  // A run's change copied into the mods folder (runs.js _syncStage): to the browser now, not at the watcher's next event.
+  onStaged: () => syncMods('agent run', false),
   // The user's consent to run an agent under an organization's settings instead of TRIF's sandbox, read
   // fresh each time (another browser's helper may have changed it). Only agent.withoutSandbox sets it.
   withoutSandbox: {

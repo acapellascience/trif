@@ -52,11 +52,12 @@ Needs a Mac to get right:
 - **Writes after a run's window.** A run's process group is killed, and a mod written more than ten seconds
   later is judged as an outside change. A process that left the group outlives it. The real fix is the next
   item; short of that, check on macOS whether either agent's sandbox lets a child leave the group at all.
+  (Checked: both do; done with the next item, docs/STAGING.md.)
 - **Runs write the mods folder directly** (the staging-folder redesign). Who wrote what is worked out
   afterwards from snapshots and a time window; several of the fixes were that reckoning going wrong. Give each
   run a folder of its own to write, and have the helper copy from it once it has decided. This changes how
   both agents are started, which is why I didn't do it blind. It's the one change here that removes a class
-  of bug.
+  of bug. (Done: docs/STAGING.md.)
 - **The release key reaches the keychain through an argument** (`scripts/release.js` keygen), and the
   key-proxy address is in Codex's arguments. Both are visible to other processes of the same user while the
   command runs. Pass them on stdin or in a file readable only by the user.

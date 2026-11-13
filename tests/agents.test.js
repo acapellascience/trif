@@ -676,9 +676,14 @@ test('agent.start: runId first, then session/text/tool events, one done with cha
   assert.equal(evs.filter((e) => e.kind === 'done').length, 1);
   assert.deepEqual(done, { kind: 'done', ok: true, result: 'Done: the banner is hidden.', costUsd: 0.0123, changedFiles: ['sites/example.com/fake.js'], sessionId: 'sess-new-1', undoable: ['example.com/fake'] });
 
-  // The agent got the contract's flags, cwd and context.
+  // The agent got the contract's flags, cwd and context. Its working folder is the run's own copy of the
+  // workspace (stage.js), beside its mailbox, removed after the run; its edit is in the mods folder.
   const call = callFor(bin, 'EDIT');
-  assert.equal(call.cwd, home);
+  assert.equal(call.cwd, path.join(fs.realpathSync(path.join(home, 'boxes')), `${runId}.ws`));
+  assert.ok(!fs.existsSync(call.cwd), 'removed after the run');
+  assert.match(fs.readFileSync(path.join(home, 'sites', 'example.com', 'fake.js'), 'utf8'), /^\/\/ edited /);
+  assert.equal(call.env.TRIF_RUN_MODS_DIR, path.join(call.cwd, 'sites'));
+  assert.equal(call.env.TRIF_RUN_LIVE_MODS_DIR, path.join(home, 'sites'));
   const a = call.argv;
   // The message came on stdin; neither it nor the page's URL is in argv (other processes can read those).
   assert.equal(call.prompt, 'EDIT hide the banner');
@@ -1494,8 +1499,10 @@ test('in a run: screenshot -o NAME saves in the run\'s screenshots folder, other
   await ext.waitForSocket();
   const r = await extRequest(ext, 'agent.start', { ...START, prompt: 'SLEEP' });
   const call = await waitFor(() => callFor(bin, 'SLEEP'), { message: 'the agent to start' });
-  const env = { TRIF_RUN_TOKEN: call.env.TRIF_RUN_TOKEN, TRIF_RUN_BOX: call.env.TRIF_RUN_BOX, TRIF_RUN_SCREENSHOTS: call.env.TRIF_RUN_SCREENSHOTS, TRIF_RUN_MODS_DIR: call.env.TRIF_RUN_MODS_DIR };
-  assert.equal(env.TRIF_RUN_MODS_DIR, custom);
+  const env = { TRIF_RUN_TOKEN: call.env.TRIF_RUN_TOKEN, TRIF_RUN_BOX: call.env.TRIF_RUN_BOX, TRIF_RUN_SCREENSHOTS: call.env.TRIF_RUN_SCREENSHOTS, TRIF_RUN_MODS_DIR: call.env.TRIF_RUN_MODS_DIR, TRIF_RUN_LIVE_MODS_DIR: call.env.TRIF_RUN_LIVE_MODS_DIR };
+  // (the run's mods are its copy's sites/; the mods folder, the custom one, is where the helper copies them)
+  assert.equal(env.TRIF_RUN_MODS_DIR, path.join(call.cwd, 'sites'));
+  assert.equal(env.TRIF_RUN_LIVE_MODS_DIR, custom);
   let res = await runCli(['screenshot', '-o', 'page.png'], { home, env });
   assert.equal(res.code, 0, res.stderr);
   assert.equal(res.stdout.trim(), path.join(fs.realpathSync(env.TRIF_RUN_SCREENSHOTS), 'page.png'));
@@ -1508,6 +1515,9 @@ test('in a run: screenshot -o NAME saves in the run\'s screenshots folder, other
     res = await runCli(['screenshot', '-o', path.join(custom, 'example.com', 'shot.png')], { home, env });
     assert.equal(res.code, 0, res.stderr);
   } finally { fs.renameSync(path.join(privDir(home), 'config.json.away'), path.join(privDir(home), 'config.json')); }
+  // (a path in the mods folder itself is the same path in the run's copy, which the helper copies over)
+  assert.ok(fs.existsSync(path.join(call.cwd, 'sites', 'example.com', 'shot.png')), 'written in the run\'s copy');
+  await waitFor(() => fs.existsSync(path.join(custom, 'example.com', 'shot.png')), { message: 'the helper to copy it to the mods folder' });
   await extRequest(ext, 'agent.stop', { runId: r.result.runId });
   await waitDone(ext, r.result.runId);
 });
@@ -1673,13 +1683,13 @@ test('held mods: a change in another site\'s folder during a run isn\'t held on 
   const ext = startHost(home);
   await ext.waitForSocket();
   const r = await extRequest(ext, 'agent.start', { ...START, prompt: 'SLEEP' });
-  await waitFor(() => callFor(bin, 'SLEEP'), { message: 'the agent to start' });
+  const call = await waitFor(() => callFor(bin, 'SLEEP'), { message: 'the agent to start' });
   writeMod(home, 'x.com', 'wide.js', '// ==WebMod==\n// @match https://x.com/*\n// @match https://twitter.com/*\n// ==/WebMod==\n// edited elsewhere\n');
   const lastMods = () => [...ext.messages].reverse().find((m) => m.type === 'mods')?.mods || [];
   await waitFor(() => lastMods().some((m) => m.id === 'x.com/wide' && m.matches.includes('https://twitter.com/*')), { message: 'the edit to reach the extension' });
   assert.equal(lastMods().find((m) => m.id === 'x.com/wide').held, undefined);
-  // The run's own broad mod in its own folder is still held.
-  writeMod(home, 'example.com', 'evil.js', '// ==WebMod==\n// @match <all_urls>\n// ==/WebMod==\n// by the run\n');
+  // The run's own broad mod in its own folder (written in its working folder, copied by the helper) is still held.
+  writeMod(path.join(call.cwd), 'example.com', 'evil.js', '// ==WebMod==\n// @match <all_urls>\n// ==/WebMod==\n// by the run\n');
   await waitFor(() => lastMods().find((m) => m.id === 'example.com/evil')?.held, { message: 'the in-scope broad mod to be held' });
   await extRequest(ext, 'agent.stop', { runId: r.result.runId });
   const done = await waitDone(ext, r.result.runId);

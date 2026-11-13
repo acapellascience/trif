@@ -65,7 +65,7 @@ function tooOld(version) {
  * The run's own rules (--settings): the sandbox for its shell commands, and per-run permission rules
  * (other sites' folders and screenshots). `limits` is runs.js runLimits.
  */
-function runSettings({ workspace = '', readOnly = [], lockedDirs = [], denied = [], home, readable = [], writable = [], privateDir, box, screenshots, skills = [], skillSecrets = [], skillLinks = [], workspaceLinks = [], systemTemp = [] } = {}) {
+function runSettings({ workspace = '', readOnly = [], lockedDirs = [], denied = [], home, readable = [], writable = [], privateDir, box, screenshots, skills = [], skillSecrets = [], skillLinks = [], workspaceLinks = [], systemTemp = [], staged = false, liveWorkspace = '', liveMods = '' } = {}) {
   // Absolute ("//" + path): a "./" rule follows the agent's current folder, so after `cd sites/x.com` it
   // would point somewhere else.
   const rel = (p) => `/${p}`;
@@ -87,8 +87,11 @@ function runSettings({ workspace = '', readOnly = [], lockedDirs = [], denied = 
         // a run's commands write into /tmp/claude-<uid> even with its own temporary folder moved (2.1.316).
         denyRead: home ? [...new Set([home, ...(privateDir ? [privateDir] : []), ...skillSecrets.map((x) => x.path), ...systemTemp])] : denied,
         allowRead: [...(home ? readable : []), box, screenshots].filter(Boolean),
-        allowWrite: [box, screenshots].filter(Boolean), // (writing there needs saying too)
-        denyWrite: [...(workspace ? STATE_FILES.map((f) => path.join(workspace, f)) : []), ...readOnly, ...systemTemp],
+        // (with a working folder of its own, runs.js runLimits `staged`: its copy's sites/, writable[0]; the
+        // mods folder and the workspace's state files, which only the helper writes, denied by name)
+        allowWrite: [...(staged && writable[0] ? [writable[0]] : []), box, screenshots].filter(Boolean), // (writing there needs saying too)
+        denyWrite: [...new Set([...(workspace ? STATE_FILES.map((f) => path.join(workspace, f)) : []), ...readOnly, ...systemTemp,
+          ...(staged ? [...(liveMods ? [liveMods] : []), ...(liveWorkspace ? STATE_FILES.map((f) => path.join(liveWorkspace, f)) : [])] : [])])],
       },
       network: { allowedDomains: [], strictAllowlist: true }, // and no unix sockets (none allowed)
     },
@@ -347,6 +350,15 @@ function toolSummary(name, input, workspace) {
     default: return oneLine(i.description || i.command || i.file_path || i.path || '');
   }
 }
+
+// After a run: the folder Claude Code made in ~/.claude/projects for the run's working folder (runs.js, stage.js:
+// a new one each run), if it holds nothing. A chat's session stays where its first run was, and a resumed
+// run adds to it there (Claude Code 2.1.319), so the later runs' folders are empty.
+adapter.afterRun = ({ workingDir, home = require('os').homedir() } = {}) => {
+  if (!workingDir) return;
+  const dir = path.join(home, '.claude', 'projects', workingDir.replace(/[^a-zA-Z0-9]/g, '-'));
+  for (const d of [path.join(dir, 'memory'), dir]) { try { fs.rmdirSync(d); } catch { /* not empty, or not there */ } }
+};
 
 // An organization's managed settings outrank TRIF's (claude-managed.js): before each run, runs.js asks
 // preflight what they do. `breaks`: the run couldn't do its work, so it's stopped with brokenMessage.

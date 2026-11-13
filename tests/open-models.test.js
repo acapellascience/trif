@@ -848,8 +848,10 @@ test('real Codex + stand-in model: model requests get through (the key proxy add
     { run: 'curl -sS -m 5 -o /dev/null -w "%{http_code}" https://example.com 2>&1; echo " curl=$?"' },
     { run: 'LOCAL' }, // filled in below: curl to the model server itself
     { run: `cat ${q(path.join(privDir(home), 'config.json'))}; echo " cat=$?"` },
-    { run: `echo '// mine' > ${q(path.join(home, 'sites', 'example.com', 'oss-probe.js'))} && echo WROTE-OWN` },
-    { run: `echo x > ${q(path.join(home, 'sites', 'other.org', 'oss-probe.js'))}; echo " other=$?"` },
+    // (its working folder is its own copy of the workspace, stage.js: the mods folder itself it can't write)
+    { run: `echo '// mine' > sites/example.com/oss-probe.js && echo WROTE-OWN` },
+    { run: `echo x > sites/other.org/oss-probe.js; echo " other=$?"` },
+    { run: `echo x > ${q(path.join(home, 'sites', 'example.com', 'live-probe.js'))}; echo " live=$?"` },
     { run: 'echo "key=[$TTEST_OR_API_KEY]"; env | grep -c TTEST_OR_API_KEY' },
     // Every same-user process's argv and environment (KERN_PROCARGS2, which the sandbox allows): no key.
     { run: `${q(py)} -I ${q(probe)} ${sha(KEY)} ${KEY.length} ${sha(canary)} ${canary.length} ${sha(MESSAGE)} ${MESSAGE.length}` },
@@ -889,6 +891,9 @@ test('real Codex + stand-in model: model requests get through (the key proxy add
   assert.match(out, /operation not permitted[^\n]*other\.org/i, info); // (stderr and stdout can come in either order)
   assert.match(out, /^ other=1$/m, info);
   assert.ok(!fs.existsSync(path.join(home, 'sites', 'other.org', 'oss-probe.js')));
+  assert.match(out, /operation not permitted[^\n]*live-probe/i, info);
+  assert.match(out, /^ live=1$/m, info);
+  assert.ok(!fs.existsSync(path.join(home, 'sites', 'example.com', 'live-probe.js')));
   assert.match(out, /key=\[\]\n0/, info);
   const scan = /procargs scanned=(\d+) key=(\d+) canary=(\d+) prompt=(\d+)/.exec(out);
   assert.ok(scan, info);

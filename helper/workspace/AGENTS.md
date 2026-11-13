@@ -47,6 +47,9 @@ they know at once that you understood them. Then work without narrating, and end
 
 Files whose name starts with `_` or `.` are ignored by TRIF: use them for tests, notes and scratch
 code (`sites/x.com/_detox-timeline.test.js`). Only create or edit files inside this workspace.
+In a side-panel chat your working folder is the run's own copy of this workspace, with the same files in the
+same places: name files by their place in it (`sites/x.com/hide-reposts.js`), not by `~/.trif/`. Each
+change you save under `sites/` is copied to the user's mods at once, so the browser has it straight away.
 `trif screenshot` saves outside it, in TRIF's own folder, and prints the file's path: open that.
 
 ## The user's instructions
@@ -478,7 +481,7 @@ the site (`trif tabs`; `trif open <url>` if none) and look:
   trif record x.com on
   trif reload --url x.com
   trif requests --url x.com --filter 'graphql|api'
-  trif request --url x.com 14 -o ~/.trif/sites/x.com/_home-timeline.json
+  trif request --url x.com 14 -o sites/x.com/_home-timeline.json
   trif record x.com off          # when you're done
   ```
   (In a side-panel chat, recording you switched on goes off by itself when you finish.)

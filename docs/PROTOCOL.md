@@ -1182,8 +1182,10 @@ Suffix List). `helper/lib/scope.js` computes it; `extension/lib.js` mirrors the 
   `-f` and `check` read only the mods folder, `-o` writes only there or the run's screenshots folder
   (`$TRIF_RUN_SCREENSHOTS`, `<private>/screenshots/<scope>/`, also where screenshots go by default;
   `trif screenshot -o name.png` with a relative name saves there), never through a link left in its
-  place (O_NOFOLLOW). The run can't read `config.json`, so the helper passes the mods folder as
-  `TRIF_RUN_MODS_DIR` (a custom `modsDir` holds for the run's `trif` too). Screenshots older than 30
+  place (O_NOFOLLOW). The run works in its own copy of the workspace (docs/STAGING.md), so the helper passes
+  that copy's `sites/` as `TRIF_RUN_MODS_DIR`, and the mods folder itself as `TRIF_RUN_LIVE_MODS_DIR` (a
+  custom `modsDir` holds for the run's `trif` too; the run can't read `config.json`): a path into the mods
+  folder is taken as the same path in the copy. Screenshots older than 30
   days are deleted when a run starts. Paths are compared as the file system does
   (`helper/lib/pathcheck.js` isInside, also used for the mods folder and held mods): real paths from the
   system's realpath (links and `..` resolved; on macOS each component in its on-disk case), the nearest
@@ -1220,10 +1222,10 @@ Suffix List). `helper/lib/scope.js` computes it; `extension/lib.js` mirrors the 
 - **Held mods.** Whoever wrote a mod, it's held while it's new or changed since the helper last let
   it run (`~/.trif/seen.json`, mod id -> hash; the first time, every mod there is recorded as it is) and
   it can do something not allowed for it (`held: {…, by: "outside"}`, `runId: null`; `trif approve` or the
-  panel's Allow releases it). For side-panel runs: the helper snapshots the mod files when a run starts (the same files the scanner loads:
-  `mods.js` listModFiles: links within the mods folder followed, links out of it ignored, no cap). On every mods sync while a run is live (and for 10 s
-  after it ends; a finished run's leftover processes get SIGTERM, then SIGKILL after 3 s, so nothing
-  writes later), a mod that the run added or changed is **held** while it can do something not allowed
+  panel's Allow releases it). For side-panel runs: a run writes its own copy of the workspace, and the helper
+  copies its changes into the mods folder (docs/STAGING.md); a mod is the run's when its file is what the helper
+  copied for it (`stage.js` written, by sha1), so no snapshot or time window decides it. On every mods sync while a run is live (and for 10 s
+  after it ends, for the sync that follows the last copy), a mod that the run added or changed is **held** while it can do something not allowed
   for it: what TRIF reads in its code (`powers.js`: sends, acts, navigates, loads, another site, hidden
   code; see docs/SECURITY.md), an `@match` outside the scope (`<all_urls>`, a `*` host, another domain,
   `file://`), or an `@risk` of 2. Recorded in `~/.trif/held.json` (`{id: {hash, site, scope, runId, at,
@@ -1236,9 +1238,10 @@ Suffix List). `helper/lib/scope.js` computes it; `extension/lib.js` mirrors the 
   only for a power or a line using one that isn't allowed. A held mod the run changes again is worked
   out again; one changed after its run ended (by the user) is released. Mods the user has that can do
   something not allowed are sent with `review: {facts, claim}` (not held; the panel's "Looks right" is
-  `mod.review`). `trif status`/`mods` show held mods and mods to review. A change in another site's existing folder, which the
-  run's limits make read-only, isn't held on the run's account (someone else made it), but only for the
-  folders the agent's adapter says it protected (`command()` returns `locked`; none if it doesn't say).
+  `mod.review`). `trif status`/`mods` show held mods and mods to review. A change the helper didn't copy for the
+  run (in another site's folder, which the run's limits make read-only, or made by the user meanwhile) isn't
+  held on the run's account. (Without a working folder of its own, as `held.js` still allows: a change in a
+  folder the agent's adapter says it protected, `command()`'s `locked`, isn't the run's.)
 - **Agent sandboxes.** The scope only holds if the agent can't reach the helper some other way or
   rewrite the rules, so both agents run under limits the operating system enforces (macOS Seatbelt;
   `runs.js` runLimits computes them, each adapter passes them on):
@@ -1275,7 +1278,8 @@ Suffix List). `helper/lib/scope.js` computes it; `extension/lib.js` mirrors the 
     `/media`, `/mnt` and `/run/media` on Linux, but the home folder, the way to what the run may read, and
     `/Volumes/Macintosh HD`, a link to `/`; Codex), the user's own folder beside `$TMPDIR` (its caches;
     Codex), and the system's temporary folders (below). The system's own folders stay readable.
-  - **Writes:** the mods folder, with every existing folder of another site read-only inside it (not
+  - **Writes:** its working folder's `sites/` (the run's own copy of the mods folder, which the helper copies
+    from: docs/STAGING.md; never the mods folder itself), with every existing folder of another site read-only inside it (not
     `all-sites/`: a mod for every site may be edited from any site's chat, and waits for the user's OK, below);
     the run's screenshots folder; its mailbox. Not `held.json`, `preinstalled.json`, `.shipped/`,
     `origins.json`, `active-runs/`, `update.json`, `trash/`, `history/`, `.ran/`, `seen.json`, `allowed.json`,
@@ -1332,8 +1336,8 @@ Suffix List). `helper/lib/scope.js` computes it; `extension/lib.js` mirrors the 
   `allowUnsandboxedCommands: false`, the filesystem lists, `network: {allowedDomains: [],
   strictAllowlist: true}`; `denyRead` the home folder and the private folder, `allowRead` the readable
   folders, the mailbox and the run's screenshots folder); its own file tools follow permission rules:
-  reads in the workspace (anything outside it needs approval, which `-p` denies), the run's screenshots
-  folder and the skill folders (`Read(//…)` allows); edits only under `sites/` minus other sites' existing
+  reads in the working folder (the run's copy of the workspace; anything outside it needs approval, which `-p` denies), the run's screenshots
+  folder and the skill folders (`Read(//…)` allows); edits only under the working folder's `sites/` minus other sites' existing
   folders (deny rules by each folder's path in the workspace and by its real path, so a site folder that
   is a link is covered too; a path in another case, `/Users/x/.TRIF/sites/X.com/a.js`, is refused as
   well, checked with Claude Code 2.1.316). No `Read` deny rules for TRIF's files any more: they're

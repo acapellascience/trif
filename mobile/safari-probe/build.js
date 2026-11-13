@@ -60,6 +60,12 @@ function main() {
   const bundle = process.env.TRIF_PROBE_BUNDLE_ID || 'com.timsrobot.trifprobe.safari';
   execFileSync('xcrun', ['safari-web-extension-converter', ext, '--project-location', out, '--app-name', APP_NAME,
     '--bundle-identifier', bundle, '--ios-only', '--swift', '--copy-resources', '--no-open', '--no-prompt', '--force'], { stdio: 'inherit' });
+  // The converter names the app <bundle minus its last part>.<app name> ("com.timsrobot.trifprobe.TRIF-Probe")
+  // but the extension <bundle>.Extension, and iOS won't build an app whose extension's id doesn't start with
+  // the app's: make the app's id the one asked for.
+  const pbx = find(out, 'project.pbxproj') || path.join(out, APP_NAME, `${APP_NAME}.xcodeproj`, 'project.pbxproj');
+  const ids = fs.readFileSync(pbx, 'utf8').replace(/PRODUCT_BUNDLE_IDENTIFIER = ("?)([^";]+)\1;/g, (m, q, id) => (id.endsWith('.Extension') ? `PRODUCT_BUNDLE_IDENTIFIER = ${bundle}.Extension;` : `PRODUCT_BUNDLE_IDENTIFIER = ${bundle};`));
+  fs.writeFileSync(pbx, ids);
   const handler = find(out, 'SafariWebExtensionHandler.swift');
   if (!handler) fail("the converter's project has no SafariWebExtensionHandler.swift to replace");
   fs.copyFileSync(path.join(HERE, 'SafariWebExtensionHandler.swift'), handler);

@@ -45,6 +45,6 @@ test('CSS a style mod is allowed loads nothing from another address in a real br
     assert.ok(refusedAndLoads >= 6, `refused cases that load: ${refusedAndLoads}`);
   } finally {
     if (browser) await browser.close();
-    server.close();
+    server.close(); server.closeAllConnections(); // (Chrome keeps a connection open: without this the test process never exits)
   }
 });

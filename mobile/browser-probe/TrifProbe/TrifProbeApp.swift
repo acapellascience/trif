@@ -30,6 +30,22 @@ final class Model: ObservableObject {
         self.report = report
         self.browser = browser
         self.pane = ClaudePane(report: report, browser: browser)
+        // For the Simulator and CI: `-autorun plain,strict,…` (the probe's own pages, or full addresses) runs the
+        // checks on each page in turn, as the Checks sheet's button does, and saves them in the report.
+        let args = ProcessInfo.processInfo.arguments
+        if let i = args.firstIndex(of: "-autorun"), i + 1 < args.count {
+            let pages = args[i + 1].split(separator: ",").map(String.init)
+            Task { @MainActor in
+                for page in pages {
+                    browser.go(page.contains(":") ? page : PageSchemeHandler.home + (page.hasSuffix(".html") ? page : page + ".html"))
+                    await browser.waitForLoad()
+                    browser.running = true
+                    report.add(await Checks(browser: browser).runAll())
+                    browser.running = false
+                }
+                report.log("autorun", "done: \(pages.joined(separator: ","))")
+            }
+        }
     }
 }
 

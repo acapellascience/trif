@@ -112,6 +112,6 @@ test('the sandbox runtime under real SES, in Chromium: mods run, stand-ins are t
     assert.deepEqual(pageErrors, []);
   } finally {
     if (browser) await browser.close();
-    server.close();
+    server.close(); server.closeAllConnections(); // (Chrome keeps a connection open: without this the test process never exits)
   }
 });

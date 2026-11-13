@@ -156,7 +156,7 @@ test('the mobile probes: the Safari probe\'s extension and the browser probe\'s 
     console.log('\nsmoke: ok');
   } finally {
     await context.close();
-    server.close();
+    server.close(); server.closeAllConnections(); // (Chrome keeps a connection open: without this the test process never exits)
     fs.rmSync(profile, { recursive: true, force: true });
   }
 });
